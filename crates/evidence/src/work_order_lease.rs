@@ -986,10 +986,12 @@ fn expand_into_tasks(
         let mut tasks = Vec::new();
         for material in material_targets {
             let target = json!({ "contentExternalId": material.content_external_id });
+            // 逐篇这几步的「该拿回多少」就是配额本身：一条详情、一组媒体、一批评论。
             tasks.push(build_task_spec(
                 subject,
                 "content_detail",
                 target.clone(),
+                1,
                 1,
                 json!("not_requested"),
                 json!("not_requested"),
@@ -999,6 +1001,7 @@ fn expand_into_tasks(
                     subject,
                     "media_slots",
                     target.clone(),
+                    1,
                     1,
                     json!("not_requested"),
                     json!("slots"),
@@ -1011,6 +1014,7 @@ fn expand_into_tasks(
                     subject,
                     "comments",
                     target.clone(),
+                    material.comment_limit,
                     material.comment_limit,
                     json!(material.comment_limit),
                     json!("not_requested"),
@@ -1026,6 +1030,7 @@ fn expand_into_tasks(
                     "replies",
                     reply_target,
                     material.comment_limit,
+                    material.comment_limit,
                     json!(material.comment_limit),
                     json!("not_requested"),
                 )?);
@@ -1034,18 +1039,22 @@ fn expand_into_tasks(
         return Ok(tasks);
     }
 
-    let steps: Vec<(&str, Value, i32)> = match (subject.target_kind.as_str(), subject.lane.as_str())
-    {
+    // 每一步是（能力, 目标, 配额, **这一轮该拿回多少**）。四元组里最后一个数只有关键词巡查
+    // 与配额不同，其余臂两者相同——让每一步自己把话说清楚，好过一个藏在判据里的推算。
+    type Step = (&'static str, Value, i32, i32);
+    let steps: Vec<Step> = match (subject.target_kind.as_str(), subject.lane.as_str()) {
         ("creator", "deep_archive") => vec![
             // 作者档案只取一份，配额固定为 1，不受工单篇数上限影响。
             (
                 "author_profile",
                 json!({ "authorExternalId": subject.identity_key }),
                 1,
+                1,
             ),
             (
                 "profile_discovery",
                 json!({ "authorExternalId": subject.identity_key }),
+                subject.max_works,
                 subject.max_works,
             ),
         ],
@@ -1057,16 +1066,19 @@ fn expand_into_tasks(
                 "author_profile",
                 json!({ "authorExternalId": subject.identity_key }),
                 1,
+                1,
             ),
             (
                 "profile_discovery",
                 json!({ "authorExternalId": subject.identity_key }),
+                subject.max_works.min(30),
                 subject.max_works.min(30),
             ),
         ],
         ("creator", _) => vec![(
             "profile_discovery",
             json!({ "authorExternalId": subject.identity_key }),
+            subject.max_works,
             subject.max_works,
         )],
         // 关键词的首次建档：把这个词的历史高赞挖一遍，**一个词只做一次**。
@@ -1081,27 +1093,47 @@ fn expand_into_tasks(
             "discovery_search",
             keyword_archive_target(subject),
             subject.max_works,
+            // 建档不设取前 N：能取多少取多少，所以「该拿回多少」就是这一单的篇数配额本身。
+            subject.max_works,
         )],
         _ => vec![(
             "discovery_search",
             keyword_search_target(subject),
             subject.max_works,
+            keyword_patrol_expected_count(subject),
         )],
     };
 
     steps
         .into_iter()
-        .map(|(capability, target, quota)| {
+        .map(|(capability, target, quota, expected_count)| {
             build_task_spec(
                 subject,
                 capability,
                 target,
                 quota,
+                expected_count,
                 json!("not_requested"),
                 json!("not_requested"),
             )
         })
         .collect()
+}
+
+/// 关键词巡查这一轮**该拿回多少**。
+///
+/// 配额（`max_works`，授权给出的加载预算，adhd = 200）不等于本轮份数：规则口径说「取赞前
+/// 20」，插件照做——加载预算决定它翻几屏，口径决定它留下哪几条。两个上限先到先停，所以这
+/// 一轮能拿回的最大条数就是两者的较小值。口径没设取前 N 时答案就是配额本身，与其它臂一致。
+///
+/// 这是「本轮该拿回多少」在派发侧的唯一算法：算一次，冻进任务说明书，判据只读那个数。
+fn keyword_patrol_expected_count(subject: &LeaseSubject) -> i32 {
+    subject
+        .sampling
+        .top_by_likes
+        .map_or(subject.max_works, |top_by_likes| {
+            top_by_likes.min(subject.max_works)
+        })
 }
 
 /// 逐篇详情为什么不在发租时生成。
@@ -1113,6 +1145,7 @@ fn build_task_spec(
     capability: &str,
     target: Value,
     quota: i32,
+    expected_count: i32,
     comment_limit: Value,
     acquire_media: Value,
 ) -> Result<ProducerTaskSpec, LeaseError> {
@@ -1130,7 +1163,11 @@ fn build_task_spec(
         "pageType": page_type,
         "target": target,
         "capabilitiesRequested": [capability],
+        // maximumQuota 是本单的**授权上限 / 加载预算**；expectedCount 是**这一轮该拿回多少**。
+        // 完工判据只读后者。两列同时写下，是因为它们各自有读者：前者是授权边界的表达，
+        // 后者是完成判据的输入。派发时算一次，此后谁也不再各自推算。
         "maximumQuota": quota,
+        "expectedCount": expected_count,
         // 每条任务仍只请求一个能力；没有请求的维度显式写 not_requested。
         "commentLimit": comment_limit,
         "acquireMedia": acquire_media,
@@ -1526,6 +1563,36 @@ mod keyword_search_target_tests {
         ));
         assert_eq!(target["publishedWithinDays"], json!(7));
         assert_eq!(target["topByLikes"], json!(20));
+    }
+
+    /// **这一轮该拿回多少**在派发时算一次，写进任务说明书；判据只读那个数。
+    ///
+    /// 关键词巡查的配额是授权给的加载预算（200），本轮份数由口径决定（取赞前 20）。此前判据
+    /// 读的是配额，于是采回 20 篇、按规则停得完全正确，却被要求「20 ≥ 200」——巡查成功的时间
+    /// 戳一次也写不上。
+    #[test]
+    fn a_keyword_patrol_freezes_the_smaller_of_policy_and_quota_as_expected_count() {
+        let policy = |top_by_likes| SamplingPolicy {
+            ranking: Some("comprehensive".to_owned()),
+            scroll_rounds: Some(3),
+            top_by_likes,
+            published_within_days: Some(7),
+        };
+        let expected_count = |max_works: i32, top_by_likes: Option<i32>| {
+            let mut subject = subject("adhd::comprehensive", policy(top_by_likes));
+            subject.max_works = max_works;
+            let tasks = expand_into_tasks(&subject, &[]).expect("关键词巡查任务必须是有效的");
+            assert_eq!(tasks.len(), 1);
+            assert_eq!(tasks[0].raw()["maximumQuota"], json!(max_works));
+            tasks[0].raw()["expectedCount"].clone()
+        };
+
+        // adhd 现场：加载预算 200、规则取赞前 20 → 这一轮该拿回 20。
+        assert_eq!(expected_count(200, Some(20)), json!(20));
+        // 口径比授权上限大时，能拿回的不会超过授权上限——加载预算先到就停在预算上。
+        assert_eq!(expected_count(20, Some(200)), json!(20));
+        // 规则没设取前 N 时，答案就是配额本身，与其它臂一致。
+        assert_eq!(expected_count(30, None), json!(30));
     }
 
     /// 名单漏改会让被漏掉的那个口径重新参与身份比对，而插件不会回显它——

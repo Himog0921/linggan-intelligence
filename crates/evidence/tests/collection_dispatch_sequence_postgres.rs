@@ -378,6 +378,250 @@ async fn creator_rule_queues_once_without_a_baseline_or_a_preassigned_station() 
     assert!(leased.3.is_some());
 }
 
+/// 调度闸门只说一件事：**这次没推进排期，等 300 秒再来看**。它不替排期回答「下一次什么时候」。
+///
+/// 2026-09-14 adhd 那条关键词规则排期已经到点，却被自己上一次派发时留下的闸门挡住，下一次
+/// 要晚 27 小时；界面上改周期、暂停恢复都只重算排期、不回写闸门，于是每一次调整都撞在同一面
+/// 墙上。下面两组断言分别钉住修复的两半：**推进了排期的派发不留便条**（写侧），
+/// **被拒的便条仍然挡得住**（读侧，冷却还在）。
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn scheduler_gate_only_cools_down_rejected_rules_and_never_outranks_the_rule_schedule() {
+    let database = proof_database_for("collection_scheduler_gate_scope").await;
+    let dispatched_target =
+        save_patrol_rule(&database, "keyword", "adhd::comprehensive", Some(20)).await;
+    grant_authorization(
+        &database,
+        &AuthorizationGrant {
+            platform: "xhs",
+            target_kind: "keyword",
+            lane: "patrol",
+            purpose: "keyword patrol gate proof",
+            max_targets: Some(10),
+            max_works_per_target: Some(200),
+            valid_for_days: 1,
+        },
+    )
+    .await
+    .expect("keyword patrol authorization is granted");
+
+    make_rule_due(&database, dispatched_target).await;
+    let first = linggan_evidence::run_due_patrols(&database)
+        .await
+        .expect("the due rule is queued");
+    assert_eq!(first.queued, vec![dispatched_target]);
+    assert!(first.skipped.is_empty());
+    assert_eq!(
+        latest_decision_gate(&database, dispatched_target, "queued").await,
+        Some(None),
+        "派发已经在同一笔事务里把排期翻到下一次，就不再留一张按别的算法算出来的便条"
+    );
+
+    // 第一单跑完了。真实系统里，人正是在这时候去界面上改周期的。
+    sqlx::query("UPDATE collection_work_order SET queue_state='completed' WHERE target_ref=$1")
+        .bind(dispatched_target)
+        .execute(database.pool())
+        .await
+        .expect("the first patrol finishes before the schedule is rewritten");
+    // 修复上线前那次派发留下的便条还在（审计记录不改写），它写着「12 小时后再来」。
+    seed_pre_fix_dispatch_gate(&database, dispatched_target).await;
+    make_rule_due(&database, dispatched_target).await;
+    let reconsidered = linggan_evidence::run_due_patrols(&database)
+        .await
+        .expect("the rewritten schedule is honoured");
+    assert_eq!(
+        reconsidered.queued,
+        vec![dispatched_target],
+        "排期说到点了就得被考虑：历史派发留下的旧便条没有资格压过排期，只有被拒的才有"
+    );
+
+    // 另一半：被拒的规则仍然要等 300 秒。这条目标没有签过任何创作者巡查授权，准入必然拒绝。
+    let rejected_target = save_patrol_rule(&database, "creator", "creator-gate-proof", None).await;
+    make_rule_due(&database, rejected_target).await;
+    let refused = linggan_evidence::run_due_patrols(&database)
+        .await
+        .expect("a rule without authorization is refused, not queued");
+    assert_eq!(
+        refused.skipped,
+        vec![(rejected_target, "authorization_missing".to_owned())]
+    );
+    let waited: i32 = sqlx::query_scalar(
+        "SELECT EXTRACT(EPOCH FROM (next_eligible_at-decided_at))::integer \
+         FROM collection_scheduler_target_decision \
+         WHERE target_ref=$1 AND outcome='rejected' \
+         ORDER BY decided_at DESC, target_decision_ref DESC LIMIT 1",
+    )
+    .bind(rejected_target)
+    .fetch_one(database.pool())
+    .await
+    .expect("the refusal leaves a cooling-down note");
+    assert_eq!(waited, 300);
+
+    let cooled = linggan_evidence::run_due_patrols(&database)
+        .await
+        .expect("a cooling rule is not retried yet");
+    assert!(
+        cooled.queued.is_empty() && cooled.skipped.is_empty(),
+        "被拒之后 300 秒之内不再碰它：冷却的意义就是不每分钟重试同一件注定失败的事"
+    );
+    sqlx::query(
+        "UPDATE collection_scheduler_target_decision SET next_eligible_at=scope_001_now()-interval '1 second' \
+         WHERE target_ref=$1 AND outcome='rejected'",
+    )
+    .bind(rejected_target)
+    .execute(database.pool())
+    .await
+    .expect("the cooling window passes");
+    let after_cooldown = linggan_evidence::run_due_patrols(&database)
+        .await
+        .expect("the rule is considered again after the cooldown");
+    assert_eq!(
+        after_cooldown.skipped,
+        vec![(rejected_target, "authorization_missing".to_owned())],
+        "冷却过后如期再来一次：便条是冷却，不是封条"
+    );
+}
+
+/// 关键词巡查「成功了没有」读的是**这一轮该拿回多少**，不是授权给的加载预算。
+///
+/// 规则说「综合榜、取赞前 20、近 7 天」；授权给的是 200 篇的加载预算——加载预算决定插件
+/// 翻几屏，规则口径决定它留下哪几条。判据此前读 `maximumQuota`，于是那一轮采回 20 篇、
+/// 按规则停得完全正确，判据却要求 `20 >= 200`：`last_patrol_succeeded_at` 一次也写不上，
+/// 界面上同一行同时显示「最近新增 +15」和「上次巡查 尚未取得成功结果」。
+///
+/// 两条断言合起来才守得住：采回 20 篇要记成功（读 `expectedCount` 才成立），采回 19 篇
+/// 不能记（插件自己报的 `target_reached` 不能替数量作证）。
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn a_keyword_patrol_counts_as_success_at_the_count_its_rule_asked_for() {
+    let database = proof_database_for("collection_keyword_patrol_expected_count").await;
+    let target_ref = save_patrol_rule(&database, "keyword", "adhd::comprehensive", Some(20)).await;
+    grant_authorization(
+        &database,
+        &AuthorizationGrant {
+            platform: "xhs",
+            target_kind: "keyword",
+            lane: "patrol",
+            purpose: "keyword patrol expected count proof",
+            max_targets: Some(10),
+            max_works_per_target: Some(200),
+            valid_for_days: 1,
+        },
+    )
+    .await
+    .expect("keyword patrol authorization is granted");
+    make_rule_due(&database, target_ref).await;
+    let tick = linggan_evidence::run_due_patrols(&database)
+        .await
+        .expect("the due keyword rule is queued");
+    assert_eq!(tick.queued, vec![target_ref]);
+
+    let station = seed_creator_work_order(&database).await;
+    // 工位、安装与账号由创作者夹具提供；关键词巡查要的是搜索能力，这个夹具的工位默认
+    // 只会读创作者页。夹具自己那张旧工单也要退出派发——本用例要连着派两轮，靠
+    // `scheduled_for` 的先后让它是不可靠的。
+    sqlx::query(
+        "UPDATE plugin_installation SET capabilities=capabilities || '[\"discovery_search\"]'::jsonb \
+         WHERE installation_ref=$1",
+    )
+    .bind(station.installation_ref)
+    .execute(database.pool())
+    .await
+    .expect("the proof station declares the search capability");
+    sqlx::query("UPDATE collection_work_order SET queue_state='cancelled' WHERE work_order_ref=$1")
+        .bind(station.work_order_ref)
+        .execute(database.pool())
+        .await
+        .expect("the fixture's own legacy order leaves the dispatch queue");
+
+    let decision = decide_dispatch(
+        &database,
+        &station.install_key,
+        &station.installation_credential,
+    )
+    .await
+    .expect("the search-capable station claims the queued keyword patrol");
+    assert_eq!(capability(&decision), "discovery_search");
+    let claimed: (Uuid, String) = sqlx::query_as(
+        "SELECT work_order.target_ref,work_order.lane \
+         FROM collection_work_order_lease lease \
+         JOIN collection_work_order work_order USING(work_order_ref) \
+         WHERE lease.released_at IS NULL \
+         ORDER BY lease.issued_at DESC, lease.lease_ref DESC LIMIT 1",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("the claimed order is readable");
+    assert_eq!(claimed, (target_ref, "patrol".to_owned()));
+    let task = task_from_dispatch(&decision);
+    assert_eq!(task.raw()["target"]["query"], "adhd");
+    assert_eq!(
+        task.raw()["maximumQuota"],
+        200,
+        "授权给的加载预算照旧写在任务说明书上——它管的是翻几屏"
+    );
+    assert_eq!(
+        task.raw()["expectedCount"],
+        20,
+        "规则说取赞前 20：这一轮该拿回多少在派发时算一次、冻进任务说明书，此后判据只读它"
+    );
+
+    run_keyword_patrol_round(
+        &database,
+        &task,
+        station.producer_instance_id,
+        20,
+        "target_reached",
+    )
+    .await;
+    let succeeded_at = read_target_patrol_success(&database, target_ref).await;
+    assert!(
+        succeeded_at.is_some(),
+        "采回这一轮该拿回的 20 篇、按规则停对了，就该被记成巡查成功"
+    );
+    let rule_succeeded_at: Option<String> = sqlx::query_scalar(
+        "SELECT last_patrol_succeeded_at::text FROM collection_monitor_rule \
+         WHERE target_ref=$1 AND retired_at IS NULL",
+    )
+    .bind(target_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("the rule row is readable");
+    assert!(
+        rule_succeeded_at.is_some(),
+        "界面上「上次巡查」读的就是规则这一列"
+    );
+
+    // 第二圈少一篇：插件仍然报 `target_reached`（它认为自己停了），但这一轮的份数没拿够。
+    make_rule_due(&database, target_ref).await;
+    let second_tick = linggan_evidence::run_due_patrols(&database)
+        .await
+        .expect("the rule is due again");
+    assert_eq!(second_tick.queued, vec![target_ref]);
+    let second = decide_dispatch(
+        &database,
+        &station.install_key,
+        &station.installation_credential,
+    )
+    .await
+    .expect("the station claims the next keyword patrol");
+    let second_task = task_from_dispatch(&second);
+    assert_eq!(second_task.raw()["expectedCount"], 20);
+    run_keyword_patrol_round(
+        &database,
+        &second_task,
+        station.producer_instance_id,
+        19,
+        "target_reached",
+    )
+    .await;
+    assert_eq!(
+        read_target_patrol_success(&database, target_ref).await,
+        succeeded_at,
+        "少一篇就不是完成：判据读的是份数，不是插件自己那句 target_reached"
+    );
+}
+
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL proof database"]
 async fn creator_lease_claims_and_completes_two_scheduled_tasks_in_order() {
@@ -1841,6 +2085,247 @@ async fn seed_creator_work_order(database: &Database) -> Fixture {
         install_key,
         installation_credential,
     }
+}
+
+/// 造一个在观察中的目标，并给它存一条自动巡查规则（固定周期、全天、每天都跑）。
+///
+/// 关键词的规则身份就是排序（`monitor_rule_slot_key`）：同一个词盯两个榜是两条规则，
+/// 所以排哪条榜要说清；创作者没有排序可言，固定 `primary`。
+///
+/// 到期与否不在这里定——那一步由调用方显式做，因为「界面把周期重算到什么时候」正是
+/// 上面两条用例要证明的东西，不能藏进夹具。
+async fn save_patrol_rule(
+    database: &Database,
+    target_kind: &str,
+    identity_key: &str,
+    top_by_likes: Option<i32>,
+) -> Uuid {
+    let target_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_observation_target \
+             (target_ref,platform,target_kind,identity_key,display_name,source) \
+         VALUES ($1,'xhs',$2,$3,$3,'manual')",
+    )
+    .bind(target_ref)
+    .bind(target_kind)
+    .bind(identity_key)
+    .execute(database.pool())
+    .await
+    .expect("the patrol target is seeded without any archive receipt");
+    let ranking_key = (target_kind == "keyword").then(|| "comprehensive".to_owned());
+    // 关键词的搜索面叫 `keyword_search`（`0046` 的 CHECK 只允许它带采样口径），
+    // 创作者主页叫 `creator_patrol`。
+    let surface_key = if target_kind == "keyword" {
+        "keyword_search"
+    } else {
+        "creator_patrol"
+    };
+    let saved = apply_monitor_rule_command(
+        database,
+        &MonitorRuleCommand {
+            target_ref,
+            expected_revision: 0,
+            idempotency_key: Uuid::new_v4(),
+            kind: MonitorCommandKind::SaveRule,
+            actor: MonitorCommandActor::Person,
+            source: "targets_ui",
+            slot_key: ranking_key.clone(),
+            draft: Some(MonitorRuleDraft {
+                mode: MonitorRuleMode::Fixed,
+                automatic_enabled: true,
+                run_on_weekdays: true,
+                run_on_weekends: true,
+                all_day: true,
+                window_start_minute: None,
+                window_end_minute: None,
+                fixed_interval_seconds: Some(43_200),
+                fallback_interval_seconds: 43_200,
+                surface_key: surface_key.to_owned(),
+                ranking_key,
+                // 采样口径只属于关键词搜索面（`0046` 的 CHECK）：创作者主页没有「排序」
+                // 也没有「取前 N」可言，给它编一个会让复核基于一个不存在的事实。
+                scroll_rounds: (target_kind == "keyword").then_some(3),
+                top_by_likes,
+                published_within_days: (target_kind == "keyword").then_some(7),
+                task_contract_version: "linggan.producer.task-spec.v1".to_owned(),
+            }),
+        },
+    )
+    .await
+    .expect("the patrol rule is saved");
+    assert_eq!(saved.reason_code, "rule_saved");
+    target_ref
+}
+
+/// 造一张**修复上线前那一版派发**留下的便条：推进了排期也照样写「派发时刻 + 周期」。
+///
+/// 生产库里每一条历史派发都长这样，而 `collection_scheduler_target_decision` 是审计记录，
+/// 不改写。所以「旧便条不再有资格压排期」这件事只能在读取侧做，而读取侧正是靠这条形状
+/// 才被证明真的挡得住它——不造这一行，用例就只在测新写的行（新写的行根本没有便条）。
+async fn seed_pre_fix_dispatch_gate(database: &Database, target_ref: Uuid) {
+    let (rule_ref, rule_revision_ref, interval_seconds): (Uuid, Uuid, i32) = sqlx::query_as(
+        "SELECT rule.rule_ref,rule.active_revision_ref,revision.fixed_interval_seconds \
+         FROM collection_monitor_rule rule \
+         JOIN collection_monitor_rule_revision revision \
+           ON revision.rule_revision_ref=rule.active_revision_ref \
+         WHERE rule.target_ref=$1 AND rule.retired_at IS NULL",
+    )
+    .bind(target_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("the active rule revision is readable");
+    // 便条来自**更早的那一次调度**，所以它得有自己的 run：`(scheduler_run_ref,target_ref)`
+    // 是唯一的，复用本轮 run 会被约束挡住，而真实历史也正是这样——每次派发各归各的 run。
+    let historical_run_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_scheduler_run \
+             (scheduler_run_ref,scheduler_key,started_at,completed_at,outcome, \
+              considered_count,dispatched_count) \
+         VALUES ($1,'patrol',scope_001_now()-interval '2 hours', \
+                 scope_001_now()-interval '2 hours', 'dispatched',1,1)",
+    )
+    .bind(historical_run_ref)
+    .execute(database.pool())
+    .await
+    .expect("a historical scheduler run is stored");
+    sqlx::query(
+        "INSERT INTO collection_scheduler_target_decision \
+             (target_decision_ref,scheduler_run_ref,target_ref,rule_ref,rule_revision_ref, \
+              outcome,reason_code,cadence_source,effective_interval_seconds,next_eligible_at, \
+              work_order_ref,lease_ref) \
+         VALUES ($1,$2,$3,$4,$5,'queued','queued','fixed',$6, \
+                 scope_001_now()+make_interval(secs=>$6),NULL,NULL)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(historical_run_ref)
+    .bind(target_ref)
+    .bind(rule_ref)
+    .bind(rule_revision_ref)
+    .bind(interval_seconds)
+    .execute(database.pool())
+    .await
+    .expect("a pre-fix dispatch note is stored exactly as the old writer wrote it");
+}
+
+/// 把规则排期重算到「现在之前」——界面上改周期、暂停恢复之后，排期就是这样被重算的。
+///
+/// 这一步只动排期，不动调度闸门：两者不一致正是 2026-09-14 那条规则逾期 27 小时的原因。
+async fn make_rule_due(database: &Database, target_ref: Uuid) {
+    sqlx::query(
+        "UPDATE collection_monitor_rule SET monitor_next_run_at=scope_001_now()-interval '1 second' \
+         WHERE target_ref=$1 AND retired_at IS NULL",
+    )
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .expect("the rule schedule is rewritten to now");
+}
+
+/// 读某个目标最近一条决定留下的闸门（`next_eligible_at`）。
+///
+/// 外层 `None` 是「没有这条决定」，内层 `None` 是「这条决定没有留闸门」。两者必须分得开：
+/// 「派发不留便条」一旦被「压根没查到行」冒充过去，断言就守不住它本该守的东西。
+async fn latest_decision_gate(
+    database: &Database,
+    target_ref: Uuid,
+    outcome: &str,
+) -> Option<Option<String>> {
+    sqlx::query_scalar::<_, Option<String>>(
+        "SELECT next_eligible_at::text FROM collection_scheduler_target_decision \
+         WHERE target_ref=$1 AND outcome=$2 \
+         ORDER BY decided_at DESC, target_decision_ref DESC LIMIT 1",
+    )
+    .bind(target_ref)
+    .bind(outcome)
+    .fetch_optional(database.pool())
+    .await
+    .expect("the scheduler decision is readable")
+}
+
+async fn read_target_patrol_success(database: &Database, target_ref: Uuid) -> Option<String> {
+    sqlx::query_scalar(
+        "SELECT last_patrol_succeeded_at::text FROM collection_observation_target \
+         WHERE target_ref=$1",
+    )
+    .bind(target_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("the target row is readable")
+}
+
+/// 走完一轮关键词巡查：建任务（调度器已经建过，这里是回放）、开尝试、交包。
+///
+/// `acquired` 条记录各自是一条内容卡（`discovery_card` + `content` 身份），落库判为
+/// `accepted_for_library_discovery`——判据里那条「接纳条数等于 acquired」正是靠它成立。
+/// `stop_reason` 写进**包的 `checkpoint`**：coverage 里那个同名的字段不携带信息。
+async fn run_keyword_patrol_round(
+    database: &Database,
+    task: &ProducerTaskSpec,
+    producer_instance_id: Uuid,
+    acquired: i64,
+    stop_reason: &str,
+) {
+    assert!(matches!(
+        create_producer_task(database, task).await,
+        Ok(RuntimeTaskOutcome::Replay { .. })
+    ));
+    let attempt = attempt(task.task_id(), producer_instance_id);
+    assert!(matches!(
+        start_producer_attempt(database, &attempt).await,
+        Ok(RuntimeAttemptOutcome::Started { .. })
+    ));
+    let records: Vec<serde_json::Value> = (0..acquired)
+        .map(|index| {
+            let external_id = format!("keyword-patrol-work-{index}");
+            serde_json::json!({
+                "kind":"discovery_card",
+                "resultPosition": index + 1,
+                "sourceObject":{"platform":"xhs","type":"content","externalId":external_id},
+                "payload":{
+                    "noteId":external_id,
+                    "title":format!("关键词巡查样本 {index}"),
+                    "likes":"233",
+                    "url":format!(
+                        "https://www.xiaohongshu.com/search_result/{external_id}?xsec_token=ABkeyword{index}"
+                    )
+                }
+            })
+        })
+        .collect();
+    let submission = parse_producer_submission(
+        &serde_json::json!({
+            "contractVersion":"linggan.producer.capture-package.v1",
+            "producerInstanceId":producer_instance_id,
+            "taskId":task.task_id(),
+            "attemptId":attempt.attempt_id(),
+            "submissionId":Uuid::new_v4(),
+            "capturePackage":{
+                "contractVersion":"linggan.producer.capture-package.v1",
+                "packageRef":Uuid::new_v4(),
+                "packageKind":"discovery_search",
+                "platform":"xhs",
+                "observedAt":"2026-09-13T00:00:00Z",
+                "capturedAt":"2026-09-13T00:00:01Z",
+                "coverage":{
+                    "target":{"basis":"current_visible_surface","surface":"target_driven_surface","query":"adhd"},
+                    "layers":[{
+                        "capability":"discovery_search",
+                        "observed":acquired,"attempted":acquired,"acquired":acquired,
+                        "verified":0,"failed":0,"notAttempted":0,"unknown":0,
+                        "stoppedReason":"surface_read_complete"
+                    }]
+                },
+                "checkpoint":{"surfaceReceipt":{"stopReason":stop_reason}},
+                "records":records
+            }
+        })
+        .to_string(),
+    )
+    .expect("keyword patrol submission is valid");
+    assert!(matches!(
+        submit_producer_package(database, &submission).await,
+        Ok(RuntimeSubmissionOutcome::Acknowledged { .. })
+    ));
 }
 
 async fn submit_profile_discovery(

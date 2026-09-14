@@ -185,6 +185,15 @@ async fn run_due_patrols_inner(database: &Database) -> Result<PatrolTickSummary,
 
     // 到期是**按规则**算的，不是按目标：一个关键词可以同时盯综合榜和点赞榜，两条规则
     // 各有各的周期。共用一个目标级的 `monitor_next_run_at` 说不清是谁该跑了。
+    //
+    // 闸门只认「没有推进排期」的决定，也就是被拒（`rejected`）。推进了排期的派发不写闸门：
+    // 排期在派发那笔事务里已经翻到下一次，再按「派发时刻 + 周期」写一张便条，等于用另一套
+    // 算法把同一句话说了第二遍——排期从固定网格推，便条从事情实际发生的时刻推，而派发总比
+    // 网格晚，两个条件又必须同时成立，于是更晚的便条长期压过排期，并且每天再多累积几十秒
+    // （调度器每分钟才醒一次，过了点最长得等到下一分钟）。界面上改周期 / 暂停恢复只重算
+    // 排期、不动便条，就会出现「排期说到点了、便条说不行」的空档：2026-09-14 adhd 那条
+    // 排期到点却被自己的旧闸门挡住，下一次要晚 27 小时。历史行里那些旧值因此不再有资格
+    // 挡排期，但审计记录保持原样，不改写。
     let due_rules: Vec<Uuid> = sqlx::query_scalar(
         "SELECT rule.rule_ref \
          FROM collection_monitor_rule rule \
@@ -201,6 +210,7 @@ async fn run_due_patrols_inner(database: &Database) -> Result<PatrolTickSummary,
            AND NOT EXISTS ( \
              SELECT 1 FROM collection_scheduler_target_decision prior \
              WHERE prior.rule_ref=rule.rule_ref \
+               AND prior.outcome='rejected' \
                AND prior.next_eligible_at>scope_001_now()) \
          ORDER BY rule.monitor_next_run_at,rule.rule_ref LIMIT $1",
     )
@@ -374,11 +384,14 @@ async fn queue_one_due_rule(
     .execute(&mut *transaction)
     .await?;
 
-    let retry_after_seconds = if advance_schedule {
-        interval_seconds
-    } else {
-        300
-    };
+    // 闸门便条只在「这次没推进排期」时留：被拒（额度不够、没授权、目标不可请求……）之后等
+    // 300 秒再来看，免得调度器每分钟都对着同一个目标重试同一件注定失败的事。
+    //
+    // 推进了排期的派发（`queued` / `deferred`）不留便条：排期在同一笔事务里已经翻到下一次，
+    // 再写一张「派发时刻 + 周期」的便条，是用第二套算法把「下一次什么时候」又说了一遍，而
+    // 两个起点不同（网格 vs 事件）、又必须同时成立，更晚的那张便条会长期压过排期。留空不是
+    // 缺省，而是如实表示「这次没有需要记下的重试冷却」。
+    let gate_seconds: Option<i32> = if advance_schedule { None } else { Some(300) };
     sqlx::query(
         "INSERT INTO collection_scheduler_target_decision \
              (target_decision_ref,scheduler_run_ref,target_ref,rule_ref,rule_revision_ref, \
@@ -394,7 +407,7 @@ async fn queue_one_due_rule(
     .bind(outcome)
     .bind(reason_code)
     .bind(interval_seconds)
-    .bind(retry_after_seconds)
+    .bind(gate_seconds)
     .bind(work_order_ref)
     .bind(rule_ref)
     .execute(&mut *transaction)
