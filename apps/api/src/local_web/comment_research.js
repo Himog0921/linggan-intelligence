@@ -22,6 +22,7 @@
     comment_research_unavailable: '评论研究暂时不可用，请检查本机数据服务。',
     comment_research_v1_unavailable: '本次研究结果暂时无法读取；上一次已显示的结果不会被伪造成新结果。',
     research_policy_missing: '请先保存研究策略。',
+    research_policy_input_contract_stale: '评论研究的输入合同已更新。请重新保存研究策略，再查看并确认新的冻结范围；此操作不会发送评论。',
     embedding_not_ready: '请先在“模型与向量设置”中完成向量模型测试并启用；系统不会创建一个必然无法归并和发布的研究运行。',
     research_model_not_ready: '请先在“模型与 AI 设置”中完成当前研究模型的 V1 语义测试；系统不会向未通过结构化输出检查的模型发送评论。',
     no_eligible_research_comments: '当前没有可进入研究的普通用户评论。作品作者回复、身份未知或不可读评论不会被混入。',
@@ -262,6 +263,8 @@
       embedding_not_qualified:'向量模型不可用',
       embedding_configuration_unavailable:'向量模型配置在执行中不可用',
       worker_interrupted:'后台执行中断，正在按次数限制恢复',
+      context_insufficient_parent_unavailable:'该回复需要父评论语境，但当前没有可读父评论；未发送给模型，也不计为“没有研究信号”',
+      context_input_contract_invalid:'该回复的冻结上下文不符合当前输入合同；未发送给模型',
       source_unavailable:'研究来源在处理时已不可读取',
       provider_timeout:'模型服务超时',
       provider_failed:'模型服务未返回可用结果'

@@ -21,7 +21,7 @@
 |---|---|---|
 | [plans/active/account-observation-bootstrap-002.md](plans/active/account-observation-bootstrap-002.md) | 活跃计划 | Issue #218：新安装插件的首单软准入、账号观察启动、人工绑定审计与无秘密配置诊断 |
 | [plans/active/comment-research-reset-001.md](plans/active/comment-research-reset-001.md) | 活跃计划；唯一未来入口 | Issue #213：开发期清空旧研究派生结果、删除 Task B/P4，重建唯一评论研究语义内核 |
-| [plans/active/comment-research-v1-real-closure-001.md](plans/active/comment-research-v1-real-closure-001.md) | 活跃计划；Issue #254 | 开发期只重置评论研究派生层，修复研究指纹恢复、Atom 局部接纳与首轮真实发布闭环 |
+| [plans/active/comment-research-v1-real-closure-001.md](plans/active/comment-research-v1-real-closure-001.md) | 活跃计划；Issue #254 | 开发期只重置评论研究派生层，修复语义上下文输入、研究指纹恢复、Atom 局部接纳与首轮真实发布闭环 |
 | [plans/active/comment-research-semantic-output-001.md](plans/active/comment-research-semantic-output-001.md) | 活跃计划；Issue #256 | 以受控真实批次修复语义提取与问题归并的结构化输出边界；不降低结果发布门槛 |
 | [plans/active/comment-research-output-diagnostics-001.md](plans/active/comment-research-output-diagnostics-001.md) | 活跃计划；Issue #258 | 将 V5 输出失败拆为安全阶段诊断，以候选绑定和精确证据短句降低模型合同失败 |
 | [plans/active/comment-research-partial-publication-001.md](plans/active/comment-research-partial-publication-001.md) | 活跃计划；Issue #264 | 将足够覆盖但含单项终态失败的 V1 Run 发布为可追溯的部分 ResultRevision；失败不计入统计 |

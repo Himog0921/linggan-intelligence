@@ -196,6 +196,34 @@ async fn advance_loaded_semantic(
     claim: &crate::comment_research_kernel::ResearchRunItemClaim,
     input: ClaimedResearchInput,
 ) -> Result<(), ModelError> {
+    if input.clean_state == "context" {
+        match &input.parent_context {
+            crate::comment_research_kernel::ParentResearchContext::Available { .. } => {}
+            crate::comment_research_kernel::ParentResearchContext::Unavailable => {
+                record_run_item_failure(
+                    database,
+                    claim,
+                    RunItemFailureClass::Incompatible,
+                    "context_insufficient_parent_unavailable",
+                )
+                .await
+                .map_err(kernel_error)?;
+                return Ok(());
+            }
+            crate::comment_research_kernel::ParentResearchContext::NotRequested
+            | crate::comment_research_kernel::ParentResearchContext::Invalid => {
+                record_run_item_failure(
+                    database,
+                    claim,
+                    RunItemFailureClass::Incompatible,
+                    "context_input_contract_invalid",
+                )
+                .await
+                .map_err(kernel_error)?;
+                return Ok(());
+            }
+        }
+    }
     let Some(config_ref) = input.config_ref else {
         record_run_item_failure(
             database,
@@ -778,9 +806,18 @@ fn semantic_prompt(input: &ClaimedResearchInput) -> Result<String, ModelError> {
         reasons: Vec::new(),
     })
     .text;
+    let parent_research_text = input.parent_context.research_text().map(|text| {
+        outbound(CleanComment {
+            text: text.to_owned(),
+            offsets: Vec::new(),
+            state: "direct".into(),
+            reasons: Vec::new(),
+        })
+        .text
+    });
     serde_json::to_string(&json!({
         "contract":"comment-research.semantic.v5",
-        "task":"只判断研究正文中明确表达的用户问题、需求、解决方法或经历。没有足够研究信号时必须输出 no_signal；不得输出空 atoms。每个 atom 的 evidence 必须逐字复制研究正文中支持该命题的一段连续、非空、唯一短句；不要输出字符位置、改写、概括或研究正文以外的文字。",
+        "task":"只判断当前研究正文中明确表达的用户问题、需求、解决方法或经历。父评论研究正文仅用于消解当前回复的指代或话题，不能单独构成用户结论。没有足够研究信号时必须输出 no_signal；不得输出空 atoms。每个 atom 的 evidence 必须逐字复制当前研究正文中支持该命题的一段连续、非空、唯一短句；不要输出字符位置、改写、概括、父评论文字或研究正文以外的文字。",
         "schema":{
             "atoms":{
                 "outcome":"atoms",
@@ -793,8 +830,8 @@ fn semantic_prompt(input: &ClaimedResearchInput) -> Result<String, ModelError> {
             {"outcome":"no_signal","reason":"评论只有礼貌感谢，没有明确问题、需求、方法或经历。"},
             {"outcome":"atoms","atoms":[{"kind":"problem","proposition":"家长难以让孩子开始完成作业。","basis":"explicit","evidence":"拖到很晚才开始"}]}
         ],
-        "researchText":outbound_text,
-        "contextManifest":input.context_manifest,
+        "currentResearchText":outbound_text,
+        "parentResearchText":parent_research_text,
     }))
     .map_err(|_| ModelError::Invalid)
 }
@@ -1786,6 +1823,34 @@ mod tests {
         assert_eq!(
             resolution_output_failure_code(ContractOutputError::SchemaRejected),
             "problem_resolution_json_schema_rejected"
+        );
+    }
+
+    #[test]
+    fn semantic_prompt_sends_only_semantic_parent_text_and_keeps_evidence_on_current_reply() {
+        let input = ClaimedResearchInput {
+            run_ref: Uuid::nil(),
+            derivation_ref: Uuid::nil(),
+            attempt: 1,
+            research_text: "我也是……难受".into(),
+            clean_state: "context".into(),
+            parent_context: crate::comment_research_kernel::ParentResearchContext::Available {
+                research_text: "我真的习惯性熬夜，有时候会熬通宵".into(),
+            },
+            config_ref: None,
+            token_limit: 10_000,
+        };
+        let packet: Value = serde_json::from_str(&semantic_prompt(&input).unwrap()).unwrap();
+        assert_eq!(packet["currentResearchText"], "我也是……难受");
+        assert_eq!(
+            packet["parentResearchText"],
+            "我真的习惯性熬夜，有时候会熬通宵"
+        );
+        assert!(packet.get("contextManifest").is_none());
+        assert!(
+            packet["task"]
+                .as_str()
+                .is_some_and(|task| task.contains("不能单独构成用户结论"))
         );
     }
 }

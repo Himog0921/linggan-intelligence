@@ -15,7 +15,7 @@
 
 ### COMMENT-RESEARCH-V1-REAL-CLOSURE-001 / Issue #254（源码实施中；开发期派生重置已获授权）
 
-Mog 已授权只重置评论研究派生层：Run、RunItem、Atom、向量空间/向量、Problem/Definition/Membership/Resolution、ResultRevision 和变化投影可以清空；Raw Comment、作品/父评论上下文、作者归属、来源限制、模型连接/配置、WeMM profile、active policy 与通用 ModelInvocation 账本必须保留。本项新增同一研究指纹下的有效结论复用、取消项恢复和局部 Atom 接纳，避免历史 Run 存在即永久阻断新研究。连续自动排程仍关闭；完成声明仍需要共享开发库的实际 reset、受控首轮 Run、published ResultRevision、localhost 页面和 Mog 业务验收分别提供证据。
+Mog 已授权只重置评论研究派生层：Run、RunItem、Atom、向量空间/向量、Problem/Definition/Membership/Resolution、ResultRevision 和变化投影可以清空；Raw Comment、作品/父评论上下文、作者归属、来源限制、模型连接/配置、WeMM profile、active policy 与通用 ModelInvocation 账本必须保留。本项新增同一研究指纹下的有效结论复用、取消项恢复和局部 Atom 接纳，避免历史 Run 存在即永久阻断新研究。2026-09-14 的输入合同核查确认：父评论目前只以 ref/hash 进入审计 manifest、未进入模型语义输入；P0 正在将清洗后的可读父正文冻结为一层 `parentResearchText`，并把父评论应存在却不可读的情况以不调用模型的 `context_insufficient_parent_unavailable` 保留，不能压成 `no_signal`。作品级全文/摘要尚无稳定且用途合格的合同，未纳入本次实现。连续自动排程仍关闭；完成声明仍需要隔离 PostgreSQL、shared database 迁移或 reset（若另获授权）、受控首轮 Run、published ResultRevision、localhost 页面和 Mog 业务验收分别提供证据。
 
 ### COMMENT-RESEARCH-SEMANTIC-OUTPUT-001 / Issue #256（源码实施中；受控首批暴露合同失败）
 

@@ -38,7 +38,7 @@ use linggan_intelligence::model_settings_read::read_model_settings;
 use linggan_intelligence::model_worker_drain::ModelWorkerDrain;
 use linggan_intelligence::pi_adapter::PiAdapter;
 use linggan_storage_postgres::Database;
-use research_fixture::{comment_with_author, detail_with_author};
+use research_fixture::{comment_with_author, detail_with_author, reply_with_author};
 use serde_json::json;
 use sqlx::Row;
 use std::{path::PathBuf, time::Duration};
@@ -147,6 +147,189 @@ async fn derivation_ref(database: &Database, source_ref: Uuid) -> Uuid {
     .fetch_one(database.pool())
     .await
     .unwrap()
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn reply_derivation_freezes_clean_parent_text_in_semantic_context_not_audit_context() {
+    let database = fixture::proof_database("comment_research_parent_context_input").await;
+    detail_with_author(
+        &database,
+        "parent-context-note",
+        "SYNTHETIC parent context note",
+        Some("creator-1"),
+    )
+    .await;
+    comment_with_author(
+        &database,
+        "parent-context-note",
+        "parent",
+        "我真的习惯性熬夜，有时候会熬通宵",
+        Some("reader-parent"),
+        "2026-09-01T08:00:00Z",
+    )
+    .await;
+    let reply = reply_with_author(
+        &database,
+        "parent-context-note",
+        "reply",
+        "parent",
+        "我也是",
+        Some("reader-reply"),
+        "2026-09-01T08:00:01Z",
+    )
+    .await;
+
+    assert_eq!(derive_current_sources(&database, 10).await.unwrap(), 2);
+    let manifest: serde_json::Value = sqlx::query_scalar(
+        "SELECT context_manifest FROM linggan_comment_research_derivation \
+         WHERE source_ref=$1 AND derivation_version=$2",
+    )
+    .bind(reply)
+    .bind(DERIVATION_VERSION)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(manifest["contract"], "comment-research.context.v2");
+    assert_eq!(manifest["semantic"]["parent"]["state"], "available");
+    assert_eq!(
+        manifest["semantic"]["parent"]["researchText"],
+        "我真的习惯性熬夜,有时候会熬通宵"
+    );
+    assert!(manifest["audit"].get("researchText").is_none());
+    assert_eq!(derive_current_sources(&database, 10).await.unwrap(), 0);
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn context_dependent_reply_without_readable_parent_is_terminal_without_a_model_call() {
+    let database = fixture::proof_database("comment_research_missing_parent_context").await;
+    detail_with_author(
+        &database,
+        "missing-parent-note",
+        "SYNTHETIC missing parent context note",
+        Some("creator-1"),
+    )
+    .await;
+    reply_with_author(
+        &database,
+        "missing-parent-note",
+        "orphan-reply",
+        "missing-parent",
+        "我也是",
+        Some("reader-reply"),
+        "2026-09-01T08:00:01Z",
+    )
+    .await;
+    save_active_policy(
+        &database,
+        SaveResearchPolicy {
+            config_ref: Some(qualified_research_config(&database).await),
+            source_limit: 10,
+            token_limit: 10_000,
+        },
+    )
+    .await
+    .unwrap();
+    let run = start_ready_run(&database).await.unwrap();
+    assert_eq!(run.selected_sources, 1);
+
+    let adapter = PiAdapter::configured_with_test_command(
+        PathBuf::from("/bin/sh"),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/support/comment_research_semantic_settlement_adapter.sh"),
+    );
+    assert!(
+        run_once(
+            &database,
+            &SyntheticModelSecrets,
+            &adapter,
+            &ModelWorkerDrain::new(),
+        )
+        .await
+        .unwrap()
+    );
+    let item: (String, Option<String>, Option<Uuid>) = sqlx::query_as(
+        "SELECT state,failure_code,invocation_ref FROM linggan_comment_research_run_item \
+         WHERE run_ref=$1",
+    )
+    .bind(run.run_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(item.0, "incompatible");
+    assert_eq!(
+        item.1.as_deref(),
+        Some("context_insufficient_parent_unavailable")
+    );
+    assert!(
+        item.2.is_none(),
+        "missing context must not reserve a model call"
+    );
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn saved_v1_policy_must_be_replaced_before_a_v2_context_run_is_created() {
+    let database = fixture::proof_database("comment_research_stale_policy_contract").await;
+    detail_with_author(
+        &database,
+        "stale-policy-note",
+        "SYNTHETIC stale policy note",
+        Some("creator-1"),
+    )
+    .await;
+    comment_with_author(
+        &database,
+        "stale-policy-note",
+        "ordinary",
+        "孩子写作业总是拖延，有什么办法吗",
+        Some("reader-1"),
+        "2026-09-01T08:00:00Z",
+    )
+    .await;
+    let config_ref = qualified_research_config(&database).await;
+    save_active_policy(
+        &database,
+        SaveResearchPolicy {
+            config_ref: Some(config_ref),
+            source_limit: 10,
+            token_limit: 10_000,
+        },
+    )
+    .await
+    .unwrap();
+    let stale_policy_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_comment_research_policy_revision( \
+             policy_revision_ref,config_ref,contract_version,derivation_version,extraction_rule_hash, \
+             membership_policy_hash,source_limit,token_limit \
+         ) VALUES($1,$2,'comment-research.semantic.v1','comment-research.derivation.v1',$3,$3,10,10000)",
+    )
+    .bind(stale_policy_ref)
+    .bind(config_ref)
+    .bind(HASH)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE linggan_comment_research_policy_active \
+         SET policy_revision_ref=$1,revision=revision+1,updated_at=scope_001_now() WHERE singleton",
+    )
+    .bind(stale_policy_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    assert!(matches!(
+        start_ready_run(&database).await,
+        Err(CommentResearchKernelError::PolicyInputContractStale)
+    ));
+    let run_count: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_comment_research_run")
+        .fetch_one(database.pool())
+        .await
+        .unwrap();
+    assert_eq!(run_count, 0, "stale policy must not freeze a V1 Run");
 }
 
 async fn insert_historical_derivation_version(database: &Database, source_ref: Uuid) {

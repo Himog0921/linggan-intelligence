@@ -157,6 +157,9 @@ fn kernel_response<T: Serialize>(
                 kernel::CommentResearchKernelError::PolicyMissing => {
                     (StatusCode::CONFLICT, "research_policy_missing")
                 }
+                kernel::CommentResearchKernelError::PolicyInputContractStale => {
+                    (StatusCode::CONFLICT, "research_policy_input_contract_stale")
+                }
                 kernel::CommentResearchKernelError::NoEligibleDerivations => {
                     (StatusCode::CONFLICT, "no_eligible_research_comments")
                 }
