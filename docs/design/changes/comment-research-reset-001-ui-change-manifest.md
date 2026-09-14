@@ -16,6 +16,43 @@
 这只是现有 modal 的数据诚实性修正：不改变 LIDS token、壳层、按钮层级、tab、任何全局
 组件或其它页面，也不把研究指纹、队列、向量或模型内部状态暴露为用户对象。
 
+## COMMENT-RESEARCH-PUBLISH-001 补充（2026-09-14）
+
+### 1. 事项
+
+- Issue / SCOPE：Issue #264 / COMMENT-RESEARCH-PUBLISH-001
+- Agent 与 worktree：`/root` / `codex/comment-research-publish-001`
+- 目标：当达到冻结覆盖与问题组织覆盖门槛时，让 `completed_with_failures` 的真实研究结果以 PARTIAL ResultRevision 可读；失败继续可见、不可计入。
+- 用户可见结果：概览、问题、变化和运行记录用中文说明“本版覆盖多少冻结原声、哪些未纳入、原因在哪里”，并提供回到运行记录的路径。
+- 明确非目标：不新增页面/导航/人工审核/复跑操作；不改 raw corpus、模型、向量、排程或全局 LIDS token。
+
+### 2. 读取回执
+
+| 来源 | 状态 | 本次解决的问题 | 已核对 |
+|---|---|---|---|
+| AGENTS.md / current-state | 已读 | 受保护交付、真实状态与文档留痕边界 | 2026-09-14 |
+| UI execution contract | 已读 | 表面、状态、依赖和验收矩阵 | 2026-09-14 |
+| PAGE-COMMENT-RESEARCH-V1-001 | 已读并更新 | 五视图职责与运行失败表达 | 2026-09-14 |
+| LIDS Token / Primitive / Pattern / Data Truth / Language | 已读 | 既有 L1 Corpus Explorer 的部分状态表达 | 2026-09-14 |
+| COMMENT-RESEARCH-PUBLISH-001 数据合同 | 本清单与 active plan 冻结 | 覆盖事实、分母和不可计入边界 | 2026-09-14 |
+| 当前代码/真实 Run | 已读 | `af79…` 的 20 条冻结输入与现行未发布原因 | 2026-09-14 |
+
+### 3. 分类、边界与验收
+
+- 分类：混合（状态语义 + 展示）；最高风险：状态语义。
+- L1 / Pattern：L1 Corpus Explorer；复用 title/status、tab、table 与 empty pattern。
+- 受影响页面：`/corpus/comments` 的 overview/problems/changes/runs；voices 保持独立读取。
+- 状态：完整结果、PARTIAL 结果、无结果、运行失败；PARTIAL 不是 INVALID，也不是完整覆盖。
+- 依赖：ResultRevision `input_counts`、read envelope、现有 run receipt；不触及 shared shell 或 token。
+- 停止条件：若必须改写 Run state、失败 Item、原始评论、调用账本或引入未批准视觉组件，停止。
+
+| 层级 | 验收方法 | 实际结果 | 未证明边界 |
+|---|---|---|---|
+| 任务可用 | PostgreSQL/API 与真实终态 Run 发布 | 待实施 | 不证明长期自动研究 |
+| 状态诚实 | 分母/失败/未组织 Atom 回归断言与页面文本 | 待实施 | 不证明模型质量 |
+| 视觉一致 | HTML/JS 断言与 localhost 浏览器走查 | 待实施 | 不做全站 token 迁移 |
+| 真实后果 | 账本调用数不变、ResultRevision 可读取 | 待实施 | 不重发模型请求 |
+
 ## 变更原因
 
 用户测试确认旧页面存在全量超级查询导致卡顿、tab 语义重复、作者徽标进入研究文本、重复授权，以及把“语义向量准备”暴露给普通用户的问题。旧页面和旧自动计划不能保留为迁移期 fallback。

@@ -98,7 +98,15 @@
 
   function resultMeta(data) {
     const input = data.result?.inputCounts || {};
-    return `<p class="cr-v1-result-meta">已发布 ${escape(date(data.result?.publishedAt))} · 当前窗口 ${escape(date(data.result?.comparison?.current?.start))} 至 ${escape(date(data.result?.comparison?.current?.end))} · 冻结样本 ${count(input.analyzedCommentCount)} 条</p>`;
+    const selected = Number(input.selectedCommentCount ?? input.analyzedCommentCount ?? 0);
+    const included = Number(input.includedCommentCount ?? input.analyzedCommentCount ?? 0);
+    const excluded = Number(input.excludedTerminalCommentCount ?? 0);
+    const organization = input.problemOrganizationCoverage || {};
+    const partial = input.publicationCoverage === 'partial';
+    const coverage = partial
+      ? `部分研究版本 · 本版纳入 ${count(included)} / ${count(selected)} 条冻结原声，${count(excluded)} 条未纳入；问题归并 ${count(organization.numerator)} / ${count(organization.denominator)} 条 Atom。`
+      : `完整研究版本 · 本版纳入 ${count(included)} / ${count(selected)} 条冻结原声。`;
+    return `<p class="cr-v1-result-meta">已发布 ${escape(date(data.result?.publishedAt))} · 当前窗口 ${escape(date(data.result?.comparison?.current?.start))} 至 ${escape(date(data.result?.comparison?.current?.end))} · ${escape(coverage)}${partial ? ' <a href="?view=runs">查看运行记录</a>' : ''}</p>`;
   }
 
   function renderOverview(data) {
@@ -147,7 +155,7 @@
   }
 
   function runStateLabel(state) {
-    return ({ queued:'等待处理', running:'正在研究', completed:'已完成', completed_with_failures:'未发布', failed:'失败', cancelled:'已取消' })[state] || '状态未知';
+    return ({ queued:'等待处理', running:'正在研究', completed:'已完成', completed_with_failures:'部分完成', failed:'失败', cancelled:'已取消' })[state] || '状态未知';
   }
 
   function runFailureLabel(code) {
@@ -255,7 +263,12 @@
         const itemFailures = countSummary(item.itemFailureCounts, ' 条', itemFailureLabel);
         const itemStates = countSummary(item.itemStates, ' 条', runItemStateLabel);
         const execution = item.modelExecution || {};
-        return `<tr><td><strong>${escape(date(item.createdAt))}</strong><p>${escape(runStateLabel(item.state))} · 冻结 ${count(item.selectedSources)} 条评论</p>${item.finishedAt ? `<p>结束于 ${escape(date(item.finishedAt))}</p>` : ''}</td><td><strong>${escape(modelExecutionSummary(execution))}</strong><details class="cr-v1-run-detail"><summary>查看调用账本摘要</summary><p>${escape(modelExecutionDetails(execution))}</p></details></td><td><p>${escape(itemStates || '尚未开始处理')}</p>${runFailures ? `<p>${escape(runFailures)}</p>` : ''}${itemFailures ? `<p>${escape(itemFailures)}</p>` : ''}</td><td>${item.publishedResult?.resultRevisionRef ? `已发布 ${escape(date(item.publishedResult.publishedAt))}` : item.state === 'completed_with_failures' ? '未发布：本轮有未完成项' : item.state === 'failed' ? '未发布：运行失败' : '尚未发布'}</td></tr>`;
+        const publishedCoverage = item.publishedResult?.inputCounts?.publicationCoverage;
+        const published = item.publishedResult?.resultRevisionRef
+          ? `已发布${publishedCoverage === 'partial' ? '（部分覆盖）' : ''} ${escape(date(item.publishedResult.publishedAt))}`
+          : item.state === 'completed_with_failures' ? '未发布：覆盖不足或有未组织的研究信号'
+            : item.state === 'failed' ? '未发布：运行失败' : '尚未发布';
+        return `<tr><td><strong>${escape(date(item.createdAt))}</strong><p>${escape(runStateLabel(item.state))} · 冻结 ${count(item.selectedSources)} 条评论</p>${item.finishedAt ? `<p>结束于 ${escape(date(item.finishedAt))}</p>` : ''}</td><td><strong>${escape(modelExecutionSummary(execution))}</strong><details class="cr-v1-run-detail"><summary>查看调用账本摘要</summary><p>${escape(modelExecutionDetails(execution))}</p></details></td><td><p>${escape(itemStates || '尚未开始处理')}</p>${runFailures ? `<p>${escape(runFailures)}</p>` : ''}${itemFailures ? `<p>${escape(itemFailures)}</p>` : ''}</td><td>${published}</td></tr>`;
       })) : empty('还没有运行记录。保存策略后可先查看系统自动选择的范围。'));
   }
 

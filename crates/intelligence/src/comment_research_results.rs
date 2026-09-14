@@ -1,8 +1,9 @@
 //! Frozen result revisions and time-window observations for COMMENT-RESEARCH-RESET-001.
 //!
-//! A revision publishes only after a fully completed Run has assigned every problem-bearing Atom.
-//! It computes facts from that frozen input manifest; no tab reads in-flight rows, recomputes an
-//! overview, or turns a partial model outcome into a trend.
+//! A revision publishes only after a terminal Run has a sufficiently complete, auditable input
+//! coverage. A partial publication never rewrites failures as success: it freezes the excluded
+//! sources and unorganized Atoms alongside the usable evidence. No tab reads in-flight rows,
+//! recomputes an overview, or turns incomplete coverage into a trend.
 
 use linggan_storage_postgres::Database;
 use serde::Serialize;
@@ -14,6 +15,8 @@ const MIN_COMPARABLE_COMMENTS: i64 = 3;
 const MIN_COMPARABLE_WORKS: i64 = 1;
 const MIN_SHARE_DELTA: f64 = 0.10;
 const MIN_NEW_PROBLEM_COMMENTS: i64 = 2;
+pub(crate) const MIN_PARTIAL_RESEARCH_COVERAGE_PERCENT: i64 = 90;
+pub(crate) const MIN_PARTIAL_PROBLEM_ORGANIZATION_PERCENT: i64 = 85;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -35,6 +38,8 @@ pub enum CommentResearchResultError {
     SourceUnavailable,
     #[error("one or more problem-bearing Atoms have no current Problem membership")]
     MembershipIncomplete,
+    #[error("the terminal research Run does not meet the publication coverage threshold")]
+    InsufficientPublicationCoverage,
     #[error("the persisted run state is invalid for publication")]
     InvalidRun,
 }
@@ -94,8 +99,9 @@ impl ObservationKind {
     }
 }
 
-/// Publishes exactly one immutable result revision for a completed Run. Repeating the call returns
-/// the existing revision; it never edits windows, counts, memberships, or observations in place.
+/// Publishes exactly one immutable result revision for a terminal Run that meets the frozen
+/// coverage contract. Repeating the call returns the existing revision; it never edits windows,
+/// counts, memberships, or observations in place.
 pub async fn publish_result_revision(
     database: &Database,
     run_ref: Uuid,
@@ -141,6 +147,19 @@ struct PublicationRun {
     manifest_hash: String,
     extraction_rule_hash: String,
     membership_policy_hash: String,
+    coverage: PublicationCoverage,
+}
+
+#[derive(Debug, Clone)]
+struct PublicationCoverage {
+    selected_comment_count: i64,
+    included_comment_count: i64,
+    excluded_terminal_comment_count: i64,
+    problem_bearing_atom_count: i64,
+    organized_problem_atom_count: i64,
+    unorganized_problem_atom_count: i64,
+    terminal_failure_counts: Value,
+    partial: bool,
 }
 
 async fn lock_publishable_run(
@@ -148,7 +167,7 @@ async fn lock_publishable_run(
     run_ref: Uuid,
 ) -> Result<PublicationRun, CommentResearchResultError> {
     let run = sqlx::query(
-        "SELECT run.state,run.as_of::text AS as_of,run.manifest_hash, \
+        "SELECT run.state,run.as_of::text AS as_of,run.manifest_hash,run.failure_counts, \
                 policy.extraction_rule_hash,policy.membership_policy_hash \
          FROM linggan_comment_research_run run \
          JOIN linggan_comment_research_policy_revision policy \
@@ -159,7 +178,8 @@ async fn lock_publishable_run(
     .fetch_optional(&mut **transaction)
     .await?
     .ok_or(CommentResearchResultError::InvalidRun)?;
-    if run.get::<String, _>("state") != "completed" {
+    let state: String = run.get("state");
+    if !matches!(state.as_str(), "completed" | "completed_with_failures") {
         return Err(CommentResearchResultError::RunNotCompleted);
     }
     let unreadable: bool = sqlx::query_scalar(
@@ -181,25 +201,18 @@ async fn lock_publishable_run(
     if unreadable {
         return Err(CommentResearchResultError::SourceUnavailable);
     }
-    let unassigned: bool = sqlx::query_scalar(
-        "SELECT EXISTS( \
-             SELECT 1 \
-             FROM linggan_comment_research_atom atom \
-             JOIN linggan_comment_research_run_item item \
-               ON item.run_ref=atom.run_ref AND item.derivation_ref=atom.derivation_ref \
-             WHERE atom.run_ref=$1 AND item.state='succeeded' \
-               AND atom.kind IN ('problem','need') \
-               AND NOT EXISTS( \
-                   SELECT 1 FROM linggan_comment_research_atom_problem_membership membership \
-                   WHERE membership.atom_ref=atom.atom_ref AND membership.current \
-               ) \
-         )",
+    let coverage = read_publication_coverage(
+        transaction,
+        run_ref,
+        run.get("failure_counts"),
+        state == "completed_with_failures",
     )
-    .bind(run_ref)
-    .fetch_one(&mut **transaction)
     .await?;
-    if unassigned {
+    if state == "completed" && coverage.unorganized_problem_atom_count > 0 {
         return Err(CommentResearchResultError::MembershipIncomplete);
+    }
+    if state == "completed_with_failures" && !coverage.meets_partial_threshold() {
+        return Err(CommentResearchResultError::InsufficientPublicationCoverage);
     }
 
     Ok(PublicationRun {
@@ -207,6 +220,68 @@ async fn lock_publishable_run(
         manifest_hash: run.get("manifest_hash"),
         extraction_rule_hash: run.get("extraction_rule_hash"),
         membership_policy_hash: run.get("membership_policy_hash"),
+        coverage,
+    })
+}
+
+impl PublicationCoverage {
+    fn meets_partial_threshold(&self) -> bool {
+        self.selected_comment_count > 0
+            && percentage_at_least(
+                self.included_comment_count,
+                self.selected_comment_count,
+                MIN_PARTIAL_RESEARCH_COVERAGE_PERCENT,
+            )
+            && percentage_at_least(
+                self.organized_problem_atom_count,
+                self.problem_bearing_atom_count,
+                MIN_PARTIAL_PROBLEM_ORGANIZATION_PERCENT,
+            )
+    }
+}
+
+fn percentage_at_least(numerator: i64, denominator: i64, minimum_percent: i64) -> bool {
+    denominator == 0 || numerator.saturating_mul(100) >= denominator.saturating_mul(minimum_percent)
+}
+
+async fn read_publication_coverage(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    run_ref: Uuid,
+    terminal_failure_counts: Value,
+    partial: bool,
+) -> Result<PublicationCoverage, CommentResearchResultError> {
+    let comments = sqlx::query(
+        "SELECT count(*) AS selected_comment_count, \
+                count(*) FILTER (WHERE state IN ('succeeded','no_signal')) AS included_comment_count \
+         FROM linggan_comment_research_run_item WHERE run_ref=$1",
+    )
+    .bind(run_ref)
+    .fetch_one(&mut **transaction)
+    .await?;
+    let atoms = sqlx::query(
+        "SELECT count(*) FILTER (WHERE atom.kind IN ('problem','need')) AS problem_bearing_atom_count, \
+                count(*) FILTER (WHERE atom.kind IN ('problem','need') AND EXISTS( \
+                    SELECT 1 FROM linggan_comment_research_atom_problem_membership membership \
+                    WHERE membership.atom_ref=atom.atom_ref AND membership.current \
+                )) AS organized_problem_atom_count \
+         FROM linggan_comment_research_atom atom WHERE atom.run_ref=$1",
+    )
+    .bind(run_ref)
+    .fetch_one(&mut **transaction)
+    .await?;
+    let selected_comment_count: i64 = comments.get("selected_comment_count");
+    let included_comment_count: i64 = comments.get("included_comment_count");
+    let problem_bearing_atom_count: i64 = atoms.get("problem_bearing_atom_count");
+    let organized_problem_atom_count: i64 = atoms.get("organized_problem_atom_count");
+    Ok(PublicationCoverage {
+        selected_comment_count,
+        included_comment_count,
+        excluded_terminal_comment_count: selected_comment_count - included_comment_count,
+        problem_bearing_atom_count,
+        organized_problem_atom_count,
+        unorganized_problem_atom_count: problem_bearing_atom_count - organized_problem_atom_count,
+        terminal_failure_counts,
+        partial,
     })
 }
 
@@ -225,6 +300,22 @@ async fn insert_building_revision(
         "baselineWorkDenominator":denominators.baseline.work_denominator,
         "currentWorkDenominator":denominators.current.work_denominator,
         "problemCount":problem_count,
+        "selectedCommentCount":run.coverage.selected_comment_count,
+        "includedCommentCount":run.coverage.included_comment_count,
+        "excludedTerminalCommentCount":run.coverage.excluded_terminal_comment_count,
+        "researchCoverage":{
+            "numerator":run.coverage.included_comment_count,
+            "denominator":run.coverage.selected_comment_count,
+        },
+        "problemBearingAtomCount":run.coverage.problem_bearing_atom_count,
+        "organizedProblemAtomCount":run.coverage.organized_problem_atom_count,
+        "unorganizedProblemAtomCount":run.coverage.unorganized_problem_atom_count,
+        "problemOrganizationCoverage":{
+            "numerator":run.coverage.organized_problem_atom_count,
+            "denominator":run.coverage.problem_bearing_atom_count,
+        },
+        "publicationCoverage":if run.coverage.partial { "partial" } else { "complete" },
+        "terminalFailureCounts":run.coverage.terminal_failure_counts,
     });
     let policy_hashes = json!({
         "extraction":run.extraction_rule_hash,

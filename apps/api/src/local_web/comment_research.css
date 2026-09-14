@@ -22,6 +22,7 @@
 .cr-v1-intro h2{min-width:12ch}
 .cr-v1-intro>p{margin:0;flex:1}
 .cr-v1-result-meta{font:var(--lgi-text-data)/var(--lgi-lh-data) var(--lgi-font-mono)!important;color:var(--lgi-muted)}
+.cr-v1-result-meta a{color:var(--lgi-signal-ink);font-family:var(--lgi-font-sans);font-weight:var(--lgi-weight-semibold)}
 .cr-v1-table-wrap{overflow:auto;margin-top:var(--lgi-space-5);border-top:1px solid var(--lgi-border-solid)}
 .cr-v1 table{width:100%;border-collapse:collapse;min-width:720px}
 .cr-v1 th,.cr-v1 td{padding:var(--lgi-space-3);border-bottom:1px solid var(--lgi-border);text-align:left;vertical-align:top}
