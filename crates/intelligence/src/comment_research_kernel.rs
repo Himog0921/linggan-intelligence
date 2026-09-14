@@ -20,8 +20,12 @@ pub const DERIVATION_VERSION: &str = "comment-research.derivation.v2";
 const CONTEXT_MANIFEST_CONTRACT: &str = "comment-research.context.v2";
 const MAX_DERIVATIONS_PER_PASS: i64 = 3000;
 const MAX_DERIVATION_PREWARM_PASSES: usize = 100;
-const EXTRACTION_CONTRACT: &str = "comment-research.semantic.v5/extract:problem,need,solution,experience;evidence:exact-source-quote;output:exact-json-or-single-json-fence;examples:required";
-const MEMBERSHIP_CONTRACT: &str = "comment-research.semantic.v5/membership:retrieval-only-before-decision;output:exact-json-or-single-json-fence;examples:required";
+/// V6 makes the provider JSON Schema an exact mirror of the Rust tagged variants.  The two
+/// hashes below enter the saved policy and research fingerprint, so an older packet cannot be
+/// reused after this branch contract changes.  `contract_version` remains the stable database
+/// contract family; it is not an output-packet revision field.
+const EXTRACTION_CONTRACT: &str = "comment-research.semantic.v6/extract:problem,need,solution,experience;evidence:exact-source-quote;output:exact-json-or-single-json-fence;examples:required;variants:exclusive-required";
+const MEMBERSHIP_CONTRACT: &str = "comment-research.semantic.v6/membership:retrieval-only-before-decision;output:exact-json-or-single-json-fence;examples:required;variants:exclusive-required";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -417,9 +421,11 @@ pub async fn save_active_policy(
 fn ensure_current_policy_contract(
     policy: &sqlx::postgres::PgRow,
 ) -> Result<(), CommentResearchKernelError> {
-    (policy.get::<String, _>("derivation_version") == DERIVATION_VERSION)
-        .then_some(())
-        .ok_or(CommentResearchKernelError::PolicyInputContractStale)
+    (policy.get::<String, _>("derivation_version") == DERIVATION_VERSION
+        && policy.get::<String, _>("extraction_rule_hash") == content_hash(EXTRACTION_CONTRACT)
+        && policy.get::<String, _>("membership_policy_hash") == content_hash(MEMBERSHIP_CONTRACT))
+    .then_some(())
+    .ok_or(CommentResearchKernelError::PolicyInputContractStale)
 }
 
 /// Creates a frozen eligible-source manifest using the previously saved policy. It neither asks

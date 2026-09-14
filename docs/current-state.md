@@ -21,9 +21,9 @@ Mog 已授权只重置评论研究派生层：Run、RunItem、Atom、向量空�
 
 2026-09-14 已在共享开发库执行仅派生层的实际 reset：删除 1,643 个 Derivation、4 个 Run、1,248 个 RunItem、58 个 Atom、3 个 Problem 与 0 个 ResultRevision；随后再次派生出当前 1,643 条研究输入。Raw Comment 为 3,102，模型调用账本、模型配置、向量 profile 与 active policy 均保留。20 条受控真实首批的 Run `4cfd518c-a1df-4046-88ce-1bc5190fd088` 完成为 `completed_with_failures`，没有发布 ResultRevision：语义提取有 3 次不可解析 JSON 和 1 次合同拒绝，问题归并有 2 次结构不合格。该事实证明当前发布门槛生效，也证明不能把现有结果展示为正式研究版本。Issue #256 只修复 V2 输出合同与安全传输边界，部署后仍只允许新的受控首批；全量和连续自动研究继续关闭。
 
-### COMMENT-RESEARCH-OUTPUT-DIAGNOSTICS-001 / Issue #258、#260、#262（源码实施中；V5 将完成受控验证）
+### COMMENT-RESEARCH-OUTPUT-DIAGNOSTICS-001 / Issue #258、#260、#262（源码实施中；V6 待受控验证）
 
-V4 受控 Run `64a9f4f8-b5d9-43c7-be3e-4214ab0f82fc` 完成为 `completed_with_failures`：20 条中 9 条有信号、5 条无信号、6 条 `semantic_contract_rejected`；问题归并 10 次成功、1 次 `problem_resolution_json_schema_rejected`，没有 `invalid_problem_resolution`。这证明候选绑定修复消除了固定 UUID 导致的接纳拒绝，但安全账本显示 6 次语义失败都已收到完整直接 JSON，仍在接纳阶段失败。V5 不读取或保存模型全文，而将 atom 证据从模型计算的 Unicode 起止坐标改为逐字复制的唯一原文短句，再由程序映射回不可变 source offsets；失败时单列 `semantic_evidence_quote_unmappable`。随后按开发期授权再次 reset **仅派生层**，运行最多 20 条；连续排程继续关闭。原始评论、作品上下文、模型/向量配置和通用调用账本不受影响。
+V4 受控 Run `64a9f4f8-b5d9-43c7-be3e-4214ab0f82fc` 证明候选绑定修复消除了固定 UUID 导致的接纳拒绝；V5 改为由模型逐字复制唯一 evidence 短句、程序映射不可变 source offsets，且不读取或保存模型全文。用户随后以当前父评论输入合同运行的 20 条 Run `7025f656-8ecc-48bc-9bbb-c8b33f66ff22` 仍为 `completed_with_failures`：5 个语义调用为 `semantic_json_schema_rejected`、10 个问题归并调用为 `problem_resolution_json_schema_rejected`。安全账本均显示完整 `direct_json`，因此不是空输出、截断或 Markdown 包装。确定性源码缺口是 provider JSON Schema 仅要求 tagged enum 的根字段、未约束每个分支所需字段和互斥字段；V6 将该 Schema 与 Rust variant 收束，并以新的 extraction/membership rule hash 使旧 V5 policy 在开始新 Run 前明确要求重新保存。未重置派生层、未触发模型、未调整发布阈值；连续排程继续关闭。原始评论、作品上下文、模型/向量配置和通用调用账本不受影响。
 
 
 ### COMMENT-RESEARCH-PUBLISH-001 / Issue #264（已合并、runtime 已切换；真实部分版本已发布）
