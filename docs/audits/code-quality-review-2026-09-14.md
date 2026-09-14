@@ -157,23 +157,39 @@ SELECT (SELECT count(*) FROM linggan_runtime_task WHERE task_spec ? 'expectedCou
 
 - `apps/api/src/local_web/collection.rs:883` — 界面：`<select name="ranking" aria-label="关键词排序">`，五个选项（`most_liked` / `most_collected` / `most_commented` / `latest` / `comprehensive`）。
 - `apps/api/src/local_web.rs:3551-3558` — 把 `form.ranking` 映射成五档写进 `TargetIntake.ranking`；紧邻注释称「排序在建目标这一刻就定下来，之后不可改」。
-- `apps/api/src/local_web.rs:3432-3434` — 同一文件另一处注释称「它已经不再是身份的一部分（`0076`）……值被忽略」。
+- `apps/api/src/local_web.rs:3432-3434` — 同一文件另一处注释（就贴在 `ranking` 字段上方）称「它已经不再是身份的一部分（`0076`）……这个字段留着只为兼容仍在发送它的旧表单，**值被忽略**」。
 - `apps/api/src/local_web/collection_intake.rs:74-90` — `parse_intake` 的关键词分支**不读** `intake.ranking`。
-- `apps/api/src/local_web.rs:3570` — 只把 `parsed`（`TargetIdentity`，不含排序）交给 `store_pending_target`。
+- `apps/api/src/local_web.rs:3569` — 只把 `parsed`（`TargetIdentity`，不含排序）交给 `store_pending_target`。
 - `apps/api/src/local_web/collection_intake.rs:24-25` — 字段文档仍写 "ranking is part of the identity"，与同文件 79-87 行冲突；`IntakeRejection::KeywordNeedsRanking`（`:45`，`code()` 映射在 `:55`）全仓无构造点。
 
 **复现**
 
 ```bash
 cd /Users/moglenny/proma/linggan-intelligence
+# 1) TargetIntake 的全部出现点：只有定义、构造、反序列化、读取它的那个函数、测试辅助
 grep -rn 'TargetIntake' --include='*.rs' apps crates
-# 预期：只有 local_web.rs:761（反序列化）、local_web.rs:3540（构造）、
-#       collection_intake.rs:19（定义）、:74（parse_intake）、:103-104（测试辅助）
-#       —— 没有任何一处读 .ranking
+# 预期恰好 6 行：
+#   apps/api/src/local_web.rs:761                        反序列化入口
+#   apps/api/src/local_web.rs:3540                       构造（把 form.ranking 填进去的那一处）
+#   apps/api/src/local_web/collection_intake.rs:19       定义
+#   apps/api/src/local_web/collection_intake.rs:74       parse_intake（唯一的消费者）
+#   apps/api/src/local_web/collection_intake.rs:103-104  测试辅助
+#   —— 没有任何一处读它的 .ranking
 
-grep -rn '\.ranking' --include='*.rs' apps crates | grep -v '^apps/api/src/local_web.rs:3551'
-# 预期：无读取点
+# 2) 承重的一句：这个字段有没有任何读取点
+grep -rn 'intake\.ranking' --include='*.rs' apps crates
+# 预期：无输出（退出码 1）
+
+# 3) 另两个旁证
+grep -rn 'KeywordNeedsRanking' --include='*.rs' apps crates
+# 预期：只有 enum 定义（collection_intake.rs:45）与 code() 里的字符串映射（:55），
+#       全仓没有一处构造它 —— 这个拒绝分支永远不会触发
+
+grep -rn 'struct TargetIdentity' -A 4 --include='*.rs' crates/contracts/src/collection.rs
+# 预期：字段只有 platform / kind / key（:177-181），排序根本不在这条链路的类型里
 ```
+
+**注意别被这个 grep 误导**（我第一版就写错过）：`grep -rn '\.ranking'` 在全仓有 20 处命中，但几乎全是**另一个同名字段** `.ranking_key`（巡检规则上的排序，属于规则、今天确实在用），以及 `work_order_lease.rs:734/763` 的 `sampling.ranking`（采样指令里的排序）。`local_web.rs:3552` 的 `form.ranking` 是构造 `TargetIntake` 时的**读表单**，不是消费 `TargetIntake.ranking`。真正的消费者一个都没有。
 
 **反证条件**
 
@@ -263,10 +279,13 @@ SELECT count(*), count(DISTINCT content_public_ref) FROM collection_material_ret
 
 - 认领：`crates/intelligence/src/comment_research_embeddings.rs:305-307`（`state='pending' → 'running'`）；候选只取 `state='pending'`（`:272`），且带 `NOT EXISTS(prior.atom_ref=… AND prior.space_ref=$1)`（`:290-291`）——只要该 atom 在该空间有过任何一行，就永不再为它建行。
 - 表结构：`database/migrations/0064_comment_research_kernel.sql:186-200` — 列只有 `atom_ref / space_ref / input_hash / state / dimensions / vector / invocation_ref / failure_code / 时间戳`，**没有 lease 列**；`0075` 改表时也没补。
-- 唯一的改写点：`:165/:178`（accept）与 `:317/:326`（failure），都要求 `state='running'`。
-- 兜底也救不了：`crates/intelligence/src/comment_research_kernel.rs:1195` `fail_active_runs_without_embedding_config` 只把 `state='pending'` 置为 `failed`。
-- 后果落在 Run 上：`comment_research_kernel.rs:1059-1072` 统计 `unassigned_atoms` / `embedding_failed_atoms`（后者带 `AND NOT EXISTS(… state IN ('pending','running'))`），`:1126` 于是永久提前返回，Run 永远 `running`；`settle_run_completion`（`:1108`）是唯一的 Run 终局写入点。
-- **对照**：同 worker 的另两条认领协议都有租约与回收——run item 有 `lease_until` + `recover_expired_run_items_in`（迁移 `0067_comment_research_run_item_lease.sql`），问题归并有 `recover_problem_resolution_leases`（`comment_research_worker.rs:1319`，认领处 `:1263`）。
+- `running` 的出口只对「当初把它从 `pending` 领走的那个人」开放，**没有第三方可走的回收**：
+  - `accept_atom_embedding`（`:165`，UPDATE 在 `:178-181`）条件是 `state IN ('pending','running')` + `input_hash` 相同；
+  - `record_embedding_failure`（`:317`，UPDATE 在 `:324-326`）条件是 `state='running'`。
+  两条都要求调用者拿着**当初认领时的那个 `input_hash`**，而认领（`:306`）要求行仍是 `pending`。所以行一旦卡在 `running`，除了原认领者回来，没有人能改写它。
+- 兜底也救不了：`crates/intelligence/src/comment_research_kernel.rs:1177` `fail_active_runs_without_embedding_config` 里那条 embedding UPDATE（`:1191-1197`）只把 `state='pending'` 置为 `failed`，跳过了 `running`。
+- 后果落在 Run 上：`comment_research_kernel.rs:1055-1090` 统计 `unassigned_atoms`（`:1060`）与 `embedding_failed_atoms`（`:1087`，带 `AND NOT EXISTS(… state IN ('pending','running'))`），`:1126` 于是永久提前返回，Run 永远 `running`；`settle_run_completion`（`:1108`）是唯一的 Run 终局写入点。
+- **对照**：同 worker 的另两条认领协议都有租约与回收——run item 有 `lease_until` + `recover_expired_run_items_in`（`:943`；迁移 `0067_comment_research_run_item_lease.sql`），问题归并有 `recover_problem_resolution_leases`（`comment_research_worker.rs:1319`，认领函数 `claim_next_resolution`（`:1262`）第一句就调它）。
 
 **复现**
 
@@ -280,9 +299,12 @@ SELECT state, count(*) FROM linggan_comment_research_atom_embedding GROUP BY sta
 
 docker exec linggan-intelligence-postgres-1 psql -U linggan_dev_admin -d linggan_intelligence_dev -t -A -c "
 SELECT column_name FROM information_schema.columns
-WHERE table_name='linggan_comment_research_run_item'
-  AND (column_name LIKE '%lease%' OR column_name LIKE '%attempt%');"
-# 预期: attempts / next_attempt_at / lease_until（三条都有）→ 对照出不对称
+WHERE table_schema='public' AND table_name='linggan_comment_research_run_item'
+  AND (column_name LIKE '%lease%' OR column_name LIKE '%attempt%')
+ORDER BY column_name;"
+# 预期: attempts / lease_until / next_attempt_at（三条都有）→ 对照出不对称
+# 注意 must 带 table_schema='public'：本机库里躺着几十个测试残留 schema，
+#   同名的表在多个 schema 里各有一份，去掉这一句会得到三份重复结果。
 ```
 
 **反证条件**
@@ -331,7 +353,8 @@ grep -rn 'release_work_order_lease' --include='*.rs' crates apps
 
 - 认领：`crates/intelligence/src/comment_research_kernel.rs:861-897`（`:881` 设 `lease_until=+120 seconds`、`attempts=attempts+1`，并把 `attempts` 作为 `claim.attempt` 返回）。
 - 到期回收：`crates/intelligence/src/comment_research_kernel.rs:943-975`（`WHERE state='running' AND lease_until<=now()` → `retryable`/`model_failed`，并把该 invocation 标成 `'recovered',true`）。
-- 写回路径（**五处，全部只判 `state='running'`**）：`crates/intelligence/src/comment_research_atoms.rs:226`、`:352`、`:437`，`crates/intelligence/src/comment_research_kernel.rs:1001`、`:1026`。
+- 写回路径（**五条语句，全部只判 `state='running'`**）：`crates/intelligence/src/comment_research_atoms.rs:226`、`:352`、`:437`；`crates/intelligence/src/comment_research_kernel.rs:1001` 与 `:1019`（同一函数 `record_run_item_failure` 的终态分支与可重试分支，各一条）。
+- **一个反而要加强这条的细节**：同文件 `:914` 的 `load_claimed_research_input` 也带 `state='running'`，但那是 **SELECT**，且它的文档注释明写「A missing row is a normal lease-loss outcome」——即**读侧明确预期并处理了「租约被抢走」**。写侧却没有对应的预期。读能优雅退场、写能静默覆盖，这个不对称本身就是证据。
 - 对照（有围栏的实现）：`crates/evidence/src/producer_runtime.rs:1093` `assert_attempt_owner`；媒体侧 `claim_generation`。
 
 **复现**
@@ -393,15 +416,16 @@ SELECT count(*), count(*) FILTER (WHERE ok), count(*) FILTER (WHERE NOT ok) FROM
 
 ---
 
-### B5 · 「动态巡查节奏」只以测试形态存在，且用的是已被判定恒假的旧词表
+### B5 · 「动态巡查节奏」只以测试形态存在，且它的判据在全库一行都匹配不到
 
-- **一句话**：`read_dynamic_cadence_for_rule` 全仓零调用方；它内部的判据用旧词表，对真实数据 100% 不可满足，永远返回 `Unavailable`。它同时是唯一逃过 `check-invariants.sh` INV-1 的判据副本。
-- **确信度**：**高**。
+- **一句话**：`read_dynamic_cadence_for_rule` 全仓零调用方；它的 SQL 在整个数据库上匹配 **0 行**，所以这个函数除了返回 `Unavailable` 之外什么也做不了。它同时是唯一逃过 `check-invariants.sh` INV-1 的判据副本。
+- **确信度**：**高**（「匹配 0 行」已实跑证明，见下）。
 
 **定位**
 
 - `crates/evidence/src/patrol_scheduler.rs:425` — `pub async fn read_dynamic_cadence_for_rule`，约 110 行 SQL，**全仓零调用方**（只有 `crates/evidence/src/lib.rs:161` 导出）。
-- `crates/evidence/src/patrol_scheduler.rs:478-479` — 旧判据原文：
+- `crates/evidence/src/patrol_scheduler.rs:465` — 它只吃一种能力面：`AND layer->>'capability'='profile_discovery'`。
+- `crates/evidence/src/patrol_scheduler.rs:478-479` — 旧词表判据原文：
   ```sql
   AND COALESCE((layer->>'unknown')::integer,0)=0 \
   AND layer->>'stoppedReason' IN ('surface_ended','maximum_quota') \
@@ -418,22 +442,82 @@ grep -rn 'read_dynamic_cadence_for_rule\|dynamic_cadence' --include='*.rs' crate
 # 预期：read_dynamic_cadence_for_rule 只有定义 + lib.rs 导出；
 #       dynamic_cadence 的调用方全部落在 #[cfg(test)] 区间内
 
-# 判据是否可满足（用全库真实包）
+# 它的镜头里有几行数据（profile_discovery 层的真实词表分布）
 docker exec linggan-intelligence-postgres-1 psql -U linggan_dev_admin -d linggan_intelligence_dev -t -A -F'|' -c "
-SELECT count(*) AS total,
-       count(*) FILTER (WHERE COALESCE((layer->>'unknown')::integer,0)=0
-                          AND layer->>'stoppedReason' IN ('surface_ended','maximum_quota')) AS satisfies
+SELECT layer->>'stoppedReason', COALESCE(layer->>'unknown','(null)'), count(*)
 FROM linggan_runtime_capture_package package
 CROSS JOIN LATERAL jsonb_array_elements(
   CASE WHEN jsonb_typeof(package.coverage->'layers')='array'
-       THEN package.coverage->'layers' ELSE '[]'::jsonb END) layer;"
-# 预期: satisfies = 0
+       THEN package.coverage->'layers' ELSE '[]'::jsonb END) layer
+WHERE layer->>'capability'='profile_discovery'
+GROUP BY 1,2 ORDER BY 3 DESC;"
+# 预期（45 行）：
+#   surface_read_complete|4|44     ← 现代词表，被 'IN (surface_ended,maximum_quota)' 排除
+#   surface_ended|0|1              ← 唯一一行满足旧词表的
 ```
+
+**「匹配 0 行」的证明**（把函数里那条 SQL 的三个 bind 全部去掉——**去掉 bind 只会放宽结果**，所以 0 行就是任何 (target, rule_revision, contract_version) 都 0 行）：
+
+```bash
+docker exec linggan-intelligence-postgres-1 psql -U linggan_dev_admin -d linggan_intelligence_dev -t -A -c "
+SELECT count(*)
+FROM collection_work_order work_order
+JOIN collection_work_order_lease lease USING(work_order_ref)
+JOIN collection_work_order_lease_task lease_task USING(lease_ref)
+JOIN linggan_runtime_task task ON task.task_id=lease_task.task_id
+JOIN linggan_runtime_capture_package package ON package.task_id=lease_task.task_id
+JOIN linggan_runtime_submission_receipt receipt ON receipt.package_ref=package.package_ref
+CROSS JOIN LATERAL jsonb_array_elements(
+  CASE WHEN jsonb_typeof(package.coverage->'layers')='array'
+       THEN package.coverage->'layers' ELSE '[]'::jsonb END) layer
+CROSS JOIN LATERAL jsonb_array_elements(package.payload->'records')
+     WITH ORDINALITY AS record(value,ordinality)
+JOIN linggan_runtime_record_disposition disposition
+  ON disposition.package_ref=package.package_ref
+ AND disposition.record_ordinal=record.ordinality-1
+WHERE work_order.account_ref IS NOT NULL
+  AND package.package_kind='profile_discovery'
+  AND receipt.material_admission='ACCEPTED'
+  AND receipt.execution_effect='COMPLETED_LIVE_STEP'
+  AND disposition.disposition='accepted_for_library_discovery'
+  AND layer->>'capability'='profile_discovery'
+  AND COALESCE(layer->>'observed','') ~ '^[0-9]+\$'
+  AND COALESCE(layer->>'attempted','') ~ '^[0-9]+\$'
+  AND COALESCE(layer->>'acquired','') ~ '^[0-9]+\$'
+  AND (layer->>'observed')::integer>0
+  AND (layer->>'attempted')::integer>0
+  AND (layer->>'acquired')::integer>0
+  AND COALESCE((layer->>'failed')::integer,0)=0
+  AND COALESCE((layer->>'notAttempted')::integer,0)=0
+  AND COALESCE((layer->>'unknown')::integer,0)=0
+  AND layer->>'stoppedReason' IN ('surface_ended','maximum_quota')
+  AND record.value #>> '{payload,publishedAtSourceKind}'='platform_epoch'
+  AND record.value #>> '{payload,publishedAtPrecision}' IN ('second','millisecond')
+  AND COALESCE(record.value #>> '{payload,publishedAt}','') ~ '^[0-9]+\$'
+  AND (record.value #>> '{payload,publishedAt}')::numeric>0;"
+# 预期: 0
+```
+
+**那唯一一行为什么还是过不了**（这是本条最值得看的一步）：那一层的 layer 级数字**全部合格**——`349d055e … observed=20 attempted=20 acquired=20 failed=0 notAttempted=0 unknown=0 surface_ended`——它卡在**记录级**：这 20 条记录里 `publishedAtSourceKind` / `publishedAtPrecision` / `publishedAt` **三个键根本不存在**（取出来是空串），过不了 `platform_epoch` + 精度那两道门。
+
+```bash
+docker exec linggan-intelligence-postgres-1 psql -U linggan_dev_admin -d linggan_intelligence_dev -t -A -F' | ' -c "
+SELECT record.ordinality,
+       record.value #>> '{payload,publishedAtSourceKind}',
+       record.value #>> '{payload,publishedAtPrecision}',
+       record.value #>> '{payload,publishedAt}'
+FROM linggan_runtime_capture_package package
+CROSS JOIN LATERAL jsonb_array_elements(package.payload->'records') WITH ORDINALITY AS record(value,ordinality)
+WHERE left(package.package_ref::text,8)='349d055e';"
+# 预期: 20 行，第 2/3/4 列全为空
+```
+
+**我改正过一次的地方**（请重点看我这次说得对不对）：我最初写的机制是「旧词表对真实数据 100% 不可满足」。**这句话不准确**——45 行里有 1 行满足旧词表。但它仍然过不了完整判据，所以**结论（永远只会返回 `Unavailable`）成立，而且比我原本的说法更强**：不是「几乎不可能匹配」，是去掉 bind 后全库实测 0 行。
 
 **反证条件**
 
-- 有我没找到的动态调用（例如通过字符串派发或外部配置选择入口）。
-- `coverage->'layers'` 之外的字段里其实带着这两个旧词（我只查了 `layers`）——**请确认 `unknown` 与 `stoppedReason` 是否有其它写入路径会产出旧词**。
+- 有我没找到的动态调用（例如通过字符串派发或外部配置选择入口）。注意：即使找到调用方，本条的第二半（判据匹配 0 行）不因此改变。
+- 本机库的数据形态与线上不同——**这正是最可能的反证**。上面的 45 行分布只代表这台开发库；线上若有任何一轮 `profile_discovery` 报出 `surface_ended` 且记录带 `platform_epoch` 时间戳，判据就能匹配。请在你的库上重跑上面三段。
 
 ---
 
