@@ -92,6 +92,16 @@ test('V3 research packets retain structured output on the documented DeepSeek pr
     assert.equal(bodies.at(-1).text.format.name,'comment_research_problem_resolution_v3');
   });
 });
+test('V4 research packets retain structured output on the documented DeepSeek protocol',async()=>{
+  const semanticV4=JSON.stringify({contract:'comment-research.semantic.v4',task:'Return JSON only.',outputSchema:schema,examples:[{outcome:'no_signal',reason:'synthetic'}],untrustedMaterial:{comments:[]}});
+  const resolutionV4=JSON.stringify({contract:'comment-research.semantic.v4/problem-resolution',task:'Return JSON only.',outputSchema:schema,examples:[{decision:'new_problem'}],untrustedMaterial:{candidates:[]}});
+  await fixture(async bodies=>{
+    assert.equal((await execute({...request,prompt:semanticV4})).ok,true);
+    assert.equal(bodies.at(-1).text.format.name,'comment_research_semantic_v4');
+    assert.equal((await execute({...request,prompt:resolutionV4})).ok,true);
+    assert.equal(bodies.at(-1).text.format.name,'comment_research_problem_resolution_v4');
+  });
+});
 test('unknown host, path, model and unrelated prompts do not inherit structured capability',async()=>{
   await fixture(async bodies=>{
     for(const change of [
