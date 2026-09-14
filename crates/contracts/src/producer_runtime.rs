@@ -64,6 +64,15 @@ struct TaskSpecWire {
     target: Value,
     capabilities_requested: Vec<String>,
     maximum_quota: Option<u32>,
+    /// **这一轮该拿回多少**——完工判据唯一读的那个数（见 `surface_scan_complete_sql`）。
+    ///
+    /// 与 `maximum_quota` 分开是因为它们本来就不是一件事：后者是授权上限、也是搜索结果页的
+    /// 加载预算；前者是这一轮按规则实际要的份数。关键词巡查上两者不同（加载预算 200、按
+    /// 口径取赞前 20），把它压成一个数，是那一轮「按规则停对了却永远不算成功」的原因。
+    ///
+    /// 可选：旧任务说明书没有这一项，照常解析——它们按判据不能被记成完成，而不是被
+    /// 记成完成（宁可漏记一次，不可误记一次）。
+    expected_count: Option<u32>,
     comment_limit: Value,
     acquire_media: Value,
     risk_policy: String,
@@ -295,6 +304,17 @@ pub fn parse_producer_task_spec(
         })
     {
         return Err(ProducerRuntimeContractError::UnboundedTask);
+    }
+    // 预期份数是一个**判据要用的承诺**，不能自己站不住：至少 1，且不超过授权上限——超过
+    // 上限的期待是拿不到的数，那样写出来的任务永远不可能被记成完成，而表面上一切正常。
+    if let Some(expected_count) = wire.expected_count {
+        if expected_count == 0
+            || wire
+                .maximum_quota
+                .is_some_and(|maximum_quota| expected_count > maximum_quota)
+        {
+            return Err(ProducerRuntimeContractError::UnsupportedValue);
+        }
     }
     Ok(ProducerTaskSpec {
         task_id,

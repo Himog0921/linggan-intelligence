@@ -44,13 +44,21 @@
 ///
 /// 调用方必须让这三个名字在作用域内可解析且不带歧义：
 /// - `layer`：`coverage->'layers'` 展开出的那一层
-/// - `task_spec`：这次任务的规格，用来读本次下发的配额
+/// - `task_spec`：这次任务的规格，用来读本次下发的**预期份数**
 /// - `checkpoint`：采集包的执行回执，插件真正的滚动收尾在这里
 ///
 /// 判据**不含**包类型、能力名与回执有效性：那些是各调用方自己的连接条件，形态不同。
 ///
 /// 用宏而不是常量：Rust 的 `concat!` 只接受字面量，只有展开成字面量的宏才能嵌进调用方
 /// 那些编译期拼好的 SQL 常量里。这是「只有一份定义」在这个语言里的代价，值得付。
+///
+/// **`target_reached` 那一支读的是 `expectedCount`，不是 `maximumQuota`。** 两者是两件事：
+/// `maximumQuota` 是授权上限、也是搜索结果页的加载预算；`expectedCount` 才是这一轮该拿回
+/// 多少。关键词巡查上它们不是同一个数——规则说「取赞前 20」（adhd = 20），授权给的加载预算
+/// 是 200。它此前读 `maximumQuota`，于是那一轮采回 20 篇、按规则停得完全正确，判据却要求
+/// `20 >= 200`，永远不成立：「巡查成功」的时间戳一次也没写上，界面上同一行同时显示「最近
+/// 新增 +15」与「上次巡查 尚未巡查 / 尚未取得成功结果」。一个事实只有一个家，判据也只许
+/// 读那一个家——判据读的这个数由派发侧算一次冻进任务说明书（见 `build_task_spec`）。
 macro_rules! surface_scan_complete_sql {
     () => {
         "COALESCE((layer->>'failed')::integer,0)=0 \
@@ -59,7 +67,7 @@ macro_rules! surface_scan_complete_sql {
            checkpoint #>> '{surfaceReceipt,stopReason}'='bottom_confirmed' \
            OR (checkpoint #>> '{surfaceReceipt,stopReason}'='target_reached' \
                AND COALESCE((layer->>'acquired')::integer,0) \
-                   >= COALESCE((task_spec->>'maximumQuota')::integer,2147483647)))"
+                   >= COALESCE((task_spec->>'expectedCount')::integer,2147483647)))"
     };
 }
 
@@ -73,7 +81,8 @@ macro_rules! surface_scan_complete_sql {
 ///    `patrol_success_and_latest_new_ring_share_one_qualified_target_level_round` 拦下。
 /// 2. 本次下发的配额必须是建档上限 200。这不是在证明完整性，而是在证明**这次扫描是按
 ///    建档标准发出的**——巡检那种 20 篇的小扫描同样会 `bottom_confirmed`，但它没资格
-///    当作目录边界。
+///    当作目录边界。**这一条仍然读 `maximumQuota`**：它问的是「这一单是多少篇的档案」，
+///    不是「采到多少算完成」，所以它读的是授权上限本身，不是预期份数。
 macro_rules! directory_proven_sql {
     () => {
         concat!(
