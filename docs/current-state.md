@@ -28,7 +28,7 @@ V4 受控 Run `64a9f4f8-b5d9-43c7-be3e-4214ab0f82fc` 完成为 `completed_with_f
 
 ### COMMENT-RESEARCH-PUBLISH-001 / Issue #264（已合并、runtime 已切换；真实部分版本已发布）
 
-V5 受控 Run `af79c247-104e-4618-b12c-3b0d1dba6bdb` 已终态：冻结 20 条，14 条提取研究信号、5 条确认无信号、1 条 `semantic_json_schema_rejected`；19 个 problem/need Atom 中 17 个已归入 Problem，另有 2 个 `problem_resolution_json_schema_rejected`。PR #266 合并后，`runtime-main@5dfe70a71fcf60d675b4a835af9b63f55c378243` 已在不新增模型调用的条件下发布 immutable ResultRevision `6dbf52b8-2c09-41f6-8b05-3e5654f37998`：冻结事实为纳入 19 / 20、未纳入 1、问题归并 17 / 19，`publicationCoverage=partial`，终态失败计数为 RunItem 1、Problem Resolution 2。Run 保持 `completed_with_failures`，未纳入评论与未归并 Atom 不进入问题、变化或分母；localhost 概览、用户问题、变化观察、运行记录和独立用户原声读取均可访问，调用账本维持 58 次。当前样本的 19 条都位于比较窗口基线期，当前期分母为 0，故页面的“当前评论数”不能被解释为当前趋势；连续自动排程仍关闭。模型语义质量、可比趋势和 Mog 业务验收仍待独立确认。
+V5 受控 Run `af79c247-104e-4618-b12c-3b0d1dba6bdb` 已终态：冻结 20 条，14 条提取研究信号、5 条确认无信号、1 条 `semantic_json_schema_rejected`；19 个 problem/need Atom 中 17 个已归入 Problem，另有 2 个 `problem_resolution_json_schema_rejected`。PR #266 合并后，`runtime-main@5dfe70a71fcf60d675b4a835af9b63f55c378243` 已在不新增模型调用的条件下发布 immutable ResultRevision `6dbf52b8-2c09-41f6-8b05-3e5654f37998`：冻结事实为纳入 19 / 20、未纳入 1、问题归并 17 / 19，`publicationCoverage=partial`，终态失败计数为 RunItem 1、Problem Resolution 2。Run 保持 `completed_with_failures`，未纳入评论与未归并 Atom 不进入问题、变化或分母；localhost 概览、用户问题、变化观察、运行记录和独立用户原声读取均可访问，调用账本维持 58 次。当前样本的 19 条都位于比较窗口基线期，当前期分母为 0，故 Issue #267 已使概览与用户问题显示“本版基线样本”而不是当前 0，变化观察仍不可比较；连续自动排程仍关闭。页面已如实暴露出部分问题定义过宽或偏离 ADHD 域，模型语义质量、领域边界、可比趋势和 Mog 业务验收仍待独立确认。
 
 ### COMMENT-RESEARCH-RESET-001 / Issue #213（V1 已合并、开发库已切换、3000 已上线；首轮模型配置与业务验收待执行）
 
