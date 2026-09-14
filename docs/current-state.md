@@ -26,9 +26,9 @@ Mog 已授权只重置评论研究派生层：Run、RunItem、Atom、向量空�
 V4 受控 Run `64a9f4f8-b5d9-43c7-be3e-4214ab0f82fc` 完成为 `completed_with_failures`：20 条中 9 条有信号、5 条无信号、6 条 `semantic_contract_rejected`；问题归并 10 次成功、1 次 `problem_resolution_json_schema_rejected`，没有 `invalid_problem_resolution`。这证明候选绑定修复消除了固定 UUID 导致的接纳拒绝，但安全账本显示 6 次语义失败都已收到完整直接 JSON，仍在接纳阶段失败。V5 不读取或保存模型全文，而将 atom 证据从模型计算的 Unicode 起止坐标改为逐字复制的唯一原文短句，再由程序映射回不可变 source offsets；失败时单列 `semantic_evidence_quote_unmappable`。随后按开发期授权再次 reset **仅派生层**，运行最多 20 条；连续排程继续关闭。原始评论、作品上下文、模型/向量配置和通用调用账本不受影响。
 
 
-### COMMENT-RESEARCH-PUBLISH-001 / Issue #264（候选源码已完成隔离验证；未合并或切换运行时）
+### COMMENT-RESEARCH-PUBLISH-001 / Issue #264（已合并、runtime 已切换；真实部分版本已发布）
 
-V5 受控 Run `af79c247-104e-4618-b12c-3b0d1dba6bdb` 已终态：冻结 20 条，14 条提取研究信号、5 条确认无信号、1 条 `semantic_json_schema_rejected`；19 个 problem/need Atom 中 17 个已归入 Problem，另有 2 个 `problem_resolution_json_schema_rejected`。现行“仅完整成功 Run 可发布”规则使其没有 ResultRevision，从而把 19 条已有可靠评论级结论一并隐藏。Issue #264 候选改为冻结两层覆盖事实：评论级 `(succeeded + no_signal) / selected` 至少 90%，问题归并级 `membership / (problem + need Atom)` 至少 85%，即可把 `completed_with_failures` 作为“部分研究版本”发布；Run 与失败项不改写，未纳入的评论和未归并 Atom 不进入问题、变化或任何分母。该候选在隔离 PostgreSQL/API 套件中通过；真实共享 Run、localhost 页面、调用账本不新增模型调用及 Mog 业务验收仍待合并并切换 runtime 后核实。连续自动排程仍关闭。
+V5 受控 Run `af79c247-104e-4618-b12c-3b0d1dba6bdb` 已终态：冻结 20 条，14 条提取研究信号、5 条确认无信号、1 条 `semantic_json_schema_rejected`；19 个 problem/need Atom 中 17 个已归入 Problem，另有 2 个 `problem_resolution_json_schema_rejected`。PR #266 合并后，`runtime-main@5dfe70a71fcf60d675b4a835af9b63f55c378243` 已在不新增模型调用的条件下发布 immutable ResultRevision `6dbf52b8-2c09-41f6-8b05-3e5654f37998`：冻结事实为纳入 19 / 20、未纳入 1、问题归并 17 / 19，`publicationCoverage=partial`，终态失败计数为 RunItem 1、Problem Resolution 2。Run 保持 `completed_with_failures`，未纳入评论与未归并 Atom 不进入问题、变化或分母；localhost 概览、用户问题、变化观察、运行记录和独立用户原声读取均可访问，调用账本维持 58 次。当前样本的 19 条都位于比较窗口基线期，当前期分母为 0，故页面的“当前评论数”不能被解释为当前趋势；连续自动排程仍关闭。模型语义质量、可比趋势和 Mog 业务验收仍待独立确认。
 
 ### COMMENT-RESEARCH-RESET-001 / Issue #213（V1 已合并、开发库已切换、3000 已上线；首轮模型配置与业务验收待执行）
 
