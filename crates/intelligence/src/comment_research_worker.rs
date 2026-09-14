@@ -24,7 +24,10 @@ use crate::{
         ExistingProblemAdmission, NewProblemAdmission, ProblemDefinitionProposal,
         ProblemMembershipBasis, admit_existing_problem, admit_new_problem,
     },
-    comment_research_results::{CommentResearchResultError, publish_result_revision},
+    comment_research_results::{
+        CommentResearchResultError, MIN_PARTIAL_PROBLEM_ORGANIZATION_PERCENT,
+        MIN_PARTIAL_RESEARCH_COVERAGE_PERCENT, publish_result_revision,
+    },
     local_embedding_profile,
     model_invocation::{connection_request, finish_invocation},
     model_secrets::ModelSecretStore,
@@ -728,10 +731,31 @@ async fn settle_resolution_response(
 async fn publish_one_ready_result(database: &Database) -> Result<bool, ModelError> {
     let run: Option<Uuid> = sqlx::query_scalar(
         "SELECT run.run_ref FROM linggan_comment_research_run run \
-         WHERE run.state='completed' \
+         CROSS JOIN LATERAL ( \
+             SELECT count(*) AS selected_count, \
+                    count(*) FILTER (WHERE state IN ('succeeded','no_signal')) AS included_count \
+             FROM linggan_comment_research_run_item item WHERE item.run_ref=run.run_ref \
+         ) item_coverage \
+         CROSS JOIN LATERAL ( \
+             SELECT count(*) FILTER (WHERE atom.kind IN ('problem','need')) AS problem_atom_count, \
+                    count(*) FILTER (WHERE atom.kind IN ('problem','need') AND EXISTS( \
+                        SELECT 1 FROM linggan_comment_research_atom_problem_membership membership \
+                        WHERE membership.atom_ref=atom.atom_ref AND membership.current \
+                    )) AS organized_problem_atom_count \
+             FROM linggan_comment_research_atom atom WHERE atom.run_ref=run.run_ref \
+         ) atom_coverage \
+         WHERE run.state IN ('completed','completed_with_failures') \
            AND NOT EXISTS(SELECT 1 FROM linggan_comment_research_result_revision result WHERE result.run_ref=run.run_ref) \
+           AND (run.state='completed' OR ( \
+                 item_coverage.selected_count>0 \
+             AND item_coverage.included_count*100>=item_coverage.selected_count*$1 \
+             AND (atom_coverage.problem_atom_count=0 OR \
+                 atom_coverage.organized_problem_atom_count*100>=atom_coverage.problem_atom_count*$2) \
+           )) \
          ORDER BY run.finished_at,run.run_ref LIMIT 1",
     )
+    .bind(MIN_PARTIAL_RESEARCH_COVERAGE_PERCENT)
+    .bind(MIN_PARTIAL_PROBLEM_ORGANIZATION_PERCENT)
     .fetch_optional(database.pool())
     .await?;
     let Some(run) = run else {
@@ -741,6 +765,7 @@ async fn publish_one_ready_result(database: &Database) -> Result<bool, ModelErro
         Ok(_) => Ok(true),
         Err(CommentResearchResultError::MembershipIncomplete) => Ok(false),
         Err(CommentResearchResultError::RunNotCompleted) => Ok(false),
+        Err(CommentResearchResultError::InsufficientPublicationCoverage) => Ok(false),
         Err(error) => Err(result_error(error)),
     }
 }

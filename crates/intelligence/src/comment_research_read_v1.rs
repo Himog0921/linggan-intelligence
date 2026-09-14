@@ -421,7 +421,7 @@ pub async fn read_runs(
                  WHERE invocation.result->>'runRef'=run.run_ref::text \
              ), \
              'publishedResult',COALESCE(( \
-                 SELECT jsonb_build_object('resultRevisionRef',result.result_revision_ref,'publishedAt',result.published_at) \
+                 SELECT jsonb_build_object('resultRevisionRef',result.result_revision_ref,'publishedAt',result.published_at,'inputCounts',result.input_counts) \
                  FROM linggan_comment_research_result_revision_readable result \
                  WHERE result.run_ref=run.run_ref \
              ),'null'::jsonb) \

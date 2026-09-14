@@ -1564,12 +1564,16 @@ async fn run_read_exposes_safe_semantic_failure_counts_without_model_or_comment_
         Some("semantic_contract_acceptance")
     );
     let quote_outcome = outcome_for(quote_source);
-    assert!(quote_outcome
-        .get::<Option<String>, _>("failure_code")
-        .is_none());
-    assert!(quote_outcome
-        .get::<Option<String>, _>("failure_stage")
-        .is_none());
+    assert!(
+        quote_outcome
+            .get::<Option<String>, _>("failure_code")
+            .is_none()
+    );
+    assert!(
+        quote_outcome
+            .get::<Option<String>, _>("failure_stage")
+            .is_none()
+    );
 
     let offset_outcome = outcome_for(offset_source);
     assert_eq!(
@@ -2239,7 +2243,145 @@ async fn terminal_embedding_and_resolution_failures_are_visible_on_the_run() {
             }],
             1
         );
+        if resolution_failure {
+            assert!(matches!(
+                publish_result_revision(&database, run.run_ref).await,
+                Err(linggan_intelligence::comment_research_results::CommentResearchResultError::InsufficientPublicationCoverage)
+            ));
+        }
     }
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn sufficiently_covered_terminal_run_publishes_a_partial_result_without_erasing_failures() {
+    let database = fixture::proof_database("comment_research_partial_publication").await;
+    detail_with_author(
+        &database,
+        "partial-publication-note",
+        "SYNTHETIC partial publication note",
+        Some("creator-1"),
+    )
+    .await;
+    for ordinal in 0..10 {
+        comment_with_author(
+            &database,
+            "partial-publication-note",
+            &format!("reader-{ordinal}"),
+            &format!("孩子写作业总拖延，第 {ordinal} 次想知道怎么办"),
+            Some(&format!("reader-{ordinal}")),
+            "2026-09-01T08:00:00Z",
+        )
+        .await;
+    }
+    save_active_policy(
+        &database,
+        SaveResearchPolicy {
+            config_ref: Some(qualified_research_config(&database).await),
+            source_limit: 20,
+            token_limit: 10_000,
+        },
+    )
+    .await
+    .unwrap();
+    let space = synthetic_qualified_embedding_space(&database).await;
+    let run = start_ready_run(&database).await.unwrap();
+
+    for ordinal in 0..10 {
+        let claim = claim_next_run_item(&database).await.unwrap().unwrap();
+        if ordinal == 9 {
+            record_run_item_failure(
+                &database,
+                &claim,
+                RunItemFailureClass::ModelFailed,
+                "synthetic_semantic_schema_failure",
+            )
+            .await
+            .unwrap();
+            continue;
+        }
+        accept_semantic_output(
+            &database,
+            &claim,
+            SemanticExtractionOutput::Atoms {
+                atoms: vec![SemanticAtomProposal {
+                    kind: AtomKind::Problem,
+                    proposition: format!("孩子难以启动第 {ordinal} 次写作业"),
+                    basis: AtomBasis::Explicit,
+                    evidence_start: 0,
+                    evidence_end: 5,
+                }],
+            },
+            None,
+        )
+        .await
+        .unwrap();
+        let atom = atom_ref(&database, run.run_ref, claim.derivation_ref).await;
+        if ordinal == 8 {
+            sqlx::query(
+                "INSERT INTO linggan_comment_research_problem_resolution( \
+                     atom_ref,space_ref,candidate_set,candidate_hash,state,failure_code,finished_at \
+                 ) VALUES($1,$2,'[]'::jsonb,$3,'model_failed','synthetic_resolution_failure',scope_001_now())",
+            )
+            .bind(atom)
+            .bind(space.space_ref)
+            .bind(HASH)
+            .execute(database.pool())
+            .await
+            .unwrap();
+            refresh_run_completion_for_atom(&database, atom)
+                .await
+                .unwrap();
+            continue;
+        }
+        admit_new_problem(
+            &database,
+            NewProblemAdmission {
+                atom_ref: atom,
+                definition: ProblemDefinitionProposal {
+                    name: format!("第 {ordinal} 次作业启动困难"),
+                    meaning: "孩子在开始完成作业前持续拖延或难以行动".into(),
+                },
+                basis: ProblemMembershipBasis::Deterministic,
+                decision_evidence: json!({"decision":"new_problem","candidateRefs":[]}),
+                invocation_ref: None,
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    let state: String =
+        sqlx::query_scalar("SELECT state FROM linggan_comment_research_run WHERE run_ref=$1")
+            .bind(run.run_ref)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(state, "completed_with_failures");
+    let publication = publish_result_revision(&database, run.run_ref)
+        .await
+        .unwrap();
+    let input_counts: serde_json::Value = sqlx::query_scalar(
+        "SELECT input_counts FROM linggan_comment_research_result_revision WHERE result_revision_ref=$1",
+    )
+    .bind(publication.result_revision_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(input_counts["publicationCoverage"], "partial");
+    assert_eq!(input_counts["selectedCommentCount"], 10);
+    assert_eq!(input_counts["includedCommentCount"], 9);
+    assert_eq!(input_counts["excludedTerminalCommentCount"], 1);
+    assert_eq!(input_counts["organizedProblemAtomCount"], 8);
+    assert_eq!(input_counts["unorganizedProblemAtomCount"], 1);
+    let runs = read_runs(&database, &CommentResearchV1ReadQuery::default())
+        .await
+        .unwrap();
+    assert_eq!(runs["page"]["items"][0]["state"], "completed_with_failures");
+    assert_eq!(
+        runs["page"]["items"][0]["publishedResult"]["inputCounts"]["publicationCoverage"],
+        "partial"
+    );
 }
 
 #[tokio::test]
