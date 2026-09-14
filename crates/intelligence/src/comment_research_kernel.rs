@@ -20,6 +20,10 @@ pub const DERIVATION_VERSION: &str = "comment-research.derivation.v2";
 const CONTEXT_MANIFEST_CONTRACT: &str = "comment-research.context.v2";
 const MAX_DERIVATIONS_PER_PASS: i64 = 3000;
 const MAX_DERIVATION_PREWARM_PASSES: usize = 100;
+/// Backlog is deliberately bounded separately from newly frozen comments. A later Run may
+/// continue eligible historical resolution work, but it cannot turn an old error into an
+/// unbounded provider drain.
+const MAX_BACKLOG_RESOLUTIONS_PER_RUN: i32 = 40;
 /// V6 makes the provider JSON Schema an exact mirror of the Rust tagged variants.  The two
 /// hashes below enter the saved policy and research fingerprint, so an older packet cannot be
 /// reused after this branch contract changes.  `contract_version` remains the stable database
@@ -135,6 +139,7 @@ pub struct ResearchRunReceipt {
     pub run_ref: Uuid,
     pub policy_revision_ref: Uuid,
     pub selected_sources: usize,
+    pub selected_backlog_atoms: usize,
     pub external_calls_started: usize,
 }
 
@@ -153,6 +158,8 @@ pub struct ResearchRunPreview {
     pub unprocessed_sources: usize,
     pub recoverable_sources: usize,
     pub selected_sources: usize,
+    pub eligible_backlog_atoms: usize,
+    pub selected_backlog_atoms: usize,
     pub selected_context_sources: usize,
     pub selected_missing_parent_context_sources: usize,
     pub succeeded_sources: usize,
@@ -460,7 +467,8 @@ pub async fn start_run(
         return Err(CommentResearchKernelError::ModelNotReady);
     }
     let selected = select_eligible_derivations(&mut transaction, &policy).await?;
-    if selected.is_empty() {
+    let eligible_backlog = select_eligible_resolution_backlog(&mut transaction, &policy).await?;
+    if selected.is_empty() && eligible_backlog.is_empty() {
         return Err(CommentResearchKernelError::NoEligibleDerivations);
     }
     let run_ref = Uuid::new_v4();
@@ -469,7 +477,12 @@ pub async fn start_run(
         .fetch_one(&mut *transaction)
         .await?;
     let policy_revision_ref: Uuid = policy.get("policy_revision_ref");
-    let exclusion_counts = json!({"eligible":selected.len(),"selected":selected.len()});
+    let exclusion_counts = json!({
+        "eligible":selected.len(),
+        "selected":selected.len(),
+        "eligibleResolutionBacklog":eligible_backlog.len(),
+        "selectedResolutionBacklog":eligible_backlog.len(),
+    });
     sqlx::query(
         "INSERT INTO linggan_comment_research_run( \
              run_ref,policy_revision_ref,state,as_of,scope,manifest_hash,exclusion_counts \
@@ -480,7 +493,7 @@ pub async fn start_run(
     .bind(&as_of)
     .bind(json!({
         "kind":"all_current_readable_ordinary_user_comments",
-        "selection":"unprocessed_derivation_created_desc"
+        "selection":"new_derivations_and_eligible_resolution_backlog"
     }))
     .bind(&manifest_hash)
     .bind(exclusion_counts)
@@ -507,11 +520,21 @@ pub async fn start_run(
         .execute(&mut *transaction)
         .await?;
     }
+    let selected_backlog_atoms =
+        activate_eligible_resolution_backlog(&mut transaction, run_ref, &eligible_backlog).await?;
+    // Two starts may observe the same terminal backlog before either one claims it. The UPDATE
+    // above is the authority; do not persist a retry-only Run that lost that race and has no
+    // frozen source Items to advance.
+    if selected.is_empty() && selected_backlog_atoms == 0 {
+        transaction.rollback().await?;
+        return Err(CommentResearchKernelError::NoEligibleDerivations);
+    }
     transaction.commit().await?;
     Ok(ResearchRunReceipt {
         run_ref,
         policy_revision_ref,
         selected_sources: selected.len(),
+        selected_backlog_atoms,
         external_calls_started: 0,
     })
 }
@@ -596,6 +619,10 @@ pub async fn preview_run(
         Some(policy) => select_eligible_derivations(&mut transaction, policy).await?,
         None => Vec::new(),
     };
+    let eligible_backlog = match policy.as_ref() {
+        Some(policy) => select_eligible_resolution_backlog(&mut transaction, policy).await?,
+        None => Vec::new(),
+    };
     let selected_context_sources = selected
         .iter()
         .filter(|source| source.clean_state == "context")
@@ -619,6 +646,8 @@ pub async fn preview_run(
         unprocessed_sources: summary.get::<i64, _>("unprocessed_sources") as usize,
         recoverable_sources: summary.get::<i64, _>("recoverable_sources") as usize,
         selected_sources: selected.len(),
+        eligible_backlog_atoms: eligible_backlog.len(),
+        selected_backlog_atoms: eligible_backlog.len(),
         selected_context_sources,
         selected_missing_parent_context_sources,
         succeeded_sources: summary.get::<i64, _>("succeeded_sources") as usize,
@@ -665,6 +694,7 @@ pub async fn reset_development_derived(
            linggan_comment_research_change_observation, \
            linggan_comment_research_problem_window_stat, \
            linggan_comment_research_result_revision, \
+           linggan_comment_research_problem_resolution_execution, \
            linggan_comment_research_problem_resolution, \
            linggan_comment_research_atom_problem_membership, \
            linggan_comment_research_atom_embedding, \
@@ -699,6 +729,9 @@ pub async fn reset_development_derived(
             .execute(&mut *transaction)
             .await?
             .rows_affected();
+    sqlx::query("DELETE FROM linggan_comment_research_problem_resolution_execution")
+        .execute(&mut *transaction)
+        .await?;
     sqlx::query("DELETE FROM linggan_comment_research_problem_resolution")
         .execute(&mut *transaction)
         .await?;
@@ -777,6 +810,11 @@ struct EligibleDerivation {
     context_manifest: Value,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct EligibleResolutionBacklog {
+    atom_ref: Uuid,
+}
+
 impl EligibleDerivation {
     fn input_hash(&self) -> String {
         content_hash(&format!(
@@ -848,6 +886,105 @@ async fn select_eligible_derivations(
             context_manifest: row.get("context_manifest"),
         })
         .collect())
+}
+
+/// A resolution remains attached to the Atom and its original source Run.  A subsequent Run can
+/// only take over a terminal backlog row under one of the explicit retry policies below; this
+/// query is shared by preview and start so the browser cannot nominate historical comments.
+async fn select_eligible_resolution_backlog(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    policy: &sqlx::postgres::PgRow,
+) -> Result<Vec<EligibleResolutionBacklog>, CommentResearchKernelError> {
+    let config_ref: Option<Uuid> = policy.get("config_ref");
+    let Some(config_ref) = config_ref else {
+        return Ok(Vec::new());
+    };
+    let rows = sqlx::query(
+        "SELECT resolution.atom_ref \
+         FROM linggan_comment_research_problem_resolution resolution \
+         JOIN linggan_comment_research_atom atom ON atom.atom_ref=resolution.atom_ref \
+         JOIN linggan_comment_research_derivation_readable derivation \
+           ON derivation.derivation_ref=atom.derivation_ref \
+         JOIN linggan_comment_research_run source_run ON source_run.run_ref=atom.run_ref \
+         JOIN linggan_comment_research_policy_revision source_policy \
+           ON source_policy.policy_revision_ref=source_run.policy_revision_ref \
+         JOIN linggan_comment_research_run prior_execution \
+           ON prior_execution.run_ref=resolution.execution_run_ref \
+         LEFT JOIN linggan_comment_research_atom_problem_membership membership \
+           ON membership.atom_ref=atom.atom_ref AND membership.current \
+         WHERE resolution.state='model_failed' \
+           AND prior_execution.state NOT IN ('queued','running') \
+           AND membership.atom_ref IS NULL \
+           AND ( \
+             (resolution.failure_code='problem_resolution_admission_rejected' AND resolution.attempts<3) \
+             OR resolution.failure_code IN ( \
+               'provider_timeout','provider_unavailable','provider_rate_limited', \
+               'provider_network_error','model_adapter_unavailable','model_database_unavailable','worker_interrupted' \
+             ) \
+             OR (resolution.failure_code IN ( \
+               'problem_resolution_json_unparseable','problem_resolution_json_schema_rejected' \
+             ) AND (source_policy.membership_policy_hash<>$1 \
+                     OR source_policy.config_ref IS DISTINCT FROM $2)) \
+           ) \
+         ORDER BY resolution.last_attempt_at NULLS FIRST,resolution.created_at,resolution.atom_ref \
+         LIMIT LEAST($3,$4)",
+    )
+    .bind(policy.get::<String, _>("membership_policy_hash"))
+    .bind(config_ref)
+    .bind(policy.get::<i32, _>("source_limit"))
+    .bind(MAX_BACKLOG_RESOLUTIONS_PER_RUN)
+    .fetch_all(&mut **transaction)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| EligibleResolutionBacklog {
+            atom_ref: row.get("atom_ref"),
+        })
+        .collect())
+}
+
+async fn activate_eligible_resolution_backlog(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    execution_run_ref: Uuid,
+    backlog: &[EligibleResolutionBacklog],
+) -> Result<usize, CommentResearchKernelError> {
+    if backlog.is_empty() {
+        return Ok(0);
+    }
+    let atom_refs = backlog
+        .iter()
+        .map(|candidate| candidate.atom_ref)
+        .collect::<Vec<_>>();
+    let reactivated: Vec<Uuid> = sqlx::query_scalar(
+        "WITH activated AS ( \
+             UPDATE linggan_comment_research_problem_resolution resolution \
+             SET state='pending',execution_run_ref=$1, \
+                 attempts=CASE WHEN failure_code='problem_resolution_admission_rejected' THEN attempts ELSE 0 END, \
+                 next_attempt_at=NULL,lease_until=NULL,finished_at=NULL,updated_at=scope_001_now() \
+             WHERE resolution.atom_ref=ANY($2) AND resolution.state='model_failed' \
+               AND NOT EXISTS(SELECT 1 FROM linggan_comment_research_atom_problem_membership membership \
+                              WHERE membership.atom_ref=resolution.atom_ref AND membership.current) \
+             RETURNING resolution.atom_ref,resolution.attempts,resolution.last_attempt_at,resolution.failure_code \
+         ) \
+         INSERT INTO linggan_comment_research_problem_resolution_execution( \
+             atom_ref,run_ref,state,attempts,last_attempt_at,failure_code \
+         ) SELECT atom_ref,$1,'pending',attempts,last_attempt_at,failure_code FROM activated \
+         RETURNING atom_ref",
+    )
+    .bind(execution_run_ref)
+    .bind(&atom_refs)
+    .fetch_all(&mut **transaction)
+    .await?;
+    sqlx::query(
+        "UPDATE linggan_comment_research_run \
+         SET exclusion_counts=jsonb_set(exclusion_counts,'{selectedResolutionBacklog}',to_jsonb($2::bigint),true), \
+             updated_at=scope_001_now() WHERE run_ref=$1",
+    )
+    .bind(execution_run_ref)
+    .bind(i64::try_from(reactivated.len()).expect("backlog bound fits i64"))
+    .execute(&mut **transaction)
+    .await?;
+    Ok(reactivated.len())
 }
 
 fn manifest_hash(sources: &[EligibleDerivation]) -> String {
@@ -1109,7 +1246,15 @@ async fn refresh_run_completion_with_embedding_state(
                AND EXISTS(SELECT 1 FROM linggan_comment_research_problem_resolution resolution \
                           WHERE resolution.atom_ref=atom.atom_ref \
                             AND resolution.state IN ('pending','running','retryable')) \
-            ) AS unsettled_resolution_atoms",
+            ) AS unsettled_resolution_atoms, \
+            (SELECT count(*) FROM linggan_comment_research_problem_resolution resolution \
+             JOIN linggan_comment_research_atom atom ON atom.atom_ref=resolution.atom_ref \
+             WHERE resolution.execution_run_ref=$1 AND atom.run_ref<>resolution.execution_run_ref \
+               AND resolution.state IN ('pending','running','retryable')) AS unsettled_backlog_resolutions, \
+            (SELECT count(*) FROM linggan_comment_research_problem_resolution resolution \
+             JOIN linggan_comment_research_atom atom ON atom.atom_ref=resolution.atom_ref \
+             WHERE resolution.execution_run_ref=$1 AND atom.run_ref<>resolution.execution_run_ref \
+               AND resolution.state IN ('model_failed','incompatible')) AS failed_backlog_resolutions",
     )
     .bind(run_ref)
     .bind(embedding_unavailable_is_terminal)
@@ -1132,24 +1277,28 @@ async fn settle_run_completion(
     let embedding_failed_atoms: i64 = outcome.get("embedding_failed_atoms");
     let resolution_failed_atoms: i64 = outcome.get("resolution_failed_atoms");
     let unsettled_resolution_atoms: i64 = outcome.get("unsettled_resolution_atoms");
-    if unsettled_resolution_atoms > 0 {
+    let unsettled_backlog_resolutions: i64 = outcome.get("unsettled_backlog_resolutions");
+    let failed_backlog_resolutions: i64 = outcome.get("failed_backlog_resolutions");
+    if unsettled_resolution_atoms > 0 || unsettled_backlog_resolutions > 0 {
         return Ok(());
     }
     let terminal_unassigned = embedding_failed_atoms + resolution_failed_atoms;
     if unassigned_atoms > 0 && terminal_unassigned < unassigned_atoms {
         return Ok(());
     }
-    let state = if item_failed_count > 0 || terminal_unassigned > 0 {
-        "completed_with_failures"
-    } else {
-        "completed"
-    };
+    let state =
+        if item_failed_count > 0 || terminal_unassigned > 0 || failed_backlog_resolutions > 0 {
+            "completed_with_failures"
+        } else {
+            "completed"
+        };
     sqlx::query(
         "UPDATE linggan_comment_research_run \
          SET state=$2,failure_counts=jsonb_strip_nulls(jsonb_build_object( \
                'runItems',NULLIF($3,0), \
                'embedding',NULLIF($4,0), \
-               'problemResolution',NULLIF($5,0) \
+               'problemResolution',NULLIF($5,0), \
+               'backlogProblemResolution',NULLIF($6,0) \
              )),finished_at=scope_001_now(),updated_at=scope_001_now() \
          WHERE run_ref=$1 AND state IN ('queued','running')",
     )
@@ -1158,28 +1307,38 @@ async fn settle_run_completion(
     .bind(item_failed_count)
     .bind(embedding_failed_atoms)
     .bind(resolution_failed_atoms)
+    .bind(failed_backlog_resolutions)
     .execute(&mut **transaction)
     .await?;
     Ok(())
 }
 
-/// Re-evaluates the single Run whose problem-bearing Atom has just advanced.  Semantic item
-/// completion alone never publishes a result: vector and problem-resolution terminal states
-/// participate in this exact same completion decision.
+/// Re-evaluates both the immutable source Run and the current execution Run for an Atom. A late
+/// successful backlog resolution can therefore improve the source window's organization
+/// coverage, while the later retry Run records only the execution health and never publishes a
+/// replacement statistical window.
 pub async fn refresh_run_completion_for_atom(
     database: &Database,
     atom_ref: Uuid,
 ) -> Result<(), CommentResearchKernelError> {
-    let run_ref: Option<Uuid> =
-        sqlx::query_scalar("SELECT run_ref FROM linggan_comment_research_atom WHERE atom_ref=$1")
-            .bind(atom_ref)
-            .fetch_optional(database.pool())
-            .await?;
-    let Some(run_ref) = run_ref else {
+    let run_refs: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT DISTINCT run_ref FROM ( \
+             SELECT atom.run_ref FROM linggan_comment_research_atom atom WHERE atom.atom_ref=$1 \
+             UNION \
+             SELECT resolution.execution_run_ref FROM linggan_comment_research_problem_resolution resolution \
+             WHERE resolution.atom_ref=$1 \
+         ) involved_runs",
+    )
+    .bind(atom_ref)
+    .fetch_all(database.pool())
+    .await?;
+    if run_refs.is_empty() {
         return Ok(());
-    };
+    }
     let mut transaction = database.pool().begin().await?;
-    refresh_run_completion(&mut transaction, run_ref).await?;
+    for run_ref in run_refs {
+        refresh_run_completion(&mut transaction, run_ref).await?;
+    }
     transaction.commit().await?;
     Ok(())
 }
@@ -1215,10 +1374,24 @@ pub async fn fail_active_runs_without_embedding_config(
         "UPDATE linggan_comment_research_problem_resolution resolution \
          SET state='incompatible',failure_code='embedding_configuration_unavailable', \
              finished_at=scope_001_now(),lease_until=NULL,next_attempt_at=NULL,updated_at=scope_001_now() \
-         FROM linggan_comment_research_atom atom \
-         JOIN linggan_comment_research_run run ON run.run_ref=atom.run_ref \
-         WHERE resolution.atom_ref=atom.atom_ref AND resolution.state IN ('pending','retryable') \
+         FROM linggan_comment_research_run run \
+         WHERE resolution.execution_run_ref=run.run_ref AND resolution.state IN ('pending','retryable') \
            AND run.state IN ('queued','running')",
+    )
+    .execute(database.pool())
+    .await?;
+    // The live resolution row moves between execution Runs. Mirror terminalization into the
+    // immutable execution record before refreshing each Run, otherwise a disabled embedding
+    // profile leaves a retry Run displayed as pending forever.
+    sqlx::query(
+        "UPDATE linggan_comment_research_problem_resolution_execution history \
+         SET state=resolution.state,attempts=resolution.attempts,last_attempt_at=resolution.last_attempt_at, \
+             next_attempt_at=resolution.next_attempt_at,failure_code=resolution.failure_code, \
+             invocation_ref=resolution.invocation_ref,updated_at=resolution.updated_at,finished_at=resolution.finished_at \
+         FROM linggan_comment_research_problem_resolution resolution \
+         WHERE history.atom_ref=resolution.atom_ref AND history.run_ref=resolution.execution_run_ref \
+           AND resolution.state='incompatible' \
+           AND resolution.failure_code='embedding_configuration_unavailable'",
     )
     .execute(database.pool())
     .await?;

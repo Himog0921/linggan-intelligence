@@ -25,11 +25,13 @@
 | [plans/active/comment-research-semantic-output-001.md](plans/active/comment-research-semantic-output-001.md) | 活跃计划；Issue #256 | 以受控真实批次修复语义提取与问题归并的结构化输出边界；不降低结果发布门槛 |
 | [plans/active/comment-research-output-diagnostics-001.md](plans/active/comment-research-output-diagnostics-001.md) | 活跃计划；Issue #258 | 将 V5 输出失败拆为安全阶段诊断，以候选绑定和精确证据短句降低模型合同失败 |
 | [plans/active/comment-research-partial-publication-001.md](plans/active/comment-research-partial-publication-001.md) | 活跃计划；Issue #264 | 将足够覆盖但含单项终态失败的 V1 Run 发布为可追溯的部分 ResultRevision；失败不计入统计 |
-| [plans/active/comment-research-window-001.md](plans/active/comment-research-window-001.md) | 活跃计划；Issue #267 | 当前窗口无样本时按真实基线样本呈现已发布研究，避免全 0 伪装为空结果 |
+| [plans/active/comment-research-cumulative-state-001.md](plans/active/comment-research-cumulative-state-001.md) | 活跃计划；Issue #281 | 将累计已确认 membership 与单轮统计发布资格分离，并在后续已启动 Run 中有界续办符合条件的历史归并 backlog |
+| [plans/active/comment-research-window-001.md](plans/active/comment-research-window-001.md) | 活跃计划；Issue #267；#281 已收束概览/问题主体 | 当前统计窗口无样本时说明基线与不可比；累计问题读取不再使用窗口统计 |
 | [plans/active/comment-research-pagination-001.md](plans/active/comment-research-pagination-001.md) | 活跃计划；Issue #269 | 评论研究三张增长型列表的有界分页浏览与 URL 页码保持 |
 | [plans/active/aud-code-quality-20260914.md](plans/active/aud-code-quality-20260914.md) | 活跃计划；Issue #279 | 恢复任务所有权、历史详情可达、退役材料读取、目标问题入口与可信检查器；不触碰生产运行 |
 | [decisions/0003-comment-research-single-semantic-kernel.md](decisions/0003-comment-research-single-semantic-kernel.md) | 权威当前 | 旧评论语义路径的退役、可继承基础能力和新内核的长期边界 |
 | [design/pages/comment-research-v1-page.md](design/pages/comment-research-v1-page.md) | 权威当前；交付分支实现 | 评论研究 V1 的五视图、研究设置与用户状态合同 |
+| [design/changes/comment-research-cumulative-state-001-ui-change-manifest.md](design/changes/comment-research-cumulative-state-001-ui-change-manifest.md) | 权威当前；实施中 | Issue #281 的累计已确认知识、统计版本与 Run Health 状态表达 |
 | [design/changes/comment-research-reset-001-ui-change-manifest.md](design/changes/comment-research-reset-001-ui-change-manifest.md) | 权威当前；交付分支实现 | 旧评论页面/API/自动计划替代与用户体验验证范围 |
 | [design/acceptance/comment-research-reset-001-acceptance.md](design/acceptance/comment-research-reset-001-acceptance.md) | 一次性验收记录；进行中 | V1 数据库、worker、UI、runtime 与用户验收边界 |
 | [archive/ci-auto-004-comment-auto-research.md](archive/ci-auto-004-comment-auto-research.md) | 历史归档 | 既有 P0–P5 与本机发布证据；其未来语义、聚类、读取和页面路径已被 COMMENT-RESEARCH-RESET-001 替代 |

@@ -208,6 +208,11 @@ async fn lock_publishable_run(
         state == "completed_with_failures",
     )
     .await?;
+    // A retry-only Run is accountable for later resolution work, not a new frozen comment
+    // sample. It can never acquire a ResultRevision, regardless of whether it completes cleanly.
+    if coverage.selected_comment_count == 0 {
+        return Err(CommentResearchResultError::InsufficientPublicationCoverage);
+    }
     if state == "completed" && coverage.unorganized_problem_atom_count > 0 {
         return Err(CommentResearchResultError::MembershipIncomplete);
     }

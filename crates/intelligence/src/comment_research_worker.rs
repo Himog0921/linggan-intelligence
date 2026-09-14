@@ -99,7 +99,9 @@ enum ResolutionOutput {
 #[derive(Debug, Clone)]
 struct ResolutionInput {
     atom_ref: Uuid,
-    run_ref: Uuid,
+    /// The later Run that authorized this provider call. The Atom's source Run stays immutable
+    /// and continues to own the frozen statistical window.
+    execution_run_ref: Uuid,
     proposition: String,
     config_ref: Option<Uuid>,
 }
@@ -147,6 +149,7 @@ pub async fn schema_ready(database: &Database) -> Result<bool, ModelError> {
     Ok(sqlx::query_scalar(
         "SELECT to_regclass('linggan_comment_research_run_item') IS NOT NULL \
                 AND to_regclass('linggan_comment_research_problem_resolution') IS NOT NULL \
+                AND to_regclass('linggan_comment_research_problem_resolution_execution') IS NOT NULL \
                 AND to_regclass('linggan_model_workspace') IS NOT NULL \
                 AND to_regclass('linggan_comment_daily_batch') IS NULL \
                 AND to_regclass('linggan_ci_problem') IS NULL \
@@ -161,7 +164,10 @@ pub async fn schema_ready(database: &Database) -> Result<bool, ModelError> {
                       AND attname='lease_until' AND NOT attisdropped) \
                 AND EXISTS(SELECT 1 FROM pg_attribute \
                     WHERE attrelid='linggan_comment_research_atom_embedding'::regclass \
-                      AND attname='attempts' AND NOT attisdropped)",
+                      AND attname='attempts' AND NOT attisdropped) \
+                AND EXISTS(SELECT 1 FROM pg_attribute \
+                    WHERE attrelid='linggan_comment_research_problem_resolution'::regclass \
+                      AND attname='execution_run_ref' AND NOT attisdropped)",
     )
     .fetch_one(database.pool())
     .await?)
@@ -595,7 +601,7 @@ async fn advance_problem_resolution(
     let prompt = resolution_prompt(&input.proposition, &candidates)?;
     let mut reserved = match reserve_generation_call(
         database,
-        input.run_ref,
+        input.execution_run_ref,
         config_ref,
         RESOLUTION_SYSTEM,
         &prompt,
@@ -754,6 +760,7 @@ async fn publish_one_ready_result(database: &Database) -> Result<bool, ModelErro
              FROM linggan_comment_research_atom atom WHERE atom.run_ref=run.run_ref \
          ) atom_coverage \
          WHERE run.state IN ('completed','completed_with_failures') \
+           AND item_coverage.selected_count>0 \
            AND NOT EXISTS(SELECT 1 FROM linggan_comment_research_result_revision result WHERE result.run_ref=run.run_ref) \
            AND (run.state='completed' OR ( \
                  item_coverage.selected_count>0 \
@@ -1311,8 +1318,8 @@ async fn claim_next_resolution(database: &Database) -> Result<Option<ResolutionC
         transaction.commit().await?;
         return Ok(Some(existing));
     }
-    let candidate: Option<(Uuid, Uuid)> = sqlx::query_as(
-        "SELECT atom.atom_ref,embedding.space_ref \
+    let candidate: Option<(Uuid, Uuid, Uuid)> = sqlx::query_as(
+        "SELECT atom.atom_ref,embedding.space_ref,atom.run_ref \
          FROM linggan_comment_research_atom atom \
          JOIN linggan_comment_research_atom_embedding embedding USING(atom_ref) \
          JOIN linggan_comment_research_derivation_readable derivation \
@@ -1331,7 +1338,7 @@ async fn claim_next_resolution(database: &Database) -> Result<Option<ResolutionC
     )
     .fetch_optional(&mut *transaction)
     .await?;
-    let Some((atom_ref, space_ref)) = candidate else {
+    let Some((atom_ref, space_ref, execution_run_ref)) = candidate else {
         transaction.commit().await?;
         return Ok(None);
     };
@@ -1343,13 +1350,24 @@ async fn claim_next_resolution(database: &Database) -> Result<Option<ResolutionC
     let candidate_hash = content_hash(&candidate_set.to_string());
     sqlx::query(
         "INSERT INTO linggan_comment_research_problem_resolution( \
-             atom_ref,space_ref,candidate_set,candidate_hash,state \
-         ) VALUES($1,$2,$3,$4,'pending') ON CONFLICT(atom_ref) DO NOTHING",
+             atom_ref,space_ref,candidate_set,candidate_hash,state,execution_run_ref \
+         ) VALUES($1,$2,$3,$4,'pending',$5) ON CONFLICT(atom_ref) DO NOTHING",
     )
     .bind(atom_ref)
     .bind(space_ref)
     .bind(candidate_set)
     .bind(candidate_hash)
+    .bind(execution_run_ref)
+    .execute(database.pool())
+    .await?;
+    sqlx::query(
+        "INSERT INTO linggan_comment_research_problem_resolution_execution( \
+             atom_ref,run_ref,state,attempts,last_attempt_at,next_attempt_at,failure_code,invocation_ref,created_at,updated_at,finished_at \
+         ) SELECT atom_ref,execution_run_ref,state,attempts,last_attempt_at,next_attempt_at,failure_code,invocation_ref,created_at,updated_at,finished_at \
+           FROM linggan_comment_research_problem_resolution WHERE atom_ref=$1 \
+         ON CONFLICT(atom_ref,run_ref) DO NOTHING",
+    )
+    .bind(atom_ref)
     .execute(database.pool())
     .await?;
     let mut transaction = database.pool().begin().await?;
@@ -1389,10 +1407,27 @@ pub async fn recover_problem_resolution_leases(database: &Database) -> Result<u6
     let mut recovered_atoms = admitted_atoms;
     recovered_atoms.extend(expired_atoms);
     let recovered = recovered_atoms.len() as u64;
+    if !recovered_atoms.is_empty() {
+        sqlx::query(
+            "UPDATE linggan_comment_research_problem_resolution_execution history \
+             SET state=resolution.state,attempts=resolution.attempts,last_attempt_at=resolution.last_attempt_at, \
+                 next_attempt_at=resolution.next_attempt_at,failure_code=resolution.failure_code, \
+                 invocation_ref=resolution.invocation_ref,updated_at=resolution.updated_at,finished_at=resolution.finished_at \
+             FROM linggan_comment_research_problem_resolution resolution \
+             WHERE history.atom_ref=resolution.atom_ref AND history.run_ref=resolution.execution_run_ref \
+               AND resolution.atom_ref=ANY($1)",
+        )
+        .bind(&recovered_atoms)
+        .execute(&mut *transaction)
+        .await?;
+    }
     let run_refs: std::collections::BTreeSet<Uuid> = sqlx::query_scalar(
-        "SELECT DISTINCT atom.run_ref \
-         FROM linggan_comment_research_atom atom \
-         WHERE atom.atom_ref=ANY($1)",
+        "SELECT DISTINCT run_ref FROM ( \
+             SELECT atom.run_ref FROM linggan_comment_research_atom atom WHERE atom.atom_ref=ANY($1) \
+             UNION \
+             SELECT resolution.execution_run_ref FROM linggan_comment_research_problem_resolution resolution \
+             WHERE resolution.atom_ref=ANY($1) \
+         ) involved_runs",
     )
     .bind(&recovered_atoms)
     .fetch_all(&mut *transaction)
@@ -1414,17 +1449,30 @@ async fn claim_resolution_row(
     let row = sqlx::query(
         "WITH candidate AS ( \
              SELECT resolution.atom_ref FROM linggan_comment_research_problem_resolution resolution \
-             JOIN linggan_comment_research_atom atom ON atom.atom_ref=resolution.atom_ref \
-             JOIN linggan_comment_research_run run ON run.run_ref=atom.run_ref \
+             JOIN linggan_comment_research_run run ON run.run_ref=resolution.execution_run_ref \
              WHERE run.state IN ('queued','running') \
                AND (resolution.state='pending' OR (resolution.state='retryable' AND resolution.next_attempt_at<=scope_001_now())) \
              ORDER BY resolution.created_at,resolution.atom_ref LIMIT 1 FOR UPDATE SKIP LOCKED \
+         ), claimed AS ( \
+             UPDATE linggan_comment_research_problem_resolution resolution \
+             SET state='running',attempts=attempts+1,last_attempt_at=scope_001_now(),next_attempt_at=NULL, \
+                 lease_until=scope_001_now()+interval '120 seconds',updated_at=scope_001_now() \
+             FROM candidate WHERE resolution.atom_ref=candidate.atom_ref \
+             RETURNING resolution.atom_ref,resolution.space_ref,resolution.candidate_set,resolution.candidate_hash, \
+                       resolution.execution_run_ref,resolution.attempts,resolution.last_attempt_at,resolution.failure_code \
+         ), started_run AS ( \
+             UPDATE linggan_comment_research_run run SET state='running',updated_at=scope_001_now() \
+             FROM claimed WHERE run.run_ref=claimed.execution_run_ref AND run.state='queued' \
+         ), history AS ( \
+             INSERT INTO linggan_comment_research_problem_resolution_execution( \
+                 atom_ref,run_ref,state,attempts,last_attempt_at,failure_code,updated_at \
+             ) SELECT atom_ref,execution_run_ref,'running',attempts,last_attempt_at,failure_code,scope_001_now() FROM claimed \
+             ON CONFLICT(atom_ref,run_ref) DO UPDATE \
+               SET state='running',attempts=EXCLUDED.attempts,last_attempt_at=EXCLUDED.last_attempt_at, \
+                   failure_code=EXCLUDED.failure_code,next_attempt_at=NULL, \
+                   finished_at=NULL,updated_at=scope_001_now() \
          ) \
-         UPDATE linggan_comment_research_problem_resolution resolution \
-         SET state='running',attempts=attempts+1,next_attempt_at=NULL, \
-             lease_until=scope_001_now()+interval '120 seconds',updated_at=scope_001_now() \
-         FROM candidate WHERE resolution.atom_ref=candidate.atom_ref \
-         RETURNING resolution.atom_ref,resolution.space_ref,resolution.candidate_set,resolution.candidate_hash",
+         SELECT atom_ref,space_ref,candidate_set,candidate_hash FROM claimed",
     )
     .fetch_optional(&mut **transaction)
     .await?;
@@ -1440,12 +1488,12 @@ async fn load_resolution_input(
     atom_ref: Uuid,
 ) -> Result<Option<ResolutionInput>, ModelError> {
     let row = sqlx::query(
-        "SELECT atom.atom_ref,atom.run_ref,atom.proposition,policy.config_ref \
+        "SELECT atom.atom_ref,resolution.execution_run_ref,atom.proposition,policy.config_ref \
          FROM linggan_comment_research_problem_resolution resolution \
          JOIN linggan_comment_research_atom atom ON atom.atom_ref=resolution.atom_ref \
          JOIN linggan_comment_research_derivation_readable derivation \
            ON derivation.derivation_ref=atom.derivation_ref \
-         JOIN linggan_comment_research_run run ON run.run_ref=atom.run_ref \
+         JOIN linggan_comment_research_run run ON run.run_ref=resolution.execution_run_ref \
          JOIN linggan_comment_research_policy_revision policy \
            ON policy.policy_revision_ref=run.policy_revision_ref \
          WHERE resolution.atom_ref=$1 AND resolution.state='running'",
@@ -1455,7 +1503,7 @@ async fn load_resolution_input(
     .await?;
     Ok(row.map(|row| ResolutionInput {
         atom_ref: row.get("atom_ref"),
-        run_ref: row.get("run_ref"),
+        execution_run_ref: row.get("execution_run_ref"),
         proposition: row.get("proposition"),
         config_ref: row.get("config_ref"),
     }))
@@ -1511,8 +1559,16 @@ async fn attach_resolution_invocation(
     invocation_ref: Uuid,
 ) -> Result<(), ModelError> {
     sqlx::query(
-        "UPDATE linggan_comment_research_problem_resolution SET invocation_ref=$2,updated_at=scope_001_now() \
-         WHERE atom_ref=$1 AND state='running'",
+        "WITH attached AS ( \
+             UPDATE linggan_comment_research_problem_resolution \
+             SET invocation_ref=$2,updated_at=scope_001_now() \
+             WHERE atom_ref=$1 AND state='running' \
+             RETURNING atom_ref,execution_run_ref,invocation_ref,updated_at \
+         ) \
+         UPDATE linggan_comment_research_problem_resolution_execution history \
+         SET invocation_ref=attached.invocation_ref,updated_at=attached.updated_at \
+         FROM attached \
+         WHERE history.atom_ref=attached.atom_ref AND history.run_ref=attached.execution_run_ref",
     )
     .bind(claim.atom_ref)
     .bind(invocation_ref)
@@ -1609,10 +1665,18 @@ async fn settle_resolution(
     invocation_ref: Option<Uuid>,
 ) -> Result<(), ModelError> {
     sqlx::query(
-        "UPDATE linggan_comment_research_problem_resolution \
-         SET state=$2,failure_code=$3,invocation_ref=COALESCE($4,invocation_ref), \
-             lease_until=NULL,finished_at=scope_001_now(),updated_at=scope_001_now() \
-         WHERE atom_ref=$1 AND state='running'",
+        "WITH settled AS ( \
+             UPDATE linggan_comment_research_problem_resolution \
+             SET state=$2,failure_code=$3,invocation_ref=COALESCE($4,invocation_ref), \
+                 lease_until=NULL,finished_at=scope_001_now(),updated_at=scope_001_now() \
+             WHERE atom_ref=$1 AND state='running' \
+             RETURNING atom_ref,execution_run_ref,state,attempts,last_attempt_at,failure_code,invocation_ref,updated_at,finished_at \
+         ) \
+         UPDATE linggan_comment_research_problem_resolution_execution history \
+         SET state=settled.state,attempts=settled.attempts,last_attempt_at=settled.last_attempt_at, \
+             next_attempt_at=NULL,failure_code=settled.failure_code,invocation_ref=settled.invocation_ref, \
+             updated_at=settled.updated_at,finished_at=settled.finished_at \
+         FROM settled WHERE history.atom_ref=settled.atom_ref AND history.run_ref=settled.execution_run_ref",
     )
     .bind(claim.atom_ref)
     .bind(state)
@@ -1630,12 +1694,20 @@ async fn settle_resolution_retry(
     invocation_ref: Option<Uuid>,
 ) -> Result<(), ModelError> {
     sqlx::query(
-        "UPDATE linggan_comment_research_problem_resolution \
-         SET state=CASE WHEN attempts>=3 THEN 'model_failed' ELSE 'retryable' END, \
-             failure_code=$2,invocation_ref=COALESCE($3,invocation_ref),lease_until=NULL, \
-             next_attempt_at=CASE WHEN attempts>=3 THEN NULL ELSE scope_001_now()+interval '60 seconds' END, \
-             finished_at=CASE WHEN attempts>=3 THEN scope_001_now() ELSE NULL END,updated_at=scope_001_now() \
-         WHERE atom_ref=$1 AND state='running'",
+        "WITH settled AS ( \
+             UPDATE linggan_comment_research_problem_resolution \
+             SET state=CASE WHEN attempts>=3 THEN 'model_failed' ELSE 'retryable' END, \
+                 failure_code=$2,invocation_ref=COALESCE($3,invocation_ref),lease_until=NULL, \
+                 next_attempt_at=CASE WHEN attempts>=3 THEN NULL ELSE scope_001_now()+interval '60 seconds' END, \
+                 finished_at=CASE WHEN attempts>=3 THEN scope_001_now() ELSE NULL END,updated_at=scope_001_now() \
+             WHERE atom_ref=$1 AND state='running' \
+             RETURNING atom_ref,execution_run_ref,state,attempts,last_attempt_at,next_attempt_at,failure_code,invocation_ref,updated_at,finished_at \
+         ) \
+         UPDATE linggan_comment_research_problem_resolution_execution history \
+         SET state=settled.state,attempts=settled.attempts,last_attempt_at=settled.last_attempt_at, \
+             next_attempt_at=settled.next_attempt_at,failure_code=settled.failure_code,invocation_ref=settled.invocation_ref, \
+             updated_at=settled.updated_at,finished_at=settled.finished_at \
+         FROM settled WHERE history.atom_ref=settled.atom_ref AND history.run_ref=settled.execution_run_ref",
     )
     .bind(claim.atom_ref)
     .bind(failure_code)
