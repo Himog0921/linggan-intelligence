@@ -192,6 +192,7 @@
 | [`audits/pre-implementation-architecture-audit-2026-08-21.md`](audits/pre-implementation-architecture-audit-2026-08-21.md) | 一次性报告 | `ADV-AUDIT-001` 的独立复核最终处置：保留权威冲突、真实 producer 接缝、产品职责和 dirty worktree 风险，否定当前解除 Attempt 1:1、强加 `attemptRef`、改 crate 或整批提交的危险建议；不改变 F01 代码门 |
 | [`audits/intelligence-system-review-2026-09-05.md`](audits/intelligence-system-review-2026-09-05.md) | 一次性报告 | `AUD-INTELLIGENCE-20260905`：固定主线 `4864edd` 的产品、领域、Rust/API/worker、PostgreSQL、Browser Producer、媒体、UI/UX、Topic/Agent 与运行协作全项目梳理；含已具备能力与尚未闭环范围的分别结论，不授予修复、采集、部署或合并权限 |
 | [`audits/intelligence-system-review-2026-09-05-evidence.md`](audits/intelligence-system-review-2026-09-05-evidence.md) | 一次性报告 | 上述主报告的 E01–E16 证据、检查范围与复核方法；197 项常规 Rust / 118 项隔离 PostgreSQL / 252 项插件测试、只读数据库与浏览器观察、明确未证明边界；不含账号原始身份、评论原文或凭据 |
+| [`audits/code-quality-review-2026-09-14.md`](audits/code-quality-review-2026-09-14.md) | 一次性报告 | `AUD-CODE-QUALITY-20260914`：固定主线 `431e79b` 的第七层代码质量核实包——逐条给出定位、判据原文、复现命令、预期输出与反证条件，附已排除项与未覆盖范围；供独立复核，不授予修复、采集、部署或合并权限 |
 | [`runbooks/development-environment.md`](runbooks/development-environment.md) | 权威当前 | Rust 与 Docker PostgreSQL 16 的统一运行入口 |
 | [`runbooks/local-evidence-library.md`](runbooks/local-evidence-library.md) | 权威当前 | Rust loopback host、health、受控 discovery ingress 与 Evidence Library 本地启动/验证；明确不含真实插件、平台或媒体链路 |
 | [`runbooks/local-runtime-deployment.md`](runbooks/local-runtime-deployment.md) | 权威当前 | 三个 launchd 常驻服务的运行来源、跟随 origin/main 的更新方式、迁移闸门与故障处置；取代已废弃的冻结快照模型 |
