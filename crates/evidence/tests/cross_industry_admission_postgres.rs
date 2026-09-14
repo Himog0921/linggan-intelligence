@@ -11,8 +11,8 @@ mod cross_industry;
 mod fixture;
 
 use cross_industry::{
-    discovery_card, discovery_card_at, search_coverage, submit_external_package,
-    submit_package_for_target,
+    FIXTURE_QUOTA, discovery_card, discovery_card_at, search_coverage, submit_external_package,
+    submit_external_package_with_quota, submit_package_for_target,
 };
 use fixture::proof_database;
 use linggan_evidence::{CatalogDetailState, read_cross_industry_hits, read_keyword_hits};
@@ -84,6 +84,62 @@ async fn a_keyword_search_records_its_sampling_provenance_and_signed_link() {
             .await
             .unwrap();
     assert_eq!(evidence_rows, 0, "参照物不得混进证据侧");
+}
+
+/// 「本轮要了多少条」记的是**这一单能拿回多少**，不是规则口径想要多少。
+///
+/// 规则说「取点赞前 20」，而这一单的篇数上限只有 8（授权给的额度小）：派发那一刻算出来的
+/// 是 8，记录里就必须是 8。现场再从口径推一个 20 出来，复核的人会把一轮「目标 8 条、拿到
+/// 8 条」的采集读成「要了 20 只拿回 8」——判断这批参照物够不够用时，基数从起点就是错的。
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn the_requested_count_is_the_frozen_expected_count_not_the_rule_wish() {
+    let database = proof_database("cross_industry_requested_count").await;
+    let signed = "https://www.xiaohongshu.com/search_result/note-cross-3?xsec_token=ABquota";
+    submit_external_package_with_quota(
+        &database,
+        "考研自习::most_liked",
+        "patrol",
+        serde_json::json!({
+            "query":"考研自习","ranking":"most_liked",
+            "topByLikes":20,"scrollRounds":3,"publishedWithinDays":7
+        }),
+        8,
+        "discovery_search",
+        search_coverage("考研自习", 8),
+        serde_json::Value::Null,
+        vec![discovery_card(
+            "note-cross-3",
+            "二战考研的早晨从图书馆开始",
+            "1.1万",
+            signed,
+        )],
+    )
+    .await;
+
+    let row = sqlx::query(
+        "SELECT requested_count,actual_count,keyword,sort_order \
+         FROM cross_industry_sample WHERE content_external_id='note-cross-3'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("external-domain material lands in the cross-industry table");
+
+    assert_eq!(
+        row.get::<Option<i32>, _>("requested_count"),
+        Some(8),
+        "要了多少 = min(口径取前 20, 这一单上限 8) = 8，不是口径那个 20"
+    );
+    assert_eq!(row.get::<Option<i32>, _>("actual_count"), Some(8));
+    // 口径本身照旧整套记下：这一格说的是「按什么口径要的」，与「要了多少条」分得很清楚。
+    assert_eq!(
+        row.get::<Option<String>, _>("keyword").as_deref(),
+        Some("考研自习")
+    );
+    assert_eq!(
+        row.get::<Option<String>, _>("sort_order").as_deref(),
+        Some("most_liked")
+    );
 }
 
 /// 没有口径的那一轮不能把已经记下的口径抹掉。
@@ -424,6 +480,7 @@ async fn a_quarantined_detail_round_is_not_reported_as_collected() {
         "考研自习::hits-quarantine-detail",
         "patrol",
         serde_json::json!({"contentExternalId":"note-quarantined"}),
+        FIXTURE_QUOTA,
         "content_detail",
         serde_json::json!({
             "target":{"basis":"known_set","contentExternalId":"note-quarantined"},
@@ -577,6 +634,7 @@ async fn a_completed_detail_round_records_the_body_and_the_fact_that_it_arrived(
         "考研自习::detail-fact-detail",
         "patrol",
         serde_json::json!({"contentExternalId":"note-detail-fact"}),
+        FIXTURE_QUOTA,
         "content_detail",
         detail_coverage("note-detail-fact"),
         serde_json::Value::Null,

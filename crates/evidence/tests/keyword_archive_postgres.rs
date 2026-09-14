@@ -14,8 +14,8 @@ mod cross_industry;
 mod fixture;
 
 use cross_industry::{
-    EXTERNAL_DOMAIN, HOME_DOMAIN, discovery_card, search_coverage, submit_external_package,
-    submit_package_in_domain,
+    EXTERNAL_DOMAIN, FIXTURE_QUOTA, HOME_DOMAIN, discovery_card, search_coverage,
+    submit_external_package, submit_package_in_domain,
 };
 use fixture::proof_database;
 use linggan_evidence::{
@@ -716,6 +716,7 @@ async fn submit_home_domain_keyword_archive(database: &Database, identity_key: &
         identity_key,
         "deep_archive",
         serde_json::json!({"query":"学不进去","ranking":"most_liked","scrollRounds":10}),
+        FIXTURE_QUOTA,
         "discovery_search",
         coverage,
         serde_json::json!({"surfaceReceipt":{"stopReason":"bottom_confirmed"}}),
