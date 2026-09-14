@@ -9,8 +9,12 @@
   const runDialog = $('#research-run-dialog');
   const form = $('#research-settings-form');
   const views = new Set(['overview', 'voices', 'problems', 'changes', 'runs']);
-  const state = { view: new URLSearchParams(location.search).get('view') || 'overview', setup: null, preview: null };
+  const pagedViews = new Set(['voices', 'problems', 'runs']);
+  const query = new URLSearchParams(location.search);
+  const initialPage = Math.max(1, Number.parseInt(query.get('page') || '1', 10) || 1);
+  const state = { view: query.get('view') || 'overview', page: initialPage, setup: null, preview: null };
   if (!views.has(state.view)) state.view = 'overview';
+  if (!pagedViews.has(state.view)) state.page = 1;
 
   const errorText = {
     comment_research_result_unavailable: '还没有可读取的已发布研究结果。先保存策略并开始一轮研究；后台完成提取、向量归并和结果冻结后，页面会显示新的版本。',
@@ -31,6 +35,24 @@
   const empty = (message, heading = '暂时没有可显示的研究结果') => `<section class="cr-v1-empty"><h2>${escape(heading)}</h2><p>${escape(message)}</p></section>`;
   const table = (head, rows) => `<div class="cr-v1-table-wrap"><table><thead><tr>${head.map(item => `<th scope="col">${escape(item)}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
 
+  function pageLimit() {
+    return state.view === 'problems' ? 10 : 20;
+  }
+
+  function pagination(page, noun) {
+    const total = Number(page.total ?? 0);
+    const limit = Number(page.limit ?? pageLimit());
+    const offset = Number(page.offset ?? 0);
+    if (!total) return '';
+    const current = Math.floor(offset / limit) + 1;
+    const pages = Math.max(1, Math.ceil(total / limit));
+    const from = offset + 1;
+    const to = Math.min(offset + limit, total);
+    const previous = Math.max(0, offset - limit);
+    const next = offset + limit;
+    return '<nav class="cr-v1-pagination" aria-label="' + escape(noun) + '分页"><span>显示 ' + count(from) + '–' + count(to) + '，共 ' + count(total) + ' 条 · 第 ' + count(current) + ' / ' + count(pages) + ' 页</span><div><button type="button" data-page-offset="' + String(previous) + '"' + (offset === 0 ? ' disabled' : '') + '>上一页</button><button type="button" data-page-offset="' + String(next) + '"' + (next >= total ? ' disabled' : '') + '>下一页</button></div></nav>';
+  }
+
   async function request(path, options = {}) {
     const response = await fetch(path, { cache:'no-store', headers: options.body ? {'Content-Type':'application/json'} : undefined, ...options });
     const payload = await response.json().catch(() => ({}));
@@ -50,7 +72,9 @@
   function updateUrl() {
     const query = new URLSearchParams(location.search);
     query.set('view', state.view);
-    history.replaceState(null, '', `${location.pathname}?${query}`);
+    if (pagedViews.has(state.view) && state.page > 1) query.set('page', String(state.page));
+    else query.delete('page');
+    history.replaceState(null, '', location.pathname + '?' + query);
   }
 
   function renderTabs() {
@@ -154,7 +178,7 @@
   function renderVoices(data) {
     const page = data.page || {items:[], total:0};
     result.innerHTML = `<section class="cr-v1-intro"><h2>用户原声</h2><p>这里呈现当前可读、已通过身份与清洗过滤的普通用户评论。原文是证据；研究正文是独立派生，不会改写原文。</p><p class="cr-v1-result-meta">当前共 ${count(page.total)} 条可读用户原声。没有对应研究运行的评论会如实显示为“尚未进入研究”。</p></section>` +
-      (page.items.length ? table(['评论原文', '研究正文', '作品与观察时间', '最新研究状态'], page.items.map(item => `<tr><td><blockquote>${escape(item.commentText || '正文尚未取得')}</blockquote></td><td><p>${escape(item.researchText || '未形成研究正文')}</p><span class="cr-v1-badge">普通用户</span></td><td><strong>${escape(item.workTitle || '作品标题未知')}</strong><p>${escape(date(item.observedAt))}</p></td><td>${escape(voiceResearchStatusLabel(item.researchStatus))}<p>${escape(voiceResearchDetail(item.researchStatus, item.researchFailureCode))}</p></td></tr>`)) : empty('当前没有可读的普通用户原声。作者回复、身份未知及已被清洗剔除的内容不会混入这里。', '暂时没有可显示的用户原声'));
+      (page.items.length ? table(['评论原文', '研究正文', '作品与观察时间', '最新研究状态'], page.items.map(item => `<tr><td><blockquote>${escape(item.commentText || '正文尚未取得')}</blockquote></td><td><p>${escape(item.researchText || '未形成研究正文')}</p><span class="cr-v1-badge">普通用户</span></td><td><strong>${escape(item.workTitle || '作品标题未知')}</strong><p>${escape(date(item.observedAt))}</p></td><td>${escape(voiceResearchStatusLabel(item.researchStatus))}<p>${escape(voiceResearchDetail(item.researchStatus, item.researchFailureCode))}</p></td></tr>`)) : empty('当前没有可读的普通用户原声。作者回复、身份未知及已被清洗剔除的内容不会混入这里。', '暂时没有可显示的用户原声')) + pagination(page, '用户原声');
   }
 
   function voiceResearchStatusLabel(state) {
@@ -196,7 +220,7 @@
       ? '本版冻结样本没有落入当前窗口，因此先展示实际被研究的基线样本；“变化观察”仍会明确说明不可比较。'
       : '不同表达只有在记录了归并依据后才属于同一问题；向量相似度本身不会合并身份。';
     result.innerHTML = '<section class="cr-v1-intro"><h2>稳定用户问题</h2><p>' + explanation + '</p>' + resultMeta(data) + '</section>' +
-      (page.items.length ? table(columns, rows) : empty('本版没有可显示的稳定问题。'));
+      (page.items.length ? table(columns, rows) : empty('本版没有可显示的稳定问题。')) + pagination(page, '用户问题');
   }
 
   function observationLabel(kind) {
@@ -322,7 +346,7 @@
           : item.state === 'completed_with_failures' ? '未发布：覆盖不足或有未组织的研究信号'
             : item.state === 'failed' ? '未发布：运行失败' : '尚未发布';
         return `<tr><td><strong>${escape(date(item.createdAt))}</strong><p>${escape(runStateLabel(item.state))} · 冻结 ${count(item.selectedSources)} 条评论</p>${item.finishedAt ? `<p>结束于 ${escape(date(item.finishedAt))}</p>` : ''}</td><td><strong>${escape(modelExecutionSummary(execution))}</strong><details class="cr-v1-run-detail"><summary>查看调用账本摘要</summary><p>${escape(modelExecutionDetails(execution))}</p></details></td><td><p>${escape(itemStates || '尚未开始处理')}</p>${runFailures ? `<p>${escape(runFailures)}</p>` : ''}${itemFailures ? `<p>${escape(itemFailures)}</p>` : ''}</td><td>${published}</td></tr>`;
-      })) : empty('还没有运行记录。保存策略后可先查看系统自动选择的范围。'));
+      })) : empty('还没有运行记录。保存策略后可先查看系统自动选择的范围。')) + pagination(page, '运行记录');
   }
 
   function render(view, data) {
@@ -332,7 +356,14 @@
   async function loadView() {
     renderTabs(); updateUrl(); result.setAttribute('aria-busy', 'true');
     try {
-      const data = await request(`${api}/${state.view}?limit=20&offset=0`);
+      const limit = pageLimit();
+      const offset = pagedViews.has(state.view) ? (state.page - 1) * limit : 0;
+      const data = await request(api + '/' + state.view + '?limit=' + limit + '&offset=' + offset);
+      const total = Number(data.page?.total ?? 0);
+      if (pagedViews.has(state.view) && total > 0 && offset >= total) {
+        state.page = Math.max(1, Math.ceil(total / limit));
+        return loadView();
+      }
       render(state.view, data);
     } catch (error) {
       result.innerHTML = empty(error.message);
@@ -424,7 +455,7 @@
       const receipt = await request(`${api}/runs`, { method:'POST', body:JSON.stringify({}) });
       setStatus(`已冻结 ${count(receipt.selectedSources)} 条普通用户评论，后台将继续完成语义提取、向量归并与结果发布。`, 'ready');
       runDialog.close();
-      state.view = 'runs'; await loadView();
+      state.view = 'runs'; state.page = 1; await loadView();
     } catch (error) {
       $('#run-preview-feedback').textContent = error.message;
       $('#run-preview-feedback').dataset.kind = 'error';
@@ -434,7 +465,14 @@
     }
   }
 
-  document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', async () => { state.view = button.dataset.view; await loadView(); }));
+  document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', async () => { state.view = button.dataset.view; state.page = 1; await loadView(); }));
+  result.addEventListener('click', async event => {
+    const button = event.target.closest('[data-page-offset]');
+    if (!button || button.disabled) return;
+    state.page = Math.max(1, Math.floor(Number(button.dataset.pageOffset) / pageLimit()) + 1);
+    await loadView();
+    result.scrollIntoView({ block:'start', behavior:'smooth' });
+  });
   $('#refresh').addEventListener('click', async () => { await loadSetup().catch(error => setStatus(error.message, 'error')); await loadView(); });
   $('#research-settings').addEventListener('click', openSettings);
   $('#start-run').addEventListener('click', openRunPreview);
