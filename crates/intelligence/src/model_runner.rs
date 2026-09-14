@@ -4,6 +4,7 @@
 //! user-created Run is the sole source of external work; a tick with no pending V1 step is idle.
 
 use crate::{
+    comment_research_kernel::prewarm_current_sources,
     comment_research_worker,
     model_secrets::{ModelSecretStore, model_secret_store},
     model_settings::ModelError,
@@ -51,6 +52,15 @@ pub async fn run_model_worker_with_drain(
             }
         }
         if drain.is_requested() || !model_schema_ready(&database).await {
+            continue;
+        }
+        // Keep the read projection on the current input contract before serving any queued
+        // work. This is deterministic local derivation only: it never saves a policy, creates a
+        // Run, or contacts a provider. In particular, a derivation-version cutover must not make
+        // the read-only Voices view empty until a user happens to preview a Run.
+        if let Err(error) = prewarm_current_sources(&database).await {
+            eprintln!("comment research input derivation failed: {error}");
+            model_worker_heartbeat(&database, "error", Some("derivation_refresh_failed")).await?;
             continue;
         }
         model_worker_heartbeat(&database, "running", None).await?;

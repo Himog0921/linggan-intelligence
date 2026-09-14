@@ -32,7 +32,7 @@ V5 受控 Run `af79c247-104e-4618-b12c-3b0d1dba6bdb` 已终态：冻结 20 条�
 
 ### COMMENT-RESEARCH-RESET-001 / Issue #213（V1 已合并、开发库已切换、3000 已上线；首轮模型配置与业务验收待执行）
 
-Mog 已决定评论研究仍处开发期：既有研究派生结果可以删除，不做 Task B、P4 与新系统之间的数据迁移。新交付只保留 Raw Comment/Evidence、来源资格、作者事实、清洗定位、调用账本、预算与 lease/recovery 等可独立复用基础；旧 candidate/relation/vector、P4 HDBSCAN/Leiden/adapter/group、旧超级查询和页面读取将全部退役。唯一未来合同为 [COMMENT-RESEARCH-RESET-001](plans/active/comment-research-reset-001.md)，长期裁定为 [DEC-0003](decisions/0003-comment-research-single-semantic-kernel.md)。
+Mog 已决定评论研究仍处开发期：既有研究派生结果可以删除，不做 Task B、P4 与新系统之间的数据迁移。新交付只保留 Raw Comment/Evidence、来源资格、作者事实、清洗定位、调用账本、预算与 lease/recovery 等可独立复用基础；旧 candidate/relation/vector、P4 HDBSCAN/Leiden/adapter/group、旧超级查询和页面读取将全部退役。唯一未来内核由 [COMMENT-RESEARCH-RESET-001](plans/active/comment-research-reset-001.md) 与 [DEC-0003](decisions/0003-comment-research-single-semantic-kernel.md) 裁定；其中当前 Derivation 输入合同以 [COMMENT-RESEARCH-V1-REAL-CLOSURE-001](plans/active/comment-research-v1-real-closure-001.md#31-语义上下文与审计上下文comment-research-context-input-001) 的 `comment-research.derivation.v2` 为准，前者不再规定输入版本。
 
 本轮已完成旧路径依赖图与代码替换。`0063_content_author_attribution` 是作品作者归属唯一投影；`0064`–`0068` 建立 versioned ResearchDerivation、保存策略、冻结 Run、四类失败语义、RunItem/归并 lease、四类 Atom、版本化 embedding、exact cosine Top-K 候选、受限同一/新问题决定、immutable ResultRevision 和独立变化信号。确认作品作者回复才从研究正文移除 `作者 ` 徽标，Raw Comment 不改写；`author_identity_unknown` 不进入研究分母。模型输出必须通过 Unicode span、kind、来源与定义候选校验，才可写入 Atom/Membership；`solution`/`experience` 仍是原声证据。生产 `linggan-comment-worker --execute [--once]` 只推进 V1 的语义、向量、归并与发布步骤，通用 invocation ledger 保存预算、调用、失败与用量；短暂 adapter/provider 问题有界重试，永久不兼容记录到具体 Item，旧 recovery 不能阻断新 Run。
 

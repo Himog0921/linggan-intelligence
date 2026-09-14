@@ -19,6 +19,7 @@ use uuid::Uuid;
 pub const DERIVATION_VERSION: &str = "comment-research.derivation.v2";
 const CONTEXT_MANIFEST_CONTRACT: &str = "comment-research.context.v2";
 const MAX_DERIVATIONS_PER_PASS: i64 = 3000;
+const MAX_DERIVATION_PREWARM_PASSES: usize = 100;
 const EXTRACTION_CONTRACT: &str = "comment-research.semantic.v5/extract:problem,need,solution,experience;evidence:exact-source-quote;output:exact-json-or-single-json-fence;examples:required";
 const MEMBERSHIP_CONTRACT: &str = "comment-research.semantic.v5/membership:retrieval-only-before-decision;output:exact-json-or-single-json-fence;examples:required";
 
@@ -95,6 +96,8 @@ pub enum CommentResearchKernelError {
     PolicyInputContractStale,
     #[error("no eligible ordinary-user derivations are available")]
     NoEligibleDerivations,
+    #[error("current comment derivations did not settle within the bounded prewarm")]
+    DerivationPrewarmIncomplete,
     #[error("no enabled, qualified embedding configuration is available")]
     EmbeddingNotReady,
     #[error("the selected research model has not passed the V1 semantic probe")]
@@ -340,6 +343,24 @@ pub async fn derive_current_sources(
         derived += persist_derivation(database, &row).await?;
     }
     Ok(derived)
+}
+
+/// Brings the current, readable source projection onto the active derivation contract before a
+/// read surface is exposed. It is intentionally bounded so a deployment cannot spin forever if
+/// new source material keeps arriving; failure leaves the caller to keep the old surface running.
+/// This only persists deterministic derivations. It neither authorizes nor starts model work.
+pub async fn prewarm_current_sources(
+    database: &Database,
+) -> Result<u64, CommentResearchKernelError> {
+    let mut derived_total = 0;
+    for _ in 0..MAX_DERIVATION_PREWARM_PASSES {
+        let derived = derive_current_sources(database, usize::MAX).await?;
+        derived_total += derived;
+        if derived == 0 {
+            return Ok(derived_total);
+        }
+    }
+    Err(CommentResearchKernelError::DerivationPrewarmIncomplete)
 }
 
 /// Saving a policy is the only authorization boundary for a user-initiated run. Starting an

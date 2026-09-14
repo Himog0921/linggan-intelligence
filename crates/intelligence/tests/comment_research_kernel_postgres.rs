@@ -15,9 +15,9 @@ use linggan_intelligence::comment_research_embeddings::{
 use linggan_intelligence::comment_research_kernel::{
     CommentResearchKernelError, DERIVATION_VERSION, ResearchRunReceipt, RunItemFailureClass,
     SaveResearchPolicy, claim_next_run_item, derive_current_sources,
-    fail_active_runs_without_embedding_config, preview_run, record_run_item_failure,
-    recover_expired_run_items, refresh_run_completion_for_atom, reset_development_derived,
-    save_active_policy, start_run,
+    fail_active_runs_without_embedding_config, preview_run, prewarm_current_sources,
+    record_run_item_failure, recover_expired_run_items, refresh_run_completion_for_atom,
+    reset_development_derived, save_active_policy, start_run,
 };
 use linggan_intelligence::comment_research_problems::{
     CommentResearchProblemError, ExistingProblemAdmission, NewProblemAdmission,
@@ -766,8 +766,8 @@ async fn derivation_preserves_raw_text_and_excludes_confirmed_content_author_rep
     )
     .await;
 
-    assert_eq!(derive_current_sources(&database, 100).await.unwrap(), 3);
-    assert_eq!(derive_current_sources(&database, 100).await.unwrap(), 0);
+    assert_eq!(prewarm_current_sources(&database).await.unwrap(), 3);
+    assert_eq!(prewarm_current_sources(&database).await.unwrap(), 0);
 
     let rows = sqlx::query(
         "SELECT source_ref,research_text,author_role,eligibility,normalization_reasons \

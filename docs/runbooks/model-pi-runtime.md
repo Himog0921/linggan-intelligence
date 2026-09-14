@@ -26,7 +26,7 @@ npm test --prefix apps/pi-adapter
 
 1. 用户在模型设置保存并测试可调用的生成模型，以及独立的 embedding 配置。
 2. 用户在评论研究保存一次 policy（研究模型与单轮总 Token 限额）。这只保存策略；语义提取、向量候选与问题归并的每笔调用都附属该 Run 并写入通用调用账本。
-3. 用户点击“开始研究”后，V1 冻结当前普通用户且可读的评论；`linggan-comment-worker --execute [--once]` 依次执行语义提取、embedding、候选归并和结果发布。
+3. 受控安装会在重启旧 API 前，以有界 `linggan-comment-worker --derive-current` 确定性补齐当前输入合同的评论派生；每次本机 API 启动在绑定 3000 前和常驻 `linggan-worker` 的循环中也会执行同一补齐。它们只读取已采集评论并写入可审计的派生记录，不保存 policy、不创建 Run，也不调用 provider；安装预热失败时旧 API 不重启，API 启动门失败时新 API 不绑定 3000。用户点击“开始研究”后，V1 才冻结当前普通用户且可读的评论；`linggan-comment-worker --execute [--once]` 依次执行语义提取、embedding、候选归并和结果发布。
 4. 生成模型只输出 semantic Atom 或 same/new problem JSON；embedding 只返回向量。统计、membership、变化与发布由 Rust/SQL 校验和写入。
 5. 每次调用落入通用 `linggan_model_invocation`：请求 hash、模型/连接版本、预留与实际用量、provider 失败及 V1 stage/run reference 可审计。adapter/provider 的短暂失败最多重试到队列上限；不兼容输入/配置与无效输出终态留痕，不阻塞后续 Item。
 
