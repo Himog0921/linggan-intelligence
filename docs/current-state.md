@@ -21,9 +21,9 @@ Mog 已授权只重置评论研究派生层：Run、RunItem、Atom、向量空�
 
 2026-09-14 已在共享开发库执行仅派生层的实际 reset：删除 1,643 个 Derivation、4 个 Run、1,248 个 RunItem、58 个 Atom、3 个 Problem 与 0 个 ResultRevision；随后再次派生出当前 1,643 条研究输入。Raw Comment 为 3,102，模型调用账本、模型配置、向量 profile 与 active policy 均保留。20 条受控真实首批的 Run `4cfd518c-a1df-4046-88ce-1bc5190fd088` 完成为 `completed_with_failures`，没有发布 ResultRevision：语义提取有 3 次不可解析 JSON 和 1 次合同拒绝，问题归并有 2 次结构不合格。该事实证明当前发布门槛生效，也证明不能把现有结果展示为正式研究版本。Issue #256 只修复 V2 输出合同与安全传输边界，部署后仍只允许新的受控首批；全量和连续自动研究继续关闭。
 
-### COMMENT-RESEARCH-OUTPUT-DIAGNOSTICS-001 / Issue #258、#260（源码实施中；V4 将完成最后一轮受控验证）
+### COMMENT-RESEARCH-OUTPUT-DIAGNOSTICS-001 / Issue #258、#260、#262（源码实施中；V5 将完成受控验证）
 
-V2 受控 Run `e4e6d635-7f63-434d-8852-7c6ee91086ff` 为 `completed_with_failures`：1 个 RunItem 是 `semantic_json_unparseable`，7 个 Problem Resolution 是 `invalid_problem_resolution`，没有 ResultRevision。V3 已将 JSON、schema 与 admission 失败分开记录，并在安全账本保留无原文的响应形态；但在重跑前发现问题归并 `same_problem` 示例使用固定演示 UUID，模型可能照抄它并触发候选接纳拒绝。V4 将该示例绑定到本次候选集的实际 `problemRef` 与 `definitionRevision`，无候选时只保留 `new_problem` 示例；随后按开发期授权再 reset **仅派生层**，运行最多 20 条，不因历史两轮失败扩大到全量。失败调用仍不保存评论、prompt、模型回复或思考，不能把未验证文本当诊断证据。
+V4 受控 Run `64a9f4f8-b5d9-43c7-be3e-4214ab0f82fc` 完成为 `completed_with_failures`：20 条中 9 条有信号、5 条无信号、6 条 `semantic_contract_rejected`；问题归并 10 次成功、1 次 `problem_resolution_json_schema_rejected`，没有 `invalid_problem_resolution`。这证明候选绑定修复消除了固定 UUID 导致的接纳拒绝，但安全账本显示 6 次语义失败都已收到完整直接 JSON，仍在接纳阶段失败。V5 不读取或保存模型全文，而将 atom 证据从模型计算的 Unicode 起止坐标改为逐字复制的唯一原文短句，再由程序映射回不可变 source offsets；失败时单列 `semantic_evidence_quote_unmappable`。随后按开发期授权再次 reset **仅派生层**，运行最多 20 条；连续排程继续关闭。原始评论、作品上下文、模型/向量配置和通用调用账本不受影响。
 
 ### COMMENT-RESEARCH-RESET-001 / Issue #213（V1 已合并、开发库已切换、3000 已上线；首轮模型配置与业务验收待执行）
 

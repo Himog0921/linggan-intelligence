@@ -8,7 +8,7 @@
 use crate::{
     comment_cleaning::{CleanComment, outbound},
     comment_research_atoms::{
-        CommentResearchAtomError, SemanticExtractionOutput, accept_semantic_output,
+        CommentResearchAtomError, SemanticQuoteExtractionOutput, accept_semantic_quote_output,
     },
     comment_research_embeddings::{
         AtomEmbeddingResult, CommentResearchEmbeddingError, EmbeddingWorkClaim,
@@ -307,7 +307,7 @@ async fn settle_semantic_response(
             let output = match response
                 .text
                 .as_deref()
-                .map(parse_contract_json::<SemanticExtractionOutput>)
+                .map(parse_contract_json::<SemanticQuoteExtractionOutput>)
                 .unwrap_or(Err(ContractOutputError::NotJson))
             {
                 Ok(output) => output,
@@ -332,8 +332,13 @@ async fn settle_semantic_response(
                     return Ok(());
                 }
             };
-            match accept_semantic_output(database, claim, output, Some(reserved.invocation_ref))
-                .await
+            match accept_semantic_quote_output(
+                database,
+                claim,
+                output,
+                Some(reserved.invocation_ref),
+            )
+            .await
             {
                 Ok(_) => {
                     settle_call(database, reserved, Some(&response), true, None).await?;
@@ -749,19 +754,19 @@ fn semantic_prompt(input: &ClaimedResearchInput) -> Result<String, ModelError> {
     })
     .text;
     serde_json::to_string(&json!({
-        "contract":"comment-research.semantic.v3",
-        "task":"只判断研究正文中明确表达的用户问题、需求、解决方法或经历。没有足够研究信号时必须输出 no_signal；不得输出空 atoms。evidenceStart/evidenceEnd 必须精确指向研究正文中支持该命题的 Unicode 字符位置，左闭右开。",
+        "contract":"comment-research.semantic.v5",
+        "task":"只判断研究正文中明确表达的用户问题、需求、解决方法或经历。没有足够研究信号时必须输出 no_signal；不得输出空 atoms。每个 atom 的 evidence 必须逐字复制研究正文中支持该命题的一段连续、非空、唯一短句；不要输出字符位置、改写、概括或研究正文以外的文字。",
         "schema":{
             "atoms":{
                 "outcome":"atoms",
-                "atoms":[{"kind":"problem|need|solution|experience","proposition":"不超过1000字的中性命题","basis":"explicit|context_resolved","evidenceStart":0,"evidenceEnd":1}]
+                "atoms":[{"kind":"problem|need|solution|experience","proposition":"不超过1000字的中性命题","basis":"explicit|context_resolved","evidence":"研究正文中逐字复制的一段唯一短句"}]
             },
             "noSignal":{"outcome":"no_signal","reason":"不超过200字"}
         },
         "outputSchema":semantic_output_schema(),
         "examples":[
             {"outcome":"no_signal","reason":"评论只有礼貌感谢，没有明确问题、需求、方法或经历。"},
-            {"outcome":"atoms","atoms":[{"kind":"problem","proposition":"家长难以让孩子开始完成作业。","basis":"explicit","evidenceStart":0,"evidenceEnd":4}]}
+            {"outcome":"atoms","atoms":[{"kind":"problem","proposition":"家长难以让孩子开始完成作业。","basis":"explicit","evidence":"拖到很晚才开始"}]}
         ],
         "researchText":outbound_text,
         "contextManifest":input.context_manifest,
@@ -815,7 +820,7 @@ fn resolution_prompt(proposition: &str, candidates: &[Value]) -> Result<String, 
         }
     }
     serde_json::to_string(&json!({
-        "contract":"comment-research.semantic.v4/problem-resolution",
+        "contract":"comment-research.semantic.v5/problem-resolution",
         "task":"判断这个表达是否与候选定义代表同一个待解决的用户问题。若同一，输出 same_problem 且只能原样使用给定候选的 problemRef 和 definitionRevision；若都不同，输出 new_problem 并给出简洁中文名称和定义。不能因主题相近而合并不同困扰。不要输出候选以外的 problemRef。",
         "schema":{
             "same":{"decision":"same_problem","problemRef":"候选中的 UUID","definitionRevision":1,"rationale":"不超过300字"},
@@ -840,10 +845,9 @@ fn semantic_output_schema() -> Value {
                     "kind":{"type":"string","enum":["problem","need","solution","experience"]},
                     "proposition":{"type":"string","maxLength":1000},
                     "basis":{"type":"string","enum":["explicit","context_resolved"]},
-                    "evidenceStart":{"type":"integer","minimum":0},
-                    "evidenceEnd":{"type":"integer","minimum":1}
+                    "evidence":{"type":"string","minLength":1,"maxLength":1000}
                 },
-                "required":["kind","proposition","basis","evidenceStart","evidenceEnd"],
+                "required":["kind","proposition","basis","evidence"],
                 "additionalProperties":false
             }},
             "reason":{"type":"string","maxLength":200}
@@ -1150,6 +1154,7 @@ fn semantic_failure_stage(failure: Option<&str>) -> Option<&'static str> {
         Some("semantic_json_schema_rejected") => Some("semantic_json_schema"),
         Some("semantic_contract_rejected") => Some("semantic_contract_acceptance"),
         Some("semantic_evidence_offset_unmappable") => Some("semantic_evidence_offset_mapping"),
+        Some("semantic_evidence_quote_unmappable") => Some("semantic_evidence_quote_mapping"),
         Some("semantic_claim_lost") => Some("semantic_claim_state"),
         Some("semantic_acceptance_storage_failed") => Some("semantic_acceptance_storage"),
         Some("problem_resolution_json_unparseable") => Some("problem_resolution_json_parse"),
@@ -1177,6 +1182,7 @@ fn semantic_acceptance_failure_code(error: &CommentResearchAtomError) -> &'stati
     match error {
         CommentResearchAtomError::InvalidOutput => "semantic_contract_rejected",
         CommentResearchAtomError::DerivationCorrupt => "semantic_evidence_offset_unmappable",
+        CommentResearchAtomError::EvidenceQuoteUnmappable => "semantic_evidence_quote_unmappable",
         CommentResearchAtomError::ClaimLost => "semantic_claim_lost",
         CommentResearchAtomError::Database(_) => "semantic_acceptance_storage_failed",
     }
@@ -1654,6 +1660,10 @@ mod tests {
             semantic_failure_stage(Some("semantic_evidence_offset_unmappable")),
             Some("semantic_evidence_offset_mapping")
         );
+        assert_eq!(
+            semantic_failure_stage(Some("semantic_evidence_quote_unmappable")),
+            Some("semantic_evidence_quote_mapping")
+        );
         assert_eq!(semantic_failure_stage(Some("provider_timeout")), None);
         assert_eq!(
             semantic_failure_stage(Some("problem_resolution_json_schema_rejected")),
@@ -1670,6 +1680,10 @@ mod tests {
         assert_eq!(
             semantic_acceptance_failure_code(&CommentResearchAtomError::DerivationCorrupt),
             "semantic_evidence_offset_unmappable"
+        );
+        assert_eq!(
+            semantic_acceptance_failure_code(&CommentResearchAtomError::EvidenceQuoteUnmappable),
+            "semantic_evidence_quote_unmappable"
         );
     }
 
@@ -1697,7 +1711,7 @@ mod tests {
                 .is_err()
         );
         assert_eq!(
-            parse_contract_json::<SemanticExtractionOutput>(r#"{"outcome":"unknown"}"#),
+            parse_contract_json::<SemanticQuoteExtractionOutput>(r#"{"outcome":"unknown"}"#),
             Err(ContractOutputError::SchemaRejected)
         );
     }

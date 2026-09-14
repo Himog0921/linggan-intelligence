@@ -58,6 +58,28 @@ pub struct SemanticAtomProposal {
     pub evidence_end: usize,
 }
 
+/// V5 model input asks for an exact visible quotation instead of asking a language model to
+/// count Unicode scalars. The program alone maps the quote to persisted offsets.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SemanticQuoteAtomProposal {
+    pub kind: AtomKind,
+    pub proposition: String,
+    pub basis: AtomBasis,
+    pub evidence: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(tag = "outcome", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SemanticQuoteExtractionOutput {
+    Atoms {
+        atoms: Vec<SemanticQuoteAtomProposal>,
+    },
+    NoSignal {
+        reason: String,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "outcome", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SemanticExtractionOutput {
@@ -83,12 +105,64 @@ pub enum CommentResearchAtomError {
     InvalidOutput,
     #[error("the persisted derivation cannot map research spans to source spans")]
     DerivationCorrupt,
+    #[error("the model evidence quote does not uniquely match the frozen research text")]
+    EvidenceQuoteUnmappable,
 }
 
 struct ClaimedInput {
     research_text: String,
     offsets: Vec<(usize, usize)>,
     extraction_rule_hash: String,
+}
+
+pub async fn accept_semantic_quote_output(
+    database: &Database,
+    claim: &ResearchRunItemClaim,
+    output: SemanticQuoteExtractionOutput,
+    invocation_ref: Option<Uuid>,
+) -> Result<AtomAcceptanceReceipt, CommentResearchAtomError> {
+    let mut transaction = database.pool().begin().await?;
+    let input = read_claimed_input(&mut transaction, claim).await?;
+    let receipt = match output {
+        SemanticQuoteExtractionOutput::Atoms { atoms } => {
+            let (accepted, rejected, quote_unmappable) =
+                accept_quote_atoms(&mut transaction, claim, &input, &atoms, invocation_ref).await?;
+            if accepted == 0 {
+                return Err(if quote_unmappable {
+                    CommentResearchAtomError::EvidenceQuoteUnmappable
+                } else {
+                    CommentResearchAtomError::InvalidOutput
+                });
+            }
+            finish_item(&mut transaction, claim, "succeeded").await?;
+            AtomAcceptanceReceipt {
+                state: "succeeded".into(),
+                accepted_atoms: accepted,
+                rejected_atoms: rejected,
+            }
+        }
+        SemanticQuoteExtractionOutput::NoSignal { reason } => {
+            if !valid_text(&reason, 200) {
+                return Err(CommentResearchAtomError::InvalidOutput);
+            }
+            finish_item(&mut transaction, claim, "no_signal").await?;
+            AtomAcceptanceReceipt {
+                state: "no_signal".into(),
+                accepted_atoms: 0,
+                rejected_atoms: 0,
+            }
+        }
+    };
+    refresh_run_completion(&mut transaction, claim.run_ref)
+        .await
+        .map_err(|error| match error {
+            crate::comment_research_kernel::CommentResearchKernelError::Database(error) => {
+                CommentResearchAtomError::Database(error)
+            }
+            _ => CommentResearchAtomError::ClaimLost,
+        })?;
+    transaction.commit().await?;
+    Ok(receipt)
 }
 
 pub async fn accept_semantic_output(
@@ -166,6 +240,54 @@ async fn read_claimed_input(
     })
 }
 
+async fn accept_quote_atoms(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    claim: &ResearchRunItemClaim,
+    input: &ClaimedInput,
+    atoms: &[SemanticQuoteAtomProposal],
+    invocation_ref: Option<Uuid>,
+) -> Result<(usize, usize, bool), CommentResearchAtomError> {
+    if atoms.is_empty() || atoms.len() > MAX_ATOMS_PER_ITEM {
+        return Err(CommentResearchAtomError::InvalidOutput);
+    }
+    let mut accepted = 0;
+    let mut rejected = 0;
+    let mut quote_unmappable = false;
+    for (ordinal, atom) in atoms.iter().enumerate() {
+        let (research_start, research_end, source_start, source_end) =
+            match validate_quote_atom(input, atom) {
+                Ok(offsets) => offsets,
+                Err(CommentResearchAtomError::InvalidOutput) => {
+                    rejected += 1;
+                    continue;
+                }
+                Err(CommentResearchAtomError::EvidenceQuoteUnmappable) => {
+                    rejected += 1;
+                    quote_unmappable = true;
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
+        insert_atom(
+            transaction,
+            claim,
+            ordinal,
+            &atom.kind,
+            &atom.proposition,
+            &atom.basis,
+            research_start,
+            research_end,
+            source_start,
+            source_end,
+            &input.extraction_rule_hash,
+            invocation_ref,
+        )
+        .await?;
+        accepted += 1;
+    }
+    Ok((accepted, rejected, quote_unmappable))
+}
+
 async fn accept_atoms(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     claim: &ResearchRunItemClaim,
@@ -187,38 +309,92 @@ async fn accept_atoms(
             }
             Err(error) => return Err(error),
         };
-        sqlx::query(
-            "INSERT INTO linggan_comment_research_atom( \
-                 atom_ref,run_ref,derivation_ref,ordinal,kind,proposition,basis,research_start, \
-                 research_end,source_start,source_end,rule_hash,input_hash,invocation_ref \
-             ) SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,item.input_hash,$13 \
-               FROM linggan_comment_research_run_item item \
-               WHERE item.run_ref=$2 AND item.derivation_ref=$3 AND item.state='running'",
+        insert_atom(
+            transaction,
+            claim,
+            ordinal,
+            &atom.kind,
+            &atom.proposition,
+            &atom.basis,
+            atom.evidence_start,
+            atom.evidence_end,
+            source_start,
+            source_end,
+            &input.extraction_rule_hash,
+            invocation_ref,
         )
-        .bind(Uuid::new_v4())
-        .bind(claim.run_ref)
-        .bind(claim.derivation_ref)
-        .bind(i32::try_from(ordinal).map_err(|_| CommentResearchAtomError::InvalidOutput)?)
-        .bind(atom.kind.as_db())
-        .bind(atom.proposition.trim())
-        .bind(atom.basis.as_db())
-        .bind(
-            i32::try_from(atom.evidence_start)
-                .map_err(|_| CommentResearchAtomError::InvalidOutput)?,
-        )
-        .bind(
-            i32::try_from(atom.evidence_end)
-                .map_err(|_| CommentResearchAtomError::InvalidOutput)?,
-        )
-        .bind(i32::try_from(source_start).map_err(|_| CommentResearchAtomError::InvalidOutput)?)
-        .bind(i32::try_from(source_end).map_err(|_| CommentResearchAtomError::InvalidOutput)?)
-        .bind(&input.extraction_rule_hash)
-        .bind(invocation_ref)
-        .execute(&mut **transaction)
         .await?;
         accepted += 1;
     }
     Ok((accepted, rejected))
+}
+
+async fn insert_atom(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    claim: &ResearchRunItemClaim,
+    ordinal: usize,
+    kind: &AtomKind,
+    proposition: &str,
+    basis: &AtomBasis,
+    research_start: usize,
+    research_end: usize,
+    source_start: usize,
+    source_end: usize,
+    extraction_rule_hash: &str,
+    invocation_ref: Option<Uuid>,
+) -> Result<(), CommentResearchAtomError> {
+    sqlx::query(
+        "INSERT INTO linggan_comment_research_atom( \
+             atom_ref,run_ref,derivation_ref,ordinal,kind,proposition,basis,research_start, \
+             research_end,source_start,source_end,rule_hash,input_hash,invocation_ref \
+         ) SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,item.input_hash,$13 \
+           FROM linggan_comment_research_run_item item \
+           WHERE item.run_ref=$2 AND item.derivation_ref=$3 AND item.state='running'",
+    )
+    .bind(Uuid::new_v4())
+    .bind(claim.run_ref)
+    .bind(claim.derivation_ref)
+    .bind(i32::try_from(ordinal).map_err(|_| CommentResearchAtomError::InvalidOutput)?)
+    .bind(kind.as_db())
+    .bind(proposition.trim())
+    .bind(basis.as_db())
+    .bind(i32::try_from(research_start).map_err(|_| CommentResearchAtomError::InvalidOutput)?)
+    .bind(i32::try_from(research_end).map_err(|_| CommentResearchAtomError::InvalidOutput)?)
+    .bind(i32::try_from(source_start).map_err(|_| CommentResearchAtomError::InvalidOutput)?)
+    .bind(i32::try_from(source_end).map_err(|_| CommentResearchAtomError::InvalidOutput)?)
+    .bind(extraction_rule_hash)
+    .bind(invocation_ref)
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
+}
+
+fn validate_quote_atom(
+    input: &ClaimedInput,
+    atom: &SemanticQuoteAtomProposal,
+) -> Result<(usize, usize, usize, usize), CommentResearchAtomError> {
+    if !valid_text(&atom.proposition, 1000) || !valid_text(&atom.evidence, 1000) {
+        return Err(CommentResearchAtomError::InvalidOutput);
+    }
+    let matches = input
+        .research_text
+        .match_indices(&atom.evidence)
+        .map(|(byte_start, matched)| (byte_start, byte_start + matched.len()))
+        .collect::<Vec<_>>();
+    let [(byte_start, byte_end)] = matches.as_slice() else {
+        return Err(CommentResearchAtomError::EvidenceQuoteUnmappable);
+    };
+    let research_start = input.research_text[..*byte_start].chars().count();
+    let research_end = input.research_text[..*byte_end].chars().count();
+    let legacy = SemanticAtomProposal {
+        kind: atom.kind.clone(),
+        proposition: atom.proposition.clone(),
+        basis: atom.basis.clone(),
+        evidence_start: research_start,
+        evidence_end: research_end,
+    };
+    let (source_start, source_end) = validate_atom(input, &legacy)?;
+    Ok((research_start, research_end, source_start, source_end))
 }
 
 fn validate_atom(
@@ -315,6 +491,41 @@ mod tests {
         assert!(matches!(
             validate_atom(&input, &invalid),
             Err(CommentResearchAtomError::InvalidOutput)
+        ));
+    }
+
+    #[test]
+    fn quoted_evidence_maps_unicode_scalars_without_model_offsets() {
+        let input = ClaimedInput {
+            research_text: "我😊不想催促".into(),
+            offsets: vec![(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 6)],
+            extraction_rule_hash: "unused".into(),
+        };
+        let atom = SemanticQuoteAtomProposal {
+            kind: AtomKind::Problem,
+            proposition: "家长不想以催促应对孩子".into(),
+            basis: AtomBasis::Explicit,
+            evidence: "😊不想".into(),
+        };
+        assert_eq!(validate_quote_atom(&input, &atom).unwrap(), (1, 4, 1, 4));
+    }
+
+    #[test]
+    fn quoted_evidence_must_match_once() {
+        let input = ClaimedInput {
+            research_text: "我不想催促，也不想催促".into(),
+            offsets: (0..11).map(|index| (index, index + 1)).collect(),
+            extraction_rule_hash: "unused".into(),
+        };
+        let atom = SemanticQuoteAtomProposal {
+            kind: AtomKind::Problem,
+            proposition: "家长不想催促".into(),
+            basis: AtomBasis::Explicit,
+            evidence: "不想催促".into(),
+        };
+        assert!(matches!(
+            validate_quote_atom(&input, &atom),
+            Err(CommentResearchAtomError::EvidenceQuoteUnmappable)
         ));
     }
 

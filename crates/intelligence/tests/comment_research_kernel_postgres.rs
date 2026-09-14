@@ -1451,6 +1451,15 @@ async fn run_read_exposes_safe_semantic_failure_counts_without_model_or_comment_
         "2026-09-01T08:00:02Z",
     )
     .await;
+    let quote_source = comment_with_author(
+        &database,
+        "failure-summary-note",
+        "quote-valid",
+        "孩子写作业总是拖延。SETTLEMENT_QUOTE_VALID",
+        Some("reader-1"),
+        "2026-09-01T08:00:03Z",
+    )
+    .await;
     let config_ref = qualified_research_config(&database).await;
     save_active_policy(
         &database,
@@ -1483,7 +1492,7 @@ async fn run_read_exposes_safe_semantic_failure_counts_without_model_or_comment_
     );
     let secrets = SyntheticModelSecrets;
     let drain = ModelWorkerDrain::new();
-    for _ in 0..3 {
+    for _ in 0..4 {
         assert!(
             run_once(&database, &secrets, &adapter, &drain)
                 .await
@@ -1519,7 +1528,7 @@ async fn run_read_exposes_safe_semantic_failure_counts_without_model_or_comment_
     .unwrap();
     assert_eq!(
         outcomes.len(),
-        3,
+        4,
         "each synthetic semantic settlement must retain one invocation receipt"
     );
     let outcome_for = |source_ref| {
@@ -1554,6 +1563,14 @@ async fn run_read_exposes_safe_semantic_failure_counts_without_model_or_comment_
             .as_deref(),
         Some("semantic_contract_acceptance")
     );
+    let quote_outcome = outcome_for(quote_source);
+    assert!(quote_outcome
+        .get::<Option<String>, _>("failure_code")
+        .is_none());
+    assert!(quote_outcome
+        .get::<Option<String>, _>("failure_stage")
+        .is_none());
+
     let offset_outcome = outcome_for(offset_source);
     assert_eq!(
         offset_outcome
@@ -1591,13 +1608,13 @@ async fn run_read_exposes_safe_semantic_failure_counts_without_model_or_comment_
         item["itemFailureCounts"]["semantic_evidence_offset_unmappable"],
         1
     );
-    assert_eq!(item["modelExecution"]["callCount"], 3);
-    assert_eq!(item["modelExecution"]["startedCallCount"], 3);
+    assert_eq!(item["modelExecution"]["callCount"], 4);
+    assert_eq!(item["modelExecution"]["startedCallCount"], 4);
     assert_eq!(item["modelExecution"]["failedCallCount"], 3);
-    assert_eq!(item["modelExecution"]["elapsedMs"], 3);
+    assert_eq!(item["modelExecution"]["elapsedMs"], 4);
     assert_eq!(
         item["modelExecution"]["stageCounts"]["semantic_extraction"],
-        3
+        4
     );
     assert_eq!(
         item["modelExecution"]["failureCounts"]["semantic_json_unparseable"],
@@ -1610,6 +1627,7 @@ async fn run_read_exposes_safe_semantic_failure_counts_without_model_or_comment_
     assert!(!public_run_payload.contains("SETTLEMENT_JSON_UNPARSEABLE"));
     assert!(!public_run_payload.contains("SETTLEMENT_CONTRACT_REJECTED"));
     assert!(!public_run_payload.contains("SETTLEMENT_OFFSET_UNMAPPABLE"));
+    assert!(!public_run_payload.contains("SETTLEMENT_QUOTE_VALID"));
 }
 
 #[tokio::test]
