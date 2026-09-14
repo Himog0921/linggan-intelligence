@@ -20,6 +20,19 @@
 
 行号锚定在 `431e79b`（工作树干净、无未提交改动的技术基线）。若 HEAD 已前进，用 `git show 431e79b:<path> | sed -n 'Np'` 取当时的原文。**`431e79b` 之后除本报告自身的文档提交外不含任何代码改动**——`git diff 431e79b..HEAD --stat` 应只列出 `docs/` 下的文件；若列出了代码文件，说明此期间有人改了代码，请以那份新代码为准。
 
+> **已知的一次前进（写这份报告之后、我核查之前发生）**：并行会话的 **PR #278**（`a937bb8` + merge `83f161b`，标题 `fix(comment-research): constrain output variants`）落在 `origin/main` 上，它改动了 **B1 与 B3 所在的两个文件**：
+>
+> | 文件 | 行数变化 | 改了什么 |
+> |---|---|---|
+> | `crates/intelligence/src/comment_research_kernel.rs` | `+6` | 契约版本串 `v5 → v6`、`ensure_current_policy_contract` 增加两个 hash 比对 |
+> | `crates/intelligence/src/comment_research_worker.rs` | `+95` | 提示词与输出 JSON Schema 收紧（`minItems:1`、`oneOf` 互斥分支） |
+>
+> **B1 / B3 的机制没有被触碰**（我已按内容在新代码上复验：`lease_until<=scope_001_now()` 的回收、`SET state='running',attempts=attempts+1` 的认领、`recover_problem_resolution_leases` 都原样在位），但**这两个文件的全部行号整体下移**：kernel.rs 的行号请 `+6`（例：认领 `:880 → :886`，回收 `:953 → :959`），worker.rs 的请按函数名重新定位。
+>
+> 也就是说：如果你在 `origin/main` 上核 B1/B3，看到行号对不上但**代码形态一致**，那是这次位移，不是我把行号写错了。
+>
+> PR #278 一共只改了 **8 个文件**（`apps/pi-adapter/src/adapter.mjs`、`apps/pi-adapter/test/structured-output.test.mjs`、上面两个 `.rs`、`crates/intelligence/tests/comment_research_kernel_postgres.rs`、`docs/current-state.md`、`docs/issues/comment-research-output-diagnostics-001.md`、`docs/progress/2026-09.md`）。**其余全部发现（A1–A4、B2、B4–B7、C1–C3）的承重文件都不在其中**，行号照旧。
+
 **三条纪律**：
 
 - 第 3 节列的是**已被排除**的疑似项，不要重复上报。
