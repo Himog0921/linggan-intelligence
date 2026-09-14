@@ -122,8 +122,12 @@
     setStatus(setupSummary(), researchModelReady() && embeddingReady() ? 'ready' : 'warning');
   }
 
+  function statisticsResult(data) {
+    return data.statisticsResult || data.result || null;
+  }
+
   function resultWindow(data) {
-    const input = data.result?.inputCounts || {};
+    const input = statisticsResult(data)?.inputCounts || {};
     const currentComments = Number(input.currentCommentDenominator ?? 0);
     const currentWorks = Number(input.currentWorkDenominator ?? 0);
     const baselineComments = Number(input.baselineCommentDenominator ?? 0);
@@ -138,7 +142,9 @@
   }
 
   function resultMeta(data) {
-    const input = data.result?.inputCounts || {};
+    const statistics = statisticsResult(data);
+    if (!statistics) return '<p class="cr-v1-result-meta">尚无可用于占比、排行或变化判断的统计研究版本；下方只显示累计已确认事实。</p>';
+    const input = statistics.inputCounts || {};
     const selected = Number(input.selectedCommentCount ?? input.analyzedCommentCount ?? 0);
     const included = Number(input.includedCommentCount ?? input.analyzedCommentCount ?? 0);
     const excluded = Number(input.excludedTerminalCommentCount ?? 0);
@@ -148,36 +154,36 @@
     const coverage = partial
       ? '部分研究版本 · 本版纳入 ' + count(included) + ' / ' + count(selected) + ' 条冻结原声，' + count(excluded) + ' 条未纳入；问题归并 ' + count(organization.numerator) + ' / ' + count(organization.denominator) + ' 条 Atom。'
       : '完整研究版本 · 本版纳入 ' + count(included) + ' / ' + count(selected) + ' 条冻结原声。';
-    const comparison = data.result?.comparison || {};
+    const comparison = statistics.comparison || {};
     const windowText = window.kind === 'baseline'
       ? '本版样本位于基线窗口 ' + escape(date(comparison.baseline?.start)) + ' 至 ' + escape(date(comparison.baseline?.end)) + '；当前窗口没有可比样本。'
       : '当前窗口 ' + escape(date(comparison.current?.start)) + ' 至 ' + escape(date(comparison.current?.end)) + '。';
-    return '<p class="cr-v1-result-meta">已发布 ' + escape(date(data.result?.publishedAt)) + ' · ' + windowText + ' · ' + escape(coverage) + (partial ? ' <a href="?view=runs">查看运行记录</a>' : '') + '</p>';
+    return '<p class="cr-v1-result-meta">统计版本发布于 ' + escape(date(statistics.publishedAt)) + ' · ' + windowText + ' · ' + escape(coverage) + (partial ? ' <a href="?view=runs">查看运行记录</a>' : '') + '</p>';
+  }
+
+  function cumulativeMeta(data) {
+    const cumulative = data.cumulative || {};
+    const problems = Number(cumulative.problemCount ?? 0);
+    const atoms = Number(cumulative.confirmedAtomCount ?? 0);
+    const comments = Number(cumulative.confirmedCommentCount ?? 0);
+    const works = Number(cumulative.confirmedWorkCount ?? 0);
+    const last = cumulative.lastConfirmedAt ? `最近确认于 ${date(cumulative.lastConfirmedAt)}。` : '尚未确认任何稳定用户问题。';
+    return `<p class="cr-v1-result-meta">累计已确认：${count(problems)} 个用户问题 · ${count(atoms)} 条归并证据 · ${count(comments)} 条评论 · ${count(works)} 篇作品。${escape(last)}</p>`;
   }
 
   function renderOverview(data) {
     const items = data.currentProblems || [];
-    const window = resultWindow(data);
-    const baselineOnly = window.kind === 'baseline';
-    const heading = baselineOnly ? '本版已被研究的问题' : '当前已被研究的问题';
-    const explanation = baselineOnly
-      ? '本版冻结原声全部位于基线窗口，当前窗口没有可比样本。这里呈现已完成的研究证据；变化是否成立仍只由“变化观察”判断。'
-      : '这里回答“当前用户在表达什么”。变化信号只在“变化观察”中呈现。';
-    const columns = baselineOnly
-      ? ['用户问题', '本版基线评论占比', '本版基线作品覆盖', '本版基线评论数']
-      : ['用户问题', '当前评论占比', '当前作品覆盖', '当前评论数'];
+    const heading = '累计已确认的用户问题';
+    const explanation = '每条证据都已经通过问题归并接纳合同，因此会立即累计到这里。本轮尚未完成的信号不会被删除，但也不会被写成占比、排行或趋势。';
+    const columns = ['用户问题', '累计评论证据', '累计作品', '归并 Atom', '最近确认'];
     const rows = items.map(item => {
-      const commentCount = baselineOnly ? item.baselineCommentCount : item.currentCommentCount;
-      const workCount = baselineOnly ? item.baselineWorkCount : item.currentWorkCount;
-      const commentShare = baselineOnly ? share(commentCount, window.comments) : item.currentCommentShare;
-      const workShare = baselineOnly ? share(workCount, window.works) : item.currentWorkShare;
-      return '<tr><td><strong>' + escape(item.name) + '</strong><p>' + escape(item.meaning) + '</p></td><td>' + pct(commentShare) + '</td><td>' + pct(workShare) + '</td><td>' + count(commentCount) + '</td></tr>';
+      return '<tr><td><strong>' + escape(item.name) + '</strong><p>' + escape(item.meaning) + '</p></td><td>' + count(item.confirmedCommentCount) + '</td><td>' + count(item.confirmedWorkCount) + '</td><td>' + count(item.confirmedAtomCount) + '</td><td>' + escape(date(item.lastConfirmedAt)) + '</td></tr>';
     });
     const overviewDisclosure = items.length
       ? '<p class="cr-v1-overview-disclosure">概览仅展示 ' + count(items.length) + ' 个代表问题。<a href="?view=problems">查看全部用户问题（可分页浏览）</a></p>'
       : '';
-    result.innerHTML = '<section class="cr-v1-intro"><h2>' + heading + '</h2><p>' + explanation + '</p>' + resultMeta(data) + '</section>' +
-      (items.length ? table(columns, rows) + overviewDisclosure : empty('本版研究没有形成可显示的问题。'));
+    result.innerHTML = '<section class="cr-v1-intro"><h2>' + heading + '</h2><p>' + explanation + '</p>' + cumulativeMeta(data) + resultMeta(data) + '</section>' +
+      (items.length ? table(columns, rows) + overviewDisclosure : empty('当前还没有通过归并接纳合同的用户问题；这不表示没有评论或没有正在处理的研究信号。'));
   }
 
   function renderVoices(data) {
@@ -207,25 +213,14 @@
 
   function renderProblems(data) {
     const page = data.page || {items:[], total:0};
-    const window = resultWindow(data);
-    const baselineOnly = window.kind === 'baseline';
-    const columns = baselineOnly
-      ? ['问题定义', '本版基线样本', '证据 Atom']
-      : ['问题定义', '当前窗口', '前一窗口', '证据 Atom'];
+    const columns = ['问题定义', '累计评论证据', '累计作品', '归并 Atom', '最近确认'];
     const rows = page.items.map(item => {
       const definition = '<td><strong>' + escape(item.name) + '</strong><p>' + escape(item.meaning) + '</p></td>';
-      if (baselineOnly) {
-        const commentShare = share(item.baseline?.commentCount, window.comments);
-        const workShare = share(item.baseline?.workCount, window.works);
-        return '<tr>' + definition + '<td>' + count(item.baseline?.commentCount) + ' 条评论 · ' + pct(commentShare) + '<p>' + count(item.baseline?.workCount) + ' 篇作品 · ' + pct(workShare) + '</p></td><td>' + count(item.evidenceAtomCount) + '</td></tr>';
-      }
-      return '<tr>' + definition + '<td>' + count(item.current?.commentCount) + ' 条评论 · ' + pct(item.current?.commentShare) + '<p>' + count(item.current?.workCount) + ' 篇作品 · ' + pct(item.current?.workShare) + '</p></td><td>' + count(item.baseline?.commentCount) + ' 条评论 · ' + pct(item.baseline?.commentShare) + '<p>' + count(item.baseline?.workCount) + ' 篇作品 · ' + pct(item.baseline?.workShare) + '</p></td><td>' + count(item.evidenceAtomCount) + '</td></tr>';
+      return '<tr>' + definition + '<td>' + count(item.confirmedCommentCount) + '</td><td>' + count(item.confirmedWorkCount) + '</td><td>' + count(item.confirmedAtomCount) + '</td><td>' + escape(date(item.lastConfirmedAt)) + '</td></tr>';
     });
-    const explanation = baselineOnly
-      ? '本版冻结样本没有落入当前窗口，因此先展示实际被研究的基线样本；“变化观察”仍会明确说明不可比较。'
-      : '不同表达只有在记录了归并依据后才属于同一问题；向量相似度本身不会合并身份。';
-    result.innerHTML = '<section class="cr-v1-intro"><h2>稳定用户问题</h2><p>' + explanation + '</p>' + resultMeta(data) + '</section>' +
-      (page.items.length ? pagination(page, '用户问题', 'top') + table(columns, rows) + pagination(page, '用户问题') : empty('本版没有可显示的稳定问题。'));
+    const explanation = '不同表达只有在记录了归并依据后才属于同一问题；向量相似度本身不会合并身份。累计计数是已确认事实，不表示当前占比或问题排行。';
+    result.innerHTML = '<section class="cr-v1-intro"><h2>稳定用户问题</h2><p>' + explanation + '</p>' + cumulativeMeta(data) + resultMeta(data) + '</section>' +
+      (page.items.length ? pagination(page, '用户问题', 'top') + table(columns, rows) + pagination(page, '用户问题') : empty('当前没有已确认的稳定问题。尚未归并的研究信号会保留在运行记录中，不会被当作零或删除。'));
   }
 
   function observationLabel(kind) {
@@ -348,11 +343,16 @@
         const itemStates = countSummary(item.itemStates, ' 条', runItemStateLabel);
         const execution = item.modelExecution || {};
         const publishedCoverage = item.publishedResult?.inputCounts?.publicationCoverage;
+        const health = item.researchHealth || {};
+        const organization = health.organizationCoverage || {};
+        const healthText = `研究信号 ${count(health.researchSignalCount)} 条 · 问题/需求 ${count(health.problemBearingAtomCount)} 条 · 已归并 ${count(health.organizedProblemAtomCount)} 条 · 待归并 ${count(health.backlogProblemAtomCount)} 条 · 本轮归并覆盖 ${pct(Number(organization.denominator) ? Number(organization.numerator) / Number(organization.denominator) : 1)}`;
+        const activatedBacklog = Number(health.activatedBacklogAtomCount || 0);
+        const backlogText = activatedBacklog ? `历史待归并续办 ${count(activatedBacklog)} 条 · 已补入 ${count(health.activatedBacklogResolvedAtomCount)} 条 · 处理中 ${count(health.activatedBacklogPendingAtomCount)} 条 · 未完成 ${count(health.activatedBacklogFailedAtomCount)} 条` : '';
         const published = item.publishedResult?.resultRevisionRef
           ? `已发布${publishedCoverage === 'partial' ? '（部分覆盖）' : ''} ${escape(date(item.publishedResult.publishedAt))}`
-          : item.state === 'completed_with_failures' ? '未发布：覆盖不足或有未组织的研究信号'
+          : item.state === 'completed_with_failures' ? '统计版本未发布：请查看本轮完整度与安全失败原因；已确认归并仍已累计到用户问题'
             : item.state === 'failed' ? '未发布：运行失败' : '尚未发布';
-        return `<tr><td><strong>${escape(date(item.createdAt))}</strong><p>${escape(runStateLabel(item.state))} · 冻结 ${count(item.selectedSources)} 条评论</p>${item.finishedAt ? `<p>结束于 ${escape(date(item.finishedAt))}</p>` : ''}</td><td><strong>${escape(modelExecutionSummary(execution))}</strong><details class="cr-v1-run-detail"><summary>查看调用账本摘要</summary><p>${escape(modelExecutionDetails(execution))}</p></details></td><td><p>${escape(itemStates || '尚未开始处理')}</p>${runFailures ? `<p>${escape(runFailures)}</p>` : ''}${itemFailures ? `<p>${escape(itemFailures)}</p>` : ''}</td><td>${published}</td></tr>`;
+        return `<tr><td><strong>${escape(date(item.createdAt))}</strong><p>${escape(runStateLabel(item.state))} · 冻结 ${count(item.selectedSources)} 条评论</p>${item.finishedAt ? `<p>结束于 ${escape(date(item.finishedAt))}</p>` : ''}</td><td><strong>${escape(modelExecutionSummary(execution))}</strong><details class="cr-v1-run-detail"><summary>查看调用账本摘要</summary><p>${escape(modelExecutionDetails(execution))}</p></details></td><td><p>${escape(healthText)}</p>${backlogText ? `<p>${escape(backlogText)}</p>` : ''}<p>${escape(itemStates || '尚未开始处理')}</p>${runFailures ? `<p>${escape(runFailures)}</p>` : ''}${itemFailures ? `<p>${escape(itemFailures)}</p>` : ''}</td><td>${published}</td></tr>`;
       })) + pagination(page, '运行记录') : empty('还没有运行记录。保存策略后可先查看系统自动选择的范围。'));
   }
 
@@ -418,7 +418,7 @@
     if (!preview?.policyConfigured) return '请先保存研究策略，系统才有本轮自动选择上限。';
     if (!researchModelReady()) return errorText.research_model_not_ready;
     if (!embeddingReady()) return errorText.embedding_not_ready;
-    if (!Number(preview.selectedSources || 0)) return '当前没有可进入本轮研究的用户原声。已有有效结论、正在执行或当前合同已拒绝的项会保留在各自的运行记录中。';
+    if (!Number(preview.selectedSources || 0) && !Number(preview.selectedBacklogAtoms || 0)) return '当前没有可进入本轮研究的用户原声，也没有符合续办条件的历史待归并 Atom。已有有效结论、正在执行或终态 unresolved 的项会保留在各自的运行记录中。';
     return '';
   }
 
@@ -430,7 +430,7 @@
     if (!preview.policyConfigured) {
       target.innerHTML = `<p>当前有 ${count(preview.eligibleSources)} 条可读普通用户原声，但尚未保存研究策略，系统不能计算本轮上限。</p>`;
     } else {
-      target.innerHTML = `<p>服务端会按当前策略和既有运行记录自动选择；确认时会再次计算并冻结范围。</p><dl><div><dt>本次自动处理</dt><dd>${count(preview.selectedSources)} 条</dd></div><div><dt>尚未进入研究</dt><dd>${count(preview.unprocessedSources)} 条</dd></div><div><dt>可恢复</dt><dd>${count(preview.recoverableSources)} 条</dd></div><div><dt>已提取研究信号</dt><dd>${count(preview.succeededSources)} 条</dd></div><div><dt>未提取到信号</dt><dd>${count(preview.noSignalSources)} 条</dd></div><div><dt>已有执行或恢复中</dt><dd>${count(Number(preview.activeSources) + Number(preview.retryableSources))} 条</dd></div><div><dt>需关联语境</dt><dd>${count(preview.selectedContextSources)} 条</dd></div></dl><p>已提取信号和未提取信号的原声保留为有效研究结论，不会重复调用模型。执行中的原声由原 Run 推进；可恢复项会按当前研究输入自动判断是否进入本轮。</p>${preview.selectedMissingParentContextSources ? `<p>所选范围中有 ${count(preview.selectedMissingParentContextSources)} 条需要关联语境，但当前没有可读父评论记录；该事实会随输入冻结保留，不会由页面补造。</p>` : ''}${terminal ? `<p>当前研究输入下不再自动外发：${escape(terminal)}。</p>` : ''}`;
+      target.innerHTML = `<p>服务端会按当前策略和既有运行记录自动选择；确认时会再次计算并冻结范围。</p><dl><div><dt>本次新增评论</dt><dd>${count(preview.selectedSources)} 条</dd></div><div><dt>历史待归并续办</dt><dd>${count(preview.selectedBacklogAtoms)} 条</dd></div><div><dt>尚未进入研究</dt><dd>${count(preview.unprocessedSources)} 条</dd></div><div><dt>可恢复</dt><dd>${count(preview.recoverableSources)} 条</dd></div><div><dt>已提取研究信号</dt><dd>${count(preview.succeededSources)} 条</dd></div><div><dt>未提取到信号</dt><dd>${count(preview.noSignalSources)} 条</dd></div><div><dt>已有执行或恢复中</dt><dd>${count(Number(preview.activeSources) + Number(preview.retryableSources))} 条</dd></div><div><dt>需关联语境</dt><dd>${count(preview.selectedContextSources)} 条</dd></div></dl><p>已提取信号和未提取信号的原声保留为有效研究结论，不会重复调用模型。符合止损条件的历史待归并 Atom 只会在本次确认创建的新 Run 中续办；成功后立即补入累计问题库和其原冻结 Run 的组织覆盖，不会形成新的统计窗口。</p>${preview.selectedMissingParentContextSources ? `<p>所选范围中有 ${count(preview.selectedMissingParentContextSources)} 条需要关联语境，但当前没有可读父评论记录；该事实会随输入冻结保留，不会由页面补造。</p>` : ''}${terminal ? `<p>当前研究输入下不再自动外发：${escape(terminal)}。</p>` : ''}`;
     }
     const blocker = previewBlocker(preview);
     feedback.textContent = blocker || (state.setup?.worker?.lastSeenAt ? '确认后会创建一个新的冻结 Run；模型是否已执行及其结果会在运行记录中如实更新。' : '确认后会创建一个新的冻结 Run；尚未记录 Worker 心跳，模型调用会等待 Worker 启动。');
@@ -461,7 +461,7 @@
         return;
       }
       const receipt = await request(`${api}/runs`, { method:'POST', body:JSON.stringify({}) });
-      setStatus(`已冻结 ${count(receipt.selectedSources)} 条普通用户评论，后台将继续完成语义提取、向量归并与结果发布。`, 'ready');
+      setStatus(`已冻结 ${count(receipt.selectedSources)} 条新增评论${Number(receipt.selectedBacklogAtoms || 0) ? `，并续办 ${count(receipt.selectedBacklogAtoms)} 条历史待归并 Atom` : ''}；后台将继续完成语义提取、向量归并与结果发布。`, 'ready');
       runDialog.close();
       state.view = 'runs'; state.page = 1; await loadView();
     } catch (error) {

@@ -473,6 +473,8 @@ mod tests {
         assert!(page.contains("前往模型与向量设置"));
         assert!(page.contains("准备本轮研究"));
         assert!(page.contains("确认系统将处理的范围"));
+        assert!(page.contains("已确认归并会立即累计到概览和用户问题"));
+        assert!(page.contains("变化观察只读取满足覆盖与可比条件的统计版本"));
         for retired in ["每日观察", "保存查询", "分析所选", "评论研究设置"] {
             assert!(!page.contains(retired));
         }
@@ -542,11 +544,18 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(overview.status(), StatusCode::NOT_FOUND);
+        assert_eq!(overview.status(), StatusCode::OK);
         let overview: Value =
             serde_json::from_slice(&to_bytes(overview.into_body(), usize::MAX).await.unwrap())
                 .unwrap();
-        assert_eq!(overview["error"], "comment_research_result_unavailable");
+        assert_eq!(overview["view"], "overview");
+        assert_eq!(
+            overview["cumulative"]["kind"],
+            "current_confirmed_membership"
+        );
+        assert_eq!(overview["cumulative"]["problemCount"], 0);
+        assert!(overview["currentProblems"].as_array().unwrap().is_empty());
+        assert!(overview["statisticsResult"].is_null());
     }
 
     async fn seed_ordinary_voice(database: &linggan_storage_postgres::Database) -> uuid::Uuid {

@@ -1,9 +1,10 @@
 //! Read models for the single COMMENT-RESEARCH-RESET-001 semantic kernel.
 //!
-//! Overview, Problems, and Changes each read one published ResultRevision only.  They
-//! intentionally do not join the legacy comment-intelligence projections, expose embedding queue
-//! state, or recompute trends from a mutable overview.  A caller may ask for a particular
-//! readable revision; otherwise the latest readable published revision is selected.
+//! Changes reads one published ResultRevision only. Overview and Problems separately read current
+//! accepted memberships: a valid atom-to-problem admission becomes cumulative knowledge at once,
+//! while a ResultRevision remains the only source for shares, ranks, and change conclusions.
+//! The projections intentionally do not expose embedding queues or recompute trends from mutable
+//! membership state.
 //!
 //! Voices answers a different question: what currently readable ordinary-user evidence is
 //! available to research?  It reads the current derivation head directly and is deliberately
@@ -100,50 +101,22 @@ pub async fn schema_ready(database: &Database) -> Result<bool, CommentResearchV1
     .await?)
 }
 
-/// Overview deliberately reports current research coverage and currently represented Problems.
-/// It has no change observations: the Changes endpoint owns that different user question.
+/// Overview reports cumulative, currently readable accepted memberships. A latest statistics
+/// revision is optional metadata: it never gates confirmed membership visibility or adds mutable
+/// facts to its frozen window metrics.
 pub async fn read_overview(
     database: &Database,
     query: &CommentResearchV1ReadQuery,
 ) -> Result<Value, CommentResearchV1ReadError> {
     let mut transaction = begin_read(database).await?;
-    let context = resolve_result(&mut transaction, query.result_revision_ref).await?;
-    let problems: Vec<Value> = sqlx::query_scalar(
-        "SELECT jsonb_build_object( \
-             'problemRef',definition.problem_ref, \
-             'definitionRevision',definition.revision, \
-             'name',definition.name, \
-             'meaning',definition.meaning, \
-             'currentCommentCount',current_stat.comment_count, \
-             'currentCommentShare',CASE WHEN current_stat.comment_denominator=0 THEN 0 ELSE current_stat.comment_count::double precision/current_stat.comment_denominator END, \
-             'currentWorkCount',current_stat.work_count, \
-             'currentWorkShare',CASE WHEN current_stat.work_denominator=0 THEN 0 ELSE current_stat.work_count::double precision/current_stat.work_denominator END, \
-             'baselineCommentCount',baseline_stat.comment_count, \
-             'baselineWorkCount',baseline_stat.work_count \
-         ) \
-         FROM linggan_comment_research_problem_window_stat current_stat \
-         JOIN linggan_comment_research_problem_window_stat baseline_stat \
-           ON baseline_stat.result_revision_ref=current_stat.result_revision_ref \
-          AND baseline_stat.problem_ref=current_stat.problem_ref \
-          AND baseline_stat.definition_revision=current_stat.definition_revision \
-          AND baseline_stat.window_kind='baseline' \
-         JOIN linggan_comment_research_problem_definition definition \
-           ON definition.problem_ref=current_stat.problem_ref \
-          AND definition.revision=current_stat.definition_revision \
-         WHERE current_stat.result_revision_ref=$1 AND current_stat.window_kind='current' \
-         ORDER BY CASE WHEN current_stat.comment_denominator=0 THEN baseline_stat.comment_count ELSE current_stat.comment_count END DESC, \
-                  CASE WHEN current_stat.work_denominator=0 THEN baseline_stat.work_count ELSE current_stat.work_count END DESC, \
-                  definition.name,definition.problem_ref \
-         LIMIT 8",
-    )
-    .bind(context.result_revision_ref)
-    .fetch_all(&mut *transaction)
-    .await?;
+    let (summary, problems) = read_cumulative_problem_state(&mut transaction, 8, 0).await?;
+    let statistics = resolve_optional_result(&mut transaction, query.result_revision_ref).await?;
     transaction.commit().await?;
     Ok(json!({
         "view":"overview",
-        "result":context.envelope(),
+        "cumulative":summary,
         "currentProblems":problems,
+        "statisticsResult":statistics.map(|context|context.envelope()),
     }))
 }
 
@@ -217,76 +190,23 @@ pub async fn read_voices(
     }))
 }
 
-/// Problems are stable Definitions and their frozen window facts.  This endpoint does not fold
-/// in ChangeObservation rows; callers should use `read_changes` for signals and reasons.
+/// Problems are current accepted Definitions and their cumulative evidence counts. They have no
+/// shares, ranks, or frozen-window fields; callers must use a published ResultRevision through
+/// Changes for statistical conclusions.
 pub async fn read_problems(
     database: &Database,
     query: &CommentResearchV1ReadQuery,
 ) -> Result<Value, CommentResearchV1ReadError> {
     let (limit, offset) = query.page()?;
     let mut transaction = begin_read(database).await?;
-    let context = resolve_result(&mut transaction, query.result_revision_ref).await?;
-    let total: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM linggan_comment_research_problem_window_stat \
-         WHERE result_revision_ref=$1 AND window_kind='current'",
-    )
-    .bind(context.result_revision_ref)
-    .fetch_one(&mut *transaction)
-    .await?;
-    let items: Vec<Value> = sqlx::query_scalar(
-        "SELECT jsonb_build_object( \
-             'problemRef',definition.problem_ref, \
-             'definitionRevision',definition.revision, \
-             'name',definition.name, \
-             'meaning',definition.meaning, \
-             'current',jsonb_build_object( \
-                'commentCount',current_stat.comment_count, \
-                'commentDenominator',current_stat.comment_denominator, \
-                'commentShare',CASE WHEN current_stat.comment_denominator=0 THEN 0 ELSE current_stat.comment_count::double precision/current_stat.comment_denominator END, \
-                'workCount',current_stat.work_count, \
-                'workDenominator',current_stat.work_denominator, \
-                'workShare',CASE WHEN current_stat.work_denominator=0 THEN 0 ELSE current_stat.work_count::double precision/current_stat.work_denominator END \
-             ), \
-             'baseline',jsonb_build_object( \
-                'commentCount',baseline_stat.comment_count, \
-                'commentDenominator',baseline_stat.comment_denominator, \
-                'commentShare',CASE WHEN baseline_stat.comment_denominator=0 THEN 0 ELSE baseline_stat.comment_count::double precision/baseline_stat.comment_denominator END, \
-                'workCount',baseline_stat.work_count, \
-                'workDenominator',baseline_stat.work_denominator, \
-                'workShare',CASE WHEN baseline_stat.work_denominator=0 THEN 0 ELSE baseline_stat.work_count::double precision/baseline_stat.work_denominator END \
-             ), \
-             'evidenceAtomCount',( \
-                SELECT count(*) FROM linggan_comment_research_atom_problem_membership membership \
-                JOIN linggan_comment_research_atom atom USING(atom_ref) \
-                WHERE membership.current AND membership.problem_ref=definition.problem_ref \
-                  AND membership.definition_revision=definition.revision AND atom.run_ref=$2 \
-             ) \
-         ) \
-         FROM linggan_comment_research_problem_window_stat current_stat \
-         JOIN linggan_comment_research_problem_window_stat baseline_stat \
-           ON baseline_stat.result_revision_ref=current_stat.result_revision_ref \
-          AND baseline_stat.problem_ref=current_stat.problem_ref \
-          AND baseline_stat.definition_revision=current_stat.definition_revision \
-          AND baseline_stat.window_kind='baseline' \
-         JOIN linggan_comment_research_problem_definition definition \
-           ON definition.problem_ref=current_stat.problem_ref \
-          AND definition.revision=current_stat.definition_revision \
-         WHERE current_stat.result_revision_ref=$1 AND current_stat.window_kind='current' \
-         ORDER BY CASE WHEN current_stat.comment_denominator=0 THEN baseline_stat.comment_count ELSE current_stat.comment_count END DESC, \
-                  CASE WHEN current_stat.work_denominator=0 THEN baseline_stat.work_count ELSE current_stat.work_count END DESC, \
-                  definition.name,definition.problem_ref \
-         LIMIT $3 OFFSET $4",
-    )
-    .bind(context.result_revision_ref)
-    .bind(context.run_ref)
-    .bind(limit)
-    .bind(offset)
-    .fetch_all(&mut *transaction)
-    .await?;
+    let (summary, items) = read_cumulative_problem_state(&mut transaction, limit, offset).await?;
+    let total = summary["problemCount"].as_i64().unwrap_or_default();
+    let statistics = resolve_optional_result(&mut transaction, query.result_revision_ref).await?;
     transaction.commit().await?;
     Ok(json!({
         "view":"problems",
-        "result":context.envelope(),
+        "cumulative":summary,
+        "statisticsResult":statistics.map(|context|context.envelope()),
         "page":{"total":total,"limit":limit,"offset":offset,"items":items},
     }))
 }
@@ -382,6 +302,37 @@ pub async fn read_runs(
              ),'{}'::jsonb), \
              'exclusionCounts',run.exclusion_counts, \
              'failureCounts',run.failure_counts, \
+             'researchHealth',jsonb_build_object( \
+                 'researchSignalCount',(SELECT count(*) FROM linggan_comment_research_atom atom WHERE atom.run_ref=run.run_ref), \
+                 'problemBearingAtomCount',(SELECT count(*) FROM linggan_comment_research_atom atom WHERE atom.run_ref=run.run_ref AND atom.kind IN ('problem','need')), \
+                 'organizedProblemAtomCount',(SELECT count(*) FROM linggan_comment_research_atom atom WHERE atom.run_ref=run.run_ref AND atom.kind IN ('problem','need') AND EXISTS( \
+                     SELECT 1 FROM linggan_comment_research_atom_problem_membership membership \
+                     WHERE membership.atom_ref=atom.atom_ref AND membership.current)), \
+                 'backlogProblemAtomCount',(SELECT count(*) FROM linggan_comment_research_atom atom WHERE atom.run_ref=run.run_ref AND atom.kind IN ('problem','need') AND NOT EXISTS( \
+                     SELECT 1 FROM linggan_comment_research_atom_problem_membership membership \
+                     WHERE membership.atom_ref=atom.atom_ref AND membership.current)), \
+                 'organizationCoverage',jsonb_build_object( \
+                     'numerator',(SELECT count(*) FROM linggan_comment_research_atom atom WHERE atom.run_ref=run.run_ref AND atom.kind IN ('problem','need') AND EXISTS( \
+                         SELECT 1 FROM linggan_comment_research_atom_problem_membership membership \
+                         WHERE membership.atom_ref=atom.atom_ref AND membership.current)), \
+                     'denominator',(SELECT count(*) FROM linggan_comment_research_atom atom WHERE atom.run_ref=run.run_ref AND atom.kind IN ('problem','need')) \
+                 ), \
+                 'activatedBacklogAtomCount',(SELECT count(*) FROM linggan_comment_research_problem_resolution_execution execution \
+                    JOIN linggan_comment_research_atom atom ON atom.atom_ref=execution.atom_ref \
+                    WHERE execution.run_ref=run.run_ref AND atom.run_ref<>run.run_ref), \
+                 'activatedBacklogResolvedAtomCount',(SELECT count(*) FROM linggan_comment_research_problem_resolution_execution execution \
+                    JOIN linggan_comment_research_atom atom ON atom.atom_ref=execution.atom_ref \
+                    JOIN linggan_comment_research_atom_problem_membership membership ON membership.atom_ref=atom.atom_ref AND membership.current \
+                    WHERE execution.run_ref=run.run_ref AND atom.run_ref<>run.run_ref), \
+                 'activatedBacklogPendingAtomCount',(SELECT count(*) FROM linggan_comment_research_problem_resolution_execution execution \
+                    JOIN linggan_comment_research_atom atom ON atom.atom_ref=execution.atom_ref \
+                    WHERE execution.run_ref=run.run_ref AND atom.run_ref<>run.run_ref \
+                      AND execution.state IN ('pending','running','retryable')), \
+                 'activatedBacklogFailedAtomCount',(SELECT count(*) FROM linggan_comment_research_problem_resolution_execution execution \
+                    JOIN linggan_comment_research_atom atom ON atom.atom_ref=execution.atom_ref \
+                    WHERE execution.run_ref=run.run_ref AND atom.run_ref<>run.run_ref \
+                      AND execution.state IN ('model_failed','incompatible')) \
+             ), \
              'modelExecution',( \
                  SELECT jsonb_build_object( \
                      'callCount',count(*), \
@@ -455,6 +406,69 @@ async fn begin_read(
     Ok(transaction)
 }
 
+async fn read_cumulative_problem_state(
+    transaction: &mut Transaction<'_, sqlx::Postgres>,
+    limit: i64,
+    offset: i64,
+) -> Result<(Value, Vec<Value>), CommentResearchV1ReadError> {
+    let summary: Value = sqlx::query_scalar(
+        "WITH accepted AS ( \
+             SELECT membership.problem_ref,membership.definition_revision,membership.atom_ref, \
+                    membership.created_at,membership.membership_ref,source.material_ref,source.content_public_ref \
+             FROM linggan_comment_research_atom_problem_membership membership \
+             JOIN linggan_comment_research_atom atom USING(atom_ref) \
+             JOIN linggan_comment_research_derivation_current derivation \
+               ON derivation.derivation_ref=atom.derivation_ref \
+             JOIN linggan_comment_research_readable source ON source.material_ref=derivation.source_ref \
+             WHERE membership.current AND derivation.derivation_version=$1 \
+         ) \
+         SELECT jsonb_build_object( \
+             'kind','current_confirmed_membership', \
+             'problemCount',count(DISTINCT (problem_ref,definition_revision)), \
+             'confirmedAtomCount',count(DISTINCT atom_ref), \
+             'confirmedCommentCount',count(DISTINCT material_ref), \
+             'confirmedWorkCount',count(DISTINCT content_public_ref), \
+             'lastConfirmedAt',max(created_at) \
+         ) FROM accepted",
+    )
+    .bind(DERIVATION_VERSION)
+    .fetch_one(&mut **transaction)
+    .await?;
+    let items: Vec<Value> = sqlx::query_scalar(
+        "WITH accepted AS ( \
+             SELECT membership.problem_ref,membership.definition_revision,membership.atom_ref, \
+                    membership.created_at,source.material_ref,source.content_public_ref \
+             FROM linggan_comment_research_atom_problem_membership membership \
+             JOIN linggan_comment_research_atom atom USING(atom_ref) \
+             JOIN linggan_comment_research_derivation_current derivation \
+               ON derivation.derivation_ref=atom.derivation_ref \
+             JOIN linggan_comment_research_readable source ON source.material_ref=derivation.source_ref \
+             WHERE membership.current AND derivation.derivation_version=$1 \
+         ), grouped AS ( \
+             SELECT problem_ref,definition_revision,count(DISTINCT atom_ref) AS atom_count, \
+                    count(DISTINCT material_ref) AS comment_count,count(DISTINCT content_public_ref) AS work_count, \
+                    min(created_at) AS first_confirmed_at,max(created_at) AS last_confirmed_at \
+             FROM accepted GROUP BY problem_ref,definition_revision \
+         ) SELECT jsonb_build_object( \
+             'problemRef',definition.problem_ref,'definitionRevision',definition.revision, \
+             'name',definition.name,'meaning',definition.meaning, \
+             'confirmedAtomCount',grouped.atom_count,'confirmedCommentCount',grouped.comment_count, \
+             'confirmedWorkCount',grouped.work_count,'firstConfirmedAt',grouped.first_confirmed_at, \
+             'lastConfirmedAt',grouped.last_confirmed_at \
+         ) FROM grouped \
+         JOIN linggan_comment_research_problem_definition definition \
+           ON definition.problem_ref=grouped.problem_ref AND definition.revision=grouped.definition_revision \
+         ORDER BY grouped.last_confirmed_at DESC,definition.name,definition.problem_ref \
+         LIMIT $2 OFFSET $3",
+    )
+    .bind(DERIVATION_VERSION)
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(&mut **transaction)
+    .await?;
+    Ok((summary, items))
+}
+
 async fn resolve_result(
     transaction: &mut Transaction<'_, sqlx::Postgres>,
     requested: Option<Uuid>,
@@ -490,6 +504,17 @@ async fn resolve_result(
         current_window_end: row.get("current_window_end"),
         input_counts: row.get("input_counts"),
     })
+}
+
+async fn resolve_optional_result(
+    transaction: &mut Transaction<'_, sqlx::Postgres>,
+    requested: Option<Uuid>,
+) -> Result<Option<ResultContext>, CommentResearchV1ReadError> {
+    match resolve_result(transaction, requested).await {
+        Ok(context) => Ok(Some(context)),
+        Err(CommentResearchV1ReadError::ResultUnavailable) if requested.is_none() => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 #[cfg(test)]

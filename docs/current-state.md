@@ -1,7 +1,7 @@
 # 当前状态与事项队列
 
 > 状态: 权威当前
-> 最后核对: 2026-09-10
+> 最后核对: 2026-09-14
 > 适用范围: 当前阶段、事项顺序、阻塞与下一步
 > 事实来源: 本机实际检查、已确认项目边界和完成计划
 > 冲突时以谁为准: 真实运行结果、ACCEPTED ADR 与用户最新确认
@@ -31,6 +31,10 @@ V4 受控 Run `64a9f4f8-b5d9-43c7-be3e-4214ab0f82fc` 证明候选绑定修复消
 ### COMMENT-RESEARCH-PUBLISH-001 / Issue #264（已合并、runtime 已切换；真实部分版本已发布）
 
 V5 受控 Run `af79c247-104e-4618-b12c-3b0d1dba6bdb` 已终态：冻结 20 条，14 条提取研究信号、5 条确认无信号、1 条 `semantic_json_schema_rejected`；19 个 problem/need Atom 中 17 个已归入 Problem，另有 2 个 `problem_resolution_json_schema_rejected`。PR #266 合并后，`runtime-main@5dfe70a71fcf60d675b4a835af9b63f55c378243` 已在不新增模型调用的条件下发布 immutable ResultRevision `6dbf52b8-2c09-41f6-8b05-3e5654f37998`：冻结事实为纳入 19 / 20、未纳入 1、问题归并 17 / 19，`publicationCoverage=partial`，终态失败计数为 RunItem 1、Problem Resolution 2。Run 保持 `completed_with_failures`，未纳入评论与未归并 Atom 不进入问题、变化或分母；localhost 概览、用户问题、变化观察、运行记录和独立用户原声读取均可访问，调用账本维持 58 次。当前样本的 19 条都位于比较窗口基线期，当前期分母为 0，故 Issue #267 已使概览与用户问题显示“本版基线样本”而不是当前 0，变化观察仍不可比较；连续自动排程仍关闭。页面已如实暴露出部分问题定义过宽或偏离 ADHD 域，模型语义质量、领域边界、可比趋势和 Mog 业务验收仍待独立确认。
+
+### COMMENT-RESEARCH-CUMULATIVE-STATE-001 / Issue #281（候选源码实施中；不改变统计门槛）
+
+Mog 已明确确认：有效 Problem membership 与单轮 Run 的统计完整度是两件事。任一 `problem`/`need` Atom 只要经过既有输出、候选、定义与 membership 接纳合同，就应即时累计为可读事实；同 Run 的其他未归并或失败 Atom 不能反向隐藏它。ResultRevision 的研究/组织覆盖仍只负责占比、排行、窗口比较与趋势资格，低覆盖 Run 不得被表述为完整分布。本候选将概览与用户问题改读 current membership 的累计绝对计数，并让运行记录明示研究信号、problem/need、已归并、待归并和覆盖率；变化观察继续只读已发布统计版本。2026-09-14 的补充决定已把“启动研究”定义为当前范围内未完成资产的持续处理授权：下一次 Run 会有界带入符合止损条件的历史 resolution backlog，独立记录 execution Run，不复制 Atom、不改写原 Run 冻结窗口；成功后只补足原窗口组织覆盖，续办 Run 不生成 ResultRevision。JSON/Schema 失败仅在模型配置或 membership contract 改变后续办，语义接纳失败最多三次，已知瞬时服务失败可在后续已启动 Run 再试。候选隔离 PostgreSQL/API proof 已通过；尚未执行共享 migration、runtime 切换、真实模型调用或 3000 人工验收。
 
 ### COMMENT-RESEARCH-RESET-001 / Issue #213（V1 已合并、开发库已切换、3000 已上线；首轮模型配置与业务验收待执行）
 

@@ -67,7 +67,7 @@ Embedding 产生同类型 Top-K 候选；确定性规则拒绝明显不同的类
 
 ### 3.4 Result Revision 与变化
 
-概览、用户问题与变化观察只读取已 `published` 的 `ResultRevision`；正在清洗、提取、向量化或归并的结果不会半成品混入这些研究结论。用户原声是例外：它只读当前语义输入合同（现为 `comment-research.derivation.v2`）的 current、readable、`ordinary_user + eligible` derivation 的原文与研究正文，并附该 derivation 最后一次 RunItem 状态；它不等待或返回 `ResultRevision`，不派生、冻结、认领或调用模型。每个 revision 固定：范围、`as_of`、样本 manifest hash、research/attribution/embedding/membership policy hash、输入/失败/排除计数。
+变化观察只读取已 `published` 的 `ResultRevision`；累计 Problem 读取的边界由后续 COMMENT-RESEARCH-CUMULATIVE-STATE-001 规定：已通过 membership 接纳的 Atom 可作为绝对事实立即可读，但不能以此计算 share、rank 或 trend。正在清洗、提取、向量化或归并的结果不会半成品混入统计研究结论。用户原声是例外：它只读当前语义输入合同（现为 `comment-research.derivation.v2`）的 current、readable、`ordinary_user + eligible` derivation 的原文与研究正文，并附该 derivation 最后一次 RunItem 状态；它不等待或返回 `ResultRevision`，不派生、冻结、认领或调用模型。每个 revision 固定：范围、`as_of`、样本 manifest hash、research/attribution/embedding/membership policy hash、输入/失败/排除计数。
 
 变化比较固定为 Asia/Shanghai 的两个完整自然周：`[as_of-14d, as_of-7d)` 对 `[as_of-7d, as_of)`；不使用当天未结束的部分日。统计同时计算去重评论占比和作品覆盖率。发布 `升温`、`降温`、`扩散`、`新出现` 前，必须满足冻结 membership basis、两期覆盖和范围可比性；否则只返回 `not_comparable` 与原因。它们是研究输入范围内的观察，不是“市场正在增长/下降”的断言。
 
