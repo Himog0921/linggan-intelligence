@@ -170,9 +170,13 @@
 | [`architecture/data-consistency.md`](architecture/data-consistency.md) | 草案 | 数据架构第三层；定义事务、重放、并发、隐私传播和 PostgreSQL 16 可证伪验收，不是 SQL 或 migration |
 | [`architecture/current-v2-architecture.md`](architecture/current-v2-architecture.md) | 代码事实优先 | 现役 V2 固定点的参考架构 |
 | [`architecture/rust-porting-map.md`](architecture/rust-porting-map.md) | 草案 | Rust 移植候选参考；只有正式 SCOPE 内明确列出的部分可以实施 |
+| [`pages/intelligence-product-blueprint.md`](pages/intelligence-product-blueprint.md) | 草案；DES-INTELLIGENCE-20260906 | 独立首页与四工作区、16 个二级页、功能/状态/跳转、事实归属与落地依赖；按用户最新选择移出选题生产 |
+| [`plans/active/intelligence-product-001-implementation-plan.md`](plans/active/intelligence-product-001-implementation-plan.md) | 活跃计划；仅计划编制，实施待派定 | 已确认决定、main/PR 事实核对、P00–P08 交付顺序、全页面覆盖、单包任务模板、模型引用与反例验收；语料资产归评论研究页内 |
+| [`pages/intelligence-home-threejs.md`](pages/intelligence-home-threejs.md) | 草案；DES-INTELLIGENCE-20260906 | 三栏首页、稳定地形、语义映射、安静/中断/空态、Three.js 与 HTML 等价入口及验证边界 |
+| [`design/pages/intelligence-product-prototype.html`](design/pages/intelligence-product-prototype.html) | 合成设计演示 | 自包含可点击原型，实际 Three.js；预置分析与本地状态，不接真实系统 |
 | [`pages/page-map.md`](pages/page-map.md) | 草案 | 页面与情报工作流的初步映射 |
 | [`pages/product-interface-architecture.md`](pages/product-interface-architecture.md) | 草案 | Gate 7 工作台、Topic/Corpus/研究/行动/运行中心、API 与外部 Agent CLI 入口架构 |
-| [`pages/home-intelligence-surface.md`](pages/home-intelligence-surface.md) | 草案 | `HOME-01`–`HOME-17` 确认的首页情报面形态：三栏骨架、恒定地形与昨夜行动、常驻编队与总编、选题卡回流、校准回路；不是实现授权 |
+| [`pages/home-intelligence-surface.md`](pages/home-intelligence-surface.md) | 草案 | `HOME-01`–`HOME-17` 历史首页推演：三栏、稳定地形；选题卡/战绩回流已被 2026-09-06 最新范围移出，详见新首页专项 |
 | [`pages/topic-intelligence-surface.md`](pages/topic-intelligence-surface.md) | 权威当前 | DESIGN-002 的 Topic 深入任务、信息/状态/行动边界；当前只授权合成静态参考页 |
 | [`migration/action-plan.md`](migration/action-plan.md) | 活跃计划 | 基础设计阶段形成的重建顺序与架构工作包参考；实时阶段状态、完成证据和决策门以 `development-stage-tracker.md` 为准 |
 | [`migration/transfer-checklist.md`](migration/transfer-checklist.md) | 活跃计划 | 跨机器搬迁和隔离检查 |
@@ -186,6 +190,8 @@
 | [`audits/implementation-readiness-review-2026-08-20.md`](audits/implementation-readiness-review-2026-08-20.md) | 一次性报告 | 全项目正式编码前实施就绪终审；NO-GO 证据、P0/P1、15 个场景、真实最小闭环及主线 Agent 复核协议 |
 | [`audits/pi-agent-kernel-upstream-assessment-2026-08-20.md`](audits/pi-agent-kernel-upstream-assessment-2026-08-20.md) | 一次性报告 | Pi 上游发布版/源码/安全边界审查；裁定为统一 Agent 执行适配器候选，不是权限、持久任务或业务事实内核，也不授权当前编码 |
 | [`audits/pre-implementation-architecture-audit-2026-08-21.md`](audits/pre-implementation-architecture-audit-2026-08-21.md) | 一次性报告 | `ADV-AUDIT-001` 的独立复核最终处置：保留权威冲突、真实 producer 接缝、产品职责和 dirty worktree 风险，否定当前解除 Attempt 1:1、强加 `attemptRef`、改 crate 或整批提交的危险建议；不改变 F01 代码门 |
+| [`audits/intelligence-system-review-2026-09-05.md`](audits/intelligence-system-review-2026-09-05.md) | 一次性报告 | `AUD-INTELLIGENCE-20260905`：固定主线 `4864edd` 的产品、领域、Rust/API/worker、PostgreSQL、Browser Producer、媒体、UI/UX、Topic/Agent 与运行协作全项目梳理；含已具备能力与尚未闭环范围的分别结论，不授予修复、采集、部署或合并权限 |
+| [`audits/intelligence-system-review-2026-09-05-evidence.md`](audits/intelligence-system-review-2026-09-05-evidence.md) | 一次性报告 | 上述主报告的 E01–E16 证据、检查范围与复核方法；197 项常规 Rust / 118 项隔离 PostgreSQL / 252 项插件测试、只读数据库与浏览器观察、明确未证明边界；不含账号原始身份、评论原文或凭据 |
 | [`runbooks/development-environment.md`](runbooks/development-environment.md) | 权威当前 | Rust 与 Docker PostgreSQL 16 的统一运行入口 |
 | [`runbooks/local-evidence-library.md`](runbooks/local-evidence-library.md) | 权威当前 | Rust loopback host、health、受控 discovery ingress 与 Evidence Library 本地启动/验证；明确不含真实插件、平台或媒体链路 |
 | [`runbooks/local-runtime-deployment.md`](runbooks/local-runtime-deployment.md) | 权威当前 | 三个 launchd 常驻服务的运行来源、跟随 origin/main 的更新方式、迁移闸门与故障处置；取代已废弃的冻结快照模型 |
@@ -243,7 +249,7 @@
 - 实施或审查 SCOPE-001：读取当前 SCOPE 后必须读取 `agents/scope-001-execution-contract.md`；当前仅按 CONTROLLED OPEN FOR TDD 推进，新增产品含义、权限或真实范围仍须停止并确认。
 - 环境配置：读 `current-state.md`、[`runbooks/development-environment.md`](runbooks/development-environment.md) 和 `database/README.md`。
 - 产品讨论：读 `product/PRD.md`、`context/discussion-decisions.md` 和相关 ACCEPTED ADR。
-- 首页与日常入口形态：先读 [`pages/page-map.md`](pages/page-map.md)，再读 [`pages/product-interface-architecture.md`](pages/product-interface-architecture.md)，最后读 [`pages/home-intelligence-surface.md`](pages/home-intelligence-surface.md)；三者均为草案，不得据此直接实现前端。
+- 首页与日常入口形态：先读 [`pages/intelligence-product-blueprint.md`](pages/intelligence-product-blueprint.md) 与 [`pages/intelligence-home-threejs.md`](pages/intelligence-home-threejs.md) 了解本轮范围；历史推演再读 [`pages/page-map.md`](pages/page-map.md)，再读 [`pages/product-interface-architecture.md`](pages/product-interface-architecture.md)，最后读 [`pages/home-intelligence-surface.md`](pages/home-intelligence-surface.md)；三者均为草案，不得据此直接实现前端。
 - 数据与 PostgreSQL 设计：先读 `architecture/data-architecture.md`；只有需要关系/基数时再读 `architecture/data-relations.md`，需要事务/并发/验收时再读 `architecture/data-consistency.md`，并同时遵守 `database/README.md` 和领域不变量；未确认草案不得直接生成 DDL。
 - 架构或实现：先读 [`architecture/technical-architecture-baseline.md`](architecture/technical-architecture-baseline.md)，再按任务读相应专题架构、当前 SCOPE、真实代码与测试；文档不得替代代码事实。
 - 来源审计：先读 `references/README.md` 和 provenance，再只打开被当前审计明确引用的 fixture、源码或 handoff。

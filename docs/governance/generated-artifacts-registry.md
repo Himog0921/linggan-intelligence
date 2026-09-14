@@ -1,7 +1,7 @@
 # 生成型文件登记表
 
 > 状态: 权威当前
-> 最后核对: 2026-09-01
+> 最后核对: 2026-09-14
 > 适用范围: 构建、代码生成、导出、日志、测试证据、备份与临时文件
 > 事实来源: 当前工具配置、`.gitignore` 与来源校验清单
 > 冲突时以谁为准: 生成源、工具配置和安全规则；生成结果不得反向覆盖来源
@@ -15,6 +15,7 @@
 | 模型后端秘密及合成 Keychain 验证 | macOS Keychain 的 `Linggan.Intelligence.Models.<workspace UUID>` service + 随机 account | API 的 Keychain SecretStore；`model_keychain` 测试只操作随机合成条目 | 不进 Git/数据库/前端存储 | 只经配置命令更换 | 正式版本保留以供冻结任务；测试结束立即删除随机项，不枚举已有秘密 |
 | CI-20260907-V1 历史隔离证明 | 已清理的临时 Docker/log 位置 | 历史交付记录；对应旧评论研究源码与再生脚本已由 V1 terminal cutover 删除 | 不进 Git | 禁止伪造或重新生成旧结果 | 仅保留文档中的历史事实；不再是可运行验证入口 |
 | CI-RUN-002 请求诊断 | PostgreSQL `linggan_comment_request_trace` | 已授权研究的真实请求边界写入；输入已脱敏，返回保结构脱敏 | 不进入 Git | 禁止伪造或回填历史 | 正文最多保留 24 小时；读取独立校验有效期与来源；worker 清理过期或受限正文，元数据与安全校验摘要继续保留；关闭记录仅影响新批次 |
+| 产品页面与首页 Three.js 合成原型 | `docs/design/pages/intelligence-product-prototype.html` | `python3 docs/design/pages/intelligence-product-prototype/build.py`；来源为同目录自有 JS/CSS、`docs/pages/intelligence-product-blueprint.md`、`docs/pages/intelligence-home-threejs.md`；Three.js 0.185.1 按固定 npm integrity 校验并保留 MIT 许可 | 可提交的设计参考，非 app/release；依赖 tarball 与截图只放系统临时目录 | 修改自有源码再生成；不直接修改生成 HTML | 稳定保留；设计更新时重新生成并走查；始终标记合成、无真实模型/采集 |
 | Rust 构建缓存 | `target/` | Cargo build/test | 忽略 | 禁止 | 可安全重建，按需清理 |
 | CI-AUTO-004 worker退出回执 | Application Support/Linggan Intelligence/runtime-drain/worker-drain-ack、worker-update-permit；开发启动为系统临时目录 `linggan-runtime-drain.*` | worker写PID与终态；install生成绑定起止revision的许可，sync核验消费 | 不进Git；无正文/凭据 | 不得伪造完成回执 | 下一次受控drain替换；开发启动成功退出后仅清理自己目录，失败保留供诊断 |
 | Rust 依赖锁 | `Cargo.lock` | `cargo generate-lockfile` | 提交 | 禁止 | Cargo 配置变化后重新生成并验证 `--locked` |
@@ -31,7 +32,7 @@
 
 ## 当前登记结论
 
-- 当前获准提交 Git 的产品生成物只有上表登记的架构沟通 HTML 与 Browser Producer release。`0.8.28` 的运行时/真实标准详情证明来自工位、Package/Receipt/Materialization 与 Evidence UI，不是 ZIP 本身自证。
+- 当前获准提交 Git 的产品生成物包括上表登记的架构沟通 HTML、产品设计合成 HTML 与 Browser Producer release。`0.8.28` 的运行时/真实标准详情证明来自工位、Package/Receipt/Materialization 与 Evidence UI，不是 ZIP 本身自证。
 - `references/` 是已导入并校验的历史证据快照，不是产品运行时生成目录。
 - SCOPE-001 的 `crates/contracts/tests/fixtures/capture-v1/*` 及其 expected canonical bytes/hash 是人工审查和维护的权威测试输入，不是由 Rust 或 Node checker 生成的产物；`scripts/verify-capture-fixtures.mjs` 只验证、不回写。任何将来的自动生成/回写都必须先增加本表正式登记，不得沿用这一人工输入豁免。
 - 未来若引入 SQLx 离线元数据、API schema、前端构建包或机器生成 fixture，必须先补充：负责人、唯一来源、再生命令、一致性检查和是否必须入 Git。

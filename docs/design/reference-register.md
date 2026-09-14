@@ -1,10 +1,17 @@
 # 设计参考登记表
 
 > 状态: 权威当前
-> 最后核对: 2026-09-02
+> 最后核对: 2026-09-06
 > 适用范围: Linggan Intelligence UI 设计工作中引用的旧系统、外部产品、截图、品牌材料和原型
 > 事实来源: DESIGN-001 / DESIGN-002 授权、AGENTS.md、docs/design/design-governance.md、当前 references/ 边界
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、已接受的产品/设计决定和当前 SCOPE；参考资料永不覆盖这些来源
+
+## 2026-09-06 · REF-INTELLIGENCE-PRODUCT-001
+
+- 来源：Mog 指定会话《梳理产品认知循环》及截图、当前首页 HOME 决定、本轮明确 Three.js 请求；与 main@4a2317b 的源码/合同对照。
+- 可继承：主题运营比较、用户问题视角、首页独立、四工作区、向外看；HOME 的三栏、稳定位置、就地下钻。
+- 当前移出：选题库、生产排期、战绩回流、独立雷达与 Pi 一级页面。
+- 新增提案：[页面蓝图](../pages/intelligence-product-blueprint.md)、[首页专项](../pages/intelligence-home-threejs.md)、[合成原型](pages/intelligence-product-prototype.html)。算法效果、业务事实与生产可用性不能从原型继承。
 
 本表的目的是让“我看过一个不错的界面”变成可审查的参考记录，而不是隐性需求。它不保存截图或素材，也不将任何历史项目、原型或外部产品自动变成 Linggan 的产品指令。
 

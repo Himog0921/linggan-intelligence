@@ -1,10 +1,12 @@
 # 前端设计手册
 
 > 状态: 权威当前
-> 最后核对: 2026-09-04
+> 最后核对: 2026-09-06
 > 适用范围: Linggan Intelligence 未来用户可见 Web UI 的设计规则、页面/组件规格、协作入口与验收追踪
 > 事实来源: 用户对 DESIGN-001 / DESIGN-002 的明确授权、AGENTS.md、docs/governance/、docs/agents/ui-execution-contract.md、已确认产品边界与当前文件树
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实运行/代码/合同、ACCEPTED 决策与当前 SCOPE；本手册不覆盖这些来源
+
+本轮产品页面设计入口：[页面蓝图](../pages/intelligence-product-blueprint.md) → [独立首页与 Three.js](../pages/intelligence-home-threejs.md) → [可点击合成原型](pages/intelligence-product-prototype.html)。DES-INTELLIGENCE-20260906 只交付设计与浏览器交互验证；不改生产 LIDS token、app、模型、采集或部署。
 
 本目录是未来 UI 工作的唯一设计入口。它的作用不是替产品决定页面要做什么，也不是把一组视觉偏好变成无需验证的实现命令；它把已经获准的界面规则、它们的来源、适用范围、验收方式和未决空白整理成 Agent 可以执行与复核的合同。
 
