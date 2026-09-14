@@ -270,7 +270,8 @@ async fn context_dependent_reply_without_readable_parent_is_terminal_without_a_m
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof"]
-async fn saved_v1_policy_must_be_replaced_before_a_v2_context_run_is_created() {
+async fn saved_policy_with_outdated_output_rule_hashes_must_be_replaced_before_a_v6_run_is_created()
+{
     let database = fixture::proof_database("comment_research_stale_policy_contract").await;
     detail_with_author(
         &database,
@@ -304,7 +305,7 @@ async fn saved_v1_policy_must_be_replaced_before_a_v2_context_run_is_created() {
         "INSERT INTO linggan_comment_research_policy_revision( \
              policy_revision_ref,config_ref,contract_version,derivation_version,extraction_rule_hash, \
              membership_policy_hash,source_limit,token_limit \
-         ) VALUES($1,$2,'comment-research.semantic.v1','comment-research.derivation.v1',$3,$3,10,10000)",
+         ) VALUES($1,$2,'comment-research.semantic.v1','comment-research.derivation.v2',$3,$3,10,10000)",
     )
     .bind(stale_policy_ref)
     .bind(config_ref)
@@ -329,7 +330,7 @@ async fn saved_v1_policy_must_be_replaced_before_a_v2_context_run_is_created() {
         .fetch_one(database.pool())
         .await
         .unwrap();
-    assert_eq!(run_count, 0, "stale policy must not freeze a V1 Run");
+    assert_eq!(run_count, 0, "stale policy must not freeze a V6 Run");
 }
 
 async fn insert_historical_derivation_version(database: &Database, source_ref: Uuid) {
@@ -568,6 +569,15 @@ async fn v1_model_admission_rejects_an_unqualified_default_and_policy_before_any
     .await
     .unwrap();
     assert_eq!(policy.active_revision, 1);
+    let contract_version: String = sqlx::query_scalar(
+        "SELECT contract_version FROM linggan_comment_research_policy_revision \
+         WHERE policy_revision_ref=$1",
+    )
+    .bind(policy.policy_revision_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(contract_version, "comment-research.semantic.v1");
 }
 
 #[tokio::test]

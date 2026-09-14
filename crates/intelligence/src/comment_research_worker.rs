@@ -816,7 +816,7 @@ fn semantic_prompt(input: &ClaimedResearchInput) -> Result<String, ModelError> {
         .text
     });
     serde_json::to_string(&json!({
-        "contract":"comment-research.semantic.v5",
+        "contract":"comment-research.semantic.v6",
         "task":"只判断当前研究正文中明确表达的用户问题、需求、解决方法或经历。父评论研究正文仅用于消解当前回复的指代或话题，不能单独构成用户结论。没有足够研究信号时必须输出 no_signal；不得输出空 atoms。每个 atom 的 evidence 必须逐字复制当前研究正文中支持该命题的一段连续、非空、唯一短句；不要输出字符位置、改写、概括、父评论文字或研究正文以外的文字。",
         "schema":{
             "atoms":{
@@ -882,7 +882,7 @@ fn resolution_prompt(proposition: &str, candidates: &[Value]) -> Result<String, 
         }
     }
     serde_json::to_string(&json!({
-        "contract":"comment-research.semantic.v5/problem-resolution",
+        "contract":"comment-research.semantic.v6/problem-resolution",
         "task":"判断这个表达是否与候选定义代表同一个待解决的用户问题。若同一，输出 same_problem 且只能原样使用给定候选的 problemRef 和 definitionRevision；若都不同，输出 new_problem 并给出简洁中文名称和定义。不能因主题相近而合并不同困扰。不要输出候选以外的 problemRef。",
         "schema":{
             "same":{"decision":"same_problem","problemRef":"候选中的 UUID","definitionRevision":1,"rationale":"不超过300字"},
@@ -901,7 +901,7 @@ fn semantic_output_schema() -> Value {
         "type":"object",
         "properties":{
             "outcome":{"type":"string","enum":["atoms","no_signal"]},
-            "atoms":{"type":"array","maxItems":8,"items":{
+            "atoms":{"type":"array","minItems":1,"maxItems":8,"items":{
                 "type":"object",
                 "properties":{
                     "kind":{"type":"string","enum":["problem","need","solution","experience"]},
@@ -915,7 +915,19 @@ fn semantic_output_schema() -> Value {
             "reason":{"type":"string","maxLength":200}
         },
         "required":["outcome"],
-        "additionalProperties":false
+        "additionalProperties":false,
+        "oneOf":[
+            {
+                "properties":{"outcome":{"const":"atoms"}},
+                "required":["outcome","atoms"],
+                "not":{"required":["reason"]}
+            },
+            {
+                "properties":{"outcome":{"const":"no_signal"}},
+                "required":["outcome","reason"],
+                "not":{"required":["atoms"]}
+            }
+        ]
     })
 }
 
@@ -933,7 +945,19 @@ fn resolution_output_schema() -> Value {
             "rationale":{"type":"string","maxLength":300}
         },
         "required":["decision","rationale"],
-        "additionalProperties":false
+        "additionalProperties":false,
+        "oneOf":[
+            {
+                "properties":{"decision":{"const":"same_problem"}},
+                "required":["decision","problemRef","definitionRevision","rationale"],
+                "not":{"required":["definition"]}
+            },
+            {
+                "properties":{"decision":{"const":"new_problem"}},
+                "required":["decision","definition","rationale"],
+                "not":{"anyOf":[{"required":["problemRef"]},{"required":["definitionRevision"]}]}
+            }
+        ]
     })
 }
 
@@ -1776,6 +1800,76 @@ mod tests {
             parse_contract_json::<SemanticQuoteExtractionOutput>(r#"{"outcome":"unknown"}"#),
             Err(ContractOutputError::SchemaRejected)
         );
+        assert_eq!(
+            parse_contract_json::<SemanticQuoteExtractionOutput>(r#"{"outcome":"atoms"}"#),
+            Err(ContractOutputError::SchemaRejected)
+        );
+        assert_eq!(
+            parse_contract_json::<SemanticQuoteExtractionOutput>(r#"{"outcome":"no_signal"}"#),
+            Err(ContractOutputError::SchemaRejected)
+        );
+        assert!(matches!(
+            parse_contract_json::<ResolutionOutput>(
+                r#"{"decision":"same_problem","rationale":"synthetic"}"#
+            ),
+            Err(ContractOutputError::SchemaRejected)
+        ));
+        assert!(matches!(
+            parse_contract_json::<ResolutionOutput>(
+                r#"{"decision":"new_problem","rationale":"synthetic"}"#
+            ),
+            Err(ContractOutputError::SchemaRejected)
+        ));
+    }
+
+    #[test]
+    fn provider_schemas_require_exactly_one_rust_tagged_variant() {
+        let semantic = semantic_output_schema();
+        assert_eq!(semantic["properties"]["atoms"]["minItems"], 1);
+        assert_eq!(
+            semantic["oneOf"][0]["properties"]["outcome"]["const"],
+            "atoms"
+        );
+        assert_eq!(
+            semantic["oneOf"][0]["required"],
+            json!(["outcome", "atoms"])
+        );
+        assert_eq!(semantic["oneOf"][0]["not"]["required"], json!(["reason"]));
+        assert_eq!(
+            semantic["oneOf"][1]["properties"]["outcome"]["const"],
+            "no_signal"
+        );
+        assert_eq!(
+            semantic["oneOf"][1]["required"],
+            json!(["outcome", "reason"])
+        );
+        assert_eq!(semantic["oneOf"][1]["not"]["required"], json!(["atoms"]));
+
+        let resolution = resolution_output_schema();
+        assert_eq!(
+            resolution["oneOf"][0]["properties"]["decision"]["const"],
+            "same_problem"
+        );
+        assert_eq!(
+            resolution["oneOf"][0]["required"],
+            json!(["decision", "problemRef", "definitionRevision", "rationale"])
+        );
+        assert_eq!(
+            resolution["oneOf"][0]["not"]["required"],
+            json!(["definition"])
+        );
+        assert_eq!(
+            resolution["oneOf"][1]["properties"]["decision"]["const"],
+            "new_problem"
+        );
+        assert_eq!(
+            resolution["oneOf"][1]["required"],
+            json!(["decision", "definition", "rationale"])
+        );
+        assert_eq!(
+            resolution["oneOf"][1]["not"]["anyOf"],
+            json!([{"required":["problemRef"]},{"required":["definitionRevision"]}])
+        );
     }
 
     #[test]
@@ -1841,6 +1935,7 @@ mod tests {
             token_limit: 10_000,
         };
         let packet: Value = serde_json::from_str(&semantic_prompt(&input).unwrap()).unwrap();
+        assert_eq!(packet["contract"], "comment-research.semantic.v6");
         assert_eq!(packet["currentResearchText"], "我也是……难受");
         assert_eq!(
             packet["parentResearchText"],
