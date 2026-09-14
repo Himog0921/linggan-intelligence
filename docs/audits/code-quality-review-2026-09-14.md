@@ -655,14 +655,31 @@ grep -n 'cargo test' scripts/verify-development-environment.sh
 
 **最重的链**
 
+调用方向（我第一版把这张图画反了，已改正——`may_move_to` 是 `may_move_to_for` 的**调用者**，不是它的分支）：
+
 ```text
-LifecycleState::may_move_to_for (crates/contracts/src/collection.rs:86)
-  ├── may_move_to (collection.rs:79) ── 唯一调用方在 #[cfg(test)] (collection.rs:254-264)
-  └── transition_target (crates/evidence/src/collection_target.rs:564) ── 死
-→ 生产代码里没有任何东西校验生命周期合法迁移；
-  活代码是裸 SQL 直接写 lifecycle_state：
-  work_order_lease.rs:467、patrol_scheduler.rs:576/588/646、collection_control.rs:1916
+may_move_to      (crates/contracts/src/collection.rs:79)
+      └── 唯一调用方在 #[cfg(test)] (collection.rs:254-264)
+transition_target (crates/evidence/src/collection_target.rs:564)
+      └── 在 :589 调 `from.may_move_to_for(to, target_kind)`
+                        ↓  两条路都汇到这里
+        LifecycleState::may_move_to_for (crates/contracts/src/collection.rs:86)
 ```
+
+即：**全仓访问 `may_move_to_for` 的只有这两条路，一条只被测试调用，一条是死函数**（`transition_target` 除 `crates/evidence/src/lib.rs:99` 的再导出外，全仓零引用——连测试都没有）。所以生命周期合法性校验在运行期从不执行。
+
+活代码改 `lifecycle_state` 是**裸 SQL 直接写**，共 5 处（全部 grep 逐个确认过）：
+
+| 位置 | 写的是什么 |
+|---|---|
+| `crates/evidence/src/work_order_lease.rs:467` | `SET lifecycle_state=$2`（`WHERE … lifecycle_state='archiving'`） |
+| `crates/evidence/src/patrol_scheduler.rs:576` | `SET monitoring_enabled=true, lifecycle_state='monitoring'` |
+| `crates/evidence/src/patrol_scheduler.rs:588` | `lifecycle_state=CASE WHEN lifecycle_state='monitoring' THEN 'paused' …` |
+| `crates/evidence/src/patrol_scheduler.rs:646` | 同 576 的批量版 |
+| `crates/evidence/src/collection_control.rs:1916` | `lifecycle_state=COALESCE($3,lifecycle_state)` |
+| `crates/evidence/src/collection_target.rs:875` | `SET monitoring_enabled=false, lifecycle_state='dismissed'` |
+
+**最后一行值得单独看一眼**：`'dismissed'` 这个迁移（很可能是全套里最不可逆的一步）就住在 `transition_target` 的**同一个文件里**，在该函数定义之后 311 行（`:564` → `:875`）。校验器和绕过它的路在同一个文件里并排躺着。
 
 **`#[allow(dead_code)]` 逐条判定**（共 4 处 `allow(dead_code)`，另有 1 处 `cfg_attr`）
 
