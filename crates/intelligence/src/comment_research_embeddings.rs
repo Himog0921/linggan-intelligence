@@ -13,6 +13,9 @@ use uuid::Uuid;
 
 const CANDIDATE_RECALL_VERSION: &str = "comment-research.exact-cosine.pgvector.v1";
 const MAX_CANDIDATES: i64 = 10;
+const EMBEDDING_LEASE_SECONDS: i64 = 120;
+const EMBEDDING_RETRY_DELAY_SECONDS: i64 = 60;
+const MAX_EMBEDDING_ATTEMPTS: i32 = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -62,6 +65,7 @@ pub struct ProblemCandidate {
 pub struct EmbeddingWorkClaim {
     pub input: AtomEmbeddingInput,
     pub run_ref: Uuid,
+    pub attempt: i32,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -164,8 +168,15 @@ pub async fn queue_atom_embedding(
 
 pub async fn accept_atom_embedding(
     database: &Database,
+    claim: &EmbeddingWorkClaim,
     result: AtomEmbeddingResult,
 ) -> Result<(), CommentResearchEmbeddingError> {
+    if claim.input.atom_ref != result.atom_ref
+        || claim.input.space_ref != result.space_ref
+        || claim.input.input_hash != result.input_hash
+    {
+        return Err(CommentResearchEmbeddingError::InvalidEmbedding);
+    }
     let expected = read_atom_embedding_input(database, result.atom_ref, result.space_ref).await?;
     if expected.input_hash != result.input_hash {
         return Err(CommentResearchEmbeddingError::InvalidEmbedding);
@@ -174,8 +185,9 @@ pub async fn accept_atom_embedding(
     let changed = sqlx::query(
         "UPDATE linggan_comment_research_atom_embedding \
          SET state='succeeded',dimensions=$4,vector=$5::public.vector,invocation_ref=$6,failure_code=NULL, \
+             lease_until=NULL,next_attempt_at=NULL, \
              updated_at=scope_001_now() \
-         WHERE atom_ref=$1 AND space_ref=$2 AND input_hash=$3 AND state IN ('pending','running')",
+         WHERE atom_ref=$1 AND space_ref=$2 AND input_hash=$3 AND attempts=$7 AND state='running'",
     )
     .bind(result.atom_ref)
     .bind(result.space_ref)
@@ -183,6 +195,7 @@ pub async fn accept_atom_embedding(
     .bind(i32::try_from(expected.dimensions).map_err(|_| CommentResearchEmbeddingError::InvalidEmbedding)?)
     .bind(vector)
     .bind(result.invocation_ref)
+    .bind(claim.attempt)
     .execute(database.pool())
     .await?
     .rows_affected();
@@ -264,15 +277,19 @@ pub async fn claim_next_embedding_work(
     database: &Database,
 ) -> Result<Option<EmbeddingWorkClaim>, CommentResearchEmbeddingError> {
     let space = activate_configured_embedding_space(database).await?;
+    recover_expired_embedding_work(database).await?;
     let existing: Option<(Uuid, Uuid)> = sqlx::query_as(
         "SELECT embedding.atom_ref,atom.run_ref \
          FROM linggan_comment_research_atom_embedding embedding \
          JOIN linggan_comment_research_atom atom USING(atom_ref) \
          JOIN linggan_comment_research_run run ON run.run_ref=atom.run_ref \
-         WHERE embedding.space_ref=$1 AND embedding.state='pending' AND run.state IN ('queued','running') \
+         WHERE embedding.space_ref=$1 AND run.state IN ('queued','running') \
+           AND (embedding.state='pending' OR (embedding.state='retryable' AND embedding.next_attempt_at<=scope_001_now())) \
+           AND embedding.attempts<$2 \
          ORDER BY embedding.created_at,embedding.atom_ref LIMIT 1",
     )
     .bind(space.space_ref)
+    .bind(MAX_EMBEDDING_ATTEMPTS)
     .fetch_optional(database.pool())
     .await?;
     let (atom_ref, run_ref) = if let Some(existing) = existing {
@@ -302,16 +319,24 @@ pub async fn claim_next_embedding_work(
     };
     let input = read_atom_embedding_input(database, atom_ref, space.space_ref).await?;
     let claimed = sqlx::query(
-        "UPDATE linggan_comment_research_atom_embedding SET state='running',updated_at=scope_001_now() \
-         WHERE atom_ref=$1 AND space_ref=$2 AND input_hash=$3 AND state='pending'",
+        "UPDATE linggan_comment_research_atom_embedding \
+         SET state='running',attempts=attempts+1,next_attempt_at=NULL, \
+             lease_until=scope_001_now()+make_interval(secs=>$4),updated_at=scope_001_now() \
+         WHERE atom_ref=$1 AND space_ref=$2 AND input_hash=$3 \
+           AND (state='pending' OR (state='retryable' AND next_attempt_at<=scope_001_now())) \
+         RETURNING attempts",
     )
     .bind(input.atom_ref)
     .bind(input.space_ref)
     .bind(&input.input_hash)
-    .execute(database.pool())
-    .await?
-    .rows_affected();
-    Ok((claimed == 1).then_some(EmbeddingWorkClaim { input, run_ref }))
+    .bind(EMBEDDING_LEASE_SECONDS)
+    .fetch_optional(database.pool())
+    .await?;
+    Ok(claimed.map(|row| EmbeddingWorkClaim {
+        input,
+        run_ref,
+        attempt: row.get("attempts"),
+    }))
 }
 
 pub async fn record_embedding_failure(
@@ -322,20 +347,87 @@ pub async fn record_embedding_failure(
 ) -> Result<(), CommentResearchEmbeddingError> {
     let changed = sqlx::query(
         "UPDATE linggan_comment_research_atom_embedding \
-         SET state='failed',invocation_ref=$4,failure_code=$5,updated_at=scope_001_now() \
-         WHERE atom_ref=$1 AND space_ref=$2 AND input_hash=$3 AND state='running'",
+         SET state=CASE WHEN attempts>=$6 THEN 'failed' ELSE 'retryable' END, \
+             invocation_ref=$4,failure_code=$5, \
+             next_attempt_at=CASE WHEN attempts>=$6 THEN NULL ELSE scope_001_now()+make_interval(secs=>$7) END, \
+             lease_until=NULL,updated_at=scope_001_now() \
+         WHERE atom_ref=$1 AND space_ref=$2 AND input_hash=$3 AND attempts=$8 AND state='running'",
     )
     .bind(claim.input.atom_ref)
     .bind(claim.input.space_ref)
     .bind(&claim.input.input_hash)
     .bind(invocation_ref)
     .bind(failure_code)
+    .bind(MAX_EMBEDDING_ATTEMPTS)
+    .bind(EMBEDDING_RETRY_DELAY_SECONDS)
+    .bind(claim.attempt)
     .execute(database.pool())
     .await?
     .rows_affected();
     (changed == 1)
         .then_some(())
         .ok_or(CommentResearchEmbeddingError::WorkUnavailable)
+}
+
+/// Converts abandoned owners into an explicitly retryable (or exhausted terminal) checkpoint.
+/// It runs before every claim, so recovery needs no parallel queue or scheduler.
+pub async fn recover_expired_embedding_work(
+    database: &Database,
+) -> Result<u64, CommentResearchEmbeddingError> {
+    let mut transaction = database.pool().begin().await?;
+    let recovered = sqlx::query(
+        "UPDATE linggan_comment_research_atom_embedding \
+         SET state=CASE WHEN attempts>=$1 THEN 'failed' ELSE 'retryable' END, \
+             failure_code='worker_interrupted', \
+             next_attempt_at=CASE WHEN attempts>=$1 THEN NULL ELSE scope_001_now()+make_interval(secs=>$2) END, \
+             lease_until=NULL,updated_at=scope_001_now() \
+         WHERE state='running' AND lease_until<=scope_001_now() \
+         RETURNING atom_ref,invocation_ref",
+    )
+    .bind(MAX_EMBEDDING_ATTEMPTS)
+    .bind(EMBEDDING_RETRY_DELAY_SECONDS)
+    .fetch_all(&mut *transaction)
+    .await?;
+    let invocation_refs: Vec<Uuid> = recovered
+        .iter()
+        .filter_map(|row| row.get::<Option<Uuid>, _>("invocation_ref"))
+        .collect();
+    if !invocation_refs.is_empty() {
+        // The invocation was atomically attached to this lease before provider dispatch. A
+        // recovered owner therefore cannot strand a running receipt or its token reservation.
+        sqlx::query(
+            "UPDATE linggan_model_invocation \
+             SET state='failed',failure_code='worker_interrupted',finished_at=scope_001_now(), \
+                 result=COALESCE(result,'{}'::jsonb)||jsonb_build_object( \
+                   'callStarted',true,'usageUnknown',input_tokens IS NULL OR output_tokens IS NULL,'recovered',true \
+                 ) \
+             WHERE invocation_ref=ANY($1) AND state='running'",
+        )
+        .bind(&invocation_refs)
+        .execute(&mut *transaction)
+        .await?;
+    }
+    // A lease that exhausts its final attempt must also terminalize the parent Run. Without
+    // this refresh, recovery would fix the checkpoint but leave the Run silently "running".
+    let atom_refs: Vec<Uuid> = recovered.iter().map(|row| row.get("atom_ref")).collect();
+    let run_refs: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT DISTINCT run_ref FROM linggan_comment_research_atom WHERE atom_ref=ANY($1)",
+    )
+    .bind(&atom_refs)
+    .fetch_all(&mut *transaction)
+    .await?;
+    for run_ref in run_refs {
+        crate::comment_research_kernel::refresh_run_completion(&mut transaction, run_ref)
+            .await
+            .map_err(|error| match error {
+                crate::comment_research_kernel::CommentResearchKernelError::Database(error) => {
+                    CommentResearchEmbeddingError::Database(error)
+                }
+                _ => CommentResearchEmbeddingError::WorkUnavailable,
+            })?;
+    }
+    transaction.commit().await?;
+    Ok(recovered.len() as u64)
 }
 
 async fn read_atom_embedding_input(

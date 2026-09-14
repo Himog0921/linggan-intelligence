@@ -11,6 +11,7 @@ use linggan_intelligence::comment_research_embeddings::{
     AtomEmbeddingResult, CommentResearchEmbeddingError, EmbeddingSpaceReceipt,
     accept_atom_embedding, activate_configured_embedding_space, claim_next_embedding_work,
     queue_atom_embedding, recall_problem_candidates, record_embedding_failure,
+    recover_expired_embedding_work,
 };
 use linggan_intelligence::comment_research_kernel::{
     CommentResearchKernelError, DERIVATION_VERSION, ResearchRunReceipt, RunItemFailureClass,
@@ -2182,6 +2183,243 @@ async fn development_reset_removes_only_comment_research_derivatives() {
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof"]
+async fn a_stale_run_item_attempt_cannot_write_the_recovered_item() {
+    let database = fixture::proof_database("comment_research_run_item_attempt_fence").await;
+    detail_with_author(
+        &database,
+        "run-item-attempt-note",
+        "SYNTHETIC run item attempt note",
+        Some("creator-1"),
+    )
+    .await;
+    comment_with_author(
+        &database,
+        "run-item-attempt-note",
+        "reader",
+        "孩子写作业总拖延，有什么办法吗",
+        Some("reader-1"),
+        "2026-09-01T08:00:00Z",
+    )
+    .await;
+    save_active_policy(
+        &database,
+        SaveResearchPolicy {
+            config_ref: Some(qualified_research_config(&database).await),
+            source_limit: 10,
+            token_limit: 10_000,
+        },
+    )
+    .await
+    .unwrap();
+    start_ready_run(&database).await.unwrap();
+    let stale = claim_next_run_item(&database).await.unwrap().unwrap();
+    sqlx::query(
+        "UPDATE linggan_comment_research_run_item SET attempts=attempts+1 \
+         WHERE run_ref=$1 AND derivation_ref=$2",
+    )
+    .bind(stale.run_ref)
+    .bind(stale.derivation_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    assert!(matches!(
+        record_run_item_failure(
+            &database,
+            &stale,
+            RunItemFailureClass::ModelFailed,
+            "synthetic_stale_owner",
+        )
+        .await,
+        Err(CommentResearchKernelError::ClaimLost)
+    ));
+    let current: (String, i32, Option<String>) = sqlx::query_as(
+        "SELECT state,attempts,failure_code FROM linggan_comment_research_run_item \
+         WHERE run_ref=$1 AND derivation_ref=$2",
+    )
+    .bind(stale.run_ref)
+    .bind(stale.derivation_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(current.0, "running");
+    assert_eq!(current.1, stale.attempt + 1);
+    assert!(current.2.is_none());
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn an_expired_embedding_claim_is_retried_and_cannot_be_settled_by_its_old_owner() {
+    let database = fixture::proof_database("comment_research_embedding_claim_recovery").await;
+    detail_with_author(
+        &database,
+        "embedding-claim-note",
+        "SYNTHETIC embedding claim note",
+        Some("creator-1"),
+    )
+    .await;
+    comment_with_author(
+        &database,
+        "embedding-claim-note",
+        "reader",
+        "孩子写作业总拖延，有什么办法吗",
+        Some("reader-1"),
+        "2026-09-01T08:00:00Z",
+    )
+    .await;
+    save_active_policy(
+        &database,
+        SaveResearchPolicy {
+            config_ref: Some(qualified_research_config(&database).await),
+            source_limit: 10,
+            token_limit: 10_000,
+        },
+    )
+    .await
+    .unwrap();
+    let run = start_ready_run(&database).await.unwrap();
+    let semantic_claim = claim_next_run_item(&database).await.unwrap().unwrap();
+    accept_semantic_output(
+        &database,
+        &semantic_claim,
+        SemanticExtractionOutput::Atoms {
+            atoms: vec![SemanticAtomProposal {
+                kind: AtomKind::Problem,
+                proposition: "孩子难以启动写作业".into(),
+                basis: AtomBasis::Explicit,
+                evidence_start: 0,
+                evidence_end: 5,
+            }],
+        },
+        None,
+    )
+    .await
+    .unwrap();
+    let atom = atom_ref(&database, run.run_ref, semantic_claim.derivation_ref).await;
+    let space = synthetic_qualified_embedding_space(&database).await;
+    let input = queue_atom_embedding(&database, atom, space.space_ref)
+        .await
+        .unwrap();
+    let first = claim_next_embedding_work(&database).await.unwrap().unwrap();
+    assert_eq!(first.attempt, 1);
+    // Model the durable state immediately after the worker has atomically reserved and attached
+    // the local embedding invocation, then dies before it can receive a provider response.
+    let (connection_version_ref, model_ref): (Uuid, Uuid) = sqlx::query_as(
+        "SELECT entry.connection_version_ref,profile.model_ref \
+         FROM linggan_comment_research_embedding_profile profile \
+         JOIN linggan_model_entry entry USING(model_ref) WHERE profile.singleton",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let invocation_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_model_invocation( \
+             invocation_ref,connection_version_ref,model_ref,operation,request_hash,state,reserved_tokens,charged_tokens,result \
+         ) VALUES($1,$2,$3,'embed',$4,'running',64,64,$5)",
+    )
+    .bind(invocation_ref)
+    .bind(connection_version_ref)
+    .bind(model_ref)
+    .bind(HASH)
+    .bind(json!({"runRef":run.run_ref,"stage":"embedding","callStarted":false}))
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE linggan_comment_research_atom_embedding SET invocation_ref=$4 \
+         WHERE atom_ref=$1 AND space_ref=$2 AND input_hash=$3 AND attempts=$5 AND state='running'",
+    )
+    .bind(atom)
+    .bind(space.space_ref)
+    .bind(&input.input_hash)
+    .bind(invocation_ref)
+    .bind(first.attempt)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE linggan_comment_research_atom_embedding \
+         SET lease_until=scope_001_now()-interval '1 second' \
+         WHERE atom_ref=$1 AND space_ref=$2 AND input_hash=$3",
+    )
+    .bind(atom)
+    .bind(space.space_ref)
+    .bind(&input.input_hash)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(recover_expired_embedding_work(&database).await.unwrap(), 1);
+    let invocation_state: String =
+        sqlx::query_scalar("SELECT state FROM linggan_model_invocation WHERE invocation_ref=$1")
+            .bind(invocation_ref)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        invocation_state, "failed",
+        "lease recovery must terminalize the atomically attached provider reservation"
+    );
+    let recovered: (String, i32, Option<String>) = sqlx::query_as(
+        "SELECT state,attempts,next_attempt_at::text FROM linggan_comment_research_atom_embedding \
+         WHERE atom_ref=$1 AND space_ref=$2 AND input_hash=$3",
+    )
+    .bind(atom)
+    .bind(space.space_ref)
+    .bind(&input.input_hash)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(recovered.0, "retryable");
+    assert_eq!(recovered.1, 1);
+    assert!(recovered.2.is_some());
+    sqlx::query(
+        "UPDATE linggan_comment_research_atom_embedding \
+         SET next_attempt_at=scope_001_now()-interval '1 second' \
+         WHERE atom_ref=$1 AND space_ref=$2 AND input_hash=$3",
+    )
+    .bind(atom)
+    .bind(space.space_ref)
+    .bind(&input.input_hash)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let second = claim_next_embedding_work(&database).await.unwrap().unwrap();
+    assert_eq!(second.attempt, 2);
+    assert!(matches!(
+        accept_atom_embedding(
+            &database,
+            &first,
+            AtomEmbeddingResult {
+                atom_ref: atom,
+                space_ref: space.space_ref,
+                input_hash: input.input_hash.clone(),
+                values: unit_vector_512(),
+                invocation_ref: None,
+            },
+        )
+        .await,
+        Err(CommentResearchEmbeddingError::WorkUnavailable)
+    ));
+    record_embedding_failure(&database, &second, None, "synthetic_retryable_failure")
+        .await
+        .unwrap();
+    let state: (String, i32, Option<String>) = sqlx::query_as(
+        "SELECT state,attempts,lease_until::text FROM linggan_comment_research_atom_embedding \
+         WHERE atom_ref=$1 AND space_ref=$2 AND input_hash=$3",
+    )
+    .bind(atom)
+    .bind(space.space_ref)
+    .bind(&input.input_hash)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(state.0, "retryable");
+    assert_eq!(state.1, 2);
+    assert!(state.2.is_none());
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
 async fn unavailable_embedding_settles_a_run_as_failure_instead_of_completed_unpublished() {
     let database = fixture::proof_database("comment_research_embedding_unavailable").await;
     detail_with_author(
@@ -2389,8 +2627,10 @@ async fn terminal_embedding_and_resolution_failures_are_visible_on_the_run() {
             let input = queue_atom_embedding(&database, atom, space.space_ref)
                 .await
                 .unwrap();
+            let embedding_claim = claim_next_embedding_work(&database).await.unwrap().unwrap();
             accept_atom_embedding(
                 &database,
+                &embedding_claim,
                 AtomEmbeddingResult {
                     atom_ref: atom,
                     space_ref: space.space_ref,
@@ -2414,9 +2654,29 @@ async fn terminal_embedding_and_resolution_failures_are_visible_on_the_run() {
             .unwrap();
         } else {
             let claim = claim_next_embedding_work(&database).await.unwrap().unwrap();
-            record_embedding_failure(&database, &claim, None, "synthetic_embedding_failure")
-                .await
-                .unwrap();
+            sqlx::query(
+                "UPDATE linggan_comment_research_atom_embedding SET attempts=3 \
+                 WHERE atom_ref=$1 AND space_ref=$2 AND input_hash=$3",
+            )
+            .bind(claim.input.atom_ref)
+            .bind(claim.input.space_ref)
+            .bind(&claim.input.input_hash)
+            .execute(database.pool())
+            .await
+            .unwrap();
+            let exhausted_claim =
+                linggan_intelligence::comment_research_embeddings::EmbeddingWorkClaim {
+                    attempt: 3,
+                    ..claim
+                };
+            record_embedding_failure(
+                &database,
+                &exhausted_claim,
+                None,
+                "synthetic_embedding_failure",
+            )
+            .await
+            .unwrap();
         }
         refresh_run_completion_for_atom(&database, atom)
             .await
@@ -2630,8 +2890,10 @@ async fn membership_admission_waits_for_its_running_resolution_to_settle() {
     let input = queue_atom_embedding(&database, atom, space.space_ref)
         .await
         .unwrap();
+    let embedding_claim = claim_next_embedding_work(&database).await.unwrap().unwrap();
     accept_atom_embedding(
         &database,
+        &embedding_claim,
         AtomEmbeddingResult {
             atom_ref: atom,
             space_ref: space.space_ref,
@@ -2743,8 +3005,10 @@ async fn unavailable_embedding_terminalizes_a_frozen_resolution_without_a_new_ca
     let input = queue_atom_embedding(&database, atom, space.space_ref)
         .await
         .unwrap();
+    let embedding_claim = claim_next_embedding_work(&database).await.unwrap().unwrap();
     accept_atom_embedding(
         &database,
+        &embedding_claim,
         AtomEmbeddingResult {
             atom_ref: atom,
             space_ref: space.space_ref,
@@ -3087,10 +3351,12 @@ async fn exact_vector_recall_only_returns_candidates_and_invalid_vectors_never_w
     let first_input = queue_atom_embedding(&database, first_atom, space.space_ref)
         .await
         .unwrap();
+    let first_embedding_claim = claim_next_embedding_work(&database).await.unwrap().unwrap();
     let mut first_values = vec![0.0; 512];
     first_values[0] = 1.0;
     accept_atom_embedding(
         &database,
+        &first_embedding_claim,
         AtomEmbeddingResult {
             atom_ref: first_atom,
             space_ref: space.space_ref,
@@ -3123,9 +3389,11 @@ async fn exact_vector_recall_only_returns_candidates_and_invalid_vectors_never_w
     let atom_input = queue_atom_embedding(&database, second_atom, space.space_ref)
         .await
         .unwrap();
+    let second_embedding_claim = claim_next_embedding_work(&database).await.unwrap().unwrap();
     assert!(matches!(
         accept_atom_embedding(
             &database,
+            &second_embedding_claim,
             AtomEmbeddingResult {
                 atom_ref: second_atom,
                 space_ref: space.space_ref,
@@ -3147,9 +3415,10 @@ async fn exact_vector_recall_only_returns_candidates_and_invalid_vectors_never_w
     .fetch_one(database.pool())
     .await
     .unwrap();
-    assert_eq!(atom_work_state, "pending");
+    assert_eq!(atom_work_state, "running");
     accept_atom_embedding(
         &database,
+        &second_embedding_claim,
         AtomEmbeddingResult {
             atom_ref: second_atom,
             space_ref: space.space_ref,

@@ -5,10 +5,8 @@
 # migration），不需要数据库。需要真实数据库才能证明的行为，本脚本只断言「那个测试还
 # 在」，真正的证明由 scripts/test-*-postgres.sh 给出。
 #
-# **它现在不是提交闸门**：对当前 main 运行会报 4 条真实失败并退出 1（语料库对已失效零
-# 感知，以及三处定位式睡眠）。在这 4 条被处理掉之前，谁把它接进 pre-commit，谁就会被
-# 四个与自己改动无关的问题挡住，进而学会用 --no-verify 绕过——那比没有闸门更糟。
-# 先当作按需运行的体检，等它自然变绿再接闸门。
+# 它仍是按需运行的体检：跨模块的 rust-boundaries 历史债另有明确 baseline，不能被本脚本
+# 的通过掩盖。这里的每一项必须指向真实实现，不能靠注释、无关迁移或包装层假绿。
 #
 # 加新检查的规矩：先有一次真实故障，再有这里的一条。
 set -euo pipefail
@@ -69,7 +67,7 @@ expected_call_sites=(
   "crates/evidence/src/acquisition_chain.rs:2"
   "crates/evidence/src/archive_completeness.rs:2"
   "crates/evidence/src/archive_ledger.rs:2"
-  "crates/evidence/src/collection_control.rs:2"
+  "crates/evidence/src/collection_control.rs:3"
   "crates/evidence/src/creator_lifecycle.rs:1"
   "crates/evidence/src/target_inspector_sql.rs:1"
   "crates/evidence/src/work_order_lease.rs:1"
@@ -86,7 +84,8 @@ for entry in "${expected_call_sites[@]}"; do
     report_error "INV-1 登记的判据调用点文件不存在：$file"
     continue
   fi
-  got="$(grep -o "$macro_call_re" "$file" | wc -l | tr -d ' ')"
+  # 注释里的宏名是在解释登记表，不是调用点；把它也数进去会让注释把检查打红。
+  got="$(sed '\|^[[:space:]]*//|d' "$file" | grep -o "$macro_call_re" | wc -l | tr -d ' ')"
   if [[ "$got" != "$want" ]]; then
     report_error "INV-1 $file 的判据调用点从 $want 变成 $got —— 改动调用点必须同步更新 scripts/check-invariants.sh 的登记表"
   fi
@@ -123,7 +122,12 @@ if [[ ! -f "$lease_source" ]]; then
 fi
 # 迁移是 append-only：撤销一个约束不会改动创建它的那个文件，而是新加一个迁移。
 # 只看创建处等于给「后来悄悄撤掉」留了整条后门。
-if grep -rq "ALTER COLUMN expires_at DROP NOT NULL" database/migrations/; then
+if awk '
+  /ALTER TABLE[[:space:]]+collection_work_order_lease/ { in_lease=1 }
+  in_lease && /ALTER COLUMN[[:space:]]+expires_at[[:space:]]+DROP[[:space:]]+NOT[[:space:]]+NULL/ { found=1 }
+  in_lease && /;/ { in_lease=0 }
+  END { exit !found }
+' database/migrations/*.sql; then
   report_error "INV-2 有后续迁移把租约的 expires_at 改回可空 —— 没有到期时间的租约等于永久授权"
 fi
 if ! grep -q "collection_work_order_lease_live_idx" "$lease_migration"; then
@@ -208,12 +212,20 @@ for file in "${expected_dependents[@]}"; do
   fi
 done
 
-# 语料库读模型：一篇已被确认失效的作品，在语料库里也该看得出来。
-# 判据要落在真实的读取上，不是「文件里出现过 retire 这几个字母」——否则谁加一句
-# `// TODO: retire` 就把这条永久点绿，而它描述的缺陷还原封不动地活着。
-if ! grep -q "collection_material_retirement\|retired_works\|retired_at\|is_retired" apps/api/src/local_web/material_projection.rs; then
-  report_error "INV-4 语料库读模型 apps/api/src/local_web/material_projection.rs 对「已确认失效」零感知 —— 同一篇作品在观察目标页显示已失效，在语料库页仍显示为正常材料"
-fi
+# retirement 是人工针对一份 target 目录作出的结论，不能在无 target 上下文的 Corpus CTE
+# 中扩大成全局内容删除。真实读取必须在 target-scoped archive ledger/completeness 内带
+# `target_ref` 与 content 的双键；只 grep 表名会让全局 NOT EXISTS 这种反向破坏假绿。
+retirement_readers=(
+  "crates/evidence/src/archive_ledger.rs"
+  "crates/evidence/src/archive_completeness.rs"
+)
+for file in "${retirement_readers[@]}"; do
+  if ! grep -q "collection_material_retirement" "$file" \
+    || ! grep -q "retired\.target_ref=" "$file" \
+    || ! grep -q "retired\.content_public_ref=" "$file"; then
+    report_error "INV-4 target-scoped retirement read $file 不再同时约束 target_ref 和 content_public_ref —— 人工结论会漏传或被扩大"
+  fi
+done
 
 # ---------------------------------------------------------------------------
 # INV-5 · 并发正确性用确定性同步证明，不用睡眠

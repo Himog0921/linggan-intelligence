@@ -253,6 +253,7 @@ migrate() {
   apply_migration_once "0065_account_observation_bootstrap" "$project_root/database/migrations/0065_account_observation_bootstrap.sql"
   apply_migration_once "0080_scheduler_admission_failure_reasons" "$project_root/database/migrations/0080_scheduler_admission_failure_reasons.sql"
   apply_migration_once "0081_comment_research_fingerprint" "$project_root/database/migrations/0081_comment_research_fingerprint.sql"
+  apply_migration_once "0082_comment_research_execution_recovery" "$project_root/database/migrations/0082_comment_research_execution_recovery.sql"
 }
 
 case "$command_name" in

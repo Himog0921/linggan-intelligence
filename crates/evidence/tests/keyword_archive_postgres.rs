@@ -243,6 +243,46 @@ async fn an_archived_keyword_advances_from_links_to_details() {
     );
 }
 
+/// 已发现的材料仍欠详情时，baseline 覆盖不完整不能把它冻死。该覆盖事实继续为 false，
+/// 但 detail continuation 必须独立可达；这覆盖历史任务已经切到 monitoring 的同一形状。
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn an_incomplete_keyword_baseline_can_still_continue_discovered_details() {
+    let database = proof_database("keyword_detail_continues_incomplete_baseline").await;
+    let target_ref = submit_keyword_archive(
+        &database,
+        "考研自习::detail-after-incomplete-baseline",
+        "time_budget_exhausted",
+        1,
+        0,
+    )
+    .await;
+    let mut transaction = database.pool().begin().await.unwrap();
+    assert!(
+        !keyword_baseline_qualified(&mut transaction, target_ref)
+            .await
+            .unwrap(),
+        "前置：这一轮搜索覆盖仍然不完整"
+    );
+    transaction.commit().await.unwrap();
+    assert!(
+        keyword_targets_pending_detail(&database, &[target_ref])
+            .await
+            .unwrap()
+            .contains(&target_ref),
+        "前置：已发现作品仍缺详情"
+    );
+    assert!(
+        matches!(
+            advance_keyword_archive_detail(&database, target_ref, "建档补详情", "person")
+                .await
+                .unwrap(),
+            KeywordDetailAdvance::Queued { works: 1, .. }
+        ),
+        "详情 work 的可达性不得依赖 baseline 是否完整"
+    );
+}
+
 /// **本领域的关键词也要能补详情。**
 ///
 /// 关键词不只有外部领域那一种。本领域的关键词（ADHD 底下的「a娃」就是）采回来的材料按

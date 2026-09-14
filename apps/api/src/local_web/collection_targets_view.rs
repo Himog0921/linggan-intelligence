@@ -159,15 +159,24 @@ fn keyword_archive_read(
 ) -> super::target_drawer::KeywordArchiveRead {
     use super::target_drawer::KeywordArchiveRead;
     let Some(archived) = keyword_archives else {
-        return KeywordArchiveRead::Unavailable;
+        return if keyword_details_pending.is_some_and(|pending| pending.contains(&target_ref)) {
+            KeywordArchiveRead::DetailPending
+        } else {
+            KeywordArchiveRead::Unavailable
+        };
     };
     if !archived.contains(&target_ref) {
-        return KeywordArchiveRead::NotArchived;
+        return if keyword_details_pending.is_some_and(|pending| pending.contains(&target_ref)) {
+            // Baseline coverage and a discovered material's detail completeness are independent.
+            KeywordArchiveRead::DetailPending
+        } else {
+            KeywordArchiveRead::NotArchived
+        };
     }
     match keyword_details_pending {
         Some(pending) if pending.contains(&target_ref) => KeywordArchiveRead::DetailPending,
         Some(_) => KeywordArchiveRead::Complete,
-        // 翻完了是已知事实，详情那一问没读到。不谎称补齐，也不倒退成「没建过」。
+        // 详情那一问没读到，不能用 baseline 代替它，更不能把未知写成补齐。
         None => KeywordArchiveRead::Unavailable,
     }
 }

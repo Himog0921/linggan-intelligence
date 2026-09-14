@@ -110,6 +110,8 @@ pub enum CommentResearchKernelError {
         "comment research reset is blocked while {active_operations} V1 model operation(s) are active"
     )]
     DevelopmentResetBlocked { active_operations: i64 },
+    #[error("the run item claim is no longer current")]
+    ClaimLost,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -917,10 +919,11 @@ pub async fn load_claimed_research_input(
            ON policy.policy_revision_ref=run.policy_revision_ref \
          JOIN linggan_comment_research_derivation_readable derivation \
            ON derivation.derivation_ref=item.derivation_ref \
-         WHERE item.run_ref=$1 AND item.derivation_ref=$2 AND item.state='running'",
+         WHERE item.run_ref=$1 AND item.derivation_ref=$2 AND item.attempts=$3 AND item.state='running'",
     )
     .bind(claim.run_ref)
     .bind(claim.derivation_ref)
+    .bind(claim.attempt)
     .fetch_optional(database.pool())
     .await?;
     Ok(row.map(|row| ClaimedResearchInput {
@@ -1004,12 +1007,13 @@ pub async fn record_run_item_failure(
         sqlx::query(
             "UPDATE linggan_comment_research_run_item \
              SET state=$3,failure_code=$4,finished_at=scope_001_now(),lease_until=NULL,updated_at=scope_001_now() \
-             WHERE run_ref=$1 AND derivation_ref=$2 AND state='running'",
+             WHERE run_ref=$1 AND derivation_ref=$2 AND attempts=$5 AND state='running'",
         )
         .bind(claim.run_ref)
         .bind(claim.derivation_ref)
         .bind(state)
         .bind(failure_code)
+        .bind(claim.attempt)
         .execute(&mut *transaction)
         .await?
         .rows_affected()
@@ -1022,18 +1026,21 @@ pub async fn record_run_item_failure(
                  finished_at=CASE WHEN attempts>=3 THEN scope_001_now() ELSE NULL END, \
                  lease_until=NULL, \
                  updated_at=scope_001_now() \
-             WHERE run_ref=$1 AND derivation_ref=$2 AND state='running'",
+             WHERE run_ref=$1 AND derivation_ref=$2 AND attempts=$4 AND state='running'",
         )
         .bind(claim.run_ref)
         .bind(claim.derivation_ref)
         .bind(failure_code)
+        .bind(claim.attempt)
         .execute(&mut *transaction)
         .await?
         .rows_affected()
     };
-    if changed == 1 {
-        refresh_run_completion(&mut transaction, claim.run_ref).await?;
+    if changed != 1 {
+        transaction.rollback().await?;
+        return Err(CommentResearchKernelError::ClaimLost);
     }
+    refresh_run_completion(&mut transaction, claim.run_ref).await?;
     transaction.commit().await?;
     Ok(())
 }
@@ -1071,7 +1078,7 @@ async fn refresh_run_completion_with_embedding_state(
                AND NOT EXISTS(SELECT 1 FROM linggan_comment_research_atom_embedding embedding \
                               WHERE embedding.atom_ref=atom.atom_ref AND embedding.state='succeeded') \
                AND NOT EXISTS(SELECT 1 FROM linggan_comment_research_atom_embedding embedding \
-                              WHERE embedding.atom_ref=atom.atom_ref AND embedding.state IN ('pending','running')) \
+                              WHERE embedding.atom_ref=atom.atom_ref AND embedding.state IN ('pending','running','retryable')) \
                AND (EXISTS(SELECT 1 FROM linggan_comment_research_atom_embedding embedding \
                            WHERE embedding.atom_ref=atom.atom_ref AND embedding.state IN ('failed','incompatible')) \
                     OR ($2 AND NOT EXISTS(SELECT 1 FROM linggan_comment_research_embedding_profile profile \
@@ -1195,10 +1202,11 @@ pub async fn fail_active_runs_without_embedding_config(
     .await?;
     sqlx::query(
         "UPDATE linggan_comment_research_atom_embedding embedding \
-         SET state='failed',failure_code='embedding_configuration_unavailable',updated_at=scope_001_now() \
+         SET state='failed',failure_code='embedding_configuration_unavailable', \
+             lease_until=NULL,next_attempt_at=NULL,updated_at=scope_001_now() \
          FROM linggan_comment_research_atom atom \
          JOIN linggan_comment_research_run run ON run.run_ref=atom.run_ref \
-         WHERE embedding.atom_ref=atom.atom_ref AND embedding.state='pending' \
+         WHERE embedding.atom_ref=atom.atom_ref AND embedding.state IN ('pending','retryable') \
            AND run.state IN ('queued','running')",
     )
     .execute(database.pool())

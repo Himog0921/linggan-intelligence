@@ -155,7 +155,13 @@ pub async fn schema_ready(database: &Database) -> Result<bool, ModelError> {
                       AND attname='derivation_input_hash' AND NOT attisdropped) \
                 AND EXISTS(SELECT 1 FROM pg_attribute \
                     WHERE attrelid='linggan_comment_research_run_item'::regclass \
-                      AND attname='research_fingerprint' AND NOT attisdropped)",
+                      AND attname='research_fingerprint' AND NOT attisdropped) \
+                AND EXISTS(SELECT 1 FROM pg_attribute \
+                    WHERE attrelid='linggan_comment_research_atom_embedding'::regclass \
+                      AND attname='lease_until' AND NOT attisdropped) \
+                AND EXISTS(SELECT 1 FROM pg_attribute \
+                    WHERE attrelid='linggan_comment_research_atom_embedding'::regclass \
+                      AND attname='attempts' AND NOT attisdropped)",
     )
     .fetch_one(database.pool())
     .await?)
@@ -241,10 +247,6 @@ async fn advance_loaded_semantic(
     else {
         return Ok(());
     };
-    if let Err(error) = attach_semantic_invocation(database, claim, reserved.invocation_ref).await {
-        release_semantic_dispatch_permit(&mut reserved).await?;
-        return Err(error);
-    }
     let response = dispatch_generation(
         database,
         store,
@@ -272,6 +274,7 @@ async fn reserve_semantic_call(
         SEMANTIC_SYSTEM,
         prompt,
         "semantic_extraction",
+        Some(claim),
     )
     .await
     {
@@ -308,23 +311,6 @@ async fn reserve_semantic_call(
             Ok(None)
         }
     }
-}
-
-async fn attach_semantic_invocation(
-    database: &Database,
-    claim: &crate::comment_research_kernel::ResearchRunItemClaim,
-    invocation_ref: Uuid,
-) -> Result<(), ModelError> {
-    sqlx::query(
-        "UPDATE linggan_comment_research_run_item SET invocation_ref=$3,updated_at=scope_001_now() \
-         WHERE run_ref=$1 AND derivation_ref=$2 AND state='running'",
-    )
-    .bind(claim.run_ref)
-    .bind(claim.derivation_ref)
-    .bind(invocation_ref)
-    .execute(database.pool())
-    .await?;
-    Ok(())
 }
 
 async fn settle_semantic_response(
@@ -443,21 +429,14 @@ async fn advance_embedding(
         return Ok(true);
     };
     let payload = embedding_payload(&claim);
-    let reserved = match reserve_embedding_call(
-        database,
-        embedding_run_ref(&claim),
-        &profile,
-        &payload,
-        "embedding",
-    )
-    .await
-    {
-        Ok(reserved) => reserved,
-        Err(error) => {
-            fail_embedding_work(database, &claim, None, error.code()).await?;
-            return Ok(true);
-        }
-    };
+    let reserved =
+        match reserve_embedding_call(database, &claim, &profile, &payload, "embedding").await {
+            Ok(reserved) => reserved,
+            Err(error) => {
+                fail_embedding_work(database, &claim, None, error.code()).await?;
+                return Ok(true);
+            }
+        };
     let response = dispatch_embedding(adapter, payload, drain).await;
     settle_embedding_response(database, &claim, &reserved, response).await?;
     refresh_embedding_completion(database, &claim).await?;
@@ -570,6 +549,7 @@ async fn accept_embedding_values(
 ) -> Result<(), CommentResearchEmbeddingError> {
     accept_atom_embedding(
         database,
+        claim,
         AtomEmbeddingResult {
             atom_ref: claim.input.atom_ref,
             space_ref: claim.input.space_ref,
@@ -620,6 +600,7 @@ async fn advance_problem_resolution(
         RESOLUTION_SYSTEM,
         &prompt,
         "problem_resolution",
+        None,
     )
     .await
     {
@@ -968,6 +949,7 @@ async fn reserve_generation_call(
     system: &str,
     prompt: &str,
     stage: &'static str,
+    semantic_claim: Option<&crate::comment_research_kernel::ResearchRunItemClaim>,
 ) -> Result<ReservedCall, ModelError> {
     let mut embedding_transaction = database.pool().begin().await?;
     if !local_embedding_profile::ready_in_transaction(&mut embedding_transaction).await? {
@@ -1026,6 +1008,26 @@ async fn reserve_generation_call(
         .bind(json!({"runRef":run_ref,"stage":stage,"callStarted":false}))
         .execute(&mut *transaction)
         .await?;
+        if let Some(claim) = semantic_claim {
+            // The reservation and ownership association must commit together. Otherwise a
+            // worker crash between them leaves an unowned running invocation that recovery can
+            // never find, while its reserved tokens keep consuming this Run's budget.
+            let attached = sqlx::query(
+                "UPDATE linggan_comment_research_run_item \
+                 SET invocation_ref=$3,updated_at=scope_001_now() \
+                 WHERE run_ref=$1 AND derivation_ref=$2 AND attempts=$4 AND state='running'",
+            )
+            .bind(claim.run_ref)
+            .bind(claim.derivation_ref)
+            .bind(invocation_ref)
+            .bind(claim.attempt)
+            .execute(&mut *transaction)
+            .await?
+            .rows_affected();
+            if attached != 1 {
+                return Err(ModelError::Source);
+            }
+        }
         let call = (
             invocation_ref,
             row.get("version_ref"),
@@ -1059,11 +1061,12 @@ async fn reserve_generation_call(
 
 async fn reserve_embedding_call(
     database: &Database,
-    run_ref: Uuid,
+    claim: &EmbeddingWorkClaim,
     profile: &local_embedding_profile::LocalEmbeddingProfile,
     payload: &str,
     stage: &'static str,
 ) -> Result<ReservedCall, ModelError> {
+    let run_ref = embedding_run_ref(claim);
     let mut transaction = database.pool().begin().await?;
     if !local_embedding_profile::ready_in_transaction(&mut transaction).await? {
         return Err(ModelError::EmbeddingNotQualified);
@@ -1103,6 +1106,24 @@ async fn reserve_embedding_call(
     .bind(json!({"runRef":run_ref,"stage":stage,"callStarted":false}))
     .execute(&mut *transaction)
     .await?;
+    // Embedding recovery owns this receipt through the embedding checkpoint. Attach it before
+    // the reservation commits so an interrupted worker cannot orphan a running invocation.
+    let attached = sqlx::query(
+        "UPDATE linggan_comment_research_atom_embedding \
+         SET invocation_ref=$4,updated_at=scope_001_now() \
+         WHERE atom_ref=$1 AND space_ref=$2 AND input_hash=$3 AND attempts=$5 AND state='running'",
+    )
+    .bind(claim.input.atom_ref)
+    .bind(claim.input.space_ref)
+    .bind(&claim.input.input_hash)
+    .bind(invocation_ref)
+    .bind(claim.attempt)
+    .execute(&mut *transaction)
+    .await?
+    .rows_affected();
+    if attached != 1 {
+        return Err(ModelError::Source);
+    }
     transaction.commit().await?;
     Ok(ReservedCall {
         invocation_ref,

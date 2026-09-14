@@ -68,3 +68,20 @@ fn an_unrecovered_block_requires_human_action() {
         TargetInspectorAction::HandleArchiveProblems
     );
 }
+
+#[test]
+fn running_execution_does_not_hide_archive_problems() {
+    let mut blocked = facts();
+    blocked.quarantined = 2;
+    let execution = execution_projection(&LaneCounts {
+        running: 1,
+        ..LaneCounts::default()
+    });
+    let (archive, coverage) = archive_projection("creator", &blocked, execution.state);
+    assert_eq!(execution.state, TargetInspectorExecutionState::Running);
+    assert_eq!(
+        resolve_action(&archive, &coverage, &execution, true),
+        TargetInspectorAction::HandleArchiveProblems,
+        "运行中与隔离材料是并列事实，不能用前者吞掉后者的处理入口"
+    );
+}

@@ -21,10 +21,6 @@ pub struct TargetIntake {
     pub target_kind: String,
     /// For a creator: the platform's own stable id. For a keyword: the term.
     pub identity: String,
-    /// Keyword only. Two rankings of one term are two observation surfaces, so ranking is
-    /// part of the identity rather than a display detail.
-    #[serde(default)]
-    pub ranking: Option<String>,
     #[serde(default)]
     pub display_name: Option<String>,
     /// Public facts already visible on the page: avatar, bio, follower count…
@@ -42,7 +38,6 @@ pub enum IntakeRejection {
     UnknownTargetKind,
     EmptyIdentity,
     CreatorIdentityMustBePlatformId,
-    KeywordNeedsRanking,
 }
 
 impl IntakeRejection {
@@ -52,7 +47,6 @@ impl IntakeRejection {
             Self::UnknownTargetKind => "unknown_target_kind",
             Self::EmptyIdentity => "empty_identity",
             Self::CreatorIdentityMustBePlatformId => "creator_identity_must_be_platform_id",
-            Self::KeywordNeedsRanking => "keyword_needs_ranking",
         }
     }
 }
@@ -83,10 +77,8 @@ pub fn parse_intake(intake: &TargetIntake) -> Result<TargetIdentity, IntakeRejec
                 .map_err(IntakeRejection::from)
         }
         TargetKind::Keyword => {
-            // 排序**不再进身份**（`0076`）：一个词就是一个观察目标，按哪些榜去看是它的
-            // 巡检规则，可以有好几条。此前这里要求必须带排序，理由是「不带排序的关键词
-            // 是个含糊的目标」——那在一个词只能有一条口径的年代成立；现在口径有自己的
-            // 归处，再把它塞进身份，只会让同一个词分裂成几个各自建档的目标。
+            // 一个词就是一个观察目标；排序是独立巡检规则的口径。目标 intake 不保留一个
+            // 既不进入 identity、也不建立 rule 的无效字段。
             TargetIdentity::keyword(intake.platform.trim(), intake.identity.trim())
                 .map_err(IntakeRejection::from)
         }
@@ -100,55 +92,56 @@ pub const INTAKE_SOURCE: TargetSource = TargetSource::PluginPush;
 mod tests {
     use super::*;
 
-    fn intake(kind: &str, identity: &str, ranking: Option<&str>) -> TargetIntake {
+    fn intake(kind: &str, identity: &str) -> TargetIntake {
         TargetIntake {
             platform: "xhs".to_owned(),
             target_kind: kind.to_owned(),
             identity: identity.to_owned(),
-            ranking: ranking.map(str::to_owned),
             display_name: None,
             identity_facts: None,
         }
     }
 
-    /// **不带排序的关键词是完整的，带排序的也不会因此分裂。**
-    ///
-    /// 排序是巡检口径，属于规则（`0076`）。此前这里要求必须带排序，理由是「替人猜一个
-    /// 排序会把两个不同的观察面并成一个身份」——那在一个词只能有一条口径的年代成立。
-    /// 现在反过来了：把排序塞进身份，同一个词会分裂成几个各自建档、各攒一份历史的目标，
-    /// 而它们面对的是同一批笔记。
+    /// 关键词 identity 只有 term；排序由另一个 monitor-rule 合同承担。
     #[test]
-    fn a_keyword_is_taken_by_its_term_whatever_ranking_accompanies_it() {
-        let without = parse_intake(&intake("keyword", "ADHD", None)).expect("term alone is enough");
-        let with = parse_intake(&intake("keyword", "ADHD", Some("comprehensive")))
-            .expect("an accompanying ranking is accepted but does not enter the identity");
-        assert_eq!(without.key(), with.key());
-        assert_eq!(without.key(), "adhd");
+    fn a_keyword_is_taken_by_its_term() {
+        let keyword = parse_intake(&intake("keyword", "ADHD")).expect("term alone is enough");
+        assert_eq!(keyword.key(), "adhd");
+    }
+
+    #[test]
+    fn a_legacy_ranking_payload_is_ignored_not_stored_as_a_target_fact() {
+        let intake: TargetIntake = serde_json::from_value(serde_json::json!({
+            "platform":"xhs", "targetKind":"keyword", "identity":"ADHD",
+            "ranking":"most_liked"
+        }))
+        .unwrap();
+        assert_eq!(parse_intake(&intake).unwrap().key(), "adhd");
     }
 
     #[test]
     fn creators_are_taken_by_platform_id_and_keywords_are_normalised() {
-        let creator = parse_intake(&intake("creator", " 5ebe6d21 ", None)).unwrap();
+        let creator = parse_intake(&intake("creator", " 5ebe6d21 ")).unwrap();
         assert_eq!(creator.key(), "5ebe6d21");
 
-        let keyword = parse_intake(&intake("keyword", " ADHD ", Some(" Comprehensive "))).unwrap();
+        let keyword = parse_intake(&intake("keyword", " ADHD ")).unwrap();
         assert_eq!(keyword.key(), "adhd");
     }
 
     #[test]
     fn unsupported_platforms_and_kinds_are_named_not_lumped_together() {
-        let mut douyin = intake("creator", "abc", None);
+        let mut douyin = intake("creator", "abc");
         douyin.platform = "douyin".to_owned();
         assert_eq!(
             parse_intake(&douyin).unwrap_err(),
             IntakeRejection::UnsupportedPlatform
         );
         assert_eq!(
-            parse_intake(&intake("topic", "abc", None)).unwrap_err(),
+            parse_intake(&intake("topic", "abc")).unwrap_err(),
             IntakeRejection::UnknownTargetKind
         );
         assert_eq!(
-            parse_intake(&intake("creator", "   ", None)).unwrap_err(),
+            parse_intake(&intake("creator", "   ")).unwrap_err(),
             IntakeRejection::EmptyIdentity
         );
     }
@@ -159,7 +152,6 @@ mod tests {
             parse_intake(&intake(
                 "creator",
                 "https://www.xiaohongshu.com/user/profile/5ebe6d21",
-                None
             ))
             .unwrap_err(),
             IntakeRejection::CreatorIdentityMustBePlatformId

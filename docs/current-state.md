@@ -17,6 +17,8 @@
 
 Mog 已授权只重置评论研究派生层：Run、RunItem、Atom、向量空间/向量、Problem/Definition/Membership/Resolution、ResultRevision 和变化投影可以清空；Raw Comment、作品/父评论上下文、作者归属、来源限制、模型连接/配置、WeMM profile、active policy 与通用 ModelInvocation 账本必须保留。本项新增同一研究指纹下的有效结论复用、取消项恢复和局部 Atom 接纳，避免历史 Run 存在即永久阻断新研究。2026-09-14 的输入合同核查确认：父评论曾只以 ref/hash 进入审计 manifest、未进入模型语义输入；P0 已将清洗后的可读父正文冻结为一层 `parentResearchText`，并把父评论应存在却不可读的情况以不调用模型的 `context_insufficient_parent_unavailable` 保留，不能压成 `no_signal`。PR #277 已合并为 `af2ad164f8fb01de2e3b13abc241bfa0a4c5d221`；受控安装已完成 worker drain、v2 派生预热与三个服务刷新，v1/v2 均为 1,643 条 Derivation、1,248 条可读普通用户原声，`:3000/health` READY、原声 API total=1,248、运行记录页 HTTP 200。预热不保存 policy、不建 Run、不调用 provider；连续自动排程仍关闭。作品级全文/摘要尚无稳定且用途合格的合同，未纳入本次实现；受控首轮 Run、published ResultRevision、浏览器人工验收与 Mog 业务判断仍分别待证。
 
+2026-09-14 已建立 Issue #279 / `codex/aud-code-quality-20260914` 专属 worktree，用于修复代码质量审查确认的执行所有权、历史详情可达、退役材料读取、Targets 问题入口与静态检查信号。计划为 [`plans/active/aud-code-quality-20260914.md`](plans/active/aud-code-quality-20260914.md)。该事项不执行共享数据库 migration、runtime 刷新、插件重载、真实采集、部署或合并；上述运行态事实不能从 branch 测试推导。
+
 ### COMMENT-RESEARCH-SEMANTIC-OUTPUT-001 / Issue #256（源码实施中；受控首批暴露合同失败）
 
 2026-09-14 已在共享开发库执行仅派生层的实际 reset：删除 1,643 个 Derivation、4 个 Run、1,248 个 RunItem、58 个 Atom、3 个 Problem 与 0 个 ResultRevision；随后再次派生出当前 1,643 条研究输入。Raw Comment 为 3,102，模型调用账本、模型配置、向量 profile 与 active policy 均保留。20 条受控真实首批的 Run `4cfd518c-a1df-4046-88ce-1bc5190fd088` 完成为 `completed_with_failures`，没有发布 ResultRevision：语义提取有 3 次不可解析 JSON 和 1 次合同拒绝，问题归并有 2 次结构不合格。该事实证明当前发布门槛生效，也证明不能把现有结果展示为正式研究版本。Issue #256 只修复 V2 输出合同与安全传输边界，部署后仍只允许新的受控首批；全量和连续自动研究继续关闭。

@@ -22,7 +22,6 @@
 use crate::acquisition_chain::{
     AcquisitionChainError, MaterialDeepeningTarget, request_and_admit_in_transaction_scoped,
 };
-use crate::collection_control::keyword_baseline_qualified;
 use linggan_storage_postgres::Database;
 use uuid::Uuid;
 
@@ -43,8 +42,9 @@ pub enum KeywordDetailAdvance {
 
 /// 为一个关键词观察目标推进下一批详情补采。
 ///
-/// 前置是**这个词已经建过档**：`keyword_baseline_qualified` 查的是「有没有一轮把搜索面
-/// 翻到底、且没有材料被隔离」。没建完就补详情，等于在一个还没挖完的底座上往下修。
+/// 已发现材料的详情完整性不从属于 target lifecycle。baseline 覆盖仍由
+/// `keyword_baseline_qualified` 单独判断；但只要已经有一个可读 discovery 仍欠详情，
+/// 它就必须保有继续形成 detail work 的路径。
 pub async fn advance_keyword_archive_detail(
     database: &Database,
     target_ref: Uuid,
@@ -84,11 +84,6 @@ pub async fn advance_keyword_archive_detail(
         transaction.rollback().await?;
         return Err(AcquisitionChainError::TargetDomainUnassigned);
     }
-    if !keyword_baseline_qualified(&mut transaction, target_ref).await? {
-        transaction.rollback().await?;
-        return Ok(KeywordDetailAdvance::Skipped("archive_round_not_complete"));
-    }
-
     // 本领域的材料住证据侧，外部领域的住跨行业语料（`0044` 的隔离）。候选判据同形，
     // 取的是两张不同的表。
     let home_domain = is_own_domain == Some(true);
@@ -398,8 +393,8 @@ pub async fn run_keyword_archive_details(
     if !schema_ready {
         return Ok(summary);
     }
-    // 只找**已经建过档、且还欠着详情**的关键词。两个判据都不能省：没建完档的推进会被
-    // 闸门挡下（那是对的），每轮都去撞一次只会把 skipped 写满噪音。
+    // 只找仍欠详情的关键词。baseline 的覆盖事实决定“这一轮搜索是否完整”，不能冻结
+    // 已经发现却仍不完整的材料；否则 target 进入 monitoring 后会永久失去补详情路径。
     let due: Vec<Uuid> = sqlx::query_scalar(
         "SELECT target_ref FROM collection_observation_target \
          WHERE target_kind='keyword' AND lifecycle_state <> 'dismissed' \
@@ -411,11 +406,10 @@ pub async fn run_keyword_archive_details(
     if due.is_empty() {
         return Ok(summary);
     }
-    let archived = crate::collection_control::keyword_baselines_qualified(database, &due).await?;
     let pending = keyword_targets_pending_detail(database, &due).await?;
     for target_ref in due
         .into_iter()
-        .filter(|target| archived.contains(target) && pending.contains(target))
+        .filter(|target| pending.contains(target))
         .take(KEYWORD_DETAIL_TARGETS_PER_TICK)
     {
         // 与巡检调度共用同一条公平性事实：推进过的排到后面去，免得前几个词把每一轮都占满。

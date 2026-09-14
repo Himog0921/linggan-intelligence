@@ -412,15 +412,20 @@ fn resolve_action(
     execution: &TargetInspectorExecution,
     monitoring_enabled: bool,
 ) -> TargetInspectorAction {
+    // Execution ownership and archive incompleteness are independent facts. A running worker
+    // cannot erase the human's route to quarantined or blocked material.
+    if archive.state == TargetInspectorArchiveState::Blocked
+        || matches!(coverage.quarantined_records, TargetInspectorCount::Known(value) if value > 0)
+        || matches!(coverage.missing_details, TargetInspectorCount::Known(value) if value > 0)
+    {
+        return TargetInspectorAction::HandleArchiveProblems;
+    }
     match execution.state {
         TargetInspectorExecutionState::Running => return TargetInspectorAction::NoActionRunning,
         TargetInspectorExecutionState::Queued | TargetInspectorExecutionState::AwaitingProducer => {
             return TargetInspectorAction::NoActionQueued;
         }
         _ => {}
-    }
-    if archive.state == TargetInspectorArchiveState::Blocked {
-        return TargetInspectorAction::HandleArchiveProblems;
     }
     match archive.directory_state {
         TargetInspectorDirectoryState::NotApplicable => TargetInspectorAction::NoActionHealthy,
