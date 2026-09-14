@@ -23,6 +23,7 @@
 | [plans/active/comment-research-reset-001.md](plans/active/comment-research-reset-001.md) | 活跃计划；唯一未来入口 | Issue #213：开发期清空旧研究派生结果、删除 Task B/P4，重建唯一评论研究语义内核 |
 | [plans/active/comment-research-v1-real-closure-001.md](plans/active/comment-research-v1-real-closure-001.md) | 活跃计划；Issue #254 | 开发期只重置评论研究派生层，修复研究指纹恢复、Atom 局部接纳与首轮真实发布闭环 |
 | [plans/active/comment-research-semantic-output-001.md](plans/active/comment-research-semantic-output-001.md) | 活跃计划；Issue #256 | 以受控真实批次修复语义提取与问题归并的结构化输出边界；不降低结果发布门槛 |
+| [plans/active/comment-research-output-diagnostics-001.md](plans/active/comment-research-output-diagnostics-001.md) | 活跃计划；Issue #258 | 将 V3 模型输出失败拆为安全且可行动的阶段诊断，保留无原文的调用可观测性 |
 | [decisions/0003-comment-research-single-semantic-kernel.md](decisions/0003-comment-research-single-semantic-kernel.md) | 权威当前 | 旧评论语义路径的退役、可继承基础能力和新内核的长期边界 |
 | [design/pages/comment-research-v1-page.md](design/pages/comment-research-v1-page.md) | 权威当前；交付分支实现 | 评论研究 V1 的五视图、研究设置与用户状态合同 |
 | [design/changes/comment-research-reset-001-ui-change-manifest.md](design/changes/comment-research-reset-001-ui-change-manifest.md) | 权威当前；交付分支实现 | 旧评论页面/API/自动计划替代与用户体验验证范围 |

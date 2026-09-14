@@ -408,7 +408,43 @@ async fn read_wemm_line(reader: &mut BufReader<ChildStdout>) -> Result<WeMMRespo
     serde_json::from_str(&line).map_err(|_| ModelError::InvalidOutput)
 }
 pub fn safe_result(response: &PiResponse) -> Value {
-    serde_json::json!({"ok":response.ok,"failureCode":response.failure_code,"usage":response.usage,"elapsedMs":response.elapsed_ms,"modelIds":response.model_ids,"modelListOrigin":response.model_list_origin,"diagnostic":response.diagnostic})
+    serde_json::json!({"ok":response.ok,"failureCode":response.failure_code,"usage":response.usage,"elapsedMs":response.elapsed_ms,"modelIds":response.model_ids,"modelListOrigin":response.model_list_origin,"diagnostic":response.diagnostic,"textShape":safe_text_shape(response.text.as_deref())})
+}
+
+/// A model response can be diagnosed without retaining its text, prompt, or hidden reasoning.
+/// The categories describe only the outer transport shape; the worker remains the authority for
+/// the semantic contract and never upgrades a failed response on the basis of this receipt.
+fn safe_text_shape(text: Option<&str>) -> Value {
+    let Some(text) = text else {
+        return serde_json::json!({"presence":"absent"});
+    };
+    let trimmed = text.trim().trim_start_matches('\u{feff}');
+    let shape = if trimmed.is_empty() {
+        "empty"
+    } else if serde_json::from_str::<Value>(trimmed).is_ok() {
+        "direct_json"
+    } else if complete_json_fence(trimmed).is_some() {
+        "json_fence"
+    } else {
+        "non_json"
+    };
+    let size_bucket = match text.len() {
+        0..=256 => "0_256",
+        257..=1024 => "257_1024",
+        1025..=4096 => "1025_4096",
+        4097..=16384 => "4097_16384",
+        _ => "over_16384",
+    };
+    serde_json::json!({"presence":"present","shape":shape,"sizeBucket":size_bucket})
+}
+
+fn complete_json_fence(text: &str) -> Option<&str> {
+    let fenced = text.strip_prefix("```json")?;
+    let body = fenced
+        .strip_prefix("\r\n")
+        .or_else(|| fenced.strip_prefix('\n'))?;
+    let body = body.trim_end().strip_suffix("```")?.trim();
+    (!body.is_empty()).then_some(body)
 }
 
 #[cfg(test)]
@@ -432,5 +468,16 @@ mod diagnostic_tests {
         let mut value = serde_json::to_value(PiDiagnostic::process_timeout(1)).unwrap();
         value["headers"] = serde_json::json!({"authorization":"synthetic"});
         assert!(serde_json::from_value::<PiDiagnostic>(value).is_err());
+    }
+
+    #[test]
+    fn safe_text_shape_exposes_only_outer_shape_and_bucket() {
+        let raw = "```json\n{\"comment\":\"SYNTHETIC-SENSITIVE-TEXT\"}\n```";
+        let receipt = safe_text_shape(Some(raw));
+        assert_eq!(receipt["presence"], "present");
+        assert_eq!(receipt["shape"], "json_fence");
+        assert_eq!(receipt["sizeBucket"], "0_256");
+        assert!(!receipt.to_string().contains("SYNTHETIC-SENSITIVE-TEXT"));
+        assert_eq!(safe_text_shape(None)["presence"], "absent");
     }
 }

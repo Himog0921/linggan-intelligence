@@ -66,6 +66,12 @@ struct DispatchInput {
     prompt: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ContractOutputError {
+    NotJson,
+    SchemaRejected,
+}
+
 #[derive(Debug, Clone)]
 struct ResolutionClaim {
     atom_ref: Uuid,
@@ -298,28 +304,33 @@ async fn settle_semantic_response(
 ) -> Result<(), ModelError> {
     match response {
         Ok(response) if response.ok => {
-            let output = response
+            let output = match response
                 .text
                 .as_deref()
-                .and_then(parse_contract_json::<SemanticExtractionOutput>);
-            let Some(output) = output else {
-                settle_call(
-                    database,
-                    reserved,
-                    Some(&response),
-                    false,
-                    Some("semantic_json_unparseable"),
-                )
-                .await?;
-                record_run_item_failure(
-                    database,
-                    claim,
-                    RunItemFailureClass::ModelFailed,
-                    "semantic_json_unparseable",
-                )
-                .await
-                .map_err(kernel_error)?;
-                return Ok(());
+                .map(parse_contract_json::<SemanticExtractionOutput>)
+                .unwrap_or(Err(ContractOutputError::NotJson))
+            {
+                Ok(output) => output,
+                Err(error) => {
+                    let failure_code = semantic_output_failure_code(error);
+                    settle_call(
+                        database,
+                        reserved,
+                        Some(&response),
+                        false,
+                        Some(failure_code),
+                    )
+                    .await?;
+                    record_run_item_failure(
+                        database,
+                        claim,
+                        RunItemFailureClass::ModelFailed,
+                        failure_code,
+                    )
+                    .await
+                    .map_err(kernel_error)?;
+                    return Ok(());
+                }
             };
             match accept_semantic_output(database, claim, output, Some(reserved.invocation_ref))
                 .await
@@ -628,27 +639,32 @@ async fn settle_resolution_response(
 ) -> Result<(), ModelError> {
     match response {
         Ok(response) if response.ok => {
-            let parsed = response
+            let output = match response
                 .text
                 .as_deref()
-                .and_then(parse_contract_json::<ResolutionOutput>);
-            let Some(output) = parsed else {
-                settle_call(
-                    database,
-                    reserved,
-                    Some(&response),
-                    false,
-                    Some("invalid_problem_resolution"),
-                )
-                .await?;
-                return settle_resolution(
-                    database,
-                    claim,
-                    "model_failed",
-                    "invalid_problem_resolution",
-                    Some(reserved.invocation_ref),
-                )
-                .await;
+                .map(parse_contract_json::<ResolutionOutput>)
+                .unwrap_or(Err(ContractOutputError::NotJson))
+            {
+                Ok(output) => output,
+                Err(error) => {
+                    let failure_code = resolution_output_failure_code(error);
+                    settle_call(
+                        database,
+                        reserved,
+                        Some(&response),
+                        false,
+                        Some(failure_code),
+                    )
+                    .await?;
+                    return settle_resolution(
+                        database,
+                        claim,
+                        "model_failed",
+                        failure_code,
+                        Some(reserved.invocation_ref),
+                    )
+                    .await;
+                }
             };
             if admit_resolution(
                 database,
@@ -675,14 +691,14 @@ async fn settle_resolution_response(
                     reserved,
                     Some(&response),
                     false,
-                    Some("invalid_problem_resolution"),
+                    Some("problem_resolution_admission_rejected"),
                 )
                 .await?;
                 settle_resolution(
                     database,
                     claim,
                     "model_failed",
-                    "invalid_problem_resolution",
+                    "problem_resolution_admission_rejected",
                     Some(reserved.invocation_ref),
                 )
                 .await
@@ -733,7 +749,7 @@ fn semantic_prompt(input: &ClaimedResearchInput) -> Result<String, ModelError> {
     })
     .text;
     serde_json::to_string(&json!({
-        "contract":"comment-research.semantic.v2",
+        "contract":"comment-research.semantic.v3",
         "task":"只判断研究正文中明确表达的用户问题、需求、解决方法或经历。没有足够研究信号时必须输出 no_signal；不得输出空 atoms。evidenceStart/evidenceEnd 必须精确指向研究正文中支持该命题的 Unicode 字符位置，左闭右开。",
         "schema":{
             "atoms":{
@@ -743,6 +759,10 @@ fn semantic_prompt(input: &ClaimedResearchInput) -> Result<String, ModelError> {
             "noSignal":{"outcome":"no_signal","reason":"不超过200字"}
         },
         "outputSchema":semantic_output_schema(),
+        "examples":[
+            {"outcome":"no_signal","reason":"评论只有礼貌感谢，没有明确问题、需求、方法或经历。"},
+            {"outcome":"atoms","atoms":[{"kind":"problem","proposition":"家长难以让孩子开始完成作业。","basis":"explicit","evidenceStart":0,"evidenceEnd":4}]}
+        ],
         "researchText":outbound_text,
         "contextManifest":input.context_manifest,
     }))
@@ -753,30 +773,38 @@ fn semantic_prompt(input: &ClaimedResearchInput) -> Result<String, ModelError> {
 /// narrowly defined provider-style `json` code fence, but never try to recover a JSON-looking
 /// substring from explanatory prose.  That keeps the persisted research contract strict while
 /// tolerating a common presentation wrapper that carries no semantic content of its own.
-fn parse_contract_json<T: DeserializeOwned>(text: &str) -> Option<T> {
-    let trimmed = text.trim();
+fn parse_contract_json<T: DeserializeOwned>(text: &str) -> Result<T, ContractOutputError> {
+    let value = parse_contract_json_value(text).ok_or(ContractOutputError::NotJson)?;
+    serde_json::from_value(value).map_err(|_| ContractOutputError::SchemaRejected)
+}
+
+fn parse_contract_json_value(text: &str) -> Option<Value> {
+    let trimmed = text.trim().trim_start_matches('\u{feff}');
     serde_json::from_str(trimmed).ok().or_else(|| {
         let fenced = trimmed.strip_prefix("```json")?;
         let body = fenced
             .strip_prefix("\r\n")
             .or_else(|| fenced.strip_prefix('\n'))?;
         let body = body.trim_end().strip_suffix("```")?.trim();
-        if body.is_empty() {
-            return None;
-        }
-        serde_json::from_str(body).ok()
+        (!body.is_empty())
+            .then_some(body)
+            .and_then(|body| serde_json::from_str(body).ok())
     })
 }
 
 fn resolution_prompt(proposition: &str, candidates: &[Value]) -> Result<String, ModelError> {
     serde_json::to_string(&json!({
-        "contract":"comment-research.semantic.v2/problem-resolution",
+        "contract":"comment-research.semantic.v3/problem-resolution",
         "task":"判断这个表达是否与候选定义代表同一个待解决的用户问题。若同一，输出 same_problem 且只能使用给定 problemRef 和 definitionRevision；若都不同，输出 new_problem 并给出简洁中文名称和定义。不能因主题相近而合并不同困扰。不要输出候选以外的 problemRef。",
         "schema":{
             "same":{"decision":"same_problem","problemRef":"候选中的 UUID","definitionRevision":1,"rationale":"不超过300字"},
             "new":{"decision":"new_problem","definition":{"name":"不超过120字","meaning":"不超过1000字"},"rationale":"不超过300字"}
         },
         "outputSchema":resolution_output_schema(),
+        "examples":[
+            {"decision":"same_problem","problemRef":"00000000-0000-0000-0000-000000000001","definitionRevision":1,"rationale":"表达与候选定义中的同一具体困扰一致。"},
+            {"decision":"new_problem","definition":{"name":"作业启动困难","meaning":"用户难以让孩子开始作业。"},"rationale":"候选中没有同一具体困扰。"}
+        ],
         "atomProposition":proposition,
         "candidates":candidates,
     }))
@@ -1101,11 +1129,29 @@ async fn settle_call(
 fn semantic_failure_stage(failure: Option<&str>) -> Option<&'static str> {
     match failure {
         Some("semantic_json_unparseable") => Some("semantic_json_parse"),
+        Some("semantic_json_schema_rejected") => Some("semantic_json_schema"),
         Some("semantic_contract_rejected") => Some("semantic_contract_acceptance"),
         Some("semantic_evidence_offset_unmappable") => Some("semantic_evidence_offset_mapping"),
         Some("semantic_claim_lost") => Some("semantic_claim_state"),
         Some("semantic_acceptance_storage_failed") => Some("semantic_acceptance_storage"),
+        Some("problem_resolution_json_unparseable") => Some("problem_resolution_json_parse"),
+        Some("problem_resolution_json_schema_rejected") => Some("problem_resolution_json_schema"),
+        Some("problem_resolution_admission_rejected") => Some("problem_resolution_admission"),
         _ => None,
+    }
+}
+
+fn semantic_output_failure_code(error: ContractOutputError) -> &'static str {
+    match error {
+        ContractOutputError::NotJson => "semantic_json_unparseable",
+        ContractOutputError::SchemaRejected => "semantic_json_schema_rejected",
+    }
+}
+
+fn resolution_output_failure_code(error: ContractOutputError) -> &'static str {
+    match error {
+        ContractOutputError::NotJson => "problem_resolution_json_unparseable",
+        ContractOutputError::SchemaRejected => "problem_resolution_json_schema_rejected",
     }
 }
 
@@ -1591,6 +1637,10 @@ mod tests {
             Some("semantic_evidence_offset_mapping")
         );
         assert_eq!(semantic_failure_stage(Some("provider_timeout")), None);
+        assert_eq!(
+            semantic_failure_stage(Some("problem_resolution_json_schema_rejected")),
+            Some("problem_resolution_json_schema")
+        );
     }
 
     #[test]
@@ -1608,19 +1658,45 @@ mod tests {
     #[test]
     fn contract_parser_accepts_direct_json_and_one_complete_json_fence() {
         let direct = parse_contract_json::<Value>(r#"{"outcome":"no_signal"}"#);
-        assert_eq!(direct, Some(json!({"outcome":"no_signal"})));
+        assert_eq!(direct, Ok(json!({"outcome":"no_signal"})));
 
         let fenced = parse_contract_json::<Value>("\n```json\n{\"outcome\":\"no_signal\"}\n```\n");
-        assert_eq!(fenced, Some(json!({"outcome":"no_signal"})));
+        assert_eq!(fenced, Ok(json!({"outcome":"no_signal"})));
     }
 
     #[test]
-    fn contract_parser_rejects_prose_and_non_json_fence_recovery() {
-        assert!(parse_contract_json::<Value>("结果如下：{\"outcome\":\"no_signal\"}").is_none());
-        assert!(parse_contract_json::<Value>("```\n{\"outcome\":\"no_signal\"}\n```").is_none());
+    fn contract_parser_separates_non_json_from_schema_rejection() {
+        assert_eq!(
+            parse_contract_json::<Value>("结果如下：{\"outcome\":\"no_signal\"}"),
+            Err(ContractOutputError::NotJson)
+        );
+        assert_eq!(
+            parse_contract_json::<Value>("```\n{\"outcome\":\"no_signal\"}\n```"),
+            Err(ContractOutputError::NotJson)
+        );
         assert!(
             parse_contract_json::<Value>("```json\n{\"outcome\":\"no_signal\"}\n```\n解释")
-                .is_none()
+                .is_err()
+        );
+        assert_eq!(
+            parse_contract_json::<SemanticExtractionOutput>(r#"{"outcome":"unknown"}"#),
+            Err(ContractOutputError::SchemaRejected)
+        );
+    }
+
+    #[test]
+    fn output_failure_codes_remain_actionable_without_text() {
+        assert_eq!(
+            semantic_output_failure_code(ContractOutputError::NotJson),
+            "semantic_json_unparseable"
+        );
+        assert_eq!(
+            semantic_output_failure_code(ContractOutputError::SchemaRejected),
+            "semantic_json_schema_rejected"
+        );
+        assert_eq!(
+            resolution_output_failure_code(ContractOutputError::SchemaRejected),
+            "problem_resolution_json_schema_rejected"
         );
     }
 }
