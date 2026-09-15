@@ -6,6 +6,8 @@
 > 事实来源: Mog 2026-09-15 的截图复核与明确推进授权、`PAGE-EVIDENCE-001`、`EVIDENCE-COVER-FLIP-CARD-001`、LIDS、现行 `evidence_library.js/css`
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实运行/代码/API 合同；本清单不扩大 Work Resource、媒体或状态语义
 
+> 后续校正（候选，未合并）：截图实测证明六列窄轨道中 `min-height:112px` 与 `aspect-ratio:7/2` 会让未定宽的铭牌反算为 392px，超过同列 281px。此后续只锁定铭牌的 inline size 为所属作品列的 100%，使 `7:2` 只在可用宽度上推导高度；不改变列数、数据、选择或翻转合同。
+
 ## 1. 事项与表面地图
 
 - Work Package：`EVIDENCE-COVER-CARD-PROPORTION-002`；分支 `codex/corpus-cover-card-proportion-002`；专属 worktree `.worktrees/corpus-cover-card-proportion-002`。
@@ -50,7 +52,7 @@
 | 合同 | 实现约束 | 验收方法 |
 |---|---|---|
 | Stage | 正反面的单一 Stage 继续 `aspect-ratio: 3/4`，两行标题不改变 Stage 起点 | 文本合同 + 不同标题长度的浏览器核对 |
-| 主从比例 | 六列下数据铭牌是低横向面；最小高度 112px，内部固定为作者/日期、四项读数、状态/观察三条横带；主视觉:铭牌高度接近 5:1 | CSS contract + 2048px 实测截图/DOM 尺寸 |
+| 主从比例 | 六列下数据铭牌是低横向面；inline size 必须等于所属作品列，`max-inline-size:100%`、`box-sizing:border-box` 禁止比例反推横向溢出；最小高度 112px，内部固定为作者/日期、四项读数、状态/观察三条横带；主视觉:铭牌高度接近 5:1 | CSS contract + 2048px 实测截图/DOM 尺寸 |
 | 成组节奏 | 主视觉→铭牌使用 `space-3`；每个作品组→下一行使用至少 `space-6` | Grid row/column gap 走读 + 浏览器核对 |
 | 真实读数 | 作者、日期、互动、取得状态、最近观察仍来自既有投影；0/未知不互换 | 既有 runtime tests + DOM walk |
 | 色彩纪律 | 默认米白/墨线；整组选择为 Signal；卡面不再显示多色大进度轨 | CSS/浏览器核对 |
