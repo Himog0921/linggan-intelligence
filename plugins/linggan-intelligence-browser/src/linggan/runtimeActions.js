@@ -20,6 +20,11 @@ export const LINGGAN_RUNTIME_ACTION = {
   SUBMIT_MEDIA_SLOTS: 'lingganSubmitMediaSlots',
   CREATE_SCHEDULED_TASK: 'lingganCreateScheduledTask',
   FLUSH_LOCAL_OUTBOX: 'lingganFlushLocalOutbox',
+  // The page reads the platform DOM, but the background owns the durable
+  // cross-task session cache.  Content-script IndexedDB is page-origin scoped
+  // and cannot be read by the MV3 service worker.
+  STORE_DETAIL_PAGE_SESSION: 'lingganStoreDetailPageSession',
+  MARK_DETAIL_PAGE_SESSION_TASK_QUEUED: 'lingganMarkDetailPageSessionTaskQueued',
   // Popup commands are intentionally separate from the retired MSG.COLLECT_* catalogue.
   // They only reach the active page runtime, which owns the eventual package/receipt boundary.
   COLLECT_CURRENT_CONTENT: 'lingganCollectCurrentContent',

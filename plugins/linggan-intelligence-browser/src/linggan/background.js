@@ -802,6 +802,26 @@ async function queueCachedDetailPageSessionLane({ leaseRef, taskSpec } = {}) {
   };
 }
 
+async function storeDetailPageSessionFromPage(message = {}) {
+  const entry = await detailPageSessionStore.put({
+    leaseRef: message.leaseRef,
+    plan: message.plan,
+    note: message.note,
+    commentResult: message.commentResult,
+    receipt: message.receipt,
+  });
+  return { success: true, cacheKey: entry.cacheKey };
+}
+
+async function markDetailPageSessionTaskQueued(message = {}) {
+  const marked = await detailPageSessionStore.markTaskQueued(
+    String(message.cacheKey || ''),
+    'content_detail',
+    String(message.taskId || ''),
+  );
+  return { success: marked };
+}
+
 async function runDispatchedTask() {
   const readiness = await readLingganLocalReadiness();
   if (!readiness.reachable) {
@@ -1038,6 +1058,18 @@ chrome.runtime.onMessage.addListener((message = {}, sender, sendResponse) => {
         return { reported: false, reasonCode: 'account_observation_source_invalid' };
       }
       return reportAccountObservationFromPage(message.observation);
+    }
+    if ([
+      LINGGAN_RUNTIME_ACTION.STORE_DETAIL_PAGE_SESSION,
+      LINGGAN_RUNTIME_ACTION.MARK_DETAIL_PAGE_SESSION_TASK_QUEUED,
+    ].includes(action)) {
+      const senderUrl = String(sender?.tab?.url || sender?.url || '');
+      if (!/^https:\/\/([^.]+\.)?xiaohongshu\.com\//i.test(senderUrl)) {
+        return { success: false, code: 'detail_page_session_source_invalid' };
+      }
+      return action === LINGGAN_RUNTIME_ACTION.STORE_DETAIL_PAGE_SESSION
+        ? storeDetailPageSessionFromPage(message)
+        : markDetailPageSessionTaskQueued(message);
     }
     if (action === LINGGAN_RUNTIME_ACTION.TEST_FLYWHEEL_CONNECTION) return getLingganStatus();
     if (action === LINGGAN_RUNTIME_ACTION.SUBMIT_DISCOVERY_PACKAGE) {

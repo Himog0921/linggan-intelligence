@@ -659,6 +659,73 @@ async fn successful_patrol_adds_new_work_to_the_current_directory_and_detail_den
 
 #[tokio::test]
 #[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn completed_progressive_archive_never_turns_a_patrol_addition_into_deepening() {
+    let database = proof_database("dossier_completed_archive_patrol").await;
+    let installation = ready_installation(&database, "dossier-completed-archive-patrol").await;
+    let target_ref = seed_creator_target(&database, "creator-completed-archive-patrol").await;
+    grant_deep_archive(&database, "建立创作者档案", 200).await;
+    let root = request_progressive_archive_and_lease(
+        &database,
+        target_ref,
+        "建立创作者档案",
+        "person",
+        30,
+    )
+    .await
+    .unwrap()
+    .request
+    .work_order_ref
+    .unwrap();
+    complete_progressive_root_with_partial_directory(&database, &installation, 1, "surface_ended")
+        .await;
+    let canonical_work: Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content \
+         WHERE platform='xhs' AND content_external_id='creator-completed-archive-patrol-partial-0'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    seed_detail_observation(
+        &database,
+        canonical_work,
+        "creator-completed-archive-patrol-partial-0",
+        Some("creator-completed-archive-patrol"),
+        1,
+        "2026-09-03T00:00:00Z",
+    )
+    .await;
+
+    grant_patrol(&database, "巡查建档创作者").await;
+    submit_patrol_round(
+        &database,
+        &installation,
+        target_ref,
+        "巡查建档创作者",
+        PatrolRound::OneUsableWork,
+    )
+    .await;
+
+    let summary = run_progressive_archives(&database).await.unwrap();
+    assert!(
+        !summary.queued.contains(&target_ref),
+        "a patrol-only addition must not create a deep archive batch: {summary:?}"
+    );
+    assert!(summary.skipped.iter().any(|(target, reason)| {
+        *target == target_ref && reason == "archive_baseline_complete"
+    }));
+    let status: String = sqlx::query_scalar(
+        "SELECT stop_conditions #>> '{progressiveArchive,status}' \
+         FROM collection_work_order WHERE work_order_ref=$1",
+    )
+    .bind(root)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(status, "completed");
+}
+
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
 async fn progressive_archive_rolls_each_source_to_the_ready_claimant_batch_cap() {
     let database = proof_database("dossier_progressive_batch_ready_cap").await;
     let first_installation = ready_installation(&database, "dossier-batch-cap-first").await;

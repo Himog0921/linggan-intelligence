@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFile } from 'node:fs/promises';
 
 import {
   createDetailPageSessionStore,
@@ -160,4 +161,16 @@ test('put prunes expired detail sessions without a separate maintenance action',
   assert.equal(table.size(), 1);
   assert.equal(await store.getForTask({ leaseRef: 'lease-old', taskSpec: task('content_detail') }), null);
   assert.ok(await store.getForTask({ leaseRef: 'lease-new', taskSpec: task('content_detail') }));
+});
+
+test('the XHS content context hands a completed session to the background-owned cache', async () => {
+  const [content, background] = await Promise.all([
+    readFile(new URL('../src/content/index.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/linggan/background.js', import.meta.url), 'utf8'),
+  ]);
+  assert.doesNotMatch(content, /detailPageSessionStore\.put/);
+  assert.match(content, /STORE_DETAIL_PAGE_SESSION/);
+  assert.match(content, /MARK_DETAIL_PAGE_SESSION_TASK_QUEUED/);
+  assert.match(background, /storeDetailPageSessionFromPage/);
+  assert.match(background, /detailPageSessionStore\.put/);
 });

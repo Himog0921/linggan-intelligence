@@ -25,7 +25,6 @@ import {
   reportPassiveAccountEligibility,
 } from '../linggan/accountEligibilityProbe.js';
 import {
-  detailPageSessionStore,
   detailPageSessionExecutionReceipt,
   validateDetailPageSessionPlan,
 } from '../linggan/detailPageSessionStore.js';
@@ -278,18 +277,28 @@ async function collectApprovedDetailPageSession(message = {}) {
     throw new Error('detail_page_session_content_not_collected');
   }
   const packaged = note.__xhsDetailPackage || {};
-  const entry = await detailPageSessionStore.put({
+  // The content script has the XHS origin; its IndexedDB is not shared with
+  // the extension service worker.  Hand the bounded page facts to background,
+  // which owns the cache used by the later independently claimed lanes.
+  const stored = await sendToBackground(LINGGAN_RUNTIME_ACTION.STORE_DETAIL_PAGE_SESSION, {
     leaseRef,
     plan,
     note,
     commentResult: packaged.commentResult,
     receipt: packaged.receipt,
   });
+  if (stored?.success !== true || !String(stored.cacheKey || '').trim()) {
+    throw new Error('detail_page_session_cache_not_stored');
+  }
   const queued = await runtime.submitContentDetail(note, {
     taskSpec,
     idempotencyKey: `detail-session:${taskSpec.taskId}:content_detail`,
   });
-  await detailPageSessionStore.markTaskQueued(entry.cacheKey, 'content_detail', taskSpec.taskId);
+  const marked = await sendToBackground(LINGGAN_RUNTIME_ACTION.MARK_DETAIL_PAGE_SESSION_TASK_QUEUED, {
+    cacheKey: stored.cacheKey,
+    taskId: taskSpec.taskId,
+  });
+  if (marked?.success !== true) throw new Error('detail_page_session_cache_not_marked');
   return detailPageSessionExecutionReceipt({
     action: LINGGAN_RUNTIME_ACTION.COLLECT_NOTE_FULL,
     taskSpec,

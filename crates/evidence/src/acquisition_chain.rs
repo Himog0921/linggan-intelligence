@@ -9,7 +9,7 @@
 use crate::collection_control::{
     CapacitySelection, evaluate_capacity_in, ready_batch_claim_slots_in, required_capabilities_for,
 };
-use crate::directory_boundary::{directory_proven_sql, surface_scan_complete_sql};
+use crate::directory_boundary::directory_proven_sql;
 use crate::work_order_lease::{
     IssuedLease, LeaseError, issue_work_order_lease_in_transaction, lease_schema_is_ready,
 };
@@ -419,6 +419,16 @@ async fn request_progressive_archive_inner(
                         return Err(
                             AcquisitionChainError::ProgressiveArchiveNotReady { reason }.into()
                         );
+                    }
+                    ProgressiveAdvance::Completed => {
+                        transaction
+                            .commit()
+                            .await
+                            .map_err(AcquisitionChainError::from)?;
+                        return Err(AcquisitionChainError::ProgressiveArchiveNotReady {
+                            reason: "archive_baseline_complete",
+                        }
+                        .into());
                     }
                 };
                 transaction
@@ -1783,6 +1793,9 @@ async fn write_progressive_marker(
     let marker = json!({
         "version": PROGRESSIVE_ARCHIVE_VERSION,
         "rootWorkOrderRef": root_work_order_ref,
+        // Only a root is a long-lived plan.  Bounded child orders retain the
+        // lineage marker for audit, but never become independently schedulable.
+        "status": if work_order_ref == root_work_order_ref { "active" } else { "continuation" },
         "maxDirectoryWorks": PROGRESSIVE_ARCHIVE_DIRECTORY_LIMIT,
         "batchSize": PROGRESSIVE_ARCHIVE_BATCH_SIZE,
         "commentLimit": 30,
@@ -1871,6 +1884,7 @@ async fn canonical_progressive_root_in_transaction(
          WHERE work_order.target_ref=$1 AND work_order.lane='deep_archive' \
            AND work_order.stop_conditions #>> '{progressiveArchive,version}'=$2 \
            AND work_order.stop_conditions #>> '{progressiveArchive,rootWorkOrderRef}'=work_order.work_order_ref::text \
+           AND COALESCE(work_order.stop_conditions #>> '{progressiveArchive,status}','active')='active' \
          ORDER BY work_order.created_at DESC,work_order.work_order_ref DESC \
          LIMIT 1 FOR UPDATE OF work_order",
     )
@@ -1938,6 +1952,27 @@ async fn progressive_root_directory_state_in_transaction(
 enum ProgressiveAdvance {
     Outcome(RequestLeaseOutcome),
     Skipped(&'static str),
+    Completed,
+}
+
+async fn complete_progressive_root_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    root_work_order_ref: Uuid,
+) -> Result<(), sqlx::Error> {
+    // Closing is deliberately stored on the root plan rather than inferred from
+    // `queue_state`: the root's directory lease completes before its bounded
+    // detail children do.  A completed plan must never absorb later patrol facts.
+    sqlx::query(
+        "UPDATE collection_work_order \
+         SET stop_conditions=jsonb_set( \
+               jsonb_set(stop_conditions,'{progressiveArchive,status}','\"completed\"'::jsonb,true), \
+               '{progressiveArchive,completedAt}',to_jsonb(scope_001_now()),true) \
+         WHERE work_order_ref=$1",
+    )
+    .bind(root_work_order_ref)
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
 }
 
 async fn advance_progressive_archive_in_transaction(
@@ -1961,7 +1996,7 @@ async fn advance_progressive_archive_in_transaction(
              JOIN linggan_runtime_task task ON task.task_id=lease_task.task_id \
              JOIN linggan_runtime_capture_package package ON package.task_id=task.task_id \
              JOIN linggan_runtime_submission_receipt receipt USING(package_ref) \
-             WHERE root_order.work_order_ref=$2 \
+             WHERE root_order.target_ref=$1 AND root_order.work_order_ref=$2 \
                AND package.package_kind='profile_discovery' \
                AND receipt.execution_effect='COMPLETED_LIVE_STEP' \
                AND receipt.material_admission='ACCEPTED' \
@@ -1975,41 +2010,11 @@ async fn advance_progressive_archive_in_transaction(
               AND disposition.record_ordinal=finding.record_ordinal \
              WHERE finding.discovery_kind='profile_discovery' \
                AND disposition.disposition='accepted_for_library_discovery' \
-         ), qualified_patrol_packages AS ( \
-             SELECT DISTINCT package.package_ref,package.accepted_at \
-             FROM collection_work_order patrol_order \
-             JOIN collection_work_order_lease lease USING(work_order_ref) \
-             JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
-             JOIN linggan_runtime_task task ON task.task_id=lease_task.task_id \
-             JOIN linggan_runtime_capture_package package ON package.task_id=task.task_id \
-             JOIN linggan_runtime_submission_receipt receipt USING(package_ref) \
-             CROSS JOIN LATERAL jsonb_array_elements( \
-               CASE WHEN jsonb_typeof(package.coverage->'layers')='array' \
-                    THEN package.coverage->'layers' ELSE '[]'::jsonb END) layer \
-             WHERE patrol_order.target_ref=$1 AND patrol_order.lane='patrol' \
-               AND package.package_kind='profile_discovery' \
-               AND receipt.execution_effect='COMPLETED_LIVE_STEP' \
-               AND receipt.material_admission='ACCEPTED' \
-               AND layer->>'capability'='profile_discovery' \
-               AND ",
-            surface_scan_complete_sql!(),
-            " \
-               AND NOT EXISTS (SELECT 1 FROM linggan_runtime_record_disposition disposition \
-                               WHERE disposition.package_ref=package.package_ref \
-                                 AND disposition.disposition='quarantined') \
-         ), patrol_additions AS ( \
-             SELECT finding.content_public_ref,patrol.accepted_at AS first_seen \
-             FROM qualified_patrol_packages patrol \
-             JOIN linggan_material_discovery_finding finding USING(package_ref) \
-             JOIN linggan_runtime_record_disposition disposition \
-               ON disposition.package_ref=finding.package_ref \
-              AND disposition.record_ordinal=finding.record_ordinal \
-             WHERE finding.discovery_kind='profile_discovery' \
-               AND disposition.disposition='accepted_for_library_discovery' \
          ), current_directory AS ( \
-             SELECT content_public_ref,min(first_seen) AS first_seen FROM ( \
-               SELECT * FROM canonical_directory UNION ALL SELECT * FROM patrol_additions \
-             ) works GROUP BY content_public_ref \
+             -- A progressive archive is a bounded historical scope. Patrol
+             -- discoveries remain visible in the current directory, but only
+             -- a separately authorized material-scope task may deepen them.
+             SELECT content_public_ref,first_seen FROM canonical_directory \
          ) \
          SELECT current_directory.content_public_ref FROM current_directory \
          WHERE NOT EXISTS ( \
@@ -2075,11 +2080,13 @@ async fn advance_progressive_archive_in_transaction(
         .fetch_one(&mut **transaction)
         .await
         .map_err(AcquisitionChainError::from)?;
-        return Ok(ProgressiveAdvance::Skipped(if in_flight {
-            "detail_batch_in_flight"
-        } else {
-            "no_missing_accepted_work"
-        }));
+        if in_flight {
+            return Ok(ProgressiveAdvance::Skipped("detail_batch_in_flight"));
+        }
+        complete_progressive_root_in_transaction(transaction, root_work_order_ref)
+            .await
+            .map_err(AcquisitionChainError::from)?;
+        return Ok(ProgressiveAdvance::Completed);
     }
     let material_targets = content_refs
         .iter()
@@ -2174,6 +2181,7 @@ pub async fn run_progressive_archives(
            WHERE work_order.lane='deep_archive' \
              AND work_order.stop_conditions #>> '{progressiveArchive,version}'=$1 \
              AND work_order.stop_conditions #>> '{progressiveArchive,rootWorkOrderRef}'=work_order.work_order_ref::text \
+             AND COALESCE(work_order.stop_conditions #>> '{progressiveArchive,status}','active')='active' \
              AND decision.authorization_ref IS NOT NULL \
              AND target.lifecycle_state <> 'dismissed') \
          SELECT target_ref,work_order_ref,purpose FROM roots WHERE root_rank=1 \
@@ -2334,6 +2342,15 @@ pub async fn run_progressive_archives(
                         .await
                         .map_err(AcquisitionChainError::from)?;
                     summary.skipped.push((*target_ref, reason.to_owned()));
+                }
+                ProgressiveAdvance::Completed => {
+                    transaction
+                        .commit()
+                        .await
+                        .map_err(AcquisitionChainError::from)?;
+                    summary
+                        .skipped
+                        .push((*target_ref, "archive_baseline_complete".to_owned()));
                 }
                 ProgressiveAdvance::Outcome(outcome)
                     if outcome.request.work_order_ref.is_some() =>
