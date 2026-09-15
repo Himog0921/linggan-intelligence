@@ -61,4 +61,4 @@
 
 - 修改文件：`evidence_library.css`、必要时 `evidence_library.js` 与局部文本合同测试；本清单、验收记录、设计索引和当月 progress。
 - 计划验证：focused cover contract、`evidence_runtime`、`node --check`、`git diff --check`、设计/治理检查、1280/1440/1920/390px 浏览器核对、键盘/hover/reduced-motion。
-- 未授权行为：不提交、不推送、不合并、不刷新 `:3000`，除非 Mog 后续明确授权；不触发采集、模型、平台或数据库写入。
+- 发布回执（2026-09-15）：Mog 已明确授权提交、推送、合并和刷新。本包提交 `a4e7f7a` 已推送 `origin/codex/corpus-cover-card-proportion-002`；`main` 合并提交 `36ee8bb` 已推送 `origin/main`；受控 `scripts/runtime/install.sh` 已将本机 `runtime-main` 同步至该 revision。无 migration、采集、模型、平台或数据库写入。

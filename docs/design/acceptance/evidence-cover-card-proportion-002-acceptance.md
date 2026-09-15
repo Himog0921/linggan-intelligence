@@ -35,14 +35,14 @@
 | 前端/组件实现 | VERIFIED | 仅 `evidence_library.css/js` 的现有 cover component 路径及其合同测试改动 | 无组件 API 或数据模型重构 |
 | 自动检查 | VERIFIED | `node --check`；focused cover contract 1 passed；`evidence_runtime` 9 passed；`git diff --check`；UI handbook 与治理检查通过 | Rust 测试产生 21 条既有 dead-code warning，未由本包引入 |
 | 真实链路/回执 | VERIFIED（只读呈现） | 50 条真实本机作品在临时只读叠加预览中加载 | 不证明采集、媒体生成或外部平台状态 |
-| 部署 | NOT VERIFIED | 本包未提交、未推送、未合并 | `main` 与 `:3000` 未改变 |
+| 部署 | VERIFIED（本机 runtime） | 提交 `a4e7f7a` 已推送分支；`main` 合并提交 `36ee8bb` 已推送 `origin/main`；受控 install 将 `runtime-main`、`origin/main` 同步到 `36ee8bb`，三个 launchd 服务 running，`/health` schema READY、目标 Evidence URL HTTP 200 | 不证明远端生产环境或 Mog 业务验收 |
 | Mog / 业务验收 | NOT VERIFIED | 等待前端实际审阅 | 不得以本截图代替用户验收 |
 
 ## 后续边界
 
 - 本轮不需要 `DECISION_REQUIRED`：用户已确认六列是正确的密度，问题是卡片主从比例和换行节奏。
 - 若需要更具业务语义的几何分类，必须先在 Work Resource 读取模型中已有可验证媒体类型后再提出；本候选不会从标题或内容猜测分类。
-- 提交、推送、合并到 `main`、刷新本机 `:3000` 都尚未执行，需要 Mog 后续明确授权。
+- 提交、推送、合并到 `main` 与刷新本机 `:3000` 已在 Mog 明确授权后完成；Mog 前端验收与真实触摸复测仍是独立未证明层。
 
 ## 交付位置
 
