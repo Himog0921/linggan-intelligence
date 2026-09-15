@@ -10,10 +10,12 @@
   const form = $('#research-settings-form');
   const views = new Set(['overview', 'voices', 'problems', 'changes', 'runs']);
   const pagedViews = new Set(['voices', 'problems', 'runs']);
+  const problemViews = new Set(['all', 'confirmed', 'deferred']);
   const query = new URLSearchParams(location.search);
   const initialPage = Math.max(1, Number.parseInt(query.get('page') || '1', 10) || 1);
-  const state = { view: query.get('view') || 'overview', page: initialPage, setup: null, preview: null };
+  const state = { view: query.get('view') || 'overview', page: initialPage, problemView: query.get('problemView') || 'all', problemItems: [], setup: null, preview: null };
   if (!views.has(state.view)) state.view = 'overview';
+  if (!problemViews.has(state.problemView)) state.problemView = 'all';
   if (!pagedViews.has(state.view)) state.page = 1;
 
   const errorText = {
@@ -74,6 +76,8 @@
   function updateUrl() {
     const query = new URLSearchParams(location.search);
     query.set('view', state.view);
+    if (state.view === 'problems') query.set('problemView', state.problemView);
+    else query.delete('problemView');
     if (pagedViews.has(state.view) && state.page > 1) query.set('page', String(state.page));
     else query.delete('page');
     history.replaceState(null, '', location.pathname + '?' + query);
@@ -213,14 +217,80 @@
 
   function renderProblems(data) {
     const page = data.page || {items:[], total:0};
-    const columns = ['问题定义', '累计评论证据', '累计作品', '归并 Atom', '最近确认'];
+    state.problemItems = page.items || [];
+    const facets = data.facets || {};
+    const filters = [
+      ['all', '全部', facets.all],
+      ['confirmed', '已形成问题', facets.confirmed],
+      ['deferred', '待归并信号', facets.deferred],
+    ].map(([view, label, total]) => '<button type="button" class="cr-v1-filter" data-problem-view="' + view + '" aria-pressed="' + String(state.problemView === view) + '">' + escape(label) + ' <span>' + count(total) + '</span></button>').join('');
+    const columns = ['状态与结论', '问题定义或用户原声', '证据/候选', '最近更新', ''];
     const rows = page.items.map(item => {
-      const definition = '<td><strong>' + escape(item.name) + '</strong><p>' + escape(item.meaning) + '</p></td>';
-      return '<tr>' + definition + '<td>' + count(item.confirmedCommentCount) + '</td><td>' + count(item.confirmedWorkCount) + '</td><td>' + count(item.confirmedAtomCount) + '</td><td>' + escape(date(item.lastConfirmedAt)) + '</td></tr>';
+      const index = state.problemItems.indexOf(item);
+      if (item.itemKind === 'deferred') {
+        const candidateCount = Array.isArray(item.candidateSnapshot) ? item.candidateSnapshot.length : 0;
+        return '<tr><td><span class="cr-v1-signal">' + escape(deferredDecisionLabel(item.decisionKind)) + '</span><p>尚未建立 membership</p></td><td><p class="cr-v1-note">原声已留存在受限证据区；本页不展示逐字评论。</p><p>' + escape(item.proposition || '未形成归一描述') + '</p></td><td>' + count(candidateCount) + ' 个冻结候选<p>' + escape(recheckLabel(item.recheckConditions)) + '</p></td><td>' + escape(date(item.decision?.updatedAt || item.updatedAt)) + '</td><td><button type="button" data-problem-detail="' + index + '">查看依据</button></td></tr>';
+      }
+      return '<tr><td><span class="cr-v1-badge">已形成问题</span><p>已建立 membership</p></td><td><strong>' + escape(item.name) + '</strong><p>' + escape(item.meaning) + '</p></td><td>' + count(item.confirmedCommentCount) + ' 条评论 · ' + count(item.confirmedWorkCount) + ' 篇作品<p>' + count(item.confirmedAtomCount) + ' 个归并 Atom</p></td><td>' + escape(date(item.lastConfirmedAt)) + '</td><td><button type="button" data-problem-detail="' + index + '">查看定义</button></td></tr>';
     });
-    const explanation = '不同表达只有在记录了归并依据后才属于同一问题；向量相似度本身不会合并身份。累计计数是已确认事实，不表示当前占比或问题排行。';
-    result.innerHTML = '<section class="cr-v1-intro"><h2>稳定用户问题</h2><p>' + explanation + '</p>' + cumulativeMeta(data) + resultMeta(data) + '</section>' +
-      (page.items.length ? pagination(page, '用户问题', 'top') + table(columns, rows) + pagination(page, '用户问题') : empty('当前没有已确认的稳定问题。尚未归并的研究信号会保留在运行记录中，不会被当作零或删除。'));
+    const explanation = '稳定 Problem 只由已建立 membership 的证据构成。待归并信号已完成当前判断、保留受限原声的出处与重评条件，但不会被写成 Problem、占比或趋势。';
+    const emptyText = state.problemView === 'deferred'
+      ? '当前没有待归并信号；这只表示当前读取范围中没有这种已完成处置，不代表评论或研究任务为零。'
+      : state.problemView === 'confirmed'
+        ? '当前没有已形成的稳定问题。尚未归并信号不会被删除或伪装成零。'
+        : '当前没有可显示的稳定 Problem 或已完成待归并信号。未评估、执行中和失败记录仍保留在运行记录中。';
+    result.innerHTML = '<section class="cr-v1-intro"><h2>用户问题与待归并信号</h2><p>' + explanation + '</p>' + cumulativeMeta(data) + resultMeta(data) + '</section><nav class="cr-v1-filter-bar" aria-label="用户问题状态筛选">' + filters + '</nav>' +
+      (page.items.length ? pagination(page, '用户问题与待归并信号', 'top') + table(columns, rows) + pagination(page, '用户问题与待归并信号') : empty(emptyText));
+  }
+
+  function deferredDecisionLabel(decision) {
+    return ({ deferred_novel:'等待独立同类证据', deferred_ambiguous:'等待消歧', deferred_context:'等待必要语境' })[decision] || '待归并信号';
+  }
+
+  function recheckLabel(conditions) {
+    const labels = {
+      independent_same_frame_signal:'出现独立同类信号', candidate_catalog_changed:'候选库变化', policy_scope_changed:'领域边界变化',
+      candidate_definition_changed:'候选定义变化', material_context_added:'补充关键语境', atom_frame_changed:'Atom frame 修订', model_contract_repaired:'模型合同修复'
+    };
+    const values = Array.isArray(conditions) ? conditions.map(value => labels[value] || value) : [];
+    return values.length ? '重评：' + values.join('；') : '暂无自动重评条件';
+  }
+
+  function frameFieldLabel(label, field) {
+    if (!field) return '<li><strong>' + escape(label) + '</strong>：未知</li>';
+    const value = field.value || '未知';
+    const basis = field.basis === 'explicit' ? '原声明确' : field.basis === 'context_resolved' ? '上下文支持' : '未知';
+    return '<li><strong>' + escape(label) + '</strong>：' + escape(value) + ' <span>（' + escape(basis) + '；' + escape((field.evidenceRefs || []).join('、') || '无引用') + '）</span></li>';
+  }
+
+  function candidateDetail(candidate, comparisons) {
+    const definition = candidate.definition || {};
+    const comparison = (comparisons || []).find(item => Number(item.candidateIndex) === Number(candidate.candidateIndex));
+    const labels = { subject:'主体', goal:'目标', barrier:'障碍', context:'场景', materialContradiction:'实质矛盾' };
+    const truth = { yes:'一致', no:'不一致', unknown:'未知' };
+    const dimensions = comparison ? ['subject', 'goal', 'barrier', 'context', 'materialContradiction'].map(key => labels[key] + '：' + (truth[comparison[key]] || '未知')).join(' · ') : '本次没有可显示的逐维比较';
+    return '<li><strong>候选 ' + escape(candidate.candidateIndex) + '：' + escape(definition.name || '未命名定义') + '</strong><p>' + escape(definition.definition || '定义快照不可读') + '</p><p>纳入：' + escape((definition.include || []).join('；') || '未记录') + '</p><p>排除：' + escape((definition.exclude || []).join('；') || '未记录') + '</p><p>' + escape(dimensions) + '</p></li>';
+  }
+
+  function renderProblemDetail(item) {
+    const dialog = $('#problem-detail-dialog');
+    if (item.itemKind !== 'deferred') {
+      $('#problem-detail-title').textContent = item.name || '稳定用户问题';
+      $('#problem-detail-body').innerHTML = '<p>这是已建立 membership 的稳定 Problem。累计证据：' + count(item.confirmedCommentCount) + ' 条评论、' + count(item.confirmedWorkCount) + ' 篇作品、' + count(item.confirmedAtomCount) + ' 个 Atom。</p><p>' + escape(item.meaning || '尚未取得定义说明') + '</p><p class="cr-v1-note">这里不会重新调用模型解释或修改归并关系。</p>';
+    } else {
+      const frame = item.problemFrame || {};
+      const decision = item.decision || {};
+      const candidates = item.candidateSnapshot || [];
+      const comparisons = decision.comparisons || [];
+      const history = item.executionHistory || [];
+      $('#problem-detail-title').textContent = deferredDecisionLabel(item.decisionKind);
+      $('#problem-detail-body').innerHTML = '<section><h3>受限原声与归一描述</h3><p class="cr-v1-note">逐字评论仅保留在受限证据区；本工作台不会读取或展示原文。</p><p>归一描述：' + escape(item.proposition || '未形成') + '</p></section>' +
+        '<section><h3>问题结构与出处</h3><ul class="cr-v1-detail-list">' + frameFieldLabel('主体', frame.subject) + frameFieldLabel('目标/期待状态', frame.goal) + frameFieldLabel('障碍/未满足需要', frame.barrier) + frameFieldLabel('场景', frame.context) + '</ul><p>领域关系：' + escape(({ in_scope:'属于当前 ADHD 研究范围', out_of_scope:'不属于当前 ADHD 研究范围', uncertain:'当前无法确认研究范围' })[frame.scopeRelation] || '未知') + '</p></section>' +
+        '<section><h3>候选比较</h3>' + (candidates.length ? '<ol class="cr-v1-detail-list">' + candidates.map(candidate => candidateDetail(candidate, comparisons)).join('') + '</ol>' : '<p>当时没有可比较的稳定 Problem 候选，因此没有发生单条新建。</p>') + '</section>' +
+        '<section><h3>结论与再次判断条件</h3><p>' + escape(deferredDecisionLabel(item.decisionKind)) + '。' + escape(recheckLabel(item.recheckConditions)) + '</p></section>' +
+        '<section><h3>执行历史</h3>' + (history.length ? '<ul class="cr-v1-detail-list">' + history.map(entry => '<li>' + escape(voiceResearchStatusLabel(entry.state)) + ' · 尝试 ' + count(entry.attempts) + ' 次' + (entry.failureCode ? ' · ' + escape(itemFailureLabel(entry.failureCode)) : '') + '</li>').join('') + '</ul>' : '<p>当前没有可显示的执行历史。</p>') + '</section>';
+    }
+    dialog.showModal();
   }
 
   function observationLabel(kind) {
@@ -366,7 +436,8 @@
     try {
       const limit = pageLimit();
       const offset = pagedViews.has(state.view) ? (state.page - 1) * limit : 0;
-      const data = await request(api + '/' + state.view + '?limit=' + limit + '&offset=' + offset);
+      const problemQuery = state.view === 'problems' ? '&problemView=' + encodeURIComponent(state.problemView) : '';
+      const data = await request(api + '/' + state.view + '?limit=' + limit + '&offset=' + offset + problemQuery);
       const total = Number(data.page?.total ?? 0);
       if (pagedViews.has(state.view) && total > 0 && offset >= total) {
         state.page = Math.max(1, Math.ceil(total / limit));
@@ -475,6 +546,19 @@
 
   document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', async () => { state.view = button.dataset.view; state.page = 1; await loadView(); }));
   result.addEventListener('click', async event => {
+    const filter = event.target.closest('[data-problem-view]');
+    if (filter) {
+      state.problemView = filter.dataset.problemView;
+      state.page = 1;
+      await loadView();
+      return;
+    }
+    const detail = event.target.closest('[data-problem-detail]');
+    if (detail) {
+      const item = state.problemItems[Number(detail.dataset.problemDetail)];
+      if (item) renderProblemDetail(item);
+      return;
+    }
     const button = event.target.closest('[data-page-offset]');
     if (!button || button.disabled) return;
     state.page = Math.max(1, Math.floor(Number(button.dataset.pageOffset) / pageLimit()) + 1);

@@ -530,3 +530,13 @@ Domain：ADHD
 ```
 
 “领域工作空间”可以用于描述用户围绕一个领域完成连续工作的产品体验，但当前不把 `Workspace` 确认为独立领域术语、超级业务对象或数据库归属规则。
+
+## 评论研究的稳定 Problem（DEC-0004 已确认）
+
+**Problem Frame** 是一条 Semantic Atom 在当前来源与上下文中有依据的 `subject`、`goal`、`observed issue` 与 `context` 描述。每个槽位可以未知；`reported cause` 只有来源明确陈述时才可保存。Frame 不等于根因、诊断、Problem 名称或模型行动。
+
+**Stable Problem** 是跨 Atom、评论、作品和 Run 累计的版本化研究对象，由 identity definition、边界和 membership 支撑。它不是单条评论的摘要，不是 Topic、趋势、需求规模或市场事实。
+
+**Deferred Signal（待归并信号）** 是已经完成可用候选判断、但尚未形成 Stable Problem membership 的 eligible Atom。它可能是 `deferred_novel`、`deferred_ambiguous` 或 `deferred_context`；它保留证据与下一次唤醒条件，但不能进入 Problem 数、占比、排行、趋势或已确认 membership。
+
+**Problem Resolution Execution** 是某个 Run 对一个 Atom 的一次可追溯处理尝试；它与 Atom 的来源 Run、当前业务结论和 membership 分开。Schema、引用、provider 或预算失败属于执行失败，不能伪装为 Deferred Signal。

@@ -28,8 +28,10 @@ const MAX_BACKLOG_RESOLUTIONS_PER_RUN: i32 = 40;
 /// hashes below enter the saved policy and research fingerprint, so an older packet cannot be
 /// reused after this branch contract changes.  `contract_version` remains the stable database
 /// contract family; it is not an output-packet revision field.
-const EXTRACTION_CONTRACT: &str = "comment-research.semantic.v6/extract:problem,need,solution,experience;evidence:exact-source-quote;output:exact-json-or-single-json-fence;examples:required;variants:exclusive-required";
-const MEMBERSHIP_CONTRACT: &str = "comment-research.semantic.v6/membership:retrieval-only-before-decision;output:exact-json-or-single-json-fence;examples:required;variants:exclusive-required";
+const EXTRACTION_CONTRACT: &str = "comment-research.semantic.v7/extract:problem,need,belief,emotion,experience,solution,quote,context,question;problem-frame:evidence-grounded;scope:policy-frozen;evidence:exact-source-quote;output:exact-json-or-single-json-fence;examples:required;variants:exclusive-required";
+const MEMBERSHIP_CONTRACT: &str = "comment-research.semantic.v7/membership:retrieval-only-before-decision;candidate-indices:closed-world;unknown:not-false;create:independent-pair-only;output:exact-json-or-single-json-fence;examples:required;variants:exclusive-required";
+const PROBLEM_RESOLUTION_CONTRACT: &str = "comment-research.problem-resolution.v2";
+const ADHD_DOMAIN_REF: &str = "00000000-0000-4000-8000-000000000001";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -219,6 +221,7 @@ pub struct ClaimedResearchInput {
     pub parent_context: ParentResearchContext,
     pub config_ref: Option<Uuid>,
     pub token_limit: i64,
+    pub problem_scope_definition: Option<Value>,
 }
 
 /// The only reply context that a semantic model may receive.  Source references and hashes are
@@ -393,6 +396,10 @@ pub async fn save_active_policy(
     let policy_revision_ref = Uuid::new_v4();
     let extraction_rule_hash = content_hash(EXTRACTION_CONTRACT);
     let membership_policy_hash = content_hash(MEMBERSHIP_CONTRACT);
+    let scope_definition = problem_scope_definition();
+    let scope_hash = content_hash(&scope_definition.to_string());
+    let scope_domain_ref =
+        Uuid::parse_str(ADHD_DOMAIN_REF).map_err(|_| CommentResearchKernelError::InvalidPolicy)?;
     let mut transaction = database.pool().begin().await?;
     if !research_model_ready_in_transaction(&mut transaction, config_ref).await? {
         return Err(CommentResearchKernelError::ModelNotReady);
@@ -400,8 +407,9 @@ pub async fn save_active_policy(
     sqlx::query(
         "INSERT INTO linggan_comment_research_policy_revision( \
              policy_revision_ref,config_ref,contract_version,derivation_version,extraction_rule_hash, \
-             membership_policy_hash,source_limit,token_limit \
-         ) VALUES($1,$2,'comment-research.semantic.v1',$3,$4,$5,$6,$7)",
+             membership_policy_hash,source_limit,token_limit,problem_resolution_contract, \
+             problem_scope_domain_ref,problem_scope_definition,problem_scope_hash \
+         ) VALUES($1,$2,'comment-research.semantic.v1',$3,$4,$5,$6,$7,$8,$9,$10,$11)",
     )
     .bind(policy_revision_ref)
     .bind(config_ref)
@@ -410,6 +418,10 @@ pub async fn save_active_policy(
     .bind(membership_policy_hash)
     .bind(request.source_limit)
     .bind(request.token_limit)
+    .bind(PROBLEM_RESOLUTION_CONTRACT)
+    .bind(scope_domain_ref)
+    .bind(scope_definition)
+    .bind(scope_hash)
     .execute(&mut *transaction)
     .await?;
     let active_revision: i64 = sqlx::query_scalar(
@@ -432,7 +444,20 @@ fn ensure_current_policy_contract(
 ) -> Result<(), CommentResearchKernelError> {
     (policy.get::<String, _>("derivation_version") == DERIVATION_VERSION
         && policy.get::<String, _>("extraction_rule_hash") == content_hash(EXTRACTION_CONTRACT)
-        && policy.get::<String, _>("membership_policy_hash") == content_hash(MEMBERSHIP_CONTRACT))
+        && policy.get::<String, _>("membership_policy_hash") == content_hash(MEMBERSHIP_CONTRACT)
+        && policy
+            .get::<Option<String>, _>("problem_resolution_contract")
+            .as_deref()
+            == Some(PROBLEM_RESOLUTION_CONTRACT)
+        && policy.get::<Option<Uuid>, _>("problem_scope_domain_ref")
+            == Uuid::parse_str(ADHD_DOMAIN_REF).ok()
+        && policy
+            .get::<Option<Value>, _>("problem_scope_definition")
+            .is_some_and(|scope| scope == problem_scope_definition())
+        && policy
+            .get::<Option<String>, _>("problem_scope_hash")
+            .as_deref()
+            == Some(&content_hash(&problem_scope_definition().to_string())))
     .then_some(())
     .ok_or(CommentResearchKernelError::PolicyInputContractStale)
 }
@@ -449,7 +474,8 @@ pub async fn start_run(
     }
     let policy = sqlx::query(
         "SELECT policy.policy_revision_ref,policy.derivation_version,policy.source_limit,policy.config_ref, \
-                policy.extraction_rule_hash,policy.membership_policy_hash \
+                policy.extraction_rule_hash,policy.membership_policy_hash,policy.problem_resolution_contract, \
+                policy.problem_scope_domain_ref,policy.problem_scope_definition,policy.problem_scope_hash \
          FROM linggan_comment_research_policy_active active \
          JOIN linggan_comment_research_policy_revision policy \
            ON policy.policy_revision_ref=active.policy_revision_ref \
@@ -539,6 +565,24 @@ pub async fn start_run(
     })
 }
 
+fn problem_scope_definition() -> Value {
+    json!({
+        "scopeId": "adhd",
+        "scopeVersion": "comment-research.adhd.v1",
+        "domainRef": ADHD_DOMAIN_REF,
+        "definition": "ADHD 相关用户、照护者或儿童在注意力、冲动、多动、执行功能、学习、家庭支持、服务或信息需求中明确表达的困难或未满足需求。",
+        "include": [
+            {"id": "adhd_explicit", "rule": "当前评论或可引用上下文明确提及 ADHD、注意缺陷多动或诊断/支持语境。"},
+            {"id": "adhd_functional", "rule": "当前评论或可引用上下文把困难明确关联到 ADHD 特征、执行功能或 ADHD 相关支持。"}
+        ],
+        "exclude": [
+            {"id": "generic_without_link", "rule": "没有可引用 ADHD 关联的泛育儿、泛学习、泛睡眠、泛情绪或内容偏好。"},
+            {"id": "inferred_identity_or_diagnosis", "rule": "不得仅凭作者、孩子、家长或困难表述推断 ADHD 身份、诊断或亲属关系。"}
+        ],
+        "uncertain": "缺少会改变 ADHD 范围或稳定问题身份的上下文时，保留为 deferred_context，不得改判为范围外。"
+    })
+}
+
 /// Reads the current automatic-selection boundary without creating a Run or reserving a provider
 /// call. Refreshing derivations is the same local, deterministic preparation that `start_run`
 /// performs; it is needed so the preview and the confirmed command reason about the same current
@@ -549,7 +593,8 @@ pub async fn preview_run(
     derive_current_sources(database, MAX_DERIVATIONS_PER_PASS as usize).await?;
     let mut transaction = database.pool().begin().await?;
     let policy = sqlx::query(
-        "SELECT policy.derivation_version,policy.source_limit,policy.config_ref,policy.extraction_rule_hash,policy.membership_policy_hash \
+        "SELECT policy.derivation_version,policy.source_limit,policy.config_ref,policy.extraction_rule_hash,policy.membership_policy_hash, \
+                policy.problem_resolution_contract,policy.problem_scope_domain_ref,policy.problem_scope_definition,policy.problem_scope_hash \
          FROM linggan_comment_research_policy_active active \
          JOIN linggan_comment_research_policy_revision policy \
            ON policy.policy_revision_ref=active.policy_revision_ref \
@@ -682,6 +727,13 @@ pub async fn reset_development_derived(
              SELECT 1 FROM linggan_comment_research_problem_resolution resolution \
              JOIN linggan_model_invocation invocation ON invocation.invocation_ref=resolution.invocation_ref \
              WHERE invocation.state='running' \
+             UNION ALL \
+             SELECT 1 FROM linggan_comment_research_problem_pair_evaluation evaluation \
+             WHERE evaluation.state='running' \
+             UNION ALL \
+             SELECT 1 FROM linggan_comment_research_problem_pair_evaluation evaluation \
+             JOIN linggan_model_invocation invocation ON invocation.invocation_ref=evaluation.invocation_ref \
+             WHERE invocation.state='running' \
          ) active",
     )
     .fetch_one(&mut *transaction)
@@ -695,6 +747,7 @@ pub async fn reset_development_derived(
            linggan_comment_research_problem_window_stat, \
            linggan_comment_research_result_revision, \
            linggan_comment_research_problem_resolution_execution, \
+           linggan_comment_research_problem_pair_evaluation, \
            linggan_comment_research_problem_resolution, \
            linggan_comment_research_atom_problem_membership, \
            linggan_comment_research_atom_embedding, \
@@ -730,6 +783,9 @@ pub async fn reset_development_derived(
             .await?
             .rows_affected();
     sqlx::query("DELETE FROM linggan_comment_research_problem_resolution_execution")
+        .execute(&mut *transaction)
+        .await?;
+    sqlx::query("DELETE FROM linggan_comment_research_problem_pair_evaluation")
         .execute(&mut *transaction)
         .await?;
     sqlx::query("DELETE FROM linggan_comment_research_problem_resolution")
@@ -910,21 +966,29 @@ async fn select_eligible_resolution_backlog(
            ON source_policy.policy_revision_ref=source_run.policy_revision_ref \
          JOIN linggan_comment_research_run prior_execution \
            ON prior_execution.run_ref=resolution.execution_run_ref \
+         LEFT JOIN linggan_comment_research_problem_catalog_guard catalog_guard \
+           ON catalog_guard.scope_domain_ref=source_policy.problem_scope_domain_ref \
          LEFT JOIN linggan_comment_research_atom_problem_membership membership \
            ON membership.atom_ref=atom.atom_ref AND membership.current \
-         WHERE resolution.state='model_failed' \
-           AND prior_execution.state NOT IN ('queued','running') \
+         WHERE prior_execution.state NOT IN ('queued','running') \
            AND membership.atom_ref IS NULL \
            AND ( \
-             (resolution.failure_code='problem_resolution_admission_rejected' AND resolution.attempts<3) \
-             OR resolution.failure_code IN ( \
-               'provider_timeout','provider_unavailable','provider_rate_limited', \
-               'provider_network_error','model_adapter_unavailable','model_database_unavailable','worker_interrupted' \
-             ) \
-             OR (resolution.failure_code IN ( \
-               'problem_resolution_json_unparseable','problem_resolution_json_schema_rejected' \
-             ) AND (source_policy.membership_policy_hash<>$1 \
-                     OR source_policy.config_ref IS DISTINCT FROM $2)) \
+             (resolution.state='model_failed' AND ( \
+               (resolution.failure_code='problem_resolution_admission_rejected' AND resolution.attempts<3) \
+               OR resolution.failure_code IN ( \
+                 'provider_timeout','provider_unavailable','provider_rate_limited', \
+                 'provider_network_error','model_adapter_unavailable','model_database_unavailable','worker_interrupted' \
+               ) \
+               OR (resolution.failure_code IN ( \
+                 'problem_resolution_json_unparseable','problem_resolution_json_schema_rejected' \
+               ) AND (source_policy.membership_policy_hash<>$1 \
+                       OR source_policy.config_ref IS DISTINCT FROM $2)) \
+             )) \
+             OR (resolution.state='succeeded' \
+                 AND resolution.decision_kind IN ('deferred_novel','deferred_ambiguous','deferred_context') \
+                 AND source_policy.membership_policy_hash=$1 \
+                 AND source_policy.problem_scope_domain_ref=$5 \
+                 AND catalog_guard.revision>resolution.catalog_revision_at_recall) \
            ) \
          ORDER BY resolution.last_attempt_at NULLS FIRST,resolution.created_at,resolution.atom_ref \
          LIMIT LEAST($3,$4)",
@@ -933,6 +997,7 @@ async fn select_eligible_resolution_backlog(
     .bind(config_ref)
     .bind(policy.get::<i32, _>("source_limit"))
     .bind(MAX_BACKLOG_RESOLUTIONS_PER_RUN)
+    .bind(policy.get::<Option<Uuid>, _>("problem_scope_domain_ref"))
     .fetch_all(&mut **transaction)
     .await?;
     Ok(rows
@@ -960,8 +1025,15 @@ async fn activate_eligible_resolution_backlog(
              UPDATE linggan_comment_research_problem_resolution resolution \
              SET state='pending',execution_run_ref=$1, \
                  attempts=CASE WHEN failure_code='problem_resolution_admission_rejected' THEN attempts ELSE 0 END, \
-                 next_attempt_at=NULL,lease_until=NULL,finished_at=NULL,updated_at=scope_001_now() \
-             WHERE resolution.atom_ref=ANY($2) AND resolution.state='model_failed' \
+                 next_attempt_at=NULL,lease_until=NULL,finished_at=NULL, \
+                 failure_code=CASE WHEN decision_kind IN ('deferred_novel','deferred_ambiguous','deferred_context') \
+                                   THEN 'candidate_catalog_changed' ELSE failure_code END, \
+                 decision_kind=NULL,decision_payload=NULL,recheck_conditions=NULL,resolution_input_hash=NULL, \
+                 catalog_revision_at_recall=NULL,updated_at=scope_001_now() \
+             WHERE resolution.atom_ref=ANY($2) \
+               AND (resolution.state='model_failed' \
+                    OR (resolution.state='succeeded' AND resolution.decision_kind IN ( \
+                        'deferred_novel','deferred_ambiguous','deferred_context'))) \
                AND NOT EXISTS(SELECT 1 FROM linggan_comment_research_atom_problem_membership membership \
                               WHERE membership.atom_ref=resolution.atom_ref AND membership.current) \
              RETURNING resolution.atom_ref,resolution.attempts,resolution.last_attempt_at,resolution.failure_code \
@@ -1049,7 +1121,8 @@ pub async fn load_claimed_research_input(
     claim: &ResearchRunItemClaim,
 ) -> Result<Option<ClaimedResearchInput>, CommentResearchKernelError> {
     let row = sqlx::query(
-        "SELECT derivation.research_text,derivation.clean_state,derivation.context_manifest,policy.config_ref,policy.token_limit \
+        "SELECT derivation.research_text,derivation.clean_state,derivation.context_manifest,policy.config_ref,policy.token_limit, \
+                policy.problem_scope_definition \
          FROM linggan_comment_research_run_item item \
          JOIN linggan_comment_research_run run USING(run_ref) \
          JOIN linggan_comment_research_policy_revision policy \
@@ -1072,6 +1145,7 @@ pub async fn load_claimed_research_input(
         parent_context: parent_context_from_manifest(&row.get("context_manifest")),
         config_ref: row.get("config_ref"),
         token_limit: row.get("token_limit"),
+        problem_scope_definition: row.get("problem_scope_definition"),
     }))
 }
 
@@ -1254,7 +1328,13 @@ async fn refresh_run_completion_with_embedding_state(
             (SELECT count(*) FROM linggan_comment_research_problem_resolution resolution \
              JOIN linggan_comment_research_atom atom ON atom.atom_ref=resolution.atom_ref \
              WHERE resolution.execution_run_ref=$1 AND atom.run_ref<>resolution.execution_run_ref \
-               AND resolution.state IN ('model_failed','incompatible')) AS failed_backlog_resolutions",
+               AND resolution.state IN ('model_failed','incompatible')) AS failed_backlog_resolutions, \
+            (SELECT count(*) FROM linggan_comment_research_problem_pair_evaluation evaluation \
+             WHERE evaluation.execution_run_ref=$1 AND evaluation.state IN ('pending','running','retryable')) \
+              AS unsettled_pair_evaluations, \
+            (SELECT count(*) FROM linggan_comment_research_problem_pair_evaluation evaluation \
+             WHERE evaluation.execution_run_ref=$1 AND evaluation.state IN ('model_failed','incompatible')) \
+              AS failed_pair_evaluations",
     )
     .bind(run_ref)
     .bind(embedding_unavailable_is_terminal)
@@ -1279,26 +1359,35 @@ async fn settle_run_completion(
     let unsettled_resolution_atoms: i64 = outcome.get("unsettled_resolution_atoms");
     let unsettled_backlog_resolutions: i64 = outcome.get("unsettled_backlog_resolutions");
     let failed_backlog_resolutions: i64 = outcome.get("failed_backlog_resolutions");
-    if unsettled_resolution_atoms > 0 || unsettled_backlog_resolutions > 0 {
+    let unsettled_pair_evaluations: i64 = outcome.get("unsettled_pair_evaluations");
+    let failed_pair_evaluations: i64 = outcome.get("failed_pair_evaluations");
+    if unsettled_resolution_atoms > 0
+        || unsettled_backlog_resolutions > 0
+        || unsettled_pair_evaluations > 0
+    {
         return Ok(());
     }
     let terminal_unassigned = embedding_failed_atoms + resolution_failed_atoms;
     if unassigned_atoms > 0 && terminal_unassigned < unassigned_atoms {
         return Ok(());
     }
-    let state =
-        if item_failed_count > 0 || terminal_unassigned > 0 || failed_backlog_resolutions > 0 {
-            "completed_with_failures"
-        } else {
-            "completed"
-        };
+    let state = if item_failed_count > 0
+        || terminal_unassigned > 0
+        || failed_backlog_resolutions > 0
+        || failed_pair_evaluations > 0
+    {
+        "completed_with_failures"
+    } else {
+        "completed"
+    };
     sqlx::query(
         "UPDATE linggan_comment_research_run \
          SET state=$2,failure_counts=jsonb_strip_nulls(jsonb_build_object( \
                'runItems',NULLIF($3,0), \
                'embedding',NULLIF($4,0), \
                'problemResolution',NULLIF($5,0), \
-               'backlogProblemResolution',NULLIF($6,0) \
+               'backlogProblemResolution',NULLIF($6,0), \
+               'problemPairResolution',NULLIF($7,0) \
              )),finished_at=scope_001_now(),updated_at=scope_001_now() \
          WHERE run_ref=$1 AND state IN ('queued','running')",
     )
@@ -1308,6 +1397,7 @@ async fn settle_run_completion(
     .bind(embedding_failed_atoms)
     .bind(resolution_failed_atoms)
     .bind(failed_backlog_resolutions)
+    .bind(failed_pair_evaluations)
     .execute(&mut **transaction)
     .await?;
     Ok(())

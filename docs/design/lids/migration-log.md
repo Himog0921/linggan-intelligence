@@ -15,6 +15,13 @@
 
 任何影响 LIDS 五层或横向约束的事项必须在同一 PR 更新本记录：变更是什么、取代什么、影响页面/组件、验证结果和仍未证明什么。日志不是路线图，更不是运行时真相。
 
+## 2026-09-15 · COMMENT-RESEARCH-PROBLEM-RESOLUTION-V2 问题读取状态面
+
+- **范围**：评论研究既有 L1 工作区新增 confirmed / deferred 筛选和只读详情；不新增页面、全局 Token、CMP、Scene、模型调用或手工归并动作。
+- **表达**：使用既有文字 Tab、连续表格、Drawer、`--lgi-page-max-workbench`、`--lgi-z-drawer` 和 1px 结构线；不以页面局部像素宽度或边线厚度另造视觉 token。
+- **Data Truth 与敏感边界**：confirmed membership 与 deferred signal 不混写。Deferred 详情只显示归一描述、frame、冻结候选、结论和执行状态；逐字评论、研究正文以及内部 UUID 均留在受限证据区，不进入普通问题读取 DTO 或前端。
+- **验证与边界**：静态 API/UI 检查与隔离 PostgreSQL 的 deferred read 反例覆盖本边界；真实 runtime、浏览器窄宽度、模型语义准确性和 Mog 业务验收须由后续部署/人工步骤独立证明。
+
 ## 2026-09-10 · COMMENT-RESEARCH-RESET-001 V1 唯一页面
 
 - **范围**：旧评论研究的每日观察、保存查询、资产、标注、Task B/P4 与技术队列表面被移除；新页面用概览、用户原声、用户问题、变化观察、运行记录五个独立读取面替代。

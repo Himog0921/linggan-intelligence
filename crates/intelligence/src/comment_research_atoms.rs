@@ -4,6 +4,7 @@
 //! immutable source offsets and decides whether the proposal satisfies the storage contract.
 
 use crate::comment_research_kernel::{ResearchRunItemClaim, refresh_run_completion};
+use crate::comment_research_problem_resolution_v2::ScopeRelation;
 use linggan_storage_postgres::Database;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -17,8 +18,13 @@ const MAX_ATOMS_PER_ITEM: usize = 8;
 pub enum AtomKind {
     Problem,
     Need,
+    Belief,
+    Emotion,
     Solution,
     Experience,
+    Quote,
+    Context,
+    Question,
 }
 
 impl AtomKind {
@@ -26,8 +32,13 @@ impl AtomKind {
         match self {
             Self::Problem => "problem",
             Self::Need => "need",
+            Self::Belief => "belief",
+            Self::Emotion => "emotion",
             Self::Solution => "solution",
             Self::Experience => "experience",
+            Self::Quote => "quote",
+            Self::Context => "context",
+            Self::Question => "question",
         }
     }
 }
@@ -37,6 +48,35 @@ impl AtomKind {
 pub enum AtomBasis {
     Explicit,
     ContextResolved,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FrameBasis {
+    Explicit,
+    ContextResolved,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProblemFrameFieldProposal {
+    pub value: Option<String>,
+    pub basis: FrameBasis,
+    /// Only `atom_evidence` is valid in this extraction stage. Its exact source quote is already
+    /// mapped by the program; parent context can disambiguate but cannot independently assert a
+    /// field that the current Atom evidence does not support.
+    pub evidence_refs: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProblemFrameProposal {
+    pub scope_relation: ScopeRelation,
+    pub subject: ProblemFrameFieldProposal,
+    pub goal: ProblemFrameFieldProposal,
+    pub barrier: ProblemFrameFieldProposal,
+    pub context: ProblemFrameFieldProposal,
 }
 
 impl AtomBasis {
@@ -67,6 +107,8 @@ pub struct SemanticQuoteAtomProposal {
     pub proposition: String,
     pub basis: AtomBasis,
     pub evidence: String,
+    #[serde(default)]
+    pub problem_frame: Option<ProblemFrameProposal>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -276,6 +318,7 @@ async fn accept_quote_atoms(
             &atom.kind,
             &atom.proposition,
             &atom.basis,
+            atom.problem_frame.as_ref(),
             research_start,
             research_end,
             source_start,
@@ -317,6 +360,7 @@ async fn accept_atoms(
             &atom.kind,
             &atom.proposition,
             &atom.basis,
+            None,
             atom.evidence_start,
             atom.evidence_end,
             source_start,
@@ -337,6 +381,7 @@ async fn insert_atom(
     kind: &AtomKind,
     proposition: &str,
     basis: &AtomBasis,
+    problem_frame: Option<&ProblemFrameProposal>,
     research_start: usize,
     research_end: usize,
     source_start: usize,
@@ -344,13 +389,18 @@ async fn insert_atom(
     extraction_rule_hash: &str,
     invocation_ref: Option<Uuid>,
 ) -> Result<(), CommentResearchAtomError> {
+    let problem_frame_json = problem_frame
+        .map(serde_json::to_value)
+        .transpose()
+        .map_err(|_| CommentResearchAtomError::InvalidOutput)?;
+    let problem_frame_hash = problem_frame.map(problem_frame_hash);
     let changed = sqlx::query(
         "INSERT INTO linggan_comment_research_atom( \
              atom_ref,run_ref,derivation_ref,ordinal,kind,proposition,basis,research_start, \
-             research_end,source_start,source_end,rule_hash,input_hash,invocation_ref \
-         ) SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,item.input_hash,$13 \
+             research_end,source_start,source_end,rule_hash,input_hash,invocation_ref,problem_frame,problem_frame_hash \
+         ) SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,item.input_hash,$13,$14,$15 \
            FROM linggan_comment_research_run_item item \
-           WHERE item.run_ref=$2 AND item.derivation_ref=$3 AND item.attempts=$14 AND item.state='running'",
+           WHERE item.run_ref=$2 AND item.derivation_ref=$3 AND item.attempts=$16 AND item.state='running'",
     )
     .bind(Uuid::new_v4())
     .bind(claim.run_ref)
@@ -365,6 +415,8 @@ async fn insert_atom(
     .bind(i32::try_from(source_end).map_err(|_| CommentResearchAtomError::InvalidOutput)?)
     .bind(extraction_rule_hash)
     .bind(invocation_ref)
+    .bind(problem_frame_json)
+    .bind(problem_frame_hash)
     .bind(claim.attempt)
     .execute(&mut **transaction)
     .await?
@@ -378,7 +430,10 @@ fn validate_quote_atom(
     input: &ClaimedInput,
     atom: &SemanticQuoteAtomProposal,
 ) -> Result<(usize, usize, usize, usize), CommentResearchAtomError> {
-    if !valid_text(&atom.proposition, 1000) || !valid_text(&atom.evidence, 1000) {
+    if !valid_text(&atom.proposition, 1000)
+        || !valid_text(&atom.evidence, 1000)
+        || !valid_problem_frame(&atom.kind, atom.problem_frame.as_ref())
+    {
         return Err(CommentResearchAtomError::InvalidOutput);
     }
     let matches = input
@@ -400,6 +455,34 @@ fn validate_quote_atom(
     };
     let (source_start, source_end) = validate_atom(input, &legacy)?;
     Ok((research_start, research_end, source_start, source_end))
+}
+
+fn valid_problem_frame(kind: &AtomKind, frame: Option<&ProblemFrameProposal>) -> bool {
+    match kind {
+        AtomKind::Problem | AtomKind::Need => frame.is_some_and(|frame| {
+            [&frame.subject, &frame.goal, &frame.barrier, &frame.context]
+                .iter()
+                .all(|field| valid_problem_frame_field(field))
+        }),
+        _ => frame.is_none(),
+    }
+}
+
+fn valid_problem_frame_field(field: &ProblemFrameFieldProposal) -> bool {
+    match (&field.value, &field.basis, field.evidence_refs.as_slice()) {
+        (None, FrameBasis::Unknown, []) => true,
+        (Some(value), FrameBasis::Explicit | FrameBasis::ContextResolved, refs)
+            if refs.len() == 1 && refs[0] == "atom_evidence" && valid_text(value, 300) =>
+        {
+            true
+        }
+        _ => false,
+    }
+}
+
+fn problem_frame_hash(frame: &ProblemFrameProposal) -> String {
+    let serialized = serde_json::to_string(frame).unwrap_or_default();
+    crate::research_text::content_hash(&serialized)
 }
 
 fn validate_atom(
@@ -463,6 +546,25 @@ fn valid_text(value: &str, maximum: usize) -> bool {
 mod tests {
     use super::*;
 
+    fn valid_problem_frame() -> ProblemFrameProposal {
+        let supported = |value: &str| ProblemFrameFieldProposal {
+            value: Some(value.into()),
+            basis: FrameBasis::Explicit,
+            evidence_refs: vec!["atom_evidence".into()],
+        };
+        ProblemFrameProposal {
+            scope_relation: ScopeRelation::InScope,
+            subject: supported("家长"),
+            goal: supported("不再催促"),
+            barrier: supported("需要催促"),
+            context: ProblemFrameFieldProposal {
+                value: None,
+                basis: FrameBasis::Unknown,
+                evidence_refs: vec![],
+            },
+        }
+    }
+
     #[test]
     fn evidence_validation_maps_unicode_scalars_to_original_source_offsets() {
         let input = ClaimedInput {
@@ -512,6 +614,7 @@ mod tests {
             proposition: "家长不想以催促应对孩子".into(),
             basis: AtomBasis::Explicit,
             evidence: "😊不想".into(),
+            problem_frame: Some(valid_problem_frame()),
         };
         assert_eq!(validate_quote_atom(&input, &atom).unwrap(), (1, 4, 1, 4));
     }
@@ -528,6 +631,7 @@ mod tests {
             proposition: "家长不想催促".into(),
             basis: AtomBasis::Explicit,
             evidence: "不想催促".into(),
+            problem_frame: Some(valid_problem_frame()),
         };
         assert!(matches!(
             validate_quote_atom(&input, &atom),

@@ -10,7 +10,7 @@ use crate::{
 };
 use linggan_storage_postgres::Database;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -37,6 +37,28 @@ impl ProblemMembershipBasis {
 pub struct ProblemDefinitionProposal {
     pub name: String,
     pub meaning: String,
+}
+
+/// A V2 stable identity is only admitted from an independently corroborated pair. `include` and
+/// `exclude` are semantic boundaries, not optional display copy.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StableProblemDefinitionProposal {
+    pub name: String,
+    pub meaning: String,
+    pub include: Vec<String>,
+    pub exclude: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NewProblemPairAdmission {
+    pub first_atom_ref: Uuid,
+    pub second_atom_ref: Uuid,
+    pub expected_catalog_revision: i64,
+    pub definition: StableProblemDefinitionProposal,
+    pub decision_evidence: Value,
+    pub invocation_ref: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -69,6 +91,16 @@ pub struct ProblemAdmissionReceipt {
     pub basis: ProblemMembershipBasis,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProblemPairAdmissionReceipt {
+    pub problem_ref: Uuid,
+    pub definition_revision: i32,
+    pub first_membership_ref: Uuid,
+    pub second_membership_ref: Uuid,
+    pub catalog_revision: i64,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum CommentResearchProblemError {
     #[error(transparent)]
@@ -85,11 +117,178 @@ pub enum CommentResearchProblemError {
     ProblemUnavailable,
     #[error("the Problem decision violates the V1 contract")]
     InvalidDecision,
+    #[error("the V2 pair does not consist of two deferred novel signals")]
+    PairNotEligible,
+    #[error("a V2 scoped Atom can create a Problem only through an independent pair")]
+    PairRequiredForV2,
+    #[error("the V2 pair belongs to different policy scopes")]
+    PairScopeMismatch,
+    #[error("the V2 pair does not prove independent comment sources")]
+    PairSourcesNotIndependent,
+    #[error("the Problem catalog changed after the pair was compared")]
+    CatalogChanged,
 }
 
-/// Accepts an explicit decision that an unassigned Atom is the first member of a new Problem.
-/// `deterministic` bootstrap is allowed only when the supplied candidate list is explicitly empty;
-/// a model decision must reference its invocation ledger row.
+/// Creates a V2 Stable Problem and both memberships atomically. Callers must provide a pair
+/// comparison already accepted by the closed-world policy core; this function re-checks the
+/// durable deferred state and fences the write with the scope catalog revision.
+pub async fn admit_new_problem_pair(
+    database: &Database,
+    admission: NewProblemPairAdmission,
+) -> Result<ProblemPairAdmissionReceipt, CommentResearchProblemError> {
+    if admission.first_atom_ref == admission.second_atom_ref
+        || admission.expected_catalog_revision < 0
+        || !valid_stable_definition(&admission.definition)
+        || !valid_pair_decision_evidence(&admission.decision_evidence)
+        || admission.invocation_ref.is_none()
+    {
+        return Err(CommentResearchProblemError::InvalidDecision);
+    }
+    let mut transaction = database.pool().begin().await?;
+    // Lock atoms in a stable order, so independently scheduled pair proposals cannot deadlock.
+    let (first_ref, second_ref, reverse_receipts) =
+        if admission.first_atom_ref < admission.second_atom_ref {
+            (admission.first_atom_ref, admission.second_atom_ref, false)
+        } else {
+            (admission.second_atom_ref, admission.first_atom_ref, true)
+        };
+    let first = lock_unassigned_readable_atom(&mut transaction, first_ref).await?;
+    let second = lock_unassigned_readable_atom(&mut transaction, second_ref).await?;
+    ensure_problem_bearing_kind(&first.kind)?;
+    ensure_problem_bearing_kind(&second.kind)?;
+    if first.problem_resolution_contract.as_deref()
+        != Some("comment-research.problem-resolution.v2")
+        || second.problem_resolution_contract.as_deref()
+            != Some("comment-research.problem-resolution.v2")
+        || !valid_v2_in_scope_problem_frame(first.problem_frame.as_ref())
+        || !valid_v2_in_scope_problem_frame(second.problem_frame.as_ref())
+    {
+        return Err(CommentResearchProblemError::PairNotEligible);
+    }
+    let scope_domain_ref = first
+        .scope_domain_ref
+        .ok_or(CommentResearchProblemError::PairScopeMismatch)?;
+    if second.scope_domain_ref != Some(scope_domain_ref)
+        || first.membership_policy_hash != second.membership_policy_hash
+    {
+        return Err(CommentResearchProblemError::PairScopeMismatch);
+    }
+    if first.source_ref == second.source_ref
+        || first.author_external_id.is_none()
+        || second.author_external_id.is_none()
+        || first.author_external_id == second.author_external_id
+        || first.body_hash == second.body_hash
+    {
+        return Err(CommentResearchProblemError::PairSourcesNotIndependent);
+    }
+    let current_revision: i64 = sqlx::query_scalar(
+        "SELECT revision FROM linggan_comment_research_problem_catalog_guard \
+         WHERE scope_domain_ref=$1 FOR UPDATE",
+    )
+    .bind(scope_domain_ref)
+    .fetch_optional(&mut *transaction)
+    .await?
+    .ok_or(CommentResearchProblemError::PairScopeMismatch)?;
+    if current_revision != admission.expected_catalog_revision {
+        return Err(CommentResearchProblemError::CatalogChanged);
+    }
+    for atom_ref in [first_ref, second_ref] {
+        let deferred: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM linggan_comment_research_problem_resolution \
+             WHERE atom_ref=$1 AND state='succeeded' AND decision_kind='deferred_novel' \
+               AND catalog_revision_at_recall=$2)",
+        )
+        .bind(atom_ref)
+        .bind(current_revision)
+        .fetch_one(&mut *transaction)
+        .await?;
+        if !deferred {
+            return Err(CommentResearchProblemError::PairNotEligible);
+        }
+    }
+    let problem_ref = Uuid::new_v4();
+    let membership_a = Uuid::new_v4();
+    let membership_b = Uuid::new_v4();
+    let identity = stable_identity(&admission.definition);
+    let definition_hash = content_hash(&identity.to_string());
+    sqlx::query("INSERT INTO linggan_comment_research_problem(problem_ref) VALUES($1)")
+        .bind(problem_ref)
+        .execute(&mut *transaction)
+        .await?;
+    sqlx::query(
+        "INSERT INTO linggan_comment_research_problem_definition( \
+             problem_ref,revision,name,meaning,definition_hash,policy_hash,invocation_ref,stable_identity,scope_domain_ref \
+         ) VALUES($1,1,$2,$3,$4,$5,$6,$7,$8)",
+    )
+    .bind(problem_ref)
+    .bind(admission.definition.name.trim())
+    .bind(admission.definition.meaning.trim())
+    .bind(definition_hash)
+    .bind(&first.membership_policy_hash)
+    .bind(admission.invocation_ref)
+    .bind(identity)
+    .bind(scope_domain_ref)
+    .execute(&mut *transaction)
+    .await?;
+    let membership_evidence = json!({
+        "decision":"v2_pair_create",
+        "pairDecision":admission.decision_evidence,
+        "catalogRevision":current_revision,
+    });
+    insert_membership(
+        &mut transaction,
+        membership_a,
+        first_ref,
+        problem_ref,
+        1,
+        ProblemMembershipBasis::ModelDecision,
+        &first.membership_policy_hash,
+        &membership_evidence,
+        admission.invocation_ref,
+    )
+    .await?;
+    insert_membership(
+        &mut transaction,
+        membership_b,
+        second_ref,
+        problem_ref,
+        1,
+        ProblemMembershipBasis::ModelDecision,
+        &second.membership_policy_hash,
+        &membership_evidence,
+        admission.invocation_ref,
+    )
+    .await?;
+    let catalog_revision: i64 = sqlx::query_scalar(
+        "UPDATE linggan_comment_research_problem_catalog_guard \
+         SET revision=revision+1,updated_at=scope_001_now() \
+         WHERE scope_domain_ref=$1 RETURNING revision",
+    )
+    .bind(scope_domain_ref)
+    .fetch_one(&mut *transaction)
+    .await?;
+    for run_ref in [first.run_ref, second.run_ref] {
+        refresh_run_completion(&mut transaction, run_ref).await?;
+    }
+    transaction.commit().await?;
+    let (first_membership_ref, second_membership_ref) = if reverse_receipts {
+        (membership_b, membership_a)
+    } else {
+        (membership_a, membership_b)
+    };
+    Ok(ProblemPairAdmissionReceipt {
+        problem_ref,
+        definition_revision: 1,
+        first_membership_ref,
+        second_membership_ref,
+        catalog_revision,
+    })
+}
+
+/// Historical V1-only admission path. A V2 scoped Atom must never use this single-Atom create
+/// path: its only creation authority is `admit_new_problem_pair` after two independent signals.
+/// The function remains to read and repair immutable V1 packet Runs without silently applying
+/// V2 semantics to them.
 pub async fn admit_new_problem(
     database: &Database,
     admission: NewProblemAdmission,
@@ -107,6 +306,9 @@ pub async fn admit_new_problem(
     let mut transaction = database.pool().begin().await?;
     let atom = lock_unassigned_readable_atom(&mut transaction, admission.atom_ref).await?;
     ensure_problem_bearing_kind(&atom.kind)?;
+    if atom.problem_resolution_contract.as_deref() == Some("comment-research.problem-resolution.v2") {
+        return Err(CommentResearchProblemError::PairRequiredForV2);
+    }
     let problem_ref = Uuid::new_v4();
     let membership_ref = Uuid::new_v4();
     let definition_hash = definition_hash(&admission.definition);
@@ -209,13 +411,15 @@ async fn lock_unassigned_readable_atom(
     atom_ref: Uuid,
 ) -> Result<ReadableUnassignedAtom, CommentResearchProblemError> {
     let row = sqlx::query(
-        "SELECT atom.run_ref,atom.kind,policy.membership_policy_hash \
+        "SELECT atom.run_ref,atom.kind,atom.problem_frame,policy.membership_policy_hash,policy.problem_resolution_contract,policy.problem_scope_domain_ref, \
+                source.material_ref,source.author_external_id,source.body_text \
          FROM linggan_comment_research_atom atom \
          JOIN linggan_comment_research_derivation_readable derivation \
            ON derivation.derivation_ref=atom.derivation_ref \
          JOIN linggan_comment_research_run run ON run.run_ref=atom.run_ref \
          JOIN linggan_comment_research_policy_revision policy \
            ON policy.policy_revision_ref=run.policy_revision_ref \
+         JOIN linggan_comment_research_readable source ON source.material_ref=derivation.source_ref \
          WHERE atom.atom_ref=$1 \
          FOR UPDATE OF atom",
     )
@@ -239,14 +443,31 @@ async fn lock_unassigned_readable_atom(
     Ok(ReadableUnassignedAtom {
         run_ref: row.get("run_ref"),
         kind: row.get("kind"),
+        problem_frame: row.get("problem_frame"),
         membership_policy_hash: row.get("membership_policy_hash"),
+        problem_resolution_contract: row.get("problem_resolution_contract"),
+        scope_domain_ref: row.get("problem_scope_domain_ref"),
+        source_ref: row.get("material_ref"),
+        author_external_id: row
+            .get::<Option<String>, _>("author_external_id")
+            .filter(|value| !value.trim().is_empty()),
+        body_hash: content_hash(
+            &row.get::<Option<String>, _>("body_text")
+                .unwrap_or_default(),
+        ),
     })
 }
 
 struct ReadableUnassignedAtom {
     run_ref: Uuid,
     kind: String,
+    problem_frame: Option<Value>,
     membership_policy_hash: String,
+    problem_resolution_contract: Option<String>,
+    scope_domain_ref: Option<Uuid>,
+    source_ref: Uuid,
+    author_external_id: Option<String>,
+    body_hash: String,
 }
 
 fn ensure_problem_bearing_kind(kind: &str) -> Result<(), CommentResearchProblemError> {
@@ -254,6 +475,43 @@ fn ensure_problem_bearing_kind(kind: &str) -> Result<(), CommentResearchProblemE
         Ok(())
     } else {
         Err(CommentResearchProblemError::AtomNotProblemBearing)
+    }
+}
+
+fn valid_v2_problem_frame(frame: Option<&Value>) -> bool {
+    let Some(frame) = frame.and_then(Value::as_object) else {
+        return false;
+    };
+    matches!(frame.get("scopeRelation").and_then(Value::as_str), Some("in_scope" | "out_of_scope" | "uncertain"))
+        && ["subject", "goal", "barrier", "context"]
+            .iter()
+            .all(|field| valid_v2_problem_frame_field(frame.get(*field)))
+}
+
+fn valid_v2_in_scope_problem_frame(frame: Option<&Value>) -> bool {
+    valid_v2_problem_frame(frame)
+        && frame
+            .and_then(Value::as_object)
+            .and_then(|value| value.get("scopeRelation"))
+            .and_then(Value::as_str)
+            == Some("in_scope")
+}
+
+fn valid_v2_problem_frame_field(field: Option<&Value>) -> bool {
+    let Some(field) = field.and_then(Value::as_object) else {
+        return false;
+    };
+    let value = field.get("value");
+    let basis = field.get("basis").and_then(Value::as_str);
+    let refs = field.get("evidenceRefs").and_then(Value::as_array);
+    match (value, basis, refs) {
+        (Some(Value::Null), Some("unknown"), Some(refs)) => refs.is_empty(),
+        (Some(Value::String(value)), Some("explicit" | "context_resolved"), Some(refs)) => {
+            valid_text(value, 300)
+                && refs.len() == 1
+                && refs.first().and_then(Value::as_str) == Some("atom_evidence")
+        }
+        _ => false,
     }
 }
 
@@ -298,13 +556,48 @@ fn definition_hash(definition: &ProblemDefinitionProposal) -> String {
     ))
 }
 
+fn valid_stable_definition(definition: &StableProblemDefinitionProposal) -> bool {
+    valid_text(&definition.name, 120)
+        && valid_text(&definition.meaning, 1000)
+        && !definition.include.is_empty()
+        && !definition.exclude.is_empty()
+        && definition
+            .include
+            .iter()
+            .all(|value| valid_text(value, 300))
+        && definition
+            .exclude
+            .iter()
+            .all(|value| valid_text(value, 300))
+}
+
+fn stable_identity(definition: &StableProblemDefinitionProposal) -> Value {
+    json!({
+        "name": definition.name.trim(),
+        "definition": definition.meaning.trim(),
+        "include": definition.include.iter().map(|value| value.trim()).collect::<Vec<_>>(),
+        "exclude": definition.exclude.iter().map(|value| value.trim()).collect::<Vec<_>>(),
+    })
+}
+
+fn valid_pair_decision_evidence(evidence: &Value) -> bool {
+    evidence.is_object()
+        && evidence.get("decision").and_then(Value::as_str) == Some("v2_pair_equivalent")
+        && serde_json::to_string(evidence)
+            .is_ok_and(|serialized| serialized.chars().count() <= 4000)
+}
+
 fn valid_basis(basis: ProblemMembershipBasis, invocation_ref: Option<Uuid>) -> bool {
     basis != ProblemMembershipBasis::ModelDecision || invocation_ref.is_some()
 }
 
 fn valid_decision_evidence(evidence: &Value, expected_decision: &str) -> bool {
     evidence.is_object()
-        && evidence.get("decision").and_then(Value::as_str) == Some(expected_decision)
+        && matches!(
+            evidence.get("decision").and_then(Value::as_str),
+            Some(decision) if decision == expected_decision
+                || (expected_decision == "same_problem" && decision == "v2_existing_problem")
+        )
         && serde_json::to_string(evidence)
             .is_ok_and(|serialized| serialized.chars().count() <= 4000)
 }
@@ -363,6 +656,18 @@ mod tests {
     }
 
     #[test]
+    fn existing_admission_accepts_only_the_v2_program_owned_decision_name() {
+        assert!(valid_decision_evidence(
+            &serde_json::json!({"decision":"v2_existing_problem","candidateIndex":0}),
+            "same_problem"
+        ));
+        assert!(!valid_decision_evidence(
+            &serde_json::json!({"decision":"v2_pair_create"}),
+            "same_problem"
+        ));
+    }
+
+    #[test]
     fn only_problem_and_need_atoms_can_be_problem_members() {
         assert!(ensure_problem_bearing_kind("problem").is_ok());
         assert!(ensure_problem_bearing_kind("need").is_ok());
@@ -370,5 +675,30 @@ mod tests {
             ensure_problem_bearing_kind("solution"),
             Err(CommentResearchProblemError::AtomNotProblemBearing)
         ));
+    }
+
+    #[test]
+    fn stable_problem_identity_carries_explicit_inclusion_and_exclusion_boundaries() {
+        let definition = StableProblemDefinitionProposal {
+            name: "作业启动困难".into(),
+            meaning: "孩子在家庭作业情境难以自主开始。".into(),
+            include: vec!["需外部催促才开始作业".into()],
+            exclude: vec!["只是不喜欢某门课但未表达启动障碍".into()],
+        };
+        assert!(valid_stable_definition(&definition));
+        let identity = stable_identity(&definition);
+        assert_eq!(identity["name"], "作业启动困难");
+        assert_eq!(identity["include"][0], "需外部催促才开始作业");
+        assert_eq!(identity["exclude"][0], "只是不喜欢某门课但未表达启动障碍");
+    }
+
+    #[test]
+    fn a_stable_problem_definition_cannot_omit_exclusion_boundary() {
+        assert!(!valid_stable_definition(&StableProblemDefinitionProposal {
+            name: "作业启动困难".into(),
+            meaning: "孩子难以开始作业。".into(),
+            include: vec!["需外部催促才开始作业".into()],
+            exclude: vec![],
+        }));
     }
 }

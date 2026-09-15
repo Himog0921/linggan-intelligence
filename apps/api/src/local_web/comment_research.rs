@@ -475,6 +475,8 @@ mod tests {
         assert!(page.contains("确认系统将处理的范围"));
         assert!(page.contains("已确认归并会立即累计到概览和用户问题"));
         assert!(page.contains("变化观察只读取满足覆盖与可比条件的统计版本"));
+        assert!(page.contains("problem-detail-dialog"));
+        assert!(page.contains("归并读取详情"));
         for retired in ["每日观察", "保存查询", "分析所选", "评论研究设置"] {
             assert!(!page.contains(retired));
         }
