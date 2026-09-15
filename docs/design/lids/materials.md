@@ -3,7 +3,7 @@
 > 状态: 权威当前
 > 标准成熟度: PROPOSED
 > 规则状态: 本文件即规则层，已生效 —— 材料家族、预算、硬规则与验收都以本文件为准，与各材料是否已经实现无关
-> 运行时状态: 逐材料另计，`M-03` 与 `M-05` 已在部署中的运行时（`/collection/runtime`、`/collection/operations`）；`M-06` 的实现随 `EVIDENCE-COVER-CARD-MATERIAL-004` 落在 `/corpus/evidence` 的封面作品卡上（长期合法性见 [DEC-0005](../../decisions/0005-lids-material-06-paper-residue.md)，部署进度见 [migration-log.md](migration-log.md) 的对应条目）
+> 运行时状态: 逐材料另计，`M-03` 与 `M-05` 已在部署中的运行时（`/collection/runtime`、`/collection/operations`）；`M-06` 的实现随 `EVIDENCE-COVER-CARD-MATERIAL-004` 落在 `/corpus/evidence` 的封面作品卡上，已随 `main@41aba73` 进入本机常驻运行时（长期合法性见 [DEC-0005](../../decisions/0005-lids-material-06-paper-residue.md)，部署进度见 [migration-log.md](migration-log.md) 的对应条目）
 > 欠账: [migration-log.md](migration-log.md) 的 DESIGN-010 条目
 > 最后核对: 2026-09-15
 > 适用范围: Linggan Intelligence 全部用户可见 Web UI 的背景材料、纹理、边缘处理、测量场、身份轨与实时传感面
