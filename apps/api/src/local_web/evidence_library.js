@@ -319,6 +319,29 @@
     return match ? match[1] : value;
   }
 
+  function coverObservationMoment(value) {
+    if (typeof value !== 'string' || !value) return '未知';
+    const match = value.match(/^\d{4}-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+    if (!match) return compactMoment(value) || '未知';
+    const [, month, day, hour, minute] = match;
+    return `${month}-${day} ${hour}:${minute}`;
+  }
+
+  function coverPublishedCopy(item) {
+    const publishedState = isCrossIndustrySample(item)
+      ? item.display?.publishedOnState
+      : item.display?.publishedAtState;
+    if (publishedState === 'SOURCE_TEXT_ONLY') return '来源时间';
+    const value = publishedCopy(item, true, false);
+    return value;
+  }
+
+  function coverStateLine(state) {
+    const line = stateLine(state);
+    line.querySelector('.v7-tech-key')?.remove();
+    return line;
+  }
+
   function compactCount(value) {
     if (!Number.isFinite(value)) return '未知';
     if (value < 1000) return String(value);
@@ -699,9 +722,20 @@
     const media = item.media && typeof item.media === 'object' ? item.media : {};
     if (Array.isArray(media.video?.items) && media.video.items.length) return 'wave';
     if (Array.isArray(media.images) && media.images.length > 1) return 'stack';
+    if (Array.isArray(media.images) && media.images.length) return 'grid';
     const comments = laneSummary(item, 'comments');
     if (comments && !['UNKNOWN', 'NOT_REQUESTED', 'NOT_OBSERVED'].includes(comments.state)) return 'cluster';
-    return 'frame';
+    // Most current XHS rows carry one explicit cover and no richer media-type distinction.
+    // Keep that honest: the catalogue mark is not a new classification. A stable existing work
+    // reference simply picks one of the generic image/text drawings, so an all-single-cover page
+    // does not collapse into a repeated icon field after sorting or paging.
+    const ref = String(itemRef(item) || item.display?.title || 'cover');
+    const hash = [...ref].reduce(
+      (hash, character) => Math.imul(hash ^ (character.codePointAt(0) || 0), 16777619) >>> 0,
+      2166136261,
+    );
+    const index = ((hash ^ (hash >>> 16)) >>> 0) % 3;
+    return ['grid', 'cone', 'frame'][index];
   }
 
   function coverKindLabel(item) {
@@ -744,23 +778,35 @@
     const group = svgNode('g', { fill: 'none', stroke: 'currentColor', 'stroke-width': '1.25' });
     const append = (name, attributes) => group.append(svgNode(name, attributes));
     if (kind === 'wave') {
-      [44, 72, 100, 128].forEach((radius, index) => append('circle', {
-        cx: 150, cy: 178 + index * 16, r: radius,
+      [42, 70, 98, 126].forEach((radius, index) => append('circle', {
+        cx: 150, cy: 188 + index * 14, r: radius,
       }));
-      append('path', { d: 'M70 296c28-34 58-34 80 0s52 34 80 0' });
-      append('path', { d: 'M112 144h76M150 106v76' });
+      append('path', { d: 'M66 300c28-34 56-34 84 0s56 34 84 0' });
+      append('path', { d: 'M112 148h76M150 110v76' });
     } else if (kind === 'stack') {
-      [[79, 100], [96, 84], [113, 68]].forEach(([x, y]) => append('rect', {
-        x, y, width: 108, height: 176,
+      [[59, 122], [83, 92], [107, 62]].forEach(([x, y]) => append('rect', {
+        x, y, width: 134, height: 212,
       }));
-      append('path', { d: 'M128 134h78M128 168h78M128 202h78' });
+      append('path', { d: 'M124 130h90M124 172h90M124 214h90' });
     } else if (kind === 'cluster') {
-      [[122, 166, 55], [180, 166, 55], [150, 224, 55]].forEach(([cx, cy, r]) => append('circle', { cx, cy, r }));
-      append('path', { d: 'M95 298h110M150 278v40' });
+      [[110, 172, 68], [190, 172, 68], [150, 236, 68]].forEach(([cx, cy, r]) => append('circle', { cx, cy, r }));
+      append('path', { d: 'M124 252 178 306M142 208l64 64' });
+    } else if (kind === 'grid') {
+      append('rect', { x: 50, y: 62, width: 200, height: 276 });
+      [90, 130, 170, 210].forEach((position) => append('path', { d: `M${position} 62v276` }));
+      [112, 162, 212, 262].forEach((position) => append('path', { d: `M50 ${position}h200` }));
+      append('path', { d: 'M90 102 150 162 210 102M90 298l60-60 60 60' });
+    } else if (kind === 'frame') {
+      append('rect', { x: 58, y: 60, width: 184, height: 280 });
+      append('rect', { x: 82, y: 96, width: 136, height: 208 });
+      append('path', { d: 'M82 152h136M82 248h136M150 96v208' });
+      append('path', { d: 'M104 122 150 160 196 122M104 278l46-38 46 38' });
     } else {
-      append('rect', { x: 67, y: 70, width: 166, height: 258 });
-      append('path', { d: 'M90 112h120M90 286h120M150 112v174M90 199h120' });
-      append('path', { d: 'M104 130 150 164 196 130M104 268l46-34 46 34' });
+      append('path', { d: 'M54 332 150 62l96 270Z' });
+      [72, 88, 104, 120, 136, 164, 180, 196, 212, 228].forEach((position) => append('path', {
+        d: `M150 62 ${position} 332`,
+      }));
+      append('path', { d: 'M54 332h192' });
     }
     svg.append(group);
     return svg;
@@ -896,19 +942,22 @@
   function coverMetaBlock(item, material, detailState, observedAt) {
     const meta = node('div', 'ev-cover-meta');
     const top = node('div', 'ev-cover-meta-top');
-    top.append(authorFact(item), node('span', 'ev-cover-date', publishedCopy(item, true, false)));
+    const published = node('span', 'ev-cover-date', coverPublishedCopy(item));
+    published.title = `发布时间 ${publishedCopy(item, false, false)}`;
+    top.append(authorFact(item), published);
     const facts = node('div', 'ev-cover-facts');
     if (isCrossIndustrySample(item)) {
-      facts.append(node('strong', 'ev-cross-industry-side-label', '列表级参照物'));
-      facts.append(node('span', 'ev-cross-industry-side-copy', '详情、媒体与材料未读取'));
+      const boundary = node('span', 'ev-cover-cross-boundary', '列表级参照物 · 详情、媒体与材料未读取');
+      boundary.title = '列表级参照物；详情、媒体与材料未读取';
+      facts.append(boundary);
     } else {
       const status = node('span', 'ev-cover-status');
       status.tabIndex = 0;
-      status.append(stateLine(detailState), coverStatusTooltip(item, material.summary));
-      facts.append(material.rail, status);
+      status.append(coverStateLine(detailState), coverStatusTooltip(item, material.summary));
+      facts.append(status);
     }
-    const observed = node('span', 'ev-cover-observed', `最近观察 ${compactMoment(observedAt) || '未知'}`);
-    if (observedAt) observed.title = `最近观察 ${observedAt}`;
+    const observed = node('span', 'ev-cover-observed', coverObservationMoment(observedAt));
+    observed.title = `最近观察 ${observedAt || '未知'}`;
     facts.append(observed);
     meta.append(top, engagementBlock(item), facts);
     return meta;
