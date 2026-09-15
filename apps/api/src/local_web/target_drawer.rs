@@ -1361,6 +1361,14 @@ fn overview_tab(
             );
         }
         TargetInspectorView::ReadUnavailable | TargetInspectorView::Projection(_) => {
+            if !is_creator {
+                return keyword_inspector_unavailable_overview(
+                    target,
+                    archive,
+                    keyword_archive,
+                    list_context,
+                );
+            }
             return inspector_unavailable_overview(is_creator);
         }
         TargetInspectorView::NotRead => {}
@@ -1462,6 +1470,35 @@ fn overview_tab(
 }
 
 fn inspector_unavailable_overview(is_creator: bool) -> String {
+    format!(
+        "{}\n            <section class=\"c-dw-section c-dw-decision\">\n              <div class=\"c-dw-decision-copy\"><span>是否需要处理</span><strong>当前无法判断</strong><p>读取恢复前不提供新的写操作，避免用未知状态触发重复任务。</p></div>\n            </section>",
+        inspector_unavailable_notice(is_creator),
+    )
+}
+
+/// 检查器读失败时，keyword 的巡查事实未知；但建档态由独立查询得出，不能把后者一并丢掉。
+fn keyword_inspector_unavailable_overview(
+    target: &ObservationTarget,
+    archive: TargetArchiveRead<'_>,
+    keyword_archive: KeywordArchiveRead,
+    list_context: TargetListContext<'_>,
+) -> String {
+    let action = target_primary_action(target, false, archive, keyword_archive);
+    let (action_title, action_note) = required_action_copy(action);
+    let action_control =
+        required_action_control(target, archive, false, keyword_archive, list_context);
+    format!(
+        r#"{notice}<section class="c-dw-section c-dw-decision" id="required-action">
+              <div class="c-dw-decision-copy"><span>是否需要处理</span><strong>{action_title}</strong><p>{action_note}</p></div>{action_control}
+            </section>"#,
+        notice = inspector_unavailable_notice(false),
+        action_title = action_title,
+        action_note = action_note,
+        action_control = action_control,
+    )
+}
+
+fn inspector_unavailable_notice(is_creator: bool) -> String {
     let scope = if is_creator {
         "档案、执行与巡查"
     } else {
@@ -1471,9 +1508,6 @@ fn inspector_unavailable_overview(is_creator: bool) -> String {
         r#"<section class="c-dw-section c-dw-now">
               <div class="c-dw-section-head"><b>系统现在在做什么</b><span>读取暂不可用</span></div>
               <div class="life-state"><b>目标状态暂时读不到</b><p>当前无法判断{scope}；这不表示没有任务、没有作品或运行正常。</p></div>
-            </section>
-            <section class="c-dw-section c-dw-decision">
-              <div class="c-dw-decision-copy"><span>是否需要处理</span><strong>当前无法判断</strong><p>读取恢复前不提供新的写操作，避免用未知状态触发重复任务。</p></div>
             </section>"#,
     )
 }
@@ -3543,6 +3577,47 @@ mod tests {
         // 建档态读不到时既不催也不改口径，与列表行走同一个兜底。
         let unknown = render(KeywordArchiveRead::Unavailable);
         assert!(unknown.contains("设置巡查"), "{unknown}");
+    }
+
+    /// 检查器读失败只让巡查事实未知，不能把已经独立读到的关键词建档态一起压掉。
+    #[test]
+    fn keyword_drawer_keeps_its_primary_action_when_inspector_read_is_unavailable() {
+        let mut keyword = keyword_target();
+        keyword.monitoring_enabled = false;
+        keyword.lifecycle_state = "stored".to_owned();
+        let render = |archive: KeywordArchiveRead| {
+            overview_tab(
+                &[],
+                &keyword,
+                TargetArchiveRead::Known(None),
+                false,
+                TargetInspectorView::ReadUnavailable,
+                LifecycleView::QueryInvalid,
+                None,
+                archive,
+                TargetListContext::default(),
+            )
+        };
+
+        let not_archived = render(KeywordArchiveRead::NotArchived);
+        assert!(
+            not_archived.contains("目标状态暂时读不到"),
+            "{not_archived}"
+        );
+        assert!(
+            not_archived.contains("当前无法判断巡查与最近结果"),
+            "{not_archived}"
+        );
+        assert!(not_archived.contains("需要建立档案"), "{not_archived}");
+        assert!(
+            not_archived.contains(">建立档案</button>"),
+            "{not_archived}"
+        );
+
+        let pending = render(KeywordArchiveRead::DetailPending);
+        assert!(pending.contains("目标状态暂时读不到"), "{pending}");
+        assert!(pending.contains("有详情缺口需要补采"), "{pending}");
+        assert!(pending.contains(">补采缺口</button>"), "{pending}");
     }
 
     /// **巡查优先于催建档。** 哪怕建档态说「还没建过」，已经在按周看增量的词也仍是
