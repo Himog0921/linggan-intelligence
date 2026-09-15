@@ -2782,6 +2782,7 @@ fn evidence_cover_layout_keeps_a_stationary_data_plate_and_one_shared_flip_stage
         ".ev-cover-status-tooltip",
         "column-gap:var(--lgi-space-2);row-gap:var(--lgi-space-8)",
         "aspect-ratio:7/2",
+        "inline-size:100%;max-inline-size:100%;box-sizing:border-box",
         "grid-template-rows:var(--lgi-space-6) var(--lgi-space-6) minmax(var(--lgi-space-6),1fr)",
         "min-height:calc(var(--lgi-space-16) + var(--lgi-space-6) + var(--lgi-space-4) + var(--lgi-space-2))",
         "grid-template-columns:minmax(0,1fr) minmax(0,1fr)",
