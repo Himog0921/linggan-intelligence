@@ -972,6 +972,11 @@ async fn select_eligible_resolution_backlog(
            ON membership.atom_ref=atom.atom_ref AND membership.current \
          WHERE prior_execution.state NOT IN ('queued','running') \
            AND membership.atom_ref IS NULL \
+           AND source_policy.problem_resolution_contract=$6 \
+           AND source_policy.problem_scope_domain_ref=$5 \
+           AND atom.problem_frame_hash IS NOT NULL \
+           AND jsonb_typeof(atom.problem_frame)='object' \
+           AND atom.problem_frame->>'scopeRelation'='in_scope' \
            AND ( \
              (resolution.state='model_failed' AND ( \
                (resolution.failure_code='problem_resolution_admission_rejected' AND resolution.attempts<3) \
@@ -998,6 +1003,7 @@ async fn select_eligible_resolution_backlog(
     .bind(policy.get::<i32, _>("source_limit"))
     .bind(MAX_BACKLOG_RESOLUTIONS_PER_RUN)
     .bind(policy.get::<Option<Uuid>, _>("problem_scope_domain_ref"))
+    .bind(PROBLEM_RESOLUTION_CONTRACT)
     .fetch_all(&mut **transaction)
     .await?;
     Ok(rows
@@ -1029,7 +1035,7 @@ async fn activate_eligible_resolution_backlog(
                  failure_code=CASE WHEN decision_kind IN ('deferred_novel','deferred_ambiguous','deferred_context') \
                                    THEN 'candidate_catalog_changed' ELSE failure_code END, \
                  decision_kind=NULL,decision_payload=NULL,recheck_conditions=NULL,resolution_input_hash=NULL, \
-                 catalog_revision_at_recall=NULL,updated_at=scope_001_now() \
+                 catalog_revision_at_recall=NULL,candidate_recall_required=true,updated_at=scope_001_now() \
              WHERE resolution.atom_ref=ANY($2) \
                AND (resolution.state='model_failed' \
                     OR (resolution.state='succeeded' AND resolution.decision_kind IN ( \

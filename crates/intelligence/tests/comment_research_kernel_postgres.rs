@@ -3053,6 +3053,14 @@ async fn problem_read_keeps_a_deferred_signal_out_of_confirmed_problem_counts() 
     .unwrap();
     assert_eq!(deferred["page"]["total"], 1);
     assert_eq!(deferred["page"]["items"][0]["itemKind"], "deferred");
+    let runs = read_runs(&database, &CommentResearchV1ReadQuery::default())
+        .await
+        .unwrap();
+    let health = &runs["page"]["items"][0]["researchHealth"];
+    assert_eq!(health["pendingProblemResolutionAtomCount"], 0);
+    assert_eq!(health["activeProblemResolutionAtomCount"], 0);
+    assert_eq!(health["deferredNovelAtomCount"], 1);
+    assert_eq!(health["failedProblemResolutionAtomCount"], 0);
 }
 
 #[tokio::test]
@@ -3433,7 +3441,11 @@ async fn confirmed_memberships_remain_readable_when_their_run_cannot_publish_sta
     assert_eq!(health["researchSignalCount"], 26);
     assert_eq!(health["problemBearingAtomCount"], 26);
     assert_eq!(health["organizedProblemAtomCount"], 2);
-    assert_eq!(health["backlogProblemAtomCount"], 24);
+    assert_eq!(health["unassignedProblemAtomCount"], 24);
+    assert_eq!(health["pendingProblemResolutionAtomCount"], 0);
+    assert_eq!(health["activeProblemResolutionAtomCount"], 0);
+    assert_eq!(health["deferredNovelAtomCount"], 0);
+    assert_eq!(health["failedProblemResolutionAtomCount"], 24);
     assert_eq!(health["organizationCoverage"]["numerator"], 2);
     assert_eq!(health["organizationCoverage"]["denominator"], 26);
 }
@@ -3471,16 +3483,16 @@ async fn a_later_run_boundedly_continues_an_eligible_historical_resolution() {
     .unwrap();
     let source_run = start_ready_run(&database).await.unwrap();
     let semantic_claim = claim_next_run_item(&database).await.unwrap().unwrap();
-    accept_semantic_output(
+    accept_semantic_quote_output(
         &database,
         &semantic_claim,
-        SemanticExtractionOutput::Atoms {
-            atoms: vec![SemanticAtomProposal {
+        SemanticQuoteExtractionOutput::Atoms {
+            atoms: vec![SemanticQuoteAtomProposal {
                 kind: AtomKind::Problem,
                 proposition: "孩子难以启动写作业".into(),
                 basis: AtomBasis::Explicit,
-                evidence_start: 0,
-                evidence_end: 5,
+                evidence: "孩子".into(),
+                problem_frame: Some(valid_v2_problem_frame()),
             }],
         },
         None,
@@ -3560,15 +3572,46 @@ async fn a_later_run_boundedly_continues_an_eligible_historical_resolution() {
     let retry_run = start_ready_run(&database).await.unwrap();
     assert_eq!(retry_run.selected_sources, 0);
     assert_eq!(retry_run.selected_backlog_atoms, 1);
-    let retry_state: (String, i32, Uuid) = sqlx::query_as(
-        "SELECT state,attempts,execution_run_ref \
+    let retry_state: (String, i32, Uuid, bool, Option<i64>) = sqlx::query_as(
+        "SELECT state,attempts,execution_run_ref,candidate_recall_required,catalog_revision_at_recall \
          FROM linggan_comment_research_problem_resolution WHERE atom_ref=$1",
     )
     .bind(atom)
     .fetch_one(database.pool())
     .await
     .unwrap();
-    assert_eq!(retry_state, ("pending".into(), 1, retry_run.run_ref));
+    assert_eq!(
+        retry_state,
+        ("pending".into(), 1, retry_run.run_ref, true, None),
+        "activation requires a fresh V2 candidate snapshot before a worker can claim it"
+    );
+    let adapter = PiAdapter::configured_with_test_command(
+        PathBuf::from("/bin/sh"),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/support/comment_research_semantic_settlement_adapter.sh"),
+    );
+    assert!(
+        run_once(
+            &database,
+            &SyntheticModelSecrets,
+            &adapter,
+            &ModelWorkerDrain::new(),
+        )
+        .await
+        .unwrap(),
+        "a V2 reactivation refreshes candidates and settles an empty catalog without a provider call"
+    );
+    let recalled: (String, bool, Option<i64>) = sqlx::query_as(
+        "SELECT state,candidate_recall_required,catalog_revision_at_recall \
+         FROM linggan_comment_research_problem_resolution WHERE atom_ref=$1",
+    )
+    .bind(atom)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(recalled.0, "succeeded");
+    assert!(!recalled.1);
+    assert!(recalled.2.is_some());
 
     // Simulate B exhausting a transient provider attempt. C must get a fresh execution history
     // row rather than overwriting B when it later completes the same Atom.
@@ -3674,6 +3717,316 @@ async fn a_later_run_boundedly_continues_an_eligible_historical_resolution() {
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof"]
+async fn v1_resolution_backlog_is_never_selected_by_a_v2_run() {
+    let database = fixture::proof_database("comment_research_v2_legacy_backlog_excluded").await;
+    detail_with_author(
+        &database,
+        "legacy-resolution-note",
+        "SYNTHETIC legacy resolution note",
+        Some("creator-1"),
+    )
+    .await;
+    comment_with_author(
+        &database,
+        "legacy-resolution-note",
+        "legacy-resolution-comment",
+        "孩子写作业前总是拖延，不知道怎么开始",
+        Some("reader-1"),
+        "2026-09-01T08:00:00Z",
+    )
+    .await;
+    let space = synthetic_qualified_embedding_space(&database).await;
+    save_active_policy(
+        &database,
+        SaveResearchPolicy {
+            config_ref: Some(qualified_research_config(&database).await),
+            source_limit: 10,
+            token_limit: 10_000,
+        },
+    )
+    .await
+    .unwrap();
+    let source_run = start_ready_run(&database).await.unwrap();
+    let claim = claim_next_run_item(&database).await.unwrap().unwrap();
+    accept_semantic_output(
+        &database,
+        &claim,
+        SemanticExtractionOutput::Atoms {
+            atoms: vec![SemanticAtomProposal {
+                kind: AtomKind::Problem,
+                proposition: "孩子难以启动写作业".into(),
+                basis: AtomBasis::Explicit,
+                evidence_start: 0,
+                evidence_end: 5,
+            }],
+        },
+        None,
+    )
+    .await
+    .unwrap();
+    let atom = atom_ref(&database, source_run.run_ref, claim.derivation_ref).await;
+    let input = queue_atom_embedding(&database, atom, space.space_ref)
+        .await
+        .unwrap();
+    let embedding_claim = claim_next_embedding_work(&database).await.unwrap().unwrap();
+    accept_atom_embedding(
+        &database,
+        &embedding_claim,
+        AtomEmbeddingResult {
+            atom_ref: atom,
+            space_ref: space.space_ref,
+            input_hash: input.input_hash,
+            values: unit_vector_512(),
+            invocation_ref: None,
+        },
+    )
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_comment_research_problem_resolution( \
+             atom_ref,space_ref,candidate_set,candidate_hash,state,failure_code,execution_run_ref,finished_at \
+         ) VALUES($1,$2,'[]'::jsonb,$3,'model_failed','problem_resolution_json_schema_rejected',$4,scope_001_now())",
+    )
+    .bind(atom)
+    .bind(space.space_ref)
+    .bind(HASH)
+    .bind(source_run.run_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_comment_research_problem_resolution_execution( \
+             atom_ref,run_ref,state,failure_code,finished_at \
+         ) VALUES($1,$2,'model_failed','problem_resolution_json_schema_rejected',scope_001_now())",
+    )
+    .bind(atom)
+    .bind(source_run.run_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let legacy_policy_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_comment_research_policy_revision( \
+             policy_revision_ref,config_ref,contract_version,derivation_version,extraction_rule_hash, \
+             membership_policy_hash,source_limit,token_limit \
+         ) SELECT $2,policy.config_ref,policy.contract_version,policy.derivation_version, \
+                  policy.extraction_rule_hash,policy.membership_policy_hash,policy.source_limit,policy.token_limit \
+           FROM linggan_comment_research_run run \
+           JOIN linggan_comment_research_policy_revision policy ON policy.policy_revision_ref=run.policy_revision_ref \
+          WHERE run.run_ref=$1",
+    )
+    .bind(source_run.run_ref)
+    .bind(legacy_policy_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query("UPDATE linggan_comment_research_run SET policy_revision_ref=$2 WHERE run_ref=$1")
+        .bind(source_run.run_ref)
+        .bind(legacy_policy_ref)
+        .execute(database.pool())
+        .await
+        .unwrap();
+
+    let preview = preview_run(&database).await.unwrap();
+    assert_eq!(preview.selected_sources, 0);
+    assert_eq!(preview.eligible_backlog_atoms, 0);
+    assert!(matches!(
+        start_run(&database).await,
+        Err(CommentResearchKernelError::NoEligibleDerivations)
+    ));
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn legacy_activation_recovery_detaches_the_queue_head_and_marks_the_execution_skip() {
+    let database = fixture::proof_database("comment_research_v2_legacy_activation_recovery").await;
+    detail_with_author(
+        &database,
+        "legacy-activation-note",
+        "SYNTHETIC legacy activation recovery note",
+        Some("creator-1"),
+    )
+    .await;
+    comment_with_author(
+        &database,
+        "legacy-activation-note",
+        "legacy-activation-comment",
+        "孩子写作业前总是拖延，不知道怎么开始",
+        Some("reader-1"),
+        "2026-09-01T08:00:00Z",
+    )
+    .await;
+    let space = synthetic_qualified_embedding_space(&database).await;
+    save_active_policy(
+        &database,
+        SaveResearchPolicy {
+            config_ref: Some(qualified_research_config(&database).await),
+            source_limit: 10,
+            token_limit: 10_000,
+        },
+    )
+    .await
+    .unwrap();
+    let source_run = start_ready_run(&database).await.unwrap();
+    let claim = claim_next_run_item(&database).await.unwrap().unwrap();
+    accept_semantic_output(
+        &database,
+        &claim,
+        SemanticExtractionOutput::Atoms {
+            atoms: vec![SemanticAtomProposal {
+                kind: AtomKind::Problem,
+                proposition: "孩子难以启动写作业".into(),
+                basis: AtomBasis::Explicit,
+                evidence_start: 0,
+                evidence_end: 5,
+            }],
+        },
+        None,
+    )
+    .await
+    .unwrap();
+    let atom = atom_ref(&database, source_run.run_ref, claim.derivation_ref).await;
+    let input = queue_atom_embedding(&database, atom, space.space_ref)
+        .await
+        .unwrap();
+    let embedding_claim = claim_next_embedding_work(&database).await.unwrap().unwrap();
+    accept_atom_embedding(
+        &database,
+        &embedding_claim,
+        AtomEmbeddingResult {
+            atom_ref: atom,
+            space_ref: space.space_ref,
+            input_hash: input.input_hash,
+            values: unit_vector_512(),
+            invocation_ref: None,
+        },
+    )
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_comment_research_problem_resolution( \
+             atom_ref,space_ref,candidate_set,candidate_hash,state,attempts,failure_code,execution_run_ref,finished_at \
+         ) VALUES($1,$2,'[]'::jsonb,$3,'model_failed',1,'problem_resolution_json_schema_rejected',$4,scope_001_now())",
+    )
+    .bind(atom)
+    .bind(space.space_ref)
+    .bind(HASH)
+    .bind(source_run.run_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_comment_research_problem_resolution_execution( \
+             atom_ref,run_ref,state,attempts,failure_code,finished_at \
+         ) VALUES($1,$2,'model_failed',1,'problem_resolution_json_schema_rejected',scope_001_now())",
+    )
+    .bind(atom)
+    .bind(source_run.run_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let legacy_policy_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_comment_research_policy_revision( \
+             policy_revision_ref,config_ref,contract_version,derivation_version,extraction_rule_hash, \
+             membership_policy_hash,source_limit,token_limit \
+         ) SELECT $2,policy.config_ref,policy.contract_version,policy.derivation_version, \
+                  policy.extraction_rule_hash,policy.membership_policy_hash,policy.source_limit,policy.token_limit \
+           FROM linggan_comment_research_run run \
+           JOIN linggan_comment_research_policy_revision policy ON policy.policy_revision_ref=run.policy_revision_ref \
+          WHERE run.run_ref=$1",
+    )
+    .bind(source_run.run_ref)
+    .bind(legacy_policy_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query("UPDATE linggan_comment_research_run SET policy_revision_ref=$2 WHERE run_ref=$1")
+        .bind(source_run.run_ref)
+        .bind(legacy_policy_ref)
+        .execute(database.pool())
+        .await
+        .unwrap();
+
+    comment_with_author(
+        &database,
+        "legacy-activation-note",
+        "new-v2-comment",
+        "我想知道怎样帮助孩子安排家庭作业",
+        Some("reader-2"),
+        "2026-09-02T08:00:00Z",
+    )
+    .await;
+    let retry_run = start_ready_run(&database).await.unwrap();
+    assert_eq!(retry_run.selected_sources, 1);
+    assert_eq!(retry_run.selected_backlog_atoms, 0);
+    sqlx::query(
+        "UPDATE linggan_comment_research_problem_resolution \
+         SET state='pending',attempts=0,execution_run_ref=$2,finished_at=NULL, \
+             next_attempt_at=NULL,lease_until=NULL,updated_at=scope_001_now() WHERE atom_ref=$1",
+    )
+    .bind(atom)
+    .bind(retry_run.run_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_comment_research_problem_resolution_execution( \
+             atom_ref,run_ref,state,attempts,failure_code \
+         ) VALUES($1,$2,'pending',0,'problem_resolution_json_schema_rejected')",
+    )
+    .bind(atom)
+    .bind(retry_run.run_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    assert_eq!(recover_problem_resolution_leases(&database).await.unwrap(), 1);
+    let restored: (String, String, Uuid) = sqlx::query_as(
+        "SELECT state,failure_code,execution_run_ref \
+         FROM linggan_comment_research_problem_resolution WHERE atom_ref=$1",
+    )
+    .bind(atom)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        restored,
+        (
+            "model_failed".into(),
+            "problem_resolution_json_schema_rejected".into(),
+            source_run.run_ref
+        )
+    );
+    let skipped: (String, String, Option<String>) = sqlx::query_as(
+        "SELECT state,failure_code,finished_at::text \
+         FROM linggan_comment_research_problem_resolution_execution \
+         WHERE atom_ref=$1 AND run_ref=$2",
+    )
+    .bind(atom)
+    .bind(retry_run.run_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(skipped.0, "incompatible");
+    assert_eq!(skipped.1, "legacy_resolution_contract_not_v2");
+    assert!(skipped.2.is_some());
+    let runs = read_runs(&database, &CommentResearchV1ReadQuery::default())
+        .await
+        .unwrap();
+    let retry_health = &runs["page"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["runRef"] == retry_run.run_ref.to_string())
+        .unwrap()["researchHealth"];
+    assert_eq!(retry_health["activatedBacklogSkippedAtomCount"], 1);
+    assert_eq!(retry_health["activatedBacklogFailedAtomCount"], 0);
+    assert_eq!(retry_health["activatedBacklogPendingAtomCount"], 0);
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
 async fn disabling_embedding_terminalizes_a_historical_resolution_under_its_retry_run() {
     let database = fixture::proof_database("comment_research_cross_run_embedding_disabled").await;
     detail_with_author(
@@ -3705,16 +4058,16 @@ async fn disabling_embedding_terminalizes_a_historical_resolution_under_its_retr
     .unwrap();
     let source_run = start_ready_run(&database).await.unwrap();
     let semantic_claim = claim_next_run_item(&database).await.unwrap().unwrap();
-    accept_semantic_output(
+    accept_semantic_quote_output(
         &database,
         &semantic_claim,
-        SemanticExtractionOutput::Atoms {
-            atoms: vec![SemanticAtomProposal {
+        SemanticQuoteExtractionOutput::Atoms {
+            atoms: vec![SemanticQuoteAtomProposal {
                 kind: AtomKind::Problem,
                 proposition: "孩子难以启动写作业".into(),
                 basis: AtomBasis::Explicit,
-                evidence_start: 0,
-                evidence_end: 5,
+                evidence: "孩子".into(),
+                problem_frame: Some(valid_v2_problem_frame()),
             }],
         },
         None,

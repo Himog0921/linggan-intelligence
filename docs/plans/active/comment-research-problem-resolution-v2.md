@@ -55,6 +55,19 @@
 | 详情抽屉 | 原声→frame及出处→候选比较→结论→唤醒条件→执行历史 | 不重新调用模型解释；引用不可读时明确限制 | read DTO test |
 | 运行记录 | 区分已完成决策、等待、执行失败与续办 | 不把 failed 计作完成判断 | PostgreSQL/API test |
 
+## 2026-09-15 · V2 backlog 合同修复
+
+受控真实 Run `3f702e1d-9044-4ffb-99fc-94be7664059e` 暴露了 #285 初版没有覆盖的一条迁移边界：历史 V1 `problem_resolution_json_schema_rejected` 行能够因 policy/config 变化被 cross-Run selector 选中，并在 activation 时被清空 `catalog_revision_at_recall`。worker 随后把空 revision 当作 source unavailable，在队首反复失败，既没有实际开始 V2 resolution，也阻塞了同 Run 新产生的 V2 Atom。
+
+本修复的闭集范围如下：
+
+- 只有来源 policy 明确为 `comment-research.problem-resolution.v2`、Atom 有有效 V2 Frame 的 resolution 才能成为 cross-Run backlog；V1 历史失败保留在其原始 Run，不再被 V2 policy 续办。
+- V2 的 catalog/policy 重评先进入一次无 provider 调用的候选重新召回，只有新的 candidate snapshot 和 catalog revision 同时冻结后才可认领模型工作；activation 不得制造一个空 revision 的普通 pending row。
+- 已被旧 selector 错误接管的 legacy row 由 worker 的事务性 recovery 脱离当前 execution Run，恢复其原始 execution 指针和终态；当前 execution history 以受控 `legacy_resolution_contract_not_v2` 原因保留为跳过，不记为当前 Run 的模型失败。
+- Run read model 分开报告“待开始归并”“归并处理中”“已完成等待独立证据/消歧/上下文”和“终态失败”；未建立 resolution 的 Atom 不能显示为已完成待归并信号。
+
+不重试本次 semantic extraction 的终态 Schema 失败，不批量重写旧 V1 Atom、Problem 或 membership，也不自动开启连续研究。隔离 PostgreSQL 需要分别证明 legacy exclusion、V2 candidate re-recall、已卡住 activation recovery、Run completion 以及读取状态计数。
+
 这是状态/语义变更，采用现有 L1 shell、文字 Tab、表格/空态和 LIDS data-boundary/LANG-05 规则；不新增 Token、全局组件、页面壳、权限或实际行动。完整读取回执在 [`../design/changes/comment-research-problem-resolution-v2-ui-change-manifest.md`](../../design/changes/comment-research-problem-resolution-v2-ui-change-manifest.md)。
 
 ## 文件与协作边界

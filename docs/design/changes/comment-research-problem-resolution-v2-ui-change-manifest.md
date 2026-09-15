@@ -28,6 +28,18 @@
 - Data truth: confirmed membership、legal deferred、execution failure 和未评估各自使用独立字段/文案；`0` 仅表示已确认零。
 - 用户问题页新增同一只读查询的 `全部 / 已形成问题 / 待归并信号` 筛选；详情顺序固定为受限原声说明与归一描述、frame 及出处、候选比较、结论、再评估条件、执行历史。
 
+## 2026-09-15 · Run Health 状态细化
+
+运行记录不得再将所有“未建立 membership 的 problem/need Atom”写成“待归并”。Run Health 以互斥执行事实表达：
+
+- `待开始归并`：已提取为 problem/need，但尚无 resolution；
+- `归并处理中`：已有 pending/running/retryable resolution；
+- `等待独立同类证据`、`等待消歧`、`等待必要语境`：对应已成功写入的 V2 deferred disposition；
+- `归并终态失败`：resolution 的 model_failed/incompatible，不能伪装为 deferred；
+- `旧合同已跳过`：本 Run 曾错误接管 V1 backlog，现已恢复到原始历史；它不计入本 Run 的失败或待处理数。
+
+此变更只复用现有运行记录文字摘要与数字 readout，不增加页面、Token、组件或写入动作。
+
 ## 停止与验收
 
 不展示模型原文、原始敏感材料、内部 UUID 或无中文含义的状态码；不在打开抽屉时调用模型。若现有页面规格不足以裁定新的筛选/抽屉互动，则停止该 UI 部分并报告。
