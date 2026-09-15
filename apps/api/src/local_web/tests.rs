@@ -2838,7 +2838,9 @@ fn evidence_cover_layout_keeps_a_stationary_data_plate_and_one_shared_flip_stage
 
 /* Surface hierarchy, card material, the measuring field and the title step are one contract: the
  * four levels of the cover card must stay distinguishable without a frame around each of them,
- * the grain must stay off every text layer, and the stage lattice must be a different pattern
+ * the grain must stay off every text layer, must stay a state of the shared 8px lattice that
+ * `LIDS-MAT-001` builds its materials on *without lining up into a rule*, and the stage lattice
+ * must be a different pattern
  * from the grain and must actually cover the whole 3:4 stage. The title step is part of it: a
  * 277px card is a caption surface over its 3:4 stage, so it takes the card step and never the
  * page-title step that made six cards shout over their own material. */
@@ -2853,8 +2855,8 @@ fn evidence_cover_card_layers_by_surface_and_keeps_its_materials_apart() {
         // The card's own material, and the layer that keeps it out of the text.
         ".ev-cover-face::after{content:\"\";position:absolute;inset:0;z-index:1;pointer-events:none;background-image:radial-gradient",
         ".ev-cover-face-inner{position:relative;z-index:2;",
-        "background-size:20px 20px",
-        // The selected card keeps the same material on orange.
+        "background-size:24px 24px",
+        // The selected card keeps the same material on orange, denser.
         ".ev-work-row[aria-selected=\"true\"] .ev-cover-face::after{background-image:radial-gradient",
         // The measuring field: a real 8px / 1px lattice, painted by CSS over the whole stage.
         ".ev-cover-stage-frame--diagram::before{content:\"\";position:absolute;inset:0;z-index:0;pointer-events:none;background-image:radial-gradient(circle,var(--lgi-ink) 1px,transparent 1.2px);background-size:8px 8px",
@@ -2868,6 +2870,180 @@ fn evidence_cover_card_layers_by_surface_and_keeps_its_materials_apart() {
             EVIDENCE_LIBRARY_CSS.contains(marker),
             "missing cover-card surface contract: {marker}"
         );
+    }
+    // The card grain is registered as `LIDS-MAT-001` `M-06`, and what keeps it in that family is
+    // that it is a *state of the same 8px lattice* rather than a second texture system: every node
+    // it draws, and the tile it repeats on, must be a whole number of lattice steps. That is
+    // checked as a property, because a pinned pixel string can be re-pinned to a number that has
+    // left the lattice and stay green.
+    //
+    // Lattice membership alone is not enough, and the first version of this material is the proof:
+    // it kept three of the nine nodes of a 24px cell that formed a *subgroup* of the lattice
+    // (y = 2x mod 3), and a subgroup makes every dot the first of an endless run — the field was
+    // a 45 degree ruling at 11.31px, which is the "texture you can see" that this material must
+    // never be. So the residue is also checked for what makes it a residue: no three of its dots
+    // may be evenly spaced along one line at a spacing under 17px — the tile holds no three-term
+    // arithmetic progression shorter than that. *Evenly* is the whole of the condition, not a
+    // softening of it: on a 24px cell any three nodes either put two of them in one row or column
+    // — which the repeat turns into a chain of alternating 8px and 16px gaps, two gaps of
+    // different length and so no single rhythm to read as a line — or they are one per column,
+    // and every such arrangement is y = ax + b, a coset of a subgroup, i.e. the ruled version
+    // again. No three-node residue can be perfectly isotropic; this is the strongest condition
+    // the density admits.
+    //
+    // Density is capped the same way, and it is the criterion most likely to be edited by hand
+    // ("make it a little stronger"), so it is asserted rather than left to taste: the family's own
+    // ink, the alpha carrying the density, and the dot under a sub-perceptible radius.
+    const LATTICE_STEP: usize = 8;
+    const MIN_RUN_SPACING: f64 = 17.0;
+    const MAX_DENSITY: f64 = 0.20;
+    const MAX_DOT_RADIUS: f64 = 0.6;
+    assert_eq!(
+        EVIDENCE_LIBRARY_CSS.matches(".ev-cover-face::after{").count(),
+        2,
+        "the card grain is one material with one selected state; a third rule would override it \
+         outside every check below"
+    );
+    for (rule, expected_nodes, tile) in [
+        (".ev-cover-face::after{content:", 3usize, 24usize),
+        (
+            ".ev-work-row[aria-selected=\"true\"] .ev-cover-face::after{background-image:",
+            4usize,
+            24usize,
+        ),
+    ] {
+        let start = EVIDENCE_LIBRARY_CSS
+            .find(rule)
+            .unwrap_or_else(|| panic!("the M-06 grain rule is missing: {rule}"));
+        let rule_body = &EVIDENCE_LIBRARY_CSS[start..];
+        let rule_body = &rule_body[..rule_body.find('}').expect("the M-06 rule must be closed")];
+        assert_eq!(
+            rule_body.matches("circle at ").count(),
+            expected_nodes,
+            "M-06 {rule} must draw {expected_nodes} nodes of the lattice"
+        );
+        let mut drawn: Vec<(usize, usize)> = Vec::new();
+        for node in rule_body.split("circle at ").skip(1) {
+            let (coordinates, ink_and_radius) = node
+                .split_once(',')
+                .expect("an M-06 node declares its coordinates, then its ink");
+            let ink_end = ink_and_radius
+                .find(')')
+                .expect("an M-06 node declares its ink as a colour function");
+            let ink = &ink_and_radius[..=ink_end];
+            let alpha: f64 = ink
+                .strip_prefix("rgba(17,19,21,")
+                .and_then(|rest| rest.strip_suffix(')'))
+                .unwrap_or_else(|| {
+                    panic!("an M-06 node draws in the family ink (17,19,21), never a second colour: {ink}")
+                })
+                .parse()
+                .unwrap_or_else(|_| panic!("an M-06 density is a number: {ink}"));
+            assert!(
+                (0.0..=MAX_DENSITY).contains(&alpha),
+                "M-06 {rule} paints at alpha {alpha}, past the sub-perceptible cap {MAX_DENSITY}"
+            );
+            let radius: f64 = ink_and_radius[ink_end + 1..]
+                .split(',')
+                .next()
+                .expect("an M-06 node declares the radius of its dot")
+                .trim()
+                .strip_suffix("px")
+                .and_then(|number| number.parse().ok())
+                .unwrap_or_else(|| panic!("an M-06 dot radius is a px length: {node}"));
+            assert!(
+                (0.0..=MAX_DOT_RADIUS).contains(&radius),
+                "M-06 {rule} paints a {radius}px dot, past the sub-perceptible cap \
+                 {MAX_DOT_RADIUS}px"
+            );
+            let parts: Vec<&str> = coordinates.split_whitespace().collect();
+            assert_eq!(
+                parts.len(),
+                2,
+                "an M-06 node is two coordinates, x then y, in space-separated px: {coordinates}"
+            );
+            let mut pair = (0usize, 0usize);
+            for (axis, part) in parts.iter().enumerate() {
+                let part = part.to_ascii_lowercase();
+                let length: f64 = match part.strip_suffix("px") {
+                    Some(number) => number.parse().unwrap_or_else(|_| {
+                        panic!("an M-06 node coordinate is not a length: {node}")
+                    }),
+                    // CSS lets a bare zero stand for a length. Any other unitless number makes
+                    // the whole declaration invalid and the layer would vanish without a word,
+                    // so it has to fail here instead of quietly painting nothing.
+                    None => {
+                        let bare: f64 = part.parse().unwrap_or_else(|_| {
+                            panic!("an M-06 node coordinate must carry its px unit: {node}")
+                        });
+                        assert_eq!(bare, 0.0, "an M-06 node coordinate must carry its px unit: {node}");
+                        bare
+                    }
+                };
+                assert!(
+                    (0.0..tile as f64).contains(&length),
+                    "M-06 {rule} draws a node outside its own tile, where the repeat hides it: \
+                     {coordinates}"
+                );
+                assert_eq!(
+                    length % LATTICE_STEP as f64,
+                    0.0,
+                    "M-06 {rule} draws off the {LATTICE_STEP}px lattice: {coordinates}"
+                );
+                let step = (length / LATTICE_STEP as f64) as usize;
+                if axis == 0 {
+                    pair.0 = step;
+                } else {
+                    pair.1 = step;
+                }
+            }
+            drawn.push(pair);
+        }
+        assert_eq!(
+            rule_body.matches("background-size:").count(),
+            1,
+            "M-06 {rule} must declare the tile it repeats on exactly once"
+        );
+        let size = rule_body
+            .split("background-size:")
+            .nth(1)
+            .expect("M-06 must declare the tile it repeats on");
+        assert_eq!(
+            size.split(';').next().expect("the tile ends the declaration").trim(),
+            format!("{tile}px {tile}px"),
+            "M-06 {rule} must repeat on a whole number of lattice steps"
+        );
+        // A dot that has a companion one step away and another two steps away is the head of a
+        // run; at this spacing that run is what a ruled pattern is made of. One probe per step
+        // vector is enough *because the tile is three lattice steps wide*: a shorter run than that
+        // would have to close at a smaller multiple of the same vector and is caught by the same
+        // probe. A material on a wider tile would need the general test — any three collinear
+        // nodes, not only evenly spaced ones — so this loop must not be carried over unchanged.
+        let span = tile / LATTICE_STEP;
+        let reach = (MIN_RUN_SPACING / LATTICE_STEP as f64).floor() as i32;
+        for dx in -reach..=reach {
+            for dy in -reach..=reach {
+                if (dx, dy) == (0, 0) {
+                    continue;
+                }
+                let spacing = LATTICE_STEP as f64 * ((dx * dx + dy * dy) as f64).sqrt();
+                if spacing >= MIN_RUN_SPACING {
+                    continue;
+                }
+                for &(x, y) in &drawn {
+                    let on_line = |multiple: i32| {
+                        let px = (x as i32 + multiple * dx).rem_euclid(span as i32) as usize;
+                        let py = (y as i32 + multiple * dy).rem_euclid(span as i32) as usize;
+                        drawn.contains(&(px, py))
+                    };
+                    assert!(
+                        !(on_line(1) && on_line(2)),
+                        "M-06 {rule} draws three dots on one line {spacing:.2}px apart, which \
+                         reads as ruled paper instead of a residue: {drawn:?}"
+                    );
+                }
+            }
+        }
     }
     // One type step for every card, and a plate that is exactly two lines of it.
     assert!(

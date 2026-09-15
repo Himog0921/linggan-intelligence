@@ -223,22 +223,33 @@
 .ev-cover-visual-sizer-stage{display:block}
 .ev-cover-visual-sizer-frame{display:block;width:100%;aspect-ratio:3/4}
 .ev-cover-visual-sizer-foot{min-height:var(--lgi-text-label)}
-/* The card surface carries one material and nothing else: a dry paper grain of three sub-pixel
- * dots per tile, at a 20px pitch and deliberately not collinear, so the field reads as paper
- * rather than as a square grid. Pitch, offsets and radius are this material's own density
- * parameters: they are not tokens, and they are not nodes of the 8px lattice LIDS-MAT-001 builds
- * its six materials on — that open question is recorded in the change manifest. The ink is
- * --lgi-ink (17,19,21); alpha is density, not a second colour. Nothing is painted behind text:
- * the face's content layer sits above it, and the stage keeps its own different pattern. */
+/* The card surface carries one material and nothing else: a dry paper residue — the seventh
+ * state of the same 8px sampling lattice LIDS-MAT-001 builds its six materials on, not a second
+ * texture system. A 24px cell (three lattice steps) draws three of its nine nodes — (0,0),
+ * (0,8), (8,16) — which is what keeps it a residue rather than a coarser copy of the stage: no
+ * three of these dots are *evenly* spaced along one line at a spacing under 17px, so the field
+ * never resolves into the evenly dotted rulings the stage's own 45 degree diagonals are made of.
+ * Even spacing is the whole condition, and it is the strongest one available here: three nodes of
+ * a 24px cell either share a row or column — a chain with alternating 8px and 16px gaps, two
+ * lengths and so no rhythm — or they are one per column, which is the ruled coset again. It is
+ * the density cap below, not this arrangement alone, that holds the whole field under the
+ * threshold of being read as a pattern at all.
+ * Pitch, node offsets and radius are this material's own density parameters: they are not tokens,
+ * and they do not take part in layout spacing. The ink is --lgi-ink (17,19,21); alpha is density,
+ * not a second colour, and it is capped in the sub-perceptible band (.6px nodes, alpha <= .20).
+ * Nothing is painted behind text — the face's content layer sits above it — and the stage keeps
+ * its own different pattern. */
 .ev-cover-face{position:absolute;inset:0;overflow:hidden;backface-visibility:hidden;-webkit-backface-visibility:hidden}
-.ev-cover-face::after{content:"";position:absolute;inset:0;z-index:1;pointer-events:none;background-image:radial-gradient(circle at 0 0,rgba(17,19,21,.15) .6px,transparent .85px),radial-gradient(circle at 13px 7px,rgba(17,19,21,.11) .6px,transparent .85px),radial-gradient(circle at 6px 15px,rgba(17,19,21,.13) .6px,transparent .85px);background-size:20px 20px}
+.ev-cover-face::after{content:"";position:absolute;inset:0;z-index:1;pointer-events:none;background-image:radial-gradient(circle at 0 0,rgba(17,19,21,.15) .6px,transparent .85px),radial-gradient(circle at 0 8px,rgba(17,19,21,.11) .6px,transparent .85px),radial-gradient(circle at 8px 16px,rgba(17,19,21,.13) .6px,transparent .85px);background-size:24px 24px}
 .ev-cover-face--front{background:var(--lgi-canvas-sunken);color:var(--v7-black)}
 .ev-work-row[aria-selected="true"] .ev-cover-face--front{background:var(--lgi-signal)}
 .ev-cover-face--back{background:var(--lgi-canvas-sunken);color:var(--v7-black);transform:rotateY(180deg)}
 .ev-work-row[aria-selected="true"] .ev-cover-face--back{background:var(--lgi-signal)}
-/* The selected card is a whole printed industrial card, not a flat signal rectangle: the same
- * grain continues on orange, denser and at a finer pitch. */
-.ev-work-row[aria-selected="true"] .ev-cover-face::after{background-image:radial-gradient(circle at 0 0,rgba(17,19,21,.20) .6px,transparent .85px),radial-gradient(circle at 12px 6px,rgba(17,19,21,.14) .6px,transparent .85px),radial-gradient(circle at 6px 14px,rgba(17,19,21,.17) .6px,transparent .85px);background-size:18px 18px}
+/* The selected card is a whole printed industrial card, not a flat signal rectangle: the state
+ * is density on the very same lattice the other six materials use, not a second texture — the
+ * same 24px cell keeps one more of its nine nodes, (8,8), so orange carries about 1.3x the
+ * residue per area without any dot moving off the grid the unselected cards are drawn on. */
+.ev-work-row[aria-selected="true"] .ev-cover-face::after{background-image:radial-gradient(circle at 0 0,rgba(17,19,21,.20) .6px,transparent .85px),radial-gradient(circle at 0 8px,rgba(17,19,21,.14) .6px,transparent .85px),radial-gradient(circle at 8px 8px,rgba(17,19,21,.20) .6px,transparent .85px),radial-gradient(circle at 8px 16px,rgba(17,19,21,.14) .6px,transparent .85px);background-size:24px 24px}
 .ev-work-row[aria-selected="true"] .ev-cover-micro-label,.ev-work-row[aria-selected="true"] .ev-cover-flip-cue{color:var(--v7-black)}
 .ev-cover-face-inner{position:relative;z-index:2;display:grid;height:100%;padding:var(--lgi-space-4);grid-template-rows:var(--ev-cover-title-height) minmax(0,1fr) min-content;gap:var(--lgi-space-2)}
 .ev-cover-face-head{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:var(--lgi-space-2);min-height:0}
