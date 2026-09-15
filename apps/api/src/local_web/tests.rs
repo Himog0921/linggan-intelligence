@@ -1229,17 +1229,13 @@ async fn a_never_archived_keyword_starts_its_first_stage_when_asked_to_archive()
     );
 }
 
-/// **已经在按周观察**、但从未建过档的关键词：建档入口会出现（这是 Issue #286 要的），
-/// 按下去却被采集准入挡住——准入只在开始观察之前接受关键词的历史建档请求。
+/// 历史上已经在观察、但未建档的关键词必须能补建第一阶段档案。
 ///
-/// 这条用例钉的不是「它能建档」（它现在不能），而是**它不会再假装失败是暂时的**：
-/// 此前这一下回的是 `archive_unavailable`「这次请求没有送达采集链路……可以稍后重试」，
-/// 而真实原因是一条永久的状态前置，重试一辈子都一样。说得含糊，人就会一直点。
-///
-/// 同时钉住「什么都没发生」：没有工单、没有采集请求。准入拒绝是真拒绝，不是静默排队。
+/// 巡查准入仍被关键词完成门槛阻断；这里仅允许修复旧状态留下的缺失底座，不能把一次
+/// `deep_archive` 成功误报成巡查已恢复。
 #[tokio::test]
 #[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
-async fn a_patrolling_keyword_says_its_archive_request_is_refused_by_state_not_by_chance() {
+async fn a_patrolling_keyword_can_repair_its_missing_first_stage_archive() {
     let database = proof_database("keyword_archive_patrolling_refusal").await;
     let application = app_with_database(database.clone());
     let created = application
@@ -1318,21 +1314,22 @@ async fn a_patrolling_keyword_says_its_archive_request_is_refused_by_state_not_b
         .and_then(|value| value.to_str().ok())
         .expect("回执地址");
     assert!(
-        location.contains("keyword_archive_not_requestable"),
-        "状态前置的拒绝必须说成状态前置，实际回执：{location}"
+        location.contains("archive_requested"),
+        "历史巡查状态不得把关键词困在未建档状态，实际回执：{location}"
     );
     assert!(
-        !location.contains("archive_unavailable"),
-        "「没送出去」和「这个状态不接受」是两件事，不能共用一句「稍后可以重试」：{location}"
+        !location.contains("keyword_archive_not_requestable"),
+        "修复性建档已被接受，不能再报成不可请求：{location}"
     );
 
-    let orders: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM collection_work_order WHERE target_ref=$1")
-            .bind(target_ref)
-            .fetch_one(database.pool())
-            .await
-            .expect("工单可数");
-    assert_eq!(orders, 0, "被准入拒绝的请求不得留下工单");
+    let orders: Vec<String> = sqlx::query_scalar(
+        "SELECT lane FROM collection_work_order WHERE target_ref=$1 ORDER BY created_at",
+    )
+    .bind(target_ref)
+    .fetch_all(database.pool())
+    .await
+    .expect("工单可数");
+    assert_eq!(orders, vec!["deep_archive"], "修复性建档只创建第一阶段工单");
 }
 
 async fn proof_database(schema: &str) -> Database {

@@ -848,6 +848,14 @@ pub(crate) async fn request_and_admit_in_transaction_scoped(
             lifecycle_state.as_str(),
             "pending_decision" | "archiving" | "archived" | "monitoring" | "paused"
         ),
+        // Keywords may carry historical patrol state from before the archive-first rule.  Those
+        // targets must be able to repair their missing first-stage archive; patrol itself stays
+        // blocked by the non-bypassable completion gate below until both archive stages prove
+        // complete.  A dismissed target remains deliberately non-requestable.
+        "deep_archive" if target_kind == "keyword" => matches!(
+            lifecycle_state.as_str(),
+            "pending_decision" | "monitoring" | "paused"
+        ),
         // `archiving` is accepted only so the scheduler can recover an expired bounded baseline.
         // Admission still merges a live lease and the scheduler caps the number of Work Orders.
         "deep_archive" => matches!(lifecycle_state.as_str(), "pending_decision" | "archiving"),

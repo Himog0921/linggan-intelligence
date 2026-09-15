@@ -10,6 +10,8 @@
 
 Mog 已决定关键词必须完成建档才允许进入巡查。本补充取代本文件中任何“未建档关键词可先保存/恢复巡查规则”的历史表述，但不改变 creator 的独立观察合同。完成是“合格搜索面 + 无待补详情”，不是已提交任务、空候选或 `monitoring` 生命周期。
 
+此前已经进入 `monitoring` 或 `paused`、但尚未建档的历史关键词不构成例外：它们的「建立档案」必须能创建**修复性**第一阶段 `deep_archive` 工单；这不会恢复或新建巡查，直到同一完成判据确认两段建档完成。下文保留的“观察中的词不能建档”描述只记录返修前的事实，不能作为当前验收或实现依据。
+
 - `SaveRule` 与 `Resume` 在同一目标锁事务中拒绝未完成/未知关键词，写入既有闭集的 `baseline_not_ready` command receipt，且不创建规则 revision。
 - `patrol` 的统一 Request → Admission → WorkOrder 链再次检查；人工观察和 scheduler 都不能绕过。scheduler 记录 `baseline_not_ready` 并且不生成 WorkOrder。
 - 旧 target-level 开关在逐规则操作前预检，避免部分翻转；未知/删除均给明确回执，不再落“稍后重试”。
@@ -30,8 +32,8 @@ Mog 已决定关键词必须完成建档才允许进入巡查。本补充取代�
 | 场景 | 用户任务 | 预期状态含义 | 视觉检查重点 | 真实后果/回执 | 结果 |
 |---|---|---|---|---|---|
 | 未建档 + 未观察（`pending_decision`） | 建起这个词的底座 | 「尚未建立」，主操作是「建立档案」 | 档案列与主操作同屏不矛盾 | `archive_requested` + 一张 `deep_archive` 工单 | VERIFIED：隔离 PG 走产品路由（新增证明用例） |
-| 未建档 + **正在观察**（`monitoring`，线上 adhd 的实际状态；a 娃已于 2026-09-15 按产品删除路径删除，见 §5） | 同上 | 同上——按钮会出现（这是本包修的） | 同上 | **`keyword_archive_not_requestable`，且不产生任何工单**：采集准入只在开始观察之前接受关键词的历史建档请求 | VERIFIED：隔离 PG 走产品路由（新增用例）。**这一格点下去仍然发不出采集**，原因不在本包范围，见 §5 DECISION_REQUIRED |
-| 未建档 + 已暂停（`paused`） | 同上 | 主操作是「恢复巡查」 | 该行不提供建档动作 | 无采集动作 | SOURCE VERIFIED：`a_paused_keyword_still_resumes_its_patrol`（#283 的既有决定，有测试钉住）。与上一格叠加后：恢复 → 变成 `monitoring` → 仍被准入拒绝 |
+| 未建档 + **正在观察**（`monitoring`） | 补建这个词的底座 | 历史巡查状态不等于建档完成 | 同上 | `archive_requested` + 一张修复性 `deep_archive` 工单；巡查仍受完成门槛阻断 | VERIFIED：隔离 PG 走产品路由 |
+| 未建档 + 已暂停（`paused`） | 同上 | 主操作是「建立档案」；仅完成建档后才可恢复巡查 | 该行不提供绕过门槛的恢复动作 | `archive_requested` + 一张修复性 `deep_archive` 工单 | VERIFIED：同一统一准入与判据测试 |
 | 建档中（第二段欠详情） | 继续补详情 | 「建档中」，主操作是「补采缺口」 | 不被巡查状态顶掉 | `keyword_detail_requested` / `archive_in_progress` | VERIFIED：既有分支保留，focused test |
 | 建档中 + **已被停掉**（`dismissed`）：补详情同样不被准入接受 | 不替人做决定 | 新渲染给「查看结果」；只有**旧渲染**上那颗按钮还可能被按到 | — | `keyword_archive_not_requestable`——两段共用同一条分类，不再说「稍后可以重试」 | SOURCE VERIFIED：focused 判据测试 + 代码事实。**没有端到端用例**（造出这一格需要八张表的重型夹具），理由与本轮为何接受这一取舍写在 §5 第二轮① |
 | 已建档 + 正在观察 | 不被打断 | 「档案已建立」，主操作回到查看 | 不出现建档按钮 | 无采集动作 | VERIFIED：focused test |
