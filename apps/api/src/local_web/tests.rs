@@ -1980,7 +1980,10 @@ fn the_runtime_surface_holds_the_v7_type_ladder() {
                 .any(|prefix| trimmed.starts_with(prefix))
         })
         .count();
-    assert!(covered > 40, "执行工位的类名前缀表已与样式表脱节：只扫到 {covered} 行");
+    assert!(
+        covered > 40,
+        "执行工位的类名前缀表已与样式表脱节：只扫到 {covered} 行"
+    );
 
     // 页面局部 v7 阶梯必须仍然存在——上面所有替换都指向它。
     assert!(COLLECTION_WORKSPACE_CSS.contains("--c-fs-100:11px"));

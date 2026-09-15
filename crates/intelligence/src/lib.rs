@@ -29,6 +29,7 @@ pub(crate) mod comment_cleaning;
 pub mod comment_research_atoms;
 pub mod comment_research_embeddings;
 pub mod comment_research_kernel;
+pub mod comment_research_problem_resolution_v2;
 pub mod comment_research_problems;
 pub mod comment_research_read_v1;
 pub mod comment_research_results;

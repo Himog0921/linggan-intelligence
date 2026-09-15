@@ -28,6 +28,29 @@ pub struct CommentResearchV1ReadQuery {
     pub result_revision_ref: Option<Uuid>,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
+    pub problem_view: Option<ProblemReadView>,
+}
+
+/// A filter on one current-state read model. `all` deliberately does not mean that every row is
+/// a stable Problem: deferred signals carry their own item kind and are excluded from cumulative
+/// Problem statistics.
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProblemReadView {
+    #[default]
+    All,
+    Confirmed,
+    Deferred,
+}
+
+impl ProblemReadView {
+    fn as_db(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Confirmed => "confirmed",
+            Self::Deferred => "deferred",
+        }
+    }
 }
 
 impl CommentResearchV1ReadQuery {
@@ -95,7 +118,13 @@ pub async fn schema_ready(database: &Database) -> Result<bool, CommentResearchV1
                 AND to_regclass('linggan_ci_problem') IS NULL \
                 AND EXISTS(SELECT 1 FROM pg_attribute \
                     WHERE attrelid='linggan_comment_research_derivation'::regclass \
-                      AND attname='derivation_input_hash' AND NOT attisdropped)",
+                      AND attname='derivation_input_hash' AND NOT attisdropped) \
+                AND EXISTS(SELECT 1 FROM pg_attribute \
+                    WHERE attrelid='linggan_comment_research_atom'::regclass \
+                      AND attname='problem_frame' AND NOT attisdropped) \
+                AND EXISTS(SELECT 1 FROM pg_attribute \
+                    WHERE attrelid='linggan_comment_research_problem_resolution'::regclass \
+                      AND attname='decision_kind' AND NOT attisdropped)",
     )
     .fetch_one(database.pool())
     .await?)
@@ -199,13 +228,23 @@ pub async fn read_problems(
 ) -> Result<Value, CommentResearchV1ReadError> {
     let (limit, offset) = query.page()?;
     let mut transaction = begin_read(database).await?;
-    let (summary, items) = read_cumulative_problem_state(&mut transaction, limit, offset).await?;
-    let total = summary["problemCount"].as_i64().unwrap_or_default();
+    let (summary, _) = read_cumulative_problem_state(&mut transaction, 1, 0).await?;
+    let confirmed_total = summary["problemCount"].as_i64().unwrap_or_default();
+    let deferred_total = read_deferred_signal_total(&mut transaction).await?;
+    let problem_view = query.problem_view.unwrap_or_default();
+    let total = match problem_view {
+        ProblemReadView::All => confirmed_total + deferred_total,
+        ProblemReadView::Confirmed => confirmed_total,
+        ProblemReadView::Deferred => deferred_total,
+    };
+    let items = read_problem_items(&mut transaction, problem_view, limit, offset).await?;
     let statistics = resolve_optional_result(&mut transaction, query.result_revision_ref).await?;
     transaction.commit().await?;
     Ok(json!({
         "view":"problems",
         "cumulative":summary,
+        "facets":{"all":confirmed_total + deferred_total,"confirmed":confirmed_total,"deferred":deferred_total},
+        "problemView":problem_view.as_db(),
         "statisticsResult":statistics.map(|context|context.envelope()),
         "page":{"total":total,"limit":limit,"offset":offset,"items":items},
     }))
@@ -404,6 +443,118 @@ async fn begin_read(
         .execute(&mut *transaction)
         .await?;
     Ok(transaction)
+}
+
+async fn read_deferred_signal_total(
+    transaction: &mut Transaction<'_, sqlx::Postgres>,
+) -> Result<i64, CommentResearchV1ReadError> {
+    Ok(sqlx::query_scalar(
+        "SELECT count(*) \
+         FROM linggan_comment_research_problem_resolution resolution \
+         JOIN linggan_comment_research_atom atom USING(atom_ref) \
+         JOIN linggan_comment_research_derivation_current derivation \
+           ON derivation.derivation_ref=atom.derivation_ref \
+         WHERE resolution.state='succeeded' \
+           AND resolution.decision_kind IN ('deferred_novel','deferred_ambiguous','deferred_context') \
+           AND derivation.derivation_version=$1 \
+           AND NOT EXISTS(SELECT 1 FROM linggan_comment_research_atom_problem_membership membership \
+                          WHERE membership.atom_ref=atom.atom_ref AND membership.current)",
+    )
+    .bind(DERIVATION_VERSION)
+    .fetch_one(&mut **transaction)
+    .await?)
+}
+
+/// One ordered stream for the existing Problems surface. Confirmed Problems and deferred
+/// signals have different semantics, but `all` remains page-able instead of silently showing a
+/// convenient subset. A deferred row never contributes to `cumulative` above.
+async fn read_problem_items(
+    transaction: &mut Transaction<'_, sqlx::Postgres>,
+    view: ProblemReadView,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<Value>, CommentResearchV1ReadError> {
+    let items: Vec<Value> = sqlx::query_scalar(
+        "WITH accepted AS ( \
+             SELECT membership.problem_ref,membership.definition_revision,membership.atom_ref, \
+                    membership.created_at,source.material_ref,source.content_public_ref \
+             FROM linggan_comment_research_atom_problem_membership membership \
+             JOIN linggan_comment_research_atom atom USING(atom_ref) \
+             JOIN linggan_comment_research_derivation_current derivation \
+               ON derivation.derivation_ref=atom.derivation_ref \
+             JOIN linggan_comment_research_readable source ON source.material_ref=derivation.source_ref \
+             WHERE membership.current AND derivation.derivation_version=$1 \
+         ), grouped AS ( \
+             SELECT problem_ref,definition_revision,count(DISTINCT atom_ref) AS atom_count, \
+                    count(DISTINCT material_ref) AS comment_count,count(DISTINCT content_public_ref) AS work_count, \
+                    min(created_at) AS first_confirmed_at,max(created_at) AS last_confirmed_at \
+             FROM accepted GROUP BY problem_ref,definition_revision \
+         ), confirmed AS ( \
+             SELECT jsonb_build_object( \
+                 'itemKind','confirmed', \
+                 'problemRef',definition.problem_ref,'definitionRevision',definition.revision, \
+                 'name',definition.name,'meaning',definition.meaning, \
+                 'confirmedAtomCount',grouped.atom_count,'confirmedCommentCount',grouped.comment_count, \
+                 'confirmedWorkCount',grouped.work_count,'firstConfirmedAt',grouped.first_confirmed_at, \
+                 'lastConfirmedAt',grouped.last_confirmed_at \
+             ) AS item,grouped.last_confirmed_at AS sort_at,0 AS kind_order,definition.name AS tie_breaker \
+             FROM grouped \
+             JOIN linggan_comment_research_problem_definition definition \
+               ON definition.problem_ref=grouped.problem_ref AND definition.revision=grouped.definition_revision \
+         ), deferred AS ( \
+             SELECT jsonb_build_object( \
+                 'itemKind','deferred', \
+                 'proposition',atom.proposition, \
+                 'problemFrame',atom.problem_frame, \
+                 'decisionKind',resolution.decision_kind, \
+                 'decision',resolution.decision_payload, \
+                 'recheckConditions',resolution.recheck_conditions, \
+                 'updatedAt',resolution.updated_at, \
+                 'candidateSnapshot',COALESCE(( \
+                     SELECT jsonb_agg(jsonb_build_object( \
+                         'candidateIndex',candidate->'candidateIndex', \
+                         'definition',candidate->'definition', \
+                         'retrievalCosine',candidate->'cosine' \
+                     ) ORDER BY (candidate->>'candidateIndex')::integer) \
+                     FROM jsonb_array_elements(resolution.candidate_set) candidate \
+                 ),'[]'::jsonb), \
+                 'executionHistory',COALESCE(( \
+                     SELECT jsonb_agg(jsonb_build_object( \
+                         'state',history.state, \
+                         'attempts',history.attempts, \
+                         'failureCode',history.failure_code, \
+                         'lastAttemptAt',history.last_attempt_at, \
+                         'finishedAt',history.finished_at \
+                     ) ORDER BY history.updated_at DESC,history.run_ref DESC) \
+                     FROM linggan_comment_research_problem_resolution_execution history \
+                     WHERE history.atom_ref=atom.atom_ref \
+                 ),'[]'::jsonb) \
+             ) AS item,resolution.updated_at AS sort_at,1 AS kind_order,atom.atom_ref::text AS tie_breaker \
+             FROM linggan_comment_research_problem_resolution resolution \
+             JOIN linggan_comment_research_atom atom USING(atom_ref) \
+             JOIN linggan_comment_research_derivation_current derivation \
+               ON derivation.derivation_ref=atom.derivation_ref \
+             JOIN linggan_comment_research_readable source ON source.material_ref=derivation.source_ref \
+             WHERE resolution.state='succeeded' \
+               AND resolution.decision_kind IN ('deferred_novel','deferred_ambiguous','deferred_context') \
+               AND derivation.derivation_version=$1 \
+               AND NOT EXISTS(SELECT 1 FROM linggan_comment_research_atom_problem_membership membership \
+                              WHERE membership.atom_ref=atom.atom_ref AND membership.current) \
+         ), visible AS ( \
+             SELECT * FROM confirmed WHERE $2 IN ('all','confirmed') \
+             UNION ALL \
+             SELECT * FROM deferred WHERE $2 IN ('all','deferred') \
+         ) SELECT item FROM visible \
+           ORDER BY sort_at DESC,kind_order,tie_breaker \
+           LIMIT $3 OFFSET $4",
+    )
+    .bind(DERIVATION_VERSION)
+    .bind(view.as_db())
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(&mut **transaction)
+    .await?;
+    Ok(items)
 }
 
 async fn read_cumulative_problem_state(

@@ -229,10 +229,12 @@ pub async fn recall_problem_candidates(
            JOIN linggan_comment_research_atom_problem_membership membership \
              ON membership.atom_ref=neighbor.atom_ref AND membership.current \
            JOIN linggan_comment_research_problem problem ON problem.problem_ref=membership.problem_ref \
+           JOIN linggan_comment_research_problem_definition definition \
+             ON definition.problem_ref=membership.problem_ref AND definition.revision=membership.definition_revision \
            WHERE query_embedding.atom_ref=$1 AND query_embedding.space_ref=$2 \
              AND query_embedding.state='succeeded' AND query_atom.kind IN ('problem','need') \
              AND neighbor.atom_ref<>query_atom.atom_ref AND neighbor.kind IN ('problem','need') \
-             AND problem.state='active' \
+             AND problem.state='active' AND definition.stable_identity IS NOT NULL \
              AND NOT EXISTS(SELECT 1 FROM linggan_comment_research_atom_problem_membership own \
                             WHERE own.atom_ref=query_atom.atom_ref AND own.problem_ref=membership.problem_ref \
                               AND own.current) \

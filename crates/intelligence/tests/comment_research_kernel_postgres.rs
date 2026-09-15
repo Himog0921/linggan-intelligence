@@ -4,8 +4,10 @@ mod fixture;
 mod research_fixture;
 
 use linggan_intelligence::comment_research_atoms::{
-    AtomBasis, AtomKind, CommentResearchAtomError, SemanticAtomProposal, SemanticExtractionOutput,
-    accept_semantic_output,
+    AtomBasis, AtomKind, CommentResearchAtomError, FrameBasis, ProblemFrameFieldProposal,
+    ProblemFrameProposal, SemanticAtomProposal, SemanticExtractionOutput,
+    SemanticQuoteAtomProposal, SemanticQuoteExtractionOutput, accept_semantic_output,
+    accept_semantic_quote_output,
 };
 use linggan_intelligence::comment_research_embeddings::{
     AtomEmbeddingResult, CommentResearchEmbeddingError, EmbeddingSpaceReceipt,
@@ -22,11 +24,13 @@ use linggan_intelligence::comment_research_kernel::{
 };
 use linggan_intelligence::comment_research_problems::{
     CommentResearchProblemError, ExistingProblemAdmission, NewProblemAdmission,
-    ProblemDefinitionProposal, ProblemMembershipBasis, admit_existing_problem, admit_new_problem,
+    NewProblemPairAdmission, ProblemAdmissionReceipt, ProblemDefinitionProposal, ProblemMembershipBasis,
+    StableProblemDefinitionProposal, admit_existing_problem, admit_new_problem,
+    admit_new_problem_pair,
 };
 use linggan_intelligence::comment_research_read_v1::{
-    CommentResearchV1ReadError, CommentResearchV1ReadQuery, read_changes, read_overview,
-    read_problems, read_runs, read_voices,
+    CommentResearchV1ReadError, CommentResearchV1ReadQuery, ProblemReadView, read_changes,
+    read_overview, read_problems, read_runs, read_voices,
 };
 use linggan_intelligence::comment_research_results::publish_result_revision;
 use linggan_intelligence::comment_research_worker::{
@@ -48,6 +52,59 @@ use std::{path::PathBuf, time::Duration};
 use uuid::Uuid;
 
 const HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+/// Production V2 policies must never use the legacy one-Atom create path. Existing regression
+/// fixtures still exercise historical packet repair, so they explicitly fork a legacy policy
+/// revision after the Run has frozen rather than weakening the production admission guard.
+async fn admit_legacy_new_problem(
+    database: &Database,
+    admission: NewProblemAdmission,
+) -> Result<ProblemAdmissionReceipt, CommentResearchProblemError> {
+    let legacy_policy_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_comment_research_policy_revision( \
+             policy_revision_ref,config_ref,contract_version,derivation_version,extraction_rule_hash, \
+             membership_policy_hash,source_limit,token_limit \
+         ) SELECT $2,policy.config_ref,policy.contract_version,policy.derivation_version, \
+                  policy.extraction_rule_hash,policy.membership_policy_hash,policy.source_limit,policy.token_limit \
+           FROM linggan_comment_research_atom atom \
+           JOIN linggan_comment_research_run run ON run.run_ref=atom.run_ref \
+           JOIN linggan_comment_research_policy_revision policy \
+             ON policy.policy_revision_ref=run.policy_revision_ref \
+          WHERE atom.atom_ref=$1",
+    )
+    .bind(admission.atom_ref)
+    .bind(legacy_policy_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE linggan_comment_research_run run SET policy_revision_ref=$2 \
+         FROM linggan_comment_research_atom atom \
+         WHERE atom.atom_ref=$1 AND run.run_ref=atom.run_ref",
+    )
+    .bind(admission.atom_ref)
+    .bind(legacy_policy_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    admit_new_problem(database, admission).await
+}
+
+fn valid_v2_problem_frame() -> ProblemFrameProposal {
+    let supported = |value: &str| ProblemFrameFieldProposal {
+        value: Some(value.to_owned()),
+        basis: FrameBasis::ContextResolved,
+        evidence_refs: vec!["atom_evidence".into()],
+    };
+    ProblemFrameProposal {
+        scope_relation: linggan_intelligence::comment_research_problem_resolution_v2::ScopeRelation::InScope,
+        subject: supported("孩子"),
+        goal: supported("自主开始家庭作业"),
+        barrier: supported("家庭作业启动困难"),
+        context: supported("家庭作业"),
+    }
+}
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof"]
@@ -925,6 +982,7 @@ async fn voices_read_current_ordinary_user_evidence_without_a_published_result()
         result_revision_ref: Some(Uuid::new_v4()),
         limit: Some(1),
         offset: Some(0),
+        problem_view: None,
     };
     let voices = read_voices(&database, &query).await.unwrap();
     assert_eq!(voices["view"], "voices");
@@ -1804,6 +1862,7 @@ async fn run_read_exposes_safe_semantic_failure_counts_without_model_or_comment_
             result_revision_ref: None,
             limit: Some(20),
             offset: Some(0),
+            problem_view: None,
         },
     )
     .await
@@ -2857,6 +2916,394 @@ async fn terminal_embedding_and_resolution_failures_are_visible_on_the_run() {
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof"]
+async fn problem_read_keeps_a_deferred_signal_out_of_confirmed_problem_counts() {
+    let database = fixture::proof_database("comment_research_v2_deferred_problem_read").await;
+    detail_with_author(
+        &database,
+        "v2-deferred-read-note",
+        "SYNTHETIC deferred read note",
+        Some("creator-1"),
+    )
+    .await;
+    comment_with_author(
+        &database,
+        "v2-deferred-read-note",
+        "deferred-reader",
+        "孩子每天写作业都要催，不催就不开始",
+        Some("deferred-reader"),
+        "2026-09-01T08:00:00Z",
+    )
+    .await;
+    let space = synthetic_qualified_embedding_space(&database).await;
+    save_active_policy(
+        &database,
+        SaveResearchPolicy {
+            config_ref: Some(qualified_research_config(&database).await),
+            source_limit: 10,
+            token_limit: 10_000,
+        },
+    )
+    .await
+    .unwrap();
+    let run = start_ready_run(&database).await.unwrap();
+    let claim = claim_next_run_item(&database).await.unwrap().unwrap();
+    accept_semantic_output(
+        &database,
+        &claim,
+        SemanticExtractionOutput::Atoms {
+            atoms: vec![SemanticAtomProposal {
+                kind: AtomKind::Problem,
+                proposition: "孩子在家庭作业中难以自主启动".into(),
+                basis: AtomBasis::Explicit,
+                evidence_start: 0,
+                evidence_end: 7,
+            }],
+        },
+        None,
+    )
+    .await
+    .unwrap();
+    let atom = atom_ref(&database, run.run_ref, claim.derivation_ref).await;
+    sqlx::query(
+        "INSERT INTO linggan_comment_research_problem_resolution( \
+             atom_ref,space_ref,candidate_set,candidate_hash,state,failure_code,execution_run_ref,finished_at, \
+             decision_kind,decision_payload,recheck_conditions,resolution_input_hash,catalog_revision_at_recall \
+         ) VALUES($1,$2,'[]'::jsonb,$3,'succeeded','deferred_novel',$4,scope_001_now(), \
+                  'deferred_novel',$5,'[\"independent_same_frame_signal\"]'::jsonb,$3,0)",
+    )
+    .bind(atom)
+    .bind(space.space_ref)
+    .bind(HASH)
+    .bind(run.run_ref)
+    .bind(json!({"decision":"deferred_novel","comparisons":[]}))
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_comment_research_problem_resolution_execution( \
+             atom_ref,run_ref,state,attempts,failure_code,decision_kind,decision_payload,recheck_conditions,finished_at \
+         ) VALUES($1,$2,'succeeded',1,'deferred_novel','deferred_novel',$3, \
+                  '[\"independent_same_frame_signal\"]'::jsonb,scope_001_now())",
+    )
+    .bind(atom)
+    .bind(run.run_ref)
+    .bind(json!({"decision":"deferred_novel","comparisons":[]}))
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    let all = read_problems(&database, &CommentResearchV1ReadQuery::default())
+        .await
+        .unwrap();
+    assert_eq!(all["cumulative"]["problemCount"], 0);
+    assert_eq!(all["facets"]["confirmed"], 0);
+    assert_eq!(all["facets"]["deferred"], 1);
+    assert_eq!(all["page"]["total"], 1);
+    assert_eq!(all["page"]["items"][0]["itemKind"], "deferred");
+    assert_eq!(all["page"]["items"][0]["decisionKind"], "deferred_novel");
+    for restricted_key in [
+        "atomRef",
+        "sourceRef",
+        "workRef",
+        "originalVoice",
+        "researchText",
+    ] {
+        assert!(
+            all["page"]["items"][0].get(restricted_key).is_none(),
+            "the ordinary Problem read must not expose {restricted_key} from restricted comment material"
+        );
+    }
+    assert!(
+        all["page"]["items"][0]["executionHistory"][0]
+            .get("runRef")
+            .is_none(),
+        "the ordinary Problem read must not expose internal execution identifiers"
+    );
+    assert_eq!(
+        all["page"]["items"][0]["candidateSnapshot"],
+        json!([]),
+        "the frozen empty catalog stays explicit rather than becoming an implicit create"
+    );
+    assert_eq!(
+        all["page"]["items"][0]["executionHistory"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    let confirmed = read_problems(
+        &database,
+        &CommentResearchV1ReadQuery {
+            problem_view: Some(ProblemReadView::Confirmed),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(confirmed["page"]["total"], 0);
+    let deferred = read_problems(
+        &database,
+        &CommentResearchV1ReadQuery {
+            problem_view: Some(ProblemReadView::Deferred),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(deferred["page"]["total"], 1);
+    assert_eq!(deferred["page"]["items"][0]["itemKind"], "deferred");
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn v2_pair_admission_requires_independent_deferred_signals_and_creates_two_memberships() {
+    let database = fixture::proof_database("comment_research_v2_pair_admission").await;
+    detail_with_author(
+        &database,
+        "v2-pair-note",
+        "SYNTHETIC V2 pair admission note",
+        Some("creator-1"),
+    )
+    .await;
+    for (id, author, body) in [
+        ("first", "parent-a", "孩子每天写作业都要催，不催就不开始"),
+        ("second", "parent-b", "孩子面对家庭作业总拖着，难以自己开始"),
+        ("same-author-a", "parent-c", "孩子写作业前一直拖延"),
+        ("same-author-b", "parent-c", "孩子做作业总要家长反复催促"),
+        ("out-of-scope", "parent-e", "孩子写家庭作业时总是拖着不开始"),
+        ("missing-frame", "parent-d", "孩子写家庭作业时总是拖着不开始"),
+    ] {
+        comment_with_author(
+            &database,
+            "v2-pair-note",
+            id,
+            body,
+            Some(author),
+            "2026-09-01T08:00:00Z",
+        )
+        .await;
+    }
+    let space = synthetic_qualified_embedding_space(&database).await;
+    let config_ref = qualified_research_config(&database).await;
+    save_active_policy(
+        &database,
+        SaveResearchPolicy {
+            config_ref: Some(config_ref),
+            source_limit: 10,
+            token_limit: 10_000,
+        },
+    )
+    .await
+    .unwrap();
+    let run = start_ready_run(&database).await.unwrap();
+    let mut atoms = Vec::new();
+    for ordinal in 0..6 {
+        let claim = claim_next_run_item(&database).await.unwrap().unwrap();
+        if ordinal == 5 {
+            accept_semantic_output(
+                &database,
+                &claim,
+                SemanticExtractionOutput::Atoms {
+                    atoms: vec![SemanticAtomProposal {
+                        kind: AtomKind::Problem,
+                        proposition: "孩子在家庭作业中难以自主启动".into(),
+                        basis: AtomBasis::Explicit,
+                        evidence_start: 0,
+                        evidence_end: 7,
+                    }],
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        } else {
+            let problem_frame = if ordinal == 4 {
+                ProblemFrameProposal {
+                    scope_relation: linggan_intelligence::comment_research_problem_resolution_v2::ScopeRelation::OutOfScope,
+                    ..valid_v2_problem_frame()
+                }
+            } else {
+                valid_v2_problem_frame()
+            };
+            accept_semantic_quote_output(
+                &database,
+                &claim,
+                SemanticQuoteExtractionOutput::Atoms {
+                    atoms: vec![SemanticQuoteAtomProposal {
+                        kind: AtomKind::Problem,
+                        proposition: "孩子在家庭作业中难以自主启动".into(),
+                        basis: AtomBasis::Explicit,
+                        evidence: "孩子".into(),
+                        problem_frame: Some(problem_frame),
+                    }],
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        }
+        atoms.push(atom_ref(&database, run.run_ref, claim.derivation_ref).await);
+    }
+    let initial_revision: i64 = sqlx::query_scalar(
+        "SELECT guard.revision FROM linggan_comment_research_problem_catalog_guard guard \
+         JOIN linggan_comment_research_policy_revision policy \
+           ON policy.problem_scope_domain_ref=guard.scope_domain_ref \
+         JOIN linggan_comment_research_run run ON run.policy_revision_ref=policy.policy_revision_ref \
+         WHERE run.run_ref=$1",
+    )
+    .bind(run.run_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    for atom in &atoms {
+        sqlx::query(
+            "INSERT INTO linggan_comment_research_problem_resolution( \
+                 atom_ref,space_ref,candidate_set,candidate_hash,state,failure_code,execution_run_ref,finished_at, \
+                 decision_kind,decision_payload,recheck_conditions,resolution_input_hash,catalog_revision_at_recall \
+             ) VALUES($1,$2,'[]'::jsonb,$3,'succeeded','deferred_novel',$4,scope_001_now(), \
+                      'deferred_novel',$5,'[\"independent_same_frame_signal\"]'::jsonb,$3,$6)",
+        )
+        .bind(*atom)
+        .bind(space.space_ref)
+        .bind(HASH)
+        .bind(run.run_ref)
+        .bind(json!({"decision":"deferred_novel","comparisons":[]}))
+        .bind(initial_revision)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    }
+    let (connection_version_ref, model_ref): (Uuid, Uuid) = sqlx::query_as(
+        "SELECT entry.connection_version_ref,config.model_ref \
+         FROM linggan_model_config config JOIN linggan_model_entry entry USING(model_ref) \
+         WHERE config.config_ref=$1",
+    )
+    .bind(config_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let invocation_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_model_invocation( \
+             invocation_ref,connection_version_ref,model_ref,config_ref,operation,request_hash,state, \
+             reserved_tokens,charged_tokens,result,finished_at \
+         ) VALUES($1,$2,$3,$4,'analyze',$5,'succeeded',0,0,$6,scope_001_now())",
+    )
+    .bind(invocation_ref)
+    .bind(connection_version_ref)
+    .bind(model_ref)
+    .bind(config_ref)
+    .bind(HASH)
+    .bind(json!({"ok":true,"stage":"problem_pair_resolution"}))
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let definition = StableProblemDefinitionProposal {
+        name: "家庭作业自主启动困难".into(),
+        meaning: "孩子在家庭作业场景难以在没有外部催促时自行开始行动".into(),
+        include: vec!["需要反复催促才开始写作业".into()],
+        exclude: vec!["只是不愿意完成某一道具体题目".into()],
+    };
+    assert!(matches!(
+        admit_new_problem(
+            &database,
+            NewProblemAdmission {
+                atom_ref: atoms[0],
+                definition: ProblemDefinitionProposal {
+                    name: "不得单 Atom 新建".into(),
+                    meaning: "V2 范围内的 Atom 必须经过双独立证据建题入口".into(),
+                },
+                basis: ProblemMembershipBasis::Deterministic,
+                decision_evidence: json!({"decision":"new_problem","candidateRefs":[]}),
+                invocation_ref: None,
+            },
+        )
+        .await,
+        Err(CommentResearchProblemError::PairRequiredForV2)
+    ));
+    let created = admit_new_problem_pair(
+        &database,
+        NewProblemPairAdmission {
+            first_atom_ref: atoms[0],
+            second_atom_ref: atoms[1],
+            expected_catalog_revision: initial_revision,
+            definition: definition.clone(),
+            decision_evidence: json!({"decision":"v2_pair_equivalent","pair":{"synthetic":true}}),
+            invocation_ref: Some(invocation_ref),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(created.catalog_revision, initial_revision + 1);
+    let memberships: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_comment_research_atom_problem_membership \
+         WHERE problem_ref=$1 AND current",
+    )
+    .bind(created.problem_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(memberships, 2);
+    assert!(matches!(
+        admit_new_problem_pair(
+            &database,
+            NewProblemPairAdmission {
+                first_atom_ref: atoms[2],
+                second_atom_ref: atoms[3],
+                expected_catalog_revision: initial_revision,
+                definition,
+                decision_evidence: json!({"decision":"v2_pair_equivalent","pair":{"synthetic":true}}),
+                invocation_ref: Some(invocation_ref),
+            },
+        )
+        .await,
+        Err(CommentResearchProblemError::PairSourcesNotIndependent)
+    ));
+    assert!(matches!(
+        admit_new_problem_pair(
+            &database,
+            NewProblemPairAdmission {
+                first_atom_ref: atoms[2],
+                second_atom_ref: atoms[4],
+                expected_catalog_revision: initial_revision,
+                definition: StableProblemDefinitionProposal {
+                    name: "域外 frame 不得建题".into(),
+                    meaning: "out_of_scope Atom 即使被错误标记为 deferred 也必须拒绝 pair admission".into(),
+                    include: vec!["测试".into()],
+                    exclude: vec!["测试".into()],
+                },
+                decision_evidence: json!({"decision":"v2_pair_equivalent","pair":{"synthetic":true}}),
+                invocation_ref: Some(invocation_ref),
+            },
+        )
+        .await,
+        Err(CommentResearchProblemError::PairNotEligible)
+    ));
+    assert!(matches!(
+        admit_new_problem_pair(
+            &database,
+            NewProblemPairAdmission {
+                first_atom_ref: atoms[2],
+                second_atom_ref: atoms[5],
+                expected_catalog_revision: initial_revision,
+                definition: StableProblemDefinitionProposal {
+                    name: "不应由缺少 frame 的 Atom 创建".into(),
+                    meaning: "缺少 V2 Problem Frame 时必须拒绝 pair admission".into(),
+                    include: vec!["测试".into()],
+                    exclude: vec!["测试".into()],
+                },
+                decision_evidence: json!({"decision":"v2_pair_equivalent","pair":{"synthetic":true}}),
+                invocation_ref: Some(invocation_ref),
+            },
+        )
+        .await,
+        Err(CommentResearchProblemError::PairNotEligible)
+    ));
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
 async fn confirmed_memberships_remain_readable_when_their_run_cannot_publish_statistics() {
     let database = fixture::proof_database("comment_research_cumulative_low_coverage").await;
     detail_with_author(
@@ -2910,7 +3357,7 @@ async fn confirmed_memberships_remain_readable_when_their_run_cannot_publish_sta
         .unwrap();
         let atom = atom_ref(&database, run.run_ref, claim.derivation_ref).await;
         if ordinal < 2 {
-            admit_new_problem(
+            admit_legacy_new_problem(
                 &database,
                 NewProblemAdmission {
                     atom_ref: atom,
@@ -3163,7 +3610,7 @@ async fn a_later_run_boundedly_continues_an_eligible_historical_resolution() {
     .await
     .unwrap();
 
-    admit_new_problem(
+    admit_legacy_new_problem(
         &database,
         NewProblemAdmission {
             atom_ref: atom,
@@ -3460,7 +3907,7 @@ async fn sufficiently_covered_terminal_run_publishes_a_partial_result_without_er
                 .unwrap();
             continue;
         }
-        admit_new_problem(
+        admit_legacy_new_problem(
             &database,
             NewProblemAdmission {
                 atom_ref: atom,
@@ -3590,7 +4037,7 @@ async fn membership_admission_waits_for_its_running_resolution_to_settle() {
     .await
     .unwrap();
 
-    admit_new_problem(
+    admit_legacy_new_problem(
         &database,
         NewProblemAdmission {
             atom_ref: atom,
@@ -3852,7 +4299,7 @@ async fn atom_problem_membership_has_one_stable_identity_and_auditable_basis() {
     .await
     .unwrap();
     let first_atom = atom_ref(&database, run.run_ref, first_claim.derivation_ref).await;
-    let created = admit_new_problem(
+    let created = admit_legacy_new_problem(
         &database,
         NewProblemAdmission {
             atom_ref: first_atom,
@@ -3888,7 +4335,7 @@ async fn atom_problem_membership_has_one_stable_identity_and_auditable_basis() {
         )
     );
     assert!(matches!(
-        admit_new_problem(
+        admit_legacy_new_problem(
             &database,
             NewProblemAdmission {
                 atom_ref: first_atom,
@@ -3955,7 +4402,7 @@ async fn atom_problem_membership_has_one_stable_identity_and_auditable_basis() {
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof"]
-async fn exact_vector_recall_only_returns_candidates_and_invalid_vectors_never_write() {
+async fn exact_vector_recall_excludes_unscoped_legacy_definitions_and_invalid_vectors_never_write() {
     let database = fixture::proof_database("comment_research_vector_candidates").await;
     detail_with_author(
         &database,
@@ -4007,7 +4454,7 @@ async fn exact_vector_recall_only_returns_candidates_and_invalid_vectors_never_w
     .await
     .unwrap();
     let first_atom = atom_ref(&database, run.run_ref, first_claim.derivation_ref).await;
-    let problem = admit_new_problem(
+    let problem = admit_legacy_new_problem(
         &database,
         NewProblemAdmission {
             atom_ref: first_atom,
@@ -4112,10 +4559,18 @@ async fn exact_vector_recall_only_returns_candidates_and_invalid_vectors_never_w
     let candidates = recall_problem_candidates(&database, second_atom, space.space_ref)
         .await
         .unwrap();
-    assert_eq!(candidates.len(), 1);
-    assert_eq!(candidates[0].problem_ref, problem.problem_ref);
-    assert_eq!(candidates[0].definition_revision, 1);
-    assert!(candidates[0].cosine > 0.9);
+    assert!(
+        candidates.is_empty(),
+        "V2 retrieval must not offer a legacy definition without a stable identity as a merge candidate"
+    );
+    let stable_identity: Option<serde_json::Value> = sqlx::query_scalar(
+        "SELECT stable_identity FROM linggan_comment_research_problem_definition WHERE problem_ref=$1",
+    )
+    .bind(problem.problem_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert!(stable_identity.is_none());
     let memberships: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM linggan_comment_research_atom_problem_membership \
          WHERE atom_ref=$1 AND current",
@@ -4249,7 +4704,7 @@ async fn published_result_has_independent_multi_signal_changes_and_is_idempotent
             .await
             .unwrap();
         } else {
-            let created = admit_new_problem(
+            let created = admit_legacy_new_problem(
                 &database,
                 NewProblemAdmission {
                     atom_ref: atom,
@@ -4320,6 +4775,7 @@ async fn published_result_has_independent_multi_signal_changes_and_is_idempotent
         result_revision_ref: Some(first.result_revision_ref),
         limit: Some(20),
         offset: Some(0),
+        problem_view: None,
     };
     let overview = read_overview(&database, &query).await.unwrap();
     assert_eq!(overview["view"], "overview");

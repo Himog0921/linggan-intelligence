@@ -129,6 +129,10 @@ LIDS 现在统一约束全项目的设计表达，但其成熟度仍为 Proposed
 
 [V1 页面规格](pages/comment-research-v1-page.md)、[变更清单](changes/comment-research-reset-001-ui-change-manifest.md)、[验收记录](acceptance/comment-research-reset-001-acceptance.md) 是评论研究唯一未来用户路径；COMMENT-RESEARCH-001 及其旧页面、旧设置和旧运行记录均为历史实施记录，不可作为实现 fallback。
 
+## COMMENT-RESEARCH-PROBLEM-RESOLUTION-V2 交付分支
+
+[变更清单](changes/comment-research-problem-resolution-v2-ui-change-manifest.md) 记录同一“用户问题”读取面中的 confirmed/deferred 筛选、只读详情与状态边界；不构成 runtime 刷新、真实模型调用或业务验收。
+
 ## MODEL-PI-001 交付分支
 
 [页面规格](pages/model-ai-settings-page.md)、[变更清单](changes/model-pi-001-ui-change-manifest.md)、[实施验收](acceptance/model-pi-001-acceptance.md) 记录四区设置、个人菜单最小适配、真实 SDK 与来源授权边界。
