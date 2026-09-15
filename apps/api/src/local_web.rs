@@ -2732,17 +2732,7 @@ async fn collection_targets(
     // 从列表那一批里找——找不到会把「这一屏没有它」说成「它没建过档」。
     let drawer_keyword_archive = match drawer_target.as_ref().ok().and_then(Option::as_ref) {
         Some(target) if target.target_kind == "keyword" => {
-            let refs = [target.target_ref];
-            let archived = keyword_baselines_qualified(database, &refs).await.ok();
-            // 建档分两段：先拿链接，再补详情。第二段是不是还欠着，同样要问。
-            let pending = linggan_evidence::keyword_targets_pending_detail(database, &refs)
-                .await
-                .ok();
-            collection_targets_view::keyword_archive_read(
-                archived.as_ref(),
-                pending.as_ref(),
-                target.target_ref,
-            )
+            read_keyword_archive(database, target.target_ref).await
         }
         // 创作者的主操作不看这一项；`Unavailable` 在这里是「不适用」，不是读失败。
         _ => target_drawer::KeywordArchiveRead::Unavailable,
@@ -4387,6 +4377,47 @@ async fn collection_monitor_rule_retire(
     Redirect::to(&format!("/collection/targets?{}", pairs.join("&")))
 }
 
+/// 一个关键词**建过档没有**：列表行、抽屉和建档按钮共用的一份判据。
+///
+/// 按钮上写什么由它决定，按下之后该走哪一段也由它决定。读会发生两次——点击在渲染之后，
+/// 这一点改不掉——但两次读的必须是同一份判据：两处**各判一次**，迟早会出一件「行上说还
+/// 没建档，点下去却在补详情」的事。读不到就如实返回 `Unavailable`，由调用方决定怎么说；
+/// 这里不把它压成任何一种已知状态，压成哪一种都是替人做主。
+async fn read_keyword_archive(
+    database: &Database,
+    target_ref: uuid::Uuid,
+) -> target_drawer::KeywordArchiveRead {
+    let refs = [target_ref];
+    let archived = keyword_baselines_qualified(database, &refs).await.ok();
+    // 建档分两段：先拿链接，再补详情。第二段是不是还欠着，同样要问。
+    let pending = linggan_evidence::keyword_targets_pending_detail(database, &refs)
+        .await
+        .ok();
+    collection_targets_view::keyword_archive_read(archived.as_ref(), pending.as_ref(), target_ref)
+}
+
+/// 采集链路回一个错误时，这一下该说哪一句话。**两段共用这一处。**
+///
+/// 「当前状态不接受这次请求」与「请求没送出去」是两件事，处置也相反：前者重试一辈子都
+/// 一样，后者过一会儿就好。此前两者共用 `archive_unavailable`，于是永久的状态前置被写成
+/// 了「稍后可以重试」。
+///
+/// 分类写在两个分支里，就一定会有一段漏掉：第一版只给第一段分了类，第二段遇到同一个拒绝
+/// （关键词被排除之后，详情补采同样不被准入接受）仍然说「稍后可以重试」。所以这里连同兜底
+/// 一起收进来——调用方不再自己 match，也就没有再漏一处的地方。
+fn keyword_archive_error_receipt(error: &AcquisitionChainError) -> &'static str {
+    match error {
+        // 缺领域要说清是缺领域。它此前落进一句「上一次动作没有完成」——信息量最低的那条
+        // 兜底文案，既不说原因也不说下一步。
+        AcquisitionChainError::TargetDomainUnassigned => "target_domain_unassigned",
+        // 准入按状态拒绝：这是前置，不是暂时故障。写「稍后重试」等于让人反复做一件永远
+        // 不会成的事。
+        AcquisitionChainError::TargetNotRequestable { .. } => "keyword_archive_not_requestable",
+        // 其余（目标已经不在了、schema 没就绪、数据库故障）是真的没送出去，如实说。
+        _ => "archive_unavailable",
+    }
+}
+
 async fn collection_target_deep_archive(
     State(state): State<LocalWebState>,
     axum::extract::Form(form): axum::extract::Form<TargetArchiveForm>,
@@ -4412,85 +4443,97 @@ async fn collection_target_deep_archive(
     .flatten();
     if target_kind.as_deref() == Some("keyword") {
         // 关键词建档也是两段：**先拿链接，再补详情**，与创作者渐进式建档同一个形状。
+        // 同一个按钮按所处的段落做不同的事，而「现在到哪一段」不是在这里再猜一次的：
+        // 它就是列表行和抽屉决定这颗按钮叫什么时读的那份事实。
         //
-        // 同一个按钮按所处的段落做不同的事：还没翻完搜索面就去翻，翻完了就去补下一批
-        // 详情。分成两个按钮反而要人先判断「现在到哪一步了」——那是系统自己查得出来的。
-        let advanced = linggan_evidence::advance_keyword_archive_detail(
-            database,
-            form.row_target_ref,
-            "从观察目标页发起关键词历史建档",
-            "person",
-        )
-        .await;
-        match advanced {
-            Ok(linggan_evidence::KeywordDetailAdvance::Queued { .. }) => {
-                let ahead = queued_ahead_for(database, form.row_target_ref).await;
-                return Redirect::to(&target_archive_return_path_with_queue(
-                    &form,
-                    Some("keyword_detail_requested"),
-                    ahead,
-                ));
-            }
-            Ok(linggan_evidence::KeywordDetailAdvance::Skipped("detail_batch_in_flight")) => {
-                return Redirect::to(&target_archive_return_path(
-                    &form,
-                    Some("archive_in_progress"),
-                ));
-            }
-            Ok(linggan_evidence::KeywordDetailAdvance::Skipped("no_missing_detail")) => {
-                return Redirect::to(&target_archive_return_path(
-                    &form,
-                    Some("keyword_detail_complete"),
-                ));
-            }
-            // 准入没放行时把它的结论原样带回去，与下面那一段同一种处理。
-            Ok(linggan_evidence::KeywordDetailAdvance::Skipped(code)) => {
-                return Redirect::to(&target_archive_return_path(
-                    &form,
-                    Some(&format!("archive_{code}")),
-                ));
-            }
-            Err(AcquisitionChainError::TargetDomainUnassigned) => {
-                return Redirect::to(&target_archive_return_path(
-                    &form,
-                    Some("target_domain_unassigned"),
-                ));
-            }
-            // 详情这一段读不出来，不代表第一段发不出去。继续往下走，由第一段自己的
-            // 结论说话——在这里断言「建档不可用」会掩盖真实原因。
-            Err(_) => {}
-        }
-        let requested = linggan_evidence::request_and_admit(
-            database,
-            form.row_target_ref,
-            "deep_archive",
-            "从观察目标页发起关键词历史建档",
-            "person",
-        )
-        .await;
-        return Redirect::to(&match requested {
-            Ok(outcome) if outcome.work_order_ref.is_some() => {
-                target_archive_return_path_with_queue(
-                    &form,
-                    Some("archive_requested"),
-                    queued_ahead_for(database, form.row_target_ref).await,
-                )
-            }
-            // 准入没放行时**把它的结论原样带回去**，与创作者那一路同一种处理：
-            // refuse（没有授权）、defer（暂时没有执行资源）、merge（已经有在途的同类
-            // 工作）后果完全不同。压成一句「没有授权」会让人去申请一份根本不缺的授权，
-            // 而真实情况——已经在建了——完全没有传达。
-            Ok(outcome) => target_archive_return_path(
-                &form,
-                Some(&format!("archive_{}", outcome.outcome.code())),
+        // 此前这里是「先试第二段，挑不出候选就当完成」——一个还没翻过搜索面的词，第二段
+        // 必然挑不出候选，于是它回一句「详情已补齐」就结束，**第一段（真正该跑的那一段）
+        // 永远发不出去**。空的候选集有两种意思：「都补完了」和「一条链接都还没有」，
+        // 只有建档态分得开它们。
+        return match read_keyword_archive(database, form.row_target_ref).await {
+            // 两段都做完了：这一单没有可发的采集。如实说，并指出下一步是开始每周巡检。
+            target_drawer::KeywordArchiveRead::Complete => Redirect::to(
+                &target_archive_return_path(&form, Some("keyword_detail_complete")),
             ),
-            // 缺领域要说清是缺领域。它此前落进一句「上一次动作没有完成」——信息量最低的
-            // 那条兜底文案，既不说原因也不说下一步。
-            Err(AcquisitionChainError::TargetDomainUnassigned) => {
-                target_archive_return_path(&form, Some("target_domain_unassigned"))
+            // 第二段：链接有了、详情还欠着，补下一批。
+            target_drawer::KeywordArchiveRead::DetailPending => {
+                let advanced = linggan_evidence::advance_keyword_archive_detail(
+                    database,
+                    form.row_target_ref,
+                    "从观察目标页发起关键词历史建档",
+                    "person",
+                )
+                .await;
+                Redirect::to(&match advanced {
+                    Ok(linggan_evidence::KeywordDetailAdvance::Queued { .. }) => {
+                        let ahead = queued_ahead_for(database, form.row_target_ref).await;
+                        target_archive_return_path_with_queue(
+                            &form,
+                            Some("keyword_detail_requested"),
+                            ahead,
+                        )
+                    }
+                    Ok(linggan_evidence::KeywordDetailAdvance::Skipped(
+                        "detail_batch_in_flight",
+                    )) => target_archive_return_path(&form, Some("archive_in_progress")),
+                    // 建档态说还欠详情，来挑的时候却没有可挑的了：缺口在这两步之间合上
+                    // （补采 tick 刚跑完，或那一批已经排在在途工单上）。**这一句在这里才是
+                    // 真的**——它上面已经确认过链接是有的。
+                    Ok(linggan_evidence::KeywordDetailAdvance::Skipped("no_missing_detail")) => {
+                        target_archive_return_path(&form, Some("keyword_detail_complete"))
+                    }
+                    // 准入没放行时把它的结论原样带回去，与下面那一段同一种处理。
+                    Ok(linggan_evidence::KeywordDetailAdvance::Skipped(code)) => {
+                        target_archive_return_path(&form, Some(&format!("archive_{code}")))
+                    }
+                    // 第二段读不出来就去发第一段？不行：建档态已经说过这个词的链接是有的，
+                    // 为一次读失败再去翻一遍搜索面，等于为一个已知存在的底座又真实访问一次
+                    // 平台。这里是「没做成」，如实说，不换一件更大的事做。
+                    Err(error) => target_archive_return_path(
+                        &form,
+                        Some(keyword_archive_error_receipt(&error)),
+                    ),
+                })
             }
-            Err(_) => target_archive_return_path(&form, Some("archive_unavailable")),
-        });
+            // 第一段：搜索面还没翻完。**这一段不经过第二段**——一个作品链接都还没有的词，
+            // 第二段能问出来的只有「没有可补的详情」，那不是「已补齐」。
+            target_drawer::KeywordArchiveRead::NotArchived => {
+                let requested = linggan_evidence::request_and_admit(
+                    database,
+                    form.row_target_ref,
+                    "deep_archive",
+                    "从观察目标页发起关键词历史建档",
+                    "person",
+                )
+                .await;
+                Redirect::to(&match requested {
+                    Ok(outcome) if outcome.work_order_ref.is_some() => {
+                        target_archive_return_path_with_queue(
+                            &form,
+                            Some("archive_requested"),
+                            queued_ahead_for(database, form.row_target_ref).await,
+                        )
+                    }
+                    // 准入没放行时**把它的结论原样带回去**，与创作者那一路同一种处理：
+                    // refuse（没有授权）、defer（暂时没有执行资源）、merge（已经有在途的同类
+                    // 工作）后果完全不同。压成一句「没有授权」会让人去申请一份根本不缺的授权，
+                    // 而真实情况——已经在建了——完全没有传达。
+                    Ok(outcome) => target_archive_return_path(
+                        &form,
+                        Some(&format!("archive_{}", outcome.outcome.code())),
+                    ),
+                    Err(error) => target_archive_return_path(
+                        &form,
+                        Some(keyword_archive_error_receipt(&error)),
+                    ),
+                })
+            }
+            // 建档态读不到就不发采集：这里**没有更安全的默认分支**——当成没建过会让人重做
+            // 一次真实的平台访问，当成建好了会把一个半成品底座推进巡检。两件都不做。
+            target_drawer::KeywordArchiveRead::Unavailable => Redirect::to(
+                &target_archive_return_path(&form, Some("keyword_archive_unreadable")),
+            ),
+        };
     }
     let outcome = request_progressive_archive(
         database,

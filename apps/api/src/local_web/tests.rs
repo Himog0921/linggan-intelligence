@@ -1090,6 +1090,251 @@ async fn accepted_author_profile_creates_a_deduplicated_observation_target_with_
     );
 }
 
+/// 采集准入按**状态**拒绝时，回执说的必须是「状态前置」，不是「稍后可以重试」。
+///
+/// 这条阶梯两段共用。此前它写在两个分支里、只有第一段分了类，于是第二段遇到同一种拒绝
+/// （关键词被停掉之后，详情补采同样不被准入接受）仍然说「稍后可以重试」——一句让人反复
+/// 做同一件永远不会成的事的话。这张卡要修的正是回执说谎，所以分类只留一处。
+///
+/// 另一半同样要钉住：**真的没送出去**（目标已不在、schema 没就绪、数据库故障）必须继续
+/// 说「可以稍后重试」。分不清这两类，只是把「一律说重试」翻成「一律说别重试」，一样是
+/// 让人照着错的话做决定。
+#[test]
+fn a_refusal_by_state_is_not_told_to_retry_later_while_a_genuine_miss_is() {
+    assert_eq!(
+        keyword_archive_error_receipt(&AcquisitionChainError::TargetNotRequestable {
+            state: "dismissed".to_owned(),
+        }),
+        "keyword_archive_not_requestable",
+        "准入按状态拒绝是永久前置，说成「稍后可以重试」会让人一直点"
+    );
+    assert_eq!(
+        keyword_archive_error_receipt(&AcquisitionChainError::TargetDomainUnassigned),
+        "target_domain_unassigned",
+        "缺领域要如实说成缺领域，不能落进信息量最低的那条兜底"
+    );
+    assert_eq!(
+        keyword_archive_error_receipt(&AcquisitionChainError::SchemaUnavailable),
+        "archive_unavailable",
+        "schema 没就绪是真的可以稍后重试，不能和状态前置混成一句"
+    );
+}
+
+/// 「建立档案」按下去要真的开始建档：一个**从没建过档**的关键词必须发出第一段
+/// （翻搜索面拿链接），而不是回一句「详情已补齐」然后什么都不做。
+///
+/// 这个入口此前是「先试第二段，挑不出候选就当已完成」：一个还没有作品链接的词，第二段
+/// 当然挑不出候选——空的候选集被读成了「都补完了」，于是它回一句「详情已补齐」就结束，
+/// **第一段永远发不出去**，库里一张工单都没有。行上写着「尚未建立」，界面上却没有任何
+/// 入口能把它建起来（2026-09-15 在「a 娃」这个词上就是整个页面没有任何反应）。
+///
+/// 判据只有一条是别人替不了的：**库里真的多了一张待翻搜索面的工单**。只断言回执文案
+/// 不够——那句话本来就是错的，错的地方正在于它说的话和库里的状态对不上。
+#[tokio::test]
+#[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
+async fn a_never_archived_keyword_starts_its_first_stage_when_asked_to_archive() {
+    let database = proof_database("keyword_archive_first_stage").await;
+    let application = app_with_database(database.clone());
+
+    // 从页面加入一个关键词：领域当场选定——缺领域的目标发不出任何采集，准入会先拦住它，
+    // 那样这条用例就绕开了真正要证明的那一段。
+    let created = application
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/collection/targets/new")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    "target_kind=keyword&identity=archive-first-stage-proof\
+                     &domain=__new__&new_domain_name=archive-first-stage-proof-domain",
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::SEE_OTHER);
+    let target_ref: uuid::Uuid = sqlx::query_scalar(
+        "SELECT target_ref FROM collection_observation_target \
+         WHERE target_kind='keyword' AND identity_key='archive-first-stage-proof'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("页面新建的关键词目标落库");
+
+    // 授权走产品自己的入口，与人在授权页上按下的那一次是同一条路。
+    let granted = application
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/local/collection/authorizations")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "targetKind": "keyword",
+                        "lane": "deep_archive",
+                        "purpose": "从观察目标页发起关键词历史建档",
+                        "maxTargets": 200,
+                        "maxWorksPerTarget": 200,
+                        "validForDays": 30,
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(granted.status(), StatusCode::OK);
+
+    // 人在列表上按下的那一下。
+    let archived = application
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/collection/targets/archive")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from(format!("row_target_ref={target_ref}")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(archived.status(), StatusCode::SEE_OTHER);
+    let location = archived
+        .headers()
+        .get(header::LOCATION)
+        .and_then(|value| value.to_str().ok())
+        .expect("回执地址");
+    assert!(
+        location.contains("archive_requested"),
+        "一个从没建过档的词，这一下应当发出第一段建档，实际回执：{location}"
+    );
+    assert!(
+        !location.contains("keyword_detail_complete"),
+        "链接都还没有的词不可能「详情已补齐」：{location}"
+    );
+
+    let orders: Vec<String> = sqlx::query_scalar(
+        "SELECT lane FROM collection_work_order WHERE target_ref=$1 ORDER BY created_at",
+    )
+    .bind(target_ref)
+    .fetch_all(database.pool())
+    .await
+    .expect("工单可查");
+    assert_eq!(
+        orders,
+        vec!["deep_archive".to_owned()],
+        "这一下应当只发出翻搜索面那一段，实际工单：{orders:?}"
+    );
+}
+
+/// **已经在按周观察**、但从未建过档的关键词：建档入口会出现（这是 Issue #286 要的），
+/// 按下去却被采集准入挡住——准入只在开始观察之前接受关键词的历史建档请求。
+///
+/// 这条用例钉的不是「它能建档」（它现在不能），而是**它不会再假装失败是暂时的**：
+/// 此前这一下回的是 `archive_unavailable`「这次请求没有送达采集链路……可以稍后重试」，
+/// 而真实原因是一条永久的状态前置，重试一辈子都一样。说得含糊，人就会一直点。
+///
+/// 同时钉住「什么都没发生」：没有工单、没有采集请求。准入拒绝是真拒绝，不是静默排队。
+#[tokio::test]
+#[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
+async fn a_patrolling_keyword_says_its_archive_request_is_refused_by_state_not_by_chance() {
+    let database = proof_database("keyword_archive_patrolling_refusal").await;
+    let application = app_with_database(database.clone());
+    let created = application
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/collection/targets/new")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    "target_kind=keyword&identity=archive-patrolling-refusal\
+                     &domain=__new__&new_domain_name=archive-patrolling-refusal-domain",
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::SEE_OTHER);
+    let target_ref: uuid::Uuid = sqlx::query_scalar(
+        "SELECT target_ref FROM collection_observation_target \
+         WHERE target_kind='keyword' AND identity_key='archive-patrolling-refusal'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("页面新建的关键词目标落库");
+
+    let granted = application
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/local/collection/authorizations")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "targetKind": "keyword",
+                        "lane": "deep_archive",
+                        "purpose": "从观察目标页发起关键词历史建档",
+                        "maxTargets": 200,
+                        "maxWorksPerTarget": 200,
+                        "validForDays": 30,
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(granted.status(), StatusCode::OK);
+
+    // 线上 a 娃 与 adhd 的真实状态：正在按周观察。
+    sqlx::query(
+        "UPDATE collection_observation_target SET lifecycle_state='monitoring' WHERE target_ref=$1",
+    )
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .expect("置为观察中");
+
+    let archived = application
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/collection/targets/archive")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from(format!("row_target_ref={target_ref}")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(archived.status(), StatusCode::SEE_OTHER);
+    let location = archived
+        .headers()
+        .get(header::LOCATION)
+        .and_then(|value| value.to_str().ok())
+        .expect("回执地址");
+    assert!(
+        location.contains("keyword_archive_not_requestable"),
+        "状态前置的拒绝必须说成状态前置，实际回执：{location}"
+    );
+    assert!(
+        !location.contains("archive_unavailable"),
+        "「没送出去」和「这个状态不接受」是两件事，不能共用一句「稍后可以重试」：{location}"
+    );
+
+    let orders: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM collection_work_order WHERE target_ref=$1")
+            .bind(target_ref)
+            .fetch_one(database.pool())
+            .await
+            .expect("工单可数");
+    assert_eq!(orders, 0, "被准入拒绝的请求不得留下工单");
+}
+
 async fn proof_database(schema: &str) -> Database {
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL")
         .expect("test script must provide the isolated proof database URL");

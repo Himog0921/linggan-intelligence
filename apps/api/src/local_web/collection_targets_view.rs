@@ -466,6 +466,27 @@ fn action_feedback_markup(error: Option<&str>, ahead: Option<i64>) -> String {
             "没有完成",
             "当前采集授权不足以支持前 200 篇作品的有界建档。本次没有缩小范围后静默开始。",
         ),
+        "archive_unavailable" => (
+            "c-src-failure",
+            "没有完成",
+            "这次请求没有送达采集链路，没有发起任何采集，目标状态也没有改动。可以稍后重试。",
+        ),
+        // 关键词的「历史建档」只在**开始观察之前**被采集准入接受。这是一条状态前置，
+        // 不是暂时故障——写「稍后重试」等于让人反复做一件永远不会成的事。此前它落进
+        // `archive_unavailable`，那句话正好是「可以稍后重试」。
+        "keyword_archive_not_requestable" => (
+            "c-src-failure",
+            "没有完成",
+            "采集准入按这个词当前所处的状态拒绝了这次请求，因此这次没有发起采集，目标状态也没有改动。准入的前置是状态：历史建档只在开始观察之前接受；详情补采在这个词停止观察之后就不再接受。**重试不会改变结果**——这一条是状态前置，不是暂缺资源。",
+        ),
+        // 建档态读不出来时**没有可猜的默认动作**：当成没建过会重做一次真实的平台访问，
+        // 当成建好了会把半成品底座推进巡检。两件都不做，并且把原因说出来——此前它落进
+        // 一句「上一次动作没有完成」，人只看到失败，看不到「为什么不能替你决定」。
+        "keyword_archive_unreadable" => (
+            "c-src-failure",
+            "没有完成",
+            "读不到这个词的建档状态，因此这次没有发起采集（建档与补详情要看它才能定）。目标状态没有改动，可以稍后重试。",
+        ),
         "batch_nothing_selected" => ("c-src-failure", "没有完成", "没有选中任何观察目标。"),
         "batch_unknown_action" => ("c-src-failure", "没有完成", "当前不支持这个操作。"),
         "batch_failed" => (
@@ -1834,11 +1855,27 @@ mod keyword_archive_action_tests {
         );
     }
 
-    /// 已经在监控、且详情齐了的词不再被问建档——它的下一步是看命中，不是回头建档。
+    /// **底座还没建起来，监控中也要给建档入口。**
+    ///
+    /// 行上写着「尚未建立」，就必须有一个动作能把它建起来。此前这一条把 `NotArchived`
+    /// 也归进「监控中的词不再被问建档」，于是一个还没建过档就打开了观察开关的词，永远
+    /// 只能靠先关掉观察再去点建档——那是界面逼出来的绕路。巡查按口径取的是每期增量，
+    /// 历史那一整段只有建档拿得回来。
     #[test]
-    fn a_monitored_keyword_is_not_asked_to_archive() {
+    fn a_monitored_keyword_without_an_archive_is_still_offered_it() {
+        assert_eq!(
+            action(
+                &keyword("monitoring", true),
+                KeywordArchiveRead::NotArchived
+            ),
+            TargetPrimaryAction::EstablishArchive
+        );
+    }
+
+    /// 底座建完了的词不再被问建档——它的下一步是看命中，不是回头重做一遍。
+    #[test]
+    fn a_monitored_keyword_with_a_finished_archive_is_not_asked_to_archive() {
         for archive in [
-            KeywordArchiveRead::NotArchived,
             KeywordArchiveRead::Complete,
             KeywordArchiveRead::Unavailable,
         ] {
@@ -1966,6 +2003,62 @@ mod queue_toast_tests {
                 "{code} 的回执还在指着一句已经删掉的行内提示"
             );
         }
+    }
+
+    /// 回执要盖在抽屉之上——抽屉一开，点「建立档案」拿到的回执正好在它下面，最该看见
+    /// 它的时候看不见。
+    ///
+    /// 断言的是**用了哪个层级 token**，不是某个数字。此前这里写死 `z-index:80`，与抽屉
+    /// 同层，而抽屉在 DOM 里靠后——同一个 z-index 由 DOM 顺序裁决，回执就落到了抽屉下面。
+    /// 数字写对一次没有意义，改一次 token 就会再错一次。
+    ///
+    /// 抽屉自己也是 `var(--lgi-z-drawer)`，所以这条不会因为「两边都用了 token」而假绿：
+    /// 下面同时核对 token 阶梯本身。
+    #[test]
+    fn the_receipt_is_layered_above_the_drawer_it_must_be_read_over() {
+        // 「回执盖过抽屉」是**两侧一起**成立的不变量。只钉回执那一侧会留下一个假绿窗口：
+        // 把抽屉写死成 999（或换挂别的 token）会重新盖住回执，而只核对回执的断言照样绿。
+        // 这个页面的抽屉就是 `.c-dw`（`target_drawer.rs` 渲染 `<aside id="c-drawer" class="c-dw">`），
+        // 两条规则都在同一张 `TARGET_DRAWER_CSS` 里。
+        let declaration = |selector: &str| -> String {
+            let css = crate::local_web::TARGET_DRAWER_CSS;
+            let rule = css
+                .split(&format!("{selector}{{"))
+                .nth(1)
+                .unwrap_or_else(|| panic!("TARGET_DRAWER_CSS 里应当有一条 {selector} 规则"));
+            rule.split('}').next().unwrap_or(rule).to_owned()
+        };
+
+        let receipt = declaration(".c-tg-toast");
+        assert!(
+            receipt.contains("z-index:var(--lgi-z-toast)"),
+            "回执必须用 --lgi-z-toast 定层，写死数字会再次落在抽屉下面：\n  {}",
+            receipt
+        );
+        let drawer = declaration(".c-dw");
+        assert!(
+            drawer.contains("z-index:var(--lgi-z-drawer)"),
+            "抽屉也必须由 --lgi-z-drawer 定层：写死一个更大的数字、或改挂别的 token，都会重新盖住回执，\
+             而只钉回执那一侧的断言不会变红：\n  {}",
+            drawer
+        );
+
+        let level = |token: &str| -> i32 {
+            let tokens = crate::local_web::LIDS_TOKENS;
+            let declaration = tokens
+                .split(&format!("{token}:"))
+                .nth(1)
+                .unwrap_or_else(|| panic!("LIDS_TOKENS 里没有 {token}"));
+            declaration
+                .split(';')
+                .next()
+                .and_then(|value| value.trim().parse().ok())
+                .unwrap_or_else(|| panic!("{token} 的取值不是一个整数层级"))
+        };
+        assert!(
+            level("--lgi-z-toast") > level("--lgi-z-drawer"),
+            "回执的层级必须高于抽屉"
+        );
     }
 }
 

@@ -428,21 +428,30 @@ pub(crate) fn target_primary_action(
         if keyword_archive == KeywordArchiveRead::DetailPending {
             return TargetPrimaryAction::ContinueArchive;
         }
-        if target.monitoring_enabled && target.lifecycle_state != "paused" {
-            return TargetPrimaryAction::ViewKeyword;
-        }
         if target.lifecycle_state == "paused" {
             return TargetPrimaryAction::OpenPatrol("恢复巡查");
         }
-        // 还没开始监控的关键词：先问它建过档没有。历史高赞是这个词的底座，没有底座就
-        // 开始每周看增量，等于在一张空表上数新增。
+        // **还没建过档的词，主操作就是建档——它是不是已经在按周巡查，不改这件事。**
+        //
+        // 这一条必须排在监控判断之前。巡查按规则口径取的是**每期增量**（取前 N，adhd 那
+        // 条口径是 20），历史那一整段只有建档拿得回来；一个还没有底座的词，巡查得越久，
+        // 手里越只剩最近几期的样本。而把建档让位给「查看结果」的后果不是少一个按钮：
+        // 行上写着「尚未建立」，却没有任何入口能把它建起来——人只能先关掉观察再去点建档，
+        // 那是界面逼出来的绕路。
+        if keyword_archive == KeywordArchiveRead::NotArchived {
+            return TargetPrimaryAction::EstablishArchive;
+        }
+        if target.monitoring_enabled {
+            return TargetPrimaryAction::ViewKeyword;
+        }
+        // 走到这里只剩两态：建完了该开始每周巡检；读不到就不催也不改口径，维持原本的入口。
         return match keyword_archive {
-            KeywordArchiveRead::NotArchived => TargetPrimaryAction::EstablishArchive,
-            // 与创作者同一个入口、同一个词：链接有了、详情还差，就是「继续建档」。
-            KeywordArchiveRead::DetailPending => TargetPrimaryAction::ContinueArchive,
             KeywordArchiveRead::Complete => TargetPrimaryAction::OpenPatrol("开始每周巡检"),
-            // 读不到就不催也不改口径，维持原本的入口。
             KeywordArchiveRead::Unavailable => TargetPrimaryAction::OpenPatrol("设置巡查"),
+            // 前两态在上面按它们自己的次序返回了；保留这两臂是为了让这个 match 仍然穷尽
+            // 四态——将来多一个建档态时，编译在这里就会停下来。
+            KeywordArchiveRead::NotArchived => TargetPrimaryAction::EstablishArchive,
+            KeywordArchiveRead::DetailPending => TargetPrimaryAction::ContinueArchive,
         };
     }
     let archive = match archive {
@@ -3620,13 +3629,17 @@ mod tests {
         assert!(pending.contains(">补采缺口</button>"), "{pending}");
     }
 
-    /// **巡查优先于催建档。** 哪怕建档态说「还没建过」，已经在按周看增量的词也仍是
-    /// 「当前无需处理」——巡查是在它自己的底座上往前跑，把它改成一件待办只会让人重做一遍。
+    /// **还没建过档的词，就算在巡查也仍然给「建立档案」。**
     ///
-    /// 这条守的不是这次修掉的那个缺陷（那种情况在修之前也是这个答案），而是一个很像的
-    /// 改法：谁把「还没建过」挪到监控判断前面，这里就会变红。
+    /// 这一条此前钉的是反过来的一面：「巡查优先于催建档，哪怕建档态说还没建过」。那个
+    /// 前提是「巡查是在它自己的底座上往前跑」——可这两件事可以同时为真：建档那一轮没
+    /// 发出去，人已经把观察开关打开了。这时巡查按口径每周只取回前 N 条，历史那一整段
+    /// 再也补不回来；主操作让位给「查看结果」之后，界面上写着「尚未建立」，却没有一个
+    /// 入口能把它建起来。
+    ///
+    /// **巡查优先的是「档案已经建完」，不是「还没建过」。**
     #[test]
-    fn a_patrolling_keyword_drawer_asks_for_nothing() {
+    fn a_patrolling_keyword_without_an_archive_is_still_offered_it() {
         let keyword = keyword_target();
         let projection = keyword_projection(&keyword);
         let html = inspector_overview(
@@ -3635,6 +3648,25 @@ mod tests {
             &projection,
             TargetArchiveRead::Known(None),
             KeywordArchiveRead::NotArchived,
+            &[],
+            TargetListContext::default(),
+        );
+
+        assert!(html.contains("需要建立档案"), "{html}");
+        assert!(html.contains(">建立档案</button>"), "{html}");
+    }
+
+    /// 底座建完的词才归巡查——这时抽屉不再问建档，它的下一步是看命中。
+    #[test]
+    fn a_patrolling_keyword_with_a_finished_archive_asks_for_nothing() {
+        let keyword = keyword_target();
+        let projection = keyword_projection(&keyword);
+        let html = inspector_overview(
+            &keyword,
+            false,
+            &projection,
+            TargetArchiveRead::Known(None),
+            KeywordArchiveRead::Complete,
             &[],
             TargetListContext::default(),
         );
