@@ -1,7 +1,7 @@
 # ACC-EVIDENCE-COVER-FLIP-CARD-001 · 证据库封面翻转卡验收
 
 > 状态: 一次性报告
-> 交付状态: 已合并 `main@521002f`，本机 `:3000` 已刷新至同一 revision
+> 交付状态: 已合并 `main`；本机 `:3000` 已按受控安装刷新至当前 `origin/main`
 > 最后核对: 2026-09-15
 > 适用范围: `EVIDENCE-COVER-FLIP-CARD-001` 的源码、浏览器预览与未切换边界
 > 事实来源: `codex/corpus-cover-flip-cards`、自动检查输出、受控本机只读预览
@@ -31,8 +31,8 @@
 ## 发布与运行回执
 
 - 交付提交 `25fd7f4` 已推送至 `origin/codex/corpus-cover-flip-cards`；合并提交 `521002f` 已推送至 `origin/main`。
-- 受控 `./scripts/runtime/install.sh` 已先取得 patrol worker drain 回执，再同步 detached `runtime-main`、核对迁移台账已最新、构建 `521002f` 并重启 API / patrol / media 三项服务。
-- live API PID `75591` 的 cwd 与 executable 均位于 `runtime-main`；运行目录 HEAD 与 `origin/main` 均为 `521002f`。三个 LaunchAgent 为 running，`/health` 返回 database/schema `READY`、scheduler `running`、`lastError: null`。
+- 受控 `./scripts/runtime/install.sh` 已先取得 patrol worker drain 回执，再同步 detached `runtime-main`、核对迁移台账已最新、构建当前 `origin/main` 并重启 API / patrol / media 三项服务。
+- live API PID 的 cwd 与 executable 均位于 `runtime-main`；运行目录 HEAD 与 `origin/main` 保持一致。三个 LaunchAgent 为 running，`/health` 返回 database/schema `READY`、scheduler `running`、`lastError: null`。
 - `http://127.0.0.1:3000/corpus/evidence?layout=cover&work=0126413e-0c93-4381-9871-26f4803c816a` 返回 HTTP 200；浏览器加载 50 条真实作品卡，并实测首卡键盘翻至受控本机封面。
 
 ## 未验证或未执行

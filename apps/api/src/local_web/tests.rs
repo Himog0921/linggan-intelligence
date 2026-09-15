@@ -3002,6 +3002,7 @@ fn evidence_cover_layout_keeps_a_stationary_data_plate_and_one_shared_flip_stage
     for marker in [
         "function coverVisualBlock(item, ordinal)",
         "function coverMetaBlock(item, material, detailState, observedAt)",
+        "function coverGeometryKind(item)",
         "coverCard.append(",
         "visual.addEventListener('click'",
         "window.matchMedia('(hover: none)').matches",
@@ -3024,12 +3025,61 @@ fn evidence_cover_layout_keeps_a_stationary_data_plate_and_one_shared_flip_stage
         "@media(hover:hover){.ev-cover-visual:hover .ev-cover-flip",
         ".ev-cover-title[data-two-line=\"true\"]",
         ".ev-cover-status-tooltip",
+        "column-gap:var(--lgi-space-2);row-gap:var(--lgi-space-8)",
+        "aspect-ratio:7/2",
+        "inline-size:100%;max-inline-size:100%;box-sizing:border-box",
+        "grid-template-rows:var(--lgi-space-6) var(--lgi-space-6) minmax(var(--lgi-space-6),1fr)",
+        "min-height:calc(var(--lgi-space-16) + var(--lgi-space-6) + var(--lgi-space-4) + var(--lgi-space-2))",
+        "grid-template-columns:minmax(0,1fr) minmax(0,1fr)",
+        "grid-template-columns:minmax(0,1fr) minmax(0,10ch)",
+        ".ev-cover-cross-boundary",
     ] {
         assert!(
             EVIDENCE_LIBRARY_CSS.contains(marker),
             "missing cover-card visual contract: {marker}"
         );
     }
+    assert!(
+        !EVIDENCE_LIBRARY_JS.contains("facts.append(material.rail, status)"),
+        "the cover data plate must not reintroduce the large multi-colour material rail"
+    );
+    for marker in [
+        "['grid', 'cone', 'frame'][index]",
+        "kind === 'stack'",
+        "kind === 'cluster'",
+    ] {
+        assert!(
+            EVIDENCE_LIBRARY_JS.contains(marker),
+            "the generic catalogue mark family must remain stable and visually differentiated: {marker}"
+        );
+    }
+    assert!(
+        EVIDENCE_LIBRARY_JS.contains("function coverObservationMoment(value)"),
+        "the cover plate must use a compact, non-overflowing observation timestamp"
+    );
+    assert!(
+        EVIDENCE_LIBRARY_JS.contains("function coverPublishedCopy(item)"),
+        "the cover plate must reserve a stable, legible date slot beside the author"
+    );
+    assert!(
+        EVIDENCE_LIBRARY_JS.contains("function coverStateLine(state)"),
+        "the cover plate must keep technical state codes out of its compact reading line"
+    );
+    assert!(
+        EVIDENCE_LIBRARY_JS.contains("line.querySelector('.v7-tech-key')?.remove()"),
+        "the cover state line must retain the real state label while omitting its technical enum"
+    );
+    assert!(
+        EVIDENCE_LIBRARY_JS
+            .contains("if (publishedState === 'SOURCE_TEXT_ONLY') return '来源时间';"),
+        "a source-text-only publish time must not overrun the compact cover date slot"
+    );
+    assert!(
+        EVIDENCE_LIBRARY_JS.contains(
+            "node('span', 'ev-cover-cross-boundary', '列表级参照物 · 详情、媒体与材料未读取')"
+        ),
+        "a cross-industry sample must consume exactly one bottom-band state cell"
+    );
 }
 
 #[test]
