@@ -12,8 +12,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use super::{
-    OperationsMode, READOUT_SLOT_END, READOUT_SLOT_START, context_readout,
-    replace_bounded_slot,
+    OperationsMode, READOUT_SLOT_END, READOUT_SLOT_START, context_readout, replace_bounded_slot,
 };
 
 const EMPTY_STATE_OPEN: &str = "<section class=\"c-empty c-empty-engineering\">";
@@ -568,7 +567,11 @@ fn operations_markup(projection: &CollectionControlSurfaceProjection) -> String 
 }
 
 fn operations_readout(projection: &CollectionControlSurfaceProjection) -> String {
-    let runs = if projection.latest_run.is_some() { "1" } else { "—" };
+    let runs = if projection.latest_run.is_some() {
+        "1"
+    } else {
+        "—"
+    };
     let recoverable = projection
         .decisions
         .iter()
@@ -583,7 +586,12 @@ fn operations_readout(projection: &CollectionControlSurfaceProjection) -> String
 
 fn flow_stage_markup(projection: &CollectionControlSurfaceProjection) -> String {
     let stages = [
-        ("01", "目标判定", "调度为目标写下决定", projection.decisions.len()),
+        (
+            "01",
+            "目标判定",
+            "调度为目标写下决定",
+            projection.decisions.len(),
+        ),
         (
             "02",
             "规则准入",
@@ -708,8 +716,16 @@ fn attention_readout(projection: &CollectionControlSurfaceProjection) -> String 
     let entries = attention_entries(projection);
     let count_owner = |owner: &str| entries.iter().filter(|entry| entry.owner == owner).count();
     context_readout(&[
-        (&entries.len().to_string(), "需要处理", "当前有明确恢复动作的持久阻断"),
-        (&count_owner("你").to_string(), "你负责", "当前需要人工处理的恢复事项"),
+        (
+            &entries.len().to_string(),
+            "需要处理",
+            "当前有明确恢复动作的持久阻断",
+        ),
+        (
+            &count_owner("你").to_string(),
+            "你负责",
+            "当前需要人工处理的恢复事项",
+        ),
     ])
 }
 
@@ -776,9 +792,10 @@ fn recovery_for(reason: &str) -> Option<Recovery> {
             owner: "你",
             action: "打开目标的监控规则并保存首个版本。",
         }),
-        // Retained historical decision vocabulary.  It has no recovery action
-        // in the current product: archive coverage no longer gates observation.
-        "baseline_not_ready" => None,
+        "baseline_not_ready" => Some(Recovery {
+            owner: "你",
+            action: "先完成该关键词的搜索面建档和待补详情，再保存或恢复巡查规则。",
+        }),
         "risk_paused" => Some(Recovery {
             owner: "你",
             action: "核对风险暂停；确认风险解除后再恢复。",
@@ -921,7 +938,10 @@ fn selected_task_id(base: &str) -> Option<Uuid> {
 }
 
 fn frozen_work_templates(works: &[FrozenWorkView]) -> String {
-    let mut task_ids = works.iter().filter_map(|work| work.task_id).collect::<Vec<_>>();
+    let mut task_ids = works
+        .iter()
+        .filter_map(|work| work.task_id)
+        .collect::<Vec<_>>();
     task_ids.sort_unstable();
     task_ids.dedup();
     task_ids
@@ -1049,7 +1069,9 @@ fn lease_label(value: &str) -> &'static str {
 fn decision_reason(value: &str) -> &'static str {
     match value {
         "rule_missing" => "目标还没有活动规则版本。",
-        "baseline_not_ready" => "历史基线门禁记录；当前规则不会因建档完整度而停止观察。",
+        "baseline_not_ready" => {
+            "关键词建档尚未完成；不会创建巡查工作，完成搜索面和待补详情后再恢复。"
+        }
         "station_not_accepting" => "工位已由人显式暂停未来接活。",
         "account_needs_login" => "观察账号需要重新登录。",
         "account_restricted" => "观察账号受到访问限制。",
@@ -1060,8 +1082,6 @@ fn decision_reason(value: &str) -> &'static str {
         _ => "scheduler 写下了一个有明确恢复责任的控制阻断。",
     }
 }
-
-
 
 fn optional_ref(value: Option<Uuid>) -> String {
     value.map_or_else(|| "NONE".to_owned(), |value| value.to_string())
@@ -1305,9 +1325,15 @@ mod tests {
         let first_start = templates.find(&first_marker).expect("first template");
         let second_start = templates.find(&second_marker).expect("second template");
         let (first_fragment, second_fragment) = if first_start < second_start {
-            (&templates[first_start..second_start], &templates[second_start..])
+            (
+                &templates[first_start..second_start],
+                &templates[second_start..],
+            )
         } else {
-            (&templates[first_start..], &templates[second_start..first_start])
+            (
+                &templates[first_start..],
+                &templates[second_start..first_start],
+            )
         };
         assert!(first_fragment.contains(&first.work_order_ref.to_string()));
         assert!(!first_fragment.contains(&second.work_order_ref.to_string()));
@@ -1468,7 +1494,10 @@ mod tests {
         );
 
         for (state, expected) in [
-            (TaskControlUnavailable::SchemaUnavailable, "控制 schema 尚未就绪"),
+            (
+                TaskControlUnavailable::SchemaUnavailable,
+                "控制 schema 尚未就绪",
+            ),
             (TaskControlUnavailable::ReadFailed, "本次读取失败"),
         ] {
             let rendered = render_tasks_control_unavailable(&base, state);
@@ -1478,5 +1507,4 @@ mod tests {
             assert!(!rendered.contains("正在读取"));
         }
     }
-
 }

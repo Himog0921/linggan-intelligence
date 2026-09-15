@@ -1598,7 +1598,34 @@ async fn monitor_rule_commands_are_revisioned_idempotent_and_side_effect_bounded
 
     let applied = apply_monitor_rule_command(&database, &command)
         .await
-        .expect("valid keyword rule is applied");
+        .expect("an incomplete keyword leaves a durable command receipt");
+    assert_eq!(applied.outcome, MonitorCommandOutcomeKind::Rejected);
+    assert_eq!(applied.reason_code, "baseline_not_ready");
+    assert_eq!(applied.current_revision, 0);
+    assert!(applied.applied_rule_revision_ref.is_none());
+
+    // 修订、幂等和命令身份这组控制面合同仍须由可观察的创作者规则守住；创作者不受关键词
+    // 建档门槛影响，因而不会把本用例的主张混进关键词的前置状态。
+    let command_target = seed_target(
+        &database,
+        "creator",
+        "pending_decision",
+        "creator-rule-command-contract",
+    )
+    .await;
+    let command = MonitorRuleCommand {
+        target_ref: command_target,
+        expected_revision: 0,
+        idempotency_key: Uuid::new_v4(),
+        kind: MonitorCommandKind::SaveRule,
+        actor: MonitorCommandActor::Person,
+        source: "targets_ui",
+        draft: Some(creator_fixed_rule()),
+        slot_key: None,
+    };
+    let applied = apply_monitor_rule_command(&database, &command)
+        .await
+        .expect("valid creator rule is applied");
     assert_eq!(applied.outcome, MonitorCommandOutcomeKind::Applied);
     assert_eq!(applied.reason_code, "rule_saved");
     assert_eq!(applied.current_revision, 1);
@@ -1711,7 +1738,7 @@ async fn monitor_rule_commands_are_revisioned_idempotent_and_side_effect_bounded
             kind: MonitorCommandKind::SaveRule,
             actor: MonitorCommandActor::Person,
             source: "targets_ui",
-            draft: Some(fixed_rule(None)),
+            draft: Some(creator_fixed_rule()),
             slot_key: None,
         },
     )
@@ -1753,14 +1780,14 @@ async fn monitor_rule_commands_are_revisioned_idempotent_and_side_effect_bounded
     .fetch_one(database.pool())
     .await
     .expect("keyword target state is readable");
-    assert_eq!(keyword_state, ("monitoring".to_owned(), true));
+    assert_eq!(keyword_state, ("pending_decision".to_owned(), false));
 }
 
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL proof database"]
 async fn target_list_toggle_uses_the_accepted_person_command_source() {
     let database = proof_database("collection_control_target_list_toggle").await;
-    let target_ref = seed_target(&database, "keyword", "pending_decision", "toggle-source").await;
+    let target_ref = seed_target(&database, "creator", "pending_decision", "toggle-source").await;
     let saved = apply_monitor_rule_command(
         &database,
         &MonitorRuleCommand {
@@ -1770,7 +1797,7 @@ async fn target_list_toggle_uses_the_accepted_person_command_source() {
             kind: MonitorCommandKind::SaveRule,
             actor: MonitorCommandActor::Person,
             source: "targets_ui",
-            draft: Some(fixed_rule(None)),
+            draft: Some(creator_fixed_rule()),
             slot_key: None,
         },
     )
@@ -2456,6 +2483,12 @@ fn fixed_rule(ranking_key: Option<&str>) -> MonitorRuleDraft {
         published_within_days: None,
         task_contract_version: "linggan.producer.task-spec.v1".to_owned(),
     }
+}
+
+fn creator_fixed_rule() -> MonitorRuleDraft {
+    let mut draft = fixed_rule(None);
+    draft.surface_key = "creator_patrol".to_owned();
+    draft
 }
 
 fn comparable_round(

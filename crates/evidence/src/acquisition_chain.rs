@@ -41,6 +41,8 @@ pub enum AcquisitionChainError {
     TargetDomainUnassigned,
     #[error("that target is not in a state where deep archiving can be requested: {state}")]
     TargetNotRequestable { state: String },
+    #[error("a keyword must complete its search archive and details before patrol can start")]
+    KeywordArchiveIncomplete,
     #[error("material deepening needs between 1 and 200 distinct content targets")]
     InvalidMaterialTargets,
     #[error(
@@ -822,6 +824,20 @@ pub(crate) async fn request_and_admit_in_transaction_scoped(
     //
     // 此前这里对所有 lane 一律要求 pending_decision，结果是巡检**永远派不出去**——
     // 目标一旦进入 archiving 就再也无法申请。这个缺陷由第一轮 tick 当场暴露。
+    let legacy_keyword_baseline_repairable =
+        if lane == "deep_archive" && target_kind == "keyword" && scope.is_empty() {
+            match crate::collection_control::keyword_archive_baseline_in(transaction, target_ref)
+                .await?
+            {
+                crate::collection_control::KeywordArchiveBaseline::Missing => true,
+                crate::collection_control::KeywordArchiveBaseline::Qualified => false,
+                crate::collection_control::KeywordArchiveBaseline::Unavailable => {
+                    return Err(AcquisitionChainError::SchemaUnavailable);
+                }
+            }
+        } else {
+            false
+        };
     let requestable = match lane {
         // A fixed material set is a follow-up to an admitted baseline.  It may deepen an archived
         // or monitored creator, but it still uses the existing deep-archive authorization class.
@@ -846,6 +862,17 @@ pub(crate) async fn request_and_admit_in_transaction_scoped(
             lifecycle_state.as_str(),
             "pending_decision" | "archiving" | "archived" | "monitoring" | "paused"
         ),
+        // Keywords may carry historical patrol state from before the archive-first rule.  Only a
+        // missing qualified search baseline may be repaired here.  A target with a baseline but
+        // pending details must use its material-scoped continuation, and a complete target must
+        // not scan the whole surface again. Patrol itself stays blocked by its completion gate.
+        "deep_archive" if target_kind == "keyword" => {
+            legacy_keyword_baseline_repairable
+                && matches!(
+                    lifecycle_state.as_str(),
+                    "pending_decision" | "monitoring" | "paused"
+                )
+        }
         // `archiving` is accepted only so the scheduler can recover an expired bounded baseline.
         // Admission still merges a live lease and the scheduler caps the number of Work Orders.
         "deep_archive" => matches!(lifecycle_state.as_str(), "pending_decision" | "archiving"),
@@ -862,6 +889,22 @@ pub(crate) async fn request_and_admit_in_transaction_scoped(
         return Err(AcquisitionChainError::TargetNotRequestable {
             state: lifecycle_state,
         });
+    }
+    // This is the non-bypassable patrol gate.  Rules, scheduler ticks and manual observation
+    // all create patrol through this chain; enforcing it here means none can create a Work Order
+    // until the keyword's accepted search archive and detail material are complete.
+    if lane == "patrol" && target_kind == "keyword" {
+        match crate::collection_control::keyword_archive_completion_in(transaction, target_ref)
+            .await?
+        {
+            crate::collection_control::KeywordArchiveCompletion::Complete => {}
+            crate::collection_control::KeywordArchiveCompletion::Incomplete => {
+                return Err(AcquisitionChainError::KeywordArchiveIncomplete);
+            }
+            crate::collection_control::KeywordArchiveCompletion::Unavailable => {
+                return Err(AcquisitionChainError::SchemaUnavailable);
+            }
+        }
     }
 
     let request_ref = Uuid::new_v4();

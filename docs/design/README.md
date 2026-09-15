@@ -90,6 +90,8 @@
 | [acceptance/target-inspector-performance-001-acceptance.md](acceptance/target-inspector-performance-001-acceptance.md) | ACC-TARGET-INSPECTOR-PERFORMANCE-001：源码、隔离 PostgreSQL、1440 浏览器与未部署边界 | 一次性报告 |
 | [changes/collection-action-001-ui-change-manifest.md](changes/collection-action-001-ui-change-manifest.md) | COLLECTION-ACTION-001：keyword Drawer 与列表行的主操作一致性及 inspector 读取失败边界 | 交付分支实施中；Issue #283 |
 | [acceptance/collection-action-001-acceptance.md](acceptance/collection-action-001-acceptance.md) | ACC-COLLECTION-ACTION-001：keyword Drawer 主操作一致性的分层验收 | 交付分支验收记录；Issue #283 |
+| [changes/keyword-archive-002-ui-change-manifest.md](changes/keyword-archive-002-ui-change-manifest.md) | KEYWORD-ARCHIVE-002：关键词建档入口可达性、两段路由与回执层级 | 交付分支实施中；Issue #286 |
+| [acceptance/keyword-archive-002-acceptance.md](acceptance/keyword-archive-002-acceptance.md) | ACC-KEYWORD-ARCHIVE-002：建档入口与回执真实性的分层验收 | 交付分支验收记录；Issue #286 |
 | [acceptance/collection-five-page-v4-ui-001-visual-acceptance.md](acceptance/collection-five-page-v4-ui-001-visual-acceptance.md) | ACC-COLLECTION-FIVE-PAGE-V4-UI-001：五页结构、隔离 PostgreSQL、1440×900 浏览器互动与未部署边界 | 一次性报告 |
 | [acceptance/design-009-runtime-capacity-surface-acceptance.md](acceptance/design-009-runtime-capacity-surface-acceptance.md) | ACC-RUNTIME-001：产能判定、状态诚实性与视觉的验收记录 | 一次性报告 |
 | [pages/topic-intelligence-reference.html](pages/topic-intelligence-reference.html) | 可本地打开的合成静态参考实现；不读取、写入或声称真实系统事实 | 权威当前 |

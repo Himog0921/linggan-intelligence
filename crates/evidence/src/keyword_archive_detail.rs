@@ -241,7 +241,11 @@ pub async fn keyword_targets_pending_detail(
     .fetch_one(database.pool())
     .await?;
     if !schema_ready {
-        return Ok(std::collections::HashSet::new());
+        // Empty means “every known detail is complete”; a missing projection cannot truthfully
+        // mean that.  The list and patrol gate turn this error into their explicit Unknown state.
+        return Err(sqlx::Error::Protocol(
+            "keyword detail completeness schema is not ready".to_owned(),
+        ));
     }
     let rows: Vec<Uuid> = sqlx::query_scalar(concat!(
         // 跨行业那一侧。哪些样本算这个目标的，按**观察记录**算而不是样本行上的
@@ -293,6 +297,74 @@ pub async fn keyword_targets_pending_detail(
     .fetch_all(database.pool())
     .await?;
     Ok(rows.into_iter().collect())
+}
+
+/// Return whether the tables that make keyword-detail completeness readable exist in this
+/// database.  A missing projection is not an empty pending set: callers that decide whether a
+/// keyword may enter patrol must reject the unknown state rather than treating it as complete.
+pub(crate) async fn keyword_detail_schema_is_ready_in(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(concat!(
+        "SELECT ",
+        sample_facts_schema_ready_sql!(),
+        " AND to_regclass('collection_work_order_cross_industry_target') IS NOT NULL",
+    ))
+    .fetch_one(&mut **transaction)
+    .await
+}
+
+/// A single-target counterpart used only by the patrol admission gate.  It deliberately keeps
+/// the same two material sides as the list read: cross-industry samples and own-domain evidence.
+/// If either side still has a readable candidate, the archive is incomplete.
+pub(crate) async fn keyword_target_has_pending_detail_in(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    target_ref: Uuid,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(concat!(
+        "SELECT EXISTS ( \
+           SELECT 1 FROM cross_industry_sample sample \
+           JOIN cross_industry_sample_observation seen \
+             ON seen.sample_ref=sample.sample_ref \
+           JOIN linggan_runtime_capture_package seen_package \
+             ON seen_package.package_ref=seen.package_ref \
+           JOIN collection_work_order_lease_task seen_lease_task \
+             ON seen_lease_task.task_id=seen_package.task_id \
+           JOIN collection_work_order_lease seen_lease USING(lease_ref) \
+           JOIN collection_work_order seen_order USING(work_order_ref) \
+           WHERE seen_order.target_ref=$1 AND ",
+        pending_detail_sql!("seen_order.target_ref"),
+        " UNION \
+           SELECT 1 FROM collection_work_order work_order \
+           JOIN collection_work_order_lease lease USING(work_order_ref) \
+           JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
+           JOIN linggan_runtime_task task ON task.task_id=lease_task.task_id \
+           JOIN linggan_runtime_capture_package package ON package.task_id=task.task_id \
+           JOIN linggan_runtime_submission_receipt receipt USING(package_ref) \
+           JOIN linggan_material_discovery_finding finding USING(package_ref) \
+           JOIN linggan_runtime_record_disposition disposition \
+             ON disposition.package_ref=finding.package_ref \
+            AND disposition.record_ordinal=finding.record_ordinal \
+           WHERE work_order.target_ref=$1 \
+             AND finding.discovery_kind='discovery_search' \
+             AND receipt.material_admission='ACCEPTED' \
+             AND disposition.disposition='accepted_for_library_discovery' \
+             AND NOT EXISTS (SELECT 1 FROM linggan_material_content_detail detail \
+                             WHERE detail.content_public_ref=finding.content_public_ref) \
+             AND NOT EXISTS ( \
+               SELECT 1 FROM collection_work_order live_order \
+               JOIN collection_work_order_material_target live_scope USING (work_order_ref) \
+               LEFT JOIN collection_work_order_lease live_lease USING (work_order_ref) \
+               WHERE live_order.target_ref=work_order.target_ref \
+                 AND live_scope.content_public_ref=finding.content_public_ref \
+                 AND (live_order.queue_state IN ('queued','leased') \
+                      OR (live_lease.released_at IS NULL \
+                          AND live_lease.expires_at>scope_001_now()))) \
+         )"
+    ))
+    .bind(target_ref)
+    .fetch_one(&mut **transaction)
+    .await
 }
 
 /// 「这一篇还等着补详情」这条判据本身。单篇挑选与列表页批量共用它，免得同一件事在两处

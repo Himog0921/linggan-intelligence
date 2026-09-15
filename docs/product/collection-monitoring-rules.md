@@ -1,7 +1,7 @@
 # 采集监控产品规则（博主监控 / 关键词监控）
 
 > 状态: 权威当前
-> 最后核对: 2026-09-05
+> 最后核对: 2026-09-15
 > 适用范围: 观察目标的生命周期、深度建档、固定间隔观察、统一浏览器任务调度、爆款追踪与插件推送协同
 > 事实来源: Mog 于 2026-09-05 的“自动监测基线设计”确认、`domain-invariants.md`、采集控制合同与当前 `COLLECTION-SCHEDULER-SCALE-001` 源码/隔离 PostgreSQL 合同
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、`domain-invariants.md`、采集控制合同；本文件不授权任何真实采集执行
@@ -30,9 +30,11 @@ Attempt → immutable CapturePackage → SubmissionReceipt → 材料投影
 - 所有需要浏览器执行的来源——人工观察、定时观察、关键词、深度建档、缺口补采——都走 `AcquisitionRequest → AdmissionDecision → WorkOrder → Lease → RuntimeTask → Attempt → CapturePackage → SubmissionReceipt`。任何模块不得直接向某一工位塞任务。
 - `deep_archive` 是批量 lane，不是自动观察的前置、暂停条件或新的目标生命周期。它可以独立排队并在浏览器执行后逐步产生目录/详情材料。
 
-### 0.2 建档完整度影响解释，不阻断观察
+### 0.2 关键词先建档，创作者观察保持独立
 
-`UNKNOWN`、`PARTIAL`、风险终止或尚未建档都可以形成真实观察结果；它们只限制“能否声称覆盖完整/变化完整”，绝不阻止已经保存且启用的规则继续产生未来 Work Order。失败、部分接纳或未知覆盖也不得把规则静默关闭。
+**关键词**必须先完成建档，才允许保存或恢复自动巡查规则，也才允许任何 `patrol` 准入形成 Work Order。完成的唯一判据是：一轮 `deep_archive` 的搜索面已获接纳并达到受证明的结束边界，且该关键词已发现的作品没有待补详情。`UNKNOWN` 不是完成；读取不到建档投影时，规则命令与 patrol 准入必须拒绝，不能猜作空缺或完成。
+
+**创作者**保持既有合同：深度建档与持续观察是独立能力，创作者不因未完成建档而被这道关键词门槛阻断。关键词的历史存量规则不被自动改写；若其档案不完整，调度器如实记录既有闭集原因 `baseline_not_ready` 且不生成巡查 Work Order，后续由人完成建档后再明确恢复。
 
 因此，以下状态没有产品意义，数据库必须拒绝或迁移修复：
 
@@ -42,7 +44,7 @@ target.monitoring_enabled = true
 active automatic rule = none
 ```
 
-保存/暂停/恢复规则时，immutable rule revision、target 的 active pointer、`monitoring_enabled`、lifecycle、`monitor_schedule_anchor_at`、稳定的 `monitor_schedule_slot_seconds` 与 `monitor_next_run_at` 同一事务更新。页面只能读该耐久计划点，不能用“上次派出 + 某个旧间隔”自行推算。
+保存/暂停/恢复规则时，immutable rule revision、target 的 active pointer、`monitoring_enabled`、lifecycle、`monitor_schedule_anchor_at`、稳定的 `monitor_schedule_slot_seconds` 与 `monitor_next_run_at` 同一事务更新。关键词的 Save/Resume 在这笔事务内先读取上述建档判据；页面只能读该耐久计划点，不能用“上次派出 + 某个旧间隔”自行推算。
 
 ### 0.3 简单、确定的定时规则
 
@@ -90,7 +92,7 @@ active automatic rule = none
    ┌────┴────┬──────────┐
    ↓         ↓          ↓
 深度建档   设置观察规则  忽略
-        （两者可独立排队）
+        （创作者可独立；关键词须先完成建档）
 ```
 
 **「已入库 · 待决」是必须的状态。** 插件推送发生在用户浏览时，不应立刻消耗平台访问。这一态正是 `INV-36` 里「申请不等于授权」的落点。
