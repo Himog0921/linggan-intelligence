@@ -389,21 +389,21 @@ async fn creator_rule_queues_once_without_a_baseline_or_a_preassigned_station() 
 async fn scheduler_gate_only_cools_down_rejected_rules_and_never_outranks_the_rule_schedule() {
     let database = proof_database_for("collection_scheduler_gate_scope").await;
     let dispatched_target =
-        save_patrol_rule(&database, "keyword", "adhd::comprehensive", Some(20)).await;
+        save_patrol_rule(&database, "creator", "creator-schedule-proof", None).await;
     grant_authorization(
         &database,
         &AuthorizationGrant {
             platform: "xhs",
-            target_kind: "keyword",
+            target_kind: "creator",
             lane: "patrol",
-            purpose: "keyword patrol gate proof",
+            purpose: "creator patrol gate proof",
             max_targets: Some(10),
             max_works_per_target: Some(200),
             valid_for_days: 1,
         },
     )
     .await
-    .expect("keyword patrol authorization is granted");
+    .expect("creator patrol authorization is granted");
 
     make_rule_due(&database, dispatched_target).await;
     let first = linggan_evidence::run_due_patrols(&database)
@@ -435,7 +435,19 @@ async fn scheduler_gate_only_cools_down_rejected_rules_and_never_outranks_the_ru
         "排期说到点了就得被考虑：历史派发留下的旧便条没有资格压过排期，只有被拒的才有"
     );
 
-    // 另一半：被拒的规则仍然要等 300 秒。这条目标没有签过任何创作者巡查授权，准入必然拒绝。
+    // 上半段的授权只服务于这个已派发目标。撤销它后再验证未授权目标的冷却，避免同一类
+    // 目标的宽授权意外覆盖拒绝样本。
+    sqlx::query(
+        "UPDATE collection_acquisition_authorization \
+         SET revoked_at=scope_001_now(),revoke_reason='proof: isolate rejected creator rule' \
+         WHERE target_kind='creator' AND lane='patrol' \
+           AND purpose='creator patrol gate proof' AND revoked_at IS NULL",
+    )
+    .execute(database.pool())
+    .await
+    .expect("the dispatched-target authorization is retired before the rejection proof");
+
+    // 另一半：被拒的规则仍然要等 300 秒。适用授权已撤销，准入必然拒绝。
     let rejected_target = save_patrol_rule(&database, "creator", "creator-gate-proof", None).await;
     make_rule_due(&database, rejected_target).await;
     let refused = linggan_evidence::run_due_patrols(&database)
@@ -443,7 +455,10 @@ async fn scheduler_gate_only_cools_down_rejected_rules_and_never_outranks_the_ru
         .expect("a rule without authorization is refused, not queued");
     assert_eq!(
         refused.skipped,
-        vec![(rejected_target, "authorization_missing".to_owned())]
+        vec![(
+            (rejected_target),
+            "authorization_expired_or_revoked".to_owned()
+        )]
     );
     let waited: i32 = sqlx::query_scalar(
         "SELECT EXTRACT(EPOCH FROM (next_eligible_at-decided_at))::integer \
@@ -477,148 +492,44 @@ async fn scheduler_gate_only_cools_down_rejected_rules_and_never_outranks_the_ru
         .expect("the rule is considered again after the cooldown");
     assert_eq!(
         after_cooldown.skipped,
-        vec![(rejected_target, "authorization_missing".to_owned())],
+        vec![(
+            (rejected_target),
+            "authorization_expired_or_revoked".to_owned()
+        )],
         "冷却过后如期再来一次：便条是冷却，不是封条"
     );
 }
 
-/// 关键词巡查「成功了没有」读的是**这一轮该拿回多少**，不是授权给的加载预算。
+/// 未完成建档的关键词没有可排期的巡查规则。
 ///
-/// 规则说「综合榜、取赞前 20、近 7 天」；授权给的是 200 篇的加载预算——加载预算决定插件
-/// 翻几屏，规则口径决定它留下哪几条。判据此前读 `maximumQuota`，于是那一轮采回 20 篇、
-/// 按规则停得完全正确，判据却要求 `20 >= 200`：`last_patrol_succeeded_at` 一次也写不上，
-/// 界面上同一行同时显示「最近新增 +15」和「上次巡查 尚未取得成功结果」。
-///
-/// 两条断言合起来才守得住：采回 20 篇要记成功（读 `expectedCount` 才成立），采回 19 篇
-/// 不能记（插件自己报的 `target_reached` 不能替数量作证）。
+/// 这是规则写入这一层的第一道门；即使有授权，也不能用它把尚未完成的关键词送进巡查。
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL proof database"]
-async fn a_keyword_patrol_counts_as_success_at_the_count_its_rule_asked_for() {
+async fn an_unarchived_keyword_rule_is_rejected_before_any_patrol_is_scheduled() {
     let database = proof_database_for("collection_keyword_patrol_expected_count").await;
     let target_ref = save_patrol_rule(&database, "keyword", "adhd::comprehensive", Some(20)).await;
-    grant_authorization(
-        &database,
-        &AuthorizationGrant {
-            platform: "xhs",
-            target_kind: "keyword",
-            lane: "patrol",
-            purpose: "keyword patrol expected count proof",
-            max_targets: Some(10),
-            max_works_per_target: Some(200),
-            valid_for_days: 1,
-        },
-    )
-    .await
-    .expect("keyword patrol authorization is granted");
-    make_rule_due(&database, target_ref).await;
-    let tick = linggan_evidence::run_due_patrols(&database)
-        .await
-        .expect("the due keyword rule is queued");
-    assert_eq!(tick.queued, vec![target_ref]);
-
-    let station = seed_creator_work_order(&database).await;
-    // 工位、安装与账号由创作者夹具提供；关键词巡查要的是搜索能力，这个夹具的工位默认
-    // 只会读创作者页。夹具自己那张旧工单也要退出派发——本用例要连着派两轮，靠
-    // `scheduled_for` 的先后让它是不可靠的。
-    sqlx::query(
-        "UPDATE plugin_installation SET capabilities=capabilities || '[\"discovery_search\"]'::jsonb \
-         WHERE installation_ref=$1",
-    )
-    .bind(station.installation_ref)
-    .execute(database.pool())
-    .await
-    .expect("the proof station declares the search capability");
-    sqlx::query("UPDATE collection_work_order SET queue_state='cancelled' WHERE work_order_ref=$1")
-        .bind(station.work_order_ref)
-        .execute(database.pool())
-        .await
-        .expect("the fixture's own legacy order leaves the dispatch queue");
-
-    let decision = decide_dispatch(
-        &database,
-        &station.install_key,
-        &station.installation_credential,
-    )
-    .await
-    .expect("the search-capable station claims the queued keyword patrol");
-    assert_eq!(capability(&decision), "discovery_search");
-    let claimed: (Uuid, String) = sqlx::query_as(
-        "SELECT work_order.target_ref,work_order.lane \
-         FROM collection_work_order_lease lease \
-         JOIN collection_work_order work_order USING(work_order_ref) \
-         WHERE lease.released_at IS NULL \
-         ORDER BY lease.issued_at DESC, lease.lease_ref DESC LIMIT 1",
-    )
-    .fetch_one(database.pool())
-    .await
-    .expect("the claimed order is readable");
-    assert_eq!(claimed, (target_ref, "patrol".to_owned()));
-    let task = task_from_dispatch(&decision);
-    assert_eq!(task.raw()["target"]["query"], "adhd");
     assert_eq!(
-        task.raw()["maximumQuota"],
-        200,
-        "授权给的加载预算照旧写在任务说明书上——它管的是翻几屏"
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM collection_monitor_rule WHERE target_ref=$1",
+        )
+        .bind(target_ref)
+        .fetch_one(database.pool())
+        .await
+        .expect("the control rows are readable"),
+        0,
+        "未完成建档的关键词在规则写入前被拒绝，因而没有可排期的 patrol rule"
     );
     assert_eq!(
-        task.raw()["expectedCount"],
-        20,
-        "规则说取赞前 20：这一轮该拿回多少在派发时算一次、冻进任务说明书，此后判据只读它"
-    );
-
-    run_keyword_patrol_round(
-        &database,
-        &task,
-        station.producer_instance_id,
-        20,
-        "target_reached",
-    )
-    .await;
-    let succeeded_at = read_target_patrol_success(&database, target_ref).await;
-    assert!(
-        succeeded_at.is_some(),
-        "采回这一轮该拿回的 20 篇、按规则停对了，就该被记成巡查成功"
-    );
-    let rule_succeeded_at: Option<String> = sqlx::query_scalar(
-        "SELECT last_patrol_succeeded_at::text FROM collection_monitor_rule \
-         WHERE target_ref=$1 AND retired_at IS NULL",
-    )
-    .bind(target_ref)
-    .fetch_one(database.pool())
-    .await
-    .expect("the rule row is readable");
-    assert!(
-        rule_succeeded_at.is_some(),
-        "界面上「上次巡查」读的就是规则这一列"
-    );
-
-    // 第二圈少一篇：插件仍然报 `target_reached`（它认为自己停了），但这一轮的份数没拿够。
-    make_rule_due(&database, target_ref).await;
-    let second_tick = linggan_evidence::run_due_patrols(&database)
+        sqlx::query_scalar::<_, String>(
+            "SELECT reason_code FROM collection_monitor_rule_command_receipt \
+             WHERE target_ref=$1 ORDER BY recorded_at DESC, command_receipt_ref DESC LIMIT 1",
+        )
+        .bind(target_ref)
+        .fetch_one(database.pool())
         .await
-        .expect("the rule is due again");
-    assert_eq!(second_tick.queued, vec![target_ref]);
-    let second = decide_dispatch(
-        &database,
-        &station.install_key,
-        &station.installation_credential,
-    )
-    .await
-    .expect("the station claims the next keyword patrol");
-    let second_task = task_from_dispatch(&second);
-    assert_eq!(second_task.raw()["expectedCount"], 20);
-    run_keyword_patrol_round(
-        &database,
-        &second_task,
-        station.producer_instance_id,
-        19,
-        "target_reached",
-    )
-    .await;
-    assert_eq!(
-        read_target_patrol_success(&database, target_ref).await,
-        succeeded_at,
-        "少一篇就不是完成：判据读的是份数，不是插件自己那句 target_reached"
+        .expect("the rejection receipt is readable"),
+        "baseline_not_ready",
+        "拒绝原因保留在既有的持久化闭集词汇内，不以本次修复扩大共享数据库约束"
     );
 }
 
@@ -2153,6 +2064,14 @@ async fn save_patrol_rule(
     )
     .await
     .expect("the patrol rule is saved");
+    if target_kind == "keyword" {
+        assert_eq!(saved.reason_code, "baseline_not_ready");
+        assert_eq!(
+            saved.outcome,
+            linggan_evidence::MonitorCommandOutcomeKind::Rejected
+        );
+        return target_ref;
+    }
     assert_eq!(saved.reason_code, "rule_saved");
     target_ref
 }

@@ -1198,6 +1198,7 @@ async fn collection_material_deepening(
                 // 与「状态不允许」分开报：这条的处置是去给目标指定领域，不是等状态流转。
                 AcquisitionChainError::TargetDomainUnassigned => "target_domain_unassigned",
                 AcquisitionChainError::TargetNotRequestable { .. } => "target_not_requestable",
+                AcquisitionChainError::KeywordArchiveIncomplete => "keyword_archive_incomplete",
                 AcquisitionChainError::InvalidMaterialTargets => "material_targets_invalid",
                 AcquisitionChainError::ProgressiveArchiveAuthorizationTooSmall { .. } => {
                     "progressive_archive_authorization_too_small"
@@ -1280,6 +1281,7 @@ async fn collection_archive_request(State(state): State<LocalWebState>, body: By
                 // 与「状态不允许」分开报：这条的处置是去给目标指定领域，不是等状态流转。
                 AcquisitionChainError::TargetDomainUnassigned => "target_domain_unassigned",
                 AcquisitionChainError::TargetNotRequestable { .. } => "target_not_requestable",
+                AcquisitionChainError::KeywordArchiveIncomplete => "keyword_archive_incomplete",
                 AcquisitionChainError::InvalidMaterialTargets => "material_targets_invalid",
                 AcquisitionChainError::ProgressiveArchiveAuthorizationTooSmall { .. } => {
                     "progressive_archive_authorization_too_small"
@@ -4213,6 +4215,12 @@ async fn collection_target_patrol_toggle(
         Ok(_) if enable => Redirect::to(&back("patrol_resumed")),
         Ok(_) => Redirect::to(&back("patrol_paused")),
         Err(MonitorRuleCommandError::UnknownTarget) => Redirect::to(&back("patrol_toggle_no_rule")),
+        Err(MonitorRuleCommandError::Acquisition(
+            AcquisitionChainError::KeywordArchiveIncomplete,
+        )) => Redirect::to(&back("keyword_archive_incomplete")),
+        Err(MonitorRuleCommandError::Acquisition(AcquisitionChainError::SchemaUnavailable)) => {
+            Redirect::to(&back("keyword_patrol_archive_unreadable"))
+        }
         // 一起开关时有规则没翻过来——多半是那一条在这一页打开之后被改过（另一个标签页，
         // 或者一次巡检推进了它的版本）。不报成功：目标行是诚实的，撒谎的会是那句横幅。
         Err(MonitorRuleCommandError::NotEveryRuleSwitched { .. }) => {
@@ -4407,12 +4415,14 @@ async fn read_keyword_archive(
 /// 一起收进来——调用方不再自己 match，也就没有再漏一处的地方。
 fn keyword_archive_error_receipt(error: &AcquisitionChainError) -> &'static str {
     match error {
+        AcquisitionChainError::UnknownTarget => "keyword_archive_target_missing",
         // 缺领域要说清是缺领域。它此前落进一句「上一次动作没有完成」——信息量最低的那条
         // 兜底文案，既不说原因也不说下一步。
         AcquisitionChainError::TargetDomainUnassigned => "target_domain_unassigned",
         // 准入按状态拒绝：这是前置，不是暂时故障。写「稍后重试」等于让人反复做一件永远
         // 不会成的事。
         AcquisitionChainError::TargetNotRequestable { .. } => "keyword_archive_not_requestable",
+        AcquisitionChainError::KeywordArchiveIncomplete => "keyword_archive_incomplete",
         // 其余（目标已经不在了、schema 没就绪、数据库故障）是真的没送出去，如实说。
         _ => "archive_unavailable",
     }

@@ -41,6 +41,8 @@ pub enum AcquisitionChainError {
     TargetDomainUnassigned,
     #[error("that target is not in a state where deep archiving can be requested: {state}")]
     TargetNotRequestable { state: String },
+    #[error("a keyword must complete its search archive and details before patrol can start")]
+    KeywordArchiveIncomplete,
     #[error("material deepening needs between 1 and 200 distinct content targets")]
     InvalidMaterialTargets,
     #[error(
@@ -862,6 +864,22 @@ pub(crate) async fn request_and_admit_in_transaction_scoped(
         return Err(AcquisitionChainError::TargetNotRequestable {
             state: lifecycle_state,
         });
+    }
+    // This is the non-bypassable patrol gate.  Rules, scheduler ticks and manual observation
+    // all create patrol through this chain; enforcing it here means none can create a Work Order
+    // until the keyword's accepted search archive and detail material are complete.
+    if lane == "patrol" && target_kind == "keyword" {
+        match crate::collection_control::keyword_archive_completion_in(transaction, target_ref)
+            .await?
+        {
+            crate::collection_control::KeywordArchiveCompletion::Complete => {}
+            crate::collection_control::KeywordArchiveCompletion::Incomplete => {
+                return Err(AcquisitionChainError::KeywordArchiveIncomplete);
+            }
+            crate::collection_control::KeywordArchiveCompletion::Unavailable => {
+                return Err(AcquisitionChainError::SchemaUnavailable);
+            }
+        }
     }
 
     let request_ref = Uuid::new_v4();

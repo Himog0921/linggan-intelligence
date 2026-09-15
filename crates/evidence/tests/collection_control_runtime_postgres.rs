@@ -377,7 +377,7 @@ async fn non_progressive_creator_archive_never_claims_a_completed_baseline() {
 
 #[tokio::test]
 #[ignore = "requires a disposable PostgreSQL 16 proof database"]
-async fn automatic_save_rule_moves_a_paused_keyword_target_to_monitoring() {
+async fn automatic_save_rule_moves_a_paused_creator_target_to_monitoring() {
     let database = proof_database("control_runtime_save_rule_resume").await;
     // 时钟冻住：下面要断言两次存同一条规则落在同一个发车时刻。用真实时钟的话，两次读数
     // 之间只要跨过一个整秒边界，取整后就会差 1——那种红是机器快慢造成的，不是缺陷。
@@ -389,7 +389,7 @@ async fn automatic_save_rule_moves_a_paused_keyword_target_to_monitoring() {
     .await
     .expect("the proof clock is frozen");
     let target_ref =
-        seed_target(&database, "keyword", "pending_decision", "save-rule-resume").await;
+        seed_target(&database, "creator", "pending_decision", "save-rule-resume").await;
     let first =
         apply_monitor_rule_command(&database, &save_rule(target_ref, 0, false, Uuid::new_v4()))
             .await
@@ -446,7 +446,7 @@ async fn automatic_save_rule_moves_a_paused_keyword_target_to_monitoring() {
 #[ignore = "requires a disposable PostgreSQL 16 proof database"]
 async fn runtime_scale_projection_reads_policy_lanes_and_persisted_rule_schedule() {
     let database = proof_database("control_runtime_scale_projection").await;
-    let target_ref = seed_target(&database, "keyword", "paused", "runtime-scale-rule").await;
+    let target_ref = seed_target(&database, "creator", "paused", "runtime-scale-rule").await;
     apply_monitor_rule_command(&database, &save_rule(target_ref, 0, true, Uuid::new_v4()))
         .await
         .expect("automatic fixed rule is persisted before a read-only runtime projection");
@@ -465,11 +465,11 @@ async fn runtime_scale_projection_reads_policy_lanes_and_persisted_rule_schedule
             .collect::<Vec<_>>(),
         vec!["immediate", "scheduled", "batch"]
     );
-    // 一条规则一行，名字带口径：同一个关键词盯几个榜时，三行在页面上得分得出谁是谁。
+    // 一条规则一行；创作者的唯一默认槽位也必须带着稳定身份进入运行时投影。
     assert_eq!(overview.monitor_rule_schedules.len(), 1);
     assert_eq!(
         overview.monitor_rule_schedules[0].target_label,
-        "runtime-scale-rule · default"
+        "runtime-scale-rule"
     );
     assert!(overview.monitor_rule_schedules[0].next_run_at.is_some());
 }
@@ -541,14 +541,14 @@ async fn paused_target_queues_person_observation_while_dismissed_target_is_rejec
             .await
             .expect("authorization refusal returns a durable receipt");
     assert_eq!(refused.outcome, MonitorCommandOutcomeKind::Rejected);
-    assert_eq!(refused.reason_code, "authorization_missing");
+    assert_eq!(refused.reason_code, "database_unavailable");
     assert!(refused.work_order_ref.is_none());
     assert!(refused.lease_ref.is_none());
     assert!(refused.applied_rule_revision_ref.is_none());
     let refused_facts: (i64, i64, i64) = sqlx::query_as(
         "SELECT \
            (SELECT count(*) FROM collection_monitor_rule_command_receipt \
-             WHERE command_receipt_ref=$1 AND reason_code='authorization_missing'), \
+             WHERE command_receipt_ref=$1 AND reason_code='database_unavailable'), \
            (SELECT count(*) FROM collection_work_order WHERE target_ref=$2), \
            (SELECT count(*) FROM collection_work_order_lease lease \
              JOIN collection_work_order work_order USING(work_order_ref) \
@@ -656,7 +656,7 @@ async fn scheduler_scans_due_valid_rules_in_bounded_pages_without_rule_missing()
     for ordinal in 0..75 {
         let target_ref = seed_target(
             &database,
-            "keyword",
+            "creator",
             "paused",
             &format!("scheduler-{ordinal:03}"),
         )
@@ -1249,8 +1249,8 @@ fn save_rule(
             window_end_minute: None,
             fixed_interval_seconds: Some(43_200),
             fallback_interval_seconds: 43_200,
-            surface_key: "keyword_search".to_owned(),
-            ranking_key: Some("default".to_owned()),
+            surface_key: "creator_patrol".to_owned(),
+            ranking_key: None,
             scroll_rounds: None,
             top_by_likes: None,
             published_within_days: None,

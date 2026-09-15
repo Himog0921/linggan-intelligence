@@ -428,9 +428,6 @@ pub(crate) fn target_primary_action(
         if keyword_archive == KeywordArchiveRead::DetailPending {
             return TargetPrimaryAction::ContinueArchive;
         }
-        if target.lifecycle_state == "paused" {
-            return TargetPrimaryAction::OpenPatrol("恢复巡查");
-        }
         // **还没建过档的词，主操作就是建档——它是不是已经在按周巡查，不改这件事。**
         //
         // 这一条必须排在监控判断之前。巡查按规则口径取的是**每期增量**（取前 N，adhd 那
@@ -441,13 +438,21 @@ pub(crate) fn target_primary_action(
         if keyword_archive == KeywordArchiveRead::NotArchived {
             return TargetPrimaryAction::EstablishArchive;
         }
+        // Unknown is not complete.  Do not offer an action that can enter patrol until the
+        // archive predicate becomes readable again.
+        if keyword_archive == KeywordArchiveRead::Unavailable {
+            return TargetPrimaryAction::ViewArchiveUnavailable;
+        }
+        if target.lifecycle_state == "paused" {
+            return TargetPrimaryAction::OpenPatrol("恢复巡查");
+        }
         if target.monitoring_enabled {
             return TargetPrimaryAction::ViewKeyword;
         }
-        // 走到这里只剩两态：建完了该开始每周巡检；读不到就不催也不改口径，维持原本的入口。
+        // 走到这里只剩完成态：两段都完成，才允许开始每周巡检。
         return match keyword_archive {
             KeywordArchiveRead::Complete => TargetPrimaryAction::OpenPatrol("开始每周巡检"),
-            KeywordArchiveRead::Unavailable => TargetPrimaryAction::OpenPatrol("设置巡查"),
+            KeywordArchiveRead::Unavailable => TargetPrimaryAction::ViewArchiveUnavailable,
             // 前两态在上面按它们自己的次序返回了；保留这两臂是为了让这个 match 仍然穷尽
             // 四态——将来多一个建档态时，编译在这里就会停下来。
             KeywordArchiveRead::NotArchived => TargetPrimaryAction::EstablishArchive,
@@ -3583,9 +3588,10 @@ mod tests {
         let complete = render(KeywordArchiveRead::Complete);
         assert!(complete.contains("开始每周巡检"), "{complete}");
 
-        // 建档态读不到时既不催也不改口径，与列表行走同一个兜底。
+        // 建档态读不到时既不催也不进入巡查，与列表行走同一个兜底。
         let unknown = render(KeywordArchiveRead::Unavailable);
-        assert!(unknown.contains("设置巡查"), "{unknown}");
+        assert!(unknown.contains("当前无法判断"), "{unknown}");
+        assert!(!unknown.contains("设置巡查"), "{unknown}");
     }
 
     /// 检查器读失败只让巡查事实未知，不能把已经独立读到的关键词建档态一起压掉。

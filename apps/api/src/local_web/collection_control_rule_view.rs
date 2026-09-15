@@ -175,7 +175,10 @@ impl MonitorRuleFormState {
             surface_key: rule.surface_key.clone(),
             ranking_key: rule.ranking_key.clone().unwrap_or_default(),
             // 空表示「没记录过口径」，不是 0。既有规则由 0046 补过，新规则从上面的默认来。
-            scroll_rounds: rule.scroll_rounds.map(|v| v.to_string()).unwrap_or_default(),
+            scroll_rounds: rule
+                .scroll_rounds
+                .map(|v| v.to_string())
+                .unwrap_or_default(),
             top_by_likes: rule.top_by_likes.map(|v| v.to_string()).unwrap_or_default(),
             published_within_days: rule
                 .published_within_days
@@ -247,14 +250,16 @@ pub async fn read_monitor_rule_panel(
         .as_ref()
         .and_then(|receipt| receipt.applied_rule_revision_ref)
     {
-        Some(revision_ref) => sqlx::query_scalar::<_, String>(
-            "SELECT rule.slot_key FROM collection_monitor_rule rule \
+        Some(revision_ref) => {
+            sqlx::query_scalar::<_, String>(
+                "SELECT rule.slot_key FROM collection_monitor_rule rule \
              JOIN collection_monitor_rule_revision revision ON revision.rule_ref=rule.rule_ref \
              WHERE revision.rule_revision_ref=$1 AND rule.retired_at IS NULL",
-        )
-        .bind(revision_ref)
-        .fetch_optional(database.pool())
-        .await?,
+            )
+            .bind(revision_ref)
+            .fetch_optional(database.pool())
+            .await?
+        }
         None => None,
     };
     let selection = match receipt_slot.as_deref() {
@@ -620,7 +625,9 @@ fn receipt_meaning(outcome: &str, reason: &str) -> &'static str {
         ("replay", _) => "相同命令已处理过；这里显示的是耐久重放结果。",
         ("stale_revision", _) => "页面基于旧版本提交，没有覆盖当前规则。请核对当前值后重试。",
         ("identity_conflict", _) => "同一命令标识携带了不同内容，没有覆盖原命令。",
-        (_, "baseline_not_ready") => "这是旧版本记录的历史原因；当前规则不再以建档完整度作为自动观察门槛。",
+        (_, "baseline_not_ready") => {
+            "关键词建档尚未完成：先完成搜索面和待补详情，再保存或恢复巡查规则。"
+        }
         (_, "invalid_interval") => "观察间隔只支持 6 小时、12 小时、24 小时、2 天或 7 天。",
         (_, "invalid_schedule") => "当前版本只接受固定、全天的单一观察间隔。",
         (_, "target_not_requestable") => "这个目标当前不允许新增观察工作。",
@@ -658,7 +665,9 @@ fn error_summary(code: &str) -> &'static str {
     match code {
         "stale_revision" => "规则版本已变化；下面保留了你提交的值，没有覆盖当前版本。",
         "identity_conflict" => "命令标识冲突；原命令仍保留，下面的值尚未应用。",
-        "baseline_not_ready" => "这是旧版本记录的历史原因；当前规则不再以建档完整度作为自动观察门槛。",
+        "baseline_not_ready" => {
+            "关键词建档尚未完成：先完成搜索面和待补详情，再保存或恢复巡查规则。"
+        }
         "read_model_not_connected" => "本机规则读写当前不可用；没有写入规则或采集工作。",
         _ => "请修正标出的字段后再提交；当前规则没有改变。",
     }
@@ -706,8 +715,12 @@ fn sampling_policy_section(
     // 「一周内」，那是个做不到的承诺。**取值仍是天数**：存的是「我想要多新的内容」这个
     // 意图，天数是跨平台通用的表达；档位是各平台的执行细节，由插件按自己的能力兑现，
     // 并把实际生效的那一档回写进回执。
-    const PUBLISH_WINDOWS: [(&str, &str); 4] =
-        [("", "不限"), ("1", "一天内"), ("7", "一周内"), ("180", "半年内")];
+    const PUBLISH_WINDOWS: [(&str, &str); 4] = [
+        ("", "不限"),
+        ("1", "一天内"),
+        ("7", "一周内"),
+        ("180", "半年内"),
+    ];
     let current_window = form.published_within_days.trim();
     let mut publish_windows = PUBLISH_WINDOWS
         .iter()
@@ -744,14 +757,14 @@ fn sampling_policy_section(
     // 只读：编辑一条已有规则时改它的排序，等于把这条规则搬到另一个榜上——它签发过的工单
     // 与采回来的材料会突然说不清是按什么口径取的。要换榜就新开一条，再停用旧的那条。
     let ranking_label = KEYWORD_RANKINGS
-    .iter()
-    .find(|(value, _)| *value == form.ranking_key.trim())
-    .map_or_else(
-        // 认不出的排序显示原文：那是一个机器标识而不是我们的描述性标签，
-        // 把它藏起来会让人看不出这个目标到底在按什么采。
-        || escape(form.ranking_key.trim()),
-        |(_, text)| (*text).to_owned(),
-    );
+        .iter()
+        .find(|(value, _)| *value == form.ranking_key.trim())
+        .map_or_else(
+            // 认不出的排序显示原文：那是一个机器标识而不是我们的描述性标签，
+            // 把它藏起来会让人看不出这个目标到底在按什么采。
+            || escape(form.ranking_key.trim()),
+            |(_, text)| (*text).to_owned(),
+        );
     let (ranking_field, ranking_hint) = if is_new_rule(panel) {
         // 只提供还没有规则的榜。已经有规则的那个再列出来，保存会撞上那条规则、被判成
         // 过期版本，而人只看到一句「版本已过期」，看不出是因为这个榜已经在盯了。
@@ -1071,7 +1084,12 @@ mod sampling_policy_tests {
     fn the_publish_window_offers_only_what_the_platform_supports() {
         let form = MonitorRuleFormState::from_panel(&keyword_panel("考研自习::latest"));
         let html = sampling_policy_section(&keyword_panel("考研自习::latest"), &form, false);
-        for (value, text) in [("", "不限"), ("1", "一天内"), ("7", "一周内"), ("180", "半年内")] {
+        for (value, text) in [
+            ("", "不限"),
+            ("1", "一天内"),
+            ("7", "一周内"),
+            ("180", "半年内"),
+        ] {
             assert!(html.contains(&format!(r#"<option value="{value}""#)));
             assert!(html.contains(text));
         }
@@ -1118,7 +1136,10 @@ mod sampling_policy_tests {
             "新开一条规则必须能选榜，否则多规则从界面上到不了"
         );
         for (value, text) in KEYWORD_RANKINGS {
-            assert!(html.contains(&format!(r#"value="{value}""#)), "{value} 缺失");
+            assert!(
+                html.contains(&format!(r#"value="{value}""#)),
+                "{value} 缺失"
+            );
             assert!(html.contains(text), "{text} 缺失");
         }
         assert_eq!(form.expected_revision, 0, "新规则报的是它自己的第 0 版");
@@ -1136,7 +1157,10 @@ mod sampling_policy_tests {
             .retain(|value| value != "most_liked" && value != "comprehensive");
         let form = MonitorRuleFormState::from_panel(&panel);
         let html = sampling_policy_section(&panel, &form, false);
-        assert!(!html.contains(r#"value="most_liked""#), "已有规则的榜不该再列");
+        assert!(
+            !html.contains(r#"value="most_liked""#),
+            "已有规则的榜不该再列"
+        );
         assert!(
             !html.contains(r#"value="comprehensive""#),
             "已有规则的榜不该再列"

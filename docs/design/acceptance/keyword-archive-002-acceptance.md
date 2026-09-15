@@ -6,6 +6,18 @@
 > 事实来源: 当前交付分支、真实样式表层叠复核、focused 渲染测试、隔离 PostgreSQL 走产品路由的证明与两轮独立复审
 > 冲突时以谁为准: 真实代码/测试/运行结果与用户最新确认
 
+## 0. 2026-09-15 流程门槛补充（当前合同）
+
+Mog 已决定关键词必须完成建档才允许进入巡查。本补充取代本文件中任何“未建档关键词可先保存/恢复巡查规则”的历史表述，但不改变 creator 的独立观察合同。完成是“合格搜索面 + 无待补详情”，不是已提交任务、空候选或 `monitoring` 生命周期。
+
+- `SaveRule` 与 `Resume` 在同一目标锁事务中拒绝未完成/未知关键词，写入既有闭集的 `baseline_not_ready` command receipt，且不创建规则 revision。
+- `patrol` 的统一 Request → Admission → WorkOrder 链再次检查；人工观察和 scheduler 都不能绕过。scheduler 记录 `baseline_not_ready` 并且不生成 WorkOrder。
+- 旧 target-level 开关在逐规则操作前预检，避免部分翻转；未知/删除均给明确回执，不再落“稍后重试”。
+- 列表与抽屉对 `Unavailable` 只提供查看建档状态；不显示“设置巡查”。
+- 历史任务缺失 `expectedCount` 时，搜索面 `target_reached` 只回退到该任务冻结的 `maximumQuota`；新任务仍优先使用 `expectedCount`，不会把关键词巡查的 20 条口径误读成 200。
+
+本补充不自动暂停或重写历史规则；这会是独立的数据处置。验证结果与未证明边界以本次提交后的实际测试记录为准。
+
 ## 1. 验收对象
 
 - 页面/组件/状态: 关键词行的「档案」列与主操作按钮、抽屉决策区、成功回执；处理函数 `collection_target_deep_archive` 的关键词分支。

@@ -796,7 +796,7 @@ async fn a_scheduler_tick_names_the_actual_admission_failure() {
         "INSERT INTO collection_observation_target \
              (target_ref,platform,target_kind,identity_key,display_name,source,lifecycle_state, \
               domain_ref) \
-         VALUES ($1,'xhs','keyword','数学思维::sched','数学思维','manual','pending_decision', \
+         VALUES ($1,'xhs','creator','creator-scheduler-reason','调度原因样本','manual','pending_decision', \
                  $2::uuid)",
     )
     .bind(target_ref)
@@ -826,11 +826,11 @@ async fn a_scheduler_tick_names_the_actual_admission_failure() {
                 window_end_minute: None,
                 fixed_interval_seconds: Some(86_400),
                 fallback_interval_seconds: 86_400,
-                surface_key: "keyword_search".to_owned(),
-                ranking_key: Some("most_liked".to_owned()),
-                scroll_rounds: Some(3),
-                top_by_likes: Some(20),
-                published_within_days: Some(7),
+                surface_key: "creator_patrol".to_owned(),
+                ranking_key: None,
+                scroll_rounds: None,
+                top_by_likes: None,
+                published_within_days: None,
                 task_contract_version: "linggan.producer.task-spec.v1".to_owned(),
             }),
         },
@@ -847,9 +847,9 @@ async fn a_scheduler_tick_names_the_actual_admission_failure() {
         "INSERT INTO collection_acquisition_authorization \
              (authorization_ref,platform,target_kind,lane,purpose,granted_by,expires_at, \
               allowed_task_templates,allowed_dispatch_lanes,max_work_units,max_works_per_target) \
-         VALUES (gen_random_uuid(),'xhs','keyword','patrol','定时巡检','person', \
+         VALUES (gen_random_uuid(),'xhs','creator','patrol','定时巡检','person', \
                  scope_001_now()+interval '1 day', \
-                 ARRAY['keyword_patrol'],ARRAY['immediate','scheduled'],200,200)",
+                 ARRAY['creator_patrol'],ARRAY['immediate','scheduled'],200,200)",
     )
     .execute(database.pool())
     .await

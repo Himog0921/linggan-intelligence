@@ -1638,6 +1638,15 @@ pub enum MonitorRuleCommandError {
     Database(#[from] sqlx::Error),
 }
 
+/// The only predicate used to decide whether a keyword may enter patrol.  It is intentionally
+/// derived from accepted archive facts, not copied onto the target lifecycle row.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum KeywordArchiveCompletion {
+    Complete,
+    Incomplete,
+    Unavailable,
+}
+
 pub async fn apply_monitor_rule_command(
     database: &Database,
     command: &MonitorRuleCommand,
@@ -1776,6 +1785,41 @@ pub async fn apply_monitor_rule_command(
             None,
         )
         .await;
+    }
+
+    // A keyword rule is the act that enters patrol.  Do not let the UI be the only guard: API
+    // callers and old links reach this command directly.  Both the bounded search surface and
+    // every discovered detail must be complete before a rule may be saved or resumed.
+    if target_kind == "keyword"
+        && matches!(
+            command.kind,
+            MonitorCommandKind::SaveRule | MonitorCommandKind::Resume
+        )
+    {
+        let reason_code =
+            match keyword_archive_completion_in(&mut transaction, command.target_ref).await? {
+                KeywordArchiveCompletion::Complete => None,
+                // `baseline_not_ready` is the existing closed durable vocabulary. It covers an
+                // incomplete or unreadable archive without widening persisted reason-code
+                // constraints before a separately authorized shared migration.
+                KeywordArchiveCompletion::Incomplete | KeywordArchiveCompletion::Unavailable => {
+                    Some("baseline_not_ready")
+                }
+            };
+        if let Some(reason_code) = reason_code {
+            return finish_monitor_command(
+                transaction,
+                command,
+                &payload_digest,
+                reason_code,
+                MonitorCommandOutcomeKind::Rejected,
+                current_revision,
+                None,
+                None,
+                None,
+            )
+            .await;
+        }
     }
 
     let next_revision = current_revision + 1;
@@ -2155,6 +2199,7 @@ pub async fn apply_manual_observe_command(
 
 fn manual_observe_error_reason(error: &AcquisitionChainError) -> &'static str {
     match error {
+        AcquisitionChainError::KeywordArchiveIncomplete => "baseline_not_ready",
         AcquisitionChainError::TargetNotRequestable { .. } => "target_not_requestable",
         // 缺领域必须单独报。它此前落进下面那个通配符，于是「这个目标还没说清属于哪个
         // 领域」被显示成「数据库不可用」——人会去查服务是不是挂了，而真正要做的只是
@@ -2264,6 +2309,32 @@ macro_rules! keyword_baseline_sql {
                                  AND disposition.disposition='quarantined')",
         )
     };
+}
+
+/// Read the keyword archive gate while the target row is locked by the caller.  The baseline and
+/// detail queries live beside their respective material facts; this wrapper is the one place that
+/// composes them into the product predicate “may enter patrol”.
+pub(crate) async fn keyword_archive_completion_in(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    target_ref: Uuid,
+) -> Result<KeywordArchiveCompletion, sqlx::Error> {
+    if !crate::keyword_archive_detail::keyword_detail_schema_is_ready_in(transaction).await? {
+        return Ok(KeywordArchiveCompletion::Unavailable);
+    }
+    let baseline: Option<Uuid> =
+        sqlx::query_scalar(keyword_baseline_sql!("work_order.target_ref=$1"))
+            .bind(target_ref)
+            .fetch_optional(&mut **transaction)
+            .await?;
+    if baseline.is_none() {
+        return Ok(KeywordArchiveCompletion::Incomplete);
+    }
+    if crate::keyword_archive_detail::keyword_target_has_pending_detail_in(transaction, target_ref)
+        .await?
+    {
+        return Ok(KeywordArchiveCompletion::Incomplete);
+    }
+    Ok(KeywordArchiveCompletion::Complete)
 }
 
 /// 一批关键词各自**建过档没有**。
@@ -3220,6 +3291,40 @@ pub async fn toggle_target_patrol(
     target_ref: Uuid,
     enable: bool,
 ) -> Result<MonitorRuleCommandReceipt, MonitorRuleCommandError> {
+    // The legacy target-level toggle is still reachable from older local links.  Preflight the
+    // same gate before its per-rule Resume loop so it cannot report a partial switch after
+    // touching any rule.
+    if enable {
+        let mut transaction = database.pool().begin().await?;
+        let target_kind: Option<String> = sqlx::query_scalar(
+            "SELECT target_kind FROM collection_observation_target WHERE target_ref=$1 FOR UPDATE",
+        )
+        .bind(target_ref)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        let Some(target_kind) = target_kind else {
+            transaction.rollback().await?;
+            return Err(MonitorRuleCommandError::UnknownTarget);
+        };
+        if target_kind == "keyword" {
+            match keyword_archive_completion_in(&mut transaction, target_ref).await? {
+                KeywordArchiveCompletion::Complete => {}
+                KeywordArchiveCompletion::Incomplete => {
+                    transaction.rollback().await?;
+                    return Err(MonitorRuleCommandError::Acquisition(
+                        AcquisitionChainError::KeywordArchiveIncomplete,
+                    ));
+                }
+                KeywordArchiveCompletion::Unavailable => {
+                    transaction.rollback().await?;
+                    return Err(MonitorRuleCommandError::Acquisition(
+                        AcquisitionChainError::SchemaUnavailable,
+                    ));
+                }
+            }
+        }
+        transaction.rollback().await?;
+    }
     let rules: Vec<(String, i32)> = sqlx::query_as(
         "SELECT rule.slot_key,COALESCE(revision.revision,0) \
          FROM collection_monitor_rule rule \

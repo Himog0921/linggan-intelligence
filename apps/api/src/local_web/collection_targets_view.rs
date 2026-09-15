@@ -471,6 +471,21 @@ fn action_feedback_markup(error: Option<&str>, ahead: Option<i64>) -> String {
             "没有完成",
             "这次请求没有送达采集链路，没有发起任何采集，目标状态也没有改动。可以稍后重试。",
         ),
+        "keyword_archive_target_missing" => (
+            "c-src-failure",
+            "目标已不存在",
+            "没有建立档案，也没有创建新的采集任务。这个观察目标已被删除或当前地址指向了旧记录；刷新列表后再继续，而不是重试这次请求。",
+        ),
+        "keyword_archive_incomplete" => (
+            "c-src-feedback c-src-feedback-warn",
+            "关键词建档尚未完成",
+            "没有开启或恢复巡查。请先完成搜索面的有界建档，并补齐已发现作品的详情；这两段都由接纳的真实回执证明，不能用已提交任务或空状态代替。",
+        ),
+        "keyword_patrol_archive_unreadable" => (
+            "c-src-failure",
+            "无法读取关键词建档状态",
+            "没有开启或恢复巡查。未知不等于已完成；等建档读取恢复后，系统才会判断这个关键词是否可以进入巡查。",
+        ),
         // 关键词的「历史建档」只在**开始观察之前**被采集准入接受。这是一条状态前置，
         // 不是暂时故障——写「稍后重试」等于让人反复做一件永远不会成的事。此前它落进
         // `archive_unavailable`，那句话正好是「可以稍后重试」。
@@ -1688,9 +1703,10 @@ mod tests {
         // 观察开关与删除必须每行各出现一次。区分不再靠尺寸（三者已统一成 34px），
         // 靠形状与颜色：开关是唯一带滑轨的，删除是唯一的红。
         assert_eq!(html.matches("c-tg-toggle").count(), 2);
-        assert_eq!(html.matches("data-monitor-rule-trigger").count(), 1);
+        // 关键词档案读不到时不提供进入巡查的入口；未知不能被当成完成。
+        assert_eq!(html.matches("data-monitor-rule-trigger").count(), 0);
         assert_eq!(html.matches(">建立档案</button>").count(), 1);
-        assert_eq!(html.matches(">设置巡查</a>").count(), 1);
+        assert_eq!(html.matches(">查看档案</a>").count(), 1);
         assert_eq!(html.matches("type=\"checkbox\"").count(), 4);
         assert!(html.contains("id=\"target-batch-modal-form\""));
         assert!(html.contains("form=\"target-batch-modal-form\" data-target-select"));
@@ -1840,18 +1856,18 @@ mod keyword_archive_action_tests {
         );
     }
 
-    /// **读不到就不猜**：既不催人建档（可能已经建过），也不改口径。
+    /// **读不到就不猜**：既不催人建档（可能已经建过），也不允许它进入巡查。
     ///
     /// 把「读不到」当成「没建过」，会让页面催人重做一件可能已经做完的事；而重做一次
     /// 关键词建档要真实访问平台。
     #[test]
-    fn an_unreadable_archive_state_keeps_the_original_entry() {
+    fn an_unreadable_archive_state_blocks_patrol_entry() {
         assert_eq!(
             action(
                 &keyword("pending_decision", false),
                 KeywordArchiveRead::Unavailable
             ),
-            TargetPrimaryAction::OpenPatrol("设置巡查")
+            TargetPrimaryAction::ViewArchiveUnavailable
         );
     }
 
@@ -1872,19 +1888,20 @@ mod keyword_archive_action_tests {
         );
     }
 
-    /// 底座建完了的词不再被问建档——它的下一步是看命中，不是回头重做一遍。
+    /// 已在观察的历史关键词不被伪装成完成；只有完整建档才提供结果查看。
     #[test]
     fn a_monitored_keyword_with_a_finished_archive_is_not_asked_to_archive() {
-        for archive in [
-            KeywordArchiveRead::Complete,
-            KeywordArchiveRead::Unavailable,
-        ] {
-            assert_eq!(
-                action(&keyword("monitoring", true), archive),
-                TargetPrimaryAction::ViewKeyword,
-                "监控中的词不该被建档按钮打断"
-            );
-        }
+        assert_eq!(
+            action(&keyword("monitoring", true), KeywordArchiveRead::Complete),
+            TargetPrimaryAction::ViewKeyword,
+        );
+        assert_eq!(
+            action(
+                &keyword("monitoring", true),
+                KeywordArchiveRead::Unavailable
+            ),
+            TargetPrimaryAction::ViewArchiveUnavailable,
+        );
     }
 
     /// **监控中的词，详情欠着时仍要够得着补详情。**
@@ -1935,12 +1952,12 @@ mod keyword_archive_action_tests {
         }
     }
 
-    /// 暂停的词恢复巡查，同样不被建档打断。
+    /// 暂停的关键词只有建档完成后才能恢复巡查。
     #[test]
-    fn a_paused_keyword_still_resumes_its_patrol() {
+    fn a_paused_keyword_without_an_archive_must_build_it_first() {
         assert_eq!(
             action(&keyword("paused", false), KeywordArchiveRead::NotArchived),
-            TargetPrimaryAction::OpenPatrol("恢复巡查")
+            TargetPrimaryAction::EstablishArchive
         );
     }
 }

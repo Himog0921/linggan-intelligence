@@ -685,6 +685,7 @@ fn scheduler_admission_failure_reason(
         Failure::UnknownTarget => "unknown_target",
         Failure::TargetDomainUnassigned => "target_domain_unassigned",
         Failure::TargetNotRequestable { .. } => "target_not_requestable",
+        Failure::KeywordArchiveIncomplete => "baseline_not_ready",
         Failure::InvalidMaterialTargets => "invalid_material_targets",
         Failure::ProgressiveArchiveAuthorizationTooSmall { .. } => "authorization_bound_too_small",
         Failure::ProgressiveArchiveAuthorizationMissing => "authorization_missing",

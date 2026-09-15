@@ -5,7 +5,10 @@
 
 #[path = "support/material_fixture.rs"]
 mod fixture;
+#[path = "support/cross_industry_fixture.rs"]
+mod cross_industry;
 
+use cross_industry::{EXTERNAL_DOMAIN, discovery_card, search_coverage, submit_external_package};
 use fixture::proof_database;
 use linggan_evidence::{
     MonitorCommandActor, MonitorCommandKind, MonitorCommandOutcomeKind, MonitorRuleCommand,
@@ -16,19 +19,52 @@ use linggan_storage_postgres::Database;
 use uuid::Uuid;
 
 async fn seed_keyword(database: &Database, identity_key: &str) -> Uuid {
-    let target_ref = Uuid::new_v4();
-    sqlx::query(
-        "INSERT INTO collection_observation_target \
-             (target_ref,platform,target_kind,identity_key,display_name,source,lifecycle_state, \
-              domain_ref) \
-         VALUES ($1,'xhs','keyword',$2,$2,'manual','pending_decision', \
-                 '00000000-0000-4000-8000-000000000001')",
+    // 多规则只属于关键词；不能为保住槽位测试而跳过新产品门槛。这里造一轮真正接纳的
+    // deep_archive 搜索面，并把唯一已发现样本的详情事实补齐，得到「可以进入巡查」的词。
+    let external_id = format!("slot-proof-{}", Uuid::new_v4());
+    let package_ref = submit_external_package(
+        database,
+        identity_key,
+        "deep_archive",
+        serde_json::json!({"query":identity_key,"ranking":"comprehensive","scrollRounds":10}),
+        "discovery_search",
+        search_coverage(identity_key, 1),
+        serde_json::json!({"surfaceReceipt":{"stopReason":"bottom_confirmed"}}),
+        vec![discovery_card(
+            &external_id,
+            "规则槽位建档样本",
+            "100",
+            &format!("https://www.xiaohongshu.com/search_result/{external_id}?xsec_token=ABslot"),
+        )],
+    )
+    .await;
+    let target_ref: Uuid = sqlx::query_scalar(
+        "SELECT target_ref FROM collection_observation_target WHERE identity_key=$1",
+    )
+    .bind(identity_key)
+    .fetch_one(database.pool())
+    .await
+    .expect("the archived keyword target exists");
+    let sample_ref: Uuid = sqlx::query_scalar(
+        "SELECT sample_ref FROM cross_industry_sample WHERE target_ref=$1",
     )
     .bind(target_ref)
-    .bind(identity_key)
+    .fetch_one(database.pool())
+    .await
+    .expect("the archived keyword sample exists");
+    sqlx::query(
+        "INSERT INTO cross_industry_sample_detail \
+             (detail_ref,sample_ref,domain_ref,package_ref,record_ordinal,body_text,body_state, \
+              published_at_source_text,published_at_source_text_state,observed_at) \
+         VALUES ($1,$2,$3::uuid,$4,0,'已取得详情','KNOWN',NULL,'UNKNOWN',scope_001_now())",
+    )
+    .bind(Uuid::new_v4())
+    .bind(sample_ref)
+    .bind(EXTERNAL_DOMAIN)
+    .bind(package_ref)
     .execute(database.pool())
     .await
-    .expect("keyword target is seeded");
+    .expect("the archive sample has a real detail fact");
     target_ref
 }
 
