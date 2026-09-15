@@ -378,6 +378,16 @@ pub async fn read_runs(
                      WHERE membership.atom_ref=atom.atom_ref AND membership.current) AND EXISTS( \
                      SELECT 1 FROM linggan_comment_research_problem_resolution resolution \
                      WHERE resolution.atom_ref=atom.atom_ref AND resolution.state='succeeded' AND resolution.decision_kind='deferred_context')), \
+                 'outOfScopeProblemAtomCount',(SELECT count(*) FROM linggan_comment_research_atom atom WHERE atom.run_ref=run.run_ref AND atom.kind IN ('problem','need') AND NOT EXISTS( \
+                     SELECT 1 FROM linggan_comment_research_atom_problem_membership membership \
+                     WHERE membership.atom_ref=atom.atom_ref AND membership.current) AND EXISTS( \
+                     SELECT 1 FROM linggan_comment_research_problem_resolution resolution \
+                     WHERE resolution.atom_ref=atom.atom_ref AND resolution.state='succeeded' AND resolution.decision_kind='out_of_scope')), \
+                 'notUserProblemAtomCount',(SELECT count(*) FROM linggan_comment_research_atom atom WHERE atom.run_ref=run.run_ref AND atom.kind IN ('problem','need') AND NOT EXISTS( \
+                     SELECT 1 FROM linggan_comment_research_atom_problem_membership membership \
+                     WHERE membership.atom_ref=atom.atom_ref AND membership.current) AND EXISTS( \
+                     SELECT 1 FROM linggan_comment_research_problem_resolution resolution \
+                     WHERE resolution.atom_ref=atom.atom_ref AND resolution.state='succeeded' AND resolution.decision_kind='not_user_problem')), \
                  'failedProblemResolutionAtomCount',(SELECT count(*) FROM linggan_comment_research_atom atom WHERE atom.run_ref=run.run_ref AND atom.kind IN ('problem','need') AND NOT EXISTS( \
                      SELECT 1 FROM linggan_comment_research_atom_problem_membership membership \
                      WHERE membership.atom_ref=atom.atom_ref AND membership.current) AND EXISTS( \

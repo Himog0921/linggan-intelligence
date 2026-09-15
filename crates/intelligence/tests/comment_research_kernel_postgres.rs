@@ -2947,16 +2947,16 @@ async fn problem_read_keeps_a_deferred_signal_out_of_confirmed_problem_counts() 
     .unwrap();
     let run = start_ready_run(&database).await.unwrap();
     let claim = claim_next_run_item(&database).await.unwrap().unwrap();
-    accept_semantic_output(
+    accept_semantic_quote_output(
         &database,
         &claim,
-        SemanticExtractionOutput::Atoms {
-            atoms: vec![SemanticAtomProposal {
+        SemanticQuoteExtractionOutput::Atoms {
+            atoms: vec![SemanticQuoteAtomProposal {
                 kind: AtomKind::Problem,
                 proposition: "孩子在家庭作业中难以自主启动".into(),
                 basis: AtomBasis::Explicit,
-                evidence_start: 0,
-                evidence_end: 7,
+                evidence: "孩子".into(),
+                problem_frame: Some(valid_v2_problem_frame()),
             }],
         },
         None,
@@ -2991,6 +2991,21 @@ async fn problem_read_keeps_a_deferred_signal_out_of_confirmed_problem_counts() 
     .execute(database.pool())
     .await
     .unwrap();
+
+    refresh_run_completion_for_atom(&database, atom)
+        .await
+        .unwrap();
+    let run_state: String = sqlx::query_scalar(
+        "SELECT state FROM linggan_comment_research_run WHERE run_ref=$1",
+    )
+    .bind(run.run_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert!(
+        matches!(run_state.as_str(), "completed" | "completed_with_failures"),
+        "a legal deferred V2 decision settles the Run without fabricating a membership; got {run_state}"
+    );
 
     let all = read_problems(&database, &CommentResearchV1ReadQuery::default())
         .await
@@ -3060,6 +3075,8 @@ async fn problem_read_keeps_a_deferred_signal_out_of_confirmed_problem_counts() 
     assert_eq!(health["pendingProblemResolutionAtomCount"], 0);
     assert_eq!(health["activeProblemResolutionAtomCount"], 0);
     assert_eq!(health["deferredNovelAtomCount"], 1);
+    assert_eq!(health["outOfScopeProblemAtomCount"], 0);
+    assert_eq!(health["notUserProblemAtomCount"], 0);
     assert_eq!(health["failedProblemResolutionAtomCount"], 0);
 }
 
