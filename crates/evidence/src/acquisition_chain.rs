@@ -824,6 +824,20 @@ pub(crate) async fn request_and_admit_in_transaction_scoped(
     //
     // 此前这里对所有 lane 一律要求 pending_decision，结果是巡检**永远派不出去**——
     // 目标一旦进入 archiving 就再也无法申请。这个缺陷由第一轮 tick 当场暴露。
+    let legacy_keyword_baseline_repairable =
+        if lane == "deep_archive" && target_kind == "keyword" && scope.is_empty() {
+            match crate::collection_control::keyword_archive_baseline_in(transaction, target_ref)
+                .await?
+            {
+                crate::collection_control::KeywordArchiveBaseline::Missing => true,
+                crate::collection_control::KeywordArchiveBaseline::Qualified => false,
+                crate::collection_control::KeywordArchiveBaseline::Unavailable => {
+                    return Err(AcquisitionChainError::SchemaUnavailable);
+                }
+            }
+        } else {
+            false
+        };
     let requestable = match lane {
         // A fixed material set is a follow-up to an admitted baseline.  It may deepen an archived
         // or monitored creator, but it still uses the existing deep-archive authorization class.
@@ -848,14 +862,17 @@ pub(crate) async fn request_and_admit_in_transaction_scoped(
             lifecycle_state.as_str(),
             "pending_decision" | "archiving" | "archived" | "monitoring" | "paused"
         ),
-        // Keywords may carry historical patrol state from before the archive-first rule.  Those
-        // targets must be able to repair their missing first-stage archive; patrol itself stays
-        // blocked by the non-bypassable completion gate below until both archive stages prove
-        // complete.  A dismissed target remains deliberately non-requestable.
-        "deep_archive" if target_kind == "keyword" => matches!(
-            lifecycle_state.as_str(),
-            "pending_decision" | "monitoring" | "paused"
-        ),
+        // Keywords may carry historical patrol state from before the archive-first rule.  Only a
+        // missing qualified search baseline may be repaired here.  A target with a baseline but
+        // pending details must use its material-scoped continuation, and a complete target must
+        // not scan the whole surface again. Patrol itself stays blocked by its completion gate.
+        "deep_archive" if target_kind == "keyword" => {
+            legacy_keyword_baseline_repairable
+                && matches!(
+                    lifecycle_state.as_str(),
+                    "pending_decision" | "monitoring" | "paused"
+                )
+        }
         // `archiving` is accepted only so the scheduler can recover an expired bounded baseline.
         // Admission still merges a live lease and the scheduler caps the number of Work Orders.
         "deep_archive" => matches!(lifecycle_state.as_str(), "pending_decision" | "archiving"),

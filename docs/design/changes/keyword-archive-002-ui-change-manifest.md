@@ -31,7 +31,7 @@
 - 表面与状态: `/collection/targets` 的关键词行与 `?drawer=<keyword>`；`KeywordArchiveRead::{NotArchived,DetailPending,Complete,Unavailable}` 与回执码。
 - 状态词典: 「建过档没有」排在「是否在观察」之前（巡查只取每期增量，历史那一整段只有建档拿得回来）；**已暂停且未建档**同样先「建立档案」，只有 `Complete + paused` 才可恢复巡查；空的候选集不再被读成「已补齐」；建档态读不到时不发采集，也不把它压成任一已知状态；「当前状态不接受这次请求」与「请求没送出去」分成两条回执——前者重试一辈子都一样，后者过一会儿就好，**这条分类两段共用一处**（`keyword_archive_error_receipt`）：分写在两个分支里，就一定有一段会漏掉，而漏掉的那一段会用「稍后可以重试」去说一条永久的状态前置。
 - 文件: `crates/evidence/src/{acquisition_chain,collection_control,keyword_archive_detail,patrol_scheduler}.rs`、`apps/api/src/local_web/{target_drawer,collection_targets_view}.rs`、`apps/api/src/local_web.rs`、本文、产品规则、验收记录、LIDS 记录与当月 progress。
-- 停止条件: 不改授权/工单字段、巡查采样口径或 creator 行为。历史关键词的 `monitoring/paused` 状态仅被允许创建修复性 `deep_archive`；仍由关键词巡查入口的完成判据阻止其进入 patrol。
+- 停止条件: 不改授权/工单字段、巡查采样口径或 creator 行为。历史关键词的 `monitoring/paused` 状态仅在**缺少合格搜索面基线**时允许创建修复性 `deep_archive`；已有搜索面而欠详情只走作品作用域的补采，仍由关键词巡查入口的完成判据阻止其进入 patrol。
 
 ## 验收矩阵与交接
 

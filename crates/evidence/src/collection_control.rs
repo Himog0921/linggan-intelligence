@@ -1647,6 +1647,16 @@ pub(crate) enum KeywordArchiveCompletion {
     Unavailable,
 }
 
+/// The accepted first-stage search baseline is distinct from the second-stage detail predicate.
+/// A legacy target may repair a *missing* baseline, but an existing baseline must continue through
+/// its material-scoped detail path rather than re-running the search surface.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum KeywordArchiveBaseline {
+    Qualified,
+    Missing,
+    Unavailable,
+}
+
 pub async fn apply_monitor_rule_command(
     database: &Database,
     command: &MonitorRuleCommand,
@@ -2318,16 +2328,10 @@ pub(crate) async fn keyword_archive_completion_in(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     target_ref: Uuid,
 ) -> Result<KeywordArchiveCompletion, sqlx::Error> {
-    if !crate::keyword_archive_detail::keyword_detail_schema_is_ready_in(transaction).await? {
-        return Ok(KeywordArchiveCompletion::Unavailable);
-    }
-    let baseline: Option<Uuid> =
-        sqlx::query_scalar(keyword_baseline_sql!("work_order.target_ref=$1"))
-            .bind(target_ref)
-            .fetch_optional(&mut **transaction)
-            .await?;
-    if baseline.is_none() {
-        return Ok(KeywordArchiveCompletion::Incomplete);
+    match keyword_archive_baseline_in(transaction, target_ref).await? {
+        KeywordArchiveBaseline::Qualified => {}
+        KeywordArchiveBaseline::Missing => return Ok(KeywordArchiveCompletion::Incomplete),
+        KeywordArchiveBaseline::Unavailable => return Ok(KeywordArchiveCompletion::Unavailable),
     }
     if crate::keyword_archive_detail::keyword_target_has_pending_detail_in(transaction, target_ref)
         .await?
@@ -2335,6 +2339,29 @@ pub(crate) async fn keyword_archive_completion_in(
         return Ok(KeywordArchiveCompletion::Incomplete);
     }
     Ok(KeywordArchiveCompletion::Complete)
+}
+
+/// Read whether the first-stage keyword search baseline is qualified while the caller holds the
+/// target-row lock.  This intentionally does not ask about pending details: callers deciding
+/// whether they may repair a missing search baseline must not turn a detail gap into permission
+/// to scan the whole surface again.
+pub(crate) async fn keyword_archive_baseline_in(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    target_ref: Uuid,
+) -> Result<KeywordArchiveBaseline, sqlx::Error> {
+    if !crate::keyword_archive_detail::keyword_detail_schema_is_ready_in(transaction).await? {
+        return Ok(KeywordArchiveBaseline::Unavailable);
+    }
+    let baseline: Option<Uuid> =
+        sqlx::query_scalar(keyword_baseline_sql!("work_order.target_ref=$1"))
+            .bind(target_ref)
+            .fetch_optional(&mut **transaction)
+            .await?;
+    Ok(if baseline.is_some() {
+        KeywordArchiveBaseline::Qualified
+    } else {
+        KeywordArchiveBaseline::Missing
+    })
 }
 
 /// 一批关键词各自**建过档没有**。

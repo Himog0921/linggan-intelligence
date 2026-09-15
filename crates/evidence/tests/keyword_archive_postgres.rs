@@ -46,6 +46,58 @@ async fn a_keyword_that_scanned_its_surface_to_the_bottom_counts_as_archived() {
     assert!(qualified, "翻到底且无隔离的一轮就是建档");
 }
 
+/// 历史巡查状态只允许修复**缺失**的搜索面。已经有合格搜索面的词即使尚欠详情，也必须
+/// 从具体作品的详情补采继续；不能借「补档」把整张搜索面重新跑一遍。
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn legacy_patrol_states_cannot_repeat_a_qualified_keyword_search_baseline() {
+    for (lifecycle_state, identity_key) in [
+        ("monitoring", "考研自习::repeat-baseline-monitoring"),
+        ("paused", "考研自习::repeat-baseline-paused"),
+    ] {
+        let database = proof_database(&format!("keyword_archive_repeat_{lifecycle_state}")).await;
+        let target_ref =
+            submit_keyword_archive(&database, identity_key, "bottom_confirmed", 1, 0).await;
+        sqlx::query(
+            "UPDATE collection_observation_target SET lifecycle_state=$2 WHERE target_ref=$1",
+        )
+        .bind(target_ref)
+        .bind(lifecycle_state)
+        .execute(database.pool())
+        .await
+        .expect("the historical patrol state is stored");
+        let before: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM collection_work_order WHERE target_ref=$1")
+                .bind(target_ref)
+                .fetch_one(database.pool())
+                .await
+                .expect("the existing archive work order is readable");
+
+        let repeated = request_and_admit(
+            &database,
+            target_ref,
+            "deep_archive",
+            "不得重复第一阶段关键词建档",
+            "person",
+        )
+        .await;
+        assert!(
+            matches!(
+                repeated,
+                Err(linggan_evidence::AcquisitionChainError::TargetNotRequestable { .. })
+            ),
+            "{lifecycle_state} + 合格搜索面不得重跑第一阶段，实际：{repeated:?}"
+        );
+        let after: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM collection_work_order WHERE target_ref=$1")
+                .bind(target_ref)
+                .fetch_one(database.pool())
+                .await
+                .expect("the work-order count is readable");
+        assert_eq!(after, before, "拒绝不得新建重复搜索工单");
+    }
+}
+
 /// 中途因为失败而停下的那一轮不算建档。
 ///
 /// 把它算作完成，等于宣布一个没挖完的词已经建好档——之后所有基于它的判断都建立在一个
