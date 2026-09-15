@@ -2234,8 +2234,9 @@ fn closed_monitor_reason(value: &str) -> &'static str {
 
 /// 「一轮合格的关键词建档」这条判据本身。
 ///
-/// 单目标与批量两个入口共用它，避免同一件事在两处各写一遍、日后各自漂移。
-/// `$1` 是目标引用（单目标用 `=`，批量用 `= ANY`，由调用方拼）。
+/// 判据只有这一处定义，避免同一件事在两处各写一遍、日后各自漂移。比较运算符由调用方拼
+/// （`$target_predicate`）：目前只剩批量一个调用方，用 `= ANY($1)`。单目标那一版入口在
+/// `#280` 拆掉建档闸门后就没有生产调用方，已随本次清理一并删除。
 macro_rules! keyword_baseline_sql {
     ($target_predicate:expr) => {
         concat!(
@@ -2270,22 +2271,6 @@ macro_rules! keyword_baseline_sql {
 /// 列表页一次要判断很多个目标，逐个查会变成 N+1。返回集合里出现的才是已建档；
 /// 没出现的是「还没建过」，不是「读不到」——读不到会以 `Err` 的形式浮上来，由调用方
 /// 决定怎么如实呈现，而不是在这里默默压成 false。
-pub async fn keyword_baselines_qualified(
-    database: &Database,
-    target_refs: &[Uuid],
-) -> Result<std::collections::HashSet<Uuid>, sqlx::Error> {
-    if target_refs.is_empty() {
-        return Ok(std::collections::HashSet::new());
-    }
-    let rows: Vec<Uuid> =
-        sqlx::query_scalar(keyword_baseline_sql!("work_order.target_ref=ANY($1)"))
-            .bind(target_refs)
-            .fetch_all(database.pool())
-            .await?;
-    Ok(rows.into_iter().collect())
-}
-
-/// 这个关键词**建过档没有**。
 ///
 /// 关键词没有建档生命周期：`0042` 用 CHECK 禁止它进入 `archiving`/`archived`，理由写在
 /// 那条迁移里——「Keyword observation has a monitor lifecycle, not a creator archive
@@ -2299,17 +2284,22 @@ pub async fn keyword_baselines_qualified(
 /// （`surface_scan_complete_sql!`）。中途因为失败或没尝试而停下的一轮不算建档——把它
 /// 算作完成，等于宣布一个没挖完的词已经建好档，之后所有基于它的判断都建立在一个不完整
 /// 的底座上，而且没人看得出来。
-pub async fn keyword_baseline_qualified(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    target_ref: Uuid,
-) -> Result<bool, sqlx::Error> {
-    Ok(
-        sqlx::query_scalar::<_, Uuid>(keyword_baseline_sql!("work_order.target_ref=$1"))
-            .bind(target_ref)
-            .fetch_optional(&mut **transaction)
-            .await?
-            .is_some(),
-    )
+///
+/// 只有一个入口。此前另有一个查单个目标的版本，在 `#280` 拆掉建档闸门后就没有生产调用
+/// 方了，只剩测试在调；同一个判据有两份入口，读的人就得先判断该信哪一个。
+pub async fn keyword_baselines_qualified(
+    database: &Database,
+    target_refs: &[Uuid],
+) -> Result<std::collections::HashSet<Uuid>, sqlx::Error> {
+    if target_refs.is_empty() {
+        return Ok(std::collections::HashSet::new());
+    }
+    let rows: Vec<Uuid> =
+        sqlx::query_scalar(keyword_baseline_sql!("work_order.target_ref=ANY($1)"))
+            .bind(target_refs)
+            .fetch_all(database.pool())
+            .await?;
+    Ok(rows.into_iter().collect())
 }
 
 pub(crate) async fn creator_baseline_qualified(

@@ -152,7 +152,10 @@ pub struct TargetListFacts<'facts> {
 /// 三件事分开表达：翻没翻完、详情补没补完、读没读到。任何一次读不到都必须说「读不到」
 /// ——把它压成「没建过」会催人重做一次真实的平台访问，压成「已完成」则会把一个半成品
 /// 底座推进巡检。
-fn keyword_archive_read(
+///
+/// 抽屉也调它（`pub(super)`）：同一个词的建档态在列表行和抽屉里必须由同一段代码得出，
+/// 各写一份迟早会各说各的。
+pub(super) fn keyword_archive_read(
     keyword_archives: Option<&std::collections::HashSet<uuid::Uuid>>,
     keyword_details_pending: Option<&std::collections::HashSet<uuid::Uuid>>,
     target_ref: uuid::Uuid,

@@ -2727,6 +2727,26 @@ async fn collection_targets(
         }
         _ => Vec::new(),
     };
+    // 关键词「建过档没有」是主操作的输入之一，抽屉现在与列表行用同一个判断，就必须拿到
+    // 同一份事实。抽屉目标可能被列表筛掉（列表最多两百行），所以在这里单独问一次，而不是
+    // 从列表那一批里找——找不到会把「这一屏没有它」说成「它没建过档」。
+    let drawer_keyword_archive = match drawer_target.as_ref().ok().and_then(Option::as_ref) {
+        Some(target) if target.target_kind == "keyword" => {
+            let refs = [target.target_ref];
+            let archived = keyword_baselines_qualified(database, &refs).await.ok();
+            // 建档分两段：先拿链接，再补详情。第二段是不是还欠着，同样要问。
+            let pending = linggan_evidence::keyword_targets_pending_detail(database, &refs)
+                .await
+                .ok();
+            collection_targets_view::keyword_archive_read(
+                archived.as_ref(),
+                pending.as_ref(),
+                target.target_ref,
+            )
+        }
+        // 创作者的主操作不看这一项；`Unavailable` 在这里是「不适用」，不是读失败。
+        _ => target_drawer::KeywordArchiveRead::Unavailable,
+    };
     let drawer = match drawer_target.as_ref() {
         Ok(target) => target_drawer::render_with_catalog_view_with_chart(
             target.as_ref(),
@@ -2777,6 +2797,7 @@ async fn collection_targets(
             selected_lifecycle_work.as_deref(),
             monitor_rules.as_deref(),
             &retirable,
+            drawer_keyword_archive,
             list_context,
         ),
         Err(()) => {
@@ -4410,8 +4431,6 @@ async fn collection_target_deep_archive(
                     ahead,
                 ));
             }
-            // 还没建完第一段，往下走去发第一段。这不是错误，是这个词还在更早的阶段。
-            Ok(linggan_evidence::KeywordDetailAdvance::Skipped("archive_round_not_complete")) => {}
             Ok(linggan_evidence::KeywordDetailAdvance::Skipped("detail_batch_in_flight")) => {
                 return Redirect::to(&target_archive_return_path(
                     &form,

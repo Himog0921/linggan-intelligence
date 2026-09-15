@@ -21,7 +21,7 @@ use fixture::proof_database;
 use linggan_evidence::{
     AccountEligibilityObservation, CheckInOutcome, DispatchDecision, InstallationCheckIn,
     KeywordDetailAdvance, activate_installation_credential, advance_keyword_archive_detail,
-    bind_observation_account, check_in_installation, decide_dispatch, keyword_baseline_qualified,
+    bind_observation_account, check_in_installation, decide_dispatch, keyword_baselines_qualified,
     keyword_targets_pending_detail, open_claim_window, register_station,
     report_account_eligibility, request_and_admit, set_station_accepting,
 };
@@ -39,11 +39,10 @@ async fn a_keyword_that_scanned_its_surface_to_the_bottom_counts_as_archived() {
     let target_ref =
         submit_keyword_archive(&database, "考研自习::archive-ok", "bottom_confirmed", 1, 0).await;
 
-    let mut tx = database.pool().begin().await.unwrap();
-    let qualified = keyword_baseline_qualified(&mut tx, target_ref)
+    let qualified = keyword_baselines_qualified(&database, &[target_ref])
         .await
-        .expect("baseline query runs");
-    tx.commit().await.unwrap();
+        .expect("baseline query runs")
+        .contains(&target_ref);
     assert!(qualified, "翻到底且无隔离的一轮就是建档");
 }
 
@@ -64,11 +63,10 @@ async fn a_keyword_archive_that_stopped_on_failures_does_not_count() {
     )
     .await;
 
-    let mut tx = database.pool().begin().await.unwrap();
-    let qualified = keyword_baseline_qualified(&mut tx, target_ref)
+    let qualified = keyword_baselines_qualified(&database, &[target_ref])
         .await
-        .expect("baseline query runs");
-    tx.commit().await.unwrap();
+        .expect("baseline query runs")
+        .contains(&target_ref);
     assert!(!qualified, "有失败的一轮不是建档，还得接着补");
 }
 
@@ -91,11 +89,10 @@ async fn a_keyword_archive_that_never_reached_the_bottom_does_not_count() {
     )
     .await;
 
-    let mut tx = database.pool().begin().await.unwrap();
-    let qualified = keyword_baseline_qualified(&mut tx, target_ref)
+    let qualified = keyword_baselines_qualified(&database, &[target_ref])
         .await
-        .expect("baseline query runs");
-    tx.commit().await.unwrap();
+        .expect("baseline query runs")
+        .contains(&target_ref);
     assert!(!qualified, "没翻到底又没采满，就还不是建档");
 }
 
@@ -128,11 +125,10 @@ async fn a_complete_patrol_round_is_not_an_archive() {
     .await
     .unwrap();
 
-    let mut tx = database.pool().begin().await.unwrap();
-    let qualified = keyword_baseline_qualified(&mut tx, target_ref)
+    let qualified = keyword_baselines_qualified(&database, &[target_ref])
         .await
-        .expect("baseline query runs");
-    tx.commit().await.unwrap();
+        .expect("baseline query runs")
+        .contains(&target_ref);
     assert!(!qualified, "巡检不是建档，哪怕这一轮本身很完整");
 }
 
@@ -257,14 +253,13 @@ async fn an_incomplete_keyword_baseline_can_still_continue_discovered_details() 
         0,
     )
     .await;
-    let mut transaction = database.pool().begin().await.unwrap();
     assert!(
-        !keyword_baseline_qualified(&mut transaction, target_ref)
+        !keyword_baselines_qualified(&database, &[target_ref])
             .await
-            .unwrap(),
+            .unwrap()
+            .contains(&target_ref),
         "前置：这一轮搜索覆盖仍然不完整"
     );
-    transaction.commit().await.unwrap();
     assert!(
         keyword_targets_pending_detail(&database, &[target_ref])
             .await

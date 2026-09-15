@@ -163,8 +163,8 @@ fn blocked_materials_get_a_real_decision_instead_of_a_dead_end() {
 #[test]
 fn performance_view_keeps_known_zero_excludes_unknown_and_preserves_context() {
     use super::target_drawer::{
-        LifeChartView, LifeTrendGrain, LifecycleView, TargetCatalogView, TargetDrawerTab,
-        TargetInspectorView, TargetListContext, TargetWorksView,
+        KeywordArchiveRead, LifeChartView, LifeTrendGrain, LifecycleView, TargetCatalogView,
+        TargetDrawerTab, TargetInspectorView, TargetListContext, TargetWorksView,
     };
 
     let target = sample_target(10, "creator");
@@ -187,6 +187,7 @@ fn performance_view_keeps_known_zero_excludes_unknown_and_preserves_context() {
             None,
             None,
             &[],
+            KeywordArchiveRead::Unavailable,
             TargetListContext {
                 filter: Some("creator"),
                 sort: Some("last"),

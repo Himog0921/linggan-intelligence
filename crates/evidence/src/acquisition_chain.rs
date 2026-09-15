@@ -1680,7 +1680,7 @@ async fn write_work_order(
     // 「上一次动作没有完成」，看不出是被一条数据库不变量挡住的。
     //
     // 关键词「正在建档 / 建过档了」不靠生命周期字段表达，而是从证据里查
-    // （`collection_control::keyword_baseline_qualified`），所以这里跳过它是完整的，
+    // （`collection_control::keyword_baselines_qualified`），所以这里跳过它是完整的，
     // 不是少做了一步。
     if lane == "deep_archive" {
         let moved = sqlx::query(

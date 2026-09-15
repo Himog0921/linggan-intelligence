@@ -43,7 +43,7 @@ pub enum KeywordDetailAdvance {
 /// 为一个关键词观察目标推进下一批详情补采。
 ///
 /// 已发现材料的详情完整性不从属于 target lifecycle。baseline 覆盖仍由
-/// `keyword_baseline_qualified` 单独判断；但只要已经有一个可读 discovery 仍欠详情，
+/// `keyword_baselines_qualified` 单独判断；但只要已经有一个可读 discovery 仍欠详情，
 /// 它就必须保有继续形成 detail work 的路径。
 pub async fn advance_keyword_archive_detail(
     database: &Database,
