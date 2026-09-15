@@ -629,6 +629,9 @@ pub fn render_with_catalog_view(
         selected_work,
         monitor_rules,
         retirable,
+        // 这条旧入口不读关键词的建档态。`Unavailable` 是「没问」——界面据此维持原本的
+        // 入口，而不是把没问过说成「没建过」。接上四态的是下面那条带 chart 的入口。
+        KeywordArchiveRead::Unavailable,
         list_context,
     )
 }
@@ -653,6 +656,9 @@ pub fn render_with_catalog_view_with_chart(
     selected_work: Option<&str>,
     monitor_rules: Option<&[linggan_evidence::MonitorRuleSummary]>,
     retirable: &[BlockedMaterial],
+    // 这个关键词建过档没有。列表行的主操作按它分派，抽屉按同一个判断给同一个答案——
+    // 一个词在两个表面上各说各的，人就不知道该信哪一句。
+    keyword_archive: KeywordArchiveRead,
     list_context: TargetListContext<'_>,
 ) -> String {
     let Some(drawer) = drawer else {
@@ -763,6 +769,7 @@ pub fn render_with_catalog_view_with_chart(
             catalog_filter,
             selected_work,
             monitor_rules,
+            keyword_archive,
             list_context,
         ),
     )
@@ -934,12 +941,10 @@ fn drawer_primary_action(
     target: &ObservationTarget,
     archive: TargetArchiveRead<'_>,
     is_creator: bool,
+    keyword_archive: KeywordArchiveRead,
     list_context: TargetListContext<'_>,
 ) -> String {
-    // 抽屉是另一个表面，本轮不接建档态：传 `Unavailable` 让它维持原本的入口，
-    // 而不是在这里顺手改一个不在本次范围内的页面。
-    let action =
-        target_primary_action(target, is_creator, archive, KeywordArchiveRead::Unavailable);
+    let action = target_primary_action(target, is_creator, archive, keyword_archive);
     match action {
         TargetPrimaryAction::EstablishArchive
         | TargetPrimaryAction::RebuildDirectory
@@ -1048,6 +1053,7 @@ fn body(
     catalog_filter: Option<&str>,
     selected_work: Option<&str>,
     monitor_rules: Option<&[linggan_evidence::MonitorRuleSummary]>,
+    keyword_archive: KeywordArchiveRead,
     list_context: TargetListContext<'_>,
 ) -> String {
     match tab {
@@ -1072,6 +1078,7 @@ fn body(
             inspector,
             lifecycle,
             selected_work,
+            keyword_archive,
             list_context,
         ),
     }
@@ -1336,23 +1343,41 @@ fn overview_tab(
     inspector: TargetInspectorView<'_>,
     _lifecycle: LifecycleView<'_>,
     _selected_work: Option<&str>,
+    keyword_archive: KeywordArchiveRead,
     list_context: TargetListContext<'_>,
 ) -> String {
     match inspector {
         TargetInspectorView::Projection(projection)
             if projection.target_ref == target.target_ref =>
         {
-            return inspector_overview(target, is_creator, projection, retirable, list_context);
+            return inspector_overview(
+                target,
+                is_creator,
+                projection,
+                archive,
+                keyword_archive,
+                retirable,
+                list_context,
+            );
         }
         TargetInspectorView::ReadUnavailable | TargetInspectorView::Projection(_) => {
+            if !is_creator {
+                return keyword_inspector_unavailable_overview(
+                    target,
+                    archive,
+                    keyword_archive,
+                    list_context,
+                );
+            }
             return inspector_unavailable_overview(is_creator);
         }
         TargetInspectorView::NotRead => {}
     }
     if !is_creator {
-        let action = target_primary_action(target, false, archive, KeywordArchiveRead::Unavailable);
+        let action = target_primary_action(target, false, archive, keyword_archive);
         let (action_title, action_note) = required_action_copy(action);
-        let action_control = required_action_control(target, archive, false, list_context);
+        let action_control =
+            required_action_control(target, archive, false, keyword_archive, list_context);
         return format!(
             r#"<section class="c-dw-section c-dw-now">
                   <div class="c-dw-section-head"><b>系统现在在做什么</b><span>关键词观察</span></div>
@@ -1384,7 +1409,7 @@ fn overview_tab(
         TargetArchiveRead::Unavailable => "当前读不到".to_owned(),
         TargetArchiveRead::Known(_) => "尚未取得".to_owned(),
     };
-    let action = target_primary_action(target, true, archive, KeywordArchiveRead::Unavailable);
+    let action = target_primary_action(target, true, archive, keyword_archive);
     let (archive_state, execution_state) = current_system_copy(archive);
     let (_, patrol_state) = lifecycle_patrol_copy(target);
     let abnormal = match archive {
@@ -1409,7 +1434,8 @@ fn overview_tab(
         "未开启"
     };
     let (action_title, action_note) = required_action_copy(action);
-    let action_control = required_action_control(target, archive, true, list_context);
+    let action_control =
+        required_action_control(target, archive, true, keyword_archive, list_context);
     format!(
         r#"<section class="c-dw-section c-dw-now" id="archive-task">
               <div class="c-dw-section-head"><b>系统现在在做什么</b><span>状态分别判断</span></div>
@@ -1444,6 +1470,35 @@ fn overview_tab(
 }
 
 fn inspector_unavailable_overview(is_creator: bool) -> String {
+    format!(
+        "{}\n            <section class=\"c-dw-section c-dw-decision\">\n              <div class=\"c-dw-decision-copy\"><span>是否需要处理</span><strong>当前无法判断</strong><p>读取恢复前不提供新的写操作，避免用未知状态触发重复任务。</p></div>\n            </section>",
+        inspector_unavailable_notice(is_creator),
+    )
+}
+
+/// 检查器读失败时，keyword 的巡查事实未知；但建档态由独立查询得出，不能把后者一并丢掉。
+fn keyword_inspector_unavailable_overview(
+    target: &ObservationTarget,
+    archive: TargetArchiveRead<'_>,
+    keyword_archive: KeywordArchiveRead,
+    list_context: TargetListContext<'_>,
+) -> String {
+    let action = target_primary_action(target, false, archive, keyword_archive);
+    let (action_title, action_note) = required_action_copy(action);
+    let action_control =
+        required_action_control(target, archive, false, keyword_archive, list_context);
+    format!(
+        r#"{notice}<section class="c-dw-section c-dw-decision" id="required-action">
+              <div class="c-dw-decision-copy"><span>是否需要处理</span><strong>{action_title}</strong><p>{action_note}</p></div>{action_control}
+            </section>"#,
+        notice = inspector_unavailable_notice(false),
+        action_title = action_title,
+        action_note = action_note,
+        action_control = action_control,
+    )
+}
+
+fn inspector_unavailable_notice(is_creator: bool) -> String {
     let scope = if is_creator {
         "档案、执行与巡查"
     } else {
@@ -1453,9 +1508,6 @@ fn inspector_unavailable_overview(is_creator: bool) -> String {
         r#"<section class="c-dw-section c-dw-now">
               <div class="c-dw-section-head"><b>系统现在在做什么</b><span>读取暂不可用</span></div>
               <div class="life-state"><b>目标状态暂时读不到</b><p>当前无法判断{scope}；这不表示没有任务、没有作品或运行正常。</p></div>
-            </section>
-            <section class="c-dw-section c-dw-decision">
-              <div class="c-dw-decision-copy"><span>是否需要处理</span><strong>当前无法判断</strong><p>读取恢复前不提供新的写操作，避免用未知状态触发重复任务。</p></div>
             </section>"#,
     )
 }
@@ -1510,12 +1562,11 @@ fn inspector_overview(
     target: &ObservationTarget,
     is_creator: bool,
     inspector: &TargetInspectorProjection,
+    archive: TargetArchiveRead<'_>,
+    keyword_archive: KeywordArchiveRead,
     retirable: &[BlockedMaterial],
     list_context: TargetListContext<'_>,
 ) -> String {
-    let action = inspector.required_action;
-    let (action_title, action_note) = inspector_action_copy(action);
-    let action_control = inspector_action_control(target, action, list_context);
     let last = inspector
         .patrol
         .last_succeeded_at
@@ -1529,6 +1580,14 @@ fn inspector_overview(
         }
     });
     if !is_creator {
+        // 关键词的主操作与列表行**同一个函数、同一组输入**：同一个词在两个表面上必须是
+        // 同一个答案。照检查器投影渲染做不到这一点——关键词的档案态恒为 `NotApplicable`
+        // （`archive_projection` 对非 creator 提前返回），于是每个关键词都得到「当前无需
+        // 处理」，而列表行写着「建立档案」，补采缺口的入口在抽屉里根本不存在。
+        let action = target_primary_action(target, false, archive, keyword_archive);
+        let (action_title, action_note) = required_action_copy(action);
+        let action_control =
+            required_action_control(target, archive, false, keyword_archive, list_context);
         return format!(
             r#"<section class="c-dw-section c-dw-now">
                   <div class="c-dw-section-head"><b>系统现在在做什么</b><span>状态分别判断</span></div>
@@ -1549,6 +1608,9 @@ fn inspector_overview(
             next = escape(next),
         );
     }
+    let action = inspector.required_action;
+    let (action_title, action_note) = inspector_action_copy(action);
+    let action_control = inspector_action_control(target, action, list_context);
     let directory = inspector_count_copy(inspector.coverage.directory_works);
     let detail = inspector_detail_copy(
         inspector.coverage.captured_details,
@@ -1814,14 +1876,15 @@ fn required_action_control(
     target: &ObservationTarget,
     archive: TargetArchiveRead<'_>,
     is_creator: bool,
+    keyword_archive: KeywordArchiveRead,
     list_context: TargetListContext<'_>,
 ) -> String {
-    match target_primary_action(target, is_creator, archive, KeywordArchiveRead::Unavailable) {
+    match target_primary_action(target, is_creator, archive, keyword_archive) {
         TargetPrimaryAction::EstablishArchive
         | TargetPrimaryAction::RebuildDirectory
         | TargetPrimaryAction::ContinueArchive
         | TargetPrimaryAction::OpenPatrol(_) => {
-            drawer_primary_action(target, archive, is_creator, list_context)
+            drawer_primary_action(target, archive, is_creator, keyword_archive, list_context)
         }
         _ => String::new(),
     }
@@ -3427,6 +3490,157 @@ mod tests {
             next_run_at: Some("2026-09-14 08:00".to_owned()),
             last_succeeded_at: None,
         }
+    }
+
+    /// 关键词抽屉要用的那一小块检查器投影：只看巡查那一栏，其余字段与主操作无关。
+    fn keyword_projection(target: &ObservationTarget) -> TargetInspectorProjection {
+        use linggan_evidence::{
+            TargetInspectorArchive, TargetInspectorCoverage, TargetInspectorDirectoryState,
+            TargetInspectorExecution, TargetInspectorPatrol,
+        };
+        TargetInspectorProjection {
+            target_ref: target.target_ref,
+            target_kind: target.target_kind.clone(),
+            as_of: "2026-09-14 08:00".to_owned(),
+            archive: TargetInspectorArchive {
+                state: TargetInspectorArchiveState::NotApplicable,
+                directory_state: TargetInspectorDirectoryState::NotApplicable,
+                started: false,
+                attempted: false,
+                author_profile_captures: TargetInspectorCount::Known(0),
+            },
+            execution: TargetInspectorExecution {
+                state: TargetInspectorExecutionState::Idle,
+                queued_work_orders: 0,
+                awaiting_producer_tasks: 0,
+                running_attempts: 0,
+                blocked_tasks: 0,
+            },
+            patrol: TargetInspectorPatrol {
+                state: TargetInspectorPatrolState::Normal,
+                last_dispatched_at: None,
+                last_succeeded_at: None,
+                next_run_at: None,
+                latest_hits: TargetInspectorCount::Known(0),
+                latest_new: TargetInspectorCount::Known(0),
+            },
+            coverage: TargetInspectorCoverage {
+                directory_works: TargetInspectorCount::Known(0),
+                captured_details: TargetInspectorCount::Known(0),
+                missing_details: TargetInspectorCount::Known(0),
+                quarantined_records: TargetInspectorCount::Known(0),
+                blocked_details: TargetInspectorCount::Known(0),
+            },
+            required_action: TargetInspectorAction::NoActionHealthy,
+        }
+    }
+
+    /// 同一个关键词在抽屉和列表行上必须是同一个答案。
+    ///
+    /// 这里渲染的是抽屉本体，不是 `target_primary_action`：那个函数在修之前也是绿的，
+    /// 拿它当断言守不住任何东西。缺陷在抽屉这一侧——它此前走检查器投影，而关键词的档案态
+    /// 恒为 `NotApplicable`，于是每个关键词都得到「当前无需处理」，列表行写着「建立档案」
+    /// 而抽屉里连按钮都没有。
+    #[test]
+    fn keyword_drawer_gives_the_same_primary_action_as_the_list_row() {
+        let mut keyword = keyword_target();
+        keyword.monitoring_enabled = false;
+        keyword.lifecycle_state = "stored".to_owned();
+        let projection = keyword_projection(&keyword);
+        let render = |archive: KeywordArchiveRead| {
+            inspector_overview(
+                &keyword,
+                false,
+                &projection,
+                // 建档完整度是创作者的东西，关键词在那个映射里本来就没有条目。
+                TargetArchiveRead::Known(None),
+                archive,
+                &[],
+                TargetListContext::default(),
+            )
+        };
+
+        let not_archived = render(KeywordArchiveRead::NotArchived);
+        assert!(not_archived.contains("需要建立档案"), "{not_archived}");
+        assert!(
+            not_archived.contains(">建立档案</button>"),
+            "{not_archived}"
+        );
+
+        let pending = render(KeywordArchiveRead::DetailPending);
+        assert!(pending.contains("有详情缺口需要补采"), "{pending}");
+        assert!(pending.contains(">补采缺口</button>"), "{pending}");
+
+        let complete = render(KeywordArchiveRead::Complete);
+        assert!(complete.contains("开始每周巡检"), "{complete}");
+
+        // 建档态读不到时既不催也不改口径，与列表行走同一个兜底。
+        let unknown = render(KeywordArchiveRead::Unavailable);
+        assert!(unknown.contains("设置巡查"), "{unknown}");
+    }
+
+    /// 检查器读失败只让巡查事实未知，不能把已经独立读到的关键词建档态一起压掉。
+    #[test]
+    fn keyword_drawer_keeps_its_primary_action_when_inspector_read_is_unavailable() {
+        let mut keyword = keyword_target();
+        keyword.monitoring_enabled = false;
+        keyword.lifecycle_state = "stored".to_owned();
+        let render = |archive: KeywordArchiveRead| {
+            overview_tab(
+                &[],
+                &keyword,
+                TargetArchiveRead::Known(None),
+                false,
+                TargetInspectorView::ReadUnavailable,
+                LifecycleView::QueryInvalid,
+                None,
+                archive,
+                TargetListContext::default(),
+            )
+        };
+
+        let not_archived = render(KeywordArchiveRead::NotArchived);
+        assert!(
+            not_archived.contains("目标状态暂时读不到"),
+            "{not_archived}"
+        );
+        assert!(
+            not_archived.contains("当前无法判断巡查与最近结果"),
+            "{not_archived}"
+        );
+        assert!(not_archived.contains("需要建立档案"), "{not_archived}");
+        assert!(
+            not_archived.contains(">建立档案</button>"),
+            "{not_archived}"
+        );
+
+        let pending = render(KeywordArchiveRead::DetailPending);
+        assert!(pending.contains("目标状态暂时读不到"), "{pending}");
+        assert!(pending.contains("有详情缺口需要补采"), "{pending}");
+        assert!(pending.contains(">补采缺口</button>"), "{pending}");
+    }
+
+    /// **巡查优先于催建档。** 哪怕建档态说「还没建过」，已经在按周看增量的词也仍是
+    /// 「当前无需处理」——巡查是在它自己的底座上往前跑，把它改成一件待办只会让人重做一遍。
+    ///
+    /// 这条守的不是这次修掉的那个缺陷（那种情况在修之前也是这个答案），而是一个很像的
+    /// 改法：谁把「还没建过」挪到监控判断前面，这里就会变红。
+    #[test]
+    fn a_patrolling_keyword_drawer_asks_for_nothing() {
+        let keyword = keyword_target();
+        let projection = keyword_projection(&keyword);
+        let html = inspector_overview(
+            &keyword,
+            false,
+            &projection,
+            TargetArchiveRead::Known(None),
+            KeywordArchiveRead::NotArchived,
+            &[],
+            TargetListContext::default(),
+        );
+
+        assert!(html.contains("当前无需处理"), "{html}");
+        assert!(!html.contains(">建立档案</button>"), "{html}");
     }
 
     /// **规则台是一张表。** 几条规则之间要比的就是「哪条什么周期、哪条停了、哪条下次什么

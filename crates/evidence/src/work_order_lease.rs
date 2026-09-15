@@ -440,7 +440,7 @@ pub(crate) async fn complete_lease_for_task_in_transaction(
         // 关键词照样可以建档（`deep_archive` 的准入对它开放），只是**建过没建过是读取时
         // 查出来的，不是存下来的一个状态**——与本仓库对生命周期的一贯理解一致：
         // 「A lifecycle point is not a second material fact. It is a read-time combination.」
-        // 判据见 `collection_control::keyword_baseline_qualified`。
+        // 判据见 `collection_control::keyword_baselines_qualified`。
         //
         // 下面这段对关键词天然是空操作：它只更新处于 `archiving` 的目标，而关键词永远
         // 不会在那个状态里。

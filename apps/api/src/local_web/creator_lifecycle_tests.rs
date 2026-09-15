@@ -328,6 +328,7 @@ fn creator_drawer_uses_three_business_tabs_and_two_level_work_association() {
         Some(&selected_ref.to_string()),
         None,
         &[],
+        target_drawer::KeywordArchiveRead::Unavailable,
         target_drawer::TargetListContext::default(),
     );
 
