@@ -682,6 +682,238 @@
     return preview;
   }
 
+  /* Cover layout has a deliberately different presentation, not a second data source. Both the
+   * compact preview used by research and the back of this card must pass through the exact same
+   * controlled-local-media gate. */
+  function coverAsset(item) {
+    const cover = isCrossIndustrySample(item)
+      ? (item.cover && typeof item.cover === 'object' ? item.cover : {})
+      : (item.media?.cover && typeof item.media.cover === 'object' ? item.media.cover : {});
+    return {
+      asset: sameOriginPath(cover.localAssetUrl, ['/api/local/media/', '/api/local/derivative/']),
+      state: cover.state || 'NOT_OBSERVED',
+    };
+  }
+
+  function coverGeometryKind(item) {
+    const media = item.media && typeof item.media === 'object' ? item.media : {};
+    if (Array.isArray(media.video?.items) && media.video.items.length) return 'wave';
+    if (Array.isArray(media.images) && media.images.length > 1) return 'stack';
+    const comments = laneSummary(item, 'comments');
+    if (comments && !['UNKNOWN', 'NOT_REQUESTED', 'NOT_OBSERVED'].includes(comments.state)) return 'cluster';
+    return 'frame';
+  }
+
+  function coverKindLabel(item) {
+    const kind = coverGeometryKind(item);
+    if (kind === 'wave') return '视频';
+    if (kind === 'stack') return '多图';
+    if (kind === 'cluster') return '讨论';
+    return '图文';
+  }
+
+  let coverDotFieldSequence = 0;
+
+  function svgNode(name, attributes = {}) {
+    const element = document.createElementNS('http://www.w3.org/2000/svg', name);
+    Object.entries(attributes).forEach(([key, value]) => element.setAttribute(key, String(value)));
+    return element;
+  }
+
+  /* Actual SVG dots rather than a CSS gradient keep the field discrete: it is a quiet measuring
+   * surface, not a tonal effect. Each pattern id is unique because multiple cards coexist. */
+  function coverDotField() {
+    const patternId = `ev-cover-dot-field-${coverDotFieldSequence += 1}`;
+    const svg = svgNode('svg', {
+      class: 'ev-cover-dot-field', viewBox: '0 0 100 100', preserveAspectRatio: 'none', 'aria-hidden': 'true',
+    });
+    const defs = svgNode('defs');
+    const pattern = svgNode('pattern', { id: patternId, width: 8, height: 8, patternUnits: 'userSpaceOnUse' });
+    pattern.append(svgNode('circle', { cx: 1, cy: 1, r: 0.75, fill: 'currentColor' }));
+    defs.append(pattern);
+    svg.append(defs, svgNode('rect', { width: '100%', height: '100%', fill: `url(#${patternId})` }));
+    return svg;
+  }
+
+  /* Four stable line templates are enough to classify the locally known work form. They do not
+   * infer a subject, an evidence state, or content quality; a template is only a catalogue cue. */
+  function coverGeometry(kind) {
+    const svg = svgNode('svg', {
+      class: 'ev-cover-geometry', viewBox: '0 0 300 400', 'aria-hidden': 'true', focusable: 'false',
+    });
+    const group = svgNode('g', { fill: 'none', stroke: 'currentColor', 'stroke-width': '1.25' });
+    const append = (name, attributes) => group.append(svgNode(name, attributes));
+    if (kind === 'wave') {
+      [44, 72, 100, 128].forEach((radius, index) => append('circle', {
+        cx: 150, cy: 178 + index * 16, r: radius,
+      }));
+      append('path', { d: 'M70 296c28-34 58-34 80 0s52 34 80 0' });
+      append('path', { d: 'M112 144h76M150 106v76' });
+    } else if (kind === 'stack') {
+      [[79, 100], [96, 84], [113, 68]].forEach(([x, y]) => append('rect', {
+        x, y, width: 108, height: 176,
+      }));
+      append('path', { d: 'M128 134h78M128 168h78M128 202h78' });
+    } else if (kind === 'cluster') {
+      [[122, 166, 55], [180, 166, 55], [150, 224, 55]].forEach(([cx, cy, r]) => append('circle', { cx, cy, r }));
+      append('path', { d: 'M95 298h110M150 278v40' });
+    } else {
+      append('rect', { x: 67, y: 70, width: 166, height: 258 });
+      append('path', { d: 'M90 112h120M90 286h120M150 112v174M90 199h120' });
+      append('path', { d: 'M104 130 150 164 196 130M104 268l46-34 46 34' });
+    }
+    svg.append(group);
+    return svg;
+  }
+
+  function coverCorners() {
+    const corners = node('span', 'ev-cover-corners');
+    ['top-left', 'top-right', 'bottom-right', 'bottom-left'].forEach((position) => {
+      const corner = node('i', 'ev-cover-corner');
+      corner.dataset.corner = position;
+      corners.append(corner);
+    });
+    return corners;
+  }
+
+  function coverStage(item, front, title) {
+    const stage = node('div', 'ev-cover-stage');
+    const frame = node('div', `ev-cover-stage-frame ${front ? 'ev-cover-stage-frame--diagram' : 'ev-cover-stage-frame--cover'}`);
+    frame.append(coverCorners());
+    if (front) {
+      frame.append(coverDotField(), coverGeometry(coverGeometryKind(item)));
+    } else {
+      const cover = coverAsset(item);
+      if (cover.asset) {
+        const image = node('img');
+        image.src = cover.asset;
+        image.alt = `${title}封面`;
+        image.loading = 'lazy';
+        image.decoding = 'async';
+        frame.append(image);
+      } else {
+        frame.classList.add('ev-cover-stage-frame--unavailable');
+        frame.append(node('strong', 'ev-cover-unavailable', stateMeta(cover.state)[0]));
+      }
+    }
+    stage.append(frame);
+    return stage;
+  }
+
+  function coverFace(item, title, index, front) {
+    const face = node('section', `ev-cover-face ${front ? 'ev-cover-face--front' : 'ev-cover-face--back'}`);
+    if (!front) face.setAttribute('aria-hidden', 'true');
+    const inner = node('div', 'ev-cover-face-inner');
+    const head = node('header', 'ev-cover-face-head');
+    if (front) {
+      const heading = node('h2', 'ev-cover-title', title);
+      heading.title = title;
+      head.append(heading);
+    } else {
+      head.append(node('span', 'ev-cover-back-label', '原始封面'));
+    }
+    head.append(node('span', 'ev-cover-index', index));
+    const foot = node('footer', 'ev-cover-face-foot');
+    if (front) {
+      foot.append(
+        node('span', 'ev-cover-micro-label', `${coverKindLabel(item)} · 已观察`),
+        node('span', 'ev-cover-flip-cue', '查看封面 →'),
+      );
+    } else {
+      foot.append(
+        node('span', 'ev-cover-micro-label', '受控本地副本'),
+        node('span', 'ev-cover-flip-cue', '3:4 COVER'),
+      );
+    }
+    inner.append(head, coverStage(item, front, title), foot);
+    face.append(inner);
+    return face;
+  }
+
+  function coverVisualBlock(item, ordinal) {
+    const title = knownText(item.display?.title, item.display?.titleState, '标题当前未知');
+    const index = String(ordinal).padStart(3, '0');
+    const visual = node('div', 'ev-cover-visual');
+    visual.tabIndex = 0;
+    visual.setAttribute('role', 'button');
+    visual.setAttribute('aria-pressed', 'false');
+    visual.setAttribute('aria-label', `${title}，查看封面`);
+    const flip = node('div', 'ev-cover-flip');
+    /* This invisible, non-interactive sizer is the shared physical footprint of the two faces.
+     * It derives the visual card height from a full-width 3:4 stage, instead of choosing a wide
+     * card height first and then leaving the portrait cover stranded in surplus whitespace. */
+    const sizer = node('div', 'ev-cover-visual-sizer');
+    sizer.setAttribute('aria-hidden', 'true');
+    sizer.append(
+      node('span', 'ev-cover-visual-sizer-title'),
+      (() => {
+        const stage = node('span', 'ev-cover-visual-sizer-stage');
+        stage.append(node('span', 'ev-cover-visual-sizer-frame'));
+        return stage;
+      })(),
+      node('span', 'ev-cover-visual-sizer-foot'),
+    );
+    flip.append(sizer, coverFace(item, title, index, true), coverFace(item, title, index, false));
+    visual.append(flip);
+    const toggle = () => {
+      const next = visual.dataset.flipped !== 'true';
+      visual.dataset.flipped = String(next);
+      visual.setAttribute('aria-pressed', String(next));
+      visual.setAttribute('aria-label', `${title}，${next ? '收起封面' : '查看封面'}`);
+    };
+    visual.addEventListener('click', (event) => {
+      if (!window.matchMedia('(hover: none)').matches) return;
+      event.preventDefault();
+      event.stopPropagation();
+      toggle();
+    });
+    visual.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      event.stopPropagation();
+      toggle();
+    });
+    return visual;
+  }
+
+  function coverStatusTooltip(item, summary) {
+    const tooltip = node('span', 'ev-cover-status-tooltip');
+    summary.segments.forEach((segment) => {
+      const line = node('span', null, `${segment.label} ${stateMeta(segment.state)[0]}`);
+      if (segment.key === 'comments') {
+        const comments = laneSummary(item, 'comments');
+        const engagement = item.display?.engagement || {};
+        if (comments?.valueState === 'KNOWN' && Number.isFinite(Number(comments.retained))
+          && engagement.commentCountState === 'KNOWN' && Number.isFinite(Number(engagement.commentCount))) {
+          line.textContent = `评论 ${Number(comments.retained).toLocaleString('zh-CN')} / ${Number(engagement.commentCount).toLocaleString('zh-CN')}`;
+        }
+      }
+      tooltip.append(line);
+    });
+    return tooltip;
+  }
+
+  function coverMetaBlock(item, material, detailState, observedAt) {
+    const meta = node('div', 'ev-cover-meta');
+    const top = node('div', 'ev-cover-meta-top');
+    top.append(authorFact(item), node('span', 'ev-cover-date', publishedCopy(item, true, false)));
+    const facts = node('div', 'ev-cover-facts');
+    if (isCrossIndustrySample(item)) {
+      facts.append(node('strong', 'ev-cross-industry-side-label', '列表级参照物'));
+      facts.append(node('span', 'ev-cross-industry-side-copy', '详情、媒体与材料未读取'));
+    } else {
+      const status = node('span', 'ev-cover-status');
+      status.tabIndex = 0;
+      status.append(stateLine(detailState), coverStatusTooltip(item, material.summary));
+      facts.append(material.rail, status);
+    }
+    const observed = node('span', 'ev-cover-observed', `最近观察 ${compactMoment(observedAt) || '未知'}`);
+    if (observedAt) observed.title = `最近观察 ${observedAt}`;
+    facts.append(observed);
+    meta.append(top, engagementBlock(item), facts);
+    return meta;
+  }
+
   /* The author's avatar is a media object like any other: it is shown only from a controlled
    * local handle, and when there is no verified copy the slot states why rather than falling
    * back to a platform URL. Ported from main's XHS-MEDIA-AUTHOR-EVIDENCE-001. */
@@ -897,6 +1129,13 @@
         tableCell(publishedCopy(item, true, false), ''),
         tableCell(compactMoment(observedAt) || '未知', ''),
       );
+    } else if (model.activeLayout === 'cover') {
+      const coverCard = node('div', 'ev-cover-card');
+      coverCard.append(
+        coverVisualBlock(item, model.items.indexOf(item) + 1),
+        coverMetaBlock(item, material, detailState, observedAt),
+      );
+      row.append(coverCard);
     } else {
       row.append(previewBlock(item), identity, side);
     }
@@ -964,6 +1203,19 @@
       row.tabIndex = selected ? 0 : -1;
     });
     if (rows.length && !rows.some((row) => row.tabIndex === 0)) rows[0].tabIndex = 0;
+    syncCoverTitleSizes();
+  }
+
+  /* The title plate itself is invariant; this only makes an actually wrapped title optically
+   * quieter. It never changes the plate's height or the stage grid row below it. */
+  function syncCoverTitleSizes() {
+    refs.list.querySelectorAll('.ev-cover-title').forEach((title) => {
+      title.removeAttribute('data-two-line');
+      const lineHeight = Number.parseFloat(window.getComputedStyle(title).lineHeight);
+      if (Number.isFinite(lineHeight) && title.scrollHeight > lineHeight * 1.5) {
+        title.dataset.twoLine = 'true';
+      }
+    });
   }
 
   function setFeedback(kind, title, detail, code) {
@@ -2331,6 +2583,7 @@
     });
   });
   refs.nextList.addEventListener('click', () => loadList({ append: true }));
+  window.addEventListener('resize', syncCoverTitleSizes);
   viewButtons.forEach((button) => button.addEventListener('click', () => {
     model.activeView = button.dataset.evView;
     viewButtons.forEach((candidate) => candidate.setAttribute('aria-pressed', String(candidate === button)));

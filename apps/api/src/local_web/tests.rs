@@ -2751,6 +2751,43 @@ fn evidence_runtime_uses_the_xhs_portrait_cover_ratio_in_visual_layouts() {
 }
 
 #[test]
+fn evidence_cover_layout_keeps_a_stationary_data_plate_and_one_shared_flip_stage() {
+    // Cover mode is a presentation of the existing Work Resource row, not another card model:
+    // the row retains its selection handler, while only `.ev-cover-visual` becomes interactive.
+    for marker in [
+        "function coverVisualBlock(item, ordinal)",
+        "function coverMetaBlock(item, material, detailState, observedAt)",
+        "coverCard.append(",
+        "visual.addEventListener('click'",
+        "window.matchMedia('(hover: none)').matches",
+        "event.stopPropagation()",
+        "sameOriginPath(cover.localAssetUrl",
+    ] {
+        assert!(
+            EVIDENCE_LIBRARY_JS.contains(marker),
+            "missing cover-card contract: {marker}"
+        );
+    }
+    for marker in [
+        ".ev-cover-visual",
+        ".ev-cover-meta",
+        ".ev-cover-stage-frame",
+        "aspect-ratio:3/4",
+        ".ev-cover-face--back",
+        "backface-visibility:hidden",
+        ".ev-cover-visual[data-flipped=\"true\"] .ev-cover-flip",
+        "@media(hover:hover){.ev-cover-visual:hover .ev-cover-flip",
+        ".ev-cover-title[data-two-line=\"true\"]",
+        ".ev-cover-status-tooltip",
+    ] {
+        assert!(
+            EVIDENCE_LIBRARY_CSS.contains(marker),
+            "missing cover-card visual contract: {marker}"
+        );
+    }
+}
+
+#[test]
 fn evidence_runtime_preserves_unknown_partial_and_restricted_states() {
     for state in [
         "UNKNOWN",
