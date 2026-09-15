@@ -255,6 +255,8 @@ migrate() {
   apply_migration_once "0081_comment_research_fingerprint" "$project_root/database/migrations/0081_comment_research_fingerprint.sql"
   apply_migration_once "0082_comment_research_execution_recovery" "$project_root/database/migrations/0082_comment_research_execution_recovery.sql"
   apply_migration_once "0083_comment_research_cross_run_resolution_retry" "$project_root/database/migrations/0083_comment_research_cross_run_resolution_retry.sql"
+  apply_migration_once "0084_comment_research_problem_resolution_v2" "$project_root/database/migrations/0084_comment_research_problem_resolution_v2.sql"
+  apply_migration_once "0085_comment_research_problem_pair_evaluation" "$project_root/database/migrations/0085_comment_research_problem_pair_evaluation.sql"
 }
 
 case "$command_name" in

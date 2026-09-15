@@ -127,10 +127,10 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.linggan-intelligence
 
 此段规定当前唯一评论研究路径；CI-AUTO-004 的 daily/Task B/P4/本地 Python 聚类实现是历史记录，不是 runtime 依赖。
 
-1. 先在交付 head 执行 `bash scripts/test-comment-research-postgres.sh`、`npm test --prefix apps/pi-adapter` 与 `cargo check -p linggan-intelligence -p linggan-api -p linggan-worker`。前者会在随机隔离 PostgreSQL 中从历史 migration 完整应用到 `0070`，验证旧研究派生被显式退役、归属修正会生成新 derivation head、冻结 Run 仍可完成而整版旧结果撤出可读投影；它绝不访问开发库。
+1. 先在交付 head 执行 `bash scripts/test-comment-research-postgres.sh`、`npm test --prefix apps/pi-adapter` 与 `cargo check -p linggan-intelligence -p linggan-api -p linggan-worker`。前者会在随机隔离 PostgreSQL 中从历史 migration 完整应用到 `0085`，验证旧研究派生被显式退役、V2 Atom→Stable Problem 的受限归并、归属修正会生成新 derivation head、冻结 Run 仍可完成而整版旧结果撤出可读投影；它绝不访问开发库。
 2. V1 不需要 Python/HDBSCAN/Leiden runtime。Pi adapter 只需在实际 runtime checkout 执行 `bash scripts/runtime/prepare-pi-adapter.sh --install`，再用 `--check` 验证固定 Node/npm 依赖。
 3. 在运行目录更新前，通过本节既有受控 `install.sh` 取得 worker drain 回执。旧 worker 的在途调用不能在删除旧表期间继续写入；未结束调用必须保留 invocation ledger 的未知用量事实，不能计作零。
-4. 更新后的代码仍不能自行迁移。取得 drain 后，从 canonical main 使用第 4 节的 `./scripts/local-runtime.sh migrate` 显式应用 `0068`–`0070`。`0069` 是终态删除 migration：清除旧研究派生和可能已存在的早期 V1 派生结果，不使用 `CASCADE`，并保留 Raw Comment/Evidence、作者归属、来源资格、通用模型连接/配置、embedding 设置和 invocation ledger；`0070` 固化 V1 derivation identity/read boundary：新 Run 选当前 head，冻结 Run 保留原输入可读性，不迁移或恢复任何旧研究结果。
+4. 更新后的代码仍不能自行迁移。取得 drain 后，从 canonical main 使用第 4 节的 `./scripts/local-runtime.sh migrate` 显式应用 `0068`–`0085`。`0069` 是终态删除 migration：清除旧研究派生和可能已存在的早期 V1 派生结果，不使用 `CASCADE`，并保留 Raw Comment/Evidence、作者归属、来源资格、通用模型连接/配置、embedding 设置和 invocation ledger；`0070` 固化 V1 derivation identity/read boundary：新 Run 选当前 head，冻结 Run 保留原输入可读性，不迁移或恢复任何旧研究结果；`0084`/`0085` 只增添 V2 Frame、closed-world Resolution 和可恢复 pair checkpoint，绝不重写既有 Problem 或原始评论。
 5. migration 后安装并刷新服务，逐项核对 exact Git revision、migration ledger、三个 PID、`/health` 和 `:3000` 的 V1 页面。旧 route/page 不应再可访问。
 6. 发布、保存连接或保存 policy 均不会调用真实模型；连续排程没有入口且保持关闭。只有用户在页面主动点击“开始研究”才会冻结 V1 Run 并发送已获许可的评论。
 
