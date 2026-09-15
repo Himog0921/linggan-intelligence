@@ -106,6 +106,8 @@
 | [design/pages/evidence-library-page.md](design/pages/evidence-library-page.md) | 权威当前 | `PAGE-EVIDENCE-001`：多材料 Evidence Library 产品手册与技术呈现要求；运行页已按现行 Material Projection 落地作品 lane 与 Inspector，真实垂直证明仍未完成 |
 | [design/changes/evidence-cover-flip-card-001-ui-change-manifest.md](design/changes/evidence-cover-flip-card-001-ui-change-manifest.md) | 交付分支实现；未合并、未部署 | `EVIDENCE-COVER-FLIP-CARD-001`：封面排版作品卡的局部翻面主视觉与固定元数据板；不改变读取、详情或状态语义 |
 | [design/acceptance/evidence-cover-flip-card-001-acceptance.md](design/acceptance/evidence-cover-flip-card-001-acceptance.md) | 一次性报告；未部署 | `ACC-EVIDENCE-COVER-FLIP-CARD-001`：自动合同、桌面真实数据预览与未切换 runtime 边界 |
+| [design/changes/evidence-cover-card-proportion-002-ui-change-manifest.md](design/changes/evidence-cover-card-proportion-002-ui-change-manifest.md) | 权威当前；候选已验证 | `EVIDENCE-COVER-CARD-PROPORTION-002`：保留六列封面扫描密度，将卡片校准为高档案主视觉与低横向数据铭牌的成组比例，不改变读取、详情或状态语义 |
+| [design/acceptance/evidence-cover-card-proportion-002-acceptance.md](design/acceptance/evidence-cover-card-proportion-002-acceptance.md) | 一次性报告；候选未部署 | `ACC-EVIDENCE-COVER-CARD-PROPORTION-002`：自动合同、真实本机只读预览与未提交/未部署边界 |
 | [design/changes/corpus-cross-domain-render-001-ui-change-manifest.md](design/changes/corpus-cross-domain-render-001-ui-change-manifest.md) | 权威当前；未部署 | 外部领域列表级参照样本显示与 Context Bar 领域链接菜单；不含领域自助配置 |
 | [design/acceptance/corpus-cross-domain-render-001-acceptance.md](design/acceptance/corpus-cross-domain-render-001-acceptance.md) | 一次性报告 | `ACC-CORPUS-CROSS-DOMAIN-RENDER-001`：外部样本 21 行、列表级 Inspector、LIDS 菜单与未部署边界 |
 | [design/changes/work-resource-read-001-ui-change-manifest.md](design/changes/work-resource-read-001-ui-change-manifest.md) | 交付分支实现；Issue #110 | Evidence Library 的共享 Work Resource 接口、作者/目标诚实表达、时间来源状态和研读/表格/封面三种排版变更清单 |
