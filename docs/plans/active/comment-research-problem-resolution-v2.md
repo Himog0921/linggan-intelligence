@@ -66,6 +66,10 @@
 - 已被旧 selector 错误接管的 legacy row 由 worker 的事务性 recovery 脱离当前 execution Run，恢复其原始 execution 指针和终态；当前 execution history 以受控 `legacy_resolution_contract_not_v2` 原因保留为跳过，不记为当前 Run 的模型失败。
 - Run read model 分开报告“待开始归并”“归并处理中”“已完成等待独立证据/消歧/上下文”和“终态失败”；未建立 resolution 的 Atom 不能显示为已完成待归并信号。
 
+### 2026-09-15 · 完成状态收口补丁
+
+真实 Run 在上述 backlog recovery 后继续暴露完成门槛遗漏：`deferred_*`、`out_of_scope` 与 `not_user_problem` 都是 V2 的合法终态，且故意不建立 membership；旧 completion query 却只把 embedding/归并失败算作“可终结的未归并 Atom”，于是没有待开始或处理中项的 Run 仍会停在 `running`。修复把这五类明确成功结论纳入 completion gate，但不写入 failure count，也不把它们伪造成 confirmed Problem；worker 在没有可认领项时会对 active Run 做一个受限 reconcile pass，使已按旧规则卡住的 Run 经由应用逻辑结清。Run Health 另单列 `范围外` 与 `非用户问题`，避免其只在“未归并总数”中隐身。
+
 不重试本次 semantic extraction 的终态 Schema 失败，不批量重写旧 V1 Atom、Problem 或 membership，也不自动开启连续研究。隔离 PostgreSQL 需要分别证明 legacy exclusion、V2 candidate re-recall、已卡住 activation recovery、Run completion 以及读取状态计数。
 
 这是状态/语义变更，采用现有 L1 shell、文字 Tab、表格/空态和 LIDS data-boundary/LANG-05 规则；不新增 Token、全局组件、页面壳、权限或实际行动。完整读取回执在 [`../design/changes/comment-research-problem-resolution-v2-ui-change-manifest.md`](../../design/changes/comment-research-problem-resolution-v2-ui-change-manifest.md)。

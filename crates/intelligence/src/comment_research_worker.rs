@@ -19,7 +19,7 @@ use crate::{
     comment_research_kernel::{
         ClaimedResearchInput, RunItemFailureClass, claim_next_run_item,
         fail_active_runs_without_embedding_config, load_claimed_research_input,
-        record_run_item_failure, refresh_run_completion_for_atom,
+        record_run_item_failure, refresh_active_run_completions, refresh_run_completion_for_atom,
     },
     comment_research_problem_resolution_v2::{
         CandidateComparison, CreationSignal, EligibilityDecision, EligibilityInput,
@@ -287,6 +287,9 @@ pub async fn run_once(
     if drain.is_requested() {
         return Ok(false);
     }
+    refresh_active_run_completions(database)
+        .await
+        .map_err(kernel_error)?;
     publish_one_ready_result(database).await
 }
 

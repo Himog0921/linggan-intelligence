@@ -418,7 +418,9 @@
         const deferredText = [
           Number(health.deferredNovelAtomCount || 0) ? `等待独立证据 ${count(health.deferredNovelAtomCount)} 条` : '',
           Number(health.deferredAmbiguousAtomCount || 0) ? `等待消歧 ${count(health.deferredAmbiguousAtomCount)} 条` : '',
-          Number(health.deferredContextAtomCount || 0) ? `等待语境 ${count(health.deferredContextAtomCount)} 条` : ''
+          Number(health.deferredContextAtomCount || 0) ? `等待语境 ${count(health.deferredContextAtomCount)} 条` : '',
+          Number(health.outOfScopeProblemAtomCount || 0) ? `范围外 ${count(health.outOfScopeProblemAtomCount)} 条` : '',
+          Number(health.notUserProblemAtomCount || 0) ? `非用户问题 ${count(health.notUserProblemAtomCount)} 条` : ''
         ].filter(Boolean).join(' · ');
         const healthText = `研究信号 ${count(health.researchSignalCount)} 条 · 问题/需求 ${count(health.problemBearingAtomCount)} 条 · 已归并 ${count(health.organizedProblemAtomCount)} 条 · 待开始归并 ${count(health.pendingProblemResolutionAtomCount)} 条 · 处理中 ${count(health.activeProblemResolutionAtomCount)} 条 · 归并终态失败 ${count(health.failedProblemResolutionAtomCount)} 条 · 本轮归并覆盖 ${pct(Number(organization.denominator) ? Number(organization.numerator) / Number(organization.denominator) : 1)}`;
         const activatedBacklog = Number(health.activatedBacklogAtomCount || 0);

@@ -1323,6 +1323,18 @@ async fn refresh_run_completion_with_embedding_state(
             ) AS resolution_failed_atoms, \
             (SELECT count(*) FROM linggan_comment_research_atom atom \
              WHERE atom.run_ref=$1 AND atom.kind IN ('problem','need') \
+               AND NOT EXISTS(SELECT 1 FROM linggan_comment_research_atom_problem_membership membership \
+                              WHERE membership.atom_ref=atom.atom_ref AND membership.current) \
+               AND EXISTS(SELECT 1 FROM linggan_comment_research_problem_resolution resolution \
+                          WHERE resolution.atom_ref=atom.atom_ref \
+                            AND resolution.state='succeeded' \
+                            AND resolution.decision_kind IN ( \
+                                'deferred_novel','deferred_ambiguous','deferred_context', \
+                                'out_of_scope','not_user_problem' \
+                            )) \
+            ) AS resolution_completed_without_membership_atoms, \
+            (SELECT count(*) FROM linggan_comment_research_atom atom \
+             WHERE atom.run_ref=$1 AND atom.kind IN ('problem','need') \
                AND EXISTS(SELECT 1 FROM linggan_comment_research_problem_resolution resolution \
                           WHERE resolution.atom_ref=atom.atom_ref \
                             AND resolution.state IN ('pending','running','retryable')) \
@@ -1362,6 +1374,8 @@ async fn settle_run_completion(
     let unassigned_atoms: i64 = outcome.get("unassigned_atoms");
     let embedding_failed_atoms: i64 = outcome.get("embedding_failed_atoms");
     let resolution_failed_atoms: i64 = outcome.get("resolution_failed_atoms");
+    let resolution_completed_without_membership_atoms: i64 =
+        outcome.get("resolution_completed_without_membership_atoms");
     let unsettled_resolution_atoms: i64 = outcome.get("unsettled_resolution_atoms");
     let unsettled_backlog_resolutions: i64 = outcome.get("unsettled_backlog_resolutions");
     let failed_backlog_resolutions: i64 = outcome.get("failed_backlog_resolutions");
@@ -1373,7 +1387,13 @@ async fn settle_run_completion(
     {
         return Ok(());
     }
-    let terminal_unassigned = embedding_failed_atoms + resolution_failed_atoms;
+    // A V2 resolution can validly end without a membership.  These explicit dispositions are
+    // complete conclusions for this Run, not failures and not evidence that a new Problem may
+    // be created.  Keeping them separate from failure counts prevents a Run with only deferred
+    // or excluded signals from remaining "running" forever.
+    let terminal_unassigned = embedding_failed_atoms
+        + resolution_failed_atoms
+        + resolution_completed_without_membership_atoms;
     if unassigned_atoms > 0 && terminal_unassigned < unassigned_atoms {
         return Ok(());
     }
@@ -1426,6 +1446,29 @@ pub async fn refresh_run_completion_for_atom(
          ) involved_runs",
     )
     .bind(atom_ref)
+    .fetch_all(database.pool())
+    .await?;
+    if run_refs.is_empty() {
+        return Ok(());
+    }
+    let mut transaction = database.pool().begin().await?;
+    for run_ref in run_refs {
+        refresh_run_completion(&mut transaction, run_ref).await?;
+    }
+    transaction.commit().await?;
+    Ok(())
+}
+
+/// Reconciles active Runs when there is no claimable worker item left.  Normally each semantic,
+/// embedding or resolution transition refreshes its own Run; this bounded idle pass also repairs
+/// a Run whose terminal state became visible under an earlier completion rule.
+pub async fn refresh_active_run_completions(
+    database: &Database,
+) -> Result<(), CommentResearchKernelError> {
+    let run_refs: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT run_ref FROM linggan_comment_research_run \
+         WHERE state IN ('queued','running') ORDER BY created_at,run_ref",
+    )
     .fetch_all(database.pool())
     .await?;
     if run_refs.is_empty() {
