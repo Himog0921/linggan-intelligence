@@ -124,7 +124,10 @@ pub async fn schema_ready(database: &Database) -> Result<bool, CommentResearchV1
                       AND attname='problem_frame' AND NOT attisdropped) \
                 AND EXISTS(SELECT 1 FROM pg_attribute \
                     WHERE attrelid='linggan_comment_research_problem_resolution'::regclass \
-                      AND attname='decision_kind' AND NOT attisdropped)",
+                      AND attname='decision_kind' AND NOT attisdropped) \
+                AND EXISTS(SELECT 1 FROM pg_attribute \
+                    WHERE attrelid='linggan_comment_research_problem_resolution'::regclass \
+                      AND attname='candidate_recall_required' AND NOT attisdropped)",
     )
     .fetch_one(database.pool())
     .await?)
@@ -347,9 +350,39 @@ pub async fn read_runs(
                  'organizedProblemAtomCount',(SELECT count(*) FROM linggan_comment_research_atom atom WHERE atom.run_ref=run.run_ref AND atom.kind IN ('problem','need') AND EXISTS( \
                      SELECT 1 FROM linggan_comment_research_atom_problem_membership membership \
                      WHERE membership.atom_ref=atom.atom_ref AND membership.current)), \
-                 'backlogProblemAtomCount',(SELECT count(*) FROM linggan_comment_research_atom atom WHERE atom.run_ref=run.run_ref AND atom.kind IN ('problem','need') AND NOT EXISTS( \
+                 'unassignedProblemAtomCount',(SELECT count(*) FROM linggan_comment_research_atom atom WHERE atom.run_ref=run.run_ref AND atom.kind IN ('problem','need') AND NOT EXISTS( \
                      SELECT 1 FROM linggan_comment_research_atom_problem_membership membership \
                      WHERE membership.atom_ref=atom.atom_ref AND membership.current)), \
+                 'pendingProblemResolutionAtomCount',(SELECT count(*) FROM linggan_comment_research_atom atom WHERE atom.run_ref=run.run_ref AND atom.kind IN ('problem','need') AND NOT EXISTS( \
+                     SELECT 1 FROM linggan_comment_research_atom_problem_membership membership \
+                     WHERE membership.atom_ref=atom.atom_ref AND membership.current) AND NOT EXISTS( \
+                     SELECT 1 FROM linggan_comment_research_problem_resolution resolution \
+                     WHERE resolution.atom_ref=atom.atom_ref)), \
+                 'activeProblemResolutionAtomCount',(SELECT count(*) FROM linggan_comment_research_atom atom WHERE atom.run_ref=run.run_ref AND atom.kind IN ('problem','need') AND NOT EXISTS( \
+                     SELECT 1 FROM linggan_comment_research_atom_problem_membership membership \
+                     WHERE membership.atom_ref=atom.atom_ref AND membership.current) AND EXISTS( \
+                     SELECT 1 FROM linggan_comment_research_problem_resolution resolution \
+                     WHERE resolution.atom_ref=atom.atom_ref AND resolution.state IN ('pending','running','retryable'))), \
+                 'deferredNovelAtomCount',(SELECT count(*) FROM linggan_comment_research_atom atom WHERE atom.run_ref=run.run_ref AND atom.kind IN ('problem','need') AND NOT EXISTS( \
+                     SELECT 1 FROM linggan_comment_research_atom_problem_membership membership \
+                     WHERE membership.atom_ref=atom.atom_ref AND membership.current) AND EXISTS( \
+                     SELECT 1 FROM linggan_comment_research_problem_resolution resolution \
+                     WHERE resolution.atom_ref=atom.atom_ref AND resolution.state='succeeded' AND resolution.decision_kind='deferred_novel')), \
+                 'deferredAmbiguousAtomCount',(SELECT count(*) FROM linggan_comment_research_atom atom WHERE atom.run_ref=run.run_ref AND atom.kind IN ('problem','need') AND NOT EXISTS( \
+                     SELECT 1 FROM linggan_comment_research_atom_problem_membership membership \
+                     WHERE membership.atom_ref=atom.atom_ref AND membership.current) AND EXISTS( \
+                     SELECT 1 FROM linggan_comment_research_problem_resolution resolution \
+                     WHERE resolution.atom_ref=atom.atom_ref AND resolution.state='succeeded' AND resolution.decision_kind='deferred_ambiguous')), \
+                 'deferredContextAtomCount',(SELECT count(*) FROM linggan_comment_research_atom atom WHERE atom.run_ref=run.run_ref AND atom.kind IN ('problem','need') AND NOT EXISTS( \
+                     SELECT 1 FROM linggan_comment_research_atom_problem_membership membership \
+                     WHERE membership.atom_ref=atom.atom_ref AND membership.current) AND EXISTS( \
+                     SELECT 1 FROM linggan_comment_research_problem_resolution resolution \
+                     WHERE resolution.atom_ref=atom.atom_ref AND resolution.state='succeeded' AND resolution.decision_kind='deferred_context')), \
+                 'failedProblemResolutionAtomCount',(SELECT count(*) FROM linggan_comment_research_atom atom WHERE atom.run_ref=run.run_ref AND atom.kind IN ('problem','need') AND NOT EXISTS( \
+                     SELECT 1 FROM linggan_comment_research_atom_problem_membership membership \
+                     WHERE membership.atom_ref=atom.atom_ref AND membership.current) AND EXISTS( \
+                     SELECT 1 FROM linggan_comment_research_problem_resolution resolution \
+                     WHERE resolution.atom_ref=atom.atom_ref AND resolution.state IN ('model_failed','incompatible'))), \
                  'organizationCoverage',jsonb_build_object( \
                      'numerator',(SELECT count(*) FROM linggan_comment_research_atom atom WHERE atom.run_ref=run.run_ref AND atom.kind IN ('problem','need') AND EXISTS( \
                          SELECT 1 FROM linggan_comment_research_atom_problem_membership membership \
@@ -370,7 +403,13 @@ pub async fn read_runs(
                  'activatedBacklogFailedAtomCount',(SELECT count(*) FROM linggan_comment_research_problem_resolution_execution execution \
                     JOIN linggan_comment_research_atom atom ON atom.atom_ref=execution.atom_ref \
                     WHERE execution.run_ref=run.run_ref AND atom.run_ref<>run.run_ref \
-                      AND execution.state IN ('model_failed','incompatible')) \
+                      AND execution.state IN ('model_failed','incompatible') \
+                      AND execution.failure_code IS DISTINCT FROM 'legacy_resolution_contract_not_v2'), \
+                 'activatedBacklogSkippedAtomCount',(SELECT count(*) FROM linggan_comment_research_problem_resolution_execution execution \
+                    JOIN linggan_comment_research_atom atom ON atom.atom_ref=execution.atom_ref \
+                    WHERE execution.run_ref=run.run_ref AND atom.run_ref<>run.run_ref \
+                      AND execution.state='incompatible' \
+                      AND execution.failure_code='legacy_resolution_contract_not_v2') \
              ), \
              'modelExecution',( \
                  SELECT jsonb_build_object( \
