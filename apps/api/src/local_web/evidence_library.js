@@ -105,7 +105,6 @@
     bench: document.getElementById('ev-bench'),
     list: document.getElementById('ev-work-list'),
     feedback: document.getElementById('ev-feedback'),
-    resultsLegend: document.getElementById('ev-results-legend'),
     railCount: document.getElementById('ev-rail-count'),
     nextList: document.getElementById('ev-next-list'),
     inspector: document.getElementById('ev-inspector'),
@@ -116,7 +115,6 @@
     openSource: document.getElementById('ev-open-source'),
     requestMedia: document.getElementById('ev-request-media'),
     closeInspector: document.getElementById('ev-close-inspector'),
-    reopenInspector: document.getElementById('ev-reopen-inspector'),
     back: document.getElementById('ev-back-to-list'),
     tableHead: document.getElementById('ev-table-head'),
     lightbox: document.getElementById('ev-lightbox'),
@@ -746,31 +744,17 @@
     return '图文';
   }
 
-  let coverDotFieldSequence = 0;
-
   function svgNode(name, attributes = {}) {
     const element = document.createElementNS('http://www.w3.org/2000/svg', name);
     Object.entries(attributes).forEach(([key, value]) => element.setAttribute(key, String(value)));
     return element;
   }
 
-  /* Actual SVG dots rather than a CSS gradient keep the field discrete: it is a quiet measuring
-   * surface, not a tonal effect. Each pattern id is unique because multiple cards coexist. */
-  function coverDotField() {
-    const patternId = `ev-cover-dot-field-${coverDotFieldSequence += 1}`;
-    const svg = svgNode('svg', {
-      class: 'ev-cover-dot-field', viewBox: '0 0 100 100', preserveAspectRatio: 'none', 'aria-hidden': 'true',
-    });
-    const defs = svgNode('defs');
-    const pattern = svgNode('pattern', { id: patternId, width: 8, height: 8, patternUnits: 'userSpaceOnUse' });
-    pattern.append(svgNode('circle', { cx: 1, cy: 1, r: 0.75, fill: 'currentColor' }));
-    defs.append(pattern);
-    svg.append(defs, svgNode('rect', { width: '100%', height: '100%', fill: `url(#${patternId})` }));
-    return svg;
-  }
-
-  /* Four stable line templates are enough to classify the locally known work form. They do not
-   * infer a subject, an evidence state, or content quality; a template is only a catalogue cue. */
+  /* Six stable line templates are enough to classify the locally known work form. They do not
+   * infer a subject, an evidence state, or content quality; a template is only a catalogue cue.
+   * All of them are drawn inside one safe area of the 300x400 viewBox — x 48..252 (68% of the
+   * stage width) and y 80..320 (60% of its height) — so that no card asks for more visual weight
+   * than its neighbour. The stage's own measuring field is painted by CSS, not here. */
   function coverGeometry(kind) {
     const svg = svgNode('svg', {
       class: 'ev-cover-geometry', viewBox: '0 0 300 400', 'aria-hidden': 'true', focusable: 'false',
@@ -778,56 +762,40 @@
     const group = svgNode('g', { fill: 'none', stroke: 'currentColor', 'stroke-width': '1.25' });
     const append = (name, attributes) => group.append(svgNode(name, attributes));
     if (kind === 'wave') {
-      [42, 70, 98, 126].forEach((radius, index) => append('circle', {
-        cx: 150, cy: 188 + index * 14, r: radius,
-      }));
-      append('path', { d: 'M66 300c28-34 56-34 84 0s56 34 84 0' });
-      append('path', { d: 'M112 148h76M150 110v76' });
+      [24, 48, 72, 96].forEach((radius) => append('circle', { cx: 150, cy: 200, r: radius }));
+      append('path', { d: 'M54 200h192M150 104v192' });
     } else if (kind === 'stack') {
-      [[59, 122], [83, 92], [107, 62]].forEach(([x, y]) => append('rect', {
-        x, y, width: 134, height: 212,
+      [[50, 90], [60, 120], [70, 150]].forEach(([x, y]) => append('rect', {
+        x, y, width: 160, height: 170,
       }));
-      append('path', { d: 'M124 130h90M124 172h90M124 214h90' });
+      append('path', { d: 'M80 140h100M80 180h100M80 220h100' });
     } else if (kind === 'cluster') {
-      [[110, 172, 68], [190, 172, 68], [150, 236, 68]].forEach(([cx, cy, r]) => append('circle', { cx, cy, r }));
-      append('path', { d: 'M124 252 178 306M142 208l64 64' });
+      [[110, 180, 60], [190, 180, 60], [150, 240, 60]].forEach(([cx, cy, r]) => append('circle', { cx, cy, r }));
+      append('path', { d: 'M125 260 175 300M140 222l60 56' });
     } else if (kind === 'grid') {
-      append('rect', { x: 50, y: 62, width: 200, height: 276 });
-      [90, 130, 170, 210].forEach((position) => append('path', { d: `M${position} 62v276` }));
-      [112, 162, 212, 262].forEach((position) => append('path', { d: `M50 ${position}h200` }));
-      append('path', { d: 'M90 102 150 162 210 102M90 298l60-60 60 60' });
+      append('rect', { x: 48, y: 80, width: 204, height: 240 });
+      [99, 150, 201].forEach((position) => append('path', { d: `M${position} 80v240` }));
+      [140, 200, 260].forEach((position) => append('path', { d: `M48 ${position}h204` }));
+      append('path', { d: 'M48 80 150 200 252 80M48 320 150 200 252 320' });
     } else if (kind === 'frame') {
-      append('rect', { x: 58, y: 60, width: 184, height: 280 });
-      append('rect', { x: 82, y: 96, width: 136, height: 208 });
-      append('path', { d: 'M82 152h136M82 248h136M150 96v208' });
-      append('path', { d: 'M104 122 150 160 196 122M104 278l46-38 46 38' });
+      append('rect', { x: 48, y: 80, width: 204, height: 240 });
+      append('rect', { x: 85, y: 123, width: 130, height: 154 });
+      append('path', { d: 'M85 174h130M85 226h130M150 123v154' });
+      append('path', { d: 'M110 148 150 180 190 148M110 252 150 220 190 252' });
     } else {
-      append('path', { d: 'M54 332 150 62l96 270Z' });
-      [72, 88, 104, 120, 136, 164, 180, 196, 212, 228].forEach((position) => append('path', {
-        d: `M150 62 ${position} 332`,
-      }));
-      append('path', { d: 'M54 332h192' });
+      append('path', { d: 'M150 80 48 320h204Z' });
+      [96, 144, 192].forEach((position) => append('path', { d: `M150 80 ${position} 320` }));
+      append('path', { d: 'M78 246h144' });
     }
     svg.append(group);
     return svg;
   }
 
-  function coverCorners() {
-    const corners = node('span', 'ev-cover-corners');
-    ['top-left', 'top-right', 'bottom-right', 'bottom-left'].forEach((position) => {
-      const corner = node('i', 'ev-cover-corner');
-      corner.dataset.corner = position;
-      corners.append(corner);
-    });
-    return corners;
-  }
-
   function coverStage(item, front, title) {
     const stage = node('div', 'ev-cover-stage');
     const frame = node('div', `ev-cover-stage-frame ${front ? 'ev-cover-stage-frame--diagram' : 'ev-cover-stage-frame--cover'}`);
-    frame.append(coverCorners());
     if (front) {
-      frame.append(coverDotField(), coverGeometry(coverGeometryKind(item)));
+      frame.append(coverGeometry(coverGeometryKind(item)));
     } else {
       const cover = coverAsset(item);
       if (cover.asset) {
@@ -1233,13 +1201,6 @@
     refs.list.dataset.layout = model.activeLayout;
     refs.tableHead.hidden = model.activeLayout !== 'table';
     refs.tableHead.setAttribute('aria-hidden', String(model.activeLayout !== 'table'));
-    refs.resultsLegend.textContent = !CORPUS_DOMAIN.isOwn
-      ? (model.activeLayout === 'table'
-        ? '跨行业参照样本 · 列表级字段 · 不读取详情'
-        : '跨行业参照样本 · 只呈现已读取的列表字段')
-      : (model.activeLayout === 'table'
-      ? '无封面 · 6 列 · 适合批量核查'
-      : (model.activeLayout === 'cover' ? '图片主导 · 视觉供给研究' : '缩略图 · 最强证据 · 材料摘要'));
     const existing = new Set([...refs.list.querySelectorAll('[data-item-ref]')].map((row) => row.dataset.itemRef));
     model.items.forEach((item) => {
       const ref = itemRef(item);
@@ -1252,19 +1213,6 @@
       row.tabIndex = selected ? 0 : -1;
     });
     if (rows.length && !rows.some((row) => row.tabIndex === 0)) rows[0].tabIndex = 0;
-    syncCoverTitleSizes();
-  }
-
-  /* The title plate itself is invariant; this only makes an actually wrapped title optically
-   * quieter. It never changes the plate's height or the stage grid row below it. */
-  function syncCoverTitleSizes() {
-    refs.list.querySelectorAll('.ev-cover-title').forEach((title) => {
-      title.removeAttribute('data-two-line');
-      const lineHeight = Number.parseFloat(window.getComputedStyle(title).lineHeight);
-      if (Number.isFinite(lineHeight) && title.scrollHeight > lineHeight * 1.5) {
-        title.dataset.twoLine = 'true';
-      }
-    });
   }
 
   function setFeedback(kind, title, detail, code) {
@@ -1282,14 +1230,14 @@
 
   /* The receipt bar only appears when the read did something the counts above cannot show. A
    * successful ordinary read is already fully described by the readout and the rows, so
-   * restating "读取成功，当前显示 14 个作品集合" a third time is noise, not honesty. The read
-   * timestamp moves onto the results header as a title, where it stays checkable without
-   * occupying a line of its own. */
+   * restating "读取成功，当前显示 14 个作品集合" a third time is noise, not honesty. With no
+   * results header left to carry it, the read timestamp hangs on the work list itself, where it
+   * stays checkable without occupying a line of its own. */
   function queryReceipt(payload, appended) {
     if (!CORPUS_DOMAIN.isOwn) {
       refs.receipt.replaceChildren();
       refs.receipt.hidden = true;
-      refs.resultsLegend.title = `跨行业列表样本 · 最近观察 ${payload.items?.[0]?.provenance?.lastObservedAt || '未知'}${appended ? ' · 已继续读取' : ''}`;
+      refs.list.title = `跨行业列表样本 · 最近观察 ${payload.items?.[0]?.provenance?.lastObservedAt || '未知'}${appended ? ' · 已继续读取' : ''}`;
       refs.nextList.hidden = true;
       refs.nextList.disabled = true;
       refs.nextList.dataset.cursor = '';
@@ -1314,7 +1262,7 @@
       meta.append(tech(`扫描 ${payload.scannedCount ?? '未知'}`));
       refs.receipt.append(main, meta);
     }
-    refs.resultsLegend.title = `读取时间 ${payload.asOf || '未知'} · 扫描 ${payload.scannedCount ?? '未知'} 条${appended ? ' · 已继续读取' : ''}`;
+    refs.list.title = `读取时间 ${payload.asOf || '未知'} · 扫描 ${payload.scannedCount ?? '未知'} 条${appended ? ' · 已继续读取' : ''}`;
     refs.nextList.hidden = !payload.cursor;
     refs.nextList.disabled = !payload.cursor;
     refs.nextList.dataset.cursor = payload.cursor || '';
@@ -1461,7 +1409,6 @@
   function applyInspectorState() {
     refs.bench.dataset.inspector = model.inspectorClosed ? 'closed' : model.inspectorWidth;
     refs.bench.dataset.drawer = model.drawerOpen ? 'open' : 'closed';
-    refs.reopenInspector.hidden = !model.inspectorClosed || isDrawerLayout();
     widthButtons.forEach((button) => {
       button.setAttribute('aria-pressed', String(!model.inspectorClosed && button.dataset.evWidth === model.inspectorWidth));
     });
@@ -2632,7 +2579,6 @@
     });
   });
   refs.nextList.addEventListener('click', () => loadList({ append: true }));
-  window.addEventListener('resize', syncCoverTitleSizes);
   viewButtons.forEach((button) => button.addEventListener('click', () => {
     model.activeView = button.dataset.evView;
     viewButtons.forEach((candidate) => candidate.setAttribute('aria-pressed', String(candidate === button)));
@@ -2646,11 +2592,6 @@
   }));
   widthButtons.forEach((button) => button.addEventListener('click', () => setInspectorWidth(button.dataset.evWidth)));
   refs.closeInspector.addEventListener('click', closeInspector);
-  refs.reopenInspector.addEventListener('click', () => {
-    openInspector();
-    syncUrl();
-    refs.inspector.focus?.();
-  });
   tabs.forEach((tab) => {
     tab.addEventListener('click', () => activateTab(tab));
     tab.addEventListener('keydown', (event) => {

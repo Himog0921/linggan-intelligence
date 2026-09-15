@@ -2778,7 +2778,6 @@ fn evidence_cover_layout_keeps_a_stationary_data_plate_and_one_shared_flip_stage
         "backface-visibility:hidden",
         ".ev-cover-visual[data-flipped=\"true\"] .ev-cover-flip",
         "@media(hover:hover){.ev-cover-visual:hover .ev-cover-flip",
-        ".ev-cover-title[data-two-line=\"true\"]",
         ".ev-cover-status-tooltip",
         "column-gap:var(--lgi-space-2);row-gap:var(--lgi-space-8)",
         "aspect-ratio:7/2",
@@ -2834,6 +2833,122 @@ fn evidence_cover_layout_keeps_a_stationary_data_plate_and_one_shared_flip_stage
             "node('span', 'ev-cover-cross-boundary', '列表级参照物 · 详情、媒体与材料未读取')"
         ),
         "a cross-industry sample must consume exactly one bottom-band state cell"
+    );
+}
+
+/* Surface hierarchy, card material, the measuring field and the title step are one contract: the
+ * four levels of the cover card must stay distinguishable without a frame around each of them,
+ * the grain must stay off every text layer, and the stage lattice must be a different pattern
+ * from the grain and must actually cover the whole 3:4 stage. The title step is part of it: a
+ * 277px card is a caption surface over its 3:4 stage, so it takes the card step and never the
+ * page-title step that made six cards shout over their own material. */
+#[test]
+fn evidence_cover_card_layers_by_surface_and_keeps_its_materials_apart() {
+    for marker in [
+        // Four levels, all existing tokens: page / card / stage / plate.
+        "--ev-cover-title-size:var(--lgi-text-longform)",
+        "border:1px solid var(--lgi-border-strong);background:var(--lgi-canvas-sunken)",
+        ".ev-cover-stage-frame{position:relative;display:grid;max-width:100%;height:100%;aspect-ratio:3/4;overflow:hidden;border:1px solid var(--lgi-border-strong);background:var(--lgi-canvas-hi)",
+        "padding:var(--lgi-space-3);aspect-ratio:7/2;border-top:1px solid var(--lgi-border-strong);border-bottom:1px solid var(--lgi-hairline);background:var(--lgi-canvas-low)",
+        // The card's own material, and the layer that keeps it out of the text.
+        ".ev-cover-face::after{content:\"\";position:absolute;inset:0;z-index:1;pointer-events:none;background-image:radial-gradient",
+        ".ev-cover-face-inner{position:relative;z-index:2;",
+        "background-size:20px 20px",
+        // The selected card keeps the same material on orange.
+        ".ev-work-row[aria-selected=\"true\"] .ev-cover-face::after{background-image:radial-gradient",
+        // The measuring field: a real 8px / 1px lattice, painted by CSS over the whole stage.
+        ".ev-cover-stage-frame--diagram::before{content:\"\";position:absolute;inset:0;z-index:0;pointer-events:none;background-image:radial-gradient(circle,var(--lgi-ink) 1px,transparent 1.2px);background-size:8px 8px",
+        ".ev-cover-geometry{position:relative;z-index:1;width:100%;height:100%;color:var(--v7-black)}",
+        // The original cover fills the very same stage box as the diagram. The frame's height
+        // comes from the shared sizer, so a percentage height on the cover resolved only
+        // sometimes and an off-ratio cover hung below the frame instead of being cropped.
+        ".ev-cover-stage-frame--cover img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}",
+    ] {
+        assert!(
+            EVIDENCE_LIBRARY_CSS.contains(marker),
+            "missing cover-card surface contract: {marker}"
+        );
+    }
+    // One type step for every card, and a plate that is exactly two lines of it.
+    assert!(
+        EVIDENCE_LIBRARY_CSS.contains(
+            "--ev-cover-title-height:calc(var(--ev-cover-title-size) * var(--lgi-lh-title) * 2)"
+        ),
+        "the title plate must be exactly two lines of the card's own title step"
+    );
+    assert!(
+        !EVIDENCE_LIBRARY_CSS.contains("data-two-line"),
+        "a per-card title downgrade would put two different type sizes on one row of cards"
+    );
+    assert!(
+        !EVIDENCE_LIBRARY_CSS.contains(".ev-cover-dot-field")
+            && !EVIDENCE_LIBRARY_CSS.contains(".ev-cover-corner"),
+        "the stage field is a CSS tile and the stage frame carries no corner ticks"
+    );
+    assert!(
+        !EVIDENCE_LIBRARY_JS.contains("ev-cover-dot-field") && !EVIDENCE_LIBRARY_JS.contains("coverCorners"),
+        "a ratio-derived inline SVG cannot measure the whole 3:4 stage, so the field must not go back to one"
+    );
+    // Every template is drawn inside the one safe area of the 300x400 viewBox — x 48..252
+    // (68%) and y 80..320 (60%). The band is only as good as the coordinates that draw it, so
+    // every literal the six templates use is pinned: pinning a subset leaves the rest free to
+    // drift out of the band unnoticed (raising the stack's rect from 160x170 to 260x260 puts it
+    // at x 70..330 / y 150..410 and a subset pin stays green).
+    for marker in [
+        "[24, 48, 72, 96].forEach((radius) => append('circle', { cx: 150, cy: 200, r: radius }))",
+        "append('path', { d: 'M54 200h192M150 104v192' })",
+        "[[50, 90], [60, 120], [70, 150]].forEach(([x, y]) => append('rect', {",
+        "x, y, width: 160, height: 170,",
+        "append('path', { d: 'M80 140h100M80 180h100M80 220h100' })",
+        "[[110, 180, 60], [190, 180, 60], [150, 240, 60]].forEach(([cx, cy, r]) => append('circle', { cx, cy, r }))",
+        "append('path', { d: 'M125 260 175 300M140 222l60 56' })",
+        "append('rect', { x: 48, y: 80, width: 204, height: 240 })",
+        "[99, 150, 201].forEach((position) => append('path', { d: `M${position} 80v240` }))",
+        "[140, 200, 260].forEach((position) => append('path', { d: `M48 ${position}h204` }))",
+        "append('path', { d: 'M48 80 150 200 252 80M48 320 150 200 252 320' })",
+        "append('rect', { x: 85, y: 123, width: 130, height: 154 })",
+        "append('path', { d: 'M85 174h130M85 226h130M150 123v154' })",
+        "append('path', { d: 'M110 148 150 180 190 148M110 252 150 220 190 252' })",
+        "append('path', { d: 'M150 80 48 320h204Z' })",
+        "[96, 144, 192].forEach((position) => append('path', { d: `M150 80 ${position} 320` }))",
+        "append('path', { d: 'M78 246h144' })",
+    ] {
+        assert!(
+            EVIDENCE_LIBRARY_JS.contains(marker),
+            "every catalogue mark must share one safe area so visual weight does not jump: {marker}"
+        );
+    }
+    // The comment is the only place the 68% / 60% claim itself is written down.
+    assert!(
+        EVIDENCE_LIBRARY_JS.contains("x 48..252 (68% of the")
+            && EVIDENCE_LIBRARY_JS.contains("y 80..320 (60% of its height)"),
+        "the geometry comment must keep naming the safe area the templates above are drawn in"
+    );
+}
+
+/* The results band that carried the layout legend and the inspector reopen button is gone; the
+ * read timestamp it used to hold hangs on the work list instead of losing its checkable home. */
+#[test]
+fn evidence_results_band_stays_removed() {
+    let html = evidence_library_html(None, &[], None);
+    for gone in ["ev-results-head", "ev-results-legend", "ev-reopen-inspector"] {
+        assert!(
+            !html.contains(gone),
+            "the results band was removed on request and must not return: {gone}"
+        );
+    }
+    // The CSS ships as its own asset, so an HTML-only check would let a stylesheet rule for the
+    // removed band come back as dead code under a passing test.
+    for gone in ["ev-inspector-reopen", "ev-results-head", "ev-results-legend"] {
+        assert!(
+            !EVIDENCE_LIBRARY_CSS.contains(gone),
+            "a stylesheet rule for the removed results band is dead code: {gone}"
+        );
+    }
+    assert!(!EVIDENCE_LIBRARY_JS.contains("reopenInspector"));
+    assert!(
+        EVIDENCE_LIBRARY_JS.contains("refs.list.title = `读取时间"),
+        "the read timestamp must stay checkable after its header row was removed"
     );
 }
 
