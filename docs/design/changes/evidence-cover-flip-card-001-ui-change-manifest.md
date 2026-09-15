@@ -1,7 +1,7 @@
 # EVIDENCE-COVER-FLIP-CARD-001 · 证据库封面作品卡
 
 > 状态: 权威当前
-> 交付状态: 交付分支实现；未合并、未部署
+> 交付状态: 已合并 `main@521002f`，本机 `:3000` 已刷新至同一 revision
 > 最后核对: 2026-09-15
 > 适用范围: `/corpus/evidence?layout=cover` 中既有作品卡的主视觉与其局部翻转交互
 > 事实来源: Mog 2026-09-15 的明确交付、`PAGE-EVIDENCE-001`、`EVIDENCE-V9-001`、LIDS、现行 `evidence_library.js/css`

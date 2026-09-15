@@ -1,7 +1,7 @@
 # ACC-EVIDENCE-COVER-FLIP-CARD-001 · 证据库封面翻转卡验收
 
 > 状态: 一次性报告
-> 交付状态: 交付分支已验证，未合并、未部署
+> 交付状态: 已合并 `main@521002f`，本机 `:3000` 已刷新至同一 revision
 > 最后核对: 2026-09-15
 > 适用范围: `EVIDENCE-COVER-FLIP-CARD-001` 的源码、浏览器预览与未切换边界
 > 事实来源: `codex/corpus-cover-flip-cards`、自动检查输出、受控本机只读预览
@@ -28,11 +28,17 @@
 - 正面只选择 4 个静态 SVG 模板（视频 wave、多图 stack、讨论 cluster、图文 frame）；没有 AI 生成、渐变、玻璃或新的媒体来源。
 - 背面继续经过原有 `sameOriginPath` gate，只读取既有受控本机 `cover.localAssetUrl`。状态提示只汇总现有 material segment 事实；未知不伪装为 0。
 
+## 发布与运行回执
+
+- 交付提交 `25fd7f4` 已推送至 `origin/codex/corpus-cover-flip-cards`；合并提交 `521002f` 已推送至 `origin/main`。
+- 受控 `./scripts/runtime/install.sh` 已先取得 patrol worker drain 回执，再同步 detached `runtime-main`、核对迁移台账已最新、构建 `521002f` 并重启 API / patrol / media 三项服务。
+- live API PID `75591` 的 cwd 与 executable 均位于 `runtime-main`；运行目录 HEAD 与 `origin/main` 均为 `521002f`。三个 LaunchAgent 为 running，`/health` 返回 database/schema `READY`、scheduler `running`、`lastError: null`。
+- `http://127.0.0.1:3000/corpus/evidence?layout=cover&work=0126413e-0c93-4381-9871-26f4803c816a` 返回 HTTP 200；浏览器加载 50 条真实作品卡，并实测首卡键盘翻至受控本机封面。
+
 ## 未验证或未执行
 
-- `:3000` 当前运行服务没有重启、替换或指向本分支；该地址仍不是本交付的运行回执。
-- 本次浏览器预览由临时 `127.0.0.1:3108` 只读代理提供分支 JS/CSS，并转发至已有本机读取接口；没有执行 API、数据库、采集、平台或媒体写入。它不是部署。
-- 移动设备的真实触摸浏览器、Mog 前端验收、合并、推送和部署均为 **NOT VERIFIED**；代码路径和文本合同已覆盖无 hover 点击语义。
+- 早期分支预览曾由临时 `127.0.0.1:3108` 只读代理提供分支 JS/CSS，并转发至已有本机读取接口；该临时代理已经关闭。没有执行 API、数据库、采集、平台或媒体写入。
+- 移动设备的真实触摸浏览器和 Mog 前端验收仍为 **NOT VERIFIED**；代码路径和文本合同已覆盖无 hover 点击语义。
 - `cargo fmt --all -- --check` 仍因本分支基线中与本包无关的 `station_view.rs`、评论研究文件等格式差异失败；本包唯一 Rust 改动 `apps/api/src/local_web/tests.rs` 已单独格式化，且聚焦测试通过。
 
 ## 交付位置
