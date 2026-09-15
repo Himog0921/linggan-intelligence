@@ -1002,15 +1002,9 @@ fn archive_count(archive: super::target_drawer::TargetArchiveRead<'_>) -> String
         super::target_drawer::TargetArchiveRead::Unavailable => "当前读不到".to_owned(),
         super::target_drawer::TargetArchiveRead::Known(value) => value
             .filter(|value| value.has_displayable_directory())
-            .map(|value| {
-                if value.directory_baseline
-                    == linggan_evidence::ArchiveDirectoryBaseline::HistoricalDirectory
-                {
-                    format!("{} 篇 · 边界未知", value.works_listed)
-                } else {
-                    format!("{} 篇", value.works_listed)
-                }
-            })
+            // The table column is count-only by the approved page display
+            // contract, so canonical and historical directories scan alike.
+            .map(|value| format!("{} 篇", value.works_listed))
             .unwrap_or_else(|| "—".to_owned()),
     }
 }
@@ -1550,6 +1544,10 @@ mod tests {
 
         assert!(html.contains("已有目录"));
         assert!(html.contains("41 篇"));
+        assert!(
+            !html.contains("41 篇 · 边界未知"),
+            "the works-directory column is a count-only field"
+        );
         // 缺口为 0 时不挂「缺 0」：每行都挂一个零值是纯噪音。
         assert!(html.contains("41 / 41"));
         assert!(!html.contains("缺 0"));
