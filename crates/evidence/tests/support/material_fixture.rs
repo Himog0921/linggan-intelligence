@@ -181,6 +181,8 @@ const MIGRATIONS: &str = concat!(
         "../../../../database/migrations/0085_comment_research_problem_pair_evaluation.sql"
     ),
     "\n",
+    include_str!("../../../../database/migrations/0086_comment_research_v2_backlog_recall.sql"),
+    "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ",
     "('0025_comment_current_projection', '64fd9474647834358f8d2d4f1c25e4345e26a3ff79dbfc53a7846915576b0885'), ",
     "('0026_work_resource_read', '08712c71e9b6f97d270739649a7c264da2f115315bef90fabaedded50cf774bd'), ",
@@ -199,7 +201,8 @@ const MIGRATIONS: &str = concat!(
     "('0082_comment_research_execution_recovery', '16c4458dea19ee5faeb24c7017860b18b61eb0b448ec987cccfddb0f0929153c'), ",
     "('0083_comment_research_cross_run_resolution_retry', 'be2bb61fbd766e47b209186b837e6e56e20e4584e055ee8a6c57554720d93e43'), ",
     "('0084_comment_research_problem_resolution_v2', 'da5673d1a64bf470a09b1c6ecc15c56a86500822e83c7397badbfe75613f0f3a'),\n",
-    "('0085_comment_research_problem_pair_evaluation', '631acb353568569f7b315b0b682654e095f13c77d0852f3bfdd0af4e4ccac74b');\n",
+    "('0085_comment_research_problem_pair_evaluation', '631acb353568569f7b315b0b682654e095f13c77d0852f3bfdd0af4e4ccac74b'),\n",
+    "('0086_comment_research_v2_backlog_recall', '5435cd7e28c9e8bb7421c9c8659b4460ea462e30b3adff72e419b7cba8d5bd22');\n",
 );
 
 pub fn coverage_layer(capability: &str, acquired: i64) -> serde_json::Value {

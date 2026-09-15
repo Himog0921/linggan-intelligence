@@ -49,6 +49,8 @@
 | [design/acceptance/target-inspector-performance-001-acceptance.md](design/acceptance/target-inspector-performance-001-acceptance.md) | 一次性报告 | 自动、隔离 PostgreSQL、浏览器与未部署边界的分层验收 |
 | [design/changes/collection-action-001-ui-change-manifest.md](design/changes/collection-action-001-ui-change-manifest.md) | 交付分支实施中；Issue #283 | keyword Drawer 与列表行主操作一致性、检查器读取失败边界与验收矩阵 |
 | [design/acceptance/collection-action-001-acceptance.md](design/acceptance/collection-action-001-acceptance.md) | 交付分支验收记录；Issue #283 | keyword Drawer 主操作一致性的自动、视觉与真实后果分层边界 |
+| [design/changes/keyword-archive-002-ui-change-manifest.md](design/changes/keyword-archive-002-ui-change-manifest.md) | 交付分支实施中；Issue #286 | 未建档关键词的建档入口可达性、两段路由与回执层级，含停止条件与未证明边界 |
+| [design/acceptance/keyword-archive-002-acceptance.md](design/acceptance/keyword-archive-002-acceptance.md) | 交付分支验收记录；Issue #286 | 建档入口、回执真实性、层叠复核与隔离 PostgreSQL 真实后果的分层边界 |
 | [design/changes/runtime-station-table-001-ui-change-manifest.md](design/changes/runtime-station-table-001-ui-change-manifest.md) | 权威当前 | 执行工位改为以工位为单位的管理台：工位总表、语言收敛与页头计数口径 |
 | [archive/model-pi-001.md](archive/model-pi-001.md) | 历史归档 | Issue #169 的模型设置/Pi 基础能力历史记录；当前调用路径由 COMMENT-RESEARCH-RESET-001 定义 |
 | [pages/model-ai-settings.md](pages/model-ai-settings.md) | 权威当前；交付分支 | 单页供应商弹窗、调用限制与用量语义 |

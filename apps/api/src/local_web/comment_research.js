@@ -415,14 +415,20 @@
         const publishedCoverage = item.publishedResult?.inputCounts?.publicationCoverage;
         const health = item.researchHealth || {};
         const organization = health.organizationCoverage || {};
-        const healthText = `研究信号 ${count(health.researchSignalCount)} 条 · 问题/需求 ${count(health.problemBearingAtomCount)} 条 · 已归并 ${count(health.organizedProblemAtomCount)} 条 · 待归并 ${count(health.backlogProblemAtomCount)} 条 · 本轮归并覆盖 ${pct(Number(organization.denominator) ? Number(organization.numerator) / Number(organization.denominator) : 1)}`;
+        const deferredText = [
+          Number(health.deferredNovelAtomCount || 0) ? `等待独立证据 ${count(health.deferredNovelAtomCount)} 条` : '',
+          Number(health.deferredAmbiguousAtomCount || 0) ? `等待消歧 ${count(health.deferredAmbiguousAtomCount)} 条` : '',
+          Number(health.deferredContextAtomCount || 0) ? `等待语境 ${count(health.deferredContextAtomCount)} 条` : ''
+        ].filter(Boolean).join(' · ');
+        const healthText = `研究信号 ${count(health.researchSignalCount)} 条 · 问题/需求 ${count(health.problemBearingAtomCount)} 条 · 已归并 ${count(health.organizedProblemAtomCount)} 条 · 待开始归并 ${count(health.pendingProblemResolutionAtomCount)} 条 · 处理中 ${count(health.activeProblemResolutionAtomCount)} 条 · 归并终态失败 ${count(health.failedProblemResolutionAtomCount)} 条 · 本轮归并覆盖 ${pct(Number(organization.denominator) ? Number(organization.numerator) / Number(organization.denominator) : 1)}`;
         const activatedBacklog = Number(health.activatedBacklogAtomCount || 0);
-        const backlogText = activatedBacklog ? `历史待归并续办 ${count(activatedBacklog)} 条 · 已补入 ${count(health.activatedBacklogResolvedAtomCount)} 条 · 处理中 ${count(health.activatedBacklogPendingAtomCount)} 条 · 未完成 ${count(health.activatedBacklogFailedAtomCount)} 条` : '';
+        const skippedBacklog = Number(health.activatedBacklogSkippedAtomCount || 0);
+        const backlogText = activatedBacklog ? `历史待归并续办 ${count(activatedBacklog)} 条 · 已补入 ${count(health.activatedBacklogResolvedAtomCount)} 条 · 处理中 ${count(health.activatedBacklogPendingAtomCount)} 条 · 未完成 ${count(health.activatedBacklogFailedAtomCount)} 条${skippedBacklog ? ` · 旧合同已跳过 ${count(skippedBacklog)} 条` : ''}` : '';
         const published = item.publishedResult?.resultRevisionRef
           ? `已发布${publishedCoverage === 'partial' ? '（部分覆盖）' : ''} ${escape(date(item.publishedResult.publishedAt))}`
           : item.state === 'completed_with_failures' ? '统计版本未发布：请查看本轮完整度与安全失败原因；已确认归并仍已累计到用户问题'
             : item.state === 'failed' ? '未发布：运行失败' : '尚未发布';
-        return `<tr><td><strong>${escape(date(item.createdAt))}</strong><p>${escape(runStateLabel(item.state))} · 冻结 ${count(item.selectedSources)} 条评论</p>${item.finishedAt ? `<p>结束于 ${escape(date(item.finishedAt))}</p>` : ''}</td><td><strong>${escape(modelExecutionSummary(execution))}</strong><details class="cr-v1-run-detail"><summary>查看调用账本摘要</summary><p>${escape(modelExecutionDetails(execution))}</p></details></td><td><p>${escape(healthText)}</p>${backlogText ? `<p>${escape(backlogText)}</p>` : ''}<p>${escape(itemStates || '尚未开始处理')}</p>${runFailures ? `<p>${escape(runFailures)}</p>` : ''}${itemFailures ? `<p>${escape(itemFailures)}</p>` : ''}</td><td>${published}</td></tr>`;
+        return `<tr><td><strong>${escape(date(item.createdAt))}</strong><p>${escape(runStateLabel(item.state))} · 冻结 ${count(item.selectedSources)} 条评论</p>${item.finishedAt ? `<p>结束于 ${escape(date(item.finishedAt))}</p>` : ''}</td><td><strong>${escape(modelExecutionSummary(execution))}</strong><details class="cr-v1-run-detail"><summary>查看调用账本摘要</summary><p>${escape(modelExecutionDetails(execution))}</p></details></td><td><p>${escape(healthText)}</p>${deferredText ? `<p>${escape(deferredText)}</p>` : ''}${backlogText ? `<p>${escape(backlogText)}</p>` : ''}<p>${escape(itemStates || '尚未开始处理')}</p>${runFailures ? `<p>${escape(runFailures)}</p>` : ''}${itemFailures ? `<p>${escape(itemFailures)}</p>` : ''}</td><td>${published}</td></tr>`;
       })) + pagination(page, '运行记录') : empty('还没有运行记录。保存策略后可先查看系统自动选择的范围。'));
   }
 

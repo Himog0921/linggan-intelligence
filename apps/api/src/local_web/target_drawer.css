@@ -418,8 +418,12 @@
 /* 成功回执：右下角角标，3 秒后自行退场。
  *
  * 退场用 CSS 动画而不是 JS——脚本没跑起来时，一个永不消失的浮层比常驻横幅更糟。
- * `forwards` 让它停在终态，`visibility:hidden` 保证它不再挡住底下的东西。 */
-.c-tg-toast{position:fixed;right:var(--lgi-space-6);bottom:var(--lgi-space-6);z-index:80;
+ * `forwards` 让它停在终态，`visibility:hidden` 保证它不再挡住底下的东西。
+ *
+ * 层级取 `--lgi-z-toast`（180），**不写数字**：回执要盖过抽屉（80）。此前这里写死 80、
+ * 与抽屉同层，而抽屉在 DOM 里靠后——同一个 z-index 由 DOM 顺序裁决，抽屉打开时这条
+ * 回执就落在它后面。点「建立档案」拿到的那句回执因此在最需要看到它的时候不可见。 */
+.c-tg-toast{position:fixed;right:var(--lgi-space-6);bottom:var(--lgi-space-6);z-index:var(--lgi-z-toast);
   max-width:min(420px,calc(100vw - var(--lgi-space-12)));margin:0;
   padding:var(--lgi-space-4) var(--lgi-space-5);
   border:2px solid var(--lgi-border-solid);background:var(--lgi-canvas);

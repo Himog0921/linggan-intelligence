@@ -52,13 +52,15 @@
 /// 用宏而不是常量：Rust 的 `concat!` 只接受字面量，只有展开成字面量的宏才能嵌进调用方
 /// 那些编译期拼好的 SQL 常量里。这是「只有一份定义」在这个语言里的代价，值得付。
 ///
-/// **`target_reached` 那一支读的是 `expectedCount`，不是 `maximumQuota`。** 两者是两件事：
+/// **`target_reached` 那一支优先读 `expectedCount`，不是 `maximumQuota`。** 两者是两件事：
 /// `maximumQuota` 是授权上限、也是搜索结果页的加载预算；`expectedCount` 才是这一轮该拿回
 /// 多少。关键词巡查上它们不是同一个数——规则说「取赞前 20」（adhd = 20），授权给的加载预算
 /// 是 200。它此前读 `maximumQuota`，于是那一轮采回 20 篇、按规则停得完全正确，判据却要求
 /// `20 >= 200`，永远不成立：「巡查成功」的时间戳一次也没写上，界面上同一行同时显示「最近
 /// 新增 +15」与「上次巡查 尚未巡查 / 尚未取得成功结果」。一个事实只有一个家，判据也只许
-/// 读那一个家——判据读的这个数由派发侧算一次冻进任务说明书（见 `build_task_spec`）。
+/// 读那一个家——判据读的这个数由派发侧算一次冻进任务说明书（见 `build_task_spec`）。旧任务
+/// 在该字段出现前已冻结，只有在**字段缺失**时才回退到同一任务冻结的 `maximumQuota`；这不是
+/// 对新巡查规则的默认值，避免已按当时配额真实完成的历史建档永久失去完成资格。
 macro_rules! surface_scan_complete_sql {
     () => {
         "COALESCE((layer->>'failed')::integer,0)=0 \
@@ -67,7 +69,8 @@ macro_rules! surface_scan_complete_sql {
            checkpoint #>> '{surfaceReceipt,stopReason}'='bottom_confirmed' \
            OR (checkpoint #>> '{surfaceReceipt,stopReason}'='target_reached' \
                AND COALESCE((layer->>'acquired')::integer,0) \
-                   >= COALESCE((task_spec->>'expectedCount')::integer,2147483647)))"
+                   >= COALESCE((task_spec->>'expectedCount')::integer, \
+                               (task_spec->>'maximumQuota')::integer,2147483647)))"
     };
 }
 

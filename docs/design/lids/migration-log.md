@@ -6,6 +6,13 @@
 > 事实来源: [system.md](system.md)、[README.md](README.md)、DESIGN-002 Issue #7、项目 progress 记录和实际验证输出
 > 冲突时以谁为准: 真实代码/合同/测试、用户最新确认、当前 SCOPE 和 ACCEPTED 决策；本日志不把计划写成已实现事实
 
+## 2026-09-15 · KEYWORD-ARCHIVE-002 巡查前建档门槛
+
+- **范围**：Collection Targets 的关键词主操作与回执，及其服务端规则命令/巡查准入状态表达；没有新增页面、Token、CMP、Scene 或 Motion。
+- **表达**：复用既有 L1 Collection 表格、L2 Drawer、状态反馈与 `--lgi-z-toast`。未知建档状态只导向“查看档案”，不以“设置巡查”制造可点击但必被拒绝的假动作。
+- **Data Truth**：关键词进入巡查只认已接纳的搜索面完成事实和详情完成事实；已提交/运行中/空读/未知均不是完成。耐久拒绝原因和 scheduler decision 明示未完成或不可读，不把历史生命周期猜作证据。
+- **验证与边界**：单元、编译和隔离 PostgreSQL 证明分别记录在本 PR 的验收记录；不自动重写历史规则、不证明 runtime、浏览器实测或 Mog 业务验收。
+
 ## 2026-09-06 · DES-INTELLIGENCE-20260906 产品与首页设计原型
 
 - 变化：独立首页加四工作区，展开 16 个二级页；市场洞察先运营比较，Three.js 只用于首页稳定领域导航。
