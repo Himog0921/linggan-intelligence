@@ -39,10 +39,10 @@
 
 | 完成层 | 结论 | 证据 | 限制 |
 |---|---|---|---|
-| 设计规格一致 | VERIFIED（branch） | 清单 §4 尺度合同全部有对应断言；四级表面取值与截图 | 未做 1440×900；材质密度属主观项，待 Mog 目视 |
-| 前端/组件实现 | VERIFIED（branch） | 只改 `evidence_library.css/js`、`local_web.rs` 横条 HTML、`tests.rs` 合同；DOM 结构未新增抽象 | 未合并、未部署 |
-| 自动检查 | VERIFIED | `cargo test -p linggan-api local_web::tests::evidence` 12 passed；`node --check` 通过；`git diff --check` 干净 | 自动检查不替代视觉走查与真实设备 |
-| 真实运行 | PARTIAL | 走的是真实本机服务 + 真实数据 + 真实浏览器 | 预览由只读代理替换静态资源，不等于部署后的运行时；触摸设备未测 |
+| 设计规格一致 | VERIFIED（main `41aba73`） | 清单 §4 尺度合同全部有对应断言；四级表面取值与截图 | 未做 1440×900；材质密度属主观项，待 Mog 目视 |
+| 前端/组件实现 | VERIFIED（main `41aba73`） | 只改 `evidence_library.css/js`、`local_web.rs` 横条 HTML、`tests.rs` 合同；DOM 结构未新增抽象 | 已合并 main、本机 `:3000` runtime 已切换；远端生产未验证 |
+| 自动检查 | VERIFIED | `cargo test -p linggan-api local_web::tests::evidence` 12 passed、`local_web::tests` 51 passed；`M-06` 合同 11 组回填验证各自变红；`node --check` 通过；`git diff --check` 干净 | 自动检查不替代视觉走查与真实设备 |
+| 真实运行 | VERIFIED（本机 `:3000`） | 部署后实测 `/corpus/evidence?layout=cover` 200，其 `/assets/evidence-library.css` 为登记后的取值；服务 `runtime-main@41aba73`、`/health` schema `READY`、无待应用迁移 | 部署前那轮几何实测走的是只读代理替换静态资源；远端生产与触摸设备仍未测 |
 | 业务验收 | NOT VERIFIED | — | 需 Mog 目视确认标题字阶与材质密度 |
 
 ## 已知偏差与未验证项
