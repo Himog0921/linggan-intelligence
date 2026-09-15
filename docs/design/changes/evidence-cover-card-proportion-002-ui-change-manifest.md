@@ -6,7 +6,7 @@
 > 事实来源: Mog 2026-09-15 的截图复核与明确推进授权、`PAGE-EVIDENCE-001`、`EVIDENCE-COVER-FLIP-CARD-001`、LIDS、现行 `evidence_library.js/css`
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实运行/代码/API 合同；本清单不扩大 Work Resource、媒体或状态语义
 
-> 后续校正（候选，未合并）：截图实测证明六列窄轨道中 `min-height:112px` 与 `aspect-ratio:7/2` 会让未定宽的铭牌反算为 392px，超过同列 281px。此后续只锁定铭牌的 inline size 为所属作品列的 100%，使 `7:2` 只在可用宽度上推导高度；不改变列数、数据、选择或翻转合同。
+> 后续校正（已合并、已刷新本机 runtime）：截图实测证明六列窄轨道中 `min-height:112px` 与 `aspect-ratio:7/2` 会让未定宽的铭牌反算为 392px，超过同列 281px。现已锁定铭牌的 inline size 为所属作品列的 100%，使 `7:2` 只在可用宽度上推导高度；不改变列数、数据、选择或翻转合同。
 
 ## 1. 事项与表面地图
 
@@ -64,3 +64,4 @@
 - 修改文件：`evidence_library.css`、必要时 `evidence_library.js` 与局部文本合同测试；本清单、验收记录、设计索引和当月 progress。
 - 计划验证：focused cover contract、`evidence_runtime`、`node --check`、`git diff --check`、设计/治理检查、1280/1440/1920/390px 浏览器核对、键盘/hover/reduced-motion。
 - 发布回执（2026-09-15）：Mog 已明确授权提交、推送、合并和刷新。本包提交 `a4e7f7a` 已推送 `origin/codex/corpus-cover-card-proportion-002`；`main` 合并提交 `36ee8bb` 已推送 `origin/main`；受控 `scripts/runtime/install.sh` 已将本机 `runtime-main` 同步至该 revision。无 migration、采集、模型、平台或数据库写入。
+- 后续校正发布回执（2026-09-15）：修正提交 `1346dac` 已推送 `origin/codex/corpus-cover-card-overflow-003`，`main` 合并提交 `ad36389` 已推送 `origin/main`；受控安装已将 `runtime-main` 刷新至该 revision。live DOM 首屏六列逐张实测 `meta.width === row.width === 280.984px`，左右溢出均为 `0px`；无 migration、采集、模型、平台或数据库写入。
