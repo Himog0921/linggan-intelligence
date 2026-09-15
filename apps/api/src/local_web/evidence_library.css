@@ -103,9 +103,6 @@
 .ev-results{min-width:0;overflow:auto;border-right:2px solid var(--v7-black);background:var(--v7-white)}
 .ev-bench[data-inspector="closed"] .ev-results{border-right:0}
 .ev-bench[data-inspector="closed"] .ev-inspector{display:none}
-.ev-results-head{position:sticky;top:0;z-index:4;min-height:38px;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:6px 16px;border-bottom:1px solid var(--v7-black);background:var(--v7-white)}
-.ev-results-head strong{font:650 11px var(--lgi-font-sans);color:var(--v7-black)}
-.ev-results-legend{color:var(--v7-ghost);font:650 10px var(--lgi-font-sans)}
 .ev-feedback{margin:12px 16px;padding:14px;border:1px solid var(--v7-line-strong);background:var(--v7-gray)}
 .ev-feedback[hidden]{display:none}
 .ev-feedback h2{margin:0 0 6px;font-size:15px}
@@ -214,7 +211,10 @@
 .ev-work-list[data-layout="cover"] .ev-work-row[aria-selected="true"]{background:transparent}
 .ev-work-list[data-layout="cover"] .ev-work-row[aria-selected="true"]::before{display:none}
 .ev-cover-card{display:grid;gap:var(--lgi-space-3);min-width:0}
-.ev-cover-visual{--ev-cover-title-height:calc(var(--lgi-text-page-title) * 2.2);position:relative;min-width:0;overflow:hidden;border:2px solid var(--v7-black);background:var(--lgi-canvas-low);clip-path:polygon(var(--lgi-space-2) 0,calc(100% - var(--lgi-space-2)) 0,100% var(--lgi-space-2),100% calc(100% - var(--lgi-space-2)),calc(100% - var(--lgi-space-2)) 100%,var(--lgi-space-2) 100%,0 calc(100% - var(--lgi-space-2)),0 var(--lgi-space-2));cursor:pointer;perspective:1400px}
+/* The card title is a caption on a narrow six-up card, not a page title: V6 draws it at 17px/1.08/700,
+ * and this column is the narrow case V6 already steps down for. The page-title token that used to
+ * live here made a 277px card shout over the 3:4 stage and clipped most titles at two lines. */
+.ev-cover-visual{--ev-cover-title-size:var(--lgi-text-longform);--ev-cover-title-height:calc(var(--ev-cover-title-size) * var(--lgi-lh-title) * 2);position:relative;min-width:0;overflow:hidden;border:1px solid var(--lgi-border-strong);background:var(--lgi-canvas-sunken);clip-path:polygon(var(--lgi-space-2) 0,calc(100% - var(--lgi-space-2)) 0,100% var(--lgi-space-2),100% calc(100% - var(--lgi-space-2)),calc(100% - var(--lgi-space-2)) 100%,var(--lgi-space-2) 100%,0 calc(100% - var(--lgi-space-2)),0 var(--lgi-space-2));cursor:pointer;perspective:1400px}
 .ev-cover-visual:focus-visible{outline:3px solid var(--lgi-focus);outline-offset:3px}
 .ev-cover-flip{position:relative;width:100%;height:100%;transform-style:preserve-3d;transition:transform calc(var(--lgi-duration-panel) + var(--lgi-duration-state)) var(--lgi-ease-ui)}
 .ev-cover-visual[data-flipped="true"] .ev-cover-flip{transform:rotateY(180deg)}
@@ -223,57 +223,82 @@
 .ev-cover-visual-sizer-stage{display:block}
 .ev-cover-visual-sizer-frame{display:block;width:100%;aspect-ratio:3/4}
 .ev-cover-visual-sizer-foot{min-height:var(--lgi-text-label)}
+/* The card surface carries one material and nothing else: a dry paper residue — the seventh
+ * state of the same 8px sampling lattice LIDS-MAT-001 builds its six materials on, not a second
+ * texture system. A 24px cell (three lattice steps) draws three of its nine nodes — (0,0),
+ * (0,8), (8,16) — which is what keeps it a residue rather than a coarser copy of the stage: no
+ * three of these dots are *evenly* spaced along one line at a spacing under 17px, so the field
+ * never resolves into the evenly dotted rulings the stage's own 45 degree diagonals are made of.
+ * Even spacing is the whole condition, and it is the strongest one available here: three nodes of
+ * a 24px cell either share a row or column — a chain with alternating 8px and 16px gaps, two
+ * lengths and so no rhythm — or they are one per column, which is the ruled coset again. It is
+ * the density cap below, not this arrangement alone, that holds the whole field under the
+ * threshold of being read as a pattern at all.
+ * Pitch, node offsets and radius are this material's own density parameters: they are not tokens,
+ * and they do not take part in layout spacing. The ink is --lgi-ink (17,19,21); alpha is density,
+ * not a second colour, and it is capped in the sub-perceptible band (.6px nodes, alpha <= .20).
+ * Nothing is painted behind text — the face's content layer sits above it — and the stage keeps
+ * its own different pattern. */
 .ev-cover-face{position:absolute;inset:0;overflow:hidden;backface-visibility:hidden;-webkit-backface-visibility:hidden}
-.ev-cover-face--front{background:var(--lgi-canvas-low);color:var(--v7-black)}
+.ev-cover-face::after{content:"";position:absolute;inset:0;z-index:1;pointer-events:none;background-image:radial-gradient(circle at 0 0,rgba(17,19,21,.15) .6px,transparent .85px),radial-gradient(circle at 0 8px,rgba(17,19,21,.11) .6px,transparent .85px),radial-gradient(circle at 8px 16px,rgba(17,19,21,.13) .6px,transparent .85px);background-size:24px 24px}
+.ev-cover-face--front{background:var(--lgi-canvas-sunken);color:var(--v7-black)}
 .ev-work-row[aria-selected="true"] .ev-cover-face--front{background:var(--lgi-signal)}
-.ev-cover-face--back{background:var(--lgi-canvas-low);color:var(--v7-black);transform:rotateY(180deg)}
+.ev-cover-face--back{background:var(--lgi-canvas-sunken);color:var(--v7-black);transform:rotateY(180deg)}
 .ev-work-row[aria-selected="true"] .ev-cover-face--back{background:var(--lgi-signal)}
+/* The selected card is a whole printed industrial card, not a flat signal rectangle: the state
+ * is density on the very same lattice the other six materials use, not a second texture — the
+ * same 24px cell keeps one more of its nine nodes, (8,8), so orange carries about 1.3x the
+ * residue per area without any dot moving off the grid the unselected cards are drawn on. */
+.ev-work-row[aria-selected="true"] .ev-cover-face::after{background-image:radial-gradient(circle at 0 0,rgba(17,19,21,.20) .6px,transparent .85px),radial-gradient(circle at 0 8px,rgba(17,19,21,.14) .6px,transparent .85px),radial-gradient(circle at 8px 8px,rgba(17,19,21,.20) .6px,transparent .85px),radial-gradient(circle at 8px 16px,rgba(17,19,21,.14) .6px,transparent .85px);background-size:24px 24px}
 .ev-work-row[aria-selected="true"] .ev-cover-micro-label,.ev-work-row[aria-selected="true"] .ev-cover-flip-cue{color:var(--v7-black)}
-.ev-cover-face-inner{display:grid;height:100%;padding:var(--lgi-space-4);grid-template-rows:var(--ev-cover-title-height) minmax(0,1fr) min-content;gap:var(--lgi-space-2)}
+.ev-cover-face-inner{position:relative;z-index:2;display:grid;height:100%;padding:var(--lgi-space-4);grid-template-rows:var(--ev-cover-title-height) minmax(0,1fr) min-content;gap:var(--lgi-space-2)}
 .ev-cover-face-head{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:var(--lgi-space-2);min-height:0}
-.ev-cover-title{display:-webkit-box;height:var(--ev-cover-title-height);margin:0;overflow:hidden;color:var(--v7-black);font:var(--lgi-weight-bold)/var(--lgi-lh-title) var(--lgi-font-sans);font-size:var(--lgi-text-page-title);letter-spacing:var(--lgi-ls-tight);-webkit-box-orient:vertical;-webkit-line-clamp:2}
-.ev-cover-title[data-two-line="true"]{font-size:calc(var(--lgi-text-page-title) * .86)}
-.ev-cover-back-label,.ev-cover-index,.ev-cover-micro-label,.ev-cover-flip-cue{font:var(--lgi-weight-semibold)/var(--lgi-lh-data) var(--lgi-font-mono);font-size:var(--lgi-text-label);letter-spacing:var(--lgi-ls-data);font-variant-numeric:tabular-nums}
+/* One type step for every card. The plate is exactly two lines of it, so a one-line and a
+ * two-line title put the stage on the same pixel and no card changes size next to its neighbour. */
+.ev-cover-title{display:-webkit-box;height:var(--ev-cover-title-height);margin:0;overflow:hidden;color:var(--v7-black);font:var(--lgi-weight-bold) var(--ev-cover-title-size)/var(--lgi-lh-title) var(--lgi-font-sans);letter-spacing:var(--lgi-ls-tight);-webkit-box-orient:vertical;-webkit-line-clamp:2}
+.ev-cover-back-label,.ev-cover-index,.ev-cover-micro-label,.ev-cover-flip-cue{font:var(--lgi-weight-semibold) var(--lgi-text-label)/var(--lgi-lh-data) var(--lgi-font-mono);letter-spacing:var(--lgi-ls-data);font-variant-numeric:tabular-nums}
 .ev-cover-back-label{color:var(--lgi-muted)}
 .ev-cover-index{color:var(--lgi-ghost)}
 .ev-cover-stage{display:grid;min-height:0;place-items:center}
 .ev-cover-stage-frame{position:relative;display:grid;max-width:100%;height:100%;aspect-ratio:3/4;overflow:hidden;border:1px solid var(--lgi-border-strong);background:var(--lgi-canvas-hi);color:var(--v7-black)}
 .ev-cover-stage-frame--diagram{place-items:center}
 .ev-cover-stage-frame--cover{background:var(--v7-black)}
-.ev-cover-stage-frame--cover img{width:100%;height:100%;object-fit:cover}
+/* The frame's height is derived from the shared sizer, so a percentage height on the cover does
+ * not resolve reliably: measured on the deployed build, most covers happened to fill the stage
+ * while an off-ratio one rendered at its intrinsic ratio and hung below it (a 640x1138 cover by
+ * 93px at five columns and 104px at six, a 640x1422 one by 209px) — cropped from the top edge
+ * instead of from the centre. Out of flow, the cover fills the same 3:4 box on both faces. */
+.ev-cover-stage-frame--cover img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 .ev-cover-stage-frame--unavailable{place-items:center;background:var(--lgi-canvas-sunken);color:var(--lgi-muted);text-align:center}
-.ev-cover-unavailable{padding:var(--lgi-space-3);font:var(--lgi-weight-semibold)/var(--lgi-lh-data) var(--lgi-font-sans);font-size:var(--lgi-text-data)}
-.ev-cover-dot-field{position:absolute;inset:0;color:var(--lgi-ink);opacity:.12}
-.ev-cover-geometry{position:relative;z-index:1;width:92%;height:92%;color:var(--v7-black)}
+.ev-cover-unavailable{padding:var(--lgi-space-3);font:var(--lgi-weight-semibold) var(--lgi-text-data)/var(--lgi-lh-data) var(--lgi-font-sans)}
+/* The measuring field is a real 8px / 1px lattice over the whole 3:4 stage. CSS rather than an
+ * inline SVG: a gradient tile has no intrinsic ratio, so it cannot leave the bottom of the stage
+ * unmeasured the way a ratio-derived SVG box did. */
+.ev-cover-stage-frame--diagram::before{content:"";position:absolute;inset:0;z-index:0;pointer-events:none;background-image:radial-gradient(circle,var(--lgi-ink) 1px,transparent 1.2px);background-size:8px 8px;opacity:.13}
+.ev-cover-geometry{position:relative;z-index:1;width:100%;height:100%;color:var(--v7-black)}
 .ev-cover-geometry *{vector-effect:non-scaling-stroke}
-.ev-cover-corners{position:absolute;inset:0;z-index:2;pointer-events:none;color:var(--lgi-ink);opacity:.36}
-.ev-cover-corner{position:absolute;width:var(--lgi-space-3);height:var(--lgi-space-3);border-color:currentColor;border-style:solid}
-.ev-cover-corner[data-corner="top-left"]{top:0;left:0;border-width:1px 0 0 1px}
-.ev-cover-corner[data-corner="top-right"]{top:0;right:0;border-width:1px 1px 0 0}
-.ev-cover-corner[data-corner="bottom-right"]{right:0;bottom:0;border-width:0 1px 1px 0}
-.ev-cover-corner[data-corner="bottom-left"]{bottom:0;left:0;border-width:0 0 1px 1px}
 .ev-cover-face-foot{display:flex;align-items:center;justify-content:space-between;gap:var(--lgi-space-2);min-height:var(--lgi-text-label)}
 .ev-cover-micro-label{min-width:0;overflow:hidden;color:var(--lgi-muted);text-overflow:ellipsis;white-space:nowrap}
 .ev-cover-flip-cue{flex:0 0 auto;color:var(--lgi-signal-ink)}
-.ev-cover-meta{display:grid;grid-template-rows:var(--lgi-space-6) var(--lgi-space-6) minmax(var(--lgi-space-6),1fr);align-content:stretch;inline-size:100%;max-inline-size:100%;box-sizing:border-box;gap:var(--lgi-space-1);min-width:0;min-height:calc(var(--lgi-space-16) + var(--lgi-space-6) + var(--lgi-space-4) + var(--lgi-space-2));padding:var(--lgi-space-3);aspect-ratio:7/2;border:1px solid var(--v7-black);background:var(--lgi-canvas-hi);clip-path:polygon(var(--lgi-space-2) 0,calc(100% - var(--lgi-space-2)) 0,100% var(--lgi-space-2),100% calc(100% - var(--lgi-space-2)),calc(100% - var(--lgi-space-2)) 100%,var(--lgi-space-2) 100%,0 calc(100% - var(--lgi-space-2)),0 var(--lgi-space-2))}
-.ev-work-row[aria-selected="true"] .ev-cover-meta{background:var(--lgi-signal)}
+.ev-cover-meta{display:grid;grid-template-rows:var(--lgi-space-6) var(--lgi-space-6) minmax(var(--lgi-space-6),1fr);align-content:stretch;inline-size:100%;max-inline-size:100%;box-sizing:border-box;gap:var(--lgi-space-1);min-width:0;min-height:calc(var(--lgi-space-16) + var(--lgi-space-6) + var(--lgi-space-4) + var(--lgi-space-2));padding:var(--lgi-space-3);aspect-ratio:7/2;border-top:1px solid var(--lgi-border-strong);border-bottom:1px solid var(--lgi-hairline);background:var(--lgi-canvas-low);clip-path:polygon(var(--lgi-space-2) 0,calc(100% - var(--lgi-space-2)) 0,100% var(--lgi-space-2),100% calc(100% - var(--lgi-space-2)),calc(100% - var(--lgi-space-2)) 100%,var(--lgi-space-2) 100%,0 calc(100% - var(--lgi-space-2)),0 var(--lgi-space-2))}
+.ev-work-row[aria-selected="true"] .ev-cover-meta{background:var(--lgi-signal);border-top-color:var(--lgi-ink);border-bottom-color:var(--lgi-border-strong)}
 .ev-work-row[aria-selected="true"] .ev-cover-meta .ev-cover-date,.ev-work-row[aria-selected="true"] .ev-cover-meta .ev-cover-observed,.ev-work-row[aria-selected="true"] .ev-cover-meta .ev-state-line,.ev-work-row[aria-selected="true"] .ev-cover-meta .ev-engagement svg{color:var(--v7-black)}
 .ev-work-row[aria-selected="true"] .ev-cover-meta .ev-state-dot{background:var(--v7-black)}
 .ev-cover-meta-top{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,10ch);align-items:center;gap:var(--lgi-space-2);min-width:0}
 .ev-cover-meta-top .ev-author-fact{flex:1 1 0;min-width:0}
 .ev-cover-meta .ev-author-avatar{width:var(--lgi-space-6);height:var(--lgi-space-6);flex-basis:var(--lgi-space-6)}
 .ev-cover-meta-top .ev-author-fact strong{min-width:0;font-size:var(--lgi-text-data)}
-.ev-cover-date,.ev-cover-observed{overflow:hidden;color:var(--lgi-muted);font:var(--lgi-weight-semibold)/var(--lgi-lh-data) var(--lgi-font-mono);font-size:var(--lgi-text-label);font-variant-numeric:tabular-nums;text-overflow:ellipsis;white-space:nowrap}
+.ev-cover-date,.ev-cover-observed{overflow:hidden;color:var(--lgi-muted);font:var(--lgi-weight-semibold) var(--lgi-text-label)/var(--lgi-lh-data) var(--lgi-font-mono);font-variant-numeric:tabular-nums;text-overflow:ellipsis;white-space:nowrap}
 .ev-cover-date{min-width:0;max-width:100%;text-align:right}
 .ev-cover-meta .ev-engagement{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));align-items:center;gap:var(--lgi-space-1);margin:0;font-size:var(--lgi-text-data)}
 .ev-cover-meta .ev-engagement span{min-width:0;justify-content:center;white-space:nowrap}
 .ev-cover-meta .ev-engagement svg{width:var(--lgi-space-3);height:var(--lgi-space-3)}
 .ev-cover-facts{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:center;gap:var(--lgi-space-2);padding-top:var(--lgi-space-1);border-top:1px solid var(--v7-line)}
-.ev-cover-cross-boundary{overflow:hidden;color:var(--lgi-muted);font:var(--lgi-weight-semibold)/var(--lgi-lh-data) var(--lgi-font-mono);font-size:var(--lgi-text-label);text-overflow:ellipsis;white-space:nowrap}
+.ev-cover-cross-boundary{overflow:hidden;color:var(--lgi-muted);font:var(--lgi-weight-semibold) var(--lgi-text-label)/var(--lgi-lh-data) var(--lgi-font-mono);text-overflow:ellipsis;white-space:nowrap}
 .ev-cover-observed{min-width:0;text-align:right}
 .ev-cover-status{position:relative;min-width:0;outline:none}
 .ev-cover-status:focus-visible .ev-state-line{outline:2px solid var(--lgi-focus);outline-offset:2px}
-.ev-cover-status-tooltip{position:absolute;z-index:var(--lgi-z-popover);bottom:calc(100% + var(--lgi-space-2));left:0;display:grid;width:max-content;max-width:240px;gap:var(--lgi-space-1);padding:var(--lgi-space-2);border:1px solid var(--v7-black);background:var(--v7-black);color:var(--lgi-on-dark);font:var(--lgi-weight-semibold)/var(--lgi-lh-data) var(--lgi-font-sans);font-size:var(--lgi-text-label);opacity:0;pointer-events:none;transform:translateY(var(--lgi-space-1));transition:opacity var(--lgi-duration-state) var(--lgi-ease-ui),transform var(--lgi-duration-state) var(--lgi-ease-ui)}
+.ev-cover-status-tooltip{position:absolute;z-index:var(--lgi-z-popover);bottom:calc(100% + var(--lgi-space-2));left:0;display:grid;width:max-content;max-width:240px;gap:var(--lgi-space-1);padding:var(--lgi-space-2);border:1px solid var(--v7-black);background:var(--v7-black);color:var(--lgi-on-dark);font:var(--lgi-weight-semibold) var(--lgi-text-label)/var(--lgi-lh-data) var(--lgi-font-sans);opacity:0;pointer-events:none;transform:translateY(var(--lgi-space-1));transition:opacity var(--lgi-duration-state) var(--lgi-ease-ui),transform var(--lgi-duration-state) var(--lgi-ease-ui)}
 .ev-cover-status:hover .ev-cover-status-tooltip,.ev-cover-status:focus .ev-cover-status-tooltip{opacity:1;transform:none}
 .ev-cover-status-tooltip span{white-space:nowrap}
 @media(max-width:420px){.ev-cover-meta{aspect-ratio:auto}}
@@ -305,13 +330,6 @@
 .ev-width-glyph--focus::after{left:3px}
 .ev-panel-close{width:32px;height:32px;display:grid;place-items:center;border:1px solid var(--v7-black);background:var(--v7-white);color:var(--v7-black);font:700 15px var(--lgi-font-mono);cursor:pointer}
 .ev-panel-close:hover{background:var(--v7-red);border-color:var(--v7-red);color:var(--v7-white)}
-/* Lives inside the results header rather than floating over the list: a cover grid fills the
- * full width when the panel is closed, and an absolutely positioned control would sit on top of
- * a work card. */
-.ev-results-head-tools{display:flex;align-items:center;gap:12px;min-width:0}
-.ev-inspector-reopen{min-height:30px;padding:0 11px;border:1px solid var(--v7-black);background:var(--v7-white);color:var(--v7-black);font:650 10px var(--lgi-font-sans);white-space:nowrap;cursor:pointer}
-.ev-inspector-reopen:hover{background:var(--v7-black);color:var(--v7-white)}
-.ev-inspector-reopen[hidden]{display:none}
 .ev-inspector-feedback{display:flex;align-items:center;gap:8px;min-height:34px;margin:9px 0 0;padding:7px 10px;background:var(--v7-gray);font-size:10px}
 .ev-inspector-feedback[hidden]{display:none}
 .ev-tabs{display:grid;grid-template-columns:repeat(4,1fr);margin:11px -14px 0}
@@ -461,7 +479,7 @@
   .ev-work-row:hover{background:var(--v7-gray)}
   .ev-work-row[aria-selected="true"]:hover{background:var(--v7-soft-red)}
 }
-.ev-button:focus-visible,.ev-field select:focus-visible,.ev-sort select:focus-visible,.ev-quickviews button:focus-visible,.ev-layout-switch button:focus-visible,.ev-tabs button:focus-visible,.ev-back:focus-visible,.ev-asset-link:focus-visible,.ev-width-switch button:focus-visible,.ev-panel-close:focus-visible,.ev-media-card:focus-visible,.ev-media-nav button:focus-visible,.ev-lightbox-step:focus-visible,.ev-lightbox-close:focus-visible,.ev-inspector-reopen:focus-visible,.ev-zoom button:focus-visible,.ev-select-toggle:focus-visible,.ev-select-list button:focus-visible{outline:3px solid var(--v7-red);outline-offset:2px}
+.ev-button:focus-visible,.ev-field select:focus-visible,.ev-sort select:focus-visible,.ev-quickviews button:focus-visible,.ev-layout-switch button:focus-visible,.ev-tabs button:focus-visible,.ev-back:focus-visible,.ev-asset-link:focus-visible,.ev-width-switch button:focus-visible,.ev-panel-close:focus-visible,.ev-media-card:focus-visible,.ev-media-nav button:focus-visible,.ev-lightbox-step:focus-visible,.ev-lightbox-close:focus-visible,.ev-zoom button:focus-visible,.ev-select-toggle:focus-visible,.ev-select-list button:focus-visible{outline:3px solid var(--v7-red);outline-offset:2px}
 
 @media(max-width:1500px){
   .ev-bench[data-inspector="normal"]{--ev-inspector-w:390px}
@@ -482,7 +500,6 @@
   .ev-inspector{position:fixed;top:0;right:0;bottom:0;z-index:110;width:min(680px,94vw);border-left:2px solid var(--v7-black);transform:translateX(100%);transition:transform 200ms ease}
   .ev-bench[data-drawer="open"] .ev-inspector{transform:none}
   .ev-bench[data-inspector="closed"] .ev-inspector{display:block}
-  .ev-inspector-reopen{display:none}
   .ev-back{display:block}
   .ev-panel-tools{display:none}
 }

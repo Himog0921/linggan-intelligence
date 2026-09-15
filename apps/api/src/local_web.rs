@@ -4964,10 +4964,6 @@ fn evidence_library_html(
           <section class="ev-bench" id="ev-bench" data-inspector="normal" aria-label="证据审查工作台">
             <section class="ev-results" aria-labelledby="results-title">
               <h2 class="v7-sr-only" id="results-title">作品材料结果</h2>
-              <div class="ev-results-head">
-                <span class="ev-results-legend" id="ev-results-legend">缩略图 · 最强证据 · 材料摘要</span>
-                <button class="ev-inspector-reopen" id="ev-reopen-inspector" type="button" hidden>打开检查器 <span class="v7-tech-key">INSPECTOR</span></button>
-              </div>
               <div class="ev-feedback" id="ev-feedback" role="status" aria-live="polite"></div>
               <div class="ev-table-head" id="ev-table-head" aria-hidden="true" hidden><span>作品</span><span>作者</span><span>材料</span><span class="ev-head-metrics" id="ev-head-metrics" aria-label="互动数据"></span><span>发布时间</span><span>最近观察</span></div>
               <div class="ev-work-list" id="ev-work-list" role="listbox" aria-label="作品材料集合"></div>

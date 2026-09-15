@@ -32,6 +32,7 @@
 | [plans/active/aud-code-quality-20260914.md](plans/active/aud-code-quality-20260914.md) | 活跃计划；Issue #279 | 恢复任务所有权、历史详情可达、退役材料读取、目标问题入口与可信检查器；不触碰生产运行 |
 | [decisions/0003-comment-research-single-semantic-kernel.md](decisions/0003-comment-research-single-semantic-kernel.md) | 权威当前 | 旧评论语义路径的退役、可继承基础能力和新内核的长期边界 |
 | [decisions/0004-comment-research-problem-resolution-v2.md](decisions/0004-comment-research-problem-resolution-v2.md) | 权威当前 | 稳定 Problem、待归并信号、模型/代码职责分离与创建并发边界 |
+| [decisions/0005-lids-material-06-paper-residue.md](decisions/0005-lids-material-06-paper-residue.md) | 权威当前 | LIDS 第七种材料 `M-06` 纸面残留的格点归属、密度上限与允许区位 |
 | [design/pages/comment-research-v1-page.md](design/pages/comment-research-v1-page.md) | 权威当前；交付分支实现 | 评论研究 V1 的五视图、研究设置与用户状态合同 |
 | [design/changes/comment-research-cumulative-state-001-ui-change-manifest.md](design/changes/comment-research-cumulative-state-001-ui-change-manifest.md) | 权威当前；实施中 | Issue #281 的累计已确认知识、统计版本与 Run Health 状态表达 |
 | [design/changes/comment-research-reset-001-ui-change-manifest.md](design/changes/comment-research-reset-001-ui-change-manifest.md) | 权威当前；交付分支实现 | 旧评论页面/API/自动计划替代与用户体验验证范围 |
@@ -110,6 +111,8 @@
 | [design/acceptance/evidence-cover-flip-card-001-acceptance.md](design/acceptance/evidence-cover-flip-card-001-acceptance.md) | 一次性报告；未部署 | `ACC-EVIDENCE-COVER-FLIP-CARD-001`：自动合同、桌面真实数据预览与未切换 runtime 边界 |
 | [design/changes/evidence-cover-card-proportion-002-ui-change-manifest.md](design/changes/evidence-cover-card-proportion-002-ui-change-manifest.md) | 权威当前；main 已合并、本机 runtime 已刷新 | `EVIDENCE-COVER-CARD-PROPORTION-002`：保留六列封面扫描密度，将卡片校准为高档案主视觉与低横向数据铭牌的成组比例，不改变读取、详情或状态语义 |
 | [design/acceptance/evidence-cover-card-proportion-002-acceptance.md](design/acceptance/evidence-cover-card-proportion-002-acceptance.md) | 一次性报告；main 已合并、本机 runtime 已刷新 | `ACC-EVIDENCE-COVER-CARD-PROPORTION-002`：自动合同、真实本机只读预览与 3000 运行回执；Mog 前端验收仍独立 |
+| [design/changes/evidence-cover-card-material-004-ui-change-manifest.md](design/changes/evidence-cover-card-material-004-ui-change-manifest.md) | 交付分支实现；未合并、未部署 | `EVIDENCE-COVER-CARD-MATERIAL-004`：封面作品卡的四级表面分层、卡面材质、舞台测量场、标题字阶与结果区横条删除；不改变读取、详情或状态语义 |
+| [design/acceptance/evidence-cover-card-material-004-acceptance.md](design/acceptance/evidence-cover-card-material-004-acceptance.md) | 一次性报告；未部署 | `ACC-EVIDENCE-COVER-CARD-MATERIAL-004`：只读预览代理上的六列实测、翻面位移与封面填充核对；远端生产与真实触摸设备未验证 |
 | [design/changes/corpus-cross-domain-render-001-ui-change-manifest.md](design/changes/corpus-cross-domain-render-001-ui-change-manifest.md) | 权威当前；未部署 | 外部领域列表级参照样本显示与 Context Bar 领域链接菜单；不含领域自助配置 |
 | [design/acceptance/corpus-cross-domain-render-001-acceptance.md](design/acceptance/corpus-cross-domain-render-001-acceptance.md) | 一次性报告 | `ACC-CORPUS-CROSS-DOMAIN-RENDER-001`：外部样本 21 行、列表级 Inspector、LIDS 菜单与未部署边界 |
 | [design/changes/work-resource-read-001-ui-change-manifest.md](design/changes/work-resource-read-001-ui-change-manifest.md) | 交付分支实现；Issue #110 | Evidence Library 的共享 Work Resource 接口、作者/目标诚实表达、时间来源状态和研读/表格/封面三种排版变更清单 |

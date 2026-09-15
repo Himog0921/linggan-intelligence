@@ -83,7 +83,7 @@ Token → Primitive → Component → Pattern → Page
 | [../components/component-promotion.md](../components/component-promotion.md) | 防止一次参考页把局部块误报为正式 LIDS 组件 |
 | [../pages/topic-intelligence-reference-page.md](../pages/topic-intelligence-reference-page.md) | 首个 L2 合成参考页；只验证 LIDS 的局部设计表达，不代表真实产品页 |
 | [language-policy.md](language-policy.md) | `LIDS-LANG-001`：用户界面中文主表达、英文技术旁注的权威规则；v7 的 LANG-05 收窄了英文预算；页面迁移仍须逐项受控 |
-| [materials.md](materials.md) | `LIDS-MAT-001`：8px 采样点阵的六种状态、材料预算与区位限制 |
+| [materials.md](materials.md) | `LIDS-MAT-001`：8px 采样点阵的七种状态（含 `M-06` 纸面残留）、材料预算与区位限制 |
 | [shell-zones.md](shell-zones.md) | `LIDS-SHELL-001`：页头 3 区、Context Bar 4 区的容量上限与静默区保护 |
 | [data-boundaries.md](data-boundaries.md) | `LIDS-BOUND-001`：组件必须跑通的四种极端数据情况 |
 | [decisions.md](decisions.md) | `LIDS-ADR-001`：v7 全部结构性决定的台账，规则状态与运行时状态分列 |
