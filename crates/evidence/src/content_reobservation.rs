@@ -5,6 +5,7 @@
 //! never reaches a platform: only a claimed Browser Producer may do that later.
 
 use crate::acquisition_chain::{
+    DETAIL_WINDOW_COMMENT_LIMIT, DETAIL_WINDOW_REPLY_EXPAND_LIMIT,
     in_flight_work_for_exact_material_scope_in_transaction,
     request_and_admit_material_targets_under_authorization_in_transaction,
 };
@@ -19,9 +20,6 @@ use serde::Serialize;
 use serde_json::Value;
 use sqlx::Row;
 use uuid::Uuid;
-
-const DEFAULT_COMMENT_LIMIT: i32 = 30;
-const DEFAULT_REPLY_EXPAND_LIMIT: i32 = 2;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ContentReobservationError {
@@ -146,10 +144,12 @@ pub async fn content_reobservation(
     else {
         return Err(ContentReobservationError::AuthorizedTargetMissing);
     };
+    // 复观测读的也是那张已经打开过的详情页，所以窗口与「详情补采」同口径（ADR-0002）：一次
+    // 打开带回详情与前 30 条评论、2 层回复。额度只有一处定义，免得两个入口各写一个 30。
     let targets = [MaterialDeepeningTarget {
         content_public_ref: public_ref,
-        comment_limit: DEFAULT_COMMENT_LIMIT,
-        reply_expand_limit: DEFAULT_REPLY_EXPAND_LIMIT,
+        comment_limit: DETAIL_WINDOW_COMMENT_LIMIT,
+        reply_expand_limit: DETAIL_WINDOW_REPLY_EXPAND_LIMIT,
         // Normal reobservation reads existing local assets. It must not create media slots,
         // download bytes, or queue OCR/ASR processing simply because a page could have changed.
         acquire_media: false,

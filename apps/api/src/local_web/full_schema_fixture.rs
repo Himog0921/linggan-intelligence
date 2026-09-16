@@ -162,6 +162,8 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../../database/migrations/0086_comment_research_v2_backlog_recall.sql"),
     "\n",
+    include_str!("../../../../database/migrations/0087_cross_industry_detail_comment_policy.sql"),
+    "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES\n",
     "('0001_scope_001_capture_evidence', 'a0deb8d5bf6cbd3bc0b8343691167fe02170abe7469f7ba270017dada442cd98'),\n",
     "('0002_local_001_discovery', '26ae29e0e00bddd2804aebc5576e8868936af746858e61cc24769579333ecdbe'),\n",
@@ -207,5 +209,6 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "('0083_comment_research_cross_run_resolution_retry', 'be2bb61fbd766e47b209186b837e6e56e20e4584e055ee8a6c57554720d93e43'),\n",
     "('0084_comment_research_problem_resolution_v2', 'da5673d1a64bf470a09b1c6ecc15c56a86500822e83c7397badbfe75613f0f3a'),\n",
     "('0085_comment_research_problem_pair_evaluation', '631acb353568569f7b315b0b682654e095f13c77d0852f3bfdd0af4e4ccac74b'),\n",
-    "('0086_comment_research_v2_backlog_recall', '5435cd7e28c9e8bb7421c9c8659b4460ea462e30b3adff72e419b7cba8d5bd22');\n",
+    "('0086_comment_research_v2_backlog_recall', '5435cd7e28c9e8bb7421c9c8659b4460ea462e30b3adff72e419b7cba8d5bd22'),\n",
+    "('0087_cross_industry_detail_comment_policy', '1b5ea42c8360714f0da7ae2425df61d74d2afa94c421b28a66fba378043e2a5a');\n",
 );

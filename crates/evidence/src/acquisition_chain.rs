@@ -115,6 +115,27 @@ pub struct MaterialDeepeningTarget {
     pub allow_asr: bool,
 }
 
+/// 一条笔记的详情读默认带回来的东西（ADR-0002 的固定窗口）。
+///
+/// 它不是「评论采集」这个独立动作的额度，而是详情页**已经打开着**时顺手读回来的上界：
+/// 一次打开最多 30 条一级评论与 2 层回复。创建者观察与关键词观察在这一点上同口径——
+/// 「单篇详情采集」是一件有确定形状的事，不该按入口各表一套。媒体不在此列：它是一次
+/// 独立的、范围更大的决定（下载字节、OCR、转录），由 `acquire_media` 单独授权。
+pub const DETAIL_WINDOW_COMMENT_LIMIT: i32 = 30;
+pub const DETAIL_WINDOW_REPLY_EXPAND_LIMIT: i32 = 2;
+
+/// 一张深化工单要覆盖的跨行业参照物，连同这一单被授权读到什么。
+///
+/// 与证据侧同样冻结在工单上（`0087` 那两列），而不是由读取点临场决定：`comment_limit = 0`
+/// 就是「只读详情」这个明确授权，不是「评论没采到」。跨行业这一侧没有媒体授权这一项——
+/// 详情补采不下载媒体，那一列也就不存在。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CrossIndustryDeepeningTarget {
+    pub sample_ref: Uuid,
+    pub comment_limit: i32,
+    pub reply_expand_limit: i32,
+}
+
 /// 一张深化工单要覆盖的作品，两侧合起来的样子。
 ///
 /// 证据侧的作品住 `linggan_material_content`，跨行业参照物住 `cross_industry_sample`，
@@ -124,7 +145,7 @@ pub struct MaterialDeepeningTarget {
 #[derive(Clone, Copy)]
 pub(crate) struct DeepeningScope<'scope> {
     pub material: &'scope [MaterialDeepeningTarget],
-    pub cross_industry: &'scope [Uuid],
+    pub cross_industry: &'scope [CrossIndustryDeepeningTarget],
 }
 
 impl<'scope> DeepeningScope<'scope> {
@@ -149,18 +170,27 @@ impl<'scope> DeepeningScope<'scope> {
         self.material.len() + self.cross_industry.len()
     }
 
-    /// 跨行业详情补采**只取详情**：评论、回复与媒体各自是另一次明确的决定，不由
-    /// 「顺手补一下详情」隐含授权。
+    /// 这一单要不要评论：两侧都按自己作用域行上冻结的额度答，没有「跨行业一律不读评论」
+    /// 这条隐含规则。`comment_limit = 0` 是明确的只读详情，不是默认值。
     fn wants_comments(&self) -> bool {
         self.material.iter().any(|target| target.comment_limit > 0)
+            || self
+                .cross_industry
+                .iter()
+                .any(|target| target.comment_limit > 0)
     }
 
     fn wants_replies(&self) -> bool {
         self.material
             .iter()
             .any(|target| target.reply_expand_limit > 0)
+            || self
+                .cross_industry
+                .iter()
+                .any(|target| target.reply_expand_limit > 0)
     }
 
+    /// 媒体只可能来自证据侧：跨行业作用域没有媒体授权这一项。
     fn wants_media(&self) -> bool {
         self.material.iter().any(|target| target.acquire_media)
     }
@@ -765,7 +795,8 @@ async fn request_and_admit_in_transaction_with_progressive_resume(
 ///
 /// 详情补采要指明「补哪几篇」。证据侧用 `collection_work_order_material_target`，跨行业
 /// 样本不在证据库里，用 `collection_work_order_cross_industry_target`。两者在这条链上
-/// 的作用完全一样：把工单从「再看一眼发现面」变成「按已知作品逐篇去取」。
+/// 的作用完全一样：把工单从「再看一眼发现面」变成「按已知作品逐篇去取」，并且各自把
+/// **这一单被授权读到什么**冻结在自己的作用域行上。
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn request_and_admit_in_transaction_scoped(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -774,7 +805,7 @@ pub(crate) async fn request_and_admit_in_transaction_scoped(
     purpose: &str,
     requested_by: &str,
     material_targets: &[MaterialDeepeningTarget],
-    cross_industry_samples: &[Uuid],
+    cross_industry_samples: &[CrossIndustryDeepeningTarget],
     required_authorization_ref: Option<Uuid>,
     // 调度按规则算到期，它知道是哪一条该跑；其余入口传 `None`，沿用目标行上的当前规则。
     frozen_rule_revision_ref: Option<Uuid>,
@@ -1062,18 +1093,19 @@ async fn ensure_material_targets_belong_to_platform(
 async fn ensure_cross_industry_samples_belong_to_target(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     target_ref: Uuid,
-    samples: &[Uuid],
+    samples: &[CrossIndustryDeepeningTarget],
 ) -> Result<(), AcquisitionChainError> {
     if samples.is_empty() {
         return Ok(());
     }
+    let sample_refs: Vec<Uuid> = samples.iter().map(|target| target.sample_ref).collect();
     let matched: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM cross_industry_sample sample \
          JOIN collection_observation_target target ON target.domain_ref=sample.domain_ref \
          WHERE sample.sample_ref=ANY($1) AND target.target_ref=$2 \
            AND sample.platform=target.platform",
     )
-    .bind(samples)
+    .bind(&sample_refs)
     .bind(target_ref)
     .fetch_one(&mut **transaction)
     .await?;
@@ -1086,16 +1118,19 @@ async fn ensure_cross_industry_samples_belong_to_target(
 async fn write_cross_industry_targets(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     work_order_ref: Uuid,
-    samples: &[Uuid],
+    samples: &[CrossIndustryDeepeningTarget],
 ) -> Result<(), sqlx::Error> {
-    for (index, sample_ref) in samples.iter().enumerate() {
+    for (index, target) in samples.iter().enumerate() {
         sqlx::query(
             "INSERT INTO collection_work_order_cross_industry_target \
-             (work_order_ref,sample_ref,ordinal) VALUES ($1,$2,$3)",
+             (work_order_ref,sample_ref,ordinal,comment_limit,reply_expand_limit) \
+             VALUES ($1,$2,$3,$4,$5)",
         )
         .bind(work_order_ref)
-        .bind(sample_ref)
+        .bind(target.sample_ref)
         .bind(i32::try_from(index + 1).unwrap_or(i32::MAX))
+        .bind(target.comment_limit)
+        .bind(target.reply_expand_limit)
         .execute(&mut **transaction)
         .await?;
     }
@@ -1197,6 +1232,11 @@ async fn gather_facts(
     } else if !scope.cross_industry.is_empty() {
         // 跨行业侧的在途判据与证据侧同形：只要这几篇里有一篇已经排在一张还活着的工单上，
         // 就不再复制一份。重复补采同一篇不会产生新事实，只会多花一次平台访问。
+        let cross_industry_sample_refs: Vec<Uuid> = scope
+            .cross_industry
+            .iter()
+            .map(|target| target.sample_ref)
+            .collect();
         sqlx::query_scalar(
             "SELECT EXISTS ( \
                  SELECT 1 FROM collection_work_order w \
@@ -1212,7 +1252,7 @@ async fn gather_facts(
         .bind(target_ref)
         .bind(lane)
         .bind(dispatch_lane)
-        .bind(scope.cross_industry)
+        .bind(&cross_industry_sample_refs)
         .fetch_one(&mut **transaction)
         .await?
     } else if let Some(authorization_ref) = required_authorization_ref {
@@ -1784,11 +1824,24 @@ fn scope_dedupe_fragment(scope: DeepeningScope<'_>) -> String {
         fragments.push(material_scope_dedupe_fragment(scope.material));
     }
     if !scope.cross_industry.is_empty() {
+        // 与证据侧同一个形状：**被授权读到什么**也是作用域的一部分，不只是那几篇是谁
+        // （证据侧那一份在 `material_scope_dedupe_fragment` 里同样带着额度）。额度进了片段，
+        // 「只读详情」和「带 30 条评论」就不是同一张工单——`dedupe_key` 上那条局部唯一索引
+        // （`0036`，只覆盖 queued/leased）也就不会把两种口径当成一件事。
+        //
+        // **但这不是在途闸门**：上面 `gather_facts` 的跨行业分支只按 `sample_ref` 比，不问
+        // 额度。两者今天给出同样答案，因为新工单的额度恒为 30/2；口径真的分叉时要不要也按
+        // 额度比，属于「存量 0/0 工单要不要回填」那个决定，不在这次改动里。
         let mut samples = scope.cross_industry.to_vec();
-        samples.sort_unstable();
+        samples.sort_by_key(|target| target.sample_ref);
         let input = samples
             .iter()
-            .map(Uuid::to_string)
+            .map(|target| {
+                format!(
+                    "{}:{}:{}",
+                    target.sample_ref, target.comment_limit, target.reply_expand_limit
+                )
+            })
             .collect::<Vec<_>>()
             .join("|");
         let digest: String = Sha256::digest(input.as_bytes())

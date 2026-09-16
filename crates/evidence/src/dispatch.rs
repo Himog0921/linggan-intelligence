@@ -1268,6 +1268,13 @@ async fn page_session_plan_for_task(
     .bind(content_external_id)
     .fetch_optional(&mut **transaction)
     .await?;
+    // 跨行业参照物的作用域住另一张表（`0074`/`0087`）。漏掉这一侧，关键词的跨行业详情补采
+    // 虽然会各自派出 `comments` 任务，却是每样东西再打开一次详情页——「一次打开顺手读完」
+    // 这件事就只发生在证据侧，而 Mog 要的恰好是两侧一致。
+    let scope = match scope {
+        Some(scope) => Some(scope),
+        None => load_cross_industry_page_scope(transaction, lease_ref, content_external_id).await?,
+    };
     let Some((comment_limit, reply_expand_limit, acquire_media, ttl_seconds)) = scope else {
         return Ok(None);
     };
@@ -1290,6 +1297,39 @@ async fn page_session_plan_for_task(
         "replyExpandLimit": reply_expand_limit,
         "cacheTtlSeconds": ttl_seconds,
     })))
+}
+
+/// 跨行业参照物的同页读取范围。与证据侧那一段同一个问题、另一张表。
+///
+/// 媒体恒为 false：跨行业作用域没有媒体授权这一项，它不是「没查」，是这一侧不存在这件事。
+async fn load_cross_industry_page_scope(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    lease_ref: Uuid,
+    content_external_id: &str,
+) -> Result<Option<(i32, i32, bool, i64)>, sqlx::Error> {
+    // 跨行业作用域表不在每一套 schema 里，与派发挑候选时同一个理由（`0074` 依赖的 `0044`
+    // 不在控制面证明库中）。缺表就不是 None 的另一种说法，所以这里先问再读。
+    let schema_ready: bool = sqlx::query_scalar(
+        "SELECT to_regclass('collection_work_order_cross_industry_target') IS NOT NULL",
+    )
+    .fetch_one(&mut **transaction)
+    .await?;
+    if !schema_ready {
+        return Ok(None);
+    }
+    sqlx::query_as(
+        "SELECT scope.comment_limit,scope.reply_expand_limit,false, \
+                GREATEST(1,FLOOR(EXTRACT(EPOCH FROM (lease.expires_at-scope_001_now()))))::bigint \
+         FROM collection_work_order_lease lease \
+         JOIN collection_work_order_cross_industry_target scope \
+           ON scope.work_order_ref=lease.work_order_ref \
+         JOIN cross_industry_sample sample USING(sample_ref) \
+         WHERE lease.lease_ref=$1 AND sample.content_external_id=$2 LIMIT 1",
+    )
+    .bind(lease_ref)
+    .bind(content_external_id)
+    .fetch_optional(&mut **transaction)
+    .await
 }
 
 /// 「这张工单现在就可以派」。
@@ -1329,11 +1369,13 @@ macro_rules! dispatch_order_sql {
 
 pub(crate) use {dispatch_order_sql, dispatch_ready_predicate_sql};
 
-/// 候选工单的选取。两份只差一处：**这张工单有没有冻结具体作品**。
+/// 候选工单的选取。两份的差别只有一处：**要不要问跨行业那一侧的作用域**。
 ///
-/// 这个答案决定要求工位具备哪些能力（冻结了就要 `content_detail`，没冻结就是发现面）。
-/// 跨行业详情补采把作用域放在 `0074` 那张表上，漏问它会让补详情的工单被当成发现任务
-/// 派给一个不具备详情能力的工位。
+/// 这几问决定要求工位具备哪些能力（冻结了就要 `content_detail`，冻结的额度里有评论就还要
+/// `comments`/`replies`，没冻结就是发现面）。跨行业详情补采把作用域放在 `0074` 那张表上，
+/// 漏问它会让补详情的工单被当成发现任务派给一个不具备详情能力的工位；`0087` 给那张表补上
+/// 额度列之后，**「这一单要不要读评论」也必须同时问两侧**，否则一张要读评论的工单会被派给
+/// 一个读不了评论的工位。媒体不在此列：跨行业作用域没有媒体授权这一项。
 const CANDIDATE_SQL: &str = concat!(
     "SELECT work_order.work_order_ref,target.platform,target.target_kind,work_order.lane, \
                     EXISTS (SELECT 1 FROM collection_work_order_material_target scope \
@@ -1365,12 +1407,18 @@ const CANDIDATE_SQL_WITH_CROSS_INDUSTRY_SCOPE: &str = concat!(
                              WHERE scope.work_order_ref=work_order.work_order_ref) \
                      OR EXISTS (SELECT 1 FROM collection_work_order_cross_industry_target scope \
                                 WHERE scope.work_order_ref=work_order.work_order_ref)), \
-                    EXISTS (SELECT 1 FROM collection_work_order_material_target scope \
-                            WHERE scope.work_order_ref=work_order.work_order_ref \
-                              AND scope.comment_limit>0), \
-                    EXISTS (SELECT 1 FROM collection_work_order_material_target scope \
-                            WHERE scope.work_order_ref=work_order.work_order_ref \
-                              AND scope.reply_expand_limit>0), \
+                    (EXISTS (SELECT 1 FROM collection_work_order_material_target scope \
+                             WHERE scope.work_order_ref=work_order.work_order_ref \
+                               AND scope.comment_limit>0) \
+                     OR EXISTS (SELECT 1 FROM collection_work_order_cross_industry_target scope \
+                                WHERE scope.work_order_ref=work_order.work_order_ref \
+                                  AND scope.comment_limit>0)), \
+                    (EXISTS (SELECT 1 FROM collection_work_order_material_target scope \
+                             WHERE scope.work_order_ref=work_order.work_order_ref \
+                               AND scope.reply_expand_limit>0) \
+                     OR EXISTS (SELECT 1 FROM collection_work_order_cross_industry_target scope \
+                                WHERE scope.work_order_ref=work_order.work_order_ref \
+                                  AND scope.reply_expand_limit>0)), \
                     EXISTS (SELECT 1 FROM collection_work_order_material_target scope \
                             WHERE scope.work_order_ref=work_order.work_order_ref \
                               AND scope.acquire_media), \
