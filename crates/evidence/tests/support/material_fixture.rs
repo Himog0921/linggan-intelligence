@@ -185,6 +185,8 @@ const MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../../database/migrations/0087_cross_industry_detail_comment_policy.sql"),
     "\n",
+    include_str!("../../../../database/migrations/0088_media_processing_concurrency_policy.sql"),
+    "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ",
     "('0025_comment_current_projection', '64fd9474647834358f8d2d4f1c25e4345e26a3ff79dbfc53a7846915576b0885'), ",
     "('0026_work_resource_read', '08712c71e9b6f97d270739649a7c264da2f115315bef90fabaedded50cf774bd'), ",
@@ -205,7 +207,8 @@ const MIGRATIONS: &str = concat!(
     "('0084_comment_research_problem_resolution_v2', 'da5673d1a64bf470a09b1c6ecc15c56a86500822e83c7397badbfe75613f0f3a'),\n",
     "('0085_comment_research_problem_pair_evaluation', '631acb353568569f7b315b0b682654e095f13c77d0852f3bfdd0af4e4ccac74b'),\n",
     "('0086_comment_research_v2_backlog_recall', '5435cd7e28c9e8bb7421c9c8659b4460ea462e30b3adff72e419b7cba8d5bd22'), ",
-    "('0087_cross_industry_detail_comment_policy', '1b5ea42c8360714f0da7ae2425df61d74d2afa94c421b28a66fba378043e2a5a');\n",
+    "('0087_cross_industry_detail_comment_policy', '1b5ea42c8360714f0da7ae2425df61d74d2afa94c421b28a66fba378043e2a5a'), ",
+    "('0088_media_processing_concurrency_policy', 'fa33e15b88b98226914302e6adeb250242710479851b17eaecb1864879c2cbef');\n",
 );
 
 pub fn coverage_layer(capability: &str, acquired: i64) -> serde_json::Value {

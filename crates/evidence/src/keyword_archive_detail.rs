@@ -14,7 +14,22 @@
 //!
 //! **两侧同口径的详情读。**一次「补详情」打开的就是那张详情页，所以两侧都顺手带回前 30 条
 //! 一级评论与 2 层回复（`DETAIL_WINDOW_*`，ADR-0002 的固定窗口），额度冻结在各自的作用域行上
-//! （证据侧 `0038` 起就有，跨行业侧 `0087` 补上）。媒体不在其中：那是范围大得多的另一件事。
+//! （证据侧 `0038` 起就有，跨行业侧 `0087` 补上）。
+//!
+//! **媒体只跟证据侧同口径，跨行业侧跟不了。**「一次打开就顺手做完」对评论成立，因为它就在
+//! 已经打开的那张详情页上；对媒体不成立——那是另下字节、另起 OCR 与转录的活。所以 `acquire_media`
+//! 是单独一列，取值跟着**这一侧能不能兑现**走，而不是跟着「另一个入口开了没有」走。
+//!
+//! 证据侧兑现得了：材料住 `linggan_material_content`，有 `linggan_material_media_origin`
+//! 这条落地链路，创作者观察一直在下字节。2026-09-16 起关键词观察与它同口径。此前这里是
+//! `false`，于是同一个领域里，博主那条路采回了封面与视频，关键词这条路一篇都没有——**不是
+//! 下载失败，是根本没下**，而两边在界面上长得一样。
+//!
+//! 跨行业侧兑现不了：`0044` 的隔离把跨行业样本挡在 `linggan_material_content` 之外，
+//! `linggan_material_media_origin.content_public_ref` 又是指向它的非空外键，所以那边没有媒体表、
+//! 没有摄取、没有字节。**授权列因此不存在，而不是存在但填 false**：写一个没有任何东西能执行的
+//! `true` 是在工单上记一条做不到的承诺，写 `false` 则会被读成「这一单决定不下字节」这样一个
+//! 从未做过的决定。两种都不如实。
 //!
 //! **两种领域各走各的一侧。** 关键词不只有外部领域那一种：本领域的关键词（比如 ADHD 底下
 //! 的「a娃」）采回来的材料按 `0044` 的隔离写进**证据侧**，跨行业样本表里一条都没有。
@@ -138,17 +153,18 @@ pub async fn advance_keyword_archive_detail(
     // 详情页已经打开着了，读回来不多花一次平台访问；此前的 0/0 让关键词的评论永远采不回来，
     // 只在语料库里留下一个个有评论数、没有评论内容的材料。两侧同口径，不按入口各表一套。
     //
-    // **媒体仍然不在此列**：下载字节、OCR、转录是范围大得多的另一件事，由 `acquire_media`
-    // 单独授权，这里保持 false。
+    // 媒体三项也一并交给工单：与创作者观察同为 true/true/true。这一单打开的是同一张详情页、
+    // 同一篇材料，材料落的是同一张证据表——**同一次打开覆盖的范围不该按入口各表一套**。
+    // 三列都写在这里而不是留给读取点临场判断：冻结在作用域行上的授权才是执行权威。
     let material_targets = works_in_evidence
         .into_iter()
         .map(|content_public_ref| MaterialDeepeningTarget {
             content_public_ref,
             comment_limit: DETAIL_WINDOW_COMMENT_LIMIT,
             reply_expand_limit: DETAIL_WINDOW_REPLY_EXPAND_LIMIT,
-            acquire_media: false,
-            allow_ocr: false,
-            allow_asr: false,
+            acquire_media: true,
+            allow_ocr: true,
+            allow_asr: true,
         })
         .collect::<Vec<_>>();
     let cross_industry_targets = samples

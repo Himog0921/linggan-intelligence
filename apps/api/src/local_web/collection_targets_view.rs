@@ -288,7 +288,7 @@ fn action_feedback_markup(error: Option<&str>, ahead: Option<i64>) -> String {
         "keyword_detail_requested" => (
             "c-src-feedback c-src-feedback-ok",
             "已排入详情补采",
-            "这个词的链接已经拿到，正在按点赞从高到低逐篇补详情：正文、发布时间、前 30 条评论与 2 层回复。一次补三篇，补完之后调度会自己接着补下一批。执行要等一个空闲工位。",
+            "这个词的链接已经拿到，正在按点赞从高到低逐篇补详情：正文、发布时间、前 30 条评论与 2 层回复，并把图片与视频文件一并取回（其中的文字与语音随后识别）。一次补三篇，补完之后调度会自己接着补下一批。执行要等一个空闲工位。",
         ),
         "keyword_detail_complete" => (
             "c-src-feedback c-src-feedback-ok",
@@ -1970,10 +1970,16 @@ mod queue_toast_tests {
     /// 回执说的范围必须就是真去读的范围。
     ///
     /// 关键词详情补采与创作者观察同口径：一次打开带回详情、前 30 条评论与 2 层回复
-    /// （`DETAIL_WINDOW_*`）。这句写着「只补正文与发布时间」的时候，人和系统对同一次采集
-    /// 的理解差着两样东西——纸面窄、实际宽，人就不会去等评论，也不会去查它们为什么没回来。
+    /// （`DETAIL_WINDOW_*`），以及媒体文件。这句写着「只补正文与发布时间」的时候，人和系统
+    /// 对同一次采集的理解差着两样东西——纸面窄、实际宽，人就不会去等评论，也不会去查它们
+    /// 为什么没回来。
     ///
     /// 数字从窗口常量取，不写死：窗口改了而文案没改，这条就红。
+    ///
+    /// 媒体那一条**只能断言「有没有提」，不能像数字那样对着常量咬**——媒体是三个布尔授权，
+    /// 没有可写进文案的量。所以它比上面两条弱：它挡得住「有人把媒体从文案里删掉」，挡不住
+    /// 「有人把 `acquire_media` 改回 false 而文案没跟着改」。写明这个强度，免得后来人以为
+    /// 它守得比实际多。
     #[test]
     fn the_keyword_detail_receipt_states_the_window_that_is_actually_read() {
         let markup = action_feedback_markup(Some("keyword_detail_requested"), Some(3));
@@ -1984,6 +1990,10 @@ mod queue_toast_tests {
         assert!(
             markup.contains(&format!("{DETAIL_WINDOW_REPLY_EXPAND_LIMIT} 层回复")),
             "回执没有说这次会展开回复：{markup}"
+        );
+        assert!(
+            markup.contains("图片与视频"),
+            "回执没有说这次会把媒体文件取回来——它就写在同一句里：{markup}"
         );
     }
 
