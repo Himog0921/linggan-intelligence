@@ -12,6 +12,10 @@
 //! 里挑出来的候选天然已经去重，同一篇不会被排两次详情。这正是 Mog 定的规则——「建档的
 //! 时候不用去重，100 条都采了；进语料库一定要去重，去重之后的链接才推进详情采集」。
 //!
+//! **两侧同口径的详情读。**一次「补详情」打开的就是那张详情页，所以两侧都顺手带回前 30 条
+//! 一级评论与 2 层回复（`DETAIL_WINDOW_*`，ADR-0002 的固定窗口），额度冻结在各自的作用域行上
+//! （证据侧 `0038` 起就有，跨行业侧 `0087` 补上）。媒体不在其中：那是范围大得多的另一件事。
+//!
 //! **两种领域各走各的一侧。** 关键词不只有外部领域那一种：本领域的关键词（比如 ADHD 底下
 //! 的「a娃」）采回来的材料按 `0044` 的隔离写进**证据侧**，跨行业样本表里一条都没有。
 //! 此前这里只查 `cross_industry_sample`，于是本领域关键词永远「没有待补详情的」，
@@ -20,7 +24,9 @@
 //! 证据侧用 `collection_work_order_material_target`，跨行业用 `0074` 那张。
 
 use crate::acquisition_chain::{
-    AcquisitionChainError, MaterialDeepeningTarget, request_and_admit_in_transaction_scoped,
+    AcquisitionChainError, CrossIndustryDeepeningTarget, DETAIL_WINDOW_COMMENT_LIMIT,
+    DETAIL_WINDOW_REPLY_EXPAND_LIMIT, MaterialDeepeningTarget,
+    request_and_admit_in_transaction_scoped,
 };
 use linggan_storage_postgres::Database;
 use uuid::Uuid;
@@ -127,17 +133,30 @@ pub async fn advance_keyword_archive_detail(
     }
 
     let works = samples.len() + works_in_evidence.len();
-    // 详情补采**只取详情**：评论、回复与媒体各自是另一次明确的决定，不由「顺手补一下
-    // 详情」隐含授权。两侧在这一点上必须一致。
+    // 一次打开笔记详情页，顺手读回的是详情 + 前 30 条一级评论 + 2 层回复——与创作者观察
+    // 同口径（`DETAIL_WINDOW_*`，ADR-0002 的固定窗口）。评论在这里不是「另一次采集」：
+    // 详情页已经打开着了，读回来不多花一次平台访问；此前的 0/0 让关键词的评论永远采不回来，
+    // 只在语料库里留下一个个有评论数、没有评论内容的材料。两侧同口径，不按入口各表一套。
+    //
+    // **媒体仍然不在此列**：下载字节、OCR、转录是范围大得多的另一件事，由 `acquire_media`
+    // 单独授权，这里保持 false。
     let material_targets = works_in_evidence
         .into_iter()
         .map(|content_public_ref| MaterialDeepeningTarget {
             content_public_ref,
-            comment_limit: 0,
-            reply_expand_limit: 0,
+            comment_limit: DETAIL_WINDOW_COMMENT_LIMIT,
+            reply_expand_limit: DETAIL_WINDOW_REPLY_EXPAND_LIMIT,
             acquire_media: false,
             allow_ocr: false,
             allow_asr: false,
+        })
+        .collect::<Vec<_>>();
+    let cross_industry_targets = samples
+        .into_iter()
+        .map(|sample_ref| CrossIndustryDeepeningTarget {
+            sample_ref,
+            comment_limit: DETAIL_WINDOW_COMMENT_LIMIT,
+            reply_expand_limit: DETAIL_WINDOW_REPLY_EXPAND_LIMIT,
         })
         .collect::<Vec<_>>();
     let request = request_and_admit_in_transaction_scoped(
@@ -147,7 +166,7 @@ pub async fn advance_keyword_archive_detail(
         purpose,
         requested_by,
         &material_targets,
-        &samples,
+        &cross_industry_targets,
         None,
         // 详情补采不是巡检，不绑规则版本。
         None,

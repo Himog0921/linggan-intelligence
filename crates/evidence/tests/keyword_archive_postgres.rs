@@ -19,9 +19,10 @@ use cross_industry::{
 };
 use fixture::proof_database;
 use linggan_evidence::{
-    AccountEligibilityObservation, CheckInOutcome, DispatchDecision, InstallationCheckIn,
-    KeywordDetailAdvance, activate_installation_credential, advance_keyword_archive_detail,
-    bind_observation_account, check_in_installation, decide_dispatch, keyword_baselines_qualified,
+    AccountEligibilityObservation, CheckInOutcome, DETAIL_WINDOW_COMMENT_LIMIT,
+    DETAIL_WINDOW_REPLY_EXPAND_LIMIT, DispatchDecision, InstallationCheckIn, KeywordDetailAdvance,
+    activate_installation_credential, advance_keyword_archive_detail, bind_observation_account,
+    check_in_installation, decide_dispatch, keyword_baselines_qualified,
     keyword_targets_pending_detail, open_claim_window, register_station,
     report_account_eligibility, request_and_admit, set_station_accepting,
 };
@@ -194,6 +195,30 @@ async fn submit_keyword_archive(
     acquired: i64,
     failed: i64,
 ) -> Uuid {
+    submit_keyword_archive_of(
+        database,
+        identity_key,
+        "note-archive-1",
+        stop_reason,
+        acquired,
+        failed,
+    )
+    .await
+}
+
+/// 同上一轮建档，但这一轮采回来的是**指定的那一篇**。
+///
+/// 样本是按作品身份去重的，所以同一个 `externalId` 采几轮都只落同一行样本。要造出两篇
+/// 互不相同的参照物，只能在包里提交两个不同的 `externalId`——换目标、换关键词、再采一轮
+/// 都换不出第二行来。
+async fn submit_keyword_archive_of(
+    database: &Database,
+    identity_key: &str,
+    note_external_id: &str,
+    stop_reason: &str,
+    acquired: i64,
+    failed: i64,
+) -> Uuid {
     let mut coverage = search_coverage("考研自习", acquired);
     coverage["layers"][0]["failed"] = serde_json::json!(failed);
     coverage["layers"][0]["observed"] = serde_json::json!(acquired + failed);
@@ -209,10 +234,12 @@ async fn submit_keyword_archive(
         coverage,
         serde_json::json!({"surfaceReceipt":{"stopReason":stop_reason}}),
         vec![discovery_card(
-            "note-archive-1",
+            note_external_id,
             "建档样本",
             "1.4万",
-            "https://www.xiaohongshu.com/search_result/note-archive-1?xsec_token=ABarchive",
+            &format!(
+                "https://www.xiaohongshu.com/search_result/{note_external_id}?xsec_token=ABarchive"
+            ),
         )],
     )
     .await;
@@ -276,6 +303,28 @@ async fn an_archived_keyword_advances_from_links_to_details() {
     .await
     .unwrap();
     assert_eq!(evidence_scope, 0, "跨行业参照物不得写进证据侧的作用域表");
+
+    // 详情读的窗口冻在作用域行上，与创作者观察同口径：一次打开带回详情 + 前 30 条评论
+    // + 2 层回复。跨行业这张表此前根本没有这两列（`0074` 只有身份与顺序），于是关键词
+    // 的详情补采按构造就是 detail-only——采回来的材料有评论数、没有一条评论内容，而这一
+    // 切在纸面上看不出来：作用域行「看起来」是完整的。
+    let policy: Vec<(i32, i32)> = sqlx::query_as(
+        "SELECT scope.comment_limit,scope.reply_expand_limit \
+         FROM collection_work_order_cross_industry_target scope \
+         WHERE scope.work_order_ref=$1 ORDER BY scope.ordinal",
+    )
+    .bind(work_order_ref)
+    .fetch_all(database.pool())
+    .await
+    .expect("the frozen cross-industry policy is readable");
+    assert_eq!(
+        policy,
+        vec![(
+            DETAIL_WINDOW_COMMENT_LIMIT,
+            DETAIL_WINDOW_REPLY_EXPAND_LIMIT
+        )],
+        "跨行业侧的详情补采也必须冻上评论与回复的窗口"
+    );
 
     // 已经排上的那一篇不会被第二次排进来——重复补采同一篇不产生新事实，只多花一次
     // 平台访问。
@@ -404,6 +453,29 @@ async fn a_home_domain_keyword_also_advances_to_details() {
     .await
     .unwrap();
     assert_eq!(cross_scope, 0, "本领域的作品不得写进跨行业作用域表");
+
+    // 三篇都按同一个窗口冻：正文 + 前 30 条评论 + 2 层回复，媒体不在此列。
+    let policy: Vec<(i32, i32, bool)> = sqlx::query_as(
+        "SELECT scope.comment_limit,scope.reply_expand_limit,scope.acquire_media \
+         FROM collection_work_order_material_target scope \
+         WHERE scope.work_order_ref=$1 ORDER BY scope.ordinal",
+    )
+    .bind(work_order_ref)
+    .fetch_all(database.pool())
+    .await
+    .expect("the evidence-side policy is readable");
+    assert_eq!(
+        policy,
+        vec![
+            (
+                DETAIL_WINDOW_COMMENT_LIMIT,
+                DETAIL_WINDOW_REPLY_EXPAND_LIMIT,
+                false
+            );
+            3
+        ],
+        "证据侧的详情补采同样带上评论与回复，但不代为下载媒体"
+    );
 }
 
 /// 基线停在**失败**上时，已经发现的那一篇仍然要能补详情。
@@ -667,7 +739,41 @@ async fn a_detail_batch_is_claimable_and_carries_a_signed_entry_point() {
         "前置：详情补采要先排出一张工单，实际是 {advance:?}"
     );
 
-    let installation = ready_detail_station(&database, "详情补采证明工位").await;
+    // **先钉住反例**：只会补详情的工位领不走这张工单。作用域行冻着 30 条评论与 2 层回复，
+    // 一个读不了评论的工位接下来只会把评论永远欠着，而回执已经告诉人它在补——活看着有人
+    // 接，结果少两样。换一个具备这三样能力的工位才该领走。
+    let detail_only = ready_detail_station(
+        &database,
+        "只会补详情的工位",
+        serde_json::json!(["content_detail"]),
+    )
+    .await;
+    let refused = decide_dispatch(
+        &database,
+        &detail_only.install_key,
+        detail_only
+            .credential
+            .as_deref()
+            .expect("the proof installation holds a credential"),
+    )
+    .await
+    .expect("dispatch decides");
+    assert!(
+        matches!(
+            refused,
+            DispatchDecision::ControlBlocked { ref reason_code }
+                if reason_code == "capability_missing"
+        ),
+        "只有 content_detail 的工位不得领走一张冻了评论与回复的工单，\
+         而它必须是因为能力不够被挡下的（不是没活、也不是别的理由），实际是 {refused:?}"
+    );
+
+    let installation = ready_detail_station(
+        &database,
+        "详情补采证明工位",
+        serde_json::json!(["content_detail", "comments", "replies"]),
+    )
+    .await;
     let decision = decide_dispatch(
         &database,
         &installation.install_key,
@@ -681,24 +787,58 @@ async fn a_detail_batch_is_claimable_and_carries_a_signed_entry_point() {
     let DispatchDecision::Dispatch {
         task_spec,
         execution_source_url,
+        page_session_plan,
+        lease_ref,
         ..
     } = decision
     else {
         panic!("具备详情能力的空闲工位必须能领走这张工单，实际是 {decision:?}");
     };
 
+    // 一条任务只请求一个能力（任务规格合同），所以这里只能是这一串里的第一步。**工位够不够格
+    // 是另一回事**：上面那段已经钉住「只有 content_detail 的工位被挡住」，说明门禁读的是
+    // 作用域行推出来的三个能力，而不是「派出去的那一条任务写了什么」。把这两件事混成一条
+    // 断言，就会得出一个永远不可能成立的期望。
     assert_eq!(
-        task_spec
-            .pointer("/capabilitiesRequested/0")
-            .and_then(serde_json::Value::as_str),
-        Some("content_detail"),
-        "跨行业作用域要展开成逐篇详情任务，而不是再翻一次发现面"
+        task_spec["capabilitiesRequested"],
+        serde_json::json!(["content_detail"])
     );
     assert_eq!(
         task_spec
             .pointer("/target/contentExternalId")
             .and_then(serde_json::Value::as_str),
         Some("note-archive-1")
+    );
+    // 冻结的窗口要真的展开成任务，而不是只体现在同一页计划里：作用域行写着 30 条评论、
+    // 2 层回复，这一单就该排出三步。**此前跨行业这一侧排不出后两步**——那正是「关键词的
+    // 语料有评论数、没有评论内容」的来处。
+    let steps: Vec<(String, String, i32)> = sqlx::query_as(
+        "SELECT task.task_spec->'capabilitiesRequested'->>0, task.task_spec->>'commentLimit', \
+                (task.task_spec->>'maximumQuota')::integer \
+         FROM collection_work_order_lease_task step \
+         JOIN linggan_runtime_task task USING(task_id) \
+         WHERE step.lease_ref=$1 ORDER BY step.sequence_no",
+    )
+    .bind(lease_ref)
+    .fetch_all(database.pool())
+    .await
+    .expect("the leased steps are readable");
+    assert_eq!(
+        steps,
+        vec![
+            ("content_detail".to_owned(), "not_requested".to_owned(), 1),
+            (
+                "comments".to_owned(),
+                DETAIL_WINDOW_COMMENT_LIMIT.to_string(),
+                DETAIL_WINDOW_COMMENT_LIMIT
+            ),
+            (
+                "replies".to_owned(),
+                DETAIL_WINDOW_COMMENT_LIMIT.to_string(),
+                DETAIL_WINDOW_COMMENT_LIMIT
+            ),
+        ],
+        "跨行业详情补采要按作用域行排出「详情 + 前 30 条评论 + 2 层回复」三步"
     );
     // 入口必须是列表面当时平台返回的那条带签名的链接。裸 `/explore/{id}` 打不开，
     // 而这条链接在证据侧根本不存在——它只在跨行业样本表上。
@@ -707,6 +847,135 @@ async fn a_detail_batch_is_claimable_and_carries_a_signed_entry_point() {
         Some("https://www.xiaohongshu.com/search_result/note-archive-1?xsec_token=ABarchive"),
         "详情任务必须带上跨行业样本记下的签名链接"
     );
+    // 同一次开页的服务范围也读跨行业那张表。这一路此前只认证据侧，跨行业的详情任务因此
+    // 拿不到页面计划：插件只好为评论另开一次页面，或者干脆不读。
+    let plan = page_session_plan.expect("跨行业的详情任务也要带上同页计划");
+    assert_eq!(plan["contractVersion"], "linggan.detail-page-session.v1");
+    assert_eq!(plan["contentExternalId"], "note-archive-1");
+    assert_eq!(
+        plan["lanes"],
+        serde_json::json!(["content_detail", "comments", "replies"])
+    );
+    assert_eq!(plan["commentLimit"], DETAIL_WINDOW_COMMENT_LIMIT);
+    assert_eq!(plan["replyExpandLimit"], DETAIL_WINDOW_REPLY_EXPAND_LIMIT);
+}
+
+/// 跨行业侧的额度不是「写进去就算数」：这张表自己拒绝自相矛盾的作用域行。
+///
+/// 两条边界与证据侧那张表逐字同义（`0038` / `0087`）：评论 0..30；回复只有在评论也授权了
+/// 的前提下才允许展开。少了后一条，一行 `comment_limit=0, reply_expand_limit=2` 会被当成
+/// 合法作用域写下去，发租时展开成「补回复但不补评论」的任务——插件只能空手而回，而工单上
+/// 看起来一切正常。**边界要被真的撞一次**：只核对迁移文件里写着这条 CHECK，挡不住后来
+/// 一次 DROP 把它拿掉。
+///
+/// 每条无效行还得落在**没有别的理由被拒**的格子上：这张表有三条约束守着同一行——主键
+/// `(work_order_ref, sample_ref)`、唯一键 `(work_order_ref, ordinal)`、以及下面那两条 CHECK。
+/// 一行同时犯两条时，用例只能靠 PostgreSQL 先查 CHECK、后插索引这个内部顺序才绿，那是运气
+/// 不是保证。所以三篇样本、三张工单，正面控制与两条负例各占一格互不相干的坐标。
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn a_cross_industry_scope_cannot_authorize_replies_without_comments() {
+    let database = proof_database("keyword_detail_scope_policy").await;
+    // 三篇互不相同的参照物只能在采回来的时候就换掉——两个目标采回同一篇，冻出来的就是同一
+    // 行样本，后面的格子就不够分了。（这不是假设：这条用例第一版只采了两篇，于是「合法行
+    // 必须被接受」这一步先撞上了主键，红得与额度毫无关系。）
+    let mut orders = Vec::new();
+    for (identity, note_external_id) in [
+        ("考研自习::policy-a", "note-archive-1"),
+        ("考研自习::policy-b", "note-policy-b"),
+        ("考研自习::policy-c", "note-policy-c"),
+    ] {
+        let target_ref = submit_keyword_archive_of(
+            &database,
+            identity,
+            note_external_id,
+            "bottom_confirmed",
+            1,
+            0,
+        )
+        .await;
+        let advance = advance_keyword_archive_detail(&database, target_ref, "建档补详情", "person")
+            .await
+            .expect("the detail advance runs");
+        let KeywordDetailAdvance::Queued { work_order_ref, .. } = advance else {
+            panic!("前置：先要有一张带上作用域的工单，实际是 {advance:?}");
+        };
+        orders.push(work_order_ref);
+    }
+    // 每张工单**各自**冻的那一篇。不能跨工单 `ORDER BY ordinal` 一把抓回来：三张工单的
+    // ordinal 都是 1，谁排在前由算子说了算，抓出来的「第二篇」可能就是某张工单自己那篇，
+    // 正面控制便撞上主键、红得与额度无关。
+    let mut frozen = Vec::new();
+    for work_order_ref in &orders {
+        let sample_ref: Uuid = sqlx::query_scalar(
+            "SELECT sample_ref FROM collection_work_order_cross_industry_target \
+             WHERE work_order_ref = $1",
+        )
+        .bind(work_order_ref)
+        .fetch_one(database.pool())
+        .await
+        .expect("每张工单冻了一篇参照物");
+        frozen.push(sample_ref);
+    }
+    assert_eq!(orders.len(), 3, "三个目标各排出了一张工单");
+    assert_eq!(frozen.len(), 3, "三张工单各冻了一篇参照物");
+
+    // 正面控制：同一形状的合法行必须写得进去。否则下面两条「被拒绝」可能只是因为整张表
+    // 什么都收不下，而不是因为这两条越界。它占 (orders[0], frozen[1])——两张工单交叉的一格，
+    // 与任何一条已冻结的行都不重。
+    sqlx::query(
+        "INSERT INTO collection_work_order_cross_industry_target \
+             (work_order_ref,sample_ref,ordinal,comment_limit,reply_expand_limit) \
+         VALUES ($1,$2,2,$3,$4)",
+    )
+    .bind(orders[0])
+    .bind(frozen[1])
+    .bind(DETAIL_WINDOW_COMMENT_LIMIT)
+    .bind(DETAIL_WINDOW_REPLY_EXPAND_LIMIT)
+    .execute(database.pool())
+    .await
+    .expect("合法的作用域行必须被接受");
+
+    // 两条负例各占一格没人用过的坐标，ordinal 都取那两张工单上空着的 2：于是这一刻能拒它
+    // 的只剩下 CHECK 那两条。
+    //
+    // 名字按**库里实际存的**写。PostgreSQL 把标识符截到 63 字节，而这条与证据侧逐字同名的
+    // 约束在迁移文件里是 72 字节——写全名去比对，报错里那个名字永远对不上。证据侧那张表
+    // 存下来的同样是截断后的名字（`collection_work_order_material_target_reply_requires_comment_ch`），
+    // 两边的行为一致，只是名字都比源码里短。（这条限制在本用例里被真的撞到过一次。）
+    for (work_order_ref, sample_ref, comment_limit, reply_expand_limit, constraint) in [
+        (
+            orders[1],
+            frozen[0],
+            0,
+            2,
+            "collection_work_order_cross_industry_target_reply_requires_comm",
+        ),
+        (
+            orders[2],
+            frozen[1],
+            31,
+            0,
+            "collection_work_order_cross_industry_target_comment_limit_check",
+        ),
+    ] {
+        let refusal = sqlx::query(
+            "INSERT INTO collection_work_order_cross_industry_target \
+                 (work_order_ref,sample_ref,ordinal,comment_limit,reply_expand_limit) \
+             VALUES ($1,$2,2,$3,$4)",
+        )
+        .bind(work_order_ref)
+        .bind(sample_ref)
+        .bind(comment_limit)
+        .bind(reply_expand_limit)
+        .execute(database.pool())
+        .await
+        .expect_err("越界的作用域行必须被拒绝");
+        assert!(
+            refusal.to_string().contains(constraint),
+            "该由 {constraint} 拒它，而不是别的冲突：{refusal}"
+        );
+    }
 }
 
 struct DetailStation {
@@ -714,11 +983,18 @@ struct DetailStation {
     credential: Option<String>,
 }
 
-/// 一个只会补详情的工位：认领窗口开着、接活开关打开、账号已绑定、能力**只有**
-/// `content_detail`。
+/// 一个空闲的详情工位：认领窗口开着、接活开关打开、账号已绑定，能力由调用方给定。
 ///
 /// 这四项缺任何一项，派发都会以一个**别的**理由拒绝，用例就会为错误的原因变红或变绿。
-async fn ready_detail_station(database: &Database, label: &str) -> DetailStation {
+///
+/// 能力列表是参数，不是写死的一项：工单要什么能力由作用域行的冻结额度推出来，所以
+/// 「都能读的工位领得走」和「只会补详情的工位领不走」是两条各自要钉的事——写死一个
+/// 列表就只能钉其中一条。
+async fn ready_detail_station(
+    database: &Database,
+    label: &str,
+    capabilities: serde_json::Value,
+) -> DetailStation {
     let station_ref = register_station(database, label, 200)
         .await
         .expect("station is registered");
@@ -733,14 +1009,14 @@ async fn ready_detail_station(database: &Database, label: &str) -> DetailStation
             installation_credential: None,
             plugin_version: "0.8.48",
             browser_label: Some(label),
-            // **只有详情能力，故意不给 `discovery_search`。**
+            // **故意不给 `discovery_search`。**
             //
             // 派发是按「这张工单有没有冻结具体作品」挑能力要求的：冻结了就要
             // `content_detail`，没冻结就要 `discovery_search`。若那个判断只认证据侧
             // 那张表、把跨行业作用域看成空，这张工单就会去要 `discovery_search`，
             // 这个工位于是被排除，活永远派不出去。一个同时具备两种能力的工位两边都
             // 合格，测不出这件事。
-            capabilities: serde_json::json!(["content_detail"]),
+            capabilities,
         },
     )
     .await

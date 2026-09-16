@@ -258,6 +258,7 @@ migrate() {
   apply_migration_once "0084_comment_research_problem_resolution_v2" "$project_root/database/migrations/0084_comment_research_problem_resolution_v2.sql"
   apply_migration_once "0085_comment_research_problem_pair_evaluation" "$project_root/database/migrations/0085_comment_research_problem_pair_evaluation.sql"
   apply_migration_once "0086_comment_research_v2_backlog_recall" "$project_root/database/migrations/0086_comment_research_v2_backlog_recall.sql"
+  apply_migration_once "0087_cross_industry_detail_comment_policy" "$project_root/database/migrations/0087_cross_industry_detail_comment_policy.sql"
 }
 
 case "$command_name" in

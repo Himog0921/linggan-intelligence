@@ -66,9 +66,10 @@ mod work_resource_current;
 mod work_resource_read;
 
 pub use acquisition_chain::{
-    AcquisitionChainError, AuthorizationGrant, MaterialDeepeningTarget,
-    ProgressiveArchiveTickSummary, RequestLeaseError, RequestLeaseOutcome, RequestOutcome,
-    acquisition_chain_schema_is_ready, grant_authorization, read_capacity, request_admit_and_lease,
+    AcquisitionChainError, AuthorizationGrant, DETAIL_WINDOW_COMMENT_LIMIT,
+    DETAIL_WINDOW_REPLY_EXPAND_LIMIT, MaterialDeepeningTarget, ProgressiveArchiveTickSummary,
+    RequestLeaseError, RequestLeaseOutcome, RequestOutcome, acquisition_chain_schema_is_ready,
+    grant_authorization, read_capacity, request_admit_and_lease,
     request_admit_material_targets_and_lease, request_and_admit,
     request_and_admit_material_targets, request_and_admit_material_targets_under_authorization,
     request_progressive_archive, request_progressive_archive_and_lease, run_progressive_archives,

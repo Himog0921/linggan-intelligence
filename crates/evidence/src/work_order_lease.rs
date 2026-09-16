@@ -1212,8 +1212,9 @@ async fn load_material_targets(
 /// 作品去取它的详情」是同一件事，材料最终落哪张表由落库那一刻的领域判定决定，不由任务
 /// 形状决定。
 ///
-/// **只展开详情**：评论、回复、媒体各自是另一次明确的决定。把它们默认打开，等于让一次
-/// 「补详情」顺手授权了三类范围更大的采集。
+/// **这一单读到什么由作用域行说了算**（`0087` 的 `comment_limit` / `reply_expand_limit`），
+/// 与证据侧同义：`comment_limit = 0` 是「只读详情」这个明确授权，不是这里替它默认的值。
+/// 媒体仍只可能来自证据侧——跨行业作用域没有媒体授权这一项。
 async fn load_cross_industry_targets(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     work_order_ref: Uuid,
@@ -1226,8 +1227,8 @@ async fn load_cross_industry_targets(
     if !schema_ready {
         return Ok(Vec::new());
     }
-    let rows: Vec<(String,)> = sqlx::query_as(
-        "SELECT sample.content_external_id \
+    let rows: Vec<(String, i32, i32)> = sqlx::query_as(
+        "SELECT sample.content_external_id,scope.comment_limit,scope.reply_expand_limit \
          FROM collection_work_order_cross_industry_target scope \
          JOIN cross_industry_sample sample USING(sample_ref) \
          WHERE scope.work_order_ref=$1 ORDER BY scope.ordinal",
@@ -1239,8 +1240,8 @@ async fn load_cross_industry_targets(
         .into_iter()
         .map(|row| MaterialTarget {
             content_external_id: row.0,
-            comment_limit: 0,
-            reply_expand_limit: 0,
+            comment_limit: row.1,
+            reply_expand_limit: row.2,
             acquire_media: false,
         })
         .collect())
