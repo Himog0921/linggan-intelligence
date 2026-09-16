@@ -454,9 +454,14 @@ async fn a_home_domain_keyword_also_advances_to_details() {
     .unwrap();
     assert_eq!(cross_scope, 0, "本领域的作品不得写进跨行业作用域表");
 
-    // 三篇都按同一个窗口冻：正文 + 前 30 条评论 + 2 层回复，媒体不在此列。
-    let policy: Vec<(i32, i32, bool)> = sqlx::query_as(
-        "SELECT scope.comment_limit,scope.reply_expand_limit,scope.acquire_media \
+    // 三篇都按同一个窗口冻：正文 + 前 30 条评论 + 2 层回复 + 媒体。
+    //
+    // 三个媒体布尔**一起断言，不只断言 `acquire_media`**：关键词这条路此前三项全是 false
+    // （2026-09-16 起与创作者观察同口径，Issue #296），只盯一个的话，另外两列被人改回去
+    // 这条断言照样绿。
+    let policy: Vec<(i32, i32, bool, bool, bool)> = sqlx::query_as(
+        "SELECT scope.comment_limit,scope.reply_expand_limit, \
+                scope.acquire_media,scope.allow_ocr,scope.allow_asr \
          FROM collection_work_order_material_target scope \
          WHERE scope.work_order_ref=$1 ORDER BY scope.ordinal",
     )
@@ -470,11 +475,13 @@ async fn a_home_domain_keyword_also_advances_to_details() {
             (
                 DETAIL_WINDOW_COMMENT_LIMIT,
                 DETAIL_WINDOW_REPLY_EXPAND_LIMIT,
-                false
+                true,
+                true,
+                true
             );
             3
         ],
-        "证据侧的详情补采同样带上评论与回复，但不代为下载媒体"
+        "证据侧的详情补采与创作者观察同口径：正文 + 评论 + 回复 + 媒体三项授权"
     );
 }
 

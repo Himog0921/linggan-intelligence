@@ -79,6 +79,7 @@ cargo test -p linggan-evidence --test keyword_archive_postgres --locked -- --ign
 cargo test -p linggan-evidence --test queue_position_postgres --locked -- --ignored
 cargo test -p linggan-evidence --test material_social_postgres --locked -- --ignored
 cargo test -p linggan-evidence --test material_media_postgres --locked -- --ignored
+cargo test -p linggan-evidence --test media_processing_concurrency_postgres --locked -- --ignored
 cargo test -p linggan-evidence --test creator_lifecycle_postgres --locked -- --ignored
 cargo test -p linggan-evidence --test target_inspector_postgres --locked -- --ignored
 cargo test -p linggan-evidence --test observation_target_dossier_postgres --locked -- --ignored

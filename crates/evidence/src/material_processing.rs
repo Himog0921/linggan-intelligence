@@ -46,19 +46,91 @@ pub async fn ensure_media_processing_work(database: &Database) -> Result<u64, sq
     .rows_affected())
 }
 
+/// 认领闸的就绪状态：这个 worker 启用的处理器，到底能不能领到活。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClaimGateReadiness {
+    /// 闸门表不存在——`0088` 还没应用。此时**任何**处理器都认领不到。
+    NotMigrated,
+    /// 闸门表在，但这些已启用的处理器没有登记上限，因此永远认领不到。
+    Unregistered(Vec<String>),
+    /// 启用的处理器全部登记在册。
+    Ready,
+}
+
+/// 读一次认领闸的就绪状态。
+///
+/// **存在的理由是：没登记的表现是「什么都不发生」。** 未迁移或未登记时 `claim` 一律返回
+/// `Ok(None)`，worker 把它读成「这一轮没有活」，循环继续，**一行日志都不打**——一个看起来
+/// 完全健康的进程永远空转。本包要消灭的正是这种失败形态（196 条 asr 里 195 条静默失败，
+/// 就是零日志藏出来的），所以闸门自己不能以同一种方式藏起来。
+///
+/// 判据与 `claim_media_processing_work` 里那道闸同源：同一张表，同一个「登记了才有资格」的
+/// 语义。这里只是把它变成一句可以读给人听的话。
+pub async fn read_claim_gate_readiness(
+    database: &Database,
+    enabled_processors: &[String],
+) -> Result<ClaimGateReadiness, sqlx::Error> {
+    let ready: bool = sqlx::query_scalar(
+        "SELECT to_regclass('linggan_media_processing_concurrency') IS NOT NULL",
+    )
+    .fetch_one(database.pool())
+    .await?;
+    if !ready {
+        return Ok(ClaimGateReadiness::NotMigrated);
+    }
+    let registered: Vec<String> =
+        sqlx::query_scalar("SELECT processor_kind FROM linggan_media_processing_concurrency")
+            .fetch_all(database.pool())
+            .await?;
+    let unregistered = enabled_processors
+        .iter()
+        .filter(|kind| !registered.iter().any(|row| row == *kind))
+        .cloned()
+        .collect::<Vec<_>>();
+    if unregistered.is_empty() {
+        Ok(ClaimGateReadiness::Ready)
+    } else {
+        Ok(ClaimGateReadiness::Unregistered(unregistered))
+    }
+}
+
 pub async fn claim_media_processing_work(
     database: &Database,
     worker_instance_ref: Uuid,
     enabled_processors: &[String],
 ) -> Result<Option<MediaProcessingClaim>, sqlx::Error> {
-    let ready: bool =
-        sqlx::query_scalar("SELECT to_regclass('linggan_media_processing_work') IS NOT NULL")
-            .fetch_one(database.pool())
-            .await?;
+    let ready: bool = sqlx::query_scalar(
+        "SELECT to_regclass('linggan_media_processing_work') IS NOT NULL \
+            AND to_regclass('linggan_media_processing_concurrency') IS NOT NULL",
+    )
+    .fetch_one(database.pool())
+    .await?;
     if !ready || enabled_processors.is_empty() {
         return Ok(None);
     }
     let mut tx = database.pool().begin().await?;
+    // **认领闸。** 先取锁，再数在途，最后才认领——三步必须在同一把锁下，否则这道闸拦不住任何东西。
+    //
+    // 光有下面的 `FOR UPDATE ... SKIP LOCKED` 是不够的：它保证两个进程**不会抢到同一条**，
+    // 恰恰因此它们会**各拿到一条不同的**，各自数到「在途 0」，然后双双越过上限。这正是
+    // 2026-09-16 线上 6 个进程同时在跑的原因——上限是 1，实际是 6，而代码里每一处看都对。
+    //
+    // 锁按「整张认领动作」取一把，不按 processor_kind 分开：认领事务只做几条 UPDATE 和一次
+    // 计数，是毫秒级的，而真正的处理（OCR、转录）发生在事务提交**之后**，不在锁里。
+    // 所以这把锁不降低任何实际吞吐，只是让「数一数」和「领一条」之间没有缝。
+    //
+    // 上限本身住在 `linggan_media_processing_concurrency` 表里，不在各进程的环境变量里：
+    // 两个进程各设各的加起来必然超，而且读取点替执行做的决定会随进程重启漂移。
+    //
+    // **一个必须说清的代价：上限收到 1 之后，一条没到期的租约就占住整条车道。** worker 正常失败
+    // 会走 `fail_media_processing_work` 当场释放；但进程被 `kill -9` 时那条租约要等到期才回收，
+    // 而 asr 的租约是 **6 小时**（基线取值，本包没改）。此前这不成问题——另外 5 个进程会接着认领，
+    // 也就是说「多进程」一直在无意中掩盖租约回收的迟钝。现在要连跑 196 条 asr（约 11 小时），
+    // 中途被杀一次就可能白等几小时。这是收紧并发换来的真实代价，不是缺陷，但得写在明处。
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
+        .bind("linggan_media_processing_claim_gate")
+        .execute(&mut *tx)
+        .await?;
     sqlx::query(
         "UPDATE linggan_media_processing_work SET \
            state=CASE WHEN attempt_count >= $1 THEN 'terminal' ELSE 'retry_wait' END, \
@@ -70,12 +142,28 @@ pub async fn claim_media_processing_work(
     .execute(&mut *tx)
     .await?;
     let candidate = sqlx::query(
+        // `JOIN ... concurrency` 是 INNER JOIN，且没有兜底行：**表里没登记的 processor_kind
+        // 一条都认领不到**（Closed World，与 SCOPE-001 一致）。这是有意的——新增一种处理器
+        // 却忘了登记上限时，它应该停下来被人看见，而不是没有上限地跑起来。
+        //
+        // 「被人看见」这半句此前是假的：停下来是真的，被看见没有实现——`Ok(None)` 在 worker
+        // 那里读作「这一轮没活」，一行日志都不打。现在由 `read_claim_gate_readiness` 在进程
+        // 启动时把这半句补上；改这里的语义时记得两处一起看。
         "SELECT work.work_ref,work.job_ref,job.processor_kind \
          FROM linggan_media_processing_work work \
          JOIN linggan_media_processing_job job USING(job_ref) \
+         JOIN linggan_media_processing_concurrency concurrency \
+           ON concurrency.processor_kind = job.processor_kind \
          WHERE work.state IN ('pending','retry_wait') AND work.attempt_count < $1 \
            AND job.processor_kind = ANY($2) \
            AND work.next_attempt_at <= scope_001_now() \
+           AND (SELECT count(*) \
+                FROM linggan_media_processing_work in_flight \
+                JOIN linggan_media_processing_job in_flight_job \
+                  ON in_flight_job.job_ref = in_flight.job_ref \
+                WHERE in_flight.state = 'leased' \
+                  AND in_flight_job.processor_kind = job.processor_kind) \
+               < concurrency.max_in_flight \
          ORDER BY CASE job.processor_kind \
                     WHEN 'image_ocr' THEN 1 WHEN 'thumbnail' THEN 2 \
                     WHEN 'audio_extract' THEN 3 WHEN 'asr' THEN 4 ELSE 5 END, \

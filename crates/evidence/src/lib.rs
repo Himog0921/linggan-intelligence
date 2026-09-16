@@ -144,9 +144,10 @@ pub use material_disposition::{
     record_materialization_disposition, record_slot_disposition,
 };
 pub use material_processing::{
-    MediaProcessingClaim, claim_media_processing_work, complete_media_processing_derivative,
-    complete_media_processing_text, complete_media_processing_without_output,
-    ensure_media_processing_work, fail_media_processing_work, record_media_derivative_completion,
+    ClaimGateReadiness, MediaProcessingClaim, claim_media_processing_work,
+    complete_media_processing_derivative, complete_media_processing_text,
+    complete_media_processing_without_output, ensure_media_processing_work,
+    fail_media_processing_work, read_claim_gate_readiness, record_media_derivative_completion,
 };
 pub use material_social_read::read_authorized_research_comments;
 pub use media_acquisition::{

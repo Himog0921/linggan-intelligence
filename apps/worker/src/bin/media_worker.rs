@@ -4,9 +4,10 @@
 //! already admitted and materialized under `LINGGAN_LOCAL_MEDIA_ROOT`.
 
 use linggan_evidence::{
-    MediaProcessingClaim, claim_media_processing_work, complete_media_processing_derivative,
-    complete_media_processing_text, complete_media_processing_without_output,
-    ensure_media_processing_work, fail_media_processing_work,
+    ClaimGateReadiness, MediaProcessingClaim, claim_media_processing_work,
+    complete_media_processing_derivative, complete_media_processing_text,
+    complete_media_processing_without_output, ensure_media_processing_work,
+    fail_media_processing_work, read_claim_gate_readiness,
 };
 use std::path::Path;
 use std::process::Command;
@@ -16,15 +17,62 @@ use uuid::Uuid;
 mod media_worker_support;
 
 use media_worker_support::{
-    command_available, ensure_local_input, ffmpeg_command, first_text_file, local_media_root,
-    normalize_text, prepare_output, require_success, run_command, sha256_hex, tesseract_command,
-    whisper_command, whisper_model,
+    apply_ffmpeg_path, command_available, ensure_local_input, ffmpeg_command, first_text_file,
+    local_media_root, normalize_text, prepare_output, require_success, run_command, sha256_hex,
+    tesseract_command, whisper_command, whisper_model,
 };
 
 const TICK_INTERVAL: Duration = Duration::from_secs(5);
 const MAX_JOBS_PER_TICK: usize = 4;
 const MAX_DISPLAY_CHARS: usize = 600;
 const PROCESS_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+
+/// 转录单独一份超时，不跟上面那 15 分钟共用。
+///
+/// 其余处理器处理的是「一张图」「一段抽帧」，15 分钟已经是「它卡住了」的可靠信号；转录不是——
+/// 它的耗时随音频时长线性增长，实测 **1.70 倍实时**（109.9 秒音频跑 187 秒）。按 `derivatives/audio`
+/// 下现存的 195 条算，最长一条 7.23 分钟，约 12.3 分钟跑完，15 分钟只剩两成余量；机器上有别的活时
+/// 就不够。
+///
+/// 取 30 分钟：对已见过的最长视频留 **2.4 倍余量**。**边界说在明处**——按这个倍率，
+/// 超过约 17.6 分钟的音频会撞上它。真出现那么长的视频，要改的是这里，不是让它静默失败。
+///
+/// 代价：并发闸把 asr 限成同时 1 条，所以真卡住时，asr 这一路会被占住 30 分钟。
+const ASR_PROCESS_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+
+/// 转录的开场提示，只为了让输出落到简体。
+///
+/// **whisper 的中文输出默认是繁体**——它的中文训练语料以繁体为主，不给提示就一路吐繁体。
+/// 2026-09-16 用同一段 110 秒中文音频量过：不给提示得 78 个繁体专有字（家長、分鐘、從、說、
+/// 變……），给这一句得 **0 个**。这正是 Mog 报的「繁体字」，与 OCR 那边是同一类症状、不同的
+/// 成因：OCR 是语言表里多带了 `chi_tra`，转录是模型本身的默认。
+///
+/// 只加提示、**不加 `--language zh`**：实测两者产出一字不差（都是 1888 字节），而强制语种
+/// 会让一段英文音频被硬当成中文转写，提示则保留了 whisper 自己的语种判断。
+///
+/// 提示本身不进入结果，只是解码的起点。
+const ASR_INITIAL_PROMPT: &str = "以下是普通话的句子。";
+
+/// Tesseract 的识别语言与分页方式。两处调用（单图、视频抽帧）共用一份。
+///
+/// **`chi_tra` 不能加回来。**原先写作 `chi_sim+chi_tra+eng`，理由是「万一是繁体」；实际效果
+/// 是 Tesseract 会**按区域自己挑一种**，于是一张简体封面被逐行拆成简繁混排——同一张图上
+/// 「家长」和「家長」并存。2026-09-16 在生产数据上量过：441 条 image_ocr 产出含繁体专有字，
+/// 随机 40 条用 `chi_sim+eng` 复跑，**39 条繁体减少、0 条增加**，繁体字总数 222 → 27；
+/// 典型一条 `在進行單位換算時` → `在进行单位换算时`。
+///
+/// **这组数字量的是繁体字数，不是识别准不准，别读成「OCR 变准了」。**换语言表会换掉整段的
+/// 识别结果，不只是把繁体折成简体：抽样里有一张电影海报，加 `chi_tra` 时读出「央視推 / 導演: 李」，
+/// 去掉后读出「RTE / 主演:」，繁体确实少了，但那两处谁也没读对。所以这里能据以说的是
+/// 「繁体串扰消失了」，不是「字认得更多了」。
+///
+/// 代价先说清楚：**内容本身是繁体的图，会被转写成简体**。来源语料是大陆平台，简体的占绝
+/// 大多数，所以这个方向是对的；但 `chi_sim` 本身仍会零星吐繁体（那 27 个字就是），这是改善
+/// 而非根治。真要彻底消掉，得在识别之后加一道繁转简，那是另一次决定。
+///
+/// `--psm 11`（稀疏文本）保持基线取值不动，本包没碰它。**这一条没有量过**：`--psm 6` 在这个
+/// 仓库的历史里从没出现过，本包也没做 6/3/11 的对照，所以不要从这里读出一个「11 更好」的结论。
+const TESSERACT_LANGUAGE_ARGS: [&str; 4] = ["-l", "chi_sim+eng", "--psm", "11"];
 
 #[tokio::main]
 async fn main() {
@@ -46,6 +94,28 @@ async fn main() {
         enabled_processors.join(","),
         TICK_INTERVAL.as_secs()
     );
+    // 认领闸的就绪状态，启动时报一次。
+    //
+    // **不能只把「应该停下来被人看见」写在注释里。** 未迁移或未登记时 `claim` 一律返回
+    // `Ok(None)`，下面的循环把它读成「这一轮没有活」继续转，一行日志都不打——界面照常，
+    // 进程照常，而它永远领不到任何一条。这正是本包要消灭的失败形态，闸门自己不能也这样藏起来。
+    //
+    // 只在启动时报：两个触发条件（迁移没跑、新处理器没登记）都在进程启动那一刻就已经确定，
+    // 而每 tick 都报会把日志淹掉，反而没人看。
+    match read_claim_gate_readiness(&database, &enabled_processors).await {
+        Ok(ClaimGateReadiness::Ready) => {}
+        Ok(ClaimGateReadiness::NotMigrated) => println!(
+            "linggan media worker: the claim-gate table is missing (migration 0088 not applied): \
+             no processor can be claimed, this process will idle forever"
+        ),
+        Ok(ClaimGateReadiness::Unregistered(kinds)) => println!(
+            "linggan media worker: these processors are enabled here but have no concurrency row, \
+             so they will never be claimed: {}",
+            kinds.join(",")
+        ),
+        // 读不出来就交给下面的认领去报错，别在这里制造第二个错误源。
+        Err(_) => {}
+    }
     let mut ticker = tokio::time::interval(TICK_INTERVAL);
     loop {
         ticker.tick().await;
@@ -132,7 +202,7 @@ async fn execute_image_ocr(
     command
         .arg(&input)
         .arg("stdout")
-        .args(["-l", "chi_sim+chi_tra+eng", "--psm", "11"]);
+        .args(TESSERACT_LANGUAGE_ARGS);
     let output = run_command(&mut command, PROCESS_TIMEOUT)?;
     if !output.status.success() {
         return Err(format!(
@@ -256,9 +326,14 @@ async fn execute_asr(
     let input = local_media_root().join(&claim.storage_key);
     ensure_local_input(&input)?;
     let output_dir = local_media_root().join(format!("derivatives/asr/{}", claim.job_ref));
+    // 先清空再建。`first_text_file` 取的是目录里**第一个** txt，所以上一次被超时杀掉留下的
+    // 半截转写，会被这一次当成完整结果读走。此前从没撞上，是因为 whisper 一次都没跑成过；
+    // 换成 medium 之后单条耗时涨到十几分钟、逼近超时，这条路径才真正可达。
+    let _ = std::fs::remove_dir_all(&output_dir);
     std::fs::create_dir_all(&output_dir)
         .map_err(|error| format!("asr_output_directory_failed:{error}"))?;
     let mut command = Command::new(whisper_command());
+    apply_ffmpeg_path(&mut command)?;
     command
         .arg(&input)
         .args([
@@ -269,8 +344,9 @@ async fn execute_asr(
             "--output_dir",
         ])
         .arg(&output_dir)
-        .args(["--fp16", "False"]);
-    require_success(run_command(&mut command, PROCESS_TIMEOUT)?, "asr")?;
+        .args(["--fp16", "False"])
+        .args(["--initial_prompt", ASR_INITIAL_PROMPT]);
+    require_success(run_command(&mut command, ASR_PROCESS_TIMEOUT)?, "asr")?;
     let transcript = first_text_file(&output_dir)?;
     let text = normalize_text(
         &std::fs::read_to_string(&transcript)
@@ -336,7 +412,7 @@ async fn execute_video_frame_ocr(
         tesseract
             .arg(&frame)
             .arg("stdout")
-            .args(["-l", "chi_sim+chi_tra+eng", "--psm", "11"]);
+            .args(TESSERACT_LANGUAGE_ARGS);
         let output = run_command(&mut tesseract, PROCESS_TIMEOUT)?;
         if output.status.success() {
             let text = normalize_text(&String::from_utf8_lossy(&output.stdout));
