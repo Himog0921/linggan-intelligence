@@ -14,8 +14,8 @@ mod fixture;
 
 use fixture::{proof_database, submit_package};
 use linggan_evidence::{
-    admit_media_blob, claim_media_processing_work, ensure_media_processing_work,
-    processor_version_for_kind, requeue_outdated_processor_jobs,
+    MediaProcessingClaimOutcome, admit_media_blob, claim_media_processing_work,
+    ensure_media_processing_work, processor_version_for_kind, requeue_outdated_processor_jobs,
 };
 use linggan_storage_postgres::Database;
 use sqlx::Row;
@@ -257,6 +257,76 @@ async fn seed_media_without_jobs(
     (sha256, slot_key)
 }
 
+/// 造一条**素材从没进过库**的媒体键——生产里那 369 条的形状：槽位与字节都在，素材行不在。
+///
+/// 不能用 `seed_media_without_jobs`：媒体车道按包的 target 调 `ensure_content`，素材行必然跟着
+/// 槽位一起出现（`material_media.rs` 的 `insert` → `material_admission.rs` 的 `ensure_content`）。
+/// 也不能事后把那两行删掉——`linggan_material_content` 与 `linggan_material_media_origin` 都受
+/// 追加式触发器保护（`0004` 的 `linggan_plugin_runtime_forbid_mutation`，BEFORE UPDATE OR DELETE；
+/// 2026-09-17 本用例第一版正是死在这里）。所以这里按 `material_media_postgres.rs` 已有的写法直接
+/// 建槽位与观察行，**不给它素材**：字节可读、槽位在、素材行不在——认领读输入时那条 INNER JOIN
+/// 落空，与生产一模一样。
+async fn seed_media_key_without_its_material(database: &Database, index: usize) -> (String, String) {
+    let content_id = format!("note-requeue-never-admitted-{index}");
+    let slot_key = format!("xhs:{content_id}:image:1");
+    // 槽位与观察行都得挂在一条真实包上（`first_package_ref`／`package_ref` 都是外键）。借一条已有的
+    // 包即可：它记的是「谁先看见了这个键」，与素材有没有入库是两件事——生产里也一样。
+    let package_ref: Uuid = sqlx::query_scalar(
+        "SELECT package_ref FROM linggan_runtime_capture_package ORDER BY accepted_at,package_ref LIMIT 1",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("本用例先造过真实包，这里借得到一条");
+    sqlx::query(
+        "INSERT INTO linggan_media_slot \
+         (slot_key,platform,content_external_id,role,ordinal,first_package_ref) \
+         VALUES($1,'xhs',$2,'image',1,$3)",
+    )
+    .bind(&slot_key)
+    .bind(&content_id)
+    .bind(package_ref)
+    .execute(database.pool())
+    .await
+    .expect("槽位只受追加式约束，可插入");
+    let observation_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_media_observation \
+         (observation_ref,slot_key,package_ref,observed_external_uri,observed_at) \
+         VALUES($1,$2,$3,$4,'2026-08-28T10:00:00Z')",
+    )
+    .bind(observation_ref)
+    .bind(&slot_key)
+    .bind(package_ref)
+    .bind(format!("https://media.example/requeue-legacy-{index}.bin"))
+    .execute(database.pool())
+    .await
+    .expect("观察行只受追加式约束，可插入");
+    let sha256 = format!("{:064x}", index);
+    admit_media_blob(
+        database,
+        observation_ref,
+        &sha256,
+        "application/octet-stream",
+        4096,
+        &format!("blobs/{}/{}", &sha256[..2], sha256),
+    )
+    .await
+    .expect("字节经既有媒体链落库");
+    let content_rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_material_content \
+         WHERE platform='xhs' AND content_external_id=$1",
+    )
+    .bind(&content_id)
+    .fetch_one(database.pool())
+    .await
+    .expect("素材表可读");
+    assert_eq!(
+        content_rows, 0,
+        "这条槽位的素材必须从没进过库，否则用例测的不是目标形状"
+    );
+    (sha256, slot_key)
+}
+
 fn kinds(names: &[&str]) -> Vec<String> {
     names.iter().map(|name| (*name).to_owned()).collect()
 }
@@ -308,11 +378,25 @@ async fn requeue_covers_only_the_outdated_jobs_of_the_named_kinds() {
     let (video_sha, video_slot) = seed_media_without_jobs(&database, 2, "video").await;
     insert_outdated_job(&database, &image_sha, &image_slot, "image_ocr", BASELINE).await;
     insert_outdated_job(&database, &video_sha, &video_slot, "asr", BASELINE).await;
-    insert_outdated_job(&database, &video_sha, &video_slot, "video_frame_ocr", BASELINE).await;
+    insert_outdated_job(
+        &database,
+        &video_sha,
+        &video_slot,
+        "video_frame_ocr",
+        BASELINE,
+    )
+    .await;
     // 行为没变的两类也各放一条旧作业：要点名的类里有一类「本来就没有新版本」，
     // 那一条要在点了名之后**一条都不多**，而不是靠它压根不存在来蒙混过关。
     insert_outdated_job(&database, &image_sha, &image_slot, "thumbnail", BASELINE).await;
-    insert_outdated_job(&database, &video_sha, &video_slot, "audio_extract", BASELINE).await;
+    insert_outdated_job(
+        &database,
+        &video_sha,
+        &video_slot,
+        "audio_extract",
+        BASELINE,
+    )
+    .await;
 
     // 点名的这一类：旧的那条补出一条同键的新版本作业，旧的一条不动。
     let summary = requeue_outdated_processor_jobs(&database, &kinds(&["image_ocr"]), false)
@@ -348,7 +432,10 @@ async fn requeue_covers_only_the_outdated_jobs_of_the_named_kinds() {
     assert_eq!(summary[0].enqueued_jobs, 1);
     assert_eq!(summary[1].enqueued_jobs, 1);
     assert_eq!(jobs_of(&database, "asr", CURRENT).await.len(), 1);
-    assert_eq!(jobs_of(&database, "video_frame_ocr", CURRENT).await.len(), 1);
+    assert_eq!(
+        jobs_of(&database, "video_frame_ocr", CURRENT).await.len(),
+        1
+    );
     assert_eq!(jobs_of(&database, "asr", BASELINE).await.len(), 1);
 
     // 行为没变的两类：目标版本就是它们已经躺着的版本，点了名也一条都排不出来。
@@ -371,8 +458,7 @@ async fn requeue_covers_only_the_outdated_jobs_of_the_named_kinds() {
 async fn requeue_preserves_the_job_keys_and_writes_one_pending_event() {
     let database = proof_database("media_requeue_event").await;
     let (sha256, slot_key) = seed_media_without_jobs(&database, 1, "image").await;
-    let outdated =
-        insert_outdated_job(&database, &sha256, &slot_key, "image_ocr", BASELINE).await;
+    let outdated = insert_outdated_job(&database, &sha256, &slot_key, "image_ocr", BASELINE).await;
 
     let before = jobs_of(&database, "image_ocr", CURRENT).await;
     requeue_outdated_processor_jobs(&database, &kinds(&["image_ocr"]), false)
@@ -441,8 +527,7 @@ async fn requeue_adds_one_job_when_one_key_holds_several_older_versions() {
 async fn requeued_jobs_become_claimable_work() {
     let database = proof_database("media_requeue_claimable").await;
     let (sha256, slot_key) = seed_media_without_jobs(&database, 1, "image").await;
-    let outdated =
-        insert_outdated_job(&database, &sha256, &slot_key, "image_ocr", BASELINE).await;
+    let outdated = insert_outdated_job(&database, &sha256, &slot_key, "image_ocr", BASELINE).await;
     ensure_media_processing_work(&database)
         .await
         .expect("every job becomes runnable work");
@@ -462,14 +547,179 @@ async fn requeued_jobs_become_claimable_work() {
         .await
         .expect("the requeued job becomes runnable work");
 
-    let claim = claim_media_processing_work(&database, Uuid::new_v4(), &kinds(&["image_ocr"]))
+    let claim = match claim_media_processing_work(&database, Uuid::new_v4(), &kinds(&["image_ocr"]))
         .await
         .expect("the claim is readable")
-        .expect("the requeued job is claimable");
+    {
+        MediaProcessingClaimOutcome::Claimed(claim) => claim,
+        other => panic!("the requeued job is claimable: {other:?}"),
+    };
     assert_eq!(claim.job_ref, enqueued);
     assert_eq!(claim.processor_kind, "image_ocr");
     assert_eq!(claim.processor_version, CURRENT);
     assert_eq!(claim.blob_sha256, sha256);
+}
+
+/// 素材已经不在库里的那条作业：**只退它一条**，而且不许堵住后面的人。
+///
+/// 2026-09-17 线上事故的形状。重排出来的 2442 条里有 369 条的素材行不在库里（那批字节的详情
+/// 从未入库：既没有 `content_detail` 包，也没有 `linggan_material_media_origin` 行），它们按
+/// `created_at` 排在队首。而认领读输入用的是 `fetch_one`——一句 `RowNotFound` 打断整个 tick，
+/// 后面 2000 多条谁也领不到，日志里只留下一行 `claim failed`。
+///
+/// 这条用例把当时的两件事一起钉住：队首那条要**退休**（状态、理由、事件三处都留痕，且不伪造
+/// 尝试次数），它后面那条照样领得到。
+///
+/// 素材不在的那条按生产的样子**造**（`seed_media_key_without_its_material`）：素材行从没建过，
+/// 不是建了再删——那两行受追加式触发器保护，删不掉，生产里也没发生过删除。
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn a_requeued_job_without_its_material_is_retired_without_blocking_the_queue() {
+    let database = proof_database("media_requeue_missing_material").await;
+    let (healthy_sha, healthy_slot) = seed_media_without_jobs(&database, 2, "image").await;
+    let (missing_sha, missing_slot) =
+        seed_media_key_without_its_material(&database, 1).await;
+    let missing_v1 = insert_outdated_job(
+        &database,
+        &missing_sha,
+        &missing_slot,
+        "image_ocr",
+        BASELINE,
+    )
+    .await;
+    let healthy_v1 = insert_outdated_job(
+        &database,
+        &healthy_sha,
+        &healthy_slot,
+        "image_ocr",
+        BASELINE,
+    )
+    .await;
+    let before = jobs_of(&database, "image_ocr", CURRENT).await;
+    let summary = requeue_outdated_processor_jobs(&database, &kinds(&["image_ocr"]), false)
+        .await
+        .expect("the named kind is registered");
+    assert_eq!(
+        summary[0].enqueued_jobs, 2,
+        "两条存量各排出一条当前版本作业"
+    );
+    ensure_media_processing_work(&database)
+        .await
+        .expect("every job becomes runnable work");
+    // 存量在库里的样子：两条旧作业都已经做过了（生产那边 738 条 v1 全是 completed）。
+    mark_work_completed(&database, missing_v1).await;
+    mark_work_completed(&database, healthy_v1).await;
+
+    // 认出新排出来的两条，按槽位分开——一条的素材不在库里，一条正常。
+    let mut missing_job = None;
+    let mut healthy_job = None;
+    for job_ref in jobs_of(&database, "image_ocr", CURRENT).await {
+        if before.contains(&job_ref) {
+            continue;
+        }
+        let slot_key = job_row(&database, job_ref).await.1;
+        if slot_key.as_deref() == Some(missing_slot.as_str()) {
+            missing_job = Some(job_ref);
+        } else {
+            healthy_job = Some(job_ref);
+        }
+    }
+    let missing_job = missing_job.expect("重排给素材不在库里的那个槽位也排了一条");
+    let healthy_job = healthy_job.expect("重排给正常的槽位也排了一条");
+
+    // 形状自检：这条作业的**输入确实读不出来**了。判据与 `claim_media_processing_work` 里那句读
+    // 逐字同形（同样的三处 INNER JOIN），刻意重写一遍——用例要能独立发现生产那边换了口径。
+    // 少了这条断言，后面那个「退休」可能因为别的原因变绿。
+    let readable: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_media_processing_job job \
+         JOIN linggan_media_blob blob ON blob.sha256=job.blob_sha256 \
+         JOIN linggan_media_slot slot ON slot.slot_key=job.slot_key \
+         JOIN linggan_material_content content \
+           ON content.platform=slot.platform AND content.content_external_id=slot.content_external_id \
+         WHERE job.job_ref=$1",
+    )
+    .bind(missing_job)
+    .fetch_one(database.pool())
+    .await
+    .expect("输入可读性是能查的");
+    assert_eq!(
+        readable, 0,
+        "这条作业的输入必须真的读不出来，否则用例测的不是目标形状"
+    );
+
+    // 排队顺序：素材不在的那条排在前面（生产里正是它堵在队首）。
+    sqlx::query(
+        "UPDATE linggan_media_processing_work SET next_attempt_at=scope_001_now()-interval '1 hour' \
+         WHERE job_ref=$1",
+    )
+    .bind(missing_job)
+    .execute(database.pool())
+    .await
+    .expect("排队时间是可变控制状态");
+
+    let outcome = claim_media_processing_work(&database, Uuid::new_v4(), &kinds(&["image_ocr"]))
+        .await
+        .expect("读不出输入的作业不是错误，是一次正常结局");
+    match outcome {
+        MediaProcessingClaimOutcome::Retired {
+            job_ref,
+            processor_kind,
+            reason,
+        } => {
+            assert_eq!(job_ref, missing_job, "退休的必须是队首那条");
+            assert_eq!(processor_kind, "image_ocr");
+            assert_eq!(reason, "source_material_missing");
+        }
+        other => panic!("素材不在的作业应当当场退休，而不是 {other:?}"),
+    }
+
+    // 三处留痕：控制行、理由、事件。没有尝试过，就不许把 attempt_count 写成 3（表的 CHECK 也这么要求）。
+    let work = sqlx::query(
+        "SELECT state,last_error,attempt_count,claim_generation,completed_at IS NOT NULL AS closed \
+         FROM linggan_media_processing_work WHERE job_ref=$1",
+    )
+    .bind(missing_job)
+    .fetch_one(database.pool())
+    .await
+    .expect("the work row is readable");
+    assert_eq!(work.get::<String, _>("state"), "not_applicable");
+    assert_eq!(
+        work.get::<Option<String>, _>("last_error").as_deref(),
+        Some("source_material_missing")
+    );
+    assert_eq!(work.get::<i32, _>("attempt_count"), 0, "一次都没试过");
+    assert_eq!(work.get::<i32, _>("claim_generation"), 0, "没有发出过租约");
+    assert!(work.get::<bool, _>("closed"), "退休必须记下结束时刻");
+    assert_eq!(
+        event_rows(&database, missing_job).await,
+        vec![
+            ("pending".to_owned(), Some(REQUEUE_REASON.to_owned())),
+            (
+                "invalidated".to_owned(),
+                Some("source_material_missing".to_owned())
+            ),
+        ],
+        "事件流里要留下退休的理由，而不是安静地消失"
+    );
+
+    // 关键的一半：后面那条**没有**被连坐。
+    let healthy_state: String =
+        sqlx::query_scalar("SELECT state FROM linggan_media_processing_work WHERE job_ref=$1")
+            .bind(healthy_job)
+            .fetch_one(database.pool())
+            .await
+            .expect("the healthy work row is readable");
+    assert_eq!(healthy_state, "pending", "退休只退它自己那条");
+
+    let claim = match claim_media_processing_work(&database, Uuid::new_v4(), &kinds(&["image_ocr"]))
+        .await
+        .expect("the claim is readable")
+    {
+        MediaProcessingClaimOutcome::Claimed(claim) => claim,
+        other => panic!("队首退休之后，下一条应当照常领得到：{other:?}"),
+    };
+    assert_eq!(claim.job_ref, healthy_job);
+    assert_eq!(claim.blob_sha256, healthy_sha);
 }
 
 /// 预演是「真的做一遍再撤回」：报的条数与真做一致，库里一条不留。

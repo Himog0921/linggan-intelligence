@@ -33,7 +33,7 @@ mod fixture;
 
 use fixture::{proof_database, submit_package};
 use linggan_evidence::{
-    ClaimGateReadiness, admit_media_blob, claim_media_processing_work,
+    ClaimGateReadiness, MediaProcessingClaimOutcome, admit_media_blob, claim_media_processing_work,
     ensure_media_processing_work, read_claim_gate_readiness,
 };
 use linggan_storage_postgres::Database;
@@ -157,7 +157,10 @@ async fn claiming_waits_on_the_shared_gate_lock() {
         .await
         .expect("the claim task joins")
         .expect("the claim attempt answers");
-    assert!(claimed.is_some(), "锁放掉之后认领应当正常完成");
+    assert!(
+        matches!(claimed, MediaProcessingClaimOutcome::Claimed(_)),
+        "锁放掉之后认领应当正常完成：{claimed:?}"
+    );
 }
 
 /// 名额满了就不再发第二条租约。
@@ -170,14 +173,20 @@ async fn a_full_processor_kind_issues_no_second_lease() {
     let first = claim_media_processing_work(&database, Uuid::new_v4(), &image_ocr())
         .await
         .expect("a claim attempt answers");
-    assert!(first.is_some(), "空的时候应当领得到");
+    assert!(
+        matches!(first, MediaProcessingClaimOutcome::Claimed(_)),
+        "空的时候应当领得到：{first:?}"
+    );
     assert_eq!(leased_count(&database, "image_ocr").await, 1);
 
     // 名额被别人占着时，后来者拿不到——不是排队，是这一次就没有。
     let second = claim_media_processing_work(&database, Uuid::new_v4(), &image_ocr())
         .await
         .expect("a claim attempt answers");
-    assert!(second.is_none(), "上限已满时不该发出第二条 image_ocr 租约");
+    assert!(
+        matches!(second, MediaProcessingClaimOutcome::Idle),
+        "上限已满时不该发出第二条 image_ocr 租约：{second:?}"
+    );
     assert_eq!(
         leased_count(&database, "image_ocr").await,
         1,
@@ -190,8 +199,8 @@ async fn a_full_processor_kind_issues_no_second_lease() {
             .await
             .expect("a claim attempt answers");
     assert!(
-        thumbnail.is_some(),
-        "thumbnail 自己的名额是空的，不该被 image_ocr 挡住"
+        matches!(thumbnail, MediaProcessingClaimOutcome::Claimed(_)),
+        "thumbnail 自己的名额是空的，不该被 image_ocr 挡住：{thumbnail:?}"
     );
 }
 
@@ -255,7 +264,10 @@ async fn an_unregistered_processor_kind_is_never_claimable() {
     let before = claim_media_processing_work(&database, Uuid::new_v4(), &image_ocr())
         .await
         .expect("a claim attempt answers");
-    assert!(before.is_some(), "登记着的时候应当领得到");
+    assert!(
+        matches!(before, MediaProcessingClaimOutcome::Claimed(_)),
+        "登记着的时候应当领得到：{before:?}"
+    );
 
     sqlx::query(
         "DELETE FROM linggan_media_processing_concurrency WHERE processor_kind='image_ocr'",
@@ -276,8 +288,8 @@ async fn an_unregistered_processor_kind_is_never_claimable() {
         .await
         .expect("a claim attempt answers");
     assert!(
-        after.is_none(),
-        "上限表里没有登记的处理器，一条都不该被认领"
+        matches!(after, MediaProcessingClaimOutcome::Idle),
+        "上限表里没有登记的处理器，一条都不该被认领：{after:?}"
     );
 }
 

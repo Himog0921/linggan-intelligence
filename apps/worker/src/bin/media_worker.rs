@@ -4,10 +4,10 @@
 //! already admitted and materialized under `LINGGAN_LOCAL_MEDIA_ROOT`.
 
 use linggan_evidence::{
-    ClaimGateReadiness, MediaProcessingClaim, claim_media_processing_work,
-    complete_media_processing_derivative, complete_media_processing_text,
-    complete_media_processing_without_output, ensure_media_processing_work,
-    fail_media_processing_work, read_claim_gate_readiness,
+    ClaimGateReadiness, MediaProcessingClaim, MediaProcessingClaimOutcome,
+    claim_media_processing_work, complete_media_processing_derivative,
+    complete_media_processing_text, complete_media_processing_without_output,
+    ensure_media_processing_work, fail_media_processing_work, read_claim_gate_readiness,
 };
 use std::path::Path;
 use std::process::Command;
@@ -131,8 +131,20 @@ async fn main() {
             )
             .await
             {
-                Ok(Some(claim)) => claim,
-                Ok(None) => break,
+                Ok(MediaProcessingClaimOutcome::Claimed(claim)) => claim,
+                // 退休也要出声：一条一行，日志里数与库里数对得上。**不能**并进下面的
+                // `Idle` 分支——那样这条永远不会有输入的作业会安静地消失，正是本包要消灭的形态。
+                Ok(MediaProcessingClaimOutcome::Retired {
+                    job_ref,
+                    processor_kind,
+                    reason,
+                }) => {
+                    println!(
+                        "linggan media worker: {processor_kind} {job_ref} -> not_applicable ({reason})"
+                    );
+                    continue;
+                }
+                Ok(MediaProcessingClaimOutcome::Idle) => break,
                 Err(error) => {
                     println!("linggan media worker: claim failed: {error}");
                     break;
