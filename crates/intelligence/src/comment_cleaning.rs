@@ -13,7 +13,6 @@ pub struct CleanComment {
     pub state: String,
     pub reasons: Vec<String>,
 }
-#[cfg(test)]
 impl CleanComment {
     /// Maps one unambiguous retained quote back to the immutable source text.  This remains a
     /// generic cleaner guarantee; V1's Atom admission uses the same offset contract.

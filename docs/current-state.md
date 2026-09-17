@@ -1,7 +1,7 @@
 # 当前状态与事项队列
 
 > 状态: 权威当前
-> 最后核对: 2026-09-14
+> 最后核对: 2026-09-17
 > 适用范围: 当前阶段、事项顺序、阻塞与下一步
 > 事实来源: 本机实际检查、已确认项目边界和完成计划
 > 冲突时以谁为准: 真实运行结果、ACCEPTED ADR 与用户最新确认
@@ -13,7 +13,15 @@
 - 本轮隔离 PostgreSQL 已通过作者归属、删除控制历史、阻止删除保护事实及名称确认等新增证明，并修正了四处旧测试夹具/断言，使其符合现有的 200 篇渐进建档、工单重排、租约历史与人可读北京时间合同。完整 LOCAL-001 脚本已通过，且其临时数据库、容器和卷均已清理；该结论仍只是候选源码证明，不代表共享迁移、PR 合并、运行时切换或真实采集。
 
 
-### COMMENT-RESEARCH-V1-REAL-CLOSURE-001 / Issue #254（P0 已合并、runtime 已切换；首轮真实研究与业务验收待执行）
+### COMMENT-STUDY-REBUILD-001 / Issue #295（受保护工作树；新合同实现中，未进入运行库）
+
+Mog 于 2026-09-16 明确决定不迁移任何旧评论研究派生结果，并要求不保留旧 V1/V2/V3 代码路径、合同或兼容层。当前唯一权威是 [DEC-0006](decisions/0006-comment-research-clean-rebuild.md) 和 [COMMENT-STUDY-REBUILD-001](plans/active/comment-research-rebuild-001.md)：领域 ADHD 是组织范围，用户选择笔记，评论是研究目标与唯一 Signal 原声证据，标题／正文／OCR／ASR 和确知父评论只作为可追溯语境。开发期本机 reset 已执行，仅删除评论研究派生层，保留原始 Evidence、资格事实与媒体 disposition；真实模型调用、共享 migration、runtime 切换、3000 刷新、合并和业务验收仍未发生。
+
+已在 `codex/comment-research-rebuild-001` 的专属 worktree 建立新 schema/reset guard、ADHD/as-of/restriction/withdrawn-media source gate、用户选笔记的 repeatable-read Run 冻结，以及评论原声 span/Frame basis 的原子 semantic acceptance。同篇评论现在可冻结为 batch：输入 manifest 固定 work context 和每个 target，输出必须按 targetRef 返回；局部合法结果已可独立写入 Signal，遗漏 target 生成有界 rejected attempt 并回到 queued，不能被伪装为 no_signal 或拖垮同批合法结果。batch 先以短事务领取带 token 的 lease、在发送前重核来源资格；来源冻结后被限制则取消 batch 而不外发正文。每个已租 batch 至多预留一个不含评论正文/提示词的通用调用账本收据；重复预留复用同一收据，接纳的 semantic attempt 指回它，正常接纳、合同拒绝和 lease 过期都会终态写回账本。长期 Problem 现以服务端封存候选集、逐候选固定维度比较、单一明确匹配才建立 membership 的方式落地；无匹配保持 `deferred_novel`，只有不同作者的两条独立评论均已无匹配并提出带 include/exclude 边界的共同定义时才可建档。真实 Pi adapter 已接入 semantic、resolution 和 pair 三种受限输出合同；候选召回使用结构化 PostgreSQL FTS；新 API/UI 已提供受控 policy 保存、ADHD 作品选择与不外发的 StudyRun 创建。旧评论研究 Rust/API/UI/worker 和旧向量设置入口均已从活跃源码移除。隔离 PostgreSQL proof 已通过；真实模型调用和运行时/3000 发布仍待后续授权。
+
+**下列 COMMENT-RESEARCH-V1/V2 段落仅记录历史运行和设计沿革，不再定义当前评论研究实现、运行或验收范围。**
+
+### COMMENT-RESEARCH-V1-REAL-CLOSURE-001 / Issue #254（历史运行记录；已被 COMMENT-STUDY-REBUILD-001 取代）
 
 Mog 已授权只重置评论研究派生层：Run、RunItem、Atom、向量空间/向量、Problem/Definition/Membership/Resolution、ResultRevision 和变化投影可以清空；Raw Comment、作品/父评论上下文、作者归属、来源限制、模型连接/配置、WeMM profile、active policy 与通用 ModelInvocation 账本必须保留。本项新增同一研究指纹下的有效结论复用、取消项恢复和局部 Atom 接纳，避免历史 Run 存在即永久阻断新研究。2026-09-14 的输入合同核查确认：父评论曾只以 ref/hash 进入审计 manifest、未进入模型语义输入；P0 已将清洗后的可读父正文冻结为一层 `parentResearchText`，并把父评论应存在却不可读的情况以不调用模型的 `context_insufficient_parent_unavailable` 保留，不能压成 `no_signal`。PR #277 已合并为 `af2ad164f8fb01de2e3b13abc241bfa0a4c5d221`；受控安装已完成 worker drain、v2 派生预热与三个服务刷新，v1/v2 均为 1,643 条 Derivation、1,248 条可读普通用户原声，`:3000/health` READY、原声 API total=1,248、运行记录页 HTTP 200。预热不保存 policy、不建 Run、不调用 provider；连续自动排程仍关闭。作品级全文/摘要尚无稳定且用途合格的合同，未纳入本次实现；受控首轮 Run、published ResultRevision、浏览器人工验收与 Mog 业务判断仍分别待证。
 

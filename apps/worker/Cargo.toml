@@ -19,12 +19,7 @@ name = "linggan-media-worker"
 path = "src/bin/media_worker.rs"
 
 [[bin]]
-name = "linggan-comment-worker"
-path = "src/bin/comment_worker.rs"
-
-[[bin]]
 name = "linggan-media-requeue"
 path = "src/bin/media_requeue.rs"
-
 [lints]
 workspace = true

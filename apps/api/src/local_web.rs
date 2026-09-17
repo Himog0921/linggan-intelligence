@@ -3,10 +3,7 @@ mod collection_dispatch;
 mod collection_intake;
 mod collection_targets_view;
 mod collection_tasks_view;
-mod comment_research;
-#[cfg(test)]
-#[path = "../../../crates/evidence/tests/support/material_fixture.rs"]
-mod comment_research_api_fixture;
+mod comment_study;
 mod creator_lifecycle_api;
 #[cfg(test)]
 mod creator_lifecycle_tests;
@@ -327,7 +324,7 @@ fn router(state: LocalWebState) -> Router {
         .merge(collection_api_routes())
         .merge(creator_lifecycle_api::routes())
         .merge(topic_workspace::routes())
-        .merge(comment_research::routes())
+        .merge(comment_study::routes())
         .merge(model_settings::routes())
         .route("/corpus", get(corpus_entry))
         .route("/corpus/evidence", get(evidence_library))
@@ -441,7 +438,7 @@ fn material_api_routes() -> Router<LocalWebState> {
         .route(
             "/api/local/work-resources/{public_ref}/comments",
             get(material_projection::research_comments_json).layer(axum::middleware::from_fn(
-                comment_research::local_research_guard,
+                comment_study::local_comment_study_guard,
             )),
         )
         .route(

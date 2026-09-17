@@ -1,6 +1,6 @@
 //! Browser-safe model configuration projection for the V1 research setup.
 
-use crate::{embedding_settings, model_settings::*};
+use crate::model_settings::*;
 use linggan_storage_postgres::Database;
 use serde_json::{Value, json};
 use sqlx::{Row, postgres::PgRow};
@@ -21,7 +21,6 @@ pub async fn read_model_settings(
         connections,
         models,
         configuration,
-        embedding_settings::read(database).await?,
         invocations,
         synthetic,
     ))
@@ -119,7 +118,6 @@ fn model_settings_projection(
     connections: Vec<PgRow>,
     models: Vec<PgRow>,
     configuration: Option<Value>,
-    embedding: Value,
     invocations: Vec<PgRow>,
     synthetic: bool,
 ) -> Value {
@@ -157,7 +155,6 @@ fn model_settings_projection(
             "test": row.get::<Option<Value>, _>("test")
         })).collect::<Vec<_>>(),
         "config": configuration,
-        "embedding": embedding,
         "invocations": invocations.iter().map(|row| json!({
             "invocationRef": row.get::<Uuid, _>("invocation_ref"),
             "operation": row.get::<String, _>("operation"),

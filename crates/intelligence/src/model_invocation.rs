@@ -1,8 +1,7 @@
-//! Generic provider invocation ledger used by the V1 comment-research executor.
+//! Generic provider invocation ledger used by explicit model executors.
 //! Invocation receipts deliberately retain transport and usage facts, not source text.
 
 use crate::{
-    comment_research_atoms::SemanticExtractionOutput,
     model_secrets::ModelSecretStore,
     model_settings::*,
     pi_adapter::{PI_PROTOCOL, PiAdapter, PiRequest, PiResponse, safe_result},
@@ -96,7 +95,7 @@ pub async fn probe_model(
             "version": request.connection_version_ref,
             "model": request.model_ref,
             "operation": request.operation,
-            "contract": "comment-research.v1.semantic"
+            "contract": "comment-study.note-batch.v1"
         })
         .to_string(),
     );
@@ -136,17 +135,19 @@ pub async fn probe_model(
                         .text
                         .as_deref()
                         .and_then(|text| {
-                            serde_json::from_str::<SemanticExtractionOutput>(text).ok()
+                            serde_json::from_str::<Value>(text)
+                                .ok()
+                                .filter(Value::is_object)
                         })
                         .is_some();
                 result["modelCallable"] =
                     json!(response.ok || response.failure_code.as_deref() == Some("output_limit"));
                 result["semanticQualified"] = json!(semantic_qualified);
-                result["semanticContract"] = json!("comment-research.v1.semantic");
+                result["semanticContract"] = json!("comment-study.note-batch.v1");
                 result["validationCode"] = json!(if semantic_qualified {
                     Value::Null
                 } else {
-                    Value::String("v1_semantic_output_invalid".into())
+                    Value::String("comment_study_output_invalid".into())
                 });
             }
             result

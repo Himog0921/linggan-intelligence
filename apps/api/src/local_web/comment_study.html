@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>评论研究</title>
+  <link rel="stylesheet" href="/assets/comment-study.css">
+</head>
+<body>
+  <div class="app-shell">
+    {{HEADER}}
+    <div class="workspace">
+      {{SIDE_NAV}}
+      <main class="study-main">
+        <section class="study-hero">
+          <p class="eyebrow">COMMENT STUDY · ADHD</p>
+          <h1>评论研究</h1>
+          <p>从原始评论中创建一次可追溯的 StudyRun。系统只会研究你勾选的作品；保存策略和创建运行都不会自动调用模型。</p>
+          <p class="connection">本机数据库：{{DATABASE_STATE}}</p>
+        </section>
+        <section class="study-setup" aria-labelledby="setup-title">
+          <div class="section-heading">
+            <div><p class="eyebrow">受控启动</p><h2 id="setup-title">创建一次研究</h2></div>
+            <p id="setup-status" class="muted" role="status">正在读取可用模型与作品…</p>
+          </div>
+          <form id="policy-form" class="policy-form">
+            <label>模型配置<select id="model-config" required disabled><option>正在读取…</option></select></label>
+            <label>本次最多评论数<input id="comment-budget" type="number" min="1" max="3000" value="100" required></label>
+            <label>单作品语境字符上限<input id="context-character-budget" type="number" min="1" max="20000" value="6000" required></label>
+            <button id="save-policy" type="submit" disabled>保存 Study policy</button>
+          </form>
+          <p class="form-hint">策略只决定本次和后续运行的模型与上限；只有点击“创建 StudyRun”后，才会冻结选中作品当前符合条件的评论。</p>
+          <div class="work-picker">
+            <div class="work-picker-heading">
+              <div><h3>选择要研究的 ADHD 作品</h3><p class="muted">仅列出当前有可研究评论的作品，最多选择 100 篇。</p></div>
+              <span id="selected-count" class="selection-count">已选择 0 篇</span>
+            </div>
+            <div id="works" class="works" aria-live="polite"><p class="muted">正在读取作品…</p></div>
+            <div class="run-actions"><button id="start-run" type="button" disabled>创建 StudyRun（不调用模型）</button><p id="run-result" class="muted" role="status"></p></div>
+          </div>
+        </section>
+        <section class="study-states" id="states" aria-live="polite"><p>正在读取新研究链路…</p></section>
+        <section class="study-grid">
+          <article><h2>最近运行</h2><div id="runs"></div></article>
+          <article><h2>问题信号</h2><div id="signals"></div></article>
+          <article><h2>长期 Problem</h2><div id="problems"></div></article>
+        </section>
+      </main>
+    </div>
+  </div>
+  <script src="/assets/comment-study.js"></script>
+</body>
+</html>
