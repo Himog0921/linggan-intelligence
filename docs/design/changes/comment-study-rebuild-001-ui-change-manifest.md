@@ -120,3 +120,54 @@
 | 窄屏 | 可自然滚动，不用桌面嵌套滚动困住表格 | 390px 浏览器走查 |
 
 本补充不把浏览器截图、构建、提交、合并、3000 刷新或 Mog 验收预先写成完成事实。
+
+## COMMENT-STUDY-TABS-001 补充（2026-09-17）
+
+### 1. 事项与读取回执
+
+- Issue / SCOPE: Issue #295 / COMMENT-STUDY-TABS-001；属于既有 COMMENT-RESEARCH-REBUILD-001。
+- Agent / branch / worktree: `codex/comment-study-tabs-001` /
+  `/Users/moglenny/proma/linggan-intelligence/.worktrees/comment-study-tabs-001`。
+- exact base: `origin/main@8b3efb9d60ed61cb54ed1bdc90cefacb916dbd35`（含 COMMENT-STUDY-LAYOUT-001）。
+- 触发: Mog 合并部署 COMMENT-STUDY-LAYOUT-001 后发现历史用户原声、运行情况和运行结果均不可见。
+  核查确认这是 COMMENT-STUDY-REBUILD-001 本身遗留的实现缺口——本节 §1「已批准组合」列出的 5 个
+  Tab（概览、评论目标、待归并、用户问题、运行记录）当时只完成只读 API，从未在页面上实现。
+- 用户可见目标: 把已批准的 5 个 Tab 实现出来；「评论目标」Tab 新增对原始评论正文的读取（此前只读
+  API 完全没有暴露 `commentText`）。
+- 明确非目标: 不改 shell、Token、StudyRun/Policy/Batch 写入路径、迁移、worker、模型调用、runtime
+  或部署；不新增分页控件；不重新设计已批准的信息架构本身。
+
+| 来源 | 状态 | 本次解决的问题 | 已核对 |
+|---|---|---|---|
+| PAGE-COMMENT-STUDY-REBUILD-001 §4 已批准组合 | 已读 | 5 个 Tab 与原声列的既定设计 | 2026-09-17 |
+| 本文件 §1「已批准组合」/§4「表面、状态、依赖与边界」 | 已读 | 每个 Tab 必须显示/禁止显示的具体字段 | 2026-09-17 |
+| `comment_study_read.rs`（既有只读 API） | 已读 | `overview`/`runs`/`targets`/`signals`/`problems` 已有字段与 `runRef` 依赖 | 2026-09-17 |
+| `comment_study_source.rs` 的来源资格判定 | 已读 | 读取原文时如何安全核对当前限制状态的既有写法 | 2026-09-17 |
+| 旧 `comment_research_read_v1.rs::read_voices`（已退役，仅作只读参考） | 已读 | 旧版如何把原文与限制状态绑定；不复用其表或路由 | 2026-09-17 |
+| LIDS `ADR-11` 文字 Tab primitive | 已读 | 选中态只用字重 + 3px 信号线，不用分段控件 | 2026-09-17 |
+
+### 2. 表面、状态、依赖与验收
+
+- 分类: 混合；最高风险为读取新字段时的敏感数据边界（原始评论正文）。
+- Pattern: L1 Corpus Explorer；复用既有 `.study-table` 家族与文字 Tab primitive，不新建 CMP、Scene
+  或 Token。原声使用既有 `--lgi-font-evidence` Serif 呈现。
+- exclusive files: `comment_study.html`、`comment_study.css`、`comment_study.js`、
+  `comment_study.rs`（页面静态测试）、`comment_study_read.rs`、
+  `comment_study_rebuild_postgres.rs`、本页验收记录、LIDS log、索引与 2026-09 progress。
+- shared files: 无新增；`comment_study_read.rs` 是既有只读投影文件的追加字段，不改变既有字段语义。
+  forbidden: `shell.rs`、`shell.css`、LIDS token、StudyRun/Policy/Batch 的写入合同、migration、
+  worker、runtime/deployment 脚本。
+- 停止条件: 若某个 Tab 需要的事实在当前 `linggan_comment_study_*` schema 中不存在，该 Tab 必须显示
+  为未知/不可读，不得在前端补造；若读取原文需要新的迁移或改变现有限制判定的语义，即停止并报告。
+
+| 表面 / 状态 | 必须保持的用户含义 | 明确不显示 | 自动或人工验收 |
+|---|---|---|---|
+| 评论目标 · 原声 | 当前仍可读的原始评论文字 | 已被限制或未知来源的原文（即使冻结时曾经可读） | Rust 页面静态断言 + 隔离 PostgreSQL 限制前后对比 |
+| 评论目标 · 处理状态 | `target.state`/`contextState`/Signal 数的真实取值与中文含义 | 把 `excluded` 说成失败，或把 `no_signal` 说成缺输出 | 页面静态断言 |
+| 待归并 | 仅 `resolutionState` 为空或 `pending`/`deferred_context`/`deferred_ambiguous`/`deferred_novel` 的 Signal | 已 `assigned`、`not_user_problem`、`protocol_rejected`、`failed` 的 Signal 混入；来源被限制后继续引用其 `evidence`（逐字子串）/`proposition`（摘要） | 页面静态断言（口径断言，非渲染像素）+ 隔离 PostgreSQL 限制前后对比（提交前审核发现原漏做此项核对，已修） |
+| 用户问题 | 既有 Problem 定义、纳入/排除条件、关联 Signal 数、`active`/`retired` | 伪造规模或跨 Problem 的相似度合并 | 页面静态断言 |
+| 运行记录 | 每次运行的作品/目标/逐状态计数完整表格 | 把「已产出」暗示成语义质量已验证 | 页面静态断言 |
+| 窄屏 | 复核表格保留横向滚动（数据列多，不同于顶部 3 列作品表） | 强制纵向嵌套滚动困住整页 | 待浏览器走查（本轮尚未完成，见验收记录） |
+
+本补充不把静态测试、隔离 PostgreSQL 证明、编译通过、构建、提交、合并、3000 刷新或 Mog 验收预先
+写成完成事实；实际证据边界见 [验收记录](../acceptance/comment-study-tabs-001-acceptance.md)。

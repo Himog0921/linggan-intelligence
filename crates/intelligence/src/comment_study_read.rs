@@ -179,12 +179,17 @@ pub async fn read_targets(
         "SELECT target.target_ref,target.source_ref,target.parent_source_ref,target.research_text, \
                 target.dependency_state,target.state,target.exclusion_reason,target.created_at::text AS created_at, \
                 work.context_state,work.content_public_ref, \
+                comment.body_text,comment.body_state, \
+                EXISTS(SELECT 1 FROM linggan_material_comment_restriction restriction \
+                  WHERE restriction.content_public_ref=comment.content_public_ref \
+                    AND restriction.comment_external_id=comment.comment_external_id) AS source_restricted, \
                 (SELECT count(*) FROM linggan_comment_study_signal signal WHERE signal.target_ref=target.target_ref) AS signal_count, \
                 (SELECT resolution.state FROM linggan_comment_study_resolution resolution \
                    JOIN linggan_comment_study_signal signal USING(signal_ref) \
                    WHERE signal.target_ref=target.target_ref ORDER BY resolution.created_at DESC LIMIT 1) AS resolution_state \
          FROM linggan_comment_study_target target \
          JOIN linggan_comment_study_work work ON work.run_ref=target.run_ref AND work.content_public_ref=target.content_public_ref \
+         JOIN linggan_material_comment comment ON comment.material_ref=target.source_ref \
          WHERE target.run_ref=$1 ORDER BY target.created_at,target.target_ref LIMIT $2",
     )
     .bind(run_ref)
@@ -193,14 +198,26 @@ pub async fn read_targets(
     .await?;
     Ok(json!({
         "contract":"comment-study.read.v1","runRef":run_ref,
-        "targets":rows.into_iter().map(|row| json!({
+        "targets":rows.into_iter().map(|row| {
+            let restricted: bool = row.get("source_restricted");
+            let body_state: String = row.get("body_state");
+            let body_text: Option<String> = row.get("body_text");
+            let (comment_text, source_state) = if restricted {
+                (None, "restricted")
+            } else if body_state == "KNOWN" {
+                (body_text, "known")
+            } else {
+                (None, "unknown")
+            };
+            json!({
             "targetRef":row.get::<Uuid,_>("target_ref"),"sourceRef":row.get::<Uuid,_>("source_ref"),
             "parentSourceRef":row.get::<Option<Uuid>,_>("parent_source_ref"),"workRef":row.get::<Uuid,_>("content_public_ref"),
+            "commentText":comment_text,"sourceState":source_state,
             "researchText":row.get::<String,_>("research_text"),"dependencyState":row.get::<String,_>("dependency_state"),
             "contextState":row.get::<String,_>("context_state"),"state":row.get::<String,_>("state"),
             "exclusionReason":row.get::<Option<String>,_>("exclusion_reason"),"signalCount":row.get::<i64,_>("signal_count"),
             "resolutionState":row.get::<Option<String>,_>("resolution_state"),"createdAt":row.get::<String,_>("created_at")
-        })).collect::<Vec<_>>()
+        })}).collect::<Vec<_>>()
     }))
 }
 
@@ -215,9 +232,13 @@ pub async fn read_signals(
         "SELECT signal.signal_ref,signal.target_ref,signal.kind,signal.proposition,signal.evidence, \
                 signal.problem_frame,signal.eligibility_state,signal.eligibility_reason,signal.created_at::text AS created_at, \
                 resolution.resolution_ref,resolution.state AS resolution_state,resolution.resolved_problem_ref, \
-                membership.membership_ref \
+                membership.membership_ref, \
+                EXISTS(SELECT 1 FROM linggan_material_comment_restriction restriction \
+                  WHERE restriction.content_public_ref=comment.content_public_ref \
+                    AND restriction.comment_external_id=comment.comment_external_id) AS source_restricted \
          FROM linggan_comment_study_signal signal \
          JOIN linggan_comment_study_target target USING(target_ref) \
+         JOIN linggan_material_comment comment ON comment.material_ref=target.source_ref \
          LEFT JOIN linggan_comment_study_resolution resolution USING(signal_ref) \
          LEFT JOIN linggan_comment_study_problem_membership membership USING(signal_ref) \
          WHERE target.run_ref=$1 ORDER BY signal.created_at,signal.signal_ref LIMIT $2",
@@ -228,15 +249,26 @@ pub async fn read_signals(
     .await?;
     Ok(json!({
         "contract":"comment-study.read.v1","runRef":run_ref,
-        "signals":rows.into_iter().map(|row| json!({
+        "signals":rows.into_iter().map(|row| {
+            let restricted: bool = row.get("source_restricted");
+            let source_state = if restricted { "restricted" } else { "known" };
+            let (proposition, evidence) = if restricted {
+                (None, None)
+            } else {
+                (
+                    Some(row.get::<String, _>("proposition")),
+                    Some(row.get::<String, _>("evidence")),
+                )
+            };
+            json!({
             "signalRef":row.get::<Uuid,_>("signal_ref"),"targetRef":row.get::<Uuid,_>("target_ref"),
-            "kind":row.get::<String,_>("kind"),"proposition":row.get::<String,_>("proposition"),
-            "evidence":row.get::<String,_>("evidence"),"problemFrame":row.get::<Option<Value>,_>("problem_frame"),
+            "kind":row.get::<String,_>("kind"),"proposition":proposition,
+            "evidence":evidence,"sourceState":source_state,"problemFrame":row.get::<Option<Value>,_>("problem_frame"),
             "eligibilityState":row.get::<String,_>("eligibility_state"),"eligibilityReason":row.get::<Option<String>,_>("eligibility_reason"),
             "resolutionRef":row.get::<Option<Uuid>,_>("resolution_ref"),"resolutionState":row.get::<Option<String>,_>("resolution_state"),
             "resolvedProblemRef":row.get::<Option<Uuid>,_>("resolved_problem_ref"),"membershipRef":row.get::<Option<Uuid>,_>("membership_ref"),
             "createdAt":row.get::<String,_>("created_at")
-        })).collect::<Vec<_>>()
+        })}).collect::<Vec<_>>()
     }))
 }
 

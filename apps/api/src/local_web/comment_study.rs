@@ -333,4 +333,117 @@ mod tests {
             ".study-table th:first-child,.study-table td:first-child{width:var(--lgi-space-10)}"
         ));
     }
+
+    #[test]
+    fn comment_study_page_offers_the_five_approved_review_tabs_with_no_leftover_mini_readout() {
+        let page = include_str!("comment_study.html");
+        assert!(page.contains("<nav class=\"study-tabs\" aria-label=\"评论研究视图\">"));
+        for view in ["overview", "targets", "pending", "problems", "runs"] {
+            assert!(
+                page.contains(&format!("data-view=\"{view}\"")),
+                "missing tab button for view={view}"
+            );
+        }
+        assert!(page.contains("data-view=\"overview\" aria-current=\"page\""));
+        assert!(page.contains("id=\"study-run-picker\" class=\"study-run-picker\" hidden"));
+        assert!(page.contains("id=\"study-run-select\""));
+        assert!(page.contains("id=\"study-tab-result\""));
+        assert!(!page.contains("study-readouts"));
+        assert!(!page.contains("id=\"states\""));
+    }
+
+    #[test]
+    fn comment_study_script_renders_a_run_scoped_targets_tab_with_original_comment_text() {
+        let script = include_str!("comment_study.js");
+        assert!(script.contains("const RUN_SCOPED_VIEWS = new Set(['targets', 'pending']);"));
+        assert!(script.contains("async function renderTargetsTab()"));
+        assert!(script.contains(
+            "`targets?runRef=${encodeURIComponent(selectedRunRef)}&limit=100`"
+        ));
+        assert!(script.contains("target.commentText"));
+        assert!(script.contains("sourceStateLabel[target.sourceState]"));
+        assert!(script.contains(
+            "restricted: '来源已被限制，原文不再显示', unknown: '原文未知（来源未采集到正文）'"
+        ));
+        assert!(script.contains(
+            "const contextStateLabel = { ready: '语境完整', partial: '语境部分（有截断）', missing: '缺少语境' };"
+        ));
+    }
+
+    #[test]
+    fn comment_study_script_selects_the_newly_created_run_instead_of_keeping_the_old_selection() {
+        let script = include_str!("comment_study.js");
+        let start_run_handler = script
+            .split("document.querySelector('#start-run').addEventListener")
+            .nth(1)
+            .expect("start-run click handler is present");
+        assert!(
+            start_run_handler
+                .find("selectedRunRef = response.runRef;")
+                .is_some_and(|selection_index| {
+                    start_run_handler.find("await loadProjection();")
+                        .is_some_and(|reload_index| selection_index < reload_index)
+                }),
+            "creating a run must select it before reloading the review tabs, otherwise \
+             the targets/pending tabs keep showing the previously selected run"
+        );
+    }
+
+    #[test]
+    fn comment_study_script_filters_pending_signals_by_resolution_state_not_by_kind() {
+        let script = include_str!("comment_study.js");
+        assert!(script.contains(
+            "const PENDING_RESOLUTION_STATES = new Set(['pending', 'deferred_context', 'deferred_ambiguous', 'deferred_novel']);"
+        ));
+        assert!(script.contains(
+            "signal.resolutionState == null || PENDING_RESOLUTION_STATES.has(signal.resolutionState)"
+        ));
+    }
+
+    #[test]
+    fn comment_study_script_hides_signal_evidence_once_its_source_is_restricted() {
+        let script = include_str!("comment_study.js");
+        assert!(
+            script.contains("signal.sourceState === 'restricted'"),
+            "a Signal's evidence is a literal quote of the original comment (see \
+             comment_study_semantic.rs); the pending-merge tab must stop quoting it once the \
+             backend reports the source as restricted, the same way the targets tab already does"
+        );
+        assert!(script.contains("来源已被限制，原声与摘要不再显示"));
+    }
+
+    #[test]
+    fn comment_study_script_discards_a_stale_tab_render_instead_of_overwriting_a_newer_one() {
+        let script = include_str!("comment_study.js");
+        assert!(
+            script.contains("let renderToken = 0;"),
+            "a slow fetch from an abandoned tab/run selection must not be allowed to overwrite \
+             whatever the user switched to in the meantime"
+        );
+        assert!(script.contains("const token = ++renderToken;"));
+        assert!(script.contains("if (token !== renderToken) return;"));
+        for renderer in [
+            "async function renderOverviewTab()",
+            "async function renderTargetsTab()",
+            "async function renderPendingTab()",
+            "async function renderProblemsTab()",
+            "async function renderRunsTab()",
+        ] {
+            assert!(
+                script.contains(renderer),
+                "{renderer} must return its HTML instead of writing to the DOM itself, so the \
+                 generation check in renderActiveTab is the only place allowed to apply it"
+            );
+        }
+    }
+
+    #[test]
+    fn comment_study_stylesheet_uses_the_text_tab_primitive_not_a_segmented_control() {
+        let stylesheet = include_str!("comment_study.css");
+        assert!(stylesheet.contains(
+            ".study-tabs button[aria-current=\"page\"]{border-color:var(--lgi-signal);color:var(--lgi-ink);font-weight:var(--lgi-weight-semibold)}"
+        ));
+        assert!(stylesheet.contains(".study-review-table blockquote{"));
+        assert!(stylesheet.contains("var(--lgi-font-evidence)"));
+    }
 }

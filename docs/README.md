@@ -41,6 +41,7 @@
 | [design/changes/comment-research-reset-001-ui-change-manifest.md](design/changes/comment-research-reset-001-ui-change-manifest.md) | 权威当前；交付分支实现 | 旧评论页面/API/自动计划替代与用户体验验证范围 |
 | [design/changes/comment-study-rebuild-001-ui-change-manifest.md](design/changes/comment-study-rebuild-001-ui-change-manifest.md) | 权威当前；受保护工作树 | 评论研究 clean rebuild 的 API/UI 替换范围、状态词典、依赖与验收矩阵 |
 | [design/acceptance/comment-study-layout-001-acceptance.md](design/acceptance/comment-study-layout-001-acceptance.md) | 一次性报告；候选布局 | Issue #295 初始研究输入面的表格布局、实际 100 篇候选读取与浏览器验证；不代表合并或 3000 刷新 |
+| [design/acceptance/comment-study-tabs-001-acceptance.md](design/acceptance/comment-study-tabs-001-acceptance.md) | 一次性报告；候选实现 | Issue #295 补齐概览/评论目标/待归并/用户问题/运行记录 5 个复核 Tab，含原声受限时如实降级；不代表合并或 3000 刷新 |
 | [design/changes/comment-research-problem-resolution-v2-ui-change-manifest.md](design/changes/comment-research-problem-resolution-v2-ui-change-manifest.md) | 权威当前 | Issue #285 的 confirmed/deferred 问题读取、受限原声边界与只读详情 |
 | [design/acceptance/comment-research-reset-001-acceptance.md](design/acceptance/comment-research-reset-001-acceptance.md) | 一次性验收记录；进行中 | V1 数据库、worker、UI、runtime 与用户验收边界 |
 | [archive/ci-auto-004-comment-auto-research.md](archive/ci-auto-004-comment-auto-research.md) | 历史归档 | 既有 P0–P5 与本机发布证据；其未来语义、聚类、读取和页面路径已被 COMMENT-RESEARCH-RESET-001 替代 |
