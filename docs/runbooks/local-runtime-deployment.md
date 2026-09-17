@@ -1,9 +1,9 @@
 # 本机常驻服务部署手册
 
 > 状态: 权威当前
-> 最后核对: 2026-09-08
+> 最后核对: 2026-09-17
 > 适用范围: 本机三个 launchd 常驻服务（API / 巡检 worker / 媒体 worker）的运行来源、更新方式与故障处置
-> 事实来源: Mog 于 2026-09-03 的明确要求「本地以 `/Users/moglenny/proma/linggan-intelligence` 为准，跟远端同步，不要到处复制」、当前 launchd 配置与实际运行验证
+> 事实来源: Mog 于 2026-09-03 的明确要求「本地以 `/Users/moglenny/proma/linggan-intelligence` 为准，跟远端同步，不要到处复制」、当前 launchd 配置与实际运行验证、2026-09-17 更新入口用旧副本失败的实测（见 §3）
 > 冲突时以谁为准: 实际运行输出与 launchd 当前加载的配置；本手册不授予平台访问或迁移执行权限
 
 ## 1. 唯一的两个目录
@@ -45,6 +45,17 @@ CI-AUTO-004 源码将版本切换改为先等待评论调用落账。以下是�
 ```
 
 `install.sh` 先请求巡检 worker 停止领取新模型任务，等待它将当前调用和用量落账，并核对与 PID 对应的退出回执。成功后才生成绑定起止 revision 的更新许可，再同步、构建并重新加载三个服务。未确认退出时停止更新，不把未知调用费用当作零。
+
+**入口脚本必须来自与 `origin/main` 同步的副本。** 2026-09-17 实测踩过：开发目录停在 `c94a3ec`，那份 `install.sh` 里还留着一段「兼容仍会构建已退休二进制」的补丁（`install.sh:168-177`），`cargo build --bin linggan-comment-worker` 当场报 `no bin target named ...` 并以 101 退出。**失败点在 drain 之后、重启服务之前**——巡检 worker 已被 `bootout` 且没有装回去（`launchctl list | grep linggan` 只剩两个 label），另外两个服务仍是旧进程。它不是「什么都没发生」的失败，而是「停了一个、旧了两个」。
+
+所以更新前先确认入口副本不落后，或者直接用运行目录里那份：
+
+```bash
+git -C ~/Library/Application\ Support/Linggan\ Intelligence/runtime-main log -1 --date=short --format='%h %ad %s'
+~/Library/Application\ Support/Linggan\ Intelligence/runtime-main/scripts/runtime/install.sh
+```
+
+`install.sh:152-159` 对「安装入口就在运行 worktree 里」的幂等场景有显式处理，`install.sh:161-166` 也写明「旧运行目录可能含已退休的二进制，因此从源 checkout 跑目标 revision 的同步器」。无论用哪份入口，跑完必须核对三件事：`launchctl list | grep linggan` 是**三个** label、`git -C $runtime_dir log -1` 等于目标 revision、三个进程的启动时间是刚才而不是上一次部署。
 
 启动时 `scripts/runtime/sync.sh` 依次做：
 
