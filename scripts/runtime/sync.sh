@@ -100,9 +100,9 @@ fi
 # 构建在锁内做一次，三个二进制一起。放在各自的启动脚本里会让三个 cargo 争同一个 target
 # 目录：其中一个正在链接、二进制被临时移除时，另一个恰好 exec 它就会失败。
 log "构建 revision ${current}"
-cargo build --quiet --bin linggan-api --bin linggan-worker --bin linggan-media-worker --bin linggan-comment-worker
+cargo build --quiet --bin linggan-api --bin linggan-worker --bin linggan-media-worker
 
-for binary in linggan-api linggan-worker linggan-media-worker linggan-comment-worker; do
+for binary in linggan-api linggan-worker linggan-media-worker; do
   [[ -x "target/debug/${binary}" ]] || { log "构建后仍找不到 target/debug/${binary}"; exit 1; }
 done
 

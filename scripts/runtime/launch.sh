@@ -37,19 +37,9 @@ export LINGGAN_LOCAL_MEDIA_ROOT="${LINGGAN_SUPPORT_DIR}/media"
 : "${LINGGAN_LOCAL_PORT:=3000}"
 export LINGGAN_LOCAL_PORT
 
-if [[ "$binary" == "linggan-api" ]]; then
-  # Do not expose a derivation-version read contract until its deterministic inputs are ready.
-  # This command has no model/provider path; a bounded failure stops the new API before it binds.
-  ./target/debug/linggan-comment-worker --derive-current
-fi
-
 # Resolve the fixed Node executable independently of launchd PATH.
 : "${LINGGAN_PI_NODE:=$HOME/.nvm/versions/node/v$(cat .nvmrc)/bin/node}"
 export LINGGAN_PI_NODE
 ./scripts/runtime/prepare-pi-adapter.sh --check
-if [[ "$binary" == "linggan-worker" ]]; then
-  # Explicit artifact verification only: no model download or profile mutation during a Run.
-  ./scripts/runtime/prepare-wemm-embedding.sh --check
-fi
 exec "./target/debug/${binary}"
 }
