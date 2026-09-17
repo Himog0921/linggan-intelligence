@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="linggan-intelligence">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -7,43 +7,61 @@
   <link rel="stylesheet" href="/assets/comment-study.css">
 </head>
 <body>
-  <div class="app-shell">
+  <div class="v7-app">
     {{HEADER}}
-    <div class="workspace">
+    <div class="v7-shell">
       {{SIDE_NAV}}
-      <main class="study-main">
-        <section class="study-hero">
-          <p class="eyebrow">COMMENT STUDY · ADHD</p>
-          <h1>评论研究</h1>
-          <p>从原始评论中创建一次可追溯的 StudyRun。系统只会研究你勾选的作品；保存策略和创建运行都不会自动调用模型。</p>
-          <p class="connection">本机数据库：{{DATABASE_STATE}}</p>
-        </section>
-        <section class="study-setup" aria-labelledby="setup-title">
-          <div class="section-heading">
-            <div><p class="eyebrow">受控启动</p><h2 id="setup-title">创建一次研究</h2></div>
-            <p id="setup-status" class="muted" role="status">正在读取可用模型与作品…</p>
+      <main class="study-main" aria-labelledby="comment-study-title">
+        <h1 id="comment-study-title" class="v7-sr-only">评论研究</h1>
+        <section class="study-command" aria-labelledby="setup-title">
+          <div class="study-command-title">
+            <p class="study-label">受控启动</p>
+            <h2 id="setup-title">准备一次研究</h2>
           </div>
           <form id="policy-form" class="policy-form">
             <label>模型配置<select id="model-config" required disabled><option>正在读取…</option></select></label>
             <label>本次最多评论数<input id="comment-budget" type="number" min="1" max="3000" value="100" required></label>
             <label>单作品语境字符上限<input id="context-character-budget" type="number" min="1" max="20000" value="6000" required></label>
-            <button id="save-policy" type="submit" disabled>保存 Study policy</button>
+            <button id="save-policy" type="submit" disabled>保存研究策略</button>
           </form>
-          <p class="form-hint">策略只决定本次和后续运行的模型与上限；只有点击“创建 StudyRun”后，才会冻结选中作品当前符合条件的评论。</p>
-          <div class="work-picker">
-            <div class="work-picker-heading">
-              <div><h3>选择要研究的 ADHD 作品</h3><p class="muted">仅列出当前有可研究评论的作品，最多选择 100 篇。</p></div>
-              <span id="selected-count" class="selection-count">已选择 0 篇</span>
-            </div>
-            <div id="works" class="works" aria-live="polite"><p class="muted">正在读取作品…</p></div>
-            <div class="run-actions"><button id="start-run" type="button" disabled>创建 StudyRun（不调用模型）</button><p id="run-result" class="muted" role="status"></p></div>
+          <div class="study-command-meta">
+            <p id="setup-status" role="status">正在读取可用模型与作品…</p>
+            <p>本机数据库：{{DATABASE_STATE}}</p>
           </div>
         </section>
-        <section class="study-states" id="states" aria-live="polite"><p>正在读取新研究链路…</p></section>
-        <section class="study-grid">
-          <article><h2>最近运行</h2><div id="runs"></div></article>
-          <article><h2>问题信号</h2><div id="signals"></div></article>
-          <article><h2>长期 Problem</h2><div id="problems"></div></article>
+
+        <section class="study-workspace" aria-labelledby="work-picker-title">
+          <header class="study-workspace-header">
+            <div>
+              <p class="study-label">研究输入</p>
+              <h2 id="work-picker-title">选择要研究的 ADHD 作品</h2>
+            </div>
+            <div class="study-workspace-tools">
+              <label class="study-filter">筛选已加载作品<input id="work-filter" type="search" placeholder="按作品标题筛选" autocomplete="off"></label>
+              <span id="selected-count" class="selection-count" role="status">已选择 0 篇</span>
+            </div>
+          </header>
+          <p id="work-filter-status" class="study-table-status" role="status">正在读取可研究作品…</p>
+          <div class="study-table-wrap">
+            <table class="study-table" aria-labelledby="work-picker-title" aria-describedby="work-filter-status">
+              <caption class="v7-sr-only">可选择进入本次评论研究的 ADHD 作品</caption>
+              <thead><tr><th scope="col"><input id="select-visible-works" type="checkbox" aria-label="选择当前筛选结果中的作品"></th><th scope="col">作品</th><th scope="col">可研究评论</th></tr></thead>
+              <tbody id="works" aria-live="polite"><tr><td colspan="3">正在读取作品…</td></tr></tbody>
+            </table>
+          </div>
+          <footer class="study-workspace-footer">
+            <p>只会冻结当前所选作品的可研究评论；创建研究运行不会调用模型。</p>
+            <div class="run-actions"><button id="start-run" type="button" disabled>创建研究运行</button><p id="run-result" role="status"></p></div>
+          </footer>
+        </section>
+
+        <section class="study-readouts" aria-label="当前研究读数">
+          <div id="states" class="study-states" aria-live="polite"><p>正在读取研究状态…</p></div>
+          <div class="study-readout-grid">
+            <section><h2>最近运行</h2><div id="runs"></div></section>
+            <section><h2>问题信号</h2><div id="signals"></div></section>
+            <section><h2>长期问题</h2><div id="problems"></div></section>
+          </div>
         </section>
       </main>
     </div>

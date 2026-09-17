@@ -76,3 +76,47 @@
 - 验证: Rust unit、isolated PostgreSQL、local HTTP、页面静态/浏览器走查、project governance；按阶段运行，不将旧 V1 套件当作新合同证明。
 - LIDS migration log / 预览同步: 新页面可运行并完成视觉验收时再登记；本清单不是运行时迁移完成声明。
 - PR / reviewer / integration owner: 尚未授权提交、PR、审查或合并。
+
+## COMMENT-STUDY-LAYOUT-001 补充（2026-09-17）
+
+### 1. 事项与读取回执
+
+- Issue / SCOPE: Issue #295 / COMMENT-STUDY-LAYOUT-001；属于既有 COMMENT-RESEARCH-REBUILD-001。
+- Agent / branch / worktree: `/root` / `codex/comment-study-layout-001` /
+  `/Users/moglenny/proma/linggan-intelligence/.worktrees/comment-study-layout-001`。
+- exact base: `origin/main@0a7c94057c1fb6cfac0e545a23995e783b84e9e0`。
+- 用户可见目标: 移除评论研究页的无效 Hero 占位，把已有的 ADHD 作品选择改为可筛选、可滚动的
+  连续表格，使研究启动与现有读数都可在同一 L1 工作区高密度阅读。
+- 明确非目标: 不改 shell、Token、路由、API、StudyRun/policy 语义、数据库、worker、模型调用、
+  runtime 或部署；不新增服务端搜索、批量动作或数据字段。
+
+| 来源 | 状态 | 本次解决的问题 | 已核对 |
+|---|---|---|---|
+| AGENTS / current-state / UI execution contract | 已读 | 受保护 UI 包、worktree、表面/状态/依赖/验收矩阵 | 2026-09-17 |
+| PAGE-COMMENT-STUDY-REBUILD-001 | 已读并补充 | L1 读取责任及既有受控启动边界 | 2026-09-17 |
+| LIDS Token / Primitive / Pattern / Materials / Shell / Data Boundary / Language | 已读 | L1 Corpus Explorer、连续表格、中文、白场与壳层所有权 | 2026-09-17 |
+| 当前 `/corpus/comments` HTML / CSS / JS 与 :3000 | 已读 | Hero + 卡片选择挤出数据区；live runtime 的确仍是该页面 | 2026-09-17 |
+| `comment-study.setup.v1` | 已读 | 只消费现有 `eligibleWorks`，不发明搜索或数据合同 | 2026-09-17 |
+
+### 2. 表面、状态、依赖与验收
+
+- 分类: 展示 + 既有交互呈现；最高风险为状态语义。
+- Pattern: L1 Corpus Explorer；不新建 CMP、Scene、Motion 或 Token。默认表面为 M-00 白场；不在正文、
+  表格或读数区增加纹理。
+- exclusive files: `comment_study.html`、`comment_study.css`、`comment_study.js`、相关页面静态测试，
+  本页规格、清单、验收、LIDS log、索引与 2026-09 progress。
+- shared files: 无。forbidden: `shell.rs`、`shell.css`、LIDS token、API/data contract、migration、worker、
+  runtime/deployment 脚本。
+- 停止条件: 若实现需要新的真实状态、服务端检索、改变已选作品的 Run 输入、改 shell 几何、或改变
+  policy/run 回执，即停止并报告。
+
+| 表面 / 状态 | 必须保持的用户含义 | 自动或人工验收 |
+|---|---|---|
+| 初始加载 | 候选尚未读取，不能假装为 0 条 | 表格加载行、状态文字与静态断言 |
+| 有候选 / 空候选 | 已加载作品数与当前筛选命中数分开；空候选不等于读取失败 | JS fixture / 浏览器走查 |
+| 筛选与选择 | 筛选只缩小可见集合；隐藏项仍属已选择输入 | JS 行为断言 / 浏览器走查 |
+| 保存策略 / 创建 Run | 继续调用既有 endpoint；按钮状态不伪造回执 | 页面脚本静态断言与现有 HTTP 合同 |
+| 运行读数空态 | 无 Run、无 Signal、无 Problem 各自可读 | 页面渲染与浏览器走查 |
+| 窄屏 | 可自然滚动，不用桌面嵌套滚动困住表格 | 390px 浏览器走查 |
+
+本补充不把浏览器截图、构建、提交、合并、3000 刷新或 Mog 验收预先写成完成事实。

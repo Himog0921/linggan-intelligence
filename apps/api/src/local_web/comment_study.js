@@ -14,17 +14,41 @@ const post = async (path, body) => {
   return response.json();
 };
 const list = (items, render, empty) => items?.length ? items.map(render).join('') : `<p class="muted">${esc(empty)}</p>`;
-const selectedWorks = () => [...document.querySelectorAll('input[name="work-ref"]:checked')].map(input => input.value);
+let loadedWorks = [];
+const selectedWorkRefs = new Set();
+
+const normalizedFilter = () => document.querySelector('#work-filter').value.trim().toLocaleLowerCase('zh-CN');
+const visibleWorks = () => {
+  const filter = normalizedFilter();
+  return filter ? loadedWorks.filter(work => String(work.title ?? '').toLocaleLowerCase('zh-CN').includes(filter)) : loadedWorks;
+};
+const selectedWorks = () => [...selectedWorkRefs];
 
 function updateSelection() {
   const count = selectedWorks().length;
   document.querySelector('#selected-count').textContent = `已选择 ${count} 篇`;
   document.querySelector('#start-run').disabled = count === 0;
+  const visible = visibleWorks();
+  const selectVisible = document.querySelector('#select-visible-works');
+  const selectedVisibleCount = visible.filter(work => selectedWorkRefs.has(work.workRef)).length;
+  selectVisible.checked = visible.length > 0 && selectedVisibleCount === visible.length;
+  selectVisible.indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < visible.length;
 }
-function renderWorks(works) {
+function renderWorks() {
   const container = document.querySelector('#works');
-  container.innerHTML = list(works, work => `<label class="work-option"><input type="checkbox" name="work-ref" value="${esc(work.workRef)}"><span><strong>${esc(work.title)}</strong><small>${esc(work.workRef)} · ${Number(work.eligibleCommentCount)} 条可研究评论</small></span></label>`, '当前没有符合条件的 ADHD 作品。');
-  container.querySelectorAll('input').forEach(input => input.addEventListener('change', updateSelection));
+  const visible = visibleWorks();
+  const filter = normalizedFilter();
+  document.querySelector('#work-filter-status').textContent = filter
+    ? `当前筛选命中 ${visible.length} 篇，已加载 ${loadedWorks.length} 篇可研究作品。`
+    : `已加载 ${loadedWorks.length} 篇可研究作品。`;
+  container.innerHTML = visible.length
+    ? visible.map(work => `<tr><td><input id="work-${esc(work.workRef)}" type="checkbox" name="work-ref" value="${esc(work.workRef)}" aria-label="选择作品：${esc(work.title)}"${selectedWorkRefs.has(work.workRef) ? ' checked' : ''}></td><td><label for="work-${esc(work.workRef)}"><span class="study-work-title">${esc(work.title)}</span></label></td><td>${Number(work.eligibleCommentCount)}</td></tr>`).join('')
+    : `<tr><td class="study-table-empty" colspan="3">${filter ? '当前筛选没有命中已加载作品。' : '当前没有符合条件的 ADHD 作品。'}</td></tr>`;
+  container.querySelectorAll('input[name="work-ref"]').forEach(input => input.addEventListener('change', event => {
+    if (event.currentTarget.checked) selectedWorkRefs.add(event.currentTarget.value);
+    else selectedWorkRefs.delete(event.currentTarget.value);
+    updateSelection();
+  }));
   updateSelection();
 }
 async function loadSetup() {
@@ -36,11 +60,14 @@ async function loadSetup() {
     const available = setup.modelConfigs?.length > 0;
     select.disabled = !available;
     document.querySelector('#save-policy').disabled = !available;
-    renderWorks(setup.eligibleWorks || []);
+    loadedWorks = setup.eligibleWorks || [];
+    selectedWorkRefs.clear();
+    renderWorks();
     status.textContent = available ? `已加载 ${setup.eligibleWorks?.length || 0} 篇可选作品` : '没有启用的模型配置，无法保存策略。';
   } catch (error) {
     status.textContent = `无法读取准备信息：${error.message}`;
-    document.querySelector('#works').innerHTML = '<p class="muted">作品列表不可用。</p>';
+    document.querySelector('#work-filter-status').textContent = '作品列表不可用。';
+    document.querySelector('#works').innerHTML = '<tr><td class="study-table-empty" colspan="3">作品列表不可用。</td></tr>';
   }
 }
 async function loadProjection() {
@@ -78,5 +105,13 @@ document.querySelector('#start-run').addEventListener('click', async () => {
     await loadProjection();
   } catch (error) { result.textContent = `未创建 StudyRun：${error.message}`; }
   finally { updateSelection(); }
+});
+document.querySelector('#work-filter').addEventListener('input', renderWorks);
+document.querySelector('#select-visible-works').addEventListener('change', event => {
+  visibleWorks().forEach(work => {
+    if (event.currentTarget.checked) selectedWorkRefs.add(work.workRef);
+    else selectedWorkRefs.delete(work.workRef);
+  });
+  renderWorks();
 });
 void Promise.all([loadSetup(), loadProjection()]);

@@ -6,6 +6,13 @@
 > 事实来源: [system.md](system.md)、[README.md](README.md)、DESIGN-002 Issue #7、项目 progress 记录和实际验证输出
 > 冲突时以谁为准: 真实代码/合同/测试、用户最新确认、当前 SCOPE 和 ACCEPTED 决策；本日志不把计划写成已实现事实
 
+## 2026-09-17 · COMMENT-STUDY-LAYOUT-001 候选初始输入面
+
+- **范围**：只重排 `/corpus/comments` 新评论研究的受控启动、作品选择和读取空态；不修改共享 shell、Token、API、schema、worker、模型、运行时或部署。
+- **表达**：移除无信息的 visual Hero，采用 L1 Corpus Explorer 的紧凑工具栏与连续表格。M-00 白场、既有 `--lgi-*` token、1px 结构线、24px checkbox 命中区和 Primary 的 2px Ink 框/既有硬投影保持不变；没有新 CMP、Scene、Motion 或纹理。
+- **交互与 Data Truth**：筛选只对当前已加载 `eligibleWorks` 生效，已选择集合不因筛选隐藏而收缩；显示“已加载”与“当前筛选命中”两个不同事实。作品标题与可研究评论数直接读取既有 setup 合同，未把 Unknown、空集或读取失败写成 0。
+- **验证与边界**：页面静态测试、JS check、`git diff --check`、真实 100 篇本机读取、桌面与 390px 浏览器走查通过；未提交、合并、刷新 3000、创建 Run 或调用模型。见 [布局验收记录](../acceptance/comment-study-layout-001-acceptance.md)。
+
 ## 2026-09-15 · KEYWORD-ARCHIVE-002 巡查前建档门槛
 
 - **范围**：Collection Targets 的关键词主操作与回执，及其服务端规则命令/巡查准入状态表达；没有新增页面、Token、CMP、Scene 或 Motion。
