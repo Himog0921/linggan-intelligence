@@ -55,13 +55,19 @@
           </footer>
         </section>
 
-        <section class="study-readouts" aria-label="当前研究读数">
-          <div id="states" class="study-states" aria-live="polite"><p>正在读取研究状态…</p></div>
-          <div class="study-readout-grid">
-            <section><h2>最近运行</h2><div id="runs"></div></section>
-            <section><h2>问题信号</h2><div id="signals"></div></section>
-            <section><h2>长期问题</h2><div id="problems"></div></section>
+        <section class="study-review" aria-labelledby="study-review-title">
+          <h2 id="study-review-title" class="v7-sr-only">研究记录与结果</h2>
+          <nav class="study-tabs" aria-label="评论研究视图">
+            <button type="button" data-view="overview" aria-current="page">概览</button>
+            <button type="button" data-view="targets">评论目标</button>
+            <button type="button" data-view="pending">待归并</button>
+            <button type="button" data-view="problems">用户问题</button>
+            <button type="button" data-view="runs">运行记录</button>
+          </nav>
+          <div id="study-run-picker" class="study-run-picker" hidden>
+            <label>查看的研究运行<select id="study-run-select"></select></label>
           </div>
+          <section id="study-tab-result" aria-live="polite" aria-busy="true"><p>正在读取研究状态…</p></section>
         </section>
       </main>
     </div>

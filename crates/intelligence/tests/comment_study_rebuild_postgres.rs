@@ -5,8 +5,9 @@ mod research_fixture;
 
 use fixture::{proof_database, submit_package};
 use linggan_evidence::{
-    MaterialMediaDisposition, admit_media_blob, claim_media_processing_work,
-    complete_media_processing_text, ensure_media_processing_work, record_derivative_disposition,
+    MaterialMediaDisposition, MediaProcessingClaimOutcome, admit_media_blob,
+    claim_media_processing_work, complete_media_processing_text, ensure_media_processing_work,
+    record_derivative_disposition,
 };
 use linggan_intelligence::comment_study_source::{
     ADHD_DOMAIN_REF, StudySourceError, eligible_sources,
@@ -158,10 +159,13 @@ async fn source_gate_excludes_withdrawn_ocr_but_keeps_the_comment_target() {
     .unwrap();
     ensure_media_processing_work(&database).await.unwrap();
     let worker_ref = Uuid::new_v4();
-    let claim = claim_media_processing_work(&database, worker_ref, &["image_ocr".to_owned()])
+    let claim = match claim_media_processing_work(&database, worker_ref, &["image_ocr".to_owned()])
         .await
         .unwrap()
-        .unwrap();
+    {
+        MediaProcessingClaimOutcome::Claimed(claim) => claim,
+        other => panic!("the freshly admitted OCR job is claimable: {other:?}"),
+    };
     assert_eq!(claim.processor_kind, "image_ocr");
     assert!(admission.processing_jobs.contains(&claim.job_ref));
     let derivative_ref = complete_media_processing_text(
@@ -480,9 +484,259 @@ async fn clean_read_projection_reports_new_lifecycle_states_without_old_result_f
     };
     let targets = read_targets(&database, &run_query).await.unwrap();
     assert_eq!(targets["targets"][0]["state"], "succeeded");
+    assert_eq!(
+        targets["targets"][0]["commentText"],
+        "孩子每天写作业都要催，不催就不开始，我很着急。"
+    );
+    assert_eq!(targets["targets"][0]["sourceState"], "known");
     let signals = read_signals(&database, &run_query).await.unwrap();
     assert_eq!(signals["signals"][0]["eligibilityState"], "eligible");
     assert!(signals["signals"][0]["resolutionRef"].is_null());
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn read_targets_hides_comment_text_once_the_source_becomes_restricted_after_freeze() {
+    let database = proof_database("comment_study_read_targets_restricted").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    detail_with_author(
+        &database,
+        "study-read-restricted-note",
+        "ADHD 笔记",
+        Some("creator-1"),
+    )
+    .await;
+    let source_ref = comment_with_author(
+        &database,
+        "study-read-restricted-note",
+        "study-read-restricted-comment",
+        "孩子每天写作业都要催，不催就不开始，我很着急。",
+        Some("reader-1"),
+        "2026-09-16T08:00:00Z",
+    )
+    .await;
+    let content_public_ref: Uuid = sqlx::query_scalar(
+        "SELECT content_public_ref FROM linggan_material_comment WHERE material_ref=$1",
+    )
+    .bind(source_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let policy_ref = seed_study_policy(&database).await;
+    let target_ref =
+        seed_running_target(&database, policy_ref, content_public_ref, source_ref).await;
+    accept_target_output(
+        &database,
+        target_ref,
+        "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        None,
+        semantic_output("每天写作业都要催,不催就不开始"),
+    )
+    .await
+    .unwrap();
+    let query = CommentStudyReadQuery::default();
+    let runs = read_runs(&database, &query).await.unwrap();
+    let run_ref = runs["runs"][0]["runRef"].as_str().unwrap().parse().unwrap();
+    let run_query = CommentStudyReadQuery {
+        run_ref: Some(run_ref),
+        ..Default::default()
+    };
+    let before = read_targets(&database, &run_query).await.unwrap();
+    assert_eq!(
+        before["targets"][0]["commentText"],
+        "孩子每天写作业都要催，不催就不开始，我很着急。"
+    );
+    assert_eq!(before["targets"][0]["sourceState"], "known");
+
+    sqlx::query(
+        "INSERT INTO linggan_material_comment_restriction( \
+           content_public_ref,comment_external_id,reason \
+         ) SELECT content_public_ref,comment_external_id,'restricted after read-target proof' \
+           FROM linggan_material_comment WHERE material_ref=$1",
+    )
+    .bind(source_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    let after = read_targets(&database, &run_query).await.unwrap();
+    assert!(
+        after["targets"][0]["commentText"].is_null(),
+        "after={after}"
+    );
+    assert_eq!(after["targets"][0]["sourceState"], "restricted");
+    assert_eq!(
+        after["targets"][0]["state"], "succeeded",
+        "restriction must not silently change the frozen target lifecycle state"
+    );
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn read_targets_reports_unknown_source_state_without_panicking_when_body_text_is_absent() {
+    // The source gate (comment_study_source.rs) only ever selects KNOWN-body comments, and
+    // linggan_material_comment rows are append-only (a direct UPDATE is rejected by
+    // linggan_plugin_runtime_forbid_mutation(), confirmed while writing this test), so a target's
+    // source_ref cannot legitimately regress to an UNKNOWN body after freeze through any real code
+    // path today. `seed_running_target` bypasses the eligibility gate entirely (it is a raw INSERT),
+    // so this constructs the otherwise-unreachable combination directly: an UNKNOWN-body comment
+    // wired as a target's source_ref from the start. This proves the defensive
+    // `sourceState:"unknown"` branch in read_targets returns a null commentText instead of
+    // panicking on a missing column value; it does not claim this combination can arise in
+    // production.
+    let database = proof_database("comment_study_read_targets_unknown_body").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    detail_with_author(
+        &database,
+        "study-read-unknown-body-note",
+        "ADHD 笔记",
+        Some("creator-1"),
+    )
+    .await;
+    let package = fixture::submit_package_at(
+        &database,
+        "comments",
+        serde_json::json!({"contentExternalId":"study-read-unknown-body-note"}),
+        serde_json::json!({
+            "kind":"comment",
+            "sourceObject":{"platform":"xhs","type":"content","externalId":"study-read-unknown-body-note"},
+            "payload":{
+                "commentId":"study-read-unknown-body-comment",
+                "noteId":"study-read-unknown-body-note",
+                "authorId":"reader-1"
+            },
+        }),
+        "2026-09-16T08:00:00Z",
+    )
+    .await;
+    let (source_ref, content_public_ref): (Uuid, Uuid) = sqlx::query_as(
+        "SELECT material_ref,content_public_ref FROM linggan_material_comment WHERE package_ref=$1",
+    )
+    .bind(package)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        sqlx::query_scalar::<_, String>(
+            "SELECT body_state FROM linggan_material_comment WHERE material_ref=$1"
+        )
+        .bind(source_ref)
+        .fetch_one(database.pool())
+        .await
+        .unwrap(),
+        "UNKNOWN",
+        "fixture must actually omit the comment body for this proof to mean anything"
+    );
+    let policy_ref = seed_study_policy(&database).await;
+    seed_running_target(&database, policy_ref, content_public_ref, source_ref).await;
+
+    let query = CommentStudyReadQuery::default();
+    let runs = read_runs(&database, &query).await.unwrap();
+    let run_ref = runs["runs"][0]["runRef"].as_str().unwrap().parse().unwrap();
+    let run_query = CommentStudyReadQuery {
+        run_ref: Some(run_ref),
+        ..Default::default()
+    };
+    let targets = read_targets(&database, &run_query).await.unwrap();
+    assert!(
+        targets["targets"][0]["commentText"].is_null(),
+        "targets={targets}"
+    );
+    assert_eq!(targets["targets"][0]["sourceState"], "unknown");
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn read_signals_hides_evidence_and_proposition_once_the_source_becomes_restricted_after_freeze()
+ {
+    // read_targets already refused to keep returning a comment's text once its source became
+    // restricted after freezing. A Signal's `evidence` is a guaranteed literal substring of that
+    // same comment text (see comment_study_semantic.rs), and `proposition` is a derived summary of
+    // it, so read_signals must apply the identical restriction check on the same lineage, not just
+    // read_targets. Before this fix, the "待归并" (pending merge) tab kept quoting the original
+    // wording verbatim after its source had been restricted.
+    let database = proof_database("comment_study_read_signals_restricted").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    detail_with_author(
+        &database,
+        "study-read-signal-restricted-note",
+        "ADHD 笔记",
+        Some("creator-1"),
+    )
+    .await;
+    let source_ref = comment_with_author(
+        &database,
+        "study-read-signal-restricted-note",
+        "study-read-signal-restricted-comment",
+        "孩子每天写作业都要催，不催就不开始，我很着急。",
+        Some("reader-1"),
+        "2026-09-16T08:00:00Z",
+    )
+    .await;
+    let content_public_ref: Uuid = sqlx::query_scalar(
+        "SELECT content_public_ref FROM linggan_material_comment WHERE material_ref=$1",
+    )
+    .bind(source_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let policy_ref = seed_study_policy(&database).await;
+    let target_ref =
+        seed_running_target(&database, policy_ref, content_public_ref, source_ref).await;
+    accept_target_output(
+        &database,
+        target_ref,
+        "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        None,
+        semantic_output("每天写作业都要催,不催就不开始"),
+    )
+    .await
+    .unwrap();
+    let query = CommentStudyReadQuery::default();
+    let runs = read_runs(&database, &query).await.unwrap();
+    let run_ref = runs["runs"][0]["runRef"].as_str().unwrap().parse().unwrap();
+    let run_query = CommentStudyReadQuery {
+        run_ref: Some(run_ref),
+        ..Default::default()
+    };
+    let before = read_signals(&database, &run_query).await.unwrap();
+    assert_eq!(before["signals"][0]["sourceState"], "known");
+    assert_eq!(
+        before["signals"][0]["evidence"], "每天写作业都要催，不催就不开始",
+        "before={before}"
+    );
+    assert_eq!(
+        before["signals"][0]["proposition"], "孩子在家庭作业中存在自主启动困难。"
+    );
+
+    sqlx::query(
+        "INSERT INTO linggan_material_comment_restriction( \
+           content_public_ref,comment_external_id,reason \
+         ) SELECT content_public_ref,comment_external_id,'restricted after read-signal proof' \
+           FROM linggan_material_comment WHERE material_ref=$1",
+    )
+    .bind(source_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    let after = read_signals(&database, &run_query).await.unwrap();
+    assert_eq!(after["signals"][0]["sourceState"], "restricted");
+    assert!(after["signals"][0]["evidence"].is_null(), "after={after}");
+    assert!(after["signals"][0]["proposition"].is_null(), "after={after}");
+    assert_eq!(
+        after["signals"][0]["eligibilityState"], "eligible",
+        "restriction must not silently change the signal's own eligibility fact"
+    );
 }
 
 #[tokio::test]

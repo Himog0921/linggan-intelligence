@@ -70,19 +70,190 @@ async function loadSetup() {
     document.querySelector('#works').innerHTML = '<tr><td class="study-table-empty" colspan="3">作品列表不可用。</td></tr>';
   }
 }
+const targetStateLabel = {
+  ready: '准备就绪', needs_context: '等待语境', excluded: '来源受限，未处理', queued: '排队中',
+  running: '处理中', succeeded: '已产出结果', no_signal: '已处理 · 无信号', failed: '处理失败'
+};
+const eligibilityLabel = {
+  eligible: '具备归并资格', deferred_context: '语境不足，暂缓', not_user_problem: '不构成用户问题',
+  not_applicable: '不适用（非问题/需求类信号）'
+};
+const resolutionLabel = {
+  pending: '待归并判断', assigned: '已归入用户问题', deferred_context: '语境不足，继续等待',
+  deferred_ambiguous: '存在多个可能匹配，继续等待', deferred_novel: '独立新证据，等待第二条佐证',
+  not_user_problem: '判定不构成用户问题', protocol_rejected: '模型输出不合规，已拒绝', failed: '归并判断失败'
+};
+const signalKindLabel = {
+  problem: '问题', need: '需求', belief: '观念', emotion: '情绪', experience: '经历',
+  solution: '解决方案', quote: '引述', context: '语境', question: '疑问'
+};
+const problemStateLabel = { active: '生效中', retired: '已停用' };
+const contextStateLabel = { ready: '语境完整', partial: '语境部分（有截断）', missing: '缺少语境' };
+const sourceStateLabel = { known: null, restricted: '来源已被限制，原文不再显示', unknown: '原文未知（来源未采集到正文）' };
+const label = (map, value) => (value == null ? null : (map[value] ?? value));
+const PENDING_RESOLUTION_STATES = new Set(['pending', 'deferred_context', 'deferred_ambiguous', 'deferred_novel']);
+
+let allRuns = [];
+let activeView = 'overview';
+let selectedRunRef = null;
+const RUN_SCOPED_VIEWS = new Set(['targets', 'pending']);
+
+function runOptionLabel(run) {
+  return `${run.runRef.slice(0, 8)}… · ${esc(label(targetStateLabel, run.state) ?? run.state)} · ${run.createdAt.slice(0, 16).replace('T', ' ')}`;
+}
+function renderRunPicker() {
+  const picker = document.querySelector('#study-run-picker');
+  const select = document.querySelector('#study-run-select');
+  picker.hidden = !RUN_SCOPED_VIEWS.has(activeView);
+  if (!RUN_SCOPED_VIEWS.has(activeView)) return;
+  if (!allRuns.length) {
+    select.innerHTML = '<option value="">尚无 StudyRun</option>';
+    select.disabled = true;
+    return;
+  }
+  select.disabled = false;
+  select.innerHTML = allRuns.map(run => `<option value="${esc(run.runRef)}"${run.runRef === selectedRunRef ? ' selected' : ''}>${runOptionLabel(run)}</option>`).join('');
+}
+
+async function renderOverviewTab() {
+  const overview = await get('overview');
+  if (overview.cleanLayerState === 'not_configured') {
+    return '<p class="study-empty">尚未配置研究策略：先在上方保存一次策略。</p>';
+  }
+  const latest = overview.latestRun;
+  if (!latest) {
+    return '<p class="study-empty">尚未创建过 StudyRun：选择作品并点击「创建研究运行」。</p>';
+  }
+  const targetTotal = Object.values(latest.targetStates || {}).reduce((sum, value) => sum + Number(value), 0);
+  const stateRows = (map, states, emptyLabel) => Object.keys(states || {}).length
+    ? Object.entries(states).map(([key, value]) => `<div class="study-stat"><strong>${Number(value)}</strong><span>${esc(label(map, key) ?? key)}</span></div>`).join('')
+    : `<p class="study-empty">${esc(emptyLabel)}</p>`;
+  return `
+    <article class="study-overview-run">
+      <header><p class="study-label">最新一次运行</p><h3>${esc(latest.runRef)}</h3><p>创建于 ${esc(latest.createdAt)}${latest.finishedAt ? ` · 结束于 ${esc(latest.finishedAt)}` : ' · 尚未结束'}</p></header>
+      <p>选择作品 ${Number(latest.selectedWorkCount)} 篇，冻结评论目标 ${targetTotal} 条。</p>
+      <div class="study-stat-group"><p class="study-label">目标处理状态</p><div class="study-stat-row">${stateRows(targetStateLabel, latest.targetStates, '尚无目标。')}</div></div>
+      <div class="study-stat-group"><p class="study-label">Signal 归并资格</p><div class="study-stat-row">${stateRows(eligibilityLabel, latest.signalStates, '本次运行没有 Signal。')}</div></div>
+      <div class="study-stat-group"><p class="study-label">归并判断结果</p><div class="study-stat-row">${stateRows(resolutionLabel, latest.resolutionStates, '尚无已产生的归并判断。')}</div></div>
+      <p>已关联到长期用户问题：<strong>${Number(latest.problemMembershipCount)}</strong> 条 Signal。</p>
+    </article>`;
+}
+
+function targetRow(target) {
+  const restrictionNote = sourceStateLabel[target.sourceState];
+  const commentBlock = target.commentText
+    ? `<blockquote>${esc(target.commentText)}</blockquote>`
+    : `<p class="study-restricted">${esc(restrictionNote || '原文当前不可读取。')}</p>`;
+  return `<tr>
+    <td>${commentBlock}</td>
+    <td>${esc(label(targetStateLabel, target.state) ?? target.state)}${target.exclusionReason ? `<p>${esc(target.exclusionReason)}</p>` : ''}</td>
+    <td>${esc(label(contextStateLabel, target.contextState) ?? target.contextState)}</td>
+    <td>${Number(target.signalCount)}${target.resolutionState ? `<p>${esc(label(resolutionLabel, target.resolutionState) ?? target.resolutionState)}</p>` : ''}</td>
+  </tr>`;
+}
+async function renderTargetsTab() {
+  if (!selectedRunRef) return '<p class="study-empty">尚无 StudyRun，先创建一次研究运行。</p>';
+  const data = await get(`targets?runRef=${encodeURIComponent(selectedRunRef)}&limit=100`);
+  if (!data.targets?.length) return '<p class="study-empty">这次运行没有冻结任何评论目标。</p>';
+  return `<div class="study-review-table-wrap"><table class="study-review-table"><thead><tr><th scope="col">评论原声</th><th scope="col">处理状态</th><th scope="col">语境</th><th scope="col">Signal</th></tr></thead><tbody>${data.targets.map(targetRow).join('')}</tbody></table></div>`;
+}
+
+function signalCard(signal) {
+  const body = signal.sourceState === 'restricted'
+    ? `<p class="study-restricted">来源已被限制，原声与摘要不再显示。</p>`
+    : `<p class="study-signal-proposition">${esc(signal.proposition)}</p><blockquote>${esc(signal.evidence)}</blockquote>`;
+  return `
+    <article class="study-signal-card">
+      <header><span class="study-badge">${esc(label(signalKindLabel, signal.kind) ?? signal.kind)}</span><span>${esc(label(resolutionLabel, signal.resolutionState) ?? '尚未进入归并判断')}</span></header>
+      ${body}
+      <p class="study-signal-meta">归并资格：${esc(label(eligibilityLabel, signal.eligibilityState) ?? signal.eligibilityState)}${signal.eligibilityReason ? ` · ${esc(signal.eligibilityReason)}` : ''}</p>
+    </article>`;
+}
+async function renderPendingTab() {
+  if (!selectedRunRef) return '<p class="study-empty">尚无 StudyRun，先创建一次研究运行。</p>';
+  const data = await get(`signals?runRef=${encodeURIComponent(selectedRunRef)}&limit=100`);
+  const pending = (data.signals || []).filter(signal => signal.resolutionState == null || PENDING_RESOLUTION_STATES.has(signal.resolutionState));
+  return list(pending, signalCard, '当前没有待归并的 Signal。');
+}
+
+async function renderProblemsTab() {
+  const data = await get('problems?limit=100');
+  return list(data.problems, problem => `
+    <article class="study-problem-card">
+      <header><span>${esc(label(problemStateLabel, problem.state) ?? problem.state)}</span><span>关联 Signal ${Number(problem.membershipCount)} 条</span></header>
+      <p class="study-signal-proposition">${esc(problem.definition)}</p>
+      <p class="study-signal-meta">纳入条件：${esc(JSON.stringify(problem.includeCriteria))}</p>
+      <p class="study-signal-meta">排除条件：${esc(JSON.stringify(problem.excludeCriteria))}</p>
+    </article>`, '尚无已建立的长期用户问题。');
+}
+
+function runRow(run) {
+  return `<tr>
+      <td>${esc(run.runRef.slice(0, 8))}…<p>${esc(run.createdAt)}</p></td>
+      <td>${esc(label(targetStateLabel, run.state) ?? run.state)}</td>
+      <td>${Number(run.workCount)}</td>
+      <td>${Number(run.targetCount)}</td>
+      <td>${Number(run.succeededCount)}</td>
+      <td>${Number(run.noSignalCount)}</td>
+      <td>${Number(run.needsContextCount)}</td>
+      <td>${Number(run.failedCount)}</td>
+      <td>${Number(run.excludedCount)}</td>
+    </tr>`;
+}
+async function renderRunsTab() {
+  const data = await get('runs?limit=50');
+  if (!data.runs?.length) return '<p class="study-empty">尚未创建过 StudyRun。</p>';
+  return `<div class="study-review-table-wrap"><table class="study-review-table"><thead><tr><th scope="col">运行</th><th scope="col">状态</th><th scope="col">作品</th><th scope="col">目标</th><th scope="col">已产出</th><th scope="col">无信号</th><th scope="col">等待语境</th><th scope="col">失败</th><th scope="col">来源受限</th></tr></thead><tbody>${data.runs.map(runRow).join('')}</tbody></table></div>`;
+}
+
+const TAB_RENDERERS = { overview: renderOverviewTab, targets: renderTargetsTab, pending: renderPendingTab, problems: renderProblemsTab, runs: renderRunsTab };
+
+// A newer render can start (Tab click, run picker change) before an older one's fetch resolves.
+// Without this token, a slow response from an abandoned render could overwrite whatever the
+// user is looking at now with stale content. Only the render that is still current when its
+// fetch resolves is allowed to touch the DOM.
+let renderToken = 0;
+async function renderActiveTab() {
+  const container = document.querySelector('#study-tab-result');
+  const token = ++renderToken;
+  const view = activeView;
+  container.setAttribute('aria-busy', 'true');
+  let html;
+  try {
+    html = await TAB_RENDERERS[view]();
+  } catch (error) {
+    html = `<p class="study-empty">读取失败：${esc(error.message)}</p>`;
+  }
+  if (token !== renderToken) return;
+  container.innerHTML = html;
+  container.setAttribute('aria-busy', 'false');
+}
+
 async function loadProjection() {
   try {
-    const [overview, runs, problems] = await Promise.all([get('overview'), get('runs?limit=8'), get('problems?limit=8')]);
-    const latest = overview.latestRun;
-    const target = latest?.targetStates || {};
-    document.querySelector('#states').innerHTML = overview.cleanLayerState === 'not_configured' ? '<span>尚未配置新研究策略</span>' : [`<span>运行：${esc(latest?.state || '尚无运行')}</span>`, `<span>目标：${Object.values(target).reduce((sum, value) => sum + Number(value), 0)}</span>`, `<span>无信号：${Number(target.no_signal || 0)}</span>`, `<span>等待语境：${Number(target.needs_context || 0)}</span>`].join('');
-    document.querySelector('#runs').innerHTML = list(runs.runs, run => `<div class="item"><strong>${esc(run.state)}</strong><small>${esc(run.runRef)} · 目标 ${run.targetCount} · 已完成 ${run.succeededCount}</small></div>`, '尚无新 StudyRun。');
-    document.querySelector('#problems').innerHTML = list(problems.problems, problem => `<div class="item"><strong>${esc(problem.definition)}</strong><small>${esc(problem.state)} · 证据 ${problem.membershipCount}</small></div>`, '尚无长期 Problem。');
-    if (!latest?.runRef) { document.querySelector('#signals').innerHTML = '<p class="muted">尚无可读取的 Signal。</p>'; return; }
-    const signals = await get(`signals?runRef=${encodeURIComponent(latest.runRef)}&limit=8`);
-    document.querySelector('#signals').innerHTML = list(signals.signals, signal => `<div class="item"><strong>${esc(signal.proposition)}</strong><small>${esc(signal.eligibilityState)}${signal.resolutionState ? ` · ${esc(signal.resolutionState)}` : ''}</small></div>`, '本次运行没有 Signal。');
-  } catch (error) { document.querySelector('#states').innerHTML = `<span>读取失败：${esc(error.message)}</span>`; }
+    const runs = await get('runs?limit=50');
+    allRuns = runs.runs || [];
+    if (!selectedRunRef || !allRuns.some(run => run.runRef === selectedRunRef)) {
+      selectedRunRef = allRuns[0]?.runRef ?? null;
+    }
+    renderRunPicker();
+  } catch (error) { allRuns = []; }
+  await renderActiveTab();
 }
+document.querySelectorAll('.study-tabs button').forEach(button => button.addEventListener('click', async () => {
+  if (button.dataset.view === activeView) return;
+  activeView = button.dataset.view;
+  document.querySelectorAll('.study-tabs button').forEach(other => {
+    if (other === button) other.setAttribute('aria-current', 'page');
+    else other.removeAttribute('aria-current');
+  });
+  renderRunPicker();
+  await renderActiveTab();
+}));
+document.querySelector('#study-run-select').addEventListener('change', async event => {
+  selectedRunRef = event.currentTarget.value || null;
+  await renderActiveTab();
+});
 document.querySelector('#policy-form').addEventListener('submit', async event => {
   event.preventDefault();
   const button = document.querySelector('#save-policy');
@@ -102,6 +273,7 @@ document.querySelector('#start-run').addEventListener('click', async () => {
   try {
     const response = await post('runs', { contentPublicRefs: selectedWorks() });
     result.textContent = `已创建 ${response.runRef}：覆盖 ${response.coveredWorkCount} 篇作品，冻结 ${response.targetCount} 条目标评论。尚未调用模型。`;
+    selectedRunRef = response.runRef;
     await loadProjection();
   } catch (error) { result.textContent = `未创建 StudyRun：${error.message}`; }
   finally { updateSelection(); }
