@@ -13,65 +13,74 @@
       {{SIDE_NAV}}
       <main class="study-main" aria-labelledby="comment-study-title">
         <h1 id="comment-study-title" class="v7-sr-only">评论研究</h1>
-        <section class="study-command" aria-labelledby="setup-title">
-          <div class="study-command-title">
-            <p class="study-label">受控启动</p>
-            <h2 id="setup-title">准备一次研究</h2>
-          </div>
-          <form id="policy-form" class="policy-form">
-            <label>模型配置<select id="model-config" required disabled><option>正在读取…</option></select></label>
-            <label>本次最多评论数<input id="comment-budget" type="number" min="1" max="3000" value="100" required></label>
-            <label>单作品语境字符上限<input id="context-character-budget" type="number" min="1" max="20000" value="6000" required></label>
-            <button id="save-policy" type="submit" disabled>保存研究策略</button>
-          </form>
-          <div class="study-command-meta">
+        <header class="study-toolbar">
+          <div>
+            <p class="study-label">评论研究</p>
             <p id="setup-status" role="status">正在读取可用模型与作品…</p>
+          </div>
+          <div class="study-toolbar-meta">
             <p>本机数据库：{{DATABASE_STATE}}</p>
+            <button type="button" id="open-study-dialog">发起一次新研究</button>
           </div>
-        </section>
+        </header>
 
-        <section class="study-workspace" aria-labelledby="work-picker-title">
-          <header class="study-workspace-header">
-            <div>
-              <p class="study-label">研究输入</p>
-              <h2 id="work-picker-title">选择要研究的 ADHD 作品</h2>
-            </div>
-            <div class="study-workspace-tools">
-              <label class="study-filter">筛选已加载作品<input id="work-filter" type="search" placeholder="按作品标题筛选" autocomplete="off"></label>
-              <span id="selected-count" class="selection-count" role="status">已选择 0 篇</span>
-            </div>
-          </header>
-          <p id="work-filter-status" class="study-table-status" role="status">正在读取可研究作品…</p>
-          <div class="study-table-wrap">
-            <table class="study-table" aria-labelledby="work-picker-title" aria-describedby="work-filter-status">
-              <caption class="v7-sr-only">可选择进入本次评论研究的 ADHD 作品</caption>
-              <thead><tr><th scope="col"><input id="select-visible-works" type="checkbox" aria-label="选择当前筛选结果中的作品"></th><th scope="col">作品</th><th scope="col">可研究评论</th></tr></thead>
-              <tbody id="works" aria-live="polite"><tr><td colspan="3">正在读取作品…</td></tr></tbody>
-            </table>
-          </div>
-          <footer class="study-workspace-footer">
-            <p>只会冻结当前所选作品的可研究评论；创建研究运行不会调用模型。</p>
-            <div class="run-actions"><button id="start-run" type="button" disabled>创建研究运行</button><p id="run-result" role="status"></p></div>
-          </footer>
-        </section>
-
-        <section class="study-review" aria-labelledby="study-review-title">
-          <h2 id="study-review-title" class="v7-sr-only">研究记录与结果</h2>
-          <nav class="study-tabs" aria-label="评论研究视图">
-            <button type="button" data-view="overview" aria-current="page">概览</button>
-            <button type="button" data-view="targets">评论目标</button>
-            <button type="button" data-view="pending">待归并</button>
-            <button type="button" data-view="problems">用户问题</button>
-            <button type="button" data-view="runs">运行记录</button>
-          </nav>
-          <div id="study-run-picker" class="study-run-picker" hidden>
-            <label>查看的研究运行<select id="study-run-select"></select></label>
-          </div>
-          <section id="study-tab-result" aria-live="polite" aria-busy="true"><p>正在读取研究状态…</p></section>
-        </section>
+        <nav class="study-tabs" aria-label="评论研究视图">
+          <button type="button" data-view="overview" aria-current="page">概览</button>
+          <button type="button" data-view="targets">评论目标</button>
+          <button type="button" data-view="pending">待归并</button>
+          <button type="button" data-view="problems">用户问题</button>
+          <button type="button" data-view="runs">运行记录</button>
+        </nav>
+        <div id="study-run-picker" class="study-run-picker" hidden>
+          <label>查看的研究运行<select id="study-run-select"></select></label>
+        </div>
+        <section id="study-tab-result" aria-live="polite" aria-busy="true"><p>正在读取研究状态…</p></section>
       </main>
     </div>
   </div>
+
+  <dialog id="study-dialog" aria-labelledby="study-dialog-title">
+    <header class="study-dialog-header">
+      <div><p class="study-label">受控启动</p><h2 id="study-dialog-title">发起一次新研究</h2></div>
+      <button type="button" id="study-dialog-close">关闭</button>
+    </header>
+    <section class="study-command" aria-labelledby="setup-title">
+      <h3 id="setup-title" class="v7-sr-only">研究策略</h3>
+      <form id="policy-form" class="policy-form">
+        <label>模型配置<select id="model-config" required disabled><option>正在读取…</option></select></label>
+        <label>本次最多评论数<input id="comment-budget" type="number" min="1" max="3000" value="100" required></label>
+        <label>单作品语境字符上限<input id="context-character-budget" type="number" min="1" max="20000" value="6000" required></label>
+        <button id="save-policy" type="submit" disabled>保存研究策略</button>
+      </form>
+      <p id="policy-status" class="study-dialog-note" role="status"></p>
+    </section>
+
+    <section class="study-workspace" aria-labelledby="work-picker-title">
+      <header class="study-workspace-header">
+        <div>
+          <p class="study-label">研究输入</p>
+          <h3 id="work-picker-title">选择要研究的 ADHD 作品</h3>
+        </div>
+        <div class="study-workspace-tools">
+          <label class="study-filter">筛选已加载作品<input id="work-filter" type="search" placeholder="按作品标题筛选" autocomplete="off"></label>
+          <span id="selected-count" class="selection-count" role="status">已选择 0 篇</span>
+        </div>
+      </header>
+      <p id="work-filter-status" class="study-table-status" role="status">正在读取可研究作品…</p>
+      <div class="study-table-wrap">
+        <table class="study-table" aria-labelledby="work-picker-title" aria-describedby="work-filter-status">
+          <caption class="v7-sr-only">可选择进入本次评论研究的 ADHD 作品</caption>
+          <thead><tr><th scope="col"><input id="select-visible-works" type="checkbox" aria-label="选择当前筛选结果中的作品"></th><th scope="col">作品</th><th scope="col">可研究评论</th></tr></thead>
+          <tbody id="works" aria-live="polite"><tr><td colspan="3">正在读取作品…</td></tr></tbody>
+        </table>
+      </div>
+      <footer class="study-workspace-footer">
+        <p>只会冻结当前所选作品的可研究评论；创建研究运行不会调用模型。</p>
+        <div class="run-actions"><button id="start-run" type="button" disabled>创建研究运行</button><p id="run-result" role="status"></p></div>
+      </footer>
+    </section>
+  </dialog>
+
   <script src="/assets/comment-study.js"></script>
 </body>
 </html>

@@ -171,3 +171,43 @@
 
 本补充不把静态测试、隔离 PostgreSQL 证明、编译通过、构建、提交、合并、3000 刷新或 Mog 验收预先
 写成完成事实；实际证据边界见 [验收记录](../acceptance/comment-study-tabs-001-acceptance.md)。
+
+## COMMENT-STUDY-LAYOUT-002 补充（2026-09-17）
+
+### 1. 事项与触发
+
+- Issue / SCOPE: Issue #295 / COMMENT-STUDY-LAYOUT-002；属于既有 COMMENT-RESEARCH-REBUILD-001。
+- 触发: Mog 部署验收 COMMENT-STUDY-TABS-001 后反馈两处布局问题（5 个 Tab 被巨大表单挤到页面
+  最下面；研究策略与作品选择不该常驻页面）与一处数据疑问（"运行记录"全 0）。
+- 用户可见目标: 页面改为「工具栏 → 5 个 Tab → Tab 内容」三段式，Tab 紧跟工具栏；「受控启动」
+  与「研究输入」整体移入按钮触发的 `<dialog>`，不再占用主页面空间；创建 Run 成功后自动切到
+  运行记录 Tab。
+- 明确非目标: 不改变 5 个 Tab 各自的读取内容与状态语义（那是 COMMENT-STUDY-TABS-001 的范围）；
+  不接通批次准备或模型调用（见下方根因排查，为独立决定，不在本包内擅自处理）。
+
+### 2. 表面、依赖与验收
+
+- 分类: 纯布局与交互容器调整；不改 API、schema、状态词典。
+- exclusive files: `comment_study.html`、`comment_study.css`、`comment_study.js`、页面静态测试、
+  本节文档、progress。
+- forbidden: `shell.rs`/`shell.css`、LIDS token、API/data contract、migration、worker、
+  runtime/deployment 脚本、`comment_study_read.rs`。
+
+| 表面 | 必须保持的用户含义 | 自动/人工验收 |
+|---|---|---|
+| 工具栏 → Tab 顺序 | Tab 紧跟工具栏，中间不夹巨大表单 | 页面静态断言（工具栏与 Tab 之间字符距离上限） |
+| 研究策略 + 作品选择 | 移入 `<dialog id="study-dialog">`，按钮触发，不常驻主页面 | 页面静态断言：`<main>` 不含 `policy-form`/`works`，dialog 内含两者 |
+| 创建 Run 后 | 自动关闭弹窗、切到运行记录 Tab | JS 静态断言（顺序断言） |
+
+### 3. "运行记录全是 0" 根因排查（只报告，不在本包内处理）
+
+`prepare_study_run` 冻结 Target 为 `queued`，本身不调用模型；`prepare_study_batch`（把 Target
+打包成可被 `linggan-worker` 常驻模型循环 `claim_next_study_batch` 认领的 Batch）在生产代码里
+**零调用方**（`git grep` 全仓库确认，仅测试文件引用），也没有对应 API 路由或 CLI。因此任何
+StudyRun 创建后，其 Target 会永久停在 `queued`，运行记录的产出/无信号/等待语境/失败/来源受限
+计数会一直是 0——这不是本次或上次 UI 改动引入的回归，是"批次准备"这一环从合同层面就没有被
+任何生产入口调用。是否要在此接通、如何接通（人工审批每次真实模型调用、额度控制、真实敏感
+数据处理边界）需要 Mog 决定，属另一件事，本包不擅自处理。
+
+本补充不把静态测试、编译通过、临时预览浏览器走查、提交、合并、3000 刷新或 Mog 验收预先写成
+完成事实；实际证据边界见验收记录。

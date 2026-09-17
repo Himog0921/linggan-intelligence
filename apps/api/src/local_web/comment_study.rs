@@ -325,13 +325,96 @@ mod tests {
             ".study-table input[type=\"checkbox\"]{inline-size:var(--lgi-space-6);block-size:var(--lgi-space-6)"
         ));
         assert!(stylesheet.contains(
-            "#save-policy:not(:disabled),.study-main #start-run:not(:disabled){border:2px solid var(--lgi-ink);background:var(--lgi-signal-ink);box-shadow:var(--lgi-shadow-brutal)"
+            "#study-dialog #save-policy:not(:disabled),#study-dialog #start-run:not(:disabled){border:2px solid var(--lgi-ink);background:var(--lgi-signal-ink);box-shadow:var(--lgi-shadow-brutal)"
         ));
         assert!(stylesheet.contains("@media(max-width:900px){.study-main{overflow:visible"));
         assert!(stylesheet.contains(".study-table-wrap{max-block-size:none;overflow:visible"));
         assert!(stylesheet.contains(
             ".study-table th:first-child,.study-table td:first-child{width:var(--lgi-space-10)}"
         ));
+    }
+
+    #[test]
+    fn comment_study_page_puts_the_five_tabs_immediately_after_the_toolbar_not_below_a_giant_form()
+    {
+        let page = include_str!("comment_study.html");
+        let main_start = page.find("<main class=\"study-main\"").expect("main present");
+        let main_end = page.find("</main>").expect("main closes");
+        let main = &page[main_start..main_end];
+        // Mog's complaint: the tabs were pushed to the very bottom of the page, below the policy
+        // form and a ~100-row work picker table, so the reviewable content (the whole point of the
+        // page) was invisible without scrolling past a giant setup form first. The setup form must
+        // now live inside <dialog id="study-dialog">, which is a sibling of <main>, not inside it.
+        assert!(
+            !main.contains("id=\"policy-form\""),
+            "the policy form must no longer live directly inside <main>; it belongs in the dialog"
+        );
+        assert!(
+            !main.contains("id=\"works\""),
+            "the 100-row work picker table must no longer live directly inside <main>"
+        );
+        let toolbar_index = main.find("class=\"study-toolbar\"").expect("toolbar present");
+        let tabs_index = main
+            .find("<nav class=\"study-tabs\" aria-label=\"评论研究视图\">")
+            .expect("tabs present");
+        assert!(
+            toolbar_index < tabs_index,
+            "toolbar must come before the tabs"
+        );
+        assert!(
+            tabs_index - toolbar_index < 700,
+            "the tabs must sit right after the toolbar with nothing bulky in between; got {} \
+             characters of markup separating them",
+            tabs_index - toolbar_index
+        );
+    }
+
+    #[test]
+    fn comment_study_dialog_headings_keep_their_lids_token_styling_outside_the_main_shell() {
+        let stylesheet = include_str!("comment_study.css");
+        // <dialog id="study-dialog"> is a sibling of <main class="study-main">, not a descendant,
+        // so the old `.study-main h2{...}` rule silently stopped matching once the setup section's
+        // headings moved into the dialog (and were demoted to h3). Without an explicit rule the
+        // work-picker heading fell back to the browser's default h3 styling.
+        assert!(stylesheet.contains(
+            "#study-dialog h3{margin:0;color:var(--lgi-ink);font:var(--lgi-weight-bold) var(--lgi-text-section)/var(--lgi-lh-heading) var(--lgi-font-sans)}"
+        ));
+    }
+
+    #[test]
+    fn comment_study_page_moves_the_research_setup_into_a_button_triggered_dialog() {
+        let page = include_str!("comment_study.html");
+        assert!(page.contains("<dialog id=\"study-dialog\" aria-labelledby=\"study-dialog-title\">"));
+        assert!(page.contains("id=\"open-study-dialog\""));
+        assert!(page.contains("id=\"study-dialog-close\""));
+        let dialog_start = page.find("<dialog id=\"study-dialog\"").expect("dialog present");
+        let dialog = &page[dialog_start..];
+        assert!(
+            dialog.contains("id=\"policy-form\""),
+            "the policy form must live inside the dialog"
+        );
+        assert!(
+            dialog.contains("id=\"works\""),
+            "the work picker table must live inside the dialog"
+        );
+        assert!(dialog.contains("id=\"start-run\""));
+    }
+
+    #[test]
+    fn comment_study_script_wires_the_dialog_open_close_and_auto_switches_to_runs_after_creating_one()
+    {
+        let script = include_str!("comment_study.js");
+        assert!(script.contains("studyDialog.showModal()"));
+        assert!(script.contains("studyDialog.close()"));
+        // Creating a Run is the whole point of opening the dialog; once it succeeds the user should
+        // land back on the tabs (Mog also asked why the runs tab looked like nothing had happened —
+        // landing on it after creating a run makes the fresh row immediately visible).
+        let start_run_handler = script
+            .split("document.querySelector('#start-run').addEventListener")
+            .nth(1)
+            .expect("start-run click handler is present");
+        assert!(start_run_handler.contains("studyDialog.close();"));
+        assert!(start_run_handler.contains("activeView = 'runs';"));
     }
 
     #[test]
