@@ -240,28 +240,35 @@ async function loadProjection() {
   } catch (error) { allRuns = []; }
   await renderActiveTab();
 }
-document.querySelectorAll('.study-tabs button').forEach(button => button.addEventListener('click', async () => {
-  if (button.dataset.view === activeView) return;
-  activeView = button.dataset.view;
-  document.querySelectorAll('.study-tabs button').forEach(other => {
-    if (other === button) other.setAttribute('aria-current', 'page');
-    else other.removeAttribute('aria-current');
+function highlightTab(view) {
+  document.querySelectorAll('.study-tabs button').forEach(button => {
+    if (button.dataset.view === view) button.setAttribute('aria-current', 'page');
+    else button.removeAttribute('aria-current');
   });
+}
+async function switchToView(view) {
+  if (view === activeView) return;
+  activeView = view;
+  highlightTab(view);
   renderRunPicker();
   await renderActiveTab();
-}));
+}
+document.querySelectorAll('.study-tabs button').forEach(button => button.addEventListener('click', () => switchToView(button.dataset.view)));
 document.querySelector('#study-run-select').addEventListener('change', async event => {
   selectedRunRef = event.currentTarget.value || null;
   await renderActiveTab();
 });
+const studyDialog = document.querySelector('#study-dialog');
+document.querySelector('#open-study-dialog').addEventListener('click', () => studyDialog.showModal());
+document.querySelector('#study-dialog-close').addEventListener('click', () => studyDialog.close());
 document.querySelector('#policy-form').addEventListener('submit', async event => {
   event.preventDefault();
   const button = document.querySelector('#save-policy');
-  const status = document.querySelector('#setup-status');
+  const status = document.querySelector('#policy-status');
   button.disabled = true;
   try {
     const response = await post('policy', { modelConfigRef: document.querySelector('#model-config').value, commentBudget: Number(document.querySelector('#comment-budget').value), contextCharacterBudget: Number(document.querySelector('#context-character-budget').value) });
-    status.textContent = `Study policy 已保存：${response.policyRef}`;
+    status.textContent = `研究策略已保存：${response.policyRef}`;
     await loadProjection();
   } catch (error) { status.textContent = `未保存策略：${error.message}`; }
   finally { button.disabled = !document.querySelector('#model-config').value; }
@@ -274,6 +281,9 @@ document.querySelector('#start-run').addEventListener('click', async () => {
     const response = await post('runs', { contentPublicRefs: selectedWorks() });
     result.textContent = `已创建 ${response.runRef}：覆盖 ${response.coveredWorkCount} 篇作品，冻结 ${response.targetCount} 条目标评论。尚未调用模型。`;
     selectedRunRef = response.runRef;
+    studyDialog.close();
+    activeView = 'runs';
+    highlightTab('runs');
     await loadProjection();
   } catch (error) { result.textContent = `未创建 StudyRun：${error.message}`; }
   finally { updateSelection(); }
