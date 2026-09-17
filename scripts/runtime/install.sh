@@ -149,9 +149,14 @@ request_worker_drain "$runtime_revision" "$target_revision"
 [[ -x "$runtime_dir/scripts/runtime/launch.sh" ]] \
   || { print -r -- "运行目录缺少 $runtime_dir/scripts/runtime/launch.sh" >&2; exit 1; }
 
-# .env 不进版本库，因此从开发目录复制一份。两边必须是同一个数据库。
-cp "$repo_root/.env" "$runtime_dir/.env"
-log "已同步 .env 到运行目录"
+# .env 不进版本库，因此从开发目录复制一份。两边必须是同一个数据库；当安装入口
+# 本身就在 runtime worktree 中时，源和目标相同，不能让 cp 把这个幂等场景当错误。
+if [[ "$repo_root/.env" != "$runtime_dir/.env" ]]; then
+  cp "$repo_root/.env" "$runtime_dir/.env"
+  log "已同步 .env 到运行目录"
+else
+  log "运行目录已使用当前 .env"
+fi
 
 # The existing runtime may predate a retired binary. Run the target revision's synchronizer from
 # the source checkout, not the runtime copy that is about to be replaced.
