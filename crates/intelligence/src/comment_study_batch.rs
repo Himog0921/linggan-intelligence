@@ -15,7 +15,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 pub const BATCH_CONTRACT: &str = "comment-study.note-batch.v1";
-const MAX_TARGETS_PER_BATCH: i64 = 12;
+pub const MAX_TARGETS_PER_BATCH: i64 = 12;
 
 #[derive(Debug, Clone)]
 pub struct PrepareStudyBatchRequest {
@@ -165,6 +165,37 @@ pub async fn prepare_study_batch(
         target_refs: targets.iter().map(|target| target.target_ref).collect(),
         input_manifest: manifest,
     })
+}
+
+/// Finds the oldest run that still has queued targets waiting to be packaged into a batch, other
+/// than any run in `exclude_run_refs`.
+///
+/// `prepare_study_batch` only ever creates one batch for one already-identified run; nothing in
+/// the codebase previously decided *which* run to call it for. Without this, a StudyRun's targets
+/// stayed `queued` forever no matter how long the model worker's `claim_next_study_batch` loop
+/// ran, because that loop only claims batches that already exist — it never creates one. This
+/// does not select which comments enter research (that stays `prepare_study_run`'s job, driven by
+/// the user's own choice of notes and budget); it only decides which already-frozen, already
+/// user-authorized queue gets packaged next.
+///
+/// `exclude_run_refs` lets a caller skip a run it already tried and failed to batch in the same
+/// pass (see `model_runner::prepare_next_batch_across_runs`), so one run whose queued target can
+/// never fit its configured model budget does not permanently block every run created after it.
+pub async fn next_run_needing_batch(
+    database: &Database,
+    exclude_run_refs: &[Uuid],
+) -> Result<Option<Uuid>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT run.run_ref FROM linggan_comment_study_run run \
+         WHERE run.state IN ('prepared','queued','running') \
+           AND NOT (run.run_ref = ANY($1)) \
+           AND EXISTS(SELECT 1 FROM linggan_comment_study_target target \
+                      WHERE target.run_ref=run.run_ref AND target.state='queued') \
+         ORDER BY run.created_at,run.run_ref LIMIT 1",
+    )
+    .bind(exclude_run_refs)
+    .fetch_optional(database.pool())
+    .await
 }
 
 async fn fit_targets_to_model_budget(

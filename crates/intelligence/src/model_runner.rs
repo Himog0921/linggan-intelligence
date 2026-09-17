@@ -1,9 +1,13 @@
 //! Bounded executor for the clean comment-study batch lifecycle.
 //!
-//! A worker only claims already-prepared batches. It never selects comments, creates a StudyRun,
-//! or uses a historical execution path.
+//! A worker never selects comments or creates a StudyRun (that is `prepare_study_run`, driven by
+//! the user's own choice of notes and budget) and never uses a historical execution path. It does
+//! decide which already-frozen, already user-authorized run's queued targets get packaged into a
+//! batch next (`prepare_next_batch_across_runs`), and it claims already-prepared batches.
 
 use crate::{
+    comment_study_batch::{MAX_TARGETS_PER_BATCH, PrepareStudyBatchRequest, StudyBatchError,
+        next_run_needing_batch, prepare_study_batch},
     comment_study_batch_acceptance::accept_study_batch_output,
     comment_study_batch_worker::{
         DEFAULT_BATCH_LEASE_SECONDS, StudyBatchWorkerError, claim_next_study_batch,
@@ -67,6 +71,9 @@ pub async fn run_model_work_once(
     {
         return Ok(true);
     }
+    if prepare_next_batch_across_runs(database).await? {
+        return Ok(true);
+    }
     recover_expired_study_batch_leases(database)
         .await
         .map_err(worker_error)?;
@@ -84,6 +91,59 @@ pub async fn run_model_work_once(
         .await
         .map_err(|_| ModelError::InvalidOutput)?;
     Ok(true)
+}
+
+/// A run's oldest queued target can be too large for its own configured model's input budget:
+/// `fit_targets_to_model_budget` then keeps every candidate out of the batch, and
+/// `prepare_study_batch` reports `NoQueuedTargets` even though queued targets still exist. Because
+/// `next_run_needing_batch` always picks the *oldest* run with a queued target, retrying without
+/// excluding that run would pick the exact same unbatchable run forever, on every tick, and no
+/// run created after it would ever get a turn (head-of-line blocking) — silently, since a stuck
+/// run's targets just stay `queued` with no error and no log line.
+///
+/// This tries up to `MAX_ATTEMPTS_PER_TICK` distinct runs in one tick, excluding each one that
+/// fails to produce a batch, so a run behind a stuck one still gets processed. It does not resolve
+/// the stuck run's target itself (that needs the real chunking work described in the roadmap, not
+/// a scheduling fix); it only stops that run from starving every other run's queue.
+const MAX_BATCH_PREPARATION_ATTEMPTS_PER_TICK: usize = 5;
+
+pub async fn prepare_next_batch_across_runs(database: &Database) -> Result<bool, ModelError> {
+    let mut skipped_run_refs = Vec::new();
+    while skipped_run_refs.len() < MAX_BATCH_PREPARATION_ATTEMPTS_PER_TICK {
+        let Some(run_ref) = next_run_needing_batch(database, &skipped_run_refs)
+            .await
+            .map_err(ModelError::Database)?
+        else {
+            return Ok(false);
+        };
+        match prepare_study_batch(
+            database,
+            PrepareStudyBatchRequest {
+                run_ref,
+                maximum_targets: MAX_TARGETS_PER_BATCH,
+            },
+        )
+        .await
+        {
+            Ok(_) => return Ok(true),
+            Err(StudyBatchError::NoQueuedTargets) => {
+                println!(
+                    "linggan worker: run {run_ref} has queued targets that do not fit the \
+                     configured model's input budget; trying the next run this tick"
+                );
+                skipped_run_refs.push(run_ref);
+            }
+            // Another worker tick (or a concurrent run) already moved this run out of a batchable
+            // state between the check above and this call; nothing is wrong, try another run.
+            Err(StudyBatchError::RunUnavailable) => skipped_run_refs.push(run_ref),
+            Err(StudyBatchError::Database(error)) => return Err(ModelError::Database(error)),
+            Err(other) => {
+                println!("linggan worker: batch preparation rejected for run {run_ref}: {other}");
+                skipped_run_refs.push(run_ref);
+            }
+        }
+    }
+    Ok(false)
 }
 
 pub async fn model_schema_ready(database: &Database) -> bool {

@@ -14,12 +14,16 @@ use linggan_intelligence::comment_study_source::{
 };
 use linggan_intelligence::{
     comment_study_acceptance::accept_target_output,
-    comment_study_batch::{PrepareStudyBatchRequest, prepare_study_batch},
+    comment_study_batch::{
+        MAX_TARGETS_PER_BATCH, PrepareStudyBatchRequest, next_run_needing_batch,
+        prepare_study_batch,
+    },
     comment_study_batch_acceptance::{BatchAcceptanceError, accept_study_batch_output},
     comment_study_batch_worker::{
         DEFAULT_BATCH_LEASE_SECONDS, claim_next_study_batch, recover_expired_study_batch_leases,
     },
     comment_study_model_dispatch::reserve_study_batch_model_call,
+    model_runner::prepare_next_batch_across_runs,
     comment_study_problem_store::{
         accept_problem_pair, accept_problem_resolution, prepare_problem_pair,
         prepare_problem_resolution,
@@ -801,6 +805,230 @@ async fn user_selected_work_run_freezes_only_selected_comments() {
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof"]
+async fn next_run_needing_batch_finds_a_freshly_created_runs_queued_targets_and_can_batch_them() {
+    // Before this fix, nothing in production code ever called prepare_study_batch: a StudyRun's
+    // targets were frozen as `queued` by prepare_study_run (the real HTTP-driven "创建研究运行"
+    // path exercised here) and then sat there forever, because the model worker's
+    // claim_next_study_batch loop only ever claims batches that already exist — it never creates
+    // one. This walks the exact real path a user triggers end to end: prepare_study_run →
+    // next_run_needing_batch (the new "which run should be packaged next" query) →
+    // prepare_study_batch, and asserts the run actually leaves `queued` behind.
+    let database = proof_database("comment_study_next_run_needing_batch").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    detail_with_author(
+        &database,
+        "study-dispatch-note",
+        "ADHD 笔记",
+        Some("creator-1"),
+    )
+    .await;
+    let source_ref = comment_with_author(
+        &database,
+        "study-dispatch-note",
+        "study-dispatch-comment",
+        "孩子每天写作业都要催，不催就不开始，我很着急。",
+        Some("reader-1"),
+        "2026-09-16T08:00:00Z",
+    )
+    .await;
+    let work_ref: Uuid = sqlx::query_scalar(
+        "SELECT content_public_ref FROM linggan_material_comment WHERE material_ref=$1",
+    )
+    .bind(source_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    seed_study_policy(&database).await;
+
+    assert_eq!(
+        next_run_needing_batch(&database, &[]).await.unwrap(),
+        None,
+        "no run exists yet; there is nothing to package"
+    );
+
+    let prepared = prepare_study_run(
+        &database,
+        PrepareStudyRunRequest {
+            content_public_refs: vec![work_ref],
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(prepared.target_count, 1);
+    assert_eq!(
+        sqlx::query_scalar::<_, String>(
+            "SELECT state FROM linggan_comment_study_target WHERE run_ref=$1"
+        )
+        .bind(prepared.run_ref)
+        .fetch_one(database.pool())
+        .await
+        .unwrap(),
+        "queued",
+        "prepare_study_run only freezes targets; it must not itself start processing them"
+    );
+
+    assert_eq!(
+        next_run_needing_batch(&database, &[]).await.unwrap(),
+        Some(prepared.run_ref),
+        "the freshly created run has a queued target and must be found"
+    );
+
+    let batch = prepare_study_batch(
+        &database,
+        PrepareStudyBatchRequest {
+            run_ref: prepared.run_ref,
+            maximum_targets: MAX_TARGETS_PER_BATCH,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(batch.target_refs.len(), 1);
+    assert_eq!(
+        sqlx::query_scalar::<_, String>(
+            "SELECT state FROM linggan_comment_study_target WHERE run_ref=$1"
+        )
+        .bind(prepared.run_ref)
+        .fetch_one(database.pool())
+        .await
+        .unwrap(),
+        "running",
+        "packaging into a batch must move the target off queued"
+    );
+
+    assert_eq!(
+        next_run_needing_batch(&database, &[]).await.unwrap(),
+        None,
+        "every queued target for this run has now been packaged; nothing left to find"
+    );
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn a_run_whose_target_never_fits_its_model_budget_does_not_starve_a_later_run() {
+    // A single comment can be longer than its own run's configured model input budget.
+    // fit_targets_to_model_budget then keeps every candidate out of the batch, so
+    // prepare_study_batch reports NoQueuedTargets even though a queued target still exists.
+    // next_run_needing_batch always picks the *oldest* run with a queued target, so without the
+    // exclusion list this older, permanently-unbatchable run would be picked again on every single
+    // tick forever, and a perfectly fine run created after it would never get a turn. This proves
+    // prepare_next_batch_across_runs — the actual function the worker calls every tick — walks
+    // past the stuck run within one call and lets the later run through.
+    let database = proof_database("comment_study_batch_dispatch_starvation").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    detail_with_author(
+        &database,
+        "study-dispatch-stuck-note",
+        "ADHD 笔记（评论超长）",
+        Some("creator-1"),
+    )
+    .await;
+    detail_with_author(
+        &database,
+        "study-dispatch-fine-note",
+        "ADHD 笔记（正常）",
+        Some("creator-2"),
+    )
+    .await;
+    let oversized_text = "孩子每天写作业都要催不催就不开始".repeat(400);
+    let stuck_source = comment_with_author(
+        &database,
+        "study-dispatch-stuck-note",
+        "study-dispatch-stuck-comment",
+        &oversized_text,
+        Some("reader-1"),
+        "2026-09-16T08:00:00Z",
+    )
+    .await;
+    let fine_source = comment_with_author(
+        &database,
+        "study-dispatch-fine-note",
+        "study-dispatch-fine-comment",
+        "孩子写作业总是拖拉。",
+        Some("reader-2"),
+        "2026-09-16T08:01:00Z",
+    )
+    .await;
+    let stuck_work: Uuid = sqlx::query_scalar(
+        "SELECT content_public_ref FROM linggan_material_comment WHERE material_ref=$1",
+    )
+    .bind(stuck_source)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let fine_work: Uuid = sqlx::query_scalar(
+        "SELECT content_public_ref FROM linggan_material_comment WHERE material_ref=$1",
+    )
+    .bind(fine_source)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+
+    let policy_ref = seed_study_policy(&database).await;
+    // The lowest limit the schema allows (linggan_model_config_input_token_limit_check requires
+    // 1024..=32768): the oversized single comment's own manifest cannot fit even at this floor,
+    // while the ordinary-length comment in the second run fits comfortably. linggan_model_config
+    // rows are immutable (see linggan_model_config_immutable), so the limit must be set at insert
+    // time.
+    seed_study_model_config_with_input_limit(&database, policy_ref, 1024).await;
+
+    let stuck_run = prepare_study_run(
+        &database,
+        PrepareStudyRunRequest {
+            content_public_refs: vec![stuck_work],
+        },
+    )
+    .await
+    .unwrap();
+    // created_at has second precision here; make sure the stuck run really is the older one.
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+    let fine_run = prepare_study_run(
+        &database,
+        PrepareStudyRunRequest {
+            content_public_refs: vec![fine_work],
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(stuck_run.target_count, 1);
+    assert_eq!(fine_run.target_count, 1);
+
+    assert!(
+        prepare_next_batch_across_runs(&database).await.unwrap(),
+        "the fine run's target must still get packaged in this same tick"
+    );
+
+    assert_eq!(
+        sqlx::query_scalar::<_, String>(
+            "SELECT state FROM linggan_comment_study_target WHERE run_ref=$1"
+        )
+        .bind(fine_run.run_ref)
+        .fetch_one(database.pool())
+        .await
+        .unwrap(),
+        "running",
+        "the later, batchable run must not be starved by the earlier stuck one"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, String>(
+            "SELECT state FROM linggan_comment_study_target WHERE run_ref=$1"
+        )
+        .bind(stuck_run.run_ref)
+        .fetch_one(database.pool())
+        .await
+        .unwrap(),
+        "queued",
+        "the stuck run's target is honestly left queued, not silently dropped or faked as failed"
+    );
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
 async fn batch_freezes_only_one_work_context_and_marks_only_its_targets_running() {
     let database = proof_database("comment_study_same_work_batch").await;
     sqlx::raw_sql(STUDY_SCHEMA_SQL)
@@ -1559,6 +1787,14 @@ async fn seed_study_model_config(
     database: &linggan_storage_postgres::Database,
     policy_ref: Uuid,
 ) -> Uuid {
+    seed_study_model_config_with_input_limit(database, policy_ref, 16000).await
+}
+
+async fn seed_study_model_config_with_input_limit(
+    database: &linggan_storage_postgres::Database,
+    policy_ref: Uuid,
+    input_token_limit: i32,
+) -> Uuid {
     let connection_ref = Uuid::new_v4();
     let version_ref = Uuid::new_v4();
     let model_ref = Uuid::new_v4();
@@ -1594,10 +1830,11 @@ async fn seed_study_model_config(
     sqlx::query(
         "INSERT INTO linggan_model_config( \
            config_ref,model_ref,input_token_limit,output_token_limit,timeout_seconds,max_attempts \
-         ) VALUES($1,$2,16000,2000,30,1)",
+         ) VALUES($1,$2,$3,2000,30,1)",
     )
     .bind(config_ref)
     .bind(model_ref)
+    .bind(input_token_limit)
     .execute(database.pool())
     .await
     .unwrap();
