@@ -143,7 +143,7 @@ fi
 runtime_revision="$(git -C "$runtime_dir" rev-parse HEAD)"
 request_worker_drain "$runtime_revision" "$target_revision"
 
-# 启动时由 sync.sh 消费上面的 target-specific drain permit，再把运行目录同步到
+# 启动时由新 revision 的 sync.sh 消费上面的 target-specific drain permit，再把运行目录同步到
 # origin/main。安装入口不能先 reset 再去停 worker，否则旧进程可能在已被替换的工作树上
 # 继续运行，且无法证明其在途模型调用已经落账。
 [[ -x "$runtime_dir/scripts/runtime/launch.sh" ]] \
@@ -152,6 +152,16 @@ request_worker_drain "$runtime_revision" "$target_revision"
 # .env 不进版本库，因此从开发目录复制一份。两边必须是同一个数据库。
 cp "$repo_root/.env" "$runtime_dir/.env"
 log "已同步 .env 到运行目录"
+
+# The existing runtime may predate a retired binary. Run the target revision's synchronizer from
+# the source checkout, not the runtime copy that is about to be replaced.
+sync_copy="$(mktemp -t linggan-sync)"
+cp "$repo_root/scripts/runtime/sync.sh" "$sync_copy"
+LINGGAN_RUNTIME_DIR="$runtime_dir" LINGGAN_SUPPORT_DIR="$support_dir" /bin/zsh "$sync_copy"
+rm -f "$sync_copy"
+
+[[ "$(git -C "$runtime_dir" rev-parse HEAD)" == "$target_revision" ]] \
+  || { print -r -- "运行目录未同步到目标 revision；未重启服务" >&2; exit 1; }
 
 write_plist() {
   local label="$1" binary="$2" logname="$3" port="${4:-}"
