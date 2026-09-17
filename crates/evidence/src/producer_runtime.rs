@@ -5,6 +5,7 @@
 //! Coverage-based use remain deliberately separate.
 
 use crate::local_discovery::{DiscoveryLibraryCard, DiscoveryLibraryProjection};
+use crate::material_processing::processor_version_for_kind;
 use linggan_contracts::{
     EvidenceQuery, EvidenceTimeView, ProducerAttempt, ProducerCapturePackage,
     ProducerRuntimeContractError, ProducerSubmission, ProducerTaskSpec, PublishedWindow,
@@ -37,6 +38,8 @@ pub enum ProducerRuntimeError {
     MediaBlobConflict,
     #[error("typed material identity conflicts with an existing immutable fact")]
     MaterialIdentityConflict,
+    #[error("no processor version is registered for processor kind: {0}")]
+    ProcessorKindNotRegistered(String),
 }
 
 #[derive(Debug, Serialize)]
@@ -230,9 +233,13 @@ pub async fn admit_media_blob(
         "asr" => allow_asr,
         _ => true,
     }) {
+        // 版本号从 `processor_version_for_kind` 取，不写死：写死的话，抬了版本也只会作用于这里
+        // 一处，而存量重排（`requeue_outdated_processor_jobs`）用的是同一个函数——两处必须同源。
+        let processor_version = processor_version_for_kind(processor_kind)
+            .ok_or_else(|| ProducerRuntimeError::ProcessorKindNotRegistered(processor_kind.to_owned()))?;
         let job_ref = Uuid::new_v4();
-        let inserted = sqlx::query("INSERT INTO linggan_media_processing_job (job_ref,blob_sha256,slot_key,processor_kind,processor_version,input_scope) VALUES ($1,$2,$3,$4,'local-v1','full_blob') ON CONFLICT (blob_sha256,slot_key,processor_kind,processor_version,input_scope) DO NOTHING")
-            .bind(job_ref).bind(sha256).bind(&slot_key).bind(processor_kind)
+        let inserted = sqlx::query("INSERT INTO linggan_media_processing_job (job_ref,blob_sha256,slot_key,processor_kind,processor_version,input_scope) VALUES ($1,$2,$3,$4,$5,'full_blob') ON CONFLICT (blob_sha256,slot_key,processor_kind,processor_version,input_scope) DO NOTHING")
+            .bind(job_ref).bind(sha256).bind(&slot_key).bind(processor_kind).bind(processor_version)
             .execute(&mut *tx).await.map_err(ProducerRuntimeError::Internal)?;
         if inserted.rows_affected() == 1 {
             sqlx::query("INSERT INTO linggan_media_processing_job_event (event_ref,job_ref,state,reason) VALUES ($1,$2,'pending','queued_for_local_processor')")

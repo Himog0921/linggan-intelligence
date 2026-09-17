@@ -2,6 +2,10 @@
 //!
 //! Jobs, events and derivatives are append-only facts. `linggan_media_processing_work` is the
 //! bounded mutable lease that prevents duplicate processing and infinite pending retries.
+//!
+//! 本模块另外管一件与「已准入的作业」直接相关的事：**处理器的版本号**。作业的唯一键含
+//! `processor_version`，所以改了一个处理器的行为却不抬版本号，改动就只对今后新采的字节生效；
+//! 抬了版本号，存量才有一条可被重新排队的路（`requeue_outdated_processor_jobs`）。
 
 use crate::material_processing_validation::{derivative_matches_processor, is_sha256};
 use crate::producer_runtime::ProducerRuntimeError;
@@ -580,4 +584,127 @@ pub async fn record_media_derivative_completion(
     .map_err(ProducerRuntimeError::Internal)?;
     tx.commit().await.map_err(ProducerRuntimeError::Internal)?;
     Ok(derivative_ref)
+}
+
+/// 登记的处理器名。与 `0004` 里 `processor_kind` 的 `CHECK` 同一份名单。
+///
+/// 单独列出来是给两个调用方校验名字用的：摄取路径不该生出一个没有版本的处理器，
+/// 重排工具的命令行也不该把名字打错读成「这一类没有旧作业」。
+pub const REGISTERED_PROCESSOR_KINDS: [&str; 5] = [
+    "thumbnail",
+    "image_ocr",
+    "audio_extract",
+    "asr",
+    "video_frame_ocr",
+];
+
+/// 这个处理器当前的版本号。**改了处理器的行为，就必须同时抬它的版本号。**
+///
+/// 作业的唯一键是 `(blob_sha256,slot_key,processor_kind,processor_version,input_scope)`，摄取路径
+/// 用 `ON CONFLICT DO NOTHING` 去重。不抬版本号时，同一张图/同一段视频**连唯一键都对得上**，
+/// 新作业一条也插不进去——改成什么样，都只对今后新采的字节生效，库里已有的结果一条都不会重做。
+/// 2026-09-16 那批 OCR 繁体串扰（2243 条）与 195 条转录失败留在库里，根因就是这个。
+///
+/// 抬版本号**不替换**任何东西：`linggan_media_processing_job` 与 `linggan_media_derivative` 都是
+/// 只追加（触发器禁 UPDATE/DELETE）。旧结果是留在库里更早的一个版本，新结果追加在其后，读路径
+/// 按作业逐条列出、各自带着 `processorVersion`（`material_media_read.rs`）。
+///
+/// 返回 `None` 表示「这个处理器没有登记版本」，调用方必须停下来，不给默认值——与 `0088` 的并发闸
+/// 同一条 Closed World 规矩：没登记的处理器不该悄悄按旧版本跑起来，也不该悄悄什么都不做。
+pub fn processor_version_for_kind(processor_kind: &str) -> Option<&'static str> {
+    match processor_kind {
+        // 2026-09-17 抬版：Tesseract 语言表去掉 `chi_tra`（简繁串扰，同一张图上「家长」「家長」
+        // 并存），whisper 换 medium 并加简体提示、修掉交给 whisper 子进程的 PATH（缺 ffmpeg）。
+        "image_ocr" | "video_frame_ocr" | "asr" => Some("local-v2"),
+        // 行为没变的两类留在 `local-v1`：它们没有需要重做的存量，存量重排也不该碰它们。
+        "thumbnail" | "audio_extract" => Some("local-v1"),
+        _ => None,
+    }
+}
+
+/// 重排出来的作业在事件流里留下的理由，与 `queued_for_local_processor` 分开记：
+/// 「当初采回来的」和「按新版本补排的」在证据上必须分得开。
+const REQUEUE_REASON: &str = "requeued_after_processor_version_upgrade";
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProcessorRequeueSummary {
+    pub processor_kind: String,
+    pub target_version: String,
+    /// 本次排出来的作业条数。`dry_run` 时报的是「真的做一遍会排多少条」——见下。
+    pub enqueued_jobs: i64,
+}
+
+/// 把旧版本处理器做过的作业，按当前版本重新排一遍（存量重跑）。
+///
+/// 每条旧作业补出一条同 `(blob_sha256,slot_key,input_scope)` 的新作业，只把 `processor_version`
+/// 换成当前版本；同时补一条 `pending` 事件，与摄取路径成对写入的形状一致（读路径取作业的最后一条
+/// 事件当状态，缺了它界面会显示成没有状态）。**可认领的 work 行不在这里建**：那是
+/// `ensure_media_processing_work` 每 tick 的投影，它有唯一的主人，不另开一条路。
+///
+/// **幂等**：同一组键已经有当前版本的那些不再补，所以重复运行是 0 条，不是报错。
+/// **有序**由调用方决定：每次只排它点名的那几类；认领顺序仍由 `claim_media_processing_work`
+/// 的 `ORDER BY` 决定，这个函数不替它排。
+/// **`dry_run` 是真的做一遍再撤回**，不是另写一套「预估」SQL：同一句语句、同一个计数，跑在事务里，
+/// 结束前 `rollback`。两份谓词各写一遍必然有一天会漂，那时预演报的数就与真做出来的不一样了。
+pub async fn requeue_outdated_processor_jobs(
+    database: &Database,
+    processor_kinds: &[String],
+    dry_run: bool,
+) -> Result<Vec<ProcessorRequeueSummary>, ProducerRuntimeError> {
+    let mut summaries = Vec::new();
+    for processor_kind in processor_kinds {
+        let target_version = processor_version_for_kind(processor_kind).ok_or_else(|| {
+            ProducerRuntimeError::ProcessorKindNotRegistered(processor_kind.clone())
+        })?;
+        let mut tx = database
+            .pool()
+            .begin()
+            .await
+            .map_err(ProducerRuntimeError::Internal)?;
+        // `DISTINCT ON` 是给「同一个键上躺着两个以上旧版本」准备的：那种情况下两条源行会长出
+        // **同一个唯一键**，一条语句里插两遍同键的行会当场违反唯一约束、整句失败。取哪一条都行
+        // （它们的 blob、槽位、作用域本来就相同，只差版本号），所以按 `created_at` 定一条。
+        let enqueued_jobs: Vec<Uuid> = sqlx::query_scalar(
+            "WITH outdated AS ( \
+               SELECT DISTINCT ON (job.blob_sha256,job.slot_key,job.processor_kind,job.input_scope) \
+                      job.blob_sha256,job.slot_key,job.processor_kind,job.input_scope \
+               FROM linggan_media_processing_job job \
+               WHERE job.processor_kind=$1 \
+                 AND NOT EXISTS (SELECT 1 FROM linggan_media_processing_job current \
+                                 WHERE current.blob_sha256=job.blob_sha256 \
+                                   AND current.slot_key IS NOT DISTINCT FROM job.slot_key \
+                                   AND current.processor_kind=job.processor_kind \
+                                   AND current.processor_version=$2 \
+                                   AND current.input_scope=job.input_scope) \
+               ORDER BY job.blob_sha256,job.slot_key,job.processor_kind,job.input_scope, \
+                        job.created_at DESC), \
+             enqueued AS ( \
+               INSERT INTO linggan_media_processing_job \
+                 (job_ref,blob_sha256,slot_key,processor_kind,processor_version,input_scope) \
+               SELECT gen_random_uuid(),outdated.blob_sha256,outdated.slot_key, \
+                      outdated.processor_kind,$2,outdated.input_scope \
+               FROM outdated RETURNING job_ref) \
+             INSERT INTO linggan_media_processing_job_event (event_ref,job_ref,state,reason) \
+             SELECT gen_random_uuid(),enqueued.job_ref,'pending',$3 FROM enqueued \
+             RETURNING job_ref",
+        )
+        .bind(processor_kind)
+        .bind(target_version)
+        .bind(REQUEUE_REASON)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(ProducerRuntimeError::Internal)?;
+        if dry_run {
+            tx.rollback().await.map_err(ProducerRuntimeError::Internal)?;
+        } else {
+            tx.commit().await.map_err(ProducerRuntimeError::Internal)?;
+        }
+        summaries.push(ProcessorRequeueSummary {
+            processor_kind: processor_kind.clone(),
+            target_version: target_version.to_owned(),
+            enqueued_jobs: enqueued_jobs.len() as i64,
+        });
+    }
+    Ok(summaries)
 }
