@@ -16,6 +16,13 @@ use uuid::Uuid;
 
 const MAX_PROCESSING_ATTEMPTS: i32 = 3;
 
+/// 作业的输入在库里已经找不到时写进 `last_error`／事件原因的词。
+///
+/// 它是**观察到的条件**，不是成因：库里没有这条素材行，既可能是素材从未入库，也可能是入库后
+/// 被移走，认领这里看到的两者一样。（2026-09-17 那 369 条核到的是前者：对应的内容 id 既没有
+/// `content_detail` 包，也没有任何派生文本——字节采到了，素材本身从没进过库。）
+const SOURCE_MATERIAL_MISSING: &str = "source_material_missing";
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MediaProcessingClaim {
@@ -29,6 +36,25 @@ pub struct MediaProcessingClaim {
     pub storage_key: String,
     pub content_public_ref: Uuid,
     pub lease_expires_at: String,
+}
+
+/// 一次认领尝试的三种结局。
+///
+/// 这里不能再用 `Option`：**「当场退休了一条永远不会有输入的作业」**是第三种结局，而 `None`
+/// 在 worker 那里读作「这一轮没有活」，一行日志都不打。2026-09-17 的停摆就是这么发生的——
+/// 369 条输入读不出来的作业按 `created_at` 排在队首，每次认领都在同一条上抛错、打断整个 tick，
+/// 2400 多条正常作业跟着一起停，日志里只有一行 `claim failed`。退休必须**说得出**。
+#[derive(Debug)]
+pub enum MediaProcessingClaimOutcome {
+    Claimed(MediaProcessingClaim),
+    /// 队首那条作业的输入已经无处可读（库里没有这条素材）：已把它退休，本次没有拿到作业。
+    Retired {
+        job_ref: Uuid,
+        processor_kind: String,
+        reason: &'static str,
+    },
+    /// 这一轮没有可认领的作业。
+    Idle,
 }
 
 pub async fn ensure_media_processing_work(database: &Database) -> Result<u64, sqlx::Error> {
@@ -64,7 +90,7 @@ pub enum ClaimGateReadiness {
 /// 读一次认领闸的就绪状态。
 ///
 /// **存在的理由是：没登记的表现是「什么都不发生」。** 未迁移或未登记时 `claim` 一律返回
-/// `Ok(None)`，worker 把它读成「这一轮没有活」，循环继续，**一行日志都不打**——一个看起来
+/// `MediaProcessingClaimOutcome::Idle`，worker 把它读成「这一轮没有活」，循环继续，**一行日志都不打**——一个看起来
 /// 完全健康的进程永远空转。本包要消灭的正是这种失败形态（196 条 asr 里 195 条静默失败，
 /// 就是零日志藏出来的），所以闸门自己不能以同一种方式藏起来。
 ///
@@ -102,7 +128,7 @@ pub async fn claim_media_processing_work(
     database: &Database,
     worker_instance_ref: Uuid,
     enabled_processors: &[String],
-) -> Result<Option<MediaProcessingClaim>, sqlx::Error> {
+) -> Result<MediaProcessingClaimOutcome, sqlx::Error> {
     let ready: bool = sqlx::query_scalar(
         "SELECT to_regclass('linggan_media_processing_work') IS NOT NULL \
             AND to_regclass('linggan_media_processing_concurrency') IS NOT NULL",
@@ -110,7 +136,7 @@ pub async fn claim_media_processing_work(
     .fetch_one(database.pool())
     .await?;
     if !ready || enabled_processors.is_empty() {
-        return Ok(None);
+        return Ok(MediaProcessingClaimOutcome::Idle);
     }
     let mut tx = database.pool().begin().await?;
     // **认领闸。** 先取锁，再数在途，最后才认领——三步必须在同一把锁下，否则这道闸拦不住任何东西。
@@ -180,11 +206,63 @@ pub async fn claim_media_processing_work(
     .await?;
     let Some(candidate) = candidate else {
         tx.commit().await?;
-        return Ok(None);
+        return Ok(MediaProcessingClaimOutcome::Idle);
     };
     let work_ref: Uuid = candidate.get("work_ref");
     let job_ref: Uuid = candidate.get("job_ref");
     let processor_kind: String = candidate.get("processor_kind");
+    // **输入先读，租约后给。** 这条读会把作业落到一个**当前还存在的素材**上：派生文本的外键指
+    // 向 `linggan_material_content.public_ref`，素材行不在，OCR 出来的字就没有地方可挂。
+    //
+    // 2026-09-17 生产事实：2442 条重排出来的作业里有 369 条的素材行不在（那批字节的详情从未入库），
+    // 它们按 `created_at` 排在队首。而这条读原本用的是 `fetch_one`——一句 `RowNotFound` 就把整个
+    // tick 打断，队列后面 2000 多条谁也领不到。所以这里做两件事：用 `fetch_optional` 把「读不出来」
+    // 当成一种**正常结局**，并且**只退它一条**（下一个 tick 再退下一条），而不是替整个队列下结论。
+    let input = sqlx::query(
+        "SELECT job.processor_version,job.blob_sha256,blob.mime_type,blob.storage_key, \
+                content.public_ref AS content_public_ref \
+         FROM linggan_media_processing_job job \
+         JOIN linggan_media_blob blob ON blob.sha256=job.blob_sha256 \
+         JOIN linggan_media_slot slot ON slot.slot_key=job.slot_key \
+         JOIN linggan_material_content content \
+           ON content.platform=slot.platform AND content.content_external_id=slot.content_external_id \
+         WHERE job.job_ref=$1",
+    )
+    .bind(job_ref)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some(input) = input else {
+        // 就地退休。状态是 `not_applicable` 而不是 `terminal`：`terminal` 被表约束钉死为
+        // 「试满 3 次」（`CHECK (state<>'terminal' OR attempt_count=3)`），而这条作业**一次都没试过**，
+        // 把 `attempt_count` 写成 3 是伪造尝试史。`not_applicable` 也要求 `completed_at`，
+        // 正好记下「这条到此为止」的时刻；理由写在 `last_error` 里，事件流里也留一条。
+        //
+        // 边界：**退休是终局**。素材日后重新入库时这条不会自己复活（`ensure_media_processing_work`
+        // 只补没有 work 行的作业），要有一次明确的处置才能让它再跑。
+        sqlx::query(
+            "UPDATE linggan_media_processing_work SET state='not_applicable',last_error=$2, \
+             completed_at=scope_001_now(),updated_at=scope_001_now() WHERE work_ref=$1",
+        )
+        .bind(work_ref)
+        .bind(SOURCE_MATERIAL_MISSING)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "INSERT INTO linggan_media_processing_job_event(event_ref,job_ref,state,reason) \
+             VALUES($1,$2,'invalidated',$3)",
+        )
+        .bind(Uuid::new_v4())
+        .bind(job_ref)
+        .bind(SOURCE_MATERIAL_MISSING)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        return Ok(MediaProcessingClaimOutcome::Retired {
+            job_ref,
+            processor_kind,
+            reason: SOURCE_MATERIAL_MISSING,
+        });
+    };
     let lease_interval = if processor_kind == "asr" {
         "6 hours"
     } else {
@@ -210,19 +288,6 @@ pub async fn claim_media_processing_work(
     .bind(job_ref)
     .execute(&mut *tx)
     .await?;
-    let input = sqlx::query(
-        "SELECT job.processor_version,job.blob_sha256,blob.mime_type,blob.storage_key, \
-                content.public_ref AS content_public_ref \
-         FROM linggan_media_processing_job job \
-         JOIN linggan_media_blob blob ON blob.sha256=job.blob_sha256 \
-         JOIN linggan_media_slot slot ON slot.slot_key=job.slot_key \
-         JOIN linggan_material_content content \
-           ON content.platform=slot.platform AND content.content_external_id=slot.content_external_id \
-         WHERE job.job_ref=$1",
-    )
-    .bind(job_ref)
-    .fetch_one(&mut *tx)
-    .await?;
     let claim = MediaProcessingClaim {
         work_ref,
         job_ref,
@@ -236,7 +301,7 @@ pub async fn claim_media_processing_work(
         lease_expires_at: row.get("lease_expires_at"),
     };
     tx.commit().await?;
-    Ok(Some(claim))
+    Ok(MediaProcessingClaimOutcome::Claimed(claim))
 }
 
 #[allow(clippy::too_many_arguments)]
