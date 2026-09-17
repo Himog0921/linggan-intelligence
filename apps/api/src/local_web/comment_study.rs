@@ -286,4 +286,51 @@ mod tests {
         headers.insert(header::ORIGIN, "http://127.0.0.1:3000".parse().unwrap());
         assert!(allowed_origin(&headers));
     }
+
+    #[test]
+    fn comment_study_page_uses_the_shared_workspace_and_a_table_for_work_selection() {
+        let page = include_str!("comment_study.html");
+        assert!(page.contains("<div class=\"v7-app\">"));
+        assert!(page.contains("<div class=\"v7-shell\">"));
+        assert!(page.contains("class=\"v7-sr-only\""));
+        assert!(
+            page.contains("<table class=\"study-table\" aria-labelledby=\"work-picker-title\"")
+        );
+        assert!(page.contains("id=\"work-filter\""));
+        assert!(page.contains("id=\"select-visible-works\""));
+        assert!(!page.contains("study-hero"));
+        assert!(!page.contains("work-option"));
+    }
+
+    #[test]
+    fn work_selection_keeps_its_canonical_set_when_the_visible_table_is_filtered() {
+        let script = include_str!("comment_study.js");
+        assert!(script.contains("const selectedWorkRefs = new Set();"));
+        assert!(script.contains("const visibleWorks = ()"));
+        assert!(script.contains("visibleWorks().forEach(work =>"));
+        assert!(script.contains("selectedWorkRefs.has(work.workRef)"));
+        assert!(script.contains(
+            "document.querySelector('#work-filter').addEventListener('input', renderWorks)"
+        ));
+    }
+
+    #[test]
+    fn comment_study_table_keeps_desktop_scroll_local_and_releases_it_on_narrow_screens() {
+        let stylesheet = include_str!("comment_study.css");
+        assert!(stylesheet.contains(
+            ".study-table-wrap{max-block-size:calc(var(--lgi-space-24) * 5);overflow:auto"
+        ));
+        assert!(stylesheet.contains(".study-table th{position:sticky"));
+        assert!(stylesheet.contains(
+            ".study-table input[type=\"checkbox\"]{inline-size:var(--lgi-space-6);block-size:var(--lgi-space-6)"
+        ));
+        assert!(stylesheet.contains(
+            "#save-policy:not(:disabled),.study-main #start-run:not(:disabled){border:2px solid var(--lgi-ink);background:var(--lgi-signal-ink);box-shadow:var(--lgi-shadow-brutal)"
+        ));
+        assert!(stylesheet.contains("@media(max-width:900px){.study-main{overflow:visible"));
+        assert!(stylesheet.contains(".study-table-wrap{max-block-size:none;overflow:visible"));
+        assert!(stylesheet.contains(
+            ".study-table th:first-child,.study-table td:first-child{width:var(--lgi-space-10)}"
+        ));
+    }
 }

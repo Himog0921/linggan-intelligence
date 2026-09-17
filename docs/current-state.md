@@ -17,6 +17,8 @@
 
 Mog 于 2026-09-16 明确决定不迁移任何旧评论研究派生结果，并要求不保留旧 V1/V2/V3 代码路径、合同或兼容层。当前唯一权威是 [DEC-0006](decisions/0006-comment-research-clean-rebuild.md) 和 [COMMENT-STUDY-REBUILD-001](plans/active/comment-research-rebuild-001.md)：领域 ADHD 是组织范围，用户选择笔记，评论是研究目标与唯一 Signal 原声证据，标题／正文／OCR／ASR 和确知父评论只作为可追溯语境。开发期本机 reset 已执行，仅删除评论研究派生层，保留原始 Evidence、资格事实与媒体 disposition；真实模型调用、共享 migration、runtime 切换、3000 刷新、合并和业务验收仍未发生。
 
+2026-09-17 新建独立候选 `codex/comment-study-layout-001`（base `origin/main@0a7c940`）收束用户指出的初始输入页空白 Hero 与卡片选择器：现为紧凑受控启动工具栏、可筛选的连续候选表、运行读数。临时 3001 真实读取到 100 篇 ADHD 作品；桌面和 390px 宽度浏览器走查、筛选后保留选择、页面静态测试均已通过。该候选不改 API、schema、worker、模型或 shell，且尚未提交、合并、刷新 3000 或取得 Mog 业务验收；细节见 [布局验收记录](design/acceptance/comment-study-layout-001-acceptance.md)。
+
 已在 `codex/comment-research-rebuild-001` 的专属 worktree 建立新 schema/reset guard、ADHD/as-of/restriction/withdrawn-media source gate、用户选笔记的 repeatable-read Run 冻结，以及评论原声 span/Frame basis 的原子 semantic acceptance。同篇评论现在可冻结为 batch：输入 manifest 固定 work context 和每个 target，输出必须按 targetRef 返回；局部合法结果已可独立写入 Signal，遗漏 target 生成有界 rejected attempt 并回到 queued，不能被伪装为 no_signal 或拖垮同批合法结果。batch 先以短事务领取带 token 的 lease、在发送前重核来源资格；来源冻结后被限制则取消 batch 而不外发正文。每个已租 batch 至多预留一个不含评论正文/提示词的通用调用账本收据；重复预留复用同一收据，接纳的 semantic attempt 指回它，正常接纳、合同拒绝和 lease 过期都会终态写回账本。长期 Problem 现以服务端封存候选集、逐候选固定维度比较、单一明确匹配才建立 membership 的方式落地；无匹配保持 `deferred_novel`，只有不同作者的两条独立评论均已无匹配并提出带 include/exclude 边界的共同定义时才可建档。真实 Pi adapter 已接入 semantic、resolution 和 pair 三种受限输出合同；候选召回使用结构化 PostgreSQL FTS；新 API/UI 已提供受控 policy 保存、ADHD 作品选择与不外发的 StudyRun 创建。旧评论研究 Rust/API/UI/worker 和旧向量设置入口均已从活跃源码移除。隔离 PostgreSQL proof 已通过；真实模型调用和运行时/3000 发布仍待后续授权。
 
 **下列 COMMENT-RESEARCH-V1/V2 段落仅记录历史运行和设计沿革，不再定义当前评论研究实现、运行或验收范围。**

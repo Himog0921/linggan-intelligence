@@ -135,6 +135,10 @@ LIDS 现在统一约束全项目的设计表达，但其成熟度仍为 Proposed
 
 [变更清单](changes/comment-research-problem-resolution-v2-ui-change-manifest.md) 记录同一“用户问题”读取面中的 confirmed/deferred 筛选、只读详情与状态边界；不构成 runtime 刷新、真实模型调用或业务验收。
 
+## COMMENT-STUDY-LAYOUT-001 候选布局
+
+[页面规格](pages/comment-study-rebuild-page.md)、[变更清单](changes/comment-study-rebuild-001-ui-change-manifest.md)、[布局验收记录](acceptance/comment-study-layout-001-acceptance.md) 记录 Issue #295 新评论研究初始输入面的 L1 表格布局、筛选/选择边界及浏览器走查；该候选尚未合并或刷新本机 3000。
+
 ## MODEL-PI-001 交付分支
 
 [页面规格](pages/model-ai-settings-page.md)、[变更清单](changes/model-pi-001-ui-change-manifest.md)、[实施验收](acceptance/model-pi-001-acceptance.md) 记录四区设置、个人菜单最小适配、真实 SDK 与来源授权边界。
