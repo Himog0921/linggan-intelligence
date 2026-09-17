@@ -16,14 +16,6 @@ use serde_json::{Value, json};
 pub(super) fn routes() -> Router<LocalWebState> {
     Router::new()
         .route(
-            "/api/local/model-settings/embedding",
-            get(read_embedding).post(save_embedding),
-        )
-        .route(
-            "/api/local/model-settings/embedding/probe",
-            post(probe_embedding),
-        )
-        .route(
             "/settings",
             get(|| async { axum::response::Redirect::temporary("/settings/models") }),
         )
@@ -43,7 +35,7 @@ pub(super) fn routes() -> Router<LocalWebState> {
         .route("/api/local/model-settings/probes", post(probe))
         .route("/api/local/model-settings/config", post(save_config))
         .layer(middleware::from_fn(
-            super::comment_research::local_research_guard,
+            super::comment_study::local_comment_study_guard,
         ))
 }
 async fn read(State(state): State<LocalWebState>) -> Response {
@@ -107,10 +99,9 @@ fn respond(result: Result<Value, ModelError>) -> Response {
                 ModelError::Invalid | ModelError::InputLimit => StatusCode::BAD_REQUEST,
                 ModelError::Conflict => StatusCode::CONFLICT,
                 ModelError::NotFound => StatusCode::NOT_FOUND,
-                ModelError::Disabled
-                | ModelError::NotQualified
-                | ModelError::EmbeddingNotQualified
-                | ModelError::Budget => StatusCode::CONFLICT,
+                ModelError::Disabled | ModelError::NotQualified | ModelError::Budget => {
+                    StatusCode::CONFLICT
+                }
                 _ => StatusCode::SERVICE_UNAVAILABLE,
             };
             (status, Json(json!({"error":e.code()}))).into_response()
@@ -151,38 +142,5 @@ async fn script() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
         include_str!("model_settings.js"),
-    )
-}
-
-async fn read_embedding(State(state): State<LocalWebState>) -> Response {
-    let Some(db) = state.database.database() else {
-        return unavailable();
-    };
-    respond(linggan_intelligence::embedding_settings::read(db).await)
-}
-async fn save_embedding(
-    State(state): State<LocalWebState>,
-    Json(r): Json<linggan_intelligence::embedding_settings::SaveEmbedding>,
-) -> Response {
-    let Some(db) = state.database.database() else {
-        return unavailable();
-    };
-    respond(linggan_intelligence::embedding_settings::save(db, &r).await)
-}
-async fn probe_embedding(
-    State(state): State<LocalWebState>,
-    Json(r): Json<linggan_intelligence::embedding_settings::ProbeEmbedding>,
-) -> Response {
-    let Some(db) = state.database.database() else {
-        return unavailable();
-    };
-    respond(
-        linggan_intelligence::embedding_settings::probe(
-            db,
-            model_secret_store().as_ref(),
-            &PiAdapter::configured(),
-            &r,
-        )
-        .await,
     )
 }

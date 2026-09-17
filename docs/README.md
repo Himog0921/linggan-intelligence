@@ -1,7 +1,7 @@
 # 文档总索引
 
 > 状态: 权威当前
-> 最后核对: 2026-09-09
+> 最后核对: 2026-09-16
 > 适用范围: 全仓库文档导航、权威状态与渐进式披露
 > 事实来源: 当前 Git 文件树、`AGENTS.md` 与文档状态头
 > 冲突时以谁为准: `AGENTS.md` 和真实代码、合同、测试、运行结果
@@ -20,22 +20,26 @@
 | 文档 | 状态 | 用途 |
 |---|---|---|
 | [plans/active/account-observation-bootstrap-002.md](plans/active/account-observation-bootstrap-002.md) | 活跃计划 | Issue #218：新安装插件的首单软准入、账号观察启动、人工绑定审计与无秘密配置诊断 |
-| [plans/active/comment-research-reset-001.md](plans/active/comment-research-reset-001.md) | 活跃基础计划；语义输入合同已被 #254 P0 替代 | Issue #213：开发期清空旧研究派生结果、删除 Task B/P4，重建唯一评论研究语义内核；不再规定当前 Derivation 输入版本 |
-| [plans/active/comment-research-v1-real-closure-001.md](plans/active/comment-research-v1-real-closure-001.md) | 活跃计划；Issue #254；当前 Derivation 输入合同 | 开发期只重置评论研究派生层，修复语义上下文输入、研究指纹恢复、Atom 局部接纳与首轮真实发布闭环 |
-| [plans/active/comment-research-semantic-output-001.md](plans/active/comment-research-semantic-output-001.md) | 活跃计划；Issue #256 | 以受控真实批次修复语义提取与问题归并的结构化输出边界；不降低结果发布门槛 |
-| [plans/active/comment-research-output-diagnostics-001.md](plans/active/comment-research-output-diagnostics-001.md) | 活跃计划；Issue #258 | 将 V5 输出失败拆为安全阶段诊断，以候选绑定和精确证据短句降低模型合同失败 |
-| [plans/active/comment-research-partial-publication-001.md](plans/active/comment-research-partial-publication-001.md) | 活跃计划；Issue #264 | 将足够覆盖但含单项终态失败的 V1 Run 发布为可追溯的部分 ResultRevision；失败不计入统计 |
-| [plans/active/comment-research-cumulative-state-001.md](plans/active/comment-research-cumulative-state-001.md) | 活跃计划；Issue #281 | 将累计已确认 membership 与单轮统计发布资格分离，并在后续已启动 Run 中有界续办符合条件的历史归并 backlog |
-| [plans/active/comment-research-problem-resolution-v2.md](plans/active/comment-research-problem-resolution-v2.md) | 活跃计划；Issue #285 | 将 Atom→Problem 从模型直接新建改为有依据 Frame、固定维度比较、确定性决策与独立证据创建合同 |
+| [decisions/0006-comment-research-clean-rebuild.md](decisions/0006-comment-research-clean-rebuild.md) | 权威当前 | Issue #295：开发期销毁旧评论研究派生层，保留原始 Evidence 与资格事实；唯一的新评论研究合同与本机 reset 边界 |
+| [plans/active/comment-research-rebuild-001.md](plans/active/comment-research-rebuild-001.md) | 活跃计划；Issue #295；实现中 | 按领域选择笔记、冻结同篇语境与评论目标、严格语义接纳、长期 Problem 归并及旧路径删除的交付顺序 |
+| [plans/active/comment-research-reset-001.md](plans/active/comment-research-reset-001.md) | 历史基础 | 旧评论研究 reset 的历史记录；不再规定当前 schema、Run、输入或 UI 合同 |
+| [plans/active/comment-research-v1-real-closure-001.md](plans/active/comment-research-v1-real-closure-001.md) | 历史基线 | V1 Derivation/Run 运行记录；不得作为新实现或兼容路径 |
+| [plans/active/comment-research-semantic-output-001.md](plans/active/comment-research-semantic-output-001.md) | 历史基线 | V1 结构化输出修复记录；新输出合同由 COMMENT-STUDY-REBUILD-001 单独定义 |
+| [plans/active/comment-research-output-diagnostics-001.md](plans/active/comment-research-output-diagnostics-001.md) | 历史基线 | V1 输出诊断记录；不得重新接入新路径 |
+| [plans/active/comment-research-partial-publication-001.md](plans/active/comment-research-partial-publication-001.md) | 历史基线 | V1 发布合同记录；新读取和发布在替换阶段另行实现 |
+| [plans/active/comment-research-cumulative-state-001.md](plans/active/comment-research-cumulative-state-001.md) | 历史基线 | V1 累计状态记录；不迁移其历史研究结果 |
+| [plans/active/comment-research-problem-resolution-v2.md](plans/active/comment-research-problem-resolution-v2.md) | 历史基线 | 长期 Problem 的部分业务原则可审计参考；不复用其表、worker 或合同 |
 | [plans/active/comment-research-window-001.md](plans/active/comment-research-window-001.md) | 活跃计划；Issue #267；#281 已收束概览/问题主体 | 当前统计窗口无样本时说明基线与不可比；累计问题读取不再使用窗口统计 |
 | [plans/active/comment-research-pagination-001.md](plans/active/comment-research-pagination-001.md) | 活跃计划；Issue #269 | 评论研究三张增长型列表的有界分页浏览与 URL 页码保持 |
 | [plans/active/aud-code-quality-20260914.md](plans/active/aud-code-quality-20260914.md) | 活跃计划；Issue #279 | 恢复任务所有权、历史详情可达、退役材料读取、目标问题入口与可信检查器；不触碰生产运行 |
-| [decisions/0003-comment-research-single-semantic-kernel.md](decisions/0003-comment-research-single-semantic-kernel.md) | 权威当前 | 旧评论语义路径的退役、可继承基础能力和新内核的长期边界 |
-| [decisions/0004-comment-research-problem-resolution-v2.md](decisions/0004-comment-research-problem-resolution-v2.md) | 权威当前 | 稳定 Problem、待归并信号、模型/代码职责分离与创建并发边界 |
+| [decisions/0003-comment-research-single-semantic-kernel.md](decisions/0003-comment-research-single-semantic-kernel.md) | 历史基础 | 旧评论语义路径的退役记录；其表和运行合同由 DEC-0006 取代 |
+| [decisions/0004-comment-research-problem-resolution-v2.md](decisions/0004-comment-research-problem-resolution-v2.md) | 历史基础 | 稳定 Problem 的设计沿革；新实现只继承已在 DEC-0006/当前计划明确的业务不变量 |
 | [decisions/0005-lids-material-06-paper-residue.md](decisions/0005-lids-material-06-paper-residue.md) | 权威当前 | LIDS 第七种材料 `M-06` 纸面残留的格点归属、密度上限与允许区位 |
 | [design/pages/comment-research-v1-page.md](design/pages/comment-research-v1-page.md) | 权威当前；交付分支实现 | 评论研究 V1 的五视图、研究设置与用户状态合同 |
+| [design/pages/comment-study-rebuild-page.md](design/pages/comment-study-rebuild-page.md) | 权威当前；受保护工作树 | 评论研究重建后的 L1 读取职责、状态与验收边界；不复用 V1 结果版本或向量语义 |
 | [design/changes/comment-research-cumulative-state-001-ui-change-manifest.md](design/changes/comment-research-cumulative-state-001-ui-change-manifest.md) | 权威当前；实施中 | Issue #281 的累计已确认知识、统计版本与 Run Health 状态表达 |
 | [design/changes/comment-research-reset-001-ui-change-manifest.md](design/changes/comment-research-reset-001-ui-change-manifest.md) | 权威当前；交付分支实现 | 旧评论页面/API/自动计划替代与用户体验验证范围 |
+| [design/changes/comment-study-rebuild-001-ui-change-manifest.md](design/changes/comment-study-rebuild-001-ui-change-manifest.md) | 权威当前；受保护工作树 | 评论研究 clean rebuild 的 API/UI 替换范围、状态词典、依赖与验收矩阵 |
 | [design/changes/comment-research-problem-resolution-v2-ui-change-manifest.md](design/changes/comment-research-problem-resolution-v2-ui-change-manifest.md) | 权威当前 | Issue #285 的 confirmed/deferred 问题读取、受限原声边界与只读详情 |
 | [design/acceptance/comment-research-reset-001-acceptance.md](design/acceptance/comment-research-reset-001-acceptance.md) | 一次性验收记录；进行中 | V1 数据库、worker、UI、runtime 与用户验收边界 |
 | [archive/ci-auto-004-comment-auto-research.md](archive/ci-auto-004-comment-auto-research.md) | 历史归档 | 既有 P0–P5 与本机发布证据；其未来语义、聚类、读取和页面路径已被 COMMENT-RESEARCH-RESET-001 替代 |

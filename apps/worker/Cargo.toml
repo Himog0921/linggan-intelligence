@@ -18,9 +18,5 @@ uuid = { workspace = true, features = ["v4"] }
 name = "linggan-media-worker"
 path = "src/bin/media_worker.rs"
 
-[[bin]]
-name = "linggan-comment-worker"
-path = "src/bin/comment_worker.rs"
-
 [lints]
 workspace = true

@@ -8,12 +8,11 @@
 <body>
   <div class="v7-app">{{HEADER}}<div class="v7-shell lgi-model-shell">
     <main class="lgi-model-settings" aria-labelledby="model-settings-title">
-      <header class="lgi-model-toolbar"><div><p>设置 / 模型与 AI</p><h1 id="model-settings-title">评论研究 V1 的模型设置</h1><p>保存连接或默认配置不会发送评论。只有手动测试，以及已启用向量归并后的“开始研究”会发起受控调用。</p></div><button type="button" id="reload">刷新</button></header>
+      <header class="lgi-model-toolbar"><div><p>设置 / 模型与 AI</p><h1 id="model-settings-title">评论研究的模型设置</h1><p>保存连接或默认配置不会发送评论。只有手动测试和 StudyRun 的受控执行会发起模型调用。</p></div><button type="button" id="reload">刷新</button></header>
       <p id="settings-feedback" role="status" aria-live="polite"></p>
       <div class="lgi-model-surface">
         <section id="connections"><div class="lgi-model-section-heading"><h2>供应商连接</h2><button type="button" id="new-connection">添加连接</button></div><p>连接只保存到本机工作空间。测试会发送一条合成 V1 JSON 请求，不会发送评论。</p><div id="connection-list"></div></section>
         <section id="default-config"><h2>研究模型与调用上限</h2><p id="default-guidance" role="status"></p><form id="config-form"><label>研究模型<select name="modelRef" id="default-model" required></select></label><div class="lgi-model-fields"><label>输入上限（Token）<input name="inputTokenLimit" type="number" min="1024" max="32768" value="16000" required></label><label>输出上限（Token）<input name="outputTokenLimit" type="number" min="128" max="8192" value="2000" required></label><label>单次等待（秒）<input name="timeoutSeconds" type="number" min="1" max="60" value="30" required></label><label>最多尝试次数<input name="maxAttempts" type="number" min="1" max="3" value="2" required></label></div><p class="lgi-model-note">这些限制约束每一次 V1 语义提取或归并调用；评论研究页保存的单轮额度还会覆盖该轮的向量候选调用。</p><button type="submit">保存默认配置</button></form></section>
-        <section id="embedding"><div class="lgi-model-section-heading"><h2>向量召回模型</h2><button type="button" id="embedding-edit">配置与测试</button></div><p>向量只召回可能相关的问题，是否归并仍由受限语义判断决定。用户原声和运行页不会显示向量准备状态。</p><p id="embedding-state" role="status">正在读取…</p></section>
         <section id="worker"><h2>后台执行器与调用记录</h2><p id="worker-state" role="status"></p><div id="invocation-list"></div><p class="lgi-model-note">调用记录保留使用量和安全传输诊断，不保存评论正文或模型原始输出。</p></section>
       </div>
     </main>

@@ -39,8 +39,6 @@ pub enum ModelError {
     Budget,
     #[error("model_not_qualified")]
     NotQualified,
-    #[error("embedding_not_qualified")]
-    EmbeddingNotQualified,
     #[error("model_schema_missing")]
     SchemaMissing,
     #[error("model_database_unavailable")]
@@ -63,7 +61,6 @@ impl ModelError {
             Self::InvalidOutput => "model_invalid_output",
             Self::Budget => "model_budget_exhausted",
             Self::NotQualified => "model_not_qualified",
-            Self::EmbeddingNotQualified => "embedding_not_qualified",
             Self::SchemaMissing => "model_schema_missing",
             Self::Database(_) => "model_database_unavailable",
             Self::Source => "model_source_unavailable",

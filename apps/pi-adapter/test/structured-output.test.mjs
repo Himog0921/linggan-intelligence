@@ -72,6 +72,13 @@ test('V1 problem resolution receives its distinct named schema',async()=>{
     assert.deepEqual(bodies.at(-1).text.format,{type:'json_schema',name:'comment_research_problem_resolution_v1',schema});
   });
 });
+test('clean comment-study batches receive their distinct named schema',async()=>{
+  const batchPrompt=JSON.stringify({contract:'comment-study.note-batch.v1',task:'Return JSON.',outputSchema:schema,input:{targets:[]}});
+  await fixture(async bodies=>{
+    assert.equal((await execute({...request,prompt:batchPrompt})).ok,true);
+    assert.deepEqual(bodies.at(-1).text.format,{type:'json_schema',name:'comment_study_note_batch_v1',schema});
+  });
+});
 test('V2 research packets retain structured output on the documented DeepSeek protocol',async()=>{
   const semanticV2=JSON.stringify({contract:'comment-research.semantic.v2',task:'Return JSON only.',outputSchema:schema,untrustedMaterial:{comments:[]}});
   const resolutionV2=JSON.stringify({contract:'comment-research.semantic.v2/problem-resolution',task:'Return JSON only.',outputSchema:schema,untrustedMaterial:{candidates:[]}});
