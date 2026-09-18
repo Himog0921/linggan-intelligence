@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import resource
 import sys
 import time
 from typing import Any
@@ -31,6 +32,26 @@ def emit(value: dict[str, Any]) -> None:
     sys.stdout.flush()
 
 
+def resources(torch_module: Any, backend: str) -> dict[str, Any]:
+    """What this process is actually costing, for the qualification record.
+
+    Peak RSS is the resident set of *this* process and says nothing about GPU-side memory, so the
+    MPS figures are reported separately and only when the backend can produce them. System memory
+    pressure and swap activity are deliberately absent rather than guessed: reading them needs a
+    dependency this verified venv does not carry.
+    """
+    usage: dict[str, Any] = {
+        "peakRssBytes": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+    }
+    if backend == "mps":
+        try:
+            usage["mpsAllocatedBytes"] = torch_module.mps.current_allocated_memory()
+            usage["mpsDriverBytes"] = torch_module.mps.driver_allocated_memory()
+        except Exception:
+            pass
+    return usage
+
+
 def fail(request_id: str | None, code: str, started: float) -> None:
     emit(
         {
@@ -49,10 +70,12 @@ def main() -> int:
     parser.add_argument("--model-revision", required=True)
     args = parser.parse_args()
 
+    load_started = time.monotonic()
     try:
         import numpy as np
         import torch
         from sentence_transformers import SentenceTransformer
+        from sentence_transformers import __version__ as sentence_transformers_version
 
         backend = "mps" if torch.backends.mps.is_available() else "cpu"
         model = SentenceTransformer(
@@ -76,6 +99,11 @@ def main() -> int:
             "encodingMode": "document",
             "dimension": DIMENSION,
             "backend": backend,
+            "dtype": str(torch.bfloat16),
+            "torchVersion": torch.__version__,
+            "sentenceTransformersVersion": sentence_transformers_version,
+            "coldStartMs": int((time.monotonic() - load_started) * 1000),
+            **resources(torch, backend),
         }
     )
 
@@ -120,6 +148,7 @@ def main() -> int:
                     "dimension": DIMENSION,
                     "values": vectors.astype("float32").tolist(),
                     "elapsedMs": int((time.monotonic() - started) * 1000),
+                    **resources(torch, backend),
                 }
             )
         except Exception:

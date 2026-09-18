@@ -27,6 +27,7 @@ use linggan_intelligence::{
     comment_study_model_dispatch::reserve_study_batch_model_call,
     comment_study_model_runner::{StudyModelRunnerError, call_study_batch_model},
     model_runner::prepare_next_batch_across_runs,
+    comment_study_embedding::{ProbeOutcome, active_profile, probe_and_register_embedding_profile},
     model_runner::run_model_work_once,
     model_secrets::SyntheticModelSecrets,
     pi_adapter::PiAdapter,
@@ -3737,4 +3738,108 @@ async fn a_tick_encodes_a_waiting_signal_before_it_tries_to_recall_against_it() 
             "an encoded Signal against an empty catalogue is novel, not unsearchable"
         );
     }
+}
+
+fn embedding_runtime(script: &str) -> PiAdapter {
+    PiAdapter::configured_with_test_embedding(
+        std::path::PathBuf::from("/bin/sh"),
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(script),
+    )
+}
+
+#[tokio::test]
+#[ignore = "requires the local PostgreSQL proof database"]
+async fn a_runtime_that_encodes_everything_onto_one_point_is_refused_qualification() {
+    let database = proof_database("comment_study_probe_collapsed").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    let outcome = probe_and_register_embedding_profile(
+        &database,
+        &embedding_runtime("tests/support/comment_study_embedding_runtime_collapsed.sh"),
+    )
+    .await
+    .unwrap();
+
+    // Protocol-valid, deterministic, correctly shaped, unit norm — and worthless. Every structural
+    // check passes; only asking whether different texts land in different places catches it.
+    match outcome {
+        ProbeOutcome::Refused { failing_check, .. } => {
+            assert_eq!(failing_check, "different_texts_encoded_identically");
+        }
+        other => panic!("a collapsed runtime must not be qualified: {other:?}"),
+    }
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM linggan_comment_study_embedding_profile"
+        )
+        .fetch_one(database.pool())
+        .await
+        .unwrap(),
+        0,
+        "a refused probe registers nothing: an unusable space must not become the one every \
+         Problem is compared in"
+    );
+    assert_eq!(
+        active_profile(&database).await.unwrap(),
+        None,
+        "and recall still has no catalogue to search"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires the local PostgreSQL proof database"]
+async fn a_probed_runtime_becomes_the_qualified_profile_with_its_own_evidence() {
+    let database = proof_database("comment_study_probe_qualified").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    let adapter = embedding_runtime("tests/support/comment_study_embedding_runtime.sh");
+    let outcome = probe_and_register_embedding_profile(&database, &adapter)
+        .await
+        .unwrap();
+    let ProbeOutcome::Qualified {
+        profile_ref,
+        evidence,
+    } = outcome
+    else {
+        panic!("a runtime that encodes consistently and distinctly qualifies: {outcome:?}")
+    };
+    assert_eq!(active_profile(&database).await.unwrap(), Some(profile_ref));
+    // The record has to say what it ran on and what it cost, and has to name what it could not
+    // measure rather than leave the gap to be read as a zero.
+    for field in ["backend", "coldStartMs", "peakRssBytes", "repeatCosine"] {
+        assert!(
+            evidence.get(field).is_some_and(|value| !value.is_null()),
+            "the qualification evidence carries {field}: {evidence}"
+        );
+    }
+    assert_eq!(
+        evidence.get("notCaptured").and_then(|value| value.as_array()),
+        Some(&vec![
+            serde_json::json!("systemMemoryPressure"),
+            serde_json::json!("swapActivity")
+        ]),
+        "what the runtime cannot measure is named, not omitted"
+    );
+
+    // Probing the same runtime again is the same profile, not a second one. A *fresh* adapter,
+    // because the handshake is read once per process: reprobing without a restart would compare
+    // a cached line with itself and could not tell a measurement in the identity from a fact.
+    // Measurements change across restarts; if they reached the identity, every probe would orphan
+    // the vectors already encoded under the profile before it.
+    let restarted = embedding_runtime("tests/support/comment_study_embedding_runtime.sh");
+    let repeated = probe_and_register_embedding_profile(&database, &restarted)
+        .await
+        .unwrap();
+    let ProbeOutcome::Qualified {
+        profile_ref: repeated_ref,
+        ..
+    } = repeated
+    else {
+        panic!("the second probe also qualifies")
+    };
+    assert_eq!(repeated_ref, profile_ref, "one runtime, one profile");
 }

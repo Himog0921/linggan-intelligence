@@ -8,7 +8,7 @@
 //! mutex, so encoding is already serial; and a machine that is busy running local OCR or ASR is
 //! busy with the same scarce resource, so this step stands down instead of competing with it.
 
-use crate::comment_study_canonical::PREPROCESSING_REVISION;
+use crate::comment_study_canonical::{PREPROCESSING_REVISION, canonical_text};
 use crate::model_settings::ModelError;
 use crate::pi_adapter::PiAdapter;
 use linggan_storage_postgres::Database;
@@ -38,6 +38,8 @@ pub enum EmbeddingError {
     #[error("the local runtime returned a vector that is not one finite 512-dimension unit vector")]
     InvalidVector,
 }
+
+pub const PROBE_REVISION: &str = "comment-study.local-probe.v1";
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", tag = "outcome")]
@@ -221,6 +223,140 @@ async fn pending_count(database: &Database, profile_ref: Uuid) -> Result<i64, sq
 /// The runtime already normalizes twice, so this is not a second opinion about the maths: it is a
 /// refusal to persist anything that would make cosine distance mean something else. A stored
 /// non-unit or non-finite vector would rank silently rather than fail.
+/// The outcome of one local qualification probe.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase", tag = "outcome")]
+pub enum ProbeOutcome {
+    /// The runtime met every check the manual lists and the profile is now the qualified one.
+    Qualified { profile_ref: Uuid, evidence: Value },
+    /// A named check failed. Nothing is registered: a profile that cannot be shown to encode
+    /// correctly must not silently become the space every Problem is compared in.
+    Refused { failing_check: &'static str, evidence: Value },
+}
+
+/// Synthetic probe sentences, built through the same canonical template production uses, so the
+/// probe measures the encoding path rather than a shape only the probe ever sends. They are
+/// invented for this purpose: the manual forbids sending captured comment text to a qualification
+/// run.
+fn probe_texts() -> [(&'static str, String); 3] {
+    let frame = |barrier: &str, context: &str| {
+        json!({
+            "actor": {"value": "孩子"},
+            "goalOrExpectedState": {"value": "自主开始作业"},
+            "barrierOrUnmetNeed": {"value": barrier},
+            "context": {"value": context}
+        })
+    };
+    [
+        (
+            "base",
+            canonical_text(
+                "孩子在家庭作业中存在自主启动困难。",
+                Some(&frame("需要外部催促才肯开始", "家庭作业")),
+            ),
+        ),
+        (
+            "near",
+            canonical_text(
+                "孩子写作业时迟迟不肯动笔。",
+                Some(&frame("必须有人反复提醒才开始", "家庭作业")),
+            ),
+        ),
+        (
+            "unrelated",
+            canonical_text(
+                "成年人早晨起床后长时间无法离开床铺。",
+                Some(&frame("起床后精神无法启动", "成年人作息")),
+            ),
+        ),
+    ]
+}
+
+fn cosine(left: &[f64], right: &[f64]) -> f64 {
+    left.iter().zip(right).map(|(a, b)| a * b).sum()
+}
+
+/// Runs the manual's minimum local qualification test against the real runtime and, only if every
+/// check holds, registers the profile as qualified.
+///
+/// Nothing here may be written by hand. A qualified profile is a claim that this machine encodes
+/// correctly, and the only thing entitled to make that claim is a run that actually happened.
+pub async fn probe_and_register_embedding_profile(
+    database: &Database,
+    adapter: &PiAdapter,
+) -> Result<ProbeOutcome, EmbeddingError> {
+    let handshake = adapter.wemm_runtime_handshake().await?;
+    let Some(model_revision) = handshake.model_revision.clone() else {
+        return Err(EmbeddingError::Model(ModelError::InvalidOutput));
+    };
+    // Identity facts only. Measurements change on every run, and folding them into the identity
+    // would mint a new profile each time the probe is run — and orphan every vector already
+    // encoded under the previous one.
+    let runtime_manifest = json!({
+        "backend": handshake.backend,
+        "dtype": handshake.dtype,
+        "torchVersion": handshake.torch_version,
+        "sentenceTransformersVersion": handshake.sentence_transformers_version,
+    });
+
+    let mut vectors = Vec::new();
+    for (_, text) in probe_texts() {
+        let response = adapter.embed_wemm_document(&text).await?;
+        vectors.push(single_unit_vector(&response)?);
+    }
+    // Encoding the first text a second time. A runtime returning random vectors passes "different
+    // texts differ" and fails here, which is the case the manual calls out by name.
+    let repeat = adapter.embed_wemm_document(&probe_texts()[0].1).await?;
+    let repeat = single_unit_vector(&repeat)?;
+
+    let repeat_cosine = cosine(&vectors[0], &repeat);
+    let near_cosine = cosine(&vectors[0], &vectors[1]);
+    let unrelated_cosine = cosine(&vectors[0], &vectors[2]);
+    let evidence = json!({
+        "probeRevision": PROBE_REVISION,
+        "preprocessingRevision": PREPROCESSING_REVISION,
+        "backend": handshake.backend,
+        "dimension": handshake.dimension,
+        "coldStartMs": handshake.cold_start_ms,
+        "peakRssBytes": handshake.peak_rss_bytes,
+        "mpsAllocatedBytes": handshake.mps_allocated_bytes,
+        "mpsDriverBytes": handshake.mps_driver_bytes,
+        // Named rather than left to be inferred from their absence: the manual asks for these and
+        // this runtime cannot produce them without a dependency the verified venv does not carry.
+        "notCaptured": ["systemMemoryPressure", "swapActivity"],
+        "repeatCosine": repeat_cosine,
+        "nearCosine": near_cosine,
+        "unrelatedCosine": unrelated_cosine,
+    });
+
+    // Distances are recorded, not gated on: the manual puts admission thresholds behind a real
+    // labelled sample, not behind three synthetic sentences. What is gated on is that the runtime
+    // is deterministic and does not collapse different inputs onto one point.
+    if repeat_cosine < 0.999_999 {
+        return Ok(ProbeOutcome::Refused {
+            failing_check: "repeated_input_did_not_encode_consistently",
+            evidence,
+        });
+    }
+    if near_cosine >= 0.999_999 || unrelated_cosine >= 0.999_999 {
+        return Ok(ProbeOutcome::Refused {
+            failing_check: "different_texts_encoded_identically",
+            evidence,
+        });
+    }
+    let profile_ref = register_embedding_profile(
+        database,
+        &model_revision,
+        runtime_manifest,
+        Some(evidence.clone()),
+    )
+    .await?;
+    Ok(ProbeOutcome::Qualified {
+        profile_ref,
+        evidence,
+    })
+}
+
 fn single_unit_vector(response: &crate::pi_adapter::WeMMResponse) -> Result<Vec<f64>, EmbeddingError> {
     if !response.ok {
         return Err(EmbeddingError::InvalidVector);
@@ -286,6 +422,13 @@ mod tests {
             model_id: Some(WEMM_MODEL_ID.into()),
             model_revision: None,
             encoding_mode: Some("document".into()),
+            dtype: None,
+            torch_version: None,
+            sentence_transformers_version: None,
+            cold_start_ms: None,
+            peak_rss_bytes: None,
+            mps_allocated_bytes: None,
+            mps_driver_bytes: None,
         }
     }
 

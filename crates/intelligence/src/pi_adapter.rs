@@ -134,6 +134,10 @@ struct WeMMProcess {
     child: Child,
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
+    /// The handshake, kept rather than discarded: dtype, dependency versions and cold-start cost
+    /// are only ever stated once per process, and they are exactly what a qualification record
+    /// has to carry.
+    ready: WeMMResponse,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -161,6 +165,22 @@ pub struct WeMMResponse {
     pub model_revision: Option<String>,
     #[serde(default)]
     pub encoding_mode: Option<String>,
+    /// What the run actually cost on this machine. Recorded for the qualification record rather
+    /// than acted on: peak RSS is this process only and is not a GPU-side capacity statement.
+    #[serde(default)]
+    pub dtype: Option<String>,
+    #[serde(default)]
+    pub torch_version: Option<String>,
+    #[serde(default)]
+    pub sentence_transformers_version: Option<String>,
+    #[serde(default)]
+    pub cold_start_ms: Option<i64>,
+    #[serde(default)]
+    pub peak_rss_bytes: Option<i64>,
+    #[serde(default)]
+    pub mps_allocated_bytes: Option<i64>,
+    #[serde(default)]
+    pub mps_driver_bytes: Option<i64>,
 }
 
 impl WeMMResponse {
@@ -230,6 +250,21 @@ impl PiAdapter {
         adapter.node = node;
         adapter.script = script;
         adapter
+    }
+
+    /// The local runtime's handshake, starting it if it is not yet resident. Separate from
+    /// encoding because a qualification record has to state what it ran on, and that is only
+    /// reported once per process.
+    pub async fn wemm_runtime_handshake(&self) -> Result<WeMMResponse, ModelError> {
+        let mut guard = self.wemm_process.lock().await;
+        if guard.is_none() {
+            *guard = Some(self.start_wemm().await?);
+        }
+        Ok(guard
+            .as_ref()
+            .ok_or(ModelError::AdapterUnavailable)?
+            .ready
+            .clone())
     }
 
     /// Calls the one local WeMM document runtime.  Its process remains owned by this adapter
@@ -304,15 +339,16 @@ impl PiAdapter {
             .map_err(|_| ModelError::AdapterUnavailable)?;
         let stdin = child.stdin.take().ok_or(ModelError::AdapterUnavailable)?;
         let stdout = child.stdout.take().ok_or(ModelError::AdapterUnavailable)?;
+        let mut stdout = BufReader::new(stdout);
+        let ready = tokio::time::timeout(Duration::from_secs(90), read_wemm_line(&mut stdout))
+            .await
+            .map_err(|_| ModelError::Timeout)??;
         let mut process = WeMMProcess {
             child,
             stdin,
-            stdout: BufReader::new(stdout),
+            stdout,
+            ready: ready.clone(),
         };
-        let ready =
-            tokio::time::timeout(Duration::from_secs(90), read_wemm_line(&mut process.stdout))
-                .await
-                .map_err(|_| ModelError::Timeout)??;
         if !ready.valid_ready(&self.wemm_revision) {
             let _ = process.child.kill().await;
             return Err(ModelError::AdapterUnavailable);

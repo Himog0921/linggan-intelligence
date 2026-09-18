@@ -37,6 +37,10 @@ pub(super) fn routes() -> Router<LocalWebState> {
         .route("/api/local/comment-study/setup", get(read_setup))
         .route("/api/local/comment-study/policy", post(save_policy))
         .route("/api/local/comment-study/runs", post(start_run))
+        .route(
+            "/api/local/comment-study/embedding-probe",
+            post(run_embedding_probe),
+        )
         .layer(middleware::from_fn(local_comment_study_guard))
 }
 
@@ -64,6 +68,27 @@ async fn read_setup(State(state): State<LocalWebState>) -> Response {
         Err(_) => error(StatusCode::SERVICE_UNAVAILABLE, "comment_study_unavailable"),
     }
 }
+/// Runs the local qualification probe and, only if it passes, makes its profile the one every
+/// comparison happens in. An operator action rather than tick work: it loads the model and states
+/// what this machine can do, and nothing entitles the system to assert that on its own.
+async fn run_embedding_probe(State(state): State<LocalWebState>) -> Response {
+    let database = match database(&state) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    match linggan_intelligence::comment_study_embedding::probe_and_register_embedding_profile(
+        database,
+        &linggan_intelligence::pi_adapter::PiAdapter::configured(),
+    )
+    .await
+    {
+        Ok(outcome) => Json(json!(outcome)).into_response(),
+        // The local runtime being absent or failing to load is a fact about this machine, not a
+        // bad request, and it is reported as itself rather than as a failed probe.
+        Err(_) => error(StatusCode::SERVICE_UNAVAILABLE, "embedding_runtime_unavailable"),
+    }
+}
+
 async fn save_policy(
     State(state): State<LocalWebState>,
     Json(request): Json<SavePolicy>,
