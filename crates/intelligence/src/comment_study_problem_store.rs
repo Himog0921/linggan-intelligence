@@ -732,13 +732,6 @@ fn ordered_pair(first: Uuid, second: Uuid) -> (Uuid, Uuid) {
     }
 }
 
-fn hash_text(value: &str) -> String {
-    Sha256::digest(value.as_bytes())
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
-}
-
 fn sha256_json(value: &Value) -> String {
     Sha256::digest(
         serde_json::to_string(value)

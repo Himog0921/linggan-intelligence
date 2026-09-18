@@ -319,6 +319,17 @@ impl PiAdapter {
         }
         Ok(process)
     }
+    /// The same isolation for the local document runtime. The stub is handed the real
+    /// `--model-revision` on argv and must echo it back through the handshake, so the proof still
+    /// crosses the whole adapter boundary instead of trusting a stubbed return value.
+    #[doc(hidden)]
+    pub fn configured_with_test_embedding(python: PathBuf, script: PathBuf) -> Self {
+        let mut adapter = Self::configured();
+        adapter.wemm_python = python;
+        adapter.wemm_script = script;
+        adapter
+    }
+
     pub async fn call(&self, request: &PiRequest) -> Result<PiResponse, ModelError> {
         let input = serde_json::to_vec(request).map_err(|_| ModelError::Invalid)?;
         if input.len() > 131072 {

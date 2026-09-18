@@ -14,6 +14,7 @@ use crate::{
         recover_expired_study_batch_leases,
     },
     comment_study_candidate_recall::{advance_next_problem_pair, advance_next_problem_resolution},
+    comment_study_embedding::{EmbeddingError, EmbeddingOutcome, embed_pending_signals},
     comment_study_model_dispatch::StudyModelDispatchError,
     comment_study_model_runner::{StudyModelRunnerError, call_study_batch_model},
     comment_study_pair_worker::run_one_problem_pair,
@@ -64,6 +65,20 @@ pub async fn run_model_work_once(
         .await
         .map_err(|_| ModelError::Conflict)?
         > 0
+    {
+        return Ok(true);
+    }
+    // Ahead of recall: an unencoded Signal is not a Signal without matches, and recall can only
+    // report it as `retrieval_incomplete`. Encoding is local work with no provider cost, so it is
+    // the cheapest way to turn "could not search" back into an answerable question.
+    if let EmbeddingOutcome::Encoded { encoded, .. } = embed_pending_signals(database, adapter)
+        .await
+        .map_err(|error| match error {
+            EmbeddingError::Database(error) => ModelError::Database(error),
+            EmbeddingError::Model(error) => error,
+            EmbeddingError::InvalidVector => ModelError::Invalid,
+        })?
+        && encoded > 0
     {
         return Ok(true);
     }

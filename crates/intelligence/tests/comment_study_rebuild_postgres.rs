@@ -27,6 +27,7 @@ use linggan_intelligence::{
     comment_study_model_dispatch::reserve_study_batch_model_call,
     comment_study_model_runner::{StudyModelRunnerError, call_study_batch_model},
     model_runner::prepare_next_batch_across_runs,
+    model_runner::run_model_work_once,
     model_secrets::SyntheticModelSecrets,
     pi_adapter::PiAdapter,
     comment_study_problem_store::{
@@ -3668,4 +3669,72 @@ async fn one_inconclusive_comparison_does_not_retire_a_signal_from_pairing() {
          next-nearest admissible one; retiring it instead leaves the closest genuine comparison \
          in the domain unmade: {retried:?}"
     );
+}
+
+#[tokio::test]
+#[ignore = "requires the local PostgreSQL proof database"]
+async fn a_tick_encodes_a_waiting_signal_before_it_tries_to_recall_against_it() {
+    let database = proof_database("comment_study_tick_encodes").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    let (first, second) = two_eligible_signals(&database, "tick-encode-note").await;
+    seed_embedding_profile(&database).await;
+    let vectors = |database: &linggan_storage_postgres::Database| {
+        let pool = database.pool().clone();
+        async move {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT count(*) FROM linggan_comment_study_embedding_cache",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+    assert_eq!(vectors(&database).await, 0, "nothing is encoded yet");
+
+    let adapter = PiAdapter::configured_with_test_embedding(
+        std::path::PathBuf::from("/bin/sh"),
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/support/comment_study_embedding_runtime.sh"),
+    );
+    assert!(
+        run_model_work_once(&database, &SyntheticModelSecrets, &adapter)
+            .await
+            .unwrap(),
+        "the tick has encoding to do"
+    );
+
+    assert!(
+        vectors(&database).await > 0,
+        "the waiting Signal was encoded through the real adapter boundary"
+    );
+    // The order is what the outcome turns on, so the assertion is about the outcome rather than
+    // about which branch ran. Recall reached before encoding answers `retrieval_incomplete`, and
+    // that answer is final: the Signal stays stuck behind a condition the same tick could have
+    // cleared for free, with no provider call involved.
+    // Stops as soon as both Signals have been judged. Carrying on would reach the pair worker,
+    // which calls the provider — a different boundary, stubbed by a different script, and not
+    // what this proof is about.
+    for _ in 0..20 {
+        if resolution_state_for(&database, first).await.is_some()
+            && resolution_state_for(&database, second).await.is_some()
+        {
+            break;
+        }
+        assert!(
+            run_model_work_once(&database, &SyntheticModelSecrets, &adapter)
+                .await
+                .unwrap(),
+            "the tick still has local work to do"
+        );
+    }
+    for signal in [first, second] {
+        assert_eq!(
+            resolution_state_for(&database, signal).await,
+            Some(("deferred_novel".to_owned(), None)),
+            "an encoded Signal against an empty catalogue is novel, not unsearchable"
+        );
+    }
 }
