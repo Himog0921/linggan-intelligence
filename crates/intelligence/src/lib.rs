@@ -29,6 +29,7 @@ pub(crate) mod comment_cleaning;
 pub mod comment_study_acceptance;
 pub mod comment_study_batch;
 pub mod comment_study_canonical;
+pub mod comment_study_comparison_cache;
 pub mod comment_study_embedding;
 pub mod comment_study_recall;
 pub mod comment_study_batch_acceptance;

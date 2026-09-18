@@ -59,6 +59,14 @@ pub async fn run_model_work_once(
     {
         return Ok(true);
     }
+    // Ahead of the resolution worker: a comparison the cache can answer never becomes a call.
+    if crate::comment_study_comparison_cache::serve_pending_resolutions_from_cache(database)
+        .await
+        .map_err(|_| ModelError::Conflict)?
+        > 0
+    {
+        return Ok(true);
+    }
     if advance_next_problem_resolution(database)
         .await
         .map_err(|_| ModelError::Conflict)?

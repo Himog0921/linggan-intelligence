@@ -30,6 +30,7 @@ pub enum ResolutionWorkerError {
 
 struct ClaimedResolution {
     resolution_ref: Uuid,
+    signal_ref: Uuid,
     invocation_ref: Uuid,
     connection_version_ref: Uuid,
     model_id: String,
@@ -78,6 +79,15 @@ pub async fn run_one_problem_resolution(
                 }
             };
             checkpoint_invocation_usage(database, claim.invocation_ref, Some(&response)).await?;
+            // Record before dispatching on the outcome: the comparison was paid for either way,
+            // and a verdict that is not cached will simply be bought again next time.
+            let _ = crate::comment_study_comparison_cache::record_resolution_comparisons(
+                database,
+                claim.signal_ref,
+                &raw,
+                Some(claim.invocation_ref),
+            )
+            .await;
             match accept_problem_resolution(database, claim.resolution_ref, raw).await {
                 Ok(_) => {
                     finish_invocation(database, claim.invocation_ref, Some(&response), true, None, &json!({"contract":PROBLEM_RESOLUTION_CONTRACT,"resolutionRef":claim.resolution_ref,"accepted":true})).await?;
@@ -120,7 +130,7 @@ async fn claim_resolution(
 ) -> Result<Option<ClaimedResolution>, ResolutionWorkerError> {
     let mut tx = database.pool().begin().await?;
     let row = sqlx::query(
-        "SELECT resolution.resolution_ref,resolution.candidate_manifest,signal.proposition,signal.problem_frame, \
+        "SELECT resolution.resolution_ref,resolution.signal_ref,resolution.candidate_manifest,signal.proposition,signal.problem_frame, \
                 config.config_ref,config.input_token_limit,config.output_token_limit,config.timeout_seconds, \
                 model.model_ref,model.model_id,version.version_ref,connection.enabled \
          FROM linggan_comment_study_resolution resolution \
@@ -172,6 +182,7 @@ async fn claim_resolution(
     sqlx::query("UPDATE linggan_comment_study_resolution SET model_invocation_ref=$2 WHERE resolution_ref=$1 AND model_invocation_ref IS NULL").bind(row.get::<Uuid,_>("resolution_ref")).bind(invocation_ref).execute(&mut *tx).await?;
     let claim = ClaimedResolution {
         resolution_ref: row.get("resolution_ref"),
+        signal_ref: row.get("signal_ref"),
         invocation_ref,
         connection_version_ref: row.get("version_ref"),
         model_id: row.get("model_id"),

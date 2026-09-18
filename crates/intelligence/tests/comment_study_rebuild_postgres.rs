@@ -34,6 +34,7 @@ use linggan_intelligence::{
         prepare_problem_resolution,
     },
     comment_study_candidate_recall::advance_next_problem_resolution,
+    comment_study_comparison_cache::{record_resolution_comparisons, serve_pending_resolutions_from_cache},
     comment_study_recall::{RecallCompleteness, recall_candidates},
     comment_study_read::{
         CommentStudyReadQuery, read_overview, read_runs, read_signals, read_targets,
@@ -2478,6 +2479,85 @@ async fn resolution_state_for(
     .fetch_optional(database.pool())
     .await
     .unwrap()
+}
+
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn a_comparison_already_paid_for_is_not_bought_again() {
+    let database = proof_database("comment_study_comparison_cache").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    let (first, second) = two_eligible_signals(&database, "study-cache-note").await;
+    let profile = seed_embedding_profile(&database).await;
+    let first_hash = signal_canonical_hash(&database, first).await;
+    seed_vector(&database, profile, &first_hash, 0.0).await;
+    seed_vector(&database, profile, &signal_canonical_hash(&database, second).await, 0.1).await;
+    let problem = seed_existing_problem(
+        &database,
+        "作业启动困难",
+        "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        &[first, second],
+    )
+    .await;
+    // The seeded revision's own core hash, so path B can reach the Problem at all.
+    seed_vector(
+        &database,
+        profile,
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        0.3,
+    )
+    .await;
+
+    // A first comparison is recorded the way a real model call would leave it behind.
+    let prepared = prepare_problem_resolution(&database, first, vec![problem])
+        .await
+        .unwrap();
+    let verdict = serde_json::json!({
+        "contract":"comment-study.problem-resolution.v1",
+        "candidates":[{"problemRef":problem,"dimensions":{
+            "actor":"different","goalOrExpectedState":"different",
+            "barrierOrUnmetNeed":"different","context":"different"
+        }}]
+    });
+    record_resolution_comparisons(&database, first, &verdict, None)
+        .await
+        .unwrap();
+    accept_problem_resolution(&database, prepared.resolution_ref, verdict)
+        .await
+        .unwrap();
+
+    // The *same* Signal text against the *same* Problem core under the same policy: a second
+    // pending resolution must be answerable without reserving an invocation at all.
+    let second_run = prepare_problem_resolution(&database, second, vec![problem])
+        .await
+        .unwrap();
+    assert_eq!(second_run.state, "pending");
+    let served = serve_pending_resolutions_from_cache(&database).await.unwrap();
+
+    let (state, invocation): (String, Option<Uuid>) = sqlx::query_as(
+        "SELECT state,model_invocation_ref FROM linggan_comment_study_resolution \
+         WHERE resolution_ref=$1",
+    )
+    .bind(second_run.resolution_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    if signal_canonical_hash(&database, second).await == first_hash {
+        // Identical canonical sentences share a cache key, which is the whole point.
+        assert_eq!(served, 1);
+        assert_eq!(state, "deferred_novel");
+        assert_eq!(
+            invocation, None,
+            "a cached verdict must never reserve a model invocation"
+        );
+    } else {
+        // Different sentences are a different question; the cache must not answer it.
+        assert_eq!(served, 0);
+        assert_eq!(state, "pending");
+    }
 }
 
 #[tokio::test]
