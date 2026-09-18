@@ -31,6 +31,9 @@ pub enum PairCreationDecision {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewProblemDefinition {
+    /// A short neutral name. The revision stores it separately from the definition because the
+    /// title is what a reader scans, while the definition is what membership is judged against.
+    pub title: String,
     pub definition: String,
     pub stable_identity: Value,
     pub include_criteria: Vec<String>,
@@ -125,6 +128,7 @@ struct PairProposal {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ProposedProblemDefinition {
+    title: String,
     definition: String,
     stable_identity: Value,
     include_criteria: Vec<String>,
@@ -220,6 +224,7 @@ pub fn decide_pair_creation(
 fn validate_problem_definition(
     proposed: ProposedProblemDefinition,
 ) -> Result<NewProblemDefinition, ProblemResolutionContractError> {
+    let title = bounded_text(proposed.title, 200)?;
     let definition = bounded_text(proposed.definition, 1000)?;
     if !proposed.stable_identity.is_object()
         || proposed
@@ -243,6 +248,7 @@ fn validate_problem_definition(
         return Err(ProblemResolutionContractError::InvalidProblemDefinition);
     }
     Ok(NewProblemDefinition {
+        title,
         definition,
         stable_identity: proposed.stable_identity,
         include_criteria,

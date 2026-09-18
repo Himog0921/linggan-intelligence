@@ -2429,18 +2429,13 @@ async fn no_existing_match_stays_deferred_until_two_independent_signals_create_o
     .fetch_one(database.pool())
     .await
     .unwrap();
-    let existing_problem = Uuid::new_v4();
-    sqlx::query(
-        "INSERT INTO linggan_comment_study_problem( \
-           problem_ref,domain_ref,definition,stable_identity,include_criteria,exclude_criteria,definition_hash,state \
-         ) VALUES($1,$2,'另一类困难','{}','[\"a\"]','[\"b\"]',$3,'active')",
+    let existing_problem = seed_existing_problem(
+        &database,
+        "另一类困难",
+        "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        &[first_signal, second_signal],
     )
-    .bind(existing_problem)
-    .bind(Uuid::parse_str(ADHD_DOMAIN_REF).unwrap())
-    .bind("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
-    .execute(database.pool())
-    .await
-    .unwrap();
+    .await;
     let different = serde_json::json!({
         "contract":"comment-study.problem-resolution.v1",
         "candidates":[{"problemRef":existing_problem,"dimensions":{
@@ -2497,6 +2492,7 @@ async fn no_existing_match_stays_deferred_until_two_independent_signals_create_o
                 "barrierOrUnmetNeed":"same","context":"same"
             },
             "proposedProblem":{
+                "title":"作业自主启动困难",
                 "definition":"孩子在家庭作业中存在自主启动困难",
                 "stableIdentity":{"actor":"孩子","barrier":"需要外部催促"},
                 "includeCriteria":["需要持续外部催促才能开始家庭作业"],
@@ -2547,6 +2543,56 @@ async fn run_state(
     .fetch_one(database.pool())
     .await
     .unwrap()
+}
+
+/// Seeds a Problem the way creation does: identity row plus its immutable first revision. A
+/// Problem without a revision has no core for recall to encode, so tests must not create half of
+/// one.
+async fn seed_existing_problem(
+    database: &linggan_storage_postgres::Database,
+    definition: &str,
+    definition_hash: &str,
+    seed_signal_refs: &[Uuid],
+) -> Uuid {
+    let problem_ref = Uuid::new_v4();
+    let revision_ref = Uuid::new_v4();
+    let domain_ref = Uuid::parse_str(ADHD_DOMAIN_REF).unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_comment_study_problem(problem_ref,domain_ref,state) \
+         VALUES($1,$2,'active')",
+    )
+    .bind(problem_ref)
+    .bind(domain_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_comment_study_problem_revision( \
+           revision_ref,problem_ref,domain_ref,identity_version,title,definition,core_frame, \
+           exclusions,seed_signal_refs,canonical_text,canonical_hash,definition_hash,reason \
+         ) VALUES($1,$2,$3,1,$4,$5,'{}'::jsonb,'[]'::jsonb,$6,$7,$8,$9,'test_seed')",
+    )
+    .bind(revision_ref)
+    .bind(problem_ref)
+    .bind(domain_ref)
+    .bind(definition)
+    .bind(definition)
+    .bind(seed_signal_refs)
+    .bind(format!("表达：{definition}\n主体：未明确\n目标：未明确\n障碍：未明确\n场景：未明确"))
+    .bind("dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+    .bind(definition_hash)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE linggan_comment_study_problem SET current_revision_ref=$2 WHERE problem_ref=$1",
+    )
+    .bind(problem_ref)
+    .bind(revision_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    problem_ref
 }
 
 async fn seed_study_policy(database: &linggan_storage_postgres::Database) -> Uuid {
