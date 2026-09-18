@@ -239,10 +239,10 @@ pub enum ProbeOutcome {
 /// invented for this purpose: the manual forbids sending captured comment text to a qualification
 /// run.
 fn probe_texts() -> [(&'static str, String); 3] {
-    let frame = |barrier: &str, context: &str| {
+    let frame = |actor: &str, goal: &str, barrier: &str, context: &str| {
         json!({
-            "actor": {"value": "孩子"},
-            "goalOrExpectedState": {"value": "自主开始作业"},
+            "actor": {"value": actor},
+            "goalOrExpectedState": {"value": goal},
             "barrierOrUnmetNeed": {"value": barrier},
             "context": {"value": context}
         })
@@ -252,21 +252,29 @@ fn probe_texts() -> [(&'static str, String); 3] {
             "base",
             canonical_text(
                 "孩子在家庭作业中存在自主启动困难。",
-                Some(&frame("需要外部催促才肯开始", "家庭作业")),
+                Some(&frame("孩子", "自主开始作业", "需要外部催促才肯开始", "家庭作业")),
             ),
         ),
         (
             "near",
             canonical_text(
                 "孩子写作业时迟迟不肯动笔。",
-                Some(&frame("必须有人反复提醒才开始", "家庭作业")),
+                Some(&frame("孩子", "自主开始作业", "必须有人反复提醒才开始", "家庭作业")),
             ),
         ),
         (
+            // Every field differs, not just the proposition. Sharing the actor and goal lines
+            // would leave two of the template's five lines identical, and the separation this
+            // records would be a measurement of the template rather than of the runtime.
             "unrelated",
             canonical_text(
-                "成年人早晨起床后长时间无法离开床铺。",
-                Some(&frame("起床后精神无法启动", "成年人作息")),
+                "上班族午餐后想找一家安静的咖啡馆办公。",
+                Some(&frame(
+                    "上班族",
+                    "找到安静的办公场所",
+                    "附近咖啡馆午后普遍嘈杂",
+                    "工作日午休",
+                )),
             ),
         ),
     ]
