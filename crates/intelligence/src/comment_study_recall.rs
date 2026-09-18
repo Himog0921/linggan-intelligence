@@ -170,6 +170,95 @@ async fn identity_matches(
     .await
 }
 
+/// The representative ranking, defined once.
+///
+/// Both the recall query and the accessor tests observe it through read the same text: a second
+/// copy would let the tested ordering and the shipped ordering drift apart while every assertion
+/// stayed green — the same failure the canonical template is protected against.
+///
+/// Placeholders are `$1` profile, `$2` target canonical hash, `$3` domain.
+///
+/// A macro rather than a `const` because the repository refuses runtime-formatted SQL — rightly —
+/// so the two call sites splice this in with `concat!` at compile time. The shipped string is
+/// still a literal, and there is still exactly one copy of the ordering.
+macro_rules! representative_ranking {
+    () => {
+        r#"
+SELECT candidate.problem_ref,candidate.signal_ref,candidate.distance,
+       /* Slots two and three answer different questions, so one ORDER BY cannot fill both. Slot
+          two asks who covers ground the lead does not — a different account, a different note.
+          Slot three asks who sits furthest from the lead, so the three together span the Problem
+          instead of crowding around it. */
+       CASE WHEN candidate.reach_rank<=2 THEN candidate.reach_rank
+            ELSE 2+row_number() OVER (
+              PARTITION BY candidate.problem_ref,(candidate.reach_rank<=2)
+              ORDER BY candidate.lead_distance DESC,
+                       candidate.created_at,candidate.signal_ref)
+       END AS rank
+FROM (
+  SELECT member.*,
+         row_number() OVER (
+           PARTITION BY member.problem_ref
+           ORDER BY member.is_lead DESC,
+                    (member.author_external_id IS DISTINCT FROM member.lead_author) DESC,
+                    (member.content_public_ref IS DISTINCT FROM member.lead_content) DESC,
+                    member.created_at,member.signal_ref) AS reach_rank
+  FROM (
+  SELECT membership.problem_ref,signal.signal_ref,signal.created_at,
+         source.author_external_id,study_target.content_public_ref,
+         cache.embedding OPERATOR(public.<=>) (SELECT embedding FROM target) AS distance,
+         (signal.signal_ref = first_value(signal.signal_ref) OVER lead_window) AS is_lead,
+         first_value(source.author_external_id) OVER lead_window AS lead_author,
+         first_value(study_target.content_public_ref) OVER lead_window AS lead_content,
+         cache.embedding OPERATOR(public.<=>)
+           first_value(cache.embedding) OVER lead_window AS lead_distance
+  FROM linggan_comment_study_problem_membership membership
+  JOIN linggan_comment_study_problem problem USING(problem_ref)
+  JOIN linggan_comment_study_problem_revision revision
+    ON revision.revision_ref=problem.current_revision_ref
+  JOIN linggan_comment_study_signal signal ON signal.signal_ref=membership.signal_ref
+  JOIN linggan_comment_study_target study_target ON study_target.target_ref=signal.target_ref
+  JOIN linggan_material_comment source ON source.material_ref=study_target.source_ref
+  JOIN linggan_comment_study_embedding_cache cache
+    ON cache.profile_ref=$1 AND cache.canonical_hash=signal.canonical_hash
+  WHERE problem.domain_ref=$3 AND problem.state='active'
+  WINDOW lead_window AS (
+    PARTITION BY membership.problem_ref
+    ORDER BY (signal.signal_ref = ANY(revision.seed_signal_refs)) DESC,
+             signal.created_at,signal.signal_ref
+    ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)
+  ) member
+) candidate
+"#
+    };
+}
+
+/// The Signals a Problem is additionally reachable through, in the order the ranking chose them.
+/// Exposed so the ordering rules can be asserted directly rather than inferred from which Problem
+/// happened to surface.
+pub async fn problem_representatives(
+    database: &Database,
+    profile_ref: Uuid,
+    target_canonical_hash: &str,
+    domain_ref: Uuid,
+    maximum: i64,
+) -> Result<Vec<Uuid>, sqlx::Error> {
+    sqlx::query_scalar(concat!(
+        "WITH target AS ( \
+           SELECT embedding FROM linggan_comment_study_embedding_cache \
+           WHERE profile_ref=$1 AND canonical_hash=$2), \
+         ranked AS (",
+        representative_ranking!(),
+        ") SELECT signal_ref FROM ranked WHERE rank<=$4 ORDER BY rank"
+    ))
+    .bind(profile_ref)
+    .bind(target_canonical_hash)
+    .bind(domain_ref)
+    .bind(maximum)
+    .fetch_all(database.pool())
+    .await
+}
+
 /// Path B. Cores and representatives are ranked in one space and then folded per Problem by the
 /// smaller distance, so a Problem reached through a member Signal competes on equal terms with one
 /// reached through its core — and a Problem still appears exactly once.
@@ -181,7 +270,7 @@ async fn nearest_problems(
     domain_ref: Uuid,
     canonical_hash: &str,
 ) -> Result<Vec<Uuid>, sqlx::Error> {
-    sqlx::query_scalar(
+    sqlx::query_scalar(concat!(
         "WITH target AS ( \
            SELECT embedding FROM linggan_comment_study_embedding_cache \
            WHERE profile_ref=$1 AND canonical_hash=$2), \
@@ -195,25 +284,12 @@ async fn nearest_problems(
              ON cache.profile_ref=$1 AND cache.canonical_hash=revision.canonical_hash \
            WHERE problem.domain_ref=$3 AND problem.state='active' \
            UNION ALL \
-           SELECT representative.problem_ref,representative.distance FROM ( \
-             SELECT membership.problem_ref, \
-                    cache.embedding OPERATOR(public.<=>) (SELECT embedding FROM target) AS distance, \
-                    row_number() OVER ( \
-                      PARTITION BY membership.problem_ref \
-                      ORDER BY (signal.signal_ref = ANY(revision.seed_signal_refs)) DESC, \
-                               signal.created_at,signal.signal_ref) AS rank \
-             FROM linggan_comment_study_problem_membership membership \
-             JOIN linggan_comment_study_problem problem USING(problem_ref) \
-             JOIN linggan_comment_study_problem_revision revision \
-               ON revision.revision_ref=problem.current_revision_ref \
-             JOIN linggan_comment_study_signal signal ON signal.signal_ref=membership.signal_ref \
-             JOIN linggan_comment_study_embedding_cache cache \
-               ON cache.profile_ref=$1 AND cache.canonical_hash=signal.canonical_hash \
-             WHERE problem.domain_ref=$3 AND problem.state='active' \
-           ) representative WHERE representative.rank<=$4) \
+           SELECT representative.problem_ref,representative.distance FROM (",
+           representative_ranking!(),
+           ") representative WHERE representative.rank<=$4) \
          SELECT problem_ref FROM candidate \
-         GROUP BY problem_ref ORDER BY min(distance),problem_ref LIMIT $5",
-    )
+         GROUP BY problem_ref ORDER BY min(distance),problem_ref LIMIT $5"
+    ))
     .bind(profile_ref)
     .bind(canonical_hash)
     .bind(domain_ref)

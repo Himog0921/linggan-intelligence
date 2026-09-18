@@ -35,7 +35,7 @@ use linggan_intelligence::{
     },
     comment_study_candidate_recall::advance_next_problem_resolution,
     comment_study_comparison_cache::{record_resolution_comparisons, serve_pending_resolutions_from_cache},
-    comment_study_recall::{RecallCompleteness, recall_candidates},
+    comment_study_recall::{RecallCompleteness, problem_representatives, recall_candidates},
     comment_study_read::{
         CommentStudyReadQuery, read_overview, read_runs, read_signals, read_targets,
     },
@@ -2367,12 +2367,52 @@ async fn reply_context_is_frozen_as_context_but_not_evidence() {
 
 /// Builds one work with two differently authored comments, runs them through the production batch
 /// path so their Signals carry canonical text, and returns both Signal refs.
+/// Fixes the order a Signal was recorded in. Both Signals of a work are written in one
+/// transaction, so `created_at` ties and every rule that falls back to it decides by a random
+/// UUID — which would make an ordering assertion pass or fail by chance.
+async fn record_order(
+    database: &linggan_storage_postgres::Database,
+    signal_ref: Uuid,
+    recorded_at: &str,
+) {
+    sqlx::query(
+        "UPDATE linggan_comment_study_signal SET created_at=$2::timestamptz WHERE signal_ref=$1",
+    )
+    .bind(signal_ref)
+    .bind(recorded_at)
+    .execute(database.pool())
+    .await
+    .unwrap();
+}
+
 async fn two_eligible_signals(
     database: &linggan_storage_postgres::Database,
     note: &str,
 ) -> (Uuid, Uuid) {
+    two_eligible_signals_from(
+        database,
+        note,
+        ["reader-1", "reader-2"],
+        ["需要外部催促", "迟迟无法开始"],
+    )
+    .await
+}
+
+/// Comment evidence is append-only, so which account a Signal belongs to has to be decided here,
+/// when the comment is captured, rather than corrected afterwards.
+///
+/// The barriers are a parameter because the canonical text is what the embedding cache is keyed
+/// by: two notes given the same barrier produce the same Signal text on purpose, and therefore
+/// share one vector. A caller that needs its Signals to sit at different points in the space has
+/// to say different things.
+async fn two_eligible_signals_from(
+    database: &linggan_storage_postgres::Database,
+    note: &str,
+    authors: [&str; 2],
+    barriers: [&str; 2],
+) -> (Uuid, Uuid) {
     detail_with_author(database, note, "ADHD 笔记", Some("creator-1")).await;
-    for (index, author) in ["reader-1", "reader-2"].iter().enumerate() {
+    for (index, author) in authors.iter().enumerate() {
         comment_with_author(
             database,
             note,
@@ -2390,8 +2430,23 @@ async fn two_eligible_signals(
     .fetch_one(database.pool())
     .await
     .unwrap();
-    let policy_ref = seed_study_policy(database).await;
-    seed_study_model_config(database, policy_ref).await;
+    // The active policy is a singleton by design — one installation, one current policy — so a
+    // second work in the same test reuses it instead of trying to install a rival.
+    let existing: Option<Uuid> = sqlx::query_scalar(
+        "SELECT policy_ref FROM linggan_comment_study_active_policy WHERE singleton",
+    )
+    .fetch_optional(database.pool())
+    .await
+    .unwrap();
+    let policy_ref = match existing {
+        Some(policy_ref) => policy_ref,
+        None => {
+            let policy_ref = seed_study_policy(database).await;
+            seed_study_model_config(database, policy_ref).await;
+            policy_ref
+        }
+    };
+    let _ = policy_ref;
     let run = prepare_study_run(
         database,
         PrepareStudyRunRequest {
@@ -2441,8 +2496,8 @@ async fn two_eligible_signals(
             "batchRef":batch.batch_ref,
             "contentPublicRef":batch.content_public_ref,
             "results":[
-                signal(batch.target_refs[0], "需要外部催促"),
-                signal(batch.target_refs[1], "迟迟无法开始")
+                signal(batch.target_refs[0], barriers[0]),
+                signal(batch.target_refs[1], barriers[1])
             ]
         }),
     )
@@ -2481,6 +2536,117 @@ async fn resolution_state_for(
     .unwrap()
 }
 
+
+
+/// Attaches an already-encoded Signal to a Problem as a confirmed member.
+async fn seed_membership(
+    database: &linggan_storage_postgres::Database,
+    signal_ref: Uuid,
+    problem_ref: Uuid,
+) {
+    let resolution_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_comment_study_resolution( \
+           resolution_ref,signal_ref,domain_ref,state,candidate_manifest,resolved_problem_ref,resolved_at \
+         ) VALUES($1,$2,$3,'assigned','{}'::jsonb,$4,scope_001_now())",
+    )
+    .bind(resolution_ref)
+    .bind(signal_ref)
+    .bind(Uuid::parse_str(ADHD_DOMAIN_REF).unwrap())
+    .bind(problem_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_comment_study_problem_membership( \
+           membership_ref,signal_ref,problem_ref,resolution_ref) VALUES($1,$2,$3,$4)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(signal_ref)
+    .bind(problem_ref)
+    .bind(resolution_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn representatives_are_chosen_for_reach_rather_than_for_being_nearest() {
+    let database = proof_database("comment_study_representatives").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    // Four members covering the four roles the rules distinguish: the lead, a same-account
+    // same-note twin that adds no reach, a member on another account and another note, and the
+    // member furthest from the lead. Roles are assigned explicitly — the helper alone cannot
+    // produce a same-account twin.
+    let (lead, twin) = two_eligible_signals_from(
+        &database,
+        "study-rep-note-a",
+        ["reader-1", "reader-1"],
+        ["需要外部催促", "自己不愿动笔"],
+    )
+    .await;
+    let (other_account, far) = two_eligible_signals_from(
+        &database,
+        "study-rep-note-b",
+        ["reader-2", "reader-3"],
+        ["拖到很晚才开始", "写一半就走神"],
+    )
+    .await;
+    record_order(&database, lead, "2026-09-16T08:00:00Z").await;
+    record_order(&database, twin, "2026-09-16T08:01:00Z").await;
+    record_order(&database, other_account, "2026-09-16T08:02:00Z").await;
+    record_order(&database, far, "2026-09-16T08:03:00Z").await;
+    let profile = seed_embedding_profile(&database).await;
+    let hash = |signal| signal_canonical_hash(&database, signal);
+    seed_vector(&database, profile, &hash(lead).await, 0.0).await;
+    seed_vector(&database, profile, &hash(twin).await, 0.02).await;
+    seed_vector(&database, profile, &hash(other_account).await, 0.05).await;
+    seed_vector(&database, profile, &hash(far).await, 1.2).await;
+    let problem = seed_existing_problem(
+        &database,
+        "作业启动困难",
+        "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        &[lead, twin],
+    )
+    .await;
+    seed_vector(
+        &database,
+        profile,
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        0.4,
+    )
+    .await;
+    for member in [lead, twin, other_account, far] {
+        seed_membership(&database, member, problem).await;
+    }
+
+    let chosen =
+        problem_representatives(&database, profile, &hash(lead).await, Uuid::parse_str(ADHD_DOMAIN_REF).unwrap(), 3)
+            .await
+            .unwrap();
+    assert_eq!(chosen.len(), 3);
+    assert_eq!(chosen[0], lead, "a seed leads, whatever the distances say");
+    assert_eq!(
+        chosen[1], other_account,
+        "second place goes to the earliest member on another account and another note"
+    );
+    assert_ne!(
+        chosen[1], twin,
+        "second place goes to a member that adds reach; the same-account same-note twin adds none"
+    );
+    assert_eq!(
+        chosen[2], far,
+        "third place spans the Problem: the furthest confirmed member, not the next nearest"
+    );
+    assert!(
+        !chosen.contains(&twin),
+        "with three richer candidates available the twin never earns a slot: {chosen:?}"
+    );
+}
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof"]
