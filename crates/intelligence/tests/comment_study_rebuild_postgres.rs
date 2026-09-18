@@ -33,7 +33,7 @@ use linggan_intelligence::{
         accept_problem_pair, accept_problem_resolution, prepare_problem_pair,
         prepare_problem_resolution,
     },
-    comment_study_candidate_recall::advance_next_problem_resolution,
+    comment_study_candidate_recall::{advance_next_problem_pair, advance_next_problem_resolution},
     comment_study_comparison_cache::{record_resolution_comparisons, serve_pending_resolutions_from_cache},
     comment_study_recall::{RecallCompleteness, problem_representatives, recall_candidates},
     comment_study_read::{
@@ -3497,5 +3497,74 @@ async fn reset_replaces_only_comment_research_derivations_and_preserves_raw_evid
     assert_eq!(
         receipt.get::<serde_json::Value, _>("preserved_relation_counts")["comment"],
         comment_before
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires the local PostgreSQL proof database"]
+async fn a_pair_partner_is_the_nearest_admissible_signal_not_the_earliest_one() {
+    let database = proof_database("comment_study_pair_partner").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    // The seeker plus three pool candidates, arranged so that arrival order, raw nearness and the
+    // rule each pick a different partner: `far` arrives first among the candidates, `twin` is the
+    // nearest of all but shares the seeker's account, and only `near` is both admissible and close.
+    let (seeker, twin) = two_eligible_signals_from(
+        &database,
+        "pair-note-a",
+        ["reader-1", "reader-1"],
+        ["需要外部催促", "自己不愿动笔"],
+    )
+    .await;
+    let (far, near) = two_eligible_signals_from(
+        &database,
+        "pair-note-b",
+        ["reader-2", "reader-3"],
+        ["拖到很晚才开始", "写一半就走神"],
+    )
+    .await;
+    record_order(&database, seeker, "2026-09-16T08:00:00Z").await;
+    record_order(&database, far, "2026-09-16T08:01:00Z").await;
+    record_order(&database, near, "2026-09-16T08:02:00Z").await;
+    record_order(&database, twin, "2026-09-16T08:03:00Z").await;
+    let profile = seed_embedding_profile(&database).await;
+    let hash = |signal| signal_canonical_hash(&database, signal);
+    seed_vector(&database, profile, &hash(seeker).await, 0.0).await;
+    seed_vector(&database, profile, &hash(twin).await, 0.01).await;
+    seed_vector(&database, profile, &hash(near).await, 0.1).await;
+    seed_vector(&database, profile, &hash(far).await, 1.3).await;
+    for _ in 0..4 {
+        assert!(advance_next_problem_resolution(&database).await.unwrap());
+    }
+    for signal in [seeker, twin, near, far] {
+        assert_eq!(
+            resolution_state_for(&database, signal).await,
+            Some(("deferred_novel".to_owned(), None)),
+            "an empty searchable catalogue leaves every Signal novel"
+        );
+    }
+
+    assert!(advance_next_problem_pair(&database).await.unwrap());
+    let paired: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT unnest(ARRAY[first_signal_ref,second_signal_ref]) \
+         FROM linggan_comment_study_problem_pair",
+    )
+    .fetch_all(database.pool())
+    .await
+    .unwrap();
+    assert!(
+        paired.contains(&seeker) && paired.contains(&near),
+        "the partner is the nearest admissible Signal; arrival order would have chosen the far one \
+         and raw nearness the same-account one: {paired:?}"
+    );
+    assert!(
+        !paired.contains(&twin),
+        "a second reading from the same account is not independent support, however near it sits"
+    );
+    assert!(
+        !paired.contains(&far),
+        "arriving early is not a reason to spend a model call on a distant Signal"
     );
 }

@@ -31,35 +31,97 @@ pub struct RecalledProblemCandidate {
     pub lexical_overlap: bool,
 }
 
-/// Finds one legal pair of independently authored deferred-novel Signals. The pair is only a
-/// frozen comparison task; it does not itself create a Problem.
+/// Finds one legal pair of independently authored deferred-novel Signals, choosing the partner by
+/// vector proximity rather than by arrival order. Pairing the two Signals that merely happened to
+/// arrive first spends a model call on two texts nothing ever suggested were about the same thing.
+///
+/// The pair is only a frozen comparison task; it does not itself create a Problem.
 pub async fn advance_next_problem_pair(
     database: &Database,
 ) -> Result<bool, ProblemCandidateRecallError> {
-    let pair: Option<(Uuid, Uuid)> = sqlx::query_as(
-        "SELECT first_signal.signal_ref,second_signal.signal_ref \
-         FROM linggan_comment_study_resolution first_resolution \
-         JOIN linggan_comment_study_signal first_signal ON first_signal.signal_ref=first_resolution.signal_ref \
-         JOIN linggan_comment_study_target first_target ON first_target.target_ref=first_signal.target_ref \
-         JOIN linggan_material_comment first_source ON first_source.material_ref=first_target.source_ref \
-         JOIN linggan_comment_study_resolution second_resolution ON second_resolution.domain_ref=first_resolution.domain_ref \
-              AND second_resolution.state='deferred_novel' AND second_resolution.signal_ref>first_resolution.signal_ref \
-         JOIN linggan_comment_study_signal second_signal ON second_signal.signal_ref=second_resolution.signal_ref \
-         JOIN linggan_comment_study_target second_target ON second_target.target_ref=second_signal.target_ref \
-         JOIN linggan_material_comment second_source ON second_source.material_ref=second_target.source_ref \
-         WHERE first_resolution.state='deferred_novel' AND first_source.material_ref<>second_source.material_ref \
-           AND first_source.author_external_id IS NOT NULL AND second_source.author_external_id IS NOT NULL \
-           AND first_source.author_external_id<>second_source.author_external_id \
-           AND NOT EXISTS(SELECT 1 FROM linggan_comment_study_problem_pair pair \
-                 WHERE pair.first_signal_ref=first_signal.signal_ref OR pair.second_signal_ref=first_signal.signal_ref \
-                    OR pair.first_signal_ref=second_signal.signal_ref OR pair.second_signal_ref=second_signal.signal_ref) \
-         ORDER BY first_resolution.created_at,second_resolution.created_at LIMIT 1",
-    ).fetch_optional(database.pool()).await?;
-    let Some((first, second)) = pair else {
+    let Some(seeker) = next_unpaired_novel_signal(database).await? else {
         return Ok(false);
     };
-    prepare_problem_pair(database, first, second).await?;
+    // Path C is a vector search. With no qualified profile there is no pool to search at all, and
+    // falling back to arrival order would record a pairing as if proximity had been considered.
+    let Some(profile_ref) = active_profile(database).await? else {
+        return Ok(false);
+    };
+    let recalled = recall_candidates(database, profile_ref, seeker).await?;
+    // A Signal is only `deferred_novel` relative to the catalogue as it stood when it was
+    // resolved. If the catalogue cannot be fully searched now, the Problem this pair would create
+    // may already exist unseen — which is the duplicate this module exists to prevent.
+    if recalled.completeness != RecallCompleteness::Complete {
+        return Ok(false);
+    }
+    let Some(partner) = nearest_admissible_partner(database, seeker, &recalled.pool_signal_refs).await?
+    else {
+        return Ok(false);
+    };
+    prepare_problem_pair(database, seeker, partner).await?;
     Ok(true)
+}
+
+async fn next_unpaired_novel_signal(
+    database: &Database,
+) -> Result<Option<Uuid>, ProblemCandidateRecallError> {
+    Ok(sqlx::query_scalar(
+        "SELECT resolution.signal_ref FROM linggan_comment_study_resolution resolution \
+         WHERE resolution.state='deferred_novel' \
+           AND NOT EXISTS(SELECT 1 FROM linggan_comment_study_problem_pair pair \
+                 WHERE pair.first_signal_ref=resolution.signal_ref \
+                    OR pair.second_signal_ref=resolution.signal_ref) \
+         ORDER BY resolution.created_at,resolution.signal_ref LIMIT 1",
+    )
+    .fetch_optional(database.pool())
+    .await?)
+}
+
+/// The nearest pool candidate that may actually be admitted, keeping the recall's distance order.
+///
+/// The pool deliberately recalls same-account Signals too — they are evidence that the pool is not
+/// empty — but a second reading from the same account is not independent support, so it can never
+/// become a pair. Filtering here rather than letting `prepare_problem_pair` refuse means the
+/// *nearest admissible* candidate is found instead of stopping at the nearest one overall.
+async fn nearest_admissible_partner(
+    database: &Database,
+    seeker: Uuid,
+    pool: &[Uuid],
+) -> Result<Option<Uuid>, ProblemCandidateRecallError> {
+    if pool.is_empty() {
+        return Ok(None);
+    }
+    Ok(sqlx::query_scalar(
+        "WITH seeker AS ( \
+           SELECT target.source_ref,source.author_external_id \
+           FROM linggan_comment_study_signal signal \
+           JOIN linggan_comment_study_target target USING(target_ref) \
+           JOIN linggan_material_comment source ON source.material_ref=target.source_ref \
+           WHERE signal.signal_ref=$1), \
+         ranked AS (SELECT signal_ref,ordinality FROM unnest($2::uuid[]) \
+                    WITH ORDINALITY AS entry(signal_ref,ordinality)) \
+         SELECT ranked.signal_ref FROM ranked \
+         JOIN linggan_comment_study_resolution resolution USING(signal_ref) \
+         JOIN linggan_comment_study_signal signal USING(signal_ref) \
+         JOIN linggan_comment_study_target target ON target.target_ref=signal.target_ref \
+         JOIN linggan_material_comment source ON source.material_ref=target.source_ref \
+         CROSS JOIN seeker \
+         WHERE resolution.state='deferred_novel' \
+           AND target.source_ref<>seeker.source_ref \
+           AND source.author_external_id IS NOT NULL \
+           AND seeker.author_external_id IS NOT NULL \
+           AND source.author_external_id<>seeker.author_external_id \
+           AND NOT EXISTS(SELECT 1 FROM linggan_comment_study_problem_membership membership \
+                 WHERE membership.signal_ref=ranked.signal_ref) \
+           AND NOT EXISTS(SELECT 1 FROM linggan_comment_study_problem_pair pair \
+                 WHERE pair.first_signal_ref=ranked.signal_ref \
+                    OR pair.second_signal_ref=ranked.signal_ref) \
+         ORDER BY ranked.ordinality LIMIT 1",
+    )
+    .bind(seeker)
+    .bind(pool)
+    .fetch_optional(database.pool())
+    .await?)
 }
 
 #[derive(Debug, Serialize)]
