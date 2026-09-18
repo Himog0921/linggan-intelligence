@@ -18,7 +18,9 @@ use linggan_intelligence::{
         MAX_TARGETS_PER_BATCH, PrepareStudyBatchRequest, next_run_needing_batch,
         prepare_study_batch,
     },
-    comment_study_batch_acceptance::{BatchAcceptanceError, accept_study_batch_output},
+    comment_study_batch_acceptance::{
+        BatchAcceptanceError, accept_study_batch_output, reject_study_batch_dispatch,
+    },
     comment_study_batch_worker::{
         DEFAULT_BATCH_LEASE_SECONDS, claim_next_study_batch, recover_expired_study_batch_leases,
     },
@@ -1442,6 +1444,137 @@ async fn batch_admission_keeps_valid_target_when_a_sibling_is_missing() {
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof"]
+async fn repeated_dispatch_failures_exhaust_a_target_instead_of_re_leasing_it_forever() {
+    let database = proof_database("comment_study_dispatch_bound").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    detail_with_author(
+        &database,
+        "study-dispatch-bound-note",
+        "ADHD 笔记",
+        Some("creator-1"),
+    )
+    .await;
+    let source_ref = comment_with_author(
+        &database,
+        "study-dispatch-bound-note",
+        "study-dispatch-bound-comment",
+        "孩子每天写作业都要催，不催就不开始，我很着急。",
+        Some("reader-1"),
+        "2026-09-16T08:00:00Z",
+    )
+    .await;
+    let work_ref: Uuid = sqlx::query_scalar(
+        "SELECT content_public_ref FROM linggan_material_comment WHERE material_ref=$1",
+    )
+    .bind(source_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let policy_ref = seed_study_policy(&database).await;
+    seed_study_model_config(&database, policy_ref).await;
+    let run = prepare_study_run(
+        &database,
+        PrepareStudyRunRequest {
+            content_public_refs: vec![work_ref],
+        },
+    )
+    .await
+    .unwrap();
+
+    // Every dispatch answers the way the oversized note in #305 did: the provider call comes back
+    // as a transport failure rather than a contract response, so nothing reaches semantic
+    // acceptance and the old code recorded no attempt at all.
+    let mut target_states = Vec::new();
+    for _ in 0..3 {
+        let batch = prepare_study_batch(
+            &database,
+            PrepareStudyBatchRequest {
+                run_ref: run.run_ref,
+                maximum_targets: 1,
+            },
+        )
+        .await
+        .unwrap();
+        let claim = claim_next_study_batch(&database, Uuid::new_v4(), DEFAULT_BATCH_LEASE_SECONDS)
+            .await
+            .unwrap()
+            .expect("a prepared batch is claimable");
+        reserve_study_batch_model_call(&database, batch.batch_ref, claim.lease_token)
+            .await
+            .unwrap();
+        reject_study_batch_dispatch(
+            &database,
+            batch.batch_ref,
+            claim.lease_token,
+            Some("response_too_large"),
+        )
+        .await
+        .unwrap();
+        target_states.push(
+            sqlx::query_scalar::<_, String>(
+                "SELECT state FROM linggan_comment_study_target WHERE target_ref=$1",
+            )
+            .bind(batch.target_refs[0])
+            .fetch_one(database.pool())
+            .await
+            .unwrap(),
+        );
+    }
+    assert_eq!(target_states, vec!["queued", "queued", "failed"]);
+
+    let attempts: Vec<(i32, String, Option<String>)> = sqlx::query_as(
+        "SELECT attempt_ordinal,state,rejection_code \
+         FROM linggan_comment_study_semantic_attempt ORDER BY attempt_ordinal",
+    )
+    .fetch_all(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        attempts,
+        vec![
+            (1, "rejected".to_owned(), Some("provider_failure".to_owned())),
+            (2, "rejected".to_owned(), Some("provider_failure".to_owned())),
+            (3, "rejected".to_owned(), Some("provider_failure".to_owned())),
+        ]
+    );
+    // The coarse rejection code is all the schema allows; the layer that actually failed has to
+    // stay recoverable from the attempt itself, otherwise a run of transport limits is
+    // indistinguishable from a run of crashes.
+    let recorded_failure_code: Option<String> = sqlx::query_scalar(
+        "SELECT output_manifest->>'providerFailureCode' \
+         FROM linggan_comment_study_semantic_attempt ORDER BY attempt_ordinal LIMIT 1",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(recorded_failure_code.as_deref(), Some("response_too_large"));
+
+    // The bound has to be real: a fourth dispatch must be impossible, not merely slower.
+    assert!(matches!(
+        prepare_study_batch(
+            &database,
+            PrepareStudyBatchRequest {
+                run_ref: run.run_ref,
+                maximum_targets: 1,
+            },
+        )
+        .await,
+        Err(_)
+    ));
+    assert_eq!(
+        claim_next_study_batch(&database, Uuid::new_v4(), DEFAULT_BATCH_LEASE_SECONDS)
+            .await
+            .unwrap()
+            .map(|claim| claim.batch_ref),
+        None
+    );
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
 async fn expired_batch_lease_rejects_late_output_and_returns_target_to_queue() {
     let database = proof_database("comment_study_batch_lease_recovery").await;
     sqlx::raw_sql(STUDY_SCHEMA_SQL)
@@ -1519,6 +1652,24 @@ async fn expired_batch_lease_rejects_late_output_and_returns_target_to_queue() {
         .await
         .unwrap(),
         "queued"
+    );
+    // Returning to `queued` is only safe because the recovery now spends an attempt: a batch that
+    // always outlives its lease would otherwise be re-dispatched on real, billed calls forever.
+    assert_eq!(
+        sqlx::query_as::<_, (i32, String, Option<String>, Option<String>)>(
+            "SELECT attempt_ordinal,state,rejection_code,output_manifest->>'stage' \
+             FROM linggan_comment_study_semantic_attempt WHERE target_ref=$1",
+        )
+        .bind(batch.target_refs[0])
+        .fetch_all(database.pool())
+        .await
+        .unwrap(),
+        vec![(
+            1,
+            "rejected".to_owned(),
+            Some("provider_failure".to_owned()),
+            Some("lease_expired".to_owned())
+        )]
     );
     assert_eq!(
         sqlx::query_scalar::<_, String>(

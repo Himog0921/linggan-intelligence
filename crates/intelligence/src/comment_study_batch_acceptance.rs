@@ -271,25 +271,160 @@ async fn reject_target(
     target_ref: Uuid,
     rejection_code: &str,
 ) -> Result<&'static str, sqlx::Error> {
+    reject_target_with_detail(
+        transaction,
+        batch_ref,
+        model_invocation_ref,
+        target_ref,
+        rejection_code,
+        json!({}),
+    )
+    .await
+}
+
+async fn reject_target_with_detail(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    batch_ref: Uuid,
+    model_invocation_ref: Option<Uuid>,
+    target_ref: Uuid,
+    rejection_code: &str,
+    detail: Value,
+) -> Result<&'static str, sqlx::Error> {
     let ordinal = next_attempt_ordinal(transaction, target_ref).await?;
-    let next_state = if ordinal == MAX_SEMANTIC_ATTEMPTS {
+    let next_state = if ordinal >= MAX_SEMANTIC_ATTEMPTS {
         "failed"
     } else {
         "queued"
     };
+    let mut manifest = json!({
+        "contract":"comment-study.note-batch.v1",
+        "batchRef":batch_ref,
+        "targetRef":target_ref
+    });
+    if let (Some(manifest), Some(detail)) = (manifest.as_object_mut(), detail.as_object()) {
+        for (key, value) in detail {
+            manifest.insert(key.clone(), value.clone());
+        }
+    }
     insert_attempt(
         transaction,
         batch_ref,
         target_ref,
         ordinal,
         "rejected",
-        json!({"contract":"comment-study.note-batch.v1","batchRef":batch_ref,"targetRef":target_ref}),
+        manifest,
         Some(rejection_code),
         model_invocation_ref,
     )
     .await?;
     update_target_state(transaction, target_ref, next_state).await?;
     Ok(next_state)
+}
+
+/// Settles every target a dispatched batch left `running`.
+///
+/// A provider call that never yields an acceptable response used to leave its targets `running`
+/// with no attempt recorded, so the only recovery was lease expiry putting them back to `queued` —
+/// which does not count. A note whose every response exceeds a transport limit therefore re-ran
+/// forever on real, billed calls. Settling here spends one bounded attempt per target, exactly like
+/// a rejected semantic response does.
+///
+/// `rejection_code` stays the coarse `provider_failure` bucket the schema already allows; the layer
+/// that actually failed travels in the attempt manifest and in the linked model invocation, so no
+/// migration is needed to tell a transport limit from a crash.
+pub(crate) async fn settle_dispatched_batch_targets(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    batch_ref: Uuid,
+    model_invocation_ref: Option<Uuid>,
+    stage: &str,
+    provider_failure_code: Option<&str>,
+) -> Result<(usize, usize), sqlx::Error> {
+    let target_refs: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT target.target_ref \
+         FROM linggan_comment_study_batch_target member \
+         JOIN linggan_comment_study_target target ON target.target_ref=member.target_ref \
+         WHERE member.batch_ref=$1 AND target.state='running' \
+         ORDER BY target.target_ref FOR UPDATE OF target",
+    )
+    .bind(batch_ref)
+    .fetch_all(&mut **transaction)
+    .await?;
+    let mut retried = 0;
+    let mut failed = 0;
+    for target_ref in target_refs {
+        let state = reject_target_with_detail(
+            transaction,
+            batch_ref,
+            model_invocation_ref,
+            target_ref,
+            "provider_failure",
+            json!({"stage":stage,"providerFailureCode":provider_failure_code}),
+        )
+        .await?;
+        if state == "queued" {
+            retried += 1;
+        } else {
+            failed += 1;
+        }
+    }
+    Ok((retried, failed))
+}
+
+/// In-process settlement for a batch whose provider call has just failed, while its lease is still
+/// live. Recovery after a lost lease is handled by `recover_expired_study_batch_leases`.
+pub async fn reject_study_batch_dispatch(
+    database: &Database,
+    batch_ref: Uuid,
+    lease_token: Uuid,
+    provider_failure_code: Option<&str>,
+) -> Result<BatchAcceptanceReceipt, BatchAcceptanceError> {
+    let mut transaction = database.pool().begin().await?;
+    let batch = sqlx::query(
+        "SELECT run_ref,model_invocation_ref FROM linggan_comment_study_batch \
+         WHERE batch_ref=$1 AND state='leased' AND lease_token=$2 \
+           AND lease_expires_at>scope_001_now() FOR UPDATE",
+    )
+    .bind(batch_ref)
+    .bind(lease_token)
+    .fetch_optional(&mut *transaction)
+    .await?
+    .ok_or(BatchAcceptanceError::BatchUnavailable)?;
+    let run_ref: Uuid = batch.get("run_ref");
+    let model_invocation_ref: Option<Uuid> = batch.get("model_invocation_ref");
+    let (retried_target_count, failed_target_count) = settle_dispatched_batch_targets(
+        &mut transaction,
+        batch_ref,
+        model_invocation_ref,
+        "provider_dispatch",
+        provider_failure_code,
+    )
+    .await?;
+    let output_manifest = json!({
+        "contract":"comment-study.note-batch.v1",
+        "runRef":run_ref,
+        "batchRef":batch_ref,
+        "stage":"provider_dispatch",
+        "providerFailureCode":provider_failure_code,
+        "retriedTargetCount":retried_target_count,
+        "failedTargetCount":failed_target_count
+    });
+    finish_batch(&mut transaction, batch_ref, "failed", output_manifest.clone()).await?;
+    finish_model_invocation(
+        &mut transaction,
+        model_invocation_ref,
+        false,
+        Some(provider_failure_code.unwrap_or("provider_failed")),
+        output_manifest,
+    )
+    .await?;
+    transaction.commit().await?;
+    Ok(BatchAcceptanceReceipt {
+        batch_ref,
+        state: "failed".to_owned(),
+        accepted_target_count: 0,
+        retried_target_count,
+        failed_target_count,
+    })
 }
 
 async fn next_attempt_ordinal(
