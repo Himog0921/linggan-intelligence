@@ -5,6 +5,7 @@
 //! result must present the exact lease token before admission.
 
 use crate::comment_study_batch_acceptance::settle_dispatched_batch_targets;
+use crate::comment_study_run::close_run_if_settled;
 use linggan_storage_postgres::Database;
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -45,7 +46,7 @@ pub async fn claim_next_study_batch(
     }
     let mut transaction = database.pool().begin().await?;
     let row = sqlx::query(
-        "SELECT batch_ref,input_manifest FROM linggan_comment_study_batch \
+        "SELECT batch_ref,run_ref,input_manifest FROM linggan_comment_study_batch \
          WHERE state='prepared' ORDER BY created_at,batch_ref LIMIT 1 FOR UPDATE SKIP LOCKED",
     )
     .fetch_optional(&mut *transaction)
@@ -83,6 +84,9 @@ pub async fn claim_next_study_batch(
         }));
     }
     cancel_unqualified_batch(&mut transaction, batch_ref).await?;
+    // Every target of this run may have just become `excluded`, which is a run that never had
+    // anything left to study rather than one still waiting on a model.
+    close_run_if_settled(&mut transaction, row.get("run_ref")).await?;
     transaction.commit().await?;
     Ok(None)
 }
@@ -94,7 +98,7 @@ pub async fn recover_expired_study_batch_leases(
 ) -> Result<u64, StudyBatchWorkerError> {
     let mut transaction = database.pool().begin().await?;
     let batches = sqlx::query(
-        "SELECT batch_ref,model_invocation_ref FROM linggan_comment_study_batch \
+        "SELECT batch_ref,run_ref,model_invocation_ref FROM linggan_comment_study_batch \
          WHERE state='leased' AND lease_expires_at<=scope_001_now() FOR UPDATE SKIP LOCKED",
     )
     .fetch_all(&mut *transaction)
@@ -139,6 +143,9 @@ pub async fn recover_expired_study_batch_leases(
             .execute(&mut *transaction)
             .await?;
         }
+        // Recovery can be what makes a run's last target terminal, so the run has to be able to
+        // close here too, not only on the acceptance path.
+        close_run_if_settled(&mut transaction, batch.get("run_ref")).await?;
     }
     transaction.commit().await?;
     Ok(u64::try_from(batches.len()).unwrap_or(0))
