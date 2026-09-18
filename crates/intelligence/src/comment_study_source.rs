@@ -104,6 +104,9 @@ pub(crate) async fn eligible_sources_in_transaction(
     .await
 }
 
+/// `linggan_material_media_origin` keeps one row per capture observation of a slot, so relating to
+/// it by `slot_key` multiplies every derived text by how often that slot was re-observed.  The work
+/// ownership check therefore has to stay a semi-join.
 async fn fetch_eligible_sources<'e, E>(
     executor: E,
     domain_ref: Uuid,
@@ -172,10 +175,11 @@ where
            FROM linggan_material_derived_text text \
            JOIN linggan_media_derivative derived USING(derivative_ref) \
            JOIN linggan_media_processing_job job USING(job_ref) \
-           JOIN linggan_material_media_origin origin ON origin.slot_key=job.slot_key \
            LEFT JOIN linggan_media_slot slot ON slot.slot_key=job.slot_key \
            WHERE text.content_public_ref=source.content_public_ref \
-             AND origin.content_public_ref=source.content_public_ref \
+             AND EXISTS (SELECT 1 FROM linggan_material_media_origin origin \
+               WHERE origin.slot_key=job.slot_key \
+                 AND origin.content_public_ref=source.content_public_ref) \
              AND text.created_at<=$2::timestamptz AND derived.created_at<=$2::timestamptz \
              AND job.created_at<=$2::timestamptz \
              AND (SELECT event.state FROM linggan_media_processing_job_event event \

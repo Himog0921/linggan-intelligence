@@ -223,6 +223,134 @@ async fn source_gate_excludes_withdrawn_ocr_but_keeps_the_comment_target() {
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof"]
+async fn a_reobserved_media_slot_contributes_one_context_fragment_per_derived_text() {
+    let database = proof_database("comment_study_reobserved_slot").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    detail_with_author(
+        &database,
+        "study-reobserved-note",
+        "ADHD 作品上下文",
+        Some("creator-1"),
+    )
+    .await;
+    comment_with_author(
+        &database,
+        "study-reobserved-note",
+        "study-reobserved-comment",
+        "孩子一写作业就拖延，我很着急。",
+        Some("reader-1"),
+        "2026-09-16T08:00:00Z",
+    )
+    .await;
+    let slot_key = "xhs:study-reobserved-note:image:1";
+    let first_observation_ref = Uuid::new_v4();
+    submit_package(
+        &database,
+        "media_slots",
+        serde_json::json!({"contentExternalId":"study-reobserved-note"}),
+        serde_json::json!({
+            "kind":"media_slot",
+            "slotKey":slot_key,
+            "observationRef":first_observation_ref,
+            "slot":{"role":"image","ordinal":1},
+            "observation":{
+                "externalUri":"https://media.example/study-reobserved-note.jpg",
+                "candidateUris":["https://media.example/study-reobserved-note.jpg"],
+                "observedAt":"2026-09-16T08:00:00Z"
+            },
+            "sourceObject":{"platform":"xhs","type":"content","externalId":"study-reobserved-note"}
+        }),
+    )
+    .await;
+    admit_media_blob(
+        &database,
+        first_observation_ref,
+        "6a45d0f1e3c7b2984f5a0d6c8e1b3a7952d4c6e8f0a2b4c6d8e0f2a4b6c8d0e2",
+        "image/jpeg",
+        12,
+        "blobs/6a/study-reobserved-note.jpg",
+    )
+    .await
+    .unwrap();
+    ensure_media_processing_work(&database).await.unwrap();
+    let worker_ref = Uuid::new_v4();
+    let claim = match claim_media_processing_work(&database, worker_ref, &["image_ocr".to_owned()])
+        .await
+        .unwrap()
+    {
+        MediaProcessingClaimOutcome::Claimed(claim) => claim,
+        other => panic!("the freshly admitted OCR job is claimable: {other:?}"),
+    };
+    complete_media_processing_text(
+        &database,
+        &claim,
+        worker_ref,
+        "ocr_text",
+        "2c8e0a4f6b1d3e5a7c9f0b2d4e6a8c0f1b3d5e7a9c1f3b5d7e9a1c3f5b7d9e1a",
+        12,
+        "derived/study-reobserved-note.txt",
+        "图片中的作业计划",
+        "图片中的作业计划",
+        Some("zh"),
+    )
+    .await
+    .unwrap();
+
+    // The same slot is captured a second time, which is ordinary re-observation rather than new
+    // material: the OCR text behind it is still one derived document.
+    submit_package(
+        &database,
+        "media_slots",
+        serde_json::json!({"contentExternalId":"study-reobserved-note"}),
+        serde_json::json!({
+            "kind":"media_slot",
+            "slotKey":slot_key,
+            "observationRef":Uuid::new_v4(),
+            "slot":{"role":"image","ordinal":1},
+            "observation":{
+                "externalUri":"https://media.example/study-reobserved-note.jpg",
+                "candidateUris":["https://media.example/study-reobserved-note.jpg"],
+                "observedAt":"2026-09-17T08:00:00Z"
+            },
+            "sourceObject":{"platform":"xhs","type":"content","externalId":"study-reobserved-note"}
+        }),
+    )
+    .await;
+    let generations: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_material_media_origin WHERE slot_key=$1",
+    )
+    .bind(slot_key)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        generations, 2,
+        "the fixture has to produce a genuinely re-observed slot for this proof to mean anything"
+    );
+
+    let domain_ref = Uuid::parse_str(ADHD_DOMAIN_REF).unwrap();
+    let sources = eligible_sources(&database, domain_ref, "2099-01-01T00:00:00Z", 10)
+        .await
+        .unwrap();
+    assert_eq!(sources.len(), 1);
+    let ocr_fragments: Vec<_> = sources[0].context_manifest["sources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|source| source["kind"] == "ocr_text")
+        .collect();
+    assert_eq!(
+        ocr_fragments.len(),
+        1,
+        "a slot observed twice still holds one OCR text, so the context must not carry it twice: {ocr_fragments:?}"
+    );
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
 async fn semantic_acceptance_is_atomic_and_keeps_deferred_signals_visible() {
     let database = proof_database("comment_study_semantic_acceptance").await;
     sqlx::raw_sql(STUDY_SCHEMA_SQL)
