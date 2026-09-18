@@ -7,6 +7,7 @@
 use crate::comment_study_batch::{
     BatchTargetState, ParsedBatchTarget, StudyBatchError, parse_batch_output,
 };
+use crate::comment_study_run::close_run_if_settled;
 use crate::comment_study_semantic::AcceptedSignal;
 use linggan_storage_postgres::Database;
 use serde::Serialize;
@@ -86,6 +87,7 @@ pub async fn accept_study_batch_output(
                 }),
             )
             .await?;
+            close_run_if_settled(&mut transaction, batch.run_ref).await?;
             transaction.commit().await?;
             return Err(BatchAcceptanceError::BatchContract(error));
         }
@@ -161,6 +163,7 @@ pub async fn accept_study_batch_output(
         }),
     )
     .await?;
+    close_run_if_settled(&mut transaction, batch.run_ref).await?;
     transaction.commit().await?;
     Ok(BatchAcceptanceReceipt {
         batch_ref,
@@ -438,6 +441,7 @@ pub async fn reject_study_batch_dispatch(
         output_manifest,
     )
     .await?;
+    close_run_if_settled(&mut transaction, run_ref).await?;
     transaction.commit().await?;
     Ok(BatchAcceptanceReceipt {
         batch_ref,

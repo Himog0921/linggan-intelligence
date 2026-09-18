@@ -1445,6 +1445,115 @@ async fn a_malformed_sibling_result_does_not_undo_the_signals_of_a_valid_target(
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof"]
+async fn a_run_closes_as_completed_once_every_target_resolves() {
+    let database = proof_database("comment_study_run_completed").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    detail_with_author(
+        &database,
+        "study-run-closure-note",
+        "ADHD 笔记",
+        Some("creator-1"),
+    )
+    .await;
+    for (comment_id, author_id) in [
+        ("study-run-closure-comment-1", "reader-1"),
+        ("study-run-closure-comment-2", "reader-2"),
+    ] {
+        comment_with_author(
+            &database,
+            "study-run-closure-note",
+            comment_id,
+            "孩子每天写作业都要催，不催就不开始，我很着急。",
+            Some(author_id),
+            "2026-09-16T08:00:00Z",
+        )
+        .await;
+    }
+    let work_ref: Uuid = sqlx::query_scalar(
+        "SELECT content_public_ref FROM linggan_material_comment \
+         WHERE comment_external_id='study-run-closure-comment-1'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let policy_ref = seed_study_policy(&database).await;
+    seed_study_model_config(&database, policy_ref).await;
+    let run = prepare_study_run(
+        &database,
+        PrepareStudyRunRequest {
+            content_public_refs: vec![work_ref],
+        },
+    )
+    .await
+    .unwrap();
+    let batch = prepare_study_batch(
+        &database,
+        PrepareStudyBatchRequest {
+            run_ref: run.run_ref,
+            maximum_targets: 2,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(batch.target_refs.len(), 2);
+    // Still open while its targets are only frozen, not resolved.
+    assert_eq!(
+        run_state(&database, run.run_ref).await,
+        ("running".to_owned(), false)
+    );
+    let claim = claim_next_study_batch(&database, Uuid::new_v4(), DEFAULT_BATCH_LEASE_SECONDS)
+        .await
+        .unwrap()
+        .expect("the prepared batch is claimable");
+    reserve_study_batch_model_call(&database, batch.batch_ref, claim.lease_token)
+        .await
+        .unwrap();
+    // One target yields Signals and the other honestly yields none. `no_signal` is a resolved
+    // outcome, so neither of them makes this run a partial failure.
+    let receipt = accept_study_batch_output(
+        &database,
+        batch.batch_ref,
+        claim.lease_token,
+        serde_json::json!({
+            "contract":"comment-study.note-batch.v1",
+            "batchRef":batch.batch_ref,
+            "contentPublicRef":batch.content_public_ref,
+            "results":[
+                {
+                    "targetRef":batch.target_refs[0],
+                    "outcome":"signals",
+                    "reason":null,
+                    "signals":[{
+                        "kind":"problem",
+                        "proposition":"孩子在家庭作业中存在自主启动困难。",
+                        "evidence":"每天写作业都要催,不催就不开始",
+                        "problemFrame":{
+                            "actor":{"value":"评论者","basis":"我很着急"},
+                            "goalOrExpectedState":{"value":"孩子自主开始作业","basis":"不催就不开始"},
+                            "barrierOrUnmetNeed":{"value":"需要外部催促","basis":"都要催"},
+                            "context":{"value":"家庭作业","basis":"写作业"}
+                        }
+                    }]
+                },
+                {"targetRef":batch.target_refs[1],"outcome":"no_signal",
+                 "reason":"未表达研究合同中的信号","signals":[]}
+            ]
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(receipt.accepted_target_count, 2);
+    assert_eq!(
+        run_state(&database, run.run_ref).await,
+        ("completed".to_owned(), true)
+    );
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
 async fn batch_admission_keeps_valid_target_when_a_sibling_is_missing() {
     let database = proof_database("comment_study_batch_partial_acceptance").await;
     sqlx::raw_sql(STUDY_SCHEMA_SQL)
@@ -1607,6 +1716,12 @@ async fn batch_admission_keeps_valid_target_when_a_sibling_is_missing() {
         .await
         .unwrap(),
         "completed_with_failures"
+    );
+    // The retriable sibling is still queued, so closing the run here would declare a research
+    // round finished while one of its comments has never been studied.
+    assert_eq!(
+        run_state(&database, run.run_ref).await,
+        ("running".to_owned(), false)
     );
 }
 
@@ -1937,6 +2052,12 @@ async fn repeated_dispatch_failures_exhaust_a_target_instead_of_re_leasing_it_fo
             .map(|claim| claim.batch_ref),
         None
     );
+    // The run has to close with its last target. Leaving it `running` for good is what made a
+    // finished run indistinguishable from one still waiting on a model.
+    assert_eq!(
+        run_state(&database, run.run_ref).await,
+        ("completed_with_failures".to_owned(), true)
+    );
 }
 
 #[tokio::test]
@@ -2160,6 +2281,12 @@ async fn source_restriction_after_freeze_cancels_batch_without_leasing_it() {
             .get::<Option<String>, _>("exclusion_reason")
             .as_deref(),
         Some("source_unavailable_after_freeze")
+    );
+    // Nothing of this run was ever studiable, which is a different outcome from a run that tried
+    // and lost targets.
+    assert_eq!(
+        run_state(&database, run.run_ref).await,
+        ("cancelled".to_owned(), true)
     );
 }
 
@@ -2404,6 +2531,22 @@ fn semantic_output(evidence: &str) -> serde_json::Value {
             "context":{"value":"家庭作业","basis":"写作业"}
         }
     }]})
+}
+
+/// A run's own state and whether it carries a finish time. The schema ties the two together, so a
+/// run reported as closed while `finished_at` stays null would be a lie the CHECK cannot catch on
+/// a row nobody updates.
+async fn run_state(
+    database: &linggan_storage_postgres::Database,
+    run_ref: Uuid,
+) -> (String, bool) {
+    sqlx::query_as::<_, (String, bool)>(
+        "SELECT state,finished_at IS NOT NULL FROM linggan_comment_study_run WHERE run_ref=$1",
+    )
+    .bind(run_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap()
 }
 
 async fn seed_study_policy(database: &linggan_storage_postgres::Database) -> Uuid {
