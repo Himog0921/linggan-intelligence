@@ -277,6 +277,26 @@ CREATE TABLE linggan_comment_study_resolution (
     CHECK(state <> 'pending' OR (decision_manifest IS NULL AND resolved_problem_ref IS NULL))
 );
 
+-- One frozen comparison, keyed by what was actually compared rather than by when.
+--
+-- The key covers the two canonical texts and the policy that judged them, so re-running a Run,
+-- re-reading the same pool, or advancing the same Signal twice all land on the existing verdict
+-- instead of paying for it again. It is a cache of a judgement, never a substitute for one: a
+-- changed canonical text or a changed policy is a different key, not a stale hit.
+CREATE TABLE linggan_comment_study_comparison (
+    comparison_ref uuid PRIMARY KEY,
+    domain_ref uuid NOT NULL REFERENCES observation_domain(domain_ref),
+    cache_key text NOT NULL CHECK(cache_key ~ '^[0-9a-f]{64}$'),
+    kind text NOT NULL CHECK(kind IN ('signal_problem','signal_signal')),
+    left_canonical_hash text NOT NULL CHECK(left_canonical_hash ~ '^[0-9a-f]{64}$'),
+    right_canonical_hash text NOT NULL CHECK(right_canonical_hash ~ '^[0-9a-f]{64}$'),
+    verdict text NOT NULL CHECK(verdict IN ('same','different','uncertain')),
+    dimensions jsonb NOT NULL CHECK(jsonb_typeof(dimensions)='object'),
+    model_invocation_ref uuid REFERENCES linggan_model_invocation(invocation_ref),
+    created_at timestamptz NOT NULL DEFAULT scope_001_now(),
+    UNIQUE(domain_ref,cache_key)
+);
+
 CREATE TABLE linggan_comment_study_problem_membership (
     membership_ref uuid PRIMARY KEY,
     signal_ref uuid NOT NULL UNIQUE REFERENCES linggan_comment_study_signal(signal_ref),
@@ -300,6 +320,16 @@ CREATE TABLE linggan_comment_study_problem_pair (
     CHECK(first_signal_ref <> second_signal_ref),
     CHECK((state='approved') = (created_problem_ref IS NOT NULL)),
     CHECK((state IN ('approved','rejected')) = (resolved_at IS NOT NULL))
+);
+
+-- Where the pool sweep stopped when a budget ran out. Without it the next authorised Run either
+-- restarts the sweep from the beginning — re-comparing what was already settled — or silently
+-- drops the tail it never reached.
+CREATE TABLE linggan_comment_study_pool_cursor (
+    domain_ref uuid PRIMARY KEY REFERENCES observation_domain(domain_ref),
+    last_signal_ref uuid REFERENCES linggan_comment_study_signal(signal_ref),
+    reason text NOT NULL CHECK(reason IN ('budget_stopped','policy_change','manual_sweep')),
+    updated_at timestamptz NOT NULL DEFAULT scope_001_now()
 );
 
 CREATE INDEX linggan_comment_study_resolution_pending_idx

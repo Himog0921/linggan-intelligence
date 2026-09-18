@@ -2492,12 +2492,20 @@ async fn a_signal_is_never_called_novel_while_the_catalogue_cannot_be_searched()
 
     // No qualified profile at all: there is no catalogue to search, so nothing may be declared new.
     assert!(advance_next_problem_resolution(&database).await.unwrap());
-    let (state, reason) = resolution_state_for(&database, first)
-        .await
-        .or(resolution_state_for(&database, second).await)
-        .expect("the advanced Signal received a resolution");
-    assert_eq!(state, "retrieval_incomplete");
-    assert_eq!(reason.as_deref(), Some("no_qualified_profile"));
+    // Which of the two got advanced is not fixed, so it is recorded now rather than inferred
+    // later: once both carry a resolution, "the other one" is no longer derivable.
+    let (settled_first, pending_next) = if resolution_state_for(&database, first).await.is_some() {
+        (first, second)
+    } else {
+        (second, first)
+    };
+    assert_eq!(
+        resolution_state_for(&database, settled_first).await,
+        Some((
+            "retrieval_incomplete".to_owned(),
+            Some("no_qualified_profile".to_owned())
+        ))
+    );
 
     // With a profile and vectors, but an active Problem whose core was never encoded, the
     // catalogue is still only partly searchable — and still not evidence of novelty.
@@ -2512,13 +2520,8 @@ async fn a_signal_is_never_called_novel_while_the_catalogue_cannot_be_searched()
     )
     .await;
     assert!(advance_next_problem_resolution(&database).await.unwrap());
-    let remaining = if resolution_state_for(&database, first).await.is_some() {
-        second
-    } else {
-        first
-    };
     assert_eq!(
-        resolution_state_for(&database, remaining).await,
+        resolution_state_for(&database, pending_next).await,
         Some((
             "retrieval_incomplete".to_owned(),
             Some("problem_core_vectors_incomplete".to_owned())

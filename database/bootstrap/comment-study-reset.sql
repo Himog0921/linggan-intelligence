@@ -66,6 +66,7 @@ END $$;
 -- neither does the reset receipt, which is the audit trail of resets rather than research output.
 DROP TABLE IF EXISTS linggan_comment_study_problem_pair;
 DROP TABLE IF EXISTS linggan_comment_study_problem_membership;
+DROP TABLE IF EXISTS linggan_comment_study_pool_cursor;
 DROP TABLE IF EXISTS linggan_comment_study_comparison;
 DROP TABLE IF EXISTS linggan_comment_study_resolution;
 DROP TABLE IF EXISTS linggan_comment_study_signal;
