@@ -1277,6 +1277,171 @@ async fn batch_freezes_only_one_work_context_and_marks_only_its_targets_running(
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof"]
+async fn a_malformed_sibling_result_does_not_undo_the_signals_of_a_valid_target() {
+    let database = proof_database("comment_study_batch_target_isolation").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    detail_with_author(
+        &database,
+        "study-isolation-note",
+        "ADHD 笔记",
+        Some("creator-1"),
+    )
+    .await;
+    for (comment_id, author_id) in [
+        ("study-isolation-comment-1", "reader-1"),
+        ("study-isolation-comment-2", "reader-2"),
+    ] {
+        comment_with_author(
+            &database,
+            "study-isolation-note",
+            comment_id,
+            "孩子每天写作业都要催，不催就不开始，我很着急。",
+            Some(author_id),
+            "2026-09-16T08:00:00Z",
+        )
+        .await;
+    }
+    let work_ref: Uuid = sqlx::query_scalar(
+        "SELECT content_public_ref FROM linggan_material_comment \
+         WHERE comment_external_id='study-isolation-comment-1'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let policy_ref = seed_study_policy(&database).await;
+    seed_study_model_config(&database, policy_ref).await;
+    let run = prepare_study_run(
+        &database,
+        PrepareStudyRunRequest {
+            content_public_refs: vec![work_ref],
+        },
+    )
+    .await
+    .unwrap();
+    let batch = prepare_study_batch(
+        &database,
+        PrepareStudyBatchRequest {
+            run_ref: run.run_ref,
+            maximum_targets: 2,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(batch.target_refs.len(), 2);
+    let claim = claim_next_study_batch(&database, Uuid::new_v4(), DEFAULT_BATCH_LEASE_SECONDS)
+        .await
+        .unwrap()
+        .expect("the prepared batch is claimable");
+    let reserved = reserve_study_batch_model_call(&database, batch.batch_ref, claim.lease_token)
+        .await
+        .unwrap();
+    // The second result carries a signal `kind` in the outcome slot, exactly as the provider sent
+    // on 2026-09-17. Deserializing the response as one strict document used to reject the whole
+    // batch, so the first target's perfectly valid Signals were discarded with it.
+    let receipt = accept_study_batch_output(
+        &database,
+        batch.batch_ref,
+        claim.lease_token,
+        serde_json::json!({
+            "contract":"comment-study.note-batch.v1",
+            "batchRef":batch.batch_ref,
+            "contentPublicRef":batch.content_public_ref,
+            "results":[
+                {
+                    "targetRef":batch.target_refs[0],
+                    "outcome":"signals",
+                    "reason":null,
+                    "signals":[{
+                        "kind":"problem",
+                        "proposition":"孩子在家庭作业中存在自主启动困难。",
+                        "evidence":"每天写作业都要催,不催就不开始",
+                        "problemFrame":{
+                            "actor":{"value":"评论者","basis":"我很着急"},
+                            "goalOrExpectedState":{"value":"孩子自主开始作业","basis":"不催就不开始"},
+                            "barrierOrUnmetNeed":{"value":"需要外部催促","basis":"都要催"},
+                            "context":{"value":"家庭作业","basis":"写作业"}
+                        }
+                    }]
+                },
+                {"targetRef":batch.target_refs[1],"outcome":"experience","reason":null,"signals":[]}
+            ]
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(receipt.state, "completed_with_failures");
+    assert_eq!(receipt.accepted_target_count, 1);
+    assert_eq!(receipt.retried_target_count, 1);
+    assert_eq!(receipt.failed_target_count, 0);
+    assert_eq!(
+        sqlx::query_scalar::<_, String>(
+            "SELECT state FROM linggan_comment_study_target WHERE target_ref=$1",
+        )
+        .bind(batch.target_refs[0])
+        .fetch_one(database.pool())
+        .await
+        .unwrap(),
+        "succeeded"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM linggan_comment_study_signal WHERE target_ref=$1",
+        )
+        .bind(batch.target_refs[0])
+        .fetch_one(database.pool())
+        .await
+        .unwrap(),
+        1
+    );
+    assert_eq!(
+        sqlx::query_as::<_, (String, Option<String>)>(
+            "SELECT state,rejection_code FROM linggan_comment_study_semantic_attempt \
+             WHERE target_ref=$1",
+        )
+        .bind(batch.target_refs[1])
+        .fetch_all(database.pool())
+        .await
+        .unwrap(),
+        vec![("rejected".to_owned(), Some("semantic_json_schema".to_owned()))]
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, String>(
+            "SELECT state FROM linggan_comment_study_target WHERE target_ref=$1",
+        )
+        .bind(batch.target_refs[1])
+        .fetch_one(database.pool())
+        .await
+        .unwrap(),
+        "queued"
+    );
+    // The valid target must not be asked for again: a repair pass covers only the failed sibling.
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM linggan_comment_study_semantic_attempt WHERE target_ref=$1",
+        )
+        .bind(batch.target_refs[0])
+        .fetch_one(database.pool())
+        .await
+        .unwrap(),
+        1
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, String>(
+            "SELECT state FROM linggan_model_invocation WHERE invocation_ref=$1",
+        )
+        .bind(reserved.invocation_ref)
+        .fetch_one(database.pool())
+        .await
+        .unwrap(),
+        "succeeded"
+    );
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
 async fn batch_admission_keeps_valid_target_when_a_sibling_is_missing() {
     let database = proof_database("comment_study_batch_partial_acceptance").await;
     sqlx::raw_sql(STUDY_SCHEMA_SQL)

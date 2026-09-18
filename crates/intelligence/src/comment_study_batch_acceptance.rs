@@ -90,6 +90,8 @@ pub async fn accept_study_batch_output(
             return Err(BatchAcceptanceError::BatchContract(error));
         }
     };
+    let unattributable_result_count = parsed.unattributable_result_count;
+    let unexpected_result_count = parsed.unexpected_result_count;
     let mut accepted_target_count = 0;
     for target in parsed.targets {
         accept_target(
@@ -103,6 +105,23 @@ pub async fn accept_study_batch_output(
     }
     let mut retried_target_count = 0;
     let mut failed_target_count = 0;
+    // A result that is malformed on its own is that target's failed attempt only. Its siblings in
+    // the same response keep whatever they legitimately produced.
+    for rejected in parsed.rejected_targets {
+        let state = reject_target(
+            &mut transaction,
+            batch_ref,
+            batch.model_invocation_ref,
+            rejected.target_ref,
+            rejected.rejection_code,
+        )
+        .await?;
+        if state == "queued" {
+            retried_target_count += 1;
+        } else {
+            failed_target_count += 1;
+        }
+    }
     for target_ref in parsed.missing_target_refs {
         let state = reject_target(
             &mut transaction,
@@ -136,7 +155,9 @@ pub async fn accept_study_batch_output(
             "stage":"comment-study.semantic.v1",
             "acceptedTargetCount":accepted_target_count,
             "retriedTargetCount":retried_target_count,
-            "failedTargetCount":failed_target_count
+            "failedTargetCount":failed_target_count,
+            "unattributableResultCount":unattributable_result_count,
+            "unexpectedResultCount":unexpected_result_count
         }),
     )
     .await?;
