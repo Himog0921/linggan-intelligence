@@ -308,18 +308,10 @@ fn context_state(manifest: &Value) -> &'static str {
 /// explicitly recorded so a model cannot mistake partial context for a complete work record.
 fn bounded_context_manifest(manifest: &Value, budget: usize) -> Value {
     let mut fragments: Vec<Value> = manifest["sources"].as_array().cloned().unwrap_or_default();
-    fragments.sort_by_key(|fragment| {
-        let kind = fragment["kind"].as_str().unwrap_or("");
-        let priority = match kind {
-            "native_title" => 0,
-            "body" => 1,
-            _ => 2,
-        };
-        (priority, kind.to_owned(), fragment["sourceRef"].to_string())
-    });
+    fragments.sort_by_key(sort_key);
     let mut used = 0_usize;
-    let mut omitted = 0_usize;
     let mut retained = Vec::new();
+    let mut omitted = Vec::new();
     for fragment in fragments {
         let length = fragment["text"]
             .as_str()
@@ -328,7 +320,14 @@ fn bounded_context_manifest(manifest: &Value, budget: usize) -> Value {
             used += length;
             retained.push(fragment);
         } else {
-            omitted += 1;
+            // What was cut has to be nameable. A bare count cannot tell a caller whether the
+            // budget dropped a stray caption or the whole second half of a work.
+            omitted.push(json!({
+                "kind":fragment["kind"],
+                "sourceRef":fragment["sourceRef"],
+                "slotOrdinal":fragment["slotOrdinal"],
+                "characterCount":length
+            }));
         }
     }
     json!({
@@ -337,10 +336,31 @@ fn bounded_context_manifest(manifest: &Value, budget: usize) -> Value {
         "cleanerVersion":manifest["cleanerVersion"],
         "characterBudget":budget,
         "includedCharacterCount":used,
-        "omittedFragmentCount":omitted,
-        "truncated":omitted > 0,
+        "orderBasis":ORDER_BASIS,
+        "omittedFragmentCount":omitted.len(),
+        "omitted":omitted,
+        "truncated":!omitted.is_empty(),
         "sources":retained
     })
+}
+
+/// Media fragments carry `slotOrdinal`, which is the work's own display order for its images and
+/// video. Nothing in `source_location` records a position *inside* a slot — it holds only a blob
+/// digest and a processor version — so two texts from one slot have no knowable reading order and
+/// are merely kept deterministic by their source reference. The basis travels with the manifest so
+/// a reader never mistakes that tiebreak for the order the work is actually read in.
+const ORDER_BASIS: &str = "native_title,body,slot_ordinal,stable_source_ref";
+
+fn sort_key(fragment: &Value) -> (u8, i64, String) {
+    let priority = match fragment["kind"].as_str().unwrap_or("") {
+        "native_title" => 0,
+        "body" => 1,
+        _ => 2,
+    };
+    // A slot whose ordinal the producer never established sorts after every known one rather than
+    // ahead of slot 1, which is where a missing value would otherwise land.
+    let slot_ordinal = fragment["slotOrdinal"].as_i64().unwrap_or(i64::MAX);
+    (priority, slot_ordinal, fragment["sourceRef"].to_string())
 }
 
 fn hash_text(value: &str) -> String {
@@ -395,5 +415,71 @@ mod tests {
         assert_eq!(bounded["sources"][0]["kind"], "native_title");
         assert_eq!(bounded["sources"][1]["kind"], "body");
         assert_eq!(context_state(&bounded), "partial");
+    }
+
+    #[test]
+    fn media_fragments_follow_the_works_slot_order_not_their_reference_order() {
+        // The references sort in the exact reverse of the slot order, so ordering by reference —
+        // as the manifest used to — hands the model the work's images backwards. References that
+        // happened to sort the same way as the slots would let this assertion pass either way.
+        let manifest = json!({
+            "contract":"comment-study.context.v1",
+            "workRef":"00000000-0000-4000-8000-000000000010",
+            "cleanerVersion":"test",
+            "sources":[
+                {"kind":"ocr_text","sourceRef":"a-gamma","text":"三","slotOrdinal":3},
+                {"kind":"ocr_text","sourceRef":"z-alpha","text":"一","slotOrdinal":1},
+                {"kind":"ocr_text","sourceRef":"m-beta","text":"二","slotOrdinal":2}
+            ]
+        });
+        let bounded = bounded_context_manifest(&manifest, 100);
+        let order: Vec<&str> = bounded["sources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|fragment| fragment["text"].as_str().unwrap())
+            .collect();
+        assert_eq!(order, vec!["一", "二", "三"]);
+        assert_eq!(bounded["orderBasis"], ORDER_BASIS);
+    }
+
+    #[test]
+    fn a_slot_without_a_known_ordinal_sorts_after_the_known_ones() {
+        let manifest = json!({
+            "contract":"comment-study.context.v1",
+            "workRef":"00000000-0000-4000-8000-000000000010",
+            "cleanerVersion":"test",
+            "sources":[
+                {"kind":"ocr_text","sourceRef":"a-unknown","text":"未知"},
+                {"kind":"ocr_text","sourceRef":"z-second","text":"二","slotOrdinal":2}
+            ]
+        });
+        let bounded = bounded_context_manifest(&manifest, 100);
+        let order: Vec<&str> = bounded["sources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|fragment| fragment["text"].as_str().unwrap())
+            .collect();
+        assert_eq!(order, vec!["二", "未知"]);
+    }
+
+    #[test]
+    fn an_omitted_fragment_is_named_rather_than_only_counted() {
+        let manifest = json!({
+            "contract":"comment-study.context.v1",
+            "workRef":"00000000-0000-4000-8000-000000000010",
+            "cleanerVersion":"test",
+            "sources":[
+                {"kind":"native_title","sourceRef":"n1","text":"12"},
+                {"kind":"ocr_text","sourceRef":"late","text":"3456","slotOrdinal":9}
+            ]
+        });
+        let bounded = bounded_context_manifest(&manifest, 2);
+        assert_eq!(bounded["omittedFragmentCount"], 1);
+        assert_eq!(
+            bounded["omitted"],
+            json!([{"kind":"ocr_text","sourceRef":"late","slotOrdinal":9,"characterCount":4}])
+        );
     }
 }

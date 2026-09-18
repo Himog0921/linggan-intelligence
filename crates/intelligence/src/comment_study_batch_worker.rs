@@ -4,6 +4,7 @@
 //! batch envelope; the provider request happens outside the database transaction, and any later
 //! result must present the exact lease token before admission.
 
+use crate::comment_study_batch_acceptance::settle_dispatched_batch_targets;
 use linggan_storage_postgres::Database;
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -100,13 +101,18 @@ pub async fn recover_expired_study_batch_leases(
     .await?;
     for batch in &batches {
         let batch_ref: Uuid = batch.get("batch_ref");
-        sqlx::query(
-            "UPDATE linggan_comment_study_target target SET state='queued' \
-             FROM linggan_comment_study_batch_target member \
-             WHERE member.batch_ref=$1 AND target.target_ref=member.target_ref AND target.state='running'",
+        let model_invocation_ref: Option<Uuid> = batch.get("model_invocation_ref");
+        // An expired lease means a dispatch was made, or may have been, and no result came back.
+        // Returning the targets straight to `queued` recorded nothing, so a batch that always
+        // outlives its lease re-dispatched on real, billed calls without ever exhausting a bound.
+        // The attempt is therefore counted conservatively, exactly as a rejected response is.
+        settle_dispatched_batch_targets(
+            &mut transaction,
+            batch_ref,
+            model_invocation_ref,
+            "lease_expired",
+            None,
         )
-        .bind(batch_ref)
-        .execute(&mut *transaction)
         .await?;
         sqlx::query(
             "UPDATE linggan_comment_study_batch \
@@ -117,7 +123,7 @@ pub async fn recover_expired_study_batch_leases(
         .bind(batch_ref)
         .execute(&mut *transaction)
         .await?;
-        if let Some(invocation_ref) = batch.get::<Option<Uuid>, _>("model_invocation_ref") {
+        if let Some(invocation_ref) = model_invocation_ref {
             sqlx::query(
                 "UPDATE linggan_model_invocation \
                  SET state='failed',failure_code='lease_expired', \
