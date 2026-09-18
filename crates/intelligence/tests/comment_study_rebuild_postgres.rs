@@ -3568,3 +3568,104 @@ async fn a_pair_partner_is_the_nearest_admissible_signal_not_the_earliest_one() 
         "arriving early is not a reason to spend a model call on a distant Signal"
     );
 }
+
+#[tokio::test]
+#[ignore = "requires the local PostgreSQL proof database"]
+async fn one_inconclusive_comparison_does_not_retire_a_signal_from_pairing() {
+    let database = proof_database("comment_study_pair_retry").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    // Three accounts, each with a second same-account reading that can never be admitted. The
+    // seeker's nearest admissible partner is `second`; `third` sits further out.
+    let (first, first_echo) = two_eligible_signals_from(
+        &database,
+        "retry-note-a",
+        ["reader-1", "reader-1"],
+        ["需要外部催促", "自己不愿动笔"],
+    )
+    .await;
+    let (second, second_echo) = two_eligible_signals_from(
+        &database,
+        "retry-note-b",
+        ["reader-2", "reader-2"],
+        ["拖到很晚才开始", "写一半就走神"],
+    )
+    .await;
+    let (third, third_echo) = two_eligible_signals_from(
+        &database,
+        "retry-note-c",
+        ["reader-3", "reader-3"],
+        ["坐下来也发呆", "要陪着才肯写"],
+    )
+    .await;
+    let profile = seed_embedding_profile(&database).await;
+    let hash = |signal| signal_canonical_hash(&database, signal);
+    for (index, signal) in [first, second, third, first_echo, second_echo, third_echo]
+        .into_iter()
+        .enumerate()
+    {
+        record_order(
+            &database,
+            signal,
+            &format!("2026-09-16T08:0{index}:00Z"),
+        )
+        .await;
+    }
+    seed_vector(&database, profile, &hash(first).await, 0.0).await;
+    seed_vector(&database, profile, &hash(second).await, 0.05).await;
+    seed_vector(&database, profile, &hash(third).await, 0.2).await;
+    seed_vector(&database, profile, &hash(first_echo).await, 2.0).await;
+    seed_vector(&database, profile, &hash(second_echo).await, 2.1).await;
+    seed_vector(&database, profile, &hash(third_echo).await, 2.2).await;
+    for _ in 0..6 {
+        assert!(advance_next_problem_resolution(&database).await.unwrap());
+    }
+
+    assert!(advance_next_problem_pair(&database).await.unwrap());
+    let pair_ref: Uuid = sqlx::query_scalar(
+        "SELECT pair_ref FROM linggan_comment_study_problem_pair WHERE state='pending'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    // The model reports a conflicting dimension: these two are not the same Problem.
+    let receipt = accept_problem_pair(
+        &database,
+        pair_ref,
+        serde_json::json!({
+            "contract":"comment-study.problem-pair.v1",
+            "firstSignalRef":first.min(second),
+            "secondSignalRef":first.max(second),
+            "dimensions":{
+                "actor":"same","goalOrExpectedState":"same",
+                "barrierOrUnmetNeed":"different","context":"same"
+            }
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(receipt.state, "rejected");
+    assert_eq!(receipt.problem_ref, None, "a conflicting dimension creates nothing");
+
+    // The two Signals were compared with each other and came apart. Neither has been shown to be
+    // unrelated to anyone else, so both must remain available to be compared with a third.
+    assert!(
+        advance_next_problem_pair(&database).await.unwrap(),
+        "one inconclusive comparison must not end pairing for the whole domain"
+    );
+    let retried: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT unnest(ARRAY[first_signal_ref,second_signal_ref]) \
+         FROM linggan_comment_study_problem_pair WHERE state='pending'",
+    )
+    .fetch_all(database.pool())
+    .await
+    .unwrap();
+    assert!(
+        retried.contains(&first) && retried.contains(&third),
+        "the seeker is still the earliest unassigned Signal and its next partner is the \
+         next-nearest admissible one; retiring it instead leaves the closest genuine comparison \
+         in the domain unmade: {retried:?}"
+    );
+}

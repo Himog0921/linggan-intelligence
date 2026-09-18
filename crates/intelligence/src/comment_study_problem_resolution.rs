@@ -352,6 +352,7 @@ mod tests {
             "secondSignalRef":second,
             "dimensions":dimensions("same","same","same","same"),
             "proposedProblem":{
+                "title":"作业启动困难",
                 "definition":"孩子在家庭作业中存在自主启动困难",
                 "stableIdentity":{"actor":"孩子","barrier":"需要催促"},
                 "includeCriteria":["需要持续外部催促才能开始作业"],
@@ -374,6 +375,7 @@ mod tests {
             "secondSignalRef":second,
             "dimensions":dimensions("same","same","same","same"),
             "proposedProblem":{
+                "title":"作业启动困难",
                 "definition":"孩子在家庭作业中存在自主启动困难",
                 "stableIdentity":{"actor":"孩子"},
                 "includeCriteria":["需要催促"],
@@ -383,6 +385,56 @@ mod tests {
         assert_eq!(
             decide_pair_creation(output, first, second, true, false),
             Ok(PairCreationDecision::DeferInsufficientIndependentEvidence)
+        );
+    }
+
+    #[test]
+    fn a_dimension_the_model_could_not_judge_creates_nothing_however_confident_the_proposal() {
+        let first = Uuid::new_v4();
+        let second = Uuid::new_v4();
+        let output = json!({
+            "contract":PROBLEM_PAIR_CONTRACT,
+            "firstSignalRef":first,
+            "secondSignalRef":second,
+            "dimensions":dimensions("same","same","unknown","same"),
+            // A fully formed definition alongside an unjudged dimension is exactly the case the
+            // rule exists for: the proposal must not be able to talk its way past the gap.
+            "proposedProblem":{
+                "title":"作业启动困难",
+                "definition":"孩子在家庭作业中存在自主启动困难",
+                "stableIdentity":{"actor":"孩子","barrier":"需要催促"},
+                "includeCriteria":["需要持续外部催促才能开始作业"],
+                "excludeCriteria":["仅偶发忘记作业"]
+            }
+        });
+        assert_eq!(
+            decide_pair_creation(output, first, second, true, true),
+            Ok(PairCreationDecision::DeferAmbiguous)
+        );
+    }
+
+    #[test]
+    fn one_conflicting_dimension_is_a_different_problem_not_an_uncertain_one() {
+        let first = Uuid::new_v4();
+        let second = Uuid::new_v4();
+        let output = json!({
+            "contract":PROBLEM_PAIR_CONTRACT,
+            "firstSignalRef":first,
+            "secondSignalRef":second,
+            "dimensions":dimensions("same","same","different","same"),
+            "proposedProblem":{
+                "title":"作业启动困难",
+                "definition":"孩子在家庭作业中存在自主启动困难",
+                "stableIdentity":{"actor":"孩子"},
+                "includeCriteria":["需要催促"],
+                "excludeCriteria":["偶发"]
+            }
+        });
+        // Both outcomes refuse to create, but they are not the same fact about the world: "we
+        // could not tell" invites another look, "these are different" does not.
+        assert_eq!(
+            decide_pair_creation(output, first, second, true, true),
+            Ok(PairCreationDecision::DeferNotSameProblem)
         );
     }
 }

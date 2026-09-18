@@ -39,41 +39,51 @@ pub struct RecalledProblemCandidate {
 pub async fn advance_next_problem_pair(
     database: &Database,
 ) -> Result<bool, ProblemCandidateRecallError> {
-    let Some(seeker) = next_unpaired_novel_signal(database).await? else {
-        return Ok(false);
-    };
     // Path C is a vector search. With no qualified profile there is no pool to search at all, and
     // falling back to arrival order would record a pairing as if proximity had been considered.
     let Some(profile_ref) = active_profile(database).await? else {
         return Ok(false);
     };
-    let recalled = recall_candidates(database, profile_ref, seeker).await?;
-    // A Signal is only `deferred_novel` relative to the catalogue as it stood when it was
-    // resolved. If the catalogue cannot be fully searched now, the Problem this pair would create
-    // may already exist unseen — which is the duplicate this module exists to prevent.
-    if recalled.completeness != RecallCompleteness::Complete {
-        return Ok(false);
+    for seeker in novel_signals_awaiting_pairing(database).await? {
+        let recalled = recall_candidates(database, profile_ref, seeker).await?;
+        // A Signal is only `deferred_novel` relative to the catalogue as it stood when it was
+        // resolved. If the catalogue cannot be fully searched now, the Problem this pair would
+        // create may already exist unseen — which is the duplicate this module exists to prevent.
+        if recalled.completeness != RecallCompleteness::Complete {
+            continue;
+        }
+        if let Some(partner) =
+            nearest_admissible_partner(database, seeker, &recalled.pool_signal_refs).await?
+        {
+            prepare_problem_pair(database, seeker, partner).await?;
+            return Ok(true);
+        }
     }
-    let Some(partner) = nearest_admissible_partner(database, seeker, &recalled.pool_signal_refs).await?
-    else {
-        return Ok(false);
-    };
-    prepare_problem_pair(database, seeker, partner).await?;
-    Ok(true)
+    Ok(false)
 }
 
-async fn next_unpaired_novel_signal(
+/// How many Signals one tick will look for a partner for before giving up. A Signal whose whole
+/// pool has already been compared with it must not block every Signal behind it, so the scan moves
+/// on rather than returning "nothing to pair" at the first exhausted one.
+const MAX_PAIR_SEEKERS_PER_TICK: i64 = 8;
+
+/// Signals still waiting to be paired, earliest first.
+///
+/// The only thing that retires a Signal from pairing is being assigned to a Problem. Having taken
+/// part in a comparison that came apart is not a reason: it establishes that those *two* are not
+/// the same Problem, and nothing about either one's relation to anything else.
+async fn novel_signals_awaiting_pairing(
     database: &Database,
-) -> Result<Option<Uuid>, ProblemCandidateRecallError> {
+) -> Result<Vec<Uuid>, ProblemCandidateRecallError> {
     Ok(sqlx::query_scalar(
         "SELECT resolution.signal_ref FROM linggan_comment_study_resolution resolution \
          WHERE resolution.state='deferred_novel' \
-           AND NOT EXISTS(SELECT 1 FROM linggan_comment_study_problem_pair pair \
-                 WHERE pair.first_signal_ref=resolution.signal_ref \
-                    OR pair.second_signal_ref=resolution.signal_ref) \
-         ORDER BY resolution.created_at,resolution.signal_ref LIMIT 1",
+           AND NOT EXISTS(SELECT 1 FROM linggan_comment_study_problem_membership membership \
+                 WHERE membership.signal_ref=resolution.signal_ref) \
+         ORDER BY resolution.created_at,resolution.signal_ref LIMIT $1",
     )
-    .fetch_optional(database.pool())
+    .bind(MAX_PAIR_SEEKERS_PER_TICK)
+    .fetch_all(database.pool())
     .await?)
 }
 
@@ -83,6 +93,10 @@ async fn next_unpaired_novel_signal(
 /// empty — but a second reading from the same account is not independent support, so it can never
 /// become a pair. Filtering here rather than letting `prepare_problem_pair` refuse means the
 /// *nearest admissible* candidate is found instead of stopping at the nearest one overall.
+///
+/// Only the exact combination already compared is excluded, never every Signal that has ever been
+/// compared with anything: the table's `UNIQUE(first,second)` is what stops one pair being bought
+/// twice, and a wider exclusion would retire both sides of every inconclusive comparison.
 async fn nearest_admissible_partner(
     database: &Database,
     seeker: Uuid,
@@ -114,8 +128,8 @@ async fn nearest_admissible_partner(
            AND NOT EXISTS(SELECT 1 FROM linggan_comment_study_problem_membership membership \
                  WHERE membership.signal_ref=ranked.signal_ref) \
            AND NOT EXISTS(SELECT 1 FROM linggan_comment_study_problem_pair pair \
-                 WHERE pair.first_signal_ref=ranked.signal_ref \
-                    OR pair.second_signal_ref=ranked.signal_ref) \
+                 WHERE (pair.first_signal_ref=ranked.signal_ref AND pair.second_signal_ref=$1) \
+                    OR (pair.first_signal_ref=$1 AND pair.second_signal_ref=ranked.signal_ref)) \
          ORDER BY ranked.ordinality LIMIT 1",
     )
     .bind(seeker)
