@@ -33,6 +33,8 @@ use linggan_intelligence::{
         accept_problem_pair, accept_problem_resolution, prepare_problem_pair,
         prepare_problem_resolution,
     },
+    comment_study_candidate_recall::advance_next_problem_resolution,
+    comment_study_recall::{RecallCompleteness, recall_candidates},
     comment_study_read::{
         CommentStudyReadQuery, read_overview, read_runs, read_signals, read_targets,
     },
@@ -2361,6 +2363,344 @@ async fn reply_context_is_frozen_as_context_but_not_evidence() {
     );
 }
 
+
+/// Builds one work with two differently authored comments, runs them through the production batch
+/// path so their Signals carry canonical text, and returns both Signal refs.
+async fn two_eligible_signals(
+    database: &linggan_storage_postgres::Database,
+    note: &str,
+) -> (Uuid, Uuid) {
+    detail_with_author(database, note, "ADHD 笔记", Some("creator-1")).await;
+    for (index, author) in ["reader-1", "reader-2"].iter().enumerate() {
+        comment_with_author(
+            database,
+            note,
+            &format!("{note}-comment-{index}"),
+            "孩子每天写作业都要催，不催就不开始，我很着急。",
+            Some(author),
+            "2026-09-16T08:00:00Z",
+        )
+        .await;
+    }
+    let work_ref: Uuid = sqlx::query_scalar(
+        "SELECT content_public_ref FROM linggan_material_comment WHERE comment_external_id=$1",
+    )
+    .bind(format!("{note}-comment-0"))
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let policy_ref = seed_study_policy(database).await;
+    seed_study_model_config(database, policy_ref).await;
+    let run = prepare_study_run(
+        database,
+        PrepareStudyRunRequest {
+            content_public_refs: vec![work_ref],
+        },
+    )
+    .await
+    .unwrap();
+    let batch = prepare_study_batch(
+        database,
+        PrepareStudyBatchRequest {
+            run_ref: run.run_ref,
+            maximum_targets: 2,
+        },
+    )
+    .await
+    .unwrap();
+    let claim = claim_next_study_batch(database, Uuid::new_v4(), DEFAULT_BATCH_LEASE_SECONDS)
+        .await
+        .unwrap()
+        .expect("the prepared batch is claimable");
+    reserve_study_batch_model_call(database, batch.batch_ref, claim.lease_token)
+        .await
+        .unwrap();
+    let signal = |target: Uuid, barrier: &str| {
+        serde_json::json!({
+            "targetRef":target,"outcome":"signals","reason":null,
+            "signals":[{
+                "kind":"problem",
+                "proposition":"孩子在家庭作业中存在自主启动困难。",
+                "evidence":"每天写作业都要催,不催就不开始",
+                "problemFrame":{
+                    "actor":{"value":"孩子","basis":"孩子"},
+                    "goalOrExpectedState":{"value":"自主开始作业","basis":"不催就不开始"},
+                    "barrierOrUnmetNeed":{"value":barrier,"basis":"都要催"},
+                    "context":{"value":"家庭作业","basis":"写作业"}
+                }
+            }]
+        })
+    };
+    accept_study_batch_output(
+        database,
+        batch.batch_ref,
+        claim.lease_token,
+        serde_json::json!({
+            "contract":"comment-study.note-batch.v1",
+            "batchRef":batch.batch_ref,
+            "contentPublicRef":batch.content_public_ref,
+            "results":[
+                signal(batch.target_refs[0], "需要外部催促"),
+                signal(batch.target_refs[1], "迟迟无法开始")
+            ]
+        }),
+    )
+    .await
+    .unwrap();
+    // Keyed by target, never by insertion order: both Signals are written in one transaction, so
+    // `created_at` ties and the ordering falls through to a random UUID. A caller that relied on
+    // that would pass or fail depending on which UUID sorted first.
+    let signal_for = |target: Uuid| async move {
+        sqlx::query_scalar::<_, Uuid>(
+            "SELECT signal_ref FROM linggan_comment_study_signal WHERE target_ref=$1",
+        )
+        .bind(target)
+        .fetch_one(database.pool())
+        .await
+        .unwrap()
+    };
+    (
+        signal_for(batch.target_refs[0]).await,
+        signal_for(batch.target_refs[1]).await,
+    )
+}
+
+
+async fn resolution_state_for(
+    database: &linggan_storage_postgres::Database,
+    signal_ref: Uuid,
+) -> Option<(String, Option<String>)> {
+    sqlx::query_as::<_, (String, Option<String>)>(
+        "SELECT state,decision_manifest->>'retrievalIncompleteReason' \
+         FROM linggan_comment_study_resolution WHERE signal_ref=$1",
+    )
+    .bind(signal_ref)
+    .fetch_optional(database.pool())
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn a_signal_is_never_called_novel_while_the_catalogue_cannot_be_searched() {
+    let database = proof_database("comment_study_resolution_incomplete").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    let (first, second) = two_eligible_signals(&database, "study-resolution-gap-note").await;
+
+    // No qualified profile at all: there is no catalogue to search, so nothing may be declared new.
+    assert!(advance_next_problem_resolution(&database).await.unwrap());
+    let (state, reason) = resolution_state_for(&database, first)
+        .await
+        .or(resolution_state_for(&database, second).await)
+        .expect("the advanced Signal received a resolution");
+    assert_eq!(state, "retrieval_incomplete");
+    assert_eq!(reason.as_deref(), Some("no_qualified_profile"));
+
+    // With a profile and vectors, but an active Problem whose core was never encoded, the
+    // catalogue is still only partly searchable — and still not evidence of novelty.
+    let profile = seed_embedding_profile(&database).await;
+    seed_vector(&database, profile, &signal_canonical_hash(&database, first).await, 0.0).await;
+    seed_vector(&database, profile, &signal_canonical_hash(&database, second).await, 0.1).await;
+    seed_existing_problem(
+        &database,
+        "另一类困难",
+        "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        &[first, second],
+    )
+    .await;
+    assert!(advance_next_problem_resolution(&database).await.unwrap());
+    let remaining = if resolution_state_for(&database, first).await.is_some() {
+        second
+    } else {
+        first
+    };
+    assert_eq!(
+        resolution_state_for(&database, remaining).await,
+        Some((
+            "retrieval_incomplete".to_owned(),
+            Some("problem_core_vectors_incomplete".to_owned())
+        ))
+    );
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn a_searchable_but_empty_catalogue_is_the_one_case_that_means_novel() {
+    let database = proof_database("comment_study_resolution_novel").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    let (first, second) = two_eligible_signals(&database, "study-resolution-novel-note").await;
+    let profile = seed_embedding_profile(&database).await;
+    seed_vector(&database, profile, &signal_canonical_hash(&database, first).await, 0.0).await;
+    seed_vector(&database, profile, &signal_canonical_hash(&database, second).await, 0.1).await;
+    // Nothing in the catalogue and nothing unsearchable: an empty candidate set here really does
+    // mean "no existing Problem covers this", which is what deferred_novel asserts.
+    assert!(advance_next_problem_resolution(&database).await.unwrap());
+    let resolved = resolution_state_for(&database, first)
+        .await
+        .or(resolution_state_for(&database, second).await)
+        .expect("the advanced Signal received a resolution");
+    assert_eq!(resolved, ("deferred_novel".to_owned(), None));
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn an_accepted_eligible_signal_carries_the_canonical_text_recall_searches_by() {
+    let database = proof_database("comment_study_canonical_written").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    let (first, _second) = two_eligible_signals(&database, "study-canonical-note").await;
+    let row = sqlx::query(
+        "SELECT eligibility_state,canonical_text,canonical_hash \
+         FROM linggan_comment_study_signal WHERE signal_ref=$1",
+    )
+    .bind(first)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(row.get::<String, _>("eligibility_state"), "eligible");
+    let text: String = row.get("canonical_text");
+    // The five slots are the shape recall depends on; a Signal stored without them would be
+    // invisible to the pool while still looking like a healthy eligible Signal.
+    assert_eq!(text.lines().count(), 5, "{text}");
+    assert!(text.contains("障碍：需要外部催促"), "{text}");
+    assert_eq!(row.get::<String, _>("canonical_hash").len(), 64);
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn the_unmerged_pool_is_what_lets_a_second_eligible_signal_find_the_first() {
+    let database = proof_database("comment_study_recall_pool").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    let (first, second) = two_eligible_signals(&database, "study-recall-pool-note").await;
+    let profile = seed_embedding_profile(&database).await;
+    seed_vector(&database, profile, &signal_canonical_hash(&database, first).await, 0.0).await;
+    seed_vector(&database, profile, &signal_canonical_hash(&database, second).await, 0.1).await;
+
+    let recalled = recall_candidates(&database, profile, second).await.unwrap();
+    assert_eq!(recalled.completeness, RecallCompleteness::Complete);
+    assert_eq!(
+        recalled.pool_signal_refs,
+        vec![first],
+        "with no Problem yet, the only thing to compare against is the other unmerged Signal"
+    );
+    assert!(recalled.problem_refs.is_empty());
+    assert!(recalled.identity_problem_refs.is_empty());
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn an_active_problem_without_an_encoded_core_makes_recall_report_itself_incomplete() {
+    let database = proof_database("comment_study_recall_incomplete").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    let (first, second) = two_eligible_signals(&database, "study-recall-gap-note").await;
+    let profile = seed_embedding_profile(&database).await;
+    seed_vector(&database, profile, &signal_canonical_hash(&database, first).await, 0.0).await;
+    seed_vector(&database, profile, &signal_canonical_hash(&database, second).await, 0.1).await;
+    // An active Problem whose core was never encoded is invisible to the vector path. Reporting
+    // "no candidates" here would read exactly like "this is new" and create a duplicate.
+    seed_existing_problem(
+        &database,
+        "另一类困难",
+        "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        &[first, second],
+    )
+    .await;
+
+    let recalled = recall_candidates(&database, profile, second).await.unwrap();
+    assert_eq!(
+        recalled.completeness,
+        RecallCompleteness::Incomplete {
+            reason: "problem_core_vectors_incomplete"
+        }
+    );
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn a_problem_reached_through_both_its_core_and_a_member_appears_once() {
+    let database = proof_database("comment_study_recall_fold").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    let (first, second) = two_eligible_signals(&database, "study-recall-fold-note").await;
+    let profile = seed_embedding_profile(&database).await;
+    let first_hash = signal_canonical_hash(&database, first).await;
+    let second_hash = signal_canonical_hash(&database, second).await;
+    seed_vector(&database, profile, &first_hash, 0.05).await;
+    seed_vector(&database, profile, &second_hash, 0.0).await;
+    // Two seeds, because a Problem that one person's single reading produced is exactly what the
+    // schema refuses: the second independent account is the point, not a formality.
+    let problem = seed_existing_problem(
+        &database,
+        "作业启动困难",
+        "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        &[first, second],
+    )
+    .await;
+    // The seeded core hash, plus a member Signal that is also encoded: both paths reach the same
+    // Problem, and folding has to leave exactly one entry rather than ranking it twice.
+    seed_vector(
+        &database,
+        profile,
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        0.2,
+    )
+    .await;
+    sqlx::query(
+        "INSERT INTO linggan_comment_study_resolution( \
+           resolution_ref,signal_ref,domain_ref,state,candidate_manifest,resolved_problem_ref,resolved_at \
+         ) VALUES($1,$2,$3,'assigned','{}'::jsonb,$4,scope_001_now())",
+    )
+    .bind(Uuid::new_v4())
+    .bind(first)
+    .bind(Uuid::parse_str(ADHD_DOMAIN_REF).unwrap())
+    .bind(problem)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let resolution: Uuid = sqlx::query_scalar(
+        "SELECT resolution_ref FROM linggan_comment_study_resolution WHERE signal_ref=$1",
+    )
+    .bind(first)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_comment_study_problem_membership( \
+           membership_ref,signal_ref,problem_ref,resolution_ref) VALUES($1,$2,$3,$4)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(first)
+    .bind(problem)
+    .bind(resolution)
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    let recalled = recall_candidates(&database, profile, second).await.unwrap();
+    assert_eq!(recalled.completeness, RecallCompleteness::Complete);
+    assert_eq!(recalled.problem_refs, vec![problem]);
+    assert!(
+        !recalled.pool_signal_refs.contains(&first),
+        "a Signal that already supports a Problem has left the unmerged pool"
+    );
+}
+
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof"]
 async fn no_existing_match_stays_deferred_until_two_independent_signals_create_one_problem() {
@@ -2548,6 +2888,64 @@ async fn run_state(
 /// Seeds a Problem the way creation does: identity row plus its immutable first revision. A
 /// Problem without a revision has no core for recall to encode, so tests must not create half of
 /// one.
+/// Registers a qualified profile the way a machine probe would, without running a model.
+async fn seed_embedding_profile(database: &linggan_storage_postgres::Database) -> Uuid {
+    linggan_intelligence::comment_study_embedding::register_embedding_profile(
+        database,
+        "test-revision",
+        serde_json::json!({"backend":"test","dtype":"test"}),
+        Some(serde_json::json!({"probe":"synthetic","dimension":512})),
+    )
+    .await
+    .unwrap()
+}
+
+/// A unit vector `angle` radians away from the reference direction, so a test can state "these two
+/// are near" or "these two are far" without depending on a model.
+fn unit_vector(angle: f64) -> String {
+    let mut values = vec![0.0_f64; 512];
+    values[0] = angle.cos();
+    values[1] = angle.sin();
+    format!(
+        "[{}]",
+        values
+            .iter()
+            .map(|value| value.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    )
+}
+
+async fn seed_vector(
+    database: &linggan_storage_postgres::Database,
+    profile_ref: Uuid,
+    canonical_hash: &str,
+    angle: f64,
+) {
+    sqlx::query(
+        "INSERT INTO linggan_comment_study_embedding_cache(profile_ref,canonical_hash,embedding) \
+         VALUES($1,$2,$3::text::public.vector) ON CONFLICT DO NOTHING",
+    )
+    .bind(profile_ref)
+    .bind(canonical_hash)
+    .bind(unit_vector(angle))
+    .execute(database.pool())
+    .await
+    .unwrap();
+}
+
+/// Reads the canonical hash a Signal actually carries, so a test never guesses at the template.
+async fn signal_canonical_hash(
+    database: &linggan_storage_postgres::Database,
+    signal_ref: Uuid,
+) -> String {
+    sqlx::query_scalar("SELECT canonical_hash FROM linggan_comment_study_signal WHERE signal_ref=$1")
+        .bind(signal_ref)
+        .fetch_one(database.pool())
+        .await
+        .unwrap()
+}
+
 async fn seed_existing_problem(
     database: &linggan_storage_postgres::Database,
     definition: &str,

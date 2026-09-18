@@ -137,6 +137,38 @@ pub async fn prepare_problem_resolution(
     })
 }
 
+/// Closes a resolution that never got a trustworthy candidate set.
+///
+/// This exists so that "recall could not cover the catalogue" can never be recorded as "compared
+/// and found nothing". The two look identical downstream — an empty candidate list — but only the
+/// second is evidence of novelty. Recording the first as novel is how a duplicate Problem gets
+/// created from a catalogue that merely was not searchable.
+pub async fn resolve_retrieval_incomplete(
+    database: &Database,
+    resolution_ref: Uuid,
+    reason: &str,
+) -> Result<ProblemResolutionReceipt, ProblemStoreError> {
+    let mut transaction = database.pool().begin().await?;
+    lock_pending_resolution(&mut transaction, resolution_ref).await?;
+    finish_resolution(
+        &mut transaction,
+        resolution_ref,
+        "retrieval_incomplete",
+        None,
+        json!({
+            "contract":"comment-study.problem-candidate-set.v1",
+            "retrievalIncompleteReason":reason
+        }),
+    )
+    .await?;
+    transaction.commit().await?;
+    Ok(ProblemResolutionReceipt {
+        resolution_ref,
+        state: "retrieval_incomplete".to_owned(),
+        problem_ref: None,
+    })
+}
+
 /// Accepts a closed candidate comparison. A malformed model output is recorded as a protocol
 /// rejection, never reinterpreted as “there was no matching Problem”.
 pub async fn accept_problem_resolution(

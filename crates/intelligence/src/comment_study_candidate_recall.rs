@@ -8,6 +8,9 @@ use crate::comment_study_problem_store::{
     PreparedProblemResolution, ProblemStoreError, accept_problem_resolution, prepare_problem_pair,
     prepare_problem_resolution,
 };
+use crate::comment_study_embedding::active_profile;
+use crate::comment_study_problem_store::resolve_retrieval_incomplete;
+use crate::comment_study_recall::{RecallCompleteness, recall_candidates};
 use linggan_storage_postgres::Database;
 use serde::Serialize;
 use serde_json::Value;
@@ -175,14 +178,46 @@ pub async fn advance_next_problem_resolution(
     let Some(signal_ref) = signal_ref else {
         return Ok(false);
     };
-    let (recall, prepared) = prepare_recalled_problem_resolution(database, signal_ref).await?;
-    if recall.candidates.is_empty() && prepared.state == "pending" {
-        accept_problem_resolution(
-            database,
-            prepared.resolution_ref,
-            serde_json::json!({"contract":"comment-study.problem-resolution.v1","candidates":[]}),
-        )
-        .await?;
+    // Without a qualified encoding profile there is no catalogue to search at all. Falling back to
+    // the lexical path here would be worse than doing nothing: it would answer "no candidates"
+    // with a method that cannot see semantic matches, and that answer creates duplicates.
+    let Some(profile_ref) = active_profile(database).await? else {
+        let prepared = prepare_problem_resolution(database, signal_ref, Vec::new()).await?;
+        if prepared.state == "pending" {
+            resolve_retrieval_incomplete(database, prepared.resolution_ref, "no_qualified_profile")
+                .await?;
+        }
+        return Ok(true);
+    };
+    let recalled = recall_candidates(database, profile_ref, signal_ref).await?;
+    // An identity match is a shortcut *into* the comparison queue, never past it, so it joins the
+    // candidate set rather than resolving anything on its own.
+    let mut candidate_problem_refs = recalled.identity_problem_refs.clone();
+    for problem_ref in recalled.problem_refs {
+        if !candidate_problem_refs.contains(&problem_ref) {
+            candidate_problem_refs.push(problem_ref);
+        }
+    }
+    let prepared =
+        prepare_problem_resolution(database, signal_ref, candidate_problem_refs.clone()).await?;
+    if prepared.state != "pending" {
+        return Ok(true);
+    }
+    match recalled.completeness {
+        // "Could not search the catalogue" and "searched it and found nothing" both arrive as an
+        // empty list. Only the second is evidence that this Signal is novel.
+        RecallCompleteness::Incomplete { reason } => {
+            resolve_retrieval_incomplete(database, prepared.resolution_ref, reason).await?;
+        }
+        RecallCompleteness::Complete if candidate_problem_refs.is_empty() => {
+            accept_problem_resolution(
+                database,
+                prepared.resolution_ref,
+                serde_json::json!({"contract":"comment-study.problem-resolution.v1","candidates":[]}),
+            )
+            .await?;
+        }
+        RecallCompleteness::Complete => {}
     }
     Ok(true)
 }
