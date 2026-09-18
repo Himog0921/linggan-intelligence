@@ -236,6 +236,71 @@ async fn insert_work(
     Ok(())
 }
 
+/// Closes a run once none of its frozen targets can still advance on their own.
+///
+/// Nothing in the codebase ever wrote `completed`, `completed_with_failures` or `cancelled`,
+/// though the schema has defined all three from the start: the only statement that set a run's
+/// state set it to `running`. Every run that ever started therefore stayed `running` for good,
+/// including runs whose every target had long since reached a terminal state.
+///
+/// Which terminal state a run takes describes its material, not how hard the system tried. A run
+/// whose targets were all excluded never had anything left to study and is `cancelled`; one that
+/// lost some targets to failure or exclusion is `completed_with_failures`; one that resolved every
+/// target is `completed` — `needs_context` counts as resolved, because a named material gap is an
+/// honest research outcome rather than a failure, and re-studying it is a later run's job.
+///
+/// `ready` has no producer today, but it is counted as unsettled anyway: for a state the schema
+/// allows, erring towards leaving a run open is recoverable, while closing one that still holds
+/// work is not.
+pub(crate) async fn close_run_if_settled(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    run_ref: Uuid,
+) -> Result<Option<&'static str>, sqlx::Error> {
+    let open: Option<String> = sqlx::query_scalar(
+        "SELECT state FROM linggan_comment_study_run \
+         WHERE run_ref=$1 AND finished_at IS NULL FOR UPDATE",
+    )
+    .bind(run_ref)
+    .fetch_optional(&mut **transaction)
+    .await?;
+    if open.is_none() {
+        return Ok(None);
+    }
+    let counts = sqlx::query(
+        "SELECT count(*) FILTER (WHERE state IN ('ready','queued','running')) AS unsettled, \
+                count(*) FILTER (WHERE state='failed') AS failed, \
+                count(*) FILTER (WHERE state='excluded') AS excluded, \
+                count(*) AS total \
+         FROM linggan_comment_study_target WHERE run_ref=$1",
+    )
+    .bind(run_ref)
+    .fetch_one(&mut **transaction)
+    .await?;
+    let unsettled: i64 = counts.get("unsettled");
+    let total: i64 = counts.get("total");
+    if unsettled > 0 || total == 0 {
+        return Ok(None);
+    }
+    let failed: i64 = counts.get("failed");
+    let excluded: i64 = counts.get("excluded");
+    let state = if excluded == total {
+        "cancelled"
+    } else if failed > 0 || excluded > 0 {
+        "completed_with_failures"
+    } else {
+        "completed"
+    };
+    sqlx::query(
+        "UPDATE linggan_comment_study_run SET state=$2,finished_at=scope_001_now() \
+         WHERE run_ref=$1 AND finished_at IS NULL",
+    )
+    .bind(run_ref)
+    .bind(state)
+    .execute(&mut **transaction)
+    .await?;
+    Ok(Some(state))
+}
+
 async fn insert_target(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     run_ref: Uuid,
