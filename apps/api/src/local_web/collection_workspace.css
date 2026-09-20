@@ -1296,3 +1296,82 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 @media (prefers-reduced-motion:reduce){
   .c-rdrawer { transition:none; }
 }
+
+/* ==========================================================================
+ * RUNTIME-STATION-BOARD-V9-FINAL
+ * 顶部单一运行看板 + 单行工位控制表。只作用 /collection/runtime 的专属类。
+ * ========================================================================== */
+
+.c-runtime{gap:var(--lgi-space-6);padding-top:var(--lgi-space-4)}
+
+/* 顶部运行看板：保留运行页唯一深色面，动作收在同一条头部，不再另起“工位控制”。 */
+.c-runtime-board{min-width:0;border-bottom:var(--c-line-hair) solid var(--v7-line-strong);background:var(--v7-white)}
+.c-runtime-board-head{position:relative;overflow:hidden;min-height:calc(var(--c-cell) * 6.25);display:grid;grid-template-columns:auto auto minmax(0,1fr) auto;align-items:center;gap:var(--lgi-space-3);padding:0 var(--lgi-space-3) 0 var(--lgi-space-4);background:var(--lgi-stream-bg);color:var(--lgi-on-dark)}
+.c-runtime-board-head::before{content:"";position:absolute;inset:0 auto 0 0;width:var(--c-line-mode);background:var(--lgi-stream-red)}
+.c-runtime-board-head::after{content:"";position:absolute;inset:0 0 0 auto;width:35%;background-image:var(--lgi-mosaic-on-dark);background-size:var(--c-cell2) var(--c-cell2);opacity:.78;pointer-events:none;-webkit-mask-image:linear-gradient(90deg,transparent 0 8%,color-mix(in srgb,var(--lgi-ink) 15%,transparent) 8% 22%,color-mix(in srgb,var(--lgi-ink) 30%,transparent) 22% 36%,color-mix(in srgb,var(--lgi-ink) 45%,transparent) 36% 50%,color-mix(in srgb,var(--lgi-ink) 62%,transparent) 50% 64%,color-mix(in srgb,var(--lgi-ink) 77%,transparent) 64% 78%,color-mix(in srgb,var(--lgi-ink) 91%,transparent) 78% 90%,var(--lgi-ink) 90% 100%);mask-image:linear-gradient(90deg,transparent 0 8%,color-mix(in srgb,var(--lgi-ink) 15%,transparent) 8% 22%,color-mix(in srgb,var(--lgi-ink) 30%,transparent) 22% 36%,color-mix(in srgb,var(--lgi-ink) 45%,transparent) 36% 50%,color-mix(in srgb,var(--lgi-ink) 62%,transparent) 50% 64%,color-mix(in srgb,var(--lgi-ink) 77%,transparent) 64% 78%,color-mix(in srgb,var(--lgi-ink) 91%,transparent) 78% 90%,var(--lgi-ink) 90% 100%)}
+.c-runtime-board-head>*{position:relative;z-index:1}
+.c-runtime-board-state{color:var(--lgi-on-dark);font-size:var(--lgi-text-body);font-weight:700}
+.c-runtime-board-code{justify-self:end;color:var(--lgi-stream-muted);font:var(--lgi-weight-semibold) var(--lgi-text-label)/1 var(--lgi-font-mono);white-space:nowrap}
+.c-runtime-board-actions{display:flex;align-items:center;gap:var(--lgi-space-2)}
+.c-runtime-board-btn{display:inline-flex;align-items:center;justify-content:center;min-height:calc(var(--c-cell) * 3.75);height:calc(var(--c-cell) * 3.75);padding:0 var(--lgi-space-3);border:var(--c-line-hair) solid color-mix(in srgb,var(--lgi-on-dark) 55%,transparent);background:transparent;color:var(--lgi-on-dark);font-size:var(--lgi-text-label);font-weight:700;line-height:1;white-space:nowrap;text-decoration:none;cursor:pointer}
+.c-runtime-board-btn:hover{border-color:var(--lgi-on-dark);background:color-mix(in srgb,var(--lgi-on-dark) 10%,transparent)}
+.c-runtime-board-btn-primary{border-color:var(--lgi-on-dark);background:var(--lgi-on-dark);color:var(--lgi-ink)}
+.c-runtime-board-btn-primary:hover{border-color:var(--lgi-signal-ink);background:var(--lgi-signal-ink);color:var(--lgi-on-dark)}
+.c-runtime-board-body{display:grid;grid-template-columns:minmax(420px,1.05fr) minmax(620px,1.95fr);min-height:calc(var(--c-cell) * 14)}
+.c-runtime-board-lanes{min-width:0;padding:var(--lgi-space-3) var(--lgi-space-4)}
+.c-runtime-board-lanes .c-instr-issue{min-height:calc(var(--c-cell) * 3.5)}
+.c-runtime-board-metrics{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));border-left:var(--c-line-hair) solid var(--v7-line)}
+.c-runtime-board-metric{display:flex;flex-direction:column;justify-content:center;min-width:0;padding:var(--lgi-space-3);border-right:var(--c-line-hair) solid var(--v7-line)}
+.c-runtime-board-metric:last-child{border-right:0}
+.c-runtime-board-metric b{color:var(--lgi-ink);font:var(--lgi-weight-bold) var(--lgi-text-section)/1.1 var(--lgi-font-mono);font-variant-numeric:tabular-nums}
+.c-runtime-board-metric span{margin-top:var(--lgi-space-2);color:var(--lgi-muted);font-size:var(--lgi-text-label)}
+.c-runtime-board-empty{padding:var(--lgi-space-4);color:var(--lgi-muted);font-size:var(--lgi-text-data)}
+
+/* 区段标题只保留标题与右侧事实，不再用“台 / 今日 / 排程”装饰性黑块。 */
+.c-runtime .c-sect-head{grid-template-columns:minmax(0,1fr) auto;min-height:calc(var(--c-cell) * 5.25);padding:0;border-bottom:var(--c-line-hair) solid var(--v7-line-strong)}
+.c-runtime .c-sect-head>.c-sect-badge{display:none}
+.c-runtime .c-sect-head h2{font-size:var(--lgi-text-section);line-height:var(--lgi-lh-heading)}
+.c-runtime .c-sect-meta{color:var(--lgi-muted);font-size:var(--lgi-text-label)}
+
+/* 工位表：十列单行。列宽权威仍住在 target_drawer.css，这里只管单元格表达。 */
+.c-stn-row{min-height:calc(var(--c-cell) * 7);padding-top:var(--lgi-space-2);padding-bottom:var(--lgi-space-2);cursor:default}
+.c-stn-row:hover{background:var(--lgi-canvas-sunken)}
+.c-stn-name-cell{display:flex;align-items:center;gap:var(--lgi-space-2);min-width:0}
+.c-stn-name-label{max-width:100%;font-size:var(--lgi-text-body);font-weight:700}
+.c-stn-edit{width:calc(var(--c-cell) * 3);height:calc(var(--c-cell) * 3);display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;padding:0;border:0;background:transparent;color:var(--lgi-muted);cursor:pointer}
+.c-stn-edit:hover{color:var(--lgi-signal-ink)}
+.c-stn-name-form{display:flex;align-items:center;gap:var(--lgi-space-1);min-width:0;margin:0}
+.c-stn-name-form[hidden]{display:none}
+.c-stn-name-input{width:min(100%,calc(var(--lgi-space-24) * 1.55));min-width:0;height:calc(var(--c-cell) * 3.75);padding:0 var(--lgi-space-2);border:var(--c-line-hair) solid var(--v7-line-strong);background:var(--v7-white);color:var(--lgi-ink);font-size:var(--lgi-text-label);font-weight:600}
+.c-stn-name-save,.c-stn-name-cancel{height:calc(var(--c-cell) * 3.75);padding:0 var(--lgi-space-2);border:var(--c-line-hair) solid var(--v7-black);background:var(--v7-white);color:var(--v7-black);font-size:var(--lgi-text-label);font-weight:700;cursor:pointer}
+.c-stn-name-save{background:var(--v7-black);color:var(--v7-white)}
+.c-tg-station-grid .c-tg-number-value{text-align:left}
+.c-usage-inline{display:flex;flex-direction:row;align-items:center;gap:var(--lgi-space-2)}
+.c-usage-inline .c-usage-track{width:calc(var(--c-cell) * 9.5)}
+.c-stn-accept-cell{display:flex;align-items:center;gap:var(--lgi-space-2);overflow:visible}
+.c-stn-inline-form{display:inline-flex;margin:0}
+.c-stn-pause-action{position:relative;overflow:hidden;min-height:calc(var(--c-cell) * 3.5);height:calc(var(--c-cell) * 3.5);padding:0 var(--lgi-space-3);border:var(--c-line-hair) solid var(--v7-line-strong);background:var(--v7-white);color:var(--lgi-body);font-size:var(--lgi-text-label);font-weight:700;cursor:pointer}
+.c-stn-pause-action::after{content:"";position:absolute;inset:0 0 0 auto;width:var(--lgi-space-2);background-image:var(--lgi-mosaic-on-light);background-size:var(--lgi-space-1) var(--lgi-space-1);opacity:.62}
+.c-stn-pause-action:hover{border-color:var(--v7-black);color:var(--v7-black)}
+.c-stn-recent{color:var(--lgi-body);font-size:var(--lgi-text-label);white-space:nowrap}
+
+/* 今日任务只列正在发生的真实任务，统计读数已经由顶部看板承担。 */
+.c-runtime .c-run-list{margin:0}
+.c-runtime .c-run-row{min-height:calc(var(--c-cell) * 6)}
+.c-runtime .c-run-name b{font-size:var(--lgi-text-body)}
+.c-runtime .c-run-name span,.c-runtime .c-run-meta{font-size:var(--lgi-text-label)}
+.c-runtime .c-run-list>.c-run-list-head{display:none}
+
+/* 自动排程首层五列，状态与时间保持同一行。 */
+.c-runtime .c-sched-grid{grid-template-columns:minmax(0,1.65fr) minmax(0,.7fr) minmax(0,1.2fr) minmax(0,1fr) minmax(0,.45fr);gap:var(--lgi-space-2)}
+.c-runtime .c-tg-table-head.c-sched-grid{min-height:calc(var(--c-cell) * 4.75);font-size:var(--lgi-text-label);font-weight:600}
+.c-runtime .c-tg-item.c-sched-grid{min-height:calc(var(--c-cell) * 5.75);padding-top:var(--lgi-space-2);padding-bottom:var(--lgi-space-2)}
+.c-runtime .c-sched-last{display:flex;align-items:center;gap:var(--lgi-space-2);white-space:nowrap}
+.c-runtime .c-sched-last time{color:var(--lgi-muted);font-family:var(--lgi-font-mono);font-size:var(--lgi-text-label)}
+.c-runtime .c-sched-act{text-align:right}
+.c-runtime .c-sched-act a{color:var(--lgi-ink);font-size:var(--lgi-text-label);text-underline-offset:var(--lgi-space-1)}
+
+@media (max-width:1380px){
+  .c-runtime-board-body{grid-template-columns:1fr}
+  .c-runtime-board-metrics{border-top:var(--c-line-hair) solid var(--v7-line);border-left:0}
+}

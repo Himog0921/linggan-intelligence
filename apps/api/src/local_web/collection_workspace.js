@@ -731,3 +731,68 @@
   // 的（提交失败）。上面那条 `paint` 之外的唯一作用是让 `aria-expanded` 与真实状态一致。
   paint(isOpen());
 })();
+
+/* runtime-station-board-v9-final
+ * 工位不再打开详情侧栏。名称只做行内编辑；接活按钮继续由服务端 POST 处理。
+ */
+(function () {
+  "use strict";
+
+  var rows = Array.prototype.slice.call(document.querySelectorAll(".c-stn-row"));
+  if (!rows.length) return;
+
+  function closeEditor(row) {
+    var form = row.querySelector("[data-station-name-form]");
+    var label = row.querySelector(".c-stn-name-label");
+    var edit = row.querySelector("[data-station-name-edit]");
+    if (!form || form.hidden) return;
+    form.hidden = true;
+    if (label) label.hidden = false;
+    if (edit) edit.hidden = false;
+  }
+
+  rows.forEach(function (row) {
+    var edit = row.querySelector("[data-station-name-edit]");
+    var form = row.querySelector("[data-station-name-form]");
+    var label = row.querySelector(".c-stn-name-label");
+    var cancel = row.querySelector("[data-station-name-cancel]");
+    var input = row.querySelector(".c-stn-name-input");
+
+    if (edit && form && label && input) {
+      edit.addEventListener("click", function (event) {
+        event.preventDefault();
+        rows.forEach(function (other) {
+          if (other !== row) closeEditor(other);
+        });
+        label.hidden = true;
+        edit.hidden = true;
+        form.hidden = false;
+        window.requestAnimationFrame(function () {
+          input.focus();
+          input.select();
+        });
+      });
+    }
+
+    if (cancel) {
+      cancel.addEventListener("click", function (event) {
+        event.preventDefault();
+        closeEditor(row);
+        if (edit) edit.focus();
+      });
+    }
+  });
+
+  document.addEventListener("keydown", function (event) {
+    if (event.key !== "Escape") return;
+    var active = rows.find(function (row) {
+      var form = row.querySelector("[data-station-name-form]");
+      return form && !form.hidden;
+    });
+    if (!active) return;
+    event.preventDefault();
+    var edit = active.querySelector("[data-station-name-edit]");
+    closeEditor(active);
+    if (edit) edit.focus();
+  });
+})();
