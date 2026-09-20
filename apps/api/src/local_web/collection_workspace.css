@@ -385,17 +385,21 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 .c-instr-issue-list { display:grid; }
 /* 一条通道一行：标记 + 名字与说明 + 判定词 + 判定码。四个位置固定，扫一列就能比对，
  * 不必逐行读句子。标记只画状态，不带文字（ADR-04）。 */
-/* 下限同时从 --c-cell 的 4.5 倍降到 4 倍（36 → 32）。这一条在当前数据下**不生效**，如实记下：
- * 一行的高度是内容撑出来的——12px 字、18px 行高的那句备注在 232px 宽的列里折成两行（36），
- * 加 4+4 的内边距与 1px 分隔线，一行 45px，早就高过 32。它只在备注短到一行时兜底，那时
- * 内容才 27，会被这个下限从 36 压到 32。收这一档是为了让上下两处留白走同一条梯子。 */
+/* 下限 --c-cell 的 4 倍（32）。上一轮在这里记过一句「在当前数据下不生效」——**那一句现在
+ * 作废**：备注改成不换行之后（见 `.c-lane-name`），一行的内容只有 18 的行高加 8 的内边距
+ * = 26，这个下限开始真正兜住行高。三条通道因此等高 32，不再按各自备注的长短折成两行、
+ * 把整块高度顶起来。 */
 .c-instr-issue { display:grid; grid-template-columns:var(--c-cell) minmax(0,1fr) auto auto; align-items:center; gap:var(--c-cell); min-height:calc(var(--c-cell) * 4); padding:var(--lgi-space-1) 0; border-bottom:var(--c-line-hair) solid var(--v7-line); }
 .c-instr-issue:last-child { border-bottom:0; }
 .c-lane-mark { width:var(--c-cell); height:var(--c-cell); display:block; background:var(--v7-unknown-fill); }
 .c-instr-issue[data-capacity-state="available"] .c-lane-mark { background:var(--v7-ok-fill); }
 .c-instr-issue[data-capacity-state="queueable"] .c-lane-mark { background:var(--v7-warn-fill); }
 .c-instr-issue[data-capacity-state="blocked"] .c-lane-mark { background:var(--v7-bad-fill); }
-.c-lane-name { min-width:0; color:var(--v7-body); font-size:var(--c-fs-200); line-height:1.5; }
+/* 装不下就截断，不换行。用户 2026-09-20：「这些描述太长了，直接截断，不允许换行，
+ * 拉高整个行高」——要消掉的是后半句：那句备注是服务端给的完整一句话，长度不归这一栏管，
+ * 让它折行，这块的高度就跟着数据走，而且三条通道折的行数还可能不一样，行高参差。
+ * 截断点由列宽决定，不写死字符数；`min-width:0` 是让它允许被压到内容宽度以下。 */
+.c-lane-name { min-width:0; color:var(--v7-body); font-size:var(--c-fs-200); line-height:1.5; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .c-lane-name b { color:var(--v7-black); font-weight:var(--c-fw-medium); }
 .c-lane-state { font:var(--c-fw-bold) var(--c-fs-100)/1 var(--lgi-font-mono); font-style:normal; letter-spacing:.05em; white-space:nowrap; }
 .c-lane-ok { color:var(--v7-ok); }
@@ -1223,9 +1227,10 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
   height:calc(100vh - var(--v7-header-height));
   border-left:var(--c-line-rail) solid var(--v7-black);
   background:var(--v7-white);
-  /* 硬边阴影，方向按贴右边的面板改：稿子那片柔和的 rgba 光晕没有对应 token，而这套
-   * 语言里所有浮起的面都是硬边的。 */
-  box-shadow:calc(var(--lgi-space-1) * -1) var(--lgi-space-1) 0 var(--v7-black);
+  /* 左缘只留一条 2px 的墨色边。这里原先还压着一片向左下偏移的硬阴影（-4px 4px），与边框
+   * 叠起来就是左缘那道 6px 的黑杠——用户 2026-09-20 指着它说「加粗线条还是阴影可以删掉了」。
+   * 删的是阴影，边留着：这块是覆盖层，把最后一条边也去掉就与底下的内容糊在一起，读不出
+   * 分界在哪。稿子里那片柔和的 rgba 光晕与本语言的所有浮起面本来就不同源。 */
   transform:translateX(calc(100% + var(--lgi-space-5)));
   pointer-events:none;
   transition:transform var(--lgi-duration-panel) var(--v7-ease);
