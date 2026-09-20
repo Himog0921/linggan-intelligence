@@ -178,6 +178,8 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../../database/migrations/0093_capture_delivery_rejection.sql"),
     "\n",
+    include_str!("../../../../database/migrations/0094_corpus_evidence_read_recovery.sql"),
+    "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES\n",
     "('0001_scope_001_capture_evidence', 'a0deb8d5bf6cbd3bc0b8343691167fe02170abe7469f7ba270017dada442cd98'),\n",
     "('0002_local_001_discovery', '26ae29e0e00bddd2804aebc5576e8868936af746858e61cc24769579333ecdbe'),\n",
@@ -230,5 +232,6 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "('0090_detail_page_grant_recovery_and_risk_cooldown', 'a6d5e5e8ed230bacd6d03b2175f61bd263c2b48e04eb6be710df078a7771acff'),\n",
     "('0091_ocr_content_layering', 'c7b8390696dc02bcff0a494cbfb55077ea6773a4f9c8109dd116cc7d6d99d770'),\n",
     "('0092_detail_page_session_recovery_boundary', '836095cc3923684684a1d22b6f38171692cadbee5c748e3f5cf004e387d701ad'),\n",
-    "('0093_capture_delivery_rejection', 'aaaecf81357c2d4b63719e9729b4e8787b0fab38c0b96953b597850bb69e443e');\n",
+    "('0093_capture_delivery_rejection', 'aaaecf81357c2d4b63719e9729b4e8787b0fab38c0b96953b597850bb69e443e'),\n",
+    "('0094_corpus_evidence_read_recovery', '5557cd2dfa4b48426caa230d72742b56d5dd7bc5f85ca53acc953aec1b57fd4b');\n",
 );
