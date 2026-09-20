@@ -146,6 +146,122 @@ async fn loopback_comment_lane_hides_sensitive_body_and_external_identity() {
 
 #[tokio::test]
 #[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn authorized_comment_channel_uses_current_restrictions_without_the_retired_v1_view() {
+    let database = proof_database("material_comment_current_restriction_contract").await;
+    seed_comment(&database).await;
+
+    sqlx::query("DROP VIEW linggan_comment_research_readable CASCADE")
+        .execute(database.pool())
+        .await
+        .unwrap();
+
+    let (content_ref, comment_external_id): (uuid::Uuid, String) = sqlx::query_as(
+        "SELECT content_public_ref,comment_external_id \
+         FROM linggan_material_comment_current LIMIT 1",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let readable = request_json(
+        &database,
+        &format!("/api/local/work-resources/{content_ref}/comments"),
+    )
+    .await;
+    assert_eq!(readable.pointer("/total").and_then(Value::as_i64), Some(1));
+    assert!(readable.to_string().contains("评论命中"));
+
+    sqlx::query(
+        "INSERT INTO linggan_material_comment_restriction(\
+           content_public_ref,comment_external_id,reason\
+         ) VALUES($1,$2,'restricted by current material eligibility')",
+    )
+    .bind(content_ref)
+    .bind(comment_external_id)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let restricted = request_json(
+        &database,
+        &format!("/api/local/work-resources/{content_ref}/comments"),
+    )
+    .await;
+    assert_eq!(
+        restricted.pointer("/total").and_then(Value::as_i64),
+        Some(0)
+    );
+    assert_eq!(restricted.pointer("/items"), Some(&json!([])));
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn corpus_media_enrichment_indexes_are_present_in_the_full_schema() {
+    let database = proof_database("material_media_enrichment_indexes").await;
+    for (index, owner_table, first_key, second_key, second_key_desc) in [
+        (
+            "linggan_material_media_origin_content_slot_idx",
+            "linggan_material_media_origin",
+            "content_public_ref",
+            "slot_key",
+            false,
+        ),
+        (
+            "linggan_media_processing_job_slot_created_idx",
+            "linggan_media_processing_job",
+            "slot_key",
+            "created_at",
+            false,
+        ),
+        (
+            "linggan_media_derivative_job_created_idx",
+            "linggan_media_derivative",
+            "job_ref",
+            "created_at",
+            false,
+        ),
+        (
+            "linggan_media_processing_job_event_job_occurred_idx",
+            "linggan_media_processing_job_event",
+            "job_ref",
+            "occurred_at",
+            true,
+        ),
+    ] {
+        let compatible: bool = sqlx::query_scalar(
+            "SELECT EXISTS( \
+                 SELECT 1 FROM pg_index indexed \
+                 JOIN pg_class relation ON relation.oid=indexed.indexrelid \
+                 JOIN pg_am access_method ON access_method.oid=relation.relam \
+                 WHERE indexed.indexrelid=to_regclass($1) \
+                   AND relation.relkind='i' \
+                   AND indexed.indrelid=$2::regclass \
+                   AND access_method.amname='btree' \
+                   AND NOT indexed.indisunique \
+                   AND indexed.indnkeyatts=2 AND indexed.indnatts=2 \
+                   AND indexed.indpred IS NULL AND indexed.indexprs IS NULL \
+                   AND indexed.indisvalid AND indexed.indisready \
+                   AND pg_get_indexdef(indexed.indexrelid,1,true)=$3 \
+                   AND pg_get_indexdef(indexed.indexrelid,2,true)=$4 \
+                   AND pg_index_column_has_property(indexed.indexrelid,1,'asc') \
+                   AND pg_index_column_has_property(indexed.indexrelid,2,'desc')=$5 \
+             )",
+        )
+        .bind(index)
+        .bind(owner_table)
+        .bind(first_key)
+        .bind(second_key)
+        .bind(second_key_desc)
+        .fetch_one(database.pool())
+        .await
+        .unwrap();
+        assert!(
+            compatible,
+            "the bounded Evidence media read requires compatible index {index}"
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
 async fn detail_exposes_the_bounded_reobservation_action_and_refuses_targetless_fallback() {
     let database = proof_database("material_loopback_reobservation_boundary").await;
     seed_detail(&database).await;

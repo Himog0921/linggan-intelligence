@@ -51,6 +51,12 @@ read interface 的事实 owner，也不授权任何泛化采集或页面私有�
 
 Evidence Library 是首个消费者，不是接口 owner。后续选题、创作者、观察、研究或其他页面不得另写 SQL、另读 Package JSON、另建封面/作者/时间拼接规则，亦不得以页面私有 endpoint 形成第二份事实。
 
+### Comment Study 重建后的受控评论读取
+
+`/api/local/work-resources/{publicRef}/comments` 是原始 Evidence 的受控读取通道，不是 Comment Study 的 Run、Signal 或 Result 读取面。它直接从 `linggan_material_comment_current` 读取当前评论，并以 `linggan_material_comment_restriction` 排除已受限评论；不得依赖已经由 DEC-0006 退休的 `linggan_comment_research_*` relation。旧 restriction table 若仍在历史 migration 链中，只能一次性复制限制事实到当前 material contract，不能借此恢复 V1 schema、结果或兼容 read model。
+
+列表仍以固定页大小在同一 Work Resource Current owner 下读取。Media V2 enrichment 可以使用支持 `content_ref → slot → job/derivative/event` 的索引，但不得借性能优化建立页面私有的 Current、降级详情字段资格，或把列表超时伪装成空 Evidence。
+
 `GET /api/local/collection/targets/{targetRef}/lifecycle` 是窄化的派生读面，不是第二个 Work facts
 API：它只公开 target/window/as-of、Work public ref、规则版本、coverage/排除/scan receipt、分位与
 滚动中位；不公开 title、author、published-at 或 engagement Current。Collection 服务端渲染可以在
