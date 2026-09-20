@@ -64,6 +64,18 @@ impl RuntimeControl<'_> {
 const NO_PLATFORM_ACCESS_NOTE: &str =
     "登记工位、开认领窗口与认领安装都只写本地记录，不访问任何平台。";
 
+/// 接单仪器面表头右侧那一格英文标记，稿里逐字如此。
+///
+/// 它是 **LANG-05 的已登记单点例外**。按 LANG-05 的判据（「这个英文词是不是一个可枚举
+/// 的状态值、一个机器标识、或一个编号？」），`INSTALLATION_STATE` 三者都不是——它是对这
+/// 一格的描述，属于该规则明令禁止的第四类「描述性标签」。用户（LANG-05 的决定者）于
+/// 2026-09-20 明确要求保留，因此按**用户授权的例外**落地：作用范围仅此一格，不构成先例，
+/// LANG-05 在其它任何位置继续有效。裁定见 `docs/design/lids/language-policy.md`。
+///
+/// 另记一条语义错配，留证不改：这个标记的字面意思是「安装状态」，而本块判的是**通道能
+/// 不能接活**，两者不是同一件事。照用户指示逐字复刻。见 manifest §5d-5。
+const INSTALLATION_STATE_MARK: &str = "INSTALLATION_STATE";
+
 /// 一条安装「最近报到过」的判据。超过这个天数只在展开里作为历史列出，不进页头计数。
 ///
 /// 页头此前把 7 条历史插件残留写成「未归位安装 7」。那 7 条全是同两台机器自己
@@ -205,13 +217,21 @@ fn verdict_state(rows: Option<&Vec<LaneRow>>) -> (&'static str, &'static str) {
 
 /// 控制条。
 ///
-/// 三个按钮都落在真实存在的地方，**没有一个是死链**：
+/// 两个动作都落在真实存在的地方，**没有一个是死链**：
 ///
-/// - 「新增工位」跳到本页下方的登记表单。登记本来就住在这里，另开一个页面只会多一次
-///   跳转；
-/// - 「运行概览」开右侧抽屉；
+/// 三个动作：
+///
+/// - 「新增工位」开登记弹窗。登记本来就住在本页，另开一个页面只会多一次跳转；
+/// - 「运行概览」开右侧抽屉。**开抽屉的入口只有这一个**。第二轮曾把入口留在贴页边的
+///   固定标签上，那片标签虽然滚动可达，却悬在内容区的两条线**之外**，读起来不像这一行
+///   的动作。代价如实记着：按钮会随正文滚走，滚到页面下方时够不着——由用户确认接受；
 /// - 第三个链到观察目标页。稿里这个位置写的是「查看观察轨迹」，而本系统的一级导航
 ///   里没有「观察轨迹」这一项——照抄会得到一条点了没反应的按钮，那比没有按钮更糟。
+///
+/// 「新增工位」是 `<button>` 而不是 `<a>`。`.c-btn` 不声明 `display` 与 `align-items`，
+/// 居中靠的是原生 `<button>` 自带的那份；锚点拿不到，文字会吊在盒子顶边之外（实测文本
+/// 上方留白 −1px、下方 22.5px）。这一行里只有它是锚点，所以按元素类型修，不去动
+/// `.c-btn` 这条贯穿全站的基础规则。
 ///
 /// 四个读数与下方的接单仪器面、今日运行出**同一批数**：这里算一遍、那里算一遍，
 /// 迟早会算出两个数。
@@ -272,21 +292,19 @@ fn deck_markup(
         })
         .collect();
 
-    // 片段锚点里带 `"#`，所以这一段要用 `r##"..."##` 包——用单层 `r#"` 会在
-    // `href="#` 处提前收尾。
     format!(
-        r##"<section class="c-deck">
+        r#"<section class="c-deck">
               <div class="c-deck-id">
                 <span class="c-deck-badge">{badge}</span>
                 <div class="c-deck-name">工位控制</div>
               </div>
               <div class="c-deck-readouts">{cells}</div>
               <div class="c-deck-actions">
-                <a class="c-btn c-btn-primary" href="#station-register">新增工位</a>
+                <button class="c-btn c-btn-primary" type="button" data-station-register-open aria-haspopup="dialog" aria-expanded="false" aria-controls="station-register">新增工位</button>
                 <button class="c-btn c-btn-quiet" type="button" data-runtime-drawer-toggle aria-controls="c-runtime-drawer" aria-expanded="false">运行概览</button>
                 <a class="c-btn c-btn-quiet" href="/collection/targets">去观察目标页</a>
               </div>
-            </section>"##,
+            </section>"#,
         // 「实时」是一个关于新鲜度的说法，只有这一页真的从库里读到了才敢说。
         badge = if overview.is_some() { "实时" } else { "读不到" },
     )
@@ -314,19 +332,22 @@ fn verdict_markup(
 ) -> String {
     let Some(rows) = lanes else {
         // 读不到与「没有」是两个不同的说法，绝不能合并。
-        return r#"<section class="c-instr c-verdict-unknown">
+        return format!(
+            r#"<section class="c-instr c-verdict-unknown">
                 <div class="c-instr-head">
                   <span class="c-instr-badge">读不到</span>
                   <strong class="c-instr-state">读不到</strong>
                   <span class="c-instr-code">通道数未知</span>
+                  <span class="c-instr-en">{mark}</span>
                 </div>
                 <div class="c-instr-body">
                   <div class="c-instr-issues">
                     <p class="c-instr-note">现在读不到「能不能接活」的判定。这不表示系统接不了活，只表示这一页此刻答不出——两者的处置不同。</p>
                   </div>
                 </div>
-              </section>"#
-            .to_owned();
+              </section>"#,
+            mark = INSTALLATION_STATE_MARK,
+        );
     };
     let verdict = verdict_of(rows);
     let (state, tone) = verdict_state(Some(rows));
@@ -344,10 +365,16 @@ fn verdict_markup(
     } else {
         ("全部通畅".to_owned(), "")
     };
+    // 表头那一行（徽章 + 状态词）已经把判定说完了；再铺一句同义的散文只是重复一遍，
+    // 「一条都派不出」这一档尤其如此——它那句「下面逐条说明卡在哪一样」，下面本来就
+    // 逐条写着。用户 2026-09-20 指着这一句要删，删的是**复述判定**的这一类。
+    //
+    // 另外两档留着，理由不同：它们不复述判定，说的是**该怎么读**这个判定——「派得出
+    // 任务」不等于「有活在跑」、几种堵塞不能合并成一件事。表头那三个字装不下这层意思。
     let why = match verdict {
-        Verdict::All => "下面每条通道现在都派得出任务。这不代表现在有活在跑，只代表申请到这一步不会被挡下。",
-        Verdict::Some => "还有通道派得出任务，下面这几条现在派不出。它们卡住的原因各不相同，不要当成同一件事。",
-        Verdict::None => "现在没有任何一条通道派得出任务。下面逐条说明卡在哪一样。",
+        Verdict::All => Some("下面每条通道现在都派得出任务。这不代表现在有活在跑，只代表申请到这一步不会被挡下。"),
+        Verdict::Some => Some("还有通道派得出任务，下面这几条现在派不出。它们卡住的原因各不相同，不要当成同一件事。"),
+        Verdict::None => None,
     };
 
     format!(
@@ -356,19 +383,22 @@ fn verdict_markup(
                 <span class="c-instr-badge{badge_tone}">{badge}</span>
                 <strong class="c-instr-state">{state}</strong>
                 <span class="c-instr-code">{count} 条通道</span>
+                <span class="c-instr-en">{mark}</span>
               </div>
               <div class="c-instr-body">
                 <div class="c-instr-issues">
-                  <p class="c-instr-note">{why}</p>
-                  {lanes}
+                  {note}{lanes}
                 </div>
                 {readouts}
               </div>
             </section>"#,
         count = rows.len(),
-        why = escape(why),
+        note = why.map_or_else(String::new, |why| {
+            format!(r#"<p class="c-instr-note">{}</p>"#, escape(why))
+        }),
         lanes = lane_markup(rows),
         readouts = factor_markup(overview, stations),
+        mark = INSTALLATION_STATE_MARK,
     )
 }
 
@@ -528,8 +558,7 @@ fn lane_markup(rows: &[LaneRow]) -> String {
 ///
 /// **账号那一项单独说明**：服务端判定的是风险、工位、能力、预算四样，账号不在其中，
 /// 它按每台工位单独判定。四项里有一项从未参与判定，却显示成四项齐备，就是用视觉
-/// 便利改写资格；而此前那句「见上方控制资格」，既没给值、又用了一个页面上已经不
-/// 存在的词。
+/// 便利改写资格；所以第 4 格的限定语写「每台单独判定」，并把值指向工位表的「账号」列。
 fn factor_markup(
     overview: Option<&RuntimeCapacityOverview>,
     stations: Option<&[StationOverview]>,
@@ -596,15 +625,10 @@ fn factor_markup(
         })
         .collect();
 
-    // 四格与那句说明必须一起进右栏：仪器面正文是两列栅格，直接返回两个并列节点会
-    // 让说明句掉到栅格外面成为第三个孩子，铺在左列底下。
-    format!(
-        r#"<div class="c-readout-col">
-              <div class="c-readouts">{rendered}</div>
-              <p class="c-readouts-caveat">{caveat}</p>
-            </div>"#,
-        caveat = escape("账号能不能用由服务端逐台判定，插件自己说了不算。"),
-    )
+    // 只返回四格本身。仪器面正文是五列栅格（左列通道 + 四格读数），四格必须是它的直接
+    // 孩子；再套一层包装，四格会掉进同一格里挤成一条。底下那句说明句按用户 2026-09-20
+    // 的指示删除——它没有独占信息，第 4 格自己的限定语已经把同一件事说过了。
+    rendered
 }
 
 // ---------------------------------------------------------------------------
@@ -1578,22 +1602,33 @@ fn footer_markup(
 ) -> String {
     let (stations, unclaimed): (&[StationOverview], &[UnclaimedInstallation]) =
         roster.unwrap_or((&[], &[]));
-    // `id` 是控制条上「新增工位」的落点：那个按钮是个真锚点，滚到这里就把表单一并
-    // 带进视野。没有这个 id，按钮点了没反应。
+    // 登记表单住在一个居中的弹窗里，由控制条上的「新增工位」打开。它曾经是页尾一行里的
+    // 一个块（`#station-register`）加一条 `href="#station-register"` 的锚点；用户
+    // 2026-09-20 指示改成弹窗。表单本身一个字段没动。
+    //
+    // **登记失败时弹窗必须自己开着**。一次失败的 POST 会整页重渲染：如果窗还是关的，用户
+    // 看到的就是「页面回到了原样、什么也没说」，而错误块恰好就在这个关着的窗里。所以
+    // `error` 有值时在这里就不输出 `hidden`。
     format!(
         r#"<section class="c-stn-footer">
-              <div class="c-stn-block" id="station-register">
-                <h3>登记一台工位</h3>
-                {failure}
-                <form class="c-stn-form" method="post" action="/collection/runtime/stations">
-                  <label for="station-name">名字要能让你一眼认出是哪台机器</label>
-                  <input id="station-name" name="display_name" required maxlength="60" value="本机 Chrome" />
-                  <button class="c-btn-primary" type="submit">登记</button>
-                </form>
-                <p class="c-stn-note">{note}</p>
+              <div class="c-stn-overlay" data-station-register-overlay{open}>
+                <section class="c-stn-modal" id="station-register" role="dialog" aria-modal="true" aria-labelledby="c-station-register-title">
+                  <header class="c-stn-modal-head">
+                    <h3 id="c-station-register-title">登记一台工位</h3>
+                    <button class="c-btn-quiet c-stn-modal-close" type="button" data-station-register-close>关闭</button>
+                  </header>
+                  {failure}
+                  <form class="c-stn-form" method="post" action="/collection/runtime/stations">
+                    <label for="station-name">名字要能让你一眼认出是哪台机器</label>
+                    <input id="station-name" name="display_name" required maxlength="60" value="本机 Chrome" />
+                    <button class="c-btn-primary" type="submit">登记</button>
+                  </form>
+                  <p class="c-stn-note">{note}</p>
+                </section>
               </div>
               {unclaimed}
             </section>"#,
+        open = if error.is_some() { "" } else { " hidden" },
         failure = failure_markup(error),
         note = escape(NO_PLATFORM_ACCESS_NOTE),
         unclaimed = unclaimed_markup(stations, unclaimed, now_minutes),
@@ -1737,8 +1772,7 @@ fn runtime_drawer_markup(
                 {backlog}
               </div>
               <p class="c-rdrawer-foot">最近一次派出 {dispatched} · 最近一次拿回 {succeeded}</p>
-            </aside>
-            <button class="c-rdrawer-tab" type="button" data-runtime-drawer-open aria-controls="c-runtime-drawer" aria-expanded="false">运行概览</button>"#,
+            </aside>"#,
         policy = drawer_policy_markup(lanes),
         results = drawer_results_markup(capabilities, stations),
         routes = drawer_routes_markup(),
@@ -3000,17 +3034,35 @@ mod tests {
 
     #[test]
     fn a_failed_action_says_so_instead_of_looking_like_it_worked() {
-        let html = render_runtime(
-            &base(),
-            Some(&overview(vec![lane("基线建档", available())])),
-            &[],
-            &[],
-            &CapabilityMatrix::new(),
-            None,
-            test_now(),
-            Some("station_rejected"),
-        );
+        let render_with = |error: Option<&str>| {
+            render_runtime(
+                &base(),
+                Some(&overview(vec![lane("基线建档", available())])),
+                &[],
+                &[],
+                &CapabilityMatrix::new(),
+                None,
+                test_now(),
+                error,
+            )
+        };
+
+        let html = render_with(Some("station_rejected"));
         assert!(html.contains("没有完成"));
         assert!(html.contains("不允许重名"));
+        // 错误块住在登记弹窗里，所以「说了没有完成」还不够——窗要是关着，用户看到的
+        // 就只是「页面回到原样、什么都没说」，而原因恰好藏在一个看不见的窗里。这条
+        // 断言钉住的是**窗必须自己开着**：失败后整页重渲染，没有任何脚本再替它开。
+        assert!(
+            html.contains(r#"<div class="c-stn-overlay" data-station-register-overlay>"#),
+            "登记失败时弹窗必须渲染成开着的，否则错误信息不可见"
+        );
+
+        // 反过来也要钉住：没有失败时窗必须是关的，否则每次进页面都会弹一个空窗。
+        let clean = render_with(None);
+        assert!(
+            clean.contains(r#"<div class="c-stn-overlay" data-station-register-overlay hidden>"#),
+            "没有失败时弹窗必须是关着的"
+        );
     }
 }

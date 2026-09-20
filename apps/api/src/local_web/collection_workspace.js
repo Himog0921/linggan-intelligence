@@ -540,7 +540,7 @@
 // 执行工位右侧的运行概览抽屉。
 //
 // 开合是纯视觉状态，不值得一次服务端往返，所以归客户端管：`data-open` 管位移，
-// `inert` 管可达性，body 上那个类管把手让位。
+// `inert` 管可达性。
 //
 // `inert` 是这里唯一不能省的一步。抽屉只是被挪出屏幕，节点还在文档里——不加 `inert`，
 // 键盘 Tab 会一路走进一个看不见的面板，读屏也会念出屏幕外的那几条读数。所以关着的时候
@@ -572,7 +572,6 @@
       panel.removeAttribute("data-open");
       panel.setAttribute("inert", "");
     }
-    document.body.classList.toggle("c-rdrawer-open", open);
     Array.prototype.forEach.call(openers, function (opener) {
       opener.setAttribute("aria-expanded", String(open));
     });
@@ -612,4 +611,123 @@
     event.preventDefault();
     closePanel();
   });
+})();
+
+// 登记一台工位的居中弹窗。控制条上的「新增工位」开它。
+//
+// 关着的时候整块是 `hidden`（`display:none`），不是靠透明或位移藏起来——那样输入框仍在
+// Tab 序列里，读屏也照样念得出。这是这里唯一不能省的一步。
+//
+// 初始态从服务端渲染的 `hidden` 读出来，不写死成「关」：一次失败的 POST 会把错误块渲染在
+// 窗里并让它开着。若这里写死关闭，用户提交失败后看到的将是"页面什么都没说"，而原因就在
+// 一个被脚本关掉的窗里。
+(function () {
+  "use strict";
+
+  var overlay = document.querySelector("[data-station-register-overlay]");
+  if (!overlay) return;
+
+  var modal = overlay.querySelector(".c-stn-modal");
+  var openers = document.querySelectorAll("[data-station-register-open]");
+  var lastTrigger = null;
+
+  function isOpen() {
+    return !overlay.hasAttribute("hidden");
+  }
+
+  function paint(open) {
+    if (open) {
+      overlay.removeAttribute("hidden");
+    } else {
+      overlay.setAttribute("hidden", "");
+    }
+    Array.prototype.forEach.call(openers, function (opener) {
+      opener.setAttribute("aria-expanded", String(open));
+    });
+  }
+
+  function openModal(trigger) {
+    lastTrigger = trigger || null;
+    paint(true);
+    // 先找输入框。写成 `"input, button"` 会选中排在它前面的「关闭」——窗头在表单之前。
+    var field = modal && (modal.querySelector("input") || modal.querySelector("button"));
+    if (field) field.focus();
+  }
+
+  function closeModal() {
+    paint(false);
+    // 焦点还回把它打开的那个按钮，否则关掉之后焦点落在被隐藏的输入框上，下一次 Tab
+    // 从文档里一个看不见的位置开始。
+    if (lastTrigger && document.documentElement.contains(lastTrigger)) {
+      lastTrigger.focus();
+    }
+    lastTrigger = null;
+  }
+
+  Array.prototype.forEach.call(openers, function (opener) {
+    opener.addEventListener("click", function () {
+      if (isOpen()) {
+        closeModal();
+      } else {
+        openModal(opener);
+      }
+    });
+  });
+
+  Array.prototype.forEach.call(
+    overlay.querySelectorAll("[data-station-register-close]"),
+    function (control) {
+      control.addEventListener("click", closeModal);
+    }
+  );
+
+  // 点遮罩关闭，点窗内不关。判据是目标节点就是遮罩本身——窗内任何位置都在 modal 里。
+  overlay.addEventListener("click", function (event) {
+    if (event.target === overlay) closeModal();
+  });
+
+  // 窗内可聚焦的元素，按文档顺序。选择器与页面上另一个弹窗（`#c-monitor-rule`）用的那一
+  // 份逐字相同，别在这里另立一套。
+  function focusable() {
+    return Array.prototype.slice.call(modal.querySelectorAll(
+      "a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex='-1'])"
+    )).filter(function (element) {
+      return !element.hidden && element.getAttribute("aria-hidden") !== "true";
+    });
+  }
+
+  document.addEventListener("keydown", function (event) {
+    if (!isOpen()) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeModal();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    // 这个窗声明了 `aria-modal="true"`，读屏会据此不再念后面的页面。若 Tab 还能走到窗外，
+    // 声明与实际行为就对不上：用户会落到一个读屏不说、视觉上也被遮罩压暗的位置。所以按
+    // 页面既有弹窗的做法把 Tab 圈在窗内，而不是给整页加 `inert`（那要反过来排除本窗，
+    // 牵动的是整页）。
+    var items = focusable();
+    if (!items.length) {
+      event.preventDefault();
+      return;
+    }
+    var first = items[0];
+    var last = items[items.length - 1];
+    if (items.indexOf(document.activeElement) === -1) {
+      event.preventDefault();
+      (event.shiftKey ? last : first).focus();
+    } else if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  });
+
+  // 首帧同步一次：服务端可能是带着 `hidden` 渲染的（常态），也可能是带着错误块开着渲染
+  // 的（提交失败）。上面那条 `paint` 之外的唯一作用是让 `aria-expanded` 与真实状态一致。
+  paint(isOpen());
 })();
