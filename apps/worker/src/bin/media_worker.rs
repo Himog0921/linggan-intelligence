@@ -217,7 +217,7 @@ async fn execute_image_ocr(
     }
     let input = local_media_root().join(&claim.storage_key);
     ensure_local_input(&input)?;
-    let output = run_paddle_ocr(&input)?;
+    let output = run_paddle_ocr(&input, &claim.mime_type)?;
     let Some(lines) = output.lines.as_ref() else {
         return Err("paddle_ocr_result_lines_missing".to_owned());
     };
@@ -305,7 +305,43 @@ async fn execute_image_ocr(
     Ok(())
 }
 
-fn run_paddle_ocr(input: &Path) -> Result<PaddleOcrOutput, String> {
+/// PaddleOCR uses the filename suffix to decide whether an input is an image.  Linggan stores
+/// blobs under their content hash, deliberately without a filename extension, so pass Paddle a
+/// short-lived local link/copy whose suffix is derived from the admitted MIME fact.  The original
+/// Blob remains the authority and is never renamed or rewritten.
+fn run_paddle_ocr(input: &Path, mime_type: &str) -> Result<PaddleOcrOutput, String> {
+    let extension = paddle_image_extension(mime_type)
+        .ok_or_else(|| format!("paddle_ocr_unsupported_mime:{mime_type}"))?;
+    let staged_input =
+        std::env::temp_dir().join(format!("linggan-paddle-{}.{}", Uuid::new_v4(), extension));
+    if let Err(link_error) = std::fs::hard_link(input, &staged_input) {
+        std::fs::copy(input, &staged_input).map_err(|copy_error| {
+            format!("paddle_ocr_input_stage_failed:{link_error};{copy_error}")
+        })?;
+    }
+    let result = run_paddle_ocr_staged(&staged_input);
+    // A staging file is an execution scratch artifact, not a media materialization.  It must not
+    // survive the attempt (whether Paddle accepts, rejects, or times out on the input).
+    let _ = std::fs::remove_file(&staged_input);
+    result
+}
+
+fn paddle_image_extension(mime_type: &str) -> Option<&'static str> {
+    match mime_type {
+        "image/bmp" | "image/x-ms-bmp" => Some("bmp"),
+        "image/jpeg" | "image/jpg" => Some("jpg"),
+        "image/png" => Some("png"),
+        "image/webp" => Some("webp"),
+        "image/tiff" => Some("tiff"),
+        "image/x-portable-bitmap" => Some("pbm"),
+        "image/x-portable-graymap" => Some("pgm"),
+        "image/x-portable-pixmap" => Some("ppm"),
+        "image/x-portable-anymap" => Some("pnm"),
+        _ => None,
+    }
+}
+
+fn run_paddle_ocr_staged(input: &Path) -> Result<PaddleOcrOutput, String> {
     let script = paddle_ocr_script();
     if !script.is_file() {
         return Err("paddle_ocr_script_missing".to_owned());
@@ -630,7 +666,7 @@ async fn execute_video_frame_ocr(
         .collect::<Vec<_>>();
     frames.sort();
     for frame in frames {
-        let output = run_paddle_ocr(&frame)?;
+        let output = run_paddle_ocr(&frame, "image/jpeg")?;
         let text = output
             .lines
             .unwrap_or_default()
@@ -732,7 +768,7 @@ async fn complete_text_derivative(
 
 #[cfg(test)]
 mod tests {
-    use super::{PaddleOcrLine, layer_paddle_lines};
+    use super::{PaddleOcrLine, layer_paddle_lines, paddle_image_extension};
 
     fn line(text: &str, confidence: f64, bbox_norm: [f64; 4]) -> PaddleOcrLine {
         PaddleOcrLine {
@@ -806,5 +842,14 @@ mod tests {
             Some("不要带 A 娃 吊在一棵树上！")
         );
         assert!(output.image_substantive_text.is_none());
+    }
+
+    #[test]
+    fn paddle_input_suffix_is_derived_only_from_supported_admitted_image_mime() {
+        assert_eq!(paddle_image_extension("image/webp"), Some("webp"));
+        assert_eq!(paddle_image_extension("image/jpeg"), Some("jpg"));
+        assert_eq!(paddle_image_extension("image/png"), Some("png"));
+        assert_eq!(paddle_image_extension("image/gif"), None);
+        assert_eq!(paddle_image_extension("video/mp4"), None);
     }
 }
