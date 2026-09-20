@@ -406,6 +406,7 @@ pub(crate) async fn enrich_media_material(
     as_of: &str,
 ) -> Result<(), sqlx::Error> {
     let media = material_media_read::read(tx, item.identity.public_ref, as_of).await?;
+    apply_cover_ocr_title_fallback(tx, item, as_of).await?;
     item.preview.local_asset_url = media.preview_url;
     item.preview.slot_purpose = media.preview_purpose;
     item.preview.bytes_state = media.bytes_state;
@@ -463,6 +464,80 @@ pub(crate) async fn enrich_media_material(
         inspector.insert(
             "limitations".to_owned(),
             serde_json::to_value(media.limitations).expect("limitations serialize"),
+        );
+    }
+    Ok(())
+}
+
+/// Fill a blank platform title only from a selected *cover headline*. Raw OCR, substantive image
+/// text, comments, and later images are intentionally ineligible: this is a display fallback,
+/// never a generated summary and never a mutation of the producer's original title field.
+async fn apply_cover_ocr_title_fallback(
+    tx: &mut Transaction<'_, Postgres>,
+    item: &mut MaterialLibraryItem,
+    as_of: &str,
+) -> Result<(), sqlx::Error> {
+    if item
+        .display
+        .title
+        .as_ref()
+        .is_some_and(|title| !title.trim().is_empty())
+    {
+        return Ok(());
+    }
+    let ocr_schema_ready: bool = sqlx::query_scalar(
+        "SELECT to_regclass('linggan_media_ocr_layout') IS NOT NULL \
+                AND to_regclass('linggan_media_ocr_layering_result') IS NOT NULL \
+                AND to_regclass('linggan_media_ocr_retirement') IS NOT NULL",
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+    if !ocr_schema_ready {
+        return Ok(());
+    }
+    let candidate = sqlx::query(
+        "SELECT result.cover_headline,origin.display_ordinal,job.slot_key,layout.layout_ref \
+         FROM linggan_media_ocr_layering_result result \
+         JOIN linggan_media_ocr_layout layout USING(layout_ref) \
+         JOIN linggan_media_derivative derivative ON derivative.derivative_ref=layout.ocr_derivative_ref \
+         JOIN linggan_media_processing_job job ON job.job_ref=derivative.job_ref \
+         JOIN LATERAL (SELECT origin.purpose,origin.display_ordinal \
+                       FROM linggan_material_media_origin origin \
+                       WHERE origin.slot_key=job.slot_key AND origin.content_public_ref=$1 \
+                       ORDER BY origin.created_at DESC LIMIT 1) origin ON true \
+         WHERE result.state IN ('ACCEPTED','PARTIAL') \
+           AND nullif(btrim(result.cover_headline),'') IS NOT NULL \
+           AND job.processor_kind='image_ocr' \
+           AND (origin.purpose='cover' OR origin.display_ordinal BETWEEN 1 AND 3) \
+           AND result.created_at <= $2::timestamptz \
+           AND job.created_at <= $2::timestamptz \
+           AND NOT EXISTS (SELECT 1 FROM linggan_media_ocr_retirement retired \
+                           WHERE retired.retired_job_ref=job.job_ref) \
+         ORDER BY (origin.purpose='cover') DESC,origin.display_ordinal NULLS LAST,result.created_at DESC LIMIT 1",
+    )
+    .bind(item.identity.public_ref)
+    .bind(as_of)
+    .fetch_optional(&mut **tx)
+    .await?;
+    let Some(candidate) = candidate else {
+        return Ok(());
+    };
+    let title: String = candidate.get("cover_headline");
+    item.display.title = Some(title.clone());
+    item.display.title_state = "KNOWN".to_owned();
+    item.display.title_source = "cover_ocr".to_owned();
+    item.display.title_media_display_ordinal = candidate.get("display_ordinal");
+    if let Some(inspector) = item.inspector.as_object_mut() {
+        inspector.insert(
+            "displayTitle".to_owned(),
+            serde_json::json!({
+                "value":title,
+                "source":"cover_ocr",
+                "slotKey":candidate.get::<String,_>("slot_key"),
+                "displayOrdinal":candidate.get::<Option<i32>,_>("display_ordinal"),
+                "layoutRef":candidate.get::<Uuid,_>("layout_ref"),
+                "originalTitleState":"UNKNOWN"
+            }),
         );
     }
     Ok(())
@@ -673,6 +748,17 @@ pub(crate) fn material_item(
         display: MaterialDisplay {
             title,
             title_state: current.title_state.clone(),
+            title_source: if current
+                .title
+                .as_ref()
+                .is_some_and(|value| !value.trim().is_empty())
+            {
+                "platform_title"
+            } else {
+                "unknown"
+            }
+            .to_owned(),
+            title_media_display_ordinal: None,
             creator_display_name: creator,
             creator_state: current.creator_display_name_state.clone(),
             published_at: published_at.clone(),

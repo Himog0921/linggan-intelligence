@@ -227,7 +227,7 @@ dispatch-failure 回退，绝不伪造 Attempt、Package、Receipt 或 Evidence�
 实况图片仍是一个逻辑媒体卡槽，但静态图与动态图分别携带候选地址、取得工作和状态；
 普通图片、封面、视频和实况图片都只把远程 URL 当来源观察，长期展示必须使用 Linggan
 本地 Materialization。图片 OCR、视频抽帧 OCR、音频提取与 ASR 由本机 Rust worker 调用
-Tesseract、FFmpeg 和本地 Whisper 处理，插件不执行语义分析。
+PaddleOCR、FFmpeg 和本地 Whisper 处理，插件不执行语义分析。
 
 本轮仍不使用 `cookies`、`downloads`、网络规则或通知权限；`alarms` 仅用于 MV3 后台唤醒、
 自动签到、受控领取与媒体工作，不成为本地授权来源。平台 host permission 只服务已批准

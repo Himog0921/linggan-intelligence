@@ -229,7 +229,24 @@ latest_detail AS (
 )
 "#;
 
-pub(crate) fn material_page_sql() -> String {
+pub(crate) fn material_page_sql(ocr_content_layering_schema_ready: bool) -> String {
+    // PostgreSQL resolves relation names before it evaluates a WHERE condition.  This must be a
+    // separate compile-time fragment rather than `to_regclass(...) AND NOT EXISTS (...)`, so a
+    // reader on an older migration ledger can still load the work projection while 0091 has not
+    // been applied yet.
+    let retired_ocr_filter = if ocr_content_layering_schema_ready {
+        " AND NOT EXISTS (SELECT 1 FROM linggan_media_ocr_retirement retired WHERE retired.retired_job_ref=derived_job.job_ref)"
+    } else {
+        ""
+    };
+    // Only ACCEPTED semantic text is eligible to be a corpus/search hit.  PARTIAL is useful
+    // evidence but deliberately stays out of the clean corpus until a future visual selector
+    // resolves the remaining ambiguity.
+    let substantive_ocr_search = if ocr_content_layering_schema_ready {
+        " OR EXISTS (SELECT 1 FROM linggan_media_ocr_layering_result layer JOIN linggan_media_ocr_layout layout USING(layout_ref) JOIN linggan_media_derivative layer_derivative ON layer_derivative.derivative_ref=layout.ocr_derivative_ref JOIN linggan_media_processing_job layer_job ON layer_job.job_ref=layer_derivative.job_ref WHERE layout.content_public_ref=current.public_ref AND layer.state='ACCEPTED' AND nullif(btrim(layer.image_substantive_text),'') IS NOT NULL AND lower(layer.image_substantive_text) LIKE '%' || lower($1) || '%' AND NOT EXISTS (SELECT 1 FROM linggan_media_ocr_retirement retired WHERE retired.retired_job_ref=layer_job.job_ref))"
+    } else {
+        ""
+    };
     format!(
         r#"WITH {WORK_RESOURCE_CURRENT_CTES}, current_comment AS (
   SELECT DISTINCT ON (comment.content_public_ref,comment.comment_external_id) comment.*
@@ -245,7 +262,8 @@ WHERE ($1::text IS NULL
   OR lower(COALESCE(current.body_text,'')) LIKE '%' || lower($1) || '%'
   OR lower(COALESCE(current.creator_display_name,'')) LIKE '%' || lower($1) || '%'
   OR EXISTS (SELECT 1 FROM current_comment comment WHERE comment.content_public_ref=current.public_ref AND lower(COALESCE(comment.body_text,'')) LIKE '%' || lower($1) || '%')
-  OR EXISTS (SELECT 1 FROM linggan_material_derived_text derived WHERE derived.content_public_ref=current.public_ref AND lower(derived.text_content) LIKE '%' || lower($1) || '%')
+  OR EXISTS (SELECT 1 FROM linggan_material_derived_text derived JOIN linggan_media_derivative derivative USING(derivative_ref) JOIN linggan_media_processing_job derived_job USING(job_ref) WHERE derived.content_public_ref=current.public_ref AND lower(derived.text_content) LIKE '%' || lower($1) || '%'{retired_ocr_filter})
+  {substantive_ocr_search}
   OR EXISTS (SELECT 1 FROM linggan_material_author_profile author JOIN linggan_runtime_capture_package author_package USING(package_ref) WHERE author.platform=current.platform AND author.author_external_id=current.author_external_id AND author_package.accepted_at <= $2::timestamptz AND (lower(COALESCE(author.display_name,'')) LIKE '%' || lower($1) || '%' OR lower(COALESCE(author.biography,'')) LIKE '%' || lower($1) || '%')))
 AND ($8::uuid IS NULL OR current.public_ref=$8)
 AND current.observed_at IS NOT NULL

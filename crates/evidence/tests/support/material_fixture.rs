@@ -189,7 +189,11 @@ const MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../../database/migrations/0089_detail_page_session_replay_safety.sql"),
     "\n",
-    include_str!("../../../../database/migrations/0090_detail_page_grant_recovery_and_risk_cooldown.sql"),
+    include_str!(
+        "../../../../database/migrations/0090_detail_page_grant_recovery_and_risk_cooldown.sql"
+    ),
+    "\n",
+    include_str!("../../../../database/migrations/0091_ocr_content_layering.sql"),
     "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ",
     "('0025_comment_current_projection', '64fd9474647834358f8d2d4f1c25e4345e26a3ff79dbfc53a7846915576b0885'), ",
@@ -214,7 +218,8 @@ const MIGRATIONS: &str = concat!(
     "('0087_cross_industry_detail_comment_policy', '1b5ea42c8360714f0da7ae2425df61d74d2afa94c421b28a66fba378043e2a5a'), ",
     "('0088_media_processing_concurrency_policy', 'fa33e15b88b98226914302e6adeb250242710479851b17eaecb1864879c2cbef'),\n",
     "('0089_detail_page_session_replay_safety', '7b7e5160467e8533cb213bbda1a71c661d63fd461aceb6a43528cb68f7dbe226'),\n",
-    "('0090_detail_page_grant_recovery_and_risk_cooldown', 'a6d5e5e8ed230bacd6d03b2175f61bd263c2b48e04eb6be710df078a7771acff');\n",
+    "('0090_detail_page_grant_recovery_and_risk_cooldown', 'a6d5e5e8ed230bacd6d03b2175f61bd263c2b48e04eb6be710df078a7771acff'),\n",
+    "('0091_ocr_content_layering', 'c7b8390696dc02bcff0a494cbfb55077ea6773a4f9c8109dd116cc7d6d99d770');\n",
 );
 
 pub fn coverage_layer(capability: &str, acquired: i64) -> serde_json::Value {

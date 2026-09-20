@@ -4,11 +4,13 @@
 //! already admitted and materialized under `LINGGAN_LOCAL_MEDIA_ROOT`.
 
 use linggan_evidence::{
-    ClaimGateReadiness, MediaProcessingClaim, MediaProcessingClaimOutcome,
-    claim_media_processing_work, complete_media_processing_derivative,
+    ClaimGateReadiness, MediaProcessingClaim, MediaProcessingClaimOutcome, OcrCompletionInput,
+    OcrExcludedLineInput, OcrLayeringInput, OcrLineInput, claim_media_processing_work,
+    complete_media_processing_derivative, complete_media_processing_ocr,
     complete_media_processing_text, complete_media_processing_without_output,
     ensure_media_processing_work, fail_media_processing_work, read_claim_gate_readiness,
 };
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
@@ -18,8 +20,8 @@ mod media_worker_support;
 
 use media_worker_support::{
     apply_ffmpeg_path, command_available, ensure_local_input, ffmpeg_command, first_text_file,
-    local_media_root, normalize_text, prepare_output, require_success, run_command, sha256_hex,
-    tesseract_command, whisper_command, whisper_model,
+    local_media_root, normalize_text, paddle_ocr_python, paddle_ocr_script, prepare_output,
+    require_success, run_command, sha256_hex, whisper_command, whisper_model,
 };
 
 const TICK_INTERVAL: Duration = Duration::from_secs(5);
@@ -53,26 +55,31 @@ const ASR_PROCESS_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 /// 提示本身不进入结果，只是解码的起点。
 const ASR_INITIAL_PROMPT: &str = "以下是普通话的句子。";
 
-/// Tesseract 的识别语言与分页方式。两处调用（单图、视频抽帧）共用一份。
-///
-/// **`chi_tra` 不能加回来。**原先写作 `chi_sim+chi_tra+eng`，理由是「万一是繁体」；实际效果
-/// 是 Tesseract 会**按区域自己挑一种**，于是一张简体封面被逐行拆成简繁混排——同一张图上
-/// 「家长」和「家長」并存。2026-09-16 在生产数据上量过：441 条 image_ocr 产出含繁体专有字，
-/// 随机 40 条用 `chi_sim+eng` 复跑，**39 条繁体减少、0 条增加**，繁体字总数 222 → 27；
-/// 典型一条 `在進行單位換算時` → `在进行单位换算时`。
-///
-/// **这组数字量的是繁体字数，不是识别准不准，别读成「OCR 变准了」。**换语言表会换掉整段的
-/// 识别结果，不只是把繁体折成简体：抽样里有一张电影海报，加 `chi_tra` 时读出「央視推 / 導演: 李」，
-/// 去掉后读出「RTE / 主演:」，繁体确实少了，但那两处谁也没读对。所以这里能据以说的是
-/// 「繁体串扰消失了」，不是「字认得更多了」。
-///
-/// 代价先说清楚：**内容本身是繁体的图，会被转写成简体**。来源语料是大陆平台，简体的占绝
-/// 大多数，所以这个方向是对的；但 `chi_sim` 本身仍会零星吐繁体（那 27 个字就是），这是改善
-/// 而非根治。真要彻底消掉，得在识别之后加一道繁转简，那是另一次决定。
-///
-/// `--psm 11`（稀疏文本）保持基线取值不动，本包没碰它。**这一条没有量过**：`--psm 6` 在这个
-/// 仓库的历史里从没出现过，本包也没做 6/3/11 的对照，所以不要从这里读出一个「11 更好」的结论。
-const TESSERACT_LANGUAGE_ARGS: [&str; 4] = ["-l", "chi_sim+eng", "--psm", "11"];
+const OCR_RAW_DIRECTORY: &str = "ocr-raw";
+const OCR_LAYOUT_DIRECTORY: &str = "ocr-layout";
+
+/// Wire contract of the local Python bridge.  `bbox_norm` means the worker never has to infer
+/// image resolution from a line or recover coordinates from unstructured OCR text.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PaddleOcrOutput {
+    schema_version: u8,
+    ok: bool,
+    engine: Option<String>,
+    engine_version: Option<String>,
+    image_width: Option<i32>,
+    image_height: Option<i32>,
+    lines: Option<Vec<PaddleOcrLine>>,
+    error: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PaddleOcrLine {
+    text: String,
+    confidence: f64,
+    bbox_norm: [f64; 4],
+}
 
 #[tokio::main]
 async fn main() {
@@ -166,10 +173,10 @@ async fn main() {
 
 fn enabled_processors() -> Vec<String> {
     let mut processors = Vec::new();
-    let tesseract = command_available(&tesseract_command());
+    let paddle_ocr = command_available(&paddle_ocr_python()) && paddle_ocr_script().is_file();
     let ffmpeg = command_available(&ffmpeg_command());
     let whisper = command_available(&whisper_command());
-    if tesseract {
+    if paddle_ocr {
         processors.push("image_ocr".to_owned());
     }
     if ffmpeg {
@@ -179,7 +186,7 @@ fn enabled_processors() -> Vec<String> {
     if ffmpeg && whisper {
         processors.push("asr".to_owned());
     }
-    if ffmpeg && tesseract {
+    if ffmpeg && paddle_ocr {
         processors.push("video_frame_ocr".to_owned());
     }
     processors
@@ -210,20 +217,11 @@ async fn execute_image_ocr(
     }
     let input = local_media_root().join(&claim.storage_key);
     ensure_local_input(&input)?;
-    let mut command = Command::new(tesseract_command());
-    command
-        .arg(&input)
-        .arg("stdout")
-        .args(TESSERACT_LANGUAGE_ARGS);
-    let output = run_command(&mut command, PROCESS_TIMEOUT)?;
-    if !output.status.success() {
-        return Err(format!(
-            "tesseract_failed:{}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    let text = normalize_text(&String::from_utf8_lossy(&output.stdout));
-    if text.is_empty() {
+    let output = run_paddle_ocr(&input)?;
+    let Some(lines) = output.lines.as_ref() else {
+        return Err("paddle_ocr_result_lines_missing".to_owned());
+    };
+    if lines.is_empty() {
         complete_media_processing_without_output(
             database,
             claim,
@@ -238,36 +236,248 @@ async fn execute_image_ocr(
         );
         return Ok(());
     }
-    let bytes = text.as_bytes();
-    let content_hash = sha256_hex(bytes);
-    let storage_key = format!("derivatives/ocr/{}/{content_hash}.txt", claim.job_ref);
-    let output_path = local_media_root().join(&storage_key);
-    if let Some(parent) = output_path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|error| format!("ocr_output_directory_failed:{error}"))?;
+    let raw_text = lines
+        .iter()
+        .map(|line| line.text.trim())
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if raw_text.is_empty() {
+        return Err("paddle_ocr_result_text_empty".to_owned());
     }
-    std::fs::write(&output_path, bytes)
-        .map_err(|error| format!("ocr_output_write_failed:{error}"))?;
-    let display_text: String = text.chars().take(MAX_DISPLAY_CHARS).collect();
-    complete_media_processing_text(
-        database,
-        claim,
-        worker_instance_ref,
-        "ocr_text",
-        &content_hash,
-        i64::try_from(bytes.len()).map_err(|error| error.to_string())?,
-        &storage_key,
-        &text,
-        &display_text,
-        Some("zh-Hans"),
-    )
-    .await
-    .map_err(|error| error.to_string())?;
+    let raw_bytes = raw_text.as_bytes();
+    let raw_content_hash = sha256_hex(raw_bytes);
+    let raw_storage_key = format!(
+        "derivatives/{OCR_RAW_DIRECTORY}/{}/{raw_content_hash}.txt",
+        claim.job_ref
+    );
+    let raw_output_path = prepare_output(&raw_storage_key)?;
+    std::fs::write(&raw_output_path, raw_bytes)
+        .map_err(|error| format!("ocr_raw_output_write_failed:{error}"))?;
+    let layout_bytes = serde_json::to_vec(&output)
+        .map_err(|error| format!("paddle_ocr_layout_serialize_failed:{error}"))?;
+    let layout_content_hash = sha256_hex(&layout_bytes);
+    let layout_storage_key = format!(
+        "derivatives/{OCR_LAYOUT_DIRECTORY}/{}/{layout_content_hash}.json",
+        claim.job_ref
+    );
+    let layout_output_path = prepare_output(&layout_storage_key)?;
+    std::fs::write(&layout_output_path, &layout_bytes)
+        .map_err(|error| format!("ocr_layout_output_write_failed:{error}"))?;
+    let engine_version = output
+        .engine_version
+        .as_deref()
+        .ok_or_else(|| "paddle_ocr_engine_version_missing".to_owned())?;
+    let image_width = output
+        .image_width
+        .ok_or_else(|| "paddle_ocr_image_width_missing".to_owned())?;
+    let image_height = output
+        .image_height
+        .ok_or_else(|| "paddle_ocr_image_height_missing".to_owned())?;
+    let layering = layer_paddle_lines(lines);
+    let completion = OcrCompletionInput {
+        engine_version: engine_version.to_owned(),
+        image_width,
+        image_height,
+        raw_text,
+        raw_content_hash: raw_content_hash.clone(),
+        raw_storage_key,
+        layout_content_hash,
+        layout_byte_size: i64::try_from(layout_bytes.len()).map_err(|error| error.to_string())?,
+        layout_storage_key,
+        lines: lines
+            .iter()
+            .map(|line| OcrLineInput {
+                text: line.text.clone(),
+                confidence: line.confidence,
+                bbox_norm: line.bbox_norm,
+            })
+            .collect(),
+        layering,
+    };
+    complete_media_processing_ocr(database, claim, worker_instance_ref, &completion)
+        .await
+        .map_err(|error| error.to_string())?;
     println!(
-        "linggan media worker: OCR completed {} -> {}",
-        claim.job_ref, content_hash
+        "linggan media worker: Paddle OCR completed {} -> {}",
+        claim.job_ref, raw_content_hash
     );
     Ok(())
+}
+
+fn run_paddle_ocr(input: &Path) -> Result<PaddleOcrOutput, String> {
+    let script = paddle_ocr_script();
+    if !script.is_file() {
+        return Err("paddle_ocr_script_missing".to_owned());
+    }
+    let mut command = Command::new(paddle_ocr_python());
+    command.arg(script).arg(input);
+    let output = run_command(&mut command, PROCESS_TIMEOUT)?;
+    if !output.status.success() {
+        let detail = String::from_utf8_lossy(&output.stderr)
+            .chars()
+            .take(500)
+            .collect::<String>();
+        return Err(format!("paddle_ocr_failed:{}", detail.trim()));
+    }
+    if output.stdout.len() > 2_000_000 {
+        return Err("paddle_ocr_result_too_large".to_owned());
+    }
+    let parsed: PaddleOcrOutput = serde_json::from_slice(&output.stdout)
+        .map_err(|_| "paddle_ocr_result_invalid_json".to_owned())?;
+    if parsed.schema_version != 1 || !parsed.ok || parsed.engine.as_deref() != Some("paddleocr") {
+        return Err(format!(
+            "paddle_ocr_result_rejected:{}",
+            parsed
+                .error
+                .unwrap_or_else(|| "schema_or_engine".to_owned())
+        ));
+    }
+    Ok(parsed)
+}
+
+/// The first local pass only removes narrowly-identifiable platform chrome.  It deliberately
+/// does not try to decide whether a photographed page, a logo, or a quote card is substantive;
+/// those ambiguous lines remain raw evidence and put the item in `PARTIAL` for the later vision
+/// selector.  This avoids silently treating a visual guess as a fact.
+fn layer_paddle_lines(lines: &[PaddleOcrLine]) -> OcrLayeringInput {
+    let mut retained = Vec::new();
+    let mut excluded = Vec::new();
+    for (ordinal, line) in lines.iter().enumerate() {
+        let compact = line
+            .text
+            .chars()
+            .filter(|character| !character.is_whitespace())
+            .collect::<String>();
+        let at_edge = line.bbox_norm[1] <= 0.14
+            || line.bbox_norm[3] >= 0.86
+            || line.bbox_norm[0] <= 0.08
+            || line.bbox_norm[2] >= 0.92;
+        let classification =
+            if (compact == "小红书" || compact.eq_ignore_ascii_case("xiaohongshu")) && at_edge {
+                Some(("platform_watermark", "edge_platform_watermark"))
+            } else if is_platform_ui_line(&compact) {
+                Some(("platform_ui", "platform_ui_metadata"))
+            } else if line.confidence < 0.35 {
+                Some(("low_confidence", "below_local_confidence_floor"))
+            } else {
+                None
+            };
+        if let Some((classification, reason)) = classification {
+            excluded.push(OcrExcludedLineInput {
+                ordinal,
+                classification: classification.to_owned(),
+                reason: reason.to_owned(),
+            });
+        } else {
+            retained.push(ordinal);
+        }
+    }
+
+    let headline_ordinals = select_local_headline(lines, &retained);
+    let cover_headline = (!headline_ordinals.is_empty()).then(|| {
+        headline_ordinals
+            .iter()
+            .map(|ordinal| lines[*ordinal].text.trim())
+            .collect::<Vec<_>>()
+            .join(" ")
+    });
+    let non_headline_count = retained
+        .iter()
+        .filter(|ordinal| !headline_ordinals.contains(ordinal))
+        .count();
+    let single_unambiguous_line = headline_ordinals.is_empty()
+        && retained.len() == 1
+        && lines[retained[0]]
+            .text
+            .chars()
+            .filter(|character| !character.is_whitespace())
+            .count()
+            >= 6
+        && lines[retained[0]].confidence >= 0.75
+        && lines[retained[0]].bbox_norm[1] >= 0.08
+        && lines[retained[0]].bbox_norm[3] <= 0.92;
+    let image_substantive_text = if single_unambiguous_line {
+        Some(
+            retained
+                .iter()
+                .map(|ordinal| lines[*ordinal].text.trim())
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+    } else {
+        None
+    };
+    let state = if retained.is_empty() {
+        "NEEDS_REVIEW"
+    } else if single_unambiguous_line || (!headline_ordinals.is_empty() && non_headline_count <= 2)
+    {
+        "ACCEPTED"
+    } else {
+        "PARTIAL"
+    };
+    OcrLayeringInput {
+        state: state.to_owned(),
+        cover_headline,
+        image_substantive_text,
+        retained_ordinals: retained,
+        headline_ordinals,
+        excluded_lines: excluded,
+    }
+}
+
+fn is_platform_ui_line(compact: &str) -> bool {
+    matches!(
+        compact,
+        "作者赞过" | "回复" | "展开更多回复" | "发布于" | "编辑于"
+    ) || (compact.ends_with("分钟前") || compact.ends_with("小时前") || compact.ends_with("天前"))
+        || (compact.starts_with("回复") && compact.chars().count() <= 12)
+}
+
+fn select_local_headline(lines: &[PaddleOcrLine], retained: &[usize]) -> Vec<usize> {
+    let candidate = retained
+        .iter()
+        .copied()
+        .filter(|ordinal| {
+            let line = &lines[*ordinal];
+            let width = line.bbox_norm[2] - line.bbox_norm[0];
+            let height = line.bbox_norm[3] - line.bbox_norm[1];
+            line.confidence >= 0.50 && width >= 0.24 && height >= 0.045
+        })
+        .max_by(|left, right| {
+            headline_score(&lines[*left]).total_cmp(&headline_score(&lines[*right]))
+        });
+    let Some(anchor) = candidate else {
+        return Vec::new();
+    };
+    let anchor_line = &lines[anchor];
+    let anchor_height = anchor_line.bbox_norm[3] - anchor_line.bbox_norm[1];
+    let mut selected = retained
+        .iter()
+        .copied()
+        .filter(|ordinal| {
+            let line = &lines[*ordinal];
+            let height = line.bbox_norm[3] - line.bbox_norm[1];
+            let close_vertically = line.bbox_norm[1] >= anchor_line.bbox_norm[1] - 0.09
+                && line.bbox_norm[3] <= anchor_line.bbox_norm[3] + 0.13;
+            let similar_scale = height >= anchor_height * 0.60 && height <= anchor_height * 1.55;
+            let broad_enough = line.bbox_norm[2] - line.bbox_norm[0] >= 0.20;
+            close_vertically && similar_scale && broad_enough
+        })
+        .collect::<Vec<_>>();
+    selected.sort_by(|left, right| {
+        lines[*left].bbox_norm[1]
+            .total_cmp(&lines[*right].bbox_norm[1])
+            .then_with(|| lines[*left].bbox_norm[0].total_cmp(&lines[*right].bbox_norm[0]))
+    });
+    selected.truncate(4);
+    selected
+}
+
+fn headline_score(line: &PaddleOcrLine) -> f64 {
+    let width = line.bbox_norm[2] - line.bbox_norm[0];
+    let height = line.bbox_norm[3] - line.bbox_norm[1];
+    height * 0.75 + width * 0.20 + line.confidence * 0.05
 }
 
 async fn execute_thumbnail(
@@ -420,17 +630,17 @@ async fn execute_video_frame_ocr(
         .collect::<Vec<_>>();
     frames.sort();
     for frame in frames {
-        let mut tesseract = Command::new(tesseract_command());
-        tesseract
-            .arg(&frame)
-            .arg("stdout")
-            .args(TESSERACT_LANGUAGE_ARGS);
-        let output = run_command(&mut tesseract, PROCESS_TIMEOUT)?;
-        if output.status.success() {
-            let text = normalize_text(&String::from_utf8_lossy(&output.stdout));
-            if !text.is_empty() && !texts.contains(&text) {
-                texts.push(text);
-            }
+        let output = run_paddle_ocr(&frame)?;
+        let text = output
+            .lines
+            .unwrap_or_default()
+            .iter()
+            .map(|line| line.text.trim())
+            .filter(|line| !line.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n");
+        if !text.is_empty() && !texts.contains(&text) {
+            texts.push(text);
         }
     }
     let text = texts.join("\n");
@@ -518,4 +728,83 @@ async fn complete_text_derivative(
     .await
     .map_err(|error| error.to_string())?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PaddleOcrLine, layer_paddle_lines};
+
+    fn line(text: &str, confidence: f64, bbox_norm: [f64; 4]) -> PaddleOcrLine {
+        PaddleOcrLine {
+            text: text.to_owned(),
+            confidence,
+            bbox_norm,
+        }
+    }
+
+    #[test]
+    fn cover_headline_keeps_author_text_and_excludes_an_edge_watermark() {
+        let output = layer_paddle_lines(&[
+            line("不要带 A 娃", 0.99, [0.12, 0.68, 0.81, 0.75]),
+            line("吊在一棵树上！", 0.98, [0.14, 0.76, 0.84, 0.84]),
+            line("小红书", 0.99, [0.84, 0.92, 0.98, 0.98]),
+        ]);
+        assert_eq!(
+            output.cover_headline.as_deref(),
+            Some("不要带 A 娃 吊在一棵树上！")
+        );
+        assert_eq!(output.state, "ACCEPTED");
+        assert_eq!(output.excluded_lines.len(), 1);
+        assert_eq!(
+            output.excluded_lines[0].classification,
+            "platform_watermark"
+        );
+    }
+
+    #[test]
+    fn platform_comment_chrome_is_excluded_without_erasing_the_comment_text() {
+        let output = layer_paddle_lines(&[
+            line(
+                "大猫给乐乐输血，说大猫很勇敢",
+                0.96,
+                [0.10, 0.28, 0.88, 0.31],
+            ),
+            line("但是猫没有选择的权利", 0.97, [0.10, 0.37, 0.82, 0.40]),
+            line("2天前", 0.99, [0.08, 0.84, 0.20, 0.86]),
+            line("作者赞过", 0.99, [0.73, 0.84, 0.94, 0.86]),
+        ]);
+        assert_eq!(output.cover_headline, None);
+        assert_eq!(output.image_substantive_text, None);
+        assert_eq!(output.state, "PARTIAL");
+        assert_eq!(output.retained_ordinals, vec![0, 1]);
+        assert_eq!(output.excluded_lines.len(), 2);
+        assert!(
+            output
+                .excluded_lines
+                .iter()
+                .all(|line| line.classification == "platform_ui")
+        );
+    }
+
+    #[test]
+    fn dense_competing_text_is_marked_partial_instead_of_being_silently_deleted() {
+        let output = layer_paddle_lines(&[
+            line("不要带 A 娃", 0.99, [0.12, 0.68, 0.81, 0.75]),
+            line("吊在一棵树上！", 0.98, [0.14, 0.76, 0.84, 0.84]),
+            line("Read the text and answer", 0.93, [0.08, 0.16, 0.78, 0.20]),
+            line(
+                "You must stop at a red light",
+                0.94,
+                [0.08, 0.24, 0.80, 0.28],
+            ),
+            line("On foot", 0.96, [0.08, 0.32, 0.28, 0.36]),
+            line("小红书", 0.99, [0.84, 0.92, 0.98, 0.98]),
+        ]);
+        assert_eq!(output.state, "PARTIAL");
+        assert_eq!(
+            output.cover_headline.as_deref(),
+            Some("不要带 A 娃 吊在一棵树上！")
+        );
+        assert!(output.image_substantive_text.is_none());
+    }
 }

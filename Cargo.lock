@@ -856,6 +856,8 @@ dependencies = [
  "linggan-evidence",
  "linggan-intelligence",
  "linggan-storage-postgres",
+ "serde",
+ "serde_json",
  "sha2 0.11.0",
  "tokio",
  "uuid",

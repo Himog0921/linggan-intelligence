@@ -3160,7 +3160,9 @@ fn evidence_cover_card_layers_by_surface_and_keeps_its_materials_apart() {
     const MAX_DENSITY: f64 = 0.20;
     const MAX_DOT_RADIUS: f64 = 0.6;
     assert_eq!(
-        EVIDENCE_LIBRARY_CSS.matches(".ev-cover-face::after{").count(),
+        EVIDENCE_LIBRARY_CSS
+            .matches(".ev-cover-face::after{")
+            .count(),
         2,
         "the card grain is one material with one selected state; a third rule would override it \
          outside every check below"
@@ -3237,7 +3239,10 @@ fn evidence_cover_card_layers_by_surface_and_keeps_its_materials_apart() {
                         let bare: f64 = part.parse().unwrap_or_else(|_| {
                             panic!("an M-06 node coordinate must carry its px unit: {node}")
                         });
-                        assert_eq!(bare, 0.0, "an M-06 node coordinate must carry its px unit: {node}");
+                        assert_eq!(
+                            bare, 0.0,
+                            "an M-06 node coordinate must carry its px unit: {node}"
+                        );
                         bare
                     }
                 };
@@ -3270,7 +3275,10 @@ fn evidence_cover_card_layers_by_surface_and_keeps_its_materials_apart() {
             .nth(1)
             .expect("M-06 must declare the tile it repeats on");
         assert_eq!(
-            size.split(';').next().expect("the tile ends the declaration").trim(),
+            size.split(';')
+                .next()
+                .expect("the tile ends the declaration")
+                .trim(),
             format!("{tile}px {tile}px"),
             "M-06 {rule} must repeat on a whole number of lattice steps"
         );
@@ -3323,7 +3331,8 @@ fn evidence_cover_card_layers_by_surface_and_keeps_its_materials_apart() {
         "the stage field is a CSS tile and the stage frame carries no corner ticks"
     );
     assert!(
-        !EVIDENCE_LIBRARY_JS.contains("ev-cover-dot-field") && !EVIDENCE_LIBRARY_JS.contains("coverCorners"),
+        !EVIDENCE_LIBRARY_JS.contains("ev-cover-dot-field")
+            && !EVIDENCE_LIBRARY_JS.contains("coverCorners"),
         "a ratio-derived inline SVG cannot measure the whole 3:4 stage, so the field must not go back to one"
     );
     // Every template is drawn inside the one safe area of the 300x400 viewBox — x 48..252
@@ -3368,7 +3377,11 @@ fn evidence_cover_card_layers_by_surface_and_keeps_its_materials_apart() {
 #[test]
 fn evidence_results_band_stays_removed() {
     let html = evidence_library_html(None, &[], None);
-    for gone in ["ev-results-head", "ev-results-legend", "ev-reopen-inspector"] {
+    for gone in [
+        "ev-results-head",
+        "ev-results-legend",
+        "ev-reopen-inspector",
+    ] {
         assert!(
             !html.contains(gone),
             "the results band was removed on request and must not return: {gone}"
@@ -3376,7 +3389,11 @@ fn evidence_results_band_stays_removed() {
     }
     // The CSS ships as its own asset, so an HTML-only check would let a stylesheet rule for the
     // removed band come back as dead code under a passing test.
-    for gone in ["ev-inspector-reopen", "ev-results-head", "ev-results-legend"] {
+    for gone in [
+        "ev-inspector-reopen",
+        "ev-results-head",
+        "ev-results-legend",
+    ] {
         assert!(
             !EVIDENCE_LIBRARY_CSS.contains(gone),
             "a stylesheet rule for the removed results band is dead code: {gone}"
@@ -3395,6 +3412,7 @@ fn evidence_runtime_preserves_unknown_partial_and_restricted_states() {
         "UNKNOWN",
         "SOURCE_TEXT_ONLY",
         "PARTIAL",
+        "RETIRED",
         "RISK_CONTROL",
         "BYTES_CLEANED",
         "WITHDRAWN_OR_RESTRICTED",
@@ -3408,6 +3426,27 @@ fn evidence_runtime_preserves_unknown_partial_and_restricted_states() {
     assert!(EVIDENCE_LIBRARY_JS.contains("SOURCE INCOMPLETE"));
     assert!(EVIDENCE_LIBRARY_JS.contains("这不表示作品没有媒体"));
     assert!(!EVIDENCE_LIBRARY_JS.contains("ACK 完整"));
+}
+
+#[test]
+fn evidence_runtime_exposes_ocr_layering_without_reintroducing_invalid_tokens() {
+    for marker in [
+        "function appendOcrLayering",
+        "image_substantive_text: '图片实质文字'",
+        "cleanCorpusEligible",
+        "dataset.evOption = 'RETIRED'",
+    ] {
+        assert!(
+            EVIDENCE_LIBRARY_JS.contains(marker),
+            "OCR-layering runtime contract marker missing: {marker}"
+        );
+    }
+    for invalid_token in ["lgi-ink-muted", "lgi-text-micro", "lgi-ls-label"] {
+        assert!(
+            !EVIDENCE_LIBRARY_CSS.contains(invalid_token),
+            "OCR-layering CSS must not refer to the removed token {invalid_token}"
+        );
+    }
 }
 
 #[test]

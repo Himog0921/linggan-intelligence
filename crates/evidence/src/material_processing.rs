@@ -11,7 +11,8 @@ use crate::material_processing_validation::{derivative_matches_processor, is_sha
 use crate::producer_runtime::ProducerRuntimeError;
 use linggan_storage_postgres::Database;
 use serde::Serialize;
-use sqlx::Row;
+use serde_json::json;
+use sqlx::{AssertSqlSafe, Postgres, Row, Transaction};
 use uuid::Uuid;
 
 const MAX_PROCESSING_ATTEMPTS: i32 = 3;
@@ -36,6 +37,48 @@ pub struct MediaProcessingClaim {
     pub storage_key: String,
     pub content_public_ref: Uuid,
     pub lease_expires_at: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct OcrLineInput {
+    pub text: String,
+    pub confidence: f64,
+    pub bbox_norm: [f64; 4],
+}
+
+#[derive(Debug, Clone)]
+pub struct OcrExcludedLineInput {
+    pub ordinal: usize,
+    pub classification: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct OcrLayeringInput {
+    pub state: String,
+    pub cover_headline: Option<String>,
+    pub image_substantive_text: Option<String>,
+    pub retained_ordinals: Vec<usize>,
+    /// A subset of `retained_ordinals`, in display order.  This is the complete provenance
+    /// of `cover_headline`: it must always be possible to reconstruct the headline from OCR
+    /// lines rather than treating the derived string as model-authored text.
+    pub headline_ordinals: Vec<usize>,
+    pub excluded_lines: Vec<OcrExcludedLineInput>,
+}
+
+#[derive(Debug, Clone)]
+pub struct OcrCompletionInput {
+    pub engine_version: String,
+    pub image_width: i32,
+    pub image_height: i32,
+    pub raw_text: String,
+    pub raw_content_hash: String,
+    pub raw_storage_key: String,
+    pub layout_content_hash: String,
+    pub layout_byte_size: i64,
+    pub layout_storage_key: String,
+    pub lines: Vec<OcrLineInput>,
+    pub layering: OcrLayeringInput,
 }
 
 /// 一次认领尝试的三种结局。
@@ -65,12 +108,21 @@ pub async fn ensure_media_processing_work(database: &Database) -> Result<u64, sq
     if !ready {
         return Ok(0);
     }
-    Ok(sqlx::query(
+    let retirement_ready: bool =
+        sqlx::query_scalar("SELECT to_regclass('linggan_media_ocr_retirement') IS NOT NULL")
+            .fetch_one(database.pool())
+            .await?;
+    let retired_job_filter = if retirement_ready {
+        " AND NOT EXISTS (SELECT 1 FROM linggan_media_ocr_retirement retired WHERE retired.retired_job_ref=job.job_ref)"
+    } else {
+        ""
+    };
+    Ok(sqlx::query(AssertSqlSafe(format!(
         "INSERT INTO linggan_media_processing_work(work_ref,job_ref) \
          SELECT gen_random_uuid(),job.job_ref FROM linggan_media_processing_job job \
          LEFT JOIN linggan_media_processing_work work USING(job_ref) \
-         WHERE work.job_ref IS NULL ON CONFLICT(job_ref) DO NOTHING",
-    )
+         WHERE work.job_ref IS NULL{retired_job_filter} ON CONFLICT(job_ref) DO NOTHING"
+    )))
     .execute(database.pool())
     .await?
     .rows_affected())
@@ -138,6 +190,15 @@ pub async fn claim_media_processing_work(
     if !ready || enabled_processors.is_empty() {
         return Ok(MediaProcessingClaimOutcome::Idle);
     }
+    let retirement_ready: bool =
+        sqlx::query_scalar("SELECT to_regclass('linggan_media_ocr_retirement') IS NOT NULL")
+            .fetch_one(database.pool())
+            .await?;
+    let retired_job_filter = if retirement_ready {
+        " AND NOT EXISTS (SELECT 1 FROM linggan_media_ocr_retirement retired WHERE retired.retired_job_ref=job.job_ref)"
+    } else {
+        ""
+    };
     let mut tx = database.pool().begin().await?;
     // **认领闸。** 先取锁，再数在途，最后才认领——三步必须在同一把锁下，否则这道闸拦不住任何东西。
     //
@@ -171,7 +232,7 @@ pub async fn claim_media_processing_work(
     .bind(MAX_PROCESSING_ATTEMPTS)
     .execute(&mut *tx)
     .await?;
-    let candidate = sqlx::query(
+    let candidate = sqlx::query(AssertSqlSafe(format!(
         // `JOIN ... concurrency` 是 INNER JOIN，且没有兜底行：**表里没登记的 processor_kind
         // 一条都认领不到**（Closed World，与 SCOPE-001 一致）。这是有意的——新增一种处理器
         // 却忘了登记上限时，它应该停下来被人看见，而不是没有上限地跑起来。
@@ -186,6 +247,7 @@ pub async fn claim_media_processing_work(
            ON concurrency.processor_kind = job.processor_kind \
          WHERE work.state IN ('pending','retry_wait') AND work.attempt_count < $1 \
            AND job.processor_kind = ANY($2) \
+           {retired_job_filter} \
            AND work.next_attempt_at <= scope_001_now() \
            AND (SELECT count(*) \
                 FROM linggan_media_processing_work in_flight \
@@ -198,8 +260,8 @@ pub async fn claim_media_processing_work(
                     WHEN 'image_ocr' THEN 1 WHEN 'thumbnail' THEN 2 \
                     WHEN 'audio_extract' THEN 3 WHEN 'asr' THEN 4 ELSE 5 END, \
                   work.next_attempt_at,work.created_at \
-         LIMIT 1 FOR UPDATE OF work SKIP LOCKED",
-    )
+         LIMIT 1 FOR UPDATE OF work SKIP LOCKED"
+    )))
     .bind(MAX_PROCESSING_ATTEMPTS)
     .bind(enabled_processors)
     .fetch_optional(&mut *tx)
@@ -409,6 +471,311 @@ pub async fn complete_media_processing_text(
     .map_err(ProducerRuntimeError::Internal)?;
     tx.commit().await.map_err(ProducerRuntimeError::Internal)?;
     Ok(derivative_ref)
+}
+
+/// Persist one Paddle OCR run as an immutable raw text derivative plus a line-level layout and
+/// a separately attributable local layering decision.  No classification can introduce text that
+/// the bridge did not return in `lines`.
+#[allow(clippy::too_many_lines)]
+pub async fn complete_media_processing_ocr(
+    database: &Database,
+    claim: &MediaProcessingClaim,
+    worker_instance_ref: Uuid,
+    input: &OcrCompletionInput,
+) -> Result<Uuid, ProducerRuntimeError> {
+    if !valid_ocr_completion_input(claim, input) {
+        return Err(ProducerRuntimeError::MaterialIdentityConflict);
+    }
+    let mut tx = database
+        .pool()
+        .begin()
+        .await
+        .map_err(ProducerRuntimeError::Internal)?;
+    if !claim_is_live(&mut tx, claim, worker_instance_ref).await? {
+        return Err(ProducerRuntimeError::MaterialIdentityConflict);
+    }
+    let existing: Option<Uuid> = sqlx::query_scalar(
+        "SELECT derivative_ref FROM linggan_media_derivative WHERE job_ref=$1 LIMIT 1",
+    )
+    .bind(claim.job_ref)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
+    if let Some(existing) = existing {
+        return Ok(existing);
+    }
+    let derivative_ref = Uuid::new_v4();
+    let layout_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_media_derivative \
+         (derivative_ref,job_ref,derivative_kind,content_hash,byte_size,storage_key) \
+         VALUES($1,$2,'ocr_text',$3,$4,$5)",
+    )
+    .bind(derivative_ref)
+    .bind(claim.job_ref)
+    .bind(&input.raw_content_hash)
+    .bind(
+        i64::try_from(input.raw_text.len())
+            .map_err(|_| ProducerRuntimeError::MaterialIdentityConflict)?,
+    )
+    .bind(&input.raw_storage_key)
+    .execute(&mut *tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
+    sqlx::query(
+        "INSERT INTO linggan_media_ocr_layout \
+         (layout_ref,ocr_derivative_ref,content_public_ref,blob_sha256,engine,engine_version,image_width,image_height,layout_content_hash,layout_byte_size,layout_storage_key) \
+         VALUES($1,$2,$3,$4,'paddleocr',$5,$6,$7,$8,$9,$10)",
+    )
+    .bind(layout_ref)
+    .bind(derivative_ref)
+    .bind(claim.content_public_ref)
+    .bind(&claim.blob_sha256)
+    .bind(&input.engine_version)
+    .bind(input.image_width)
+    .bind(input.image_height)
+    .bind(&input.layout_content_hash)
+    .bind(input.layout_byte_size)
+    .bind(&input.layout_storage_key)
+    .execute(&mut *tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
+    let line_refs = insert_ocr_lines(&mut tx, layout_ref, &input.lines).await?;
+    insert_ocr_layering(&mut tx, layout_ref, &line_refs, &input.layering).await?;
+    sqlx::query(
+        "INSERT INTO linggan_material_derived_text \
+         (derivative_ref,content_public_ref,kind,text_content,display_text,language_state,language_tag,source_location) \
+         VALUES($1,$2,'ocr_text',$3,$4,'KNOWN','zh-Hans',jsonb_build_object('blobSha256',$5,'processorVersion',$6,'layoutRef',$7))",
+    )
+    .bind(derivative_ref)
+    .bind(claim.content_public_ref)
+    .bind(&input.raw_text)
+    .bind(input.raw_text.chars().take(600).collect::<String>())
+    .bind(&claim.blob_sha256)
+    .bind(&claim.processor_version)
+    .bind(layout_ref)
+    .execute(&mut *tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
+    finish_processing_claim(&mut tx, claim, worker_instance_ref).await?;
+    tx.commit().await.map_err(ProducerRuntimeError::Internal)?;
+    Ok(derivative_ref)
+}
+
+fn valid_ocr_completion_input(claim: &MediaProcessingClaim, input: &OcrCompletionInput) -> bool {
+    derivative_matches_processor(&claim.processor_kind, "ocr_text")
+        && is_sha256(&input.raw_content_hash)
+        && is_sha256(&input.layout_content_hash)
+        && !input.raw_text.trim().is_empty()
+        && input.engine_version.len() <= 120
+        && input.image_width > 0
+        && input.image_height > 0
+        && input.layout_byte_size > 0
+        && input.layout_byte_size <= crate::material_storage_key::maximum_local_asset_bytes()
+        && crate::material_storage_key::is_safe_storage_key(&input.raw_storage_key)
+        && crate::material_storage_key::is_safe_storage_key(&input.layout_storage_key)
+        && input.lines.len() <= 5_000
+        && matches!(
+            input.layering.state.as_str(),
+            "ACCEPTED" | "PARTIAL" | "NEEDS_REVIEW" | "FAILED"
+        )
+        && valid_ocr_layering_input(&input.layering, input.lines.len())
+        && input.lines.iter().all(valid_ocr_line)
+}
+
+fn valid_ocr_line(line: &OcrLineInput) -> bool {
+    !line.text.trim().is_empty()
+        && line.text.len() <= 10_000
+        && (0.0..=1.0).contains(&line.confidence)
+        && line
+            .bbox_norm
+            .iter()
+            .all(|value| (0.0..=1.0).contains(value))
+        && line.bbox_norm[0] <= line.bbox_norm[2]
+        && line.bbox_norm[1] <= line.bbox_norm[3]
+}
+
+fn valid_ocr_layering_input(input: &OcrLayeringInput, line_count: usize) -> bool {
+    let mut retained = input.retained_ordinals.clone();
+    retained.sort_unstable();
+    retained.dedup();
+    let mut headline = input.headline_ordinals.clone();
+    headline.sort_unstable();
+    headline.dedup();
+    let mut excluded = input
+        .excluded_lines
+        .iter()
+        .map(|line| line.ordinal)
+        .collect::<Vec<_>>();
+    excluded.sort_unstable();
+    excluded.dedup();
+    let valid_exclusion = input.excluded_lines.iter().all(|line| {
+        line.ordinal < line_count
+            && matches!(
+                line.classification.as_str(),
+                "platform_watermark" | "platform_ui" | "incidental_scene_text" | "low_confidence"
+            )
+            && !line.reason.trim().is_empty()
+            && line.reason.len() <= 500
+    });
+    let non_empty_result = input
+        .cover_headline
+        .as_ref()
+        .is_some_and(|value| !value.trim().is_empty())
+        || input
+            .image_substantive_text
+            .as_ref()
+            .is_some_and(|value| !value.trim().is_empty());
+    retained.len() == input.retained_ordinals.len()
+        && headline.len() == input.headline_ordinals.len()
+        && excluded.len() == input.excluded_lines.len()
+        && retained.iter().all(|ordinal| *ordinal < line_count)
+        && headline.iter().all(|ordinal| retained.contains(ordinal))
+        && retained.iter().all(|ordinal| !excluded.contains(ordinal))
+        && valid_exclusion
+        && (input.state != "ACCEPTED" || non_empty_result)
+        && (input.cover_headline.is_some() == !input.headline_ordinals.is_empty())
+        && input
+            .cover_headline
+            .as_ref()
+            .is_none_or(|value| value.len() <= 500)
+        && input
+            .image_substantive_text
+            .as_ref()
+            .is_none_or(|value| value.len() <= 20_000)
+}
+
+async fn claim_is_live(
+    tx: &mut Transaction<'_, Postgres>,
+    claim: &MediaProcessingClaim,
+    worker_instance_ref: Uuid,
+) -> Result<bool, ProducerRuntimeError> {
+    sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM linggan_media_processing_work \
+         WHERE work_ref=$1 AND job_ref=$2 AND state='leased' AND worker_instance_ref=$3 \
+           AND claim_generation=$4 AND lease_expires_at>scope_001_now())",
+    )
+    .bind(claim.work_ref)
+    .bind(claim.job_ref)
+    .bind(worker_instance_ref)
+    .bind(claim.claim_generation)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)
+}
+
+async fn insert_ocr_lines(
+    tx: &mut Transaction<'_, Postgres>,
+    layout_ref: Uuid,
+    lines: &[OcrLineInput],
+) -> Result<Vec<Uuid>, ProducerRuntimeError> {
+    let mut line_refs = Vec::with_capacity(lines.len());
+    for (ordinal, line) in lines.iter().enumerate() {
+        let line_ref = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO linggan_media_ocr_line \
+             (layout_ref,line_ref,ordinal,text_content,confidence,left_norm,top_norm,right_norm,bottom_norm) \
+             VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+        )
+        .bind(layout_ref)
+        .bind(line_ref)
+        .bind(i32::try_from(ordinal).map_err(|_| ProducerRuntimeError::MaterialIdentityConflict)?)
+        .bind(&line.text)
+        .bind(line.confidence)
+        .bind(line.bbox_norm[0])
+        .bind(line.bbox_norm[1])
+        .bind(line.bbox_norm[2])
+        .bind(line.bbox_norm[3])
+        .execute(&mut **tx)
+        .await
+        .map_err(ProducerRuntimeError::Internal)?;
+        line_refs.push(line_ref);
+    }
+    Ok(line_refs)
+}
+
+async fn insert_ocr_layering(
+    tx: &mut Transaction<'_, Postgres>,
+    layout_ref: Uuid,
+    line_refs: &[Uuid],
+    input: &OcrLayeringInput,
+) -> Result<(), ProducerRuntimeError> {
+    let retained_line_refs = input
+        .retained_ordinals
+        .iter()
+        .map(|ordinal| {
+            json!({
+                "lineRef": line_refs[*ordinal].to_string(),
+                "classification": if input.headline_ordinals.contains(ordinal) {
+                    "primary_copy"
+                } else if input.state == "PARTIAL" {
+                    "uncertain"
+                } else {
+                    "substantive_text"
+                },
+            })
+        })
+        .collect::<Vec<_>>();
+    let excluded_lines = input
+        .excluded_lines
+        .iter()
+        .map(|line| {
+            json!({
+                "lineRef": line_refs[line.ordinal].to_string(),
+                "classification": line.classification,
+                "reason": line.reason,
+            })
+        })
+        .collect::<Vec<_>>();
+    sqlx::query(
+        "INSERT INTO linggan_media_ocr_layering_result \
+         (layering_ref,layout_ref,layer_version,state,decision_source,cover_headline,image_substantive_text,retained_line_refs,excluded_lines) \
+         VALUES($1,$2,'rules-v1',$3,'rules',$4,$5,$6,$7)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(layout_ref)
+    .bind(&input.state)
+    .bind(&input.cover_headline)
+    .bind(&input.image_substantive_text)
+    .bind(json!(retained_line_refs))
+    .bind(json!(excluded_lines))
+    .execute(&mut **tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
+    Ok(())
+}
+
+async fn finish_processing_claim(
+    tx: &mut Transaction<'_, Postgres>,
+    claim: &MediaProcessingClaim,
+    worker_instance_ref: Uuid,
+) -> Result<(), ProducerRuntimeError> {
+    let completed = sqlx::query(
+        "UPDATE linggan_media_processing_work SET state='completed',worker_instance_ref=NULL, \
+         lease_expires_at=NULL,last_error=NULL,completed_at=scope_001_now(),updated_at=scope_001_now() \
+         WHERE work_ref=$1 AND job_ref=$2 AND state='leased' AND worker_instance_ref=$3 \
+           AND claim_generation=$4 AND lease_expires_at>scope_001_now()",
+    )
+    .bind(claim.work_ref)
+    .bind(claim.job_ref)
+    .bind(worker_instance_ref)
+    .bind(claim.claim_generation)
+    .execute(&mut **tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
+    if completed.rows_affected() != 1 {
+        return Err(ProducerRuntimeError::MaterialIdentityConflict);
+    }
+    sqlx::query(
+        "INSERT INTO linggan_media_processing_job_event(event_ref,job_ref,state,reason) \
+         VALUES($1,$2,'succeeded',NULL)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(claim.job_ref)
+    .execute(&mut **tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
+    Ok(())
 }
 
 pub async fn fail_media_processing_work(
@@ -678,9 +1045,12 @@ pub const REGISTERED_PROCESSOR_KINDS: [&str; 5] = [
 /// 同一条 Closed World 规矩：没登记的处理器不该悄悄按旧版本跑起来，也不该悄悄什么都不做。
 pub fn processor_version_for_kind(processor_kind: &str) -> Option<&'static str> {
     match processor_kind {
-        // 2026-09-17 抬版：Tesseract 语言表去掉 `chi_tra`（简繁串扰，同一张图上「家长」「家長」
-        // 并存），whisper 换 medium 并加简体提示、修掉交给 whisper 子进程的 PATH（缺 ffmpeg）。
-        "image_ocr" | "video_frame_ocr" | "asr" => Some("local-v2"),
+        // OCR 从 Tesseract 改为 PaddleOCR v4，同时保存逐行框与本地分层结果；旧 OCR 输出必须按
+        // 新作业重跑，不能让同一唯一键悄悄复用。视频抽帧也必须同批切换，避免系统仍有一个隐蔽
+        // 的 Tesseract OCR 入口。
+        "image_ocr" | "video_frame_ocr" => Some("local-v3"),
+        // 2026-09-17：whisper 换 medium 并加简体提示、修掉交给 whisper 子进程的 PATH（缺 ffmpeg）。
+        "asr" => Some("local-v2"),
         // 行为没变的两类留在 `local-v1`：它们没有需要重做的存量，存量重排也不该碰它们。
         "thumbnail" | "audio_extract" => Some("local-v1"),
         _ => None,
@@ -761,7 +1131,9 @@ pub async fn requeue_outdated_processor_jobs(
         .await
         .map_err(ProducerRuntimeError::Internal)?;
         if dry_run {
-            tx.rollback().await.map_err(ProducerRuntimeError::Internal)?;
+            tx.rollback()
+                .await
+                .map_err(ProducerRuntimeError::Internal)?;
         } else {
             tx.commit().await.map_err(ProducerRuntimeError::Internal)?;
         }

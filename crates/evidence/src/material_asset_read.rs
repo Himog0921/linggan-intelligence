@@ -1,7 +1,7 @@
 //! Read eligibility for revocable local media and derivative assets.
 
 use linggan_storage_postgres::Database;
-use sqlx::Row;
+use sqlx::{AssertSqlSafe, Row};
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -58,14 +58,25 @@ pub async fn read_local_derivative(
     database: &Database,
     derivative_ref: Uuid,
 ) -> Result<Option<LocalMaterialAsset>, sqlx::Error> {
-    let row = sqlx::query(
+    let ocr_retirement_schema_ready: bool =
+        sqlx::query_scalar("SELECT to_regclass('linggan_media_ocr_retirement') IS NOT NULL")
+            .fetch_one(database.pool())
+            .await?;
+    let retirement_filter = if ocr_retirement_schema_ready {
+        " AND NOT EXISTS (SELECT 1 FROM linggan_media_ocr_retirement retired WHERE retired.retired_job_ref=job.job_ref)"
+    } else {
+        ""
+    };
+    // The only interpolation is a private literal selected by schema readiness above.
+    let row = sqlx::query(AssertSqlSafe(format!(
         "SELECT derivative.derivative_kind,derivative.storage_key,derivative.content_hash,derivative.byte_size FROM linggan_media_derivative derivative \
          JOIN linggan_media_processing_job job USING(job_ref) \
          WHERE derivative.derivative_ref=$1 AND derivative.storage_key IS NOT NULL \
+           {retirement_filter} \
            AND NOT EXISTS (SELECT 1 FROM linggan_current_material_media_disposition event \
              WHERE (event.derivative_ref=$1 OR event.blob_sha256=job.blob_sha256 OR event.slot_key=job.slot_key) \
-            )",
-    )
+            )"
+    )))
     .bind(derivative_ref)
     .fetch_optional(database.pool())
     .await?;
