@@ -93,8 +93,53 @@ export function createLocalProducerOutbox(table = database.submissions, now = cu
       });
     },
 
-    async terminal(submissionId, error, { at = now() } = {}) {
-      await table.update(submissionId, { status: 'terminal', updatedAt: at, error: String(error || 'contract_rejected') });
+    async terminal(submissionId, error, { at = now(), dispatchFailureCode = '' } = {}) {
+      const row = await table.get(submissionId);
+      if (!row) return;
+      const scheduledDelivery = row?.taskSpec?.source === 'scheduled';
+      const dispatchFailure = scheduledDelivery && String(dispatchFailureCode).trim()
+        ? {
+          dispatchFailureCode: String(dispatchFailureCode).trim(),
+          // submissionId is already a durable UUID unique to this server task.
+          // Reusing it makes a lost failure response safely idempotent.
+          dispatchFailureId: row.submissionId,
+          dispatchFailureReportedAt: null,
+        }
+        : {};
+      await table.update(submissionId, {
+        status: 'terminal', updatedAt: at, error: String(error || 'contract_rejected'), ...dispatchFailure,
+      });
+    },
+
+    async terminalDispatchFailures({ limit = 5 } = {}) {
+      const rows = await table.where('status').equals('terminal').toArray();
+      return rows
+        .map((row) => {
+          // v0.8.52 persisted this exact server rejection before it knew how
+          // to close the server task. This is a one-way terminal-state
+          // migration, not a second delivery or a platform retry.
+          const legacyRejectedPackage = !row?.dispatchFailureCode
+            && String(row?.error || '').trim() === 'submission_invalid';
+          return legacyRejectedPackage
+            ? {
+              ...row,
+              dispatchFailureCode: 'capture_delivery_rejected',
+              dispatchFailureId: row.submissionId,
+            }
+            : row;
+        })
+        .filter((row) => row?.taskSpec?.source === 'scheduled'
+          && String(row?.taskId || '').trim()
+          && String(row?.producerInstanceId || '').trim()
+          && String(row?.dispatchFailureId || '').trim()
+          && String(row?.dispatchFailureCode || '').trim()
+          && !row?.dispatchFailureReportedAt)
+        .sort((left, right) => Number(left.createdAt) - Number(right.createdAt))
+        .slice(0, limit);
+    },
+
+    async markTerminalDispatchFailureReported(submissionId, { at = now() } = {}) {
+      await table.update(submissionId, { dispatchFailureReportedAt: at, updatedAt: at });
     },
 
     async pendingCount() {

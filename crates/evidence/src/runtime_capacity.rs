@@ -268,7 +268,8 @@ pub async fn read_runtime_capacity(
                                   WHERE task.lease_ref=l.lease_ref),l.issued_at)), \
                 linggan_human_moment(l.expires_at), \
                 o.estimated_work_units, \
-                (l.task_id IS NOT NULL) \
+                EXISTS (SELECT 1 FROM collection_work_order_lease_task task \
+                        WHERE task.lease_ref=l.lease_ref) \
          FROM collection_work_order_lease l \
          JOIN collection_work_order o ON o.work_order_ref = l.work_order_ref \
          JOIN collection_observation_target t ON t.target_ref = o.target_ref \

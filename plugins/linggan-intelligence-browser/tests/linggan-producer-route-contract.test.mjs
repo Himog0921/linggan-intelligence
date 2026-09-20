@@ -123,3 +123,94 @@ test('legacy 003 health is reachable but cannot start full Producer delivery', a
     ['retry', 'submission-1', 'local_producer_route_contract_not_ready'],
   ]);
 });
+
+test('a conclusively rejected scheduled Package ends its one server task without retrying platform work', async () => {
+  const calls = [];
+  const terminalRows = [];
+  const scheduledEntry = {
+    ...entry(),
+    taskSpec: { source: 'scheduled' },
+    submissionId: '11111111-1111-4111-8111-111111111111',
+    taskId: '22222222-2222-4222-8222-222222222222',
+    producerInstanceId: '33333333-3333-4333-8333-333333333333',
+  };
+  const outbox = {
+    due: async () => [scheduledEntry],
+    markInFlight: async () => calls.push('in_flight'),
+    acknowledge: async () => calls.push('acknowledged'),
+    retry: async () => calls.push('retry'),
+    terminal: async (_submissionId, error, options) => {
+      terminalRows.push({ ...scheduledEntry, error, dispatchFailureCode: options.dispatchFailureCode,
+        dispatchFailureId: scheduledEntry.submissionId });
+    },
+    terminalDispatchFailures: async () => terminalRows,
+    markTerminalDispatchFailureReported: async () => calls.push('failure_reported'),
+    pendingCount: async () => 0,
+  };
+  const readiness = {
+    deliveryReady: true,
+    health: { routes: { dispatch: { failure: '/api/local/dispatch/failures' } } },
+    producerRoutes: {
+      taskCreation: '/api/local/producer/tasks',
+      attemptStart: '/api/local/producer/runtime-attempts',
+      submission: '/api/local/producer/runtime-submissions',
+    },
+  };
+  let failure;
+  await flushLocalOutboxOnce({
+    outbox,
+    mediaOutbox: { pendingCount: async () => 0 },
+    readReadiness: async () => readiness,
+    post: async (path) => {
+      if (path === readiness.producerRoutes.taskCreation) return { ok: true, status: 200, payload: { outcome: 'created' } };
+      if (path === readiness.producerRoutes.attemptStart) return { ok: true, status: 200, payload: { outcome: 'started' } };
+      return { ok: false, status: 400, payload: { code: 'submission_invalid' } };
+    },
+    readCredential: async () => 'credential',
+    reportDispatchFailure: async (request) => {
+      failure = request;
+      return { reported: true, outcome: 'unavailable' };
+    },
+    flushMedia: async () => {},
+  });
+  assert.deepEqual(failure, {
+    installKey: scheduledEntry.producerInstanceId,
+    installationCredential: 'credential',
+    taskId: scheduledEntry.taskId,
+    failureId: scheduledEntry.submissionId,
+    failureCode: 'capture_delivery_rejected',
+    health: readiness.health,
+  });
+  assert.deepEqual(calls, ['in_flight', 'failure_reported']);
+  assert.equal(terminalRows[0].error, 'submission_invalid');
+});
+
+test('a claim or Attempt conflict is terminal locally but is never mislabeled as a rejected Package', async () => {
+  const calls = [];
+  const outbox = {
+    due: async () => [{ ...entry(), taskSpec: { source: 'scheduled' } }],
+    markInFlight: async () => {},
+    acknowledge: async () => {},
+    retry: async () => {},
+    terminal: async (_id, _error, options) => calls.push(options.dispatchFailureCode),
+    terminalDispatchFailures: async () => [],
+    pendingCount: async () => 0,
+  };
+  const routes = {
+    taskCreation: '/api/local/producer/tasks',
+    attemptStart: '/api/local/producer/runtime-attempts',
+    submission: '/api/local/producer/runtime-submissions',
+  };
+  await flushLocalOutboxOnce({
+    outbox,
+    mediaOutbox: { pendingCount: async () => 0 },
+    readReadiness: async () => ({ deliveryReady: true, health: {}, producerRoutes: routes }),
+    post: async (path) => {
+      if (path === routes.taskCreation) return { ok: true, status: 200, payload: { outcome: 'created' } };
+      if (path === routes.attemptStart) return { ok: true, status: 200, payload: { outcome: 'started' } };
+      return { ok: false, status: 409, payload: { code: 'attempt_terminal_submission_conflict' } };
+    },
+    flushMedia: async () => {},
+  });
+  assert.deepEqual(calls, ['']);
+});

@@ -32,6 +32,23 @@ function text(value = '') {
   return String(value || '').trim();
 }
 
+// The page collector exposes observedAt as an epoch millisecond number. The
+// Producer contract, however, accepts an RFC3339 timestamp. Normalize once at
+// the durable cache boundary so every later lane reuses the same valid fact.
+export function canonicalCaptureTimestamp(value, fallbackTimestamp = null) {
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed)) return new Date(parsed).toISOString();
+  }
+  const numeric = typeof value === 'number' ? value : Number(String(value || '').trim());
+  if (Number.isFinite(numeric) && numeric > 0) {
+    const milliseconds = numeric < 10_000_000_000 ? numeric * 1000 : numeric;
+    const parsed = new Date(milliseconds);
+    if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
+  }
+  return fallbackTimestamp == null ? '' : new Date(fallbackTimestamp).toISOString();
+}
+
 function plain(value) {
   return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 }
@@ -176,8 +193,10 @@ export function createDetailPageSessionStore(table = database.sessions, now = ()
         note: plain(note),
         commentResult: plain(commentResult || { total: 0, comments: [], stopReason: 'not_observed' }),
         receipt: plain(receipt || {}),
-        observedAt: text(note?.observedAt || note?.collectedAt) || new Date(timestamp).toISOString(),
-        capturedAt: new Date(timestamp).toISOString(),
+        observedAt: canonicalCaptureTimestamp(note?.observedAt)
+          || canonicalCaptureTimestamp(note?.collectedAt)
+          || canonicalCaptureTimestamp(timestamp, timestamp),
+        capturedAt: canonicalCaptureTimestamp(timestamp, timestamp),
         queuedTasks: existing?.queuedTasks && typeof existing.queuedTasks === 'object'
           ? existing.queuedTasks
           : {},

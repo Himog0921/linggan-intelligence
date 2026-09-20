@@ -89,6 +89,29 @@ test('outbox resolves concurrent detail-session enqueues to the one committed en
   await database.delete();
 });
 
+test('a legacy terminal submission_invalid is recovered only as a server task closure', async () => {
+  const database = new Dexie(`linggan-terminal-recovery-${crypto.randomUUID()}`);
+  database.version(1).stores({ submissions: '&submissionId, status, nextAttemptAt, createdAt, [status+nextAttemptAt+createdAt]' });
+  const outbox = createLocalProducerOutbox(database.submissions, () => 100);
+  await database.submissions.add({
+    submissionId: '11111111-1111-4111-8111-111111111111',
+    producerInstanceId: '22222222-2222-4222-8222-222222222222',
+    taskId: '33333333-3333-4333-8333-333333333333',
+    taskSpec: { source: 'scheduled' },
+    status: 'terminal', error: 'submission_invalid', createdAt: 100, nextAttemptAt: 100,
+  });
+  assert.deepEqual(await outbox.terminalDispatchFailures(), [{
+    submissionId: '11111111-1111-4111-8111-111111111111',
+    producerInstanceId: '22222222-2222-4222-8222-222222222222',
+    taskId: '33333333-3333-4333-8333-333333333333',
+    taskSpec: { source: 'scheduled' },
+    status: 'terminal', error: 'submission_invalid', createdAt: 100, nextAttemptAt: 100,
+    dispatchFailureCode: 'capture_delivery_rejected',
+    dispatchFailureId: '11111111-1111-4111-8111-111111111111',
+  }]);
+  await database.delete();
+});
+
 test('media outbox restores an interrupted local upload without losing its independent lane', async () => {
   const database = new Dexie(`linggan-media-test-${crypto.randomUUID()}`);
   database.version(1).stores({ mediaUploads: '&uploadId, slotSubmissionId, status, nextAttemptAt, createdAt, [status+nextAttemptAt+createdAt]' });

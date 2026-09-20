@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 import {
   createDetailPageSessionStore,
   createDetailPageNavigationGrantStore,
+  canonicalCaptureTimestamp,
   detailPageSessionExecutionReceipt,
   packageDetailPageSessionLane,
   validateDetailPageSessionPlan,
@@ -164,6 +165,31 @@ test('one persistent page result produces separate packages only for separately 
   now += 121_000;
   assert.ok(await store.getForTask({ leaseRef: 'lease-1', taskSpec: task('media_slots') }),
     'a pending frozen lane remains deliverable after the original lease TTL');
+});
+
+test('an epoch-millisecond page observation is canonicalized before every frozen lane packages it', async () => {
+  const store = createDetailPageSessionStore(memoryTable(), () => 1_000);
+  const observedAt = 1789908628809;
+  const entry = await store.put({
+    leaseRef: 'lease-1', plan, note: { ...note, observedAt }, commentResult, receipt: {},
+  });
+  assert.equal(entry.observedAt, '2026-09-20T12:50:28.809Z');
+  assert.equal(canonicalCaptureTimestamp(observedAt), entry.observedAt);
+  const media = packageDetailPageSessionLane(
+    await store.getForTask({ leaseRef: 'lease-1', taskSpec: task('media_slots') }),
+    task('media_slots'),
+  );
+  assert.equal(media.observedAt, entry.observedAt);
+});
+
+test('an invalid observedAt falls through to the collector observed timestamp instead of inventing now', async () => {
+  const store = createDetailPageSessionStore(memoryTable(), () => 9_999);
+  const entry = await store.put({
+    leaseRef: 'lease-1', plan,
+    note: { ...note, observedAt: 'not-a-time', collectedAt: 1789908628809 },
+    commentResult, receipt: {},
+  });
+  assert.equal(entry.observedAt, '2026-09-20T12:50:28.809Z');
 });
 
 test('cached comment and reply lanes keep their content source identity', async () => {

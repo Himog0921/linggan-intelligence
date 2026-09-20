@@ -1,7 +1,7 @@
 # DETAIL-PAGE-SESSION-REPLAY-SAFETY-001
 
 > 状态: 活跃计划
-> 最后核对: 2026-09-20（授权恢复与插件级风险冷却实现中）
+> 最后核对: 2026-09-20（采集包拒绝单 lane 收口候选）
 > 适用范围: XHS 详情页的派发、浏览器导航、页面结果暂存与本机交付重传
 > 事实来源: 2026-09-20 的真实运行审计、当前 `dispatch.rs`/Browser Producer 实现，以及 Mog 确认的“最终执行策略”
 > 冲突时以谁为准: Mog 的最新确认、运行时事实、受保护交付规则
@@ -22,12 +22,14 @@
 6. 若本地已记录由本插件创建的页面 tab，后台重启后只确认/接管该 tab；找不到已消费许可对应的页面时停止自动导航。
 7. `prepared` 表示本地已持久化同一份 `grant_request_id`，不是开页事实。授权接口的暂时不可达只允许同 ID 重试或按退避回队；不得换 ID 后再次导航。
 8. 显式风险拦截页只在已经打开的 claimed XHS 详情页受限状态面被观察。相同 installation 在 30 分钟内的 2 个独立风险观察会形成 12 小时安装级 cooldown；它不改写人的 `accepting_tasks` 意图，不暂停其他未被确认关联的插件安装。
+9. 页面 collector 的 epoch 毫秒时间必须在本机持久缓存边界转换为 RFC3339。服务端明确拒绝 immutable Package 时，使用该 Package 的 submission UUID 追加 `capture_delivery_rejected`；只把当前 Task 结束为 `unavailable`，同页其它冻结 lane 仍可从已保存缓存分包交付，绝不因此新增导航。
 
 ## 实施面
 
 - `0089_detail_page_session_replay_safety.sql`：会话唯一性、owner、授权申请、计划快照/hash、Chrome 导航观测、进度和安全停止原因。导航观测是单独上报的事实，不从授权推断。
 - Rust/loopback：只为已 claim 的详情 task 签发或按同一 request id 重放会话授权；不向非 owner 安装泄露或转让该会话。
 - `0090_detail_page_grant_recovery_and_risk_cooldown.sql`：追加 grant outcome 审计、安装级风险信号与有截止时间的 cooldown；它们不是 Attempt、Package、Receipt 或 Evidence。
+- `0093_capture_delivery_rejection.sql`：把 `capture_delivery_rejected` 纳入闭集失败码。它不形成新的证据或页面事实；它只终结服务端已拒绝的一个 Task，并保留其它 frozen lane。
 - Browser Producer：持久 grant ledger、原子消费、已消费后抑制重开、可接管已知 tab；正文在评论前进入 outbox。页面 payload 仅以原 Lease 寻址，且在全部冻结 lane 均已进 durable outbox 前永不因 TTL/容量被删除。
 - 测试：重复领取/并发消费只允许一次导航；授权响应丢失复用同一 grant；已消费但页面不明时 fail closed；正文先于评论；原 Lease 过期仍保留 payload、新 Lease 不得接管，全部 lane 入 outbox 后才可清理。
 
