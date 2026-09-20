@@ -68,6 +68,7 @@ struct DetailPageSessionGrantBody {
     installation_credential: String,
     task_id: uuid::Uuid,
     grant_request_id: uuid::Uuid,
+    execution_source_url: String,
 }
 
 #[derive(serde::Deserialize)]
@@ -117,6 +118,7 @@ async fn grant_detail_page_session_route(
         &request.installation_credential,
         request.task_id,
         request.grant_request_id,
+        &request.execution_source_url,
     )
     .await
     {
@@ -158,6 +160,12 @@ fn detail_page_session_grant_error_code(error: &DetailPageSessionGrantError) -> 
         DetailPageSessionGrantError::ClaimNotHeld => "detail_page_session_claim_not_held",
         DetailPageSessionGrantError::DetailScopeUnavailable => {
             "detail_page_session_scope_unavailable"
+        }
+        DetailPageSessionGrantError::ExecutionSourceUnavailable => {
+            "detail_page_execution_source_unavailable"
+        }
+        DetailPageSessionGrantError::ExecutionSourceChanged => {
+            "detail_page_execution_source_changed"
         }
         DetailPageSessionGrantError::Database(_) => "detail_page_session_grant_write_failed",
     }
@@ -640,6 +648,7 @@ fn failure_error_code(error: &DispatchFailureError) -> &'static str {
         DispatchFailureError::InvalidCredential => "dispatch_failure_credential_invalid",
         DispatchFailureError::ClaimNotHeld => "dispatch_failure_claim_not_held",
         DispatchFailureError::FailureIdentityConflict => "dispatch_failure_identity_conflict",
+        DispatchFailureError::DetailPageSourceUnbound => "dispatch_failure_source_unbound",
         DispatchFailureError::Database(_) => "dispatch_failure_write_failed",
     }
 }

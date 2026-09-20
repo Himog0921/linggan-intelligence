@@ -9,10 +9,11 @@ use linggan_evidence::{
     ProducerRuntimeError, RuntimeAttemptOutcome, RuntimeSubmissionOutcome, RuntimeTaskOutcome,
     activate_installation_credential, apply_monitor_rule_command, bind_observation_account,
     check_in_installation, create_producer_task, decide_dispatch, dispatch_schema_is_ready,
-    expire_lapsed_leases, grant_authorization, issue_work_order_lease, open_claim_window,
-    read_collection_task_timeline, read_work_resources, recover_released_orphaned_work_orders,
-    report_account_eligibility, requeue_failed_dispatch, rotate_installation_credential,
-    set_station_accepting, start_producer_attempt, submit_producer_package,
+    expire_lapsed_leases, grant_authorization, grant_detail_page_session, issue_work_order_lease,
+    open_claim_window, read_collection_task_timeline, read_work_resources,
+    recover_released_orphaned_work_orders, report_account_eligibility, requeue_failed_dispatch,
+    rotate_installation_credential, set_station_accepting, start_producer_attempt,
+    submit_producer_package,
 };
 use linggan_storage_postgres::{Database, testing::isolated_proof_schema};
 use sqlx::{AssertSqlSafe, Row};
@@ -126,6 +127,10 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0092_detail_page_session_recovery_boundary.sql"),
     "\n",
     include_str!("../../../database/migrations/0093_capture_delivery_rejection.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0094_corpus_evidence_read_recovery.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0095_detail_page_url_rejection.sql"),
 );
 
 #[tokio::test]
@@ -1348,6 +1353,141 @@ async fn repeated_detail_read_failure_becomes_blocked_without_stalling_later_mat
         "eligible-second"
     );
     assert_eq!(failure_task_ids.len(), 3);
+}
+
+/// 平台明确把某条签名详情链接带到了 404 时，停的是这一条 URL，不是作品身份。
+/// 后来发现链路带回新的签名 URL 后，新工单仍可以正常领取；旧 URL 则绝不再回队打开。
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn rejected_signed_detail_url_is_never_reopened_but_a_fresh_discovery_url_can_run() {
+    let database = proof_database_for("collection_dispatch_rejected_detail_url").await;
+    let fixture = seed_creator_work_order(&database).await;
+    let content_external_id = "signed-url-rejection-proof";
+    let rejected_url = format!(
+        "https://www.xiaohongshu.com/explore/{content_external_id}?xsec_token=REJECTED_FIXTURE&xsec_source=pc_user"
+    );
+    submit_profile_discovery(&database, content_external_id, &rejected_url).await;
+    let content_public_ref: Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content \
+         WHERE platform='xhs' AND content_external_id=$1",
+    )
+    .bind(content_external_id)
+    .fetch_one(database.pool())
+    .await
+    .expect("accepted discovery creates the stable content identity");
+    sqlx::query(
+        "INSERT INTO collection_work_order_material_target \
+             (work_order_ref,content_public_ref,ordinal,comment_limit,reply_expand_limit,acquire_media) \
+         VALUES ($1,$2,1,30,2,true)",
+    )
+    .bind(fixture.work_order_ref)
+    .bind(content_public_ref)
+    .execute(database.pool())
+    .await
+    .expect("the original work order freezes the one material");
+
+    issue_work_order_lease(&database, fixture.work_order_ref, 60)
+        .await
+        .expect("original detail work is leased");
+    let first = decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("the signed URL is dispatched once");
+    let first_task_id = task_id(&first);
+    let dispatched_url = match first {
+        DispatchDecision::Dispatch {
+            execution_source_url: Some(url),
+            ..
+        } => url,
+        other => panic!("a signed detail URL is required for the first dispatch; got {other:?}"),
+    };
+    assert_eq!(dispatched_url, rejected_url);
+    assert!(matches!(
+        grant_detail_page_session(
+            &database,
+            &fixture.install_key,
+            &fixture.installation_credential,
+            first_task_id,
+            Uuid::new_v4(),
+            &dispatched_url,
+        )
+        .await,
+        Ok(linggan_evidence::DetailPageSessionGrant::Authorized { .. })
+    ));
+
+    assert_eq!(
+        requeue_failed_dispatch(
+            &database,
+            &fixture.install_key,
+            &fixture.installation_credential,
+            first_task_id,
+            Uuid::new_v4(),
+            DispatchFailureCode::DetailPageUrlInvalid,
+        )
+        .await
+        .expect("the explicit platform dead-page fact terminalizes this URL"),
+        DispatchFailureOutcome::Blocked
+    );
+    let stored_session: (String, Option<String>, String) = sqlx::query_as(
+        "SELECT state,stop_reason,execution_source_url_sha256 \
+         FROM collection_detail_page_session WHERE initial_lease_ref=( \
+             SELECT lease_ref FROM collection_work_order_lease \
+             WHERE work_order_ref=$1 ORDER BY issued_at DESC LIMIT 1)",
+    )
+    .bind(fixture.work_order_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("the server records a terminal source fingerprint");
+    assert_eq!(stored_session.0, "stopped");
+    assert_eq!(stored_session.1.as_deref(), Some("detail_page_url_invalid"));
+    assert_eq!(
+        stored_session.2.len(),
+        64,
+        "only the SHA-256 fingerprint is stored on the session"
+    );
+    assert_ne!(
+        stored_session.2, rejected_url,
+        "the session never stores the raw signed URL"
+    );
+    assert!(matches!(
+        decide_dispatch(
+            &database,
+            &fixture.install_key,
+            &fixture.installation_credential,
+        )
+        .await,
+        Ok(DispatchDecision::NothingWaiting)
+    ));
+
+    let fresh_url = format!(
+        "https://www.xiaohongshu.com/explore/{content_external_id}?xsec_token=FRESH_FIXTURE&xsec_source=pc_user"
+    );
+    submit_profile_discovery(&database, content_external_id, &fresh_url).await;
+    let new_work_order_ref = seed_second_queued_work_order(&database, &fixture).await;
+    sqlx::query(
+        "INSERT INTO collection_work_order_material_target \
+             (work_order_ref,content_public_ref,ordinal,comment_limit,reply_expand_limit,acquire_media) \
+         VALUES ($1,$2,1,30,2,true)",
+    )
+    .bind(new_work_order_ref)
+    .bind(content_public_ref)
+    .execute(database.pool())
+    .await
+    .expect("the later approved work order freezes the same durable content identity");
+    let fresh = decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("the later work order is eligible");
+    assert!(matches!(
+        fresh,
+        DispatchDecision::Dispatch { execution_source_url: Some(url), .. } if url == fresh_url
+    ));
 }
 
 #[tokio::test]

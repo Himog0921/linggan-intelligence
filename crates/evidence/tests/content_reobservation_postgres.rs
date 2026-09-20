@@ -240,8 +240,12 @@ async fn detail_page_grant_replays_one_request_and_suppresses_a_new_request_for_
     )
     .await
     .unwrap();
-    let task_id = match dispatched {
-        DispatchDecision::Dispatch { task_id, .. } => task_id,
+    let (task_id, execution_source_url) = match dispatched {
+        DispatchDecision::Dispatch {
+            task_id,
+            execution_source_url: Some(url),
+            ..
+        } => (task_id, url),
         other => panic!("expected detail dispatch, got {other:?}"),
     };
     let request_id = Uuid::new_v4();
@@ -251,6 +255,7 @@ async fn detail_page_grant_replays_one_request_and_suppresses_a_new_request_for_
         &fixture.installation_credential,
         task_id,
         request_id,
+        &execution_source_url,
     )
     .await
     .unwrap();
@@ -260,6 +265,7 @@ async fn detail_page_grant_replays_one_request_and_suppresses_a_new_request_for_
         &fixture.installation_credential,
         task_id,
         request_id,
+        &execution_source_url,
     )
     .await
     .unwrap();
@@ -269,6 +275,7 @@ async fn detail_page_grant_replays_one_request_and_suppresses_a_new_request_for_
         &fixture.installation_credential,
         task_id,
         Uuid::new_v4(),
+        &execution_source_url,
     )
     .await
     .unwrap();
@@ -355,6 +362,7 @@ async fn detail_page_grant_replays_one_request_and_suppresses_a_new_request_for_
         &fixture.installation_credential,
         task_id,
         request_id,
+        &execution_source_url,
     )
     .await
     .unwrap();
