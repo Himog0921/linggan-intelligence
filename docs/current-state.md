@@ -1,10 +1,16 @@
 # 当前状态与事项队列
 
 > 状态: 权威当前
-> 最后核对: 2026-09-17
+> 最后核对: 2026-09-20
 > 适用范围: 当前阶段、事项顺序、阻塞与下一步
 > 事实来源: 本机实际检查、已确认项目边界和完成计划
 > 冲突时以谁为准: 真实运行结果、ACCEPTED ADR 与用户最新确认
+
+### OCR-CONTENT-LAYERING-001 / Issue #296（候选源码；未进入共享运行）
+
+- 用户已基于 50 张本机封面盲测确认：PaddleOCR 的识字质量显著优于 Tesseract，但原始识别仍会混入小红书水印、截图界面和场景偶发文字。候选把图片 OCR 切为 PaddleOCR v4，并保留 raw 文本、逐行归一化坐标、置信度与版面 JSON；本地规则只移除确定的平台边缘水印/UI，复杂图保持 `PARTIAL`/`NEEDS_REVIEW`，不会补写或删猜正文。
+- `cover_headline` 与 `image_substantive_text` 是不同的可追溯派生视图。平台标题为空时，Evidence Library 仅可从前 3 张图中合格的 `cover_headline` 补显示标题，并标记“封面 OCR”；平台原始标题不被覆盖。历史 Tesseract OCR 将在共享 migration 后退役为不可读/不可检索，原始媒体、Evidence、事件和 ASR 不删除。
+- 已完成源码编译、媒体 worker 规则测试、B39 原图 bridge 实跑，以及完整一次性 PostgreSQL LOCAL-001 契约证明；尚未执行共享 migration、历史重排、Paddle runtime 安装、视觉模型真实调用、runtime/3000 切换、PR 合并或业务验收。
 
 ### DETAIL-PAGE-SESSION-REPLAY-SAFETY-001（候选源码已完成隔离验证；未进入共享运行）
 
@@ -316,7 +322,7 @@ Mog 对当前 Evidence Library 首屏指出重复定位文案、左侧 `STATE VI
 
 当前实施把已发现的固定 12 个作品作为明确 WorkOrder 范围，而不是让普通巡检对全部发现结果自动扩张。新增 additive `0022`–`0024`：固定作品及评论/回复/媒体/OCR/ASR策略、详情互动观察时间线、实况图片 still/motion 组件、有界媒体处理租约和可检索派生文本。发租时每个作品顺序展开 `content_detail → media_slots → comments → replies`，每个 Task 只请求一个能力；媒体和处理重试均最多 3 次。
 
-Browser Producer 已沿真实 canary 升至 `0.8.4` 并进入 `main` 与本机发布：安装、启动或 alarm 唤醒后自动签到与领活，能按作品标识自动打开详情并分别回传详情、媒体、评论、回复 Package；不再依赖人工点击“领取”。服务端派发最新已接纳发现材料中的短期 XHS 签名来源链接，插件验证作品身份与 `xsec_token` 后执行；插件升级后同一工位可原位承接有效租约中的未完成 Task。普通图片、封面、视频与 Live Photo 共用媒体槽位，Live Photo 的 still/motion 候选和取得状态分开。服务端会自动取得短期 URL 的字节并保存在独立本地媒体根；本机媒体 worker 使用 Tesseract/FFmpeg/Whisper 形成缩略图、OCR、音频、ASR 和视频抽帧 OCR，空文本按 `KNOWN_EMPTY` 保留。Evidence Library 已接入互动时间线、评论/回复与派生文本检索，并只使用受控本地资产。
+Browser Producer 已沿真实 canary 升至 `0.8.4` 并进入 `main` 与本机发布：安装、启动或 alarm 唤醒后自动签到与领活，能按作品标识自动打开详情并分别回传详情、媒体、评论、回复 Package；不再依赖人工点击“领取”。服务端派发最新已接纳发现材料中的短期 XHS 签名来源链接，插件验证作品身份与 `xsec_token` 后执行；插件升级后同一工位可原位承接有效租约中的未完成 Task。普通图片、封面、视频与 Live Photo 共用媒体槽位，Live Photo 的 still/motion 候选和取得状态分开。服务端会自动取得短期 URL 的字节并保存在独立本地媒体根；本机媒体 worker 使用 PaddleOCR/FFmpeg/Whisper 形成缩略图、OCR、音频、ASR 和视频抽帧 OCR，空文本按 `KNOWN_EMPTY` 保留。Evidence Library 已接入互动时间线、评论/回复与派生文本检索，并只使用受控本地资产。
 
 共享数据库已应用 additive `0022`–`0024`，API、调度 worker 和媒体 worker 已切到 `origin/main@8fe531e` 冻结快照。Chrome 已加载并认领 0.8.4；首个 `content_detail` Task 自动打开了带 `xsec_token` 的目标详情页，但页面水合后全局 `__INITIAL_STATE__` 已被删除、当前 DOM 又没有旧详情容器，导致详情采集在浏览器内失败，任务保持 `in_progress` 且仍为 0 Attempt / 0 Package，服务端接纳尚未发生。该现象与内容工作台 2.0.93 的真实热修根因一致。0.8.5 候选补回安全 SSR `noteDetailMap` 解析，并让详情就绪、完整度判断、正式单篇采集和启动探针共用这一路径；只解析有界 JSON 对象，不执行页面脚本。123 项 Browser Producer 测试、合同检查、生产构建、发布包校验、可复现性与旧工作台隔离已一次通过；发行 SHA-256 为 `62d17c53e0fd6153e3c28aaaa66351002b1de05a576942fd3f687483534f8676`。数据库、WorkOrder/Task、签名 URL、12 条固定范围和原 canary 均不改变。真实 12 作品穿过详情/评论/媒体/OCR/ASR 与 Evidence Library 的最终验收仍未完成，下一步是 0.8.5 精确 head 合并、发布、重载后继续同一 canary。
 

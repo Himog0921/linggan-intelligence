@@ -1093,6 +1093,9 @@
     const identity = node('div', 'ev-identity');
     const eyebrow = node('div', 'ev-eyebrow');
     eyebrow.append(node('span', null, item.identity?.platform?.toUpperCase() || '平台未知'));
+    if (!crossIndustry && item.display?.titleSource === 'cover_ocr') {
+      eyebrow.append(node('span', 'ev-title-source', '封面 OCR'));
+    }
     const title = node('h2', null, knownText(item.display?.title, item.display?.titleState, '标题当前未知'));
     const meta = node('div', 'ev-meta');
     meta.append(authorFact(item), node('span', 'ev-time-line', published));

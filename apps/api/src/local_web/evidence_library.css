@@ -256,6 +256,7 @@
 /* One type step for every card. The plate is exactly two lines of it, so a one-line and a
  * two-line title put the stage on the same pixel and no card changes size next to its neighbour. */
 .ev-cover-title{display:-webkit-box;height:var(--ev-cover-title-height);margin:0;overflow:hidden;color:var(--v7-black);font:var(--lgi-weight-bold) var(--ev-cover-title-size)/var(--lgi-lh-title) var(--lgi-font-sans);letter-spacing:var(--lgi-ls-tight);-webkit-box-orient:vertical;-webkit-line-clamp:2}
+.ev-title-source{padding:1px var(--lgi-space-1);border:1px solid var(--lgi-border);color:var(--lgi-ink-muted);font:var(--lgi-weight-medium) var(--lgi-text-micro)/1 var(--lgi-font-sans);letter-spacing:var(--lgi-ls-label)}
 .ev-cover-back-label,.ev-cover-index,.ev-cover-micro-label,.ev-cover-flip-cue{font:var(--lgi-weight-semibold) var(--lgi-text-label)/var(--lgi-lh-data) var(--lgi-font-mono);letter-spacing:var(--lgi-ls-data);font-variant-numeric:tabular-nums}
 .ev-cover-back-label{color:var(--lgi-muted)}
 .ev-cover-index{color:var(--lgi-ghost)}

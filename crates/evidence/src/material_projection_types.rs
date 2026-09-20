@@ -49,7 +49,8 @@ pub struct MaterialLibraryItem {
 #[serde(rename_all = "camelCase")]
 pub struct MaterialEvidenceFragment {
     pub text: String,
-    /// `detail_body` | `ocr_text` | `frame_ocr_text` | `asr_text` | `comment_body`. The reader
+    /// `detail_body` | `ocr_text` | `image_substantive_text` | `frame_ocr_text` | `asr_text` |
+    /// `comment_body`. The reader
     /// must be able to tell the author's own sentence from a comment or from machine-read text,
     /// so this is never collapsed into a single "content" label in the UI.
     pub source_kind: &'static str,
@@ -82,6 +83,10 @@ pub struct MaterialIdentity {
 pub struct MaterialDisplay {
     pub title: Option<String>,
     pub title_state: String,
+    /// `platform_title` preserves the producer field; `cover_ocr` is a labelled display-only
+    /// fallback and never overwrites the original title fact.
+    pub title_source: String,
+    pub title_media_display_ordinal: Option<i32>,
     pub creator_display_name: Option<String>,
     pub creator_state: String,
     pub published_at: Option<String>,

@@ -21,10 +21,11 @@ use linggan_storage_postgres::Database;
 use sqlx::Row;
 use uuid::Uuid;
 
-/// 与生产代码逐字相同的两份版本号。`local-v2` 是 2026-09-17 抬上去的那一代：
-/// Tesseract 语言表去掉 `chi_tra`、whisper 换 medium 并修掉子进程 PATH。
+/// 与生产代码逐字相同的版本号。`local-v3` 是 Paddle OCR 分层版；ASR 不在这次 OCR
+/// 替换范围，仍保持上一代 `local-v2`。
 const BASELINE: &str = "local-v1";
-const CURRENT: &str = "local-v2";
+const CURRENT: &str = "local-v3";
+const ASR_CURRENT: &str = "local-v2";
 /// 重排出来的作业在事件流里的理由，与摄取路径的 `queued_for_local_processor` 分开。
 const REQUEUE_REASON: &str = "requeued_after_processor_version_upgrade";
 
@@ -266,7 +267,10 @@ async fn seed_media_without_jobs(
 /// 2026-09-17 本用例第一版正是死在这里）。所以这里按 `material_media_postgres.rs` 已有的写法直接
 /// 建槽位与观察行，**不给它素材**：字节可读、槽位在、素材行不在——认领读输入时那条 INNER JOIN
 /// 落空，与生产一模一样。
-async fn seed_media_key_without_its_material(database: &Database, index: usize) -> (String, String) {
+async fn seed_media_key_without_its_material(
+    database: &Database,
+    index: usize,
+) -> (String, String) {
     let content_id = format!("note-requeue-never-admitted-{index}");
     let slot_key = format!("xhs:{content_id}:image:1");
     // 槽位与观察行都得挂在一条真实包上（`first_package_ref`／`package_ref` 都是外键）。借一条已有的
@@ -357,7 +361,7 @@ async fn admission_uses_the_registered_version_per_kind() {
         versions,
         vec![
             // 一张图 + 一段视频：两个 `thumbnail`、一个 `image_ocr`，视频那三条各一个。
-            ("asr".to_owned(), CURRENT.to_owned()),
+            ("asr".to_owned(), ASR_CURRENT.to_owned()),
             ("audio_extract".to_owned(), BASELINE.to_owned()),
             ("image_ocr".to_owned(), CURRENT.to_owned()),
             ("thumbnail".to_owned(), BASELINE.to_owned()),
@@ -412,7 +416,7 @@ async fn requeue_covers_only_the_outdated_jobs_of_the_named_kinds() {
     // 没点名的三类：一条不动。
     for (kind, version) in [
         ("asr", BASELINE),
-        ("asr", CURRENT),
+        ("asr", ASR_CURRENT),
         ("video_frame_ocr", BASELINE),
         ("video_frame_ocr", CURRENT),
     ] {
@@ -431,7 +435,7 @@ async fn requeue_covers_only_the_outdated_jobs_of_the_named_kinds() {
             .expect("both kinds are registered");
     assert_eq!(summary[0].enqueued_jobs, 1);
     assert_eq!(summary[1].enqueued_jobs, 1);
-    assert_eq!(jobs_of(&database, "asr", CURRENT).await.len(), 1);
+    assert_eq!(jobs_of(&database, "asr", ASR_CURRENT).await.len(), 1);
     assert_eq!(
         jobs_of(&database, "video_frame_ocr", CURRENT).await.len(),
         1
@@ -577,8 +581,7 @@ async fn requeued_jobs_become_claimable_work() {
 async fn a_requeued_job_without_its_material_is_retired_without_blocking_the_queue() {
     let database = proof_database("media_requeue_missing_material").await;
     let (healthy_sha, healthy_slot) = seed_media_without_jobs(&database, 2, "image").await;
-    let (missing_sha, missing_slot) =
-        seed_media_key_without_its_material(&database, 1).await;
+    let (missing_sha, missing_slot) = seed_media_key_without_its_material(&database, 1).await;
     let missing_v1 = insert_outdated_job(
         &database,
         &missing_sha,
@@ -752,7 +755,7 @@ async fn requeue_refuses_a_kind_that_has_no_registered_version() {
 
     assert_eq!(processor_version_for_kind("image_ocr"), Some(CURRENT));
     assert_eq!(processor_version_for_kind("video_frame_ocr"), Some(CURRENT));
-    assert_eq!(processor_version_for_kind("asr"), Some(CURRENT));
+    assert_eq!(processor_version_for_kind("asr"), Some(ASR_CURRENT));
     assert_eq!(processor_version_for_kind("thumbnail"), Some(BASELINE));
     assert_eq!(processor_version_for_kind("audio_extract"), Some(BASELINE));
     assert_eq!(processor_version_for_kind("image_ocr_v2"), None);

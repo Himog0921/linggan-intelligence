@@ -18,7 +18,7 @@ http://localhost:3000/corpus/evidence
 
 服务会明确绑定 `127.0.0.1:3000`。因此它只供这台 Mac 使用，不会监听局域网或互联网。它不连接旧内容工作台或旧数据库。平台访问只由已签到且已领取服务端 TaskSpec 的 Browser Producer 执行；API、scheduler 与媒体处理 worker 本身不登录平台。
 
-从 `MATERIAL-DEEPENING-001` 起，`serve` 同时启动三类本机进程：loopback API、观察调度 worker 和媒体处理 worker。媒体处理只读取已经物化到 `LINGGAN_LOCAL_MEDIA_ROOT` 的本地字节，并按可用命令启用 Tesseract OCR、FFmpeg 缩略图/音频/抽帧和 local Whisper ASR；它不会把原始媒体提交给外部模型 API。若处理器不可用，页面保留 `NOT_ENABLED/QUEUED/UNKNOWN`，不能写成已处理。
+从 `MATERIAL-DEEPENING-001` 起，`serve` 同时启动三类本机进程：loopback API、观察调度 worker 和媒体处理 worker。媒体处理只读取已经物化到 `LINGGAN_LOCAL_MEDIA_ROOT` 的本地字节，并按可用命令启用 PaddleOCR（图片与视频帧）、FFmpeg 缩略图/音频/抽帧和 local Whisper ASR；它不会把原始媒体提交给外部模型 API。若处理器不可用，页面保留 `NOT_ENABLED/QUEUED/UNKNOWN`，不能写成已处理。
 
 未使用本运行手册启动时，Evidence Library 会保持 `SOURCE_INCOMPLETE / NOT_CONNECTED` 的诚实空态。不要把这个状态理解为“世界没有材料”。
 

@@ -21,6 +21,10 @@
 |---|---|---|
 | [plans/active/account-observation-bootstrap-002.md](plans/active/account-observation-bootstrap-002.md) | 活跃计划 | Issue #218：新安装插件的首单软准入、账号观察启动、人工绑定审计与无秘密配置诊断 |
 | [plans/active/detail-page-session-replay-safety-001.md](plans/active/detail-page-session-replay-safety-001.md) | 活跃计划；受保护工作树 | 同一 Work Order/内容详情页的单次导航授权、浏览器持久消费闸门、缓存缺失 fail-closed 与既得数据重传边界 |
+| [plans/active/ocr-content-layering-001.md](plans/active/ocr-content-layering-001.md) | 活跃计划；Issue #296；受保护工作树 | PaddleOCR 替换、逐行版面/内容分层、封面标题补位与 Tesseract OCR 可审计退役 |
+| [decisions/0007-ocr-content-layering.md](decisions/0007-ocr-content-layering.md) | 权威当前 | OCR 原始事实、内容分层、视觉选择边界和展示标题来源的长期决定 |
+| [data-contracts/ocr-content-layering.md](data-contracts/ocr-content-layering.md) | 权威当前 | OCR raw/layout/行引用、分层状态、标题回退与视觉模型输出闭集 |
+| [runbooks/paddle-ocr-runtime.md](runbooks/paddle-ocr-runtime.md) | 权威当前 | 本机 Paddle runtime 准备、无 Tesseract 回退、迁移后受控重排步骤 |
 | [decisions/0006-comment-research-clean-rebuild.md](decisions/0006-comment-research-clean-rebuild.md) | 权威当前 | Issue #295：开发期销毁旧评论研究派生层，保留原始 Evidence 与资格事实；唯一的新评论研究合同与本机 reset 边界 |
 | [plans/active/comment-research-rebuild-001.md](plans/active/comment-research-rebuild-001.md) | 活跃计划；Issue #295；实现中 | 按领域选择笔记、冻结同篇语境与评论目标、严格语义接纳、长期 Problem 归并及旧路径删除的交付顺序 |
 | [plans/active/comment-research-reset-001.md](plans/active/comment-research-reset-001.md) | 历史基础 | 旧评论研究 reset 的历史记录；不再规定当前 schema、Run、输入或 UI 合同 |
@@ -39,6 +43,7 @@
 | [design/pages/comment-research-v1-page.md](design/pages/comment-research-v1-page.md) | 权威当前；交付分支实现 | 评论研究 V1 的五视图、研究设置与用户状态合同 |
 | [design/pages/comment-study-rebuild-page.md](design/pages/comment-study-rebuild-page.md) | 权威当前；受保护工作树 | 评论研究重建后的 L1 读取职责、状态与验收边界；不复用 V1 结果版本或向量语义 |
 | [design/changes/comment-research-cumulative-state-001-ui-change-manifest.md](design/changes/comment-research-cumulative-state-001-ui-change-manifest.md) | 权威当前；实施中 | Issue #281 的累计已确认知识、统计版本与 Run Health 状态表达 |
+| [design/changes/ocr-content-layering-001-ui-change-manifest.md](design/changes/ocr-content-layering-001-ui-change-manifest.md) | 活跃计划；Issue #296 | Evidence Library 的封面 OCR 标记、标题来源与图片文字可追溯读取边界 |
 | [design/changes/comment-research-reset-001-ui-change-manifest.md](design/changes/comment-research-reset-001-ui-change-manifest.md) | 权威当前；交付分支实现 | 旧评论页面/API/自动计划替代与用户体验验证范围 |
 | [design/changes/comment-study-rebuild-001-ui-change-manifest.md](design/changes/comment-study-rebuild-001-ui-change-manifest.md) | 权威当前；受保护工作树 | 评论研究 clean rebuild 的 API/UI 替换范围、状态词典、依赖与验收矩阵 |
 | [design/acceptance/comment-study-layout-001-acceptance.md](design/acceptance/comment-study-layout-001-acceptance.md) | 一次性报告；候选布局 | Issue #295 初始研究输入面的表格布局、实际 100 篇候选读取与浏览器验证；不代表合并或 3000 刷新 |

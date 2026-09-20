@@ -11,7 +11,7 @@
 //! only returned from the explicitly authorised comment-research channel.
 
 use crate::material_projection_types::{MaterialEvidenceFragment, MaterialLibraryItem};
-use sqlx::{Postgres, Row, Transaction};
+use sqlx::{AssertSqlSafe, Postgres, Row, Transaction};
 use uuid::Uuid;
 
 /// Total characters an excerpt may carry. Chosen against the V9 research row, where the quote
@@ -52,6 +52,9 @@ pub(crate) async fn read(
         {
             return Ok(Some(fragment));
         }
+        if let Some(fragment) = matched_image_substantive_text(tx, item, query, as_of).await? {
+            return Ok(Some(fragment));
+        }
         if let Some(fragment) = matched_derived_text(tx, item, query, as_of).await? {
             return Ok(Some(fragment));
         }
@@ -68,6 +71,9 @@ pub(crate) async fn read(
             None,
             None,
         )));
+    }
+    if let Some(fragment) = leading_image_substantive_text(tx, item, as_of).await? {
+        return Ok(Some(fragment));
     }
     leading_derived_text(tx, item, as_of).await
 }
@@ -190,15 +196,20 @@ async fn matched_derived_text(
     query: &str,
     as_of: &str,
 ) -> Result<Option<MaterialEvidenceFragment>, sqlx::Error> {
-    let row = sqlx::query(
+    let retirement_filter = if ocr_retirement_schema_ready(tx).await? {
+        " AND NOT EXISTS (SELECT 1 FROM linggan_media_ocr_retirement retired WHERE retired.retired_job_ref=job.job_ref)"
+    } else {
+        ""
+    };
+    let row = sqlx::query(AssertSqlSafe(format!(
         "SELECT derived.derivative_ref,derived.kind,derived.display_text,job.slot_key \
          FROM linggan_material_derived_text derived \
          JOIN linggan_media_derivative derivative USING(derivative_ref) \
          JOIN linggan_media_processing_job job USING(job_ref) \
          WHERE derived.content_public_ref=$1 AND derived.created_at <= $2::timestamptz \
-           AND lower(derived.display_text) LIKE '%' || lower($3) || '%' \
-         ORDER BY job.slot_key,derived.created_at DESC LIMIT 1",
-    )
+           AND lower(derived.display_text) LIKE '%' || lower($3) || '%'{retirement_filter} \
+         ORDER BY job.slot_key,derived.created_at DESC LIMIT 1"
+    )))
     .bind(item.identity.public_ref)
     .bind(as_of)
     .bind(query)
@@ -211,6 +222,50 @@ async fn matched_derived_text(
             fragment_from(
                 hit,
                 derived_source_kind(&kind),
+                "SEARCH_MATCH",
+                row.get::<Option<Uuid>, _>("derivative_ref"),
+                row.get::<Option<String>, _>("slot_key"),
+            )
+        })
+    }))
+}
+
+/// A curated image-text view is readable only when the local layer is ACCEPTED.  `PARTIAL`
+/// remains available in the Inspector's OCR-layering record but cannot quietly become corpus.
+async fn matched_image_substantive_text(
+    tx: &mut Transaction<'_, Postgres>,
+    item: &MaterialLibraryItem,
+    query: &str,
+    as_of: &str,
+) -> Result<Option<MaterialEvidenceFragment>, sqlx::Error> {
+    if !ocr_retirement_schema_ready(tx).await? {
+        return Ok(None);
+    }
+    let row = sqlx::query(
+        "SELECT derivative.derivative_ref,layer.image_substantive_text,job.slot_key \
+         FROM linggan_media_ocr_layering_result layer \
+         JOIN linggan_media_ocr_layout layout USING(layout_ref) \
+         JOIN linggan_media_derivative derivative ON derivative.derivative_ref=layout.ocr_derivative_ref \
+         JOIN linggan_media_processing_job job ON job.job_ref=derivative.job_ref \
+         WHERE layout.content_public_ref=$1 AND layer.state='ACCEPTED' \
+           AND layer.created_at <= $2::timestamptz \
+           AND nullif(btrim(layer.image_substantive_text),'') IS NOT NULL \
+           AND lower(layer.image_substantive_text) LIKE '%' || lower($3) || '%' \
+           AND NOT EXISTS (SELECT 1 FROM linggan_media_ocr_retirement retired \
+                           WHERE retired.retired_job_ref=job.job_ref) \
+         ORDER BY layer.created_at DESC LIMIT 1",
+    )
+    .bind(item.identity.public_ref)
+    .bind(as_of)
+    .bind(query)
+    .fetch_optional(&mut **tx)
+    .await?;
+    Ok(row.and_then(|row| {
+        let text: String = row.get("image_substantive_text");
+        match_in(&text, query).map(|hit| {
+            fragment_from(
+                hit,
+                "image_substantive_text",
                 "SEARCH_MATCH",
                 row.get::<Option<Uuid>, _>("derivative_ref"),
                 row.get::<Option<String>, _>("slot_key"),
@@ -238,15 +293,20 @@ async fn leading_derived_text(
     item: &MaterialLibraryItem,
     as_of: &str,
 ) -> Result<Option<MaterialEvidenceFragment>, sqlx::Error> {
-    let row = sqlx::query(
+    let retirement_filter = if ocr_retirement_schema_ready(tx).await? {
+        " AND NOT EXISTS (SELECT 1 FROM linggan_media_ocr_retirement retired WHERE retired.retired_job_ref=job.job_ref)"
+    } else {
+        ""
+    };
+    let row = sqlx::query(AssertSqlSafe(format!(
         "SELECT derived.derivative_ref,derived.kind,derived.display_text,job.slot_key \
          FROM linggan_material_derived_text derived \
          JOIN linggan_media_derivative derivative USING(derivative_ref) \
          JOIN linggan_media_processing_job job USING(job_ref) \
          WHERE derived.content_public_ref=$1 AND derived.created_at <= $2::timestamptz \
-           AND job.slot_key NOT LIKE '%:cover:%' \
-         ORDER BY job.slot_key,derived.created_at DESC LIMIT 1",
-    )
+           AND job.slot_key NOT LIKE '%:cover:%'{retirement_filter} \
+         ORDER BY job.slot_key,derived.created_at DESC LIMIT 1"
+    )))
     .bind(item.identity.public_ref)
     .bind(as_of)
     .fetch_optional(&mut **tx)
@@ -265,6 +325,51 @@ async fn leading_derived_text(
             )
         })
     }))
+}
+
+async fn leading_image_substantive_text(
+    tx: &mut Transaction<'_, Postgres>,
+    item: &MaterialLibraryItem,
+    as_of: &str,
+) -> Result<Option<MaterialEvidenceFragment>, sqlx::Error> {
+    if !ocr_retirement_schema_ready(tx).await? {
+        return Ok(None);
+    }
+    let row = sqlx::query(
+        "SELECT derivative.derivative_ref,layer.image_substantive_text,job.slot_key \
+         FROM linggan_media_ocr_layering_result layer \
+         JOIN linggan_media_ocr_layout layout USING(layout_ref) \
+         JOIN linggan_media_derivative derivative ON derivative.derivative_ref=layout.ocr_derivative_ref \
+         JOIN linggan_media_processing_job job ON job.job_ref=derivative.job_ref \
+         WHERE layout.content_public_ref=$1 AND layer.state='ACCEPTED' \
+           AND layer.created_at <= $2::timestamptz \
+           AND nullif(btrim(layer.image_substantive_text),'') IS NOT NULL \
+           AND NOT EXISTS (SELECT 1 FROM linggan_media_ocr_retirement retired \
+                           WHERE retired.retired_job_ref=job.job_ref) \
+         ORDER BY layer.created_at DESC LIMIT 1",
+    )
+    .bind(item.identity.public_ref)
+    .bind(as_of)
+    .fetch_optional(&mut **tx)
+    .await?;
+    Ok(row.map(|row| {
+        let text: String = row.get("image_substantive_text");
+        fragment_from(
+            window(&text, None),
+            "image_substantive_text",
+            "FIRST_AVAILABLE",
+            row.get::<Option<Uuid>, _>("derivative_ref"),
+            row.get::<Option<String>, _>("slot_key"),
+        )
+    }))
+}
+
+async fn ocr_retirement_schema_ready(
+    tx: &mut Transaction<'_, Postgres>,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar("SELECT to_regclass('linggan_media_ocr_retirement') IS NOT NULL")
+        .fetch_one(&mut **tx)
+        .await
 }
 
 fn derived_source_kind(kind: &str) -> &'static str {

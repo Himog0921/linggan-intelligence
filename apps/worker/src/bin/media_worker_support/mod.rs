@@ -100,9 +100,28 @@ pub(crate) fn local_media_root() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from(".linggan-local/media"))
 }
 
-pub(crate) fn tesseract_command() -> String {
-    std::env::var("LINGGAN_TESSERACT_COMMAND")
-        .unwrap_or_else(|_| "/opt/homebrew/bin/tesseract".to_owned())
+pub(crate) fn paddle_ocr_python() -> String {
+    std::env::var("LINGGAN_PADDLE_OCR_PYTHON").unwrap_or_else(|_| {
+        let support_dir = std::env::var_os("LINGGAN_SUPPORT_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
+                    .join("Library/Application Support/Linggan Intelligence")
+            });
+        support_dir
+            .join("paddle-ocr/venv/bin/python")
+            .display()
+            .to_string()
+    })
+}
+
+pub(crate) fn paddle_ocr_script() -> PathBuf {
+    std::env::var_os("LINGGAN_PADDLE_OCR_SCRIPT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("src/bin/media_worker_support/paddle_ocr.py")
+        })
 }
 
 pub(crate) fn ffmpeg_command() -> String {

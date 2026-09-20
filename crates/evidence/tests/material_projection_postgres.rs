@@ -10,6 +10,109 @@ use linggan_evidence::{
     read_target_deletion_preview, read_work_resource, read_work_resources, store_pending_target,
 };
 use sqlx::Row;
+use uuid::Uuid;
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn blank_platform_title_falls_back_only_to_an_accepted_front_cover_headline() {
+    let database = proof_database("material_cover_ocr_title_fallback").await;
+    let content_id = "note-cover-ocr-fallback";
+    let slot_key = format!("xhs:{content_id}:cover:1");
+    let observation_ref = Uuid::new_v4();
+    submit_package(
+        &database,
+        "content_detail",
+        serde_json::json!({"contentExternalId":content_id}),
+        serde_json::json!({
+            "kind":"content_detail",
+            "sourceObject":{"platform":"xhs","type":"content","externalId":content_id},
+            "payload":{"bodyText":"原始标题为空，不应由正文替代"}
+        }),
+    )
+    .await;
+    submit_package(
+        &database,
+        "media_slots",
+        serde_json::json!({"contentExternalId":content_id}),
+        serde_json::json!({
+            "kind":"media_slot",
+            "slotKey":slot_key,
+            "observationRef":observation_ref,
+            "slot":{"role":"cover","ordinal":1},
+            "observation":{"externalUri":"https://media.example/cover-ocr-fallback.jpg","candidateUris":["https://media.example/cover-ocr-fallback.jpg"],"observedAt":"2026-09-20T10:00:00Z"},
+            "sourceObject":{"platform":"xhs","type":"content","externalId":content_id}
+        }),
+    )
+    .await;
+    let blob_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    admit_media_blob(
+        &database,
+        observation_ref,
+        blob_sha256,
+        "image/jpeg",
+        4096,
+        "blobs/aa/cover-ocr-fallback",
+    )
+    .await
+    .expect("the local image produces an image_ocr job");
+    let (content_ref, job_ref): (Uuid, Uuid) = sqlx::query_as(
+        "SELECT content.public_ref,job.job_ref FROM linggan_material_content content \
+         JOIN linggan_media_slot slot ON slot.platform=content.platform AND slot.content_external_id=content.content_external_id \
+         JOIN linggan_media_processing_job job USING(slot_key) \
+         WHERE content.platform='xhs' AND content.content_external_id=$1 AND job.processor_kind='image_ocr'",
+    )
+    .bind(content_id)
+    .fetch_one(database.pool())
+    .await
+    .expect("the admitted cover has a current Paddle job");
+    let derivative_ref = Uuid::new_v4();
+    let layout_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_media_derivative(derivative_ref,job_ref,derivative_kind,content_hash,byte_size,storage_key) \
+         VALUES($1,$2,'ocr_text',$3,24,'derivatives/ocr-raw/fallback/raw.txt')",
+    )
+    .bind(derivative_ref)
+    .bind(job_ref)
+    .bind("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+    .execute(database.pool())
+    .await
+    .expect("the raw OCR derivative is appendable");
+    sqlx::query(
+        "INSERT INTO linggan_media_ocr_layout(layout_ref,ocr_derivative_ref,content_public_ref,blob_sha256,engine,engine_version,image_width,image_height,layout_content_hash,layout_byte_size,layout_storage_key) \
+         VALUES($1,$2,$3,$4,'paddleocr','paddle-test',1080,1440,$5,20,'derivatives/ocr-layout/fallback/layout.json')",
+    )
+    .bind(layout_ref)
+    .bind(derivative_ref)
+    .bind(content_ref)
+    .bind(blob_sha256)
+    .bind("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+    .execute(database.pool())
+    .await
+    .expect("the layout is appendable");
+    sqlx::query(
+        "INSERT INTO linggan_media_ocr_layering_result(layering_ref,layout_ref,layer_version,state,decision_source,cover_headline,image_substantive_text,retained_line_refs,excluded_lines) \
+         VALUES($1,$2,'rules-v1','ACCEPTED','rules','封面里的作者标题',NULL,'[]'::jsonb,'[]'::jsonb)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(layout_ref)
+    .execute(database.pool())
+    .await
+    .expect("the accepted cover headline is appendable");
+
+    let item = read_work_resource(&database, content_ref)
+        .await
+        .expect("the shared read projection succeeds")
+        .expect("the work remains readable");
+    assert_eq!(item.display.title.as_deref(), Some("封面里的作者标题"));
+    assert_eq!(item.display.title_state, "KNOWN");
+    assert_eq!(item.display.title_source, "cover_ocr");
+    assert_eq!(item.display.title_media_display_ordinal, None);
+    assert_eq!(
+        item.inspector.pointer("/displayTitle/source"),
+        Some(&serde_json::json!("cover_ocr")),
+        "the fallback is disclosed instead of being presented as a platform field"
+    );
+}
 
 #[tokio::test]
 #[ignore = "requires the isolated PostgreSQL 16 proof harness"]

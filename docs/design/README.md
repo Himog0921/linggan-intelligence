@@ -68,6 +68,7 @@
 | [patterns/evidence-candidate-and-boundary-patterns.md](patterns/evidence-candidate-and-boundary-patterns.md) | PAT-001–PAT-004：观察、候选、来源限制与无副作用意图的表达模式 | 权威当前 |
 | [components/component-promotion.md](components/component-promotion.md) | Reference Page 局部块如何经第二页面验证后才可晋升为 CMP | 权威当前 |
 | [pages/evidence-library-page.md](pages/evidence-library-page.md) | PAGE-EVIDENCE-001：Evidence Library 多材料产品手册、技术呈现要求、表面地图、状态与回执合同 | 权威当前；运行页已按现行 Material Projection 落地，真实垂直证明未完成 |
+| [changes/ocr-content-layering-001-ui-change-manifest.md](changes/ocr-content-layering-001-ui-change-manifest.md) | Evidence Library 平台标题为空时的封面 OCR 补位、来源徽章与 Inspector 读取边界 | 活跃计划；Issue #296 |
 | [pages/evidence-library-multi-material-reference.html](pages/evidence-library-multi-material-reference.html) | EVIDENCE-PAGE-002：多材料 Evidence Library 合成静态高保真参考；不连接运行时或真实材料 | 权威当前；静态参考 |
 | [pages/collection-workspace-page.md](pages/collection-workspace-page.md) | PAGE-COLLECTION-001：Collection 五个子面的职责、状态、事实边界与验收规则 | 权威当前 |
 | [pages/collection-operations-html-prototype-brief.md](pages/collection-operations-html-prototype-brief.md) | COLLECTION-HTML-BRIEF-001：外部模型可直接使用的自包含静态原型委托书 | 权威当前；不是运行实现 |
