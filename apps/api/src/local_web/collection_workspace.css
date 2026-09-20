@@ -1334,8 +1334,8 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 .c-runtime .c-sect-meta{color:var(--lgi-muted);font-size:var(--lgi-text-label)}
 
 /* 工位表：十列单行。列宽权威仍住在 target_drawer.css，这里只管单元格表达。 */
-.c-stn-row{min-height:calc(var(--c-cell) * 7);padding-top:var(--lgi-space-2);padding-bottom:var(--lgi-space-2);cursor:default}
-.c-stn-row:hover{background:var(--lgi-canvas-sunken)}
+.c-tg-item.c-stn-row{min-height:calc(var(--c-cell) * 7);padding-top:var(--lgi-space-2);padding-bottom:var(--lgi-space-2);cursor:default}
+.c-tg-item.c-stn-row:hover{background:var(--lgi-canvas-sunken)}
 .c-stn-name-cell{display:flex;align-items:center;gap:var(--lgi-space-2);min-width:0}
 .c-stn-name-label{max-width:100%;font-size:var(--lgi-text-body);font-weight:700}
 .c-stn-edit{width:calc(var(--c-cell) * 3);height:calc(var(--c-cell) * 3);display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;padding:0;border:0;background:transparent;color:var(--lgi-muted);cursor:pointer}
