@@ -81,6 +81,8 @@ const eligibilityLabel = {
 const resolutionLabel = {
   pending: '待归并判断', assigned: '已归入用户问题', deferred_context: '语境不足，继续等待',
   deferred_ambiguous: '存在多个可能匹配，继续等待', deferred_novel: '独立新证据，等待第二条佐证',
+  retrieval_incomplete: '候选目录未查全，当前不能判定是否为新问题',
+  budget_stopped: '归并预算已到上限，当前未完成判断',
   not_user_problem: '判定不构成用户问题', protocol_rejected: '模型输出不合规，已拒绝', failed: '归并判断失败'
 };
 const signalKindLabel = {
@@ -91,7 +93,7 @@ const problemStateLabel = { active: '生效中', retired: '已停用' };
 const contextStateLabel = { ready: '语境完整', partial: '语境部分（有截断）', missing: '缺少语境' };
 const sourceStateLabel = { known: null, restricted: '来源已被限制，原文不再显示', unknown: '原文未知（来源未采集到正文）' };
 const label = (map, value) => (value == null ? null : (map[value] ?? value));
-const PENDING_RESOLUTION_STATES = new Set(['pending', 'deferred_context', 'deferred_ambiguous', 'deferred_novel']);
+const PENDING_RESOLUTION_STATES = new Set(['pending', 'deferred_context', 'deferred_ambiguous', 'deferred_novel', 'retrieval_incomplete', 'budget_stopped']);
 
 let allRuns = [];
 let activeView = 'overview';

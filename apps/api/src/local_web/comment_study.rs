@@ -532,11 +532,20 @@ mod tests {
     fn comment_study_script_filters_pending_signals_by_resolution_state_not_by_kind() {
         let script = include_str!("comment_study.js");
         assert!(script.contains(
-            "const PENDING_RESOLUTION_STATES = new Set(['pending', 'deferred_context', 'deferred_ambiguous', 'deferred_novel']);"
+            "const PENDING_RESOLUTION_STATES = new Set(['pending', 'deferred_context', 'deferred_ambiguous', 'deferred_novel', 'retrieval_incomplete', 'budget_stopped']);"
         ));
         assert!(script.contains(
             "signal.resolutionState == null || PENDING_RESOLUTION_STATES.has(signal.resolutionState)"
         ));
+    }
+
+    #[test]
+    fn comment_study_script_explains_incomplete_resolution_states_in_chinese() {
+        let script = include_str!("comment_study.js");
+        assert!(
+            script.contains("retrieval_incomplete: '候选目录未查全，当前不能判定是否为新问题'")
+        );
+        assert!(script.contains("budget_stopped: '归并预算已到上限，当前未完成判断'"));
     }
 
     #[test]

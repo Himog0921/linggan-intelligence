@@ -74,13 +74,25 @@
 
 完成 source context provenance 的合成回归，而未修改 worker、schema 或 migration。`StudyContextSnapshot` 现在保留非 OCR 派生语境；对 OCR，只读取同一 derivative 最新、未退役、未撤回且 `ACCEPTED` 的非空 `image_substantive_text`，不再把 raw `ocr_text`、`PARTIAL` 或旧 accepted layer 当作模型语境。隔离 fixture 直接覆盖 accepted、latest partial 覆盖旧 accepted、retired、withdrawn 与同 slot 重观测，因而这些条件可由 41 条 PostgreSQL proof 中的对应断言证伪。
 
-这只完成 C 的无真实数据部分；D（状态 API/UI 回归）与 E（真实样本/模型授权申请包）仍未开始。
+这只完成 C 的无真实数据部分；D 已进入受控的 UI 状态投影回归准备，E（真实样本/模型授权申请包）仍未开始。
+
+### D 的 UI 变更清单（实施前，2026-09-20）
+
+**事项与目标。** Issue #316；worktree `comment-study-p3-quality-gate-010`。目标是在既有 `/corpus/comments` 的 L1 Corpus Explorer 中，让 `retrieval_incomplete` 与 `budget_stopped` 两个既存归并结果以中文独立表达，并保留在既有“待归并”工作面。用户由此能看出“尚未完成判断”，而不会把它误读成无匹配或新问题。非目标：新增状态、API/数据库字段、权限、按钮、路由、真实运行、评论或模型访问，以及任何 Token、Primitive、CMP、Scene、Motion 改动。
+
+**读取回执。** 已读取 `AGENTS.md`、`docs/current-state.md`、`docs/agents/ui-execution-contract.md`、`docs/design/README.md`、`docs/design/lids/README.md` 与 `agent-execution-guide.md`；页面规格 `PAGE-COMMENT-STUDY-REBUILD-001`；`LIDS-LANG-001`、`LIDS-BOUND-001`；以及当前 API/UI 代码和 `comment-study-001.sql`。它们共同要求 L1 只读投影、中文独立承载状态含义、PARTIAL/未知不得隐藏或降格为失败，并禁止以 UI 改写数据语义。
+
+**分类与依据。** 分类为“展示 + 状态语义”；最高风险是把目录未查全或预算中止降格为“没有匹配”。依据是质量协议第 2 节可见性、PAGE 的 `DEFERRED`/`PARTIAL` 约束，以及 `comment_study_recall.rs` 的不完整召回合同。无需 `DECISION_REQUIRED`：两个数据库字面状态、现有“待归并”页面和其只读职责均已存在。页面为 L1，唯一 Pattern 为 Corpus Explorer；不触及 Token、Primitive、CMP、Scene、Motion，仅修正 Data Truth 的文字投影。
+
+**Surface map 与状态字典。** 受影响面仅为 `/corpus/comments`：概览的“归并判断结果”、目标表 Signal 状态、Signal 卡片和既有“待归并”列表。`retrieval_incomplete` 的中文为“候选目录未查全，当前不能判定是否为新问题”：它不等于无匹配，也不等于已建题。`budget_stopped` 的中文为“归并预算已到上限，当前未完成判断”：它不等于无匹配，也不等于模型判断失败。二者均加入既有待归并过滤集合；其余状态、后端字面值与状态迁移一律不变。
+
+**依赖与验收矩阵。** `comment-study-001.sql` 是状态闭集来源；`comment_study_recall.rs` 是 `retrieval_incomplete` 的语义来源；本地 API 投影与 `comment_study.js` 只负责展示。静态 API 回归须证明两个中文标签存在、待归并集合包含二者且仍按 `resolutionState` 筛选；`cargo test -p linggan-api --bin linggan-api --locked`、格式、diff 与治理检查须通过。因为本包不启动 runtime 或浏览器，真实页面渲染、响应式/键盘走查与业务验收均为 `NOT VERIFIED`；不会用静态字符串测试冒充这些证据。停止条件：发现需新增状态/API/动作、须改 CSS/Token 或真实数据/运行时才可解释时，停止并回报 Mog。
 
 ## 文件与交付边界
 
 - 本包 exclusive：本文件、`crates/intelligence/src/comment_study_{canonical,embedding,recall,candidate_recall,comparison_cache,problem_resolution,problem_store,resolution_worker,read,source}.rs`、`crates/intelligence/src/{model_runner,pi_adapter,lib}.rs`、`crates/intelligence/tests/comment_study_rebuild_postgres.rs` 及其 P3 测试支持脚本、`apps/api/src/local_web/comment_study.rs`、`apps/pi-adapter/src/wemm_runtime.py`、`database/bootstrap/comment-study-001.sql` 和配套 reset。它们由 Issue #316 的 [原 Claim](https://github.com/Himog0921/linggan-intelligence/issues/316#issuecomment-5749282350)、[revision-read 更正](https://github.com/Himog0921/linggan-intelligence/issues/316#issuecomment-5749395396) 及 [OCR context amendment](https://github.com/Himog0921/linggan-intelligence/issues/316#issuecomment-5749506006) 明确列入；均仅限本地代码与隔离 fixture。
 - 本包 shared：`docs/README.md`、`docs/current-state.md`、`docs/progress/2026-09.md`，仅作索引与有界状态记录。
-- 本包 forbidden：`database/migrations/**`、`apps/worker/**`、`apps/api/src/local_web/comment_study.js`、P4/P5 领域实现、所有 runtime/deployment 配置。经 Issue #316 Claim amendment 明确列出的 P3 bootstrap、Pi adapter 与 local API 文件是本包 exclusive，而非对真实运行的授权。
+- 本包 forbidden：`database/migrations/**`、`apps/worker/**`、P4/P5 领域实现、所有 runtime/deployment 配置。`apps/api/src/local_web/comment_study.js` 由 [D 项 Claim amendment](https://github.com/Himog0921/linggan-intelligence/issues/316#issuecomment-5749597843) 列为 exclusive，但仅限既有状态的中文投影与待归并可见性回归；这不构成对真实运行的授权。
 
 本包结束时分别报告：协议/设计、代码、自动检查、真实链路、部署、Mog 业务验收。后一四层如未发生，必须写为 `NOT VERIFIED` 或 `N/A`，不得以 rebase 或合成测试替代。
 

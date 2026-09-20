@@ -1,10 +1,17 @@
 # LIDS-LOG-001 · LIDS 迁移与变更记录
 
 > 状态: 权威当前
-> 最后核对: 2026-09-15
+> 最后核对: 2026-09-20
 > 适用范围: Linggan Intelligence LIDS Token、Primitive、Component、Pattern、Page、Motion、Scene 和 Data Truth 规则的实际变更、替代、例外与验证边界
 > 事实来源: [system.md](system.md)、[README.md](README.md)、DESIGN-002 Issue #7、项目 progress 记录和实际验证输出
 > 冲突时以谁为准: 真实代码/合同/测试、用户最新确认、当前 SCOPE 和 ACCEPTED 决策；本日志不把计划写成已实现事实
+
+## 2026-09-20 · COMMENT-STUDY-P3-QUALITY-GATE-010 未完成归并状态投影
+
+- **范围**：既有 `/corpus/comments` 的 L1 Corpus Explorer 只读投影；不新增页面、路由、动作、状态、API/数据字段、Token、Primitive、CMP、Scene 或 Motion。
+- **表达**：`retrieval_incomplete` 显示“候选目录未查全，当前不能判定是否为新问题”；`budget_stopped` 显示“归并预算已到上限，当前未完成判断”。二者均保留在既有“待归并”列表，而不是显示裸机器码、消失或被写成无匹配。
+- **Data Truth**：两个字面状态和其迁移不由 UI 改写。前者表示候选目录未完整可查，后者表示当前比较预算已停止；它们均不证明没有匹配、没有新问题或模型失败。
+- **验证与边界**：JS syntax、API 静态回归、format、diff 与治理检查覆盖中文标签和待归并过滤集合；本包未启动 runtime 或浏览器，因此真实渲染、响应式/键盘走查与 Mog 验收为 `NOT VERIFIED`。
 
 ## 2026-09-20 · OCR-CONTENT-LAYERING-001 Evidence Library 图片文字分层
 
