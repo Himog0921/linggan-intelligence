@@ -329,7 +329,7 @@ fn verdict_markup(
     lanes: Option<&Vec<LaneRow>>,
 ) -> String {
     let Some(rows) = lanes else {
-        return r#"<section class="c-runtime-board c-runtime-board-unknown">
+        return r#"<section class="c-runtime-board c-runtime-board-unknown c-verdict-unknown">
               <div class="c-runtime-board-head">
                 <span class="c-instr-badge">读不到</span>
                 <strong class="c-runtime-board-state">运行状态读不到</strong>
