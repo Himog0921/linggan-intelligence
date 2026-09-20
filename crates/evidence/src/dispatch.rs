@@ -144,6 +144,7 @@ pub enum DispatchFailureCode {
     PageReadFailed,
     DetailPageSessionGrantUnavailable,
     DetailPageSessionRecoveryRequired,
+    CaptureDeliveryRejected,
     AccountObservationBlocked,
 }
 
@@ -164,6 +165,7 @@ impl DispatchFailureCode {
             "detail_page_session_recovery_required" => {
                 Some(Self::DetailPageSessionRecoveryRequired)
             }
+            "capture_delivery_rejected" => Some(Self::CaptureDeliveryRejected),
             "account_observation_blocked" => Some(Self::AccountObservationBlocked),
             _ => None,
         }
@@ -181,6 +183,7 @@ impl DispatchFailureCode {
             Self::PageReadFailed => "page_read_failed",
             Self::DetailPageSessionGrantUnavailable => "detail_page_session_grant_unavailable",
             Self::DetailPageSessionRecoveryRequired => "detail_page_session_recovery_required",
+            Self::CaptureDeliveryRejected => "capture_delivery_rejected",
             Self::AccountObservationBlocked => "account_observation_blocked",
         }
     }
@@ -925,10 +928,41 @@ pub async fn requeue_failed_dispatch(
     .bind(installation_ref)
     .fetch_optional(&mut *transaction)
     .await?;
-    let Some((_task_id, lease_ref, work_order_ref, capability, content_external_id)) = requeued
+    let Some((current_task_id, lease_ref, work_order_ref, capability, content_external_id)) =
+        requeued
     else {
         return Err(DispatchFailureError::ClaimNotHeld);
     };
+    if failure_code == DispatchFailureCode::CaptureDeliveryRejected {
+        // A Package rejection is terminal for this one immutable task, but is
+        // not evidence that the shared page cache is bad. Keep its separately
+        // approved lanes eligible so already-read facts can still be delivered
+        // without a second page visit.
+        let terminalized = sqlx::query(
+            "UPDATE collection_work_order_lease_task \
+             SET execution_state='unavailable',claimed_at=NULL,claimed_by_installation_ref=NULL \
+             WHERE task_id=$1 AND execution_state='pending'",
+        )
+        .bind(current_task_id)
+        .execute(&mut *transaction)
+        .await?;
+        if terminalized.rows_affected() != 1 {
+            return Err(DispatchFailureError::ClaimNotHeld);
+        }
+        record_terminal_dispatch_failure_in_transaction(
+            &mut transaction,
+            failure_ref,
+            task_id,
+            installation_ref,
+            lease_ref,
+            work_order_ref,
+            failure_code.as_str(),
+            "unavailable",
+        )
+        .await?;
+        transaction.commit().await?;
+        return Ok(DispatchFailureOutcome::Unavailable);
+    }
     let terminal_disposition = match (failure_code, content_external_id.as_deref()) {
         (DispatchFailureCode::PageUnavailable, Some(content_external_id))
         | (DispatchFailureCode::DetailPageSessionRecoveryRequired, Some(content_external_id)) => {

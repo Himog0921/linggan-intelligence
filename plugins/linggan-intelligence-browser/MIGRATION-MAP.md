@@ -80,6 +80,7 @@
 | 首单观察启动与身份摘要诊断（0.8.47） | 新 installation 没有 observation 或人工 binding 时，可在其余服务端准入已满足后领取一项任务；`bindingRequired` 仅提示人工确认，`bindingMismatch` 才停止已领取任务；health 缺少身份摘要键时返回无秘密诊断 | 不为账号资格扫描标签、打开/刷新/滚动/点击页面或调用平台接口；不生成、记录或显示身份摘要键；明确登录/限制/冷却与已绑定账号变化仍由服务端阻断 |
 | 详情授权恢复与风控冷却（0.8.51） | grant 申请失败作为无导航的可重试 dispatch failure 回队；本地许可必须从 `prepared` 获服务端接受后才可原子消费。已领取页面出现明确平台风控层时，插件只上传闭集风险信号并停止该任务；服务端在同一 installation 的 30 分钟窗口内收到第二个独立信号后暂停该 installation 接单 12 小时 | 不把 `prepared` 当作已开页，不因授权超时重开详情，不储存原始页面文字/截图，不用标题或评论中的“风控”文字触发，不暂停其他 installation，也不由插件自行恢复接单 |
 | 单一 Linggan 执行链与冻结 lane 收口（0.8.52） | 物理移除旧 Workbench 控制面、旧远程内容处理器、旧同步表、旧入口及其测试；当前插件只经 `src/linggan/background.js` 派发和交付。已消费详情许可但无法复用同页数据、窗口不明或页面未就绪时，追加 `detail_page_session_recovery_required`，服务端把同一冻结内容的详情/评论/回复/媒体 lane 统一结束为 `unavailable` | 不从缓存缺失、服务重启或任务重放推断可以再开详情页；不以 `success: true` 掩盖未采集；不删已接纳 Evidence、Package、Receipt 或历史迁移。 |
+| 采集包拒绝的单 lane 收口（0.8.53） | 详情缓存把页面 collector 的 epoch 毫秒观察时间规范为 RFC3339；若服务端仍明确拒绝一个 scheduled immutable Package，本地 durable outbox 以其 submission UUID 幂等回报 `capture_delivery_rejected`，服务端仅结束该 Task | 不把采集包拒绝解释为页面或同页缓存失效；不重试该 Package、不重开页面、不连坐取消其它已批准 lane；旧 Workbench 或第二投递协议不会复活。 |
 
 ## 新旧运行路径对照
 

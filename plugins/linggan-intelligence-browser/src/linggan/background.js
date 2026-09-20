@@ -49,6 +49,7 @@ import {
 } from './installationCredentialStore.js';
 
 const PRODUCER_INSTANCE_KEY = 'linggan.localTrusted.producerInstanceId';
+const CAPTURE_DELIVERY_REJECTED = 'capture_delivery_rejected';
 let flushingOutbox = null;
 let creatingMediaWorker = null;
 
@@ -71,6 +72,8 @@ export async function flushLocalOutboxOnce({
   readReadiness = readLingganLocalReadiness,
   post = localPost,
   flushMedia = flushMediaOutbox,
+  readCredential = installationCredentialFor,
+  reportDispatchFailure = reportLingganDispatchFailure,
 } = {}) {
   const readiness = await readReadiness();
   const producerRoutes = readiness?.deliveryReady === true ? readiness.producerRoutes : null;
@@ -109,7 +112,13 @@ export async function flushLocalOutboxOnce({
       if (submitted.ok && ['acknowledged', 'replay'].includes(submitted.payload.delivery)) {
         await outbox.acknowledge(entry.submissionId, submitted.payload);
       } else if (submitted.status >= 400 && submitted.status < 500) {
-        await outbox.terminal(entry.submissionId, submitted.payload.code);
+        // Only the capture-contract rejection proves this immutable Package
+        // cannot be accepted. Claim/attempt conflicts have their own server
+        // meaning and must not be misreported as a failed page delivery.
+        const dispatchFailureCode = submitted.payload.code === 'submission_invalid'
+          ? CAPTURE_DELIVERY_REJECTED
+          : '';
+        await outbox.terminal(entry.submissionId, submitted.payload.code, { dispatchFailureCode });
       } else {
         await outbox.retry(entry.submissionId, submitted.payload.code || 'submission_not_acknowledged');
       }
@@ -117,11 +126,36 @@ export async function flushLocalOutboxOnce({
       await outbox.retry(entry.submissionId, error?.message || error);
     }
   }
+  await reportTerminalDeliveryFailures({
+    outbox, readiness, readCredential, reportDispatchFailure,
+  });
   await flushMedia();
   return {
     pending: await outbox.pendingCount(),
     mediaPending: await mediaOutbox.pendingCount(),
   };
+}
+
+async function reportTerminalDeliveryFailures({
+  outbox, readiness, readCredential, reportDispatchFailure,
+} = {}) {
+  if (!readiness?.health || typeof outbox?.terminalDispatchFailures !== 'function') return;
+  const terminalEntries = await outbox.terminalDispatchFailures({ limit: 5 });
+  for (const entry of terminalEntries) {
+    const installationCredential = await readCredential(entry.producerInstanceId);
+    if (!installationCredential) continue;
+    const reported = await reportDispatchFailure({
+      installKey: entry.producerInstanceId,
+      installationCredential,
+      taskId: entry.taskId,
+      failureId: entry.dispatchFailureId,
+      failureCode: entry.dispatchFailureCode,
+      health: readiness.health,
+    });
+    if (reported?.reported === true) {
+      await outbox.markTerminalDispatchFailureReported(entry.submissionId);
+    }
+  }
 }
 
 function flushLocalOutbox() {

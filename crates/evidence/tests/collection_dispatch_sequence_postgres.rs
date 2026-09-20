@@ -124,6 +124,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0091_ocr_content_layering.sql"),
     "\n",
     include_str!("../../../database/migrations/0092_detail_page_session_recovery_boundary.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0093_capture_delivery_rejection.sql"),
 );
 
 #[tokio::test]
@@ -1074,6 +1076,101 @@ async fn unavailable_detail_is_audited_without_blocking_later_materials() {
     .await
     .expect("a lost terminal acknowledgement remains idempotent");
     assert_eq!(replay, DispatchFailureOutcome::Unavailable);
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn rejected_capture_package_ends_only_its_lane_without_reopening_the_page() {
+    let database = proof_database_for("collection_dispatch_capture_delivery_rejected").await;
+    let fixture = seed_creator_work_order(&database).await;
+    let content_external_id = "delivery-rejected-note";
+    submit_profile_discovery(
+        &database,
+        content_external_id,
+        "https://www.xiaohongshu.com/explore/delivery-rejected-note?xsec_token=SIGNED_FIXTURE&xsec_source=pc_user",
+    )
+    .await;
+    let content_public_ref: Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content WHERE platform='xhs' AND content_external_id=$1",
+    )
+    .bind(content_external_id)
+    .fetch_one(database.pool())
+    .await
+    .expect("accepted discovery creates the frozen material identity");
+    sqlx::query(
+        "INSERT INTO collection_work_order_material_target \
+             (work_order_ref,content_public_ref,ordinal,comment_limit,reply_expand_limit,acquire_media) \
+         VALUES ($1,$2,1,30,2,true)",
+    )
+    .bind(fixture.work_order_ref)
+    .bind(content_public_ref)
+    .execute(database.pool())
+    .await
+    .expect("the work order freezes every approved detail lane");
+    issue_work_order_lease(&database, fixture.work_order_ref, 60)
+        .await
+        .expect("a deepening lease is issued");
+    let first = decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("the page-owning detail task is claimed");
+    let first_task_id = task_id(&first);
+    assert_eq!(
+        task_from_dispatch(&first).raw()["capabilitiesRequested"][0],
+        "content_detail"
+    );
+    assert_eq!(
+        requeue_failed_dispatch(
+            &database,
+            &fixture.install_key,
+            &fixture.installation_credential,
+            first_task_id,
+            Uuid::new_v4(),
+            DispatchFailureCode::CaptureDeliveryRejected,
+        )
+        .await
+        .expect("a rejected immutable package is terminal for its task"),
+        DispatchFailureOutcome::Unavailable
+    );
+    let states: Vec<(String, String)> = sqlx::query_as(
+        "SELECT runtime.task_spec #>> '{capabilitiesRequested,0}',task.execution_state \
+         FROM collection_work_order_lease_task task \
+         JOIN linggan_runtime_task runtime USING(task_id) \
+         WHERE task.lease_ref=(SELECT lease_ref FROM collection_work_order_lease \
+                               WHERE work_order_ref=$1 ORDER BY issued_at DESC LIMIT 1) \
+         ORDER BY runtime.task_spec #>> '{capabilitiesRequested,0}'",
+    )
+    .bind(fixture.work_order_ref)
+    .fetch_all(database.pool())
+    .await
+    .expect("every lane state remains auditable");
+    assert_eq!(
+        states
+            .iter()
+            .filter(|(_, state)| state == "unavailable")
+            .count(),
+        1,
+        "only the rejected package lane closes"
+    );
+    assert_eq!(
+        states
+            .iter()
+            .filter(|(_, state)| state == "pending")
+            .count(),
+        3,
+        "other cached lanes remain deliverable without another page read"
+    );
+    let next = decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("the next approved lane can use the retained page session");
+    assert_ne!(task_id(&next), first_task_id);
 }
 
 #[tokio::test]
