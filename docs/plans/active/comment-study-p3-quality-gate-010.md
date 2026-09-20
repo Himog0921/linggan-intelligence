@@ -88,7 +88,7 @@
 
 **依赖与验收矩阵。** `comment-study-001.sql` 是状态闭集来源；`comment_study_recall.rs` 是 `retrieval_incomplete` 的语义来源；本地 API 投影与 `comment_study.js` 只负责展示。静态 API 回归须证明两个中文标签存在、待归并集合包含二者且仍按 `resolutionState` 筛选；`cargo test -p linggan-api --bin linggan-api --locked`、格式、diff 与治理检查须通过。因为本包不启动 runtime 或浏览器，真实页面渲染、响应式/键盘走查与业务验收均为 `NOT VERIFIED`；不会用静态字符串测试冒充这些证据。停止条件：发现需新增状态/API/动作、须改 CSS/Token 或真实数据/运行时才可解释时，停止并回报 Mog。
 
-### E 的 P3 出口证据包（授权申请；不执行）
+### E 的 P3 出口证据包（执行中；真实样本冻结完成）
 
 **收口方式。** A–D 形成的本地代码和合成契约在 `75ca02f` 冻结为 P3 的候选实现基线。后续不再把发现逐项开成修复卡：一旦真实验证发现缺陷，只记录到同一份“P3 出口缺陷清单”，由 Mog 决定是否以一个收口修复包处理。该阶段包只在全部证据齐备后才给出“P3 出口可裁定/不可裁定”的结论；它绝不以单个测试、模型 HTTP 成功或局部指标替代阶段结论。
 
@@ -113,7 +113,12 @@
 
 **代码质量与审查边界。** 这份阶段包不预设新增抽象、框架、迁移或 UI。若真实验证需要修复，优先在既有 P3 模块中做最小直接改动，并以缺陷所对应的可证伪回归为准；若需要跨 P3 边界，则停止并单列决定。实现过程只运行针对性自动检查、格式和 diff 完整性检查；**不由本 agent 发起独立代码审查、也不把自查或测试称为代码审查**。代码审查的推进、结论和是否接受由 Mog 负责。
 
-**当前状态。** 本节只建立申请包，未创建真实样本、未读取/导出评论、未运行标注、未启动模型或 Pi adapter、未写任何数据库、未启动 runtime/browser，也未设定通过阈值。E 仍是 `DECISION_REQUIRED`。
+**2026-09-20 执行回执。** Mog 已在当前对话授权按本节落地，并在 Issue #316 以 [执行 Claim amendment](https://github.com/Himog0921/linggan-intelligence/issues/316#issuecomment-5750349975) 留痕。先完成的不是结论，而是两个前置事实：
+
+- 本地 `Tencent/WeMM-Embedding-2B` 真实预检在 MPS 成功运行；固定 revision `bbd6cd4bf52cfc6716f752a2df80b2706720bd95`、document/512 维、`torch 2.8.0`、`sentence-transformers 6.0.1`。合成单句冷启动 10,962ms、编码 1,173ms、MPS driver 峰值 6,019,661,824 bytes。这只证明单进程模型可运行，不证明 Rust 接线、真实样本语义、Recall@K 或 P3 通过。
+- 共享开发库只读资格核对显示当前 ADHD domain 有 1,085 条未限制、KNOWN 正文且作者身份已知的候选评论，来自 63 篇作品；没有读取结果正文到终端。按每作品首条优先、其后以稳定 hash 排序的规则，冻结了 100 条到 FileVault 已开启机器上的 ignored `artifacts/private/comment-study-p3-exit-20260920/source-selection.ndjson`。目录/文件权限为 `700/600`，不包含平台评论 ID 或作者 ID，样本文件 SHA-256 为 `3c6d7a703854918dbd5c379e361a67559fa55b121462bd5fef8bdb0ef8577a3d`。共享库未写入，未启动 runtime/worker，也没有运行外部模型。
+
+**当前阻塞。** 冻结样本不是 Gold Set。下一步的 Frame、同题/不同题、独立性与预期候选必须由 Mog 指定的独立人工标注者完成，并保留双人分歧与裁定；本 agent 不会用同一模型或自身对原文的判断构造“正确答案”后再评价 P3。标注完成前，离线 Recall@K、Rust→Pi adapter→WeMM→隔离 PostgreSQL 回放和 P3 出口裁定均不得开始；状态为 `BLOCKED_ON_HUMAN_ANNOTATION`，不等于验证失败。
 
 ## 文件与交付边界
 
