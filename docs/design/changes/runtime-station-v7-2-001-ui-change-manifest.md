@@ -469,3 +469,14 @@ Mog 在同一次走查里给的两条，附一张抽屉左缘的截图。这一�
 - **例外与替代**：本轮**不替代** `RUNTIME-STATION-TABLE-001` 的任何判定口径；那份清单的判定、四组不可互换区分与语言收敛全部继续有效，本轮只换表达层
 - **LIDS migration log / 预览同步**：见上
 - **PR / reviewer / integration owner**：待 Mog 指定；按仓库规则，收尾提交前跑一次 `commit-reviewer`，push 与部署由 Mog 决定
+
+### 5h. 最终收口（2026-09-20：单一运行看板、单行工位表与受控材料例外）
+
+Mog 最终确认以单一运行看板收口 `/collection/runtime`：旧控制条不再与看板重复表达；运行概览入口留在看板动作区，不恢复贴边标签；工位表冻结为十列单行，删除详情侧栏。此决定替代本清单中与其冲突的控制条／贴边标签／十一列表达，旧段只作为决策沿革保留。
+
+- **表面与交互**：看板只呈现可接活判定、通道原因、在线／执行／等待／重试／自动观察／并发读数和「新增工位／运行概览／观察目标」三个已有入口。工位更名仍由铅笔进入行内表单，接活仍复用既有 POST；停用、认领窗口、账号确认、能力与上次问活改由同一行的「管理」弹窗承载，不恢复 `<details>` 或侧栏，也不删除既有写动作。
+- **数据诚实**：「今天在跑什么」只列 `LiveLease.has_task=true` 的真实任务；只持有 Lease、尚未展开任务的记录不再被写成执行中。顶部读数与本节不互相替代。
+- **材料**：Mog 允许本页的量化 mask 与白底纹理，规则精确登记为 `M-02E`。深色表头右缘仍只占 35% 且以八段硬停止遮罩呈现；白底纹理只留在「暂停／恢复」真实动作的右缘，宽度为一个 `--lgi-space-2`。文字、状态色和边框仍承担信息，纹理不承担状态。
+- **依赖与非目标**：不改 RuntimeCapacityOverview、StationOverview、RuntimeResourceView、数据库、迁移、调度、准入、额度、账号资格或插件协议；所有 POST 的地址、字段和错误回执保持既有合同。
+- **验收补充**：自动测试必须证明一台工位仅有一条 `.c-stn-row`、所有低频动作仍可达、无任务 Lease 不进「今天在跑什么」、有任务 Lease 正确入列；浏览器验收须覆盖管理弹窗开合／Escape 焦点归还、行内更名、暂停／恢复的真实回执、1440px 两台工位的两行密度及 `M-02E` 的两处范围。
+- **已完成自动验证**：`cargo test -p linggan-api --bin linggan-api station_view --locked` 42/42、完整 `cargo test -p linggan-api --bin linggan-api --locked` 243 passed / 21 ignored、`cargo check -p linggan-api --locked`、`node --check apps/api/src/local_web/collection_workspace.js`、`verify-ui-design-handbook.sh`、`check-project-governance.sh origin/main` 与 `git diff --check` 均通过。`cargo fmt --check` 仍被未触及的既有文件阻断；本次 `station_view.rs` 已单独格式化，未把全仓基线格式化混入本包。真实 POST、浏览器验收与部署尚待合并后执行。

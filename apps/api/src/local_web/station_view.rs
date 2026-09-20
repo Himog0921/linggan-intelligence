@@ -26,8 +26,12 @@
 //! 速率与逐时序列。Mog 于同日裁定换成真读得到的四块（规则策略 / 近 7 天执行结果 /
 //! 补采与失败入口 / 积压与重试），稿中数值一个都不出现。
 
-use super::collection::collection_control_surface_view::{RuntimeLaneControlView, RuntimeResourceView};
-use super::collection_targets_view::{beijing_now_minutes, minutes_since_epoch, moment_without_year};
+use super::collection::collection_control_surface_view::{
+    RuntimeLaneControlView, RuntimeResourceView,
+};
+use super::collection_targets_view::{
+    beijing_now_minutes, minutes_since_epoch, moment_without_year,
+};
 use linggan_evidence::{
     CONTROL_FRESHNESS_MINUTES, CapabilityState, RuntimeCapacityOverview, StationCapability,
     StationOverview, UnclaimedInstallation,
@@ -233,10 +237,7 @@ fn verdict_state(rows: Option<&Vec<LaneRow>>) -> (&'static str, &'static str) {
 ///
 /// 四个读数与下方的接单仪器面、今日运行出**同一批数**：这里算一遍、那里算一遍，
 /// 迟早会算出两个数。
-fn deck_markup(
-    overview: Option<&RuntimeCapacityOverview>,
-    lanes: Option<&Vec<LaneRow>>,
-) -> String {
+fn deck_markup(overview: Option<&RuntimeCapacityOverview>, lanes: Option<&Vec<LaneRow>>) -> String {
     let (state, tone) = verdict_state(lanes);
     let staffed = overview.map_or_else(
         || "读不到".to_owned(),
@@ -304,7 +305,11 @@ fn deck_markup(
               </div>
             </section>"#,
         // 「实时」是一个关于新鲜度的说法，只有这一页真的从库里读到了才敢说。
-        badge = if overview.is_some() { "实时" } else { "读不到" },
+        badge = if overview.is_some() {
+            "实时"
+        } else {
+            "读不到"
+        },
     )
 }
 
@@ -377,14 +382,24 @@ fn verdict_markup(
     };
     let staffed = overview.map_or_else(
         || "读不到".to_owned(),
-        |overview| format!("{}/{}", overview.staffed_stations, overview.registered_stations),
+        |overview| {
+            format!(
+                "{}/{}",
+                overview.staffed_stations, overview.registered_stations
+            )
+        },
     );
     let running = backlog(|lane| lane.leased_work_orders);
     let queued = backlog(|lane| lane.queued_work_orders);
     let retrying = backlog(|lane| lane.retry_cooling_work_orders);
     let monitoring = overview.map_or_else(
         || "读不到".to_owned(),
-        |overview| format!("{}/{}", overview.patrol.monitoring_targets, overview.patrol.total_targets),
+        |overview| {
+            format!(
+                "{}/{}",
+                overview.patrol.monitoring_targets, overview.patrol.total_targets
+            )
+        },
     );
     let concurrency = overview
         .and_then(|overview| overview.platform_dispatch.first())
@@ -560,14 +575,12 @@ fn capacity_state(row: &LaneRow) -> &'static str {
 /// 原因码是数据合同里的字面取值，按 LANG-05 第 2 类可以作为中文旁边的小字保留；
 /// 它旁边永远有一句中文，不单独承担含义。
 fn reason_code_markup(row: &LaneRow) -> String {
-    row.reason_code
-        .as_deref()
-        .map_or_else(String::new, |code| {
-            format!(
-                r#"<code class="c-lane-code">{code}</code>"#,
-                code = escape(code)
-            )
-        })
+    row.reason_code.as_deref().map_or_else(String::new, |code| {
+        format!(
+            r#"<code class="c-lane-code">{code}</code>"#,
+            code = escape(code)
+        )
+    })
 }
 
 fn lane_markup(rows: &[LaneRow]) -> String {
@@ -744,15 +757,15 @@ fn station_entry(
     station: &StationOverview,
     capabilities: Option<&Vec<StationCapability>>,
     control: Option<&RuntimeResourceView>,
-    _account_observation_available: bool,
+    account_observation_available: bool,
     now_minutes: i64,
 ) -> String {
     let (state_label, state_tone) = station_state(station, now_minutes);
     let plugin = station.active_plugin_version.as_deref().unwrap_or("—");
-    let last_seen = station
-        .active_last_seen_at
-        .as_deref()
-        .map_or_else(|| "尚未报到".to_owned(), |at| moment_without_year(at).to_owned());
+    let last_seen = station.active_last_seen_at.as_deref().map_or_else(
+        || "尚未报到".to_owned(),
+        |at| moment_without_year(at).to_owned(),
+    );
 
     let quota = i64::from(station.daily_work_quota);
     let exhausted = station.daily_notes_used >= quota;
@@ -778,6 +791,14 @@ fn station_entry(
         .as_deref()
         .map_or_else(|| "—".to_owned(), |at| moment_without_year(at).to_owned());
     let caps = capability_counts(capabilities);
+    let management = station_management_dialog(
+        station,
+        control,
+        capabilities,
+        account_observation_available,
+        dispatch_label,
+        &dispatch_hint,
+    );
 
     format!(
         r#"<div class="c-tg-item c-tg-station-grid c-stn-row" role="row" data-station-entry="{station_ref}">
@@ -785,6 +806,7 @@ fn station_entry(
               <div class="c-tg-object c-stn-name-cell" role="cell">
                 <span class="c-tg-title c-stn-name-label">{name}</span>
                 <button class="c-stn-edit" type="button" data-station-name-edit aria-label="编辑 {name} 工位名称" title="编辑工位名称">✎</button>
+                <button class="c-stn-manage" type="button" data-station-manage-open aria-controls="station-manage-{station_ref}" aria-label="管理 {name} 工位">管理</button>
                 <form class="c-stn-name-form" method="post" action="/collection/runtime/stations/name" data-station-name-form hidden>
                   <input type="hidden" name="station_ref" value="{station_ref}" />
                   <input class="c-stn-name-input" name="display_name" required maxlength="60" value="{name}" aria-label="工位名称" />
@@ -805,7 +827,8 @@ fn station_entry(
               <div class="c-tg-cell" role="cell">{account}</div>
               <div class="c-tg-cell" role="cell">{caps}</div>
               <div class="c-tg-cell c-stn-recent" role="cell" title="{dispatch_title}">{dispatch} · {dispatch_at}</div>
-            </div>"#,
+            </div>
+            {management}"#,
         station_ref = station.station_ref,
         index = index + 1,
         name = escape(&station.display_name),
@@ -821,13 +844,11 @@ fn station_entry(
         dispatch = escape(dispatch_label),
         dispatch_at = escape(&dispatch_at),
         dispatch_title = escape(&format!("{dispatch_label} · {dispatch_hint}")),
+        management = management,
     )
 }
 
-fn accepting_inline_control(
-    control: Option<&RuntimeResourceView>,
-    station_ref: Uuid,
-) -> String {
+fn accepting_inline_control(control: Option<&RuntimeResourceView>, station_ref: Uuid) -> String {
     let Some(resource) = control else {
         return r#"<span class="c-tg-truth c-tg-neutral">读不到</span>"#.to_owned();
     };
@@ -914,33 +935,55 @@ fn account_binding_label(state: &str) -> (&'static str, &'static str) {
     }
 }
 
-/// 每台工位的四个真实动作。它们都只写本地记录，不访问任何平台。
-fn station_actions(station: &StationOverview) -> String {
+/// 详情侧栏被移除后，低频但已有的真实动作不能随之消失。
+///
+/// 这个弹窗不属于表格行：一台工位仍严格只渲染一行；它只给已有的停用、认领窗口、
+/// 账号确认和能力诊断一个可达的管理面，不新增写入合同或平台动作。
+fn station_management_dialog(
+    station: &StationOverview,
+    control: Option<&RuntimeResourceView>,
+    capabilities: Option<&Vec<StationCapability>>,
+    account_observation_available: bool,
+    dispatch_label: &str,
+    dispatch_hint: &str,
+) -> String {
     let window = if station.claim_window_open {
         "认领窗口开着：新装的插件会自动归到这台工位。"
     } else {
         "认领窗口已关：新装的插件会停在下面的待认领里等你指认。"
     };
     format!(
-        r#"<div class="c-stn-block">
-              <h3>这台工位</h3>
-              <form class="c-stn-form" method="post" action="/collection/runtime/stations/name" data-station-name-form>
-                <input type="hidden" name="station_ref" value="{station_ref}" />
-                <label for="station-name-{station_ref}">工位名称</label>
-                <input id="station-name-{station_ref}" name="display_name" required maxlength="60" value="{name}" />
-                <button class="c-btn-quiet" type="submit">更名</button>
-              </form>
-              <p class="c-stn-note">{window}</p>
-              {window_form}
-              <form class="c-stn-form" method="post" action="/collection/runtime/retire">
-                <input type="hidden" name="station_ref" value="{station_ref}" />
-                <button class="c-tg-act c-tg-act-danger" type="submit">停用这台工位</button>
-              </form>
-            </div>"#,
+        r#"<dialog class="c-stn-modal c-stn-manage-modal" id="station-manage-{station_ref}" data-station-manage-dialog aria-labelledby="station-manage-title-{station_ref}">
+              <header class="c-stn-modal-head">
+                <h3 id="station-manage-title-{station_ref}">管理 {name}</h3>
+                <button class="c-btn-quiet c-stn-modal-close" type="button" data-station-manage-close>关闭</button>
+              </header>
+              <div class="c-stn-manage-body">
+                <div class="c-stn-block">
+                  <h3>认领窗口</h3>
+                  <p class="c-stn-note">{window}</p>
+                  {window_form}
+                </div>
+                {account}
+                {capabilities}
+                {dispatch}
+                <div class="c-stn-block">
+                  <h3>停用</h3>
+                  <p class="c-stn-note">停用后，这台工位不会再自动领取任务。</p>
+                  <form class="c-stn-form" method="post" action="/collection/runtime/retire">
+                    <input type="hidden" name="station_ref" value="{station_ref}" />
+                    <button class="c-tg-act c-tg-act-danger" type="submit">停用这台工位</button>
+                  </form>
+                </div>
+              </div>
+            </dialog>"#,
         station_ref = station.station_ref,
         name = escape(&station.display_name),
         window = escape(window),
         window_form = claim_window_form(station),
+        account = account_panel(control, account_observation_available),
+        capabilities = capability_matrix_markup(capabilities),
+        dispatch = dispatch_panel(station, dispatch_label, dispatch_hint),
     )
 }
 
@@ -1017,10 +1060,10 @@ fn account_panel(
         .eligibility_reason_code
         .as_deref()
         .unwrap_or("account_unknown");
-    let observed = resource
-        .eligibility_observed_at
-        .as_deref()
-        .map_or_else(|| "从未观察过".to_owned(), |at| moment_without_year(at).to_owned());
+    let observed = resource.eligibility_observed_at.as_deref().map_or_else(
+        || "从未观察过".to_owned(),
+        |at| moment_without_year(at).to_owned(),
+    );
     let busy = if resource.account_has_live_lease {
         "这个账号已经有一份活在跑。"
     } else {
@@ -1467,37 +1510,26 @@ fn running_markup(overview: Option<&RuntimeCapacityOverview>) -> String {
     let Some(overview) = overview else {
         return String::new();
     };
-    let running = if overview.dispatch_backlog.is_empty() {
-        "—".to_owned()
-    } else {
-        overview
-            .dispatch_backlog
-            .iter()
-            .map(|lane| lane.leased_work_orders)
-            .sum::<i64>()
-            .to_string()
-    };
+    let live_tasks: Vec<_> = overview
+        .live_leases
+        .iter()
+        .filter(|lease| lease.has_task)
+        .collect();
+    let running = live_tasks.len();
 
-    let live = if overview.live_leases.is_empty() {
+    let live = if live_tasks.is_empty() {
         r#"<p class="c-stn-empty">当前没有正在执行的任务。</p>"#.to_owned()
     } else {
-        overview
-            .live_leases
+        live_tasks
             .iter()
             .map(|lease| {
-                let stage = if lease.has_task {
-                    "已展开成任务"
-                } else {
-                    "只是许可，还没展开成任务"
-                };
                 format!(
                     r#"<div class="c-run-row">
                         <div class="c-run-name"><b>{target}</b><span>{station}</span></div>
-                        <div class="c-run-meta"><span>{stage}</span><span>开始 {started}</span><span>预计 {units} 单元</span><span>到期 {expires}</span></div>
+                        <div class="c-run-meta"><span>已展开成任务</span><span>开始 {started}</span><span>预计 {units} 单元</span><span>到期 {expires}</span></div>
                       </div>"#,
                     target = escape(&lease.target_label),
                     station = escape(&lease.station_name),
-                    stage = escape(stage),
                     started = escape(moment_without_year(&lease.started_at)),
                     units = lease.estimated_work_units,
                     expires = escape(moment_without_year(&lease.expires_at)),
@@ -1831,7 +1863,8 @@ fn drawer_results_markup(
     capabilities: &CapabilityMatrix,
     stations: Option<&[StationOverview]>,
 ) -> String {
-    let (mut read, mut picked, mut capability_failures, mut execution_failures) = (0usize, 0i64, 0i64, 0i64);
+    let (mut read, mut picked, mut capability_failures, mut execution_failures) =
+        (0usize, 0i64, 0i64, 0i64);
     for rows in capabilities.values() {
         read += 1;
         for row in rows {
@@ -2089,14 +2122,22 @@ mod tests {
         }
     }
 
-    fn control_lane(label: &'static str, lane: &'static str, available: bool) -> RuntimeLaneControlView {
+    fn control_lane(
+        label: &'static str,
+        lane: &'static str,
+        available: bool,
+    ) -> RuntimeLaneControlView {
         RuntimeLaneControlView {
             label,
             target_kind: "creator",
             lane,
             queueable: false,
             available,
-            reason_code: if available { None } else { Some("account_needs_login") },
+            reason_code: if available {
+                None
+            } else {
+                Some("account_needs_login")
+            },
             reason: if available {
                 None
             } else {
@@ -2147,7 +2188,6 @@ mod tests {
         assert!(!html.contains("c-stn-more"));
     }
 
-
     /// 改写前同一台机器的事实散在三处，人得滚三个地方来回对照。
     #[test]
     fn one_station_is_one_dense_row_with_inline_controls() {
@@ -2185,6 +2225,8 @@ mod tests {
         }
         assert!(html.contains("/collection/runtime/stations/name"));
         assert!(html.contains("/collection/runtime/accepting"));
+        assert!(html.contains("data-station-manage-open"));
+        assert!(html.contains("data-station-manage-dialog"));
         assert!(!html.contains("换过 3 次插件"));
     }
 
@@ -2209,6 +2251,9 @@ mod tests {
         assert!(html.contains("c-stn-row"));
         assert!(html.contains("data-station-name-edit"));
         assert!(html.contains("data-station-accepting-form"));
+        assert!(html.contains("/collection/runtime/retire"));
+        assert!(html.contains("/collection/runtime/claim-window"));
+        assert!(html.contains("/collection/runtime/account-bindings"));
         assert!(!html.contains("c-stn-panel"));
         assert!(!html.contains("<summary class=\"c-tg-item c-tg-station-grid\""));
     }
@@ -2454,7 +2499,7 @@ mod tests {
     }
 
     #[test]
-    fn a_lease_is_never_reported_as_work_in_progress() {
+    fn a_lease_without_a_task_is_not_reported_as_work_in_progress() {
         let mut capacity = overview(vec![lane("基线建档", available())]);
         capacity.live_leases = vec![LiveLease {
             station_name: "MacBook Chrome".to_owned(),
@@ -2466,7 +2511,27 @@ mod tests {
             has_task: false,
         }];
         let html = render(Some(&capacity), &[], &[], &CapabilityMatrix::new(), None);
-        assert!(html.contains("只是许可，还没展开成任务"));
+        assert!(html.contains("0 个执行中"));
+        assert!(!html.contains("木可可"));
+        assert!(!html.contains("只是许可，还没展开成任务"));
+    }
+
+    #[test]
+    fn an_expanded_task_is_listed_as_work_in_progress() {
+        let mut capacity = overview(vec![lane("基线建档", available())]);
+        capacity.live_leases = vec![LiveLease {
+            station_name: "MacBook Chrome".to_owned(),
+            lane: "deep_archive".to_owned(),
+            target_label: "木可可".to_owned(),
+            started_at: "2026-09-13 10:00".to_owned(),
+            expires_at: "2026-09-13 11:00".to_owned(),
+            estimated_work_units: 20,
+            has_task: true,
+        }];
+        let html = render(Some(&capacity), &[], &[], &CapabilityMatrix::new(), None);
+        assert!(html.contains("1 个执行中"));
+        assert!(html.contains("木可可"));
+        assert!(html.contains("已展开成任务"));
     }
 
     // -----------------------------------------------------------------------
@@ -2522,7 +2587,12 @@ mod tests {
     // 能力：摘要三态互不替代
     // -----------------------------------------------------------------------
 
-    fn capability(name: &str, declared: bool, successes: i64, capability_failures: i64) -> StationCapability {
+    fn capability(
+        name: &str,
+        declared: bool,
+        successes: i64,
+        capability_failures: i64,
+    ) -> StationCapability {
         StationCapability {
             capability: name.to_owned(),
             declared,
@@ -2645,7 +2715,7 @@ mod tests {
         assert!(html.contains("查一遍作品清单有没有新作品"));
     }
 
-    /// 没有登记中文名的能力，机器名已经当了标题，不再重复印一遍。
+    /// 摘要行只显示聚合结论；没有中文名的机器能力仍可在管理弹窗中如实查到。
     #[test]
     fn capability_machine_names_stay_out_of_the_dense_station_row() {
         let station = station(Some("0.8.48"), 0);
@@ -2665,8 +2735,8 @@ mod tests {
             None,
         );
         assert!(html.contains("1 就绪"));
-        assert!(!html.contains("batch_checkpoint"));
-        assert!(!html.contains("author_profile"));
+        assert!(html.contains("batch_checkpoint"));
+        assert!(html.contains("作者档案"));
     }
 
     #[test]
@@ -2833,7 +2903,7 @@ mod tests {
             Some(&control),
         );
         assert!(candidate.contains("待确认"));
-        assert!(!candidate.contains("data-account-binding-form"));
+        assert!(candidate.contains("data-account-binding-form"));
 
         let bound = vec![resource(station.station_ref, "bound_without_eligibility")];
         let control = RuntimeControl {
@@ -2852,7 +2922,7 @@ mod tests {
     }
 
     #[test]
-    fn account_observation_diagnostics_do_not_expand_the_station_row() {
+    fn account_observation_diagnostics_remain_available_from_management_dialog() {
         let station = station(Some("0.8.48"), 0);
         let lanes = vec![control_lane("创作者基线", "deep_archive", true)];
         let mut rows = vec![resource(station.station_ref, "current")];
@@ -2871,8 +2941,8 @@ mod tests {
             Some(&control),
         );
         assert!(html.contains("已确认"));
-        assert!(!html.contains("最后一次账号观察"));
-        assert!(!html.contains("2026-09-10 09:00"));
+        assert!(html.contains("最后一次账号观察"));
+        assert!(html.contains("09-10 09:00"));
     }
 
     #[test]

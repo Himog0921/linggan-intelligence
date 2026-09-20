@@ -1340,6 +1340,8 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 .c-stn-name-label{max-width:100%;font-size:var(--lgi-text-body);font-weight:700}
 .c-stn-edit{width:calc(var(--c-cell) * 3);height:calc(var(--c-cell) * 3);display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;padding:0;border:0;background:transparent;color:var(--lgi-muted);cursor:pointer}
 .c-stn-edit:hover{color:var(--lgi-signal-ink)}
+.c-stn-manage{min-height:calc(var(--c-cell) * 3);padding:0 var(--lgi-space-2);border:0;background:transparent;color:var(--lgi-muted);font-size:var(--lgi-text-label);font-weight:700;cursor:pointer}
+.c-stn-manage:hover{text-decoration:underline;text-underline-offset:var(--lgi-space-1);color:var(--lgi-ink)}
 .c-stn-name-form{display:flex;align-items:center;gap:var(--lgi-space-1);min-width:0;margin:0}
 .c-stn-name-form[hidden]{display:none}
 .c-stn-name-input{width:min(100%,calc(var(--lgi-space-24) * 1.55));min-width:0;height:calc(var(--c-cell) * 3.75);padding:0 var(--lgi-space-2);border:var(--c-line-hair) solid var(--v7-line-strong);background:var(--v7-white);color:var(--lgi-ink);font-size:var(--lgi-text-label);font-weight:600}
@@ -1354,6 +1356,10 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 .c-stn-pause-action::after{content:"";position:absolute;inset:0 0 0 auto;width:var(--lgi-space-2);background-image:var(--lgi-mosaic-on-light);background-size:var(--lgi-space-1) var(--lgi-space-1);opacity:.62}
 .c-stn-pause-action:hover{border-color:var(--v7-black);color:var(--v7-black)}
 .c-stn-recent{color:var(--lgi-body);font-size:var(--lgi-text-label);white-space:nowrap}
+.c-stn-manage-modal{width:min(840px,calc(100vw - var(--lgi-space-24)))}
+.c-stn-manage-modal::backdrop{background:var(--lgi-canvas-overlay)}
+.c-stn-manage-body{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:var(--lgi-space-5)}
+.c-stn-manage-body>.c-stn-block:last-child{grid-column:1/-1;padding-top:var(--lgi-space-4);border-top:var(--c-line-hair) solid var(--v7-line)}
 
 /* 今日任务只列正在发生的真实任务，统计读数已经由顶部看板承担。 */
 .c-runtime .c-run-list{margin:0}

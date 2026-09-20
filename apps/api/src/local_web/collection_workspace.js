@@ -439,6 +439,36 @@
   }
 })();
 
+/* 单行工位表把低频真实动作收进原生弹窗：不恢复详情侧栏，也不让这些动作失去入口。 */
+(function () {
+  "use strict";
+
+  var dialogs = Array.prototype.slice.call(document.querySelectorAll("[data-station-manage-dialog]"));
+  if (!dialogs.length) return;
+
+  dialogs.forEach(function (dialog) {
+    var lastTrigger = null;
+    var opener = document.querySelector("[data-station-manage-open][aria-controls='" + dialog.id + "']");
+    var close = dialog.querySelector("[data-station-manage-close]");
+
+    function restoreFocus() {
+      if (lastTrigger && document.documentElement.contains(lastTrigger)) lastTrigger.focus();
+      lastTrigger = null;
+    }
+
+    if (opener) {
+      opener.addEventListener("click", function () {
+        lastTrigger = opener;
+        dialog.showModal();
+        var first = dialog.querySelector("button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),a[href]");
+        if (first) first.focus();
+      });
+    }
+    if (close) close.addEventListener("click", function () { dialog.close(); });
+    dialog.addEventListener("close", restoreFocus);
+  });
+})();
+
 // 自绘下拉。
 //
 // 原生 select 的**弹出层由操作系统绘制**——自带圆角、蓝色高亮和阴影，CSS 一律管不到。
