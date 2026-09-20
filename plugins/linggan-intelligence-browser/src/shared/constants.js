@@ -48,33 +48,6 @@ export const MSG = {
   GET_FLYWHEEL_CONFIG: 'getFlywheelConfig',
   SAVE_FLYWHEEL_CONFIG: 'saveFlywheelConfig',
 
-  // 工作台接入
-  WORKBENCH_CAPABILITY_CHECK: 'workbenchCapabilityCheck',
-  WORKBENCH_DISPATCH_TASK: 'workbenchDispatchTask',
-  WORKBENCH_TASK_CONTROL: 'workbenchTaskControl',
-  WORKBENCH_GET_RESULT_PACKAGE: 'workbenchGetResultPackage',
-  WORKBENCH_LOCAL_CONTROL_EVENT: 'workbenchLocalControlEvent',
-  WORKBENCH_RECORD_DELTA: 'workbenchRecordDelta',
-  WORKBENCH_DELTA_FLUSH: 'workbenchDeltaFlush',
-  AUTHORIZE_PLUGIN_ACCESS: 'authorizePluginAccess',
-  REQUEST_PLUGIN_AUTHORIZATION: 'requestPluginAuthorization',
-  CLAIM_PLUGIN_AUTHORIZATION_REQUEST: 'claimPluginAuthorizationRequest',
-  CLEAR_PLUGIN_AUTHORIZATION: 'clearPluginAuthorization',
-  GET_EXECUTION_STATION_STATUS: 'getExecutionStationStatus',
-  EXPORT_OUTBOX_RECOVERY: 'exportOutboxRecovery',
-  REGISTER_EXECUTION_STATION: 'registerExecutionStation',
-  SEND_EXECUTION_STATION_HEARTBEAT: 'sendExecutionStationHeartbeat',
-
-  // 账号管理
-  GET_ACCOUNTS: 'getAccounts',
-  ADD_ACCOUNT: 'addAccount',
-  REMOVE_ACCOUNT: 'removeAccount',
-  UPDATE_ACCOUNT: 'updateAccount',
-
-  // Cookie 管理
-  GET_PLATFORM_COOKIES: 'getPlatformCookies',
-  GET_STORED_PLATFORM_COOKIES: 'getStoredPlatformCookies',
-
   // 进度与状态
   PROGRESS: 'progress',
   COLLECT_DONE: 'collectDone',

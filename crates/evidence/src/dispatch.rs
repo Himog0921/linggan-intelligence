@@ -143,6 +143,7 @@ pub enum DispatchFailureCode {
     PageReceiptIdentityMismatch,
     PageReadFailed,
     DetailPageSessionGrantUnavailable,
+    DetailPageSessionRecoveryRequired,
     AccountObservationBlocked,
 }
 
@@ -160,6 +161,9 @@ impl DispatchFailureCode {
             "detail_page_session_grant_unavailable" => {
                 Some(Self::DetailPageSessionGrantUnavailable)
             }
+            "detail_page_session_recovery_required" => {
+                Some(Self::DetailPageSessionRecoveryRequired)
+            }
             "account_observation_blocked" => Some(Self::AccountObservationBlocked),
             _ => None,
         }
@@ -176,6 +180,7 @@ impl DispatchFailureCode {
             Self::PageReceiptIdentityMismatch => "page_receipt_identity_mismatch",
             Self::PageReadFailed => "page_read_failed",
             Self::DetailPageSessionGrantUnavailable => "detail_page_session_grant_unavailable",
+            Self::DetailPageSessionRecoveryRequired => "detail_page_session_recovery_required",
             Self::AccountObservationBlocked => "account_observation_blocked",
         }
     }
@@ -491,14 +496,16 @@ pub async fn grant_detail_page_session(
     .map(|byte| format!("{byte:02x}"))
     .collect::<String>();
 
-    type Existing = (Uuid, Uuid, Uuid, String, Value);
+    type Existing = (Uuid, Uuid, Uuid, String, Value, bool);
     let existing: Option<Existing> = sqlx::query_as(
-        "SELECT session_ref,owner_installation_ref,grant_request_id,state,plan_snapshot \
-         FROM collection_detail_page_session \
+        "SELECT session.session_ref,session.owner_installation_ref,session.grant_request_id, \
+                session.state,session.plan_snapshot,owner.superseded_at IS NOT NULL \
+         FROM collection_detail_page_session session \
+         JOIN plugin_installation owner ON owner.installation_ref=session.owner_installation_ref \
          WHERE work_order_ref=$1 \
-           AND content_public_ref IS NOT DISTINCT FROM $2 \
-           AND cross_industry_sample_ref IS NOT DISTINCT FROM $3 \
-         FOR UPDATE",
+           AND session.content_public_ref IS NOT DISTINCT FROM $2 \
+           AND session.cross_industry_sample_ref IS NOT DISTINCT FROM $3 \
+         FOR UPDATE OF session,owner",
     )
     .bind(work_order_ref)
     .bind(content_public_ref)
@@ -527,7 +534,7 @@ pub async fn grant_detail_page_session(
             .await?;
             DetailPageSessionGrant::Authorized { session_ref, plan }
         }
-        Some((session_ref, owner_installation_ref, recorded_request_id, state, snapshot))
+        Some((session_ref, owner_installation_ref, recorded_request_id, state, snapshot, _))
             if owner_installation_ref == installation_ref
                 && recorded_request_id == grant_request_id =>
         {
@@ -543,10 +550,27 @@ pub async fn grant_detail_page_session(
                 }
             }
         }
-        Some((session_ref, _, _, _, _)) => DetailPageSessionGrant::Suppressed {
-            session_ref,
-            reason_code: "session_already_authorized",
-        },
+        Some((session_ref, _, _, state, _, owner_superseded)) => {
+            if owner_superseded && state != "stopped" {
+                sqlx::query(
+                    "UPDATE collection_detail_page_session \
+                     SET state='stopped',stop_reason='owner_unavailable',finished_at=scope_001_now(), \
+                         last_progress_at=scope_001_now() \
+                     WHERE session_ref=$1 AND state NOT IN ('finished','stopped')",
+                )
+                .bind(session_ref)
+                .execute(&mut *transaction)
+                .await?;
+            }
+            DetailPageSessionGrant::Suppressed {
+                session_ref,
+                reason_code: if owner_superseded {
+                    "session_owner_unavailable"
+                } else {
+                    "session_already_authorized"
+                },
+            }
+        }
     };
     let (grant_outcome, session_ref) = match &outcome {
         DetailPageSessionGrant::Authorized { session_ref, .. } => {
@@ -905,28 +929,27 @@ pub async fn requeue_failed_dispatch(
     else {
         return Err(DispatchFailureError::ClaimNotHeld);
     };
-    let terminal_disposition = if capability == "content_detail" {
-        match (failure_code, content_external_id.as_deref()) {
-            (DispatchFailureCode::PageUnavailable, Some(content_external_id)) => {
-                Some(("unavailable", content_external_id))
-            }
-            (DispatchFailureCode::PageReadFailed, Some(content_external_id)) => {
-                let prior_failures = page_read_failure_count_for_detail_in_transaction(
-                    &mut transaction,
-                    work_order_ref,
-                    content_external_id,
-                )
-                .await?;
-                if prior_failures + 1 >= MAX_PAGE_READ_FAILURES_PER_DETAIL {
-                    Some(("blocked", content_external_id))
-                } else {
-                    None
-                }
-            }
-            _ => None,
+    let terminal_disposition = match (failure_code, content_external_id.as_deref()) {
+        (DispatchFailureCode::PageUnavailable, Some(content_external_id))
+        | (DispatchFailureCode::DetailPageSessionRecoveryRequired, Some(content_external_id)) => {
+            Some(("unavailable", content_external_id))
         }
-    } else {
-        None
+        (DispatchFailureCode::PageReadFailed, Some(content_external_id))
+            if capability == "content_detail" =>
+        {
+            let prior_failures = page_read_failure_count_for_detail_in_transaction(
+                &mut transaction,
+                work_order_ref,
+                content_external_id,
+            )
+            .await?;
+            if prior_failures + 1 >= MAX_PAGE_READ_FAILURES_PER_DETAIL {
+                Some(("blocked", content_external_id))
+            } else {
+                None
+            }
+        }
+        _ => None,
     };
     if let Some((disposition, content_external_id)) = terminal_disposition {
         // The generic update above restores the current task to `pending`.

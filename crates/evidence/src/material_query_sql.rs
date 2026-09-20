@@ -299,7 +299,11 @@ mod tests {
 
     #[test]
     fn shared_work_resource_reads_do_not_expand_target_scoped_retirement_to_all_corpus_uses() {
-        for sql in [material_page_sql(), work_resource_currents_sql()] {
+        for sql in [
+            material_page_sql(false),
+            material_page_sql(true),
+            work_resource_currents_sql(),
+        ] {
             assert!(
                 !sql.contains("collection_material_retirement"),
                 "a target-scoped human retirement conclusion cannot erase the content globally"

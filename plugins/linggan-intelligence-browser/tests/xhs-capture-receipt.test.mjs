@@ -12,7 +12,7 @@ import {
   normalizeXhsDetailCommentLimit,
 } from '../src/platforms/xhs/captureReceipt.js';
 
-test('detail receipt keeps the workbench note-detail comment cap at 30', () => {
+test('detail receipt keeps the standard note-detail comment cap at 30', () => {
   assert.equal(XHS_DETAIL_COMMENT_CAP, 30);
   assert.equal(normalizeXhsDetailCommentLimit(undefined), 30);
   assert.equal(normalizeXhsDetailCommentLimit(12), 12);

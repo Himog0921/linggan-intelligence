@@ -83,7 +83,7 @@ function pickMediaUrlFromArray(value) {
   return '';
 }
 
-function buildWorkbenchNoteRecord(note = {}) {
+function buildLocalNoteRecord(note = {}) {
   const images = Array.isArray(note.images) ? note.images.filter(Boolean) : [];
   const imageCandidates = Array.isArray(note.imageCandidates) ? note.imageCandidates.filter(Boolean) : [];
   const cover = firstText(note.cover)
@@ -1179,7 +1179,7 @@ export class BatchNoteController extends BaseBatchController {
     if (!this.collectionRunId) return;
     if (this._shouldUseFinalResultPackageOnly()) return;
     const record = withLocalReadMeta(
-      buildWorkbenchNoteRecord(result),
+      buildLocalNoteRecord(result),
       this.monitorMeta || result.monitorMeta,
       result.monitorMode,
     );

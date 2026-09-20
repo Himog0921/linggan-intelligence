@@ -1,7 +1,5 @@
 /**
- * 失效页面 title 关键词表（2026-07-08 归因修复，从 workbench/runtime/capabilityCheck.js
- * 提取为共享常量，避免任务派发阶段和详情采集失败阶段各自维护一份、逐渐漂移）。
- * 词表来源与语义见该文件历史注释：任务目标是某条具体作品，但当前页面 title
+ * 失效页面 title 关键词表。任务目标是某条具体作品，但当前页面 title
  * 显示为死页时命中，用于判定 CONTENT_NOT_FOUND。
  */
 export const DEAD_PAGE_TITLE_PATTERN =

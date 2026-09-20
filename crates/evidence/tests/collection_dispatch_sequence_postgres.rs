@@ -117,7 +117,13 @@ const MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../database/migrations/0089_detail_page_session_replay_safety.sql"),
     "\n",
-    include_str!("../../../database/migrations/0090_detail_page_grant_recovery_and_risk_cooldown.sql"),
+    include_str!(
+        "../../../database/migrations/0090_detail_page_grant_recovery_and_risk_cooldown.sql"
+    ),
+    "\n",
+    include_str!("../../../database/migrations/0091_ocr_content_layering.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0092_detail_page_session_recovery_boundary.sql"),
 );
 
 #[tokio::test]
@@ -1011,7 +1017,7 @@ async fn unavailable_detail_is_audited_without_blocking_later_materials() {
         &fixture.installation_credential,
         first_task_id,
         unavailable_failure_ref,
-        DispatchFailureCode::PageUnavailable,
+        DispatchFailureCode::DetailPageSessionRecoveryRequired,
     )
     .await
     .expect("a producer-confirmed unavailable page is recorded");
@@ -1056,14 +1062,14 @@ async fn unavailable_detail_is_audited_without_blocking_later_materials() {
     .fetch_one(database.pool())
     .await
     .expect("unavailability remains an append-only dispatch fact");
-    assert_eq!(failure_code, "page_unavailable");
+    assert_eq!(failure_code, "detail_page_session_recovery_required");
     let replay = requeue_failed_dispatch(
         &database,
         &fixture.install_key,
         &fixture.installation_credential,
         first_task_id,
         unavailable_failure_ref,
-        DispatchFailureCode::PageUnavailable,
+        DispatchFailureCode::DetailPageSessionRecoveryRequired,
     )
     .await
     .expect("a lost terminal acknowledgement remains idempotent");
