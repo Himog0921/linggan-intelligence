@@ -237,6 +237,7 @@ pub async fn collection_control_schema_is_ready(database: &Database) -> Result<b
                 AND to_regclass(format('%I.%I',current_schema(),'platform_observation_account')) IS NOT NULL \
                 AND to_regclass(format('%I.%I',current_schema(),'collection_monitor_rule_revision')) IS NOT NULL \
                 AND to_regclass(format('%I.%I',current_schema(),'collection_platform_dispatch_policy')) IS NOT NULL \
+                AND to_regclass(format('%I.%I',current_schema(),'collection_installation_risk_cooldown')) IS NOT NULL \
                 AND EXISTS (SELECT 1 FROM information_schema.columns \
                             WHERE table_schema=current_schema() AND table_name='execution_station' \
                               AND column_name='accepting_tasks') \
@@ -1077,6 +1078,20 @@ pub(crate) async fn revalidate_frozen_capacity_in(
         return Ok(CapacitySelection::blocked(
             CapacityReasonCode::RiskPaused,
             "风险暂停仍在生效，当前 Lease 不再允许派发。",
+        ));
+    }
+    let cooling_until: Option<String> = sqlx::query_scalar(
+        "SELECT linggan_human_moment(until_at) FROM collection_installation_risk_cooldown \
+         WHERE installation_ref=$1 AND platform=$2 AND until_at>scope_001_now()",
+    )
+    .bind(installation_ref)
+    .bind(platform)
+    .fetch_optional(&mut **transaction)
+    .await?;
+    if let Some(until) = cooling_until {
+        return Ok(CapacitySelection::blocked(
+            CapacityReasonCode::InstallationRiskCooldown,
+            &format!("当前插件观察到连续页面风控，自动暂停接单至 {until}。"),
         ));
     }
     // A policy-row lock serializes every new Lease across stations and Runtime

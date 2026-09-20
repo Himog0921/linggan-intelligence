@@ -6,6 +6,7 @@ import {
   claimLingganDispatch,
   grantLingganDetailPageSession,
   reportLingganDetailPageSessionNavigation,
+  reportLingganDetailPageRiskSignal,
   claimLingganMediaAcquisition,
   claimedTaskAccountDecision,
   createLocalAttempt,
@@ -714,6 +715,7 @@ const DISPATCH_FAILURE_CODES = new Set([
   'page_receipt_missing',
   'page_receipt_identity_mismatch',
   'page_read_failed',
+  'detail_page_session_grant_unavailable',
   'account_observation_blocked',
 ]);
 
@@ -770,6 +772,20 @@ async function verifyClaimedTaskAccount(tabId, claim) {
   if (!observation) return { mayExecute: true, state: 'account_observation_inconclusive' };
   const report = await reportAccountObservationFromPage(observation, { taskId: claim?.taskId });
   return claimedTaskAccountDecision(report);
+}
+
+async function reportClaimedTaskRisk(tabId, claim, installKey, installationCredential) {
+  const page = await chrome.tabs.sendMessage(tabId, {
+    action: LINGGAN_RUNTIME_ACTION.OBSERVE_CLAIMED_TASK_RISK,
+  }).catch(() => null);
+  const observation = page?.success === true ? page.observation : null;
+  if (!observation || observation.signal !== 'risk_control_interstitial') return { riskObserved: false };
+  const report = await reportLingganDetailPageRiskSignal({
+    installKey, installationCredential, taskId: claim?.taskId,
+    riskSignalId: crypto.randomUUID(), detectorVersion: observation.detectorVersion,
+    health: claim?.health,
+  });
+  return { riskObserved: report.reported === true, cooldownActive: report.cooldownActive === true };
 }
 
 async function queueCachedDetailPageSessionLane({ leaseRef, taskSpec } = {}) {
@@ -1003,6 +1019,15 @@ async function runDispatchedTask() {
       };
     }
     if (!navigationGrant.shouldNavigate) {
+      if (navigationGrant.reason === 'grant_transport_unavailable'
+          || navigationGrant.reason === 'grant_route_unavailable') {
+        return requeueClaimedTaskFailure({
+          claim: { ...claim, health: readiness.health },
+          installKey,
+          state: 'detail_page_session_grant_unavailable',
+          message: '详情页授权服务暂不可用；没有打开页面，任务已进入退避后重试。',
+        });
+      }
       if (!navigationGrant.recovered && navigationGrant.reason === 'navigation_state_unknown'
           && navigationGrant.sessionRef) {
         void reportLingganDetailPageSessionNavigation({
@@ -1122,6 +1147,25 @@ async function runDispatchedTask() {
         sessionRef: navigationGrant.sessionRef,
         kind: 'navigation_observed',
         health: readiness.health,
+      });
+    }
+    const pageRisk = await reportClaimedTaskRisk(
+      tabId, { ...claim, health: readiness.health }, installKey, installationCredential,
+    );
+    if (pageRisk.riskObserved) {
+      if (navigationGrant?.sessionRef) {
+        await reportLingganDetailPageSessionNavigation({
+          installKey, installationCredential, taskId: spec.taskId,
+          sessionRef: navigationGrant.sessionRef, kind: 'stopped',
+          stopReason: 'risk_stop', health: readiness.health,
+        });
+      }
+      return requeueClaimedTaskFailure({
+        claim: { ...claim, health: readiness.health }, installKey,
+        state: 'account_observation_blocked',
+        message: pageRisk.cooldownActive
+          ? '页面连续出现风控提示；当前插件已自动暂停接单 12 小时。'
+          : '页面出现风控提示；已停止当前采集，继续观察同一插件的风险信号。',
       });
     }
     const accountVerification = await verifyClaimedTaskAccount(tabId, claim);

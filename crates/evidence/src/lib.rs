@@ -114,11 +114,13 @@ pub use creator_lifecycle::{
     read_creator_lifecycle,
 };
 pub use dispatch::{
-    DISPATCH_FAILURE_RETRY_AFTER_SECONDS, DetailPageSessionGrant, DetailPageSessionGrantError,
-    DetailPageSessionNavigationError, DetailPageSessionProgress, DispatchDecision, DispatchError,
-    DispatchFailureCode, DispatchFailureError, DispatchFailureOutcome, decide_dispatch,
-    dispatch_schema_is_ready, grant_detail_page_session, record_detail_page_session_navigation,
-    record_detail_page_session_progress, record_dispatch_answer, requeue_failed_dispatch,
+    DISPATCH_FAILURE_RETRY_AFTER_SECONDS, DetailPageRiskSignalError, DetailPageRiskSignalReceipt,
+    DetailPageSessionGrant, DetailPageSessionGrantError, DetailPageSessionNavigationError,
+    DetailPageSessionProgress, DispatchDecision, DispatchError, DispatchFailureCode,
+    DispatchFailureError, DispatchFailureOutcome, decide_dispatch, dispatch_schema_is_ready,
+    grant_detail_page_session, record_detail_page_session_navigation,
+    record_detail_page_session_progress, record_dispatch_answer, report_detail_page_risk_signal,
+    requeue_failed_dispatch,
 };
 pub use execution_station::{
     CheckInOutcome, InstallationCheckIn, InstallationClaimOutcome, StationError,

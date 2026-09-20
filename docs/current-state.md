@@ -12,6 +12,8 @@
 - Producer 先把 request id 与“导航已消费”写入同一个 IndexedDB 事务并等待提交，再能创建窗口。同 request id 可取回原 grant；新 request id、换安装、缓存缺失、已消费而 tab 丢失均停止自动导航。正文先进入 durable outbox；页面 payload 不随原 Lease 到期删除、又不能被新 Lease 接管，只有全部冻结 lane 已入 outbox 才可清理。
 - 当前候选已完成 Browser Producer 281 条全量测试、TypeScript 合同、Rust `cargo check`，以及本卡隔离 PostgreSQL `content_reobservation` 4/4（grant 重放/抑制、观测、交付中与停止封存）。候选包为 `0.8.50` / SHA-256 `5cddcdf11e0c96fb7e72328017ce13be2f16958268c43c25537c5eff16872019`。未执行共享 migration、runtime 切换、Chrome 插件重载、真实平台访问、提交、合并、推送或 Mog 业务验收。
 
+2026-09-20，Mog 授权在隔离分支 `codex/detail-page-grant-recovery-risk-cooldown` 补全授权恢复与页面风险保护：`0090` 将追加 grant 结果审计、30 分钟内两次明确风险拦截页触发的安装级 12 小时 cooldown，以及服务端容量复核；浏览器 `prepared → grant_accepted → consumed` 使授权传输不可达能以专用 pre-Attempt 失败回队而不导航。实现与自动验证尚在进行中；它不代表共享 migration、runtime 切换、Chrome 重载、真实平台访问或业务验收。
+
 ### TARGET-DELETION-AUTHOR-001 / Issue #214（候选已完成隔离验证；未进入共享运行）
 
 - 本包把“删除观察目标”收束为删除控制决定及其申请、准入、工单、租约和调度历史；已接纳的作品、详情、评论、采集包和人工材料结论不随之删除。若目标已经拥有跨行业样本或人工的作品退役结论，删除在数据库层拒绝。

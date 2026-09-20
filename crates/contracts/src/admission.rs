@@ -15,6 +15,7 @@ use std::fmt;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum CapacityReasonCode {
     RiskPaused,
+    InstallationRiskCooldown,
     StationUnavailable,
     StationNotAccepting,
     InstallationCredentialMissing,
@@ -40,6 +41,7 @@ impl CapacityReasonCode {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::RiskPaused => "risk_paused",
+            Self::InstallationRiskCooldown => "installation_risk_cooldown",
             Self::StationUnavailable => "station_unavailable",
             Self::StationNotAccepting => "station_not_accepting",
             Self::InstallationCredentialMissing => "installation_credential_missing",

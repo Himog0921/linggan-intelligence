@@ -1,7 +1,7 @@
 # PLUGIN-REHOME-001 · 旧插件迁入与运行边界映射
 
 > 状态: 当前迁移与自动执行边界
-> 最后核对: 2026-08-31
+> 最后核对: 2026-09-20
 > 适用范围: `linggan-boom@8a00cc1` / `v2.0.91` 到 Linggan 自有浏览器包的第一条垂直迁入边界
 > 事实来源: `plugins/linggan-intelligence-browser/` 当前 source、Manifest、Webpack active entries 和 isolation check
 > 冲突时以谁为准: 当前可构建 source 和实际运行证明；旧插件只说明迁入来源，不是 Linggan 运行规格
@@ -78,6 +78,7 @@
 | 详情页派发回执身份（0.8.39） | 首个同页 `content_detail` 读取入本机可靠 outbox 后，回显原派发的 action、capability、taskId；后台保持严格比对后才继续交付 | 不因一个页面读取合并后续 lane；不将缺身份回执当作成功；不扩大 WorkOrder、页面访问或采集范围 |
 | 持久账号绑定与任务页观察（0.8.46） | 账号 binding 不再依赖日历 expiry；严格嵌套 observation 合同将正向身份与显式负面事实分开。自然页面只读一次已渲染 DOM；已领取任务在其本来打开的页面复核后才采集。启动 selector probe 仅留诊断 | 不扫描标签、不为账号打开/刷新/滚动/切换页面、不调平台 API；缺失 DOM或本机回传失败不写/不阻断；负面仅能来自平台状态组件；服务端确认的负面或账号变化才中止当前任务；不把启动诊断误报为 selector blocked |
 | 首单观察启动与身份摘要诊断（0.8.47） | 新 installation 没有 observation 或人工 binding 时，可在其余服务端准入已满足后领取一项任务；`bindingRequired` 仅提示人工确认，`bindingMismatch` 才停止已领取任务；health 缺少身份摘要键时返回无秘密诊断 | 不为账号资格扫描标签、打开/刷新/滚动/点击页面或调用平台接口；不生成、记录或显示身份摘要键；明确登录/限制/冷却与已绑定账号变化仍由服务端阻断 |
+| 详情授权恢复与风控冷却（0.8.51） | grant 申请失败作为无导航的可重试 dispatch failure 回队；本地许可必须从 `prepared` 获服务端接受后才可原子消费。已领取页面出现明确平台风控层时，插件只上传闭集风险信号并停止该任务；服务端在同一 installation 的 30 分钟窗口内收到第二个独立信号后暂停该 installation 接单 12 小时 | 不把 `prepared` 当作已开页，不因授权超时重开详情，不储存原始页面文字/截图，不用标题或评论中的“风控”文字触发，不暂停其他 installation，也不由插件自行恢复接单 |
 
 ## 新旧运行路径对照
 

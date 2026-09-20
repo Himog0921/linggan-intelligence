@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   accountObservationFromCurrentAccountHref,
   currentAccountHrefFromDocument,
+  observeXhsDetailRiskFromDocument,
   observeXhsAccountFromDocument,
   reportPassiveAccountEligibility,
 } from '../src/linggan/accountEligibilityProbe.js';
@@ -171,6 +172,18 @@ test('only a platform status surface becomes a negative account observation', ()
     }),
     null,
     'user-authored note or comment text is not a platform account decision',
+  );
+});
+
+test('only a platform risk-control surface contributes to the detail circuit breaker', () => {
+  const riskControlSurface = { innerText: '操作过于频繁，请稍后再试。' };
+  assert.deepEqual(
+    observeXhsDetailRiskFromDocument({ querySelectorAll: () => [riskControlSurface] }),
+    { signal: 'risk_control_interstitial', detectorVersion: 'xhs-risk-interstitial.v1' },
+  );
+  assert.equal(
+    observeXhsDetailRiskFromDocument({ querySelectorAll: () => [] }),
+    null,
   );
 });
 

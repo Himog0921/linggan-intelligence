@@ -22,6 +22,7 @@ import { LINGGAN_RUNTIME_ACTION } from '../linggan/runtimeActions.js';
 import { unavailableLingganStats } from '../linggan/adapter.js';
 import {
   observeXhsAccountFromDocument,
+  observeXhsDetailRiskFromDocument,
   reportPassiveAccountEligibility,
 } from '../linggan/accountEligibilityProbe.js';
 import {
@@ -422,6 +423,10 @@ chrome.runtime.onMessage.addListener((message = {}, _sender, sendResponse) => {
   }
   if (action === LINGGAN_RUNTIME_ACTION.OBSERVE_CLAIMED_TASK_ACCOUNT && platform() === 'xhs') {
     sendResponse({ success: true, observation: observeXhsAccountFromDocument(document) });
+    return true;
+  }
+  if (action === LINGGAN_RUNTIME_ACTION.OBSERVE_CLAIMED_TASK_RISK && platform() === 'xhs') {
+    sendResponse({ success: true, observation: observeXhsDetailRiskFromDocument(document) });
     return true;
   }
   if (action === LINGGAN_RUNTIME_ACTION.TOGGLE_DASHBOARD && platform() === 'xhs') {

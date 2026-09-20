@@ -197,6 +197,35 @@ export function detailPageSessionNavigationRouteFromHealth(health) {
   return path.startsWith('/api/local/dispatch/') && !/[?#]/.test(path) ? path : null;
 }
 
+export function detailPageRiskSignalRouteFromHealth(health) {
+  const path = String(health?.routes?.dispatch?.detailPageRiskSignal || '').trim();
+  return path.startsWith('/api/local/dispatch/') && !/[?#]/.test(path) ? path : null;
+}
+
+export async function reportLingganDetailPageRiskSignal({
+  installKey, installationCredential, taskId, riskSignalId, detectorVersion,
+  origin = LINGGAN_LOCAL_ORIGIN, fetchImpl = globalThis.fetch, health = null,
+} = {}) {
+  const route = detailPageRiskSignalRouteFromHealth(health);
+  if (typeof fetchImpl !== 'function' || !route || !String(installKey || '').trim()
+      || !String(installationCredential || '').trim() || !String(taskId || '').trim()
+      || !String(riskSignalId || '').trim() || !String(detectorVersion || '').trim()) {
+    return { reported: false, reasonCode: 'risk_signal_route_unavailable' };
+  }
+  try {
+    const response = await fetchImpl(`${origin}${route}`, {
+      method: 'POST', credentials: 'omit', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ installKey, installationCredential, taskId, riskSignalId, detectorVersion }),
+    });
+    const body = await response.json().catch(() => null);
+    return response.ok && body?.outcome === 'recorded'
+      ? { reported: true, cooldownActive: body.cooldownActive === true, cooldownUntil: body.cooldownUntil || null }
+      : { reported: false, reasonCode: String(body?.code || 'risk_signal_rejected') };
+  } catch {
+    return { reported: false, reasonCode: 'risk_signal_transport_unavailable' };
+  }
+}
+
 /**
  * Obtain a detail-page authorization using the browser-persisted request id.
  * Repeating the same id may recover a lost response; a new id is never a
