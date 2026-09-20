@@ -5,9 +5,9 @@ mod research_fixture;
 
 use fixture::{proof_database, submit_package};
 use linggan_evidence::{
-    MaterialMediaDisposition, MediaProcessingClaimOutcome, admit_media_blob,
-    claim_media_processing_work, complete_media_processing_text, ensure_media_processing_work,
-    record_derivative_disposition,
+    MaterialMediaDisposition, MediaProcessingClaimOutcome, OcrCompletionInput, OcrLayeringInput,
+    OcrLineInput, admit_media_blob, claim_media_processing_work, complete_media_processing_ocr,
+    ensure_media_processing_work, record_derivative_disposition,
 };
 use linggan_intelligence::comment_study_source::{
     ADHD_DOMAIN_REF, StudySourceError, eligible_sources,
@@ -189,17 +189,36 @@ async fn source_gate_excludes_withdrawn_ocr_but_keeps_the_comment_target() {
     };
     assert_eq!(claim.processor_kind, "image_ocr");
     assert!(admission.processing_jobs.contains(&claim.job_ref));
-    let derivative_ref = complete_media_processing_text(
+    let derivative_ref = complete_media_processing_ocr(
         &database,
         &claim,
         worker_ref,
-        "ocr_text",
-        "1320b046a60f7c39a3480dea50b655ca92ce61db269ea07e4037e7a6f0788e5a",
-        12,
-        "derived/study-ocr-note.txt",
-        "图片中的作业计划",
-        "图片中的作业计划",
-        Some("zh"),
+        &OcrCompletionInput {
+            engine_version: "paddle-test".to_owned(),
+            image_width: 100,
+            image_height: 100,
+            raw_text: "原始 OCR 不能直接进入研究语境".to_owned(),
+            raw_content_hash: "1320b046a60f7c39a3480dea50b655ca92ce61db269ea07e4037e7a6f0788e5a"
+                .to_owned(),
+            raw_storage_key: "derived/study-ocr-note.txt".to_owned(),
+            layout_content_hash: "2320b046a60f7c39a3480dea50b655ca92ce61db269ea07e4037e7a6f0788e5a"
+                .to_owned(),
+            layout_byte_size: 12,
+            layout_storage_key: "derived/study-ocr-note-layout.json".to_owned(),
+            lines: vec![OcrLineInput {
+                text: "图片中的作业计划".to_owned(),
+                confidence: 0.99,
+                bbox_norm: [0.0, 0.0, 1.0, 1.0],
+            }],
+            layering: OcrLayeringInput {
+                state: "ACCEPTED".to_owned(),
+                cover_headline: None,
+                image_substantive_text: Some("图片中的作业计划".to_owned()),
+                retained_ordinals: vec![0],
+                headline_ordinals: vec![],
+                excluded_lines: vec![],
+            },
+        },
     )
     .await
     .unwrap();
@@ -213,7 +232,7 @@ async fn source_gate_excludes_withdrawn_ocr_but_keeps_the_comment_target() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|source| source["kind"] == "ocr_text")
+            .any(|source| source["kind"] == "image_substantive_text")
     );
 
     record_derivative_disposition(
@@ -234,8 +253,210 @@ async fn source_gate_excludes_withdrawn_ocr_but_keeps_the_comment_target() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|source| source["kind"] == "ocr_text")
+            .any(|source| source["kind"] == "image_substantive_text")
     );
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn source_context_admits_only_the_latest_accepted_nonretired_ocr_semantic_text() {
+    let database = proof_database("comment_study_ocr_context_qualification").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    detail_with_author(
+        &database,
+        "study-ocr-qualification-note",
+        "ADHD 作品上下文",
+        Some("creator-1"),
+    )
+    .await;
+    comment_with_author(
+        &database,
+        "study-ocr-qualification-note",
+        "study-ocr-qualification-comment",
+        "孩子一写作业就拖延，我很着急。",
+        Some("reader-1"),
+        "2026-09-16T08:00:00Z",
+    )
+    .await;
+    let (accepted_derivative, _) = complete_study_context_ocr(
+        &database,
+        "study-ocr-qualification-note",
+        1,
+        "ACCEPTED",
+        "可以进入研究语境的图片实质文本",
+    )
+    .await;
+    let (superseded_derivative, _) = complete_study_context_ocr(
+        &database,
+        "study-ocr-qualification-note",
+        2,
+        "ACCEPTED",
+        "旧的 accepted 文本不能越过最新 partial",
+    )
+    .await;
+    let superseded_layout: Uuid = sqlx::query_scalar(
+        "SELECT layout_ref FROM linggan_media_ocr_layout WHERE ocr_derivative_ref=$1",
+    )
+    .bind(superseded_derivative)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_media_ocr_layering_result( \
+           layering_ref,layout_ref,layer_version,state,decision_source,image_substantive_text, \
+           retained_line_refs,excluded_lines,created_at \
+         ) VALUES($1,$2,'rules-v2','PARTIAL','rules',$3,'[]'::jsonb,'[]'::jsonb, \
+                  scope_001_now()+interval '1 second')",
+    )
+    .bind(Uuid::new_v4())
+    .bind(superseded_layout)
+    .bind("最新 partial 不能进入研究语境")
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let (retired_derivative, retired_job) = complete_study_context_ocr(
+        &database,
+        "study-ocr-qualification-note",
+        3,
+        "ACCEPTED",
+        "已退役 OCR 不能进入研究语境",
+    )
+    .await;
+    sqlx::query(
+        "INSERT INTO linggan_media_ocr_retirement(retired_job_ref,reason) \
+         VALUES($1,'tesseract_replaced_by_paddleocr')",
+    )
+    .bind(retired_job)
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    let sources = eligible_sources(
+        &database,
+        Uuid::parse_str(ADHD_DOMAIN_REF).unwrap(),
+        "2099-01-01T00:00:00Z",
+        10,
+    )
+    .await
+    .unwrap();
+    let ocr_fragments: Vec<_> = sources[0].context_manifest["sources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|fragment| fragment["kind"] == "image_substantive_text")
+        .collect();
+    assert_eq!(ocr_fragments.len(), 1, "{ocr_fragments:?}");
+    assert_eq!(
+        ocr_fragments[0]["sourceRef"],
+        serde_json::json!(accepted_derivative)
+    );
+    assert_eq!(ocr_fragments[0]["text"], "可以进入研究语境的图片实质文本");
+    assert!(
+        sources[0].context_manifest["sources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|fragment| fragment["kind"] != "ocr_text"),
+        "the raw OCR derivative must never enter the context manifest"
+    );
+    let manifest = sources[0].context_manifest.to_string();
+    assert!(
+        !manifest.contains("原始 OCR 1"),
+        "the raw derivative itself is never a context fragment: {manifest}"
+    );
+    assert!(
+        !manifest.contains("最新 partial 不能进入研究语境"),
+        "the latest PARTIAL layer must suppress its older accepted layer: {manifest}"
+    );
+    assert!(
+        !manifest.contains("已退役 OCR 不能进入研究语境"),
+        "retired OCR must remain unavailable even if its layer was accepted: {manifest}"
+    );
+    assert_ne!(accepted_derivative, retired_derivative);
+}
+
+async fn complete_study_context_ocr(
+    database: &linggan_storage_postgres::Database,
+    content_external_id: &str,
+    ordinal: u8,
+    layering_state: &str,
+    image_substantive_text: &str,
+) -> (Uuid, Uuid) {
+    let observation_ref = Uuid::new_v4();
+    let slot_key = format!("xhs:{content_external_id}:image:{ordinal}");
+    submit_package(
+        database,
+        "media_slots",
+        serde_json::json!({"contentExternalId":content_external_id}),
+        serde_json::json!({
+            "kind":"media_slot",
+            "slotKey":slot_key,
+            "observationRef":observation_ref,
+            "slot":{"role":"image","ordinal":ordinal},
+            "observation":{
+                "externalUri":format!("https://media.example/{content_external_id}-{ordinal}.jpg"),
+                "candidateUris":[format!("https://media.example/{content_external_id}-{ordinal}.jpg")],
+                "observedAt":"2026-09-16T08:00:00Z"
+            },
+            "sourceObject":{"platform":"xhs","type":"content","externalId":content_external_id}
+        }),
+    )
+    .await;
+    let blob_hash = format!("{ordinal:x}").repeat(64);
+    admit_media_blob(
+        database,
+        observation_ref,
+        &blob_hash,
+        "image/jpeg",
+        12,
+        &format!("blobs/study-ocr-{ordinal}.jpg"),
+    )
+    .await
+    .unwrap();
+    ensure_media_processing_work(database).await.unwrap();
+    let worker_ref = Uuid::new_v4();
+    let claim = match claim_media_processing_work(database, worker_ref, &["image_ocr".to_owned()])
+        .await
+        .unwrap()
+    {
+        MediaProcessingClaimOutcome::Claimed(claim) => claim,
+        other => panic!("the synthetic OCR job is claimable: {other:?}"),
+    };
+    let derivative_ref = complete_media_processing_ocr(
+        database,
+        &claim,
+        worker_ref,
+        &OcrCompletionInput {
+            engine_version: "paddle-test".to_owned(),
+            image_width: 100,
+            image_height: 100,
+            raw_text: format!("原始 OCR {ordinal}"),
+            raw_content_hash: format!("{:x}", ordinal + 3).repeat(64),
+            raw_storage_key: format!("derived/study-ocr-{ordinal}.txt"),
+            layout_content_hash: format!("{:x}", ordinal + 6).repeat(64),
+            layout_byte_size: 12,
+            layout_storage_key: format!("derived/study-ocr-{ordinal}-layout.json"),
+            lines: vec![OcrLineInput {
+                text: image_substantive_text.to_owned(),
+                confidence: 0.99,
+                bbox_norm: [0.0, 0.0, 1.0, 1.0],
+            }],
+            layering: OcrLayeringInput {
+                state: layering_state.to_owned(),
+                cover_headline: None,
+                image_substantive_text: Some(image_substantive_text.to_owned()),
+                retained_ordinals: vec![0],
+                headline_ordinals: vec![],
+                excluded_lines: vec![],
+            },
+        },
+    )
+    .await
+    .unwrap();
+    (derivative_ref, claim.job_ref)
 }
 
 #[tokio::test]
@@ -301,17 +522,36 @@ async fn a_reobserved_media_slot_contributes_one_context_fragment_per_derived_te
         MediaProcessingClaimOutcome::Claimed(claim) => claim,
         other => panic!("the freshly admitted OCR job is claimable: {other:?}"),
     };
-    complete_media_processing_text(
+    complete_media_processing_ocr(
         &database,
         &claim,
         worker_ref,
-        "ocr_text",
-        "2c8e0a4f6b1d3e5a7c9f0b2d4e6a8c0f1b3d5e7a9c1f3b5d7e9a1c3f5b7d9e1a",
-        12,
-        "derived/study-reobserved-note.txt",
-        "图片中的作业计划",
-        "图片中的作业计划",
-        Some("zh"),
+        &OcrCompletionInput {
+            engine_version: "paddle-test".to_owned(),
+            image_width: 100,
+            image_height: 100,
+            raw_text: "原始 OCR 不作为评论研究语境".to_owned(),
+            raw_content_hash: "2c8e0a4f6b1d3e5a7c9f0b2d4e6a8c0f1b3d5e7a9c1f3b5d7e9a1c3f5b7d9e1a"
+                .to_owned(),
+            raw_storage_key: "derived/study-reobserved-note.txt".to_owned(),
+            layout_content_hash: "3c8e0a4f6b1d3e5a7c9f0b2d4e6a8c0f1b3d5e7a9c1f3b5d7e9a1c3f5b7d9e1a"
+                .to_owned(),
+            layout_byte_size: 12,
+            layout_storage_key: "derived/study-reobserved-note-layout.json".to_owned(),
+            lines: vec![OcrLineInput {
+                text: "图片中的作业计划".to_owned(),
+                confidence: 0.99,
+                bbox_norm: [0.0, 0.0, 1.0, 1.0],
+            }],
+            layering: OcrLayeringInput {
+                state: "ACCEPTED".to_owned(),
+                cover_headline: None,
+                image_substantive_text: Some("图片中的作业计划".to_owned()),
+                retained_ordinals: vec![0],
+                headline_ordinals: vec![],
+                excluded_lines: vec![],
+            },
+        },
     )
     .await
     .unwrap();
@@ -356,7 +596,7 @@ async fn a_reobserved_media_slot_contributes_one_context_fragment_per_derived_te
         .as_array()
         .unwrap()
         .iter()
-        .filter(|source| source["kind"] == "ocr_text")
+        .filter(|source| source["kind"] == "image_substantive_text")
         .collect();
     assert_eq!(
         ocr_fragments.len(),

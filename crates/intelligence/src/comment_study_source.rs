@@ -177,6 +177,7 @@ where
            JOIN linggan_media_processing_job job USING(job_ref) \
            LEFT JOIN linggan_media_slot slot ON slot.slot_key=job.slot_key \
            WHERE text.content_public_ref=source.content_public_ref \
+             AND text.kind<>'ocr_text' \
              AND EXISTS (SELECT 1 FROM linggan_material_media_origin origin \
                WHERE origin.slot_key=job.slot_key \
                  AND origin.content_public_ref=source.content_public_ref) \
@@ -185,6 +186,38 @@ where
              AND (SELECT event.state FROM linggan_media_processing_job_event event \
                   WHERE event.job_ref=job.job_ref AND event.occurred_at<=$2::timestamptz \
                   ORDER BY event.occurred_at DESC,event.event_ref DESC LIMIT 1)='succeeded' \
+             AND NOT EXISTS (SELECT 1 FROM linggan_current_material_media_disposition disposition \
+               WHERE disposition.state='WITHDRAWN_OR_RESTRICTED' \
+                 AND (disposition.derivative_ref=derived.derivative_ref \
+                 OR disposition.blob_sha256=job.blob_sha256 \
+                  OR disposition.slot_key=job.slot_key)) \
+           UNION ALL \
+           SELECT jsonb_build_object('kind','image_substantive_text','sourceRef',derived.derivative_ref, \
+              'text',layer.image_substantive_text,'sourceLocation',text.source_location, \
+              'slotOrdinal',slot.ordinal,'contentHash',derived.content_hash) \
+           FROM linggan_material_derived_text text \
+           JOIN linggan_media_derivative derived USING(derivative_ref) \
+           JOIN linggan_media_processing_job job USING(job_ref) \
+           JOIN linggan_media_ocr_layout layout ON layout.ocr_derivative_ref=derived.derivative_ref \
+           JOIN LATERAL ( \
+             SELECT result.state,result.image_substantive_text \
+             FROM linggan_media_ocr_layering_result result \
+             WHERE result.layout_ref=layout.layout_ref AND result.created_at<=$2::timestamptz \
+             ORDER BY result.created_at DESC,result.layering_ref DESC LIMIT 1 \
+           ) layer ON layer.state='ACCEPTED' \
+           LEFT JOIN linggan_media_slot slot ON slot.slot_key=job.slot_key \
+           WHERE text.content_public_ref=source.content_public_ref AND text.kind='ocr_text' \
+             AND nullif(btrim(layer.image_substantive_text),'') IS NOT NULL \
+             AND EXISTS (SELECT 1 FROM linggan_material_media_origin origin \
+               WHERE origin.slot_key=job.slot_key \
+                 AND origin.content_public_ref=source.content_public_ref) \
+             AND text.created_at<=$2::timestamptz AND derived.created_at<=$2::timestamptz \
+             AND job.created_at<=$2::timestamptz AND layout.created_at<=$2::timestamptz \
+             AND (SELECT event.state FROM linggan_media_processing_job_event event \
+                  WHERE event.job_ref=job.job_ref AND event.occurred_at<=$2::timestamptz \
+                  ORDER BY event.occurred_at DESC,event.event_ref DESC LIMIT 1)='succeeded' \
+             AND NOT EXISTS (SELECT 1 FROM linggan_media_ocr_retirement retired \
+               WHERE retired.retired_job_ref=job.job_ref) \
              AND NOT EXISTS (SELECT 1 FROM linggan_current_material_media_disposition disposition \
                WHERE disposition.state='WITHDRAWN_OR_RESTRICTED' \
                  AND (disposition.derivative_ref=derived.derivative_ref \

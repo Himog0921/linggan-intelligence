@@ -70,9 +70,15 @@
 | D | 设计未比较状态的 API/UI 回归 | `retrieval_incomplete` 与 `budget_stopped` 不被隐藏或归为无匹配 | 真实 UI 修改前先读 UI 执行合同并更新 Claim 文件边界 |
 | E | 建立真实样本与真实模型的授权申请包 | 用途、样本、人员、模型、输出、保留/处置均明确 | 未获逐项授权时不接触真实评论或模型 |
 
+### C 的本地执行记录（2026-09-20）
+
+完成 source context provenance 的合成回归，而未修改 worker、schema 或 migration。`StudyContextSnapshot` 现在保留非 OCR 派生语境；对 OCR，只读取同一 derivative 最新、未退役、未撤回且 `ACCEPTED` 的非空 `image_substantive_text`，不再把 raw `ocr_text`、`PARTIAL` 或旧 accepted layer 当作模型语境。隔离 fixture 直接覆盖 accepted、latest partial 覆盖旧 accepted、retired、withdrawn 与同 slot 重观测，因而这些条件可由 41 条 PostgreSQL proof 中的对应断言证伪。
+
+这只完成 C 的无真实数据部分；D（状态 API/UI 回归）与 E（真实样本/模型授权申请包）仍未开始。
+
 ## 文件与交付边界
 
-- 本包 exclusive：本文件、`crates/intelligence/src/comment_study_{canonical,embedding,recall,candidate_recall,comparison_cache,problem_resolution,problem_store,resolution_worker,read}.rs`、`crates/intelligence/src/{model_runner,pi_adapter,lib}.rs`、`crates/intelligence/tests/comment_study_rebuild_postgres.rs` 及其 P3 测试支持脚本、`apps/api/src/local_web/comment_study.rs`、`apps/pi-adapter/src/wemm_runtime.py`、`database/bootstrap/comment-study-001.sql` 和配套 reset。它们由 Issue #316 的 [原 Claim](https://github.com/Himog0921/linggan-intelligence/issues/316#issuecomment-5749282350) 及 [revision-read 更正](https://github.com/Himog0921/linggan-intelligence/issues/316#issuecomment-5749395396) 明确列入；均仅限本地代码与隔离 fixture。
+- 本包 exclusive：本文件、`crates/intelligence/src/comment_study_{canonical,embedding,recall,candidate_recall,comparison_cache,problem_resolution,problem_store,resolution_worker,read,source}.rs`、`crates/intelligence/src/{model_runner,pi_adapter,lib}.rs`、`crates/intelligence/tests/comment_study_rebuild_postgres.rs` 及其 P3 测试支持脚本、`apps/api/src/local_web/comment_study.rs`、`apps/pi-adapter/src/wemm_runtime.py`、`database/bootstrap/comment-study-001.sql` 和配套 reset。它们由 Issue #316 的 [原 Claim](https://github.com/Himog0921/linggan-intelligence/issues/316#issuecomment-5749282350)、[revision-read 更正](https://github.com/Himog0921/linggan-intelligence/issues/316#issuecomment-5749395396) 及 [OCR context amendment](https://github.com/Himog0921/linggan-intelligence/issues/316#issuecomment-5749506006) 明确列入；均仅限本地代码与隔离 fixture。
 - 本包 shared：`docs/README.md`、`docs/current-state.md`、`docs/progress/2026-09.md`，仅作索引与有界状态记录。
 - 本包 forbidden：`database/migrations/**`、`apps/worker/**`、`apps/api/src/local_web/comment_study.js`、P4/P5 领域实现、所有 runtime/deployment 配置。经 Issue #316 Claim amendment 明确列出的 P3 bootstrap、Pi adapter 与 local API 文件是本包 exclusive，而非对真实运行的授权。
 
@@ -80,7 +86,7 @@
 
 ## 2026-09-20 本地 P3 导入后的修复证据
 
-在最新基线中仅重放 P3 所属的十个候选提交后，合成隔离验证发现并修复以下“修订版为权威”的断裂：Problem 定义的 `includeCriteria` 未写入 revision；活跃 Problem 固定核心没有进入 embedding 待办；Problem 读取与旧 lexical candidate recall 仍读取已从主表移走的字段；probe API 也没有区分 runtime 与 storage 不可用。
+在最新基线中仅重放 P3 所属的十个候选提交后，合成隔离验证发现并修复以下“修订版为权威”的断裂：Problem 定义的 `includeCriteria` 未写入 revision；活跃 Problem 固定核心没有进入 embedding 待办；Problem 读取与旧 lexical candidate recall 仍读取已从主表移走的字段；probe API 也没有区分 runtime 与 storage 不可用。随后也收紧 OCR→StudyContextSnapshot：只有最新、未退役、未撤回的 accepted image substantive text 可作为图片语境。
 
 修复后，Problem 的当前 revision 成为 definition/core frame/inclusions/exclusions 的唯一读取面；embedding 待办按 canonical hash 对 Signal 与 Problem core 合并去重；candidate recall 直接 join `current_revision_ref`。新增的隔离 PostgreSQL 回归显式验证 lexical candidate recall 读取 revision，而不是依赖向量路径间接覆盖。
 
