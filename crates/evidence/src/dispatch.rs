@@ -20,6 +20,7 @@ use crate::work_order_lease::{
 };
 use linggan_storage_postgres::Database;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 /// The next retry after a locally reported execution-start failure.  Chrome
@@ -44,6 +45,67 @@ pub enum DispatchError {
     InvalidCredential,
     #[error(transparent)]
     Database(#[from] sqlx::Error),
+}
+
+/// The only server response that may be paired with a browser's durable local
+/// navigation-consumption record.  It is intentionally separate from task
+/// claim: a committed claim may be replayed, while this grant is idempotent by
+/// a browser-persisted request id and one Work Order/material session.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DetailPageSessionGrant {
+    Authorized {
+        session_ref: Uuid,
+        plan: Value,
+    },
+    Replay {
+        session_ref: Uuid,
+        plan: Value,
+    },
+    Suppressed {
+        session_ref: Uuid,
+        reason_code: &'static str,
+    },
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum DetailPageSessionGrantError {
+    #[error("dispatch schema is not applied")]
+    SchemaUnavailable,
+    #[error("no active plugin installation with that install key")]
+    UnknownInstallation,
+    #[error("installation credential is invalid")]
+    InvalidCredential,
+    #[error("the installation no longer holds that live detail task claim")]
+    ClaimNotHeld,
+    #[error("the task is not a material detail-page task")]
+    DetailScopeUnavailable,
+    #[error(transparent)]
+    Database(#[from] sqlx::Error),
+}
+
+/// A navigation observation is deliberately separate from grant issuance.
+/// It advances the one session row and never creates another execution ledger.
+#[derive(Debug, thiserror::Error)]
+pub enum DetailPageSessionNavigationError {
+    #[error("dispatch schema is not applied")]
+    SchemaUnavailable,
+    #[error("no active plugin installation with that install key")]
+    UnknownInstallation,
+    #[error("installation credential is invalid")]
+    InvalidCredential,
+    #[error("the installation does not own an active detail-page session for that task")]
+    SessionNotHeld,
+    #[error(transparent)]
+    Database(#[from] sqlx::Error),
+}
+
+/// A constrained session-progress vocabulary. None of these transitions can
+/// issue, renew, or transfer a navigation grant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DetailPageSessionProgress {
+    NavigationObserved,
+    DeliveryPending,
+    Stopped { reason: &'static str },
 }
 
 /// A bounded failure vocabulary for a claimed browser task before a producer
@@ -270,6 +332,7 @@ pub async fn dispatch_schema_is_ready(database: &Database) -> Result<bool, sqlx:
                 AND to_regclass(format('%I.%I',current_schema(),'collection_work_order_lease_task_dispatch_failure')) IS NOT NULL \
                 AND to_regclass(format('%I.%I',current_schema(),'collection_dispatch_lane_fairness')) IS NOT NULL \
                 AND to_regclass(format('%I.%I',current_schema(),'collection_platform_dispatch_policy')) IS NOT NULL \
+                AND to_regclass(format('%I.%I',current_schema(),'collection_detail_page_session')) IS NOT NULL \
                 AND EXISTS (SELECT 1 FROM information_schema.columns \
                             WHERE table_schema=current_schema() \
                               AND table_name='collection_work_order' \
@@ -281,6 +344,295 @@ pub async fn dispatch_schema_is_ready(database: &Database) -> Result<bool, sqlx:
     )
     .fetch_one(database.pool())
     .await
+}
+
+/// Authorize the one page-owning `content_detail` task for a material only
+/// after the Browser Producer has persisted `grant_request_id` locally.
+///
+/// PostgreSQL makes the Work Order/material session unique.  Retrying the
+/// same request id returns the same grant; another request id, another
+/// installation, a stopped session, or an unheld task never becomes a second
+/// navigation authorization.  This function does not observe Chrome and must
+/// not claim that a page was actually opened.
+pub async fn grant_detail_page_session(
+    database: &Database,
+    install_key: &str,
+    installation_credential: &str,
+    task_id: Uuid,
+    grant_request_id: Uuid,
+) -> Result<DetailPageSessionGrant, DetailPageSessionGrantError> {
+    if !dispatch_schema_is_ready(database).await? {
+        return Err(DetailPageSessionGrantError::SchemaUnavailable);
+    }
+    let mut transaction = database.pool().begin().await?;
+    let installation_ref: Option<Uuid> = sqlx::query_scalar(
+        "SELECT installation_ref FROM plugin_installation \
+         WHERE install_key=$1 AND superseded_at IS NULL FOR UPDATE",
+    )
+    .bind(install_key)
+    .fetch_optional(&mut *transaction)
+    .await?;
+    let Some(installation_ref) = installation_ref else {
+        return Err(DetailPageSessionGrantError::UnknownInstallation);
+    };
+    if !validate_installation_credential_in(
+        &mut transaction,
+        installation_ref,
+        installation_credential,
+    )
+    .await?
+    {
+        return Err(DetailPageSessionGrantError::InvalidCredential);
+    }
+
+    type ClaimedDetail = (Uuid, Uuid, Option<Uuid>, Option<Uuid>, Value);
+    type RawClaimedDetail = (Uuid, Uuid, Uuid, Value);
+    let material_claimed: Option<ClaimedDetail> = sqlx::query_as::<_, RawClaimedDetail>(
+        "SELECT lease.lease_ref,lease.work_order_ref,target.content_public_ref,runtime.task_spec \
+         FROM collection_work_order_lease_task task \
+         JOIN collection_work_order_lease lease ON lease.lease_ref=task.lease_ref \
+         JOIN linggan_runtime_task runtime ON runtime.task_id=task.task_id \
+         JOIN collection_work_order_material_target target ON target.work_order_ref=lease.work_order_ref \
+         JOIN linggan_material_content content ON content.public_ref=target.content_public_ref \
+         WHERE task.task_id=$1 AND task.execution_state='in_progress' \
+           AND task.claimed_by_installation_ref=$2 \
+           AND lease.released_at IS NULL AND lease.expires_at>scope_001_now() \
+           AND runtime.task_spec #>> '{capabilitiesRequested,0}'='content_detail' \
+           AND content.content_external_id=runtime.task_spec #>> '{target,contentExternalId}' \
+         FOR UPDATE OF task,lease",
+    )
+    .bind(task_id)
+    .bind(installation_ref)
+    .fetch_optional(&mut *transaction)
+    .await?
+    .map(|(lease_ref, work_order_ref, content_public_ref, task_spec)| {
+        (lease_ref, work_order_ref, Some(content_public_ref), None, task_spec)
+    });
+    let cross_industry_claimed: Option<ClaimedDetail> = if material_claimed.is_none()
+        && sqlx::query_scalar::<_, bool>(
+            "SELECT to_regclass('collection_work_order_cross_industry_target') IS NOT NULL",
+        )
+        .fetch_one(&mut *transaction)
+        .await?
+    {
+        sqlx::query_as::<_, RawClaimedDetail>(
+            "SELECT lease.lease_ref,lease.work_order_ref,sample.sample_ref,runtime.task_spec \
+             FROM collection_work_order_lease_task task \
+             JOIN collection_work_order_lease lease ON lease.lease_ref=task.lease_ref \
+             JOIN linggan_runtime_task runtime ON runtime.task_id=task.task_id \
+             JOIN collection_work_order_cross_industry_target target \
+               ON target.work_order_ref=lease.work_order_ref \
+             JOIN cross_industry_sample sample ON sample.sample_ref=target.sample_ref \
+             WHERE task.task_id=$1 AND task.execution_state='in_progress' \
+               AND task.claimed_by_installation_ref=$2 \
+               AND lease.released_at IS NULL AND lease.expires_at>scope_001_now() \
+               AND runtime.task_spec #>> '{capabilitiesRequested,0}'='content_detail' \
+               AND sample.content_external_id=runtime.task_spec #>> '{target,contentExternalId}' \
+             FOR UPDATE OF task,lease",
+        )
+        .bind(task_id)
+        .bind(installation_ref)
+        .fetch_optional(&mut *transaction)
+        .await?
+        .map(|(lease_ref, work_order_ref, sample_ref, task_spec)| {
+            (lease_ref, work_order_ref, None, Some(sample_ref), task_spec)
+        })
+    } else {
+        None
+    };
+    let Some((lease_ref, work_order_ref, content_public_ref, cross_industry_sample_ref, task_spec)) =
+        material_claimed.or(cross_industry_claimed)
+    else {
+        return Err(DetailPageSessionGrantError::ClaimNotHeld);
+    };
+    let Some(plan) = page_session_plan_for_task(&mut transaction, lease_ref, &task_spec).await?
+    else {
+        return Err(DetailPageSessionGrantError::DetailScopeUnavailable);
+    };
+    let plan_hash = Sha256::digest(
+        serde_json::to_string(&plan)
+            .map_err(|error| sqlx::Error::Protocol(error.to_string()))?
+            .as_bytes(),
+    )
+    .iter()
+    .map(|byte| format!("{byte:02x}"))
+    .collect::<String>();
+
+    type Existing = (Uuid, Uuid, Uuid, String, Value);
+    let existing: Option<Existing> = sqlx::query_as(
+        "SELECT session_ref,owner_installation_ref,grant_request_id,state,plan_snapshot \
+         FROM collection_detail_page_session \
+         WHERE work_order_ref=$1 \
+           AND content_public_ref IS NOT DISTINCT FROM $2 \
+           AND cross_industry_sample_ref IS NOT DISTINCT FROM $3 \
+         FOR UPDATE",
+    )
+    .bind(work_order_ref)
+    .bind(content_public_ref)
+    .bind(cross_industry_sample_ref)
+    .fetch_optional(&mut *transaction)
+    .await?;
+    let outcome = match existing {
+        None => {
+            let session_ref = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO collection_detail_page_session \
+                     (session_ref,work_order_ref,content_public_ref,cross_industry_sample_ref,owner_installation_ref, \
+                      grant_request_id,initial_lease_ref,plan_snapshot,plan_hash,state) \
+                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'authorized')",
+            )
+            .bind(session_ref)
+            .bind(work_order_ref)
+            .bind(content_public_ref)
+            .bind(cross_industry_sample_ref)
+            .bind(installation_ref)
+            .bind(grant_request_id)
+            .bind(lease_ref)
+            .bind(&plan)
+            .bind(&plan_hash)
+            .execute(&mut *transaction)
+            .await?;
+            DetailPageSessionGrant::Authorized { session_ref, plan }
+        }
+        Some((session_ref, owner_installation_ref, recorded_request_id, state, snapshot))
+            if owner_installation_ref == installation_ref
+                && recorded_request_id == grant_request_id =>
+        {
+            if state == "stopped" {
+                DetailPageSessionGrant::Suppressed {
+                    session_ref,
+                    reason_code: "session_stopped",
+                }
+            } else {
+                DetailPageSessionGrant::Replay {
+                    session_ref,
+                    plan: snapshot,
+                }
+            }
+        }
+        Some((session_ref, _, _, _, _)) => DetailPageSessionGrant::Suppressed {
+            session_ref,
+            reason_code: "session_already_authorized",
+        },
+    };
+    transaction.commit().await?;
+    Ok(outcome)
+}
+
+/// Record that Chrome observed the one locally consumed detail tab.  This is
+/// not a navigation command and cannot reopen a page; a missing report stays
+/// an honest unknown instead of being inferred from authorization alone.
+pub async fn record_detail_page_session_navigation(
+    database: &Database,
+    install_key: &str,
+    installation_credential: &str,
+    task_id: Uuid,
+    session_ref: Uuid,
+) -> Result<(), DetailPageSessionNavigationError> {
+    record_detail_page_session_progress(
+        database,
+        install_key,
+        installation_credential,
+        task_id,
+        session_ref,
+        DetailPageSessionProgress::NavigationObserved,
+    )
+    .await
+}
+
+/// Persist the latest execution fact for one owner-held session. A stopped
+/// session remains replayable only as `suppressed`; it can never be used to
+/// revive an automatic browser navigation.
+pub async fn record_detail_page_session_progress(
+    database: &Database,
+    install_key: &str,
+    installation_credential: &str,
+    task_id: Uuid,
+    session_ref: Uuid,
+    progress: DetailPageSessionProgress,
+) -> Result<(), DetailPageSessionNavigationError> {
+    if !dispatch_schema_is_ready(database).await? {
+        return Err(DetailPageSessionNavigationError::SchemaUnavailable);
+    }
+    let mut transaction = database.pool().begin().await?;
+    let installation_ref: Option<Uuid> = sqlx::query_scalar(
+        "SELECT installation_ref FROM plugin_installation \
+         WHERE install_key=$1 AND superseded_at IS NULL FOR UPDATE",
+    )
+    .bind(install_key)
+    .fetch_optional(&mut *transaction)
+    .await?;
+    let Some(installation_ref) = installation_ref else {
+        return Err(DetailPageSessionNavigationError::UnknownInstallation);
+    };
+    if !validate_installation_credential_in(
+        &mut transaction,
+        installation_ref,
+        installation_credential,
+    )
+    .await?
+    {
+        return Err(DetailPageSessionNavigationError::InvalidCredential);
+    }
+    let recorded: Option<Uuid> = match progress {
+        DetailPageSessionProgress::NavigationObserved => {
+            sqlx::query_scalar(
+                "UPDATE collection_detail_page_session session \
+             SET state=CASE WHEN state='authorized' THEN 'navigation_committed' ELSE state END, \
+                 navigation_observed_at=COALESCE(navigation_observed_at,scope_001_now()), \
+                 last_progress_at=scope_001_now() \
+             WHERE session.session_ref=$1 AND session.owner_installation_ref=$2 \
+               AND session.state NOT IN ('finished','stopped') \
+               AND EXISTS (SELECT 1 FROM collection_work_order_lease_task task \
+                           WHERE task.lease_ref=session.initial_lease_ref AND task.task_id=$3) \
+             RETURNING session.session_ref",
+            )
+            .bind(session_ref)
+            .bind(installation_ref)
+            .bind(task_id)
+            .fetch_optional(&mut *transaction)
+            .await?
+        }
+        DetailPageSessionProgress::DeliveryPending => {
+            sqlx::query_scalar(
+                "UPDATE collection_detail_page_session session \
+             SET state='delivery_pending',last_progress_at=scope_001_now() \
+             WHERE session.session_ref=$1 AND session.owner_installation_ref=$2 \
+               AND session.state NOT IN ('finished','stopped') \
+               AND EXISTS (SELECT 1 FROM collection_work_order_lease_task task \
+                           WHERE task.lease_ref=session.initial_lease_ref AND task.task_id=$3) \
+             RETURNING session.session_ref",
+            )
+            .bind(session_ref)
+            .bind(installation_ref)
+            .bind(task_id)
+            .fetch_optional(&mut *transaction)
+            .await?
+        }
+        DetailPageSessionProgress::Stopped { reason } => {
+            sqlx::query_scalar(
+                "UPDATE collection_detail_page_session session \
+             SET state='stopped',stop_reason=$4,finished_at=scope_001_now(), \
+                 last_progress_at=scope_001_now() \
+             WHERE session.session_ref=$1 AND session.owner_installation_ref=$2 \
+               AND session.state NOT IN ('finished','stopped') \
+               AND EXISTS (SELECT 1 FROM collection_work_order_lease_task task \
+                           WHERE task.lease_ref=session.initial_lease_ref AND task.task_id=$3) \
+             RETURNING session.session_ref",
+            )
+            .bind(session_ref)
+            .bind(installation_ref)
+            .bind(task_id)
+            .bind(reason)
+            .fetch_optional(&mut *transaction)
+            .await?
+        }
+    };
+    if recorded.is_none() {
+        return Err(DetailPageSessionNavigationError::SessionNotHeld);
+    }
+    transaction.commit().await?;
+    Ok(())
 }
 
 /// Release a *current* scheduled-task claim after the plugin could not start

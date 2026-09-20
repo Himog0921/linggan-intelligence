@@ -1,7 +1,7 @@
 # Linggan Intelligence Browser
 
 > 状态: 自动观察与固定材料深化 Producer
-> 版本: `0.8.47`
+> 版本: `0.8.50`（隔离候选；未加载到 Chrome）
 > 适用范围: `OBSERVATION-RUNTIME-001`、`MEDIA-ACQUISITION-001` 与 `MATERIAL-DEEPENING-001`（GitHub Issue #103）
 > 事实来源: 当前 package source、`MIGRATION-MAP.md`、构建与隔离检查输出
 > 冲突时以谁为准: 用户最新确认、仓库 `AGENTS.md`、当前代码和实际运行证明
@@ -105,8 +105,9 @@ Task，不重建任务、不重跑已完成步骤。
 插件只打开一次带签名详情页，沿用成熟单篇详情采集能力读取详情、媒体候选及有界评论树，
 并把结果保存到独立的 MV3 可恢复缓存。后续 `media_slots`、`comments`、`replies` 仍须分别
 领取自己的 TaskSpec，分别形成 Attempt、Package 和 Receipt，只是不再重复打开同一详情页。
-缓存按 Lease 与作品隔离、受租约剩余时间约束；缺失或过期时继续走原有单 lane 页面执行，
-不会用缓存扩大 WorkOrder 范围。
+缓存按原 Lease 与作品隔离，但**不**随该 Lease 到期删除：已取得的页面快照只会在每个冻结 lane
+均已进入 durable outbox 后清理。新 Lease 不能接管旧快照；缺失或导航状态不明时不回退为单 lane
+重开页面，只保留已取得数据的 outbox 投递并如实停止自动导航。
 0.8.5 补齐内容工作台 `2.0.93` 已经真实验证过、迁入时遗漏的 XHS SSR 详情读取路径：
 部分详情路由在页面水合后会删除全局 `__INITIAL_STATE__`，但原始页面脚本仍保留序列化的
 `noteDetailMap`。插件现在只做有界 JSON 对象解析，绝不执行页面脚本文本；详情就绪判断、
@@ -280,7 +281,13 @@ npm run verify:linggan-isolation
 只是人工确认提示，只有 `bindingMismatch` 才停止已领取任务；当本机没有账号身份摘要键时，
 插件获得明确且不含秘密的诊断，不会为此扫描或驱动平台页面。
 
-当前发行包生成在 `releases/linggan-intelligence-browser-v0.8.47.zip`。打包器以
+当前候选 `DETAIL-PAGE-SESSION-REPLAY-SAFETY-001` 再将“服务端允许领取”和“浏览器可以再开一次
+详情页”拆开：浏览器先在 IndexedDB 原子消费持久导航许可，再创建受管窗口；同一 request id
+只能取回原授权，换 request id、缓存缺失或已消费但窗口不明都会停止自动导航。Chrome 已观察到
+的受管标签页另行回报服务端，不由 grant 推断；已经取得的正文先进入 durable outbox，不被评论
+采集或缓存交接失败连坐。候选发行包为 `0.8.50`；尚未重载浏览器或访问平台。
+
+当前候选发行包生成在 `releases/linggan-intelligence-browser-v0.8.50.zip`。打包器以
 固定 ZIP 时间戳和稳定文件顺序生成；`releases/release-manifest.json` 记录已提交
 ZIP 的 SHA-256。`npm run verify` 不会改写 release ZIP：它会以新的 `npm ci`、build
 和临时 ZIP 重新打包，并要求该 SHA-256 与已提交 ZIP 完全一致，然后运行旧工作台

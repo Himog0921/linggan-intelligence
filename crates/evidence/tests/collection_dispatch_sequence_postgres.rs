@@ -114,6 +114,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0076_monitor_rule_slots.sql"),
     "\n",
     include_str!("../../../database/migrations/0078_monitor_rule_owns_its_schedule.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0089_detail_page_session_replay_safety.sql"),
 );
 
 #[tokio::test]

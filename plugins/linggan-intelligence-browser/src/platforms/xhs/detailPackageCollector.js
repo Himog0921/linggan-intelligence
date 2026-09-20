@@ -81,6 +81,12 @@ export async function collectXhsNoteDetailPackage(wd = window, options = {}) {
     ...options,
     deferLingganDelivery: true,
   });
+  // A page session may spend much longer on comments than on the note itself.
+  // Let the owner durably hand off the already-read detail before that slower
+  // lane starts; comment failure must not hold its body hostage.
+  if (typeof options.onDetailReady === 'function') {
+    await options.onDetailReady(note);
+  }
 
   let commentResult = {
     total: 0,

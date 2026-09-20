@@ -6,6 +6,12 @@
 > 事实来源: 本机实际检查、已确认项目边界和完成计划
 > 冲突时以谁为准: 真实运行结果、ACCEPTED ADR 与用户最新确认
 
+### DETAIL-PAGE-SESSION-REPLAY-SAFETY-001（候选源码已完成隔离验证；未进入共享运行）
+
+- 针对同一 XHS 笔记被 `in_progress` claim 重放后反复打开详情页的缺口，候选新增一张**非任务账本**会话表：证据材料按 `(work_order_ref, content_public_ref)` 唯一，跨行业样本按同构键唯一；每个会话绑定首个安装、持久 `grant_request_id`、冻结采集计划及可空的 Chrome 导航观测。Task → Attempt → CapturePackage → Receipt 仍是每个 lane 的唯一交付事实。
+- Producer 先把 request id 与“导航已消费”写入同一个 IndexedDB 事务并等待提交，再能创建窗口。同 request id 可取回原 grant；新 request id、换安装、缓存缺失、已消费而 tab 丢失均停止自动导航。正文先进入 durable outbox；页面 payload 不随原 Lease 到期删除、又不能被新 Lease 接管，只有全部冻结 lane 已入 outbox 才可清理。
+- 当前候选已完成 Browser Producer 281 条全量测试、TypeScript 合同、Rust `cargo check`，以及本卡隔离 PostgreSQL `content_reobservation` 4/4（grant 重放/抑制、观测、交付中与停止封存）。候选包为 `0.8.50` / SHA-256 `5cddcdf11e0c96fb7e72328017ce13be2f16958268c43c25537c5eff16872019`。未执行共享 migration、runtime 切换、Chrome 插件重载、真实平台访问、提交、合并、推送或 Mog 业务验收。
+
 ### TARGET-DELETION-AUTHOR-001 / Issue #214（候选已完成隔离验证；未进入共享运行）
 
 - 本包把“删除观察目标”收束为删除控制决定及其申请、准入、工单、租约和调度历史；已接纳的作品、详情、评论、采集包和人工材料结论不随之删除。若目标已经拥有跨行业样本或人工的作品退役结论，删除在数据库层拒绝。

@@ -4,6 +4,8 @@ import assert from 'node:assert/strict';
 import {
   claimLingganDispatch,
   decodePageExecutionReceipt,
+  detailPageSessionGrantRouteFromHealth,
+  grantLingganDetailPageSession,
   dispatchClaimRouteFromHealth,
 } from '../src/linggan/adapter.js';
 
@@ -16,6 +18,24 @@ test('the claim route comes from /health and is namespace-checked', () => {
     dispatchClaimRouteFromHealth({ routes: { dispatch: { claim: '/api/evil' } } }),
     null,
   );
+});
+
+test('detail-page grant route is separately advertised and a lost response can replay the same grant', async () => {
+  const health = { routes: { dispatch: { detailPageSessionGrant: '/api/local/dispatch/detail-page-sessions/grant' } } };
+  assert.equal(detailPageSessionGrantRouteFromHealth(health), '/api/local/dispatch/detail-page-sessions/grant');
+  assert.equal(detailPageSessionGrantRouteFromHealth({ routes: { dispatch: { detailPageSessionGrant: '/api/other' } } }), null);
+  const bodies = [
+    { outcome: 'authorized', sessionRef: 'session-1', pageSessionPlan: { contractVersion: 'linggan.detail-page-session.v1' } },
+    { outcome: 'replay', sessionRef: 'session-1', pageSessionPlan: { contractVersion: 'linggan.detail-page-session.v1' } },
+  ];
+  for (const body of bodies) {
+    const result = await grantLingganDetailPageSession({
+      installKey: 'install-1', installationCredential: 'credential-1', taskId: 'task-1', grantRequestId: 'request-1', health,
+      fetchImpl: async () => ({ ok: true, async json() { return body; } }),
+    });
+    assert.equal(result.granted, true);
+    assert.equal(result.sessionRef, 'session-1');
+  }
 });
 
 test('a task body without permission is not carried out of the claim', async () => {

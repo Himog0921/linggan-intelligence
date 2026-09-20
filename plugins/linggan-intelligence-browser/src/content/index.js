@@ -258,6 +258,22 @@ async function collectApprovedDetailPageSession(message = {}) {
   const leaseRef = String(message.leaseRef || '').trim();
   if (!leaseRef || !contentExternalId) throw new Error('detail_page_session_identity_required');
   const plan = validateDetailPageSessionPlan(message.pageSessionPlan, contentExternalId);
+  let contentDelivery = null;
+  let contentDeliveryFailure = null;
+  const queueDetailBeforeComments = async (note) => {
+    if (contentDelivery || contentDeliveryFailure) return;
+    try {
+      contentDelivery = await runtime.submitContentDetail(note, {
+        taskSpec,
+        idempotencyKey: `detail-session:${taskSpec.taskId}:content_detail`,
+      });
+    } catch (error) {
+      // The note stays in the page/local store.  Do not fail the page session
+      // or trigger navigation; after comments finish we make one local-only
+      // retry against that same immutable note before reporting the receipt.
+      contentDeliveryFailure = error;
+    }
+  };
 
   const controller = new LingganBatchNoteController();
   await controller.start(COLLECT_MODE.DETAIL, null, {
@@ -269,6 +285,7 @@ async function collectApprovedDetailPageSession(message = {}) {
     maxSubComments: plan.replyExpandLimit,
     taskSpec,
     deferLingganDelivery: true,
+    onDetailReady: queueDetailBeforeComments,
     triggerSource: 'linggan_detail_page_session',
   });
 
@@ -277,28 +294,27 @@ async function collectApprovedDetailPageSession(message = {}) {
     throw new Error('detail_page_session_content_not_collected');
   }
   const packaged = note.__xhsDetailPackage || {};
+  // The first durable deliverable is the detail lane itself.  A later cache
+  // failure must not discard an already obtained body/media snapshot or force
+  // another page visit just to make the other lanes convenient.
+  const queued = contentDelivery || await runtime.submitContentDetail(note, {
+    taskSpec,
+    idempotencyKey: `detail-session:${taskSpec.taskId}:content_detail`,
+  });
   // The content script has the XHS origin; its IndexedDB is not shared with
   // the extension service worker.  Hand the bounded page facts to background,
   // which owns the cache used by the later independently claimed lanes.
   const stored = await sendToBackground(LINGGAN_RUNTIME_ACTION.STORE_DETAIL_PAGE_SESSION, {
-    leaseRef,
-    plan,
-    note,
-    commentResult: packaged.commentResult,
-    receipt: packaged.receipt,
-  });
-  if (stored?.success !== true || !String(stored.cacheKey || '').trim()) {
-    throw new Error('detail_page_session_cache_not_stored');
+    leaseRef, plan, note, commentResult: packaged.commentResult, receipt: packaged.receipt,
+  }).catch(() => null);
+  if (stored?.success === true && String(stored.cacheKey || '').trim()) {
+    // A queue-marker failure may be replayed safely through the deterministic
+    // outbox key. It must not turn this already persisted content package into
+    // a reason to reopen the page.
+    await sendToBackground(LINGGAN_RUNTIME_ACTION.MARK_DETAIL_PAGE_SESSION_TASK_QUEUED, {
+      cacheKey: stored.cacheKey, taskId: taskSpec.taskId,
+    }).catch(() => null);
   }
-  const queued = await runtime.submitContentDetail(note, {
-    taskSpec,
-    idempotencyKey: `detail-session:${taskSpec.taskId}:content_detail`,
-  });
-  const marked = await sendToBackground(LINGGAN_RUNTIME_ACTION.MARK_DETAIL_PAGE_SESSION_TASK_QUEUED, {
-    cacheKey: stored.cacheKey,
-    taskId: taskSpec.taskId,
-  });
-  if (marked?.success !== true) throw new Error('detail_page_session_cache_not_marked');
   return detailPageSessionExecutionReceipt({
     action: LINGGAN_RUNTIME_ACTION.COLLECT_NOTE_FULL,
     taskSpec,

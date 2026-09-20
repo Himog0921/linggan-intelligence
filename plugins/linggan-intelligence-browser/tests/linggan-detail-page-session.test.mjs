@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 
 import {
   createDetailPageSessionStore,
+  createDetailPageNavigationGrantStore,
   detailPageSessionExecutionReceipt,
   packageDetailPageSessionLane,
   validateDetailPageSessionPlan,
@@ -45,6 +46,30 @@ function memoryTable() {
       };
     },
     size() { return rows.size; },
+  };
+}
+
+function navigationGrantTable() {
+  const rows = new Map();
+  return {
+    async get(key) { return rows.get(key) ? structuredClone(rows.get(key)) : undefined; },
+    async add(row) {
+      if (rows.has(row.grantKey)) {
+        const error = new Error('duplicate'); error.name = 'ConstraintError'; throw error;
+      }
+      rows.set(row.grantKey, structuredClone(row));
+    },
+    async put(row) { rows.set(row.grantKey, structuredClone(row)); },
+    async update(key, patch) { rows.set(key, { ...rows.get(key), ...structuredClone(patch) }); },
+  };
+}
+
+function serializedTransaction() {
+  let tail = Promise.resolve();
+  return (work) => {
+    const next = tail.then(work);
+    tail = next.catch(() => {});
+    return next;
   };
 }
 
@@ -137,7 +162,8 @@ test('one persistent page result produces separate packages only for separately 
   );
 
   now += 121_000;
-  assert.equal(await store.getForTask({ leaseRef: 'lease-1', taskSpec: task('media_slots') }), null);
+  assert.ok(await store.getForTask({ leaseRef: 'lease-1', taskSpec: task('media_slots') }),
+    'a pending frozen lane remains deliverable after the original lease TTL');
 });
 
 test('cached comment and reply lanes keep their content source identity', async () => {
@@ -151,16 +177,47 @@ test('cached comment and reply lanes keep their content source identity', async 
   assert.equal(packageDetailPageSessionLane(repliesEntry, repliesTask).records[0].kind, 'reply');
 });
 
-test('put prunes expired detail sessions without a separate maintenance action', async () => {
+test('a page payload outlives its lease but cannot be adopted by a new lease', async () => {
   let now = 1_000;
   const table = memoryTable();
   const store = createDetailPageSessionStore(table, () => now);
   await store.put({ leaseRef: 'lease-old', plan: { ...plan, cacheTtlSeconds: 1 }, note, commentResult, receipt: {} });
   now += 2_000;
-  await store.put({ leaseRef: 'lease-new', plan, note, commentResult, receipt: {} });
-  assert.equal(table.size(), 1);
-  assert.equal(await store.getForTask({ leaseRef: 'lease-old', taskSpec: task('content_detail') }), null);
-  assert.ok(await store.getForTask({ leaseRef: 'lease-new', taskSpec: task('content_detail') }));
+  assert.ok(await store.getForTask({ leaseRef: 'lease-old', taskSpec: task('comments') }),
+    'already-read comments remain available to their original lease after its expiry');
+  assert.equal(await store.getForTask({ leaseRef: 'lease-new', taskSpec: task('comments') }), null,
+    'a new lease must not silently attach an old page payload to a new task');
+  const entry = await store.getForTask({ leaseRef: 'lease-old', taskSpec: task('content_detail') });
+  for (const capability of plan.lanes) {
+    await store.markTaskQueued(entry.cacheKey, capability, `${capability}-task`);
+  }
+  assert.equal(await store.pruneExpired(), 1,
+    'the local page payload is removable only after every frozen lane is durably queued');
+  assert.equal(await store.getForTask({ leaseRef: 'lease-old', taskSpec: task('comments') }), null);
+});
+
+test('two replayed dispatch wakeups consume one persisted navigation grant only once', async () => {
+  let requestNo = 0;
+  const ledger = createDetailPageNavigationGrantStore({
+    table: navigationGrantTable(),
+    transaction: serializedTransaction(),
+    now: () => 1_000,
+    createRequestId: () => `request-${++requestNo}`,
+  });
+  const taskSpec = task('content_detail', 'detail-task-atomic');
+  const [first, second] = await Promise.all([
+    ledger.prepare({ leaseRef: 'lease-atomic', taskSpec }),
+    ledger.prepare({ leaseRef: 'lease-atomic', taskSpec }),
+  ]);
+  assert.equal(first.grantRequestId, 'request-1');
+  assert.equal(second.grantRequestId, 'request-1', 'the same task retry reuses its request id');
+  await ledger.attachServerGrant({ grantKey: first.grantKey, sessionRef: 'session-1', plan });
+  const consumed = await Promise.all([
+    ledger.consume({ grantKey: first.grantKey, sessionRef: 'session-1' }),
+    ledger.consume({ grantKey: first.grantKey, sessionRef: 'session-1' }),
+  ]);
+  assert.equal(consumed.filter((entry) => entry.shouldNavigate).length, 1);
+  assert.equal(consumed.filter((entry) => !entry.shouldNavigate).length, 1);
 });
 
 test('the XHS content context hands a completed session to the background-owned cache', async () => {
@@ -173,4 +230,33 @@ test('the XHS content context hands a completed session to the background-owned 
   assert.match(content, /MARK_DETAIL_PAGE_SESSION_TASK_QUEUED/);
   assert.match(background, /storeDetailPageSessionFromPage/);
   assert.match(background, /detailPageSessionStore\.put/);
+  assert.match(background, /detailPageNavigationGrantStore\.consume/);
+  assert.match(background, /capability !== 'content_detail'/);
+  assert.ok(
+    content.indexOf('runtime.submitContentDetail') < content.indexOf('STORE_DETAIL_PAGE_SESSION'),
+    'a cache hand-off failure must not discard the first durable content delivery',
+  );
+});
+
+test('the detail body is handed off before comments, and a timeout is not reported as navigation', async () => {
+  const [collector, content, background] = await Promise.all([
+    readFile(new URL('../src/platforms/xhs/detailPackageCollector.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/content/index.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/linggan/background.js', import.meta.url), 'utf8'),
+  ]);
+  const readNote = collector.indexOf('const note = await collectNote');
+  const handoff = collector.indexOf('await options.onDetailReady(note)');
+  const comments = collector.indexOf('await collectComments');
+  assert.ok(readNote >= 0 && handoff > readNote && comments > handoff,
+    'the content body must reach its durable handoff before the slow comment crawl');
+  assert.match(content, /onDetailReady: queueDetailBeforeComments/);
+  assert.match(content, /contentDelivery \|\| await runtime\.submitContentDetail/);
+
+  const ready = background.indexOf('const ready = await waitForTabReady(tabId)');
+  const timeout = background.indexOf("stopReason: 'page_unavailable'", ready);
+  const observed = background.indexOf("kind: 'navigation_observed'", ready);
+  assert.ok(ready >= 0 && timeout > ready && observed > timeout,
+    'a readiness timeout records a stop; navigation is observed only after readiness succeeds');
+  assert.match(background, /tabUrl\.includes\(contentExternalId\).*tabUrl\.includes\(encodedContentId\)/s,
+    'a recovered tab must still identify the expected content, not only the XHS domain');
 });

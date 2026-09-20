@@ -166,6 +166,8 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../../database/migrations/0088_media_processing_concurrency_policy.sql"),
     "\n",
+    include_str!("../../../../database/migrations/0089_detail_page_session_replay_safety.sql"),
+    "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES\n",
     "('0001_scope_001_capture_evidence', 'a0deb8d5bf6cbd3bc0b8343691167fe02170abe7469f7ba270017dada442cd98'),\n",
     "('0002_local_001_discovery', '26ae29e0e00bddd2804aebc5576e8868936af746858e61cc24769579333ecdbe'),\n",
@@ -213,5 +215,6 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "('0085_comment_research_problem_pair_evaluation', '631acb353568569f7b315b0b682654e095f13c77d0852f3bfdd0af4e4ccac74b'),\n",
     "('0086_comment_research_v2_backlog_recall', '5435cd7e28c9e8bb7421c9c8659b4460ea462e30b3adff72e419b7cba8d5bd22'),\n",
     "('0087_cross_industry_detail_comment_policy', '1b5ea42c8360714f0da7ae2425df61d74d2afa94c421b28a66fba378043e2a5a'),\n",
-    "('0088_media_processing_concurrency_policy', 'fa33e15b88b98226914302e6adeb250242710479851b17eaecb1864879c2cbef');\n",
+    "('0088_media_processing_concurrency_policy', 'fa33e15b88b98226914302e6adeb250242710479851b17eaecb1864879c2cbef'),\n",
+    "('0089_detail_page_session_replay_safety', '7b7e5160467e8533cb213bbda1a71c661d63fd461aceb6a43528cb68f7dbe226');\n",
 );
