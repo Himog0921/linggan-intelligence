@@ -2177,14 +2177,33 @@ fn the_runtime_surface_holds_the_v7_type_ladder() {
     // RUNTIME-STATION-TABLE-001 把工位行、名册、运行边界三组类名换成 `.c-stn-*` 与
     // `.c-run-*`。前缀表必须跟着换：留着已经不存在的 `.c-roster` / `.c-bounds`，这条
     // 测试就会在一个空集合上通过——一条扫不到任何一行的检查，等于没有检查。
-    const RUNTIME_SELECTOR_PREFIXES: [&str; 7] = [
+    //
+    // RUNTIME-STATION-V7-2-001 把这一页重新铺了一遍，整页的类名都跟着换了：控制条
+    // （`.c-deck`）、接单仪器面（`.c-instr` / `.c-lane` / `.c-readout`）、区块头
+    // （`.c-sect`）、今日运行（`.c-ops`）、排程表（`.c-sched`）、右侧抽屉
+    // （`.c-rdrawer` / `.c-rd-`）。
+    //
+    // `.c-verdict` 留着，不是漏删：改写只把外壳换成 `.c-instr`，判定四态的色带仍是
+    // `.c-verdict-{ok,partial,blocked,unknown} .c-instr-head::before` 四条在用的规则。
+    // 真消失的是 `.c-factor`（0 行）——那一个留着才会空转。
+    // 表里每一条都至少命中一行；空转的检查等于没有检查，加前缀前先数一遍。
+    const RUNTIME_SELECTOR_PREFIXES: [&str; 16] = [
+        ".c-deck",
+        ".c-instr",
         ".c-verdict",
         ".c-lane",
-        ".c-factor",
+        ".c-readout",
+        ".c-sect",
+        ".c-ops",
+        ".c-op",
+        ".c-usage",
         ".c-stn",
         ".c-run",
+        ".c-sched",
         ".c-caps",
         ".c-cap",
+        ".c-rdrawer",
+        ".c-rd-",
     ];
     const BANNED: [&str; 7] = [
         "font-size:10px",

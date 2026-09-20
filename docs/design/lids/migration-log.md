@@ -403,3 +403,13 @@ Mog 明确将四区常驻设置改为单页+关键配置弹窗。复用 L1 Setti
 ## 2026-09-17 · COMMENT-STUDY-TABS-001 补齐 `PAGE-COMMENT-STUDY-REBUILD-001` 已批准的 5 个复核 Tab
 
 `/corpus/comments` 的复核区此前只有三个迷你统计框，未实现设计文档 §4 已批准的"概览、评论目标、待归并、用户问题、运行记录"5 个文字 Tab（`ADR-11`）。本包补齐，使用既有共享工作区骨架、既有 `.study-table` 滚动/表头/token 惯例与旧评论研究页沿用的 Serif 原声呈现（`--lgi-font-evidence`），不新增 Token、CMP 或 Scene。"评论目标"Tab 新增对 `linggan_material_comment.body_text` 的读取，直接在读取时核对 `linggan_material_comment_restriction`，冻结后被限制的来源如实显示限制说明而不是继续返回原文。技术状态词（`target.state`/`eligibility_state`/`resolution.state`/`problem.state`）全部补了中文标签，未识别取值原样显示。`cargo test -p linggan-api local_web::comment_study::tests --locked` 8 passed；隔离 PostgreSQL `test-comment-study-rebuild-postgres.sh` 15 passed（含来源限制后原文消失的新证明）。共享部署、真实浏览器逐 Tab 走查与 Mog 业务验收详见验收记录。
+
+## 2026-09-20 · RUNTIME-STATION-V7-2-001 执行工位内容区按 v7.2 稿复刻
+
+- **来源与事项**：Mog 2026-09-20 提供 `linggan-execution-station-v7-2-runtime-drawer.html` 并要求按其细节完整复刻到 `/collection/runtime`；同日当面拍板三项范围裁定（只复刻内容区 / 按 LANG-05 只留中文 / 抽屉换成真读得到的四块）。Issue #309。完整清单见 [`changes/runtime-station-v7-2-001-ui-change-manifest.md`](../changes/runtime-station-v7-2-001-ui-change-manifest.md)。
+- **落地的 v7 语法**：控制条（`.c-deck`，`auto | 1fr | auto` 三列，四格读数 + 动作区）、接单仪器面（`.c-instr`，深色表头 + 左通道列 + 右四读数格）、区段头（`.c-sect`，徽章 + `h2` + 右侧 meta）、六格读数条（`.c-ops`）、量级额度轨（`.c-usage`）、右侧运行概览抽屉（`.c-rdrawer` + 贴边把手）。这些语法全部在**本页内**建立，未升格为共享 CMP，也未被其它页面引用。
+- **Token**：不新增、不改值。新增样式只消费既有 `--lgi-*` 与 `DESIGN-010-UI-EX-01` 例外块内已登记的 `--c-*` 别名；新登记一个页内变量 `--c-runtime-drawer: 356px`（抽屉宽度，与稿中的 `--runtime-drawer-w` 同值）。`lids_tokens.css` 未改。
+- **材料**：深色只出现在两处局部面（仪器表头、抽屉执行结果卡），沿用 `M-05` 的既有深色面语法与 `--lgi-stream-*` 取值；稿中的「传感器」斜纹与点阵未引入。
+- **语言**：稿中描述性英文标签（`LIVE` / `SUCCESS` / `FAIL` / `TOP 3 · 24H` / 各模块英文小标题）一律不加，按 `LANG-05` 只留中文。
+- **数据诚实**：稿中抽屉三块内容（回传成功率与柱状图、补采失败任务计数、失败原因 TOP 3）在本系统**没有真实读模型**，按 `data-boundaries.md` 换成四块真读得到的内容；稿中数值一个都不出现。逐条偏离见清单 §4d。
+- **验证**：`cargo test -p linggan-api --bin linggan-api` **240 passed; 0 failed; 21 ignored**，与改动前基线一致；抽屉开合契约、把手与控制条动作按钮的几何关系、`.c-runtime` 子树溢出扫描均为脚本实测。**未部署、未推送、未合并**，本机 `:3000` 上尚不可见。

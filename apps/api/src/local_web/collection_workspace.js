@@ -536,3 +536,80 @@
     paint();
   });
 })();
+
+// 执行工位右侧的运行概览抽屉。
+//
+// 开合是纯视觉状态，不值得一次服务端往返，所以归客户端管：`data-open` 管位移，
+// `inert` 管可达性，body 上那个类管把手让位。
+//
+// `inert` 是这里唯一不能省的一步。抽屉只是被挪出屏幕，节点还在文档里——不加 `inert`，
+// 键盘 Tab 会一路走进一个看不见的面板，读屏也会念出屏幕外的那几条读数。所以关着的时候
+// 它整块退出可达性，而不是只靠 transform 藏起来。
+//
+// 初始态是关。稿子把它画成开着的只是为了展示那四块内容；第一帧就压住正文、没有脚本又
+// 永远关不掉的覆盖层，是这份稿子里最不该照抄的一处。
+(function () {
+  "use strict";
+
+  var panel = document.getElementById("c-runtime-drawer");
+  if (!panel) return;
+
+  var openers = document.querySelectorAll(
+    "[data-runtime-drawer-toggle],[data-runtime-drawer-open]"
+  );
+  var closeControl = panel.querySelector("[data-runtime-drawer-close]");
+  var lastTrigger = null;
+
+  function isOpen() {
+    return panel.hasAttribute("data-open");
+  }
+
+  function paint(open) {
+    if (open) {
+      panel.setAttribute("data-open", "");
+      panel.removeAttribute("inert");
+    } else {
+      panel.removeAttribute("data-open");
+      panel.setAttribute("inert", "");
+    }
+    document.body.classList.toggle("c-rdrawer-open", open);
+    Array.prototype.forEach.call(openers, function (opener) {
+      opener.setAttribute("aria-expanded", String(open));
+    });
+  }
+
+  function openPanel(trigger) {
+    lastTrigger = trigger || null;
+    paint(true);
+    if (closeControl) closeControl.focus();
+  }
+
+  function closePanel() {
+    paint(false);
+    // 焦点还回把它打开的那个控件。不还的话，焦点留在已经挪出屏幕的关闭按钮上，
+    // 下一次 Tab 从屏幕外开始。
+    if (lastTrigger && document.documentElement.contains(lastTrigger)) {
+      lastTrigger.focus();
+    }
+    lastTrigger = null;
+  }
+
+  Array.prototype.forEach.call(openers, function (opener) {
+    opener.addEventListener("click", function (event) {
+      event.preventDefault();
+      if (isOpen()) {
+        closePanel();
+      } else {
+        openPanel(opener);
+      }
+    });
+  });
+
+  if (closeControl) closeControl.addEventListener("click", closePanel);
+
+  document.addEventListener("keydown", function (event) {
+    if (event.key !== "Escape" || !isOpen()) return;
+    event.preventDefault();
+    closePanel();
+  });
+})();

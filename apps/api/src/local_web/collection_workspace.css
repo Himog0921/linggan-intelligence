@@ -7,7 +7,8 @@
  * readouts. See docs/design/changes/design-005-*.md for the itemised list. */
 :root {
   --c-drawer-width: min(1120px, 72vw); --c-drawer-wide: min(1380px, 86vw);
-  --c-now-aside: 450px; --c-stream-feed: 472px; --c-inspector: 430px; }
+  --c-now-aside: 450px; --c-stream-feed: 472px; --c-inspector: 430px;
+  --c-runtime-drawer: 356px; }
 
 /* DESIGN-010 · LIDS v7 preview, scoped to this page.
  *
@@ -239,7 +240,6 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
   .c-now { grid-template-columns:minmax(620px,1fr) var(--c-now-aside); }
 }
 @media (max-width:1180px) {
-  .c-factors { grid-template-columns:repeat(2,minmax(0,1fr)); }
   :root { --c-drawer-width:calc(100vw - var(--v7-side-width)); --c-drawer-wide:calc(100vw - var(--v7-side-width)); }
   .c-now { grid-template-columns:minmax(0,1fr); }
   .c-now-main { border-right:0; border-bottom:2px solid var(--v7-black); }
@@ -313,39 +313,64 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
   .c-task-facts { grid-template-columns:1fr; gap:11px; }
 }
 
-/* 第一层：一个判断，不是一串读数。整块底色，不用侧边色条。 */
-.c-verdict { padding:20px 24px 24px; background:var(--v7-sunken); }
-.c-verdict-partial { background:var(--v7-warn-soft); }
-.c-verdict-blocked { background:var(--v7-bad-soft); }
-.c-verdict-unknown { background:var(--v7-gray); }
-.c-verdict-head { display:flex; align-items:baseline; gap:20px; flex-wrap:wrap; }
-.c-verdict-state { flex:0 0 auto; color:var(--v7-black); font:var(--c-fw-bold) var(--c-fs-600)/1.2 var(--lgi-font-sans); letter-spacing:-.01em; }
-.c-verdict-why { margin:0; flex:1 1 320px; min-width:0; max-width:70ch; color:var(--v7-body); font-size:var(--c-fs-300); line-height:1.7; }
-.c-verdict-why-list { margin:0; padding:0; flex:1 1 320px; min-width:0; max-width:70ch; list-style:none; display:flex; flex-direction:column; gap:5px; }
-.c-verdict-why-list li { color:var(--v7-body); font-size:var(--c-fs-300); line-height:1.65; }
-.c-verdict-why-list b { margin-right:9px; color:var(--v7-black); font:var(--c-fw-bold) var(--c-fs-100) var(--lgi-font-mono); letter-spacing:.06em; }
-
-/* 两条 lane 分开判定：深度建档接不了、巡检还能跑，是真实情况。 */
-/* auto-fill 而非 auto-fit：宽屏下补空轨道，不把两条 lane 拉成 400px 宽——
- * 拉宽会让「深度建档」和它的判定词隔着半屏，眼睛得来回找。 */
-.c-lanes { margin-top:18px; display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,400px)); gap:0 48px; justify-content:start; border-top:var(--c-line-hair) solid var(--v7-line-strong); }
-.c-lane { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:12px 0; border-bottom:var(--c-line-hair) solid var(--v7-line); }
-.c-lane-name b { display:block; color:var(--v7-black); font-size:var(--c-fs-300); font-weight:var(--c-fw-medium); }
-.c-lane-name span { display:block; margin-top:3px; color:var(--v7-muted); font-size:var(--c-fs-100); }
-.c-lane-state { flex:0 0 auto; font:var(--c-fw-bold) var(--c-fs-100) var(--lgi-font-mono); letter-spacing:.05em; }
-.c-lane-ok { color:var(--v7-black); }
-.c-lane-blocked { color:var(--v7-red); }
-
-/* 第二层：第 5 问的四个分项。账号那一项永远是「不参与判定」。 */
-/* 分项是竖排的（标签在上、值在下），铺满宽度不伤阅读；lane 是左右对照的，拉宽会让
- * 名字和判定词隔着半屏，所以两者用不同的伸缩策略。 */
-.c-factors { margin:20px 0 0; display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:0; border-top:var(--c-line-hair) solid var(--v7-line-strong); }
-.c-factor { padding:13px 20px 13px 0; }
-.c-factor dt { color:var(--v7-muted); font:var(--c-fw-medium) var(--c-fs-200)/1.4 var(--lgi-font-sans); }
-.c-factor dd { margin:6px 0 0; color:var(--v7-black); font:var(--c-fw-bold) var(--c-fs-500)/1.2 var(--lgi-font-mono); letter-spacing:-.02em; }
-.c-factor p { margin:6px 0 0; color:var(--v7-muted); font-size:var(--c-fs-100); line-height:1.5; }
+/* RUNTIME-STATION-V7-2-001 · 第一层：一整块**仪器面**。
+ *
+ * 深色表头一句话给出判定与阻塞数量，左边逐条列出通道，右边四个读数。判定口径、四态
+ * 词表与每一句文案都与改写前逐字相同，换的只是外壳与排布。
+ *
+ * 深色只占表头这一条带：它是这一页唯一的仪器读数面，与观察决策流那一个深色面同源
+ * （M-05 局部例外），不是把整页做成暗色。表头左缘那道信号轨是这一块的定位标记，
+ * 不承担状态——状态全部由文字和徽章承担。 */
+.c-instr { min-width:0; border:var(--c-line-rail) solid var(--v7-black); background:var(--v7-white); box-shadow:var(--v7-brutal); }
+.c-instr-head { position:relative; min-height:calc(var(--c-cell) * 5.75); display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:var(--c-cell2); padding:0 var(--lgi-space-4); background:var(--lgi-stream-bg); color:var(--lgi-stream-ink); }
+.c-instr-head::before { content:""; position:absolute; left:0; top:0; bottom:0; width:var(--c-line-mode); background:var(--lgi-stream-dim); }
+/* 判定轨道按四态取深色面自己的那一档色。深色面不复用浅色画布的信号色：同一个面上
+ * 并存两套信号，读的人得先判断这块是哪一套。 */
+.c-verdict-ok .c-instr-head::before { background:var(--lgi-stream-mint); }
+.c-verdict-partial .c-instr-head::before { background:var(--lgi-stream-amber); }
+.c-verdict-blocked .c-instr-head::before { background:var(--lgi-stream-red); }
+.c-verdict-unknown .c-instr-head::before { background:var(--lgi-stream-dim); }
+.c-instr-badge { height:calc(var(--c-cell) * 3); padding:0 var(--c-cell); display:inline-flex; align-items:center; border:var(--c-line-hair) solid var(--lgi-stream-line); background:var(--lgi-stream-bg-raised); color:var(--lgi-stream-ink); font:var(--c-fw-bold) var(--c-fs-100)/1 var(--lgi-font-mono); letter-spacing:.05em; white-space:nowrap; }
+/* 阻塞数用整块实色：它是这一页唯一「现在就有人在等你处理」的数。 */
+.c-instr-badge-bad { background:var(--lgi-stream-red); border-color:var(--lgi-stream-red); color:var(--lgi-stream-bg); }
+.c-instr-state { color:var(--lgi-stream-ink); font:var(--c-fw-bold) var(--c-fs-400)/1.2 var(--lgi-font-sans); }
+.c-instr-code { color:var(--lgi-stream-muted); font:var(--c-fw-medium) var(--c-fs-100)/1 var(--lgi-font-mono); white-space:nowrap; }
+.c-instr-body { display:grid; grid-template-columns:minmax(0,1.35fr) minmax(0,1fr); align-items:stretch; }
+.c-instr-issues { min-width:0; padding:var(--lgi-space-4); border-right:var(--c-line-hair) solid var(--v7-line); }
+.c-instr-note { margin:0 0 var(--lgi-space-3); max-width:74ch; color:var(--v7-muted); font-size:var(--c-fs-200); line-height:1.65; }
+.c-instr-issue-list { display:grid; }
+/* 一条通道一行：标记 + 名字与说明 + 判定词 + 判定码。四个位置固定，扫一列就能比对，
+ * 不必逐行读句子。标记只画状态，不带文字（ADR-04）。 */
+.c-instr-issue { display:grid; grid-template-columns:var(--c-cell) minmax(0,1fr) auto auto; align-items:center; gap:var(--c-cell); min-height:calc(var(--c-cell) * 4.5); padding:var(--lgi-space-1) 0; border-bottom:var(--c-line-hair) solid var(--v7-line); }
+.c-instr-issue:last-child { border-bottom:0; }
+.c-lane-mark { width:var(--c-cell); height:var(--c-cell); display:block; background:var(--v7-unknown-fill); }
+.c-instr-issue[data-capacity-state="available"] .c-lane-mark { background:var(--v7-ok-fill); }
+.c-instr-issue[data-capacity-state="queueable"] .c-lane-mark { background:var(--v7-warn-fill); }
+.c-instr-issue[data-capacity-state="blocked"] .c-lane-mark { background:var(--v7-bad-fill); }
+.c-lane-name { min-width:0; color:var(--v7-body); font-size:var(--c-fs-200); line-height:1.5; }
+.c-lane-name b { color:var(--v7-black); font-weight:var(--c-fw-medium); }
+.c-lane-state { font:var(--c-fw-bold) var(--c-fs-100)/1 var(--lgi-font-mono); font-style:normal; letter-spacing:.05em; white-space:nowrap; }
+.c-lane-ok { color:var(--v7-ok); }
+.c-lane-blocked { color:var(--v7-bad); }
+/* 第二层：判定用到的四样资源各自的当前值。 */
+/* 四格读数与左边那列通道并排：左边回答「哪条通道不行」，右边回答「是不是少东西」。
+ * 值用等宽数字，二乘二排布，扫一眼就能比。 */
+.c-readout-col { min-width:0; }
+.c-readouts { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); margin:0; }
+.c-readout { position:relative; min-width:0; padding:var(--lgi-space-4); border-right:var(--c-line-hair) solid var(--v7-line); border-bottom:var(--c-line-hair) solid var(--v7-line); }
+.c-readout:nth-child(even) { border-right:0; }
+.c-readout:nth-child(n + 3) { border-bottom:0; }
+/* 风险余量那一格整块强调：四条读数里它是唯一说明「为什么现在不动」的。 */
+/* 被标记的那一格：顶端一条信号轨加一层极淡的底色。值是这一格里唯一要说的话，所以它
+ * 保持墨色——轨道负责说「先看这里」，让值本身变色等于替这格多喊了一句它没说过的话。 */
+.c-readout[data-active] { background:linear-gradient(180deg, var(--v7-soft-red), var(--v7-white) 54%); }
+.c-readout[data-active]::before { content:""; position:absolute; left:0; right:0; top:0; height:var(--c-line-mode); background:var(--v7-red); }
+/* 读数 → 限定语 → 名称。名称落在最后一行，与上方控制条那四个读数逐字同构。 */
+.c-readout b { display:block; color:var(--v7-black); font:var(--c-fw-bold) var(--c-fs-600)/1.15 var(--lgi-font-mono); font-variant-numeric:tabular-nums; letter-spacing:-.02em; }
+.c-readout span { display:block; margin-top:var(--lgi-space-1); color:var(--v7-muted); font-size:var(--c-fs-100); line-height:1.5; }
+.c-readout small { display:block; margin-top:var(--lgi-space-2); color:var(--v7-ghost); font-size:var(--c-fs-100); }
 /* 没有被检查的那一项不能与被检查过的看起来一样：显示成四项齐备就是改写资格。 */
-.c-factors-caveat { margin:16px 0 0; max-width:74ch; color:var(--v7-muted); font-size:var(--c-fs-200); line-height:1.65; }
+.c-readouts-caveat { margin:0; padding:var(--lgi-space-3) var(--lgi-space-4); border-top:var(--c-line-hair) solid var(--v7-line-strong); color:var(--v7-muted); font-size:var(--c-fs-100); line-height:1.6; }
 
 /* 第三层：构成这些值的对象。 */
 /* M-03 序列索引轨。v7 的六种材料共用同一套 8px 点阵，这是它被压成一维的那一态，语义是
@@ -920,8 +945,57 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 .c-task-panel .c-control-section-head { min-height:calc(var(--c-cell) * 5); }
 .c-task-panel .c-frozen-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
 
-/* Runtime: preserve the authoritative verdict, but use the V4 station hierarchy. */
-.c-verdict { border-top:var(--c-line-rail) solid var(--v7-black); border-bottom:var(--c-line-hair) solid var(--v7-black); }
+/* 控制条。三个动作都落在真存在的地方；四个读数与下方仪器面、今日运行出自同一次读取。
+ *
+ * 它是一个跟栏，不是一个卡片：左边报身份，中间报四个数，右边给三个动作。整条只有一层
+ * 硬阴影，和这一页其它区块同一个重量——控制条不因为是第一块就长得更重。 */
+.c-deck { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:stretch; border:var(--c-line-rail) solid var(--v7-black); background:var(--v7-white); box-shadow:var(--v7-brutal); }
+.c-deck-id { display:flex; align-items:center; gap:var(--c-cell); padding:0 var(--lgi-space-4); border-right:var(--c-line-hair) solid var(--v7-line-strong); }
+.c-deck-badge { height:calc(var(--c-cell) * 3); padding:0 var(--c-cell); display:inline-flex; align-items:center; background:var(--v7-black); color:var(--v7-white); font:var(--c-fw-bold) var(--c-fs-100)/1 var(--lgi-font-mono); letter-spacing:.05em; white-space:nowrap; }
+.c-deck-name { color:var(--v7-black); font:var(--c-fw-bold) var(--c-fs-300)/1 var(--lgi-font-sans); white-space:nowrap; }
+.c-deck-readouts { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); }
+.c-deck-readout { display:flex; flex-direction:column; justify-content:center; gap:var(--c-cell); min-width:0; min-height:calc(var(--c-cell) * 8); padding:var(--lgi-space-3) var(--lgi-space-4); border-right:var(--c-line-hair) solid var(--v7-line); }
+.c-deck-readout b { color:var(--v7-black); font:var(--c-fw-bold) var(--c-fs-400)/1.1 var(--lgi-font-mono); font-variant-numeric:tabular-nums; letter-spacing:-.02em; }
+.c-deck-readout span { color:var(--v7-muted); font-size:var(--c-fs-100); }
+/* 只有确认为坏的两档上色。「读不到」保持墨色：答不出不等于出了问题，把它画成红的
+ * 就是替系统说了一句它并不知道的话。 */
+.c-deck-readout[data-state="partial"] b { color:var(--v7-warn); }
+.c-deck-readout[data-state="blocked"] b { color:var(--v7-bad); }
+.c-deck-actions { display:flex; align-items:center; gap:var(--c-cell); padding:0 var(--lgi-space-4); }
+.c-deck-actions .c-btn { white-space:nowrap; }
+
+/* 区块头。徽章 + 标题 + 右侧一句现状，三者一行；高度固定，好让这一页几块的标题落在
+ * 同一水平线上，扫读时不必重新找标题。 */
+.c-sect { min-width:0; }
+.c-sect-head { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:var(--c-cell2); min-height:calc(var(--c-cell) * 5.5); padding:0 var(--lgi-space-3); border-bottom:var(--c-line-hair) solid var(--v7-black); }
+.c-sect-head h2 { margin:0; color:var(--v7-black); font:var(--c-fw-bold) var(--c-fs-400)/1.2 var(--lgi-font-sans); letter-spacing:-.01em; }
+.c-sect-badge { height:calc(var(--c-cell) * 3); padding:0 var(--c-cell); display:inline-flex; align-items:center; border:var(--c-line-hair) solid var(--v7-line-strong); background:var(--v7-white); color:var(--v7-muted); font:var(--c-fw-bold) var(--c-fs-100)/1 var(--lgi-font-mono); letter-spacing:.05em; white-space:nowrap; }
+.c-sect-badge.ink { border-color:var(--v7-black); background:var(--v7-black); color:var(--v7-white); }
+.c-sect-badge.soft { border-style:dashed; color:var(--v7-ghost); }
+.c-sect-meta { color:var(--v7-muted); font-size:var(--c-fs-200); text-align:right; }
+
+/* 今日运行：六格等宽读数。格子的宽度不跟着内容走——六格是六个并列的事实，谁宽谁窄
+ * 会被读成重要性排序，而这个排序是排版给的，不是数据给的。 */
+.c-ops { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); margin:0; }
+.c-op { display:flex; flex-direction:column; min-width:0; min-height:calc(var(--c-cell) * 14); padding:var(--lgi-space-4) var(--lgi-space-3); border-right:var(--c-line-hair) solid var(--v7-line); }
+.c-op:last-child { border-right:0; }
+.c-op dt { color:var(--v7-muted); font-size:var(--c-fs-100); }
+.c-op dd { margin:var(--c-cell) 0 0; color:var(--v7-black); font:var(--c-fw-bold) var(--c-fs-600)/1.1 var(--lgi-font-mono); font-variant-numeric:tabular-nums; letter-spacing:-.02em; }
+.c-op p { margin:auto 0 0; padding-top:var(--c-cell); color:var(--v7-ghost); font-size:var(--c-fs-100); line-height:1.5; }
+
+/* 额度：读数是「已用/上限」，轨道是它的粗读刻度。格子数与上限之间没有任何换算约定
+ * ——上限换了不用改这里，格子只表示比例。 */
+/* 轨道宽度是定值，装它的格子却跟着卡片宽度缩。少了这道 100% 上限，轨道会顶出格子
+ * 一个边距的宽度——格子越窄越明显，而且被裁掉的是读数右边的那个数（上限）。 */
+.c-usage { display:inline-flex; flex-direction:column; gap:var(--c-cell); min-width:0; max-width:100%; }
+.c-usage-value { color:var(--v7-black); font-family:var(--lgi-font-mono); font-variant-numeric:tabular-nums; }
+.c-usage-track { display:grid; grid-template-columns:repeat(12,minmax(0,1fr)); gap:var(--c-line-hair); width:calc(var(--c-cell) * 11); max-width:100%; }
+.c-usage-seg { height:var(--lgi-space-1); background:var(--v7-sunken); }
+.c-usage-seg.on { background:var(--v7-black); }
+/* 用尽是准入拒绝的来源。语气沿用这张表既有的那一档（`.c-tg-warn` 的橙），不另起一个
+ * 更重的颜色：同一张表里同一个意思用两种色，读的人会以为是两件事。 */
+.c-tg-number-value.c-tg-warn .c-usage-value { color:var(--v7-warn); }
+.c-tg-number-value.c-tg-warn .c-usage-seg.on { background:var(--v7-warn-fill); }
 
 /* RUNTIME-STATION-TABLE-001 · 执行工位：一台机器一行，展开即管理。
  * 复用目标目录宽表的单元格语法，不另写第二套表格实现；两张表的栅格列宽住在
@@ -965,13 +1039,8 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 .c-stn-unclaimed-row .c-stn-form{margin:0}
 /* 运行读数：一排读数替换掉此前六个并列区块，其中五个在正常日子里全是 0。 */
 .c-run{min-width:0}
-.c-run-readouts{display:grid;grid-template-columns:repeat(auto-fit,minmax(152px,1fr));gap:var(--lgi-space-5);margin:var(--lgi-space-4) var(--lgi-space-3)}
-.c-run-readouts>div{min-width:0}
-.c-run-readouts dt{color:var(--lgi-muted);font-size:var(--lgi-text-label)}
-.c-run-readouts dd{margin:var(--lgi-space-1) 0 0;color:var(--lgi-ink);font:700 var(--lgi-text-section)/1.1 var(--lgi-font-mono);font-variant-numeric:tabular-nums}
-.c-run-readouts p{margin:var(--lgi-space-1) 0 0;color:var(--lgi-muted);font-size:var(--lgi-text-label);line-height:var(--lgi-lh-body)}
 .c-run-list{margin:0 var(--lgi-space-3) var(--lgi-space-4)}
-.c-run-list h3{margin:0 0 var(--lgi-space-2);color:var(--lgi-ink);font-size:var(--lgi-text-label);font-weight:700}
+.c-run-list-head{margin:0 0 var(--lgi-space-2);color:var(--lgi-ink);font-size:var(--lgi-text-label);font-weight:700}
 .c-run-row{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:var(--lgi-space-3);padding:var(--lgi-space-3) 0;border-bottom:1px solid var(--lgi-hairline)}
 .c-run-name b{color:var(--lgi-ink);font-size:var(--lgi-text-body);font-weight:700}
 .c-run-name span{margin-left:var(--lgi-space-2);color:var(--lgi-muted);font-size:var(--lgi-text-label)}
@@ -980,8 +1049,110 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 /* 通道行的原因码是合同字面取值，按 LANG-05 第 2 类作为中文旁边的小字保留。 */
 .c-lane-code{margin-left:var(--lgi-space-2);color:var(--lgi-muted);font:600 var(--lgi-text-label)/1 var(--lgi-font-mono)}
 .c-lane-queueable{color:var(--lgi-warning)}
+
+/* 排程表：九列，比工位表多一列「上次开工」，少一列「状态」。
+ *
+ * 它复用目标目录宽表的单元格语法，不另写第二套表格实现。九列各有下限，窄屏时整表横向
+ * 滚动（滚动容器是上面那个 `.c-tg-table-scroll`）——把列压到读不出来换来的「不滚动」
+ * 不是好处。
+ *
+ * 行不可点：这里没有可展开的东西，整行给 `cursor:pointer` 会承诺一个不存在的动作。 */
+.c-sched-grid{display:grid;grid-template-columns:40px minmax(150px,1fr) minmax(0,84px) minmax(0,88px) minmax(0,96px) minmax(0,96px) minmax(0,96px) minmax(0,96px) minmax(0,88px);gap:var(--lgi-space-2);min-width:900px;align-items:center}
+.c-tg-item.c-sched-grid{cursor:default}
+.c-sched-act a{color:var(--v7-black);font-size:var(--lgi-text-label);text-decoration:underline;text-underline-offset:3px}
+.c-sched-act a:hover{color:var(--lgi-signal-ink)}
+
 /* 整页竖向节奏。工位表是主体，因此它上下的留白比其它区块大一档。 */
-.c-runtime{display:grid;gap:var(--lgi-space-8);padding:var(--lgi-space-6) 0}
+/* 顶部比常规留白多一格：右侧那个固定的抽屉把手就悬在这条缝里。稿子里把手落在一片
+ * 页边空白上，而这一页的正文是铺满的——不留出这条缝，把手第一眼就压在控制条上面。 */
+.c-runtime{display:grid;gap:var(--lgi-space-8);padding:calc(var(--c-cell) * 5) 0 var(--lgi-space-6)}
+
+/* ---------------------------------------------------------------------------
+ * 右侧抽屉：运行概览
+ *
+ * 外观、位置与开合方式照 v7.2 稿：固定在右侧、贴边一个把手、Esc 可关。与稿子的差别在
+ * 内容与初始态上，都写在 station_view.rs 那一节的文档注释里。
+ *
+ * 它是一块**覆盖层**，不是页面里的一栏：因此它用固定定位、自己滚动，并且关着的时候带
+ * `inert`（由脚本加上），屏幕外的链接不进 Tab 序列。稿子默认把它画成开着的，这里默认关。
+ * --------------------------------------------------------------------------- */
+.c-rdrawer {
+  position:fixed; z-index:var(--lgi-z-drawer); top:var(--v7-header-height); right:0;
+  display:flex; flex-direction:column; box-sizing:border-box;
+  width:min(var(--c-runtime-drawer), calc(100vw - var(--v7-side-width) - var(--lgi-space-6)));
+  height:calc(100vh - var(--v7-header-height));
+  border-left:var(--c-line-rail) solid var(--v7-black);
+  background:var(--v7-white);
+  /* 硬边阴影，方向按贴右边的面板改：稿子那片柔和的 rgba 光晕没有对应 token，而这套
+   * 语言里所有浮起的面都是硬边的。 */
+  box-shadow:calc(var(--lgi-space-1) * -1) var(--lgi-space-1) 0 var(--v7-black);
+  transform:translateX(calc(100% + var(--lgi-space-5)));
+  pointer-events:none;
+  transition:transform var(--lgi-duration-panel) var(--v7-ease);
+}
+.c-rdrawer[data-open] { transform:translateX(0); pointer-events:auto; }
+.c-rdrawer-head { display:flex; align-items:center; justify-content:space-between; gap:var(--c-cell); min-height:calc(var(--c-cell) * 6.5); padding:0 var(--lgi-space-4); border-bottom:var(--c-line-hair) solid var(--v7-black); }
+.c-rdrawer-title { color:var(--v7-black); font:var(--c-fw-bold) var(--c-fs-400)/1 var(--lgi-font-sans); }
+.c-rdrawer-close { width:calc(var(--c-cell) * 3.5); height:calc(var(--c-cell) * 3.5); display:inline-flex; align-items:center; justify-content:center; padding:0; border:var(--c-line-hair) solid var(--v7-line-strong); background:var(--v7-white); color:var(--v7-muted); font:var(--c-fw-regular) var(--c-fs-400)/1 var(--lgi-font-sans); cursor:pointer; }
+.c-rdrawer-close:hover { border-color:var(--v7-black); color:var(--v7-black); }
+.c-rdrawer-body { flex:1; min-height:0; overflow:auto; }
+.c-rdrawer-foot { margin:0; padding:var(--lgi-space-3) var(--lgi-space-4); border-top:var(--c-line-hair) solid var(--v7-line); color:var(--v7-muted); font-size:var(--c-fs-100); line-height:1.6; }
+
+/* 把手：关着的时候它是这一页唯一说得出「这里还有个抽屉」的东西。开着时它让位，
+ * 免得压在抽屉左缘上。 */
+/* 把手贴着固定头的下沿挂，高度比稿子矮一格：稿子的 42px 是按它那片 388px 页边空白画的，
+ * 这一页没有那片空白，42px 会一路压到控制条的动作按钮上。34px 正好落进控制条上方的
+ * 留白里（见 `.c-runtime` 的顶部内边距），宽度和稿子一致。 */
+.c-rdrawer-tab { position:fixed; z-index:calc(var(--lgi-z-drawer) - 1); right:0; top:var(--v7-header-height); width:calc(var(--c-cell) * 14); height:calc(var(--c-cell) * 4.25); padding:0; border:var(--c-line-rail) solid var(--v7-black); border-right:0; background:var(--v7-black); color:var(--v7-white); font:var(--c-fw-bold) var(--c-fs-200)/1 var(--lgi-font-sans); cursor:pointer; box-shadow:calc(var(--lgi-space-1) * -1) var(--lgi-space-1) 0 var(--v7-black); transition:transform var(--lgi-duration-panel) var(--v7-ease), opacity var(--lgi-duration-state) var(--v7-ease); }
+.c-rdrawer-tab:hover { background:var(--v7-red-hover); }
+body.c-rdrawer-open .c-rdrawer-tab { transform:translateX(100%); opacity:0; pointer-events:none; }
+
+.c-rd-sec { border-bottom:var(--c-line-hair) solid var(--v7-line); }
+.c-rd-sec:last-child { border-bottom:0; }
+.c-rd-sec-head { margin:0; padding:var(--lgi-space-4) var(--lgi-space-4) var(--c-cell); color:var(--v7-black); font:var(--c-fw-bold) var(--c-fs-200)/1 var(--lgi-font-sans); }
+.c-rd-meta { margin:0; padding:0 var(--lgi-space-4) var(--lgi-space-3); color:var(--v7-muted); font-size:var(--c-fs-100); line-height:1.6; }
+.c-rd-meta b { color:var(--v7-black); font-family:var(--lgi-font-mono); }
+.c-rd-note { margin:0; padding:0 var(--lgi-space-4) var(--lgi-space-4); color:var(--v7-muted); font-size:var(--c-fs-200); line-height:1.7; }
+.c-rd-routes, .c-rd-pauses, .c-rd-card { margin:0 var(--lgi-space-4) var(--lgi-space-4); }
+
+/* 第一块：逐条通道。与主页面仪器面同源，只是这里写的是「这条通道要去干什么」——
+ * 上面那块在通道被挡住时写的是原因，用途在那一行被挤掉了。 */
+.c-rd-rule { padding:0 var(--lgi-space-4) var(--lgi-space-3); }
+.c-rd-rule-head { display:flex; align-items:center; gap:var(--c-cell); min-width:0; }
+.c-rd-rule-head b { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--v7-black); font-size:var(--c-fs-200); font-weight:var(--c-fw-medium); }
+.c-rd-rule p { margin:var(--c-cell) 0 0; color:var(--v7-muted); font-size:var(--c-fs-100); line-height:1.6; }
+
+/* 第二块：近 7 天执行结果。深色卡是这一页的第二个深色面，与仪器面表头同一套 token
+ * ——同一页上两个深色面各用一套色，读的人会以为是两种东西。 */
+.c-rd-card { padding:var(--lgi-space-4); background:var(--lgi-stream-bg); color:var(--lgi-stream-ink); }
+.c-rd-card-meta { margin:0; color:var(--lgi-stream-muted); font-size:var(--c-fs-100); line-height:1.6; }
+.c-rd-card .c-rd-note { padding:var(--lgi-space-3) 0 0; color:var(--lgi-stream-muted); }
+.c-rd-figures { display:grid; margin:var(--lgi-space-4) 0 0; }
+.c-rd-figures > div { padding:var(--lgi-space-3) 0; border-top:var(--c-line-hair) solid var(--lgi-stream-line); }
+.c-rd-figures dt { color:var(--lgi-stream-muted); font-size:var(--c-fs-100); }
+.c-rd-figures dd { margin:var(--c-cell) 0 0; color:var(--lgi-stream-ink); font:var(--c-fw-bold) var(--c-fs-500)/1 var(--lgi-font-mono); font-variant-numeric:tabular-nums; }
+.c-rd-figures p { margin:var(--c-cell) 0 0; color:var(--lgi-stream-dim); font-size:var(--c-fs-100); line-height:1.5; }
+
+/* 第三块：两个真入口。它们是链接，所以长得像链接——不做成按钮，按下去会跳走而不是
+ * 在这一页上做一件事。 */
+.c-rd-routes { display:grid; }
+.c-rd-route { display:block; padding:var(--lgi-space-3) var(--lgi-space-4); border:var(--c-line-hair) solid var(--v7-line-strong); color:var(--v7-black); text-decoration:none; }
+.c-rd-route + .c-rd-route { border-top:0; }
+.c-rd-route b { display:block; font-size:var(--c-fs-200); font-weight:var(--c-fw-medium); }
+.c-rd-route span { display:block; margin-top:var(--c-cell); color:var(--v7-muted); font-size:var(--c-fs-100); line-height:1.6; }
+.c-rd-route:hover { border-color:var(--v7-black); }
+.c-rd-route:hover b { text-decoration:underline; text-underline-offset:3px; }
+
+/* 第四块：积压与重试。三个总数已经在「今天在跑什么」里，这里只补上面没有的两件。 */
+.c-rd-pauses { display:grid; gap:var(--c-cell); }
+.c-rd-pause { padding:var(--lgi-space-3) var(--lgi-space-3) var(--lgi-space-3) var(--c-cell2); border-left:var(--c-line-mode) solid var(--v7-bad-fill); background:var(--v7-bad-soft); }
+.c-rd-pause b { display:block; color:var(--v7-black); font-size:var(--c-fs-200); font-weight:var(--c-fw-medium); }
+.c-rd-pause span { display:block; margin-top:var(--c-cell); color:var(--v7-muted); font-size:var(--c-fs-100); line-height:1.5; }
+
 @media (max-width:900px){
   .c-stn-panel{grid-template-columns:minmax(0,1fr)}
+  .c-sched-grid{grid-template-columns:32px minmax(120px,1fr) minmax(0,72px) minmax(0,76px) minmax(0,84px) minmax(0,84px) minmax(0,84px) minmax(0,84px) minmax(0,76px);min-width:0}
+}
+@media (prefers-reduced-motion:reduce){
+  .c-rdrawer,.c-rdrawer-tab { transition:none; }
 }
