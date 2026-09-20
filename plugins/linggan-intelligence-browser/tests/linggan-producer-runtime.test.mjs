@@ -538,7 +538,7 @@ test('background immediately auto-claims and executes bounded baseline plus fixe
   assert.match(background, /COLLECT_CURRENT_CONTENT/);
   assert.match(background, /queueCachedDetailPageSessionLane/);
   assert.match(background, /COLLECT_NOTE_FULL/);
-  assert.match(background, /pageSessionPlan: claim\.pageSessionPlan/);
+  assert.match(background, /pageSessionPlan: navigationGrant\?\.pageSessionPlan \|\| claim\.pageSessionPlan/);
   assert.match(background, /const station = await checkInStationOnce\(\)/);
   assert.doesNotMatch(background, /refreshPassiveAccountEligibilityFromOpenXhsTab/);
   assert.doesNotMatch(background, /PROBE_CURRENT_ACCOUNT_ELIGIBILITY/);

@@ -6,11 +6,13 @@ use linggan_contracts::{
     parse_producer_attempt, parse_producer_submission, parse_producer_task_spec,
 };
 use linggan_evidence::{
-    AccountEligibilityObservation, DispatchDecision, RuntimeAttemptOutcome,
-    RuntimeSubmissionOutcome, activate_installation_credential, bind_observation_account,
-    content_reobservation, decide_dispatch, issue_work_order_lease, read_content_reobservation,
-    report_account_eligibility, rotate_installation_credential, set_station_accepting,
-    start_producer_attempt, submit_producer_package,
+    AccountEligibilityObservation, DetailPageSessionProgress, DispatchDecision,
+    RuntimeAttemptOutcome, RuntimeSubmissionOutcome, activate_installation_credential,
+    bind_observation_account, content_reobservation, decide_dispatch, grant_detail_page_session,
+    issue_work_order_lease, read_content_reobservation, record_detail_page_session_navigation,
+    record_detail_page_session_progress, report_account_eligibility,
+    rotate_installation_credential, set_station_accepting, start_producer_attempt,
+    submit_producer_package,
 };
 use uuid::Uuid;
 
@@ -200,6 +202,167 @@ async fn reobservation_uses_the_existing_authorized_lease_path_without_new_media
         media_task_count, 0,
         "a normal reobservation never creates media work"
     );
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn detail_page_grant_replays_one_request_and_suppresses_a_new_request_for_the_same_work() {
+    let database = proof_database("detail_page_session_grant_idempotency").await;
+    let content_external_id = "note-detail-session-grant";
+    submit_package(
+        &database,
+        "content_detail",
+        serde_json::json!({"contentExternalId":content_external_id}),
+        serde_json::json!({
+            "kind":"content_detail",
+            "sourceObject":{"platform":"xhs","type":"content","externalId":content_external_id},
+            "payload":{"title":"首次观察","likes":1,"publicCommentCount":0,"collects":0,"shares":0}
+        }),
+    )
+    .await;
+    submit_profile_discovery(&database, content_external_id).await;
+    let content_public_ref: Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content WHERE platform='xhs' AND content_external_id=$1",
+    )
+    .bind(content_external_id)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let fixture = seed_authorized_material_context(&database, content_public_ref).await;
+    let queued = content_reobservation(&database, content_public_ref)
+        .await
+        .expect("the bounded reobservation creates its one detail work order");
+    assert_eq!(queued.execution, "QUEUED");
+    let dispatched = decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .unwrap();
+    let task_id = match dispatched {
+        DispatchDecision::Dispatch { task_id, .. } => task_id,
+        other => panic!("expected detail dispatch, got {other:?}"),
+    };
+    let request_id = Uuid::new_v4();
+    let first = grant_detail_page_session(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+        task_id,
+        request_id,
+    )
+    .await
+    .unwrap();
+    let replay = grant_detail_page_session(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+        task_id,
+        request_id,
+    )
+    .await
+    .unwrap();
+    let suppressed = grant_detail_page_session(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+        task_id,
+        Uuid::new_v4(),
+    )
+    .await
+    .unwrap();
+    let session_ref = match first {
+        linggan_evidence::DetailPageSessionGrant::Authorized { session_ref, .. } => session_ref,
+        other => panic!("first grant must authorize, got {other:?}"),
+    };
+    record_detail_page_session_navigation(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+        task_id,
+        session_ref,
+    )
+    .await
+    .expect("only the owner of the original task can record the observed tab");
+    record_detail_page_session_progress(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+        task_id,
+        session_ref,
+        DetailPageSessionProgress::DeliveryPending,
+    )
+    .await
+    .expect("the detail body may be pending delivery while comment collection continues");
+    assert!(matches!(
+        replay,
+        linggan_evidence::DetailPageSessionGrant::Replay { session_ref: replay_ref, .. }
+        if replay_ref == session_ref
+    ));
+    assert!(matches!(
+        suppressed,
+        linggan_evidence::DetailPageSessionGrant::Suppressed { session_ref: suppressed_ref, reason_code: "session_already_authorized" }
+        if suppressed_ref == session_ref
+    ));
+    let sessions: i64 = sqlx::query_scalar("SELECT count(*) FROM collection_detail_page_session")
+        .fetch_one(database.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        sessions, 1,
+        "one work/material owns exactly one server session"
+    );
+    let observation: (String, bool) = sqlx::query_as(
+        "SELECT state,navigation_observed_at IS NOT NULL \
+         FROM collection_detail_page_session WHERE session_ref=$1",
+    )
+    .bind(session_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(observation.0, "delivery_pending");
+    assert!(
+        observation.1,
+        "a recorded Chrome tab is distinct from authorization"
+    );
+    record_detail_page_session_progress(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+        task_id,
+        session_ref,
+        DetailPageSessionProgress::Stopped {
+            reason: "page_unavailable",
+        },
+    )
+    .await
+    .expect("a failed page session becomes terminal instead of being silently replayed");
+    let stopped: (String, Option<String>, bool) = sqlx::query_as(
+        "SELECT state,stop_reason,finished_at IS NOT NULL \
+         FROM collection_detail_page_session WHERE session_ref=$1",
+    )
+    .bind(session_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(stopped.0, "stopped");
+    assert_eq!(stopped.1.as_deref(), Some("page_unavailable"));
+    assert!(stopped.2);
+    let stopped_replay = grant_detail_page_session(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+        task_id,
+        request_id,
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        stopped_replay,
+        linggan_evidence::DetailPageSessionGrant::Suppressed { session_ref: replay_ref, reason_code: "session_stopped" }
+        if replay_ref == session_ref
+    ));
 }
 
 #[tokio::test]

@@ -5,6 +5,7 @@
 //! create memberships.  Those mutations remain in their dedicated transactional acceptors.
 
 use crate::{
+    comment_study_batch_acceptance::reject_study_batch_dispatch,
     comment_study_model_dispatch::{
         ReservedStudyModelCall, StudyModelDispatchError, reserve_study_batch_model_call,
     },
@@ -76,23 +77,86 @@ pub async fn call_study_batch_model(
     let response = adapter.call(&provider).await;
     match response {
         Ok(response) if response.ok => {
-            let output = parse_provider_json(response.text.as_deref())?;
+            // Usage is banked before the text is judged. The checkpoint used to sit after
+            // `parse_provider_json(..)?`, so a response we could not parse returned early and its
+            // real, billed usage was never recorded.
             checkpoint_invocation_usage(database, reservation.invocation_ref, Some(&response))
                 .await?;
-            Ok(StudyBatchModelOutput {
-                reservation,
-                output,
-            })
+            match parse_provider_json(response.text.as_deref()) {
+                Ok(output) => Ok(StudyBatchModelOutput {
+                    reservation,
+                    output,
+                }),
+                Err(error) => {
+                    finish_unparsable_output(database, reservation.invocation_ref, &response)
+                        .await?;
+                    settle_dispatched_batch(
+                        database,
+                        batch_ref,
+                        lease_token,
+                        Some("model_invalid_output"),
+                    )
+                    .await;
+                    Err(error)
+                }
+            }
         }
         Ok(response) => {
+            let failure_code = response.failure_code.clone();
             finish_provider_failure(database, reservation.invocation_ref, Some(&response)).await?;
+            settle_dispatched_batch(database, batch_ref, lease_token, failure_code.as_deref())
+                .await;
             Err(StudyModelRunnerError::ProviderFailure)
         }
         Err(error) => {
             finish_provider_error(database, reservation.invocation_ref, &error).await?;
+            settle_dispatched_batch(database, batch_ref, lease_token, Some(error.code())).await;
             Err(StudyModelRunnerError::Model(error))
         }
     }
+}
+
+/// Spends one bounded attempt for the batch this call just failed.
+///
+/// Without it the targets stay `running` until the lease expires, and lease recovery alone lets a
+/// note whose every response exceeds a transport limit re-dispatch on real, billed calls forever.
+/// Settlement must never mask the provider failure that caused it: a lease that expired while the
+/// provider was still working leaves nothing to lock here, and recovery counts the attempt instead.
+async fn settle_dispatched_batch(
+    database: &Database,
+    batch_ref: Uuid,
+    lease_token: Uuid,
+    provider_failure_code: Option<&str>,
+) {
+    if let Err(error) =
+        reject_study_batch_dispatch(database, batch_ref, lease_token, provider_failure_code).await
+    {
+        println!(
+            "linggan worker: comment-study batch {batch_ref} was not settled in process \
+             ({error}); expired-lease recovery will count the attempt"
+        );
+    }
+}
+
+async fn finish_unparsable_output(
+    database: &Database,
+    invocation_ref: Uuid,
+    response: &PiResponse,
+) -> Result<(), ModelError> {
+    let mut result = safe_result(response);
+    if let Some(object) = result.as_object_mut() {
+        object.insert("ok".into(), json!(false));
+        object.insert("failureCode".into(), json!("model_invalid_output"));
+    }
+    finish_invocation(
+        database,
+        invocation_ref,
+        Some(response),
+        false,
+        Some("model_invalid_output"),
+        &result,
+    )
+    .await
 }
 
 async fn frozen_batch_manifest(

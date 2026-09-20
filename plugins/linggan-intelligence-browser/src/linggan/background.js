@@ -4,6 +4,8 @@ import {
   activateLingganInstallationCredential,
   checkInLingganStation,
   claimLingganDispatch,
+  grantLingganDetailPageSession,
+  reportLingganDetailPageSessionNavigation,
   claimLingganMediaAcquisition,
   claimedTaskAccountDecision,
   createLocalAttempt,
@@ -24,6 +26,7 @@ import { localMediaOutbox, localProducerOutbox } from './localProducerOutbox.js'
 import { createManualRuntimeTask, packageDiscovery } from './producerRuntime.js';
 import {
   detailPageSessionStore,
+  detailPageNavigationGrantStore,
   packageDetailPageSessionLane,
 } from './detailPageSessionStore.js';
 import { waitForStableTab } from './tabReadiness.js';
@@ -822,6 +825,75 @@ async function markDetailPageSessionTaskQueued(message = {}) {
   return { success: marked };
 }
 
+function isDetailPageSessionCapability(capability) {
+  return ['content_detail', 'media_slots', 'comments', 'replies'].includes(capability);
+}
+
+/**
+ * A dispatched task is replayable; a Chrome navigation is not.  This function
+ * ties them together without treating server authorization as proof of a page
+ * load.  The IndexedDB transaction in `consume` completes before this returns
+ * `shouldNavigate: true`, so two MV3 wakeups cannot both create a window.
+ */
+async function prepareDetailPageNavigation({ claim, taskSpec, installKey, installationCredential }) {
+  const existing = await detailPageNavigationGrantStore.get({ leaseRef: claim.leaseRef, taskSpec });
+  if (existing && ['page_opened', 'action_dispatched'].includes(existing.state)) {
+    const tabId = Number(existing.tabId || 0);
+    const contentExternalId = String(taskSpec?.target?.contentExternalId || '').trim();
+    if (tabId) {
+      const tab = await chrome.tabs.get(tabId).catch(() => null);
+      const tabUrl = String(tab?.url || '');
+      const encodedContentId = encodeURIComponent(contentExternalId);
+      if (tab && contentExternalId
+          && /^https:\/\/([^.]+\.)?xiaohongshu\.com\//i.test(tabUrl)
+          && (tabUrl.includes(contentExternalId) || tabUrl.includes(encodedContentId))) {
+        // The page belongs to this extension-managed session.  Do not send a
+        // second collector action after a worker restart: the original content
+        // script can continue and its durable outbox is independently retryable.
+        return {
+          shouldNavigate: false, recovered: true, tabId, windowId: existing.windowId || null,
+          sessionRef: existing.sessionRef || null,
+        };
+      }
+    }
+    return {
+      shouldNavigate: false, suppressed: true, reason: 'navigation_state_unknown',
+      sessionRef: existing.sessionRef || null,
+    };
+  }
+  const prepared = existing || await detailPageNavigationGrantStore.prepare({
+    leaseRef: claim.leaseRef,
+    taskSpec,
+  });
+  const grant = await grantLingganDetailPageSession({
+    installKey,
+    installationCredential,
+    taskId: taskSpec.taskId,
+    grantRequestId: prepared.grantRequestId,
+    health: claim.health,
+  });
+  if (!grant.granted) {
+    return { shouldNavigate: false, suppressed: true, reason: grant.reasonCode || grant.outcome };
+  }
+  await detailPageNavigationGrantStore.attachServerGrant({
+    grantKey: prepared.grantKey,
+    sessionRef: grant.sessionRef,
+    plan: grant.pageSessionPlan,
+  });
+  const consumed = await detailPageNavigationGrantStore.consume({
+    grantKey: prepared.grantKey,
+    sessionRef: grant.sessionRef,
+  });
+  return {
+    shouldNavigate: consumed.shouldNavigate,
+    suppressed: !consumed.shouldNavigate,
+    reason: consumed.shouldNavigate ? '' : 'navigation_already_consumed',
+    grantKey: prepared.grantKey,
+    sessionRef: grant.sessionRef,
+    pageSessionPlan: grant.pageSessionPlan,
+  };
+}
+
 async function runDispatchedTask() {
   const readiness = await readLingganLocalReadiness();
   if (!readiness.reachable) {
@@ -880,7 +952,7 @@ async function runDispatchedTask() {
   // The first content_detail task opens the signed page and captures the server-approved lanes.
   // Later sequential tasks from the same Work Order reuse those persisted facts, but still form
   // their own Task/Attempt/Package/Receipt only after they are actually claimed.
-  if (['content_detail', 'media_slots', 'comments', 'replies'].includes(capability)) {
+  if (isDetailPageSessionCapability(capability)) {
     let cached;
     try {
       cached = await queueCachedDetailPageSessionLane({
@@ -896,11 +968,72 @@ async function runDispatchedTask() {
       });
     }
     if (cached) return { ...cached, nextPollAfterSeconds: claim.nextPollAfterSeconds };
+
+    // Only the first `content_detail` task is permitted to own a page.  A
+    // cache miss in a later lane is an execution-uncertainty fact, never an
+    // excuse to visit the note again for comments, replies or media.
+    if (capability !== 'content_detail' || !claim.pageSessionPlan) {
+      return {
+        success: true,
+        state: 'detail_page_session_data_unavailable',
+        executed: false,
+        leaseRef: claim.leaseRef,
+        nextPollAfterSeconds: claim.nextPollAfterSeconds,
+        message: '本机没有可交付的同页结果；已停止自动重开详情页，等待明确恢复决定。',
+      };
+    }
+  }
+  let navigationGrant = null;
+  if (capability === 'content_detail' && claim.pageSessionPlan) {
+    try {
+      navigationGrant = await prepareDetailPageNavigation({
+        claim: { ...claim, health: readiness.health },
+        taskSpec: spec,
+        installKey,
+        installationCredential,
+      });
+    } catch {
+      return {
+        success: true,
+        state: 'detail_page_navigation_state_unknown',
+        executed: false,
+        leaseRef: claim.leaseRef,
+        nextPollAfterSeconds: claim.nextPollAfterSeconds,
+        message: '详情页导航状态无法确认；为避免重复访问，未自动打开页面。',
+      };
+    }
+    if (!navigationGrant.shouldNavigate) {
+      if (!navigationGrant.recovered && navigationGrant.reason === 'navigation_state_unknown'
+          && navigationGrant.sessionRef) {
+        void reportLingganDetailPageSessionNavigation({
+          installKey, installationCredential, taskId: spec.taskId,
+          sessionRef: navigationGrant.sessionRef, kind: 'stopped',
+          stopReason: 'navigation_state_unknown', health: readiness.health,
+        });
+      }
+      return {
+        success: true,
+        state: navigationGrant.recovered ? 'detail_page_session_recovered' : 'detail_page_navigation_suppressed',
+        executed: false,
+        leaseRef: claim.leaseRef,
+        nextPollAfterSeconds: claim.nextPollAfterSeconds,
+        message: navigationGrant.recovered
+          ? '已确认同一详情页仍由本安装管理；未重复打开或重复下发采集动作。'
+          : '详情页导航许可已消费或状态不明；已停止自动重开页面。',
+      };
+    }
   }
   let opened;
   try {
     opened = await openTaskWindow(capability, targetValue, claim.executionSourceUrl);
   } catch {
+    if (navigationGrant?.sessionRef) {
+      void reportLingganDetailPageSessionNavigation({
+        installKey, installationCredential, taskId: spec.taskId,
+        sessionRef: navigationGrant.sessionRef, kind: 'stopped',
+        stopReason: 'navigation_state_unknown', health: readiness.health,
+      });
+    }
     return requeueClaimedTaskFailure({
       claim: { ...claim, health: readiness.health },
       installKey,
@@ -911,12 +1044,45 @@ async function runDispatchedTask() {
   const { windowId, tabId } = opened;
   if (!tabId) {
     await closeCollectionWindow(windowId);
+    if (navigationGrant?.sessionRef) {
+      void reportLingganDetailPageSessionNavigation({
+        installKey, installationCredential, taskId: spec.taskId,
+        sessionRef: navigationGrant.sessionRef, kind: 'stopped',
+        stopReason: 'navigation_state_unknown', health: readiness.health,
+      });
+    }
     return requeueClaimedTaskFailure({
       claim: { ...claim, health: readiness.health },
       installKey,
       state: 'tab_unavailable',
       message: '无法打开观察页面。',
     });
+  }
+  if (navigationGrant?.grantKey) {
+    try {
+      await detailPageNavigationGrantStore.recordWindow({
+        grantKey: navigationGrant.grantKey,
+        windowId,
+        tabId,
+      });
+    } catch {
+      await closeCollectionWindow(windowId);
+      if (navigationGrant?.sessionRef) {
+        void reportLingganDetailPageSessionNavigation({
+          installKey, installationCredential, taskId: spec.taskId,
+          sessionRef: navigationGrant.sessionRef, kind: 'stopped',
+          stopReason: 'navigation_state_unknown', health: readiness.health,
+        });
+      }
+      return {
+        success: true,
+        state: 'detail_page_navigation_state_unknown',
+        executed: false,
+        leaseRef: claim.leaseRef,
+        nextPollAfterSeconds: claim.nextPollAfterSeconds,
+        message: '页面窗口已创建但未能持久登记；已关闭该受管窗口，后续不会自动重开。',
+      };
+    }
   }
 
   const action = capability === 'author_profile'
@@ -931,6 +1097,13 @@ async function runDispatchedTask() {
   try {
     const ready = await waitForTabReady(tabId);
     if (!ready) {
+      if (navigationGrant?.sessionRef) {
+        void reportLingganDetailPageSessionNavigation({
+          installKey, installationCredential, taskId: spec.taskId,
+          sessionRef: navigationGrant.sessionRef, kind: 'stopped',
+          stopReason: 'page_unavailable', health: readiness.health,
+        });
+      }
       return requeueClaimedTaskFailure({
         claim: { ...claim, health: readiness.health },
         installKey,
@@ -938,14 +1111,37 @@ async function runDispatchedTask() {
         message: '观察页面加载超时，本次未采集。',
       });
     }
+    if (navigationGrant?.sessionRef) {
+      // Only the stable, content-script-confirmed final document counts as a
+      // Chrome navigation observation. A tab id returned by window creation
+      // or a timeout is not proof that the detail page committed.
+      void reportLingganDetailPageSessionNavigation({
+        installKey,
+        installationCredential,
+        taskId: spec.taskId,
+        sessionRef: navigationGrant.sessionRef,
+        kind: 'navigation_observed',
+        health: readiness.health,
+      });
+    }
     const accountVerification = await verifyClaimedTaskAccount(tabId, claim);
     if (!accountVerification.mayExecute) {
+      if (navigationGrant?.sessionRef) {
+        void reportLingganDetailPageSessionNavigation({
+          installKey, installationCredential, taskId: spec.taskId,
+          sessionRef: navigationGrant.sessionRef, kind: 'stopped',
+          stopReason: 'risk_stop', health: readiness.health,
+        });
+      }
       return requeueClaimedTaskFailure({
         claim: { ...claim, health: readiness.health },
         installKey,
         state: accountVerification.state,
         message: accountVerification.message,
       });
+    }
+    if (navigationGrant?.grantKey) {
+      await detailPageNavigationGrantStore.markActionDispatched({ grantKey: navigationGrant.grantKey });
     }
     const response = await chrome.tabs.sendMessage(tabId, {
       action,
@@ -960,7 +1156,7 @@ async function runDispatchedTask() {
       // manual task here would leave the claimed scheduled task without Attempt or Receipt.
       taskSpec: spec,
       leaseRef: claim.leaseRef,
-      pageSessionPlan: claim.pageSessionPlan,
+      pageSessionPlan: navigationGrant?.pageSessionPlan || claim.pageSessionPlan,
       triggerSource: 'linggan_dispatched_task',
     });
     const receipt = decodePageExecutionReceipt(response, {
@@ -976,6 +1172,13 @@ async function runDispatchedTask() {
         message: receipt.message || `页面未能执行「${capability}」。`,
       });
     }
+    if (navigationGrant?.sessionRef) {
+      void reportLingganDetailPageSessionNavigation({
+        installKey, installationCredential, taskId: spec.taskId,
+        sessionRef: navigationGrant.sessionRef, kind: 'delivery_pending',
+        health: readiness.health,
+      });
+    }
     return {
       success: true,
       state: 'executed',
@@ -986,6 +1189,13 @@ async function runDispatchedTask() {
       message: receipt.message || `已按派下来的任务执行「${capability}」。`,
     };
   } catch (error) {
+    if (navigationGrant?.sessionRef) {
+      void reportLingganDetailPageSessionNavigation({
+        installKey, installationCredential, taskId: spec.taskId,
+        sessionRef: navigationGrant.sessionRef, kind: 'stopped',
+        stopReason: 'page_unavailable', health: readiness.health,
+      });
+    }
     return requeueClaimedTaskFailure({
       claim: { ...claim, health: readiness.health },
       installKey,

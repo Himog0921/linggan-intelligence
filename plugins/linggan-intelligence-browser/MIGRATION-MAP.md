@@ -45,7 +45,7 @@
 | XHS 签名详情定位（0.8.2） | 服务端从最新已接纳发现记录派发带 `xsec_token` 的短期来源链接；插件校验作品身份后转换为 `/discovery/item/{id}` | token 不进入 TaskSpec、作品身份或 Evidence；缺失时不执行，不回退裸 `/explore` |
 | 同工位安装承接（0.8.2） | 新安装取代旧安装时承接其有效租约内尚未完成的同一 Task | 不重建 Task、不重跑完成步骤；已被取代安装不能再改变执行状态 |
 | XHS 最终页面稳定（0.8.3） | 首次 `complete` 后继续观察 URL/加载变化；保持 1.5 秒稳定且最终 content script 回应同一 URL 才下发采集动作 | 总等待最多 20 秒；不新建 Task/Attempt，不把页面可响应冒充 Package 或 Receipt |
-| XHS 部分详情与同页执行（0.8.4） | 结构化详情已取得内容/作者/媒体时允许互动字段部分未知；首个详情 Task 按服务端已批准范围一次读取详情、媒体候选与有界评论树，后续单能力 Task 复用持久缓存 | 不以未知补 0；不合并 Task/Attempt/Package/Receipt；缓存不授权新 lane、不跨 Lease，缺失或过期时回退原 lane 执行 |
+| XHS 部分详情与同页执行（0.8.4；候选安全收口） | 结构化详情已取得内容/作者/媒体时允许互动字段部分未知；首个详情 Task 按服务端冻结范围一次读取详情、媒体候选与有界评论树，后续单能力 Task 复用持久缓存。候选会先原子消费本地导航许可，再开页；服务端 grant 与 Chrome 观测分开记录 | 不以未知补 0；不合并 Task/Attempt/Package/Receipt；缓存仅由原 Lease 定位，**不随其到期删除**，只在全部冻结 lane 已进 durable outbox 后清理；新 Lease 不得接管旧快照。缺失、grant 重放或已消费但窗口不明时不回退重开页面 |
 | XHS SSR 详情读取（0.8.5） | 全局 `__INITIAL_STATE__` 被页面水合删除时，从原始页面脚本安全解析序列化 `noteDetailMap`，供详情就绪、完整度和正式采集共用 | 不执行页面脚本、不放宽作品身份校验、不把 SSR 内容冒充 API 或 DOM 观察；无 SSR 时仍走现有运行态/DOM 路径 |
 | 评论回执与当前投影（0.8.6） | 标准 30 条窗口与深采分开；短采保留，重试从评论入口重新遍历；服务端按稳定评论身份形成当前投影 | 不跨 Attempt 累加数量冒充完整，不从旧评论游标续采，不修改历史 Package |
 | 真实评论树接纳修复（0.8.7） | 顶层自指 root 与回复多关系字段在出包前规范到评论/回复唯一合同；自然结束深采使用无数值配额的有界停止条件 | 不从结果反推任务配额，不放宽服务端关系门闸，不改 scheduled TaskSpec |
@@ -102,7 +102,8 @@ Dashboard selected cached author
 
 自动观察路径
 Observation rule -> WorkOrder -> ordered single-capability steps
-  -> first signed detail page read -> lease-scoped persistent page cache
+  -> one server session grant + atomically consumed local navigation permit
+  -> first signed detail page read -> lease-scoped persistent page cache/outbox
   -> each claimed lane -> its own immutable Package -> Receipt
   -> durable media outbox -> offscreen bytes transfer -> local processors -> Evidence Library
 ```

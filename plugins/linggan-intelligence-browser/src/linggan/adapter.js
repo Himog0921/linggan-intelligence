@@ -187,6 +187,92 @@ export function dispatchFailureRouteFromHealth(health) {
   return path.startsWith('/api/local/dispatch/') && !/[?#]/.test(path) ? path : null;
 }
 
+export function detailPageSessionGrantRouteFromHealth(health) {
+  const path = String(health?.routes?.dispatch?.detailPageSessionGrant || '').trim();
+  return path.startsWith('/api/local/dispatch/') && !/[?#]/.test(path) ? path : null;
+}
+
+export function detailPageSessionNavigationRouteFromHealth(health) {
+  const path = String(health?.routes?.dispatch?.detailPageSessionNavigation || '').trim();
+  return path.startsWith('/api/local/dispatch/') && !/[?#]/.test(path) ? path : null;
+}
+
+/**
+ * Obtain a detail-page authorization using the browser-persisted request id.
+ * Repeating the same id may recover a lost response; a new id is never a
+ * license to reset an existing Work Order/material navigation boundary.
+ */
+export async function grantLingganDetailPageSession({
+  installKey,
+  installationCredential,
+  taskId,
+  grantRequestId,
+  origin = LINGGAN_LOCAL_ORIGIN,
+  fetchImpl = globalThis.fetch,
+  health = null,
+} = {}) {
+  const route = detailPageSessionGrantRouteFromHealth(health);
+  if (typeof fetchImpl !== 'function' || !route
+      || !String(installKey || '').trim() || !String(installationCredential || '').trim()
+      || !String(taskId || '').trim() || !String(grantRequestId || '').trim()) {
+    return { granted: false, outcome: 'unavailable', reasonCode: 'grant_route_unavailable' };
+  }
+  try {
+    const response = await fetchImpl(`${origin}${route}`, {
+      method: 'POST', credentials: 'omit', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ installKey, installationCredential, taskId, grantRequestId }),
+    });
+    const body = await response.json().catch(() => null);
+    if (!response.ok) {
+      return { granted: false, outcome: 'rejected', reasonCode: String(body?.code || 'grant_rejected') };
+    }
+    const outcome = String(body?.outcome || '');
+    const sessionRef = String(body?.sessionRef || '').trim();
+    if (['authorized', 'replay'].includes(outcome) && sessionRef
+        && body?.pageSessionPlan && typeof body.pageSessionPlan === 'object'
+        && !Array.isArray(body.pageSessionPlan)) {
+      return { granted: true, outcome, sessionRef, pageSessionPlan: body.pageSessionPlan };
+    }
+    return { granted: false, outcome: outcome || 'invalid', sessionRef, reasonCode: String(body?.reasonCode || 'grant_contract_invalid') };
+  } catch {
+    return { granted: false, outcome: 'unavailable', reasonCode: 'grant_transport_unavailable' };
+  }
+}
+
+/**
+ * Report a Chrome-observed, extension-managed tab after the durable local
+ * consumption record has committed. This call is observational only: a
+ * transport failure must not trigger another page open.
+ */
+export async function reportLingganDetailPageSessionNavigation({
+  installKey,
+  installationCredential,
+  taskId,
+  sessionRef,
+  kind = 'navigation_observed',
+  stopReason = null,
+  origin = LINGGAN_LOCAL_ORIGIN,
+  fetchImpl = globalThis.fetch,
+  health = null,
+} = {}) {
+  const route = detailPageSessionNavigationRouteFromHealth(health);
+  if (typeof fetchImpl !== 'function' || !route
+      || !String(installKey || '').trim() || !String(installationCredential || '').trim()
+      || !String(taskId || '').trim() || !String(sessionRef || '').trim()) {
+    return false;
+  }
+  try {
+    const response = await fetchImpl(`${origin}${route}`, {
+      method: 'POST', credentials: 'omit', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ installKey, installationCredential, taskId, sessionRef, kind, stopReason }),
+    });
+    const body = await response.json().catch(() => null);
+    return response.ok && body?.outcome === 'recorded';
+  } catch {
+    return false;
+  }
+}
+
 export function accountEligibilityRouteFromHealth(health) {
   const path = String(health?.routes?.station?.eligibilityReport || '').trim();
   return path.startsWith('/api/local/stations/') && !/[?#]/.test(path) ? path : null;

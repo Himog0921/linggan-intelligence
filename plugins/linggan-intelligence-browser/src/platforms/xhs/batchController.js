@@ -361,6 +361,7 @@ export class BatchNoteController extends BaseBatchController {
     this._maxSubComments = BATCH_CONFIG.maxSubComments;
     this.taskSpec = null;
     this._deferLingganDelivery = false;
+    this._onDetailReady = null;
     this._totalCommentsCollected = 0;
     this._searchFilters = normalizeXhsSearchFilters();
     this._searchFilterSnapshot = null;
@@ -436,6 +437,9 @@ export class BatchNoteController extends BaseBatchController {
       : BATCH_CONFIG.maxSubComments;
     this.taskSpec = settings.taskSpec || null;
     this._deferLingganDelivery = settings.deferLingganDelivery === true;
+    this._onDetailReady = typeof settings.onDetailReady === 'function'
+      ? settings.onDetailReady
+      : null;
     this._searchFilters = normalizeXhsSearchFilters(settings.searchFilters || {});
     this._searchFilterSnapshot = mode === COLLECT_MODE.SEARCH
       ? readCurrentXhsSearchFilterSnapshot(window)
@@ -900,6 +904,7 @@ export class BatchNoteController extends BaseBatchController {
       maxSubComments: this._maxSubComments,
       taskSpec: this.taskSpec,
       deferLingganDelivery: this._deferLingganDelivery,
+      onDetailReady: this._onDetailReady,
       shouldStop: () => !this.isRunning,
       waitIfPaused: () => this._waitIfPaused(),
       onCommentProgress: (progress) => {

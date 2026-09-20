@@ -51,7 +51,20 @@ pub enum BatchTargetState {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParsedBatchOutput {
     pub targets: Vec<ParsedBatchTarget>,
+    pub rejected_targets: Vec<RejectedBatchTarget>,
     pub missing_target_refs: Vec<Uuid>,
+    /// Results whose `targetRef` could not be read at all, so they belong to no target. They are
+    /// counted rather than rejected: attributing them would invent a victim.
+    pub unattributable_result_count: usize,
+    /// Results addressed to a target outside this batch. They are never admitted and never create
+    /// a source, but they also do not implicate the targets that were addressed correctly.
+    pub unexpected_result_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RejectedBatchTarget {
+    pub target_ref: Uuid,
+    pub rejection_code: &'static str,
 }
 
 #[derive(Debug, Error)]
@@ -68,8 +81,6 @@ pub enum StudyBatchError {
     OutputSchema,
     #[error("batch output names a different contract, batch, or work")]
     OutputIdentityMismatch,
-    #[error("batch output repeats, invents, or otherwise misaddresses a target")]
-    OutputTargetMismatch,
     #[error("batch output uses an outcome incompatible with its per-target payload")]
     OutputOutcomeMismatch,
     #[error("batch output has an invalid per-target semantic contract")]
@@ -249,8 +260,13 @@ pub fn conservative_token_estimate_json(value: &Value) -> i64 {
     estimate + (ascii + 3) / 4
 }
 
-/// Parses one batch response without writing it. It accepts valid addressed targets independently
-/// and returns missing targets explicitly so a worker can retry only those targets later.
+/// Parses one batch response without writing it.
+///
+/// Only the envelope is judged for the batch as a whole: if the contract, batch, or work identity
+/// is wrong, or the outer JSON will not parse, nothing in it can be attributed and the caller
+/// rejects every target. Each result inside is then judged on its own. A single malformed result —
+/// the provider once sent `"outcome":"experience"` — used to fail the deserialization of the whole
+/// response and cost all twelve of its targets an attempt; here it costs only its own.
 pub fn parse_batch_output(
     raw_output: Value,
     batch_ref: Uuid,
@@ -265,27 +281,66 @@ pub fn parse_batch_output(
     {
         return Err(StudyBatchError::OutputIdentityMismatch);
     }
-    let expected: BTreeSet<Uuid> = target_texts.keys().copied().collect();
-    let actual: BTreeSet<Uuid> = output
-        .results
-        .iter()
-        .map(|result| result.target_ref)
-        .collect();
-    if actual.len() != output.results.len() || !actual.is_subset(&expected) {
-        return Err(StudyBatchError::OutputTargetMismatch);
-    }
-    let mut targets = Vec::with_capacity(output.results.len());
+    let mut accepted: BTreeMap<Uuid, ParsedBatchTarget> = BTreeMap::new();
+    let mut rejected: BTreeMap<Uuid, &'static str> = BTreeMap::new();
+    let mut addressed: BTreeSet<Uuid> = BTreeSet::new();
+    let mut unattributable_result_count = 0;
+    let mut unexpected_result_count = 0;
     for result in output.results {
-        let source = target_texts
-            .get(&result.target_ref)
-            .expect("set-subset check proved target source exists");
-        targets.push(parse_one_target(result, source)?);
+        let Some(target_ref) = result
+            .get("targetRef")
+            .and_then(Value::as_str)
+            .and_then(|value| Uuid::parse_str(value).ok())
+        else {
+            unattributable_result_count += 1;
+            continue;
+        };
+        let Some(source) = target_texts.get(&target_ref) else {
+            unexpected_result_count += 1;
+            continue;
+        };
+        if !addressed.insert(target_ref) {
+            // Two results for one target cannot be told apart, so neither is admitted; taking the
+            // last one would let a repeat silently overwrite an already valid result.
+            accepted.remove(&target_ref);
+            rejected.insert(target_ref, "semantic_contract");
+            continue;
+        }
+        match serde_json::from_value::<BatchResult>(result)
+            .map_err(|_| StudyBatchError::OutputSchema)
+            .and_then(|result| parse_one_target(result, source))
+        {
+            Ok(target) => {
+                accepted.insert(target_ref, target);
+            }
+            Err(error) => {
+                rejected.insert(target_ref, target_rejection_code(&error));
+            }
+        }
     }
-    let missing_target_refs = expected.difference(&actual).copied().collect();
+    let expected: BTreeSet<Uuid> = target_texts.keys().copied().collect();
+    let missing_target_refs = expected.difference(&addressed).copied().collect();
     Ok(ParsedBatchOutput {
-        targets,
+        targets: accepted.into_values().collect(),
+        rejected_targets: rejected
+            .into_iter()
+            .map(|(target_ref, rejection_code)| RejectedBatchTarget {
+                target_ref,
+                rejection_code,
+            })
+            .collect(),
         missing_target_refs,
+        unattributable_result_count,
+        unexpected_result_count,
     })
+}
+
+fn target_rejection_code(error: &StudyBatchError) -> &'static str {
+    match error {
+        StudyBatchError::Semantic(error) => error.rejection_code(),
+        StudyBatchError::OutputOutcomeMismatch => "semantic_contract",
+        _ => "semantic_json_schema",
+    }
 }
 
 async fn ensure_batchable_run(
@@ -383,7 +438,9 @@ struct BatchOutput {
     contract: String,
     batch_ref: Uuid,
     content_public_ref: Uuid,
-    results: Vec<BatchResult>,
+    /// Left raw on purpose: deserializing the results as strict per-target structs here would put
+    /// one bad result's error on the whole envelope again.
+    results: Vec<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -533,7 +590,7 @@ mod tests {
     }
 
     #[test]
-    fn unknown_or_duplicate_target_is_not_silently_accepted() {
+    fn an_unknown_target_is_recorded_without_implicating_the_addressed_target() {
         let batch_ref = Uuid::new_v4();
         let work_ref = Uuid::new_v4();
         let target = Uuid::new_v4();
@@ -548,9 +605,90 @@ mod tests {
                 {"targetRef":unknown,"outcome":"no_signal","reason":"未表达研究合同中的信号","signals":[]}
             ]
         });
-        assert!(matches!(
-            parse_batch_output(output, batch_ref, work_ref, &targets),
-            Err(StudyBatchError::OutputTargetMismatch)
-        ));
+        let parsed = parse_batch_output(output, batch_ref, work_ref, &targets).unwrap();
+        assert_eq!(parsed.targets.len(), 1);
+        assert_eq!(parsed.targets[0].target_ref, target);
+        assert_eq!(parsed.unexpected_result_count, 1);
+        assert!(parsed.rejected_targets.is_empty());
+        assert!(parsed.missing_target_refs.is_empty());
+    }
+
+    #[test]
+    fn a_repeated_target_admits_neither_copy() {
+        let batch_ref = Uuid::new_v4();
+        let work_ref = Uuid::new_v4();
+        let target = Uuid::new_v4();
+        let source = "孩子每天写作业都要催，不催就不开始，我很着急。";
+        let targets = BTreeMap::from([(target, source.to_owned())]);
+        let output = json!({
+            "contract":BATCH_CONTRACT,
+            "batchRef":batch_ref,
+            "contentPublicRef":work_ref,
+            "results":[
+                {"targetRef":target,"outcome":"signals","reason":null,
+                    "signals":[complete_signal("每天写作业都要催,不催就不开始")]},
+                {"targetRef":target,"outcome":"no_signal","reason":"未表达研究合同中的信号","signals":[]}
+            ]
+        });
+        let parsed = parse_batch_output(output, batch_ref, work_ref, &targets).unwrap();
+        assert!(parsed.targets.is_empty());
+        assert_eq!(parsed.rejected_targets.len(), 1);
+        assert_eq!(parsed.rejected_targets[0].target_ref, target);
+        assert_eq!(parsed.rejected_targets[0].rejection_code, "semantic_contract");
+    }
+
+    #[test]
+    fn one_malformed_result_does_not_cost_its_siblings_an_attempt() {
+        // The provider really sent `"outcome":"experience"` on 2026-09-17: a signal `kind` in the
+        // outcome slot. Deserializing the whole response at once turned that single bad result
+        // into a failed attempt for every target in its batch.
+        let batch_ref = Uuid::new_v4();
+        let work_ref = Uuid::new_v4();
+        let healthy = Uuid::new_v4();
+        let malformed = Uuid::new_v4();
+        let source = "孩子每天写作业都要催，不催就不开始，我很着急。";
+        let targets = BTreeMap::from([
+            (healthy, source.to_owned()),
+            (malformed, source.to_owned()),
+        ]);
+        let output = json!({
+            "contract":BATCH_CONTRACT,
+            "batchRef":batch_ref,
+            "contentPublicRef":work_ref,
+            "results":[
+                {"targetRef":healthy,"outcome":"signals","reason":null,
+                    "signals":[complete_signal("每天写作业都要催,不催就不开始")]},
+                {"targetRef":malformed,"outcome":"experience","reason":null,"signals":[]}
+            ]
+        });
+        let parsed = parse_batch_output(output, batch_ref, work_ref, &targets).unwrap();
+        assert_eq!(parsed.targets.len(), 1);
+        assert_eq!(parsed.targets[0].target_ref, healthy);
+        assert_eq!(parsed.targets[0].state, BatchTargetState::Succeeded);
+        assert_eq!(parsed.rejected_targets.len(), 1);
+        assert_eq!(parsed.rejected_targets[0].target_ref, malformed);
+        assert_eq!(
+            parsed.rejected_targets[0].rejection_code,
+            "semantic_json_schema"
+        );
+        assert!(parsed.missing_target_refs.is_empty());
+    }
+
+    #[test]
+    fn a_result_without_a_readable_target_ref_blames_no_target() {
+        let batch_ref = Uuid::new_v4();
+        let work_ref = Uuid::new_v4();
+        let target = Uuid::new_v4();
+        let targets = BTreeMap::from([(target, "这个视频拍得真好。".to_owned())]);
+        let output = json!({
+            "contract":BATCH_CONTRACT,
+            "batchRef":batch_ref,
+            "contentPublicRef":work_ref,
+            "results":[{"outcome":"no_signal","reason":"缺少 targetRef","signals":[]}]
+        });
+        let parsed = parse_batch_output(output, batch_ref, work_ref, &targets).unwrap();
+        assert_eq!(parsed.unattributable_result_count, 1);
+        assert!(parsed.rejected_targets.is_empty());
+        assert_eq!(parsed.missing_target_refs, vec![target]);
     }
 }

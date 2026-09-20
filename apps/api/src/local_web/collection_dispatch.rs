@@ -13,9 +13,11 @@ use axum::{
     routing::post,
 };
 use linggan_evidence::{
-    AccountEligibilityObservation, CollectionControlError, DispatchDecision, DispatchFailureCode,
-    DispatchFailureError, DispatchFailureOutcome, ExplicitAccountEligibilitySignal,
-    activate_installation_credential, decide_dispatch, record_dispatch_answer,
+    AccountEligibilityObservation, CollectionControlError, DetailPageSessionGrant,
+    DetailPageSessionGrantError, DetailPageSessionNavigationError, DetailPageSessionProgress,
+    DispatchDecision, DispatchFailureCode, DispatchFailureError, DispatchFailureOutcome,
+    ExplicitAccountEligibilitySignal, activate_installation_credential, decide_dispatch,
+    grant_detail_page_session, record_detail_page_session_progress, record_dispatch_answer,
     report_account_eligibility, report_claimed_task_account_eligibility, requeue_failed_dispatch,
 };
 
@@ -26,6 +28,10 @@ pub(super) const CLAIM_PATH: &str = "/api/local/dispatch/claim";
 /// A successful claim whose browser work cannot start returns this local
 /// execution failure before the frozen task may be retried.
 pub(super) const FAILURE_PATH: &str = "/api/local/dispatch/failures";
+pub(super) const DETAIL_PAGE_SESSION_GRANT_PATH: &str =
+    "/api/local/dispatch/detail-page-sessions/grant";
+pub(super) const DETAIL_PAGE_SESSION_NAVIGATION_PATH: &str =
+    "/api/local/dispatch/detail-page-sessions/navigation-observed";
 
 pub(super) const ACCOUNT_ELIGIBILITY_PATH: &str =
     "/api/local/stations/account-eligibility-observations";
@@ -36,8 +42,206 @@ pub(super) fn routes() -> Router<LocalWebState> {
     Router::new()
         .route(CLAIM_PATH, post(claim))
         .route(FAILURE_PATH, post(failure))
+        .route(
+            DETAIL_PAGE_SESSION_GRANT_PATH,
+            post(grant_detail_page_session_route),
+        )
+        .route(
+            DETAIL_PAGE_SESSION_NAVIGATION_PATH,
+            post(record_detail_page_session_navigation_route),
+        )
         .route(ACCOUNT_ELIGIBILITY_PATH, post(report_account))
         .route(CREDENTIAL_ACTIVATION_PATH, post(activate_credential))
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DetailPageSessionGrantBody {
+    install_key: String,
+    installation_credential: String,
+    task_id: uuid::Uuid,
+    grant_request_id: uuid::Uuid,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DetailPageSessionNavigationBody {
+    install_key: String,
+    installation_credential: String,
+    task_id: uuid::Uuid,
+    session_ref: uuid::Uuid,
+    kind: String,
+    stop_reason: Option<String>,
+}
+
+/// Return a previously recorded page-session authorization only to the
+/// installation that owns the still-live `content_detail` claim.  This route
+/// never starts a browser, and an idempotent response is not evidence that
+/// Chrome navigated.
+async fn grant_detail_page_session_route(
+    State(state): State<LocalWebState>,
+    body: Bytes,
+) -> Response {
+    let Some(database) = state.database.database() else {
+        return local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "read_model_not_connected",
+        );
+    };
+    let Ok(request) = serde_json::from_slice::<DetailPageSessionGrantBody>(&body) else {
+        return local_read_json_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "detail_page_session_grant_invalid",
+        );
+    };
+    match grant_detail_page_session(
+        database,
+        &request.install_key,
+        &request.installation_credential,
+        request.task_id,
+        request.grant_request_id,
+    )
+    .await
+    {
+        Ok(DetailPageSessionGrant::Authorized { session_ref, plan }) => Json(serde_json::json!({
+            "outcome": "authorized",
+            "sessionRef": session_ref,
+            "pageSessionPlan": plan,
+        }))
+        .into_response(),
+        Ok(DetailPageSessionGrant::Replay { session_ref, plan }) => Json(serde_json::json!({
+            "outcome": "replay",
+            "sessionRef": session_ref,
+            "pageSessionPlan": plan,
+        }))
+        .into_response(),
+        Ok(DetailPageSessionGrant::Suppressed {
+            session_ref,
+            reason_code,
+        }) => Json(serde_json::json!({
+            "outcome": "suppressed",
+            "sessionRef": session_ref,
+            "reasonCode": reason_code,
+        }))
+        .into_response(),
+        Err(error) => local_read_json_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            detail_page_session_grant_error_code(&error),
+        ),
+    }
+}
+
+fn detail_page_session_grant_error_code(error: &DetailPageSessionGrantError) -> &'static str {
+    match error {
+        DetailPageSessionGrantError::SchemaUnavailable => "detail_page_session_schema_unavailable",
+        DetailPageSessionGrantError::UnknownInstallation => {
+            "detail_page_session_installation_unknown"
+        }
+        DetailPageSessionGrantError::InvalidCredential => "detail_page_session_credential_invalid",
+        DetailPageSessionGrantError::ClaimNotHeld => "detail_page_session_claim_not_held",
+        DetailPageSessionGrantError::DetailScopeUnavailable => {
+            "detail_page_session_scope_unavailable"
+        }
+        DetailPageSessionGrantError::Database(_) => "detail_page_session_grant_write_failed",
+    }
+}
+
+/// Chrome reports the durable progress of its locally consumed session. This
+/// route records observed navigation, pending delivery, or a terminal stop;
+/// it is never an API that can request or replay a browser action.
+async fn record_detail_page_session_navigation_route(
+    State(state): State<LocalWebState>,
+    body: Bytes,
+) -> Response {
+    let Some(database) = state.database.database() else {
+        return local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "read_model_not_connected",
+        );
+    };
+    let Ok(request) = serde_json::from_slice::<DetailPageSessionNavigationBody>(&body) else {
+        return local_read_json_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "detail_page_session_navigation_invalid",
+        );
+    };
+    let progress = match detail_page_session_progress(&request) {
+        Some(progress) => progress,
+        None => {
+            return local_read_json_error(
+                axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+                "detail_page_session_progress_invalid",
+            );
+        }
+    };
+    match record_detail_page_session_progress(
+        database,
+        &request.install_key,
+        &request.installation_credential,
+        request.task_id,
+        request.session_ref,
+        progress,
+    )
+    .await
+    {
+        Ok(()) => Json(serde_json::json!({"outcome":"recorded"})).into_response(),
+        Err(error) => local_read_json_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            detail_page_session_navigation_error_code(&error),
+        ),
+    }
+}
+
+fn detail_page_session_progress(
+    request: &DetailPageSessionNavigationBody,
+) -> Option<DetailPageSessionProgress> {
+    match request.kind.as_str() {
+        "navigation_observed" if request.stop_reason.is_none() => {
+            Some(DetailPageSessionProgress::NavigationObserved)
+        }
+        "delivery_pending" if request.stop_reason.is_none() => {
+            Some(DetailPageSessionProgress::DeliveryPending)
+        }
+        "stopped" => match request.stop_reason.as_deref() {
+            Some("navigation_state_unknown") => Some(DetailPageSessionProgress::Stopped {
+                reason: "navigation_state_unknown",
+            }),
+            Some("page_unavailable") => Some(DetailPageSessionProgress::Stopped {
+                reason: "page_unavailable",
+            }),
+            Some("risk_stop") => Some(DetailPageSessionProgress::Stopped {
+                reason: "risk_stop",
+            }),
+            Some("owner_unavailable") => Some(DetailPageSessionProgress::Stopped {
+                reason: "owner_unavailable",
+            }),
+            Some("delivery_terminal") => Some(DetailPageSessionProgress::Stopped {
+                reason: "delivery_terminal",
+            }),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn detail_page_session_navigation_error_code(
+    error: &DetailPageSessionNavigationError,
+) -> &'static str {
+    match error {
+        DetailPageSessionNavigationError::SchemaUnavailable => {
+            "detail_page_session_schema_unavailable"
+        }
+        DetailPageSessionNavigationError::UnknownInstallation => {
+            "detail_page_session_installation_unknown"
+        }
+        DetailPageSessionNavigationError::InvalidCredential => {
+            "detail_page_session_credential_invalid"
+        }
+        DetailPageSessionNavigationError::SessionNotHeld => "detail_page_session_not_held",
+        DetailPageSessionNavigationError::Database(_) => {
+            "detail_page_session_navigation_write_failed"
+        }
+    }
 }
 
 #[derive(serde::Deserialize)]

@@ -4,6 +4,8 @@
 //! batch envelope; the provider request happens outside the database transaction, and any later
 //! result must present the exact lease token before admission.
 
+use crate::comment_study_batch_acceptance::settle_dispatched_batch_targets;
+use crate::comment_study_run::close_run_if_settled;
 use linggan_storage_postgres::Database;
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -44,7 +46,7 @@ pub async fn claim_next_study_batch(
     }
     let mut transaction = database.pool().begin().await?;
     let row = sqlx::query(
-        "SELECT batch_ref,input_manifest FROM linggan_comment_study_batch \
+        "SELECT batch_ref,run_ref,input_manifest FROM linggan_comment_study_batch \
          WHERE state='prepared' ORDER BY created_at,batch_ref LIMIT 1 FOR UPDATE SKIP LOCKED",
     )
     .fetch_optional(&mut *transaction)
@@ -82,6 +84,9 @@ pub async fn claim_next_study_batch(
         }));
     }
     cancel_unqualified_batch(&mut transaction, batch_ref).await?;
+    // Every target of this run may have just become `excluded`, which is a run that never had
+    // anything left to study rather than one still waiting on a model.
+    close_run_if_settled(&mut transaction, row.get("run_ref")).await?;
     transaction.commit().await?;
     Ok(None)
 }
@@ -93,20 +98,25 @@ pub async fn recover_expired_study_batch_leases(
 ) -> Result<u64, StudyBatchWorkerError> {
     let mut transaction = database.pool().begin().await?;
     let batches = sqlx::query(
-        "SELECT batch_ref,model_invocation_ref FROM linggan_comment_study_batch \
+        "SELECT batch_ref,run_ref,model_invocation_ref FROM linggan_comment_study_batch \
          WHERE state='leased' AND lease_expires_at<=scope_001_now() FOR UPDATE SKIP LOCKED",
     )
     .fetch_all(&mut *transaction)
     .await?;
     for batch in &batches {
         let batch_ref: Uuid = batch.get("batch_ref");
-        sqlx::query(
-            "UPDATE linggan_comment_study_target target SET state='queued' \
-             FROM linggan_comment_study_batch_target member \
-             WHERE member.batch_ref=$1 AND target.target_ref=member.target_ref AND target.state='running'",
+        let model_invocation_ref: Option<Uuid> = batch.get("model_invocation_ref");
+        // An expired lease means a dispatch was made, or may have been, and no result came back.
+        // Returning the targets straight to `queued` recorded nothing, so a batch that always
+        // outlives its lease re-dispatched on real, billed calls without ever exhausting a bound.
+        // The attempt is therefore counted conservatively, exactly as a rejected response is.
+        settle_dispatched_batch_targets(
+            &mut transaction,
+            batch_ref,
+            model_invocation_ref,
+            "lease_expired",
+            None,
         )
-        .bind(batch_ref)
-        .execute(&mut *transaction)
         .await?;
         sqlx::query(
             "UPDATE linggan_comment_study_batch \
@@ -117,7 +127,7 @@ pub async fn recover_expired_study_batch_leases(
         .bind(batch_ref)
         .execute(&mut *transaction)
         .await?;
-        if let Some(invocation_ref) = batch.get::<Option<Uuid>, _>("model_invocation_ref") {
+        if let Some(invocation_ref) = model_invocation_ref {
             sqlx::query(
                 "UPDATE linggan_model_invocation \
                  SET state='failed',failure_code='lease_expired', \
@@ -133,6 +143,9 @@ pub async fn recover_expired_study_batch_leases(
             .execute(&mut *transaction)
             .await?;
         }
+        // Recovery can be what makes a run's last target terminal, so the run has to be able to
+        // close here too, not only on the acceptance path.
+        close_run_if_settled(&mut transaction, batch.get("run_ref")).await?;
     }
     transaction.commit().await?;
     Ok(u64::try_from(batches.len()).unwrap_or(0))
