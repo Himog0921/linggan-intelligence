@@ -1,7 +1,7 @@
 # CORPUS-EVIDENCE-READ-RECOVERY-001 · 语料 Evidence 读取恢复
 
 > 状态: 活跃计划
-> 最后核对: 2026-09-20
+> 最后核对: 2026-09-21
 > 适用范围: Issue #308；Evidence Library 列表与受控评论通道的本机读取恢复
 > 事实来源: 2026-09-20 loopback API/数据库查询计划、DEC-0006、共享 Work Resource Read 合同与当前代码
 > 冲突时以谁为准: 用户最新授权、AGENTS.md、DEC-0006、真实数据库副作用、当前代码与可复现测试
@@ -27,7 +27,7 @@
 ## 非目标与停止条件
 
 - 不修改 Raw Comment/Evidence、采集、插件、模型调用、Comment Study Run/Policy/Problem、UI 设计或页面字段。
-- 不执行共享数据库 migration、runtime restart、3000 切换、合并或部署；这些动作在候选验证后按用户授权另行处理。
+- 本机 loopback 已在用户授权下完成共享 `0094` migration、PR #320 合并和 3000 runtime 切换；未执行浏览器插件重载、外部平台访问、采集或模型调用。
 - 若当前 restriction 合同无法表达原有读边界、需要恢复 V1 relation、或会改变原始材料，停止并报告。
 
 ## 验收矩阵
@@ -37,4 +37,4 @@
 | Evidence 列表 | 完整 schema 中四个索引存在；固定页仍使用唯一 Work Resource Current owner | 不创建第二个列表投影，不改变详情 Media V2 contract |
 | 评论检查器 | 退休 V1 view/table 被删除后，当前可读评论仍返回 | 写入 current restriction 后正文和条目均不返回 |
 | 数据边界 | 迁移只建索引、建当前 restriction 表和复制旧限制事实 | 不写 Raw Comment、CapturePackage 或任何 Study 派生数据 |
-| 运行边界 | isolated PostgreSQL/API、静态/编译/治理检查 | shared DB、runtime、模型和外部平台均 NOT VERIFIED |
+| 运行边界 | isolated PostgreSQL/API、静态/编译/治理检查；0094 真实账本/索引、3000 API 与页面 | 浏览器插件、外部平台、采集、模型和 Mog 业务验收均 NOT VERIFIED |
