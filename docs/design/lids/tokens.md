@@ -340,7 +340,7 @@ L3 GEOMETRY   间距 / 字号 / 线宽 / 圆角 / 动效 五套阶梯
 | Signal | 品牌活跃/选中/升级；不是 danger/warning/success。承载文字只能用 `signal-fill` 一档（`ADR-04`）。 |
 | Semantic | 绿=Valid/Completed，琥珀=Partial/Aging/Retrying，深红=Failed/Invalid/删除，蓝灰=信息/链接；均需文字和图形/定位双通道。 |
 | Type | Sans 承担中文阅读；Mono 承担机器语义；**Evidence 只承担逐字引用的来源材料**——正文原文、评论原文、OCR/转录文本，不用于任何界面文字，否则读者无法一眼分辨「谁说的」和「系统说的」。Display 为窄体，只用于页面级强层级。可对比数字要有 `tabular-nums`。**功能文字不得低于 11px（`ADR-03`）——v7 废止了 9px 校准刻度，它在非高分屏上不可读。** |
-| Mosaic | `mosaic-on-dark` / `mosaic-on-light` 只贴在实心墨色主动作或激活块的**右缘**，必须配渐隐遮罩，面积约 35%–45%，绝不覆盖文字。不得铺满、不得作页面背景、不得替换为竖条纹或随机噪点。它与 [materials.md](materials.md) 的 `M-02` 采样栅格是同一件事的两代写法：Mosaic 是当前运行时的落地值，`M-02` 是 v7 把它归入八格点阵家族后的规则层。 |
+| Mosaic | `mosaic-on-dark` / `mosaic-on-light` 只贴在实心墨色主动作或激活块的**右缘**，必须配渐隐遮罩，面积约 35%–45%，绝不覆盖文字。不得铺满、不得作页面背景、不得替换为竖条纹或随机噪点。唯一例外是 [materials.md](materials.md) 的 `M-02E`：`/collection/runtime` 的暂停／恢复白底真实动作可使用一个 `--lgi-space-2` 宽的 `mosaic-on-light` 右缘，不能外溢成白底纹理规则。它与 [materials.md](materials.md) 的 `M-02` 采样栅格是同一件事的两代写法：Mosaic 是当前运行时的落地值，`M-02` 是 v7 把它归入八格点阵家族后的规则层。 |
 | Spacing | 只用 4px 基数；不得新增 13/17/29px 等孤立对齐补丁。 |
 | Radius/Shadow | 默认 0/4/8 和无阴影；pill 只给纯圆元素。硬投影必须是实色偏移（`4px 4px 0`），**不得使用模糊或多层阴影**。 |
 | Layout | L3 最大 1720px；L1/L2 最大 1440px；超宽屏增加外白而非拉宽正文。 |

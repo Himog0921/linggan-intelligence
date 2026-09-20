@@ -439,6 +439,36 @@
   }
 })();
 
+/* 单行工位表把低频真实动作收进原生弹窗：不恢复详情侧栏，也不让这些动作失去入口。 */
+(function () {
+  "use strict";
+
+  var dialogs = Array.prototype.slice.call(document.querySelectorAll("[data-station-manage-dialog]"));
+  if (!dialogs.length) return;
+
+  dialogs.forEach(function (dialog) {
+    var lastTrigger = null;
+    var opener = document.querySelector("[data-station-manage-open][aria-controls='" + dialog.id + "']");
+    var close = dialog.querySelector("[data-station-manage-close]");
+
+    function restoreFocus() {
+      if (lastTrigger && document.documentElement.contains(lastTrigger)) lastTrigger.focus();
+      lastTrigger = null;
+    }
+
+    if (opener) {
+      opener.addEventListener("click", function () {
+        lastTrigger = opener;
+        dialog.showModal();
+        var first = dialog.querySelector("button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),a[href]");
+        if (first) first.focus();
+      });
+    }
+    if (close) close.addEventListener("click", function () { dialog.close(); });
+    dialog.addEventListener("close", restoreFocus);
+  });
+})();
+
 // 自绘下拉。
 //
 // 原生 select 的**弹出层由操作系统绘制**——自带圆角、蓝色高亮和阴影，CSS 一律管不到。
@@ -730,4 +760,69 @@
   // 首帧同步一次：服务端可能是带着 `hidden` 渲染的（常态），也可能是带着错误块开着渲染
   // 的（提交失败）。上面那条 `paint` 之外的唯一作用是让 `aria-expanded` 与真实状态一致。
   paint(isOpen());
+})();
+
+/* runtime-station-board-v9-final
+ * 工位不再打开详情侧栏。名称只做行内编辑；接活按钮继续由服务端 POST 处理。
+ */
+(function () {
+  "use strict";
+
+  var rows = Array.prototype.slice.call(document.querySelectorAll(".c-stn-row"));
+  if (!rows.length) return;
+
+  function closeEditor(row) {
+    var form = row.querySelector("[data-station-name-form]");
+    var label = row.querySelector(".c-stn-name-label");
+    var edit = row.querySelector("[data-station-name-edit]");
+    if (!form || form.hidden) return;
+    form.hidden = true;
+    if (label) label.hidden = false;
+    if (edit) edit.hidden = false;
+  }
+
+  rows.forEach(function (row) {
+    var edit = row.querySelector("[data-station-name-edit]");
+    var form = row.querySelector("[data-station-name-form]");
+    var label = row.querySelector(".c-stn-name-label");
+    var cancel = row.querySelector("[data-station-name-cancel]");
+    var input = row.querySelector(".c-stn-name-input");
+
+    if (edit && form && label && input) {
+      edit.addEventListener("click", function (event) {
+        event.preventDefault();
+        rows.forEach(function (other) {
+          if (other !== row) closeEditor(other);
+        });
+        label.hidden = true;
+        edit.hidden = true;
+        form.hidden = false;
+        window.requestAnimationFrame(function () {
+          input.focus();
+          input.select();
+        });
+      });
+    }
+
+    if (cancel) {
+      cancel.addEventListener("click", function (event) {
+        event.preventDefault();
+        closeEditor(row);
+        if (edit) edit.focus();
+      });
+    }
+  });
+
+  document.addEventListener("keydown", function (event) {
+    if (event.key !== "Escape") return;
+    var active = rows.find(function (row) {
+      var form = row.querySelector("[data-station-name-form]");
+      return form && !form.hidden;
+    });
+    if (!active) return;
+    event.preventDefault();
+    var edit = active.querySelector("[data-station-name-edit]");
+    closeEditor(active);
+    if (edit) edit.focus();
+  });
 })();

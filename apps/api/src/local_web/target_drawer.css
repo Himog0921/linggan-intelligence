@@ -589,11 +589,10 @@
 
 /* RUNTIME-STATION-TABLE-001 · 执行工位两张表的栅格变体。
  * 与上面两条同住一处：栅格列宽这个决定只允许有一个住处，散开写就会分叉。
- * 工位表十一列：编号 / 工位 / 状态 / 插件 / 最后报到 / 今日采集 / 接活 / 账号 /
- * 能力 / 上次问活 / 明细。定宽列写成 minmax(0,N)，窄窗按比例收窄并省略文字；
- * 编号与明细两列保持定宽，它们是可点区域，收窄会让人点不中。 */
-.c-tg-table-head.c-tg-station-grid,.c-tg-item.c-tg-station-grid{display:grid;grid-template-columns:48px minmax(176px,1fr) minmax(0,72px) minmax(0,80px) minmax(0,104px) minmax(0,104px) minmax(0,84px) minmax(0,96px) minmax(0,152px) minmax(0,168px) 64px;gap:var(--lgi-space-2);align-items:center}
+ * 工位表十列：编号 / 工位 / 连接 / 工位版本 / 心跳时间 / 今日额度 / 接活 / 账号 /
+ * 能力 / 最近动作。首层不再展开工位详情，因此没有「明细」列。 */
+.c-tg-table-head.c-tg-station-grid,.c-tg-item.c-tg-station-grid{display:grid;grid-template-columns:48px minmax(176px,1.1fr) minmax(0,72px) minmax(0,84px) minmax(0,104px) minmax(0,118px) minmax(0,116px) minmax(0,96px) minmax(0,152px) minmax(0,176px);gap:var(--lgi-space-2);align-items:center}
 .c-tg-table-head.c-tg-plan-grid,.c-tg-item.c-tg-plan-grid{display:grid;grid-template-columns:minmax(176px,1fr) minmax(0,96px) minmax(0,104px) minmax(0,120px) minmax(0,120px) minmax(0,120px);gap:var(--lgi-space-2);align-items:center}
 @media (max-width:900px){
-  .c-tg-table-head.c-tg-station-grid,.c-tg-item.c-tg-station-grid{grid-template-columns:40px minmax(140px,1fr) minmax(0,64px) minmax(0,72px) minmax(0,88px) minmax(0,88px) minmax(0,72px) minmax(0,84px) minmax(0,128px) minmax(0,140px) 56px}
+  .c-tg-table-head.c-tg-station-grid,.c-tg-item.c-tg-station-grid{grid-template-columns:40px minmax(140px,1fr) minmax(0,64px) minmax(0,72px) minmax(0,88px) minmax(0,104px) minmax(0,104px) minmax(0,84px) minmax(0,128px) minmax(0,140px)}
 }
