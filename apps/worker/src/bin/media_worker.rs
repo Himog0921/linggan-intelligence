@@ -217,7 +217,7 @@ async fn execute_image_ocr(
     }
     let input = local_media_root().join(&claim.storage_key);
     ensure_local_input(&input)?;
-    let output = run_paddle_ocr(&input)?;
+    let output = run_paddle_ocr(&input, &claim.mime_type)?;
     let Some(lines) = output.lines.as_ref() else {
         return Err("paddle_ocr_result_lines_missing".to_owned());
     };
@@ -305,7 +305,58 @@ async fn execute_image_ocr(
     Ok(())
 }
 
-fn run_paddle_ocr(input: &Path) -> Result<PaddleOcrOutput, String> {
+/// PaddleOCR uses the filename suffix to decide whether an input is an image.  Linggan stores
+/// blobs under their content hash, deliberately without a filename extension, so pass Paddle a
+/// short-lived local link/copy whose suffix is derived from the admitted MIME fact.  The original
+/// Blob remains the authority and is never renamed or rewritten.
+fn run_paddle_ocr(input: &Path, mime_type: &str) -> Result<PaddleOcrOutput, String> {
+    let extension = paddle_image_extension(mime_type)
+        .ok_or_else(|| format!("paddle_ocr_unsupported_mime:{mime_type}"))?;
+    let staged_input = stage_paddle_input(input, extension)?;
+    let result = run_paddle_ocr_staged(&staged_input);
+    // A staging file is an execution scratch artifact, not a media materialization.  It must not
+    // survive the attempt (whether Paddle accepts, rejects, or times out on the input).
+    let _ = std::fs::remove_file(&staged_input);
+    result
+}
+
+fn stage_paddle_input(input: &Path, extension: &str) -> Result<std::path::PathBuf, String> {
+    let staged_input =
+        std::env::temp_dir().join(format!("linggan-paddle-{}.{}", Uuid::new_v4(), extension));
+    stage_paddle_input_at(input, &staged_input)?;
+    Ok(staged_input)
+}
+
+fn stage_paddle_input_at(input: &Path, staged_input: &Path) -> Result<(), String> {
+    if let Err(link_error) = std::fs::hard_link(input, &staged_input) {
+        if let Err(copy_error) = std::fs::copy(input, &staged_input) {
+            // A failed copy may have created a partial file.  Delete it before returning so a
+            // retry never leaves raw media in the system temporary directory.
+            let _ = std::fs::remove_file(staged_input);
+            return Err(format!(
+                "paddle_ocr_input_stage_failed:{link_error};{copy_error}"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn paddle_image_extension(mime_type: &str) -> Option<&'static str> {
+    match mime_type {
+        "image/bmp" | "image/x-ms-bmp" => Some("bmp"),
+        "image/jpeg" | "image/jpg" => Some("jpg"),
+        "image/png" => Some("png"),
+        "image/webp" => Some("webp"),
+        "image/tiff" => Some("tiff"),
+        "image/x-portable-bitmap" => Some("pbm"),
+        "image/x-portable-graymap" => Some("pgm"),
+        "image/x-portable-pixmap" => Some("ppm"),
+        "image/x-portable-anymap" => Some("pnm"),
+        _ => None,
+    }
+}
+
+fn run_paddle_ocr_staged(input: &Path) -> Result<PaddleOcrOutput, String> {
     let script = paddle_ocr_script();
     if !script.is_file() {
         return Err("paddle_ocr_script_missing".to_owned());
@@ -630,7 +681,7 @@ async fn execute_video_frame_ocr(
         .collect::<Vec<_>>();
     frames.sort();
     for frame in frames {
-        let output = run_paddle_ocr(&frame)?;
+        let output = run_paddle_ocr(&frame, "image/jpeg")?;
         let text = output
             .lines
             .unwrap_or_default()
@@ -732,7 +783,8 @@ async fn complete_text_derivative(
 
 #[cfg(test)]
 mod tests {
-    use super::{PaddleOcrLine, layer_paddle_lines};
+    use super::{PaddleOcrLine, layer_paddle_lines, paddle_image_extension, stage_paddle_input_at};
+    use uuid::Uuid;
 
     fn line(text: &str, confidence: f64, bbox_norm: [f64; 4]) -> PaddleOcrLine {
         PaddleOcrLine {
@@ -806,5 +858,33 @@ mod tests {
             Some("不要带 A 娃 吊在一棵树上！")
         );
         assert!(output.image_substantive_text.is_none());
+    }
+
+    #[test]
+    fn paddle_input_suffix_is_derived_only_from_supported_admitted_image_mime() {
+        assert_eq!(paddle_image_extension("image/webp"), Some("webp"));
+        assert_eq!(paddle_image_extension("image/jpeg"), Some("jpg"));
+        assert_eq!(paddle_image_extension("image/png"), Some("png"));
+        assert_eq!(paddle_image_extension("image/gif"), None);
+        assert_eq!(paddle_image_extension("video/mp4"), None);
+    }
+
+    #[test]
+    fn failed_paddle_input_copy_removes_a_partial_staging_file() {
+        let root = std::env::temp_dir().join(format!("linggan-paddle-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).expect("test root");
+        let source_directory = root.join("source-directory");
+        std::fs::create_dir(&source_directory).expect("source directory");
+        let staged_input = root.join("partial.webp");
+        std::fs::write(&staged_input, b"partial").expect("partial staging file");
+
+        let result = stage_paddle_input_at(&source_directory, &staged_input);
+
+        assert!(result.is_err());
+        assert!(
+            !staged_input.exists(),
+            "failed staging must not leave a partial temporary file"
+        );
+        std::fs::remove_dir_all(&root).expect("test cleanup");
     }
 }
