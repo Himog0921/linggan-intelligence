@@ -88,6 +88,33 @@
 
 **依赖与验收矩阵。** `comment-study-001.sql` 是状态闭集来源；`comment_study_recall.rs` 是 `retrieval_incomplete` 的语义来源；本地 API 投影与 `comment_study.js` 只负责展示。静态 API 回归须证明两个中文标签存在、待归并集合包含二者且仍按 `resolutionState` 筛选；`cargo test -p linggan-api --bin linggan-api --locked`、格式、diff 与治理检查须通过。因为本包不启动 runtime 或浏览器，真实页面渲染、响应式/键盘走查与业务验收均为 `NOT VERIFIED`；不会用静态字符串测试冒充这些证据。停止条件：发现需新增状态/API/动作、须改 CSS/Token 或真实数据/运行时才可解释时，停止并回报 Mog。
 
+### E 的 P3 出口证据包（授权申请；不执行）
+
+**收口方式。** A–D 形成的本地代码和合成契约在 `75ca02f` 冻结为 P3 的候选实现基线。后续不再把发现逐项开成修复卡：一旦真实验证发现缺陷，只记录到同一份“P3 出口缺陷清单”，由 Mog 决定是否以一个收口修复包处理。该阶段包只在全部证据齐备后才给出“P3 出口可裁定/不可裁定”的结论；它绝不以单个测试、模型 HTTP 成功或局部指标替代阶段结论。
+
+**拟议执行链。**
+
+1. 在指定的非 Git、受控位置冻结一份评估包：100–200 条最小真实评论样本，其中至少 20 个已知召回案例、40 对问题比较；每条只保存受控引用或脱敏替代文本，并记录抽样规则、冻结时间和标注指南版本。
+2. 由 Mog 指定的标注者完成 Frame、同题/不同题、独立性和预期候选的标注；存在分歧的条目必须保留双人意见和裁定，不能由模型或单一标注者静默覆盖。
+3. 先对冻结包运行不发送模型的离线召回评估，按身份键、Problem core、代表 Atom、未归并池四条 route 分列 Recall@K 和漏召回归因。
+4. 经单独授权后，才用同一冻结包运行一次最小 Rust → Pi adapter → 本地 WeMM → 隔离 PostgreSQL 回放；仅记录 profile/model 身份、资源读数、结构化结果与安全错误码，不将原文、向量或 prompt 写入 Git、普通日志或共享数据库。
+5. 汇总 P3 出口不变量：不同已知账号的同篇支持可建题、同账号不能建题、模型不确定不能建题、目录不完整不宣称无匹配、重复/并发不重复建题。任一零容忍项失败，阶段结论只能是“不可裁定”，不以平均 Recall@K 抵消。
+
+**必须由 Mog 逐项授权的输入。** 以下全部留为 `DECISION_REQUIRED`，在明确答复前不得执行第 1–4 步：
+
+| 决定 | 需要明确的值 | 不得擅自假定 |
+|---|---|---|
+| 样本 | 精确数量、来源范围、抽样人、是否允许读取原文 | 100–200 只是建议规模，不是默认许可 |
+| 人员与位置 | 可访问者、标注者、受控存放位置、加密要求 | agent 可读取全部评论或样本可放 Git/普通目录 |
+| 脱敏与生命周期 | 允许给标注/模型的文本形态、保留期、销毁/撤回处理 | 脱敏已充分、结果可永久保留 |
+| 模型与资源 | 允许的本地 WeMM/profile、最大调用/时长/内存压力停止线 | 探针资格等于真实回放许可 |
+| 数据库与运行 | 隔离数据库标识、是否允许写入、是否允许启动临时进程 | 可写共享开发库、可切换 `:3000` 或运行 worker |
+| 通过规则 | Recall@K 报告格式、零容忍项、由谁裁定通过 | 系统自行设阈值或模型成功即通过 |
+
+**代码质量与审查边界。** 这份阶段包不预设新增抽象、框架、迁移或 UI。若真实验证需要修复，优先在既有 P3 模块中做最小直接改动，并以缺陷所对应的可证伪回归为准；若需要跨 P3 边界，则停止并单列决定。实现过程只运行针对性自动检查、格式和 diff 完整性检查；**不由本 agent 发起独立代码审查、也不把自查或测试称为代码审查**。代码审查的推进、结论和是否接受由 Mog 负责。
+
+**当前状态。** 本节只建立申请包，未创建真实样本、未读取/导出评论、未运行标注、未启动模型或 Pi adapter、未写任何数据库、未启动 runtime/browser，也未设定通过阈值。E 仍是 `DECISION_REQUIRED`。
+
 ## 文件与交付边界
 
 - 本包 exclusive：本文件、`crates/intelligence/src/comment_study_{canonical,embedding,recall,candidate_recall,comparison_cache,problem_resolution,problem_store,resolution_worker,read,source}.rs`、`crates/intelligence/src/{model_runner,pi_adapter,lib}.rs`、`crates/intelligence/tests/comment_study_rebuild_postgres.rs` 及其 P3 测试支持脚本、`apps/api/src/local_web/comment_study.rs`、`apps/pi-adapter/src/wemm_runtime.py`、`database/bootstrap/comment-study-001.sql` 和配套 reset。它们由 Issue #316 的 [原 Claim](https://github.com/Himog0921/linggan-intelligence/issues/316#issuecomment-5749282350)、[revision-read 更正](https://github.com/Himog0921/linggan-intelligence/issues/316#issuecomment-5749395396) 及 [OCR context amendment](https://github.com/Himog0921/linggan-intelligence/issues/316#issuecomment-5749506006) 明确列入；均仅限本地代码与隔离 fixture。
