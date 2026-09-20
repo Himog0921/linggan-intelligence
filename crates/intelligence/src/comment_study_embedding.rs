@@ -114,10 +114,11 @@ pub async fn register_embedding_profile(
     .map_err(EmbeddingError::Database)
 }
 
-/// Encodes eligible Signals whose canonical text has no vector under the active profile.
+/// Encodes eligible Signals and active Problem cores whose canonical text has no vector under the
+/// active profile.
 ///
-/// Work is chosen by canonical hash, not by Signal: two Signals that reduce to the same canonical
-/// sentence share one vector, which is also why re-running a Run costs nothing here.
+/// Work is chosen by canonical hash, not by object: Signals that reduce to the same canonical
+/// sentence share one vector, and a fixed Problem core is eligible for the same cache entry.
 pub async fn embed_pending_signals(
     database: &Database,
     adapter: &PiAdapter,
@@ -188,14 +189,25 @@ async fn pending_canonical_texts(
     profile_ref: Uuid,
 ) -> Result<Vec<(String, String)>, sqlx::Error> {
     let rows = sqlx::query(
-        "SELECT DISTINCT ON (signal.canonical_hash) signal.canonical_hash,signal.canonical_text \
-         FROM linggan_comment_study_signal signal \
-         WHERE signal.canonical_hash IS NOT NULL \
-           AND NOT EXISTS( \
-             SELECT 1 FROM linggan_comment_study_embedding_cache cache \
-             WHERE cache.profile_ref=$1 AND cache.canonical_hash=signal.canonical_hash) \
-         ORDER BY signal.canonical_hash,signal.created_at \
-         LIMIT $2",
+        "SELECT candidate.canonical_hash,candidate.canonical_text FROM ( \
+           SELECT source.canonical_hash,source.canonical_text,min(source.created_at) AS created_at \
+           FROM ( \
+             SELECT signal.canonical_hash,signal.canonical_text,signal.created_at \
+             FROM linggan_comment_study_signal signal \
+             WHERE signal.canonical_hash IS NOT NULL \
+             UNION ALL \
+             SELECT revision.canonical_hash,revision.canonical_text,revision.created_at \
+             FROM linggan_comment_study_problem problem \
+             JOIN linggan_comment_study_problem_revision revision \
+               ON revision.revision_ref=problem.current_revision_ref \
+             WHERE problem.state='active' \
+           ) source \
+           GROUP BY source.canonical_hash,source.canonical_text \
+         ) candidate \
+         WHERE NOT EXISTS( \
+           SELECT 1 FROM linggan_comment_study_embedding_cache cache \
+           WHERE cache.profile_ref=$1 AND cache.canonical_hash=candidate.canonical_hash) \
+         ORDER BY candidate.created_at,candidate.canonical_hash LIMIT $2",
     )
     .bind(profile_ref)
     .bind(i64::try_from(MAX_TEXTS_PER_TICK).unwrap_or(16))
@@ -209,11 +221,17 @@ async fn pending_canonical_texts(
 
 async fn pending_count(database: &Database, profile_ref: Uuid) -> Result<i64, sqlx::Error> {
     sqlx::query_scalar(
-        "SELECT count(DISTINCT signal.canonical_hash) FROM linggan_comment_study_signal signal \
-         WHERE signal.canonical_hash IS NOT NULL \
-           AND NOT EXISTS( \
-             SELECT 1 FROM linggan_comment_study_embedding_cache cache \
-             WHERE cache.profile_ref=$1 AND cache.canonical_hash=signal.canonical_hash)",
+        "SELECT count(*) FROM ( \
+           SELECT signal.canonical_hash FROM linggan_comment_study_signal signal \
+           WHERE signal.canonical_hash IS NOT NULL \
+           UNION \
+           SELECT revision.canonical_hash FROM linggan_comment_study_problem problem \
+           JOIN linggan_comment_study_problem_revision revision \
+             ON revision.revision_ref=problem.current_revision_ref \
+           WHERE problem.state='active' \
+         ) candidate WHERE NOT EXISTS( \
+           SELECT 1 FROM linggan_comment_study_embedding_cache cache \
+           WHERE cache.profile_ref=$1 AND cache.canonical_hash=candidate.canonical_hash)",
     )
     .bind(profile_ref)
     .fetch_one(database.pool())
@@ -231,7 +249,10 @@ pub enum ProbeOutcome {
     Qualified { profile_ref: Uuid, evidence: Value },
     /// A named check failed. Nothing is registered: a profile that cannot be shown to encode
     /// correctly must not silently become the space every Problem is compared in.
-    Refused { failing_check: &'static str, evidence: Value },
+    Refused {
+        failing_check: &'static str,
+        evidence: Value,
+    },
 }
 
 /// Synthetic probe sentences, built through the same canonical template production uses, so the
@@ -252,14 +273,24 @@ fn probe_texts() -> [(&'static str, String); 3] {
             "base",
             canonical_text(
                 "孩子在家庭作业中存在自主启动困难。",
-                Some(&frame("孩子", "自主开始作业", "需要外部催促才肯开始", "家庭作业")),
+                Some(&frame(
+                    "孩子",
+                    "自主开始作业",
+                    "需要外部催促才肯开始",
+                    "家庭作业",
+                )),
             ),
         ),
         (
             "near",
             canonical_text(
                 "孩子写作业时迟迟不肯动笔。",
-                Some(&frame("孩子", "自主开始作业", "必须有人反复提醒才开始", "家庭作业")),
+                Some(&frame(
+                    "孩子",
+                    "自主开始作业",
+                    "必须有人反复提醒才开始",
+                    "家庭作业",
+                )),
             ),
         ),
         (
@@ -365,7 +396,9 @@ pub async fn probe_and_register_embedding_profile(
     })
 }
 
-fn single_unit_vector(response: &crate::pi_adapter::WeMMResponse) -> Result<Vec<f64>, EmbeddingError> {
+fn single_unit_vector(
+    response: &crate::pi_adapter::WeMMResponse,
+) -> Result<Vec<f64>, EmbeddingError> {
     if !response.ok {
         return Err(EmbeddingError::InvalidVector);
     }

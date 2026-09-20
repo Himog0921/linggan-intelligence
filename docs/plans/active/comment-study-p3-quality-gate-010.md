@@ -72,8 +72,16 @@
 
 ## 文件与交付边界
 
-- 本包 exclusive：本文件，以及后续由 Claim 明确加入的 P3 合成 fixture、测试和质量报告合同文件。
+- 本包 exclusive：本文件、`crates/intelligence/src/comment_study_{canonical,embedding,recall,candidate_recall,comparison_cache,problem_resolution,problem_store,resolution_worker,read}.rs`、`crates/intelligence/src/{model_runner,pi_adapter,lib}.rs`、`crates/intelligence/tests/comment_study_rebuild_postgres.rs` 及其 P3 测试支持脚本、`apps/api/src/local_web/comment_study.rs`、`apps/pi-adapter/src/wemm_runtime.py`、`database/bootstrap/comment-study-001.sql` 和配套 reset。它们由 Issue #316 的 [原 Claim](https://github.com/Himog0921/linggan-intelligence/issues/316#issuecomment-5749282350) 及 [revision-read 更正](https://github.com/Himog0921/linggan-intelligence/issues/316#issuecomment-5749395396) 明确列入；均仅限本地代码与隔离 fixture。
 - 本包 shared：`docs/README.md`、`docs/current-state.md`、`docs/progress/2026-09.md`，仅作索引与有界状态记录。
-- 本包 forbidden：`database/migrations/**`、`database/bootstrap/**`、`apps/worker/**`、`apps/pi-adapter/**`、P4/P5 领域实现、所有 runtime/deployment 配置。
+- 本包 forbidden：`database/migrations/**`、`apps/worker/**`、`apps/api/src/local_web/comment_study.js`、P4/P5 领域实现、所有 runtime/deployment 配置。经 Issue #316 Claim amendment 明确列出的 P3 bootstrap、Pi adapter 与 local API 文件是本包 exclusive，而非对真实运行的授权。
 
 本包结束时分别报告：协议/设计、代码、自动检查、真实链路、部署、Mog 业务验收。后一四层如未发生，必须写为 `NOT VERIFIED` 或 `N/A`，不得以 rebase 或合成测试替代。
+
+## 2026-09-20 本地 P3 导入后的修复证据
+
+在最新基线中仅重放 P3 所属的十个候选提交后，合成隔离验证发现并修复以下“修订版为权威”的断裂：Problem 定义的 `includeCriteria` 未写入 revision；活跃 Problem 固定核心没有进入 embedding 待办；Problem 读取与旧 lexical candidate recall 仍读取已从主表移走的字段；probe API 也没有区分 runtime 与 storage 不可用。
+
+修复后，Problem 的当前 revision 成为 definition/core frame/inclusions/exclusions 的唯一读取面；embedding 待办按 canonical hash 对 Signal 与 Problem core 合并去重；candidate recall 直接 join `current_revision_ref`。新增的隔离 PostgreSQL 回归显式验证 lexical candidate recall 读取 revision，而不是依赖向量路径间接覆盖。
+
+本记录只证明本地代码与合成数据库契约：不构成真实标注 Recall@K、真实 Rust→WeMM 回放、OCR 语境资格回归、runtime 切换、共享数据库 migration、部署或 Mog 业务验收。

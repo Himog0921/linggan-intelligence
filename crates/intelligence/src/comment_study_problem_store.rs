@@ -4,11 +4,11 @@
 //! any model comparison, and it writes a membership only after the deterministic resolver admits
 //! exactly one match. Pair creation is deliberately separate from no-match handling.
 
+use crate::comment_study_canonical::{canonical_hash, canonical_text};
 use crate::comment_study_problem_resolution::{
     ExistingResolutionDecision, NewProblemDefinition, PROBLEM_PAIR_CONTRACT, PairCreationDecision,
     ProblemResolutionContractError, decide_existing_resolution, decide_pair_creation,
 };
-use crate::comment_study_canonical::{canonical_hash, canonical_text};
 use linggan_storage_postgres::Database;
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -333,14 +333,13 @@ pub async fn accept_problem_pair(
     };
     let receipt = match decision {
         PairCreationDecision::Create(definition) => {
-            let problem_ref =
-                insert_or_find_problem(
-                    &mut transaction,
-                    domain_ref,
-                    &definition,
-                    &[pair.first_signal_ref, pair.second_signal_ref],
-                )
-                .await?;
+            let problem_ref = insert_or_find_problem(
+                &mut transaction,
+                domain_ref,
+                &definition,
+                &[pair.first_signal_ref, pair.second_signal_ref],
+            )
+            .await?;
             assign_novel_signal_from_pair(
                 &mut transaction,
                 pair.first_signal_ref,
@@ -634,8 +633,8 @@ async fn insert_or_find_problem(
     sqlx::query(
         "INSERT INTO linggan_comment_study_problem_revision( \
            revision_ref,problem_ref,domain_ref,identity_version,title,definition,core_frame, \
-           exclusions,seed_signal_refs,canonical_text,canonical_hash,definition_hash,reason \
-         ) VALUES($1,$2,$3,1,$4,$5,$6,$7,$8,$9,$10,$11,'pair_creation')",
+           inclusions,exclusions,seed_signal_refs,canonical_text,canonical_hash,definition_hash,reason \
+         ) VALUES($1,$2,$3,1,$4,$5,$6,$7,$8,$9,$10,$11,$12,'pair_creation')",
     )
     .bind(revision_ref)
     .bind(problem_ref)
@@ -643,6 +642,7 @@ async fn insert_or_find_problem(
     .bind(&definition.title)
     .bind(&definition.definition)
     .bind(&definition.stable_identity)
+    .bind(json!(definition.include_criteria))
     .bind(json!(definition.exclude_criteria))
     .bind(seed_signal_refs)
     .bind(&canonical)

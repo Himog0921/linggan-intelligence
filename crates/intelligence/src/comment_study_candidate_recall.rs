@@ -4,12 +4,12 @@
 //! set to the resolution contract, with transparent structured lexical evidence and a recency
 //! fallback so a zero lexical overlap never becomes a hidden “no match” verdict.
 
+use crate::comment_study_embedding::active_profile;
+use crate::comment_study_problem_store::resolve_retrieval_incomplete;
 use crate::comment_study_problem_store::{
     PreparedProblemResolution, ProblemStoreError, accept_problem_resolution, prepare_problem_pair,
     prepare_problem_resolution,
 };
-use crate::comment_study_embedding::active_profile;
-use crate::comment_study_problem_store::resolve_retrieval_incomplete;
 use crate::comment_study_recall::{RecallCompleteness, recall_candidates};
 use linggan_storage_postgres::Database;
 use serde::Serialize;
@@ -183,12 +183,15 @@ pub async fn recall_problem_candidates(
     let query_terms = recall_terms(signal.get("proposition"), signal.get("problem_frame"));
     let rows = sqlx::query(
         "WITH terms AS (SELECT unnest($2::text[]) AS term) \
-         SELECT problem.problem_ref,problem.definition,problem.stable_identity,problem.include_criteria,problem.exclude_criteria, \
-                EXISTS(SELECT 1 FROM terms WHERE lower(problem.definition) LIKE '%' || lower(term) || '%' \
-                       OR lower(problem.stable_identity::text) LIKE '%' || lower(term) || '%') AS lexical_overlap, \
-                COALESCE((SELECT count(*) FROM terms WHERE lower(problem.definition) LIKE '%' || lower(term) || '%' \
-                       OR lower(problem.stable_identity::text) LIKE '%' || lower(term) || '%'),0) AS overlap_count \
+         SELECT problem.problem_ref,revision.definition,revision.core_frame AS stable_identity, \
+                revision.inclusions AS include_criteria,revision.exclusions AS exclude_criteria, \
+                EXISTS(SELECT 1 FROM terms WHERE lower(revision.definition) LIKE '%' || lower(term) || '%' \
+                       OR lower(revision.core_frame::text) LIKE '%' || lower(term) || '%') AS lexical_overlap, \
+                COALESCE((SELECT count(*) FROM terms WHERE lower(revision.definition) LIKE '%' || lower(term) || '%' \
+                       OR lower(revision.core_frame::text) LIKE '%' || lower(term) || '%'),0) AS overlap_count \
          FROM linggan_comment_study_problem problem \
+         JOIN linggan_comment_study_problem_revision revision \
+           ON revision.revision_ref=problem.current_revision_ref \
          WHERE problem.domain_ref=$1 AND problem.state='active' \
          ORDER BY overlap_count DESC,problem.created_at DESC,problem.problem_ref DESC LIMIT $3",
     )

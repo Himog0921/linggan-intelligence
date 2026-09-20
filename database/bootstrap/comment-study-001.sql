@@ -232,6 +232,7 @@ CREATE TABLE linggan_comment_study_problem_revision (
     title text NOT NULL CHECK(char_length(title) BETWEEN 1 AND 200),
     definition text NOT NULL CHECK(char_length(definition) BETWEEN 1 AND 1000),
     core_frame jsonb NOT NULL CHECK(jsonb_typeof(core_frame)='object'),
+    inclusions jsonb NOT NULL DEFAULT '[]'::jsonb CHECK(jsonb_typeof(inclusions)='array'),
     exclusions jsonb NOT NULL DEFAULT '[]'::jsonb CHECK(jsonb_typeof(exclusions)='array'),
     seed_signal_refs uuid[] NOT NULL CHECK(array_length(seed_signal_refs,1) >= 2),
     canonical_text text NOT NULL CHECK(char_length(canonical_text) BETWEEN 1 AND 16000),

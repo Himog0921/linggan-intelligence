@@ -24,24 +24,31 @@ use linggan_intelligence::{
     comment_study_batch_worker::{
         DEFAULT_BATCH_LEASE_SECONDS, claim_next_study_batch, recover_expired_study_batch_leases,
     },
+    comment_study_candidate_recall::{
+        advance_next_problem_pair, advance_next_problem_resolution, recall_problem_candidates,
+    },
+    comment_study_comparison_cache::{
+        record_resolution_comparisons, serve_pending_resolutions_from_cache,
+    },
+    comment_study_embedding::{
+        EmbeddingOutcome, ProbeOutcome, active_profile, embed_pending_signals,
+        probe_and_register_embedding_profile,
+    },
     comment_study_model_dispatch::reserve_study_batch_model_call,
     comment_study_model_runner::{StudyModelRunnerError, call_study_batch_model},
-    model_runner::prepare_next_batch_across_runs,
-    comment_study_embedding::{ProbeOutcome, active_profile, probe_and_register_embedding_profile},
-    model_runner::run_model_work_once,
-    model_secrets::SyntheticModelSecrets,
-    pi_adapter::PiAdapter,
     comment_study_problem_store::{
         accept_problem_pair, accept_problem_resolution, prepare_problem_pair,
         prepare_problem_resolution,
     },
-    comment_study_candidate_recall::{advance_next_problem_pair, advance_next_problem_resolution},
-    comment_study_comparison_cache::{record_resolution_comparisons, serve_pending_resolutions_from_cache},
-    comment_study_recall::{RecallCompleteness, problem_representatives, recall_candidates},
     comment_study_read::{
-        CommentStudyReadQuery, read_overview, read_runs, read_signals, read_targets,
+        CommentStudyReadQuery, read_overview, read_problems, read_runs, read_signals, read_targets,
     },
+    comment_study_recall::{RecallCompleteness, problem_representatives, recall_candidates},
     comment_study_run::{PrepareStudyRunRequest, prepare_study_run},
+    model_runner::prepare_next_batch_across_runs,
+    model_runner::run_model_work_once,
+    model_secrets::SyntheticModelSecrets,
+    pi_adapter::PiAdapter,
 };
 use research_fixture::{comment_with_author, detail_with_author, reply_with_author};
 use sqlx::Row;
@@ -329,13 +336,12 @@ async fn a_reobserved_media_slot_contributes_one_context_fragment_per_derived_te
         }),
     )
     .await;
-    let generations: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM linggan_material_media_origin WHERE slot_key=$1",
-    )
-    .bind(slot_key)
-    .fetch_one(database.pool())
-    .await
-    .unwrap();
+    let generations: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM linggan_material_media_origin WHERE slot_key=$1")
+            .bind(slot_key)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
     assert_eq!(
         generations, 2,
         "the fixture has to produce a genuinely re-observed slot for this proof to mean anything"
@@ -857,7 +863,8 @@ async fn read_signals_hides_evidence_and_proposition_once_the_source_becomes_res
         "before={before}"
     );
     assert_eq!(
-        before["signals"][0]["proposition"], "孩子在家庭作业中存在自主启动困难。"
+        before["signals"][0]["proposition"],
+        "孩子在家庭作业中存在自主启动困难。"
     );
 
     sqlx::query(
@@ -874,7 +881,10 @@ async fn read_signals_hides_evidence_and_proposition_once_the_source_becomes_res
     let after = read_signals(&database, &run_query).await.unwrap();
     assert_eq!(after["signals"][0]["sourceState"], "restricted");
     assert!(after["signals"][0]["evidence"].is_null(), "after={after}");
-    assert!(after["signals"][0]["proposition"].is_null(), "after={after}");
+    assert!(
+        after["signals"][0]["proposition"].is_null(),
+        "after={after}"
+    );
     assert_eq!(
         after["signals"][0]["eligibilityState"], "eligible",
         "restriction must not silently change the signal's own eligibility fact"
@@ -1413,7 +1423,10 @@ async fn a_malformed_sibling_result_does_not_undo_the_signals_of_a_valid_target(
         .fetch_all(database.pool())
         .await
         .unwrap(),
-        vec![("rejected".to_owned(), Some("semantic_json_schema".to_owned()))]
+        vec![(
+            "rejected".to_owned(),
+            Some("semantic_json_schema".to_owned())
+        )]
     );
     assert_eq!(
         sqlx::query_scalar::<_, String>(
@@ -1893,7 +1906,16 @@ async fn an_unparsable_response_banks_its_usage_before_it_settles() {
     // key. Without the checkpoint, a crash between the provider returning and the finisher running
     // loses the usage entirely.
     assert_eq!(
-        sqlx::query_as::<_, (Option<i64>, Option<i64>, String, Option<String>, Option<String>)>(
+        sqlx::query_as::<
+            _,
+            (
+                Option<i64>,
+                Option<i64>,
+                String,
+                Option<String>,
+                Option<String>
+            ),
+        >(
             "SELECT input_tokens,output_tokens,state,failure_code,result->>'callStarted' \
              FROM linggan_model_invocation \
              WHERE invocation_ref=(SELECT model_invocation_ref FROM linggan_comment_study_batch \
@@ -2021,9 +2043,21 @@ async fn repeated_dispatch_failures_exhaust_a_target_instead_of_re_leasing_it_fo
     assert_eq!(
         attempts,
         vec![
-            (1, "rejected".to_owned(), Some("provider_failure".to_owned())),
-            (2, "rejected".to_owned(), Some("provider_failure".to_owned())),
-            (3, "rejected".to_owned(), Some("provider_failure".to_owned())),
+            (
+                1,
+                "rejected".to_owned(),
+                Some("provider_failure".to_owned())
+            ),
+            (
+                2,
+                "rejected".to_owned(),
+                Some("provider_failure".to_owned())
+            ),
+            (
+                3,
+                "rejected".to_owned(),
+                Some("provider_failure".to_owned())
+            ),
         ]
     );
     // The coarse rejection code is all the schema allows; the layer that actually failed has to
@@ -2366,7 +2400,6 @@ async fn reply_context_is_frozen_as_context_but_not_evidence() {
     );
 }
 
-
 /// Builds one work with two differently authored comments, runs them through the production batch
 /// path so their Signals carry canonical text, and returns both Signal refs.
 /// Fixes the order a Signal was recorded in. Both Signals of a work are written in one
@@ -2523,7 +2556,6 @@ async fn two_eligible_signals_from(
     )
 }
 
-
 async fn resolution_state_for(
     database: &linggan_storage_postgres::Database,
     signal_ref: Uuid,
@@ -2537,8 +2569,6 @@ async fn resolution_state_for(
     .await
     .unwrap()
 }
-
-
 
 /// Attaches an already-encoded Signal to a Problem as a confirmed member.
 async fn seed_membership(
@@ -2626,10 +2656,15 @@ async fn representatives_are_chosen_for_reach_rather_than_for_being_nearest() {
         seed_membership(&database, member, problem).await;
     }
 
-    let chosen =
-        problem_representatives(&database, profile, &hash(lead).await, Uuid::parse_str(ADHD_DOMAIN_REF).unwrap(), 3)
-            .await
-            .unwrap();
+    let chosen = problem_representatives(
+        &database,
+        profile,
+        &hash(lead).await,
+        Uuid::parse_str(ADHD_DOMAIN_REF).unwrap(),
+        3,
+    )
+    .await
+    .unwrap();
     assert_eq!(chosen.len(), 3);
     assert_eq!(chosen[0], lead, "a seed leads, whatever the distances say");
     assert_eq!(
@@ -2662,7 +2697,13 @@ async fn a_comparison_already_paid_for_is_not_bought_again() {
     let profile = seed_embedding_profile(&database).await;
     let first_hash = signal_canonical_hash(&database, first).await;
     seed_vector(&database, profile, &first_hash, 0.0).await;
-    seed_vector(&database, profile, &signal_canonical_hash(&database, second).await, 0.1).await;
+    seed_vector(
+        &database,
+        profile,
+        &signal_canonical_hash(&database, second).await,
+        0.1,
+    )
+    .await;
     let problem = seed_existing_problem(
         &database,
         "作业启动困难",
@@ -2703,7 +2744,9 @@ async fn a_comparison_already_paid_for_is_not_bought_again() {
         .await
         .unwrap();
     assert_eq!(second_run.state, "pending");
-    let served = serve_pending_resolutions_from_cache(&database).await.unwrap();
+    let served = serve_pending_resolutions_from_cache(&database)
+        .await
+        .unwrap();
 
     let (state, invocation): (String, Option<Uuid>) = sqlx::query_as(
         "SELECT state,model_invocation_ref FROM linggan_comment_study_resolution \
@@ -2758,8 +2801,20 @@ async fn a_signal_is_never_called_novel_while_the_catalogue_cannot_be_searched()
     // With a profile and vectors, but an active Problem whose core was never encoded, the
     // catalogue is still only partly searchable — and still not evidence of novelty.
     let profile = seed_embedding_profile(&database).await;
-    seed_vector(&database, profile, &signal_canonical_hash(&database, first).await, 0.0).await;
-    seed_vector(&database, profile, &signal_canonical_hash(&database, second).await, 0.1).await;
+    seed_vector(
+        &database,
+        profile,
+        &signal_canonical_hash(&database, first).await,
+        0.0,
+    )
+    .await;
+    seed_vector(
+        &database,
+        profile,
+        &signal_canonical_hash(&database, second).await,
+        0.1,
+    )
+    .await;
     seed_existing_problem(
         &database,
         "另一类困难",
@@ -2787,8 +2842,20 @@ async fn a_searchable_but_empty_catalogue_is_the_one_case_that_means_novel() {
         .unwrap();
     let (first, second) = two_eligible_signals(&database, "study-resolution-novel-note").await;
     let profile = seed_embedding_profile(&database).await;
-    seed_vector(&database, profile, &signal_canonical_hash(&database, first).await, 0.0).await;
-    seed_vector(&database, profile, &signal_canonical_hash(&database, second).await, 0.1).await;
+    seed_vector(
+        &database,
+        profile,
+        &signal_canonical_hash(&database, first).await,
+        0.0,
+    )
+    .await;
+    seed_vector(
+        &database,
+        profile,
+        &signal_canonical_hash(&database, second).await,
+        0.1,
+    )
+    .await;
     // Nothing in the catalogue and nothing unsearchable: an empty candidate set here really does
     // mean "no existing Problem covers this", which is what deferred_novel asserts.
     assert!(advance_next_problem_resolution(&database).await.unwrap());
@@ -2835,8 +2902,20 @@ async fn the_unmerged_pool_is_what_lets_a_second_eligible_signal_find_the_first(
         .unwrap();
     let (first, second) = two_eligible_signals(&database, "study-recall-pool-note").await;
     let profile = seed_embedding_profile(&database).await;
-    seed_vector(&database, profile, &signal_canonical_hash(&database, first).await, 0.0).await;
-    seed_vector(&database, profile, &signal_canonical_hash(&database, second).await, 0.1).await;
+    seed_vector(
+        &database,
+        profile,
+        &signal_canonical_hash(&database, first).await,
+        0.0,
+    )
+    .await;
+    seed_vector(
+        &database,
+        profile,
+        &signal_canonical_hash(&database, second).await,
+        0.1,
+    )
+    .await;
 
     let recalled = recall_candidates(&database, profile, second).await.unwrap();
     assert_eq!(recalled.completeness, RecallCompleteness::Complete);
@@ -2859,8 +2938,20 @@ async fn an_active_problem_without_an_encoded_core_makes_recall_report_itself_in
         .unwrap();
     let (first, second) = two_eligible_signals(&database, "study-recall-gap-note").await;
     let profile = seed_embedding_profile(&database).await;
-    seed_vector(&database, profile, &signal_canonical_hash(&database, first).await, 0.0).await;
-    seed_vector(&database, profile, &signal_canonical_hash(&database, second).await, 0.1).await;
+    seed_vector(
+        &database,
+        profile,
+        &signal_canonical_hash(&database, first).await,
+        0.0,
+    )
+    .await;
+    seed_vector(
+        &database,
+        profile,
+        &signal_canonical_hash(&database, second).await,
+        0.1,
+    )
+    .await;
     // An active Problem whose core was never encoded is invisible to the vector path. Reporting
     // "no candidates" here would read exactly like "this is new" and create a duplicate.
     seed_existing_problem(
@@ -2878,6 +2969,37 @@ async fn an_active_problem_without_an_encoded_core_makes_recall_report_itself_in
             reason: "problem_core_vectors_incomplete"
         }
     );
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn lexical_problem_candidate_recall_reads_the_active_problem_revision() {
+    let database = proof_database("comment_study_revision_candidate_recall").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    let (seeker, supporter) =
+        two_eligible_signals(&database, "study-revision-candidate-note").await;
+    let problem = seed_existing_problem(
+        &database,
+        "孩子写作业时需要反复催促才开始",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        &[seeker, supporter],
+    )
+    .await;
+
+    let recalled = recall_problem_candidates(&database, seeker).await.unwrap();
+    assert_eq!(recalled.candidates.len(), 1);
+    let candidate = &recalled.candidates[0];
+    assert_eq!(candidate.problem_ref, problem);
+    assert_eq!(candidate.definition, "孩子写作业时需要反复催促才开始");
+    assert_eq!(candidate.stable_identity["actor"], "test");
+    assert_eq!(
+        candidate.include_criteria,
+        serde_json::json!(["test inclusion"])
+    );
+    assert_eq!(candidate.exclude_criteria, serde_json::json!([]));
 }
 
 #[tokio::test]
@@ -3105,6 +3227,24 @@ async fn no_existing_match_stays_deferred_until_two_independent_signals_create_o
         .unwrap(),
         2
     );
+    let problems = read_problems(&database, &CommentStudyReadQuery::default())
+        .await
+        .unwrap();
+    let created = problems["problems"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|problem| problem["problemRef"] == accepted.problem_ref.unwrap().to_string())
+        .expect("the accepted Problem remains readable through its current revision");
+    assert_eq!(created["stableIdentity"]["actor"], "孩子");
+    assert_eq!(
+        created["includeCriteria"],
+        serde_json::json!(["需要持续外部催促才能开始家庭作业"])
+    );
+    assert_eq!(
+        created["excludeCriteria"],
+        serde_json::json!(["仅一次忘记作业"])
+    );
 }
 
 fn semantic_output(evidence: &str) -> serde_json::Value {
@@ -3123,10 +3263,7 @@ fn semantic_output(evidence: &str) -> serde_json::Value {
 /// A run's own state and whether it carries a finish time. The schema ties the two together, so a
 /// run reported as closed while `finished_at` stays null would be a lie the CHECK cannot catch on
 /// a row nobody updates.
-async fn run_state(
-    database: &linggan_storage_postgres::Database,
-    run_ref: Uuid,
-) -> (String, bool) {
+async fn run_state(database: &linggan_storage_postgres::Database, run_ref: Uuid) -> (String, bool) {
     sqlx::query_as::<_, (String, bool)>(
         "SELECT state,finished_at IS NOT NULL FROM linggan_comment_study_run WHERE run_ref=$1",
     )
@@ -3190,11 +3327,13 @@ async fn signal_canonical_hash(
     database: &linggan_storage_postgres::Database,
     signal_ref: Uuid,
 ) -> String {
-    sqlx::query_scalar("SELECT canonical_hash FROM linggan_comment_study_signal WHERE signal_ref=$1")
-        .bind(signal_ref)
-        .fetch_one(database.pool())
-        .await
-        .unwrap()
+    sqlx::query_scalar(
+        "SELECT canonical_hash FROM linggan_comment_study_signal WHERE signal_ref=$1",
+    )
+    .bind(signal_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap()
 }
 
 async fn seed_existing_problem(
@@ -3218,8 +3357,8 @@ async fn seed_existing_problem(
     sqlx::query(
         "INSERT INTO linggan_comment_study_problem_revision( \
            revision_ref,problem_ref,domain_ref,identity_version,title,definition,core_frame, \
-           exclusions,seed_signal_refs,canonical_text,canonical_hash,definition_hash,reason \
-         ) VALUES($1,$2,$3,1,$4,$5,'{}'::jsonb,'[]'::jsonb,$6,$7,$8,$9,'test_seed')",
+           inclusions,exclusions,seed_signal_refs,canonical_text,canonical_hash,definition_hash,reason \
+         ) VALUES($1,$2,$3,1,$4,$5,'{\"actor\":\"test\"}'::jsonb,'[\"test inclusion\"]'::jsonb,'[]'::jsonb,$6,$7,$8,$9,'test_seed')",
     )
     .bind(revision_ref)
     .bind(problem_ref)
@@ -3608,12 +3747,7 @@ async fn one_inconclusive_comparison_does_not_retire_a_signal_from_pairing() {
         .into_iter()
         .enumerate()
     {
-        record_order(
-            &database,
-            signal,
-            &format!("2026-09-16T08:0{index}:00Z"),
-        )
-        .await;
+        record_order(&database, signal, &format!("2026-09-16T08:0{index}:00Z")).await;
     }
     seed_vector(&database, profile, &hash(first).await, 0.0).await;
     seed_vector(&database, profile, &hash(second).await, 0.05).await;
@@ -3649,7 +3783,10 @@ async fn one_inconclusive_comparison_does_not_retire_a_signal_from_pairing() {
     .await
     .unwrap();
     assert_eq!(receipt.state, "rejected");
-    assert_eq!(receipt.problem_ref, None, "a conflicting dimension creates nothing");
+    assert_eq!(
+        receipt.problem_ref, None,
+        "a conflicting dimension creates nothing"
+    );
 
     // The two Signals were compared with each other and came apart. Neither has been shown to be
     // unrelated to anyone else, so both must remain available to be compared with a third.
@@ -3740,6 +3877,56 @@ async fn a_tick_encodes_a_waiting_signal_before_it_tries_to_recall_against_it() 
     }
 }
 
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn embedding_work_covers_an_active_problem_fixed_core() {
+    let database = proof_database("comment_study_encode_problem_core").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    let (first, second) = two_eligible_signals(&database, "encode-problem-core-note").await;
+    let profile = seed_embedding_profile(&database).await;
+    let problem = seed_existing_problem(
+        &database,
+        "固定问题核心",
+        "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        &[first, second],
+    )
+    .await;
+    let core_hash: String = sqlx::query_scalar(
+        "SELECT revision.canonical_hash FROM linggan_comment_study_problem problem \
+         JOIN linggan_comment_study_problem_revision revision \
+           ON revision.revision_ref=problem.current_revision_ref \
+         WHERE problem.problem_ref=$1",
+    )
+    .bind(problem)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let adapter = PiAdapter::configured_with_test_embedding(
+        std::path::PathBuf::from("/bin/sh"),
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/support/comment_study_embedding_runtime.sh"),
+    );
+    assert!(matches!(
+        embed_pending_signals(&database, &adapter).await.unwrap(),
+        EmbeddingOutcome::Encoded { .. }
+    ));
+    assert!(
+        sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM linggan_comment_study_embedding_cache \
+             WHERE profile_ref=$1 AND canonical_hash=$2)",
+        )
+        .bind(profile)
+        .bind(core_hash)
+        .fetch_one(database.pool())
+        .await
+        .unwrap(),
+        "an active Problem core without an embedding would permanently make recall incomplete"
+    );
+}
+
 fn embedding_runtime(script: &str) -> PiAdapter {
     PiAdapter::configured_with_test_embedding(
         std::path::PathBuf::from("/bin/sh"),
@@ -3817,7 +4004,9 @@ async fn a_probed_runtime_becomes_the_qualified_profile_with_its_own_evidence() 
         );
     }
     assert_eq!(
-        evidence.get("notCaptured").and_then(|value| value.as_array()),
+        evidence
+            .get("notCaptured")
+            .and_then(|value| value.as_array()),
         Some(&vec![
             serde_json::json!("systemMemoryPressure"),
             serde_json::json!("swapActivity")
