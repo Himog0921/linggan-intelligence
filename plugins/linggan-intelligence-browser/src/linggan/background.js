@@ -748,6 +748,7 @@ const DISPATCH_FAILURE_CODES = new Set([
   'page_receipt_missing',
   'page_receipt_identity_mismatch',
   'page_read_failed',
+  'detail_page_url_invalid',
   'detail_page_session_grant_unavailable',
   'detail_page_session_recovery_required',
   'account_observation_blocked',
@@ -756,9 +757,16 @@ const DISPATCH_FAILURE_CODES = new Set([
 async function requeueClaimedTaskFailure({ claim, installKey, state, message }) {
   const taskId = String(claim?.taskSpec?.taskId || '').trim();
   const normalizedState = String(state || '');
+  const capability = String(claim?.taskSpec?.capabilitiesRequested?.[0] || '');
+  // After a detail navigation is consumed, an unknown collector failure is
+  // execution uncertainty, not permission to repeat the visit.  Keep the
+  // legacy generic code only for non-detail surfaces that do not consume the
+  // one-page session boundary.
   const failureCode = DISPATCH_FAILURE_CODES.has(normalizedState)
     ? normalizedState
-    : 'page_read_failed';
+    : (isDetailPageSessionCapability(capability)
+      ? 'detail_page_session_recovery_required'
+      : 'page_read_failed');
   const reported = await reportLingganDispatchFailure({
     installKey,
     installationCredential: await installationCredentialFor(installKey),
@@ -932,6 +940,7 @@ async function prepareDetailPageNavigation({ claim, taskSpec, installKey, instal
     installationCredential,
     taskId: taskSpec.taskId,
     grantRequestId: prepared.grantRequestId,
+    executionSourceUrl: claim.executionSourceUrl,
     health: claim.health,
   });
   if (!grant.granted) {

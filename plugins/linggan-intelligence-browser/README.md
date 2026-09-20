@@ -1,7 +1,7 @@
 # Linggan Intelligence Browser
 
 > 状态: 自动观察与固定材料深化 Producer
-> 版本: `0.8.53`（隔离候选；未加载到 Chrome）
+> 版本: `0.8.54`（隔离候选；未加载到 Chrome）
 > 适用范围: `OBSERVATION-RUNTIME-001`、`MEDIA-ACQUISITION-001` 与 `MATERIAL-DEEPENING-001`（GitHub Issue #103）
 > 事实来源: 当前 package source、`MIGRATION-MAP.md`、构建与隔离检查输出
 > 冲突时以谁为准: 用户最新确认、仓库 `AGENTS.md`、当前代码和实际运行证明
@@ -294,9 +294,12 @@ npm run verify:linggan-isolation
 保留同页其余已批准 lane 的 outbox 交付，不重开页面也不重放被拒绝的 Package。若当前已领取页面
 明确显示平台的“操作频繁”风控层，插件只回报闭集风险信号并停止该
 任务；同一安装在 30 分钟内收到第二个独立信号后，服务端冻结其接单 12 小时。此时不会继续打开、
-刷新或扫描页面；冷却到期后由服务端重新裁决。候选发行包为 `0.8.53`；尚未重载浏览器或访问平台。
+刷新或扫描页面；冷却到期后由服务端重新裁决。`0.8.54` 仅在当前领取的 XHS 详情页最终 URL 已明确
+落入平台 404/失效页时，追加 `detail_page_url_invalid`：服务端终止当前冻结 lane，并只保存这条签名
+URL 的 SHA-256，使相同 URL 以后不再被派发或重新打开；它不把作品永久写成删除。后续发现链带回新
+签名 URL 后，新 WorkOrder 可自然执行。候选发行包为 `0.8.54`；尚未重载浏览器或访问平台。
 
-当前候选发行包生成在 `releases/linggan-intelligence-browser-v0.8.53.zip`。打包器以
+当前候选发行包生成在 `releases/linggan-intelligence-browser-v0.8.54.zip`。打包器以
 固定 ZIP 时间戳和稳定文件顺序生成；`releases/release-manifest.json` 记录已提交
 ZIP 的 SHA-256。`npm run verify` 不会改写 release ZIP：它会以新的 `npm ci`、build
 和临时 ZIP 重新打包，并要求该 SHA-256 与已提交 ZIP 完全一致，然后运行已退役控制面隔离扫描。

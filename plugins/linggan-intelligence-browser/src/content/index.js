@@ -20,6 +20,7 @@ import { extractNoteId } from '../shared/utils.js';
 import { createLingganContentRuntime } from '../linggan/contentRuntimeAdapter.js';
 import { LINGGAN_RUNTIME_ACTION } from '../linggan/runtimeActions.js';
 import { unavailableLingganStats } from '../linggan/adapter.js';
+import { explicitXhsDetailPageUrlInvalid } from '../shared/deadPageSignals.js';
 import {
   observeXhsAccountFromDocument,
   observeXhsDetailRiskFromDocument,
@@ -259,6 +260,17 @@ async function collectApprovedDetailPageSession(message = {}) {
   const leaseRef = String(message.leaseRef || '').trim();
   if (!leaseRef || !contentExternalId) throw new Error('detail_page_session_identity_required');
   const plan = validateDetailPageSessionPlan(message.pageSessionPlan, contentExternalId);
+  if (explicitXhsDetailPageUrlInvalid({
+    currentUrl: location.href,
+    title: document.title,
+    expectedContentExternalId: contentExternalId,
+  })) {
+    return {
+      success: false,
+      state: 'detail_page_url_invalid',
+      message: '当前详情链接已落到平台失效页；不会自动重新打开该链接。',
+    };
+  }
   let contentDelivery = null;
   let contentDeliveryFailure = null;
   const queueDetailBeforeComments = async (note) => {

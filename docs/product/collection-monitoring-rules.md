@@ -66,7 +66,7 @@ active automatic rule = none
 
 可恢复的浏览器启动失败或运行超时不会删改旧 Lease/Task/Attempt/Package/Receipt：服务端追加失败账本、释放旧 Lease，并以 60、120、240、480、900 秒封顶的持久退避重新开放同一 WorkOrder。缺失签名执行 locator 发生在浏览器 Attempt 之前，也必须走同样的释放与冷却，不能以一张无效 Lease 占住工位、账号或平台并发。
 
-`content_detail` 的 `page_read_failed` 另有**按冻结 WorkOrder + contentExternalId 计数的三次边界**：前两次仍走上述冷却；第三次把该作品全部尚未执行 lane 标为 `blocked`，追加 `failure_disposition=blocked`，并立刻让同批后续作品继续领取。`blocked` 不是 `page_unavailable`，不表示页面不存在，也不生成 Attempt、CapturePackage、Receipt 或 Evidence；它只表示当前已停止自动重试，必须由后续明确、受控的采集决定重新尝试。Runtime 页只读展示平台余量、lane 等待/冷却、活着的 Lease 与 Rule 排程；它不声称未被账本定义的“成功率”。
+`content_detail` 的未知 `page_read_failed` 另有**按冻结 WorkOrder + contentExternalId 计数的三次边界**：前两次仍走上述冷却；第三次把该作品全部尚未执行 lane 标为 `blocked`，追加 `failure_disposition=blocked`，并立刻让同批后续作品继续领取。若浏览器最终 URL 已明确落到 XHS 404/失效页，则不是未知读取失败：它立即追加 `detail_page_url_invalid`，终结当前 URL 的冻结 lane，并仅以 SHA-256 记住该签名 URL；相同 URL 以后不会再派发，新的发现 URL 仍可由新工单执行。两种 `blocked` 都不是 `page_unavailable`，不表示作品永久不存在，也不生成 Attempt、CapturePackage、Receipt 或 Evidence。Runtime 页只读展示平台余量、lane 等待/冷却、活着的 Lease 与 Rule 排程；它不声称未被账本定义的“成功率”。
 
 ---
 

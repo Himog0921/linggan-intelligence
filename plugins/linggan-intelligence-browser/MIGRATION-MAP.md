@@ -1,7 +1,7 @@
 # PLUGIN-REHOME-001 · 旧插件迁入与运行边界映射
 
 > 状态: 当前迁移与自动执行边界
-> 最后核对: 2026-09-20
+> 最后核对: 2026-09-21
 > 适用范围: `linggan-boom@8a00cc1` / `v2.0.91` 到 Linggan 自有浏览器包的第一条垂直迁入边界
 > 事实来源: `plugins/linggan-intelligence-browser/` 当前 source、Manifest、Webpack active entries 和 isolation check
 > 冲突时以谁为准: 当前可构建 source 和实际运行证明；旧插件只说明迁入来源，不是 Linggan 运行规格
@@ -81,6 +81,7 @@
 | 详情授权恢复与风控冷却（0.8.51） | grant 申请失败作为无导航的可重试 dispatch failure 回队；本地许可必须从 `prepared` 获服务端接受后才可原子消费。已领取页面出现明确平台风控层时，插件只上传闭集风险信号并停止该任务；服务端在同一 installation 的 30 分钟窗口内收到第二个独立信号后暂停该 installation 接单 12 小时 | 不把 `prepared` 当作已开页，不因授权超时重开详情，不储存原始页面文字/截图，不用标题或评论中的“风控”文字触发，不暂停其他 installation，也不由插件自行恢复接单 |
 | 单一 Linggan 执行链与冻结 lane 收口（0.8.52） | 物理移除旧 Workbench 控制面、旧远程内容处理器、旧同步表、旧入口及其测试；当前插件只经 `src/linggan/background.js` 派发和交付。已消费详情许可但无法复用同页数据、窗口不明或页面未就绪时，追加 `detail_page_session_recovery_required`，服务端把同一冻结内容的详情/评论/回复/媒体 lane 统一结束为 `unavailable` | 不从缓存缺失、服务重启或任务重放推断可以再开详情页；不以 `success: true` 掩盖未采集；不删已接纳 Evidence、Package、Receipt 或历史迁移。 |
 | 采集包拒绝的单 lane 收口（0.8.53） | 详情缓存把页面 collector 的 epoch 毫秒观察时间规范为 RFC3339；若服务端仍明确拒绝一个 scheduled immutable Package，本地 durable outbox 以其 submission UUID 幂等回报 `capture_delivery_rejected`，服务端仅结束该 Task | 不把采集包拒绝解释为页面或同页缓存失效；不重试该 Package、不重开页面、不连坐取消其它已批准 lane；旧 Workbench 或第二投递协议不会复活。 |
+| 明确失效签名 URL 收口（0.8.54） | 仅当前已领取详情页的最终 XHS URL 明确为 404/失效页时，上报 `detail_page_url_invalid`；服务端停止当前冻结 lane，并只保存该签名 URL 的 SHA-256 以拒绝未来相同 URL。后来发现的不同签名 URL 仍可由新工单执行 | 不把 URL 失效推断为作品永久删除，不按猜测 TTL 禁止其他 URL，不扫描正文/评论文字，不把 404 计作风控，也不让任何不确定 collector 失败触发重复导航。 |
 
 ## 新旧运行路径对照
 

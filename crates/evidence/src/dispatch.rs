@@ -79,6 +79,10 @@ pub enum DetailPageSessionGrantError {
     ClaimNotHeld,
     #[error("the task is not a material detail-page task")]
     DetailScopeUnavailable,
+    #[error("the task no longer has an accepted signed execution locator")]
+    ExecutionSourceUnavailable,
+    #[error("the signed execution locator changed after the task was dispatched")]
+    ExecutionSourceChanged,
     #[error(transparent)]
     Database(#[from] sqlx::Error),
 }
@@ -142,6 +146,7 @@ pub enum DispatchFailureCode {
     PageReceiptMissing,
     PageReceiptIdentityMismatch,
     PageReadFailed,
+    DetailPageUrlInvalid,
     DetailPageSessionGrantUnavailable,
     DetailPageSessionRecoveryRequired,
     CaptureDeliveryRejected,
@@ -159,6 +164,7 @@ impl DispatchFailureCode {
             "page_receipt_missing" => Some(Self::PageReceiptMissing),
             "page_receipt_identity_mismatch" => Some(Self::PageReceiptIdentityMismatch),
             "page_read_failed" => Some(Self::PageReadFailed),
+            "detail_page_url_invalid" => Some(Self::DetailPageUrlInvalid),
             "detail_page_session_grant_unavailable" => {
                 Some(Self::DetailPageSessionGrantUnavailable)
             }
@@ -181,6 +187,7 @@ impl DispatchFailureCode {
             Self::PageReceiptMissing => "page_receipt_missing",
             Self::PageReceiptIdentityMismatch => "page_receipt_identity_mismatch",
             Self::PageReadFailed => "page_read_failed",
+            Self::DetailPageUrlInvalid => "detail_page_url_invalid",
             Self::DetailPageSessionGrantUnavailable => "detail_page_session_grant_unavailable",
             Self::DetailPageSessionRecoveryRequired => "detail_page_session_recovery_required",
             Self::CaptureDeliveryRejected => "capture_delivery_rejected",
@@ -201,6 +208,8 @@ pub enum DispatchFailureError {
     ClaimNotHeld,
     #[error("failure id was already used for a different task, installation, or failure code")]
     FailureIdentityConflict,
+    #[error("the claimed detail session has no bound execution-source fingerprint")]
+    DetailPageSourceUnbound,
     #[error(transparent)]
     Database(#[from] sqlx::Error),
 }
@@ -401,6 +410,7 @@ pub async fn grant_detail_page_session(
     installation_credential: &str,
     task_id: Uuid,
     grant_request_id: Uuid,
+    execution_source_url: &str,
 ) -> Result<DetailPageSessionGrant, DetailPageSessionGrantError> {
     if !dispatch_schema_is_ready(database).await? {
         return Err(DetailPageSessionGrantError::SchemaUnavailable);
@@ -490,6 +500,19 @@ pub async fn grant_detail_page_session(
     else {
         return Err(DetailPageSessionGrantError::DetailScopeUnavailable);
     };
+    // The browser is allowed to navigate only the locator that was actually
+    // dispatched.  Resolve it again inside this transaction and store no raw
+    // signed URL: a different discovery result must be claimed afresh rather
+    // than silently swapping a page beneath an already-consumed grant.
+    let Some(current_execution_source_url) =
+        execution_source_url_for_task(&mut transaction, &task_spec).await?
+    else {
+        return Err(DetailPageSessionGrantError::ExecutionSourceUnavailable);
+    };
+    if current_execution_source_url != execution_source_url {
+        return Err(DetailPageSessionGrantError::ExecutionSourceChanged);
+    }
+    let execution_source_url_sha256 = execution_source_url_sha256(execution_source_url);
     let plan_hash = Sha256::digest(
         serde_json::to_string(&plan)
             .map_err(|error| sqlx::Error::Protocol(error.to_string()))?
@@ -499,10 +522,11 @@ pub async fn grant_detail_page_session(
     .map(|byte| format!("{byte:02x}"))
     .collect::<String>();
 
-    type Existing = (Uuid, Uuid, Uuid, String, Value, bool);
+    type Existing = (Uuid, Uuid, Uuid, String, Value, bool, Option<String>);
     let existing: Option<Existing> = sqlx::query_as(
         "SELECT session.session_ref,session.owner_installation_ref,session.grant_request_id, \
-                session.state,session.plan_snapshot,owner.superseded_at IS NOT NULL \
+                session.state,session.plan_snapshot,owner.superseded_at IS NOT NULL, \
+                session.execution_source_url_sha256 \
          FROM collection_detail_page_session session \
          JOIN plugin_installation owner ON owner.installation_ref=session.owner_installation_ref \
          WHERE work_order_ref=$1 \
@@ -521,8 +545,8 @@ pub async fn grant_detail_page_session(
             sqlx::query(
                 "INSERT INTO collection_detail_page_session \
                      (session_ref,work_order_ref,content_public_ref,cross_industry_sample_ref,owner_installation_ref, \
-                      grant_request_id,initial_lease_ref,plan_snapshot,plan_hash,state) \
-                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'authorized')",
+                      grant_request_id,initial_lease_ref,plan_snapshot,plan_hash,execution_source_url_sha256,state) \
+                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'authorized')",
             )
             .bind(session_ref)
             .bind(work_order_ref)
@@ -533,13 +557,22 @@ pub async fn grant_detail_page_session(
             .bind(lease_ref)
             .bind(&plan)
             .bind(&plan_hash)
+            .bind(&execution_source_url_sha256)
             .execute(&mut *transaction)
             .await?;
             DetailPageSessionGrant::Authorized { session_ref, plan }
         }
-        Some((session_ref, owner_installation_ref, recorded_request_id, state, snapshot, _))
-            if owner_installation_ref == installation_ref
-                && recorded_request_id == grant_request_id =>
+        Some((
+            session_ref,
+            owner_installation_ref,
+            recorded_request_id,
+            state,
+            snapshot,
+            _,
+            source_hash,
+        )) if owner_installation_ref == installation_ref
+            && recorded_request_id == grant_request_id
+            && source_hash.as_deref() == Some(execution_source_url_sha256.as_str()) =>
         {
             if state == "stopped" {
                 DetailPageSessionGrant::Suppressed {
@@ -553,7 +586,7 @@ pub async fn grant_detail_page_session(
                 }
             }
         }
-        Some((session_ref, _, _, state, _, owner_superseded)) => {
+        Some((session_ref, _, _, state, _, owner_superseded, _)) => {
             if owner_superseded && state != "stopped" {
                 sqlx::query(
                     "UPDATE collection_detail_page_session \
@@ -964,6 +997,30 @@ pub async fn requeue_failed_dispatch(
         return Ok(DispatchFailureOutcome::Unavailable);
     }
     let terminal_disposition = match (failure_code, content_external_id.as_deref()) {
+        (DispatchFailureCode::DetailPageUrlInvalid, Some(content_external_id))
+            if capability == "content_detail" =>
+        {
+            // The final document conclusively rejected this exact signed URL.
+            // Bind that fact to the server-owned session fingerprint, never to
+            // raw URL text or to the permanent content identity. A future
+            // discovery can therefore provide a different signed URL without
+            // manually clearing a false "content deleted" state.
+            let source_bound: Option<Uuid> = sqlx::query_scalar(
+                "UPDATE collection_detail_page_session \
+                 SET state='stopped',stop_reason='detail_page_url_invalid', \
+                     finished_at=scope_001_now(),last_progress_at=scope_001_now() \
+                 WHERE initial_lease_ref=$1 AND execution_source_url_sha256 IS NOT NULL \
+                   AND state NOT IN ('finished','stopped') \
+                 RETURNING session_ref",
+            )
+            .bind(lease_ref)
+            .fetch_optional(&mut *transaction)
+            .await?;
+            if source_bound.is_none() {
+                return Err(DispatchFailureError::DetailPageSourceUnbound);
+            }
+            Some(("blocked", content_external_id))
+        }
         (DispatchFailureCode::PageUnavailable, Some(content_external_id))
         | (DispatchFailureCode::DetailPageSessionRecoveryRequired, Some(content_external_id)) => {
             Some(("unavailable", content_external_id))
@@ -2029,6 +2086,26 @@ fn requires_signed_execution_source(task_spec: &Value) -> bool {
 
 /// 发现链接是可过期的执行定位信息，不是作品身份。每次派发都从最新已接纳的
 /// discovery record 读取，而不把 token 冻结进长寿命 TaskSpec 或 Evidence UI。
+fn execution_source_url_sha256(execution_source_url: &str) -> String {
+    Sha256::digest(execution_source_url.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+async fn execution_source_url_is_rejected(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    execution_source_url: &str,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM collection_detail_page_session \
+         WHERE execution_source_url_sha256=$1 AND stop_reason='detail_page_url_invalid')",
+    )
+    .bind(execution_source_url_sha256(execution_source_url))
+    .fetch_one(&mut **transaction)
+    .await
+}
+
 async fn execution_source_url_for_task(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     task_spec: &Value,
@@ -2061,8 +2138,12 @@ async fn execution_source_url_for_task(
     .fetch_optional(&mut **transaction)
     .await?
     .flatten();
-    if from_evidence.is_some() {
-        return Ok(from_evidence);
+    if let Some(url) = from_evidence {
+        return if execution_source_url_is_rejected(transaction, &url).await? {
+            Ok(None)
+        } else {
+            Ok(Some(url))
+        };
     }
     // 跨行业参照物不在证据侧，上面那一查对它必然落空。
     //
@@ -2077,7 +2158,7 @@ async fn execution_source_url_for_task(
     if !cross_industry_ready {
         return Ok(None);
     }
-    sqlx::query_scalar(
+    let cross_industry_url: Option<String> = sqlx::query_scalar(
         "SELECT sample.source_url FROM cross_industry_sample sample \
          WHERE sample.platform='xhs' AND sample.content_external_id=$1 \
            AND sample.source_url LIKE 'https://www.xiaohongshu.com/%' \
@@ -2086,7 +2167,12 @@ async fn execution_source_url_for_task(
     )
     .bind(content_external_id)
     .fetch_optional(&mut **transaction)
-    .await
+    .await?;
+    match cross_industry_url {
+        Some(url) if execution_source_url_is_rejected(transaction, &url).await? => Ok(None),
+        Some(url) => Ok(Some(url)),
+        None => Ok(None),
+    }
 }
 
 /// Does a changed monitor rule revision stop this dispatch?

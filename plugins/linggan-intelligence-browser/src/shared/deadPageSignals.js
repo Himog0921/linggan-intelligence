@@ -8,3 +8,29 @@ export const DEAD_PAGE_TITLE_PATTERN =
 export function looksLikeDeadPageTitle(title = '') {
   return DEAD_PAGE_TITLE_PATTERN.test(String(title || '').trim());
 }
+
+/**
+ * A scheduled detail-page task names one concrete XHS work.  This detector
+ * deliberately reads only the browser's final URL and document title: note
+ * body/comment text is user content and must never manufacture a platform
+ * failure.  A positive result means the *signed execution URL* is no longer
+ * usable, not that the work itself has been deleted permanently.
+ */
+export function explicitXhsDetailPageUrlInvalid({
+  currentUrl = '',
+  title = '',
+  expectedContentExternalId = '',
+} = {}) {
+  if (!String(expectedContentExternalId || '').trim()) return false;
+  let url;
+  try {
+    url = new URL(String(currentUrl || '').trim());
+  } catch {
+    return false;
+  }
+  if (url.protocol !== 'https:' || !/(^|\.)xiaohongshu\.com$/i.test(url.hostname)) return false;
+  // XHS redirects an expired/invalid signed detail URL to this platform-owned
+  // surface.  It is a stronger fact than any collector exception.
+  if (url.pathname === '/explore' && url.searchParams.get('source') === '404') return true;
+  return looksLikeDeadPageTitle(title);
+}

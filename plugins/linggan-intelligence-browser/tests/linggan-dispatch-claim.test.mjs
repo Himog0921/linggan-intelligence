@@ -30,14 +30,24 @@ test('detail-page grant route is separately advertised and a lost response can r
     { outcome: 'authorized', sessionRef: 'session-1', pageSessionPlan: { contractVersion: 'linggan.detail-page-session.v1' } },
     { outcome: 'replay', sessionRef: 'session-1', pageSessionPlan: { contractVersion: 'linggan.detail-page-session.v1' } },
   ];
+  const requests = [];
   for (const body of bodies) {
     const result = await grantLingganDetailPageSession({
-      installKey: 'install-1', installationCredential: 'credential-1', taskId: 'task-1', grantRequestId: 'request-1', health,
-      fetchImpl: async () => ({ ok: true, async json() { return body; } }),
+      installKey: 'install-1', installationCredential: 'credential-1', taskId: 'task-1', grantRequestId: 'request-1',
+      executionSourceUrl: 'https://www.xiaohongshu.com/explore/note-1?xsec_token=fixture', health,
+      fetchImpl: async (url, options) => {
+        requests.push({ url, body: JSON.parse(options.body) });
+        return { ok: true, async json() { return body; } };
+      },
     });
     assert.equal(result.granted, true);
     assert.equal(result.sessionRef, 'session-1');
   }
+  assert.deepEqual(requests.map(({ body }) => body.executionSourceUrl), [
+    'https://www.xiaohongshu.com/explore/note-1?xsec_token=fixture',
+    'https://www.xiaohongshu.com/explore/note-1?xsec_token=fixture',
+  ]);
+  assert.ok(requests.every(({ url }) => /\/api\/local\/dispatch\//.test(url)));
 });
 
 test('a detail risk signal only uses the health-advertised local route and returns no credential', async () => {

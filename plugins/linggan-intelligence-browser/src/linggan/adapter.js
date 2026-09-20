@@ -236,6 +236,7 @@ export async function grantLingganDetailPageSession({
   installationCredential,
   taskId,
   grantRequestId,
+  executionSourceUrl,
   origin = LINGGAN_LOCAL_ORIGIN,
   fetchImpl = globalThis.fetch,
   health = null,
@@ -243,13 +244,16 @@ export async function grantLingganDetailPageSession({
   const route = detailPageSessionGrantRouteFromHealth(health);
   if (typeof fetchImpl !== 'function' || !route
       || !String(installKey || '').trim() || !String(installationCredential || '').trim()
-      || !String(taskId || '').trim() || !String(grantRequestId || '').trim()) {
+      || !String(taskId || '').trim() || !String(grantRequestId || '').trim()
+      || !String(executionSourceUrl || '').trim()) {
     return { granted: false, outcome: 'unavailable', reasonCode: 'grant_route_unavailable' };
   }
   try {
     const response = await fetchImpl(`${origin}${route}`, {
       method: 'POST', credentials: 'omit', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ installKey, installationCredential, taskId, grantRequestId }),
+      // The server compares this ephemeral value to its current accepted
+      // discovery locator and persists only its SHA-256 fingerprint.
+      body: JSON.stringify({ installKey, installationCredential, taskId, grantRequestId, executionSourceUrl }),
     });
     const body = await response.json().catch(() => null);
     if (!response.ok) {
