@@ -261,6 +261,7 @@ migrate() {
   apply_migration_once "0087_cross_industry_detail_comment_policy" "$project_root/database/migrations/0087_cross_industry_detail_comment_policy.sql"
   apply_migration_once "0088_media_processing_concurrency_policy" "$project_root/database/migrations/0088_media_processing_concurrency_policy.sql"
   apply_migration_once "0089_detail_page_session_replay_safety" "$project_root/database/migrations/0089_detail_page_session_replay_safety.sql"
+  apply_migration_once "0090_detail_page_grant_recovery_and_risk_cooldown" "$project_root/database/migrations/0090_detail_page_grant_recovery_and_risk_cooldown.sql"
 }
 
 case "$command_name" in
