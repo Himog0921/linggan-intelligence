@@ -120,6 +120,12 @@
 
 **当前阻塞。** 冻结样本不是 Gold Set。下一步的 Frame、同题/不同题、独立性与预期候选必须由 Mog 指定的独立人工标注者完成，并保留双人分歧与裁定；本 agent 不会用同一模型或自身对原文的判断构造“正确答案”后再评价 P3。标注完成前，离线 Recall@K、Rust→Pi adapter→WeMM→隔离 PostgreSQL 回放和 P3 出口裁定均不得开始；状态为 `BLOCKED_ON_HUMAN_ANNOTATION`，不等于验证失败。
 
+**Gold Set 标注合同 v1。** 每个私有标注行只用 `sourceRef`、`workRef`、`authorKey` 指向冻结样本，原文仍只在 source-selection 包内。两位标注者各自填写：`eligibility`（`eligible` / `not_user_problem` / `insufficient_context`）、`signalKind`、`proposition`、原文的半开区间 `evidenceSpan`、四维 `frame`（actor / goal / barrier / context，各字段可以明确为 unknown）、以及候选 `problemKey`。同题判断采用不同来源的两条 `sourceRef` 对，逐维记录 `same` / `different` / `unknown`；同一 `authorKey` 的配对必须单独标为不可作建题支持。模板不保存原文摘抄、平台 ID、作者 ID、模型输出或向量。
+
+标注者先独立完成，后才生成分歧表。只有 eligibility、evidenceSpan、四维 frame 和 pair 四维判断均一致的记录可进入已裁定 Gold Set；不一致项由 Mog 裁定并留下 `adjudication`（裁定者、时间、理由和原/后状态），不能多数投票、平均或静默覆盖。`unknown` 与 `insufficient_context` 保持原值，不能被为了凑足 20/40 样本而改写为 negative。标注模板的 contract 为 `comment-study.p3.gold-set-annotation.v1`；它和 source-selection 同属私有生成物，不进入 Git。
+
+配套模板已生成于同一私有目录的 `gold-set-annotation-template.ndjson`：100 行、`700/600` 访问保护、SHA-256 `de7464d7c8ac9aad44b95547135b521ca1672e06b879919078470a159f75fbe0`。模板不复制 source-selection 的 commentText/title/bodyContext，仅保留受控引用和待填字段；人类标注时应并排打开 source-selection，而不能把原文回填到模板的 proposition/evidence 字段。
+
 ## 文件与交付边界
 
 - 本包 exclusive：本文件、`crates/intelligence/src/comment_study_{canonical,embedding,recall,candidate_recall,comparison_cache,problem_resolution,problem_store,resolution_worker,read,source}.rs`、`crates/intelligence/src/{model_runner,pi_adapter,lib}.rs`、`crates/intelligence/tests/comment_study_rebuild_postgres.rs` 及其 P3 测试支持脚本、`apps/api/src/local_web/comment_study.rs`、`apps/pi-adapter/src/wemm_runtime.py`、`database/bootstrap/comment-study-001.sql` 和配套 reset。它们由 Issue #316 的 [原 Claim](https://github.com/Himog0921/linggan-intelligence/issues/316#issuecomment-5749282350)、[revision-read 更正](https://github.com/Himog0921/linggan-intelligence/issues/316#issuecomment-5749395396) 及 [OCR context amendment](https://github.com/Himog0921/linggan-intelligence/issues/316#issuecomment-5749506006) 明确列入；均仅限本地代码与隔离 fixture。
