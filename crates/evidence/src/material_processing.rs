@@ -12,7 +12,7 @@ use crate::producer_runtime::ProducerRuntimeError;
 use linggan_storage_postgres::Database;
 use serde::Serialize;
 use serde_json::json;
-use sqlx::{Postgres, Row, Transaction};
+use sqlx::{AssertSqlSafe, Postgres, Row, Transaction};
 use uuid::Uuid;
 
 const MAX_PROCESSING_ATTEMPTS: i32 = 3;
@@ -108,12 +108,21 @@ pub async fn ensure_media_processing_work(database: &Database) -> Result<u64, sq
     if !ready {
         return Ok(0);
     }
-    Ok(sqlx::query(
+    let retirement_ready: bool =
+        sqlx::query_scalar("SELECT to_regclass('linggan_media_ocr_retirement') IS NOT NULL")
+            .fetch_one(database.pool())
+            .await?;
+    let retired_job_filter = if retirement_ready {
+        " AND NOT EXISTS (SELECT 1 FROM linggan_media_ocr_retirement retired WHERE retired.retired_job_ref=job.job_ref)"
+    } else {
+        ""
+    };
+    Ok(sqlx::query(AssertSqlSafe(format!(
         "INSERT INTO linggan_media_processing_work(work_ref,job_ref) \
          SELECT gen_random_uuid(),job.job_ref FROM linggan_media_processing_job job \
          LEFT JOIN linggan_media_processing_work work USING(job_ref) \
-         WHERE work.job_ref IS NULL ON CONFLICT(job_ref) DO NOTHING",
-    )
+         WHERE work.job_ref IS NULL{retired_job_filter} ON CONFLICT(job_ref) DO NOTHING"
+    )))
     .execute(database.pool())
     .await?
     .rows_affected())
@@ -181,6 +190,15 @@ pub async fn claim_media_processing_work(
     if !ready || enabled_processors.is_empty() {
         return Ok(MediaProcessingClaimOutcome::Idle);
     }
+    let retirement_ready: bool =
+        sqlx::query_scalar("SELECT to_regclass('linggan_media_ocr_retirement') IS NOT NULL")
+            .fetch_one(database.pool())
+            .await?;
+    let retired_job_filter = if retirement_ready {
+        " AND NOT EXISTS (SELECT 1 FROM linggan_media_ocr_retirement retired WHERE retired.retired_job_ref=job.job_ref)"
+    } else {
+        ""
+    };
     let mut tx = database.pool().begin().await?;
     // **认领闸。** 先取锁，再数在途，最后才认领——三步必须在同一把锁下，否则这道闸拦不住任何东西。
     //
@@ -214,7 +232,7 @@ pub async fn claim_media_processing_work(
     .bind(MAX_PROCESSING_ATTEMPTS)
     .execute(&mut *tx)
     .await?;
-    let candidate = sqlx::query(
+    let candidate = sqlx::query(AssertSqlSafe(format!(
         // `JOIN ... concurrency` 是 INNER JOIN，且没有兜底行：**表里没登记的 processor_kind
         // 一条都认领不到**（Closed World，与 SCOPE-001 一致）。这是有意的——新增一种处理器
         // 却忘了登记上限时，它应该停下来被人看见，而不是没有上限地跑起来。
@@ -229,6 +247,7 @@ pub async fn claim_media_processing_work(
            ON concurrency.processor_kind = job.processor_kind \
          WHERE work.state IN ('pending','retry_wait') AND work.attempt_count < $1 \
            AND job.processor_kind = ANY($2) \
+           {retired_job_filter} \
            AND work.next_attempt_at <= scope_001_now() \
            AND (SELECT count(*) \
                 FROM linggan_media_processing_work in_flight \
@@ -241,8 +260,8 @@ pub async fn claim_media_processing_work(
                     WHEN 'image_ocr' THEN 1 WHEN 'thumbnail' THEN 2 \
                     WHEN 'audio_extract' THEN 3 WHEN 'asr' THEN 4 ELSE 5 END, \
                   work.next_attempt_at,work.created_at \
-         LIMIT 1 FOR UPDATE OF work SKIP LOCKED",
-    )
+         LIMIT 1 FOR UPDATE OF work SKIP LOCKED"
+    )))
     .bind(MAX_PROCESSING_ATTEMPTS)
     .bind(enabled_processors)
     .fetch_optional(&mut *tx)

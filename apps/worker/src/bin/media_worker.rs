@@ -4,12 +4,11 @@
 //! already admitted and materialized under `LINGGAN_LOCAL_MEDIA_ROOT`.
 
 use linggan_evidence::{
-    claim_media_processing_work, complete_media_processing_derivative,
-    complete_media_processing_ocr, complete_media_processing_text,
-    complete_media_processing_without_output, ensure_media_processing_work,
-    fail_media_processing_work, read_claim_gate_readiness, ClaimGateReadiness,
-    MediaProcessingClaim, MediaProcessingClaimOutcome, OcrCompletionInput, OcrExcludedLineInput,
-    OcrLayeringInput, OcrLineInput,
+    ClaimGateReadiness, MediaProcessingClaim, MediaProcessingClaimOutcome, OcrCompletionInput,
+    OcrExcludedLineInput, OcrLayeringInput, OcrLineInput, claim_media_processing_work,
+    complete_media_processing_derivative, complete_media_processing_ocr,
+    complete_media_processing_text, complete_media_processing_without_output,
+    ensure_media_processing_work, fail_media_processing_work, read_claim_gate_readiness,
 };
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -387,7 +386,18 @@ fn layer_paddle_lines(lines: &[PaddleOcrLine]) -> OcrLayeringInput {
         .iter()
         .filter(|ordinal| !headline_ordinals.contains(ordinal))
         .count();
-    let image_substantive_text = if headline_ordinals.is_empty() && !retained.is_empty() {
+    let single_unambiguous_line = headline_ordinals.is_empty()
+        && retained.len() == 1
+        && lines[retained[0]]
+            .text
+            .chars()
+            .filter(|character| !character.is_whitespace())
+            .count()
+            >= 6
+        && lines[retained[0]].confidence >= 0.75
+        && lines[retained[0]].bbox_norm[1] >= 0.08
+        && lines[retained[0]].bbox_norm[3] <= 0.92;
+    let image_substantive_text = if single_unambiguous_line {
         Some(
             retained
                 .iter()
@@ -400,7 +410,8 @@ fn layer_paddle_lines(lines: &[PaddleOcrLine]) -> OcrLayeringInput {
     };
     let state = if retained.is_empty() {
         "NEEDS_REVIEW"
-    } else if headline_ordinals.is_empty() || non_headline_count <= 2 {
+    } else if single_unambiguous_line || (!headline_ordinals.is_empty() && non_headline_count <= 2)
+    {
         "ACCEPTED"
     } else {
         "PARTIAL"
@@ -721,7 +732,7 @@ async fn complete_text_derivative(
 
 #[cfg(test)]
 mod tests {
-    use super::{layer_paddle_lines, PaddleOcrLine};
+    use super::{PaddleOcrLine, layer_paddle_lines};
 
     fn line(text: &str, confidence: f64, bbox_norm: [f64; 4]) -> PaddleOcrLine {
         PaddleOcrLine {
@@ -763,15 +774,16 @@ mod tests {
             line("作者赞过", 0.99, [0.73, 0.84, 0.94, 0.86]),
         ]);
         assert_eq!(output.cover_headline, None);
-        assert_eq!(
-            output.image_substantive_text.as_deref(),
-            Some("大猫给乐乐输血，说大猫很勇敢\n但是猫没有选择的权利")
-        );
+        assert_eq!(output.image_substantive_text, None);
+        assert_eq!(output.state, "PARTIAL");
+        assert_eq!(output.retained_ordinals, vec![0, 1]);
         assert_eq!(output.excluded_lines.len(), 2);
-        assert!(output
-            .excluded_lines
-            .iter()
-            .all(|line| line.classification == "platform_ui"));
+        assert!(
+            output
+                .excluded_lines
+                .iter()
+                .all(|line| line.classification == "platform_ui")
+        );
     }
 
     #[test]

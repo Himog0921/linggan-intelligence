@@ -13,10 +13,9 @@
 ## 表面与状态
 
 - `EV-S05` 列表：`platform_title` 不显示额外标记；`cover_ocr` 显示“封面 OCR”；`unknown` 继续“标题当前未知”。
-- `EV-S06` Inspector：标题事实与来源分别显示；材料区展示 raw/layout/分层的处理版本、状态和限制。
+- `EV-S06` Inspector：标题事实与来源分别显示；材料区展示 raw OCR、版面记录、分层状态、判定来源、封面主文案与干净语料资格。`PARTIAL` 明示不可作为干净语料，`RETIRED` 明示旧 OCR 已停用。
 - 不新增页面、导航、按钮或全局 Token；使用既有 LIDS 文本/状态 Primitive 与数据边界规则。
 
 ## 依赖与验证
 
-依赖共享 Work Resource Read Interface 的 display title/source 字段；不另写浏览器 SQL。验证包括 API serialization、未知与 OCR 回退负例、既有布局的 DOM/JS fixture。真实图像、真实 provider、部署和人工视觉验收均不由本改动自动证明。
-
+依赖共享 Work Resource Read Interface 的 display title/source 与 derivatives.ocrLayering 字段；不另写浏览器 SQL。验证包括 API serialization、未知与 OCR 回退负例、已接纳/部分/退役的读取反例、既有布局的 DOM/JS fixture。真实图像、真实 provider、部署和人工视觉验收均不由本改动自动证明。

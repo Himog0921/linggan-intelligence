@@ -10,7 +10,7 @@
 
 图片识字只由本机 PaddleOCR v4 执行。安装步骤不会执行数据库 migration、重排历史作业、重启 worker、访问平台或调用视觉模型。
 
-运行 `scripts/runtime/prepare-paddle-ocr.sh` 会在 `LINGGAN_SUPPORT_DIR/paddle-ocr/venv`（默认 Application Support）安装并校验固定版本：Paddle 3.3.1、PaddleOCR 3.7.0、Pillow 10.x–11.x。首次运行会下载 Python wheels 与 Paddle 官方模型；这是本机依赖安装，不是平台采集。
+运行 `scripts/runtime/prepare-paddle-ocr.sh --install` 会在 `LINGGAN_SUPPORT_DIR/paddle-ocr/venv`（默认 Application Support）安装并校验固定版本：Paddle 3.3.1、PaddleOCR 3.7.0、Pillow 10.x–11.x。脚本只接受 Python 3.9–3.13，优先使用 Homebrew 的 3.13/3.12；可用 `LINGGAN_PADDLE_PYTHON_COMMAND` 指定兼容解释器。首次安装会下载 Python wheels 与两份 PP-OCRv4 mobile 模型到同一 Application Support runtime；`--check` 只验证已安装解释器、版本和模型文件，不联网。这是本机依赖安装，不是平台采集。
 
 ## Worker 配置
 
@@ -21,7 +21,7 @@
 
 ## 发布后的有界步骤
 
-1. 在新 runtime checkout 准备 Paddle 环境，并核对脚本打印的三个版本。
+1. 在新 runtime checkout 执行 `scripts/runtime/prepare-paddle-ocr.sh --install`，再执行 `--check`；确认固定解释器、三个版本和两个本地模型都已就绪。
 2. 应用已批准的 `0091_ocr_content_layering`；它只退役历史 Tesseract OCR 的可读性，不删除原始媒体或 Evidence。
 3. 先执行 `linggan-media-requeue --kinds image_ocr,video_frame_ocr --dry-run`，核对数量，再由有授权的操作者去掉 `--dry-run`。
 4. 启动媒体 worker，确认它声明 OCR 能力且新的 job 为 `local-v3`；抽查 raw、layout、分层与“封面 OCR”标题来源。

@@ -6,6 +6,13 @@
 > 事实来源: [system.md](system.md)、[README.md](README.md)、DESIGN-002 Issue #7、项目 progress 记录和实际验证输出
 > 冲突时以谁为准: 真实代码/合同/测试、用户最新确认、当前 SCOPE 和 ACCEPTED 决策；本日志不把计划写成已实现事实
 
+## 2026-09-20 · OCR-CONTENT-LAYERING-001 Evidence Library 图片文字分层
+
+- **范围**：Evidence Library 既有列表与 Inspector 增加“封面 OCR”标题来源和图片文字分层事实；不新增页面、导航、动作、全局 Token、CMP、Scene 或模型调用。
+- **表达**：标题补位只在平台标题为空且后端已证明 `cover_headline` 时显示轻量来源标记。Inspector 保持原始 OCR 原文，同时明确显示版面记录、分层状态、规则/视觉判定来源、封面主文案和干净语料资格；历史结果显示“旧 OCR 已停用”，不以 Unknown 冒充。
+- **Data Truth**：`image_substantive_text` 只在后端标为 `ACCEPTED` 时才可进入干净语料与普通列表引用；封面 OCR 仍不可成为默认列表引文。`PARTIAL` 保留可审计原文和已证明 headline，但不冒充完成的语料清洗。
+- **验证与边界**：UI 标签、状态筛选与 Inspector 字段均直接读取现有 Work Resource 合同；样式只消费已有 `--lgi-*` token。真实 Paddle runtime、共享 migration、历史重跑、`3000` 刷新和 Mog 视觉/业务验收不由这条源码记录证明。
+
 ## 2026-09-17 · COMMENT-STUDY-LAYOUT-001 候选初始输入面
 
 - **范围**：只重排 `/corpus/comments` 新评论研究的受控启动、作品选择和读取空态；不修改共享 shell、Token、API、schema、worker、模型、运行时或部署。

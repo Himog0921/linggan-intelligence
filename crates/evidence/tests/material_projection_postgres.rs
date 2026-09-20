@@ -26,7 +26,7 @@ async fn blank_platform_title_falls_back_only_to_an_accepted_front_cover_headlin
         serde_json::json!({
             "kind":"content_detail",
             "sourceObject":{"platform":"xhs","type":"content","externalId":content_id},
-            "payload":{"bodyText":"原始标题为空，不应由正文替代"}
+            "payload":{}
         }),
     )
     .await;
@@ -91,7 +91,7 @@ async fn blank_platform_title_falls_back_only_to_an_accepted_front_cover_headlin
     .expect("the layout is appendable");
     sqlx::query(
         "INSERT INTO linggan_media_ocr_layering_result(layering_ref,layout_ref,layer_version,state,decision_source,cover_headline,image_substantive_text,retained_line_refs,excluded_lines) \
-         VALUES($1,$2,'rules-v1','ACCEPTED','rules','封面里的作者标题',NULL,'[]'::jsonb,'[]'::jsonb)",
+         VALUES($1,$2,'rules-v1','ACCEPTED','rules','封面里的作者标题','封面噪声不可作为默认引用','[]'::jsonb,'[]'::jsonb)",
     )
     .bind(Uuid::new_v4())
     .bind(layout_ref)
@@ -107,6 +107,10 @@ async fn blank_platform_title_falls_back_only_to_an_accepted_front_cover_headlin
     assert_eq!(item.display.title_state, "KNOWN");
     assert_eq!(item.display.title_source, "cover_ocr");
     assert_eq!(item.display.title_media_display_ordinal, None);
+    assert!(
+        item.evidence_fragment.is_none(),
+        "cover OCR may supply a disclosed title fallback but must not become the default evidence quote"
+    );
     assert_eq!(
         item.inspector.pointer("/displayTitle/source"),
         Some(&serde_json::json!("cover_ocr")),

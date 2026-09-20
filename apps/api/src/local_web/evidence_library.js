@@ -47,6 +47,7 @@
     FAILED: ['执行失败', 'danger'],
     RISK_CONTROL: ['风险控制停止', 'danger'],
     BYTES_CLEANED: ['字节已清理', 'warning'],
+    RETIRED: ['旧 OCR 已停用', 'warning'],
     WITHDRAWN_OR_RESTRICTED: ['已撤回或限制读取', 'danger'],
     AVAILABLE: ['本地副本可用', 'success'],
   };
@@ -80,9 +81,21 @@
     detail_body: '正文',
     comment_body: '评论',
     ocr_text: '图片文字',
+    image_substantive_text: '图片实质文字',
     frame_ocr_text: '视频画面文字',
     asr_text: '视频转录',
   };
+
+  const retiredStateList = document.getElementById('ev-lane-state-list');
+  if (retiredStateList && !retiredStateList.querySelector('[data-ev-option="RETIRED"]')) {
+    const retiredOption = document.createElement('button');
+    retiredOption.type = 'button';
+    retiredOption.setAttribute('role', 'option');
+    retiredOption.dataset.evOption = 'RETIRED';
+    retiredOption.setAttribute('aria-selected', 'false');
+    retiredOption.textContent = stateLabels.RETIRED[0];
+    retiredStateList.append(retiredOption);
+  }
 
   const SORT_OPTIONS = [
     { value: 'latest_discovery', label: '最近观察' },
@@ -1926,6 +1939,22 @@
       .sort((left, right) => String(left.slotKey || '').localeCompare(String(right.slotKey || '')));
   }
 
+  function appendOcrLayering(entry, derivative) {
+    const layering = derivative?.ocrLayering;
+    if (!layering || typeof layering !== 'object') return;
+    const state = layering.state || 'UNKNOWN';
+    entry.append(factGrid([
+      ['OCR 版面记录', layering.layoutRef || '当前未表达', layering.layoutRef ? null : 'UNKNOWN'],
+      ['分层状态', stateLabels[state]?.[0] || '当前未表达', state],
+      ['判定来源', layering.decisionSource === 'rules' ? '本地规则' : layering.decisionSource === 'vision' ? '视觉选择器' : '当前未表达', layering.decisionSource || 'UNKNOWN'],
+      ['封面主文案', layering.coverHeadline || '当前未形成', layering.coverHeadline ? null : 'UNKNOWN'],
+      ['干净语料资格', layering.cleanCorpusEligible === true ? '可进入图片实质语料' : '不可作为干净语料', layering.cleanCorpusEligible === true ? 'ACCEPTED' : state],
+    ]));
+    if (typeof layering.imageSubstantiveText === 'string' && layering.imageSubstantiveText.trim()) {
+      entry.append(node('p', 'ev-section-note', `已接纳的图片实质文字：${layering.imageSubstantiveText}`));
+    }
+  }
+
   function renderEvidence(listItem, item, inspector, commentChannel) {
     const panel = panels.get('evidence');
     panel.replaceChildren();
@@ -1976,6 +2005,7 @@
         );
         if (isCover) head.append(node('span', 'ev-inline-note', '封面图 · 不宜直接引用'));
         entry.append(head, node('q', null, derivative.displayText), stateLine(derivative.state || 'UNKNOWN'));
+        appendOcrLayering(entry, derivative);
         if (isCover) {
           entry.append(node('p', 'ev-section-note', '封面是设计排版，机器识别结果常为噪声；列表引用的原声不采用它。'));
         }

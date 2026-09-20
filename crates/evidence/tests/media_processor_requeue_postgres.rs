@@ -67,6 +67,36 @@ async fn jobs_of(database: &Database, processor_kind: &str, processor_version: &
     .expect("jobs are readable")
 }
 
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn retired_legacy_ocr_is_never_queued_or_claimed_again() {
+    let database = proof_database("retired_ocr_cannot_claim").await;
+    let (blob_sha256, slot_key) = seed_media_without_jobs(&database, 81, "image").await;
+    let job_ref =
+        insert_outdated_job(&database, &blob_sha256, &slot_key, "image_ocr", BASELINE).await;
+    sqlx::query(
+        "INSERT INTO linggan_media_ocr_retirement(retired_job_ref,reason) \
+         VALUES($1,'tesseract_replaced_by_paddleocr')",
+    )
+    .bind(job_ref)
+    .execute(database.pool())
+    .await
+    .expect("the historical OCR job is retired before worker queueing");
+
+    assert_eq!(
+        ensure_media_processing_work(&database).await.unwrap(),
+        0,
+        "a retired OCR job must not create new mutable processing work"
+    );
+    let outcome = claim_media_processing_work(&database, Uuid::new_v4(), &kinds(&["image_ocr"]))
+        .await
+        .expect("claim query is readable");
+    assert!(
+        matches!(outcome, MediaProcessingClaimOutcome::Idle),
+        "the retired job must never be leased to the Paddle worker: {outcome:?}"
+    );
+}
+
 async fn job_row(database: &Database, job_ref: Uuid) -> (String, Option<String>, String, String) {
     let row = sqlx::query(
         "SELECT blob_sha256,slot_key,processor_version,input_scope \

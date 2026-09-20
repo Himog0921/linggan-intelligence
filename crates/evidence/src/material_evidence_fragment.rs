@@ -344,6 +344,7 @@ async fn leading_image_substantive_text(
          WHERE layout.content_public_ref=$1 AND layer.state='ACCEPTED' \
            AND layer.created_at <= $2::timestamptz \
            AND nullif(btrim(layer.image_substantive_text),'') IS NOT NULL \
+           AND job.slot_key NOT LIKE '%:cover:%' \
            AND NOT EXISTS (SELECT 1 FROM linggan_media_ocr_retirement retired \
                            WHERE retired.retired_job_ref=job.job_ref) \
          ORDER BY layer.created_at DESC LIMIT 1",
