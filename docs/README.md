@@ -59,6 +59,7 @@
 | [design/changes/keyword-archive-002-ui-change-manifest.md](design/changes/keyword-archive-002-ui-change-manifest.md) | 交付分支实施中；Issue #286 | 未建档关键词的建档入口可达性、两段路由与回执层级，含停止条件与未证明边界 |
 | [design/acceptance/keyword-archive-002-acceptance.md](design/acceptance/keyword-archive-002-acceptance.md) | 交付分支验收记录；Issue #286 | 建档入口、回执真实性、层叠复核与隔离 PostgreSQL 真实后果的分层边界 |
 | [design/changes/runtime-station-table-001-ui-change-manifest.md](design/changes/runtime-station-table-001-ui-change-manifest.md) | 权威当前 | 执行工位改为以工位为单位的管理台：工位总表、语言收敛与页头计数口径 |
+| [design/changes/runtime-station-v7-2-001-ui-change-manifest.md](design/changes/runtime-station-v7-2-001-ui-change-manifest.md) | 交付分支实施完成、验证通过；未推送未部署；Issue #309 | 执行工位内容区按 v7.2 稿复刻、运行概览抽屉，及稿中无源数值的逐条替代与对稿偏离 |
 | [archive/model-pi-001.md](archive/model-pi-001.md) | 历史归档 | Issue #169 的模型设置/Pi 基础能力历史记录；当前调用路径由 COMMENT-RESEARCH-RESET-001 定义 |
 | [pages/model-ai-settings.md](pages/model-ai-settings.md) | 权威当前；交付分支 | 单页供应商弹窗、调用限制与用量语义 |
 | [design/pages/model-ai-settings-page.md](design/pages/model-ai-settings-page.md) | 权威当前；交付分支 | L1 模型与 AI 页面/状态/交互规格 |

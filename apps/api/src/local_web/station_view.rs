@@ -16,6 +16,15 @@
 //! **这一页此前用写死的句子回答接通状态**：`调度器未接通`、`队列、租约、回执尚不
 //! 存在`。三句写下时都是真的，之后三样全部接通，句子一个字没变——一个不会随系统
 //! 状态改变的状态区块，等于一个永远不会响的警报器。现在没有一句接通状态是手写的。
+//!
+//! RUNTIME-STATION-V7-2-001（2026-09-20）按 v7.2 稿复刻**内容区**，并新增右侧
+//! 「运行概览」抽屉。这一轮**只换表达，不换事实**：判定口径、四态区分、权限与
+//! 八条写路由全部逐字不变，新增的四块内容全部来自这一页已经在读的读模型。
+//!
+//! 稿里抽屉中的三块（回传成功率、补采入口计数、失败原因 TOP 3）在本系统中没有
+//! 对应事实——全库只有三个 `failure_code` 且没有聚合读模型，也没有 24 小时全局
+//! 速率与逐时序列。Mog 于同日裁定换成真读得到的四块（规则策略 / 近 7 天执行结果 /
+//! 补采与失败入口 / 积压与重试），稿中数值一个都不出现。
 
 use super::collection::collection_control_surface_view::{RuntimeLaneControlView, RuntimeResourceView};
 use super::collection_targets_view::{beijing_now_minutes, minutes_since_epoch, moment_without_year};
@@ -54,6 +63,18 @@ impl RuntimeControl<'_> {
 /// 因此这一页允许出现真实可点的按钮，而会触发平台访问的控件仍然不存在。
 const NO_PLATFORM_ACCESS_NOTE: &str =
     "登记工位、开认领窗口与认领安装都只写本地记录，不访问任何平台。";
+
+/// 接单仪器面表头右侧那一格英文标记，稿里逐字如此。
+///
+/// 它是 **LANG-05 的已登记单点例外**。按 LANG-05 的判据（「这个英文词是不是一个可枚举
+/// 的状态值、一个机器标识、或一个编号？」），`INSTALLATION_STATE` 三者都不是——它是对这
+/// 一格的描述，属于该规则明令禁止的第四类「描述性标签」。用户（LANG-05 的决定者）于
+/// 2026-09-20 明确要求保留，因此按**用户授权的例外**落地：作用范围仅此一格，不构成先例，
+/// LANG-05 在其它任何位置继续有效。裁定见 `docs/design/lids/language-policy.md`。
+///
+/// 另记一条语义错配，留证不改：这个标记的字面意思是「安装状态」，而本块判的是**通道能
+/// 不能接活**，两者不是同一件事。照用户指示逐字复刻。见 manifest §5d-5。
+const INSTALLATION_STATE_MARK: &str = "INSTALLATION_STATE";
 
 /// 一条安装「最近报到过」的判据。超过这个天数只在展开里作为历史列出，不进页头计数。
 ///
@@ -146,25 +167,146 @@ fn render_runtime_with_roster(
     let close = open + close_offset + EMPTY_STATE_CLOSE.len();
 
     let stations = roster.map(|(stations, _)| stations);
+    // 通道判定在一页里只算一次，交给控制条、接单仪器面与抽屉三处共用。三处各自算
+    // 一次，就是给「同一屏上同一件事有两个答案」留门——这一页此前正是这么坏的。
+    let lanes = lane_rows(control, overview);
     let body = format!(
         r#"<div class="c-runtime">
+              {deck}
               {verdict}
               {table}
               {running}
               {schedule}
               {footer}
+              {drawer}
             </div>"#,
-        verdict = verdict_markup(overview, control, stations),
+        deck = deck_markup(overview, lanes.as_ref()),
+        verdict = verdict_markup(overview, stations, lanes.as_ref()),
         table = station_table_markup(roster, capabilities, control, now_minutes),
         running = running_markup(overview),
         schedule = schedule_markup(overview),
         footer = footer_markup(roster, now_minutes, error),
+        drawer = runtime_drawer_markup(overview, lanes.as_ref(), capabilities, stations),
     );
 
     format!(
         "{before}{body}{after}",
         before = &base[..open],
         after = &base[close..],
+    )
+}
+
+// ---------------------------------------------------------------------------
+// 控制条：一屏之内先说清「现在能不能接活、几台在岗、几个在跑、排了几条」
+// ---------------------------------------------------------------------------
+
+/// 判定的四态在页面上的说法与语气。**控制条、接单仪器面与抽屉共用同一个词表**——
+/// 三处各写一份，就是给「同一屏上同一件事有三个答案」留门。
+///
+/// 返回的第二个值是语气，不是颜色：它决定这一块用哪一档强调，具体取值住在样式表里。
+fn verdict_state(rows: Option<&Vec<LaneRow>>) -> (&'static str, &'static str) {
+    let Some(rows) = rows else {
+        return ("读不到", "unknown");
+    };
+    match verdict_of(rows) {
+        Verdict::All => ("能接活", "ok"),
+        Verdict::Some => ("部分接不了活", "partial"),
+        Verdict::None => ("接不了活", "blocked"),
+    }
+}
+
+/// 控制条。
+///
+/// 两个动作都落在真实存在的地方，**没有一个是死链**：
+///
+/// 三个动作：
+///
+/// - 「新增工位」开登记弹窗。登记本来就住在本页，另开一个页面只会多一次跳转；
+/// - 「运行概览」开右侧抽屉。**开抽屉的入口只有这一个**。第二轮曾把入口留在贴页边的
+///   固定标签上，那片标签虽然滚动可达，却悬在内容区的两条线**之外**，读起来不像这一行
+///   的动作。代价如实记着：按钮会随正文滚走，滚到页面下方时够不着——由用户确认接受；
+/// - 第三个链到观察目标页。稿里这个位置写的是「查看观察轨迹」，而本系统的一级导航
+///   里没有「观察轨迹」这一项——照抄会得到一条点了没反应的按钮，那比没有按钮更糟。
+///
+/// 「新增工位」是 `<button>` 而不是 `<a>`。`.c-btn` 不声明 `display` 与 `align-items`，
+/// 居中靠的是原生 `<button>` 自带的那份；锚点拿不到，文字会吊在盒子顶边之外（实测文本
+/// 上方留白 −1px、下方 22.5px）。这一行里只有它是锚点，所以按元素类型修，不去动
+/// `.c-btn` 这条贯穿全站的基础规则。
+///
+/// 四个读数与下方的接单仪器面、今日运行出**同一批数**：这里算一遍、那里算一遍，
+/// 迟早会算出两个数。
+fn deck_markup(
+    overview: Option<&RuntimeCapacityOverview>,
+    lanes: Option<&Vec<LaneRow>>,
+) -> String {
+    let (state, tone) = verdict_state(lanes);
+    let staffed = overview.map_or_else(
+        || "读不到".to_owned(),
+        |overview| {
+            format!(
+                "{staffed}/{registered}",
+                staffed = overview.staffed_stations,
+                registered = overview.registered_stations,
+            )
+        },
+    );
+    // 整块读不到时给「—」而不是 0：0 是「已确认为零」，— 是「此刻答不出」。
+    let backlog_pick = |pick: fn(&linggan_evidence::DispatchLaneBacklog) -> i64| {
+        overview
+            .map(|overview| &overview.dispatch_backlog)
+            .filter(|lanes| !lanes.is_empty())
+            .map_or_else(
+                || "—".to_owned(),
+                |lanes| lanes.iter().map(pick).sum::<i64>().to_string(),
+            )
+    };
+    let scheduled = overview.map_or_else(
+        || "读不到".to_owned(),
+        |overview| overview.monitor_rule_schedules.len().to_string(),
+    );
+
+    // 先落成具名变量再进数组：直接写 `.as_str()` 会在同一条语句末尾被丢弃，
+    // 数组借的是已经死掉的值。
+    let leased = backlog_pick(|lane| lane.leased_work_orders);
+    // 语气按四态原样带上，不压成一个「是不是 ok」的布尔：压了之后 `读不到` 就只能
+    // 和 `接不了活` 落在同一档，而「答不出」与「坏了」的处置完全不同。
+    let readouts = [
+        (state, "接单状态", tone),
+        (staffed.as_str(), "在岗工位", ""),
+        (leased.as_str(), "正在执行", ""),
+        (scheduled.as_str(), "自动排程", ""),
+    ];
+    let cells: String = readouts
+        .iter()
+        .map(|(value, label, tone)| {
+            format!(
+                r#"<div class="c-deck-readout"{state}><b>{value}</b><span>{label}</span></div>"#,
+                state = if tone.is_empty() {
+                    String::new()
+                } else {
+                    format!(r#" data-state="{tone}""#)
+                },
+                value = escape(value),
+                label = escape(label),
+            )
+        })
+        .collect();
+
+    format!(
+        r#"<section class="c-deck">
+              <div class="c-deck-id">
+                <span class="c-deck-badge">{badge}</span>
+                <div class="c-deck-name">工位控制</div>
+              </div>
+              <div class="c-deck-readouts">{cells}</div>
+              <div class="c-deck-actions">
+                <button class="c-btn c-btn-primary" type="button" data-station-register-open aria-haspopup="dialog" aria-expanded="false" aria-controls="station-register">新增工位</button>
+                <button class="c-btn c-btn-quiet" type="button" data-runtime-drawer-toggle aria-controls="c-runtime-drawer" aria-expanded="false">运行概览</button>
+                <a class="c-btn c-btn-quiet" href="/collection/targets">去观察目标页</a>
+              </div>
+            </section>"#,
+        // 「实时」是一个关于新鲜度的说法，只有这一页真的从库里读到了才敢说。
+        badge = if overview.is_some() { "实时" } else { "读不到" },
     )
 }
 
@@ -180,48 +322,83 @@ fn render_runtime_with_roster(
 /// 判断的来源只有一个：能读到通道判定就用它，读不到才退回产能概览。**两者都渲染
 /// 会让同一件事在一屏里有两个答案**——改写前顶部说「三条通道可接活」、下面说
 /// 「两条通道可接活」，同一个 `deep_archive` 一处叫「基线建档」、一处叫「批量建档」。
+///
+/// v7.2 把这一块从「一段散文加几个格子」改成**仪器面**：深色表头一句话给出判定与
+/// 阻塞数量，左边逐条列出通道，右边四个读数。改的是外壳，判定与文案一个字没动。
 fn verdict_markup(
     overview: Option<&RuntimeCapacityOverview>,
-    control: Option<&RuntimeControl<'_>>,
     stations: Option<&[StationOverview]>,
+    lanes: Option<&Vec<LaneRow>>,
 ) -> String {
-    let lanes = lane_rows(control, overview);
-    let Some(verdict) = lanes.as_ref().map(|rows| verdict_of(rows)) else {
+    let Some(rows) = lanes else {
         // 读不到与「没有」是两个不同的说法，绝不能合并。
-        return r#"<section class="c-verdict c-verdict-unknown">
-                <div class="c-verdict-head">
-                  <b class="c-verdict-state">读不到</b>
-                  <p class="c-verdict-why">现在读不到「能不能接活」的判定。这不表示系统接不了活，只表示这一页此刻答不出——两者的处置不同。</p>
+        return format!(
+            r#"<section class="c-instr c-verdict-unknown">
+                <div class="c-instr-head">
+                  <span class="c-instr-badge">读不到</span>
+                  <strong class="c-instr-state">读不到</strong>
+                  <span class="c-instr-code">通道数未知</span>
+                  <span class="c-instr-en">{mark}</span>
                 </div>
-              </section>"#
-            .to_owned();
+                <div class="c-instr-body">
+                  <div class="c-instr-issues">
+                    <p class="c-instr-note">现在读不到「能不能接活」的判定。这不表示系统接不了活，只表示这一页此刻答不出——两者的处置不同。</p>
+                  </div>
+                </div>
+              </section>"#,
+            mark = INSTALLATION_STATE_MARK,
+        );
     };
-    let rows = lanes.unwrap_or_default();
-    let (variant, state, why) = match verdict {
-        Verdict::All => (
-            "c-verdict-ok",
-            "能接活",
-            "<p class=\"c-verdict-why\">下面每条通道现在都派得出任务。这不代表现在有活在跑，只代表申请到这一步不会被挡下。</p>".to_owned(),
-        ),
-        Verdict::Some => (
-            "c-verdict-partial",
-            "部分接不了活",
-            blocked_list(&rows),
-        ),
-        Verdict::None => ("c-verdict-blocked", "接不了活", blocked_list(&rows)),
+    let verdict = verdict_of(rows);
+    let (state, tone) = verdict_state(Some(rows));
+    // 阻塞与「可排队」必须分开数：可排队的通道缺的是工位，不是坏了。压成一个数，
+    // 读的人会去修一条没有坏的通道。
+    let blocked = rows
+        .iter()
+        .filter(|row| !row.available && !row.queueable)
+        .count();
+    let queueable = rows.iter().filter(|row| !row.available && row.queueable).count();
+    let (badge, badge_tone) = if blocked > 0 {
+        (format!("{blocked} 项阻塞"), " c-instr-badge-bad")
+    } else if queueable > 0 {
+        (format!("{queueable} 项等工位"), "")
+    } else {
+        ("全部通畅".to_owned(), "")
+    };
+    // 表头那一行（徽章 + 状态词）已经把判定说完了；再铺一句同义的散文只是重复一遍，
+    // 「一条都派不出」这一档尤其如此——它那句「下面逐条说明卡在哪一样」，下面本来就
+    // 逐条写着。用户 2026-09-20 指着这一句要删，删的是**复述判定**的这一类。
+    //
+    // 另外两档留着，理由不同：它们不复述判定，说的是**该怎么读**这个判定——「派得出
+    // 任务」不等于「有活在跑」、几种堵塞不能合并成一件事。表头那三个字装不下这层意思。
+    let why = match verdict {
+        Verdict::All => Some("下面每条通道现在都派得出任务。这不代表现在有活在跑，只代表申请到这一步不会被挡下。"),
+        Verdict::Some => Some("还有通道派得出任务，下面这几条现在派不出。它们卡住的原因各不相同，不要当成同一件事。"),
+        Verdict::None => None,
     };
 
     format!(
-        r#"<section class="c-verdict {variant}">
-              <div class="c-verdict-head">
-                <b class="c-verdict-state">{state}</b>
-                {why}
+        r#"<section class="c-instr c-verdict-{tone}">
+              <div class="c-instr-head">
+                <span class="c-instr-badge{badge_tone}">{badge}</span>
+                <strong class="c-instr-state">{state}</strong>
+                <span class="c-instr-code">{count} 条通道</span>
+                <span class="c-instr-en">{mark}</span>
               </div>
-              {lanes}
-              {factors}
+              <div class="c-instr-body">
+                <div class="c-instr-issues">
+                  {note}{lanes}
+                </div>
+                {readouts}
+              </div>
             </section>"#,
-        lanes = lane_markup(&rows),
-        factors = factor_markup(overview, stations),
+        count = rows.len(),
+        note = why.map_or_else(String::new, |why| {
+            format!(r#"<p class="c-instr-note">{}</p>"#, escape(why))
+        }),
+        lanes = lane_markup(rows),
+        readouts = factor_markup(overview, stations),
+        mark = INSTALLATION_STATE_MARK,
     )
 }
 
@@ -306,75 +483,82 @@ fn lane_rows(
     )
 }
 
-/// 接不了活时，逐条说明是哪条通道、缺哪一样。
+/// 每条通道分别判定，并逐条说明它卡在哪一样。
 ///
-/// 两条通道可能因为不同原因停下（一条缺能力、一条额度满），压成一句「资源不足」
-/// 会让人翻遍四个子系统。
-fn blocked_list(rows: &[LaneRow]) -> String {
-    let items: String = rows
-        .iter()
-        .filter(|row| !row.available)
-        .map(|row| {
-            format!(
-                "<li><b>{name}</b>{reason}</li>",
-                name = escape(&row.name),
-                reason = escape(
-                    row.reason
-                        .as_deref()
-                        .unwrap_or("这条通道现在派不出任务，服务端没有给出更具体的原因。")
-                ),
-            )
-        })
-        .collect();
-    format!("<ul class=\"c-verdict-why-list\">{items}</ul>")
+/// 合并成一次或压成一句「资源不足」，会让「创作者还能跑、关键词停了」这种真实情况
+/// 消失——两条通道可能因为完全不同的原因停下（一条缺能力、一条额度满），而它们的
+/// 处置差着四个子系统。
+///
+/// 每一行说的是「这条通道要去干什么」加「现在为什么不行」。原文稿这一行只有
+/// 「通道名 · 插件心跳超时」，后面半句从哪来、前半句去哪了，读的人无从判断。
+/// 一条通道现在的状态：样式类与说法。
+///
+/// **主页面与右侧抽屉共用这一个函数。** 两处各写一份判定，就是给「同一屏上同一条
+/// 通道有两个说法」留门——这一页此前正是这么坏的（顶部说三条可接活、下面说两条）。
+fn lane_state(row: &LaneRow) -> (&'static str, &'static str) {
+    if row.available {
+        ("c-lane-ok", "可接活")
+    } else if row.queueable {
+        ("c-lane-queueable", "可排队，等工位")
+    } else {
+        ("c-lane-blocked", "接不了")
+    }
 }
 
-/// 每条通道分别判定。合并成一次会让「创作者还能跑、关键词停了」这种真实情况消失。
+/// 状态在机器侧的字面取值。它只用于标记，不参与说话。
+fn capacity_state(row: &LaneRow) -> &'static str {
+    if row.available {
+        "available"
+    } else if row.queueable {
+        "queueable"
+    } else {
+        "blocked"
+    }
+}
+
+/// 原因码是数据合同里的字面取值，按 LANG-05 第 2 类可以作为中文旁边的小字保留；
+/// 它旁边永远有一句中文，不单独承担含义。
+fn reason_code_markup(row: &LaneRow) -> String {
+    row.reason_code
+        .as_deref()
+        .map_or_else(String::new, |code| {
+            format!(
+                r#"<code class="c-lane-code">{code}</code>"#,
+                code = escape(code)
+            )
+        })
+}
+
 fn lane_markup(rows: &[LaneRow]) -> String {
     let rendered: String = rows
         .iter()
         .map(|row| {
-            let (state_class, label) = if row.available {
-                ("c-lane-ok", "可接活")
-            } else if row.queueable {
-                ("c-lane-queueable", "可排队，等工位")
-            } else {
-                ("c-lane-blocked", "接不了")
-            };
-            // 原因码是数据合同里的字面取值，按 LANG-05 第 2 类可以作为中文旁边的
-            // 小字保留；它旁边永远有一句中文，不单独承担含义。
-            let code = row.reason_code.as_deref().map_or_else(String::new, |code| {
-                format!(
-                    r#"<code class="c-lane-code">{code}</code>"#,
-                    code = escape(code)
-                )
-            });
-            let capacity_state = if row.available {
-                "available"
-            } else if row.queueable {
-                "queueable"
-            } else {
-                "blocked"
-            };
+            let (state_class, label) = lane_state(row);
+            // 通得了的通道写它要去干什么，通不了的写它为什么不行——两句话都来自
+            // 服务端，页面这一层不补写。
+            let detail = row.reason.as_deref().unwrap_or(row.needs);
             format!(
-                r#"<div class="c-lane" data-capacity-state="{capacity_state}">
-                    <div class="c-lane-name"><b>{name}</b><span>{needs}</span></div>
-                    <div class="c-lane-state {state_class}">{label}{code}</div>
+                r#"<div class="c-instr-issue" data-capacity-state="{capacity_state}">
+                    <i class="c-lane-mark" aria-hidden="true"></i>
+                    <span class="c-lane-name"><b>{name}</b> · {detail}</span>
+                    <em class="c-lane-state {state_class}">{label}</em>
+                    {code}
                   </div>"#,
+                capacity_state = capacity_state(row),
                 name = escape(&row.name),
-                needs = escape(row.needs),
+                detail = escape(detail),
+                code = reason_code_markup(row),
             )
         })
         .collect();
-    format!(r#"<div class="c-lanes">{rendered}</div>"#)
+    format!(r#"<div class="c-instr-issue-list">{rendered}</div>"#)
 }
 
 /// 第二层：判定用到的几样资源各自的当前值。
 ///
 /// **账号那一项单独说明**：服务端判定的是风险、工位、能力、预算四样，账号不在其中，
 /// 它按每台工位单独判定。四项里有一项从未参与判定，却显示成四项齐备，就是用视觉
-/// 便利改写资格；而此前那句「见上方控制资格」，既没给值、又用了一个页面上已经不
-/// 存在的词。
+/// 便利改写资格；所以第 4 格的限定语写「每台单独判定」，并把值指向工位表的「账号」列。
 fn factor_markup(
     overview: Option<&RuntimeCapacityOverview>,
     stations: Option<&[StationOverview]>,
@@ -404,26 +588,36 @@ fn factor_markup(
         count => format!("{count} 条生效"),
     };
 
-    let cells = [
-        ("在岗工位", station_value, "在岗 / 已登记"),
-        ("今日预算", budget_value, "今天已采 / 每台每日上限"),
-        ("风险余量", risk_value, "生效中的风险暂停"),
+    // 有风险暂停生效时，那一格整块强调：四条读数里它是唯一说明「为什么现在不动」的。
+    let cells: [(bool, &str, String, &str); 4] = [
+        (false, "在岗工位", station_value, "在岗 / 已登记"),
+        (false, "今日预算", budget_value, "今天已采 / 每台每日上限"),
         (
+            !overview.risk_pauses.is_empty(),
+            "风险余量",
+            risk_value,
+            "生效中的风险暂停",
+        ),
+        (
+            false,
             "观察账号",
             "每台单独判定".to_owned(),
             "见下面工位表的「账号」列",
         ),
     ];
 
+    // 三行的次序是「读数 → 限定语 → 名称」，名称落在最后。这与控制条上那四个读数是
+    // 同一个次序；两处都是读数卡，读的人不该为了同一件事换两次读法。
     let rendered: String = cells
         .iter()
-        .map(|(label, value, note)| {
+        .map(|(active, label, value, note)| {
             format!(
-                r#"<div class="c-factor">
-                    <dt>{label}</dt>
-                    <dd>{value}</dd>
-                    <p>{note}</p>
+                r#"<div class="c-readout"{active}>
+                    <b>{value}</b>
+                    <span>{note}</span>
+                    <small>{label}</small>
                   </div>"#,
+                active = if *active { " data-active" } else { "" },
                 label = escape(label),
                 value = escape(value),
                 note = escape(note),
@@ -431,11 +625,10 @@ fn factor_markup(
         })
         .collect();
 
-    format!(
-        r#"<dl class="c-factors">{rendered}</dl>
-           <p class="c-factors-caveat">{caveat}</p>"#,
-        caveat = escape("账号能不能用由服务端逐台判定，插件自己说了不算。"),
-    )
+    // 只返回四格本身。仪器面正文是五列栅格（左列通道 + 四格读数），四格必须是它的直接
+    // 孩子；再套一层包装，四格会掉进同一格里挤成一条。底下那句说明句按用户 2026-09-20
+    // 的指示删除——它没有独占信息，第 4 格自己的限定语已经把同一件事说过了。
+    rendered
 }
 
 // ---------------------------------------------------------------------------
@@ -452,15 +645,15 @@ fn station_table_markup(
     now_minutes: i64,
 ) -> String {
     let Some((stations, _)) = roster else {
-        return r#"<section class="c-stn">
-              <div class="c-tg-kind-head"><h2>工位</h2><span>读不到</span></div>
+        return r#"<section class="c-sect c-stn">
+              <div class="c-sect-head"><span class="c-sect-badge soft">读不到</span><h2>工位</h2><div class="c-sect-meta">台数未知</div></div>
               <p class="c-stn-empty">工位列表当前读不到。这不表示没有登记工位，也不表示它们离线——两者的处置不同。</p>
             </section>"#
             .to_owned();
     };
     if stations.is_empty() {
-        return r#"<section class="c-stn">
-              <div class="c-tg-kind-head"><h2>工位</h2><span>0 台</span></div>
+        return r#"<section class="c-sect c-stn">
+              <div class="c-sect-head"><span class="c-sect-badge ink">0 台</span><h2>工位</h2><div class="c-sect-meta">合计 · 0</div></div>
               <p class="c-stn-empty">还没有登记任何工位。这不是「等工程」——登记一台是你现在就能做的事，页面下方就是入口。</p>
             </section>"#
             .to_owned();
@@ -479,9 +672,19 @@ fn station_table_markup(
             )
         })
         .collect();
+    // 表头右侧只报「几台在岗 / 共几台」，不报「几台有问题」——问题台的尺寸由接单
+    // 仪器面回答，同屏两处说同一件事迟早会说出两个数。
+    let staffed = stations
+        .iter()
+        .filter(|station| station.active_plugin_version.is_some())
+        .count();
     format!(
-        r#"<section class="c-stn">
-              <div class="c-tg-kind-head"><h2>工位</h2><span>{count} 台</span></div>
+        r#"<section class="c-sect c-stn">
+              <div class="c-sect-head">
+                <span class="c-sect-badge ink">台</span>
+                <h2>工位</h2>
+                <div class="c-sect-meta">{staffed} / {count} 在岗 · 合计 {count}</div>
+              </div>
               <div class="c-tg-table-scroll" role="table" aria-label="工位">
                 <div class="c-tg-table-head c-tg-station-grid" role="row">{STATION_COLUMNS}</div>
                 <div class="c-stn-list" role="rowgroup">{rows}</div>
@@ -511,8 +714,26 @@ fn station_entry(
         .as_deref()
         .map_or_else(|| "尚未报到".to_owned(), |at| moment_without_year(at).to_owned());
     // 额度是这一行唯一能告诉人「今天还能干多少活」的数。用尽时它也是准入拒绝的来源。
-    let exhausted = station.daily_notes_used >= i64::from(station.daily_work_quota);
+    let quota = i64::from(station.daily_work_quota);
+    let exhausted = station.daily_notes_used >= quota;
     let quota_tone = if exhausted { " c-tg-warn" } else { "" };
+    // 12 格是粗读刻度，不是数据：真实读数永远是旁边那串「已用/上限」。所以格子数与
+    // 上限之间不存在任何「一格代表几篇」的约定，上限换了也不用改这里。上限为 0 时
+    // 一格不亮——不猜一个比例出来。
+    let lit = if quota > 0 {
+        (station.daily_notes_used.clamp(0, quota) * 12 + quota - 1) / quota
+    } else {
+        0
+    };
+    let usage_track: String = (0..12)
+        .map(|segment| {
+            if segment < lit {
+                r#"<i class="c-usage-seg on"></i>"#
+            } else {
+                r#"<i class="c-usage-seg"></i>"#
+            }
+        })
+        .collect();
     // 换过几次插件要看得见。内容工作台正是让这个数字隐身，才变成 11 台僵尸工位。
     let history = match station.superseded_count {
         0 => "首次安装".to_owned(),
@@ -529,7 +750,7 @@ fn station_entry(
                 <div class="c-tg-cell" role="cell"><span class="c-tg-truth {state_tone}">{state}</span></div>
                 <div class="c-tg-cell c-stn-mono" role="cell">{plugin}</div>
                 <time class="c-tg-cell c-tg-time" role="cell">{last_seen}</time>
-                <div class="c-tg-cell c-tg-number-value{quota_tone}" role="cell">{used}/{quota}</div>
+                <div class="c-tg-cell c-tg-number-value{quota_tone}" role="cell"><span class="c-usage"><span class="c-usage-value">{used}/{quota_text}</span><span class="c-usage-track" aria-hidden="true">{usage_track}</span></span></div>
                 <div class="c-tg-cell" role="cell">{accepting}</div>
                 <div class="c-tg-cell" role="cell">{account}</div>
                 <div class="c-tg-cell" role="cell">{caps_summary}</div>
@@ -551,7 +772,8 @@ fn station_entry(
         plugin = escape(plugin),
         last_seen = escape(&last_seen),
         used = station.daily_notes_used,
-        quota = station.daily_work_quota,
+        quota_text = station.daily_work_quota,
+        usage_track = usage_track,
         accepting = accepting_cell(control),
         account = account_cell(control),
         caps_summary = caps.summary_markup(),
@@ -1221,11 +1443,13 @@ fn running_markup(overview: Option<&RuntimeCapacityOverview>) -> String {
             "已经过了计划时间还没派出去",
         ),
     ];
+    // 六格等宽：读数本身是主角（大字号、等宽对齐），标签和注解各降一级。格子数少于
+    // 六时最后一格留白，不拉伸已有的格子——被拉伸的格子会读成「它更重要」。
     let cells: String = readouts
         .iter()
         .map(|(label, value, note)| {
             format!(
-                r#"<div><dt>{label}</dt><dd>{value}</dd><p>{note}</p></div>"#,
+                r#"<div class="c-op"><dt>{label}</dt><dd>{value}</dd><p>{note}</p></div>"#,
                 label = escape(label),
                 value = escape(value),
                 note = escape(note),
@@ -1260,7 +1484,7 @@ fn running_markup(overview: Option<&RuntimeCapacityOverview>) -> String {
                 )
             })
             .collect();
-        format!(r#"<div class="c-run-list"><h3>正在执行的任务</h3>{rows}</div>"#)
+        format!(r#"<div class="c-run-list"><h3 class="c-run-list-head">正在执行的任务</h3>{rows}</div>"#)
     };
 
     // 「在跑但没活可派」与「根本没在跑」处置完全不同，页面必须把这个区别说出来，
@@ -1271,9 +1495,13 @@ fn running_markup(overview: Option<&RuntimeCapacityOverview>) -> String {
         "到期判据与调度自己用的是同一个式子。运行状态见页面顶部；这里是它留下的痕迹。"
     };
     format!(
-        r#"<section class="c-run">
-              <div class="c-tg-kind-head"><h2>今天在跑什么</h2><span>最近一次派出 {dispatched}</span></div>
-              <dl class="c-run-readouts">{cells}</dl>
+        r#"<section class="c-sect c-run">
+              <div class="c-sect-head">
+                <span class="c-sect-badge ink">今日</span>
+                <h2>今天在跑什么</h2>
+                <div class="c-sect-meta">最近一次派出 {dispatched}</div>
+              </div>
+              <dl class="c-ops">{cells}</dl>
               {live}
               <p class="c-stn-note">{note}</p>
             </section>"#,
@@ -1298,28 +1526,41 @@ fn schedule_markup(overview: Option<&RuntimeCapacityOverview>) -> String {
         return String::new();
     };
     if overview.monitor_rule_schedules.is_empty() {
-        return r#"<section class="c-run">
-              <div class="c-tg-kind-head"><h2>自动观察排程</h2><span>0 条</span></div>
+        return r#"<section class="c-sect c-run">
+              <div class="c-sect-head">
+                <span class="c-sect-badge ink">0 条</span>
+                <h2>自动观察排程</h2>
+                <div class="c-sect-meta">没有开着的规则</div>
+              </div>
               <p class="c-stn-empty">当前没有开着的自动观察规则。</p>
             </section>"#
             .to_owned();
     }
+    // 「上次开工」是这条规则最近一次真的动过的时刻，取代了稿里那一列「状态」：状态
+    // 已经由「最近一单」回答，而开工时刻在此之前从未上过页面——逾期排查要的正是
+    // 「计划 18:50、18:55 开了工、之后没有回音」这种断点，缺的就是中间这一列。
     let rows: String = overview
         .monitor_rule_schedules
         .iter()
-        .map(|rule| {
+        .enumerate()
+        .map(|(index, rule)| {
             format!(
-                r#"<div class="c-tg-item c-tg-plan-grid" role="row">
+                r#"<div class="c-tg-item c-sched-grid" role="row">
+                    <div class="c-tg-cell c-tg-index" role="cell">{index:02}</div>
                     <div class="c-tg-object" role="cell"><div class="c-tg-object-text"><span class="c-tg-title">{target}</span></div></div>
                     <div class="c-tg-cell" role="cell">每 {interval}</div>
                     <div class="c-tg-cell" role="cell">{state}</div>
+                    <time class="c-tg-cell c-tg-time" role="cell">{started}</time>
                     <time class="c-tg-cell c-tg-time" role="cell">{planned}</time>
                     <time class="c-tg-cell c-tg-time" role="cell">{receipt}</time>
                     <time class="c-tg-cell c-tg-time" role="cell">{next}</time>
+                    <div class="c-tg-cell c-sched-act" role="cell"><a href="/collection/targets">观察目标</a></div>
                   </div>"#,
+                index = index + 1,
                 target = escape(&rule.target_label),
                 interval = escape(&interval_label(rule.interval_seconds)),
                 state = escape(work_order_state_label(rule.latest_work_order_state.as_deref())),
+                started = escape(&moment_or_never(rule.last_attempt_started_at.as_deref())),
                 planned = escape(&moment_or_never(rule.last_scheduled_for.as_deref())),
                 receipt = escape(&moment_or_never(rule.last_receipt_at.as_deref())),
                 next = escape(&moment_or_never(rule.next_run_at.as_deref())),
@@ -1327,10 +1568,14 @@ fn schedule_markup(overview: Option<&RuntimeCapacityOverview>) -> String {
         })
         .collect();
     format!(
-        r#"<section class="c-run">
-              <div class="c-tg-kind-head"><h2>自动观察排程</h2><span>{count} 条</span></div>
+        r#"<section class="c-sect c-run">
+              <div class="c-sect-head">
+                <span class="c-sect-badge ink">排程</span>
+                <h2>自动观察排程</h2>
+                <div class="c-sect-meta">{count} 条在跑</div>
+              </div>
               <div class="c-tg-table-scroll" role="table" aria-label="自动观察排程">
-                <div class="c-tg-table-head c-tg-plan-grid" role="row"><span role="columnheader">目标</span><span role="columnheader">间隔</span><span role="columnheader">最近一单</span><span role="columnheader">上次计划</span><span role="columnheader">上次拿回</span><span role="columnheader">下次</span></div>
+                <div class="c-tg-table-head c-sched-grid" role="row"><span role="columnheader">序</span><span role="columnheader">目标</span><span role="columnheader">间隔</span><span role="columnheader">最近一单</span><span role="columnheader">上次开工</span><span role="columnheader">上次计划</span><span role="columnheader">上次拿回</span><span role="columnheader">下次</span><span role="columnheader">操作</span></div>
                 <div class="c-stn-list" role="rowgroup">{rows}</div>
               </div>
             </section>"#,
@@ -1357,20 +1602,33 @@ fn footer_markup(
 ) -> String {
     let (stations, unclaimed): (&[StationOverview], &[UnclaimedInstallation]) =
         roster.unwrap_or((&[], &[]));
+    // 登记表单住在一个居中的弹窗里，由控制条上的「新增工位」打开。它曾经是页尾一行里的
+    // 一个块（`#station-register`）加一条 `href="#station-register"` 的锚点；用户
+    // 2026-09-20 指示改成弹窗。表单本身一个字段没动。
+    //
+    // **登记失败时弹窗必须自己开着**。一次失败的 POST 会整页重渲染：如果窗还是关的，用户
+    // 看到的就是「页面回到了原样、什么也没说」，而错误块恰好就在这个关着的窗里。所以
+    // `error` 有值时在这里就不输出 `hidden`。
     format!(
         r#"<section class="c-stn-footer">
-              <div class="c-stn-block">
-                <h3>登记一台工位</h3>
-                {failure}
-                <form class="c-stn-form" method="post" action="/collection/runtime/stations">
-                  <label for="station-name">名字要能让你一眼认出是哪台机器</label>
-                  <input id="station-name" name="display_name" required maxlength="60" value="本机 Chrome" />
-                  <button class="c-btn-primary" type="submit">登记</button>
-                </form>
-                <p class="c-stn-note">{note}</p>
+              <div class="c-stn-overlay" data-station-register-overlay{open}>
+                <section class="c-stn-modal" id="station-register" role="dialog" aria-modal="true" aria-labelledby="c-station-register-title">
+                  <header class="c-stn-modal-head">
+                    <h3 id="c-station-register-title">登记一台工位</h3>
+                    <button class="c-btn-quiet c-stn-modal-close" type="button" data-station-register-close>关闭</button>
+                  </header>
+                  {failure}
+                  <form class="c-stn-form" method="post" action="/collection/runtime/stations">
+                    <label for="station-name">名字要能让你一眼认出是哪台机器</label>
+                    <input id="station-name" name="display_name" required maxlength="60" value="本机 Chrome" />
+                    <button class="c-btn-primary" type="submit">登记</button>
+                  </form>
+                  <p class="c-stn-note">{note}</p>
+                </section>
               </div>
               {unclaimed}
             </section>"#,
+        open = if error.is_some() { "" } else { " hidden" },
         failure = failure_markup(error),
         note = escape(NO_PLATFORM_ACCESS_NOTE),
         unclaimed = unclaimed_markup(stations, unclaimed, now_minutes),
@@ -1464,6 +1722,225 @@ fn unclaimed_row(installation: &UnclaimedInstallation, stations: &[StationOvervi
         version = escape(&installation.plugin_version),
         browser = escape(browser),
         first_seen = escape(moment_without_year(&installation.first_seen_at)),
+    )
+}
+
+// ---------------------------------------------------------------------------
+// 右侧抽屉：运行概览
+// ---------------------------------------------------------------------------
+
+/// 右侧「运行概览」抽屉。
+///
+/// 外观、位置与开合方式照 v7.2 稿：固定在右侧、贴边一个把手、`Esc` 可关。**里面换成
+/// 这一页真读得到的四块。** 稿里那三块——回传成功率 98.6%、补采入口 26 条、失败原因
+/// TOP 3——在本系统里没有对应事实：全库只有三个 `failure_code` 且没有聚合读模型，
+/// 也没有 24 小时全局速率与逐时序列。编一个出来，等于把「不知道」画成「知道」。
+///
+/// 与稿子有意的第二处不同：**默认关闭**。稿子为了展示把它画成开着的，但那是一个覆盖层，
+/// 第一帧就压在被覆盖的内容上、且没有脚本时永远关不掉。开合方式、把手位置与动效都
+/// 与稿子一致，只是初始态取关。关着的时候整个抽屉带 `inert`，屏幕外的链接不进 Tab 序列。
+///
+/// 四块与主页面**同源**：通道判定只算一次传进来，队列与风险暂停取自同一次读取。
+/// 抽屉里不会出现和上面读数打架的第二套数。
+fn runtime_drawer_markup(
+    overview: Option<&RuntimeCapacityOverview>,
+    lanes: Option<&Vec<LaneRow>>,
+    capabilities: &CapabilityMatrix,
+    stations: Option<&[StationOverview]>,
+) -> String {
+    // 「派过」与「成了」是两个事实，并排放在最底下。只报派出不报拿回，正是让一个
+    // 一直派得出去、什么都拿不回来的系统看起来在正常工作的那种写法。
+    let (dispatched, succeeded) = overview.map_or_else(
+        || ("读不到".to_owned(), "读不到".to_owned()),
+        |overview| {
+            (
+                moment_or_never(overview.patrol.last_dispatched_at.as_deref()),
+                moment_or_never(overview.patrol.last_succeeded_at.as_deref()),
+            )
+        },
+    );
+    format!(
+        r#"<aside class="c-rdrawer" id="c-runtime-drawer" aria-label="运行概览" inert>
+              <div class="c-rdrawer-head">
+                <span class="c-rdrawer-title">运行概览</span>
+                <button class="c-rdrawer-close" type="button" data-runtime-drawer-close aria-label="关闭运行概览">×</button>
+              </div>
+              <div class="c-rdrawer-body">
+                {policy}
+                {results}
+                {routes}
+                {backlog}
+              </div>
+              <p class="c-rdrawer-foot">最近一次派出 {dispatched} · 最近一次拿回 {succeeded}</p>
+            </aside>"#,
+        policy = drawer_policy_markup(lanes),
+        results = drawer_results_markup(capabilities, stations),
+        routes = drawer_routes_markup(),
+        backlog = drawer_backlog_markup(overview),
+    )
+}
+
+/// 抽屉里一块的固定外壳。四块共用，免得四段各自长出一个表头。
+fn drawer_section(title: &str, body: &str) -> String {
+    format!(
+        r#"<section class="c-rd-sec"><h3 class="c-rd-sec-head">{title}</h3>{body}</section>"#,
+        title = escape(title),
+    )
+}
+
+/// 第一块：规则策略。
+///
+/// 逐条列出通道**要去干什么**加它现在的判定。上面那块仪器面在通道被挡住时写的是
+/// 原因，于是「这条通道本来是干什么的」在那一行被挤掉了；这里把它补回来。状态词与
+/// 判定码都走同一对函数（`lane_state` / `reason_code_markup`），两处不可能给出两个答案。
+fn drawer_policy_markup(lanes: Option<&Vec<LaneRow>>) -> String {
+    let Some(rows) = lanes else {
+        return drawer_section(
+            "规则策略",
+            r#"<p class="c-rd-note">通道判定此刻读不到。这不表示没有通道，只表示这一页答不出——两者的处置不同。</p>"#,
+        );
+    };
+    let open = rows.iter().filter(|row| row.available).count();
+    let cards: String = rows
+        .iter()
+        .map(|row| {
+            let (state_class, label) = lane_state(row);
+            format!(
+                r#"<div class="c-rd-rule">
+                    <div class="c-rd-rule-head"><b>{name}</b><em class="c-lane-state {state_class}">{label}</em>{code}</div>
+                    <p>{needs}</p>
+                  </div>"#,
+                name = escape(&row.name),
+                needs = escape(row.needs),
+                code = reason_code_markup(row),
+            )
+        })
+        .collect();
+    drawer_section(
+        "规则策略",
+        &format!(
+            r#"<p class="c-rd-meta">共 {total} 条通道 · {open} 条现在能接活</p>{cards}"#,
+            total = rows.len(),
+        ),
+    )
+}
+
+/// 第二块：近 7 天执行结果（深色卡）。
+///
+/// 窗口不是页面自己划的：能力读数本来就按 7 天窗口取（`CAPABILITY_WINDOW_DAYS`），
+/// 这里只是把各台工位的计数加起来。三类数**分开放，不合成一个「失败数」**——
+/// 「插件说这项在这里跑不了」是能力问题，「这一次超时了」不是，合成一个会让一次网络
+/// 抖动看起来像能力缺陷。
+///
+/// **只读到一部分工位时先说清几台有读数**：把三台的和当成全系统的和，是这一页最容易
+/// 犯、也最难被看出来的那种错。整个窗口一条记录都没有时说「没有留下记录」，不显示 0。
+fn drawer_results_markup(
+    capabilities: &CapabilityMatrix,
+    stations: Option<&[StationOverview]>,
+) -> String {
+    let (mut read, mut picked, mut capability_failures, mut execution_failures) = (0usize, 0i64, 0i64, 0i64);
+    for rows in capabilities.values() {
+        read += 1;
+        for row in rows {
+            picked += row.successes;
+            capability_failures += row.capability_failures;
+            execution_failures += row.execution_failures;
+        }
+    }
+    let coverage = stations.map_or_else(
+        || format!("{read} 台有读数，工位总数此刻读不到"),
+        |stations| format!("{read} / {} 台工位有读数", stations.len()),
+    );
+    let body = if read == 0 {
+        r#"<p class="c-rd-note">这一轮没有任何一台工位的能力读数是读到的。这不表示它们没干过活，只表示现在答不出。</p>"#
+            .to_owned()
+    } else if picked + capability_failures + execution_failures == 0 {
+        // 0 是「已确认为零」，这里要说的正是这个：窗口内确实一条记录都没有。
+        r#"<p class="c-rd-note">这 7 天里，有读数的工位没有留下任何执行记录。</p>"#.to_owned()
+    } else {
+        format!(
+            r#"<dl class="c-rd-figures">
+                <div><dt>拿回的采集包</dt><dd>{picked}</dd><p>这 7 天从这些工位收上来的包</p></div>
+                <div><dt>插件说这项跑不了</dt><dd>{capability_failures}</dd><p>工位明确回答这项在这里干不了，是能力问题</p></div>
+                <div><dt>这一次没跑成</dt><dd>{execution_failures}</dd><p>超时、标签页不可用等，能力本身没问题</p></div>
+              </dl>"#
+        )
+    };
+    drawer_section(
+        "近 7 天执行结果",
+        &format!(
+            r#"<div class="c-rd-card"><p class="c-rd-card-meta">{coverage}</p>{body}</div>"#,
+            coverage = escape(&coverage),
+        ),
+    )
+}
+
+/// 第三块：补采与失败入口。
+///
+/// 两个都是真链接，落到真存在的地方，指向哪就说哪：补采缺口在观察目标页的目标详情里
+/// （那里有「补采缺口」这个操作），上一次为什么没成在任务页（工单时间线上带着
+/// `last_dispatch_failure_code`）。稿里这一块挂着「26 条待检查」这类计数，一个都不出现：
+/// 那两个页面各自的筛选口径不在这条链路上，报一个数出来只能是编的。
+fn drawer_routes_markup() -> String {
+    drawer_section(
+        "补采与失败入口",
+        r#"<div class="c-rd-routes">
+              <a class="c-rd-route" href="/collection/targets"><b>补采缺口</b><span>在观察目标页打开目标详情，能看到缺了多少、点一下排入补采</span></a>
+              <a class="c-rd-route" href="/collection/tasks"><b>失败与重试</b><span>在任务页看每张工单停在哪一步、上一次为什么没成</span></a>
+            </div>"#,
+    )
+}
+
+/// 第四块：积压与重试。
+///
+/// 三个总数已经在上面「今天在跑什么」里，这里**不重报**，只补上面没有的两件：
+/// 排在最前面的那一单从什么时候开始等，以及生效中的风险暂停各自是什么。后者是
+/// 「为什么没有在重试」的答案——上面那四格只说有几条暂停，不说暂停的理由。
+fn drawer_backlog_markup(overview: Option<&RuntimeCapacityOverview>) -> String {
+    let Some(overview) = overview else {
+        return drawer_section(
+            "积压与重试",
+            r#"<p class="c-rd-note">这一轮没有读到队列事实，因此答不出积压与重试的现状。</p>"#,
+        );
+    };
+    // 「最久的一单还在等」比「一共积压几张」更能说明等了多久：一张等了两天的单和
+    // 五张刚排进来的单，处置完全不同。取原始时刻比大小（`YYYY-MM-DD HH:MM` 的字典序
+    // 与时间序一致），再裁掉年份显示。
+    let oldest = overview
+        .dispatch_backlog
+        .iter()
+        .filter_map(|lane| lane.oldest_ready_at.as_deref())
+        .min()
+        .map_or_else(
+            || "没有在等的一单".to_owned(),
+            |at| moment_without_year(at).to_owned(),
+        );
+    let pauses = if overview.risk_pauses.is_empty() {
+        r#"<p class="c-rd-note">当前没有生效中的风险暂停。</p>"#.to_owned()
+    } else {
+        let rows: String = overview
+            .risk_pauses
+            .iter()
+            .map(|pause| {
+                format!(
+                    r#"<div class="c-rd-pause">
+                        <b>{reason}</b>
+                        <span>由 {by} 于 {at} 暂停</span>
+                      </div>"#,
+                    reason = escape(&pause.reason),
+                    by = escape(&pause.paused_by),
+                    at = escape(moment_without_year(&pause.paused_at)),
+                )
+            })
+            .collect();
+        format!(r#"<div class="c-rd-pauses">{rows}</div>"#)
+    };
+    drawer_section(
+        "积压与重试",
+        &format!(
+            r#"<p class="c-rd-meta">最久在等的一单 · <b>{oldest}</b></p>{pauses}"#,
+            oldest = escape(&oldest),
+        ),
     )
 }
 
@@ -2557,17 +3034,35 @@ mod tests {
 
     #[test]
     fn a_failed_action_says_so_instead_of_looking_like_it_worked() {
-        let html = render_runtime(
-            &base(),
-            Some(&overview(vec![lane("基线建档", available())])),
-            &[],
-            &[],
-            &CapabilityMatrix::new(),
-            None,
-            test_now(),
-            Some("station_rejected"),
-        );
+        let render_with = |error: Option<&str>| {
+            render_runtime(
+                &base(),
+                Some(&overview(vec![lane("基线建档", available())])),
+                &[],
+                &[],
+                &CapabilityMatrix::new(),
+                None,
+                test_now(),
+                error,
+            )
+        };
+
+        let html = render_with(Some("station_rejected"));
         assert!(html.contains("没有完成"));
         assert!(html.contains("不允许重名"));
+        // 错误块住在登记弹窗里，所以「说了没有完成」还不够——窗要是关着，用户看到的
+        // 就只是「页面回到原样、什么都没说」，而原因恰好藏在一个看不见的窗里。这条
+        // 断言钉住的是**窗必须自己开着**：失败后整页重渲染，没有任何脚本再替它开。
+        assert!(
+            html.contains(r#"<div class="c-stn-overlay" data-station-register-overlay>"#),
+            "登记失败时弹窗必须渲染成开着的，否则错误信息不可见"
+        );
+
+        // 反过来也要钉住：没有失败时窗必须是关的，否则每次进页面都会弹一个空窗。
+        let clean = render_with(None);
+        assert!(
+            clean.contains(r#"<div class="c-stn-overlay" data-station-register-overlay hidden>"#),
+            "没有失败时弹窗必须是关着的"
+        );
     }
 }
