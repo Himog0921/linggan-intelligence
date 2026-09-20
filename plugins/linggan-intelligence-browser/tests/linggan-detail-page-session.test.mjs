@@ -211,7 +211,8 @@ test('two replayed dispatch wakeups consume one persisted navigation grant only 
   ]);
   assert.equal(first.grantRequestId, 'request-1');
   assert.equal(second.grantRequestId, 'request-1', 'the same task retry reuses its request id');
-  await ledger.attachServerGrant({ grantKey: first.grantKey, sessionRef: 'session-1', plan });
+  const accepted = await ledger.attachServerGrant({ grantKey: first.grantKey, sessionRef: 'session-1', plan });
+  assert.equal(accepted.state, 'grant_accepted', 'prepared alone must not consume a navigation budget');
   const consumed = await Promise.all([
     ledger.consume({ grantKey: first.grantKey, sessionRef: 'session-1' }),
     ledger.consume({ grantKey: first.grantKey, sessionRef: 'session-1' }),

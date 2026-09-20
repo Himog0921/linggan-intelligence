@@ -13,12 +13,13 @@ use axum::{
     routing::post,
 };
 use linggan_evidence::{
-    AccountEligibilityObservation, CollectionControlError, DetailPageSessionGrant,
-    DetailPageSessionGrantError, DetailPageSessionNavigationError, DetailPageSessionProgress,
-    DispatchDecision, DispatchFailureCode, DispatchFailureError, DispatchFailureOutcome,
-    ExplicitAccountEligibilitySignal, activate_installation_credential, decide_dispatch,
-    grant_detail_page_session, record_detail_page_session_progress, record_dispatch_answer,
-    report_account_eligibility, report_claimed_task_account_eligibility, requeue_failed_dispatch,
+    AccountEligibilityObservation, CollectionControlError, DetailPageRiskSignalError,
+    DetailPageSessionGrant, DetailPageSessionGrantError, DetailPageSessionNavigationError,
+    DetailPageSessionProgress, DispatchDecision, DispatchFailureCode, DispatchFailureError,
+    DispatchFailureOutcome, ExplicitAccountEligibilitySignal, activate_installation_credential,
+    decide_dispatch, grant_detail_page_session, record_detail_page_session_progress,
+    record_dispatch_answer, report_account_eligibility, report_claimed_task_account_eligibility,
+    report_detail_page_risk_signal, requeue_failed_dispatch,
 };
 
 /// The station asks whether it may execute a bounded task. Published through
@@ -32,6 +33,8 @@ pub(super) const DETAIL_PAGE_SESSION_GRANT_PATH: &str =
     "/api/local/dispatch/detail-page-sessions/grant";
 pub(super) const DETAIL_PAGE_SESSION_NAVIGATION_PATH: &str =
     "/api/local/dispatch/detail-page-sessions/navigation-observed";
+pub(super) const DETAIL_PAGE_RISK_SIGNAL_PATH: &str =
+    "/api/local/dispatch/detail-page-sessions/risk-signals";
 
 pub(super) const ACCOUNT_ELIGIBILITY_PATH: &str =
     "/api/local/stations/account-eligibility-observations";
@@ -49,6 +52,10 @@ pub(super) fn routes() -> Router<LocalWebState> {
         .route(
             DETAIL_PAGE_SESSION_NAVIGATION_PATH,
             post(record_detail_page_session_navigation_route),
+        )
+        .route(
+            DETAIL_PAGE_RISK_SIGNAL_PATH,
+            post(report_detail_page_risk_signal_route),
         )
         .route(ACCOUNT_ELIGIBILITY_PATH, post(report_account))
         .route(CREDENTIAL_ACTIVATION_PATH, post(activate_credential))
@@ -72,6 +79,16 @@ struct DetailPageSessionNavigationBody {
     session_ref: uuid::Uuid,
     kind: String,
     stop_reason: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DetailPageRiskSignalBody {
+    install_key: String,
+    installation_credential: String,
+    task_id: uuid::Uuid,
+    risk_signal_id: uuid::Uuid,
+    detector_version: String,
 }
 
 /// Return a previously recorded page-session authorization only to the
@@ -143,6 +160,56 @@ fn detail_page_session_grant_error_code(error: &DetailPageSessionGrantError) -> 
             "detail_page_session_scope_unavailable"
         }
         DetailPageSessionGrantError::Database(_) => "detail_page_session_grant_write_failed",
+    }
+}
+
+async fn report_detail_page_risk_signal_route(
+    State(state): State<LocalWebState>,
+    body: Bytes,
+) -> Response {
+    let Some(database) = state.database.database() else {
+        return local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "read_model_not_connected",
+        );
+    };
+    let Ok(request) = serde_json::from_slice::<DetailPageRiskSignalBody>(&body) else {
+        return local_read_json_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "detail_page_risk_signal_invalid",
+        );
+    };
+    match report_detail_page_risk_signal(
+        database,
+        &request.install_key,
+        &request.installation_credential,
+        request.task_id,
+        request.risk_signal_id,
+        &request.detector_version,
+    )
+    .await
+    {
+        Ok(receipt) => Json(serde_json::json!({
+            "outcome": "recorded", "cooldownActive": receipt.cooldown_active,
+            "cooldownUntil": receipt.cooldown_until, "consecutiveCount": receipt.consecutive_count,
+        }))
+        .into_response(),
+        Err(error) => local_read_json_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            match error {
+                DetailPageRiskSignalError::SchemaUnavailable => {
+                    "detail_page_risk_schema_unavailable"
+                }
+                DetailPageRiskSignalError::UnknownInstallation => {
+                    "detail_page_risk_installation_unknown"
+                }
+                DetailPageRiskSignalError::InvalidCredential => {
+                    "detail_page_risk_credential_invalid"
+                }
+                DetailPageRiskSignalError::ClaimNotHeld => "detail_page_risk_claim_not_held",
+                DetailPageRiskSignalError::Database(_) => "detail_page_risk_write_failed",
+            },
+        ),
     }
 }
 

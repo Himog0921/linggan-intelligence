@@ -1,7 +1,7 @@
 # Linggan Intelligence Browser
 
 > 状态: 自动观察与固定材料深化 Producer
-> 版本: `0.8.50`（隔离候选；未加载到 Chrome）
+> 版本: `0.8.51`（隔离候选；未加载到 Chrome）
 > 适用范围: `OBSERVATION-RUNTIME-001`、`MEDIA-ACQUISITION-001` 与 `MATERIAL-DEEPENING-001`（GitHub Issue #103）
 > 事实来源: 当前 package source、`MIGRATION-MAP.md`、构建与隔离检查输出
 > 冲突时以谁为准: 用户最新确认、仓库 `AGENTS.md`、当前代码和实际运行证明
@@ -285,9 +285,12 @@ npm run verify:linggan-isolation
 详情页”拆开：浏览器先在 IndexedDB 原子消费持久导航许可，再创建受管窗口；同一 request id
 只能取回原授权，换 request id、缓存缺失或已消费但窗口不明都会停止自动导航。Chrome 已观察到
 的受管标签页另行回报服务端，不由 grant 推断；已经取得的正文先进入 durable outbox，不被评论
-采集或缓存交接失败连坐。候选发行包为 `0.8.50`；尚未重载浏览器或访问平台。
+采集或缓存交接失败连坐。若当前已领取页面明确显示平台的“操作频繁”风控层，插件只回报
+闭集风险信号并停止该任务；同一安装在 30 分钟内收到第二次独立信号后，服务端冻结其接单
+12 小时。此时不会继续打开、刷新或扫描页面；冷却到期后由服务端重新裁决。候选发行包为
+`0.8.51`；尚未重载浏览器或访问平台。
 
-当前候选发行包生成在 `releases/linggan-intelligence-browser-v0.8.50.zip`。打包器以
+当前候选发行包生成在 `releases/linggan-intelligence-browser-v0.8.51.zip`。打包器以
 固定 ZIP 时间戳和稳定文件顺序生成；`releases/release-manifest.json` 记录已提交
 ZIP 的 SHA-256。`npm run verify` 不会改写 release ZIP：它会以新的 `npm ci`、build
 和临时 ZIP 重新打包，并要求该 SHA-256 与已提交 ZIP 完全一致，然后运行旧工作台

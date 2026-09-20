@@ -274,9 +274,14 @@ export function createDetailPageNavigationGrantStore({
           throw new Error('detail_page_navigation_session_identity_conflict');
         }
         await table.update(row.grantKey, {
-          sessionRef: text(sessionRef), plan: plain(plan), updatedAt: now(),
+          sessionRef: text(sessionRef), plan: plain(plan),
+          state: row.state === 'prepared' ? 'grant_accepted' : row.state,
+          updatedAt: now(),
         });
-        return { ...row, sessionRef: text(sessionRef), plan: plain(plan), updatedAt: now() };
+        return {
+          ...row, sessionRef: text(sessionRef), plan: plain(plan),
+          state: row.state === 'prepared' ? 'grant_accepted' : row.state, updatedAt: now(),
+        };
       });
     },
 
@@ -287,7 +292,7 @@ export function createDetailPageNavigationGrantStore({
         if (!text(sessionRef) || row.sessionRef !== text(sessionRef)) {
           throw new Error('detail_page_navigation_session_identity_conflict');
         }
-        if (row.state !== 'prepared') return { shouldNavigate: false, row };
+        if (row.state !== 'grant_accepted') return { shouldNavigate: false, row };
         const timestamp = now();
         const consumed = { ...row, state: 'consumed', consumedAt: timestamp, updatedAt: timestamp };
         await table.put(consumed);

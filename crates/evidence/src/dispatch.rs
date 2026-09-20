@@ -99,6 +99,27 @@ pub enum DetailPageSessionNavigationError {
     Database(#[from] sqlx::Error),
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum DetailPageRiskSignalError {
+    #[error("dispatch schema is not applied")]
+    SchemaUnavailable,
+    #[error("no active plugin installation with that install key")]
+    UnknownInstallation,
+    #[error("installation credential is invalid")]
+    InvalidCredential,
+    #[error("the installation no longer holds that live detail task claim")]
+    ClaimNotHeld,
+    #[error(transparent)]
+    Database(#[from] sqlx::Error),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DetailPageRiskSignalReceipt {
+    pub cooldown_active: bool,
+    pub cooldown_until: Option<String>,
+    pub consecutive_count: i64,
+}
+
 /// A constrained session-progress vocabulary. None of these transitions can
 /// issue, renew, or transfer a navigation grant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,6 +142,7 @@ pub enum DispatchFailureCode {
     PageReceiptMissing,
     PageReceiptIdentityMismatch,
     PageReadFailed,
+    DetailPageSessionGrantUnavailable,
     AccountObservationBlocked,
 }
 
@@ -135,6 +157,9 @@ impl DispatchFailureCode {
             "page_receipt_missing" => Some(Self::PageReceiptMissing),
             "page_receipt_identity_mismatch" => Some(Self::PageReceiptIdentityMismatch),
             "page_read_failed" => Some(Self::PageReadFailed),
+            "detail_page_session_grant_unavailable" => {
+                Some(Self::DetailPageSessionGrantUnavailable)
+            }
             "account_observation_blocked" => Some(Self::AccountObservationBlocked),
             _ => None,
         }
@@ -150,6 +175,7 @@ impl DispatchFailureCode {
             Self::PageReceiptMissing => "page_receipt_missing",
             Self::PageReceiptIdentityMismatch => "page_receipt_identity_mismatch",
             Self::PageReadFailed => "page_read_failed",
+            Self::DetailPageSessionGrantUnavailable => "detail_page_session_grant_unavailable",
             Self::AccountObservationBlocked => "account_observation_blocked",
         }
     }
@@ -235,6 +261,9 @@ impl DispatchDecision {
             Self::Dispatch { .. } => 0,
             Self::NothingWaiting => 300,
             Self::ExecutionLocatorUnavailable { .. } => 300,
+            Self::ControlBlocked { reason_code } if reason_code == "installation_risk_cooldown" => {
+                1800
+            }
             Self::ControlBlocked { .. } => 300,
             // 触顶要等次日自然日窗口重置，问得再勤也不会变。
             Self::DailyQuotaReached { .. } => 1800,
@@ -257,6 +286,7 @@ impl DispatchDecision {
             Self::ExecutionLocatorUnavailable { .. } => "execution_locator_unavailable",
             Self::ControlBlocked { reason_code } => match reason_code.as_str() {
                 "risk_paused" => "risk_paused",
+                "installation_risk_cooldown" => "installation_risk_cooldown",
                 "station_unavailable" => "station_unavailable",
                 "installation_credential_missing" => "installation_credential_missing",
                 "plugin_version_unsupported" => "plugin_version_unsupported",
@@ -333,6 +363,9 @@ pub async fn dispatch_schema_is_ready(database: &Database) -> Result<bool, sqlx:
                 AND to_regclass(format('%I.%I',current_schema(),'collection_dispatch_lane_fairness')) IS NOT NULL \
                 AND to_regclass(format('%I.%I',current_schema(),'collection_platform_dispatch_policy')) IS NOT NULL \
                 AND to_regclass(format('%I.%I',current_schema(),'collection_detail_page_session')) IS NOT NULL \
+                AND to_regclass(format('%I.%I',current_schema(),'collection_detail_page_session_grant_attempt')) IS NOT NULL \
+                AND to_regclass(format('%I.%I',current_schema(),'collection_installation_risk_signal')) IS NOT NULL \
+                AND to_regclass(format('%I.%I',current_schema(),'collection_installation_risk_cooldown')) IS NOT NULL \
                 AND EXISTS (SELECT 1 FROM information_schema.columns \
                             WHERE table_schema=current_schema() \
                               AND table_name='collection_work_order' \
@@ -515,6 +548,39 @@ pub async fn grant_detail_page_session(
             reason_code: "session_already_authorized",
         },
     };
+    let (grant_outcome, session_ref) = match &outcome {
+        DetailPageSessionGrant::Authorized { session_ref, .. } => {
+            ("authorized", Some(*session_ref))
+        }
+        DetailPageSessionGrant::Replay { session_ref, .. } => ("replay", Some(*session_ref)),
+        DetailPageSessionGrant::Suppressed { session_ref, .. } => {
+            ("suppressed", Some(*session_ref))
+        }
+    };
+    let attempt_no: i64 = sqlx::query_scalar(
+        "SELECT count(*) + 1 FROM collection_detail_page_session_grant_attempt \
+         WHERE installation_ref=$1 AND grant_request_id=$2",
+    )
+    .bind(installation_ref)
+    .bind(grant_request_id)
+    .fetch_one(&mut *transaction)
+    .await?;
+    sqlx::query(
+        "INSERT INTO collection_detail_page_session_grant_attempt \
+             (grant_attempt_ref,work_order_ref,task_id,lease_ref,installation_ref,grant_request_id,attempt_no,outcome,session_ref) \
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(work_order_ref)
+    .bind(task_id)
+    .bind(lease_ref)
+    .bind(installation_ref)
+    .bind(grant_request_id)
+    .bind(attempt_no as i32)
+    .bind(grant_outcome)
+    .bind(session_ref)
+    .execute(&mut *transaction)
+    .await?;
     transaction.commit().await?;
     Ok(outcome)
 }
@@ -538,6 +604,109 @@ pub async fn record_detail_page_session_navigation(
         DetailPageSessionProgress::NavigationObserved,
     )
     .await
+}
+
+/// Record a conclusive risk-control interstitial from an already-open claimed
+/// XHS detail page.  The browser supplies only a closed signal and detector
+/// version; page text is never persisted. Two independent observations in
+/// thirty minutes open an installation-only twelve-hour circuit breaker.
+pub async fn report_detail_page_risk_signal(
+    database: &Database,
+    install_key: &str,
+    installation_credential: &str,
+    task_id: Uuid,
+    risk_signal_ref: Uuid,
+    detector_version: &str,
+) -> Result<DetailPageRiskSignalReceipt, DetailPageRiskSignalError> {
+    if !dispatch_schema_is_ready(database).await? {
+        return Err(DetailPageRiskSignalError::SchemaUnavailable);
+    }
+    let mut transaction = database.pool().begin().await?;
+    let installation_ref: Option<Uuid> = sqlx::query_scalar(
+        "SELECT installation_ref FROM plugin_installation WHERE install_key=$1 AND superseded_at IS NULL FOR UPDATE",
+    )
+    .bind(install_key)
+    .fetch_optional(&mut *transaction)
+    .await?;
+    let Some(installation_ref) = installation_ref else {
+        return Err(DetailPageRiskSignalError::UnknownInstallation);
+    };
+    if !validate_installation_credential_in(
+        &mut transaction,
+        installation_ref,
+        installation_credential,
+    )
+    .await?
+    {
+        return Err(DetailPageRiskSignalError::InvalidCredential);
+    }
+    let claimed: Option<(Uuid, Option<Uuid>)> = sqlx::query_as(
+        "SELECT lease.lease_ref,session.session_ref \
+         FROM collection_work_order_lease_task task \
+         JOIN collection_work_order_lease lease ON lease.lease_ref=task.lease_ref \
+         JOIN linggan_runtime_task runtime ON runtime.task_id=task.task_id \
+         LEFT JOIN collection_detail_page_session session ON session.initial_lease_ref=lease.lease_ref \
+         WHERE task.task_id=$1 AND task.claimed_by_installation_ref=$2 AND task.execution_state='in_progress' \
+           AND lease.released_at IS NULL AND lease.expires_at>scope_001_now() \
+           AND runtime.platform='xhs' AND runtime.task_spec #>> '{capabilitiesRequested,0}'='content_detail' \
+         FOR UPDATE OF task,lease",
+    )
+    .bind(task_id)
+    .bind(installation_ref)
+    .fetch_optional(&mut *transaction)
+    .await?;
+    let Some((lease_ref, session_ref)) = claimed else {
+        return Err(DetailPageRiskSignalError::ClaimNotHeld);
+    };
+    sqlx::query(
+        "INSERT INTO collection_installation_risk_signal \
+             (risk_signal_ref,installation_ref,task_id,lease_ref,detail_page_session_ref,platform,signal_code,detector_version) \
+         VALUES ($1,$2,$3,$4,$5,'xhs','risk_control_interstitial',$6) \
+         ON CONFLICT (risk_signal_ref) DO NOTHING",
+    )
+    .bind(risk_signal_ref)
+    .bind(installation_ref)
+    .bind(task_id)
+    .bind(lease_ref)
+    .bind(session_ref)
+    .bind(detector_version.trim())
+    .execute(&mut *transaction)
+    .await?;
+    let consecutive_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_installation_risk_signal \
+         WHERE installation_ref=$1 AND platform='xhs' AND observed_at>=scope_001_now()-interval '30 minutes'",
+    )
+    .bind(installation_ref)
+    .fetch_one(&mut *transaction)
+    .await?;
+    if consecutive_count >= 2 {
+        sqlx::query(
+            "INSERT INTO collection_installation_risk_cooldown \
+                 (installation_ref,platform,trigger_signal_ref,trigger_count,opened_at,until_at) \
+             VALUES ($1,'xhs',$2,$3,scope_001_now(),scope_001_now()+interval '12 hours') \
+             ON CONFLICT (installation_ref,platform) DO UPDATE \
+             SET trigger_signal_ref=EXCLUDED.trigger_signal_ref,trigger_count=EXCLUDED.trigger_count, \
+                 opened_at=EXCLUDED.opened_at,until_at=EXCLUDED.until_at",
+        )
+        .bind(installation_ref)
+        .bind(risk_signal_ref)
+        .bind(consecutive_count as i32)
+        .execute(&mut *transaction)
+        .await?;
+    }
+    let cooldown_until: Option<String> = sqlx::query_scalar(
+        "SELECT linggan_human_moment(until_at) FROM collection_installation_risk_cooldown \
+         WHERE installation_ref=$1 AND platform='xhs' AND until_at>scope_001_now()",
+    )
+    .bind(installation_ref)
+    .fetch_optional(&mut *transaction)
+    .await?;
+    transaction.commit().await?;
+    Ok(DetailPageRiskSignalReceipt {
+        cooldown_active: cooldown_until.is_some(),
+        cooldown_until,
+        consecutive_count,
+    })
 }
 
 /// Persist the latest execution fact for one owner-held session. A stopped

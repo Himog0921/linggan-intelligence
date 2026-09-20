@@ -75,6 +75,15 @@ export function observeXhsAccountFromDocument(doc) {
   return authenticated || explicitXhsAccountBlockObservation(doc);
 }
 
+// This is deliberately narrower than generic account eligibility: only the
+// explicit platform cooldown prompt on an already-open task page is allowed to
+// contribute to the plugin circuit breaker.
+export function observeXhsDetailRiskFromDocument(doc) {
+  return explicitXhsAccountBlockObservation(doc)?.signal === 'cooldown_observed'
+    ? { signal: 'risk_control_interstitial', detectorVersion: 'xhs-risk-interstitial.v1' }
+    : null;
+}
+
 /**
  * Natural page load reporting is a single DOM read. No retry loop, alarm, tab enumeration or
  * platform request is introduced; inconclusive DOM state simply sends nothing.

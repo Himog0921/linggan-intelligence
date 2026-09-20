@@ -4,9 +4,11 @@ import assert from 'node:assert/strict';
 import {
   claimLingganDispatch,
   decodePageExecutionReceipt,
+  detailPageRiskSignalRouteFromHealth,
   detailPageSessionGrantRouteFromHealth,
   grantLingganDetailPageSession,
   dispatchClaimRouteFromHealth,
+  reportLingganDetailPageRiskSignal,
 } from '../src/linggan/adapter.js';
 
 const HEALTH = { routes: { dispatch: { claim: '/api/local/dispatch/claim' } } };
@@ -36,6 +38,28 @@ test('detail-page grant route is separately advertised and a lost response can r
     assert.equal(result.granted, true);
     assert.equal(result.sessionRef, 'session-1');
   }
+});
+
+test('a detail risk signal only uses the health-advertised local route and returns no credential', async () => {
+  const health = { routes: { dispatch: { detailPageRiskSignal: '/api/local/dispatch/detail-page-sessions/risk-signals' } } };
+  assert.equal(detailPageRiskSignalRouteFromHealth(health), '/api/local/dispatch/detail-page-sessions/risk-signals');
+  assert.equal(detailPageRiskSignalRouteFromHealth({ routes: { dispatch: { detailPageRiskSignal: '/api/other' } } }), null);
+  let request;
+  const result = await reportLingganDetailPageRiskSignal({
+    installKey: 'install-1', installationCredential: 'credential-1', taskId: 'task-1',
+    riskSignalId: 'signal-1', detectorVersion: 'xhs-risk-interstitial.v1', health,
+    fetchImpl: async (url, options) => {
+      request = { url, body: JSON.parse(options.body) };
+      return { ok: true, async json() { return { outcome: 'recorded', cooldownActive: true, cooldownUntil: '2026-09-21T00:00:00Z' }; } };
+    },
+  });
+  assert.deepEqual(request.body, {
+    installKey: 'install-1', installationCredential: 'credential-1', taskId: 'task-1',
+    riskSignalId: 'signal-1', detectorVersion: 'xhs-risk-interstitial.v1',
+  });
+  assert.match(request.url, /^http:\/\/localhost:3000\/api\/local\/dispatch\//);
+  assert.deepEqual(result, { reported: true, cooldownActive: true, cooldownUntil: '2026-09-21T00:00:00Z' });
+  assert.equal(JSON.stringify(result).includes('credential-1'), false);
 });
 
 test('a task body without permission is not carried out of the claim', async () => {

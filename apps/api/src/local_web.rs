@@ -543,7 +543,8 @@ async fn health(State(state): State<LocalWebState>) -> Json<Value> {
             "claim": collection_dispatch::CLAIM_PATH,
             "failure": collection_dispatch::FAILURE_PATH,
             "detailPageSessionGrant": collection_dispatch::DETAIL_PAGE_SESSION_GRANT_PATH,
-            "detailPageSessionNavigation": collection_dispatch::DETAIL_PAGE_SESSION_NAVIGATION_PATH
+            "detailPageSessionNavigation": collection_dispatch::DETAIL_PAGE_SESSION_NAVIGATION_PATH,
+            "detailPageRiskSignal": collection_dispatch::DETAIL_PAGE_RISK_SIGNAL_PATH
         }),
         _ => Value::Null,
     };
