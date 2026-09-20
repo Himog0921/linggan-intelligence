@@ -1,6 +1,6 @@
 // Narrow UI constants used by the Linggan-owned active runtime.
 // The rehomed legacy constants remain available to dormant collector source,
-// but the active browser shell must not import the old workbench protocol.
+// but the active browser shell must not import retired control protocols.
 export const TASK_STATE = {
   IDLE: 'idle',
   RUNNING: 'running',

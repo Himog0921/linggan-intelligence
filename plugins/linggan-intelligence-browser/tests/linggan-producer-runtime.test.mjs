@@ -510,16 +510,17 @@ test('background forwards the claimed scheduled identity into the content page a
   assert.doesNotMatch(dispatched, /createManualRuntimeTask/);
 });
 
-test('a claimed task which cannot start a page is audibly requeued instead of remaining in progress', () => {
+test('a detail-session uncertainty is terminally reported instead of remaining in progress', () => {
   const background = readFileSync(new URL('../src/linggan/background.js', import.meta.url), 'utf8');
   const start = background.indexOf('async function runDispatchedTask()');
   const end = background.indexOf('\n/**\n * 在一个独立的', start);
   const dispatched = background.slice(start, end);
   assert.match(background, /reportLingganDispatchFailure/);
   assert.match(dispatched, /requeueClaimedTaskFailure/);
-  assert.match(dispatched, /state: 'page_timeout'/);
   assert.match(dispatched, /state: 'page_unavailable'/);
-  assert.match(dispatched, /state: 'tab_unavailable'/);
+  assert.match(dispatched, /state: 'detail_page_session_recovery_required'/);
+  assert.match(dispatched, /error\?\.detailPageSessionRecoveryRequired/);
+  assert.doesNotMatch(dispatched, /state: 'detail_page_session_data_unavailable'/);
   assert.match(background, /DISPATCH_FAILURE_CODES/);
 });
 

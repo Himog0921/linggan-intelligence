@@ -1,7 +1,7 @@
 import { parseCount } from '../shared/utils.js';
 
 // Browser-local execution support only. These records keep pause/resume and progress durable
-// inside the installed producer; they are never a second Linggan truth or an old Workbench
+// inside the installed producer; they are never a second Linggan truth or a second
 // transport. Linggan receives typed packages through the runtime outbox.
 export const LOCAL_SURFACE_MODE = Object.freeze({
   KEYWORD_SURFACE: 'keyword_surface',

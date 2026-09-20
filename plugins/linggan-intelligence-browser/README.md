@@ -1,7 +1,7 @@
 # Linggan Intelligence Browser
 
 > 状态: 自动观察与固定材料深化 Producer
-> 版本: `0.8.51`（隔离候选；未加载到 Chrome）
+> 版本: `0.8.52`（隔离候选；未加载到 Chrome）
 > 适用范围: `OBSERVATION-RUNTIME-001`、`MEDIA-ACQUISITION-001` 与 `MATERIAL-DEEPENING-001`（GitHub Issue #103）
 > 事实来源: 当前 package source、`MIGRATION-MAP.md`、构建与隔离检查输出
 > 冲突时以谁为准: 用户最新确认、仓库 `AGENTS.md`、当前代码和实际运行证明
@@ -281,20 +281,22 @@ npm run verify:linggan-isolation
 只是人工确认提示，只有 `bindingMismatch` 才停止已领取任务；当本机没有账号身份摘要键时，
 插件获得明确且不含秘密的诊断，不会为此扫描或驱动平台页面。
 
-当前候选 `DETAIL-PAGE-SESSION-REPLAY-SAFETY-001` 再将“服务端允许领取”和“浏览器可以再开一次
+当前候选 `DETAIL-PAGE-SESSION-REPLAY-SAFETY-001` 将“服务端允许领取”和“浏览器可以再开一次
 详情页”拆开：浏览器先在 IndexedDB 原子消费持久导航许可，再创建受管窗口；同一 request id
-只能取回原授权，换 request id、缓存缺失或已消费但窗口不明都会停止自动导航。Chrome 已观察到
-的受管标签页另行回报服务端，不由 grant 推断；已经取得的正文先进入 durable outbox，不被评论
-采集或缓存交接失败连坐。若当前已领取页面明确显示平台的“操作频繁”风控层，插件只回报
-闭集风险信号并停止该任务；同一安装在 30 分钟内收到第二次独立信号后，服务端冻结其接单
-12 小时。此时不会继续打开、刷新或扫描页面；冷却到期后由服务端重新裁决。候选发行包为
-`0.8.51`；尚未重载浏览器或访问平台。
+只能取回原授权。`0.8.52` 进一步删除旧 Workbench 控制面、旧远程内容处理器、旧本地同步表和
+兼容入口：当前 package 只保留 Linggan service worker、采集器、导航许可、durable outbox 与本机
+展示缓存。换 request id、缓存缺失、已消费但窗口不明或页面未就绪，都不会自动重开详情页；插件
+追加 `detail_page_session_recovery_required` 失败事实，服务端将同一冻结内容的剩余 lane 结束为
+`unavailable`，不再把“没有执行”伪装成成功或留下 `in_progress`。Chrome 已观察到的受管标签页
+另行回报服务端，不由 grant 推断；已经取得的正文先进入 durable outbox，不被评论采集或缓存交接
+失败连坐。若当前已领取页面明确显示平台的“操作频繁”风控层，插件只回报闭集风险信号并停止该
+任务；同一安装在 30 分钟内收到第二个独立信号后，服务端冻结其接单 12 小时。此时不会继续打开、
+刷新或扫描页面；冷却到期后由服务端重新裁决。候选发行包为 `0.8.52`；尚未重载浏览器或访问平台。
 
-当前候选发行包生成在 `releases/linggan-intelligence-browser-v0.8.51.zip`。打包器以
+当前候选发行包生成在 `releases/linggan-intelligence-browser-v0.8.52.zip`。打包器以
 固定 ZIP 时间戳和稳定文件顺序生成；`releases/release-manifest.json` 记录已提交
 ZIP 的 SHA-256。`npm run verify` 不会改写 release ZIP：它会以新的 `npm ci`、build
-和临时 ZIP 重新打包，并要求该 SHA-256 与已提交 ZIP 完全一致，然后运行旧工作台
-运行时隔离扫描。
+和临时 ZIP 重新打包，并要求该 SHA-256 与已提交 ZIP 完全一致，然后运行已退役控制面隔离扫描。
 
 ## 未证明事项
 

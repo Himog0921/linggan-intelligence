@@ -1,6 +1,6 @@
 // These values intentionally match the existing Popup and Dashboard UI
 // protocol. Keeping this small map separate prevents the active Linggan
-// runtime from loading the retired workbench action catalogue.
+// runtime from loading any retired action catalogue.
 export const LINGGAN_RUNTIME_ACTION = {
   GET_STATS: 'getStats',
   GET_PAGE_CONTEXT: 'getPageContext',

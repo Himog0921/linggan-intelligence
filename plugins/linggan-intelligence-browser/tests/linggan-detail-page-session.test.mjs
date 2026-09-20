@@ -177,6 +177,20 @@ test('cached comment and reply lanes keep their content source identity', async 
   assert.equal(packageDetailPageSessionLane(repliesEntry, repliesTask).records[0].kind, 'reply');
 });
 
+test('a damaged persisted page session is rejected instead of becoming a retryable later lane', async () => {
+  const table = memoryTable();
+  const store = createDetailPageSessionStore(table, () => 1_000);
+  const entry = await store.put({ leaseRef: 'lease-1', plan, note, commentResult, receipt: {} });
+  await table.put({
+    ...entry,
+    plan: { ...entry.plan, lanes: ['content_detail', 'comments', 'unknown_lane'] },
+  });
+  await assert.rejects(
+    store.getForTask({ leaseRef: 'lease-1', taskSpec: task('comments') }),
+    /detail_page_session_lanes_invalid/,
+  );
+});
+
 test('a page payload outlives its lease but cannot be adopted by a new lease', async () => {
   let now = 1_000;
   const table = memoryTable();

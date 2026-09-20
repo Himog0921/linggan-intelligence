@@ -18,10 +18,11 @@ Workbench runtime.
 ## Active runtime contract
 
 - The only active service-worker entry is `src/linggan/background.js`.
-- `src/background/index.js`, `src/workbench/`, `src/sync/`, historical probe
-  scripts, and legacy collector implementation are retained migration source;
-  they are not an authorization to call their old endpoints, run polling/lease,
-  read Cookies, download media, or sync to the old workbench.
+- The former `src/background/`, `src/workbench/`, `src/sync/` control plane and
+  remote-content handlers have been removed from this package. Historical
+  retrofit directories remain read-only evidence outside this active source;
+  they are not an authorization to restore old endpoints, polling/lease,
+  Cookie reads, media download, or Workbench sync.
 - Browser local storage is staging/recovery only, never Linggan truth.
 - Before a named Linggan adapter contract is implemented and reviewed, a
   detail/comment/media/batch/Douyin/automation action must stay visibly pending

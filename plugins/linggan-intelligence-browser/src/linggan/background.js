@@ -167,9 +167,8 @@ async function ensureMediaWorker() {
 }
 
 async function queueManualDiscovery(discoveryPackage) {
-  // Old page readers can still emit the mature surface-card shape while they are all routed
-  // through this one runtime. Convert it at the boundary rather than preserving a second
-  // Workbench delivery protocol.
+  // Mature page readers emit one surface-card shape and all delivery is routed
+  // through this one runtime; there is no second delivery protocol.
   const cards = Array.isArray(discoveryPackage?.cards) ? discoveryPackage.cards : [];
   const platform = String(discoveryPackage?.platform || 'xhs');
   const query = String(discoveryPackage?.query || '').trim();
@@ -716,6 +715,7 @@ const DISPATCH_FAILURE_CODES = new Set([
   'page_receipt_identity_mismatch',
   'page_read_failed',
   'detail_page_session_grant_unavailable',
+  'detail_page_session_recovery_required',
   'account_observation_blocked',
 ]);
 
@@ -789,7 +789,13 @@ async function reportClaimedTaskRisk(tabId, claim, installKey, installationCrede
 }
 
 async function queueCachedDetailPageSessionLane({ leaseRef, taskSpec } = {}) {
-  const entry = await detailPageSessionStore.getForTask({ leaseRef, taskSpec });
+  let entry;
+  try {
+    entry = await detailPageSessionStore.getForTask({ leaseRef, taskSpec });
+  } catch (error) {
+    error.detailPageSessionRecoveryRequired = true;
+    throw error;
+  }
   if (!entry) return null;
   if (entry.alreadyQueued) {
     // A claim response can be replayed while its durable outbox item is still being delivered.
@@ -804,7 +810,13 @@ async function queueCachedDetailPageSessionLane({ leaseRef, taskSpec } = {}) {
       message: `已复用详情页缓存；「${entry.capability}」此前已进入待交付队列。`,
     };
   }
-  const capturePackage = packageDetailPageSessionLane(entry, taskSpec);
+  let capturePackage;
+  try {
+    capturePackage = packageDetailPageSessionLane(entry, taskSpec);
+  } catch (error) {
+    error.detailPageSessionRecoveryRequired = true;
+    throw error;
+  }
   const idempotencyKey = `detail-session:${taskSpec.taskId}:${entry.capability}`;
   const queued = entry.capability === 'media_slots'
     ? await queueMediaSlots({ taskSpec, capturePackage, idempotencyKey })
@@ -975,12 +987,16 @@ async function runDispatchedTask() {
         leaseRef: claim.leaseRef,
         taskSpec: spec,
       });
-    } catch {
+    } catch (error) {
       return requeueClaimedTaskFailure({
         claim: { ...claim, health: readiness.health },
         installKey,
-        state: 'page_read_failed',
-        message: '页面缓存读取未能进入本机可靠队列。',
+        state: error?.detailPageSessionRecoveryRequired
+          ? 'detail_page_session_recovery_required'
+          : 'page_read_failed',
+        message: error?.detailPageSessionRecoveryRequired
+          ? '同页缓存身份或内容无法验证；已停止自动重开详情页，并将该内容标记为不可自动恢复。'
+          : '本机待交付队列暂不可写；没有打开页面，任务将按退避重试交付。',
       });
     }
     if (cached) return { ...cached, nextPollAfterSeconds: claim.nextPollAfterSeconds };
@@ -989,14 +1005,12 @@ async function runDispatchedTask() {
     // cache miss in a later lane is an execution-uncertainty fact, never an
     // excuse to visit the note again for comments, replies or media.
     if (capability !== 'content_detail' || !claim.pageSessionPlan) {
-      return {
-        success: true,
-        state: 'detail_page_session_data_unavailable',
-        executed: false,
-        leaseRef: claim.leaseRef,
-        nextPollAfterSeconds: claim.nextPollAfterSeconds,
-        message: '本机没有可交付的同页结果；已停止自动重开详情页，等待明确恢复决定。',
-      };
+      return requeueClaimedTaskFailure({
+        claim: { ...claim, health: readiness.health },
+        installKey,
+        state: 'detail_page_session_recovery_required',
+        message: '本机没有可交付的同页结果；已停止自动重开详情页，并将该内容标记为不可自动恢复。',
+      });
     }
   }
   let navigationGrant = null;
@@ -1009,14 +1023,12 @@ async function runDispatchedTask() {
         installationCredential,
       });
     } catch {
-      return {
-        success: true,
-        state: 'detail_page_navigation_state_unknown',
-        executed: false,
-        leaseRef: claim.leaseRef,
-        nextPollAfterSeconds: claim.nextPollAfterSeconds,
-        message: '详情页导航状态无法确认；为避免重复访问，未自动打开页面。',
-      };
+      return requeueClaimedTaskFailure({
+        claim: { ...claim, health: readiness.health },
+        installKey,
+        state: 'detail_page_session_recovery_required',
+        message: '详情页导航状态无法确认；为避免重复访问，未自动打开页面，并将该内容标记为不可自动恢复。',
+      });
     }
     if (!navigationGrant.shouldNavigate) {
       if (navigationGrant.reason === 'grant_transport_unavailable'
@@ -1030,15 +1042,23 @@ async function runDispatchedTask() {
       }
       if (!navigationGrant.recovered && navigationGrant.reason === 'navigation_state_unknown'
           && navigationGrant.sessionRef) {
-        void reportLingganDetailPageSessionNavigation({
+        await reportLingganDetailPageSessionNavigation({
           installKey, installationCredential, taskId: spec.taskId,
           sessionRef: navigationGrant.sessionRef, kind: 'stopped',
           stopReason: 'navigation_state_unknown', health: readiness.health,
+        }).catch(() => null);
+      }
+      if (!navigationGrant.recovered) {
+        return requeueClaimedTaskFailure({
+          claim: { ...claim, health: readiness.health },
+          installKey,
+          state: 'detail_page_session_recovery_required',
+          message: '详情页许可已被其他执行状态占用或已不可确认；未自动重开页面，已标记为不可自动恢复。',
         });
       }
       return {
         success: true,
-        state: navigationGrant.recovered ? 'detail_page_session_recovered' : 'detail_page_navigation_suppressed',
+        state: 'detail_page_session_recovered',
         executed: false,
         leaseRef: claim.leaseRef,
         nextPollAfterSeconds: claim.nextPollAfterSeconds,
@@ -1053,34 +1073,34 @@ async function runDispatchedTask() {
     opened = await openTaskWindow(capability, targetValue, claim.executionSourceUrl);
   } catch {
     if (navigationGrant?.sessionRef) {
-      void reportLingganDetailPageSessionNavigation({
+      await reportLingganDetailPageSessionNavigation({
         installKey, installationCredential, taskId: spec.taskId,
         sessionRef: navigationGrant.sessionRef, kind: 'stopped',
         stopReason: 'navigation_state_unknown', health: readiness.health,
-      });
+      }).catch(() => null);
     }
     return requeueClaimedTaskFailure({
       claim: { ...claim, health: readiness.health },
       installKey,
-      state: 'tab_unavailable',
-      message: '无法打开观察页面。',
+      state: 'detail_page_session_recovery_required',
+      message: '详情页许可已消费但页面未能确认打开；为避免重复访问，已标记为不可自动恢复。',
     });
   }
   const { windowId, tabId } = opened;
   if (!tabId) {
     await closeCollectionWindow(windowId);
     if (navigationGrant?.sessionRef) {
-      void reportLingganDetailPageSessionNavigation({
+      await reportLingganDetailPageSessionNavigation({
         installKey, installationCredential, taskId: spec.taskId,
         sessionRef: navigationGrant.sessionRef, kind: 'stopped',
         stopReason: 'navigation_state_unknown', health: readiness.health,
-      });
+      }).catch(() => null);
     }
     return requeueClaimedTaskFailure({
       claim: { ...claim, health: readiness.health },
       installKey,
-      state: 'tab_unavailable',
-      message: '无法打开观察页面。',
+      state: 'detail_page_session_recovery_required',
+      message: '详情页许可已消费但没有可确认的页面；为避免重复访问，已标记为不可自动恢复。',
     });
   }
   if (navigationGrant?.grantKey) {
@@ -1093,20 +1113,18 @@ async function runDispatchedTask() {
     } catch {
       await closeCollectionWindow(windowId);
       if (navigationGrant?.sessionRef) {
-        void reportLingganDetailPageSessionNavigation({
+        await reportLingganDetailPageSessionNavigation({
           installKey, installationCredential, taskId: spec.taskId,
           sessionRef: navigationGrant.sessionRef, kind: 'stopped',
           stopReason: 'navigation_state_unknown', health: readiness.health,
-        });
+        }).catch(() => null);
       }
-      return {
-        success: true,
-        state: 'detail_page_navigation_state_unknown',
-        executed: false,
-        leaseRef: claim.leaseRef,
-        nextPollAfterSeconds: claim.nextPollAfterSeconds,
-        message: '页面窗口已创建但未能持久登记；已关闭该受管窗口，后续不会自动重开。',
-      };
+      return requeueClaimedTaskFailure({
+        claim: { ...claim, health: readiness.health },
+        installKey,
+        state: 'detail_page_session_recovery_required',
+        message: '页面窗口未能持久登记且已关闭；为避免重复访问，已标记为不可自动恢复。',
+      });
     }
   }
 
@@ -1123,17 +1141,17 @@ async function runDispatchedTask() {
     const ready = await waitForTabReady(tabId);
     if (!ready) {
       if (navigationGrant?.sessionRef) {
-        void reportLingganDetailPageSessionNavigation({
+        await reportLingganDetailPageSessionNavigation({
           installKey, installationCredential, taskId: spec.taskId,
           sessionRef: navigationGrant.sessionRef, kind: 'stopped',
           stopReason: 'page_unavailable', health: readiness.health,
-        });
+        }).catch(() => null);
       }
       return requeueClaimedTaskFailure({
         claim: { ...claim, health: readiness.health },
         installKey,
-        state: 'page_timeout',
-        message: '观察页面加载超时，本次未采集。',
+        state: 'detail_page_session_recovery_required',
+        message: '已消费详情页导航许可但页面未就绪；为避免重复开页，冻结 lane 已结束为不可用。',
       });
     }
     if (navigationGrant?.sessionRef) {

@@ -12,13 +12,13 @@
 - `cover_headline` 与 `image_substantive_text` 是不同的可追溯派生视图。平台标题为空时，Evidence Library 仅可从前 3 张图中合格的 `cover_headline` 补显示标题，并标记“封面 OCR”；平台原始标题不被覆盖。历史 Tesseract OCR 将在共享 migration 后退役为不可读/不可检索，原始媒体、Evidence、事件和 ASR 不删除。
 - 已完成源码编译、媒体 worker 规则测试、B39 原图 bridge 实跑，以及完整一次性 PostgreSQL LOCAL-001 契约证明；尚未执行共享 migration、历史重排、Paddle runtime 安装、视觉模型真实调用、runtime/3000 切换、PR 合并或业务验收。
 
-### DETAIL-PAGE-SESSION-REPLAY-SAFETY-001（候选源码已完成隔离验证；未进入共享运行）
+### DETAIL-PAGE-SESSION-REPLAY-SAFETY-001（`0.8.52` 单轨候选已完成隔离验证；待进入共享运行）
 
 - 针对同一 XHS 笔记被 `in_progress` claim 重放后反复打开详情页的缺口，候选新增一张**非任务账本**会话表：证据材料按 `(work_order_ref, content_public_ref)` 唯一，跨行业样本按同构键唯一；每个会话绑定首个安装、持久 `grant_request_id`、冻结采集计划及可空的 Chrome 导航观测。Task → Attempt → CapturePackage → Receipt 仍是每个 lane 的唯一交付事实。
 - Producer 先把 request id 与“导航已消费”写入同一个 IndexedDB 事务并等待提交，再能创建窗口。同 request id 可取回原 grant；新 request id、换安装、缓存缺失、已消费而 tab 丢失均停止自动导航。正文先进入 durable outbox；页面 payload 不随原 Lease 到期删除、又不能被新 Lease 接管，只有全部冻结 lane 已入 outbox 才可清理。
-- 当前候选已完成 Browser Producer 281 条全量测试、TypeScript 合同、Rust `cargo check`，以及本卡隔离 PostgreSQL `content_reobservation` 4/4（grant 重放/抑制、观测、交付中与停止封存）。候选包为 `0.8.50` / SHA-256 `5cddcdf11e0c96fb7e72328017ce13be2f16958268c43c25537c5eff16872019`。未执行共享 migration、runtime 切换、Chrome 插件重载、真实平台访问、提交、合并、推送或 Mog 业务验收。
+- 当前候选移除了活跃插件内的旧 Workbench 协议、轮询、同步、旧本地表和专属测试；`references/current-v2` 仅作受校验的历史证据，不参与构建或运行。对同一详情内容，缓存损坏、已消费许可对应的 tab 不确定、窗口/页面就绪失败会报告 `detail_page_session_recovery_required`，服务端终结该 lease 的同内容冻结 lane 为 `unavailable`；只有已保存 payload 的 outbox 交付失败可安全重试，且不会重新导航。`0092_detail_page_session_recovery_boundary.sql` 扩展失败码闭集并登记至本地运行与完整 fixture。候选包为 `0.8.52` / SHA-256 `7d9e0bd969b1424d06f9cfb149a81d8371b66d921233b06ce6d75e8bc7d6d270`。插件核心 258/258、抖音/共享运行时 69/69、Rust Evidence 70/70 与完整隔离 PostgreSQL LOCAL-001 proof 均通过；该 proof 的容器、数据库、卷已清理。尚未执行共享 migration、runtime 切换、Chrome 插件重载、真实平台访问或 Mog 业务验收。
 
-2026-09-20，Mog 授权在隔离分支 `codex/detail-page-grant-recovery-risk-cooldown` 补全授权恢复与页面风险保护：`0090` 将追加 grant 结果审计、30 分钟内两次明确风险拦截页触发的安装级 12 小时 cooldown，以及服务端容量复核；浏览器 `prepared → grant_accepted → consumed` 使授权传输不可达能以专用 pre-Attempt 失败回队而不导航。实现与自动验证尚在进行中；它不代表共享 migration、runtime 切换、Chrome 重载、真实平台访问或业务验收。
+2026-09-20，Mog 授权在隔离分支补全授权恢复与页面风险保护：`0090` 追加 grant 结果审计、30 分钟内两次明确风险拦截页触发的安装级 12 小时 cooldown，以及服务端容量复核；浏览器 `prepared → grant_accepted → consumed` 使授权传输不可达能以专用 pre-Attempt 失败回队而不导航。后续 `0092` 将不可恢复的会话状态与可重试的授权/交付错误分开；它仍不代表共享 migration、runtime 切换、Chrome 重载、真实平台访问或业务验收。
 
 ### TARGET-DELETION-AUTHOR-001 / Issue #214（候选已完成隔离验证；未进入共享运行）
 

@@ -263,6 +263,7 @@ migrate() {
   apply_migration_once "0089_detail_page_session_replay_safety" "$project_root/database/migrations/0089_detail_page_session_replay_safety.sql"
   apply_migration_once "0090_detail_page_grant_recovery_and_risk_cooldown" "$project_root/database/migrations/0090_detail_page_grant_recovery_and_risk_cooldown.sql"
   apply_migration_once "0091_ocr_content_layering" "$project_root/database/migrations/0091_ocr_content_layering.sql"
+  apply_migration_once "0092_detail_page_session_recovery_boundary" "$project_root/database/migrations/0092_detail_page_session_recovery_boundary.sql"
 }
 
 case "$command_name" in
