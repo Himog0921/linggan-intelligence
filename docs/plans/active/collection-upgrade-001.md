@@ -202,7 +202,11 @@ S4 运行诊断与就绪 → S5 有证据才优化 → S6 集成与历史处置�
 | 一步排出的决定必须挂在**同一轮**上（S4d 串证用例） | 让巡查步写目标级决定时用一个新号（`Uuid::new_v4()`）而不是 `ledger.run_ref()`——即「这一步排出的活成了另一轮的事」 | 用例在 `fetch_one` 处 `RowNotFound`（`从一个 run 号出发就能走到「哪一步失败了 + 这一步排出了什么」`）：从一个 run 号出发 JOIN 不到那一步排出的决定。串证要成立，三张表必须真的用同一个号 |
 | 字段表本身就是判据（S4d 两条快照用例） | 从 `SELECTOR_HEALTH_SNAPSHOT_FIELDS` 里删掉 `failureCounts`（快照里这个键仍在） | 两条用例同时变红（「快照只带字段表上的键」与「只收受限形状」）：清单与实现分开写，多的、少的都会露出来 |
 
-二十九次变异均已还原（两次 S1a、四次 S1b、两次 S2、三次 S3、两次 S3c、三次 S4a、六次 S4b、三次 S4c、四次 S4d）；S4b、S4c、S4d 的十三次分别记在本节下面三段。**一处更正的计数**：这句话上一版写的是「十九次」，而表上当时已经是二十五条——S4b 的六条进了表却没有累进这句计数（十六应为二十二），S4c 又只按自己的三条把十六改成十九。以表上的行为准：二十五条 + 本步四条 = 二十九条。S3c 的两次变异都从 `crates/evidence/src/collection_task_read.rs` 还原：两处都是逐字对照原句反向替换（终态分支回到第一条、计数回到 `receipt.receipt_ref`），还原后 `grep -n "count(lane.attempt_id)"` 为 0 命中、匹配臂顺序与原句一致，两条 S3c 用例重新变绿。S3 的三次变异分别从 `execution_input_eligibility.rs`（两次）与 `target_drawer.rs`（一次）还原：还原后逐一 `grep` 变异标记（`false &&`／`if false`／写错的那两支文案）为 0 命中，`git diff` 回到变异前的内容，两条证据用例与页面用例重新变绿。S1b 的还原用还原前快照逐字节核对：`execution_input_eligibility.rs` sha256 `6408147952b274a9a7ae8f180fb53eaaf37362383177fa30355f31377fba43ab`、`0097` 最终 sha256 `83a8a99362df528217ac7473c102ca8c42f6f8beb3b76b9e195f95451ddac3b7`（已同步进 `material_fixture` 与 `full_schema_fixture` 两处账本）、`dispatch.rs` 变异前后同为 sha256 `5b54d0395180ea385150dff4b60fa608083ff334319a21ecb57d7b2dbab1c6b0`。T28① 的变异同样从 `dispatch.rs` 还原，之后该文件 sha256 仍为 `5b54d039…`（两次变异都是逐字节还原）。S2 的两次变异从 `acquisition_chain.rs` 还原：变异前快照存于 `/tmp/acquisition_chain_s2_pre_mutation.rs`，还原后 `grep -c MUTATION` = 0 且 sha256 与变异前同为 `3e4f14e56f7b5b2e08152dbb96e009bee48e701911d6f08a2fc770b4e8fedd43`（逐字节）。各阶段还原后：S1b 的 `keyword_archive_postgres` **16 passed / 0 failed**、`collection_dispatch_sequence_postgres` **27 passed / 0 failed**；S2 的 `collection_dispatch_sequence_postgres` **32 passed / 0 failed**、`observation_target_dossier_postgres` **23 passed / 0 failed**，`cargo check --workspace --all-targets --locked` 通过。源码冻结后的干净全套（`./scripts/test-local-001-discovery-postgres.sh`，20 目标）**231 passed / 0 failed**，容器/卷/库自建自清。
+| 代码侧加了码、迁移没跟上（S5，单元用例 `both_receipt_check_constraints_spell_out_the_whole_closed_vocabulary`） | 往 `MONITOR_COMMAND_REASONS` 里插一个码 `MUTATION_A_pretend_new_code`——即「有人加了码却忘了开迁移」 | 用例变红并指名道姓：`最后一条写 collection_command_identity_reason_codes_ck 的迁移是 …/0101_collection_command_reason_vocabulary.sql，它的词表与本域词表不一致：多了 []，少了 ["MUTATION_A_pretend_new_code"]`；左边（库上真正生效的那份）是 55 个码。这正是本卡修的那个缺陷的复发形态：`0065` 之后代码侧陆续加了十几个码，两条 `CHECK` 一个都没跟上 |
+| 迁移侧手抄漏了一个码（同上） | 从 `0101` 的身份表 `CHECK` 里删掉 `within_authorization`——即「词表的第三份副本自己写少了一个」 | 同一个用例变红：`少了 ["within_authorization"]`。方向相反、报法相同——它比的是**两份词表的差集**，谁少了谁都会露出来；这条也顺带证明它不会因为「两边都少同一个码」而放过 |
+| 「已物化却没有下载尝试引用」必须得到具名错误，不是解码 panic（S5，隔离 PostgreSQL `full_runtime_accepts_each_capability_without_collapsing_partial_media_or_replay` 末段） | 把 `claim_media_upload_finalize` 的 `row.try_get::<Uuid,_>("download_attempt_ref").map_err(\|_\| MaterializedSessionWithoutDownloadAttempt)?` 换回 `row.get::<Uuid,_>(…)` | 用例变红，**红在解码处**：`panicked at crates/evidence/src/producer_runtime.rs:471:44: called Result::unwrap() on an Err value: ColumnDecode { index: "\"download_attempt_ref\"", source: UnexpectedNullError }`——一个正在处理请求的进程被一行坏数据打掉（正是 `try_get` 要换掉的那个后果），而修好的版本走的是具名错误分支 |
+
+三十二次变异均已还原（两次 S1a、四次 S1b、两次 S2、三次 S3、两次 S3c、三次 S4a、六次 S4b、三次 S4c、四次 S4d、三次 S5）；S4b、S4c、S4d、S5 的十六次分别记在本节下面四段。**一处更正的计数**：这句话上一版写的是「十九次」，而表上当时已经是二十五条——S4b 的六条进了表却没有累进这句计数（十六应为二十二），S4c 又只按自己的三条把十六改成十九。以表上的行为准：二十五条 + S4d 四条 = 二十九条，+ S5 三条 = 三十二条。S3c 的两次变异都从 `crates/evidence/src/collection_task_read.rs` 还原：两处都是逐字对照原句反向替换（终态分支回到第一条、计数回到 `receipt.receipt_ref`），还原后 `grep -n "count(lane.attempt_id)"` 为 0 命中、匹配臂顺序与原句一致，两条 S3c 用例重新变绿。S3 的三次变异分别从 `execution_input_eligibility.rs`（两次）与 `target_drawer.rs`（一次）还原：还原后逐一 `grep` 变异标记（`false &&`／`if false`／写错的那两支文案）为 0 命中，`git diff` 回到变异前的内容，两条证据用例与页面用例重新变绿。S1b 的还原用还原前快照逐字节核对：`execution_input_eligibility.rs` sha256 `6408147952b274a9a7ae8f180fb53eaaf37362383177fa30355f31377fba43ab`、`0097` 最终 sha256 `83a8a99362df528217ac7473c102ca8c42f6f8beb3b76b9e195f95451ddac3b7`（已同步进 `material_fixture` 与 `full_schema_fixture` 两处账本）、`dispatch.rs` 变异前后同为 sha256 `5b54d0395180ea385150dff4b60fa608083ff334319a21ecb57d7b2dbab1c6b0`。T28① 的变异同样从 `dispatch.rs` 还原，之后该文件 sha256 仍为 `5b54d039…`（两次变异都是逐字节还原）。S2 的两次变异从 `acquisition_chain.rs` 还原：变异前快照存于 `/tmp/acquisition_chain_s2_pre_mutation.rs`，还原后 `grep -c MUTATION` = 0 且 sha256 与变异前同为 `3e4f14e56f7b5b2e08152dbb96e009bee48e701911d6f08a2fc770b4e8fedd43`（逐字节）。各阶段还原后：S1b 的 `keyword_archive_postgres` **16 passed / 0 failed**、`collection_dispatch_sequence_postgres` **27 passed / 0 failed**；S2 的 `collection_dispatch_sequence_postgres` **32 passed / 0 failed**、`observation_target_dossier_postgres` **23 passed / 0 failed**，`cargo check --workspace --all-targets --locked` 通过。源码冻结后的干净全套（`./scripts/test-local-001-discovery-postgres.sh`，20 目标）**231 passed / 0 failed**，容器/卷/库自建自清。
 
 S3c 两次变异还原后：`collection_dispatch_sequence_postgres` **34 passed / 0 failed**（新增两条）、`content_reobservation_postgres` **4 passed / 0 failed**、`linggan-api` 二进制内 `--ignored` **23 passed / 0 failed**；`cargo check --workspace --all-targets --locked` 通过。S3c 源码冻结后的干净全套（20 目标）**234 passed / 0 failed**，容器/卷/库自建自清——这一跑同时补上了 S3b 记录里被宿主磁盘写满打断的那次重跑（当时第 20 个目标 7 例 `57P03 in recovery mode` 未计入结论）。
 
@@ -213,6 +217,8 @@ S4c 的三次变异分别落在 `crates/evidence/src/execution_station.rs`（SQL
 S4a 的三次变异分别落在 `apps/worker/src/main.rs`、`crates/evidence/src/runtime_readiness.rs`、`apps/worker/src/bin/media_worker.rs`（上表三条，逐字还原）。还原后 `grep -rn "MUTATION" apps crates --include="*.rs"` 为 0 命中，`cargo test -p linggan-worker --test startup_contract --locked` 重新 **4 passed / 1 ignored**（15.01s，`--ignored` 那条走证明库）。**一处如实记录的观察**：在「不可达端口」这一实测条件下，未就绪日志里的 `detail` 落在 `probe_timeout`（十秒没问到），不是 `connect_failed`——sqlx 连接池对被拒绝的连接会自己重试满 30 秒，所以「立刻失败」那条分支很少先到达。两者都归 `database_unreachable`，用例只钉分类码（`not ready (database_unreachable`），不钉它后面跟哪一个。
 
 S4d 的四次变异分别落在 `crates/evidence/src/step_report.rs`（事件映射去掉 `error_class`）、`crates/evidence/src/selector_health.rs`（两次：收口漏一类字段；具名常量少一个键）、`crates/evidence/src/patrol_scheduler.rs`（决定用新号而不挂本轮）。四次都按**变异前快照** `cp` 还原并用 sha256 逐字节核对：`step_report.rs` `596713a3…`、`selector_health.rs` `a1e06afa…`、`patrol_scheduler.rs` `7112a33a…`，另两个本步碰过的文件 `lib.rs` `e84b6a21…`、`apps/worker/src/tick.rs` `63195bfa…` 同样与快照一致（快照存于 `/tmp/s4d-pre-mutation/`）。还原后 `grep -rn "MUTATION" apps crates database scripts plugins` 为 0 命中；三套证明重新全绿：`scheduler_tick_postgres` **5 passed / 0 failed**、`linggan-evidence --lib` **86 passed / 0 failed**、`linggan-worker --lib` **5 passed** 与 `startup_contract` **4 passed / 1 ignored**。**一处如实记录的教训（与还原凭据有关）**：本步对 `crates/evidence/src/lib.rs` 跑 `rustfmt` 时被连带重排了九个**没碰过**的模块（细节见 §10.9 S4d）。做法是**先整份快照到 `/tmp/s4d-rustfmt-collateral/`、再逐个还原、再与原快照逐字节核对**，还原后工作树只剩本步自己的七个文件。教训有两层：**模块根不是单文件**——`rustfmt` 会把它的 `mod` 子模块一起格式化，跑之前得先知道它会碰到谁；以及**动手之前先看清哪些文件本来就带着未提交改动**——`git checkout --` 是整文件覆盖，它不判断「这个文件里有没有我要留的东西」；本步这九个文件当时都在 HEAD 状态，所以覆盖是安全的，但同一个动作落在「改到一半的文件」上就会把在途改动一起丢掉。
+
+S5 的三次变异分别落在 `crates/evidence/src/collection_control.rs`（代码侧加码，表上第 27 条）、`database/migrations/0101_collection_command_reason_vocabulary.sql`（迁移侧漏码，第 28 条）与 `crates/evidence/src/producer_runtime.rs`（`try_get` 回到 `get`，第 29 条）。三次都按**变异前快照** `cp` 还原并用 sha256 逐字节核对：`collection_control.rs` 回到 `0e68c49c14edc3f6e111c7ebcb8453251513bf5a56e6019abc3cd0c46d4997de`、`producer_runtime.rs` 回到 `b8266df21f0671e2f8d3f7ed049803cbf645d1d962a53fdb4f5faa4626f37681`、`0101` 回到 `fda3711ea7bb38af6bb5a6a28264a39ac0c04024aef3e6feeb931e07a9b074c1`（与两处夹具台账里登记的摘要逐字一致，等于同时核了两处登记）。还原后 `grep -rn "MUTATION" apps crates database scripts plugins` 为 0 命中，`cargo test -p linggan-evidence --lib --locked` 重新 **90 passed / 0 failed**（新增守卫一条后由 89 变 90）。**两处如实记录的顺序与返工**：①`try_get` 那条变异第一次复原用的是「按位置插入」的脚本，插进了声明中间（`expected item after doc comment`），源码被写坏——按快照整份复原、逐字节核对（当时 sha256 `1006a815…`）后，改成「先定位 `= &[`、再插在下一行」重做；②守卫用例的断言措辞在两条变异都跑完之后改过一次：原文只写了「代码侧加了码」这一种方向，而变异乙证明迁移侧漏码是同一个报法的另一个方向，留着会误导下一个读它的人；改完**重跑变异甲**确认新措辞同样变红，再跑 `--lib` 确认 90 条全绿，随后整套隔离库在那个最终状态上重跑一遍（结果见 §11.9）。
 
 ## 9. S3 变更清单（统一状态读取与页面动作）
 
@@ -637,3 +643,216 @@ S4d 的四次变异分别落在 `crates/evidence/src/step_report.rs`（事件映
 2. S4c 挂账 1（`0099` 的就绪归属）、S4b 挂账 1（步骤表与 run 表的保留策略）本步未动，仍开着。
 
 **S4 收束**：S4a–S4d 四步全部落地，§10.7 的两行出口条件都有了可复现的证明与如实写明的未证明边界。下一步是 S5（T33–T34，条件 D），再之后是 S6（集成证据表、历史处置预览、兼容矩阵、回滚步骤、PR 候选）。
+
+## 11. S5 变更清单（查询性能基线与热路径改善）
+
+> 依 `docs/design/templates/ui-change-manifest-form.md` 的可迁移骨架填写；本清单写在实施计划里，不另建文档。
+> 状态: 活跃计划 · **实施前写入**（本节先于 S5 代码存在；§11.9 在每步落地后回填）。
+
+### 11.1 事项
+
+- **Issue / SCOPE**：COLLECTION-UPGRADE-001 · S5（交付包 `02-实施步骤.md` §S5；验收行 T33 与 T34；退出条件「T33–T34；每项有稳定收益或不实施的证据结论。样本太小则报告未证明收益，不宣传固定百分比提速」）。
+- **Agent 与 worktree**：`fix/collection-upgrade-001` @ `.worktrees/collection-upgrade-001`。
+- **目标**：为四类热路径（采集页渲染、claim/renew/recovery、detail-gap、媒体 finalize）建立**可比的 SQL 次数／耗时／执行计划基线**，并只对**被测量证明确有稳定收益**的语句动手；量不出来的候选，结论写成「不实施」并留下判据，而不是靠感觉下手。
+- **用户可见结果**：采集页刷新与工单认领这两条最常走的路，不再逐行全表扫描租约表与媒体物化表；「媒体已物化」这类事实在查询里被索引直接命中。收益量级如实说明（见 §11.4 的读数），**不承诺任何固定百分比提速**。
+- **明确非目标**（本卡不做，也不得顺手做）：
+  - **不合并三套 Dexie**、**不合并两个域的材料表**；
+  - **不为 `materialization_ref` 主键查询额外造 blob 索引**（主键查询本来就不缺索引）；
+  - **不把 `include!` 改语法当作修复**；
+  - **不新增统计扩展或全量日志**：不 `pg_stat_reset`、不默认开启全量 SQL 日志、不装 `pg_stat_statements`；统计一律用**带时间窗口的差值**；
+  - **不重排其它语句**：候选 ③ 判为「不改」（§11.4）；
+  - 不改接纳、权限、额度、调度与清理规则；不改用户可见状态词与文案语义；
+  - 不合并/推送/部署、不应用共享库迁移、不重载插件、不发发布包、不访问真实平台。
+
+### 11.2 读取回执
+
+| 来源 | 状态 | 本次解决的问题 | 已核对 |
+|---|---|---|---|
+| 交付包 `02-实施步骤.md` §S5、`03-验收与发布.md` T33/T34 | 交付包 | 六候选的**实施条件**（不是「都要做」）、禁止清单（不合并 Dexie／材料表、不造 blob 索引、不用 `include!` 语法凑数）、统计纪律（时间窗口差值、不 `pg_stat_reset`、不默认开日志） | 2026-09-21 读 |
+| `crates/evidence/src/producer_runtime.rs`（`claim_media_upload_finalize` / 采集页库查询） | 真实代码 | 候选 ①（`download_attempt_ref` 查找）与候选 ④（`row.get`）在同一文件；`materialized` 分支是唯一读该索引的路径，也是该列**唯一**的写入点 | 2026-09-21 读 |
+| `crates/evidence/src/work_order_lease.rs`、`crates/evidence/src/dispatch.rs` | 真实代码 | 候选 ② 的调用点：`expire_lapsed_leases_in_transaction` 与 `recover_released_orphaned_work_orders_in_transaction` 的**真实调用者**是 dispatch 的两处 tick 步骤，不是页面 | 2026-09-21 读 |
+| `apps/api/src/local_web/collection_control_surface_view.rs`、`collection_control_rule_view.rs` | 真实代码 | 候选 ③（两个 control view）与**候选 ② 真正的量**：`read_frozen_works` 的 LATERAL 子查询逐行扫租约表 | 2026-09-21 读 |
+| `crates/evidence/src/collection_control.rs`、`acquisition_chain.rs` | 真实代码 | 候选 ⑥（重复原因表达）的两处：`manual_observe_error_reason` 与 `closed_monitor_reason` 各有一张表，中间夹着一个通配臂 | 2026-09-21 读 |
+| `plugins/linggan-intelligence-browser/src/content/douyinBatchMessageHandlers.js` + `tests/` + `package.json` | 真实代码 | 候选 ⑤：模块 684 行，**零** `src/` 引用，不在 webpack content 图内，只有 4 个测试文件 import 它 | 2026-09-21 读 |
+| `plugins/linggan-intelligence-browser/MIGRATION-MAP.md` | 责任文档 | 该模块的既有归属判定就是「旧 source 仅作历史保留」——本卡是**执行**这条既有判定，不是新判 | 2026-09-21 读 |
+| 运行时库 `linggan_intelligence_dev`（只读窗口差值 + EXPLAIN） | 真实运行事实 | §11.4 的全部读数；本次核查**自己的探针也是计数器污染源**，已按交付包要求排除 | 2026-09-21 量 |
+| 一次性证明库 `linggan_cu_proof`（容器 `linggan-cu-proof-pg`） | 隔离证明面 | 代表规模阶梯与前后对比；可丢弃，不影响运行时库 | 2026-09-21 量 |
+
+### 11.3 表面地图
+
+| 表面 | 入口 | 本卡改动 |
+|---|---|---|
+| 媒体 finalize 写路径 | `/api/local/producer/media-uploads/{session_ref}/finalize` | 候选 ④：把 `row.get` 换成 `try_get` + 一个具名错误，并给路由加一条如实分支；**不改原子写语句** |
+| 采集页库查询（封面） | `/collection` 库列表的读取面 | 候选 ①：给 `linggan_media_materialization.download_attempt_ref` 加索引（与其排序键组成复合索引）；**查询语句本身不改** |
+| 采集控制面（冻结物） | `/collection` 的待处理/恢复读取面 | 候选 ②：给 `collection_work_order_lease(work_order_ref, issued_at DESC)` 加索引，让逐行的 LATERAL 判断走索引；**不改视图结构与文案** |
+| 认领 / 回收 / 过期 | `dispatch` 的两处 tick 步骤 | 候选 ② 的同一索引顺带覆盖回收语句的扫描；**过期语句已有的有效索引保留**（不动） |
+| 两个 control view | 同上读取面 | 候选 ③：**不改**（判据见 §11.4） |
+| 原因码词典 | 页面回执、恢复动作、巡查关闭原因 | 候选 ⑥：两张表补齐显式分支、去掉通配臂、兜底改成如实的中性词，并加一条往返守卫测试 |
+| 插件内容侧 | 打包入口 | 候选 ⑤：把 `douyinBatchMessageHandlers.js` 移入 `tests/historical/` 并写明责任；**打包入口与产物不变** |
+
+页头/导航/共享壳层与 LIDS Token：不改。分页、状态词表与页面区块：不改。
+
+### 11.4 候选与判据（六条，逐条给读数与结论）
+
+测量纪律：统计取自 `pg_stat_user_tables` / `pg_stat_user_indexes` 的**时间窗口差值**（本机 PG 16）；一次核查自己的 EXPLAIN 探针也是计数器污染源，已从归因里排除（交付包「排除核查本身」）。规模阶梯与前后对比在一次性证明库上做，用**与生产相同的语句与参数形状**。
+
+#### ① 媒体物化按 `download_attempt_ref` 查找 —— **实施**
+
+- **现状**：该列只有主键之外的**零个**索引。运行时库上 finalize 的那条语句是 `Seq Scan on linggan_media_materialization`（3071 行被过滤、139 buffers、0.461 ms）。
+- **调用频率**（窗口差值折算）：今日 126 次、昨日 174 次、09-15 542 次——约 5～600 次/天，随采集量增长（约 +200/天）。
+- **代表规模阶梯**（同参数、各 3 次）：3 千行 0.11–0.40 ms → 30 千行 1.37–3.19 ms → 30 万行 9.6–10.0 ms（转并行顺序扫描）；加索引后同一阶梯为 0.004–0.03 / 0.006–0.03 / 0.005–0.03 ms。
+- **同一条列还被采集页的封面子查询用**：运行时库上 3.612 ms、453 buffers，**每渲染一行执行一次**（一页最多 51 行）。忠实复刻表上的归因（每次 / 每页 51 次）：现状 0.624 ms / 20.0 ms；只加被点名的物化索引 0.444 / 15.1；只加两个兄弟索引 0.264 / 6.6；三个都加 0.102 / 2.2 ms。
+- **结论**：**实施**——加 `linggan_media_materialization (download_attempt_ref, verified_at DESC)`（第二个键就是语句里的排序键，让 `ORDER BY … LIMIT 1` 直接走索引首行）。
+- **如实说明收益量级**：今天的绝对节省是**亚毫秒到几毫秒**（当前 3 千行）；真正的理由是**形状**——这条语句的成本随库增长**线性上升**，而索引版几乎不随规模变。所以本卡**不写**「提速 N%」。
+
+#### ② 租约高频扫描 —— **实施**
+
+- **现状**：运行时库上 `collection_work_order_lease` 累计 `seq_scan = 166,694`、`seq_tup_read = 148,405,174`——是全库顺序扫描量最大的表。
+- **窗口差值**（4 分 23 秒）：租约表 `seq_scan +4796`、`idx_scan +94`。脉冲式：某一分钟 +958，某 20 秒样本 0。
+- **归因**：候选表把它记为「lease 高频扫描」，但真正的语句**不在** `work_order_lease.rs`，而在采集控制面的 `read_frozen_works`——它的 LATERAL 子查询对每行取最近一条租约。运行时 EXPLAIN 实测：`Seq Scan on collection_work_order_lease candidate_1 (actual rows=1 loops=100)`，即**每次页面渲染扫 100 次**；4 796 ÷ 100 ≈ 48 次渲染/窗口 ≈ 11 次/分钟。
+- **前后对比**（证明库复刻表，同一语句同参数）：改前每次查询 100 次顺序扫描 / 1000 buffers / 3.403 ms，11 次重复 29.224 ms；加索引后 283 buffers / 0.637 ms，11 次 4.313 ms（**6.8×**）。
+- **这个 6.8× 的适用范围（同 ① 的纪律，不当作线上提速宣传）**：它是**复刻表在复刻规模下**的同参数前后对比，不是生产提速承诺。运行时库上这条语句的绝对耗时本来就小；收益的形状和 ① 一样——**每次渲染扫 100 次、且随表增长线性上升**，索引版把它压成常数级。样本与规模都不足以支撑一个百分比结论，所以本卡只报「形状改变 + 缓冲页数下降（1000 → 283）」，不报「线上快 6.8 倍」。
+- **为什么既有的两条索引都服务不了它**（这是本条成立的**关键**，复核必问）：租约表原有两条索引，都是**部分索引**——`_live_idx`（唯一，`ON (work_order_ref) WHERE released_at IS NULL`）与 `_station_idx`（`ON (station_ref, expires_at DESC) WHERE released_at IS NULL`）。部分索引只能服务**谓词蕴含它**的查询，而 `read_frozen_works` 的 LATERAL 里**没有** `released_at IS NULL`——它要的是「最近一份租约，不论释放与否」，因为同一行还要据 `released_at`／`expires_at` 把状态分成 `not_issued`／`released`／`expired`／`live` 四档。所以它只能退化成顺序扫描。**同表另一条 LATERAL 则相反**：`live_patrol_execution_in`（`collection_control.rs:2263`）的谓词里**有** `released_at IS NULL AND expires_at>scope_001_now()`，它正好被 `_live_idx` 服务——那一条**不需要**新索引，本卡也不动它。两条 LATERAL 长得像、判据不同，一处差别就是这条索引存在的全部理由。
+- **同一索引的顺带效果**：回收语句（`recover_released_orphaned_work_orders_in_transaction`）的顺序扫描一并消失（0.085 → 0.042 ms）；过期语句**继续用它已有的** `collection_work_order_lease_station_idx`（有效索引保留，不动）。
+- **结论**：**实施**——加 `collection_work_order_lease (work_order_ref, issued_at DESC)`。
+- **一条被量掉的想法（不实施）**：给 `collection_work_order(queue_state='leased')` 建部分索引，实测 0.024 ms，放大 100 倍后收益约等于 0——**证据不支持，不做**。
+
+#### ③ 两个 control view 中的 SQL —— **不改**
+
+- **判据**：交付包给的条件是「与统一状态读取重复，或使错误边界不清」。
+- **核对的结论**：S3 建立的统一读取（`read_material_execution_states`、`read_detail_delivery_reconciliation`、`read_collection_task_timeline`）服务的**对象不同**——它们答的是「材料执行到哪一步、详情交付对没对上、任务时间线」，而 control view 答的是「这一轮调度决定了什么、哪些工单被冻结、运行时资源能不能接活、当前生效规则与回执」。二者没有同一条事实被写两遍。
+- **确实重叠的那一处，已经在用统一读取**：容量（`read_capacity`）本来就是 `acquisition_chain` 的读口，control view 调用它，没有第二份实现。
+- **错误边界**：视图内读取统一用 `try_get`（失败即报错，不静默取默认值），与本次要求一致。
+- **结论**：**不改**，并把理由留在本节（供下次复核，不必重查）。
+- **一处需要写清楚的交叉**：候选 ② 要改的那条语句**住在**这两个 view 之一的里面。这不矛盾——② 改的是**一条语句的索引命中**（交付包条件是「真实调用频率与代表规模证明稳定收益」），③ 判的是**要不要把这些 SQL 搬进已有读接口**（条件是「重复或边界不清」）。两条各自按各自的条件判。
+
+#### ④ `row.get` —— **实施**
+
+- **风险面**：`linggan_media_upload_session.download_attempt_ref` 可空，且**没有** CHECK 把它与 `state='materialized'` 绑在一起；`materialized` 分支用**会 panic 的** `row.get::<Uuid, _>` 读它。
+- **为什么是「潜伏」而不是「正在发生」**：该列全仓只有一个写入点（同文件的原子 `UPDATE … SET state='materialized', download_attempt_ref=$2`），它保证了两者同时成立。所以今天读到的都是非空——但这条保证**只存在于代码约定里**，任何一次越界写入就会把 panic 带给正在处理请求的进程。
+- **结论**：**实施**——该处改 `try_get`，新增一个具名错误分支，并在 `finalize_media_upload_route` 加一条显式分支把「物化会话缺下载尝试引用」如实报出去。**不做全仓机械替换**（交付包明确禁止）：只改本次触及的热路径。
+
+#### ⑤ `douyinBatchMessageHandlers` —— **实施迁移（不删除）**
+
+- **生产引用的证明**：模块内零个 `src/` 引用；不在 webpack 的 content 入口图里；`scripts/verify-linggan-isolation.mjs` 早已断言 content 入口**不得**提到它；`MIGRATION-MAP.md` 对它的既有判定就是「旧 source 仅作历史保留」。
+- **谁还在用**：4 个测试文件（`douyin-batch-remote-startup`、`douyin-batch-ui-routing`、`manual-execution-lock-release`、`douyin-batch-summary`）与 `task-state-constants` 里的两条路径条目。
+- **结论**：**实施**——移入 `tests/historical/` 并附一份说明它为什么在那里的 README（治理规则：默认保留并降级旧材料，不静默删除），同步改 4 处 import 与 2 处路径条目，模块自己的 4 条相对 import 随目录深度调整。`package.json` 的测试脚本不变（用例仍留在 `tests/`）。
+- **T34 的加强证明**：不止 grep `src/`，还要**构建产物**里搜不到这个名字（§11.7）。
+
+#### ⑥ 重复原因表达 —— **实施**
+
+- **分歧的确切集合**：`acquisition_chain` 会产出的下面 7 个码，在 `closed_monitor_reason` 的白名单里**没有**，于是全部被兜底臂渲染成「数据库不可用」：`available`、`in_flight_work_covers_it`、`need_already_satisfied`、`question_unanswerable`、`queueable`、`target_domain_unassigned`、`within_authorization`。
+- **第二处分歧**：`manual_observe_error_reason` 的通配臂把 7 个 `AcquisitionChainError` 变体一并藏进「数据库不可用」。
+- **一处具体的自相矛盾**：`target_domain_unassigned` 由一个函数如实产出，重放时被另一个函数改写成「数据库不可用」——同一条事实在两条路径上说法不同。
+- **结论**：**实施**——两张表补成显式分支、去掉通配臂，把兜底从「数据库不可用」改成**如实的中性词**（说不出原因就说「说不出原因」，不猜一个具体故障），并加一条守卫测试：产出侧会发出的每个码，穿过关闭词表后必须逐字不变。**分领域**集中（交付包禁止混成全项目万能枚举），不合并成一张大表。
+- **实施时发现的第三份副本（本卡最重要的发现，也是本卡范围扩大的唯一原因）**：这份词表在本仓库里有**三个**写处，不是两个。除了代码侧 `MONITOR_COMMAND_REASONS` 与两个渲染函数，`0065` 还给两张回执表各建了一条 `CHECK` 约束，把同一份词表**手抄进了数据库**。手抄会分头长大：`0065` 之后代码侧陆续加的十几个码，两条 `CHECK` 一个都没跟上。后果不是「显示得不好看」——`finish_monitor_command` 把原因码**原样**绑进两条 INSERT，码一旦不在 `CHECK` 里，Postgres 直接 `23514`，**这条拒绝连一张回执都留不下**。比写一个错的说法更坏。
+- **它已经能在线触发**：`manual_observe_error_reason` 有一个显式分支专门产出 `target_domain_unassigned`（注释就写在那条分支上方，说的是「缺领域必须单独报」，因为以前它被说成「数据库不可用」），而这个码**不在**两条 `CHECK` 里。对一个还没指定领域的目标点「立即观察」，就是在写回执这一步整笔失败。**如实划界**：这条路径能触发是**读代码读出来的**（该码的产生由显式分支保证），「码不在 CHECK 里就写不进去」是**实测的**（本地看到 `23514`），**未证明**的是它在生产上被触发过——今天没有任何用例走过这条路径，这正是它能一路发布出来的原因。
+- **修法与为什么是新开一条迁移**：migrations 是 append-only 的，`0065` 已在共享库与所有证明库上应用过，改它对已应用的环境不生效，只会让「仓库里的 0065」与「库里的 0065」变成两个东西。所以新开 `0101`，只把两条 `CHECK` 补成代码侧的完整词表。两份新 `CHECK` 都是旧的**超集**，因此不可能与任何既有行冲突。
+- **防复发的那道闸不在 SQL 里**：`collection_control.rs` 的单元用例扫全部迁移，取这两条约束的**最终**定义逐码比对（两侧各变异验证过一次，见 §8）。它跑在 `--lib` 里，不用等一次真实的拒绝写不进去才发现：代码侧加一个码而没有配套迁移，那条用例直接变红。**它挡不住的**是「某条迁移把约束单独 DROP 掉而不重建」——那种改动会让这道闸和数据库那道闸一起消失，只能靠复核看 diff；这条限制写在用例自己的注释里，不靠本节记。
+- **一处有意的不对称**：身份表不收 `identity_conflict`（身份行记的是一条命令的**首条**结果，身份冲突按定义不可能发生在第一条，写入点用 `unreachable!` 表达了同一件事）；回执表收。`reason_not_recognized` 两张都收——它的用途是**回滚**：新二进制按新词表写下的码，回滚后旧二进制不认识，读出时收敛成这个中性词；要能写回去，`CHECK` 就必须收它。
+- **本次范围扩大的一处决定**：交付包原本写的「本卡新增 `0100`」，实施后是 `0100` + `0101`。这不是顺手多做——⑥ 的验收（「产出侧的码不再被改写」）在 `0101` 应用之前**根本不成立**：改了代码反而让以前能写进去的路径变成写不进去。所以两条迁移与 ⑥ 是一个不可分的单位，要撤就一起撤。已在 §11.6 记为 `DECISION_REQUIRED`，报 Mog。
+
+#### 未纳入本卡的相邻发现（报给 Mog，不自行实施）
+
+采集页封面子查询里还有两个**兄弟缺索引**：`linggan_media_observation(slot_key)` 与 `linggan_media_download_attempt(media_observation_ref)`。按 §11.4 ① 的归因读数，它们各自省下的时间**比被点名的那个索引更多**（只加两个兄弟索引 → 0.264 ms，只加被点名的 → 0.444 ms，三个都加 → 0.102 ms）。它们**不在**交付包的六候选里，因此本卡**不做**，只把读数与建议报给 Mog 决定是否另开一卡。
+
+同一族、本卡同样**不做**的三条（都报给 Mog，不自行实施）：
+
+- **`complete_media_upload` 会静默什么也不做**：它只在会话处于 `finalizing` 态时落 `materialized`（`producer_runtime.rs:523` 的 `WHERE … AND state='finalizing'`），其它状态一律**返回 `Ok(())` 且不改变任何东西**。调用方因此分不出「已经物化了」和「状态不对，什么都没发生」。核查时正是先漏了「先领终结权」这一步，才看到它悄悄留在 `ready_to_finalize`。**未证明**这造成过线上后果——本卡只是把调用顺序写进用例注释，不改这个函数（它被插件链路依赖，改语义超出本卡）。
+- **原因码会原样出现在页面上**：`collection_control_rule_view.rs:607` 把 `reason_code` 直接交给界面，而这份词表里有相当一批是英文机器码（`target_domain_unassigned`、`in_flight_work_covers_it` …）。这是**用户可见文案**问题，不是 ⑥ 要修的「同一个事实两种说法」问题，且已经超出本卡「不改用户可见状态词与文案语义」的边界。
+- **同一份词表还有两份手维护的部分映射**：`receipt_meaning` 与 `error_summary` 各自对 55 个码做截断式翻译（覆盖不全是设计使然，缺的部分走兜底）。它们与 ⑥ 是同族风险（手抄会分头长大），但交付包只点名了那两个函数。
+
+### 11.5 依赖地图
+
+| 依赖 | 归属 | 本卡的用法 |
+|---|---|---|
+| `linggan_media_materialization` | 已交付 | 只**加一条索引**；列、约束、写入语句都不动 |
+| `linggan_media_observation` / `linggan_media_download_attempt` | 已交付 | 本卡**不动**（兄弟缺索引，见 §11.4 末） |
+| `collection_work_order_lease` | 已交付 | 只**加一条索引**；过期语句既有的 `_station_idx` 保留不动 |
+| `collection_work_order` | 已交付 | 本卡不动（被量掉的部分索引想法不实施） |
+| 两个 control view | 已交付 | 语句不改；只让其中的 LATERAL 走索引 |
+| `AcquisitionChainError` / 原因码 | 已交付 | 不新增码、不改语义；只让两张呈现表**不漏**已有码 |
+| `collection_monitor_rule_command_identity.first_reason_code` 与 `collection_monitor_rule_command_receipt.reason_code` 的 `CHECK` | 已交付（`0065` 建） | **本卡修正**：两条 `CHECK` 是同一份词表的第三份手抄副本，`0101` 把它们补成代码侧的完整词表（只放宽、不收紧）。列与写入语句不动 |
+| 插件打包入口与产物 | 已交付 | 不变（候选 ⑤ 只挪测试侧文件） |
+| `linggan_local_schema_migration` | 已交付 | **本卡新增两条**迁移（`0100` 索引、`0101` 词表），各按既有六处登记 + 两处夹具摘要，先应用后部署 |
+
+**未纳入本卡**：兄弟缺索引（§11.4 末）、三套 Dexie 合并、两域材料表合并、统计扩展安装、共享库迁移应用与历史处置（S6 才准备）。
+
+### 11.6 变更分类与影响边界
+
+- **分类**：查询性能（索引）+ 错误边界（一处 `try_get`）+ 呈现词典（原因码）+ 测试侧文件归属。不改产品语义、不改权限与后果、不新增可点动作。
+- **最高风险类别**：**migration**（本卡新增**两条**：`0100` 索引、`0101` 词表）。两条的风险形状不同：
+  - `0100` 只影响执行计划，不改变任何判定。风险在①写入成本——索引会给媒体物化表与租约表各加一笔写开销，租约表写频率高，需如实观察；②部署顺序——新二进制不认识没应用的 `0100` 也能跑（索引只影响计划，不产生 `42703`），所以 `0100` 与 `0098`/`0099` **不同**：它不在就绪判据里，但 S6 的部署说明仍把它与其它待应用迁移**一起**写成「先应用、后部署」，避免同一批出现两种顺序。
+  - `0101` **是**部署顺序约束，且方向与 `0100` 相反：它放宽的是**新二进制才会写出的码**的落库门槛。新二进制先上线、`0101` 后应用，则「按新词表说出名字的拒绝」仍然写不进回执。所以 `0101` 必须与代码**同一批先应用**；反过来，旧二进制不认识的新码在回滚后读出时收敛成 `reason_not_recognized`，该码两张 `CHECK` 都收，回滚方向是通的。
+  - 两条迁移都只放宽/新增，**不收紧**：`0100` 加索引不改任何行的合法性，`0101` 的两份新 `CHECK` 都是旧的超集，不可能让已写下的行变成非法。
+- **是否存在 `DECISION_REQUIRED`**：
+  - **本卡范围扩大：`0101` 是计划外的第二条迁移**——交付包写的是「本卡新增 `0100`」。`0101` 不是顺手多做，而是 ⑥ 成立的**前提**（理由见 §11.4 ⑥ 末）。它与 ⑥ 是一个不可分的单位，要撤就一起撤。需要 Mog 确认这条扩大是否接受；不接受就是**整个 ⑥ 撤回**并保留 `0100`，不能只留代码不留迁移——那只留会把拒绝变成 `23514` 的坏处。
+  - **兄弟缺索引是否要一并做**——本卡不做，报 Mog（§11.4 末）；
+  - **租约表的写开销与保留策略**——索引给写路径加成本，而租约行只增不减（S4b 挂账 1 同类的保留问题），是否设保留窗口是产品决定；
+  - **`closed_monitor_reason` 兜底改成中性词后页面上少一个具体说法**——这是**如实**（原来那个说法是错的），但会让某些历史回执的表述变化，属呈现变化，本卡按实修改并记录。
+- **L1 / L2 / L3**：L1 查询与索引；页面侧**零**结构变化，只在既有文案槽内换词。
+- **是否触及 Token、Primitive、CMP、Scene、Motion 或 Data Truth**：都不触及。
+- **禁止修改的文件/能力**：接纳/派发写路径的判定与停止语义、授权与额度规则、`0097`/`0098`/`0099` 台账、`local-runtime.sh migrate` 的应用顺序、`runtime-main`、共享库、三套 Dexie、两域材料表、`materialization_ref` 的主键查询、`0065`（已应用，不得改写，见 §11.4 ⑥ 末）。
+- **停止条件**：若新索引在真实运行时被计划器**绕过**（例如统计未更新导致仍选顺序扫描），不追加更多的索引或强制 `enable_seqscan`；保留已证实的计划对比，把分歧报给 Mog。
+
+### 11.7 验收矩阵
+
+| 层级 | 验收方法 | 未证明边界 |
+|---|---|---|
+| 基线可复现（T33） | 证明库上以**同参数**跑规模阶梯（3 千 / 3 万 / 30 万）与两条语句的前后计划，断言 `EXPLAIN` 计划从 `Seq Scan` 变为索引命中、且缓冲页数下降；结论按**计划与规模曲线的形状**给出，不按单次扫描累计差值 | 真实运行时库在真实并发下的计划选择（本卡只在只读窗口内取样） |
+| 时间窗口差值（T33） | 运行时库上取窗口快照（`pg_stat_user_tables` / `pg_stat_user_indexes`，只含 `public`），记录租约表与物化表的 `seq_scan`/`idx_scan` 差值；**排除核查自身的探针** | 窗口内如果一次流量都没有，差值就是 0；样本小则如实写「未证明收益」 |
+| 候选 ① / ② 索引（迁移 `0100`） | 隔离 PostgreSQL 全套（`./scripts/test-local-001-discovery-postgres.sh`）在应用 `0100` 后全绿；夹具台账含 `0100` 摘要 | 线上规模（本机库只有 3 千行量级） |
+| 候选 ④ 错误边界 | 用例构造「`state='materialized'` 但引用为空」的行（**故意绕过写入点**），断言得到**具名错误**而不是解码 panic；变异验证：把 `try_get` 改回 `get`，用例以 `ColumnDecode … UnexpectedNullError` panic 变红（证明它钉住的正是那个差别，不是一条恒绿的断言） | **证据层已证，HTTP 层未证**：`finalize` 路由的 4xx 分支没有用例——那条路由今天一条 HTTP 级用例都没有（相邻的 `media_upload_session_not_found` 等分支同样没有）。新分支按相邻分支的同一形状写，属**读代码验证**，如实记在 §11.9.2 |
+| 候选 ⑤ 无生产引用（T34） | 三证：`src/` 零引用；webpack content 图不含该模块；**构建产物**（`dist/`）里搜不到该名字 | 真实 Chrome 的扩展加载（本卡不装包，未授权） |
+| 候选 ⑥ 词典不漏 | 单测：产出侧每个码穿过关闭词表后逐字不变；两个函数的通配臂被去掉后仍有兜底（中性词），且不再是「数据库不可用」；**隔离库实证**：一条 `schema_unavailable` 的拒绝真的留下了回执（`0101` 之前这一步是 `23514`，一条都留不下） | 历史回执文本会随之变化（已在 §11.6 记为呈现变化） |
+| 词表第三份副本不再分头长大（`0101`） | 单测扫**全部**迁移、取两条 `CHECK` 的**最终**定义，与代码侧词表逐码比对（不是只查创建它的那个文件）；两侧各变异验证一次：代码侧加码 → 红，迁移侧漏码 → 红 | **挡不住**「某条迁移把约束 DROP 掉而不重建」——那种改动会让两道闸一起消失，只能靠复核看 diff（限制写在用例自己的注释里） |
+| 全模块集成与构建（T34） | `cargo check --workspace --all-targets --locked` + 插件 `npm run build` + 产物 grep + 既有 verify 脚本；断言「活跃插件入口、真实 Rust 查询、API 与视图覆盖；无仅测试调用的假链路」 | 真实平台与线上运行（未授权） |
+
+### 11.8 交接
+
+- **修改文件**：见各次提交的 `git show --stat`；核心是 `database/migrations/0100_*.sql`（两条索引）、`database/migrations/0101_*.sql`（两条 `CHECK` 补成完整词表）、`crates/evidence/src/producer_runtime.rs`（`try_get` + 具名错误）、`apps/api/src/local_web.rs`（finalize 路由一条如实分支）、`crates/evidence/src/collection_control.rs`（两张原因码表 + 两条守卫测试）、`crates/evidence/tests/local_producer_postgres.rs`（候选 ④ 的攻击性负例）、插件 `src/content/douyinBatchMessageHandlers.js` → `tests/historical/`（含 README）与 4 个测试文件的 import、`MIGRATION-MAP.md` 里 2 处路径条目。
+- **迁移 `0100` 的登记点（六个，逐一核过）**：新迁移文件本身之外，`scripts/local-runtime.sh:274` 的 `apply_migration_once`；`crates/evidence/tests/support/material_fixture.rs:215` 与 `apps/api/src/local_web/full_schema_fixture.rs:194` 的 `include_str!`，这两处**另各带一行台账摘要**（`…:250` / `…:255`，同为 `a26c7006…`）；`crates/evidence/tests/{collection_control_postgres:156, collection_control_runtime_postgres:146, collection_dispatch_sequence_postgres:153}.rs` 的 `include_str!`（**不带**台账摘要）。核对方式：`grep -rln "0100"` 全仓扫过，`crates/contracts/src/collection.rs` 的命中是一个含 `0100` 的测试用平台 ID，不是登记点；**上一版这一行列的四处是错的**（把 `runtime_readiness.rs` 与 `scripts/test-local-001-discovery-postgres.sh` 当成了登记点）——前者只登记 tick 需要的 `0034/0036/0097/0098` 四个 id，后者按目录扫迁移、不逐条登记。列错登记点的代价是下次改迁移时按这行去改，改了不生效还以为登记过了。
+- **迁移 `0101` 的登记点（六个，逐一核过）**：与 `0100` 同构、同一批核对，行号各差一行：`scripts/local-runtime.sh:275` 的 `apply_migration_once`；`crates/evidence/tests/support/material_fixture.rs:216` 的 `include_str!` 与 `:252` 的台账摘要；`apps/api/src/local_web/full_schema_fixture.rs:195` 的 `include_str!` 与 `:257` 的台账摘要（两处摘要同为 `fda3711ea7bb38af6bb5a6a28264a39ac0c04024aef3e6feeb931e07a9b074c1`，与文件实际 sha256 一致，已核）；`crates/evidence/tests/{collection_control_postgres:157, collection_control_runtime_postgres:147, collection_dispatch_sequence_postgres:154}.rs` 的 `include_str!`（**不带**台账摘要）。核对方式同 `0100`：全仓 `grep -rn "0101"` 逐条看过，命中的都是登记点或说明性注释。
+- **验证命令/走查**：`cargo check --workspace --all-targets --locked`；`cargo test -p linggan-evidence --lib --locked`；`cargo test -p linggan-api --bin linggan-api --locked`；`./scripts/test-local-001-discovery-postgres.sh`（全套，**读退出码与 log 的 `test result` 行，不看管道尾部**）；插件 `npm run build` + 受影响的五个用例文件 + 产物 grep；`./scripts/check-rust-boundaries.sh`；`./scripts/check-project-governance.sh`。
+- **规则或索引同步**：`docs/progress/2026-09.md` 记本次交付；迁移编号按 §3 的纪律在合并前重新 fetch 复核（本卡实际新增 `0100` + `0101` 两条，撞号则整体顺延并同步全部登记点）。
+- **例外与替代**：候选 ③ **有意不改**（判据在 §11.4），兄弟缺索引**有意不做**（报 Mog）。两处都写明了理由，不是遗漏。
+- **PR / reviewer / integration owner**：由 Mog 指定；按交付包约定在整包收尾时统一走一次独立复核（不再为 S5 单独发起）。
+
+### 11.9 实施状态
+
+**已完成（2026-09-21；全部是本 worktree 内的本地状态）**。实际顺序：迁移 `0100` 与六处登记 → 候选 ④ → 候选 ⑥（**在实施中扩出第二条迁移 `0101`**，理由见 §11.4 ⑥ 末与 §11.6 的 `DECISION_REQUIRED`）→ 候选 ⑤ → 集成与构建证据 → 回填本节。**除 `0101` 外没有偏离计划的其他改动**；候选 ③ 与兄弟缺索引仍是有意不做。
+
+#### 11.9.1 证据表（命令 + 真实结果）
+
+| 证据 | 命令 | 结果 |
+|---|---|---|
+| 基线可复现（T33） | 证明库规模阶梯（3 千／3 万／30 万，同参数各 3 次）与运行时库**时间窗口差值**，读数在 §11.4 ①② | 计划对比：①`Seq Scan` → 索引首行（3 千 0.11–0.40 ms → 0.004–0.03 ms）、②每次渲染 100 次顺序扫描 → 0.637 ms／283 buffers；**只报形状改变与缓冲页数下降，不报线上百分比** |
+| 隔离库全套（T34 集成面） | `./scripts/test-local-001-discovery-postgres.sh` | **24 次 cargo 运行：252 passed / 0 failed / 1 ignored，退出码 0**，容器/卷/库自建自清（日志末尾 `LOCAL-001 PostgreSQL proof cleanup verified`）。关键目标：`collection_control_runtime_postgres` **14 passed / 0 failed**（`0101` 的证明——`schema_unavailable` 那条拒绝此前是 `23514`，一条回执都留不下）、`collection_control_postgres` 22、`collection_dispatch_sequence_postgres` 34、`local_producer_postgres` **6 passed**（候选 ④ 的攻击性负例）、`scheduler_tick_postgres` 5、`runtime_readiness_postgres` 5、`linggan-api` 二进制 25 passed / 259 filtered out |
+| 单元面 | `cargo test -p linggan-evidence --lib --locked` | **90 passed / 0 failed**（新增守卫一条，89 → 90） |
+| API 二进制（单独跑一次） | `cargo test -p linggan-api --bin linggan-api --locked` | **259 passed / 0 failed / 25 ignored** |
+| 全仓编译 | `cargo check --workspace --all-targets --locked` | 退出码 0 |
+| 插件构建（T34 产物证） | `npm run build` | 退出码 0（3 条既有体积警告）；**产物三证**：`src/` 零引用、webpack content 图不含它（`verify-linggan-isolation.mjs:67` 本来就断言这件事）、新建的 `dist/` 里搜不到模块名（命中 **0** 个文件） |
+| 插件用例与校验 | `npm run test:douyin`；两条**没有 npm 脚本入口**的用例直接跑；`check:contracts`；`verify:linggan-isolation`；`verify:content-runtime` | 69 passed / 0 failed；3 passed / 0 failed；三者退出码 0 |
+| 边界与治理 | `./scripts/check-rust-boundaries.sh`；`./scripts/check-project-governance.sh` | 前者 **61 error(s) / 27 warning(s)**（与 S3c/S4c/S4d 逐项同数：本卡碰过的 `collection_control.rs` 与 `producer_runtime.rs` 本来就在那 61 个里，该检查按文件计、只报一次，所以往已超限文件里加的行不会再新增计数——这意味着**这份检查证明不了「本卡没有新增超限行」**，只证明没有新增超限**文件**）；后者**通过** |
+| 变异验证 | 见 §8 末尾三条 | 三次全红、三次逐字节还原（`collection_control.rs` `0e68c49c…`、`producer_runtime.rs` `b8266df2…`、`0101` `fda3711e…`） |
+
+#### 11.9.2 未证明边界（如实）
+
+- **T33 的收益只在复刻规模上量过**：证明库的规模阶梯与运行时库的窗口差值都不是生产并发，运行时库上这条语句的绝对耗时本来就小；样本与规模都不足以支撑一个百分比结论，所以本卡**不宣传任何固定提速**。这正是交付包「样本太小则报告未证明收益」那条。
+- **`0101` 只在隔离库与单元面上证明**：共享库未应用（未授权），因此「线上那两条 `CHECK` 的确切定义」这一步没有实测——本卡读的是 `0065` 的文本与 `0101` 的最终态。
+- **候选 ⑤ 的「没有生产引用」止于构建产物与入口图**：真实 Chrome 加载扩展未做（未授权）。
+- **候选 ④ 的新 4xx 分支没有 HTTP 级用例**：`/api/local/producer/media-uploads/{session_ref}/finalize` 这条路由今天**一条** HTTP 级用例都没有（相邻几条错误分支也一样），隔离库那条用例证到的是**证据层**的具名错误。分支本身按相邻分支的同一形状写（同样的 `local_producer_error` + 状态码），属读代码验证。
+- **全套隔离库跑在本机 PostgreSQL 16 镜像上**：与部署机版本的差异未测。
+- **一件与本卡无关但会让 `npm run verify` 整体变红的事**：`release:verify` 失败（`releases/linggan-intelligence-browser-v0.8.54.zip` 的 `background.js`／`content.js` 与新建的 `dist/` 不一致）。已实证**与本卡无关**——把候选 ⑤ 迁移出去的那个模块临时放回 `src/` 重新构建，产物**逐字节相同**（`background.js` `26cd650f52a9`、`content.js` `3d369914321c`），即该模块进出构建图对产物零影响；建完即刻删除并重建，工作树回到本卡状态。**未证明**它到底是「发布包本身过期」还是「本机 webpack 与打包时版本不同」；本卡不重建发布包（未授权），只报这一条。
+
+#### 11.9.3 如实记录的两处返工（候选 ④ 的用例）
+
+- 第一版用了**随手编的**观察对象 UUID（`eeeeeeee-…`，它在包里是 `packageRef` 而不是 `observationRef`），`begin_media_upload` 第一步查存在性就以 `MediaObservationNotFound` 死在开头——用例变成在测别的东西。改用包里真的建出来的那个（`11111111-…`）是本条的修法，注释里写明了为什么不能用编的。
+- 改对之后又暴露第二处：漏了「先领终结权」这一步，而 `complete_media_upload` 在**非 `finalizing` 态上返回 `Ok(())` 却什么也不做**，于是前提断言停在 `ready_to_finalize` 上。两处都写进了用例注释，并把「静默无操作」这条同族发现报给 Mog（§11.4 末）。
+
+#### 11.9.4 挂账与报 Mog（不自行处置）
+
+①`0101` 是否接受这次范围扩大（不接受即整个 ⑥ 撤回，见 §11.6）；②`target_domain_unassigned` 这条**改动之前就在**的雷（同一个领域里另有别的码也可能撞上那两条 `CHECK`）；③`reason_code` 会原样出现在页面上；④`receipt_meaning`／`error_summary` 是同一份词表的另两份手维护映射；⑤采集页两个兄弟缺索引；⑥`complete_media_upload` 的静默无操作；⑦`manual-execution-lock-release.test.mjs` 与 `task-state-constants.test.mjs` 没有 npm 脚本入口（本步直接跑过，3 passed）、`release:verify` 的既有红灯、以及既有的插件 `linggan-current-surface-discovery-runtime` 失败与 `crates/contracts/src/producer_runtime.rs:428` 的既有 clippy `too_many_lines` error；⑧是否为这次受保护交付开 GitHub Issue（**上一窗口问过，Mog 未答**）。
+
+**未完成（不在本卡）**：S6（集成证据表、历史处置预览、兼容矩阵、回滚步骤、PR 候选）；共享库迁移应用与历史数据处置；merge／push／部署／runtime 切换／插件重载／发布包生成／真实平台访问——**全部需要另行授权**。本交付包收尾后按 Mog 指定走**一次**独立复核（不逐步复核）。
+

@@ -28,6 +28,11 @@
 | cookies、媒体下载、定时、网络规则、通知权限 | 从 Manifest 移除 | 不会请求这些旧能力的浏览器权限 | 所有需要这些能力的未来接入必须重新评审 |
 | 详情、评论、媒体、批量、抖音、自动化 | 代码与 UI 位置保留，运行动作均等待 adapter | 点击会得到具体未接通说明 | 未访问平台、未下载媒体、未写入 Linggan |
 
+「旧 source 仅作历史保留」的落点是 `tests/historical/`：已经不进任何构建产物、但仍有测试在读的
+模块放那里，附一份说明它为什么还在这里的 README。目前只有 `douyinBatchMessageHandlers.js`
+（原 `src/content/douyinBatchMessageHandlers.js`），详见
+[`tests/historical/README.md`](tests/historical/README.md)。
+
 ## Issue #78 / #80 的当前执行边界（覆盖上表中旧的 XHS 静态入口描述）
 
 | XHS 能力 | 当前处置 | 不构成的承诺 |

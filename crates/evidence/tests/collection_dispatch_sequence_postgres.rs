@@ -150,6 +150,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0098_scheduler_tick_steps_and_readiness.sql"),
     "\n",
     include_str!("../../../database/migrations/0099_collection_selector_health.sql"),
+    include_str!("../../../database/migrations/0100_collection_hot_path_indexes.sql"),
+    include_str!("../../../database/migrations/0101_collection_command_reason_vocabulary.sql"),
 );
 
 #[tokio::test]

@@ -271,6 +271,8 @@ migrate() {
   apply_migration_once "0097_collection_execution_input_eligibility" "$project_root/database/migrations/0097_collection_execution_input_eligibility.sql"
   apply_migration_once "0098_scheduler_tick_steps_and_readiness" "$project_root/database/migrations/0098_scheduler_tick_steps_and_readiness.sql"
   apply_migration_once "0099_collection_selector_health" "$project_root/database/migrations/0099_collection_selector_health.sql"
+  apply_migration_once "0100_collection_hot_path_indexes" "$project_root/database/migrations/0100_collection_hot_path_indexes.sql"
+  apply_migration_once "0101_collection_command_reason_vocabulary" "$project_root/database/migrations/0101_collection_command_reason_vocabulary.sql"
 }
 
 case "$command_name" in

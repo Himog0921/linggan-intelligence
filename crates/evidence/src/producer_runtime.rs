@@ -40,6 +40,12 @@ pub enum ProducerRuntimeError {
     MaterialIdentityConflict,
     #[error("no processor version is registered for processor kind: {0}")]
     ProcessorKindNotRegistered(String),
+    // `download_attempt_ref` 在 `linggan_media_upload_session` 上可空，而「已物化」这个状态
+    // 隐含它必须有值——这条隐含关系今天只有写入点（同文件的原子 UPDATE）在维护，数据库里
+    // 没有 CHECK 把它钉住。读到空值不是「查询失败」，是这条会话行处于它不该处于的状态；
+    // 给它一个名字，让它如实走到调用方，而不是在解码时 panic 掉一个正在处理请求的进程。
+    #[error("a materialized media upload session has no download attempt reference")]
+    MaterializedSessionWithoutDownloadAttempt,
 }
 
 #[derive(Debug, Serialize)]
@@ -461,7 +467,9 @@ pub async fn claim_media_upload_finalize(
     let session = media_upload_session_from_row(&row);
     let claim = match session.state.as_str() {
         "materialized" => {
-            let download_attempt_ref = row.get::<Uuid, _>("download_attempt_ref");
+            let download_attempt_ref = row
+                .try_get::<Uuid, _>("download_attempt_ref")
+                .map_err(|_| ProducerRuntimeError::MaterializedSessionWithoutDownloadAttempt)?;
             crate::media_acquisition::complete_media_acquisition_for_observation(
                 &mut tx,
                 session.media_observation_ref,

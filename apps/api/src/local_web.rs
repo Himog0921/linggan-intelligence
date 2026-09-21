@@ -2022,6 +2022,15 @@ async fn finalize_media_upload_route(
                 "media_upload_session_not_found",
             );
         }
+        // 会话自称已物化，却没有下载尝试引用——这是**这一行自己的状态**出了问题，不是服务
+        // 暂时不可用。两者必须分开说：归到 `media_upload_state_unavailable` 会让插件一直重试
+        // 一个重试不好的东西；归到这里，它至少能停下来把这条会话报出来。
+        Err(ProducerRuntimeError::MaterializedSessionWithoutDownloadAttempt) => {
+            return local_producer_error(
+                axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+                "media_upload_materialized_without_download_attempt",
+            );
+        }
         Err(_) => {
             return local_producer_error(
                 axum::http::StatusCode::SERVICE_UNAVAILABLE,

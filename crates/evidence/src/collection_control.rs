@@ -2222,16 +2222,34 @@ pub async fn apply_manual_observe_command(
     .await
 }
 
+/// 人工观察被拒时，这条拒绝**是哪一类**。
+///
+/// **没有通配臂，这是有意的**：此前它以一个 `_ => "database_unavailable"` 收尾，于是
+/// 「这个目标还没说清属于哪个领域」「这套表压根没建」「这个目标不存在」全都被说成
+/// 「数据库不可用」。人对一个目标点「立即观察」，页面说数据库不可用，于是去查服务是不是
+/// 挂了——而真正要做的可能只是给目标指定一个领域。少了通配臂，`AcquisitionChainError`
+/// 每加一个变体都必须在这里说清它是什么，编译器逼着做，不靠记性。
 fn manual_observe_error_reason(error: &AcquisitionChainError) -> &'static str {
     match error {
         AcquisitionChainError::KeywordArchiveIncomplete => "baseline_not_ready",
         AcquisitionChainError::TargetNotRequestable { .. } => "target_not_requestable",
-        // 缺领域必须单独报。它此前落进下面那个通配符，于是「这个目标还没说清属于哪个
-        // 领域」被显示成「数据库不可用」——人会去查服务是不是挂了，而真正要做的只是
-        // 给目标指定一个领域。
         AcquisitionChainError::TargetDomainUnassigned => "target_domain_unassigned",
+        // 「这套 schema 没装上」与「数据库连不上」是两件事：前者修一次就好，后者会自愈；
+        // 而且第一种情况下重试永远没用。它们不该共用一个码。
+        AcquisitionChainError::SchemaUnavailable => "schema_unavailable",
+        AcquisitionChainError::UnknownTarget => "unknown_target",
+        AcquisitionChainError::InvalidMaterialTargets => "invalid_material_targets",
+        AcquisitionChainError::ProgressiveArchiveAuthorizationTooSmall { .. } => {
+            "progressive_archive_authorization_too_small"
+        }
+        AcquisitionChainError::ProgressiveArchiveAuthorizationMissing => {
+            "progressive_archive_authorization_missing"
+        }
+        AcquisitionChainError::ProgressiveArchivePurposeMismatch => {
+            "progressive_archive_purpose_mismatch"
+        }
+        AcquisitionChainError::ProgressiveArchiveNotReady { .. } => "progressive_archive_not_ready",
         AcquisitionChainError::Database(_) => "database_unavailable",
-        _ => "database_unavailable",
     }
 }
 
@@ -2257,49 +2275,110 @@ async fn live_patrol_execution_in(
     .await
 }
 
+/// 一条命令回执说得出原因时，它**只能**是这些码之一。
+///
+/// 这是**这一个域**的词表，不是全项目通用的枚举：它收的是「采集控制面一条人工命令为什么
+/// 没有按人期望的样子改变世界」。账号资格观察有自己的词表
+/// （`AccountEligibilityState::reason_code`，落在 `platform_observation_account_eligibility_observation`），
+/// 采集调度的步骤结果也有自己的一套（`step_report` 的受限码）——三套各自演进，不合并。
+///
+/// 表里的码来自四个判定处，按来源分组列出：命令本身的前置检查、准入结论
+/// （`admission::reason_code`）、容量与账号资格（`Capacity::reason_code` 与
+/// `CapacityReasonCode::as_str`）、人工观察的失败（`manual_observe_error_reason`）。
+/// 这里不重新决定哪一条该出现——那是生产侧的事；这里只回答「这个码本域认不认」。
+///
+/// 过去这份词表只有 39 个码，而生产侧真的会发出的码里有 **16 个**不在表上；它们全部落在
+/// 兜底臂上被说成「数据库不可用」——一个具体的断言，而且通常是错的。**数量按逐条比对旧表算出来
+/// 的（39 → 55）**，是 16 而不是先前凭印象记下的 7：那 7 个（`available`、
+/// `in_flight_work_covers_it`、`need_already_satisfied`、`question_unanswerable`、`queueable`、
+/// `target_domain_unassigned`、`within_authorization`）只是其中一部分，另外 9 个是
+/// `installation_risk_cooldown` 与 `platform_concurrency_reached`（容量侧），以及人工观察失败里
+/// 除 `target_domain_unassigned` 之外的七个（`schema_unavailable`、`unknown_target`、
+/// `invalid_material_targets` 与四个 `progressive_archive_*`）。凭印象报数正是这条要消灭的错法，所以这里写算式。
+/// `closed_monitor_reason` 的守卫测试现在逐条比对生产侧的枚举，漏一个就会红。
+const MONITOR_COMMAND_REASONS: &[&str] = &[
+    // 命令本身的结果与前置检查。
+    "rule_saved",
+    "monitor_paused",
+    "monitor_resumed",
+    "monitor_stopped",
+    "manual_observe_created",
+    "manual_observe_reused",
+    "stale_revision",
+    "identity_conflict",
+    "invalid_mode",
+    "invalid_interval",
+    "invalid_schedule",
+    "target_not_requestable",
+    // 准入结论（`AdmissionOutcome` / `AcquisitionChainError` 直接给出的那几个）。
+    "within_authorization",
+    "need_already_satisfied",
+    "in_flight_work_covers_it",
+    "question_unanswerable",
+    // 容量（`Capacity::reason_code`）。
+    "queueable",
+    "available",
+    // 容量与账号资格（`CapacityReasonCode::as_str` 的全部二十一个）。
+    "risk_paused",
+    "installation_risk_cooldown",
+    "station_unavailable",
+    "station_not_accepting",
+    "installation_credential_missing",
+    "plugin_version_unsupported",
+    "installation_stale",
+    "capability_missing",
+    "account_unbound",
+    "account_binding_changed",
+    "account_binding_expired",
+    "account_eligibility_stale",
+    "account_cooling",
+    "account_needs_login",
+    "account_restricted",
+    "account_unknown",
+    "account_busy",
+    "station_busy",
+    "station_daily_budget_reached",
+    "platform_concurrency_reached",
+    "capacity_unknown",
+    // 授权边界（`AuthorizationBoundaryFailure::as_str` 的全部六个；`authorization_missing`
+    // 也出现在这里，表里只写一次）。
+    "authorization_missing",
+    "authorization_scope_mismatch",
+    "authorization_purpose_mismatch",
+    "authorization_target_limit_reached",
+    "authorization_work_unit_limit_reached",
+    "authorization_expired_or_revoked",
+    // 人工观察的失败（`manual_observe_error_reason` 的全部十一个）。
+    "baseline_not_ready",
+    "target_domain_unassigned",
+    "schema_unavailable",
+    "unknown_target",
+    "invalid_material_targets",
+    "progressive_archive_authorization_too_small",
+    "progressive_archive_authorization_missing",
+    "progressive_archive_purpose_mismatch",
+    "progressive_archive_not_ready",
+    "database_unavailable",
+];
+
+/// 词表外的码收敛到它。它说的是**本域不认识这个码**，不是猜测它属于哪一类故障。
+const MONITOR_COMMAND_REASON_NOT_RECOGNIZED: &str = "reason_not_recognized";
+
+/// 把一条存下来的原因原文收敛进本域词表。
+///
+/// 两个读者：重放一条已有命令时读回它当初的 `first_reason_code`，以及把命令请求里带的原因
+/// 收口后再落库。两者拿到的都可能是**当初写下的**值，而不是此刻生产侧会发出的值。
+///
+/// **兜底不再是「数据库不可用」**：那是一个具体的断言，而真相是「这个码不在本域词表里」
+/// ——多半来自旧版本的回执，或者干脆是别人写进来的。说不出原因就说不出原因，不替它挑一个
+/// 故障名字。`reason_not_recognized` 在页面上走到既有的中性兜底文案（「命令没有改变当前
+/// 规则，也没有创建采集事实。」），既不吓人，也不撒谎。
 fn closed_monitor_reason(value: &str) -> &'static str {
-    match value {
-        "rule_saved" => "rule_saved",
-        "monitor_paused" => "monitor_paused",
-        "monitor_resumed" => "monitor_resumed",
-        "monitor_stopped" => "monitor_stopped",
-        "manual_observe_created" => "manual_observe_created",
-        "manual_observe_reused" => "manual_observe_reused",
-        "stale_revision" => "stale_revision",
-        "identity_conflict" => "identity_conflict",
-        "invalid_mode" => "invalid_mode",
-        "invalid_interval" => "invalid_interval",
-        "invalid_schedule" => "invalid_schedule",
-        "baseline_not_ready" => "baseline_not_ready",
-        "target_not_requestable" => "target_not_requestable",
-        "database_unavailable" => "database_unavailable",
-        "authorization_missing" => "authorization_missing",
-        "authorization_scope_mismatch" => "authorization_scope_mismatch",
-        "authorization_purpose_mismatch" => "authorization_purpose_mismatch",
-        "authorization_target_limit_reached" => "authorization_target_limit_reached",
-        "authorization_work_unit_limit_reached" => "authorization_work_unit_limit_reached",
-        "authorization_expired_or_revoked" => "authorization_expired_or_revoked",
-        "risk_paused" => "risk_paused",
-        "station_unavailable" => "station_unavailable",
-        "station_not_accepting" => "station_not_accepting",
-        "installation_credential_missing" => "installation_credential_missing",
-        "plugin_version_unsupported" => "plugin_version_unsupported",
-        "installation_stale" => "installation_stale",
-        "capability_missing" => "capability_missing",
-        "account_unbound" => "account_unbound",
-        "account_binding_changed" => "account_binding_changed",
-        "account_binding_expired" => "account_binding_expired",
-        "account_eligibility_stale" => "account_eligibility_stale",
-        "account_cooling" => "account_cooling",
-        "account_needs_login" => "account_needs_login",
-        "account_restricted" => "account_restricted",
-        "account_unknown" => "account_unknown",
-        "account_busy" => "account_busy",
-        "station_busy" => "station_busy",
-        "station_daily_budget_reached" => "station_daily_budget_reached",
-        "capacity_unknown" => "capacity_unknown",
-        _ => "database_unavailable",
-    }
+    MONITOR_COMMAND_REASONS
+        .iter()
+        .copied()
+        .find(|known| *known == value)
+        .unwrap_or(MONITOR_COMMAND_REASON_NOT_RECOGNIZED)
 }
 
 /// 「一轮合格的关键词建档」这条判据本身。
@@ -3418,8 +3497,9 @@ pub async fn toggle_target_patrol(
 }
 
 #[cfg(test)]
-mod manual_observe_reason_tests {
+mod monitor_command_reason_tests {
     use super::*;
+    use linggan_contracts::AuthorizationBoundaryFailure;
 
     /// 「缺领域」不能被通配符吞成「数据库不可用」。
     ///
@@ -3432,16 +3512,312 @@ mod manual_observe_reason_tests {
             manual_observe_error_reason(&AcquisitionChainError::TargetDomainUnassigned),
             "target_domain_unassigned"
         );
-        // 另外两类原因保持原样，证明这次只把一个被误归的原因摘出来。
         assert_eq!(
             manual_observe_error_reason(&AcquisitionChainError::TargetNotRequestable {
                 state: "monitoring".to_owned()
             }),
             "target_not_requestable"
         );
+        // 「这套表没装上」与「连不上」也是两件事：前者重试永远不会好，后者会自愈。
+        // 它此前同样落在通配臂上说成「数据库不可用」。
         assert_eq!(
             manual_observe_error_reason(&AcquisitionChainError::SchemaUnavailable),
-            "database_unavailable"
+            "schema_unavailable"
         );
+    }
+
+    /// 生产侧每一个会发出的码，穿过关闭词表后必须**逐字不变**。
+    ///
+    /// 一个都不许落到 `reason_not_recognized`：兜底只该接住「本域不认识的码」，不该接住
+    /// 自家产出的码。这条用例因此不抄一份期望值表（抄一份就是同一件事的第二个答案），
+    /// 而是直接从生产侧的枚举遍历。
+    #[test]
+    fn every_reason_the_producers_emit_survives_the_closed_vocabulary_unchanged() {
+        for code in capacity_reason_codes() {
+            assert_eq!(closed_monitor_reason(code.as_str()), code.as_str());
+        }
+        for failure in authorization_boundary_failures() {
+            assert_eq!(closed_monitor_reason(failure.as_str()), failure.as_str());
+        }
+        for error in acquisition_chain_errors() {
+            let reason = manual_observe_error_reason(&error);
+            assert_eq!(
+                closed_monitor_reason(reason),
+                reason,
+                "人工观察的拒绝原因 {reason} 不在关闭词表里"
+            );
+        }
+        // 命令分支与准入结论直接写下的那几个字面量。
+        for literal in [
+            "rule_saved",
+            "monitor_paused",
+            "monitor_resumed",
+            "monitor_stopped",
+            "manual_observe_created",
+            "manual_observe_reused",
+            "stale_revision",
+            "identity_conflict",
+            "invalid_interval",
+            "invalid_schedule",
+            "within_authorization",
+            "need_already_satisfied",
+            "in_flight_work_covers_it",
+            "question_unanswerable",
+            "authorization_missing",
+            "queueable",
+            "available",
+        ] {
+            assert_eq!(closed_monitor_reason(literal), literal);
+        }
+    }
+
+    /// 词表之外的码说「不认识」，不替它挑一个故障名字。
+    ///
+    /// 旧兜底是 `database_unavailable`——那是一个具体的断言。旧回执里存着一个本版本不认识的
+    /// 码时，页面会让人去查服务是不是挂了，而事实只是「这个码我们不认识」。
+    #[test]
+    fn an_unknown_code_says_so_instead_of_naming_a_failure() {
+        assert_eq!(
+            closed_monitor_reason("some_future_code_from_a_newer_build"),
+            MONITOR_COMMAND_REASON_NOT_RECOGNIZED
+        );
+        assert_ne!(MONITOR_COMMAND_REASON_NOT_RECOGNIZED, "database_unavailable");
+    }
+
+    /// 词表里不该有重复——重复说明有人把同一个码加了两遍，也说明分组注释在撒谎。
+    #[test]
+    fn the_closed_vocabulary_has_no_duplicates() {
+        let mut sorted = MONITOR_COMMAND_REASONS.to_vec();
+        sorted.sort_unstable();
+        let before = sorted.len();
+        sorted.dedup();
+        assert_eq!(sorted.len(), before);
+    }
+
+    // 下面两个「遍历全部变体」的辅助函数**故意不写通配臂**：`linggan_contracts` 里给这两个
+    // 枚举加一个变体，这里就编译不过。没有这一步，守卫测试会在新变体面前静默失效——它仍然
+    // 绿着，只是不再覆盖新来的那个。
+
+    fn capacity_index(code: CapacityReasonCode) -> usize {
+        match code {
+            CapacityReasonCode::RiskPaused => 0,
+            CapacityReasonCode::InstallationRiskCooldown => 1,
+            CapacityReasonCode::StationUnavailable => 2,
+            CapacityReasonCode::StationNotAccepting => 3,
+            CapacityReasonCode::InstallationCredentialMissing => 4,
+            CapacityReasonCode::PluginVersionUnsupported => 5,
+            CapacityReasonCode::InstallationStale => 6,
+            CapacityReasonCode::CapabilityMissing => 7,
+            CapacityReasonCode::AccountUnbound => 8,
+            CapacityReasonCode::AccountBindingChanged => 9,
+            CapacityReasonCode::AccountBindingExpired => 10,
+            CapacityReasonCode::AccountEligibilityStale => 11,
+            CapacityReasonCode::AccountCooling => 12,
+            CapacityReasonCode::AccountNeedsLogin => 13,
+            CapacityReasonCode::AccountRestricted => 14,
+            CapacityReasonCode::AccountUnknown => 15,
+            CapacityReasonCode::AccountBusy => 16,
+            CapacityReasonCode::StationBusy => 17,
+            CapacityReasonCode::StationDailyBudgetReached => 18,
+            CapacityReasonCode::PlatformConcurrentLimitReached => 19,
+            CapacityReasonCode::CapacityUnknown => 20,
+        }
+    }
+
+    fn capacity_reason_codes() -> Vec<CapacityReasonCode> {
+        let all = [
+            CapacityReasonCode::RiskPaused,
+            CapacityReasonCode::InstallationRiskCooldown,
+            CapacityReasonCode::StationUnavailable,
+            CapacityReasonCode::StationNotAccepting,
+            CapacityReasonCode::InstallationCredentialMissing,
+            CapacityReasonCode::PluginVersionUnsupported,
+            CapacityReasonCode::InstallationStale,
+            CapacityReasonCode::CapabilityMissing,
+            CapacityReasonCode::AccountUnbound,
+            CapacityReasonCode::AccountBindingChanged,
+            CapacityReasonCode::AccountBindingExpired,
+            CapacityReasonCode::AccountEligibilityStale,
+            CapacityReasonCode::AccountCooling,
+            CapacityReasonCode::AccountNeedsLogin,
+            CapacityReasonCode::AccountRestricted,
+            CapacityReasonCode::AccountUnknown,
+            CapacityReasonCode::AccountBusy,
+            CapacityReasonCode::StationBusy,
+            CapacityReasonCode::StationDailyBudgetReached,
+            CapacityReasonCode::PlatformConcurrentLimitReached,
+            CapacityReasonCode::CapacityUnknown,
+        ];
+        let mut seen: Vec<usize> = all.iter().copied().map(capacity_index).collect();
+        seen.sort_unstable();
+        assert_eq!(
+            seen,
+            (0..all.len()).collect::<Vec<_>>(),
+            "上面的清单漏了一个变体"
+        );
+        all.to_vec()
+    }
+
+    fn authorization_boundary_failures() -> Vec<AuthorizationBoundaryFailure> {
+        let all = [
+            AuthorizationBoundaryFailure::Missing,
+            AuthorizationBoundaryFailure::ScopeMismatch,
+            AuthorizationBoundaryFailure::PurposeMismatch,
+            AuthorizationBoundaryFailure::TargetLimitReached,
+            AuthorizationBoundaryFailure::WorkUnitLimitReached,
+            AuthorizationBoundaryFailure::ExpiredOrRevoked,
+        ];
+        let mut seen: Vec<&'static str> = all.iter().map(|failure| failure.as_str()).collect();
+        seen.sort_unstable();
+        seen.dedup();
+        assert_eq!(seen.len(), all.len(), "上面的清单里有重复");
+        all.to_vec()
+    }
+
+    fn acquisition_error_index(error: &AcquisitionChainError) -> usize {
+        match error {
+            AcquisitionChainError::SchemaUnavailable => 0,
+            AcquisitionChainError::UnknownTarget => 1,
+            AcquisitionChainError::TargetDomainUnassigned => 2,
+            AcquisitionChainError::TargetNotRequestable { .. } => 3,
+            AcquisitionChainError::KeywordArchiveIncomplete => 4,
+            AcquisitionChainError::InvalidMaterialTargets => 5,
+            AcquisitionChainError::ProgressiveArchiveAuthorizationTooSmall { .. } => 6,
+            AcquisitionChainError::ProgressiveArchiveAuthorizationMissing => 7,
+            AcquisitionChainError::ProgressiveArchivePurposeMismatch => 8,
+            AcquisitionChainError::ProgressiveArchiveNotReady { .. } => 9,
+            AcquisitionChainError::Database(_) => 10,
+        }
+    }
+
+    fn acquisition_chain_errors() -> Vec<AcquisitionChainError> {
+        let all = vec![
+            AcquisitionChainError::KeywordArchiveIncomplete,
+            AcquisitionChainError::TargetNotRequestable {
+                state: "monitoring".to_owned(),
+            },
+            AcquisitionChainError::TargetDomainUnassigned,
+            AcquisitionChainError::SchemaUnavailable,
+            AcquisitionChainError::UnknownTarget,
+            AcquisitionChainError::InvalidMaterialTargets,
+            AcquisitionChainError::ProgressiveArchiveAuthorizationTooSmall { current_bound: 50 },
+            AcquisitionChainError::ProgressiveArchiveAuthorizationMissing,
+            AcquisitionChainError::ProgressiveArchivePurposeMismatch,
+            AcquisitionChainError::ProgressiveArchiveNotReady { reason: "未就绪" },
+            AcquisitionChainError::Database(sqlx::Error::RowNotFound),
+        ];
+        let mut seen: Vec<usize> = all.iter().map(acquisition_error_index).collect();
+        seen.sort_unstable();
+        assert_eq!(
+            seen,
+            (0..all.len()).collect::<Vec<_>>(),
+            "上面的清单漏了一个变体"
+        );
+        all
+    }
+
+    /// 关闭词表在两个回执表上也各有一份，而那两份是**手抄的**。
+    ///
+    /// `0065` 建这两条 CHECK 时抄的是当时的词表；之后代码侧陆续加了码，两条 CHECK 一个都没
+    /// 跟上。代价不是文案不好看，是**回执写不进去**：`target_domain_unassigned`（`0065` 之后
+    /// 加的）与再后来的「缺 schema」「目标不存在」这些码，在写回执那一步整笔失败（`23514`）。
+    /// 回执是控制面唯一的持久事实，写不进去比写错更坏——写错了至少还能看见。`0101` 把两份
+    /// 补齐，这条用例守住它们不许再分头长大：任何一个码只出现在代码侧、或某处列表被抄窄，
+    /// 这里就红。
+    ///
+    /// **它守得住什么、守不住什么**：它扫**全部**迁移文件，要求每一处提到这两条约束的地方
+    /// 都写着完整词表，所以「新开一条迁移把列表抄漏/抄窄」会被抓住，而且不必等数据库——
+    /// 它跑在 `--lib` 里。它**挡不住**的是某条迁移用 `DROP CONSTRAINT` 把约束单独删掉而不
+    /// 重建：那种改动会让这道闸和数据库那道闸一起消失，只能靠复核看 diff。把这个限制写在
+    /// 这里，比让它看起来什么都能守更值（同 §8 记的 `NULLS NOT DISTINCT` 那一处）。
+    #[test]
+    fn both_receipt_check_constraints_spell_out_the_whole_closed_vocabulary() {
+        use std::collections::BTreeSet;
+        use std::path::{Path, PathBuf};
+
+        let migrations = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../database/migrations");
+        let mut files: Vec<PathBuf> = std::fs::read_dir(&migrations)
+            .unwrap_or_else(|error| panic!("读不到迁移目录 {}：{error}", migrations.display()))
+            .map(|entry| entry.expect("迁移目录项可读").path())
+            .filter(|path| path.extension().is_some_and(|extension| extension == "sql"))
+            .collect();
+        files.sort();
+
+        let stored: BTreeSet<&str> = MONITOR_COMMAND_REASONS
+            .iter()
+            .copied()
+            .chain([MONITOR_COMMAND_REASON_NOT_RECOGNIZED])
+            .collect();
+        // 身份表**有意**不收 `identity_conflict`：身份行记的是首条结果，而「身份冲突」按定义
+        // 不可能发生在第一条。写入点用 `unreachable!` 说了同一件事，SQL 这一侧也保留。
+        let expected_identity: BTreeSet<String> = stored
+            .iter()
+            .filter(|code| **code != "identity_conflict")
+            .map(|code| (*code).to_owned())
+            .collect();
+        let expected_receipt: BTreeSet<String> =
+            stored.iter().map(|code| (*code).to_owned()).collect();
+
+        for (constraint, column, expected) in [
+            (
+                "collection_command_identity_reason_codes_ck",
+                "first_reason_code",
+                &expected_identity,
+            ),
+            (
+                "collection_command_receipt_reason_codes_ck",
+                "reason_code",
+                &expected_receipt,
+            ),
+        ] {
+            // **最后一条说了算**。`0065` 写下的那份列表按今天的词表看是**过时的**，而它必须
+            // 保持原样（migration 是 append-only，改已应用的文件只会让「仓库里的」与「库里的」
+            // 变成两份东西）；在库上真正生效的是最后提到它的那一条。所以这里比的是最终态，
+            // 不是「每个提到它的文件都写得对」——后者会把历史文件也算成错的。
+            let mut latest: Option<(PathBuf, BTreeSet<String>)> = None;
+            for path in &files {
+                let text = std::fs::read_to_string(path).expect("迁移文件可读");
+                if !text.contains(constraint) {
+                    continue;
+                }
+                let marker = format!("ADD CONSTRAINT {constraint}");
+                let added = text.find(&marker).unwrap_or_else(|| {
+                    panic!(
+                        "{} 提到了 {constraint}，却没有把它建立起来",
+                        path.display()
+                    )
+                });
+                let head = format!("CHECK ({column} IN (");
+                let open = text[added..].find(&head).unwrap_or_else(|| {
+                    panic!(
+                        "{} 里的 {constraint} 不是 {column} 的 IN 清单",
+                        path.display()
+                    )
+                }) + added
+                    + head.len();
+                let close = open
+                    + text[open..]
+                        .find("));")
+                        .expect("CHECK 清单有收尾");
+                let listed: BTreeSet<String> = text[open..close]
+                    .split(',')
+                    .map(|piece| piece.trim().trim_matches('\'').to_owned())
+                    .filter(|piece| !piece.is_empty())
+                    .collect();
+                latest = Some((path.clone(), listed));
+            }
+            let (latest_path, listed) =
+                latest.unwrap_or_else(|| panic!("没有任何一条迁移建立过 {constraint}"));
+            assert_eq!(
+                listed,
+                *expected,
+                "最后一条写 {constraint} 的迁移是 {}，它的词表与本域词表不一致：多了 {:?}，少了 {:?}\
+                 （这份词表只有一个来源：代码侧加了码，就欠一条把 CHECK 一起放宽的迁移；\
+                 反过来，若多出来的是迁移侧手抄进去的，就欠一次代码侧登记）",
+                latest_path.display(),
+                listed.difference(expected).collect::<Vec<_>>(),
+                expected.difference(&listed).collect::<Vec<_>>(),
+            );
+        }
     }
 }

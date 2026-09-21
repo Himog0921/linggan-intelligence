@@ -11,7 +11,7 @@ const projectRoot = path.resolve(__dirname, '..');
 test('task-state hot paths import TASK_STATE instead of hard-coding UI task states', () => {
   const positiveFiles = [
     'src/content/commentImageTask.js',
-    'src/content/douyinBatchMessageHandlers.js',
+    'tests/historical/douyinBatchMessageHandlers.js',
     'src/content/xhsPageController.js',
     'src/content/components/TaskControlBar.jsx',
     'src/shared/taskUi.js',
@@ -28,7 +28,7 @@ test('task-state hot paths import TASK_STATE instead of hard-coding UI task stat
 
   const noLegacyDoneComparisons = [
     'src/content/commentImageTask.js',
-    'src/content/douyinBatchMessageHandlers.js',
+    'tests/historical/douyinBatchMessageHandlers.js',
     'src/content/xhsPageController.js',
   ];
 

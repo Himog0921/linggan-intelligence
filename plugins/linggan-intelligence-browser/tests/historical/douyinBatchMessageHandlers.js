@@ -1,7 +1,7 @@
-import { MSG, COMMENT_DEPTH_MODE, TASK_STATE } from '../shared/constants.js';
-import { sendToBackground } from '../shared/messaging.js';
-import { isPausedTaskState, resolveTaskState } from '../shared/taskUi.js';
-import { hasExplicitXhsSearchFilters, normalizeXhsSearchFilters } from '../platforms/xhs/searchFilters.js';
+import { MSG, COMMENT_DEPTH_MODE, TASK_STATE } from '../../src/shared/constants.js';
+import { sendToBackground } from '../../src/shared/messaging.js';
+import { isPausedTaskState, resolveTaskState } from '../../src/shared/taskUi.js';
+import { hasExplicitXhsSearchFilters, normalizeXhsSearchFilters } from '../../src/platforms/xhs/searchFilters.js';
 
 const XHS_FILTERED_REMOTE_STARTUP_TIMEOUT_MS = 30_000;
 

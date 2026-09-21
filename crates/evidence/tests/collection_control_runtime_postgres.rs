@@ -143,6 +143,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0098_scheduler_tick_steps_and_readiness.sql"),
     "\n",
     include_str!("../../../database/migrations/0099_collection_selector_health.sql"),
+    include_str!("../../../database/migrations/0100_collection_hot_path_indexes.sql"),
+    include_str!("../../../database/migrations/0101_collection_command_reason_vocabulary.sql"),
 );
 
 #[tokio::test]
@@ -559,27 +561,41 @@ async fn paused_target_queues_person_observation_while_dismissed_target_is_rejec
     .expect("manual observation rule side effects are inspectable");
     assert_eq!(rule_revisions, 0);
 
-    let unauthorized = seed_target(&database, "keyword", "paused", "manual-unauthorized").await;
+    // 关键词目标先过「归档完整性能不能读」这一关，再谈授权。本夹具登记的迁移里**没有**
+    // 这一关要读的四个关系所属的那四条（`0041` 的 `cross_industry_sample`、
+    // `0073` 的 `cross_industry_sample_observation`、`0079` 的 `cross_industry_sample_detail`、
+    // `0074` 的 `collection_work_order_cross_industry_target`），所以这里读到的是「读不出」，
+    // 拒绝发生在归档闸门，**根本没走到授权那一步**。
+    //
+    // （此前这里写作「迁移窗口到 `0038` 为止」——不准确：清单登记到 `0101`，只是中间缺了这四条。
+    // 实体结论不变，但说法要跟清单对得上。）
+    //
+    // 这条以前记的是 `database_unavailable`：那时原因码由一条 `_ =>` 兜底，任何没被逐个
+    // 命名的失败都被算成「数据库不可用」。现在每种失败都有自己的名字，于是一条库本身好着、
+    // 只是缺表的请求会如实说成 `schema_unavailable`——这正是要区分的两件事：前者该重试，
+    // 后者重试也不会变好。
+    let unreadable_archive =
+        seed_target(&database, "keyword", "paused", "manual-unreadable-archive").await;
     let refused =
-        apply_monitor_rule_command(&database, &manual_observe(unauthorized, Uuid::new_v4()))
+        apply_monitor_rule_command(&database, &manual_observe(unreadable_archive, Uuid::new_v4()))
             .await
-            .expect("authorization refusal returns a durable receipt");
+            .expect("a refusal at the archive gate returns a durable receipt");
     assert_eq!(refused.outcome, MonitorCommandOutcomeKind::Rejected);
-    assert_eq!(refused.reason_code, "database_unavailable");
+    assert_eq!(refused.reason_code, "schema_unavailable");
     assert!(refused.work_order_ref.is_none());
     assert!(refused.lease_ref.is_none());
     assert!(refused.applied_rule_revision_ref.is_none());
     let refused_facts: (i64, i64, i64) = sqlx::query_as(
         "SELECT \
            (SELECT count(*) FROM collection_monitor_rule_command_receipt \
-             WHERE command_receipt_ref=$1 AND reason_code='database_unavailable'), \
+             WHERE command_receipt_ref=$1 AND reason_code='schema_unavailable'), \
            (SELECT count(*) FROM collection_work_order WHERE target_ref=$2), \
            (SELECT count(*) FROM collection_work_order_lease lease \
              JOIN collection_work_order work_order USING(work_order_ref) \
              WHERE work_order.target_ref=$2)",
     )
     .bind(refused.receipt_ref)
-    .bind(unauthorized)
+    .bind(unreadable_archive)
     .fetch_one(database.pool())
     .await
     .expect("refused receipt and execution absence are inspectable");

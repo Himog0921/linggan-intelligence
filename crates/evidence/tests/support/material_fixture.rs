@@ -212,6 +212,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../../database/migrations/0098_scheduler_tick_steps_and_readiness.sql"),
     "\n",
     include_str!("../../../../database/migrations/0099_collection_selector_health.sql"),
+    include_str!("../../../../database/migrations/0100_collection_hot_path_indexes.sql"),
+    include_str!("../../../../database/migrations/0101_collection_command_reason_vocabulary.sql"),
     "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ",
     "('0025_comment_current_projection', '64fd9474647834358f8d2d4f1c25e4345e26a3ff79dbfc53a7846915576b0885'), ",
@@ -245,7 +247,9 @@ const MIGRATIONS: &str = concat!(
     "('0096_detail_page_session_lane_delivery_identities', '5bca0b9c770f16ebeed7f510fa0080e7cde07687dfb11bc485fe6b9da8d462eb'),\n",
     "('0097_collection_execution_input_eligibility', 'fde9a03309bcad985bc20ba0e4a38b1c9a6f9927c0902c2ed1df3a65f77f5b2e'),\n",
     "('0098_scheduler_tick_steps_and_readiness', '1933b8978c73c094f8e41c04d119021c17a25483ba71c0d7751af7556e1ba310'), ",
-    "('0099_collection_selector_health', '31bd088d59d027abceceef3584aba221803795a576cda21cb462e1f5466baf4f');\n",
+    "('0099_collection_selector_health', '31bd088d59d027abceceef3584aba221803795a576cda21cb462e1f5466baf4f'), ",
+    "('0100_collection_hot_path_indexes', 'a26c7006e1c210f226ab8e432651b949f0456ca99055dc41df055b1e6a52dc6c'), ",
+    "('0101_collection_command_reason_vocabulary', 'fda3711ea7bb38af6bb5a6a28264a39ac0c04024aef3e6feeb931e07a9b074c1');\n",
 );
 
 pub fn coverage_layer(capability: &str, acquired: i64) -> serde_json::Value {
