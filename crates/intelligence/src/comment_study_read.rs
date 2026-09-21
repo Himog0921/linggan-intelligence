@@ -104,6 +104,23 @@ pub async fn read_overview(
                          JOIN linggan_comment_study_signal signal USING(signal_ref) \
                          JOIN linggan_comment_study_target target USING(target_ref) \
                          WHERE target.run_ref=run.run_ref GROUP BY resolution.state) grouped),'{}'::jsonb), \
+                 'semanticSummary',COALESCE((WITH attempts AS ( \
+                    SELECT attempt.target_ref,attempt.attempt_ordinal,attempt.state,attempt.rejection_code,attempt.model_invocation_ref \
+                    FROM linggan_comment_study_semantic_attempt attempt \
+                    JOIN linggan_comment_study_target target USING(target_ref) \
+                    WHERE target.run_ref=run.run_ref \
+                  ), final_attempt AS ( \
+                    SELECT DISTINCT ON (target_ref) target_ref,state,rejection_code \
+                    FROM attempts ORDER BY target_ref,attempt_ordinal DESC \
+                  ) SELECT jsonb_build_object( \
+                    'modelInvocationCount',(SELECT count(DISTINCT model_invocation_ref) FROM attempts), \
+                    'semanticAttemptCount',(SELECT count(*) FROM attempts), \
+                    'firstAttemptAcceptedTargetCount',(SELECT count(*) FROM attempts WHERE state='accepted' AND attempt_ordinal=1), \
+                    'retryRecoveredTargetCount',(SELECT count(*) FROM (SELECT target_ref FROM attempts WHERE state='accepted' GROUP BY target_ref HAVING min(attempt_ordinal)>1) recovered), \
+                    'finalSemanticContractFailureCount',(SELECT count(*) FROM final_attempt final JOIN linggan_comment_study_target target USING(target_ref) WHERE target.state='failed' AND final.rejection_code IN ('semantic_json_schema','semantic_contract','unsupported_problem_frame','semantic_batch_contract','semantic_target_missing')), \
+                    'finalEvidenceFailureCount',(SELECT count(*) FROM final_attempt final JOIN linggan_comment_study_target target USING(target_ref) WHERE target.state='failed' AND final.rejection_code IN ('evidence_not_contiguous','evidence_ambiguous')), \
+                    'acceptedEvidenceSpanMismatchCount',(SELECT count(*) FROM linggan_comment_study_signal signal JOIN linggan_comment_study_target target USING(target_ref) JOIN linggan_material_comment source ON source.material_ref=target.source_ref WHERE target.run_ref=run.run_ref AND substring(source.body_text FROM signal.evidence_start+1 FOR signal.evidence_end-signal.evidence_start)<>signal.evidence) \
+                  ) ),'{}'::jsonb), \
                  'problemMembershipCount',(SELECT count(*) FROM linggan_comment_study_problem_membership membership \
                     JOIN linggan_comment_study_signal signal USING(signal_ref) \
                     JOIN linggan_comment_study_target target USING(target_ref) WHERE target.run_ref=run.run_ref) \

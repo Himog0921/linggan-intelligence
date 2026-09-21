@@ -6,7 +6,7 @@
 > 事实来源: DEC-0006、Mog 明确 reset 范围、现行 Evidence schema、提交前审查
 > 冲突时以谁为准: 用户最新决定、AGENTS.md、真实代码/数据库/测试
 
-> 当前阶段: Card 1–5、读取 API/UI、受限真实模型 adapter 与本机评论研究派生层 reset 均已完成并发布；P3 的真实质量出口仍未验证。当前专属候选只修复 StudySource 的作品作者声音排除，尚未合并或部署。
+> 当前阶段: Card 1–5、读取 API/UI、受限真实模型 adapter 与本机评论研究派生层 reset 均已完成并发布。当前专属候选将 setup 预览与 Target 冻结收敛到同一 StudySource gate，并补充运行中的语义/证据计数；P3 的真实质量出口仍未验证，候选尚未合并或部署。
 
 ## Reset 边界
 
@@ -28,9 +28,9 @@
 1. **已完成**：建立 reset receipt 与新的 `linggan_comment_study_*` schema，并移除旧 V1 模块的活跃路径后启用本机 reset/init。
 2. **已完成**：建立 source/work/context 查询，并以 ADHD、as-of、restriction、withdrawn OCR、父回复语境和作品作者声音排除的隔离 PostgreSQL 反例钉住。
 3. **已完成**：建立按作品选择、评论预算、同篇 batch semantic invocation 与输出接纳，以及受限真实模型 adapter、读取 API/UI 和本机发布路径。
-4. **已完成实现，真实质量出口未验证**：Problem resolution 只接受双独立证据；Embedding/FTS 候选召回已接入，但没有合格 embedding profile 时必须如实返回 `retrieval_incomplete`，不能判定新问题。真实模型端到端成功、Recall@K 和 P3 出口仍未验证。
+4. **已完成实现，真实质量出口未验证**：Problem resolution 只接受双独立证据；Embedding/FTS 候选召回已接入，但没有合格 embedding profile 时必须如实返回 `retrieval_incomplete`，不能判定新问题。当前私有 Gold Set 只含经授权的双代理交叉标注 spot check（1 正例、2 hard negative、1 unknown），不等同于 Recall@K 通过；真实模型端到端成功、完整 Recall@K 和 P3 出口仍未验证。
 5. **已完成**：替换旧 Rust/API/UI/worker 活跃路径，并在不迁移旧评论研究结果的前提下完成本机 reset；下一次干净真实运行仍须在当前作者声音排除修复发布后由 Mog 验收。
 
 ## 非目标
 
-本次作者声音排除候选不调用真实模型、不自动清库、不应用共享 migration、不部署、不合并 main；它不替代下一次干净样本的人工真实验收。
+本次候选不自动清库、不应用共享 migration、不修改连续排程；真实模型回放、合并、部署和 Mog 前端验收必须分别以实际回执报告，不得由这份计划或隔离证明替代。
