@@ -58,8 +58,11 @@ mod qualified_detail;
 mod queue_position;
 mod receipt;
 mod runtime_capacity;
+mod runtime_event;
 mod runtime_readiness;
+mod scheduler_tick;
 mod station_read;
+mod step_report;
 mod target_catalog;
 mod target_enrichment;
 mod target_inspector;
@@ -173,9 +176,10 @@ pub use observation_summary::{
     PatrolReadState, TargetObservationSummary, read_target_observation_summaries,
 };
 pub use patrol_scheduler::{
-    PatrolTickSummary, SchedulerHeartbeat, patrol_schema_is_ready, read_dynamic_cadence_for_rule,
-    read_scheduler_heartbeat, record_scheduler_started, run_due_patrols, set_group_for_many,
-    set_monitoring_for_many, set_target_monitoring, target_monitoring_enabled,
+    PatrolStepError, PatrolTickSummary, SchedulerHeartbeat, patrol_schema_is_ready,
+    read_dynamic_cadence_for_rule, read_scheduler_heartbeat, record_scheduler_started,
+    run_due_patrol_step, run_due_patrols, set_group_for_many, set_monitoring_for_many,
+    set_target_monitoring, target_monitoring_enabled,
 };
 pub use producer_runtime::{
     MediaBlobAdmission, MediaUploadFinalizeClaim, MediaUploadSession, ProducerRuntimeError,
@@ -191,10 +195,19 @@ pub use runtime_capacity::{
     MonitorRuleSchedule, PatrolOutlook, PlatformDispatchCapacity, RuntimeCapacityOverview,
     read_runtime_capacity,
 };
+pub use runtime_event::{
+    EVENT_FIELD_WHITELIST, EVENT_READINESS, EVENT_STARTUP, EVENT_TICK, EVENT_TICK_STEP,
+    RuntimeEvent, SERVICE_MEDIA_WORKER, SERVICE_WORKER, runtime_revision,
+};
 pub use runtime_readiness::{
     COLLECTION_RUNTIME_REQUIREMENTS, READINESS_RETRY_START, ReadinessState, RuntimeReadiness,
     RuntimeRequirements, connect_runtime_readiness, next_readiness_retry, probe_runtime_readiness,
 };
+pub use scheduler_tick::{
+    STEP_KEYWORD_DETAILS, STEP_MEDIA_ACQUISITION, STEP_PATROL, STEP_PROGRESSIVE_DOSSIERS,
+    TICK_STEP_KEYS, TickLedger, record_readiness, tick_outcome,
+};
+pub use step_report::{StepFailure, StepOutcome, StepReport};
 pub use station_read::{
     CapabilityState, StationCapability, StationOverview, UnclaimedInstallation,
     read_station_capabilities, read_station_overview, station_daily_note_usage,

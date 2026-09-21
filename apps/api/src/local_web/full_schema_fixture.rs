@@ -190,6 +190,8 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
         "../../../../database/migrations/0097_collection_execution_input_eligibility.sql"
     ),
     "\n",
+    include_str!("../../../../database/migrations/0098_scheduler_tick_steps_and_readiness.sql"),
+    "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES\n",
     "('0001_scope_001_capture_evidence', 'a0deb8d5bf6cbd3bc0b8343691167fe02170abe7469f7ba270017dada442cd98'),\n",
     "('0002_local_001_discovery', '26ae29e0e00bddd2804aebc5576e8868936af746858e61cc24769579333ecdbe'),\n",
@@ -246,5 +248,6 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "('0094_corpus_evidence_read_recovery', '5557cd2dfa4b48426caa230d72742b56d5dd7bc5f85ca53acc953aec1b57fd4b'),\n",
     "('0095_detail_page_url_rejection', '8daf8717a6eb55887dd4b83f92f1c79c93b7a42156e272bc04ceacb112797eb8'),\n",
     "('0096_detail_page_session_lane_delivery_identities', '5bca0b9c770f16ebeed7f510fa0080e7cde07687dfb11bc485fe6b9da8d462eb'),\n",
-    "('0097_collection_execution_input_eligibility', 'fde9a03309bcad985bc20ba0e4a38b1c9a6f9927c0902c2ed1df3a65f77f5b2e');\n",
+    "('0097_collection_execution_input_eligibility', 'fde9a03309bcad985bc20ba0e4a38b1c9a6f9927c0902c2ed1df3a65f77f5b2e'),\n",
+    "('0098_scheduler_tick_steps_and_readiness', '1933b8978c73c094f8e41c04d119021c17a25483ba71c0d7751af7556e1ba310');\n",
 );

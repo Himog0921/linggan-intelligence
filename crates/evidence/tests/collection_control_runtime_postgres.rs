@@ -139,6 +139,10 @@ const MIGRATIONS: &str = concat!(
     ),
     "\n",
     include_str!("../../../database/migrations/0097_collection_execution_input_eligibility.sql"),
+    "\n",
+    include_str!(
+        "../../../database/migrations/0098_scheduler_tick_steps_and_readiness.sql"
+    ),
 );
 
 #[tokio::test]

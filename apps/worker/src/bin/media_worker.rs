@@ -20,9 +20,9 @@ use uuid::Uuid;
 mod media_worker_support;
 
 use media_worker_support::{
-    apply_ffmpeg_path, command_available, ensure_local_input, ffmpeg_command, first_text_file,
-    local_media_root, normalize_text, paddle_ocr_python, paddle_ocr_script, prepare_output,
-    require_success, run_command, sha256_hex, whisper_command, whisper_model,
+    apply_ffmpeg_path, command_available, emit_startup_event, ensure_local_input, ffmpeg_command,
+    first_text_file, local_media_root, normalize_text, paddle_ocr_python, paddle_ocr_script,
+    prepare_output, require_success, run_command, sha256_hex, whisper_command, whisper_model,
 };
 
 const TICK_INTERVAL: Duration = Duration::from_secs(5);
@@ -90,6 +90,9 @@ async fn main() -> ExitCode {
         eprintln!("linggan media worker: LINGGAN_LOCAL_DATABASE_URL is not set; refusing to start");
         return ExitCode::FAILURE;
     };
+    // 与巡检 worker 同一个启动事件（同一张字段表）：日志里带上 service 与 revision，
+    // 一次故障才能被钉到某一次部署上。
+    emit_startup_event();
     let database = connect_when_reachable(&url).await;
     let worker_instance_ref = Uuid::new_v4();
     let enabled_processors = enabled_processors();

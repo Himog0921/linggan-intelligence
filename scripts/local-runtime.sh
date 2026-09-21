@@ -269,6 +269,7 @@ migrate() {
   apply_migration_once "0095_detail_page_url_rejection" "$project_root/database/migrations/0095_detail_page_url_rejection.sql"
   apply_migration_once "0096_detail_page_session_lane_delivery_identities" "$project_root/database/migrations/0096_detail_page_session_lane_delivery_identities.sql"
   apply_migration_once "0097_collection_execution_input_eligibility" "$project_root/database/migrations/0097_collection_execution_input_eligibility.sql"
+  apply_migration_once "0098_scheduler_tick_steps_and_readiness" "$project_root/database/migrations/0098_scheduler_tick_steps_and_readiness.sql"
 }
 
 case "$command_name" in

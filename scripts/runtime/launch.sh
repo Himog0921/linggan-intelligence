@@ -33,6 +33,10 @@ set +a
 export LINGGAN_LOCAL_DATABASE_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:${POSTGRES_PORT}/${POSTGRES_DB}"
 export LINGGAN_LOCAL_MEDIA_ROOT="${LINGGAN_SUPPORT_DIR}/media"
 
+# 这次部署的身份文件（sync.sh 写、进程只读）。读不到时进程报 `unknown`，不拿别的东西冒充。
+: "${LINGGAN_RUNTIME_IDENTITY_PATH:=$LINGGAN_SUPPORT_DIR/runtime-identity.json}"
+export LINGGAN_RUNTIME_IDENTITY_PATH
+
 # 端口只对 API 有意义；worker 读到也无害。
 : "${LINGGAN_LOCAL_PORT:=3000}"
 export LINGGAN_LOCAL_PORT

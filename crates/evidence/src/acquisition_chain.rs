@@ -97,6 +97,17 @@ pub struct ProgressiveArchiveTickSummary {
     pub skipped: Vec<(Uuid, String)>,
 }
 
+impl ProgressiveArchiveTickSummary {
+    /// 这一步在账本上该怎么记。这一步不数「考虑过多少」——留空，不写 0 冒充。
+    pub fn step_outcome(&self) -> crate::step_report::StepOutcome {
+        crate::step_report::StepOutcome::Ok {
+            considered: None,
+            produced: Some(i64::try_from(self.queued.len()).unwrap_or(i64::MAX)),
+            skipped: Some(i64::try_from(self.skipped.len()).unwrap_or(i64::MAX)),
+        }
+    }
+}
+
 const PROGRESSIVE_ARCHIVE_VERSION: i32 = 1;
 const PROGRESSIVE_ARCHIVE_DIRECTORY_LIMIT: i32 = 200;
 const PROGRESSIVE_ARCHIVE_BATCH_SIZE: i64 = 3;

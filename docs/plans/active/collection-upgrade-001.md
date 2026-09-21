@@ -186,9 +186,18 @@ S4 运行诊断与就绪 → S5 有证据才优化 → S6 集成与历史处置�
 | 连得上但台账不在，必须报 `migration_ledger_unreadable`，不能当成可以接活（同上，`reachable_but_unmigrated_database_is_classified_not_masked`） | 把 `crates/evidence/src/runtime_readiness.rs` 里 `!ledger_present` 那一支的 `MigrationLedgerUnreadable` 换成 `Ready` | 用例在分类断言处变红（`startup_contract.rs:185`）：日志里没有那一行分类，取而代之的是 `linggan worker: patrol tick every 60s` 和随后的逐步骤失败（`media acquisition projection failed: media acquisition schema is unavailable`、`progressive dossier tick failed: acquisition chain schema is not applied`）——**一台根本接不了活的机器被说成「在跑、只是步骤不顺」**，这正是把「缺 schema」与「步骤失败」压成一句话的后果 |
 | 媒体 worker 连不上时必须在十秒内说出来（`unreachable_database_keeps_the_media_worker_retrying_instead_of_exiting`） | 去掉 `connect_when_reachable` 的 `tokio::time::timeout(CONNECT_ATTEMPT_BUDGET, …)`，直接 await 连接池（它自己会重试满 30 秒） | 用例在「连不上必须说出来」处变红（`startup_contract.rs:160`）：15 秒窗口内日志只有开场那一行（`linggan media worker: started; checking whether the local database is reachable`），`retrying with backoff instead of exiting` 一个字都没有——修前正是这个样子：整整半分钟与一台空闲机器无法区分 |
 
+| 失败/跳过的步骤行必须能收尾，且**没有计数**（T30，隔离 PostgreSQL `one_failing_step_is_recorded_alone_while_the_other_three_finish` 与 `a_step_whose_own_tables_are_missing_is_skipped_rather_than_failed`） | 把 `0098` 的三个计数列还原成修前写法 `integer NOT NULL DEFAULT 0`（CHECK 一并复原为只判 `>= 0`） | 两条用例同时变红，且失败形状正是这版要消灭的那种：三步各打一行 `linggan runtime: step … finished but its ledger row could not be closed: … null value in column "considered_count" … violates not-null constraint`，随后在 `step rows are readable` 处 `ColumnDecode UnexpectedNullError`（`outcome` 读出来是 NULL）。**写不进去的行留下来的是「开始了没收尾」，与真的被杀掉长得一样**——一个「看起来什么都没发生」的步骤行，正是本卡存在的理由 |
+| 一步失败必须染红整轮（T30，`one_failing_step_is_recorded_alone_while_the_other_three_finish`） | 从 `tick_outcome` 删掉「任一报告带 `error_class` 就返回 `failed`」那一段，让整轮只按巡查步的产出判 `idle` | 用例在收轮处变红（`scheduler_tick_postgres.rs:95`，`the tick closes in its ledger`）：`23514` —— `collection_scheduler_heartbeat_check1`（`0020` 的 `(last_outcome = 'failed') = (last_error IS NOT NULL)`）拒绝写入，失败行里正是 `last_outcome='idle'` 配 `last_error='media_acquisition:sqlstate_42703'`。**数据库是第二道闸**：把失败说成空闲的这一对内伤，账本根本不收 |
+| 步骤账本不在时不开轮（T30，`an_absent_step_ledger_opens_nothing_rather_than_a_half_recorded_tick`） | 把 `TickLedger::begin` 的探针从「run 表 **且** 步骤表都在」改成只探 run 表 | 用例在 `opened.is_none()` 处变红（`scheduler_tick_postgres.rs:295`）：账本不全时照样开了一行 run，随后四步都记不上——「跑了却记不上」比不跑更坏，也正是这一条要挡的 |
+| 结构化事件必须真的落在 stdout（T30，`unreachable_database_keeps_the_process_waiting_and_says_so` 末段） | 把 `RuntimeEvent::emit` 的 `println!` 换成 `eprintln!` | 用例在「未就绪时该有一行 readiness 事件」处变红（`startup_contract.rs:130`）：15 秒日志里一行可解析的事件都没有。白名单那条测试证明的是**定义**（字段闭集、每个字段都有生产者），这条证明它走到了 supervisor 看的那条流上——只改流向，白名单仍然全绿 |
+| 本来就受限形状的长标识必须留前缀，而不是被判成「没分类」（T30，`a_long_restricted_identifier_keeps_its_prefix_instead_of_vanishing`） | 去掉 `bounded_code` 的 `.take(32)`（改成 `take(usize::MAX)`） | 用例在「超长的受限标识留前缀」处变红：`left: "0098_scheduler_tick_steps_and_readiness" != right: "0098_scheduler_tick_steps_and_re"`。截断不是美化——账本的 `error_class` 列写死 `≤32`，不截就是写不进去 |
+| 数据库给的 SQLSTATE 大小写必须归一（同上用例第二处） | 去掉 `bounded_code` 的 `.map(\|c\| c.to_ascii_lowercase())` | 用例在「SQLSTATE 是大写，词表一律小写」处变红：`left: "42P01" != right: "42p01"`——同一件事在事件里是 `42P01`、在账本里是 `42p01`，两处读者会当成两个类别 |
+
 十六次变异均已还原（前两次 S1a、四次 S1b、两次 S2、三次 S3、两次 S3c、三次 S4a）。S3c 的两次变异都从 `crates/evidence/src/collection_task_read.rs` 还原：两处都是逐字对照原句反向替换（终态分支回到第一条、计数回到 `receipt.receipt_ref`），还原后 `grep -n "count(lane.attempt_id)"` 为 0 命中、匹配臂顺序与原句一致，两条 S3c 用例重新变绿。S3 的三次变异分别从 `execution_input_eligibility.rs`（两次）与 `target_drawer.rs`（一次）还原：还原后逐一 `grep` 变异标记（`false &&`／`if false`／写错的那两支文案）为 0 命中，`git diff` 回到变异前的内容，两条证据用例与页面用例重新变绿。S1b 的还原用还原前快照逐字节核对：`execution_input_eligibility.rs` sha256 `6408147952b274a9a7ae8f180fb53eaaf37362383177fa30355f31377fba43ab`、`0097` 最终 sha256 `83a8a99362df528217ac7473c102ca8c42f6f8beb3b76b9e195f95451ddac3b7`（已同步进 `material_fixture` 与 `full_schema_fixture` 两处账本）、`dispatch.rs` 变异前后同为 sha256 `5b54d0395180ea385150dff4b60fa608083ff334319a21ecb57d7b2dbab1c6b0`。T28① 的变异同样从 `dispatch.rs` 还原，之后该文件 sha256 仍为 `5b54d039…`（两次变异都是逐字节还原）。S2 的两次变异从 `acquisition_chain.rs` 还原：变异前快照存于 `/tmp/acquisition_chain_s2_pre_mutation.rs`，还原后 `grep -c MUTATION` = 0 且 sha256 与变异前同为 `3e4f14e56f7b5b2e08152dbb96e009bee48e701911d6f08a2fc770b4e8fedd43`（逐字节）。各阶段还原后：S1b 的 `keyword_archive_postgres` **16 passed / 0 failed**、`collection_dispatch_sequence_postgres` **27 passed / 0 failed**；S2 的 `collection_dispatch_sequence_postgres` **32 passed / 0 failed**、`observation_target_dossier_postgres` **23 passed / 0 failed**，`cargo check --workspace --all-targets --locked` 通过。源码冻结后的干净全套（`./scripts/test-local-001-discovery-postgres.sh`，20 目标）**231 passed / 0 failed**，容器/卷/库自建自清。
 
 S3c 两次变异还原后：`collection_dispatch_sequence_postgres` **34 passed / 0 failed**（新增两条）、`content_reobservation_postgres` **4 passed / 0 failed**、`linggan-api` 二进制内 `--ignored` **23 passed / 0 failed**；`cargo check --workspace --all-targets --locked` 通过。S3c 源码冻结后的干净全套（20 目标）**234 passed / 0 failed**，容器/卷/库自建自清——这一跑同时补上了 S3b 记录里被宿主磁盘写满打断的那次重跑（当时第 20 个目标 7 例 `57P03 in recovery mode` 未计入结论）。
+
+S4b 的六次变异分别落在 `database/migrations/0098_…sql`（一次，SQL 层）、`crates/evidence/src/scheduler_tick.rs`（两次）、`crates/evidence/src/runtime_event.rs`（三次），还原前快照存于 `/tmp/scheduler_tick.rs.orig` 与 `/tmp/runtime_event.rs.orig`（限码那两次另存 `/tmp/runtime_event.rs.pre_bounded`）。还原后：`0098` 的 sha256 回到 `1933b8978c73c094f8e41c04d119021c17a25483ba71c0d7751af7556e1ba310`（与 `material_fixture` / `full_schema_fixture` 两处登记逐字一致），两个 `.rs` 文件逐字节还原（按还原前快照 `cp` 回去；**注意此处的教训**：这两个文件在本步尚未提交，`git diff` 对未跟踪文件恒为空，因此不能用它当还原凭据，只能按快照逐条比对断言），`grep -rn "MUTATION" apps crates database scripts` 为 0 命中；`cargo test -p linggan-evidence --test scheduler_tick_postgres --locked -- --ignored --test-threads=1` 重新 **4 passed / 0 failed**，`cargo test -p linggan-worker --test startup_contract --locked` 重新 **4 passed / 1 ignored**，`cargo test -p linggan-evidence --lib --locked` 重新 **79 passed / 0 failed**。**两处如实记录的发现**：`0098` 的三个计数列在本步**曾经是错的**（`NOT NULL DEFAULT 0`），是 T30 的新用例在第一次跑时就抓出来的——失败与跳过的行写不进去，留下的 `outcome` 是 NULL，恰好把「这一步崩了」伪装成「这一步开始了没收尾」，也就是本卡要消灭的那个东西；`bounded_code` 原本把散文按字符挑成一个「码」（详见 §10.9 S4b），单测在第一次跑 `--lib` 时变红——这两处都记在该节的「两处如实记录的发现」里，不是我事后自查的结论。**另一处更正**：§10.4 原先举的跳过原因例子 `not_ready` 在实现里没有生产者（真实生产者只有 `schema_unavailable`，即这一步自己的表不在），已按实现改掉——计划里写一个没人生产的码，正是这张表要防的错。
 
 S4a 的三次变异分别落在 `apps/worker/src/main.rs`、`crates/evidence/src/runtime_readiness.rs`、`apps/worker/src/bin/media_worker.rs`（上表三条，逐字还原）。还原后 `grep -rn "MUTATION" apps crates --include="*.rs"` 为 0 命中，`cargo test -p linggan-worker --test startup_contract --locked` 重新 **4 passed / 1 ignored**（15.01s，`--ignored` 那条走证明库）。**一处如实记录的观察**：在「不可达端口」这一实测条件下，未就绪日志里的 `detail` 落在 `probe_timeout`（十秒没问到），不是 `connect_failed`——sqlx 连接池对被拒绝的连接会自己重试满 30 秒，所以「立刻失败」那条分支很少先到达。两者都归 `database_unreachable`，用例只钉分类码（`not ready (database_unreachable`），不钉它后面跟哪一个。
 
@@ -403,7 +412,8 @@ S4a 的三次变异分别落在 `apps/worker/src/main.rs`、`crates/evidence/src
 |---|---|---|
 | tick 跑了、这一步有产出 | 步骤行 `outcome='ok'` + 计数 | `collection_scheduler_run_step` |
 | tick 跑了、这一步失败 | 步骤行 `outcome='failed'` + 受限 `error_class` | 同上；心跳 `last_outcome='failed'` |
-| tick 跑了、这一步没轮到 | 步骤行 `outcome='skipped'` + 受限原因（如 `not_ready`） | 同上；**不再与「本轮 0 个」混同** |
+| tick 跑了、这一步没轮到 | 步骤行 `outcome='skipped'` + 受限原因（今日的生产者只有一个：`schema_unavailable`——这一步自己的表不在） | 同上；**不再与「本轮 0 个」混同** |
+| 开始了但没有收尾（进程被杀 / 崩溃） | 步骤行 `outcome IS NULL`（`completed_at` 也为空） | 同上；**「未知」必须查得出来**，不许写成 `ok`，也不许写成默认的 0 |
 | 这台机器当前不能接活 | 心跳 `readiness_state <> 'ready'` | `collection_scheduler_heartbeat` + `/health.readiness` |
 
 **选择器诊断**（插件产出、服务端受限接收）：
@@ -456,7 +466,7 @@ S4a 的三次变异分别落在 `apps/worker/src/main.rs`、`crates/evidence/src
 
 ### 10.8 交接
 
-- **修改文件**：见各次提交的 `git show --stat`；核心新增为 `crates/evidence/src/runtime_readiness.rs`、`crates/evidence/src/runtime_event.rs`、`collection_scheduler_run_step` 与会话/心跳迁移、`scripts/runtime/{sync,launch,install}.sh`、插件 `src/shared/selectorHealth.js` 与 `src/popup/startupRecovery.js`、`apps/api/src/local_web.rs` 的 `/health`。
+- **修改文件**：见各次提交的 `git show --stat`；核心新增为 `crates/evidence/src/runtime_readiness.rs`、`crates/evidence/src/runtime_event.rs`、`crates/evidence/src/step_report.rs`（值：三值结局、受限码、`StepFailure` 对照表；从 `scheduler_tick.rs` 拆出，使两者各自在边界上限内）、`collection_scheduler_run_step` 与会话/心跳迁移、`apps/worker/src/{tick,shutdown,keyword_details}.rs`（四步组合入口，`main.rs` 只按顺序装）、`scripts/runtime/{sync,launch,install}.sh`、插件 `src/shared/selectorHealth.js` 与 `src/popup/startupRecovery.js`、`apps/api/src/local_web.rs` 的 `/health`。
 - **验证命令/走查**：`cargo check --workspace --all-targets --locked`；`./scripts/test-local-001-discovery-postgres.sh`（20 目标全套，容器/卷/库自建自清）；插件侧 `node --test tests/xhs-selector-health.test.mjs` 等由 `npm run test:linggan` 覆盖的用例。
 - **诊断样例与字段白名单**：落在 `docs/runbooks/local-runtime-deployment.md` 的「运行诊断」一节（样例为**手工构造的脱敏样例**，非运行抓取）并登记到 `docs/README.md`；本计划 §10.4 的表即字段白名单。
 - **规则或索引同步**：`docs/progress/2026-09.md` 记本次交付；迁移编号按 §3 的纪律在合并前重新 fetch 复核（本卡预期新增 `0098`/`0099`，撞号则整体顺延并同步六处登记）。
@@ -496,3 +506,42 @@ S4a 的三次变异分别落在 `apps/worker/src/main.rs`、`crates/evidence/src
 1. **媒体 worker 没有自己的就绪要求清单与分级**——本卡只给了它退出语义。它现在「连上就跑」；若它自己的表不在，失败按原样逐次报错。要不要给它同一套分级，是一次范围决定。
 2. **API 启动时连不上数据库会一直停在 `DatabaseUnavailable` 直到重启**（它不重连）；这种情况下 `/health.readiness` 报的是启动时的结论，`checkedAt` 为空即表示「问不到时钟」。要不要给 API 加同一条退避重连，是另一次范围决定。
 3. **模型循环「不受采集面闸约束」这条决定目前只有代码注释与本记录**，没有测试锚定（进程日志里没有可观察的启动行）；S4b 给心跳加就绪列后它会有可见落点，届时补断言。
+
+#### S4b（T30）— 已完成（2026-09-21；本地提交，未推送、未部署、未应用共享库迁移）
+
+- **一轮 tick 一个 run，四步各一行**：`TickLedger::begin` 先写 run 行与心跳起点（run 行故意不写结局——被杀在半路的那一轮就是 `outcome IS NULL`，「有一轮没跑完」自己看得出来），四步各走 `run_step`：先记「开始了」，跑完补结果。表 `collection_scheduler_run_step`（`0098`）是 run 的**子表**，`UNIQUE (scheduler_run_ref, step_key)`——不是第二套巡检账本。
+- **三种结局 + 未完成态**：`ok`（带计数）/ `failed`（受限 `error_class`）/ `skipped`（受限 `skipped_reason`，今日唯一生产者是 `schema_unavailable`：这一步自己的表不在）/ NULL（开始了没收尾）。计数可空，**只有 `ok` 带**：0 是「数过了，是零」，不能拿它冒充「没数过」；这条由数据库的 CHECK 判，不靠写代码的人记得。受限码的字符集写死在 `[a-z0-9_]{1,32}`：报文、连接串、选择器串、页面文本都没有能通过这道 CHECK 的形状。
+- **失败隔离**：一步失败只染红那一步，其余三步照常收尾；整轮按「有一步失败就是失败」记账（`tick_outcome` 一个定义两个读者：收轮写行 + worker 发事件），心跳的 `last_error` 只记 `步骤:分类`（如 `media_acquisition:sqlstate_42703`）。
+- **结构化事件**：新模块 `crates/evidence/src/runtime_event.rs`——字段闭集（`EVENT_FIELD_WHITELIST`，每条必须有生产者，测试断言集合精确相等）、`reason`/`error_class` 走全仓唯一的受限码转换、`ts` 是**进程时钟**（与就绪判定的数据库时钟分开标注，不互相冒充）、`emit` 写 stdout 一行 JSON。媒体 worker 补上 startup 事件后，白名单里不再有「登记了却没人生产」的常量。
+- **worker 组合入口拆薄**：`main.rs` 只按顺序装（172 行，入口点硬上限 200；拆之前 237 行），tick 四步在 `tick.rs`、关停在 `shutdown.rs`、关键词建档在 `keyword_details.rs`。步骤名与受限码只有一处定义。
+- **部署脚本**：`sync.sh` 把构建输出另落 `<support>/runtime-build/sync-build.log`——日志主体从这一版起是结构化事件，一行 cargo 警告混进去就要靠猜；失败时抄最后 20 行回服务日志。迁移头按 `ORDER BY migration_id` 取最后一行（写进身份文件）。身份文件**先写临时文件再原子改名**：三个服务会同时启动读它，读到半个 JSON 会报 `unknown`，看起来像「刚部署完却看不出 revision」。`launch.sh` 导出 `LINGGAN_RUNTIME_IDENTITY_PATH`。
+- **迁移登记与就绪耦合**：`0098` 登记进 `scripts/local-runtime.sh migrate`（本仓唯一的应用入口）与两处夹具台账哈希，并同时进了 `COLLECTION_RUNTIME_REQUIREMENTS`（迁移 id + 新表名）。含义是**先应用、后部署**：只换二进制不应用迁移，worker 会报 `migration_missing`、保持未就绪、一个 tick 步骤都不跑——不会半写，也不会假装在跑。这条顺序是 S6 的部署与回滚说明必须带上的约束。
+- **两个新模块的分工**：`scheduler_tick.rs`（账本：开轮 / 跑一步 / 收轮 / 就绪落点）与 `step_report.rs`（值：三值结局、受限码、`StepFailure` 对照表）。拆分的直接原因是边界检查——一个文件一度 535 行、撞上 500 行硬上限；拆完两个都在限内，`scheduler_tick.rs` 的公开面也回到告警线以下（`run_step` 是跑一步的唯一入口，`step_started`/`record_step` 收为私有：「开始」与「收尾」是配对的两笔，不该由调用方各写一半）。
+
+**证据**（本机隔离 PostgreSQL 16 证明库；不代表 CI 或线上）：
+
+| 命令 | 结果 |
+|---|---|
+| `cargo test -p linggan-evidence --test scheduler_tick_postgres --locked -- --ignored --test-threads=1` | 4 passed（一步失败其余三步照跑且各有结果 / 自己的表不在算「没轮到」不算失败 / 步骤账本不在就不开轮 / 就绪落心跳而不动 tick 列） |
+| `cargo test -p linggan-worker --test startup_contract --locked` | 4 passed / 1 ignored（新增：未就绪时 stdout 上真的有一行可解析的 `readiness` 事件，字段全在白名单内） |
+| `cargo test -p linggan-worker --test startup_contract --locked -- --ignored` | 1 passed（连得上、台账不在 → `migration_ledger_unreadable`） |
+| `cargo test -p linggan-evidence --test runtime_readiness_postgres --locked -- --ignored` | 5 passed（S4a 的用例在 `bounded_code` 改动后重跑仍绿） |
+| `cargo test -p linggan-evidence --lib --locked` | 79 passed（含受限码三条：散文不成码 / 超长标识留前缀 / SQLSTATE 大写折小写） |
+| `cargo test --workspace --lib --locked` | 155 passed / 0 failed（19+1+79+56） |
+| `cargo check --workspace --all-targets --locked` | 通过（warning 均为既有 dead-code） |
+| `./scripts/check-rust-boundaries.sh` | 61 error(s) / 26 warning(s)：全部落在**修前就已超限**的既有文件上（含本步改过、但修前已超限的 4 个）；本步两个新文件均不触发 |
+
+**未证明边界**：真实 launchd 下的重启节流行为（本机 plist 未重装，同 S4a）；`./scripts/test-local-001-discovery-postgres.sh` 全套尚未整体重跑（新增目标 `scheduler_tick_postgres` 已登记，S6 串证时跑一次全量）；真实浏览器在途任务与 tick 的并发时序（§10.7 同注）；**行量**——一 tick 一行 run + 四行步骤 ≈ 每分钟 5 行（约 7 200 行/天），保留与清理策略不在本卡（见挂账）。
+
+**两处如实记录的发现**（都是本步第一次跑到就变红、按缺陷修掉的，不是事后自查）：
+
+1. **`0098` 的三个计数列原本是 `NOT NULL DEFAULT 0`**，与 `TickLedger::record_step` 对失败/跳过写 NULL 直接冲突：失败与跳过的步骤行**根本写不进去**，留下的 `outcome` 是 NULL——也就是「这一步开始了没收尾」，恰好是本卡要消灭的那个东西。修正为三列可空 + 一条 CHECK（`outcome='ok' OR 三个都空`），重算 sha256 并重登记两处夹具（`0098` 当时未提交、只在一次性证明库上应用过，是更正而非改写历史）。
+2. **`bounded_code` 原本把任意字符串按字符挑成「码」**：`failed to fetch https://x.test/a?token=secret` 会被过滤成 `failedtofetchhttpsxtestatoken`——一个谁也不曾说过的「原因码」，还把那段文字里的词带进了落盘的事实。单测 `reasons_are_bounded_codes_not_text` 在第一次跑 `--lib` 时变红（此前只跑过 `--test`，这条一直没被执行到）。按断言的意图修实现：只接受字母数字下划线（大写折小写、超长留前缀），其余一律 `unclassified`。
+
+**更正 S4a 记录里的一处读数**：S4a 写的「62 error(s)，均为既有」当时把本步新文件的超限一并计了进去。把新文件的超限消掉之后读数是 **61 error(s) / 26 warning(s)**——那才是既有事实。
+
+**挂账（报给 Mog，不在本卡自行处置）**：
+
+1. **步骤表与 run 表的保留策略**：≈7 200 行/天，本卡不加清理。给 tick 加保留窗口，还是接受持续增长，是产品决定。
+2. **S4a 挂账 3（模型循环不受采集面闸门约束缺测试锚定）仍未闭合**：就绪列已按预告落在心跳上，但断言要同时具备「迁移完整、可写心跳的库」与「真的 worker 进程」，今天两个夹具各占一半（worker 的进程夹具只有一个未迁移的库；迁移完整的夹具在 evidence crate 里、没有进程）。补它要新建一个两边都具备的夹具，属独立范围决定。
+3. S4a 挂账 1 / 2（媒体 worker 没有自己的就绪分级、API 启动连不上不重连）本步未动，仍开着。

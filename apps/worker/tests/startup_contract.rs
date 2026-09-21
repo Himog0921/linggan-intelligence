@@ -1,4 +1,4 @@
-//! 巡检 worker 的启动与退出语义（COLLECTION-UPGRADE-001 · S4a · 验收行 T29）。
+//! 巡检 worker 的启动与退出语义（COLLECTION-UPGRADE-001 · S4a/S4b · 验收行 T29/T30）。
 //!
 //! 这一组测的是**进程**而不是函数：判据落在退出码与启动日志上——正是 supervisor 和看日志的
 //! 人真正能看到的那两样东西。改之前这两条路都是干净的退出（`main` 返回 `()` 就是退出码 0），
@@ -116,6 +116,28 @@ fn unreachable_database_keeps_the_process_waiting_and_says_so() {
         !log.contains("patrol tick every"),
         "未就绪期间不进入任何 tick 步骤：{log}"
     );
+
+    // 人读的散文行之外，stdout 上还要有一行机器读的事件。白名单那条测试证明的是**定义**
+    // （字段是闭集、每个字段都有生产者），这一条证明它真的走到了 supervisor 看的那条流上：
+    // 事件一旦悄悄换成 stderr 或换掉字段名，白名单仍然是绿的。
+    let events: Vec<serde_json::Value> = log
+        .lines()
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .collect();
+    let readiness_event = events
+        .iter()
+        .find(|event| event["event"] == linggan_evidence::EVENT_READINESS)
+        .unwrap_or_else(|| panic!("未就绪时该有一行 readiness 事件：{log}"));
+    assert_eq!(readiness_event["service"], linggan_evidence::SERVICE_WORKER);
+    assert_eq!(readiness_event["outcome"], "database_unreachable");
+    for event in &events {
+        for key in event.as_object().expect("事件是一行 JSON 对象").keys() {
+            assert!(
+                linggan_evidence::EVENT_FIELD_WHITELIST.contains(&key.as_str()),
+                "事件字段是闭集，`{key}` 不在白名单里：{log}"
+            );
+        }
+    }
 }
 
 #[test]

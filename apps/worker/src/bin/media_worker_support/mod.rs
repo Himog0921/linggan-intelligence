@@ -224,3 +224,17 @@ pub(crate) fn sha256_hex(value: &[u8]) -> String {
         .map(|byte| format!("{byte:02x}"))
         .collect()
 }
+
+/// 启动事件：与巡检 worker 同一张字段表、同一个 revision 来源（见 `runtime_event`）。
+///
+/// 两个 worker 的散文日志此前都不说「这句话是哪个部署说的」。加这一行之后，日志里的
+/// `service` + `revision` 能把一次故障钉到某次部署上，而不用去比对启动时刻。
+///
+/// 只在拿到数据库地址之后说：没有地址是拒绝启动，那条路上不该先发出一行「我起来了」。
+pub(crate) fn emit_startup_event() {
+    linggan_evidence::RuntimeEvent::new(
+        linggan_evidence::SERVICE_MEDIA_WORKER,
+        linggan_evidence::EVENT_STARTUP,
+    )
+    .emit();
+}

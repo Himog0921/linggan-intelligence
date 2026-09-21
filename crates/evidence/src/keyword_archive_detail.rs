@@ -47,6 +47,7 @@ use crate::execution_input_eligibility::{
     budget_blocks_new_work_predicate, has_executable_locator_predicate,
     unchanged_input_block_predicate,
 };
+use crate::step_report::StepOutcome;
 use linggan_storage_postgres::Database;
 use uuid::Uuid;
 
@@ -572,6 +573,17 @@ pub struct KeywordDetailTickSummary {
     pub skipped: Vec<(Uuid, String)>,
 }
 
+impl KeywordDetailTickSummary {
+    /// 这一步在账本上该怎么记。这一步不数「考虑过多少」——留空，不写 0 冒充。
+    pub fn step_outcome(&self) -> StepOutcome {
+        StepOutcome::Ok {
+            considered: None,
+            produced: Some(i64::try_from(self.queued.len()).unwrap_or(i64::MAX)),
+            skipped: Some(i64::try_from(self.skipped.len()).unwrap_or(i64::MAX)),
+        }
+    }
+}
+
 pub async fn run_keyword_archive_details(
     database: &Database,
     purpose: &str,
@@ -585,7 +597,9 @@ pub async fn run_keyword_archive_details(
     .fetch_one(database.pool())
     .await?;
     if !schema_ready {
-        return Ok(summary);
+        // 与媒体投影、渐进档案两步同一句话：**自己的表不在 = 没轮到**，不是「没有欠详情的
+        // 词」。此前这里静默返回空汇总，两种情形在日志与账本上长得一模一样。
+        return Err(AcquisitionChainError::SchemaUnavailable);
     }
     // 只找仍欠详情的关键词。baseline 的覆盖事实决定“这一轮搜索是否完整”，不能冻结
     // 已经发现却仍不完整的材料；否则 target 进入 monitoring 后会永久失去补详情路径。

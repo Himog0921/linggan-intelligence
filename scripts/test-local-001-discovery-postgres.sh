@@ -89,6 +89,7 @@ cargo test -p linggan-evidence --test monitor_rule_slots_postgres --locked -- --
 cargo test -p linggan-evidence --test collection_control_runtime_postgres --locked -- --ignored
 cargo test -p linggan-evidence --test collection_dispatch_sequence_postgres --locked -- --ignored
 cargo test -p linggan-evidence --test runtime_readiness_postgres --locked -- --ignored
+cargo test -p linggan-evidence --test scheduler_tick_postgres --locked -- --ignored
 cargo test -p linggan-intelligence --test topic_workspace_postgres --locked -- --ignored
 cargo test -p linggan-api --bin linggan-api --locked -- --ignored
 # worker 的启动/退出语义分两层：不需要数据库的那两条（缺地址必须失败、连不上不许装成空闲）

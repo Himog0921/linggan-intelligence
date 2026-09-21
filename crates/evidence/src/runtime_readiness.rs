@@ -48,15 +48,18 @@ pub struct RuntimeRequirements {
 }
 
 /// 采集运行时（巡检 worker 与本地 API 的采集读口）的最小要求：
-/// 巡检账本由 `0034` 建立、`0036` 定下结果词表，派发前要读的资格台账是 `0097`。
+/// 巡检账本由 `0034` 建立、`0036` 定下结果词表，派发前要读的资格台账是 `0097`，
+/// 每轮 tick 要写的步骤明细是 `0098`。
 pub const COLLECTION_RUNTIME_REQUIREMENTS: RuntimeRequirements = RuntimeRequirements {
     migration_ids: &[
         "0034_collection_control_closure",
         "0036_monitor_scheduling_clarity",
         "0097_collection_execution_input_eligibility",
+        "0098_scheduler_tick_steps_and_readiness",
     ],
     tables: &[
         "collection_scheduler_run",
+        "collection_scheduler_run_step",
         "collection_scheduler_heartbeat",
         "collection_scheduler_target_decision",
         "collection_monitor_rule_revision",
