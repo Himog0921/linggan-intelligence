@@ -2144,6 +2144,7 @@ async fn ready_installation(database: &Database, label: &str) -> Installed {
                 "replies",
                 "media_slots"
             ]),
+            selector_health: None,
         },
     )
     .await

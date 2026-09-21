@@ -21,6 +21,7 @@ import { createLingganContentRuntime } from '../linggan/contentRuntimeAdapter.js
 import { LINGGAN_RUNTIME_ACTION } from '../linggan/runtimeActions.js';
 import { unavailableLingganStats } from '../linggan/adapter.js';
 import { explicitXhsDetailPageUrlInvalid } from '../shared/deadPageSignals.js';
+import { installSelectorHealthReporter } from '../shared/selectorHealth.js';
 import {
   observeXhsAccountFromDocument,
   observeXhsDetailRiskFromDocument,
@@ -49,6 +50,14 @@ function localTrustedAuthorization() {
 
 const runtime = createLingganContentRuntime({ platform: 'xhs' });
 let activeDouyinAdapter = null;
+
+// 页面上的结构自检（探过的与动作前的）统一交给 background 存：页面会随导航消失，
+// 诊断不该跟着消失。这是一条只出不进的旁注——上报失败不改变页面上正在做的任何事。
+installSelectorHealthReporter((snapshot) => sendToBackground(
+  LINGGAN_RUNTIME_ACTION.REPORT_SELECTOR_HEALTH,
+  { snapshot },
+  { timeoutMs: 4000 },
+));
 
 async function collectCurrentXhsDetailPackage(...args) {
   // A direct detail request carries its attached comments in the same logical package.

@@ -1173,6 +1173,11 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 .c-tg-station-grid .c-tg-number-value { text-align:center; }
 .c-stn-entry[open]>summary .c-stn-more{color:var(--lgi-signal-ink);font-weight:700}
 .c-stn-mono{font-family:var(--lgi-font-mono);font-variant-numeric:tabular-nums}
+/* 「工位版本」格里的第二行：这台安装最近一次的页面结构自检。版本号答的是「装的哪个版本」，
+ * 这一行答的是「还认不认得出页面」——两件事同格分行，免得自检结果被读成版本号的一部分。
+ * 这一格只有 84px 宽，行内只放一个短标记（语气沿用这张表既有的 `.c-tg-ok` / `.c-tg-warn`
+ * / `.c-tg-neutral`，不新增颜色），逐项事实在悬停提示里。 */
+.c-stn-health{display:block;margin-top:var(--lgi-space-1);font-size:var(--lgi-text-label);font-weight:600;white-space:nowrap}
 /* 展开面板换底色而不是画线：分区用面，不用线（LIDS-PRI-001 线条第 2 条）。 */
 .c-stn-panel{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:var(--lgi-space-5);padding:var(--lgi-space-5);background:var(--lgi-canvas-low);border-bottom:1px solid var(--lgi-hairline)}
 .c-stn-block{min-width:0}

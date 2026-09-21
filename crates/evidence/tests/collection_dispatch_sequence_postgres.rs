@@ -4,18 +4,18 @@ use linggan_contracts::{
 };
 use linggan_evidence::{
     AccountEligibilityObservation, AuthorizationGrant, CheckInOutcome, DeliveryConclusion,
-    DetailPageSessionNavigationError, DetailPageSessionProgress, DispatchDecision,
-    DispatchFailureCode, DispatchFailureOutcome, InstallationCheckIn, MonitorCommandActor,
-    MonitorCommandKind, MonitorRuleCommand, MonitorRuleDraft, MonitorRuleMode, PreparedLaneDelivery,
-    ProducerRuntimeError, RuntimeAttemptOutcome, RuntimeSubmissionOutcome, RuntimeTaskOutcome,
-    activate_installation_credential, apply_monitor_rule_command, bind_observation_account,
-    check_in_installation, create_producer_task, decide_dispatch, dispatch_schema_is_ready,
-    DetailPageSessionGrant, expire_lapsed_leases, grant_authorization, grant_detail_page_session,
-    grant_detail_page_session_with_lane_deliveries, issue_work_order_lease,
-    open_claim_window, read_collection_task_timeline, read_detail_delivery_reconciliation,
-    read_work_resources, record_detail_page_session_progress, recover_released_orphaned_work_orders,
-    report_account_eligibility, requeue_failed_dispatch,
-    retire_materials, rotate_installation_credential, set_station_accepting, start_producer_attempt,
+    DetailPageSessionGrant, DetailPageSessionNavigationError, DetailPageSessionProgress,
+    DispatchDecision, DispatchFailureCode, DispatchFailureOutcome, InstallationCheckIn,
+    MonitorCommandActor, MonitorCommandKind, MonitorRuleCommand, MonitorRuleDraft, MonitorRuleMode,
+    PreparedLaneDelivery, ProducerRuntimeError, RuntimeAttemptOutcome, RuntimeSubmissionOutcome,
+    RuntimeTaskOutcome, activate_installation_credential, apply_monitor_rule_command,
+    bind_observation_account, check_in_installation, create_producer_task, decide_dispatch,
+    dispatch_schema_is_ready, expire_lapsed_leases, grant_authorization, grant_detail_page_session,
+    grant_detail_page_session_with_lane_deliveries, issue_work_order_lease, open_claim_window,
+    read_collection_task_timeline, read_detail_delivery_reconciliation, read_work_resources,
+    record_detail_page_session_progress, recover_released_orphaned_work_orders,
+    report_account_eligibility, requeue_failed_dispatch, retire_materials,
+    rotate_installation_credential, set_station_accepting, start_producer_attempt,
     submit_producer_package,
 };
 use linggan_storage_postgres::{Database, testing::isolated_proof_schema};
@@ -147,9 +147,9 @@ const MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../database/migrations/0097_collection_execution_input_eligibility.sql"),
     "\n",
-    include_str!(
-        "../../../database/migrations/0098_scheduler_tick_steps_and_readiness.sql"
-    ),
+    include_str!("../../../database/migrations/0098_scheduler_tick_steps_and_readiness.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0099_collection_selector_health.sql"),
 );
 
 #[tokio::test]
@@ -1249,13 +1249,12 @@ async fn an_explicitly_unavailable_page_stops_only_its_lanes_without_fabricating
         lease_is_live(&database, lease.lease_ref).await,
         "还有可执行的相邻成员时，租约不因这一篇停止而收束"
     );
-    let work_order_state: String = sqlx::query_scalar(
-        "SELECT queue_state FROM collection_work_order WHERE work_order_ref=$1",
-    )
-    .bind(fixture.work_order_ref)
-    .fetch_one(database.pool())
-    .await
-    .expect("the work order state is readable");
+    let work_order_state: String =
+        sqlx::query_scalar("SELECT queue_state FROM collection_work_order WHERE work_order_ref=$1")
+            .bind(fixture.work_order_ref)
+            .fetch_one(database.pool())
+            .await
+            .expect("the work order state is readable");
     assert_eq!(
         work_order_state, "leased",
         "一张工单里的一篇不可用不等于整单耗尽"
@@ -2095,7 +2094,8 @@ async fn navigation_time_lane_identities_outlive_a_closed_lease_without_imperson
             .expect("the lane task spec is readable");
     let media_task = parse_producer_task_spec(&media_task_spec.to_string())
         .expect("the stored lane task remains valid");
-    let submission = scheduled_submission(&media_task, &media_attempt, fixture.producer_instance_id);
+    let submission =
+        scheduled_submission(&media_task, &media_attempt, fixture.producer_instance_id);
     let outcome = submit_producer_package(&database, &submission)
         .await
         .expect("material observed under the prepared identity is retained");
@@ -2282,13 +2282,18 @@ async fn delivery_reconciliation_counts_receipts_not_the_session_marker() {
         &fixture,
         task.task_id(),
         session_ref,
-        DetailPageSessionProgress::Stopped { reason: "risk_stop" },
+        DetailPageSessionProgress::Stopped {
+            reason: "risk_stop",
+        },
     )
     .await;
     let closed = only_session(&database).await;
     assert_eq!(closed.conclusion, DeliveryConclusion::Closed);
     assert_eq!(closed.stop_reason.as_deref(), Some("risk_stop"));
-    assert!(closed.closed_at.is_some(), "a terminal session records when");
+    assert!(
+        closed.closed_at.is_some(),
+        "a terminal session records when"
+    );
 
     // 晚到的交付进度不能把终态降级：写入侧拒绝这条事实，读侧结论原封不动（T27）。
     let late = record_detail_page_session_progress(
@@ -2316,12 +2321,14 @@ async fn delivery_reconciliation_counts_receipts_not_the_session_marker() {
         "risk_stop",
         "delivery_terminal",
     ] {
-        sqlx::query("UPDATE collection_detail_page_session SET stop_reason = $2 WHERE session_ref = $1")
-            .bind(session_ref)
-            .bind(reason)
-            .execute(database.pool())
-            .await
-            .expect("the terminal reason is restated");
+        sqlx::query(
+            "UPDATE collection_detail_page_session SET stop_reason = $2 WHERE session_ref = $1",
+        )
+        .bind(session_ref)
+        .bind(reason)
+        .execute(database.pool())
+        .await
+        .expect("the terminal reason is restated");
         let row = only_session(&database).await;
         assert_eq!(row.conclusion, DeliveryConclusion::Closed);
         assert_eq!(row.stop_reason.as_deref(), Some(reason));
@@ -2403,7 +2410,11 @@ async fn report_session_progress(
 }
 
 /// 用导航前登记好的身份投递一个通道的包，并证明它换回了回执。
-async fn deliver_prepared_lane(database: &Database, fixture: &Fixture, lane: &PreparedLaneDelivery) {
+async fn deliver_prepared_lane(
+    database: &Database,
+    fixture: &Fixture,
+    lane: &PreparedLaneDelivery,
+) {
     let attempt = parse_producer_attempt(
         &serde_json::json!({
             "contractVersion": "linggan.producer.attempt.v1",
@@ -2470,6 +2481,7 @@ async fn replacement_installation_releases_stale_work_instead_of_adopting_it() {
             plugin_version: "0.8.47",
             browser_label: Some("intermediate fixture"),
             capabilities: serde_json::json!(["author_profile", "profile_discovery"]),
+            selector_health: None,
             installation_credential: None,
         },
     )
@@ -2507,6 +2519,7 @@ async fn replacement_installation_releases_stale_work_instead_of_adopting_it() {
                 "comments",
                 "replies"
             ]),
+            selector_health: None,
             installation_credential: None,
         },
     )
@@ -2957,9 +2970,7 @@ async fn a_missing_locator_stops_only_its_own_material_without_requeueing_foreve
     .expect("stopped lanes stay readable");
     assert_eq!(stopped.len(), 4, "这一篇的四条通道都要有明确去向");
     assert!(
-        stopped
-            .iter()
-            .all(|(state, _)| state == "input_blocked"),
+        stopped.iter().all(|(state, _)| state == "input_blocked"),
         "缺输入是「从未执行」，既不是读过没读成的 blocked，也不是 completed：{stopped:?}"
     );
     let fabricated: i64 = sqlx::query_scalar(
@@ -3174,10 +3185,11 @@ async fn a_lease_whose_members_all_lack_execution_input_ends_as_a_stop_not_a_com
     assert_eq!(fabricated, 0, "停止不能伪造 Attempt 或 Package");
 
     // 停就停住：再调度 100 轮，不得新建租约、不得新增停止事实、也不得把工单退回队列。
-    let leases_at_stop: i64 = sqlx::query_scalar("SELECT count(*) FROM collection_work_order_lease")
-        .fetch_one(database.pool())
-        .await
-        .expect("lease count is readable");
+    let leases_at_stop: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM collection_work_order_lease")
+            .fetch_one(database.pool())
+            .await
+            .expect("lease count is readable");
     let stop_events_at_stop: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM collection_work_order_lease_task_dispatch_failure \
          WHERE failure_code='execution_input_missing'",
@@ -3211,7 +3223,10 @@ async fn a_lease_whose_members_all_lack_execution_input_ends_as_a_stop_not_a_com
         .fetch_one(database.pool())
         .await
         .expect("lease count is readable");
-    assert_eq!(leases_after, leases_at_stop, "停止之后 100 轮调度不得再新建租约");
+    assert_eq!(
+        leases_after, leases_at_stop,
+        "停止之后 100 轮调度不得再新建租约"
+    );
     let stop_events_after: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM collection_work_order_lease_task_dispatch_failure \
          WHERE failure_code='execution_input_missing'",
@@ -3219,7 +3234,10 @@ async fn a_lease_whose_members_all_lack_execution_input_ends_as_a_stop_not_a_com
     .fetch_one(database.pool())
     .await
     .expect("stop events are readable");
-    assert_eq!(stop_events_after, stop_events_at_stop, "停止事实不随调度轮数增长");
+    assert_eq!(
+        stop_events_after, stop_events_at_stop,
+        "停止事实不随调度轮数增长"
+    );
     let state_after: String =
         sqlx::query_scalar("SELECT queue_state FROM collection_work_order WHERE work_order_ref=$1")
             .bind(fixture.work_order_ref)
@@ -3319,7 +3337,11 @@ async fn an_in_progress_replay_with_a_dead_locator_keeps_the_attempt_and_never_r
     .execute(database.pool())
     .await
     .expect("the platform's dead-address fact is recordable");
-    assert_eq!(stopped.rows_affected(), 1, "这条地址的失效要落在它自己的会话上");
+    assert_eq!(
+        stopped.rows_affected(),
+        1,
+        "这条地址的失效要落在它自己的会话上"
+    );
 
     let scene_before = execution_scene(&database, task.task_id(), lease.lease_ref).await;
 
@@ -3398,7 +3420,9 @@ async fn an_in_progress_replay_with_a_dead_locator_keeps_the_attempt_and_never_r
     assert_eq!(lane_states.len(), 4, "这一篇的四条通道都要有明确去向");
     assert_eq!(lane_states[0], "completed", "已交付的通道保持完成");
     assert!(
-        lane_states[1..].iter().all(|state| state == "input_blocked"),
+        lane_states[1..]
+            .iter()
+            .all(|state| state == "input_blocked"),
         "没开始的通道如实记为缺输入，不改写成读过没读成的 blocked：{lane_states:?}"
     );
     let attempts_after: i64 =
@@ -3508,7 +3532,8 @@ async fn detail_read_failure_budget_follows_the_requirement_scope_across_new_wor
     issue_work_order_lease(&database, second_order, 60)
         .await
         .expect("第二张工单发出租约");
-    let second = fail_dispatched_detail(&database, &fixture, second_order, "budget-scope-target").await;
+    let second =
+        fail_dispatched_detail(&database, &fixture, second_order, "budget-scope-target").await;
     assert_eq!(
         second,
         DispatchFailureOutcome::Requeued {
@@ -3522,7 +3547,8 @@ async fn detail_read_failure_budget_follows_the_requirement_scope_across_new_wor
     issue_work_order_lease(&database, third_order, 60)
         .await
         .expect("第三张工单发出租约");
-    let third = fail_dispatched_detail(&database, &fixture, third_order, "budget-scope-target").await;
+    let third =
+        fail_dispatched_detail(&database, &fixture, third_order, "budget-scope-target").await;
     assert_eq!(
         third,
         DispatchFailureOutcome::Blocked,
@@ -3622,10 +3648,7 @@ async fn the_same_content_under_two_targets_keeps_two_independent_detail_budgets
         )
         .await;
         if attempt < 3 {
-            assert!(matches!(
-                outcome,
-                DispatchFailureOutcome::Requeued { .. }
-            ));
+            assert!(matches!(outcome, DispatchFailureOutcome::Requeued { .. }));
             clear_work_order_backoff(&database, fixture.work_order_ref).await;
         } else {
             assert_eq!(outcome, DispatchFailureOutcome::Blocked);
@@ -3899,10 +3922,7 @@ async fn a_late_detail_read_failure_never_spends_the_budget_of_an_already_accept
     .fetch_one(database.pool())
     .await
     .expect("资格台账可读");
-    assert_eq!(
-        ledger_rows, 0,
-        "没有要补的东西，就不该为它开一条预算行"
-    );
+    assert_eq!(ledger_rows, 0, "没有要补的东西，就不该为它开一条预算行");
     let stopped_lanes: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM collection_work_order_lease_task task \
          JOIN linggan_runtime_task runtime ON runtime.task_id=task.task_id \
@@ -4983,14 +5003,15 @@ struct ExecutionScene {
 }
 
 async fn execution_scene(database: &Database, task_id: Uuid, lease_ref: Uuid) -> ExecutionScene {
-    let (task_state, claimed_at, claimed_by): (String, Option<String>, Option<Uuid>) = sqlx::query_as(
-        "SELECT execution_state, claimed_at::text, claimed_by_installation_ref \
+    let (task_state, claimed_at, claimed_by): (String, Option<String>, Option<Uuid>) =
+        sqlx::query_as(
+            "SELECT execution_state, claimed_at::text, claimed_by_installation_ref \
          FROM collection_work_order_lease_task WHERE task_id=$1",
-    )
-    .bind(task_id)
-    .fetch_one(database.pool())
-    .await
-    .expect("the held task stays readable");
+        )
+        .bind(task_id)
+        .fetch_one(database.pool())
+        .await
+        .expect("the held task stays readable");
     let (lease_live, release_reason, work_order_state): (bool, Option<String>, String) =
         sqlx::query_as(
             "SELECT lease.released_at IS NULL, lease.release_reason, work_order.queue_state \
@@ -5008,12 +5029,13 @@ async fn execution_scene(database: &Database, task_id: Uuid, lease_ref: Uuid) ->
             .fetch_one(database.pool())
             .await
             .expect("attempt history is readable");
-    let lease_tasks: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM collection_work_order_lease_task WHERE lease_ref=$1")
-            .bind(lease_ref)
-            .fetch_one(database.pool())
-            .await
-            .expect("lease tasks are readable");
+    let lease_tasks: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_work_order_lease_task WHERE lease_ref=$1",
+    )
+    .bind(lease_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("lease tasks are readable");
     let leases: i64 = sqlx::query_scalar("SELECT count(*) FROM collection_work_order_lease")
         .fetch_one(database.pool())
         .await

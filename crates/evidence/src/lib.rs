@@ -61,6 +61,7 @@ mod runtime_capacity;
 mod runtime_event;
 mod runtime_readiness;
 mod scheduler_tick;
+mod selector_health;
 mod station_read;
 mod step_report;
 mod target_catalog;
@@ -207,11 +208,17 @@ pub use scheduler_tick::{
     STEP_KEYWORD_DETAILS, STEP_MEDIA_ACQUISITION, STEP_PATROL, STEP_PROGRESSIVE_DOSSIERS,
     TICK_STEP_KEYS, TickLedger, record_readiness, tick_outcome,
 };
-pub use step_report::{StepFailure, StepOutcome, StepReport};
-pub use station_read::{
-    CapabilityState, StationCapability, StationOverview, UnclaimedInstallation,
-    read_station_capabilities, read_station_overview, station_daily_note_usage,
+pub use selector_health::{
+    SELECTOR_HEALTH_MAX_BYTES, SELECTOR_HEALTH_MAX_CATEGORIES, SELECTOR_HEALTH_PAGE_TYPES,
+    SELECTOR_HEALTH_PLATFORMS, SelectorHealthRejection, accepted_selector_health,
+    normalize_selector_health,
 };
+pub use station_read::{
+    CapabilityState, StationCapability, StationOverview, StationSelectorHealth,
+    UnclaimedInstallation, read_station_capabilities, read_station_overview,
+    station_daily_note_usage,
+};
+pub use step_report::{StepFailure, StepOutcome, StepReport};
 pub use target_catalog::{
     CatalogDetailState, CatalogSource, CatalogWork, CreatorDirectoryProjection,
     KeywordCatalogCounts, KeywordHitProjection, read_creator_directory, read_cross_industry_hits,

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 
-import { createPopupStartupBoundary, POPUP_STARTUP_RECOVERY } from '../src/popup/startupRecovery.js';
+import { createPopupStartupBoundary, popupPluginVersionLabel, popupStartupRecovery } from '../src/popup/startupRecovery.js';
 
 const require = createRequire(import.meta.url);
 const { transformSync } = require('@babel/core');
@@ -124,7 +124,8 @@ test('the startup boundary has a normal path and a truthful no-new-action recove
   assert.equal(fallback.type, 'main');
   assert.match(fallbackText, /本机状态目前未知，无法确认是否已读取页面信息/);
   assert.match(fallbackText, /本提示没有发起新的采集或传输/);
-  assert.match(fallbackText, /重新加载 Linggan Intelligence Browser v0\.4\.8/);
+  // 版本不写死：读不到清单时就如实说不知道，绝不编一个数字。
+  assert.match(fallbackText, /重新加载 Linggan Intelligence Browser（本机已安装 v未知）/);
   assert.doesNotMatch(fallbackText, /本次没有读取、采集或传输任何数据/);
 });
 
@@ -136,5 +137,26 @@ test('the recovery surface uses the copied LIDS tokens without adding another vi
   assert.match(recoveryCss, /var\(--lgi-font-sans\)/);
   assert.doesNotMatch(recoveryCss, /var\(--(?!lgi-)/);
   assert.doesNotMatch(recoveryCss, /#[0-9a-f]{3,8}/i);
-  assert.equal(POPUP_STARTUP_RECOVERY.version, 'v0.4.8');
+  assert.equal(popupStartupRecovery().version, 'v未知');
+});
+
+test('the recovery surface names the version Chrome actually loaded, never a stale literal', () => {
+  const manifest = JSON.parse(readFileSync(new URL('../manifest.json', import.meta.url), 'utf8'));
+  const originalChrome = globalThis.chrome;
+  try {
+    globalThis.chrome = { runtime: { getManifest: () => ({ version: manifest.version }) } };
+    assert.equal(popupPluginVersionLabel(), `v${manifest.version}`);
+    assert.match(popupStartupRecovery().recovery, new RegExp(`本机已安装 v${manifest.version.replaceAll('.', '\\.')}`));
+
+    // 读得到清单但里面不是版本号：同样说不知道，不把别的东西当版本。
+    globalThis.chrome = { runtime: { getManifest: () => ({ version: 'current' }) } };
+    assert.equal(popupPluginVersionLabel(), 'v未知');
+
+    // 清单接口本身抛错（旧版浏览器/权限变化）：说不知道，而不是让渲染崩掉。
+    globalThis.chrome = { runtime: { getManifest: () => { throw new Error('fixture_manifest_unavailable'); } } };
+    assert.equal(popupPluginVersionLabel(), 'v未知');
+  } finally {
+    if (originalChrome === undefined) delete globalThis.chrome;
+    else globalThis.chrome = originalChrome;
+  }
 });

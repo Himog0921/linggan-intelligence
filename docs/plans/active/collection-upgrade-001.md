@@ -193,11 +193,17 @@ S4 运行诊断与就绪 → S5 有证据才优化 → S6 集成与历史处置�
 | 本来就受限形状的长标识必须留前缀，而不是被判成「没分类」（T30，`a_long_restricted_identifier_keeps_its_prefix_instead_of_vanishing`） | 去掉 `bounded_code` 的 `.take(32)`（改成 `take(usize::MAX)`） | 用例在「超长的受限标识留前缀」处变红：`left: "0098_scheduler_tick_steps_and_readiness" != right: "0098_scheduler_tick_steps_and_re"`。截断不是美化——账本的 `error_class` 列写死 `≤32`，不截就是写不进去 |
 | 数据库给的 SQLSTATE 大小写必须归一（同上用例第二处） | 去掉 `bounded_code` 的 `.map(\|c\| c.to_ascii_lowercase())` | 用例在「SQLSTATE 是大写，词表一律小写」处变红：`left: "42P01" != right: "42p01"`——同一件事在事件里是 `42P01`、在账本里是 `42p01`，两处读者会当成两个类别 |
 
-十六次变异均已还原（前两次 S1a、四次 S1b、两次 S2、三次 S3、两次 S3c、三次 S4a）。S3c 的两次变异都从 `crates/evidence/src/collection_task_read.rs` 还原：两处都是逐字对照原句反向替换（终态分支回到第一条、计数回到 `receipt.receipt_ref`），还原后 `grep -n "count(lane.attempt_id)"` 为 0 命中、匹配臂顺序与原句一致，两条 S3c 用例重新变绿。S3 的三次变异分别从 `execution_input_eligibility.rs`（两次）与 `target_drawer.rs`（一次）还原：还原后逐一 `grep` 变异标记（`false &&`／`if false`／写错的那两支文案）为 0 命中，`git diff` 回到变异前的内容，两条证据用例与页面用例重新变绿。S1b 的还原用还原前快照逐字节核对：`execution_input_eligibility.rs` sha256 `6408147952b274a9a7ae8f180fb53eaaf37362383177fa30355f31377fba43ab`、`0097` 最终 sha256 `83a8a99362df528217ac7473c102ca8c42f6f8beb3b76b9e195f95451ddac3b7`（已同步进 `material_fixture` 与 `full_schema_fixture` 两处账本）、`dispatch.rs` 变异前后同为 sha256 `5b54d0395180ea385150dff4b60fa608083ff334319a21ecb57d7b2dbab1c6b0`。T28① 的变异同样从 `dispatch.rs` 还原，之后该文件 sha256 仍为 `5b54d039…`（两次变异都是逐字节还原）。S2 的两次变异从 `acquisition_chain.rs` 还原：变异前快照存于 `/tmp/acquisition_chain_s2_pre_mutation.rs`，还原后 `grep -c MUTATION` = 0 且 sha256 与变异前同为 `3e4f14e56f7b5b2e08152dbb96e009bee48e701911d6f08a2fc770b4e8fedd43`（逐字节）。各阶段还原后：S1b 的 `keyword_archive_postgres` **16 passed / 0 failed**、`collection_dispatch_sequence_postgres` **27 passed / 0 failed**；S2 的 `collection_dispatch_sequence_postgres` **32 passed / 0 failed**、`observation_target_dossier_postgres` **23 passed / 0 failed**，`cargo check --workspace --all-targets --locked` 通过。源码冻结后的干净全套（`./scripts/test-local-001-discovery-postgres.sh`，20 目标）**231 passed / 0 failed**，容器/卷/库自建自清。
+| 收不下的一份报到**不能改写**这台安装已有的记录（T32，隔离 PostgreSQL `selector_health_is_stored_read_back_and_never_gates_a_check_in`） | 把 `execution_station.rs` 心跳写入里的 `selector_health = COALESCE($4::jsonb, selector_health)` 换成 `selector_health = $4::jsonb`——即把「收不下＝不写」改成「收不下＝写空」 | 用例在「收不下的一份报到不能改写这台安装已有的记录」处变红，左边正是缺陷的形状：`left: None != right: Some(Object {"xhs": Object {"checkedAt": …, "missingCategories": ["reply_expand"], …}})`——一份谁也没收下的报告把库里那份好记录抹掉了，而这次报到**什么都没证明** |
+| 「没有自检记录」不得画成「一切正常」（T32，页面层 `a_station_that_never_reported_a_selector_check_is_not_drawn_as_healthy`） | 把 `station_view.rs` 无记录那一支的 `未上报自检` + `c-tg-neutral` 换成 `自检无缺失` + `c-tg-ok`（悬停说明一并换成「没有记录」） | 用例在第一处断言变红：`assertion failed: html.contains("未上报自检")`。它钉住的是**展示映射**这一层：领域判据再对，页面仍可以用一句没依据的「正常」盖住一台可能早就认不出页面的机器 |
+| 弹窗说的必须是 Chrome 真正加载的那份版本（E10，插件 `the recovery surface names the version Chrome actually loaded, never a stale literal`） | 把 `popupPluginVersionLabel()` 的返回值写死成 `'v0.4.8'`——即把修前的那个字面值放回去 | 用例变红：`+ 'v0.4.8' - 'v0.8.54'`（`linggan-popup-startup.test.mjs:148`）。这正是 E10 指的那类文案：界面说着一个不是本机的版本，人在扩展页看到的会是两个不同的数字 |
+
+十九次变异均已还原（两次 S1a、四次 S1b、两次 S2、三次 S3、两次 S3c、三次 S4a、六次 S4b、三次 S4c）；S4b 与 S4c 的九次分别记在本节下面两段。S3c 的两次变异都从 `crates/evidence/src/collection_task_read.rs` 还原：两处都是逐字对照原句反向替换（终态分支回到第一条、计数回到 `receipt.receipt_ref`），还原后 `grep -n "count(lane.attempt_id)"` 为 0 命中、匹配臂顺序与原句一致，两条 S3c 用例重新变绿。S3 的三次变异分别从 `execution_input_eligibility.rs`（两次）与 `target_drawer.rs`（一次）还原：还原后逐一 `grep` 变异标记（`false &&`／`if false`／写错的那两支文案）为 0 命中，`git diff` 回到变异前的内容，两条证据用例与页面用例重新变绿。S1b 的还原用还原前快照逐字节核对：`execution_input_eligibility.rs` sha256 `6408147952b274a9a7ae8f180fb53eaaf37362383177fa30355f31377fba43ab`、`0097` 最终 sha256 `83a8a99362df528217ac7473c102ca8c42f6f8beb3b76b9e195f95451ddac3b7`（已同步进 `material_fixture` 与 `full_schema_fixture` 两处账本）、`dispatch.rs` 变异前后同为 sha256 `5b54d0395180ea385150dff4b60fa608083ff334319a21ecb57d7b2dbab1c6b0`。T28① 的变异同样从 `dispatch.rs` 还原，之后该文件 sha256 仍为 `5b54d039…`（两次变异都是逐字节还原）。S2 的两次变异从 `acquisition_chain.rs` 还原：变异前快照存于 `/tmp/acquisition_chain_s2_pre_mutation.rs`，还原后 `grep -c MUTATION` = 0 且 sha256 与变异前同为 `3e4f14e56f7b5b2e08152dbb96e009bee48e701911d6f08a2fc770b4e8fedd43`（逐字节）。各阶段还原后：S1b 的 `keyword_archive_postgres` **16 passed / 0 failed**、`collection_dispatch_sequence_postgres` **27 passed / 0 failed**；S2 的 `collection_dispatch_sequence_postgres` **32 passed / 0 failed**、`observation_target_dossier_postgres` **23 passed / 0 failed**，`cargo check --workspace --all-targets --locked` 通过。源码冻结后的干净全套（`./scripts/test-local-001-discovery-postgres.sh`，20 目标）**231 passed / 0 failed**，容器/卷/库自建自清。
 
 S3c 两次变异还原后：`collection_dispatch_sequence_postgres` **34 passed / 0 failed**（新增两条）、`content_reobservation_postgres` **4 passed / 0 failed**、`linggan-api` 二进制内 `--ignored` **23 passed / 0 failed**；`cargo check --workspace --all-targets --locked` 通过。S3c 源码冻结后的干净全套（20 目标）**234 passed / 0 failed**，容器/卷/库自建自清——这一跑同时补上了 S3b 记录里被宿主磁盘写满打断的那次重跑（当时第 20 个目标 7 例 `57P03 in recovery mode` 未计入结论）。
 
 S4b 的六次变异分别落在 `database/migrations/0098_…sql`（一次，SQL 层）、`crates/evidence/src/scheduler_tick.rs`（两次）、`crates/evidence/src/runtime_event.rs`（三次），还原前快照存于 `/tmp/scheduler_tick.rs.orig` 与 `/tmp/runtime_event.rs.orig`（限码那两次另存 `/tmp/runtime_event.rs.pre_bounded`）。还原后：`0098` 的 sha256 回到 `1933b8978c73c094f8e41c04d119021c17a25483ba71c0d7751af7556e1ba310`（与 `material_fixture` / `full_schema_fixture` 两处登记逐字一致），两个 `.rs` 文件逐字节还原（按还原前快照 `cp` 回去；**注意此处的教训**：这两个文件在本步尚未提交，`git diff` 对未跟踪文件恒为空，因此不能用它当还原凭据，只能按快照逐条比对断言），`grep -rn "MUTATION" apps crates database scripts` 为 0 命中；`cargo test -p linggan-evidence --test scheduler_tick_postgres --locked -- --ignored --test-threads=1` 重新 **4 passed / 0 failed**，`cargo test -p linggan-worker --test startup_contract --locked` 重新 **4 passed / 1 ignored**，`cargo test -p linggan-evidence --lib --locked` 重新 **79 passed / 0 failed**。**两处如实记录的发现**：`0098` 的三个计数列在本步**曾经是错的**（`NOT NULL DEFAULT 0`），是 T30 的新用例在第一次跑时就抓出来的——失败与跳过的行写不进去，留下的 `outcome` 是 NULL，恰好把「这一步崩了」伪装成「这一步开始了没收尾」，也就是本卡要消灭的那个东西；`bounded_code` 原本把散文按字符挑成一个「码」（详见 §10.9 S4b），单测在第一次跑 `--lib` 时变红——这两处都记在该节的「两处如实记录的发现」里，不是我事后自查的结论。**另一处更正**：§10.4 原先举的跳过原因例子 `not_ready` 在实现里没有生产者（真实生产者只有 `schema_unavailable`，即这一步自己的表不在），已按实现改掉——计划里写一个没人生产的码，正是这张表要防的错。
+
+S4c 的三次变异分别落在 `crates/evidence/src/execution_station.rs`（SQL 写入）、`apps/api/src/local_web/station_view.rs`（页面映射）、`plugins/linggan-intelligence-browser/src/popup/startupRecovery.js`（版本文案）。三处都按变异前快照 `cp` 还原并**用 sha256 逐字节核对**：`execution_station.rs` `7f6aa8c1b980e84327375ccb84b7ecc589fd8510d6673dc74ddb1792a5bf4599`（还原后 `COALESCE($4::jsonb, selector_health)` 回到第 298 行）、`station_view.rs` `a30fa8ebde7e53045aa15a5541d6c0d508c76327614af8fe41f1d38c984dd9db`、`startupRecovery.js` `fdbf5d14ee662e988f49a6f62ff6c274796df521aff38a556d34450caf00307a`。这三个文件都是**已跟踪、且有未提交改动**的文件，所以它们的 `git diff` 有内容、可以作为还原的旁证；但**还原凭据仍是快照比对**（逐字节 sha256），不是「diff 看起来对」。还原后：`grep -rn "MUTATION" apps crates database scripts plugins` 为 0 命中；`collection_control_runtime_postgres` 重新 **14 passed / 0 failed**、`linggan-api` 二进制重新 **259 passed / 0 failed / 25 ignored**、插件 `npm run test:linggan` 重新 **287 条 286 passed / 1 failed**（那一条是既有的 `linggan-current-surface-discovery-runtime`，见 §10.9 S4c 的未证明与如实记录）。
 
 S4a 的三次变异分别落在 `apps/worker/src/main.rs`、`crates/evidence/src/runtime_readiness.rs`、`apps/worker/src/bin/media_worker.rs`（上表三条，逐字还原）。还原后 `grep -rn "MUTATION" apps crates --include="*.rs"` 为 0 命中，`cargo test -p linggan-worker --test startup_contract --locked` 重新 **4 passed / 1 ignored**（15.01s，`--ignored` 那条走证明库）。**一处如实记录的观察**：在「不可达端口」这一实测条件下，未就绪日志里的 `detail` 落在 `probe_timeout`（十秒没问到），不是 `connect_failed`——sqlx 连接池对被拒绝的连接会自己重试满 30 秒，所以「立刻失败」那条分支很少先到达。两者都归 `database_unreachable`，用例只钉分类码（`not ready (database_unreachable`），不钉它后面跟哪一个。
 
@@ -389,7 +395,7 @@ S4a 的三次变异分别落在 `apps/worker/src/main.rs`、`crates/evidence/src
 | 采集控制面 | `/collection/*` 的待处理/恢复文案 | `recovery_for("plugin_version_unsupported")` 文案带上最低版本号与「以本机实际版本为准」 |
 | 插件 popup | 启动失败弹窗 | 版本号取自 manifest，不再写死 |
 | 插件内容侧 | 采集页 preflight 与告警 | 快照补齐平台/页面类型/能力/插件版本/规则验证日期/缺失类别/失败计数；本地即时阻断行为不变 |
-| 服务端诊断读口 | 报到接口 + 工位读取 | 受限快照经运行时校验后按安装保存；工位页只在既有行内多一句诊断（若既有版式容不下，退为只读接口 + 交付回执里说明） |
+| 服务端诊断读口 | 报到接口 + 工位读取 | 受限快照经运行时**第二次收口**后按安装保存（收不下就不写，保持已有记录）；工位页在**既有「工位版本」格内**多一行短标记（`未上报自检` / `自检无缺失` / `自检缺 N 类` / `自检待重验`），逐项事实在悬停提示里——该列只有 84px，容不下一行长句，也不新增区块 |
 
 页头/导航/共享壳层与 LIDS Token：不改。
 
@@ -418,13 +424,23 @@ S4a 的三次变异分别落在 `apps/worker/src/main.rs`、`crates/evidence/src
 
 **选择器诊断**（插件产出、服务端受限接收）：
 
+写的是实施后的**实际字段**（S4c 落地时按实现更正过一次，见 §10.9 S4c 的「与原计划的差异」）：
+
 | 字段 | 语义 | 边界 |
 |---|---|---|
 | `checkedAt` | **本次**运行时检查时刻（每次 preflight 都变） | 不得被当作验证日期展示 |
-| `verifiedAt` | 该平台/页面类型选择器**上次人工验证日期**（`SELECTOR_VERIFIED_AT` / `SEARCH_FEED_VERIFIED_AT`） | 过期 ≠ 坏了：只提示「回归验证」，不改判失败 |
-| `platform` / `pageType` / `capability` | 哪儿的、哪类页面、哪项能力 | 受限词表；不是页面内容 |
-| `pluginVersion` / `ruleVersion` | 上报时插件版本、规则验证版本（今日即上述两个日期常量） | 不新造版本号；没有就写未知 |
-| `missingCategories` / `staleCategories` / `failureCounts` | 缺哪几类检查、哪几类验证日期陈旧、各类失败次数 | 只写**检查项名**，不写选择器串、不写 DOM 文本、不写任何 URL |
+| `verifiedAt` | 该平台/页面类型选择器**上次人工验证日期**（`SELECTOR_VERIFIED_AT` / `SEARCH_FEED_VERIFIED_AT`） | 过期 ≠ 坏了：只提示「回归验证」，不改判失败；页面上只显示到**日** |
+| `platform` / `pageType` / `capability` | 哪儿的、哪类页面、哪项能力 | 受限词表（`[a-z0-9_]{1,32}`）；不是页面内容。`platform` 还是**分组键**：一份快照按平台各一条 |
+| `checkedCategories` | 这次实际查过的检查项名 | 只写**检查项名**；名字形状不对也不丢，写 `unclassified`——丢掉它等于把「有一项没过」从快照里删掉 |
+| `missingCategories` / `staleCategories` | 缺哪几类检查、哪几类验证日期陈旧 | 同上：只写检查项名，不写选择器串、不写 DOM 文本、不写任何 URL |
+| `failureCounts` | 某个检查项**连续**几次检查都是缺的（中间查到过就从零重来） | 正整数才有条目；键同样是检查项名。它由本机存储层补上，不属于页面报来的快照 |
+
+**不在快照里的两件东西**（原计划列过，实施后按实际去掉）：
+
+| 原计划字段 | 为什么去掉 |
+|---|---|
+| `pluginVersion` | 报到自述里**本来就有** `pluginVersion`（`InstallationCheckIn.plugin_version`），服务端存进 `plugin_installation.plugin_version`。快照里再抄一份就是同一件事的第二个来源——两份迟早有一份过期，而「本机是哪个版本」只能有一个答案 |
+| `ruleVersion` | 今日它**就是** `verifiedAt` 的别名（两个日期常量没有独立版本号）。上报一个与验证日期同值不同名的字段，只会让人以为存在一套独立的规则版本体系 |
 
 ### 10.5 依赖地图
 
@@ -466,7 +482,7 @@ S4a 的三次变异分别落在 `apps/worker/src/main.rs`、`crates/evidence/src
 
 ### 10.8 交接
 
-- **修改文件**：见各次提交的 `git show --stat`；核心新增为 `crates/evidence/src/runtime_readiness.rs`、`crates/evidence/src/runtime_event.rs`、`crates/evidence/src/step_report.rs`（值：三值结局、受限码、`StepFailure` 对照表；从 `scheduler_tick.rs` 拆出，使两者各自在边界上限内）、`collection_scheduler_run_step` 与会话/心跳迁移、`apps/worker/src/{tick,shutdown,keyword_details}.rs`（四步组合入口，`main.rs` 只按顺序装）、`scripts/runtime/{sync,launch,install}.sh`、插件 `src/shared/selectorHealth.js` 与 `src/popup/startupRecovery.js`、`apps/api/src/local_web.rs` 的 `/health`。
+- **修改文件**：见各次提交的 `git show --stat`；核心新增为 `crates/evidence/src/runtime_readiness.rs`、`crates/evidence/src/runtime_event.rs`、`crates/evidence/src/step_report.rs`（值：三值结局、受限码、`StepFailure` 对照表；从 `scheduler_tick.rs` 拆出，使两者各自在边界上限内）、`collection_scheduler_run_step` 与会话/心跳迁移、`apps/worker/src/{tick,shutdown,keyword_details}.rs`（四步组合入口，`main.rs` 只按顺序装）、`scripts/runtime/{sync,launch,install}.sh`、`apps/api/src/local_web.rs` 的 `/health`；S4c 再加 `crates/evidence/src/selector_health.rs`（受限收口，插件侧同规则一份在插件里）、`0099_collection_selector_health.sql`（一列）、插件 `src/linggan/selectorHealthReport.js`（本机留存 + 报到时带上）、`src/shared/selectorHealth.js` 与 `src/popup/startupRecovery.js`、`apps/api/src/local_web/station_view.rs` 与 `collection_control_surface_view.rs` 的两处版本文案、以及工位版本格第二行的样式 `.c-stn-health`（`apps/api/src/local_web/collection_workspace.css`——只加这一条，语气沿用这张表既有的 `.c-tg-*` 三档，不新增颜色与 token）。
 - **验证命令/走查**：`cargo check --workspace --all-targets --locked`；`./scripts/test-local-001-discovery-postgres.sh`（20 目标全套，容器/卷/库自建自清）；插件侧 `node --test tests/xhs-selector-health.test.mjs` 等由 `npm run test:linggan` 覆盖的用例。
 - **诊断样例与字段白名单**：落在 `docs/runbooks/local-runtime-deployment.md` 的「运行诊断」一节（样例为**手工构造的脱敏样例**，非运行抓取）并登记到 `docs/README.md`；本计划 §10.4 的表即字段白名单。
 - **规则或索引同步**：`docs/progress/2026-09.md` 记本次交付；迁移编号按 §3 的纪律在合并前重新 fetch 复核（本卡预期新增 `0098`/`0099`，撞号则整体顺延并同步六处登记）。
@@ -545,3 +561,41 @@ S4a 的三次变异分别落在 `apps/worker/src/main.rs`、`crates/evidence/src
 1. **步骤表与 run 表的保留策略**：≈7 200 行/天，本卡不加清理。给 tick 加保留窗口，还是接受持续增长，是产品决定。
 2. **S4a 挂账 3（模型循环不受采集面闸门约束缺测试锚定）仍未闭合**：就绪列已按预告落在心跳上，但断言要同时具备「迁移完整、可写心跳的库」与「真的 worker 进程」，今天两个夹具各占一半（worker 的进程夹具只有一个未迁移的库；迁移完整的夹具在 evidence crate 里、没有进程）。补它要新建一个两边都具备的夹具，属独立范围决定。
 3. S4a 挂账 1 / 2（媒体 worker 没有自己的就绪分级、API 启动连不上不重连）本步未动，仍开着。
+
+#### S4c（T32 / E10）— 已完成（2026-09-21；本地提交，未推送、未部署、未应用共享库迁移）
+
+- **这条诊断要回答的问题（E10）**：页面结构变了，插件自己最先知道——每次采集前它都会查一遍关键选择器在不在，也知道这些选择器上一次人工重验是哪一天。但这份知识此前**只留在浏览器里**：服务端能看到的只有「这张工单失败了」。于是「页面结构缺了一类信号」与「这台机器网络断了」在页面上长得一模一样。
+- **两侧各收一次口**：插件出门前收一次（`src/shared/selectorHealth.js` 的字段闭集 `SELECTOR_HEALTH_SNAPSHOT_FIELDS`，测试逐字断言），服务端进门再收一次（`crates/evidence/src/selector_health.rs`）。不是重复劳动：一侧防「本机把不该出门的东西发出去」（选择器串、DOM 文本、带签名的页面地址在出门前就消失），另一侧防「不管谁发来的都按受限形状收」——上报口在页面上，页面来的东西不可信。
+- **收不下＝不写，且留一行日志**：形状不对（连对象都不是／超过 4096 字节／一条认得出的平台记录都没有）整条不收；安静丢掉会让「这台机器一直在报一份我们认不出的东西」在服务端完全隐形，而那正是这类诊断要回答的问题。收不下**不清空**这台安装已有的记录——那次报到什么都没证明，不能拿它去改写已有的结论；`COALESCE($4::jsonb, selector_health)` 就是这句话的写法。**报到本身照常成功**：诊断从来不是报到的前提。
+- **词表外写 `unknown`／`unclassified`**：那是「说不出来」，本身是一条如实的事实，不是把垃圾当默认值存下来。检查项名形状不对也不丢——丢掉它等于把「这次有一项检查没过」从快照里删掉。
+- **两个时刻分开**：`checkedAt` 是**这次**看的时刻，`verifiedAt` 是这些选择器**上一次人工重验**的日期。谁把它们合成一个，谁就把「刚看了一眼」说成「刚验证过」。
+- **本机留存那一侧**：`src/linggan/selectorHealthReport.js` 把快照存进 `chrome.storage.local`——页面会随导航消失、background 会被 MV3 回收，本地存储活得比两者都长。它另维护一份 `failureCounts`：某个检查项**连续**几次检查都是缺的（不是累计：一次缺失说明不了什么，页面还在加载；每次检查都缺才是结构变了；中间查到过就从零重来）。`platform` 是 background 从**发送页面**的地址读出来的，页面自己说的对不上就拒收——免得一个页面替另一个平台写诊断。
+- **服务端只加一列**：`plugin_installation.selector_health`（`0099`），`jsonb` + 一条「是对象」的 CHECK。存储层只保证「是个对象」，具体形状由运行时校验负责——**不在 SQL 里抄一份字段清单**：两份清单迟早有一份过期。
+- **页面**：工位页「工位版本」格内多一行短标记——`未上报自检`（中性）／`自检无缺失`／`自检缺 N 类`／`自检待重验`（黄），逐项事实（这次检查、选择器验证日期、检查了哪几类、缺哪几类、连续缺失）在**悬停提示**里；两平台各有一条时标记前带平台名。该列只有 84px 宽，容不下一行长句，也不新增区块。**没有在岗安装时这一行不出现**——空缺由「连接」那一列说。`verifiedAt` 只显示到**日**：把时分写出来会让人以为那一刻真发生过一次验证。
+- **版本文案（E10 的另一半）**：插件启动失败弹窗此前写死 `v0.4.8`（而 manifest 实为 `0.8.54`），改为**每次渲染时**从 `chrome.runtime.getManifest()` 取，取不到写 `v未知`；服务端两条「版本过低」文案（工位页的提示、采集控制面的恢复动作）改为从**判定用的那个常量** `MINIMUM_PLUGIN_VERSION` 现拼——取值本身（`0.8.47`）没有动，改的只是「说的数字与判的数字必须是同一个」。
+- **与原计划的差异**（实施时按实际更正，§10.4 已同步）：去掉 `ruleVersion`（今日它就是 `verifiedAt` 的别名，上报一个同值不同名的字段只会让人以为存在一套独立的规则版本体系）与快照内的 `pluginVersion`（报到自述里本来就有，快照再抄一份就是同一件事的第二个来源）；补上 `checkedCategories`——「这次查过哪几类」与「哪几类缺」是两件事：只查过两类、两类都在，与全查过且都在，不是一个结论。
+- **一处边界信号（如实记录，不做处置）**：新模块 `selector_health.rs` 367 行，越过 350 行的**评审线**（硬线 500 未破），其中约 127 行是 6 条受限形状单测。不拆的理由：本卡的证明入口是 `cargo test -p linggan-evidence --lib`（受限收口那 6 条就在这条命令里），把单测挪进 `tests/` 会变成一个新的集成测试目标——而本仓的证明脚本是按目标名逐个点跑的，没登记的目标不会有人跑，反而更容易烂掉。这是一个 warning，不是失败；要不要把「模块 + 同文件单测」一起计入评审线的口径改掉，是仓库规则层面的决定。
+- **一处实现取舍**：快照里的两个时刻在 SQL 读取时用 `linggan_human_moment` 渲染成 `YYYY-MM-DD HH:MM`（会话时区）。仓库里没有日期库，而 `0062` 已定下「时刻只有一种人读的写法」；读取侧只重写这两个时刻，其余字段原样带出，**不做二次解释**（快照里存的是什么，读出来就是什么）。
+- **收尾时跑了一遍 rustfmt，只动排版、不动语义**：本步碰过的 14 个文件先整份快照到 `/private/tmp/s4c-pre-fmt/`，再就地跑 `rustfmt --edition 2024 --config skip_children=true`，其中 **8 个文件**有改动（`crates/evidence/src/selector_health.rs`、`crates/evidence/src/lib.rs`、`crates/evidence/tests/{collection_control_postgres,collection_control_runtime_postgres,collection_dispatch_sequence_postgres}.rs`、`apps/api/src/local_web/{station_view,collection_control_surface_view,full_schema_fixture}.rs`）。「只动排版」不是靠眼看：先对每个文件取**标识符多重集**（`grep -oE '[A-Za-z_][A-Za-z0-9_]*' | sort | uniq -c`）前后比对，8 个全部相等（换行位置变、词没增没减）；再跑 `cargo check -p linggan-evidence -p linggan-api --all-targets --locked` 通过；最后三套证明原样重跑，结果与重排前逐条一致（见下表）。**顺带收敛了几处早于本步的漂移**：`crates/evidence/src/lib.rs` 里 `pub use step_report` 与 `pub use station_read` 的先后顺序在 HEAD 上就是反的、`0098` 的 `include_str!` 折行在 HEAD 上也是折的——这三处不在本步的编辑范围里，是 rustfmt 顺手排齐的。本仓没有 fmt 门禁（`check-project-governance.sh` 不跑它），所以这条不是「修好了检查」，只是**让本步碰过的文件排版回到工具的标准形**；若不需要这类顺带收敛，撤销它是机械操作。
+
+**证据**（本机隔离 PostgreSQL 16 证明库 + 插件 node 测试；不代表 CI 或线上）：
+
+| 命令 | 结果 |
+|---|---|
+| `cargo test -p linggan-evidence --lib --locked` | **85 passed / 0 failed**（含受限收口 6 条：只收受限形状且多余字段不跟着走／非对象与超长与「一条都认不出」被拒／词表外写 unknown／两个时刻分开且缺席不冒充「就是现在」） |
+| `cargo test -p linggan-evidence --test collection_control_runtime_postgres --locked -- --ignored --test-threads=1` | **14 passed / 0 failed**（新增 `selector_health_is_stored_read_back_and_never_gates_a_check_in`：两个时刻各自按会话时区渲染且互不相等、检查项与连续次数原样读回、第二次上报覆盖第一次、**收不下的与超长的两份报到让这一列逐字节不变**、库里仍只有这一条记录） |
+| `cargo test -p linggan-api --bin linggan-api --locked` | **259 passed / 0 failed / 25 ignored**（S4a 时 253；本步新增 6 条：无记录不画成正常／空缺工位不提自检／缺失、陈旧、健康三态互不替代／两个时刻不合并／两处版本文案各一条） |
+| `node --test tests/{xhs,douyin}-selector-health* tests/selector-health-notice tests/linggan-selector-health-report tests/linggan-station-check-in tests/linggan-popup-startup` | **36 passed / 0 failed**（含「快照只带白名单字段，绝不带选择器、DOM 文本或签名地址」「连续缺失按检查项计数并被一次查到重置」「页面只能替自己那个平台上报」「报到载荷＝快照＋连续次数，不凭空造平台」） |
+| `npm run test:linggan`（插件全套） | **287 条：286 passed / 1 failed**——失败的是**既有**的 `linggan-current-surface-discovery-runtime`（见下） |
+| `./scripts/check-rust-boundaries.sh` | **61 error(s) / 27 warning(s)**：61 个 error 全部落在修前就已超限的既有文件上（本步改动过的 `execution_station.rs`、`station_view.rs`、`station_read.rs` 等都在其中，但都不是本步才超的）；27 个 warning 里**有 1 个是本步新增的**——`crates/evidence/src/selector_health.rs` 367 行（评审线 350、硬线 500），主体是 6 条受限形状单测（约 127 行） |
+| `cargo check -p linggan-evidence -p linggan-api --all-targets --locked` + 上表三套重跑（rustfmt 之后） | **通过**；三套结果与重排前逐条相同（85 / 259·25 ignored / 14，全 0 failed）——排版改动没有改掉任何一条结论 |
+
+**未证明边界**：真实页面结构变化时的诊断取值（§10.7 同注，需真实平台，未授权）；真实 Chrome 扩展页上看到的版本号（本机未装包，§10.7 同注）；`./scripts/test-local-001-discovery-postgres.sh` 全套尚未整体重跑（`0099` 已登记进脚本与三处测试 `MIGRATIONS` 常量，S6 串证时跑一次全量）。
+
+**如实记录的既有失败（报给 Mog，不由本卡处置）**：插件全套里 `tests/linggan-current-surface-discovery-runtime.test.mjs` 变红，形态是「测试结束后仍有异步活动」引发的 `unhandledRejection`：`TypeError: Cannot read properties of undefined (reading 'offscreen')`（该用例没有 mock `chrome.offscreen`，而 background 的媒体 worker 那条路会去读它）。它与本步改动的文件无关（本步在 `background.js` 里只加了一个消息分支与一个报到字段，都不经过 offscreen），且**在本步之前就存在**；本卡不改它。
+
+**挂账（报给 Mog，不在本卡自行处置）**：
+
+1. **`0099` 没有进 `COLLECTION_RUNTIME_REQUIREMENTS`，因此它是一条「部署顺序约束」而不是就绪判据**——理由：那份清单是**巡检循环**能干活的最小要求（`0034`/`0036`/`0097`/`0098`），而这一列只被「插件报到」这条写路径用到；把它加进去，会让一个诊断列的缺席把三个与它无关的 tick 步骤（媒体投影、渐进档案、关键词建档）一起停掉，正是该模块开头警告的「一个缺口连坐其它还能跑的步骤」。**代价必须写明**：新二进制若跑在没应用 `0099` 的库上，**每一次插件报到都会撞 `42703 undefined_column`**——报到接口把它归到 `422 check_in_rejected`（插件侧只显示「Linggan 本机服务返回 422。」，看不出是哪一列缺了；确切原因只在服务端日志里），页面上工位随之陆续显示失联，而 `/health` 仍会说 READY。因此 S6 的部署与回滚说明必须把 `0098` 与 `0099` 一起写成「先应用、后部署」。要不要给 API 单独一份要求清单（把「报到面」与「巡检面」分开），是一次范围决定。
+2. **页面上的验证日期只显示到「日」**：选择器验证日期是人类约定的日期（`2026-04-28`），显示时分没有意义；但若有别的读者需要精确时刻，那是一次产品决定。
+3. **「持续缺失」只在本机计数**（连续次数由插件维护、随快照上报）：服务端不重算、不留历史，因此「这个检查项已经连续缺了三天」查不到——要不要在服务端留一份诊断历史，是范围决定。

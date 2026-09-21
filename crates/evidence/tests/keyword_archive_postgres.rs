@@ -1413,6 +1413,7 @@ async fn ready_detail_station(
             // 这个工位于是被排除，活永远派不出去。一个同时具备两种能力的工位两边都
             // 合格，测不出这件事。
             capabilities,
+            selector_health: None,
         },
     )
     .await

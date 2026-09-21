@@ -24,6 +24,10 @@ import {
   validateTaskSpec,
 } from './adapter.js';
 import { LINGGAN_RUNTIME_ACTION } from './runtimeActions.js';
+import {
+  recordSelectorHealthReport,
+  selectorHealthForCheckIn,
+} from './selectorHealthReport.js';
 import { localMediaOutbox, localProducerOutbox } from './localProducerOutbox.js';
 import { createManualRuntimeTask, packageDiscovery } from './producerRuntime.js';
 import {
@@ -408,6 +412,8 @@ async function reportStationStatus() {
     browserLabel: browserLabel(),
     capabilities: await declaredCapabilities(),
     health: readiness.health,
+    // 本机最近一次结构自检。它不是能力声明，也不影响报到结果：收下与否都不改变归位。
+    selectorHealth: await selectorHealthForCheckIn({ storage: chrome.storage.local }),
   });
   if (checkIn.installationCredential
       && checkIn.installationCredentialRef
@@ -1388,6 +1394,20 @@ async function closeCollectionWindow(windowId) {
   }
 }
 
+/// 消息来源站点 → 平台词。两个站点之外一律不认：诊断只描述本插件真正跑着的那两个页面。
+function platformForSenderUrl(url) {
+  const host = (() => {
+    try {
+      return new URL(String(url || '')).hostname.toLowerCase();
+    } catch {
+      return '';
+    }
+  })();
+  if (/(^|\.)douyin\.com$/.test(host)) return 'douyin';
+  if (/(^|\.)xiaohongshu\.com$/.test(host)) return 'xhs';
+  return '';
+}
+
 /// 等最终页面完成重定向且 content script 已属于当前 URL。
 function waitForTabReady(tabId, timeoutMs = 20000) {
   return waitForStableTab({
@@ -1406,6 +1426,17 @@ chrome.runtime.onMessage.addListener((message = {}, sender, sendResponse) => {
     if (action === LINGGAN_RUNTIME_ACTION.RUN_DISPATCHED_TASK) return runDispatchedTask();
     if (action === LINGGAN_RUNTIME_ACTION.GET_EXECUTION_STATION_STATUS) {
       return reportStationStatus();
+    }
+    if (action === LINGGAN_RUNTIME_ACTION.REPORT_SELECTOR_HEALTH) {
+      const senderUrl = String(sender?.tab?.url || sender?.url || '');
+      const sourcePlatform = platformForSenderUrl(senderUrl);
+      if (!sourcePlatform) {
+        return { accepted: false, reason: 'selector_health_source_unrecognized' };
+      }
+      return recordSelectorHealthReport(message.snapshot, {
+        platform: sourcePlatform,
+        storage: chrome.storage.local,
+      });
     }
     if (action === LINGGAN_RUNTIME_ACTION.REPORT_ACCOUNT_ELIGIBILITY) {
       const senderUrl = String(sender?.tab?.url || sender?.url || '');

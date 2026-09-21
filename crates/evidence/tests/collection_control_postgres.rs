@@ -150,9 +150,9 @@ const MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../database/migrations/0097_collection_execution_input_eligibility.sql"),
     "\n",
-    include_str!(
-        "../../../database/migrations/0098_scheduler_tick_steps_and_readiness.sql"
-    ),
+    include_str!("../../../database/migrations/0098_scheduler_tick_steps_and_readiness.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0099_collection_selector_health.sql"),
 );
 
 #[tokio::test]
@@ -289,6 +289,7 @@ async fn claimed_installation_auto_accepts_but_a_person_pause_survives_replaceme
             plugin_version: "0.8.47",
             browser_label: Some("Chrome"),
             capabilities: serde_json::json!(["author_profile"]),
+            selector_health: None,
         },
     )
     .await
@@ -327,6 +328,7 @@ async fn claimed_installation_auto_accepts_but_a_person_pause_survives_replaceme
             plugin_version: "0.8.47",
             browser_label: Some("Chrome"),
             capabilities: serde_json::json!(["author_profile"]),
+            selector_health: None,
         },
     )
     .await
@@ -385,6 +387,7 @@ async fn legacy_registered_closed_default_also_auto_accepts_when_claimed() {
             plugin_version: "0.8.47",
             browser_label: Some("Chrome"),
             capabilities: serde_json::json!(["author_profile"]),
+            selector_health: None,
         },
     )
     .await
@@ -2159,6 +2162,7 @@ async fn install(database: &Database, label: &str, version: &str) -> Installed {
                 "profile_discovery",
                 "discovery_search"
             ]),
+            selector_health: None,
         },
     )
     .await

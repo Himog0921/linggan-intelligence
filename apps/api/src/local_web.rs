@@ -985,6 +985,11 @@ struct CheckInBody {
     browser_label: Option<String>,
     #[serde(default)]
     capabilities: Vec<String>,
+    /// 最近一次页面结构自检的受限快照，按平台分组。字段**可选**：没有记录时不带它，
+    /// 「本机还没检查过」与「检查过、一切正常」是两件事。它认不出形状时不会让报到失败——
+    /// 诊断从来不是报到的前提。
+    #[serde(default)]
+    selector_health: Option<serde_json::Value>,
 }
 
 /// COLLECTION-001 · a plugin install reports in.
@@ -1011,6 +1016,7 @@ async fn station_check_in(State(state): State<LocalWebState>, body: Bytes) -> Re
             plugin_version: &check_in.plugin_version,
             browser_label: check_in.browser_label.as_deref(),
             capabilities: serde_json::json!(check_in.capabilities),
+            selector_health: check_in.selector_health.as_ref(),
             installation_credential: check_in.installation_credential.as_deref(),
         },
     )

@@ -107,6 +107,8 @@ export async function checkInLingganStation({
   origin = LINGGAN_LOCAL_ORIGIN,
   fetchImpl = globalThis.fetch,
   health = null,
+  // 报到时一并带上的结构自检快照；只有报到这条路需要它。
+  selectorHealth = null,
 } = {}) {
   if (typeof fetchImpl !== 'function') {
     return { checkedIn: false, message: '浏览器当前无法连接 Linggan 本机服务。' };
@@ -133,6 +135,8 @@ export async function checkInLingganStation({
         pluginVersion,
         browserLabel,
         capabilities: Array.isArray(capabilities) ? capabilities : [],
+        // 最近一次结构自检的受限快照（没有记录时不带这个字段：缺席就是「本机还没检查过」）。
+        ...(selectorHealth && Object.keys(selectorHealth).length > 0 ? { selectorHealth } : {}),
       }),
     });
     if (!response.ok) {

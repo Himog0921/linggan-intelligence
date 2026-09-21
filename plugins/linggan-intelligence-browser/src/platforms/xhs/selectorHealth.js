@@ -66,7 +66,7 @@ export function runXhsSelectorBootstrapProbe({ document = window.document, win =
         '笔记流容器',
         SEARCH_FEED_VERIFIED_AT,
       );
-      return publishBootstrapDiagnostic(check, win, '当前搜索页暂未识别到笔记流容器');
+      return publishBootstrapDiagnostic(check, win, '当前搜索页暂未识别到笔记流容器', pageType);
     }
     case PAGE_TYPE.PROFILE: {
       const check = buildPresenceCheck(
@@ -75,7 +75,7 @@ export function runXhsSelectorBootstrapProbe({ document = window.document, win =
         AUTHOR_PAGE_SELECTORS,
         '博主页结构信号',
       );
-      return publishBootstrapDiagnostic(check, win, '当前博主页暂未识别到基础资料区');
+      return publishBootstrapDiagnostic(check, win, '当前博主页暂未识别到基础资料区', pageType);
     }
     case PAGE_TYPE.NOTE_DETAIL: {
       const shellCheck = buildPresenceCheck(
@@ -94,11 +94,14 @@ export function runXhsSelectorBootstrapProbe({ document = window.document, win =
         stale: false,
       };
       const check = shellCheck.ok ? shellCheck : ssrCheck;
-      return publishBootstrapDiagnostic(check, win, '当前笔记页暂未识别到详情容器信号');
+      return publishBootstrapDiagnostic(check, win, '当前笔记页暂未识别到详情容器信号', pageType);
     }
     default:
       return publishSelectorHealthSnapshot(
         finalizeSelectorPreflight('xhs', 'bootstrap', {
+          // 这一类页面上没有要看的容器，但仍要如实说这次是在哪类页面上：
+          // 「未识别到的页面」与「看过了、没事」不是一回事。
+          pageType,
           ok: true,
           code: 'skipped',
           checks: [],
@@ -114,9 +117,11 @@ export function runXhsSelectorBootstrapProbe({ document = window.document, win =
  * Action-specific preflight continues to use `ok: false` immediately before the action it can
  * actually stop.
  */
-function publishBootstrapDiagnostic(check, win, unavailableMessage) {
+function publishBootstrapDiagnostic(check, win, unavailableMessage, pageType = '') {
   const ready = check.ok === true;
   const result = finalizeSelectorPreflight('xhs', 'bootstrap', {
+    // 探针走到哪一类页面是在这里探测出来的，因此由这里说，不从检查项名字里反推。
+    pageType,
     ok: true,
     code: ready ? 'ok' : 'not_ready',
     message: ready ? '' : unavailableMessage,
@@ -132,6 +137,9 @@ function publishBootstrapDiagnostic(check, win, unavailableMessage) {
 function runBatchPreflight(action, label, params, document, win) {
   const mode = String(params?.mode || '').trim().toLowerCase();
   const isProfileMode = mode === 'profile';
+  // 要哪一类容器由 mode 决定，但**这次检查发生在哪一类页面**是页面自己说了算：
+  // 任务说了博主页而人停在搜索页，正是诊断要如实说出来的那件事。
+  const pageType = detectLocalXhsPageType(win);
   const selector = isProfileMode ? PROFILE_FEED_SELECTOR : FEEDS_CONTAINER_SELECTOR;
   const check = buildPresenceCheck(
     document,
@@ -142,23 +150,27 @@ function runBatchPreflight(action, label, params, document, win) {
   );
 
   return publishSelectorHealthSnapshot(
-    finalizeSelectorPreflight('xhs', action, check.ok
-      ? {
-          ok: true,
-          code: 'ok',
-          checks: [check],
-        }
-      : {
-          ok: false,
-          code: 'selector_missing',
-          message: `${label}页面结构已变化，未找到${check.detail}`,
-          checks: [check],
-        }),
+    finalizeSelectorPreflight('xhs', action, {
+      pageType,
+      ...(check.ok
+        ? {
+            ok: true,
+            code: 'ok',
+            checks: [check],
+          }
+        : {
+            ok: false,
+            code: 'selector_missing',
+            message: `${label}页面结构已变化，未找到${check.detail}`,
+            checks: [check],
+          }),
+    }),
     win,
   );
 }
 
 function runCommentContainerPreflight(action, label, document, win) {
+  const pageType = detectLocalXhsPageType(win);
   const check = buildPresenceCheck(
     document,
     'comments_container',
@@ -167,23 +179,27 @@ function runCommentContainerPreflight(action, label, document, win) {
   );
 
   return publishSelectorHealthSnapshot(
-    finalizeSelectorPreflight('xhs', action, check.ok
-      ? {
-          ok: true,
-          code: 'ok',
-          checks: [check],
-        }
-      : {
-          ok: false,
-          code: 'selector_missing',
-          message: `${label}页面结构已变化，未找到${check.detail}`,
-          checks: [check],
-        }),
+    finalizeSelectorPreflight('xhs', action, {
+      pageType,
+      ...(check.ok
+        ? {
+            ok: true,
+            code: 'ok',
+            checks: [check],
+          }
+        : {
+            ok: false,
+            code: 'selector_missing',
+            message: `${label}页面结构已变化，未找到${check.detail}`,
+            checks: [check],
+          }),
+    }),
     win,
   );
 }
 
 function runAuthorPreflight(document, win) {
+  const pageType = detectLocalXhsPageType(win);
   const check = buildPresenceCheck(
     document,
     'author_profile_shell',
@@ -192,18 +208,21 @@ function runAuthorPreflight(document, win) {
   );
 
   return publishSelectorHealthSnapshot(
-    finalizeSelectorPreflight('xhs', 'collectAuthor', check.ok
-      ? {
-          ok: true,
-          code: 'ok',
-          checks: [check],
-        }
-      : {
-          ok: false,
-          code: 'selector_missing',
-          message: `博主页页面结构已变化，未找到${check.detail}`,
-          checks: [check],
-        }),
+    finalizeSelectorPreflight('xhs', 'collectAuthor', {
+      pageType,
+      ...(check.ok
+        ? {
+            ok: true,
+            code: 'ok',
+            checks: [check],
+          }
+        : {
+            ok: false,
+            code: 'selector_missing',
+            message: `博主页页面结构已变化，未找到${check.detail}`,
+            checks: [check],
+          }),
+    }),
     win,
   );
 }

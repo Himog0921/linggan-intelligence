@@ -33,8 +33,8 @@ use super::collection_targets_view::{
     beijing_now_minutes, minutes_since_epoch, moment_without_year,
 };
 use linggan_evidence::{
-    CONTROL_FRESHNESS_MINUTES, CapabilityState, RuntimeCapacityOverview, StationCapability,
-    StationOverview, UnclaimedInstallation,
+    CONTROL_FRESHNESS_MINUTES, CapabilityState, MINIMUM_PLUGIN_VERSION, RuntimeCapacityOverview,
+    StationCapability, StationOverview, StationSelectorHealth, UnclaimedInstallation,
 };
 use std::collections::BTreeMap;
 use uuid::Uuid;
@@ -815,7 +815,7 @@ fn station_entry(
                 </form>
               </div>
               <div class="c-tg-cell" role="cell"><span class="c-tg-truth {state_tone}">{state}</span></div>
-              <div class="c-tg-cell c-stn-mono" role="cell">{plugin}</div>
+              <div class="c-tg-cell c-stn-mono" role="cell">{plugin}{selector_health}</div>
               <time class="c-tg-cell c-tg-time" role="cell">{last_seen}</time>
               <div class="c-tg-cell c-tg-number-value{quota_tone}" role="cell">
                 <span class="c-usage c-usage-inline">
@@ -834,6 +834,12 @@ fn station_entry(
         name = escape(&station.display_name),
         state = state_label,
         plugin = escape(plugin),
+        // 没有在岗安装时这一格只有「—」：空缺由「连接」那一列说，不在版本格里再念一遍。
+        selector_health = if station.active_plugin_version.is_some() {
+            selector_health_markup(&station.active_selector_health)
+        } else {
+            String::new()
+        },
         last_seen = escape(&last_seen),
         used = station.daily_notes_used,
         quota = station.daily_work_quota,
@@ -846,6 +852,128 @@ fn station_entry(
         dispatch_title = escape(&format!("{dispatch_label} · {dispatch_hint}")),
         management = management,
     )
+}
+
+/// 「工位版本」格里的第二行：这台安装最近一次**页面结构自检**。
+///
+/// 它回答的是「这台机器上的选择器还认不认得出页面」，与「插件是哪个版本」是两件事，所以
+/// 放在同一格里但不并进版本号本身。
+///
+/// 三种情况必须一眼分得开：**没有记录**（没报到过，或报来的那份没收下）、**这次检查没发现
+/// 缺失**、**有检查项缺失或验证日期陈旧**。把「没有记录」画成一个安静的默认值，等于用一句
+/// 没依据的「正常」盖住一台可能早就认不出页面的机器。
+///
+/// 两个时刻分开写：`checkedAt` 是**这次**看的时刻，`verifiedAt` 是这些选择器**上一次人工
+/// 重验**的日期。合成一个，就会把「刚看了一眼」说成「刚验证过」。
+///
+/// 这一格只有 84px 宽，所以行内只放一个短标记，逐项事实全在悬停提示里。
+fn selector_health_markup(records: &[StationSelectorHealth]) -> String {
+    if records.is_empty() {
+        return r#"<span class="c-stn-health c-tg-neutral" title="这台安装还没有可用的页面结构自检记录：没报到过，或报来的那份没被收下。没有记录不等于页面结构正常。">未上报自检</span>"#
+            .to_owned();
+    }
+    let with_platform = records.len() > 1;
+    records
+        .iter()
+        .map(|record| {
+            let missing = record.missing_categories.len();
+            let stale = record.stale_categories.len();
+            let tone = if missing > 0 || stale > 0 {
+                "c-tg-warn"
+            } else {
+                "c-tg-ok"
+            };
+            let marker = if missing > 0 {
+                format!("自检缺 {missing} 类")
+            } else if stale > 0 {
+                "自检待重验".to_owned()
+            } else {
+                "自检无缺失".to_owned()
+            };
+            let summary = if with_platform {
+                format!("{} {marker}", platform_label(&record.platform))
+            } else {
+                marker
+            };
+            format!(
+                r#"<span class="c-stn-health {tone}" title="{title}">{summary}</span>"#,
+                title = escape(&selector_health_detail(record)),
+                summary = escape(&summary),
+            )
+        })
+        .collect()
+}
+
+/// 自检那一行的逐项说明（悬停可见）。只写这一份快照里**存下来的事实**：在哪类页面、检查了
+/// 几类、缺哪几类、验证日期是哪天。不含选择器串与页面地址——那些从来没有进过这一列。
+fn selector_health_detail(record: &StationSelectorHealth) -> String {
+    let mut lines = vec![
+        format!(
+            "这次检查：{}（{} 页面 · {}）",
+            or_unknown(&record.checked_at),
+            or_unknown(&record.page_type),
+            or_unknown(&record.capability),
+        ),
+        format!("选择器验证日期：{}", verification_date(&record.verified_at)),
+    ];
+    if !record.checked_categories.is_empty() {
+        lines.push(format!(
+            "检查了 {} 类：{}",
+            record.checked_categories.len(),
+            record.checked_categories.join("、"),
+        ));
+    }
+    if !record.missing_categories.is_empty() {
+        lines.push(format!("缺：{}", record.missing_categories.join("、")));
+    }
+    if !record.stale_categories.is_empty() {
+        lines.push(format!(
+            "验证日期陈旧：{}",
+            record.stale_categories.join("、")
+        ));
+    }
+    if !record.failure_counts.is_empty() {
+        let counts: Vec<String> = record
+            .failure_counts
+            .iter()
+            .map(|(category, count)| format!("{category} 连续 {count} 次"))
+            .collect();
+        lines.push(format!("连续缺失：{}", counts.join("、")));
+    }
+    lines.join("\n")
+}
+
+fn or_unknown(value: &str) -> &str {
+    if value.trim().is_empty() {
+        "未知"
+    } else {
+        value
+    }
+}
+
+/// 验证日期只显示到日。`verifiedAt` 记的是「上一次人工重验是哪一天」，把时分一起写出来
+/// 会让人以为那一刻真发生过一次验证。认不出的字面值原样显示。
+fn verification_date(value: &str) -> &str {
+    let Some((date, _time)) = value.split_once(' ') else {
+        return value;
+    };
+    let shaped = date.len() == 10
+        && date.char_indices().all(|(i, c)| {
+            if i == 4 || i == 7 {
+                c == '-'
+            } else {
+                c.is_ascii_digit()
+            }
+        });
+    if shaped { date } else { value }
+}
+
+fn platform_label(platform: &str) -> &str {
+    match platform {
+        "xhs" => "小红书",
+        "douyin" => "抖音",
+        other => other,
+    }
 }
 
 fn accepting_inline_control(control: Option<&RuntimeResourceView>, station_ref: Uuid) -> String {
@@ -1380,7 +1508,7 @@ const DISPATCH_ANSWER_EXPLANATIONS: &[(&str, &str, &str)] = &[
     (
         "plugin_version_unsupported",
         "插件版本过低",
-        "升级这台机器上的插件到当前最低版本以上。",
+        "升级这台机器上的插件。",
     ),
     (
         "installation_stale",
@@ -1478,7 +1606,7 @@ fn dispatch_answer_label(code: &str, reason: Option<&str>) -> (&'static str, Str
         .iter()
         .find(|(key, _, _)| *key == code)
     {
-        return ((*label), (*hint).to_owned());
+        return ((*label), dispatch_answer_hint(code, hint));
     }
     if code == "capacity_unknown" {
         return (
@@ -1493,6 +1621,19 @@ fn dispatch_answer_label(code: &str, reason: Option<&str>) -> (&'static str, Str
         "这条回答还没有中文说明",
         format!("服务端给出的判定是 {code}。"),
     )
+}
+
+/// 提示里要带版本号的那一条，版本号直接取判定用的那个常量（`MINIMUM_PLUGIN_VERSION`）。
+///
+/// 页面自己抄一份数字，就会在插件升版之后继续念旧数字：恢复提示曾长期写着「升级到 0.4.8
+/// 以上」，而当时的最低合同版本是 0.8.47——人照着提示去比版本，比的是一个不存在的门槛。
+/// 判据与文案读同一个常量，这种漂移才不可能发生。
+fn dispatch_answer_hint(code: &str, hint: &str) -> String {
+    if code == "plugin_version_unsupported" {
+        format!("{hint}当前最低版本是 {MINIMUM_PLUGIN_VERSION}。")
+    } else {
+        hint.to_owned()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2059,6 +2200,7 @@ mod tests {
             active_last_seen_at: Some("2026-08-27 02:58".to_owned()),
             superseded_count: superseded,
             daily_notes_used: 0,
+            active_selector_health: Vec::new(),
             last_dispatch_answer_at: None,
             last_dispatch_answer_code: None,
             last_dispatch_answer_reason: None,
@@ -2581,6 +2723,146 @@ mod tests {
         );
         assert!(html.contains("这条回答还没有中文说明"));
         assert!(html.contains("brand_new_reason"));
+    }
+
+    /// 「插件版本过低」这句提示里的版本号必须是**判定用的那一个**。
+    ///
+    /// 页面自己抄一份数字，就会在插件升版后继续念旧数字：恢复提示曾长期写着「升级到
+    /// 0.4.8 以上」，而当时的最低合同版本是 0.8.47——人照着提示去比版本，比的是一个
+    /// 不存在的门槛。判定与文案读同一个常量，这种漂移才不可能发生。
+    #[test]
+    fn a_version_too_low_instruction_names_the_version_the_judgement_uses() {
+        let mut station = station(Some("0.8.20"), 0);
+        station.last_dispatch_answer_at = Some("2026-09-13 17:50".to_owned());
+        // 存进这一列的就是原因码本身（`DispatchDecision::code()` 对「被拦住」返回的是
+        // 具体原因，不是笼统的 blocked），页面按它查词表。
+        station.last_dispatch_answer_code = Some("plugin_version_unsupported".to_owned());
+        let html = render(
+            Some(&overview(vec![lane("基线建档", available())])),
+            &[station],
+            &[],
+            &CapabilityMatrix::new(),
+            None,
+        );
+        assert!(html.contains("插件版本过低"));
+        assert!(
+            html.contains(MINIMUM_PLUGIN_VERSION),
+            "升级提示必须写出判定用的最低版本 {MINIMUM_PLUGIN_VERSION}"
+        );
+        assert!(!html.contains("0.4.8"), "旧文案里的版本号不能留在页面上");
+    }
+
+    // -----------------------------------------------------------------------
+    // 页面结构自检：没有记录、没发现缺失、有缺失，三件事互不替代
+    // -----------------------------------------------------------------------
+
+    fn selector_health(
+        missing: &[&str],
+        stale: &[&str],
+        checked_at: &str,
+        verified_at: &str,
+    ) -> StationSelectorHealth {
+        StationSelectorHealth {
+            platform: "xhs".to_owned(),
+            page_type: "note_detail".to_owned(),
+            capability: "comments".to_owned(),
+            checked_at: checked_at.to_owned(),
+            verified_at: verified_at.to_owned(),
+            checked_categories: vec!["note_root".to_owned(), "comment_list".to_owned()],
+            missing_categories: missing.iter().map(|name| (*name).to_owned()).collect(),
+            stale_categories: stale.iter().map(|name| (*name).to_owned()).collect(),
+            failure_counts: vec![],
+        }
+    }
+
+    fn station_with_health(health: Vec<StationSelectorHealth>) -> StationOverview {
+        let mut station = station(Some("0.8.54"), 0);
+        station.active_selector_health = health;
+        station
+    }
+
+    fn render_one(station: &StationOverview) -> String {
+        render(
+            Some(&overview(vec![lane("基线建档", available())])),
+            std::slice::from_ref(station),
+            &[],
+            &CapabilityMatrix::new(),
+            None,
+        )
+    }
+
+    /// 没有记录不是「一切正常」。把没报到过的机器画成一个安静的默认值，等于用一句
+    /// 没依据的「正常」盖住一台可能早就认不出页面的机器。
+    #[test]
+    fn a_station_that_never_reported_a_selector_check_is_not_drawn_as_healthy() {
+        let html = render_one(&station_with_health(Vec::new()));
+        assert!(html.contains("未上报自检"));
+        assert!(html.contains("c-tg-neutral"));
+        assert!(!html.contains("自检无缺失"));
+    }
+
+    /// 没有在岗安装时，版本格里只有「—」：空缺由「连接」那一列说。
+    #[test]
+    fn a_vacant_station_does_not_claim_a_selector_record() {
+        let html = render_one(&station(None, 0));
+        assert!(!html.contains("未上报自检"));
+        assert!(!html.contains("c-stn-health"));
+    }
+
+    /// 三条互不替代的信息：这次检查没发现缺失 / 有检查项缺失 / 验证日期陈旧。
+    #[test]
+    fn a_selector_check_reports_missing_and_stale_apart_from_healthy() {
+        let healthy = station_with_health(vec![selector_health(
+            &[],
+            &[],
+            "2026-09-21 14:12",
+            "2026-04-28",
+        )]);
+        let html = render_one(&healthy);
+        assert!(html.contains("自检无缺失"));
+        assert!(html.contains("c-tg-ok"));
+
+        let gapped = station_with_health(vec![selector_health(
+            &["reply_expand", "note_root"],
+            &[],
+            "2026-09-21 14:12",
+            "2026-04-28",
+        )]);
+        let html = render_one(&gapped);
+        assert!(html.contains("自检缺 2 类"));
+        assert!(html.contains("c-tg-warn"));
+        assert!(!html.contains("自检无缺失"));
+
+        let stale = station_with_health(vec![selector_health(
+            &[],
+            &["note_root"],
+            "2026-09-21 14:12",
+            "2026-04-28",
+        )]);
+        let html = render_one(&stale);
+        assert!(html.contains("自检待重验"));
+        assert!(html.contains("c-tg-warn"));
+    }
+
+    /// 两个时刻必须分开写：`checkedAt` 是这次看的时刻，`verifiedAt` 是这些选择器上一次
+    /// 人工重验的日期。合成一个，就会把「刚看了一眼」说成「刚验证过」。
+    #[test]
+    fn the_check_moment_and_the_verification_date_are_never_merged() {
+        let html = render_one(&station_with_health(vec![selector_health(
+            &["reply_expand"],
+            &["note_root"],
+            "2026-09-21 14:12",
+            "2026-04-28 00:00",
+        )]));
+        assert!(html.contains("这次检查：2026-09-21 14:12"));
+        assert!(
+            html.contains("选择器验证日期：2026-04-28"),
+            "验证日期只显示到日"
+        );
+        assert!(html.contains("缺：reply_expand"));
+        assert!(html.contains("验证日期陈旧：note_root"));
+        // 快照里的原文（选择器串、页面地址）从来不进这一列，页面上也不该有它们的影子。
+        assert!(!html.contains("http"));
     }
 
     // -----------------------------------------------------------------------

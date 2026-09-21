@@ -81,7 +81,7 @@ function createPageTypeCheck(expected, actual) {
   });
 }
 
-function finalizeAndPublish(action, win, {
+function finalizeAndPublish(action, { win, pageType }, {
   ok = true,
   code = 'ok',
   message = '',
@@ -89,6 +89,8 @@ function finalizeAndPublish(action, win, {
 } = {}) {
   return publishSelectorHealthSnapshot(
     finalizeSelectorPreflight(PLATFORM, action, {
+      // 这次检查发生在哪一类页面，由探到的页面说，不从动作名或检查项名里猜。
+      pageType,
       ok,
       code,
       message,
@@ -98,8 +100,8 @@ function finalizeAndPublish(action, win, {
   );
 }
 
-function createSelectorMissingResult(action, win, message, checks = []) {
-  return finalizeAndPublish(action, win, {
+function createSelectorMissingResult(action, ctx, message, checks = []) {
+  return finalizeAndPublish(action, ctx, {
     ok: false,
     code: 'selector_missing',
     message,
@@ -107,8 +109,8 @@ function createSelectorMissingResult(action, win, message, checks = []) {
   });
 }
 
-function createPageMismatchResult(action, win, message, checks = []) {
-  return finalizeAndPublish(action, win, {
+function createPageMismatchResult(action, ctx, message, checks = []) {
+  return finalizeAndPublish(action, ctx, {
     ok: false,
     code: 'page_mismatch',
     message,
@@ -137,10 +139,11 @@ function buildSearchSignalCheck(win) {
   });
 }
 
-function runDetailPreflight(action, { document, win, pageType }) {
+function runDetailPreflight(action, ctx) {
+  const { document, pageType } = ctx;
   const pageCheck = createPageTypeCheck('detail', pageType);
   if (!pageCheck.ok) {
-    return createPageMismatchResult(action, win, '当前不在抖音作品详情页，请先打开单条作品后再操作', [pageCheck]);
+    return createPageMismatchResult(action, ctx, '当前不在抖音作品详情页，请先打开单条作品后再操作', [pageCheck]);
   }
 
   const detailCheck = buildDomSignalCheck(
@@ -150,19 +153,20 @@ function runDetailPreflight(action, { document, win, pageType }) {
     'video/detail metadata',
   );
   if (!detailCheck.ok) {
-    return createSelectorMissingResult(action, win, '当前页面缺少抖音详情页信号，建议刷新页面后重试', [pageCheck, detailCheck]);
+    return createSelectorMissingResult(action, ctx, '当前页面缺少抖音详情页信号，建议刷新页面后重试', [pageCheck, detailCheck]);
   }
 
-  return finalizeAndPublish(action, win, {
+  return finalizeAndPublish(action, ctx, {
     ok: true,
     checks: [pageCheck, detailCheck],
   });
 }
 
-function runProfilePreflight(action, { document, win, pageType }) {
+function runProfilePreflight(action, ctx) {
+  const { document, pageType } = ctx;
   const pageCheck = createPageTypeCheck('profile', pageType);
   if (!pageCheck.ok) {
-    return createPageMismatchResult(action, win, '当前不在抖音博主页，请先进入目标博主页后再操作', [pageCheck]);
+    return createPageMismatchResult(action, ctx, '当前不在抖音博主页，请先进入目标博主页后再操作', [pageCheck]);
   }
 
   const profileCheck = buildDomSignalCheck(
@@ -172,19 +176,20 @@ function runProfilePreflight(action, { document, win, pageType }) {
     'author header',
   );
   if (!profileCheck.ok) {
-    return createSelectorMissingResult(action, win, '当前页面缺少抖音博主信息信号，建议刷新页面后重试', [pageCheck, profileCheck]);
+    return createSelectorMissingResult(action, ctx, '当前页面缺少抖音博主信息信号，建议刷新页面后重试', [pageCheck, profileCheck]);
   }
 
-  return finalizeAndPublish(action, win, {
+  return finalizeAndPublish(action, ctx, {
     ok: true,
     checks: [pageCheck, profileCheck],
   });
 }
 
-function runBatchPreflight(action, { document, win, pageType }) {
+function runBatchPreflight(action, ctx) {
+  const { document, win, pageType } = ctx;
   const pageCheck = createPageTypeCheck(['profile', 'search'], pageType);
   if (!pageCheck.ok) {
-    return createPageMismatchResult(action, win, '当前不在抖音搜索页或博主页，请先进入正确页面后再操作', [pageCheck]);
+    return createPageMismatchResult(action, ctx, '当前不在抖音搜索页或博主页，请先进入正确页面后再操作', [pageCheck]);
   }
 
   if (pageType === 'profile') {
@@ -195,10 +200,10 @@ function runBatchPreflight(action, { document, win, pageType }) {
       'profile list',
     );
     if (!profileListCheck.ok) {
-      return createSelectorMissingResult(action, win, '当前博主页未识别到作品列表信号，建议滚动加载后重试', [pageCheck, profileListCheck]);
+      return createSelectorMissingResult(action, ctx, '当前博主页未识别到作品列表信号，建议滚动加载后重试', [pageCheck, profileListCheck]);
     }
 
-    return finalizeAndPublish(action, win, {
+    return finalizeAndPublish(action, ctx, {
       ok: true,
       checks: [pageCheck, profileListCheck],
     });
@@ -207,10 +212,10 @@ function runBatchPreflight(action, { document, win, pageType }) {
   const searchCheck = buildSearchSignalCheck(win);
 
   if (!searchCheck.ok) {
-    return createSelectorMissingResult(action, win, '当前搜索页未识别到稳定结果列表信号，建议等待页面加载完成后重试', [pageCheck, searchCheck]);
+    return createSelectorMissingResult(action, ctx, '当前搜索页未识别到稳定结果列表信号，建议等待页面加载完成后重试', [pageCheck, searchCheck]);
   }
 
-  return finalizeAndPublish(action, win, {
+  return finalizeAndPublish(action, ctx, {
     ok: true,
     checks: [pageCheck, searchCheck],
   });
@@ -229,12 +234,12 @@ function buildSecurityChallengeCheck(documentRef, win) {
   });
 }
 
-function createSecurityChallengeResult(action, win, documentRef) {
-  return finalizeAndPublish(action, win, {
+function createSecurityChallengeResult(action, ctx) {
+  return finalizeAndPublish(action, ctx, {
     ok: false,
     code: 'security_challenge',
     message: '检测到抖音安全验证，请先完成验证后继续操作',
-    checks: [buildSecurityChallengeCheck(documentRef, win)],
+    checks: [buildSecurityChallengeCheck(ctx.document, ctx.win)],
   });
 }
 
@@ -243,25 +248,27 @@ export function runDouyinSelectorPreflight(
   { params = {}, document = window.document, win = window } = {},
 ) {
   const normalizedAction = String(action || '').trim();
+  // 页面类型先探出来：安全验证与页面不符两种结局都要如实说这次是在哪类页面上看的。
+  const pageType = detectLocalDouyinPageType(win);
+  const ctx = { params, document, win, pageType };
+
   if (detectDouyinSecurityChallenge({ root: document, href: win?.location?.href || '' })) {
-    return createSecurityChallengeResult(normalizedAction, win, document);
+    return createSecurityChallengeResult(normalizedAction, ctx);
   }
 
-  const pageType = detectLocalDouyinPageType(win);
-
   if (DETAIL_ACTIONS.has(normalizedAction)) {
-    return runDetailPreflight(normalizedAction, { params, document, win, pageType });
+    return runDetailPreflight(normalizedAction, ctx);
   }
 
   if (PROFILE_ACTIONS.has(normalizedAction)) {
-    return runProfilePreflight(normalizedAction, { params, document, win, pageType });
+    return runProfilePreflight(normalizedAction, ctx);
   }
 
   if (BATCH_ACTIONS.has(normalizedAction)) {
-    return runBatchPreflight(normalizedAction, { params, document, win, pageType });
+    return runBatchPreflight(normalizedAction, ctx);
   }
 
-  return finalizeAndPublish(normalizedAction, win, {
+  return finalizeAndPublish(normalizedAction, ctx, {
     ok: true,
     checks: [createPageTypeCheck(pageType || 'unknown', pageType)],
   });
@@ -272,9 +279,10 @@ export function runDouyinSelectorBootstrapProbe(
 ) {
   const pageType = detectLocalDouyinPageType(win);
   const action = 'bootstrap';
+  const ctx = { params: {}, document, win, pageType };
 
   if (detectDouyinSecurityChallenge({ root: document, href: win?.location?.href || '' })) {
-    return createSecurityChallengeResult(action, win, document);
+    return createSecurityChallengeResult(action, ctx);
   }
 
   if (pageType === 'detail') {
@@ -285,7 +293,7 @@ export function runDouyinSelectorBootstrapProbe(
       document,
       'video/detail metadata',
     );
-    return finalizeAndPublish(action, win, detailCheck.ok
+    return finalizeAndPublish(action, ctx, detailCheck.ok
       ? {
           ok: true,
           code: 'ok',
@@ -307,7 +315,7 @@ export function runDouyinSelectorBootstrapProbe(
       document,
       'author header',
     );
-    return finalizeAndPublish(action, win, profileCheck.ok
+    return finalizeAndPublish(action, ctx, profileCheck.ok
       ? {
           ok: true,
           code: 'ok',
@@ -324,7 +332,7 @@ export function runDouyinSelectorBootstrapProbe(
   if (pageType === 'search') {
     const pageCheck = createPageTypeCheck('search', pageType);
     const searchCheck = buildSearchSignalCheck(win);
-    return finalizeAndPublish(action, win, searchCheck.ok
+    return finalizeAndPublish(action, ctx, searchCheck.ok
       ? {
           ok: true,
           code: 'ok',
@@ -338,7 +346,7 @@ export function runDouyinSelectorBootstrapProbe(
         });
   }
 
-  return finalizeAndPublish(action, win, {
+  return finalizeAndPublish(action, ctx, {
     ok: true,
     code: 'skipped',
     checks: [createPageTypeCheck(pageType || 'unknown', pageType)],

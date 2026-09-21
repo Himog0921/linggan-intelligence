@@ -10,6 +10,8 @@ export const LINGGAN_RUNTIME_ACTION = {
   TEST_FLYWHEEL_CONNECTION: 'testFlywheelConnection',
   GET_EXECUTION_STATION_STATUS: 'getExecutionStationStatus',
   REPORT_ACCOUNT_ELIGIBILITY: 'lingganReportAccountEligibility',
+  // 页面每次结构自检的受限快照。诊断是旁注：收下与拒收都不改变页面上正在做的事。
+  REPORT_SELECTOR_HEALTH: 'lingganReportSelectorHealth',
   // Sent only to the one already-claimed task page after it has reached a stable document.
   // This is a DOM fact query, never a background tab scan or platform navigation command.
   OBSERVE_CLAIMED_TASK_ACCOUNT: 'lingganObserveClaimedTaskAccount',
