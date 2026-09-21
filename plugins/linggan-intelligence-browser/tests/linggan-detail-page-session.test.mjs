@@ -12,6 +12,7 @@ import {
   validateDetailPageSessionPlan,
 } from '../src/linggan/detailPageSessionStore.js';
 import {
+  createTaskSpec,
   decodePageExecutionReceipt,
   detailPageSessionLanePreparationContractFromHealth,
   grantLingganDetailPageSession,
@@ -111,11 +112,12 @@ function lanePreparationReceipt() {
     contractVersion: 'linggan.detail-page-session.lane-preparation.v1',
     sessionRef: 'session-1',
     lanes: [
-      { capability: 'content_detail', taskId: 'detail-task-1', attemptId: 'attempt-content' },
-      { capability: 'media_slots', taskId: 'media-task-1', attemptId: 'attempt-media' },
-      { capability: 'comments', taskId: 'comments-task-1', attemptId: 'attempt-comments' },
-      { capability: 'replies', taskId: 'replies-task-1', attemptId: 'attempt-replies' },
-    ],
+      { capability: 'content_detail', taskId: '00000000-0000-4000-8000-000000000001', attemptId: '00000000-0000-4000-8000-000000000005' },
+      { capability: 'media_slots', taskId: '00000000-0000-4000-8000-000000000002', attemptId: '00000000-0000-4000-8000-000000000006' },
+      { capability: 'comments', taskId: '00000000-0000-4000-8000-000000000003', attemptId: '00000000-0000-4000-8000-000000000007' },
+      { capability: 'replies', taskId: '00000000-0000-4000-8000-000000000004', attemptId: '00000000-0000-4000-8000-000000000008' },
+    ].map((lane) => ({ ...lane, taskSpec: task(lane.capability, lane.taskId),
+      leaseExpiresAt: '2026-09-21T16:00:00Z' })),
   };
 }
 
@@ -129,13 +131,12 @@ function serializedTransaction() {
 }
 
 function task(capability, taskId = `${capability}-task`) {
-  return {
-    taskId,
-    source: 'scheduled',
-    platform: 'xhs',
-    target: { contentExternalId: 'note-1' },
-    capabilitiesRequested: [capability],
-  };
+  return createTaskSpec({
+    taskId: /^[0-9a-f-]{36}$/.test(taskId) ? taskId : `00000000-0000-4000-8000-${String(['content_detail','media_slots','comments','replies'].indexOf(capability)+1).padStart(12,'0')}`,
+    source: 'scheduled', platform: 'xhs', pageType: 'note_detail',
+    target: { contentExternalId: 'note-1' }, capabilitiesRequested: [capability],
+    maximumQuota: 1, riskPolicy: 'server_authorized_leased', stopConditions: ['maximum_quota'],
+  });
 }
 
 const plan = {
@@ -176,7 +177,7 @@ test('detail page plan is bounded to one content and the approved closed lane se
 });
 
 test('the first detail lane returns the exact dispatched page identity', () => {
-  const taskSpec = task('content_detail', 'detail-task-1');
+  const taskSpec = task('content_detail', '00000000-0000-4000-8000-000000000001');
   const receipt = detailPageSessionExecutionReceipt({
     action: 'lingganCollectNoteFull',
     taskSpec,
@@ -185,7 +186,7 @@ test('the first detail lane returns the exact dispatched page identity', () => {
   });
   assert.deepEqual(
     decodePageExecutionReceipt(receipt, {
-      action: 'lingganCollectNoteFull', capability: 'content_detail', taskId: 'detail-task-1',
+      action: 'lingganCollectNoteFull', capability: 'content_detail', taskId: '00000000-0000-4000-8000-000000000001',
     }),
     { ok: true, state: 'detail_page_session_queued', message: receipt.message },
   );
@@ -210,7 +211,7 @@ test('one persistent page result produces separate packages only for separately 
     assert.ok(capturePackage.records.every((record) => record.sourceObject.externalId === 'note-1'));
   }
 
-  await store.markTaskQueued(entry.cacheKey, 'comments', 'comments-task');
+  await store.markTaskQueued(entry.cacheKey, 'comments', task('comments').taskId);
   assert.equal(
     (await store.getForTask({ leaseRef: 'lease-1', taskSpec: task('comments') })).alreadyQueued,
     true,
@@ -356,12 +357,12 @@ test('the detail body is handed off before comments, and a timeout is not report
     'a recovered tab must still identify the expected content, not only the XHS domain');
 });
 
-test('a service that never announced the handshake receives the unchanged v1 grant request', async () => {
+test('a service without preparation cannot authorize new navigation', async () => {
   let sentBody = null;
   const result = await grantLingganDetailPageSession({
     installKey: 'install-1',
     installationCredential: 'credential-1',
-    taskId: 'detail-task-1',
+    taskId: '00000000-0000-4000-8000-000000000001',
     grantRequestId: 'request-1',
     executionSourceUrl: 'https://www.xiaohongshu.com/explore/note-1?xsec_token=token',
     health: grantHealth,
@@ -371,10 +372,9 @@ test('a service that never announced the handshake receives the unchanged v1 gra
     },
   });
   assert.equal(detailPageSessionLanePreparationContractFromHealth(grantHealth), '');
-  assert.ok(!Object.hasOwn(sentBody, 'lanePreparationContract'),
-    'an unannounced contract must not be requested; an older service rejects unknown fields');
-  assert.equal(result.granted, true);
-  assert.equal(result.lanePreparation, null);
+  assert.equal(sentBody, null, 'incompatible services receive no new navigation grant request');
+  assert.equal(result.granted, false);
+  assert.equal(result.reasonCode, 'grant_lane_preparation_unsupported');
 });
 
 test('an announced handshake is requested, and a missing receipt never authorizes a page open', async () => {
@@ -386,7 +386,7 @@ test('an announced handshake is requested, and a missing receipt never authorize
   const args = {
     installKey: 'install-1',
     installationCredential: 'credential-1',
-    taskId: 'detail-task-1',
+    taskId: '00000000-0000-4000-8000-000000000001',
     grantRequestId: 'request-1',
     executionSourceUrl: 'https://www.xiaohongshu.com/explore/note-1?xsec_token=token',
     health: handshakeHealth,
@@ -438,35 +438,35 @@ test('prepared lane identities are persisted with the navigation grant and canno
     now: () => 1000,
     createRequestId: () => 'request-1',
   });
-  const taskSpec = task('content_detail', 'detail-task-1');
+  const taskSpec = task('content_detail', '00000000-0000-4000-8000-000000000001');
   const prepared = await grantStore.prepare({ leaseRef: 'lease-1', taskSpec });
   await grantStore.attachServerGrant({
     grantKey: prepared.grantKey, sessionRef: 'session-1', plan,
     lanePreparation: lanePreparationReceipt(),
   });
-  const media = await lanePreparations.get('media-task-1');
-  assert.equal(media.attemptId, 'attempt-media');
+  const media = await lanePreparations.get('00000000-0000-4000-8000-000000000002');
+  assert.equal(media.attemptId, '00000000-0000-4000-8000-000000000006');
   assert.equal(media.leaseRef, 'lease-1');
   assert.equal(media.contentExternalId, 'note-1');
 
   // 同一身份重放是幂等的；换成另一个身份就是给同一通道改身份，必须拒绝。
   await lanePreparations.recordLanes({
     sessionRef: 'session-1', leaseRef: 'lease-1', contentExternalId: 'note-1',
-    lanes: [{ capability: 'media_slots', taskId: 'media-task-1', attemptId: 'attempt-media' }],
+    lanes: [lanePreparationReceipt().lanes[1]],
   });
   await assert.rejects(
     lanePreparations.recordLanes({
       sessionRef: 'session-1', leaseRef: 'lease-1', contentExternalId: 'note-1',
-      lanes: [{ capability: 'media_slots', taskId: 'media-task-1', attemptId: 'attempt-other' }],
+      lanes: [{ ...lanePreparationReceipt().lanes[1], attemptId: 'attempt-other' }],
     }),
     /lane_preparation_conflict/,
   );
   await assert.rejects(
     lanePreparations.recordLanes({
       sessionRef: 'session-1', leaseRef: 'lease-1', contentExternalId: 'note-1',
-      lanes: [{ capability: 'comments', taskId: 'media-task-1', attemptId: 'attempt-media' }],
+      lanes: [{ ...lanePreparationReceipt().lanes[1], capability: 'comments' }],
     }),
-    /lane_preparation_conflict/,
+    /lane_preparation_(conflict|invalid)/,
   );
 });
 

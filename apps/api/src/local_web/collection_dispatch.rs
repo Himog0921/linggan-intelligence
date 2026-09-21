@@ -16,8 +16,8 @@ use linggan_evidence::{
     AccountEligibilityObservation, CollectionControlError, DetailPageRiskSignalError,
     DetailPageSessionGrant, DetailPageSessionGrantError, DetailPageSessionNavigationError,
     DetailPageSessionProgress, DispatchDecision, DispatchFailureCode, DispatchFailureError,
-    DispatchFailureOutcome, ExplicitAccountEligibilitySignal, activate_installation_credential,
-    PreparedLaneDelivery, decide_dispatch, grant_detail_page_session,
+    DispatchFailureOutcome, ExplicitAccountEligibilitySignal, PreparedLaneDelivery,
+    activate_installation_credential, decide_dispatch, grant_detail_page_session,
     grant_detail_page_session_with_lane_deliveries, record_detail_page_session_progress,
     record_dispatch_answer, report_account_eligibility, report_claimed_task_account_eligibility,
     report_detail_page_risk_signal, requeue_failed_dispatch,
@@ -208,6 +208,7 @@ async fn grant_detail_page_session_route(
 
 fn detail_page_session_grant_error_code(error: &DetailPageSessionGrantError) -> &'static str {
     match error {
+        DetailPageSessionGrantError::UpgradeRecoveryOnly => "collection_upgrade_recovery_only",
         DetailPageSessionGrantError::SchemaUnavailable => "detail_page_session_schema_unavailable",
         DetailPageSessionGrantError::UnknownInstallation => {
             "detail_page_session_installation_unknown"
@@ -764,7 +765,12 @@ fn payload(decision: &DispatchDecision) -> serde_json::Value {
         }
         DispatchDecision::ControlBlocked { reason_code } => {
             payload["reasonCode"] = serde_json::json!(reason_code);
-            payload["reason"] = serde_json::json!("当前控制资格已变化，任务保持等待。");
+            payload["reason"] =
+                serde_json::json!(if reason_code == "collection_upgrade_recovery_only" {
+                    "采集恢复阶段：暂停新访问，已采集数据继续交付。"
+                } else {
+                    "当前控制资格已变化，任务保持等待。"
+                });
         }
     }
     payload

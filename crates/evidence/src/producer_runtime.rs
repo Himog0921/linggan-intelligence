@@ -26,6 +26,8 @@ pub enum ProducerRuntimeError {
     ScheduledTaskNotServerIssued,
     #[error("the scheduled task was not claimed by this producer installation")]
     ScheduledTaskNotClaimed,
+    #[error("the prepared lane is waiting for its live lease claim")]
+    ScheduledLaneAwaitingClaim,
     #[error("the producer task or attempt does not exist")]
     RoutingNotFound,
     #[error("the producer identity does not own the attempt")]
@@ -930,22 +932,28 @@ async fn prepared_lane_delivery_exists(
     if !table_present {
         return Ok(false);
     }
-    sqlx::query_scalar(
-        "SELECT EXISTS ( \
-             SELECT 1 FROM collection_detail_page_session_lane_preparation preparation \
+    let lease_live: Option<bool> = sqlx::query_scalar(
+        "SELECT lease.released_at IS NULL AND lease.expires_at > scope_001_now() \
+             FROM collection_detail_page_session_lane_preparation preparation \
+             JOIN collection_work_order_lease lease ON lease.lease_ref=preparation.lease_ref \
              JOIN plugin_installation installation \
                ON installation.installation_ref = preparation.owner_installation_ref \
              WHERE preparation.attempt_id = $1 \
                AND preparation.task_id = $2 \
                AND installation.install_key = $3::text \
-               AND installation.superseded_at IS NULL)",
+               AND installation.superseded_at IS NULL",
     )
     .bind(attempt.attempt_id())
     .bind(attempt.task_id())
     .bind(attempt.producer_instance_id())
-    .fetch_one(&mut **tx)
+    .fetch_optional(&mut **tx)
     .await
-    .map_err(ProducerRuntimeError::Internal)
+    .map_err(ProducerRuntimeError::Internal)?;
+    match lease_live {
+        Some(true) => Err(ProducerRuntimeError::ScheduledLaneAwaitingClaim),
+        Some(false) => Ok(true),
+        None => Ok(false),
+    }
 }
 
 pub async fn submit_producer_package(

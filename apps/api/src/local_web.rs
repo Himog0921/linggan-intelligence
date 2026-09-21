@@ -612,6 +612,7 @@ async fn health(State(state): State<LocalWebState>) -> Json<Value> {
     };
     Json(json!({
         "service": "linggan-local-web",
+        "collectionUpgradePhase": linggan_evidence::collection_upgrade_phase(),
         "listener": "loopback-only",
         "dataState": data_state,
         "evidenceReadModel": evidence_read_model,
@@ -1599,6 +1600,10 @@ async fn start_producer_attempt_route(State(state): State<LocalWebState>, body: 
         Err(ProducerRuntimeError::ScheduledTaskNotClaimed) => local_producer_error(
             axum::http::StatusCode::CONFLICT,
             "scheduled_task_not_claimed_by_producer",
+        ),
+        Err(ProducerRuntimeError::ScheduledLaneAwaitingClaim) => local_producer_error(
+            axum::http::StatusCode::CONFLICT,
+            "scheduled_lane_waiting_for_claim",
         ),
         Err(ProducerRuntimeError::Internal(_)) => local_producer_error(
             axum::http::StatusCode::SERVICE_UNAVAILABLE,

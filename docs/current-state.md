@@ -1,7 +1,7 @@
 # 当前状态与事项队列
 
 > 状态: 权威当前
-> 最后核对: 2026-09-20
+> 最后核对: 2026-09-21
 > 适用范围: 当前阶段、事项顺序、阻塞与下一步
 > 事实来源: 本机实际检查、已确认项目边界和完成计划
 > 冲突时以谁为准: 真实运行结果、ACCEPTED ADR 与用户最新确认
@@ -27,9 +27,9 @@
 - 本轮隔离 PostgreSQL 已通过作者归属、删除控制历史、阻止删除保护事实及名称确认等新增证明，并修正了四处旧测试夹具/断言，使其符合现有的 200 篇渐进建档、工单重排、租约历史与人可读北京时间合同。完整 LOCAL-001 脚本已通过，且其临时数据库、容器和卷均已清理；该结论仍只是候选源码证明，不代表共享迁移、PR 合并、运行时切换或真实采集。
 
 
-### COMMENT-STUDY-REBUILD-001 / Issue #295（受保护工作树；新合同实现中，未进入运行库）
+### COMMENT-STUDY-REBUILD-001 / Issue #295（已发布；作者声音排除修复候选中）
 
-Mog 于 2026-09-16 明确决定不迁移任何旧评论研究派生结果，并要求不保留旧 V1/V2/V3 代码路径、合同或兼容层。当前唯一权威是 [DEC-0006](decisions/0006-comment-research-clean-rebuild.md) 和 [COMMENT-STUDY-REBUILD-001](plans/active/comment-research-rebuild-001.md)：领域 ADHD 是组织范围，用户选择笔记，评论是研究目标与唯一 Signal 原声证据，标题／正文／OCR／ASR 和确知父评论只作为可追溯语境。开发期本机 reset 已执行，仅删除评论研究派生层，保留原始 Evidence、资格事实与媒体 disposition；真实模型调用、共享 migration、runtime 切换、3000 刷新、合并和业务验收仍未发生。
+Mog 于 2026-09-16 明确决定不迁移任何旧评论研究派生结果，并要求不保留旧 V1/V2/V3 代码路径、合同或兼容层。当前唯一权威是 [DEC-0006](decisions/0006-comment-research-clean-rebuild.md) 和 [COMMENT-STUDY-REBUILD-001](plans/active/comment-research-rebuild-001.md)：领域 ADHD 是组织范围，用户选择笔记，评论是研究目标与唯一 Signal 原声证据，标题／正文／OCR／ASR 和确知父评论只作为可追溯语境。开发期本机 reset 仅删除评论研究派生层，保留原始 Evidence、资格事实与媒体 disposition；随后评论研究已合并并刷新到本机 3000，Mog 已开始首次真实手动验收。真实 provider 端到端成功、P3 Recall@K 与业务结论仍分别 `NOT VERIFIED`。
 
 2026-09-17 新建独立候选 `codex/comment-study-layout-001`（base `origin/main@0a7c940`）收束用户指出的初始输入页空白 Hero 与卡片选择器：现为紧凑受控启动工具栏、可筛选的连续候选表、运行读数。临时 3001 真实读取到 100 篇 ADHD 作品；桌面和 390px 宽度浏览器走查、筛选后保留选择、页面静态测试均已通过。该候选不改 API、schema、worker、模型或 shell，且尚未提交、合并、刷新 3000 或取得 Mog 业务验收；细节见 [布局验收记录](design/acceptance/comment-study-layout-001-acceptance.md)。
 
@@ -38,6 +38,8 @@ Mog 于 2026-09-16 明确决定不迁移任何旧评论研究派生结果，并�
 2026-09-20，Mog 已授权 Issue #316 在 `codex/comment-study-p3-quality-gate-010` 专属 worktree 推进 P3 质量闸门与本地整合准备。候选 `feat/comment-study-p3-vectors` 已从 `129c9e3` 本地 rebase 至 `origin/main@8348096`，只裁定并保留了 `docs/progress/2026-09.md` 的双方记录；这不是 PR、merge 或最新基线 PostgreSQL 证明。随后在该 worktree 仅导入 P3 的十个提交，并以隔离 PostgreSQL fixture 修复 revision 读写、Problem core embedding 待办、旧 lexical candidate recall、probe 错误类别及 OCR→StudyContextSnapshot 资格断裂；前四项已通过双向复核，OCR 项已通过 source 定点复核，当前隔离 proof 为 41/41。#316 已制定 Gold Set/Recall@K、OCR 语境契约和未比较状态的无真实数据验证协议；其中 `retrieval_incomplete` 与 `budget_stopped` 现以中文保留在既有待归并读取面，API 静态测试为 243 passed、21 ignored（264 total）。现已在共享库只读范围冻结 100 条 FileVault 私有样本，并完成一次本地 WeMM MPS 预检；真实 P3 质量验证暂待 Mog 指定独立人工标注者，不能以 agent/模型自标代替 Gold Set。
 
 **2026-09-21 发布收口授权**：Mog 已明确授权审核本评论研究分支、提交推送、合并和刷新本机上线环境，并由 Mog 手动验收。发布前审核新增修复了 current revision 读取与 provider I/O 前 claim 永久卡住两项缺陷，中文 UI/提示词也已收束；相应隔离 PostgreSQL proof 已通过。一次三条私有评论的 provider 回放发现并修正 outcome/reason 合同遗漏，但后续回放未在工具会话时限内形成可用闭环。因此真实语义模型成功、P3 Recall@K 和业务验收仍是 `NOT VERIFIED`，发布不应被表述为 P3 出口通过。
+
+**2026-09-21 作者声音污染处置（候选修复，未合并／未部署）**：Mog 在发布后的首次真实运行 `21d1f1e7-674e-4ec3-992c-1020b7ba589b` 发现作品作者回复被列为评论研究目标。审计确认 source gate 只检查领域和可读性，未将评论作者与既有 `linggan_material_content_author` 的稳定作品作者身份比较；100 个目标中 40 个来自作品作者，67 条 Signal 中 20 条来自该身份。Mog 已授权删除该一次运行及其所有评论研究派生结果（100 target、13 batch、86 attempt、67 Signal、14 resolution、5 work、1 run），原始 Evidence 与通用模型调用账本保留。候选改为只接纳双方身份已知且不同的评论；作者根评论／回复仍可作为父语境，身份缺失 fail closed。下一次真实运行必须在该修复合并、部署后重新创建并由 Mog 验收。
 
 **下列 COMMENT-RESEARCH-V1/V2 段落仅记录历史运行和设计沿革，不再定义当前评论研究实现、运行或验收范围。**
 

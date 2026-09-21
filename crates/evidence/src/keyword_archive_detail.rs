@@ -145,6 +145,11 @@ pub async fn advance_keyword_archive_detail(
     purpose: &str,
     requested_by: &str,
 ) -> Result<KeywordDetailAdvance, AcquisitionChainError> {
+    if !crate::collection_governance_enabled() {
+        return Ok(KeywordDetailAdvance::Skipped(
+            "collection_upgrade_recovery_only",
+        ));
+    }
     let schema_ready: bool = sqlx::query_scalar(concat!(
         "SELECT ",
         sample_facts_schema_ready_sql!(),

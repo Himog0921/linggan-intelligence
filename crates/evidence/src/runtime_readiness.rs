@@ -26,6 +26,20 @@ use std::time::Duration;
 
 use linggan_storage_postgres::Database;
 
+/// Release staging only; delivery admission does not consult this switch.
+/// Missing or unrecognized configuration keeps new acquisition paused.
+pub fn collection_governance_enabled() -> bool {
+    std::env::var("LINGGAN_COLLECTION_UPGRADE_PHASE").as_deref() == Ok("governance")
+}
+
+pub fn collection_upgrade_phase() -> &'static str {
+    if collection_governance_enabled() {
+        "governance"
+    } else {
+        "recovery"
+    }
+}
+
 /// 未就绪时重新判定的节奏：1 秒起步、翻倍、封顶 60 秒。
 ///
 /// 起点短，是因为数据库常常只是还在启动，几秒就回来，不该让它等到下一分钟；上限等于扫描

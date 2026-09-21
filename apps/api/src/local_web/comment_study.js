@@ -15,6 +15,7 @@ const post = async (path, body) => {
 };
 const list = (items, render, empty) => items?.length ? items.map(render).join('') : `<p class="muted">${esc(empty)}</p>`;
 let loadedWorks = [];
+let sourcePreview = null;
 const selectedWorkRefs = new Set();
 
 const normalizedFilter = () => document.querySelector('#work-filter').value.trim().toLocaleLowerCase('zh-CN');
@@ -26,13 +27,43 @@ const selectedWorks = () => [...selectedWorkRefs];
 
 function updateSelection() {
   const count = selectedWorks().length;
-  document.querySelector('#selected-count').textContent = `已选择 ${count} 篇`;
+  const selectedEligible = loadedWorks
+    .filter(work => selectedWorkRefs.has(work.workRef))
+    .reduce((total, work) => total + Number(work.eligibleCommentCount || 0), 0);
+  const budget = Number(document.querySelector('#comment-budget').value || 0);
+  const frozenCount = budget > 0 ? Math.min(selectedEligible, budget) : 0;
+  document.querySelector('#selected-count').textContent = count
+    ? `已选择 ${count} 篇 · 合格 ${selectedEligible} 条 · 本次最多冻结 ${frozenCount} 条`
+    : '已选择 0 篇';
   document.querySelector('#start-run').disabled = count === 0;
   const visible = visibleWorks();
   const selectVisible = document.querySelector('#select-visible-works');
   const selectedVisibleCount = visible.filter(work => selectedWorkRefs.has(work.workRef)).length;
   selectVisible.checked = visible.length > 0 && selectedVisibleCount === visible.length;
   selectVisible.indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < visible.length;
+}
+
+function renderSourcePreview(preview) {
+  const target = document.querySelector('#source-preview');
+  if (!preview) {
+    target.textContent = '评论资格统计暂不可用。';
+    return;
+  }
+  const excluded = preview.excludedCounts || {};
+  const labels = {
+    commentAuthorUnknown: '评论作者身份未知',
+    workAuthorUnknown: '作品作者身份未知',
+    creatorVoice: '作品作者本人',
+    bodyUnavailable: '正文不可研究',
+    sourceRestricted: '来源受限',
+    textNotResearchable: '文本不具研究条件'
+  };
+  const reasons = Object.entries(labels)
+    .map(([key, label]) => [label, Number(excluded[key] || 0)])
+    .filter(([, count]) => count > 0)
+    .map(([label, count]) => `${label} ${count} 条`);
+  const excludedCount = Number(preview.totalCommentCount || 0) - Number(preview.eligibleCommentCount || 0);
+  target.textContent = `截至 ${String(preview.asOf || '').replace('T', ' ')}：共 ${Number(preview.totalCommentCount || 0)} 条评论；可研究 ${Number(preview.eligibleCommentCount || 0)} 条；未纳入 ${excludedCount} 条${reasons.length ? `（${reasons.join('；')}）` : ''}。`;
 }
 function renderWorks() {
   const container = document.querySelector('#works');
@@ -60,13 +91,17 @@ async function loadSetup() {
     const available = setup.modelConfigs?.length > 0;
     select.disabled = !available;
     document.querySelector('#save-policy').disabled = !available;
+    sourcePreview = setup.sourcePreview || null;
+    renderSourcePreview(sourcePreview);
     loadedWorks = setup.eligibleWorks || [];
     selectedWorkRefs.clear();
     renderWorks();
-    status.textContent = available ? `已加载 ${setup.eligibleWorks?.length || 0} 篇可选作品` : '没有启用的模型配置，无法保存策略。';
+    status.textContent = available ? `已加载 ${setup.eligibleWorks?.length || 0} 篇可选作品；此列表最多展示 100 篇。` : '没有启用的模型配置，无法保存策略。';
   } catch (error) {
     status.textContent = `无法读取准备信息：${error.message}`;
     document.querySelector('#work-filter-status').textContent = '作品列表不可用。';
+    sourcePreview = null;
+    renderSourcePreview(null);
     document.querySelector('#works').innerHTML = '<tr><td class="study-table-empty" colspan="3">作品列表不可用。</td></tr>';
   }
 }
@@ -127,6 +162,7 @@ async function renderOverviewTab() {
     return '<p class="study-empty">尚未创建过研究运行：选择作品并点击「创建研究运行」。</p>';
   }
   const targetTotal = Object.values(latest.targetStates || {}).reduce((sum, value) => sum + Number(value), 0);
+  const semantic = latest.semanticSummary || {};
   const stateRows = (map, states, emptyLabel) => Object.keys(states || {}).length
     ? Object.entries(states).map(([key, value]) => `<div class="study-stat"><strong>${Number(value)}</strong><span>${esc(label(map, key) ?? key)}</span></div>`).join('')
     : `<p class="study-empty">${esc(emptyLabel)}</p>`;
@@ -137,6 +173,14 @@ async function renderOverviewTab() {
       <div class="study-stat-group"><p class="study-label">目标处理状态</p><div class="study-stat-row">${stateRows(targetStateLabel, latest.targetStates, '尚无目标。')}</div></div>
       <div class="study-stat-group"><p class="study-label">研究信号的归并资格</p><div class="study-stat-row">${stateRows(eligibilityLabel, latest.signalStates, '本次运行没有研究信号。')}</div></div>
       <div class="study-stat-group"><p class="study-label">归并判断结果</p><div class="study-stat-row">${stateRows(resolutionLabel, latest.resolutionStates, '尚无已产生的归并判断。')}</div></div>
+      <div class="study-stat-group"><p class="study-label">语义与证据校验</p><div class="study-stat-row">
+        <div class="study-stat"><strong>${Number(semantic.modelInvocationCount || 0)}</strong><span>模型调用</span></div>
+        <div class="study-stat"><strong>${Number(semantic.firstAttemptAcceptedTargetCount || 0)}</strong><span>首次成功目标</span></div>
+        <div class="study-stat"><strong>${Number(semantic.retryRecoveredTargetCount || 0)}</strong><span>重试恢复目标</span></div>
+        <div class="study-stat"><strong>${Number(semantic.finalSemanticContractFailureCount || 0)}</strong><span>最终语义合同失败</span></div>
+        <div class="study-stat"><strong>${Number(semantic.finalEvidenceFailureCount || 0)}</strong><span>最终原声证据失败</span></div>
+        <div class="study-stat"><strong>${Number(semantic.acceptedEvidenceSpanMismatchCount || 0)}</strong><span>已接纳证据定位不符</span></div>
+      </div></div>
       <p>已关联到长期用户问题：<strong>${Number(latest.problemMembershipCount)}</strong> 条研究信号。</p>
     </article>`;
 }
@@ -291,6 +335,7 @@ document.querySelector('#start-run').addEventListener('click', async () => {
   finally { updateSelection(); }
 });
 document.querySelector('#work-filter').addEventListener('input', renderWorks);
+document.querySelector('#comment-budget').addEventListener('input', updateSelection);
 document.querySelector('#select-visible-works').addEventListener('change', event => {
   visibleWorks().forEach(work => {
     if (event.currentTarget.checked) selectedWorkRefs.add(work.workRef);

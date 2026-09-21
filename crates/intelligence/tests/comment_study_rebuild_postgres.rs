@@ -10,7 +10,7 @@ use linggan_evidence::{
     ensure_media_processing_work, record_derivative_disposition,
 };
 use linggan_intelligence::comment_study_source::{
-    ADHD_DOMAIN_REF, StudySourceError, eligible_sources,
+    ADHD_DOMAIN_REF, StudySourceError, eligible_sources, preview_sources,
 };
 use linggan_intelligence::{
     comment_study_acceptance::accept_target_output,
@@ -142,6 +142,187 @@ async fn source_gate_selects_only_adhd_current_readable_and_unrestricted_comment
         eligible_sources(&database, Uuid::new_v4(), as_of, 10).await,
         Err(StudySourceError::InvalidDomain)
     ));
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn source_gate_excludes_content_author_voice_and_unknown_roles() {
+    let database = proof_database("comment_study_source_author_role").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    detail_with_author(
+        &database,
+        "study-author-role-note",
+        "ADHD 家庭作业上下文",
+        Some("creator-1"),
+    )
+    .await;
+    let reader_comment = comment_with_author(
+        &database,
+        "study-author-role-note",
+        "study-author-role-reader",
+        "孩子每天写作业都要催，不催就不开始。",
+        Some("reader-1"),
+        "2026-09-16T08:00:00Z",
+    )
+    .await;
+    comment_with_author(
+        &database,
+        "study-author-role-note",
+        "study-author-role-creator-root",
+        "我是作者，这条是我的补充说明。",
+        Some("creator-1"),
+        "2026-09-16T08:01:00Z",
+    )
+    .await;
+    reply_with_author(
+        &database,
+        "study-author-role-note",
+        "study-author-role-creator-reply",
+        "study-author-role-reader",
+        "谢谢你的留言，我补充一下。",
+        Some("creator-1"),
+        "2026-09-16T08:02:00Z",
+    )
+    .await;
+    comment_with_author(
+        &database,
+        "study-author-role-note",
+        "study-author-role-unknown-commenter",
+        "没有稳定作者身份，不能断言是用户声音。",
+        None,
+        "2026-09-16T08:03:00Z",
+    )
+    .await;
+    comment_with_author(
+        &database,
+        "study-author-role-note",
+        "study-author-role-blank-commenter",
+        "空白作者身份也不能断言为用户声音。",
+        Some(" "),
+        "2026-09-16T08:03:30Z",
+    )
+    .await;
+    detail_with_author(
+        &database,
+        "study-author-role-unknown-work",
+        "作者身份未知的 ADHD 笔记",
+        None,
+    )
+    .await;
+    comment_with_author(
+        &database,
+        "study-author-role-unknown-work",
+        "study-author-role-unknown-work-comment",
+        "作品作者未知，不能断言这条是用户声音。",
+        Some("reader-2"),
+        "2026-09-16T08:04:00Z",
+    )
+    .await;
+
+    let selected = eligible_sources(
+        &database,
+        Uuid::parse_str(ADHD_DOMAIN_REF).unwrap(),
+        "2099-01-01T00:00:00Z",
+        10,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(selected.len(), 1);
+    assert_eq!(selected[0].source_ref, reader_comment);
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn setup_preview_counts_the_same_source_gate_that_freezes_targets() {
+    let database = proof_database("comment_study_source_preview").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    detail_with_author(
+        &database,
+        "study-preview-note",
+        "ADHD 研究对象资格",
+        Some("creator-1"),
+    )
+    .await;
+    let reader = comment_with_author(
+        &database,
+        "study-preview-note",
+        "study-preview-reader",
+        "孩子每天写作业都要催，不催就不开始。",
+        Some("reader-1"),
+        "2026-09-16T08:00:00Z",
+    )
+    .await;
+    comment_with_author(
+        &database,
+        "study-preview-note",
+        "study-preview-creator",
+        "我是作品作者，这是一条补充。",
+        Some("creator-1"),
+        "2026-09-16T08:01:00Z",
+    )
+    .await;
+    comment_with_author(
+        &database,
+        "study-preview-note",
+        "study-preview-unknown",
+        "不知道作者身份的评论。",
+        None,
+        "2026-09-16T08:02:00Z",
+    )
+    .await;
+    let restricted = comment_with_author(
+        &database,
+        "study-preview-note",
+        "study-preview-restricted",
+        "来源已经受限，不能进入研究。",
+        Some("reader-2"),
+        "2026-09-16T08:03:00Z",
+    )
+    .await;
+    comment_with_author(
+        &database,
+        "study-preview-note",
+        "study-preview-emoji",
+        "😭😭😭",
+        Some("reader-3"),
+        "2026-09-16T08:04:00Z",
+    )
+    .await;
+    sqlx::query(
+        "INSERT INTO linggan_material_comment_restriction( \
+           content_public_ref,comment_external_id,reason \
+         ) SELECT content_public_ref,comment_external_id,'synthetic restriction proof' \
+           FROM linggan_material_comment WHERE material_ref=$1",
+    )
+    .bind(restricted)
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    let domain_ref = Uuid::parse_str(ADHD_DOMAIN_REF).unwrap();
+    let as_of = "2099-01-01T00:00:00Z";
+    let preview = preview_sources(&database, domain_ref, as_of).await.unwrap();
+    let frozen = eligible_sources(&database, domain_ref, as_of, 3000)
+        .await
+        .unwrap();
+
+    assert_eq!(preview.total_comment_count, 5);
+    assert_eq!(preview.eligible_comment_count, frozen.len());
+    assert_eq!(frozen.len(), 1);
+    assert_eq!(frozen[0].source_ref, reader);
+    assert_eq!(preview.excluded_counts.creator_voice, 1);
+    assert_eq!(preview.excluded_counts.comment_author_unknown, 1);
+    assert_eq!(preview.excluded_counts.source_restricted, 1);
+    assert_eq!(preview.excluded_counts.text_not_researchable, 1);
+    assert_eq!(preview.works.len(), 1);
+    assert_eq!(preview.works[0].eligible_comment_count, 1);
 }
 
 #[tokio::test]
@@ -670,7 +851,8 @@ async fn semantic_acceptance_is_atomic_and_keeps_deferred_signals_visible() {
     assert_eq!(accepted.state, "accepted");
     assert_eq!(accepted.signal_count, 1);
     let signal = sqlx::query(
-        "SELECT evidence,eligibility_state FROM linggan_comment_study_signal WHERE target_ref=$1",
+        "SELECT evidence,evidence_start,evidence_end,eligibility_state \
+         FROM linggan_comment_study_signal WHERE target_ref=$1",
     )
     .bind(target_ref)
     .fetch_one(database.pool())
@@ -681,6 +863,24 @@ async fn semantic_acceptance_is_atomic_and_keeps_deferred_signals_visible() {
         "每天写作业都要催，不催就不开始"
     );
     assert_eq!(signal.get::<String, _>("eligibility_state"), "eligible");
+    let stored_evidence: String = signal.get("evidence");
+    let evidence_start: i32 = signal.get("evidence_start");
+    let evidence_end: i32 = signal.get("evidence_end");
+    let source_body: String =
+        sqlx::query_scalar("SELECT body_text FROM linggan_material_comment WHERE material_ref=$1")
+            .bind(source_ref)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        source_body
+            .chars()
+            .skip(evidence_start as usize)
+            .take((evidence_end - evidence_start) as usize)
+            .collect::<String>(),
+        stored_evidence,
+        "accepted evidence must remain a literal span of the immutable comment source"
+    );
     assert_eq!(
         sqlx::query_scalar::<_, String>(
             "SELECT state FROM linggan_comment_study_target WHERE target_ref=$1",
@@ -899,6 +1099,70 @@ async fn clean_read_projection_reports_new_lifecycle_states_without_old_result_f
     let signals = read_signals(&database, &run_query).await.unwrap();
     assert_eq!(signals["signals"][0]["eligibilityState"], "eligible");
     assert!(signals["signals"][0]["resolutionRef"].is_null());
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn overview_counts_a_final_json_schema_rejection_as_a_semantic_contract_failure() {
+    let database = proof_database("comment_study_read_semantic_summary").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    detail_with_author(
+        &database,
+        "study-semantic-summary-note",
+        "ADHD 语义摘要",
+        Some("creator-1"),
+    )
+    .await;
+    let source_ref = comment_with_author(
+        &database,
+        "study-semantic-summary-note",
+        "study-semantic-summary-comment",
+        "孩子每天写作业都要催。",
+        Some("reader-1"),
+        "2026-09-16T08:00:00Z",
+    )
+    .await;
+    let content_public_ref: Uuid = sqlx::query_scalar(
+        "SELECT content_public_ref FROM linggan_material_comment WHERE material_ref=$1",
+    )
+    .bind(source_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let target_ref = seed_running_target(
+        &database,
+        seed_study_policy(&database).await,
+        content_public_ref,
+        source_ref,
+    )
+    .await;
+    sqlx::query("UPDATE linggan_comment_study_target SET state='failed' WHERE target_ref=$1")
+        .bind(target_ref)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_comment_study_semantic_attempt( \
+           attempt_ref,target_ref,attempt_ordinal,request_hash,state,rejection_code,finished_at \
+         ) VALUES($1,$2,1,$3,'rejected','semantic_json_schema',scope_001_now())",
+    )
+    .bind(Uuid::new_v4())
+    .bind(target_ref)
+    .bind("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    let overview = read_overview(&database, &CommentStudyReadQuery::default())
+        .await
+        .unwrap();
+    assert_eq!(
+        overview["latestRun"]["semanticSummary"]["finalSemanticContractFailureCount"], 1,
+        "overview={overview}"
+    );
 }
 
 #[tokio::test]
@@ -1169,6 +1433,15 @@ async fn user_selected_work_run_freezes_only_selected_comments() {
         "2026-09-16T08:00:00Z",
     )
     .await;
+    let selected_newer_source = comment_with_author(
+        &database,
+        "study-run-one",
+        "study-run-one-newer-comment",
+        "同一作品第二条合格评论。",
+        Some("reader-3"),
+        "2026-09-16T08:02:00Z",
+    )
+    .await;
     comment_with_author(
         &database,
         "study-run-two",
@@ -1185,7 +1458,28 @@ async fn user_selected_work_run_freezes_only_selected_comments() {
     .fetch_one(database.pool())
     .await
     .unwrap();
-    seed_study_policy(&database).await;
+    let policy_ref = seed_study_policy(&database).await;
+    sqlx::query("UPDATE linggan_comment_study_policy SET comment_budget=1 WHERE policy_ref=$1")
+        .bind(policy_ref)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    let preview = preview_sources(
+        &database,
+        Uuid::parse_str(ADHD_DOMAIN_REF).unwrap(),
+        "2099-01-01T00:00:00Z",
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        preview
+            .works
+            .iter()
+            .find(|work| work.work_ref == selected_work)
+            .map(|work| work.eligible_comment_count),
+        Some(2),
+        "setup must report all selected-work candidates before the run applies its policy budget"
+    );
     let prepared = prepare_study_run(
         &database,
         PrepareStudyRunRequest {
@@ -1196,6 +1490,7 @@ async fn user_selected_work_run_freezes_only_selected_comments() {
     .unwrap();
     assert_eq!(prepared.selected_work_count, 1);
     assert_eq!(prepared.covered_work_count, 1);
+    assert_eq!(prepared.comment_budget, 1);
     assert_eq!(prepared.target_count, 1);
     assert_eq!(prepared.needs_context_count, 0);
     assert_eq!(
@@ -1206,7 +1501,8 @@ async fn user_selected_work_run_freezes_only_selected_comments() {
         .fetch_one(database.pool())
         .await
         .unwrap(),
-        selected_source
+        selected_newer_source,
+        "the same selected-work gate is applied before its policy budget truncates the frozen set"
     );
 }
 
@@ -2608,7 +2904,7 @@ async fn reply_context_is_frozen_as_context_but_not_evidence() {
         "study-parent-note",
         "study-parent-comment",
         "孩子每天写作业都要催。",
-        Some("reader-1"),
+        Some("creator-1"),
         "2026-09-16T08:00:00Z",
     )
     .await;
@@ -2638,6 +2934,16 @@ async fn reply_context_is_frozen_as_context_but_not_evidence() {
     )
     .await
     .unwrap();
+    let target_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM linggan_comment_study_target WHERE run_ref=$1")
+            .bind(prepared.run_ref)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        target_count, 1,
+        "the creator parent is context, not a target"
+    );
     let reply_target = sqlx::query(
         "SELECT dependency_state,state,parent_source_ref,input_manifest \
          FROM linggan_comment_study_target WHERE run_ref=$1 AND source_ref=$2",
@@ -3044,10 +3350,10 @@ async fn a_signal_is_never_called_novel_while_the_catalogue_cannot_be_searched()
     assert!(advance_next_problem_resolution(&database).await.unwrap());
     // Which of the two got advanced is not fixed, so it is recorded now rather than inferred
     // later: once both carry a resolution, "the other one" is no longer derivable.
-    let (settled_first, pending_next) = if resolution_state_for(&database, first).await.is_some() {
-        (first, second)
+    let settled_first = if resolution_state_for(&database, first).await.is_some() {
+        first
     } else {
-        (second, first)
+        second
     };
     assert_eq!(
         resolution_state_for(&database, settled_first).await,
@@ -3083,12 +3389,64 @@ async fn a_signal_is_never_called_novel_while_the_catalogue_cannot_be_searched()
     .await;
     assert!(advance_next_problem_resolution(&database).await.unwrap());
     assert_eq!(
-        resolution_state_for(&database, pending_next).await,
+        resolution_state_for(&database, settled_first).await,
         Some((
             "retrieval_incomplete".to_owned(),
             Some("problem_core_vectors_incomplete".to_owned())
         ))
     );
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn an_incomplete_recall_retries_after_a_profile_becomes_qualified() {
+    let database = proof_database("comment_study_resolution_resume").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    let (first, second) = two_eligible_signals(&database, "study-resolution-resume-note").await;
+
+    assert!(advance_next_problem_resolution(&database).await.unwrap());
+    let settled_first = if resolution_state_for(&database, first).await.is_some() {
+        first
+    } else {
+        second
+    };
+    assert_eq!(
+        resolution_state_for(&database, settled_first).await,
+        Some((
+            "retrieval_incomplete".to_owned(),
+            Some("no_qualified_profile".to_owned())
+        ))
+    );
+
+    let profile = seed_embedding_profile(&database).await;
+    for signal in [first, second] {
+        seed_vector(
+            &database,
+            profile,
+            &signal_canonical_hash(&database, signal).await,
+            0.0,
+        )
+        .await;
+    }
+
+    assert!(advance_next_problem_resolution(&database).await.unwrap());
+    assert_eq!(
+        resolution_state_for(&database, settled_first).await,
+        Some(("deferred_novel".to_owned(), None)),
+        "a complete, empty catalogue is now evidence of novelty"
+    );
+    let prior_reason: Option<String> = sqlx::query_scalar(
+        "SELECT candidate_manifest->'priorRetrievalIncomplete'->>'retrievalIncompleteReason' \
+         FROM linggan_comment_study_resolution WHERE signal_ref=$1",
+    )
+    .bind(settled_first)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(prior_reason.as_deref(), Some("no_qualified_profile"));
 }
 
 #[tokio::test]

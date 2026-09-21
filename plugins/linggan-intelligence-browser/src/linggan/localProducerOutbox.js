@@ -18,6 +18,25 @@ const RETRYABLE = ['pending', 'retryable', 'in_flight'];
 function currentTime() { return Date.now(); }
 function retryDelay(attempts) { return Math.min(60000, 1000 * (2 ** Math.min(6, attempts))); }
 
+function canonicalJson(value) {
+  if (Array.isArray(value)) return value.map(canonicalJson);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.keys(value).sort()
+      .filter((key) => value[key] !== undefined).map((key) => [key, canonicalJson(value[key])]));
+  }
+  return value;
+}
+
+function replayEnvelope(existing, incoming) {
+  const immutable = (row) => JSON.stringify(canonicalJson({
+    producerInstanceId: row.producerInstanceId, taskId: row.taskId, attemptId: row.attemptId,
+    contractVersion: row.contractVersion, taskSpec: row.taskSpec, attempt: row.attempt,
+    capturePackage: row.capturePackage, idempotencyKey: row.idempotencyKey || '',
+  }));
+  if (immutable(existing) !== immutable(incoming)) throw new Error('local_producer_identity_content_conflict');
+  return existing;
+}
+
 export function createLocalProducerOutbox(table = database.submissions, now = currentTime) {
   async function restoreExpired({ at = now(), limit = 20 } = {}) {
     const rows = await table
@@ -33,19 +52,27 @@ export function createLocalProducerOutbox(table = database.submissions, now = cu
 
   return {
     async get(submissionId) { return table.get(submissionId); },
+    async getByIdempotencyKey(key) { return table.where('idempotencyKey').equals(key).first(); },
+    async releaseForClaim(submissionId) {
+      const row = await table.get(submissionId);
+      if (row && ['pending', 'retryable'].includes(row.status)) {
+        await table.update(submissionId, { deliveryNotBefore: null, nextAttemptAt: now(), updatedAt: now() });
+      }
+    },
     async enqueue(envelope) {
       if (!envelope?.submissionId || !envelope?.attemptId || !envelope?.taskId || !envelope?.producerInstanceId) {
         throw new Error('invalid_local_producer_submission');
       }
       const existing = await table.get(envelope.submissionId);
-      if (existing) return existing;
+      if (existing) return replayEnvelope(existing, envelope);
       const idempotencyKey = String(envelope?.idempotencyKey || '').trim();
       if (idempotencyKey) {
         const replay = await table.where('idempotencyKey').equals(idempotencyKey).first();
-        if (replay) return replay;
+        if (replay) return replayEnvelope(replay, envelope);
       }
       const createdAt = now();
-      const row = { ...envelope, status: 'pending', attempts: 0, nextAttemptAt: createdAt, createdAt, updatedAt: createdAt };
+      const nextAttemptAt = Math.max(createdAt, Number(envelope.deliveryNotBefore) || 0);
+      const row = { ...envelope, status: 'pending', attempts: 0, nextAttemptAt, createdAt, updatedAt: createdAt };
       try {
         await table.add(row);
       } catch (error) {
@@ -54,7 +81,7 @@ export function createLocalProducerOutbox(table = database.submissions, now = cu
         // reuse the committed envelope instead of turning an intentional replay into a failure.
         if (idempotencyKey && error?.name === 'ConstraintError') {
           const replay = await table.where('idempotencyKey').equals(idempotencyKey).first();
-          if (replay) return replay;
+          if (replay) return replayEnvelope(replay, envelope);
         }
         throw error;
       }

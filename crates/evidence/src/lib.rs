@@ -16,6 +16,7 @@ mod cross_industry_sample_facts;
 mod directory_boundary;
 mod dispatch;
 mod execution_input_eligibility;
+pub use runtime_readiness::{collection_governance_enabled, collection_upgrade_phase};
 mod execution_station;
 mod ingress;
 mod keyword_archive_detail;
@@ -245,3 +246,5 @@ pub use work_resource_read::{
     WorkResourceReadError, WorkResourceSummary, read_work_resource, read_work_resources,
     work_resource_schema_is_ready,
 };
+
+pub mod collection_repair;

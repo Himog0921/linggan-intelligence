@@ -6,6 +6,33 @@
 > 事实来源: Mog 派定的交付包 `linggan-collection-upgrade-handoff-2026-09-21`、`origin/main@1ef5830c` 的代码与迁移、隔离 PostgreSQL 基线运行结果
 > 冲突时以谁为准: 交付包合同与 Mog 最新确认；实现事实以当前代码、迁移与真实验证输出为准
 
+## 2026-09-21 PR #328 修复与发布接手
+
+Mog 在本任务明确要求修复审查问题、提交合并 main 并部署刷新。该授权覆盖本交付包的代码、必要 schema 发布、插件候选、受控本机运行刷新；真实平台新增访问和任意历史数据重写仍不由发布推导。本节取代下文历史阶段中的“未授权 merge/push/部署”描述。
+
+- Claim：`pr-328-completion`；执行者 Codex 当前任务；起点 `0aa8ac20ff68d5137352ec9cf6ad61061dab874e`，整合 `origin/main@3ff3982`。
+- 专属 branch：`codex/pr-328-completion`；工作树：`/Users/moglenny/proma/linggan-intelligence/.worktrees/pr-328-review-20260921`。只更新既有 PR #328，不在共享 main 或原执行代理工作树改代码。
+- 范围：审查 F1–F5、S6 默认只读 repair preview/隔离应用证明、分阶段启用、版本兼容与插件可复现候选；补齐对应失败路径后运行定向和整包验证，提交前按 AGENTS.md 执行只读 commit-reviewer。
+- 通道准备合同补全原 TaskSpec。插件必须校验冻结通道全集和身份，再持久保存；已经取得的事实在后台按原 Task/Attempt 包装、冻结 envelope 并独立交付，不依赖后续执行 claim，不产生新导航。
+- IndexedDB 读取失败保持明确失败；同身份同内容重放、异内容冲突；未通告受支持准备协议的服务端不授予新插件新导航。旧已入队包仍按原身份交付。
+- 缓存恢复只处理实际持久化的 payload，未取得的数据保持未知。旧缓存缺完整原任务合同标记需处理，不猜造或改挂新 Task。
+- 发布先开启恢复能力，再依据隔离与本机兼容证据开启资格治理；所有运行检查分别记录 schema、SHA、PID、readiness、插件构建及尚未验证的业务层。
+- 以下 S0–S6、T 表与未授权说明保留为原提交的历史交付声明；最终修复结果以本节后续回执为准。
+
+### 接手后的合同更正（当前执行口径）
+
+本节覆盖下文交付代理在 `0aa8ac2` 及之前写下的完成、权限和发布判断；旧章节作为阶段记录保留，不能据其声明当前已上线。Mog 当前已授权修复、提交、合并到 main 与部署刷新。
+
+- F1/F3：导航准备保存每个通道完整 TaskSpec、原 Attempt 和租约边界；IDB 读写失败不得生成替代身份。缓存恢复独立扫描，冻结包后入队，活租约未 claim 的通道等待 claim 或租约结束；服务端返回 `scheduled_lane_waiting_for_claim` 时继续保留。
+- F2：`detail_page_session_lane_preparation_unavailable` 纳入未部署的 0097 约束及停止策略；不会再以 23514 代替停止回执。migration hash 以两处 fixture 与当前文件为准。
+- F4：outbox 同身份不同内容明确冲突；同内容重放保留原 envelope。session 首写与排队标记用事务防止并发覆盖，正文提前交付与最终重试共用冻结包。
+- F5：新插件遇旧 API 不发起新详情访问；旧 outbox 仍走原交付协议。
+- S6：提供 `linggan-collection-repair` 默认只读预览；每批最多 100 个对象，支持 `--task-id UUID` 精确查看被默认窗口截断的历史对象。仅缺输入、全部相关通道未开始、无会话/Attempt 的活租约可停止；其余逐项排除。预算历史未知不追溯扣分，本地 outbox 明示 NOT_OBSERVED。应用需要原文件、batch-id、preview-hash；逐项 serializable 重核，锁等待 2 秒、语句 5 秒；新输入/状态变化/争用跳过，重复应用不追加重复事件。JSON 回执绑定批次与预览哈希。
+- 分阶段发布：`LINGGAN_COLLECTION_UPGRADE_PHASE=recovery` 是默认值，暂停 claim、新 lease、新详情 grant 和关键词详情推进，但允许原包交付。仅验证后设 `governance`。回退使用同一新版二进制切回 recovery，保留新增 schema/状态/身份。旧二进制误读 input_blocked，**不批准回退旧二进制；禁止移动远端 main 指针**。
+- 插件发布为 0.8.55；源码、manifest、lock、ZIP、release-manifest 同版本。从全新 npm ci 重建并核验 hash。`scripts/proof-session-mv3.mjs` 使用一次性 Chromium profile、合成缓存、真实 IndexedDB/worker 重启和模拟交付接口；死代理阻止真实平台/本机 API 访问。此证明不等于真实平台验收。
+
+本次新增代码归属：领域修复入口 `crates/evidence/src/collection_repair.rs`，单次运维命令 `apps/worker/src/bin/collection_repair.rs`；两者不属于常驻 worker 自动任务。验证脚本与插件既有 scripts 同生命周期；运行输出仅进入任务证据目录，不进仓库。
+
 ## 1. 派定、授权与不做的事
 
 Mog 于 2026-09-21 派定交付包 `~/Downloads/linggan-collection-upgrade-handoff-2026-09-21 2/`，要求「按照这个包进行系统的修复升级」。交付包内含 S0–S6 步骤、T01–T34 验收矩阵与 E01–E10 事实表，是本包的唯一用户结果授权。
@@ -999,7 +1026,7 @@ S5 的三次变异分别落在 `crates/evidence/src/collection_control.rs`（代
 | 面 | 回滚动作 | 已验证的兼容性 | 未证明 |
 |---|---|---|---|
 | 迁移 | **不回滚**（仓库口径：append-only，没有 down 迁移）。回滚 = 代码回退，库里多出来的表/列/索引留着 | 多出来的东西对旧二进制不可见（`0096`/`0098`/`0100`）；`0101` 是**放宽** CHECK，旧码是新集合的子集，不可能因此写失败 | —— |
-| 二进制 | 把 `origin/main` 指回旧 revision 再走 `install.sh`；受控入口会先 drain 再换 | §12.4 逐条判过：`0097` 的 `execution_state = 'input_blocked'` 会被**旧二进制读成 `QUEUED`**——不崩、查询也不报错，但那条工单在旧二进制眼里变成「排队中」，而旧二进制不会再推进它（它不是旧代码认识的状态）。**回滚前必须确认没有工单还停在该状态**，或者明确接受它们显示成「排队中」 | 「旧二进制读到 `input_blocked` 之后到底会不会再动它」只按代码读出来（读成 QUEUED → 走排队路径），**没有真的用旧二进制跑过新库** |
+| 二进制 | **已被接手合同否决**：不得移动远端 main。当前回退为新版本切回 recovery；旧二进制回退未获兼容性放行 | §12.4 逐条判过：`0097` 的 `execution_state = 'input_blocked'` 会被**旧二进制读成 `QUEUED`**——不崩、查询也不报错，但那条工单在旧二进制眼里变成「排队中」，而旧二进制不会再推进它（它不是旧代码认识的状态）。**回滚前必须确认没有工单还停在该状态**，或者明确接受它们显示成「排队中」 | 「旧二进制读到 `input_blocked` 之后到底会不会再动它」只按代码读出来（读成 QUEUED → 走排队路径），**没有真的用旧二进制跑过新库** |
 | 插件 | 不需要（版本号没变、产物没动） | 旧插件对新 API 的全部路径按 §12.4 逐条判过 | 真实浏览器未做 |
 
 **与交付包 `03` §4／§5 的发布与回退合同对账（一处真冲突，报 Mog）**
@@ -1128,3 +1155,13 @@ S5 的三次变异分别落在 `crates/evidence/src/collection_control.rs`（代
 - 本次修复**之后**没有重跑整脚本 `./scripts/test-local-001-discovery-postgres.sh` 的 24 次全量，只跑受影响的层（读数见 §12.8 自动化行）。这是本表记录的**已知缺口**，不用「应该没影响」把它抹平。
 - §12.7 记的既有红灯（`release:verify`、clippy `too_many_lines`、插件 `current-surface-discovery-runtime`）**不是**复核发现的，是 S6 串证时就存在的，与本包无关（§11 已逐字节证明）。
 
+
+
+### PR #328 接手终态验证（提交前，2026-09-21）
+
+- 原代理交付不能判为全部完成；本次已补齐 F1–F5、并发缓存、repair 工具、阶段开关和候选发布。
+- `test:linggan` 290/290、`test:douyin` 69/69；新 npm ci/build/package 可重复，0.8.55 ZIP SHA-256 `888d2b387e22de56df591f485932e57c149c721393e998db33157ee8a72cabbf`。
+- 全量隔离 PostgreSQL：24 次 cargo 运行，256 passed / 0 failed；启动套件中最初 ignored 的 2 项在末尾独立运行通过，容器/库/卷清理通过。定向 dispatch 37/37；`linggan-evidence --lib` 92/92。
+- 真实 Chromium 合成 MV3 生命周期：worker 执行上下文确已更换；原四个 Submission/Attempt/Package 不变，4/4 模拟回执接纳；真实平台导航 0。证据边界为独立 profile/真实 IDB 与 worker/模拟 API，不是正式材料。
+- commit-reviewer 三轮只读复审收口；最后独立 Node 29/29，加测并发四通道标记完整，未发现新增阻断。治理检查通过。
+- 提交前发现 main 新合入 PR #329（4f4dada，评论研究范围，无 migration 冲突）；在推送前继续集成该提交并完成受影响验证。部署回执以实际 main SHA、共享迁移台账、运行身份和浏览器加载结果为准。

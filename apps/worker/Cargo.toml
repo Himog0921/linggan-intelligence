@@ -28,5 +28,9 @@ path = "src/bin/media_worker.rs"
 [[bin]]
 name = "linggan-media-requeue"
 path = "src/bin/media_requeue.rs"
+[[bin]]
+name = "linggan-collection-repair"
+path = "src/bin/collection_repair.rs"
+
 [lints]
 workspace = true

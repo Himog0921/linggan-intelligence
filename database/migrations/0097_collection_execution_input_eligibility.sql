@@ -151,6 +151,7 @@ ALTER TABLE collection_work_order_lease_task_dispatch_failure
         'detail_page_url_invalid','account_observation_blocked','execution_locator_unavailable',
         'execution_input_missing',
         'detail_page_session_grant_unavailable','detail_page_session_recovery_required',
+        'detail_page_session_lane_preparation_unavailable',
         'capture_delivery_rejected'
     ));
 

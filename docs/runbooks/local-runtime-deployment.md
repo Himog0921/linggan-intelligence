@@ -244,3 +244,36 @@ DOM 文本、带签名的地址的载荷收下来之后那些键一个不剩。�
 6. 发布、保存连接或保存 policy 均不会调用真实模型；连续排程没有入口且保持关闭。只有用户在页面主动点击“开始研究”才会冻结 V1 Run 并发送已获许可的评论。
 
 真实 provider 的语义质量与 Mog 业务验收不由上述基础设施步骤推断。
+
+
+## 8. COLLECTION-UPGRADE-001 分阶段刷新与停止新访问
+
+先应用 0096–0101，再从已合并 main 的最新脚本执行部署。部署源 `.env` 明确设
+`LINGGAN_COLLECTION_UPGRADE_PHASE=recovery`；缺失/未知值同样为 recovery。`install.sh`
+会同步该配置并受控 drain/restart。核对 `/health.collectionUpgradePhase`、readiness、
+导航准备契约和部署 revision 后，才将部署源配置改为 `governance`，再次受控刷新。
+recovery 下旧包的 Attempt 重放与 Submission 保持开放，不应清空浏览器数据库。
+
+插件从本次 0.8.55 release-manifest 指定 ZIP/源码 dist 切换，保留同一个扩展 ID 与用户数据。
+核验加载路径、版本和新的工位报到，不能把 ZIP 已生成写成实际插件已升级。
+
+有问题时使用**新版二进制切回 recovery**：它能识别新台账、准备身份与 input_blocked。
+不得重置远端 main，也不执行 down migration。旧二进制会将 input_blocked 误读为排队；
+未经新库兼容实证不得切回旧二进制。恢复阶段的 PostgreSQL 用例证明禁止新 claim 时旧包仍可接纳。
+
+历史处置工具默认只读（命令运行环境需设置正确的 `LINGGAN_LOCAL_DATABASE_URL`）：
+
+```bash
+cargo run --locked -p linggan-worker --bin linggan-collection-repair > /tmp/collection-repair-preview.json
+# 默认只展示最近 100 个对象；truncated=true 时可按原 taskId 精确查看：
+cargo run --locked -p linggan-worker --bin linggan-collection-repair -- --task-id <UUID>
+# 经逐项批准后的显式应用；UUID/hash 必须来自同一原始预览：
+cargo run --locked -p linggan-worker --bin linggan-collection-repair -- --apply /tmp/collection-repair-preview.json --batch-id <UUID> --preview-hash <SHA256>
+```
+
+默认预览只 SELECT；应用逐项重新核对并输出批次/哈希/结果。每批最多 100 个对象，
+每项锁等待 2 秒、语句 5 秒。冲突跳过而不强制重试，需重新预览；已成功项重放无额外事件。
+仅停止有明确作用域、缺输入且尚无任何在途材料的 pending 通道。旧 released/in_progress、
+已开始或有准备会话的对象不改写；本地 terminal/缺历史身份材料是 NOT_OBSERVED，需在原浏览器
+另作逐项核验，不得据服务端预览批量复活。输入历史未知的失败预算不追溯猜造。
+保存预览与应用 JSON 作为运维回执，原 Package、Receipt、失败历史均保留。

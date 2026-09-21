@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   claimLingganDispatch,
+  createTaskSpec,
   decodePageExecutionReceipt,
   detailPageRiskSignalRouteFromHealth,
   detailPageSessionGrantRouteFromHealth,
@@ -23,17 +24,26 @@ test('the claim route comes from /health and is namespace-checked', () => {
 });
 
 test('detail-page grant route is separately advertised and a lost response can replay the same grant', async () => {
-  const health = { routes: { dispatch: { detailPageSessionGrant: '/api/local/dispatch/detail-page-sessions/grant' } } };
+  const health = { routes: { dispatch: { detailPageSessionGrant: '/api/local/dispatch/detail-page-sessions/grant',
+    detailPageSessionLanePreparationContract: 'linggan.detail-page-session.lane-preparation.v1' } } };
+  const taskId = '20000000-0000-4000-8000-000000000001';
+  const taskSpec = createTaskSpec({ taskId, source: 'scheduled', platform: 'xhs', pageType: 'note_detail',
+    target: { contentExternalId: 'note-1' }, capabilitiesRequested: ['content_detail'], maximumQuota: 1,
+    riskPolicy: 'server_authorized_leased', stopConditions: ['maximum_quota'] });
+  const pageSessionPlan = { contractVersion: 'linggan.detail-page-session.v1', contentExternalId: 'note-1',
+    lanes: ['content_detail'], commentLimit: 0, replyExpandLimit: 0, cacheTtlSeconds: 120 };
+  const lanePreparation = { contractVersion: 'linggan.detail-page-session.lane-preparation.v1', sessionRef: 'session-1',
+    lanes: [{ capability: 'content_detail', taskId, taskSpec, attemptId: '30000000-0000-4000-8000-000000000001', leaseExpiresAt: '2026-09-21T16:00:00Z' }] };
   assert.equal(detailPageSessionGrantRouteFromHealth(health), '/api/local/dispatch/detail-page-sessions/grant');
   assert.equal(detailPageSessionGrantRouteFromHealth({ routes: { dispatch: { detailPageSessionGrant: '/api/other' } } }), null);
   const bodies = [
-    { outcome: 'authorized', sessionRef: 'session-1', pageSessionPlan: { contractVersion: 'linggan.detail-page-session.v1' } },
-    { outcome: 'replay', sessionRef: 'session-1', pageSessionPlan: { contractVersion: 'linggan.detail-page-session.v1' } },
+    { outcome: 'authorized', sessionRef: 'session-1', pageSessionPlan, lanePreparation },
+    { outcome: 'replay', sessionRef: 'session-1', pageSessionPlan, lanePreparation },
   ];
   const requests = [];
   for (const body of bodies) {
     const result = await grantLingganDetailPageSession({
-      installKey: 'install-1', installationCredential: 'credential-1', taskId: 'task-1', grantRequestId: 'request-1',
+      installKey: 'install-1', installationCredential: 'credential-1', taskId, grantRequestId: 'request-1',
       executionSourceUrl: 'https://www.xiaohongshu.com/explore/note-1?xsec_token=fixture', health,
       fetchImpl: async (url, options) => {
         requests.push({ url, body: JSON.parse(options.body) });

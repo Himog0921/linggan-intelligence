@@ -39,7 +39,9 @@ pub enum LeaseError {
     FrozenControlMissing,
     #[error("every step this work order froze is already done")]
     WorkOrderAlreadySatisfied,
-    #[error("every step this work order still has left is stopped: missing execution input, or an exhausted page-read budget")]
+    #[error(
+        "every step this work order still has left is stopped: missing execution input, or an exhausted page-read budget"
+    )]
     OnlyStoppedMembersRemain,
     #[error("collection control closed lease issuance: {reason_code}")]
     ControlBlocked { reason_code: String },
@@ -166,6 +168,11 @@ pub(crate) async fn issue_work_order_lease_in_transaction(
     work_order_ref: Uuid,
     valid_for_minutes: i32,
 ) -> Result<IssuedLease, LeaseError> {
+    if !crate::collection_governance_enabled() {
+        return Err(LeaseError::ControlBlocked {
+            reason_code: "collection_upgrade_recovery_only".to_owned(),
+        });
+    }
     if valid_for_minutes <= 0 {
         return Err(LeaseError::InvalidLeaseDuration);
     }

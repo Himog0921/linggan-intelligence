@@ -198,9 +198,8 @@ export function detailPageSessionGrantRouteFromHealth(health) {
 
 /**
  * The handshake version the service advertises for navigation-time delivery
- * identities.  Absent means this service predates the preparation step, and
- * the browser keeps using the compatibility path: no preparation is requested,
- * and none is assumed.
+ * identities. Missing support blocks new detail navigation; existing outbox
+ * delivery uses its original identity and stays independent of this handshake.
  */
 export function detailPageSessionLanePreparationContractFromHealth(health) {
   return String(health?.routes?.dispatch?.detailPageSessionLanePreparationContract || '').trim();
@@ -212,7 +211,7 @@ export function detailPageSessionLanePreparationContractFromHealth(health) {
  * lane, or a lane without a server-minted identity is not a preparation this
  * browser may act on.
  */
-export function normalizeDetailPageLanePreparation(value, { contractVersion, sessionRef } = {}) {
+export function normalizeDetailPageLanePreparation(value, { contractVersion, sessionRef, plan, taskId: initialTaskId } = {}) {
   const expectedContract = String(contractVersion || '').trim();
   const expectedSession = String(sessionRef || '').trim();
   if (!expectedContract || !expectedSession) return null;
@@ -221,16 +220,29 @@ export function normalizeDetailPageLanePreparation(value, { contractVersion, ses
   const lanes = Array.isArray(value?.lanes) ? value.lanes : null;
   if (!lanes || lanes.length === 0) return null;
   const normalized = [];
+  const taskIds = new Set();
+  const attemptIds = new Set();
+  const capabilities = new Set();
   for (const lane of lanes) {
     const capability = String(lane?.capability || '').trim();
     const taskId = String(lane?.taskId || '').trim();
     const attemptId = String(lane?.attemptId || '').trim();
     if (!['content_detail', 'media_slots', 'comments', 'replies'].includes(capability)
-        || !taskId || !attemptId) {
+        || !taskId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(attemptId)
+        || !Number.isFinite(Date.parse(lane.leaseExpiresAt))
+        || taskIds.has(taskId) || attemptIds.has(attemptId) || capabilities.has(capability)) {
       return null;
     }
-    normalized.push({ capability, taskId, attemptId });
+    try { validateTaskSpec(lane.taskSpec); } catch { return null; }
+    if (lane.taskSpec.taskId !== taskId || lane.taskSpec.source !== 'scheduled'
+        || lane.taskSpec.platform !== 'xhs' || lane.taskSpec.capabilitiesRequested[0] !== capability
+        || (plan && lane.taskSpec.target.contentExternalId !== plan.contentExternalId)
+        || (initialTaskId && capability === 'content_detail' && taskId !== initialTaskId)) return null;
+    taskIds.add(taskId); attemptIds.add(attemptId); capabilities.add(capability);
+    normalized.push({ capability, taskId, attemptId, taskSpec: lane.taskSpec, leaseExpiresAt: lane.leaseExpiresAt });
   }
+  if (plan && (!Array.isArray(plan.lanes) || plan.lanes.length !== capabilities.size
+      || plan.lanes.some((capability) => !capabilities.has(capability)))) return null;
   return { contractVersion: expectedContract, sessionRef: expectedSession, lanes: normalized };
 }
 
@@ -290,6 +302,9 @@ export async function grantLingganDetailPageSession({
   // contract it cannot verify.
   const requestedLanePreparationContract =
     detailPageSessionLanePreparationContractFromHealth(health);
+  if (requestedLanePreparationContract !== 'linggan.detail-page-session.lane-preparation.v1') {
+    return { granted: false, outcome: 'incompatible', reasonCode: 'grant_lane_preparation_unsupported' };
+  }
   if (typeof fetchImpl !== 'function' || !route
       || !String(installKey || '').trim() || !String(installationCredential || '').trim()
       || !String(taskId || '').trim() || !String(grantRequestId || '').trim()
@@ -324,6 +339,8 @@ export async function grantLingganDetailPageSession({
         ? normalizeDetailPageLanePreparation(body?.lanePreparation, {
           contractVersion: requestedLanePreparationContract,
           sessionRef,
+          plan: body.pageSessionPlan,
+          taskId,
         })
         : null;
       if (requestedLanePreparationContract && !lanePreparation) {

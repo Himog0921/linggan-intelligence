@@ -15,7 +15,8 @@ use crate::collection_control::{
     revalidate_frozen_capacity_in, validate_installation_credential_in,
 };
 use crate::execution_input_eligibility::{
-    MISSING_EXECUTION_INPUT_REASON, PageReadBudget, detail_material_already_accepted_in_transaction,
+    MISSING_EXECUTION_INPUT_REASON, PageReadBudget,
+    detail_material_already_accepted_in_transaction,
     record_detail_page_read_failure_in_transaction, requires_signed_execution_source,
     signed_locator_predicate, stop_material_for_missing_execution_input_in_transaction,
     task_content_external_id,
@@ -70,6 +71,8 @@ pub struct PreparedLaneDelivery {
     pub capability: String,
     pub task_id: Uuid,
     pub attempt_id: Uuid,
+    pub task_spec: Value,
+    pub lease_expires_at: String,
 }
 
 /// The only server response that may be paired with a browser's durable local
@@ -96,6 +99,8 @@ pub enum DetailPageSessionGrant {
 
 #[derive(Debug, thiserror::Error)]
 pub enum DetailPageSessionGrantError {
+    #[error("new page access is paused during delivery recovery rollout")]
+    UpgradeRecoveryOnly,
     #[error("dispatch schema is not applied")]
     SchemaUnavailable,
     #[error("no active plugin installation with that install key")]
@@ -338,6 +343,7 @@ impl DispatchDecision {
             Self::NothingWaiting => "nothing_waiting",
             Self::ExecutionLocatorUnavailable { .. } => "execution_locator_unavailable",
             Self::ControlBlocked { reason_code } => match reason_code.as_str() {
+                "collection_upgrade_recovery_only" => "collection_upgrade_recovery_only",
                 "risk_paused" => "risk_paused",
                 "installation_risk_cooldown" => "installation_risk_cooldown",
                 "station_unavailable" => "station_unavailable",
@@ -499,6 +505,9 @@ async fn grant_detail_page_session_inner(
     execution_source_url: &str,
     register_lane_deliveries: bool,
 ) -> Result<DetailPageSessionGrant, DetailPageSessionGrantError> {
+    if !crate::collection_governance_enabled() {
+        return Err(DetailPageSessionGrantError::UpgradeRecoveryOnly);
+    }
     if !dispatch_schema_is_ready(database).await? {
         return Err(DetailPageSessionGrantError::SchemaUnavailable);
     }
@@ -831,9 +840,10 @@ async fn register_lane_delivery_identities(
     let Some(lanes) = plan.get("lanes").and_then(Value::as_array) else {
         return Ok(None);
     };
-    let frozen: Vec<(Uuid, Option<String>)> = sqlx::query_as(
-        "SELECT runtime.task_id,runtime.task_spec #>> '{capabilitiesRequested,0}' \
+    let frozen: Vec<(Uuid, Option<String>, Value, String)> = sqlx::query_as(
+        "SELECT runtime.task_id,runtime.task_spec #>> '{capabilitiesRequested,0}',runtime.task_spec,replace((lease.expires_at AT TIME ZONE 'UTC')::text,' ','T') || 'Z' \
          FROM collection_work_order_lease_task task \
+         JOIN collection_work_order_lease lease ON lease.lease_ref=task.lease_ref \
          JOIN linggan_runtime_task runtime ON runtime.task_id=task.task_id \
          WHERE task.lease_ref=$1 \
            AND runtime.task_spec #>> '{target,contentExternalId}'=$2",
@@ -858,10 +868,10 @@ async fn register_lane_delivery_identities(
         else {
             return Ok(None);
         };
-        let mut candidates = frozen
-            .iter()
-            .filter(|(_, frozen_capability)| frozen_capability.as_deref() == Some(capability));
-        let Some((task_id, _)) = candidates.next() else {
+        let mut candidates = frozen.iter().filter(|(_, frozen_capability, _, _)| {
+            frozen_capability.as_deref() == Some(capability)
+        });
+        let Some((task_id, _, task_spec, lease_expires_at)) = candidates.next() else {
             return Ok(None);
         };
         if candidates.next().is_some() {
@@ -905,6 +915,8 @@ async fn register_lane_delivery_identities(
             capability: capability.to_owned(),
             task_id,
             attempt_id,
+            task_spec: task_spec.clone(),
+            lease_expires_at: lease_expires_at.clone(),
         });
     }
     Ok(Some(prepared))
@@ -1291,6 +1303,10 @@ pub async fn requeue_failed_dispatch(
             Some(("blocked", content_external_id))
         }
         (DispatchFailureCode::PageUnavailable, Some(content_external_id))
+        | (
+            DispatchFailureCode::DetailPageSessionLanePreparationUnavailable,
+            Some(content_external_id),
+        )
         | (DispatchFailureCode::DetailPageSessionRecoveryRequired, Some(content_external_id)) => {
             Some(("unavailable", content_external_id))
         }
@@ -1632,6 +1648,11 @@ pub async fn decide_dispatch(
     install_key: &str,
     installation_credential: &str,
 ) -> Result<DispatchDecision, DispatchError> {
+    if !crate::collection_governance_enabled() {
+        return Ok(DispatchDecision::ControlBlocked {
+            reason_code: "collection_upgrade_recovery_only".to_owned(),
+        });
+    }
     if !dispatch_schema_is_ready(database).await? {
         return Err(DispatchError::SchemaUnavailable);
     }
@@ -1765,7 +1786,8 @@ pub async fn decide_dispatch(
 
         let Some((task_id, lease_ref, task_spec, _platform, _lane)) = waiting else {
             let Some(claimed) =
-                claim_next_queued_work_order(&mut transaction, installation_ref, station_ref).await?
+                claim_next_queued_work_order(&mut transaction, installation_ref, station_ref)
+                    .await?
             else {
                 transaction.commit().await?;
                 return Ok(DispatchDecision::NothingWaiting);
@@ -1834,7 +1856,7 @@ pub async fn decide_dispatch(
 /// 停掉一个缺执行输入的成员：台账记原因、收束它那一篇的其余通道、记一条停止事件。
 ///
 /// 三件事一起做，且都不碰同批的其它作品——它们的地址是好的，没有被牵连的理由。
-async fn stop_member_for_missing_execution_input(
+pub(crate) async fn stop_member_for_missing_execution_input(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     installation_ref: Uuid,
     task_id: Uuid,
@@ -1850,11 +1872,12 @@ async fn stop_member_for_missing_execution_input(
     let Some(work_order_ref) = work_order_ref else {
         return Ok(());
     };
-    let lease_ref: Uuid =
-        sqlx::query_scalar("SELECT lease_ref FROM collection_work_order_lease_task WHERE task_id=$1")
-            .bind(task_id)
-            .fetch_one(&mut **transaction)
-            .await?;
+    let lease_ref: Uuid = sqlx::query_scalar(
+        "SELECT lease_ref FROM collection_work_order_lease_task WHERE task_id=$1",
+    )
+    .bind(task_id)
+    .fetch_one(&mut **transaction)
+    .await?;
     stop_material_for_missing_execution_input_in_transaction(
         transaction,
         task_id,
@@ -2103,7 +2126,11 @@ async fn claim_next_queued_work_order(
         }
     }
     Ok(deferred_control_block
-        .map(|reason_code| Some(ClaimedWork::Decision(DispatchDecision::ControlBlocked { reason_code })))
+        .map(|reason_code| {
+            Some(ClaimedWork::Decision(DispatchDecision::ControlBlocked {
+                reason_code,
+            }))
+        })
         .unwrap_or(None))
 }
 

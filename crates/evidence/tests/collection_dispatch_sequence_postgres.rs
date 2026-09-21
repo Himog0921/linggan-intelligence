@@ -2417,6 +2417,14 @@ async fn deliver_prepared_lane(
     fixture: &Fixture,
     lane: &PreparedLaneDelivery,
 ) {
+    let claimed = decide_dispatch(
+        database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("live delivery claims its original lane");
+    assert_eq!(task_id(&claimed), lane.task_id);
     let attempt = parse_producer_attempt(
         &serde_json::json!({
             "contractVersion": "linggan.producer.attempt.v1",
@@ -5091,4 +5099,215 @@ fn manual_task() -> ProducerTaskSpec {
         .to_string(),
     )
     .expect("manual task remains valid")
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn preparation_failure_reason_is_a_durable_stop() {
+    let database = proof_database_for("review_missing_preparation_failure").await;
+    let fixture = seed_creator_work_order(&database).await;
+    let content_external_id = "note-lane-preparation";
+    let signed_url = format!(
+        "https://www.xiaohongshu.com/user/profile/creator-fixture/{content_external_id}?xsec_token=SIGNED_PREPARATION%3D&xsec_source=pc_user"
+    );
+    submit_profile_discovery(&database, content_external_id, &signed_url).await;
+    let content_public_ref: Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content WHERE platform='xhs' AND content_external_id=$1",
+    )
+    .bind(content_external_id)
+    .fetch_one(database.pool())
+    .await
+    .expect("accepted discovery creates the stable content identity");
+    sqlx::query(
+        "INSERT INTO collection_work_order_material_target \
+         (work_order_ref,content_public_ref,ordinal,comment_limit,reply_expand_limit,acquire_media) \
+         VALUES ($1,$2,1,30,2,true)",
+    )
+    .bind(fixture.work_order_ref)
+    .bind(content_public_ref)
+    .execute(database.pool())
+    .await
+    .expect("the work order freezes all four lanes");
+    let _lease = issue_work_order_lease(&database, fixture.work_order_ref, 60)
+        .await
+        .expect("material deepening lease is issued");
+    let dispatch = decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("detail dispatch is decided");
+    let task = task_from_dispatch(&dispatch);
+    let _execution_source_url = match &dispatch {
+        DispatchDecision::Dispatch {
+            execution_source_url: Some(url),
+            ..
+        } => url.clone(),
+        other => panic!("signed discovery must produce a detail dispatch; got {other:?}"),
+    };
+
+    let outcome = requeue_failed_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+        task.task_id(),
+        Uuid::new_v4(),
+        DispatchFailureCode::DetailPageSessionLanePreparationUnavailable,
+    )
+    .await;
+    assert!(
+        outcome.is_ok(),
+        "new public failure code must be persisted, got {outcome:?}"
+    );
+    assert_task_state(&database, task.task_id(), "unavailable").await;
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn repair_preview_is_read_only_hash_bound_and_skips_changed_input() {
+    use linggan_evidence::collection_repair::{apply_collection_repair, preview_collection_repair};
+    let database = proof_database_for("collection_repair_preview").await;
+    let fixture = seed_creator_work_order(&database).await;
+    for (ordinal, note) in [(1, "repair-missing"), (2, "repair-changed")] {
+        submit_profile_discovery(
+            &database,
+            note,
+            &format!("https://www.xiaohongshu.com/explore/{note}"),
+        )
+        .await;
+        sqlx::query("INSERT INTO collection_work_order_material_target(work_order_ref,content_public_ref,ordinal,comment_limit,reply_expand_limit,acquire_media) SELECT $1,public_ref,$2,30,2,true FROM linggan_material_content WHERE content_external_id=$3")
+            .bind(fixture.work_order_ref).bind(ordinal).bind(note).execute(database.pool()).await.unwrap();
+    }
+    issue_work_order_lease(&database, fixture.work_order_ref, 60)
+        .await
+        .unwrap();
+    let before = package_and_receipt_counts(&database).await;
+    let preview = preview_collection_repair(&database).await.unwrap();
+    assert_eq!(preview.items.len(), 2);
+    let selected = linggan_evidence::collection_repair::preview_collection_repair_for_task(
+        &database,
+        Some(preview.items[0].task_id),
+    )
+    .await
+    .unwrap();
+    assert_eq!(selected.items, vec![preview.items[0].clone()]);
+    assert!(
+        preview
+            .items
+            .iter()
+            .all(|item| item.proposed_action == "stop_missing_input")
+    );
+    assert_eq!(before, package_and_receipt_counts(&database).await);
+    assert!(
+        apply_collection_repair(&database, &preview, preview.batch_id, "wrong")
+            .await
+            .is_err()
+    );
+    submit_profile_discovery(
+        &database,
+        "repair-changed",
+        "https://www.xiaohongshu.com/explore/repair-changed?xsec_token=NEW_FIXTURE",
+    )
+    .await;
+    let applied =
+        apply_collection_repair(&database, &preview, preview.batch_id, &preview.preview_hash)
+            .await
+            .unwrap();
+    assert_eq!(
+        applied
+            .iter()
+            .filter(|item| item.outcome == "stopped_missing_input")
+            .count(),
+        1
+    );
+    assert_eq!(
+        applied
+            .iter()
+            .filter(|item| item.outcome == "skipped_changed")
+            .count(),
+        1
+    );
+    let count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_work_order_lease_task_dispatch_failure",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let again =
+        apply_collection_repair(&database, &preview, preview.batch_id, &preview.preview_hash)
+            .await
+            .unwrap();
+    assert!(again.iter().all(|item| item.outcome == "skipped_changed"));
+    assert_eq!(
+        count,
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM collection_work_order_lease_task_dispatch_failure"
+        )
+        .fetch_one(database.pool())
+        .await
+        .unwrap()
+    );
+    assert_eq!(sqlx::query_scalar::<_,i64>("SELECT count(*) FROM collection_work_order_lease_task WHERE execution_state='input_blocked'").fetch_one(database.pool()).await.unwrap(),4);
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn recovery_phase_blocks_new_claims_but_preserves_old_delivery() {
+    const SCHEMA: &str = "collection_recovery_phase";
+    if let Ok(context) = std::env::var("COLLECTION_RECOVERY_CHILD") {
+        assert_eq!(linggan_evidence::collection_upgrade_phase(), "recovery");
+        let context: serde_json::Value = serde_json::from_str(&context).unwrap();
+        let database = Database::connect_within_schema(
+            &std::env::var("COLLECTION_DISPATCH_PROOF_DATABASE_URL").unwrap(),
+            SCHEMA,
+        )
+        .await
+        .unwrap();
+        assert!(
+            matches!(decide_dispatch(&database,context["key"].as_str().unwrap(),context["credential"].as_str().unwrap()).await.unwrap(),DispatchDecision::ControlBlocked{reason_code} if reason_code=="collection_upgrade_recovery_only")
+        );
+        let attempt = parse_producer_attempt(&context["attempt"].to_string()).unwrap();
+        let submission = parse_producer_submission(&context["submission"].to_string()).unwrap();
+        assert!(matches!(
+            start_producer_attempt(&database, &attempt).await.unwrap(),
+            RuntimeAttemptOutcome::Replay { .. }
+        ));
+        assert!(matches!(
+            submit_producer_package(&database, &submission)
+                .await
+                .unwrap(),
+            RuntimeSubmissionOutcome::Acknowledged { .. }
+        ));
+        return;
+    }
+    let database = proof_database_for(SCHEMA).await;
+    let fixture = seed_creator_work_order(&database).await;
+    issue_work_order_lease(&database, fixture.work_order_ref, 60)
+        .await
+        .unwrap();
+    let claim = decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .unwrap();
+    let task = task_from_dispatch(&claim);
+    let attempt = attempt(task.task_id(), fixture.producer_instance_id);
+    start_producer_attempt(&database, &attempt).await.unwrap();
+    let submission = scheduled_submission(&task, &attempt, fixture.producer_instance_id);
+    let attempt_wire = serde_json::json!({"contractVersion":"linggan.producer.attempt.v1","producerInstanceId":fixture.producer_instance_id,"taskId":task.task_id(),"attemptId":attempt.attempt_id()});
+    let submission_wire = serde_json::json!({"contractVersion":linggan_contracts::CAPTURE_PACKAGE_VERSION,"producerInstanceId":fixture.producer_instance_id,"taskId":task.task_id(),"attemptId":attempt.attempt_id(),"submissionId":submission.submission_id(),"capturePackage":submission.capture_package().raw()});
+    let result=std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--ignored","--exact","recovery_phase_blocks_new_claims_but_preserves_old_delivery"])
+        .env("LINGGAN_COLLECTION_UPGRADE_PHASE","recovery")
+        .env("COLLECTION_RECOVERY_CHILD",serde_json::json!({"key":fixture.install_key,"credential":fixture.installation_credential,"attempt":attempt_wire,"submission":submission_wire}).to_string())
+        .output().unwrap();
+    assert!(
+        result.status.success(),
+        "{} {}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
 }
