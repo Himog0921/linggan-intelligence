@@ -997,6 +997,39 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 .c-task-panel .c-control-section-head { min-height:calc(var(--c-cell) * 5); }
 .c-task-panel .c-frozen-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
 
+/* 回执结论与执行权结论都是机器码：中文先说结论，码降为同一行里的旁注。
+ *
+ * 没有回执时这行没有码可写——留空，不留一个空框，也不能落成 `UNKNOWN` 那个假码。 */
+[data-task-inspector-effect-code] { margin-left:var(--c-cell); color:var(--v7-ghost); font-family:var(--lgi-font-mono); font-size:var(--c-fs-100); }
+[data-task-inspector-effect-code]:empty { display:none; }
+
+/* 交付对账：一行一个已进入交付阶段的详情页会话。
+ *
+ * 结论不是会话自己记的状态——`delivery_pending` 的会话在冻结通道都拿到回执后读成已交付，
+ * 终结的会话压过一切晚到的进度。所以每一行除了结论，还要写出它的依据：几 / 几 通道已有
+ * 回执，或者「没有可核对的冻结通道」。光有一枚结论徽章，读的人没法自己判断它对不对。
+ *
+ * 与任务台账共用同一条左沿和同一套网格节奏，但行更矮：它是台账下面的一段核对，不是第二张
+ * 台账，所以不重复表头，也不给自己的每一行加边框之外的分隔。 */
+.c-task-delivery { margin-top:calc(var(--c-cell) * 4); }
+.c-task-delivery h2 { margin:calc(var(--c-cell) * 2) 0 0; color:var(--v7-black); font-size:var(--c-fs-500); }
+.c-task-delivery-list { margin-top:calc(var(--c-cell) * 2); border-top:var(--c-line-hair) solid var(--v7-line-strong); }
+.c-task-delivery-row {
+  display:grid; grid-template-columns:minmax(calc(var(--c-cell) * 19),1fr) calc(var(--c-cell) * 15) minmax(calc(var(--c-cell) * 14),.7fr) calc(var(--c-cell) * 16.5);
+  gap:calc(var(--c-cell) * 1.5); align-items:center;
+  padding:var(--c-cell) 0; border-bottom:var(--c-line-hair) solid var(--v7-line);
+}
+.c-task-delivery-target b { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--v7-black); font-size:var(--c-fs-200); }
+.c-task-delivery-target small,.c-task-delivery-lanes small { display:block; margin-top:calc(var(--c-cell) * .5); color:var(--v7-ghost); font-size:var(--c-fs-100); }
+.c-task-delivery-row .c-task-state { width:auto; flex:initial; padding:var(--c-cell); }
+.c-task-delivery-row .c-task-state b { font-size:var(--c-fs-100); }
+.c-task-delivery-lanes { color:var(--v7-body); font-size:var(--c-fs-100); overflow-wrap:anywhere; }
+.c-task-delivery-row time { color:var(--v7-muted); font:var(--c-fw-medium) var(--c-fs-100)/1.45 var(--lgi-font-mono); }
+
+@media (max-width:900px) {
+  .c-task-delivery-row { grid-template-columns:minmax(0,1fr); gap:var(--c-cell); }
+}
+
 /* 控制条。两个动作都落在真存在的地方；四个读数与下方仪器面、今日运行出自同一次读取。
  *
  * 它是一条跟栏，不是一个卡片：整条夹在上下两条线之间，不分左右边框，也不落阴影。
@@ -1140,6 +1173,11 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 .c-tg-station-grid .c-tg-number-value { text-align:center; }
 .c-stn-entry[open]>summary .c-stn-more{color:var(--lgi-signal-ink);font-weight:700}
 .c-stn-mono{font-family:var(--lgi-font-mono);font-variant-numeric:tabular-nums}
+/* 「工位版本」格里的第二行：这台安装最近一次的页面结构自检。版本号答的是「装的哪个版本」，
+ * 这一行答的是「还认不认得出页面」——两件事同格分行，免得自检结果被读成版本号的一部分。
+ * 这一格只有 84px 宽，行内只放一个短标记（语气沿用这张表既有的 `.c-tg-ok` / `.c-tg-warn`
+ * / `.c-tg-neutral`，不新增颜色），逐项事实在悬停提示里。 */
+.c-stn-health{display:block;margin-top:var(--lgi-space-1);font-size:var(--lgi-text-label);font-weight:600;white-space:nowrap}
 /* 展开面板换底色而不是画线：分区用面，不用线（LIDS-PRI-001 线条第 2 条）。 */
 .c-stn-panel{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:var(--lgi-space-5);padding:var(--lgi-space-5);background:var(--lgi-canvas-low);border-bottom:1px solid var(--lgi-hairline)}
 .c-stn-block{min-width:0}

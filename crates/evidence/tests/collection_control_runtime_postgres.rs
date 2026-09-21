@@ -9,9 +9,9 @@ use linggan_evidence::{
     RuntimeAttemptOutcome, RuntimeSubmissionOutcome, StationError,
     activate_installation_credential, apply_monitor_rule_command, bind_observation_account,
     check_in_installation, decide_dispatch, grant_authorization, open_claim_window, read_capacity,
-    read_runtime_capacity, register_station, report_account_eligibility, request_admit_and_lease,
-    request_and_admit, retire_station, rotate_installation_credential, run_due_patrols,
-    set_station_accepting, start_producer_attempt, submit_producer_package,
+    read_runtime_capacity, read_station_overview, register_station, report_account_eligibility,
+    request_admit_and_lease, request_and_admit, retire_station, rotate_installation_credential,
+    run_due_patrols, set_station_accepting, start_producer_attempt, submit_producer_package,
 };
 use linggan_storage_postgres::{Database, testing::isolated_proof_schema};
 use sqlx::Row;
@@ -133,6 +133,18 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0094_corpus_evidence_read_recovery.sql"),
     "\n",
     include_str!("../../../database/migrations/0095_detail_page_url_rejection.sql"),
+    "\n",
+    include_str!(
+        "../../../database/migrations/0096_detail_page_session_lane_delivery_identities.sql"
+    ),
+    "\n",
+    include_str!("../../../database/migrations/0097_collection_execution_input_eligibility.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0098_scheduler_tick_steps_and_readiness.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0099_collection_selector_health.sql"),
+    include_str!("../../../database/migrations/0100_collection_hot_path_indexes.sql"),
+    include_str!("../../../database/migrations/0101_collection_command_reason_vocabulary.sql"),
 );
 
 #[tokio::test]
@@ -549,27 +561,41 @@ async fn paused_target_queues_person_observation_while_dismissed_target_is_rejec
     .expect("manual observation rule side effects are inspectable");
     assert_eq!(rule_revisions, 0);
 
-    let unauthorized = seed_target(&database, "keyword", "paused", "manual-unauthorized").await;
+    // 关键词目标先过「归档完整性能不能读」这一关，再谈授权。本夹具登记的迁移里**没有**
+    // 这一关要读的四个关系所属的那四条（`0041` 的 `cross_industry_sample`、
+    // `0073` 的 `cross_industry_sample_observation`、`0079` 的 `cross_industry_sample_detail`、
+    // `0074` 的 `collection_work_order_cross_industry_target`），所以这里读到的是「读不出」，
+    // 拒绝发生在归档闸门，**根本没走到授权那一步**。
+    //
+    // （此前这里写作「迁移窗口到 `0038` 为止」——不准确：清单登记到 `0101`，只是中间缺了这四条。
+    // 实体结论不变，但说法要跟清单对得上。）
+    //
+    // 这条以前记的是 `database_unavailable`：那时原因码由一条 `_ =>` 兜底，任何没被逐个
+    // 命名的失败都被算成「数据库不可用」。现在每种失败都有自己的名字，于是一条库本身好着、
+    // 只是缺表的请求会如实说成 `schema_unavailable`——这正是要区分的两件事：前者该重试，
+    // 后者重试也不会变好。
+    let unreadable_archive =
+        seed_target(&database, "keyword", "paused", "manual-unreadable-archive").await;
     let refused =
-        apply_monitor_rule_command(&database, &manual_observe(unauthorized, Uuid::new_v4()))
+        apply_monitor_rule_command(&database, &manual_observe(unreadable_archive, Uuid::new_v4()))
             .await
-            .expect("authorization refusal returns a durable receipt");
+            .expect("a refusal at the archive gate returns a durable receipt");
     assert_eq!(refused.outcome, MonitorCommandOutcomeKind::Rejected);
-    assert_eq!(refused.reason_code, "database_unavailable");
+    assert_eq!(refused.reason_code, "schema_unavailable");
     assert!(refused.work_order_ref.is_none());
     assert!(refused.lease_ref.is_none());
     assert!(refused.applied_rule_revision_ref.is_none());
     let refused_facts: (i64, i64, i64) = sqlx::query_as(
         "SELECT \
            (SELECT count(*) FROM collection_monitor_rule_command_receipt \
-             WHERE command_receipt_ref=$1 AND reason_code='database_unavailable'), \
+             WHERE command_receipt_ref=$1 AND reason_code='schema_unavailable'), \
            (SELECT count(*) FROM collection_work_order WHERE target_ref=$2), \
            (SELECT count(*) FROM collection_work_order_lease lease \
              JOIN collection_work_order work_order USING(work_order_ref) \
              WHERE work_order.target_ref=$2)",
     )
     .bind(refused.receipt_ref)
-    .bind(unauthorized)
+    .bind(unreadable_archive)
     .fetch_one(database.pool())
     .await
     .expect("refused receipt and execution absence are inspectable");
@@ -755,6 +781,7 @@ async fn credential_response_loss_rotation_and_activation_are_recoverable_and_ha
             plugin_version: "0.8.47",
             browser_label: Some("credential-recovery"),
             capabilities: capabilities(),
+            selector_health: None,
         },
     )
     .await
@@ -933,6 +960,7 @@ async fn active_installation_heartbeat_rejects_spoofing_before_mutating_installa
                 plugin_version: "99.99.99",
                 browser_label: Some("spoofed"),
                 capabilities: spoofed_capabilities.clone(),
+                selector_health: None,
             },
         )
         .await;
@@ -961,6 +989,7 @@ async fn active_installation_heartbeat_rejects_spoofing_before_mutating_installa
             plugin_version: "0.8.35",
             browser_label: Some("authenticated"),
             capabilities: spoofed_capabilities.clone(),
+            selector_health: None,
         },
     )
     .await
@@ -982,6 +1011,160 @@ async fn active_installation_heartbeat_rejects_spoofing_before_mutating_installa
     .await
     .expect("authenticated heartbeat mutation is readable");
     assert_eq!(after, ("0.8.35".to_owned(), spoofed_capabilities, true));
+}
+
+/// S4c · 选择器自检：收下的才写，写下的能按平台读回，两个时刻始终是两个字段。
+///
+/// 四件事一起测，因为它们各自都能单独成立而合起来才说明这条链路是活的：
+///   1. 形状合规的一份报到会被存下来，并在工位读投影里读回**同一个平台、同一批检查项**；
+///   2. 第二次合规报到**覆盖**第一次——只测「存下来」会让一个永远写不进去的列也通过；
+///   3. 认不出平台的那份**整条不收**，且已存下的记录原样保留（不是被清空）；
+///   4. 这两种情况下报到**本身都成功**。诊断从不是准入判据：一份说不出所以然的快照
+///      不能让一台能干活机器掉线，一份写不进库的快照也不该让插件以为报到失败了。
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn selector_health_is_stored_read_back_and_never_gates_a_check_in() {
+    let database = proof_database("control_runtime_selector_health").await;
+    let installation = ready_installation(&database, "selector-health").await;
+
+    let first = selector_health_report("note_detail", "2026-09-21T06:12:00Z");
+    check_in_selector_health(&database, &installation, &first).await;
+
+    let station = station_row(&database, installation.station_ref).await;
+    assert_eq!(
+        station.active_selector_health.len(),
+        1,
+        "报到一次只该留下一条平台记录"
+    );
+    let health = &station.active_selector_health[0];
+    assert_eq!(health.platform, "xhs");
+    assert_eq!(health.page_type, "note_detail");
+    assert_eq!(health.capability, "comments");
+    // 时刻到读侧已经是页面统一的那种写法：ISO 不会漏到界面上。
+    assert_eq!(health.checked_at, "2026-09-21 14:12");
+    assert_eq!(health.verified_at, "2026-04-28 00:00");
+    assert_ne!(
+        health.checked_at, health.verified_at,
+        "这次检查的时刻与选择器上次人工重验的日期是两件事，不能压成一个"
+    );
+    assert_eq!(health.checked_categories, ["note_root", "comment_list"]);
+    assert_eq!(health.missing_categories, ["reply_expand"]);
+    assert_eq!(health.stale_categories, ["note_root"]);
+    assert_eq!(
+        health.failure_counts,
+        [("reply_expand".to_owned(), 3)],
+        "连续失败次数要按检查项读回来，而不是丢掉"
+    );
+
+    // 第二次合规报到：这一列必须真的会被改写，而不是只写得进第一次。
+    let second = selector_health_report("search_results", "2026-09-22T01:30:00Z");
+    check_in_selector_health(&database, &installation, &second).await;
+    let station = station_row(&database, installation.station_ref).await;
+    assert_eq!(station.active_selector_health.len(), 1);
+    assert_eq!(
+        station.active_selector_health[0].checked_at, "2026-09-22 09:30",
+        "新的一份报到应当覆盖旧的一份"
+    );
+    let kept = stored_selector_health(&database, installation.installation_ref).await;
+
+    // 认不出平台的一份：整条不收。它不是「这台安装现在没问题」，也不是「把旧的清掉」。
+    let unusable = serde_json::json!({
+        "weibo": {
+            "platform": "weibo",
+            "pageType": "note_detail",
+            "capability": "comments",
+            "checkedAt": "2026-09-23T01:00:00Z",
+            "verifiedAt": "2026-04-28T00:00:00+08:00",
+        }
+    });
+    check_in_selector_health(&database, &installation, &unusable).await;
+    assert_eq!(
+        stored_selector_health(&database, installation.installation_ref).await,
+        kept,
+        "收不下的一份报到不能改写这台安装已有的记录"
+    );
+
+    // 超长载荷同样整条不收。
+    let oversized = serde_json::json!({
+        "xhs": {
+            "platform": "xhs",
+            "pageType": "note_detail",
+            "capability": "comments",
+            "checkedAt": "x".repeat(4096),
+            "verifiedAt": "2026-04-28T00:00:00+08:00",
+        }
+    });
+    check_in_selector_health(&database, &installation, &oversized).await;
+    assert_eq!(
+        stored_selector_health(&database, installation.installation_ref).await,
+        kept,
+        "超过上限的一份报到不能改写已有记录"
+    );
+    let station = station_row(&database, installation.station_ref).await;
+    assert_eq!(station.active_selector_health.len(), 1);
+    assert_eq!(
+        station.active_selector_health[0].checked_at,
+        "2026-09-22 09:30"
+    );
+}
+
+/// 一份形状合规的报到，只有页面类型与检查时刻变化——其余字段是插件真实上报的那几个。
+fn selector_health_report(page_type: &str, checked_at: &str) -> serde_json::Value {
+    serde_json::json!({
+        "xhs": {
+            "platform": "xhs",
+            "pageType": page_type,
+            "capability": "comments",
+            "checkedAt": checked_at,
+            "verifiedAt": "2026-04-28T00:00:00+08:00",
+            "checkedCategories": ["note_root", "comment_list"],
+            "missingCategories": ["reply_expand"],
+            "staleCategories": ["note_root"],
+            "failureCounts": {"reply_expand": 3},
+        }
+    })
+}
+
+async fn check_in_selector_health(
+    database: &Database,
+    installation: &Installed,
+    selector_health: &serde_json::Value,
+) {
+    let outcome = check_in_installation(
+        database,
+        &InstallationCheckIn {
+            install_key: &installation.install_key,
+            installation_credential: Some(&installation.secret),
+            plugin_version: "0.8.54",
+            browser_label: Some("Chrome"),
+            capabilities: capabilities(),
+            selector_health: Some(selector_health),
+        },
+    )
+    .await
+    .expect("带诊断的报到与不带诊断的报到一样必须成功");
+    assert!(matches!(outcome, CheckInOutcome::Heartbeat { .. }));
+}
+
+async fn station_row(database: &Database, station_ref: Uuid) -> linggan_evidence::StationOverview {
+    read_station_overview(database)
+        .await
+        .expect("station overview reads")
+        .0
+        .into_iter()
+        .find(|station| station.station_ref == station_ref)
+        .expect("the station is in the overview")
+}
+
+async fn stored_selector_health(
+    database: &Database,
+    installation_ref: Uuid,
+) -> Option<serde_json::Value> {
+    sqlx::query_scalar("SELECT selector_health FROM plugin_installation WHERE installation_ref=$1")
+        .bind(installation_ref)
+        .fetch_one(database.pool())
+        .await
+        .expect("the stored diagnostic column is readable")
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1020,6 +1203,7 @@ async fn claim_pending_installation(
             plugin_version: "0.8.47",
             browser_label: Some(label),
             capabilities: capabilities(),
+            selector_health: None,
         },
     )
     .await

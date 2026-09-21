@@ -280,8 +280,13 @@ action:
 | `ACCEPTED` | 对应 lane 的 Package 已有接纳回执 | 全 lane 完整、Coverage 完整或平台事实代表性 |
 | `EXPIRED_WITHOUT_RECEIPT` | Lease 到期而该 lane 未见接纳回执 | 失败已可自动重试、平台没有内容 |
 | `COMPLETED_WITHOUT_RECEIPT` | Task 已结束而未见接纳回执 | 成功或已经观察 |
+| `INPUT_BLOCKED` | 这次复观测缺执行地址，在打开页面前就被停下，租约随之结束 | 已排队、稍后会自动重试、试过没成功 |
+
+`INPUT_BLOCKED` 是迁移 `0097` 新增的 `execution_state`：这类成员没有 Attempt、没有 Package，也不会沿这张租约继续走，只可能被**新的**输入或新的资格行重新派发。所以它是终态，界面不得显示为「已排队」，也不得让页面继续对它轮询等待。
 
 `ACCEPTED` 是回执事实，Coverage 仍按 lane 和每个 Package/Receipt 独立显示；部分 lane 接纳不能遮蔽另一个 lane 的未回执或部分 Coverage。
+
+本表是复观测状态的**闭集**声明。当前读取模型还会输出 `PAGE_UNAVAILABLE`（生产方确认页面不在）与 `DETAIL_READ_BLOCKED`（读过但未读成）两个值，本表与运行时词表都尚未给它们各自的文案，它们在界面上会落到兜底的 `来源未完整表达`。这是本页的已知缺口，不是上面两个状态的正确表达；补齐与否由产品决定（2026-09-21 记录，未扩展本次交付）。
 
 ### 7.4 组合规则
 

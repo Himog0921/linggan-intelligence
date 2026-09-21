@@ -10,6 +10,7 @@ use crate::collection_control::{
     CapacitySelection, evaluate_capacity_in, ready_batch_claim_slots_in, required_capabilities_for,
 };
 use crate::directory_boundary::directory_proven_sql;
+use crate::qualified_detail::qualified_detail_missing_sql;
 use crate::work_order_lease::{
     IssuedLease, LeaseError, issue_work_order_lease_in_transaction, lease_schema_is_ready,
 };
@@ -94,6 +95,17 @@ pub struct ProgressiveArchiveTickSummary {
     /// New code never records a browser dispatch here; only an eligible installation can do so.
     pub dispatched: Vec<Uuid>,
     pub skipped: Vec<(Uuid, String)>,
+}
+
+impl ProgressiveArchiveTickSummary {
+    /// 这一步在账本上该怎么记。这一步不数「考虑过多少」——留空，不写 0 冒充。
+    pub fn step_outcome(&self) -> crate::step_report::StepOutcome {
+        crate::step_report::StepOutcome::Ok {
+            considered: None,
+            produced: Some(i64::try_from(self.queued.len()).unwrap_or(i64::MAX)),
+            skipped: Some(i64::try_from(self.skipped.len()).unwrap_or(i64::MAX)),
+        }
+    }
 }
 
 const PROGRESSIVE_ARCHIVE_VERSION: i32 = 1;
@@ -1027,6 +1039,22 @@ pub(crate) async fn request_and_admit_in_transaction_scoped(
         write_material_targets(&mut *transaction, work_order_ref, material_targets).await?;
         write_cross_industry_targets(&mut *transaction, work_order_ref, cross_industry_samples)
             .await?;
+        // 工单写下的就是这一次要执行的输入，所以输入冻结在这里发生：停过而输入真的变了的
+        // 对象，在这里把当前资格交还给它（同一个 epoch 的当前行就地更新，并指回停过的那一行）。
+        // 返回值不入调用方契约——「这一次为什么又能跑了」的可追溯性住在台账行上，不靠一个计数转述。
+        let _reconciled = crate::execution_input_eligibility::open_successors_for_reopened_inputs_in_transaction(
+            &mut *transaction,
+            target_ref,
+            &material_targets
+                .iter()
+                .map(|target| target.content_public_ref)
+                .collect::<Vec<_>>(),
+            &cross_industry_samples
+                .iter()
+                .map(|target| target.sample_ref)
+                .collect::<Vec<_>>(),
+        )
+        .await?;
         Some(work_order_ref)
     } else {
         None
@@ -1735,14 +1763,18 @@ async fn write_work_order(
         scope_dedupe_fragment(scope),
     );
     let dispatch_group_key = (dispatch_lane == "batch").then(|| format!("target:{target_ref}"));
+    // 建单这一刻就是**冻结执行输入**的时刻。台账上的失败预算按需求范围跨工单累计，而它的
+    // 判据是「这些失败试的是不是同一份输入」——那句话只有冻过输入的工单证明得了（`0097`）。
+    // 本表建立之前的工单这一列如实为空：不补造历史，它们的失败只记进
+    // `prior_failures_unverified`，不进预算、也不构成对一篇作品的封禁。
     sqlx::query(
         "INSERT INTO collection_work_order \
              (work_order_ref, decision_ref, target_ref, lane, max_works, station_ref, \
              installation_ref,account_ref,eligibility_ref,monitor_rule_revision_ref,stop_conditions, \
              dispatch_lane,queue_state,scheduled_for,dedupe_key,estimated_work_units, \
-             dispatch_group_key,retry_not_before_at) \
+             dispatch_group_key,retry_not_before_at,execution_input_frozen_at) \
          VALUES ($1, $2, $3, $4, $5, NULL, NULL,NULL,NULL,$6,$7,$8,'queued', \
-                 scope_001_now(),$9,$10,$11,scope_001_now())",
+                 scope_001_now(),$9,$10,$11,scope_001_now(),scope_001_now())",
     )
     .bind(work_order_ref)
     .bind(decision_ref)
@@ -2071,6 +2103,120 @@ async fn complete_progressive_root_in_transaction(
     Ok(())
 }
 
+/// 渐进式建档的**规范目录**：根工单自己接纳的那一份 discovery Package 里的成员清单。
+///
+/// 候选查询和「还欠多少篇详情」的计数必须看同一份清单。各写一份的后果不是重复，而是判据
+/// 分叉：改动只落在其中一处时，空候选集的解释就会撒谎——把「还欠着、只是现在排不进去」
+/// 说成「已经齐了」，而收口一份没齐的基线是不可逆的（收口后的根不再被自动续跑）。
+const CANONICAL_DIRECTORY_CTE: &str = "WITH canonical_directory_package AS ( \
+     SELECT package.package_ref,package.accepted_at \
+     FROM collection_work_order root_order \
+     JOIN collection_work_order_lease lease USING(work_order_ref) \
+     JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
+     JOIN linggan_runtime_task task ON task.task_id=lease_task.task_id \
+     JOIN linggan_runtime_capture_package package ON package.task_id=task.task_id \
+     JOIN linggan_runtime_submission_receipt receipt USING(package_ref) \
+     WHERE root_order.target_ref=$1 AND root_order.work_order_ref=$2 \
+       AND package.package_kind='profile_discovery' \
+       AND receipt.execution_effect='COMPLETED_LIVE_STEP' \
+       AND receipt.material_admission='ACCEPTED' \
+     ORDER BY package.accepted_at DESC,package.package_ref DESC LIMIT 1 \
+ ), canonical_directory AS ( \
+     SELECT finding.content_public_ref,directory.accepted_at AS first_seen \
+     FROM canonical_directory_package directory \
+     JOIN linggan_material_discovery_finding finding USING(package_ref) \
+     JOIN linggan_runtime_record_disposition disposition \
+       ON disposition.package_ref=finding.package_ref \
+      AND disposition.record_ordinal=finding.record_ordinal \
+     WHERE finding.discovery_kind='profile_discovery' \
+       AND disposition.disposition='accepted_for_library_discovery' \
+ ), current_directory AS ( \
+     -- A progressive archive is a bounded historical scope. Patrol
+     -- discoveries remain visible in the current directory, but only
+     -- a separately authorized material-scope task may deepen them.
+     -- `content_external_id` 是为了让候选能问出执行输入那一句（与派发时的解析同一句）。
+     SELECT directory.content_public_ref,directory.first_seen, \
+            content.content_external_id \
+     FROM canonical_directory directory \
+     JOIN linggan_material_content content ON content.public_ref=directory.content_public_ref \
+ ) ";
+
+/// 「这一篇还没有详情」。候选与缺口计数共用同一条判据——两处一旦分叉，空候选集的解释就会错。
+///
+/// 判据本身住在 `qualified_detail.rs`：**合格详情材料**（材料本体 + 已接纳来源 + 未被隔离），
+/// 与观察目标列表、抽屉、关键词补齐四处读到的是同一句话。
+const MISSING_DETAIL_PREDICATE: &str =
+    qualified_detail_missing_sql!("current_directory.content_public_ref");
+
+/// 目录里**可以排进下一批**的成员：还欠详情、此刻解析得出执行地址、没有在途工单、
+/// 没有被判定读不出来，且预算还允许。
+///
+/// 后两条与关键词那一侧（`keyword_archive_detail.rs` 的入口判据）同源：一家「要不要为它
+/// 再开一张工单」的问题，两个面必须给同一个答案。少了它们，渐进建档会为解析不出地址的成员
+/// 每轮新建一张注定被停的工单——占一张工单、一次调度，一次页面都不打开。
+const MISSING_DETAIL_CANDIDATE_SQL: &str = "SELECT current_directory.content_public_ref FROM current_directory \
+     WHERE /*missing_detail*/ \
+       AND /*executable*/ \
+       AND NOT /*already_stopped*/ \
+       AND NOT EXISTS ( \
+         SELECT 1 FROM collection_work_order scoped_order \
+         JOIN collection_work_order_material_target scope USING(work_order_ref) \
+         LEFT JOIN collection_work_order_lease scoped_lease USING(work_order_ref) \
+         WHERE scoped_order.target_ref=$1 \
+           AND scope.content_public_ref=current_directory.content_public_ref \
+           AND (scoped_order.queue_state='queued' \
+                OR (scoped_lease.released_at IS NULL \
+                    AND scoped_lease.expires_at>scope_001_now()))) \
+       AND NOT EXISTS ( \
+         SELECT 1 FROM collection_work_order unavailable_order \
+         JOIN collection_work_order_material_target unavailable_scope \
+           ON unavailable_scope.work_order_ref=unavailable_order.work_order_ref \
+         JOIN linggan_material_content unavailable_content \
+           ON unavailable_content.public_ref=unavailable_scope.content_public_ref \
+         JOIN collection_work_order_lease unavailable_lease \
+           ON unavailable_lease.work_order_ref=unavailable_order.work_order_ref \
+         JOIN collection_work_order_lease_task unavailable_task \
+           ON unavailable_task.lease_ref=unavailable_lease.lease_ref \
+         JOIN linggan_runtime_task unavailable_runtime \
+           ON unavailable_runtime.task_id=unavailable_task.task_id \
+         WHERE unavailable_order.target_ref=$1 \
+           AND unavailable_content.public_ref=current_directory.content_public_ref \
+           -- An explicitly absent page and a bounded pre-Attempt read
+           -- failure both remain unresolved details. Neither may be
+           -- silently reintroduced by the automatic progressive worker;
+           -- a later retry requires a new, explicit acquisition decision.
+           AND unavailable_task.execution_state IN ('unavailable','blocked') \
+           AND unavailable_runtime.task_spec #>> '{target,contentExternalId}'=unavailable_content.content_external_id) \
+       -- 台账上的页面失败预算：用尽（停止）或还在退避里（等一下）都不再自动排新工作。
+       -- 上面那条按**本目标内某一张工单的成员状态**排除，管不住「另一张工单正在退避」：
+       -- 预算记在需求范围的当前资格行上，跨工单累计，所以判据也必须是跨工单的那一条。
+       AND NOT /*budget_blocked*/ \
+     ORDER BY current_directory.first_seen,current_directory.content_public_ref \
+     LIMIT $3";
+
+/// 目录里还欠着多少篇详情。候选为空时，它是唯一还能把「已经齐了」和「排不进去」分开的事实。
+const MISSING_DETAIL_COUNT_SQL: &str = "SELECT count(*)::bigint FROM current_directory \
+     WHERE /*missing_detail*/";
+
+/// 目录里还欠着多少篇详情。
+///
+/// 方向与候选查询一致：**预算用尽、被判定读不出来的成员照样算「欠着」**——停止的是重试，
+/// 不是缺口。把它们算成「不欠了」，等于用一次停止冒充一次完成。
+async fn missing_detail_count_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    target_ref: Uuid,
+    root_work_order_ref: Uuid,
+) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar(sqlx::AssertSqlSafe(
+        format!("{CANONICAL_DIRECTORY_CTE}{MISSING_DETAIL_COUNT_SQL}")
+            .replace("/*missing_detail*/", MISSING_DETAIL_PREDICATE),
+    ))
+    .bind(target_ref)
+    .bind(root_work_order_ref)
+    .fetch_one(&mut **transaction)
+    .await
+}
+
 async fn advance_progressive_archive_in_transaction(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     target_ref: Uuid,
@@ -2082,73 +2228,39 @@ async fn advance_progressive_archive_in_transaction(
     valid_for_minutes: i32,
     issue_lease: bool,
 ) -> Result<ProgressiveAdvance, RequestLeaseError> {
-    let content_refs: Vec<Uuid> = sqlx::query_scalar(
-        concat!(
-            "WITH canonical_directory_package AS ( \
-             SELECT package.package_ref,package.accepted_at \
-             FROM collection_work_order root_order \
-             JOIN collection_work_order_lease lease USING(work_order_ref) \
-             JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
-             JOIN linggan_runtime_task task ON task.task_id=lease_task.task_id \
-             JOIN linggan_runtime_capture_package package ON package.task_id=task.task_id \
-             JOIN linggan_runtime_submission_receipt receipt USING(package_ref) \
-             WHERE root_order.target_ref=$1 AND root_order.work_order_ref=$2 \
-               AND package.package_kind='profile_discovery' \
-               AND receipt.execution_effect='COMPLETED_LIVE_STEP' \
-               AND receipt.material_admission='ACCEPTED' \
-             ORDER BY package.accepted_at DESC,package.package_ref DESC LIMIT 1 \
-         ), canonical_directory AS ( \
-             SELECT finding.content_public_ref,directory.accepted_at AS first_seen \
-             FROM canonical_directory_package directory \
-             JOIN linggan_material_discovery_finding finding USING(package_ref) \
-             JOIN linggan_runtime_record_disposition disposition \
-               ON disposition.package_ref=finding.package_ref \
-              AND disposition.record_ordinal=finding.record_ordinal \
-             WHERE finding.discovery_kind='profile_discovery' \
-               AND disposition.disposition='accepted_for_library_discovery' \
-         ), current_directory AS ( \
-             -- A progressive archive is a bounded historical scope. Patrol
-             -- discoveries remain visible in the current directory, but only
-             -- a separately authorized material-scope task may deepen them.
-             SELECT content_public_ref,first_seen FROM canonical_directory \
-         ) \
-         SELECT current_directory.content_public_ref FROM current_directory \
-         WHERE NOT EXISTS ( \
-             SELECT 1 FROM linggan_material_content_detail detail \
-             WHERE detail.content_public_ref=current_directory.content_public_ref) \
-           AND NOT EXISTS ( \
-             SELECT 1 FROM collection_work_order scoped_order \
-             JOIN collection_work_order_material_target scope USING(work_order_ref) \
-             LEFT JOIN collection_work_order_lease scoped_lease USING(work_order_ref) \
-             WHERE scoped_order.target_ref=$1 \
-               AND scope.content_public_ref=current_directory.content_public_ref \
-               AND (scoped_order.queue_state='queued' \
-                    OR (scoped_lease.released_at IS NULL \
-                        AND scoped_lease.expires_at>scope_001_now()))) \
-           AND NOT EXISTS ( \
-             SELECT 1 FROM collection_work_order unavailable_order \
-             JOIN collection_work_order_material_target unavailable_scope \
-               ON unavailable_scope.work_order_ref=unavailable_order.work_order_ref \
-             JOIN linggan_material_content unavailable_content \
-               ON unavailable_content.public_ref=unavailable_scope.content_public_ref \
-             JOIN collection_work_order_lease unavailable_lease \
-               ON unavailable_lease.work_order_ref=unavailable_order.work_order_ref \
-             JOIN collection_work_order_lease_task unavailable_task \
-               ON unavailable_task.lease_ref=unavailable_lease.lease_ref \
-             JOIN linggan_runtime_task unavailable_runtime \
-               ON unavailable_runtime.task_id=unavailable_task.task_id \
-             WHERE unavailable_order.target_ref=$1 \
-               AND unavailable_content.public_ref=current_directory.content_public_ref \
-               -- An explicitly absent page and a bounded pre-Attempt read
-               -- failure both remain unresolved details. Neither may be
-               -- silently reintroduced by the automatic progressive worker;
-               -- a later retry requires a new, explicit acquisition decision.
-               AND unavailable_task.execution_state IN ('unavailable','blocked') \
-               AND unavailable_runtime.task_spec #>> '{target,contentExternalId}'=unavailable_content.content_external_id) \
-         ORDER BY current_directory.first_seen,current_directory.content_public_ref \
-         LIMIT $3",
-        ),
-    )
+    // 几条判据是运行时拼出来的（有的要带上这一侧的表达式，有的两边共用同一份字面量），
+    // 所以 SQL 里留整词占位符在这里替换——SQL 自己的花括号不参与，替换键不会误伤它们。
+    let content_refs: Vec<Uuid> = sqlx::query_scalar(sqlx::AssertSqlSafe(
+        format!("{CANONICAL_DIRECTORY_CTE}{MISSING_DETAIL_CANDIDATE_SQL}")
+            .replace("/*missing_detail*/", MISSING_DETAIL_PREDICATE)
+            .replace(
+                "/*executable*/",
+                &crate::execution_input_eligibility::has_executable_locator_predicate(
+                    "current_directory.content_external_id",
+                    false,
+                ),
+            )
+            .replace(
+                "/*already_stopped*/",
+                &crate::execution_input_eligibility::unchanged_input_block_predicate(
+                    "$1",
+                    "own_domain",
+                    "material_content",
+                    "current_directory.content_public_ref",
+                    "current_directory.content_external_id",
+                    false,
+                ),
+            )
+            .replace(
+                "/*budget_blocked*/",
+                &crate::execution_input_eligibility::budget_blocks_new_work_predicate(
+                    "$1",
+                    "own_domain",
+                    "material_content",
+                    "current_directory.content_public_ref",
+                ),
+            ),
+    ))
     .bind(target_ref)
     .bind(root_work_order_ref)
     .bind(PROGRESSIVE_ARCHIVE_BATCH_SIZE)
@@ -2156,12 +2268,13 @@ async fn advance_progressive_archive_in_transaction(
     .await
     .map_err(AcquisitionChainError::from)?;
     if content_refs.is_empty() {
-        // 「一篇都挑不出来」有两种完全不同的原因，必须分开告诉用户。
+        // 「一篇都挑不出来」有三种完全不同的原因，必须分开告诉用户。
         //
-        // 候选查询同时排除了「已经有详情的」和「已经在别的批次里在途的」。若只报
-        // `no_missing_accepted_work`，正在跑的批次会被说成「没有可继续的内容」——人看到的
-        // 是「点了没反应」，而实际上活正在进行。此前 `detail_batch_in_flight` 这个理由在
-        // 全仓库没有任何一处会产生，页面上那条「建档进行中」的提示永远不会出现。
+        // 候选查询同时排除了「已经有详情的」「已经在别的批次里在途的」「已经被判定读不出来
+        // 的」和「预算不允许再排的」。若只报 `no_missing_accepted_work`，正在跑的批次会被
+        // 说成「没有可继续的内容」——人看到的是「点了没反应」，而实际上活正在进行。此前
+        // `detail_batch_in_flight` 这个理由在全仓库没有任何一处会产生，页面上那条
+        // 「建档进行中」的提示永远不会出现。
         let in_flight: bool = sqlx::query_scalar(
             "SELECT EXISTS ( \
                  SELECT 1 FROM collection_work_order work_order \
@@ -2178,6 +2291,17 @@ async fn advance_progressive_archive_in_transaction(
         .map_err(AcquisitionChainError::from)?;
         if in_flight {
             return Ok(ProgressiveAdvance::Skipped("detail_batch_in_flight"));
+        }
+        // 没有在途的活，不等于目录已经齐了：还欠着详情的那几篇可能各自卡在「预算用尽」或
+        // 「已判定读不出来」上，等的是人的处置，不是下一次 tick。**这时候不能把根收口**——
+        // 收口意味着这份基线被说成完整，而它不完整；更重的是收口后的根不会再被自动续跑
+        // （活根查询只认 `status='active'`），欠着的那几条详情就永远等不到下一次机会。
+        let missing =
+            missing_detail_count_in_transaction(transaction, target_ref, root_work_order_ref)
+                .await
+                .map_err(AcquisitionChainError::from)?;
+        if missing > 0 {
+            return Ok(ProgressiveAdvance::Skipped("detail_gap_not_schedulable"));
         }
         complete_progressive_root_in_transaction(transaction, root_work_order_ref)
             .await

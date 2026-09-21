@@ -380,6 +380,180 @@ fn overview_orders_identity_system_facts_and_decision_as_four_distinct_layers() 
     assert!(!html.contains(r#"action="/collection/targets/archive""#));
 }
 
+/// T19 的界面一侧：**详情已经取到、只是没有标题**，行的说法必须与「还没去取」分开。
+///
+/// 两篇作品的标题都是空的，区别只在详情有没有落库。此前两行都写「标题待取得」，于是一份
+/// 已经在库里的材料看上去还欠一次采集——人会再去点一次补齐，采回来的还是同一份材料。
+/// 标题缺失是**字段覆盖度**（`0015` 的 `title_state='UNKNOWN'`），不是完成度。
+#[test]
+fn a_captured_work_without_a_title_says_the_field_is_missing_not_the_detail() {
+    use super::target_drawer::{
+        LifecycleView, TargetCatalogView, TargetDrawerTab, TargetInspectorView, TargetListContext,
+        TargetWorksView,
+    };
+
+    let target = sample_target(31, "creator");
+    let directory = linggan_evidence::CreatorDirectoryProjection {
+        works: vec![
+            catalog_work(1, linggan_evidence::CatalogDetailState::Complete, None),
+            catalog_work(2, linggan_evidence::CatalogDetailState::Pending, None),
+        ],
+    };
+    let html = super::target_drawer::render_with_catalog_view(
+        Some(&target),
+        None,
+        Some(&HashMap::new()),
+        Some(&target.target_ref.to_string()),
+        TargetDrawerTab::Baseline,
+        LifecycleView::NotRead {
+            window: CreatorLifecycleWindow::Recent90Days,
+            metric: CreatorLifecycleMetric::Likes,
+        },
+        TargetInspectorView::NotRead,
+        TargetWorksView::List,
+        TargetCatalogView::Creator(Some(&directory)),
+        None,
+        None,
+        None,
+        None,
+        &[],
+        TargetListContext::default(),
+    );
+
+    assert!(
+        html.contains("标题未收录"),
+        "详情已在库里、只是没有标题：说的是字段没收录，不是还欠一次采集"
+    );
+    assert!(html.contains("标题待取得"));
+    assert!(html.contains(r#"data-state="complete">已完成"#));
+    assert!(html.contains(r#"data-state="pending">待采集"#));
+    // 摘要行与逐行状态必须是同一个判据，一行说已取得、另一行说待取得就是自相矛盾。
+    assert!(html.contains("<b>1</b><span>详情已取得</span>"));
+    assert!(html.contains("<b>1</b><span>待取得详情</span>"));
+    // 没有标题就如实没有：页面上不出现编出来的标题占位以外的第二份说法。
+    assert_eq!(html.matches("标题未收录").count(), 1);
+    assert_eq!(html.matches("标题待取得").count(), 1);
+}
+
+/// 欠详情的作品必须说清**它欠的是什么**：等执行权、退避冷却、输入缺失、预算用尽，在用户那里
+/// 是四件不同的事（计划 §9.4）。此前这四种一律写成「待采集」，于是「试过没成」与「从未开始」
+/// 长得一样，「不会再自己回来」与「等一下就好」也长得一样——而它们的处理方式正好相反。
+///
+/// 判据只从领域读来的 `execution_state` 拿：这里摆的就是读到的结果，页面不许自己再拼一套。
+#[test]
+fn a_work_owed_detail_says_which_reason_it_is_waiting_on() {
+    use super::target_drawer::{
+        LifecycleView, TargetCatalogView, TargetDrawerTab, TargetInspectorView, TargetListContext,
+        TargetWorksView,
+    };
+    use linggan_evidence::{CatalogDetailState, MaterialExecutionKind};
+
+    let target = sample_target(41, "creator");
+    let directory = linggan_evidence::CreatorDirectoryProjection {
+        works: vec![
+            catalog_work(
+                1,
+                CatalogDetailState::Pending,
+                Some(MaterialExecutionKind::RetryPending),
+            ),
+            catalog_work(
+                2,
+                CatalogDetailState::Pending,
+                Some(MaterialExecutionKind::InputBlocked),
+            ),
+            catalog_work(
+                3,
+                CatalogDetailState::Pending,
+                Some(MaterialExecutionKind::BudgetExhausted),
+            ),
+            catalog_work(
+                4,
+                CatalogDetailState::Pending,
+                Some(MaterialExecutionKind::Executable),
+            ),
+            // 详情已经在库里时，「欠什么」不再是这一行要说的话：材料事实更强，也更能解释自己。
+            catalog_work(
+                5,
+                CatalogDetailState::Complete,
+                Some(MaterialExecutionKind::BudgetExhausted),
+            ),
+        ],
+    };
+    let html = super::target_drawer::render_with_catalog_view(
+        Some(&target),
+        None,
+        Some(&HashMap::new()),
+        Some(&target.target_ref.to_string()),
+        TargetDrawerTab::Baseline,
+        LifecycleView::NotRead {
+            window: CreatorLifecycleWindow::Recent90Days,
+            metric: CreatorLifecycleMetric::Likes,
+        },
+        TargetInspectorView::NotRead,
+        TargetWorksView::List,
+        TargetCatalogView::Creator(Some(&directory)),
+        None,
+        None,
+        None,
+        None,
+        &[],
+        TargetListContext::default(),
+    );
+
+    assert!(
+        html.contains(r#"data-state="retry_pending">延迟重试"#),
+        "退避冷却中的作品说的是「延迟重试」，不是笼统的「待采集」"
+    );
+    assert!(
+        html.contains(r#"data-state="input_blocked">输入不可执行"#),
+        "缺输入停下的作品不是读失败、也不是「待采集」——它一次页面都没打开过"
+    );
+    assert!(
+        html.contains(r#"data-state="budget_exhausted">自动重试已停止"#),
+        "预算用尽的作品不会再自己回来，这一句必须说出来"
+    );
+    assert!(
+        html.contains(r#"data-state="pending">待采集"#),
+        "输入有效、等的只是执行权的作品没有额外要说的"
+    );
+    assert!(html.contains(r#"data-state="complete">已完成"#));
+    assert_eq!(
+        html.matches("自动重试已停止").count(),
+        1,
+        "停止只出现在真的停止的那一行：已经取到详情的一行不许再说它停了"
+    );
+    // 摘要行仍按「详情已取得 / 待取得详情」两分：这一行说的是欠的原因，不改覆盖统计的口径。
+    assert!(html.contains("<b>1</b><span>详情已取得</span>"));
+    assert!(html.contains("<b>4</b><span>待取得详情</span>"));
+}
+
+fn catalog_work(
+    index: u128,
+    detail_state: linggan_evidence::CatalogDetailState,
+    execution: Option<linggan_evidence::MaterialExecutionKind>,
+) -> linggan_evidence::CatalogWork {
+    linggan_evidence::CatalogWork {
+        public_ref: uuid::Uuid::from_u128(index),
+        content_external_id: format!("work-{index}"),
+        title: None,
+        creator_display_name: Some("示例创作者".to_owned()),
+        match_position: Some(index as i64),
+        published_at: None,
+        source: linggan_evidence::CatalogSource::InitialArchive,
+        detail_state,
+        execution_state: execution.map(|kind| linggan_evidence::MaterialExecutionState {
+            kind,
+            reason_code: None,
+            eligibility_ref: uuid::Uuid::from_u128(index),
+            confirmed_at: None,
+            retry_at: None,
+        }),
+        media_state: "—",
+        comment_count: None,
+        last_captured_at: None,
+    }
+}
+
 #[test]
 fn queued_and_running_are_not_the_same_execution_claim() {
     use super::target_drawer::{

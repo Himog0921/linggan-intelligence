@@ -15,6 +15,8 @@ pub mod cross_industry_read;
 mod cross_industry_sample_facts;
 mod directory_boundary;
 mod dispatch;
+mod execution_input_eligibility;
+pub use runtime_readiness::{collection_governance_enabled, collection_upgrade_phase};
 mod execution_station;
 mod ingress;
 mod keyword_archive_detail;
@@ -53,10 +55,16 @@ pub mod observation_domain;
 mod observation_summary;
 mod patrol_scheduler;
 mod producer_runtime;
+mod qualified_detail;
 mod queue_position;
 mod receipt;
 mod runtime_capacity;
+mod runtime_event;
+mod runtime_readiness;
+mod scheduler_tick;
+mod selector_health;
 mod station_read;
+mod step_report;
 mod target_catalog;
 mod target_enrichment;
 mod target_inspector;
@@ -99,7 +107,9 @@ pub use collection_target::{
     read_target_avatars, read_target_deletion_preview, store_pending_target, transition_target,
 };
 pub use collection_task_read::{
-    CollectionTaskExecution, CollectionTaskTimeline, read_collection_task_timeline,
+    CollectionTaskExecution, CollectionTaskTimeline, DeliveryConclusion,
+    DetailDeliveryReconciliation, read_collection_task_timeline,
+    read_detail_delivery_reconciliation,
 };
 pub use content_reobservation::{
     ContentReobservation, ContentReobservationEligibility, ContentReobservationError,
@@ -117,11 +127,13 @@ pub use dispatch::{
     DISPATCH_FAILURE_RETRY_AFTER_SECONDS, DetailPageRiskSignalError, DetailPageRiskSignalReceipt,
     DetailPageSessionGrant, DetailPageSessionGrantError, DetailPageSessionNavigationError,
     DetailPageSessionProgress, DispatchDecision, DispatchError, DispatchFailureCode,
-    DispatchFailureError, DispatchFailureOutcome, decide_dispatch, dispatch_schema_is_ready,
-    grant_detail_page_session, record_detail_page_session_navigation,
+    DispatchFailureError, DispatchFailureOutcome, PreparedLaneDelivery, decide_dispatch,
+    dispatch_schema_is_ready, grant_detail_page_session,
+    grant_detail_page_session_with_lane_deliveries, record_detail_page_session_navigation,
     record_detail_page_session_progress, record_dispatch_answer, report_detail_page_risk_signal,
     requeue_failed_dispatch,
 };
+pub use execution_input_eligibility::{MaterialExecutionKind, MaterialExecutionState};
 pub use execution_station::{
     CheckInOutcome, InstallationCheckIn, InstallationClaimOutcome, StationError,
     check_in_installation, claim_installation, close_claim_window, open_claim_window,
@@ -166,9 +178,10 @@ pub use observation_summary::{
     PatrolReadState, TargetObservationSummary, read_target_observation_summaries,
 };
 pub use patrol_scheduler::{
-    PatrolTickSummary, SchedulerHeartbeat, patrol_schema_is_ready, read_dynamic_cadence_for_rule,
-    read_scheduler_heartbeat, record_scheduler_started, run_due_patrols, set_group_for_many,
-    set_monitoring_for_many, set_target_monitoring, target_monitoring_enabled,
+    PatrolStepError, PatrolTickSummary, SchedulerHeartbeat, patrol_schema_is_ready,
+    read_dynamic_cadence_for_rule, read_scheduler_heartbeat, record_scheduler_started,
+    run_due_patrol_step, run_due_patrols, set_group_for_many, set_monitoring_for_many,
+    set_target_monitoring, target_monitoring_enabled,
 };
 pub use producer_runtime::{
     MediaBlobAdmission, MediaUploadFinalizeClaim, MediaUploadSession, ProducerRuntimeError,
@@ -184,10 +197,29 @@ pub use runtime_capacity::{
     MonitorRuleSchedule, PatrolOutlook, PlatformDispatchCapacity, RuntimeCapacityOverview,
     read_runtime_capacity,
 };
-pub use station_read::{
-    CapabilityState, StationCapability, StationOverview, UnclaimedInstallation,
-    read_station_capabilities, read_station_overview, station_daily_note_usage,
+pub use runtime_event::{
+    EVENT_FIELD_WHITELIST, EVENT_READINESS, EVENT_STARTUP, EVENT_TICK, EVENT_TICK_STEP,
+    RuntimeEvent, SERVICE_MEDIA_WORKER, SERVICE_WORKER, runtime_revision,
 };
+pub use runtime_readiness::{
+    COLLECTION_RUNTIME_REQUIREMENTS, READINESS_RETRY_START, ReadinessState, RuntimeReadiness,
+    RuntimeRequirements, connect_runtime_readiness, next_readiness_retry, probe_runtime_readiness,
+};
+pub use scheduler_tick::{
+    STEP_KEYWORD_DETAILS, STEP_MEDIA_ACQUISITION, STEP_PATROL, STEP_PROGRESSIVE_DOSSIERS,
+    TICK_STEP_KEYS, TickLedger, record_readiness, tick_outcome,
+};
+pub use selector_health::{
+    SELECTOR_HEALTH_MAX_BYTES, SELECTOR_HEALTH_MAX_CATEGORIES, SELECTOR_HEALTH_PAGE_TYPES,
+    SELECTOR_HEALTH_PLATFORMS, SELECTOR_HEALTH_SNAPSHOT_FIELDS, SelectorHealthRejection,
+    accepted_selector_health, normalize_selector_health,
+};
+pub use station_read::{
+    CapabilityState, StationCapability, StationOverview, StationSelectorHealth,
+    UnclaimedInstallation, read_station_capabilities, read_station_overview,
+    station_daily_note_usage,
+};
+pub use step_report::{StepFailure, StepOutcome, StepReport};
 pub use target_catalog::{
     CatalogDetailState, CatalogSource, CatalogWork, CreatorDirectoryProjection,
     KeywordCatalogCounts, KeywordHitProjection, read_creator_directory, read_cross_industry_hits,
@@ -214,3 +246,5 @@ pub use work_resource_read::{
     WorkResourceReadError, WorkResourceSummary, read_work_resource, read_work_resources,
     work_resource_schema_is_ready,
 };
+
+pub mod collection_repair;

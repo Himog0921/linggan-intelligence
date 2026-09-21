@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { MSG, TASK_STATE } from '../src/shared/constants.js';
-import { createBatchMessageHandlers } from '../src/content/douyinBatchMessageHandlers.js';
+import { createBatchMessageHandlers } from './historical/douyinBatchMessageHandlers.js';
 
 function createManagedTaskController(runTask) {
   return {

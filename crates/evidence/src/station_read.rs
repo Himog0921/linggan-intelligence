@@ -5,6 +5,7 @@
 
 use crate::execution_station::{StationError, station_schema_is_ready};
 use linggan_storage_postgres::Database;
+use serde_json::Value;
 use uuid::Uuid;
 
 /// 一台工位当天碰过的**笔记篇数**。
@@ -92,6 +93,10 @@ pub struct StationOverview {
     /// 当天碰过的笔记篇数（去重）。与准入判定读同一段 SQL——旧项目两处口径不同，出现过
     /// 「页面显示已达上限但仍在派单」。
     pub daily_notes_used: i64,
+    /// 在岗安装最近一次上报的页面结构自检（受限快照），**按平台各一条**——一台机器可能同时
+    /// 跑两个站点。空表示**这台安装没有可用记录**：从来没报到过诊断，或报来的那一份没被收下。
+    /// 它不是「一切正常」，两者在页面上必须看得出区别。
+    pub active_selector_health: Vec<StationSelectorHealth>,
     /// 上一次这台工位来问活时，服务端给出的回答。三项一起为空表示它还从来没问过。
     ///
     /// 这不是「现在能不能接活」——那是 `RuntimeCapacityOverview` 的判定。这里是**实际
@@ -101,6 +106,91 @@ pub struct StationOverview {
     pub last_dispatch_answer_code: Option<String>,
     /// 回答是「被拦住」时，拦住它的那条具体原因码。
     pub last_dispatch_answer_reason: Option<String>,
+}
+
+/// 一台工位在岗安装最近一次结构自检的受限快照。
+///
+/// 形状与插件上报的一致（见 `crate::selector_health`），这里只把存下来的 JSON 读成有名字的
+/// 字段，**不补默认值**：没写的就是空的，写 `unknown` 的保持 `unknown`。两个时刻分开存，
+/// 也分开读——把它们合成一个，页面就会把「刚检查过」显示成「刚验证过」。
+///
+/// 两个时刻到这里已经是 `YYYY-MM-DD HH:MM`：查询里过了 `linggan_human_moment`。存的是 ISO，
+/// 页面要的是人话，换写法的地方只该有一处。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StationSelectorHealth {
+    pub platform: String,
+    pub page_type: String,
+    pub capability: String,
+    pub checked_at: String,
+    pub verified_at: String,
+    pub checked_categories: Vec<String>,
+    pub missing_categories: Vec<String>,
+    pub stale_categories: Vec<String>,
+    /// 连续失败次数：检查项名 → 连续多少次检查都是缺的。
+    pub failure_counts: Vec<(String, i64)>,
+}
+
+impl StationSelectorHealth {
+    /// 存下来的那一列 → 每个平台一条可读记录。写侧已经收过口（运行时校验 + 列上的形状约束），
+    /// 这里只按名字取，取不到就是空——**不重新推断**它应该是什么。
+    fn list_from_stored(value: &Value) -> Vec<Self> {
+        value
+            .as_object()
+            .map(|platforms| {
+                platforms
+                    .iter()
+                    .filter_map(|(platform, entry)| Self::from_stored(platform, entry))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn from_stored(platform: &str, entry: &Value) -> Option<Self> {
+        let stored = entry.as_object()?;
+        let text = |key: &str| {
+            stored
+                .get(key)
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned()
+        };
+        let names = |key: &str| {
+            stored
+                .get(key)
+                .and_then(Value::as_array)
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        let failure_counts = stored
+            .get("failureCounts")
+            .and_then(Value::as_object)
+            .map(|counts| {
+                counts
+                    .iter()
+                    .filter_map(|(category, count)| Some((category.clone(), count.as_i64()?)))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        Some(Self {
+            // 键与条目里的 `platform` 在写侧已经核过一致；这里用键，读出来的这条一定知道自己是谁。
+            platform: platform.to_owned(),
+            page_type: text("pageType"),
+            capability: text("capability"),
+            checked_at: text("checkedAt"),
+            verified_at: text("verifiedAt"),
+            checked_categories: names("checkedCategories"),
+            missing_categories: names("missingCategories"),
+            stale_categories: names("staleCategories"),
+            failure_counts,
+        })
+    }
 }
 
 /// 一个报到了但还没人认领的插件安装。它不会被派活。
@@ -119,6 +209,9 @@ pub async fn read_station_overview(
     if !station_schema_is_ready(database).await? {
         return Err(StationError::SchemaUnavailable);
     }
+    // 自检快照里的两个时刻在库外就是给人看的（这一列只有工位页在读它），所以在这里过一次
+    // `linggan_human_moment`——项目里只有这一处知道怎么把 ISO 时刻写成人话。只换这两个键，
+    // 其余字段**原样带出**：读侧不重新解释快照，只把时间换成页面统一的那一种写法。
     let station_rows = sqlx::query_as::<_, StationRow>(
         "SELECT s.station_ref, s.display_name, s.daily_work_quota, \
                 (s.claim_window_expires_at > scope_001_now()) AS claim_window_open, \
@@ -130,7 +223,11 @@ pub async fn read_station_overview(
                     AS superseded_count, \
                 linggan_human_moment(s.last_dispatch_answer_at) \
                     AS last_dispatch_answer_at, \
-                s.last_dispatch_answer_code, s.last_dispatch_answer_reason \
+                s.last_dispatch_answer_code, s.last_dispatch_answer_reason, \
+                (SELECT jsonb_object_agg(entry.key, entry.value || jsonb_build_object( \
+                            'checkedAt', linggan_human_moment(entry.value ->> 'checkedAt'), \
+                            'verifiedAt', linggan_human_moment(entry.value ->> 'verifiedAt'))) \
+                   FROM jsonb_each(active.selector_health) AS entry) AS active_selector_health \
          FROM execution_station s \
          LEFT JOIN plugin_installation active \
                 ON active.station_ref = s.station_ref AND active.superseded_at IS NULL \
@@ -181,6 +278,7 @@ type StationRow = (
     Option<String>,
     Option<String>,
     Option<String>,
+    Option<Value>,
 );
 
 impl From<StationRow> for StationOverview {
@@ -200,6 +298,11 @@ impl From<StationRow> for StationOverview {
             last_dispatch_answer_at: row.8,
             last_dispatch_answer_code: row.9,
             last_dispatch_answer_reason: row.10,
+            active_selector_health: row
+                .11
+                .as_ref()
+                .map(StationSelectorHealth::list_from_stored)
+                .unwrap_or_default(),
         }
     }
 }

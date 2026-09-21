@@ -6,7 +6,7 @@
 // platform identity, Cookie, HTML, payload, Evidence content or free-form platform error.
 
 use linggan_contracts::Capacity;
-use linggan_evidence::{collection_control_schema_is_ready, read_capacity};
+use linggan_evidence::{MINIMUM_PLUGIN_VERSION, collection_control_schema_is_ready, read_capacity};
 use linggan_storage_postgres::Database;
 use sqlx::Row;
 use uuid::Uuid;
@@ -769,7 +769,9 @@ struct AttentionEntry {
     reason: String,
     detail: String,
     owner: &'static str,
-    action: &'static str,
+    /// 一句给人照着做的动作。多数是词表里的原文；个别条目要在动作里带上具体数字
+    /// （版本号），那时由 [`recovery_action`] 从判据常量现拼——不在这里抄一份。
+    action: String,
     observed: String,
 }
 
@@ -780,9 +782,22 @@ impl AttentionEntry {
             reason: reason.to_owned(),
             detail: detail.to_owned(),
             owner: recovery.owner,
-            action: recovery.action,
+            action: recovery_action(reason, recovery.action),
             observed: observed.to_owned(),
         }
+    }
+}
+
+/// 动作文案里要带数字的那一条，数字直接取判定用的那个常量（`MINIMUM_PLUGIN_VERSION`）。
+///
+/// 这一页与控制台工位页给的是同一句提示，两处各写一个版本号就会出现「同一件事、两个
+/// 门槛」，而人只能照着一个去升级。旧恢复提示写着 0.4.8、当时最低合同版本是 0.8.47，
+/// 就是这么来的。
+fn recovery_action(reason: &str, action: &str) -> String {
+    if reason == "plugin_version_unsupported" {
+        format!("{action}当前最低版本是 {MINIMUM_PLUGIN_VERSION}。")
+    } else {
+        action.to_owned()
     }
 }
 
@@ -814,7 +829,7 @@ fn recovery_for(reason: &str) -> Option<Recovery> {
         }),
         "plugin_version_unsupported" => Some(Recovery {
             owner: "你",
-            action: "更新插件到当前最低合同版本。",
+            action: "更新这台机器上的插件。",
         }),
         "installation_stale" => Some(Recovery {
             owner: "执行工位",
@@ -882,7 +897,7 @@ fn attention_row(entry: &AttentionEntry) -> String {
         title = escape(&entry.title),
         detail = escape(&entry.detail),
         owner = entry.owner,
-        action = escape(entry.action),
+        action = escape(&entry.action),
     )
 }
 
@@ -902,7 +917,7 @@ fn attention_inspector(entry: &AttentionEntry) -> String {
         observed = escape(&entry.observed),
         owner = entry.owner,
         detail = escape(&entry.detail),
-        action = escape(entry.action),
+        action = escape(&entry.action),
     )
 }
 
@@ -1273,6 +1288,31 @@ mod tests {
         assert!(recovery_for("lease_issue_failed").is_some());
     }
 
+    /// 「更新插件」这句恢复动作里的版本号必须与判定读同一个常量。
+    ///
+    /// 旧恢复提示写着 0.4.8，而当时的最低合同版本是 0.8.47：同一件事出现两个门槛，
+    /// 人只能照着一个去升级。别条目不受影响——版本号只出现在它该出现的那一条里。
+    #[test]
+    fn a_version_too_low_recovery_names_the_version_the_judgement_uses() {
+        let recovery = recovery_for("plugin_version_unsupported").expect("这条原因有恢复动作");
+        let entry = AttentionEntry::new(
+            "插件版本过低",
+            "plugin_version_unsupported",
+            "这一单没有被派出。",
+            recovery,
+            "09-13 17:50",
+        );
+        assert!(entry.action.contains(MINIMUM_PLUGIN_VERSION));
+        assert!(!entry.action.contains("0.4.8"));
+
+        let other = recovery_for("station_unavailable").expect("这条原因有恢复动作");
+        assert_eq!(
+            recovery_action("station_unavailable", other.action),
+            other.action,
+            "只有版本那一条需要带数字，其余条目照抄词表原文"
+        );
+    }
+
     #[test]
     fn operations_recovery_count_excludes_ordinary_non_dispatch_decisions() {
         let mut projection = projection();
@@ -1479,6 +1519,7 @@ mod tests {
                 active_count: 0,
                 expired_lease_count: 0,
             },
+            None,
         );
         let rendered = render_tasks_control(&tasks, &projection());
 

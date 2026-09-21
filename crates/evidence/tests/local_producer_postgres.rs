@@ -5,7 +5,8 @@ use linggan_contracts::{
 };
 use linggan_evidence::{
     LocalAttemptOutcome, LocalSubmissionOutcome, LocalTaskOutcome, MediaUploadFinalizeClaim,
-    RuntimeAttemptOutcome, RuntimeSubmissionOutcome, RuntimeTaskOutcome, admit_media_blob,
+    ProducerRuntimeError, RuntimeAttemptOutcome, RuntimeSubmissionOutcome, RuntimeTaskOutcome,
+    admit_media_blob,
     begin_media_upload, claim_media_upload_finalize, complete_media_upload, create_manual_task,
     create_producer_task, read_runtime_library, record_media_download_failure,
     record_media_upload_chunk, start_local_attempt, start_producer_attempt, submit_local_package,
@@ -172,6 +173,7 @@ async fn full_runtime_accepts_each_capability_without_collapsing_partial_media_o
     .expect("failed media acquisition is independently retained");
     assert_ne!(failed_attempt, uuid::Uuid::nil());
     prove_resumable_media_upload(&database).await;
+    prove_materialized_session_without_a_download_attempt_is_refused(&database).await;
     let query = serde_json::from_str(r#"{"text":null,"scope":"all_accepted_material","window":"last_30_days","sort":"latest_discovery"}"#)
         .expect("read query is valid");
     let projection = read_runtime_library(&database, &query)
@@ -558,6 +560,95 @@ async fn prove_resumable_media_upload(database: &Database) {
             assert_ne!(replayed.materialization_ref, uuid::Uuid::nil());
         }
         _ => panic!("a completed upload must replay its actual materialization receipt"),
+    }
+}
+
+/// 候选 ④ 的负例：一条**自称已物化、却没有下载尝试引用**的会话行。
+///
+/// 这种行今天写不出来——唯一写入点是上游那条原子 `UPDATE … SET state='materialized',
+/// download_attempt_ref=$2`，它同时写两个字段。但这条隐含关系**在数据库里没有约束**：
+/// `download_attempt_ref` 建表时就是可空的（`0004` 第 135 行，没有 NOT NULL），也没有 CHECK
+/// 把它与 `state='materialized'` 绑在一起。所以这个用例**故意绕过写入点**，直接把这一列改成
+/// 空，模拟一次越界写入。
+///
+/// 要求是：读到它的人得到一个**具名错误**，而不是让一个正在处理请求的进程 panic。
+/// 换成 `try_get` 之前的 `row.get::<Uuid,_>`，这里就是一次解码 panic——这个用例钉的正是那个
+/// 差别。（顺带钉住前提：那一列确实没有约束拦着，否则本用例的第一条断言就会红。）
+async fn prove_materialized_session_without_a_download_attempt_is_refused(database: &Database) {
+    // 必须用**本包真的通过媒体能力建出来的**那个观察对象：`begin_media_upload` 第一步就查
+    // 它是否存在，随手编一个 UUID 会以 `MediaObservationNotFound` 死在开头上，用例就变成在
+    // 测别的东西了。（第一版正是编的 `eeeeeeee-…`，它在包里是 packageRef 而不是 observationRef。）
+    // 选第二个而不是第一个，是为了不和上面那条可续传用例共用同一个观察对象。
+    let observation = "11111111-2222-4333-8444-555555555555"
+        .parse()
+        .expect("observation id");
+    let sha256 = "3b1f4a7c5e8d2b9f6a3c0e7d4b1f8a5c2e9d6b3a0f7c4e1d8b5a2f9c6e3d0b7a";
+    let upload = begin_media_upload(
+        database,
+        observation,
+        sha256,
+        "image/jpeg",
+        4,
+        "uploads/synthetic/unreferenced-materialization.part",
+    )
+    .await
+    .expect("upload session starts");
+    record_media_upload_chunk(database, upload.session_ref, 0, 4)
+        .await
+        .expect("staged bytes complete the session");
+    let admission = admit_media_blob(
+        database,
+        observation,
+        sha256,
+        "image/jpeg",
+        4,
+        "blobs/3b/3b1f4a7c5e8d2b9f6a3c0e7d4b1f8a5c2e9d6b3a0f7c4e1d8b5a2f9c6e3d0b7a",
+    )
+    .await
+    .expect("blob admission");
+    // 先领一次终结权：`complete_media_upload` 只在 `finalizing` 态上落 `materialized`，
+    // 少了这一步它会**静默什么也不做**（返回 Ok，状态留在 ready_to_finalize），
+    // 于是下面那条「前提断言」会在一个根本没到物化态的会话上变红。
+    assert!(matches!(
+        claim_media_upload_finalize(database, upload.session_ref)
+            .await
+            .expect("upload is finalizable"),
+        MediaUploadFinalizeClaim::Ready(_)
+    ));
+    complete_media_upload(database, upload.session_ref, admission.download_attempt_ref)
+        .await
+        .expect("upload receipt persists");
+
+    sqlx::query(
+        "UPDATE linggan_media_upload_session SET download_attempt_ref = NULL WHERE session_ref = $1",
+    )
+    .bind(upload.session_ref)
+    .execute(database.pool())
+    .await
+    .expect("the unguarded column accepts an out-of-band write");
+
+    // 前提本身也要断言：否则「读到一个具名错误」可能只是因为这条会话根本没到物化态，
+    // 那这个用例就在测别的东西了。
+    let row = sqlx::query(
+        "SELECT state, download_attempt_ref IS NOT NULL AS reference_present \
+         FROM linggan_media_upload_session WHERE session_ref = $1",
+    )
+    .bind(upload.session_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("the row is readable");
+    let state: String = row.get("state");
+    let reference_present: bool = row.get("reference_present");
+    assert_eq!(state, "materialized");
+    assert!(
+        !reference_present,
+        "the out-of-band write really cleared the reference"
+    );
+
+    match claim_media_upload_finalize(database, upload.session_ref).await {
+        Err(ProducerRuntimeError::MaterializedSessionWithoutDownloadAttempt) => {}
+        Err(other) => panic!("expected a named refusal, got a different error: {other}"),
+        Ok(_) => panic!("a materialized session without a download attempt must not be claimed"),
     }
 }
 

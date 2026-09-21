@@ -13,6 +13,7 @@ import {
   createLocalSubmission,
   createTaskSpec,
   decodePageExecutionReceipt,
+  isRecoverableDeliveryRegistrationRefusal,
   isTerminalLocalDeliveryResult,
   localPost,
   readLingganLocalReadiness,
@@ -23,12 +24,16 @@ import {
   validateTaskSpec,
 } from './adapter.js';
 import { LINGGAN_RUNTIME_ACTION } from './runtimeActions.js';
+import {
+  recordSelectorHealthReport,
+  selectorHealthForCheckIn,
+} from './selectorHealthReport.js';
 import { localMediaOutbox, localProducerOutbox } from './localProducerOutbox.js';
 import { createManualRuntimeTask, packageDiscovery } from './producerRuntime.js';
 import {
   detailPageSessionStore,
   detailPageNavigationGrantStore,
-  packageDetailPageSessionLane,
+  detailPageLanePreparationStore,
 } from './detailPageSessionStore.js';
 import { waitForStableTab } from './tabReadiness.js';
 import { buildSignedXhsDetailExecutionUrl } from './xhsExecutionTarget.js';
@@ -74,7 +79,11 @@ export async function flushLocalOutboxOnce({
   flushMedia = flushMediaOutbox,
   readCredential = installationCredentialFor,
   reportDispatchFailure = reportLingganDispatchFailure,
+  recoverSessions = recoverCachedDetailPageSessions,
 } = {}) {
+  // Local durable facts are deliverable without another execution claim or page visit.
+  // A broken session must not prevent independent, already-frozen envelopes from flushing.
+  const cachedRecovery = await recoverSessions().catch(() => ({ state: 'storage_unavailable' }));
   const readiness = await readReadiness();
   const producerRoutes = readiness?.deliveryReady === true ? readiness.producerRoutes : null;
   const due = await outbox.due({ limit: 5 });
@@ -95,11 +104,21 @@ export async function flushLocalOutboxOnce({
       }
       const attempt = await post(producerRoutes.attemptStart, entry.attempt);
       if (!attemptStartIsAccepted(attempt)) {
-        if (isTerminalLocalDeliveryResult(attempt)) {
-          await outbox.terminal(entry.submissionId, attempt.payload.code || 'attempt_not_started');
+        if (attempt?.payload?.code === 'scheduled_lane_waiting_for_claim') {
+          await outbox.retry(entry.submissionId, 'scheduled_lane_waiting_for_claim');
           continue;
         }
-        throw new Error(attempt.payload.code || 'attempt_not_started');
+        // 起步登记被「活权不在了」挡回来时，不能就此认定这份包没被收过：上一次投递可能
+        // 正是关掉这条租约的那一次，而服务端早已开出 Receipt。这一种必须继续走投递路由，
+        // 由服务端按 durable 事实重放原 Receipt（晚到包按 LOST_AUTHORITY 接纳）；身份冲突、
+        // 任务不存在等其他 4xx 仍是终态。
+        if (!isRecoverableDeliveryRegistrationRefusal(attempt)) {
+          if (isTerminalLocalDeliveryResult(attempt)) {
+            await outbox.terminal(entry.submissionId, attempt.payload.code || 'attempt_not_started');
+            continue;
+          }
+          throw new Error(attempt.payload.code || 'attempt_not_started');
+        }
       }
       const submitted = await post(producerRoutes.submission, {
         contractVersion: entry.contractVersion,
@@ -133,6 +152,7 @@ export async function flushLocalOutboxOnce({
   return {
     pending: await outbox.pendingCount(),
     mediaPending: await mediaOutbox.pendingCount(),
+    cachedRecovery,
   };
 }
 
@@ -237,7 +257,21 @@ async function deterministicUuid(seed) {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-async function queueCapturePackage({ taskSpec, capturePackage, idempotencyKey = '' } = {}) {
+/**
+ * 这条任务在导航前是否已经拿到服务端铸造的交付身份？
+ *
+ * 拿到就用它，而不是在本机另算一个：断网期间取回的包在投递时，租约可能已经结束，
+ * 服务端只认它自己登记过的那个身份。这里不改写任何已经入队的包——旧包的身份是它自己的
+ * 历史事实，不往上重挂新身份。
+ */
+async function preparedAttemptIdForTask(taskId) {
+  const key = String(taskId || '').trim();
+  if (!key) return '';
+  const row = await detailPageLanePreparationStore.get(key);
+  return String(row?.attemptId || '').trim();
+}
+
+async function queueCapturePackage({ taskSpec, capturePackage, idempotencyKey = '', deliveryNotBefore = null } = {}) {
   // Keep the stable-instance lookup callable.  Naming the local result
   // `producerInstanceId` shadows the helper for this whole block, which turns
   // the first current-surface delivery into a temporal-dead-zone failure.
@@ -247,9 +281,14 @@ async function queueCapturePackage({ taskSpec, capturePackage, idempotencyKey = 
   }
   validateTaskSpec(taskSpec);
   const stableKey = String(idempotencyKey || '').trim();
-  const attemptId = stableKey
+  const preparedAttemptId = await preparedAttemptIdForTask(taskSpec.taskId);
+  if (taskSpec.source === 'scheduled' && taskSpec.platform === 'xhs' && taskSpec.target?.contentExternalId
+      && isDetailPageSessionCapability(taskSpec.capabilitiesRequested?.[0]) && !preparedAttemptId) {
+    throw new Error('detail_page_lane_preparation_missing');
+  }
+  const attemptId = preparedAttemptId || (stableKey
     ? await deterministicUuid(`attempt:${instanceId}:${taskSpec.taskId}:${stableKey}`)
-    : crypto.randomUUID();
+    : crypto.randomUUID());
   const submissionId = stableKey
     ? await deterministicUuid(`submission:${instanceId}:${taskSpec.taskId}:${stableKey}`)
     : crypto.randomUUID();
@@ -266,7 +305,7 @@ async function queueCapturePackage({ taskSpec, capturePackage, idempotencyKey = 
     submissionId,
   });
   const queuedEnvelope = stableKey
-    ? { ...submission, taskSpec, attempt, idempotencyKey: stableKey }
+    ? { ...submission, taskSpec, attempt, idempotencyKey: stableKey, deliveryNotBefore }
     : { ...submission, taskSpec, attempt };
   const queuedRow = await localProducerOutbox.enqueue(queuedEnvelope);
   // The capture boundary ends once the durable browser outbox has accepted this envelope.
@@ -283,8 +322,8 @@ async function queueCapturePackage({ taskSpec, capturePackage, idempotencyKey = 
   };
 }
 
-async function queueMediaSlots({ taskSpec, capturePackage, idempotencyKey = '' } = {}) {
-  const queued = await queueCapturePackage({ taskSpec, capturePackage, idempotencyKey });
+async function queueMediaSlots({ taskSpec, capturePackage, idempotencyKey = '', deliveryNotBefore = null } = {}) {
+  const queued = await queueCapturePackage({ taskSpec, capturePackage, idempotencyKey, deliveryNotBefore });
   const records = Array.isArray(capturePackage?.records) ? capturePackage.records : [];
   let mediaQueued = 0;
   for (const record of records) {
@@ -380,6 +419,8 @@ async function reportStationStatus() {
     browserLabel: browserLabel(),
     capabilities: await declaredCapabilities(),
     health: readiness.health,
+    // 本机最近一次结构自检。它不是能力声明，也不影响报到结果：收下与否都不改变归位。
+    selectorHealth: await selectorHealthForCheckIn({ storage: chrome.storage.local }),
   });
   if (checkIn.installationCredential
       && checkIn.installationCredentialRef
@@ -750,6 +791,7 @@ const DISPATCH_FAILURE_CODES = new Set([
   'page_read_failed',
   'detail_page_url_invalid',
   'detail_page_session_grant_unavailable',
+  'detail_page_session_lane_preparation_unavailable',
   'detail_page_session_recovery_required',
   'account_observation_blocked',
 ]);
@@ -830,7 +872,72 @@ async function reportClaimedTaskRisk(tabId, claim, installKey, installationCrede
   return { riskObserved: report.reported === true, cooldownActive: report.cooldownActive === true };
 }
 
+async function enqueueCachedLane({ entry, taskSpec, sessions, outbox, queue, queueMedia, deliveryNotBefore = null }) {
+  const capability = taskSpec.capabilitiesRequested[0];
+  const idempotencyKey = `detail-session:${taskSpec.taskId}:${capability}`;
+  const existing = await outbox.getByIdempotencyKey(idempotencyKey);
+  let queued;
+  if (existing) {
+    // Recovery resends an already frozen envelope; it never repackages the facts with fresh UUIDs.
+    if (existing.taskId !== taskSpec.taskId || JSON.stringify(existing.taskSpec) !== JSON.stringify(taskSpec)) {
+      throw new Error('detail_page_session_envelope_identity_conflict');
+    }
+    queued = existing;
+  } else {
+    const capturePackage = await sessions.freezePackage({ cacheKey: entry.cacheKey, taskSpec });
+    queued = await (capability === 'media_slots' ? queueMedia : queue)({ taskSpec, capturePackage, idempotencyKey, deliveryNotBefore });
+  }
+  await sessions.markTaskQueued(entry.cacheKey, capability, taskSpec.taskId);
+  return queued;
+}
+
+export async function recoverCachedDetailPageSessions({
+  sessions = detailPageSessionStore, preparations = detailPageLanePreparationStore,
+  outbox = localProducerOutbox, queue = queueCapturePackage, queueMedia = queueMediaSlots,
+} = {}) {
+  let queued = 0;
+  let needsAttention = 0;
+  for (const entry of await sessions.pending({ limit: 20 })) {
+    try {
+      const lanes = await preparations.forSession(entry.leaseRef, entry.contentExternalId);
+      for (const capability of entry.plan.lanes) {
+        if (Object.values(entry.queuedTasks || {}).includes(capability)) continue;
+        try {
+          const matches = lanes.filter((lane) => lane.capability === capability);
+          if (matches.length !== 1 || !matches[0].taskSpec
+              || !Number.isFinite(Date.parse(matches[0].leaseExpiresAt))) throw new Error('detail_page_lane_preparation_missing');
+          const lane = matches[0];
+          validateTaskSpec(lane.taskSpec);
+          if (lane.taskSpec.taskId !== lane.taskId || lane.taskSpec.target.contentExternalId !== entry.contentExternalId
+              || lane.taskSpec.capabilitiesRequested[0] !== capability) throw new Error('detail_page_lane_preparation_conflict');
+          const existing = await outbox.getByIdempotencyKey(`detail-session:${lane.taskId}:${capability}`);
+          if (existing && existing.attemptId !== lane.attemptId) throw new Error('detail_page_lane_preparation_conflict');
+          await enqueueCachedLane({ entry, taskSpec: lane.taskSpec, sessions, outbox, queue, queueMedia,
+            deliveryNotBefore: Date.parse(lane.leaseExpiresAt) });
+          queued += 1;
+        } catch {
+          needsAttention += 1;
+          await sessions.recordRecoveryError(entry.cacheKey, 'lane_delivery_recovery_required');
+        }
+      }
+    } catch {
+      needsAttention += 1;
+      await sessions.recordRecoveryError(entry.cacheKey, 'lane_preparation_unreadable');
+    }
+  }
+  return { queued, needsAttention };
+}
+
 async function queueCachedDetailPageSessionLane({ leaseRef, taskSpec } = {}) {
+  const capability = taskSpec.capabilitiesRequested[0];
+  const existing = await localProducerOutbox.getByIdempotencyKey(`detail-session:${taskSpec.taskId}:${capability}`);
+  if (existing) {
+    if (JSON.stringify(existing.taskSpec) !== JSON.stringify(taskSpec)) throw new Error('detail_page_session_envelope_identity_conflict');
+    await localProducerOutbox.releaseForClaim(existing.submissionId);
+    void flushLocalOutbox();
+    return { success: true, state: 'cached_page_session_already_queued', executed: true, capability,
+      leaseRef, submissionId: existing.submissionId, message: '原任务已领取，继续交付已保存的通道材料。' };
+  }
   let entry;
   try {
     entry = await detailPageSessionStore.getForTask({ leaseRef, taskSpec });
@@ -852,18 +959,14 @@ async function queueCachedDetailPageSessionLane({ leaseRef, taskSpec } = {}) {
       message: `已复用详情页缓存；「${entry.capability}」此前已进入待交付队列。`,
     };
   }
-  let capturePackage;
+  let queued;
   try {
-    capturePackage = packageDetailPageSessionLane(entry, taskSpec);
+    queued = await enqueueCachedLane({ entry, taskSpec, sessions: detailPageSessionStore,
+      outbox: localProducerOutbox, queue: queueCapturePackage, queueMedia: queueMediaSlots });
   } catch (error) {
     error.detailPageSessionRecoveryRequired = true;
     throw error;
   }
-  const idempotencyKey = `detail-session:${taskSpec.taskId}:${entry.capability}`;
-  const queued = entry.capability === 'media_slots'
-    ? await queueMediaSlots({ taskSpec, capturePackage, idempotencyKey })
-    : await queueCapturePackage({ taskSpec, capturePackage, idempotencyKey });
-  await detailPageSessionStore.markTaskQueued(entry.cacheKey, entry.capability, taskSpec.taskId);
   return {
     success: true,
     state: 'cached_page_session_queued',
@@ -876,13 +979,24 @@ async function queueCachedDetailPageSessionLane({ leaseRef, taskSpec } = {}) {
 }
 
 async function storeDetailPageSessionFromPage(message = {}) {
+  if (message.detailTaskId) {
+    const prepared = await detailPageLanePreparationStore.get(message.detailTaskId);
+    if (!prepared || prepared.leaseRef !== message.leaseRef || prepared.capability !== 'content_detail'
+        || prepared.contentExternalId !== message.plan?.contentExternalId
+        || message.detailPackage?.packageKind !== 'content_detail') {
+      throw new Error('detail_page_session_envelope_identity_conflict');
+    }
+  }
   const entry = await detailPageSessionStore.put({
     leaseRef: message.leaseRef,
     plan: message.plan,
     note: message.note,
     commentResult: message.commentResult,
     receipt: message.receipt,
+    detailTaskId: message.detailTaskId,
+    detailPackage: message.detailPackage,
   });
+  void flushLocalOutbox();
   return { success: true, cacheKey: entry.cacheKey };
 }
 
@@ -950,6 +1064,7 @@ async function prepareDetailPageNavigation({ claim, taskSpec, installKey, instal
     grantKey: prepared.grantKey,
     sessionRef: grant.sessionRef,
     plan: grant.pageSessionPlan,
+    lanePreparation: grant.lanePreparation,
   });
   const consumed = await detailPageNavigationGrantStore.consume({
     grantKey: prepared.grantKey,
@@ -1081,6 +1196,16 @@ async function runDispatchedTask() {
           installKey,
           state: 'detail_page_session_grant_unavailable',
           message: '详情页授权服务暂不可用；没有打开页面，任务已进入退避后重试。',
+        });
+      }
+      // 服务端通告了准备握手却没给出准备回执：这一页没有可持久化的交付身份，
+      // 打开它等于在没有交付凭据的情况下消耗一次平台访问。停在原地，等人处理。
+      if (['grant_lane_preparation_missing', 'grant_lane_preparation_unsupported'].includes(navigationGrant.reason)) {
+        return requeueClaimedTaskFailure({
+          claim: { ...claim, health: readiness.health },
+          installKey,
+          state: 'detail_page_session_lane_preparation_unavailable',
+          message: '服务端未给出本次导航的通道交付身份；没有打开页面，该内容需人工处理。',
         });
       }
       if (!navigationGrant.recovered && navigationGrant.reason === 'navigation_state_unknown'
@@ -1348,6 +1473,20 @@ async function closeCollectionWindow(windowId) {
   }
 }
 
+/// 消息来源站点 → 平台词。两个站点之外一律不认：诊断只描述本插件真正跑着的那两个页面。
+function platformForSenderUrl(url) {
+  const host = (() => {
+    try {
+      return new URL(String(url || '')).hostname.toLowerCase();
+    } catch {
+      return '';
+    }
+  })();
+  if (/(^|\.)douyin\.com$/.test(host)) return 'douyin';
+  if (/(^|\.)xiaohongshu\.com$/.test(host)) return 'xhs';
+  return '';
+}
+
 /// 等最终页面完成重定向且 content script 已属于当前 URL。
 function waitForTabReady(tabId, timeoutMs = 20000) {
   return waitForStableTab({
@@ -1366,6 +1505,17 @@ chrome.runtime.onMessage.addListener((message = {}, sender, sendResponse) => {
     if (action === LINGGAN_RUNTIME_ACTION.RUN_DISPATCHED_TASK) return runDispatchedTask();
     if (action === LINGGAN_RUNTIME_ACTION.GET_EXECUTION_STATION_STATUS) {
       return reportStationStatus();
+    }
+    if (action === LINGGAN_RUNTIME_ACTION.REPORT_SELECTOR_HEALTH) {
+      const senderUrl = String(sender?.tab?.url || sender?.url || '');
+      const sourcePlatform = platformForSenderUrl(senderUrl);
+      if (!sourcePlatform) {
+        return { accepted: false, reason: 'selector_health_source_unrecognized' };
+      }
+      return recordSelectorHealthReport(message.snapshot, {
+        platform: sourcePlatform,
+        storage: chrome.storage.local,
+      });
     }
     if (action === LINGGAN_RUNTIME_ACTION.REPORT_ACCOUNT_ELIGIBILITY) {
       const senderUrl = String(sender?.tab?.url || sender?.url || '');

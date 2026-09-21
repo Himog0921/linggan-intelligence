@@ -9,6 +9,7 @@ use crate::collection_control::{
     IssuedInstallationCredential, MINIMUM_PLUGIN_VERSION, authenticate_installation_check_in_in,
     issue_installation_credential_if_absent_in, version_at_least,
 };
+use crate::selector_health::accepted_selector_health;
 use linggan_storage_postgres::Database;
 use serde_json::Value;
 use uuid::Uuid;
@@ -244,6 +245,12 @@ pub struct InstallationCheckIn<'a> {
     pub plugin_version: &'a str,
     pub browser_label: Option<&'a str>,
     pub capabilities: Value,
+    /// 最近一次页面结构自检的受限快照，插件上报的**原文**。服务端在写之前收口
+    /// （`crate::selector_health`）：收不下就不写，这一列保持这台安装已有的记录——
+    /// 一份没被收下的报告什么都没有证明，不能拿它改写已有的结论。
+    ///
+    /// 它不参与任何判定：报到成不成、能不能被派活，都与这一项无关。
+    pub selector_health: Option<&'a Value>,
     /// Required once this installation has an activated credential. It is omitted only for a
     /// first bootstrap or replacement of an unactivated pending issuance.
     pub installation_credential: Option<&'a str>,
@@ -260,6 +267,8 @@ pub async fn check_in_installation(
     if !station_schema_is_ready(database).await? {
         return Err(StationError::SchemaUnavailable);
     }
+    // 诊断先收口，再进任何写路径。收不下时这一列保持原样（不是清空）：见 `selector_health`。
+    let selector_health = accepted_selector_health(check_in.selector_health);
     let mut transaction = database.pool().begin().await?;
 
     // 同一个 install_key 且仍在岗 —— 插件只是又报了一次到。
@@ -285,12 +294,14 @@ pub async fn check_in_installation(
         }
         sqlx::query(
             "UPDATE plugin_installation \
-             SET last_seen_at = scope_001_now(), plugin_version = $2, capabilities = $3 \
+             SET last_seen_at = scope_001_now(), plugin_version = $2, capabilities = $3, \
+                 selector_health = COALESCE($4::jsonb, selector_health) \
              WHERE installation_ref = $1",
         )
         .bind(installation_ref)
         .bind(check_in.plugin_version)
         .bind(&check_in.capabilities)
+        .bind(selector_health.as_ref())
         .execute(&mut *transaction)
         .await?;
         let credential = issue_compatible_credential(
@@ -363,6 +374,7 @@ pub async fn check_in_installation(
                 installation_ref,
                 check_in,
                 Some(station.station_ref),
+                selector_health.as_ref(),
             )
             .await?;
             let credential = issue_compatible_credential(
@@ -384,7 +396,14 @@ pub async fn check_in_installation(
             }
         }
         None => {
-            insert_installation(&mut transaction, installation_ref, check_in, None).await?;
+            insert_installation(
+                &mut transaction,
+                installation_ref,
+                check_in,
+                None,
+                selector_health.as_ref(),
+            )
+            .await?;
             let credential = issue_compatible_credential(
                 &mut transaction,
                 installation_ref,
@@ -666,15 +685,16 @@ async fn insert_installation(
     installation_ref: Uuid,
     check_in: &InstallationCheckIn<'_>,
     station_ref: Option<Uuid>,
+    selector_health: Option<&Value>,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         "INSERT INTO plugin_installation \
              (installation_ref, install_key, station_ref, claim_kind, claimed_at, \
-              plugin_version, browser_label, capabilities) \
+              plugin_version, browser_label, capabilities, selector_health) \
          VALUES ($1, $2, $3, \
                  CASE WHEN $3::uuid IS NULL THEN NULL ELSE 'claim_window' END, \
                  CASE WHEN $3::uuid IS NULL THEN NULL ELSE scope_001_now() END, \
-                 $4, $5, $6)",
+                 $4, $5, $6, $7::jsonb)",
     )
     .bind(installation_ref)
     .bind(check_in.install_key)
@@ -682,6 +702,7 @@ async fn insert_installation(
     .bind(check_in.plugin_version)
     .bind(check_in.browser_label)
     .bind(&check_in.capabilities)
+    .bind(selector_health.as_ref())
     .execute(&mut **transaction)
     .await?;
     Ok(())

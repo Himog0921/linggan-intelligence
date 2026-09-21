@@ -10,6 +10,7 @@
 
 use crate::archive_ledger::directory_works_sql;
 use crate::directory_boundary::{directory_proven_sql, surface_scan_complete_sql};
+use crate::qualified_detail::qualified_detail_missing_sql;
 use linggan_storage_postgres::Database;
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -466,7 +467,7 @@ pub async fn read_blocked_materials(
     database: &Database,
     target_ref: Uuid,
 ) -> Result<Vec<BlockedMaterial>, sqlx::Error> {
-    let rows: Vec<(Uuid, String, Option<String>)> = sqlx::query_as(
+    let rows: Vec<(Uuid, String, Option<String>)> = sqlx::query_as(concat!(
         "SELECT DISTINCT content.public_ref,content.content_external_id, \
                 (SELECT finding.title FROM linggan_material_discovery_finding finding \
                  WHERE finding.content_public_ref=content.public_ref \
@@ -481,13 +482,15 @@ pub async fn read_blocked_materials(
          WHERE work_order.target_ref=$1 \
            AND lease_task.execution_state='blocked' \
            AND runtime.task_spec #>> '{capabilitiesRequested,0}'='content_detail' \
-           AND NOT EXISTS (SELECT 1 FROM linggan_material_content_detail detail \
-                           WHERE detail.content_public_ref=content.public_ref) \
+           -- 已经取到合格详情的不再问人；只有真的还欠着才进这张待补齐清单。
+           AND ",
+        qualified_detail_missing_sql!("content.public_ref"),
+        " \
            AND NOT EXISTS (SELECT 1 FROM collection_material_retirement retired \
                            WHERE retired.target_ref=$1 \
                              AND retired.content_public_ref=content.public_ref) \
          ORDER BY content.content_external_id",
-    )
+    ))
     .bind(target_ref)
     .fetch_all(database.pool())
     .await?;

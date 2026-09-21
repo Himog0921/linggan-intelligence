@@ -16,8 +16,9 @@ use linggan_evidence::{
     AccountEligibilityObservation, CollectionControlError, DetailPageRiskSignalError,
     DetailPageSessionGrant, DetailPageSessionGrantError, DetailPageSessionNavigationError,
     DetailPageSessionProgress, DispatchDecision, DispatchFailureCode, DispatchFailureError,
-    DispatchFailureOutcome, ExplicitAccountEligibilitySignal, activate_installation_credential,
-    decide_dispatch, grant_detail_page_session, record_detail_page_session_progress,
+    DispatchFailureOutcome, ExplicitAccountEligibilitySignal, PreparedLaneDelivery,
+    activate_installation_credential, decide_dispatch, grant_detail_page_session,
+    grant_detail_page_session_with_lane_deliveries, record_detail_page_session_progress,
     record_dispatch_answer, report_account_eligibility, report_claimed_task_account_eligibility,
     report_detail_page_risk_signal, requeue_failed_dispatch,
 };
@@ -31,6 +32,14 @@ pub(super) const CLAIM_PATH: &str = "/api/local/dispatch/claim";
 pub(super) const FAILURE_PATH: &str = "/api/local/dispatch/failures";
 pub(super) const DETAIL_PAGE_SESSION_GRANT_PATH: &str =
     "/api/local/dispatch/detail-page-sessions/grant";
+
+/// 导航前登记通道交付身份的握手版本。
+///
+/// 采集服务先在 /health 通告它，插件确认后才在授权请求里带上同一个字符串。请求里没有这个
+/// 字段的插件（旧版本）拿到的是与升级前完全相同的回答：服务端不会把「没有请求准备」
+/// 当成「已经准备完成」。
+pub(super) const DETAIL_PAGE_SESSION_LANE_PREPARATION_CONTRACT: &str =
+    "linggan.detail-page-session.lane-preparation.v1";
 pub(super) const DETAIL_PAGE_SESSION_NAVIGATION_PATH: &str =
     "/api/local/dispatch/detail-page-sessions/navigation-observed";
 pub(super) const DETAIL_PAGE_RISK_SIGNAL_PATH: &str =
@@ -69,6 +78,8 @@ struct DetailPageSessionGrantBody {
     task_id: uuid::Uuid,
     grant_request_id: uuid::Uuid,
     execution_source_url: String,
+    /// 插件确认过的握手版本；缺席就是 v1 插件，回答与升级前一致。
+    lane_preparation_contract: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -112,26 +123,71 @@ async fn grant_detail_page_session_route(
             "detail_page_session_grant_invalid",
         );
     };
-    match grant_detail_page_session(
-        database,
-        &request.install_key,
-        &request.installation_credential,
-        request.task_id,
-        request.grant_request_id,
-        &request.execution_source_url,
-    )
-    .await
-    {
-        Ok(DetailPageSessionGrant::Authorized { session_ref, plan }) => Json(serde_json::json!({
+    // 只有插件明确报出握手版本时才登记通道交付身份。认不出的版本按无效请求拒绝，
+    // 不悄悄降级成 v1——那会让插件以为自己拿到了它根本不理解的准备回执。
+    let lane_preparation_requested = match request.lane_preparation_contract.as_deref() {
+        None => false,
+        Some(contract) if contract == DETAIL_PAGE_SESSION_LANE_PREPARATION_CONTRACT => true,
+        Some(_) => {
+            return local_read_json_error(
+                axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+                "detail_page_session_lane_preparation_contract_unknown",
+            );
+        }
+    };
+    let grant = if lane_preparation_requested {
+        grant_detail_page_session_with_lane_deliveries(
+            database,
+            &request.install_key,
+            &request.installation_credential,
+            request.task_id,
+            request.grant_request_id,
+            &request.execution_source_url,
+        )
+        .await
+    } else {
+        grant_detail_page_session(
+            database,
+            &request.install_key,
+            &request.installation_credential,
+            request.task_id,
+            request.grant_request_id,
+            &request.execution_source_url,
+        )
+        .await
+    };
+    // 准备回执与授权一起返回：插件在打开页面前把它写进本机持久状态。回执缺席就是
+    // 「这次没有准备」，不是一个可以照常导航的默认值。
+    let lane_preparation = |session_ref: uuid::Uuid, prepared_lanes: Vec<PreparedLaneDelivery>| {
+        (!prepared_lanes.is_empty()).then(|| {
+            serde_json::json!({
+                "contractVersion": DETAIL_PAGE_SESSION_LANE_PREPARATION_CONTRACT,
+                "sessionRef": session_ref,
+                "lanes": prepared_lanes,
+            })
+        })
+    };
+    match grant {
+        Ok(DetailPageSessionGrant::Authorized {
+            session_ref,
+            plan,
+            prepared_lanes,
+        }) => Json(serde_json::json!({
             "outcome": "authorized",
             "sessionRef": session_ref,
             "pageSessionPlan": plan,
+            "lanePreparation": lane_preparation(session_ref, prepared_lanes),
         }))
         .into_response(),
-        Ok(DetailPageSessionGrant::Replay { session_ref, plan }) => Json(serde_json::json!({
+        Ok(DetailPageSessionGrant::Replay {
+            session_ref,
+            plan,
+            prepared_lanes,
+        }) => Json(serde_json::json!({
             "outcome": "replay",
             "sessionRef": session_ref,
             "pageSessionPlan": plan,
+            "lanePreparation": lane_preparation(session_ref, prepared_lanes),
         }))
         .into_response(),
         Ok(DetailPageSessionGrant::Suppressed {
@@ -152,6 +208,7 @@ async fn grant_detail_page_session_route(
 
 fn detail_page_session_grant_error_code(error: &DetailPageSessionGrantError) -> &'static str {
     match error {
+        DetailPageSessionGrantError::UpgradeRecoveryOnly => "collection_upgrade_recovery_only",
         DetailPageSessionGrantError::SchemaUnavailable => "detail_page_session_schema_unavailable",
         DetailPageSessionGrantError::UnknownInstallation => {
             "detail_page_session_installation_unknown"
@@ -166,6 +223,9 @@ fn detail_page_session_grant_error_code(error: &DetailPageSessionGrantError) -> 
         }
         DetailPageSessionGrantError::ExecutionSourceChanged => {
             "detail_page_execution_source_changed"
+        }
+        DetailPageSessionGrantError::LanePreparationUnavailable => {
+            "detail_page_session_lane_preparation_unavailable"
         }
         DetailPageSessionGrantError::Database(_) => "detail_page_session_grant_write_failed",
     }
@@ -705,7 +765,12 @@ fn payload(decision: &DispatchDecision) -> serde_json::Value {
         }
         DispatchDecision::ControlBlocked { reason_code } => {
             payload["reasonCode"] = serde_json::json!(reason_code);
-            payload["reason"] = serde_json::json!("当前控制资格已变化，任务保持等待。");
+            payload["reason"] =
+                serde_json::json!(if reason_code == "collection_upgrade_recovery_only" {
+                    "采集恢复阶段：暂停新访问，已采集数据继续交付。"
+                } else {
+                    "当前控制资格已变化，任务保持等待。"
+                });
         }
     }
     payload

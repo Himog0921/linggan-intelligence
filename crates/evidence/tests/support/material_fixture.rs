@@ -203,6 +203,18 @@ const MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../../database/migrations/0095_detail_page_url_rejection.sql"),
     "\n",
+    include_str!(
+        "../../../../database/migrations/0096_detail_page_session_lane_delivery_identities.sql"
+    ),
+    "\n",
+    include_str!("../../../../database/migrations/0097_collection_execution_input_eligibility.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0098_scheduler_tick_steps_and_readiness.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0099_collection_selector_health.sql"),
+    include_str!("../../../../database/migrations/0100_collection_hot_path_indexes.sql"),
+    include_str!("../../../../database/migrations/0101_collection_command_reason_vocabulary.sql"),
+    "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ",
     "('0025_comment_current_projection', '64fd9474647834358f8d2d4f1c25e4345e26a3ff79dbfc53a7846915576b0885'), ",
     "('0026_work_resource_read', '08712c71e9b6f97d270739649a7c264da2f115315bef90fabaedded50cf774bd'), ",
@@ -231,7 +243,13 @@ const MIGRATIONS: &str = concat!(
     "('0092_detail_page_session_recovery_boundary', '836095cc3923684684a1d22b6f38171692cadbee5c748e3f5cf004e387d701ad'),\n",
     "('0093_capture_delivery_rejection', 'aaaecf81357c2d4b63719e9729b4e8787b0fab38c0b96953b597850bb69e443e'),\n",
     "('0094_corpus_evidence_read_recovery', '5557cd2dfa4b48426caa230d72742b56d5dd7bc5f85ca53acc953aec1b57fd4b'),\n",
-    "('0095_detail_page_url_rejection', '8daf8717a6eb55887dd4b83f92f1c79c93b7a42156e272bc04ceacb112797eb8');\n",
+    "('0095_detail_page_url_rejection', '8daf8717a6eb55887dd4b83f92f1c79c93b7a42156e272bc04ceacb112797eb8'),\n",
+    "('0096_detail_page_session_lane_delivery_identities', '5bca0b9c770f16ebeed7f510fa0080e7cde07687dfb11bc485fe6b9da8d462eb'),\n",
+    "('0097_collection_execution_input_eligibility', '4163a67a9b8556460c816818e5e96829f825610a1ecb0a32550c9b0ab1b43237'),\n",
+    "('0098_scheduler_tick_steps_and_readiness', '1933b8978c73c094f8e41c04d119021c17a25483ba71c0d7751af7556e1ba310'), ",
+    "('0099_collection_selector_health', '31bd088d59d027abceceef3584aba221803795a576cda21cb462e1f5466baf4f'), ",
+    "('0100_collection_hot_path_indexes', 'a26c7006e1c210f226ab8e432651b949f0456ca99055dc41df055b1e6a52dc6c'), ",
+    "('0101_collection_command_reason_vocabulary', 'fda3711ea7bb38af6bb5a6a28264a39ac0c04024aef3e6feeb931e07a9b074c1');\n",
 );
 
 pub fn coverage_layer(capability: &str, acquired: i64) -> serde_json::Value {

@@ -1,7 +1,7 @@
 # 采集监控产品规则（博主监控 / 关键词监控）
 
 > 状态: 权威当前
-> 最后核对: 2026-09-15
+> 最后核对: 2026-09-21
 > 适用范围: 观察目标的生命周期、深度建档、固定间隔观察、统一浏览器任务调度、爆款追踪与插件推送协同
 > 事实来源: Mog 于 2026-09-05 的“自动监测基线设计”确认、`domain-invariants.md`、采集控制合同与当前 `COLLECTION-SCHEDULER-SCALE-001` 源码/隔离 PostgreSQL 合同
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、`domain-invariants.md`、采集控制合同；本文件不授权任何真实采集执行
@@ -64,7 +64,11 @@ active automatic rule = none
 
 这不是静态工位分组。工位每次 claim 前都要过：任务到期与 `retry_not_before_at`、工位接活/新鲜度/最低版本/能力、账号绑定与资格、额度、风险/节流、授权 scope、目标冲突，以及平台全局活跃 Lease cap。合格候选按 lane 的权重与虚拟完成量公平选择：即时 lane FIFO、定时 lane 最早计划、batch lane 按最近最少被领取的 group 轮转；认领使用 `FOR UPDATE SKIP LOCKED` 原子抢占。一个工位初期最多执行一个有效浏览器任务；平台 cap 由数据库策略行锁定并跨 Runtime 进程裁决。OCR、ASR、媒体下载和分析是后续独立 worker，不占浏览器 claim。
 
-可恢复的浏览器启动失败或运行超时不会删改旧 Lease/Task/Attempt/Package/Receipt：服务端追加失败账本、释放旧 Lease，并以 60、120、240、480、900 秒封顶的持久退避重新开放同一 WorkOrder。缺失签名执行 locator 发生在浏览器 Attempt 之前，也必须走同样的释放与冷却，不能以一张无效 Lease 占住工位、账号或平台并发。
+可恢复的浏览器启动失败或运行超时不会删改旧 Lease/Task/Attempt/Package/Receipt：服务端追加失败账本、释放旧 Lease，并以 60、120、240、480、900 秒封顶的持久退避重新开放同一 WorkOrder。
+
+缺失签名执行 locator 发生在浏览器 Attempt 之前，**它不是一次可恢复的启动失败，因此不释放整张 Lease、不进冷却重试**：该成员停在 `input_blocked`，台账记 `execution_input_missing`，它那一篇的其余通道一并收束，同批地址完好的作品当场继续领取；工单若已无剩余可执行成员，则整张 Lease 以 `input_blocked` 释放并终结该 WorkOrder。同一份缺失输入再调度一百次，不新增租约、派发或平台访问。输入真的变了（出现一条不同的、已接纳的带签名地址）才交还执行资格，旧停止事实保留；**换地址既不增加重试 epoch，也不清零页面失败预算**。
+
+> **2026-09-21 修订（COLLECTION-UPGRADE-001 · S1b）。** 本条原文为「缺失签名执行 locator 发生在浏览器 Attempt 之前，也必须走同样的释放与冷却，不能以一张无效 Lease 占住工位、账号或平台并发」。它把「没有入口」当成了「读了一次没读成」，实际后果恰好是它想避免的反面：缺地址的成员每一轮重新消耗一次租约，同批里地址完好的作品永远轮不到——共享库 2026-09-21 的 3 张工单、35 条 `execution_locator_unavailable` 就是这条路径连转三小时的产物。原文保留在此供对照，不再作为有效规则；证明与验收见 [`../plans/active/collection-upgrade-001.md`](../plans/active/collection-upgrade-001.md)。
 
 `content_detail` 的未知 `page_read_failed` 另有**按冻结 WorkOrder + contentExternalId 计数的三次边界**：前两次仍走上述冷却；第三次把该作品全部尚未执行 lane 标为 `blocked`，追加 `failure_disposition=blocked`，并立刻让同批后续作品继续领取。若浏览器最终 URL 已明确落到 XHS 404/失效页，则不是未知读取失败：它立即追加 `detail_page_url_invalid`，终结当前 URL 的冻结 lane，并仅以 SHA-256 记住该签名 URL；相同 URL 以后不会再派发，新的发现 URL 仍可由新工单执行。两种 `blocked` 都不是 `page_unavailable`，不表示作品永久不存在，也不生成 Attempt、CapturePackage、Receipt 或 Evidence。Runtime 页只读展示平台余量、lane 等待/冷却、活着的 Lease 与 Rule 排程；它不声称未被账本定义的“成功率”。
 

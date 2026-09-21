@@ -94,7 +94,7 @@ export function createLingganContentRuntime({ platform } = {}) {
       }), packageValue);
     },
     async submitContentDetail(note, options = {}) {
-      const packageValue = packageContentDetail({ platform, note });
+      const packageValue = options.capturePackage || packageContentDetail({ platform, note });
       return submit(taskFor(
         platform,
         'content_detail',

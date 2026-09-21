@@ -107,6 +107,8 @@ export async function checkInLingganStation({
   origin = LINGGAN_LOCAL_ORIGIN,
   fetchImpl = globalThis.fetch,
   health = null,
+  // 报到时一并带上的结构自检快照；只有报到这条路需要它。
+  selectorHealth = null,
 } = {}) {
   if (typeof fetchImpl !== 'function') {
     return { checkedIn: false, message: '浏览器当前无法连接 Linggan 本机服务。' };
@@ -133,6 +135,8 @@ export async function checkInLingganStation({
         pluginVersion,
         browserLabel,
         capabilities: Array.isArray(capabilities) ? capabilities : [],
+        // 最近一次结构自检的受限快照（没有记录时不带这个字段：缺席就是「本机还没检查过」）。
+        ...(selectorHealth && Object.keys(selectorHealth).length > 0 ? { selectorHealth } : {}),
       }),
     });
     if (!response.ok) {
@@ -192,6 +196,56 @@ export function detailPageSessionGrantRouteFromHealth(health) {
   return path.startsWith('/api/local/dispatch/') && !/[?#]/.test(path) ? path : null;
 }
 
+/**
+ * The handshake version the service advertises for navigation-time delivery
+ * identities. Missing support blocks new detail navigation; existing outbox
+ * delivery uses its original identity and stays independent of this handshake.
+ */
+export function detailPageSessionLanePreparationContractFromHealth(health) {
+  return String(health?.routes?.dispatch?.detailPageSessionLanePreparationContract || '').trim();
+}
+
+/**
+ * Accept a preparation receipt only when it answers the exact request that was
+ * made.  A receipt for another session, another contract version, an unknown
+ * lane, or a lane without a server-minted identity is not a preparation this
+ * browser may act on.
+ */
+export function normalizeDetailPageLanePreparation(value, { contractVersion, sessionRef, plan, taskId: initialTaskId } = {}) {
+  const expectedContract = String(contractVersion || '').trim();
+  const expectedSession = String(sessionRef || '').trim();
+  if (!expectedContract || !expectedSession) return null;
+  if (value?.contractVersion !== expectedContract) return null;
+  if (String(value?.sessionRef || '').trim() !== expectedSession) return null;
+  const lanes = Array.isArray(value?.lanes) ? value.lanes : null;
+  if (!lanes || lanes.length === 0) return null;
+  const normalized = [];
+  const taskIds = new Set();
+  const attemptIds = new Set();
+  const capabilities = new Set();
+  for (const lane of lanes) {
+    const capability = String(lane?.capability || '').trim();
+    const taskId = String(lane?.taskId || '').trim();
+    const attemptId = String(lane?.attemptId || '').trim();
+    if (!['content_detail', 'media_slots', 'comments', 'replies'].includes(capability)
+        || !taskId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(attemptId)
+        || !Number.isFinite(Date.parse(lane.leaseExpiresAt))
+        || taskIds.has(taskId) || attemptIds.has(attemptId) || capabilities.has(capability)) {
+      return null;
+    }
+    try { validateTaskSpec(lane.taskSpec); } catch { return null; }
+    if (lane.taskSpec.taskId !== taskId || lane.taskSpec.source !== 'scheduled'
+        || lane.taskSpec.platform !== 'xhs' || lane.taskSpec.capabilitiesRequested[0] !== capability
+        || (plan && lane.taskSpec.target.contentExternalId !== plan.contentExternalId)
+        || (initialTaskId && capability === 'content_detail' && taskId !== initialTaskId)) return null;
+    taskIds.add(taskId); attemptIds.add(attemptId); capabilities.add(capability);
+    normalized.push({ capability, taskId, attemptId, taskSpec: lane.taskSpec, leaseExpiresAt: lane.leaseExpiresAt });
+  }
+  if (plan && (!Array.isArray(plan.lanes) || plan.lanes.length !== capabilities.size
+      || plan.lanes.some((capability) => !capabilities.has(capability)))) return null;
+  return { contractVersion: expectedContract, sessionRef: expectedSession, lanes: normalized };
+}
+
 export function detailPageSessionNavigationRouteFromHealth(health) {
   const path = String(health?.routes?.dispatch?.detailPageSessionNavigation || '').trim();
   return path.startsWith('/api/local/dispatch/') && !/[?#]/.test(path) ? path : null;
@@ -242,6 +296,15 @@ export async function grantLingganDetailPageSession({
   health = null,
 } = {}) {
   const route = detailPageSessionGrantRouteFromHealth(health);
+  // The announced handshake version is the only reason to ask for a preparation
+  // receipt.  A service that does not advertise one would reject the unknown
+  // field outright, and a browser that sent it anyway would be guessing at a
+  // contract it cannot verify.
+  const requestedLanePreparationContract =
+    detailPageSessionLanePreparationContractFromHealth(health);
+  if (requestedLanePreparationContract !== 'linggan.detail-page-session.lane-preparation.v1') {
+    return { granted: false, outcome: 'incompatible', reasonCode: 'grant_lane_preparation_unsupported' };
+  }
   if (typeof fetchImpl !== 'function' || !route
       || !String(installKey || '').trim() || !String(installationCredential || '').trim()
       || !String(taskId || '').trim() || !String(grantRequestId || '').trim()
@@ -253,7 +316,12 @@ export async function grantLingganDetailPageSession({
       method: 'POST', credentials: 'omit', headers: { 'Content-Type': 'application/json' },
       // The server compares this ephemeral value to its current accepted
       // discovery locator and persists only its SHA-256 fingerprint.
-      body: JSON.stringify({ installKey, installationCredential, taskId, grantRequestId, executionSourceUrl }),
+      body: JSON.stringify({
+        installKey, installationCredential, taskId, grantRequestId, executionSourceUrl,
+        ...(requestedLanePreparationContract
+          ? { lanePreparationContract: requestedLanePreparationContract }
+          : {}),
+      }),
     });
     const body = await response.json().catch(() => null);
     if (!response.ok) {
@@ -264,7 +332,24 @@ export async function grantLingganDetailPageSession({
     if (['authorized', 'replay'].includes(outcome) && sessionRef
         && body?.pageSessionPlan && typeof body.pageSessionPlan === 'object'
         && !Array.isArray(body.pageSessionPlan)) {
-      return { granted: true, outcome, sessionRef, pageSessionPlan: body.pageSessionPlan };
+      // Preparation was asked for, so it is required: an authorization without
+      // it means this navigation has no durable delivery identities, and the
+      // page must not be opened on a promise the service did not make.
+      const lanePreparation = requestedLanePreparationContract
+        ? normalizeDetailPageLanePreparation(body?.lanePreparation, {
+          contractVersion: requestedLanePreparationContract,
+          sessionRef,
+          plan: body.pageSessionPlan,
+          taskId,
+        })
+        : null;
+      if (requestedLanePreparationContract && !lanePreparation) {
+        return {
+          granted: false, outcome: 'invalid', sessionRef,
+          reasonCode: 'grant_lane_preparation_missing',
+        };
+      }
+      return { granted: true, outcome, sessionRef, pageSessionPlan: body.pageSessionPlan, lanePreparation };
     }
     return { granted: false, outcome: outcome || 'invalid', sessionRef, reasonCode: String(body?.reasonCode || 'grant_contract_invalid') };
   } catch {
@@ -838,6 +923,18 @@ export function attemptStartIsAccepted(result) {
 
 export function isTerminalLocalDeliveryResult(result) {
   return (result?.status >= 400 && result.status < 500) || result?.payload?.outcome === 'conflict';
+}
+
+// 「这块工位现在没有这条活权」不等于「这份包没被收过」。
+//
+// 最普通的一种就是：上一次投递本身完成了最后一条冻结通道，服务端顺手关掉了租约。此时若
+// 客户端丢的恰好是那次响应，它重开同一份已登记身份就会被判成这个码——而服务端其实早已开
+// 出 Receipt。把这种情况交给投递路由去判（那里按 Attempt、包 hash 和活权三件durable事实
+// 决定，重放会拿回原 Receipt，晚到包按 LOST_AUTHORITY 接纳），才是恢复而不是丢弃。
+//
+// 其余 4xx 保持原义：身份冲突、任务不存在都不是「活权挪走了」，不能借这条通道绕过去。
+export function isRecoverableDeliveryRegistrationRefusal(result) {
+  return result?.payload?.code === 'scheduled_task_not_claimed_by_producer';
 }
 
 export function unavailableLingganStats(statsState = 'not_connected') {

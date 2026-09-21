@@ -325,7 +325,7 @@ fn database(state: &LocalWebState) -> Result<&linggan_storage_postgres::Database
         LocalDatabaseState::Ready(database) => Ok(database),
         LocalDatabaseState::NotConfigured
         | LocalDatabaseState::DatabaseUnavailable
-        | LocalDatabaseState::SchemaUnavailable => Err(error(
+        | LocalDatabaseState::SchemaUnavailable(_) => Err(error(
             StatusCode::SERVICE_UNAVAILABLE,
             "comment_study_unavailable",
         )),

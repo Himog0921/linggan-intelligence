@@ -13,6 +13,8 @@
 //!    一步不少。自动化不是豁免权：如果准入说资源不够，调度也只能等。
 
 use crate::collection_control::{ComparableObservationRound, DynamicCadence, dynamic_cadence};
+use crate::scheduler_tick::{STEP_PATROL, TickLedger};
+use crate::step_report::StepOutcome;
 use linggan_contracts::AdmissionOutcome;
 use linggan_storage_postgres::Database;
 use uuid::Uuid;
@@ -28,6 +30,33 @@ pub struct PatrolTickSummary {
     pub dispatched: Vec<Uuid>,
     /// 每个被跳过的目标，以及具体原因。
     pub skipped: Vec<(Uuid, String)>,
+    /// 这一轮看过的到期规则条数（不是目标数：一个目标可以有几条口径各设各的周期）。
+    /// 账本的 `considered_count` 就是它——「没有到期的活」与「根本没看」必须分得开。
+    pub considered: i64,
+}
+
+impl PatrolTickSummary {
+    /// 这一步在账本上该怎么记。翻译只写一份，调用方不各自解释计数。
+    pub fn step_outcome(&self) -> StepOutcome {
+        StepOutcome::counted(
+            self.considered,
+            i64::try_from(self.queued.len()).unwrap_or(i64::MAX),
+            i64::try_from(self.skipped.len()).unwrap_or(i64::MAX),
+        )
+    }
+}
+
+/// 巡查这一步自己的失败。与另外三步同一句话：**缺自己的表 = 没轮到**（`SchemaUnavailable`），
+/// 不是「本轮 0 个」。
+///
+/// `run_due_patrols` 的公开错误类型仍是 `sqlx::Error`（调用方多是测试与独立入口，不为记账改
+/// 它们的签名）；只有走账本的那条路（[`run_due_patrol_step`]）用这个类型，把两种失败分开。
+#[derive(Debug, thiserror::Error)]
+pub enum PatrolStepError {
+    #[error("the collection ledger schema is not applied")]
+    SchemaUnavailable,
+    #[error(transparent)]
+    Database(#[from] sqlx::Error),
 }
 
 #[derive(Debug, Clone)]
@@ -74,6 +103,16 @@ pub async fn record_scheduler_started(
     .bind(worker_instance_ref)
     .execute(database.pool())
     .await?;
+    // 换了进程，上一次的就绪判定不再代表这台机器现在能不能接活：把它退回「还没判」。
+    // 否则一个刚崩过、正在重连的进程，页面上还挂着上一条命留下的 `ready`。
+    if crate::scheduler_tick::heartbeat_readiness_columns_present(database).await? {
+        sqlx::query(
+            "UPDATE collection_scheduler_heartbeat SET readiness_state='unknown', \
+                 readiness_detail=NULL,readiness_checked_at=NULL WHERE scheduler_key='patrol'",
+        )
+        .execute(database.pool())
+        .await?;
+    }
     Ok(())
 }
 
@@ -107,62 +146,46 @@ async fn heartbeat_schema_is_ready(database: &Database) -> Result<bool, sqlx::Er
         .await
 }
 
-/// 跑一轮巡检调度。
+/// 跑一轮**只有巡查一步**的 tick。
+///
+/// 独立调用方与测试用它；worker 每轮的四步 tick 用 [`run_due_patrol_step`]——那一轮的 run 行
+/// 由那一轮自己开，巡查只是它的一步，账本上不该出现第二个 tick。
 ///
 /// 到期判据只看「上次**派出**的时间」，不看采集是否成功：采集失败也算看过了，否则一个
 /// 持续失败的目标会被无限重试，把当天额度吃光。
 pub async fn run_due_patrols(database: &Database) -> Result<PatrolTickSummary, sqlx::Error> {
-    let heartbeat_ready = heartbeat_schema_is_ready(database).await.unwrap_or(false);
-    if heartbeat_ready {
-        sqlx::query(
-            "INSERT INTO collection_scheduler_heartbeat \
-                 (scheduler_key,last_tick_started_at,last_outcome,last_error) \
-             VALUES ('patrol',scope_001_now(),'unknown',NULL) \
-             ON CONFLICT (scheduler_key) DO UPDATE SET \
-                 last_tick_started_at=EXCLUDED.last_tick_started_at,last_outcome='unknown',last_error=NULL",
+    let Some(ledger) = TickLedger::begin(database).await? else {
+        // 账本表不在（这库还没跑到 0034/0098）：巡查在同一批表上干活，走到这里它也无事可做。
+        return Ok(PatrolTickSummary::default());
+    };
+    let run_ref = ledger.run_ref();
+    let (report, result) = ledger
+        .run_step(
+            STEP_PATROL,
+            run_due_patrol_step(database, run_ref),
+            PatrolTickSummary::step_outcome,
         )
-        .execute(database.pool())
-        .await?;
-    }
-    let result = run_due_patrols_inner(database).await;
-    if heartbeat_ready {
-        let (outcome, dispatched, skipped, error) = match &result {
-            Ok(summary) if summary.queued.is_empty() && summary.skipped.is_empty() => {
-                ("idle", 0, 0, None)
-            }
-            Ok(summary) if summary.skipped.is_empty() => (
-                "queued",
-                i32::try_from(summary.queued.len()).unwrap_or(i32::MAX),
-                0,
-                None,
-            ),
-            Ok(summary) => (
-                "partial",
-                i32::try_from(summary.queued.len()).unwrap_or(i32::MAX),
-                i32::try_from(summary.skipped.len()).unwrap_or(i32::MAX),
-                None,
-            ),
-            Err(_) => ("failed", 0, 0, Some("database_error")),
-        };
-        let heartbeat_result = sqlx::query(
-            "UPDATE collection_scheduler_heartbeat SET \
-                 last_tick_completed_at=scope_001_now(),last_outcome=$1, \
-                 dispatched_count=$2,skipped_count=$3,last_error=$4 \
-             WHERE scheduler_key='patrol'",
-        )
-        .bind(outcome)
-        .bind(dispatched)
-        .bind(skipped)
-        .bind(error)
-        .execute(database.pool())
         .await;
-        if result.is_ok() {
-            heartbeat_result?;
+    let finished = ledger.finish(std::slice::from_ref(&report)).await;
+    match result {
+        // 这一步成功了，收轮却写不下时如实报错：run 行停在「没有结局」上，页面会把它当作
+        // 仍在跑。反过来（这一步本来就失败），原来的错误更重要，收轮的错误不掩盖它。
+        Some(Ok(summary)) => {
+            finished?;
+            Ok(summary)
         }
+        // 缺表这条路的对外行为不变（这条入口的历史约定：空汇总，不报错）。
+        Some(Err(PatrolStepError::SchemaUnavailable)) => Ok(PatrolTickSummary::default()),
+        Some(Err(PatrolStepError::Database(error))) => Err(error),
+        None => Err(sqlx::Error::RowNotFound),
     }
-    result
 }
 
+/// 在**已经开好的那一轮**里跑巡查这一步。
+///
+/// 只跑这一步、不碰 run 行：run 的开始、结局与心跳都由那一轮的账本收口（[`TickLedger`]）。
+/// 目标级决定仍写 `collection_scheduler_target_decision`，挂在同一条 `scheduler_run_ref` 上。
+///
 /// Queue only rules that are valid *and already due*. In particular, this never
 /// scans arbitrary `monitoring_enabled` targets and then emits `rule_missing`:
 /// that was an implementation leak from a state the database now forbids.
@@ -171,17 +194,14 @@ pub async fn run_due_patrols(database: &Database) -> Result<PatrolTickSummary, s
 /// Work Order. A delayed scheduler therefore produces one catch-up order and
 /// records the number of missed intervals rather than emitting an accidental
 /// backlog of browser work.
-async fn run_due_patrols_inner(database: &Database) -> Result<PatrolTickSummary, sqlx::Error> {
+pub async fn run_due_patrol_step(
+    database: &Database,
+    scheduler_run_ref: Uuid,
+) -> Result<PatrolTickSummary, PatrolStepError> {
     if !patrol_schema_is_ready(database).await? {
-        return Ok(PatrolTickSummary::default());
+        // 如实说「没轮到」，不写一行决定、不建工单；0 个到期规则与「根本没看」是两件事。
+        return Err(PatrolStepError::SchemaUnavailable);
     }
-    let scheduler_run_ref = Uuid::new_v4();
-    sqlx::query(
-        "INSERT INTO collection_scheduler_run (scheduler_run_ref,scheduler_key) VALUES ($1,'patrol')",
-    )
-    .bind(scheduler_run_ref)
-    .execute(database.pool())
-    .await?;
 
     // 到期是**按规则**算的，不是按目标：一个关键词可以同时盯综合榜和点赞榜，两条规则
     // 各有各的周期。共用一个目标级的 `monitor_next_run_at` 说不清是谁该跑了。
@@ -218,7 +238,10 @@ async fn run_due_patrols_inner(database: &Database) -> Result<PatrolTickSummary,
     .fetch_all(database.pool())
     .await?;
 
-    let mut summary = PatrolTickSummary::default();
+    let mut summary = PatrolTickSummary {
+        considered: i64::try_from(due_rules.len()).unwrap_or(i64::MAX),
+        ..PatrolTickSummary::default()
+    };
     for rule_ref in &due_rules {
         let (outcome, reason, target_ref, work_order_ref) =
             queue_one_due_rule(database, scheduler_run_ref, *rule_ref).await?;
@@ -230,26 +253,6 @@ async fn run_due_patrols_inner(database: &Database) -> Result<PatrolTickSummary,
         }
         let _ = work_order_ref;
     }
-
-    let run_outcome = if summary.queued.is_empty() && summary.skipped.is_empty() {
-        "idle"
-    } else if summary.skipped.is_empty() {
-        "queued"
-    } else {
-        "partial"
-    };
-    sqlx::query(
-        "UPDATE collection_scheduler_run SET completed_at=scope_001_now(),outcome=$2, \
-             considered_count=$3,dispatched_count=$4 WHERE scheduler_run_ref=$1",
-    )
-    .bind(scheduler_run_ref)
-    .bind(run_outcome)
-    .bind(i32::try_from(due_rules.len()).unwrap_or(i32::MAX))
-    // The legacy column is retained for projection compatibility. It means
-    // “orders queued by this scheduler run”, never “browser collection ran”.
-    .bind(i32::try_from(summary.queued.len()).unwrap_or(i32::MAX))
-    .execute(database.pool())
-    .await?;
     Ok(summary)
 }
 
@@ -331,7 +334,7 @@ async fn queue_one_due_rule(
         // 一个压平的原因码比没有原因码更坏：它看起来是个答案。
         Err(error) => (
             "rejected",
-            scheduler_admission_failure_reason(&error),
+            acquisition_failure_code(&error),
             None,
             false,
         ),
@@ -675,8 +678,10 @@ pub async fn set_target_monitoring(
 /// 准入直接报错（还没走到决策）时，如实说出是哪一种。
 ///
 /// 返回的是闭集里的机器原因码，与决策上持久化的那一套同源——调度写进
-/// `collection_scheduler_target_decision.reason_code`，界面按它显示。
-fn scheduler_admission_failure_reason(
+/// `collection_scheduler_target_decision.reason_code`，界面按它显示；账本的步骤行
+/// （`error_class`）也共用这张表（见 `step_report::StepFailure`）：同一个错误在两个
+/// 地方被叫成两个名字，读日志的人就要自己发现它们是同一件事。
+pub(crate) fn acquisition_failure_code(
     error: &crate::acquisition_chain::AcquisitionChainError,
 ) -> &'static str {
     use crate::acquisition_chain::AcquisitionChainError as Failure;

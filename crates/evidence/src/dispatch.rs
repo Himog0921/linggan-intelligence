@@ -14,6 +14,13 @@ use crate::collection_control::{
     evaluate_claiming_installation_capacity_in, required_capabilities_for,
     revalidate_frozen_capacity_in, validate_installation_credential_in,
 };
+use crate::execution_input_eligibility::{
+    MISSING_EXECUTION_INPUT_REASON, PageReadBudget,
+    detail_material_already_accepted_in_transaction,
+    record_detail_page_read_failure_in_transaction, requires_signed_execution_source,
+    signed_locator_predicate, stop_material_for_missing_execution_input_in_transaction,
+    task_content_external_id,
+};
 use crate::work_order_lease::{
     LeaseError, claim_queued_work_order_in_transaction, expire_lapsed_leases_in_transaction,
     recover_released_orphaned_work_orders_in_transaction,
@@ -34,6 +41,12 @@ const MAX_DISPATCH_FAILURE_RETRY_AFTER_SECONDS: u32 = 900;
 /// blocked until a later, explicit recovery decision is made.
 const MAX_PAGE_READ_FAILURES_PER_DETAIL: i64 = 3;
 const CLAIM_LEASE_MINUTES: i32 = 30;
+/// 一次派发里最多为「输入缺失」停几个成员。
+///
+/// 停止是廉价的（都停完就终结这张工单），但它是循环的出口：没有上限时，一张成员全部缺输入
+/// 的工单会让这一次派发把整批成员挨个停完才开始做别的——在队列很长时那不是「马上」，而是
+/// 「这一轮都在收尸」。留一个上限，剩下的下一轮继续停，停过的成员不会重新变成候选。
+const MAX_MEMBER_STOPS_PER_DISPATCH: usize = 8;
 
 #[derive(Debug, thiserror::Error)]
 pub enum DispatchError {
@@ -47,6 +60,21 @@ pub enum DispatchError {
     Database(#[from] sqlx::Error),
 }
 
+/// 导航前为一个冻结通道登记的交付身份。
+///
+/// 它是「受权的准备」，不是执行事实：登记它不代表这个通道已经被访问、采集、交付或完成。
+/// 插件在打开页面前把它持久化，之后同一条 task 的投递都用这个身份，哪怕最初那份租约
+/// 已经结束——服务端仍能认出「这是它自己为这次导航登记过的身份」。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreparedLaneDelivery {
+    pub capability: String,
+    pub task_id: Uuid,
+    pub attempt_id: Uuid,
+    pub task_spec: Value,
+    pub lease_expires_at: String,
+}
+
 /// The only server response that may be paired with a browser's durable local
 /// navigation-consumption record.  It is intentionally separate from task
 /// claim: a committed claim may be replayed, while this grant is idempotent by
@@ -56,10 +84,12 @@ pub enum DetailPageSessionGrant {
     Authorized {
         session_ref: Uuid,
         plan: Value,
+        prepared_lanes: Vec<PreparedLaneDelivery>,
     },
     Replay {
         session_ref: Uuid,
         plan: Value,
+        prepared_lanes: Vec<PreparedLaneDelivery>,
     },
     Suppressed {
         session_ref: Uuid,
@@ -69,6 +99,8 @@ pub enum DetailPageSessionGrant {
 
 #[derive(Debug, thiserror::Error)]
 pub enum DetailPageSessionGrantError {
+    #[error("new page access is paused during delivery recovery rollout")]
+    UpgradeRecoveryOnly,
     #[error("dispatch schema is not applied")]
     SchemaUnavailable,
     #[error("no active plugin installation with that install key")]
@@ -83,6 +115,8 @@ pub enum DetailPageSessionGrantError {
     ExecutionSourceUnavailable,
     #[error("the signed execution locator changed after the task was dispatched")]
     ExecutionSourceChanged,
+    #[error("the frozen plan's lanes could not be registered for delivery before navigation")]
+    LanePreparationUnavailable,
     #[error(transparent)]
     Database(#[from] sqlx::Error),
 }
@@ -148,6 +182,7 @@ pub enum DispatchFailureCode {
     PageReadFailed,
     DetailPageUrlInvalid,
     DetailPageSessionGrantUnavailable,
+    DetailPageSessionLanePreparationUnavailable,
     DetailPageSessionRecoveryRequired,
     CaptureDeliveryRejected,
     AccountObservationBlocked,
@@ -167,6 +202,9 @@ impl DispatchFailureCode {
             "detail_page_url_invalid" => Some(Self::DetailPageUrlInvalid),
             "detail_page_session_grant_unavailable" => {
                 Some(Self::DetailPageSessionGrantUnavailable)
+            }
+            "detail_page_session_lane_preparation_unavailable" => {
+                Some(Self::DetailPageSessionLanePreparationUnavailable)
             }
             "detail_page_session_recovery_required" => {
                 Some(Self::DetailPageSessionRecoveryRequired)
@@ -189,6 +227,9 @@ impl DispatchFailureCode {
             Self::PageReadFailed => "page_read_failed",
             Self::DetailPageUrlInvalid => "detail_page_url_invalid",
             Self::DetailPageSessionGrantUnavailable => "detail_page_session_grant_unavailable",
+            Self::DetailPageSessionLanePreparationUnavailable => {
+                "detail_page_session_lane_preparation_unavailable"
+            }
             Self::DetailPageSessionRecoveryRequired => "detail_page_session_recovery_required",
             Self::CaptureDeliveryRejected => "capture_delivery_rejected",
             Self::AccountObservationBlocked => "account_observation_blocked",
@@ -302,6 +343,7 @@ impl DispatchDecision {
             Self::NothingWaiting => "nothing_waiting",
             Self::ExecutionLocatorUnavailable { .. } => "execution_locator_unavailable",
             Self::ControlBlocked { reason_code } => match reason_code.as_str() {
+                "collection_upgrade_recovery_only" => "collection_upgrade_recovery_only",
                 "risk_paused" => "risk_paused",
                 "installation_risk_cooldown" => "installation_risk_cooldown",
                 "station_unavailable" => "station_unavailable",
@@ -381,6 +423,7 @@ pub async fn dispatch_schema_is_ready(database: &Database) -> Result<bool, sqlx:
                 AND to_regclass(format('%I.%I',current_schema(),'collection_platform_dispatch_policy')) IS NOT NULL \
                 AND to_regclass(format('%I.%I',current_schema(),'collection_detail_page_session')) IS NOT NULL \
                 AND to_regclass(format('%I.%I',current_schema(),'collection_detail_page_session_grant_attempt')) IS NOT NULL \
+                AND to_regclass(format('%I.%I',current_schema(),'collection_detail_page_session_lane_preparation')) IS NOT NULL \
                 AND to_regclass(format('%I.%I',current_schema(),'collection_installation_risk_signal')) IS NOT NULL \
                 AND to_regclass(format('%I.%I',current_schema(),'collection_installation_risk_cooldown')) IS NOT NULL \
                 AND EXISTS (SELECT 1 FROM information_schema.columns \
@@ -404,6 +447,9 @@ pub async fn dispatch_schema_is_ready(database: &Database) -> Result<bool, sqlx:
 /// installation, a stopped session, or an unheld task never becomes a second
 /// navigation authorization.  This function does not observe Chrome and must
 /// not claim that a page was actually opened.
+///
+/// 这是 v1 的入口：它不登记通道交付身份，行为与升级前完全一致。已确认握手版本的插件走
+/// [`grant_detail_page_session_with_lane_deliveries`]。
 pub async fn grant_detail_page_session(
     database: &Database,
     install_key: &str,
@@ -412,6 +458,56 @@ pub async fn grant_detail_page_session(
     grant_request_id: Uuid,
     execution_source_url: &str,
 ) -> Result<DetailPageSessionGrant, DetailPageSessionGrantError> {
+    grant_detail_page_session_inner(
+        database,
+        install_key,
+        installation_credential,
+        task_id,
+        grant_request_id,
+        execution_source_url,
+        false,
+    )
+    .await
+}
+
+/// 新插件的入口：在同一个授权事务里，先为冻结计划中的每个通道登记稳定交付身份，
+/// 再给出可持久化的准备回执。
+///
+/// 登记失败即不发这份授权——「先登记交付身份，再进行页面读取」不是建议。插件在打开页面前
+/// 把回执写进本机持久状态，之后各通道按各自的本机 outbox 投递，身份不会因为租约结束
+/// 而消失。旧插件不请求这件事，服务端也从不把它当作已经准备完成。
+pub async fn grant_detail_page_session_with_lane_deliveries(
+    database: &Database,
+    install_key: &str,
+    installation_credential: &str,
+    task_id: Uuid,
+    grant_request_id: Uuid,
+    execution_source_url: &str,
+) -> Result<DetailPageSessionGrant, DetailPageSessionGrantError> {
+    grant_detail_page_session_inner(
+        database,
+        install_key,
+        installation_credential,
+        task_id,
+        grant_request_id,
+        execution_source_url,
+        true,
+    )
+    .await
+}
+
+async fn grant_detail_page_session_inner(
+    database: &Database,
+    install_key: &str,
+    installation_credential: &str,
+    task_id: Uuid,
+    grant_request_id: Uuid,
+    execution_source_url: &str,
+    register_lane_deliveries: bool,
+) -> Result<DetailPageSessionGrant, DetailPageSessionGrantError> {
+    if !crate::collection_governance_enabled() {
+        return Err(DetailPageSessionGrantError::UpgradeRecoveryOnly);
+    }
     if !dispatch_schema_is_ready(database).await? {
         return Err(DetailPageSessionGrantError::SchemaUnavailable);
     }
@@ -522,11 +618,20 @@ pub async fn grant_detail_page_session(
     .map(|byte| format!("{byte:02x}"))
     .collect::<String>();
 
-    type Existing = (Uuid, Uuid, Uuid, String, Value, bool, Option<String>);
+    type Existing = (
+        Uuid,
+        Uuid,
+        Uuid,
+        String,
+        Value,
+        bool,
+        Option<String>,
+        String,
+    );
     let existing: Option<Existing> = sqlx::query_as(
         "SELECT session.session_ref,session.owner_installation_ref,session.grant_request_id, \
                 session.state,session.plan_snapshot,owner.superseded_at IS NOT NULL, \
-                session.execution_source_url_sha256 \
+                session.execution_source_url_sha256,session.plan_hash \
          FROM collection_detail_page_session session \
          JOIN plugin_installation owner ON owner.installation_ref=session.owner_installation_ref \
          WHERE work_order_ref=$1 \
@@ -539,6 +644,9 @@ pub async fn grant_detail_page_session(
     .bind(cross_industry_sample_ref)
     .fetch_optional(&mut *transaction)
     .await?;
+    // 通道身份要绑定到**这次实际发出的那份计划**：新授权用刚冻结的这份，重放用会话里
+    // 存着的那份快照。两者用各自的 plan_hash 记录，不互相借用。
+    let mut effective_plan_hash = plan_hash.clone();
     let outcome = match existing {
         None => {
             let session_ref = Uuid::new_v4();
@@ -560,7 +668,11 @@ pub async fn grant_detail_page_session(
             .bind(&execution_source_url_sha256)
             .execute(&mut *transaction)
             .await?;
-            DetailPageSessionGrant::Authorized { session_ref, plan }
+            DetailPageSessionGrant::Authorized {
+                session_ref,
+                plan,
+                prepared_lanes: Vec::new(),
+            }
         }
         Some((
             session_ref,
@@ -570,6 +682,7 @@ pub async fn grant_detail_page_session(
             snapshot,
             _,
             source_hash,
+            stored_plan_hash,
         )) if owner_installation_ref == installation_ref
             && recorded_request_id == grant_request_id
             && source_hash.as_deref() == Some(execution_source_url_sha256.as_str()) =>
@@ -580,13 +693,15 @@ pub async fn grant_detail_page_session(
                     reason_code: "session_stopped",
                 }
             } else {
+                effective_plan_hash = stored_plan_hash;
                 DetailPageSessionGrant::Replay {
                     session_ref,
                     plan: snapshot,
+                    prepared_lanes: Vec::new(),
                 }
             }
         }
-        Some((session_ref, _, _, state, _, owner_superseded, _)) => {
+        Some((session_ref, _, _, state, _, owner_superseded, _, _)) => {
             if owner_superseded && state != "stopped" {
                 sqlx::query(
                     "UPDATE collection_detail_page_session \
@@ -607,6 +722,55 @@ pub async fn grant_detail_page_session(
                 },
             }
         }
+    };
+    // 登记发生在会话已经确定、授权事务仍未提交的时候：此刻计划、工单、租约与工位都还锁着。
+    // 只有真的会发出可用导航授权的两种结果才登记——被抑制的授权不留下任何身份，否则
+    // 「登记了」会被读成「这次导航获得了许可」。
+    let prepared_lanes = match (&outcome, register_lane_deliveries) {
+        (
+            DetailPageSessionGrant::Authorized {
+                session_ref, plan, ..
+            },
+            true,
+        )
+        | (
+            DetailPageSessionGrant::Replay {
+                session_ref, plan, ..
+            },
+            true,
+        ) => {
+            let Some(prepared_lanes) = register_lane_delivery_identities(
+                &mut transaction,
+                *session_ref,
+                installation_ref,
+                lease_ref,
+                plan,
+                &effective_plan_hash,
+            )
+            .await?
+            else {
+                return Err(DetailPageSessionGrantError::LanePreparationUnavailable);
+            };
+            prepared_lanes
+        }
+        _ => Vec::new(),
+    };
+    let outcome = match outcome {
+        DetailPageSessionGrant::Authorized {
+            session_ref, plan, ..
+        } => DetailPageSessionGrant::Authorized {
+            session_ref,
+            plan,
+            prepared_lanes,
+        },
+        DetailPageSessionGrant::Replay {
+            session_ref, plan, ..
+        } => DetailPageSessionGrant::Replay {
+            session_ref,
+            plan,
+            prepared_lanes,
+        },
+        other => other,
     };
     let (grant_outcome, session_ref) = match &outcome {
         DetailPageSessionGrant::Authorized { session_ref, .. } => {
@@ -643,6 +807,119 @@ pub async fn grant_detail_page_session(
     .await?;
     transaction.commit().await?;
     Ok(outcome)
+}
+
+/// 为冻结计划中的每个通道登记一个稳定交付身份。
+///
+/// 通道不是插件能加的东西：计划里的每个通道必须在这份租约里已经有一个同目标的任务，
+/// 且每个通道只有一个。少一个、多一个、或指向别的目标，都不登记——「受权准备」这句话
+/// 得对得上工单真正冻结过的范围。
+///
+/// 一个会话的一个通道只登记一次：同一 `grant_request_id` 重放拿回同一个 `attempt_id`。
+/// 返回 `None` 表示这份计划与租约的任务集合对不上，调用方不得发出导航授权。
+///
+/// 这里不写 `linggan_runtime_attempt`：那张表是「执行真的开始了」的凭据，界面用它区分
+/// 「等着工位来干」和「工位正在干」。把准备写成 Attempt 会让一条尚未打开的通道显示成
+/// 正在采集。身份先登记在这里，Attempt 仍在第一次投递时产生。
+async fn register_lane_delivery_identities(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_ref: Uuid,
+    owner_installation_ref: Uuid,
+    lease_ref: Uuid,
+    plan: &Value,
+    plan_hash: &str,
+) -> Result<Option<Vec<PreparedLaneDelivery>>, sqlx::Error> {
+    let Some(content_external_id) = plan
+        .pointer("/contentExternalId")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+    let Some(lanes) = plan.get("lanes").and_then(Value::as_array) else {
+        return Ok(None);
+    };
+    let frozen: Vec<(Uuid, Option<String>, Value, String)> = sqlx::query_as(
+        "SELECT runtime.task_id,runtime.task_spec #>> '{capabilitiesRequested,0}',runtime.task_spec,replace((lease.expires_at AT TIME ZONE 'UTC')::text,' ','T') || 'Z' \
+         FROM collection_work_order_lease_task task \
+         JOIN collection_work_order_lease lease ON lease.lease_ref=task.lease_ref \
+         JOIN linggan_runtime_task runtime ON runtime.task_id=task.task_id \
+         WHERE task.lease_ref=$1 \
+           AND runtime.task_spec #>> '{target,contentExternalId}'=$2",
+    )
+    .bind(lease_ref)
+    .bind(content_external_id)
+    .fetch_all(&mut **transaction)
+    .await?;
+    let recorded: Vec<(String, Uuid, Uuid)> = sqlx::query_as(
+        "SELECT capability,task_id,attempt_id \
+         FROM collection_detail_page_session_lane_preparation WHERE session_ref=$1",
+    )
+    .bind(session_ref)
+    .fetch_all(&mut **transaction)
+    .await?;
+    let mut prepared = Vec::with_capacity(lanes.len());
+    for lane in lanes {
+        let Some(capability) = lane
+            .as_str()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            return Ok(None);
+        };
+        let mut candidates = frozen.iter().filter(|(_, frozen_capability, _, _)| {
+            frozen_capability.as_deref() == Some(capability)
+        });
+        let Some((task_id, _, task_spec, lease_expires_at)) = candidates.next() else {
+            return Ok(None);
+        };
+        if candidates.next().is_some() {
+            return Ok(None);
+        }
+        let task_id = *task_id;
+        let attempt_id = match recorded
+            .iter()
+            .find(|(recorded_capability, _, _)| recorded_capability == capability)
+        {
+            Some((_, recorded_task_id, attempt_id)) => {
+                // 同一份计划里同一个通道永远指向同一个任务。指到别处，说明这份会话
+                // 被另一种计划写过；那种情况下宁可拒绝导航，也不混用两组身份。
+                if *recorded_task_id != task_id {
+                    return Ok(None);
+                }
+                *attempt_id
+            }
+            None => {
+                let attempt_id = Uuid::new_v4();
+                sqlx::query(
+                    "INSERT INTO collection_detail_page_session_lane_preparation \
+                         (preparation_ref,session_ref,owner_installation_ref,capability,task_id, \
+                          lease_ref,attempt_id,plan_hash) \
+                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+                )
+                .bind(Uuid::new_v4())
+                .bind(session_ref)
+                .bind(owner_installation_ref)
+                .bind(capability)
+                .bind(task_id)
+                .bind(lease_ref)
+                .bind(attempt_id)
+                .bind(plan_hash)
+                .execute(&mut **transaction)
+                .await?;
+                attempt_id
+            }
+        };
+        prepared.push(PreparedLaneDelivery {
+            capability: capability.to_owned(),
+            task_id,
+            attempt_id,
+            task_spec: task_spec.clone(),
+            lease_expires_at: lease_expires_at.clone(),
+        });
+    }
+    Ok(Some(prepared))
 }
 
 /// Record that Chrome observed the one locally consumed detail tab.  This is
@@ -996,6 +1273,10 @@ pub async fn requeue_failed_dispatch(
         transaction.commit().await?;
         return Ok(DispatchFailureOutcome::Unavailable);
     }
+    // 这次上报在台账上落到的位置（只有 `content_detail` 的页面读失败会填它）。它带出去给
+    // 下面的退避阶梯用：退避问的是「这个缺口试了几次」，而次数现在按需求范围跨工单累计——
+    // 换一张工单就从 60 秒重新开始，等于把同一个缺口的等待时间抹掉。
+    let mut page_read_budget: Option<PageReadBudget> = None;
     let terminal_disposition = match (failure_code, content_external_id.as_deref()) {
         (DispatchFailureCode::DetailPageUrlInvalid, Some(content_external_id))
             if capability == "content_detail" =>
@@ -1022,19 +1303,53 @@ pub async fn requeue_failed_dispatch(
             Some(("blocked", content_external_id))
         }
         (DispatchFailureCode::PageUnavailable, Some(content_external_id))
+        | (
+            DispatchFailureCode::DetailPageSessionLanePreparationUnavailable,
+            Some(content_external_id),
+        )
         | (DispatchFailureCode::DetailPageSessionRecoveryRequired, Some(content_external_id)) => {
             Some(("unavailable", content_external_id))
         }
         (DispatchFailureCode::PageReadFailed, Some(content_external_id))
             if capability == "content_detail" =>
         {
+            // 「同一张工单里最多三次」从前是这里唯一的判据，于是每建一张新工单都从零开始，
+            // 同一个缺口可以永远「再试三次」（共享库 2026-09-21：同一篇作品进过 21、13、
+            // 20、18 张有匹配任务的工单）。现在预算记在台账的**当前资格行**上：按需求范围
+            // 跨工单累计，换工单不清零，刷新同一个地址的签名 token 也不清零。
+            //
+            // 停止判据取两者中**更严**的一条：台账说用尽就停，已上线的「同一工单三次」
+            // 也永远不作废——新规则只能收紧，不能放松既有的保护。
+            let budget = if detail_material_already_accepted_in_transaction(
+                &mut transaction,
+                current_task_id,
+            )
+            .await?
+            {
+                // 材料已经被接纳：迟到的失败不回退材料事实，也不许把跨工单预算推到停止——
+                // 那个预算问的是「还要不要再试」，而这里已经没有要补的东西了。这次尝试
+                // 自己的事实仍按原有的「同一工单三次」收尾。
+                None
+            } else {
+                record_detail_page_read_failure_in_transaction(
+                    &mut transaction,
+                    current_task_id,
+                    failure_ref,
+                )
+                .await?
+            };
             let prior_failures = page_read_failure_count_for_detail_in_transaction(
                 &mut transaction,
                 work_order_ref,
                 content_external_id,
             )
             .await?;
-            if prior_failures + 1 >= MAX_PAGE_READ_FAILURES_PER_DETAIL {
+            let effective_failures =
+                (prior_failures + 1).max(budget.map_or(0, |budget| budget.count));
+            let stopped = effective_failures >= MAX_PAGE_READ_FAILURES_PER_DETAIL
+                || budget.is_some_and(|budget| budget.exhausted);
+            page_read_budget = budget;
+            if stopped {
                 Some(("blocked", content_external_id))
             } else {
                 None
@@ -1092,6 +1407,7 @@ pub async fn requeue_failed_dispatch(
         work_order_ref,
         failure_code.as_str(),
         "dispatch_start_failed",
+        page_read_budget.map_or(0, |budget| i32::try_from(budget.count).unwrap_or(i32::MAX)),
     )
     .await?;
     transaction.commit().await?;
@@ -1125,7 +1441,8 @@ async fn record_terminal_dispatch_failure_in_transaction(
     let all_terminal: bool = sqlx::query_scalar(
         "SELECT NOT EXISTS ( \
              SELECT 1 FROM collection_work_order_lease_task \
-             WHERE lease_ref=$1 AND execution_state NOT IN ('completed','unavailable','blocked'))",
+             WHERE lease_ref=$1 \
+               AND execution_state NOT IN ('completed','unavailable','blocked','input_blocked'))",
     )
     .bind(lease_ref)
     .fetch_one(&mut **transaction)
@@ -1141,6 +1458,86 @@ async fn record_terminal_dispatch_failure_in_transaction(
         .await?;
         sqlx::query(
             "UPDATE collection_work_order SET queue_state='completed' \
+             WHERE work_order_ref=$1 AND queue_state='leased'",
+        )
+        .bind(work_order_ref)
+        .execute(&mut **transaction)
+        .await?;
+    }
+    Ok(())
+}
+
+/// 一个成员缺执行输入：记下这一次**停止**，再按剩余有效成员判断工单状态。
+///
+/// 与 `record_recoverable_dispatch_failure_in_transaction` 的分工，正是这两件事的本质区别：
+/// 那边是「读了一次没读成」——退避之后值得再试，所以释放整张租约、把工单放回队列；这边是
+/// 「这一篇根本没有可用的执行入口」——重试只是把一件不会变的事再问一遍，所以停它自己，
+/// 不重排、不进冷却，**同批其余成员的许可原样保留**。
+///
+/// 只有当所有通道都终止时才结束租约；还有可跑的成员时租约继续有效，那些成员照常执行。
+/// 结束时的队列状态按「有没有任何一条通道真的完成过」判断：全部都是停下的记 `cancelled`
+/// ——停止不是完成；有完成过的记 `completed`，与既有终态口径一致。
+async fn record_input_blocked_dispatch_failure_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    failure_ref: Uuid,
+    task_id: Uuid,
+    installation_ref: Uuid,
+    lease_ref: Uuid,
+    work_order_ref: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO collection_work_order_lease_task_dispatch_failure \
+             (failure_ref,task_id,installation_ref,failure_code,retry_after_seconds,failure_disposition) \
+         VALUES ($1,$2,$3,$4,1,'input_blocked')",
+    )
+    .bind(failure_ref)
+    .bind(task_id)
+    .bind(installation_ref)
+    .bind(MISSING_EXECUTION_INPUT_REASON)
+    .execute(&mut **transaction)
+    .await?;
+    let all_terminal: bool = sqlx::query_scalar(
+        "SELECT NOT EXISTS ( \
+             SELECT 1 FROM collection_work_order_lease_task \
+             WHERE lease_ref=$1 \
+               AND execution_state NOT IN ('completed','unavailable','blocked','input_blocked'))",
+    )
+    .bind(lease_ref)
+    .fetch_one(&mut **transaction)
+    .await?;
+    if !all_terminal {
+        return Ok(());
+    }
+    let any_completed: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM collection_work_order_lease_task \
+           WHERE lease_ref=$1 AND execution_state='completed')",
+    )
+    .bind(lease_ref)
+    .fetch_one(&mut **transaction)
+    .await?;
+    sqlx::query(
+        "UPDATE collection_work_order_lease \
+         SET released_at=scope_001_now(),release_reason='input_blocked' \
+         WHERE lease_ref=$1 AND released_at IS NULL",
+    )
+    .bind(lease_ref)
+    .execute(&mut **transaction)
+    .await?;
+    if any_completed {
+        sqlx::query(
+            "UPDATE collection_work_order SET queue_state='completed' \
+             WHERE work_order_ref=$1 AND queue_state='leased'",
+        )
+        .bind(work_order_ref)
+        .execute(&mut **transaction)
+        .await?;
+    } else {
+        // 一条都没跑成，而且剩下的都因为缺输入停了。记 `completed` 会把「一篇都没取回」
+        // 说成「这一单做完了」——那正是包规约禁止的「制造成功」。`cancelled` 说的是实事：
+        // 这一轮停了；新的有效输入到了，会由准入另开一张后继工单。
+        sqlx::query(
+            "UPDATE collection_work_order SET queue_state='cancelled',station_ref=NULL, \
+                 installation_ref=NULL,account_ref=NULL,eligibility_ref=NULL \
              WHERE work_order_ref=$1 AND queue_state='leased'",
         )
         .bind(work_order_ref)
@@ -1188,6 +1585,9 @@ async fn record_recoverable_dispatch_failure_in_transaction(
     work_order_ref: Uuid,
     failure_code: &str,
     release_reason: &str,
+    // 这张工单自己的失败次数只是退避阶梯的**下限**：同一个需求范围的失败按台账跨工单累计，
+    // 而等待时间要跟着那个更大的数走。它只把等待变长，不会把任何一次重试提前。
+    failure_count_floor: i32,
 ) -> Result<u32, sqlx::Error> {
     let failure_count: i32 = sqlx::query_scalar(
         "UPDATE collection_work_order \
@@ -1198,7 +1598,8 @@ async fn record_recoverable_dispatch_failure_in_transaction(
     .bind(work_order_ref)
     .fetch_one(&mut **transaction)
     .await?;
-    let retry_after_seconds = retry_after_seconds_for_failure_count(failure_count);
+    let effective_failure_count = failure_count.max(failure_count_floor);
+    let retry_after_seconds = retry_after_seconds_for_failure_count(effective_failure_count);
     sqlx::query(
         "INSERT INTO collection_work_order_lease_task_dispatch_failure \
              (failure_ref,task_id,installation_ref,failure_code,retry_after_seconds,failure_disposition) \
@@ -1232,7 +1633,7 @@ async fn record_recoverable_dispatch_failure_in_transaction(
     Ok(retry_after_seconds)
 }
 
-fn retry_after_seconds_for_failure_count(failure_count: i32) -> u32 {
+pub(crate) fn retry_after_seconds_for_failure_count(failure_count: i32) -> u32 {
     let exponent = u32::try_from((failure_count - 1).clamp(0, 4)).unwrap_or(0);
     (DISPATCH_FAILURE_RETRY_AFTER_SECONDS.saturating_mul(1_u32 << exponent))
         .min(MAX_DISPATCH_FAILURE_RETRY_AFTER_SECONDS)
@@ -1247,6 +1648,11 @@ pub async fn decide_dispatch(
     install_key: &str,
     installation_credential: &str,
 ) -> Result<DispatchDecision, DispatchError> {
+    if !crate::collection_governance_enabled() {
+        return Ok(DispatchDecision::ControlBlocked {
+            reason_code: "collection_upgrade_recovery_only".to_owned(),
+        });
+    }
     if !dispatch_schema_is_ready(database).await? {
         return Err(DispatchError::SchemaUnavailable);
     }
@@ -1350,101 +1756,153 @@ pub async fn decide_dispatch(
     //
     // 顺序保证「有任务却被拦」不会被报成「没有任务」：只有确实没有候选时才回
     // `NothingWaiting`。
-    let waiting: Option<(Uuid, Uuid, Value, String, String)> = sqlx::query_as(
-        "SELECT task.task_id, lease.lease_ref, runtime.task_spec, runtime.platform, work_order.lane \
-         FROM collection_work_order_lease_task task \
-         JOIN collection_work_order_lease lease ON lease.lease_ref = task.lease_ref \
-         JOIN linggan_runtime_task runtime ON runtime.task_id = task.task_id \
-         JOIN collection_work_order work_order ON work_order.work_order_ref = lease.work_order_ref \
-         WHERE lease.station_ref = $1 \
-           AND lease.released_at IS NULL \
-           AND lease.expires_at > scope_001_now() \
-           AND task.execution_state = 'pending' \
-           AND NOT EXISTS ( \
-               SELECT 1 FROM collection_work_order_lease_task prior \
-               WHERE prior.lease_ref = task.lease_ref \
-                 AND prior.sequence_no < task.sequence_no \
-                 AND prior.execution_state NOT IN ('completed','unavailable','blocked')) \
-         ORDER BY lease.issued_at, task.sequence_no \
-         LIMIT 1 FOR UPDATE OF task SKIP LOCKED",
-    )
-    .bind(station_ref)
-    .fetch_optional(&mut *transaction)
-    .await?;
+    //
+    // 循环是为了「停一个成员、当场继续下一个」。一批里有一篇没有执行地址时，停它自己就够
+    // 了，同批其余作品应该在同一次轮询里照常派出去；不循环的话它们要等下一轮，而人看到的
+    // 是「这一轮什么也没派」——一次针对单篇的停止被读成整批停摆。
+    for _ in 0..MAX_MEMBER_STOPS_PER_DISPATCH {
+        let waiting: Option<(Uuid, Uuid, Value, String, String)> = sqlx::query_as(
+            "SELECT task.task_id, lease.lease_ref, runtime.task_spec, runtime.platform, work_order.lane \
+             FROM collection_work_order_lease_task task \
+             JOIN collection_work_order_lease lease ON lease.lease_ref = task.lease_ref \
+             JOIN linggan_runtime_task runtime ON runtime.task_id = task.task_id \
+             JOIN collection_work_order work_order ON work_order.work_order_ref = lease.work_order_ref \
+             WHERE lease.station_ref = $1 \
+               AND lease.released_at IS NULL \
+               AND lease.expires_at > scope_001_now() \
+               AND task.execution_state = 'pending' \
+               AND NOT EXISTS ( \
+                   SELECT 1 FROM collection_work_order_lease_task prior \
+                   WHERE prior.lease_ref = task.lease_ref \
+                     AND prior.sequence_no < task.sequence_no \
+                     AND prior.execution_state NOT IN \
+                         ('completed','unavailable','blocked','input_blocked')) \
+             ORDER BY lease.issued_at, task.sequence_no \
+             LIMIT 1 FOR UPDATE OF task SKIP LOCKED",
+        )
+        .bind(station_ref)
+        .fetch_optional(&mut *transaction)
+        .await?;
 
-    let Some((task_id, lease_ref, task_spec, _platform, _lane)) = waiting else {
-        if let Some(decision) =
-            claim_next_queued_work_order(&mut transaction, installation_ref, station_ref).await?
+        let Some((task_id, lease_ref, task_spec, _platform, _lane)) = waiting else {
+            let Some(claimed) =
+                claim_next_queued_work_order(&mut transaction, installation_ref, station_ref)
+                    .await?
+            else {
+                transaction.commit().await?;
+                return Ok(DispatchDecision::NothingWaiting);
+            };
+            match claimed {
+                ClaimedWork::StoppedMember => continue,
+                ClaimedWork::Decision(decision) => {
+                    transaction.commit().await?;
+                    return Ok(decision);
+                }
+            }
+        };
+
+        if let Some(reason_code) =
+            revalidate_dispatch_task(&mut transaction, installation_ref, lease_ref, &task_spec)
+                .await?
         {
             transaction.commit().await?;
-            return Ok(decision);
+            return Ok(DispatchDecision::ControlBlocked { reason_code });
         }
-        transaction.commit().await?;
-        return Ok(DispatchDecision::NothingWaiting);
-    };
 
-    if let Some(reason_code) =
-        revalidate_dispatch_task(&mut transaction, installation_ref, lease_ref, &task_spec).await?
-    {
-        transaction.commit().await?;
-        return Ok(DispatchDecision::ControlBlocked { reason_code });
-    }
+        let execution_source_url =
+            execution_source_url_for_task(&mut transaction, &task_spec).await?;
+        if requires_signed_execution_source(&task_spec) && execution_source_url.is_none() {
+            // 这个任务还是 pending：浏览器一次都没开始过。停它自己——停的方式是收束它那
+            // 一篇的全部通道并记进执行资格台账，**不释放整张租约**。释放整张租约正是那条
+            // 连转三小时的老路：同批地址完好的作品被一遍遍放回队列，永远轮不到。
+            stop_member_for_missing_execution_input(&mut transaction, installation_ref, task_id)
+                .await?;
+            continue;
+        }
+        let page_session_plan =
+            page_session_plan_for_task(&mut transaction, lease_ref, &task_spec).await?;
 
-    let execution_source_url = execution_source_url_for_task(&mut transaction, &task_spec).await?;
-    if requires_signed_execution_source(&task_spec) && execution_source_url.is_none() {
-        // This task is still pending: no browser Attempt has begun.  Release
-        // the permission now rather than allowing a locator defect to consume
-        // the station/account/platform slot until the lease naturally expires.
-        let work_order_ref: Uuid = sqlx::query_scalar(
-            "SELECT work_order_ref FROM collection_work_order_lease WHERE lease_ref=$1",
+        let claimed = sqlx::query(
+            "UPDATE collection_work_order_lease_task \
+             SET execution_state = 'in_progress', claimed_at = scope_001_now(), \
+                 claimed_by_installation_ref = $2 \
+             WHERE task_id = $1 AND execution_state = 'pending'",
         )
-        .bind(lease_ref)
-        .fetch_one(&mut *transaction)
-        .await?;
-        let _retry_after_seconds = record_recoverable_dispatch_failure_in_transaction(
-            &mut transaction,
-            Uuid::new_v4(),
+        .bind(task_id)
+        .bind(installation_ref)
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+        if claimed != 1 {
+            transaction.commit().await?;
+            return Ok(DispatchDecision::NothingWaiting);
+        }
+
+        transaction.commit().await?;
+        return Ok(DispatchDecision::Dispatch {
             task_id,
-            installation_ref,
             lease_ref,
-            work_order_ref,
-            "execution_locator_unavailable",
-            "execution_locator_unavailable",
-        )
-        .await?;
-        transaction.commit().await?;
-        return Ok(DispatchDecision::ExecutionLocatorUnavailable {
-            reason: "这篇作品当前没有带 xsec_token 的已接纳发现链接；已释放许可并进入冷却重试。"
-                .to_owned(),
+            task_spec,
+            execution_source_url,
+            page_session_plan,
         });
     }
-    let page_session_plan =
-        page_session_plan_for_task(&mut transaction, lease_ref, &task_spec).await?;
+    // 一轮里停下的成员多到没停下脚。剩下的下一轮照常处理——这里如实说「这一轮没有可派
+    // 的」，而不是把一张还没跑的工单报成别的结论。
+    transaction.commit().await?;
+    Ok(DispatchDecision::NothingWaiting)
+}
 
-    let claimed = sqlx::query(
-        "UPDATE collection_work_order_lease_task \
-         SET execution_state = 'in_progress', claimed_at = scope_001_now(), \
-             claimed_by_installation_ref = $2 \
-         WHERE task_id = $1 AND execution_state = 'pending'",
+/// 停掉一个缺执行输入的成员：台账记原因、收束它那一篇的其余通道、记一条停止事件。
+///
+/// 三件事一起做，且都不碰同批的其它作品——它们的地址是好的，没有被牵连的理由。
+pub(crate) async fn stop_member_for_missing_execution_input(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    installation_ref: Uuid,
+    task_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    let work_order_ref: Option<Uuid> = sqlx::query_scalar(
+        "SELECT lease.work_order_ref FROM collection_work_order_lease_task task \
+         JOIN collection_work_order_lease lease USING(lease_ref) \
+         WHERE task.task_id=$1",
     )
     .bind(task_id)
-    .bind(installation_ref)
-    .execute(&mut *transaction)
-    .await?
-    .rows_affected();
-    if claimed != 1 {
-        transaction.commit().await?;
-        return Ok(DispatchDecision::NothingWaiting);
-    }
-
-    transaction.commit().await?;
-    Ok(DispatchDecision::Dispatch {
+    .fetch_optional(&mut **transaction)
+    .await?;
+    let Some(work_order_ref) = work_order_ref else {
+        return Ok(());
+    };
+    let lease_ref: Uuid = sqlx::query_scalar(
+        "SELECT lease_ref FROM collection_work_order_lease_task WHERE task_id=$1",
+    )
+    .bind(task_id)
+    .fetch_one(&mut **transaction)
+    .await?;
+    stop_material_for_missing_execution_input_in_transaction(
+        transaction,
         task_id,
+        MISSING_EXECUTION_INPUT_REASON,
+    )
+    .await?;
+    record_input_blocked_dispatch_failure_in_transaction(
+        transaction,
+        Uuid::new_v4(),
+        task_id,
+        installation_ref,
         lease_ref,
-        task_spec,
-        execution_source_url,
-        page_session_plan,
-    })
+        work_order_ref,
+    )
+    .await
+}
+
+/// 一次认领的结果。
+///
+/// `StoppedMember` 不是失败，也不是「没有活」：它说的是「刚认下的这张租约里，第一个成员
+/// 缺执行输入，已经把它停在自己的通道上」。调用方要据此再看一眼同一张租约里的下一个成员，
+/// 而不是把整批放回去——后者正是那条永远轮不到好地址作品的老路。
+enum ClaimedWork {
+    StoppedMember,
+    Decision(DispatchDecision),
 }
 
 /// Claim one compatible Work Order from the shared queue. The lane fairness
@@ -1454,7 +1912,7 @@ async fn claim_next_queued_work_order(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     installation_ref: Uuid,
     caller_station_ref: Uuid,
-) -> Result<Option<DispatchDecision>, sqlx::Error> {
+) -> Result<Option<ClaimedWork>, sqlx::Error> {
     type Lane = (String, i32, Option<i32>, f64);
     type Candidate = (
         Uuid,
@@ -1611,9 +2069,11 @@ async fn claim_next_queued_work_order(
                 }
             };
             let Some(task_id) = lease.task_ids.first().copied() else {
-                return Ok(Some(DispatchDecision::ControlBlocked {
-                    reason_code: "capability_missing".to_owned(),
-                }));
+                return Ok(Some(ClaimedWork::Decision(
+                    DispatchDecision::ControlBlocked {
+                        reason_code: "capability_missing".to_owned(),
+                    },
+                )));
             };
             let task_spec: Value =
                 sqlx::query_scalar("SELECT task_spec FROM linggan_runtime_task WHERE task_id=$1")
@@ -1623,21 +2083,12 @@ async fn claim_next_queued_work_order(
             let execution_source_url =
                 execution_source_url_for_task(transaction, &task_spec).await?;
             if requires_signed_execution_source(&task_spec) && execution_source_url.is_none() {
-                let _retry_after_seconds = record_recoverable_dispatch_failure_in_transaction(
-                    transaction,
-                    Uuid::new_v4(),
-                    task_id,
-                    installation_ref,
-                    lease.lease_ref,
-                    work_order_ref,
-                    "execution_locator_unavailable",
-                    "execution_locator_unavailable",
-                )
-                .await?;
-                return Ok(Some(DispatchDecision::ExecutionLocatorUnavailable {
-                    reason: "已认领的详情任务缺少仍有效的签名执行链接；许可已释放并进入冷却重试。"
-                        .to_owned(),
-                }));
+                // 这里只停**这一个成员**，不释放租约。释放租约等于把同批地址完好的作品一起
+                // 放回队列：它们下一轮仍要排在这个缺地址的成员后面，于是每一轮都从头再来，
+                // 谁都执行不到。停下来它，租约继续持有，下一个成员当场就能派。
+                stop_member_for_missing_execution_input(transaction, installation_ref, task_id)
+                    .await?;
+                return Ok(Some(ClaimedWork::StoppedMember));
             }
             let page_session_plan =
                 page_session_plan_for_task(transaction, lease.lease_ref, &task_spec).await?;
@@ -1665,17 +2116,21 @@ async fn claim_next_queued_work_order(
             .bind(weight)
             .execute(&mut **transaction)
             .await?;
-            return Ok(Some(DispatchDecision::Dispatch {
+            return Ok(Some(ClaimedWork::Decision(DispatchDecision::Dispatch {
                 task_id,
                 lease_ref: lease.lease_ref,
                 task_spec,
                 execution_source_url,
                 page_session_plan,
-            }));
+            })));
         }
     }
     Ok(deferred_control_block
-        .map(|reason_code| Some(DispatchDecision::ControlBlocked { reason_code }))
+        .map(|reason_code| {
+            Some(ClaimedWork::Decision(DispatchDecision::ControlBlocked {
+                reason_code,
+            }))
+        })
         .unwrap_or(None))
 }
 
@@ -2069,21 +2524,6 @@ const CANDIDATE_SQL_WITH_CROSS_INDUSTRY_SCOPE: &str = concat!(
     " LIMIT 64 FOR UPDATE OF work_order SKIP LOCKED",
 );
 
-fn requires_signed_execution_source(task_spec: &Value) -> bool {
-    task_spec.get("platform").and_then(Value::as_str) == Some("xhs")
-        && task_spec
-            .get("capabilitiesRequested")
-            .and_then(Value::as_array)
-            .and_then(|values| values.first())
-            .and_then(Value::as_str)
-            .is_some_and(|capability| {
-                matches!(
-                    capability,
-                    "content_detail" | "media_slots" | "comments" | "replies"
-                )
-            })
-}
-
 /// 发现链接是可过期的执行定位信息，不是作品身份。每次派发都从最新已接纳的
 /// discovery record 读取，而不把 token 冻结进长寿命 TaskSpec 或 Evidence UI。
 fn execution_source_url_sha256(execution_source_url: &str) -> String {
@@ -2113,14 +2553,14 @@ async fn execution_source_url_for_task(
     if !requires_signed_execution_source(task_spec) {
         return Ok(None);
     }
-    let Some(content_external_id) = task_spec
-        .get("target")
-        .and_then(|target| target.get("contentExternalId"))
-        .and_then(Value::as_str)
-    else {
+    let Some(content_external_id) = task_content_external_id(task_spec) else {
         return Ok(None);
     };
-    let from_evidence: Option<String> = sqlx::query_scalar(
+    // 「哪条地址算执行入口」这一条判据住在 `execution_input_eligibility`：候选筛选、准入冻结
+    // 与这里问的是同一件事。三处各写一份 URL 形状的判据，正是「候选说能跑、派发说没地址」
+    // 这类缺陷的由来。
+    let evidence_predicate = signed_locator_predicate("record.value->'payload'->>'url'");
+    let from_evidence: Option<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT record.value->'payload'->>'url' \
          FROM linggan_material_discovery_finding finding \
          JOIN linggan_material_content content ON content.public_ref=finding.content_public_ref \
@@ -2130,10 +2570,9 @@ async fn execution_source_url_for_task(
          WHERE content.platform='xhs' AND content.content_external_id=$1 \
            AND record.ordinality=finding.record_ordinal+1 \
            AND record.value->'sourceObject'->>'externalId'=$1 \
-           AND record.value->'payload'->>'url' LIKE 'https://www.xiaohongshu.com/%' \
-           AND position('xsec_token=' IN record.value->'payload'->>'url') > 0 \
+           AND {evidence_predicate} \
          ORDER BY package.accepted_at DESC,finding.created_at DESC LIMIT 1",
-    )
+    )))
     .bind(content_external_id)
     .fetch_optional(&mut **transaction)
     .await?
@@ -2158,13 +2597,13 @@ async fn execution_source_url_for_task(
     if !cross_industry_ready {
         return Ok(None);
     }
-    let cross_industry_url: Option<String> = sqlx::query_scalar(
+    let sample_predicate = signed_locator_predicate("sample.source_url");
+    let cross_industry_url: Option<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT sample.source_url FROM cross_industry_sample sample \
          WHERE sample.platform='xhs' AND sample.content_external_id=$1 \
-           AND sample.source_url LIKE 'https://www.xiaohongshu.com/%' \
-           AND position('xsec_token=' IN sample.source_url) > 0 \
+           AND {sample_predicate} \
          ORDER BY sample.last_observed_at DESC,sample.sample_ref LIMIT 1",
-    )
+    )))
     .bind(content_external_id)
     .fetch_optional(&mut **transaction)
     .await?;

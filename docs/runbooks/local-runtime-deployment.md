@@ -1,9 +1,9 @@
 # 本机常驻服务部署手册
 
 > 状态: 权威当前
-> 最后核对: 2026-09-17
-> 适用范围: 本机三个 launchd 常驻服务（API / 巡检 worker / 媒体 worker）的运行来源、更新方式与故障处置
-> 事实来源: Mog 于 2026-09-03 的明确要求「本地以 `/Users/moglenny/proma/linggan-intelligence` 为准，跟远端同步，不要到处复制」、当前 launchd 配置与实际运行验证、2026-09-17 更新入口用旧副本失败的实测（见 §3）
+> 最后核对: 2026-09-21
+> 适用范围: 本机三个 launchd 常驻服务（API / 巡检 worker / 媒体 worker）的运行来源、更新方式、故障处置与运行诊断
+> 事实来源: Mog 于 2026-09-03 的明确要求「本地以 `/Users/moglenny/proma/linggan-intelligence` 为准，跟远端同步，不要到处复制」、当前 launchd 配置与实际运行验证、2026-09-17 更新入口用旧副本失败的实测（见 §3）、2026-09-21 按 COLLECTION-UPGRADE-001 S4 的实现与隔离库用例写成 §7（**样例为手工构造**，不是运行抓取；其余各节未重新实测，最后核对的口径见各节标注的日期）
 > 冲突时以谁为准: 实际运行输出与 launchd 当前加载的配置；本手册不授予平台访问或迁移执行权限
 
 ## 1. 唯一的两个目录
@@ -127,14 +127,112 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.linggan-intelligence
 `runtime-main/.sync.lock` 是目录锁。超过 5 分钟的锁会被下次启动自动清理；要手工清就
 `rmdir` 它。
 
-## 7. 本手册不证明什么
+## 7. 运行诊断：一个 tick 号串一条链
+
+巡检 worker 每轮 tick（60 秒扫一次）有一个号，落在 `collection_scheduler_run.scheduler_run_ref`。
+同一个号写在它的步骤行、这一步排出的目标级决定、以及那些工单上；日志里的事件行用 `tickRef`
+带着它。**一条链断在哪里，从这一个号出发就能查出来，不需要累计任何日志。**
+
+三个查询（`psql`，把 `<run>` 换成 run 号；工单号由上一条给出）：
+
+```sql
+-- ① 这一轮四步各自的结果。失败与「没轮到」在这里分开，失败带的是受限类别，不是报文。
+SELECT step_key, outcome, error_class, skipped_reason,
+       considered_count, produced_count, skipped_count
+  FROM collection_scheduler_run_step
+ WHERE scheduler_run_ref = '<run>'
+ ORDER BY started_at;
+
+-- ② 巡查这一步把哪些目标排成了活、各自给了什么理由。
+SELECT target_ref, outcome, reason_code, work_order_ref
+  FROM collection_scheduler_target_decision
+ WHERE scheduler_run_ref = '<run>';
+
+-- ③ 排出的工单此刻在哪条队列、什么时候该跑。
+SELECT work_order_ref, target_ref, queue_state, dispatch_lane, scheduled_for
+  FROM collection_work_order
+ WHERE work_order_ref = '<工单号>';
+```
+
+同一轮在 `runtime-logs/worker.out.log` 里的三行（一行一个 JSON 对象）：
+
+```json
+{"ts":"2026-09-21T09:00:00Z","service":"worker","revision":"9a1c2f4","event":"tick","tickRef":"<run>","outcome":"failed"}
+{"ts":"2026-09-21T09:00:04Z","service":"worker","revision":"9a1c2f4","event":"tick_step","tickRef":"<run>","stepKey":"media_acquisition","outcome":"failed","errorClass":"sqlstate_42703","durationMs":12}
+{"ts":"2026-09-21T09:00:05Z","service":"worker","revision":"9a1c2f4","event":"tick_step","tickRef":"<run>","stepKey":"patrol","outcome":"ok","durationMs":41,"considered":1,"produced":1,"skipped":0}
+```
+
+**这三行是手工构造的脱敏样例，不是从运行日志里抓的**：形状按实现写（`<run>` 是省略的号），
+用来对照字段，不构成任何一次真实故障的证据。同一条链在隔离 PostgreSQL 上有可复现的用例
+（`crates/evidence/tests/scheduler_tick_postgres.rs` 的
+`one_tick_ref_strings_the_failure_and_what_it_queued_without_reading_the_logs`）。
+
+读法：`outcome` 是「这一步跑完没有」，`failed` 与 `skipped` 是两件事——`failed` 是跑了但坏了
+（带 `errorClass`），`skipped` 是这一步自己的表不在、**没轮到**（带 `reason`，如
+`schema_unavailable`）。一步失败不连坐其余三步：上面例子里媒体投影坏了，巡查照样把活排了出去。
+计数只在 `outcome="ok"` 的行上出现；失败、没轮到、以及**开始了却没写完结（进程被杀）**的行
+一律没有计数——「数过了是零」与「没数过」不能互相冒充。库里 `outcome IS NULL` 的那一行就是
+最后这种情况，它既不写成 `ok` 也不写成 0。
+
+### 7.1 字段白名单
+
+事件只能带这 13 个字段（`crates/evidence/src/runtime_event.rs` 的 `EVENT_FIELD_WHITELIST`，
+结构体里没有「随手塞一个键」的入口）：
+
+| 字段 | 含义 | 边界 |
+|---|---|---|
+| `ts` | 事件发生的时刻 | **进程时钟**（UTC、秒），不是数据库时钟 |
+| `service` | 谁在说话 | `worker` / `media-worker` |
+| `revision` | 这份进程是哪个部署 | 读不到写 `unknown`，不拿别的东西冒充 |
+| `event` | 事件类型 | `startup` / `readiness` / `tick` / `tick_step` |
+| `tickRef` | 这一轮 tick 的号 | 与 `scheduler_run_ref` 是同一个值，串证的入口 |
+| `stepKey` | 哪一步 | 四步之一；`media_acquisition` 这类受限词 |
+| `outcome` | 这一步（或这一轮）的结局 | `ok` / `failed` / `skipped` |
+| `reason` | 没轮到的原因 | 受限码 `[a-z0-9_]{1,32}`，如 `schema_unavailable` |
+| `errorClass` | 失败的类别 | 受限码，如 `sqlstate_42703`；**不是报文** |
+| `durationMs` | 这一步花了多久 | 进程时钟测出来的毫秒数 |
+| `considered` / `produced` / `skipped` | 这一步数过的三个计数 | 只在跑完的步骤上出现 |
+
+两条纪律：**引用只到 tick 号为止**——目标、工单、租约、任务、提交这些引用住在数据库里，
+把副本抄进日志只会多出一份会漂移的东西，也会让「什么算敏感」在第二个地方重新判一遍；
+**理由是受限码**——不规则形状（空格、斜杠、问号、中文、连接串）一律记 `unclassified`，
+不把散文按字符挑成一个「看起来像原因码」的词。
+
+页面结构自检的快照另有自己的一份字段表（`crates/evidence/src/selector_health.rs` 的
+`SELECTOR_HEALTH_SNAPSHOT_FIELDS`，与插件 `src/shared/selectorHealth.js` 里的同名常量是同一份
+合同的两侧），一条平台记录九个键：`platform`、`pageType`、`capability`、`checkedAt`、
+`verifiedAt`、`checkedCategories`、`missingCategories`、`staleCategories`、`failureCounts`
+（服务端比插件多最后一项：连续次数由本机留存层补上，页面看到的那一次里没有「连续几次」）。
+
+快照里**没有**这两样，也不要去找：`pluginVersion`（报到自述里本来就有，存进
+`plugin_installation.plugin_version`——同一件事不能有两个答案）、`ruleVersion`（今日它就是
+`verifiedAt` 的别名，另起一个名字会让人以为存在一套独立的规则版本）。
+
+白名单不是承诺，是测试判据：Rust 侧 `an_event_carries_only_whitelisted_fields` 与
+`every_field_the_event_can_carry_is_whitelisted_and_used` 断言事件的字段**逐字等于**那张表
+（多一个、少一个都变红），串证用例再从真实 tick 路径上验一遍；
+`nothing_outside_the_field_whitelist_survives_into_the_snapshot` 断言一份夹带了选择器串、
+DOM 文本、带签名的地址的载荷收下来之后那些键一个不剩。插件侧另有 node 用例断言出门前
+只带快照字段。
+
+### 7.2 这一节不证明什么
+
+- 样例是**描出来的**，不是抓来的：它证明字段表长得对、查得到，不证明任何一次真实故障被这样
+  串起来过（那要有一次真实提交，属真实平台访问，未授权）；
+- 只覆盖本机三个常驻服务，不含部署机（Mac mini）与任何远端环境；
+- 日志只带引用，**不带目标与工单的内容**：要回答「排出给谁、排的是什么」必须真的查库；
+- 库里的步骤、决定与工单是采集链的事实，日志只是进入那条链的入口。两者不一致时以库为准，
+  并把不一致本身当作一次待查的缺陷。
+
+
+## 8. 本手册不证明什么
 
 - 不证明部署机（Mac mini）或任何远端环境采用同一模型——这里只描述本机；
 - 不授权服务自行执行迁移、访问平台或修改数据库；
 - 不保证开机首次启动时迁移检查一定生效（见第 4 节的已知边界）。
 
 
-## 8. COMMENT-RESEARCH-RESET-001 V1 的发布前条件
+## 9. COMMENT-RESEARCH-RESET-001 V1 的发布前条件
 
 此段规定当前唯一评论研究路径；CI-AUTO-004 的 daily/Task B/P4/本地 Python 聚类实现是历史记录，不是 runtime 依赖。
 
@@ -146,3 +244,36 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.linggan-intelligence
 6. 发布、保存连接或保存 policy 均不会调用真实模型；连续排程没有入口且保持关闭。只有用户在页面主动点击“开始研究”才会冻结 V1 Run 并发送已获许可的评论。
 
 真实 provider 的语义质量与 Mog 业务验收不由上述基础设施步骤推断。
+
+
+## 8. COLLECTION-UPGRADE-001 分阶段刷新与停止新访问
+
+先应用 0096–0101，再从已合并 main 的最新脚本执行部署。部署源 `.env` 明确设
+`LINGGAN_COLLECTION_UPGRADE_PHASE=recovery`；缺失/未知值同样为 recovery。`install.sh`
+会同步该配置并受控 drain/restart。核对 `/health.collectionUpgradePhase`、readiness、
+导航准备契约和部署 revision 后，才将部署源配置改为 `governance`，再次受控刷新。
+recovery 下旧包的 Attempt 重放与 Submission 保持开放，不应清空浏览器数据库。
+
+插件从本次 0.8.55 release-manifest 指定 ZIP/源码 dist 切换，保留同一个扩展 ID 与用户数据。
+核验加载路径、版本和新的工位报到，不能把 ZIP 已生成写成实际插件已升级。
+
+有问题时使用**新版二进制切回 recovery**：它能识别新台账、准备身份与 input_blocked。
+不得重置远端 main，也不执行 down migration。旧二进制会将 input_blocked 误读为排队；
+未经新库兼容实证不得切回旧二进制。恢复阶段的 PostgreSQL 用例证明禁止新 claim 时旧包仍可接纳。
+
+历史处置工具默认只读（命令运行环境需设置正确的 `LINGGAN_LOCAL_DATABASE_URL`）：
+
+```bash
+cargo run --locked -p linggan-worker --bin linggan-collection-repair > /tmp/collection-repair-preview.json
+# 默认只展示最近 100 个对象；truncated=true 时可按原 taskId 精确查看：
+cargo run --locked -p linggan-worker --bin linggan-collection-repair -- --task-id <UUID>
+# 经逐项批准后的显式应用；UUID/hash 必须来自同一原始预览：
+cargo run --locked -p linggan-worker --bin linggan-collection-repair -- --apply /tmp/collection-repair-preview.json --batch-id <UUID> --preview-hash <SHA256>
+```
+
+默认预览只 SELECT；应用逐项重新核对并输出批次/哈希/结果。每批最多 100 个对象，
+每项锁等待 2 秒、语句 5 秒。冲突跳过而不强制重试，需重新预览；已成功项重放无额外事件。
+仅停止有明确作用域、缺输入且尚无任何在途材料的 pending 通道。旧 released/in_progress、
+已开始或有准备会话的对象不改写；本地 terminal/缺历史身份材料是 NOT_OBSERVED，需在原浏览器
+另作逐项核验，不得据服务端预览批量复活。输入历史未知的失败预算不追溯猜造。
+保存预览与应用 JSON 作为运维回执，原 Package、Receipt、失败历史均保留。

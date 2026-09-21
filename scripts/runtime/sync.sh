@@ -75,10 +75,13 @@ source ./.env
 set +a
 
 pending=()
+migration_head=""
+# 按 id 排序读：下面的循环只关心「某个 id 在不在」，排序是为了让**最后一行就是台账头**
+# （写进 runtime-identity.json 的那个值）。迁移 id 是零填充的（`0098`），字典序即顺序。
 if applied="$(docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" \
       "${LINGGAN_POSTGRES_CONTAINER:-linggan-intelligence-postgres-1}" \
       psql -X -At -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
-      -c 'SELECT migration_id FROM linggan_local_schema_migration' 2>/dev/null)"; then
+      -c 'SELECT migration_id FROM linggan_local_schema_migration ORDER BY migration_id' 2>/dev/null)"; then
   # 循环变量不能叫 path：zsh 的 $path 与 $PATH 绑定，赋值会把整个 PATH 冲掉，表现是后面
   # 每个外部命令都 "command not found"，而迁移检查会把全部迁移误判为未应用。
   for migration_file in database/migrations/*.sql; do
@@ -91,6 +94,7 @@ if applied="$(docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" \
     exit 1
   fi
   log "迁移台账已是最新"
+  migration_head="$(print -r -- "$applied" | tail -n 1)"
 else
   # 读不到台账与「没有待应用迁移」不是一回事。开机时数据库常常还没起来，硬拦会让服务
   # 永远起不来，因此这里放行——代价是开机首次启动不保证迁移检查生效。
@@ -99,8 +103,22 @@ fi
 
 # 构建在锁内做一次，三个二进制一起。放在各自的启动脚本里会让三个 cargo 争同一个 target
 # 目录：其中一个正在链接、二进制被临时移除时，另一个恰好 exec 它就会失败。
-log "构建 revision ${current}"
-cargo build --quiet --bin linggan-api --bin linggan-worker --bin linggan-media-worker
+#
+# 构建输出另落一份日志，不与服务日志混在一起：从这一版起服务日志里跑的是**结构化事件**
+# （一行一个 JSON，见 `crates/evidence/src/runtime_event.rs`），一行 cargo 警告混进去之后，
+# 「哪一行是这次进程说的」就要靠猜。失败时把最后 20 行抄回这里，看服务日志的人不必先去
+# 找另一个文件。
+build_dir="${support_dir}/runtime-build"
+build_log="${build_dir}/sync-build.log"
+mkdir -p "$build_dir"
+print -r -- "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] build revision ${current}" >> "$build_log"
+log "构建 revision ${current}（完整输出：${build_log}）"
+if ! cargo build --quiet --bin linggan-api --bin linggan-worker --bin linggan-media-worker \
+     >>"$build_log" 2>&1; then
+  log "构建失败；最近 20 行如下，完整输出见 ${build_log}"
+  tail -n 20 "$build_log" | while IFS= read -r line; do log "  ${line}"; done
+  exit 1
+fi
 
 for binary in linggan-api linggan-worker linggan-media-worker; do
   [[ -x "target/debug/${binary}" ]] || { log "构建后仍找不到 target/debug/${binary}"; exit 1; }
@@ -110,5 +128,29 @@ done
 # when launchd has no nvm shell initialization. This installs only fixed local packages.
 ./scripts/runtime/prepare-pi-adapter.sh --install
 
-log "revision ${current} 就绪"
+# 这次部署是谁：写一份身份文件，`launch.sh` 把路径导出给三个服务，进程只读它（见
+# `crates/evidence/src/runtime_event.rs`）。此前日志里没有 revision，一次故障要说清
+# 「是哪个部署干的」只能靠比对启动时刻。
+#
+# **先写临时文件再改名**：三个服务会同时启动并读这个文件，写一半被读到的话，读到的会是一个
+# 残缺的 JSON——进程按约定报 `unknown`，于是「刚部署完却看不出 revision」。同一个目录里的
+# 改名是原子的，读到的要么是旧的一份、要么是新的完整一份。
+identity_file="${LINGGAN_RUNTIME_IDENTITY_PATH:-$support_dir/runtime-identity.json}"
+identity_tmp="${identity_file}.tmp.$$"
+mkdir -p "${identity_file:h}"
+{
+  print -r -- '{'
+  print -r -- "  \"revision\": \"${current}\","
+  print -r -- "  \"builtAt\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\","
+  if [[ -n "$migration_head" ]]; then
+    print -r -- "  \"migrationHead\": \"${migration_head}\""
+  else
+    # 读不到台账时如实写 null，不写「大概是最新的」：身份文件是给排查用的，不是给信心用的。
+    print -r -- '  "migrationHead": null'
+  fi
+  print -r -- '}'
+} > "$identity_tmp"
+mv -f "$identity_tmp" "$identity_file"
+
+log "revision ${current} 就绪（身份文件：${identity_file}）"
 }

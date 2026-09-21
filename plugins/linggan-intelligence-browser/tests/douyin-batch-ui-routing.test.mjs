@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { MSG } from '../src/shared/constants.js';
-import { createBatchMessageHandlers } from '../src/content/douyinBatchMessageHandlers.js';
+import { createBatchMessageHandlers } from './historical/douyinBatchMessageHandlers.js';
 
 test('douyin batch notes uses the late-bound douyin task UI adapter instead of xhs fallback controls', async () => {
   const fallbackCalls = [];

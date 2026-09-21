@@ -157,6 +157,11 @@
       setTaskText("[data-task-inspector-package]", row.dataset.taskPackage);
       setTaskText("[data-task-inspector-receipt]", row.dataset.taskReceipt);
       setTaskText("[data-task-inspector-effect]", row.dataset.taskEffect);
+      var effectCode = taskInspector.querySelector("[data-task-inspector-effect-code]");
+      if (effectCode) {
+        // 机器码是旁注：没有码时留空，不能落成 UNKNOWN 那个假码。
+        effectCode.textContent = row.dataset.taskEffectCode || "";
+      }
       var frozen = taskInspector.querySelector("[data-task-inspector-frozen]");
       if (frozen) {
         var template = taskFrozenTemplates.find(function (candidate) {

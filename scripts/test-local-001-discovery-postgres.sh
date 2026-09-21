@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export LINGGAN_COLLECTION_UPGRADE_PHASE=governance
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$project_root"
@@ -88,6 +89,12 @@ cargo test -p linggan-evidence --test collection_control_postgres --locked -- --
 cargo test -p linggan-evidence --test monitor_rule_slots_postgres --locked -- --ignored
 cargo test -p linggan-evidence --test collection_control_runtime_postgres --locked -- --ignored
 cargo test -p linggan-evidence --test collection_dispatch_sequence_postgres --locked -- --ignored
+cargo test -p linggan-evidence --test runtime_readiness_postgres --locked -- --ignored
+cargo test -p linggan-evidence --test scheduler_tick_postgres --locked -- --ignored
 cargo test -p linggan-intelligence --test topic_workspace_postgres --locked -- --ignored
 cargo test -p linggan-api --bin linggan-api --locked -- --ignored
+# worker 的启动/退出语义分两层：不需要数据库的那两条（缺地址必须失败、连不上不许装成空闲）
+# 默认就跑；第三条要一个没有迁移台账的真实库，跟着 `--ignored` 走。
+cargo test -p linggan-worker --test startup_contract --locked
+cargo test -p linggan-worker --test startup_contract --locked -- --ignored
 echo "LOCAL-001 discovery PostgreSQL proof passed"

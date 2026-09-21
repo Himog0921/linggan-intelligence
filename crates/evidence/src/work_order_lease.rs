@@ -39,6 +39,10 @@ pub enum LeaseError {
     FrozenControlMissing,
     #[error("every step this work order froze is already done")]
     WorkOrderAlreadySatisfied,
+    #[error(
+        "every step this work order still has left is stopped: missing execution input, or an exhausted page-read budget"
+    )]
+    OnlyStoppedMembersRemain,
     #[error("collection control closed lease issuance: {reason_code}")]
     ControlBlocked { reason_code: String },
     #[error("the authorization behind this work order is no longer valid")]
@@ -164,6 +168,11 @@ pub(crate) async fn issue_work_order_lease_in_transaction(
     work_order_ref: Uuid,
     valid_for_minutes: i32,
 ) -> Result<IssuedLease, LeaseError> {
+    if !crate::collection_governance_enabled() {
+        return Err(LeaseError::ControlBlocked {
+            reason_code: "collection_upgrade_recovery_only".to_owned(),
+        });
+    }
     if valid_for_minutes <= 0 {
         return Err(LeaseError::InvalidLeaseDuration);
     }
@@ -237,22 +246,42 @@ pub(crate) async fn issue_work_order_lease_in_transaction(
     .bind(work_order_ref)
     .execute(&mut **transaction)
     .await?;
-    let tasks =
+    let remaining =
         remaining_steps_for_work_order(transaction, work_order_ref, &subject, &material_targets)
             .await?;
+    let tasks = remaining.tasks;
     if tasks.is_empty() {
-        // Nothing left to do. Issuing an empty Lease would hand a station a permit with no work,
-        // and it would sit there until it expired — putting the Work Order straight back into the
-        // queue to be claimed again. Close it instead; `undo_failed_queue_claim` is guarded on
-        // `queue_state='leased'`, so this completion survives the caller's rollback.
+        // 空任务列表有**两种**成因，处置相反，所以先分开它们：
+        //
+        //   * 「冻结的步骤都做完了」——这是完成。空租约不能发（工位会白拿一张没有活的许可，
+        //     到期才归还），所以在这里终结工单，`undo_failed_queue_claim` 因为
+        //     `queue_state='leased'` 的守卫而不会把它退回队列。
+        //   * 「剩下的成员都停着」——**这不是完成**。一个都没有交付，既没有 Attempt 也没有
+        //     Package；记成 `completed` 就是凭空制造成功（采集纪律明令禁止）。留在队列里更糟：
+        //     每一轮都会被重新领取、重新展开、再空一次。如实终结它，而「为什么不能执行」留在
+        //     执行资格台账上——那里记得住每一篇缺的是哪个输入、还是哪一个范围的预算已经用尽。
+        //     两种停止合成一句，是因为它们对这张工单的处置相同（都不再自动重试）；它们彼此的
+        //     区别（一个等更好的输入，一个要另一次明确的准入决定）记在台账的状态里，不记在
+        //     这一句回绝里。
+        let stopped_members = remaining.stopped_members;
+        let (queue_state, error) = if stopped_members > 0 {
+            ("cancelled", LeaseError::OnlyStoppedMembersRemain)
+        } else {
+            ("completed", LeaseError::WorkOrderAlreadySatisfied)
+        };
         sqlx::query(
-            "UPDATE collection_work_order SET queue_state='completed' \
+            "UPDATE collection_work_order SET queue_state=$2, \
+                 station_ref=CASE WHEN $2='cancelled' THEN NULL ELSE station_ref END, \
+                 installation_ref=CASE WHEN $2='cancelled' THEN NULL ELSE installation_ref END, \
+                 account_ref=CASE WHEN $2='cancelled' THEN NULL ELSE account_ref END, \
+                 eligibility_ref=CASE WHEN $2='cancelled' THEN NULL ELSE eligibility_ref END \
              WHERE work_order_ref=$1 AND queue_state='leased'",
         )
         .bind(work_order_ref)
+        .bind(queue_state)
         .execute(&mut **transaction)
         .await?;
-        return Err(LeaseError::WorkOrderAlreadySatisfied);
+        return Err(error);
     }
     for task in &tasks {
         insert_scheduled_task(transaction, task).await?;
@@ -373,7 +402,8 @@ pub(crate) async fn complete_lease_for_task_in_transaction(
     let all_terminal: bool = sqlx::query_scalar(
         "SELECT NOT EXISTS ( \
              SELECT 1 FROM collection_work_order_lease_task \
-             WHERE lease_ref = $1 AND execution_state NOT IN ('completed','unavailable','blocked'))",
+             WHERE lease_ref = $1 \
+               AND execution_state NOT IN ('completed','unavailable','blocked','input_blocked'))",
     )
     .bind(lease_ref)
     .fetch_one(&mut **transaction)
@@ -381,9 +411,11 @@ pub(crate) async fn complete_lease_for_task_in_transaction(
     if !all_terminal {
         return Ok(true);
     }
+    // 缺输入停下的通道也算「非完成的终止」：这一轮的租约是**部分**交付/部分停止，不是全成。
+    // 漏掉它，一次只有缺地址成员收尾的租约会被记成全成，而那一篇其实一行都没有取回。
     let has_non_completed_terminal: bool = sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM collection_work_order_lease_task \
-           WHERE lease_ref=$1 AND execution_state IN ('unavailable','blocked'))",
+           WHERE lease_ref=$1 AND execution_state IN ('unavailable','blocked','input_blocked'))",
     )
     .bind(lease_ref)
     .fetch_one(&mut **transaction)
@@ -933,7 +965,7 @@ async fn remaining_steps_for_work_order(
     work_order_ref: Uuid,
     subject: &LeaseSubject,
     material_targets: &[MaterialTarget],
-) -> Result<Vec<ProducerTaskSpec>, LeaseError> {
+) -> Result<RemainingWork, LeaseError> {
     let finished: Vec<(Option<String>, Option<String>)> = sqlx::query_as(
         "SELECT DISTINCT runtime.task_spec->'target'->>'contentExternalId', \
                 runtime.task_spec->'capabilitiesRequested'->>0 \
@@ -950,7 +982,33 @@ async fn remaining_steps_for_work_order(
         .filter_map(|(content, capability)| Some((content?, capability?)))
         .collect();
 
-    Ok(expand_into_tasks(subject, material_targets)?
+    // 已经因为缺输入停过、而且输入没变的成员，这一轮不再为它建任务。
+    //
+    // 不给它建任务，而不是「建了再停一次」：每发一张租约就重建一组任务，那组任务会在下一次
+    // 派发里被再停一次——停止本身变成一个循环，而循环里的每一条都长得像「系统在努力」。
+    // 摘掉它，等真正的输入变化再让它回来。工单冻结的材料范围不改写。
+    let blocked = crate::execution_input_eligibility::blocked_object_refs_in_transaction(
+        transaction,
+        work_order_ref,
+    )
+    .await?;
+    // 预算已经用尽的成员同样不建任务，但它们是**另一种**停止：缺输入的等一个更好的输入自己
+    // 回来，预算用尽的不会——它要的是另一次明确的准入决定。两者对这张工单的处置相同（都不再
+    // 自动重试），所以在这里合流；区别留在台账的状态里。
+    let budget_exhausted =
+        crate::execution_input_eligibility::budget_exhausted_object_refs_in_transaction(
+            transaction,
+            work_order_ref,
+        )
+        .await?;
+    let mut blocked_contents =
+        content_external_ids_for_object_refs_in_transaction(transaction, &blocked).await?;
+    blocked_contents.extend(
+        content_external_ids_for_object_refs_in_transaction(transaction, &budget_exhausted).await?,
+    );
+
+    let mut stopped_members = 0_usize;
+    let tasks = expand_into_tasks(subject, material_targets)?
         .into_iter()
         .filter(|task| {
             let content = task
@@ -963,12 +1021,64 @@ async fn remaining_steps_for_work_order(
                 .and_then(Value::as_str);
             match (content, capability) {
                 (Some(content), Some(capability)) => {
-                    !done.contains(&(content.to_owned(), capability.to_owned()))
+                    if done.contains(&(content.to_owned(), capability.to_owned())) {
+                        return false;
+                    }
+                    if blocked_contents.contains(content) {
+                        stopped_members += 1;
+                        return false;
+                    }
+                    true
                 }
                 _ => true,
             }
         })
-        .collect())
+        .collect();
+    Ok(RemainingWork {
+        tasks,
+        stopped_members,
+    })
+}
+
+/// 把两侧的台账对象引用解析成作品的外部 ID——展开任务时用的键是后者。
+///
+/// 跨行业那侧的表在控制面证明库里不存在：能力缺失不是「没有这一侧的对象」，所以只在真的有
+/// 引用时才去查它。
+async fn content_external_ids_for_object_refs_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    objects: &crate::execution_input_eligibility::BlockedObjects,
+) -> Result<std::collections::HashSet<String>, sqlx::Error> {
+    let mut contents: Vec<String> = Vec::new();
+    if !objects.material.is_empty() {
+        contents.extend(
+            sqlx::query_scalar::<_, String>(
+                "SELECT content_external_id FROM linggan_material_content WHERE public_ref=ANY($1)",
+            )
+            .bind(&objects.material)
+            .fetch_all(&mut **transaction)
+            .await?,
+        );
+    }
+    if !objects.cross_industry.is_empty() {
+        contents.extend(
+            sqlx::query_scalar::<_, String>(
+                "SELECT content_external_id FROM cross_industry_sample WHERE sample_ref=ANY($1)",
+            )
+            .bind(&objects.cross_industry)
+            .fetch_all(&mut **transaction)
+            .await?,
+        );
+    }
+    Ok(contents.into_iter().collect())
+}
+
+/// 一张工单这一轮还剩多少可执行的步骤，以及有多少步骤是被「停着的成员」摘掉的。
+///
+/// 两个数必须一起带出来：只剩空列表时，调用方要能区分「都做完了」和「剩下的都停着」——
+/// 前者是完成，后者一个都没交付。
+struct RemainingWork {
+    tasks: Vec<ProducerTaskSpec>,
+    stopped_members: usize,
 }
 
 /// 把一张工单展开成派发任务序列。
@@ -1219,8 +1329,11 @@ async fn load_cross_industry_targets(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     work_order_ref: Uuid,
 ) -> Result<Vec<MaterialTarget>, LeaseError> {
+    // 这一句要读两张表：作用域行（`0087`）说冻了什么额度和顺序，样本行（`0044`）给作品
+    // 身份。少查一张，缺表的环境会在这一句上直接报 42P01，而不是如实回「这一侧没有」。
     let schema_ready: bool = sqlx::query_scalar(
-        "SELECT to_regclass('collection_work_order_cross_industry_target') IS NOT NULL",
+        "SELECT to_regclass('collection_work_order_cross_industry_target') IS NOT NULL \
+             AND to_regclass('cross_industry_sample') IS NOT NULL",
     )
     .fetch_one(&mut **transaction)
     .await?;

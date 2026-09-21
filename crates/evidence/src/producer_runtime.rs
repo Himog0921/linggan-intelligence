@@ -26,6 +26,8 @@ pub enum ProducerRuntimeError {
     ScheduledTaskNotServerIssued,
     #[error("the scheduled task was not claimed by this producer installation")]
     ScheduledTaskNotClaimed,
+    #[error("the prepared lane is waiting for its live lease claim")]
+    ScheduledLaneAwaitingClaim,
     #[error("the producer task or attempt does not exist")]
     RoutingNotFound,
     #[error("the producer identity does not own the attempt")]
@@ -40,6 +42,12 @@ pub enum ProducerRuntimeError {
     MaterialIdentityConflict,
     #[error("no processor version is registered for processor kind: {0}")]
     ProcessorKindNotRegistered(String),
+    // `download_attempt_ref` 在 `linggan_media_upload_session` 上可空，而「已物化」这个状态
+    // 隐含它必须有值——这条隐含关系今天只有写入点（同文件的原子 UPDATE）在维护，数据库里
+    // 没有 CHECK 把它钉住。读到空值不是「查询失败」，是这条会话行处于它不该处于的状态；
+    // 给它一个名字，让它如实走到调用方，而不是在解码时 panic 掉一个正在处理请求的进程。
+    #[error("a materialized media upload session has no download attempt reference")]
+    MaterializedSessionWithoutDownloadAttempt,
 }
 
 #[derive(Debug, Serialize)]
@@ -235,8 +243,9 @@ pub async fn admit_media_blob(
     }) {
         // 版本号从 `processor_version_for_kind` 取，不写死：写死的话，抬了版本也只会作用于这里
         // 一处，而存量重排（`requeue_outdated_processor_jobs`）用的是同一个函数——两处必须同源。
-        let processor_version = processor_version_for_kind(processor_kind)
-            .ok_or_else(|| ProducerRuntimeError::ProcessorKindNotRegistered(processor_kind.to_owned()))?;
+        let processor_version = processor_version_for_kind(processor_kind).ok_or_else(|| {
+            ProducerRuntimeError::ProcessorKindNotRegistered(processor_kind.to_owned())
+        })?;
         let job_ref = Uuid::new_v4();
         let inserted = sqlx::query("INSERT INTO linggan_media_processing_job (job_ref,blob_sha256,slot_key,processor_kind,processor_version,input_scope) VALUES ($1,$2,$3,$4,$5,'full_blob') ON CONFLICT (blob_sha256,slot_key,processor_kind,processor_version,input_scope) DO NOTHING")
             .bind(job_ref).bind(sha256).bind(&slot_key).bind(processor_kind).bind(processor_version)
@@ -460,7 +469,9 @@ pub async fn claim_media_upload_finalize(
     let session = media_upload_session_from_row(&row);
     let claim = match session.state.as_str() {
         "materialized" => {
-            let download_attempt_ref = row.get::<Uuid, _>("download_attempt_ref");
+            let download_attempt_ref = row
+                .try_get::<Uuid, _>("download_attempt_ref")
+                .map_err(|_| ProducerRuntimeError::MaterializedSessionWithoutDownloadAttempt)?;
             crate::media_acquisition::complete_media_acquisition_for_observation(
                 &mut tx,
                 session.media_observation_ref,
@@ -816,29 +827,18 @@ pub async fn start_producer_attempt(
     let Some(task_source) = task_source else {
         return Err(ProducerRuntimeError::RoutingNotFound);
     };
-    if task_source == "scheduled" {
-        let claimed_by_this_installation: bool = sqlx::query_scalar(
-            "SELECT EXISTS ( \
-                 SELECT 1 FROM collection_work_order_lease_task lease_task \
-                 JOIN collection_work_order_lease lease USING (lease_ref) \
-                 JOIN plugin_installation installation \
-                   ON installation.installation_ref = lease_task.claimed_by_installation_ref \
-                 WHERE lease_task.task_id = $1 \
-                   AND lease_task.execution_state = 'in_progress' \
-                   AND lease.released_at IS NULL \
-                   AND lease.expires_at > scope_001_now() \
-                   AND installation.install_key = $2::text \
-                   AND installation.superseded_at IS NULL)",
-        )
-        .bind(attempt.task_id())
-        .bind(attempt.producer_instance_id())
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(ProducerRuntimeError::Internal)?;
-        if !claimed_by_this_installation {
-            return Err(ProducerRuntimeError::ScheduledTaskNotClaimed);
-        }
-    }
+    // Identity-matched replay is answered before any live-authority requirement.
+    //
+    // An Attempt is a historical fact that already happened. A client replaying a registration it
+    // legitimately obtained — because the response was lost — must get that same registration
+    // back, not be asked to re-earn execution authority. Checking the live claim first turned
+    // every such recovery into `ScheduledTaskNotClaimed`, including the ordinary case where the
+    // delivery itself completed the last frozen lane and so closed its own lease. The browser
+    // outbox classifies that 4xx as terminal, which permanently buries a Receipt the server had
+    // already issued.
+    //
+    // A new Attempt still requires the atomic live claim, and its check stays in the same
+    // transaction as its insert.
     let existing = sqlx::query("SELECT task_id, producer_instance_id FROM linggan_runtime_attempt WHERE attempt_id = $1 FOR UPDATE")
         .bind(attempt.attempt_id()).fetch_optional(&mut *tx).await.map_err(ProducerRuntimeError::Internal)?;
     let outcome = match existing {
@@ -855,6 +855,15 @@ pub async fn start_producer_attempt(
             attempt_id: attempt.attempt_id(),
         },
         None => {
+            // Two independent bases let a *new* Attempt start, and both are server-side facts:
+            // a live claim, or a delivery identity the server itself minted for this attempt
+            // before the page was opened. Both are checked in the same transaction as the insert.
+            if task_source == "scheduled"
+                && !live_scheduled_claim_exists(&mut tx, attempt).await?
+                && !prepared_lane_delivery_exists(&mut tx, attempt).await?
+            {
+                return Err(ProducerRuntimeError::ScheduledTaskNotClaimed);
+            }
             sqlx::query("INSERT INTO linggan_runtime_attempt (attempt_id, task_id, producer_instance_id) VALUES ($1,$2,$3)")
                 .bind(attempt.attempt_id()).bind(attempt.task_id()).bind(attempt.producer_instance_id())
                 .execute(&mut *tx).await.map_err(ProducerRuntimeError::Internal)?;
@@ -866,6 +875,85 @@ pub async fn start_producer_attempt(
     };
     tx.commit().await.map_err(ProducerRuntimeError::Internal)?;
     Ok(outcome)
+}
+
+/// Is this task's execution authority live *and* held by the installation asking to start?
+///
+/// Read-only on purpose: it takes no row locks, so a new Attempt never acquires `installation` /
+/// `lease_task` while already holding the attempt row. The terminal submission boundary revalidates
+/// the same claim with `lock_live_scheduled_claim`, which is the lock that actually fences it.
+async fn live_scheduled_claim_exists(
+    tx: &mut Transaction<'_, Postgres>,
+    attempt: &ProducerAttempt,
+) -> Result<bool, ProducerRuntimeError> {
+    sqlx::query_scalar(
+        "SELECT EXISTS ( \
+             SELECT 1 FROM collection_work_order_lease_task lease_task \
+             JOIN collection_work_order_lease lease USING (lease_ref) \
+             JOIN plugin_installation installation \
+               ON installation.installation_ref = lease_task.claimed_by_installation_ref \
+             WHERE lease_task.task_id = $1 \
+               AND lease_task.execution_state = 'in_progress' \
+               AND lease.released_at IS NULL \
+               AND lease.expires_at > scope_001_now() \
+               AND installation.install_key = $2::text \
+               AND installation.superseded_at IS NULL)",
+    )
+    .bind(attempt.task_id())
+    .bind(attempt.producer_instance_id())
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)
+}
+
+/// 服务端是否在导航前为**这一条** Attempt 身份登记过交付准备？
+///
+/// 详情页会话允许一次导航读完冻结的全部通道，而各通道的包在本机 outbox 里慢慢投递。投递时
+/// 租约可能早已结束，通道任务也可能从未被单独领取——这两个事实都不改变「材料是在授权下读到
+/// 的」。这条准备是服务端在授权事务里自己铸造的（会话 + 冻结通道任务 + 所属工位 + 计划摘要），
+/// 所以它可以作为启动依据；插件无法凭空造一条。
+///
+/// 它放宽的只是「谁可以开始」，不是「什么可以被接纳」：终局边界上的
+/// `lock_live_scheduled_claim` 仍然独立复核活权，因此租约已结束的晚到包照旧记为
+/// `LOST_AUTHORITY`，材料接纳结论不变。
+///
+/// 迁移尚未应用时按「没有这份准备」处理，而不是让整条登记报错：升级顺序不该让
+/// 普通的 startAttempt 变成内部错误。
+async fn prepared_lane_delivery_exists(
+    tx: &mut Transaction<'_, Postgres>,
+    attempt: &ProducerAttempt,
+) -> Result<bool, ProducerRuntimeError> {
+    let table_present: bool = sqlx::query_scalar(
+        "SELECT to_regclass('collection_detail_page_session_lane_preparation') IS NOT NULL",
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
+    if !table_present {
+        return Ok(false);
+    }
+    let lease_live: Option<bool> = sqlx::query_scalar(
+        "SELECT lease.released_at IS NULL AND lease.expires_at > scope_001_now() \
+             FROM collection_detail_page_session_lane_preparation preparation \
+             JOIN collection_work_order_lease lease ON lease.lease_ref=preparation.lease_ref \
+             JOIN plugin_installation installation \
+               ON installation.installation_ref = preparation.owner_installation_ref \
+             WHERE preparation.attempt_id = $1 \
+               AND preparation.task_id = $2 \
+               AND installation.install_key = $3::text \
+               AND installation.superseded_at IS NULL",
+    )
+    .bind(attempt.attempt_id())
+    .bind(attempt.task_id())
+    .bind(attempt.producer_instance_id())
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
+    match lease_live {
+        Some(true) => Err(ProducerRuntimeError::ScheduledLaneAwaitingClaim),
+        Some(false) => Ok(true),
+        None => Ok(false),
+    }
 }
 
 pub async fn submit_producer_package(

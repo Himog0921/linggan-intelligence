@@ -18,9 +18,11 @@ import { createXhsPageController } from './xhsPageController.js';
 import { isContextValid, reportDone, sendToBackground } from '../shared/messaging.js';
 import { extractNoteId } from '../shared/utils.js';
 import { createLingganContentRuntime } from '../linggan/contentRuntimeAdapter.js';
+import { packageContentDetail } from '../linggan/producerRuntime.js';
 import { LINGGAN_RUNTIME_ACTION } from '../linggan/runtimeActions.js';
 import { unavailableLingganStats } from '../linggan/adapter.js';
 import { explicitXhsDetailPageUrlInvalid } from '../shared/deadPageSignals.js';
+import { installSelectorHealthReporter } from '../shared/selectorHealth.js';
 import {
   observeXhsAccountFromDocument,
   observeXhsDetailRiskFromDocument,
@@ -49,6 +51,14 @@ function localTrustedAuthorization() {
 
 const runtime = createLingganContentRuntime({ platform: 'xhs' });
 let activeDouyinAdapter = null;
+
+// 页面上的结构自检（探过的与动作前的）统一交给 background 存：页面会随导航消失，
+// 诊断不该跟着消失。这是一条只出不进的旁注——上报失败不改变页面上正在做的任何事。
+installSelectorHealthReporter((snapshot) => sendToBackground(
+  LINGGAN_RUNTIME_ACTION.REPORT_SELECTOR_HEALTH,
+  { snapshot },
+  { timeoutMs: 4000 },
+));
 
 async function collectCurrentXhsDetailPackage(...args) {
   // A direct detail request carries its attached comments in the same logical package.
@@ -273,11 +283,14 @@ async function collectApprovedDetailPageSession(message = {}) {
   }
   let contentDelivery = null;
   let contentDeliveryFailure = null;
+  let contentPackage = null;
   const queueDetailBeforeComments = async (note) => {
     if (contentDelivery || contentDeliveryFailure) return;
     try {
+      contentPackage ||= packageContentDetail({ platform: 'xhs', note });
       contentDelivery = await runtime.submitContentDetail(note, {
         taskSpec,
+        capturePackage: contentPackage,
         idempotencyKey: `detail-session:${taskSpec.taskId}:content_detail`,
       });
     } catch (error) {
@@ -310,16 +323,22 @@ async function collectApprovedDetailPageSession(message = {}) {
   // The first durable deliverable is the detail lane itself.  A later cache
   // failure must not discard an already obtained body/media snapshot or force
   // another page visit just to make the other lanes convenient.
-  const queued = contentDelivery || await runtime.submitContentDetail(note, {
-    taskSpec,
-    idempotencyKey: `detail-session:${taskSpec.taskId}:content_detail`,
-  });
+  contentPackage ||= packageContentDetail({ platform: 'xhs', note });
   // The content script has the XHS origin; its IndexedDB is not shared with
   // the extension service worker.  Hand the bounded page facts to background,
   // which owns the cache used by the later independently claimed lanes.
   const stored = await sendToBackground(LINGGAN_RUNTIME_ACTION.STORE_DETAIL_PAGE_SESSION, {
     leaseRef, plan, note, commentResult: packaged.commentResult, receipt: packaged.receipt,
+    detailTaskId: taskSpec.taskId, detailPackage: contentPackage,
   }).catch(() => null);
+  if (stored?.success !== true) {
+    return { success: false, state: 'detail_page_session_recovery_required',
+      message: '同页通道缓存未能持久保存；已入队的正文继续交付，其余材料需处理。' };
+  }
+  const queued = contentDelivery || await runtime.submitContentDetail(note, {
+    taskSpec, capturePackage: contentPackage,
+    idempotencyKey: `detail-session:${taskSpec.taskId}:content_detail`,
+  });
   if (stored?.success === true && String(stored.cacheKey || '').trim()) {
     // A queue-marker failure may be replayed safely through the deterministic
     // outbox key. It must not turn this already persisted content package into
