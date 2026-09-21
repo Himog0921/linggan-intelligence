@@ -82,8 +82,8 @@ Mog 于 2026-09-21 派定交付包 `~/Downloads/linggan-collection-upgrade-hando
 | E5 title 非空被当作「详情已取得」 | 统一材料完成判据 = 合格详情材料及其来源；标题缺失是字段覆盖度 | 新 `qualified_detail.rs`（全库一处定义）、`target_catalog.rs`、`archive_completeness.rs`、`archive_ledger.rs`、`keyword_archive_detail.rs`、`acquisition_chain.rs`、`execution_input_eligibility.rs`、`target_drawer.rs` | T19–T21, T23 | **已实施（S3a）；隔离 PostgreSQL 20 目标全套 232 passed / 0 failed**（判据收成一处：目录行、覆盖统计、待补齐、关键词建档候选与缺口计数共用；详情已取到而平台没给标题时说「标题未收录」而不是「标题待取得」；写路径上两处更宽的守卫〔退役确认、材料补采〕有意保留原判据——它们问的是「有没有任何一行材料」，方向是把关更严，见 §9.8） |
 | E1/E3 的展示面：欠详情的作品只说「待采集」 | 作品行欠详情时说出**欠的原因**（等新输入 / 还在退避 / 自动重试已停止），判据只从 `0097` 台账读一处 | `execution_input_eligibility.rs::read_material_execution_states`、`target_catalog.rs`、`target_drawer.rs` | T20, T21, T23 | **已实施（S3b）；两侧隔离证明通过**（判定规则与「看板为什么没排」共用同一句 `current_row_pauses_work_sql`；候选行压过停止行——停止是历史，不是永久封禁；变异验证见 §8） |
 | E6 session 终结与 Receipt 不对账 | 统一当前状态 DTO（原因/来源/最后确认时间/允许动作）+ 会话终结归并 | `collection_tasks_view.rs`、`collection_task_read.rs`、`runtime_capacity.rs`、`queue_position.rs` | T22, T27 | **已实施（S3c）**：新增只读交付对账投影 `read_detail_delivery_reconciliation`（`DetailDeliveryReconciliation` + `DeliveryConclusion{Delivered, AwaitingDelivery, RecoveryUnverified, Closed}`），结论由冻结通道的回执数出来、不由会话自己写的 `state` 出来；`/collection/tasks` 新增「交付对账」小节与两个读数；终结压过一切且晚到 progress 在写入侧即被拒（`SessionNotHeld`）。`runtime_capacity.rs`／`queue_position.rs` **未改**：本卡不动工位与排队口径，交付结论不反向写进它们。证据见 §9.9；变异验证见 §8 |
-| 故障无法按一条链路串起来 | 结构化事件字段 + 复用现有巡检账本的统一 tick 关联 | 采集/worker 入口、`collection_scheduler_run` | T29–T32 | 待实施 |
-| 性能候选缺少证据 | 建 SQL 次数/耗时/计划基线；无稳定收益则明确「收益未证实，不改」 | 见交付包 S5 表 | T33–T34 | 待实施 |
+| 故障无法按一条链路串起来 | 结构化事件字段 + 复用现有巡检账本的统一 tick 关联 | 采集/worker 入口、`collection_scheduler_run` | T29–T32 | **已实施（S4a–S4d）**：就绪分级与 worker 退出语义（S4a）、统一 tick／步骤结果／结构化事件（S4b，新表 `collection_scheduler_run_step` = 迁移 `0098`）、选择器诊断与陈旧版本文案（S4c，`0099`）、一个 tick 号串一条链与字段白名单（S4d）。隔离库 `scheduler_tick_postgres` **5 passed / 0 failed**、`linggan-evidence --lib` **86 passed / 0 failed**；诊断查询已写进部署手册 §7。**未证明**：样例是描出来的不是抓来的（一条真实故障的全链要真实平台）；`emit_step` 的调用点只有类型保证、没有取值断言 |
+| 性能候选缺少证据 | 建 SQL 次数/耗时/计划基线；无稳定收益则明确「收益未证实，不改」 | 见交付包 S5 表 | T33–T34 | **已实施（S5）**：六条候选逐条给读数与结论（§11.4）——两条索引实施（`0100`）、一处 panic 型解码换成具名错误、另一条索引与其两条兄弟**明确不改**（收益未证实/不同对象）、零引用模块降级为历史材料、原因码词表补齐（`0101`）。读数取自 `pg_stat_user_tables` 的时间窗口差值 + EXPLAIN，**不写「提速 N%」**——收益量级如实说：真正理由是形状（随库增长线性上升 → 常数级），6.8× 只作复刻规模下的同参数对比出现。**未证明**：只在复刻规模上量过，真实并发下的计划选择未测 |
 
 ### 5.1 输入资格台账的两条键（T13 的实现口径）
 
@@ -855,4 +855,196 @@ S5 的三次变异分别落在 `crates/evidence/src/collection_control.rs`（代
 ①`0101` 是否接受这次范围扩大（不接受即整个 ⑥ 撤回，见 §11.6）；②`target_domain_unassigned` 这条**改动之前就在**的雷（同一个领域里另有别的码也可能撞上那两条 `CHECK`）；③`reason_code` 会原样出现在页面上；④`receipt_meaning`／`error_summary` 是同一份词表的另两份手维护映射；⑤采集页两个兄弟缺索引；⑥`complete_media_upload` 的静默无操作；⑦`manual-execution-lock-release.test.mjs` 与 `task-state-constants.test.mjs` 没有 npm 脚本入口（本步直接跑过，3 passed）、`release:verify` 的既有红灯、以及既有的插件 `linggan-current-surface-discovery-runtime` 失败与 `crates/contracts/src/producer_runtime.rs:428` 的既有 clippy `too_many_lines` error；⑧是否为这次受保护交付开 GitHub Issue（**上一窗口问过，Mog 未答**）。
 
 **未完成（不在本卡）**：S6（集成证据表、历史处置预览、兼容矩阵、回滚步骤、PR 候选）；共享库迁移应用与历史数据处置；merge／push／部署／runtime 切换／插件重载／发布包生成／真实平台访问——**全部需要另行授权**。本交付包收尾后按 Mog 指定走**一次**独立复核（不逐步复核）。
+
+## 12. S6 集成交付与历史处置准备
+
+> 状态: 活跃计划 · 实施状态回填（本节在 S5 之后写入，记录整包的集成证据、兼容与回滚口径、历史处置的只读预览与最终交付表）。
+
+### 12.1 范围与基线
+
+| 项 | 值 |
+|---|---|
+| 交付包 | `~/Downloads/linggan-collection-upgrade-handoff-2026-09-21 2/`（README + 01 目标合同 + 02 实施步骤 + 03 验收与发布 + 04 事实与取舍） |
+| 分支 / worktree | `fix/collection-upgrade-001` @ `.worktrees/collection-upgrade-001`（仓库唯一允许的 worktree 位置） |
+| 基线（分支点） | `1ef5830` —— 已确认是 `origin/main` 的祖先（S0 已更正交付包对基线的描述：包内称 `1511725c → 1ef5830` 只含评论研究，实际中间 PR #322 直接改了采集模块） |
+| 本包提交 | 12 个（`a1e8a9c` → `de1e8be`），全部**未推送** |
+| 差异规模 | 相对分支点 **90 个文件、+14853 / −1192** |
+| 当前 `origin/main` | `3ff3982`（已晚于分支点 **8 个提交**，全部是 comment-study 系列、**不含 migration**，因此编号不撞；试合并结果与冲突面见 §12.7） |
+| 共享库 | 迁移台账最高 `0095`；本包的 `0096`–`0101` **未应用** |
+| 本轮**未发生**的动作 | 共享库迁移应用、历史数据处置、merge、push、部署、runtime 切换、插件重载、发布包生成、真实平台访问 |
+
+### 12.2 合同冲突裁定
+
+| 冲突 | 裁定 | 落点 |
+|---|---|---|
+| `docs/product/collection-monitoring-rules.md` §0.4「缺失签名执行 locator…也必须走同样的释放与冷却」与交付包 `01` 的缺输入止转相抵触 | **旧条被取代**：原文保留并标明为历史对照，改述为停止语义（缺输入是停止，不是重试；只停这一篇） | S1b 提交 `de7f6f4` |
+| 交付包 `01` 的三条同时约束（01:50 身份键含指纹 / 01:52 预算键不含指纹 / 01:54 地址变化不得增加 `retry_epoch`）与初版单键设计互斥 | 改为**两条键分工**（身份键含指纹 + `NULLS NOT DISTINCT`；当前键不含指纹、只覆盖非停止行） | 计划 §5.1；`0097` 迁移注释 |
+| `docs/plans/active/detail-page-session-replay-safety-001.md` 只写了「授权 → 执行 → 接纳」的既有 `LOST_AUTHORITY`，未区分「授权登记的准备」与「实际执行」 | 该计划新增第 11 条：三者是三个不同关系；准备记录不构成 Attempt/执行/交付；实施面登记 `0096` | S1a 提交 `edd1e56` |
+| 交付包对基线的描述与 `origin/main` 实际不符（包内所有插件与 `dispatch.rs` 行号因此失效） | **改按符号名定位**，并在计划 §3 更正基线 | S0 提交 `a1e8a9c` 前 |
+
+页面文档 `docs/design/pages/collection-workspace-page.md` 未与实现冲突（它不枚举本包新增的作品行文案与「交付对账」小节）；LIDS 手册未改。
+
+### 12.3 验收矩阵结果（T01–T34）
+
+层级口径：**单元** = `linggan-evidence --lib`；**隔离 PG** = 容器/卷/库自建自清的 PostgreSQL 16 证明库；**插件** = `node --test`（Dexie/fake-indexeddb 与路由桩）；**页面** = `linggan-api` 二进制内的 HTML 断言；**浏览器生命周期** = 真实 Chrome + 真实 MV3 worker 终止/重启——**本包一次都没跑**（未获授权安装/重载插件）。
+
+| ID | 场景 | 本包的证明（层级 · 用例/命令） | 结论 |
+|---|---|---|---|
+| T01 | 页面读完后 API 断开、跨租约到期再恢复 | 隔离 PG `navigation_time_lane_identities_outlive_a_closed_lease_without_impersonating_execution`（身份跨关闭租约存活、按原身份开始并记 `LOST_AUTHORITY`+`ACCEPTED`）；插件 `prepared lane identities are persisted with the navigation grant and cannot be re-pointed`、`lane delivery uses the server-minted identity and stops without one` | **证据层 + 插件单测已证**；「再次导航数为 0」需浏览器生命周期，**NOT VERIFIED** |
+| T02 | 服务端已提交 Receipt、HTTP 响应丢失 | 隔离 PG `a_lost_submission_response_still_replays_after_its_lease_closed`（**修前 1 failed / 修后通过**）；插件 `a closed claim still asks the submission route and keeps the Receipt it already earned` | **已证** |
+| T03 | outbox 写入后 MV3 worker 终止再启动 | 插件 outbox 持久化用例（既有 + 本包相关用例）只覆盖 Dexie 层 | **NOT VERIFIED**（真实 worker 生命周期未跑） |
+| T04 | flush 标记 in_flight 后终止、唤醒 | `markInFlight` 只在路由桩里被断言（调用顺序），没有「终止后超时行恢复」的用例 | **NOT VERIFIED** |
+| T05 | 准备 Attempt 响应丢失 | 隔离 PG：同一申请 ID 重放身份一致、准备阶段 attempt 计数为零；插件 `an announced handshake is requested, and a missing receipt never authorizes a page open`（拿不到合规回执即不开页） | **已证** |
+| T06 | 同 submission/Attempt 内容变化 | 既有覆盖（`collection_control_postgres`／`material_media_postgres` 的身份冲突用例）+ 本包插件 `an Attempt identity conflict stays terminal and never reaches the submission route` | **既有覆盖（复用）+ 插件侧已证** |
+| T07 | 本地相同幂等键、不同内容并发 enqueue | 既有覆盖：`outbox reuses one envelope for the same detail-session lane idempotency key` 与同文件的并发 enqueue 用例 | **既有覆盖（复用）** |
+| T08 | 第一个通道包无效、后续通道合格 | 隔离 PG：四通道身份互不相同、错配通道任务被拒、未领取通道仍可各自交付 | **已证（证据层）** |
+| T09 | 一页多通道，只有部分已登记/已持久化/已送达 | 隔离 PG `delivery_reconciliation_counts_receipts_not_the_session_marker`（4/0 → 4/3 → 已交付）；页面层四态渲染 | **已证** |
+| T10 | API 断开时尚未登记 Attempt 的旧版历史包 | 插件 `prepared lane identities … cannot be re-pointed` 守住「不自动改挂」；**没有**「旧包保留并可人工处理」的运行级用例 | **部分**；运行级 **NOT VERIFIED** |
+| T11 | 空 locator 连续调度/claim 100 次 | 隔离 PG `a_lease_whose_members_all_lack_execution_input_ends_as_a_stop_not_a_completion`（停 `input_blocked`、零 Attempt/Package、其后连续 100 轮不再新建租约） | **已证** |
+| T12 | 缺地址后获得新有效地址 | 隔离 PG `a_new_signed_address_after_a_stop_opens_a_successor_eligibility_through_admission`（旧停止事实保留、新资格可执行） | **已证** |
+| T13 | 重复发现同一地址/只改时间戳或刷新 token | 隔离 PG：同一条地址再准入不多出当前资格；指纹不同时不增加 `retry_epoch`、不清零预算 | **已证（结构面）**；身份键的 `NULLS NOT DISTINCT` 那条**如实降级为守卫**（去掉它没有变红，因为成员展开已挡住） |
+| T14 | 每次新 WorkOrder 都收到相同 `page_read_failed` | 隔离 PG `detail_read_failure_budget_follows_the_requirement_scope_across_new_work_orders`（三张新工单、第三次停止） | **已证** |
+| T15 | 批量工单一个对象无地址、其余有效 | 隔离 PG `a_missing_locator_stops_only_its_own_material_without_requeueing_forever`（**修前红**） | **已证** |
+| T16 | 同一 content 同属目标 A/B | 隔离 PG `the_same_content_under_two_targets_keeps_two_independent_detail_budgets` | **已证** |
+| T17 | 两 worker 同时建同缺口工单/重复上报 failure_id | 隔离 PG `duplicate_detail_failure_reports_count_once_and_keep_one_current_row`（`tokio::join!` 真并发）+ 唯一性约束 | **已证（证据层）** |
+| T18 | `in_progress` 重放时 locator 不可用但有旧 Attempt/包 | 隔离 PG `an_in_progress_replay_with_a_dead_locator_keeps_the_attempt_and_never_renavigates`（100 轮、现场全量比对；变异验证见 §8） | **已证**（守的是**修前就已正确**的路，记为回归守卫） |
+| T19 | 已接纳详情 `title=NULL` | 隔离 PG `a_detail_accepted_without_a_title_still_counts_as_captured`；页面 `a_captured_work_without_a_title_says_the_field_is_missing_not_the_detail` | **已证** |
+| T20 | own/cross 各含空标题、无详情、隔离记录 | 隔离 PG `keyword_archive_postgres`（跨行业侧）+ `observation_target_dossier_postgres`（本领域侧）各自读取口断言 | **已证** |
+| T21 | released lease + 历史 `in_progress` | **既有覆盖（复用）**：隔离 PG `released_orphaned_work_order_is_recovered_without_rewriting_old_lease_history`（旧租约历史不被改写、仍可查）；S3c 的读层结论由回执数出来、不由会话标记数出来（同一件事的读侧一半） | **既有覆盖（复用）+ 读层已证**；本包未新增专项目例 |
+| T22 | `delivery_pending` 会话已有 Receipt 或只是未知本地状态 | 隔离 PG `delivery_reconciliation_counts_receipts_not_the_session_marker`（`DeliveryPending` + 末通道 → 已交付；无通道 → 恢复待核实） | **已证** |
+| T23 | 成功 Receipt 与旧失败/预算更新并发 | 隔离 PG `a_late_detail_read_failure_never_spends_the_budget_of_an_already_accepted_material` | **已证** |
+| T24 | 租约到期/撤销后原 Attempt 的合格晚到包 | 隔离 PG（`LOST_AUTHORITY` + `material_admission='ACCEPTED'`）；页面 `a_receipt_with_lost_authority_is_not_rendered_as_a_plain_success` | **已证** |
+| T25 | 伪造新 Attempt、变更 owner/target、安装替换 | 本包新增（隔离 PG `navigation_time_lane_identities_outlive_a_closed_lease_without_impersonating_execution` 内）：陌生安装与错配通道任务被拒、安装被取代后身份失效；**既有覆盖（复用）**：`creator_lease_claims_and_completes_two_scheduled_tasks_in_order`（陌生安装的新 Attempt 仍被拒）、`replacement_installation_releases_stale_work_instead_of_adopting_it` | **已证（证据层）** |
+| T26 | session cache / IDB 配额不足、序列化失败 | 未见任何用例 | **NOT VERIFIED** |
+| T27 | 完成/停止事件后到达旧 progress | 隔离 PG：晚到 `DeliveryPending` 被写入侧拒绝为 `SessionNotHeld`、读侧结论仍 `Closed`；页面层五种终结原因 | **已证** |
+| T28 | 明确页面不可用 / 暂时超时 / 选择器失配各一例 | 隔离 PG 三例三码：`an_explicitly_unavailable_page_stops_only_its_lanes_without_fabricating_deletion`（新增）、`failed_browser_start_is_audited_then_returns_work_order_to_shared_queue`（复用）、`unavailable_detail_is_audited_without_blocking_later_materials` + `repeated_detail_read_failure_becomes_blocked_without_stalling_later_materials`（复用）；变异验证见 §8 | **已证** |
+| T29 | 数据库不可达 / 台账读失败 / 未迁移 | 隔离 PG `runtime_readiness_postgres` 5 例（四类注入 + 只读性）；`startup_contract` 4+1（不退出、不空转、日志不含连接串）；`/health` 两例同判 | **已证（隔离）**；真实 launchd 重启节流 **NOT VERIFIED**（plist 未重装） |
+| T30 | worker 一步失败、其余成功 | 隔离 PG `one_failing_step_is_recorded_alone_while_the_other_three_finish`、`an_absent_step_ledger_opens_nothing_rather_than_a_half_recorded_tick`、`a_step_whose_own_tables_are_missing_is_skipped_rather_than_failed`、`ready_requires_the_ledger_row_and_the_required_tables`、`readiness_is_a_heartbeat_column_that_does_not_touch_the_tick_columns` | **已证（隔离）** |
+| T31 | 新旧插件/服务端混合版本及旧 outbox 升级 | 插件三例（未通告握手 → 请求与 v1 完全一致；通告 → 请求且缺回执不开页；回执必须回答确切契约/会话/冻结通道集）；服务端 `lane_preparation_contract` 未知版本 422 而不是静默降级 | **已证（契约层）**；「旧 outbox 升级」无运行级用例，**NOT VERIFIED** |
+| T32 | 选择器检查成功/缺失/日期陈旧 | 插件 `linggan-selector-health-report` 9 例（三态、两个时刻分离、白名单字段、按平台归一、取最早验证日）；服务端 `selector_health_is_stored_read_back_and_never_gates_a_check_in` | **已证（隔离 + 插件）**；真实页面结构变化下的取值 **NOT VERIFIED** |
+| T33 | 优化前后同参数、代表规模的重复测量 | 证明库规模阶梯（3 千/3 万/30 万，同参数各 3 次）+ 运行时库**只读时间窗口差值** + `EXPLAIN` 计划对比；见 §11.4 ①②、§11.9.1 | **已证**；收益只在复刻规模上量过，**不宣传固定百分比** |
+| T34 | 全模块集成与生产构建 | 隔离库全套 24 次 cargo 运行 **252 passed / 0 failed / 1 ignored**（退出码 0）；`cargo check --workspace --all-targets --locked` 退出码 0；插件 `npm run build` 退出码 0 + 产物三证（`src/` 零引用、webpack 入口图不含、新建 `dist/` 搜不到该模块名）；`npm run test:douyin` 69/69 | **已证** |
+
+### 12.4 兼容矩阵（schema / API / 插件 / 迁移顺序）
+
+**schema 面（六条新迁移，全部只增不改）**
+
+| 迁移 | 加什么 | 旧二进制读新库 | 新二进制读旧库 | 属于哪一类闸门 |
+|---|---|---|---|---|
+| `0096_detail_page_session_lane_delivery_identities` | 新表 `collection_detail_page_session_lane_preparation` | 无影响（旧代码不读该表） | **不应用就不通告**：`dispatch_schema_is_ready` 要求该表存在，缺表时 `/health` 不通告 `detailPageSessionLanePreparationContract`，插件也就不请求它——退化成旧路径（**不报错，但 S1a 的交付恢复不生效**） | 部署顺序约束（API 侧） |
+| `0097_collection_execution_input_eligibility` | 新表 + `collection_work_order.execution_input_frozen_at` + `collection_work_order_lease_task.execution_state` 增 `input_blocked` + 失败账本两个取值 + 租约释放原因 | 旧代码把 `execution_state` 读成 String，未知值落进 `else → "QUEUED"`——**不崩，但会把「已停止」读成「排队中」**；`release_reason IN ('expired','station_unavailable','revoked')` 那类统计会少算一条 | **是就绪判据**：`COLLECTION_RUNTIME_REQUIREMENTS` 含 `0097`，缺它 worker 判未就绪、一个 tick 步骤都不跑 | 就绪判据 |
+| `0098_scheduler_tick_steps_and_readiness` | 新表 `collection_scheduler_run_step` + 心跳/就绪列 | 无影响 | 同上，**是就绪判据** | 就绪判据 |
+| `0099_collection_selector_health` | 一列（选择器诊断） | 无影响 | **是部署顺序约束**：新二进制每次「插件报到」都会写这一列，缺列 → `42703` → 报到被判 `422 check_in_rejected`，而 `/health` 仍是 READY（详见 §10.8 的代价说明） | 部署顺序约束（API 侧） |
+| `0100_collection_hot_path_indexes` | 两条索引 | 无影响 | **不构成约束**（索引只影响计划，不产生 `42703`） | 无闸门 |
+| `0101_collection_command_reason_vocabulary` | 两条 `CHECK` 放宽到代码侧全量词表 | 无影响（旧码是新集合的子集） | **是部署顺序约束**：新二进制写下的新原因码在未应用的库上撞 `23514`，**那笔拒绝连回执都留不下** | 部署顺序约束（API 侧） |
+
+读法：`0097`/`0098` 是**就绪判据**（不应用就不干活、不会半写）；`0096`/`0099`/`0101` 是**部署顺序约束**（新二进制能用，但会在某一条路径上退化成旧行为或整笔失败）。因此部署口径只有一句：**六条一起先应用、后部署**——不给同一批迁移留两种顺序。
+
+**API 面**
+
+| 变化 | 旧插件 → 新 API | 新插件 → 旧 API |
+|---|---|---|
+| 授权请求新增可选字段 `lanePreparationContract` | 不出现该字段 → 走旧路径（已证：`a service that never announced the handshake receives the unchanged v1 grant request`） | 插件只在 `/health` 通告该握手版本时才带字段；旧服务端不通报 → 不带（已证） |
+| 未知握手版本 | —— | 服务端**显式 422** `detail_page_session_lane_preparation_contract_unknown`，**不静默降级成 v1**（已证） |
+| `/health` 新增 `readiness` 与 `detailPageSessionLanePreparationContract` | 旧插件只读它认识的键 | 新插件在缺通告时按「没有该能力」处理，不猜 |
+| 新拒绝码 `work_order_only_stopped_members_remain`（S1b 的 `…input_blocked_members_remain` 因从未发布直接改名） | —— | 旧插件对该码按未知 4xx 处置（它只在这张工单**被终结**时出现，不是交付路径） |
+| finalize 路由新增一个 422 分支（候选 ④） | 触不到（旧插件不会产生 `state='materialized'` 且引用为空的行） | —— |
+
+**插件面**
+
+- 插件源码是本包唯一权威源码（`plugins/linggan-intelligence-browser/`），版本号**未变**（`0.8.54`），`releases/` 未重新打包（未授权）。
+- 因此「新插件」目前**只存在于源码里**：真实 Chrome 里跑的还是 0.8.54 的旧构建。安装/重载插件在本包未授权，浏览器生命周期层因此整列 `NOT VERIFIED`（§12.3）。
+
+「假链路」核对（T34 的最后半句）：本包新增的每条 Rust 读取入口都有真实调用方——`qualified_detail`（6 个消费者）、`execution_input_eligibility`（4 个入口 + 3 个读取面）、`runtime_readiness`（worker + `/health`）、`step_report`/`scheduler_tick`（worker 四步）、`selector_health`（插件报到 → 服务端列 → 工位页）、`read_detail_delivery_reconciliation`（`/collection/tasks`）。候选 ⑤ 移出的模块是**反向**的例子：它今天没有任何生产调用方，因此被降级为历史材料而不是留着冒充入口（§11.4 ⑤）。
+
+### 12.5 历史处置只读预览（**只读，未处置任何数据**）
+
+本节回答一个问题：**`0096`–`0101` 应用之后，哪些存量数据会第一次被新语义覆盖**。它**不是处置**——没有改任何状态、没有清任何队列、没有重挂任何 Attempt、没有刷新任何失败预算，全部是 `SELECT`。
+
+数据来源：本机运行时库（`linggan_intelligence_dev`，迁移台账最高 `0095`，容器内只读查询，2026-09-21）。**口径边界**：这是**本机这台运行实例**的快照，不是共享环境的普查；既然是快照，计数会随运行变化；它也不证明外部环境有同样形状的数据。
+
+| 预览对象 | 判据（代码里那一条） | 今天读到什么 | `0096`–`0101` 应用后会变成什么 |
+|---|---|---|---|
+| **旧缺输入任务**（没有带签名执行地址的小红书作品） | `signed_locator_predicate` = 地址 `LIKE 'https://www.xiaohongshu.com/%'` 且含 `xsec_token=`；解析取「最新已接纳的发现地址」，跨行业样本兜底（`candidate_locator_sql`／`execution_source_url_for_task` 两处**同形**） | 1220 篇小红书详情类作品里 **1137 篇有地址、83 篇没有**；但那 83 篇对应的 86 个任务**一行租约任务行都没有**——它们今天不在派发链上，所以新停止语义**不会**作用到它们 | 真正每天在被反复重试的是另一批：失败账本里 `execution_locator_unavailable` **96 条，全部发生在今天（00:35 → 11:11），只落在 2 篇作品上**（63 次 + 33 次）。它们今天按「有界退避重试」处理，本包之后第一次改判为**停止**（`input_blocked`）并只停这两篇自己 |
+| **预算超限范围** | 详情读失败按内容对象累计，预算 3（`DETAIL_PAGE_READ_BUDGET`）；旧规则按**单张工单**数（`page_read_failure_count_for_detail_in_transaction`），新预算按**需求范围跨工单**累计（`0097` 台账 + `unverified_prior_failures_sql`） | 按「作品 × 工单」数：26 对 1 次、1 对 2 次、**23 对正好 3 次**、1 对 5 次、1 对 7 次、**1 对 40 次** | 台账建立前的旧失败（`execution_input_frozen_at IS NULL`）**只记「待核实」、不进预算**——这是代码口径（`unverified_prior_failures_sql` 的 `order_row.execution_input_frozen_at IS NULL` 一条），因此存量工单一条都不会被追溯扣分。**待 Mog 决定**的是：那对 40 次的组合（旧规则下每次换工单就重新开始）今天会被新预算第一次拦住 |
+| **遗留 `delivery_pending`** | 会话状态 + 交付对账：冻结通道数 vs 按 `attempt_id` 对上的回执数（`collection_task_read.rs` 的 `LEFT JOIN … ON receipt.attempt_id = lane.attempt_id`） | **57 个会话全部未结束**（`finished_at IS NULL`、无一有 `stop_reason`），涉及 32 张工单、448 个任务；其中 **40 个至少有一条回执、17 个一条都没有** | **今天算不出通道级结论**：`collection_detail_page_session_lane_preparation`（`0096`）**在本机库不存在**——这正是 S1a 补的那张表。`0096` 应用后，对账第一次可读，但**存量会话的冻结通道没有准备记录**，所以它们的结论只能是「无法核验」（`RecoveryUnverified`），不会是「已交付」——这是**如实未知**，不是失败 |
+| **捕获包与 Attempt 身份** | `linggan_runtime_capture_package` 的外键 `(attempt_id, task_id)` + `producer_instance_id` 相等（`assert_attempt_owner` 的同一条判据） | **11509 个包、0 个生产者不一致、0 个找不到 Attempt**（这条判据今天本来就成立） | 不改写任何包；这条留在预览里是为了说明「新代码的守卫对着的是 0 行」——它的价值在**防止未来**出现不符，不是修存量 |
+| **租约与工单状态词表** | `release_reason`／`queue_state`／`execution_state` 的取值集合 | 释放原因：`completed` 448、`partial` 164、`dispatch_start_failed` 127、`expired` 104、`execution_locator_unavailable` 96、`station_unavailable` 9、`revoked` 2，另有 1 条是**仍然活着**的租约（`released_at IS NULL`，所以原因为空——这不违反那条 `(released_at IS NULL) = (release_reason IS NULL)` 的约束）。工单队列状态：`completed` 596、`legacy` 43、`cancelled` 21、`queued` 3、`leased` 1 | `input_blocked` 在三张表里**各 0 行**——而且**在 `0097` 应用前根本写不进去**（`release_reason`／`failure_disposition` 的 `CHECK` 还不认这个值）。这就是 §12.6 把六条迁移定为「一起先应用」的直接理由 |
+| **插件本地 terminal outbox** | 插件侧持久化的终态投递队列 | **读不到**：它存在浏览器侧，服务端既不持有也不该持有这份数据 | `NOT VERIFIED`——本包**没有**读取、没有清空、也不打算清空任何工位存储（红线）。要在浏览器里看它，需要真实 Chrome 与插件重载，两者都未授权 |
+
+**预览的结论（一句话）**：这个包里会**改变存量数据行为**的地方只有两处——**停止语义首次作用到 2 篇作品**、**预算首次跨工单累计**；其余四类要么今天就是成立的（包身份一致）、要么要等迁移应用后才第一次可读（通道对账）、要么明确读不到（插件本地 outbox）。因此「历史处置」这件事在本轮的结论是 **`DECISION_REQUIRED`**：本包**不主张**对存量会话、存量失败、存量租约做任何回填或重写，是否需要在部署后另开一张「存量收口」的卡，请 Mog 决定。
+
+### 12.6 部署与回滚步骤（**待执行方案，本包未执行其中任何一步**）
+
+本节是**步骤准备**，不是操作记录。本包没有应用任何迁移、没有部署、没有切换 runtime、没有重载插件。
+
+**部署顺序（一条链，不给两种顺序）**
+
+1. **迁移 —— 六条一起应用**：`./scripts/local-runtime.sh migrate`（开发目录）。当前台账 `public.linggan_local_schema_migration` 最高 **`0095`**（只读实测，2026-09-21），本包六条都还没有名字进过任何库。为什么不拆开应用：§12.4 的读法——`0097`/`0098` 缺一条 worker 就不就绪，`0096`/`0099`/`0101` 缺一条会在某条路径上退化成旧行为或整笔失败，「先应用三条看情况」只会制造一批看起来成功、实际半生效的状态。
+2. **二进制 —— 走受控入口**：`~/Library/Application Support/Linggan Intelligence/runtime-main/scripts/runtime/install.sh`（或与 `origin/main` 同步的那份入口；2026-09-17 实测过用落后副本当入口会在 drain 之后失败——巡检 worker 被停掉却没装回去）。`sync.sh` 自己会核对迁移台账：**有未应用的迁移就拒绝启动**——所以顺序上第 1 步必须在第 2 步之前完成，且这一步的失败是可读的（日志列出缺哪几条），不是一堆 SQL 报错。
+   - **已知边界（手册已记）**：开机时若 PostgreSQL 比 API 后起来，读不到台账会**跳过检查继续启动**。所以「服务起来了」不证明迁移检查跑过；部署后手工重启一次，或在运行日志里确认那一行不是「读不到迁移台账」。
+3. **插件 —— 本步不需要做，也做不到**：版本号仍是 `0.8.54`、`releases/` 没有重新打包，所以真实 Chrome 里那份旧构建**不重载也一致**（不会因为服务端升级而坏，§12.4 的「旧插件 → 新 API」列）。代价是 S1a 的「断网包按原身份交付」在真实浏览器里**不会生效**——它要新插件。要拿到它必须重新构建发布包并重载插件：**未授权、未做**。
+
+**部署后核对（用已有入口，不新造指标）**
+
+- `/health` 的 `readiness` 与 `detailPageSessionLanePreparationContract` 是否出现（对应 §12.4 的 0097/0098 与 0096）。
+- 一个 tick 号串一条链：`collection_scheduler_run.scheduler_run_ref` → 步骤行 → 目标级决定 → 工单（三个查询见 `docs/runbooks/local-runtime-deployment.md` §7）。
+- 部署后第一次真实插件报到如果返回 `422 check_in_rejected`，先查 `0099` 是否已应用（`42703` 会被收成 422，而 `/health` 仍是 READY）。
+
+**回滚**
+
+| 面 | 回滚动作 | 已验证的兼容性 | 未证明 |
+|---|---|---|---|
+| 迁移 | **不回滚**（仓库口径：append-only，没有 down 迁移）。回滚 = 代码回退，库里多出来的表/列/索引留着 | 多出来的东西对旧二进制不可见（`0096`/`0098`/`0100`）；`0101` 是**放宽** CHECK，旧码是新集合的子集，不可能因此写失败 | —— |
+| 二进制 | 把 `origin/main` 指回旧 revision 再走 `install.sh`；受控入口会先 drain 再换 | §12.4 逐条判过：`0097` 的 `execution_state = 'input_blocked'` 会被**旧二进制读成 `QUEUED`**——不崩、查询也不报错，但那条工单在旧二进制眼里变成「排队中」，而旧二进制不会再推进它（它不是旧代码认识的状态）。**回滚前必须确认没有工单还停在该状态**，或者明确接受它们显示成「排队中」 | 「旧二进制读到 `input_blocked` 之后到底会不会再动它」只按代码读出来（读成 QUEUED → 走排队路径），**没有真的用旧二进制跑过新库** |
+| 插件 | 不需要（版本号没变、产物没动） | 旧插件对新 API 的全部路径按 §12.4 逐条判过 | 真实浏览器未做 |
+
+**一条既有风险提醒（不是本包的验证结论）**：部署这个动作本身会重启三个常驻服务，**在途作业会被掐断**；2026-09-17 的现场记录显示，被掐断的那一类作业会把租约堵住一直到过期（当时是 asr 类）。因此「挑一个没有在途采集/媒体作业的时间部署」属于操作纪律，不是代码能兜住的。这条来自既有运行记录，本包没有复验。
+
+### 12.7 PR 候选与发布产物校验
+
+**分支与差异（实测）**
+
+| 项 | 值 |
+|---|---|
+| branch | `fix/collection-upgrade-001`（worktree `.worktrees/collection-upgrade-001`） |
+| HEAD | `de1e8be` |
+| base（分支点） | `1ef5830` |
+| 提交数 | 12（`a1e8a9c` → `de1e8be`） |
+| 差异 | 90 files changed, +14853 / −1192 |
+| origin/main | `3ff3982`（**分支点之后又进了 8 个提交**，全部是 comment-study 系列，不含任何 migration——编号不撞） |
+| 与 origin/main 的试合并 | `apps/api/src/local_web/comment_study.rs` 自动合并；`docs/progress/2026-09.md` **冲突**（双方都往同一个月度记录里追加，冲突是文本位置，不是语义） |
+| 远端 | **未推送**（12 个提交只存在于本机分支） |
+
+**PR 正文候选（按 `.github/pull_request_template.md` 的骨架填）**
+
+- **Related Issue and authority**：Refs #（**待 Mog 决定是否开 Issue**——本包是受保护交付，但至今没有对应的 GitHub Issue）。Active SCOPE：COLLECTION-UPGRADE-001（handoff 包 `linggan-collection-upgrade-handoff-2026-09-21`）。Base commit：`1ef5830`。Execution Agent/task-id：见 `docs/progress/2026-09.md` 同日各条。
+- **Changed scope**：采集模块的交付/恢复与状态表达（S1a/S1b/S2/S3a–S3c）、巡检 worker 的退出语义与可观测（S4a–S4d）、热路径两条索引与原因码词表补齐（S5），六条新迁移（`0096`–`0101`，**均未应用**），插件侧历史材料归位与一个零引用模块降级。
+- **Explicitly out of scope**：共享库迁移应用、历史数据处置、merge/push/deploy/runtime 切换、插件重载与发布包生成、真实平台访问、以及所有 `NOT VERIFIED` 行对应的验收（§12.3/§12.8）。
+- **Validation and evidence**：照 §12.3 的 T01–T34 表逐行填；自动化侧的分子分母以各步进度记录为准（隔离库全套 24 次 cargo / 252 passed / 0 failed / 1 ignored；`linggan-evidence --lib` 90；`linggan-api` 259 / 25 ignored；插件 `test:douyin` 69）。
+- **Database and external side effects**：**没有**——本包未对任何共享库执行迁移或写入；隔离库的容器/卷/库由脚本自建自清。
+- **Proved / Not proved**：照 §12.3 的「未证明」段与 §12.8 的 `NOT VERIFIED` 行。
+
+**发布产物校验**
+
+- 本包**没有**也无法产出插件发布产物（未授权）；`releases/` 未被改动，版本号未变。
+- `npm run release:verify` 在**改动之前就是红的**（`releases/…v0.8.54.zip` 与新建 `dist/` 不一致），已按「把移出的模块临时放回重建、产物逐字节相同」证明与本包无关（§11）；本包不重建发布包，因此「插件发布产物」这一行是 `NOT VERIFIED`，不是「通过」。
+- 合并授权：Mog 决定；exact-head 合并授权**未给出**。分支落后 origin/main 8 个提交，合并前需先决定 rebase 还是直接合并（试合并只有一处文本冲突，见上表）。
+
+### 12.8 最终交付表（逐行结论，**不合成总完成度**）
+
+| 交付面 | 结论 | 依据 |
+|---|---|---|
+| **代码分支 / PR** | 分支存在、内容完整；**未推送、未建 PR** | `fix/collection-upgrade-001` @ `de1e8be`，12 个提交全部只在本地；PR 正文候选见 §12.7（是否开 Issue 待 Mog 决定） |
+| **origin/main** | **未被本包改动** | 本包一次 `push` 都没有发生；`origin/main` 仍是 `3ff3982` |
+| **自动化与隔离 PostgreSQL** | **通过（本分支终态）** | S6 串证时复跑全套 `./scripts/test-local-001-discovery-postgres.sh`：**24 次 cargo 运行、252 passed / 0 failed / 1 ignored、退出码 0**，末尾输出 `…cleanup verified; isolated database, container, and volume were removed`（容器/卷/库自建自清）。口径：这是**本分支上的终态分子分母**；本包**没有**在分支点上跑过一次全量，所以「净值 = 终态 − 分支点基线」这个减法**不写**——只报终态。分层读数见 §12.3 各行 |
+| **插件发布产物** | **`NOT VERIFIED`** | 未重新打包、未发布（`releases/` 未动、版本号仍 `0.8.54`）；`npm run release:verify` 在**改动之前就是红的**（§11） |
+| **live runtime（本机常驻服务）** | **`NOT VERIFIED`** | 未部署、未切换 revision；3000 端口跑的仍是 `origin/main` 的构建。部署与回滚步骤是**待执行方案**（§12.6），不是操作记录 |
+| **浏览器插件链路** | **`NOT VERIFIED`** | 真实 Chrome 未安装/未重载插件、未做 MV3 worker 终止-重启、未跑真实页面。T03/T04/T26 与 T31 的真实浏览器一半都落在这里（§12.3） |
+| **共享迁移 / 历史修复** | **`NOT VERIFIED`** | 六条迁移（`0096`–`0101`）**未应用**到任何共享库；没有执行任何历史数据处置（§12.5 只做只读预览）。本机运行时库今天仍是 `0095` |
+| **真实平台样本** | **`NOT VERIFIED`** | 未访问小红书/抖音；T29 的 launchd 样例、T32 的真实页面、T34 的真实平台链路都因此只能给结构证据 |
+| **Mog 前端 / 业务验收** | **未进行** | 未部署即不可验收；页面侧证据止于 `linggan-api` 二进制内的 HTML 断言与页面单测 |
+| **独立复核（commit-reviewer）** | **待跑** | 按 Mog 的指定：整个交付包完成后跑**一次**（不逐步复核）；结论与逐条裁定会记入 `docs/progress/2026-09.md` |
+
+**不合成百分比**：本表逐行给结论，不折算成一个「完成度」数字——不同行的分母不同（有的按测试项、有的按真实环境），合成出来的数字只会掩盖哪一行没跑。
 
