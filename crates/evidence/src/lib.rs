@@ -54,6 +54,7 @@ pub mod observation_domain;
 mod observation_summary;
 mod patrol_scheduler;
 mod producer_runtime;
+mod qualified_detail;
 mod queue_position;
 mod receipt;
 mod runtime_capacity;

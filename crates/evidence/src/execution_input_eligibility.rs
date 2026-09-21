@@ -27,6 +27,7 @@
 //! **它不复制任何事实。** 台账回答「还能不能执行、为什么不能」；Package、Receipt、Attempt
 //! 和材料事实仍只由各自的表表达。这里既不写 Attempt，也不写 Evidence。
 
+use crate::qualified_detail::qualified_detail_exists_sql;
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -1027,9 +1028,10 @@ fn unverified_prior_failures_sql(
 /// 交付并发到达，而那份材料已经落库。已经拿到的材料不因为一次旧的读失败倒退，也不该再被
 /// 算进预算——那个预算问的是「要不要再试」，而这里已经没有要补的东西了。
 ///
-/// 判据与档案完整度用的是同一句：详情材料在库里有一行（本领域侧
-/// `linggan_material_content_detail`、跨行业侧 `cross_industry_sample_detail`）。**整包被隔离
-/// 时两处都不会有行**，所以「任务说完成、材料没进来」不会被误读成已取得。
+/// 判据与档案完整度、目标列表、补齐资格用的是**同一句**：本领域侧是
+/// `qualified_detail.rs` 里那条合格详情材料（材料本体 + 已接纳来源 + 未被隔离），跨行业侧
+/// 是 `cross_industry_sample_detail` 有没有行。**整包被隔离时两处都不会有行**，所以「任务说
+/// 完成、材料没进来」不会被误读成已取得。
 pub(crate) async fn detail_material_already_accepted_in_transaction(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     task_id: Uuid,
@@ -1039,10 +1041,10 @@ pub(crate) async fn detail_material_already_accepted_in_transaction(
         return Ok(false);
     };
     if let Some(content_public_ref) = subject.content_public_ref {
-        return sqlx::query_scalar(
-            "SELECT EXISTS (SELECT 1 FROM linggan_material_content_detail detail \
-                            WHERE detail.content_public_ref=$1)",
-        )
+        return sqlx::query_scalar(concat!(
+            "SELECT ",
+            qualified_detail_exists_sql!("$1"),
+        ))
         .bind(content_public_ref)
         .fetch_one(&mut **transaction)
         .await;

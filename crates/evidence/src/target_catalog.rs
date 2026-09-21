@@ -7,6 +7,7 @@
 use crate::cross_industry_sample_facts::{
     sample_detail_obtained_sql, sample_facts_schema_ready_sql, sample_observed_by_target_sql,
 };
+use crate::qualified_detail::qualified_detail_exists_sql;
 use linggan_storage_postgres::Database;
 use sqlx::Row;
 use uuid::Uuid;
@@ -174,12 +175,12 @@ pub async fn read_keyword_catalog_counts(
         std::collections::HashMap::new();
 
     // 证据侧：本领域关键词的命中作品与它们的详情。
-    let evidence: Vec<(Uuid, i64, i64)> = sqlx::query_as(
+    let evidence: Vec<(Uuid, i64, i64)> = sqlx::query_as(concat!(
         "SELECT work_order.target_ref, \
                 count(DISTINCT finding.content_public_ref), \
-                count(DISTINCT finding.content_public_ref) FILTER (WHERE EXISTS ( \
-                  SELECT 1 FROM linggan_material_content_detail detail \
-                  WHERE detail.content_public_ref=finding.content_public_ref)) \
+                count(DISTINCT finding.content_public_ref) FILTER (WHERE ",
+        qualified_detail_exists_sql!("finding.content_public_ref"),
+        ") \
          FROM collection_work_order work_order \
          JOIN collection_work_order_lease lease USING(work_order_ref) \
          JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
@@ -195,7 +196,7 @@ pub async fn read_keyword_catalog_counts(
            AND receipt.material_admission='ACCEPTED' \
            AND disposition.disposition='accepted_for_library_discovery' \
          GROUP BY 1",
-    )
+    ))
     .bind(target_refs)
     .fetch_all(database.pool())
     .await?;
@@ -307,6 +308,7 @@ async fn read_catalog(
                 linggan_human_moment(first_discovery.published_at_source_text) \
                     AS published_at_source_text, \
                 first_discovery.lane, \
+                detail.content_public_ref AS qualified_detail_ref, \
                 detail.title AS detail_title, \
                 linggan_human_moment(detail.published_at) AS detail_published_at, \
                 linggan_human_moment(detail.observed_at) AS detail_observed_at, \
@@ -317,8 +319,11 @@ async fn read_catalog(
                                   WHERE origin.content_public_ref=first_discovery.content_public_ref) THEN '待处理' \
                      ELSE '—' END AS media_state \
          FROM first_discovery \
+         -- 这份内容**合格详情材料**的最新一行。存在性就是「详情已取得」（判据见
+         -- `qualified_detail.rs`，这里是它的行级孪生：为了取那一行的字段才把连接写在这里）；
+         -- 标题只从这一行顺带取出，**不参与完成判断**。
          LEFT JOIN LATERAL ( \
-             SELECT candidate.title,candidate.published_at,candidate.observed_at \
+             SELECT candidate.content_public_ref,candidate.title,candidate.published_at,candidate.observed_at \
              FROM linggan_material_content_detail candidate \
              JOIN linggan_runtime_capture_package package USING(package_ref) \
              JOIN linggan_runtime_submission_receipt receipt USING(package_ref) \
@@ -344,7 +349,11 @@ async fn read_catalog(
         rows.into_iter()
             .map(|row| {
                 let detail_title: Option<String> = row.get("detail_title");
-                let detail_state = if detail_title.is_some() {
+                // 「详情已取得」= 有一份合格详情材料，与标题无关。`0015` 把标题有无单独记在
+                // `title_state` 上：**平台没给标题**（`title` 为空）与**还没取到详情**是两件
+                // 事，此前都由 `detail_title.is_some()` 回答，于是取到但没有标题的作品在列表和
+                // 抽屉里显示成还欠一篇，括号里的覆盖统计却已经把它算作取得。
+                let detail_state = if row.get::<Option<Uuid>, _>("qualified_detail_ref").is_some() {
                     CatalogDetailState::Complete
                 } else {
                     CatalogDetailState::Pending

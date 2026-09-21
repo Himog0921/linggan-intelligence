@@ -8,16 +8,17 @@ use linggan_contracts::{
     parse_producer_task_spec,
 };
 use linggan_evidence::{
-    AccountEligibilityObservation, AcquisitionChainError, AuthorizationGrant, CheckInOutcome,
-    CreatorLifecycleAssociation, CreatorLifecycleMetric, CreatorLifecycleQuery,
+    AccountEligibilityObservation, AcquisitionChainError, AuthorizationGrant, CatalogDetailState,
+    CheckInOutcome, CreatorLifecycleAssociation, CreatorLifecycleMetric, CreatorLifecycleQuery,
     CreatorLifecycleStatus, CreatorLifecycleWindow, DispatchDecision, DispatchFailureCode,
     DispatchFailureOutcome, InstallationCheckIn, RequestLeaseError, RuntimeAttemptOutcome,
     RuntimeSubmissionOutcome, activate_installation_credential, bind_observation_account,
     check_in_installation, decide_dispatch, grant_authorization, list_targets, open_claim_window,
-    read_archive_completeness, read_creator_lifecycle, read_target, register_station,
-    report_account_eligibility, request_admit_and_lease, request_progressive_archive_and_lease,
-    requeue_failed_dispatch, retire_materials, run_progressive_archives, set_station_accepting,
-    start_producer_attempt, submit_producer_package,
+    read_archive_completeness, read_creator_directory, read_creator_lifecycle, read_target,
+    register_station, report_account_eligibility, request_admit_and_lease,
+    request_progressive_archive_and_lease, requeue_failed_dispatch, retire_materials,
+    run_progressive_archives, set_station_accepting, start_producer_attempt,
+    submit_producer_package,
 };
 use linggan_storage_postgres::Database;
 use std::time::Duration;
@@ -238,6 +239,115 @@ async fn a_retired_work_stays_in_the_directory_and_leaves_the_pending_count() {
         .await
         .unwrap();
     assert_eq!(rows, 1);
+}
+
+/// T19：**详情已经取到、只是平台没给标题**，仍然算「详情已取得」。
+///
+/// 此前这张目录用 `detail_title.is_some()` 回答「这一篇有没有详情」。于是一篇详情已经落库、
+/// 标题为空的合格材料，在列表和抽屉里显示成还欠一篇、在补齐资格里被重新挑走，而在覆盖统计
+/// 里它已经算取得了——同一条材料事实读出两种答案。标题是**字段覆盖度**（`0015` 的
+/// `title_state='UNKNOWN'`），不是完成度：缺标题该说「标题未收录」，不是把整篇材料说成没取到。
+///
+/// 目录里三篇，只有中间那一篇有详情，这样「已取得」与「待取得」不是同一个数字的两种读法：
+/// 另外两篇真的还欠着，要一起断言，才不会把「目录里有详情就把整页算成有详情」放过去。
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn a_detail_accepted_without_a_title_still_counts_as_captured() {
+    let database = proof_database("dossier_untitled_detail").await;
+    let installation = ready_installation(&database, "dossier-untitled-detail").await;
+    let target_ref = seed_creator_target(&database, "creator-untitled-detail").await;
+    grant_deep_archive(&database, "建立创作者档案", 200).await;
+    let root = request_progressive_archive_and_lease(
+        &database,
+        target_ref,
+        "建立创作者档案",
+        "person",
+        30,
+    )
+    .await
+    .unwrap()
+    .request
+    .work_order_ref
+    .unwrap();
+    complete_progressive_root_with_partial_directory(&database, &installation, 3, "surface_ended")
+        .await;
+
+    let captured_ref: Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content \
+         WHERE platform='xhs' AND content_external_id='creator-untitled-detail-partial-0'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    seed_untitled_detail_observation(&database, captured_ref).await;
+
+    let directory = read_creator_directory(&database, target_ref)
+        .await
+        .unwrap()
+        .expect("已证明的目录可以被读出来");
+    let captured = directory
+        .works
+        .iter()
+        .find(|work| work.public_ref == captured_ref)
+        .expect("有详情的那一篇就在目录里");
+    assert_eq!(
+        captured.detail_state,
+        CatalogDetailState::Complete,
+        "详情材料已经落库，欠的只是标题——这是字段覆盖度，不是还没去取"
+    );
+    assert_eq!(
+        captured.title.as_deref(),
+        Some("partial work 0"),
+        "没有标题就如实没有：发现卡上的标题照旧显示，不因为详情缺标题就回写一个补出来的"
+    );
+    let mut pending: Vec<&str> = directory
+        .works
+        .iter()
+        .filter(|work| work.detail_state == CatalogDetailState::Pending)
+        .map(|work| work.content_external_id.as_str())
+        .collect();
+    pending.sort_unstable();
+    assert_eq!(
+        pending,
+        vec![
+            "creator-untitled-detail-partial-1",
+            "creator-untitled-detail-partial-2"
+        ],
+        "另外两篇确实还欠着详情，不能被这一篇的结论一起带过"
+    );
+
+    let ledger = read_archive_completeness(&database, "xhs").await.unwrap();
+    let ledger = ledger.get("creator-untitled-detail").unwrap();
+    assert_eq!(
+        (
+            ledger.works_listed,
+            ledger.details_captured,
+            ledger.pending_details
+        ),
+        (3, 1, 2),
+        "覆盖统计与目录读的是同一句判据，不能让同一份材料在两处各答一次"
+    );
+
+    // 「不列为待详情采集」走的不是展示层：补详情的子工单排出哪些篇，是执行侧自己挑的。
+    run_progressive_archives(&database).await.unwrap();
+    let child = pending_detail_batch(&database, target_ref, root).await;
+    let scope: Vec<String> = sqlx::query_scalar(
+        "SELECT content.content_external_id FROM collection_work_order_material_target scope \
+         JOIN linggan_material_content content ON content.public_ref=scope.content_public_ref \
+         WHERE scope.work_order_ref=$1 ORDER BY content.content_external_id",
+    )
+    .bind(child)
+    .fetch_all(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        scope,
+        vec![
+            "creator-untitled-detail-partial-1".to_owned(),
+            "creator-untitled-detail-partial-2".to_owned()
+        ],
+        "已经取到详情的那一篇不再被排进补详情——它欠的是标题，不是材料"
+    );
 }
 
 #[tokio::test]
@@ -2759,6 +2869,56 @@ async fn seed_detail_observation(
     .bind(published_at)
     .bind(author_external_id)
     .bind(likes)
+    .execute(database.pool())
+    .await
+    .unwrap();
+}
+
+/// 一次**合格但没带标题**的详情：材料本体、已接纳来源、非隔离处置三样都在，只有 `title` 为空。
+///
+/// 这不是残缺夹具，是平台真实会发生的形态——详情页读回来了，标题字段没有。`0015` 的
+/// `CHECK ((title_state='KNOWN') = (title IS NOT NULL))` 要求这种材料把 `title_state` 记成
+/// `UNKNOWN`，夹具照实写。
+async fn seed_untitled_detail_observation(database: &Database, work_ref: Uuid) {
+    let content_external_id: String = sqlx::query_scalar(
+        "SELECT content_external_id FROM linggan_material_content WHERE public_ref=$1",
+    )
+    .bind(work_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let task_id = seed_standalone_task(
+        database,
+        "content_detail",
+        serde_json::json!({"contentExternalId":content_external_id}),
+    )
+    .await;
+    let package_ref =
+        seed_runtime_package(database, task_id, "content_detail", "2026-09-03T11:00:00Z").await;
+    sqlx::query(
+        "INSERT INTO linggan_runtime_record_disposition \
+           (package_ref,record_ordinal,disposition,reason) \
+         VALUES ($1,0,'accepted_for_library_content','qualified detail without a platform title')",
+    )
+    .bind(package_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_material_content_detail \
+           (material_ref,content_public_ref,package_ref,record_ordinal,observed_at, \
+            title,title_state,body_text,body_state,creator_display_name, \
+            creator_display_name_state,published_at_source_text,published_at_source_text_state, \
+            searchable_text,author_external_id,like_count,like_count_state,published_at, \
+            published_at_source_field,published_at_source_kind,published_at_precision, \
+            published_at_parser_version) \
+         VALUES ($1,$2,$3,0,'2026-09-03T11:00:00Z',NULL,'UNKNOWN',NULL,'UNKNOWN',NULL,'UNKNOWN', \
+                 NULL,'UNKNOWN',$4,NULL,NULL,'UNKNOWN',NULL,NULL,'unknown','unknown',NULL)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(work_ref)
+    .bind(package_ref)
+    .bind(&content_external_id)
     .execute(database.pool())
     .await
     .unwrap();

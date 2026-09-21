@@ -1232,7 +1232,13 @@ fn works_list(
     let rows = filtered
         .iter()
         .map(|work| {
-            let title = work.title.as_deref().unwrap_or("标题待取得");
+            let title = work.title.as_deref().unwrap_or(match work.detail_state {
+                // 详情已经取到、却还是没有标题：缺的是**字段覆盖度**（`0015` 的
+                // `title_state='UNKNOWN'`），不是还没去取。说「待取得」会让人以为还有一次采集
+                // 会把这个标题补回来，而这份材料其实已经在库里了。
+                CatalogDetailState::Complete => "标题未收录",
+                CatalogDetailState::Pending => "标题待取得",
+            });
             let published = work.published_at.as_deref().unwrap_or("发布时间待取得");
             let source = match work.source {
                 CatalogSource::InitialArchive => "初始建档",

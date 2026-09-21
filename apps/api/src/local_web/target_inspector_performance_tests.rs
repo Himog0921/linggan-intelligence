@@ -380,6 +380,80 @@ fn overview_orders_identity_system_facts_and_decision_as_four_distinct_layers() 
     assert!(!html.contains(r#"action="/collection/targets/archive""#));
 }
 
+/// T19 的界面一侧：**详情已经取到、只是没有标题**，行的说法必须与「还没去取」分开。
+///
+/// 两篇作品的标题都是空的，区别只在详情有没有落库。此前两行都写「标题待取得」，于是一份
+/// 已经在库里的材料看上去还欠一次采集——人会再去点一次补齐，采回来的还是同一份材料。
+/// 标题缺失是**字段覆盖度**（`0015` 的 `title_state='UNKNOWN'`），不是完成度。
+#[test]
+fn a_captured_work_without_a_title_says_the_field_is_missing_not_the_detail() {
+    use super::target_drawer::{
+        LifecycleView, TargetCatalogView, TargetDrawerTab, TargetInspectorView, TargetListContext,
+        TargetWorksView,
+    };
+
+    let target = sample_target(31, "creator");
+    let directory = linggan_evidence::CreatorDirectoryProjection {
+        works: vec![
+            catalog_work(1, linggan_evidence::CatalogDetailState::Complete),
+            catalog_work(2, linggan_evidence::CatalogDetailState::Pending),
+        ],
+    };
+    let html = super::target_drawer::render_with_catalog_view(
+        Some(&target),
+        None,
+        Some(&HashMap::new()),
+        Some(&target.target_ref.to_string()),
+        TargetDrawerTab::Baseline,
+        LifecycleView::NotRead {
+            window: CreatorLifecycleWindow::Recent90Days,
+            metric: CreatorLifecycleMetric::Likes,
+        },
+        TargetInspectorView::NotRead,
+        TargetWorksView::List,
+        TargetCatalogView::Creator(Some(&directory)),
+        None,
+        None,
+        None,
+        None,
+        &[],
+        TargetListContext::default(),
+    );
+
+    assert!(
+        html.contains("标题未收录"),
+        "详情已在库里、只是没有标题：说的是字段没收录，不是还欠一次采集"
+    );
+    assert!(html.contains("标题待取得"));
+    assert!(html.contains(r#"data-state="complete">已完成"#));
+    assert!(html.contains(r#"data-state="pending">待采集"#));
+    // 摘要行与逐行状态必须是同一个判据，一行说已取得、另一行说待取得就是自相矛盾。
+    assert!(html.contains("<b>1</b><span>详情已取得</span>"));
+    assert!(html.contains("<b>1</b><span>待取得详情</span>"));
+    // 没有标题就如实没有：页面上不出现编出来的标题占位以外的第二份说法。
+    assert_eq!(html.matches("标题未收录").count(), 1);
+    assert_eq!(html.matches("标题待取得").count(), 1);
+}
+
+fn catalog_work(
+    index: u128,
+    detail_state: linggan_evidence::CatalogDetailState,
+) -> linggan_evidence::CatalogWork {
+    linggan_evidence::CatalogWork {
+        public_ref: uuid::Uuid::from_u128(index),
+        content_external_id: format!("work-{index}"),
+        title: None,
+        creator_display_name: Some("示例创作者".to_owned()),
+        match_position: Some(index as i64),
+        published_at: None,
+        source: linggan_evidence::CatalogSource::InitialArchive,
+        detail_state,
+        media_state: "—",
+        comment_count: None,
+        last_captured_at: None,
+    }
+}
+
 #[test]
 fn queued_and_running_are_not_the_same_execution_claim() {
     use super::target_drawer::{

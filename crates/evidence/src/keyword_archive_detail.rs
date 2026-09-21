@@ -296,9 +296,7 @@ async fn next_evidence_detail_batch(
            AND finding.discovery_kind='discovery_search' \
            AND receipt.material_admission='ACCEPTED' \
            AND disposition.disposition='accepted_for_library_discovery' \
-           AND NOT EXISTS ( \
-             SELECT 1 FROM linggan_material_content_detail detail \
-             WHERE detail.content_public_ref=finding.content_public_ref) \
+           AND {missing_detail} \
            AND NOT EXISTS ( \
              SELECT 1 FROM collection_work_order live_order \
              JOIN collection_work_order_material_target live_scope USING (work_order_ref) \
@@ -316,6 +314,7 @@ async fn next_evidence_detail_batch(
          ORDER BY candidate.like_count DESC NULLS LAST,candidate.accepted_at, \
                   candidate.content_public_ref \
          LIMIT $2",
+        missing_detail = qualified_detail_missing_sql!("finding.content_public_ref"),
     )))
     .bind(target_ref)
     .bind(KEYWORD_DETAIL_BATCH_SIZE)
@@ -385,9 +384,7 @@ pub async fn keyword_targets_pending_detail(
            AND finding.discovery_kind='discovery_search' \
            AND receipt.material_admission='ACCEPTED' \
            AND disposition.disposition='accepted_for_library_discovery' \
-           AND NOT EXISTS ( \
-             SELECT 1 FROM linggan_material_content_detail detail \
-             WHERE detail.content_public_ref=finding.content_public_ref) \
+           AND {missing_detail} \
            AND NOT EXISTS ( \
              SELECT 1 FROM collection_work_order live_order \
              JOIN collection_work_order_material_target live_scope USING (work_order_ref) \
@@ -400,6 +397,7 @@ pub async fn keyword_targets_pending_detail(
            AND {executable} \
            AND NOT {not_stopped} \
            AND NOT {budget_blocked}",
+        missing_detail = qualified_detail_missing_sql!("finding.content_public_ref"),
         pending = pending_detail_sql!("seen_order.target_ref"),
     )))
     .bind(target_refs)
@@ -464,8 +462,7 @@ pub(crate) async fn keyword_target_has_pending_detail_in(
              AND finding.discovery_kind='discovery_search' \
              AND receipt.material_admission='ACCEPTED' \
              AND disposition.disposition='accepted_for_library_discovery' \
-             AND NOT EXISTS (SELECT 1 FROM linggan_material_content_detail detail \
-                             WHERE detail.content_public_ref=finding.content_public_ref) \
+             AND {missing_detail} \
              AND NOT EXISTS ( \
                SELECT 1 FROM collection_work_order live_order \
                JOIN collection_work_order_material_target live_scope USING (work_order_ref) \
@@ -479,6 +476,7 @@ pub(crate) async fn keyword_target_has_pending_detail_in(
              AND NOT {not_stopped} \
              AND NOT {budget_blocked} \
          )",
+        missing_detail = qualified_detail_missing_sql!("finding.content_public_ref"),
         pending = pending_detail_sql!("seen_order.target_ref"),
     )))
     .bind(target_ref)
@@ -515,6 +513,7 @@ macro_rules! pending_detail_sql {
 use crate::cross_industry_sample_facts::{
     sample_detail_obtained_sql, sample_facts_schema_ready_sql, sample_observed_by_target_sql,
 };
+use crate::qualified_detail::qualified_detail_missing_sql;
 use pending_detail_sql;
 
 /// 下一批该补详情的样本。

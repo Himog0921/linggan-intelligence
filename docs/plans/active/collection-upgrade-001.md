@@ -147,7 +147,7 @@ S1b 缺输入止转 ── 出口条件依赖 S2 的资格台账，两者连续�
    ↓
 S2 跨工单预算与调度一致性（预算落在 S1b 已建好的 0097 台账上）
    ↓
-S3 统一状态读取（消费 S2 的资格事实）
+S3 统一状态读取（消费 S2 的资格事实）── 变更清单见 §9，实施前先写入
    ↓
 S4 运行诊断与就绪 → S5 有证据才优化 → S6 集成与历史处置预览
 ```
@@ -176,3 +176,117 @@ S4 运行诊断与就绪 → S5 有证据才优化 → S6 集成与历史处置�
 | 没有执行地址的目录成员必须进不了候选（隔离 PostgreSQL `a_directory_member_without_a_signed_link_never_enters_a_doomed_work_order`） | 把候选里的 `/*executable*/` 换成常量 `TRUE` | 该测试在 `!tick.queued.contains(&target_ref)` 处变红：`queued: [目标]`——一张注定被停在成员展开处的工单被建了出来，下一轮还会再来一张 |
 
 八次变异均已还原（前两次 S1a、四次 S1b、两次 S2）。S1b 的还原用还原前快照逐字节核对：`execution_input_eligibility.rs` sha256 `6408147952b274a9a7ae8f180fb53eaaf37362383177fa30355f31377fba43ab`、`0097` 最终 sha256 `83a8a99362df528217ac7473c102ca8c42f6f8beb3b76b9e195f95451ddac3b7`（已同步进 `material_fixture` 与 `full_schema_fixture` 两处账本）、`dispatch.rs` 变异前后同为 sha256 `5b54d0395180ea385150dff4b60fa608083ff334319a21ecb57d7b2dbab1c6b0`。T28① 的变异同样从 `dispatch.rs` 还原，之后该文件 sha256 仍为 `5b54d039…`（两次变异都是逐字节还原）。S2 的两次变异从 `acquisition_chain.rs` 还原：变异前快照存于 `/tmp/acquisition_chain_s2_pre_mutation.rs`，还原后 `grep -c MUTATION` = 0 且 sha256 与变异前同为 `3e4f14e56f7b5b2e08152dbb96e009bee48e701911d6f08a2fc770b4e8fedd43`（逐字节）。各阶段还原后：S1b 的 `keyword_archive_postgres` **16 passed / 0 failed**、`collection_dispatch_sequence_postgres` **27 passed / 0 failed**；S2 的 `collection_dispatch_sequence_postgres` **32 passed / 0 failed**、`observation_target_dossier_postgres` **23 passed / 0 failed**，`cargo check --workspace --all-targets --locked` 通过。源码冻结后的干净全套（`./scripts/test-local-001-discovery-postgres.sh`，20 目标）**231 passed / 0 failed**，容器/卷/库自建自清。
+
+## 9. S3 变更清单（统一状态读取与页面动作）
+
+> 依 `docs/design/templates/ui-change-manifest-form.md` 填写。清单写在实施计划里，不另建 `docs/design/` 下的零散文档。
+> 状态: 活跃计划 · 实施前写入（本节先于 S3 代码存在）。
+
+### 9.1 事项
+
+- **Issue / SCOPE**：COLLECTION-UPGRADE-001 · S3（交付包 `02-实施步骤.md` §S3；验收行 T19–T23、T27，以及 `01-目标合同.md` §4.3 的 `LOST_AUTHORITY` 文案）。
+- **Agent 与 worktree**：`fix/collection-upgrade-001` @ `.worktrees/collection-upgrade-001`。
+- **目标**：让「详情已取得」「这一篇还能不能执行」「这一批包交付完了没有」三类事实各自只有一处领域判据，并让页面只说这三类事实各自能证明的话。不同页面可以用不同中文，但同一个原因语义在任何页面上都指向同一条事实。
+- **用户可见结果**：
+  1. 作品行不再把「详情已取到、只是标题为空」显示成还欠一篇详情；
+  2. 欠详情的作品能说出它欠的原因（等新输入 / 自动重试已停止 / 还在退避），而不是一律「待采集」；
+  3. 每个已授权详情页会话能说出它的交付结论（已交付 / 待交付 / 恢复待核实 / 已终结）与最后观察时间，而不是让 `delivery_pending` 直接冒充待交付；
+  4. 失去执行权的晚到包显示「材料已保存，原执行权已失效」，不再显示英文机器码。
+- **明确非目标**（本卡不做，也不得顺手做）：
+  - 不新增页面、导航或状态分类卡片；四个新显示状态全部落在既有表面的既有列/既有小节里；
+  - 不实现「恢复提交」「受控重新准入」「确认为已失效」的**动作按钮**：本卡只读，动作入口各自的合同分别归 S1a、S2 与 #158 的退役路径（见 9.6 停止条件）；
+  - 不改接纳、权限、额度、调度与清理规则；不改跨行业评论准入；
+  - 不改 `runtime-main`、共享库、插件版本或 :3000 运行态。
+
+### 9.2 读取回执
+
+| 来源 | 状态 | 本次解决的问题 | 已核对 |
+|---|---|---|---|
+| AGENTS.md / `docs/current-state.md` | 权威当前 | 现状里 `详情读取受阻` 已是既有显示状态（`COLLECTION-DOSSIER-RELIABILITY-002`）；五个采集子面已由 `COLLECTION-FIVE-PAGE-V4-UI-001` 合入 | 2026-09-21 读 |
+| `docs/agents/ui-execution-contract.md` | 权威当前 | 四件套（表面地图/状态词典/依赖地图/验收矩阵）、变更分类、停止条件 | 2026-09-21 读 |
+| `docs/design/README.md`、`docs/design/lids/README.md` | 权威当前 | LIDS 规则已采纳、运行时仍是 v2.0；不得以「和旁边一致」沿用旧口径 | 2026-09-21 读 |
+| 产品页面文档 `docs/design/pages/collection-workspace-page.md` | 权威当前（PAGE-COLLECTION-001） | 五个子面的职责与「状态与诚实性」表；`UNKNOWN` 不得暗示为零 | 2026-09-21 读 |
+| LIDS `language-policy.md`（LANG-05）、`data-boundaries.md`（LIDS-BOUND-001） | 权威当前 | 中文承载意义、机器码只作 Mono 旁注；字段缺失写明确中文，不留空、不编默认值 | 2026-09-21 读 |
+| 数据/权限/行动合同 `01-目标合同.md` §4.3、§5、§6 | 交付包 | 九行展示状态与「最低事实条件」、`LOST_AUTHORITY` 文案、「详情已取得」的唯一判据、两域隔离 | 2026-09-21 读 |
+| 当前代码/测试 | 真实运行事实 | 判据分叉点与两处终态守卫的位置（见 9.5）；`0097` 台账的两条键；`0004` 的 receipt/disposition 主键 | 2026-09-21 读 |
+
+### 9.3 表面地图
+
+| 表面 | 入口 | 本卡改动 |
+|---|---|---|
+| 观察目标 → 作品目录（抽屉） | `/collection/targets` 抽屉 · 作品列表 | 作品行「详情」列增加停止原因；标题占位区分「未收录」与「待取得」；四格摘要里「详情已取得」改由同一判据计数 |
+| 观察目标 → 档案状态（列表） | `/collection/targets` 列表「详情进度」列 | 计数来源（`details_captured` / `pending_details`）改由同一判据产出；**列本身与写法不变** |
+| 观察目标 → 待补齐 | 抽屉内「待补齐」区块（`read_blocked_materials`） | 判据统一（已取到详情的不再出现在待补齐） |
+| 采集任务 | `/collection/tasks` | 任务行的状态词修复（`LOST_AUTHORITY`）；新增「交付对账」小节与读数 |
+| 执行工位 | `/collection/runtime` | **不改**——工位、租约、心跳本就只属于这一面；交付结论不反向写进目标页 |
+| 待处理 | `/collection/attention` | **不改**（读模型仍未接入，继续显示未知，不因本卡变成空） |
+
+页头/导航/共享壳层：不改。
+
+### 9.4 状态词典
+
+| 展示含义 | 最低事实条件（来源） | 本卡之后的所在 | 本卡动作 |
+|---|---|---|---|
+| 等待执行 | 输入有效、未被阻断、预算允许、尚无执行权（`0097` 台账 + lease/task） | 采集任务 · 任务行「等待派发」 | 不变 |
+| 延迟重试 | 明确可重试原因、未超限、有 `next_retry_at`（`0097` 台账） | 目标抽屉 · 作品行「延迟重试」 | **新增显示** |
+| 已领取 / 正在采集 | 活租约 / 有效导航或执行进度证据 | 采集任务 · 任务行「执行中」 | 不变 |
+| 待交付 | 有可对账的待交付依据、服务端尚无匹配 Receipt（会话 + 冻结通道） | 采集任务 · 交付对账「待交付」 | **新增显示** |
+| 恢复待核实 | 有 `delivery_pending` 标记，但读不到该会话的冻结通道（缺 `lane_preparation`） | 采集任务 · 交付对账「恢复待核实」 | **新增显示** |
+| 输入不可执行 | 必要输入缺失或该输入被停止（`0097` 台账 `input_blocked`） | 目标抽屉 · 作品行「输入不可执行」 | **新增显示** |
+| 自动重试已停止 | 同一需求范围预算已用尽（`0097` 台账 `budget_exhausted`） | 目标抽屉 · 作品行「自动重试已停止」 | **新增显示** |
+| 材料已保存 | 有 Receipt 且执行权仍在（`COMPLETED_LIVE_STEP`）/ 材料已保存但执行权已失效（`LOST_AUTHORITY`） | 采集任务 · 任务行与 Receipt 面板 | 文案修复（英文机器码 → 中文；机器码降为 Mono 旁注） |
+
+**禁止互相替代的边界**（每一条都对应一个反例，写在 9.7）：
+
+1. 「详情已取得」不得由 `title` 非空推断；标题缺失是**字段覆盖度**问题，不回写伪标题、不列为待采集（T19）。
+2. 停止不是完成：预算用尽与输入缺失都不是「已补齐」。
+3. 「从未开始」不是「试过没成功」：缺输入停下的成员不消耗页面失败预算，也不显示成读取失败。
+4. 没有 Receipt 不等于数据丢失；`delivery_pending` 也不等于待交付——先按冻结通道回执归并（T22）。
+5. `completed` 工单下的 `session.delivery_pending` 不直接计入待交付总数。
+6. 租约失效不是正在执行；历史 `in_progress` 保持可查，但不计入当前执行（T21）。
+7. 未知不等于 0：读不到就写「读不到 + 最后观察时间」，不写 0、不写「都补齐了」（LIDS-BOUND-001）。
+8. 两域材料不互相顶替：跨行业样本不进入本领域资格读取，本领域细节也不计入跨行业计数（T20）。
+
+### 9.5 依赖地图
+
+| 依赖 | 归属 | 本卡的用法 |
+|---|---|---|
+| `collection_execution_input_eligibility`（`0097`） | S1b/S2 已交付 | **只读**当前非停止行（`state <> 'eligible'` 的部分）作为停止原因；不写、不新增列、不改索引 |
+| `collection_detail_page_session` + `_lane_preparation`（`0090`/S1a） | 已交付 | **只读**会话状态、`last_progress_at`、冻结通道与其任务；不写终态（终态只由既有的完成/停止事件写） |
+| `linggan_runtime_submission_receipt` / `_record_disposition`（`0004`） | 已交付 | 合格详情判据读它；`(package_ref, record_ordinal)` 是 disposition 主键、receipt 按 `attempt_id` 唯一 |
+| `linggan_material_content_detail`（`0015`） | 已交付 | `title_state` 是字段覆盖度事实；本卡不新增列 |
+| 冻结 Work / 控制面读取（`collection_control_surface_view`） | 既有 | 不合并、不改写；S5 的「两个 control view 的 SQL」候选项留到 S5 按证据决定 |
+| 跨行业侧判据 `cross_industry_sample_facts` | 既有、已是单一定义 | 不合并两域：本卡只把**证据侧**的判据收成一处，跨行业侧继续用它自己那份 |
+| 共享组件/样式 | LIDS Token | 只复用既有类；新增样式只用既有 Token，不写死颜色/字号/间距 |
+
+**未纳入本卡的跨任务依赖**：作品退役动作（`collection_material_retirement` 的入口）仍在 #158 的路径上；本卡只读它的结论，不新增确认入口。
+
+### 9.6 变更分类与影响边界
+
+- **分类**：状态/语义（含展示）。四个新显示状态都由既有领域的既有事实直接读出，不新增权限、不改行动后果、不产生新的可点动作。
+- **最高风险类别**：状态/语义——所以来源收据是「产品页面 + 数据合同同时说明状态来源、用户含义和禁止暗示」（§9.4 三条来源）。
+- **是否存在 `DECISION_REQUIRED`**：
+  - 「该不该有一个过期阈值把待交付归到恢复待核实」——**本卡不设阈值**。本卡只在读不到冻结通道时才说「恢复待核实」，并在两种状态下都显示最后观察时间；按时间本身推断「没采到」是被合同禁止的（§4.3）。阈值若要加，是一次产品决定。
+  - 「受控重新准入的入口长什么样」——S2 已记为挂账，本卡只让「自动重试已停止」可见。
+- **L1 / L2 / L3 与主 Pattern**：L2 工作台子面，沿用 Collection Control Pattern；不引入新 Pattern。
+- **是否触及 Token、Primitive、CMP、Scene、Motion 或 Data Truth**：触及 Data Truth（多列读同一判据），不触及 Token/Primitive/Scene/Motion；无新 CMP。
+- **禁止修改的文件/能力**：接纳与 disposition 写入路径、`dispatch.rs` 的终态判定、`0097` 台账写入、插件源码、`runtime-main`、共享库。
+- **停止条件**：若统一判据会在生产路径上改变既有结论（而非今天的读法不一致），停止并只保留「已核对」的读侧改动，把分歧报给 Mog。
+
+### 9.7 验收矩阵
+
+| 层级 | 验收方法 | 未证明边界 |
+|---|---|---|
+| 任务可用 | 隔离 PostgreSQL 集成证明：四类停止原因各自可读、交付对账四态各自可读 | 真实平台下的实际会话序列 |
+| 状态诚实 | 反例（变异）验证：每一条新断言都要证明它能测出它声称守住的缺陷（T19/T20/T21/T22/T23/T27 各一条） | 未跑到的浏览器实拍 |
+| 视觉一致 | 既有 HTML 断言 + LANG-05 文案专查（中文承载意义、机器码只作旁注） | **NOT VERIFIED**：本机 `:3000` 运行的是 `runtime-main`，不是本分支；未获授权切换运行态，因此没有本卡的浏览器实拍 |
+| 真实后果 | 本卡不含动作按钮，不产生真实副作用；读路径不写库（隔离证明里以行数与状态比对确认） | 恢复提交、受控重新准入与退役动作仍待各自授权 |
+
+### 9.8 交接
+
+- **修改文件**：见各次提交的 `git show --stat`；本节的读法统一落在一个新模块上（`crates/evidence/src/` 下的单一判据模块），消费方为 `target_catalog`、`archive_ledger`、`archive_completeness`、`keyword_archive_detail`、`acquisition_chain`、`execution_input_eligibility`，页面侧为 `target_drawer`、`collection_tasks_view` 与其路由。
+- **验证命令/走查**：`cargo check --workspace --all-targets --locked`；`./scripts/test-local-001-discovery-postgres.sh`（20 目标全套，容器/卷/库自建自清）。
+- **规则或索引同步**：`docs/progress/2026-09.md` 记本次交付；`docs/design/pages/collection-workspace-page.md` 若与实现冲突则按治理流程裁定（本卡不新写页面规格）。
+- **例外与替代**：无。写路径上两处「至少得有一行详情」的守卫（退役确认、材料补采）**有意保留**更宽的裸判据——它们问的是「有没有任何一行材料」，方向是把关更严，不并入展示判据（详见判据模块的模块注释）。
+- **LIDS migration log / 预览同步**：不涉及 Token 或组件层变化，无需同步 migration log。
+- **PR / reviewer / integration owner**：由 Mog 指定；本卡按交付包约定在整个交付包收尾时统一走一次独立复核。

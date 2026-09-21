@@ -207,9 +207,7 @@ const MIGRATIONS: &str = concat!(
         "../../../../database/migrations/0096_detail_page_session_lane_delivery_identities.sql"
     ),
     "\n",
-    include_str!(
-        "../../../../database/migrations/0097_collection_execution_input_eligibility.sql"
-    ),
+    include_str!("../../../../database/migrations/0097_collection_execution_input_eligibility.sql"),
     "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ",
     "('0025_comment_current_projection', '64fd9474647834358f8d2d4f1c25e4345e26a3ff79dbfc53a7846915576b0885'), ",

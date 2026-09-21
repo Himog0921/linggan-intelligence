@@ -45,6 +45,9 @@
 ///
 /// 用 `EXISTS` 判断有没有详情而不是 join 详情表：一篇作品可能有多条详情记录（重采过），
 /// join 会让它在计数里出现多次；这里问的是「有没有」，不是「有几条」。
+///
+/// 「有没有」问的是**合格详情材料**，判据来自 `qualified_detail.rs`——与目标抽屉、关键词
+/// 补齐、缺口计数消费的是同一句，不在这里另写一遍。
 macro_rules! directory_works_sql {
     ($scope:literal, $as_of:literal) => {
         concat!(
@@ -137,8 +140,9 @@ macro_rules! directory_works_sql {
                  SELECT target_ref,package_ref FROM ledger_patrol_packages \
              ), directory_work AS ( \
                  SELECT DISTINCT packages.target_ref,finding.content_public_ref, \
-                        EXISTS (SELECT 1 FROM linggan_material_content_detail detail \
-                                WHERE detail.content_public_ref=finding.content_public_ref) \
+                        ", crate::qualified_detail::qualified_detail_exists_sql!(
+            "finding.content_public_ref"
+        ), " \
                             AS has_detail, \
                         -- 人确认过「这篇在平台上已经没了」。它仍然留在目录里——博主当时
                         -- 确实发过——只是不再计入待补齐。

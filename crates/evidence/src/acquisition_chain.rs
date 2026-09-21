@@ -10,6 +10,7 @@ use crate::collection_control::{
     CapacitySelection, evaluate_capacity_in, ready_batch_claim_slots_in, required_capabilities_for,
 };
 use crate::directory_boundary::directory_proven_sql;
+use crate::qualified_detail::qualified_detail_missing_sql;
 use crate::work_order_lease::{
     IssuedLease, LeaseError, issue_work_order_lease_in_transaction, lease_schema_is_ready,
 };
@@ -2130,9 +2131,11 @@ const CANONICAL_DIRECTORY_CTE: &str = "WITH canonical_directory_package AS ( \
  ) ";
 
 /// 「这一篇还没有详情」。候选与缺口计数共用同一条判据——两处一旦分叉，空候选集的解释就会错。
-const MISSING_DETAIL_PREDICATE: &str = "NOT EXISTS ( \
-     SELECT 1 FROM linggan_material_content_detail detail \
-     WHERE detail.content_public_ref=current_directory.content_public_ref)";
+///
+/// 判据本身住在 `qualified_detail.rs`：**合格详情材料**（材料本体 + 已接纳来源 + 未被隔离），
+/// 与观察目标列表、抽屉、关键词补齐四处读到的是同一句话。
+const MISSING_DETAIL_PREDICATE: &str =
+    qualified_detail_missing_sql!("current_directory.content_public_ref");
 
 /// 目录里**可以排进下一批**的成员：还欠详情、此刻解析得出执行地址、没有在途工单、
 /// 没有被判定读不出来，且预算还允许。
