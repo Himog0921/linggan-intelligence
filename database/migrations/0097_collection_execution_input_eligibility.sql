@@ -170,3 +170,31 @@ ALTER TABLE collection_work_order_lease
 
 COMMENT ON COLUMN collection_work_order_lease.release_reason IS
     'Why this lease stopped holding execution permission. input_blocked means the lease ended because its remaining members had no resolvable execution input — it is a stop, not a delivery and not a retryable cooldown.';
+
+-- 页面失败预算跨工单累计，那么「这张工单出生时输入被冻过没有」必须是一个可查的事实。
+--
+-- 判据不能反过来由台账推：一次停止会为某个对象写下 `input_source_status='frozen'`，于是
+-- 「这个对象停过」会被读成「这张工单冻过输入」——两件事方向相反。冻结发生在工单建立的那一刻，
+-- 所以标记就记在工单上：建单的准入事务里写下时刻，此前的工单如实为空。
+--
+-- 它同时回答「旧失败归档能不能算进预算」：**只有冻过输入的工单**，它的失败才证明「试的是
+-- 同一份输入」。没冻过的那些（本表建立之前的所有工单）只能证明「试过」，所以它们不进预算，
+-- 只进 `prior_failures_unverified` 待核实——不能凭一批无法对齐输入的历史失败，把一篇作品
+-- 按 content ID 全局封禁。
+ALTER TABLE collection_work_order
+    ADD COLUMN execution_input_frozen_at timestamptz;
+
+COMMENT ON COLUMN collection_work_order.execution_input_frozen_at IS
+    'When this WorkOrder froze the execution input of its members (set in the admitting transaction). NULL means the order predates the eligibility ledger: its input was never frozen, so its page-read failures prove an attempt but not that the same input was attempted.';
+
+-- 台账建立之前留下的失败，与预算分开记。
+--
+-- 它们是真实发生过的尝试，抹掉不合适；但它们没有冻过的输入可比，按合同不能算进跨工单预算，
+-- 更不能变成一次对象级封禁。所以单独一列：它让「这一篇过去失败过多少次、其中多少次算数」
+-- 都读得出来，而不是把不可证的次数混进一个会触发停止的计数器里。
+ALTER TABLE collection_execution_input_eligibility
+    ADD COLUMN prior_failures_unverified integer NOT NULL DEFAULT 0
+        CHECK (prior_failures_unverified >= 0);
+
+COMMENT ON COLUMN collection_execution_input_eligibility.prior_failures_unverified IS
+    'Page-read failures recorded before this range had a frozen execution input (pre-ledger WorkOrders). They are history, not budget: they never trigger a stop, and they never ban the content. Kept so a human can see how often this range was attempted before the ledger existed.';

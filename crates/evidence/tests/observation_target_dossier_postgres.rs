@@ -10,13 +10,14 @@ use linggan_contracts::{
 use linggan_evidence::{
     AccountEligibilityObservation, AcquisitionChainError, AuthorizationGrant, CheckInOutcome,
     CreatorLifecycleAssociation, CreatorLifecycleMetric, CreatorLifecycleQuery,
-    CreatorLifecycleStatus, CreatorLifecycleWindow, InstallationCheckIn, RequestLeaseError,
-    RuntimeAttemptOutcome, RuntimeSubmissionOutcome, activate_installation_credential,
-    bind_observation_account, check_in_installation, decide_dispatch, grant_authorization,
-    list_targets, open_claim_window, read_archive_completeness, read_creator_lifecycle,
-    read_target, register_station, report_account_eligibility, request_admit_and_lease,
-    request_progressive_archive_and_lease, retire_materials, run_progressive_archives,
-    set_station_accepting, start_producer_attempt, submit_producer_package,
+    CreatorLifecycleStatus, CreatorLifecycleWindow, DispatchDecision, DispatchFailureCode,
+    DispatchFailureOutcome, InstallationCheckIn, RequestLeaseError, RuntimeAttemptOutcome,
+    RuntimeSubmissionOutcome, activate_installation_credential, bind_observation_account,
+    check_in_installation, decide_dispatch, grant_authorization, list_targets, open_claim_window,
+    read_archive_completeness, read_creator_lifecycle, read_target, register_station,
+    report_account_eligibility, request_admit_and_lease, request_progressive_archive_and_lease,
+    requeue_failed_dispatch, retire_materials, run_progressive_archives, set_station_accepting,
+    start_producer_attempt, submit_producer_package,
 };
 use linggan_storage_postgres::Database;
 use std::time::Duration;
@@ -722,6 +723,184 @@ async fn completed_progressive_archive_never_turns_a_patrol_addition_into_deepen
     .await
     .unwrap();
     assert_eq!(status, "completed");
+}
+
+/// **「这一篇不再自动重试」不等于「这份目录已经齐了」。**
+///
+/// 目录里只剩一篇没有详情、而它恰好把页面读预算用光时，候选查询会一条都挑不出来。
+/// 从前「挑不出候选」只有一种落法：把根标成完成。两层后果——界面上这份基线被说成齐了，
+/// 而它没有；更重的是**完成的根不会再被自动续跑**（活根查询只认 `status='active'`），
+/// 欠着的那一条详情于是永远等不到下一次机会，除非有人重新发起一次真实平台访问去建新目录。
+///
+/// 空候选集因此必须再问一句「目录里还欠不欠详情」：欠着就如实说欠着，根保持活着。
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn a_detail_that_spent_its_page_read_budget_keeps_the_baseline_open() {
+    let database = proof_database("dossier_spent_budget_baseline_stays_open").await;
+    let installation = ready_installation(&database, "dossier-spent-budget").await;
+    let target_ref = seed_creator_target(&database, "creator-spent-budget").await;
+    grant_deep_archive(&database, "建立创作者档案", 200).await;
+    let root = request_progressive_archive_and_lease(
+        &database,
+        target_ref,
+        "建立创作者档案",
+        "person",
+        30,
+    )
+    .await
+    .unwrap()
+    .request
+    .work_order_ref
+    .unwrap();
+    complete_progressive_root_with_partial_directory(&database, &installation, 1, "surface_ended")
+        .await;
+    let member = "creator-spent-budget-partial-0";
+
+    // 第一段是真的自动跑出来的：补详情为这一篇排了一张子工单，不是把状态摆好让系统去认。
+    let first = run_progressive_archives(&database).await.unwrap();
+    assert!(first.queued.contains(&target_ref), "{first:?}");
+    let child = pending_detail_batch(&database, target_ref, root).await;
+    // 这一篇连读三次都读不出来：退避阶梯 60/120，第三次用尽预算。
+    for (ordinal, expected) in [(1_i32, 60_u32), (2, 120)] {
+        clear_dispatch_backoff(&database, child).await;
+        let outcome = report_detail_read_failure(&database, &installation, child, member).await;
+        assert_eq!(
+            outcome,
+            DispatchFailureOutcome::Requeued {
+                retry_after_seconds: expected
+            },
+            "第 {ordinal} 次页面读失败仍在退避阶梯上"
+        );
+    }
+    clear_dispatch_backoff(&database, child).await;
+    assert_eq!(
+        report_detail_read_failure(&database, &installation, child, member).await,
+        DispatchFailureOutcome::Blocked,
+        "第三次用尽预算：这一篇不再自动重试"
+    );
+    let ledger: Vec<(String, i32)> = sqlx::query_as(
+        "SELECT state,deduplicated_failure_count FROM collection_execution_input_eligibility \
+         WHERE target_ref=$1 AND object_kind='material_content' AND capability='content_detail' \
+           AND object_ref=(SELECT public_ref FROM linggan_material_content \
+                           WHERE content_external_id=$2)",
+    )
+    .bind(target_ref)
+    .bind(member)
+    .fetch_all(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        ledger,
+        vec![("budget_exhausted".to_owned(), 3)],
+        "空候选集的原因是预算用尽，不是别的东西碰巧把候选挑空了"
+    );
+
+    // 预算用尽之后这一篇不再自动重试，目录里只剩它一条欠着详情。
+    let tick = run_progressive_archives(&database).await.unwrap();
+    assert!(
+        !tick.queued.contains(&target_ref),
+        "预算用尽的成员不该被再排一张新工单：{tick:?}"
+    );
+    assert!(
+        !tick
+            .skipped
+            .iter()
+            .any(|(target, reason)| *target == target_ref && reason == "archive_baseline_complete"),
+        "目录里还欠着详情，这份基线不算完成：{tick:?}"
+    );
+    assert!(
+        tick.skipped
+            .iter()
+            .any(|(target, reason)| *target == target_ref && reason == "detail_gap_not_schedulable"),
+        "要如实说出「欠着的这一条现在排不进去」：{tick:?}"
+    );
+    let status: String = sqlx::query_scalar(
+        "SELECT COALESCE(stop_conditions #>> '{progressiveArchive,status}','active') \
+         FROM collection_work_order WHERE work_order_ref=$1",
+    )
+    .bind(root)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        status, "active",
+        "根必须保持活着，否则欠着的那一条详情再也没有自动续跑的机会"
+    );
+    let details: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_material_content_detail detail \
+         JOIN linggan_material_content content ON content.public_ref=detail.content_public_ref \
+         WHERE content.content_external_id=$1",
+    )
+    .bind(member)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(details, 0, "这一篇确实还没有详情——收口就是一句假话");
+}
+
+/// **解析不出执行地址的目录成员不该被排进候选。**
+///
+/// 平台会在一些卡片上不给带 `xsec_token` 的链接，插件照实上报。这种成员排进工单只会得到一次
+/// 「派不出去」：占一张工单、一次调度，一次页面都不打开，随后被停成 `input_blocked`、工单终结
+/// 为 `cancelled`；下一轮 tick 的候选里它还在——停止本身变成新的循环。关键词那一侧已经用
+/// 「此刻能不能解析出地址」把这类作品挡在候选之外（迁移 `0097` 的入口判据），渐进建档这一侧
+/// 只有「有没有详情」和「在不在途」，同一件事问了两套。
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn a_directory_member_without_a_signed_link_never_enters_a_doomed_work_order() {
+    let database = proof_database("dossier_directory_member_without_link").await;
+    let installation = ready_installation(&database, "dossier-no-link").await;
+    let target_ref = seed_creator_target(&database, "creator-no-link").await;
+    grant_deep_archive(&database, "建立创作者档案", 200).await;
+    let root = request_progressive_archive_and_lease(
+        &database,
+        target_ref,
+        "建立创作者档案",
+        "person",
+        30,
+    )
+    .await
+    .unwrap()
+    .request
+    .work_order_ref
+    .unwrap();
+    complete_progressive_root_with_directory(&database, &installation, 1, "surface_ended", false)
+        .await;
+
+    let tick = run_progressive_archives(&database).await.unwrap();
+    assert!(
+        !tick.queued.contains(&target_ref),
+        "没有执行地址的成员排不进工单：排进去只会被停一次，而下一轮还会再排一次：{tick:?}"
+    );
+    assert!(
+        tick.skipped.iter().any(|(target, reason)| {
+            *target == target_ref && reason == "detail_gap_not_schedulable"
+        }),
+        "要如实说出「欠着的这一条现在排不进去」：{tick:?}"
+    );
+    let children: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_work_order work_order \
+         JOIN collection_work_order_material_target scope USING(work_order_ref) \
+         WHERE work_order.target_ref=$1 AND work_order.work_order_ref<>$2",
+    )
+    .bind(target_ref)
+    .bind(root)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(children, 0, "一篇都不该被排进子工单");
+    let status: String = sqlx::query_scalar(
+        "SELECT COALESCE(stop_conditions #>> '{progressiveArchive,status}','active') \
+         FROM collection_work_order WHERE work_order_ref=$1",
+    )
+    .bind(root)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        status, "active",
+        "缺口还在，根就得活着——等平台下一次给出带链接的卡片时它要能接着跑"
+    );
 }
 
 #[tokio::test]
@@ -1942,6 +2121,18 @@ async fn complete_progressive_root_with_partial_directory(
     directory_size: i64,
     stopped_reason: &str,
 ) {
+    complete_progressive_root_with_directory(database, installation, directory_size, stopped_reason, true)
+        .await;
+}
+
+/// `signed_links=false` 时目录成员没有可执行地址——用来证明这类成员不会进候选。
+async fn complete_progressive_root_with_directory(
+    database: &Database,
+    installation: &Installed,
+    directory_size: i64,
+    stopped_reason: &str,
+    signed_links: bool,
+) {
     for _ in 0..2 {
         let decision = decide_dispatch(database, &installation.install_key, &installation.secret)
             .await
@@ -1973,6 +2164,7 @@ async fn complete_progressive_root_with_partial_directory(
                 producer_instance_id,
                 directory_size,
                 stopped_reason,
+                signed_links,
             )
         } else {
             bounded_root_submission(&task, &attempt, producer_instance_id)
@@ -1985,21 +2177,115 @@ async fn complete_progressive_root_with_partial_directory(
     }
 }
 
+/// 这一篇的补详情子工单：根之外、带着材料范围的那一张。
+async fn pending_detail_batch(database: &Database, target_ref: Uuid, root: Uuid) -> Uuid {
+    sqlx::query_scalar(
+        "SELECT work_order.work_order_ref FROM collection_work_order work_order \
+         JOIN collection_work_order_material_target scope USING(work_order_ref) \
+         WHERE work_order.target_ref=$1 AND work_order.work_order_ref<>$2 \
+         ORDER BY work_order.created_at DESC,work_order.work_order_ref DESC LIMIT 1",
+    )
+    .bind(target_ref)
+    .bind(root)
+    .fetch_one(database.pool())
+    .await
+    .expect("补详情的子工单是系统自己排出来的，不是用例摆出来的")
+}
+
+/// 退避是真实写进工单的，所以这里显式跨过它——跨的是时钟，不是把退避抹掉。
+async fn clear_dispatch_backoff(database: &Database, work_order_ref: Uuid) {
+    sqlx::query(
+        "UPDATE collection_work_order SET retry_not_before_at=scope_001_now()-interval '1 second' \
+         WHERE work_order_ref=$1",
+    )
+    .bind(work_order_ref)
+    .execute(database.pool())
+    .await
+    .expect("退避只是等待，不是停止");
+}
+
+/// 在指定的那张工单上派一次 `content_detail`，再如实上报一次页面读失败。
+///
+/// 先认工单、再认能力，最后认作品：三条里错一条，这次失败就会记到别的缺口上，而这条用例的
+/// 全部结论都建立在「失败确实记在这一篇上」。
+async fn report_detail_read_failure(
+    database: &Database,
+    installation: &Installed,
+    work_order_ref: Uuid,
+    content_external_id: &str,
+) -> DispatchFailureOutcome {
+    let decision = decide_dispatch(database, &installation.install_key, &installation.secret)
+        .await
+        .expect("证明库会把这张补详情的子工单派出去");
+    match decision {
+        DispatchDecision::Dispatch {
+            task_id,
+            lease_ref,
+            task_spec,
+            ..
+        } => {
+            let leased_work_order: Uuid = sqlx::query_scalar(
+                "SELECT work_order_ref FROM collection_work_order_lease WHERE lease_ref=$1",
+            )
+            .bind(lease_ref)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+            assert_eq!(
+                leased_work_order, work_order_ref,
+                "这一步要报的是这张工单上的失败"
+            );
+            assert_eq!(
+                task_spec["capabilitiesRequested"][0].as_str(),
+                Some("content_detail")
+            );
+            assert_eq!(
+                task_spec["target"]["contentExternalId"].as_str(),
+                Some(content_external_id)
+            );
+            requeue_failed_dispatch(
+                database,
+                &installation.install_key,
+                &installation.secret,
+                task_id,
+                Uuid::new_v4(),
+                DispatchFailureCode::PageReadFailed,
+            )
+            .await
+            .expect("页面读失败的上报被接受")
+        }
+        other => panic!("expected a dispatched detail task, got {other:?}"),
+    }
+}
+
+/// `signed_links=false` 是**真实存在的一种目录**：平台在某些卡片上不给带 `xsec_token` 的链接，
+/// 插件照实上报。这种成员有没有执行输入，由候选判据回答，不由夹具替它回答。
 fn partial_directory_submission(
     task: &ProducerTaskSpec,
     attempt: &linggan_contracts::ProducerAttempt,
     producer_instance_id: Uuid,
     directory_size: i64,
     stopped_reason: &str,
+    signed_links: bool,
 ) -> linggan_contracts::ProducerSubmission {
     let identity = task.raw()["target"]["authorExternalId"].as_str().unwrap();
     let records = (0..directory_size)
         .map(|ordinal| {
+            let external_id = format!("{identity}-partial-{ordinal}");
+            let mut payload = serde_json::json!({"title":format!("partial work {ordinal}")});
+            if signed_links {
+                // 真实插件的发现卡带的就是这条签名链接，补详情要靠它当执行入口。夹具里少了
+                // 它，目录成员一到派发就被停成「缺执行输入」——补详情那条链一步都走不出去，
+                // 拿它写的用例会以为自己测的是别的东西。
+                payload["url"] = serde_json::Value::String(format!(
+                    "https://www.xiaohongshu.com/explore/{external_id}?xsec_token=SIGNED_FIXTURE&xsec_source=pc_user"
+                ));
+            }
             serde_json::json!({
                 "kind":"profile_discovery_card",
                 "resultPosition":ordinal + 1,
-                "sourceObject":{"platform":"xhs","type":"content","externalId":format!("{identity}-partial-{ordinal}")},
-                "payload":{"title":format!("partial work {ordinal}")}
+                "sourceObject":{"platform":"xhs","type":"content","externalId":external_id},
+                "payload":payload
             })
         })
         .collect::<Vec<_>>();
@@ -2055,15 +2341,22 @@ fn bounded_root_submission(
     } else {
         (0..maximum_quota)
             .map(|ordinal| {
+                let external_id = format!("{identity}-work-{ordinal}");
                 serde_json::json!({
                     "kind":"profile_discovery_card",
                     "resultPosition":ordinal + 1,
                     "sourceObject":{
                         "platform":"xhs",
                         "type":"content",
-                        "externalId":format!("{identity}-work-{ordinal}")
+                        "externalId":external_id
                     },
-                    "payload":{"title":format!("bounded work {ordinal}")}
+                    // 真实插件的发现卡带签名链接：它是补详情的执行入口，也是候选判据问的那一句
+                    // 「此刻能不能解析出地址」。夹具里少了它，这一份目录会整片地被判成
+                    // 「排不进去」——用例测到的就不是它以为自己测的那个行为了。
+                    "payload":{
+                        "title":format!("bounded work {ordinal}"),
+                        "url":format!("https://www.xiaohongshu.com/explore/{external_id}?xsec_token=SIGNED_FIXTURE&xsec_source=pc_user")
+                    }
                 })
             })
             .collect()

@@ -241,7 +241,7 @@ const MIGRATIONS: &str = concat!(
     "('0094_corpus_evidence_read_recovery', '5557cd2dfa4b48426caa230d72742b56d5dd7bc5f85ca53acc953aec1b57fd4b'),\n",
     "('0095_detail_page_url_rejection', '8daf8717a6eb55887dd4b83f92f1c79c93b7a42156e272bc04ceacb112797eb8'),\n",
     "('0096_detail_page_session_lane_delivery_identities', '5bca0b9c770f16ebeed7f510fa0080e7cde07687dfb11bc485fe6b9da8d462eb'),\n",
-    "('0097_collection_execution_input_eligibility', '83a8a99362df528217ac7473c102ca8c42f6f8beb3b76b9e195f95451ddac3b7');\n",
+    "('0097_collection_execution_input_eligibility', 'fde9a03309bcad985bc20ba0e4a38b1c9a6f9927c0902c2ed1df3a65f77f5b2e');\n",
 );
 
 pub fn coverage_layer(capability: &str, acquired: i64) -> serde_json::Value {

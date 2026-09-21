@@ -44,12 +44,13 @@ use crate::acquisition_chain::{
     request_and_admit_in_transaction_scoped,
 };
 use crate::execution_input_eligibility::{
-    has_executable_locator_predicate, unchanged_input_block_predicate,
+    budget_blocks_new_work_predicate, has_executable_locator_predicate,
+    unchanged_input_block_predicate,
 };
 use linggan_storage_postgres::Database;
 use uuid::Uuid;
 
-/// 候选查询里那两条「能不能执行」的条件，本模块四个入口共用。
+/// 候选查询里那三条「能不能执行」的条件，本模块四个入口共用。
 ///
 /// **前置，而不是排队后再停。** 缺执行地址的作品从来不该进候选：排进去只会得到一次
 /// 「派不出去」——那一轮里它占用了一张工单、一张租约和一次调度，却一次页面都没打开。此前
@@ -59,10 +60,14 @@ use uuid::Uuid;
 /// 第二条是「已经因此停过、且输入没变」。只加第一条会让停过的作品每一轮重新排队、重新被停，
 /// 停止本身变成循环；只加第二条则拦不住从没排过队但同样没有地址的新作品。两条都要。
 ///
+/// 第三条是「这个需求范围的页面失败预算已经不允许再排新工作」——用尽（停止）或还在退避里
+/// （等一下）都算。少了它，同一个缺口每被新建一张工单就重新起一轮：预算记在台账的当前资格行
+/// 上，而这里正是「要不要为此再开一张工单」的那个决定点。
+///
 /// `cross_industry_ready` 取 `true`：这四个入口的外层查询本来就无条件连跨行业样本表，
 /// 表不存在时整条查询本来就报错，所以「这一侧存在」是它们的前置条件而不是新假设。取值与
 /// `execution_source_url_for_task` 的解析顺序一致——先证据侧、再跨行业兜底。
-fn evidence_side_executable() -> (String, String) {
+fn evidence_side_executable() -> (String, String, String) {
     (
         has_executable_locator_predicate("content.content_external_id", true),
         unchanged_input_block_predicate(
@@ -73,10 +78,16 @@ fn evidence_side_executable() -> (String, String) {
             "content.content_external_id",
             true,
         ),
+        budget_blocks_new_work_predicate(
+            "work_order.target_ref",
+            "own_domain",
+            "material_content",
+            "finding.content_public_ref",
+        ),
     )
 }
 
-fn sample_side_executable(target_ref_expression: &str) -> (String, String) {
+fn sample_side_executable(target_ref_expression: &str) -> (String, String, String) {
     (
         has_executable_locator_predicate("sample.content_external_id", true),
         unchanged_input_block_predicate(
@@ -86,6 +97,12 @@ fn sample_side_executable(target_ref_expression: &str) -> (String, String) {
             "sample.sample_ref",
             "sample.content_external_id",
             true,
+        ),
+        budget_blocks_new_work_predicate(
+            target_ref_expression,
+            "cross_industry",
+            "cross_industry_sample",
+            "sample.sample_ref",
         ),
     )
 }
@@ -257,7 +274,7 @@ async fn next_evidence_detail_batch(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     target_ref: Uuid,
 ) -> Result<Vec<Uuid>, sqlx::Error> {
-    let (executable, not_stopped) = evidence_side_executable();
+    let (executable, not_stopped, budget_blocked) = evidence_side_executable();
     sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         // 按**点赞从高到低**取，与跨行业那一侧以及回执文案一致：先补最值得看的那几篇。
         // `DISTINCT ON` 要求排序键以去重键开头，所以去重与排序分两层。
@@ -293,6 +310,7 @@ async fn next_evidence_detail_batch(
                         AND live_lease.expires_at>scope_001_now()))) \
            AND {executable} \
            AND NOT {not_stopped} \
+           AND NOT {budget_blocked} \
            ORDER BY finding.content_public_ref,package.accepted_at \
          ) candidate \
          ORDER BY candidate.like_count DESC NULLS LAST,candidate.accepted_at, \
@@ -330,8 +348,9 @@ pub async fn keyword_targets_pending_detail(
             "keyword detail completeness schema is not ready".to_owned(),
         ));
     }
-    let (executable, not_stopped) = evidence_side_executable();
-    let (sample_executable, sample_not_stopped) = sample_side_executable("seen_order.target_ref");
+    let (executable, not_stopped, budget_blocked) = evidence_side_executable();
+    let (sample_executable, sample_not_stopped, sample_budget_blocked) =
+        sample_side_executable("seen_order.target_ref");
     let rows: Vec<Uuid> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         // 跨行业那一侧。哪些样本算这个目标的，按**观察记录**算而不是样本行上的
         // `target_ref`——那一列只在第一次插入时写定，同一篇被另一个关键词先看到，
@@ -348,6 +367,7 @@ pub async fn keyword_targets_pending_detail(
          WHERE seen_order.target_ref=ANY($1) AND {pending} \
            AND {sample_executable} \
            AND NOT {sample_not_stopped} \
+           AND NOT {sample_budget_blocked} \
          UNION \
          SELECT DISTINCT work_order.target_ref \
          FROM collection_work_order work_order \
@@ -378,7 +398,8 @@ pub async fn keyword_targets_pending_detail(
                     OR (live_lease.released_at IS NULL \
                         AND live_lease.expires_at>scope_001_now()))) \
            AND {executable} \
-           AND NOT {not_stopped}",
+           AND NOT {not_stopped} \
+           AND NOT {budget_blocked}",
         pending = pending_detail_sql!("seen_order.target_ref"),
     )))
     .bind(target_refs)
@@ -409,8 +430,9 @@ pub(crate) async fn keyword_target_has_pending_detail_in(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     target_ref: Uuid,
 ) -> Result<bool, sqlx::Error> {
-    let (executable, not_stopped) = evidence_side_executable();
-    let (sample_executable, sample_not_stopped) = sample_side_executable("seen_order.target_ref");
+    let (executable, not_stopped, budget_blocked) = evidence_side_executable();
+    let (sample_executable, sample_not_stopped, sample_budget_blocked) =
+        sample_side_executable("seen_order.target_ref");
     sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT EXISTS ( \
            SELECT 1 FROM cross_industry_sample sample \
@@ -425,6 +447,7 @@ pub(crate) async fn keyword_target_has_pending_detail_in(
            WHERE seen_order.target_ref=$1 AND {pending} \
              AND {sample_executable} \
              AND NOT {sample_not_stopped} \
+             AND NOT {sample_budget_blocked} \
            UNION \
            SELECT 1 FROM collection_work_order work_order \
            JOIN collection_work_order_lease lease USING(work_order_ref) \
@@ -454,6 +477,7 @@ pub(crate) async fn keyword_target_has_pending_detail_in(
                           AND live_lease.expires_at>scope_001_now()))) \
              AND {executable} \
              AND NOT {not_stopped} \
+             AND NOT {budget_blocked} \
          )",
         pending = pending_detail_sql!("seen_order.target_ref"),
     )))
@@ -512,13 +536,14 @@ async fn next_detail_batch(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     target_ref: Uuid,
 ) -> Result<Vec<Uuid>, sqlx::Error> {
-    let (executable, not_stopped) = sample_side_executable("$1");
+    let (executable, not_stopped, budget_blocked) = sample_side_executable("$1");
     sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT sample.sample_ref FROM cross_industry_sample sample \
          WHERE {observed} \
            AND {pending} \
            AND {executable} \
            AND NOT {not_stopped} \
+           AND NOT {budget_blocked} \
          ORDER BY sample.like_count DESC NULLS LAST, sample.first_seen_at, sample.sample_ref \
          LIMIT $2",
         observed = sample_observed_by_target_sql!("$1"),

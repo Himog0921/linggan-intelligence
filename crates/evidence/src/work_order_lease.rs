@@ -39,8 +39,8 @@ pub enum LeaseError {
     FrozenControlMissing,
     #[error("every step this work order froze is already done")]
     WorkOrderAlreadySatisfied,
-    #[error("every step this work order still has left is stopped on missing execution input")]
-    OnlyBlockedMembersRemain,
+    #[error("every step this work order still has left is stopped: missing execution input, or an exhausted page-read budget")]
+    OnlyStoppedMembersRemain,
     #[error("collection control closed lease issuance: {reason_code}")]
     ControlBlocked { reason_code: String },
     #[error("the authorization behind this work order is no longer valid")]
@@ -249,13 +249,16 @@ pub(crate) async fn issue_work_order_lease_in_transaction(
         //   * 「冻结的步骤都做完了」——这是完成。空租约不能发（工位会白拿一张没有活的许可，
         //     到期才归还），所以在这里终结工单，`undo_failed_queue_claim` 因为
         //     `queue_state='leased'` 的守卫而不会把它退回队列。
-        //   * 「剩下的成员都因为缺输入停着」——**这不是完成**。一个都没有交付，既没有 Attempt
-        //     也没有 Package；记成 `completed` 就是凭空制造成功（采集纪律明令禁止）。留在
-        //     队列里更糟：每一轮都会被重新领取、重新展开、再空一次。如实终结它，而
-        //     「为什么不能执行」留在执行资格台账上——那里记得住每一篇缺的是哪个输入。
+        //   * 「剩下的成员都停着」——**这不是完成**。一个都没有交付，既没有 Attempt 也没有
+        //     Package；记成 `completed` 就是凭空制造成功（采集纪律明令禁止）。留在队列里更糟：
+        //     每一轮都会被重新领取、重新展开、再空一次。如实终结它，而「为什么不能执行」留在
+        //     执行资格台账上——那里记得住每一篇缺的是哪个输入、还是哪一个范围的预算已经用尽。
+        //     两种停止合成一句，是因为它们对这张工单的处置相同（都不再自动重试）；它们彼此的
+        //     区别（一个等更好的输入，一个要另一次明确的准入决定）记在台账的状态里，不记在
+        //     这一句回绝里。
         let stopped_members = remaining.stopped_members;
         let (queue_state, error) = if stopped_members > 0 {
-            ("cancelled", LeaseError::OnlyBlockedMembersRemain)
+            ("cancelled", LeaseError::OnlyStoppedMembersRemain)
         } else {
             ("completed", LeaseError::WorkOrderAlreadySatisfied)
         };
@@ -982,25 +985,20 @@ async fn remaining_steps_for_work_order(
         work_order_ref,
     )
     .await?;
-    let mut blocked_contents: std::collections::HashSet<String> = std::collections::HashSet::new();
-    if !blocked.material.is_empty() {
-        let contents: Vec<String> = sqlx::query_scalar(
-            "SELECT content_external_id FROM linggan_material_content WHERE public_ref=ANY($1)",
+    // 预算已经用尽的成员同样不建任务，但它们是**另一种**停止：缺输入的等一个更好的输入自己
+    // 回来，预算用尽的不会——它要的是另一次明确的准入决定。两者对这张工单的处置相同（都不再
+    // 自动重试），所以在这里合流；区别留在台账的状态里。
+    let budget_exhausted =
+        crate::execution_input_eligibility::budget_exhausted_object_refs_in_transaction(
+            transaction,
+            work_order_ref,
         )
-        .bind(&blocked.material)
-        .fetch_all(&mut **transaction)
         .await?;
-        blocked_contents.extend(contents);
-    }
-    if !blocked.cross_industry.is_empty() {
-        let contents: Vec<String> = sqlx::query_scalar(
-            "SELECT content_external_id FROM cross_industry_sample WHERE sample_ref=ANY($1)",
-        )
-        .bind(&blocked.cross_industry)
-        .fetch_all(&mut **transaction)
-        .await?;
-        blocked_contents.extend(contents);
-    }
+    let mut blocked_contents =
+        content_external_ids_for_object_refs_in_transaction(transaction, &blocked).await?;
+    blocked_contents.extend(
+        content_external_ids_for_object_refs_in_transaction(transaction, &budget_exhausted).await?,
+    );
 
     let mut stopped_members = 0_usize;
     let tasks = expand_into_tasks(subject, material_targets)?
@@ -1035,7 +1033,39 @@ async fn remaining_steps_for_work_order(
     })
 }
 
-/// 一张工单这一轮还剩多少可执行的步骤，以及有多少步骤是被「缺输入」摘掉的。
+/// 把两侧的台账对象引用解析成作品的外部 ID——展开任务时用的键是后者。
+///
+/// 跨行业那侧的表在控制面证明库里不存在：能力缺失不是「没有这一侧的对象」，所以只在真的有
+/// 引用时才去查它。
+async fn content_external_ids_for_object_refs_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    objects: &crate::execution_input_eligibility::BlockedObjects,
+) -> Result<std::collections::HashSet<String>, sqlx::Error> {
+    let mut contents: Vec<String> = Vec::new();
+    if !objects.material.is_empty() {
+        contents.extend(
+            sqlx::query_scalar::<_, String>(
+                "SELECT content_external_id FROM linggan_material_content WHERE public_ref=ANY($1)",
+            )
+            .bind(&objects.material)
+            .fetch_all(&mut **transaction)
+            .await?,
+        );
+    }
+    if !objects.cross_industry.is_empty() {
+        contents.extend(
+            sqlx::query_scalar::<_, String>(
+                "SELECT content_external_id FROM cross_industry_sample WHERE sample_ref=ANY($1)",
+            )
+            .bind(&objects.cross_industry)
+            .fetch_all(&mut **transaction)
+            .await?,
+        );
+    }
+    Ok(contents.into_iter().collect())
+}
+
+/// 一张工单这一轮还剩多少可执行的步骤，以及有多少步骤是被「停着的成员」摘掉的。
 ///
 /// 两个数必须一起带出来：只剩空列表时，调用方要能区分「都做完了」和「剩下的都停着」——
 /// 前者是完成，后者一个都没交付。

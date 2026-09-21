@@ -13,12 +13,18 @@ use linggan_evidence::{
     grant_detail_page_session_with_lane_deliveries, issue_work_order_lease,
     open_claim_window, read_collection_task_timeline, read_work_resources,
     recover_released_orphaned_work_orders, report_account_eligibility, requeue_failed_dispatch,
-    rotate_installation_credential, set_station_accepting, start_producer_attempt,
+    retire_materials, rotate_installation_credential, set_station_accepting, start_producer_attempt,
     submit_producer_package,
 };
 use linggan_storage_postgres::{Database, testing::isolated_proof_schema};
 use sqlx::{AssertSqlSafe, Row};
 use uuid::Uuid;
+
+/// 迟到的页面读失败要证明的是「已经接纳的详情不因此消失」，而接纳详情只有一条正常路径
+/// （Package 接纳）。这里复用材料夹具的那一条，不再写一份近似的替身。
+#[allow(dead_code)]
+#[path = "support/material_fixture.rs"]
+mod material_fixture;
 
 const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0001_scope_001_capture_evidence.sql"),
@@ -3149,6 +3155,599 @@ async fn an_in_progress_replay_with_a_dead_locator_keeps_the_attempt_and_never_r
     );
 }
 
+/// 详情页读取失败的预算记在**需求范围**上，不记在工单上。
+///
+/// 同一张工单里「最多三次」从前是新工单就能清零的软限制：共享库里同一篇作品进过 21、13、20、
+/// 18 张带匹配任务的工单，每一张都从零开始，于是同一个缺口可以永远「再试三次」。这条用例把
+/// 三件事一起钉住——换新工单不清零、刷新同一个地址的签名令牌不清零、用尽之后同批里别的作品
+/// 照常执行。
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn detail_read_failure_budget_follows_the_requirement_scope_across_new_work_orders() {
+    let database = proof_database_for("collection_dispatch_detail_budget_scope").await;
+    let fixture = seed_creator_work_order(&database).await;
+    let (target_ref, ..) = fixture_control_tuple(&database, fixture.work_order_ref).await;
+    let first_url = "https://www.xiaohongshu.com/explore/budget-scope-target?xsec_token=FIRST_TOKEN&xsec_source=pc_user";
+    let content_public_ref = accept_material(&database, "budget-scope-target", first_url).await;
+    freeze_material(&database, fixture.work_order_ref, content_public_ref, 1).await;
+    issue_work_order_lease(&database, fixture.work_order_ref, 60)
+        .await
+        .expect("第一张工单发出租约");
+
+    let first = fail_dispatched_detail(
+        &database,
+        &fixture,
+        fixture.work_order_ref,
+        "budget-scope-target",
+    )
+    .await;
+    assert_eq!(
+        first,
+        DispatchFailureOutcome::Requeued {
+            retry_after_seconds: 60
+        },
+        "这个范围上的第一次失败仍是 60 秒那一档"
+    );
+
+    // 平台后来又给了这一篇**另一条**签名地址。指纹不同——输入确实变了；预算键不含指纹，
+    // 所以它不该因此从头再数。
+    let second_url = "https://www.xiaohongshu.com/explore/budget-scope-target?xsec_token=SECOND_TOKEN&xsec_source=pc_user";
+    accept_material(&database, "budget-scope-target", second_url).await;
+    let (first_fingerprint, second_fingerprint): (String, String) = sqlx::query_as(
+        "SELECT encode(sha256(convert_to($1,'UTF8')),'hex'), \
+                encode(sha256(convert_to($2,'UTF8')),'hex')",
+    )
+    .bind(first_url)
+    .bind(second_url)
+    .fetch_one(database.pool())
+    .await
+    .expect("指纹就是候选解析用的那一段 SQL");
+    assert_ne!(
+        first_fingerprint, second_fingerprint,
+        "刷新令牌确实换了一条地址，这不是同一份输入"
+    );
+
+    let second_order = seed_followup_frozen_work_order(&database, &fixture).await;
+    freeze_material(&database, second_order, content_public_ref, 1).await;
+    issue_work_order_lease(&database, second_order, 60)
+        .await
+        .expect("第二张工单发出租约");
+    let second = fail_dispatched_detail(&database, &fixture, second_order, "budget-scope-target").await;
+    assert_eq!(
+        second,
+        DispatchFailureOutcome::Requeued {
+            retry_after_seconds: 120
+        },
+        "换工单、换地址都不是新事实：等待要接在这个范围累计的第二次上"
+    );
+
+    let third_order = seed_followup_frozen_work_order(&database, &fixture).await;
+    freeze_material(&database, third_order, content_public_ref, 1).await;
+    issue_work_order_lease(&database, third_order, 60)
+        .await
+        .expect("第三张工单发出租约");
+    let third = fail_dispatched_detail(&database, &fixture, third_order, "budget-scope-target").await;
+    assert_eq!(
+        third,
+        DispatchFailureOutcome::Blocked,
+        "第三次是这个范围的停止，不是又一次重试"
+    );
+
+    let ledger: Vec<(i32, String, Option<String>, i32, i32)> = sqlx::query_as(
+        "SELECT deduplicated_failure_count,state,reason_code,retry_epoch,prior_failures_unverified \
+         FROM collection_execution_input_eligibility \
+         WHERE target_ref=$1 AND domain_scope='own_domain' AND object_kind='material_content' \
+           AND object_ref=$2 AND capability='content_detail'",
+    )
+    .bind(target_ref)
+    .bind(content_public_ref)
+    .fetch_all(database.pool())
+    .await
+    .expect("资格台账可读");
+    assert_eq!(
+        ledger,
+        vec![(
+            3,
+            "budget_exhausted".to_owned(),
+            Some("page_read_budget_exhausted".to_owned()),
+            0,
+            0
+        )],
+        "跨工单只有一条当前行：三次都记在它上面，刷新地址没有另开一条，旧失败也没有混进来"
+    );
+
+    let blocked_lanes: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_work_order_lease_task task \
+         JOIN linggan_runtime_task runtime ON runtime.task_id=task.task_id \
+         WHERE runtime.task_spec #>> '{target,contentExternalId}'='budget-scope-target' \
+           AND task.execution_state='blocked'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("通道状态可读");
+    assert_eq!(
+        blocked_lanes, 4,
+        "停的是这一篇的四条通道；前两张工单里已经退队的任务不跟着变成停止"
+    );
+
+    // 第四张工单里既有预算用尽的那一篇，也有一篇完好的：展开任务时摘掉用尽的那一篇，
+    // 好的那一篇当场就要能派——一个缺口不该让同一批里别的作品一起等。
+    let healthy_ref = accept_material(
+        &database,
+        "budget-scope-healthy",
+        "https://www.xiaohongshu.com/explore/budget-scope-healthy?xsec_token=HEALTHY_TOKEN&xsec_source=pc_user",
+    )
+    .await;
+    let fourth_order = seed_followup_frozen_work_order(&database, &fixture).await;
+    freeze_material(&database, fourth_order, content_public_ref, 1).await;
+    freeze_material(&database, fourth_order, healthy_ref, 2).await;
+    issue_work_order_lease(&database, fourth_order, 60)
+        .await
+        .expect("预算用尽的成员不该让这张工单发不出租约");
+    let next = decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("同批里完好的那一篇仍要派出去");
+    assert_eq!(
+        task_from_dispatch(&next).raw()["target"]["contentExternalId"].as_str(),
+        Some("budget-scope-healthy")
+    );
+}
+
+/// 同一篇作品被两个目标各要求一次详情时，两个需求范围的资格彼此独立。
+///
+/// 一个目标上读三次读不成，不该让另一个目标再也拿不到这一篇；一个目标上记下的「已失效」也只
+/// 约束它自己。台账的键里含目标，这两件事才对得上。
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn the_same_content_under_two_targets_keeps_two_independent_detail_budgets() {
+    let database = proof_database_for("collection_dispatch_detail_budget_two_targets").await;
+    let fixture = seed_creator_work_order(&database).await;
+    let (target_a, ..) = fixture_control_tuple(&database, fixture.work_order_ref).await;
+    let content_public_ref = accept_material(
+        &database,
+        "shared-content",
+        "https://www.xiaohongshu.com/explore/shared-content?xsec_token=SHARED_TOKEN&xsec_source=pc_user",
+    )
+    .await;
+    freeze_material(&database, fixture.work_order_ref, content_public_ref, 1).await;
+    issue_work_order_lease(&database, fixture.work_order_ref, 60)
+        .await
+        .expect("目标 A 的工单发出租约");
+    for attempt in 1..=3 {
+        let outcome = fail_dispatched_detail(
+            &database,
+            &fixture,
+            fixture.work_order_ref,
+            "shared-content",
+        )
+        .await;
+        if attempt < 3 {
+            assert!(matches!(
+                outcome,
+                DispatchFailureOutcome::Requeued { .. }
+            ));
+            clear_work_order_backoff(&database, fixture.work_order_ref).await;
+        } else {
+            assert_eq!(outcome, DispatchFailureOutcome::Blocked);
+        }
+    }
+
+    let retired = retire_materials(&database, target_a, &[content_public_ref], "page_gone")
+        .await
+        .expect("目标 A 上的结论写进台账");
+    assert_eq!(retired, 1, "目标 A 记下这一篇已失效");
+
+    // 第二个目标要的是同一篇作品的详情——换的是需求，不是作品。
+    let target_b = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_observation_target \
+             (target_ref, platform, target_kind, identity_key, display_name, source, lifecycle_state) \
+         VALUES ($1, 'xhs', 'creator', 'second-fixture', '第二个目标', 'manual', 'archiving')",
+    )
+    .bind(target_b)
+    .execute(database.pool())
+    .await
+    .expect("第二个目标已建档");
+    let order_b = seed_followup_frozen_work_order_for_target(&database, &fixture, target_b).await;
+    freeze_material(&database, order_b, content_public_ref, 1).await;
+    issue_work_order_lease(&database, order_b, 60)
+        .await
+        .expect("同一台工位、同一篇作品，换一个需求范围照常发租约");
+    let decision = decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("目标 B 的工单可以派");
+    assert_eq!(
+        task_from_dispatch(&decision).raw()["target"]["contentExternalId"].as_str(),
+        Some("shared-content"),
+        "别的目标上读不成、还被记了失效，都不影响这个目标拿到这一篇"
+    );
+    let outcome = requeue_failed_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+        task_id(&decision),
+        Uuid::new_v4(),
+        DispatchFailureCode::PageReadFailed,
+    )
+    .await
+    .expect("目标 B 的失败上报被接纳");
+    assert_eq!(
+        outcome,
+        DispatchFailureOutcome::Requeued {
+            retry_after_seconds: 60
+        },
+        "目标 B 自己才失败第一次：等待从它自己的范围起算"
+    );
+
+    let rows: Vec<(Uuid, i32, String)> = sqlx::query_as(
+        "SELECT target_ref,deduplicated_failure_count,state \
+         FROM collection_execution_input_eligibility \
+         WHERE capability='content_detail' AND object_ref=$1",
+    )
+    .bind(content_public_ref)
+    .fetch_all(database.pool())
+    .await
+    .expect("两个范围各有一条自己的资格行");
+    let mut actual = rows;
+    let mut expected = vec![
+        (target_a, 3, "budget_exhausted".to_owned()),
+        (target_b, 1, "eligible".to_owned()),
+    ];
+    actual.sort_by_key(|row| row.0);
+    expected.sort_by_key(|row| row.0);
+    assert_eq!(
+        actual, expected,
+        "键里含目标：两个需求各自的次数与状态互不覆盖"
+    );
+}
+
+/// 本表建立之前的老工单：失败如实记下，但不算进预算。
+///
+/// 「试过」不等于「试的是同一份输入」。凭一批无法对齐输入的历史失败去停止一篇作品，等于按
+/// content ID 把它封掉——所以旧失败只进待核实那一列：既不清零、也不触发停止，更不允许它们
+/// 把一篇历史上常失败的作品在新规则下直接停掉。
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn legacy_unfrozen_orders_record_unverified_prior_failures_without_spending_the_budget() {
+    let database = proof_database_for("collection_dispatch_legacy_unfrozen_budget").await;
+    let fixture = seed_creator_work_order(&database).await;
+    let (target_ref, ..) = fixture_control_tuple(&database, fixture.work_order_ref).await;
+    let content_public_ref = accept_material(
+        &database,
+        "legacy-content",
+        "https://www.xiaohongshu.com/explore/legacy-content?xsec_token=LEGACY_TOKEN&xsec_source=pc_user",
+    )
+    .await;
+    freeze_material(&database, fixture.work_order_ref, content_public_ref, 1).await;
+    set_work_order_execution_input_frozen(&database, fixture.work_order_ref, false).await;
+    issue_work_order_lease(&database, fixture.work_order_ref, 60)
+        .await
+        .expect("本表建立之前的老工单照常发租约");
+
+    for (attempt, expected_seconds) in [(1_i32, 60_u32), (2, 120)] {
+        let outcome = fail_dispatched_detail(
+            &database,
+            &fixture,
+            fixture.work_order_ref,
+            "legacy-content",
+        )
+        .await;
+        assert_eq!(
+            outcome,
+            DispatchFailureOutcome::Requeued {
+                retry_after_seconds: expected_seconds
+            },
+            "老工单里仍按已上线的「同一张工单最多三次」收尾（第 {attempt} 次）"
+        );
+        clear_work_order_backoff(&database, fixture.work_order_ref).await;
+    }
+    let third = fail_dispatched_detail(
+        &database,
+        &fixture,
+        fixture.work_order_ref,
+        "legacy-content",
+    )
+    .await;
+    assert_eq!(
+        third,
+        DispatchFailureOutcome::Blocked,
+        "已上线的同一工单三次仍然有效，新规则只收紧不放松"
+    );
+
+    let ledger: Vec<(i32, i32, String, Option<String>, String)> = sqlx::query_as(
+        "SELECT deduplicated_failure_count,prior_failures_unverified,state,reason_code, \
+                input_source_status \
+         FROM collection_execution_input_eligibility \
+         WHERE target_ref=$1 AND domain_scope='own_domain' AND object_kind='material_content' \
+           AND object_ref=$2 AND capability='content_detail'",
+    )
+    .bind(target_ref)
+    .bind(content_public_ref)
+    .fetch_all(database.pool())
+    .await
+    .expect("资格台账可读");
+    assert_eq!(
+        ledger,
+        vec![(
+            0,
+            3,
+            "eligible".to_owned(),
+            None,
+            "legacy_input_unfrozen".to_owned()
+        )],
+        "三次旧失败一次都不进预算：次数记在待核实那一列，台账也不谎称这份输入当初冻过"
+    );
+
+    let fresh_order = seed_followup_frozen_work_order(&database, &fixture).await;
+    freeze_material(&database, fresh_order, content_public_ref, 1).await;
+    issue_work_order_lease(&database, fresh_order, 60)
+        .await
+        .expect("新工单发出租约");
+    let outcome = fail_dispatched_detail(&database, &fixture, fresh_order, "legacy-content").await;
+    assert_eq!(
+        outcome,
+        DispatchFailureOutcome::Requeued {
+            retry_after_seconds: 60
+        },
+        "旧失败不进预算，也就不会把新工单直接推到停止"
+    );
+    let after: (i32, i32) = sqlx::query_as(
+        "SELECT deduplicated_failure_count,prior_failures_unverified \
+         FROM collection_execution_input_eligibility \
+         WHERE target_ref=$1 AND object_ref=$2 AND capability='content_detail'",
+    )
+    .bind(target_ref)
+    .bind(content_public_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("仍然只有一条当前行");
+    assert_eq!(
+        after,
+        (1, 3),
+        "新工单的这次失败进了预算（1），旧失败仍留在待核实（3）"
+    );
+}
+
+/// 已经接纳了详情的那一篇，后来又报一次页面读失败：不改写已经拿到的材料事实，也不动预算。
+///
+/// 预算回答的是「还要不要再试」，而这里已经没有要补的东西了。把这次失败也算进停止，等于让
+/// 一次迟到的浏览器故障把已经拿到的正文作废。
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn a_late_detail_read_failure_never_spends_the_budget_of_an_already_accepted_material() {
+    let database = proof_database_for("collection_dispatch_late_detail_failure").await;
+    let fixture = seed_creator_work_order(&database).await;
+    let (target_ref, ..) = fixture_control_tuple(&database, fixture.work_order_ref).await;
+    let content_public_ref = accept_material(
+        &database,
+        "late-accept-content",
+        "https://www.xiaohongshu.com/explore/late-accept-content?xsec_token=LATE_TOKEN&xsec_source=pc_user",
+    )
+    .await;
+    freeze_material(&database, fixture.work_order_ref, content_public_ref, 1).await;
+    issue_work_order_lease(&database, fixture.work_order_ref, 60)
+        .await
+        .expect("这一篇的详情通道发出租约");
+    let decision = decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("这一篇的正文通道可以派");
+    assert_eq!(capability(&decision), "content_detail");
+
+    // 正文已经由一次正常交付接纳（夹具走的是与生产同一条 Package 接纳路径）。
+    material_fixture::submit_package(
+        &database,
+        "content_detail",
+        serde_json::json!({"contentExternalId":"late-accept-content"}),
+        serde_json::json!({
+            "kind":"content_detail",
+            "sourceObject":{"platform":"xhs","type":"content","externalId":"late-accept-content"},
+            "payload":{
+                "title":"已经拿到的正文",
+                "authorId":"creator-fixture",
+                "publishedAt":1785542400000_i64,
+                "publishedAtText":"1785542400",
+                "publishedAtSourceField":"publishTime",
+                "publishedAtSourceKind":"platform_epoch",
+                "publishedAtPrecision":"second",
+                "publishedAtParserVersion":"xhs-detail-time-v2"
+            }
+        }),
+    )
+    .await;
+
+    let failure_ref = Uuid::new_v4();
+    let outcome = requeue_failed_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+        task_id(&decision),
+        failure_ref,
+        DispatchFailureCode::PageReadFailed,
+    )
+    .await
+    .expect("迟到的失败上报仍会被如实处理");
+    assert_eq!(
+        outcome,
+        DispatchFailureOutcome::Requeued {
+            retry_after_seconds: 60
+        },
+        "材料已经接纳：这次失败不进预算，也就不该触发任何停止"
+    );
+
+    let details: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_material_content_detail WHERE content_public_ref=$1",
+    )
+    .bind(content_public_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("已接纳的详情可读");
+    assert_eq!(details, 1, "已经拿到的正文不得因为一次迟到失败而消失");
+    let ledger_rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_execution_input_eligibility \
+         WHERE target_ref=$1 AND object_ref=$2 AND capability='content_detail'",
+    )
+    .bind(target_ref)
+    .bind(content_public_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("资格台账可读");
+    assert_eq!(
+        ledger_rows, 0,
+        "没有要补的东西，就不该为它开一条预算行"
+    );
+    let stopped_lanes: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_work_order_lease_task task \
+         JOIN linggan_runtime_task runtime ON runtime.task_id=task.task_id \
+         WHERE runtime.task_spec #>> '{target,contentExternalId}'='late-accept-content' \
+           AND task.execution_state IN ('blocked','unavailable')",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("通道状态可读");
+    assert_eq!(stopped_lanes, 0, "这一篇的四条通道一条也不停");
+    let failure_rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_work_order_lease_task_dispatch_failure \
+         WHERE failure_ref=$1 AND failure_disposition='requeued'",
+    )
+    .bind(failure_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("失败事实可读");
+    assert_eq!(failure_rows, 1, "这次失败本身仍然如实留痕");
+}
+
+/// 同一个失败被上报两次（插件重试，或两条连接同时到）：只算一次，只留一条当前行。
+///
+/// 上报路径是「先提交、再确认」，确认丢了这个动作一定会被重做；重做不该让预算往前走一格，
+/// 也不该在台账上留下第二条并行的资格。两个调用先抢同一行安装记录，于是它们串行——一个真的
+/// 记账，另一个读到那条已经落地的记录、如实回放同一个结论。
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn duplicate_detail_failure_reports_count_once_and_keep_one_current_row() {
+    let database = proof_database_for("collection_dispatch_detail_failure_dedupe").await;
+    let fixture = seed_creator_work_order(&database).await;
+    let (target_ref, ..) = fixture_control_tuple(&database, fixture.work_order_ref).await;
+    let content_public_ref = accept_material(
+        &database,
+        "dedupe-content",
+        "https://www.xiaohongshu.com/explore/dedupe-content?xsec_token=DEDUPE_TOKEN&xsec_source=pc_user",
+    )
+    .await;
+    freeze_material(&database, fixture.work_order_ref, content_public_ref, 1).await;
+    issue_work_order_lease(&database, fixture.work_order_ref, 60)
+        .await
+        .expect("这一篇的详情通道发出租约");
+    let decision = decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("这一篇的正文通道可以派");
+    let task = task_id(&decision);
+    let failure_ref = Uuid::new_v4();
+    let (left, right) = tokio::join!(
+        requeue_failed_dispatch(
+            &database,
+            &fixture.install_key,
+            &fixture.installation_credential,
+            task,
+            failure_ref,
+            DispatchFailureCode::PageReadFailed,
+        ),
+        requeue_failed_dispatch(
+            &database,
+            &fixture.install_key,
+            &fixture.installation_credential,
+            task,
+            failure_ref,
+            DispatchFailureCode::PageReadFailed,
+        ),
+    );
+    let mut outcomes = vec![
+        left.expect("并发的第一条上报被接纳"),
+        right.expect("并发的第二条上报被接纳"),
+    ];
+    outcomes.sort_by_key(|outcome| match outcome {
+        DispatchFailureOutcome::Requeued { .. } => 0_u8,
+        _ => 1,
+    });
+    assert_eq!(
+        outcomes,
+        vec![
+            DispatchFailureOutcome::Requeued {
+                retry_after_seconds: 60
+            },
+            DispatchFailureOutcome::Replay {
+                retry_after_seconds: 60
+            },
+        ],
+        "一次记账、一次如实回放；回放说的还是同一条事实，不是第二次失败"
+    );
+    let failure_rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_work_order_lease_task_dispatch_failure \
+         WHERE failure_ref=$1",
+    )
+    .bind(failure_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("失败事实可读");
+    assert_eq!(failure_rows, 1, "同一个 failure_ref 只留一条事实");
+    let ledger: Vec<(i32, i32)> = sqlx::query_as(
+        "SELECT deduplicated_failure_count,prior_failures_unverified \
+         FROM collection_execution_input_eligibility \
+         WHERE target_ref=$1 AND object_ref=$2 AND capability='content_detail'",
+    )
+    .bind(target_ref)
+    .bind(content_public_ref)
+    .fetch_all(database.pool())
+    .await
+    .expect("资格台账可读");
+    assert_eq!(
+        ledger,
+        vec![(1, 0)],
+        "重复上报不让预算走两格，也不长出第二条当前行"
+    );
+
+    clear_work_order_backoff(&database, fixture.work_order_ref).await;
+    let outcome = fail_dispatched_detail(
+        &database,
+        &fixture,
+        fixture.work_order_ref,
+        "dedupe-content",
+    )
+    .await;
+    assert_eq!(
+        outcome,
+        DispatchFailureOutcome::Requeued {
+            retry_after_seconds: 120
+        },
+        "真正新的一次失败照常累计"
+    );
+    let count: i32 = sqlx::query_scalar(
+        "SELECT deduplicated_failure_count FROM collection_execution_input_eligibility \
+         WHERE target_ref=$1 AND object_ref=$2 AND capability='content_detail'",
+    )
+    .bind(target_ref)
+    .bind(content_public_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("资格台账可读");
+    assert_eq!(count, 2, "只有新事件才让预算往前走");
+}
+
 /// 在同一个目标、同一台工位上再排一张工单——授权是有效的，排在毒工单后面。
 async fn seed_second_queued_work_order(database: &Database, fixture: &Fixture) -> Uuid {
     let authorization_ref = Uuid::new_v4();
@@ -3200,6 +3799,230 @@ async fn seed_second_queued_work_order(database: &Database, fixture: &Fixture) -
     .await
     .expect("the runnable order waits behind the poisoned one");
     work_order_ref
+}
+
+/// 接纳一篇作品的发现地址，并回答它稳定的材料身份。
+///
+/// 这一步不能省：工单执行的是**冻过的已知作品**，而一篇作品要先有一条已接纳的签名地址，
+/// 准入与派发才认它有执行入口。
+async fn accept_material(database: &Database, content_external_id: &str, signed_url: &str) -> Uuid {
+    submit_profile_discovery(database, content_external_id, signed_url).await;
+    sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content \
+         WHERE platform='xhs' AND content_external_id=$1",
+    )
+    .bind(content_external_id)
+    .fetch_one(database.pool())
+    .await
+    .expect("accepted discovery creates the stable material identity")
+}
+
+/// 把一篇作品冻进这张工单要执行的范围——工单执行的是冻结过的已知集合，不是「再看一眼」。
+///
+/// 四通道同开（正文、媒体、评论、回复）：同一次页面打开服务这四条，停止判据也在四条上一致。
+async fn freeze_material(
+    database: &Database,
+    work_order_ref: Uuid,
+    content_public_ref: Uuid,
+    ordinal: i32,
+) {
+    sqlx::query(
+        "INSERT INTO collection_work_order_material_target \
+             (work_order_ref,content_public_ref,ordinal,comment_limit,reply_expand_limit,acquire_media) \
+         VALUES ($1,$2,$3,30,2,true)",
+    )
+    .bind(work_order_ref)
+    .bind(content_public_ref)
+    .bind(ordinal)
+    .execute(database.pool())
+    .await
+    .expect("the frozen material scope is recorded");
+}
+
+/// 控制元组（目标、工位、安装、账号）读自**那次准入决定**。
+///
+/// 不读工单自己那几列：失败退回队列时它们会被清空（`station_ref`/`installation_ref`/
+/// `account_ref` 置空），决定上的那一份不会——后续工单要绑的正是「当初选定的那套控制面」。
+async fn fixture_control_tuple(
+    database: &Database,
+    work_order_ref: Uuid,
+) -> (Uuid, Uuid, Uuid, Uuid) {
+    sqlx::query_as(
+        "SELECT decision.target_ref,decision.station_ref,decision.installation_ref, \
+                decision.account_ref \
+         FROM collection_work_order work_order \
+         JOIN collection_admission_decision decision USING(decision_ref) \
+         WHERE work_order.work_order_ref=$1",
+    )
+    .bind(work_order_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("the fixture admission decision froze the control tuple")
+}
+
+/// 同一个需求范围上的**又一张**工单：换的是工单，不是需求。
+async fn seed_followup_frozen_work_order(database: &Database, fixture: &Fixture) -> Uuid {
+    let (target_ref, ..) = fixture_control_tuple(database, fixture.work_order_ref).await;
+    seed_followup_frozen_work_order_for_target(database, fixture, target_ref).await
+}
+
+/// 建单该有的三样都在——一份仍然有效的授权、一条请求、一次准入决定（`decision_ref` 是唯一键，
+/// 一张工单一份决定），以及建单那一刻写下的执行输入冻结标记。它不带作品：要执行哪几篇由调用
+/// 方按这一条用例要证明的东西自己冻进去。
+async fn seed_followup_frozen_work_order_for_target(
+    database: &Database,
+    fixture: &Fixture,
+    target_ref: Uuid,
+) -> Uuid {
+    let (_, station_ref, installation_ref, account_ref) =
+        fixture_control_tuple(database, fixture.work_order_ref).await;
+    let authorization_ref = Uuid::new_v4();
+    let request_ref = Uuid::new_v4();
+    let decision_ref = Uuid::new_v4();
+    let work_order_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_acquisition_authorization \
+             (authorization_ref, platform, target_kind, lane, max_targets, max_works_per_target, \
+              allowed_task_templates,allowed_dispatch_lanes,max_work_units,purpose,granted_by,expires_at) \
+         VALUES ($1,'xhs','creator','deep_archive',1,10, \
+                 ARRAY['creator_archive','material_deepening'],ARRAY['immediate','batch'],10, \
+                 '需求范围上的又一张工单','person',scope_001_now() + interval '1 day')",
+    )
+    .bind(authorization_ref)
+    .execute(database.pool())
+    .await
+    .expect("the follow-up authorization is seeded");
+    sqlx::query(
+        "INSERT INTO collection_acquisition_request \
+             (request_ref, target_ref, lane, purpose, requested_by) \
+         VALUES ($1,$2,'deep_archive','需求范围上的又一张工单','person')",
+    )
+    .bind(request_ref)
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .expect("the follow-up request is seeded");
+    sqlx::query(
+        "INSERT INTO collection_admission_decision \
+             (decision_ref, request_ref, outcome, reason_code, authorization_ref, \
+              target_ref, station_ref, installation_ref, account_ref) \
+         VALUES ($1,$2,'admitted','focused_sequence_proof',$3,$4,$5,$6,$7)",
+    )
+    .bind(decision_ref)
+    .bind(request_ref)
+    .bind(authorization_ref)
+    .bind(target_ref)
+    .bind(station_ref)
+    .bind(installation_ref)
+    .bind(account_ref)
+    .execute(database.pool())
+    .await
+    .expect("the follow-up admission is seeded");
+    sqlx::query(
+        "INSERT INTO collection_work_order \
+             (work_order_ref, decision_ref, target_ref, lane, max_works, stop_conditions, \
+              station_ref,installation_ref,account_ref,dispatch_lane,queue_state,scheduled_for, \
+              execution_input_frozen_at) \
+         VALUES ($1,$2,$3,'deep_archive',10,'[\"maximum_quota\",\"time_budget\"]'::jsonb, \
+                 $4,$5,$6,'immediate','queued',scope_001_now()-interval '1 hour',scope_001_now())",
+    )
+    .bind(work_order_ref)
+    .bind(decision_ref)
+    .bind(target_ref)
+    .bind(station_ref)
+    .bind(installation_ref)
+    .bind(account_ref)
+    .execute(database.pool())
+    .await
+    .expect("the follow-up work order waits in the immediate lane");
+    work_order_ref
+}
+
+/// 把一张工单标成「出生时没有冻过输入」——本表建立之前的老工单形态。
+///
+/// 夹具默认按今天的建单方式写这一列；要覆盖旧分支的用例必须显式退回去，否则测的是另一条路。
+async fn set_work_order_execution_input_frozen(
+    database: &Database,
+    work_order_ref: Uuid,
+    frozen: bool,
+) {
+    sqlx::query(
+        "UPDATE collection_work_order \
+         SET execution_input_frozen_at=CASE WHEN $2 THEN scope_001_now() ELSE NULL END \
+         WHERE work_order_ref=$1",
+    )
+    .bind(work_order_ref)
+    .bind(frozen)
+    .execute(database.pool())
+    .await
+    .expect("the fixture states whether this work order froze its execution input");
+}
+
+/// 把工单的退避时间拨到过去——只有隔离的证明时钟可以这样走。
+async fn clear_work_order_backoff(database: &Database, work_order_ref: Uuid) {
+    sqlx::query(
+        "UPDATE collection_work_order SET retry_not_before_at=scope_001_now()-interval '1 second' \
+         WHERE work_order_ref=$1",
+    )
+    .bind(work_order_ref)
+    .execute(database.pool())
+    .await
+    .expect("the isolated proof clock steps past the backoff");
+}
+
+/// 在一张工单上派一次 `content_detail`、再如实上报一次页面读失败。
+///
+/// 报的是**这一次真的派出去的那条通道**：先认工单、再认能力，免得把失败记到别的工单或别的
+/// 通道上，最后把台账的结论读成别人的。
+async fn fail_dispatched_detail(
+    database: &Database,
+    fixture: &Fixture,
+    expected_work_order: Uuid,
+    content_external_id: &str,
+) -> DispatchFailureOutcome {
+    let decision = decide_dispatch(
+        database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("the isolated proof database dispatches the frozen detail");
+    assert_eq!(
+        work_order_of_lease(database, lease_ref(&decision)).await,
+        expected_work_order,
+        "这一步要报的是这张工单上的失败"
+    );
+    assert_eq!(capability(&decision), "content_detail");
+    let task = task_from_dispatch(&decision);
+    assert_eq!(
+        task.raw()["target"]["contentExternalId"].as_str(),
+        Some(content_external_id)
+    );
+    requeue_failed_dispatch(
+        database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+        task_id(&decision),
+        Uuid::new_v4(),
+        DispatchFailureCode::PageReadFailed,
+    )
+    .await
+    .expect("the page-read failure report is accepted")
+}
+
+fn lease_ref(decision: &DispatchDecision) -> Uuid {
+    match decision {
+        DispatchDecision::Dispatch { lease_ref, .. } => *lease_ref,
+        other => panic!("expected dispatch, got {other:?}"),
+    }
+}
+
+async fn work_order_of_lease(database: &Database, lease_ref: Uuid) -> Uuid {
+    sqlx::query_scalar("SELECT work_order_ref FROM collection_work_order_lease WHERE lease_ref=$1")
+        .bind(lease_ref)
+        .fetch_one(database.pool())
+        .await
+        .expect("every lease belongs to a work order")
 }
 
 struct Fixture {
@@ -3339,11 +4162,16 @@ async fn seed_creator_work_order(database: &Database) -> Fixture {
     .execute(database.pool())
     .await
     .expect("fixture admission freezes the selected control tuple");
+    // `execution_input_frozen_at` 与 `write_work_order` 一样在建单那一刻写下：夹具直接写表，
+    // 少写这一列就会造出一张「本表建立之前的老工单」，走的是另一条分支（旧失败不进预算，
+    // 见 `legacy_unfrozen_orders_record_unverified_prior_failures_without_spending_the_budget`）。
+    // 需要旧分支的用例显式调用 `set_work_order_execution_input_frozen(…, false)`。
     sqlx::query(
         "INSERT INTO collection_work_order \
              (work_order_ref, decision_ref, target_ref, lane, max_works, stop_conditions, \
-              station_ref,installation_ref,account_ref) \
-         VALUES ($1, $2, $3, 'deep_archive', 10, '[\"maximum_quota\",\"time_budget\"]'::jsonb, $4,$5,$6)",
+              station_ref,installation_ref,account_ref,execution_input_frozen_at) \
+         VALUES ($1, $2, $3, 'deep_archive', 10, '[\"maximum_quota\",\"time_budget\"]'::jsonb, $4,$5,$6, \
+                 scope_001_now())",
     )
     .bind(work_order_ref)
     .bind(decision_ref)

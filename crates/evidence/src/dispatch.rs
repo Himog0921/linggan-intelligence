@@ -15,7 +15,8 @@ use crate::collection_control::{
     revalidate_frozen_capacity_in, validate_installation_credential_in,
 };
 use crate::execution_input_eligibility::{
-    MISSING_EXECUTION_INPUT_REASON, requires_signed_execution_source,
+    MISSING_EXECUTION_INPUT_REASON, PageReadBudget, detail_material_already_accepted_in_transaction,
+    record_detail_page_read_failure_in_transaction, requires_signed_execution_source,
     signed_locator_predicate, stop_material_for_missing_execution_input_in_transaction,
     task_content_external_id,
 };
@@ -1260,6 +1261,10 @@ pub async fn requeue_failed_dispatch(
         transaction.commit().await?;
         return Ok(DispatchFailureOutcome::Unavailable);
     }
+    // 这次上报在台账上落到的位置（只有 `content_detail` 的页面读失败会填它）。它带出去给
+    // 下面的退避阶梯用：退避问的是「这个缺口试了几次」，而次数现在按需求范围跨工单累计——
+    // 换一张工单就从 60 秒重新开始，等于把同一个缺口的等待时间抹掉。
+    let mut page_read_budget: Option<PageReadBudget> = None;
     let terminal_disposition = match (failure_code, content_external_id.as_deref()) {
         (DispatchFailureCode::DetailPageUrlInvalid, Some(content_external_id))
             if capability == "content_detail" =>
@@ -1292,13 +1297,43 @@ pub async fn requeue_failed_dispatch(
         (DispatchFailureCode::PageReadFailed, Some(content_external_id))
             if capability == "content_detail" =>
         {
+            // 「同一张工单里最多三次」从前是这里唯一的判据，于是每建一张新工单都从零开始，
+            // 同一个缺口可以永远「再试三次」（共享库 2026-09-21：同一篇作品进过 21、13、
+            // 20、18 张有匹配任务的工单）。现在预算记在台账的**当前资格行**上：按需求范围
+            // 跨工单累计，换工单不清零，刷新同一个地址的签名 token 也不清零。
+            //
+            // 停止判据取两者中**更严**的一条：台账说用尽就停，已上线的「同一工单三次」
+            // 也永远不作废——新规则只能收紧，不能放松既有的保护。
+            let budget = if detail_material_already_accepted_in_transaction(
+                &mut transaction,
+                current_task_id,
+            )
+            .await?
+            {
+                // 材料已经被接纳：迟到的失败不回退材料事实，也不许把跨工单预算推到停止——
+                // 那个预算问的是「还要不要再试」，而这里已经没有要补的东西了。这次尝试
+                // 自己的事实仍按原有的「同一工单三次」收尾。
+                None
+            } else {
+                record_detail_page_read_failure_in_transaction(
+                    &mut transaction,
+                    current_task_id,
+                    failure_ref,
+                )
+                .await?
+            };
             let prior_failures = page_read_failure_count_for_detail_in_transaction(
                 &mut transaction,
                 work_order_ref,
                 content_external_id,
             )
             .await?;
-            if prior_failures + 1 >= MAX_PAGE_READ_FAILURES_PER_DETAIL {
+            let effective_failures =
+                (prior_failures + 1).max(budget.map_or(0, |budget| budget.count));
+            let stopped = effective_failures >= MAX_PAGE_READ_FAILURES_PER_DETAIL
+                || budget.is_some_and(|budget| budget.exhausted);
+            page_read_budget = budget;
+            if stopped {
                 Some(("blocked", content_external_id))
             } else {
                 None
@@ -1356,6 +1391,7 @@ pub async fn requeue_failed_dispatch(
         work_order_ref,
         failure_code.as_str(),
         "dispatch_start_failed",
+        page_read_budget.map_or(0, |budget| i32::try_from(budget.count).unwrap_or(i32::MAX)),
     )
     .await?;
     transaction.commit().await?;
@@ -1533,6 +1569,9 @@ async fn record_recoverable_dispatch_failure_in_transaction(
     work_order_ref: Uuid,
     failure_code: &str,
     release_reason: &str,
+    // 这张工单自己的失败次数只是退避阶梯的**下限**：同一个需求范围的失败按台账跨工单累计，
+    // 而等待时间要跟着那个更大的数走。它只把等待变长，不会把任何一次重试提前。
+    failure_count_floor: i32,
 ) -> Result<u32, sqlx::Error> {
     let failure_count: i32 = sqlx::query_scalar(
         "UPDATE collection_work_order \
@@ -1543,7 +1582,8 @@ async fn record_recoverable_dispatch_failure_in_transaction(
     .bind(work_order_ref)
     .fetch_one(&mut **transaction)
     .await?;
-    let retry_after_seconds = retry_after_seconds_for_failure_count(failure_count);
+    let effective_failure_count = failure_count.max(failure_count_floor);
+    let retry_after_seconds = retry_after_seconds_for_failure_count(effective_failure_count);
     sqlx::query(
         "INSERT INTO collection_work_order_lease_task_dispatch_failure \
              (failure_ref,task_id,installation_ref,failure_code,retry_after_seconds,failure_disposition) \
@@ -1577,7 +1617,7 @@ async fn record_recoverable_dispatch_failure_in_transaction(
     Ok(retry_after_seconds)
 }
 
-fn retry_after_seconds_for_failure_count(failure_count: i32) -> u32 {
+pub(crate) fn retry_after_seconds_for_failure_count(failure_count: i32) -> u32 {
     let exponent = u32::try_from((failure_count - 1).clamp(0, 4)).unwrap_or(0);
     (DISPATCH_FAILURE_RETRY_AFTER_SECONDS.saturating_mul(1_u32 << exponent))
         .min(MAX_DISPATCH_FAILURE_RETRY_AFTER_SECONDS)

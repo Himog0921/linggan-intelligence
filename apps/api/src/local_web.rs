@@ -3410,10 +3410,11 @@ fn lease_error_code(error: &LeaseError) -> &'static str {
         // instead of being handed a permit with no work behind it.
         LeaseError::WorkOrderAlreadySatisfied => "work_order_already_satisfied",
         // Also not an ordinary refusal: nothing left in this order can run **yet** — every
-        // remaining step is stopped on missing execution input. It was cancelled rather than
-        // left in the queue to be re-claimed and re-expanded into nothing every round; why it
-        // cannot run lives on the execution-input ledger, one row per stopped range.
-        LeaseError::OnlyBlockedMembersRemain => "work_order_only_input_blocked_members_remain",
+        // remaining step is stopped, either on missing execution input or on an exhausted
+        // page-read budget. It was cancelled rather than left in the queue to be re-claimed
+        // and re-expanded into nothing every round; which of the two stopped a given range —
+        // and whether it can come back on its own — lives on the execution-input ledger.
+        LeaseError::OnlyStoppedMembersRemain => "work_order_only_stopped_members_remain",
         LeaseError::ControlBlocked { reason_code } => match reason_code.as_str() {
             "risk_paused" => "risk_paused",
             "station_unavailable" => "station_unavailable",

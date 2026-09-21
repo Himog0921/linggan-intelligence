@@ -611,11 +611,12 @@ async fn load_task_execution_subject_in_transaction(
     .await?;
     // 一篇作品属于哪一侧，由它落在哪张作用域表上回答，不由任务形状回答——同一次页面打开
     // 在两侧长得一样，落点不同（`0044` 的隔离）。
+    // 「这张工单冻过输入没有」问的是**工单**，不是台账。反过来由台账推会得出相反的答案：
+    // 一次停止也会为某个对象写下 `input_source_status='frozen'`，于是「这个对象停过」会被
+    // 读成「这张工单冻过输入」。冻结发生在建单那一刻，标记就记在建单事务里（`0097`）。
     let material_sql = "SELECT order_row.target_ref,material.content_public_ref,NULL::uuid, \
                 material_content.content_external_id,lease.lease_ref, \
-                EXISTS (SELECT 1 FROM collection_execution_input_eligibility eligibility \
-                        WHERE eligibility.object_ref=material.content_public_ref \
-                          AND eligibility.input_source_status='frozen') \
+                order_row.execution_input_frozen_at IS NOT NULL \
          FROM collection_work_order_lease_task task \
          JOIN collection_work_order_lease lease USING(lease_ref) \
          JOIN collection_work_order order_row USING(work_order_ref) \
@@ -628,9 +629,7 @@ async fn load_task_execution_subject_in_transaction(
            AND material_content.content_external_id=runtime.task_spec #>> '{target,contentExternalId}'";
     let sample_sql = "SELECT order_row.target_ref,NULL::uuid,cross_scope.sample_ref, \
                 sample.content_external_id,lease.lease_ref, \
-                EXISTS (SELECT 1 FROM collection_execution_input_eligibility eligibility \
-                        WHERE eligibility.object_ref=cross_scope.sample_ref \
-                          AND eligibility.input_source_status='frozen') \
+                order_row.execution_input_frozen_at IS NOT NULL \
          FROM collection_work_order_lease_task task \
          JOIN collection_work_order_lease lease USING(lease_ref) \
          JOIN collection_work_order order_row USING(work_order_ref) \
@@ -668,4 +667,403 @@ async fn load_task_execution_subject_in_transaction(
             scope_was_frozen,
         },
     ))
+}
+
+/// 页面失败预算：同一个需求范围**跨工单**累计几次 `page_read_failed` 之后停止自动重试。
+///
+/// 数值与既有规则相同（同一详情最多三次），改的是**计数范围**：从前每次建一张新工单都从零
+/// 开始数，于是同一个缺口可以永远「再试三次」——共享库 2026-09-21 里同一篇作品进入过
+/// 21、13、20、18 张有匹配任务的工单，每一张都从零开始。
+pub(crate) const DETAIL_PAGE_READ_BUDGET: i64 = 3;
+
+/// 预算用尽时记在台账上的原因码。
+pub(crate) const PAGE_READ_BUDGET_EXHAUSTED_REASON: &str = "page_read_budget_exhausted";
+
+/// 预算策略的版本。与停止策略分开：换一套计数范围不等于换一套停止判据。
+pub(crate) const PAGE_READ_BUDGET_POLICY_VERSION: &str = "page_read_budget_v1";
+
+/// 一次页面读取失败之后，这个需求范围的预算落点。
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PageReadBudget {
+    /// 台账上记到的失败次数（去重后，跨工单累计）。
+    pub count: i64,
+    /// 是否该停止自动重试。为真时调用方按既有终态收束该成员，不在下一张工单里复活它。
+    pub exhausted: bool,
+}
+
+/// 「这个需求范围的预算已经不允许再排新工作」——候选与建单用的判据。
+///
+/// 两件事都算：预算已经用尽（`budget_exhausted`），以及还在冷却里（`next_retry_at` 未到）。
+/// 前者是停止，后者是等一下——对「要不要现在排一张新工单」这个问题，两者的答案都是「先不排」，
+/// 但它们在台账上仍是两种不同的状态，看板上分得开。
+///
+/// 只看**当前行**（`state <> 'input_blocked'`）：停止行是历史，一个范围可以留下多条，
+/// 拿它们来挡执行等于把「当时停过」变成永久封禁。
+pub(crate) fn budget_blocks_new_work_predicate(
+    target_ref_expression: &str,
+    domain_scope: &str,
+    object_kind: &str,
+    object_ref_expression: &str,
+) -> String {
+    format!(
+        "EXISTS ( \
+             SELECT 1 FROM collection_execution_input_eligibility budget \
+             WHERE budget.target_ref={target_ref_expression} \
+               AND budget.domain_scope='{domain_scope}' \
+               AND budget.object_kind='{object_kind}' \
+               AND budget.object_ref={object_ref_expression} \
+               AND budget.capability='content_detail' \
+               AND budget.state <> 'input_blocked' \
+               AND (budget.state='budget_exhausted' \
+                    OR (budget.next_retry_at IS NOT NULL \
+                        AND budget.next_retry_at > scope_001_now())))"
+    )
+}
+
+/// 这张工单里预算已经用尽、不该再被展开的成员。
+///
+/// 与「缺输入停过」分开：缺输入的成员会在输入真的变了之后回来，而预算用尽的成员**不会**
+/// 自己回来——它要的是受控重新准入（另一次明确的决定），不是等一个更好的地址。所以两条判据
+/// 不能合用一个函数：合起来之后，「什么时候它会回来」就没有单一答案了。
+pub(crate) async fn budget_exhausted_object_refs_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    work_order_ref: Uuid,
+) -> Result<BlockedObjects, sqlx::Error> {
+    let cross_industry_ready: bool = sqlx::query_scalar(
+        "SELECT to_regclass('cross_industry_sample') IS NOT NULL \
+             AND to_regclass('collection_work_order_cross_industry_target') IS NOT NULL",
+    )
+    .fetch_one(&mut **transaction)
+    .await?;
+    let material: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT scope.content_public_ref \
+         FROM collection_work_order_material_target scope \
+         JOIN collection_work_order order_row USING(work_order_ref) \
+         JOIN collection_execution_input_eligibility budget \
+           ON budget.target_ref=order_row.target_ref \
+          AND budget.domain_scope='own_domain' \
+          AND budget.object_kind='material_content' \
+          AND budget.object_ref=scope.content_public_ref \
+          AND budget.capability='content_detail' \
+          AND budget.state='budget_exhausted' \
+         WHERE scope.work_order_ref=$1",
+    )
+    .bind(work_order_ref)
+    .fetch_all(&mut **transaction)
+    .await?;
+    let cross_industry: Vec<Uuid> = if cross_industry_ready {
+        sqlx::query_scalar(
+            "SELECT scope.sample_ref \
+             FROM collection_work_order_cross_industry_target scope \
+             JOIN collection_work_order order_row USING(work_order_ref) \
+             JOIN collection_execution_input_eligibility budget \
+               ON budget.target_ref=order_row.target_ref \
+              AND budget.domain_scope='cross_industry' \
+              AND budget.object_kind='cross_industry_sample' \
+              AND budget.object_ref=scope.sample_ref \
+              AND budget.capability='content_detail' \
+              AND budget.state='budget_exhausted' \
+             WHERE scope.work_order_ref=$1",
+        )
+        .bind(work_order_ref)
+        .fetch_all(&mut **transaction)
+        .await?
+    } else {
+        Vec::new()
+    };
+    Ok(BlockedObjects {
+        material,
+        cross_industry,
+    })
+}
+
+/// 记一次「页面读了一次没读成」，把预算累计到台账的当前行上。
+///
+/// 计数落在**当前行**而不是某张工单上，因为要回答的问题变了：从前问「这张工单里试了几次」，
+/// 于是每建一张新工单都从零开始，同一个缺口可以永远「再试三次」。现在问「这个需求范围一共
+/// 试了几次」——换工单不是新事实，换地址也不是（预算键不含 locator 指纹，见迁移头注释），
+/// 只有受控重新准入才开新的 `retry_epoch`。
+///
+/// **同一个事件重报只算一次**（按 `last_event_ref` 去重）：上报路径可能重试，重试不该让预算
+/// 往前走一格。
+///
+/// **旧归档不进预算。** 本表建立之前的工单没有冻过输入（`execution_input_frozen_at IS NULL`），
+/// 它们的失败证明「试过」，不证明「试的是同一份输入」；按合同不算进预算，更不允许凭一批无法
+/// 对齐输入的历史失败把一篇作品按 content ID 封禁。那些次数记进 `prior_failures_unverified`，
+/// 让「过去失败过多少次、其中多少次算数」两个数都读得出来。
+///
+/// 返回 `None` 表示这次上报不归预算管，三种情形都如实说而不是编一个数：任务对不上任何已知的
+/// 作品作用域；这个范围此刻正停在 `input_blocked` 上（停止有自己的判据，一次读失败不能改写
+/// 它）；或这张工单出生时没有冻过输入（旧工单，这次失败只记进待核实）。调用方遇到 `None`
+/// 就只按原有的「同一工单内」规则走。
+pub(crate) async fn record_detail_page_read_failure_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    task_id: Uuid,
+    failure_ref: Uuid,
+) -> Result<Option<PageReadBudget>, sqlx::Error> {
+    let Some(subject) = load_task_execution_subject_in_transaction(transaction, task_id).await?
+    else {
+        return Ok(None);
+    };
+    let Some(target_ref) = subject.target_ref else {
+        return Ok(None);
+    };
+    let (domain_scope, object_kind, object_ref) = match (&subject.content_public_ref, &subject.sample_ref)
+    {
+        (Some(content_public_ref), _) => ("own_domain", "material_content", *content_public_ref),
+        (_, Some(sample_ref)) => ("cross_industry", "cross_industry_sample", *sample_ref),
+        _ => return Ok(None),
+    };
+    let mut current = current_budget_row_in_transaction(
+        transaction,
+        target_ref,
+        domain_scope,
+        object_kind,
+        object_ref,
+    )
+    .await?;
+    if current.is_none() {
+        // 这个范围在台账里还没有行，这一次失败就是它的第一条记录。新建时如实写下此刻解析出来
+        // 的输入，以及**这张工单有没有冻过输入**——它的来历决定这些次数算不算数。
+        //
+        // 冲突什么都不做：并发的另一条上报、或一条已经停下的行，都可能占住这个身份。占了就
+        // 让位，随后重新读一次当前行——**不覆盖**别人写下的事实，也不把停止行改写成可执行。
+        let locator = candidate_locator_sql("$9", subject.cross_industry_ready);
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "WITH resolved AS ( \
+                 SELECT locator.url,locator.source_kind,locator.source_ref \
+                 FROM (VALUES (1)) singleton \
+                 LEFT JOIN LATERAL ({locator}) locator ON TRUE \
+             ) \
+             INSERT INTO collection_execution_input_eligibility \
+                 (eligibility_ref,target_ref,domain_scope,object_kind,object_ref,capability, \
+                  state,reason_code,input_fingerprint,input_source_kind,input_source_ref, \
+                  resolver_version,input_source_status,last_event_ref,policy_version, \
+                  prior_failures_unverified) \
+             SELECT gen_random_uuid(),$1,$2,$3,$4,'content_detail','eligible',NULL, \
+                    CASE WHEN resolved.url IS NULL THEN NULL \
+                         ELSE {fingerprint} END, \
+                    resolved.source_kind,resolved.source_ref,$6, \
+                    CASE WHEN $7 THEN 'frozen' ELSE 'legacy_input_unfrozen' END, \
+                    NULL,$8,{unverified} \
+             FROM resolved \
+             ON CONFLICT DO NOTHING",
+            fingerprint = locator_fingerprint_sql("resolved.url"),
+            unverified = unverified_prior_failures_sql(
+                "$1",
+                domain_scope,
+                object_kind,
+                "$9",
+                subject.cross_industry_ready,
+            ),
+        )))
+        .bind(target_ref)
+        .bind(domain_scope)
+        .bind(object_kind)
+        .bind(object_ref)
+        .bind(&subject.content_external_id)
+        .bind(EXECUTION_INPUT_RESOLVER_VERSION)
+        .bind(subject.scope_was_frozen)
+        .bind(PAGE_READ_BUDGET_POLICY_VERSION)
+        .bind(&subject.content_external_id)
+        .execute(&mut **transaction)
+        .await?;
+        current = current_budget_row_in_transaction(
+            transaction,
+            target_ref,
+            domain_scope,
+            object_kind,
+            object_ref,
+        )
+        .await?;
+    }
+    let Some(BudgetRow {
+        eligibility_ref,
+        count,
+        last_event_ref,
+        state,
+    }) = current
+    else {
+        // 插不进去也读不到当前行：这个范围此刻停在「没有输入」上。停止行是历史，一次读失败
+        // 不改写它，也不在它身上累计预算。
+        return Ok(None);
+    };
+    if last_event_ref == Some(failure_ref) {
+        // 同一个事件又报了一次：预算不动，把当前的落点如实答回去。
+        return Ok(Some(PageReadBudget {
+            count: i64::from(count),
+            exhausted: state == "budget_exhausted",
+        }));
+    }
+    if !subject.scope_was_frozen {
+        // 这张工单出生时没有冻过输入（本表建立之前的工单）：它的失败证明「试过」，不证明
+        // 「试的是同一份输入」，所以记进待核实那一列，不进预算——预算会触发停止，而停止
+        // 之后要重新可执行需要另一次明确决定；凭一条无法对齐输入的历史失败做到这一步，
+        // 等于按 content ID 把一篇作品封掉。返回 `None`：这次上报不归预算管，调用方仍按
+        // 既有的「同一工单内」规则收尾。
+        sqlx::query(
+            "UPDATE collection_execution_input_eligibility \
+             SET prior_failures_unverified=prior_failures_unverified+1,last_event_ref=$2, \
+                 updated_at=scope_001_now() \
+             WHERE eligibility_ref=$1",
+        )
+        .bind(eligibility_ref)
+        .bind(failure_ref)
+        .execute(&mut **transaction)
+        .await?;
+        return Ok(None);
+    }
+    let next_count = count.saturating_add(1);
+    let exhausted = i64::from(next_count) >= DETAIL_PAGE_READ_BUDGET;
+    let retry_after_seconds = crate::dispatch::retry_after_seconds_for_failure_count(next_count);
+    sqlx::query(
+        "UPDATE collection_execution_input_eligibility \
+         SET deduplicated_failure_count=$2,last_event_ref=$3, \
+             next_retry_at=scope_001_now()+make_interval(secs=>$4), \
+             state=CASE WHEN $5 THEN 'budget_exhausted' ELSE state END, \
+             reason_code=CASE WHEN $5 THEN $7 ELSE reason_code END, \
+             policy_version=$6,updated_at=scope_001_now() \
+         WHERE eligibility_ref=$1 AND state <> 'input_blocked'",
+    )
+    .bind(eligibility_ref)
+    .bind(next_count)
+    .bind(failure_ref)
+    .bind(i32::try_from(retry_after_seconds).unwrap_or(i32::MAX))
+    .bind(exhausted)
+    .bind(PAGE_READ_BUDGET_POLICY_VERSION)
+    .bind(PAGE_READ_BUDGET_EXHAUSTED_REASON)
+    .execute(&mut **transaction)
+    .await?;
+    Ok(Some(PageReadBudget {
+        count: i64::from(next_count),
+        exhausted,
+    }))
+}
+
+/// 台账里「此刻说了算」的那一行：非停止行至多一条（部分唯一索引
+/// `collection_execution_input_eligibility_current_idx`）。`FOR UPDATE` 让同一范围的两条并发
+/// 上报排队数数，而不是各自读到一个旧值再各写一次——那会让预算少记一格。
+struct BudgetRow {
+    eligibility_ref: Uuid,
+    count: i32,
+    last_event_ref: Option<Uuid>,
+    state: String,
+}
+
+async fn current_budget_row_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    target_ref: Uuid,
+    domain_scope: &str,
+    object_kind: &str,
+    object_ref: Uuid,
+) -> Result<Option<BudgetRow>, sqlx::Error> {
+    let row: Option<(Uuid, i32, Option<Uuid>, String)> = sqlx::query_as(
+        "SELECT eligibility_ref,deduplicated_failure_count,last_event_ref,state \
+         FROM collection_execution_input_eligibility \
+         WHERE target_ref=$1 AND domain_scope=$2 AND object_kind=$3 AND object_ref=$4 \
+           AND capability='content_detail' AND state <> 'input_blocked' \
+         FOR UPDATE",
+    )
+    .bind(target_ref)
+    .bind(domain_scope)
+    .bind(object_kind)
+    .bind(object_ref)
+    .fetch_optional(&mut **transaction)
+    .await?;
+    Ok(row.map(
+        |(eligibility_ref, count, last_event_ref, state)| BudgetRow {
+            eligibility_ref,
+            count,
+            last_event_ref,
+            state,
+        },
+    ))
+}
+
+/// 本表建立之前、没冻过输入的那些失败：记下次数，但不进预算。
+///
+/// 判据落在**工单**上而不是台账上：一次停止会为某个对象写下 `input_source_status='frozen'`，
+/// 于是「这个对象停过」会被读成「这张工单冻过输入」——两件事方向相反。冻结发生在建单那一刻，
+/// 所以只有 `collection_work_order.execution_input_frozen_at` 能回答它。
+fn unverified_prior_failures_sql(
+    target_ref_expression: &str,
+    domain_scope: &str,
+    object_kind: &str,
+    content_external_id_expression: &str,
+    cross_industry_ready: bool,
+) -> String {
+    let scope_join = match (domain_scope, object_kind) {
+        ("own_domain", _) => "JOIN collection_work_order_material_target scope \
+                              ON scope.work_order_ref=order_row.work_order_ref \
+                             AND scope.content_public_ref=$4"
+            .to_owned(),
+        _ if cross_industry_ready => "JOIN collection_work_order_cross_industry_target scope \
+                                       ON scope.work_order_ref=order_row.work_order_ref \
+                                      AND scope.sample_ref=$4"
+            .to_owned(),
+        _ => "JOIN collection_work_order_cross_industry_target scope \
+              ON scope.work_order_ref=order_row.work_order_ref AND false"
+            .to_owned(),
+    };
+    format!(
+        "(SELECT COUNT(*) \
+          FROM collection_work_order_lease_task_dispatch_failure failure \
+          JOIN collection_work_order_lease_task task ON task.task_id=failure.task_id \
+          JOIN collection_work_order_lease lease ON lease.lease_ref=task.lease_ref \
+          JOIN collection_work_order order_row ON order_row.work_order_ref=lease.work_order_ref \
+          JOIN linggan_runtime_task runtime ON runtime.task_id=task.task_id \
+          {scope_join} \
+          WHERE order_row.target_ref={target_ref_expression} \
+            AND order_row.execution_input_frozen_at IS NULL \
+            AND failure.failure_code='page_read_failed' \
+            AND runtime.task_spec #>> '{{capabilitiesRequested,0}}'='content_detail' \
+            AND runtime.task_spec #>> '{{target,contentExternalId}}'={content_external_id_expression})",
+    )
+}
+
+/// 「这个范围的详情材料已经被接纳了吗」。
+///
+/// 用来挡住「迟到的失败把一件已经做成的事往回写」：一次读失败的报告可能和另一个通道的成功
+/// 交付并发到达，而那份材料已经落库。已经拿到的材料不因为一次旧的读失败倒退，也不该再被
+/// 算进预算——那个预算问的是「要不要再试」，而这里已经没有要补的东西了。
+///
+/// 判据与档案完整度用的是同一句：详情材料在库里有一行（本领域侧
+/// `linggan_material_content_detail`、跨行业侧 `cross_industry_sample_detail`）。**整包被隔离
+/// 时两处都不会有行**，所以「任务说完成、材料没进来」不会被误读成已取得。
+pub(crate) async fn detail_material_already_accepted_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    task_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    let Some(subject) = load_task_execution_subject_in_transaction(transaction, task_id).await?
+    else {
+        return Ok(false);
+    };
+    if let Some(content_public_ref) = subject.content_public_ref {
+        return sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM linggan_material_content_detail detail \
+                            WHERE detail.content_public_ref=$1)",
+        )
+        .bind(content_public_ref)
+        .fetch_one(&mut **transaction)
+        .await;
+    }
+    let Some(sample_ref) = subject.sample_ref else {
+        return Ok(false);
+    };
+    // 控制面证明库里没有跨行业那几张表：「这个环境没有这一侧」是一次能力缺失，不是「没有材料」。
+    let ready: bool = sqlx::query_scalar(
+        "SELECT to_regclass('cross_industry_sample_detail') IS NOT NULL",
+    )
+    .fetch_one(&mut **transaction)
+    .await?;
+    if !ready {
+        return Ok(false);
+    }
+    sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM cross_industry_sample_detail detail \
+                        WHERE detail.sample_ref=$1)",
+    )
+    .bind(sample_ref)
+    .fetch_one(&mut **transaction)
+    .await
 }
