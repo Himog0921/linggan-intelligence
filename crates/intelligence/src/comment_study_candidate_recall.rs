@@ -5,10 +5,10 @@
 //! fallback so a zero lexical overlap never becomes a hidden “no match” verdict.
 
 use crate::comment_study_embedding::active_profile;
-use crate::comment_study_problem_store::resolve_retrieval_incomplete;
 use crate::comment_study_problem_store::{
     PreparedProblemResolution, ProblemStoreError, accept_problem_resolution, prepare_problem_pair,
-    prepare_problem_resolution,
+    prepare_problem_resolution, resolve_retrieval_incomplete,
+    resume_retrieval_incomplete_resolution,
 };
 use crate::comment_study_recall::{RecallCompleteness, recall_candidates};
 use linggan_storage_postgres::Database;
@@ -246,21 +246,25 @@ pub async fn prepare_recalled_problem_resolution(
 pub async fn advance_next_problem_resolution(
     database: &Database,
 ) -> Result<bool, ProblemCandidateRecallError> {
-    let signal_ref: Option<Uuid> = sqlx::query_scalar(
-        "SELECT signal.signal_ref FROM linggan_comment_study_signal signal \
-         WHERE signal.kind IN ('problem','need') AND signal.eligibility_state='eligible' \
-           AND NOT EXISTS(SELECT 1 FROM linggan_comment_study_resolution resolution WHERE resolution.signal_ref=signal.signal_ref) \
-         ORDER BY signal.created_at,signal.signal_ref LIMIT 1",
-    )
-    .fetch_optional(database.pool())
-    .await?;
-    let Some(signal_ref) = signal_ref else {
-        return Ok(false);
-    };
     // Without a qualified encoding profile there is no catalogue to search at all. Falling back to
     // the lexical path here would be worse than doing nothing: it would answer "no candidates"
     // with a method that cannot see semantic matches, and that answer creates duplicates.
-    let Some(profile_ref) = active_profile(database).await? else {
+    let profile_ref = active_profile(database).await?;
+    let candidate: Option<(Uuid, Option<Uuid>)> = sqlx::query_as(
+        "SELECT signal.signal_ref,resolution.resolution_ref \
+         FROM linggan_comment_study_signal signal \
+         LEFT JOIN linggan_comment_study_resolution resolution USING(signal_ref) \
+         WHERE signal.kind IN ('problem','need') AND signal.eligibility_state='eligible' \
+           AND (resolution.signal_ref IS NULL OR ($1 AND resolution.state='retrieval_incomplete')) \
+         ORDER BY signal.created_at,signal.signal_ref LIMIT 1",
+    )
+    .bind(profile_ref.is_some())
+    .fetch_optional(database.pool())
+    .await?;
+    let Some((signal_ref, existing_resolution_ref)) = candidate else {
+        return Ok(false);
+    };
+    let Some(profile_ref) = profile_ref else {
         let prepared = prepare_problem_resolution(database, signal_ref, Vec::new()).await?;
         if prepared.state == "pending" {
             resolve_retrieval_incomplete(database, prepared.resolution_ref, "no_qualified_profile")
@@ -277,8 +281,19 @@ pub async fn advance_next_problem_resolution(
             candidate_problem_refs.push(problem_ref);
         }
     }
-    let prepared =
-        prepare_problem_resolution(database, signal_ref, candidate_problem_refs.clone()).await?;
+    let prepared = match existing_resolution_ref {
+        Some(resolution_ref) => {
+            resume_retrieval_incomplete_resolution(
+                database,
+                resolution_ref,
+                candidate_problem_refs.clone(),
+            )
+            .await?
+        }
+        None => {
+            prepare_problem_resolution(database, signal_ref, candidate_problem_refs.clone()).await?
+        }
+    };
     if prepared.state != "pending" {
         return Ok(true);
     }

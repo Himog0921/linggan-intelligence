@@ -3350,10 +3350,10 @@ async fn a_signal_is_never_called_novel_while_the_catalogue_cannot_be_searched()
     assert!(advance_next_problem_resolution(&database).await.unwrap());
     // Which of the two got advanced is not fixed, so it is recorded now rather than inferred
     // later: once both carry a resolution, "the other one" is no longer derivable.
-    let (settled_first, pending_next) = if resolution_state_for(&database, first).await.is_some() {
-        (first, second)
+    let settled_first = if resolution_state_for(&database, first).await.is_some() {
+        first
     } else {
-        (second, first)
+        second
     };
     assert_eq!(
         resolution_state_for(&database, settled_first).await,
@@ -3389,12 +3389,64 @@ async fn a_signal_is_never_called_novel_while_the_catalogue_cannot_be_searched()
     .await;
     assert!(advance_next_problem_resolution(&database).await.unwrap());
     assert_eq!(
-        resolution_state_for(&database, pending_next).await,
+        resolution_state_for(&database, settled_first).await,
         Some((
             "retrieval_incomplete".to_owned(),
             Some("problem_core_vectors_incomplete".to_owned())
         ))
     );
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn an_incomplete_recall_retries_after_a_profile_becomes_qualified() {
+    let database = proof_database("comment_study_resolution_resume").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    let (first, second) = two_eligible_signals(&database, "study-resolution-resume-note").await;
+
+    assert!(advance_next_problem_resolution(&database).await.unwrap());
+    let settled_first = if resolution_state_for(&database, first).await.is_some() {
+        first
+    } else {
+        second
+    };
+    assert_eq!(
+        resolution_state_for(&database, settled_first).await,
+        Some((
+            "retrieval_incomplete".to_owned(),
+            Some("no_qualified_profile".to_owned())
+        ))
+    );
+
+    let profile = seed_embedding_profile(&database).await;
+    for signal in [first, second] {
+        seed_vector(
+            &database,
+            profile,
+            &signal_canonical_hash(&database, signal).await,
+            0.0,
+        )
+        .await;
+    }
+
+    assert!(advance_next_problem_resolution(&database).await.unwrap());
+    assert_eq!(
+        resolution_state_for(&database, settled_first).await,
+        Some(("deferred_novel".to_owned(), None)),
+        "a complete, empty catalogue is now evidence of novelty"
+    );
+    let prior_reason: Option<String> = sqlx::query_scalar(
+        "SELECT candidate_manifest->'priorRetrievalIncomplete'->>'retrievalIncompleteReason' \
+         FROM linggan_comment_study_resolution WHERE signal_ref=$1",
+    )
+    .bind(settled_first)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(prior_reason.as_deref(), Some("no_qualified_profile"));
 }
 
 #[tokio::test]

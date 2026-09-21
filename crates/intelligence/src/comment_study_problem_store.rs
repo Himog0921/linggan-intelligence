@@ -169,6 +169,43 @@ pub async fn resolve_retrieval_incomplete(
     })
 }
 
+/// Reopens a previously incomplete recall after its search prerequisites have changed.
+///
+/// The Resolution keeps its identity because this is not a second conclusion about the Signal: it
+/// is the same comparison that could not previously cover the catalogue. The prior incomplete
+/// receipt remains attached to the refreshed candidate manifest rather than being silently lost.
+pub async fn resume_retrieval_incomplete_resolution(
+    database: &Database,
+    resolution_ref: Uuid,
+    server_candidate_refs: Vec<Uuid>,
+) -> Result<PreparedProblemResolution, ProblemStoreError> {
+    let candidates = normalized_candidates(server_candidate_refs)?;
+    let mut transaction = database.pool().begin().await?;
+    let resolution = lock_retrieval_incomplete_resolution(&mut transaction, resolution_ref).await?;
+    validate_candidates(&mut transaction, resolution.domain_ref, &candidates).await?;
+    let manifest = json!({
+        "contract":"comment-study.problem-candidate-set.v1",
+        "candidateProblemRefs":candidates,
+        "priorRetrievalIncomplete":resolution.decision_manifest,
+    });
+    sqlx::query(
+        "UPDATE linggan_comment_study_resolution \
+         SET state='pending',candidate_manifest=$2,decision_manifest=NULL,resolved_problem_ref=NULL,resolved_at=NULL \
+         WHERE resolution_ref=$1",
+    )
+    .bind(resolution_ref)
+    .bind(manifest)
+    .execute(&mut *transaction)
+    .await?;
+    transaction.commit().await?;
+    Ok(PreparedProblemResolution {
+        resolution_ref,
+        signal_ref: resolution.signal_ref,
+        state: "pending".to_owned(),
+        candidate_problem_refs: candidates,
+    })
+}
+
 /// Accepts a closed candidate comparison. A malformed model output is recorded as a protocol
 /// rejection, never reinterpreted as “there was no matching Problem”.
 pub async fn accept_problem_resolution(
@@ -440,6 +477,39 @@ struct PendingResolution {
     signal_ref: Uuid,
     domain_ref: Uuid,
     candidate_manifest: Value,
+}
+
+struct RetrievalIncompleteResolution {
+    signal_ref: Uuid,
+    domain_ref: Uuid,
+    decision_manifest: Value,
+}
+
+async fn lock_retrieval_incomplete_resolution(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    resolution_ref: Uuid,
+) -> Result<RetrievalIncompleteResolution, ProblemStoreError> {
+    let row = sqlx::query(
+        "SELECT resolution.signal_ref,resolution.domain_ref,resolution.decision_manifest,signal.kind,signal.eligibility_state \
+         FROM linggan_comment_study_resolution resolution \
+         JOIN linggan_comment_study_signal signal USING(signal_ref) \
+         WHERE resolution.resolution_ref=$1 AND resolution.state='retrieval_incomplete' \
+         FOR UPDATE OF resolution,signal",
+    )
+    .bind(resolution_ref)
+    .fetch_optional(&mut **transaction)
+    .await?
+    .ok_or(ProblemStoreError::ResolutionUnavailable)?;
+    let kind: String = row.get("kind");
+    let eligibility_state: String = row.get("eligibility_state");
+    if !matches!(kind.as_str(), "problem" | "need") || eligibility_state != "eligible" {
+        return Err(ProblemStoreError::SignalNotEligible);
+    }
+    Ok(RetrievalIncompleteResolution {
+        signal_ref: row.get("signal_ref"),
+        domain_ref: row.get("domain_ref"),
+        decision_manifest: row.get("decision_manifest"),
+    })
 }
 
 async fn lock_pending_resolution(
