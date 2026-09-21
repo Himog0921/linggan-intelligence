@@ -67,7 +67,8 @@ async fn main() -> ExitCode {
     // `unknown`，不拿别的东西冒充（见 `runtime_event`）。
     RuntimeEvent::new(SERVICE_WORKER, EVENT_STARTUP).emit();
 
-    let mut ticker = tokio::time::interval(TICK_INTERVAL);
+    let mut ticker =
+        tokio::time::interval_at(tokio::time::Instant::now() + TICK_INTERVAL, TICK_INTERVAL);
     // 卡住的那一轮不该在恢复之后补跑一串：延后到下一个周期就够了。
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
@@ -78,81 +79,83 @@ async fn main() -> ExitCode {
     let mut tick_announced = false;
     let mut retry_after = READINESS_RETRY_START;
 
-    loop {
-        let readiness = observe_readiness(&url, &mut database).await;
-        // 模型评论循环**不**由采集面的就绪判据决定：它有自己的表，采集面的缺口不该把另一条
-        // 通道连坐停摆（要求清单是每消费者各主张的下限，不是一个总闸）。它的判据是「有没有
-        // 连接」——连不上时把它跑起来，只会制造一屋子错误日志。
-        if model_worker.is_none() {
-            if let Some(connection) = database.as_ref() {
-                let worker_instance_ref = uuid::Uuid::new_v4();
-                if let Err(error) =
-                    record_scheduler_started(connection, worker_instance_ref).await
-                {
-                    println!("linggan worker: cannot record scheduler identity: {error}");
+    // Cancel only the collection loop. In-flight model receipts drain independently below.
+    // An interrupted tick retains its unfinished ledger row; cancellation is not completion.
+    tokio::select! {
+        biased;
+        _ = &mut shutdown => {},
+        _ = async {
+            loop {
+                let readiness = observe_readiness(&url, &mut database).await;
+                // 模型评论循环**不**由采集面的就绪判据决定：它有自己的表，采集面的缺口不该把另一条
+                // 通道连坐停摆（要求清单是每消费者各主张的下限，不是一个总闸）。它的判据是「有没有
+                // 连接」——连不上时把它跑起来，只会制造一屋子错误日志。
+                if model_worker.is_none() {
+                    if let Some(connection) = database.as_ref() {
+                        let worker_instance_ref = uuid::Uuid::new_v4();
+                        if let Err(error) =
+                            record_scheduler_started(connection, worker_instance_ref).await
+                        {
+                            println!("linggan worker: cannot record scheduler identity: {error}");
+                        }
+                        model_worker = Some(tokio::spawn(
+                            linggan_intelligence::model_runner::run_model_worker_with_drain(
+                                connection.clone(),
+                                drain.clone(),
+                            ),
+                        ));
+                    }
                 }
-                model_worker = Some(tokio::spawn(
-                    linggan_intelligence::model_runner::run_model_worker_with_drain(
-                        connection.clone(),
-                        drain.clone(),
-                    ),
-                ));
-            }
-        }
-        if !readiness.is_ready() {
-            if announced != Some(readiness.state.code()) {
-                println!(
-                    "linggan worker: not ready ({}{}); no work is claimed until this clears",
-                    readiness.state.code(),
-                    readiness
-                        .detail
-                        .as_deref()
-                        .map(|detail| format!(": {detail}"))
-                        .unwrap_or_default(),
-                );
-                emit_readiness(&readiness);
-                announced = Some(readiness.state.code());
-            }
-            // 未就绪同样要落心跳，而且是**每轮都落**：日志只在状态变化时说话（上面那句），
-            // 但心跳那一行是「最后一次判定」——只写第一次，`readiness_checked_at` 会永远停在
-            // 故障开始的那一刻，读它的人分不清「现在还接不了活」和「这台机器说完那句话就死了」。
-            // 连不上数据库时 `database` 还是 None，没有可写之处：那种情况由 `/health` 说。
-            if let Some(database) = database.as_ref() {
+                if !readiness.is_ready() {
+                    if announced != Some(readiness.state.code()) {
+                        println!(
+                            "linggan worker: not ready ({}{}); no work is claimed until this clears",
+                            readiness.state.code(),
+                            readiness
+                                .detail
+                                .as_deref()
+                                .map(|detail| format!(": {detail}"))
+                                .unwrap_or_default(),
+                        );
+                        emit_readiness(&readiness);
+                        announced = Some(readiness.state.code());
+                    }
+                    // 未就绪同样要落心跳，而且是**每轮都落**：日志只在状态变化时说话（上面那句），
+                    // 但心跳那一行是「最后一次判定」——只写第一次，`readiness_checked_at` 会永远停在
+                    // 故障开始的那一刻，读它的人分不清「现在还接不了活」和「这台机器说完那句话就死了」。
+                    // 连不上数据库时 `database` 还是 None，没有可写之处：那种情况由 `/health` 说。
+                    if let Some(database) = database.as_ref() {
+                        if let Err(error) = record_readiness(database, &readiness).await {
+                            println!("linggan worker: cannot record readiness: {error}");
+                        }
+                    }
+                    tokio::time::sleep(retry_after).await;
+                    retry_after = next_readiness_retry(retry_after);
+                    continue;
+                }
+                if let Some(previous) = announced.take() {
+                    println!("linggan worker: ready again (was {previous}); resuming work");
+                    emit_readiness(&readiness);
+                }
+                retry_after = READINESS_RETRY_START;
+                if !tick_announced {
+                    println!(
+                        "linggan worker: patrol tick every {}s",
+                        TICK_INTERVAL.as_secs()
+                    );
+                    tick_announced = true;
+                }
+                let database = database
+                    .as_ref()
+                    .expect("a ready probe always has a connection behind it");
+                // 就绪这件事写进心跳：进程被杀掉时，日志没了，心跳里那行还在。
                 if let Err(error) = record_readiness(database, &readiness).await {
                     println!("linggan worker: cannot record readiness: {error}");
                 }
+                run_collection_tick(database).await;
+                ticker.tick().await;
             }
-            tokio::select! {
-                _ = &mut shutdown => break,
-                _ = tokio::time::sleep(retry_after) => {}
-            }
-            retry_after = next_readiness_retry(retry_after);
-            continue;
-        }
-        if let Some(previous) = announced.take() {
-            println!("linggan worker: ready again (was {previous}); resuming work");
-            emit_readiness(&readiness);
-        }
-        retry_after = READINESS_RETRY_START;
-        if !tick_announced {
-            println!(
-                "linggan worker: patrol tick every {}s",
-                TICK_INTERVAL.as_secs()
-            );
-            tick_announced = true;
-        }
-        let database = database
-            .as_ref()
-            .expect("a ready probe always has a connection behind it");
-        // 就绪这件事写进心跳：进程被杀掉时，日志没了，心跳里那行还在。
-        if let Err(error) = record_readiness(database, &readiness).await {
-            println!("linggan worker: cannot record readiness: {error}");
-        }
-        run_collection_tick(database).await;
-        tokio::select! {
-            _ = &mut shutdown => break,
-            _ = ticker.tick() => {}
-        }
+        } => {},
     }
 
     drain.request();
@@ -172,8 +175,8 @@ async fn main() -> ExitCode {
 
 /// 一次就绪判定写一行事件。人读的散文行与机器读的事件都在状态**变化**时出现。
 fn emit_readiness(readiness: &linggan_evidence::RuntimeReadiness) {
-    let mut event = RuntimeEvent::new(SERVICE_WORKER, EVENT_READINESS)
-        .with_outcome(readiness.state.code());
+    let mut event =
+        RuntimeEvent::new(SERVICE_WORKER, EVENT_READINESS).with_outcome(readiness.state.code());
     if let Some(detail) = readiness.detail.as_deref() {
         event = event.with_reason(detail);
     }

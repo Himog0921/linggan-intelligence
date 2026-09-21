@@ -1609,3 +1609,38 @@ async fn a_scheduler_tick_names_the_actual_admission_failure() {
         "挡住它的是「还没说清属于哪个领域」，不是一句笼统的「目标不可请求」"
     );
 }
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn recovery_phase_skips_keyword_candidate_scan() {
+    const SCHEMA: &str = "keyword_recovery_scan";
+    if let Ok(target_ref) = std::env::var("KEYWORD_RECOVERY_SCAN_CHILD") {
+        let database = Database::connect_within_schema(
+            &std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap(), SCHEMA,
+        ).await.unwrap();
+        let summary = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            linggan_evidence::run_keyword_archive_details(&database, "proof"),
+        ).await.expect("recovery must not wait for the locked candidate table").unwrap();
+        assert!(summary.queued.is_empty());
+        assert!(summary.skipped.contains(&(
+            Uuid::parse_str(&target_ref).unwrap(), "collection_upgrade_recovery_only".to_owned(),
+        )));
+        return;
+    }
+    let database = proof_database(SCHEMA).await;
+    let target_ref = submit_keyword_archive(
+        &database, "recovery-scan-proof", "bottom_confirmed", 1, 0,
+    ).await;
+    let mut blocker = database.pool().begin().await.unwrap();
+    sqlx::query("LOCK TABLE cross_industry_sample IN ACCESS EXCLUSIVE MODE")
+        .execute(&mut *blocker).await.unwrap();
+    let result = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--ignored", "--exact", "recovery_phase_skips_keyword_candidate_scan"])
+        .env("LINGGAN_COLLECTION_UPGRADE_PHASE", "recovery")
+        .env("KEYWORD_RECOVERY_SCAN_CHILD", target_ref.to_string())
+        .output().unwrap();
+    blocker.rollback().await.unwrap();
+    assert!(result.status.success(), "{} {}",
+        String::from_utf8_lossy(&result.stdout), String::from_utf8_lossy(&result.stderr));
+}

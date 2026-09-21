@@ -236,9 +236,13 @@ async fn reachable_but_unmigrated_database_is_classified_not_masked() {
 async fn an_unready_worker_leaves_its_classification_in_the_heartbeat() {
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").expect("proof URL is supplied");
     let schema = "worker_readiness_landing";
-    isolated_proof_schema(&url, schema, &migrations_missing("0034_collection_control_closure"))
-        .await
-        .expect("the fixture schema is built from the real migration directory");
+    isolated_proof_schema(
+        &url,
+        schema,
+        &migrations_missing("0034_collection_control_closure"),
+    )
+    .await
+    .expect("the fixture schema is built from the real migration directory");
 
     // 子进程只拿得到一个连接串，所以 schema 走 libpq 的 `options`——它与
     // `Database::connect_within_schema` 写进 startup 包的是同一个参数。
@@ -320,4 +324,85 @@ fn migrations_missing(missing: &str) -> String {
         rows.join(",\n")
     ));
     sql
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn sigterm_drains_even_while_the_collection_tick_is_blocked() {
+    let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").expect("proof URL is supplied");
+    let schema = "worker_tick_drain";
+    let database = isolated_proof_schema(&url, schema, &migrations_missing("none"))
+        .await
+        .expect("the complete isolated schema is built");
+    let mut blocker = database.pool().begin().await.unwrap();
+    sqlx::query("LOCK TABLE collection_scheduler_run IN ACCESS EXCLUSIVE MODE")
+        .execute(&mut *blocker)
+        .await
+        .unwrap();
+    let ack_dir =
+        std::env::temp_dir().join(format!("linggan-drain-proof-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&ack_dir).unwrap();
+    struct ProcessGuard(Child, std::path::PathBuf);
+    impl Drop for ProcessGuard {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+            let _ = std::fs::remove_dir_all(&self.1);
+        }
+    }
+    let ack = ack_dir.join("ack");
+    let mut worker = ProcessGuard(
+        Command::new(WORKER_BINARY)
+            .env(
+                "LINGGAN_LOCAL_DATABASE_URL",
+                format!("{url}?options=-csearch_path%3D{schema}"),
+            )
+            .env_remove("LINGGAN_SUPPORT_DIR")
+            .env("LINGGAN_WORKER_DRAIN_ACK_PATH", &ack)
+            .env("LINGGAN_COLLECTION_UPGRADE_PHASE", "recovery")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+        ack_dir,
+    );
+    tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            let blocked: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM pg_locks waiting \
+                 WHERE waiting.relation='collection_scheduler_run'::regclass \
+                   AND NOT waiting.granted)",
+            )
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+            if blocked {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("the real worker reaches the blocked tick insert");
+    assert!(
+        Command::new("kill")
+            .args(["-TERM", &worker.0.id().to_string()])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let status = tokio::time::timeout(Duration::from_secs(8), async {
+        loop {
+            if let Some(status) = worker.0.try_wait().unwrap() {
+                break status;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("SIGTERM must drain while the database lock remains held");
+    assert!(status.success());
+    let receipt = std::fs::read_to_string(&ack).expect("the worker confirms drain");
+    assert!(receipt.contains(&format!("pid={}\nstate=drained\n", worker.0.id())));
+    blocker.rollback().await.unwrap();
 }
