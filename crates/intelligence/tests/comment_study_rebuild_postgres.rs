@@ -146,6 +146,97 @@ async fn source_gate_selects_only_adhd_current_readable_and_unrestricted_comment
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof"]
+async fn source_gate_excludes_content_author_voice_and_unknown_roles() {
+    let database = proof_database("comment_study_source_author_role").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    detail_with_author(
+        &database,
+        "study-author-role-note",
+        "ADHD 家庭作业上下文",
+        Some("creator-1"),
+    )
+    .await;
+    let reader_comment = comment_with_author(
+        &database,
+        "study-author-role-note",
+        "study-author-role-reader",
+        "孩子每天写作业都要催，不催就不开始。",
+        Some("reader-1"),
+        "2026-09-16T08:00:00Z",
+    )
+    .await;
+    comment_with_author(
+        &database,
+        "study-author-role-note",
+        "study-author-role-creator-root",
+        "我是作者，这条是我的补充说明。",
+        Some("creator-1"),
+        "2026-09-16T08:01:00Z",
+    )
+    .await;
+    reply_with_author(
+        &database,
+        "study-author-role-note",
+        "study-author-role-creator-reply",
+        "study-author-role-reader",
+        "谢谢你的留言，我补充一下。",
+        Some("creator-1"),
+        "2026-09-16T08:02:00Z",
+    )
+    .await;
+    comment_with_author(
+        &database,
+        "study-author-role-note",
+        "study-author-role-unknown-commenter",
+        "没有稳定作者身份，不能断言是用户声音。",
+        None,
+        "2026-09-16T08:03:00Z",
+    )
+    .await;
+    comment_with_author(
+        &database,
+        "study-author-role-note",
+        "study-author-role-blank-commenter",
+        "空白作者身份也不能断言为用户声音。",
+        Some(" "),
+        "2026-09-16T08:03:30Z",
+    )
+    .await;
+    detail_with_author(
+        &database,
+        "study-author-role-unknown-work",
+        "作者身份未知的 ADHD 笔记",
+        None,
+    )
+    .await;
+    comment_with_author(
+        &database,
+        "study-author-role-unknown-work",
+        "study-author-role-unknown-work-comment",
+        "作品作者未知，不能断言这条是用户声音。",
+        Some("reader-2"),
+        "2026-09-16T08:04:00Z",
+    )
+    .await;
+
+    let selected = eligible_sources(
+        &database,
+        Uuid::parse_str(ADHD_DOMAIN_REF).unwrap(),
+        "2099-01-01T00:00:00Z",
+        10,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(selected.len(), 1);
+    assert_eq!(selected[0].source_ref, reader_comment);
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
 async fn source_gate_excludes_withdrawn_ocr_but_keeps_the_comment_target() {
     let database = proof_database("comment_study_withdrawn_ocr").await;
     sqlx::raw_sql(STUDY_SCHEMA_SQL)
@@ -2608,7 +2699,7 @@ async fn reply_context_is_frozen_as_context_but_not_evidence() {
         "study-parent-note",
         "study-parent-comment",
         "孩子每天写作业都要催。",
-        Some("reader-1"),
+        Some("creator-1"),
         "2026-09-16T08:00:00Z",
     )
     .await;
@@ -2638,6 +2729,16 @@ async fn reply_context_is_frozen_as_context_but_not_evidence() {
     )
     .await
     .unwrap();
+    let target_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM linggan_comment_study_target WHERE run_ref=$1")
+            .bind(prepared.run_ref)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        target_count, 1,
+        "the creator parent is context, not a target"
+    );
     let reply_target = sqlx::query(
         "SELECT dependency_state,state,parent_source_ref,input_manifest \
          FROM linggan_comment_study_target WHERE run_ref=$1 AND source_ref=$2",

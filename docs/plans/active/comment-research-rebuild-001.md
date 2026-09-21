@@ -1,12 +1,12 @@
 # COMMENT-RESEARCH-REBUILD-001 · 单一合同重建
 
 > 状态: 活跃计划
-> 最后核对: 2026-09-16
+> 最后核对: 2026-09-21
 > 适用范围: Issue #295；本机评论研究派生层 reset 与新实现
 > 事实来源: DEC-0006、Mog 明确 reset 范围、现行 Evidence schema、提交前审查
 > 冲突时以谁为准: 用户最新决定、AGENTS.md、真实代码/数据库/测试
 
-> 当前阶段: Card 1–5 核心数据、批次、局部恢复、lease 与模型调用账本预留已实现；尚未接入真实模型 adapter、API/UI 或本机 reset。
+> 当前阶段: Card 1–5、读取 API/UI、受限真实模型 adapter 与本机评论研究派生层 reset 均已完成并发布；P3 的真实质量出口仍未验证。当前专属候选只修复 StudySource 的作品作者声音排除，尚未合并或部署。
 
 ## Reset 边界
 
@@ -17,7 +17,7 @@
 ## 当前合同（唯一）
 
 1. `StudyWork`：`domain_ref` 必须等于当前 ADHD 域；作品为选择、共享上下文和预算单位。
-2. `StudySource`：当前可读普通用户评论；评论为目标、成本和唯一 Atom 证据。
+2. `StudySource`：当前可读、具有稳定作者身份且作者明确不是该作品创作者的普通用户评论；评论为目标、成本和唯一 Atom 证据。作品作者的根评论或回复可作为已知父评论语境，但绝不能成为 target、Signal、社区词或 Problem 的证据。任一方作者身份未知时，角色为 unknown，不能默认当作用户声音。
 3. `StudyContextSnapshot`：标题、正文、OCR/ASR 是同一作品、截至冻结时刻成功且当前未撤回/未受限的来源片段；sent、omitted、missing 都显式记录。
 4. `StudyRun`：用户确认后冻结已选择作品、评论与上下文；没有自动重跑。
 5. `StudySignal`：模型原子仅可引用当前评论的连续原文；没有 problem/need 准入时仍可保留非问题语义。
@@ -25,12 +25,12 @@
 
 ## 实施顺序
 
-1. 先建立 reset receipt 与新 schema，使用新的 `linggan_comment_study_*` 名称；旧 V1 模块尚未删除前，新 schema 不对外接单。
-2. 建立 source/work/context 查询并用 domain/readability/disposition/时间反例钉住。**进行中：已完成 ADHD、as-of、restriction、withdrawn OCR 和父回复语境的隔离 PostgreSQL 证明。**
-3. 建立按作品选择、评论预算、同篇批次 semantic invocation 与输出接纳。**进行中：已完成用户选笔记的冻结 Run、评论级目标、同篇 batch 输入冻结、lease 领取/过期恢复、逐 target 输出接纳与漏项局部重试，以及一 batch 一通用 invocation 的预留、幂等复用、attempt 关联和终态回写；尚未接入真实模型 adapter 或 API。**
-4. 建立 Problem resolution；只接受新的双独立证据创建合同。**已完成规则内核、候选闭集持久化和独立双证据建档；Embedding/FTS 候选召回、真实模型 worker 和读取 API/UI 尚未接入。**
-5. 替换 API/UI/worker 后删除旧 Rust 模块、旧页面与旧 endpoint；最后才启用本机 reset/init。
+1. **已完成**：建立 reset receipt 与新的 `linggan_comment_study_*` schema，并移除旧 V1 模块的活跃路径后启用本机 reset/init。
+2. **已完成**：建立 source/work/context 查询，并以 ADHD、as-of、restriction、withdrawn OCR、父回复语境和作品作者声音排除的隔离 PostgreSQL 反例钉住。
+3. **已完成**：建立按作品选择、评论预算、同篇 batch semantic invocation 与输出接纳，以及受限真实模型 adapter、读取 API/UI 和本机发布路径。
+4. **已完成实现，真实质量出口未验证**：Problem resolution 只接受双独立证据；Embedding/FTS 候选召回已接入，但没有合格 embedding profile 时必须如实返回 `retrieval_incomplete`，不能判定新问题。真实模型端到端成功、Recall@K 和 P3 出口仍未验证。
+5. **已完成**：替换旧 Rust/API/UI/worker 活跃路径，并在不迁移旧评论研究结果的前提下完成本机 reset；下一次干净真实运行仍须在当前作者声音排除修复发布后由 Mog 验收。
 
 ## 非目标
 
-不调用真实模型、不自动清库、不应用共享 migration、不部署、不合并 main。Mog 在新 UI/API 构建完成并确认本机 reset 后，才执行一次实际清空与人工真实测试。
+本次作者声音排除候选不调用真实模型、不自动清库、不应用共享 migration、不部署、不合并 main；它不替代下一次干净样本的人工真实验收。

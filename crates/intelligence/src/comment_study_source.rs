@@ -29,7 +29,7 @@ pub enum StudySourceError {
     InvalidDomain,
 }
 
-/// Lists only current, accepted, readable comments belonging to the configured domain. The
+/// Lists only current, accepted, readable user comments belonging to the configured domain. The
 /// context array contains source-qualified work text; `text_content` from a withdrawn or
 /// restricted derivative cannot pass this query.
 pub async fn eligible_sources(
@@ -125,7 +125,7 @@ where
          FROM ( \
            SELECT DISTINCT ON (comment.content_public_ref,comment.comment_external_id) \
              comment.material_ref,comment.content_public_ref,comment.comment_external_id, \
-             comment.parent_comment_external_id, \
+             comment.parent_comment_external_id,comment.author_external_id, \
              comment.body_text,comment.body_state,comment.created_at \
            FROM linggan_material_comment comment \
            JOIN linggan_runtime_capture_package package USING(package_ref) \
@@ -134,6 +134,8 @@ where
                     comment.observed_at::timestamptz DESC,comment.created_at DESC,comment.material_ref DESC \
          ) source \
          JOIN linggan_material_content content ON content.public_ref=source.content_public_ref \
+         JOIN linggan_material_content_author content_author \
+           ON content_author.content_public_ref=source.content_public_ref \
          LEFT JOIN LATERAL ( \
            SELECT ancestor.material_ref,ancestor.body_text \
            FROM linggan_material_comment ancestor \
@@ -226,6 +228,12 @@ where
            ) context_fragments \
          ) context ON true \
          WHERE content.domain_ref=$1 AND source.body_state='KNOWN' \
+           /* A Study target is user voice. Creator replies may supply parent context, but
+              never become a target, Signal, term or Problem evidence themselves. Missing
+              stable identities are role-unknown rather than silently assumed to be user voice. */ \
+           AND NULLIF(btrim(source.author_external_id),'') IS NOT NULL \
+           AND content_author.author_external_id IS NOT NULL \
+           AND source.author_external_id<>content_author.author_external_id \
            AND ($4::uuid[] IS NULL OR source.content_public_ref=ANY($4::uuid[])) \
            AND NOT EXISTS (SELECT 1 FROM linggan_material_comment_restriction restriction \
              WHERE restriction.content_public_ref=source.content_public_ref \
