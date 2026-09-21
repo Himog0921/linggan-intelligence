@@ -3,16 +3,18 @@ use linggan_contracts::{
     parse_producer_task_spec,
 };
 use linggan_evidence::{
-    AccountEligibilityObservation, AuthorizationGrant, CheckInOutcome, DispatchDecision,
+    AccountEligibilityObservation, AuthorizationGrant, CheckInOutcome, DeliveryConclusion,
+    DetailPageSessionNavigationError, DetailPageSessionProgress, DispatchDecision,
     DispatchFailureCode, DispatchFailureOutcome, InstallationCheckIn, MonitorCommandActor,
-    MonitorCommandKind, MonitorRuleCommand, MonitorRuleDraft, MonitorRuleMode,
+    MonitorCommandKind, MonitorRuleCommand, MonitorRuleDraft, MonitorRuleMode, PreparedLaneDelivery,
     ProducerRuntimeError, RuntimeAttemptOutcome, RuntimeSubmissionOutcome, RuntimeTaskOutcome,
     activate_installation_credential, apply_monitor_rule_command, bind_observation_account,
     check_in_installation, create_producer_task, decide_dispatch, dispatch_schema_is_ready,
     DetailPageSessionGrant, expire_lapsed_leases, grant_authorization, grant_detail_page_session,
     grant_detail_page_session_with_lane_deliveries, issue_work_order_lease,
-    open_claim_window, read_collection_task_timeline, read_work_resources,
-    recover_released_orphaned_work_orders, report_account_eligibility, requeue_failed_dispatch,
+    open_claim_window, read_collection_task_timeline, read_detail_delivery_reconciliation,
+    read_work_resources, record_detail_page_session_progress, recover_released_orphaned_work_orders,
+    report_account_eligibility, requeue_failed_dispatch,
     retire_materials, rotate_installation_credential, set_station_accepting, start_producer_attempt,
     submit_producer_package,
 };
@@ -2142,6 +2144,296 @@ async fn navigation_time_lane_identities_outlive_a_closed_lease_without_imperson
             Err(ProducerRuntimeError::ScheduledTaskNotClaimed)
         ),
         "a replaced installation cannot start from a preparation it no longer owns"
+    );
+}
+
+/// 交付对账回答的是「冻结通道的包到服务端了没有」，不是「会话自己写着什么状态」。
+///
+/// 一条真实会话从「读完页面、包还在手上」走到「四个通道全部拿到回执」，中途没有写入任何
+/// 交付事实：结论只能由回执数出来。已经终结的会话，晚到的交付进度既写不进去（写入侧的
+/// 终态守卫），也改不动已经读出的结论（读侧不按通道数把终态降级）。
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn delivery_reconciliation_counts_receipts_not_the_session_marker() {
+    let database = proof_database_for("collection_dispatch_delivery_reconciliation").await;
+    let fixture = seed_creator_work_order(&database).await;
+    let content_external_id = "note-delivery-reconciliation";
+    let signed_url = format!(
+        "https://www.xiaohongshu.com/user/profile/creator-fixture/{content_external_id}?xsec_token=SIGNED_RECONCILE%3D&xsec_source=pc_user"
+    );
+    submit_profile_discovery(&database, content_external_id, &signed_url).await;
+    let content_public_ref: Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content WHERE platform='xhs' AND content_external_id=$1",
+    )
+    .bind(content_external_id)
+    .fetch_one(database.pool())
+    .await
+    .expect("accepted discovery creates the stable content identity");
+    sqlx::query(
+        "INSERT INTO collection_work_order_material_target \
+         (work_order_ref,content_public_ref,ordinal,comment_limit,reply_expand_limit,acquire_media) \
+         VALUES ($1,$2,1,30,2,true)",
+    )
+    .bind(fixture.work_order_ref)
+    .bind(content_public_ref)
+    .execute(database.pool())
+    .await
+    .expect("the work order freezes all four lanes");
+    issue_work_order_lease(&database, fixture.work_order_ref, 60)
+        .await
+        .expect("material deepening lease is issued");
+    let dispatch = decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("detail dispatch is decided");
+    let task = task_from_dispatch(&dispatch);
+    let execution_source_url = match &dispatch {
+        DispatchDecision::Dispatch {
+            execution_source_url: Some(url),
+            ..
+        } => url.clone(),
+        other => panic!("signed discovery must produce a detail dispatch; got {other:?}"),
+    };
+    let (session_ref, prepared) = match grant_detail_page_session_with_lane_deliveries(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+        task.task_id(),
+        Uuid::new_v4(),
+        &execution_source_url,
+    )
+    .await
+    .expect("the authorized page session is prepared before navigation")
+    {
+        DetailPageSessionGrant::Authorized {
+            session_ref,
+            prepared_lanes,
+            ..
+        } => (session_ref, prepared_lanes),
+        other => panic!("first preparation must authorize, got {other:?}"),
+    };
+    assert_eq!(
+        prepared.len(),
+        4,
+        "the frozen plan owes all four lanes, got {prepared:?}"
+    );
+
+    // 只拿到授权、还没消费导航：没有任何包可以交付，这一行不该出现在对账里，更不该
+    // 被读成「欠着四个包」。
+    assert!(
+        read_detail_delivery_reconciliation(&database, 100)
+            .await
+            .expect("delivery reconciliation is readable")
+            .is_empty(),
+        "an authorized session that never consumed navigation owes no delivery"
+    );
+
+    report_session_progress(
+        &database,
+        &fixture,
+        task.task_id(),
+        session_ref,
+        DetailPageSessionProgress::NavigationObserved,
+    )
+    .await;
+
+    // 页面读完、包还在本地：四个通道一个回执都没有，依据是 0/4 而不是会话的措辞。
+    let waiting = only_session(&database).await;
+    assert_eq!(waiting.conclusion, DeliveryConclusion::AwaitingDelivery);
+    assert_eq!((waiting.prepared_lanes, waiting.delivered_lanes), (4, 0));
+    assert_eq!(
+        waiting.state, "navigation_committed",
+        "the read model does not rewrite the session's own state"
+    );
+
+    // 三个通道到岸、一个还在路上：结论不变，依据变成 3/4。
+    for lane in prepared.iter().take(3) {
+        deliver_prepared_lane(&database, &fixture, lane).await;
+    }
+    let partial = only_session(&database).await;
+    assert_eq!(partial.conclusion, DeliveryConclusion::AwaitingDelivery);
+    assert_eq!((partial.prepared_lanes, partial.delivered_lanes), (4, 3));
+
+    // 会话自己说「已保存待交付」，四个通道却都拿到了回执：按回执归并，结论是已交付。
+    // 会话的 delivery_pending 只是它自己的说法，不能直接顶替结论（T22）。
+    report_session_progress(
+        &database,
+        &fixture,
+        task.task_id(),
+        session_ref,
+        DetailPageSessionProgress::DeliveryPending,
+    )
+    .await;
+    deliver_prepared_lane(&database, &fixture, &prepared[3]).await;
+    let delivered = only_session(&database).await;
+    assert_eq!(delivered.conclusion, DeliveryConclusion::Delivered);
+    assert_eq!(delivered.state, "delivery_pending");
+
+    // 平台风控停止：结论换成已终结，原因与终结时刻原样带出。
+    report_session_progress(
+        &database,
+        &fixture,
+        task.task_id(),
+        session_ref,
+        DetailPageSessionProgress::Stopped { reason: "risk_stop" },
+    )
+    .await;
+    let closed = only_session(&database).await;
+    assert_eq!(closed.conclusion, DeliveryConclusion::Closed);
+    assert_eq!(closed.stop_reason.as_deref(), Some("risk_stop"));
+    assert!(closed.closed_at.is_some(), "a terminal session records when");
+
+    // 晚到的交付进度不能把终态降级：写入侧拒绝这条事实，读侧结论原封不动（T27）。
+    let late = record_detail_page_session_progress(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+        task.task_id(),
+        session_ref,
+        DetailPageSessionProgress::DeliveryPending,
+    )
+    .await;
+    assert!(
+        matches!(late, Err(DetailPageSessionNavigationError::SessionNotHeld)),
+        "已终结的会话必须拒绝晚到的交付进度，实际得到 {late:?}"
+    );
+    let after_late_progress = only_session(&database).await;
+    assert_eq!(after_late_progress.conclusion, DeliveryConclusion::Closed);
+    assert_eq!(after_late_progress.state, "stopped");
+
+    // 五种终结原因都要能原样读出：读层不挑原因，页面的中文映射各自成立。
+    for reason in [
+        "navigation_state_unknown",
+        "owner_unavailable",
+        "page_unavailable",
+        "risk_stop",
+        "delivery_terminal",
+    ] {
+        sqlx::query("UPDATE collection_detail_page_session SET stop_reason = $2 WHERE session_ref = $1")
+            .bind(session_ref)
+            .bind(reason)
+            .execute(database.pool())
+            .await
+            .expect("the terminal reason is restated");
+        let row = only_session(&database).await;
+        assert_eq!(row.conclusion, DeliveryConclusion::Closed);
+        assert_eq!(row.stop_reason.as_deref(), Some(reason));
+    }
+}
+
+/// 跨行业参照物的来源表不是每个 schema 都装：0089 为 `cross_industry_sample_ref` 写下的列注释
+/// 点名了这件事，那一列也因此故意不带外键。于是「会话在、样本身份读不到」是一个真实状态——
+/// 对账必须照常给出这行，缺的是一张参照物表，不是这条会话；更不能让整页变成「读取失败」。
+///
+/// 这条用例所在的证明 schema 恰好就是那个状态：装着 detail page session，没装跨行业来源表。
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn a_session_without_its_cross_industry_table_still_reconciles() {
+    let database = proof_database_for("collection_dispatch_cross_industry_absent").await;
+    let fixture = seed_creator_work_order(&database).await;
+    let lease = issue_work_order_lease(&database, fixture.work_order_ref, 60)
+        .await
+        .expect("lease is issued");
+    let table_exists: bool =
+        sqlx::query_scalar("SELECT to_regclass('cross_industry_sample') IS NOT NULL")
+            .fetch_one(database.pool())
+            .await
+            .expect("the schema is inspected");
+    assert!(!table_exists, "这条用例只在跨行业来源表缺席时才有意义");
+
+    let session_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_detail_page_session \
+         (session_ref,work_order_ref,content_public_ref,cross_industry_sample_ref, \
+          owner_installation_ref,grant_request_id,initial_lease_ref,plan_snapshot,plan_hash,state) \
+         VALUES ($1,$2,NULL,$3,$4,$5,$6,'{}'::jsonb,repeat('a',64),'navigation_started')",
+    )
+    .bind(session_ref)
+    .bind(fixture.work_order_ref)
+    .bind(Uuid::new_v4())
+    .bind(fixture.installation_ref)
+    .bind(Uuid::new_v4())
+    .bind(lease.lease_ref)
+    .execute(database.pool())
+    .await
+    .expect("a cross-industry session row is seeded");
+
+    let rows = read_detail_delivery_reconciliation(&database, 100)
+        .await
+        .expect("缺一张参照物表不该让整页交付对账读取失败");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].session_ref, session_ref);
+    assert_eq!(rows[0].conclusion, DeliveryConclusion::RecoveryUnverified);
+    assert_eq!(rows[0].platform, None);
+    assert_eq!(rows[0].content_external_id, None);
+}
+
+async fn only_session(database: &Database) -> linggan_evidence::DetailDeliveryReconciliation {
+    let mut rows = read_detail_delivery_reconciliation(database, 100)
+        .await
+        .expect("delivery reconciliation is readable");
+    assert_eq!(rows.len(), 1, "exactly one consumed session is in scope");
+    rows.remove(0)
+}
+
+async fn report_session_progress(
+    database: &Database,
+    fixture: &Fixture,
+    task_id: Uuid,
+    session_ref: Uuid,
+    progress: DetailPageSessionProgress,
+) {
+    record_detail_page_session_progress(
+        database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+        task_id,
+        session_ref,
+        progress,
+    )
+    .await
+    .expect("the owning installation reports its own session progress");
+}
+
+/// 用导航前登记好的身份投递一个通道的包，并证明它换回了回执。
+async fn deliver_prepared_lane(database: &Database, fixture: &Fixture, lane: &PreparedLaneDelivery) {
+    let attempt = parse_producer_attempt(
+        &serde_json::json!({
+            "contractVersion": "linggan.producer.attempt.v1",
+            "producerInstanceId": fixture.producer_instance_id,
+            "taskId": lane.task_id,
+            "attemptId": lane.attempt_id,
+        })
+        .to_string(),
+    )
+    .expect("a prepared lane attempt is well-formed");
+    let started = start_producer_attempt(database, &attempt)
+        .await
+        .expect("a prepared lane identity survives to its delivery");
+    assert!(
+        !matches!(started, RuntimeAttemptOutcome::Conflict { .. }),
+        "the {} lane must not conflict, got {started:?}",
+        lane.capability
+    );
+    let spec: serde_json::Value =
+        sqlx::query_scalar("SELECT task_spec FROM linggan_runtime_task WHERE task_id = $1")
+            .bind(lane.task_id)
+            .fetch_one(database.pool())
+            .await
+            .expect("the lane task spec is readable");
+    let task =
+        parse_producer_task_spec(&spec.to_string()).expect("the stored lane task remains valid");
+    let submission = scheduled_submission(&task, &attempt, fixture.producer_instance_id);
+    let outcome = submit_producer_package(database, &submission)
+        .await
+        .expect("a lane package is retained under its prepared identity");
+    assert!(
+        matches!(outcome, RuntimeSubmissionOutcome::Acknowledged { .. }),
+        "the {} lane must be acknowledged, got {outcome:?}",
+        lane.capability
     );
 }
 

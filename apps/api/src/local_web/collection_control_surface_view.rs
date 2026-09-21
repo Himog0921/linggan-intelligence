@@ -1479,6 +1479,7 @@ mod tests {
                 active_count: 0,
                 expired_lease_count: 0,
             },
+            None,
         );
         let rendered = render_tasks_control(&tasks, &projection());
 

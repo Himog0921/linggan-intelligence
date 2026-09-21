@@ -74,7 +74,8 @@ use linggan_evidence::{
     media_acquisition_schema_is_ready, open_claim_window, producer_runtime_has_packages,
     producer_runtime_schema_is_ready, read_archive_completeness, read_blocked_materials,
     read_collection_task_timeline, read_creator_directory, read_creator_lifecycle,
-    read_cross_industry_hits, read_discovery_library, read_keyword_hits, read_media_upload_session,
+    read_cross_industry_hits, read_detail_delivery_reconciliation, read_discovery_library,
+    read_keyword_hits, read_media_upload_session,
     read_runtime_capacity, read_runtime_library, read_scheduler_heartbeat,
     read_station_capabilities, read_station_overview, read_target, read_target_avatars,
     read_target_deletion_preview, read_target_inspector, read_target_observation_summaries,
@@ -2951,10 +2952,13 @@ async fn collection_tasks(
         )
         .await;
     };
-    let (reads, timeline) = tokio::join!(
+    let (reads, timeline, delivery) = tokio::join!(
         read_collection_surface(database),
         read_collection_task_timeline(database, 100),
+        read_detail_delivery_reconciliation(database, 100),
     );
+    // 交付对账读失败时留 None：页面上写「读不到」，不写 0。缺失与零是两件事。
+    let delivery = delivery.ok();
     let base = collection::render_in_domain(
         collection::Section::Tasks,
         collection::OperationsMode::Now,
@@ -2969,7 +2973,7 @@ async fn collection_tasks(
     );
     match timeline {
         Ok(timeline) => {
-            let tasks = collection_tasks_view::render_tasks(&base, &timeline);
+            let tasks = collection_tasks_view::render_tasks(&base, &timeline, delivery.as_deref());
             match collection::collection_control_surface_view::read_collection_control_surface(database, 100).await {
                 Ok(collection::collection_control_surface_view::CollectionControlSurfaceRead::Ready(projection)) =>
                     Html(collection::collection_control_surface_view::render_tasks_control(&tasks, &projection)),

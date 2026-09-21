@@ -6,11 +6,12 @@ use linggan_contracts::{
     parse_producer_attempt, parse_producer_submission, parse_producer_task_spec,
 };
 use linggan_evidence::{
-    AccountEligibilityObservation, DetailPageSessionProgress, DispatchDecision,
+    AccountEligibilityObservation, DeliveryConclusion, DetailPageSessionProgress, DispatchDecision,
     RuntimeAttemptOutcome, RuntimeSubmissionOutcome, activate_installation_credential,
     bind_observation_account, content_reobservation, decide_dispatch, grant_detail_page_session,
-    issue_work_order_lease, read_content_reobservation, record_detail_page_session_navigation,
-    record_detail_page_session_progress, report_account_eligibility,
+    issue_work_order_lease, read_content_reobservation, read_detail_delivery_reconciliation,
+    record_detail_page_session_navigation, record_detail_page_session_progress,
+    report_account_eligibility,
     rotate_installation_credential, set_station_accepting, start_producer_attempt,
     submit_producer_package,
 };
@@ -302,6 +303,19 @@ async fn detail_page_grant_replays_one_request_and_suppresses_a_new_request_for_
     )
     .await
     .expect("the detail body may be pending delivery while comment collection continues");
+    // 旧插件的会话没有任何冻结通道身份：它说了「待交付」，读层却无从对账。这时只能说
+    // 「恢复待核实」加最后观察时间——不写 0（那会读成「没有待交付」），也不写「待交付」
+    // （那会让一个无法核对的标记顶替结论）。
+    let unverified = read_detail_delivery_reconciliation(&database, 100)
+        .await
+        .expect("delivery reconciliation is readable");
+    assert_eq!(unverified.len(), 1);
+    assert_eq!(
+        unverified[0].conclusion,
+        DeliveryConclusion::RecoveryUnverified
+    );
+    assert_eq!(unverified[0].prepared_lanes, 0);
+    assert_eq!(unverified[0].state, "delivery_pending");
     assert!(matches!(
         replay,
         linggan_evidence::DetailPageSessionGrant::Replay { session_ref: replay_ref, .. }
@@ -356,6 +370,14 @@ async fn detail_page_grant_replays_one_request_and_suppresses_a_new_request_for_
     assert_eq!(stopped.0, "stopped");
     assert_eq!(stopped.1.as_deref(), Some("page_unavailable"));
     assert!(stopped.2);
+    // 读取层不把终态改写回「恢复待核实」：会话终结后，这一行说的是它终结在哪。
+    let closed = read_detail_delivery_reconciliation(&database, 100)
+        .await
+        .expect("delivery reconciliation is readable");
+    assert_eq!(closed.len(), 1);
+    assert_eq!(closed[0].conclusion, DeliveryConclusion::Closed);
+    assert_eq!(closed[0].stop_reason.as_deref(), Some("page_unavailable"));
+    assert!(closed[0].closed_at.is_some());
     let stopped_replay = grant_detail_page_session(
         &database,
         &fixture.install_key,

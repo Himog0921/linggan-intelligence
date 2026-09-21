@@ -101,7 +101,9 @@ pub use collection_target::{
     read_target_avatars, read_target_deletion_preview, store_pending_target, transition_target,
 };
 pub use collection_task_read::{
-    CollectionTaskExecution, CollectionTaskTimeline, read_collection_task_timeline,
+    CollectionTaskExecution, CollectionTaskTimeline, DeliveryConclusion,
+    DetailDeliveryReconciliation, read_collection_task_timeline,
+    read_detail_delivery_reconciliation,
 };
 pub use content_reobservation::{
     ContentReobservation, ContentReobservationEligibility, ContentReobservationError,

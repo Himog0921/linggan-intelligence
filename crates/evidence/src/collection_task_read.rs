@@ -126,6 +126,181 @@ pub async fn read_collection_task_timeline(
     })
 }
 
+/// 一个已授权详情页会话的交付结论。
+///
+/// 「包到没到服务端」与「材料有没有通过资格判定」是两件事，这里只回答前者：有回执
+/// 不等于材料合格，没有回执也不等于本地数据丢了。会话自己记的 `state` 不直接变成
+/// 页面上的话——`delivery_pending` 的会话如果冻结通道都已拿到回执，它的结论是
+/// 已交付，而不是继续留在待交付里。
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum DeliveryConclusion {
+    /// 冻结通道的包都收到了回执。
+    Delivered,
+    /// 读得到冻结通道的交付身份，其中还有通道没有回执。
+    AwaitingDelivery,
+    /// 会话说自己在等交付，却读不到它的冻结通道。此时只能显示未知与最后观察时间，
+    /// 不能据此推断「没采到」。
+    RecoveryUnverified,
+    /// 会话已终结（`finished` / `stopped`）。晚到的 progress 不会把它降回待交付。
+    Closed,
+}
+
+/// 交付对账里的一行：一个已进入交付阶段的详情页会话。
+#[derive(Debug, Clone)]
+pub struct DetailDeliveryReconciliation {
+    pub session_ref: Uuid,
+    pub conclusion: DeliveryConclusion,
+    /// 会话自己记的状态（机器码，页面上只作旁注）。
+    pub state: String,
+    pub stop_reason: Option<String>,
+    pub platform: Option<String>,
+    pub content_external_id: Option<String>,
+    pub target_display_name: Option<String>,
+    /// 冻结计划登记过的通道数，以及其中已有回执的通道数。两个数一起看才知道欠的是
+    /// 哪一段：0 个通道，是读不到身份；3 个里到 1 个，是还有两个包在路上。
+    pub prepared_lanes: i64,
+    pub delivered_lanes: i64,
+    pub last_observed_at: String,
+    pub closed_at: Option<String>,
+}
+
+/// 只读的交付对账投影。它不接纳、不重投、不清理本地 outbox，也不重开页面。
+///
+/// 进对账的是**已消费导航的会话**：只有 `authorized` 的会话还没有任何包可以交付，把它列进
+/// 「待交付」等于把「还没打开页面」说成「欠着几个包」。已消费导航的会话即使还写着
+/// `navigation_committed`，它的通道也已经是可对账的身份了。
+pub async fn read_detail_delivery_reconciliation(
+    database: &Database,
+    limit: i64,
+) -> Result<Vec<DetailDeliveryReconciliation>, sqlx::Error> {
+    let rows = sqlx::query(DETAIL_DELIVERY_RECONCILIATION_SQL)
+        .bind(limit.clamp(1, 200))
+        .fetch_all(database.pool())
+        .await?;
+    let mut reconciliations = Vec::with_capacity(rows.len());
+    let mut cross_industry_refs = Vec::new();
+    for row in rows {
+        let state: String = row.get("state");
+        let prepared_lanes: i64 = row.get("prepared_lanes");
+        let delivered_lanes: i64 = row.get("delivered_lanes");
+        if let Some(sample_ref) = row.get::<Option<Uuid>, _>("cross_industry_sample_ref") {
+            cross_industry_refs.push((reconciliations.len(), sample_ref));
+        }
+        reconciliations.push(DetailDeliveryReconciliation {
+            session_ref: row.get("session_ref"),
+            conclusion: delivery_conclusion(&state, prepared_lanes, delivered_lanes),
+            state,
+            stop_reason: row.get("stop_reason"),
+            platform: row.get("platform"),
+            content_external_id: row.get("content_external_id"),
+            target_display_name: row.get("target_display_name"),
+            prepared_lanes,
+            delivered_lanes,
+            last_observed_at: row.get("last_observed_at"),
+            closed_at: row.get("closed_at"),
+        });
+    }
+    fill_cross_industry_identities(database, &mut reconciliations, &cross_industry_refs).await?;
+    Ok(reconciliations)
+}
+
+/// 跨行业参照物的平台与作品号住 `cross_industry_sample`，而那张表**不是每个 schema 都装**：
+/// 0089 为 `cross_industry_sample_ref` 写下的列注释说明了原因——collection-control 那套证明
+/// schema 里没有跨行业来源表，所以这一列故意不带外键。这里与 `dispatch.rs` 用同一条判据：
+/// 表在就补齐身份，表不在就留空。缺的是一张参照物表，不是这条会话；整页对账不该因此变成
+/// 「读取失败」，但也不能凭空编出平台和作品号。
+///
+/// 只在本页真的读到跨行业会话时才去问表在不在：本领域会话永远不付这次往返。
+async fn fill_cross_industry_identities(
+    database: &Database,
+    reconciliations: &mut [DetailDeliveryReconciliation],
+    cross_industry_refs: &[(usize, Uuid)],
+) -> Result<(), sqlx::Error> {
+    if cross_industry_refs.is_empty() {
+        return Ok(());
+    }
+    let schema_ready: bool =
+        sqlx::query_scalar("SELECT to_regclass('cross_industry_sample') IS NOT NULL")
+            .fetch_one(database.pool())
+            .await?;
+    if !schema_ready {
+        return Ok(());
+    }
+    let sample_refs = cross_industry_refs
+        .iter()
+        .map(|(_, sample_ref)| *sample_ref)
+        .collect::<Vec<_>>();
+    let identities = sqlx::query(
+        "SELECT sample_ref, platform, content_external_id FROM cross_industry_sample \
+         WHERE sample_ref = ANY($1)",
+    )
+    .bind(&sample_refs)
+    .fetch_all(database.pool())
+    .await?;
+    let by_ref = identities
+        .into_iter()
+        .map(|row| {
+            (
+                row.get::<Uuid, _>("sample_ref"),
+                (row.get::<String, _>("platform"), row.get::<String, _>("content_external_id")),
+            )
+        })
+        .collect::<std::collections::HashMap<_, _>>();
+    for (index, sample_ref) in cross_industry_refs {
+        if let Some((platform, content_external_id)) = by_ref.get(sample_ref) {
+            reconciliations[*index].platform = Some(platform.clone());
+            reconciliations[*index].content_external_id = Some(content_external_id.clone());
+        }
+    }
+    Ok(())
+}
+
+/// 会话落点与通道回执合成一个交付结论。终结压过一切：一个已经终结的会话，
+/// 之后再来多少条 progress 都改不回 `delivery_pending`（写入路径同样守着这条），
+/// 这里的读法只是如实复述那个终态。
+fn delivery_conclusion(state: &str, prepared_lanes: i64, delivered_lanes: i64) -> DeliveryConclusion {
+    match state {
+        "finished" | "stopped" => DeliveryConclusion::Closed,
+        _ if prepared_lanes == 0 => DeliveryConclusion::RecoveryUnverified,
+        _ if delivered_lanes == prepared_lanes => DeliveryConclusion::Delivered,
+        _ => DeliveryConclusion::AwaitingDelivery,
+    }
+}
+
+const DETAIL_DELIVERY_RECONCILIATION_SQL: &str = r#"
+SELECT
+    session.session_ref,
+    session.state,
+    session.stop_reason,
+    session.cross_industry_sample_ref,
+    linggan_human_moment(session.last_progress_at) AS last_observed_at,
+    linggan_human_moment(session.finished_at) AS closed_at,
+    content.platform,
+    content.content_external_id,
+    target.display_name AS target_display_name,
+    COALESCE(lanes.prepared_lanes, 0) AS prepared_lanes,
+    COALESCE(lanes.delivered_lanes, 0) AS delivered_lanes
+FROM collection_detail_page_session session
+LEFT JOIN collection_work_order work_order
+       ON work_order.work_order_ref = session.work_order_ref
+LEFT JOIN collection_observation_target target
+       ON target.target_ref = work_order.target_ref
+LEFT JOIN linggan_material_content content
+       ON content.public_ref = session.content_public_ref
+LEFT JOIN LATERAL (
+    SELECT count(*) AS prepared_lanes,
+           count(receipt.receipt_ref) AS delivered_lanes
+    FROM collection_detail_page_session_lane_preparation lane
+    LEFT JOIN linggan_runtime_submission_receipt receipt ON receipt.attempt_id = lane.attempt_id
+    WHERE lane.session_ref = session.session_ref
+) lanes ON true
+WHERE session.state IN (
+    'navigation_started','navigation_committed','delivery_pending','finished','stopped'
+)
+ORDER BY session.last_progress_at DESC
+LIMIT $1
+"#;
+
 const TASK_TIMELINE_SQL: &str = r#"
 SELECT
     task.task_id,
