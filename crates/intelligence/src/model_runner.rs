@@ -6,8 +6,10 @@
 //! batch next (`prepare_next_batch_across_runs`), and it claims already-prepared batches.
 
 use crate::{
-    comment_study_batch::{MAX_TARGETS_PER_BATCH, PrepareStudyBatchRequest, StudyBatchError,
-        next_run_needing_batch, prepare_study_batch},
+    comment_study_batch::{
+        MAX_TARGETS_PER_BATCH, PrepareStudyBatchRequest, StudyBatchError, next_run_needing_batch,
+        prepare_study_batch,
+    },
     comment_study_batch_acceptance::accept_study_batch_output,
     comment_study_batch_worker::{
         DEFAULT_BATCH_LEASE_SECONDS, StudyBatchWorkerError, claim_next_study_batch,
@@ -40,6 +42,10 @@ pub async fn run_model_work_once(
             crate::comment_study_pair_worker::PairWorkerError::Database(error) => {
                 ModelError::Database(error)
             }
+            crate::comment_study_pair_worker::PairWorkerError::Store(
+                crate::comment_study_problem_store::ProblemStoreError::Database(error),
+            ) => ModelError::Database(error),
+            crate::comment_study_pair_worker::PairWorkerError::Store(_) => ModelError::Conflict,
             crate::comment_study_pair_worker::PairWorkerError::Manifest => ModelError::Conflict,
         })?
     {

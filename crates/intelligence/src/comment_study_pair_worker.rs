@@ -3,7 +3,9 @@
 use crate::{
     comment_study_model_runner::parse_provider_json,
     comment_study_problem_resolution::PROBLEM_PAIR_CONTRACT,
-    comment_study_problem_store::accept_problem_pair,
+    comment_study_problem_store::{
+        ProblemStoreError, accept_problem_pair, pair_contract_failure_code,
+    },
     model_invocation::{checkpoint_invocation_usage, connection_request, finish_invocation},
     model_secrets::ModelSecretStore,
     model_settings::ModelError,
@@ -22,6 +24,8 @@ pub enum PairWorkerError {
     Database(#[from] sqlx::Error),
     #[error(transparent)]
     Model(#[from] ModelError),
+    #[error(transparent)]
+    Store(#[from] ProblemStoreError),
     #[error("pair manifest is invalid")]
     Manifest,
 }
@@ -93,15 +97,25 @@ pub async fn run_one_problem_pair(
                     finish_invocation(database,claim.invocation,Some(&response),true,None,&json!({"contract":PROBLEM_PAIR_CONTRACT,"pairRef":claim.pair,"accepted":true})).await?;
                     Ok(true)
                 }
-                Err(_) => {
+                Err(ProblemStoreError::Contract(error)) => {
                     finish(
                         database,
                         claim.invocation,
                         Some(&response),
-                        "pair_contract_rejected",
+                        pair_contract_failure_code(&error),
                     )
                     .await?;
-                    Err(PairWorkerError::Model(ModelError::InvalidOutput))
+                    Err(PairWorkerError::Store(ProblemStoreError::Contract(error)))
+                }
+                Err(error) => {
+                    finish(
+                        database,
+                        claim.invocation,
+                        Some(&response),
+                        "pair_acceptance_failed",
+                    )
+                    .await?;
+                    Err(PairWorkerError::Store(error))
                 }
             }
         }
