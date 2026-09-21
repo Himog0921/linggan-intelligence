@@ -21,6 +21,13 @@ database.version(3).stores({
   sessions: '&cacheKey, leaseRef, contentExternalId, prunableAt, updatedAt',
   navigationGrants: '&grantKey, taskId, leaseRef, contentExternalId, state, updatedAt',
 });
+database.version(4).stores({
+  sessions: '&cacheKey, leaseRef, contentExternalId, prunableAt, updatedAt',
+  navigationGrants: '&grantKey, taskId, leaseRef, contentExternalId, state, updatedAt',
+  // 导航前由服务端登记的通道交付身份。主键就是该通道任务自己的 taskId：交付时要用的正是
+  // 「这条任务的服务端身份」，用别的键都会在恢复路径上多绕一层推断。
+  lanePreparations: '&taskId, leaseRef, contentExternalId, capability, sessionRef, updatedAt',
+});
 
 const PLAN_VERSION = 'linggan.detail-page-session.v1';
 const ALLOWED_LANES = new Set(['content_detail', 'media_slots', 'comments', 'replies']);
@@ -251,6 +258,67 @@ export function createDetailPageSessionStore(table = database.sessions, now = ()
 }
 
 /**
+ * 服务端在导航前登记的通道交付身份，本机持久副本。
+ *
+ * 它记录的是「这条通道任务已经有一个服务端铸造的身份」，不是「这条通道已经采到东西」。
+ * 交付时用它作为 startAttempt 的身份：断网期间取回的包因此仍能拿到原来那个身份，
+ * 而不是在租约关闭后凭空生成一个服务端不认识的新身份。
+ */
+export function createDetailPageLanePreparationStore({
+  table = database.lanePreparations,
+  transaction = (work) => database.transaction('rw', table, work),
+  now = () => Date.now(),
+} = {}) {
+  function rowFrom(lane, context) {
+    return {
+      taskId: text(lane?.taskId),
+      attemptId: text(lane?.attemptId),
+      capability: text(lane?.capability),
+      sessionRef: text(context.sessionRef),
+      leaseRef: text(context.leaseRef),
+      contentExternalId: text(context.contentExternalId),
+      updatedAt: now(),
+    };
+  }
+
+  return {
+    /**
+     * 写入一次准备回执。同一通道任务拿到同一个身份时是幂等的重放；拿到不同身份、
+     * 不同会话或不同能力时是身份冲突——那说明这不是同一次准备，不能覆盖旧记录。
+     */
+    async recordLanes({ sessionRef, leaseRef, contentExternalId, lanes } = {}) {
+      const rows = (Array.isArray(lanes) ? lanes : []).map((lane) => rowFrom(lane, {
+        sessionRef, leaseRef, contentExternalId,
+      }));
+      if (rows.length === 0) return [];
+      for (const row of rows) {
+        if (!row.taskId || !row.attemptId || !ALLOWED_LANES.has(row.capability)) {
+          throw new Error('detail_page_lane_preparation_invalid');
+        }
+      }
+      return transaction(async () => {
+        for (const row of rows) {
+          const existing = await table.get(row.taskId);
+          if (!existing) continue;
+          if (text(existing.attemptId) !== row.attemptId
+              || text(existing.sessionRef) !== row.sessionRef
+              || text(existing.capability) !== row.capability) {
+            throw new Error('detail_page_lane_preparation_conflict');
+          }
+        }
+        for (const row of rows) await table.put(row);
+        return rows;
+      });
+    },
+
+    async get(taskId) {
+      const key = text(taskId);
+      return key ? (await table.get(key)) || null : null;
+    },
+  };
+}
+
+/**
  * Durable, browser-local side of the detail navigation boundary.  The
  * transaction is intentionally injected so tests can prove the same
  * read-modify-write boundary without relying on a running browser.  Dexie's
@@ -259,7 +327,14 @@ export function createDetailPageSessionStore(table = database.sessions, now = ()
  */
 export function createDetailPageNavigationGrantStore({
   table = database.navigationGrants,
-  transaction = (work) => database.transaction('rw', table, work),
+  // 交付身份只在该店的写事务里登记（见 attachServerGrant），所以这一层的「事务」
+  // 就是父事务本身，不再另开一层。
+  lanePreparationStore = createDetailPageLanePreparationStore({
+    transaction: (work) => work(),
+  }),
+  transaction = (work) => database.transaction(
+    'rw', table, database.lanePreparations, work,
+  ),
   now = () => Date.now(),
   createRequestId = () => crypto.randomUUID(),
 } = {}) {
@@ -285,12 +360,22 @@ export function createDetailPageNavigationGrantStore({
       });
     },
 
-    async attachServerGrant({ grantKey, sessionRef, plan } = {}) {
+    async attachServerGrant({ grantKey, sessionRef, plan, lanePreparation = null } = {}) {
       return transaction(async () => {
         const row = await table.get(text(grantKey));
         if (!row) throw new Error('detail_page_navigation_grant_missing');
         if (row.sessionRef && row.sessionRef !== text(sessionRef)) {
           throw new Error('detail_page_navigation_session_identity_conflict');
+        }
+        // 交付身份与导航授权同库同事务落盘：只写下一半，重启后就会既打不开页面、
+        // 也说不清哪条通道已经拿到过身份。
+        if (Array.isArray(lanePreparation?.lanes) && lanePreparation.lanes.length > 0) {
+          await lanePreparationStore.recordLanes({
+            sessionRef,
+            leaseRef: row.leaseRef,
+            contentExternalId: row.contentExternalId,
+            lanes: lanePreparation.lanes,
+          });
         }
         await table.update(row.grantKey, {
           sessionRef: text(sessionRef), plan: plain(plan),
@@ -347,4 +432,5 @@ export function createDetailPageNavigationGrantStore({
 }
 
 export const detailPageSessionStore = createDetailPageSessionStore();
+export const detailPageLanePreparationStore = createDetailPageLanePreparationStore();
 export const detailPageNavigationGrantStore = createDetailPageNavigationGrantStore();

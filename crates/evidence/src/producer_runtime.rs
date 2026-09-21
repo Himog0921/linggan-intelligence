@@ -845,7 +845,13 @@ pub async fn start_producer_attempt(
             attempt_id: attempt.attempt_id(),
         },
         None => {
-            if task_source == "scheduled" && !live_scheduled_claim_exists(&mut tx, attempt).await? {
+            // Two independent bases let a *new* Attempt start, and both are server-side facts:
+            // a live claim, or a delivery identity the server itself minted for this attempt
+            // before the page was opened. Both are checked in the same transaction as the insert.
+            if task_source == "scheduled"
+                && !live_scheduled_claim_exists(&mut tx, attempt).await?
+                && !prepared_lane_delivery_exists(&mut tx, attempt).await?
+            {
                 return Err(ProducerRuntimeError::ScheduledTaskNotClaimed);
             }
             sqlx::query("INSERT INTO linggan_runtime_attempt (attempt_id, task_id, producer_instance_id) VALUES ($1,$2,$3)")
@@ -883,6 +889,50 @@ async fn live_scheduled_claim_exists(
                AND installation.install_key = $2::text \
                AND installation.superseded_at IS NULL)",
     )
+    .bind(attempt.task_id())
+    .bind(attempt.producer_instance_id())
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)
+}
+
+/// 服务端是否在导航前为**这一条** Attempt 身份登记过交付准备？
+///
+/// 详情页会话允许一次导航读完冻结的全部通道，而各通道的包在本机 outbox 里慢慢投递。投递时
+/// 租约可能早已结束，通道任务也可能从未被单独领取——这两个事实都不改变「材料是在授权下读到
+/// 的」。这条准备是服务端在授权事务里自己铸造的（会话 + 冻结通道任务 + 所属工位 + 计划摘要），
+/// 所以它可以作为启动依据；插件无法凭空造一条。
+///
+/// 它放宽的只是「谁可以开始」，不是「什么可以被接纳」：终局边界上的
+/// `lock_live_scheduled_claim` 仍然独立复核活权，因此租约已结束的晚到包照旧记为
+/// `LOST_AUTHORITY`，材料接纳结论不变。
+///
+/// 迁移尚未应用时按「没有这份准备」处理，而不是让整条登记报错：升级顺序不该让
+/// 普通的 startAttempt 变成内部错误。
+async fn prepared_lane_delivery_exists(
+    tx: &mut Transaction<'_, Postgres>,
+    attempt: &ProducerAttempt,
+) -> Result<bool, ProducerRuntimeError> {
+    let table_present: bool = sqlx::query_scalar(
+        "SELECT to_regclass('collection_detail_page_session_lane_preparation') IS NOT NULL",
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
+    if !table_present {
+        return Ok(false);
+    }
+    sqlx::query_scalar(
+        "SELECT EXISTS ( \
+             SELECT 1 FROM collection_detail_page_session_lane_preparation preparation \
+             JOIN plugin_installation installation \
+               ON installation.installation_ref = preparation.owner_installation_ref \
+             WHERE preparation.attempt_id = $1 \
+               AND preparation.task_id = $2 \
+               AND installation.install_key = $3::text \
+               AND installation.superseded_at IS NULL)",
+    )
+    .bind(attempt.attempt_id())
     .bind(attempt.task_id())
     .bind(attempt.producer_instance_id())
     .fetch_one(&mut **tx)

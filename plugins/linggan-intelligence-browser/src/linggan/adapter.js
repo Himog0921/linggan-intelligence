@@ -192,6 +192,44 @@ export function detailPageSessionGrantRouteFromHealth(health) {
   return path.startsWith('/api/local/dispatch/') && !/[?#]/.test(path) ? path : null;
 }
 
+/**
+ * The handshake version the service advertises for navigation-time delivery
+ * identities.  Absent means this service predates the preparation step, and
+ * the browser keeps using the compatibility path: no preparation is requested,
+ * and none is assumed.
+ */
+export function detailPageSessionLanePreparationContractFromHealth(health) {
+  return String(health?.routes?.dispatch?.detailPageSessionLanePreparationContract || '').trim();
+}
+
+/**
+ * Accept a preparation receipt only when it answers the exact request that was
+ * made.  A receipt for another session, another contract version, an unknown
+ * lane, or a lane without a server-minted identity is not a preparation this
+ * browser may act on.
+ */
+export function normalizeDetailPageLanePreparation(value, { contractVersion, sessionRef } = {}) {
+  const expectedContract = String(contractVersion || '').trim();
+  const expectedSession = String(sessionRef || '').trim();
+  if (!expectedContract || !expectedSession) return null;
+  if (value?.contractVersion !== expectedContract) return null;
+  if (String(value?.sessionRef || '').trim() !== expectedSession) return null;
+  const lanes = Array.isArray(value?.lanes) ? value.lanes : null;
+  if (!lanes || lanes.length === 0) return null;
+  const normalized = [];
+  for (const lane of lanes) {
+    const capability = String(lane?.capability || '').trim();
+    const taskId = String(lane?.taskId || '').trim();
+    const attemptId = String(lane?.attemptId || '').trim();
+    if (!['content_detail', 'media_slots', 'comments', 'replies'].includes(capability)
+        || !taskId || !attemptId) {
+      return null;
+    }
+    normalized.push({ capability, taskId, attemptId });
+  }
+  return { contractVersion: expectedContract, sessionRef: expectedSession, lanes: normalized };
+}
+
 export function detailPageSessionNavigationRouteFromHealth(health) {
   const path = String(health?.routes?.dispatch?.detailPageSessionNavigation || '').trim();
   return path.startsWith('/api/local/dispatch/') && !/[?#]/.test(path) ? path : null;
@@ -242,6 +280,12 @@ export async function grantLingganDetailPageSession({
   health = null,
 } = {}) {
   const route = detailPageSessionGrantRouteFromHealth(health);
+  // The announced handshake version is the only reason to ask for a preparation
+  // receipt.  A service that does not advertise one would reject the unknown
+  // field outright, and a browser that sent it anyway would be guessing at a
+  // contract it cannot verify.
+  const requestedLanePreparationContract =
+    detailPageSessionLanePreparationContractFromHealth(health);
   if (typeof fetchImpl !== 'function' || !route
       || !String(installKey || '').trim() || !String(installationCredential || '').trim()
       || !String(taskId || '').trim() || !String(grantRequestId || '').trim()
@@ -253,7 +297,12 @@ export async function grantLingganDetailPageSession({
       method: 'POST', credentials: 'omit', headers: { 'Content-Type': 'application/json' },
       // The server compares this ephemeral value to its current accepted
       // discovery locator and persists only its SHA-256 fingerprint.
-      body: JSON.stringify({ installKey, installationCredential, taskId, grantRequestId, executionSourceUrl }),
+      body: JSON.stringify({
+        installKey, installationCredential, taskId, grantRequestId, executionSourceUrl,
+        ...(requestedLanePreparationContract
+          ? { lanePreparationContract: requestedLanePreparationContract }
+          : {}),
+      }),
     });
     const body = await response.json().catch(() => null);
     if (!response.ok) {
@@ -264,7 +313,22 @@ export async function grantLingganDetailPageSession({
     if (['authorized', 'replay'].includes(outcome) && sessionRef
         && body?.pageSessionPlan && typeof body.pageSessionPlan === 'object'
         && !Array.isArray(body.pageSessionPlan)) {
-      return { granted: true, outcome, sessionRef, pageSessionPlan: body.pageSessionPlan };
+      // Preparation was asked for, so it is required: an authorization without
+      // it means this navigation has no durable delivery identities, and the
+      // page must not be opened on a promise the service did not make.
+      const lanePreparation = requestedLanePreparationContract
+        ? normalizeDetailPageLanePreparation(body?.lanePreparation, {
+          contractVersion: requestedLanePreparationContract,
+          sessionRef,
+        })
+        : null;
+      if (requestedLanePreparationContract && !lanePreparation) {
+        return {
+          granted: false, outcome: 'invalid', sessionRef,
+          reasonCode: 'grant_lane_preparation_missing',
+        };
+      }
+      return { granted: true, outcome, sessionRef, pageSessionPlan: body.pageSessionPlan, lanePreparation };
     }
     return { granted: false, outcome: outcome || 'invalid', sessionRef, reasonCode: String(body?.reasonCode || 'grant_contract_invalid') };
   } catch {

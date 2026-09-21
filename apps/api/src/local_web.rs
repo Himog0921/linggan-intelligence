@@ -544,7 +544,11 @@ async fn health(State(state): State<LocalWebState>) -> Json<Value> {
             "failure": collection_dispatch::FAILURE_PATH,
             "detailPageSessionGrant": collection_dispatch::DETAIL_PAGE_SESSION_GRANT_PATH,
             "detailPageSessionNavigation": collection_dispatch::DETAIL_PAGE_SESSION_NAVIGATION_PATH,
-            "detailPageRiskSignal": collection_dispatch::DETAIL_PAGE_RISK_SIGNAL_PATH
+            "detailPageRiskSignal": collection_dispatch::DETAIL_PAGE_RISK_SIGNAL_PATH,
+            // 通道交付身份的握手版本。插件只在本字段出现时才在授权请求里带上它；
+            // 没通告就不请求，请求了但服务端认不出则该次授权被拒。
+            "detailPageSessionLanePreparationContract":
+                collection_dispatch::DETAIL_PAGE_SESSION_LANE_PREPARATION_CONTRACT
         }),
         _ => Value::Null,
     };

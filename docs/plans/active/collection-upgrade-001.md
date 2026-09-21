@@ -37,7 +37,7 @@ Mog 于 2026-09-21 派定交付包 `~/Downloads/linggan-collection-upgrade-hando
 |---|---|---|
 | 交付包所述基线 | `1511725c`（= PR #321 合并点） | 包 README |
 | 实际 `origin/main` | `1ef5830c`（= PR #323 合并点），比包所述多 21 个提交 | `git rev-list --count 1511725c..HEAD` |
-| 最高 migration | `0095_detail_page_url_rejection.sql`；下一个空闲编号 **0096**（按交付包 §4.1 不预占） | `database/migrations/` |
+| 最高 migration | 基线最高 `0095_detail_page_url_rejection.sql`；本分支已用 `0096_detail_page_session_lane_delivery_identities.sql`，S2 台账顺延 `0097`。交付包 §4.1 要求「执行时取下一个空闲编号、不预占」——**合并前必须重新 fetch 复核 `0096/0097` 是否仍空闲，撞号则整体顺延并同步 5 处登记**（migration 文件、两处 control 测试、`material_fixture`、`full_schema_fixture`、`scripts/local-runtime.sh`） | `database/migrations/`、交付包 03 §5 |
 | live runtime | `~/Library/Application Support/Linggan Intelligence/runtime-main` HEAD = `1ef5830c`，与 `origin/main` 一致 | 只读核对 |
 | 插件版本 | `0.8.54`（release manifest 在 `plugins/linggan-intelligence-browser/releases/`） | `manifest.json` |
 | 隔离 PostgreSQL 基线 | `./scripts/test-collection-dispatch-sequence-postgres.sh` 通过：**21 passed / 0 failed**，容器/卷/库自建自清 | 2026-09-21 运行，日志 `/tmp/s0-baseline-dispatch-proof.log` |
@@ -61,7 +61,7 @@ Mog 于 2026-09-21 派定交付包 `~/Downloads/linggan-collection-upgrade-hando
 | E1 | 缺地址反复入队 | **代码级已定位；运行级复现待建（T11）** | `dispatch.rs` pending 分支在取不到签名 locator 时调用 `record_recoverable_dispatch_failure_in_transaction(…, "execution_locator_unavailable")`（`dispatch.rs:1411`）→ 释放租约、按 60/120/240/480/900 秒阶梯回队（`dispatch.rs:1235`）。`in_progress` 分支直接返回 `ExecutionLocatorUnavailable` 而不释放（`dispatch.rs:1633`）。失败计数只挂当前工单，新工单从零开始 |
 | E2 | 同一对象跨新工单重复 `page_read_failed` | **代码级已定位；运行级复现待建（T14）** | `page_read_failure_count_for_detail_in_transaction` 的 WHERE 以 `lease.work_order_ref = $1` 为界（`dispatch.rs:1157`）→ 预算按工单而非按对象/输入累计 |
 | E3 | API 已接纳但响应丢失后，插件重新 `startAttempt` 被拒 | **已复现；已修复；测试通过** | 修前：`start_producer_attempt` 先做活租约原子校验、通过后才查已有 Attempt（`producer_runtime.rs:801` → `:839`），所以租约一旦关闭（**投递自己正常完成也会关**），已合法提交的包在重放时拿不到幂等回执；插件侧 `flushLocalOutboxOnce` 把该结果按 4xx 判为终态并 `outbox.terminal(...)`。修前复现 `a_lost_submission_response_still_replays_after_its_lease_closed` 失败、修后通过；插件侧 `a closed claim still asks the submission route…` 同法验证 |
-| E4 | 读取完成而 API 离线 | **代码级已定位；运行级复现待建（T01/T03）** | 本地 outbox 独立于租约，`queueCapturePackage` 先落 Dexie 再异步 flush（`background.js:240`）；但 flush 走 createTask→startAttempt→submit，一旦 startAttempt 因租约关闭被拒即落入 E3 的终态路径 |
+| E4 | 读取完成而 API 离线 | **代码级已定位；运行级复现待建（T01/T03）** | 本地 outbox 独立于租约，`queueCapturePackage` 先落 Dexie 再异步 flush（`background.js:240`）；flush 走 createTask→startAttempt→submit。**详情会话的四条冻结通道**在导航前已取得服务端身份（S1a 第二步），因此租约关闭后仍能如实按原身份开始并提交（隔离 PostgreSQL 已证）；非详情任务（如首页发现）不在本次机制内，仍落入 E3 的终态路径 |
 | E5 | 详情 `title` 为 NULL | **代码级已定位；运行级复现待建（T19）** | 完成判据需要按 `target_catalog.rs` / `archive_completeness.rs` 的现有读取逐点核实后再改；本包 S3 只把「详情已取得」的唯一判据改为「存在合格详情材料及其来源」 |
 | E6 | session 标记落后于 Receipt | **代码级已定位；运行级复现待建（T22/T27）** | `completed` 工单下的 `collection_detail_page_session.delivery_pending` 与已存在的 Receipt 无对账入口；S3 增加以冻结通道回执/明确终止结果归并的终结判断 |
 
@@ -74,11 +74,11 @@ Mog 于 2026-09-21 派定交付包 `~/Downloads/linggan-collection-upgrade-hando
 | 问题 | 改动 | 主要落点 | 验收编号 | 状态 |
 |---|---|---|---|---|
 | E3 已接纳包因租约关闭无法重放 | 身份匹配的已有 Attempt 先返回幂等重放；新 Attempt 仍要求活租约原子校验 | `producer_runtime.rs::start_producer_attempt`、`live_scheduled_claim_exists` | T01–T04, T10, T24 | **已实施；T02 与 T24 相邻路径测试通过**（T01/T03/T04 待浏览器生命周期层证明） |
-| 插件把可恢复的 4xx 一律判为终态 | 按机器码分类：仅「活权不在了」继续走投递路由恢复原 Receipt，其余 4xx 保持终态 | `adapter.js::isRecoverableDeliveryRegistrationRefusal`、`background.js` | T06–T08, T31 | **部分实施**（注册拒绝已分类；T31 能力协商待 S1a 第二步） |
+| 插件把可恢复的 4xx 一律判为终态 | 按机器码分类：仅「活权不在了」继续走投递路由恢复原 Receipt，其余 4xx 保持终态 | `adapter.js::isRecoverableDeliveryRegistrationRefusal`、`background.js` | T06–T08, T31 | **已实施；T31 能力协商测试通过**（服务端只在 `/health` 广告后接受该字段；请求了却无合规回执则不开页） |
 | `LOST_AUTHORITY` 回执在页面上显示英文机器码 | 按 S3 状态词典给出「材料已保存，原执行权已失效」 | `collection_tasks_view.rs` | T24, T27 | 待实施（UI 文案，须先提交变更清单） |
-| 采集完成才登记 Attempt，断网后新包无服务端身份 | 导航前在授权事务内登记全部冻结通道的稳定 Attempt 身份，按 capability 协商启用 | `dispatch.rs::grant_detail_page_session`、`page_session_plan_for_task`、`apps/api/src/local_web.rs` | T05, T09, T31 | 待实施 |
+| 采集完成才登记 Attempt，断网后新包无服务端身份 | 导航前在授权事务内登记全部冻结通道的稳定 Attempt 身份，按 capability 协商启用 | `0096`、`dispatch.rs::grant_detail_page_session_with_lane_deliveries`、`producer_runtime.rs::prepared_lane_delivery_exists`、`apps/api/src/local_web.rs`、`adapter.js`/`detailPageSessionStore.js`/`background.js` | T05, T09, T31 | **已实施；T31 与 T05 的隔离 PostgreSQL + 插件测试通过**（T09 逐通道如实显示待 S3；变异验证见 §8） |
 | E1 缺地址反复入队 | 输入资格前移；新工单冻结执行输入引用；原范围事务化停止 | `keyword_archive_detail.rs` 候选/批量判据、`dispatch.rs` 首次/pending/in_progress 三路、`execution_source_url_for_task` | T11–T15, T18, T28 | 待实施 |
-| E2 失败预算随新工单清零 | 资格/重试台账（新 migration 0096），预算键不含 locator 指纹，跨工单累计 | `dispatch.rs::record_recoverable_dispatch_failure_in_transaction`、`work_order_lease.rs`、scheduler | T12–T18, T23 | 待实施 |
+| E2 失败预算随新工单清零 | 资格/重试台账（新 migration **0097**——`0096` 已被 S1a 第二步的通道交付身份占用，实施前须再 fetch 定号），预算键不含 locator 指纹，跨工单累计 | `dispatch.rs::record_recoverable_dispatch_failure_in_transaction`、`work_order_lease.rs`、scheduler | T12–T18, T23 | 待实施 |
 | E5 title 非空被当作「详情已取得」 | 统一材料完成判据 = 合格详情材料及其来源；标题缺失是字段覆盖度 | `target_catalog.rs`、`archive_completeness.rs`、`content_reobservation.rs`、`collection_targets_view.rs` | T19–T21, T23 | 待实施 |
 | E6 session 终结与 Receipt 不对账 | 统一当前状态 DTO（原因/来源/最后确认时间/允许动作）+ 会话终结归并 | `collection_tasks_view.rs`、`runtime_capacity.rs`、`queue_position.rs` | T22, T27 | 待实施 |
 | 故障无法按一条链路串起来 | 结构化事件字段 + 复用现有巡检账本的统一 tick 关联 | 采集/worker 入口、`collection_scheduler_run` | T29–T32 | 待实施 |
@@ -110,3 +110,14 @@ S4 运行诊断与就绪 → S5 有证据才优化 → S6 集成与历史处置�
 - `fake-indexeddb` 只覆盖部分证明，浏览器持久化必须另有真实 worker 生命周期中断证据。
 - 未执行的验收行写 `NOT VERIFIED`，不给混合完成百分比。
 - 共享库应用、runtime、插件与真实平台操作分别记录实际授权与结果。
+
+## 8. 反例（变异）验证记录
+
+新断言必须证明能测出它声称守住的缺陷，而不是恰好与被测代码同向。
+
+| 被验证的断言 | 变异（临时移除） | 观察到的失败 |
+|---|---|---|
+| 导航前登记的交付身份在租约关闭后仍可用（隔离 PostgreSQL `navigation_time_lane_identities_outlive_a_closed_lease_without_impersonating_execution`） | 从 `start_producer_attempt` 的 `None` 分支去掉 `prepared_lane_delivery_exists` 判据 | 该测试在 `a delivery identity registered before navigation survives its closed lease` 处失败（`ScheduledTaskNotClaimed` 路径） |
+| 广告了能力却拿不到合规回执时必须不开页（插件 `an announced handshake is requested, and a missing receipt never authorizes a page open`） | 把 adapter 的 `grant_lane_preparation_missing` 分支置为不可达 | 该测试失败 |
+
+两次变异均已还原，还原后隔离 PostgreSQL **23 passed / 0 failed**、插件 **16 passed / 0 failed**。

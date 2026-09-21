@@ -29,6 +29,7 @@ import { createManualRuntimeTask, packageDiscovery } from './producerRuntime.js'
 import {
   detailPageSessionStore,
   detailPageNavigationGrantStore,
+  detailPageLanePreparationStore,
   packageDetailPageSessionLane,
 } from './detailPageSessionStore.js';
 import { waitForStableTab } from './tabReadiness.js';
@@ -244,6 +245,25 @@ async function deterministicUuid(seed) {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
+/**
+ * 这条任务在导航前是否已经拿到服务端铸造的交付身份？
+ *
+ * 拿到就用它，而不是在本机另算一个：断网期间取回的包在投递时，租约可能已经结束，
+ * 服务端只认它自己登记过的那个身份。这里不改写任何已经入队的包——旧包的身份是它自己的
+ * 历史事实，不往上重挂新身份。
+ */
+async function preparedAttemptIdForTask(taskId) {
+  const key = String(taskId || '').trim();
+  if (!key) return '';
+  try {
+    const row = await detailPageLanePreparationStore.get(key);
+    return String(row?.attemptId || '').trim();
+  } catch {
+    // 本机读取失败不能变成「没有身份就换一个」：返回空表示按旧路径处理。
+    return '';
+  }
+}
+
 async function queueCapturePackage({ taskSpec, capturePackage, idempotencyKey = '' } = {}) {
   // Keep the stable-instance lookup callable.  Naming the local result
   // `producerInstanceId` shadows the helper for this whole block, which turns
@@ -254,9 +274,10 @@ async function queueCapturePackage({ taskSpec, capturePackage, idempotencyKey = 
   }
   validateTaskSpec(taskSpec);
   const stableKey = String(idempotencyKey || '').trim();
-  const attemptId = stableKey
+  const preparedAttemptId = await preparedAttemptIdForTask(taskSpec.taskId);
+  const attemptId = preparedAttemptId || (stableKey
     ? await deterministicUuid(`attempt:${instanceId}:${taskSpec.taskId}:${stableKey}`)
-    : crypto.randomUUID();
+    : crypto.randomUUID());
   const submissionId = stableKey
     ? await deterministicUuid(`submission:${instanceId}:${taskSpec.taskId}:${stableKey}`)
     : crypto.randomUUID();
@@ -757,6 +778,7 @@ const DISPATCH_FAILURE_CODES = new Set([
   'page_read_failed',
   'detail_page_url_invalid',
   'detail_page_session_grant_unavailable',
+  'detail_page_session_lane_preparation_unavailable',
   'detail_page_session_recovery_required',
   'account_observation_blocked',
 ]);
@@ -957,6 +979,7 @@ async function prepareDetailPageNavigation({ claim, taskSpec, installKey, instal
     grantKey: prepared.grantKey,
     sessionRef: grant.sessionRef,
     plan: grant.pageSessionPlan,
+    lanePreparation: grant.lanePreparation,
   });
   const consumed = await detailPageNavigationGrantStore.consume({
     grantKey: prepared.grantKey,
@@ -1088,6 +1111,16 @@ async function runDispatchedTask() {
           installKey,
           state: 'detail_page_session_grant_unavailable',
           message: '详情页授权服务暂不可用；没有打开页面，任务已进入退避后重试。',
+        });
+      }
+      // 服务端通告了准备握手却没给出准备回执：这一页没有可持久化的交付身份，
+      // 打开它等于在没有交付凭据的情况下消耗一次平台访问。停在原地，等人处理。
+      if (navigationGrant.reason === 'grant_lane_preparation_missing') {
+        return requeueClaimedTaskFailure({
+          claim: { ...claim, health: readiness.health },
+          installKey,
+          state: 'detail_page_session_lane_preparation_unavailable',
+          message: '服务端未给出本次导航的通道交付身份；没有打开页面，该内容需人工处理。',
         });
       }
       if (!navigationGrant.recovered && navigationGrant.reason === 'navigation_state_unknown'

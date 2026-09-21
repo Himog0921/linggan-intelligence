@@ -1,7 +1,7 @@
 # DETAIL-PAGE-SESSION-REPLAY-SAFETY-001
 
 > 状态: 活跃计划
-> 最后核对: 2026-09-21（签名详情 URL 明确失效收口候选）
+> 最后核对: 2026-09-21（签名详情 URL 明确失效收口候选；导航前通道交付身份登记）
 > 适用范围: XHS 详情页的派发、浏览器导航、页面结果暂存与本机交付重传
 > 事实来源: 2026-09-20 的真实运行审计、当前 `dispatch.rs`/Browser Producer 实现，以及 Mog 确认的“最终执行策略”
 > 冲突时以谁为准: Mog 的最新确认、运行时事实、受保护交付规则
@@ -24,6 +24,11 @@
 8. 显式风险拦截页只在已经打开的 claimed XHS 详情页受限状态面被观察。相同 installation 在 30 分钟内的 2 个独立风险观察会形成 12 小时安装级 cooldown；它不改写人的 `accepting_tasks` 意图，不暂停其他未被确认关联的插件安装。
 9. 页面 collector 的 epoch 毫秒时间必须在本机持久缓存边界转换为 RFC3339。服务端明确拒绝 immutable Package 时，使用该 Package 的 submission UUID 追加 `capture_delivery_rejected`；只把当前 Task 结束为 `unavailable`，同页其它冻结 lane 仍可从已保存缓存分包交付，绝不因此新增导航。
 10. 最终 URL 明确落到 XHS 的 404/失效页时，追加 `detail_page_url_invalid`：停止并只记住这条已验证执行 URL 的 SHA-256，不把作品身份标成删除。此 URL 不会再派发；后续发现链带回不同签名 URL 后，可由新 WorkOrder 正常执行。
+11. **授权登记、实际执行、材料接纳是三个不同的关系**，导航前登记通道交付身份不改变后两者：
+    - **授权登记**（本项新增）：在签发/重放导航授权的事务内，为冻结计划中的每条合法通道登记稳定的 Attempt 身份与 session/owner 绑定，返回可持久化的准备回执。它只说明「这条通道已获准准备，且已有一个服务端身份」，**不代表该通道已访问、已采集、已交付或完成**。
+    - **实际执行**仍由插件的单次页面导航与各通道自己的 claim/startAttempt 决定；预登记不把 `pending` 通道伪装为执行中，也不放宽新 Attempt 的活权要求。旧插件不带该协议字段，继续走版本化兼容路径；新行为只在服务端 `/health` 广告该能力、插件显式请求时才启用，请求了却没拿到合规回执则**不开页**。
+    - **材料接纳**仍由终态提交边界（`lock_live_scheduled_claim`）判定。因此一条通道在租约关闭后才提交，仍照既有语义记 `LOST_AUTHORITY` + `material_admission='ACCEPTED'`——身份提前铸造不等于执行权延长，也不新增执行结果取值。
+    - 断网或后台重启造成的「包在本地、租约已关」因此可按原身份交付；升级前已入队的旧信封保留其自己的尝试身份，不自动改挂新身份。
 
 ## 实施面
 
@@ -32,7 +37,8 @@
 - `0090_detail_page_grant_recovery_and_risk_cooldown.sql`：追加 grant outcome 审计、安装级风险信号与有截止时间的 cooldown；它们不是 Attempt、Package、Receipt 或 Evidence。
 - `0093_capture_delivery_rejection.sql`：把 `capture_delivery_rejected` 纳入闭集失败码。它不形成新的证据或页面事实；它只终结服务端已拒绝的一个 Task，并保留其它 frozen lane。
 - `0095_detail_page_url_rejection.sql`：会话只保存服务端核验后签名 URL 的 SHA-256；`detail_page_url_invalid` 终结当前冻结 lane 并在后续派发前拒绝同一 URL。它不引入 URL 生命周期表、TTL 猜测或永久作品失效状态。
-- Browser Producer：持久 grant ledger、原子消费、已消费后抑制重开、可接管已知 tab；正文在评论前进入 outbox。页面 payload 仅以原 Lease 寻址，且在全部冻结 lane 均已进 durable outbox 前永不因 TTL/容量被删除。
+- `0096_detail_page_session_lane_delivery_identities.sql`：导航前登记的通道交付身份（`collection_detail_page_session_lane_preparation`）。它是**受权准备**记录，不是 Attempt、Package、Receipt 或 Evidence，也不是第二套任务账本；`linggan_runtime_attempt` 仍在首次交付时创建，避免被其它读取面当作「执行已开始」。
+- Browser Producer：持久 grant ledger、原子消费、已消费后抑制重开、可接管已知 tab；正文在评论前进入 outbox。页面 payload 仅以原 Lease 寻址，且在全部冻结 lane 均已进 durable outbox 前永不因 TTL/容量被删除。交付身份与导航授权在同一次本地读写事务内落盘；交付时以该身份 `startAttempt`，没有身份则不开页并如实上报。
 - 测试：重复领取/并发消费只允许一次导航；授权响应丢失复用同一 grant；已消费但页面不明时 fail closed；正文先于评论；原 Lease 过期仍保留 payload、新 Lease 不得接管，全部 lane 入 outbox 后才可清理。
 
 ## 非目标与验收边界

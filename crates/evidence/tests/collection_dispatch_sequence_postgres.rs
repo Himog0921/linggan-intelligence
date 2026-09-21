@@ -9,7 +9,8 @@ use linggan_evidence::{
     ProducerRuntimeError, RuntimeAttemptOutcome, RuntimeSubmissionOutcome, RuntimeTaskOutcome,
     activate_installation_credential, apply_monitor_rule_command, bind_observation_account,
     check_in_installation, create_producer_task, decide_dispatch, dispatch_schema_is_ready,
-    expire_lapsed_leases, grant_authorization, grant_detail_page_session, issue_work_order_lease,
+    DetailPageSessionGrant, expire_lapsed_leases, grant_authorization, grant_detail_page_session,
+    grant_detail_page_session_with_lane_deliveries, issue_work_order_lease,
     open_claim_window, read_collection_task_timeline, read_work_resources,
     recover_released_orphaned_work_orders, report_account_eligibility, requeue_failed_dispatch,
     rotate_installation_credential, set_station_accepting, start_producer_attempt,
@@ -131,6 +132,10 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0094_corpus_evidence_read_recovery.sql"),
     "\n",
     include_str!("../../../database/migrations/0095_detail_page_url_rejection.sql"),
+    "\n",
+    include_str!(
+        "../../../database/migrations/0096_detail_page_session_lane_delivery_identities.sql"
+    ),
 );
 
 #[tokio::test]
@@ -1660,6 +1665,283 @@ async fn a_lost_submission_response_still_replays_after_its_lease_closed() {
         package_and_receipt_counts(&database).await,
         before,
         "replaying a delivered package must not mint a second package or receipt"
+    );
+}
+
+/// 导航前登记的通道交付身份，必须让「页面已读完、当时服务端不可达」的包仍有身份可投递。
+///
+/// 只把重放顺序提前是不够的：身份是投递时才生成的，断网期间取回的包在租约关闭后连一个
+/// 服务端认识的身份都没有。这条用例同时钉住两件事——身份在授权事务里一次登记、重放拿回
+/// 同一个；登记**不**等于执行，通道任务不会被伪装成执行中，Attempt 也仍然只在真的投递时出现。
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn navigation_time_lane_identities_outlive_a_closed_lease_without_impersonating_execution() {
+    let database = proof_database_for("collection_dispatch_lane_preparation").await;
+    let fixture = seed_creator_work_order(&database).await;
+    let content_external_id = "note-lane-preparation";
+    let signed_url = format!(
+        "https://www.xiaohongshu.com/user/profile/creator-fixture/{content_external_id}?xsec_token=SIGNED_PREPARATION%3D&xsec_source=pc_user"
+    );
+    submit_profile_discovery(&database, content_external_id, &signed_url).await;
+    let content_public_ref: Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content WHERE platform='xhs' AND content_external_id=$1",
+    )
+    .bind(content_external_id)
+    .fetch_one(database.pool())
+    .await
+    .expect("accepted discovery creates the stable content identity");
+    sqlx::query(
+        "INSERT INTO collection_work_order_material_target \
+         (work_order_ref,content_public_ref,ordinal,comment_limit,reply_expand_limit,acquire_media) \
+         VALUES ($1,$2,1,30,2,true)",
+    )
+    .bind(fixture.work_order_ref)
+    .bind(content_public_ref)
+    .execute(database.pool())
+    .await
+    .expect("the work order freezes all four lanes");
+    let lease = issue_work_order_lease(&database, fixture.work_order_ref, 60)
+        .await
+        .expect("material deepening lease is issued");
+    let dispatch = decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("detail dispatch is decided");
+    let task = task_from_dispatch(&dispatch);
+    let execution_source_url = match &dispatch {
+        DispatchDecision::Dispatch {
+            execution_source_url: Some(url),
+            ..
+        } => url.clone(),
+        other => panic!("signed discovery must produce a detail dispatch; got {other:?}"),
+    };
+
+    let grant_request_id = Uuid::new_v4();
+    let first = grant_detail_page_session_with_lane_deliveries(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+        task.task_id(),
+        grant_request_id,
+        &execution_source_url,
+    )
+    .await
+    .expect("the authorized page session is prepared before navigation");
+    let (session_ref, plan, prepared) = match first {
+        DetailPageSessionGrant::Authorized {
+            session_ref,
+            plan,
+            prepared_lanes,
+        } => (session_ref, plan, prepared_lanes),
+        other => panic!("first preparation must authorize, got {other:?}"),
+    };
+    let planned_lanes: Vec<String> = plan["lanes"]
+        .as_array()
+        .expect("the frozen plan lists lanes")
+        .iter()
+        .map(|lane| lane.as_str().expect("lane is a capability name").to_owned())
+        .collect();
+    assert_eq!(
+        prepared
+            .iter()
+            .map(|lane| lane.capability.clone())
+            .collect::<Vec<_>>(),
+        planned_lanes,
+        "every frozen lane gets exactly one identity, in plan order"
+    );
+    let attempt_ids: std::collections::HashSet<Uuid> =
+        prepared.iter().map(|lane| lane.attempt_id).collect();
+    assert_eq!(
+        attempt_ids.len(),
+        prepared.len(),
+        "one lane must never share another lane's delivery identity"
+    );
+
+    // 准备不是执行：这张租约下还没有任何通道 Attempt，通道任务也没有被说成「正在采集」。
+    // （只统计本租约：夹具自己那条发现任务早就有 Attempt 了，全局计数会把两件事混在一起。）
+    let lane_attempt_rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_runtime_attempt attempt \
+         JOIN collection_work_order_lease_task lease_task ON lease_task.task_id = attempt.task_id \
+         WHERE lease_task.lease_ref = $1",
+    )
+    .bind(lease.lease_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("lease task attempts are readable");
+    assert_eq!(
+        lane_attempt_rows, 0,
+        "registering delivery identities must not mint an Attempt"
+    );
+    for lane in &prepared {
+        let expected_state = if lane.capability == "content_detail" {
+            "in_progress"
+        } else {
+            "pending"
+        };
+        assert_task_state(&database, lane.task_id, expected_state).await;
+    }
+
+    // 准备响应丢失后，同一个 grant_request_id 必须拿回同一份身份。
+    let replayed = grant_detail_page_session_with_lane_deliveries(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+        task.task_id(),
+        grant_request_id,
+        &execution_source_url,
+    )
+    .await
+    .expect("a lost preparation response is recoverable");
+    match replayed {
+        DetailPageSessionGrant::Replay {
+            session_ref: replay_session,
+            prepared_lanes,
+            ..
+        } => {
+            assert_eq!(replay_session, session_ref);
+            assert_eq!(prepared_lanes, prepared, "replay owes the same identities");
+        }
+        other => panic!("repeating the same request must replay, got {other:?}"),
+    }
+
+    // 页面读完、服务端此后不可达：租约关闭，通道任务从未被单独领取。
+    sqlx::query(
+        "UPDATE collection_work_order_lease \
+         SET released_at = scope_001_now(), release_reason = 'revoked' WHERE lease_ref = $1",
+    )
+    .bind(lease.lease_ref)
+    .execute(database.pool())
+    .await
+    .expect("lease is revoked after the page was read");
+    assert!(!lease_is_live(&database, lease.lease_ref).await);
+
+    let media_lane = prepared
+        .iter()
+        .find(|lane| lane.capability == "media_slots")
+        .expect("the frozen plan contains the media lane");
+    let comments_lane = prepared
+        .iter()
+        .find(|lane| lane.capability == "comments")
+        .expect("the frozen plan contains the comments lane");
+
+    // 服务端不认识的身份仍然没有执行权：换一条通道、换一个工位、或这台安装已被替换。
+    let foreign = parse_producer_attempt(
+        &serde_json::json!({
+            "contractVersion": "linggan.producer.attempt.v1",
+            "producerInstanceId": Uuid::new_v4(),
+            "taskId": comments_lane.task_id,
+            "attemptId": media_lane.attempt_id,
+        })
+        .to_string(),
+    )
+    .expect("foreign attempt is well-formed");
+    assert!(
+        matches!(
+            start_producer_attempt(&database, &foreign).await,
+            Err(ProducerRuntimeError::ScheduledTaskNotClaimed)
+        ),
+        "a prepared identity is bound to its own task and its own installation"
+    );
+    let crossed = parse_producer_attempt(
+        &serde_json::json!({
+            "contractVersion": "linggan.producer.attempt.v1",
+            "producerInstanceId": fixture.producer_instance_id,
+            "taskId": comments_lane.task_id,
+            "attemptId": media_lane.attempt_id,
+        })
+        .to_string(),
+    )
+    .expect("crossed attempt is well-formed");
+    assert!(
+        matches!(
+            start_producer_attempt(&database, &crossed).await,
+            Err(ProducerRuntimeError::ScheduledTaskNotClaimed)
+        ),
+        "the right installation with the wrong lane task is still not an execution right"
+    );
+
+    // 同一条通道、同一个工位、服务端铸造的身份：晚到的包仍然有身份可投递。
+    let media_attempt = parse_producer_attempt(
+        &serde_json::json!({
+            "contractVersion": "linggan.producer.attempt.v1",
+            "producerInstanceId": fixture.producer_instance_id,
+            "taskId": media_lane.task_id,
+            "attemptId": media_lane.attempt_id,
+        })
+        .to_string(),
+    )
+    .expect("prepared attempt is well-formed");
+    assert!(
+        matches!(
+            start_producer_attempt(&database, &media_attempt).await,
+            Ok(RuntimeAttemptOutcome::Started { .. })
+        ),
+        "a delivery identity registered before navigation survives its closed lease"
+    );
+    let media_task_spec: serde_json::Value =
+        sqlx::query_scalar("SELECT task_spec FROM linggan_runtime_task WHERE task_id = $1")
+            .bind(media_lane.task_id)
+            .fetch_one(database.pool())
+            .await
+            .expect("the lane task spec is readable");
+    let media_task = parse_producer_task_spec(&media_task_spec.to_string())
+        .expect("the stored lane task remains valid");
+    let submission = scheduled_submission(&media_task, &media_attempt, fixture.producer_instance_id);
+    let outcome = submit_producer_package(&database, &submission)
+        .await
+        .expect("material observed under the prepared identity is retained");
+    assert!(
+        matches!(
+            outcome,
+            RuntimeSubmissionOutcome::Acknowledged {
+                ref execution_effect,
+                ref material_admission,
+                ..
+            } if execution_effect == "LOST_AUTHORITY" && material_admission == "ACCEPTED"
+        ),
+        "a closed lease costs the execution effect, never the material, got {outcome:?}"
+    );
+
+    // 安装被替换之后，同一份准备不再构成新的开始依据。取代是记下来的事实：
+    // 必须同时写下 superseded_by（0007 的 CHECK 不允许只写一半）。
+    let replacement_installation_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO plugin_installation (installation_ref, install_key, plugin_version, capabilities) \
+         VALUES ($1, $2, '0.8.54', '[]'::jsonb)",
+    )
+    .bind(replacement_installation_ref)
+    .bind(Uuid::new_v4().to_string())
+    .execute(database.pool())
+    .await
+    .expect("a replacement installation registers");
+    sqlx::query(
+        "UPDATE plugin_installation \
+         SET superseded_at = scope_001_now(), superseded_by = $2 WHERE installation_ref = $1",
+    )
+    .bind(fixture.installation_ref)
+    .bind(replacement_installation_ref)
+    .execute(database.pool())
+    .await
+    .expect("the installation is replaced after the fact");
+    let superseded_attempt = parse_producer_attempt(
+        &serde_json::json!({
+            "contractVersion": "linggan.producer.attempt.v1",
+            "producerInstanceId": fixture.producer_instance_id,
+            "taskId": comments_lane.task_id,
+            "attemptId": comments_lane.attempt_id,
+        })
+        .to_string(),
+    )
+    .expect("superseded installation attempt is well-formed");
+    assert!(
+        matches!(
+            start_producer_attempt(&database, &superseded_attempt).await,
+            Err(ProducerRuntimeError::ScheduledTaskNotClaimed)
+        ),
+        "a replaced installation cannot start from a preparation it no longer owns"
     );
 }
 

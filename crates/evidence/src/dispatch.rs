@@ -47,6 +47,19 @@ pub enum DispatchError {
     Database(#[from] sqlx::Error),
 }
 
+/// 导航前为一个冻结通道登记的交付身份。
+///
+/// 它是「受权的准备」，不是执行事实：登记它不代表这个通道已经被访问、采集、交付或完成。
+/// 插件在打开页面前把它持久化，之后同一条 task 的投递都用这个身份，哪怕最初那份租约
+/// 已经结束——服务端仍能认出「这是它自己为这次导航登记过的身份」。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreparedLaneDelivery {
+    pub capability: String,
+    pub task_id: Uuid,
+    pub attempt_id: Uuid,
+}
+
 /// The only server response that may be paired with a browser's durable local
 /// navigation-consumption record.  It is intentionally separate from task
 /// claim: a committed claim may be replayed, while this grant is idempotent by
@@ -56,10 +69,12 @@ pub enum DetailPageSessionGrant {
     Authorized {
         session_ref: Uuid,
         plan: Value,
+        prepared_lanes: Vec<PreparedLaneDelivery>,
     },
     Replay {
         session_ref: Uuid,
         plan: Value,
+        prepared_lanes: Vec<PreparedLaneDelivery>,
     },
     Suppressed {
         session_ref: Uuid,
@@ -83,6 +98,8 @@ pub enum DetailPageSessionGrantError {
     ExecutionSourceUnavailable,
     #[error("the signed execution locator changed after the task was dispatched")]
     ExecutionSourceChanged,
+    #[error("the frozen plan's lanes could not be registered for delivery before navigation")]
+    LanePreparationUnavailable,
     #[error(transparent)]
     Database(#[from] sqlx::Error),
 }
@@ -148,6 +165,7 @@ pub enum DispatchFailureCode {
     PageReadFailed,
     DetailPageUrlInvalid,
     DetailPageSessionGrantUnavailable,
+    DetailPageSessionLanePreparationUnavailable,
     DetailPageSessionRecoveryRequired,
     CaptureDeliveryRejected,
     AccountObservationBlocked,
@@ -167,6 +185,9 @@ impl DispatchFailureCode {
             "detail_page_url_invalid" => Some(Self::DetailPageUrlInvalid),
             "detail_page_session_grant_unavailable" => {
                 Some(Self::DetailPageSessionGrantUnavailable)
+            }
+            "detail_page_session_lane_preparation_unavailable" => {
+                Some(Self::DetailPageSessionLanePreparationUnavailable)
             }
             "detail_page_session_recovery_required" => {
                 Some(Self::DetailPageSessionRecoveryRequired)
@@ -189,6 +210,9 @@ impl DispatchFailureCode {
             Self::PageReadFailed => "page_read_failed",
             Self::DetailPageUrlInvalid => "detail_page_url_invalid",
             Self::DetailPageSessionGrantUnavailable => "detail_page_session_grant_unavailable",
+            Self::DetailPageSessionLanePreparationUnavailable => {
+                "detail_page_session_lane_preparation_unavailable"
+            }
             Self::DetailPageSessionRecoveryRequired => "detail_page_session_recovery_required",
             Self::CaptureDeliveryRejected => "capture_delivery_rejected",
             Self::AccountObservationBlocked => "account_observation_blocked",
@@ -381,6 +405,7 @@ pub async fn dispatch_schema_is_ready(database: &Database) -> Result<bool, sqlx:
                 AND to_regclass(format('%I.%I',current_schema(),'collection_platform_dispatch_policy')) IS NOT NULL \
                 AND to_regclass(format('%I.%I',current_schema(),'collection_detail_page_session')) IS NOT NULL \
                 AND to_regclass(format('%I.%I',current_schema(),'collection_detail_page_session_grant_attempt')) IS NOT NULL \
+                AND to_regclass(format('%I.%I',current_schema(),'collection_detail_page_session_lane_preparation')) IS NOT NULL \
                 AND to_regclass(format('%I.%I',current_schema(),'collection_installation_risk_signal')) IS NOT NULL \
                 AND to_regclass(format('%I.%I',current_schema(),'collection_installation_risk_cooldown')) IS NOT NULL \
                 AND EXISTS (SELECT 1 FROM information_schema.columns \
@@ -404,6 +429,9 @@ pub async fn dispatch_schema_is_ready(database: &Database) -> Result<bool, sqlx:
 /// installation, a stopped session, or an unheld task never becomes a second
 /// navigation authorization.  This function does not observe Chrome and must
 /// not claim that a page was actually opened.
+///
+/// 这是 v1 的入口：它不登记通道交付身份，行为与升级前完全一致。已确认握手版本的插件走
+/// [`grant_detail_page_session_with_lane_deliveries`]。
 pub async fn grant_detail_page_session(
     database: &Database,
     install_key: &str,
@@ -411,6 +439,53 @@ pub async fn grant_detail_page_session(
     task_id: Uuid,
     grant_request_id: Uuid,
     execution_source_url: &str,
+) -> Result<DetailPageSessionGrant, DetailPageSessionGrantError> {
+    grant_detail_page_session_inner(
+        database,
+        install_key,
+        installation_credential,
+        task_id,
+        grant_request_id,
+        execution_source_url,
+        false,
+    )
+    .await
+}
+
+/// 新插件的入口：在同一个授权事务里，先为冻结计划中的每个通道登记稳定交付身份，
+/// 再给出可持久化的准备回执。
+///
+/// 登记失败即不发这份授权——「先登记交付身份，再进行页面读取」不是建议。插件在打开页面前
+/// 把回执写进本机持久状态，之后各通道按各自的本机 outbox 投递，身份不会因为租约结束
+/// 而消失。旧插件不请求这件事，服务端也从不把它当作已经准备完成。
+pub async fn grant_detail_page_session_with_lane_deliveries(
+    database: &Database,
+    install_key: &str,
+    installation_credential: &str,
+    task_id: Uuid,
+    grant_request_id: Uuid,
+    execution_source_url: &str,
+) -> Result<DetailPageSessionGrant, DetailPageSessionGrantError> {
+    grant_detail_page_session_inner(
+        database,
+        install_key,
+        installation_credential,
+        task_id,
+        grant_request_id,
+        execution_source_url,
+        true,
+    )
+    .await
+}
+
+async fn grant_detail_page_session_inner(
+    database: &Database,
+    install_key: &str,
+    installation_credential: &str,
+    task_id: Uuid,
+    grant_request_id: Uuid,
+    execution_source_url: &str,
+    register_lane_deliveries: bool,
 ) -> Result<DetailPageSessionGrant, DetailPageSessionGrantError> {
     if !dispatch_schema_is_ready(database).await? {
         return Err(DetailPageSessionGrantError::SchemaUnavailable);
@@ -522,11 +597,20 @@ pub async fn grant_detail_page_session(
     .map(|byte| format!("{byte:02x}"))
     .collect::<String>();
 
-    type Existing = (Uuid, Uuid, Uuid, String, Value, bool, Option<String>);
+    type Existing = (
+        Uuid,
+        Uuid,
+        Uuid,
+        String,
+        Value,
+        bool,
+        Option<String>,
+        String,
+    );
     let existing: Option<Existing> = sqlx::query_as(
         "SELECT session.session_ref,session.owner_installation_ref,session.grant_request_id, \
                 session.state,session.plan_snapshot,owner.superseded_at IS NOT NULL, \
-                session.execution_source_url_sha256 \
+                session.execution_source_url_sha256,session.plan_hash \
          FROM collection_detail_page_session session \
          JOIN plugin_installation owner ON owner.installation_ref=session.owner_installation_ref \
          WHERE work_order_ref=$1 \
@@ -539,6 +623,9 @@ pub async fn grant_detail_page_session(
     .bind(cross_industry_sample_ref)
     .fetch_optional(&mut *transaction)
     .await?;
+    // 通道身份要绑定到**这次实际发出的那份计划**：新授权用刚冻结的这份，重放用会话里
+    // 存着的那份快照。两者用各自的 plan_hash 记录，不互相借用。
+    let mut effective_plan_hash = plan_hash.clone();
     let outcome = match existing {
         None => {
             let session_ref = Uuid::new_v4();
@@ -560,7 +647,11 @@ pub async fn grant_detail_page_session(
             .bind(&execution_source_url_sha256)
             .execute(&mut *transaction)
             .await?;
-            DetailPageSessionGrant::Authorized { session_ref, plan }
+            DetailPageSessionGrant::Authorized {
+                session_ref,
+                plan,
+                prepared_lanes: Vec::new(),
+            }
         }
         Some((
             session_ref,
@@ -570,6 +661,7 @@ pub async fn grant_detail_page_session(
             snapshot,
             _,
             source_hash,
+            stored_plan_hash,
         )) if owner_installation_ref == installation_ref
             && recorded_request_id == grant_request_id
             && source_hash.as_deref() == Some(execution_source_url_sha256.as_str()) =>
@@ -580,13 +672,15 @@ pub async fn grant_detail_page_session(
                     reason_code: "session_stopped",
                 }
             } else {
+                effective_plan_hash = stored_plan_hash;
                 DetailPageSessionGrant::Replay {
                     session_ref,
                     plan: snapshot,
+                    prepared_lanes: Vec::new(),
                 }
             }
         }
-        Some((session_ref, _, _, state, _, owner_superseded, _)) => {
+        Some((session_ref, _, _, state, _, owner_superseded, _, _)) => {
             if owner_superseded && state != "stopped" {
                 sqlx::query(
                     "UPDATE collection_detail_page_session \
@@ -607,6 +701,55 @@ pub async fn grant_detail_page_session(
                 },
             }
         }
+    };
+    // 登记发生在会话已经确定、授权事务仍未提交的时候：此刻计划、工单、租约与工位都还锁着。
+    // 只有真的会发出可用导航授权的两种结果才登记——被抑制的授权不留下任何身份，否则
+    // 「登记了」会被读成「这次导航获得了许可」。
+    let prepared_lanes = match (&outcome, register_lane_deliveries) {
+        (
+            DetailPageSessionGrant::Authorized {
+                session_ref, plan, ..
+            },
+            true,
+        )
+        | (
+            DetailPageSessionGrant::Replay {
+                session_ref, plan, ..
+            },
+            true,
+        ) => {
+            let Some(prepared_lanes) = register_lane_delivery_identities(
+                &mut transaction,
+                *session_ref,
+                installation_ref,
+                lease_ref,
+                plan,
+                &effective_plan_hash,
+            )
+            .await?
+            else {
+                return Err(DetailPageSessionGrantError::LanePreparationUnavailable);
+            };
+            prepared_lanes
+        }
+        _ => Vec::new(),
+    };
+    let outcome = match outcome {
+        DetailPageSessionGrant::Authorized {
+            session_ref, plan, ..
+        } => DetailPageSessionGrant::Authorized {
+            session_ref,
+            plan,
+            prepared_lanes,
+        },
+        DetailPageSessionGrant::Replay {
+            session_ref, plan, ..
+        } => DetailPageSessionGrant::Replay {
+            session_ref,
+            plan,
+            prepared_lanes,
+        },
+        other => other,
     };
     let (grant_outcome, session_ref) = match &outcome {
         DetailPageSessionGrant::Authorized { session_ref, .. } => {
@@ -643,6 +786,116 @@ pub async fn grant_detail_page_session(
     .await?;
     transaction.commit().await?;
     Ok(outcome)
+}
+
+/// 为冻结计划中的每个通道登记一个稳定交付身份。
+///
+/// 通道不是插件能加的东西：计划里的每个通道必须在这份租约里已经有一个同目标的任务，
+/// 且每个通道只有一个。少一个、多一个、或指向别的目标，都不登记——「受权准备」这句话
+/// 得对得上工单真正冻结过的范围。
+///
+/// 一个会话的一个通道只登记一次：同一 `grant_request_id` 重放拿回同一个 `attempt_id`。
+/// 返回 `None` 表示这份计划与租约的任务集合对不上，调用方不得发出导航授权。
+///
+/// 这里不写 `linggan_runtime_attempt`：那张表是「执行真的开始了」的凭据，界面用它区分
+/// 「等着工位来干」和「工位正在干」。把准备写成 Attempt 会让一条尚未打开的通道显示成
+/// 正在采集。身份先登记在这里，Attempt 仍在第一次投递时产生。
+async fn register_lane_delivery_identities(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_ref: Uuid,
+    owner_installation_ref: Uuid,
+    lease_ref: Uuid,
+    plan: &Value,
+    plan_hash: &str,
+) -> Result<Option<Vec<PreparedLaneDelivery>>, sqlx::Error> {
+    let Some(content_external_id) = plan
+        .pointer("/contentExternalId")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+    let Some(lanes) = plan.get("lanes").and_then(Value::as_array) else {
+        return Ok(None);
+    };
+    let frozen: Vec<(Uuid, Option<String>)> = sqlx::query_as(
+        "SELECT runtime.task_id,runtime.task_spec #>> '{capabilitiesRequested,0}' \
+         FROM collection_work_order_lease_task task \
+         JOIN linggan_runtime_task runtime ON runtime.task_id=task.task_id \
+         WHERE task.lease_ref=$1 \
+           AND runtime.task_spec #>> '{target,contentExternalId}'=$2",
+    )
+    .bind(lease_ref)
+    .bind(content_external_id)
+    .fetch_all(&mut **transaction)
+    .await?;
+    let recorded: Vec<(String, Uuid, Uuid)> = sqlx::query_as(
+        "SELECT capability,task_id,attempt_id \
+         FROM collection_detail_page_session_lane_preparation WHERE session_ref=$1",
+    )
+    .bind(session_ref)
+    .fetch_all(&mut **transaction)
+    .await?;
+    let mut prepared = Vec::with_capacity(lanes.len());
+    for lane in lanes {
+        let Some(capability) = lane
+            .as_str()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            return Ok(None);
+        };
+        let mut candidates = frozen
+            .iter()
+            .filter(|(_, frozen_capability)| frozen_capability.as_deref() == Some(capability));
+        let Some((task_id, _)) = candidates.next() else {
+            return Ok(None);
+        };
+        if candidates.next().is_some() {
+            return Ok(None);
+        }
+        let task_id = *task_id;
+        let attempt_id = match recorded
+            .iter()
+            .find(|(recorded_capability, _, _)| recorded_capability == capability)
+        {
+            Some((_, recorded_task_id, attempt_id)) => {
+                // 同一份计划里同一个通道永远指向同一个任务。指到别处，说明这份会话
+                // 被另一种计划写过；那种情况下宁可拒绝导航，也不混用两组身份。
+                if *recorded_task_id != task_id {
+                    return Ok(None);
+                }
+                *attempt_id
+            }
+            None => {
+                let attempt_id = Uuid::new_v4();
+                sqlx::query(
+                    "INSERT INTO collection_detail_page_session_lane_preparation \
+                         (preparation_ref,session_ref,owner_installation_ref,capability,task_id, \
+                          lease_ref,attempt_id,plan_hash) \
+                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+                )
+                .bind(Uuid::new_v4())
+                .bind(session_ref)
+                .bind(owner_installation_ref)
+                .bind(capability)
+                .bind(task_id)
+                .bind(lease_ref)
+                .bind(attempt_id)
+                .bind(plan_hash)
+                .execute(&mut **transaction)
+                .await?;
+                attempt_id
+            }
+        };
+        prepared.push(PreparedLaneDelivery {
+            capability: capability.to_owned(),
+            task_id,
+            attempt_id,
+        });
+    }
+    Ok(Some(prepared))
 }
 
 /// Record that Chrome observed the one locally consumed detail tab.  This is

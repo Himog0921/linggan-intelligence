@@ -143,6 +143,10 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0094_corpus_evidence_read_recovery.sql"),
     "\n",
     include_str!("../../../database/migrations/0095_detail_page_url_rejection.sql"),
+    "\n",
+    include_str!(
+        "../../../database/migrations/0096_detail_page_session_lane_delivery_identities.sql"
+    ),
 );
 
 #[tokio::test]

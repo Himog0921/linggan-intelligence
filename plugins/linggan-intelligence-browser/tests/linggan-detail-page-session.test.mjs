@@ -5,12 +5,18 @@ import { readFile } from 'node:fs/promises';
 import {
   createDetailPageSessionStore,
   createDetailPageNavigationGrantStore,
+  createDetailPageLanePreparationStore,
   canonicalCaptureTimestamp,
   detailPageSessionExecutionReceipt,
   packageDetailPageSessionLane,
   validateDetailPageSessionPlan,
 } from '../src/linggan/detailPageSessionStore.js';
-import { decodePageExecutionReceipt } from '../src/linggan/adapter.js';
+import {
+  decodePageExecutionReceipt,
+  detailPageSessionLanePreparationContractFromHealth,
+  grantLingganDetailPageSession,
+  normalizeDetailPageLanePreparation,
+} from '../src/linggan/adapter.js';
 
 function memoryTable() {
   const rows = new Map();
@@ -62,6 +68,54 @@ function navigationGrantTable() {
     },
     async put(row) { rows.set(row.grantKey, structuredClone(row)); },
     async update(key, patch) { rows.set(key, { ...rows.get(key), ...structuredClone(patch) }); },
+  };
+}
+
+function lanePreparationTable() {
+  const rows = new Map();
+  return {
+    async get(key) { return rows.get(key) ? structuredClone(rows.get(key)) : undefined; },
+    async put(row) { rows.set(row.taskId, structuredClone(row)); },
+    size() { return rows.size; },
+  };
+}
+
+function grantResponse(overrides = {}) {
+  return {
+    outcome: 'authorized',
+    sessionRef: 'session-1',
+    pageSessionPlan: plan,
+    ...overrides,
+  };
+}
+
+const grantHealth = {
+  routes: {
+    dispatch: {
+      detailPageSessionGrant: '/api/local/dispatch/detail-page-sessions/grant',
+    },
+  },
+};
+
+const handshakeHealth = {
+  routes: {
+    dispatch: {
+      detailPageSessionGrant: '/api/local/dispatch/detail-page-sessions/grant',
+      detailPageSessionLanePreparationContract: 'linggan.detail-page-session.lane-preparation.v1',
+    },
+  },
+};
+
+function lanePreparationReceipt() {
+  return {
+    contractVersion: 'linggan.detail-page-session.lane-preparation.v1',
+    sessionRef: 'session-1',
+    lanes: [
+      { capability: 'content_detail', taskId: 'detail-task-1', attemptId: 'attempt-content' },
+      { capability: 'media_slots', taskId: 'media-task-1', attemptId: 'attempt-media' },
+      { capability: 'comments', taskId: 'comments-task-1', attemptId: 'attempt-comments' },
+      { capability: 'replies', taskId: 'replies-task-1', attemptId: 'attempt-replies' },
+    ],
   };
 }
 
@@ -300,4 +354,130 @@ test('the detail body is handed off before comments, and a timeout is not report
     'a readiness timeout records a stop; navigation is observed only after readiness succeeds');
   assert.match(background, /tabUrl\.includes\(contentExternalId\).*tabUrl\.includes\(encodedContentId\)/s,
     'a recovered tab must still identify the expected content, not only the XHS domain');
+});
+
+test('a service that never announced the handshake receives the unchanged v1 grant request', async () => {
+  let sentBody = null;
+  const result = await grantLingganDetailPageSession({
+    installKey: 'install-1',
+    installationCredential: 'credential-1',
+    taskId: 'detail-task-1',
+    grantRequestId: 'request-1',
+    executionSourceUrl: 'https://www.xiaohongshu.com/explore/note-1?xsec_token=token',
+    health: grantHealth,
+    fetchImpl: async (url, options) => {
+      sentBody = JSON.parse(options.body);
+      return { ok: true, async json() { return grantResponse(); } };
+    },
+  });
+  assert.equal(detailPageSessionLanePreparationContractFromHealth(grantHealth), '');
+  assert.ok(!Object.hasOwn(sentBody, 'lanePreparationContract'),
+    'an unannounced contract must not be requested; an older service rejects unknown fields');
+  assert.equal(result.granted, true);
+  assert.equal(result.lanePreparation, null);
+});
+
+test('an announced handshake is requested, and a missing receipt never authorizes a page open', async () => {
+  let sentBody = null;
+  const fetchImpl = async (url, options) => {
+    sentBody = JSON.parse(options.body);
+    return { ok: true, async json() { return grantResponse(); } };
+  };
+  const args = {
+    installKey: 'install-1',
+    installationCredential: 'credential-1',
+    taskId: 'detail-task-1',
+    grantRequestId: 'request-1',
+    executionSourceUrl: 'https://www.xiaohongshu.com/explore/note-1?xsec_token=token',
+    health: handshakeHealth,
+    fetchImpl,
+  };
+  const refused = await grantLingganDetailPageSession(args);
+  assert.equal(sentBody.lanePreparationContract, 'linggan.detail-page-session.lane-preparation.v1');
+  assert.equal(refused.granted, false);
+  assert.equal(refused.reasonCode, 'grant_lane_preparation_missing');
+
+  const accepted = await grantLingganDetailPageSession({
+    ...args,
+    fetchImpl: async () => ({
+      ok: true,
+      async json() { return grantResponse({ lanePreparation: lanePreparationReceipt() }); },
+    }),
+  });
+  assert.equal(accepted.granted, true);
+  assert.deepEqual(accepted.lanePreparation.lanes, lanePreparationReceipt().lanes);
+});
+
+test('a preparation receipt must answer the exact contract, session and frozen lane set', () => {
+  const expected = { contractVersion: 'linggan.detail-page-session.lane-preparation.v1', sessionRef: 'session-1' };
+  const receipt = lanePreparationReceipt();
+  assert.deepEqual(normalizeDetailPageLanePreparation(receipt, expected), receipt);
+  assert.equal(normalizeDetailPageLanePreparation({ ...receipt, contractVersion: 'other' }, expected), null);
+  assert.equal(normalizeDetailPageLanePreparation({ ...receipt, sessionRef: 'session-2' }, expected), null);
+  assert.equal(normalizeDetailPageLanePreparation({ ...receipt, lanes: [] }, expected), null);
+  assert.equal(normalizeDetailPageLanePreparation({
+    ...receipt,
+    lanes: [{ capability: 'author_profile', taskId: 't', attemptId: 'a' }],
+  }, expected), null, 'a lane outside the frozen plan is not a preparation this browser may act on');
+  assert.equal(normalizeDetailPageLanePreparation({
+    ...receipt,
+    lanes: [{ capability: 'content_detail', taskId: 't' }],
+  }, expected), null, 'an identity without a server-minted attempt id is not a preparation');
+});
+
+test('prepared lane identities are persisted with the navigation grant and cannot be re-pointed', async () => {
+  const lanePreparations = createDetailPageLanePreparationStore({
+    table: lanePreparationTable(),
+    transaction: (work) => work(),
+    now: () => 1000,
+  });
+  const grantStore = createDetailPageNavigationGrantStore({
+    table: navigationGrantTable(),
+    lanePreparationStore: lanePreparations,
+    transaction: serializedTransaction(),
+    now: () => 1000,
+    createRequestId: () => 'request-1',
+  });
+  const taskSpec = task('content_detail', 'detail-task-1');
+  const prepared = await grantStore.prepare({ leaseRef: 'lease-1', taskSpec });
+  await grantStore.attachServerGrant({
+    grantKey: prepared.grantKey, sessionRef: 'session-1', plan,
+    lanePreparation: lanePreparationReceipt(),
+  });
+  const media = await lanePreparations.get('media-task-1');
+  assert.equal(media.attemptId, 'attempt-media');
+  assert.equal(media.leaseRef, 'lease-1');
+  assert.equal(media.contentExternalId, 'note-1');
+
+  // 同一身份重放是幂等的；换成另一个身份就是给同一通道改身份，必须拒绝。
+  await lanePreparations.recordLanes({
+    sessionRef: 'session-1', leaseRef: 'lease-1', contentExternalId: 'note-1',
+    lanes: [{ capability: 'media_slots', taskId: 'media-task-1', attemptId: 'attempt-media' }],
+  });
+  await assert.rejects(
+    lanePreparations.recordLanes({
+      sessionRef: 'session-1', leaseRef: 'lease-1', contentExternalId: 'note-1',
+      lanes: [{ capability: 'media_slots', taskId: 'media-task-1', attemptId: 'attempt-other' }],
+    }),
+    /lane_preparation_conflict/,
+  );
+  await assert.rejects(
+    lanePreparations.recordLanes({
+      sessionRef: 'session-1', leaseRef: 'lease-1', contentExternalId: 'note-1',
+      lanes: [{ capability: 'comments', taskId: 'media-task-1', attemptId: 'attempt-media' }],
+    }),
+    /lane_preparation_conflict/,
+  );
+});
+
+test('lane delivery uses the server-minted identity and stops without one', async () => {
+  const background = await readFile(new URL('../src/linggan/background.js', import.meta.url), 'utf8');
+  const lookup = background.indexOf('const preparedAttemptId = await preparedAttemptIdForTask(taskSpec.taskId)');
+  const derived = background.indexOf('await deterministicUuid(`attempt:${instanceId}:${taskSpec.taskId}:${stableKey}`)');
+  assert.ok(lookup >= 0 && derived > lookup,
+    'a prepared identity must win over the locally derived attempt id');
+  assert.match(background, /const attemptId = preparedAttemptId \|\| \(stableKey/);
+  assert.match(background, /detailPageLanePreparationStore\.get\(key\)/);
+  assert.match(background, /state: 'detail_page_session_lane_preparation_unavailable'/);
+  assert.match(background, /'detail_page_session_lane_preparation_unavailable',/);
 });
