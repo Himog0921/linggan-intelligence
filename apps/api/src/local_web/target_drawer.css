@@ -174,7 +174,7 @@
 .c-dw-rule-actions form{display:inline-block;margin:0}
 .c-dw-catalog-work{display:grid;gap:var(--lgi-space-1);min-width:var(--lgi-space-24)}
 .c-dw-catalog-work b{color:var(--lgi-ink);font-weight:700}.c-dw-catalog-work span{color:var(--lgi-muted);font-family:var(--lgi-font-mono);overflow-wrap:anywhere}
-.c-dw-catalog-state{font-weight:600;white-space:nowrap}.c-dw-catalog-state[data-state="pending"]{color:var(--lgi-warning)}.c-dw-catalog-state[data-state="complete"]{color:var(--lgi-success)}
+.c-dw-catalog-state{font-weight:600;white-space:nowrap}.c-dw-catalog-state[data-state="pending"],.c-dw-catalog-state[data-state="retry_pending"],.c-dw-catalog-state[data-state="input_blocked"],.c-dw-catalog-state[data-state="budget_exhausted"]{color:var(--lgi-warning)}.c-dw-catalog-state[data-state="complete"]{color:var(--lgi-success)}
 @media (max-width:900px){.c-dw-catalog-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.c-dw-catalog-filter{grid-template-columns:1fr}.c-dw-catalog-filter :is(select,button){width:100%}}
 
 .life-panel{display:grid;min-width:0;gap:var(--lgi-space-4);color:var(--lgi-ink)}

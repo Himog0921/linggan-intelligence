@@ -125,6 +125,7 @@ pub use dispatch::{
     record_detail_page_session_progress, record_dispatch_answer, report_detail_page_risk_signal,
     requeue_failed_dispatch,
 };
+pub use execution_input_eligibility::{MaterialExecutionKind, MaterialExecutionState};
 pub use execution_station::{
     CheckInOutcome, InstallationCheckIn, InstallationClaimOutcome, StationError,
     check_in_installation, claim_installation, close_claim_window, open_claim_window,

@@ -19,11 +19,11 @@ use cross_industry::{
 };
 use fixture::proof_database;
 use linggan_evidence::{
-    AccountEligibilityObservation, CheckInOutcome, DETAIL_WINDOW_COMMENT_LIMIT,
+    AccountEligibilityObservation, CatalogDetailState, CheckInOutcome, DETAIL_WINDOW_COMMENT_LIMIT,
     DETAIL_WINDOW_REPLY_EXPAND_LIMIT, DispatchDecision, InstallationCheckIn, KeywordDetailAdvance,
-    activate_installation_credential, advance_keyword_archive_detail, bind_observation_account,
-    check_in_installation, decide_dispatch, keyword_baselines_qualified,
-    keyword_targets_pending_detail, open_claim_window, register_station,
+    MaterialExecutionKind, activate_installation_credential, advance_keyword_archive_detail,
+    bind_observation_account, check_in_installation, decide_dispatch, keyword_baselines_qualified,
+    keyword_targets_pending_detail, open_claim_window, read_cross_industry_hits, register_station,
     report_account_eligibility, request_and_admit, set_station_accepting,
 };
 use linggan_storage_postgres::Database;
@@ -324,6 +324,39 @@ fn keyword_archive_round(
         coverage,
         serde_json::json!({"surfaceReceipt":{"stopReason":stop_reason}}),
         vec![discovery_card(note_external_id, "建档样本", "1.4万", url)],
+    )
+}
+
+/// 界面上「这一篇此刻能不能取详情、不能时欠的是什么」——走的是页面用的那个读取口。
+///
+/// 断言不在这里另拼一句 SQL 去近似它：另拼的句子永远会对，而页面上那一行可以同时在说别的
+/// 话。读同一个投影，才是在断言用户看得见的那件事。
+async fn hit_display_state(
+    database: &Database,
+    target_ref: Uuid,
+    content_external_id: &str,
+) -> (CatalogDetailState, Option<MaterialExecutionKind>) {
+    let projection = read_cross_industry_hits(database, target_ref)
+        .await
+        .expect("the cross-industry hit list stays readable")
+        .expect("the sampling surface is ready for this target");
+    let work = projection
+        .works
+        .iter()
+        .find(|work| work.content_external_id == content_external_id)
+        .unwrap_or_else(|| {
+            panic!(
+                "{content_external_id} 应当在这张榜上；实际是 {:?}",
+                projection
+                    .works
+                    .iter()
+                    .map(|work| work.content_external_id.as_str())
+                    .collect::<Vec<_>>()
+            )
+        });
+    (
+        work.detail_state,
+        work.execution_state.as_ref().map(|state| state.kind),
     )
 }
 
@@ -1021,6 +1054,17 @@ async fn a_new_signed_address_after_a_stop_opens_a_successor_eligibility_through
         "没有可用入口的那一篇不该派给工位，实际是 {decision:?}"
     );
 
+    // 停下的这一篇在榜上要说出**它欠的是什么**：不是「读失败」（它一次页面都没打开过），也
+    // 不是「待采集」（那等于什么都不知道）。界面读的就是这一个值。
+    assert_eq!(
+        hit_display_state(&database, target_ref, "note-archive-1").await,
+        (
+            CatalogDetailState::Pending,
+            Some(MaterialExecutionKind::InputBlocked)
+        ),
+        "缺输入停下的作品，行上说的是「输入不可执行」"
+    );
+
     let stopped: (String, Option<String>, i32) = sqlx::query_as(
         "SELECT state,input_fingerprint,retry_epoch \
          FROM collection_execution_input_eligibility \
@@ -1067,6 +1111,18 @@ async fn a_new_signed_address_after_a_stop_opens_a_successor_eligibility_through
     assert!(
         matches!(advance, KeywordDetailAdvance::Queued { works: 1, .. }),
         "新地址到了，这一篇要重新排得上；实际是 {advance:?}"
+    );
+
+    // 停止行还留在台账上，但它已经**不是此刻的答案**：界面读到的必须是「可执行」。把停止行
+    // 当成永久封禁，正是这次要修的那种缺陷的形状——从前是每一轮都重认一次「输入又变了」，
+    // 反过来就成了永远不再排。两种都错。
+    assert_eq!(
+        hit_display_state(&database, target_ref, "note-archive-1").await,
+        (
+            CatalogDetailState::Pending,
+            Some(MaterialExecutionKind::Executable)
+        ),
+        "新地址到了之后这一篇读到的就是可执行：停止行是历史，不是永久封禁"
     );
 
     // 停止行与当前行**同时存在**，各自说各自的事实：一条说「当初确实没有入口」，一条说
@@ -1163,9 +1219,10 @@ async fn a_new_signed_address_after_a_stop_opens_a_successor_eligibility_through
         "https://www.xiaohongshu.com/search_result/note-archive-1?xsec_token=ABfresh",
     )
     .await;
-    let advance_again = advance_keyword_archive_detail(&database, target_ref, "建档补详情", "person")
-        .await
-        .expect("a second advance still answers");
+    let advance_again =
+        advance_keyword_archive_detail(&database, target_ref, "建档补详情", "person")
+            .await
+            .expect("a second advance still answers");
     assert!(
         matches!(advance_again, KeywordDetailAdvance::Queued { works: 1, .. }),
         "同一条地址回来了，这一篇仍然排得上（它本来就可执行）；实际是 {advance_again:?}"

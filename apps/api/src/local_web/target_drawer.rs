@@ -14,9 +14,10 @@ use linggan_evidence::{
     ArchiveCompleteness, BlockedMaterial, CatalogDetailState, CatalogSource,
     CreatorDirectoryProjection, CreatorLifecycleAssociation, CreatorLifecycleMetric,
     CreatorLifecyclePoint, CreatorLifecycleProjection, CreatorLifecycleStatus,
-    CreatorLifecycleWindow, KeywordHitProjection, ObservationTarget, ObservationTargetAvatar,
-    TargetInspectorAction, TargetInspectorArchiveState, TargetInspectorCount,
-    TargetInspectorExecutionState, TargetInspectorPatrolState, TargetInspectorProjection,
+    CreatorLifecycleWindow, KeywordHitProjection, MaterialExecutionKind, ObservationTarget,
+    ObservationTargetAvatar, TargetInspectorAction, TargetInspectorArchiveState,
+    TargetInspectorCount, TargetInspectorExecutionState, TargetInspectorPatrolState,
+    TargetInspectorProjection,
 };
 
 /// Collection 目标抽屉的三个职责。Evidence 已退回唯一的 Corpus 表面。退役或未知
@@ -1244,9 +1245,22 @@ fn works_list(
                 CatalogSource::InitialArchive => "初始建档",
                 CatalogSource::PatrolDiscovery => "巡查新增",
             };
-            let detail = match work.detail_state {
-                CatalogDetailState::Complete => "已完成",
-                CatalogDetailState::Pending => "待采集",
+            // 欠详情的作品要说清它欠的是什么，而不是一律「待采集」：等执行权、退避冷却、输入
+            // 缺失、预算用尽，在用户那里是四件不同的事（计划 §9.4）。判据只从领域读来的
+            // `execution_state` 拿，页面不自己拼第二套资格，也不给「从未开始」编一句「试过没成」。
+            let execution = work.execution_state.as_ref().map(|state| state.kind);
+            let (detail, detail_state) = match (work.detail_state, execution) {
+                (CatalogDetailState::Complete, _) => ("已完成", "complete"),
+                (CatalogDetailState::Pending, Some(MaterialExecutionKind::RetryPending)) => {
+                    ("延迟重试", "retry_pending")
+                }
+                (CatalogDetailState::Pending, Some(MaterialExecutionKind::InputBlocked)) => {
+                    ("输入不可执行", "input_blocked")
+                }
+                (CatalogDetailState::Pending, Some(MaterialExecutionKind::BudgetExhausted)) => {
+                    ("自动重试已停止", "budget_exhausted")
+                }
+                (CatalogDetailState::Pending, _) => ("待采集", "pending"),
             };
             let comments = work
                 .comment_count
@@ -1263,7 +1277,6 @@ fn works_list(
             );
             let tail = format!(
                 r#"<td><span class="c-dw-catalog-state" data-state="{detail_state}">{detail}</span></td><td>{media}</td><td>{comments}</td><td>{last}</td><td><a class="c-btn-secondary c-dw-work-open" href="/corpus/evidence?selected={work_ref}">查看</a></td>"#,
-                detail_state = if work.detail_state == CatalogDetailState::Complete { "complete" } else { "pending" },
                 detail = detail,
                 media = work.media_state,
                 comments = comments,

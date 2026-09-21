@@ -11,13 +11,13 @@ use linggan_evidence::{
     AccountEligibilityObservation, AcquisitionChainError, AuthorizationGrant, CatalogDetailState,
     CheckInOutcome, CreatorLifecycleAssociation, CreatorLifecycleMetric, CreatorLifecycleQuery,
     CreatorLifecycleStatus, CreatorLifecycleWindow, DispatchDecision, DispatchFailureCode,
-    DispatchFailureOutcome, InstallationCheckIn, RequestLeaseError, RuntimeAttemptOutcome,
-    RuntimeSubmissionOutcome, activate_installation_credential, bind_observation_account,
-    check_in_installation, decide_dispatch, grant_authorization, list_targets, open_claim_window,
-    read_archive_completeness, read_creator_directory, read_creator_lifecycle, read_target,
-    register_station, report_account_eligibility, request_admit_and_lease,
-    request_progressive_archive_and_lease, requeue_failed_dispatch, retire_materials,
-    run_progressive_archives, set_station_accepting, start_producer_attempt,
+    DispatchFailureOutcome, InstallationCheckIn, MaterialExecutionKind, RequestLeaseError,
+    RuntimeAttemptOutcome, RuntimeSubmissionOutcome, activate_installation_credential,
+    bind_observation_account, check_in_installation, decide_dispatch, grant_authorization,
+    list_targets, open_claim_window, read_archive_completeness, read_creator_directory,
+    read_creator_lifecycle, read_target, register_station, report_account_eligibility,
+    request_admit_and_lease, request_progressive_archive_and_lease, requeue_failed_dispatch,
+    retire_materials, run_progressive_archives, set_station_accepting, start_producer_attempt,
     submit_producer_package,
 };
 use linggan_storage_postgres::Database;
@@ -882,11 +882,32 @@ async fn a_detail_that_spent_its_page_read_budget_keeps_the_baseline_open() {
             "第 {ordinal} 次页面读失败仍在退避阶梯上"
         );
     }
+    // 两次读失败之后，这一篇欠的还是同一件事（详情），但**等的东西变了**：它现在在退避冷却里，
+    // 到点会自动再来一次。界面上说成「待采集」就把「已经试过、还在等」抹掉了。
+    assert_eq!(
+        member_display_state(&database, target_ref, member).await,
+        (
+            CatalogDetailState::Pending,
+            Some(MaterialExecutionKind::RetryPending)
+        ),
+        "退避中的作品，行上说的是「延迟重试」"
+    );
+
     clear_dispatch_backoff(&database, child).await;
     assert_eq!(
         report_detail_read_failure(&database, &installation, child, member).await,
         DispatchFailureOutcome::Blocked,
         "第三次用尽预算：这一篇不再自动重试"
+    );
+    // 第三次之后它仍然是「欠着详情」，但**不再是「再等等就好」**：这一篇的页面读预算用尽，
+    // 自动重试已经停了。「延迟重试」和「自动重试已停止」是两句话，不能合成一句。
+    assert_eq!(
+        member_display_state(&database, target_ref, member).await,
+        (
+            CatalogDetailState::Pending,
+            Some(MaterialExecutionKind::BudgetExhausted)
+        ),
+        "预算用尽的作品，行上说的是「自动重试已停止」"
     );
     let ledger: Vec<(String, i32)> = sqlx::query_as(
         "SELECT state,deduplicated_failure_count FROM collection_execution_input_eligibility \
@@ -2231,8 +2252,14 @@ async fn complete_progressive_root_with_partial_directory(
     directory_size: i64,
     stopped_reason: &str,
 ) {
-    complete_progressive_root_with_directory(database, installation, directory_size, stopped_reason, true)
-        .await;
+    complete_progressive_root_with_directory(
+        database,
+        installation,
+        directory_size,
+        stopped_reason,
+        true,
+    )
+    .await;
 }
 
 /// `signed_links=false` 时目录成员没有可执行地址——用来证明这类成员不会进候选。
@@ -2300,6 +2327,39 @@ async fn pending_detail_batch(database: &Database, target_ref: Uuid, root: Uuid)
     .fetch_one(database.pool())
     .await
     .expect("补详情的子工单是系统自己排出来的，不是用例摆出来的")
+}
+
+/// 界面上「这一篇此刻能不能取详情、不能时欠的是什么」——走的是目标抽屉那一侧用的读取口。
+///
+/// 断言读的是创作者目录投影，不在用例里另拼一句资格 SQL：另拼的句子总是对得上台账，而用户
+/// 看到的那一行可以同时在说另一件事。
+async fn member_display_state(
+    database: &Database,
+    target_ref: Uuid,
+    content_external_id: &str,
+) -> (CatalogDetailState, Option<MaterialExecutionKind>) {
+    let directory = read_creator_directory(database, target_ref)
+        .await
+        .expect("the creator directory stays readable")
+        .expect("the directory surface is ready for this target");
+    let work = directory
+        .works
+        .iter()
+        .find(|work| work.content_external_id == content_external_id)
+        .unwrap_or_else(|| {
+            panic!(
+                "{content_external_id} 应当在这份目录里；实际是 {:?}",
+                directory
+                    .works
+                    .iter()
+                    .map(|work| work.content_external_id.as_str())
+                    .collect::<Vec<_>>()
+            )
+        });
+    (
+        work.detail_state,
+        work.execution_state.as_ref().map(|state| state.kind),
+    )
 }
 
 /// 退避是真实写进工单的，所以这里显式跨过它——跨的是时钟，不是把退避抹掉。

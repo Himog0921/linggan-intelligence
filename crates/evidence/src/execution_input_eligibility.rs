@@ -28,7 +28,9 @@
 //! 和材料事实仍只由各自的表表达。这里既不写 Attempt，也不写 Evidence。
 
 use crate::qualified_detail::qualified_detail_exists_sql;
+use linggan_storage_postgres::Database;
 use serde_json::Value;
+use sqlx::Row;
 use uuid::Uuid;
 
 /// 解析规则的版本。规则变了就是另一套输入语义，旧指纹不能与新指纹直接比较。
@@ -700,6 +702,9 @@ pub(crate) struct PageReadBudget {
 ///
 /// 只看**当前行**（`state <> 'input_blocked'`）：停止行是历史，一个范围可以留下多条，
 /// 拿它们来挡执行等于把「当时停过」变成永久封禁。
+///
+/// 判据本身只有一句，写在 `current_row_pauses_work_sql` 上：看板那句「为什么没排」与这里的
+/// 「现在不排」必须是同一句话。
 pub(crate) fn budget_blocks_new_work_predicate(
     target_ref_expression: &str,
     domain_scope: &str,
@@ -715,9 +720,19 @@ pub(crate) fn budget_blocks_new_work_predicate(
                AND budget.object_ref={object_ref_expression} \
                AND budget.capability='content_detail' \
                AND budget.state <> 'input_blocked' \
-               AND (budget.state='budget_exhausted' \
-                    OR (budget.next_retry_at IS NOT NULL \
-                        AND budget.next_retry_at > scope_001_now())))"
+               AND ({pauses}) )",
+        pauses = current_row_pauses_work_sql("budget")
+    )
+}
+
+/// 「这条当前行不让现在排新工作」：预算已用尽，或者还在冷却里。
+///
+/// 建单与看板共用这一句话。分开写两份，就会长出「看板说在冷却、候选说可以排」这种自相矛盾，
+/// 而它在页面上看不出是错的。
+fn current_row_pauses_work_sql(alias: &str) -> String {
+    format!(
+        "{alias}.state='budget_exhausted' \
+         OR ({alias}.next_retry_at IS NOT NULL AND {alias}.next_retry_at > scope_001_now())"
     )
 }
 
@@ -1068,4 +1083,105 @@ pub(crate) async fn detail_material_already_accepted_in_transaction(
     .bind(sample_ref)
     .fetch_one(&mut **transaction)
     .await
+}
+
+/// 一个对象在「取详情」这件事上**此刻说了算的那一行**：能不能执行、不能执行时欠的是什么。
+///
+/// 看板与候选读的是同一份台账，问法不同：候选问「要不要现在排」，看板问「为什么不排」。所以
+/// 这个读取只给出一行——当前行（`state <> 'input_blocked'`）优先，停止行只在**没有**当前行时
+/// 兜底。停止行是历史：平台后来又给了一条有效地址、准入另开了一条当前资格之后，这一篇读到的
+/// 就是「可执行」。`state`、`reason_code` 与时间都原样带出，界面不自己拼第二套资格判据，也不
+/// 把台账的意思翻译成另一套事实。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MaterialExecutionState {
+    pub kind: MaterialExecutionKind,
+    /// 台账记下的原因码；没有原因时为空。
+    pub reason_code: Option<String>,
+    /// 这条状态来自哪一行——沿它能回查台账，不靠界面转述。
+    pub eligibility_ref: Uuid,
+    /// 台账最后一次改写这条状态的时间。
+    pub confirmed_at: Option<String>,
+    /// 延迟重试时的下次重试时刻；其余状态为空。
+    pub retry_at: Option<String>,
+}
+
+/// `MaterialExecutionState` 的四种落点。前三类各有一句人话可说，`Executable` 没有。
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum MaterialExecutionKind {
+    /// 输入有效、也不在冷却里：等的只是执行权。
+    Executable,
+    /// 明确的可重试原因，重试时刻还没到。
+    RetryPending,
+    /// 必要输入缺失或被停过，且此后没有更新的当前资格。
+    InputBlocked,
+    /// 同一需求范围的页面失败预算已用尽：它不会自己回来。
+    BudgetExhausted,
+}
+
+/// 一次读齐一批对象此刻的取详情状态；台账里没有行的对象不出现在结果里。
+///
+/// 每个对象只取一行：当前行压过停止行，同类里取 `updated_at` 最新的一条。**不按「第几行」取**
+/// ——`0097` 的两条键本来就让同一范围可以同时留着一条停止事实和一条当前资格（见
+/// `keyword_archive_postgres` 的后继资格用例），顺序在这里没有意义。
+///
+/// 两侧（本领域材料 / 跨行业样本）只差调用方给的 `domain_scope`/`object_kind`：判据只写一份，
+/// 隔离仍由各自的作用域取值保证，不靠读取侧再加条件。
+pub(crate) async fn read_material_execution_states(
+    database: &Database,
+    target_ref: Uuid,
+    domain_scope: &str,
+    object_kind: &str,
+    object_refs: &[Uuid],
+) -> Result<std::collections::HashMap<Uuid, MaterialExecutionState>, sqlx::Error> {
+    if object_refs.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "SELECT DISTINCT ON (eligibility.object_ref) \
+                eligibility.object_ref,eligibility.state,eligibility.reason_code, \
+                eligibility.eligibility_ref, \
+                linggan_human_moment(eligibility.updated_at) AS confirmed_at, \
+                linggan_human_moment(eligibility.next_retry_at) AS retry_at, \
+                ({pauses}) AS pauses_new_work \
+         FROM collection_execution_input_eligibility eligibility \
+         WHERE eligibility.target_ref=$1 \
+           AND eligibility.domain_scope=$2 AND eligibility.object_kind=$3 \
+           AND eligibility.capability='content_detail' \
+           AND eligibility.object_ref=ANY($4) \
+         ORDER BY eligibility.object_ref,(eligibility.state='input_blocked'), \
+                  eligibility.updated_at DESC,eligibility.eligibility_ref DESC",
+        pauses = current_row_pauses_work_sql("eligibility"),
+    )))
+    .bind(target_ref)
+    .bind(domain_scope)
+    .bind(object_kind)
+    .bind(object_refs)
+    .fetch_all(database.pool())
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let state: String = row.get("state");
+            let kind = if state == "input_blocked" {
+                MaterialExecutionKind::InputBlocked
+            } else if state == "budget_exhausted" {
+                MaterialExecutionKind::BudgetExhausted
+            } else if row.get::<bool, _>("pauses_new_work") {
+                // 当前行、预算没用尽、却仍然拦着新工作：只剩「还在冷却里」这一种。
+                MaterialExecutionKind::RetryPending
+            } else {
+                MaterialExecutionKind::Executable
+            };
+            (
+                row.get("object_ref"),
+                MaterialExecutionState {
+                    kind,
+                    reason_code: row.get("reason_code"),
+                    eligibility_ref: row.get("eligibility_ref"),
+                    confirmed_at: row.get("confirmed_at"),
+                    retry_at: row.get("retry_at"),
+                },
+            )
+        })
+        .collect())
 }

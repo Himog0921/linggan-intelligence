@@ -7,6 +7,7 @@
 use crate::cross_industry_sample_facts::{
     sample_detail_obtained_sql, sample_facts_schema_ready_sql, sample_observed_by_target_sql,
 };
+use crate::execution_input_eligibility::{MaterialExecutionState, read_material_execution_states};
 use crate::qualified_detail::qualified_detail_exists_sql;
 use linggan_storage_postgres::Database;
 use sqlx::Row;
@@ -36,6 +37,10 @@ pub struct CatalogWork {
     pub published_at: Option<String>,
     pub source: CatalogSource,
     pub detail_state: CatalogDetailState,
+    /// 这一篇此刻「能不能取详情、不能时欠的是什么」——`0097` 台账的唯一读取口。
+    ///
+    /// 空表示台账里没有这一篇的行：那既不是停止也不是冷却，界面不替它编一个原因。
+    pub execution_state: Option<MaterialExecutionState>,
     pub media_state: &'static str,
     pub comment_count: Option<i64>,
     pub last_captured_at: Option<String>,
@@ -55,18 +60,66 @@ pub async fn read_creator_directory(
     database: &Database,
     target_ref: Uuid,
 ) -> Result<Option<CreatorDirectoryProjection>, sqlx::Error> {
-    read_catalog(database, target_ref, "creator", "profile_discovery")
-        .await
-        .map(|value| value.map(|works| CreatorDirectoryProjection { works }))
+    let Some(mut works) =
+        read_catalog(database, target_ref, "creator", "profile_discovery").await?
+    else {
+        return Ok(None);
+    };
+    stamp_material_execution_states(
+        database,
+        target_ref,
+        "own_domain",
+        "material_content",
+        &mut works,
+    )
+    .await?;
+    Ok(Some(CreatorDirectoryProjection { works }))
 }
 
 pub async fn read_keyword_hits(
     database: &Database,
     target_ref: Uuid,
 ) -> Result<Option<KeywordHitProjection>, sqlx::Error> {
-    read_catalog(database, target_ref, "keyword", "discovery_search")
-        .await
-        .map(|value| value.map(|works| KeywordHitProjection { works }))
+    let Some(mut works) = read_catalog(database, target_ref, "keyword", "discovery_search").await?
+    else {
+        return Ok(None);
+    };
+    stamp_material_execution_states(
+        database,
+        target_ref,
+        "own_domain",
+        "material_content",
+        &mut works,
+    )
+    .await?;
+    Ok(Some(KeywordHitProjection { works }))
+}
+
+/// 把台账里此刻的状态贴到这一页作品上。
+///
+/// 两侧（本领域材料 / 跨行业样本）只差「哪一套作用域取值」这一件事，而它正是两域边界所在
+/// （`0044` 的隔离）：写成一个函数、由调用方明写取值，比在两个查询里各拼一遍 `LATERAL` 更难
+/// 漂移，也让「界面不自己拼第二套资格」落在类型上——页面只读 `CatalogWork.execution_state`。
+async fn stamp_material_execution_states(
+    database: &Database,
+    target_ref: Uuid,
+    domain_scope: &str,
+    object_kind: &str,
+    works: &mut [CatalogWork],
+) -> Result<(), sqlx::Error> {
+    let object_refs: Vec<Uuid> = works.iter().map(|work| work.public_ref).collect();
+    let mut states = read_material_execution_states(
+        database,
+        target_ref,
+        domain_scope,
+        object_kind,
+        &object_refs,
+    )
+    .await?;
+    for work in works.iter_mut() {
+        work.execution_state = states.remove(&work.public_ref);
+    }
+    Ok(())
 }
 
 /// 一个**跨行业**关键词目标的命中作品。
@@ -126,7 +179,7 @@ pub async fn read_cross_industry_hits(
     .bind(target_ref)
     .fetch_all(database.pool())
     .await?;
-    let works = rows
+    let mut works: Vec<CatalogWork> = rows
         .into_iter()
         .map(|row| CatalogWork {
             public_ref: row.get("sample_ref"),
@@ -144,12 +197,23 @@ pub async fn read_cross_industry_hits(
             } else {
                 CatalogDetailState::Pending
             },
+            // 台账里的当前状态在这一页读完之后统一贴上：这条查询只读样本与观察记录，不自己
+            // 拼一份资格判据（`0044` 的隔离正是靠「谁都不许顺手加一个条件」守住的）。
+            execution_state: None,
             // 跨行业侧不下载媒体，也不做 OCR/转录：参照物只看列表与正文。
             media_state: "NOT_APPLICABLE",
             comment_count: row.get("comment_count"),
             last_captured_at: row.get("last_captured_at"),
         })
         .collect();
+    stamp_material_execution_states(
+        database,
+        target_ref,
+        "cross_industry",
+        "cross_industry_sample",
+        &mut works,
+    )
+    .await?;
     Ok(Some(KeywordHitProjection { works }))
 }
 
@@ -373,6 +437,9 @@ async fn read_catalog(
                         CatalogSource::InitialArchive
                     },
                     detail_state,
+                    // 台账里的当前状态在 `read_creator_directory` / `read_keyword_hits` 里贴上：
+                    // 这条查询只读发现、详情与评论，不自己拼一份资格判据。
+                    execution_state: None,
                     media_state: match row.get::<String, _>("media_state").as_str() {
                         "已处理" => "已处理",
                         "待处理" => "待处理",
