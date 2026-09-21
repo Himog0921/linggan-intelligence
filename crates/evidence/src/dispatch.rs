@@ -14,6 +14,11 @@ use crate::collection_control::{
     evaluate_claiming_installation_capacity_in, required_capabilities_for,
     revalidate_frozen_capacity_in, validate_installation_credential_in,
 };
+use crate::execution_input_eligibility::{
+    MISSING_EXECUTION_INPUT_REASON, requires_signed_execution_source,
+    signed_locator_predicate, stop_material_for_missing_execution_input_in_transaction,
+    task_content_external_id,
+};
 use crate::work_order_lease::{
     LeaseError, claim_queued_work_order_in_transaction, expire_lapsed_leases_in_transaction,
     recover_released_orphaned_work_orders_in_transaction,
@@ -34,6 +39,12 @@ const MAX_DISPATCH_FAILURE_RETRY_AFTER_SECONDS: u32 = 900;
 /// blocked until a later, explicit recovery decision is made.
 const MAX_PAGE_READ_FAILURES_PER_DETAIL: i64 = 3;
 const CLAIM_LEASE_MINUTES: i32 = 30;
+/// 一次派发里最多为「输入缺失」停几个成员。
+///
+/// 停止是廉价的（都停完就终结这张工单），但它是循环的出口：没有上限时，一张成员全部缺输入
+/// 的工单会让这一次派发把整批成员挨个停完才开始做别的——在队列很长时那不是「马上」，而是
+/// 「这一轮都在收尸」。留一个上限，剩下的下一轮继续停，停过的成员不会重新变成候选。
+const MAX_MEMBER_STOPS_PER_DISPATCH: usize = 8;
 
 #[derive(Debug, thiserror::Error)]
 pub enum DispatchError {
@@ -1378,7 +1389,8 @@ async fn record_terminal_dispatch_failure_in_transaction(
     let all_terminal: bool = sqlx::query_scalar(
         "SELECT NOT EXISTS ( \
              SELECT 1 FROM collection_work_order_lease_task \
-             WHERE lease_ref=$1 AND execution_state NOT IN ('completed','unavailable','blocked'))",
+             WHERE lease_ref=$1 \
+               AND execution_state NOT IN ('completed','unavailable','blocked','input_blocked'))",
     )
     .bind(lease_ref)
     .fetch_one(&mut **transaction)
@@ -1394,6 +1406,86 @@ async fn record_terminal_dispatch_failure_in_transaction(
         .await?;
         sqlx::query(
             "UPDATE collection_work_order SET queue_state='completed' \
+             WHERE work_order_ref=$1 AND queue_state='leased'",
+        )
+        .bind(work_order_ref)
+        .execute(&mut **transaction)
+        .await?;
+    }
+    Ok(())
+}
+
+/// 一个成员缺执行输入：记下这一次**停止**，再按剩余有效成员判断工单状态。
+///
+/// 与 `record_recoverable_dispatch_failure_in_transaction` 的分工，正是这两件事的本质区别：
+/// 那边是「读了一次没读成」——退避之后值得再试，所以释放整张租约、把工单放回队列；这边是
+/// 「这一篇根本没有可用的执行入口」——重试只是把一件不会变的事再问一遍，所以停它自己，
+/// 不重排、不进冷却，**同批其余成员的许可原样保留**。
+///
+/// 只有当所有通道都终止时才结束租约；还有可跑的成员时租约继续有效，那些成员照常执行。
+/// 结束时的队列状态按「有没有任何一条通道真的完成过」判断：全部都是停下的记 `cancelled`
+/// ——停止不是完成；有完成过的记 `completed`，与既有终态口径一致。
+async fn record_input_blocked_dispatch_failure_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    failure_ref: Uuid,
+    task_id: Uuid,
+    installation_ref: Uuid,
+    lease_ref: Uuid,
+    work_order_ref: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO collection_work_order_lease_task_dispatch_failure \
+             (failure_ref,task_id,installation_ref,failure_code,retry_after_seconds,failure_disposition) \
+         VALUES ($1,$2,$3,$4,1,'input_blocked')",
+    )
+    .bind(failure_ref)
+    .bind(task_id)
+    .bind(installation_ref)
+    .bind(MISSING_EXECUTION_INPUT_REASON)
+    .execute(&mut **transaction)
+    .await?;
+    let all_terminal: bool = sqlx::query_scalar(
+        "SELECT NOT EXISTS ( \
+             SELECT 1 FROM collection_work_order_lease_task \
+             WHERE lease_ref=$1 \
+               AND execution_state NOT IN ('completed','unavailable','blocked','input_blocked'))",
+    )
+    .bind(lease_ref)
+    .fetch_one(&mut **transaction)
+    .await?;
+    if !all_terminal {
+        return Ok(());
+    }
+    let any_completed: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM collection_work_order_lease_task \
+           WHERE lease_ref=$1 AND execution_state='completed')",
+    )
+    .bind(lease_ref)
+    .fetch_one(&mut **transaction)
+    .await?;
+    sqlx::query(
+        "UPDATE collection_work_order_lease \
+         SET released_at=scope_001_now(),release_reason='input_blocked' \
+         WHERE lease_ref=$1 AND released_at IS NULL",
+    )
+    .bind(lease_ref)
+    .execute(&mut **transaction)
+    .await?;
+    if any_completed {
+        sqlx::query(
+            "UPDATE collection_work_order SET queue_state='completed' \
+             WHERE work_order_ref=$1 AND queue_state='leased'",
+        )
+        .bind(work_order_ref)
+        .execute(&mut **transaction)
+        .await?;
+    } else {
+        // 一条都没跑成，而且剩下的都因为缺输入停了。记 `completed` 会把「一篇都没取回」
+        // 说成「这一单做完了」——那正是包规约禁止的「制造成功」。`cancelled` 说的是实事：
+        // 这一轮停了；新的有效输入到了，会由准入另开一张后继工单。
+        sqlx::query(
+            "UPDATE collection_work_order SET queue_state='cancelled',station_ref=NULL, \
+                 installation_ref=NULL,account_ref=NULL,eligibility_ref=NULL \
              WHERE work_order_ref=$1 AND queue_state='leased'",
         )
         .bind(work_order_ref)
@@ -1603,101 +1695,151 @@ pub async fn decide_dispatch(
     //
     // 顺序保证「有任务却被拦」不会被报成「没有任务」：只有确实没有候选时才回
     // `NothingWaiting`。
-    let waiting: Option<(Uuid, Uuid, Value, String, String)> = sqlx::query_as(
-        "SELECT task.task_id, lease.lease_ref, runtime.task_spec, runtime.platform, work_order.lane \
-         FROM collection_work_order_lease_task task \
-         JOIN collection_work_order_lease lease ON lease.lease_ref = task.lease_ref \
-         JOIN linggan_runtime_task runtime ON runtime.task_id = task.task_id \
-         JOIN collection_work_order work_order ON work_order.work_order_ref = lease.work_order_ref \
-         WHERE lease.station_ref = $1 \
-           AND lease.released_at IS NULL \
-           AND lease.expires_at > scope_001_now() \
-           AND task.execution_state = 'pending' \
-           AND NOT EXISTS ( \
-               SELECT 1 FROM collection_work_order_lease_task prior \
-               WHERE prior.lease_ref = task.lease_ref \
-                 AND prior.sequence_no < task.sequence_no \
-                 AND prior.execution_state NOT IN ('completed','unavailable','blocked')) \
-         ORDER BY lease.issued_at, task.sequence_no \
-         LIMIT 1 FOR UPDATE OF task SKIP LOCKED",
-    )
-    .bind(station_ref)
-    .fetch_optional(&mut *transaction)
-    .await?;
+    //
+    // 循环是为了「停一个成员、当场继续下一个」。一批里有一篇没有执行地址时，停它自己就够
+    // 了，同批其余作品应该在同一次轮询里照常派出去；不循环的话它们要等下一轮，而人看到的
+    // 是「这一轮什么也没派」——一次针对单篇的停止被读成整批停摆。
+    for _ in 0..MAX_MEMBER_STOPS_PER_DISPATCH {
+        let waiting: Option<(Uuid, Uuid, Value, String, String)> = sqlx::query_as(
+            "SELECT task.task_id, lease.lease_ref, runtime.task_spec, runtime.platform, work_order.lane \
+             FROM collection_work_order_lease_task task \
+             JOIN collection_work_order_lease lease ON lease.lease_ref = task.lease_ref \
+             JOIN linggan_runtime_task runtime ON runtime.task_id = task.task_id \
+             JOIN collection_work_order work_order ON work_order.work_order_ref = lease.work_order_ref \
+             WHERE lease.station_ref = $1 \
+               AND lease.released_at IS NULL \
+               AND lease.expires_at > scope_001_now() \
+               AND task.execution_state = 'pending' \
+               AND NOT EXISTS ( \
+                   SELECT 1 FROM collection_work_order_lease_task prior \
+                   WHERE prior.lease_ref = task.lease_ref \
+                     AND prior.sequence_no < task.sequence_no \
+                     AND prior.execution_state NOT IN \
+                         ('completed','unavailable','blocked','input_blocked')) \
+             ORDER BY lease.issued_at, task.sequence_no \
+             LIMIT 1 FOR UPDATE OF task SKIP LOCKED",
+        )
+        .bind(station_ref)
+        .fetch_optional(&mut *transaction)
+        .await?;
 
-    let Some((task_id, lease_ref, task_spec, _platform, _lane)) = waiting else {
-        if let Some(decision) =
-            claim_next_queued_work_order(&mut transaction, installation_ref, station_ref).await?
+        let Some((task_id, lease_ref, task_spec, _platform, _lane)) = waiting else {
+            let Some(claimed) =
+                claim_next_queued_work_order(&mut transaction, installation_ref, station_ref).await?
+            else {
+                transaction.commit().await?;
+                return Ok(DispatchDecision::NothingWaiting);
+            };
+            match claimed {
+                ClaimedWork::StoppedMember => continue,
+                ClaimedWork::Decision(decision) => {
+                    transaction.commit().await?;
+                    return Ok(decision);
+                }
+            }
+        };
+
+        if let Some(reason_code) =
+            revalidate_dispatch_task(&mut transaction, installation_ref, lease_ref, &task_spec)
+                .await?
         {
             transaction.commit().await?;
-            return Ok(decision);
+            return Ok(DispatchDecision::ControlBlocked { reason_code });
         }
-        transaction.commit().await?;
-        return Ok(DispatchDecision::NothingWaiting);
-    };
 
-    if let Some(reason_code) =
-        revalidate_dispatch_task(&mut transaction, installation_ref, lease_ref, &task_spec).await?
-    {
-        transaction.commit().await?;
-        return Ok(DispatchDecision::ControlBlocked { reason_code });
-    }
+        let execution_source_url =
+            execution_source_url_for_task(&mut transaction, &task_spec).await?;
+        if requires_signed_execution_source(&task_spec) && execution_source_url.is_none() {
+            // 这个任务还是 pending：浏览器一次都没开始过。停它自己——停的方式是收束它那
+            // 一篇的全部通道并记进执行资格台账，**不释放整张租约**。释放整张租约正是那条
+            // 连转三小时的老路：同批地址完好的作品被一遍遍放回队列，永远轮不到。
+            stop_member_for_missing_execution_input(&mut transaction, installation_ref, task_id)
+                .await?;
+            continue;
+        }
+        let page_session_plan =
+            page_session_plan_for_task(&mut transaction, lease_ref, &task_spec).await?;
 
-    let execution_source_url = execution_source_url_for_task(&mut transaction, &task_spec).await?;
-    if requires_signed_execution_source(&task_spec) && execution_source_url.is_none() {
-        // This task is still pending: no browser Attempt has begun.  Release
-        // the permission now rather than allowing a locator defect to consume
-        // the station/account/platform slot until the lease naturally expires.
-        let work_order_ref: Uuid = sqlx::query_scalar(
-            "SELECT work_order_ref FROM collection_work_order_lease WHERE lease_ref=$1",
+        let claimed = sqlx::query(
+            "UPDATE collection_work_order_lease_task \
+             SET execution_state = 'in_progress', claimed_at = scope_001_now(), \
+                 claimed_by_installation_ref = $2 \
+             WHERE task_id = $1 AND execution_state = 'pending'",
         )
-        .bind(lease_ref)
-        .fetch_one(&mut *transaction)
-        .await?;
-        let _retry_after_seconds = record_recoverable_dispatch_failure_in_transaction(
-            &mut transaction,
-            Uuid::new_v4(),
+        .bind(task_id)
+        .bind(installation_ref)
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+        if claimed != 1 {
+            transaction.commit().await?;
+            return Ok(DispatchDecision::NothingWaiting);
+        }
+
+        transaction.commit().await?;
+        return Ok(DispatchDecision::Dispatch {
             task_id,
-            installation_ref,
             lease_ref,
-            work_order_ref,
-            "execution_locator_unavailable",
-            "execution_locator_unavailable",
-        )
-        .await?;
-        transaction.commit().await?;
-        return Ok(DispatchDecision::ExecutionLocatorUnavailable {
-            reason: "这篇作品当前没有带 xsec_token 的已接纳发现链接；已释放许可并进入冷却重试。"
-                .to_owned(),
+            task_spec,
+            execution_source_url,
+            page_session_plan,
         });
     }
-    let page_session_plan =
-        page_session_plan_for_task(&mut transaction, lease_ref, &task_spec).await?;
+    // 一轮里停下的成员多到没停下脚。剩下的下一轮照常处理——这里如实说「这一轮没有可派
+    // 的」，而不是把一张还没跑的工单报成别的结论。
+    transaction.commit().await?;
+    Ok(DispatchDecision::NothingWaiting)
+}
 
-    let claimed = sqlx::query(
-        "UPDATE collection_work_order_lease_task \
-         SET execution_state = 'in_progress', claimed_at = scope_001_now(), \
-             claimed_by_installation_ref = $2 \
-         WHERE task_id = $1 AND execution_state = 'pending'",
+/// 停掉一个缺执行输入的成员：台账记原因、收束它那一篇的其余通道、记一条停止事件。
+///
+/// 三件事一起做，且都不碰同批的其它作品——它们的地址是好的，没有被牵连的理由。
+async fn stop_member_for_missing_execution_input(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    installation_ref: Uuid,
+    task_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    let work_order_ref: Option<Uuid> = sqlx::query_scalar(
+        "SELECT lease.work_order_ref FROM collection_work_order_lease_task task \
+         JOIN collection_work_order_lease lease USING(lease_ref) \
+         WHERE task.task_id=$1",
     )
     .bind(task_id)
-    .bind(installation_ref)
-    .execute(&mut *transaction)
-    .await?
-    .rows_affected();
-    if claimed != 1 {
-        transaction.commit().await?;
-        return Ok(DispatchDecision::NothingWaiting);
-    }
-
-    transaction.commit().await?;
-    Ok(DispatchDecision::Dispatch {
+    .fetch_optional(&mut **transaction)
+    .await?;
+    let Some(work_order_ref) = work_order_ref else {
+        return Ok(());
+    };
+    let lease_ref: Uuid =
+        sqlx::query_scalar("SELECT lease_ref FROM collection_work_order_lease_task WHERE task_id=$1")
+            .bind(task_id)
+            .fetch_one(&mut **transaction)
+            .await?;
+    stop_material_for_missing_execution_input_in_transaction(
+        transaction,
         task_id,
+        MISSING_EXECUTION_INPUT_REASON,
+    )
+    .await?;
+    record_input_blocked_dispatch_failure_in_transaction(
+        transaction,
+        Uuid::new_v4(),
+        task_id,
+        installation_ref,
         lease_ref,
-        task_spec,
-        execution_source_url,
-        page_session_plan,
-    })
+        work_order_ref,
+    )
+    .await
+}
+
+/// 一次认领的结果。
+///
+/// `StoppedMember` 不是失败，也不是「没有活」：它说的是「刚认下的这张租约里，第一个成员
+/// 缺执行输入，已经把它停在自己的通道上」。调用方要据此再看一眼同一张租约里的下一个成员，
+/// 而不是把整批放回去——后者正是那条永远轮不到好地址作品的老路。
+enum ClaimedWork {
+    StoppedMember,
+    Decision(DispatchDecision),
 }
 
 /// Claim one compatible Work Order from the shared queue. The lane fairness
@@ -1707,7 +1849,7 @@ async fn claim_next_queued_work_order(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     installation_ref: Uuid,
     caller_station_ref: Uuid,
-) -> Result<Option<DispatchDecision>, sqlx::Error> {
+) -> Result<Option<ClaimedWork>, sqlx::Error> {
     type Lane = (String, i32, Option<i32>, f64);
     type Candidate = (
         Uuid,
@@ -1864,9 +2006,11 @@ async fn claim_next_queued_work_order(
                 }
             };
             let Some(task_id) = lease.task_ids.first().copied() else {
-                return Ok(Some(DispatchDecision::ControlBlocked {
-                    reason_code: "capability_missing".to_owned(),
-                }));
+                return Ok(Some(ClaimedWork::Decision(
+                    DispatchDecision::ControlBlocked {
+                        reason_code: "capability_missing".to_owned(),
+                    },
+                )));
             };
             let task_spec: Value =
                 sqlx::query_scalar("SELECT task_spec FROM linggan_runtime_task WHERE task_id=$1")
@@ -1876,21 +2020,12 @@ async fn claim_next_queued_work_order(
             let execution_source_url =
                 execution_source_url_for_task(transaction, &task_spec).await?;
             if requires_signed_execution_source(&task_spec) && execution_source_url.is_none() {
-                let _retry_after_seconds = record_recoverable_dispatch_failure_in_transaction(
-                    transaction,
-                    Uuid::new_v4(),
-                    task_id,
-                    installation_ref,
-                    lease.lease_ref,
-                    work_order_ref,
-                    "execution_locator_unavailable",
-                    "execution_locator_unavailable",
-                )
-                .await?;
-                return Ok(Some(DispatchDecision::ExecutionLocatorUnavailable {
-                    reason: "已认领的详情任务缺少仍有效的签名执行链接；许可已释放并进入冷却重试。"
-                        .to_owned(),
-                }));
+                // 这里只停**这一个成员**，不释放租约。释放租约等于把同批地址完好的作品一起
+                // 放回队列：它们下一轮仍要排在这个缺地址的成员后面，于是每一轮都从头再来，
+                // 谁都执行不到。停下来它，租约继续持有，下一个成员当场就能派。
+                stop_member_for_missing_execution_input(transaction, installation_ref, task_id)
+                    .await?;
+                return Ok(Some(ClaimedWork::StoppedMember));
             }
             let page_session_plan =
                 page_session_plan_for_task(transaction, lease.lease_ref, &task_spec).await?;
@@ -1918,17 +2053,17 @@ async fn claim_next_queued_work_order(
             .bind(weight)
             .execute(&mut **transaction)
             .await?;
-            return Ok(Some(DispatchDecision::Dispatch {
+            return Ok(Some(ClaimedWork::Decision(DispatchDecision::Dispatch {
                 task_id,
                 lease_ref: lease.lease_ref,
                 task_spec,
                 execution_source_url,
                 page_session_plan,
-            }));
+            })));
         }
     }
     Ok(deferred_control_block
-        .map(|reason_code| Some(DispatchDecision::ControlBlocked { reason_code }))
+        .map(|reason_code| Some(ClaimedWork::Decision(DispatchDecision::ControlBlocked { reason_code })))
         .unwrap_or(None))
 }
 
@@ -2322,21 +2457,6 @@ const CANDIDATE_SQL_WITH_CROSS_INDUSTRY_SCOPE: &str = concat!(
     " LIMIT 64 FOR UPDATE OF work_order SKIP LOCKED",
 );
 
-fn requires_signed_execution_source(task_spec: &Value) -> bool {
-    task_spec.get("platform").and_then(Value::as_str) == Some("xhs")
-        && task_spec
-            .get("capabilitiesRequested")
-            .and_then(Value::as_array)
-            .and_then(|values| values.first())
-            .and_then(Value::as_str)
-            .is_some_and(|capability| {
-                matches!(
-                    capability,
-                    "content_detail" | "media_slots" | "comments" | "replies"
-                )
-            })
-}
-
 /// 发现链接是可过期的执行定位信息，不是作品身份。每次派发都从最新已接纳的
 /// discovery record 读取，而不把 token 冻结进长寿命 TaskSpec 或 Evidence UI。
 fn execution_source_url_sha256(execution_source_url: &str) -> String {
@@ -2366,14 +2486,14 @@ async fn execution_source_url_for_task(
     if !requires_signed_execution_source(task_spec) {
         return Ok(None);
     }
-    let Some(content_external_id) = task_spec
-        .get("target")
-        .and_then(|target| target.get("contentExternalId"))
-        .and_then(Value::as_str)
-    else {
+    let Some(content_external_id) = task_content_external_id(task_spec) else {
         return Ok(None);
     };
-    let from_evidence: Option<String> = sqlx::query_scalar(
+    // 「哪条地址算执行入口」这一条判据住在 `execution_input_eligibility`：候选筛选、准入冻结
+    // 与这里问的是同一件事。三处各写一份 URL 形状的判据，正是「候选说能跑、派发说没地址」
+    // 这类缺陷的由来。
+    let evidence_predicate = signed_locator_predicate("record.value->'payload'->>'url'");
+    let from_evidence: Option<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT record.value->'payload'->>'url' \
          FROM linggan_material_discovery_finding finding \
          JOIN linggan_material_content content ON content.public_ref=finding.content_public_ref \
@@ -2383,10 +2503,9 @@ async fn execution_source_url_for_task(
          WHERE content.platform='xhs' AND content.content_external_id=$1 \
            AND record.ordinality=finding.record_ordinal+1 \
            AND record.value->'sourceObject'->>'externalId'=$1 \
-           AND record.value->'payload'->>'url' LIKE 'https://www.xiaohongshu.com/%' \
-           AND position('xsec_token=' IN record.value->'payload'->>'url') > 0 \
+           AND {evidence_predicate} \
          ORDER BY package.accepted_at DESC,finding.created_at DESC LIMIT 1",
-    )
+    )))
     .bind(content_external_id)
     .fetch_optional(&mut **transaction)
     .await?
@@ -2411,13 +2530,13 @@ async fn execution_source_url_for_task(
     if !cross_industry_ready {
         return Ok(None);
     }
-    let cross_industry_url: Option<String> = sqlx::query_scalar(
+    let sample_predicate = signed_locator_predicate("sample.source_url");
+    let cross_industry_url: Option<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT sample.source_url FROM cross_industry_sample sample \
          WHERE sample.platform='xhs' AND sample.content_external_id=$1 \
-           AND sample.source_url LIKE 'https://www.xiaohongshu.com/%' \
-           AND position('xsec_token=' IN sample.source_url) > 0 \
+           AND {sample_predicate} \
          ORDER BY sample.last_observed_at DESC,sample.sample_ref LIMIT 1",
-    )
+    )))
     .bind(content_external_id)
     .fetch_optional(&mut **transaction)
     .await?;

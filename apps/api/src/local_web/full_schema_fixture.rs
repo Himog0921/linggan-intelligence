@@ -186,6 +186,10 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
         "../../../../database/migrations/0096_detail_page_session_lane_delivery_identities.sql"
     ),
     "\n",
+    include_str!(
+        "../../../../database/migrations/0097_collection_execution_input_eligibility.sql"
+    ),
+    "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES\n",
     "('0001_scope_001_capture_evidence', 'a0deb8d5bf6cbd3bc0b8343691167fe02170abe7469f7ba270017dada442cd98'),\n",
     "('0002_local_001_discovery', '26ae29e0e00bddd2804aebc5576e8868936af746858e61cc24769579333ecdbe'),\n",
@@ -241,5 +245,6 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "('0093_capture_delivery_rejection', 'aaaecf81357c2d4b63719e9729b4e8787b0fab38c0b96953b597850bb69e443e'),\n",
     "('0094_corpus_evidence_read_recovery', '5557cd2dfa4b48426caa230d72742b56d5dd7bc5f85ca53acc953aec1b57fd4b'),\n",
     "('0095_detail_page_url_rejection', '8daf8717a6eb55887dd4b83f92f1c79c93b7a42156e272bc04ceacb112797eb8'),\n",
-    "('0096_detail_page_session_lane_delivery_identities', '5bca0b9c770f16ebeed7f510fa0080e7cde07687dfb11bc485fe6b9da8d462eb');\n",
+    "('0096_detail_page_session_lane_delivery_identities', '5bca0b9c770f16ebeed7f510fa0080e7cde07687dfb11bc485fe6b9da8d462eb'),\n",
+    "('0097_collection_execution_input_eligibility', '83a8a99362df528217ac7473c102ca8c42f6f8beb3b76b9e195f95451ddac3b7');\n",
 );

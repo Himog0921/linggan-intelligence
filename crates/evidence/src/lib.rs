@@ -15,6 +15,7 @@ pub mod cross_industry_read;
 mod cross_industry_sample_facts;
 mod directory_boundary;
 mod dispatch;
+mod execution_input_eligibility;
 mod execution_station;
 mod ingress;
 mod keyword_archive_detail;

@@ -15,7 +15,7 @@ mod fixture;
 
 use cross_industry::{
     EXTERNAL_DOMAIN, FIXTURE_QUOTA, HOME_DOMAIN, discovery_card, search_coverage,
-    submit_external_package, submit_package_in_domain,
+    submit_external_package, submit_package_for_target, submit_package_in_domain,
 };
 use fixture::proof_database;
 use linggan_evidence::{
@@ -219,11 +219,36 @@ async fn submit_keyword_archive_of(
     acquired: i64,
     failed: i64,
 ) -> Uuid {
-    let mut coverage = search_coverage("考研自习", acquired);
-    coverage["layers"][0]["failed"] = serde_json::json!(failed);
-    coverage["layers"][0]["observed"] = serde_json::json!(acquired + failed);
-    coverage["layers"][0]["attempted"] = serde_json::json!(acquired + failed);
-    coverage["layers"][0]["stoppedReason"] = serde_json::json!(stop_reason);
+    submit_keyword_archive_of_url(
+        database,
+        identity_key,
+        note_external_id,
+        stop_reason,
+        acquired,
+        failed,
+        &format!(
+            "https://www.xiaohongshu.com/search_result/{note_external_id}?xsec_token=ABarchive"
+        ),
+    )
+    .await
+}
+
+/// 同上一轮建档，但这一轮平台返回的是**指定的那一条**链接。
+///
+/// 同一篇作品的样本行按身份去重（`domain_ref + platform + content_external_id`），所以再采
+/// 一轮更新的是同一行的来源地址——「平台这次给的入口变了没有」正是这条链路上真实发生的事，
+/// 而它在夹具里只能靠换这一条链接来表达。
+async fn submit_keyword_archive_of_url(
+    database: &Database,
+    identity_key: &str,
+    note_external_id: &str,
+    stop_reason: &str,
+    acquired: i64,
+    failed: i64,
+    url: &str,
+) -> Uuid {
+    let (coverage, checkpoint, records) =
+        keyword_archive_round(note_external_id, stop_reason, acquired, failed, url);
     submit_external_package(
         database,
         identity_key,
@@ -232,15 +257,8 @@ async fn submit_keyword_archive_of(
         serde_json::json!({"query":"考研自习","ranking":"most_liked","scrollRounds":10}),
         "discovery_search",
         coverage,
-        serde_json::json!({"surfaceReceipt":{"stopReason":stop_reason}}),
-        vec![discovery_card(
-            note_external_id,
-            "建档样本",
-            "1.4万",
-            &format!(
-                "https://www.xiaohongshu.com/search_result/{note_external_id}?xsec_token=ABarchive"
-            ),
-        )],
+        checkpoint,
+        records,
     )
     .await;
     sqlx::query_scalar("SELECT target_ref FROM collection_observation_target WHERE identity_key=$1")
@@ -248,6 +266,65 @@ async fn submit_keyword_archive_of(
         .fetch_one(database.pool())
         .await
         .expect("the archived target exists")
+}
+
+/// 同一个目标上的**下一轮**建档：目标是既有的，不能再建一次。
+///
+/// 「平台这次给的是另一条链接」只可能发生在**同一个目标**上。`submit_external_package`
+/// 每一轮都从建目标开始，而 `collection_observation_target` 上「平台+类型+身份」是唯一的：
+/// 拿它再采一轮，撞的是目标身份，不是链接——换一个目标则更糟，那不是「同一篇又采到一次」，
+/// 而是另一篇，按 `target_ref` 关联的判据会静默落空、让用例因为错误的原因变绿。
+///
+/// `station_key` 只用来拼证明工位的显示名：`execution_station` 有一条「同名工位只能有一个」
+/// 的唯一索引（未退休者为限），而这一路每一轮都要登记一次工位。
+async fn submit_keyword_archive_round(
+    database: &Database,
+    target_ref: Uuid,
+    station_key: &str,
+    note_external_id: &str,
+    stop_reason: &str,
+    acquired: i64,
+    failed: i64,
+    url: &str,
+) {
+    let (coverage, checkpoint, records) =
+        keyword_archive_round(note_external_id, stop_reason, acquired, failed, url);
+    submit_package_for_target(
+        database,
+        target_ref,
+        station_key,
+        "deep_archive",
+        serde_json::json!({"query":"考研自习","ranking":"most_liked","scrollRounds":10}),
+        FIXTURE_QUOTA,
+        "discovery_search",
+        coverage,
+        checkpoint,
+        records,
+    )
+    .await;
+}
+
+/// 一轮关键词建档的包体：覆盖率（含停在什么地方）、检查点与发现记录。
+///
+/// 抽出来只为一件事：把「第一个目标」和「同一个目标的下一轮」分开以后，两边的包体仍然
+/// 逐字相同。两边各写一份，任何一边漂了，比的就是两个不同的包。
+fn keyword_archive_round(
+    note_external_id: &str,
+    stop_reason: &str,
+    acquired: i64,
+    failed: i64,
+    url: &str,
+) -> (serde_json::Value, serde_json::Value, Vec<serde_json::Value>) {
+    let mut coverage = search_coverage("考研自习", acquired);
+    coverage["layers"][0]["failed"] = serde_json::json!(failed);
+    coverage["layers"][0]["observed"] = serde_json::json!(acquired + failed);
+    coverage["layers"][0]["attempted"] = serde_json::json!(acquired + failed);
+    coverage["layers"][0]["stoppedReason"] = serde_json::json!(stop_reason);
+    (
+        coverage,
+        serde_json::json!({"surfaceReceipt":{"stopReason":stop_reason}}),
+        vec![discovery_card(note_external_id, "建档样本", "1.4万", url)],
+    )
 }
 
 /// 建档拿到链接之后，必须接着把详情补上。
@@ -865,6 +942,261 @@ async fn a_detail_batch_is_claimable_and_carries_a_signed_entry_point() {
     );
     assert_eq!(plan["commentLimit"], DETAIL_WINDOW_COMMENT_LIMIT);
     assert_eq!(plan["replyExpandLimit"], DETAIL_WINDOW_REPLY_EXPAND_LIMIT);
+}
+
+/// 缺入口停下的一篇，后来真的拿到了新签名地址：经准入建立**后继资格**，旧的停止事实留着。
+///
+/// 这条用例钉的是「停止不是封禁」。只把停下来的那一篇挡在候选之外，会让它从「等一个更好的
+/// 输入」变成「永久出局」——平台再给一条新链接也没人接。所以输入真的变了以后，准入要为这
+/// 个缺口交还当前执行资格，并指回停过的那一条。
+///
+/// 「旧行原样留着」与「当前行接替」必须同时成立，缺一半都会说谎：只开新行不指回前驱，
+/// 「这一次为什么又能跑了」就查不到了；改写旧行，则「当时确实没有可用的入口」这条历史事实
+/// 被抹掉，看起来像它一直都有入口、只是没人跑。
+///
+/// **但不许换 epoch。** 换一条地址既不是故障修复证明也不是受控重新准入，让它开一个新 epoch
+/// 就等于让「刷新一次签名 token」把跨工单的失败预算清零——同一篇作品于是可以靠不断换链接
+/// 无限重试。所以断言里除了「当前资格回到 eligible」，还有一条同样重要的反面：`retry_epoch`
+/// 仍是 0，而且同一时刻只有一条可执行资格。
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn a_new_signed_address_after_a_stop_opens_a_successor_eligibility_through_admission() {
+    let database = proof_database("keyword_detail_input_successor").await;
+    let target_ref = submit_keyword_archive(
+        &database,
+        "考研自习::input-successor",
+        "bottom_confirmed",
+        1,
+        0,
+    )
+    .await;
+
+    // 前置：这一篇此刻打得开，所以详情补采为它排得出工单，作用域冻住它。
+    let advance = advance_keyword_archive_detail(&database, target_ref, "建档补详情", "person")
+        .await
+        .expect("the detail advance runs");
+    // 停止发生在**这一张**工单上。不能用「这个目标最新的一张工单」代替：同一篇的每一轮
+    // 建档都会各自留下一张工单，先按时间再按算子挑出来的那一张不一定是详情这张，
+    // 于是断言会对着另一张说「它没被取消」——红的理由与被测行为无关。
+    let KeywordDetailAdvance::Queued {
+        works: 1,
+        work_order_ref: detail_order,
+        ..
+    } = advance
+    else {
+        panic!("前置不成立：这一篇要先真的排进一张详情工单，实际是 {advance:?}");
+    };
+
+    // 平台这一轮返回的是一条**没有签名**的链接。这一篇还在作用域里，但此刻没有可用入口。
+    submit_keyword_archive_round(
+        &database,
+        target_ref,
+        "考研自习::input-successor#unsigned",
+        "note-archive-1",
+        "bottom_confirmed",
+        1,
+        0,
+        "https://www.xiaohongshu.com/explore/note-archive-1",
+    )
+    .await;
+
+    let station = ready_detail_station(
+        &database,
+        "缺输入后继证明工位",
+        serde_json::json!(["content_detail", "comments", "replies"]),
+    )
+    .await;
+    let decision = decide_dispatch(
+        &database,
+        &station.install_key,
+        station
+            .credential
+            .as_deref()
+            .expect("the proof installation holds a credential"),
+    )
+    .await
+    .expect("dispatch decides");
+    assert!(
+        matches!(decision, DispatchDecision::NothingWaiting),
+        "没有可用入口的那一篇不该派给工位，实际是 {decision:?}"
+    );
+
+    let stopped: (String, Option<String>, i32) = sqlx::query_as(
+        "SELECT state,input_fingerprint,retry_epoch \
+         FROM collection_execution_input_eligibility \
+         WHERE target_ref=$1 AND object_kind='cross_industry_sample' \
+           AND capability='content_detail'",
+    )
+    .bind(target_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("the stopped range is on the eligibility ledger");
+    assert_eq!(stopped.0, "input_blocked", "停下这件事要记在台账上");
+    assert_eq!(
+        stopped.1, None,
+        "「当初连一条地址都没有」是一条真实观察到的事实，不是一个待补的默认值"
+    );
+    assert_eq!(stopped.2, 0, "第一次停不增加 epoch");
+
+    let work_order_state: String =
+        sqlx::query_scalar("SELECT queue_state FROM collection_work_order WHERE work_order_ref=$1")
+            .bind(detail_order)
+            .fetch_one(database.pool())
+            .await
+            .expect("the detail work order stays readable");
+    assert_eq!(
+        work_order_state, "cancelled",
+        "一篇都没取回：既不能记成完成，也不能留在队列里每一轮空转一次"
+    );
+
+    // 平台又给了一条**新的**带签名链接。走产品自己的入口推进，而不是靠人再点一次。
+    submit_keyword_archive_round(
+        &database,
+        target_ref,
+        "考研自习::input-successor#fresh",
+        "note-archive-1",
+        "bottom_confirmed",
+        1,
+        0,
+        "https://www.xiaohongshu.com/search_result/note-archive-1?xsec_token=ABfresh",
+    )
+    .await;
+    let advance = advance_keyword_archive_detail(&database, target_ref, "建档补详情", "person")
+        .await
+        .expect("the detail advance runs again");
+    assert!(
+        matches!(advance, KeywordDetailAdvance::Queued { works: 1, .. }),
+        "新地址到了，这一篇要重新排得上；实际是 {advance:?}"
+    );
+
+    // 停止行与当前行**同时存在**，各自说各自的事实：一条说「当初确实没有入口」，一条说
+    // 「此刻这条地址可以执行」。所以按 state 取行，不按「第几行」——顺序在这里没有意义。
+    let rows: Vec<(Uuid, i32, String, Option<Uuid>, Option<String>)> = sqlx::query_as(
+        "SELECT eligibility_ref,retry_epoch,state,successor_eligibility_ref,input_fingerprint \
+         FROM collection_execution_input_eligibility \
+         WHERE target_ref=$1 AND object_kind='cross_industry_sample' \
+           AND capability='content_detail'",
+    )
+    .bind(target_ref)
+    .fetch_all(database.pool())
+    .await
+    .expect("the ledger stays readable");
+    assert_eq!(
+        rows.len(),
+        2,
+        "留一条停止事实、再有一条当前资格；不是把旧行改写成「它一直都有地址」，\
+         也不是同一时刻挂着两条可执行资格：{rows:?}"
+    );
+    let stopped_row = rows
+        .iter()
+        .find(|(_, _, state, _, _)| state == "input_blocked")
+        .expect("the stop stays on the ledger");
+    assert_eq!(stopped_row.1, 0, "停止事实仍记在它发生的那个 epoch 上");
+    assert_eq!(
+        stopped_row.4, None,
+        "旧行的输入指纹保持「当时没有」，不随后来的发现被回填"
+    );
+    assert_eq!(
+        stopped_row.3, None,
+        "前驱不该被改写；「谁接替了它」写在接替的那一条上"
+    );
+    let live_row = rows
+        .iter()
+        .find(|(_, _, state, _, _)| state == "eligible")
+        .expect("the reopened input leaves a currently executable eligibility");
+    assert_eq!(
+        live_row.1, 0,
+        "换地址不换 epoch：换一条签名地址不是故障修复证明，不能靠它把失败预算清零"
+    );
+    assert!(
+        live_row.4.is_some(),
+        "当前行要带着这一次真正解析出来的地址指纹，否则下一轮无从判断输入有没有再变"
+    );
+    assert_eq!(
+        live_row.3,
+        Some(stopped_row.0),
+        "接替的那一条要指回被它接替的停止行，「这一次为什么又能跑了」才查得到"
+    );
+    // 平台又给**同一条**地址：这不是一次新的执行机会，不该再多出一条当前资格。
+    //
+    // 要证明这一条，得让准入真的再走到判断那一步。上一轮排出的工单还在途时，产品入口会直接以
+    // 「批次在途」作答（那也是一种正确），根本到不了这里——于是断言会永远绿，测的却不是幂等。
+    // 所以先让这一篇**再失去一次地址**，把那张工单结束掉，再拿同一条地址推进。
+    //
+    // 为什么这条判据是必须的：停止行的指纹是空的，因此它**永远满足**「与此刻的指纹不同」——
+    // 同一个缺口每准入一次都会被重新认成「输入又变了一次」。防重不能靠「这条前驱交接过了没
+    // 有」，只能靠写入那一步：与当前行冲突时就地更新，写进去的还是同一份输入。少了它，同一篇
+    // 会同时挂着两条可执行资格，被两个 scheduler 各派一张工单。
+    submit_keyword_archive_round(
+        &database,
+        target_ref,
+        "考研自习::input-successor#unsigned-again",
+        "note-archive-1",
+        "bottom_confirmed",
+        1,
+        0,
+        "https://www.xiaohongshu.com/explore/note-archive-1",
+    )
+    .await;
+    let decision = decide_dispatch(
+        &database,
+        &station.install_key,
+        station
+            .credential
+            .as_deref()
+            .expect("the proof installation holds a credential"),
+    )
+    .await
+    .expect("dispatch decides");
+    assert!(
+        matches!(decision, DispatchDecision::NothingWaiting),
+        "这一段的前置：地址又被收走时这一篇不该被派出去，实际是 {decision:?}"
+    );
+    submit_keyword_archive_round(
+        &database,
+        target_ref,
+        "考研自习::input-successor#fresh-again",
+        "note-archive-1",
+        "bottom_confirmed",
+        1,
+        0,
+        "https://www.xiaohongshu.com/search_result/note-archive-1?xsec_token=ABfresh",
+    )
+    .await;
+    let advance_again = advance_keyword_archive_detail(&database, target_ref, "建档补详情", "person")
+        .await
+        .expect("a second advance still answers");
+    assert!(
+        matches!(advance_again, KeywordDetailAdvance::Queued { works: 1, .. }),
+        "同一条地址回来了，这一篇仍然排得上（它本来就可执行）；实际是 {advance_again:?}"
+    );
+    // 两条各自的「只此一条」：停止事实只有一个通道一条，当前资格每轮准入之后也只有一条。
+    //
+    // 后一条是有回填的：把 `ON CONFLICT` 从写入里去掉，这一句所在的用例立刻红（23505 唯一键
+    // 冲突）。**前一条没有**——把身份键的 `NULLS NOT DISTINCT` 去掉，本用例照样全绿，因为
+    // 「再停一次」这条路在它之前就被挡住了：发租时 `blocked_object_refs_in_transaction` 会把
+    // 输入未变的停止成员排除在任务之外，同一篇根本不会再产生一个 `pending` 任务去触发第二次
+    // 停止。所以这一句只守住「四通道各一条、不多不少」，不构成 `NULLS NOT DISTINCT` 的证明。
+    let (stops_after, live_after): (i64, i64) = sqlx::query_as(
+        "SELECT count(*) FILTER (WHERE state='input_blocked'), \
+                count(*) FILTER (WHERE state<>'input_blocked') \
+         FROM collection_execution_input_eligibility \
+         WHERE target_ref=$1 AND object_kind='cross_industry_sample' \
+           AND capability='content_detail'",
+    )
+    .bind(target_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("the ledger stays readable");
+    assert_eq!(
+        stops_after, 1,
+        "又停了一次，留的仍是同一条停止事实：缺地址这件事不该每轮攒一行"
+    );
+    assert_eq!(
+        live_after, 1,
+        "同一条地址再准入一次，不得再多一条当前资格——否则每跑一次 tick 就多一次「新的执行机会」，\
+         同一篇作品会被并行派发"
+    );
 }
 
 /// 跨行业侧的额度不是「写进去就算数」：这张表自己拒绝自相矛盾的作用域行。

@@ -1027,6 +1027,22 @@ pub(crate) async fn request_and_admit_in_transaction_scoped(
         write_material_targets(&mut *transaction, work_order_ref, material_targets).await?;
         write_cross_industry_targets(&mut *transaction, work_order_ref, cross_industry_samples)
             .await?;
+        // 工单写下的就是这一次要执行的输入，所以输入冻结在这里发生：停过而输入真的变了的
+        // 对象，在这里把当前资格交还给它（同一个 epoch 的当前行就地更新，并指回停过的那一行）。
+        // 返回值不入调用方契约——「这一次为什么又能跑了」的可追溯性住在台账行上，不靠一个计数转述。
+        let _reconciled = crate::execution_input_eligibility::open_successors_for_reopened_inputs_in_transaction(
+            &mut *transaction,
+            target_ref,
+            &material_targets
+                .iter()
+                .map(|target| target.content_public_ref)
+                .collect::<Vec<_>>(),
+            &cross_industry_samples
+                .iter()
+                .map(|target| target.sample_ref)
+                .collect::<Vec<_>>(),
+        )
+        .await?;
         Some(work_order_ref)
     } else {
         None

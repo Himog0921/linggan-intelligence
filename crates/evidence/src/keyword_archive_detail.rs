@@ -43,8 +43,52 @@ use crate::acquisition_chain::{
     DETAIL_WINDOW_REPLY_EXPAND_LIMIT, MaterialDeepeningTarget,
     request_and_admit_in_transaction_scoped,
 };
+use crate::execution_input_eligibility::{
+    has_executable_locator_predicate, unchanged_input_block_predicate,
+};
 use linggan_storage_postgres::Database;
 use uuid::Uuid;
+
+/// 候选查询里那两条「能不能执行」的条件，本模块四个入口共用。
+///
+/// **前置，而不是排队后再停。** 缺执行地址的作品从来不该进候选：排进去只会得到一次
+/// 「派不出去」——那一轮里它占用了一张工单、一张租约和一次调度，却一次页面都没打开。此前
+/// 这里只看「有没有链接」（`source_url IS NOT NULL`），而链接可能没有签名令牌，插件打不开；
+/// 判据放宽成「有链接」，实际需要的是「有能打开的链接」。
+///
+/// 第二条是「已经因此停过、且输入没变」。只加第一条会让停过的作品每一轮重新排队、重新被停，
+/// 停止本身变成循环；只加第二条则拦不住从没排过队但同样没有地址的新作品。两条都要。
+///
+/// `cross_industry_ready` 取 `true`：这四个入口的外层查询本来就无条件连跨行业样本表，
+/// 表不存在时整条查询本来就报错，所以「这一侧存在」是它们的前置条件而不是新假设。取值与
+/// `execution_source_url_for_task` 的解析顺序一致——先证据侧、再跨行业兜底。
+fn evidence_side_executable() -> (String, String) {
+    (
+        has_executable_locator_predicate("content.content_external_id", true),
+        unchanged_input_block_predicate(
+            "work_order.target_ref",
+            "own_domain",
+            "material_content",
+            "finding.content_public_ref",
+            "content.content_external_id",
+            true,
+        ),
+    )
+}
+
+fn sample_side_executable(target_ref_expression: &str) -> (String, String) {
+    (
+        has_executable_locator_predicate("sample.content_external_id", true),
+        unchanged_input_block_predicate(
+            target_ref_expression,
+            "cross_industry",
+            "cross_industry_sample",
+            "sample.sample_ref",
+            "sample.content_external_id",
+            true,
+        ),
+    )
+}
 
 /// 一次补采多少篇。与博主那条路同样克制：一批三篇，跑完再要下一批。
 ///
@@ -213,7 +257,8 @@ async fn next_evidence_detail_batch(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     target_ref: Uuid,
 ) -> Result<Vec<Uuid>, sqlx::Error> {
-    sqlx::query_scalar(
+    let (executable, not_stopped) = evidence_side_executable();
+    sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         // 按**点赞从高到低**取，与跨行业那一侧以及回执文案一致：先补最值得看的那几篇。
         // `DISTINCT ON` 要求排序键以去重键开头，所以去重与排序分两层。
         "SELECT content_public_ref FROM ( \
@@ -226,6 +271,7 @@ async fn next_evidence_detail_batch(
          JOIN linggan_runtime_capture_package package ON package.task_id=task.task_id \
          JOIN linggan_runtime_submission_receipt receipt USING(package_ref) \
          JOIN linggan_material_discovery_finding finding USING(package_ref) \
+         JOIN linggan_material_content content ON content.public_ref=finding.content_public_ref \
          JOIN linggan_runtime_record_disposition disposition \
            ON disposition.package_ref=finding.package_ref \
           AND disposition.record_ordinal=finding.record_ordinal \
@@ -245,12 +291,14 @@ async fn next_evidence_detail_batch(
                AND (live_order.queue_state IN ('queued','leased') \
                     OR (live_lease.released_at IS NULL \
                         AND live_lease.expires_at>scope_001_now()))) \
+           AND {executable} \
+           AND NOT {not_stopped} \
            ORDER BY finding.content_public_ref,package.accepted_at \
          ) candidate \
          ORDER BY candidate.like_count DESC NULLS LAST,candidate.accepted_at, \
                   candidate.content_public_ref \
          LIMIT $2",
-    )
+    )))
     .bind(target_ref)
     .bind(KEYWORD_DETAIL_BATCH_SIZE)
     .fetch_all(&mut **transaction)
@@ -282,7 +330,9 @@ pub async fn keyword_targets_pending_detail(
             "keyword detail completeness schema is not ready".to_owned(),
         ));
     }
-    let rows: Vec<Uuid> = sqlx::query_scalar(concat!(
+    let (executable, not_stopped) = evidence_side_executable();
+    let (sample_executable, sample_not_stopped) = sample_side_executable("seen_order.target_ref");
+    let rows: Vec<Uuid> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         // 跨行业那一侧。哪些样本算这个目标的，按**观察记录**算而不是样本行上的
         // `target_ref`——那一列只在第一次插入时写定，同一篇被另一个关键词先看到，
         // 这个目标就永远不会给它补详情。
@@ -295,11 +345,10 @@ pub async fn keyword_targets_pending_detail(
            ON seen_lease_task.task_id=seen_package.task_id \
          JOIN collection_work_order_lease seen_lease USING(lease_ref) \
          JOIN collection_work_order seen_order USING(work_order_ref) \
-         WHERE seen_order.target_ref=ANY($1) AND ",
-        pending_detail_sql!("seen_order.target_ref"),
-        // 证据侧。本领域的关键词材料住这儿，漏掉它，补详情的入口对本领域关键词
-        // 根本不会出现。
-        " UNION \
+         WHERE seen_order.target_ref=ANY($1) AND {pending} \
+           AND {sample_executable} \
+           AND NOT {sample_not_stopped} \
+         UNION \
          SELECT DISTINCT work_order.target_ref \
          FROM collection_work_order work_order \
          JOIN collection_work_order_lease lease USING(work_order_ref) \
@@ -308,6 +357,7 @@ pub async fn keyword_targets_pending_detail(
          JOIN linggan_runtime_capture_package package ON package.task_id=task.task_id \
          JOIN linggan_runtime_submission_receipt receipt USING(package_ref) \
          JOIN linggan_material_discovery_finding finding USING(package_ref) \
+         JOIN linggan_material_content content ON content.public_ref=finding.content_public_ref \
          JOIN linggan_runtime_record_disposition disposition \
            ON disposition.package_ref=finding.package_ref \
           AND disposition.record_ordinal=finding.record_ordinal \
@@ -326,8 +376,11 @@ pub async fn keyword_targets_pending_detail(
                AND live_scope.content_public_ref=finding.content_public_ref \
                AND (live_order.queue_state IN ('queued','leased') \
                     OR (live_lease.released_at IS NULL \
-                        AND live_lease.expires_at>scope_001_now())))",
-    ))
+                        AND live_lease.expires_at>scope_001_now()))) \
+           AND {executable} \
+           AND NOT {not_stopped}",
+        pending = pending_detail_sql!("seen_order.target_ref"),
+    )))
     .bind(target_refs)
     .fetch_all(database.pool())
     .await?;
@@ -356,7 +409,9 @@ pub(crate) async fn keyword_target_has_pending_detail_in(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     target_ref: Uuid,
 ) -> Result<bool, sqlx::Error> {
-    sqlx::query_scalar(concat!(
+    let (executable, not_stopped) = evidence_side_executable();
+    let (sample_executable, sample_not_stopped) = sample_side_executable("seen_order.target_ref");
+    sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT EXISTS ( \
            SELECT 1 FROM cross_industry_sample sample \
            JOIN cross_industry_sample_observation seen \
@@ -367,9 +422,10 @@ pub(crate) async fn keyword_target_has_pending_detail_in(
              ON seen_lease_task.task_id=seen_package.task_id \
            JOIN collection_work_order_lease seen_lease USING(lease_ref) \
            JOIN collection_work_order seen_order USING(work_order_ref) \
-           WHERE seen_order.target_ref=$1 AND ",
-        pending_detail_sql!("seen_order.target_ref"),
-        " UNION \
+           WHERE seen_order.target_ref=$1 AND {pending} \
+             AND {sample_executable} \
+             AND NOT {sample_not_stopped} \
+           UNION \
            SELECT 1 FROM collection_work_order work_order \
            JOIN collection_work_order_lease lease USING(work_order_ref) \
            JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
@@ -377,6 +433,7 @@ pub(crate) async fn keyword_target_has_pending_detail_in(
            JOIN linggan_runtime_capture_package package ON package.task_id=task.task_id \
            JOIN linggan_runtime_submission_receipt receipt USING(package_ref) \
            JOIN linggan_material_discovery_finding finding USING(package_ref) \
+           JOIN linggan_material_content content ON content.public_ref=finding.content_public_ref \
            JOIN linggan_runtime_record_disposition disposition \
              ON disposition.package_ref=finding.package_ref \
             AND disposition.record_ordinal=finding.record_ordinal \
@@ -395,8 +452,11 @@ pub(crate) async fn keyword_target_has_pending_detail_in(
                  AND (live_order.queue_state IN ('queued','leased') \
                       OR (live_lease.released_at IS NULL \
                           AND live_lease.expires_at>scope_001_now()))) \
-         )"
-    ))
+             AND {executable} \
+             AND NOT {not_stopped} \
+         )",
+        pending = pending_detail_sql!("seen_order.target_ref"),
+    )))
     .bind(target_ref)
     .fetch_one(&mut **transaction)
     .await
@@ -452,15 +512,18 @@ async fn next_detail_batch(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     target_ref: Uuid,
 ) -> Result<Vec<Uuid>, sqlx::Error> {
-    sqlx::query_scalar(concat!(
+    let (executable, not_stopped) = sample_side_executable("$1");
+    sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT sample.sample_ref FROM cross_industry_sample sample \
-         WHERE ",
-        sample_observed_by_target_sql!("$1"),
-        " AND ",
-        pending_detail_sql!("$1"),
-        " ORDER BY sample.like_count DESC NULLS LAST, sample.first_seen_at, sample.sample_ref \
+         WHERE {observed} \
+           AND {pending} \
+           AND {executable} \
+           AND NOT {not_stopped} \
+         ORDER BY sample.like_count DESC NULLS LAST, sample.first_seen_at, sample.sample_ref \
          LIMIT $2",
-    ))
+        observed = sample_observed_by_target_sql!("$1"),
+        pending = pending_detail_sql!("$1"),
+    )))
     .bind(target_ref)
     .bind(KEYWORD_DETAIL_BATCH_SIZE)
     .fetch_all(&mut **transaction)
