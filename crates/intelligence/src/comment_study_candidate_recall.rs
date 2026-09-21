@@ -8,7 +8,7 @@ use crate::comment_study_embedding::active_profile;
 use crate::comment_study_problem_store::{
     PreparedProblemResolution, ProblemStoreError, accept_problem_resolution, prepare_problem_pair,
     prepare_problem_resolution, resolve_retrieval_incomplete,
-    resume_retrieval_incomplete_resolution,
+    resume_pre_v2_pair_contract_rejection, resume_retrieval_incomplete_resolution,
 };
 use crate::comment_study_recall::{RecallCompleteness, recall_candidates};
 use linggan_storage_postgres::Database;
@@ -39,6 +39,9 @@ pub struct RecalledProblemCandidate {
 pub async fn advance_next_problem_pair(
     database: &Database,
 ) -> Result<bool, ProblemCandidateRecallError> {
+    if resume_pre_v2_pair_contract_rejection(database).await? {
+        return Ok(true);
+    }
     // Path C is a vector search. With no qualified profile there is no pool to search at all, and
     // falling back to arrival order would record a pairing as if proximity had been considered.
     let Some(profile_ref) = active_profile(database).await? else {
