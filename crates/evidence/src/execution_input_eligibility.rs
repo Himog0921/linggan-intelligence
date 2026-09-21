@@ -107,28 +107,29 @@ pub(crate) fn candidate_locator_sql(
     content_external_id_expression: &str,
     cross_industry_ready: bool,
 ) -> String {
-    let evidence_signed = signed_locator_predicate("record.value->'payload'->>'url'");
+    // Private aliases must not shadow the correlated expression supplied by the caller.
+    let evidence_signed = signed_locator_predicate("locator_record.value->'payload'->>'url'");
     let evidence = format!(
-        "SELECT record.value->'payload'->>'url' AS url, \
+        "SELECT locator_record.value->'payload'->>'url' AS url, \
                 'discovery_finding'::text AS source_kind, \
-                finding.material_ref AS source_ref, \
-                package.accepted_at AS observed_at \
-         FROM linggan_material_discovery_finding finding \
-         JOIN linggan_material_content content ON content.public_ref=finding.content_public_ref \
-         JOIN linggan_runtime_capture_package package USING(package_ref) \
-         CROSS JOIN LATERAL jsonb_array_elements(package.payload->'records') \
-              WITH ORDINALITY AS record(value,ordinality) \
-         WHERE content.platform='xhs' \
-           AND content.content_external_id={content_external_id_expression} \
-           AND record.ordinality=finding.record_ordinal+1 \
-           AND record.value->'sourceObject'->>'externalId'={content_external_id_expression} \
+                locator_finding.material_ref AS source_ref, \
+                locator_package.accepted_at AS observed_at \
+         FROM linggan_material_discovery_finding locator_finding \
+         JOIN linggan_material_content locator_content ON locator_content.public_ref=locator_finding.content_public_ref \
+         JOIN linggan_runtime_capture_package locator_package USING(package_ref) \
+         CROSS JOIN LATERAL jsonb_array_elements(locator_package.payload->'records') \
+              WITH ORDINALITY AS locator_record(value,ordinality) \
+         WHERE locator_content.platform='xhs' \
+           AND locator_content.content_external_id={content_external_id_expression} \
+           AND locator_record.ordinality=locator_finding.record_ordinal+1 \
+           AND locator_record.value->'sourceObject'->>'externalId'={content_external_id_expression} \
            AND {evidence_signed} \
-         ORDER BY package.accepted_at DESC,finding.created_at DESC LIMIT 1"
+         ORDER BY locator_package.accepted_at DESC,locator_finding.created_at DESC LIMIT 1"
     );
     if !cross_industry_ready {
         return evidence;
     }
-    let sample_signed = signed_locator_predicate("sample.source_url");
+    let sample_signed = signed_locator_predicate("locator_sample.source_url");
     // 证据侧优先，跨行业样本只在证据侧解析不出来时兜底——与 `execution_source_url_for_task`
     // 的先后完全一致。写成显式的 `priority` 而不是把两段 `UNION ALL` 起来再排序：后者在
     // 「两侧都有地址」时挑到的可能是另一条，于是候选筛选与派发解析对着同一篇作品各说各话。
@@ -137,11 +138,11 @@ pub(crate) fn candidate_locator_sql(
              SELECT 1 AS priority,evidence.url,evidence.source_kind,evidence.source_ref \
              FROM ({evidence}) evidence \
              UNION ALL \
-             SELECT 2 AS priority,sample.source_url,'cross_industry_sample'::text, \
-                    sample.sample_ref \
-             FROM cross_industry_sample sample \
-             WHERE sample.platform='xhs' \
-               AND sample.content_external_id={content_external_id_expression} \
+             SELECT 2 AS priority,locator_sample.source_url,'cross_industry_sample'::text, \
+                    locator_sample.sample_ref \
+             FROM cross_industry_sample locator_sample \
+             WHERE locator_sample.platform='xhs' \
+               AND locator_sample.content_external_id={content_external_id_expression} \
                AND {sample_signed} \
          ) locator \
          ORDER BY locator.priority LIMIT 1"
