@@ -285,8 +285,8 @@ async fn nearest_problems(
            WHERE problem.domain_ref=$3 AND problem.state='active' \
            UNION ALL \
            SELECT representative.problem_ref,representative.distance FROM (",
-           representative_ranking!(),
-           ") representative WHERE representative.rank<=$4) \
+        representative_ranking!(),
+        ") representative WHERE representative.rank<=$4) \
          SELECT problem_ref FROM candidate \
          GROUP BY problem_ref ORDER BY min(distance),problem_ref LIMIT $5"
     ))
@@ -302,8 +302,10 @@ async fn nearest_problems(
 /// Path C. Without it a first eligible Signal in an empty catalogue would have nothing to be
 /// compared with, and every later one would look equally novel.
 ///
-/// Signals sharing the target's canonical sentence are excluded along with the target itself: an
-/// identical sentence cannot supply the independent second reading a Problem needs.
+/// The target itself is excluded, but a different Signal with the same canonical sentence stays
+/// eligible for recall.  Canonical equality is evidence that two expressions deserve comparison,
+/// not evidence that they came from the same person: source and author independence are enforced
+/// by the pairing admission boundary after recall has ranked the pool.
 async fn unmerged_pool(
     database: &Database,
     profile_ref: Uuid,
@@ -323,7 +325,7 @@ async fn unmerged_pool(
          JOIN linggan_comment_study_embedding_cache cache \
            ON cache.profile_ref=$1 AND cache.canonical_hash=signal.canonical_hash \
          WHERE work.domain_ref=$3 AND signal.eligibility_state='eligible' \
-           AND signal.signal_ref<>$4 AND signal.canonical_hash<>$2 \
+           AND signal.signal_ref<>$4 \
            AND NOT EXISTS( \
              SELECT 1 FROM linggan_comment_study_problem_membership membership \
              WHERE membership.signal_ref=signal.signal_ref) \

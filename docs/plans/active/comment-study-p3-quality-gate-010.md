@@ -141,3 +141,7 @@
 修复后，Problem 的当前 revision 成为 definition/core frame/inclusions/exclusions 的唯一读取面；embedding 待办按 canonical hash 对 Signal 与 Problem core 合并去重；candidate recall 直接 join `current_revision_ref`。新增的隔离 PostgreSQL 回归显式验证 lexical candidate recall 读取 revision，而不是依赖向量路径间接覆盖。
 
 本记录只证明本地代码与合成数据库契约：不构成真实标注 Recall@K、真实 Rust→WeMM 回放、OCR 语境资格回归、runtime 切换、共享数据库 migration、部署或 Mog 业务验收。
+
+## 2026-09-21 发布收口授权与未变边界
+
+Mog 已明确授权当前评论研究交付进行审核、提交、推送、合并和本机上线，并将在上线后手动验收。这替代本计划此前仅适用于准备阶段的“不得 push/merge/deploy”限制；不替代本计划对事实结论的限制。三条冻结私有评论的最小 provider 回放只用于发现输出合同缺陷，未形成成功的端到端结果；Gold Set、Recall@K、P3 出口、共享迁移/reset 成功、运行时实际行为和 Mog 业务验收仍不得据此宣称完成。私有原文、模型文本、提示词、向量、Keychain 凭据与一次性 harness 均不进入 Git 或发布物。

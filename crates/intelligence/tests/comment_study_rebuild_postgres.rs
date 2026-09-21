@@ -36,6 +36,7 @@ use linggan_intelligence::{
     },
     comment_study_model_dispatch::reserve_study_batch_model_call,
     comment_study_model_runner::{StudyModelRunnerError, call_study_batch_model},
+    comment_study_pair_worker::run_one_problem_pair,
     comment_study_problem_store::{
         accept_problem_pair, accept_problem_resolution, prepare_problem_pair,
         prepare_problem_resolution,
@@ -44,10 +45,12 @@ use linggan_intelligence::{
         CommentStudyReadQuery, read_overview, read_problems, read_runs, read_signals, read_targets,
     },
     comment_study_recall::{RecallCompleteness, problem_representatives, recall_candidates},
+    comment_study_resolution_worker::run_one_problem_resolution,
     comment_study_run::{PrepareStudyRunRequest, prepare_study_run},
     model_runner::prepare_next_batch_across_runs,
     model_runner::run_model_work_once,
-    model_secrets::SyntheticModelSecrets,
+    model_secrets::{ModelSecretStore, SyntheticModelSecrets},
+    model_settings::ModelError,
     pi_adapter::PiAdapter,
 };
 use research_fixture::{comment_with_author, detail_with_author, reply_with_author};
@@ -56,6 +59,22 @@ use uuid::Uuid;
 
 const RESET_SQL: &str = include_str!("../../../database/bootstrap/comment-study-reset.sql");
 const STUDY_SCHEMA_SQL: &str = include_str!("../../../database/bootstrap/comment-study-001.sql");
+
+struct UnavailableModelSecrets;
+
+impl ModelSecretStore for UnavailableModelSecrets {
+    fn put(&self, _: Uuid, _: Uuid, _: &str) -> Result<(), ModelError> {
+        Err(ModelError::SecretUnavailable)
+    }
+
+    fn get(&self, _: Uuid, _: Uuid) -> Result<String, ModelError> {
+        Err(ModelError::SecretUnavailable)
+    }
+
+    fn delete(&self, _: Uuid, _: Uuid) -> Result<(), ModelError> {
+        Err(ModelError::SecretUnavailable)
+    }
+}
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof"]
@@ -3170,6 +3189,39 @@ async fn the_unmerged_pool_is_what_lets_a_second_eligible_signal_find_the_first(
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof"]
+async fn the_unmerged_pool_keeps_an_independent_signal_with_the_same_canonical_text() {
+    let database = proof_database("comment_study_recall_identical_pool").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    let (first, second) = two_eligible_signals_from(
+        &database,
+        "study-recall-identical-pool-note",
+        ["reader-1", "reader-2"],
+        ["需要外部催促", "需要外部催促"],
+    )
+    .await;
+    let profile = seed_embedding_profile(&database).await;
+    let canonical_hash = signal_canonical_hash(&database, first).await;
+    assert_eq!(
+        canonical_hash,
+        signal_canonical_hash(&database, second).await
+    );
+    seed_vector(&database, profile, &canonical_hash, 0.0).await;
+
+    let recalled = recall_candidates(&database, profile, second).await.unwrap();
+    assert_eq!(recalled.completeness, RecallCompleteness::Complete);
+    assert_eq!(
+        recalled.pool_signal_refs,
+        vec![first],
+        "a same-text Signal from a different source and author is the independent second reading \
+         the pairing boundary must decide, not an item recall may discard"
+    );
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
 async fn an_active_problem_without_an_encoded_core_makes_recall_report_itself_incomplete() {
     let database = proof_database("comment_study_recall_incomplete").await;
     sqlx::raw_sql(STUDY_SCHEMA_SQL)
@@ -3311,6 +3363,109 @@ async fn a_problem_reached_through_both_its_core_and_a_member_appears_once() {
     assert!(
         !recalled.pool_signal_refs.contains(&first),
         "a Signal that already supports a Problem has left the unmerged pool"
+    );
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn provider_workers_read_problem_revisions_and_release_pre_dispatch_claims() {
+    let database = proof_database("comment_study_provider_worker_claims").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    let (first, second) = two_eligible_signals(&database, "study-provider-worker-note").await;
+    let problem = seed_existing_problem(
+        &database,
+        "需要外部催促才能开始家庭作业",
+        "1111111111111111111111111111111111111111111111111111111111111111",
+        &[first, second],
+    )
+    .await;
+    let resolution = prepare_problem_resolution(&database, first, vec![problem])
+        .await
+        .unwrap();
+    let adapter = PiAdapter::configured();
+    let error = run_one_problem_resolution(&database, &UnavailableModelSecrets, &adapter)
+        .await
+        .expect_err("the synthetic missing secret prevents provider I/O");
+    assert!(matches!(
+        error,
+        linggan_intelligence::comment_study_resolution_worker::ResolutionWorkerError::Model(
+            ModelError::SecretUnavailable
+        )
+    ));
+    assert_eq!(
+        sqlx::query_scalar::<_, Option<Uuid>>(
+            "SELECT model_invocation_ref FROM linggan_comment_study_resolution WHERE resolution_ref=$1",
+        )
+        .bind(resolution.resolution_ref)
+        .fetch_one(database.pool())
+        .await
+        .unwrap(),
+        None,
+        "a failed request build must release the Resolution for a later configured worker"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM linggan_model_invocation \
+             WHERE state='failed' AND result->>'failureCode'='model_secret_unavailable'",
+        )
+        .fetch_one(database.pool())
+        .await
+        .unwrap(),
+        1,
+        "the failed request build remains auditable even though the Resolution was released"
+    );
+
+    accept_problem_resolution(
+        &database,
+        resolution.resolution_ref,
+        serde_json::json!({
+            "contract":"comment-study.problem-resolution.v1",
+            "candidates":[{"problemRef":problem,"dimensions":{
+                "actor":"different","goalOrExpectedState":"different",
+                "barrierOrUnmetNeed":"different","context":"different"
+            }}]
+        }),
+    )
+    .await
+    .unwrap();
+    let novel = prepare_problem_resolution(&database, second, Vec::new())
+        .await
+        .unwrap();
+    accept_problem_resolution(
+        &database,
+        novel.resolution_ref,
+        serde_json::json!({
+            "contract":"comment-study.problem-resolution.v1",
+            "candidates":[]
+        }),
+    )
+    .await
+    .unwrap();
+    let pair = prepare_problem_pair(&database, first, second)
+        .await
+        .unwrap();
+    let error = run_one_problem_pair(&database, &UnavailableModelSecrets, &adapter)
+        .await
+        .expect_err("the synthetic missing secret prevents provider I/O");
+    assert!(matches!(
+        error,
+        linggan_intelligence::comment_study_pair_worker::PairWorkerError::Model(
+            ModelError::SecretUnavailable
+        )
+    ));
+    assert_eq!(
+        sqlx::query_scalar::<_, Option<Uuid>>(
+            "SELECT model_invocation_ref FROM linggan_comment_study_problem_pair WHERE pair_ref=$1",
+        )
+        .bind(pair.pair_ref)
+        .fetch_one(database.pool())
+        .await
+        .unwrap(),
+        None,
+        "a failed request build must release the Pair for a later configured worker"
     );
 }
 
