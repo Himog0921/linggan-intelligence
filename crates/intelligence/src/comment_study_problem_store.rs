@@ -4,6 +4,7 @@
 //! any model comparison, and it writes a membership only after the deterministic resolver admits
 //! exactly one match. Pair creation is deliberately separate from no-match handling.
 
+use crate::comment_study_canonical::{canonical_hash, canonical_text};
 use crate::comment_study_problem_resolution::{
     ExistingResolutionDecision, NewProblemDefinition, PROBLEM_PAIR_CONTRACT, PairCreationDecision,
     ProblemResolutionContractError, decide_existing_resolution, decide_pair_creation,
@@ -133,6 +134,38 @@ pub async fn prepare_problem_resolution(
         signal_ref,
         state: state.to_owned(),
         candidate_problem_refs,
+    })
+}
+
+/// Closes a resolution that never got a trustworthy candidate set.
+///
+/// This exists so that "recall could not cover the catalogue" can never be recorded as "compared
+/// and found nothing". The two look identical downstream — an empty candidate list — but only the
+/// second is evidence of novelty. Recording the first as novel is how a duplicate Problem gets
+/// created from a catalogue that merely was not searchable.
+pub async fn resolve_retrieval_incomplete(
+    database: &Database,
+    resolution_ref: Uuid,
+    reason: &str,
+) -> Result<ProblemResolutionReceipt, ProblemStoreError> {
+    let mut transaction = database.pool().begin().await?;
+    lock_pending_resolution(&mut transaction, resolution_ref).await?;
+    finish_resolution(
+        &mut transaction,
+        resolution_ref,
+        "retrieval_incomplete",
+        None,
+        json!({
+            "contract":"comment-study.problem-candidate-set.v1",
+            "retrievalIncompleteReason":reason
+        }),
+    )
+    .await?;
+    transaction.commit().await?;
+    Ok(ProblemResolutionReceipt {
+        resolution_ref,
+        state: "retrieval_incomplete".to_owned(),
+        problem_ref: None,
     })
 }
 
@@ -300,8 +333,13 @@ pub async fn accept_problem_pair(
     };
     let receipt = match decision {
         PairCreationDecision::Create(definition) => {
-            let problem_ref =
-                insert_or_find_problem(&mut transaction, domain_ref, &definition).await?;
+            let problem_ref = insert_or_find_problem(
+                &mut transaction,
+                domain_ref,
+                &definition,
+                &[pair.first_signal_ref, pair.second_signal_ref],
+            )
+            .await?;
             assign_novel_signal_from_pair(
                 &mut transaction,
                 pair.first_signal_ref,
@@ -545,47 +583,82 @@ fn pair_manifest(manifest: &Value) -> Result<(Uuid, bool, bool), ProblemStoreErr
     Ok((domain_ref, independent_sources, independent_authors))
 }
 
+/// Creates a Problem and its first immutable revision together, or returns the Problem that
+/// already carries this definition.
+///
+/// The two rows are one fact: a Problem with no revision has no meaning, and a revision names the
+/// core that recall will encode and that every later member is compared against. The definition
+/// hash therefore lives on the revision — deduplicating on the Problem row would tie identity to a
+/// definition the Problem is not allowed to keep once it is revised.
 async fn insert_or_find_problem(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     domain_ref: Uuid,
     definition: &NewProblemDefinition,
+    seed_signal_refs: &[Uuid],
 ) -> Result<Uuid, sqlx::Error> {
     let definition_value = json!({
+        "title":definition.title,
         "definition":definition.definition,
         "stableIdentity":definition.stable_identity,
         "includeCriteria":definition.include_criteria,
         "excludeCriteria":definition.exclude_criteria,
     });
     let definition_hash = sha256_json(&definition_value);
+    if let Some(existing) = sqlx::query_scalar::<_, Uuid>(
+        "SELECT problem.problem_ref FROM linggan_comment_study_problem problem \
+         JOIN linggan_comment_study_problem_revision revision \
+           ON revision.revision_ref=problem.current_revision_ref \
+         WHERE problem.domain_ref=$1 AND revision.definition_hash=$2 AND problem.state='active'",
+    )
+    .bind(domain_ref)
+    .bind(&definition_hash)
+    .fetch_optional(&mut **transaction)
+    .await?
+    {
+        return Ok(existing);
+    }
     let problem_ref = Uuid::new_v4();
-    let inserted: Option<Uuid> = sqlx::query_scalar(
-        "INSERT INTO linggan_comment_study_problem( \
-           problem_ref,domain_ref,definition,stable_identity,include_criteria,exclude_criteria,definition_hash,state \
-         ) VALUES($1,$2,$3,$4,$5,$6,$7,'active') \
-         ON CONFLICT(domain_ref,definition_hash) DO NOTHING RETURNING problem_ref",
+    let revision_ref = Uuid::new_v4();
+    // The same builder a Signal goes through, so the core and the Signals judged
+    // against it land in one space rather than two that merely look alike.
+    let canonical = canonical_text(&definition.definition, Some(&definition.stable_identity));
+    sqlx::query(
+        "INSERT INTO linggan_comment_study_problem(problem_ref,domain_ref,state) \
+         VALUES($1,$2,'active')",
     )
     .bind(problem_ref)
     .bind(domain_ref)
+    .execute(&mut **transaction)
+    .await?;
+    sqlx::query(
+        "INSERT INTO linggan_comment_study_problem_revision( \
+           revision_ref,problem_ref,domain_ref,identity_version,title,definition,core_frame, \
+           inclusions,exclusions,seed_signal_refs,canonical_text,canonical_hash,definition_hash,reason \
+         ) VALUES($1,$2,$3,1,$4,$5,$6,$7,$8,$9,$10,$11,$12,'pair_creation')",
+    )
+    .bind(revision_ref)
+    .bind(problem_ref)
+    .bind(domain_ref)
+    .bind(&definition.title)
     .bind(&definition.definition)
     .bind(&definition.stable_identity)
     .bind(json!(definition.include_criteria))
     .bind(json!(definition.exclude_criteria))
+    .bind(seed_signal_refs)
+    .bind(&canonical)
+    .bind(canonical_hash(&canonical))
     .bind(&definition_hash)
-    .fetch_optional(&mut **transaction)
+    .execute(&mut **transaction)
     .await?;
-    match inserted {
-        Some(problem_ref) => Ok(problem_ref),
-        None => {
-            sqlx::query_scalar(
-                "SELECT problem_ref FROM linggan_comment_study_problem \
-             WHERE domain_ref=$1 AND definition_hash=$2 AND state='active'",
-            )
-            .bind(domain_ref)
-            .bind(definition_hash)
-            .fetch_one(&mut **transaction)
-            .await
-        }
-    }
+    sqlx::query(
+        "UPDATE linggan_comment_study_problem SET current_revision_ref=$2,updated_at=scope_001_now() \
+         WHERE problem_ref=$1",
+    )
+    .bind(problem_ref)
+    .bind(revision_ref)
+    .execute(&mut **transaction)
+    .await?;
+    Ok(problem_ref)
 }
 
 async fn assign_novel_signal_from_pair(

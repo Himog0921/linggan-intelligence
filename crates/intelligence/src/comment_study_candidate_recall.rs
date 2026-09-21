@@ -4,10 +4,13 @@
 //! set to the resolution contract, with transparent structured lexical evidence and a recency
 //! fallback so a zero lexical overlap never becomes a hidden “no match” verdict.
 
+use crate::comment_study_embedding::active_profile;
+use crate::comment_study_problem_store::resolve_retrieval_incomplete;
 use crate::comment_study_problem_store::{
     PreparedProblemResolution, ProblemStoreError, accept_problem_resolution, prepare_problem_pair,
     prepare_problem_resolution,
 };
+use crate::comment_study_recall::{RecallCompleteness, recall_candidates};
 use linggan_storage_postgres::Database;
 use serde::Serialize;
 use serde_json::Value;
@@ -28,35 +31,111 @@ pub struct RecalledProblemCandidate {
     pub lexical_overlap: bool,
 }
 
-/// Finds one legal pair of independently authored deferred-novel Signals. The pair is only a
-/// frozen comparison task; it does not itself create a Problem.
+/// Finds one legal pair of independently authored deferred-novel Signals, choosing the partner by
+/// vector proximity rather than by arrival order. Pairing the two Signals that merely happened to
+/// arrive first spends a model call on two texts nothing ever suggested were about the same thing.
+///
+/// The pair is only a frozen comparison task; it does not itself create a Problem.
 pub async fn advance_next_problem_pair(
     database: &Database,
 ) -> Result<bool, ProblemCandidateRecallError> {
-    let pair: Option<(Uuid, Uuid)> = sqlx::query_as(
-        "SELECT first_signal.signal_ref,second_signal.signal_ref \
-         FROM linggan_comment_study_resolution first_resolution \
-         JOIN linggan_comment_study_signal first_signal ON first_signal.signal_ref=first_resolution.signal_ref \
-         JOIN linggan_comment_study_target first_target ON first_target.target_ref=first_signal.target_ref \
-         JOIN linggan_material_comment first_source ON first_source.material_ref=first_target.source_ref \
-         JOIN linggan_comment_study_resolution second_resolution ON second_resolution.domain_ref=first_resolution.domain_ref \
-              AND second_resolution.state='deferred_novel' AND second_resolution.signal_ref>first_resolution.signal_ref \
-         JOIN linggan_comment_study_signal second_signal ON second_signal.signal_ref=second_resolution.signal_ref \
-         JOIN linggan_comment_study_target second_target ON second_target.target_ref=second_signal.target_ref \
-         JOIN linggan_material_comment second_source ON second_source.material_ref=second_target.source_ref \
-         WHERE first_resolution.state='deferred_novel' AND first_source.material_ref<>second_source.material_ref \
-           AND first_source.author_external_id IS NOT NULL AND second_source.author_external_id IS NOT NULL \
-           AND first_source.author_external_id<>second_source.author_external_id \
-           AND NOT EXISTS(SELECT 1 FROM linggan_comment_study_problem_pair pair \
-                 WHERE pair.first_signal_ref=first_signal.signal_ref OR pair.second_signal_ref=first_signal.signal_ref \
-                    OR pair.first_signal_ref=second_signal.signal_ref OR pair.second_signal_ref=second_signal.signal_ref) \
-         ORDER BY first_resolution.created_at,second_resolution.created_at LIMIT 1",
-    ).fetch_optional(database.pool()).await?;
-    let Some((first, second)) = pair else {
+    // Path C is a vector search. With no qualified profile there is no pool to search at all, and
+    // falling back to arrival order would record a pairing as if proximity had been considered.
+    let Some(profile_ref) = active_profile(database).await? else {
         return Ok(false);
     };
-    prepare_problem_pair(database, first, second).await?;
-    Ok(true)
+    for seeker in novel_signals_awaiting_pairing(database).await? {
+        let recalled = recall_candidates(database, profile_ref, seeker).await?;
+        // A Signal is only `deferred_novel` relative to the catalogue as it stood when it was
+        // resolved. If the catalogue cannot be fully searched now, the Problem this pair would
+        // create may already exist unseen — which is the duplicate this module exists to prevent.
+        if recalled.completeness != RecallCompleteness::Complete {
+            continue;
+        }
+        if let Some(partner) =
+            nearest_admissible_partner(database, seeker, &recalled.pool_signal_refs).await?
+        {
+            prepare_problem_pair(database, seeker, partner).await?;
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// How many Signals one tick will look for a partner for before giving up. A Signal whose whole
+/// pool has already been compared with it must not block every Signal behind it, so the scan moves
+/// on rather than returning "nothing to pair" at the first exhausted one.
+const MAX_PAIR_SEEKERS_PER_TICK: i64 = 8;
+
+/// Signals still waiting to be paired, earliest first.
+///
+/// The only thing that retires a Signal from pairing is being assigned to a Problem. Having taken
+/// part in a comparison that came apart is not a reason: it establishes that those *two* are not
+/// the same Problem, and nothing about either one's relation to anything else.
+async fn novel_signals_awaiting_pairing(
+    database: &Database,
+) -> Result<Vec<Uuid>, ProblemCandidateRecallError> {
+    Ok(sqlx::query_scalar(
+        "SELECT resolution.signal_ref FROM linggan_comment_study_resolution resolution \
+         WHERE resolution.state='deferred_novel' \
+           AND NOT EXISTS(SELECT 1 FROM linggan_comment_study_problem_membership membership \
+                 WHERE membership.signal_ref=resolution.signal_ref) \
+         ORDER BY resolution.created_at,resolution.signal_ref LIMIT $1",
+    )
+    .bind(MAX_PAIR_SEEKERS_PER_TICK)
+    .fetch_all(database.pool())
+    .await?)
+}
+
+/// The nearest pool candidate that may actually be admitted, keeping the recall's distance order.
+///
+/// The pool deliberately recalls same-account Signals too — they are evidence that the pool is not
+/// empty — but a second reading from the same account is not independent support, so it can never
+/// become a pair. Filtering here rather than letting `prepare_problem_pair` refuse means the
+/// *nearest admissible* candidate is found instead of stopping at the nearest one overall.
+///
+/// Only the exact combination already compared is excluded, never every Signal that has ever been
+/// compared with anything: the table's `UNIQUE(first,second)` is what stops one pair being bought
+/// twice, and a wider exclusion would retire both sides of every inconclusive comparison.
+async fn nearest_admissible_partner(
+    database: &Database,
+    seeker: Uuid,
+    pool: &[Uuid],
+) -> Result<Option<Uuid>, ProblemCandidateRecallError> {
+    if pool.is_empty() {
+        return Ok(None);
+    }
+    Ok(sqlx::query_scalar(
+        "WITH seeker AS ( \
+           SELECT target.source_ref,source.author_external_id \
+           FROM linggan_comment_study_signal signal \
+           JOIN linggan_comment_study_target target USING(target_ref) \
+           JOIN linggan_material_comment source ON source.material_ref=target.source_ref \
+           WHERE signal.signal_ref=$1), \
+         ranked AS (SELECT signal_ref,ordinality FROM unnest($2::uuid[]) \
+                    WITH ORDINALITY AS entry(signal_ref,ordinality)) \
+         SELECT ranked.signal_ref FROM ranked \
+         JOIN linggan_comment_study_resolution resolution USING(signal_ref) \
+         JOIN linggan_comment_study_signal signal USING(signal_ref) \
+         JOIN linggan_comment_study_target target ON target.target_ref=signal.target_ref \
+         JOIN linggan_material_comment source ON source.material_ref=target.source_ref \
+         CROSS JOIN seeker \
+         WHERE resolution.state='deferred_novel' \
+           AND target.source_ref<>seeker.source_ref \
+           AND source.author_external_id IS NOT NULL \
+           AND seeker.author_external_id IS NOT NULL \
+           AND source.author_external_id<>seeker.author_external_id \
+           AND NOT EXISTS(SELECT 1 FROM linggan_comment_study_problem_membership membership \
+                 WHERE membership.signal_ref=ranked.signal_ref) \
+           AND NOT EXISTS(SELECT 1 FROM linggan_comment_study_problem_pair pair \
+                 WHERE (pair.first_signal_ref=ranked.signal_ref AND pair.second_signal_ref=$1) \
+                    OR (pair.first_signal_ref=$1 AND pair.second_signal_ref=ranked.signal_ref)) \
+         ORDER BY ranked.ordinality LIMIT 1",
+    )
+    .bind(seeker)
+    .bind(pool)
+    .fetch_optional(database.pool())
+    .await?)
 }
 
 #[derive(Debug, Serialize)]
@@ -104,12 +183,15 @@ pub async fn recall_problem_candidates(
     let query_terms = recall_terms(signal.get("proposition"), signal.get("problem_frame"));
     let rows = sqlx::query(
         "WITH terms AS (SELECT unnest($2::text[]) AS term) \
-         SELECT problem.problem_ref,problem.definition,problem.stable_identity,problem.include_criteria,problem.exclude_criteria, \
-                EXISTS(SELECT 1 FROM terms WHERE lower(problem.definition) LIKE '%' || lower(term) || '%' \
-                       OR lower(problem.stable_identity::text) LIKE '%' || lower(term) || '%') AS lexical_overlap, \
-                COALESCE((SELECT count(*) FROM terms WHERE lower(problem.definition) LIKE '%' || lower(term) || '%' \
-                       OR lower(problem.stable_identity::text) LIKE '%' || lower(term) || '%'),0) AS overlap_count \
+         SELECT problem.problem_ref,revision.definition,revision.core_frame AS stable_identity, \
+                revision.inclusions AS include_criteria,revision.exclusions AS exclude_criteria, \
+                EXISTS(SELECT 1 FROM terms WHERE lower(revision.definition) LIKE '%' || lower(term) || '%' \
+                       OR lower(revision.core_frame::text) LIKE '%' || lower(term) || '%') AS lexical_overlap, \
+                COALESCE((SELECT count(*) FROM terms WHERE lower(revision.definition) LIKE '%' || lower(term) || '%' \
+                       OR lower(revision.core_frame::text) LIKE '%' || lower(term) || '%'),0) AS overlap_count \
          FROM linggan_comment_study_problem problem \
+         JOIN linggan_comment_study_problem_revision revision \
+           ON revision.revision_ref=problem.current_revision_ref \
          WHERE problem.domain_ref=$1 AND problem.state='active' \
          ORDER BY overlap_count DESC,problem.created_at DESC,problem.problem_ref DESC LIMIT $3",
     )
@@ -175,14 +257,46 @@ pub async fn advance_next_problem_resolution(
     let Some(signal_ref) = signal_ref else {
         return Ok(false);
     };
-    let (recall, prepared) = prepare_recalled_problem_resolution(database, signal_ref).await?;
-    if recall.candidates.is_empty() && prepared.state == "pending" {
-        accept_problem_resolution(
-            database,
-            prepared.resolution_ref,
-            serde_json::json!({"contract":"comment-study.problem-resolution.v1","candidates":[]}),
-        )
-        .await?;
+    // Without a qualified encoding profile there is no catalogue to search at all. Falling back to
+    // the lexical path here would be worse than doing nothing: it would answer "no candidates"
+    // with a method that cannot see semantic matches, and that answer creates duplicates.
+    let Some(profile_ref) = active_profile(database).await? else {
+        let prepared = prepare_problem_resolution(database, signal_ref, Vec::new()).await?;
+        if prepared.state == "pending" {
+            resolve_retrieval_incomplete(database, prepared.resolution_ref, "no_qualified_profile")
+                .await?;
+        }
+        return Ok(true);
+    };
+    let recalled = recall_candidates(database, profile_ref, signal_ref).await?;
+    // An identity match is a shortcut *into* the comparison queue, never past it, so it joins the
+    // candidate set rather than resolving anything on its own.
+    let mut candidate_problem_refs = recalled.identity_problem_refs.clone();
+    for problem_ref in recalled.problem_refs {
+        if !candidate_problem_refs.contains(&problem_ref) {
+            candidate_problem_refs.push(problem_ref);
+        }
+    }
+    let prepared =
+        prepare_problem_resolution(database, signal_ref, candidate_problem_refs.clone()).await?;
+    if prepared.state != "pending" {
+        return Ok(true);
+    }
+    match recalled.completeness {
+        // "Could not search the catalogue" and "searched it and found nothing" both arrive as an
+        // empty list. Only the second is evidence that this Signal is novel.
+        RecallCompleteness::Incomplete { reason } => {
+            resolve_retrieval_incomplete(database, prepared.resolution_ref, reason).await?;
+        }
+        RecallCompleteness::Complete if candidate_problem_refs.is_empty() => {
+            accept_problem_resolution(
+                database,
+                prepared.resolution_ref,
+                serde_json::json!({"contract":"comment-study.problem-resolution.v1","candidates":[]}),
+            )
+            .await?;
+        }
+        RecallCompleteness::Complete => {}
     }
     Ok(true)
 }

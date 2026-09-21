@@ -17,6 +17,7 @@ use linggan_intelligence::comment_study_read::{
     self as read, CommentStudyReadError, CommentStudyReadQuery,
 };
 use linggan_intelligence::{
+    comment_study_embedding::EmbeddingError,
     comment_study_run::{PrepareStudyRunRequest, prepare_study_run},
     comment_study_source::ADHD_DOMAIN_REF,
 };
@@ -37,6 +38,10 @@ pub(super) fn routes() -> Router<LocalWebState> {
         .route("/api/local/comment-study/setup", get(read_setup))
         .route("/api/local/comment-study/policy", post(save_policy))
         .route("/api/local/comment-study/runs", post(start_run))
+        .route(
+            "/api/local/comment-study/embedding-probe",
+            post(run_embedding_probe),
+        )
         .layer(middleware::from_fn(local_comment_study_guard))
 }
 
@@ -64,6 +69,40 @@ async fn read_setup(State(state): State<LocalWebState>) -> Response {
         Err(_) => error(StatusCode::SERVICE_UNAVAILABLE, "comment_study_unavailable"),
     }
 }
+/// Runs the local qualification probe and, only if it passes, makes its profile the one every
+/// comparison happens in. An operator action rather than tick work: it loads the model and states
+/// what this machine can do, and nothing entitles the system to assert that on its own.
+async fn run_embedding_probe(State(state): State<LocalWebState>) -> Response {
+    let database = match database(&state) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    match linggan_intelligence::comment_study_embedding::probe_and_register_embedding_profile(
+        database,
+        &linggan_intelligence::pi_adapter::PiAdapter::configured(),
+    )
+    .await
+    {
+        Ok(outcome) => Json(json!(outcome)).into_response(),
+        // A runtime failure is distinct from a failure to retain the qualification fact.  Both
+        // remain deliberately closed, safe codes rather than exposing an adapter or database
+        // error string to the local browser.
+        Err(probe_error) => error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            embedding_probe_error_code(&probe_error),
+        ),
+    }
+}
+
+fn embedding_probe_error_code(error: &EmbeddingError) -> &'static str {
+    match error {
+        // A runtime failure is distinct from a failure to retain the qualification fact. Both
+        // remain deliberately closed, safe codes rather than exposing adapter or database text.
+        EmbeddingError::Database(_) => "embedding_probe_storage_unavailable",
+        EmbeddingError::Model(_) | EmbeddingError::InvalidVector => "embedding_runtime_unavailable",
+    }
+}
+
 async fn save_policy(
     State(state): State<LocalWebState>,
     Json(request): Json<SavePolicy>,
@@ -288,6 +327,14 @@ mod tests {
     }
 
     #[test]
+    fn embedding_probe_never_reports_an_invalid_runtime_vector_as_a_storage_failure() {
+        assert_eq!(
+            embedding_probe_error_code(&EmbeddingError::InvalidVector),
+            "embedding_runtime_unavailable"
+        );
+    }
+
+    #[test]
     fn comment_study_page_uses_the_shared_workspace_and_a_table_for_work_selection() {
         let page = include_str!("comment_study.html");
         assert!(page.contains("<div class=\"v7-app\">"));
@@ -338,7 +385,9 @@ mod tests {
     fn comment_study_page_puts_the_five_tabs_immediately_after_the_toolbar_not_below_a_giant_form()
     {
         let page = include_str!("comment_study.html");
-        let main_start = page.find("<main class=\"study-main\"").expect("main present");
+        let main_start = page
+            .find("<main class=\"study-main\"")
+            .expect("main present");
         let main_end = page.find("</main>").expect("main closes");
         let main = &page[main_start..main_end];
         // Mog's complaint: the tabs were pushed to the very bottom of the page, below the policy
@@ -353,7 +402,9 @@ mod tests {
             !main.contains("id=\"works\""),
             "the 100-row work picker table must no longer live directly inside <main>"
         );
-        let toolbar_index = main.find("class=\"study-toolbar\"").expect("toolbar present");
+        let toolbar_index = main
+            .find("class=\"study-toolbar\"")
+            .expect("toolbar present");
         let tabs_index = main
             .find("<nav class=\"study-tabs\" aria-label=\"评论研究视图\">")
             .expect("tabs present");
@@ -384,10 +435,14 @@ mod tests {
     #[test]
     fn comment_study_page_moves_the_research_setup_into_a_button_triggered_dialog() {
         let page = include_str!("comment_study.html");
-        assert!(page.contains("<dialog id=\"study-dialog\" aria-labelledby=\"study-dialog-title\">"));
+        assert!(
+            page.contains("<dialog id=\"study-dialog\" aria-labelledby=\"study-dialog-title\">")
+        );
         assert!(page.contains("id=\"open-study-dialog\""));
         assert!(page.contains("id=\"study-dialog-close\""));
-        let dialog_start = page.find("<dialog id=\"study-dialog\"").expect("dialog present");
+        let dialog_start = page
+            .find("<dialog id=\"study-dialog\"")
+            .expect("dialog present");
         let dialog = &page[dialog_start..];
         assert!(
             dialog.contains("id=\"policy-form\""),
@@ -402,7 +457,7 @@ mod tests {
 
     #[test]
     fn comment_study_script_wires_the_dialog_open_close_and_auto_switches_to_runs_after_creating_one()
-    {
+     {
         let script = include_str!("comment_study.js");
         assert!(script.contains("studyDialog.showModal()"));
         assert!(script.contains("studyDialog.close()"));
@@ -440,9 +495,9 @@ mod tests {
         let script = include_str!("comment_study.js");
         assert!(script.contains("const RUN_SCOPED_VIEWS = new Set(['targets', 'pending']);"));
         assert!(script.contains("async function renderTargetsTab()"));
-        assert!(script.contains(
-            "`targets?runRef=${encodeURIComponent(selectedRunRef)}&limit=100`"
-        ));
+        assert!(
+            script.contains("`targets?runRef=${encodeURIComponent(selectedRunRef)}&limit=100`")
+        );
         assert!(script.contains("target.commentText"));
         assert!(script.contains("sourceStateLabel[target.sourceState]"));
         assert!(script.contains(
@@ -464,7 +519,8 @@ mod tests {
             start_run_handler
                 .find("selectedRunRef = response.runRef;")
                 .is_some_and(|selection_index| {
-                    start_run_handler.find("await loadProjection();")
+                    start_run_handler
+                        .find("await loadProjection();")
                         .is_some_and(|reload_index| selection_index < reload_index)
                 }),
             "creating a run must select it before reloading the review tabs, otherwise \
@@ -476,11 +532,20 @@ mod tests {
     fn comment_study_script_filters_pending_signals_by_resolution_state_not_by_kind() {
         let script = include_str!("comment_study.js");
         assert!(script.contains(
-            "const PENDING_RESOLUTION_STATES = new Set(['pending', 'deferred_context', 'deferred_ambiguous', 'deferred_novel']);"
+            "const PENDING_RESOLUTION_STATES = new Set(['pending', 'deferred_context', 'deferred_ambiguous', 'deferred_novel', 'retrieval_incomplete', 'budget_stopped']);"
         ));
         assert!(script.contains(
             "signal.resolutionState == null || PENDING_RESOLUTION_STATES.has(signal.resolutionState)"
         ));
+    }
+
+    #[test]
+    fn comment_study_script_explains_incomplete_resolution_states_in_chinese() {
+        let script = include_str!("comment_study.js");
+        assert!(
+            script.contains("retrieval_incomplete: '候选目录未查全，当前不能判定是否为新问题'")
+        );
+        assert!(script.contains("budget_stopped: '归并预算已到上限，当前未完成判断'"));
     }
 
     #[test]

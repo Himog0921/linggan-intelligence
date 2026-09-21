@@ -7,6 +7,7 @@
 use crate::comment_study_batch::{
     BatchTargetState, ParsedBatchTarget, StudyBatchError, parse_batch_output,
 };
+use crate::comment_study_canonical::{canonical_hash, canonical_text};
 use crate::comment_study_run::close_run_if_settled;
 use crate::comment_study_semantic::AcceptedSignal;
 use linggan_storage_postgres::Database;
@@ -509,11 +510,19 @@ async fn insert_signals(
     .fetch_one(&mut **transaction)
     .await?;
     for signal in signals {
+        // Only an eligible Signal carries canonical text: it is what the unmerged pool is searched
+        // by, and an ineligible Signal stays fully visible without ever entering that pool.
+        let canonical = (signal.eligibility_state == "eligible").then(|| {
+            let text = canonical_text(&signal.proposition, signal.problem_frame.as_ref());
+            let hash = canonical_hash(&text);
+            (text, hash)
+        });
         sqlx::query(
             "INSERT INTO linggan_comment_study_signal( \
                signal_ref,target_ref,semantic_attempt_ref,kind,proposition,evidence, \
-               evidence_start,evidence_end,problem_frame,eligibility_state,eligibility_reason \
-             ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
+               evidence_start,evidence_end,problem_frame,eligibility_state,eligibility_reason, \
+               canonical_text,canonical_hash \
+             ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",
         )
         .bind(Uuid::new_v4())
         .bind(target_ref)
@@ -524,8 +533,10 @@ async fn insert_signals(
         .bind(signal.evidence_start)
         .bind(signal.evidence_end)
         .bind(signal.problem_frame)
-        .bind(signal.eligibility_state)
+        .bind(&signal.eligibility_state)
         .bind(signal.eligibility_reason)
+        .bind(canonical.as_ref().map(|(text, _)| text.as_str()))
+        .bind(canonical.as_ref().map(|(_, hash)| hash.as_str()))
         .execute(&mut **transaction)
         .await?;
     }

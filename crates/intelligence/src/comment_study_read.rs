@@ -280,13 +280,17 @@ pub async fn read_problems(
     let limit = query.limit()?;
     let domain_ref = resolved_domain(database, query.domain).await?;
     let rows = sqlx::query(
-        "SELECT problem.problem_ref,problem.domain_ref,problem.definition,problem.stable_identity, \
-                problem.include_criteria,problem.exclude_criteria,problem.state,problem.created_at::text AS created_at,problem.retired_at::text AS retired_at, \
+        "SELECT problem.problem_ref,problem.domain_ref,revision.definition,revision.core_frame, \
+                revision.inclusions,revision.exclusions,problem.state,problem.created_at::text AS created_at,problem.retired_at::text AS retired_at, \
                 count(membership.membership_ref) AS membership_count \
          FROM linggan_comment_study_problem problem \
-         LEFT JOIN linggan_comment_study_problem_membership membership USING(problem_ref) \
+         JOIN linggan_comment_study_problem_revision revision \
+           ON revision.revision_ref=problem.current_revision_ref \
+         LEFT JOIN linggan_comment_study_problem_membership membership \
+           ON membership.problem_ref=problem.problem_ref \
          WHERE ($1::uuid IS NULL OR problem.domain_ref=$1) \
-         GROUP BY problem.problem_ref ORDER BY problem.created_at DESC,problem.problem_ref DESC LIMIT $2",
+         GROUP BY problem.problem_ref,revision.revision_ref \
+         ORDER BY problem.created_at DESC,problem.problem_ref DESC LIMIT $2",
     )
     .bind(domain_ref)
     .bind(limit)
@@ -296,8 +300,8 @@ pub async fn read_problems(
         "contract":"comment-study.read.v1","domainRef":domain_ref,
         "problems":rows.into_iter().map(|row| json!({
             "problemRef":row.get::<Uuid,_>("problem_ref"),"domainRef":row.get::<Uuid,_>("domain_ref"),
-            "definition":row.get::<String,_>("definition"),"stableIdentity":row.get::<Value,_>("stable_identity"),
-            "includeCriteria":row.get::<Value,_>("include_criteria"),"excludeCriteria":row.get::<Value,_>("exclude_criteria"),
+            "definition":row.get::<String,_>("definition"),"stableIdentity":row.get::<Value,_>("core_frame"),
+            "includeCriteria":row.get::<Value,_>("inclusions"),"excludeCriteria":row.get::<Value,_>("exclusions"),
             "state":row.get::<String,_>("state"),"membershipCount":row.get::<i64,_>("membership_count"),
             "createdAt":row.get::<String,_>("created_at"),"retiredAt":row.get::<Option<String>,_>("retired_at")
         })).collect::<Vec<_>>()
