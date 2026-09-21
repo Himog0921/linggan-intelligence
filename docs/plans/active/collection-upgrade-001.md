@@ -1023,15 +1023,15 @@ S5 的三次变异分别落在 `crates/evidence/src/collection_control.rs`（代
 | 项 | 值 |
 |---|---|
 | branch | `fix/collection-upgrade-001`（worktree `.worktrees/collection-upgrade-001`） |
-| HEAD | 本记录提交（复核裁定与修复；PR 应以**提交时的实际 HEAD** 为准，用 `git log -1` 读；本包未推送，HEAD 只在本机分支上） |
+| HEAD | 本记录提交（复核裁定与修复；PR 应以**提交时的实际 HEAD** 为准，用 `git log -1` 读）。分支已于 2026-09-21 推到 `origin`，当时 HEAD = `5212232` |
 | base（分支点） | `1ef5830` |
 | 提交数 | 15（`a1e8a9c` → 本记录提交；12 个实现 + 2 个 S6 文档 + 1 个复核裁定与修复） |
 | 差异 | 97 files changed, +15341 / −1199（写本记录时的读数；本记录也在改动里，见 §12.1 的说明） |
 | origin/main | `3ff3982`（**分支点之后又进了 8 个提交**，全部是 comment-study 系列，不含任何 migration——编号不撞） |
 | 与 origin/main 的试合并 | `apps/api/src/local_web/comment_study.rs` 自动合并；`docs/progress/2026-09.md` **冲突**（双方都往同一个月度记录里追加，冲突是文本位置，不是语义） |
-| 远端 | **未推送**（15 个提交只存在于本机分支） |
+| 远端 | **已推送**到 `origin/fix/collection-upgrade-001`（首次推送 HEAD = `5212232`）；**PR #328 已建，状态 Draft、未合并** |
 
-**PR 正文候选（按 `.github/pull_request_template.md` 的骨架填）**
+**PR 正文（已作为 PR #328 提交，按 `.github/pull_request_template.md` 的骨架填；下面保留成文时的全文以备离线查阅）**
 
 - **Related Issue and authority**：Refs #（**待 Mog 决定是否开 Issue**——本包是受保护交付，但至今没有对应的 GitHub Issue）。Active SCOPE：COLLECTION-UPGRADE-001（handoff 包 `linggan-collection-upgrade-handoff-2026-09-21`）。Base commit：`1ef5830`。Execution Agent/task-id：见 `docs/progress/2026-09.md` 同日各条。
 - **Changed scope**：采集模块的交付/恢复与状态表达（S1a/S1b/S2/S3a–S3c）、巡检 worker 的退出语义与可观测（S4a–S4d）、热路径两条索引与原因码词表补齐（S5），六条新迁移（`0096`–`0101`，**均未应用**），插件侧历史材料归位与一个零引用模块降级。
@@ -1050,7 +1050,7 @@ S5 的三次变异分别落在 `crates/evidence/src/collection_control.rs`（代
 
 | 交付面 | 结论 | 依据 |
 |---|---|---|
-| **代码分支 / PR** | 分支存在、内容完整；**未推送、未建 PR** | `fix/collection-upgrade-001`，15 个提交全部只在本地，HEAD 用 `git log -1` 读；PR 正文候选见 §12.7（是否开 Issue 待 Mog 决定） |
+| **代码分支 / PR** | 分支已推送、**PR #328 已建**（**Draft、未合并**） | `fix/collection-upgrade-001` → `origin/fix/collection-upgrade-001`；PR #328 以 `main` 为 base，正文按 `.github/pull_request_template.md` 骨架逐段填（§12.7）。**是否开 Issue 仍未决**，因此 PR 的 `Refs #` 空着、Merge gate 两条未勾 |
 | **origin/main** | **未被本包改动** | 本包一次 `push` 都没有发生；`origin/main` 仍是 `3ff3982` |
 | **自动化与隔离 PostgreSQL** | **通过（S6 全量终态 + 复核后分层复跑）** | S6 串证时跑过全套 `./scripts/test-local-001-discovery-postgres.sh`：**24 次 cargo 运行、252 passed / 0 failed / 1 ignored、退出码 0**，末尾输出 `…cleanup verified; isolated database, container, and volume were removed`（容器/卷/库自建自清）。复核修复**之后**没有重跑这整套 24 次，只重跑了**受影响的层**：`cargo build --locked --workspace`、`linggan-evidence --lib` 92、`linggan-api` 259/25 ignored、`evidence_observation.test.mjs` 3、`apps/worker --test startup_contract` ignored 集 2（在一次性 pgvector 容器上）。**这是本表的已知缺口**：未受影响的层按修复前的读数记账，不冒充「整套在终态上又跑过一遍」。口径：本包**没有**在分支点上跑过一次全量，所以「净值 = 终态 − 分支点基线」这个减法**不写**——只报终态。分层读数见 §12.3 各行 |
 | **插件发布产物** | **`NOT VERIFIED`** | 未重新打包、未发布（`releases/` 未动、版本号仍 `0.8.54`）；`npm run release:verify` 在**改动之前就是红的**（§11） |
