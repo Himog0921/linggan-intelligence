@@ -56,31 +56,32 @@ use linggan_evidence::observation_domain::{
     ObservationDomain, read_observation_domains, resolve_current_domain,
 };
 use linggan_evidence::{
-    AcquisitionChainError, AuthorizationGrant, CheckInOutcome, CreatorLifecycleQuery,
-    DiscoveryIngressError, InstallationCheckIn, LeaseError, LocalAttemptOutcome,
-    LocalProducerError, LocalSubmissionOutcome, LocalTaskOutcome, MaterialDeepeningTarget,
-    MediaUploadFinalizeClaim, MonitorCommandActor, MonitorCommandKind, MonitorRuleCommand,
-    MonitorRuleCommandError, MonitorRuleDraft, MonitorRuleMode, ObservationTarget,
-    ObservationTargetAvatar, ProducerRuntimeError, RequestLeaseError, RuntimeAttemptOutcome,
-    RuntimeCapacityOverview, RuntimeSubmissionOutcome, RuntimeTaskOutcome, StationCapability,
-    StationOverview, StoreOutcome, TargetCounts, TargetDeletionOutcome, UnclaimedInstallation,
-    WorkResourceReadError, admit_media_blob, apply_monitor_rule_command, begin_media_upload,
-    bind_observation_account, check_in_installation, claim_installation, claim_media_acquisition,
+    AcquisitionChainError, AuthorizationGrant, COLLECTION_RUNTIME_REQUIREMENTS, CheckInOutcome,
+    CreatorLifecycleQuery, DiscoveryIngressError, InstallationCheckIn, LeaseError,
+    LocalAttemptOutcome, LocalProducerError, LocalSubmissionOutcome, LocalTaskOutcome,
+    MaterialDeepeningTarget, MediaUploadFinalizeClaim, MonitorCommandActor, MonitorCommandKind,
+    MonitorRuleCommand, MonitorRuleCommandError, MonitorRuleDraft, MonitorRuleMode,
+    ObservationTarget, ObservationTargetAvatar, ProducerRuntimeError, RequestLeaseError,
+    RuntimeAttemptOutcome, RuntimeCapacityOverview, RuntimeReadiness, RuntimeSubmissionOutcome,
+    RuntimeTaskOutcome, StationCapability, StationOverview, StoreOutcome, TargetCounts,
+    TargetDeletionOutcome, UnclaimedInstallation, WorkResourceReadError, admit_media_blob,
+    apply_monitor_rule_command, begin_media_upload, bind_observation_account,
+    check_in_installation, claim_installation, claim_media_acquisition,
     claim_media_upload_finalize, close_claim_window, complete_media_upload, count_targets,
     create_manual_task, create_producer_task, delete_observation_target, dispatch_schema_is_ready,
     grant_authorization, ingest_discovery_package, issue_work_order_lease,
     keyword_baselines_qualified, list_targets, list_targets_in_state,
     local_discovery_schema_is_ready, local_producer_schema_is_ready,
-    media_acquisition_schema_is_ready, open_claim_window, producer_runtime_has_packages,
-    producer_runtime_schema_is_ready, read_archive_completeness, read_blocked_materials,
-    read_collection_task_timeline, read_creator_directory, read_creator_lifecycle,
-    read_cross_industry_hits, read_detail_delivery_reconciliation, read_discovery_library,
-    read_keyword_hits, read_media_upload_session,
-    read_runtime_capacity, read_runtime_library, read_scheduler_heartbeat,
-    read_station_capabilities, read_station_overview, read_target, read_target_avatars,
-    read_target_deletion_preview, read_target_inspector, read_target_observation_summaries,
-    record_media_acquisition_failure, record_media_download_failure, record_media_upload_chunk,
-    register_station, release_media_upload_finalize, rename_station, request_and_admit,
+    media_acquisition_schema_is_ready, open_claim_window, probe_runtime_readiness,
+    producer_runtime_has_packages, producer_runtime_schema_is_ready, read_archive_completeness,
+    read_blocked_materials, read_collection_task_timeline, read_creator_directory,
+    read_creator_lifecycle, read_cross_industry_hits, read_detail_delivery_reconciliation,
+    read_discovery_library, read_keyword_hits, read_media_upload_session, read_runtime_capacity,
+    read_runtime_library, read_scheduler_heartbeat, read_station_capabilities,
+    read_station_overview, read_target, read_target_avatars, read_target_deletion_preview,
+    read_target_inspector, read_target_observation_summaries, record_media_acquisition_failure,
+    record_media_download_failure, record_media_upload_chunk, register_station,
+    release_media_upload_finalize, rename_station, request_and_admit,
     request_and_admit_material_targets, request_progressive_archive, retire_materials,
     retire_station, set_group_for_many, set_station_accepting, start_local_attempt,
     start_producer_attempt, station_schema_is_ready, store_pending_target, submit_local_package,
@@ -133,7 +134,10 @@ struct LocalWebState {
 enum LocalDatabaseState {
     NotConfigured,
     DatabaseUnavailable,
-    SchemaUnavailable,
+    /// 连得上，但本地读取面的基础 schema 不在，所以这个进程读不了任何东西。连接留着：
+    /// `/health` 的就绪判定要拿它问清楚**为什么**不在（台账有没有、缺哪个迁移），
+    /// 而不是在这里替它猜一个原因。
+    SchemaUnavailable(Arc<Database>),
     Ready(Arc<Database>),
 }
 
@@ -141,7 +145,7 @@ impl LocalDatabaseState {
     fn database(&self) -> Option<&Database> {
         match self {
             Self::Ready(database) => Some(database),
-            Self::NotConfigured | Self::DatabaseUnavailable | Self::SchemaUnavailable => None,
+            Self::NotConfigured | Self::DatabaseUnavailable | Self::SchemaUnavailable(_) => None,
         }
     }
 
@@ -159,7 +163,7 @@ impl LocalDatabaseState {
                 "CONFIGURED_UNAVAILABLE",
                 "LOCAL_001_DATABASE_UNAVAILABLE",
             ),
-            Self::SchemaUnavailable => (
+            Self::SchemaUnavailable(_) => (
                 "SOURCE_INCOMPLETE",
                 "NOT_CONNECTED",
                 "CONFIGURED_UNAVAILABLE",
@@ -573,6 +577,17 @@ async fn health(State(state): State<LocalWebState>) -> Json<Value> {
     } else {
         Value::Null
     };
+    // 「这台机器现在能不能接活」用与 worker 同一套判据（`runtime_readiness`），不在页面这层
+    // 另解释一遍 `database.state`——同一件事两处各判一次，迟早会出现 worker 说未就绪、
+    // 页面说没问题。`database.state` 与 `scheduler` 的含义都不变，这里是新增的第三个回答。
+    let readiness = match &state.database {
+        LocalDatabaseState::Ready(database) | LocalDatabaseState::SchemaUnavailable(database) => {
+            probe_runtime_readiness(database, &COLLECTION_RUNTIME_REQUIREMENTS).await
+        }
+        // 地址没给是配置错误，等多久都不会好；连不上是环境问题，等它回来。
+        LocalDatabaseState::NotConfigured => RuntimeReadiness::not_configured(),
+        LocalDatabaseState::DatabaseUnavailable => RuntimeReadiness::unreachable("connect_failed"),
+    };
     let scheduler = match state.database.database() {
         Some(database) => match read_scheduler_heartbeat(database).await {
             Ok(Some(heartbeat)) => json!({
@@ -603,6 +618,11 @@ async fn health(State(state): State<LocalWebState>) -> Json<Value> {
         "database": {
             "state": database_state,
             "schema": schema_state
+        },
+        "readiness": {
+            "state": readiness.state.code(),
+            "detail": readiness.detail,
+            "checkedAt": readiness.checked_at
         },
         "scheduler": scheduler,
         "routes": {
@@ -2289,13 +2309,19 @@ async fn configured_database_state() -> LocalDatabaseState {
         Ok(database) => database,
         Err(_) => return LocalDatabaseState::DatabaseUnavailable,
     };
+    classify_database(database).await
+}
+
+/// 连上之后的分类：这个进程的本地读取面能不能用。不能用的原因不在这里猜——连接留着，
+/// `/health` 的就绪判定会拿它问出确切原因。
+async fn classify_database(database: Database) -> LocalDatabaseState {
     if local_discovery_schema_is_ready(&database)
         .await
         .unwrap_or(false)
     {
         LocalDatabaseState::Ready(Arc::new(database))
     } else {
-        LocalDatabaseState::SchemaUnavailable
+        LocalDatabaseState::SchemaUnavailable(Arc::new(database))
     }
 }
 

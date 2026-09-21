@@ -182,9 +182,15 @@ S4 运行诊断与就绪 → S5 有证据才优化 → S6 集成与历史处置�
 | 交付结论按**回执数**、不按通道行数（隔离 PostgreSQL `delivery_reconciliation_counts_receipts_not_the_session_marker`，T22） | 把 `DETAIL_DELIVERY_RECONCILIATION_SQL` 的 `count(receipt.receipt_ref) AS delivered_lanes` 换成 `count(lane.attempt_id)`——即「登记了通道」当成「通道送到」 | 该用例在刚导航完那一步变红：`left: Delivered != right: AwaitingDelivery`。刚提交导航、一条回执都还没有的会话被读成「已交付」，正是「没有 Receipt 不等于数据丢失」的反面 |
 | 已终结的会话不再被任何晚到事实降级（同上，T27） | 把 `delivery_conclusion` 的终态分支从**第一条**挪到**最后一条**（先按通道数判 `Delivered`／`AwaitingDelivery`） | 该用例在 `Stopped{risk_stop}` 之后变红：`left: Delivered != right: Closed`。四通道回执齐全的已停止会话被改写成「已交付」——终结语义被通道计数盖过，而这正是读侧必须与写入侧（`SessionNotHeld`）一致的那条 |
 
-十三次变异均已还原（前两次 S1a、四次 S1b、两次 S2、三次 S3、两次 S3c）。S3c 的两次变异都从 `crates/evidence/src/collection_task_read.rs` 还原：两处都是逐字对照原句反向替换（终态分支回到第一条、计数回到 `receipt.receipt_ref`），还原后 `grep -n "count(lane.attempt_id)"` 为 0 命中、匹配臂顺序与原句一致，两条 S3c 用例重新变绿。S3 的三次变异分别从 `execution_input_eligibility.rs`（两次）与 `target_drawer.rs`（一次）还原：还原后逐一 `grep` 变异标记（`false &&`／`if false`／写错的那两支文案）为 0 命中，`git diff` 回到变异前的内容，两条证据用例与页面用例重新变绿。S1b 的还原用还原前快照逐字节核对：`execution_input_eligibility.rs` sha256 `6408147952b274a9a7ae8f180fb53eaaf37362383177fa30355f31377fba43ab`、`0097` 最终 sha256 `83a8a99362df528217ac7473c102ca8c42f6f8beb3b76b9e195f95451ddac3b7`（已同步进 `material_fixture` 与 `full_schema_fixture` 两处账本）、`dispatch.rs` 变异前后同为 sha256 `5b54d0395180ea385150dff4b60fa608083ff334319a21ecb57d7b2dbab1c6b0`。T28① 的变异同样从 `dispatch.rs` 还原，之后该文件 sha256 仍为 `5b54d039…`（两次变异都是逐字节还原）。S2 的两次变异从 `acquisition_chain.rs` 还原：变异前快照存于 `/tmp/acquisition_chain_s2_pre_mutation.rs`，还原后 `grep -c MUTATION` = 0 且 sha256 与变异前同为 `3e4f14e56f7b5b2e08152dbb96e009bee48e701911d6f08a2fc770b4e8fedd43`（逐字节）。各阶段还原后：S1b 的 `keyword_archive_postgres` **16 passed / 0 failed**、`collection_dispatch_sequence_postgres` **27 passed / 0 failed**；S2 的 `collection_dispatch_sequence_postgres` **32 passed / 0 failed**、`observation_target_dossier_postgres` **23 passed / 0 failed**，`cargo check --workspace --all-targets --locked` 通过。源码冻结后的干净全套（`./scripts/test-local-001-discovery-postgres.sh`，20 目标）**231 passed / 0 failed**，容器/卷/库自建自清。
+| 未就绪的 worker 必须留在原地等，不能以「干净退出」收场（T29，`unreachable_database_keeps_the_process_waiting_and_says_so`） | 把 `apps/worker/src/main.rs` 未就绪分支的退避等待（`tokio::select!` 睡眠 + `next_readiness_retry`）整个换成 `return ExitCode::SUCCESS` | 用例在 `alive` 断言处变红（`startup_contract.rs:107`）：15 秒观察窗内进程已经不在，日志停在开场行与 `linggan worker: not ready (database_unreachable: probe_timeout); no work is claimed until this clears`。修前形态正是这个：对 launchd 是一次正常退出，看日志的人只看到「不可达」然后什么都没有 |
+| 连得上但台账不在，必须报 `migration_ledger_unreadable`，不能当成可以接活（同上，`reachable_but_unmigrated_database_is_classified_not_masked`） | 把 `crates/evidence/src/runtime_readiness.rs` 里 `!ledger_present` 那一支的 `MigrationLedgerUnreadable` 换成 `Ready` | 用例在分类断言处变红（`startup_contract.rs:185`）：日志里没有那一行分类，取而代之的是 `linggan worker: patrol tick every 60s` 和随后的逐步骤失败（`media acquisition projection failed: media acquisition schema is unavailable`、`progressive dossier tick failed: acquisition chain schema is not applied`）——**一台根本接不了活的机器被说成「在跑、只是步骤不顺」**，这正是把「缺 schema」与「步骤失败」压成一句话的后果 |
+| 媒体 worker 连不上时必须在十秒内说出来（`unreachable_database_keeps_the_media_worker_retrying_instead_of_exiting`） | 去掉 `connect_when_reachable` 的 `tokio::time::timeout(CONNECT_ATTEMPT_BUDGET, …)`，直接 await 连接池（它自己会重试满 30 秒） | 用例在「连不上必须说出来」处变红（`startup_contract.rs:160`）：15 秒窗口内日志只有开场那一行（`linggan media worker: started; checking whether the local database is reachable`），`retrying with backoff instead of exiting` 一个字都没有——修前正是这个样子：整整半分钟与一台空闲机器无法区分 |
+
+十六次变异均已还原（前两次 S1a、四次 S1b、两次 S2、三次 S3、两次 S3c、三次 S4a）。S3c 的两次变异都从 `crates/evidence/src/collection_task_read.rs` 还原：两处都是逐字对照原句反向替换（终态分支回到第一条、计数回到 `receipt.receipt_ref`），还原后 `grep -n "count(lane.attempt_id)"` 为 0 命中、匹配臂顺序与原句一致，两条 S3c 用例重新变绿。S3 的三次变异分别从 `execution_input_eligibility.rs`（两次）与 `target_drawer.rs`（一次）还原：还原后逐一 `grep` 变异标记（`false &&`／`if false`／写错的那两支文案）为 0 命中，`git diff` 回到变异前的内容，两条证据用例与页面用例重新变绿。S1b 的还原用还原前快照逐字节核对：`execution_input_eligibility.rs` sha256 `6408147952b274a9a7ae8f180fb53eaaf37362383177fa30355f31377fba43ab`、`0097` 最终 sha256 `83a8a99362df528217ac7473c102ca8c42f6f8beb3b76b9e195f95451ddac3b7`（已同步进 `material_fixture` 与 `full_schema_fixture` 两处账本）、`dispatch.rs` 变异前后同为 sha256 `5b54d0395180ea385150dff4b60fa608083ff334319a21ecb57d7b2dbab1c6b0`。T28① 的变异同样从 `dispatch.rs` 还原，之后该文件 sha256 仍为 `5b54d039…`（两次变异都是逐字节还原）。S2 的两次变异从 `acquisition_chain.rs` 还原：变异前快照存于 `/tmp/acquisition_chain_s2_pre_mutation.rs`，还原后 `grep -c MUTATION` = 0 且 sha256 与变异前同为 `3e4f14e56f7b5b2e08152dbb96e009bee48e701911d6f08a2fc770b4e8fedd43`（逐字节）。各阶段还原后：S1b 的 `keyword_archive_postgres` **16 passed / 0 failed**、`collection_dispatch_sequence_postgres` **27 passed / 0 failed**；S2 的 `collection_dispatch_sequence_postgres` **32 passed / 0 failed**、`observation_target_dossier_postgres` **23 passed / 0 failed**，`cargo check --workspace --all-targets --locked` 通过。源码冻结后的干净全套（`./scripts/test-local-001-discovery-postgres.sh`，20 目标）**231 passed / 0 failed**，容器/卷/库自建自清。
 
 S3c 两次变异还原后：`collection_dispatch_sequence_postgres` **34 passed / 0 failed**（新增两条）、`content_reobservation_postgres` **4 passed / 0 failed**、`linggan-api` 二进制内 `--ignored` **23 passed / 0 failed**；`cargo check --workspace --all-targets --locked` 通过。S3c 源码冻结后的干净全套（20 目标）**234 passed / 0 failed**，容器/卷/库自建自清——这一跑同时补上了 S3b 记录里被宿主磁盘写满打断的那次重跑（当时第 20 个目标 7 例 `57P03 in recovery mode` 未计入结论）。
+
+S4a 的三次变异分别落在 `apps/worker/src/main.rs`、`crates/evidence/src/runtime_readiness.rs`、`apps/worker/src/bin/media_worker.rs`（上表三条，逐字还原）。还原后 `grep -rn "MUTATION" apps crates --include="*.rs"` 为 0 命中，`cargo test -p linggan-worker --test startup_contract --locked` 重新 **4 passed / 1 ignored**（15.01s，`--ignored` 那条走证明库）。**一处如实记录的观察**：在「不可达端口」这一实测条件下，未就绪日志里的 `detail` 落在 `probe_timeout`（十秒没问到），不是 `connect_failed`——sqlx 连接池对被拒绝的连接会自己重试满 30 秒，所以「立刻失败」那条分支很少先到达。两者都归 `database_unreachable`，用例只钉分类码（`not ready (database_unreachable`），不钉它后面跟哪一个。
 
 ## 9. S3 变更清单（统一状态读取与页面动作）
 
@@ -325,3 +331,168 @@ S3c 两次变异还原后：`collection_dispatch_sequence_postgres` **34 passed 
 **未证明**：跨行业会话**真的**走一遍授予→导航→回执（读层的补齐分支只有「表缺席」这一侧有隔离证明，跨行业侧需要跨行业来源表与授权夹具，本步没有建）；页面实拍仍是 `NOT VERIFIED`（§9.7 视觉一致一行的理由不变）。
 
 **本卡不做**：不写台账、不新增列、不改索引、不新增可点动作、不改接纳/权限/额度/调度与清理规则、不动 `runtime-main`/共享库/插件版本/`:3000` 运行态。
+
+## 10. S4 变更清单（运行诊断与就绪）
+
+> 依 `docs/design/templates/ui-change-manifest-form.md` 的可迁移骨架填写；本清单写在实施计划里，不另建文档。
+> 状态: 活跃计划 · 实施前写入（本节先于 S4 代码存在）。
+
+### 10.1 事项
+
+- **Issue / SCOPE**：COLLECTION-UPGRADE-001 · S4（交付包 `02-实施步骤.md` §S4；验收行 T29–T32；事实行 E09「结构化日志不足、编译与运行日志混用、migration 台账查询失败放行、worker 连接失败以 SUCCESS 退出」、E10「有本地选择器 preflight，缺专门服务端选择器诊断；恢复提示 v0.4.8 陈旧，manifest/package 实为 0.8.54」）。
+- **Agent 与 worktree**：`fix/collection-upgrade-001` @ `.worktrees/collection-upgrade-001`。
+- **目标**：把「这台机器现在能不能接活、为什么不能」从日志里的自由文本，变成四类可判定的运行事实——**就绪分级**、**统一 tick 关联**、**结构化事件**、**受限选择器诊断**；并让插件与服务端两处陈旧版本文案如实说话。
+- **用户可见结果**：
+  1. 数据库不可达 / 迁移台账读不到 / 迁移未应用 / schema 不兼容时，页面与日志说的是这四件事之一，而不是「本轮 0 个」；此时不派新工作，恢复后自动接着干；
+  2. 一个 tick 里哪一步跑了、哪一步失败了可以逐项查，且都挂到同一个 tick 上（不再靠累计日志猜「现在是不是每秒在失败」）；
+  3. 插件启动失败弹窗说的是**本机真实版本**（不再写死 `v0.4.8`），服务端「版本过低」文案带上当前最低版本号；
+  4. 选择器诊断分别说出「本次检查时间」与「上次验证日期」、缺哪一类检查、失败了几次，且不上报页面原文、DOM 或签名链接。
+- **明确非目标**（本卡不做，也不得顺手做）：
+  - **不建第二套巡检账本**：tick 与步骤复用 `collection_scheduler_run` / `_heartbeat` / `_target_decision`（§10.5）；
+  - **不新增告警通道**（邮件/推送/值班监控）：「持续故障可告警」落在心跳与 `/health` 的持久状态 + 结构化事件上，是否外接告警是一次产品决定；
+  - 不改接纳、权限、额度、调度与清理规则；**不改 `MINIMUM_PLUGIN_VERSION` 的取值**（`0.8.47` 保持原判），只改文案与诊断；
+  - 不把服务端变成页面检查器：**服务端只据插件上报的受限快照作能力诊断**，不抓页面、不解析 DOM；
+  - 不合并/推送/部署、不应用共享库迁移、不重载插件、不发发布包、不访问真实平台。
+
+### 10.2 读取回执
+
+| 来源 | 状态 | 本次解决的问题 | 已核对 |
+|---|---|---|---|
+| 交付包 `02-实施步骤.md` §S4、`03-验收与发布.md` T29–T32、`04-事实与取舍.md` E09/E10 | 交付包 | 四行验收的判据、退出条件（一条 submission/WorkOrder 串出故障、可脱敏诊断样例与字段白名单） | 2026-09-21 读 |
+| `scripts/runtime/{sync,launch,install}.sh` | 真实运行事实 | 迁移台账比对写在 `sync.sh`（未应用→拒绝启动；**读不到→放行**）；`launch.sh` 只负责同步+exec；plist `KeepAlive=true`、无 `ThrottleInterval`、`StandardOutPath` 把编译输出与运行日志写进同一个文件 | 2026-09-21 读 |
+| `apps/worker/src/main.rs` | 真实运行事实 | tick 四步（媒体投影/渐进档案/关键词建档/巡查）只有巡查写账本，其余只 `println!`；`ExitCode::SUCCESS` 出现在 DSN 缺失与数据库连不上两条路径 | 2026-09-21 读 |
+| `crates/evidence/src/patrol_scheduler.rs`、`0034`/`0036` 迁移 | 真实运行事实 | `collection_scheduler_run` 一 tick 一行、`outcome ∈ (idle,queued,dispatched,partial,failed)`、`considered/dispatched_count` 由**巡查步**写；`device_heartbeat` 单行单键；`patrol_schema_is_ready` 为假时**不建 run 行**（未就绪被记成 idle） | 2026-09-21 读 |
+| `crates/evidence/src/{producer_runtime,local_discovery}.rs` | 既有判据先例 | 「台账里必须有这些 migration id + 这些表在」的写法（`to_regclass` 先探物理面，再查 `linggan_local_schema_migration`） | 2026-09-21 读 |
+| `apps/api/src/local_web.rs`（`/health`、`LocalDatabaseState`） | 真实运行事实 | 已有 NotConfigured/DatabaseUnavailable/SchemaUnavailable/Ready 四态与三层 schema 探针；插件据 `database.state === 'READY'` 决定是否报到 | 2026-09-21 读 |
+| 插件 `src/shared/selectorHealth.js`、`src/platforms/*/selectorHealth.js` | 真实运行事实 | 已有本地 preflight（`finalizeSelectorPreflight` 带 `checkedAt`、`staleChecks`、`missingChecks`）与告警文案；**没有任何字段离开浏览器**；`SELECTOR_VERIFIED_AT`/`SEARCH_FEED_VERIFIED_AT` 是唯一的「验证日期」来源 | 2026-09-21 读 |
+| 插件 `src/popup/startupRecovery.js` | 真实运行事实 | 弹窗写死 `version: 'v0.4.8'`，与 `manifest.json` 的 `0.8.54` 不一致（E10 所指的陈旧文案） | 2026-09-21 读 |
+| `crates/evidence/src/execution_station.rs`、`collection_control.rs` | 真实运行事实 | 报到自述 `InstallationCheckIn` 已带 `plugin_version`/`capabilities`；`MINIMUM_PLUGIN_VERSION = "0.8.47"` 是判定所用常量 | 2026-09-21 读 |
+
+### 10.3 表面地图
+
+| 表面 | 入口 | 本卡改动 |
+|---|---|---|
+| 巡检 worker | launchd `patrol-worker` → `apps/worker` | tick 拥有一个 run（tick）标识；四步各记一行步骤结果；就绪不满足时不派活、按退避重试；启动与恢复写结构化事件。**这道闸只管采集面**：模型评论循环有自己的表，只要有连接就照常跑 |
+| 媒体 worker | launchd `media-worker` | 仅启动标识与就绪事件（本卡不重排它的作业） |
+| 本地 API | `:3000` `/health` | 新增 `readiness`（六分类 + 受限 detail + 检查时间）；已有 `database.state`/`scheduler` 语义不变 |
+| 部署与日志 | `scripts/runtime/*.sh`、launchd plist | 编译输出与运行日志分开；启动生成 deployment/revision 标识；plist 补 `ThrottleInterval`（重启节流） |
+| 执行工位页 | `/collection/runtime` | 「插件版本过低」文案带上当前最低版本号；**不新增区块** |
+| 采集控制面 | `/collection/*` 的待处理/恢复文案 | `recovery_for("plugin_version_unsupported")` 文案带上最低版本号与「以本机实际版本为准」 |
+| 插件 popup | 启动失败弹窗 | 版本号取自 manifest，不再写死 |
+| 插件内容侧 | 采集页 preflight 与告警 | 快照补齐平台/页面类型/能力/插件版本/规则验证日期/缺失类别/失败计数；本地即时阻断行为不变 |
+| 服务端诊断读口 | 报到接口 + 工位读取 | 受限快照经运行时校验后按安装保存；工位页只在既有行内多一句诊断（若既有版式容不下，退为只读接口 + 交付回执里说明） |
+
+页头/导航/共享壳层与 LIDS Token：不改。
+
+### 10.4 状态词典
+
+**就绪分级**（唯一判据模块 `crates/evidence/src/runtime_readiness.rs`，页面/日志/心跳共用）：
+
+| 分类 | 最低事实条件 | 后果 |
+|---|---|---|
+| `not_configured` | 被要求接活，却连数据库地址都没给 | 非 READY；这是配置错误，等多久都不会好 |
+| `ready` | 台账可读 + 本消费者要求的 migration id 全在 + 要求的表/列全在 | 正常跑 tick |
+| `database_unreachable` | 连接或探针查询失败（含连接池超时） | 非 READY、不派活、退避重试 |
+| `migration_ledger_unreadable` | 连得上，但 `linggan_local_schema_migration` 不存在或读不动 | 非 READY、不派活；**不再像 `sync.sh` 那样静默放行后照常派活** |
+| `migrations_not_applied` | 台账可读，但本消费者要求的某个 migration id 不在 | 非 READY、不派活；detail 只写第一个缺失 id |
+| `schema_incompatible` | 台账齐，但要求的表/列不在（旧库/半迁移库） | 非 READY、不派活；detail 只写第一个缺失对象 |
+
+**tick 与步骤**（不新增词汇表，沿用既有 `outcome`）：
+
+| 展示含义 | 最低事实条件 | 所在 |
+|---|---|---|
+| tick 跑了、这一步有产出 | 步骤行 `outcome='ok'` + 计数 | `collection_scheduler_run_step` |
+| tick 跑了、这一步失败 | 步骤行 `outcome='failed'` + 受限 `error_class` | 同上；心跳 `last_outcome='failed'` |
+| tick 跑了、这一步没轮到 | 步骤行 `outcome='skipped'` + 受限原因（如 `not_ready`） | 同上；**不再与「本轮 0 个」混同** |
+| 这台机器当前不能接活 | 心跳 `readiness_state <> 'ready'` | `collection_scheduler_heartbeat` + `/health.readiness` |
+
+**选择器诊断**（插件产出、服务端受限接收）：
+
+| 字段 | 语义 | 边界 |
+|---|---|---|
+| `checkedAt` | **本次**运行时检查时刻（每次 preflight 都变） | 不得被当作验证日期展示 |
+| `verifiedAt` | 该平台/页面类型选择器**上次人工验证日期**（`SELECTOR_VERIFIED_AT` / `SEARCH_FEED_VERIFIED_AT`） | 过期 ≠ 坏了：只提示「回归验证」，不改判失败 |
+| `platform` / `pageType` / `capability` | 哪儿的、哪类页面、哪项能力 | 受限词表；不是页面内容 |
+| `pluginVersion` / `ruleVersion` | 上报时插件版本、规则验证版本（今日即上述两个日期常量） | 不新造版本号；没有就写未知 |
+| `missingCategories` / `staleCategories` / `failureCounts` | 缺哪几类检查、哪几类验证日期陈旧、各类失败次数 | 只写**检查项名**，不写选择器串、不写 DOM 文本、不写任何 URL |
+
+### 10.5 依赖地图
+
+| 依赖 | 归属 | 本卡的用法 |
+|---|---|---|
+| `collection_scheduler_run` / `_heartbeat` / `_target_decision`（`0034`/`0036`/`0020`） | 已交付 | **继续是唯一巡检账本**：tick 一行 run、目标级决定仍在 decision；新步骤行是 run 的子行，不另立账本 |
+| `collection_scheduler_run_step` | 本卡新增（迁移） | run 的子表，一步骤一行：`step_key`、开始/结束、`outcome`、计数、受限 `error_class` |
+| `collection_scheduler_heartbeat` | 已交付（本卡加列） | 加 `readiness_state`/`readiness_detail`/`readiness_checked_at`：持续故障有持久落点，`/health` 与工位页可读 |
+| `linggan_local_schema_migration` | 已交付 | 就绪判据只读它；不新增台账、不改写入路径（`local-runtime.sh migrate` 仍是唯一应用者） |
+| `plugin_installation` + 报到合同 | 已交付（本卡加一处受限列） | 选择器快照随报到上报，服务端运行时校验后保存**最新一份**；不改认领/授权语义 |
+| runtime 标识 | 本卡新增（文件） | `sync.sh` 写 `<support>/runtime-identity.json`（revision/构建时刻/迁移头），`launch.sh` 导出路径；服务端启动读它作为 `revision` |
+| `MINIMUM_PLUGIN_VERSION`（`0.8.47`） | 已交付 | 只用于文案，不用于改变判定 |
+
+**未纳入本卡**：告警外发通道、插件发布包、`:3000` 运行态切换、共享库迁移应用与历史处置（S6 才准备）。
+
+### 10.6 变更分类与影响边界
+
+- **分类**：运行合同 + 诊断（含展示文案）。不改产品语义、不改权限与后果、不新增可点动作。
+- **最高风险类别**：运行合同——就绪判据与 tick 归属一旦判错，会让**整台机器停止接活**（比「假成功」更贵）。因此：判据收在一个模块；「未就绪」必须能自愈（退避重试）；worker 退出语义与 supervisor 成对写进 runbook/脚本注释。
+- **是否存在 `DECISION_REQUIRED`**：
+  - **持续故障是否外发告警**——本卡只做持久可见（心跳 + `/health` + 事件），不外发；渠道与阈值属产品决定。
+  - **`ruleVersion` 是否要独立版本号**——今日只有两个验证日期常量；本卡据实上报，不新造版本号。
+  - **就绪不满足时 API 是否也拒绝派发**——`decide_dispatch` 已有自己的 schema 闸门（`dispatch_schema_is_ready`），本卡不叠加第二道闸；若 Mog 要求「任何未就绪都不许派发」，是一次策略决定。
+- **L1 / L2 / L3**：L3 运行基础设施；页面侧只在既有行内改文案，不引入新 Pattern。
+- **是否触及 Token、Primitive、CMP、Scene、Motion 或 Data Truth**：不触及 Token/Primitive/CMP/Scene/Motion；触及 Data Truth（就绪与步骤结果各有唯一定义）。
+- **禁止修改的文件/能力**：接纳/派发写路径（`dispatch.rs` 的判定与停止语义）、授权与额度规则、`MINIMUM_PLUGIN_VERSION` 取值、`0097` 台账、`local-runtime.sh migrate` 的应用顺序、`runtime-main`、共享库。
+- **停止条件**：若就绪判据在真实运行时会把一台健康机器判成未就绪（假阴性）而无法在退避内自愈，停止扩展判据范围，保留已证实的五分类与最小消费者要求清单，把分歧报给 Mog。
+
+### 10.7 验收矩阵
+
+| 层级 | 验收方法 | 未证明边界 |
+|---|---|---|
+| 就绪分级（T29） | 隔离 PostgreSQL 注入四类故障：连接不可达（坏端口）、台账表缺失、台账在但缺 id、台账齐但缺表/列；逐类断言 `readiness` 分类与 detail；断言未就绪时不新增任何 run/decision/任务；断言 worker 在未就绪期**不退出**、退避期内不重复派发 | 真实 launchd 下的重启节流行为（本机 plist 未重装） |
+| 统一 tick 与步骤（T30） | 隔离 PostgreSQL：一个 tick 内一步失败、其余成功 → 同一 `scheduler_run_ref` 下逐行结果独立可读、心跳如实；对照现有巡检账本，无第二账本 | 真实浏览器在途任务与 tick 的并发时序 |
+| 选择器诊断（T32） | 插件侧 node 测试：成功/缺失/陈旧三态；`checkedAt ≠ verifiedAt` 不被混用；**快照键白名单**断言（无 DOM/URL/选择器串）；服务端：受限字段运行时校验、超长或非法载荷被拒、保存后可按安装读回 | 真实页面结构变化时的诊断取值 |
+| 版本文案（E10） | 插件 popup 测试：弹窗版本 == `manifest.json` 版本；服务端两条文案含 `MINIMUM_PLUGIN_VERSION` | 真实 Chrome 的扩展页显示（未装包） |
+| 端到端可串（S4 退出条件） | 一次 tick 的一步失败可只用引用（run/step/decision/target/work_order + 事件里的 `tick_ref`）串起来，不用累计日志推断 | 一条真实 submission 的全链（需真实平台，未授权） |
+| 诊断样例与白名单（S4 退出条件） | 文档给出可脱敏样例与字段白名单（§10.8 落点），并用测试断言事件与快照**只能**含白名单字段 | 脱敏后的样例仍是样例，不是运行证据 |
+
+### 10.8 交接
+
+- **修改文件**：见各次提交的 `git show --stat`；核心新增为 `crates/evidence/src/runtime_readiness.rs`、`crates/evidence/src/runtime_event.rs`、`collection_scheduler_run_step` 与会话/心跳迁移、`scripts/runtime/{sync,launch,install}.sh`、插件 `src/shared/selectorHealth.js` 与 `src/popup/startupRecovery.js`、`apps/api/src/local_web.rs` 的 `/health`。
+- **验证命令/走查**：`cargo check --workspace --all-targets --locked`；`./scripts/test-local-001-discovery-postgres.sh`（20 目标全套，容器/卷/库自建自清）；插件侧 `node --test tests/xhs-selector-health.test.mjs` 等由 `npm run test:linggan` 覆盖的用例。
+- **诊断样例与字段白名单**：落在 `docs/runbooks/local-runtime-deployment.md` 的「运行诊断」一节（样例为**手工构造的脱敏样例**，非运行抓取）并登记到 `docs/README.md`；本计划 §10.4 的表即字段白名单。
+- **规则或索引同步**：`docs/progress/2026-09.md` 记本次交付；迁移编号按 §3 的纪律在合并前重新 fetch 复核（本卡预期新增 `0098`/`0099`，撞号则整体顺延并同步六处登记）。
+- **例外与替代**：`sync.sh` 开机时「读不到台账则放行启动」**有意保留**——开机时数据库常常还没起来，硬拦会让服务永远起不来；代价由本卡的就绪分级接住（worker 会保持未就绪、不派活），并把该日志行改成如实说明这一点。
+- **PR / reviewer / integration owner**：由 Mog 指定；按交付包约定在整包收尾时统一走一次独立复核。
+
+### 10.9 实施状态（S4a–S4d）
+
+实施顺序：S4a 就绪分级与 worker 退出语义（T29）→ S4b 统一 tick、步骤结果与结构化事件（T30，含迁移与部署脚本）→ S4c 选择器诊断与陈旧版本文案（T32/E10）→ S4d 端到端串证与诊断样例白名单（S4 退出条件）。每一步落地后回填本节与 §8 的变异记录。
+
+#### S4a（T29）— 已完成（2026-09-21；本地提交，未推送、未部署、未应用共享库迁移）
+
+- **判据收在一个模块**：`crates/evidence/src/runtime_readiness.rs`——六分类、受限 `detail`（声明序里第一个缺的 migration id / 第一个缺的对象名 / SQLSTATE / `connect_failed` / `probe_timeout`）、判定时刻取自**数据库时钟**（UTC；问不到就是 `None`，不拿本地时间冒充）。只读：不写行、不应用迁移。
+- **巡检 worker**：每轮先判就绪。未就绪 → 不跑任何 tick 步骤、按 1→2→4…封顶 60 秒退避重问、只在**状态变化**时说话；连不上数据库不再走上「干净退出（退出码 0）」那条路，也不空转热重启——进程留在原地等它回来。判定本身带 10 秒上限（sqlx 连接池默认 30 秒的耐心不该由操作员等；实测第一行「不可达」原来正好在第 30 秒出现）。
+- **模型评论循环不受此闸约束**：它有自己的表，采集面的缺口不该把另一条通道连坐停摆；它的判据是「有没有连接」（连不上时起它只会制造一屋子错误日志）。
+- **媒体 worker**：同一条退出语义的最小改动（连不上 → 留在原地按退避重试并说出这件事，不再以 SUCCESS 退出）。
+- **`/health` 新增 `readiness`**：与 worker 同一判据（同一份分类码），`database.state`/`scheduler` 语义不变；`SchemaUnavailable` 保留连接，因此能报出确切原因（台账读不到 / 缺哪个迁移），而不是笼统的「schema 不行」。
+- **plist 补 `ThrottleInterval=30`**：崩溃循环每半分钟最多一行日志；正常部署走 `bootout`/`bootstrap`，不受此限制。
+
+**证据**（本机隔离 PostgreSQL 16 证明库；不代表 CI 或线上）：
+
+| 命令 | 结果 |
+|---|---|
+| `cargo test -p linggan-evidence --test runtime_readiness_postgres --locked -- --ignored` | 5 passed（连接不可达 / 台账缺失 / 缺 migration id / 缺表四类注入 + 只读性与不编造时刻） |
+| `cargo test -p linggan-worker --test startup_contract --locked` | 4 passed / 1 ignored（两个 worker 各两条：缺地址 → 退出码 1 + `refusing to start`；连不上 → 15 秒观察窗内不退出且说出来；媒体 worker 另断言日志里不出现连接串） |
+| `cargo test -p linggan-worker --test startup_contract --locked -- --ignored` | 1 passed（可连、无台账 → `migration_ledger_unreadable`，不冒充空闲） |
+| `cargo test -p linggan-api --bin linggan-api --locked` | 253 passed / 25 ignored |
+| `cargo test -p linggan-api --bin linggan-api --locked -- --ignored` | 25 passed（含两条新增：`/health` 与 worker 同判、读取面判死时仍说得出确切原因） |
+| `cargo check -p linggan-evidence -p linggan-worker -p linggan-api --all-targets --locked` | 通过（warning 均为既有 dead-code） |
+
+**未证明边界**：真实 launchd 下的重启节流行为（本机 plist 未重装，§10.7 同注）；`./scripts/test-local-001-discovery-postgres.sh` 全套尚未整体重跑（新增的三个目标已登记进脚本，S6 串证时跑一次全量）。
+
+**格式：本步交付的文件按当前 rustfmt 格式化，剩余的既有漂移不动**。本步的 9 个 `.rs` 文件逐个用 `rustfmt --edition 2024 --config skip_children=true` 跑过（`skip_children` 是为了只动这些文件本身，不把没碰过的子模块卷进来）。再跑 `cargo fmt --all -- --check`，剩余漂移是 **19 个本步没碰过的文件**（`crates/intelligence/*`、`apps/api/src/local_web/collection_dispatch.rs`、`crates/evidence/src/acquisition_chain.rs` 等），形态都是 `use` 块重排——仓库整体是按更早的 rustfmt 排的。本步**不做**这次全仓格式化（会把无关文件卷进提交）。它影响的是 `scripts/verify-development-environment.sh` 里的 fmt 一步：在本步之前那一步也不通过。要不要另开一次全仓格式化，是一次独立决定。
+
+**挂账（报给 Mog，不在本卡自行处置）**：
+
+1. **媒体 worker 没有自己的就绪要求清单与分级**——本卡只给了它退出语义。它现在「连上就跑」；若它自己的表不在，失败按原样逐次报错。要不要给它同一套分级，是一次范围决定。
+2. **API 启动时连不上数据库会一直停在 `DatabaseUnavailable` 直到重启**（它不重连）；这种情况下 `/health.readiness` 报的是启动时的结论，`checkedAt` 为空即表示「问不到时钟」。要不要给 API 加同一条退避重连，是另一次范围决定。
+3. **模型循环「不受采集面闸约束」这条决定目前只有代码注释与本记录**，没有测试锚定（进程日志里没有可观察的启动行）；S4b 给心跳加就绪列后它会有可见落点，届时补断言。

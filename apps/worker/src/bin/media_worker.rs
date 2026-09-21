@@ -5,14 +5,15 @@
 
 use linggan_evidence::{
     ClaimGateReadiness, MediaProcessingClaim, MediaProcessingClaimOutcome, OcrCompletionInput,
-    OcrExcludedLineInput, OcrLayeringInput, OcrLineInput, claim_media_processing_work,
-    complete_media_processing_derivative, complete_media_processing_ocr,
-    complete_media_processing_text, complete_media_processing_without_output,
-    ensure_media_processing_work, fail_media_processing_work, read_claim_gate_readiness,
+    OcrExcludedLineInput, OcrLayeringInput, OcrLineInput, READINESS_RETRY_START,
+    claim_media_processing_work, complete_media_processing_derivative,
+    complete_media_processing_ocr, complete_media_processing_text,
+    complete_media_processing_without_output, ensure_media_processing_work,
+    fail_media_processing_work, next_readiness_retry, read_claim_gate_readiness,
 };
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, ExitCode};
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -82,18 +83,14 @@ struct PaddleOcrLine {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> ExitCode {
     let Ok(url) = std::env::var("LINGGAN_LOCAL_DATABASE_URL") else {
-        println!("linggan media worker: LINGGAN_LOCAL_DATABASE_URL is not set");
-        return;
+        // 与巡检 worker 同一条判据（COLLECTION-UPGRADE-001 · T29）：没有地址是配置错误，
+        // 不是「没有活干」。以失败退出，让 supervisor 看见；用成功退出等于把故障说成正常。
+        eprintln!("linggan media worker: LINGGAN_LOCAL_DATABASE_URL is not set; refusing to start");
+        return ExitCode::FAILURE;
     };
-    let database = match linggan_storage_postgres::Database::connect(&url).await {
-        Ok(database) => database,
-        Err(error) => {
-            println!("linggan media worker: cannot reach the local database: {error}");
-            return;
-        }
-    };
+    let database = connect_when_reachable(&url).await;
     let worker_instance_ref = Uuid::new_v4();
     let enabled_processors = enabled_processors();
     println!(
@@ -168,6 +165,60 @@ async fn main() {
                 );
             }
         }
+    }
+}
+
+/// 一次连接判定最多等多久。与巡检 worker 同一条道理：连接池有自己的耐心（sqlx 默认
+/// `acquire_timeout` 30 秒，期间反复重试），那是连接池该有的，不是操作员该等的——本机数据库
+/// 是毫秒级的，十秒还没有结果就是「这一轮没问到」，如实记下来、退避后再问。
+///
+/// 这道上限只影响**故障多久被说出来**，不影响恢复速度：数据库一回来，连接尝试马上成功。
+const CONNECT_ATTEMPT_BUDGET: Duration = Duration::from_secs(10);
+
+/// 连不上数据库时留在原地等它回来。
+///
+/// 以前这条路是「打印一行然后 return」——main 返回 `()` 就是退出码 0，对 supervisor 来说是
+/// 一次干净退出，对看日志的人来说是这台机器什么都没说。改成退避重试：数据库回来这一轮就
+/// 接上，进程不重启、日志不重灌。只在进入这个状态时说一次话。
+///
+/// 开场先说一句、再开始判定：没有这句，连不上时前 30 秒日志是空的，而空日志与「一台没事
+/// 可做的机器」是同一个样子。打印的错误用 `StorageError` 的固定说法（「the database refused
+/// a connection」），**不带连接串**——那里面有密码。
+///
+/// 这里不装信号处理器：这个进程没有在途预留要收，SIGTERM 的默认动作就是立即结束。
+async fn connect_when_reachable(url: &str) -> linggan_storage_postgres::Database {
+    println!("linggan media worker: started; checking whether the local database is reachable");
+    let mut retry_after = READINESS_RETRY_START;
+    let mut reported = false;
+    loop {
+        let attempt = tokio::time::timeout(
+            CONNECT_ATTEMPT_BUDGET,
+            linggan_storage_postgres::Database::connect(url),
+        );
+        match attempt.await {
+            Ok(Ok(database)) => return database,
+            Ok(Err(error)) => {
+                if !reported {
+                    println!(
+                        "linggan media worker: cannot reach the local database ({error}); \
+                         retrying with backoff instead of exiting"
+                    );
+                    reported = true;
+                }
+            }
+            Err(_) => {
+                if !reported {
+                    println!(
+                        "linggan media worker: the local database did not answer within {}s; \
+                         retrying with backoff instead of exiting",
+                        CONNECT_ATTEMPT_BUDGET.as_secs()
+                    );
+                    reported = true;
+                }
+            }
+        }
+        tokio::time::sleep(retry_after).await;
+        retry_after = next_readiness_retry(retry_after);
     }
 }
 

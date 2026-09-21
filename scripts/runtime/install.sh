@@ -195,6 +195,11 @@ write_plist() {
     [[ "$binary" == "linggan-worker" ]] && print -r -- '  <key>ExitTimeOut</key><integer>90</integer>'
     print -r -- '  <key>RunAtLoad</key><true/>'
     print -r -- '  <key>KeepAlive</key><true/>'
+    # 启动即失败（配置错误、端口被占）时隔多久才允许再起一次。写出来是因为它必须与进程的退出
+    # 语义配套：一个「起来就崩」的进程若任由 launchd 按内置节流反复重起，日志会被同一行填满，
+    # 真正的变化反而看不见。30 秒 = 每半分钟最多一行，而不是每分钟六行。正常部署走的是
+    # bootout/bootstrap（不受此限制），所以它只约束崩溃循环，不拖慢部署。
+    print -r -- '  <key>ThrottleInterval</key><integer>30</integer>'
     print -r -- "  <key>StandardOutPath</key><string>$log_dir/$logname.out.log</string>"
     print -r -- "  <key>StandardErrorPath</key><string>$log_dir/$logname.err.log</string>"
     print -r -- '</dict></plist>'

@@ -58,6 +58,7 @@ mod qualified_detail;
 mod queue_position;
 mod receipt;
 mod runtime_capacity;
+mod runtime_readiness;
 mod station_read;
 mod target_catalog;
 mod target_enrichment;
@@ -189,6 +190,10 @@ pub use runtime_capacity::{
     ACCOUNT_CHECK_NOT_CONNECTED, ActiveRiskPause, DispatchLaneBacklog, LaneVerdict, LiveLease,
     MonitorRuleSchedule, PatrolOutlook, PlatformDispatchCapacity, RuntimeCapacityOverview,
     read_runtime_capacity,
+};
+pub use runtime_readiness::{
+    COLLECTION_RUNTIME_REQUIREMENTS, READINESS_RETRY_START, ReadinessState, RuntimeReadiness,
+    RuntimeRequirements, connect_runtime_readiness, next_readiness_retry, probe_runtime_readiness,
 };
 pub use station_read::{
     CapabilityState, StationCapability, StationOverview, UnclaimedInstallation,

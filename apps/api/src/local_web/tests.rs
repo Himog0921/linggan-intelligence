@@ -60,6 +60,39 @@ async fn health_route_returns_machine_readable_local_state() {
         Some(&serde_json::Value::Null),
         "a non-ready local host must not publish a full Producer delivery bundle"
     );
+    assert_eq!(
+        payload.pointer("/readiness/state").and_then(Value::as_str),
+        Some("not_configured"),
+        "没给数据库地址是配置错误，与「连不上」不是同一件事：{payload}"
+    );
+    assert_eq!(payload.pointer("/readiness/detail"), Some(&Value::Null));
+    assert_eq!(
+        payload.pointer("/readiness/checkedAt"),
+        Some(&Value::Null),
+        "问不到数据库时钟就不编造判定时刻"
+    );
+}
+
+#[tokio::test]
+async fn health_readiness_separates_an_unreachable_database_from_a_missing_configuration() {
+    let application = router(LocalWebState {
+        database: LocalDatabaseState::DatabaseUnavailable,
+        active_media_sessions: Arc::new(tokio::sync::Mutex::new(BTreeSet::new())),
+        account_digest_key: None,
+    });
+    let payload = health_payload(application).await;
+
+    assert_eq!(
+        payload.pointer("/readiness/state").and_then(Value::as_str),
+        Some("database_unreachable"),
+        "连不上是环境问题，等它回来就会好：{payload}"
+    );
+    assert_eq!(
+        payload.pointer("/readiness/detail").and_then(Value::as_str),
+        Some("connect_failed"),
+        "detail 只写类别，不带连接串"
+    );
+    assert_eq!(payload.pointer("/readiness/checkedAt"), Some(&Value::Null));
 }
 
 #[tokio::test]
@@ -917,6 +950,92 @@ async fn loopback_local_producer_acknowledges_one_partial_package_and_replays_ti
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
 }
 
+/// `/health` 的就绪回答与 worker 用的是同一套判据（`runtime_readiness`），同一次故障在这里
+/// 和在 worker 日志里必须是同一句话。注入用「台账少一行」：迁移文件全部应用过，只是记账少了
+/// `0034`。这类故障最容易糊过去——库是好的、表都在，只有记账不齐。
+#[tokio::test]
+#[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
+async fn health_readiness_speaks_the_same_verdict_as_the_worker() {
+    let database = proof_database("local_api_readiness").await;
+    let application = app_with_database(database.clone());
+
+    let ready = health_payload(application.clone()).await;
+    assert_eq!(
+        ready.pointer("/readiness/state").and_then(Value::as_str),
+        Some("ready"),
+        "迁移与表都齐就该判成可接活：{ready}"
+    );
+    assert_eq!(ready.pointer("/readiness/detail"), Some(&Value::Null));
+    let checked_at = ready
+        .pointer("/readiness/checkedAt")
+        .and_then(Value::as_str)
+        .expect("连得上就有数据库时钟给的判定时刻");
+    assert!(
+        checked_at.ends_with('Z'),
+        "判定时刻用数据库时钟：{checked_at}"
+    );
+
+    sqlx::query(
+        "DELETE FROM linggan_local_schema_migration \
+         WHERE migration_id = '0034_collection_control_closure'",
+    )
+    .execute(database.pool())
+    .await
+    .expect("the ledger row is removed for this proof");
+
+    let not_applied = health_payload(application).await;
+    assert_eq!(
+        not_applied
+            .pointer("/readiness/state")
+            .and_then(Value::as_str),
+        Some("migrations_not_applied"),
+        "连得上、表在、记账缺一行，就该报未迁移：{not_applied}"
+    );
+    assert_eq!(
+        not_applied
+            .pointer("/readiness/detail")
+            .and_then(Value::as_str),
+        Some("0034_collection_control_closure"),
+        "detail 写声明序里第一个缺的 id，与 worker 报的是同一句"
+    );
+}
+
+/// 本地读取面用不了时（`SchemaUnavailable`）仍然拿得住连接，所以 `/health` 能说出**为什么**
+/// 不能接活，而不是在这里替它猜一个原因。这里把台账表整个删掉：读取面判死，而就绪判定报的
+/// 是「台账读不到」——两者是不同的问题，第二个回答更具体。
+#[tokio::test]
+#[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
+async fn a_schema_unavailable_api_still_says_why_it_cannot_take_work() {
+    let database = proof_database("local_api_readiness_schema").await;
+    sqlx::query("DROP TABLE linggan_local_schema_migration")
+        .execute(database.pool())
+        .await
+        .expect("the ledger table is dropped for this proof");
+
+    let state = classify_database(database).await;
+    assert!(
+        matches!(state, LocalDatabaseState::SchemaUnavailable(_)),
+        "基础 schema 不在时读取面判死"
+    );
+    let application = router(LocalWebState {
+        database: state,
+        active_media_sessions: Arc::new(tokio::sync::Mutex::new(BTreeSet::new())),
+        account_digest_key: None,
+    });
+    let payload = health_payload(application).await;
+
+    assert_eq!(
+        payload.pointer("/database/state").and_then(Value::as_str),
+        Some("CONFIGURED_UNAVAILABLE"),
+        "读取面的状态不变：{payload}"
+    );
+    assert_eq!(
+        payload.pointer("/readiness/state").and_then(Value::as_str),
+        Some("migration_ledger_unreadable"),
+        "就绪回答要说出确切原因，不是笼统的「schema 不行」：{payload}"
+    );
+}
+
 #[tokio::test]
 #[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
 async fn loopback_runtime_producer_uses_the_routes_published_by_health() {
@@ -1338,6 +1457,22 @@ async fn proof_database(schema: &str) -> Database {
     isolated_proof_schema(&url, schema, LOCAL_001_MIGRATIONS)
         .await
         .expect("isolated migration applies")
+}
+
+/// 走真实路由取一次 `/health` 的回答。
+async fn health_payload(application: Router) -> Value {
+    let response = application
+        .oneshot(
+            Request::builder()
+                .uri("/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    serde_json::from_slice(&body).unwrap()
 }
 
 async fn producer_fixture_observed_at(database: &Database) -> String {
