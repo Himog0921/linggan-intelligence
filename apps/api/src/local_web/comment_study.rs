@@ -586,6 +586,18 @@ mod tests {
     }
 
     #[test]
+    fn comment_study_script_explains_primary_pair_outcomes_in_chinese_without_exposing_model_output()
+     {
+        let script = include_str!("comment_study.js");
+        assert!(script.contains("const pairDecisionLabel = {"));
+        assert!(script.contains("关键维度不同，当前不是同一用户问题"));
+        assert!(script.contains("模型输出结构不符合约定，未接纳"));
+        assert!(script.contains("历史配对未记录候选选择信息"));
+        assert!(script.contains("function pairOutcomeSummary(outcome)"));
+        assert!(!script.contains("proposedProblem"));
+    }
+
+    #[test]
     fn comment_study_script_explains_source_eligibility_and_budget_in_chinese() {
         let script = include_str!("comment_study.js");
         assert!(script.contains("function renderSourcePreview(preview)"));

@@ -38,7 +38,7 @@ use linggan_intelligence::{
     comment_study_model_runner::{StudyModelRunnerError, call_study_batch_model},
     comment_study_pair_worker::run_one_problem_pair,
     comment_study_problem_store::{
-        accept_problem_pair, accept_problem_resolution, prepare_problem_pair,
+        PairSelection, accept_problem_pair, accept_problem_resolution, prepare_problem_pair,
         prepare_problem_resolution,
     },
     comment_study_read::{
@@ -3802,7 +3802,7 @@ async fn provider_workers_read_problem_revisions_and_release_pre_dispatch_claims
     )
     .await
     .unwrap();
-    let pair = prepare_problem_pair(&database, first, second)
+    let pair = prepare_problem_pair(&database, first, second, test_pair_selection())
         .await
         .unwrap();
     let error = run_one_problem_pair(&database, &UnavailableModelSecrets, &adapter)
@@ -3943,9 +3943,14 @@ async fn no_existing_match_stays_deferred_until_two_independent_signals_create_o
         1,
         "a no-match Signal has not created a Problem"
     );
-    let pair = prepare_problem_pair(&database, first_signal, second_signal)
-        .await
-        .unwrap();
+    let pair = prepare_problem_pair(
+        &database,
+        first_signal,
+        second_signal,
+        test_pair_selection(),
+    )
+    .await
+    .unwrap();
     let accepted = accept_problem_pair(
         &database,
         pair.pair_ref,
@@ -4039,6 +4044,14 @@ async fn seed_embedding_profile(database: &linggan_storage_postgres::Database) -
     )
     .await
     .unwrap()
+}
+
+fn test_pair_selection() -> PairSelection {
+    PairSelection {
+        profile_ref: Uuid::new_v4(),
+        recall_rank: 1,
+        admissible_rank: 1,
+    }
 }
 
 /// A unit vector `angle` radians away from the reference direction, so a test can state "these two
@@ -4461,11 +4474,30 @@ async fn a_pair_partner_is_the_nearest_admissible_signal_not_the_earliest_one() 
         !paired.contains(&far),
         "arriving early is not a reason to spend a model call on a distant Signal"
     );
+    let selection: serde_json::Value = sqlx::query_scalar(
+        "SELECT pair_manifest->'selection' FROM linggan_comment_study_problem_pair",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        selection["contract"],
+        "comment-study.problem-pair-selection.v1"
+    );
+    assert_eq!(selection["method"], "nearest_admissible");
+    assert_eq!(selection["embeddingProfileRef"], profile.to_string());
+    assert_eq!(selection["admissibleRank"], 1);
+    assert!(
+        selection["recallRank"]
+            .as_i64()
+            .is_some_and(|rank| rank >= 1),
+        "the persisted rank is the actual ordered recall position, not a similarity threshold"
+    );
 }
 
 #[tokio::test]
 #[ignore = "requires the local PostgreSQL proof database"]
-async fn one_inconclusive_comparison_does_not_retire_a_signal_from_pairing() {
+async fn one_primary_comparison_does_not_expand_after_a_valid_non_create_outcome() {
     let database = proof_database("comment_study_pair_retry").await;
     sqlx::raw_sql(STUDY_SCHEMA_SQL)
         .execute(database.pool())
@@ -4536,29 +4568,96 @@ async fn one_inconclusive_comparison_does_not_retire_a_signal_from_pairing() {
     .await
     .unwrap();
     assert_eq!(receipt.state, "rejected");
+    assert_eq!(receipt.decision_reason, "not_same_problem");
     assert_eq!(
         receipt.problem_ref, None,
         "a conflicting dimension creates nothing"
     );
 
-    // The two Signals were compared with each other and came apart. Neither has been shown to be
-    // unrelated to anyone else, so both must remain available to be compared with a third.
+    // The two Signals remain deferred novel because no Problem was created, but their one automatic
+    // primary comparison is consumed. The worker must not silently turn "not the same" into a
+    // near-exhaustive search of the remaining pool.
+    assert_eq!(
+        resolution_state_for(&database, first).await,
+        Some(("deferred_novel".to_owned(), None))
+    );
+    assert_eq!(
+        resolution_state_for(&database, second).await,
+        Some(("deferred_novel".to_owned(), None))
+    );
     assert!(
         advance_next_problem_pair(&database).await.unwrap(),
-        "one inconclusive comparison must not end pairing for the whole domain"
+        "unpaired Signals may still receive their own primary comparison"
     );
-    let retried: Vec<Uuid> = sqlx::query_scalar(
-        "SELECT unnest(ARRAY[first_signal_ref,second_signal_ref]) \
-         FROM linggan_comment_study_problem_pair WHERE state='pending'",
+    assert!(advance_next_problem_pair(&database).await.unwrap());
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT max(comparison_count) FROM ( \
+               SELECT signal_ref,count(*) AS comparison_count FROM ( \
+                 SELECT first_signal_ref AS signal_ref FROM linggan_comment_study_problem_pair \
+                 UNION ALL \
+                 SELECT second_signal_ref AS signal_ref FROM linggan_comment_study_problem_pair \
+               ) compared GROUP BY signal_ref \
+             ) degrees",
+        )
+        .fetch_one(database.pool())
+        .await
+        .unwrap(),
+        1,
+        "every Signal may receive one primary comparison, never a second automatic partner"
+    );
+    assert!(
+        !advance_next_problem_pair(&database).await.unwrap(),
+        "once every admissible Signal has its primary comparison, the automatic worker stops"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, String>(
+            "SELECT pair_manifest->'decision'->>'code' \
+             FROM linggan_comment_study_problem_pair WHERE pair_ref=$1",
+        )
+        .bind(pair_ref)
+        .fetch_one(database.pool())
+        .await
+        .unwrap(),
+        "not_same_problem"
+    );
+    let run_ref: Uuid = sqlx::query_scalar(
+        "SELECT target.run_ref FROM linggan_comment_study_signal signal \
+         JOIN linggan_comment_study_target target USING(target_ref) \
+         WHERE signal.signal_ref=$1",
     )
-    .fetch_all(database.pool())
+    .bind(first)
+    .fetch_one(database.pool())
     .await
     .unwrap();
+    let signals = read_signals(
+        &database,
+        &CommentStudyReadQuery {
+            run_ref: Some(run_ref),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let projected = signals["signals"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|signal| signal["signalRef"] == first.to_string())
+        .unwrap();
+    assert_eq!(
+        projected["pairOutcomes"][0]["decisionReason"],
+        "not_same_problem"
+    );
+    assert_eq!(
+        projected["pairOutcomes"][0]["selection"]["admissibleRank"],
+        1
+    );
     assert!(
-        retried.contains(&first) && retried.contains(&third),
-        "the seeker is still the earliest unassigned Signal and its next partner is the \
-         next-nearest admissible one; retiring it instead leaves the closest genuine comparison \
-         in the domain unmade: {retried:?}"
+        projected["pairOutcomes"][0]["selection"]
+            .get("embeddingProfileRef")
+            .is_none(),
+        "the read projection exposes only the selection facts a reviewer can interpret"
     );
 }
 

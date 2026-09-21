@@ -45,12 +45,23 @@ pub struct PreparedProblemPair {
     pub second_signal_ref: Uuid,
 }
 
+/// Facts about how the server selected a new-Problem comparison. These are selection provenance,
+/// not a similarity threshold or a verdict.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PairSelection {
+    pub profile_ref: Uuid,
+    pub recall_rank: i64,
+    pub admissible_rank: i64,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProblemPairReceipt {
     pub pair_ref: Uuid,
     pub state: String,
     pub problem_ref: Option<Uuid>,
+    pub decision_reason: String,
 }
 
 #[derive(Debug, Error)]
@@ -300,6 +311,7 @@ pub async fn prepare_problem_pair(
     database: &Database,
     first_signal_ref: Uuid,
     second_signal_ref: Uuid,
+    selection: PairSelection,
 ) -> Result<PreparedProblemPair, ProblemStoreError> {
     if first_signal_ref == second_signal_ref {
         return Err(ProblemStoreError::PairNotIndependentOrNovel);
@@ -324,6 +336,13 @@ pub async fn prepare_problem_pair(
         "second":{"signalRef":second.signal_ref,"sourceRef":second.source_ref},
         "independentSources":true,
         "independentAuthors":true,
+        "selection":{
+            "contract":"comment-study.problem-pair-selection.v1",
+            "method":"nearest_admissible",
+            "embeddingProfileRef":selection.profile_ref,
+            "recallRank":selection.recall_rank,
+            "admissibleRank":selection.admissible_rank,
+        },
     });
     sqlx::query(
         "INSERT INTO linggan_comment_study_problem_pair( \
@@ -397,7 +416,16 @@ pub async fn accept_problem_pair(
     ) {
         Ok(decision) => decision,
         Err(error) => {
-            finish_pair(&mut transaction, pair_ref, "rejected", None, raw_output).await?;
+            let decision_reason = pair_contract_failure_code(&error);
+            finish_pair(
+                &mut transaction,
+                pair_ref,
+                "rejected",
+                None,
+                decision_reason,
+                raw_output,
+            )
+            .await?;
             transaction.commit().await?;
             return Err(ProblemStoreError::Contract(error));
         }
@@ -430,6 +458,7 @@ pub async fn accept_problem_pair(
                 pair_ref,
                 "approved",
                 Some(problem_ref),
+                "approved",
                 raw_output,
             )
             .await?;
@@ -437,16 +466,58 @@ pub async fn accept_problem_pair(
                 pair_ref,
                 state: "approved".to_owned(),
                 problem_ref: Some(problem_ref),
+                decision_reason: "approved".to_owned(),
             }
         }
-        PairCreationDecision::DeferInsufficientIndependentEvidence
-        | PairCreationDecision::DeferAmbiguous
-        | PairCreationDecision::DeferNotSameProblem => {
-            finish_pair(&mut transaction, pair_ref, "rejected", None, raw_output).await?;
+        PairCreationDecision::DeferInsufficientIndependentEvidence => {
+            finish_pair(
+                &mut transaction,
+                pair_ref,
+                "rejected",
+                None,
+                "insufficient_independent_evidence",
+                raw_output,
+            )
+            .await?;
             ProblemPairReceipt {
                 pair_ref,
                 state: "rejected".to_owned(),
                 problem_ref: None,
+                decision_reason: "insufficient_independent_evidence".to_owned(),
+            }
+        }
+        PairCreationDecision::DeferAmbiguous => {
+            finish_pair(
+                &mut transaction,
+                pair_ref,
+                "rejected",
+                None,
+                "ambiguous",
+                raw_output,
+            )
+            .await?;
+            ProblemPairReceipt {
+                pair_ref,
+                state: "rejected".to_owned(),
+                problem_ref: None,
+                decision_reason: "ambiguous".to_owned(),
+            }
+        }
+        PairCreationDecision::DeferNotSameProblem => {
+            finish_pair(
+                &mut transaction,
+                pair_ref,
+                "rejected",
+                None,
+                "not_same_problem",
+                raw_output,
+            )
+            .await?;
+            ProblemPairReceipt {
+                pair_ref,
+                state: "rejected".to_owned(),
+                problem_ref: None,
+                decision_reason: "not_same_problem".to_owned(),
             }
         }
     };
@@ -803,20 +874,40 @@ async fn finish_pair(
     pair_ref: Uuid,
     state: &str,
     problem_ref: Option<Uuid>,
+    decision_reason: &str,
     proposed_problem: Value,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         "UPDATE linggan_comment_study_problem_pair \
-         SET state=$2,created_problem_ref=$3,proposed_problem=$4,resolved_at=scope_001_now() \
+         SET state=$2,created_problem_ref=$3,proposed_problem=$4,resolved_at=scope_001_now(), \
+             pair_manifest=jsonb_set(pair_manifest,'{decision}',jsonb_build_object('code',$5::text)) \
          WHERE pair_ref=$1",
     )
     .bind(pair_ref)
     .bind(state)
     .bind(problem_ref)
     .bind(proposed_problem)
+    .bind(decision_reason)
     .execute(&mut **transaction)
     .await?;
     Ok(())
+}
+
+pub fn pair_contract_failure_code(error: &ProblemResolutionContractError) -> &'static str {
+    match error {
+        ProblemResolutionContractError::JsonSchema => "contract_rejected_json_schema",
+        ProblemResolutionContractError::Contract => "contract_rejected_contract",
+        ProblemResolutionContractError::CandidateSetMismatch => {
+            "contract_rejected_candidate_set_mismatch"
+        }
+        ProblemResolutionContractError::InvalidVerdict => "contract_rejected_invalid_verdict",
+        ProblemResolutionContractError::InvalidProblemDefinition => {
+            "contract_rejected_invalid_problem_definition"
+        }
+        ProblemResolutionContractError::PairSignalMismatch => {
+            "contract_rejected_pair_signal_mismatch"
+        }
+    }
 }
 
 fn normalized_candidates(candidates: Vec<Uuid>) -> Result<Vec<Uuid>, ProblemStoreError> {

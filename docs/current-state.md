@@ -41,6 +41,8 @@ Mog 于 2026-09-16 明确决定不迁移任何旧评论研究派生结果，并�
 
 **2026-09-21 作者声音污染处置（候选修复，未合并／未部署）**：Mog 在发布后的首次真实运行 `21d1f1e7-674e-4ec3-992c-1020b7ba589b` 发现作品作者回复被列为评论研究目标。审计确认 source gate 只检查领域和可读性，未将评论作者与既有 `linggan_material_content_author` 的稳定作品作者身份比较；100 个目标中 40 个来自作品作者，67 条 Signal 中 20 条来自该身份。Mog 已授权删除该一次运行及其所有评论研究派生结果（100 target、13 batch、86 attempt、67 Signal、14 resolution、5 work、1 run），原始 Evidence 与通用模型调用账本保留。候选改为只接纳双方身份已知且不同的评论；作者根评论／回复仍可作为父语境，身份缺失 fail closed。下一次真实运行必须在该修复合并、部署后重新创建并由 Mog 验收。
 
+**2026-09-21 COMMENT-STUDY-PAIR-BOUNDS-001（候选实施中，未合并／未部署）**：已发布的干净运行曾令 13 条 `deferred_novel` Signal 产生接近完整两两组合的自动 Pair；这证明后台自动搜索需要止损，但不证明候选质量或任何阈值。当前候选将后续自动流程收束为“每个 Signal 仅一次首个合格候选比较”，有效未建题仍保留 `deferred_novel`；新 Pair 记录实际 profile／候选位次和明确结论代码，并在 `/corpus/comments` 用中文解释。已有 Pair 不删除、不重算、不回填历史排名或理由。本地隔离 PostgreSQL 已验证每个 Signal 的自动配对度最多为 1、有效非同题不建 Problem、读取投影不暴露原始 provider 输出。真实 provider、Recall@K、历史 Pair 细分类、PR、合并、runtime/3000 和 Mog 业务验收均仍 `NOT VERIFIED`。
+
 **下列 COMMENT-RESEARCH-V1/V2 段落仅记录历史运行和设计沿革，不再定义当前评论研究实现、运行或验收范围。**
 
 ### COMMENT-RESEARCH-V1-REAL-CLOSURE-001 / Issue #254（历史运行记录；已被 COMMENT-STUDY-REBUILD-001 取代）

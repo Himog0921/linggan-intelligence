@@ -29,6 +29,7 @@
 | `RUNNING` | queued/running target 或 prepared/leased batch | 工作已创建，尚无最终结果 | 已有 Signal/Problem | 查看运行记录 |
 | `NO_SIGNAL` | target state `no_signal` | 模型明确未发现可接纳 Signal | 缺输出/失败 | 查看原声 |
 | `DEFERRED` | Signal resolution state | 信号存在，但当前不能安全归并 | 已建 Problem | 看等待条件 |
+| `PRIMARY_PAIR_RECORDED` | 新 Pair 的 selection / decision manifest | 已比较首个合格候选；未建题的原因可读，Signal 仍保留 | 已穷尽所有候选、相似度已证明不是同题、历史记录缺失等于没有比较 | 查看中文结论与后续人工／质量验证边界 |
 | `PROBLEM_LINKED` | membership | 已依据闭集比较关联稳定问题 | 规模、趋势或普遍性 | 查看定义和 evidence count |
 | `PARTIAL` | accepted 与 retry/failed 同时存在 | 有效结果保留，其他项未完成 | 全量完成 | 查看运行记录 |
 | `SOURCE_RESTRICTED` | target excluded / batch cancelled | 当前来源不可再处理 | 已外发或已安全完成 | 查看安全原因 |
