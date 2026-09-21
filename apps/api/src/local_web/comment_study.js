@@ -120,6 +120,19 @@ const resolutionLabel = {
   budget_stopped: '归并预算已到上限，当前未完成判断',
   not_user_problem: '判定不构成用户问题', protocol_rejected: '模型输出不合规，已拒绝', failed: '归并判断失败'
 };
+const pairStateLabel = { pending: '正在比较首个合格候选', approved: '已共同建立用户问题', rejected: '未共同建立用户问题' };
+const pairDecisionLabel = {
+  approved: '两条独立证据支持同一用户问题，已建立问题',
+  not_same_problem: '关键维度不同，当前不是同一用户问题',
+  ambiguous: '当前证据不足以可靠判断是否为同一问题',
+  insufficient_independent_evidence: '独立证据条件不足，未建立问题',
+  contract_rejected_json_schema: '模型输出结构不符合约定，未接纳',
+  contract_rejected_contract: '模型输出合同版本不符合约定，未接纳',
+  contract_rejected_candidate_set_mismatch: '模型返回的比较对象不符合约定，未接纳',
+  contract_rejected_invalid_verdict: '模型返回的维度判断无效，未接纳',
+  contract_rejected_invalid_problem_definition: '模型给出的问题定义不完整，未接纳',
+  contract_rejected_pair_signal_mismatch: '模型返回的研究信号不对应当前配对，未接纳'
+};
 const signalKindLabel = {
   problem: '问题', need: '需求', belief: '观念', emotion: '情绪', experience: '经历',
   solution: '解决方案', quote: '引述', context: '语境', question: '疑问'
@@ -204,6 +217,20 @@ async function renderTargetsTab() {
   return `<div class="study-review-table-wrap"><table class="study-review-table"><thead><tr><th scope="col">评论原声</th><th scope="col">处理状态</th><th scope="col">语境</th><th scope="col">研究信号</th></tr></thead><tbody>${data.targets.map(targetRow).join('')}</tbody></table></div>`;
 }
 
+function pairOutcomeSummary(outcome) {
+  const state = label(pairStateLabel, outcome.state) ?? '配对状态未知';
+  const decision = outcome.decisionReason
+    ? (label(pairDecisionLabel, outcome.decisionReason) ?? '配对结论未能识别')
+    : '历史配对未记录可分类结论';
+  const selection = outcome.selection;
+  const recallRank = Number(selection?.recallRank);
+  const admissibleRank = Number(selection?.admissibleRank);
+  const selectionText = Number.isInteger(recallRank) && recallRank > 0
+    && Number.isInteger(admissibleRank) && admissibleRank > 0
+    ? `本次自动选择：召回候选第 ${recallRank} 位；通过独立性筛选后第 ${admissibleRank} 位。`
+    : '历史配对未记录候选选择信息。';
+  return `<p class="study-signal-meta">首个候选比较：${esc(state)} · ${esc(decision)}<br>${esc(selectionText)}</p>`;
+}
 function signalCard(signal) {
   const body = signal.sourceState === 'restricted'
     ? `<p class="study-restricted">来源已被限制，原声与摘要不再显示。</p>`
@@ -213,6 +240,7 @@ function signalCard(signal) {
       <header><span class="study-badge">${esc(label(signalKindLabel, signal.kind) ?? signal.kind)}</span><span>${esc(label(resolutionLabel, signal.resolutionState) ?? '尚未进入归并判断')}</span></header>
       ${body}
       <p class="study-signal-meta">归并资格：${esc(label(eligibilityLabel, signal.eligibilityState) ?? signal.eligibilityState)}${signal.eligibilityReason ? ` · ${esc(signal.eligibilityReason)}` : ''}</p>
+      ${(signal.pairOutcomes || []).map(pairOutcomeSummary).join('')}
     </article>`;
 }
 async function renderPendingTab() {

@@ -250,6 +250,17 @@ pub async fn read_signals(
                 signal.problem_frame,signal.eligibility_state,signal.eligibility_reason,signal.created_at::text AS created_at, \
                 resolution.resolution_ref,resolution.state AS resolution_state,resolution.resolved_problem_ref, \
                 membership.membership_ref, \
+                COALESCE((SELECT jsonb_agg(jsonb_build_object( \
+                    'pairRef',pair.pair_ref,'state',pair.state, \
+                    'decisionReason',pair.pair_manifest->'decision'->>'code', \
+                    'selection',CASE WHEN pair.pair_manifest ? 'selection' THEN jsonb_build_object( \
+                        'recallRank',pair.pair_manifest->'selection'->'recallRank', \
+                        'admissibleRank',pair.pair_manifest->'selection'->'admissibleRank' \
+                    ) ELSE NULL END \
+                  ) ORDER BY pair.created_at,pair.pair_ref) \
+                  FROM linggan_comment_study_problem_pair pair \
+                  WHERE pair.first_signal_ref=signal.signal_ref OR pair.second_signal_ref=signal.signal_ref), \
+                 '[]'::jsonb) AS pair_outcomes, \
                 EXISTS(SELECT 1 FROM linggan_material_comment_restriction restriction \
                   WHERE restriction.content_public_ref=comment.content_public_ref \
                     AND restriction.comment_external_id=comment.comment_external_id) AS source_restricted \
@@ -284,6 +295,7 @@ pub async fn read_signals(
             "eligibilityState":row.get::<String,_>("eligibility_state"),"eligibilityReason":row.get::<Option<String>,_>("eligibility_reason"),
             "resolutionRef":row.get::<Option<Uuid>,_>("resolution_ref"),"resolutionState":row.get::<Option<String>,_>("resolution_state"),
             "resolvedProblemRef":row.get::<Option<Uuid>,_>("resolved_problem_ref"),"membershipRef":row.get::<Option<Uuid>,_>("membership_ref"),
+            "pairOutcomes":row.get::<Value,_>("pair_outcomes"),
             "createdAt":row.get::<String,_>("created_at")
         })}).collect::<Vec<_>>()
     }))

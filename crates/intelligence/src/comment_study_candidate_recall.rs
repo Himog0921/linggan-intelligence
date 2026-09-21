@@ -6,8 +6,8 @@
 
 use crate::comment_study_embedding::active_profile;
 use crate::comment_study_problem_store::{
-    PreparedProblemResolution, ProblemStoreError, accept_problem_resolution, prepare_problem_pair,
-    prepare_problem_resolution, resolve_retrieval_incomplete,
+    PairSelection, PreparedProblemResolution, ProblemStoreError, accept_problem_resolution,
+    prepare_problem_pair, prepare_problem_resolution, resolve_retrieval_incomplete,
     resume_pre_v2_pair_contract_rejection, resume_retrieval_incomplete_resolution,
 };
 use crate::comment_study_recall::{RecallCompleteness, recall_candidates};
@@ -31,9 +31,10 @@ pub struct RecalledProblemCandidate {
     pub lexical_overlap: bool,
 }
 
-/// Finds one legal pair of independently authored deferred-novel Signals, choosing the partner by
-/// vector proximity rather than by arrival order. Pairing the two Signals that merely happened to
-/// arrive first spends a model call on two texts nothing ever suggested were about the same thing.
+/// Finds one primary legal pair of independently authored deferred-novel Signals, choosing the
+/// partner by vector proximity rather than by arrival order. A Signal gets one automatic primary
+/// comparison only: a valid non-create outcome is useful evidence, but it is not a reason to keep
+/// spending model calls attempting to prove that the Signal differs from the whole pool.
 ///
 /// The pair is only a frozen comparison task; it does not itself create a Problem.
 pub async fn advance_next_problem_pair(
@@ -58,23 +59,34 @@ pub async fn advance_next_problem_pair(
         if let Some(partner) =
             nearest_admissible_partner(database, seeker, &recalled.pool_signal_refs).await?
         {
-            prepare_problem_pair(database, seeker, partner).await?;
+            prepare_problem_pair(
+                database,
+                seeker,
+                partner.signal_ref,
+                PairSelection {
+                    profile_ref,
+                    recall_rank: partner.recall_rank,
+                    admissible_rank: partner.admissible_rank,
+                },
+            )
+            .await?;
             return Ok(true);
         }
     }
     Ok(false)
 }
 
-/// How many Signals one tick will look for a partner for before giving up. A Signal whose whole
-/// pool has already been compared with it must not block every Signal behind it, so the scan moves
-/// on rather than returning "nothing to pair" at the first exhausted one.
+/// How many Signals one tick will look for a primary partner for before giving up. A Signal without
+/// an admissible primary partner must not block every Signal behind it, so the scan moves on rather
+/// than returning "nothing to pair" at the first exhausted one.
 const MAX_PAIR_SEEKERS_PER_TICK: i64 = 8;
 
-/// Signals still waiting to be paired, earliest first.
+/// Signals that have not yet received their automatic primary comparison, earliest first.
 ///
-/// The only thing that retires a Signal from pairing is being assigned to a Problem. Having taken
-/// part in a comparison that came apart is not a reason: it establishes that those *two* are not
-/// the same Problem, and nothing about either one's relation to anything else.
+/// A non-create outcome remains a `deferred_novel` resolution: it says that no durable Problem was
+/// created, not that the underlying user voice ceased to exist. It nevertheless consumes this
+/// automatic pairing opportunity. Broader recall is a future evidence-led policy decision, not a
+/// background retry loop.
 async fn novel_signals_awaiting_pairing(
     database: &Database,
 ) -> Result<Vec<Uuid>, ProblemCandidateRecallError> {
@@ -83,6 +95,9 @@ async fn novel_signals_awaiting_pairing(
          WHERE resolution.state='deferred_novel' \
            AND NOT EXISTS(SELECT 1 FROM linggan_comment_study_problem_membership membership \
                  WHERE membership.signal_ref=resolution.signal_ref) \
+           AND NOT EXISTS(SELECT 1 FROM linggan_comment_study_problem_pair pair \
+                 WHERE pair.first_signal_ref=resolution.signal_ref \
+                    OR pair.second_signal_ref=resolution.signal_ref) \
          ORDER BY resolution.created_at,resolution.signal_ref LIMIT $1",
     )
     .bind(MAX_PAIR_SEEKERS_PER_TICK)
@@ -97,18 +112,24 @@ async fn novel_signals_awaiting_pairing(
 /// become a pair. Filtering here rather than letting `prepare_problem_pair` refuse means the
 /// *nearest admissible* candidate is found instead of stopping at the nearest one overall.
 ///
-/// Only the exact combination already compared is excluded, never every Signal that has ever been
-/// compared with anything: the table's `UNIQUE(first,second)` is what stops one pair being bought
-/// twice, and a wider exclusion would retire both sides of every inconclusive comparison.
+/// Both sides must be awaiting their first automatic primary comparison. This prevents the worker
+/// from turning one valid no-create result into an implicit exhaustive search, while retaining the
+/// selected rank as an auditable fact for future recall evaluation.
+struct AdmissiblePartner {
+    signal_ref: Uuid,
+    recall_rank: i64,
+    admissible_rank: i64,
+}
+
 async fn nearest_admissible_partner(
     database: &Database,
     seeker: Uuid,
     pool: &[Uuid],
-) -> Result<Option<Uuid>, ProblemCandidateRecallError> {
+) -> Result<Option<AdmissiblePartner>, ProblemCandidateRecallError> {
     if pool.is_empty() {
         return Ok(None);
     }
-    Ok(sqlx::query_scalar(
+    Ok(sqlx::query_as::<_, (Uuid, i64, i64)>(
         "WITH seeker AS ( \
            SELECT target.source_ref,source.author_external_id \
            FROM linggan_comment_study_signal signal \
@@ -117,7 +138,9 @@ async fn nearest_admissible_partner(
            WHERE signal.signal_ref=$1), \
          ranked AS (SELECT signal_ref,ordinality FROM unnest($2::uuid[]) \
                     WITH ORDINALITY AS entry(signal_ref,ordinality)) \
-         SELECT ranked.signal_ref FROM ranked \
+         SELECT ranked.signal_ref,ranked.ordinality AS recall_rank, \
+                row_number() OVER (ORDER BY ranked.ordinality) AS admissible_rank \
+         FROM ranked \
          JOIN linggan_comment_study_resolution resolution USING(signal_ref) \
          JOIN linggan_comment_study_signal signal USING(signal_ref) \
          JOIN linggan_comment_study_target target ON target.target_ref=signal.target_ref \
@@ -131,14 +154,23 @@ async fn nearest_admissible_partner(
            AND NOT EXISTS(SELECT 1 FROM linggan_comment_study_problem_membership membership \
                  WHERE membership.signal_ref=ranked.signal_ref) \
            AND NOT EXISTS(SELECT 1 FROM linggan_comment_study_problem_pair pair \
-                 WHERE (pair.first_signal_ref=ranked.signal_ref AND pair.second_signal_ref=$1) \
-                    OR (pair.first_signal_ref=$1 AND pair.second_signal_ref=ranked.signal_ref)) \
+                 WHERE pair.first_signal_ref=ranked.signal_ref \
+                    OR pair.second_signal_ref=ranked.signal_ref \
+                    OR pair.first_signal_ref=$1 \
+                    OR pair.second_signal_ref=$1) \
          ORDER BY ranked.ordinality LIMIT 1",
     )
     .bind(seeker)
     .bind(pool)
     .fetch_optional(database.pool())
-    .await?)
+    .await?
+    .map(
+        |(signal_ref, recall_rank, admissible_rank)| AdmissiblePartner {
+            signal_ref,
+            recall_rank,
+            admissible_rank,
+        },
+    ))
 }
 
 #[derive(Debug, Serialize)]

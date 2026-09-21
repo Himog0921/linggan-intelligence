@@ -1,7 +1,7 @@
 # COMMENT-STUDY-REBUILD-001 · UI 变更清单
 
 > 状态: 权威当前
-> 最后核对: 2026-09-17
+> 最后核对: 2026-09-21
 > 适用范围: `/corpus/comments` 新评论研究读取面及其本地 API 替换准备
 > 事实来源: DEC-0006、COMMENT-RESEARCH-REBUILD-001、当前旧 V1 路由/页面代码、LIDS
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实运行/数据合同和当前代码
@@ -171,6 +171,32 @@
 
 本补充不把静态测试、隔离 PostgreSQL 证明、编译通过、构建、提交、合并、3000 刷新或 Mog 验收预先
 写成完成事实；实际证据边界见 [验收记录](../acceptance/comment-study-tabs-001-acceptance.md)。
+
+## COMMENT-STUDY-PAIR-BOUNDS-001 补充（2026-09-21）
+
+### 1. 事项与边界
+
+- Issue / SCOPE: Issue #316 / COMMENT-STUDY-PAIR-BOUNDS-001；属于既有评论研究 Problem 归并读取面。
+- 用户可见目标: 在「待归并」信号卡中用中文说明该 Signal 的首个自动候选比较结果，以及它为何没有建立 Problem；历史 Pair 缺少该事实时明确显示“未记录”，不以未知补造结论。
+- 明确非目标: 不新增页面、Tab、按钮、人工归并动作、模型调用、向量距离、相似度阈值、Top-K、Problem 资格或历史数据修复。
+- 分类: 读取投影 + 状态语义；L1 / Corpus Explorer。只复用现有 Signal card 的 metadata 文本，不新增 Token、CMP、Scene、Motion 或 shell 变化。
+
+### 2. 表面与状态
+
+| 表面 / 状态 | 用户应理解什么 | 禁止暗示什么 |
+|---|---|---|
+| 新 Pair · 已建立 | 两条独立证据满足当前建题合同 | 相似度本身建立了 Problem |
+| 新 Pair · 非同题 | 当前关键维度不同，未共同建题 | 任一 Signal 没有价值或永远不可能有同类 |
+| 新 Pair · 不确定／独立性不足 | 当前证据不能可靠建题 | 这是模型或系统故障 |
+| 新 Pair · 合同未接纳 | 模型返回不能安全进入机器链路，未把它算作语义否定 | 模型已经判断不是同题 |
+| 历史 Pair | 该条记录发生在选择／结论代码持久化之前 | 没有比较、没有候选或已知为非同题 |
+
+读取 API 仅提供 Pair 状态、可分类结论与可解释位次；不返回 `proposed_problem`、provider 原始输出、prompt、向量、距离或完整候选池。来源受限时，现有原声／摘要隐藏规则不变。
+
+### 3. 验收与未证明边界
+
+- 自动: 隔离 PostgreSQL 证明有效非同题后两个 Signal 仍为 `deferred_novel` 但不会再触发第二次自动 Pair；同时证明新 Pair 的 selection/decision 可安全读出，页面脚本只含中文解释且不引用原始 provider 输出。
+- 未证明: 实际 embedding 召回质量、任何 Top-K/阈值正确性、真实 provider 结论、历史 Pair 的细分类、3000 runtime 或 Mog 业务验收。
 
 ## COMMENT-STUDY-LAYOUT-002 补充（2026-09-17）
 
