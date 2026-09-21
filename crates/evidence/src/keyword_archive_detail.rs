@@ -371,7 +371,8 @@ pub async fn keyword_targets_pending_detail(
         // 跨行业那一侧。哪些样本算这个目标的，按**观察记录**算而不是样本行上的
         // `target_ref`——那一列只在第一次插入时写定，同一篇被另一个关键词先看到，
         // 这个目标就永远不会给它补详情。
-        "SELECT DISTINCT seen_order.target_ref FROM cross_industry_sample sample \
+        "SELECT requested.target_ref FROM unnest($1::uuid[]) AS requested(target_ref) \
+         WHERE EXISTS (SELECT 1 FROM cross_industry_sample sample \
          JOIN cross_industry_sample_observation seen \
            ON seen.sample_ref=sample.sample_ref \
          JOIN linggan_runtime_capture_package seen_package \
@@ -380,12 +381,11 @@ pub async fn keyword_targets_pending_detail(
            ON seen_lease_task.task_id=seen_package.task_id \
          JOIN collection_work_order_lease seen_lease USING(lease_ref) \
          JOIN collection_work_order seen_order USING(work_order_ref) \
-         WHERE seen_order.target_ref=ANY($1) AND {pending} \
+         WHERE seen_order.target_ref=requested.target_ref AND {pending} \
            AND {sample_executable} \
            AND NOT {sample_not_stopped} \
-           AND NOT {sample_budget_blocked} \
-         UNION \
-         SELECT DISTINCT work_order.target_ref \
+           AND NOT {sample_budget_blocked}) \
+         OR EXISTS (SELECT 1 \
          FROM collection_work_order work_order \
          JOIN collection_work_order_lease lease USING(work_order_ref) \
          JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
@@ -397,7 +397,7 @@ pub async fn keyword_targets_pending_detail(
          JOIN linggan_runtime_record_disposition disposition \
            ON disposition.package_ref=finding.package_ref \
           AND disposition.record_ordinal=finding.record_ordinal \
-         WHERE work_order.target_ref=ANY($1) \
+         WHERE work_order.target_ref=requested.target_ref \
            AND finding.discovery_kind='discovery_search' \
            AND receipt.material_admission='ACCEPTED' \
            AND disposition.disposition='accepted_for_library_discovery' \
@@ -413,7 +413,7 @@ pub async fn keyword_targets_pending_detail(
                         AND live_lease.expires_at>scope_001_now()))) \
            AND {executable} \
            AND NOT {not_stopped} \
-           AND NOT {budget_blocked}",
+           AND NOT {budget_blocked})",
         missing_detail = qualified_detail_missing_sql!("finding.content_public_ref"),
         pending = pending_detail_sql!("seen_order.target_ref"),
     )))
@@ -628,6 +628,12 @@ pub async fn run_keyword_archive_details(
     .fetch_all(database.pool())
     .await?;
     if due.is_empty() {
+        return Ok(summary);
+    }
+    if !crate::collection_governance_enabled() {
+        summary.skipped.extend(due.into_iter().map(|target_ref| {
+            (target_ref, "collection_upgrade_recovery_only".to_owned())
+        }));
         return Ok(summary);
     }
     let pending = keyword_targets_pending_detail(database, &due).await?;
