@@ -318,6 +318,7 @@ pub async fn prepare_problem_pair(
     let pair_ref = Uuid::new_v4();
     let manifest = json!({
         "contract":"comment-study.problem-pair-input.v1",
+        "outputContractVersion":"v2",
         "domainRef":first.domain_ref,
         "first":{"signalRef":first.signal_ref,"sourceRef":first.source_ref},
         "second":{"signalRef":second.signal_ref,"sourceRef":second.source_ref},
@@ -341,6 +342,39 @@ pub async fn prepare_problem_pair(
         first_signal_ref: first.signal_ref,
         second_signal_ref: second.signal_ref,
     })
+}
+
+/// Gives a pair one bounded retry when its earlier provider output was rejected solely because it
+/// predated the current output contract. The failed invocation receipt remains immutable; only the
+/// pair's claim is reopened, and only once per output-contract version.
+pub async fn resume_pre_v2_pair_contract_rejection(
+    database: &Database,
+) -> Result<bool, ProblemStoreError> {
+    let mut transaction = database.pool().begin().await?;
+    let pair_ref: Option<Uuid> = sqlx::query_scalar(
+        "SELECT pair.pair_ref FROM linggan_comment_study_problem_pair pair \
+         JOIN linggan_model_invocation invocation ON invocation.invocation_ref=pair.model_invocation_ref \
+         WHERE pair.state='rejected' AND invocation.failure_code='pair_contract_rejected' \
+           AND pair.pair_manifest->>'outputContractVersion' IS NULL \
+         ORDER BY pair.created_at,pair.pair_ref LIMIT 1 FOR UPDATE OF pair SKIP LOCKED",
+    )
+    .fetch_optional(&mut *transaction)
+    .await?;
+    let Some(pair_ref) = pair_ref else {
+        transaction.commit().await?;
+        return Ok(false);
+    };
+    sqlx::query(
+        "UPDATE linggan_comment_study_problem_pair \
+         SET state='pending',model_invocation_ref=NULL,resolved_at=NULL,proposed_problem=NULL, \
+             pair_manifest=jsonb_set(pair_manifest,'{outputContractVersion}','\"v2\"'::jsonb) \
+         WHERE pair_ref=$1",
+    )
+    .bind(pair_ref)
+    .execute(&mut *transaction)
+    .await?;
+    transaction.commit().await?;
+    Ok(true)
 }
 
 /// Creates a durable Problem and assigns both Signals only when the pair contract and independent
