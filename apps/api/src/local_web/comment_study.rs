@@ -19,7 +19,7 @@ use linggan_intelligence::comment_study_read::{
 use linggan_intelligence::{
     comment_study_embedding::EmbeddingError,
     comment_study_run::{PrepareStudyRunRequest, prepare_study_run},
-    comment_study_source::ADHD_DOMAIN_REF,
+    comment_study_source::{ADHD_DOMAIN_REF, preview_sources},
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -63,11 +63,48 @@ async fn read_setup(State(state): State<LocalWebState>) -> Response {
         Ok(v) => v,
         Err(e) => return e,
     };
-    let result:Result<Value,sqlx::Error>=async { let configs:Vec<Value>=sqlx::query_scalar("SELECT jsonb_build_object('configRef',config.config_ref,'modelId',model.model_id,'inputTokenLimit',config.input_token_limit,'outputTokenLimit',config.output_token_limit,'enabled',connection.enabled) FROM linggan_model_config config JOIN linggan_model_entry model USING(model_ref) JOIN linggan_model_connection_version version ON version.version_ref=model.connection_version_ref JOIN linggan_model_connection connection USING(connection_ref) WHERE connection.enabled ORDER BY config.created_at").fetch_all(database.pool()).await?;let works:Vec<Value>=sqlx::query_scalar("SELECT jsonb_build_object('workRef',comment.content_public_ref,'eligibleCommentCount',count(*),'title',COALESCE((SELECT detail.title FROM linggan_material_content_detail detail JOIN linggan_runtime_capture_package package USING(package_ref) WHERE detail.content_public_ref=comment.content_public_ref AND detail.title_state='KNOWN' ORDER BY detail.observed_at DESC LIMIT 1),'未命名作品')) FROM linggan_material_comment comment JOIN linggan_material_content content ON content.public_ref=comment.content_public_ref WHERE content.domain_ref=$1 AND comment.body_state='KNOWN' GROUP BY comment.content_public_ref ORDER BY count(*) DESC,comment.content_public_ref LIMIT 100").bind(Uuid::parse_str(ADHD_DOMAIN_REF).expect("static uuid")).fetch_all(database.pool()).await?;Ok(json!({"contract":"comment-study.setup.v1","domainRef":ADHD_DOMAIN_REF,"modelConfigs":configs,"eligibleWorks":works}))}.await;
-    match result {
-        Ok(value) => Json(value).into_response(),
-        Err(_) => error(StatusCode::SERVICE_UNAVAILABLE, "comment_study_unavailable"),
-    }
+    let configs: Result<Vec<Value>, sqlx::Error> = sqlx::query_scalar(
+        "SELECT jsonb_build_object( \
+           'configRef',config.config_ref,'modelId',model.model_id, \
+           'inputTokenLimit',config.input_token_limit,'outputTokenLimit',config.output_token_limit, \
+           'enabled',connection.enabled \
+         ) \
+         FROM linggan_model_config config \
+         JOIN linggan_model_entry model USING(model_ref) \
+         JOIN linggan_model_connection_version version \
+           ON version.version_ref=model.connection_version_ref \
+         JOIN linggan_model_connection connection USING(connection_ref) \
+         WHERE connection.enabled ORDER BY config.created_at",
+    )
+    .fetch_all(database.pool())
+    .await;
+    let Ok(configs) = configs else {
+        return error(StatusCode::SERVICE_UNAVAILABLE, "comment_study_unavailable");
+    };
+    let as_of: Result<String, sqlx::Error> = sqlx::query_scalar("SELECT scope_001_now()::text")
+        .fetch_one(database.pool())
+        .await;
+    let Ok(as_of) = as_of else {
+        return error(StatusCode::SERVICE_UNAVAILABLE, "comment_study_unavailable");
+    };
+    let Ok(preview) = preview_sources(
+        database,
+        Uuid::parse_str(ADHD_DOMAIN_REF).expect("static UUID"),
+        &as_of,
+    )
+    .await
+    else {
+        return error(StatusCode::SERVICE_UNAVAILABLE, "comment_study_unavailable");
+    };
+    let eligible_works = preview.works.clone();
+    Json(json!({
+        "contract":"comment-study.setup.v2",
+        "domainRef":ADHD_DOMAIN_REF,
+        "modelConfigs":configs,
+        "sourcePreview":preview,
+        "eligibleWorks":eligible_works
+    }))
+    .into_response()
 }
 /// Runs the local qualification probe and, only if it passes, makes its profile the one every
 /// comparison happens in. An operator action rather than tick work: it loads the model and states
@@ -546,6 +583,16 @@ mod tests {
             script.contains("retrieval_incomplete: '候选目录未查全，当前不能判定是否为新问题'")
         );
         assert!(script.contains("budget_stopped: '归并预算已到上限，当前未完成判断'"));
+    }
+
+    #[test]
+    fn comment_study_script_explains_source_eligibility_and_budget_in_chinese() {
+        let script = include_str!("comment_study.js");
+        assert!(script.contains("function renderSourcePreview(preview)"));
+        assert!(script.contains("评论作者身份未知"));
+        assert!(script.contains("作品作者本人"));
+        assert!(script.contains("本次最多冻结"));
+        assert!(script.contains("此列表最多展示 100 篇"));
     }
 
     #[test]

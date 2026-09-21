@@ -53,6 +53,7 @@
         <button id="save-policy" type="submit" disabled>保存研究策略</button>
       </form>
       <p id="policy-status" class="study-dialog-note" role="status"></p>
+      <p id="source-preview" class="study-dialog-note" role="status">正在核对评论资格…</p>
     </section>
 
     <section class="study-workspace" aria-labelledby="work-picker-title">
@@ -75,7 +76,7 @@
         </table>
       </div>
       <footer class="study-workspace-footer">
-        <p>只会冻结当前所选作品的可研究评论；创建研究运行不会调用模型。</p>
+        <p>只会冻结当前所选作品中、并受本次评论数上限约束的可研究评论；创建研究运行不会调用模型。</p>
         <div class="run-actions"><button id="start-run" type="button" disabled>创建研究运行</button><p id="run-result" role="status"></p></div>
       </footer>
     </section>
