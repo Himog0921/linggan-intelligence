@@ -1591,6 +1591,80 @@ async fn late_scheduled_submission_keeps_material_without_advancing_revoked_exec
 
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL proof database"]
+async fn a_lost_submission_response_still_replays_after_its_lease_closed() {
+    let database = proof_database_for("collection_dispatch_lost_response_replay").await;
+    let fixture = seed_creator_work_order(&database).await;
+    let lease = issue_work_order_lease(&database, fixture.work_order_ref, 60)
+        .await
+        .expect("creator work order receives one ordered lease");
+    let first = decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("first task is claimed");
+    let first_task = task_from_dispatch(&first);
+    let first_attempt = attempt(first_task.task_id(), fixture.producer_instance_id);
+    assert!(matches!(
+        start_producer_attempt(&database, &first_attempt).await,
+        Ok(RuntimeAttemptOutcome::Started { .. })
+    ));
+    let first_submission =
+        scheduled_submission(&first_task, &first_attempt, fixture.producer_instance_id);
+    let acknowledged = submit_producer_package(&database, &first_submission)
+        .await
+        .expect("first delivery is accepted");
+    let RuntimeSubmissionOutcome::Acknowledged { receipt_ref, .. } = acknowledged else {
+        panic!("first delivery must be acknowledged, got {acknowledged:?}");
+    };
+
+    // The browser never received that response, so its durable outbox row stays and will be
+    // replayed. Meanwhile the remaining frozen lane finishes and its own delivery closes the
+    // lease — the exact state in which the client has already earned a receipt it cannot see.
+    let second = decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("second sequence dispatch decides");
+    run_scheduled_task(
+        &database,
+        &task_from_dispatch(&second),
+        fixture.producer_instance_id,
+    )
+    .await;
+    assert!(!lease_is_live(&database, lease.lease_ref).await);
+
+    // Recovery must not depend on the closed lease. The Attempt is a durable fact, so an
+    // identity-matched replay is owed even after its execution authority ends; a *new* Attempt
+    // still requires live authority, which the ordered-completion proof keeps covering.
+    assert!(matches!(
+        start_producer_attempt(&database, &first_attempt).await,
+        Ok(RuntimeAttemptOutcome::Replay { .. })
+    ));
+    let before = package_and_receipt_counts(&database).await;
+    let replayed = submit_producer_package(&database, &first_submission)
+        .await
+        .expect("replay recovers the receipt the browser never received");
+    assert!(
+        matches!(
+            replayed,
+            RuntimeSubmissionOutcome::Replay { receipt_ref: ref recovered, .. }
+                if *recovered == receipt_ref
+        ),
+        "replay must return the original receipt, got {replayed:?}"
+    );
+    assert_eq!(
+        package_and_receipt_counts(&database).await,
+        before,
+        "replaying a delivered package must not mint a second package or receipt"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
 async fn replacement_installation_releases_stale_work_instead_of_adopting_it() {
     let database = proof_database_for("collection_dispatch_installation_takeover").await;
     let fixture = seed_creator_work_order(&database).await;
@@ -2692,6 +2766,20 @@ async fn lease_is_live(database: &Database, lease_ref: Uuid) -> bool {
     .fetch_one(database.pool())
     .await
     .expect("lease is readable")
+}
+
+/// 交付重放必须不新增事实，所以断言它时得同时看 Package 和 Receipt 两张表。
+async fn package_and_receipt_counts(database: &Database) -> (i64, i64) {
+    let packages: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_runtime_capture_package")
+        .fetch_one(database.pool())
+        .await
+        .expect("package count is readable");
+    let receipts: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM linggan_runtime_submission_receipt")
+            .fetch_one(database.pool())
+            .await
+            .expect("receipt count is readable");
+    (packages, receipts)
 }
 
 async fn assert_task_state(database: &Database, task_id: Uuid, expected: &str) {

@@ -13,6 +13,7 @@ import {
   createLocalSubmission,
   createTaskSpec,
   decodePageExecutionReceipt,
+  isRecoverableDeliveryRegistrationRefusal,
   isTerminalLocalDeliveryResult,
   localPost,
   readLingganLocalReadiness,
@@ -95,11 +96,17 @@ export async function flushLocalOutboxOnce({
       }
       const attempt = await post(producerRoutes.attemptStart, entry.attempt);
       if (!attemptStartIsAccepted(attempt)) {
-        if (isTerminalLocalDeliveryResult(attempt)) {
-          await outbox.terminal(entry.submissionId, attempt.payload.code || 'attempt_not_started');
-          continue;
+        // 起步登记被「活权不在了」挡回来时，不能就此认定这份包没被收过：上一次投递可能
+        // 正是关掉这条租约的那一次，而服务端早已开出 Receipt。这一种必须继续走投递路由，
+        // 由服务端按 durable 事实重放原 Receipt（晚到包按 LOST_AUTHORITY 接纳）；身份冲突、
+        // 任务不存在等其他 4xx 仍是终态。
+        if (!isRecoverableDeliveryRegistrationRefusal(attempt)) {
+          if (isTerminalLocalDeliveryResult(attempt)) {
+            await outbox.terminal(entry.submissionId, attempt.payload.code || 'attempt_not_started');
+            continue;
+          }
+          throw new Error(attempt.payload.code || 'attempt_not_started');
         }
-        throw new Error(attempt.payload.code || 'attempt_not_started');
       }
       const submitted = await post(producerRoutes.submission, {
         contractVersion: entry.contractVersion,

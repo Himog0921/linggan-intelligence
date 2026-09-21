@@ -21,6 +21,7 @@
 |---|---|---|
 | [plans/active/account-observation-bootstrap-002.md](plans/active/account-observation-bootstrap-002.md) | 活跃计划 | Issue #218：新安装插件的首单软准入、账号观察启动、人工绑定审计与无秘密配置诊断 |
 | [plans/active/detail-page-session-replay-safety-001.md](plans/active/detail-page-session-replay-safety-001.md) | 活跃计划；受保护工作树 | 同一 Work Order/内容详情页的单次导航授权、浏览器持久消费闸门、缓存缺失 fail-closed 与既得数据重传边界 |
+| [plans/active/collection-upgrade-001.md](plans/active/collection-upgrade-001.md) | 活跃计划；受保护工作树 | Mog 交付包：缺输入止转、跨工单重试预算、交付恢复、统一材料完成判据与运行诊断的 S0–S6 对照表 |
 | [plans/active/corpus-evidence-read-recovery-001.md](plans/active/corpus-evidence-read-recovery-001.md) | 活跃计划；Issue #308 已关闭；main/本机 loopback 已部署 | Comment Study 重建后恢复 Evidence 列表与受控评论读取，不复活 V1 研究合同 |
 | [plans/active/ocr-content-layering-001.md](plans/active/ocr-content-layering-001.md) | 活跃计划；Issue #296；受保护工作树 | PaddleOCR 替换、逐行版面/内容分层、封面标题补位与 Tesseract OCR 可审计退役 |
 | [decisions/0007-ocr-content-layering.md](decisions/0007-ocr-content-layering.md) | 权威当前 | OCR 原始事实、内容分层、视觉选择边界和展示标题来源的长期决定 |

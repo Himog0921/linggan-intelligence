@@ -214,3 +214,74 @@ test('a claim or Attempt conflict is terminal locally but is never mislabeled as
   });
   assert.deepEqual(calls, ['']);
 });
+
+test('a closed claim still asks the submission route and keeps the Receipt it already earned', async () => {
+  const calls = [];
+  const requested = [];
+  const outbox = {
+    due: async () => [{ ...entry(), taskSpec: { source: 'scheduled' } }],
+    markInFlight: async () => calls.push('in_flight'),
+    acknowledge: async () => calls.push('acknowledged'),
+    retry: async (_id, reason) => calls.push(`retry:${reason}`),
+    terminal: async (_id, error) => calls.push(`terminal:${error}`),
+    terminalDispatchFailures: async () => [],
+    pendingCount: async () => 0,
+  };
+  const routes = {
+    taskCreation: '/api/local/producer/tasks',
+    attemptStart: '/api/local/producer/runtime-attempts',
+    submission: '/api/local/producer/runtime-submissions',
+  };
+  await flushLocalOutboxOnce({
+    outbox,
+    mediaOutbox: { pendingCount: async () => 0 },
+    readReadiness: async () => ({ deliveryReady: true, health: {}, producerRoutes: routes }),
+    post: async (path) => {
+      requested.push(path);
+      if (path === routes.taskCreation) return { ok: true, status: 200, payload: { outcome: 'created' } };
+      if (path === routes.attemptStart) {
+        return { ok: false, status: 409, payload: { code: 'scheduled_task_not_claimed_by_producer' } };
+      }
+      return { ok: true, status: 200, payload: { delivery: 'replay', receipt_ref: 'receipt-1' } };
+    },
+    flushMedia: async () => {},
+  });
+  assert.deepEqual(requested, [
+    routes.taskCreation,
+    routes.attemptStart,
+    routes.submission,
+  ]);
+  assert.deepEqual(calls, ['in_flight', 'acknowledged']);
+});
+
+test('an Attempt identity conflict stays terminal and never reaches the submission route', async () => {
+  const calls = [];
+  const requested = [];
+  const outbox = {
+    due: async () => [{ ...entry(), taskSpec: { source: 'scheduled' } }],
+    markInFlight: async () => {},
+    acknowledge: async () => calls.push('acknowledged'),
+    retry: async () => calls.push('retry'),
+    terminal: async (_id, error) => calls.push(`terminal:${error}`),
+    terminalDispatchFailures: async () => [],
+    pendingCount: async () => 0,
+  };
+  const routes = {
+    taskCreation: '/api/local/producer/tasks',
+    attemptStart: '/api/local/producer/runtime-attempts',
+    submission: '/api/local/producer/runtime-submissions',
+  };
+  await flushLocalOutboxOnce({
+    outbox,
+    mediaOutbox: { pendingCount: async () => 0 },
+    readReadiness: async () => ({ deliveryReady: true, health: {}, producerRoutes: routes }),
+    post: async (path) => {
+      requested.push(path);
+      if (path === routes.taskCreation) return { ok: true, status: 200, payload: { outcome: 'created' } };
+      return { ok: false, status: 409, payload: { code: 'attempt_identity_conflict' } };
+    },
+    flushMedia: async () => {},
+  });
+  assert.deepEqual(requested, [routes.taskCreation, routes.attemptStart]);
+  assert.deepEqual(calls, ['terminal:attempt_identity_conflict']);
+});

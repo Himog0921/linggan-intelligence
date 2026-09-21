@@ -840,6 +840,18 @@ export function isTerminalLocalDeliveryResult(result) {
   return (result?.status >= 400 && result.status < 500) || result?.payload?.outcome === 'conflict';
 }
 
+// 「这块工位现在没有这条活权」不等于「这份包没被收过」。
+//
+// 最普通的一种就是：上一次投递本身完成了最后一条冻结通道，服务端顺手关掉了租约。此时若
+// 客户端丢的恰好是那次响应，它重开同一份已登记身份就会被判成这个码——而服务端其实早已开
+// 出 Receipt。把这种情况交给投递路由去判（那里按 Attempt、包 hash 和活权三件durable事实
+// 决定，重放会拿回原 Receipt，晚到包按 LOST_AUTHORITY 接纳），才是恢复而不是丢弃。
+//
+// 其余 4xx 保持原义：身份冲突、任务不存在都不是「活权挪走了」，不能借这条通道绕过去。
+export function isRecoverableDeliveryRegistrationRefusal(result) {
+  return result?.payload?.code === 'scheduled_task_not_claimed_by_producer';
+}
+
 export function unavailableLingganStats(statsState = 'not_connected') {
   return {
     success: true,
