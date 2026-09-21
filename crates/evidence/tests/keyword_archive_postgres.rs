@@ -1644,3 +1644,33 @@ async fn recovery_phase_skips_keyword_candidate_scan() {
     assert!(result.status.success(), "{} {}",
         String::from_utf8_lossy(&result.stdout), String::from_utf8_lossy(&result.stderr));
 }
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn an_unsigned_work_cannot_borrow_another_works_signed_locator() {
+    let database = proof_database("keyword_locator_correlation").await;
+    submit_home_domain_keyword_archive(&database, "unrelated-home-signed").await;
+    submit_keyword_archive_of(&database, "unrelated-sample-signed", "signed-sample", "bottom_confirmed", 1, 0).await;
+    let mut borrowed = Vec::new();
+    for (domain, identity) in [(HOME_DOMAIN, "unsigned-home"), (EXTERNAL_DOMAIN, "unsigned-sample")] {
+        let (coverage, checkpoint, records) = keyword_archive_round(
+            identity, "bottom_confirmed", 1, 0,
+            &format!("https://www.xiaohongshu.com/explore/{identity}"),
+        );
+        submit_package_in_domain(
+            &database, domain, identity, "deep_archive",
+            serde_json::json!({"query":"考研自习","ranking":"most_liked","scrollRounds":10}),
+            FIXTURE_QUOTA, "discovery_search", coverage, checkpoint, records,
+        ).await;
+        let target_ref: Uuid = sqlx::query_scalar(
+            "SELECT target_ref FROM collection_observation_target WHERE identity_key=$1",
+        ).bind(identity).fetch_one(database.pool()).await.unwrap();
+        let pending = keyword_targets_pending_detail(&database, &[target_ref]).await.unwrap();
+        if pending.contains(&target_ref) {
+            borrowed.push(identity);
+            continue;
+        }
+        assert!(!matches!(advance_keyword_archive_detail(&database, target_ref, "proof", "agent").await.unwrap(), KeywordDetailAdvance::Queued { .. }));
+    }
+    assert!(borrowed.is_empty(), "unsigned works borrowed unrelated locators: {borrowed:?}");
+}
