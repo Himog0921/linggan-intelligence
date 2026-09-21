@@ -210,8 +210,8 @@ pub use scheduler_tick::{
 };
 pub use selector_health::{
     SELECTOR_HEALTH_MAX_BYTES, SELECTOR_HEALTH_MAX_CATEGORIES, SELECTOR_HEALTH_PAGE_TYPES,
-    SELECTOR_HEALTH_PLATFORMS, SelectorHealthRejection, accepted_selector_health,
-    normalize_selector_health,
+    SELECTOR_HEALTH_PLATFORMS, SELECTOR_HEALTH_SNAPSHOT_FIELDS, SelectorHealthRejection,
+    accepted_selector_health, normalize_selector_health,
 };
 pub use station_read::{
     CapabilityState, StationCapability, StationOverview, StationSelectorHealth,

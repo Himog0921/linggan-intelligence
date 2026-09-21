@@ -228,7 +228,7 @@
 | [`audits/code-quality-review-2026-09-14.md`](audits/code-quality-review-2026-09-14.md) | 一次性报告 | `AUD-CODE-QUALITY-20260914`：固定主线 `431e79b` 的第七层代码质量核实包——逐条给出定位、判据原文、复现命令、预期输出与反证条件，附已排除项与未覆盖范围；供独立复核，不授予修复、采集、部署或合并权限 |
 | [`runbooks/development-environment.md`](runbooks/development-environment.md) | 权威当前 | Rust 与 Docker PostgreSQL 16 的统一运行入口 |
 | [`runbooks/local-evidence-library.md`](runbooks/local-evidence-library.md) | 权威当前 | Rust loopback host、health、受控 discovery ingress 与 Evidence Library 本地启动/验证；明确不含真实插件、平台或媒体链路 |
-| [`runbooks/local-runtime-deployment.md`](runbooks/local-runtime-deployment.md) | 权威当前 | 三个 launchd 常驻服务的运行来源、跟随 origin/main 的更新方式、迁移闸门与故障处置；取代已废弃的冻结快照模型 |
+| [`runbooks/local-runtime-deployment.md`](runbooks/local-runtime-deployment.md) | 权威当前 | 三个 launchd 常驻服务的运行来源、跟随 origin/main 的更新方式、迁移闸门与故障处置；§7 为运行诊断（一个 tick 号串一条链的查询、事件与选择器快照的字段白名单，样例为手工构造的脱敏样例）；取代已废弃的冻结快照模型 |
 | [`runbooks/linggan-browser-producer-local.md`](runbooks/linggan-browser-producer-local.md) | 权威当前 | Browser Producer 当前 `0.8.47` 构建/发行/加载/工位/真实回执的分层核对步骤；操作授权仍以当次任务为准 |
 | [`platforms/xiaohongshu/capture-capability-registry.md`](platforms/xiaohongshu/capture-capability-registry.md) | 权威当前；AUD-XHS-001 范围内 | 小红书页面字段、探针、插件交付能力、Coverage 与平台漂移的唯一登记入口；不保存真实原文或接入真实材料 |
 | [`decisions/0002-comment-collection-completion-and-retry.md`](decisions/0002-comment-collection-completion-and-retry.md) | ACCEPTED | 小红书评论的标准 30 条窗口、全量深采完成判据、部分材料可用性、重新从详情页采集及当前去重投影规则 |

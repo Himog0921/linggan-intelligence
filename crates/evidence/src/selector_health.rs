@@ -43,6 +43,28 @@ pub const SELECTOR_HEALTH_PAGE_TYPES: [&str; 6] = [
 /// 一次检查能带的检查项上限（`checked`/`missing`/`stale` 各自，`failureCounts` 另算）。
 pub const SELECTOR_HEALTH_MAX_CATEGORIES: usize = 16;
 
+/// 收下的快照里的键（闭集），一条平台记录一份。
+///
+/// 与插件 `src/shared/selectorHealth.js` 的 `SELECTOR_HEALTH_SNAPSHOT_FIELDS` 是同一份
+/// 合同的**两侧**：插件那份是八个键，没有 `failureCounts`——连续次数由本机的留存层数出来
+/// （页面看到的那一次里本来就没有「连续几次」这回事），报到时才补上；服务端收的是补过之后
+/// 的形状，所以这里是九个。
+///
+/// 它同时是测试的**判据**：`nothing_outside_the_field_whitelist_survives_into_the_snapshot`
+/// 断言收下来的键与这张表逐个相等——多一个（有人塞了别的字段进来）少一个（新增字段忘了
+/// 登记）都变红。写死一份在测试里、代码里另写一份，就是同一件事有了两个答案。
+pub const SELECTOR_HEALTH_SNAPSHOT_FIELDS: [&str; 9] = [
+    "platform",
+    "pageType",
+    "capability",
+    "checkedAt",
+    "verifiedAt",
+    "checkedCategories",
+    "missingCategories",
+    "staleCategories",
+    "failureCounts",
+];
+
 /// 一份上报收得下的最大字节数。超长载荷不只是「大」——它多半意味着有人往里塞了别的东西。
 pub const SELECTOR_HEALTH_MAX_BYTES: usize = 4096;
 
@@ -272,7 +294,9 @@ mod tests {
         let accepted = normalize_selector_health(&report(json!({}))).expect("收下");
         let snapshot = &accepted["xhs"];
 
-        // 收下来的是这份形状，不是页面报来的原样：多出来的字段不会跟着走。
+        // 收下来的是这份形状，不是页面报来的原样：字段表外的键不会跟着走（那份证据在
+        // `nothing_outside_the_field_whitelist_survives_into_the_snapshot` 里，这里先钉住
+        // 收下的就是字段表本身）。
         let mut keys: Vec<&str> = snapshot
             .as_object()
             .expect("对象")
@@ -280,21 +304,45 @@ mod tests {
             .map(String::as_str)
             .collect();
         keys.sort_unstable();
-        assert_eq!(
-            keys,
-            [
-                "capability",
-                "checkedAt",
-                "checkedCategories",
-                "failureCounts",
-                "missingCategories",
-                "pageType",
-                "platform",
-                "staleCategories",
-                "verifiedAt",
-            ]
-        );
+        let mut whitelist: Vec<&str> = SELECTOR_HEALTH_SNAPSHOT_FIELDS.to_vec();
+        whitelist.sort_unstable();
+        assert_eq!(keys, whitelist);
         assert_eq!(snapshot["failureCounts"]["feed_container"], 3);
+    }
+
+    /// 快照里**只能**有字段表上的键。上报口开在页面上，页面来的东西不可信：一份夹带了选择器
+    /// 串、DOM 文本、带签名的地址或别的东西的载荷，收下来之后那些键必须一个都不剩。
+    ///
+    /// 插件那一侧已经在出门前收过一次口（`SELECTOR_HEALTH_SNAPSHOT_FIELDS`）；这里证明的是
+    /// **换一个人发同一样东西**——服务端不因为「发送方是自家的插件」就少做一次收口。
+    #[test]
+    fn nothing_outside_the_field_whitelist_survives_into_the_snapshot() {
+        let accepted = normalize_selector_health(&report(json!({
+            "selector": "#feed .note-item a",
+            "domText": "页面上的原文",
+            "url": "https://www.xiaohongshu.com/explore?xsec_token=SECRET",
+            "pluginVersion": "0.8.47",
+            "ruleVersion": "2026-06-01",
+            "nested": { "anything": [1, 2, 3] },
+        })))
+        .expect("字段表内的部分照收");
+        let snapshot = accepted["xhs"].as_object().expect("对象");
+
+        let mut keys: Vec<&str> = snapshot.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        let mut whitelist: Vec<&str> = SELECTOR_HEALTH_SNAPSHOT_FIELDS.to_vec();
+        whitelist.sort_unstable();
+        assert_eq!(keys, whitelist, "快照只带字段表上的键");
+        for leaked in [
+            "selector",
+            "domText",
+            "url",
+            "pluginVersion",
+            "ruleVersion",
+            "nested",
+        ] {
+            assert!(snapshot.get(leaked).is_none(), "{leaked} 不该留在快照里");
+        }
     }
 
     #[test]

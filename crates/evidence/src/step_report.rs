@@ -1,15 +1,21 @@
 //! 一步的结果：三值结局 + 「什么样的错误算没轮到」。
 //!
-//! 与账本（`scheduler_tick`）分开，是因为这一层是**值**：它不碰数据库、不认识 run。写行是
-//! 账本那一层的事。分开也是为了让「三个结局」和 `0098` 的 CHECK 挨着住——两边是同一套词，
-//! 改一处必须改另一处。
+//! 与账本（`scheduler_tick`）分开，是因为这一层是**值**：它不碰数据库，也不管这一步属于哪一
+//! 轮——写行是账本那一层的事。分开也是为了让「三个结局」和 `0098` 的 CHECK 挨着住——两边是
+//! 同一套词，改一处必须改另一处。
+//!
+//! 一份报告有两个读者：账本（一行步骤）与事件（一行日志）。两者的**值**只在这里写一次
+//! （[`StepReport::event`] 与 [`StepOutcome`] 的那几个取值方法）：两个读者各写一份映射，迟早
+//! 会一个说 `failed`、另一个说 `ok`，而它们指的是同一件事。
 //!
 //! 失败一律压成受限码（`error_class` / `skipped_reason`，字符集 `[a-z0-9_]`、最长 32 字符）：
 //! 原始报文可能带着连接串与页面文本，而这几列是给人看、给页面读的持久事实。
 
 use std::time::Duration;
 
-use crate::runtime_event::bounded_code;
+use uuid::Uuid;
+
+use crate::runtime_event::{EVENT_TICK_STEP, RuntimeEvent, SERVICE_WORKER, bounded_code};
 
 /// 这一步的结局。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -92,6 +98,37 @@ pub struct StepReport {
     pub step_key: &'static str,
     pub outcome: StepOutcome,
     pub duration: Duration,
+}
+
+impl StepReport {
+    /// 这一步的一行事件。`tick_ref` 是**引用**，不是这一步的状态：日志与账本要说的是同一轮，
+    /// 所以两边写的是同一个号（`TickLedger::run_ref`），不是各算各的。
+    ///
+    /// 值只在这里写一次：账本写库、事件写日志是同一件事的两个读者，各写一份映射迟早会各说
+    /// 各话。落盘的字段形状由 [`RuntimeEvent`] 的闭集保证，这里只管把三个结局翻译成它认的词。
+    pub fn event(&self, tick_ref: Uuid) -> RuntimeEvent {
+        let mut event = RuntimeEvent::new(SERVICE_WORKER, EVENT_TICK_STEP)
+            .with_tick(tick_ref)
+            .with_step(self.step_key)
+            .with_outcome(self.outcome.code())
+            .with_duration(self.duration);
+        if let Some(reason) = self.outcome.reason() {
+            event = event.with_reason(reason);
+        }
+        if let Some(error_class) = self.outcome.error_class() {
+            event = event.with_error_class(error_class);
+        }
+        // 只有跑完的步骤有计数：失败与跳过的行在账本里也留空，不能在这里凭空补 0。
+        if let StepOutcome::Ok {
+            considered,
+            produced,
+            skipped,
+        } = &self.outcome
+        {
+            event = event.with_counts(*considered, *produced, *skipped);
+        }
+        event
+    }
 }
 
 /// 一步的失败怎么变成受限码。

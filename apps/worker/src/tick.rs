@@ -14,14 +14,12 @@
 use std::time::Duration;
 
 use linggan_evidence::{
-    COLLECTION_RUNTIME_REQUIREMENTS, EVENT_TICK, EVENT_TICK_STEP, PatrolTickSummary, RuntimeEvent,
-    RuntimeReadiness, SERVICE_WORKER, STEP_MEDIA_ACQUISITION, STEP_PATROL,
-    STEP_PROGRESSIVE_DOSSIERS, StepOutcome, StepReport, TickLedger, connect_runtime_readiness,
-    ensure_discovery_cover_media_work, probe_runtime_readiness, run_due_patrol_step,
-    run_progressive_archives, tick_outcome,
+    COLLECTION_RUNTIME_REQUIREMENTS, EVENT_TICK, PatrolTickSummary, RuntimeEvent, RuntimeReadiness,
+    SERVICE_WORKER, STEP_MEDIA_ACQUISITION, STEP_PATROL, STEP_PROGRESSIVE_DOSSIERS, StepOutcome,
+    StepReport, TickLedger, connect_runtime_readiness, ensure_discovery_cover_media_work,
+    probe_runtime_readiness, run_due_patrol_step, run_progressive_archives, tick_outcome,
 };
 use linggan_storage_postgres::Database;
-use uuid::Uuid;
 
 use crate::keyword_details;
 
@@ -90,7 +88,6 @@ pub async fn run_collection_tick(database: &Database) {
             return;
         }
     };
-    let tick_ref = ledger.run_ref();
     // 顺序是有意的：先做投影，再推进档案与关键词，最后按到期派活——巡查看到的是前三步
     // 已经落库的世界。四步各自 await 完毕再开下一步，不并发。
     let reports = vec![
@@ -100,10 +97,10 @@ pub async fn run_collection_tick(database: &Database) {
         patrol_step(database, &ledger).await,
     ];
     for report in &reports {
-        emit_step(tick_ref, report);
+        emit_step(&ledger, report);
     }
     RuntimeEvent::new(SERVICE_WORKER, EVENT_TICK)
-        .with_tick(tick_ref)
+        .with_tick(ledger.run_ref())
         .with_outcome(tick_outcome(&reports))
         .emit();
     if let Err(error) = ledger.finish(&reports).await {
@@ -195,25 +192,13 @@ fn report_failure<T, E: std::fmt::Display>(
 }
 
 /// 一步一行事件。字段是闭集（`runtime_event::EVENT_FIELD_WHITELIST`）：没有能塞任意键的入口。
-fn emit_step(tick_ref: Uuid, report: &StepReport) {
-    let mut event = RuntimeEvent::new(SERVICE_WORKER, EVENT_TICK_STEP)
-        .with_tick(tick_ref)
-        .with_step(report.step_key)
-        .with_outcome(report.outcome.code())
-        .with_duration(report.duration);
-    if let Some(reason) = report.outcome.reason() {
-        event = event.with_reason(reason);
-    }
-    if let Some(error_class) = report.outcome.error_class() {
-        event = event.with_error_class(error_class);
-    }
-    if let StepOutcome::Ok {
-        considered,
-        produced,
-        skipped,
-    } = &report.outcome
-    {
-        event = event.with_counts(*considered, *produced, *skipped);
-    }
-    event.emit();
+///
+/// 值不在这里拼：同一份报告还要写进账本，两处的映射只应有一份（[`StepReport::event`]）。
+/// 这里只负责把那一行发出去。
+///
+/// **号也不经手**：这一轮的号当场问账本要。上一个版本把它取出来放在一个局部变量里，于是
+/// 这个变量就有了两个去处（事件与收轮），而两处各写各的号时它们会各自都对、合起来对不上——
+/// 那正是这条链最要命的错法。手里没有第二个号，就没有传错的机会。
+fn emit_step(ledger: &TickLedger, report: &StepReport) {
+    report.event(ledger.run_ref()).emit();
 }

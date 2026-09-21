@@ -21,10 +21,12 @@ mod fixture;
 
 use fixture::proof_database;
 use linggan_evidence::{
-    COLLECTION_RUNTIME_REQUIREMENTS, PatrolTickSummary, STEP_KEYWORD_DETAILS, STEP_MEDIA_ACQUISITION,
-    STEP_PATROL, STEP_PROGRESSIVE_DOSSIERS, StepOutcome, StepReport, TICK_STEP_KEYS, TickLedger,
-    ensure_discovery_cover_media_work, probe_runtime_readiness, record_readiness,
-    run_due_patrol_step, run_keyword_archive_details, run_progressive_archives, tick_outcome,
+    AuthorizationGrant, COLLECTION_RUNTIME_REQUIREMENTS, MonitorCommandActor, MonitorCommandKind,
+    MonitorRuleCommand, MonitorRuleDraft, MonitorRuleMode, PatrolTickSummary, STEP_KEYWORD_DETAILS,
+    STEP_MEDIA_ACQUISITION, STEP_PATROL, STEP_PROGRESSIVE_DOSSIERS, StepOutcome, StepReport,
+    TICK_STEP_KEYS, TickLedger, apply_monitor_rule_command, ensure_discovery_cover_media_work,
+    grant_authorization, probe_runtime_readiness, record_readiness, run_due_patrol_step,
+    run_keyword_archive_details, run_progressive_archives, tick_outcome,
 };
 use linggan_storage_postgres::Database;
 use uuid::Uuid;
@@ -200,11 +202,7 @@ async fn one_failing_step_is_recorded_alone_while_the_other_three_finish() {
         "没数过的计数留空，不写 0"
     );
 
-    for step_key in [
-        STEP_PROGRESSIVE_DOSSIERS,
-        STEP_KEYWORD_DETAILS,
-        STEP_PATROL,
-    ] {
+    for step_key in [STEP_PROGRESSIVE_DOSSIERS, STEP_KEYWORD_DETAILS, STEP_PATROL] {
         let row = step_row(&database, run_ref, step_key).await;
         assert_eq!((row.1.as_str(), row.3.as_deref()), ("ok", None));
     }
@@ -347,4 +345,166 @@ async fn readiness_is_a_heartbeat_column_that_does_not_touch_the_tick_columns() 
     assert_eq!(last_outcome, "unknown", "开轮写了「还没结局」，就留着");
     assert_eq!(last_completed_at, None, "这一轮还没收轮");
     drop(ledger);
+}
+
+/// 一条到期的巡查规则 + 一份适用于它的授权，让巡查步在这一轮里真的排出一张工单。
+///
+/// 走的是与 `collection_dispatch_sequence_postgres` 相同的公开入口（改目标、存规则、把排期
+/// 拨到过期），不另造一套「更简单的」夹具：夹具替系统干活，藏起来的正是系统真会怎么做。
+async fn seed_a_due_patrol_rule(database: &Database) -> Uuid {
+    let target_ref = Uuid::new_v4();
+    // 领域是采集的**准入前提**，不是装饰：`0041` 之后，没归属领域的目标在申请工位之前就被
+    // 挡下（`target_domain_unassigned`）——「这批材料该写进哪个库」必须在花掉第一次平台
+    // 访问之前就有答案。所以这里像建档路径（`store_pending_target`）一样，显式把本领域写上。
+    // 领域号从表里读，不抄 `0041` 里那串字面量：抄下来就多了一份会各自漂的副本。
+    sqlx::query(
+        "INSERT INTO collection_observation_target \
+             (target_ref,platform,target_kind,identity_key,display_name,source,lifecycle_state,domain_ref) \
+         VALUES ($1,'xhs','creator','tick-trace-proof','串证证明','manual','pending_decision', \
+                 (SELECT home.domain_ref FROM observation_domain home WHERE home.is_own_domain))",
+    )
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .expect("the patrol target is seeded with its domain");
+    grant_authorization(
+        database,
+        &AuthorizationGrant {
+            platform: "xhs",
+            target_kind: "creator",
+            lane: "patrol",
+            purpose: "tick trace proof",
+            max_targets: Some(10),
+            max_works_per_target: Some(30),
+            valid_for_days: 1,
+        },
+    )
+    .await
+    .expect("creator patrol authorization is granted");
+    let saved = apply_monitor_rule_command(
+        database,
+        &MonitorRuleCommand {
+            target_ref,
+            expected_revision: 0,
+            idempotency_key: Uuid::new_v4(),
+            kind: MonitorCommandKind::SaveRule,
+            actor: MonitorCommandActor::Person,
+            source: "targets_ui",
+            slot_key: None,
+            draft: Some(MonitorRuleDraft {
+                mode: MonitorRuleMode::Fixed,
+                automatic_enabled: true,
+                run_on_weekdays: true,
+                run_on_weekends: true,
+                all_day: true,
+                window_start_minute: None,
+                window_end_minute: None,
+                fixed_interval_seconds: Some(21_600),
+                fallback_interval_seconds: 21_600,
+                surface_key: "creator_patrol".to_owned(),
+                ranking_key: None,
+                scroll_rounds: None,
+                top_by_likes: None,
+                published_within_days: None,
+                task_contract_version: "linggan.producer.task-spec.v1".to_owned(),
+            }),
+        },
+    )
+    .await
+    .expect("the patrol rule is saved");
+    assert_eq!(saved.reason_code, "rule_saved");
+    // 排期住在规则上（`0076`/`0078`）：把它拨到过期，这一轮才会排活。
+    sqlx::query(
+        "UPDATE collection_monitor_rule \
+         SET monitor_next_run_at=scope_001_now()-interval '1 second' WHERE target_ref=$1",
+    )
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .expect("the isolated clock makes the rule due");
+    target_ref
+}
+
+/// S4 退出条件：**一次 tick 的一步失败，只用引用就能串出整个故事**（COLLECTION-UPGRADE-001 · S4d）。
+///
+/// 一条采集链断在哪里，此前要靠在几万行日志里往回翻：调度说「这一轮没派活」，插件说「没拿到
+/// 活」，哪个都不指向同一个东西。现在一次 tick 有一个号（`tickRef`），库里四张表都挂着它或
+/// 挂在挂着它的东西上，于是「谁失败了、失败在哪个类别、这一步排出了什么、排出给谁」是一条
+/// JOIN 的事，不需要累计任何日志。
+///
+/// 反向也钉住：**日志里那一行的 `tickRef` 与库里串证的入口是同一个号**——两处各算一个号，
+/// 就会各自都对、合起来对不上。这份报告也写进账本，两处的值出自同一份映射
+/// （`StepReport::event`），本用例用的正是 `apps/worker` 发事件时走的那个方法。
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn one_tick_ref_strings_the_failure_and_what_it_queued_without_reading_the_logs() {
+    let database = proof_database("tick_trace_chain").await;
+    let target_ref = seed_a_due_patrol_rule(&database).await;
+    // 真的坏一处：媒体投影要读的那一列改名，这一步会拿到一个真实的 SQLSTATE。
+    break_the_media_projection(&database).await;
+
+    let (run_ref, reports) = run_one_tick(&database).await;
+
+    // 只用 run 号——也是事件里的 `tickRef`。四张表走到底，中间没有一处读日志或累计计数。
+    let trace: (String, Option<String>, String, String, Uuid, Uuid, String) = sqlx::query_as(
+        "SELECT step.step_key, step.error_class, decision.outcome, decision.reason_code, \
+                decision.target_ref, decision.work_order_ref, work_order.queue_state \
+         FROM collection_scheduler_run_step step \
+         JOIN collection_scheduler_target_decision decision \
+           ON decision.scheduler_run_ref = step.scheduler_run_ref \
+         JOIN collection_work_order work_order \
+           ON work_order.work_order_ref = decision.work_order_ref \
+         WHERE step.scheduler_run_ref = $1 AND step.outcome = 'failed'",
+    )
+    .bind(run_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("从一个 run 号出发就能走到「哪一步失败了 + 这一步排出了什么」");
+
+    assert_eq!(trace.0, STEP_MEDIA_ACQUISITION, "失败的是哪一步");
+    assert_eq!(
+        trace.1.as_deref(),
+        Some("sqlstate_42703"),
+        "失败在哪个受限类别（不是报文）"
+    );
+    assert_eq!(
+        (trace.2.as_str(), trace.3.as_str()),
+        ("queued", "queued"),
+        "同一轮里巡查步排出的决定"
+    );
+    assert_eq!(trace.4, target_ref, "决定指向的目标");
+    assert_eq!(trace.6, "queued", "决定指向的工单此刻的状态");
+
+    // 工单确实挂在这个目标上：串证不是「两条各自成立的记录被摆在了一起」。
+    let work_order_target: Uuid =
+        sqlx::query_scalar("SELECT target_ref FROM collection_work_order WHERE work_order_ref=$1")
+            .bind(trace.5)
+            .fetch_one(database.pool())
+            .await
+            .expect("the queued work order is readable");
+    assert_eq!(work_order_target, target_ref);
+
+    // 日志那一侧：同一份报告发出去的那一行，号与库里串证的入口是同一个，分类码也同一个。
+    let failed = reports
+        .iter()
+        .find(|report| report.step_key == STEP_MEDIA_ACQUISITION)
+        .expect("这一轮四步各有报告");
+    let line: serde_json::Value =
+        serde_json::from_str(&failed.event(run_ref).to_json()).expect("一行事件就是一行 JSON");
+    assert_eq!(line["tickRef"], run_ref.to_string());
+    assert_eq!(line["stepKey"], STEP_MEDIA_ACQUISITION);
+    assert_eq!(line["outcome"], "failed");
+    assert_eq!(line["errorClass"], "sqlstate_42703");
+    assert!(
+        line.get("considered").is_none() && line.get("produced").is_none(),
+        "失败的行不带计数：账本里这一步也没有数，两个读者说同一件事"
+    );
+    // 这一行**只能**带白名单上的字段（`runtime_event::EVENT_FIELD_WHITELIST`）：这一步是
+    // 运行链上的最后一道口，任何一处「顺手把详情塞进日志」都会在这里露出来。
+    for key in line.as_object().expect("一行事件就是一个对象").keys() {
+        assert!(
+            linggan_evidence::EVENT_FIELD_WHITELIST.contains(&key.as_str()),
+            "事件漏出了白名单之外的字段：{key}"
+        );
+    }
 }
