@@ -36,6 +36,10 @@
     EXPIRED: ['租约已过期', 'warning'],
     EXPIRED_WITHOUT_RECEIPT: ['租约结束，未见回执', 'warning'],
     COMPLETED_WITHOUT_RECEIPT: ['任务结束，未见回执', 'warning'],
+    // 缺执行地址在浏览器 Attempt 之前就被停下（迁移 0097）：它没有 Attempt、没有 Package，也
+    // 不会自己重排。别让它掉进 `来源未完整表达` 的兜底——那会读成「还没轮到」，而它其实已经
+    // 停了。措辞与 /collection 目标检查器的 `输入不可执行` 同源，补上后果。
+    INPUT_BLOCKED: ['输入不可执行，已停止', 'warning'],
     NOT_OBSERVED: ['尚未形成观察', 'unknown'],
     OBSERVED: ['已观察', 'info'],
     PARTIAL: ['部分取得', 'warning'],

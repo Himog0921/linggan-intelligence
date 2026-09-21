@@ -113,6 +113,15 @@ async fn main() -> ExitCode {
                 emit_readiness(&readiness);
                 announced = Some(readiness.state.code());
             }
+            // 未就绪同样要落心跳，而且是**每轮都落**：日志只在状态变化时说话（上面那句），
+            // 但心跳那一行是「最后一次判定」——只写第一次，`readiness_checked_at` 会永远停在
+            // 故障开始的那一刻，读它的人分不清「现在还接不了活」和「这台机器说完那句话就死了」。
+            // 连不上数据库时 `database` 还是 None，没有可写之处：那种情况由 `/health` 说。
+            if let Some(database) = database.as_ref() {
+                if let Err(error) = record_readiness(database, &readiness).await {
+                    println!("linggan worker: cannot record readiness: {error}");
+                }
+            }
             tokio::select! {
                 _ = &mut shutdown => break,
                 _ = tokio::time::sleep(retry_after) => {}

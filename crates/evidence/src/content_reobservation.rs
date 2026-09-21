@@ -383,12 +383,23 @@ async fn linked_authorization_in_transaction(
     }))
 }
 
-fn task_from_row(row: &sqlx::postgres::PgRow, lease_released: bool) -> ReobservationTask {
-    let execution_state: String = row.get("execution_state");
-    let attempt_id: Option<Uuid> = row.get("attempt_id");
-    let package_ref: Option<Uuid> = row.get("package_ref");
-    let receipt_ref: Option<Uuid> = row.get("receipt_ref");
-    let state = if receipt_ref.is_some() {
+/// The reader-facing state词表 of one lease task.
+///
+/// 单独提出来是为了能被单元测试钉住：它只从四个已知量判状态，不碰数据库。判据顺序即语义：
+/// 有回执才算交付；生产方确认页面不在、页面读过但没读成、以及**从未拿到执行地址**是三种不同
+/// 的失败，不能说成同一个；租约已释放而任务还停在 pending，才是「租约结束，未见回执」。
+///
+/// `input_blocked` 必须单列。它在 `0097` 之前于 `execution_state` 里根本不存在——缺地址的成员
+/// 在浏览器 Attempt 之前就被停下，既没有 Attempt 也没有 Package。旧的 `else` 兜底会把它读成
+/// `QUEUED`，那是在告诉操作者「还在排队」：一篇永远不会再被派发的作品，看起来和一篇正等着
+/// 派发的作品完全一样。停止必须有停止的说法。
+fn task_state(
+    execution_state: &str,
+    lease_released: bool,
+    attempt_id: Option<Uuid>,
+    receipt_ref: Option<Uuid>,
+) -> &'static str {
+    if receipt_ref.is_some() {
         "ACCEPTED"
     } else if execution_state == "completed" {
         "COMPLETED_WITHOUT_RECEIPT"
@@ -396,6 +407,8 @@ fn task_from_row(row: &sqlx::postgres::PgRow, lease_released: bool) -> Reobserva
         "PAGE_UNAVAILABLE"
     } else if execution_state == "blocked" {
         "DETAIL_READ_BLOCKED"
+    } else if execution_state == "input_blocked" {
+        "INPUT_BLOCKED"
     } else if lease_released {
         "EXPIRED_WITHOUT_RECEIPT"
     } else if execution_state == "in_progress" && attempt_id.is_some() {
@@ -404,7 +417,20 @@ fn task_from_row(row: &sqlx::postgres::PgRow, lease_released: bool) -> Reobserva
         "CLAIMED"
     } else {
         "QUEUED"
-    };
+    }
+}
+
+fn task_from_row(row: &sqlx::postgres::PgRow, lease_released: bool) -> ReobservationTask {
+    let execution_state: String = row.get("execution_state");
+    let attempt_id: Option<Uuid> = row.get("attempt_id");
+    let package_ref: Option<Uuid> = row.get("package_ref");
+    let receipt_ref: Option<Uuid> = row.get("receipt_ref");
+    let state = task_state(
+        &execution_state,
+        lease_released,
+        attempt_id,
+        receipt_ref,
+    );
     ReobservationTask {
         task_id: row.get("task_id"),
         capability: row.get("capability"),
@@ -449,5 +475,51 @@ const fn reobservation_media_policy() -> ReobservationMediaPolicy {
     ReobservationMediaPolicy {
         state: "NOT_REQUESTED",
         reason: "EXISTING_ASSETS_REUSED",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::task_state;
+    use uuid::Uuid;
+
+    /// `0097` 的 `input_blocked` 与 `blocked` 都带 `attempt_id = NULL`，也都没有回执：只有
+    /// `execution_state` 这一个词能把它们分开。若这个分支缺位，兜底的 `QUEUED` 会把一篇
+    /// **永远不会再被派发**的作品说成「还在排队」——操作者等一个不存在的交付。
+    #[test]
+    fn a_task_stopped_for_missing_input_is_not_reported_as_queued() {
+        assert_eq!(
+            task_state("input_blocked", true, None, None),
+            "INPUT_BLOCKED",
+        );
+        assert_eq!(task_state("input_blocked", false, None, None), "INPUT_BLOCKED");
+    }
+
+    /// 词表其余分支与顺序一并钉住：租约已释放只解释 **pending**，不能把已经说明过原因的
+    /// 三种失败（`unavailable`/`blocked`/`input_blocked`）改写成「租约结束，未见回执」。
+    #[test]
+    fn the_release_reason_never_overrides_a_state_that_already_explains_itself() {
+        assert_eq!(
+            task_state("unavailable", true, None, None),
+            "PAGE_UNAVAILABLE"
+        );
+        assert_eq!(task_state("blocked", true, None, None), "DETAIL_READ_BLOCKED");
+        assert_eq!(
+            task_state("pending", true, None, None),
+            "EXPIRED_WITHOUT_RECEIPT"
+        );
+        assert_eq!(task_state("pending", false, None, None), "QUEUED");
+        let attempt = Uuid::nil();
+        assert_eq!(task_state("in_progress", false, Some(attempt), None), "RUNNING");
+        assert_eq!(task_state("in_progress", false, None, None), "CLAIMED");
+        let receipt = Uuid::nil();
+        assert_eq!(
+            task_state("completed", false, Some(attempt), Some(receipt)),
+            "ACCEPTED"
+        );
+        assert_eq!(
+            task_state("completed", false, Some(attempt), None),
+            "COMPLETED_WITHOUT_RECEIPT"
+        );
     }
 }

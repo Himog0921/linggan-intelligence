@@ -1,7 +1,15 @@
 (() => {
   'use strict';
 
-  const TERMINAL_TASK_STATES = new Set(['ACCEPTED', 'EXPIRED_WITHOUT_RECEIPT', 'COMPLETED_WITHOUT_RECEIPT']);
+  // `INPUT_BLOCKED` 是终态：缺执行地址的成员在 Attempt 之前就被停下，租约也随之结束
+  // （迁移 0097）；它只可能被**新的**输入或新的资格行重新派发，不会沿这张租约继续走。
+  // 不把它算终态，页面就会对一张已经结束的租约每 2.5 秒问一次，直到用户关掉抽屉。
+  const TERMINAL_TASK_STATES = new Set([
+    'ACCEPTED',
+    'EXPIRED_WITHOUT_RECEIPT',
+    'COMPLETED_WITHOUT_RECEIPT',
+    'INPUT_BLOCKED',
+  ]);
 
   function createController({ apiRoot, sameOriginPath, readJson, onChange, onTerminal, postJson = postJsonSameOrigin, timer = window }) {
     const state = {

@@ -11,6 +11,8 @@ use std::io::{BufRead, BufReader};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
+use linggan_storage_postgres::{Database, testing::isolated_proof_schema};
+
 const WORKER_BINARY: &str = env!("CARGO_BIN_EXE_linggan-worker");
 const MEDIA_WORKER_BINARY: &str = env!("CARGO_BIN_EXE_linggan-media-worker");
 
@@ -209,4 +211,113 @@ async fn reachable_but_unmigrated_database_is_classified_not_masked() {
         !log.contains("patrol tick every"),
         "未就绪期间不进入任何 tick 步骤：{log}"
     );
+}
+
+/// 未就绪的分类必须落在心跳里，而不是只留在日志上。
+///
+/// `0098` 给心跳加 `readiness_state` / `readiness_detail` / `readiness_checked_at` 三列，
+/// 理由写在迁移头上：日志与 `/health` 都是**即时**视图，重启即丢，而「这台机器从上周起就
+/// 一直没迁移完」要在重启之后仍然查得出来。列注释也写着同一件事：anything other than
+/// ready means this machine must not claim work。
+///
+/// 而 worker 此前只在**就绪**那一支写心跳：未就绪的一支打完日志就退避重试。于是那五类
+/// 「不能接活」写得进、查得出，却没人写——库里那一行永远停在 `ready` 或 `unknown`，
+/// 恰恰是操作者最需要的那条事实缺失。
+///
+/// 这条用例问的是**调用点**：起一个真的 worker 进程，让它面对一个「连得上、但接不了活」
+/// 的库（迁移全部应用，台账里唯独不登记 `0034`），然后不读日志、只读心跳那一行。
+///
+/// 夹具的边界说清楚：写入逻辑跑在生产代码上，这条用例只提供落点。真表由 `0020` 建、
+/// `0098` 加列，同一条 UPDATE 落进**真表**已由 `linggan-evidence` 的
+/// `readiness_is_a_heartbeat_column_that_does_not_touch_the_tick_columns` 在完整迁移链上
+/// 证明过；这里要证的是另一件事——未就绪分支真的会调用它。
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn an_unready_worker_leaves_its_classification_in_the_heartbeat() {
+    let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").expect("proof URL is supplied");
+    let schema = "worker_readiness_landing";
+    isolated_proof_schema(&url, schema, &migrations_missing("0034_collection_control_closure"))
+        .await
+        .expect("the fixture schema is built from the real migration directory");
+
+    // 子进程只拿得到一个连接串，所以 schema 走 libpq 的 `options`——它与
+    // `Database::connect_within_schema` 写进 startup 包的是同一个参数。
+    let (alive, log) = WorkerRun::start(Some(&format!("{url}?options=-csearch_path%3D{schema}")))
+        .observe_for(Duration::from_secs(3));
+    assert!(alive, "接不了活时要留在原地等它变好，而不是退出：{log}");
+    assert!(
+        log.contains("not ready (migrations_not_applied"),
+        "台账缺一个被要求的 migration id，就该报这一分类：{log}"
+    );
+
+    let database = Database::connect_within_schema(&url, schema)
+        .await
+        .expect("the isolated schema is reachable");
+    let (state, detail, checked_at): (String, Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT readiness_state,readiness_detail,readiness_checked_at::text \
+         FROM collection_scheduler_heartbeat WHERE scheduler_key='patrol'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("the worker left a heartbeat row behind");
+    assert_eq!(
+        state, "migrations_not_applied",
+        "未就绪的分类要落在心跳里；只留在日志上等于重启就丢"
+    );
+    assert_eq!(
+        detail.as_deref(),
+        Some("0034_collection_control_closure"),
+        "原因要是限制过的那个标识，不是一句散文"
+    );
+    assert!(checked_at.is_some(), "判定时刻来自数据库时钟");
+}
+
+/// 把真实迁移目录按文件名顺序拼成一段 SQL，并在台账里登记**除** `missing` 之外的每一条。
+///
+/// 不手抄一份迁移清单：抄一份就会漂移，而漂移的夹具绿的没有意义。台账在生产上由
+/// `scripts/local-runtime.sh migrate` 写；这里由夹具代笔，因为探针读的就是台账，
+/// 而「台账说这一条没跑」正是要造出来的那个状态。
+///
+/// 登记用的 `sha256` 是占位值：探针只按 `migration_id` 判在不在，不比对内容——内容校验在
+/// 应用迁移那一步，不在判定能不能接活的这一步。
+fn migrations_missing(missing: &str) -> String {
+    let directory =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../database/migrations");
+    let mut paths: Vec<std::path::PathBuf> = std::fs::read_dir(&directory)
+        .expect("the migrations directory is readable")
+        .map(|entry| entry.expect("the directory entry is readable").path())
+        .filter(|path| path.extension().is_some_and(|extension| extension == "sql"))
+        .collect();
+    paths.sort();
+    assert!(paths.len() > 90, "迁移目录看起来不完整");
+
+    let mut sql = String::from(
+        "CREATE TABLE linggan_local_schema_migration (\n\
+           migration_id text PRIMARY KEY,\n\
+           migration_sha256 text NOT NULL CHECK (migration_sha256 ~ '^[0-9a-f]{64}$'),\n\
+           applied_at timestamptz NOT NULL DEFAULT clock_timestamp()\n\
+         );\n",
+    );
+    let mut registered = Vec::new();
+    for path in &paths {
+        sql.push_str(&std::fs::read_to_string(path).expect("the migration is readable"));
+        sql.push('\n');
+        let id = path
+            .file_stem()
+            .expect("a migration file has a stem")
+            .to_string_lossy()
+            .into_owned();
+        if id != missing {
+            registered.push(id);
+        }
+    }
+    let rows: Vec<String> = registered
+        .iter()
+        .map(|id| format!("('{}', repeat('0', 64))", id.replace('\'', "''")))
+        .collect();
+    sql.push_str(&format!(
+        "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES\n{};\n",
+        rows.join(",\n")
+    ));
+    sql
 }

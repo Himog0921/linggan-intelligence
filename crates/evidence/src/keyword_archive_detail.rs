@@ -65,9 +65,20 @@ use uuid::Uuid;
 /// （等一下）都算。少了它，同一个缺口每被新建一张工单就重新起一轮：预算记在台账的当前资格行
 /// 上，而这里正是「要不要为此再开一张工单」的那个决定点。
 ///
-/// `cross_industry_ready` 取 `true`：这四个入口的外层查询本来就无条件连跨行业样本表，
-/// 表不存在时整条查询本来就报错，所以「这一侧存在」是它们的前置条件而不是新假设。取值与
-/// `execution_source_url_for_task` 的解析顺序一致——先证据侧、再跨行业兜底。
+/// `cross_industry_ready` 取 `true`：地址可能在跨行业那一侧（`0044`）兜底，候选必须与派发
+/// 用同一把尺子。派发时 `execution_source_url_for_task` 先证据侧、再跨行业兜底；候选这里
+/// 取 `false` 就会比它更严——一篇本侧没有签名地址、兜底侧有地址的作品会被候选**静默剔除**：
+/// 不排队，也不以任何理由出现在任何地方。`unchanged_input_block_predicate` 同理：那一侧取
+/// `false` 时「输入没变」只看证据侧，而停下来的判据看两侧，于是一篇因样本侧输入未变而停过的
+/// 作品会每轮重新排队、重新被停——正是它要挡的那个循环。
+///
+/// 代价是这三条判据会把一个 `cross_industry_sample` 的引用塞进 SQL，哪怕外层查询本来不碰
+/// 那张表（`next_evidence_detail_batch` 的外层查询只连证据侧）。它们安全**不是**因为外层查询
+/// 本来就提到那张表——此前这里就是这么写的，而它对那个入口并不成立——而是因为走到这些入口
+/// 之前都先验过 `sample_facts_schema_ready_sql!()` 与
+/// `collection_work_order_cross_industry_target`（例如 `advance_keyword_archive_detail`），
+/// 不齐就报 `SchemaUnavailable`，根本不执行。改动这些入口的人要保住那道前置检查：漏掉它，
+/// 这里得到的不是「更保守的候选集」，而是一次 42P01。
 fn evidence_side_executable() -> (String, String, String) {
     (
         has_executable_locator_predicate("content.content_external_id", true),

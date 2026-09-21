@@ -94,3 +94,35 @@ test('reobservation controller cancels its timer and request on selection reset'
   assert.equal(controller.snapshot().operation, null);
   assert.equal(controller.snapshot().statusUrl, null);
 });
+
+// 迁移 0097 让「缺执行地址」成为一个可写状态：这类成员在 Attempt 之前就被停下，租约随之结束。
+// 它不是「还没轮到」——不把它算终态，页面会对一张已经结束的租约一直轮询下去。
+test('a lease stopped for missing execution input is terminal, not still-running', async () => {
+  const { observation, scheduled } = loadObservationModule();
+  let terminalRefreshes = 0;
+  const controller = observation.createController({
+    apiRoot: '/api/local/work-resources',
+    sameOriginPath: (url) => url || null,
+    readJson: async () => ({ operation: { tasks: [{ state: 'INPUT_BLOCKED' }] } }),
+    postJson: async () => ({
+      statusUrl: '/api/local/work-resources/work-1/reobserve/lease-1',
+      operation: { tasks: [{ state: 'INPUT_BLOCKED' }], leaseRef: 'lease-1' },
+    }),
+    onTerminal: async () => { terminalRefreshes += 1; },
+    timer: {
+      setTimeout(callback, delay) {
+        const entry = { callback, delay, cleared: false };
+        scheduled.push(entry);
+        return entry;
+      },
+      clearTimeout(entry) {
+        if (entry) entry.cleared = true;
+      },
+    },
+  });
+
+  await controller.request('/api/local/work-resources/work-1/reobserve');
+  assert.equal(controller.isTerminal({ state: 'INPUT_BLOCKED' }), true);
+  assert.equal(scheduled.length, 0, '停止的租约不再轮询');
+  assert.equal(terminalRefreshes, 1, '停在停止上也要刷新一次，让界面显示停止原因');
+});

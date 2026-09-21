@@ -867,8 +867,8 @@ S5 的三次变异分别落在 `crates/evidence/src/collection_control.rs`（代
 | 交付包 | `~/Downloads/linggan-collection-upgrade-handoff-2026-09-21 2/`（README + 01 目标合同 + 02 实施步骤 + 03 验收与发布 + 04 事实与取舍） |
 | 分支 / worktree | `fix/collection-upgrade-001` @ `.worktrees/collection-upgrade-001`（仓库唯一允许的 worktree 位置） |
 | 基线（分支点） | `1ef5830` —— 已确认是 `origin/main` 的祖先（S0 已更正交付包对基线的描述：包内称 `1511725c → 1ef5830` 只含评论研究，实际中间 PR #322 直接改了采集模块） |
-| 本包提交 | 12 个（`a1e8a9c` → `de1e8be`），全部**未推送** |
-| 差异规模 | 相对分支点 **90 个文件、+14853 / −1192** |
+| 本包提交 | **15 个**（`a1e8a9c` → 本记录提交，全部**未推送**）：12 个实现提交（`a1e8a9c` → `de1e8be`）+ 2 个 S6 文档提交（`72763ff`、`e743ed9`）+ 1 个复核裁定与修复（**本记录提交**，HEAD 以 `git log -1` 为准）。复核结论逐条见 §12.9 |
+| 差异规模 | 相对分支点 **97 个文件、+15341 / −1199**（含 S6 与本次复核修复；`Cargo.lock` 因 worker 加一条 **dev** 依赖而 +1 行）。**这是写本记录那一刻的读数**：本记录自己就在这批改动里，写完它数字还会再长几条——要引用就现跑 `git diff 1ef5830 --shortstat`，别抄这里的字面值 |
 | 当前 `origin/main` | `3ff3982`（已晚于分支点 **8 个提交**，全部是 comment-study 系列、**不含 migration**，因此编号不撞；试合并结果与冲突面见 §12.7） |
 | 共享库 | 迁移台账最高 `0095`；本包的 `0096`–`0101` **未应用** |
 | 本轮**未发生**的动作 | 共享库迁移应用、历史数据处置、merge、push、部署、runtime 切换、插件重载、发布包生成、真实平台访问 |
@@ -1023,20 +1023,20 @@ S5 的三次变异分别落在 `crates/evidence/src/collection_control.rs`（代
 | 项 | 值 |
 |---|---|
 | branch | `fix/collection-upgrade-001`（worktree `.worktrees/collection-upgrade-001`） |
-| HEAD | `de1e8be` |
+| HEAD | 本记录提交（复核裁定与修复；PR 应以**提交时的实际 HEAD** 为准，用 `git log -1` 读；本包未推送，HEAD 只在本机分支上） |
 | base（分支点） | `1ef5830` |
-| 提交数 | 12（`a1e8a9c` → `de1e8be`） |
-| 差异 | 90 files changed, +14853 / −1192 |
+| 提交数 | 15（`a1e8a9c` → 本记录提交；12 个实现 + 2 个 S6 文档 + 1 个复核裁定与修复） |
+| 差异 | 97 files changed, +15341 / −1199（写本记录时的读数；本记录也在改动里，见 §12.1 的说明） |
 | origin/main | `3ff3982`（**分支点之后又进了 8 个提交**，全部是 comment-study 系列，不含任何 migration——编号不撞） |
 | 与 origin/main 的试合并 | `apps/api/src/local_web/comment_study.rs` 自动合并；`docs/progress/2026-09.md` **冲突**（双方都往同一个月度记录里追加，冲突是文本位置，不是语义） |
-| 远端 | **未推送**（12 个提交只存在于本机分支） |
+| 远端 | **未推送**（15 个提交只存在于本机分支） |
 
 **PR 正文候选（按 `.github/pull_request_template.md` 的骨架填）**
 
 - **Related Issue and authority**：Refs #（**待 Mog 决定是否开 Issue**——本包是受保护交付，但至今没有对应的 GitHub Issue）。Active SCOPE：COLLECTION-UPGRADE-001（handoff 包 `linggan-collection-upgrade-handoff-2026-09-21`）。Base commit：`1ef5830`。Execution Agent/task-id：见 `docs/progress/2026-09.md` 同日各条。
 - **Changed scope**：采集模块的交付/恢复与状态表达（S1a/S1b/S2/S3a–S3c）、巡检 worker 的退出语义与可观测（S4a–S4d）、热路径两条索引与原因码词表补齐（S5），六条新迁移（`0096`–`0101`，**均未应用**），插件侧历史材料归位与一个零引用模块降级。
 - **Explicitly out of scope**：共享库迁移应用、历史数据处置、merge/push/deploy/runtime 切换、插件重载与发布包生成、真实平台访问、以及所有 `NOT VERIFIED` 行对应的验收（§12.3/§12.8）。
-- **Validation and evidence**：照 §12.3 的 T01–T34 表逐行填；自动化侧的分子分母以各步进度记录为准（隔离库全套 24 次 cargo / 252 passed / 0 failed / 1 ignored；`linggan-evidence --lib` 90；`linggan-api` 259 / 25 ignored；插件 `test:douyin` 69）。
+- **Validation and evidence**：照 §12.3 的 T01–T34 表逐行填；自动化侧的分子分母以各步进度记录为准（隔离库全套 24 次 cargo / 252 passed / 0 failed / 1 ignored；`linggan-evidence --lib` **92**（复核修复 +2）；`linggan-api` 259 / 25 ignored；`apps/worker --test startup_contract` ignored 集 **2**（复核修复 +1）；`node --test apps/api/src/local_web/evidence_observation.test.mjs` 3；插件 `test:douyin` 69）。
 - **Database and external side effects**：**没有**——本包未对任何共享库执行迁移或写入；隔离库的容器/卷/库由脚本自建自清。
 - **Proved / Not proved**：照 §12.3 的「未证明」段与 §12.8 的 `NOT VERIFIED` 行。
 
@@ -1050,16 +1050,81 @@ S5 的三次变异分别落在 `crates/evidence/src/collection_control.rs`（代
 
 | 交付面 | 结论 | 依据 |
 |---|---|---|
-| **代码分支 / PR** | 分支存在、内容完整；**未推送、未建 PR** | `fix/collection-upgrade-001` @ `de1e8be`，12 个提交全部只在本地；PR 正文候选见 §12.7（是否开 Issue 待 Mog 决定） |
+| **代码分支 / PR** | 分支存在、内容完整；**未推送、未建 PR** | `fix/collection-upgrade-001`，15 个提交全部只在本地，HEAD 用 `git log -1` 读；PR 正文候选见 §12.7（是否开 Issue 待 Mog 决定） |
 | **origin/main** | **未被本包改动** | 本包一次 `push` 都没有发生；`origin/main` 仍是 `3ff3982` |
-| **自动化与隔离 PostgreSQL** | **通过（本分支终态）** | S6 串证时复跑全套 `./scripts/test-local-001-discovery-postgres.sh`：**24 次 cargo 运行、252 passed / 0 failed / 1 ignored、退出码 0**，末尾输出 `…cleanup verified; isolated database, container, and volume were removed`（容器/卷/库自建自清）。口径：这是**本分支上的终态分子分母**；本包**没有**在分支点上跑过一次全量，所以「净值 = 终态 − 分支点基线」这个减法**不写**——只报终态。分层读数见 §12.3 各行 |
+| **自动化与隔离 PostgreSQL** | **通过（S6 全量终态 + 复核后分层复跑）** | S6 串证时跑过全套 `./scripts/test-local-001-discovery-postgres.sh`：**24 次 cargo 运行、252 passed / 0 failed / 1 ignored、退出码 0**，末尾输出 `…cleanup verified; isolated database, container, and volume were removed`（容器/卷/库自建自清）。复核修复**之后**没有重跑这整套 24 次，只重跑了**受影响的层**：`cargo build --locked --workspace`、`linggan-evidence --lib` 92、`linggan-api` 259/25 ignored、`evidence_observation.test.mjs` 3、`apps/worker --test startup_contract` ignored 集 2（在一次性 pgvector 容器上）。**这是本表的已知缺口**：未受影响的层按修复前的读数记账，不冒充「整套在终态上又跑过一遍」。口径：本包**没有**在分支点上跑过一次全量，所以「净值 = 终态 − 分支点基线」这个减法**不写**——只报终态。分层读数见 §12.3 各行 |
 | **插件发布产物** | **`NOT VERIFIED`** | 未重新打包、未发布（`releases/` 未动、版本号仍 `0.8.54`）；`npm run release:verify` 在**改动之前就是红的**（§11） |
 | **live runtime（本机常驻服务）** | **`NOT VERIFIED`** | 未部署、未切换 revision；3000 端口跑的仍是 `origin/main` 的构建。部署与回滚步骤是**待执行方案**（§12.6），不是操作记录 |
 | **浏览器插件链路** | **`NOT VERIFIED`** | 真实 Chrome 未安装/未重载插件、未做 MV3 worker 终止-重启、未跑真实页面。T03/T04/T26 与 T31 的真实浏览器一半都落在这里（§12.3） |
 | **共享迁移 / 历史修复** | **`NOT VERIFIED`** | 六条迁移（`0096`–`0101`）**未应用**到任何共享库；没有执行任何历史数据处置（§12.5 只做只读预览）。本机运行时库今天仍是 `0095` |
 | **真实平台样本** | **`NOT VERIFIED`** | 未访问小红书/抖音；T29 的 launchd 样例、T32 的真实页面、T34 的真实平台链路都因此只能给结构证据 |
 | **Mog 前端 / 业务验收** | **未进行** | 未部署即不可验收；页面侧证据止于 `linggan-api` 二进制内的 HTML 断言与页面单测 |
-| **独立复核（commit-reviewer）** | **待跑** | 按 Mog 的指定：整个交付包完成后跑**一次**（不逐步复核）；结论与逐条裁定会记入 `docs/progress/2026-09.md` |
+| **独立复核（commit-reviewer）** | **已跑（交付收尾一次），3 条意见：2 条成立已修、1 条部分成立（改注释、驳回取值改动并写明理由）** | 按 Mog 的指定：整个交付包完成后跑**一次**（不逐步复核）。逐条裁定与复现证据见 **§12.9**；同一条也记入 `docs/progress/2026-09.md` |
 
 **不合成百分比**：本表逐行给结论，不折算成一个「完成度」数字——不同行的分母不同（有的按测试项、有的按真实环境），合成出来的数字只会掩盖哪一行没跑。
+
+### 12.9 独立复核结论与逐条裁定
+
+**什么时候跑的**：整个交付包（S0–S6）完成之后、收尾提交之前，跑**一次** `commit-reviewer`（Mog 指定的节奏：不逐步复核）。它只读代码、不改代码、不跑测试、不连数据库。
+
+**裁定口径**：复核意见不是圣旨。**每条都要判断成不成立，成立的修，不成立的驳回并写明理由**，两种处理都留痕（本表即留痕）。「整轮照单全收」和「整轮无视」一样是没做复核。
+
+| # | 复核意见（概述） | 核实结果 | 裁定 | 处理 |
+|---|---|---|---|---|
+| F1 | 新增的 `execution_state='input_blocked'` 在复观测读模型里没有对应状态，会落到兜底分支，被显示成「还在排队」——而这批工作永远不会有下一次派发 | **成立** | **修** | `content_reobservation.rs` 新增 `INPUT_BLOCKED`；前端词表与终态集合同步（见 F1 详情） |
+| F2 | 未就绪时 worker 只打日志、不落心跳，`readiness_state` 的几个取值永远不会出现在库里，运维分不清「还接不了活」和「进程已死」 | **成立** | **修** | 未就绪分支每轮写心跳（见 F2 详情），并补一条隔离库集成测试 |
+| F3 | `keyword_archive_detail.rs` 里 `cross_industry_ready` 传 `true` 的注释理由是错的：外层查询提到表名 ≠ 表存在，真正的保护是入口闸 | **部分成立**（注释确实错；由它推出的取值改动不成立） | **只改注释，驳回取值改动并写明理由** | 见 F3 详情 |
+
+#### F1 —— 读模型把「不会再执行」的工作报成「还在排队」
+
+**意见**：`0097` 引入 `input_blocked` 表示「这个成员在做出任何一次尝试之前就因为缺执行地址被停下，不留 Attempt / Package / Evidence」。而复观测读模型的 `task_state` 按 `execution_state` 分支，没有这一档，于是落进最后的兜底分支。
+
+**核实**：属实，且比意见说的更严重一层。兜底分支的两个出口——`EXPIRED_WITHOUT_RECEIPT`（租约已释放）与 `QUEUED`——**都是「还会再来」的意思**。对一批永远不会被派发的工作显示这两个词，不是文案不准，是把「停在这里等人补输入」说成了「稍后会自动重试」，操作者会一直等一个不会发生的事。
+
+**处理**：
+- `crates/evidence/src/content_reobservation.rs`：`task_state` 增加 `input_blocked → "INPUT_BLOCKED"` 分支，位置在 `blocked` 之后、`lease_released` 之前（它比租约状态更具体）。
+- `apps/api/src/local_web/evidence_library.js`：`stateLabels` 增 `INPUT_BLOCKED: ['输入不可执行，已停止', 'warning']`，措辞与 `target_drawer.rs` 的「输入不可执行」对齐。
+- `apps/api/src/local_web/evidence_observation.js`：`INPUT_BLOCKED` 进 `TERMINAL_TASK_STATES`。它是终态而非进行中——补输入后会形成**新的**资格行、**新的**派发，不是这一条租约继续走；不这样归类，页面会对着一条已经结束的租约每 2.5 秒轮询一次。
+- `docs/design/pages/evidence-library-page.md` §7.3：词表增行，并把这张表声明为**闭集**。
+
+**留痕（变异验证，两次都验）**：把 Rust 的 `input_blocked` 分支临时删掉 → 新断言变红，实测差值 `left: "EXPIRED_WITHOUT_RECEIPT", right: "INPUT_BLOCKED"`；把 JS 的 `'INPUT_BLOCKED',` 临时删掉 → 页面单测变红（既没进终态集合，也排了轮询）。两次都**恢复到原状**后再跑绿（已用 `grep` 与逐行读回确认不是变异残留）。
+
+**顺带发现、本包不扩展**：`PAGE_UNAVAILABLE` / `DETAIL_READ_BLOCKED` 在同一个词表里**本来就没有**对应文案，会掉到 `['来源未完整表达','unknown']`。这是本包之前就存在的，不是本包引入，已记入未决清单，**不作为本次扩展**。
+
+#### F2 —— 未就绪的机器不落心跳，五个取值里四个永远读不到
+
+**意见**：`0098` 给 `collection_scheduler_heartbeat` 加了 `readiness_state` / `readiness_detail` / `readiness_checked_at`，列注释写明「任何非 ready 都表示这台机器不得认领工作」。但 `record_readiness` 只在 **ready** 路径被调用，未就绪的分支只 `println!` 一句就 `continue`。
+
+**核实**：属实。后果有两层：库里这一列永远是 `ready` 或 `unknown`，中间四档**从来不会出现**；而「最后一次判定」这个语义恰恰在故障时最有用——现在故障发生时心跳停在故障前那一刻，读它的人分不清「现在还接不了活」与「这台机器说完那句话就死了」。
+
+**处理**（`apps/worker/src/main.rs` 未就绪分支）：每轮落一次心跳，并把「为什么是每轮而不是只写第一次」写进注释（日志只在状态**变化**时说话是为了不制造噪音；心跳那一行是「最后一次判定」，只写第一次就会停在故障开始的那一刻）。数据库连不上时 `database` 仍是 `None`，没有可写之处——那种情况由 `/health` 说，不拿本地时间冒充。
+
+**留痕（新增集成测试）**：`apps/worker/tests/startup_contract.rs` 增 `an_unready_worker_leaves_its_classification_in_the_heartbeat`（`#[ignore]`，用一次性隔离 schema）：
+- 夹具不手抄 DDL（手抄会随迁移漂移），而是**运行时读真的 `database/migrations/*.sql`**，建出「能连上、但台账里独独缺 `0034_collection_control_closure`」的状态——这是真实的「可达但未就绪」，且心跳表列齐全。
+- 子进程用 `?options=-csearch_path%3D<schema>` 指到该 schema（已先验证 sqlx 接受这种写法）。
+- 起来跑 3 秒，断言日志出现 `not ready (migrations_not_applied`，再**读回**心跳行：`readiness_state = 'migrations_not_applied'`、`readiness_detail = Some("0034_collection_control_closure")`、`readiness_checked_at` 非空。
+- **变异验证**：把写心跳那 5 行临时去掉 → 心跳行停在 `unknown`，测试变红；恢复后绿。同一次运行里既有的那条 ignored 测试也仍是绿的（我的 schema 不碰 `public`）。
+
+**依赖变动**：worker 的产品依赖里没有数据库客户端（它自己不拼 SQL，SQL 都在 `linggan-evidence`），因此为这个测试加了一条 **dev** 依赖 `sqlx.workspace`；`Cargo.lock` 随之 **+1 行**。证明脚本用 `--locked` 跑，所以 `Cargo.lock` 必须与 `Cargo.toml` 一起提交，否则脚本会在原地拒绝。
+
+#### F3 —— 注释把「为什么安全」说错了；由它推出的取值改动不成立
+
+**意见**：`crates/evidence/src/keyword_archive_detail.rs` 中 `evidence_side_executable(false)` 一类的注释称「传 `true` 是安全的，因为外层查询提到了 `cross_industry_sample` 表」。意见指出这个理由站不住：**提到表名不等于表存在**，真正挡住 `42P01` 的是别的东西。
+
+**核实**：注释确实错。`next_evidence_detail_batch` 的外层查询是**证据侧**的，它并不会去碰样本表；把「外层查询提到了这张表」当成保护，是把「语句里出现过这个名字」误当成「这张表一定在」。
+
+**裁定：部分成立。** 注释改；**取值改动驳回**，两条理由：
+
+1. **派发侧的先后顺序是证据侧在前、样本侧在后**（`execution_source_url_for_task`）。传 `false` 会让候选集只看证据侧，而停转判定看两侧——**可执行的作品会被静默丢掉**。候选集与派发必须同构，这条对称性是这一版设计的核心。
+2. **`unchanged_input_block_predicate` 传 `false` 会只查证据侧**，而停转判定查两侧，于是重新制造「重复入队 → 再停」的循环——正是这一版要消灭的东西。
+
+真正承担安全性的是**入口处的闸**：`sample_facts_schema_ready_sql!()`（`to_regclass` 三张样本表）+ `collection_work_order_cross_industry_target`，例如 `advance_keyword_archive_detail` / `keyword_targets_pending_detail` 进门前先查，`keyword_archive_baseline_in` 走 `keyword_detail_schema_is_ready_in`。把这个闸撤掉，才会 42P01——但那是入口的问题，不是这个布尔的职责。
+
+**处理**：两处注释改写成上面这两条真实理由，并写明「安全性由入口闸承担，不由这个布尔承担」。
+
+#### 这一轮复核**没有**覆盖的
+
+- 复核是**读代码**：不跑测试、不连数据库、不碰共享库。上面每条结论都由我自己复现验证过（变异两次 + 一次隔离库集成测试），不采信「委员会说它对」。
+- 本次修复**之后**没有重跑整脚本 `./scripts/test-local-001-discovery-postgres.sh` 的 24 次全量，只跑受影响的层（读数见 §12.8 自动化行）。这是本表记录的**已知缺口**，不用「应该没影响」把它抹平。
+- §12.7 记的既有红灯（`release:verify`、clippy `too_many_lines`、插件 `current-surface-discovery-runtime`）**不是**复核发现的，是 S6 串证时就存在的，与本包无关（§11 已逐字节证明）。
 
