@@ -162,26 +162,13 @@ pub async fn read_runs(
     ensure_schema(database).await?;
     let limit = query.limit()?;
     let domain_ref = resolved_domain(database, query.domain).await?;
-    let rows = sqlx::query(
-        "SELECT run.run_ref,run.as_of::text AS as_of,run.state,run.created_at::text AS created_at,run.finished_at::text AS finished_at, \
-                count(DISTINCT work.content_public_ref) AS work_count, \
-                count(target.target_ref) AS target_count, \
-                count(target.target_ref) FILTER (WHERE target.state='succeeded') AS succeeded_count, \
-                count(target.target_ref) FILTER (WHERE target.state='no_signal') AS no_signal_count, \
-                count(target.target_ref) FILTER (WHERE target.state='needs_context') AS needs_context_count, \
-                count(target.target_ref) FILTER (WHERE target.state='failed') AS failed_count, \
-                count(target.target_ref) FILTER (WHERE target.state='excluded') AS excluded_count \
-         FROM linggan_comment_study_run run \
-         JOIN linggan_comment_study_policy policy USING(policy_ref) \
-         LEFT JOIN linggan_comment_study_work work ON work.run_ref=run.run_ref \
-         LEFT JOIN linggan_comment_study_target target ON target.run_ref=run.run_ref \
-         WHERE ($1::uuid IS NULL OR policy.domain_ref=$1) \
-         GROUP BY run.run_ref ORDER BY run.created_at DESC,run.run_ref DESC LIMIT $2",
-    )
-    .bind(domain_ref)
-    .bind(limit)
-    .fetch_all(database.pool())
-    .await?;
+    // Aggregate each child relation independently after bounding the run page. Joining both
+    // children on run_ref would count every target once for each selected work.
+    let rows = sqlx::query(include_str!("comment_study_read/runs.sql"))
+        .bind(domain_ref)
+        .bind(limit)
+        .fetch_all(database.pool())
+        .await?;
     Ok(json!({
         "contract":"comment-study.read.v1",
         "domainRef":domain_ref,
