@@ -1681,11 +1681,14 @@ fn inspector_overview(
     }
     // Inspector 的投影只判断档案/执行/巡查，不拥有业务领域。未分配候选必须先走与列表、
     // 抽屉顶部相同的领域动作；否则这里会生成一个必然被准入拒绝的“建立档案”POST。
+    let primary_action =
+        target_primary_action(target, true, archive, KeywordArchiveRead::Unavailable);
     let (action_title, action_note, action_control) =
-        if target_primary_action(target, true, archive, KeywordArchiveRead::Unavailable)
-            == TargetPrimaryAction::AssignDomain
+        if primary_action == TargetPrimaryAction::AssignDomain
+            || (target.lifecycle_state == "dismissed"
+                && primary_action == TargetPrimaryAction::ViewCreator)
         {
-            let action = TargetPrimaryAction::AssignDomain;
+            let action = primary_action;
             let (title, note) = required_action_copy(action);
             (
                 title,
@@ -3597,6 +3600,20 @@ mod tests {
             ),
             TargetPrimaryAction::ViewCreator
         );
+        let mut inspector = keyword_projection(&creator);
+        inspector.required_action = TargetInspectorAction::StartArchive;
+        let creator_html = inspector_overview(
+            &creator,
+            true,
+            &inspector,
+            TargetArchiveRead::Known(None),
+            KeywordArchiveRead::Unavailable,
+            &[],
+            TargetListContext::default(),
+        );
+        assert!(creator_html.contains("当前无需处理"));
+        assert!(!creator_html.contains(r#"action="/collection/targets/archive""#));
+        assert!(!creator_html.contains(">分配领域</a>"));
 
         let mut keyword = keyword_target();
         keyword.lifecycle_state = "dismissed".to_owned();
