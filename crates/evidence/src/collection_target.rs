@@ -22,6 +22,10 @@ pub enum CollectionTargetError {
     IllegalTransition { from: String, to: String },
     #[error("no observation target with that reference")]
     UnknownTarget,
+    #[error("no active observation domain with that reference")]
+    UnknownDomain,
+    #[error("that observation target already belongs to another domain")]
+    DomainAlreadyAssigned,
     #[error(transparent)]
     Database(#[from] sqlx::Error),
 }
@@ -53,8 +57,8 @@ pub struct ObservationTarget {
     pub next_patrol_at: Option<String>,
     /// 这个目标在观察哪个领域。
     ///
-    /// 只有列表查询读它。`None` 表示领域表尚未建立（旧 schema），不是「没有领域」——
-    /// 没标过 `domain_ref` 的历史目标在读取时已回落成本领域，与 `0041` 的处置一致。
+    /// `None` 表示目标尚未明确分配领域，或领域表尚未建立。页面必须保持这个未知边界，
+    /// 不能把空值显示成本领域；写入侧会在明确分配前拒绝采集。
     pub domain_name: Option<String>,
     /// 该领域是不是本领域。用于列表里给外部领域加标记；`None` 同上。
     pub domain_is_own: Option<bool>,
@@ -69,6 +73,64 @@ pub struct ObservationTarget {
 pub enum StoreOutcome {
     Stored,
     AlreadyPresent,
+}
+
+/// Result of the explicit person-owned step that turns a plugin-discovered candidate into a
+/// domain-scoped observation target. Repeating the same assignment is safe; changing an existing
+/// assignment is a different product decision and is deliberately rejected here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetDomainAssignmentOutcome {
+    Assigned,
+    AlreadyAssigned,
+}
+
+pub async fn assign_target_domain(
+    database: &Database,
+    target_ref: Uuid,
+    domain_ref: Uuid,
+) -> Result<TargetDomainAssignmentOutcome, CollectionTargetError> {
+    if !collection_target_schema_is_ready(database).await?
+        || !crate::observation_domain::observation_domain_schema_is_ready(database).await?
+    {
+        return Err(CollectionTargetError::SchemaUnavailable);
+    }
+    let mut tx = database.pool().begin().await?;
+    let current: Option<Option<Uuid>> = sqlx::query_scalar(
+        "SELECT domain_ref FROM collection_observation_target WHERE target_ref=$1 FOR UPDATE",
+    )
+    .bind(target_ref)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some(current) = current else {
+        return Err(CollectionTargetError::UnknownTarget);
+    };
+    let domain_is_active: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM observation_domain WHERE domain_ref=$1 AND status='active')",
+    )
+    .bind(domain_ref)
+    .fetch_one(&mut *tx)
+    .await?;
+    if !domain_is_active {
+        return Err(CollectionTargetError::UnknownDomain);
+    }
+    match current {
+        Some(current) if current == domain_ref => {
+            tx.commit().await?;
+            Ok(TargetDomainAssignmentOutcome::AlreadyAssigned)
+        }
+        Some(_) => Err(CollectionTargetError::DomainAlreadyAssigned),
+        None => {
+            sqlx::query(
+                "UPDATE collection_observation_target SET domain_ref=$2 WHERE target_ref=$1",
+            )
+            .bind(target_ref)
+            .bind(domain_ref)
+            .execute(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            Ok(TargetDomainAssignmentOutcome::Assigned)
+        }
+    }
 }
 
 /// Presentation eligibility for a creator avatar. A target may retain its observed source URL
@@ -168,8 +230,8 @@ pub async fn collection_target_schema_is_ready(database: &Database) -> Result<bo
 /// read-then-write in application code: two pushes arriving together must not both succeed.
 /// The legacy workbench has no such index, and its failure mode is a silent parallel duplicate
 /// with its own independent baseline.
-/// `domain` 是这个目标要观察的领域。`None` 表示不指定——列保持可空，读取时回落本领域，
-/// 与 `0041` 对既有目标的处置一致（「没标过」与「标了本领域」是两件事，只是当前处置相同）。
+/// `domain` 是这个目标要观察的领域。`None` 表示插件只发现了目标身份，领域仍待人决定；
+/// 它只出现在“全部领域”视图，且在明确分配前不能开始采集。
 pub async fn store_pending_target(
     database: &Database,
     identity: &TargetIdentity,
@@ -305,9 +367,7 @@ const READ_TARGET_WITH_DOMAIN: &str = concat!(
        LEFT JOIN collection_monitor_rule_revision revision \
               ON revision.rule_revision_ref=rule.active_revision_ref \
        WHERE rule.target_ref=target.target_ref AND rule.retired_at IS NULL) rules ON true \
-     LEFT JOIN observation_domain domain \
-       ON domain.domain_ref = COALESCE(target.domain_ref, \
-            (SELECT home.domain_ref FROM observation_domain home WHERE home.is_own_domain)) \
+     LEFT JOIN observation_domain domain ON domain.domain_ref = target.domain_ref \
      WHERE target.target_ref = $1"
 );
 const READ_TARGET_WITHOUT_DOMAIN: &str = concat!(
@@ -340,13 +400,10 @@ const LIST_TARGETS_WITH_DOMAIN: &str = concat!(
        LEFT JOIN collection_monitor_rule_revision revision \
               ON revision.rule_revision_ref=rule.active_revision_ref \
        WHERE rule.target_ref=target.target_ref AND rule.retired_at IS NULL) rules ON true \
-     LEFT JOIN observation_domain domain \
-       ON domain.domain_ref = COALESCE(target.domain_ref, \
-            (SELECT home.domain_ref FROM observation_domain home WHERE home.is_own_domain)) \
+     LEFT JOIN observation_domain domain ON domain.domain_ref = target.domain_ref \
      WHERE ($1::text IS NULL OR target.target_kind = $1) \
        AND ($2::text IS NULL OR target.lifecycle_state = $2) \
-       AND ($4::uuid IS NULL OR COALESCE(target.domain_ref, \
-            (SELECT home.domain_ref FROM observation_domain home WHERE home.is_own_domain)) = $4) \
+       AND ($4::uuid IS NULL OR target.domain_ref = $4) \
      ORDER BY target.first_stored_at DESC LIMIT $3"
 );
 const LIST_TARGETS_WITHOUT_DOMAIN: &str = concat!(
@@ -432,8 +489,7 @@ pub async fn count_targets(
                     WHERE rule.target_ref=target.target_ref AND rule.retired_at IS NULL \
                       AND revision.automatic_enabled)) \
          FROM collection_observation_target target \
-         WHERE $1::uuid IS NULL OR COALESCE(target.domain_ref, \
-               (SELECT home.domain_ref FROM observation_domain home WHERE home.is_own_domain)) = $1"
+         WHERE $1::uuid IS NULL OR target.domain_ref = $1"
     );
     let row: (i64, i64, i64, i64, i64) = if domain_ready {
         sqlx::query_as(COUNT_IN_DOMAIN).bind(domain)
@@ -461,8 +517,8 @@ pub async fn count_targets(
 /// `domain` 传 `Some` 时只列该领域的目标，传 `None` 是「全部领域」——采集是运维视角，
 /// 一眼看到所有领域在跑什么是真实需求，与语料页只看一个世界的读法不同。
 ///
-/// 没标过 `domain_ref` 的历史目标按本领域处理（读取时回落，与 `0041` 一致）：它们是在
-/// 只有 ADHD 的时候建立的，算成别的领域会改写历史。
+/// 没标过 `domain_ref` 的目标只出现在“全部领域”视图。把它塞进任一具体领域会在页面上
+/// 隐藏尚未作出的归属决定，并与采集准入的领域闸门产生矛盾。
 pub async fn list_targets(
     database: &Database,
     filter: Option<&str>,
@@ -722,8 +778,10 @@ pub struct TargetDeletionPreview {
     pub retained_details: i64,
     /// 跨行业样本是已采集的参照材料，不能随观察决定一起抹掉。
     pub blocking_cross_industry_samples: i64,
-    /// 人已确认的作品失效结论也不能因删除观察目标而丢失。
-    pub blocking_material_retirements: i64,
+    /// 明确风险页是安装级安全事实；目标删除不能借机清掉仍可触发 cooldown 的信号。
+    pub blocking_risk_signals: i64,
+    /// 随目标控制面一起删除的、只在该目标目录内成立的人工作品失效结论。
+    pub material_retirements: i64,
 }
 
 pub async fn read_target_deletion_preview(
@@ -759,7 +817,7 @@ pub async fn read_target_deletion_preview(
     .bind(target_ref)
     .fetch_optional(database.pool())
     .await?;
-    Ok(row.map(|row| TargetDeletionPreview {
+    let mut preview = row.map(|row| TargetDeletionPreview {
         confirmation_name: row.0,
         target_kind: row.1,
         work_orders: row.2,
@@ -770,8 +828,35 @@ pub async fn read_target_deletion_preview(
         retained_works: row.7,
         retained_details: row.8,
         blocking_cross_industry_samples: row.9,
-        blocking_material_retirements: row.10,
-    }))
+        blocking_risk_signals: 0,
+        material_retirements: row.10,
+    });
+    if let Some(preview) = preview.as_mut() {
+        let risk_schema_ready: bool = sqlx::query_scalar(
+            "SELECT to_regclass('collection_installation_risk_signal') IS NOT NULL \
+                  AND to_regclass('collection_detail_page_session') IS NOT NULL",
+        )
+        .fetch_one(database.pool())
+        .await?;
+        if risk_schema_ready {
+            preview.blocking_risk_signals = sqlx::query_scalar(
+                "SELECT count(*) FROM collection_installation_risk_signal signal \
+                 WHERE signal.lease_ref IN ( \
+                   SELECT lease.lease_ref FROM collection_work_order work_order \
+                   JOIN collection_work_order_lease lease USING(work_order_ref) \
+                   WHERE work_order.target_ref=$1 \
+                 ) OR signal.detail_page_session_ref IN ( \
+                   SELECT session.session_ref FROM collection_detail_page_session session \
+                   JOIN collection_work_order work_order USING(work_order_ref) \
+                   WHERE work_order.target_ref=$1 \
+                 )",
+            )
+            .bind(target_ref)
+            .fetch_one(database.pool())
+            .await?;
+        }
+    }
+    Ok(preview)
 }
 
 /// 删除的结果。「删不了」与「没找到」是两件事，不能都报成失败。
@@ -781,7 +866,7 @@ pub enum TargetDeletionOutcome {
     UnknownTarget,
     /// 输入的名字与目标名字不一致。不可逆操作要求手打名字，点两下太容易了。
     NameMismatch,
-    /// 有必须保留的材料或人工结论挂在它下面，不能把它们和观察决定一起抹掉。
+    /// 有必须保留的跨行业材料挂在它下面，不能把材料和观察决定一起抹掉。
     BlockedByProtectedFacts {
         rows: i64,
     },
@@ -815,13 +900,40 @@ pub async fn delete_observation_target(
         tx.rollback().await?;
         return Ok(TargetDeletionOutcome::NameMismatch);
     }
-    let blocking: i64 = sqlx::query_scalar(
-        "SELECT (SELECT count(*) FROM cross_industry_sample WHERE target_ref=$1) \
-              + (SELECT count(*) FROM collection_material_retirement WHERE target_ref=$1)",
-    )
-    .bind(target_ref)
-    .fetch_one(&mut *tx)
-    .await?;
+    let (detail_session_ready, risk_signal_ready, execution_eligibility_ready): (bool, bool, bool) =
+        sqlx::query_as(
+            "SELECT \
+           to_regclass('collection_detail_page_session') IS NOT NULL \
+             AND to_regclass('collection_detail_page_session_grant_attempt') IS NOT NULL \
+             AND to_regclass('collection_detail_page_session_lane_preparation') IS NOT NULL, \
+           to_regclass('collection_installation_risk_signal') IS NOT NULL \
+             AND to_regclass('collection_detail_page_session') IS NOT NULL, \
+           to_regclass('collection_execution_input_eligibility') IS NOT NULL",
+        )
+        .fetch_one(&mut *tx)
+        .await?;
+    let mut blocking: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM cross_industry_sample WHERE target_ref=$1")
+            .bind(target_ref)
+            .fetch_one(&mut *tx)
+            .await?;
+    if risk_signal_ready {
+        blocking += sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM collection_installation_risk_signal signal \
+             WHERE signal.lease_ref IN ( \
+               SELECT lease.lease_ref FROM collection_work_order work_order \
+               JOIN collection_work_order_lease lease USING(work_order_ref) \
+               WHERE work_order.target_ref=$1 \
+             ) OR signal.detail_page_session_ref IN ( \
+               SELECT session.session_ref FROM collection_detail_page_session session \
+               JOIN collection_work_order work_order USING(work_order_ref) \
+               WHERE work_order.target_ref=$1 \
+             )",
+        )
+        .bind(target_ref)
+        .fetch_one(&mut *tx)
+        .await?;
+    }
     if blocking > 0 {
         tx.rollback().await?;
         return Ok(TargetDeletionOutcome::BlockedByProtectedFacts { rows: blocking });
@@ -848,8 +960,60 @@ pub async fn delete_observation_target(
         .await?;
     }
 
+    if detail_session_ready {
+        // 页面会话、授权回执与 lane preparation 都是目标执行控制记录；它们不证明材料
+        // 已被取得。先从叶子删到会话根，之后才允许删除 Lease / WorkOrder。
+        for statement in [
+            "DELETE FROM collection_detail_page_session_lane_preparation preparation \
+             WHERE preparation.session_ref IN ( \
+               SELECT session.session_ref FROM collection_detail_page_session session \
+               JOIN collection_work_order work_order USING(work_order_ref) \
+               WHERE work_order.target_ref=$1 \
+             ) OR preparation.lease_ref IN ( \
+               SELECT lease.lease_ref FROM collection_work_order work_order \
+               JOIN collection_work_order_lease lease USING(work_order_ref) \
+               WHERE work_order.target_ref=$1 \
+             )",
+            "DELETE FROM collection_detail_page_session_grant_attempt grant_attempt \
+             WHERE grant_attempt.work_order_ref IN ( \
+               SELECT work_order_ref FROM collection_work_order WHERE target_ref=$1 \
+             ) OR grant_attempt.lease_ref IN ( \
+               SELECT lease.lease_ref FROM collection_work_order work_order \
+               JOIN collection_work_order_lease lease USING(work_order_ref) \
+               WHERE work_order.target_ref=$1 \
+             ) OR grant_attempt.session_ref IN ( \
+               SELECT session.session_ref FROM collection_detail_page_session session \
+               JOIN collection_work_order work_order USING(work_order_ref) \
+               WHERE work_order.target_ref=$1 \
+             )",
+            "DELETE FROM collection_detail_page_session session \
+             WHERE session.work_order_ref IN ( \
+               SELECT work_order_ref FROM collection_work_order WHERE target_ref=$1 \
+             ) OR session.initial_lease_ref IN ( \
+               SELECT lease.lease_ref FROM collection_work_order work_order \
+               JOIN collection_work_order_lease lease USING(work_order_ref) \
+               WHERE work_order.target_ref=$1 \
+             )",
+        ] {
+            sqlx::query(statement)
+                .bind(target_ref)
+                .execute(&mut *tx)
+                .await?;
+        }
+    }
+    if execution_eligibility_ready {
+        sqlx::query("DELETE FROM collection_execution_input_eligibility WHERE target_ref=$1")
+            .bind(target_ref)
+            .execute(&mut *tx)
+            .await?;
+    }
+
     // 顺序由外键决定，从叶子往根删。任何一条走不通都会整笔回滚——半删的目标比不删更糟。
     for statement in [
+        // 作品失效是“这个目标的目录里不再补这篇”的人工作品控制结论。删除整个观察
+        // 决定后它已没有可应用的目录，因此跟控制面一起删除；底层作品、详情、评论、
+        // Package 与 Receipt 仍由各自的 append-only 边界保留。
+        "DELETE FROM collection_material_retirement WHERE target_ref=$1",
         "DELETE FROM collection_monitor_rule_command_receipt WHERE target_ref=$1",
         "DELETE FROM collection_monitor_rule_command_identity WHERE target_ref=$1",
         "DELETE FROM collection_scheduler_target_decision WHERE target_ref=$1",

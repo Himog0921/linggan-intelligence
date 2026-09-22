@@ -268,6 +268,29 @@ impl<'a> TargetListContext<'a> {
         ))
     }
 
+    pub fn domain_assignment_href(self, target_ref: uuid::Uuid) -> String {
+        let mut pairs = self
+            .pairs()
+            .into_iter()
+            .map(|(key, value)| (key.to_owned(), value.to_owned()))
+            .collect::<Vec<_>>();
+        pairs.push(("assign_domain".to_owned(), target_ref.to_string()));
+        escape(&format!(
+            "/collection/targets?{}",
+            pairs
+                .iter()
+                .map(|(key, value)| {
+                    format!(
+                        "{}={}",
+                        percent_encode_component(key),
+                        percent_encode_component(value)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("&")
+        ))
+    }
+
     /// Open the target-scoped monitoring rule overlay without carrying drawer state into it.
     /// The list filter and sort remain in the URL so closing the overlay returns to the same
     /// working set. `opener_id` is a fragment only: it restores keyboard focus and never
@@ -379,6 +402,7 @@ impl<'a> TargetArchiveRead<'a> {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum TargetPrimaryAction {
+    AssignDomain,
     EstablishArchive,
     RebuildDirectory,
     ContinueArchive,
@@ -414,6 +438,18 @@ pub(crate) fn target_primary_action(
     archive: TargetArchiveRead<'_>,
     keyword_archive: KeywordArchiveRead,
 ) -> TargetPrimaryAction {
+    // 已停止观察的目标始终只读。即使它来自历史插件写入、还没有领域，也不能借
+    // “分配领域”重新打开写路径；恢复观察应走独立、显式的生命周期操作。
+    if target.lifecycle_state == "dismissed" {
+        return if is_creator {
+            TargetPrimaryAction::ViewCreator
+        } else {
+            TargetPrimaryAction::ViewKeyword
+        };
+    }
+    if target.domain_name.is_none() {
+        return TargetPrimaryAction::AssignDomain;
+    }
     if !is_creator {
         // 详情还欠着就先补详情，**排在「查看结果」之前**——与创作者那一路同一个次序，
         // 那边 `needs_details` 同样排在「查看档案」前面。
@@ -422,10 +458,6 @@ pub(crate) fn target_primary_action(
         // 补详情的入口从此消失。而巡检每周带回来的新笔记同样只有链接——不补详情，这个词
         // 的面貌就永远停在列表面能看到的那一层（标题、封面、点赞），正文、发布时间、评论
         // 一样都没有。
-        // 已弃用的目标只提供查看，任何采集动作都不该来打断它——与创作者那一路一致。
-        if target.lifecycle_state == "dismissed" {
-            return TargetPrimaryAction::ViewKeyword;
-        }
         if keyword_archive == KeywordArchiveRead::DetailPending {
             return TargetPrimaryAction::ContinueArchive;
         }
@@ -469,9 +501,6 @@ pub(crate) fn target_primary_action(
     }
     if archive.is_some_and(|value| value.work_in_progress) {
         return TargetPrimaryAction::ViewArchiveProgress;
-    }
-    if target.lifecycle_state == "dismissed" {
-        return TargetPrimaryAction::ViewCreator;
     }
     let untouched = archive.is_none_or(ArchiveCompleteness::is_untouched);
     let needs_details =
@@ -961,6 +990,10 @@ fn drawer_primary_action(
 ) -> String {
     let action = target_primary_action(target, is_creator, archive, keyword_archive);
     match action {
+        TargetPrimaryAction::AssignDomain => {
+            let href = list_context.domain_assignment_href(target.target_ref);
+            format!(r#"<a class="c-btn-primary" href="{href}">分配领域</a>"#)
+        }
         TargetPrimaryAction::EstablishArchive
         | TargetPrimaryAction::RebuildDirectory
         | TargetPrimaryAction::ContinueArchive => {
@@ -1646,9 +1679,37 @@ fn inspector_overview(
             next = escape(next),
         );
     }
-    let action = inspector.required_action;
-    let (action_title, action_note) = inspector_action_copy(action);
-    let action_control = inspector_action_control(target, action, list_context);
+    // Inspector 的投影只判断档案/执行/巡查，不拥有业务领域。未分配候选必须先走与列表、
+    // 抽屉顶部相同的领域动作；否则这里会生成一个必然被准入拒绝的“建立档案”POST。
+    let primary_action =
+        target_primary_action(target, true, archive, KeywordArchiveRead::Unavailable);
+    let (action_title, action_note, action_control) =
+        if primary_action == TargetPrimaryAction::AssignDomain
+            || (target.lifecycle_state == "dismissed"
+                && primary_action == TargetPrimaryAction::ViewCreator)
+        {
+            let action = primary_action;
+            let (title, note) = required_action_copy(action);
+            (
+                title,
+                note,
+                required_action_control(
+                    target,
+                    archive,
+                    true,
+                    KeywordArchiveRead::Unavailable,
+                    list_context,
+                ),
+            )
+        } else {
+            let action = inspector.required_action;
+            let (title, note) = inspector_action_copy(action);
+            (
+                title,
+                note,
+                inspector_action_control(target, action, list_context),
+            )
+        };
     let directory = inspector_count_copy(inspector.coverage.directory_works);
     let detail = inspector_detail_copy(
         inspector.coverage.captured_details,
@@ -1880,6 +1941,10 @@ fn current_system_copy(archive: TargetArchiveRead<'_>) -> (&'static str, &'stati
 
 fn required_action_copy(action: TargetPrimaryAction) -> (&'static str, &'static str) {
     match action {
+        TargetPrimaryAction::AssignDomain => (
+            "需要分配领域",
+            "这个目标来自插件采集，但还没有决定材料归入本行业证据库还是跨行业参照语料。",
+        ),
         TargetPrimaryAction::EstablishArchive => (
             "需要建立档案",
             "当前只有观察目标身份，还没有可核验的作品目录。",
@@ -1923,7 +1988,8 @@ fn required_action_control(
     list_context: TargetListContext<'_>,
 ) -> String {
     match target_primary_action(target, is_creator, archive, keyword_archive) {
-        TargetPrimaryAction::EstablishArchive
+        TargetPrimaryAction::AssignDomain
+        | TargetPrimaryAction::EstablishArchive
         | TargetPrimaryAction::RebuildDirectory
         | TargetPrimaryAction::ContinueArchive
         | TargetPrimaryAction::OpenPatrol(_) => {
@@ -3159,6 +3225,10 @@ fn archive_tab(
         _ => "",
     };
     let action = match primary_action {
+        TargetPrimaryAction::AssignDomain => {
+            let href = list_context.domain_assignment_href(target.target_ref);
+            format!(r#"<a class="c-btn-primary" href="{href}">分配领域</a>"#)
+        }
         TargetPrimaryAction::ViewArchiveProgress => r#"<span class="c-dw-action-note">已有建档任务等待处理或执行中；本页不会重复提交。目录和详情只会随真实采集回执更新。</span>"#.to_owned(),
         TargetPrimaryAction::ViewArchiveProblems => r#"<span class="c-dw-action-note">当前先查看上面的档案待处理项；页面不会把隔离记录或读取受阻详情算成已完成。</span>"#.to_owned(),
         TargetPrimaryAction::ViewArchiveUnavailable => r#"<span class="c-dw-action-note">档案状态暂时无法读取，本页不会在未知状态下发起写操作。</span>"#.to_owned(),
@@ -3504,8 +3574,8 @@ mod tests {
             last_patrol_dispatched_at: None,
             last_patrol_succeeded_at: None,
             next_patrol_at: None,
-            domain_name: None,
-            domain_is_own: None,
+            domain_name: Some("ADHD".to_owned()),
+            domain_is_own: Some(true),
         }
     }
 
@@ -3515,6 +3585,71 @@ mod tests {
         target.identity_key = "考研自习".to_owned();
         target.display_name = Some("考研自习".to_owned());
         target
+    }
+
+    #[test]
+    fn dismissed_unassigned_targets_remain_read_only() {
+        let mut creator = target("dismissed");
+        creator.domain_name = None;
+        assert_eq!(
+            target_primary_action(
+                &creator,
+                true,
+                TargetArchiveRead::Unavailable,
+                KeywordArchiveRead::Unavailable,
+            ),
+            TargetPrimaryAction::ViewCreator
+        );
+        let mut inspector = keyword_projection(&creator);
+        inspector.required_action = TargetInspectorAction::StartArchive;
+        let creator_html = inspector_overview(
+            &creator,
+            true,
+            &inspector,
+            TargetArchiveRead::Known(None),
+            KeywordArchiveRead::Unavailable,
+            &[],
+            TargetListContext::default(),
+        );
+        assert!(creator_html.contains("当前无需处理"));
+        assert!(!creator_html.contains(r#"action="/collection/targets/archive""#));
+        assert!(!creator_html.contains(">分配领域</a>"));
+
+        let mut keyword = keyword_target();
+        keyword.lifecycle_state = "dismissed".to_owned();
+        keyword.domain_name = None;
+        assert_eq!(
+            target_primary_action(
+                &keyword,
+                false,
+                TargetArchiveRead::Unavailable,
+                KeywordArchiveRead::Unavailable,
+            ),
+            TargetPrimaryAction::ViewKeyword
+        );
+    }
+
+    #[test]
+    fn unassigned_creator_inspector_cannot_offer_archive_before_domain_assignment() {
+        let mut creator = target("pending_decision");
+        creator.domain_name = None;
+        creator.domain_is_own = None;
+        let mut inspector = keyword_projection(&creator);
+        inspector.required_action = TargetInspectorAction::StartArchive;
+
+        let html = inspector_overview(
+            &creator,
+            true,
+            &inspector,
+            TargetArchiveRead::Known(None),
+            KeywordArchiveRead::Unavailable,
+            &[],
+            TargetListContext::default(),
+        );
+
+        assert!(html.contains("需要分配领域"));
+        assert!(html.contains(">分配领域</a>"));
+        assert!(!html.contains(r#"action="/collection/targets/archive""#));
     }
 
     fn rule(

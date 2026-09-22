@@ -65,7 +65,7 @@ use linggan_evidence::{
     RuntimeAttemptOutcome, RuntimeCapacityOverview, RuntimeReadiness, RuntimeSubmissionOutcome,
     RuntimeTaskOutcome, StationCapability, StationOverview, StoreOutcome, TargetCounts,
     TargetDeletionOutcome, UnclaimedInstallation, WorkResourceReadError, admit_media_blob,
-    apply_monitor_rule_command, begin_media_upload, bind_observation_account,
+    apply_monitor_rule_command, assign_target_domain, begin_media_upload, bind_observation_account,
     check_in_installation, claim_installation, claim_media_acquisition,
     claim_media_upload_finalize, close_claim_window, complete_media_upload, count_targets,
     create_manual_task, create_producer_task, delete_observation_target, dispatch_schema_is_ready,
@@ -361,6 +361,10 @@ fn router(state: LocalWebState) -> Router {
             post(collection_monitor_rule_retire),
         )
         .route("/collection/targets/delete", post(collection_target_delete))
+        .route(
+            "/collection/targets/domain",
+            post(collection_target_assign_domain),
+        )
         .route("/collection/targets/batch", post(collection_targets_batch))
         .route("/collection/operations", get(collection_operations))
         .route("/collection/attention", get(collection_attention))
@@ -2399,6 +2403,8 @@ struct CollectionParams {
     drawer: Option<String>,
     /// 要删除哪个观察目标。只是打开确认面板，不删任何东西——删除只走 POST。
     delete: Option<String>,
+    /// 要为哪个插件发现的候选目标分配领域。这里只打开选择面板，写入只走 POST。
+    assign_domain: Option<String>,
     /// 观察目标的筛选。只改读取范围，不消耗任何平台访问。
     filter: Option<String>,
     /// 当前观察领域。`all` 或缺省表示全部领域——采集是运维视角，默认看全貌，
@@ -2692,6 +2698,24 @@ async fn collection_targets(
             .flatten(),
         None => None,
     };
+    // 领域分配面板与当前列表范围是两次独立读取。未分配目标本来就会被具体领域过滤
+    // 排除，也可能落在 200 行截断之外；若只从列表里找，抽屉给出的“分配领域”链接会
+    // 打开一个没有面板的页面。
+    let assignment_target_ref = params
+        .assign_domain
+        .as_deref()
+        .and_then(|value| uuid::Uuid::parse_str(value).ok());
+    let (assignment_target, assignment_error) =
+        match (params.assign_domain.as_deref(), assignment_target_ref) {
+            (None, _) => (None, None),
+            (Some(_), None) => (None, Some("target_domain_assignment_invalid")),
+            (Some(_), Some(target_ref)) => match read_target(database, target_ref).await {
+                Ok(Some(target)) if target.domain_name.is_none() => (Some(target), None),
+                Ok(Some(_)) => (None, Some("target_domain_already_assigned")),
+                Ok(None) => (None, Some("target_domain_target_missing")),
+                Err(_) => (None, Some("target_domain_assignment_failed")),
+            },
+        };
     let list = match list_targets(
         database,
         params.filter.as_deref(),
@@ -2753,6 +2777,9 @@ async fn collection_targets(
                     keyword_counts: keyword_counts.as_ref(),
                 },
                 list_context,
+                &domains,
+                assignment_target.as_ref(),
+                assignment_error,
             )
         }
         Err(_) => base,
@@ -4237,6 +4264,60 @@ fn target_list_return_path(
         path.push_str(&format!("#target-{focus}"));
     }
     path
+}
+
+async fn collection_target_assign_domain(
+    State(state): State<LocalWebState>,
+    body: Bytes,
+) -> Redirect {
+    let mut target_ref: Option<uuid::Uuid> = None;
+    let mut domain_ref: Option<uuid::Uuid> = None;
+    let mut return_filter: Option<String> = None;
+    let mut return_sort: Option<String> = None;
+    let mut return_domain: Option<String> = None;
+    let mut return_focus: Option<String> = None;
+    for (key, value) in parse_form_pairs(&body) {
+        match key.as_str() {
+            "row_target_ref" => target_ref = uuid::Uuid::parse_str(&value).ok(),
+            "domain_ref" => domain_ref = uuid::Uuid::parse_str(&value).ok(),
+            "return_filter" => return_filter = Some(value),
+            "return_sort" => return_sort = Some(value),
+            "return_domain" => return_domain = Some(value),
+            "return_focus" => return_focus = Some(value),
+            _ => {}
+        }
+    }
+    let back = |code| {
+        target_list_return_path(
+            return_domain.as_deref(),
+            return_filter.as_deref(),
+            return_sort.as_deref(),
+            return_focus.as_deref(),
+            None,
+            code,
+        )
+    };
+    let (Some(target_ref), Some(domain_ref)) = (target_ref, domain_ref) else {
+        return Redirect::to(&back("target_domain_assignment_invalid"));
+    };
+    let Some(database) = state.database.database() else {
+        return Redirect::to(&back("read_model_not_connected"));
+    };
+    let code = match assign_target_domain(database, target_ref, domain_ref).await {
+        Ok(
+            linggan_evidence::TargetDomainAssignmentOutcome::Assigned
+            | linggan_evidence::TargetDomainAssignmentOutcome::AlreadyAssigned,
+        ) => "target_domain_assigned",
+        Err(linggan_evidence::CollectionTargetError::DomainAlreadyAssigned) => {
+            "target_domain_already_assigned"
+        }
+        Err(linggan_evidence::CollectionTargetError::UnknownDomain) => "target_domain_unavailable",
+        Err(linggan_evidence::CollectionTargetError::UnknownTarget) => {
+            "target_domain_target_missing"
+        }
+        Err(_) => "target_domain_assignment_failed",
+    };
+    Redirect::to(&back(code))
 }
 
 /// COLLECTION-001 · 从列表上开关一个目标的自动巡查。
