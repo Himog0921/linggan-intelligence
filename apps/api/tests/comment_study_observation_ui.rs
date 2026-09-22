@@ -2,13 +2,22 @@
 fn comment_study_overview_exposes_observation_chart_table_and_ranges() {
     let page = include_str!("../src/local_web/comment_study.html");
 
+    // 三个范围按钮由模板生成（源码里是 data-series-days="${days}" 配 [7,28,56] 的取值集合），
+    // 写死的 data-series-days="7" 本来就不会出现在文件里，断言要对着模板写。
+    let compact: String = page
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect();
+
     assert!(page.contains("id=\"study-observation-title\">评论观察量"));
-    for days in [7, 28, 56] {
-        assert!(
-            page.contains(&format!("data-series-days=\"{days}\"")),
-            "missing observation range {days}"
-        );
-    }
+    assert!(
+        compact.contains("data-series-days=\"${days}\""),
+        "观察量必须提供 7 / 28 / 56 三个尾窗范围按钮"
+    );
+    assert!(
+        compact.contains("[7,28,56]"),
+        "范围集合固定为尾部 7 / 28 / 56 天"
+    );
     assert!(page.contains("data-series-view=\"chart\""));
     assert!(page.contains("data-series-view=\"table\""));
     for heading in [

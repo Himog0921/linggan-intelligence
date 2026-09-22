@@ -61,7 +61,7 @@
 | `studiedCommentCount` | 当日新建 Target 的不同 `source_ref` 数 | 当日采集评论数、模型已完成数 |
 | `acceptedSignalCount` | 当日实际写入的 Signal 数 | 质量分、问题数量、市场规模 |
 | `coveredWorkCount` | 当日首次观察评论或 Target 涉及的不同作品数 | 全领域作品覆盖率 |
-| `observationCoverage` | comments / replies lane 当日采集台账为 `recorded / partial / none` | `none` 不得解释为用户没有表达 |
+| `observationCoverage` | 当日 comments / replies lane 台账：每条都带 producer 记录的 `complete` 判定且无失败/未尝试/未知计数为 `recorded`；有缺口或无法证明完整（含无判定）为 `partial`；当日无台账为 `none`。停止原因本身不构成缺口——producer 每次采集都会记原因（`comment_area_end`、`no_progress`、`comment_cap_reached` 等），合同把 `state: complete` 与 `stopReason: comment_area_end` 配成合法组合 | `none` 不得解释为用户没有表达；`recorded` 不证明代表性或完整世界 |
 
 图表默认使用：
 
@@ -115,7 +115,8 @@
 | `PRIMARY_PAIR_RECORDED` | selection / decision manifest | 已比较首个合格候选，结论与边界可读 | 已穷尽候选 | 查看中文结论 |
 | `PROBLEM_LINKED` | membership | 已依据闭集比较关联稳定问题 | 规模、趋势或普遍性 | 查看 Problem |
 | `OBSERVATION_NONE` | 当日无 comments/replies lane ledger | 系统没有当日观察覆盖证明 | 用户没有讨论 | 查看采集运行事实 |
-| `OBSERVATION_PARTIAL` | lane ledger 有失败、未尝试、未知或停止原因 | 当日观察存在已知缺口 | 图中数量代表完整世界 | 查看采集运行事实 |
+| `OBSERVATION_RECORDED` | 当日每条 comments/replies lane 都带 producer 记录的 `complete` 判定，且无失败/未尝试/未知计数 | 当日观察有台账且无已知缺口 | 完整性证明、代表性、图中数量代表完整世界 | 查看采集运行事实 |
+| `OBSERVATION_PARTIAL` | lane ledger 有失败、未尝试、未知计数，或上游记录的采集判定不是 `complete`（含无判定） | 当日观察存在已知缺口或无法证明完整 | 图中数量代表完整世界 | 查看采集运行事实 |
 | `PARTIAL` | accepted 与 retry/failed 同时存在 | 有效结果保留，其他项未完成 | 全量完成 | 查看运行记录 |
 | `SOURCE_RESTRICTED` | target excluded / batch cancelled | 当前来源不可再处理 | 已外发或已安全完成 | 查看安全原因 |
 

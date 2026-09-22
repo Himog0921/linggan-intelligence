@@ -18,6 +18,14 @@ pub const COMMENT_OBSERVATION_TIMEZONE: &str = "Asia/Shanghai";
 
 /// Returns a fixed 56-day server-side aggregate. The browser may show the trailing 7, 28 or 56
 /// points, but it never rebuilds historical counts from paginated Run reads.
+///
+/// A day is `recorded` only when every `comments` / `replies` lane ledger row of that day carries
+/// the producer's own recorded verdict `complete` and no failed / not-attempted / unknown counter.
+/// A stop reason by itself is not a known gap: the producer always records one (`comment_area_end`,
+/// `no_progress`, `comment_cap_reached` …) and its contract pairs `state: complete` with
+/// `stopReason: comment_area_end`, so treating any reason as a gap would make `recorded`
+/// unreachable and print complete captures as partial. A row without a recorded verdict stays
+/// `partial`: completeness is never inferred from a missing field.
 pub async fn read_comment_observation_series(
     database: &Database,
     domain_ref: Uuid,
@@ -105,7 +113,8 @@ pub async fn read_comment_observation_series(
                     COALESCE(lane.failed,0)>0 \
                     OR COALESCE(lane.known_unattempted,0)>0 \
                     OR COALESCE(lane.unknown_count,0)>0 \
-                    OR lane.stopped_reason IS NOT NULL \
+                    OR package.coverage->'target'->'commentCollection'->>'state' \
+                       IS DISTINCT FROM 'complete' \
                   ) AS has_known_gap \
            FROM linggan_material_lane_observation lane \
            JOIN linggan_runtime_capture_package package USING(package_ref) \
