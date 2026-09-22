@@ -996,25 +996,19 @@ fn deletion_modal(
     error: Option<&str>,
     list_context: super::target_drawer::TargetListContext<'_>,
 ) -> String {
-    let blocked =
-        preview.blocking_cross_industry_samples > 0 || preview.blocking_material_retirements > 0;
+    let blocked = preview.blocking_cross_industry_samples > 0;
     let note = if blocked {
-        let mut reasons = Vec::new();
-        if preview.blocking_cross_industry_samples > 0 {
-            reasons.push(format!(
-                "{} 条跨行业样本",
-                preview.blocking_cross_industry_samples
-            ));
-        }
-        if preview.blocking_material_retirements > 0 {
-            reasons.push(format!(
-                "{} 条已确认的作品失效结论",
-                preview.blocking_material_retirements
-            ));
-        }
         format!(
-            r#"<p class="c-tg-delete-blocked">这个目标关联 {reasons}。它们是已经留下的材料或人工结论，删除目标不能把它们一起抹掉；在有独立保留方案前，这里不提供删除。</p>"#,
-            reasons = escape(&reasons.join("、")),
+            r#"<p class="c-tg-delete-blocked">这个目标关联 {samples} 条跨行业样本。它们是已经进入参照语料的材料，删除目标不能把材料一起抹掉；在有独立保留方案前，这里不提供删除。</p>"#,
+            samples = preview.blocking_cross_industry_samples,
+        )
+    } else {
+        String::new()
+    };
+    let retirement_item = if preview.material_retirements > 0 {
+        format!(
+            "<li>{} 条只对这个目标目录生效的作品失效结论</li>",
+            preview.material_retirements
         )
     } else {
         String::new()
@@ -1050,6 +1044,7 @@ fn deletion_modal(
                    <li>这个观察目标本身与它的 {rules} 个规则版本</li>
                    <li>{requests} 次采集申请与准入决定</li>
                    <li>{orders} 张采集工单、{leases} 份租约、{tasks} 个执行任务</li>
+                   {retirement_item}
                  </ul></div>
                  <div><b>不会删掉</b><ul>
                    <li>{works} 篇作品与 {details} 份详情，以及它们的评论</li>
@@ -1067,6 +1062,7 @@ fn deletion_modal(
         orders = preview.work_orders,
         leases = preview.leases,
         tasks = preview.lease_tasks,
+        retirement_item = retirement_item,
         works = preview.retained_works,
         details = preview.retained_details,
         cancel_href = list_context.list_href(Some(&format!("target-{target_ref}"))),
@@ -1529,7 +1525,7 @@ mod tests {
             retained_works: 2,
             retained_details: 1,
             blocking_cross_industry_samples: 0,
-            blocking_material_retirements: 0,
+            material_retirements: 4,
         };
         let html = render_stored_targets_with_observation(
             &base,
@@ -1559,6 +1555,9 @@ mod tests {
         assert!(html.contains(&format!(
             "href=\"/collection/targets?domain={domain}&amp;filter=creator&amp;sort=last#target-{target_ref}\""
         )));
+        assert!(html.contains("4 条只对这个目标目录生效的作品失效结论"));
+        assert!(html.contains(r#"action="/collection/targets/delete""#));
+        assert!(html.contains(">彻底删除</button>"));
     }
 
     #[test]

@@ -12,10 +12,11 @@ use linggan_evidence::{
     CheckInOutcome, CreatorLifecycleAssociation, CreatorLifecycleMetric, CreatorLifecycleQuery,
     CreatorLifecycleStatus, CreatorLifecycleWindow, DispatchDecision, DispatchFailureCode,
     DispatchFailureOutcome, InstallationCheckIn, MaterialExecutionKind, RequestLeaseError,
-    RuntimeAttemptOutcome, RuntimeSubmissionOutcome, TargetDomainAssignmentOutcome,
-    activate_installation_credential, assign_target_domain, bind_observation_account,
-    check_in_installation, decide_dispatch, grant_authorization, list_targets, open_claim_window,
-    read_archive_completeness, read_creator_directory, read_creator_lifecycle, read_target,
+    RuntimeAttemptOutcome, RuntimeSubmissionOutcome, TargetDeletionOutcome,
+    TargetDomainAssignmentOutcome, activate_installation_credential, assign_target_domain,
+    bind_observation_account, check_in_installation, decide_dispatch, delete_observation_target,
+    grant_authorization, list_targets, open_claim_window, read_archive_completeness,
+    read_creator_directory, read_creator_lifecycle, read_target, read_target_deletion_preview,
     register_station, report_account_eligibility, request_admit_and_lease,
     request_progressive_archive_and_lease, requeue_failed_dispatch, retire_materials,
     run_progressive_archives, set_station_accepting, start_producer_attempt,
@@ -87,6 +88,77 @@ async fn a_plugin_candidate_stays_unassigned_until_a_person_picks_an_active_doma
         assign_target_domain(&database, target_ref, other_domain).await,
         Err(linggan_evidence::CollectionTargetError::DomainAlreadyAssigned)
     ));
+}
+
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn deleting_a_target_removes_its_retirement_decisions_but_keeps_material() {
+    let database = proof_database("dossier_target_deletion_retirement").await;
+    let target_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_observation_target \
+           (target_ref,platform,target_kind,identity_key,display_name,source) \
+         VALUES ($1,'xhs','creator','deletion-retirement-author','删除目标','manual')",
+    )
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    let task_id = seed_standalone_task(
+        &database,
+        "content_detail",
+        serde_json::json!({"contentExternalId":"retired-work"}),
+    )
+    .await;
+    let package_ref =
+        seed_runtime_package(&database, task_id, "content_detail", "2026-09-22T04:00:00Z").await;
+    let content_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_material_content \
+           (platform,content_external_id,public_ref,first_package_ref) \
+         VALUES ('xhs','retired-work',$1,$2)",
+    )
+    .bind(content_ref)
+    .bind(package_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO collection_material_retirement \
+           (retirement_ref,target_ref,content_public_ref,reason_code,decided_by) \
+         VALUES ($1,$2,$3,'page_gone','person')",
+    )
+    .bind(Uuid::new_v4())
+    .bind(target_ref)
+    .bind(content_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    let preview = read_target_deletion_preview(&database, target_ref)
+        .await
+        .unwrap()
+        .expect("target deletion preview remains available");
+    assert_eq!(preview.material_retirements, 1);
+    assert_eq!(
+        delete_observation_target(&database, target_ref, "删除目标")
+            .await
+            .unwrap(),
+        TargetDeletionOutcome::Deleted
+    );
+    let (targets, retirements, materials): (i64, i64, i64) = sqlx::query_as(
+        "SELECT \
+           (SELECT count(*) FROM collection_observation_target WHERE target_ref=$1), \
+           (SELECT count(*) FROM collection_material_retirement WHERE target_ref=$1), \
+           (SELECT count(*) FROM linggan_material_content WHERE public_ref=$2)",
+    )
+    .bind(target_ref)
+    .bind(content_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!((targets, retirements, materials), (0, 0, 1));
 }
 
 #[tokio::test]

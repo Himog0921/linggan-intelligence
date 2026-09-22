@@ -778,8 +778,8 @@ pub struct TargetDeletionPreview {
     pub retained_details: i64,
     /// 跨行业样本是已采集的参照材料，不能随观察决定一起抹掉。
     pub blocking_cross_industry_samples: i64,
-    /// 人已确认的作品失效结论也不能因删除观察目标而丢失。
-    pub blocking_material_retirements: i64,
+    /// 随目标控制面一起删除的、只在该目标目录内成立的人工作品失效结论。
+    pub material_retirements: i64,
 }
 
 pub async fn read_target_deletion_preview(
@@ -826,7 +826,7 @@ pub async fn read_target_deletion_preview(
         retained_works: row.7,
         retained_details: row.8,
         blocking_cross_industry_samples: row.9,
-        blocking_material_retirements: row.10,
+        material_retirements: row.10,
     }))
 }
 
@@ -837,7 +837,7 @@ pub enum TargetDeletionOutcome {
     UnknownTarget,
     /// 输入的名字与目标名字不一致。不可逆操作要求手打名字，点两下太容易了。
     NameMismatch,
-    /// 有必须保留的材料或人工结论挂在它下面，不能把它们和观察决定一起抹掉。
+    /// 有必须保留的跨行业材料挂在它下面，不能把材料和观察决定一起抹掉。
     BlockedByProtectedFacts {
         rows: i64,
     },
@@ -871,13 +871,11 @@ pub async fn delete_observation_target(
         tx.rollback().await?;
         return Ok(TargetDeletionOutcome::NameMismatch);
     }
-    let blocking: i64 = sqlx::query_scalar(
-        "SELECT (SELECT count(*) FROM cross_industry_sample WHERE target_ref=$1) \
-              + (SELECT count(*) FROM collection_material_retirement WHERE target_ref=$1)",
-    )
-    .bind(target_ref)
-    .fetch_one(&mut *tx)
-    .await?;
+    let blocking: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM cross_industry_sample WHERE target_ref=$1")
+            .bind(target_ref)
+            .fetch_one(&mut *tx)
+            .await?;
     if blocking > 0 {
         tx.rollback().await?;
         return Ok(TargetDeletionOutcome::BlockedByProtectedFacts { rows: blocking });
@@ -906,6 +904,10 @@ pub async fn delete_observation_target(
 
     // 顺序由外键决定，从叶子往根删。任何一条走不通都会整笔回滚——半删的目标比不删更糟。
     for statement in [
+        // 作品失效是“这个目标的目录里不再补这篇”的人工作品控制结论。删除整个观察
+        // 决定后它已没有可应用的目录，因此跟控制面一起删除；底层作品、详情、评论、
+        // Package 与 Receipt 仍由各自的 append-only 边界保留。
+        "DELETE FROM collection_material_retirement WHERE target_ref=$1",
         "DELETE FROM collection_monitor_rule_command_receipt WHERE target_ref=$1",
         "DELETE FROM collection_monitor_rule_command_identity WHERE target_ref=$1",
         "DELETE FROM collection_scheduler_target_decision WHERE target_ref=$1",
