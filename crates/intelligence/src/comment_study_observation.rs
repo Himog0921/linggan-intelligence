@@ -99,7 +99,7 @@ pub async fn read_comment_observation_series(
            ) activity \
            GROUP BY activity.day \
          ), observation_coverage AS ( \
-           SELECT (lane.created_at AT TIME ZONE $3)::date AS day, \
+           SELECT (package.accepted_at AT TIME ZONE $3)::date AS day, \
                   count(*)::bigint AS ledger_count, \
                   bool_or( \
                     COALESCE(lane.failed,0)>0 \
@@ -108,11 +108,12 @@ pub async fn read_comment_observation_series(
                     OR lane.stopped_reason IS NOT NULL \
                   ) AS has_known_gap \
            FROM linggan_material_lane_observation lane \
+           JOIN linggan_runtime_capture_package package USING(package_ref) \
            JOIN linggan_material_content content ON content.public_ref=lane.content_public_ref \
            JOIN params ON params.domain_ref=content.domain_ref \
            WHERE lane.lane IN ('comments','replies') \
-             AND lane.created_at >= (params.end_date-(params.window_days-1))::timestamp AT TIME ZONE $3 \
-             AND lane.created_at < (params.end_date+1)::timestamp AT TIME ZONE $3 \
+             AND package.accepted_at >= (params.end_date-(params.window_days-1))::timestamp AT TIME ZONE $3 \
+             AND package.accepted_at < (params.end_date+1)::timestamp AT TIME ZONE $3 \
            GROUP BY 1 \
          ) \
          SELECT jsonb_build_object( \
