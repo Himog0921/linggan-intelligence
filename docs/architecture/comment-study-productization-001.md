@@ -15,7 +15,7 @@
 |---|---|---|
 | S01 `database/bootstrap/comment-study-001.sql` | clean-study 表在 bootstrap，非 numbered migration；已有 policy/run/target/batch/signal/problem/revision/resolution/pair/membership/comparison | 通过增量 migration 升级，不重新执行 bootstrap |
 | S02 `comment_study_source.rs` | 作者身份、清洗、领域与受限来源资格；准备页作品截断 100；候选 `.fetch_all`；父语境查询缺少同等 restriction 过滤 | 共用资格函数；分页；先确定最新版本再判断可读；父语境补同等资格 |
-| S03 `comment_study_run.rs` | 从活动 policy 建 prepared Run；每 Target 存一次完整 workContext；Run 完成只取决于 Target 终态 | 新命令显式 policy；新 Target 不重复作品语境；Run 语义结束与归并进度分开 |
+| S03 `comment_study_run.rs` | 从活动 policy 建 prepared Run；每 Target 存一次完整 workContext；Run 完成只取决于 Target 终态 | 新命令显式 policy；新 Target 不重复作品语境；语义结束与归并进度分开 |
 | S04 `comment_study_batch.rs` | 同篇合批，上限 12；请求目标含 researchText，没有 rawText；prepared 可被 Worker 打包 | 保留合批；新请求补原文；开始动作即授权，不伪造待启动 |
 | S05 `model_runner.rs` | 实际先 pair→resolution，后缓存；回收靠后；早期步骤进展或错误可能阻止语义执行 | 先回收，缓存先于比较外发；小型轮转、逐阶段错误隔离 |
 | S06 `comment_study_resolution_worker.rs` | 候选定义取 claim 时的 current revision；缓存写入发生在合同接纳之前；Schema 对候选描述很宽 | 冻结 revision 与完整定义；先验证后缓存；严格 Schema |
