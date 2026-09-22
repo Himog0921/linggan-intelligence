@@ -90,6 +90,9 @@
 
   const overviewDomainRef = new URLSearchParams(window.location.search).get('domain');
   const overviewState = { kind: 'all', expression: null, method: 'solution', cache: null };
+  // 「待归并」页只列 PENDING_RESOLUTION_STATES 里的等待状态；协议拒绝与失败不在其中，
+  // 这两类的记录在运行记录里，不能让「查看」落到一个必定为空的列表上。
+  const RUN_RECORD_RESOLUTION_STATES = new Set(['protocol_rejected', 'failed']);
   const overviewNum = value => value == null || Number.isNaN(Number(value))
     ? '—'
     : new Intl.NumberFormat('zh-CN').format(Number(value));
@@ -153,7 +156,7 @@
     ['deferred_novel', 'deferred_ambiguous', 'deferred_context', 'retrieval_incomplete', 'budget_stopped', 'pending', 'protocol_rejected', 'failed']
       .forEach(state => {
         const count = Number(latest.resolutionStates?.[state] || 0);
-        if (count) rows.push({ text: label(resolutionLabel, state) ?? state, count, view: 'pending' });
+        if (count) rows.push({ text: label(resolutionLabel, state) ?? state, count, view: RUN_RECORD_RESOLUTION_STATES.has(state) ? 'runs' : 'pending' });
       });
     [['needs_context', '仍在等待评论语境'], ['failed', '评论研究处理失败'], ['excluded', '来源受限，未继续处理']]
       .forEach(([state, text]) => {
@@ -210,11 +213,11 @@
         : '按已关联信号数优先展示';
 
     return `<div class="study-overview">
-      <div class="study-overview-scope"><span><strong>ADHD 评论研究</strong> · ${esc(scope)}</span><code>${esc(data.overview?.domainRef || overviewDomainRef || 'DOMAIN UNKNOWN')}</code></div>
+      <div class="study-overview-scope"><span><strong>ADHD 评论研究</strong> · ${esc(scope)}</span><code>${esc(data.overview?.domainRef || overviewDomainRef || '未配置领域')}</code></div>
 
       <section class="study-readout-strip" aria-label="评论研究观察基础">
         ${overviewReadout('观察到的评论', preview ? overviewNum(preview.totalCommentCount) : '—', '条', preview ? '当前领域库存快照' : '资格读取不可用')}
-        ${overviewReadout('可研究评论', preview ? overviewNum(preview.eligibleCommentCount) : '—', '条', preview ? `覆盖 ${overviewNum(preview.works?.length || 0)} 篇作品` : '来源 gate 状态未知', true)}
+        ${overviewReadout('可研究评论', preview ? overviewNum(preview.eligibleCommentCount) : '—', '条', preview ? `覆盖 ${overviewNum(preview.works?.length || 0)} 篇作品${(preview.works?.length || 0) >= 100 ? '（已达读取上限）' : ''}` : '来源 gate 状态未知', true)}
         ${overviewReadout('本次接纳信号', signalTotal == null ? '—' : overviewNum(signalTotal), '条', latest ? '最近一次研究产出' : '尚无研究运行')}
         ${overviewReadout('长期用户问题', problemTotal === 100 ? '100+' : overviewNum(problemTotal), '个', problemTotal ? '累计已建档问题' : '尚无稳定问题')}
       </section>
@@ -275,10 +278,9 @@
   }
 
   async function loadIntelligenceOverview() {
-    const [overview, problems, runs, setup] = await Promise.all([
+    const [overview, problems, setup] = await Promise.all([
       get(overviewPath('overview')),
       get(overviewPath('problems', { limit: 100 })),
-      get(overviewPath('runs', { limit: 50 })),
       get('setup').catch(() => null)
     ]);
     let targets = [];
@@ -291,7 +293,7 @@
       targets = targetData.targets || [];
       signals = signalData.signals || [];
     }
-    return { overview, problems: problems.problems || [], runs: runs.runs || [], setup, targets, signals };
+    return { overview, problems: problems.problems || [], setup, targets, signals };
   }
   async function renderIntelligenceOverviewTab() {
     overviewState.cache = await loadIntelligenceOverview();
@@ -343,8 +345,6 @@
   });
   statusObserver.observe(setupStatus, { childList: true, characterData: true, subtree: true });
   setupStatus.hidden = !setupStatus.textContent.trim();
-
-  if (activeView === 'overview') renderActiveTab();
 })();
   </script>
 </body>

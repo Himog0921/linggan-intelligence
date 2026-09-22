@@ -96,8 +96,10 @@ async function loadSetup() {
     loadedWorks = setup.eligibleWorks || [];
     selectedWorkRefs.clear();
     renderWorks();
+    status.dataset.kind = available ? 'info' : 'error';
     status.textContent = available ? `已加载 ${setup.eligibleWorks?.length || 0} 篇可选作品；此列表最多展示 100 篇。` : '没有启用的模型配置，无法保存策略。';
   } catch (error) {
+    status.dataset.kind = 'error';
     status.textContent = `无法读取准备信息：${error.message}`;
     document.querySelector('#work-filter-status').textContent = '作品列表不可用。';
     sourcePreview = null;

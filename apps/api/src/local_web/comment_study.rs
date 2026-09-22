@@ -645,6 +645,47 @@ mod tests {
     }
 
     #[test]
+    fn comment_study_overview_stays_a_read_only_projection_of_existing_facts() {
+        let page = include_str!("comment_study.html");
+        assert!(
+            page.contains("TAB_RENDERERS.overview = renderIntelligenceOverviewTab;"),
+            "情报总览必须是默认工作面的渲染器，否则首屏仍会落回旧的工程报告"
+        );
+        assert!(
+            page.contains("if (activeView !== 'overview' || !overviewState.cache) return;"),
+            "总览的本地重渲染只能作用于当前工作面；没有这道判断，一次旧筛选的 innerHTML \
+             写入会覆盖用户已经切到的其它 Tab"
+        );
+        assert!(
+            page.contains(
+                "const RUN_RECORD_RESOLUTION_STATES = new Set(['protocol_rejected', 'failed']);"
+            ),
+            "协议拒绝与失败不在「待归并」页的状态集合里；它们必须指向运行记录，否则\
+             「尚未看清」里的「查看」会落到一个必定为空的列表上"
+        );
+        let loader = page
+            .split("async function loadIntelligenceOverview()")
+            .nth(1)
+            .and_then(|rest| {
+                rest.split("async function renderIntelligenceOverviewTab()")
+                    .next()
+            })
+            .expect("总览必须有独立的加载函数，组合既有读取端点");
+        for read in [
+            "get(overviewPath('overview'))",
+            "get(overviewPath('problems', { limit: 100 }))",
+            "get(overviewPath('targets', { runRef: overview.latestRun.runRef, limit: 100 }))",
+            "get(overviewPath('signals', { runRef: overview.latestRun.runRef, limit: 100 }))",
+        ] {
+            assert!(loader.contains(read), "总览只组合既有读取事实：{read}");
+        }
+        assert!(
+            !loader.contains("post("),
+            "总览的加载路径必须只读：浏览、筛选与下钻不得创建 Run、保存策略或调用模型"
+        );
+    }
+
+    #[test]
     fn comment_study_stylesheet_uses_the_text_tab_primitive_not_a_segmented_control() {
         let stylesheet = include_str!("comment_study.css");
         assert!(stylesheet.contains(
