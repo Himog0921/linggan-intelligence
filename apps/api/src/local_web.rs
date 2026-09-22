@@ -4069,8 +4069,15 @@ struct MonitoringForm {
 }
 
 #[derive(serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum TargetArchiveAction {
+    Gaps,
+}
+
+#[derive(serde::Deserialize)]
 struct TargetArchiveForm {
     row_target_ref: uuid::Uuid,
+    archive_action: Option<TargetArchiveAction>,
     /// Closed list state only. These fields are navigation context, never acquisition input.
     return_filter: Option<String>,
     return_sort: Option<String>,
@@ -4145,6 +4152,7 @@ async fn collection_retire_materials(State(state): State<LocalWebState>, body: B
     };
     let form = TargetArchiveForm {
         row_target_ref: target_ref,
+        archive_action: None,
         return_filter,
         return_sort,
     };
@@ -4605,13 +4613,25 @@ async fn collection_target_deep_archive(
             ),
         };
     }
-    let outcome = request_progressive_archive(
-        database,
-        form.row_target_ref,
-        "从观察目标页发起深度建档",
-        "person",
-    )
-    .await;
+    let filling_gaps = matches!(form.archive_action, Some(TargetArchiveAction::Gaps));
+    let outcome = if filling_gaps {
+        linggan_evidence::request_creator_directory_gaps(
+            database,
+            form.row_target_ref,
+            "从观察目标页发起深度建档",
+            "person",
+        )
+        .await
+        .map_err(RequestLeaseError::Acquisition)
+    } else {
+        request_progressive_archive(
+            database,
+            form.row_target_ref,
+            "从观察目标页发起深度建档",
+            "person",
+        )
+        .await
+    };
     let outcome = match outcome {
         Ok(outcome) => outcome,
         Err(RequestLeaseError::Acquisition(
@@ -4659,7 +4679,11 @@ async fn collection_target_deep_archive(
     };
     Redirect::to(&target_archive_return_path(
         &form,
-        Some("archive_requested"),
+        Some(if filling_gaps {
+            "creator_detail_requested"
+        } else {
+            "archive_requested"
+        }),
     ))
 }
 

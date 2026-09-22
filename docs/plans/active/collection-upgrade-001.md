@@ -6,6 +6,18 @@
 > 事实来源: Mog 派定的交付包 `linggan-collection-upgrade-handoff-2026-09-21`、`origin/main@1ef5830c` 的代码与迁移、隔离 PostgreSQL 基线运行结果
 > 冲突时以谁为准: 交付包合同与 Mog 最新确认；实现事实以当前代码、迁移与真实验证输出为准
 
+## 2026-09-22 用户现场阻塞恢复（执行中）
+
+Mog 反馈木可可「补采缺口」仅打开一次主页、读写障碍在本机 Chrome-1 长期卡住，并明确要求清理阻碍或重新下任务；沿用本对话修复、合并 main、部署刷新授权。Claim 为当前任务，branch `codex/collection-stalled-recovery`，专属 `.worktrees/collection-stalled-recovery`，基线 f02c2fd。保留历史 Attempt、Package、Receipt 与 outbox，不 SQL 改写成功。
+
+- 现场事实：读写障碍正文有 U+0000，PG JSONB 报 unsupported Unicode escape，API 错判 503；冻结 outbox 因此反复投递。木可可最新主页/目录已接纳，根计划已结束，但页面当前目录仍有 2 个未退役详情缺口；补采按钮与建立目录共用无动作参数的入口。
+- 现场显示更正：检查器 execution 只读当前有效租约的阻塞；已结束/过期租约中的失败仍在历史任务和材料缺口中，不继续冒充当前执行状态。验证活租约 blocked → 结束后 idle，历史事实计数保持不变。
+- 修复边界：正文文本在新包冻结前移除无法存储的 NUL，并在同包字段保存可逆 JSON 字符串编码原文与版本；旧不可变包遇 NUL 在合同边界确定拒绝，保留失败包，禁止改挂或改 hash。补采按钮显式传递 gaps 意图，后端在目标锁内按统一目录账本冻结尚欠、未退役且未在途的具体作品，走普通授权/准入/队列；不重开或扩张已完成历史根。
+- 表面地图：观察目标列表、抽屉概览/基线/主按钮、入队或受阻反馈；工位卡与正文交付状态。只改动作连接，不改布局或视觉值。状态词典：已入队不等于已采到，历史失效不等于详情完成，缺口为零才无待补作品；确定无效包不再作为临时网络失败重试。
+- 依赖与读取回执：既有 `acquisition_chain`、`archive_ledger`、producer 合同/包装、local web 路由与四处按钮；已读 UI execution contract、design README/governance、LIDS README/data-boundaries/language-policy。分类为既有权限/行动修正，L1 列表与 L2 抽屉沿用原组件和反馈，不增加授权能力。
+- 提交前验证：插件 291/291、合同 6/6；隔离档案 24/24、API PG 27/27、API普通 261/261；检查器有效阻塞到已结束闲置 1/1，历史事实数量不变。首次检查器夹具未同步 claimed_at/合法 release_reason，被 DB 约束正确拒绝，已按现有合同修正，无 migration。0.8.56 两次干净构建 SHA-256 `8c861bf5f8833c0f9addc54486a883ab9409cb1e49be20bdee09d64960547460`；独立复审 Node 57/57，原两项无阻断。部署与真实材料回执仍待后续完成。
+- 验收矩阵：合成 NUL 多字段可逆且包无 NUL、原 note 不变；HTTP 422 与 PG 无部分提交；完成根 + 巡检新增缺口仅生成精确材料任务、已取得/退役/在途排除、重复点击不重复导航；插件回归与可复现发布；独立 commit-reviewer；部署后定向新 Attempt/Package/Receipt 与页面读取。真实材料不进入 Git/测试/普通日志。
+
 ## 2026-09-22 真实数据候选查询继续核对
 
 #330 已合并 720ca8c；recovery 一轮正常结束，关停阻断已修复。目标列表在 45 秒内未返回，故保持 recovery，继续同交付包的输入资格修复。EXPLAIN 显示签名地址解析子查询使用 `content` / `sample`，遮蔽调用方同名外层别名，把对象匹配变成内层自比较；这同时导致全量扫描与用别篇地址判断可执行。

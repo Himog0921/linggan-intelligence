@@ -239,6 +239,21 @@ async fn a_retired_work_stays_in_the_directory_and_leaves_the_pending_count() {
         .await
         .unwrap();
     assert_eq!(rows, 1);
+    let request = linggan_evidence::request_creator_directory_gaps(
+        &database,
+        target_ref,
+        "建立创作者档案",
+        "person",
+    )
+    .await
+    .unwrap();
+    let scope: Vec<Uuid> = sqlx::query_scalar("SELECT content_public_ref FROM collection_work_order_material_target WHERE work_order_ref=$1")
+        .bind(request.work_order_ref.unwrap()).fetch_all(database.pool()).await.unwrap();
+    assert_eq!(scope.len(), 30);
+    assert!(
+        !scope.contains(&gone),
+        "an explicit gap retry must respect material retirement"
+    );
 }
 
 /// T19：**详情已经取到、只是平台没给标题**，仍然算「详情已取得」。
@@ -833,6 +848,55 @@ async fn completed_progressive_archive_never_turns_a_patrol_addition_into_deepen
     .await
     .unwrap();
     assert_eq!(status, "completed");
+
+    // Only a new explicit person request may freeze the patrol-only gap. It must never
+    // re-open the completed root or revisit the already-qualified canonical member.
+    let directory = read_creator_directory(&database, target_ref)
+        .await
+        .unwrap()
+        .unwrap();
+    let expected: Vec<Uuid> = directory
+        .works
+        .iter()
+        .filter(|work| work.detail_state == CatalogDetailState::Pending)
+        .map(|work| work.public_ref)
+        .collect();
+    assert_eq!(expected.len(), 1);
+    let (left, right) = tokio::join!(
+        linggan_evidence::request_creator_directory_gaps(
+            &database,
+            target_ref,
+            "建立创作者档案",
+            "person"
+        ),
+        linggan_evidence::request_creator_directory_gaps(
+            &database,
+            target_ref,
+            "建立创作者档案",
+            "person"
+        ),
+    );
+    let outcomes = [left, right];
+    let success = outcomes
+        .iter()
+        .find_map(|outcome| outcome.as_ref().ok())
+        .unwrap();
+    let work_order = success
+        .work_order_ref
+        .expect("one explicit gap request is queued");
+    assert_eq!(outcomes.iter().filter(|outcome| outcome.is_ok()).count(), 1);
+    assert!(outcomes.iter().any(|outcome| matches!(
+        outcome,
+        Err(AcquisitionChainError::ProgressiveArchiveNotReady {
+            reason: "detail_batch_in_flight"
+        })
+    )));
+    let scope: Vec<Uuid> = sqlx::query_scalar("SELECT content_public_ref FROM collection_work_order_material_target WHERE work_order_ref=$1")
+        .bind(work_order).fetch_all(database.pool()).await.unwrap();
+    assert_eq!(scope, expected);
+    let state: (i64, String) = sqlx::query_as("SELECT (SELECT count(*) FROM collection_work_order WHERE target_ref=$1 AND stop_conditions #>> '{progressiveArchive,rootWorkOrderRef}'=work_order_ref::text), (SELECT stop_conditions #>> '{progressiveArchive,status}' FROM collection_work_order WHERE work_order_ref=$2)")
+        .bind(target_ref).bind(root).fetch_one(database.pool()).await.unwrap();
+    assert_eq!(state, (1, "completed".into()));
 }
 
 /// **「这一篇不再自动重试」不等于「这份目录已经齐了」。**

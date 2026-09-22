@@ -786,6 +786,7 @@ async fn target_route_never_reflects_an_invalid_selected_work() {
 fn archive_return_path_drops_untrusted_navigation_fields() {
     let target_ref = uuid::Uuid::from_u128(606);
     let unsafe_form = TargetArchiveForm {
+        archive_action: None,
         row_target_ref: target_ref,
         return_filter: Some("\"><svg onload=alert(1)>".to_owned()),
         return_sort: Some("https://example.invalid".to_owned()),
@@ -798,6 +799,7 @@ fn archive_return_path_drops_untrusted_navigation_fields() {
     );
 
     let valid_form = TargetArchiveForm {
+        archive_action: None,
         row_target_ref: target_ref,
         return_filter: Some("creator".to_owned()),
         return_sort: Some("last".to_owned()),

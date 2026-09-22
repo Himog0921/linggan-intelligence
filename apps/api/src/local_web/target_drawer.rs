@@ -965,13 +965,18 @@ fn drawer_primary_action(
         | TargetPrimaryAction::RebuildDirectory
         | TargetPrimaryAction::ContinueArchive => {
             let label = archive_action_label(action);
+            let gap_field = if action == TargetPrimaryAction::ContinueArchive {
+                r#"<input type="hidden" name="archive_action" value="gaps">"#
+            } else {
+                ""
+            };
             let fields = list_context.return_fields(
                 Some(target.target_ref),
                 Some(TargetDrawerTab::Baseline),
                 Some("target-archive"),
             );
             format!(
-                r#"<form class="c-dw-primary-form" method="post" action="/collection/targets/archive">{fields}<button class="c-btn-primary" type="submit" name="row_target_ref" value="{target_ref}">{label}</button></form>"#,
+                r#"<form class="c-dw-primary-form" method="post" action="/collection/targets/archive">{fields}{gap_field}<button class="c-btn-primary" type="submit" name="row_target_ref" value="{target_ref}">{label}</button></form>"#,
                 target_ref = target.target_ref,
             )
         }
@@ -1809,13 +1814,18 @@ fn inspector_action_control(
                 TargetInspectorAction::ContinueArchive => "补采缺口",
                 _ => unreachable!(),
             };
+            let gap_field = if action == TargetInspectorAction::ContinueArchive {
+                r#"<input type="hidden" name="archive_action" value="gaps">"#
+            } else {
+                ""
+            };
             let fields = list_context.return_fields(
                 Some(target.target_ref),
                 Some(TargetDrawerTab::Overview),
                 Some("archive-problems"),
             );
             format!(
-                r#"<form class="c-dw-primary-form" method="post" action="/collection/targets/archive">{fields}<button class="c-btn-primary" type="submit" name="row_target_ref" value="{target_ref}">{label}</button></form>"#,
+                r#"<form class="c-dw-primary-form" method="post" action="/collection/targets/archive">{fields}{gap_field}<button class="c-btn-primary" type="submit" name="row_target_ref" value="{target_ref}">{label}</button></form>"#,
                 target_ref = target.target_ref,
             )
         }
@@ -3156,13 +3166,14 @@ fn archive_tab(
         | TargetPrimaryAction::RebuildDirectory
         | TargetPrimaryAction::ContinueArchive => {
             let label = archive_action_label(primary_action);
+            let gap_field = if primary_action == TargetPrimaryAction::ContinueArchive { r#"<input type="hidden" name="archive_action" value="gaps">"# } else { "" };
             let fields = list_context.return_fields(
                 Some(target.target_ref),
                 Some(TargetDrawerTab::Baseline),
                 Some("target-archive"),
             );
             format!(
-                r#"<form class="c-dw-primary-form" method="post" action="/collection/targets/archive">{fields}<button class="c-btn-primary" type="submit" name="row_target_ref" value="{target_ref}">{label}</button></form>"#,
+                r#"<form class="c-dw-primary-form" method="post" action="/collection/targets/archive">{fields}{gap_field}<button class="c-btn-primary" type="submit" name="row_target_ref" value="{target_ref}">{label}</button></form>"#,
                 target_ref = target.target_ref,
             )
         }
@@ -3603,6 +3614,7 @@ mod tests {
         let pending = render(KeywordArchiveRead::DetailPending);
         assert!(pending.contains("有详情缺口需要补采"), "{pending}");
         assert!(pending.contains(">补采缺口</button>"), "{pending}");
+        assert!(pending.contains(r#"name="archive_action" value="gaps""#), "{pending}");
 
         let complete = render(KeywordArchiveRead::Complete);
         assert!(complete.contains("开始每周巡检"), "{complete}");
@@ -3652,6 +3664,7 @@ mod tests {
         assert!(pending.contains("目标状态暂时读不到"), "{pending}");
         assert!(pending.contains("有详情缺口需要补采"), "{pending}");
         assert!(pending.contains(">补采缺口</button>"), "{pending}");
+        assert!(pending.contains(r#"name="archive_action" value="gaps""#), "{pending}");
     }
 
     /// **还没建过档的词，就算在巡查也仍然给「建立档案」。**

@@ -9,6 +9,7 @@ import {
   createManualRuntimeTask,
   packageAuthorAvatarMediaSlots,
   packageComments,
+  packageContentDetail,
   packageDiscovery,
   packageMediaSlots,
   packageReplies,
@@ -767,4 +768,25 @@ test('douyin control receipt is negative without an active controller and positi
     success: true,
     state: 'stopped',
   });
+});
+
+
+test('detail NUL text is losslessly encoded before freeze without mutating source or identities', () => {
+  const note = { noteId: 'nul-note', title: '标题', content: '前\u0000后\u0000', bodyText: '🐱\u0000正文', rawDomText: 'raw\u0000\nend' };
+  const original = structuredClone(note);
+  const capture = packageContentDetail({ platform: 'xhs', note });
+  const payload = capture.records[0].payload;
+  assert.deepEqual(note, original);
+  assert.equal(payload.content, '前后');
+  assert.equal(payload.bodyText, '🐱正文');
+  assert.equal(payload.sourceTextEncoding.version, 'nul-json-string.v1');
+  for (const field of ['content', 'bodyText', 'rawDomText']) {
+    assert.equal(JSON.parse(payload.sourceTextEncoding.fields[field]), original[field]);
+    assert.ok(!payload[field].includes('\u0000'));
+    assert.ok(!payload.sourceTextEncoding.fields[field].includes('\u0000'));
+  }
+  assert.equal(capture.coverage.target.contentExternalId, 'nul-note');
+  const clean = packageContentDetail({ platform: 'xhs', note: { noteId: 'clean', content: '不变\n正文' } });
+  assert.equal(clean.records[0].payload.content, '不变\n正文');
+  assert.equal(clean.records[0].payload.sourceTextEncoding, undefined);
 });
