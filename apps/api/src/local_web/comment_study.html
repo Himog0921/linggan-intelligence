@@ -13,28 +13,25 @@
       {{SIDE_NAV}}
       <main class="study-main" aria-labelledby="comment-study-title">
         <h1 id="comment-study-title" class="v7-sr-only">评论研究</h1>
+
         <header class="study-toolbar">
-          <div>
-            <p class="study-label">评论研究</p>
-            <p id="setup-status" role="status">正在读取可用模型与作品…</p>
-          </div>
-          <div class="study-toolbar-meta">
-            <p>本机数据库：{{DATABASE_STATE}}</p>
-            <button type="button" id="open-study-dialog">发起一次新研究</button>
+          <nav class="study-tabs" aria-label="评论研究视图">
+            <button type="button" data-view="overview" aria-current="page">概览</button>
+            <button type="button" data-view="targets">评论目标</button>
+            <button type="button" data-view="pending">待归并</button>
+            <button type="button" data-view="problems">用户问题</button>
+            <button type="button" data-view="runs">运行记录</button>
+          </nav>
+          <div class="study-toolbar-actions">
+            <span id="setup-status" class="study-setup-status" role="status" hidden></span>
+            <button type="button" id="open-study-dialog" class="study-primary-action">发起研究</button>
           </div>
         </header>
 
-        <nav class="study-tabs" aria-label="评论研究视图">
-          <button type="button" data-view="overview" aria-current="page">概览</button>
-          <button type="button" data-view="targets">评论目标</button>
-          <button type="button" data-view="pending">待归并</button>
-          <button type="button" data-view="problems">用户问题</button>
-          <button type="button" data-view="runs">运行记录</button>
-        </nav>
         <div id="study-run-picker" class="study-run-picker" hidden>
           <label>查看的研究运行<select id="study-run-select"></select></label>
         </div>
-        <section id="study-tab-result" aria-live="polite" aria-busy="true"><p>正在读取研究状态…</p></section>
+        <section id="study-tab-result" aria-live="polite" aria-busy="true"><p class="study-empty">正在读取评论研究…</p></section>
       </main>
     </div>
   </div>
@@ -76,7 +73,7 @@
         </table>
       </div>
       <footer class="study-workspace-footer">
-        <p>只会冻结当前所选作品中、并受本次评论数上限约束的可研究评论；创建研究运行不会调用模型。</p>
+        <p>只冻结当前所选作品中、受评论数上限约束的可研究评论；创建研究运行不会调用模型。</p>
         <div class="run-actions"><button id="start-run" type="button" disabled>创建研究运行</button><p id="run-result" role="status"></p></div>
       </footer>
     </section>
