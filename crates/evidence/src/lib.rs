@@ -103,7 +103,8 @@ pub use collection_control::{
 };
 pub use collection_target::{
     CollectionTargetError, ObservationTarget, ObservationTargetAvatar, StoreOutcome, TargetCounts,
-    TargetDeletionOutcome, TargetDeletionPreview, collection_target_schema_is_ready, count_targets,
+    TargetDeletionOutcome, TargetDeletionPreview, TargetDomainAssignmentOutcome,
+    assign_target_domain, collection_target_schema_is_ready, count_targets,
     delete_observation_target, list_targets, list_targets_in_state, read_target,
     read_target_avatars, read_target_deletion_preview, store_pending_target, transition_target,
 };

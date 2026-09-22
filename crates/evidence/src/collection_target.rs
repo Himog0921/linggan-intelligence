@@ -22,6 +22,10 @@ pub enum CollectionTargetError {
     IllegalTransition { from: String, to: String },
     #[error("no observation target with that reference")]
     UnknownTarget,
+    #[error("no active observation domain with that reference")]
+    UnknownDomain,
+    #[error("that observation target already belongs to another domain")]
+    DomainAlreadyAssigned,
     #[error(transparent)]
     Database(#[from] sqlx::Error),
 }
@@ -53,8 +57,8 @@ pub struct ObservationTarget {
     pub next_patrol_at: Option<String>,
     /// 这个目标在观察哪个领域。
     ///
-    /// 只有列表查询读它。`None` 表示领域表尚未建立（旧 schema），不是「没有领域」——
-    /// 没标过 `domain_ref` 的历史目标在读取时已回落成本领域，与 `0041` 的处置一致。
+    /// `None` 表示目标尚未明确分配领域，或领域表尚未建立。页面必须保持这个未知边界，
+    /// 不能把空值显示成本领域；写入侧会在明确分配前拒绝采集。
     pub domain_name: Option<String>,
     /// 该领域是不是本领域。用于列表里给外部领域加标记；`None` 同上。
     pub domain_is_own: Option<bool>,
@@ -69,6 +73,64 @@ pub struct ObservationTarget {
 pub enum StoreOutcome {
     Stored,
     AlreadyPresent,
+}
+
+/// Result of the explicit person-owned step that turns a plugin-discovered candidate into a
+/// domain-scoped observation target. Repeating the same assignment is safe; changing an existing
+/// assignment is a different product decision and is deliberately rejected here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetDomainAssignmentOutcome {
+    Assigned,
+    AlreadyAssigned,
+}
+
+pub async fn assign_target_domain(
+    database: &Database,
+    target_ref: Uuid,
+    domain_ref: Uuid,
+) -> Result<TargetDomainAssignmentOutcome, CollectionTargetError> {
+    if !collection_target_schema_is_ready(database).await?
+        || !crate::observation_domain::observation_domain_schema_is_ready(database).await?
+    {
+        return Err(CollectionTargetError::SchemaUnavailable);
+    }
+    let mut tx = database.pool().begin().await?;
+    let current: Option<Option<Uuid>> = sqlx::query_scalar(
+        "SELECT domain_ref FROM collection_observation_target WHERE target_ref=$1 FOR UPDATE",
+    )
+    .bind(target_ref)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some(current) = current else {
+        return Err(CollectionTargetError::UnknownTarget);
+    };
+    let domain_is_active: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM observation_domain WHERE domain_ref=$1 AND status='active')",
+    )
+    .bind(domain_ref)
+    .fetch_one(&mut *tx)
+    .await?;
+    if !domain_is_active {
+        return Err(CollectionTargetError::UnknownDomain);
+    }
+    match current {
+        Some(current) if current == domain_ref => {
+            tx.commit().await?;
+            Ok(TargetDomainAssignmentOutcome::AlreadyAssigned)
+        }
+        Some(_) => Err(CollectionTargetError::DomainAlreadyAssigned),
+        None => {
+            sqlx::query(
+                "UPDATE collection_observation_target SET domain_ref=$2 WHERE target_ref=$1",
+            )
+            .bind(target_ref)
+            .bind(domain_ref)
+            .execute(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            Ok(TargetDomainAssignmentOutcome::Assigned)
+        }
+    }
 }
 
 /// Presentation eligibility for a creator avatar. A target may retain its observed source URL
@@ -168,8 +230,8 @@ pub async fn collection_target_schema_is_ready(database: &Database) -> Result<bo
 /// read-then-write in application code: two pushes arriving together must not both succeed.
 /// The legacy workbench has no such index, and its failure mode is a silent parallel duplicate
 /// with its own independent baseline.
-/// `domain` 是这个目标要观察的领域。`None` 表示不指定——列保持可空，读取时回落本领域，
-/// 与 `0041` 对既有目标的处置一致（「没标过」与「标了本领域」是两件事，只是当前处置相同）。
+/// `domain` 是这个目标要观察的领域。`None` 表示插件只发现了目标身份，领域仍待人决定；
+/// 它只出现在“全部领域”视图，且在明确分配前不能开始采集。
 pub async fn store_pending_target(
     database: &Database,
     identity: &TargetIdentity,
@@ -305,9 +367,7 @@ const READ_TARGET_WITH_DOMAIN: &str = concat!(
        LEFT JOIN collection_monitor_rule_revision revision \
               ON revision.rule_revision_ref=rule.active_revision_ref \
        WHERE rule.target_ref=target.target_ref AND rule.retired_at IS NULL) rules ON true \
-     LEFT JOIN observation_domain domain \
-       ON domain.domain_ref = COALESCE(target.domain_ref, \
-            (SELECT home.domain_ref FROM observation_domain home WHERE home.is_own_domain)) \
+     LEFT JOIN observation_domain domain ON domain.domain_ref = target.domain_ref \
      WHERE target.target_ref = $1"
 );
 const READ_TARGET_WITHOUT_DOMAIN: &str = concat!(
@@ -340,13 +400,10 @@ const LIST_TARGETS_WITH_DOMAIN: &str = concat!(
        LEFT JOIN collection_monitor_rule_revision revision \
               ON revision.rule_revision_ref=rule.active_revision_ref \
        WHERE rule.target_ref=target.target_ref AND rule.retired_at IS NULL) rules ON true \
-     LEFT JOIN observation_domain domain \
-       ON domain.domain_ref = COALESCE(target.domain_ref, \
-            (SELECT home.domain_ref FROM observation_domain home WHERE home.is_own_domain)) \
+     LEFT JOIN observation_domain domain ON domain.domain_ref = target.domain_ref \
      WHERE ($1::text IS NULL OR target.target_kind = $1) \
        AND ($2::text IS NULL OR target.lifecycle_state = $2) \
-       AND ($4::uuid IS NULL OR COALESCE(target.domain_ref, \
-            (SELECT home.domain_ref FROM observation_domain home WHERE home.is_own_domain)) = $4) \
+       AND ($4::uuid IS NULL OR target.domain_ref = $4) \
      ORDER BY target.first_stored_at DESC LIMIT $3"
 );
 const LIST_TARGETS_WITHOUT_DOMAIN: &str = concat!(
@@ -432,8 +489,7 @@ pub async fn count_targets(
                     WHERE rule.target_ref=target.target_ref AND rule.retired_at IS NULL \
                       AND revision.automatic_enabled)) \
          FROM collection_observation_target target \
-         WHERE $1::uuid IS NULL OR COALESCE(target.domain_ref, \
-               (SELECT home.domain_ref FROM observation_domain home WHERE home.is_own_domain)) = $1"
+         WHERE $1::uuid IS NULL OR target.domain_ref = $1"
     );
     let row: (i64, i64, i64, i64, i64) = if domain_ready {
         sqlx::query_as(COUNT_IN_DOMAIN).bind(domain)
@@ -461,8 +517,8 @@ pub async fn count_targets(
 /// `domain` 传 `Some` 时只列该领域的目标，传 `None` 是「全部领域」——采集是运维视角，
 /// 一眼看到所有领域在跑什么是真实需求，与语料页只看一个世界的读法不同。
 ///
-/// 没标过 `domain_ref` 的历史目标按本领域处理（读取时回落，与 `0041` 一致）：它们是在
-/// 只有 ADHD 的时候建立的，算成别的领域会改写历史。
+/// 没标过 `domain_ref` 的目标只出现在“全部领域”视图。把它塞进任一具体领域会在页面上
+/// 隐藏尚未作出的归属决定，并与采集准入的领域闸门产生矛盾。
 pub async fn list_targets(
     database: &Database,
     filter: Option<&str>,

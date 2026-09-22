@@ -10,7 +10,7 @@
 
 use linggan_evidence::{
     ArchiveCompleteness, ObservationTarget, ObservationTargetAvatar, PatrolReadState,
-    TargetObservationSummary,
+    TargetObservationSummary, observation_domain::ObservationDomain,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -45,6 +45,8 @@ pub fn render_stored_targets(
         // 这条入口不读那三件事——读不到就如实是「读不到」，不假装查过。
         TargetListFacts::default(),
         list_context,
+        &[],
+        None,
     )
 }
 
@@ -62,6 +64,8 @@ pub fn render_stored_targets_with_observation(
     deletion_target: Option<uuid::Uuid>,
     facts: TargetListFacts<'_>,
     list_context: super::target_drawer::TargetListContext<'_>,
+    domains: &[ObservationDomain],
+    assignment_target: Option<uuid::Uuid>,
 ) -> String {
     if targets.is_empty() {
         return replace_target_state(
@@ -119,6 +123,7 @@ pub fn render_stored_targets_with_observation(
                 </div>
               </form>
               {deletion}
+              {domain_assignment}
             </section>"#,
         deletion = match (deletion, deletion_target) {
             (Some(preview), Some(target_ref)) => {
@@ -126,6 +131,13 @@ pub fn render_stored_targets_with_observation(
             }
             _ => String::new(),
         },
+        domain_assignment = assignment_target
+            .and_then(|target_ref| targets
+                .iter()
+                .find(|target| target.target_ref == target_ref))
+            .filter(|target| target.domain_name.is_none())
+            .map(|target| domain_assignment_modal(target, domains, list_context))
+            .unwrap_or_default(),
         failure = action_feedback_markup(error, ahead),
     );
     replace_target_state(base, &list)
@@ -279,6 +291,31 @@ fn action_feedback_markup(error: Option<&str>, ahead: Option<i64>) -> String {
             "c-src-feedback c-src-feedback-warn",
             "还没选领域",
             "新建观察目标前要先选定它属于哪个领域。领域决定这个目标采回来的材料进本行业证据库还是跨行业参照语料——选错会让参照物混进证据，而且之后任何读证据的地方都不会再提醒你，所以这一项不做推断。",
+        ),
+        "target_domain_assigned" => (
+            "c-src-feedback c-src-feedback-ok",
+            "领域已分配",
+            "这个目标现在有了明确材料归属，可以继续建立档案。没有重新采集博主，也没有复制或改写已有材料。",
+        ),
+        "target_domain_already_assigned" => (
+            "c-src-feedback c-src-feedback-warn",
+            "这个目标已经有领域",
+            "没有覆盖现有领域。更换领域会改变后续材料归属，不能通过首次分配入口静默完成。",
+        ),
+        "target_domain_unavailable" => (
+            "c-src-feedback c-src-feedback-warn",
+            "所选领域当前不可用",
+            "没有修改目标。该领域可能已经停用或不存在，请重新打开分配面板选择当前可用领域。",
+        ),
+        "target_domain_target_missing" => (
+            "c-src-feedback c-src-feedback-warn",
+            "目标已经不存在",
+            "没有进行领域分配。请刷新观察目标列表确认当前状态。",
+        ),
+        "target_domain_assignment_invalid" | "target_domain_assignment_failed" => (
+            "c-src-feedback c-src-feedback-warn",
+            "领域分配没有完成",
+            "没有修改目标。请重新打开分配面板再试一次。",
         ),
         "archive_requested" => (
             "c-src-feedback c-src-feedback-ok",
@@ -710,6 +747,9 @@ fn archive_state(
     archive: super::target_drawer::TargetArchiveRead<'_>,
 ) -> String {
     use super::target_drawer::TargetArchiveRead;
+    if target.domain_name.is_none() {
+        return r#"<span class="c-tg-truth c-tg-warn">待分配领域</span>"#.to_owned();
+    }
     let (tone, label) = match archive {
         TargetArchiveRead::Unavailable => ("neutral", "档案暂不可读"),
         TargetArchiveRead::Known(Some(value)) if value.has_actionable_problems() => {
@@ -889,6 +929,59 @@ pub(super) fn minutes_since_epoch(value: &str) -> Option<i64> {
     let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
     let days = era * 146_097 + day_of_era - 719_468;
     Some(days * 1440 + hour * 60 + minute)
+}
+
+fn domain_assignment_modal(
+    target: &ObservationTarget,
+    domains: &[ObservationDomain],
+    list_context: super::target_drawer::TargetListContext<'_>,
+) -> String {
+    let name = target
+        .display_name
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(&target.identity_key);
+    let options = domains
+        .iter()
+        .map(|domain| {
+            let suffix = if domain.is_own_domain {
+                "本行业，材料进入证据库"
+            } else {
+                "参照领域，材料进入跨行业语料"
+            };
+            format!(
+                r#"<option value="{value}">{name}（{suffix}）</option>"#,
+                value = domain.domain_ref,
+                name = escape(&domain.name),
+            )
+        })
+        .collect::<String>();
+    let focus_id = format!("target-{}", target.target_ref);
+    let fields = list_context.return_fields(None, None, Some(&focus_id));
+    let submit = if options.is_empty() {
+        r#"<p class="c-tg-delete-blocked">当前读不到任何可用领域，没有修改目标。领域读取恢复后再分配。</p>"#.to_owned()
+    } else {
+        format!(
+            r#"<form method="post" action="/collection/targets/domain">
+                 <input type="hidden" name="row_target_ref" value="{target_ref}"/>
+                 {fields}
+                 <label>领域<span class="c-tg-field" data-drawn-select><select name="domain_ref" required>{options}</select></span></label>
+                 <div class="c-tg-batch-dialog-actions"><a class="c-btn-secondary" href="{cancel_href}">取消</a><button class="c-btn-primary" type="submit">确认分配</button></div>
+               </form>"#,
+            target_ref = target.target_ref,
+            cancel_href = list_context.list_href(Some(&focus_id)),
+        )
+    };
+    format!(
+        r#"<div class="c-tg-batch-overlay">
+             <section class="c-tg-batch-dialog" role="dialog" aria-modal="true" aria-labelledby="target-domain-assignment-title">
+               <div><h2 id="target-domain-assignment-title">为「{name}」分配领域</h2>
+               <p>插件只负责带回博主身份，不替你判断业务领域。这里的选择决定后续材料进入本行业证据库还是跨行业参照语料；确认后才能建立档案。</p></div>
+               {submit}
+             </section>
+           </div>"#,
+        name = escape(name),
+    )
 }
 
 /// 删除确认面板：把将要发生的事用真实数字摆出来，而不是一句「确定删除吗」。
@@ -1088,6 +1181,10 @@ fn row_action(
     let action =
         super::target_drawer::target_primary_action(target, is_creator, archive, keyword_archive);
     match action {
+        TargetPrimaryAction::AssignDomain => {
+            let href = list_context.domain_assignment_href(target.target_ref);
+            format!(r#"<a class="c-tg-act" href="{href}">分配领域</a>"#)
+        }
         TargetPrimaryAction::ViewKeyword => {
             let drawer_href = list_context.drawer_href(
                 target.target_ref,
@@ -1198,8 +1295,8 @@ mod tests {
             last_patrol_dispatched_at: None,
             last_patrol_succeeded_at: None,
             next_patrol_at: None,
-            domain_name: None,
-            domain_is_own: None,
+            domain_name: Some("ADHD".to_owned()),
+            domain_is_own: Some(true),
         }
     }
 
@@ -1243,6 +1340,43 @@ mod tests {
         assert!(html.contains("建立档案"));
         assert!(!html.contains("档案已建立"));
         assert!(!html.contains("巡查中"));
+    }
+
+    #[test]
+    fn a_plugin_candidate_requires_an_explicit_domain_before_archive() {
+        let base = format!("before{EMPTY_STATE_OPEN}empty{EMPTY_STATE_CLOSE}after");
+        let mut creator = target("creator", Some("待分配作者"));
+        creator.domain_name = None;
+        creator.domain_is_own = None;
+        let home = ObservationDomain {
+            domain_ref: Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
+            name: "ADHD".to_owned(),
+            is_own_domain: true,
+            status: "active".to_owned(),
+            sample_count: None,
+        };
+        let html = render_stored_targets_with_observation(
+            &base,
+            std::slice::from_ref(&creator),
+            &HashMap::new(),
+            Some(&HashMap::new()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            TargetListFacts::default(),
+            TargetListContext::default(),
+            &[home],
+            Some(creator.target_ref),
+        );
+
+        assert!(html.contains("待分配领域"));
+        assert!(html.contains(">分配领域</a>"));
+        assert!(html.contains("为「待分配作者」分配领域"));
+        assert!(html.contains(r#"action="/collection/targets/domain""#));
+        assert!(html.contains("ADHD（本行业，材料进入证据库）"));
+        assert!(!html.contains(">建立档案</button>"));
     }
 
     #[test]
@@ -1409,6 +1543,8 @@ mod tests {
             Some(creator.target_ref),
             TargetListFacts::default(),
             context,
+            &[],
+            None,
         );
         let target_ref = creator.target_ref;
         assert!(html.contains(&format!(
@@ -1809,8 +1945,8 @@ mod keyword_archive_action_tests {
             last_patrol_dispatched_at: None,
             last_patrol_succeeded_at: None,
             next_patrol_at: None,
-            domain_name: None,
-            domain_is_own: None,
+            domain_name: Some("ADHD".to_owned()),
+            domain_is_own: Some(true),
         }
     }
 

@@ -12,12 +12,13 @@ use linggan_evidence::{
     CheckInOutcome, CreatorLifecycleAssociation, CreatorLifecycleMetric, CreatorLifecycleQuery,
     CreatorLifecycleStatus, CreatorLifecycleWindow, DispatchDecision, DispatchFailureCode,
     DispatchFailureOutcome, InstallationCheckIn, MaterialExecutionKind, RequestLeaseError,
-    RuntimeAttemptOutcome, RuntimeSubmissionOutcome, activate_installation_credential,
-    bind_observation_account, check_in_installation, decide_dispatch, grant_authorization,
-    list_targets, open_claim_window, read_archive_completeness, read_creator_directory,
-    read_creator_lifecycle, read_target, register_station, report_account_eligibility,
-    request_admit_and_lease, request_progressive_archive_and_lease, requeue_failed_dispatch,
-    retire_materials, run_progressive_archives, set_station_accepting, start_producer_attempt,
+    RuntimeAttemptOutcome, RuntimeSubmissionOutcome, TargetDomainAssignmentOutcome,
+    activate_installation_credential, assign_target_domain, bind_observation_account,
+    check_in_installation, decide_dispatch, grant_authorization, list_targets, open_claim_window,
+    read_archive_completeness, read_creator_directory, read_creator_lifecycle, read_target,
+    register_station, report_account_eligibility, request_admit_and_lease,
+    request_progressive_archive_and_lease, requeue_failed_dispatch, retire_materials,
+    run_progressive_archives, set_station_accepting, start_producer_attempt,
     submit_producer_package,
 };
 use linggan_storage_postgres::Database;
@@ -25,6 +26,68 @@ use std::time::Duration;
 use uuid::Uuid;
 
 const DIGEST_KEY: &[u8] = b"observation-target-dossier-postgres-proof-v1";
+
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn a_plugin_candidate_stays_unassigned_until_a_person_picks_an_active_domain() {
+    let database = proof_database("dossier_domain_assignment").await;
+    let target_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_observation_target \
+           (target_ref,platform,target_kind,identity_key,display_name,source) \
+         VALUES ($1,'xhs','creator','plugin-domain-candidate','插件候选','plugin_push')",
+    )
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    let candidate = read_target(&database, target_ref)
+        .await
+        .unwrap()
+        .expect("candidate remains readable");
+    assert_eq!(candidate.domain_name, None, "the UI must not invent ADHD");
+    assert!(
+        list_targets(
+            &database,
+            Some("creator"),
+            Some(Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap()),
+            10,
+        )
+        .await
+        .unwrap()
+        .iter()
+        .all(|target| target.target_ref != target_ref),
+        "an unassigned candidate belongs only to the all-domains operations view"
+    );
+
+    let home_domain = Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap();
+    assert_eq!(
+        assign_target_domain(&database, target_ref, home_domain)
+            .await
+            .unwrap(),
+        TargetDomainAssignmentOutcome::Assigned
+    );
+    assert_eq!(
+        assign_target_domain(&database, target_ref, home_domain)
+            .await
+            .unwrap(),
+        TargetDomainAssignmentOutcome::AlreadyAssigned,
+        "repeating the same person-owned command is safe"
+    );
+    let assigned = read_target(&database, target_ref)
+        .await
+        .unwrap()
+        .expect("assigned target remains readable");
+    assert_eq!(assigned.domain_name.as_deref(), Some("ADHD"));
+    assert_eq!(assigned.domain_is_own, Some(true));
+
+    let other_domain = Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap();
+    assert!(matches!(
+        assign_target_domain(&database, target_ref, other_domain).await,
+        Err(linggan_evidence::CollectionTargetError::DomainAlreadyAssigned)
+    ));
+}
 
 #[tokio::test]
 #[ignore = "requires a disposable PostgreSQL 16 proof database"]
