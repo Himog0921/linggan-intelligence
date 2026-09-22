@@ -2698,6 +2698,24 @@ async fn collection_targets(
             .flatten(),
         None => None,
     };
+    // 领域分配面板与当前列表范围是两次独立读取。未分配目标本来就会被具体领域过滤
+    // 排除，也可能落在 200 行截断之外；若只从列表里找，抽屉给出的“分配领域”链接会
+    // 打开一个没有面板的页面。
+    let assignment_target_ref = params
+        .assign_domain
+        .as_deref()
+        .and_then(|value| uuid::Uuid::parse_str(value).ok());
+    let (assignment_target, assignment_error) =
+        match (params.assign_domain.as_deref(), assignment_target_ref) {
+            (None, _) => (None, None),
+            (Some(_), None) => (None, Some("target_domain_assignment_invalid")),
+            (Some(_), Some(target_ref)) => match read_target(database, target_ref).await {
+                Ok(Some(target)) if target.domain_name.is_none() => (Some(target), None),
+                Ok(Some(_)) => (None, Some("target_domain_already_assigned")),
+                Ok(None) => (None, Some("target_domain_target_missing")),
+                Err(_) => (None, Some("target_domain_assignment_failed")),
+            },
+        };
     let list = match list_targets(
         database,
         params.filter.as_deref(),
@@ -2760,10 +2778,8 @@ async fn collection_targets(
                 },
                 list_context,
                 &domains,
-                params
-                    .assign_domain
-                    .as_deref()
-                    .and_then(|value| uuid::Uuid::parse_str(value).ok()),
+                assignment_target.as_ref(),
+                assignment_error,
             )
         }
         Err(_) => base,

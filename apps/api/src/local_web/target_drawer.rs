@@ -1679,9 +1679,34 @@ fn inspector_overview(
             next = escape(next),
         );
     }
-    let action = inspector.required_action;
-    let (action_title, action_note) = inspector_action_copy(action);
-    let action_control = inspector_action_control(target, action, list_context);
+    // Inspector 的投影只判断档案/执行/巡查，不拥有业务领域。未分配候选必须先走与列表、
+    // 抽屉顶部相同的领域动作；否则这里会生成一个必然被准入拒绝的“建立档案”POST。
+    let (action_title, action_note, action_control) =
+        if target_primary_action(target, true, archive, KeywordArchiveRead::Unavailable)
+            == TargetPrimaryAction::AssignDomain
+        {
+            let action = TargetPrimaryAction::AssignDomain;
+            let (title, note) = required_action_copy(action);
+            (
+                title,
+                note,
+                required_action_control(
+                    target,
+                    archive,
+                    true,
+                    KeywordArchiveRead::Unavailable,
+                    list_context,
+                ),
+            )
+        } else {
+            let action = inspector.required_action;
+            let (title, note) = inspector_action_copy(action);
+            (
+                title,
+                note,
+                inspector_action_control(target, action, list_context),
+            )
+        };
     let directory = inspector_count_copy(inspector.coverage.directory_works);
     let detail = inspector_detail_copy(
         inspector.coverage.captured_details,
@@ -3585,6 +3610,29 @@ mod tests {
             ),
             TargetPrimaryAction::ViewKeyword
         );
+    }
+
+    #[test]
+    fn unassigned_creator_inspector_cannot_offer_archive_before_domain_assignment() {
+        let mut creator = target("pending_decision");
+        creator.domain_name = None;
+        creator.domain_is_own = None;
+        let mut inspector = keyword_projection(&creator);
+        inspector.required_action = TargetInspectorAction::StartArchive;
+
+        let html = inspector_overview(
+            &creator,
+            true,
+            &inspector,
+            TargetArchiveRead::Known(None),
+            KeywordArchiveRead::Unavailable,
+            &[],
+            TargetListContext::default(),
+        );
+
+        assert!(html.contains("需要分配领域"));
+        assert!(html.contains(">分配领域</a>"));
+        assert!(!html.contains(r#"action="/collection/targets/archive""#));
     }
 
     fn rule(

@@ -14,7 +14,7 @@
 
 ## 范围与非目标
 
-本包新增 `linggan_material_content_author` 只读 projection；用它显示删除前将保留的作者作品/详情数量，并覆盖详情作者与 `profile_discovery` 的有界回退。跨行业样本仍挂在目标上时删除必须整体拒绝；人工作品失效结论只对该目标目录生效，确认删除整个目标时在预览中披露数量并随控制面一并删除。
+本包新增 `linggan_material_content_author` 只读 projection；用它显示删除前将保留的作者作品/详情数量，并覆盖详情作者与 `profile_discovery` 的有界回退。跨行业样本仍挂在目标上时删除必须整体拒绝；安装级明确风险页信号及其 cooldown 也不能借目标删除被抹掉。人工作品失效结论只对该目标目录生效，确认删除整个目标时在预览中披露数量并随控制面一并删除。
 
 本包不回填、不清理共享历史目标、不访问平台、不重载插件、不改变评论研究资格，也不把“作者回复”徽标识别当作已完成。评论研究 V1 的输入清洗、角色事实与语义路径属于独立交付包。
 
@@ -22,7 +22,7 @@
 
 1. `Observation Target` 是观察控制面，不是作品作者关系的权威。
 2. 所有删除 SQL 在一个事务中按外键从叶到根执行；任一失败即回滚。
-3. 跨行业样本是已进入参照语料的材料，不能为删除目标而删除；人确认的失效结论是目标目录控制事实，删除目标后不再有应用范围，必须在同一事务中随控制面删除。
+3. 跨行业样本是已进入参照语料的材料，安装级风险信号是仍可能支撑 cooldown 的安全事实；两者都不能为删除目标而删除。人确认的失效结论是目标目录控制事实，删除目标后不再有应用范围，必须在同一事务中随控制面删除。
 4. `NULL` 或空显示名使用稳定 `identity_key` 作为确认名；空白输入永远不能通过确认。
 5. 页面不能把“停止观察”“已删除”“删除受阻”混成同一种成功或失败反馈。
 
@@ -30,8 +30,8 @@
 
 | 层级 | 验收 |
 |---|---|
-| 控制面删除 | 隔离 PostgreSQL 构造 command identity、receipt、scheduler decision、WorkOrder 与 Lease，证明删除不再被外键阻断且相关行全部消失。 |
-| 保留事实 | 隔离 PostgreSQL 证明跨行业样本阻止删除、目标域失效结论随目标删除而底层作品保留；作品作者 attribution 在目标删除前后保持相同；详情优先、主页发现仅作 profile-discovery 回退。 |
+| 控制面删除 | 隔离 PostgreSQL 构造 command identity、receipt、scheduler decision、WorkOrder、Lease、详情会话、授权尝试、lane preparation 与执行资格，证明删除不再被外键阻断且相关控制行全部消失。 |
+| 保留事实 | 隔离 PostgreSQL 证明跨行业样本或安装级风险信号阻止删除、目标域失效结论随目标删除而底层作品保留；作品作者 attribution 在目标删除前后保持相同；详情优先、主页发现仅作 profile-discovery 回退。 |
 | 状态与界面 | Rust/API renderer 测试覆盖确认名回退、删除回执、缺口投影与行级控制；页面只按真实 preview 渲染可删除/受阻。 |
 | 发布 | 代码审查、`cargo fmt`、项目治理检查、隔离 PostgreSQL harness、PR 精确 head、main 复核、migration checksum 与本机 runtime health。 |
 

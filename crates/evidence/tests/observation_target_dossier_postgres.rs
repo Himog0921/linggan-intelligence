@@ -136,6 +136,94 @@ async fn deleting_a_target_removes_its_retirement_decisions_but_keeps_material()
     .await
     .unwrap();
 
+    let installation = ready_installation(&database, "target-delete-session").await;
+    let station_ref: Uuid =
+        sqlx::query_scalar("SELECT station_ref FROM plugin_installation WHERE installation_ref=$1")
+            .bind(installation.installation_ref)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    let lease_ref =
+        seed_historical_patrol(&database, target_ref, station_ref, "2026-09-22T04:00:00Z").await;
+    let work_order_ref: Uuid = sqlx::query_scalar(
+        "SELECT work_order_ref FROM collection_work_order_lease WHERE lease_ref=$1",
+    )
+    .bind(lease_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let task_id = seed_bound_task(
+        &database,
+        lease_ref,
+        1,
+        "content_detail",
+        serde_json::json!({"contentExternalId":"retired-work"}),
+    )
+    .await;
+    let session_ref = Uuid::new_v4();
+    let grant_request_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_detail_page_session \
+           (session_ref,work_order_ref,content_public_ref,owner_installation_ref,grant_request_id, \
+            initial_lease_ref,plan_snapshot,plan_hash,state) \
+         VALUES ($1,$2,$3,$4,$5,$6,'{}',$7,'delivery_pending')",
+    )
+    .bind(session_ref)
+    .bind(work_order_ref)
+    .bind(content_ref)
+    .bind(installation.installation_ref)
+    .bind(grant_request_id)
+    .bind(lease_ref)
+    .bind("a".repeat(64))
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO collection_detail_page_session_grant_attempt \
+           (grant_attempt_ref,work_order_ref,task_id,lease_ref,installation_ref,grant_request_id, \
+            attempt_no,outcome,session_ref) \
+         VALUES ($1,$2,$3,$4,$5,$6,1,'authorized',$7)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(work_order_ref)
+    .bind(task_id)
+    .bind(lease_ref)
+    .bind(installation.installation_ref)
+    .bind(grant_request_id)
+    .bind(session_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO collection_detail_page_session_lane_preparation \
+           (preparation_ref,session_ref,owner_installation_ref,capability,task_id,lease_ref, \
+            attempt_id,plan_hash) \
+         VALUES ($1,$2,$3,'content_detail',$4,$5,$6,$7)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(session_ref)
+    .bind(installation.installation_ref)
+    .bind(task_id)
+    .bind(lease_ref)
+    .bind(Uuid::new_v4())
+    .bind("a".repeat(64))
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO collection_execution_input_eligibility \
+           (eligibility_ref,target_ref,domain_scope,object_kind,object_ref,capability,state, \
+            reason_code,input_source_status) \
+         VALUES ($1,$2,'own_domain','material_content',$3,'content_detail','input_blocked', \
+                 'execution_input_missing','frozen')",
+    )
+    .bind(Uuid::new_v4())
+    .bind(target_ref)
+    .bind(content_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+
     let preview = read_target_deletion_preview(&database, target_ref)
         .await
         .unwrap()
@@ -147,18 +235,97 @@ async fn deleting_a_target_removes_its_retirement_decisions_but_keeps_material()
             .unwrap(),
         TargetDeletionOutcome::Deleted
     );
-    let (targets, retirements, materials): (i64, i64, i64) = sqlx::query_as(
+    let counts: (i64, i64, i64, i64, i64, i64, i64, i64, i64) = sqlx::query_as(
         "SELECT \
            (SELECT count(*) FROM collection_observation_target WHERE target_ref=$1), \
            (SELECT count(*) FROM collection_material_retirement WHERE target_ref=$1), \
-           (SELECT count(*) FROM linggan_material_content WHERE public_ref=$2)",
+           (SELECT count(*) FROM linggan_material_content WHERE public_ref=$2), \
+           (SELECT count(*) FROM collection_execution_input_eligibility WHERE target_ref=$1), \
+           (SELECT count(*) FROM collection_detail_page_session WHERE session_ref=$3), \
+           (SELECT count(*) FROM collection_detail_page_session_grant_attempt WHERE session_ref=$3), \
+           (SELECT count(*) FROM collection_detail_page_session_lane_preparation WHERE session_ref=$3), \
+           (SELECT count(*) FROM collection_work_order WHERE work_order_ref=$4), \
+           (SELECT count(*) FROM collection_work_order_lease WHERE lease_ref=$5)",
     )
     .bind(target_ref)
     .bind(content_ref)
+    .bind(session_ref)
+    .bind(work_order_ref)
+    .bind(lease_ref)
     .fetch_one(database.pool())
     .await
     .unwrap();
-    assert_eq!((targets, retirements, materials), (0, 0, 1));
+    assert_eq!(counts, (0, 0, 1, 0, 0, 0, 0, 0, 0));
+}
+
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn target_deletion_preserves_installation_risk_signals_by_refusing_the_delete() {
+    let database = proof_database("dossier_target_deletion_risk_signal").await;
+    let target_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_observation_target \
+           (target_ref,platform,target_kind,identity_key,display_name,source) \
+         VALUES ($1,'xhs','creator','deletion-risk-author','风险页目标','manual')",
+    )
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    let installation = ready_installation(&database, "target-delete-risk").await;
+    let station_ref: Uuid =
+        sqlx::query_scalar("SELECT station_ref FROM plugin_installation WHERE installation_ref=$1")
+            .bind(installation.installation_ref)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    let lease_ref =
+        seed_historical_patrol(&database, target_ref, station_ref, "2026-09-22T05:00:00Z").await;
+    let task_id = seed_bound_task(
+        &database,
+        lease_ref,
+        1,
+        "content_detail",
+        serde_json::json!({"contentExternalId":"risk-work"}),
+    )
+    .await;
+    let risk_signal_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_installation_risk_signal \
+           (risk_signal_ref,installation_ref,task_id,lease_ref,platform,signal_code,detector_version) \
+         VALUES ($1,$2,$3,$4,'xhs','risk_control_interstitial','test-v1')",
+    )
+    .bind(risk_signal_ref)
+    .bind(installation.installation_ref)
+    .bind(task_id)
+    .bind(lease_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    let preview = read_target_deletion_preview(&database, target_ref)
+        .await
+        .unwrap()
+        .expect("target deletion preview remains available");
+    assert_eq!(preview.blocking_risk_signals, 1);
+    assert_eq!(
+        delete_observation_target(&database, target_ref, "风险页目标")
+            .await
+            .unwrap(),
+        TargetDeletionOutcome::BlockedByProtectedFacts { rows: 1 }
+    );
+    let retained: (i64, i64) = sqlx::query_as(
+        "SELECT \
+           (SELECT count(*) FROM collection_observation_target WHERE target_ref=$1), \
+           (SELECT count(*) FROM collection_installation_risk_signal WHERE risk_signal_ref=$2)",
+    )
+    .bind(target_ref)
+    .bind(risk_signal_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(retained, (1, 1));
 }
 
 #[tokio::test]

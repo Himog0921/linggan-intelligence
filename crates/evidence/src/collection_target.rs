@@ -778,6 +778,8 @@ pub struct TargetDeletionPreview {
     pub retained_details: i64,
     /// 跨行业样本是已采集的参照材料，不能随观察决定一起抹掉。
     pub blocking_cross_industry_samples: i64,
+    /// 明确风险页是安装级安全事实；目标删除不能借机清掉仍可触发 cooldown 的信号。
+    pub blocking_risk_signals: i64,
     /// 随目标控制面一起删除的、只在该目标目录内成立的人工作品失效结论。
     pub material_retirements: i64,
 }
@@ -815,7 +817,7 @@ pub async fn read_target_deletion_preview(
     .bind(target_ref)
     .fetch_optional(database.pool())
     .await?;
-    Ok(row.map(|row| TargetDeletionPreview {
+    let mut preview = row.map(|row| TargetDeletionPreview {
         confirmation_name: row.0,
         target_kind: row.1,
         work_orders: row.2,
@@ -826,8 +828,35 @@ pub async fn read_target_deletion_preview(
         retained_works: row.7,
         retained_details: row.8,
         blocking_cross_industry_samples: row.9,
+        blocking_risk_signals: 0,
         material_retirements: row.10,
-    }))
+    });
+    if let Some(preview) = preview.as_mut() {
+        let risk_schema_ready: bool = sqlx::query_scalar(
+            "SELECT to_regclass('collection_installation_risk_signal') IS NOT NULL \
+                  AND to_regclass('collection_detail_page_session') IS NOT NULL",
+        )
+        .fetch_one(database.pool())
+        .await?;
+        if risk_schema_ready {
+            preview.blocking_risk_signals = sqlx::query_scalar(
+                "SELECT count(*) FROM collection_installation_risk_signal signal \
+                 WHERE signal.lease_ref IN ( \
+                   SELECT lease.lease_ref FROM collection_work_order work_order \
+                   JOIN collection_work_order_lease lease USING(work_order_ref) \
+                   WHERE work_order.target_ref=$1 \
+                 ) OR signal.detail_page_session_ref IN ( \
+                   SELECT session.session_ref FROM collection_detail_page_session session \
+                   JOIN collection_work_order work_order USING(work_order_ref) \
+                   WHERE work_order.target_ref=$1 \
+                 )",
+            )
+            .bind(target_ref)
+            .fetch_one(database.pool())
+            .await?;
+        }
+    }
+    Ok(preview)
 }
 
 /// 删除的结果。「删不了」与「没找到」是两件事，不能都报成失败。
@@ -871,11 +900,40 @@ pub async fn delete_observation_target(
         tx.rollback().await?;
         return Ok(TargetDeletionOutcome::NameMismatch);
     }
-    let blocking: i64 =
+    let (detail_session_ready, risk_signal_ready, execution_eligibility_ready): (bool, bool, bool) =
+        sqlx::query_as(
+            "SELECT \
+           to_regclass('collection_detail_page_session') IS NOT NULL \
+             AND to_regclass('collection_detail_page_session_grant_attempt') IS NOT NULL \
+             AND to_regclass('collection_detail_page_session_lane_preparation') IS NOT NULL, \
+           to_regclass('collection_installation_risk_signal') IS NOT NULL \
+             AND to_regclass('collection_detail_page_session') IS NOT NULL, \
+           to_regclass('collection_execution_input_eligibility') IS NOT NULL",
+        )
+        .fetch_one(&mut *tx)
+        .await?;
+    let mut blocking: i64 =
         sqlx::query_scalar("SELECT count(*) FROM cross_industry_sample WHERE target_ref=$1")
             .bind(target_ref)
             .fetch_one(&mut *tx)
             .await?;
+    if risk_signal_ready {
+        blocking += sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM collection_installation_risk_signal signal \
+             WHERE signal.lease_ref IN ( \
+               SELECT lease.lease_ref FROM collection_work_order work_order \
+               JOIN collection_work_order_lease lease USING(work_order_ref) \
+               WHERE work_order.target_ref=$1 \
+             ) OR signal.detail_page_session_ref IN ( \
+               SELECT session.session_ref FROM collection_detail_page_session session \
+               JOIN collection_work_order work_order USING(work_order_ref) \
+               WHERE work_order.target_ref=$1 \
+             )",
+        )
+        .bind(target_ref)
+        .fetch_one(&mut *tx)
+        .await?;
+    }
     if blocking > 0 {
         tx.rollback().await?;
         return Ok(TargetDeletionOutcome::BlockedByProtectedFacts { rows: blocking });
@@ -900,6 +958,54 @@ pub async fn delete_observation_target(
         .bind(target_ref)
         .execute(&mut *tx)
         .await?;
+    }
+
+    if detail_session_ready {
+        // 页面会话、授权回执与 lane preparation 都是目标执行控制记录；它们不证明材料
+        // 已被取得。先从叶子删到会话根，之后才允许删除 Lease / WorkOrder。
+        for statement in [
+            "DELETE FROM collection_detail_page_session_lane_preparation preparation \
+             WHERE preparation.session_ref IN ( \
+               SELECT session.session_ref FROM collection_detail_page_session session \
+               JOIN collection_work_order work_order USING(work_order_ref) \
+               WHERE work_order.target_ref=$1 \
+             ) OR preparation.lease_ref IN ( \
+               SELECT lease.lease_ref FROM collection_work_order work_order \
+               JOIN collection_work_order_lease lease USING(work_order_ref) \
+               WHERE work_order.target_ref=$1 \
+             )",
+            "DELETE FROM collection_detail_page_session_grant_attempt grant_attempt \
+             WHERE grant_attempt.work_order_ref IN ( \
+               SELECT work_order_ref FROM collection_work_order WHERE target_ref=$1 \
+             ) OR grant_attempt.lease_ref IN ( \
+               SELECT lease.lease_ref FROM collection_work_order work_order \
+               JOIN collection_work_order_lease lease USING(work_order_ref) \
+               WHERE work_order.target_ref=$1 \
+             ) OR grant_attempt.session_ref IN ( \
+               SELECT session.session_ref FROM collection_detail_page_session session \
+               JOIN collection_work_order work_order USING(work_order_ref) \
+               WHERE work_order.target_ref=$1 \
+             )",
+            "DELETE FROM collection_detail_page_session session \
+             WHERE session.work_order_ref IN ( \
+               SELECT work_order_ref FROM collection_work_order WHERE target_ref=$1 \
+             ) OR session.initial_lease_ref IN ( \
+               SELECT lease.lease_ref FROM collection_work_order work_order \
+               JOIN collection_work_order_lease lease USING(work_order_ref) \
+               WHERE work_order.target_ref=$1 \
+             )",
+        ] {
+            sqlx::query(statement)
+                .bind(target_ref)
+                .execute(&mut *tx)
+                .await?;
+        }
+    }
+    if execution_eligibility_ready {
+        sqlx::query("DELETE FROM collection_execution_input_eligibility WHERE target_ref=$1")
+            .bind(target_ref)
+            .execute(&mut *tx)
+            .await?;
     }
 
     // 顺序由外键决定，从叶子往根删。任何一条走不通都会整笔回滚——半删的目标比不删更糟。

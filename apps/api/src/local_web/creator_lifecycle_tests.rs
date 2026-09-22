@@ -992,8 +992,8 @@ fn sample_target(target_kind: &str) -> linggan_evidence::ObservationTarget {
         last_patrol_dispatched_at: None,
         last_patrol_succeeded_at: None,
         next_patrol_at: None,
-        domain_name: None,
-        domain_is_own: None,
+        domain_name: Some("ADHD".to_owned()),
+        domain_is_own: Some(true),
     }
 }
 

@@ -47,6 +47,7 @@ pub fn render_stored_targets(
         list_context,
         &[],
         None,
+        None,
     )
 }
 
@@ -65,17 +66,25 @@ pub fn render_stored_targets_with_observation(
     facts: TargetListFacts<'_>,
     list_context: super::target_drawer::TargetListContext<'_>,
     domains: &[ObservationDomain],
-    assignment_target: Option<uuid::Uuid>,
+    assignment_target: Option<&ObservationTarget>,
+    assignment_error: Option<&str>,
 ) -> String {
+    let domain_assignment = assignment_target
+        .filter(|target| target.domain_name.is_none())
+        .map(|target| domain_assignment_modal(target, domains, list_context))
+        .unwrap_or_default();
+    let failure = action_feedback_markup(error.or(assignment_error), ahead);
     if targets.is_empty() {
         return replace_target_state(
             base,
-            r#"<section class="c-empty c-empty-known-view">
-                 <div class="c-empty-rule"></div>
-                 <h2>当前列表范围没有匹配的观察目标</h2>
-                 <p>当前筛选下没有观察目标。可以切换上方分类查看其他目标；这不表示平台上没有可观察对象。</p>
-                 <div class="c-empty-foot"></div>
-               </section>"#,
+            &format!(
+                r#"<section class="c-tg-workspace">{failure}<section class="c-empty c-empty-known-view">
+                     <div class="c-empty-rule"></div>
+                     <h2>当前列表范围没有匹配的观察目标</h2>
+                     <p>当前筛选下没有观察目标。可以切换上方分类查看其他目标；这不表示平台上没有可观察对象。</p>
+                     <div class="c-empty-foot"></div>
+                   </section>{domain_assignment}</section>"#,
+            ),
         );
     }
 
@@ -131,14 +140,8 @@ pub fn render_stored_targets_with_observation(
             }
             _ => String::new(),
         },
-        domain_assignment = assignment_target
-            .and_then(|target_ref| targets
-                .iter()
-                .find(|target| target.target_ref == target_ref))
-            .filter(|target| target.domain_name.is_none())
-            .map(|target| domain_assignment_modal(target, domains, list_context))
-            .unwrap_or_default(),
-        failure = action_feedback_markup(error, ahead),
+        domain_assignment = domain_assignment,
+        failure = failure,
     );
     replace_target_state(base, &list)
 }
@@ -996,11 +999,24 @@ fn deletion_modal(
     error: Option<&str>,
     list_context: super::target_drawer::TargetListContext<'_>,
 ) -> String {
-    let blocked = preview.blocking_cross_industry_samples > 0;
+    let blocked = preview.blocking_cross_industry_samples > 0 || preview.blocking_risk_signals > 0;
     let note = if blocked {
+        let mut reasons = Vec::new();
+        if preview.blocking_cross_industry_samples > 0 {
+            reasons.push(format!(
+                "{} 条跨行业样本已经进入参照语料",
+                preview.blocking_cross_industry_samples
+            ));
+        }
+        if preview.blocking_risk_signals > 0 {
+            reasons.push(format!(
+                "{} 条明确风险页信号仍属于安装安全记录",
+                preview.blocking_risk_signals
+            ));
+        }
         format!(
-            r#"<p class="c-tg-delete-blocked">这个目标关联 {samples} 条跨行业样本。它们是已经进入参照语料的材料，删除目标不能把材料一起抹掉；在有独立保留方案前，这里不提供删除。</p>"#,
-            samples = preview.blocking_cross_industry_samples,
+            r#"<p class="c-tg-delete-blocked">这个目标关联 {reasons}。删除目标不能把材料或安装级安全事实一起抹掉；在有独立保留方案前，这里不提供删除。</p>"#,
+            reasons = escape(&reasons.join("、")),
         )
     } else {
         String::new()
@@ -1364,7 +1380,8 @@ mod tests {
             TargetListFacts::default(),
             TargetListContext::default(),
             &[home],
-            Some(creator.target_ref),
+            Some(&creator),
+            None,
         );
 
         assert!(html.contains("待分配领域"));
@@ -1373,6 +1390,44 @@ mod tests {
         assert!(html.contains(r#"action="/collection/targets/domain""#));
         assert!(html.contains("ADHD（本行业，材料进入证据库）"));
         assert!(!html.contains(">建立档案</button>"));
+    }
+
+    #[test]
+    fn domain_assignment_survives_a_filter_that_excludes_the_target() {
+        let base = format!("before{EMPTY_STATE_OPEN}empty{EMPTY_STATE_CLOSE}after");
+        let mut creator = target("creator", Some("过滤外候选"));
+        creator.domain_name = None;
+        creator.domain_is_own = None;
+        let home = ObservationDomain {
+            domain_ref: Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
+            name: "ADHD".to_owned(),
+            is_own_domain: true,
+            status: "active".to_owned(),
+            sample_count: None,
+        };
+        let html = render_stored_targets_with_observation(
+            &base,
+            &[],
+            &HashMap::new(),
+            Some(&HashMap::new()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            TargetListFacts::default(),
+            TargetListContext {
+                domain: Some("00000000-0000-4000-8000-000000000001"),
+                ..TargetListContext::default()
+            },
+            &[home],
+            Some(&creator),
+            None,
+        );
+
+        assert!(html.contains("当前列表范围没有匹配的观察目标"));
+        assert!(html.contains("为「过滤外候选」分配领域"));
+        assert!(html.contains(r#"action="/collection/targets/domain""#));
     }
 
     #[test]
@@ -1525,6 +1580,7 @@ mod tests {
             retained_works: 2,
             retained_details: 1,
             blocking_cross_industry_samples: 0,
+            blocking_risk_signals: 0,
             material_retirements: 4,
         };
         let html = render_stored_targets_with_observation(
@@ -1540,6 +1596,7 @@ mod tests {
             TargetListFacts::default(),
             context,
             &[],
+            None,
             None,
         );
         let target_ref = creator.target_ref;
