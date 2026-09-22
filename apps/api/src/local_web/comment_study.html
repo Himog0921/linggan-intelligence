@@ -5,6 +5,50 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>评论研究</title>
   <link rel="stylesheet" href="/assets/comment-study.css">
+  <style>
+/* COMMENT-STUDY-OBSERVATION-SERIES-001 */
+.study-observation{border-top:var(--study-rail) solid var(--lgi-border-solid);border-bottom:var(--study-hair) solid var(--lgi-border-solid);padding:var(--lgi-space-5) 0}
+.study-observation-head{display:flex;align-items:end;justify-content:space-between;gap:var(--lgi-space-6);margin-bottom:var(--lgi-space-4)}
+.study-observation-head h2{font-size:var(--lgi-text-section);letter-spacing:var(--lgi-ls-tight)}
+.study-observation-head p{max-width:72ch;margin:var(--lgi-space-1) 0 0;color:var(--lgi-muted);font-size:var(--lgi-text-label)}
+.study-observation-controls{display:flex;align-items:end;justify-content:flex-end;gap:var(--lgi-space-6);flex-wrap:wrap}
+.study-text-switcher{display:inline-flex;align-items:end;gap:var(--lgi-space-5);border-bottom:var(--study-hair) solid var(--lgi-hairline)}
+.study-text-switcher button{position:relative;min-height:var(--lgi-space-8);border:0;padding:0 2px;background:transparent;color:var(--lgi-muted);font-size:var(--lgi-text-data);cursor:pointer}
+.study-text-switcher button:hover{color:var(--lgi-ink)}
+.study-text-switcher button[aria-pressed="true"]{color:var(--lgi-ink);font-weight:var(--lgi-weight-semibold)}
+.study-text-switcher button[aria-pressed="true"]:after{content:"";position:absolute;inset:auto 0 -1px;height:3px;background:var(--lgi-signal)}
+.study-series-chart{min-width:0}
+.study-series-legend{display:flex;align-items:center;gap:var(--lgi-space-5);flex-wrap:wrap;margin-bottom:var(--lgi-space-3);color:var(--lgi-muted);font-size:var(--lgi-text-label)}
+.study-series-legend span{display:inline-flex;align-items:center;gap:var(--lgi-space-2)}
+.study-series-legend i{display:block;width:18px;height:8px;background:var(--lgi-ink)}
+.study-series-legend i[data-kind="signals"]{height:3px;background:var(--lgi-signal)}
+.study-series-svg-wrap{min-width:0;height:286px;border-top:var(--study-hair) solid var(--lgi-hairline);border-bottom:var(--study-hair) solid var(--lgi-hairline);background-color:var(--lgi-canvas);background-image:linear-gradient(var(--lgi-mesh-fine) 1px,transparent 1px),linear-gradient(90deg,var(--lgi-mesh-fine) 1px,transparent 1px);background-size:var(--lgi-space-2) var(--lgi-space-2)}
+.study-series-svg-wrap svg{display:block;width:100%;height:100%;overflow:visible}
+.study-series-svg-wrap text{fill:var(--lgi-muted);font:var(--lgi-text-label) var(--lgi-font-mono)}
+.study-series-grid-line{stroke:var(--lgi-hairline);stroke-width:1;vector-effect:non-scaling-stroke}
+.study-series-bars rect{fill:var(--lgi-ink);opacity:.82}
+.study-series-line{fill:none;stroke:var(--lgi-signal);stroke-width:3;stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.study-series-dots circle{fill:var(--lgi-canvas);stroke:var(--lgi-signal);stroke-width:2;vector-effect:non-scaling-stroke}
+.study-series-coverage{display:grid;grid-template-columns:repeat(var(--study-series-columns),minmax(2px,1fr));gap:2px;margin-top:var(--lgi-space-2)}
+.study-series-coverage i{height:6px;background:var(--lgi-unknown-soft);box-shadow:inset 0 0 0 1px var(--lgi-hairline)}
+.study-series-coverage i[data-state="recorded"]{background:var(--lgi-success-dot);box-shadow:none}
+.study-series-coverage i[data-state="partial"]{background:var(--lgi-warning-dot);box-shadow:none}
+.study-series-table-wrap{overflow:auto;border-top:var(--study-rail) solid var(--lgi-border-solid);border-bottom:var(--study-hair) solid var(--lgi-border-solid)}
+.study-series-table{width:100%;min-width:760px;border-collapse:collapse;font-variant-numeric:tabular-nums}
+.study-series-table th,.study-series-table td{padding:var(--lgi-space-3) var(--lgi-space-4);border-bottom:var(--study-hair) solid var(--lgi-hairline);text-align:right;white-space:nowrap}
+.study-series-table th{background:var(--lgi-canvas-low);color:var(--lgi-muted);font-size:var(--lgi-text-label);font-weight:var(--lgi-weight-semibold)}
+.study-series-table th:first-child,.study-series-table td:first-child{text-align:left}
+.study-series-table td{color:var(--lgi-ink);font-family:var(--lgi-font-mono);font-size:var(--lgi-text-data)}
+.study-series-table tbody tr:hover{background:var(--lgi-canvas-low)}
+.study-coverage-state{font-family:var(--lgi-font-sans);font-size:var(--lgi-text-label);font-weight:var(--lgi-weight-semibold)}
+.study-coverage-state[data-state="recorded"]{color:var(--lgi-success)}
+.study-coverage-state[data-state="partial"]{color:var(--lgi-warning)}
+.study-coverage-state[data-state="none"]{color:var(--lgi-unknown)}
+.study-series-note,.study-observation-empty{margin:var(--lgi-space-3) 0 0;color:var(--lgi-muted);font-size:var(--lgi-text-label)}
+.study-observation-empty{padding:var(--lgi-space-8) 0;border-top:var(--study-hair) solid var(--lgi-hairline);border-bottom:var(--study-hair) solid var(--lgi-hairline)}
+@media(max-width:900px){.study-observation-head{align-items:stretch;flex-direction:column;gap:var(--lgi-space-4)}.study-observation-controls{justify-content:flex-start}.study-series-svg-wrap{height:248px}}
+@media(max-width:620px){.study-observation-controls{gap:var(--lgi-space-4)}.study-text-switcher{gap:var(--lgi-space-4)}.study-series-table-wrap{margin-right:calc(var(--lgi-space-4) * -1);padding-right:var(--lgi-space-4)}}
+  </style>
 </head>
 <body>
   <div class="v7-app">
@@ -13,7 +57,6 @@
       {{SIDE_NAV}}
       <main class="study-main" aria-labelledby="comment-study-title">
         <h1 id="comment-study-title" class="v7-sr-only">评论研究</h1>
-
         <header class="study-toolbar">
           <nav class="study-tabs" aria-label="评论研究视图">
             <button type="button" data-view="overview" aria-current="page">概览</button>
@@ -27,7 +70,6 @@
             <button type="button" id="open-study-dialog" class="study-primary-action">发起研究</button>
           </div>
         </header>
-
         <div id="study-run-picker" class="study-run-picker" hidden>
           <label>查看的研究运行<select id="study-run-select"></select></label>
         </div>
@@ -52,13 +94,9 @@
       <p id="policy-status" class="study-dialog-note" role="status"></p>
       <p id="source-preview" class="study-dialog-note" role="status">正在核对评论资格…</p>
     </section>
-
     <section class="study-workspace" aria-labelledby="work-picker-title">
       <header class="study-workspace-header">
-        <div>
-          <p class="study-label">研究输入</p>
-          <h3 id="work-picker-title">选择要研究的 ADHD 作品</h3>
-        </div>
+        <div><p class="study-label">研究输入</p><h3 id="work-picker-title">选择要研究的 ADHD 作品</h3></div>
         <div class="study-workspace-tools">
           <label class="study-filter">筛选已加载作品<input id="work-filter" type="search" placeholder="按作品标题筛选" autocomplete="off"></label>
           <span id="selected-count" class="selection-count" role="status">已选择 0 篇</span>
@@ -81,270 +119,36 @@
 
   <script src="/assets/comment-study.js"></script>
   <script>
-/* COMMENT-STUDY-INTELLIGENCE-OVERVIEW-001
- * Read-only intelligence overview. Existing Targets / Pending / Problems / Runs remain the
- * authoritative drill-down surfaces; this file only composes facts already returned by them.
- */
+/* COMMENT-STUDY-INTELLIGENCE-OVERVIEW-002 */
 (() => {
   'use strict';
-
   const overviewDomainRef = new URLSearchParams(window.location.search).get('domain');
-  const overviewState = { kind: 'all', expression: null, method: 'solution', cache: null };
-  // 「待归并」页只列 PENDING_RESOLUTION_STATES 里的等待状态；协议拒绝与失败不在其中，
-  // 这两类的记录在运行记录里，不能让「查看」落到一个必定为空的列表上。
-  const RUN_RECORD_RESOLUTION_STATES = new Set(['protocol_rejected', 'failed']);
-  const overviewNum = value => value == null || Number.isNaN(Number(value))
-    ? '—'
-    : new Intl.NumberFormat('zh-CN').format(Number(value));
-  const overviewSum = values => Object.values(values || {}).reduce((sum, value) => sum + Number(value || 0), 0);
-  const overviewPath = (path, extra = {}) => {
-    const query = new URLSearchParams();
-    if (overviewDomainRef) query.set('domain', overviewDomainRef);
-    Object.entries(extra).forEach(([key, value]) => {
-      if (value != null && value !== '') query.set(key, value);
-    });
-    return query.size ? `${path}?${query}` : path;
-  };
-  const overviewReadout = (text, value, unit, note, active = false) => `
-    <div class="study-readout" data-active="${active}">
-      <span class="study-readout-label">${esc(text)}</span>
-      <div class="study-readout-value"><b>${esc(value)}</b>${unit ? `<span>${esc(unit)}</span>` : ''}</div>
-      <span class="study-readout-note">${esc(note)}</span>
-    </div>`;
-
-  function overviewKinds(signals) {
-    const counts = new Map();
-    signals.forEach(signal => counts.set(signal.kind, (counts.get(signal.kind) || 0) + 1));
-    return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  }
-  function overviewExpressions(signals) {
-    const groups = new Map();
-    signals.forEach(signal => {
-      if (signal.sourceState === 'restricted') return;
-      const proposition = String(signal.proposition || '').trim();
-      if (!proposition) return;
-      const group = groups.get(proposition) || { proposition, signals: [] };
-      group.signals.push(signal);
-      groups.set(proposition, group);
-    });
-    return [...groups.values()]
-      .sort((a, b) => b.signals.length - a.signals.length || a.proposition.localeCompare(b.proposition))
-      .slice(0, 8);
-  }
-  function overviewProblemHighlights(problems, signals) {
-    const current = new Map();
-    signals.forEach(signal => {
-      if (!signal.resolvedProblemRef) return;
-      const group = current.get(signal.resolvedProblemRef) || [];
-      group.push(signal);
-      current.set(signal.resolvedProblemRef, group);
-    });
-    const active = (problems || []).filter(problem => problem.state === 'active');
-    const changed = active
-      .filter(problem => current.has(problem.problemRef))
-      .map(problem => ({ problem, signals: current.get(problem.problemRef) }))
-      .sort((a, b) => b.signals.length - a.signals.length || Number(b.problem.membershipCount) - Number(a.problem.membershipCount));
-    if (changed.length) return changed.slice(0, 3);
-    return active
-      .sort((a, b) => Number(b.membershipCount) - Number(a.membershipCount))
-      .slice(0, 3)
-      .map(problem => ({ problem, signals: [] }));
-  }
-  function overviewUnresolved(latest) {
-    if (!latest) return [];
-    const rows = [];
-    ['deferred_novel', 'deferred_ambiguous', 'deferred_context', 'retrieval_incomplete', 'budget_stopped', 'pending', 'protocol_rejected', 'failed']
-      .forEach(state => {
-        const count = Number(latest.resolutionStates?.[state] || 0);
-        if (count) rows.push({ text: label(resolutionLabel, state) ?? state, count, view: RUN_RECORD_RESOLUTION_STATES.has(state) ? 'runs' : 'pending' });
-      });
-    [['needs_context', '仍在等待评论语境'], ['failed', '评论研究处理失败'], ['excluded', '来源受限，未继续处理']]
-      .forEach(([state, text]) => {
-        const count = Number(latest.targetStates?.[state] || 0);
-        if (count) rows.push({ text, count, view: 'targets' });
-      });
-    return rows;
-  }
-  function overviewVoices(data) {
-    const byTarget = new Map();
-    data.signals.forEach(signal => {
-      const group = byTarget.get(signal.targetRef) || [];
-      group.push(signal);
-      byTarget.set(signal.targetRef, group);
-    });
-    let targets = data.targets.filter(target => target.commentText);
-    if (overviewState.kind !== 'all') {
-      targets = targets.filter(target => (byTarget.get(target.targetRef) || []).some(signal => signal.kind === overviewState.kind));
-    }
-    if (overviewState.expression) {
-      targets = targets.filter(target => (byTarget.get(target.targetRef) || []).some(signal => signal.proposition === overviewState.expression));
-    }
-    targets.sort((a, b) => (byTarget.get(b.targetRef) || []).length - (byTarget.get(a.targetRef) || []).length || String(b.createdAt).localeCompare(String(a.createdAt)));
-    return targets.slice(0, 4).map(target => ({ target, signals: byTarget.get(target.targetRef) || [] }));
-  }
-
-  function renderIntelligenceOverview(data) {
-    const preview = data.setup?.sourcePreview || null;
-    const latest = data.overview?.latestRun || null;
-    const signalTotal = latest ? overviewSum(latest.signalStates) : null;
-    const problemTotal = data.problems.length;
-    const kinds = overviewKinds(data.signals);
-    const maxKind = Math.max(1, ...kinds.map(([, count]) => count));
-    const expressions = overviewExpressions(data.signals);
-    const highlights = overviewProblemHighlights(data.problems, data.signals);
-    const unresolved = overviewUnresolved(latest);
-    const voices = overviewVoices(data);
-    const titles = new Map((data.setup?.eligibleWorks || []).map(work => [work.workRef, work.title]));
-    const methods = data.signals
-      .filter(signal => signal.kind === overviewState.method && signal.sourceState !== 'restricted')
-      .slice(0, 3);
-    const scope = latest
-      ? `最近一次研究 · ${String(latest.createdAt || '').slice(0, 16).replace('T', ' ')}`
-      : '尚无研究运行';
-    const signalCoverage = signalTotal == null
-      ? '没有研究运行'
-      : signalTotal > data.signals.length
-        ? `当前读取 ${data.signals.length}/${signalTotal} 条信号`
-        : `本次 ${signalTotal} 条信号`;
-    const filterNote = overviewState.expression
-      ? `当前仅看“${overviewState.expression}”关联的原声`
-      : overviewState.kind !== 'all'
-        ? `当前仅看${label(signalKindLabel, overviewState.kind) ?? overviewState.kind}类原声`
-        : '按已关联信号数优先展示';
-
-    return `<div class="study-overview">
-      <div class="study-overview-scope"><span><strong>ADHD 评论研究</strong> · ${esc(scope)}</span><code>${esc(data.overview?.domainRef || overviewDomainRef || '未配置领域')}</code></div>
-
-      <section class="study-readout-strip" aria-label="评论研究观察基础">
-        ${overviewReadout('观察到的评论', preview ? overviewNum(preview.totalCommentCount) : '—', '条', preview ? '当前领域库存快照' : '资格读取不可用')}
-        ${overviewReadout('可研究评论', preview ? overviewNum(preview.eligibleCommentCount) : '—', '条', preview ? `覆盖 ${overviewNum(preview.works?.length || 0)} 篇作品${(preview.works?.length || 0) >= 100 ? '（已达读取上限）' : ''}` : '来源 gate 状态未知', true)}
-        ${overviewReadout('本次接纳信号', signalTotal == null ? '—' : overviewNum(signalTotal), '条', latest ? '最近一次研究产出' : '尚无研究运行')}
-        ${overviewReadout('长期用户问题', problemTotal === 100 ? '100+' : overviewNum(problemTotal), '个', problemTotal ? '累计已建档问题' : '尚无稳定问题')}
-      </section>
-
-      <div class="study-overview-grid">
-        <section class="study-overview-section" aria-labelledby="study-kind-title">
-          <div class="study-section-head"><h2 id="study-kind-title">用户表达构成</h2><span>${esc(signalCoverage)}</span></div>
-          <p class="study-section-note">表达类型说明系统识别到了什么，不代表主题规模或需求强度。</p>
-          ${kinds.length ? `<div class="study-kind-list">
-            <button class="study-kind-row" type="button" data-overview-kind="all" aria-pressed="${overviewState.kind === 'all'}"><span class="study-kind-name">全部表达</span><span class="study-kind-track"><i style="width:100%"></i></span><span class="study-kind-count">${overviewNum(data.signals.length)}</span></button>
-            ${kinds.map(([kind, count]) => `<button class="study-kind-row" type="button" data-overview-kind="${esc(kind)}" aria-pressed="${overviewState.kind === kind}"><span class="study-kind-name">${esc(label(signalKindLabel, kind) ?? kind)}</span><span class="study-kind-track"><i style="width:${Math.max(6, Math.round(count / maxKind * 100))}%"></i></span><span class="study-kind-count">${overviewNum(count)}</span></button>`).join('')}
-          </div>` : '<p class="study-empty">最近一次研究还没有形成可读取的信号。</p>'}
-        </section>
-
-        <section class="study-overview-section" aria-labelledby="study-problem-title">
-          <div class="study-section-head"><h2 id="study-problem-title">本期值得看的问题</h2><button class="study-link" type="button" data-study-view="problems">查看全部用户问题</button></div>
-          <p class="study-section-note">优先显示本次新增关联；没有新增时显示累计依据较多的问题。不是需求排行榜。</p>
-          ${highlights.length ? `<ol class="study-problem-list">${highlights.map((item, index) => {
-            const evidence = item.signals.find(signal => signal.evidence)?.evidence;
-            return `<li class="study-problem-item"><div class="study-problem-top"><span class="study-problem-index">0${index + 1}</span><h3 class="study-problem-title">${esc(item.problem.definition)}</h3></div><div class="study-problem-meta"><span>累计 ${overviewNum(item.problem.membershipCount)} 条关联信号</span>${item.signals.length ? `<span>本次 ${overviewNum(item.signals.length)} 条</span>` : '<span>长期积累</span>'}</div>${evidence ? `<blockquote class="study-problem-quote">“${esc(evidence)}”</blockquote>` : ''}</li>`;
-          }).join('')}</ol>` : '<p class="study-empty">尚未形成稳定用户问题。已有原声和非问题类信号仍可继续查看。</p>'}
-        </section>
-      </div>
-
-      <div class="study-overview-grid" data-balance="equal">
-        <section class="study-overview-section" aria-labelledby="study-expression-title">
-          <div class="study-section-head"><h2 id="study-expression-title">${expressions.some(group => group.signals.length > 1) ? '重复出现的归一表达' : '本次归一表达'}</h2><span>系统归一表达</span></div>
-          <p class="study-section-note">这里不是词云；相同归一表达按不同 Signal 计数，点击后回到对应原声。</p>
-          ${expressions.length ? `<div class="study-expression-list">${expressions.map(group => `<button class="study-expression" type="button" data-overview-expression="${esc(group.proposition)}" aria-pressed="${overviewState.expression === group.proposition}"><span>${esc(group.proposition)}</span><b>${overviewNum(group.signals.length)}</b></button>`).join('')}</div>` : '<p class="study-empty">当前没有可读取的归一表达。</p>'}
-        </section>
-
-        <section class="study-overview-section" aria-labelledby="study-method-title">
-          <div class="study-section-head"><h2 id="study-method-title">用户提到的办法与经历</h2><span>不替用户下有效性结论</span></div>
-          <div class="study-method-switcher" role="tablist" aria-label="办法与经历"><button type="button" role="tab" data-method-kind="solution" aria-selected="${overviewState.method === 'solution'}">解决办法</button><button type="button" role="tab" data-method-kind="experience" aria-selected="${overviewState.method === 'experience'}">使用经历</button></div>
-          ${methods.length ? `<div class="study-method-list">${methods.map(signal => `<article class="study-method"><h3>${esc(signal.proposition || '未命名表达')}</h3>${signal.evidence ? `<blockquote>“${esc(signal.evidence)}”</blockquote>` : ''}<small>${esc(label(signalKindLabel, signal.kind) ?? signal.kind)}</small></article>`).join('')}</div>` : `<p class="study-empty">本次研究还没有可读取的${overviewState.method === 'solution' ? '解决办法' : '使用经历'}信号。</p>`}
-        </section>
-      </div>
-
-      <div class="study-overview-grid">
-        <section class="study-overview-section" aria-labelledby="study-voice-title">
-          <div class="study-section-head"><h2 id="study-voice-title">代表原声</h2>${overviewState.kind !== 'all' || overviewState.expression ? '<button class="study-link" type="button" data-overview-clear>清除筛选</button>' : '<span>回到真实评论</span>'}</div>
-          <p class="study-section-note">${esc(filterNote)}</p>
-          ${voices.length ? `<div class="study-voice-list">${voices.map(({ target, signals }) => {
-            const tags = [...new Set(signals.map(signal => label(signalKindLabel, signal.kind) ?? signal.kind))].slice(0, 3);
-            return `<article class="study-voice"><div class="study-voice-meta"><div class="study-voice-tags">${tags.map(tag => `<span class="study-voice-tag">${esc(tag)}</span>`).join('')}</div><span>${overviewNum(target.signalCount)} 条信号</span></div><blockquote>“${esc(target.commentText)}”</blockquote><div class="study-voice-footer"><span>${esc(titles.get(target.workRef) || '来源作品')}</span><button class="study-link" type="button" data-study-view="targets">查看评论目标</button></div></article>`;
-          }).join('')}</div>` : '<p class="study-empty">当前筛选下没有可读取的评论原声。</p>'}
-        </section>
-
-        <section class="study-overview-section" aria-labelledby="study-unknown-title">
-          <div class="study-section-head"><h2 id="study-unknown-title">尚未看清的部分</h2><span>不是人工审核待办</span></div>
-          <p class="study-section-note">只显示会影响当前理解的真实等待或失败状态。</p>
-          ${unresolved.length ? `<div class="study-unknown-list">${unresolved.map(item => `<div class="study-unknown-row"><span>${esc(item.text)}</span><b>${overviewNum(item.count)}</b><button type="button" data-study-view="${esc(item.view)}">查看</button></div>`).join('')}</div>` : '<p class="study-empty">最近一次研究没有尚待说明的归并或处理状态。</p>'}
-        </section>
-      </div>
-
-      <p class="study-overview-footnote">总览只读取已有研究事实。浏览、筛选与切换视图不会创建研究运行，也不会调用模型。</p>
-    </div>`;
-  }
-
-  async function loadIntelligenceOverview() {
-    const [overview, problems, setup] = await Promise.all([
-      get(overviewPath('overview')),
-      get(overviewPath('problems', { limit: 100 })),
-      get('setup').catch(() => null)
-    ]);
-    let targets = [];
-    let signals = [];
-    if (overview.latestRun?.runRef) {
-      const [targetData, signalData] = await Promise.all([
-        get(overviewPath('targets', { runRef: overview.latestRun.runRef, limit: 100 })),
-        get(overviewPath('signals', { runRef: overview.latestRun.runRef, limit: 100 }))
-      ]);
-      targets = targetData.targets || [];
-      signals = signalData.signals || [];
-    }
-    return { overview, problems: problems.problems || [], setup, targets, signals };
-  }
-  async function renderIntelligenceOverviewTab() {
-    overviewState.cache = await loadIntelligenceOverview();
-    return renderIntelligenceOverview(overviewState.cache);
-  }
-  function rerenderIntelligenceOverview() {
-    if (activeView !== 'overview' || !overviewState.cache) return;
-    document.querySelector('#study-tab-result').innerHTML = renderIntelligenceOverview(overviewState.cache);
-  }
-
-  document.querySelector('#study-tab-result').addEventListener('click', event => {
-    const view = event.target.closest('[data-study-view]');
-    if (view) {
-      switchToView(view.dataset.studyView);
-      return;
-    }
-    const kind = event.target.closest('[data-overview-kind]');
-    if (kind) {
-      overviewState.kind = kind.dataset.overviewKind;
-      overviewState.expression = null;
-      rerenderIntelligenceOverview();
-      return;
-    }
-    const expression = event.target.closest('[data-overview-expression]');
-    if (expression) {
-      const value = expression.dataset.overviewExpression;
-      overviewState.expression = overviewState.expression === value ? null : value;
-      overviewState.kind = 'all';
-      rerenderIntelligenceOverview();
-      return;
-    }
-    const method = event.target.closest('[data-method-kind]');
-    if (method) {
-      overviewState.method = method.dataset.methodKind;
-      rerenderIntelligenceOverview();
-      return;
-    }
-    if (event.target.closest('[data-overview-clear]')) {
-      overviewState.kind = 'all';
-      overviewState.expression = null;
-      rerenderIntelligenceOverview();
-    }
-  });
-
-  TAB_RENDERERS.overview = renderIntelligenceOverviewTab;
-  const setupStatus = document.querySelector('#setup-status');
-  const statusObserver = new MutationObserver(() => {
-    setupStatus.hidden = !setupStatus.textContent.trim();
-  });
-  statusObserver.observe(setupStatus, { childList: true, characterData: true, subtree: true });
-  setupStatus.hidden = !setupStatus.textContent.trim();
+  const overviewState = {kind:'all',expression:null,method:'solution',seriesDays:28,seriesView:window.matchMedia('(max-width:620px)').matches?'table':'chart',cache:null};
+  const RUN_RECORD_RESOLUTION_STATES = new Set(['protocol_rejected','failed']);
+  const overviewNum = value => value == null || Number.isNaN(Number(value)) ? '—' : new Intl.NumberFormat('zh-CN').format(Number(value));
+  const overviewSum = values => Object.values(values || {}).reduce((sum,value)=>sum+Number(value||0),0);
+  const overviewPath = (path,extra={}) => {const query=new URLSearchParams();if(overviewDomainRef)query.set('domain',overviewDomainRef);Object.entries(extra).forEach(([key,value])=>{if(value!=null&&value!=='')query.set(key,value)});return query.size?`${path}?${query}`:path};
+  const overviewReadout = (text,value,unit,note,active=false)=>`<div class="study-readout" data-active="${active}"><span class="study-readout-label">${esc(text)}</span><div class="study-readout-value"><b>${esc(value)}</b>${unit?`<span>${esc(unit)}</span>`:''}</div><span class="study-readout-note">${esc(note)}</span></div>`;
+  function overviewKinds(signals){const counts=new Map();signals.forEach(signal=>counts.set(signal.kind,(counts.get(signal.kind)||0)+1));return[...counts.entries()].sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]))}
+  function overviewExpressions(signals){const groups=new Map();signals.forEach(signal=>{if(signal.sourceState==='restricted')return;const proposition=String(signal.proposition||'').trim();if(!proposition)return;const group=groups.get(proposition)||{proposition,signals:[]};group.signals.push(signal);groups.set(proposition,group)});return[...groups.values()].sort((a,b)=>b.signals.length-a.signals.length||a.proposition.localeCompare(b.proposition)).slice(0,8)}
+  function overviewProblemHighlights(problems,signals){const current=new Map();signals.forEach(signal=>{if(!signal.resolvedProblemRef)return;const group=current.get(signal.resolvedProblemRef)||[];group.push(signal);current.set(signal.resolvedProblemRef,group)});const active=(problems||[]).filter(problem=>problem.state==='active');const changed=active.filter(problem=>current.has(problem.problemRef)).map(problem=>({problem,signals:current.get(problem.problemRef)})).sort((a,b)=>b.signals.length-a.signals.length||Number(b.problem.membershipCount)-Number(a.problem.membershipCount));if(changed.length)return changed.slice(0,3);return active.sort((a,b)=>Number(b.membershipCount)-Number(a.membershipCount)).slice(0,3).map(problem=>({problem,signals:[]}))}
+  function overviewUnresolved(latest){if(!latest)return[];const rows=[];['deferred_novel','deferred_ambiguous','deferred_context','retrieval_incomplete','budget_stopped','pending','protocol_rejected','failed'].forEach(state=>{const count=Number(latest.resolutionStates?.[state]||0);if(count)rows.push({text:label(resolutionLabel,state)??state,count,view:RUN_RECORD_RESOLUTION_STATES.has(state)?'runs':'pending'})});[['needs_context','仍在等待评论语境'],['failed','评论研究处理失败'],['excluded','来源受限，未继续处理']].forEach(([state,text])=>{const count=Number(latest.targetStates?.[state]||0);if(count)rows.push({text,count,view:'targets'})});return rows}
+  function overviewVoices(data){const byTarget=new Map();data.signals.forEach(signal=>{const group=byTarget.get(signal.targetRef)||[];group.push(signal);byTarget.set(signal.targetRef,group)});let targets=data.targets.filter(target=>target.commentText);if(overviewState.kind!=='all')targets=targets.filter(target=>(byTarget.get(target.targetRef)||[]).some(signal=>signal.kind===overviewState.kind));if(overviewState.expression)targets=targets.filter(target=>(byTarget.get(target.targetRef)||[]).some(signal=>signal.proposition===overviewState.expression));targets.sort((a,b)=>(byTarget.get(b.targetRef)||[]).length-(byTarget.get(a.targetRef)||[]).length||String(b.createdAt).localeCompare(String(a.createdAt)));return targets.slice(0,4).map(target=>({target,signals:byTarget.get(target.targetRef)||[]}))}
+  const coverageLabel=state=>({recorded:'有观察记录',partial:'部分观察',none:'无观察记录'}[state]||'观察状态未知');
+  const observationPoints=series=>(Array.isArray(series?.points)?series.points:[]).slice(-overviewState.seriesDays);
+  function renderObservationChart(points,series){if(!points.length)return'<p class="study-observation-empty">当前没有可读取的评论观察序列。</p>';const width=1000,height=286,left=48,right=18,top=22,bottom=42,plotWidth=width-left-right,plotHeight=height-top-bottom,maximum=Math.max(1,...points.flatMap(point=>[Number(point.newObservedCommentCount||0),Number(point.acceptedSignalCount||0)])),step=plotWidth/Math.max(points.length,1),barWidth=Math.max(3,Math.min(18,step*.56)),x=index=>left+step*index+step/2,y=value=>top+plotHeight-Number(value||0)/maximum*plotHeight;const grid=[0,.25,.5,.75,1].map(ratio=>{const yy=top+plotHeight-plotHeight*ratio;return`<g><line x1="${left}" y1="${yy}" x2="${width-right}" y2="${yy}" class="study-series-grid-line"/><text x="${left-9}" y="${yy+4}" text-anchor="end">${overviewNum(Math.round(maximum*ratio))}</text></g>`}).join('');const bars=points.map((point,index)=>{const value=Number(point.newObservedCommentCount||0),yy=y(value);return`<rect x="${(x(index)-barWidth/2).toFixed(2)}" y="${yy.toFixed(2)}" width="${barWidth.toFixed(2)}" height="${Math.max(0,top+plotHeight-yy).toFixed(2)}"><title>${esc(point.date)} · 首次观察评论 ${overviewNum(value)} 条</title></rect>`}).join('');const linePoints=points.map((point,index)=>`${x(index).toFixed(2)},${y(point.acceptedSignalCount).toFixed(2)}`).join(' ');const dots=points.map((point,index)=>`<circle cx="${x(index).toFixed(2)}" cy="${y(point.acceptedSignalCount).toFixed(2)}" r="3"><title>${esc(point.date)} · 接纳信号 ${overviewNum(point.acceptedSignalCount)} 条</title></circle>`).join('');const ticks=points.map((point,index)=>{const every=points.length<=7?1:points.length<=28?4:8;if(index!==0&&index!==points.length-1&&index%every!==0)return'';return`<text x="${x(index).toFixed(2)}" y="${height-14}" text-anchor="middle">${esc(String(point.date).slice(5))}</text>`}).join('');const coverage=points.map(point=>`<i data-state="${esc(point.observationCoverage)}" title="${esc(point.date)} · ${esc(coverageLabel(point.observationCoverage))}"></i>`).join('');return`<div class="study-series-chart"><div class="study-series-legend"><span><i data-kind="comments"></i>首次观察评论</span><span><i data-kind="signals"></i>接纳信号</span><span>按 ${esc(series?.timezone||'Asia/Shanghai')} 自然日</span></div><div class="study-series-svg-wrap" role="img" aria-label="最近 ${overviewState.seriesDays} 天评论观察量。柱状为首次观察评论，折线为接纳信号。"><svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" aria-hidden="true">${grid}<g class="study-series-bars">${bars}</g><polyline class="study-series-line" points="${linePoints}"/><g class="study-series-dots">${dots}</g><g class="study-series-axis">${ticks}</g></svg></div><div class="study-series-coverage" style="--study-series-columns:${points.length}" aria-label="每日观察覆盖">${coverage}</div></div>`}
+  function renderObservationTable(points){if(!points.length)return'<p class="study-observation-empty">当前没有可读取的评论观察序列。</p>';return`<div class="study-series-table-wrap"><table class="study-series-table"><thead><tr><th scope="col">日期</th><th scope="col">首次观察评论</th><th scope="col">进入研究评论</th><th scope="col">接纳信号</th><th scope="col">覆盖作品</th><th scope="col">观察覆盖</th></tr></thead><tbody>${[...points].reverse().map(point=>`<tr><td><time datetime="${esc(point.date)}">${esc(point.date)}</time></td><td>${overviewNum(point.newObservedCommentCount)}</td><td>${overviewNum(point.studiedCommentCount)}</td><td>${overviewNum(point.acceptedSignalCount)}</td><td>${overviewNum(point.coveredWorkCount)}</td><td><span class="study-coverage-state" data-state="${esc(point.observationCoverage)}">${esc(coverageLabel(point.observationCoverage))}</span></td></tr>`).join('')}</tbody></table></div>`}
+  function renderObservationSeries(series){const points=observationPoints(series);const body=series?(overviewState.seriesView==='table'?renderObservationTable(points):renderObservationChart(points,series)):'<p class="study-observation-empty">当前领域没有可读取的评论观察序列。</p>';return`<section class="study-observation" aria-labelledby="study-observation-title"><header class="study-observation-head"><div><h2 id="study-observation-title">评论观察量</h2><p>柱状记录评论首次被系统接受观察的日期；折线记录 Signal 实际写入日期。没有观察记录不等于用户没有表达。</p></div><div class="study-observation-controls"><div class="study-text-switcher" role="group" aria-label="观察时间范围">${[7,28,56].map(days=>`<button type="button" data-series-days="${days}" aria-pressed="${overviewState.seriesDays===days}">近 ${days} 天</button>`).join('')}</div><div class="study-text-switcher" role="group" aria-label="评论观察量视图"><button type="button" data-series-view="chart" aria-pressed="${overviewState.seriesView==='chart'}">图表</button><button type="button" data-series-view="table" aria-pressed="${overviewState.seriesView==='table'}">表格</button></div></div></header>${body}<p class="study-series-note">“首次观察评论”按稳定评论身份去重；“进入研究评论”按 Target source 去重；观察覆盖来自 comments / replies 采集台账。</p></section>`}
+  function renderIntelligenceOverview(data){const preview=data.setup?.sourcePreview||null,latest=data.overview?.latestRun||null,signalTotal=latest?overviewSum(latest.signalStates):null,problemTotal=data.problems.length,kinds=overviewKinds(data.signals),maxKind=Math.max(1,...kinds.map(([,count])=>count)),expressions=overviewExpressions(data.signals),highlights=overviewProblemHighlights(data.problems,data.signals),unresolved=overviewUnresolved(latest),voices=overviewVoices(data),titles=new Map((data.setup?.eligibleWorks||[]).map(work=>[work.workRef,work.title])),methods=data.signals.filter(signal=>signal.kind===overviewState.method&&signal.sourceState!=='restricted').slice(0,3),scope=latest?`最近一次研究 · ${String(latest.createdAt||'').slice(0,16).replace('T',' ')}`:'尚无研究运行',signalCoverage=signalTotal==null?'没有研究运行':signalTotal>data.signals.length?`当前读取 ${data.signals.length}/${signalTotal} 条信号`:`本次 ${signalTotal} 条信号`,filterNote=overviewState.expression?`当前仅看“${overviewState.expression}”关联的原声`:overviewState.kind!=='all'?`当前仅看${label(signalKindLabel,overviewState.kind)??overviewState.kind}类原声`:'按已关联信号数优先展示';return`<div class="study-overview"><div class="study-overview-scope"><span><strong>ADHD 评论研究</strong> · ${esc(scope)}</span><code>${esc(data.overview?.domainRef||overviewDomainRef||'未配置领域')}</code></div><section class="study-readout-strip" aria-label="评论研究观察基础">${overviewReadout('观察到的评论',preview?overviewNum(preview.totalCommentCount):'—','条',preview?'当前领域库存快照':'资格读取不可用')}${overviewReadout('可研究评论',preview?overviewNum(preview.eligibleCommentCount):'—','条',preview?`覆盖 ${overviewNum(preview.works?.length||0)} 篇作品${(preview.works?.length||0)>=100?'（已达读取上限）':''}`:'来源 gate 状态未知',true)}${overviewReadout('本次接纳信号',signalTotal==null?'—':overviewNum(signalTotal),'条',latest?'最近一次研究产出':'尚无研究运行')}${overviewReadout('长期用户问题',problemTotal===100?'100+':overviewNum(problemTotal),'个',problemTotal?'累计已建档问题':'尚无稳定问题')}</section>${renderObservationSeries(data.overview?.observationSeries)}<div class="study-overview-grid"><section class="study-overview-section" aria-labelledby="study-kind-title"><div class="study-section-head"><h2 id="study-kind-title">用户表达构成</h2><span>${esc(signalCoverage)}</span></div><p class="study-section-note">表达类型说明系统识别到了什么，不代表主题规模或需求强度。</p>${kinds.length?`<div class="study-kind-list"><button class="study-kind-row" type="button" data-overview-kind="all" aria-pressed="${overviewState.kind==='all'}"><span class="study-kind-name">全部表达</span><span class="study-kind-track"><i style="width:100%"></i></span><span class="study-kind-count">${overviewNum(data.signals.length)}</span></button>${kinds.map(([kind,count])=>`<button class="study-kind-row" type="button" data-overview-kind="${esc(kind)}" aria-pressed="${overviewState.kind===kind}"><span class="study-kind-name">${esc(label(signalKindLabel,kind)??kind)}</span><span class="study-kind-track"><i style="width:${Math.max(6,Math.round(count/maxKind*100))}%"></i></span><span class="study-kind-count">${overviewNum(count)}</span></button>`).join('')}</div>`:'<p class="study-empty">最近一次研究还没有形成可读取的信号。</p>'}</section><section class="study-overview-section" aria-labelledby="study-problem-title"><div class="study-section-head"><h2 id="study-problem-title">本期值得看的问题</h2><button class="study-link" type="button" data-study-view="problems">查看全部用户问题</button></div><p class="study-section-note">优先显示本次新增关联；没有新增时显示累计依据较多的问题。不是需求排行榜。</p>${highlights.length?`<ol class="study-problem-list">${highlights.map((item,index)=>{const evidence=item.signals.find(signal=>signal.evidence)?.evidence;return`<li class="study-problem-item"><div class="study-problem-top"><span class="study-problem-index">0${index+1}</span><h3 class="study-problem-title">${esc(item.problem.definition)}</h3></div><div class="study-problem-meta"><span>累计 ${overviewNum(item.problem.membershipCount)} 条关联信号</span>${item.signals.length?`<span>本次 ${overviewNum(item.signals.length)} 条</span>`:'<span>长期积累</span>'}</div>${evidence?`<blockquote class="study-problem-quote">“${esc(evidence)}”</blockquote>`:''}</li>`}).join('')}</ol>`:'<p class="study-empty">尚未形成稳定用户问题。已有原声和非问题类信号仍可继续查看。</p>'}</section></div><div class="study-overview-grid" data-balance="equal"><section class="study-overview-section" aria-labelledby="study-expression-title"><div class="study-section-head"><h2 id="study-expression-title">${expressions.some(group=>group.signals.length>1)?'重复出现的归一表达':'本次归一表达'}</h2><span>系统归一表达</span></div><p class="study-section-note">这里不是词云；相同归一表达按不同 Signal 计数，点击后回到对应原声。</p>${expressions.length?`<div class="study-expression-list">${expressions.map(group=>`<button class="study-expression" type="button" data-overview-expression="${esc(group.proposition)}" aria-pressed="${overviewState.expression===group.proposition}"><span>${esc(group.proposition)}</span><b>${overviewNum(group.signals.length)}</b></button>`).join('')}</div>`:'<p class="study-empty">当前没有可读取的归一表达。</p>'}</section><section class="study-overview-section" aria-labelledby="study-method-title"><div class="study-section-head"><h2 id="study-method-title">用户提到的办法与经历</h2><span>不替用户下有效性结论</span></div><div class="study-method-switcher" role="tablist" aria-label="办法与经历"><button type="button" role="tab" data-method-kind="solution" aria-selected="${overviewState.method==='solution'}">解决办法</button><button type="button" role="tab" data-method-kind="experience" aria-selected="${overviewState.method==='experience'}">使用经历</button></div>${methods.length?`<div class="study-method-list">${methods.map(signal=>`<article class="study-method"><h3>${esc(signal.proposition||'未命名表达')}</h3>${signal.evidence?`<blockquote>“${esc(signal.evidence)}”</blockquote>`:''}<small>${esc(label(signalKindLabel,signal.kind)??signal.kind)}</small></article>`).join('')}</div>`:`<p class="study-empty">本次研究还没有可读取的${overviewState.method==='solution'?'解决办法':'使用经历'}信号。</p>`}</section></div><div class="study-overview-grid"><section class="study-overview-section" aria-labelledby="study-voice-title"><div class="study-section-head"><h2 id="study-voice-title">代表原声</h2>${overviewState.kind!=='all'||overviewState.expression?'<button class="study-link" type="button" data-overview-clear>清除筛选</button>':'<span>回到真实评论</span>'}</div><p class="study-section-note">${esc(filterNote)}</p>${voices.length?`<div class="study-voice-list">${voices.map(({target,signals})=>{const tags=[...new Set(signals.map(signal=>label(signalKindLabel,signal.kind)??signal.kind))].slice(0,3);return`<article class="study-voice"><div class="study-voice-meta"><div class="study-voice-tags">${tags.map(tag=>`<span class="study-voice-tag">${esc(tag)}</span>`).join('')}</div><span>${overviewNum(target.signalCount)} 条信号</span></div><blockquote>“${esc(target.commentText)}”</blockquote><div class="study-voice-footer"><span>${esc(titles.get(target.workRef)||'来源作品')}</span><button class="study-link" type="button" data-study-view="targets">查看评论目标</button></div></article>`}).join('')}</div>`:'<p class="study-empty">当前筛选下没有可读取的评论原声。</p>'}</section><section class="study-overview-section" aria-labelledby="study-unknown-title"><div class="study-section-head"><h2 id="study-unknown-title">尚未看清的部分</h2><span>不是人工审核待办</span></div><p class="study-section-note">只显示会影响当前理解的真实等待或失败状态。</p>${unresolved.length?`<div class="study-unknown-list">${unresolved.map(item=>`<div class="study-unknown-row"><span>${esc(item.text)}</span><b>${overviewNum(item.count)}</b><button type="button" data-study-view="${esc(item.view)}">查看</button></div>`).join('')}</div>`:'<p class="study-empty">最近一次研究没有尚待说明的归并或处理状态。</p>'}</section></div><p class="study-overview-footnote">总览只读取已有研究事实。浏览、筛选与切换视图不会创建研究运行，也不会调用模型。</p></div>`}
+  async function loadIntelligenceOverview(){const[overview,problems,setup]=await Promise.all([get(overviewPath('overview')),get(overviewPath('problems',{limit:100})),get('setup').catch(()=>null)]);let targets=[],signals=[];if(overview.latestRun?.runRef){const[targetData,signalData]=await Promise.all([get(overviewPath('targets',{runRef:overview.latestRun.runRef,limit:100})),get(overviewPath('signals',{runRef:overview.latestRun.runRef,limit:100}))]);targets=targetData.targets||[];signals=signalData.signals||[]}return{overview,problems:problems.problems||[],setup,targets,signals}}
+  async function renderIntelligenceOverviewTab(){overviewState.cache=await loadIntelligenceOverview();return renderIntelligenceOverview(overviewState.cache)}
+  function rerenderIntelligenceOverview(){if(activeView!=='overview'||!overviewState.cache)return;document.querySelector('#study-tab-result').innerHTML=renderIntelligenceOverview(overviewState.cache)}
+  document.querySelector('#study-tab-result').addEventListener('click',event=>{const view=event.target.closest('[data-study-view]');if(view){switchToView(view.dataset.studyView);return}const seriesDays=event.target.closest('[data-series-days]');if(seriesDays){overviewState.seriesDays=Number(seriesDays.dataset.seriesDays);rerenderIntelligenceOverview();return}const seriesView=event.target.closest('[data-series-view]');if(seriesView){overviewState.seriesView=seriesView.dataset.seriesView;rerenderIntelligenceOverview();return}const kind=event.target.closest('[data-overview-kind]');if(kind){overviewState.kind=kind.dataset.overviewKind;overviewState.expression=null;rerenderIntelligenceOverview();return}const expression=event.target.closest('[data-overview-expression]');if(expression){const value=expression.dataset.overviewExpression;overviewState.expression=overviewState.expression===value?null:value;overviewState.kind='all';rerenderIntelligenceOverview();return}const method=event.target.closest('[data-method-kind]');if(method){overviewState.method=method.dataset.methodKind;rerenderIntelligenceOverview();return}if(event.target.closest('[data-overview-clear]')){overviewState.kind='all';overviewState.expression=null;rerenderIntelligenceOverview()}});
+  TAB_RENDERERS.overview=renderIntelligenceOverviewTab;
+  const setupStatus=document.querySelector('#setup-status');
+  const statusObserver=new MutationObserver(()=>{setupStatus.hidden=!setupStatus.textContent.trim()});
+  statusObserver.observe(setupStatus,{childList:true,characterData:true,subtree:true});
+  setupStatus.hidden=!setupStatus.textContent.trim();
 })();
   </script>
 </body>

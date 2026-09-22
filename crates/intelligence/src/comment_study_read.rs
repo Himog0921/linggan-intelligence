@@ -57,8 +57,9 @@ pub async fn schema_ready(database: &Database) -> Result<bool, CommentStudyReadE
     Ok(ready)
 }
 
-/// Shows configuration and the latest run state without inferring study success from source
-/// material counts.  Each count is a distinct lifecycle fact.
+/// Shows configuration, a truthful 56-day observation series, and the latest Run state without
+/// inferring study success from source material counts. Each count remains a distinct lifecycle
+/// fact; the browser only slices the server projection into 7 / 28 / 56 day views.
 pub async fn read_overview(
     database: &Database,
     query: &CommentStudyReadQuery,
@@ -134,11 +135,22 @@ pub async fn read_overview(
         .await?,
         None => None,
     };
+    let observation_series = match domain_ref {
+        Some(domain_ref) => Some(
+            crate::comment_study_observation::read_comment_observation_series(
+                database,
+                domain_ref,
+            )
+            .await?,
+        ),
+        None => None,
+    };
     Ok(json!({
         "contract":"comment-study.read.v1",
         "domainRef":domain_ref,
         "policy":policy,
         "latestRun":latest_run,
+        "observationSeries":observation_series,
         "cleanLayerState": if policy.is_some() { "configured" } else { "not_configured" }
     }))
 }
