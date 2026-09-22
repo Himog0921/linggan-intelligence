@@ -1250,6 +1250,37 @@ fn a_refusal_by_state_is_not_told_to_retry_later_while_a_genuine_miss_is() {
 /// 判据只有一条是别人替不了的：**库里真的多了一张待翻搜索面的工单**。只断言回执文案
 /// 不够——那句话本来就是错的，错的地方正在于它说的话和库里的状态对不上。
 #[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn nul_submission_is_terminal_422_without_partial_package_or_receipt() {
+    let database = proof_database("nul_submission_rejection").await;
+    let application = app_with_database(database.clone());
+    let mut submission: Value =
+        serde_json::from_str(&runtime_author_producer_submission()).unwrap();
+    submission["capturePackage"]["records"][0]["payload"]["description"] =
+        serde_json::json!("前\0后");
+    for _ in 0..2 {
+        let response = application
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/local/producer/runtime-submissions")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(submission.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert!(String::from_utf8_lossy(&body).contains("submission_invalid"));
+    }
+    let counts: (i64,i64) = sqlx::query_as("SELECT (SELECT count(*) FROM linggan_runtime_capture_package), (SELECT count(*) FROM linggan_runtime_submission_receipt)")
+        .fetch_one(database.pool()).await.unwrap();
+    assert_eq!(counts, (0, 0));
+}
+
+#[tokio::test]
 #[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
 async fn a_never_archived_keyword_starts_its_first_stage_when_asked_to_archive() {
     let database = proof_database("keyword_archive_first_stage").await;
@@ -1449,6 +1480,47 @@ async fn a_patrolling_keyword_can_repair_its_missing_first_stage_archive() {
     .await
     .expect("工单可数");
     assert_eq!(orders, vec!["deep_archive"], "修复性建档只创建第一阶段工单");
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn creator_gap_route_never_falls_back_to_a_homepage_rescan() {
+    let database = proof_database("creator_gap_route").await;
+    let application = app_with_database(database.clone());
+    let created = application.clone().oneshot(Request::builder()
+        .method("POST").uri("/collection/targets/new")
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .body(Body::from("target_kind=creator&identity=69aad16e000000003201b111&domain=__new__&new_domain_name=creator-gap-proof")).unwrap()).await.unwrap();
+    assert_eq!(created.status(), StatusCode::SEE_OTHER);
+    let target_ref: uuid::Uuid = sqlx::query_scalar("SELECT target_ref FROM collection_observation_target WHERE identity_key='69aad16e000000003201b111'")
+        .fetch_one(database.pool()).await.unwrap();
+    let response = application
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/collection/targets/archive")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from(format!(
+                    "row_target_ref={target_ref}&archive_action=gaps"
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert!(
+        response.headers()[header::LOCATION]
+            .to_str()
+            .unwrap()
+            .contains("archive_nothing_to_continue")
+    );
+    let work_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM collection_work_order WHERE target_ref=$1")
+            .bind(target_ref)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(work_count, 0);
 }
 
 async fn proof_database(schema: &str) -> Database {

@@ -123,6 +123,24 @@ export function createScheduledRuntimeTask(input = {}) {
   return createTaskSpec({ ...input, source: 'scheduled' });
 }
 
+// Only normalize display/body text before the immutable package is frozen. The JSON-encoded
+// original is lossless and jsonb-safe; identities, URLs and already-frozen envelopes stay intact.
+function storageSafeDetailText(note) {
+  const payload = { ...(note || {}) };
+  const fields = {};
+  for (const key of ['title', 'content', 'bodyText', 'rawDomText']) {
+    const value = payload[key];
+    if (typeof value === 'string' && value.includes('\u0000')) {
+      fields[key] = JSON.stringify(value);
+      payload[key] = value.replaceAll('\u0000', '');
+    }
+  }
+  if (Object.keys(fields).length) {
+    payload.sourceTextEncoding = { version: 'nul-json-string.v1', fields };
+  }
+  return payload;
+}
+
 export function packageContentDetail({ platform, note, observedAt, capturedAt } = {}) {
   const media = asArray(note?.images).concat(note?.video ? [note.video] : []);
   return createCapturePackage({
@@ -132,7 +150,7 @@ export function packageContentDetail({ platform, note, observedAt, capturedAt } 
     capturedAt,
     target: { basis: 'known_set', contentExternalId: String(note?.noteId || note?.id || note?.contentId || '') },
     coverage: { observed: 1, attempted: 1, acquired: 1, verified: 0, unknown: media.length ? 1 : 0, stoppedReason: 'detail_read_complete' },
-    records: [{ kind: 'content_detail', sourceObject: normalizeSourceObject(platform, note), payload: note || {} }],
+    records: [{ kind: 'content_detail', sourceObject: normalizeSourceObject(platform, note), payload: storageSafeDetailText(note) }],
   });
 }
 

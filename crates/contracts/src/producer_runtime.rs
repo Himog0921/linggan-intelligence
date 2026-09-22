@@ -47,6 +47,8 @@ pub enum ProducerRuntimeContractError {
     InvalidIdentifiers,
     #[error("producer runtime contains an unsupported enum value")]
     UnsupportedValue,
+    #[error("producer runtime contains a NUL character unsupported by storage")]
+    UnsupportedNullCharacter,
     #[error("producer runtime task spec is not bounded")]
     UnboundedTask,
     #[error("producer runtime coverage is invalid")]
@@ -370,9 +372,35 @@ pub fn parse_producer_submission(
     })
 }
 
+// Reject a deterministic representation failure before it becomes a retryable DB outage.
+// Keys matter too: PostgreSQL jsonb rejects U+0000 anywhere in a JSON string.
+fn validate_storage_text(value: &Value) -> Result<(), ProducerRuntimeContractError> {
+    match value {
+        Value::String(text) if text.contains('\0') => {
+            return Err(ProducerRuntimeContractError::UnsupportedNullCharacter);
+        }
+        Value::Array(values) => {
+            for value in values {
+                validate_storage_text(value)?;
+            }
+        }
+        Value::Object(values) => {
+            for (key, value) in values {
+                if key.contains('\0') {
+                    return Err(ProducerRuntimeContractError::UnsupportedNullCharacter);
+                }
+                validate_storage_text(value)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 fn parse_producer_capture_value(
     raw: Value,
 ) -> Result<ProducerCapturePackage, ProducerRuntimeContractError> {
+    validate_storage_text(&raw)?;
     let wire: CapturePackageWire = serde_json::from_value(raw.clone())
         .map_err(|error| ProducerRuntimeContractError::SchemaInvalid(error.to_string()))?;
     if wire.contract_version != CAPTURE_PACKAGE_VERSION {
@@ -597,6 +625,26 @@ fn is_timestamp(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn storage_boundary_rejects_nul_in_nested_values_and_keys_but_allows_encoded_original() {
+        for value in [
+            serde_json::json!({"records": [{"payload": {"bodyText": "前\0后"}}]}),
+            serde_json::json!({"records": [{"bad\0key": "value"}]}),
+        ] {
+            assert!(matches!(
+                validate_storage_text(&value),
+                Err(ProducerRuntimeContractError::UnsupportedNullCharacter)
+            ));
+        }
+        let original = "前\0后";
+        let encoded = serde_json::to_string(original).unwrap();
+        assert!(
+            validate_storage_text(&serde_json::json!({"content": "前后", "originalJson": encoded}))
+                .is_ok()
+        );
+        assert_eq!(serde_json::from_str::<String>(&encoded).unwrap(), original);
+    }
 
     #[test]
     fn task_spec_allows_manual_and_scheduled_without_implementing_a_poller() {

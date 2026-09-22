@@ -80,7 +80,8 @@ pub use acquisition_chain::{
     grant_authorization, read_capacity, request_admit_and_lease,
     request_admit_material_targets_and_lease, request_and_admit,
     request_and_admit_material_targets, request_and_admit_material_targets_under_authorization,
-    request_progressive_archive, request_progressive_archive_and_lease, run_progressive_archives,
+    request_creator_directory_gaps, request_progressive_archive,
+    request_progressive_archive_and_lease, run_progressive_archives,
 };
 pub use archive_completeness::{
     ArchiveCompleteness, ArchiveDirectoryBaseline, BlockedMaterial, read_archive_completeness,

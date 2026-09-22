@@ -1,7 +1,7 @@
 # Linggan Browser Producer 本地构建与加载核对
 
 > 状态: 权威当前
-> 最后核对: 2026-09-10
+> 最后核对: 2026-09-22（新增正文字符交付边界，其余历史回执未重验）
 > 适用范围: `plugins/linggan-intelligence-browser` 当前 MV3 Browser Producer 的本地构建、release 完整性核对与真实链加载检查
 > 事实来源: Issue #37 / #128 / #149、PR #132 / #153、插件 source/build/release scripts、工位/运行时/真实 Package 与 Evidence UI 回执
 > 冲突时以谁为准: 用户最新确认、实际 manifest/release hash、浏览器实际加载状态和 Linggan local host receipt
@@ -42,6 +42,12 @@ npm run verify:linggan-isolation
 - `npm run check` 从 clean source 临时重建并对比 release manifest/ZIP，同时检查最小权限和禁止依赖。
 
 上述构建命令本身不打开浏览器、不发送 health 请求，也不访问平台；不得用其结果替代后续加载、工位、接纳和 UI 回执。
+
+## 正文 NUL 字符与旧包恢复（0.8.56）
+
+PostgreSQL JSONB 无法接纳 U+0000。新 producer 在冻结 `content_detail` Package 前，只处理 `title/content/bodyText/rawDomText` 中的 NUL：展示字段移除 NUL，同一 payload 的 `sourceTextEncoding` 保存 `version: nul-json-string.v1` 和 `fields`（字段名 → `JSON.stringify(原字符串)`）。对该值 `JSON.parse` 可逐字符还原原始文本；不得把规范化后的 `rawDomText` 单独称为原始字节。身份、URL 和其他字段不隐式改写。
+
+任何残留 NUL（含 JSON key、嵌套数组/值）在服务端 Package 合同校验时返回 422 `submission_invalid`，尚未写入 Package/Receipt，不伪装成暂时数据库故障。已冻结旧包保留原身份与原内容，在 outbox 留作终态诊断，并通过既有 `capture_delivery_rejected` 上报失败；不得编辑旧包、清空 IDB 或改挂到新 Attempt。重新取得正文须走新授权任务/Attempt；相邻通道的已接纳材料保留。
 
 ## 浏览器加载与连接检查
 

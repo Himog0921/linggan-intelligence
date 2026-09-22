@@ -580,6 +580,77 @@ pub async fn request_and_admit_material_targets(
     .await
 }
 
+/// A person explicitly requests the current creator-directory gaps, including accepted patrol
+/// additions. Freeze that exact scope in a new ordinary material request; never reopen a root.
+pub async fn request_creator_directory_gaps(
+    database: &Database,
+    target_ref: Uuid,
+    purpose: &str,
+    requested_by: &str,
+) -> Result<RequestOutcome, AcquisitionChainError> {
+    let mut transaction = database.pool().begin().await?;
+    let kind: Option<String> = sqlx::query_scalar(
+        "SELECT target_kind FROM collection_observation_target WHERE target_ref=$1 FOR UPDATE",
+    )
+    .bind(target_ref)
+    .fetch_optional(&mut *transaction)
+    .await?;
+    if kind.as_deref() != Some("creator") {
+        return Err(AcquisitionChainError::UnknownTarget);
+    }
+    let gaps: Vec<(Uuid, bool)> = sqlx::query_as(concat!(
+        "WITH ", crate::archive_ledger::directory_works_sql!("target.target_ref=$1", "true"),
+        r#" SELECT content_public_ref, EXISTS (
+            SELECT 1 FROM collection_work_order scoped_order
+            JOIN collection_work_order_material_target scope USING(work_order_ref)
+            LEFT JOIN collection_work_order_lease lease USING(work_order_ref)
+            WHERE scoped_order.target_ref=$1
+              AND scope.content_public_ref=directory_work.content_public_ref
+              AND (scoped_order.queue_state='queued'
+                   OR (lease.released_at IS NULL AND lease.expires_at>scope_001_now()))) AS in_flight
+          FROM directory_work WHERE NOT has_detail AND NOT is_retired
+          ORDER BY content_public_ref"#,
+    ))
+    .bind(target_ref)
+    .fetch_all(&mut *transaction)
+    .await?;
+    if gaps.is_empty() {
+        return Err(AcquisitionChainError::ProgressiveArchiveNotReady {
+            reason: "no_missing_accepted_work",
+        });
+    }
+    let materials: Vec<MaterialDeepeningTarget> = gaps
+        .into_iter()
+        .filter(|(_, in_flight)| !in_flight)
+        .take(200)
+        .map(|(content_public_ref, _)| MaterialDeepeningTarget {
+            content_public_ref,
+            comment_limit: 30,
+            reply_expand_limit: 2,
+            acquire_media: true,
+            allow_ocr: true,
+            allow_asr: true,
+        })
+        .collect();
+    if materials.is_empty() {
+        return Err(AcquisitionChainError::ProgressiveArchiveNotReady {
+            reason: "detail_batch_in_flight",
+        });
+    }
+    let outcome = request_and_admit_in_transaction(
+        &mut transaction,
+        target_ref,
+        "deep_archive",
+        purpose,
+        requested_by,
+        &materials,
+        None,
+    )
+    .await?;
+    transaction.commit().await?;
+    Ok(outcome)
+}
+
 pub async fn request_admit_material_targets_and_lease(
     database: &Database,
     target_ref: Uuid,

@@ -8,7 +8,8 @@ SELECT work_order.lane,
  count(DISTINCT work_order.work_order_ref) FILTER (WHERE work_order.queue_state='queued') AS queued_work_orders,
  count(DISTINCT lease_task.task_id) FILTER (WHERE lease.released_at IS NULL AND lease.expires_at>$2::timestamptz AND (lease_task.execution_state='pending' OR (lease_task.execution_state='in_progress' AND NOT EXISTS (SELECT 1 FROM linggan_runtime_attempt attempt WHERE attempt.task_id=lease_task.task_id)))) AS awaiting_producer_tasks,
  count(DISTINCT lease_task.task_id) FILTER (WHERE lease.released_at IS NULL AND lease.expires_at>$2::timestamptz AND lease_task.execution_state='in_progress' AND EXISTS (SELECT 1 FROM linggan_runtime_attempt attempt WHERE attempt.task_id=lease_task.task_id) AND NOT EXISTS (SELECT 1 FROM linggan_runtime_capture_package package WHERE package.task_id=lease_task.task_id AND package.accepted_at<=$2::timestamptz)) AS running_attempts,
- count(DISTINCT lease_task.task_id) FILTER (WHERE lease_task.execution_state IN ('blocked','unavailable')) AS blocked_tasks
+ -- Historical failures remain in archive coverage/history; they are not current execution.
+ count(DISTINCT lease_task.task_id) FILTER (WHERE lease.released_at IS NULL AND lease.expires_at>$2::timestamptz AND lease_task.execution_state IN ('blocked','unavailable')) AS blocked_tasks
 FROM collection_work_order work_order
 LEFT JOIN collection_work_order_lease lease USING(work_order_ref)
 LEFT JOIN collection_work_order_lease_task lease_task USING(lease_ref)

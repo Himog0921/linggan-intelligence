@@ -285,6 +285,11 @@ fn action_feedback_markup(error: Option<&str>, ahead: Option<i64>) -> String {
             "建档已入队",
             "已记录这次建立档案请求。系统会先取回作品链接（创作者取主页目录，关键词按排序翻搜索面），再逐篇补齐详情；目录和详情只会在接纳真实回执后更新。执行要等一个空闲工位，可能需要几分钟，不用再点一次。",
         ),
+        "creator_detail_requested" => (
+            "c-src-feedback c-src-feedback-ok",
+            "已排入详情补采",
+            "已按当前目录冻结这次待补作品，最多 200 篇，等待空闲工位执行。已有详情、已确认失效和正在采集的作品不会重复排入；完成情况以实际材料回执为准。",
+        ),
         "keyword_detail_requested" => (
             "c-src-feedback c-src-feedback-ok",
             "已排入详情补采",
@@ -1132,10 +1137,15 @@ fn row_action(
                 TargetPrimaryAction::ContinueArchive => "补采缺口",
                 _ => unreachable!(),
             };
+            let gap_field = if action == TargetPrimaryAction::ContinueArchive {
+                r#"<input type="hidden" name="archive_action" value="gaps">"#
+            } else {
+                ""
+            };
             let focus_id = format!("target-{}", target.target_ref);
             let fields = list_context.return_fields(None, None, Some(&focus_id));
             format!(
-                r#"<form method="post" action="/collection/targets/archive">{fields}<button class="c-tg-act" type="submit" name="row_target_ref" value="{target_ref}">{label}</button></form>"#,
+                r#"<form method="post" action="/collection/targets/archive">{fields}{gap_field}<button class="c-tg-act" type="submit" name="row_target_ref" value="{target_ref}">{label}</button></form>"#,
                 target_ref = target.target_ref,
             )
         }
@@ -1759,6 +1769,7 @@ mod tests {
         // 12−5 自己算——那会把「已失效」误算成「缺失」。
         assert!(html.contains("5 / 12 · 缺 7"));
         assert!(html.contains("补采缺口"));
+        assert!(html.contains(r#"name="archive_action" value="gaps""#));
         // 上次巡查是已经发生的事实，保留绝对时刻——可能要拿去跟别的记录对时间。
         // 列表里的巡查时刻不带年份：同一屏里年份永远相同，却稳定占掉五个字符，
         // 正是把这一列挤到截断的最后一根稻草。完整时刻仍在目标详情里。

@@ -76,6 +76,18 @@ async fn inspector_separates_queued_from_running_and_keeps_reads_side_effect_fre
         running_before,
         "the read projection must remain read-only"
     );
+    sqlx::query("UPDATE collection_work_order_lease_task SET execution_state='blocked',claimed_at=NULL WHERE lease_ref IN (SELECT lease_ref FROM collection_work_order_lease WHERE work_order_ref=$1)")
+        .bind(fixture.work_order_ref).execute(database.pool()).await.unwrap();
+    let blocked = read_target_inspector(&database, fixture.target_ref).await.unwrap().unwrap();
+    assert_eq!(blocked.execution.state, TargetInspectorExecutionState::Blocked);
+    assert_eq!(blocked.execution.blocked_tasks, 1);
+    sqlx::query("UPDATE collection_work_order_lease SET released_at=scope_001_now(),release_reason='partial' WHERE work_order_ref=$1")
+        .bind(fixture.work_order_ref).execute(database.pool()).await.unwrap();
+    let historical = read_target_inspector(&database, fixture.target_ref).await.unwrap().unwrap();
+    assert_eq!(historical.execution.state, TargetInspectorExecutionState::Idle);
+    assert_eq!(historical.execution.blocked_tasks, 0);
+    assert_eq!(fact_counts(&database).await, running_before, "ending an execution never erases its history");
+
 }
 
 struct Fixture {
