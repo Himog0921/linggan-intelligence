@@ -31,6 +31,7 @@ pub mod comment_study_batch;
 pub mod comment_study_canonical;
 pub mod comment_study_comparison_cache;
 pub mod comment_study_embedding;
+pub mod comment_study_observation;
 pub mod comment_study_recall;
 pub mod comment_study_batch_acceptance;
 pub mod comment_study_batch_worker;
