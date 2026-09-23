@@ -1,10 +1,16 @@
 # 当前状态与事项队列
 
 > 状态: 权威当前
-> 最后核对: 2026-09-22
+> 最后核对: 2026-09-23
 > 适用范围: 当前阶段、事项顺序、阻塞与下一步
 > 事实来源: 本机实际检查、已确认项目边界和完成计划
 > 冲突时以谁为准: 真实运行结果、ACCEPTED ADR 与用户最新确认
+
+### DOMAIN-UNIFICATION-001（开发推进文件已建立；实施未开始）
+
+Mog 已确认正式 Domain 在基础采集、详情、评论、媒体与研究能力上平权，Domain 只定义研究上下文；Collection 需要新增“领域管理”。当前唯一推进入口是 [DOMAIN-UNIFICATION-001](plans/active/domain-unification-001.md)：它冻结 Domain–Target 的 `primary/reference` 配置、相容多用途共享一次 WorkOrder、统一 canonical Material/Comment/Media、Domain-scoped Corpus 与 Comment Study、pause 真语义，以及开发期旧 `cross_industry` 路径的直接清理。
+
+本计划明确不为旧开发数据建设双写、长期 fallback、逐行审批、down migration 或专用保全系统。现有领域文档中“一级 Domain 只有 ADHD”、旧 `is_own_domain` 分流和旧跨行业 UI manifest 是待 WP0 替换/降级的历史语义，不得覆盖本计划。Issue #130 仍是旧正文并带旧 ready 状态；root 同步它之前不得派实施 Agent。代码、migration、测试、PR、共享数据库、runtime、插件、外部平台和 Mog 业务验收均未执行。
 
 ### OCR-CONTENT-LAYERING-001 / Issue #296（候选源码；未进入共享运行）
 

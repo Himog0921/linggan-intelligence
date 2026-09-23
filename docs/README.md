@@ -1,7 +1,7 @@
 # 文档总索引
 
 > 状态: 权威当前
-> 最后核对: 2026-09-16
+> 最后核对: 2026-09-23
 > 适用范围: 全仓库文档导航、权威状态与渐进式披露
 > 事实来源: 当前 Git 文件树、`AGENTS.md` 与文档状态头
 > 冲突时以谁为准: `AGENTS.md` 和真实代码、合同、测试、运行结果
@@ -19,6 +19,7 @@
 
 | 文档 | 状态 | 用途 |
 |---|---|---|
+| [plans/active/domain-unification-001.md](plans/active/domain-unification-001.md) | 活跃计划；实施待 root 同步 Issue #130 | 多个正式 Domain 平权、Domain–Target role、统一 Material/Comment/Media、Comment Study 领域化、领域管理与开发期旧 cross 模型清理的唯一推进文件 |
 | [plans/active/account-observation-bootstrap-002.md](plans/active/account-observation-bootstrap-002.md) | 活跃计划 | Issue #218：新安装插件的首单软准入、账号观察启动、人工绑定审计与无秘密配置诊断 |
 | [plans/active/detail-page-session-replay-safety-001.md](plans/active/detail-page-session-replay-safety-001.md) | 活跃计划；受保护工作树 | 同一 Work Order/内容详情页的单次导航授权、浏览器持久消费闸门、缓存缺失 fail-closed 与既得数据重传边界 |
 | [plans/active/collection-upgrade-001.md](plans/active/collection-upgrade-001.md) | 活跃计划；受保护工作树 | Mog 交付包：缺输入止转、跨工单重试预算、交付恢复、统一材料完成判据与运行诊断的 S0–S6 对照表 |
