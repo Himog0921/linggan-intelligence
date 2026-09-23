@@ -273,6 +273,7 @@ migrate() {
   apply_migration_once "0099_collection_selector_health" "$project_root/database/migrations/0099_collection_selector_health.sql"
   apply_migration_once "0100_collection_hot_path_indexes" "$project_root/database/migrations/0100_collection_hot_path_indexes.sql"
   apply_migration_once "0101_collection_command_reason_vocabulary" "$project_root/database/migrations/0101_collection_command_reason_vocabulary.sql"
+  apply_migration_once "0102_cross_industry_creator_directory" "$project_root/database/migrations/0102_cross_industry_creator_directory.sql"
 }
 
 case "$command_name" in

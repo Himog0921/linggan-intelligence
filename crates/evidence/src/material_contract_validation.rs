@@ -74,14 +74,18 @@ pub(crate) fn record_disposition(
             if record.get("kind").and_then(Value::as_str) != Some(expected_kind) {
                 return Some(("retained_uninterpreted", "typed_discovery_kind_unsupported"));
             }
-            Some(if source_is(package, record, "content") {
-                (
-                    "accepted_for_library_discovery",
-                    "typed_discovery_identity_valid",
-                )
-            } else {
-                (quarantined, "typed_discovery_identity_invalid")
-            })
+            Some(
+                if source_is(package, record, "content")
+                    && discovery_payload_identity_matches_source(record)
+                {
+                    (
+                        "accepted_for_library_discovery",
+                        "typed_discovery_identity_valid",
+                    )
+                } else {
+                    (quarantined, "typed_discovery_identity_invalid")
+                },
+            )
         }
         "content_detail" => Some(if content_record_valid(package, record) {
             (accepted, "typed_detail_identity_valid")
@@ -226,6 +230,26 @@ fn source_external_id(record: &Value) -> Option<&str> {
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
+}
+
+/// `sourceObject` 是 Producer 合同里的规范对象身份。平台 payload 会重复携带 noteId / id，
+/// 它只能用于交叉校验，不能反过来覆盖规范身份；任意一个已出现的副本不一致都隔离整条记录。
+fn discovery_payload_identity_matches_source(record: &Value) -> bool {
+    let Some(source_external_id) = source_external_id(record) else {
+        return false;
+    };
+    let Some(payload) = record.get("payload").and_then(Value::as_object) else {
+        return true;
+    };
+    ["noteId", "contentId", "id"]
+        .iter()
+        .all(|key| match payload.get(*key) {
+            None | Some(Value::Null) => true,
+            Some(value) => value
+                .as_str()
+                .map(str::trim)
+                .is_some_and(|identity| !identity.is_empty() && identity == source_external_id),
+        })
 }
 
 fn target_string<'a>(package: &'a ProducerCapturePackage, field: &str) -> Option<&'a str> {

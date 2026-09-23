@@ -2664,9 +2664,15 @@ async fn collection_targets(
     };
     let creator_catalog = match drawer_target.as_ref().ok().and_then(Option::as_ref) {
         Some(target) if target.target_kind == "creator" => {
-            read_creator_directory(database, target.target_ref)
-                .await
-                .ok()
+            if target_is_cross_industry(database, target.target_ref).await {
+                linggan_evidence::read_cross_industry_creator_directory(database, target.target_ref)
+                    .await
+                    .ok()
+            } else {
+                read_creator_directory(database, target.target_ref)
+                    .await
+                    .ok()
+            }
         }
         _ => None,
     };

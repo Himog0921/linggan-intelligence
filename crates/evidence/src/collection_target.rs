@@ -808,8 +808,7 @@ pub async fn read_target_deletion_preview(
                  JOIN linggan_material_content_detail d \
                    ON d.content_public_ref=a.content_public_ref \
                  WHERE a.author_external_id=target.identity_key AND a.platform=target.platform), \
-                (SELECT count(*) FROM cross_industry_sample s \
-                 WHERE s.target_ref=target.target_ref), \
+                0::bigint, \
                 (SELECT count(*) FROM collection_material_retirement retirement \
                  WHERE retirement.target_ref=target.target_ref) \
          FROM collection_observation_target target WHERE target.target_ref=$1",
@@ -832,6 +831,9 @@ pub async fn read_target_deletion_preview(
         material_retirements: row.10,
     });
     if let Some(preview) = preview.as_mut() {
+        let mut connection = database.pool().acquire().await?;
+        preview.blocking_cross_industry_samples =
+            protected_cross_industry_sample_count(&mut connection, target_ref).await?;
         let risk_schema_ready: bool = sqlx::query_scalar(
             "SELECT to_regclass('collection_installation_risk_signal') IS NOT NULL \
                   AND to_regclass('collection_detail_page_session') IS NOT NULL",
@@ -857,6 +859,39 @@ pub async fn read_target_deletion_preview(
         }
     }
     Ok(preview)
+}
+
+const PROTECTED_CROSS_INDUSTRY_SAMPLE_COUNT_SQL: &str = "SELECT count(*) FROM ( \
+       SELECT sample_ref FROM cross_industry_sample WHERE target_ref=$1 \
+       UNION \
+       SELECT seen.sample_ref \
+       FROM cross_industry_creator_sample_observation seen \
+       JOIN linggan_runtime_capture_package package USING(package_ref) \
+       JOIN collection_work_order_lease_task lease_task ON lease_task.task_id=package.task_id \
+       JOIN collection_work_order_lease lease USING(lease_ref) \
+       JOIN collection_work_order work_order USING(work_order_ref) \
+       WHERE work_order.target_ref=$1 \
+     ) protected_cross_industry_fact";
+
+/// 删除预览与实际删除共用这一句：前端看到的阻断数必须就是提交时采用的阻断数。
+async fn protected_cross_industry_sample_count(
+    connection: &mut sqlx::PgConnection,
+    target_ref: Uuid,
+) -> Result<i64, sqlx::Error> {
+    let creator_observation_ready: bool = sqlx::query_scalar(
+        "SELECT to_regclass('cross_industry_creator_sample_observation') IS NOT NULL",
+    )
+    .fetch_one(&mut *connection)
+    .await?;
+    let sql = if creator_observation_ready {
+        PROTECTED_CROSS_INDUSTRY_SAMPLE_COUNT_SQL
+    } else {
+        "SELECT count(*) FROM cross_industry_sample WHERE target_ref=$1"
+    };
+    sqlx::query_scalar(sql)
+        .bind(target_ref)
+        .fetch_one(&mut *connection)
+        .await
 }
 
 /// 删除的结果。「删不了」与「没找到」是两件事，不能都报成失败。
@@ -912,11 +947,7 @@ pub async fn delete_observation_target(
         )
         .fetch_one(&mut *tx)
         .await?;
-    let mut blocking: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM cross_industry_sample WHERE target_ref=$1")
-            .bind(target_ref)
-            .fetch_one(&mut *tx)
-            .await?;
+    let mut blocking = protected_cross_industry_sample_count(&mut *tx, target_ref).await?;
     if risk_signal_ready {
         blocking += sqlx::query_scalar::<_, i64>(
             "SELECT count(*) FROM collection_installation_risk_signal signal \
