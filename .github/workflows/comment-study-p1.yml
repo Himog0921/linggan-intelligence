@@ -44,7 +44,13 @@ jobs:
         run: cargo +stable check -p linggan-intelligence -p linggan-api --locked
       - name: Unit tests
         run: cargo +stable test -p linggan-intelligence -p linggan-api --locked
+      - name: Install isolated browser test runtime
+        run: |
+          python3 -m pip install --break-system-packages playwright==1.57.0
+          python3 -m playwright install --with-deps chromium
       - name: Isolated synthetic PostgreSQL proofs
+        env:
+          P1_BROWSER_PROOF: '1'
         run: bash scripts/test-comment-study-productization-postgres.sh
       - name: Frontend behavior tests when present
         shell: bash
