@@ -224,8 +224,9 @@ pub use station_read::{
 pub use step_report::{StepFailure, StepOutcome, StepReport};
 pub use target_catalog::{
     CatalogDetailState, CatalogSource, CatalogWork, CreatorDirectoryProjection,
-    KeywordCatalogCounts, KeywordHitProjection, read_creator_directory, read_cross_industry_hits,
-    read_keyword_catalog_counts, read_keyword_hits,
+    KeywordCatalogCounts, KeywordHitProjection, read_creator_directory,
+    read_cross_industry_creator_directory, read_cross_industry_hits, read_keyword_catalog_counts,
+    read_keyword_hits,
 };
 pub use target_enrichment::{
     TargetEnrichmentError, TargetSyncOutcome, sync_target_from_author_profile,

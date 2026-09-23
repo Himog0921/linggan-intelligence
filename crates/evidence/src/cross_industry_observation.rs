@@ -67,6 +67,51 @@ pub(crate) async fn record_sample_observation(
     Ok(())
 }
 
+/// 记下「这篇作品是从这个创作者主页发现的」。
+///
+/// 目标不复制进关系行：沿 Package → Lease Task → Lease → WorkOrder 可以唯一回到目标。
+/// 这里保存的只是那条已接纳 record 与样本之间的追加式联系。关键词榜单仍使用上面的
+/// `cross_industry_sample_observation`，两种来源不会靠假默认值混成一张表。
+pub(crate) async fn record_creator_sample_observation(
+    tx: &mut Transaction<'_, Postgres>,
+    package: &ProducerCapturePackage,
+    sample_ref: Uuid,
+    domain_ref: Uuid,
+    record_ordinal: i32,
+    discovery_order: Option<i32>,
+) -> Result<(), ProducerRuntimeError> {
+    if package.package_kind() != "profile_discovery" {
+        return Ok(());
+    }
+    let schema_ready: bool = sqlx::query_scalar(
+        "SELECT to_regclass('cross_industry_creator_sample_observation') IS NOT NULL",
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
+    if !schema_ready {
+        return Ok(());
+    }
+    sqlx::query(
+        "INSERT INTO cross_industry_creator_sample_observation \
+             (observation_ref,sample_ref,domain_ref,package_ref,record_ordinal, \
+              discovery_order,observed_at) \
+         VALUES ($1,$2,$3,$4,$5,$6,$7) \
+         ON CONFLICT DO NOTHING",
+    )
+    .bind(Uuid::new_v4())
+    .bind(sample_ref)
+    .bind(domain_ref)
+    .bind(package.package_ref())
+    .bind(record_ordinal)
+    .bind(discovery_order)
+    .bind(package.observed_at())
+    .execute(&mut **tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
+    Ok(())
+}
+
 /// 这一次观察读到的东西。与样本行上的「当前最好的一份事实」分开：**「这篇现在有多少赞」
 /// 与「上周五看到它时有多少赞」是两个事实，后者推不出前者，也不该被前者覆盖。**
 pub(crate) struct ObservationReading {

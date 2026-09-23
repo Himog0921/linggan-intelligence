@@ -167,13 +167,6 @@ impl<'scope> DeepeningScope<'scope> {
         cross_industry: &[],
     };
 
-    fn material(material: &'scope [MaterialDeepeningTarget]) -> Self {
-        Self {
-            material,
-            cross_industry: &[],
-        }
-    }
-
     fn is_empty(&self) -> bool {
         self.material.is_empty() && self.cross_industry.is_empty()
     }
@@ -532,6 +525,7 @@ async fn request_progressive_archive_inner(
                 target_ref,
                 "deep_archive",
                 &[],
+                &[],
             )
             .await?;
             Some(
@@ -598,33 +592,60 @@ pub async fn request_creator_directory_gaps(
     if kind.as_deref() != Some("creator") {
         return Err(AcquisitionChainError::UnknownTarget);
     }
-    let gaps: Vec<(Uuid, bool)> = sqlx::query_as(concat!(
-        "WITH ", crate::archive_ledger::directory_works_sql!("target.target_ref=$1", "true"),
-        r#" SELECT content_public_ref, EXISTS (
-            SELECT 1 FROM collection_work_order scoped_order
-            JOIN collection_work_order_material_target scope USING(work_order_ref)
-            LEFT JOIN collection_work_order_lease lease USING(work_order_ref)
-            WHERE scoped_order.target_ref=$1
-              AND scope.content_public_ref=directory_work.content_public_ref
-              AND (scoped_order.queue_state='queued'
-                   OR (lease.released_at IS NULL AND lease.expires_at>scope_001_now()))) AS in_flight
-          FROM directory_work WHERE NOT has_detail AND NOT is_retired
-          ORDER BY content_public_ref"#,
-    ))
-    .bind(target_ref)
-    .fetch_all(&mut *transaction)
-    .await?;
+    let cross_industry =
+        target_uses_cross_industry_directory_in_transaction(&mut transaction, target_ref).await?;
+    let gaps: Vec<(Uuid, bool)> = if cross_industry {
+        sqlx::query_as(concat!(
+            "WITH ",
+            crate::archive_ledger::cross_industry_creator_directory_sql!(
+                "target.target_ref=$1",
+                "true"
+            ),
+            " SELECT directory.sample_ref,EXISTS ( \
+                 SELECT 1 FROM collection_work_order scoped_order \
+                 JOIN collection_work_order_cross_industry_target scope USING(work_order_ref) \
+                 LEFT JOIN collection_work_order_lease lease USING(work_order_ref) \
+                 WHERE scoped_order.target_ref=$1 \
+                   AND scope.sample_ref=directory.sample_ref \
+                   AND (scoped_order.queue_state='queued' \
+                        OR (lease.released_at IS NULL \
+                            AND lease.expires_at>scope_001_now()))) AS in_flight \
+              FROM cross_directory_work directory \
+              WHERE NOT directory.has_detail \
+              ORDER BY directory.sample_ref"
+        ))
+        .bind(target_ref)
+        .fetch_all(&mut *transaction)
+        .await?
+    } else {
+        sqlx::query_as(concat!(
+            "WITH ", crate::archive_ledger::directory_works_sql!("target.target_ref=$1", "true"),
+            r#" SELECT content_public_ref, EXISTS (
+                SELECT 1 FROM collection_work_order scoped_order
+                JOIN collection_work_order_material_target scope USING(work_order_ref)
+                LEFT JOIN collection_work_order_lease lease USING(work_order_ref)
+                WHERE scoped_order.target_ref=$1
+                  AND scope.content_public_ref=directory_work.content_public_ref
+                  AND (scoped_order.queue_state='queued'
+                       OR (lease.released_at IS NULL AND lease.expires_at>scope_001_now()))) AS in_flight
+              FROM directory_work WHERE NOT has_detail AND NOT is_retired
+              ORDER BY content_public_ref"#,
+        ))
+        .bind(target_ref)
+        .fetch_all(&mut *transaction)
+        .await?
+    };
     if gaps.is_empty() {
         return Err(AcquisitionChainError::ProgressiveArchiveNotReady {
             reason: "no_missing_accepted_work",
         });
     }
     let materials: Vec<MaterialDeepeningTarget> = gaps
-        .into_iter()
+        .iter()
         .filter(|(_, in_flight)| !in_flight)
         .take(200)
         .map(|(content_public_ref, _)| MaterialDeepeningTarget {
-            content_public_ref,
+            content_public_ref: *content_public_ref,
             comment_limit: 30,
             reply_expand_limit: 2,
             acquire_media: true,
@@ -632,19 +653,38 @@ pub async fn request_creator_directory_gaps(
             allow_asr: true,
         })
         .collect();
-    if materials.is_empty() {
+    let cross_industry_targets: Vec<CrossIndustryDeepeningTarget> = gaps
+        .iter()
+        .filter(|(_, in_flight)| !in_flight)
+        .take(200)
+        .map(|(sample_ref, _)| CrossIndustryDeepeningTarget {
+            sample_ref: *sample_ref,
+            comment_limit: DETAIL_WINDOW_COMMENT_LIMIT,
+            reply_expand_limit: DETAIL_WINDOW_REPLY_EXPAND_LIMIT,
+        })
+        .collect();
+    if (!cross_industry && materials.is_empty())
+        || (cross_industry && cross_industry_targets.is_empty())
+    {
         return Err(AcquisitionChainError::ProgressiveArchiveNotReady {
             reason: "detail_batch_in_flight",
         });
     }
-    let outcome = request_and_admit_in_transaction(
+    let outcome = request_and_admit_in_transaction_scoped(
         &mut transaction,
         target_ref,
         "deep_archive",
         purpose,
         requested_by,
-        &materials,
+        if cross_industry { &[] } else { &materials },
+        if cross_industry {
+            &cross_industry_targets
+        } else {
+            &[]
+        },
         None,
+        None,
+        false,
     )
     .await?;
     transaction.commit().await?;
@@ -715,6 +755,7 @@ async fn request_admit_and_lease_inner(
             target_ref,
             lane,
             material_targets,
+            &[],
         )
         .await?;
         Some(
@@ -968,7 +1009,7 @@ pub(crate) async fn request_and_admit_in_transaction_scoped(
                 "pending_decision" | "archiving" | "archived" | "monitoring" | "paused"
             )
         }
-        "deep_archive" if !material_targets.is_empty() => matches!(
+        "deep_archive" if !scope.is_empty() => matches!(
             lifecycle_state.as_str(),
             "archiving" | "archived" | "monitoring" | "paused"
         ),
@@ -1113,19 +1154,20 @@ pub(crate) async fn request_and_admit_in_transaction_scoped(
         // 工单写下的就是这一次要执行的输入，所以输入冻结在这里发生：停过而输入真的变了的
         // 对象，在这里把当前资格交还给它（同一个 epoch 的当前行就地更新，并指回停过的那一行）。
         // 返回值不入调用方契约——「这一次为什么又能跑了」的可追溯性住在台账行上，不靠一个计数转述。
-        let _reconciled = crate::execution_input_eligibility::open_successors_for_reopened_inputs_in_transaction(
-            &mut *transaction,
-            target_ref,
-            &material_targets
-                .iter()
-                .map(|target| target.content_public_ref)
-                .collect::<Vec<_>>(),
-            &cross_industry_samples
-                .iter()
-                .map(|target| target.sample_ref)
-                .collect::<Vec<_>>(),
-        )
-        .await?;
+        let _reconciled =
+            crate::execution_input_eligibility::open_successors_for_reopened_inputs_in_transaction(
+                &mut *transaction,
+                target_ref,
+                &material_targets
+                    .iter()
+                    .map(|target| target.content_public_ref)
+                    .collect::<Vec<_>>(),
+                &cross_industry_samples
+                    .iter()
+                    .map(|target| target.sample_ref)
+                    .collect::<Vec<_>>(),
+            )
+            .await?;
         Some(work_order_ref)
     } else {
         None
@@ -1672,6 +1714,7 @@ async fn assign_current_capacity_to_queued_work_order(
     target_ref: Uuid,
     lane: &str,
     material_targets: &[MaterialDeepeningTarget],
+    cross_industry_samples: &[CrossIndustryDeepeningTarget],
 ) -> Result<(), LeaseError> {
     let (platform, target_kind): (String, String) = sqlx::query_as(
         "SELECT platform,target_kind FROM collection_observation_target WHERE target_ref=$1",
@@ -1685,7 +1728,10 @@ async fn assign_current_capacity_to_queued_work_order(
         &target_kind,
         lane,
         Some(target_ref),
-        DeepeningScope::material(material_targets),
+        DeepeningScope {
+            material: material_targets,
+            cross_industry: cross_industry_samples,
+        },
     )
     .await?;
     let (Some(station_ref), Some(installation_ref)) =
@@ -2269,6 +2315,87 @@ const MISSING_DETAIL_CANDIDATE_SQL: &str = "SELECT current_directory.content_pub
 const MISSING_DETAIL_COUNT_SQL: &str = "SELECT count(*)::bigint FROM current_directory \
      WHERE /*missing_detail*/";
 
+/// 跨行业创作者的规范目录与本领域目录同义，但材料侧完全分开。主页关系钉在已接纳
+/// profile_discovery record 上；详情完成事实钉在 `cross_industry_sample_detail` 上。
+const CROSS_INDUSTRY_CANONICAL_DIRECTORY_CTE: &str = concat!(
+    "WITH canonical_directory_package AS ( \
+     SELECT package.package_ref,package.accepted_at \
+     FROM collection_work_order root_order \
+     JOIN collection_work_order_lease lease USING(work_order_ref) \
+     JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
+     JOIN linggan_runtime_task task ON task.task_id=lease_task.task_id \
+     JOIN linggan_runtime_capture_package package ON package.task_id=task.task_id \
+     JOIN linggan_runtime_submission_receipt receipt USING(package_ref) \
+     CROSS JOIN LATERAL jsonb_array_elements( \
+       CASE WHEN jsonb_typeof(package.coverage->'layers')='array' \
+            THEN package.coverage->'layers' ELSE '[]'::jsonb END) layer \
+     WHERE root_order.target_ref=$1 AND root_order.work_order_ref=$2 \
+       AND package.package_kind='profile_discovery' \
+       AND receipt.execution_effect='COMPLETED_LIVE_STEP' \
+       AND receipt.material_admission='ACCEPTED' \
+       AND layer->>'capability'='profile_discovery' \
+       AND ",
+    crate::directory_boundary::directory_proven_sql!(),
+    " \
+       AND NOT EXISTS (SELECT 1 FROM linggan_runtime_record_disposition disposition \
+                       WHERE disposition.package_ref=package.package_ref \
+                         AND disposition.disposition='quarantined') \
+       AND (SELECT count(*) FROM linggan_runtime_record_disposition disposition \
+            WHERE disposition.package_ref=package.package_ref \
+              AND disposition.disposition='accepted_for_library_discovery') \
+           =COALESCE((layer->>'acquired')::integer,-1) \
+     ORDER BY package.accepted_at DESC,package.package_ref DESC LIMIT 1 \
+ ), canonical_directory AS ( \
+     SELECT seen.sample_ref,directory.accepted_at AS first_seen \
+     FROM canonical_directory_package directory \
+     JOIN cross_industry_creator_sample_observation seen USING(package_ref) \
+ ), current_directory AS ( \
+     SELECT directory.sample_ref,directory.first_seen,sample.content_external_id \
+     FROM canonical_directory directory \
+     JOIN cross_industry_sample sample USING(sample_ref) \
+ ) "
+);
+
+const CROSS_INDUSTRY_MISSING_DETAIL_PREDICATE: &str = "NOT EXISTS (SELECT 1 FROM cross_industry_sample_detail obtained \
+                 WHERE obtained.sample_ref=current_directory.sample_ref)";
+
+const CROSS_INDUSTRY_MISSING_DETAIL_CANDIDATE_SQL: &str = "SELECT current_directory.sample_ref FROM current_directory \
+     WHERE /*missing_detail*/ \
+       AND /*executable*/ \
+       AND NOT /*already_stopped*/ \
+       AND NOT EXISTS ( \
+         SELECT 1 FROM collection_work_order scoped_order \
+         JOIN collection_work_order_cross_industry_target scope USING(work_order_ref) \
+         LEFT JOIN collection_work_order_lease scoped_lease USING(work_order_ref) \
+         WHERE scoped_order.target_ref=$1 \
+           AND scope.sample_ref=current_directory.sample_ref \
+           AND (scoped_order.queue_state='queued' \
+                OR (scoped_lease.released_at IS NULL \
+                    AND scoped_lease.expires_at>scope_001_now()))) \
+       AND NOT EXISTS ( \
+         SELECT 1 FROM collection_work_order unavailable_order \
+         JOIN collection_work_order_cross_industry_target unavailable_scope \
+           ON unavailable_scope.work_order_ref=unavailable_order.work_order_ref \
+         JOIN cross_industry_sample unavailable_sample \
+           ON unavailable_sample.sample_ref=unavailable_scope.sample_ref \
+         JOIN collection_work_order_lease unavailable_lease \
+           ON unavailable_lease.work_order_ref=unavailable_order.work_order_ref \
+         JOIN collection_work_order_lease_task unavailable_task \
+           ON unavailable_task.lease_ref=unavailable_lease.lease_ref \
+         JOIN linggan_runtime_task unavailable_runtime \
+           ON unavailable_runtime.task_id=unavailable_task.task_id \
+         WHERE unavailable_order.target_ref=$1 \
+           AND unavailable_sample.sample_ref=current_directory.sample_ref \
+           AND unavailable_task.execution_state IN ('unavailable','blocked') \
+           AND unavailable_runtime.task_spec #>> '{target,contentExternalId}' \
+               =unavailable_sample.content_external_id) \
+       AND NOT /*budget_blocked*/ \
+     ORDER BY current_directory.first_seen,current_directory.sample_ref \
+     LIMIT $3";
+
+const CROSS_INDUSTRY_MISSING_DETAIL_COUNT_SQL: &str =
+    "SELECT count(*)::bigint FROM current_directory WHERE /*missing_detail*/";
+
 /// 目录里还欠着多少篇详情。
 ///
 /// 方向与候选查询一致：**预算用尽、被判定读不出来的成员照样算「欠着」**——停止的是重试，
@@ -2288,6 +2415,89 @@ async fn missing_detail_count_in_transaction(
     .await
 }
 
+async fn target_uses_cross_industry_directory_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    target_ref: Uuid,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT COALESCE(domain.is_own_domain,true)=false \
+         FROM collection_observation_target target \
+         LEFT JOIN observation_domain domain USING(domain_ref) \
+         WHERE target.target_ref=$1",
+    )
+    .bind(target_ref)
+    .fetch_one(&mut **transaction)
+    .await
+}
+
+async fn cross_industry_missing_detail_candidates_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    target_ref: Uuid,
+    root_work_order_ref: Uuid,
+) -> Result<Vec<Uuid>, sqlx::Error> {
+    sqlx::query_scalar(sqlx::AssertSqlSafe(
+        format!(
+            "{CROSS_INDUSTRY_CANONICAL_DIRECTORY_CTE}{CROSS_INDUSTRY_MISSING_DETAIL_CANDIDATE_SQL}"
+        )
+        .replace(
+            "/*missing_detail*/",
+            CROSS_INDUSTRY_MISSING_DETAIL_PREDICATE,
+        )
+        .replace(
+            "/*executable*/",
+            &crate::execution_input_eligibility::has_executable_locator_predicate(
+                "current_directory.content_external_id",
+                true,
+            ),
+        )
+        .replace(
+            "/*already_stopped*/",
+            &crate::execution_input_eligibility::unchanged_input_block_predicate(
+                "$1",
+                "cross_industry",
+                "cross_industry_sample",
+                "current_directory.sample_ref",
+                "current_directory.content_external_id",
+                true,
+            ),
+        )
+        .replace(
+            "/*budget_blocked*/",
+            &crate::execution_input_eligibility::budget_blocks_new_work_predicate(
+                "$1",
+                "cross_industry",
+                "cross_industry_sample",
+                "current_directory.sample_ref",
+            ),
+        ),
+    ))
+    .bind(target_ref)
+    .bind(root_work_order_ref)
+    .bind(PROGRESSIVE_ARCHIVE_BATCH_SIZE)
+    .fetch_all(&mut **transaction)
+    .await
+}
+
+async fn cross_industry_missing_detail_count_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    target_ref: Uuid,
+    root_work_order_ref: Uuid,
+) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar(sqlx::AssertSqlSafe(
+        format!(
+            "{CROSS_INDUSTRY_CANONICAL_DIRECTORY_CTE}{CROSS_INDUSTRY_MISSING_DETAIL_COUNT_SQL}"
+        )
+        .replace(
+            "/*missing_detail*/",
+            CROSS_INDUSTRY_MISSING_DETAIL_PREDICATE,
+        ),
+    ))
+    .bind(target_ref)
+    .bind(root_work_order_ref)
+    .fetch_one(&mut **transaction)
+    .await
+}
+
 async fn advance_progressive_archive_in_transaction(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     target_ref: Uuid,
@@ -2299,46 +2509,65 @@ async fn advance_progressive_archive_in_transaction(
     valid_for_minutes: i32,
     issue_lease: bool,
 ) -> Result<ProgressiveAdvance, RequestLeaseError> {
+    let cross_industry =
+        target_uses_cross_industry_directory_in_transaction(transaction, target_ref)
+            .await
+            .map_err(AcquisitionChainError::from)?;
     // 几条判据是运行时拼出来的（有的要带上这一侧的表达式，有的两边共用同一份字面量），
     // 所以 SQL 里留整词占位符在这里替换——SQL 自己的花括号不参与，替换键不会误伤它们。
-    let content_refs: Vec<Uuid> = sqlx::query_scalar(sqlx::AssertSqlSafe(
-        format!("{CANONICAL_DIRECTORY_CTE}{MISSING_DETAIL_CANDIDATE_SQL}")
-            .replace("/*missing_detail*/", MISSING_DETAIL_PREDICATE)
-            .replace(
-                "/*executable*/",
-                &crate::execution_input_eligibility::has_executable_locator_predicate(
-                    "current_directory.content_external_id",
-                    false,
+    let content_refs: Vec<Uuid> = if cross_industry {
+        Vec::new()
+    } else {
+        sqlx::query_scalar(sqlx::AssertSqlSafe(
+            format!("{CANONICAL_DIRECTORY_CTE}{MISSING_DETAIL_CANDIDATE_SQL}")
+                .replace("/*missing_detail*/", MISSING_DETAIL_PREDICATE)
+                .replace(
+                    "/*executable*/",
+                    &crate::execution_input_eligibility::has_executable_locator_predicate(
+                        "current_directory.content_external_id",
+                        false,
+                    ),
+                )
+                .replace(
+                    "/*already_stopped*/",
+                    &crate::execution_input_eligibility::unchanged_input_block_predicate(
+                        "$1",
+                        "own_domain",
+                        "material_content",
+                        "current_directory.content_public_ref",
+                        "current_directory.content_external_id",
+                        false,
+                    ),
+                )
+                .replace(
+                    "/*budget_blocked*/",
+                    &crate::execution_input_eligibility::budget_blocks_new_work_predicate(
+                        "$1",
+                        "own_domain",
+                        "material_content",
+                        "current_directory.content_public_ref",
+                    ),
                 ),
-            )
-            .replace(
-                "/*already_stopped*/",
-                &crate::execution_input_eligibility::unchanged_input_block_predicate(
-                    "$1",
-                    "own_domain",
-                    "material_content",
-                    "current_directory.content_public_ref",
-                    "current_directory.content_external_id",
-                    false,
-                ),
-            )
-            .replace(
-                "/*budget_blocked*/",
-                &crate::execution_input_eligibility::budget_blocks_new_work_predicate(
-                    "$1",
-                    "own_domain",
-                    "material_content",
-                    "current_directory.content_public_ref",
-                ),
-            ),
-    ))
-    .bind(target_ref)
-    .bind(root_work_order_ref)
-    .bind(PROGRESSIVE_ARCHIVE_BATCH_SIZE)
-    .fetch_all(&mut **transaction)
-    .await
-    .map_err(AcquisitionChainError::from)?;
-    if content_refs.is_empty() {
+        ))
+        .bind(target_ref)
+        .bind(root_work_order_ref)
+        .bind(PROGRESSIVE_ARCHIVE_BATCH_SIZE)
+        .fetch_all(&mut **transaction)
+        .await
+        .map_err(AcquisitionChainError::from)?
+    };
+    let sample_refs = if cross_industry {
+        cross_industry_missing_detail_candidates_in_transaction(
+            transaction,
+            target_ref,
+            root_work_order_ref,
+        )
+        .await
+        .map_err(AcquisitionChainError::from)?
+    } else {
+        Vec::new()
+    };
+    if content_refs.is_empty() && sample_refs.is_empty() {
         // 「一篇都挑不出来」有三种完全不同的原因，必须分开告诉用户。
         //
         // 候选查询同时排除了「已经有详情的」「已经在别的批次里在途的」「已经被判定读不出来
@@ -2349,9 +2578,12 @@ async fn advance_progressive_archive_in_transaction(
         let in_flight: bool = sqlx::query_scalar(
             "SELECT EXISTS ( \
                  SELECT 1 FROM collection_work_order work_order \
-                 JOIN collection_work_order_material_target scope USING (work_order_ref) \
+                 LEFT JOIN collection_work_order_material_target material_scope USING(work_order_ref) \
+                 LEFT JOIN collection_work_order_cross_industry_target cross_scope USING(work_order_ref) \
                  LEFT JOIN collection_work_order_lease lease USING (work_order_ref) \
                  WHERE work_order.target_ref=$1 \
+                   AND (material_scope.content_public_ref IS NOT NULL \
+                        OR cross_scope.sample_ref IS NOT NULL) \
                    AND (work_order.queue_state='queued' \
                         OR (lease.released_at IS NULL \
                             AND lease.expires_at>scope_001_now())))",
@@ -2367,10 +2599,19 @@ async fn advance_progressive_archive_in_transaction(
         // 「已判定读不出来」上，等的是人的处置，不是下一次 tick。**这时候不能把根收口**——
         // 收口意味着这份基线被说成完整，而它不完整；更重的是收口后的根不会再被自动续跑
         // （活根查询只认 `status='active'`），欠着的那几条详情就永远等不到下一次机会。
-        let missing =
+        let missing = if cross_industry {
+            cross_industry_missing_detail_count_in_transaction(
+                transaction,
+                target_ref,
+                root_work_order_ref,
+            )
+            .await
+            .map_err(AcquisitionChainError::from)?
+        } else {
             missing_detail_count_in_transaction(transaction, target_ref, root_work_order_ref)
                 .await
-                .map_err(AcquisitionChainError::from)?;
+                .map_err(AcquisitionChainError::from)?
+        };
         if missing > 0 {
             return Ok(ProgressiveAdvance::Skipped("detail_gap_not_schedulable"));
         }
@@ -2390,17 +2631,41 @@ async fn advance_progressive_archive_in_transaction(
             allow_asr: true,
         })
         .collect::<Vec<_>>();
-    let request = request_and_admit_in_transaction_with_progressive_resume(
-        transaction,
-        target_ref,
-        "deep_archive",
-        purpose,
-        requested_by,
-        &material_targets,
-        Some(authorization_ref),
-        true,
-    )
-    .await?;
+    let cross_industry_targets = sample_refs
+        .iter()
+        .map(|sample_ref| CrossIndustryDeepeningTarget {
+            sample_ref: *sample_ref,
+            comment_limit: DETAIL_WINDOW_COMMENT_LIMIT,
+            reply_expand_limit: DETAIL_WINDOW_REPLY_EXPAND_LIMIT,
+        })
+        .collect::<Vec<_>>();
+    let request = if cross_industry {
+        request_and_admit_in_transaction_scoped(
+            transaction,
+            target_ref,
+            "deep_archive",
+            purpose,
+            requested_by,
+            &[],
+            &cross_industry_targets,
+            Some(authorization_ref),
+            None,
+            true,
+        )
+        .await?
+    } else {
+        request_and_admit_in_transaction_with_progressive_resume(
+            transaction,
+            target_ref,
+            "deep_archive",
+            purpose,
+            requested_by,
+            &material_targets,
+            Some(authorization_ref),
+            true,
+        )
+        .await?
+    };
     let Some(work_order_ref) = request.work_order_ref else {
         return Ok(ProgressiveAdvance::Outcome(RequestLeaseOutcome {
             request,
@@ -2411,7 +2676,7 @@ async fn advance_progressive_archive_in_transaction(
         transaction,
         work_order_ref,
         root_work_order_ref,
-        i32::try_from(content_refs.len()).unwrap_or(i32::MAX),
+        i32::try_from(content_refs.len() + sample_refs.len()).unwrap_or(i32::MAX),
     )
     .await
     .map_err(AcquisitionChainError::from)?;
@@ -2422,6 +2687,7 @@ async fn advance_progressive_archive_in_transaction(
             target_ref,
             "deep_archive",
             &material_targets,
+            &cross_industry_targets,
         )
         .await?;
         Some(

@@ -76,6 +76,98 @@ pub async fn read_creator_directory(
     Ok(Some(CreatorDirectoryProjection { works }))
 }
 
+/// 一个外部领域创作者的作品目录。
+///
+/// 创作者主页发现没有关键词和榜单排序，不能借用关键词观察表。目录范围来自
+/// `cross_industry_creator_sample_observation`，每一行都由 Package 血缘回到当前目标；样本
+/// 事实和详情仍分别住在跨行业自己的表中，不穿过 `0044` 的隔离边界。
+pub async fn read_cross_industry_creator_directory(
+    database: &Database,
+    target_ref: Uuid,
+) -> Result<Option<CreatorDirectoryProjection>, sqlx::Error> {
+    let schema_ready: bool = sqlx::query_scalar(
+        "SELECT to_regclass('cross_industry_creator_sample_observation') IS NOT NULL \
+              AND to_regclass('cross_industry_sample_detail') IS NOT NULL",
+    )
+    .fetch_one(database.pool())
+    .await?;
+    if !schema_ready {
+        return Ok(None);
+    }
+    let target_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM collection_observation_target \
+                        WHERE target_ref=$1 AND target_kind='creator')",
+    )
+    .bind(target_ref)
+    .fetch_one(database.pool())
+    .await?;
+    if !target_exists {
+        return Ok(None);
+    }
+    let rows = sqlx::query(concat!(
+        "WITH ",
+        crate::archive_ledger::cross_industry_creator_directory_sql!(
+            "target.target_ref=$1",
+            "true"
+        ),
+        " \
+         SELECT sample.sample_ref,sample.content_external_id,sample.title, \
+                (directory.discovery_order+1)::bigint AS match_position, \
+                linggan_human_moment(detail.published_at_source_text) AS published_on, \
+                directory.lane,detail.detail_ref, \
+                (SELECT count(*)::bigint FROM cross_industry_comment comment \
+                  WHERE comment.sample_ref=sample.sample_ref) AS comment_count, \
+                linggan_human_moment(COALESCE(detail.observed_at,directory.observed_at)) \
+                    AS last_captured_at \
+         FROM cross_directory_work directory \
+         JOIN cross_industry_sample sample USING(sample_ref) \
+         LEFT JOIN LATERAL ( \
+             SELECT candidate.detail_ref,candidate.published_at_source_text,candidate.observed_at \
+             FROM cross_industry_sample_detail candidate \
+             WHERE candidate.sample_ref=sample.sample_ref \
+             ORDER BY candidate.created_at DESC,candidate.detail_ref DESC LIMIT 1 \
+         ) detail ON true \
+         ORDER BY sample.last_observed_at DESC,sample.sample_ref"
+    ))
+    .bind(target_ref)
+    .fetch_all(database.pool())
+    .await?;
+    let mut works = rows
+        .into_iter()
+        .map(|row| CatalogWork {
+            public_ref: row.get("sample_ref"),
+            content_external_id: row.get("content_external_id"),
+            title: row.get("title"),
+            creator_display_name: None,
+            match_position: row.get("match_position"),
+            published_at: row.get("published_on"),
+            source: if row.get::<String, _>("lane") == "patrol" {
+                CatalogSource::PatrolDiscovery
+            } else {
+                CatalogSource::InitialArchive
+            },
+            detail_state: if row.get::<Option<Uuid>, _>("detail_ref").is_some() {
+                CatalogDetailState::Complete
+            } else {
+                CatalogDetailState::Pending
+            },
+            execution_state: None,
+            media_state: "NOT_APPLICABLE",
+            comment_count: row.get("comment_count"),
+            last_captured_at: row.get("last_captured_at"),
+        })
+        .collect::<Vec<_>>();
+    stamp_material_execution_states(
+        database,
+        target_ref,
+        "cross_industry",
+        "cross_industry_sample",
+        &mut works,
+    )
+    .await?;
+    Ok(Some(CreatorDirectoryProjection { works }))
+}
+
 pub async fn read_keyword_hits(
     database: &Database,
     target_ref: Uuid,

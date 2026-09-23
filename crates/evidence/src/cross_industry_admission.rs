@@ -13,7 +13,9 @@
 //! （`CHECK (is_own_domain = true)` + 复合外键）：万一这里判错，写入会被数据库拒绝
 //! 而不是静默把参照物混进证据。**失败远好过污染。**
 
-use crate::cross_industry_observation::{ObservationReading, record_sample_observation};
+use crate::cross_industry_observation::{
+    ObservationReading, record_creator_sample_observation, record_sample_observation,
+};
 use crate::material_admission::{
     exact_nonnegative_count, exact_scalar_text, exact_string, known_state, observed_cover_url,
     target_string,
@@ -129,12 +131,14 @@ async fn insert_samples(
         let Some(payload) = record.get("payload").and_then(Value::as_object) else {
             continue;
         };
-        let Some(content_id) = exact_string(payload, "noteId")
-            .or_else(|| exact_string(payload, "contentId").or_else(|| exact_string(payload, "id")))
+        let Some(content_id) = record
+            .get("sourceObject")
+            .and_then(Value::as_object)
+            .and_then(|source| exact_string(source, "externalId"))
         else {
             continue;
         };
-        upsert_sample(
+        let sample_ref = upsert_sample(
             tx,
             package,
             domain,
@@ -148,6 +152,15 @@ async fn insert_samples(
             exact_nonnegative_count(payload, &["commentCount", "comments"]),
             signed_source_url(payload),
             sampling.as_ref(),
+            discovery_order(payload),
+        )
+        .await?;
+        record_creator_sample_observation(
+            tx,
+            package,
+            sample_ref,
+            domain.domain_ref,
+            i32::try_from(ordinal).expect("record count is bounded"),
             discovery_order(payload),
         )
         .await?;
