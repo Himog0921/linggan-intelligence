@@ -25,6 +25,9 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
+#[path = "comment_study_api.rs"]
+mod catalog_api;
+
 pub(super) fn routes() -> Router<LocalWebState> {
     Router::new()
         .route("/corpus/comments", get(page))
@@ -42,6 +45,7 @@ pub(super) fn routes() -> Router<LocalWebState> {
             "/api/local/comment-study/embedding-probe",
             post(run_embedding_probe),
         )
+        .merge(catalog_api::routes())
         .layer(middleware::from_fn(local_comment_study_guard))
 }
 

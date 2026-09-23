@@ -41,6 +41,39 @@ Mog 已授权继续开发，无需其手动建表。入手重新核对main=c74d7
 - 固定手册正文和T01–T54台账本轮不改；T05/T07/T45/T50/T51仅增加部分测试候选，不勾PASS；T52的ledger重放证明尚未实现。
 - 全仓库治理、运行入口注册、真实模型、浏览器、部署：NOT_RUN。无共享库副作用。
 
+## 2026-09-23 继续：评论目录、字面搜索与历史读取
+
+本轮重新核对 main=c74d72e3、PR head=b967970，继续同一授权和PR；没有新建任务系统或物理表。对应数据库合同§7–8、HTTP合同§1–2、P1以及T05/T06/T37/T38/T39/T45/T46的部分读取场景。源码可检查，不等于本机已运行。
+
+### 已写代码及接缝
+
+- `comment_study_catalog/read.rs`：独立于runRef的评论目录和汇总，默认50、上限100、limit+1判断下一页，短READ ONLY事务；不在GET中清洗、建Run或调用模型。
+- `comment_study_catalog/cursor.rs`：私有base64url编码，严格版本／字段／2048字节边界，scopeHash绑定领域、文字、作品、声音、状态、cleaner与排序；页大小可变。时间以绑定参数进行日历校验，游标不是权限凭证。
+- `comment_study_catalog/comments.sql`：先取稳定身份的最新接纳版本，再判权限与清洗；关键词为字面ILIKE。历史按关系批量读取，分别选择最后尝试和最新succeeded/no_signal，不按每条评论查询历史。原声只由有界结果页返回，SQL结果不是全库正文数组。
+- 作者未知的有效文字可以显示但不研究；作品作者声音默认隐藏，可显式筛选；dropped/anomaly不进入正常评论页。后来的失败不覆盖旧成功head，新的no_signal替换旧成功head；重采版本按作品＋平台评论ID合并。
+- 实际增加两个受原Host/Origin和no-store保护的GET：`/api/local/comment-study/comments`、`/api/local/comment-study/catalog-summary`。新的私有`comment_study_api.rs`只做DTO/安全错误映射，既有API文件仅增加模块声明与merge，保留原路由和测试。
+- 查询失败返回503而非空数组；旧库缺候选字段/表返回study_schema_unavailable，不自动初始化。清洗未完成时给partial；带文字搜索且未知未清洗材料能否命中时pendingCount=NULL，不虚报搜遍全库。
+
+### 本次新增汇总字段的读取口径
+
+`summary`包含displayableCommentCount、eligibleCommentCount、studiedCommentCount、inProgressCommentCount、needsContextCount、failedCount、creatorVoiceCount、unknownIdentityCount、textNotResearchableCount、sourceRestrictedCount、bodyUnavailableCount。所有数量对应当前筛选而非当前页；不同维度可以重叠，不加总成互斥进度。studied表示存在成功研究head，当前正文改变另用effectiveState提示，不能将它展示为当前有效知识量。文字查询无法安全判断受限／不可读正文是否命中，后两项返回NULL。indexCoverage独立返回已索引/待索引口径，dropped缓存也属于已索引。
+
+### 明确未完成与禁止假象
+
+- `/works`完整分页和标题搜索尚未实现。现有作品选择弹窗仍有100篇限制，本轮没有宣称T43解决。作品标题必须复用Evidence的共享显示标题解析器；不得为快交付另拼一套native/OCR回退或N+1全作品读取。
+- `input_changed`暂明确拒绝，不能只用正文不同冒充完整输入变化。P2将统一保留作品/父语境fingerprint；此阶段已知正文不同可以报告changed，其余inputComparison为unknown，不猜same。该限制是分阶段未完成，不是修改已批准最终合同。
+- 当前成功head为P1读取投影；P4统一effective_target view、下游召回、Problem支持去重及来源依赖传播仍需完成。不能据此声称整个研究链已排重或受限语境全部解决。
+- 评论详情、全部历史批次明细、共享source选择器、父/作品语境资格收束和新版用户评论UI尚未接完。新GET不改变旧写路径；最终按手册同版切换，不能长期保留分叉资格规则。
+- 未注册0102、不创建0103/0104、不触发cache tick、模型或计划。不得为了试新目录单独将0102迁到运行中的共享库。
+
+### 验证证据
+
+本轮新增6个单元测试候选（游标2、目录参数2、API错误2），以及5个隔离PG用例候选：124评论完整翻页/字面通配符、声音与索引覆盖、新UNKNOWN/受限不回退、成功head/no_signal/后失败、跨筛选游标与全量汇总。proof脚本保留前两组测试并加入新test target；使用合成材料，无真实调用。
+
+实际完成：13项staging源码形状/范围检查PASS；包含SQL参数1–11与bind数、read-only、有界页、受控路由、无GET写调用、原API只新增4行，以及base64**测试向量**用Python标准库核对。此检查没有执行Rust编解码器或PostgreSQL。修改前API/catalog/proof脚本/本记录均核对原Git blob哈希，避免重构抓取文本时截断。
+
+`bash -n scripts/test-comment-study-productization-postgres.sh`通过；实际执行脚本退出1、Cargo is unavailable，尚未进入Docker。Rust编译/fmt、SQL语法执行、PG证明、EXPLAIN、全仓库治理、浏览器均NOT_RUN；T01–T54不改PASS。本轮不证明百万规模性能，15秒statement_timeout也不代表达到延迟验收目标。
+
 ## 下一步
 
-沿同一P1继续来源资格共用、父语境限制、目录keyset/服务器搜索、作品分页及历史读取，再接用户评论视图。完整schema/constraints/views与启动/外发控制集成后才注册受控升级入口。共享迁移前仍必须完成P0现场只读盘点和Worker drain；不得为了消除差异reset历史。
+继续同一P1：复用共享作品标题读取完成作品分页、评论详情与历史清单，统一source资格和父语境；补齐隔离测试并接用户评论页。P2输入指纹和方法/启动完成后开放input_changed。完整schema/constraints/views与执行控制集成后才注册迁移，实际共享升级仍先完成P0现场盘点和drain。每次回到本记录及固定手册，不新增Coverage实体或第二引擎。

@@ -1,7 +1,7 @@
 //! Deterministic catalog preparation. No Run creation, model call or permission caching.
 //!
-//! P1 foundation only: the public v2 catalog routes and automatic tick integration are not wired
-//! until their complete source qualification and read contracts are implemented.
+//! P1 catalog reads are separate from the existing write path. Automatic cache tick, work
+//! pagination and the P2 shared selector are not activated by directory reads.
 use crate::comment_cleaning::{CLEANER_VERSION, clean};
 use linggan_storage_postgres::Database;
 use serde::Serialize;
@@ -9,6 +9,16 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use sqlx::Row;
 use uuid::Uuid;
+
+#[path = "comment_study_catalog/cursor.rs"]
+mod cursor;
+#[path = "comment_study_catalog/read.rs"]
+mod read;
+
+pub use read::{
+    CatalogStudyState, CatalogSummaryQuery, CatalogVoiceRole, CommentCatalogQuery,
+    read_catalog_summary, read_comment_catalog,
+};
 
 const MAX_REFRESH_LIMIT: i64 = 200;
 const MAX_QUERY_CHARS: usize = 200;
@@ -21,6 +31,22 @@ pub enum StudyCatalogError {
     InvalidQuery,
     #[error("comment cleaning cache conflicts with its immutable source")]
     CacheConflict,
+    #[error("unsupported comment-study domain")]
+    UnsupportedDomain,
+    #[error("catalog limit must be between 1 and 100")]
+    InvalidLimit,
+    #[error("invalid catalog cursor")]
+    InvalidCursor,
+    #[error("catalog cursor belongs to a different query")]
+    CursorScopeMismatch,
+    #[error("the complete input comparison is not available yet")]
+    InputComparisonUnavailable,
+    #[error("the required catalog schema is unavailable")]
+    SchemaUnavailable,
+    #[error("the catalog query timed out")]
+    QueryTimeout,
+    #[error("the catalog projection does not match its contract")]
+    ProjectionInvalid,
 }
 
 #[derive(Debug, Default, PartialEq, Eq, Serialize)]
