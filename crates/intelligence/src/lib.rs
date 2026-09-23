@@ -40,6 +40,7 @@ pub mod comment_study_candidate_recall;
 pub mod comment_study_model_dispatch;
 pub mod comment_study_model_runner;
 pub mod comment_study_pair_worker;
+pub mod comment_study_policy;
 pub mod comment_study_problem_resolution;
 pub mod comment_study_problem_store;
 pub mod comment_study_read;
