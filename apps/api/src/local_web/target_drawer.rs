@@ -1475,7 +1475,7 @@ fn overview_tab(
     };
     let detail = match archive {
         TargetArchiveRead::Known(Some(value)) if value.has_displayable_directory() => {
-            format!("{} / {}", value.details_captured, value.works_listed)
+            format!("{}/{}", value.details_captured, value.works_listed)
         }
         TargetArchiveRead::Unavailable => "当前读不到".to_owned(),
         TargetArchiveRead::Known(_) => "尚未取得".to_owned(),
@@ -1800,7 +1800,7 @@ fn inspector_count_copy(value: TargetInspectorCount) -> String {
 fn inspector_detail_copy(captured: TargetInspectorCount, total: TargetInspectorCount) -> String {
     match (captured, total) {
         (TargetInspectorCount::Known(captured), TargetInspectorCount::Known(total)) => {
-            format!("{captured} / {total}")
+            format!("{captured}/{total}")
         }
         _ => "尚未取得".to_owned(),
     }
@@ -3098,7 +3098,7 @@ fn archive_gap_overview(
         TargetArchiveRead::Unavailable => "当前读不到".to_owned(),
         TargetArchiveRead::Known(value) => value
             .filter(|value| value.has_displayable_directory() && value.works_listed > 0)
-            .map(|value| format!("{} / {}", value.details_captured, value.works_listed))
+            .map(|value| format!("{}/{}", value.details_captured, value.works_listed))
             .unwrap_or_else(|| "—".to_owned()),
     };
     let analyzable = match lifecycle {
@@ -3174,7 +3174,7 @@ fn archive_tab(
         TargetArchiveRead::Unavailable => "当前读不到".to_owned(),
         TargetArchiveRead::Known(value) => value
             .filter(|value| value.has_displayable_directory() && value.works_listed > 0)
-            .map(|value| format!("{} / {}", value.details_captured, value.works_listed))
+            .map(|value| format!("{}/{}", value.details_captured, value.works_listed))
             .unwrap_or_else(|| "—".to_owned()),
     };
     let analyzable = match lifecycle {
@@ -4065,7 +4065,7 @@ mod tests {
         assert!(html.contains("作品目录"));
         assert!(!html.contains("作品生命周期"));
         assert!(!html.contains(">31</b><span>作品目录"));
-        assert!(!html.contains(">27 / 31</b><span>详情进度"));
+        assert!(!html.contains(">27/31</b><span>详情进度"));
     }
 
     #[test]

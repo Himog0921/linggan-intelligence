@@ -2,7 +2,7 @@
 #[path = "support/material_fixture.rs"]
 mod fixture;
 
-use fixture::proof_database;
+use fixture::{proof_database, proof_database_before_cross_industry_creator_directory};
 use linggan_contracts::{
     AdmissionOutcome, ProducerTaskSpec, parse_producer_attempt, parse_producer_submission,
     parse_producer_task_spec,
@@ -16,10 +16,10 @@ use linggan_evidence::{
     TargetDomainAssignmentOutcome, activate_installation_credential, assign_target_domain,
     bind_observation_account, check_in_installation, decide_dispatch, delete_observation_target,
     grant_authorization, list_targets, open_claim_window, read_archive_completeness,
-    read_creator_directory, read_creator_lifecycle, read_target, read_target_deletion_preview,
-    register_station, report_account_eligibility, request_admit_and_lease,
-    request_progressive_archive_and_lease, requeue_failed_dispatch, retire_materials,
-    run_progressive_archives, set_station_accepting, start_producer_attempt,
+    read_creator_directory, read_creator_lifecycle, read_cross_industry_creator_directory,
+    read_target, read_target_deletion_preview, register_station, report_account_eligibility,
+    request_admit_and_lease, request_progressive_archive_and_lease, requeue_failed_dispatch,
+    retire_materials, run_progressive_archives, set_station_accepting, start_producer_attempt,
     submit_producer_package,
 };
 use linggan_storage_postgres::Database;
@@ -330,6 +330,92 @@ async fn target_deletion_preserves_installation_risk_signals_by_refusing_the_del
 
 #[tokio::test]
 #[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn target_deletion_preserves_cross_industry_creator_relation_when_sample_was_seen_elsewhere_first()
+ {
+    let database = proof_database("dossier_target_deletion_cross_creator_relation").await;
+    let installation = ready_installation(&database, "target-delete-cross-creator").await;
+    let creator_ref = seed_creator_target_in_domain(
+        &database,
+        "creator-delete-cross-relation",
+        "00000000-0000-4000-8000-000000000002",
+    )
+    .await;
+    grant_deep_archive(&database, "建立创作者档案", 200).await;
+    request_progressive_archive_and_lease(&database, creator_ref, "建立创作者档案", "person", 30)
+        .await
+        .unwrap();
+    complete_progressive_root_with_partial_directory(&database, &installation, 1, "surface_ended")
+        .await;
+
+    let keyword_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_observation_target \
+           (target_ref,platform,target_kind,identity_key,display_name,source,domain_ref) \
+         VALUES ($1,'xhs','keyword','考研自习','考研自习','manual', \
+                 '00000000-0000-4000-8000-000000000002')",
+    )
+    .bind(keyword_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE cross_industry_sample SET target_ref=$1 \
+         WHERE content_external_id='creator-delete-cross-relation-partial-0'",
+    )
+    .bind(keyword_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let direct_creator_samples: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM cross_industry_sample WHERE target_ref=$1")
+            .bind(creator_ref)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        direct_creator_samples, 0,
+        "the sample's first-seen owner no longer identifies the creator relation"
+    );
+
+    let preview = read_target_deletion_preview(&database, creator_ref)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        preview.blocking_cross_industry_samples, 1,
+        "the confirmation dialog must expose the same creator-relation block as deletion"
+    );
+
+    let outcome =
+        delete_observation_target(&database, creator_ref, "creator-delete-cross-relation")
+            .await
+            .unwrap();
+    assert!(
+        matches!(
+            outcome,
+            TargetDeletionOutcome::BlockedByProtectedFacts { rows } if rows > 0
+        ),
+        "the immutable relation's Package lineage must prevent target deletion: {outcome:?}"
+    );
+    let retained: (i64, i64) = sqlx::query_as(
+        "SELECT \
+           (SELECT count(*) FROM collection_observation_target WHERE target_ref=$1), \
+           (SELECT count(*) FROM cross_industry_creator_sample_observation seen \
+             JOIN linggan_runtime_capture_package package USING(package_ref) \
+             JOIN collection_work_order_lease_task lease_task ON lease_task.task_id=package.task_id \
+             JOIN collection_work_order_lease lease USING(lease_ref) \
+             JOIN collection_work_order work_order USING(work_order_ref) \
+             WHERE work_order.target_ref=$1)",
+    )
+    .bind(creator_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(retained, (1, 1));
+}
+
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
 async fn target_drawer_read_uses_the_same_full_projection_as_the_target_list() {
     let database = proof_database("dossier_target_drawer_projection").await;
     let target_ref = seed_creator_target(&database, "creator-drawer-projection").await;
@@ -488,6 +574,389 @@ async fn clean_200_work_progressive_root_establishes_the_bounded_creator_baselin
         state, "archived",
         "a clean, explicitly bounded 200-Work directory is established without claiming the platform surface ended",
     );
+}
+
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn cross_industry_creator_directory_schedules_cross_industry_detail_children() {
+    let database = proof_database("dossier_cross_industry_creator").await;
+    let installation = ready_installation(&database, "dossier-cross-industry-creator").await;
+    let target_ref = seed_creator_target_in_domain(
+        &database,
+        "creator-cross-industry",
+        "00000000-0000-4000-8000-000000000002",
+    )
+    .await;
+    grant_deep_archive(&database, "建立创作者档案", 200).await;
+    let root = request_progressive_archive_and_lease(
+        &database,
+        target_ref,
+        "建立创作者档案",
+        "person",
+        30,
+    )
+    .await
+    .unwrap()
+    .request
+    .work_order_ref
+    .unwrap();
+
+    complete_progressive_root_with_partial_directory(&database, &installation, 3, "surface_ended")
+        .await;
+
+    let directory = read_cross_industry_creator_directory(&database, target_ref)
+        .await
+        .unwrap()
+        .expect("跨领域创作者的已接纳主页作品应当出现在创作者目录");
+    assert_eq!(directory.works.len(), 3);
+    assert!(
+        directory
+            .works
+            .iter()
+            .all(|work| work.detail_state == CatalogDetailState::Pending)
+    );
+    let evidence_rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_material_discovery_finding finding \
+         JOIN linggan_runtime_capture_package package USING(package_ref) \
+         WHERE package.package_kind='profile_discovery'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        evidence_rows, 0,
+        "跨领域目录只进入 cross_industry，不得为了让页面可见而复制进本领域 Evidence"
+    );
+
+    let completeness = read_archive_completeness(&database, "xhs").await.unwrap();
+    let completeness = completeness.get("creator-cross-industry").unwrap();
+    assert_eq!(
+        (
+            completeness.works_listed,
+            completeness.details_captured,
+            completeness.pending_details,
+        ),
+        (3, 0, 3)
+    );
+
+    let tick = run_progressive_archives(&database).await.unwrap();
+    assert!(
+        tick.queued.contains(&target_ref),
+        "主页目录接纳后，渐进建档应立即排出详情子工单：{tick:?}"
+    );
+    let child: Uuid = sqlx::query_scalar(
+        "SELECT work_order_ref FROM collection_work_order \
+         WHERE target_ref=$1 AND work_order_ref<>$2 \
+         ORDER BY created_at DESC,work_order_ref DESC LIMIT 1",
+    )
+    .bind(target_ref)
+    .bind(root)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let cross_scope: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_work_order_cross_industry_target \
+         WHERE work_order_ref=$1",
+    )
+    .bind(child)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let evidence_scope: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_work_order_material_target WHERE work_order_ref=$1",
+    )
+    .bind(child)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!((cross_scope, evidence_scope), (3, 0));
+}
+
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn interrupted_cross_industry_patrol_does_not_expand_the_directory_or_gap_scope() {
+    let database = proof_database("dossier_cross_patrol_boundary").await;
+    let installation = ready_installation(&database, "dossier-cross-patrol-boundary").await;
+    let target_ref = seed_creator_target_in_domain(
+        &database,
+        "creator-cross-patrol-boundary",
+        "00000000-0000-4000-8000-000000000002",
+    )
+    .await;
+    grant_deep_archive(&database, "建立创作者档案", 200).await;
+    request_progressive_archive_and_lease(&database, target_ref, "建立创作者档案", "person", 30)
+        .await
+        .unwrap();
+    complete_progressive_root_with_partial_directory(&database, &installation, 3, "surface_ended")
+        .await;
+    grant_patrol(&database, "巡查建档创作者").await;
+    submit_patrol_round(
+        &database,
+        &installation,
+        target_ref,
+        "巡查建档创作者",
+        PatrolRound::InterruptedWithUsableWork,
+    )
+    .await;
+
+    let raw_relation_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS ( \
+           SELECT 1 FROM cross_industry_creator_sample_observation seen \
+           JOIN cross_industry_sample sample USING(sample_ref) \
+           WHERE sample.content_external_id='creator-patrol-interrupted-work')",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert!(
+        raw_relation_exists,
+        "the interrupted Package remains immutable history; qualification happens at consumption"
+    );
+    let directory = read_cross_industry_creator_directory(&database, target_ref)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(directory.works.len(), 3);
+    assert!(
+        directory
+            .works
+            .iter()
+            .all(|work| work.content_external_id != "creator-patrol-interrupted-work")
+    );
+    let completeness = read_archive_completeness(&database, "xhs").await.unwrap();
+    let completeness = completeness.get("creator-cross-patrol-boundary").unwrap();
+    assert_eq!(
+        (completeness.works_listed, completeness.pending_details),
+        (3, 3)
+    );
+
+    let retry = linggan_evidence::request_creator_directory_gaps(
+        &database,
+        target_ref,
+        "建立创作者档案",
+        "person",
+    )
+    .await
+    .unwrap();
+    let scoped_ids: Vec<String> = sqlx::query_scalar(
+        "SELECT sample.content_external_id \
+         FROM collection_work_order_cross_industry_target scope \
+         JOIN cross_industry_sample sample USING(sample_ref) \
+         WHERE scope.work_order_ref=$1 ORDER BY sample.content_external_id",
+    )
+    .bind(retry.work_order_ref.unwrap())
+    .fetch_all(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(scoped_ids.len(), 3);
+    assert!(
+        !scoped_ids
+            .iter()
+            .any(|identity| identity == "creator-patrol-interrupted-work")
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn conflicting_discovery_payload_identity_is_quarantined_before_cross_industry_projection() {
+    let database = proof_database("dossier_cross_identity_conflict").await;
+    let installation = ready_installation(&database, "dossier-cross-identity-conflict").await;
+    let target_ref = seed_creator_target_in_domain(
+        &database,
+        "creator-cross-identity-conflict",
+        "00000000-0000-4000-8000-000000000002",
+    )
+    .await;
+    grant_deep_archive(&database, "建立创作者档案", 200).await;
+    request_progressive_archive_and_lease(&database, target_ref, "建立创作者档案", "person", 30)
+        .await
+        .unwrap();
+    complete_progressive_root_with_partial_directory(&database, &installation, 1, "surface_ended")
+        .await;
+    grant_patrol(&database, "巡查建档创作者").await;
+    submit_patrol_round(
+        &database,
+        &installation,
+        target_ref,
+        "巡查建档创作者",
+        PatrolRound::ConflictingPayloadIdentity,
+    )
+    .await;
+
+    let disposition: (String, String) = sqlx::query_as(
+        "SELECT disposition.disposition,disposition.reason \
+         FROM linggan_runtime_record_disposition disposition \
+         JOIN linggan_runtime_capture_package package USING(package_ref) \
+         JOIN collection_work_order_lease_task lease_task ON lease_task.task_id=package.task_id \
+         JOIN collection_work_order_lease lease USING(lease_ref) \
+         JOIN collection_work_order work_order USING(work_order_ref) \
+         WHERE work_order.target_ref=$1 \
+           AND package.payload #>> '{records,0,sourceObject,externalId}'='canonical-source-identity'",
+    )
+    .bind(target_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        disposition,
+        (
+            "quarantined".to_owned(),
+            "typed_discovery_identity_invalid".to_owned()
+        )
+    );
+    let projected: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM cross_industry_sample \
+         WHERE content_external_id IN ('canonical-source-identity','forged-payload-identity')",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(projected, 0);
+}
+
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn migration_backfills_cross_industry_creator_directory_and_reopens_the_false_completion() {
+    let database = proof_database_before_cross_industry_creator_directory(
+        "dossier_cross_industry_creator_migration",
+    )
+    .await;
+    let installation = ready_installation(&database, "dossier-cross-creator-migration").await;
+    let target_ref = seed_creator_target_in_domain(
+        &database,
+        "creator-cross-migration",
+        "00000000-0000-4000-8000-000000000002",
+    )
+    .await;
+    grant_deep_archive(&database, "建立创作者档案", 200).await;
+    let root = request_progressive_archive_and_lease(
+        &database,
+        target_ref,
+        "建立创作者档案",
+        "person",
+        30,
+    )
+    .await
+    .unwrap()
+    .request
+    .work_order_ref
+    .unwrap();
+    complete_progressive_root_with_partial_directory(&database, &installation, 3, "surface_ended")
+        .await;
+
+    let historical_samples: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM cross_industry_sample WHERE target_ref=$1")
+            .bind(target_ref)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        historical_samples, 3,
+        "旧运行已经存下样本，只缺目标目录关系"
+    );
+    let relation_before: Option<String> =
+        sqlx::query_scalar("SELECT to_regclass('cross_industry_creator_sample_observation')::text")
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(relation_before, None);
+    sqlx::query(
+        "UPDATE collection_work_order SET stop_conditions=jsonb_set( \
+             jsonb_set(stop_conditions,'{progressiveArchive,status}','\"completed\"'::jsonb,true), \
+             '{progressiveArchive,completedAt}',to_jsonb(scope_001_now()),true) \
+         WHERE work_order_ref=$1",
+    )
+    .bind(root)
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    let interrupted_target_ref = seed_creator_target_in_domain(
+        &database,
+        "creator-cross-migration-interrupted",
+        "00000000-0000-4000-8000-000000000002",
+    )
+    .await;
+    let interrupted_root = request_progressive_archive_and_lease(
+        &database,
+        interrupted_target_ref,
+        "建立创作者档案",
+        "person",
+        30,
+    )
+    .await
+    .unwrap()
+    .request
+    .work_order_ref
+    .unwrap();
+    complete_progressive_root_with_partial_directory(&database, &installation, 1, "risk_control")
+        .await;
+    sqlx::query(
+        "UPDATE collection_work_order SET stop_conditions=jsonb_set( \
+             jsonb_set(stop_conditions,'{progressiveArchive,status}','\"completed\"'::jsonb,true), \
+             '{progressiveArchive,completedAt}',to_jsonb(scope_001_now()),true) \
+         WHERE work_order_ref=$1",
+    )
+    .bind(interrupted_root)
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    sqlx::raw_sql(include_str!(
+        "../../../database/migrations/0102_cross_industry_creator_directory.sql"
+    ))
+    .execute(database.pool())
+    .await
+    .expect("0102 backfills immutable package records and repairs the false root completion");
+
+    let backfilled: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM cross_industry_creator_sample_observation")
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        backfilled, 4,
+        "both qualified and interrupted Packages remain immutable history; only root recovery is qualified"
+    );
+    let state: (String, String) = sqlx::query_as(
+        "SELECT stop_conditions #>> '{progressiveArchive,status}', \
+                stop_conditions #>> '{progressiveArchive,recoveryReason}' \
+         FROM collection_work_order WHERE work_order_ref=$1",
+    )
+    .bind(root)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        state,
+        (
+            "active".to_owned(),
+            "cross_industry_creator_directory_reconstructed".to_owned(),
+        )
+    );
+    let directory = read_cross_industry_creator_directory(&database, target_ref)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(directory.works.len(), 3);
+    let interrupted_state: String = sqlx::query_scalar(
+        "SELECT stop_conditions #>> '{progressiveArchive,status}' \
+         FROM collection_work_order WHERE work_order_ref=$1",
+    )
+    .bind(interrupted_root)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        interrupted_state, "completed",
+        "an unproven risk-stopped Package must not be reopened into an unschedulable active root"
+    );
+    let interrupted_directory =
+        read_cross_industry_creator_directory(&database, interrupted_target_ref)
+            .await
+            .unwrap()
+            .unwrap();
+    assert!(interrupted_directory.works.is_empty());
 }
 
 /// 人确认「这篇在平台上没了」之后，作品仍留在目录里，只是不再计入待补齐。
@@ -2278,14 +2747,28 @@ async fn patrol_success_and_latest_new_ring_share_one_qualified_target_level_rou
 }
 
 async fn seed_creator_target(database: &Database, identity_key: &str) -> Uuid {
+    seed_creator_target_in_domain(
+        database,
+        identity_key,
+        "00000000-0000-4000-8000-000000000001",
+    )
+    .await
+}
+
+async fn seed_creator_target_in_domain(
+    database: &Database,
+    identity_key: &str,
+    domain_ref: &str,
+) -> Uuid {
     let target_ref = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO collection_observation_target \
            (target_ref,platform,target_kind,identity_key,display_name,source,domain_ref) \
-         VALUES ($1,'xhs','creator',$2,$2,'manual','00000000-0000-4000-8000-000000000001')",
+         VALUES ($1,'xhs','creator',$2,$2,'manual',$3::uuid)",
     )
     .bind(target_ref)
     .bind(identity_key)
+    .bind(domain_ref)
     .execute(database.pool())
     .await
     .unwrap();
@@ -2355,6 +2838,8 @@ enum PatrolRound {
     ValidZeroNew,
     AllQuarantined,
     UnknownRiskStop,
+    InterruptedWithUsableWork,
+    ConflictingPayloadIdentity,
 }
 
 async fn submit_patrol_round(
@@ -2445,6 +2930,41 @@ async fn submit_patrol_round(
             })],
         ),
         PatrolRound::UnknownRiskStop => (1, 1, 0, 1, "risk_budget", Vec::new()),
+        PatrolRound::InterruptedWithUsableWork => (
+            1,
+            1,
+            1,
+            0,
+            "risk_control",
+            vec![serde_json::json!({
+                "kind":"profile_discovery_card",
+                "resultPosition":1,
+                "sourceObject":{
+                    "platform":"xhs","type":"content",
+                    "externalId":"creator-patrol-interrupted-work"
+                },
+                "payload":{"title":"accepted card from an interrupted patrol"}
+            })],
+        ),
+        PatrolRound::ConflictingPayloadIdentity => (
+            1,
+            1,
+            1,
+            0,
+            "surface_ended",
+            vec![serde_json::json!({
+                "kind":"profile_discovery_card",
+                "resultPosition":1,
+                "sourceObject":{
+                    "platform":"xhs","type":"content",
+                    "externalId":"canonical-source-identity"
+                },
+                "payload":{
+                    "noteId":"forged-payload-identity",
+                    "title":"identity conflict must be quarantined"
+                }
+            })],
+        ),
     };
     let submission = parse_producer_submission(
         &serde_json::json!({

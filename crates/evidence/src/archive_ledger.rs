@@ -163,3 +163,124 @@ macro_rules! directory_works_sql {
 }
 
 pub(crate) use directory_works_sql;
+
+/// 外部领域创作者的规范作品目录。
+///
+/// 目录边界与本领域创作者完全同义：当前渐进建档根里最新一个被证明的主页发现包，加上
+/// 后续完整结束的巡检包。区别只在材料落点：作品身份来自
+/// `cross_industry_creator_sample_observation`，详情来自 `cross_industry_sample_detail`。
+///
+/// 展开后的最后一个 CTE 名为 `cross_directory_work`，列为
+/// `(target_ref, sample_ref, discovery_order, observed_at, lane, accepted_at, has_detail)`。
+macro_rules! cross_industry_creator_directory_sql {
+    ($scope:literal, $as_of:literal) => {
+        concat!(
+            "cross_ledger_roots AS ( \
+                 SELECT target.target_ref,work_order.work_order_ref AS root_work_order_ref, \
+                        row_number() OVER (PARTITION BY target.target_ref \
+                                           ORDER BY work_order.created_at DESC, \
+                                                    work_order.work_order_ref DESC) AS root_rank \
+                 FROM collection_observation_target target \
+                 JOIN observation_domain domain USING(domain_ref) \
+                 JOIN collection_work_order work_order USING(target_ref) \
+                 WHERE target.target_kind='creator' AND domain.is_own_domain=false \
+                   AND work_order.lane='deep_archive' \
+                   AND work_order.stop_conditions #>> '{progressiveArchive,version}'='1' \
+                   AND work_order.stop_conditions #>> '{progressiveArchive,rootWorkOrderRef}' \
+                       =work_order.work_order_ref::text \
+                   AND ", $scope, " \
+             ), cross_ledger_active_roots AS ( \
+                 SELECT target_ref,root_work_order_ref \
+                 FROM cross_ledger_roots WHERE root_rank=1 \
+             ), cross_ledger_root_orders AS ( \
+                 SELECT roots.target_ref,work_order.work_order_ref \
+                 FROM cross_ledger_active_roots roots \
+                 JOIN collection_work_order work_order \
+                   ON work_order.target_ref=roots.target_ref \
+                 WHERE work_order.lane='deep_archive' \
+                   AND (work_order.work_order_ref=roots.root_work_order_ref \
+                        OR work_order.stop_conditions #>> '{progressiveArchive,rootWorkOrderRef}' \
+                           =roots.root_work_order_ref::text) \
+             ), cross_ledger_proven_directory AS ( \
+                 SELECT scoped.target_ref,package.package_ref,package.accepted_at, \
+                        row_number() OVER (PARTITION BY scoped.target_ref \
+                                           ORDER BY package.accepted_at DESC, \
+                                                    package.package_ref DESC) AS package_rank \
+                 FROM cross_ledger_root_orders scoped \
+                 JOIN collection_work_order_lease lease USING(work_order_ref) \
+                 JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
+                 JOIN linggan_runtime_task task ON task.task_id=lease_task.task_id \
+                 JOIN linggan_runtime_capture_package package ON package.task_id=task.task_id \
+                 JOIN linggan_runtime_submission_receipt receipt USING(package_ref) \
+                 CROSS JOIN LATERAL jsonb_array_elements( \
+                   CASE WHEN jsonb_typeof(package.coverage->'layers')='array' \
+                        THEN package.coverage->'layers' ELSE '[]'::jsonb END) layer \
+                 WHERE package.package_kind='profile_discovery' \
+                   AND receipt.execution_effect='COMPLETED_LIVE_STEP' \
+                   AND receipt.material_admission='ACCEPTED' \
+                   AND layer->>'capability'='profile_discovery' \
+                   AND ", crate::directory_boundary::directory_proven_sql!(), " \
+                   AND ", $as_of, " \
+                   AND NOT EXISTS (SELECT 1 FROM linggan_runtime_record_disposition disposition \
+                                   WHERE disposition.package_ref=package.package_ref \
+                                     AND disposition.disposition='quarantined') \
+                   AND (SELECT count(*) FROM linggan_runtime_record_disposition disposition \
+                        WHERE disposition.package_ref=package.package_ref \
+                          AND disposition.disposition='accepted_for_library_discovery') \
+                       =COALESCE((layer->>'acquired')::integer,-1) \
+             ), cross_ledger_patrol_packages AS ( \
+                 SELECT DISTINCT target.target_ref,package.package_ref,package.accepted_at \
+                 FROM collection_observation_target target \
+                 JOIN observation_domain domain USING(domain_ref) \
+                 JOIN collection_work_order work_order USING(target_ref) \
+                 JOIN collection_work_order_lease lease USING(work_order_ref) \
+                 JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
+                 JOIN linggan_runtime_task task ON task.task_id=lease_task.task_id \
+                 JOIN linggan_runtime_capture_package package ON package.task_id=task.task_id \
+                 JOIN linggan_runtime_submission_receipt receipt USING(package_ref) \
+                 CROSS JOIN LATERAL jsonb_array_elements( \
+                   CASE WHEN jsonb_typeof(package.coverage->'layers')='array' \
+                        THEN package.coverage->'layers' ELSE '[]'::jsonb END) layer \
+                 WHERE target.target_kind='creator' AND domain.is_own_domain=false \
+                   AND work_order.lane='patrol' \
+                   AND package.package_kind='profile_discovery' \
+                   AND receipt.execution_effect='COMPLETED_LIVE_STEP' \
+                   AND receipt.material_admission='ACCEPTED' \
+                   AND layer->>'capability'='profile_discovery' \
+                   AND ", crate::directory_boundary::surface_scan_complete_sql!(), " \
+                   AND ", $as_of, " \
+                   AND ", $scope, " \
+                   AND NOT EXISTS (SELECT 1 FROM linggan_runtime_record_disposition disposition \
+                                   WHERE disposition.package_ref=package.package_ref \
+                                     AND disposition.disposition='quarantined') \
+                   AND (SELECT count(*) FROM linggan_runtime_record_disposition disposition \
+                        WHERE disposition.package_ref=package.package_ref \
+                          AND disposition.disposition='accepted_for_library_discovery') \
+                       =COALESCE((layer->>'acquired')::integer,-1) \
+             ), cross_ledger_directory_packages AS ( \
+                 SELECT target_ref,package_ref,'deep_archive'::text AS lane,accepted_at \
+                 FROM cross_ledger_proven_directory WHERE package_rank=1 \
+                 UNION ALL \
+                 SELECT target_ref,package_ref,'patrol'::text AS lane,accepted_at \
+                 FROM cross_ledger_patrol_packages \
+             ), cross_ledger_observations AS ( \
+                 SELECT packages.target_ref,seen.sample_ref,seen.discovery_order,seen.observed_at, \
+                        packages.lane,packages.accepted_at, \
+                        row_number() OVER (PARTITION BY packages.target_ref,seen.sample_ref \
+                                           ORDER BY packages.accepted_at, \
+                                             CASE WHEN packages.lane='deep_archive' THEN 0 ELSE 1 END, \
+                                             packages.package_ref) AS observation_rank \
+                 FROM cross_ledger_directory_packages packages \
+                 JOIN cross_industry_creator_sample_observation seen USING(package_ref) \
+             ), cross_directory_work AS ( \
+                 SELECT target_ref,sample_ref,discovery_order,observed_at,lane,accepted_at, \
+                        EXISTS (SELECT 1 FROM cross_industry_sample_detail detail \
+                                WHERE detail.sample_ref=observations.sample_ref) AS has_detail \
+                 FROM cross_ledger_observations observations \
+                 WHERE observation_rank=1 \
+             )"
+        )
+    };
+}
+
+pub(crate) use cross_industry_creator_directory_sql;
