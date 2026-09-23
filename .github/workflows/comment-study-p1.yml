@@ -1,0 +1,46 @@
+name: Comment Study P1 proof
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/comment-study-p1.yml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'crates/**'
+      - 'apps/api/**'
+      - 'database/**'
+      - 'scripts/test-comment-study*'
+      - 'scripts/runtime/build-pgvector-image.sh'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: comment-study-p1-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  synthetic-proof:
+    if: github.head_ref == 'chatgpt/comment-study-productization-001'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install stable Rust tools
+        run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
+      - name: Compile the exact candidate
+        run: cargo +stable check -p linggan-intelligence -p linggan-api --locked
+      - name: Unit tests
+        run: cargo +stable test -p linggan-intelligence -p linggan-api --locked
+      - name: Isolated synthetic PostgreSQL proofs
+        run: bash scripts/test-comment-study-productization-postgres.sh
+      - name: Frontend behavior tests when present
+        shell: bash
+        run: |
+          if test -f scripts/test-comment-study-p1-ui.mjs; then
+            node --test scripts/test-comment-study-p1-ui.mjs
+          fi
