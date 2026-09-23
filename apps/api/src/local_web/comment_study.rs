@@ -395,7 +395,7 @@ mod tests {
         let script = include_str!("comment_study.js");
         assert!(script.contains("const selectedWorkRefs = new Set();"));
         assert!(script.contains("const visibleWorks = ()"));
-        assert!(script.contains("visibleWorks().forEach(work =>"));
+        assert!(script.contains("visibleWorks().forEach(work=>") || script.contains("visibleWorks().forEach(work =>"));
         assert!(script.contains("selectedWorkRefs.has(work.workRef)"));
         assert!(script.contains(
             "document.querySelector('#work-filter').addEventListener('input', renderWorks)"
