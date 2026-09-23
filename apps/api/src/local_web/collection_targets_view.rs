@@ -1127,7 +1127,7 @@ fn keyword_hit_count(
     }
 }
 
-/// 详情补到哪儿了。与创作者的「详情进度」同一种写法：`已取得 / 命中`。
+/// 详情补到哪儿了。creator 与 keyword 都只显示紧凑计数：`已取得/总数`。
 fn keyword_detail_progress(
     counts: Option<&HashMap<uuid::Uuid, linggan_evidence::KeywordCatalogCounts>>,
     target_ref: uuid::Uuid,
@@ -1135,11 +1135,11 @@ fn keyword_detail_progress(
     let Some(counts) = counts else {
         return "读不到".to_owned();
     };
-    // 一篇都还没命中时不写 `0 / 0`——那读起来像「采过了，一篇都没有」。
+    // 一篇都还没命中时不写 `0/0`——那读起来像「采过了，一篇都没有」。
     match counts.get(&target_ref) {
         None => "—".to_owned(),
         Some(counts) if counts.works == 0 => "—".to_owned(),
-        Some(counts) => format!("{} / {}", counts.details, counts.works),
+        Some(counts) => format!("{}/{}", counts.details, counts.works),
     }
 }
 
@@ -1160,22 +1160,7 @@ fn detail_count(archive: super::target_drawer::TargetArchiveRead<'_>) -> String 
         super::target_drawer::TargetArchiveRead::Unavailable => "当前读不到".to_owned(),
         super::target_drawer::TargetArchiveRead::Known(value) => value
             .filter(|value| value.has_displayable_directory() && value.works_listed > 0)
-            .map(|value| {
-                // 缺口读投影，不在这里相减：已确认失效的作品有详情之外的第三种去向，
-                // 减法算不出来它。
-                //
-                // 缺 0 不显示——每一行都挂一个「缺 0」是纯噪音。但**缺口大于 0 时必须
-                // 显示**：木可可的 `10 / 13` 里那 3 篇是已确认失效、不是缺失，读的人
-                // 若自己做 13−10 会得出「缺 3」这个错误结论。这个数正是为此而投影的。
-                if value.pending_details == 0 {
-                    format!("{} / {}", value.details_captured, value.works_listed)
-                } else {
-                    format!(
-                        "{} / {} · 缺 {}",
-                        value.details_captured, value.works_listed, value.pending_details
-                    )
-                }
-            })
+            .map(|value| format!("{}/{}", value.details_captured, value.works_listed))
             .unwrap_or_else(|| "—".to_owned()),
     }
 }
@@ -1750,7 +1735,7 @@ mod tests {
         assert!(html.contains("异常"));
         assert!(html.contains(">处理异常</button>"));
         assert!(!html.contains("31 篇"));
-        assert!(!html.contains("27 / 31"));
+        assert!(!html.contains("27/31"));
     }
 
     #[test]
@@ -1786,9 +1771,7 @@ mod tests {
             !html.contains("41 篇 · 边界未知"),
             "the works-directory column is a count-only field"
         );
-        // 缺口为 0 时不挂「缺 0」：每行都挂一个零值是纯噪音。
-        assert!(html.contains("41 / 41"));
-        assert!(!html.contains("缺 0"));
+        assert!(html.contains("41/41"));
         assert!(html.contains(">查看档案</a>"));
         assert!(!html.contains("建立标准目录"));
     }
@@ -1957,9 +1940,9 @@ mod tests {
 
         assert!(html.contains("详情有缺口"));
         assert!(html.contains("12 篇"));
-        // 缺口大于 0 时必须显示：这一格的 12 篇里有已确认失效的，读的人不能靠
-        // 12−5 自己算——那会把「已失效」误算成「缺失」。
-        assert!(html.contains("5 / 12 · 缺 7"));
+        // 展示紧凑计数；不在进度字段追加缺口描述，避免把总数差值当作待补详情数。
+        assert!(html.contains("5/12"));
+        assert!(!html.contains("5/12 · 缺 7"));
         assert!(html.contains("补采缺口"));
         assert!(html.contains(r#"name="archive_action" value="gaps""#));
         // 上次巡查是已经发生的事实，保留绝对时刻——可能要拿去跟别的记录对时间。
@@ -2340,7 +2323,7 @@ mod keyword_counts_tests {
         assert_eq!(keyword_detail_progress(None, target_ref), "读不到");
     }
 
-    /// 有命中时按「已取得 / 命中」写，与创作者那一列同一种写法。
+    /// 有命中时按「已取得/命中」写，与创作者那一列同一种写法。
     #[test]
     fn a_counted_target_reads_as_details_over_hits() {
         let target_ref = uuid::Uuid::new_v4();
@@ -2353,10 +2336,7 @@ mod keyword_counts_tests {
             },
         );
         assert_eq!(keyword_hit_count(Some(&counts), target_ref), "218");
-        assert_eq!(
-            keyword_detail_progress(Some(&counts), target_ref),
-            "60 / 218"
-        );
+        assert_eq!(keyword_detail_progress(Some(&counts), target_ref), "60/218");
     }
 }
 
