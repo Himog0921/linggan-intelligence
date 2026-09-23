@@ -397,9 +397,9 @@ mod tests {
         assert!(script.contains("const visibleWorks = ()"));
         assert!(script.contains("visibleWorks().forEach(work=>") || script.contains("visibleWorks().forEach(work =>"));
         assert!(script.contains("selectedWorkRefs.has(work.workRef)"));
-        assert!(script.contains(
-            "document.querySelector('#work-filter').addEventListener('input', renderWorks)"
-        ));
+        assert!(script.contains("document.querySelector('#work-filter').addEventListener('input'"));
+        assert!(script.contains("searchWorksNow()"));
+        assert!(script.contains("loadWorksPage(workCatalogState.nextCursor)"));
     }
 
     #[test]
