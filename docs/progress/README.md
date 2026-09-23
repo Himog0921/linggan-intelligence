@@ -16,6 +16,7 @@
 ## 2026-09 当前实施回执
 
 - [COMMENT-STUDY-PRODUCTIZATION-001 · P1](../audits/comment-study-productization-001/p1-read-counts.md)：PR #338 的目录、评论详情与分页研究历史增量；代码候选、测试与未验证边界分别记录。月报正文保留不覆盖，集成前补入对应条目。
+- [P1作品目录与共享标题](../audits/comment-study-productization-001/p1-work-catalog.md)：同PR的服务端作品分页/标题搜索、Evidence单一标题选择与安全检查、共享目录资格；未接UI、未运行Rust/PG。剩余P0–P5见该目录README，不能按提交数量估算完成比例。
 
 ## 每条记录必填
 

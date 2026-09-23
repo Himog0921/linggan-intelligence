@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use super::{CLEANER_VERSION, StudyCatalogError, cursor, literal_substring_pattern};
 
-const PAGE_SQL: &str = include_str!("comments.sql");
+const PAGE_SQL: &str = concat!(include_str!("facts.sql"), include_str!("comments.sql"));
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -146,12 +146,12 @@ async fn read_catalog(
     let last = previous.as_ref().map(|value| &value.last);
     let projection: Value = sqlx::query_scalar(PAGE_SQL)
         .bind(query.domain).bind(&as_of).bind(CLEANER_VERSION).bind(query.work_ref)
+        .bind(Option::<&str>::None)
         .bind(&scope.pattern).bind(&scope.voice).bind(&scope.study)
         .bind(last.map(|value| value.received_at.as_str()))
         .bind(last.map(|value| value.work_ref))
         .bind(last.map(|value| value.comment_external_id.as_str()))
         .bind(if summary_only { 0 } else { scope.limit + 1 })
-        .bind(Option::<&str>::None)
         .fetch_one(&mut *tx).await?;
     tx.commit().await?;
     if summary_only {
@@ -164,7 +164,6 @@ async fn read_catalog(
     page_response(query.domain, &scope, &as_of, projection)
 }
 
-
 /// Read one stable comment using exactly the same eligibility and projection as the directory.
 /// Non-displayable sources return metadata, not a fallback to an older known version.
 pub(super) async fn read_one_projection(
@@ -176,9 +175,10 @@ pub(super) async fn read_one_projection(
 ) -> Result<Value, StudyCatalogError> {
     let projection: Value = sqlx::query_scalar(PAGE_SQL)
         .bind(domain).bind(as_of).bind(CLEANER_VERSION).bind(Some(work))
+        .bind(Some(external_id))
         .bind(Option::<&str>::None).bind("all").bind("all")
         .bind(Option::<&str>::None).bind(Option::<Uuid>::None).bind(Option::<&str>::None)
-        .bind(1_i64).bind(Some(external_id))
+        .bind(1_i64)
         .fetch_one(&mut **tx).await?;
     if projection.get("currentSource").is_none_or(Value::is_null) {
         return Err(StudyCatalogError::ResourceNotFound);

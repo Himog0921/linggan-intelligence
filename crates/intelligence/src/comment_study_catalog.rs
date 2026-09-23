@@ -1,7 +1,6 @@
 //! Deterministic catalog preparation. No Run creation, model call or permission caching.
 //!
-//! P1 catalog reads are separate from the existing write path. Automatic cache tick, work
-//! pagination and the P2 shared selector are not activated by directory reads.
+//! Directory reads do not activate the cache tick or the P2 shared selection/write path.
 use crate::comment_cleaning::{CLEANER_VERSION, clean};
 use linggan_storage_postgres::Database;
 use serde::Serialize;
@@ -16,6 +15,8 @@ mod cursor;
 mod read;
 #[path = "comment_study_catalog/detail.rs"]
 mod detail;
+#[path = "comment_study_catalog/works.rs"]
+mod works;
 
 pub use read::{
     CatalogStudyState, CatalogSummaryQuery, CatalogVoiceRole, CommentCatalogQuery,
@@ -26,6 +27,7 @@ pub use detail::{
     CommentDetailQuery, CommentHistoryQuery, read_comment_detail, read_comment_history,
     read_comment_versions,
 };
+pub use works::{WorkCatalogQuery, read_work_catalog};
 
 const MAX_REFRESH_LIMIT: i64 = 200;
 const MAX_QUERY_CHARS: usize = 200;

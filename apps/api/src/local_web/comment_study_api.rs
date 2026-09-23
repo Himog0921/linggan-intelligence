@@ -9,8 +9,9 @@ use axum::{
     routing::get,
 };
 use linggan_intelligence::comment_study_catalog::{
-    CatalogSummaryQuery, CommentCatalogQuery, CommentDetailQuery, CommentHistoryQuery, StudyCatalogError,
-    read_catalog_summary, read_comment_catalog, read_comment_detail, read_comment_history, read_comment_versions,
+    CatalogSummaryQuery, CommentCatalogQuery, CommentDetailQuery, CommentHistoryQuery,
+    StudyCatalogError, WorkCatalogQuery, read_catalog_summary, read_comment_catalog,
+    read_comment_detail, read_comment_history, read_comment_versions, read_work_catalog,
 };
 use linggan_storage_postgres::Database;
 use serde_json::{Value, json};
@@ -22,6 +23,16 @@ pub(super) fn routes() -> Router<LocalWebState> {
         .route("/api/local/comment-study/comments/history", get(history))
         .route("/api/local/comment-study/comments/versions", get(versions))
         .route("/api/local/comment-study/catalog-summary", get(summary))
+        .route("/api/local/comment-study/works", get(works))
+}
+
+async fn works(
+    State(state): State<LocalWebState>,
+    query: Result<Query<WorkCatalogQuery>, QueryRejection>,
+) -> Response {
+    let Ok(Query(query)) = query else { return invalid_query(); };
+    let Some(database) = database(&state) else { return unavailable(); };
+    response(read_work_catalog(database, &query).await)
 }
 
 async fn comments(

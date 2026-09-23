@@ -110,7 +110,7 @@ pub(super) fn decode_for<P: DeserializeOwned + CursorPosition>(
 
 fn validate<P: CursorPosition>(cursor: &Cursor<P>) -> Result<(), StudyCatalogError> {
     if cursor.v != 1
-        || !matches!(cursor.resource.as_str(), "comments" | "comment-history" | "comment-versions")
+        || !matches!(cursor.resource.as_str(), "comments" | "comment-history" | "comment-versions" | "works")
         || cursor.scope_hash.len() != 64
         || !cursor.scope_hash.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
         || !utc_timestamp_shape(&cursor.as_of)
