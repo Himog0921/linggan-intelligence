@@ -38,6 +38,7 @@ docker exec "$proof_container" pg_isready -U "$proof_user" -d "$proof_database" 
 proof_port="$(docker inspect --format '{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostPort}}' "$proof_container")"
 export LOCAL_001_PROOF_DATABASE_URL="postgresql://${proof_user}:${proof_password}@127.0.0.1:${proof_port}/${proof_database}"
 RUST_TEST_THREADS=1 cargo test -p linggan-intelligence \
-  --test comment_study_productization_postgres --locked \
+  --test comment_study_productization_postgres \
+  --test comment_study_catalog_postgres --locked \
   -- --ignored --nocapture --test-threads=1
 printf '%s\n' 'Implemented Comment Study productization PostgreSQL subset passed; not the complete T01-T54 suite'

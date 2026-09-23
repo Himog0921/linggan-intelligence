@@ -26,6 +26,7 @@ pub mod model_worker_drain;
 pub mod model_settings_read;
 
 pub(crate) mod comment_cleaning;
+pub mod comment_study_catalog;
 pub mod comment_study_acceptance;
 pub mod comment_study_batch;
 pub mod comment_study_canonical;
