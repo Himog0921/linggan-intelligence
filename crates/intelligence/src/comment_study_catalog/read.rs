@@ -3,6 +3,7 @@ use linggan_storage_postgres::Database;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::Postgres;
+use super::cursor::CursorPosition;
 use uuid::Uuid;
 
 use super::{CLEANER_VERSION, StudyCatalogError, cursor, literal_substring_pattern};
@@ -150,6 +151,7 @@ async fn read_catalog(
         .bind(last.map(|value| value.work_ref))
         .bind(last.map(|value| value.comment_external_id.as_str()))
         .bind(if summary_only { 0 } else { scope.limit + 1 })
+        .bind(Option::<&str>::None)
         .fetch_one(&mut *tx).await?;
     tx.commit().await?;
     if summary_only {
@@ -162,9 +164,31 @@ async fn read_catalog(
     page_response(query.domain, &scope, &as_of, projection)
 }
 
-async fn resolve_as_of(
+
+/// Read one stable comment using exactly the same eligibility and projection as the directory.
+/// Non-displayable sources return metadata, not a fallback to an older known version.
+pub(super) async fn read_one_projection(
     tx: &mut sqlx::Transaction<'_, Postgres>,
-    previous: Option<&cursor::Cursor>,
+    domain: Uuid,
+    work: Uuid,
+    external_id: &str,
+    as_of: &str,
+) -> Result<Value, StudyCatalogError> {
+    let projection: Value = sqlx::query_scalar(PAGE_SQL)
+        .bind(domain).bind(as_of).bind(CLEANER_VERSION).bind(Some(work))
+        .bind(Option::<&str>::None).bind("all").bind("all")
+        .bind(Option::<&str>::None).bind(Option::<Uuid>::None).bind(Option::<&str>::None)
+        .bind(1_i64).bind(Some(external_id))
+        .fetch_one(&mut **tx).await?;
+    if projection.get("currentSource").is_none_or(Value::is_null) {
+        return Err(StudyCatalogError::ResourceNotFound);
+    }
+    Ok(projection)
+}
+
+pub(super) async fn resolve_as_of<P: CursorPosition>(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    previous: Option<&cursor::Cursor<P>>,
 ) -> Result<String, StudyCatalogError> {
     let now: String = sqlx::query_scalar(
         "SELECT to_char(scope_001_now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')",
@@ -175,7 +199,7 @@ async fn resolve_as_of(
             // Dates are parameters and are calendar-checked by PostgreSQL, never interpolated.
             let valid: bool = sqlx::query_scalar(
                 "SELECT $1::timestamptz <= $2::timestamptz AND $3::timestamptz <= $1::timestamptz",
-            ).bind(&previous.as_of).bind(&now).bind(&previous.last.received_at)
+            ).bind(&previous.as_of).bind(&now).bind(previous.last.timestamp())
                 .fetch_one(&mut **tx).await?;
             if !valid { return Err(StudyCatalogError::InvalidCursor); }
             Ok(previous.as_of.clone())
@@ -210,7 +234,7 @@ fn page_response(
     }))
 }
 
-fn classify_read_error(error: StudyCatalogError) -> StudyCatalogError {
+pub(super) fn classify_read_error(error: StudyCatalogError) -> StudyCatalogError {
     let StudyCatalogError::Database(database_error) = &error else { return error; };
     let code = database_error.as_database_error().and_then(|value| value.code()).map(|value| value.into_owned());
     match code.as_deref() {

@@ -9,8 +9,8 @@ use axum::{
     routing::get,
 };
 use linggan_intelligence::comment_study_catalog::{
-    CatalogSummaryQuery, CommentCatalogQuery, StudyCatalogError,
-    read_catalog_summary, read_comment_catalog,
+    CatalogSummaryQuery, CommentCatalogQuery, CommentDetailQuery, CommentHistoryQuery, StudyCatalogError,
+    read_catalog_summary, read_comment_catalog, read_comment_detail, read_comment_history, read_comment_versions,
 };
 use linggan_storage_postgres::Database;
 use serde_json::{Value, json};
@@ -18,6 +18,9 @@ use serde_json::{Value, json};
 pub(super) fn routes() -> Router<LocalWebState> {
     Router::new()
         .route("/api/local/comment-study/comments", get(comments))
+        .route("/api/local/comment-study/comments/detail", get(detail))
+        .route("/api/local/comment-study/comments/history", get(history))
+        .route("/api/local/comment-study/comments/versions", get(versions))
         .route("/api/local/comment-study/catalog-summary", get(summary))
 }
 
@@ -37,6 +40,33 @@ async fn summary(
     let Ok(Query(query)) = query else { return invalid_query(); };
     let Some(database) = database(&state) else { return unavailable(); };
     response(read_catalog_summary(database, &query).await)
+}
+
+async fn detail(
+    State(state): State<LocalWebState>,
+    query: Result<Query<CommentDetailQuery>, QueryRejection>,
+) -> Response {
+    let Ok(Query(query)) = query else { return invalid_query(); };
+    let Some(database) = database(&state) else { return unavailable(); };
+    response(read_comment_detail(database, &query).await)
+}
+
+async fn history(
+    State(state): State<LocalWebState>,
+    query: Result<Query<CommentHistoryQuery>, QueryRejection>,
+) -> Response {
+    let Ok(Query(query)) = query else { return invalid_query(); };
+    let Some(database) = database(&state) else { return unavailable(); };
+    response(read_comment_history(database, &query).await)
+}
+
+async fn versions(
+    State(state): State<LocalWebState>,
+    query: Result<Query<CommentHistoryQuery>, QueryRejection>,
+) -> Response {
+    let Ok(Query(query)) = query else { return invalid_query(); };
+    let Some(database) = database(&state) else { return unavailable(); };
+    response(read_comment_versions(database, &query).await)
 }
 
 fn database(state: &LocalWebState) -> Option<&Database> {
@@ -60,6 +90,8 @@ fn response(result: Result<Value, StudyCatalogError>) -> Response {
         Err(failure) => failure,
     };
     let (status, code, message, retryable) = match failure {
+        StudyCatalogError::ResourceNotFound =>
+            (StatusCode::NOT_FOUND, "resource_not_found", "未找到可访问的评论。", false),
         StudyCatalogError::UnsupportedDomain =>
             (StatusCode::BAD_REQUEST, "unsupported_domain", "当前评论研究不支持这个领域。", false),
         StudyCatalogError::InvalidLimit =>
@@ -106,6 +138,7 @@ mod tests {
 
     #[test]
     fn cursor_and_schema_failures_are_distinct() {
+        assert_eq!(response(Err(StudyCatalogError::ResourceNotFound)).status(), StatusCode::NOT_FOUND);
         assert_eq!(response(Err(StudyCatalogError::CursorScopeMismatch)).status(), StatusCode::BAD_REQUEST);
         assert_eq!(response(Err(StudyCatalogError::SchemaUnavailable)).status(), StatusCode::SERVICE_UNAVAILABLE);
     }

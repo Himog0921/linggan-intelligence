@@ -40,6 +40,7 @@ export LOCAL_001_PROOF_DATABASE_URL="postgresql://${proof_user}:${proof_password
 RUST_TEST_THREADS=1 cargo test -p linggan-intelligence \
   --test comment_study_productization_postgres \
   --test comment_study_catalog_postgres \
-  --test comment_study_catalog_read_postgres --locked \
+  --test comment_study_catalog_read_postgres \
+  --test comment_study_inspection_postgres --locked \
   -- --ignored --nocapture --test-threads=1
 printf '%s\n' 'Implemented Comment Study productization PostgreSQL subset passed; not the complete T01-T54 suite'

@@ -14,10 +14,17 @@ use uuid::Uuid;
 mod cursor;
 #[path = "comment_study_catalog/read.rs"]
 mod read;
+#[path = "comment_study_catalog/detail.rs"]
+mod detail;
 
 pub use read::{
     CatalogStudyState, CatalogSummaryQuery, CatalogVoiceRole, CommentCatalogQuery,
     read_catalog_summary, read_comment_catalog,
+};
+
+pub use detail::{
+    CommentDetailQuery, CommentHistoryQuery, read_comment_detail, read_comment_history,
+    read_comment_versions,
 };
 
 const MAX_REFRESH_LIMIT: i64 = 200;
@@ -47,6 +54,8 @@ pub enum StudyCatalogError {
     QueryTimeout,
     #[error("the catalog projection does not match its contract")]
     ProjectionInvalid,
+    #[error("the requested comment is absent or outside the selected domain")]
+    ResourceNotFound,
 }
 
 #[derive(Debug, Default, PartialEq, Eq, Serialize)]

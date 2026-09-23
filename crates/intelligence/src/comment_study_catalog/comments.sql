@@ -1,6 +1,7 @@
 -- One read-only statement: latest version first, dynamic readability second, then search/page.
 -- $1 domain; $2 asOf; $3 cleaner; $4 work; $5 literal pattern; $6 voice; $7 study filter;
 -- $8 received-before; $9 work-after; $10 external-id-after; $11 page size plus one (0 for summary).
+-- $12 exact stable comment id, used only by the detail reader; public list filters stay unchanged.
 WITH latest AS MATERIALIZED (
     SELECT DISTINCT ON (comment.content_public_ref, comment.comment_external_id)
            comment.material_ref, comment.content_public_ref, comment.comment_external_id,
@@ -12,6 +13,7 @@ WITH latest AS MATERIALIZED (
     JOIN linggan_runtime_capture_package package ON package.package_ref = comment.package_ref
     WHERE content.domain_ref = $1
       AND ($4::uuid IS NULL OR comment.content_public_ref = $4)
+      AND ($12::text IS NULL OR comment.comment_external_id = $12)
       AND package.accepted_at <= $2::timestamptz AND comment.created_at <= $2::timestamptz
     ORDER BY comment.content_public_ref, comment.comment_external_id,
              comment.observed_at::timestamptz DESC, comment.created_at DESC, comment.material_ref DESC
@@ -26,6 +28,7 @@ WITH latest AS MATERIALIZED (
     JOIN linggan_comment_study_policy policy ON policy.policy_ref = run.policy_ref
     WHERE policy.domain_ref = $1 AND target.created_at <= $2::timestamptz
       AND ($4::uuid IS NULL OR original.content_public_ref = $4)
+      AND ($12::text IS NULL OR original.comment_external_id = $12)
 ), last_attempt AS (
     SELECT DISTINCT ON (content_public_ref, comment_external_id) * FROM history
     ORDER BY content_public_ref, comment_external_id, created_at DESC, target_ref DESC
@@ -130,6 +133,22 @@ WITH latest AS MATERIALIZED (
     FROM scoped
 )
 SELECT jsonb_build_object(
+    -- This metadata is only used by a stable-key detail read. No raw or derived text survives
+    -- here when the current source cannot be displayed, and ordinary lists receive NULL.
+    'currentSource', (SELECT jsonb_build_object(
+        'commentKey', jsonb_build_object('workRef', content_public_ref, 'commentExternalId', comment_external_id),
+        'sourceRef', material_ref,
+        'sourceState', CASE WHEN source_restricted THEN 'restricted' WHEN readable THEN 'known' ELSE 'unknown' END,
+        'displayState', CASE
+            WHEN source_restricted THEN 'restricted'
+            WHEN NOT readable THEN 'body_unavailable'
+            WHEN cached_source_ref IS NULL THEN 'index_pending'
+            WHEN clean_state NOT IN ('direct', 'context') THEN 'not_displayable'
+            ELSE 'displayable' END,
+        'cleanState', CASE WHEN readable THEN clean_state ELSE NULL END,
+        'parentCommentKey', CASE WHEN parent_comment_external_id IS NULL THEN NULL
+            ELSE jsonb_build_object('workRef', content_public_ref, 'commentExternalId', parent_comment_external_id) END
+    ) FROM qualified WHERE $12::text IS NOT NULL),
     'indexCoverage', (SELECT jsonb_build_object(
         'state', CASE WHEN pending = 0 THEN 'ready' ELSE 'partial' END,
         'indexedCount', indexed,

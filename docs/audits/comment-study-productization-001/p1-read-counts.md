@@ -74,6 +74,45 @@ Mog 已授权继续开发，无需其手动建表。入手重新核对main=c74d7
 
 `bash -n scripts/test-comment-study-productization-postgres.sh`通过；实际执行脚本退出1、Cargo is unavailable，尚未进入Docker。Rust编译/fmt、SQL语法执行、PG证明、EXPLAIN、全仓库治理、浏览器均NOT_RUN；T01–T54不改PASS。本轮不证明百万规模性能，15秒statement_timeout也不代表达到延迟验收目标。
 
+## 2026-09-23 继续：评论详情与完整分页历史
+
+本轮继续同一授权／PR，基线为 ff8f2064，main仍为c74d72e3；未发现新审查意见。对照HTTP§1–2的评论详情／完整历史要求、数据库§7–8和P1；未修改批准手册原文。读取子项先形成可审查代码，不把已写接口声明为前端或真实数据库验收完成。
+
+### 实现与边界
+
+- `comment_study_catalog/detail.rs`负责当前评论检查器、父语境和两类元数据历史；不是新的服务层。当前原声复用`read.rs`的`read_one_projection`和原`comments.sql`，只增加私有精确comment ID参数，不复制评论可显示／可研究资格规则。普通目录绑定NULL，原公开筛选与分页响应不改变。
+- 评论详情一次短只读事务中取当前原声及父语境、前50条研究历史和前50条材料版本。历史集合都返回完整totalCount和独立nextCursor，不将前50条当全部。单条评论最新版本UNKNOWN、受限、待索引或无意义时返回状态及metadata，正文为NULL；不回退旧原文填空。
+- `parent.sql`先取同作品、确知parent ID的最新已接纳版本，再检查正文和当前restriction；不能先过滤KNOWN而复活旧父评论。只传回最多16001 scalar，由同一clean.v2区分超长／无语义；作品作者的父评论标contextOnly，不变成用户依据。此处修复的是新检查器读取，**原冻结选择器的父语境SQL尚未统一**，不能据此宣称全链路T07/T39通过。
+- `history.sql`跨材料版本按稳定评论身份读取全部Target尝试，只返回状态、方法元信息、时间、Signal数量和runRef/targetRef。最近尝试与最近成功分别标注；历史方法缺记录返回legacy_unrecorded，不将活动方法倒填进去。完整输入比较仍为unknown，留给P2冻结fingerprint；成功head标记不冒充当前Problem支持数。
+- `versions.sql`返回材料版本元信息而非历史正文；isCurrent按实际观察时间、接收时间和material_ref判定，翻页按created_at/material_ref，两个顺序不混用。材料版本数量不能展示成用户评论数。无论来源是否受限，这两个历史集合均不返回raw/researchText、frame/basis、prompt或模型输出。
+- 原私有cursor扩展到两个实际位置类型，复用base64url和边界检查；history/versions按resource、domain、稳定评论键和排序绑定。改变页大小允许，换评论或资源必须拒绝游标。没有增加通用查询DSL、依赖库或数据库表。
+
+### 精确HTTP接缝
+
+均由`comment_study_api.rs`挂在既有Host/Origin/no-store guard下，GET无清洗／Run／模型副作用。
+
+| 路由 | 参数 | 新读取形状 |
+|---|---|---|
+| `/comments/detail` | domain、workRef、commentExternalId | contract/domainRef/asOf/commentKey/workRef/source/comment/parentContext/studyHistory/materialVersions/indexCoverage |
+| `/comments/history` | 同上＋cursor/limit | contract/domainRef/commentKey/items/totalCount/page；Target尝试元数据 |
+| `/comments/versions` | 同上＋cursor/limit | 相同分页外壳；原材料版本元数据 |
+
+后两个是手册“完整历史可查”的有界继续读取入口，不增加新的领域对象或写操作。默认50、上限100；page字段与既有合同相同。source含commentKey/sourceRef/sourceState/displayState/cleanState/parentCommentKey；displayState为displayable/index_pending/not_displayable/body_unavailable/restricted。comment为目录同型对象或NULL。parentContext与comment分开，并明确contextOnly。找不到当前域的稳定评论返回安全404/resource_not_found，不暴露其他领域内容。
+
+### 未完成项，不得扩大声明
+
+`/works`服务端分页、显示标题搜索和原作品选择器100篇限制本轮仍未解决。共享Evidence的title/OCR选择拥有独立权威，不能在评论模块复制native/OCR回退SQL，也不使用N+1全作品读取冒充有界实现。detail目前给workRef，尚未返回完整作品上下文和共享显示标题；本轮没有修改Evidence、HTML/CSS/JS、Worker、schema或migration。
+
+完整冻结选择器、语境权限传播、P2启动默认排重／方法／fingerprint和P4有效知识仍需推进。三个新GET不意味着批次手动流程、四个Tab或自动研究已完成。0102继续未注册、未执行，用户无需手工建表。
+
+### 实际验证与治理回执
+
+本轮新增5个单元测试候选（详情参数3、游标2）和5个隔离PG用例候选，覆盖当前评论／父语境、最新UNKNOWN和受限、无效文本／未知作者、124次同评论研究历史、105个材料版本、相同时间UUID翻页与资源越界。proof脚本保留既有三组test target并加入inspection组。用例只使用合成材料，不外发模型；这些是T05/T06/T07/T38/T39/T44/T46的部分场景，T01–T54继续NOT_RUN。
+
+实际执行36项本地staging静态检查通过：修改前7份文件Git blob完整校验、SQL参数集合与对应bind数、只读SQL／事务、共用目录查询、无历史正文输出、独立总数、GET路由与404、无越界文件、测试候选登记等。该数量包含基础文件校验，**不等于36个业务测试，也未执行Rust或PostgreSQL**。`bash -n`通过；尝试proof脚本退出1/Cargo is unavailable，未进入Docker或数据库。Rust编译/fmt/clippy、隔离SQL/并发、EXPLAIN、全仓库治理和浏览器均NOT_RUN。
+
+原月报`docs/progress/2026-09.md`为875681字节，本轮未使用截断读取覆盖它；在小型`docs/progress/README.md`增加本P1回执入口。集成前仍须将对应条目追加进完整月报并执行全仓库治理，不能将索引链接当作月报正文已更新。现有审计记录均保留，原手册和验收台账不改写。
+
 ## 下一步
 
-继续同一P1：复用共享作品标题读取完成作品分页、评论详情与历史清单，统一source资格和父语境；补齐隔离测试并接用户评论页。P2输入指纹和方法/启动完成后开放input_changed。完整schema/constraints/views与执行控制集成后才注册迁移，实际共享升级仍先完成P0现场盘点和drain。每次回到本记录及固定手册，不新增Coverage实体或第二引擎。
+继续P1的作品分页／共享显示标题、完整作品上下文、统一冻结来源资格及用户评论页接入；现已写的检查器与历史必须先通过隔离SQL和Rust证明，再用于UI。P2统一方法／选择／输入指纹后开放input_changed和默认排重。完整schema/constraints/views与执行控制就绪才注册迁移；共享升级仍需P0现场只读盘点和drain。不新增Coverage实体或第二引擎。
