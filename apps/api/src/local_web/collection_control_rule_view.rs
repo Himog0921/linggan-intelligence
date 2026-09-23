@@ -241,14 +241,13 @@ pub async fn read_monitor_rule_panel(
     .fetch_all(database.pool())
     .await?;
     let receipt = read_receipt(database, target_ref, receipt_ref).await?;
-    // **刚跑完一条命令时，面板显示的就是它写的那条规则。**
+    // **只有命令返回页显式带回执时，才让回执决定面板选中的规则。**
     //
-    // 回执只会出现在命令刚跑完的那次跳转里（抽屉上的链接一律不带它），所以它比 URL 上的
-    // 口径更准：新开一条成功之后 URL 上还写着 `rule_slot=new`，照它读就会显示成「再加一条」，
-    // 而人刚存的那条看不见——横幅说「已保存」，下面的表单却是另一条规则的设置。
-    let receipt_slot = match receipt
-        .as_ref()
-        .and_then(|receipt| receipt.applied_rule_revision_ref)
+    // `read_receipt(None)` 会为普通打开的面板读取最近一条回执，供反馈区展示；这条历史回执
+    // 不能覆盖 URL 的 `rule_slot=new`，否则「加一条规则」会退回到旧规则的只读编辑表单。
+    // 命令提交后的跳转会显式带 `rule_receipt`，此时才用刚应用的版本定位刚保存的那条规则。
+    let receipt_slot = match receipt_ref
+        .and_then(|_| receipt.as_ref().and_then(|receipt| receipt.applied_rule_revision_ref))
     {
         Some(revision_ref) => {
             sqlx::query_scalar::<_, String>(
