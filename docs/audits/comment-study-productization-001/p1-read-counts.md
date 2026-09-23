@@ -20,7 +20,7 @@ Mog 已授权继续开发，无需其手动建表。入手重新核对main=c74d7
 
 ### 对照手册与实际文件
 
-- 数据库合同§3–4、开发手册§3.1：新增 `database/migrations/0102_comment_study_productization_schema.sql` 候选。恰好三张批准的新表：clean_cache、start_request、model_request；policy/run/target/membership仅增加约定字段。旧方法/指纹/匹配版本不倒填，旧原字段不UPDATE。安装pg_trgm并建立清洗检索索引。
+- 数据库合同§3–4、开发手册§3.1：新增 `database/migrations/0103_comment_study_productization_schema.sql` 候选。恰好三张批准的新表：clean_cache、start_request、model_request；policy/run/target/membership仅增加约定字段。旧方法/指纹/匹配版本不倒填，旧原字段不UPDATE。安装pg_trgm并建立清洗检索索引。
 - 架构文件地图和开发手册§4：新增既定 `comment_study_catalog.rs`，先实现 `refresh_clean_cache`。继续调用现有 `comment-clean.v2`，不存offsets、不建第二清洗器、不创建Run或模型调用。
 - SQL从领域内每条稳定评论的最新已接纳版本选取，再判断正文/限制；不从UNKNOWN新版本回退旧正文。一次最多200条，最多传回16001 scalar用于判超长；完整原文哈希仍针对完整UTF-8。全库latest投影只保存元信息，不物化全库正文。
 - ON CONFLICT DO NOTHING后比对hash、文本、状态和原因；不覆盖竞争写入。写入前再次检查来源限制；缓存存在不代表有研究或外发资格。读取权限JOIN仍是后续目录接口的必做项。

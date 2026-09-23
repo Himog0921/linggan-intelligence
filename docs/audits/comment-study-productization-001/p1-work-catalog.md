@@ -3,14 +3,14 @@
 > 状态: 已编写候选；Rust/PostgreSQL/浏览器未运行，不是已上线声明
 > 最后核对: 2026-09-23
 > 适用范围: COMMENT-STUDY-PRODUCTIZATION-001 / PR #338 的 P1 作品读取增量
-> 事实来源: 分支起点 1849bdbf、main b9ff8237、当前变更与实际工具回执
+> 事实来源: 分支起点 1849bdbf、原核对 main b9ff8237、当前集成 main a42315eb、实际工具回执
 > 冲突时以谁为准: 已批准数据库/HTTP合同、实际测试与对应 Git diff
 
 ## 1. 本轮边界与主线差异
 
 Mog 已连续授权按手册开发、追加 PR #338，并要求明确剩余工作。本轮实现 HTTP §2 的 `/works` 后端，复用既有目录资格与 Evidence 显示标题；不更改原型或四 Tab 产品结构。
 
-main 已从 c74d72e3 前进到 b9ff8237，两次提交涉及跨行业作者目录等功能。候选以 PR 自己的 1849bdbf 为父提交，不覆盖 main，不把其他交付回退。main 新增 `0102_cross_industry_creator_directory`，本包未注册的 `0102_comment_study_productization_schema` 为不同完整 migration ID；最终集成仍需核对序列与 ledger，不能只凭相同数字前缀重写已应用文件。本轮没有同步合并 main，也不声称 PR 无冲突。
+初次制作本回执时，main 为 `b9ff8237`，PR 分支尚未同步后续主线；当时的候选以 `1849bdbf` 为父提交，产品化迁移文件名为 `0102_comment_study_productization_schema.sql`。该段记录的是初次实施时的主线差异，最新对齐结果见下方追加回执。
 
 ## 2. 实际增量与复用
 
@@ -29,7 +29,7 @@ main 已从 c74d72e3 前进到 b9ff8237，两次提交涉及跨行业作者目�
 
 本轮只完成 `/works` 后端候选。现有 HTML/JS 作品选择器还未切换新接口，因此用户本机弹窗的100篇限制仍不能宣称已经消失；T43必须在真实接口和前端连接后验收。完整作品上下文、冻结来源统一、清洗后台接入与用户评论 UI 仍在 P1 待办。
 
-不新增表、依赖、Worker、执行通道或 migration；不改手册字段。0102候选继续不注册、不执行。无共享库、真实模型或计划副作用。
+不新增表、依赖、Worker、执行通道或 migration；不改手册字段。初次实施时的 `0102` 候选没有注册或执行。无共享库、真实模型或计划副作用。
 
 ## 4. 测试与真实验证边界
 
@@ -48,3 +48,7 @@ main 已从 c74d72e3 前进到 b9ff8237，两次提交涉及跨行业作者目�
 ## 5. 下一执行点
 
 P1先完成完整作品语境与原冻结资格统一、后台有界清洗接入和用户评论页面，再对照P1可验收结果执行真实测试。P2–P5不跳过、不因已有SQL候选宣布完成。剩余阶段统一登记在 [来源与验收账本](README.md)，原技术手册不改写。
+
+## Latest-main integration correction · 2026-09-23
+
+After aligning this branch with `origin/main@a42315eb`, the shared migration number `0102` is already occupied by `0102_cross_industry_creator_directory`. The productization schema candidate has therefore been renumbered to `0103_comment_study_productization_schema.sql`, and its isolated proof references now use that exact path. The earlier note above records the pre-alignment state and is superseded on this point. The candidate remains deliberately unregistered in `local-runtime.sh`; no shared database was migrated.

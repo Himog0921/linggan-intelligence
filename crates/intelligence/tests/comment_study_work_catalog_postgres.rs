@@ -18,7 +18,7 @@ use uuid::Uuid;
 
 const BASE: &str = include_str!("../../../database/bootstrap/comment-study-001.sql");
 const DELTA: &str =
-    include_str!("../../../database/migrations/0102_comment_study_productization_schema.sql");
+    include_str!("../../../database/migrations/0103_comment_study_productization_schema.sql");
 
 async fn database(name: &str) -> Database {
     let db = proof_database(name).await;

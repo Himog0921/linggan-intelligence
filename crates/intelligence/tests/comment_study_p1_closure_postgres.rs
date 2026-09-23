@@ -17,7 +17,7 @@ async fn database(name: &str) -> Database {
     let db=fixture::proof_database(name).await;
     sqlx::raw_sql(include_str!("../../../database/bootstrap/comment-study-001.sql"))
         .execute(db.pool()).await.unwrap();
-    sqlx::raw_sql(include_str!("../../../database/migrations/0102_comment_study_productization_schema.sql"))
+    sqlx::raw_sql(include_str!("../../../database/migrations/0103_comment_study_productization_schema.sql"))
         .execute(db.pool()).await.unwrap();
     db
 }
