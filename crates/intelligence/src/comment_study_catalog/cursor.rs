@@ -1,7 +1,6 @@
 //! Bounded resource/query-bound cursors; never authorization tokens.
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use super::StudyCatalogError;
@@ -54,7 +53,7 @@ pub(super) struct Cursor<P = CommentPosition> {
 
 pub(super) fn scope_hash(scope: &Value) -> Result<String, StudyCatalogError> {
     let bytes = serde_json::to_vec(scope).map_err(|_| StudyCatalogError::InvalidQuery)?;
-    Ok(format!("{:x}", Sha256::digest(bytes)))
+    Ok(super::sha256_hex(&bytes))
 }
 
 pub(super) fn encode(

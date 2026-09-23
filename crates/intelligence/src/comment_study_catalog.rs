@@ -78,11 +78,18 @@ struct CacheProjection {
     clean_reasons: Vec<String>,
 }
 
+pub(super) fn sha256_hex(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
 fn projection(raw_prefix: &str, raw_sha256: String) -> Result<CacheProjection, StudyCatalogError> {
     // SQL bounds transfer to 16001 scalars while hashing the complete immutable raw UTF-8.
     // For short inputs the complete text is available, so verify SQL/Rust hash agreement too.
     if raw_prefix.chars().count() <= 16000
-        && format!("{:x}", Sha256::digest(raw_prefix.as_bytes())) != raw_sha256
+        && sha256_hex(raw_prefix.as_bytes()) != raw_sha256
     {
         return Err(StudyCatalogError::CacheConflict);
     }
@@ -194,7 +201,7 @@ mod tests {
     use super::*;
 
     fn from_raw(raw: &str) -> CacheProjection {
-        projection(raw, format!("{:x}", Sha256::digest(raw.as_bytes()))).unwrap()
+        projection(raw, sha256_hex(raw.as_bytes())).unwrap()
     }
 
     #[test]
