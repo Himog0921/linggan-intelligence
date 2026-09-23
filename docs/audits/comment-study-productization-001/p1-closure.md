@@ -32,6 +32,7 @@ exact head `7f22b14e` / CI run `35848941778`：Rust compile、单元测试、隔
 
 - `origin/main@a42315eb` 已合入独立 PR worktree；合并提交为 `1c43495d`。迁移号冲突已修正为 `0103_comment_study_productization_schema.sql`，仍未注册或应用到共享运行路径。
 - 合并后 `cargo +stable check -p linggan-intelligence -p linggan-api --locked` 与 `cargo +stable test -p linggan-intelligence -p linggan-api --locked` 均通过。`scripts/test-comment-study-productization-postgres.sh` 的 6 个隔离 target 共 22/22 通过；这些是选定 P1 proof，不是 T01–T54 全量。
+- GitHub Actions run `35887043720` 在 exact PR head `5fe1818e` 全绿（编译、单元、隔离 PostgreSQL）。CI 只安装 Playwright/Chromium；可选 `scripts/test-comment-study-p1-ui.mjs` 不存在，因此 CI 没有实际浏览器交互证明，浏览器证据来自本机手动操作。
 - 本机 HTTP 页面连接本轮新建的合成 PostgreSQL；健康检查、HTML 页面、setup 和作品目录 API 均返回 200。浏览器验证了概览计数、用户评论列表与未知声音标注、按“老师”搜索、详情中的原声/清洗文本/空研究历史、Escape 关闭、作品作者声音筛选、作品目录搜索和复选。
 - 作品选择弹窗没有启用模型配置，策略保存按钮禁用；选中零条可研究评论的作品后，启动按钮仍启用。没有点击启动，因此没有创建 Run；该按钮条件需要与 P2 `no_work`/`index_pending` 启动语义一起修订或证明。
 - T43 在 `acceptance-status.json` 标为 PASS；其他 T 编号仍按完整案例覆盖要求保持 NOT_RUN。P0用户库历史/在途请求盘点、真实模型质量、P1全量边界、P2–P5、迁移/部署和 Mog 业务验收仍未验证。
