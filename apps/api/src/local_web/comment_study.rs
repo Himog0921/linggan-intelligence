@@ -514,10 +514,10 @@ mod tests {
     }
 
     #[test]
-    fn comment_study_page_offers_the_five_approved_review_tabs_with_no_leftover_mini_readout() {
+    fn comment_study_page_exposes_user_comments_without_restoring_the_old_target_tab() {
         let page = include_str!("comment_study.html");
         assert!(page.contains("<nav class=\"study-tabs\" aria-label=\"评论研究视图\">"));
-        for view in ["overview", "targets", "pending", "problems", "runs"] {
+        for view in ["overview", "comments", "pending", "problems", "runs"] {
             assert!(
                 page.contains(&format!("data-view=\"{view}\"")),
                 "missing tab button for view={view}"
@@ -534,7 +534,7 @@ mod tests {
     #[test]
     fn comment_study_script_renders_a_run_scoped_targets_tab_with_original_comment_text() {
         let script = include_str!("comment_study.js");
-        assert!(script.contains("const RUN_SCOPED_VIEWS = new Set(['targets', 'pending']);"));
+        assert!(script.contains("const RUN_SCOPED_VIEWS = new Set(['pending']);"));
         assert!(script.contains("async function renderTargetsTab()"));
         assert!(
             script.contains("`targets?runRef=${encodeURIComponent(selectedRunRef)}&limit=100`")
@@ -608,7 +608,7 @@ mod tests {
         assert!(script.contains("评论作者身份未知"));
         assert!(script.contains("作品作者本人"));
         assert!(script.contains("本次最多冻结"));
-        assert!(script.contains("此列表最多展示 100 篇"));
+        assert!(script.contains("服务端作品目录"));
     }
 
     #[test]
@@ -706,4 +706,18 @@ mod tests {
         assert!(stylesheet.contains(".study-review-table blockquote{"));
         assert!(stylesheet.contains("var(--lgi-font-evidence)"));
     }
+    #[test]
+    fn p1_comments_use_catalog_detail_and_server_side_work_pagination() {
+        let page=include_str!("comment_study.html");let script=include_str!("comment_study.js");
+        assert!(page.contains("data-view=\"comments\">用户评论"));assert!(page.contains("id=\"comment-detail-dialog\""));
+        for token in ["catalogQuery('comments',params)","catalogQuery('catalog-summary',summaryParams)","catalogQuery('comments/detail',{workRef,commentExternalId})","catalogQuery('works',{q:query,limit:20})","workCatalogPath(cursor)"] { assert!(script.contains(token),"missing P1 client contract: {token}"); }
+        assert!(!script.contains("setup.eligibleWorks || []"));assert!(!page.contains("筛选已加载作品"));
+    }
+    #[test]
+    fn p1_comment_detail_keeps_raw_context_cleaning_and_history_visibly_distinct() {
+        let page=include_str!("comment_study.html");let script=include_str!("comment_study.js");
+        for label in ["原声证据","所属作品","父评论语境","清洗文本","研究历史"] { assert!(page.contains(label)||script.contains(label),"missing detail layer: {label}"); }
+        assert!(script.contains("仅作为语境，不作为当前评论的独立证据"));assert!(script.contains("历史未记录"));
+    }
+
 }
