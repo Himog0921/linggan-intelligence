@@ -3,7 +3,7 @@
 > 状态: 实施中；非通过声明
 > 最后核对: 2026-09-23
 > 适用范围: COMMENT-STUDY-PRODUCTIZATION-001 / P1 / PR #338
-> 事实来源: exact head c94047f、已批准手册、CI run 35820257177
+> 事实来源: exact head 7f22b14e、已批准手册、CI run 35848941778
 > 冲突时以谁为准: 当前用户授权、固定手册与实际测试
 
 ## 本轮范围
@@ -17,3 +17,12 @@
 ## 第一项实测修复
 
 CI 在 sha2 0.11 的摘要 LowerHex 格式化处发现两处 E0277。目录缓存及游标复用逐字节小写 hex，不降级依赖、不修改哈希语义。源码与上传 blob 已核对；后续以新 exact-head CI 回执为准。独立 commit-reviewer 工具不可用，未冒充独立审查，最终交 Codex。
+
+
+## P1-B · 用户评论与作品目录已接通
+
+exact head `7f22b14e` / CI run `35848941778`：Rust compile、单元测试、隔离 PostgreSQL proof 全部 PASS。页面已经从旧 run-scoped「评论目标」切到全库「用户评论」，接入评论搜索/筛选/keyset、评论详情、父语境、清洗文本与可继续翻页的研究历史；研究发起弹窗改用服务端 `/works` 搜索/翻页，跨页选择保持且最多 100 篇。此处不把 P2 的最终启动合同或 P4 的四 Tab 重构提前算入 P1。
+
+## P1-C · 有界清洗维护
+
+本提交将既有 `maintain_comment_catalog` 接入原模型 Worker 的一次 tick 入口：每 tick 最多处理 128 个缺当前 cleaner 版本的 raw head，随后继续原 pair/resolution/semantic 链，不因本地清洗成功而提前 return。缺 `clean_cache` 表时返回 no-op，不能借此 bootstrap/reset；数据库错误按既有 Worker 错误边界结算。已有隔离 PG 用例证明 130 条会按 128+2+0 三次推进且不创建 Run / model invocation；本提交仍需 exact-head CI 复验。
