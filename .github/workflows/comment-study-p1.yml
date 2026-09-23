@@ -30,6 +30,14 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           persist-credentials: false
+      - name: Package tracked sources for exact-head validation
+        run: git archive --format=zip --output=/tmp/comment-study-source.zip HEAD
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: comment-study-source-${{ github.event.pull_request.head.sha }}
+          path: /tmp/comment-study-source.zip
+          retention-days: 1
+          if-no-files-found: error
       - name: Install stable Rust tools
         run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
       - name: Compile the exact candidate
