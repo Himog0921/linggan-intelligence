@@ -1,7 +1,7 @@
 # P1 作品目录与共享显示标题
 
-> 状态: 已编写候选；Rust/PostgreSQL/浏览器未运行，不是已上线声明
-> 最后核对: 2026-09-23
+> 状态: 最新主线整合后，隔离 PostgreSQL 与合成数据浏览器验证通过；P1整体未结项
+> 最后核对: 2026-09-24
 > 适用范围: COMMENT-STUDY-PRODUCTIZATION-001 / PR #338 的 P1 作品读取增量
 > 事实来源: 分支起点 1849bdbf、原核对 main b9ff8237、当前集成 main a42315eb、实际工具回执
 > 冲突时以谁为准: 已批准数据库/HTTP合同、实际测试与对应 Git diff
@@ -27,9 +27,9 @@ Mog 已连续授权按手册开发、追加 PR #338，并要求明确剩余工�
 
 `studiedCommentCount` 继续表示当前可展示评论中曾有成功 Target head 的数量；它不是完整输入条件均一致的当前有效知识数。P2 的作品/父语境 fingerprint、P4 的有效关系和支持去重仍需完成。`input_changed` 继续明确拒绝，不能偷偷用正文差异代替完整输入变化。
 
-本轮只完成 `/works` 后端候选。现有 HTML/JS 作品选择器还未切换新接口，因此用户本机弹窗的100篇限制仍不能宣称已经消失；T43必须在真实接口和前端连接后验收。完整作品上下文、冻结来源统一、清洗后台接入与用户评论 UI 仍在 P1 待办。
+原始目录回执完成时，作品选择器尚未切换新接口。PR #338 后续提交已把弹窗接到 `/works`，并实现用户评论、筛选、详情和历史读取；本回合在合并后的浏览器对这些路径作了合成数据验证。P1的全部语境资格、冻结选择与边界状态仍须按手册完成整体验收。
 
-不新增表、依赖、Worker、执行通道或 migration；不改手册字段。初次实施时的 `0102` 候选没有注册或执行。无共享库、真实模型或计划副作用。
+不新增表、依赖、Worker、执行通道或 migration；不改手册字段。`0103_comment_study_productization_schema.sql` 仍是候选，未注册或执行到共享库。无共享库、真实模型或计划副作用。
 
 ## 4. 测试与真实验证边界
 
@@ -38,17 +38,22 @@ Mog 已连续授权按手册开发、追加 PR #338，并要求明确剩余工�
 实际运行：
 
 - 16项本地源码形状检查通过：4个已保存文件与 Git blob SHA 一致；九参数绑定、有界读取、独立总数、搜索先于分页、125作品fixture等。此计数不是业务测试，不等于 Rust/SQL 执行。
-- `bash -n scripts/test-comment-study-productization-postgres.sh`：PASS。
-- 实际执行该脚本：退出1，`Cargo is unavailable`；未进入Docker或数据库步骤。
-- Rust编译/fmt/clippy、PostgreSQL、OCR回退真实fixture、EXPLAIN、浏览器、全仓库治理：NOT_RUN。
-- T01–T54保留NOT_RUN；本轮为T43/T45/T46等补代码和验证用例，不把它们自动勾为PASS。
+- `cargo +stable check -p linggan-intelligence -p linggan-api --locked`：PASS。
+- `cargo +stable test -p linggan-intelligence -p linggan-api --locked`：PASS。
+- `scripts/test-comment-study-productization-postgres.sh`：PASS，6 个隔离 target 共 22/22；脚本清理了其专用临时容器与 volume。
+- 本机 API 使用独立 PostgreSQL 容器、主线完整 schema、clean-study bootstrap、未注册的 0103 候选及合成记录，在 `127.0.0.1:3011/corpus/comments?view=overview` 进行浏览器验证。页面/health/setup/works 均 HTTP 200；概览读取 4 条原始评论、2 条可研究评论；列表展示 3 条用户声音，其中未知身份仍可读但不可研究，作品作者声音单独筛出且不可研究。字面搜索、评论详情、清洗文本、空历史与 Escape 关闭、作品搜索及选择均可用。
+- 手动验证没有提交研究运行或保存策略。没有模型配置时策略按钮禁用；选择一篇零条可研究评论的作品后，“创建研究运行”仍可点，本次停止在提交前，列为 P2 启动合同的复验/修正规则。
+- T43：PASS（第 101 条之后的服务端搜索由 `all_125_works_are_pageable_and_titles_after_the_first_100_are_searchable` 覆盖，弹窗另经真实本地 HTTP 搜索验证）。其余 T01–T54 未达到完整案例覆盖，保持 NOT_RUN。
+- Rust fmt/clippy、OCR 回退专项、EXPLAIN/性能、未覆盖 T 项、真实模型、用户数据库保护盘点、部署与 Mog 业务验收：NOT_RUN。
 
-提交前回读 Git diff，确认大文件只发生本轮接缝变化。主线合并、月报正文安全追加、原型入库仍需后续整合，不能用此说明替代相关检查。
+本地分支已合入 `origin/main@a42315eb`；对应代码修正提交为 `d5b2d0cd`。主线同步已完成，但 PR 仍为 Draft；月报正文安全追加、原型入库、P0现场保护盘点及完整发布验收仍待后续执行。
 
 ## 5. 下一执行点
 
-P1先完成完整作品语境与原冻结资格统一、后台有界清洗接入和用户评论页面，再对照P1可验收结果执行真实测试。P2–P5不跳过、不因已有SQL候选宣布完成。剩余阶段统一登记在 [来源与验收账本](README.md)，原技术手册不改写。
+先完成 P1 全量验收中的完整语境、冻结来源资格一致性和剩余边界状态。下一开发阶段是 P2 启动与不可变方法合同；本次观察到的空选择启动按钮应并入 P2 验收。P3–P5、真实模型质量、部署与业务验收未完成。剩余阶段统一登记在 [来源与验收账本](README.md)，原技术手册不改写。
 
-## Latest-main integration correction · 2026-09-23
+## 最新主线整合与浏览器验证 · 2026-09-24
 
-After aligning this branch with `origin/main@a42315eb`, the shared migration number `0102` is already occupied by `0102_cross_industry_creator_directory`. The productization schema candidate has therefore been renumbered to `0103_comment_study_productization_schema.sql`, and its isolated proof references now use that exact path. The earlier note above records the pre-alignment state and is superseded on this point. The candidate remains deliberately unregistered in `local-runtime.sh`; no shared database was migrated.
+分支已合并 `origin/main@a42315eb`。主线占用 `0102_cross_industry_creator_directory`，因此本包迁移候选及五个隔离 PG proof 均改用 `0103_comment_study_productization_schema.sql`；该迁移仍未注册进 `local-runtime.sh`，没有修改共享数据库。LIDS 的负 8 像素间距改为现有 spacing token。
+
+上述编译、单元、22 个 PostgreSQL proof 与浏览器操作都针对代码提交 `d5b2d0cd`。浏览器用全新合成数据库，没有接触已存在容器、共享数据库、模型或用户页面 `:3000`。隔离 API/数据库留在本机供 Mog 继续查看；不是部署结果。

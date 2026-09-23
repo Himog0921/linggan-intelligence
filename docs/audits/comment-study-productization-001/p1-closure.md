@@ -1,10 +1,11 @@
 # P1 闭环实施与验收
 
-> 状态: 实施中；非通过声明
-> 最后核对: 2026-09-23
+> 状态: P1候选经隔离数据库与合成浏览器验证；非整包通过声明
+> 最后核对: 2026-09-24
 > 适用范围: COMMENT-STUDY-PRODUCTIZATION-001 / P1 / PR #338
 > 事实来源: exact head 7f22b14e、已批准手册、CI run 35848941778
 > 冲突时以谁为准: 当前用户授权、固定手册与实际测试
+> 当前集成源码: `d5b2d0cd`（本地合入 `origin/main@a42315eb` 后）
 
 ## 本轮范围
 
@@ -26,3 +27,12 @@ exact head `7f22b14e` / CI run `35848941778`：Rust compile、单元测试、隔
 ## P1-C · 有界清洗维护
 
 本提交将既有 `maintain_comment_catalog` 接入原模型 Worker 的一次 tick 入口：每 tick 最多处理 128 个缺当前 cleaner 版本的 raw head，随后继续原 pair/resolution/semantic 链，不因本地清洗成功而提前 return。缺 `clean_cache` 表时返回 no-op，不能借此 bootstrap/reset；数据库错误按既有 Worker 错误边界结算。已有隔离 PG 用例证明 130 条会按 128+2+0 三次推进且不创建 Run / model invocation；本提交仍需 exact-head CI 复验。
+
+## 最新主线整合与本机只读浏览器回执 · 2026-09-24
+
+- `origin/main@a42315eb` 已合入独立 PR worktree；合并提交为 `1c43495d`。迁移号冲突已修正为 `0103_comment_study_productization_schema.sql`，仍未注册或应用到共享运行路径。
+- 合并后 `cargo +stable check -p linggan-intelligence -p linggan-api --locked` 与 `cargo +stable test -p linggan-intelligence -p linggan-api --locked` 均通过。`scripts/test-comment-study-productization-postgres.sh` 的 6 个隔离 target 共 22/22 通过；这些是选定 P1 proof，不是 T01–T54 全量。
+- 本机 HTTP 页面连接本轮新建的合成 PostgreSQL；健康检查、HTML 页面、setup 和作品目录 API 均返回 200。浏览器验证了概览计数、用户评论列表与未知声音标注、按“老师”搜索、详情中的原声/清洗文本/空研究历史、Escape 关闭、作品作者声音筛选、作品目录搜索和复选。
+- 作品选择弹窗没有启用模型配置，策略保存按钮禁用；选中零条可研究评论的作品后，启动按钮仍启用。没有点击启动，因此没有创建 Run；该按钮条件需要与 P2 `no_work`/`index_pending` 启动语义一起修订或证明。
+- T43 在 `acceptance-status.json` 标为 PASS；其他 T 编号仍按完整案例覆盖要求保持 NOT_RUN。P0用户库历史/在途请求盘点、真实模型质量、P1全量边界、P2–P5、迁移/部署和 Mog 业务验收仍未验证。
+- 浏览器地址：`http://127.0.0.1:3011/corpus/comments?view=overview`。页面当前停在默认用户评论视图。合成容器与 API 故意保留给 Mog 手动查看，不复用 `:3000` 或已有容器。
