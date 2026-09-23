@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use super::{CLEANER_VERSION, StudyCatalogError, cursor, literal_substring_pattern};
 
-const PAGE_SQL: &str = concat!(include_str!("facts.sql"), include_str!("comments.sql"));
+fn page_sql() -> String { format!("{}{}", super::facts_sql(), include_str!("comments.sql")) }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -144,7 +144,7 @@ async fn read_catalog(
     sqlx::query("SET LOCAL statement_timeout = '15s'").execute(&mut *tx).await?;
     let as_of = resolve_as_of(&mut tx, previous.as_ref()).await?;
     let last = previous.as_ref().map(|value| &value.last);
-    let projection: Value = sqlx::query_scalar(PAGE_SQL)
+    let mut projection: Value = sqlx::query_scalar(sqlx::AssertSqlSafe(page_sql()))
         .bind(query.domain).bind(&as_of).bind(CLEANER_VERSION).bind(query.work_ref)
         .bind(Option::<&str>::None)
         .bind(&scope.pattern).bind(&scope.voice).bind(&scope.study)
@@ -153,6 +153,7 @@ async fn read_catalog(
         .bind(last.map(|value| value.comment_external_id.as_str()))
         .bind(if summary_only { 0 } else { scope.limit + 1 })
         .fetch_one(&mut *tx).await?;
+    if !summary_only { enrich_titles(&mut tx,&mut projection,&as_of).await?; }
     tx.commit().await?;
     if summary_only {
         return Ok(json!({
@@ -164,6 +165,26 @@ async fn read_catalog(
     page_response(query.domain, &scope, &as_of, projection)
 }
 
+async fn enrich_titles(
+    tx: &mut sqlx::Transaction<'_, Postgres>, projection: &mut Value, as_of: &str,
+) -> Result<(),StudyCatalogError> {
+    let rows=projection["rows"].as_array().ok_or(StudyCatalogError::ProjectionInvalid)?;
+    let works: Vec<Uuid>=rows.iter().map(|row| {
+        row.pointer("/item/commentKey/workRef").and_then(Value::as_str)
+            .and_then(|v|Uuid::parse_str(v).ok()).ok_or(StudyCatalogError::ProjectionInvalid)
+    }).collect::<Result<std::collections::BTreeSet<_>,_>>()?.into_iter().collect();
+    let titles=crate::comment_study_source::context::read_titles(tx,&works,as_of).await?;
+    for row in projection["rows"].as_array_mut().ok_or(StudyCatalogError::ProjectionInvalid)? {
+        let id=row["item"]["commentKey"]["workRef"].as_str()
+            .and_then(|s|Uuid::parse_str(s).ok()).ok_or(StudyCatalogError::ProjectionInvalid)?;
+        let title=titles.get(&id).ok_or(StudyCatalogError::ProjectionInvalid)?;
+        row["item"]["workTitle"]=title["displayTitle"].clone();
+        row["item"]["workTitleSource"]=title["displayTitleSource"].clone();
+    }
+    Ok(())
+}
+
+
 /// Read one stable comment using exactly the same eligibility and projection as the directory.
 /// Non-displayable sources return metadata, not a fallback to an older known version.
 pub(super) async fn read_one_projection(
@@ -173,7 +194,7 @@ pub(super) async fn read_one_projection(
     external_id: &str,
     as_of: &str,
 ) -> Result<Value, StudyCatalogError> {
-    let projection: Value = sqlx::query_scalar(PAGE_SQL)
+    let projection: Value = sqlx::query_scalar(sqlx::AssertSqlSafe(page_sql()))
         .bind(domain).bind(as_of).bind(CLEANER_VERSION).bind(Some(work))
         .bind(Some(external_id))
         .bind(Option::<&str>::None).bind("all").bind("all")

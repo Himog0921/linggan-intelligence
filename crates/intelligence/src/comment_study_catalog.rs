@@ -10,7 +10,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 #[path = "comment_study_catalog/cursor.rs"]
-mod cursor;
+pub(crate) mod cursor;
 #[path = "comment_study_catalog/read.rs"]
 mod read;
 #[path = "comment_study_catalog/detail.rs"]
@@ -28,6 +28,11 @@ pub use detail::{
     read_comment_versions,
 };
 pub use works::{WorkCatalogQuery, read_work_catalog};
+
+pub(super) fn facts_sql() -> String {
+    include_str!("comment_study_catalog/facts.sql")
+        .replace("/*SOURCE_ELIGIBILITY_CASE*/", &crate::comment_study_source::gate::sql_case())
+}
 
 const MAX_REFRESH_LIMIT: i64 = 200;
 const MAX_QUERY_CHARS: usize = 200;
@@ -173,6 +178,20 @@ pub async fn refresh_clean_cache(
     }
     transaction.commit().await?;
     Ok(report)
+}
+
+/// One deterministic maintenance pass in the existing worker. Missing P1 schema means this
+/// feature has not been installed, not permission to bootstrap or reset a live database.
+pub async fn maintain_comment_catalog(
+    database: &Database,
+) -> Result<Option<CleanCacheRefresh>,StudyCatalogError> {
+    let installed: bool=sqlx::query_scalar(
+        "SELECT to_regclass('linggan_comment_study_clean_cache') IS NOT NULL",
+    ).fetch_one(database.pool()).await?;
+    if !installed { return Ok(None); }
+    let domain=Uuid::parse_str(crate::comment_study_source::ADHD_DOMAIN_REF)
+        .map_err(|_|StudyCatalogError::UnsupportedDomain)?;
+    refresh_clean_cache(database,domain,128).await.map(Some)
 }
 
 /// A bind parameter for `ILIKE $n ESCAPE E'\\\\'`, not a SQL expression or FTS query.

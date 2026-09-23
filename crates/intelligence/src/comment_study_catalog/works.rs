@@ -64,7 +64,7 @@ fn statement(ocr_schema_ready: bool) -> Result<String, StudyCatalogError> {
     let titles = linggan_evidence::work_display_title_ctes(ocr_schema_ready)
         .map_err(|_| StudyCatalogError::ProjectionInvalid)?;
     // All fragments are owned compile-time constants. Caller values are only bind parameters.
-    Ok(format!("{}{},\n{}\n{}", include_str!("facts.sql"), WORK_SCOPE,
+    Ok(format!("{}{},\n{}\n{}", super::facts_sql(), WORK_SCOPE,
         titles, include_str!("works.sql")))
 }
 
@@ -84,13 +84,12 @@ async fn read_page(database: &Database, query: &WorkCatalogQuery) -> Result<Valu
         .execute(&mut *tx).await?;
     sqlx::query("SET LOCAL statement_timeout = '15s'").execute(&mut *tx).await?;
     let as_of = resolve_as_of(&mut tx, previous.as_ref()).await?;
-    let ocr_ready: bool = sqlx::query_scalar(
+    let ready: bool = sqlx::query_scalar(
         "SELECT to_regclass('linggan_media_ocr_layout') IS NOT NULL \
-         AND to_regclass('linggan_media_ocr_layering_result') IS NOT NULL \
-         AND to_regclass('linggan_media_ocr_retirement') IS NOT NULL",
+          AND to_regclass('linggan_media_ocr_layering_result') IS NOT NULL \
+          AND to_regclass('linggan_media_ocr_retirement') IS NOT NULL",
     ).fetch_one(&mut *tx).await?;
-    let sql = statement(ocr_ready)?;
-    let projection: Value = sqlx::query_scalar(AssertSqlSafe(sql))
+    let projection: Value = sqlx::query_scalar(AssertSqlSafe(statement(ready)?))
         .bind(query.domain).bind(&as_of).bind(CLEANER_VERSION)
         .bind(Option::<Uuid>::None).bind(Option::<&str>::None)
         .bind(&scope.pattern).bind(&scope.study)
@@ -171,7 +170,7 @@ mod tests {
     #[test]
     fn title_search_precedes_pagination_and_has_no_full_work_read_loop() {
         let sql = statement(true).unwrap();
-        assert!(sql.contains(include_str!("facts.sql")));
+        assert!(sql.contains(&super::super::facts_sql()));
         assert!(sql.contains("display_title ILIKE $6"));
         assert!(sql.find("display_title ILIKE $6").unwrap() < sql.find("ORDER BY work_ref ASC LIMIT $9").unwrap());
         assert!(!sql.contains("LIMIT 100"));

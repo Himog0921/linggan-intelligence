@@ -86,15 +86,6 @@ WITH latest AS MATERIALIZED (
 ), qualified AS MATERIALIZED (
     SELECT facts.*,
            NOT source_restricted AND body_state = 'KNOWN' AND has_body AS readable,
-           CASE
-             WHEN source_restricted THEN 'sourceRestricted'
-             WHEN body_state <> 'KNOWN' OR NOT has_body THEN 'bodyUnavailable'
-             WHEN cached_source_ref IS NULL THEN 'indexPending'
-             WHEN clean_state NOT IN ('direct', 'context') THEN 'textNotResearchable'
-             WHEN work_author_unknown THEN 'workAuthorUnknown'
-             WHEN comment_author_unknown THEN 'commentAuthorUnknown'
-             WHEN voice_role = 'creator' THEN 'creatorVoice'
-             ELSE NULL
-           END AS exclusion_reason
+           /*SOURCE_ELIGIBILITY_CASE*/ AS exclusion_reason
     FROM facts
 )

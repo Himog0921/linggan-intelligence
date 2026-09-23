@@ -371,17 +371,18 @@ fn context_state(manifest: &Value) -> &'static str {
 /// Makes the configured context-character cap part of the frozen work contract.  Fragments are
 /// retained whole (never mid-quote) in a stable relevance order, while omitted material is
 /// explicitly recorded so a model cannot mistake partial context for a complete work record.
-fn bounded_context_manifest(manifest: &Value, budget: usize) -> Value {
+pub(crate) fn bounded_context_manifest(manifest: &Value, budget: usize) -> Value {
     let mut fragments: Vec<Value> = manifest["sources"].as_array().cloned().unwrap_or_default();
     fragments.sort_by_key(sort_key);
     let mut used = 0_usize;
     let mut retained = Vec::new();
-    let mut omitted = Vec::new();
+    // A caller may apply a smaller budget to an already bounded source projection.
+    // Earlier omissions remain auditable; re-bounding must never declare that input complete.
+    let mut omitted = manifest["omitted"].as_array().cloned().unwrap_or_default();
     for fragment in fragments {
-        let length = fragment["text"]
-            .as_str()
-            .map_or(0, |text| text.chars().count());
-        if used.saturating_add(length) <= budget {
+        let length = fragment["characterCount"].as_u64().map(|n| n as usize)
+            .unwrap_or_else(|| fragment["text"].as_str().map_or(0, |text| text.chars().count()));
+        if fragment["text"].is_string() && used.saturating_add(length) <= budget {
             used += length;
             retained.push(fragment);
         } else {
@@ -480,6 +481,17 @@ mod tests {
         assert_eq!(bounded["sources"][0]["kind"], "native_title");
         assert_eq!(bounded["sources"][1]["kind"], "body");
         assert_eq!(context_state(&bounded), "partial");
+    }
+
+    #[test]
+    fn rebounding_preserves_prior_omission_metadata() {
+        let manifest=json!({"sources":[{"kind":"body","sourceRef":"body","text":null,"characterCount":21000},
+            {"kind":"native_title","sourceRef":"title","text":"ABC","characterCount":3}]});
+        let first=bounded_context_manifest(&manifest,20000);
+        let second=bounded_context_manifest(&first,2);
+        assert_eq!(second["omittedFragmentCount"],2);
+        assert_eq!(second["truncated"],true);
+        assert_eq!(second["includedCharacterCount"],0);
     }
 
     #[test]

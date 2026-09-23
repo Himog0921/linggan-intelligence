@@ -2,11 +2,17 @@
 //! predicates, never prompt instructions. This module depends only on retained material
 //! evidence and clean comment-study relations.
 
-use crate::comment_cleaning::{CLEANER_VERSION, clean};
+use crate::comment_cleaning::clean;
 use linggan_storage_postgres::Database;
 use serde::Serialize;
-use serde_json::{Value, json};
-use sqlx::{Executor, Postgres, Row};
+use serde_json::Value;
+use sqlx::{Postgres, Row, Transaction};
+use std::collections::BTreeMap;
+
+#[path = "comment_study_source/gate.rs"]
+pub(crate) mod gate;
+#[path = "comment_study_source/context.rs"]
+pub(crate) mod context;
 use uuid::Uuid;
 
 pub const ADHD_DOMAIN_REF: &str = "00000000-0000-4000-8000-000000000001";
@@ -63,400 +69,174 @@ pub enum StudySourceError {
     InvalidDomain,
 }
 
-/// Lists only current, accepted, readable user comments belonging to the configured domain. The
-/// context array contains source-qualified work text; `text_content` from a withdrawn or
-/// restricted derivative cannot pass this query.
+// Reads below preserve the existing run contract; P2 owns new-only selection and idempotency.
+// Candidates are fetched in bounded windows, and work/parent context only after selection.
+const SOURCE_PAGE_SIZE: i64 = 128;
+
 pub async fn eligible_sources(
-    database: &Database,
-    domain_ref: Uuid,
-    as_of: &str,
-    limit: i64,
+    database: &Database, domain_ref: Uuid, as_of: &str, limit: i64,
 ) -> Result<Vec<StudySource>, StudySourceError> {
-    load_eligible_sources(database, domain_ref, as_of, None, limit).await
+    load_sources(database,domain_ref,as_of,None,limit).await
 }
 
-/// The same database gate, narrowed to the works a user selected for a single Study preview or
-/// Run. The filter is part of the query, so a globally popular work cannot consume the caller's
-/// budget before a selected work is considered.
 pub async fn eligible_sources_for_works(
-    database: &Database,
-    domain_ref: Uuid,
-    as_of: &str,
-    content_public_refs: &[Uuid],
-    limit: i64,
+    database: &Database, domain_ref: Uuid, as_of: &str,
+    content_public_refs: &[Uuid], limit: i64,
 ) -> Result<Vec<StudySource>, StudySourceError> {
-    if content_public_refs.is_empty() {
-        return Ok(Vec::new());
-    }
-    load_eligible_sources(
-        database,
-        domain_ref,
-        as_of,
-        Some(content_public_refs),
-        limit,
-    )
-    .await
+    if content_public_refs.is_empty() { return Ok(Vec::new()); }
+    load_sources(database,domain_ref,as_of,Some(content_public_refs),limit).await
 }
 
-/// Builds the setup-page counts from the same candidate rows and the same eligibility decision
-/// used by target freezing. `as_of` is returned so callers can state exactly which snapshot their
-/// preview describes; a later Run intentionally re-evaluates at its own frozen snapshot.
-pub async fn preview_sources(
-    database: &Database,
-    domain_ref: Uuid,
-    as_of: &str,
-) -> Result<StudySourcePreview, StudySourceError> {
-    ensure_domain(domain_ref)?;
-    let candidates = fetch_source_candidates(database.pool(), domain_ref, as_of, None).await?;
-    let total_comment_count = candidates.len();
-    let mut excluded_counts = StudySourceExcludedCounts::default();
-    let mut eligible_by_work = std::collections::BTreeMap::<Uuid, (String, usize)>::new();
-
-    for candidate in candidates {
-        match classify_candidate(candidate) {
-            Ok(source) => {
-                let entry = eligible_by_work
-                    .entry(source.content_public_ref)
-                    .or_insert_with(|| (source.work_title, 0));
-                entry.1 += 1;
-            }
-            Err(reason) => reason.increment(&mut excluded_counts),
-        }
-    }
-
-    let eligible_comment_count = eligible_by_work.values().map(|(_, count)| *count).sum();
-    let mut works: Vec<_> = eligible_by_work
-        .into_iter()
-        .map(
-            |(work_ref, (title, eligible_comment_count))| StudySourcePreviewWork {
-                work_ref,
-                title,
-                eligible_comment_count,
-            },
-        )
-        .collect();
-    works.sort_by(|left, right| {
-        right
-            .eligible_comment_count
-            .cmp(&left.eligible_comment_count)
-            .then_with(|| left.work_ref.cmp(&right.work_ref))
-    });
-    works.truncate(100);
-    Ok(StudySourcePreview {
-        as_of: as_of.to_owned(),
-        total_comment_count,
-        eligible_comment_count,
-        excluded_counts,
-        works,
-    })
-}
-
-async fn load_eligible_sources(
-    database: &Database,
-    domain_ref: Uuid,
-    as_of: &str,
-    content_public_refs: Option<&[Uuid]>,
-    limit: i64,
+async fn load_sources(
+    database: &Database, domain: Uuid, as_of: &str, works: Option<&[Uuid]>, limit: i64,
 ) -> Result<Vec<StudySource>, StudySourceError> {
-    ensure_domain(domain_ref)?;
-    fetch_eligible_sources(
-        database.pool(),
-        domain_ref,
-        as_of,
-        content_public_refs,
-        limit,
-    )
-    .await
+    let mut tx=database.pool().begin().await?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+        .execute(&mut *tx).await?;
+    sqlx::query("SET LOCAL statement_timeout='15s'").execute(&mut *tx).await?;
+    let result=fetch_eligible_sources(&mut tx,domain,as_of,works,limit).await?;
+    tx.commit().await?;
+    Ok(result)
 }
 
 pub(crate) async fn eligible_sources_in_transaction(
-    transaction: &mut sqlx::Transaction<'_, Postgres>,
-    domain_ref: Uuid,
-    as_of: &str,
-    content_public_refs: &[Uuid],
-    limit: i64,
+    tx: &mut Transaction<'_,Postgres>, domain: Uuid, as_of: &str,
+    works: &[Uuid], limit: i64,
 ) -> Result<Vec<StudySource>, StudySourceError> {
-    ensure_domain(domain_ref)?;
-    fetch_eligible_sources(
-        &mut **transaction,
-        domain_ref,
-        as_of,
-        Some(content_public_refs),
-        limit,
-    )
-    .await
+    fetch_eligible_sources(tx,domain,as_of,Some(works),limit).await
 }
 
-fn ensure_domain(domain_ref: Uuid) -> Result<(), StudySourceError> {
-    (domain_ref.to_string() == ADHD_DOMAIN_REF)
-        .then_some(())
-        .ok_or(StudySourceError::InvalidDomain)
+struct Candidate {
+    source: StudySource,
+    parent_id: Option<String>,
 }
 
-#[derive(Debug)]
-struct SourceCandidate {
-    source_ref: Uuid,
-    content_public_ref: Uuid,
-    work_title: String,
-    body_text: Option<String>,
-    body_state: String,
-    author_external_id: Option<String>,
-    work_author_external_id: Option<String>,
-    source_restricted: bool,
-    parent_source_ref: Option<Uuid>,
-    parent_body_text: Option<String>,
-    context_fragments: Value,
+async fn candidate_page(
+    tx: &mut Transaction<'_,Postgres>, domain: Uuid, as_of: &str,
+    works: Option<&[Uuid]>, after: (i64,Uuid),
+) -> Result<Vec<sqlx::postgres::PgRow>,StudySourceError> {
+    if domain.to_string()!=ADHD_DOMAIN_REF { return Err(StudySourceError::InvalidDomain); }
+    let rows=sqlx::query(include_str!("comment_study_source/candidates.sql"))
+        .bind(domain).bind(as_of).bind(works.map(<[Uuid]>::to_vec))
+        .bind(after.0).bind(after.1).bind(SOURCE_PAGE_SIZE).fetch_all(&mut **tx).await?;
+    Ok(rows)
 }
 
-#[derive(Debug, Clone, Copy)]
-enum SourceExclusionReason {
-    CommentAuthorUnknown,
-    WorkAuthorUnknown,
-    CreatorVoice,
-    BodyUnavailable,
-    SourceRestricted,
-    TextNotResearchable,
+fn classify(row: &sqlx::postgres::PgRow) -> Result<Result<Candidate,&'static str>,sqlx::Error> {
+    let raw: Option<String>=row.try_get("body_text")?;
+    let state: String=row.try_get("body_state")?;
+    let author: Option<String>=row.try_get("author_external_id")?;
+    let work_author: Option<String>=row.try_get("work_author_external_id")?;
+    let known=|v: &Option<String>|v.as_deref().map(str::trim).filter(|s|!s.is_empty()).map(str::to_owned);
+    let author=known(&author);
+    let work_author=known(&work_author);
+    let cleaned=clean(raw.as_deref().unwrap_or(""));
+    let reason=gate::exclusion([
+        row.try_get("source_restricted")?, state!="KNOWN"||raw.is_none(), false,
+        !matches!(cleaned.state.as_str(),"direct"|"context"),work_author.is_none(),author.is_none(),
+        author.is_some()&&author==work_author,
+    ]);
+    if let Some(reason)=reason { return Ok(Err(reason)); }
+    Ok(Ok(Candidate{
+        source: StudySource{
+            source_ref:row.try_get("material_ref")?,content_public_ref:row.try_get("content_public_ref")?,
+            work_title:String::new(),research_text:cleaned.text,clean_state:cleaned.state,
+            context_manifest:Value::Null,parent_source_ref:None,parent_research_text:None,
+        },parent_id:row.try_get("parent_comment_external_id")?,
+    }))
 }
 
-impl SourceExclusionReason {
-    fn increment(self, counts: &mut StudySourceExcludedCounts) {
-        match self {
-            Self::CommentAuthorUnknown => counts.comment_author_unknown += 1,
-            Self::WorkAuthorUnknown => counts.work_author_unknown += 1,
-            Self::CreatorVoice => counts.creator_voice += 1,
-            Self::BodyUnavailable => counts.body_unavailable += 1,
-            Self::SourceRestricted => counts.source_restricted += 1,
-            Self::TextNotResearchable => counts.text_not_researchable += 1,
+async fn fetch_eligible_sources(
+    tx: &mut Transaction<'_,Postgres>, domain: Uuid, as_of: &str,
+    works: Option<&[Uuid]>, limit: i64,
+) -> Result<Vec<StudySource>,StudySourceError> {
+    let limit=limit.clamp(1,3000) as usize;
+    let mut after=(0,Uuid::nil());
+    let mut selected=Vec::new();
+    while selected.len()<limit {
+        let page=candidate_page(tx,domain,as_of,works,after).await?;
+        if page.is_empty() { break; }
+        for row in &page {
+            after=(row.try_get("rank")?,row.try_get("content_public_ref")?);
+            if let Ok(candidate)=classify(row)? { selected.push(candidate); }
+            if selected.len()==limit { break; }
         }
+        if page.len()<SOURCE_PAGE_SIZE as usize { break; }
     }
+    attach_context(tx,domain,as_of,selected).await
 }
 
-fn classify_candidate(candidate: SourceCandidate) -> Result<StudySource, SourceExclusionReason> {
-    if candidate.body_state != "KNOWN" || candidate.body_text.is_none() {
-        return Err(SourceExclusionReason::BodyUnavailable);
+async fn attach_context(
+    tx: &mut Transaction<'_,Postgres>,domain: Uuid,as_of: &str,candidates: Vec<Candidate>,
+) -> Result<Vec<StudySource>,StudySourceError> {
+    let works: Vec<_>=candidates.iter().map(|c|c.source.content_public_ref)
+        .collect::<std::collections::BTreeSet<_>>().into_iter().collect();
+    let mut contexts=BTreeMap::new();
+    for chunk in works.chunks(100) {
+        contexts.extend(context::read_work_contexts(tx,domain,chunk,as_of).await?);
     }
-    let comment_author = candidate
-        .author_external_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or(SourceExclusionReason::CommentAuthorUnknown)?;
-    let work_author = candidate
-        .work_author_external_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or(SourceExclusionReason::WorkAuthorUnknown)?;
-    if comment_author == work_author {
-        return Err(SourceExclusionReason::CreatorVoice);
-    }
-    if candidate.source_restricted {
-        return Err(SourceExclusionReason::SourceRestricted);
-    }
-    let cleaned = clean(candidate.body_text.as_deref().expect("checked above"));
-    if !matches!(cleaned.state.as_str(), "direct" | "context") {
-        return Err(SourceExclusionReason::TextNotResearchable);
-    }
-    let parent_cleaned = candidate.parent_body_text.as_deref().map(clean);
-    Ok(StudySource {
-        source_ref: candidate.source_ref,
-        content_public_ref: candidate.content_public_ref,
-        work_title: candidate.work_title,
-        research_text: cleaned.text,
-        clean_state: cleaned.state,
-        context_manifest: json!({
-            "contract":"comment-study.context.v1",
-            "workRef":candidate.content_public_ref,
-            "cleanerVersion":CLEANER_VERSION,
-            "sources":candidate.context_fragments
-        }),
-        parent_source_ref: candidate.parent_source_ref,
-        parent_research_text: parent_cleaned.and_then(|value| {
-            matches!(value.state.as_str(), "direct" | "context").then_some(value.text)
-        }),
-    })
+    let keys: Vec<_>=candidates.iter().filter_map(|c|c.parent_id.clone().map(|id|(c.source.content_public_ref,id))).collect();
+    let mut parents=BTreeMap::new();
+    for chunk in keys.chunks(128) { parents.extend(context::read_parents(tx,chunk,as_of).await?); }
+    candidates.into_iter().map(|mut c| {
+        let work=contexts.get(&c.source.content_public_ref).ok_or_else(||
+            sqlx::Error::Protocol("qualified work context is missing".into()))?;
+        c.source.work_title=work["displayTitle"].as_str().unwrap_or("未命名作品").to_owned();
+        c.source.context_manifest=work["contextManifest"].clone();
+        if let Some(id)=c.parent_id
+            && let Some(parent)=parents.get(&(c.source.content_public_ref,id)) {
+                c.source.parent_source_ref=parent["sourceRef"].as_str().and_then(|v|Uuid::parse_str(v).ok());
+                c.source.parent_research_text=parent["researchText"].as_str().map(str::to_owned);
+        }
+        Ok(c.source)
+    }).collect()
 }
 
-/// `linggan_material_media_origin` keeps one row per capture observation of a slot, so relating to
-/// it by `slot_key` multiplies every derived text by how often that slot was re-observed.  The work
-/// ownership check therefore has to stay a semi-join.
-async fn fetch_eligible_sources<'e, E>(
-    executor: E,
-    domain_ref: Uuid,
-    as_of: &str,
-    content_public_refs: Option<&[Uuid]>,
-    limit: i64,
-) -> Result<Vec<StudySource>, StudySourceError>
-where
-    E: Executor<'e, Database = Postgres>,
-{
-    let limit = limit.clamp(1, 3000);
-    Ok(
-        fetch_source_candidates(executor, domain_ref, as_of, content_public_refs)
-            .await?
-            .into_iter()
-            .filter_map(|candidate| classify_candidate(candidate).ok())
-            .take(limit as usize)
-            .collect(),
-    )
+/// Legacy overview summary remains bounded in transfer, with exact counts across all pages.
+/// The paginated /works catalog is the user-facing picker; this 100-item preview is not a catalog.
+pub async fn preview_sources(
+    database: &Database, domain: Uuid, as_of: &str,
+) -> Result<StudySourcePreview,StudySourceError> {
+    let mut tx=database.pool().begin().await?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY").execute(&mut *tx).await?;
+    sqlx::query("SET LOCAL statement_timeout='15s'").execute(&mut *tx).await?;
+    let mut after=(0,Uuid::nil());
+    let mut total=0;
+    let mut counts=BTreeMap::<Uuid,usize>::new();
+    let mut excluded=StudySourceExcludedCounts::default();
+    loop {
+        let page=candidate_page(&mut tx,domain,as_of,None,after).await?;
+        for row in &page {
+            total+=1;
+            after=(row.try_get("rank")?,row.try_get("content_public_ref")?);
+            match classify(row)? {
+                Ok(c)=>*counts.entry(c.source.content_public_ref).or_default()+=1,
+                Err(reason)=>increment_exclusion(&mut excluded,reason),
+            }
+        }
+        if page.len()<SOURCE_PAGE_SIZE as usize { break; }
+    }
+    let eligible=counts.values().sum();
+    let mut ordered: Vec<_>=counts.into_iter().collect();
+    ordered.sort_by(|a,b|b.1.cmp(&a.1).then_with(||a.0.cmp(&b.0)));
+    ordered.truncate(100);
+    let titles=context::read_titles(&mut tx,&ordered.iter().map(|v|v.0).collect::<Vec<_>>(),as_of).await?;
+    let works=ordered.into_iter().map(|(work_ref,eligible_comment_count)|StudySourcePreviewWork{
+        work_ref,eligible_comment_count,
+        title:titles.get(&work_ref).and_then(|w|w["displayTitle"].as_str()).unwrap_or("未命名作品").into(),
+    }).collect();
+    tx.commit().await?;
+    Ok(StudySourcePreview{as_of:as_of.into(),total_comment_count:total,
+        eligible_comment_count:eligible,excluded_counts:excluded,works})
 }
 
-/// Loads the frozen, de-duplicated comment candidates once.  All consumers turn a candidate into
-/// an eligible source through `classify_candidate`, which prevents setup and Run from quietly
-/// drifting into separate source gates.
-async fn fetch_source_candidates<'e, E>(
-    executor: E,
-    domain_ref: Uuid,
-    as_of: &str,
-    content_public_refs: Option<&[Uuid]>,
-) -> Result<Vec<SourceCandidate>, StudySourceError>
-where
-    E: Executor<'e, Database = Postgres>,
-{
-    let rows = sqlx::query(
-        "SELECT source.material_ref,source.content_public_ref,source.body_text,source.body_state, \
-                source.author_external_id,content_author.author_external_id AS work_author_external_id, \
-                COALESCE((SELECT detail.title FROM linggan_material_content_detail detail \
-                  JOIN linggan_runtime_capture_package title_package USING(package_ref) \
-                  WHERE detail.content_public_ref=source.content_public_ref AND detail.title_state='KNOWN' \
-                    AND title_package.accepted_at<=$2::timestamptz AND detail.created_at<=$2::timestamptz \
-                  ORDER BY detail.observed_at DESC,detail.created_at DESC LIMIT 1),'未命名作品') AS work_title, \
-                EXISTS(SELECT 1 FROM linggan_material_comment_restriction restriction \
-                  WHERE restriction.content_public_ref=source.content_public_ref \
-                    AND restriction.comment_external_id=source.comment_external_id) AS source_restricted, \
-                parent.material_ref AS parent_source_ref,parent.body_text AS parent_body_text, \
-                COALESCE(context.fragments,'[]'::jsonb) AS context_fragments \
-         FROM ( \
-           SELECT DISTINCT ON (comment.content_public_ref,comment.comment_external_id) \
-             comment.material_ref,comment.content_public_ref,comment.comment_external_id, \
-             comment.parent_comment_external_id,comment.author_external_id, \
-             comment.body_text,comment.body_state,comment.created_at \
-           FROM linggan_material_comment comment \
-           JOIN linggan_runtime_capture_package package USING(package_ref) \
-           WHERE package.accepted_at<=$2::timestamptz AND comment.created_at<=$2::timestamptz \
-           ORDER BY comment.content_public_ref,comment.comment_external_id, \
-                    comment.observed_at::timestamptz DESC,comment.created_at DESC,comment.material_ref DESC \
-         ) source \
-         JOIN linggan_material_content content ON content.public_ref=source.content_public_ref \
-         LEFT JOIN linggan_material_content_author content_author \
-           ON content_author.content_public_ref=source.content_public_ref \
-         LEFT JOIN LATERAL ( \
-           SELECT ancestor.material_ref,ancestor.body_text \
-           FROM linggan_material_comment ancestor \
-           JOIN linggan_runtime_capture_package ancestor_package USING(package_ref) \
-           WHERE ancestor.content_public_ref=source.content_public_ref \
-             AND ancestor.comment_external_id=source.parent_comment_external_id \
-             AND ancestor.body_state='KNOWN' \
-             AND ancestor_package.accepted_at<=$2::timestamptz \
-             AND ancestor.created_at<=$2::timestamptz \
-           ORDER BY ancestor.observed_at::timestamptz DESC,ancestor.created_at DESC,ancestor.material_ref DESC \
-           LIMIT 1 \
-         ) parent ON true \
-         LEFT JOIN LATERAL ( \
-           SELECT jsonb_agg(fragment ORDER BY fragment->>'kind',fragment->>'sourceRef') AS fragments \
-           FROM ( \
-             SELECT fragment FROM ( \
-             SELECT jsonb_build_object('kind','native_title','sourceRef',detail.material_ref, \
-                'text',detail.title,'observedAt',detail.observed_at) AS fragment \
-             FROM linggan_material_content_detail detail \
-             JOIN linggan_runtime_capture_package detail_package USING(package_ref) \
-             WHERE detail.content_public_ref=source.content_public_ref \
-               AND detail.title_state='KNOWN' AND detail_package.accepted_at<=$2::timestamptz \
-             ORDER BY detail.observed_at::timestamptz DESC,detail.created_at DESC LIMIT 1 \
-           ) title \
-           UNION ALL \
-           SELECT fragment FROM ( \
-             SELECT jsonb_build_object('kind','body','sourceRef',detail.material_ref, \
-                'text',detail.body_text,'observedAt',detail.observed_at) AS fragment \
-             FROM linggan_material_content_detail detail \
-             JOIN linggan_runtime_capture_package detail_package USING(package_ref) \
-             WHERE detail.content_public_ref=source.content_public_ref \
-               AND detail.body_state='KNOWN' AND detail_package.accepted_at<=$2::timestamptz \
-             ORDER BY detail.observed_at::timestamptz DESC,detail.created_at DESC LIMIT 1 \
-           ) body \
-           UNION ALL \
-           SELECT jsonb_build_object('kind',text.kind,'sourceRef',derived.derivative_ref, \
-              'text',text.text_content,'sourceLocation',text.source_location, \
-              'slotOrdinal',slot.ordinal,'contentHash',derived.content_hash) \
-           FROM linggan_material_derived_text text \
-           JOIN linggan_media_derivative derived USING(derivative_ref) \
-           JOIN linggan_media_processing_job job USING(job_ref) \
-           LEFT JOIN linggan_media_slot slot ON slot.slot_key=job.slot_key \
-           WHERE text.content_public_ref=source.content_public_ref \
-             AND text.kind<>'ocr_text' \
-             AND EXISTS (SELECT 1 FROM linggan_material_media_origin origin \
-               WHERE origin.slot_key=job.slot_key \
-                 AND origin.content_public_ref=source.content_public_ref) \
-             AND text.created_at<=$2::timestamptz AND derived.created_at<=$2::timestamptz \
-             AND job.created_at<=$2::timestamptz \
-             AND (SELECT event.state FROM linggan_media_processing_job_event event \
-                  WHERE event.job_ref=job.job_ref AND event.occurred_at<=$2::timestamptz \
-                  ORDER BY event.occurred_at DESC,event.event_ref DESC LIMIT 1)='succeeded' \
-             AND NOT EXISTS (SELECT 1 FROM linggan_current_material_media_disposition disposition \
-               WHERE disposition.state='WITHDRAWN_OR_RESTRICTED' \
-                 AND (disposition.derivative_ref=derived.derivative_ref \
-                 OR disposition.blob_sha256=job.blob_sha256 \
-                  OR disposition.slot_key=job.slot_key)) \
-           UNION ALL \
-           SELECT jsonb_build_object('kind','image_substantive_text','sourceRef',derived.derivative_ref, \
-              'text',layer.image_substantive_text,'sourceLocation',text.source_location, \
-              'slotOrdinal',slot.ordinal,'contentHash',derived.content_hash) \
-           FROM linggan_material_derived_text text \
-           JOIN linggan_media_derivative derived USING(derivative_ref) \
-           JOIN linggan_media_processing_job job USING(job_ref) \
-           JOIN linggan_media_ocr_layout layout ON layout.ocr_derivative_ref=derived.derivative_ref \
-           JOIN LATERAL ( \
-             SELECT result.state,result.image_substantive_text \
-             FROM linggan_media_ocr_layering_result result \
-             WHERE result.layout_ref=layout.layout_ref AND result.created_at<=$2::timestamptz \
-             ORDER BY result.created_at DESC,result.layering_ref DESC LIMIT 1 \
-           ) layer ON layer.state='ACCEPTED' \
-           LEFT JOIN linggan_media_slot slot ON slot.slot_key=job.slot_key \
-           WHERE text.content_public_ref=source.content_public_ref AND text.kind='ocr_text' \
-             AND nullif(btrim(layer.image_substantive_text),'') IS NOT NULL \
-             AND EXISTS (SELECT 1 FROM linggan_material_media_origin origin \
-               WHERE origin.slot_key=job.slot_key \
-                 AND origin.content_public_ref=source.content_public_ref) \
-             AND text.created_at<=$2::timestamptz AND derived.created_at<=$2::timestamptz \
-             AND job.created_at<=$2::timestamptz AND layout.created_at<=$2::timestamptz \
-             AND (SELECT event.state FROM linggan_media_processing_job_event event \
-                  WHERE event.job_ref=job.job_ref AND event.occurred_at<=$2::timestamptz \
-                  ORDER BY event.occurred_at DESC,event.event_ref DESC LIMIT 1)='succeeded' \
-             AND NOT EXISTS (SELECT 1 FROM linggan_media_ocr_retirement retired \
-               WHERE retired.retired_job_ref=job.job_ref) \
-             AND NOT EXISTS (SELECT 1 FROM linggan_current_material_media_disposition disposition \
-               WHERE disposition.state='WITHDRAWN_OR_RESTRICTED' \
-                 AND (disposition.derivative_ref=derived.derivative_ref \
-                   OR disposition.blob_sha256=job.blob_sha256 \
-                   OR disposition.slot_key=job.slot_key)) \
-           ) context_fragments \
-         ) context ON true \
-         WHERE content.domain_ref=$1 \
-           AND ($3::uuid[] IS NULL OR source.content_public_ref=ANY($3::uuid[])) \
-         ORDER BY row_number() OVER ( \
-                    PARTITION BY source.content_public_ref \
-                    ORDER BY source.created_at DESC,source.material_ref DESC \
-                  ),source.content_public_ref",
-    )
-    .bind(domain_ref)
-    .bind(as_of)
-    .bind(content_public_refs.map(<[Uuid]>::to_vec))
-    .fetch_all(executor)
-    .await?;
-    Ok(rows
-        .into_iter()
-        .map(|row| SourceCandidate {
-            source_ref: row.get("material_ref"),
-            content_public_ref: row.get("content_public_ref"),
-            work_title: row.get("work_title"),
-            body_text: row.get("body_text"),
-            body_state: row.get("body_state"),
-            author_external_id: row.get("author_external_id"),
-            work_author_external_id: row.get("work_author_external_id"),
-            source_restricted: row.get("source_restricted"),
-            parent_source_ref: row.get("parent_source_ref"),
-            parent_body_text: row.get("parent_body_text"),
-            context_fragments: row.get("context_fragments"),
-        })
-        .collect())
+fn increment_exclusion(counts: &mut StudySourceExcludedCounts,reason: &str) {
+    match reason {
+        "sourceRestricted"=>counts.source_restricted+=1,
+        "bodyUnavailable"=>counts.body_unavailable+=1,
+        "workAuthorUnknown"=>counts.work_author_unknown+=1,
+        "commentAuthorUnknown"=>counts.comment_author_unknown+=1,
+        "creatorVoice"=>counts.creator_voice+=1,
+        _=>counts.text_not_researchable+=1,
+    }
 }

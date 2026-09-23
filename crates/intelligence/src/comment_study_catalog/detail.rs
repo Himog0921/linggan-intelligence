@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
 
-use super::{StudyCatalogError, clean, cursor, read};
+use super::{StudyCatalogError, cursor, read};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -128,9 +128,15 @@ async fn read_detail(
     // These independently pageable metadata collections never load all historical bodies.
     let history = collection_page(&mut tx, query, Collection::History, &as_of, None, 50).await?;
     let versions = collection_page(&mut tx, query, Collection::Versions, &as_of, None, 50).await?;
+    let work=crate::comment_study_source::context::read_work_contexts(
+        &mut tx,query.domain,&[query.work_ref],&as_of).await
+        .map_err(|error|match error {
+            crate::comment_study_source::StudySourceError::Database(e)=>StudyCatalogError::Database(e),
+            crate::comment_study_source::StudySourceError::InvalidDomain=>StudyCatalogError::ResourceNotFound,
+        })?.remove(&query.work_ref);
     tx.commit().await?;
     Ok(json!({
-        "contract": "comment-study.read.v2", "domainRef": query.domain, "asOf": as_of,
+        "contract": "comment-study.read.v2", "domainRef": query.domain, "asOf": as_of, "work":work,
         "commentKey": query.key(), "workRef": query.work_ref, "source": source,
         "comment": comment, "parentContext": parent,
         "studyHistory": history, "materialVersions": versions,
@@ -285,28 +291,8 @@ async fn read_parent(
     id: &str,
     as_of: &str,
 ) -> Result<Value, StudyCatalogError> {
-    let row = sqlx::query(include_str!("parent.sql"))
-        .bind(work)
-        .bind(id)
-        .bind(as_of)
-        .fetch_one(&mut **tx)
-        .await?;
-    let source_ref: Option<Uuid> = row.try_get("source_ref")?;
-    let state: String = row.try_get("source_state")?;
-    let raw: Option<String> = row.try_get("raw_prefix")?;
-    let cleaned = raw.as_deref().map(clean);
-    let displayable = cleaned
-        .as_ref()
-        .is_some_and(|value| matches!(value.state.as_str(), "direct" | "context"));
-    Ok(json!({
-        "commentKey": {"workRef": work, "commentExternalId": id}, "sourceRef": source_ref,
-        "sourceState": state,
-        "commentText": if displayable { raw.as_deref() } else { None },
-        "researchText": cleaned.as_ref().filter(|_| displayable).map(|value| value.text.as_str()),
-        "cleanState": cleaned.as_ref().map(|value| value.state.as_str()),
-        "cleanReasons": cleaned.as_ref().map(|value| &value.reasons),
-        "contextOnly": true
-    }))
+    let parents=crate::comment_study_source::context::read_parents(tx,&[(work,id.to_owned())],as_of).await?;
+    Ok(parents.get(&(work,id.to_owned())).cloned().unwrap_or(Value::Null))
 }
 
 #[cfg(test)]
