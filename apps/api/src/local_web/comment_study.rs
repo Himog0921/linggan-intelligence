@@ -399,6 +399,9 @@ mod tests {
         assert!(script.contains("selectedWorkRefs.has(work.workRef)"));
         assert!(script.contains("document.querySelector('#work-filter').addEventListener('input'"));
         assert!(script.contains("searchWorksNow()"));
+        assert!(script.contains("MAX_SELECTED_WORKS = 100"));
+        assert!(script.contains("comments/history"));
+        assert!(script.contains("继续读取研究历史"));
         assert!(script.contains("loadWorksPage(workCatalogState.nextCursor)"));
     }
 
