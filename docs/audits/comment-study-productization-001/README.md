@@ -72,3 +72,14 @@ Mog 已在当前对话报告 P1 手动产品验收合格并授权 P2。用户未
 验证结果待本轮真实执行回执；不把已有22项P1数据库回归当新增方法测试。
 
 实现文件已形成：三条新方法 API、policy 保存/只读模块、policy-only 0104约束和6个隔离PG/3个API测试。当前本地没有Cargo且无法解析Rust下载域名；本地文档校验与bash语法/diff检查通过，Rust/PG以本增量GitHub CI为准。全仓治理仍有72项（71项基线，加1项月报正文未追加）；不以进度索引冒充月报检查通过。
+
+
+## P2 第三增量 · 共用选样规则与输入等价（实施前边界）
+
+2026-09-24 / Issue #295 / PR #338，基线 `39f3f534`。本轮按 HTTP 合同 §4–5、数据库合同 §5.2/§6 先固化 preview/start 共用的确定性内核：闭集开始与预览命令、稳定身份集合规范化、四模式真值表、作品轮转、内容 fingerprint 与 v2 Target 输入。放置在 `comment_study_selection.rs` 及私有 input/tests；仅复用当前 cleaner、context manifest、source gate 和 canonical JSON，不加表、服务、调度器或模型依赖。
+
+本增量不接通 `/runs`/`selection-preview`，不宣称已经具有数据库幂等或并发防重。后续事务读取器必须在 domain lock 后用单条冻结 SELECT 提供最新材料、所有在途事实、最后尝试和已保留语境；本纯函数不能证明输入来自哪个数据库快照。旧 Worker 与默认方法不切换，避免有完整方法的新 Run 仍被旧外发合同消费。整体 P2 和 T01–T54 仍未完成。
+
+验证目标：688/100 选样交集、四模式/未知历史/在途优先级、完整十项排除计数、作品公平轮转、显式三预算与请求 hash、材料换 ID 不误判输入变化、raw 标点和真实父语境变化、未入保留语境的 OCR 不触发重研；所有用例均为合成确定性证明，不冒充数据库或真实模型证明。独立复审仍交 Codex；本工具环境不能调用仓库约定的 commit-reviewer，不以自审替代。
+
+实现候选：新增共用命令/选择器和输入准备器、28个合成单元测试。当前纯函数只消费快照，不是冻结查询或收费入口：没有幂等回执 SQL、实际 domain lock、Run/Target 插入或 dispatch 切换，T11–T16 等不得标为通过。Python 独立生成 fingerprint 与 signed big-endian lock key golden；批准手册字节校验与diff检查已过；Rust/PG以exact-head CI回执为准。本环境无Cargo且Rust下载域名不能解析，未运行fmt/clippy。治理检查实测仍72项既有/未解决问题，未修改批准正文以凑通过。

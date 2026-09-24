@@ -19,7 +19,7 @@ pub(crate) fn sql_case() -> String {
     sql
 }
 
-pub(super) fn exclusion(flags: [bool; 7]) -> Option<&'static str> {
+pub(crate) fn exclusion(flags: [bool; 7]) -> Option<&'static str> {
     RULES.iter().zip(flags).find_map(|((code, _), excluded)| excluded.then_some(*code))
 }
 

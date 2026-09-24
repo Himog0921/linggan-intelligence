@@ -46,5 +46,6 @@ pub mod comment_study_problem_store;
 pub mod comment_study_read;
 pub mod comment_study_resolution_worker;
 pub mod comment_study_run;
+pub mod comment_study_selection;
 pub mod comment_study_semantic;
 pub mod comment_study_source;
