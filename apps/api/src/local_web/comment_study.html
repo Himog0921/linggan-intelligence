@@ -60,7 +60,7 @@
         <header class="study-toolbar">
           <nav class="study-tabs" aria-label="评论研究视图">
             <button type="button" data-view="overview" aria-current="page">概览</button>
-            <button type="button" data-view="targets">评论目标</button>
+            <button type="button" data-view="comments">用户评论</button>
             <button type="button" data-view="pending">待归并</button>
             <button type="button" data-view="problems">用户问题</button>
             <button type="button" data-view="runs">运行记录</button>
@@ -98,7 +98,7 @@
       <header class="study-workspace-header">
         <div><p class="study-label">研究输入</p><h3 id="work-picker-title">选择要研究的 ADHD 作品</h3></div>
         <div class="study-workspace-tools">
-          <label class="study-filter">筛选已加载作品<input id="work-filter" type="search" placeholder="按作品标题筛选" autocomplete="off"></label>
+          <label class="study-filter">搜索全部作品<input id="work-filter" type="search" placeholder="按作品标题搜索" autocomplete="off"></label>
           <span id="selected-count" class="selection-count" role="status">已选择 0 篇</span>
         </div>
       </header>
@@ -110,11 +110,24 @@
           <tbody id="works" aria-live="polite"><tr><td colspan="3">正在读取作品…</td></tr></tbody>
         </table>
       </div>
+      <nav class="study-pagination" aria-label="作品目录翻页">
+        <button id="work-prev" type="button" disabled>上一页</button>
+        <span id="work-page-status" role="status">第 1 页</span>
+        <button id="work-next" type="button" disabled>下一页</button>
+      </nav>
       <footer class="study-workspace-footer">
         <p>只冻结当前所选作品中、受评论数上限约束的可研究评论；创建研究运行不会调用模型。</p>
         <div class="run-actions"><button id="start-run" type="button" disabled>创建研究运行</button><p id="run-result" role="status"></p></div>
       </footer>
     </section>
+  </dialog>
+
+  <dialog id="comment-detail-dialog" class="study-detail-dialog" aria-labelledby="comment-detail-title">
+    <header class="study-dialog-header">
+      <div><p class="study-label">原声证据</p><h2 id="comment-detail-title">评论详情</h2></div>
+      <button type="button" id="comment-detail-close">关闭</button>
+    </header>
+    <div id="comment-detail-body" class="study-detail-body" aria-live="polite"></div>
   </dialog>
 
   <script src="/assets/comment-study.js"></script>
@@ -132,7 +145,7 @@
   function overviewKinds(signals){const counts=new Map();signals.forEach(signal=>counts.set(signal.kind,(counts.get(signal.kind)||0)+1));return[...counts.entries()].sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]))}
   function overviewExpressions(signals){const groups=new Map();signals.forEach(signal=>{if(signal.sourceState==='restricted')return;const proposition=String(signal.proposition||'').trim();if(!proposition)return;const group=groups.get(proposition)||{proposition,signals:[]};group.signals.push(signal);groups.set(proposition,group)});return[...groups.values()].sort((a,b)=>b.signals.length-a.signals.length||a.proposition.localeCompare(b.proposition)).slice(0,8)}
   function overviewProblemHighlights(problems,signals){const current=new Map();signals.forEach(signal=>{if(!signal.resolvedProblemRef)return;const group=current.get(signal.resolvedProblemRef)||[];group.push(signal);current.set(signal.resolvedProblemRef,group)});const active=(problems||[]).filter(problem=>problem.state==='active');const changed=active.filter(problem=>current.has(problem.problemRef)).map(problem=>({problem,signals:current.get(problem.problemRef)})).sort((a,b)=>b.signals.length-a.signals.length||Number(b.problem.membershipCount)-Number(a.problem.membershipCount));if(changed.length)return changed.slice(0,3);return active.sort((a,b)=>Number(b.membershipCount)-Number(a.membershipCount)).slice(0,3).map(problem=>({problem,signals:[]}))}
-  function overviewUnresolved(latest){if(!latest)return[];const rows=[];['deferred_novel','deferred_ambiguous','deferred_context','retrieval_incomplete','budget_stopped','pending','protocol_rejected','failed'].forEach(state=>{const count=Number(latest.resolutionStates?.[state]||0);if(count)rows.push({text:label(resolutionLabel,state)??state,count,view:RUN_RECORD_RESOLUTION_STATES.has(state)?'runs':'pending'})});[['needs_context','仍在等待评论语境'],['failed','评论研究处理失败'],['excluded','来源受限，未继续处理']].forEach(([state,text])=>{const count=Number(latest.targetStates?.[state]||0);if(count)rows.push({text,count,view:'targets'})});return rows}
+  function overviewUnresolved(latest){if(!latest)return[];const rows=[];['deferred_novel','deferred_ambiguous','deferred_context','retrieval_incomplete','budget_stopped','pending','protocol_rejected','failed'].forEach(state=>{const count=Number(latest.resolutionStates?.[state]||0);if(count)rows.push({text:label(resolutionLabel,state)??state,count,view:RUN_RECORD_RESOLUTION_STATES.has(state)?'runs':'pending'})});[['needs_context','仍在等待评论语境'],['failed','评论研究处理失败'],['excluded','来源受限，未继续处理']].forEach(([state,text])=>{const count=Number(latest.targetStates?.[state]||0);if(count)rows.push({text,count,view:'comments'})});return rows}
   function overviewVoices(data){const byTarget=new Map();data.signals.forEach(signal=>{const group=byTarget.get(signal.targetRef)||[];group.push(signal);byTarget.set(signal.targetRef,group)});let targets=data.targets.filter(target=>target.commentText);if(overviewState.kind!=='all')targets=targets.filter(target=>(byTarget.get(target.targetRef)||[]).some(signal=>signal.kind===overviewState.kind));if(overviewState.expression)targets=targets.filter(target=>(byTarget.get(target.targetRef)||[]).some(signal=>signal.proposition===overviewState.expression));targets.sort((a,b)=>(byTarget.get(b.targetRef)||[]).length-(byTarget.get(a.targetRef)||[]).length||String(b.createdAt).localeCompare(String(a.createdAt)));return targets.slice(0,4).map(target=>({target,signals:byTarget.get(target.targetRef)||[]}))}
   const coverageLabel=state=>({recorded:'有观察记录',partial:'部分观察',none:'无观察记录'}[state]||'观察状态未知');
   const observationPoints=series=>(Array.isArray(series?.points)?series.points:[]).slice(-overviewState.seriesDays);

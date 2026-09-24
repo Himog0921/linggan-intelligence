@@ -14,27 +14,28 @@ const post = async (path, body) => {
   return response.json();
 };
 const list = (items, render, empty) => items?.length ? items.map(render).join('') : `<p class="muted">${esc(empty)}</p>`;
+let domainRef = null;
 let loadedWorks = [];
 let sourcePreview = null;
 const selectedWorkRefs = new Set();
+const selectedWorkMeta = new Map();
+const workCatalogState = { cursor: null, nextCursor: null, history: [], q: '', total: 0, coverage: null };
+let workSearchTimer = null;
 
-const normalizedFilter = () => document.querySelector('#work-filter').value.trim().toLocaleLowerCase('zh-CN');
-const visibleWorks = () => {
-  const filter = normalizedFilter();
-  return filter ? loadedWorks.filter(work => String(work.title ?? '').toLocaleLowerCase('zh-CN').includes(filter)) : loadedWorks;
-};
 const selectedWorks = () => [...selectedWorkRefs];
+const visibleWorks = () => loadedWorks;
+const workTitleSourceLabel = { platform_title: '平台标题', cover_ocr: '封面 OCR', unknown: '标题未记录' };
+const MAX_SELECTED_WORKS = 100;
 
 function updateSelection() {
-  const count = selectedWorks().length;
-  const selectedEligible = loadedWorks
-    .filter(work => selectedWorkRefs.has(work.workRef))
-    .reduce((total, work) => total + Number(work.eligibleCommentCount || 0), 0);
+  const count = selectedWorkRefs.size;
+  const selectedEligible = [...selectedWorkRefs].reduce((total, ref) =>
+    total + Number(selectedWorkMeta.get(ref)?.eligibleCommentCount || 0), 0);
   const budget = Number(document.querySelector('#comment-budget').value || 0);
   const frozenCount = budget > 0 ? Math.min(selectedEligible, budget) : 0;
   document.querySelector('#selected-count').textContent = count
-    ? `已选择 ${count} 篇 · 合格 ${selectedEligible} 条 · 本次最多冻结 ${frozenCount} 条`
-    : '已选择 0 篇';
+    ? `已选择 ${count} 篇 · 当前已知合格 ${selectedEligible} 条 · 本次最多冻结 ${frozenCount} 条`
+    : `已选择 0 篇 · 最多 ${MAX_SELECTED_WORKS} 篇`;
   document.querySelector('#start-run').disabled = count === 0;
   const visible = visibleWorks();
   const selectVisible = document.querySelector('#select-visible-works');
@@ -42,69 +43,69 @@ function updateSelection() {
   selectVisible.checked = visible.length > 0 && selectedVisibleCount === visible.length;
   selectVisible.indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < visible.length;
 }
-
 function renderSourcePreview(preview) {
   const target = document.querySelector('#source-preview');
-  if (!preview) {
-    target.textContent = '评论资格统计暂不可用。';
-    return;
-  }
+  if (!preview) { target.textContent = '评论资格统计暂不可用。'; return; }
   const excluded = preview.excludedCounts || {};
-  const labels = {
-    commentAuthorUnknown: '评论作者身份未知',
-    workAuthorUnknown: '作品作者身份未知',
-    creatorVoice: '作品作者本人',
-    bodyUnavailable: '正文不可研究',
-    sourceRestricted: '来源受限',
-    textNotResearchable: '文本不具研究条件'
-  };
-  const reasons = Object.entries(labels)
-    .map(([key, label]) => [label, Number(excluded[key] || 0)])
-    .filter(([, count]) => count > 0)
-    .map(([label, count]) => `${label} ${count} 条`);
-  const excludedCount = Number(preview.totalCommentCount || 0) - Number(preview.eligibleCommentCount || 0);
-  target.textContent = `截至 ${String(preview.asOf || '').replace('T', ' ')}：共 ${Number(preview.totalCommentCount || 0)} 条评论；可研究 ${Number(preview.eligibleCommentCount || 0)} 条；未纳入 ${excludedCount} 条${reasons.length ? `（${reasons.join('；')}）` : ''}。`;
+  const labels = { commentAuthorUnknown:'评论作者身份未知',workAuthorUnknown:'作品作者身份未知',creatorVoice:'作品作者本人',bodyUnavailable:'正文不可研究',sourceRestricted:'来源受限',textNotResearchable:'文本不具研究条件' };
+  const reasons = Object.entries(labels).map(([key,label])=>[label,Number(excluded[key]||0)]).filter(([,count])=>count>0).map(([label,count])=>`${label} ${count} 条`);
+  const excludedCount=Number(preview.totalCommentCount||0)-Number(preview.eligibleCommentCount||0);
+  target.textContent=`截至 ${String(preview.asOf||'').replace('T',' ')}：共 ${Number(preview.totalCommentCount||0)} 条评论；可研究 ${Number(preview.eligibleCommentCount||0)} 条；未纳入 ${excludedCount} 条${reasons.length?`（${reasons.join('；')}）`:''}。`;
 }
-function renderWorks() {
-  const container = document.querySelector('#works');
-  const visible = visibleWorks();
-  const filter = normalizedFilter();
-  document.querySelector('#work-filter-status').textContent = filter
-    ? `当前筛选命中 ${visible.length} 篇，已加载 ${loadedWorks.length} 篇可研究作品。`
-    : `已加载 ${loadedWorks.length} 篇可研究作品。`;
-  container.innerHTML = visible.length
-    ? visible.map(work => `<tr><td><input id="work-${esc(work.workRef)}" type="checkbox" name="work-ref" value="${esc(work.workRef)}" aria-label="选择作品：${esc(work.title)}"${selectedWorkRefs.has(work.workRef) ? ' checked' : ''}></td><td><label for="work-${esc(work.workRef)}"><span class="study-work-title">${esc(work.title)}</span></label></td><td>${Number(work.eligibleCommentCount)}</td></tr>`).join('')
-    : `<tr><td class="study-table-empty" colspan="3">${filter ? '当前筛选没有命中已加载作品。' : '当前没有符合条件的 ADHD 作品。'}</td></tr>`;
-  container.querySelectorAll('input[name="work-ref"]').forEach(input => input.addEventListener('change', event => {
-    if (event.currentTarget.checked) selectedWorkRefs.add(event.currentTarget.value);
-    else selectedWorkRefs.delete(event.currentTarget.value);
+function workCatalogPath(cursor=null){
+  const query=new URLSearchParams({domain:domainRef,limit:'50'});
+  if(workCatalogState.q)query.set('q',workCatalogState.q);
+  if(cursor)query.set('cursor',cursor);
+  return `works?${query}`;
+}
+function renderWorks(){
+  const container=document.querySelector('#works');
+  const coverage=workCatalogState.coverage||{};
+  const pending=coverage.pendingCount==null?'未知':Number(coverage.pendingCount);
+  document.querySelector('#work-filter-status').textContent=`服务端作品目录：当前页 ${loadedWorks.length} 篇 / 匹配 ${workCatalogState.total} 篇；已索引评论 ${Number(coverage.indexedCount||0)}，待索引 ${pending}。`;
+  document.querySelector('#work-page-status').textContent=`第 ${workCatalogState.history.length+1} 页`;
+  document.querySelector('#work-prev').disabled=workCatalogState.history.length===0;
+  document.querySelector('#work-next').disabled=!workCatalogState.nextCursor;
+  container.innerHTML=loadedWorks.length?loadedWorks.map(work=>`<tr><td><input id="work-${esc(work.workRef)}" type="checkbox" name="work-ref" value="${esc(work.workRef)}" aria-label="选择作品：${esc(work.displayTitle)}"${selectedWorkRefs.has(work.workRef)?' checked':''}${selectedWorkRefs.size>=MAX_SELECTED_WORKS&&!selectedWorkRefs.has(work.workRef)?' disabled':''}></td><td><label for="work-${esc(work.workRef)}"><span class="study-work-title">${esc(work.displayTitle||'未命名作品')}</span><small>${esc(workTitleSourceLabel[work.displayTitleSource]||work.displayTitleSource||'标题未记录')}</small></label></td><td>${Number(work.eligibleCommentCount||0)}</td></tr>`).join(''):'<tr><td class="study-table-empty" colspan="3">当前搜索没有匹配作品。</td></tr>';
+  container.querySelectorAll('input[name="work-ref"]').forEach(input=>input.addEventListener('change',event=>{
+    const work=loadedWorks.find(item=>item.workRef===event.currentTarget.value);
+    if(event.currentTarget.checked){
+      if(selectedWorkRefs.size>=MAX_SELECTED_WORKS){event.currentTarget.checked=false;document.querySelector('#work-filter-status').textContent=`最多选择 ${MAX_SELECTED_WORKS} 篇作品；已保留原选择。`;}
+      else{selectedWorkRefs.add(event.currentTarget.value);if(work)selectedWorkMeta.set(work.workRef,work);}
+    }else{selectedWorkRefs.delete(event.currentTarget.value);selectedWorkMeta.delete(event.currentTarget.value);}
     updateSelection();
   }));
   updateSelection();
 }
-async function loadSetup() {
-  const status = document.querySelector('#setup-status');
-  try {
-    const setup = await get('setup');
-    const select = document.querySelector('#model-config');
-    select.innerHTML = list(setup.modelConfigs, config => `<option value="${esc(config.configRef)}">${esc(config.modelId)} · 输入上限 ${Number(config.inputTokenLimit)} 词元／输出上限 ${Number(config.outputTokenLimit)} 词元</option>`, '没有可用模型配置。');
-    const available = setup.modelConfigs?.length > 0;
-    select.disabled = !available;
-    document.querySelector('#save-policy').disabled = !available;
-    sourcePreview = setup.sourcePreview || null;
-    renderSourcePreview(sourcePreview);
-    loadedWorks = setup.eligibleWorks || [];
-    selectedWorkRefs.clear();
-    renderWorks();
-    status.dataset.kind = available ? 'info' : 'error';
-    status.textContent = available ? `已加载 ${setup.eligibleWorks?.length || 0} 篇可选作品；此列表最多展示 100 篇。` : '没有启用的模型配置，无法保存策略。';
-  } catch (error) {
-    status.dataset.kind = 'error';
-    status.textContent = `无法读取准备信息：${error.message}`;
-    document.querySelector('#work-filter-status').textContent = '作品列表不可用。';
-    sourcePreview = null;
-    renderSourcePreview(null);
-    document.querySelector('#works').innerHTML = '<tr><td class="study-table-empty" colspan="3">作品列表不可用。</td></tr>';
+async function loadWorksPage(cursor=null){
+  if(!domainRef)return;
+  const data=await get(workCatalogPath(cursor));
+  loadedWorks=data.items||[];
+  workCatalogState.cursor=cursor;
+  workCatalogState.nextCursor=data.page?.nextCursor||null;
+  workCatalogState.total=Number(data.totalWorkCount||0);
+  workCatalogState.coverage=data.indexCoverage||null;
+  renderWorks();
+}
+async function searchWorksNow(){
+  workCatalogState.q=document.querySelector('#work-filter').value.trim();
+  workCatalogState.cursor=null;workCatalogState.history=[];
+  await loadWorksPage(null);
+}
+async function loadSetup(){
+  const status=document.querySelector('#setup-status');
+  try{
+    const setup=await get('setup');domainRef=setup.domainRef;
+    const select=document.querySelector('#model-config');
+    select.innerHTML=setup.modelConfigs?.length?setup.modelConfigs.map(config=>`<option value="${esc(config.configRef)}">${esc(config.modelId)} · 输入上限 ${Number(config.inputTokenLimit)} 词元／输出上限 ${Number(config.outputTokenLimit)} 词元</option>`).join(''):'<option value="" disabled>没有可用模型配置</option>';
+    const available=setup.modelConfigs?.length>0;select.disabled=!available;document.querySelector('#save-policy').disabled=!available;
+    sourcePreview=setup.sourcePreview||null;renderSourcePreview(sourcePreview);
+    selectedWorkRefs.clear();selectedWorkMeta.clear();workCatalogState.q='';workCatalogState.history=[];document.querySelector('#work-filter').value='';
+    await loadWorksPage(null);
+    status.dataset.kind=available?'info':'error';
+    status.textContent=available?`作品目录可连续翻页；当前匹配 ${workCatalogState.total} 篇。`:'没有启用的模型配置，无法保存策略。';
+  }catch(error){
+    status.dataset.kind='error';status.textContent=`无法读取准备信息：${error.message}`;document.querySelector('#work-filter-status').textContent='作品目录不可用。';sourcePreview=null;renderSourcePreview(null);document.querySelector('#works').innerHTML='<tr><td class="study-table-empty" colspan="3">作品目录不可用。</td></tr>';
   }
 }
 const targetStateLabel = {
@@ -148,7 +149,7 @@ const PENDING_RESOLUTION_STATES = new Set(['pending', 'deferred_context', 'defer
 let allRuns = [];
 let activeView = 'overview';
 let selectedRunRef = null;
-const RUN_SCOPED_VIEWS = new Set(['targets', 'pending']);
+const RUN_SCOPED_VIEWS = new Set(['pending']);
 
 function runOptionLabel(run) {
   return `${run.runRef.slice(0, 8)}… · ${esc(label(targetStateLabel, run.state) ?? run.state)} · ${run.createdAt.slice(0, 16).replace('T', ' ')}`;
@@ -219,6 +220,80 @@ async function renderTargetsTab() {
   return `<div class="study-review-table-wrap"><table class="study-review-table"><thead><tr><th scope="col">评论原声</th><th scope="col">处理状态</th><th scope="col">语境</th><th scope="col">研究信号</th></tr></thead><tbody>${data.targets.map(targetRow).join('')}</tbody></table></div>`;
 }
 
+const commentCatalogState={q:'',studyState:'all',voiceRole:'reader_and_unknown',workRef:null,workLabel:'',cursor:null,history:[],response:null,summary:null,workChoices:[]};
+function catalogQuery(path,extra={}){
+  const query=new URLSearchParams({domain:domainRef});
+  Object.entries(extra).forEach(([key,value])=>{if(value!=null&&value!=='')query.set(key,String(value));});
+  return `${path}?${query}`;
+}
+function resetCommentPage(){commentCatalogState.cursor=null;commentCatalogState.history=[];}
+function commentStatus(item){
+  if(!item.latestStudy)return'尚未研究';
+  const latest=label(targetStateLabel,item.latestStudy.state)??item.latestStudy.state;
+  if(item.effectiveStudy&&item.latestStudy.targetRef!==item.effectiveStudy.targetRef){const effective=label(targetStateLabel,item.effectiveStudy.state)??item.effectiveStudy.state;return`${latest}；历史有效结果：${effective}`;}
+  return latest;
+}
+function commentEligibility(item){
+  if(item.studyEligibility?.eligible)return'可研究';
+  const map={sourceRestricted:'来源受限',bodyUnavailable:'正文不可用',indexPending:'等待本地清洗',textNotResearchable:'纯无效文本',workAuthorUnknown:'作品作者身份未知',commentAuthorUnknown:'评论作者身份未知',creatorVoice:'作品作者声音'};
+  return(item.studyEligibility?.reasons||[]).map(reason=>map[reason]||reason).join('；')||'暂不可研究';
+}
+async function renderCommentsTab(){
+  if(!domainRef)return'<p class="study-empty">评论目录尚未就绪。</p>';
+  const params={q:commentCatalogState.q,workRef:commentCatalogState.workRef,studyState:commentCatalogState.studyState,voiceRole:commentCatalogState.voiceRole,cursor:commentCatalogState.cursor,limit:50};
+  const summaryParams={...params};delete summaryParams.cursor;delete summaryParams.limit;
+  const[data,summary]=await Promise.all([get(catalogQuery('comments',params)),get(catalogQuery('catalog-summary',summaryParams))]);
+  commentCatalogState.response=data;commentCatalogState.summary=summary;
+  const rows=data.items||[],stats=summary.summary||{},coverage=data.indexCoverage||{},pending=coverage.pendingCount==null?'未知':Number(coverage.pendingCount);
+  const workOptions=commentCatalogState.workChoices.map(work=>`<option value="${esc(work.workRef)}"${work.workRef===commentCatalogState.workRef?' selected':''}>${esc(work.displayTitle||'未命名作品')}</option>`).join('');
+  const body=rows.length?rows.map(item=>`<tr><td><button type="button" class="study-comment-open" data-comment-work="${esc(item.commentKey.workRef)}" data-comment-id="${esc(item.commentKey.commentExternalId)}"><span class="study-comment-voice">${esc(item.commentText)}</span></button><small>${esc(commentEligibility(item))}</small></td><td><span class="study-work-title">${esc(item.workTitle||'未命名作品')}</span><small>${esc(workTitleSourceLabel[item.workTitleSource]||item.workTitleSource||'标题未记录')}</small></td><td>${esc(commentStatus(item))}</td><td>${esc(item.authorDisplayName||'作者未记录')}<small>${esc(String(item.observedAt||'').replace('T',' '))}</small></td></tr>`).join(''):'<tr><td colspan="4" class="study-table-empty">当前筛选没有可显示的用户评论。</td></tr>';
+  return`<section class="study-comments" aria-labelledby="comments-title"><header class="study-comments-head"><div><p class="study-label">评论证据库</p><h2 id="comments-title">用户评论</h2><p>当前筛选可显示 ${Number(stats.displayableCommentCount||0)} 条；可研究 ${Number(stats.eligibleCommentCount||0)} 条；已索引 ${Number(coverage.indexedCount||0)}，待索引 ${pending}。</p></div></header>
+  <form id="comment-filter-form" class="study-comment-filters"><label>字面搜索<input id="comment-query" type="search" value="${esc(commentCatalogState.q)}" placeholder="搜索清洗后的评论文本"></label><label>研究状态<select id="comment-study-state">${[['all','全部'],['never_studied','从未研究'],['in_progress','处理中'],['studied','已有成功结果'],['needs_context','等待语境'],['failed','最近失败']].map(([v,t])=>`<option value="${v}"${commentCatalogState.studyState===v?' selected':''}>${t}</option>`).join('')}</select></label><label>声音角色<select id="comment-voice-role">${[['reader_and_unknown','用户评论（默认）'],['reader','已知用户'],['unknown','身份未知'],['creator','作品作者'],['all','全部声音']].map(([v,t])=>`<option value="${v}"${commentCatalogState.voiceRole===v?' selected':''}>${t}</option>`).join('')}</select></label><button type="submit">应用筛选</button></form>
+  <div class="study-comment-work-filter"><form id="comment-work-search-form"><label>所属作品<input id="comment-work-search" type="search" value="${esc(commentCatalogState.workLabel)}" placeholder="搜索作品标题"></label><button type="submit">查找作品</button></form><label>已匹配作品<select id="comment-work-select"><option value="">全部作品</option>${workOptions}</select></label></div>
+  <div class="study-review-table-wrap"><table class="study-review-table study-comments-table"><thead><tr><th scope="col">原声</th><th scope="col">所属作品</th><th scope="col">研究状态</th><th scope="col">作者 / 观测</th></tr></thead><tbody>${body}</tbody></table></div>
+  <nav class="study-pagination" aria-label="用户评论翻页"><button id="comment-prev" type="button"${commentCatalogState.history.length?'':' disabled'}>上一页</button><span>第 ${commentCatalogState.history.length+1} 页</span><button id="comment-next" type="button"${data.page?.nextCursor?'':' disabled'}>下一页</button></nav></section>`;
+}
+async function searchCommentWorks(query){
+  const data=await get(catalogQuery('works',{q:query,limit:20}));commentCatalogState.workChoices=data.items||[];
+  const select=document.querySelector('#comment-work-select');if(!select)return;
+  select.innerHTML='<option value="">全部作品</option>'+commentCatalogState.workChoices.map(work=>`<option value="${esc(work.workRef)}">${esc(work.displayTitle||'未命名作品')}</option>`).join('');
+}
+function bindCommentsView(){
+  const form=document.querySelector('#comment-filter-form');if(!form)return;
+  form.addEventListener('submit',async event=>{event.preventDefault();commentCatalogState.q=document.querySelector('#comment-query').value.trim();commentCatalogState.studyState=document.querySelector('#comment-study-state').value;commentCatalogState.voiceRole=document.querySelector('#comment-voice-role').value;resetCommentPage();await renderActiveTab();});
+  document.querySelector('#comment-work-search-form').addEventListener('submit',async event=>{event.preventDefault();const query=document.querySelector('#comment-work-search').value.trim();commentCatalogState.workLabel=query;try{await searchCommentWorks(query);}catch(error){document.querySelector('#comment-work-select').innerHTML='<option value="">作品读取失败</option>';}});
+  document.querySelector('#comment-work-select').addEventListener('change',async event=>{commentCatalogState.workRef=event.currentTarget.value||null;const chosen=commentCatalogState.workChoices.find(work=>work.workRef===commentCatalogState.workRef);commentCatalogState.workLabel=chosen?.displayTitle||'';resetCommentPage();await renderActiveTab();});
+  document.querySelector('#comment-prev').addEventListener('click',async()=>{commentCatalogState.cursor=commentCatalogState.history.pop()??null;await renderActiveTab();});
+  document.querySelector('#comment-next').addEventListener('click',async()=>{const next=commentCatalogState.response?.page?.nextCursor;if(!next)return;commentCatalogState.history.push(commentCatalogState.cursor);commentCatalogState.cursor=next;await renderActiveTab();});
+  document.querySelectorAll('[data-comment-work][data-comment-id]').forEach(button=>button.addEventListener('click',()=>openCommentDetail(button.dataset.commentWork,button.dataset.commentId)));
+}
+function detailSection(title,body){return`<section class="study-detail-section"><h3>${esc(title)}</h3>${body}</section>`;}
+function renderCommentDetail(data){
+  const comment=data.comment,source=data.source||{},work=data.work||{},parent=data.parentContext,history=data.studyHistory?.items||[];
+  const raw=comment?.commentText?`<blockquote>${esc(comment.commentText)}</blockquote>`:`<p class="study-restricted">当前原声不可显示：${esc(source.displayState||source.sourceState||'unknown')}</p>`;
+  const workBody=`<p><strong>${esc(work.displayTitle||comment?.workTitle||'未命名作品')}</strong> <small>${esc(workTitleSourceLabel[work.displayTitleSource]||work.displayTitleSource||'标题未记录')}</small></p>`;
+  const parentBody=parent?.commentText?`<blockquote>${esc(parent.commentText)}</blockquote><p class="study-signal-meta">仅作为语境，不作为当前评论的独立证据。</p>`:'<p class="muted">没有可显示的父评论语境。</p>';
+  const cleanBody=comment?`<p>${esc(comment.researchText||'')}</p><p class="study-signal-meta">状态：${esc(comment.cleanState||'unknown')} · 原因：${esc((comment.cleanReasons||[]).join('、')||'无')}</p>`:'<p class="muted">当前版本不可清洗或尚未索引。</p>';
+  const historyRow=item=>`<li><strong>${esc(label(targetStateLabel,item.state)??item.state)}</strong><span>${esc(String(item.createdAt||'').replace('T',' '))}</span><span>Signal ${Number(item.signalCount||0)} 条</span><span>方法：${esc(item.method?.recordingState==='recorded'?(item.method.methodName||item.method.policyRef):'历史未记录')}</span></li>`;
+  const historyBody=history.length?`<ol class="study-history-list">${history.map(historyRow).join('')}</ol>`:'<p class="muted">尚无研究历史。</p>';
+  const next=data.studyHistory?.page?.nextCursor;
+  const more=next?`<button type="button" id="comment-history-more" data-work="${esc(data.commentKey.workRef)}" data-comment-id="${esc(data.commentKey.commentExternalId)}" data-cursor="${esc(next)}">继续读取研究历史</button>`:'';
+  return raw+detailSection('所属作品',workBody)+detailSection('父评论语境',parentBody)+detailSection('清洗文本',cleanBody)+detailSection(`研究历史（${Number(data.studyHistory?.totalCount||0)}）`,historyBody+more);
+}
+async function loadMoreCommentHistory(button){
+  const data=await get(catalogQuery('comments/history',{workRef:button.dataset.work,commentExternalId:button.dataset.commentId,cursor:button.dataset.cursor,limit:50}));
+  const list=document.querySelector('#comment-detail-body .study-history-list');
+  if(list)list.insertAdjacentHTML('beforeend',(data.items||[]).map(item=>`<li><strong>${esc(label(targetStateLabel,item.state)??item.state)}</strong><span>${esc(String(item.createdAt||'').replace('T',' '))}</span><span>Signal ${Number(item.signalCount||0)} 条</span><span>方法：${esc(item.method?.recordingState==='recorded'?(item.method.methodName||item.method.policyRef):'历史未记录')}</span></li>`).join(''));
+  if(data.page?.nextCursor){button.dataset.cursor=data.page.nextCursor;button.disabled=false;button.textContent='继续读取研究历史';}else button.remove();
+}
+function bindCommentHistoryMore(){
+  const button=document.querySelector('#comment-history-more');if(!button)return;
+  button.addEventListener('click',async()=>{button.disabled=true;button.textContent='正在读取…';try{await loadMoreCommentHistory(button);}catch(error){button.disabled=false;button.textContent=`读取失败，重试：${error.message}`;}});
+}
+async function openCommentDetail(workRef,commentExternalId){
+  const dialog=document.querySelector('#comment-detail-dialog'),body=document.querySelector('#comment-detail-body');body.innerHTML='<p class="study-empty">正在读取评论详情…</p>';if(!dialog.open)dialog.showModal();
+  try{const data=await get(catalogQuery('comments/detail',{workRef,commentExternalId}));body.innerHTML=renderCommentDetail(data);bindCommentHistoryMore();}catch(error){body.innerHTML=`<p class="study-empty">评论详情读取失败：${esc(error.message)}</p>`;}
+}
 function pairOutcomeSummary(outcome) {
   const state = label(pairStateLabel, outcome.state) ?? '配对状态未知';
   const decision = outcome.decisionReason
@@ -282,7 +357,7 @@ async function renderRunsTab() {
   return `<div class="study-review-table-wrap"><table class="study-review-table"><thead><tr><th scope="col">运行</th><th scope="col">状态</th><th scope="col">作品</th><th scope="col">目标</th><th scope="col">已产出</th><th scope="col">无信号</th><th scope="col">等待语境</th><th scope="col">失败</th><th scope="col">来源受限</th></tr></thead><tbody>${data.runs.map(runRow).join('')}</tbody></table></div>`;
 }
 
-const TAB_RENDERERS = { overview: renderOverviewTab, targets: renderTargetsTab, pending: renderPendingTab, problems: renderProblemsTab, runs: renderRunsTab };
+const TAB_RENDERERS = { overview: renderOverviewTab, comments: renderCommentsTab, pending: renderPendingTab, problems: renderProblemsTab, runs: renderRunsTab };
 
 // A newer render can start (Tab click, run picker change) before an older one's fetch resolves.
 // Without this token, a slow response from an abandoned render could overwrite whatever the
@@ -303,6 +378,7 @@ async function renderActiveTab() {
   if (token !== renderToken) return;
   container.innerHTML = html;
   container.setAttribute('aria-busy', 'false');
+  if (view === 'comments') bindCommentsView();
 }
 
 async function loadProjection() {
@@ -364,13 +440,13 @@ document.querySelector('#start-run').addEventListener('click', async () => {
   } catch (error) { result.textContent = `未创建研究运行：${error.message}`; }
   finally { updateSelection(); }
 });
-document.querySelector('#work-filter').addEventListener('input', renderWorks);
+document.querySelector('#work-filter').addEventListener('input',()=>{clearTimeout(workSearchTimer);workSearchTimer=setTimeout(()=>{void searchWorksNow().catch(error=>{document.querySelector('#work-filter-status').textContent=`作品搜索失败：${error.message}`;});},250);});
+document.querySelector('#work-prev').addEventListener('click',async()=>{const previous=workCatalogState.history.pop()??null;await loadWorksPage(previous);});
+document.querySelector('#work-next').addEventListener('click',async()=>{if(!workCatalogState.nextCursor)return;workCatalogState.history.push(workCatalogState.cursor);await loadWorksPage(workCatalogState.nextCursor);});
 document.querySelector('#comment-budget').addEventListener('input', updateSelection);
 document.querySelector('#select-visible-works').addEventListener('change', event => {
-  visibleWorks().forEach(work => {
-    if (event.currentTarget.checked) selectedWorkRefs.add(work.workRef);
-    else selectedWorkRefs.delete(work.workRef);
-  });
+  visibleWorks().forEach(work=>{if(event.currentTarget.checked){if(selectedWorkRefs.size<MAX_SELECTED_WORKS){selectedWorkRefs.add(work.workRef);selectedWorkMeta.set(work.workRef,work);}}else{selectedWorkRefs.delete(work.workRef);selectedWorkMeta.delete(work.workRef);}});
   renderWorks();
 });
-void Promise.all([loadSetup(), loadProjection()]);
+document.querySelector('#comment-detail-close').addEventListener('click',()=>document.querySelector('#comment-detail-dialog').close());
+void(async()=>{await loadSetup();await loadProjection();})();

@@ -1,0 +1,1 @@
+{"requestRef":"00000000-0000-4000-8000-000000000101","domainRef":"00000000-0000-4000-8000-000000000001","policyRef":"00000000-0000-4000-8000-000000000102","scope":{"kind":"works","workRefs":["00000000-0000-4000-8000-000000000103"]},"mode":"new_only","limits":{"commentBudget":100,"contextCharacterBudget":6000,"tokenLimit":100000},"reason":null}

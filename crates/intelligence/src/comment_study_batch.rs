@@ -199,6 +199,7 @@ pub async fn next_run_needing_batch(
     sqlx::query_scalar(
         "SELECT run.run_ref FROM linggan_comment_study_run run \
          WHERE run.state IN ('prepared','queued','running') \
+           AND run.selection_manifest->>'contract'='comment-study.run-selection.v1' \
            AND NOT (run.run_ref = ANY($1)) \
            AND EXISTS(SELECT 1 FROM linggan_comment_study_target target \
                       WHERE target.run_ref=run.run_ref AND target.state='queued') \
@@ -348,7 +349,7 @@ async fn ensure_batchable_run(
     run_ref: Uuid,
 ) -> Result<(), StudyBatchError> {
     let state: Option<String> = sqlx::query_scalar(
-        "SELECT state FROM linggan_comment_study_run WHERE run_ref=$1 FOR UPDATE",
+        "SELECT state FROM linggan_comment_study_run WHERE run_ref=$1 AND selection_manifest->>'contract'='comment-study.run-selection.v1' FOR UPDATE",
     )
     .bind(run_ref)
     .fetch_optional(&mut **transaction)

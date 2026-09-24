@@ -8,6 +8,12 @@
 
 本页是项目的“总书目”。Agent 不应先通读所有材料，而应从这里逐层进入与当前事项直接相关的文件。
 
+## 评论研究产品化 · 当前交付入口
+
+Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发。先读[完整手册入口](runbooks/comment-study-productization-package.md)，再按职责读取其中的八个分册、机器合同与验收台账；每步对照 P0–P5 和 T01–T54。当前阶段与未验证项以该入口及实施回执为准，不将文档入库视为代码、数据库或 UI 已交付。
+
+本包保留当前 clean-study 合法历史，不延用 DEC-0006 的旧 reset 授权；只替代对应五 Tab 与旧启动交互的目标规格，不恢复 V1 路径。自动化分册是下一阶段设计，不是定时外发授权。此处为 2026-09-23 的局部入口登记，不表示下方所有历史状态已经重新核验。
+
 ## 固定阅读顺序
 
 1. 根目录 [`AGENTS.md`](../AGENTS.md)：最高约束、事实优先级和不可违反规则。
@@ -29,7 +35,7 @@
 | [runbooks/paddle-ocr-runtime.md](runbooks/paddle-ocr-runtime.md) | 权威当前 | 本机 Paddle runtime 准备、无 Tesseract 回退、迁移后受控重排步骤 |
 | [decisions/0006-comment-research-clean-rebuild.md](decisions/0006-comment-research-clean-rebuild.md) | 权威当前 | Issue #295：开发期销毁旧评论研究派生层，保留原始 Evidence 与资格事实；唯一的新评论研究合同与本机 reset 边界 |
 | [plans/active/comment-research-rebuild-001.md](plans/active/comment-research-rebuild-001.md) | 活跃计划；Issue #295；实现中 | 按领域选择笔记、冻结同篇语境与评论目标、严格语义接纳、长期 Problem 归并及旧路径删除的交付顺序 |
-| [plans/active/comment-study-p3-quality-gate-010.md](plans/active/comment-study-p3-quality-gate-010.md) | 活跃计划；Issue #316；受保护工作树 | P3 候选的主线整合准备、Gold Set/Recall@K 协议与无真实评论/模型调用的验证边界 |
+| [plans/active/comment-study-p3-quality-gate-010.md](plans/active/comment-study-p3-quality-gate-010.md) | 活跃计划；Issue #316；受保护工作树 | P3 候选的主线整合准备、Gold Set/Recall@K 协议與无真实评论/模型调用的验证边界 |
 | [plans/active/comment-research-reset-001.md](plans/active/comment-research-reset-001.md) | 历史基础 | 旧评论研究 reset 的历史记录；不再规定当前 schema、Run、输入或 UI 合同 |
 | [plans/active/comment-research-v1-real-closure-001.md](plans/active/comment-research-v1-real-closure-001.md) | 历史基线 | V1 Derivation/Run 运行记录；不得作为新实现或兼容路径 |
 | [plans/active/comment-research-semantic-output-001.md](plans/active/comment-research-semantic-output-001.md) | 历史基线 | V1 结构化输出修复记录；新输出合同由 COMMENT-STUDY-REBUILD-001 单独定义 |
@@ -99,7 +105,7 @@
 | [`product/collection-monitoring-rules.md`](product/collection-monitoring-rules.md) | 权威当前 | 博主/关键词监控的产品规则：目标生命周期、深度建档、频率、爆款追踪；含 4 项待 Mog 决定 |
 | [`plans/completed/observation-runtime-001-implementation-manual.md`](plans/completed/observation-runtime-001-implementation-manual.md) | 已完成；Issue #94 / PR #95 / PR #96 | 观察规则自动调度、插件无人领取、Package/Receipt、封面材料投影、发布与一次性验收的实施规格和已完成边界 |
 | [`data-contracts/local-001-discovery-evidence-boundary.md`](data-contracts/local-001-discovery-evidence-boundary.md) | 权威当前 | `LOCAL-001 / 001C-0` 与 #34 localhost binding：平台 discovery 与本地 Evidence Library 检索、partial Coverage、DiscoveryOccurrence、接纳回执与本地封面引用的跨边界合同；不证明真实插件或媒体取得 |
-| [`architecture/material-projection-data-map.md`](architecture/material-projection-data-map.md) | 权威当前；MATERIAL-PROJECTION-001 | 最新 Browser Producer 产出到服务接纳、作品级材料投影与 Evidence 列表/详情/受控媒体读取的逐 lane 映射及代表性 fixture |
+| [`architecture/material-projection-data-map.md`](architecture/material-projection-data-map.md) | 权威当前；MATERIAL-PROJECTION-001 | 最新 Browser Producer 产出到服务接纳、作品级材料投影与 Evidence 列表/详情受控媒体读取的逐 lane 映射及代表性 fixture |
 | [`architecture/work-resource-read-contract.md`](architecture/work-resource-read-contract.md) | 权威当前；Issue #110 / #128 | Intelligence 跨页面唯一作品资源读取入口；`0.8.28` 真实链已验收封面/头像/作者-目标分责，评论图片非空真实样本仍未观察 |
 | [`architecture/topic-workspace-contract.md`](architecture/topic-workspace-contract.md) | 验证中；Issue #112 | 暂定 Topic Definition、人工 Classification Run、冻结 Material Pack、版本/幂等与 Agent 准入边界；不复制 Evidence 原文，不形成正式 Topic、Claim 或趋势 |
 | [design/README.md](design/README.md) | 权威当前 | 前端设计手册入口、权威地图、读取路径和当前已建立/未建立边界 |
@@ -240,7 +246,7 @@
 | [`plans/active/design-002-topic-intelligence-reference-page.md`](plans/active/design-002-topic-intelligence-reference-page.md) | 活跃计划 | 合成 Topic Intelligence Reference Page 的范围、规则、原型与验证计划；不替代完整 P0 或业务 SCOPE |
 | [`plans/active/topic-workspace-real-001.md`](plans/active/topic-workspace-real-001.md) | 活跃计划；已部署、待 Mog 业务验收；Issue #112 | 首个真实 Topic 工作区垂直切片；只到暂定定义、人工裁定、冻结 Material Pack 与共享 Work Resource Read |
 | [`plans/active/scope-001-content-evidence-vertical-slice.md`](plans/active/scope-001-content-evidence-vertical-slice.md) | 活跃计划 | 当前唯一获准实施事项：F01 synthetic fact-kernel technical tracer 受控进入 TDD；完成 loopback API + minimal CLI 后 hard stop，不扩入 F02–F10、真实平台/AI/插件/Web |
-| [`plans/active/plugin-runtime-001-full-capability-retrofit.md`](plans/active/plugin-runtime-001-full-capability-retrofit.md) | 活跃计划；Issue #50 | 将灵感爆爆爆的成熟浏览器采集能力一次性适配为 Linggan 自有 Browser Producer Runtime；媒体本地资产与异步处理血缘为本事项第一类约束 |
+| [`plans/active/plugin-runtime-001-full-capability-retrofit.md`](plans/active/plugin-runtime-001-full-capability-retrofit.md) | 活跃计划 | Issue #50：将灵感爆爆爆的成熟浏览器采集能力一次性适配为 Linggan 自有 Browser Producer Runtime；媒体本地资产与异步处理血缘为本事项第一类约束 |
 | [`plans/active/author-target-sync-001.md`](plans/active/author-target-sync-001.md) | 活跃计划 | 已缓存作者资料经既有 Browser Producer outbox 接纳后，幂等同步为观察目标；作者头像经既有媒体管道本地物化并在观察目标页以本机资产展示 |
 | [`plans/completed/aud-xhs-001-xiaohongshu-capture-probe-refresh.md`](plans/completed/aud-xhs-001-xiaohongshu-capture-probe-refresh.md) | 已完成；治理终止；Issue #74 | 历史小红书页面字段与能力探针；未确认字段保持 unknown，只有真实链被具体字段阻断时才可另行最小探针 |
 | [`plans/completed/plugin-xhs-capture-upgrade-001.md`](plans/completed/plugin-xhs-capture-upgrade-001.md) | 已完成；源码升级；Issue #76 / PR #77 | 已合入搜索页面事实、详情 DOM 回退与统一详情包回执源码；不证明真实兼容性、运行时或用户验收 |

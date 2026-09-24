@@ -35,6 +35,11 @@ pub async fn run_model_work_once(
     store: &dyn ModelSecretStore,
     adapter: &PiAdapter,
 ) -> Result<bool, ModelError> {
+    // P1 deterministic maintenance shares this existing 10s worker tick. It is bounded and local:
+    // no provider call, no Run creation and no second scheduler. On pre-P1 schemas it is a no-op.
+    crate::comment_study_catalog::maintain_comment_catalog(database)
+        .await
+        .map_err(catalog_error)?;
     if run_one_problem_pair(database, store, adapter)
         .await
         .map_err(|error| match error {
@@ -216,6 +221,13 @@ pub async fn run_model_worker_with_drain(
         }
     }
     model_worker_heartbeat(&database, "idle", None).await
+}
+
+fn catalog_error(error: crate::comment_study_catalog::StudyCatalogError) -> ModelError {
+    match error {
+        crate::comment_study_catalog::StudyCatalogError::Database(error) => ModelError::Database(error),
+        _ => ModelError::Conflict,
+    }
 }
 
 fn worker_error(error: StudyBatchWorkerError) -> ModelError {

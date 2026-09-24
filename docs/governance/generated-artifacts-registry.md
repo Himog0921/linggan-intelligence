@@ -30,6 +30,14 @@
 | Linggan Browser Producer release | `plugins/linggan-browser-producer/releases/linggan-browser-producer-<version>.zip`、`plugins/linggan-browser-producer/releases/release-manifest.json` | `cd plugins/linggan-browser-producer && npm run build`；唯一源为该包的 `src/` 和 Linggan runtime token source `apps/api/src/local_web/lids_tokens.css`，build script 同时生成 ZIP/manifest | 提交 | 禁止手工修改 ZIP 或 release manifest；修改源后重新 build | 当前只保留当前发行版；替代/删除必须经单独发布卡和 hash 核对 |
 | Linggan Intelligence Browser release | `plugins/linggan-intelligence-browser/releases/linggan-intelligence-browser-v<version>.zip`、`plugins/linggan-intelligence-browser/releases/release-manifest.json` | `cd plugins/linggan-intelligence-browser && npm run build && npm run package:release && npm run release:manifest && npm run release:verify && npm run release:reproducibility`；唯一源是该包的当前 source；打包器固定 ZIP 时间与文件顺序 | 提交 | 禁止手工修改 ZIP 或 release manifest；修改 source 后重新 build/package 并核验 | `release-manifest.json` 指向唯一当前受控发行包；历史 ZIP 作为已发布工件保留，不覆盖或删除。当前 `0.8.56` ZIP SHA-256 = `8c861bf5f8833c0f9addc54486a883ab9409cb1e49be20bdee09d64960547460`；不含真实材料、账号、凭据或运行日志 |
 
+## COMMENT-STUDY-PRODUCTIZATION-001 · 2026-09-23 局部登记
+
+| 类别 | 固定位置 | 来源/生成方式 | Git 策略 | 手工修改 | 保留与清理 |
+|---|---|---|---|---|---|
+| 评论研究手册机器合同 | `docs/data-contracts/comment-study-productization-001/*.json` | Mog批准的手册v1.0 `validation/`；仅规范化JSON空白；与数据库/HTTP合同逐字段核对 | 提交；不是运行时代码生成结果 | 变更必须有对应合同版本决定，不独立扩展字段 | 与手册版本长期保留 |
+| 手册来源及静态检查 | `docs/audits/comment-study-productization-001/*.json` | 原交付回执；`python3 scripts/verify-comment-study-productization-docs.py` 检查源hash/链接/Schema；实际执行再记录新回执 | 允许无正文/凭据的回执；不提交数据库dump或原始模型内容 | 不伪造PASS；历史回执不覆盖，业务T编号由实际证明更新 | 与exact head关联保留 |
+| 已确认评论研究合成原型 | `docs/design/pages/comment-study-productization-prototype-v1.html`（待导入）；当前来源元数据在上述audit目录 | 用户确认的 `linggan-comment-research-product-prototype-v1.html`；原文件SHA-256固定，不重新生成替代原件 | 仅合成设计参考；不得进入运行assets；只有原字节校验通过后才算正文入库 | 冲突时以完整手册和LIDS为准，不从模拟数据推导真实能力 | 来源元数据不代表原型正文已上传；入库状态单独记录 |
+
 ## 当前登记结论
 
 - 当前获准提交 Git 的产品生成物包括上表登记的架构沟通 HTML、产品设计合成 HTML 与 Browser Producer release。`0.8.28` 的运行时/真实标准详情证明来自工位、Package/Receipt/Materialization 与 Evidence UI，不是 ZIP 本身自证。
