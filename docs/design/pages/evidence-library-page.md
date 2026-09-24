@@ -1,12 +1,14 @@
 # PAGE-EVIDENCE-001 · 多材料证据库
 
 > 状态: 权威当前
-> 最后核对: 2026-09-08
+> 最后核对: 2026-09-24
 > 适用范围: `语料 → 证据库` 的产品任务、页面信息架构、技术呈现要求、状态与验收；运行时入口仍为 `http://localhost:3000/corpus/evidence`
 > 事实来源: Mog 批准的五卡 Evidence Library 垂直交付、Issue #85/#86/#90、MEDIA-RECON-001、MATERIAL-PROJECTION-001、LIDS、UI execution contract 与当前 Rust/HTML/CSS/JS
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实运行/代码/合同、ACCEPTED 决定；本页规格不让静态原型冒充已接通运行时
 
 本页所有读取均显式属于一个正式 Domain。所有 Domain 共用同一 Work Resource 和 Material Inspector；primary/reference 不再决定另一套 API 或材料身份。
+
+从全局导航进入语料而尚未明确领域时，页面先呈现现有 LIDS 语料壳层上的「选择研究领域」弹窗；点击领域链接后才进入对应证据库。关闭弹窗只返回未选领域空态，不自动代选，也不读取材料。弹窗显示 active/paused 的真实状态，paused 历史可读；未知统计保持未知。页面内面包屑可换领域，不能保留旧领域检索或作品选择。领域列表读失败与列表确实为空必须区分。
 
 本规格替代本文件 2026-08-25 的 Discovery-only 产品定义。Issue #90 已把本规格的可由现行合同承担的部分落到运行页；静态参考仍只证明设计场景，运行页只证明当前 Material Projection 可以诚实返回的字段和状态。禁止把“页面已接通”写成“真实平台、媒体、处理器或业务验收已完成”。
 

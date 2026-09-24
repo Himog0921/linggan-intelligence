@@ -67,3 +67,25 @@
 | runtime 部署与 Mog 验收 | `runtime-main@46e10837`、共享迁移 0104、本机 API/浏览器 smoke | 本机部署 VERIFIED；真实媒体/跨 Domain 业务数据与 Mog 验收 NOT VERIFIED |
 
 通道读数仅总结来源事实，不把未出现的通道回执推断成“未申请”；页面提供通往目标/材料读取面的链接以检查原始来源。写入失败通过可见错误反馈说明未写入，并保留当前领域读取上下文。视觉规则沿用 L1 Operations 的 Collection Control；本次不新增 Token、Primitive、CMP、Scene 或 Motion。
+
+## 6. 语料入口与领域切换补充（DOMAIN-UNIFICATION-001-CORPUS-ENTRY-20260924）
+
+### 表面与状态
+
+| 表面 | 触发与动作 | 必须保持 |
+|---|---|---|
+| 任意页面的全局「语料」入口 | 进入 `/corpus/evidence`；未带有效 Domain 时，在完整 LIDS 语料壳层上弹出领域选择 | 不自动选 ADHD、不返回无样式后端页、不读取作品 |
+| 领域选择弹窗 | 列出正式 Domain 的名称、状态和已有统计；选择后以 `?domain=` 进入对应证据库 | active 和 paused 均可阅读历史；未知作品数显示「未知」；无 Domain 时给出领域管理入口 |
+| 证据库面包屑与子页 rail | 已选领域可切换 Domain；切换时丢弃旧领域检索与作品选择；即使当前仅有一个 Domain，去评论研究仍携带其范围 | 单一 Domain 读取范围；不把其他领域材料混入 |
+| 评论研究面包屑 | 领域选单浮在内容区和 sticky 工具条之上，可用鼠标及键盘选择 | 共享页头层级在各页一致；不遮挡全屏弹窗/抽屉 |
+
+状态词典：`未选/无效 Domain` 显示弹窗和未选空态；`已选 active` 读该领域材料；`已选 paused` 只读历史；`领域列表读取失败` 显示读取失败，不能伪装为空列表；`无可选 Domain` 仍留在有样式语料壳层并指向领域管理，关闭弹窗后空态仍保留管理链接。弹窗可通过关闭或 Escape 返回未选壳层；有领域时面包屑仍可选择。
+
+依赖仅为现有 Domain 读取、`/corpus/evidence` SSR、Evidence Library JS/CSS 和共享 Shell CSS；不增加表、API、材料角色、Token 或跨领域状态存储。文件所有权限定于本清单、Evidence 页面规格、上述页面源码/测试及必要的 LIDS 实施记录。浏览器验收路径：从 Collection 点击全局语料 → 看见弹窗与完整壳层 → 选择领域并核对 URL/材料范围 → 进入评论研究 → 打开面包屑并实际点选另一领域；在 1440 与 375/390 CSS px 核对无遮挡、无横向溢出和键盘焦点。自动检查另验证无 Domain 不触发材料读取、选择后不串领域。
+
+### 本次候选验证（2026-09-24）
+
+- 独立 worktree `codex/domain-unification-corpus-entry-130`，本机候选 API `:3103` 连共享开发库仅做 GET/浏览器读取；没有迁移、POST、采集或 runtime-main 切换。
+- Chrome 实际点击：`/collection/domains` 的全局「语料」→ `/corpus/evidence` 弹窗显示 ADHD/考研自习/自闭症干预 → 选考研进入 `?domain=...0002` 的成功空查询 → 面包屑切 ADHD `...0001` 并读取本次分页 50 篇作品 → 评论研究打开菜单，链接中心点击命中菜单自身（页头 z=40、sticky 工具条 z=30）→ 切回考研评论研究 `...0002`。
+- 390px 弹窗边界在视口内、`scrollWidth=390`；375px 弹窗关闭后焦点回到领域面包屑、搜索禁用，Enter 重新展开并选 ADHD，`scrollWidth=360 ≤ innerWidth=375`。这是本机浏览器回执，不代表真实移动设备或 Mog 业务验收。
+- 定向 Rust 测试、`node --check`、UI handbook 检查通过；完整自动测试与独立提交审查的最终结果记入进度。未合并、未部署，`:3000` 仍为已发布 main。

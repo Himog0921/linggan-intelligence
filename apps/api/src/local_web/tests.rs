@@ -3314,6 +3314,63 @@ fn corpus_domain_picker_is_a_lids_owned_link_menu_not_a_native_select() {
         SHELL_CSS.contains(".v7-domain-picker[open] summary{box-shadow:var(--lgi-shadow-brutal)}")
     );
     assert!(!SHELL_CSS.contains(".v7-domain-picker select"));
+    assert!(!html.contains("id=\"ev-domain-dialog\""));
+}
+
+#[test]
+fn corpus_without_a_selected_domain_keeps_the_shell_and_offers_a_modal_choice() {
+    let domains = vec![
+        ObservationDomain {
+            domain_ref: uuid::Uuid::new_v4(),
+            name: "考研自习".to_owned(),
+            description: None,
+            research_goal: None,
+            status: "active".to_owned(),
+            sample_count: None,
+            target_count: 2,
+            primary_target_count: 2,
+            reference_target_count: 0,
+        },
+        ObservationDomain {
+            domain_ref: uuid::Uuid::new_v4(),
+            name: "已暂停领域".to_owned(),
+            description: None,
+            research_goal: None,
+            status: "paused".to_owned(),
+            sample_count: Some(5),
+            target_count: 1,
+            primary_target_count: 1,
+            reference_target_count: 0,
+        },
+    ];
+    let html = evidence_library_html(None, &domains, None);
+    assert!(html.contains("data-theme=\"linggan-intelligence\""));
+    assert!(html.contains("class=\"v7-app\""));
+    assert!(html.contains("data-corpus-domain-selected=\"false\""));
+    assert!(html.contains("<dialog class=\"ev-domain-dialog\""));
+    assert!(html.contains("id=\"ev-domain-dialog-title\">选择研究领域"));
+    assert!(html.contains("2 个目标 · 作品数未知"));
+    assert!(html.contains("已暂停 · 历史材料可读"));
+    assert!(html.contains(&format!(
+        "href=\"/corpus/evidence?domain={}\"",
+        domains[0].domain_ref
+    )));
+    assert!(!html.contains("<h1>先选择一个领域</h1>"));
+
+    let empty = evidence_library_html(None, &[], None);
+    assert!(empty.contains("还没有可选择的研究领域"));
+    assert!(empty.contains("href=\"/collection/domains\""));
+    assert!(empty.contains("class=\"ev-domain-manage ev-domain-manage--inline\""));
+    assert!(!empty.contains("class=\"v7-domain-picker\""));
+    assert!(EVIDENCE_LIBRARY_JS.contains("dialog.showModal()"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("if (!CORPUS_DOMAIN.hasDomain)"));
+    assert!(SHELL_CSS.contains("z-index:var(--lgi-z-header)"));
+
+    let only_one = evidence_library_html(None, &domains[..1], Some(&domains[0]));
+    assert!(only_one.contains(&format!(
+        "href=\"/corpus/comments?domain={}\"",
+        domains[0].domain_ref
+    )));
 }
 
 #[test]

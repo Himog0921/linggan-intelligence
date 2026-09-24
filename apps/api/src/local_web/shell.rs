@@ -241,8 +241,8 @@ const CORPUS_ENTRIES: [CorpusEntry; 3] = [
     },
 ];
 
-/// `domain_ref` 传 `None` 时链接保持裸路径（少于两个领域时选择器本就不渲染，
-/// 带一个参数只会让地址假装有得选）。传了就每一条都带上：本领域同样带，
+/// `domain_ref` 传 `None` 时链接保持裸路径（尚未选择领域时不能传入虚假的读取范围）。
+/// 传了就每一条都带上：本领域同样带，
 /// 这样导航行为不因当前是哪个领域而不同。
 pub fn corpus_side_nav(active: CorpusPage, domain_ref: Option<&str>, foot: &str) -> String {
     let mut items = String::new();
