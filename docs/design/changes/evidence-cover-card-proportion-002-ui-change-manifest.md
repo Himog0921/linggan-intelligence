@@ -8,6 +8,8 @@
 
 > 后续校正（已合并、已刷新本机 runtime）：截图实测证明六列窄轨道中 `min-height:112px` 与 `aspect-ratio:7/2` 会让未定宽的铭牌反算为 392px，超过同列 281px。现已锁定铭牌的 inline size 为所属作品列的 100%，使 `7:2` 只在可用宽度上推导高度；不改变列数、数据、选择或翻转合同。
 
+> Domain 语义更新（2026-09-23）：`reference` 使用与 `primary` 相同的 Work Resource 卡片和材料 lane，只增加用途标签；不再为“跨行业样本”保留独立外观或列表级字段边界。该变化由 [DEC-0008](../../decisions/0008-peer-domains-and-unified-material-pipeline.md) 规定。
+
 ## 1. 事项与表面地图
 
 - Work Package：`EVIDENCE-COVER-CARD-PROPORTION-002`；分支 `codex/corpus-cover-card-proportion-002`；专属 worktree `.worktrees/corpus-cover-card-proportion-002`。

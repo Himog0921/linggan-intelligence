@@ -2,17 +2,12 @@
   'use strict';
 
   const API_ROOT = '/api/local/work-resources';
-  // 跨行业是另一条查询路径，不是给上面那个接口加参数。规格的接口红线：不得为跨行业
-  // 给证据库接口增加任何参数或字段——两条路不共享，隔离才不依赖谁记得加条件。
-  const CROSS_INDUSTRY_ROOT = '/api/local/cross-industry/samples';
   // 当前领域由服务端随页面下发。地址里的 domain 可能无效，回落判定服务端已经做过一次，
   // 前端再判一次就会出现两处规则，早晚不一致。
   const CORPUS_DOMAIN = {
     ref: document.body.dataset.corpusDomain || '',
-    name: document.body.dataset.corpusDomainName || '',
-    isOwn: document.body.dataset.corpusDomainOwn !== 'false',
+    hasDomain: document.body.dataset.corpusDomainSelected === 'true',
   };
-  const CROSS_INDUSTRY_SAMPLE_KIND = 'cross_industry_sample';
   const laneOrder = [
     'discovery', 'detail', 'comments', 'replies', 'author',
     'media_slots', 'media_bytes', 'ocr', 'asr',
@@ -222,65 +217,8 @@
       : unknownCopy;
   }
 
-  /* A cross-industry sample is a list-level reference, not a Work Resource. Keep its identity
-   * separate all the way to the DOM: giving it a `publicRef` would make the Inspector call the
-   * evidence detail API and turn an honest read boundary into a fake missing-detail failure. */
-  function isCrossIndustrySample(item) {
-    return item?.kind === CROSS_INDUSTRY_SAMPLE_KIND;
-  }
-
   function itemRef(item) {
-    return isCrossIndustrySample(item)
-      ? item?.identity?.sampleRef || null
-      : item?.identity?.publicRef || null;
-  }
-
-  function crossIndustryListItem(sample) {
-    const identity = sample?.identity || {};
-    const display = sample?.display || {};
-    const provenance = sample?.provenance || {};
-    return {
-      kind: CROSS_INDUSTRY_SAMPLE_KIND,
-      identity: {
-        sampleRef: identity.sampleRef || null,
-        contentExternalId: identity.contentExternalId || null,
-        platform: identity.platform || null,
-      },
-      display: {
-        title: display.title || null,
-        titleState: display.titleState || 'UNKNOWN',
-        authorName: display.authorName || null,
-        authorNameState: display.authorNameState || 'UNKNOWN',
-        publishedOn: display.publishedOn || null,
-        publishedOnState: display.publishedOnState || 'UNKNOWN',
-        engagement: display.engagement || {},
-      },
-      cover: sample?.cover || {},
-      provenance: {
-        keyword: provenance.keyword || null,
-        lastObservedAt: provenance.lastObservedAt || null,
-        observationTarget: provenance.observationTarget || null,
-        sortOrder: provenance.sortOrder ?? null,
-        observedTimes: Number.isFinite(provenance.observedTimes) ? provenance.observedTimes : 0,
-        firstSeenAt: provenance.firstSeenAt || null,
-        firstLikeCount: provenance.firstLikeCount ?? null,
-        firstLikeCountState: provenance.firstLikeCountState || 'UNKNOWN',
-      },
-    };
-  }
-
-  /* 「这篇被看到过几次、第一次看到时多少赞」。样本行只留得下最近一次的读数，所以
-   * 热度到底动没动，只能由观察记录回答；一次也没记到时不编一个「1 次」出来。 */
-  function observationHistoryCopy(item) {
-    const provenance = item?.provenance || {};
-    const times = Number(provenance.observedTimes);
-    if (!Number.isFinite(times) || times < 1) return null;
-    const parts = [`被看到 ${times} 次`];
-    if (provenance.firstLikeCountState === 'KNOWN' && provenance.firstLikeCount !== null) {
-      parts.push(`首次赞 ${Number(provenance.firstLikeCount).toLocaleString('zh-CN')}`);
-    }
-    if (provenance.firstSeenAt) parts.push(`起于 ${compactMoment(provenance.firstSeenAt) || provenance.firstSeenAt}`);
-    return parts.join(' · ');
+    return item?.identity?.publicRef || null;
   }
 
   function stateMeta(state) {
@@ -343,10 +281,7 @@
   }
 
   function coverPublishedCopy(item) {
-    const publishedState = isCrossIndustrySample(item)
-      ? item.display?.publishedOnState
-      : item.display?.publishedAtState;
-    if (publishedState === 'SOURCE_TEXT_ONLY') return '来源时间';
+    if (item.display?.publishedAtState === 'SOURCE_TEXT_ONLY') return '来源时间';
     const value = publishedCopy(item, true, false);
     return value;
   }
@@ -413,14 +348,15 @@
 
   function currentParams(cursor = null) {
     const params = explicitParams(cursor);
+    if (CORPUS_DOMAIN.hasDomain) params.set('domain', CORPUS_DOMAIN.ref);
     const view = viewFilters[model.activeView] || {};
     Object.entries(view).forEach(([key, value]) => params.set(key, value));
     return params;
   }
 
-  function applyCrossIndustryCapabilities() {
-    if (CORPUS_DOMAIN.isOwn) return;
-    const reason = '跨行业样本当前只提供列表级字段，检索、材料筛选与排序尚未接通。';
+  function applyDomainSelectionState() {
+    if (CORPUS_DOMAIN.hasDomain) return;
+    const reason = '请先选择研究领域，再读取统一作品材料。';
     [
       refs.search,
       refs.filterToggle,
@@ -452,9 +388,8 @@
     if (domain) params.set('domain', domain);
     if (model.activeView !== 'all') params.set('view', model.activeView);
     if (model.activeLayout !== 'research') params.set('layout', model.activeLayout);
-    // `work` is a Work Resource address. Cross-industry samples intentionally have no such
-    // address, so never serialize their sample reference into that parameter.
-    if (CORPUS_DOMAIN.isOwn && model.selectedRef) params.set('work', model.selectedRef);
+    // `work` addresses a Work Resource in the selected Domain.
+    if (CORPUS_DOMAIN.hasDomain && model.selectedRef) params.set('work', model.selectedRef);
     if (model.activeTab !== 'overview') params.set('tab', model.activeTab);
     if (model.inspectorClosed) params.set('panel', 'closed');
     else if (model.inspectorWidth !== 'normal') params.set('panel', model.inspectorWidth);
@@ -672,10 +607,10 @@
    * 本次读取 for the same reason. */
   function renderReadout() {
     const works = model.items.length;
-    if (!CORPUS_DOMAIN.isOwn) {
-      refs.railCount.textContent = String(works);
-      refs.railCount.hidden = works === 0;
-      refs.railCount.title = `本次读取 ${works} 个跨行业列表级参照样本；详情、正文、评论和媒体未在此读取。`;
+    if (!CORPUS_DOMAIN.hasDomain) {
+      refs.railCount.textContent = '0';
+      refs.railCount.hidden = true;
+      refs.railCount.title = '选择研究领域后读取统一作品材料。';
       return;
     }
     let commentsRetained = null;
@@ -701,9 +636,7 @@
 
   function previewBlock(item) {
     const preview = node('div', 'ev-preview');
-    const cover = isCrossIndustrySample(item)
-      ? (item.cover && typeof item.cover === 'object' ? item.cover : {})
-      : (item.media?.cover && typeof item.media.cover === 'object' ? item.media.cover : {});
+    const cover = item.media?.cover && typeof item.media.cover === 'object' ? item.media.cover : {};
     const controlledHandle = sameOriginPath(cover.localAssetUrl, ['/api/local/media/', '/api/local/derivative/']);
     const coverState = cover.state || 'NOT_OBSERVED';
     if (controlledHandle) {
@@ -724,9 +657,7 @@
    * compact preview used by research and the back of this card must pass through the exact same
    * controlled-local-media gate. */
   function coverAsset(item) {
-    const cover = isCrossIndustrySample(item)
-      ? (item.cover && typeof item.cover === 'object' ? item.cover : {})
-      : (item.media?.cover && typeof item.media.cover === 'object' ? item.media.cover : {});
+    const cover = item.media?.cover && typeof item.media.cover === 'object' ? item.media.cover : {};
     return {
       asset: sameOriginPath(cover.localAssetUrl, ['/api/local/media/', '/api/local/derivative/']),
       state: cover.state || 'NOT_OBSERVED',
@@ -931,16 +862,10 @@
     published.title = `发布时间 ${publishedCopy(item, false, false)}`;
     top.append(authorFact(item), published);
     const facts = node('div', 'ev-cover-facts');
-    if (isCrossIndustrySample(item)) {
-      const boundary = node('span', 'ev-cover-cross-boundary', '列表级参照物 · 详情、媒体与材料未读取');
-      boundary.title = '列表级参照物；详情、媒体与材料未读取';
-      facts.append(boundary);
-    } else {
-      const status = node('span', 'ev-cover-status');
-      status.tabIndex = 0;
-      status.append(coverStateLine(detailState), coverStatusTooltip(item, material.summary));
-      facts.append(status);
-    }
+    const status = node('span', 'ev-cover-status');
+    status.tabIndex = 0;
+    status.append(coverStateLine(detailState), coverStatusTooltip(item, material.summary));
+    facts.append(status);
     const observed = node('span', 'ev-cover-observed', coverObservationMoment(observedAt));
     observed.title = `最近观察 ${observedAt || '未知'}`;
     facts.append(observed);
@@ -976,9 +901,6 @@
    * still blocks the fallback rather than asserting an authorship the platform denies. A keyword
    * target is a search term, not a person, and never fills the author. */
   function effectiveAuthor(item) {
-    if (isCrossIndustrySample(item)) {
-      return knownText(item.display?.authorName, item.display?.authorNameState);
-    }
     if (item.display?.creatorState === 'KNOWN' && item.display?.creatorDisplayName) {
       return item.display.creatorDisplayName;
     }
@@ -993,13 +915,6 @@
   function authorFact(item) {
     const name = effectiveAuthor(item);
     const fact = node('div', 'ev-author-fact');
-    // Cross-industry list items do not include an avatar read. Do not create a media-state slot
-    // for a field that this contract never asked for; the author name remains independently
-    // honest through its own KNOWN/UNKNOWN state.
-    if (isCrossIndustrySample(item)) {
-      fact.append(node('strong', null, name));
-      return fact;
-    }
     fact.append(authorAvatar(item.media, `${name}的头像`), node('strong', null, name));
     return fact;
   }
@@ -1078,12 +993,6 @@
   }
 
   function publishedCopy(item, compact = false, withFieldName = true) {
-    if (isCrossIndustrySample(item)) {
-      if (item.display?.publishedOnState === 'KNOWN' && item.display?.publishedOn) {
-        return compact ? compactDay(item.display.publishedOn) : item.display.publishedOn;
-      }
-      return withFieldName ? '发布时间当前未知' : '当前未知';
-    }
     if (item.display?.publishedAtState === 'KNOWN') {
       const raw = item.display?.publishedAt;
       if (!raw) return '发布时间已知';
@@ -1097,7 +1006,6 @@
 
   function rowFor(item) {
     const ref = itemRef(item);
-    const crossIndustry = isCrossIndustrySample(item);
     const row = node('article', 'ev-work-row');
     row.setAttribute('role', 'option');
     row.tabIndex = -1;
@@ -1110,37 +1018,22 @@
     const identity = node('div', 'ev-identity');
     const eyebrow = node('div', 'ev-eyebrow');
     eyebrow.append(node('span', null, item.identity?.platform?.toUpperCase() || '平台未知'));
-    if (!crossIndustry && item.display?.titleSource === 'cover_ocr') {
+    if (item.display?.titleSource === 'cover_ocr') {
       eyebrow.append(node('span', 'ev-title-source', '封面 OCR'));
+    }
+    if (item.domainUsage?.role === 'reference') {
+      eyebrow.append(node('span', 'ev-reference-marker', 'reference · 对照'));
     }
     const title = node('h2', null, knownText(item.display?.title, item.display?.titleState, '标题当前未知'));
     const meta = node('div', 'ev-meta');
     meta.append(authorFact(item), node('span', 'ev-time-line', published));
-    if (crossIndustry) {
-      eyebrow.append(node('span', 'ev-cross-industry-marker', '跨行业参照样本'));
-      identity.append(
-        eyebrow,
-        title,
-        meta,
-        crossIndustryBoundaryBlock('已读取列表级字段；详情、正文、评论与媒体未读取。'),
-        engagementBlock(item),
-      );
-    } else {
-      identity.append(eyebrow, title, meta, evidenceBlock(item.evidenceFragment), engagementBlock(item));
-    }
+    identity.append(eyebrow, title, meta, evidenceBlock(item.evidenceFragment), engagementBlock(item));
 
     const side = node('div', 'ev-side');
-    const material = crossIndustry ? null : materialBlock(item);
-    const detailState = crossIndustry ? null : (laneSummary(item, 'detail')?.state || 'UNKNOWN');
-    if (crossIndustry) {
-      side.append(node('strong', 'ev-cross-industry-side-label', '列表级参照物'));
-      side.append(node('span', 'ev-cross-industry-side-copy', '不参与本领域判断'));
-      const history = observationHistoryCopy(item);
-      if (history) side.append(node('span', 'ev-cross-industry-side-copy', history));
-    } else {
-      side.append(material.rail, stateLine(detailState));
-    }
-    const observedAt = crossIndustry ? item.provenance?.lastObservedAt : item.summary?.lastObservedAt;
+    const material = materialBlock(item);
+    const detailState = laneSummary(item, 'detail')?.state || 'UNKNOWN';
+    side.append(material.rail, stateLine(detailState));
+    const observedAt = item.summary?.lastObservedAt;
     const observed = node('span', 'ev-observed', `最近观察 ${compactMoment(observedAt) || '未知'}`);
     if (observedAt) observed.title = `最近观察 ${observedAt}`;
     side.append(observed);
@@ -1155,11 +1048,7 @@
         })(),
         (() => {
           const cell = node('div', 'ev-table-material');
-          if (crossIndustry) {
-            cell.append(node('strong', null, '列表级参照物'), node('span', null, '详情未读取'));
-          } else {
-            cell.append(material.rail, stateLine(detailState));
-          }
+          cell.append(material.rail, stateLine(detailState));
           return cell;
         })(),
         engagementBlock(item, { numbersOnly: true }),
@@ -1254,15 +1143,6 @@
    * results header left to carry it, the read timestamp hangs on the work list itself, where it
    * stays checkable without occupying a line of its own. */
   function queryReceipt(payload, appended) {
-    if (!CORPUS_DOMAIN.isOwn) {
-      refs.receipt.replaceChildren();
-      refs.receipt.hidden = true;
-      refs.list.title = `跨行业列表样本 · 最近观察 ${payload.items?.[0]?.provenance?.lastObservedAt || '未知'}${appended ? ' · 已继续读取' : ''}`;
-      refs.nextList.hidden = true;
-      refs.nextList.disabled = true;
-      refs.nextList.dataset.cursor = '';
-      return;
-    }
     const notes = [];
     if (payload.scanLimited) {
       notes.push(['扫描预算已触发，当前结果不是全部匹配；可继续读取']);
@@ -1317,37 +1197,32 @@
     if (!append) {
       model.items = [];
       model.cursor = null;
-      if (!keepSelection) {
-        model.selectedRef = null;
-        clearInspector();
-      }
-      setFeedback(
-        'loading',
-        CORPUS_DOMAIN.isOwn ? '正在读取本机材料投影' : '正在读取跨行业参照样本',
-        CORPUS_DOMAIN.isOwn
-          ? '只读取 Linggan 已接纳的作品级材料；不会触发平台搜索或采集。'
-          : '只读取当前领域已保存的列表级样本；不会读取详情、正文、评论或媒体。',
-      );
+      if (!keepSelection) model.selectedRef = null;
       refs.list.replaceChildren();
     }
     refs.nextList.disabled = true;
+    if (!CORPUS_DOMAIN.hasDomain) {
+      model.selectedRef = null;
+      model.cursor = null;
+      refs.nextList.hidden = true;
+      refs.nextList.dataset.cursor = '';
+      refs.receipt.replaceChildren();
+      refs.receipt.hidden = true;
+      refs.list.title = '请选择研究领域';
+      renderRows(false);
+      renderReadout();
+      clearInspector();
+      setFeedback('empty', '请选择研究领域', '选择一个领域后，页面会读取该领域的统一作品材料，并保留每件作品的 primary/reference 角色。');
+      return;
+    }
+    if (!append) {
+      setFeedback('loading', '正在读取本机材料投影', '只读取 Linggan 已接纳的作品级材料；不会触发平台搜索或采集。');
+    }
     try {
-      let payload;
-      if (CORPUS_DOMAIN.isOwn) {
-        const params = currentParams(cursor);
-        payload = await readJson(`${API_ROOT}?${params.toString()}`, model.listController.signal);
-      } else {
-        // 外部领域读的是自己那套样本，与证据侧不共用查询。本页面的检索词与筛选描述的是
-        // 证据侧的字段，对样本侧无意义，因此不带过去——带一个不会生效的条件过去，
-        // 比不带更容易让人误以为筛过了。
-        const params = new URLSearchParams({ domain: CORPUS_DOMAIN.ref });
-        payload = await readJson(`${CROSS_INDUSTRY_ROOT}?${params.toString()}`, model.listController.signal);
-      }
+      const params = currentParams(cursor);
+      const payload = await readJson(`${API_ROOT}?${params.toString()}`, model.listController.signal);
       if (!payload || !Array.isArray(payload.items)) throw new Error('invalid_material_projection_response');
-      const items = CORPUS_DOMAIN.isOwn
-        ? payload.items
-        : payload.items.map(crossIndustryListItem).filter((item) => itemRef(item));
-      model.items = append ? model.items.concat(items) : items;
+      model.items = append ? model.items.concat(payload.items) : payload.items;
       model.cursor = payload.cursor || null;
       renderRows(append);
       queryReceipt(payload, append);
@@ -1359,23 +1234,13 @@
         : null;
       const selectionSource = revealUrlSelection && requestedRef ? 'url' : 'auto';
       if (model.items.length === 0) {
-        if (CORPUS_DOMAIN.isOwn) {
-          setFeedback('empty', '当前查询没有匹配的作品材料', '读取已经成功；这个结果只描述当前本地查询，不证明平台或现实中没有相关内容。');
-        } else {
-          // 外部领域的空是「还没采过」，不是「查询没匹配」。用证据侧那句文案会把
-          // 「这个领域一条都还没有」说成「你筛掉了」，两件事的下一步动作完全不同。
-          setFeedback(
-            'empty',
-            `「${CORPUS_DOMAIN.name}」还没有采集过内容`,
-            '读取已经成功。这个领域的观察目标建立并跑过一轮采集后，样本会出现在这里；它们是参照物，不参与本领域的判断。',
-          );
-        }
-        if (CORPUS_DOMAIN.isOwn && directWorkItem(requestedRef)) await selectItem(directWorkItem(requestedRef), selectionSource);
+        setFeedback('empty', '当前查询没有匹配的作品材料', '读取已经成功；这个结果只描述当前本地查询，不证明平台或现实中没有相关内容。');
+        if (directWorkItem(requestedRef)) await selectItem(directWorkItem(requestedRef), selectionSource);
         else clearInspector();
       } else {
         clearFeedback();
         if (requestedItem) await selectItem(requestedItem, selectionSource);
-        else if (CORPUS_DOMAIN.isOwn && directWorkItem(requestedRef)) await selectItem(directWorkItem(requestedRef), selectionSource);
+        else if (directWorkItem(requestedRef)) await selectItem(directWorkItem(requestedRef), selectionSource);
         else await selectItem(model.items[0], 'auto');
       }
     } catch (error) {
@@ -1386,19 +1251,15 @@
       refs.nextList.hidden = true;
       setFeedback(
         'error',
-        CORPUS_DOMAIN.isOwn ? '本机材料读取暂时不可用' : '跨行业参照样本读取暂时不可用',
-        CORPUS_DOMAIN.isOwn
-          ? '当前没有读取任何作品材料；页面不会回退到旧卡片、远程数据库或平台 CDN。'
-          : '当前没有读取任何跨行业样本；页面不会回退到旧卡片、远程数据库或平台 CDN。',
+        '本机材料读取暂时不可用',
+        '当前没有读取任何作品材料；页面不会回退到旧卡片、远程数据库或平台 CDN。',
         error.code || null,
       );
       refs.receipt.replaceChildren();
       refs.receipt.hidden = false;
       addTextWithTech(
         refs.receipt,
-        CORPUS_DOMAIN.isOwn
-          ? '当前未读取任何材料，不能据此判断库为空或来源不存在。'
-          : '当前未读取任何跨行业样本，不能据此判断该领域没有内容。',
+        '当前未读取任何材料，不能据此判断库为空或来源不存在。',
         error.code || null,
       );
     }
@@ -1498,10 +1359,6 @@
   }
 
   async function selectItem(item, selectionSource) {
-    if (isCrossIndustrySample(item)) {
-      selectCrossIndustrySample(item, selectionSource);
-      return;
-    }
     const publicRef = item?.identity?.publicRef;
     const detailUrl = sameOriginPath(item?.detailUrl, [`${API_ROOT}/`]);
     if (!publicRef || !detailUrl || detailUrl.endsWith('/comments')) {
@@ -1556,67 +1413,6 @@
     panels.forEach((panel) => panel.replaceChildren(sourceIncompleteBlock(detail)));
   }
 
-  /* Cross-industry is deliberately list-level today. This Inspector renders only what that
-   * contract returned and makes the un-read boundary explicit; it does not call a Work detail
-   * route, manufacture a `SOURCE INCOMPLETE` error, or imply the sample is ADHD evidence. */
-  function selectCrossIndustrySample(item, selectionSource) {
-    const sampleRef = itemRef(item);
-    if (!sampleRef) {
-      showInspectorSourceIncomplete(item, '跨行业样本没有提供可用的样本标识。');
-      return;
-    }
-    model.detailController?.abort();
-    reobservation.reset();
-    commentResearch.reset();
-    model.selectedRef = sampleRef;
-    model.detailItem = null;
-    model.detailChannels = null;
-    model.detailUrl = null;
-    model.listItem = item;
-    model.mediaObjects = [];
-    model.mediaIndex = 0;
-    [...refs.list.querySelectorAll('[data-item-ref]')].forEach((row) => {
-      const selected = row.dataset.itemRef === sampleRef;
-      row.setAttribute('aria-selected', String(selected));
-      row.tabIndex = selected ? 0 : -1;
-    });
-    if (selectionSource === 'user' || selectionSource === 'url') openInspector();
-    syncUrl(selectionSource === 'user' ? 'push' : 'replace');
-    refs.inspectorTitle.textContent = knownText(item.display?.title, item.display?.titleState, '标题当前未知');
-    refs.inspectorRef.textContent = `样本 ${sampleRef.slice(0, 8).toUpperCase()}`;
-    refs.openSource.disabled = true;
-    refs.requestMedia.disabled = true;
-    refs.inspectorFeedback.hidden = false;
-    refs.inspectorFeedback.replaceChildren(node('strong', null, '跨行业列表级参照样本'), tech('LIST LEVEL'));
-
-    const overview = section('当前样本', 'CROSS INDUSTRY SAMPLE');
-    overview.append(factGrid([
-      ['材料类型', '跨行业参照样本', 'REFERENCE MATERIAL'],
-      ['读取层级', '列表级字段', 'LIST LEVEL'],
-      ['观察目标', item.provenance?.observationTarget || CORPUS_DOMAIN.name || '当前未知', item.provenance?.observationTarget ? null : 'UNKNOWN'],
-      ['采样关键词', item.provenance?.keyword || '当前未知', item.provenance?.keyword ? null : 'UNKNOWN'],
-      ['作者', knownText(item.display?.authorName, item.display?.authorNameState), item.display?.authorNameState || 'UNKNOWN'],
-      ['发布时间', publishedCopy(item, false), item.display?.publishedOnState || 'UNKNOWN'],
-      ['最近观察', item.provenance?.lastObservedAt || '当前未知', item.provenance?.lastObservedAt ? null : 'UNKNOWN'],
-    ]));
-    overview.append(crossIndustryBoundaryBlock('该样本只作为外部参照，不参与本领域判断；详情、正文、评论和媒体尚未读取。'));
-    panels.get('overview')?.replaceChildren(overview);
-
-    ['evidence', 'materials', 'trace'].forEach((name) => {
-      const panel = panels.get(name);
-      if (!panel) return;
-      const title = name === 'evidence' ? '可引用内容' : (name === 'materials' ? '材料读取' : '来源轨迹');
-      const code = name === 'evidence' ? 'NO EVIDENCE READ' : 'LIST LEVEL ONLY';
-      const section_ = section(title, code);
-      section_.append(crossIndustryBoundaryBlock(
-        name === 'evidence'
-          ? '当前没有读取可引用内容；页面不会据此推断平台上不存在正文、评论或图片文字。'
-          : '当前只读取列表级字段；页面不会猜测详情路由、采集回执或来源血缘。',
-      ));
-      panel.replaceChildren(section_);
-    });
-  }
-
   // PAT-003 places the boundary band in front of a region once. This used to render a warning
   // panel per empty block, so a single inspector carried the same sentence five or more times
   // and the warning colour stopped meaning anything. The specific sentence stays -- it says
@@ -1624,12 +1420,6 @@
   function sourceIncompleteBlock(detail) {
     const block = node('p', 'ev-source-note');
     block.append(node('span', null, detail), tech('SOURCE INCOMPLETE'));
-    return block;
-  }
-
-  function crossIndustryBoundaryBlock(detail) {
-    const block = node('p', 'ev-source-note ev-cross-industry-boundary');
-    block.append(node('span', null, detail), tech('LIST LEVEL ONLY'));
     return block;
   }
 
@@ -2551,12 +2341,12 @@
    * would otherwise keep the partial filter while the tab strip claimed 全部材料. */
   function restoreFromUrl() {
     const params = new URLSearchParams(window.location.search);
-    refs.search.value = CORPUS_DOMAIN.isOwn ? (params.get('q') || '') : '';
-    selectByName.get('window').set(CORPUS_DOMAIN.isOwn ? (params.get('window') || 'latest_accepted_discovery') : 'latest_accepted_discovery');
-    ['lane', 'laneState', 'mediaKind'].forEach((name) => selectByName.get(name).set(CORPUS_DOMAIN.isOwn ? (params.get(name) || '') : ''));
-    const sort = CORPUS_DOMAIN.isOwn ? params.get('sort') : null;
+    refs.search.value = CORPUS_DOMAIN.hasDomain ? (params.get('q') || '') : '';
+    selectByName.get('window').set(CORPUS_DOMAIN.hasDomain ? (params.get('window') || 'latest_accepted_discovery') : 'latest_accepted_discovery');
+    ['lane', 'laneState', 'mediaKind'].forEach((name) => selectByName.get(name).set(CORPUS_DOMAIN.hasDomain ? (params.get(name) || '') : ''));
+    const sort = CORPUS_DOMAIN.hasDomain ? params.get('sort') : null;
     setSort(SORT_OPTIONS.some((option) => option.value === sort) ? sort : 'latest_discovery');
-    const view = CORPUS_DOMAIN.isOwn ? params.get('view') : null;
+    const view = CORPUS_DOMAIN.hasDomain ? params.get('view') : null;
     model.activeView = view && viewFilters[view] ? view : 'all';
     const layout = params.get('layout');
     model.activeLayout = ['research', 'table', 'cover'].includes(layout) ? layout : 'research';
@@ -2568,9 +2358,9 @@
     model.inspectorClosed = panel === 'closed';
     if (INSPECTOR_WIDTHS.includes(panel)) model.inspectorWidth = panel;
     else if (panel !== 'closed') model.inspectorWidth = storedInspectorWidth();
-    // An old `work` parameter cannot address an external sample. Ignore it rather than issuing
-    // a Work Resource request under a different domain.
-    model.selectedRef = CORPUS_DOMAIN.isOwn ? (params.get('work') || null) : null;
+    // A `work` parameter is meaningful only inside a resolved Domain. Without one, do not turn
+    // a stale link into an unscoped detail request.
+    model.selectedRef = CORPUS_DOMAIN.hasDomain ? (params.get('work') || null) : null;
     viewButtons.forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.evView === model.activeView)));
     layoutButtons.forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.evLayout === model.activeLayout)));
     syncFilterCount();
@@ -2770,7 +2560,7 @@
   window.matchMedia(DRAWER_QUERY).addEventListener('change', applyInspectorState);
 
   restoreFromUrl();
-  applyCrossIndustryCapabilities();
+  applyDomainSelectionState();
   applyInspectorState();
   clearInspector();
   activateTab(tabs.find((tab) => tab.dataset.evTab === model.activeTab) || tabs[0]);

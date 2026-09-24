@@ -2,9 +2,9 @@
 
 > 状态: 权威当前
 > 最后核对: 2026-09-22
-> 适用范围: `/corpus/comments` 的 COMMENT-STUDY-REBUILD-001 页面与只读投影
-> 事实来源: DEC-0006、COMMENT-RESEARCH-REBUILD-001、COMMENT-STUDY-INTELLIGENCE-OVERVIEW-001、LIDS
-> 冲突时以谁为准: 用户最新确认、AGENTS.md、真实运行/数据合同和当前代码
+> 适用范围: `/corpus/comments` 的 Domain-scoped Comment Study 页面、只读投影和显式研究写入
+> 事实来源: DEC-0006、DEC-0008、COMMENT-RESEARCH-REBUILD-001、COMMENT-STUDY-INTELLIGENCE-OVERVIEW-001、LIDS
+> 冲突时以谁为准: 用户最新确认、AGENTS.md、DEC-0008、真实运行/数据合同和当前代码
 
 ## 1. 身份与授权
 
@@ -13,7 +13,7 @@
 - 三秒答案: 我们已经从评论中理解了什么，这些理解能否回到真实原声。
 - 五秒主动作: 从总览下钻评论目标、待归并信号、长期用户问题或运行记录；需要时显式发起一次受控研究。
 - 明确非目标: 不在本页编辑 raw comment、人工创建 Problem、发起采集、自动调用模型、恢复选题库、发布需求排行或伪造质量总分。
-- 可用数据合同: `linggan_comment_study_*`、raw Evidence 的 current qualification、generic invocation ledger；不读取旧 V1/V2/V3 research relations。
+- 可用数据合同: 当前 Domain 下的 `linggan_comment_study_*`、合格 Material Domain Usage、raw Evidence qualification 与 generic invocation ledger；不读取旧 V1/V2/V3 research relations。
 
 ## 2. 页面边界
 
@@ -21,6 +21,9 @@
 - 核心任务: 只读呈现评论研究的观察基础、观察量、Signal、Problem、原声与未闭合状态。
 - 责任分界: 本页只显示后端已写入的 receipt 和研究事实；模型配置属于模型设置，真实执行属于 worker，raw comment 仍属 Evidence。
 - 浏览、筛选、展开和切换 Tab 只能读取；只有「发起研究」弹窗中的显式提交可以写入 Policy 或创建 Run。
+- 当前 Domain 必须由调用方显式选择并贯穿 setup、source selection、Policy、Run、Problem、Signal、统计与 URL。缺失、不存在或无效的 Domain 明确失败，不能默认 ADHD 或混入其他 Domain。
+- 每个 Domain 的 Policy 与 Run 相互隔离；paused Domain 的既有材料和研究结果可读，但不可创建新的 Policy 或 Run。
+- source selection 默认包含该 Domain 的 `primary` 材料；`reference` 只有在人显式选择后进入 Run，且 Run 与结果持续展示并保存其 role。role 不能绕开材料资格和访问限制。
 
 ## 3. 五个工作面
 

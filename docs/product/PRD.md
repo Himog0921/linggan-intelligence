@@ -306,7 +306,7 @@ AI 的价值是把大量材料组织成较短的理解路径：聚合、对比�
 - 人工确认允许某个定义或 Claim 成为当前正式口径/依据，但不把它变成不可挑战真理；自动分析按是否改变正式认知、观察方法、资源、敏感传播或现实行动决定治理强度。
 - Corpus 可以保存用途、选择规则和成员历史但不复制原文真相；Topic Map 是导航视图；CLI/Agent Interface 是受控服务入口，仍可在隐私和用途授权下返回真实原声与 Evidence 引用。
 - Decision、Action、Outcome Observation 和 Evaluation 分开；结果通过新的判断或有记录修订校准系统，不直接回写 Topic、Claim 或长期观察。
-- 当前 Domain 仍为 ADHD；家庭干预是 Topic/研究范围。`Knowledge Layer First`、`Domain Seed`、跨 Domain Graph、固定核心对象数和 `Gate 3-A` 均不成为首期产品合同。
+- 本草案在 2026-08 延续了 DISC-001 的单 Domain 边界；该范围已由 [DEC-0008](../decisions/0008-peer-domains-and-unified-material-pipeline.md) 于 2026-09-23 修订。其余关于 `Knowledge Layer First`、`Domain Seed`、跨 Domain Graph、固定核心对象数和 `Gate 3-A` 的边界仍不成为首期产品合同。
 
 ### Gate 3-4 正式领域语言与历史解释边界（已确认）
 

@@ -48,6 +48,9 @@ pub async fn schema_ready(database: &Database) -> Result<bool, CommentStudyReadE
         "SELECT to_regclass('linggan_comment_study_active_policy') IS NOT NULL \
                 AND to_regclass('linggan_comment_study_run') IS NOT NULL \
                 AND to_regclass('linggan_comment_study_target') IS NOT NULL \
+                AND EXISTS (SELECT 1 FROM information_schema.columns \
+                  WHERE table_schema=current_schema() AND table_name='linggan_comment_study_work' \
+                    AND column_name='observation_role') \
                 AND to_regclass('linggan_comment_study_signal') IS NOT NULL \
                 AND to_regclass('linggan_comment_study_problem') IS NOT NULL \
                 AND to_regclass('linggan_comment_study_resolution') IS NOT NULL",
@@ -77,7 +80,7 @@ pub async fn read_overview(
              ) \
              FROM linggan_comment_study_active_policy active \
              JOIN linggan_comment_study_policy policy USING(policy_ref) \
-             WHERE active.singleton AND policy.domain_ref=$1",
+             WHERE active.domain_ref=$1 AND policy.domain_ref=$1",
             )
             .bind(domain_ref)
             .fetch_optional(database.pool())
@@ -91,6 +94,8 @@ pub async fn read_overview(
                  'runRef',run.run_ref,'asOf',run.as_of,'state',run.state, \
                  'createdAt',run.created_at,'finishedAt',run.finished_at, \
                  'selectedWorkCount',(SELECT count(*) FROM linggan_comment_study_work work WHERE work.run_ref=run.run_ref), \
+                 'primaryWorkCount',(SELECT count(*) FROM linggan_comment_study_work work WHERE work.run_ref=run.run_ref AND work.observation_role='primary'), \
+                 'referenceWorkCount',(SELECT count(*) FROM linggan_comment_study_work work WHERE work.run_ref=run.run_ref AND work.observation_role='reference'), \
                  'targetStates',COALESCE((SELECT jsonb_object_agg(grouped.state,grouped.count) \
                    FROM (SELECT target.state,count(*) AS count FROM linggan_comment_study_target target \
                          WHERE target.run_ref=run.run_ref GROUP BY target.state) grouped),'{}'::jsonb), \
@@ -137,11 +142,8 @@ pub async fn read_overview(
     };
     let observation_series = match domain_ref {
         Some(domain_ref) => Some(
-            crate::comment_study_observation::read_comment_observation_series(
-                database,
-                domain_ref,
-            )
-            .await?,
+            crate::comment_study_observation::read_comment_observation_series(database, domain_ref)
+                .await?,
         ),
         None => None,
     };
@@ -165,6 +167,8 @@ pub async fn read_runs(
     let rows = sqlx::query(
         "SELECT run.run_ref,run.as_of::text AS as_of,run.state,run.created_at::text AS created_at,run.finished_at::text AS finished_at, \
                 count(DISTINCT work.content_public_ref) AS work_count, \
+                count(DISTINCT work.content_public_ref) FILTER (WHERE work.observation_role='primary') AS primary_work_count, \
+                count(DISTINCT work.content_public_ref) FILTER (WHERE work.observation_role='reference') AS reference_work_count, \
                 count(target.target_ref) AS target_count, \
                 count(target.target_ref) FILTER (WHERE target.state='succeeded') AS succeeded_count, \
                 count(target.target_ref) FILTER (WHERE target.state='no_signal') AS no_signal_count, \
@@ -189,7 +193,10 @@ pub async fn read_runs(
             "runRef":row.get::<Uuid,_>("run_ref"),"asOf":row.get::<String,_>("as_of"),
             "state":row.get::<String,_>("state"),"createdAt":row.get::<String,_>("created_at"),
             "finishedAt":row.get::<Option<String>,_>("finished_at"),
-            "workCount":row.get::<i64,_>("work_count"),"targetCount":row.get::<i64,_>("target_count"),
+            "workCount":row.get::<i64,_>("work_count"),
+            "primaryWorkCount":row.get::<i64,_>("primary_work_count"),
+            "referenceWorkCount":row.get::<i64,_>("reference_work_count"),
+            "targetCount":row.get::<i64,_>("target_count"),
             "succeededCount":row.get::<i64,_>("succeeded_count"),"noSignalCount":row.get::<i64,_>("no_signal_count"),
             "needsContextCount":row.get::<i64,_>("needs_context_count"),"failedCount":row.get::<i64,_>("failed_count"),
             "excludedCount":row.get::<i64,_>("excluded_count")
@@ -207,7 +214,7 @@ pub async fn read_targets(
     let rows = sqlx::query(
         "SELECT target.target_ref,target.source_ref,target.parent_source_ref,target.research_text, \
                 target.dependency_state,target.state,target.exclusion_reason,target.created_at::text AS created_at, \
-                work.context_state,work.content_public_ref, \
+                work.context_state,work.content_public_ref,work.observation_role, \
                 comment.body_text,comment.body_state, \
                 EXISTS(SELECT 1 FROM linggan_material_comment_restriction restriction \
                   WHERE restriction.content_public_ref=comment.content_public_ref \
@@ -241,6 +248,7 @@ pub async fn read_targets(
             json!({
             "targetRef":row.get::<Uuid,_>("target_ref"),"sourceRef":row.get::<Uuid,_>("source_ref"),
             "parentSourceRef":row.get::<Option<Uuid>,_>("parent_source_ref"),"workRef":row.get::<Uuid,_>("content_public_ref"),
+            "observationRole":row.get::<String,_>("observation_role"),
             "commentText":comment_text,"sourceState":source_state,
             "researchText":row.get::<String,_>("research_text"),"dependencyState":row.get::<String,_>("dependency_state"),
             "contextState":row.get::<String,_>("context_state"),"state":row.get::<String,_>("state"),
@@ -258,7 +266,7 @@ pub async fn read_signals(
     let limit = query.limit()?;
     let run_ref = required_run(database, query).await?;
     let rows = sqlx::query(
-        "SELECT signal.signal_ref,signal.target_ref,signal.kind,signal.proposition,signal.evidence, \
+        "SELECT signal.signal_ref,signal.target_ref,signal.kind,signal.proposition,signal.evidence,work.observation_role, \
                 signal.problem_frame,signal.eligibility_state,signal.eligibility_reason,signal.created_at::text AS created_at, \
                 resolution.resolution_ref,resolution.state AS resolution_state,resolution.resolved_problem_ref, \
                 membership.membership_ref, \
@@ -278,6 +286,7 @@ pub async fn read_signals(
                     AND restriction.comment_external_id=comment.comment_external_id) AS source_restricted \
          FROM linggan_comment_study_signal signal \
          JOIN linggan_comment_study_target target USING(target_ref) \
+         JOIN linggan_comment_study_work work ON work.run_ref=target.run_ref AND work.content_public_ref=target.content_public_ref \
          JOIN linggan_material_comment comment ON comment.material_ref=target.source_ref \
          LEFT JOIN linggan_comment_study_resolution resolution USING(signal_ref) \
          LEFT JOIN linggan_comment_study_problem_membership membership USING(signal_ref) \
@@ -302,6 +311,7 @@ pub async fn read_signals(
             };
             json!({
             "signalRef":row.get::<Uuid,_>("signal_ref"),"targetRef":row.get::<Uuid,_>("target_ref"),
+            "observationRole":row.get::<String,_>("observation_role"),
             "kind":row.get::<String,_>("kind"),"proposition":proposition,
             "evidence":evidence,"sourceState":source_state,"problemFrame":row.get::<Option<Value>,_>("problem_frame"),
             "eligibilityState":row.get::<String,_>("eligibility_state"),"eligibilityReason":row.get::<Option<String>,_>("eligibility_reason"),
@@ -360,15 +370,15 @@ async fn resolved_domain(
     database: &Database,
     requested: Option<Uuid>,
 ) -> Result<Option<Uuid>, CommentStudyReadError> {
-    if requested.is_some() {
-        return Ok(requested);
-    }
-    Ok(sqlx::query_scalar(
-        "SELECT policy.domain_ref FROM linggan_comment_study_active_policy active \
-         JOIN linggan_comment_study_policy policy USING(policy_ref) WHERE active.singleton",
-    )
-    .fetch_optional(database.pool())
-    .await?)
+    let requested = requested.ok_or(CommentStudyReadError::InvalidQuery)?;
+    let exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM observation_domain WHERE domain_ref=$1)")
+            .bind(requested)
+            .fetch_one(database.pool())
+            .await?;
+    exists
+        .then_some(Some(requested))
+        .ok_or(CommentStudyReadError::InvalidQuery)
 }
 
 async fn required_run(
@@ -376,13 +386,14 @@ async fn required_run(
     query: &CommentStudyReadQuery,
 ) -> Result<Uuid, CommentStudyReadError> {
     let requested = query.run_ref.ok_or(CommentStudyReadError::InvalidQuery)?;
+    let domain_ref = query.domain.ok_or(CommentStudyReadError::InvalidQuery)?;
     let exists: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM linggan_comment_study_run run \
          JOIN linggan_comment_study_policy policy USING(policy_ref) \
-         WHERE run.run_ref=$1 AND ($2::uuid IS NULL OR policy.domain_ref=$2))",
+         WHERE run.run_ref=$1 AND policy.domain_ref=$2)",
     )
     .bind(requested)
-    .bind(query.domain)
+    .bind(domain_ref)
     .fetch_one(database.pool())
     .await?;
     exists

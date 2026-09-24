@@ -62,13 +62,8 @@ async fn read_items(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     task_id: Option<Uuid>,
 ) -> Result<Vec<RepairItem>, RepairError> {
-    let cross_ready: bool =
-        sqlx::query_scalar("SELECT to_regclass('cross_industry_sample') IS NOT NULL")
-            .fetch_one(&mut **tx)
-            .await?;
     let locator = crate::execution_input_eligibility::candidate_locator_sql(
         "runtime.task_spec #>> '{target,contentExternalId}'",
-        cross_ready,
     );
     let query = format!(
         r#"

@@ -178,14 +178,10 @@ pub async fn read_detail_delivery_reconciliation(
         .fetch_all(database.pool())
         .await?;
     let mut reconciliations = Vec::with_capacity(rows.len());
-    let mut cross_industry_refs = Vec::new();
     for row in rows {
         let state: String = row.get("state");
         let prepared_lanes: i64 = row.get("prepared_lanes");
         let delivered_lanes: i64 = row.get("delivered_lanes");
-        if let Some(sample_ref) = row.get::<Option<Uuid>, _>("cross_industry_sample_ref") {
-            cross_industry_refs.push((reconciliations.len(), sample_ref));
-        }
         reconciliations.push(DetailDeliveryReconciliation {
             session_ref: row.get("session_ref"),
             conclusion: delivery_conclusion(&state, prepared_lanes, delivered_lanes),
@@ -200,65 +196,17 @@ pub async fn read_detail_delivery_reconciliation(
             closed_at: row.get("closed_at"),
         });
     }
-    fill_cross_industry_identities(database, &mut reconciliations, &cross_industry_refs).await?;
     Ok(reconciliations)
-}
-
-/// 跨行业参照物的平台与作品号住 `cross_industry_sample`，而那张表**不是每个 schema 都装**：
-/// 0089 为 `cross_industry_sample_ref` 写下的列注释说明了原因——collection-control 那套证明
-/// schema 里没有跨行业来源表，所以这一列故意不带外键。这里与 `dispatch.rs` 用同一条判据：
-/// 表在就补齐身份，表不在就留空。缺的是一张参照物表，不是这条会话；整页对账不该因此变成
-/// 「读取失败」，但也不能凭空编出平台和作品号。
-///
-/// 只在本页真的读到跨行业会话时才去问表在不在：本领域会话永远不付这次往返。
-async fn fill_cross_industry_identities(
-    database: &Database,
-    reconciliations: &mut [DetailDeliveryReconciliation],
-    cross_industry_refs: &[(usize, Uuid)],
-) -> Result<(), sqlx::Error> {
-    if cross_industry_refs.is_empty() {
-        return Ok(());
-    }
-    let schema_ready: bool =
-        sqlx::query_scalar("SELECT to_regclass('cross_industry_sample') IS NOT NULL")
-            .fetch_one(database.pool())
-            .await?;
-    if !schema_ready {
-        return Ok(());
-    }
-    let sample_refs = cross_industry_refs
-        .iter()
-        .map(|(_, sample_ref)| *sample_ref)
-        .collect::<Vec<_>>();
-    let identities = sqlx::query(
-        "SELECT sample_ref, platform, content_external_id FROM cross_industry_sample \
-         WHERE sample_ref = ANY($1)",
-    )
-    .bind(&sample_refs)
-    .fetch_all(database.pool())
-    .await?;
-    let by_ref = identities
-        .into_iter()
-        .map(|row| {
-            (
-                row.get::<Uuid, _>("sample_ref"),
-                (row.get::<String, _>("platform"), row.get::<String, _>("content_external_id")),
-            )
-        })
-        .collect::<std::collections::HashMap<_, _>>();
-    for (index, sample_ref) in cross_industry_refs {
-        if let Some((platform, content_external_id)) = by_ref.get(sample_ref) {
-            reconciliations[*index].platform = Some(platform.clone());
-            reconciliations[*index].content_external_id = Some(content_external_id.clone());
-        }
-    }
-    Ok(())
 }
 
 /// 会话落点与通道回执合成一个交付结论。终结压过一切：一个已经终结的会话，
 /// 之后再来多少条 progress 都改不回 `delivery_pending`（写入路径同样守着这条），
 /// 这里的读法只是如实复述那个终态。
-fn delivery_conclusion(state: &str, prepared_lanes: i64, delivered_lanes: i64) -> DeliveryConclusion {
+fn delivery_conclusion(
+    state: &str,
+    prepared_lanes: i64,
+    delivered_lanes: i64,
+) -> DeliveryConclusion {
     match state {
         "finished" | "stopped" => DeliveryConclusion::Closed,
         _ if prepared_lanes == 0 => DeliveryConclusion::RecoveryUnverified,
@@ -272,7 +220,6 @@ SELECT
     session.session_ref,
     session.state,
     session.stop_reason,
-    session.cross_industry_sample_ref,
     linggan_human_moment(session.last_progress_at) AS last_observed_at,
     linggan_human_moment(session.finished_at) AS closed_at,
     content.platform,

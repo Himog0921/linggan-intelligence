@@ -70,7 +70,8 @@
 | [pages/evidence-library-page.md](pages/evidence-library-page.md) | PAGE-EVIDENCE-001：Evidence Library 多材料产品手册、技术呈现要求、表面地图、状态与回执合同 | 权威当前；运行页已按现行 Material Projection 落地，真实垂直证明未完成 |
 | [changes/ocr-content-layering-001-ui-change-manifest.md](changes/ocr-content-layering-001-ui-change-manifest.md) | Evidence Library 平台标题为空时的封面 OCR 补位、来源徽章与 Inspector 读取边界 | 活跃计划；Issue #296 |
 | [pages/evidence-library-multi-material-reference.html](pages/evidence-library-multi-material-reference.html) | EVIDENCE-PAGE-002：多材料 Evidence Library 合成静态高保真参考；不连接运行时或真实材料 | 权威当前；静态参考 |
-| [pages/collection-workspace-page.md](pages/collection-workspace-page.md) | PAGE-COLLECTION-001：Collection 五个子面的职责、状态、事实边界与验收规则 | 权威当前 |
+| [pages/collection-workspace-page.md](pages/collection-workspace-page.md) | PAGE-COLLECTION-001：Collection 六个子面的职责、状态、事实边界与验收规则 | 权威当前 |
+| [pages/domain-management-page.md](pages/domain-management-page.md) | PAGE-DOMAIN-MANAGEMENT-001：Domain、Target 用途、状态后果和材料 lane | 权威当前；隔离浏览器核心交互验收完成，未部署 |
 | [pages/collection-operations-html-prototype-brief.md](pages/collection-operations-html-prototype-brief.md) | COLLECTION-HTML-BRIEF-001：外部模型可直接使用的自包含静态原型委托书 | 权威当前；不是运行实现 |
 | [changes/evidence-page-002-multi-material-ui-change-manifest.md](changes/evidence-page-002-multi-material-ui-change-manifest.md) | EVIDENCE-PAGE-002：本次产品与静态参考变更清单及越权边界 | 权威当前 |
 | [acceptance/evidence-page-002-multi-material-reference-acceptance.md](acceptance/evidence-page-002-multi-material-reference-acceptance.md) | ACC-EVIDENCE-PAGE-002：桌面/窄屏、状态、互动与证明边界验收 | 一次性报告 |
@@ -79,6 +80,9 @@
 | [acceptance/dev-05-xhs-content-observation-001-visual-acceptance.md](acceptance/dev-05-xhs-content-observation-001-visual-acceptance.md) | ACC-DEV-05-XHS-CONTENT-OBSERVATION-001：Issue #133 的当前/历史事实、Coverage 历史与有界复观测分层验收 | 一次性报告；未重载运行时或进行真实 XHS 验收 |
 | [pages/topic-intelligence-reference-page.md](pages/topic-intelligence-reference-page.md) | PAGE-TOPIC-001：Topic Reference Page 的获准组合、状态与验收 | 权威当前 |
 | [changes/design-007-chinese-first-evidence-library-ui-change-manifest.md](changes/design-007-chinese-first-evidence-library-ui-change-manifest.md) | DESIGN-007：Evidence Library 中文优先规则的受限落地清单 | 权威当前 |
+| [changes/domain-unification-001-ui-change-manifest.md](changes/domain-unification-001-ui-change-manifest.md) | DOMAIN-UNIFICATION-001：平级 Domain 与统一材料链 UI 变更清单 | 权威当前；隔离浏览器核心交互验收完成，未部署 |
+| [acceptance/domain-unification-001-acceptance.md](acceptance/domain-unification-001-acceptance.md) | ACC-DOMAIN-UNIFICATION-001：领域管理页隔离数据库、1440/390 浏览器交互与未部署边界 | 一次性报告 |
+| [changes/corpus-cross-domain-render-001-ui-change-manifest.md](changes/corpus-cross-domain-render-001-ui-change-manifest.md) | 旧外部样本/领域切换表现 | 历史基线；由 DOMAIN-UNIFICATION-001 取代 |
 | [changes/design-009-runtime-capacity-surface-ui-change-manifest.md](changes/design-009-runtime-capacity-surface-ui-change-manifest.md) | DESIGN-009：执行工位改为产能判定面，五处写死的接通状态改为实读 | 权威当前 |
 | [changes/design-010-lids-v7-adoption-ui-change-manifest.md](changes/design-010-lids-v7-adoption-ui-change-manifest.md) | DESIGN-010：LIDS 升级到 v7.0 的范围、逐条差异、运行时欠账与明确非目标 | 权威当前 |
 | [changes/design-011-collection-surfaces-v7-ui-change-manifest.md](changes/design-011-collection-surfaces-v7-ui-change-manifest.md) | DESIGN-011：生产流与执行工位落地 v7、能力矩阵四态与已知限制 | 权威当前 |

@@ -1,11 +1,11 @@
 # DOMAIN-UNIFICATION-001 · 领域平权、统一材料链与领域管理
 
 > 状态: 活跃计划
-> 最后核对: 2026-09-23
+> 最后核对: 2026-09-24
 > 适用范围: 平级 Domain、Domain 与观察目标关系、统一材料/评论/媒体接纳与读取、Comment Study 领域化、领域管理页面、开发期旧模型清理、主线集成与本机上线
-> 事实来源: Mog 2026-09-23 最新决定；origin/main@a42315eb539ee26f42cc3228817001db73ca12a5 的代码与 migration；同版本本机 runtime、API 与 PostgreSQL 只读核对；Issue #130 与 #337 的历史事实
+> 事实来源: Mog 2026-09-23 最新决定；origin/main@a42315eb539ee26f42cc3228817001db73ca12a5 的代码与 migration；隔离 worktree 代码与 disposable PostgreSQL 证明；Issue #130 与 #337 的历史事实
 > 冲突时以谁为准: Mog 最新明确决定；其次是真实运行、数据库副作用和可复现测试；再其次是当前代码、migration、ACCEPTED ADR 和权威当前文档
-> 当前阶段: 开发推进文件已建立；实施前由 root 同步 Issue #130、冻结 exact base 并派定 Work Package
+> 当前阶段: WP0–WP5 已完成。提交前 commit-reviewer 审查已发现并修复 4 项问题；完整隔离 PostgreSQL 套件、并发 pause/Merge 屏障与领域管理页隔离浏览器验收均已通过。最终暂存树第二轮 commit-reviewer 复审无新发现；本地候选已提交并完成 exact-commit/root 基线与清洁状态核对。下一步门槛为当前 schema 副本升级证明；Issue #130 旧正文未同步。验证基线=`origin/main@a42315eb539ee26f42cc3228817001db73ca12a5`；未执行当前共享库副本迁移、main 合并、runtime-main 切换、部署或外部 Issue 写入
 
 ## 0. 下一位 Agent 从这里开始
 
@@ -155,9 +155,9 @@ WorkOrder 通过一张窄关系冻结一个或多个已准入用途：
 
 规则：
 
-- admitted Request 创建 WorkOrder 和第一条 usage；merge Request 只能在目标 WorkOrder 首次 claim 前指向该范围相容的 WorkOrder 并追加 usage，不再发起第二次平台访问；
+- admitted Request 创建 WorkOrder 和第一条 usage；merge Request 只能在目标 WorkOrder 首次 claim 前指向相容 WorkOrder 并追加 `basis_kind=merged` usage，不再发起第二次平台访问。V1 要求 purpose 文本、有效 authorization、Target/lane/dispatch/rule revision、渐进归档模式、工作量和两侧作品范围完全相同；
 - 能否 merge 必须比较授权、字段、Coverage、新鲜度、保留与风险边界，不能让一个用途借用另一个用途的权限；
-- 相容性查找、决定和 usage 追加必须在同一数据库并发边界完成，防止两个同时到达的 Request 各自创建平台工作；
+- 相容性查找、决定和 usage 追加必须在同一数据库并发边界完成，防止两个同时到达的 Request 各自创建平台工作；Target 锁串行化 admission 与首次 claim，claim 后不再 merge，即使 Lease 后来释放；
 - 一个 WorkOrder 可以有多个 Domain usage，但 Producer 仍只收到一份有界执行指令，不感知 Domain；
 - 每条 Request usage 写入后不可改；WorkOrder 的 usage 集合在首次 claim 时冻结。首次 claim 后的新 Request 不得再 merge，已有新鲜 Evidence 可走 reuse，否则另建 WorkOrder；
 - role 改动或解除当前 relation 不重写已经 admitted 的 Request usage，但会使尚未 Admission 的旧快照失去资格；
@@ -229,7 +229,7 @@ Domain 使用资格落到一张窄的、append-only 的读取投影；它记录�
 |---|---|---|
 | Domain schema | [0041](../../../database/migrations/0041_observation_domain.sql) 用 is_own_domain 和 partial unique 强制一个 home Domain | 新 Domain 自动进入降级路径 |
 | Target | [0005](../../../database/migrations/0005_collection_observation_target.sql) 保持真实目标全局唯一；后续只加单值 domain_ref | 同一 Target 无法跨 Domain 承担不同 role |
-| Admission | [material_admission.rs](../../../crates/evidence/src/material_admission.rs) 对 External 早退到 [cross_industry_admission.rs](../../../crates/evidence/src/cross_industry_admission.rs) | 外部 Domain 不进入统一 Material/Media |
+| Admission | 历史 `material_admission.rs` 曾对 External 早退到独立 `cross_industry_admission.rs`；WP5 已移除该运行时代码 | 外部 Domain 不进入统一 Material/Media |
 | Deepening scope | 通用 scope 已有媒体/OCR/ASR；cross scope 没有完整媒体权限 | 外部 Domain 没有 media_slots 任务 |
 | Work Resource | canonical API 没有完整 Domain scope，外部领域走第二套 sample/comment API | 不能直接删除前端分支，否则会串域 |
 | Evidence UI | [evidence_library.js](../../../apps/api/src/local_web/evidence_library.js) 按 isOwn 切 API，外部对象固定 LIST LEVEL ONLY | 已有详情和评论也不展示 |
@@ -797,20 +797,21 @@ shared 文件必须由 root 指定 integration owner；实施 Agent不得因为�
 | 产品决定 | 已确认 |
 | 活跃计划 | 已建立 |
 | Issue #130 同步 | 未执行 |
-| WP0 权威合同 | 未开始 |
-| WP1 schema/context | 未开始 |
-| WP2 unified admission/media | 未开始 |
-| WP3 Corpus/Comment Study | 未开始 |
-| WP4 Domain Management | 未开始 |
-| WP5 reset/cleanup | 未开始 |
-| 自动检查 | 未执行 |
-| Fresh PostgreSQL | 未执行 |
-| 当前 schema 升级 | 未执行 |
-| PR / root 终审 | 未创建 |
+| WP0 权威合同 | 已完成（DEC-0008、共同语言、不变量、页面合同、UI manifest、索引与进度已同步） |
+| WP1 schema/context | 实施与隔离 PostgreSQL 证明完成（0103 additive migration、Domain–Target relation、Request/WorkOrder/Material usage；多 primary 拒绝任意择一；Request admission 与 lease claim 对 Domain status 持行共享锁至提交，pause 与新写入线性化；Merge 按授权、目的、执行边界和未 claim 状态匹配；数据库锁定首次 claim 并保护 usage 不可变；Target 锁覆盖 Request/首次 claim 并发边界；有持锁屏障证明） |
+| WP2 unified admission/media | 实施与隔离 PostgreSQL 证明完成（统一接纳及 Domain usage；归档与精确材料补采 API 显式传 Domain；目标抽屉将 Domain 传到关键词基线/详情、创作者缺口和分批建档；Merge 共享 WorkOrder 并记录独立用途；scope/merge/reply/media lane 由完整 LOCAL-001 隔离证明覆盖） |
+| WP3 Corpus/Comment Study | 实施与隔离 PostgreSQL 证明完成（Corpus list/detail/comments/cursor 按显式 Domain；移除 isOwn UI/API 分支与 LIST LEVEL ONLY；未选 Domain 显示选择提示且不发语料请求；Comment Study setup/policy/run/source 显式 Domain，reference 预览后显式纳入，Run/运行记录/评论目标/信号投影冻结 role；策略保存与 Run 创建对 active Domain 持共享行锁至提交，暂停竞态不能落新研究写入；旧 cross 运行路径由 WP5 清理） |
+| WP4 Domain Management | SSR 页面与配置/关系操作、错误反馈已实现；reference 关联和 role 在同一事务提交，Target 行锁串行化关系变更与 Request；8 个材料通道状态按来源事实分别汇总；隔离 PostgreSQL API 路由与 2026-09-24 浏览器交互证明通过：配置创建/编辑、暂停/恢复、同一 Target 多 Domain 不同 role、冲突无写入；1440×1000 与 390×844 目视、按钮焦点环通过。精确 DOM overflow、数据库不可读浏览器态、非空媒体 lane 与 Mog 验收仍未做 |
+| WP5 reset/cleanup | 实施与隔离 PostgreSQL 证明完成。0104 cleanup migration 已登记至 fixtures 与本机迁移链；canonical legacy usage 只从旧 `content.domain_ref`/`first_package_ref` 事实 seed；旧 cross sample 没有 canonical Package 血缘时不会借用 Content 的首页 Package 冒充 peer 来源；可再生旧样本投影按合同清理/重投影，缺少替代事实的用户笔记会阻止清理；运行时代码不再引用旧 cross admission/read/routes/worker 分支。此证明使用全新 disposable PostgreSQL，不证明当前共享 schema 升级 |
+| 自动检查 | 最新 `./scripts/test-local-001-discovery-postgres.sh` 全组通过；包含领域管理 API lane 汇总真实路由证明、WP1–WP5 关键正反例、pause Request/claim 持锁竞态、A/B Merge 持锁屏障、调度/API/worker；另有真实 Comment Study API 回归确认 paused Domain 策略保存返回 `409 domain_not_active` 且不落库。proof 数据库/容器/卷已清理。`cargo check --locked --workspace --tests`、定点 `rustfmt --check`、`git diff --check`、项目治理与 UI design handbook 检查通过。全仓 `cargo fmt --all -- --check` 仍被未修改基线文件的格式漂移阻断 |
+| Fresh PostgreSQL | 完成：完整 LOCAL-001 disposable PostgreSQL 套件通过，包括 migration 全链、跨 Domain 并发合并及冻结用途、WP1–WP5 关键正反例、领域管理 API、worker 与调度证明；临时资源清理已核实 |
+| 当前 schema 升级 | 未执行；需要独立复制当前共享 schema 后再验证 cleanup migration |
+| Root 合同/标准复核 | 完成于当前 worktree；已修复 UI 语言、轨道顺序、逐通道读数、失败反馈、陈旧 ADHD-only 状态和并发 Merge 证明。首轮 commit-reviewer 另确认 pause 行锁竞态、reference 半写入、0104 peer Package 归属错配、Comment Study 错误码四项，已修复并复跑完整隔离证明；最终 106 文件树第二轮 commit-reviewer 复审无新发现，exact commit 相对基线与 clean worktree 检查通过；PR 集成审查待做 |
+| PR | 未创建 |
 | origin/main 合并 | 未执行 |
 | 共享开发库 migration | 未执行 |
 | runtime-main 上线 | 未执行 |
-| 浏览器/UI | 未验证 |
+| 浏览器/UI | 领域管理已做隔离 PostgreSQL/本机浏览器验收，回执见 `docs/design/acceptance/domain-unification-001-acceptance.md`；未部署。Evidence 与 Comment Study 的跨 Domain 真实运行数据、精确 viewport 溢出测量未验证 |
 | 插件 | 预计无需修改，待实现证明 |
 | 外部平台重采 | 不在自动上线范围 |
 | Mog 业务验收 | 未执行 |
@@ -825,6 +826,7 @@ shared 文件必须由 root 指定 integration owner；实施 Agent不得因为�
 - [Collection 页面合同](../../design/pages/collection-workspace-page.md)
 - [Evidence Library 页面合同](../../design/pages/evidence-library-page.md)
 - [Comment Study 页面合同](../../design/pages/comment-study-rebuild-page.md)
+- [领域管理页浏览器验收](../../design/acceptance/domain-unification-001-acceptance.md)
 - [Issue 与协作规则](../../agents/issue-tracker.md)
 - [Agent 协作协议](../../governance/agent-collaboration.md)
 - [本机 runtime 发布 runbook](../../runbooks/local-runtime-deployment.md)

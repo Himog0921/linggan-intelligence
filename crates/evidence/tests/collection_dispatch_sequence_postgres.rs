@@ -28,131 +28,7 @@ use uuid::Uuid;
 #[path = "support/material_fixture.rs"]
 mod material_fixture;
 
-const MIGRATIONS: &str = concat!(
-    include_str!("../../../database/migrations/0001_scope_001_capture_evidence.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0002_local_001_discovery.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0003_local_trusted_producer.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0004_plugin_runtime_all_capabilities.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0005_collection_observation_target.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0006_collection_acquisition_chain.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0007_execution_station.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0008_collection_risk_pause.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0009_work_order_station.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0010_work_order_lease.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0011_execution_gate.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0012_target_monitor_schedule.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0013_drop_execution_gate.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0014_target_group.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0015_material_projection.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0016_material_social_lanes.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0017_material_media_projection.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0018_material_discovery_lane.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0019_work_order_lease_task_sequence.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0020_observation_runtime_automation.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0021_discovery_cover_media_acquisition.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0022_material_deepening_scope.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0023_material_engagement_and_media_components.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0024_media_processing_runtime.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0025_comment_current_projection.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0026_work_resource_read.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0027_unified_media_resource.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0029_author_avatar_media.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0030_comment_image_media.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0032_author_profile_avatar_media.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0033_dispatch_failure_recovery.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0034_collection_control_closure.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0035_claimed_station_auto_acceptance.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0036_monitor_scheduling_clarity.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0037_collection_scheduler_scale.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0038_detail_only_material_scope.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0045_deep_archive_recovery.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0046_keyword_sampling_policy.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0047_collection_detail_failure_boundary.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0052_work_order_expiry.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0061_material_retirement.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0062_human_moment.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0063_content_author_attribution.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0064_account_observation_normalization.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0065_account_observation_bootstrap.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0080_scheduler_admission_failure_reasons.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0076_monitor_rule_slots.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0078_monitor_rule_owns_its_schedule.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0089_detail_page_session_replay_safety.sql"),
-    "\n",
-    include_str!(
-        "../../../database/migrations/0090_detail_page_grant_recovery_and_risk_cooldown.sql"
-    ),
-    "\n",
-    include_str!("../../../database/migrations/0091_ocr_content_layering.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0092_detail_page_session_recovery_boundary.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0093_capture_delivery_rejection.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0094_corpus_evidence_read_recovery.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0095_detail_page_url_rejection.sql"),
-    "\n",
-    include_str!(
-        "../../../database/migrations/0096_detail_page_session_lane_delivery_identities.sql"
-    ),
-    "\n",
-    include_str!("../../../database/migrations/0097_collection_execution_input_eligibility.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0098_scheduler_tick_steps_and_readiness.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0099_collection_selector_health.sql"),
-    include_str!("../../../database/migrations/0100_collection_hot_path_indexes.sql"),
-    include_str!("../../../database/migrations/0101_collection_command_reason_vocabulary.sql"),
-);
+const MIGRATIONS: &str = material_fixture::MIGRATIONS;
 
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL proof database"]
@@ -282,6 +158,7 @@ async fn creator_rule_queues_once_without_a_baseline_or_a_preassigned_station() 
     .execute(database.pool())
     .await
     .expect("creator target is seeded without any archive receipt");
+    relate_target_to_primary_domain(&database, target_ref).await;
     grant_authorization(
         &database,
         &AuthorizationGrant {
@@ -2337,53 +2214,6 @@ async fn delivery_reconciliation_counts_receipts_not_the_session_marker() {
     }
 }
 
-/// 跨行业参照物的来源表不是每个 schema 都装：0089 为 `cross_industry_sample_ref` 写下的列注释
-/// 点名了这件事，那一列也因此故意不带外键。于是「会话在、样本身份读不到」是一个真实状态——
-/// 对账必须照常给出这行，缺的是一张参照物表，不是这条会话；更不能让整页变成「读取失败」。
-///
-/// 这条用例所在的证明 schema 恰好就是那个状态：装着 detail page session，没装跨行业来源表。
-#[tokio::test]
-#[ignore = "requires an isolated PostgreSQL proof database"]
-async fn a_session_without_its_cross_industry_table_still_reconciles() {
-    let database = proof_database_for("collection_dispatch_cross_industry_absent").await;
-    let fixture = seed_creator_work_order(&database).await;
-    let lease = issue_work_order_lease(&database, fixture.work_order_ref, 60)
-        .await
-        .expect("lease is issued");
-    let table_exists: bool =
-        sqlx::query_scalar("SELECT to_regclass('cross_industry_sample') IS NOT NULL")
-            .fetch_one(database.pool())
-            .await
-            .expect("the schema is inspected");
-    assert!(!table_exists, "这条用例只在跨行业来源表缺席时才有意义");
-
-    let session_ref = Uuid::new_v4();
-    sqlx::query(
-        "INSERT INTO collection_detail_page_session \
-         (session_ref,work_order_ref,content_public_ref,cross_industry_sample_ref, \
-          owner_installation_ref,grant_request_id,initial_lease_ref,plan_snapshot,plan_hash,state) \
-         VALUES ($1,$2,NULL,$3,$4,$5,$6,'{}'::jsonb,repeat('a',64),'navigation_started')",
-    )
-    .bind(session_ref)
-    .bind(fixture.work_order_ref)
-    .bind(Uuid::new_v4())
-    .bind(fixture.installation_ref)
-    .bind(Uuid::new_v4())
-    .bind(lease.lease_ref)
-    .execute(database.pool())
-    .await
-    .expect("a cross-industry session row is seeded");
-
-    let rows = read_detail_delivery_reconciliation(&database, 100)
-        .await
-        .expect("缺一张参照物表不该让整页交付对账读取失败");
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].session_ref, session_ref);
-    assert_eq!(rows[0].conclusion, DeliveryConclusion::RecoveryUnverified);
-    assert_eq!(rows[0].platform, None);
-    assert_eq!(rows[0].content_external_id, None);
-}
-
 async fn only_session(database: &Database) -> linggan_evidence::DetailDeliveryReconciliation {
     let mut rows = read_detail_delivery_reconciliation(database, 100)
         .await
@@ -3681,6 +3511,7 @@ async fn the_same_content_under_two_targets_keeps_two_independent_detail_budgets
     .execute(database.pool())
     .await
     .expect("第二个目标已建档");
+    relate_target_to_primary_domain(&database, target_b).await;
     let order_b = seed_followup_frozen_work_order_for_target(&database, &fixture, target_b).await;
     freeze_material(&database, order_b, content_public_ref, 1).await;
     issue_work_order_lease(&database, order_b, 60)
@@ -4095,10 +3926,11 @@ async fn seed_second_queued_work_order(database: &Database, fixture: &Fixture) -
     .await
     .expect("the replacement authorization is seeded");
     sqlx::query(
-        "INSERT INTO collection_acquisition_request              (request_ref, target_ref, lane, purpose, requested_by)          VALUES ($1,$2,'deep_archive','proof: the request behind the lapsed one','person')",
+        "INSERT INTO collection_acquisition_request              (request_ref, target_ref, lane, purpose, requested_by,domain_ref,observation_role)          VALUES ($1,$2,'deep_archive','proof: the request behind the lapsed one','person',$3,'primary')",
     )
     .bind(request_ref)
     .bind(target_ref)
+    .bind(default_domain_ref())
     .execute(database.pool())
     .await
     .expect("the later request is seeded");
@@ -4124,6 +3956,7 @@ async fn seed_second_queued_work_order(database: &Database, fixture: &Fixture) -
     .execute(database.pool())
     .await
     .expect("the runnable order waits behind the poisoned one");
+    record_primary_work_order_usage(database, work_order_ref, request_ref).await;
     work_order_ref
 }
 
@@ -4220,11 +4053,12 @@ async fn seed_followup_frozen_work_order_for_target(
     .expect("the follow-up authorization is seeded");
     sqlx::query(
         "INSERT INTO collection_acquisition_request \
-             (request_ref, target_ref, lane, purpose, requested_by) \
-         VALUES ($1,$2,'deep_archive','需求范围上的又一张工单','person')",
+             (request_ref, target_ref, lane, purpose, requested_by,domain_ref,observation_role) \
+         VALUES ($1,$2,'deep_archive','需求范围上的又一张工单','person',$3,'primary')",
     )
     .bind(request_ref)
     .bind(target_ref)
+    .bind(default_domain_ref())
     .execute(database.pool())
     .await
     .expect("the follow-up request is seeded");
@@ -4261,6 +4095,7 @@ async fn seed_followup_frozen_work_order_for_target(
     .execute(database.pool())
     .await
     .expect("the follow-up work order waits in the immediate lane");
+    record_primary_work_order_usage(database, work_order_ref, request_ref).await;
     work_order_ref
 }
 
@@ -4364,6 +4199,41 @@ async fn proof_database() -> Database {
     proof_database_for("collection_dispatch_sequence").await
 }
 
+fn default_domain_ref() -> Uuid {
+    Uuid::parse_str("00000000-0000-4000-8000-000000000001")
+        .expect("the full proof schema seeds the ADHD Domain")
+}
+
+async fn relate_target_to_primary_domain(database: &Database, target_ref: Uuid) {
+    sqlx::query(
+        "INSERT INTO observation_domain_target(domain_ref,target_ref,role) \
+         VALUES ($1,$2,'primary') ON CONFLICT (domain_ref,target_ref) DO NOTHING",
+    )
+    .bind(default_domain_ref())
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .expect("the fixture target has an explicit primary Domain relation");
+}
+
+async fn record_primary_work_order_usage(
+    database: &Database,
+    work_order_ref: Uuid,
+    request_ref: Uuid,
+) {
+    sqlx::query(
+        "INSERT INTO collection_work_order_domain_usage \
+         (work_order_ref,request_ref,domain_ref,role,basis_kind) \
+         VALUES ($1,$2,$3,'primary','admitted')",
+    )
+    .bind(work_order_ref)
+    .bind(request_ref)
+    .bind(default_domain_ref())
+    .execute(database.pool())
+    .await
+    .expect("the fixture Work Order freezes its admitted Domain usage");
+}
+
 async fn proof_database_for(schema: &str) -> Database {
     let url = std::env::var("COLLECTION_DISPATCH_PROOF_DATABASE_URL")
         .expect("proof database URL is supplied");
@@ -4392,6 +4262,7 @@ async fn seed_creator_work_order(database: &Database) -> Fixture {
     .execute(database.pool())
     .await
     .expect("target is seeded");
+    relate_target_to_primary_domain(database, target_ref).await;
     sqlx::query(
         "INSERT INTO collection_acquisition_authorization \
              (authorization_ref, platform, target_kind, lane, max_targets, max_works_per_target, \
@@ -4406,11 +4277,12 @@ async fn seed_creator_work_order(database: &Database) -> Fixture {
     .expect("authorization is seeded");
     sqlx::query(
         "INSERT INTO collection_acquisition_request \
-             (request_ref, target_ref, lane, purpose, requested_by) \
-         VALUES ($1, $2, 'deep_archive', 'focused sequence proof', 'person')",
+             (request_ref, target_ref, lane, purpose, requested_by,domain_ref,observation_role) \
+         VALUES ($1, $2, 'deep_archive', 'focused sequence proof', 'person',$3,'primary')",
     )
     .bind(request_ref)
     .bind(target_ref)
+    .bind(default_domain_ref())
     .execute(database.pool())
     .await
     .expect("request is seeded");
@@ -4495,9 +4367,9 @@ async fn seed_creator_work_order(database: &Database) -> Fixture {
     sqlx::query(
         "INSERT INTO collection_work_order \
              (work_order_ref, decision_ref, target_ref, lane, max_works, stop_conditions, \
-              station_ref,installation_ref,account_ref,execution_input_frozen_at) \
+              station_ref,installation_ref,account_ref,queue_state,scheduled_for,execution_input_frozen_at) \
          VALUES ($1, $2, $3, 'deep_archive', 10, '[\"maximum_quota\",\"time_budget\"]'::jsonb, $4,$5,$6, \
-                 scope_001_now())",
+                 'queued',scope_001_now(),scope_001_now())",
     )
     .bind(work_order_ref)
     .bind(decision_ref)
@@ -4508,6 +4380,7 @@ async fn seed_creator_work_order(database: &Database) -> Fixture {
     .execute(database.pool())
     .await
     .expect("work order is seeded");
+    record_primary_work_order_usage(database, work_order_ref, request_ref).await;
 
     Fixture {
         work_order_ref,
@@ -4544,6 +4417,7 @@ async fn save_patrol_rule(
     .execute(database.pool())
     .await
     .expect("the patrol target is seeded without any archive receipt");
+    relate_target_to_primary_domain(database, target_ref).await;
     let ranking_key = (target_kind == "keyword").then(|| "comprehensive".to_owned());
     // 关键词的搜索面叫 `keyword_search`（`0046` 的 CHECK 只允许它带采样口径），
     // 创作者主页叫 `creator_patrol`。

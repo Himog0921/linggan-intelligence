@@ -7,6 +7,7 @@ use linggan_storage_postgres::testing::isolated_proof_schema;
 use tower::ServiceExt;
 
 const MIGRATIONS: &str = full_schema_fixture::FULL_MIGRATIONS;
+const ADHD_DOMAIN: &str = "00000000-0000-4000-8000-000000000001";
 
 #[tokio::test]
 #[ignore = "requires the isolated PostgreSQL 16 proof harness"]
@@ -16,7 +17,9 @@ async fn loopback_material_query_applies_lane_filter_instead_of_returning_unrela
     let response = app_with_database(database.clone())
         .oneshot(
             Request::builder()
-                .uri("/api/local/work-resources?q=可检索&lane=comments")
+                .uri(format!(
+                    "/api/local/work-resources?q=可检索&lane=comments&domain={ADHD_DOMAIN}"
+                ))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -39,7 +42,7 @@ async fn loopback_material_query_applies_lane_filter_instead_of_returning_unrela
     let unfiltered = app_with_database(database)
         .oneshot(
             Request::builder()
-                .uri("/api/local/work-resources")
+                .uri(format!("/api/local/work-resources?domain={ADHD_DOMAIN}"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -76,7 +79,9 @@ async fn loopback_comment_lane_hides_sensitive_body_and_external_identity() {
     let response = app_with_database(database.clone())
         .oneshot(
             Request::builder()
-                .uri("/api/local/work-resources?lane=comments")
+                .uri(format!(
+                    "/api/local/work-resources?lane=comments&domain={ADHD_DOMAIN}"
+                ))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -310,7 +315,9 @@ async fn detail_exposes_the_bounded_reobservation_action_and_refuses_targetless_
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(format!("/api/local/work-resources/{public_ref}/reobserve"))
+                .uri(format!(
+                    "/api/local/work-resources/{public_ref}/reobserve?domain={ADHD_DOMAIN}"
+                ))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -338,7 +345,7 @@ async fn request_json(database: &Database, url: &str) -> Value {
     let response = app_with_database(database.clone())
         .oneshot(
             Request::builder()
-                .uri(url)
+                .uri(with_default_domain(url))
                 .header("Host", "127.0.0.1:3000")
                 .body(Body::empty())
                 .unwrap(),
@@ -347,6 +354,14 @@ async fn request_json(database: &Database, url: &str) -> Value {
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap()
+}
+
+fn with_default_domain(url: &str) -> String {
+    if url.contains("domain=") {
+        return url.to_owned();
+    }
+    let separator = if url.contains('?') { '&' } else { '?' };
+    format!("{url}{separator}domain={ADHD_DOMAIN}")
 }
 
 async fn seed_detail(database: &Database) {
@@ -375,6 +390,11 @@ async fn seed_detail(database: &Database) {
     submit_producer_package(database, &submission)
         .await
         .unwrap();
+    super::material_projection_media_fixture::assign_synthetic_material_to_legacy_domain(
+        database,
+        "note-api-1",
+    )
+    .await;
 }
 
 async fn seed_comment(database: &Database) {
@@ -403,6 +423,11 @@ async fn seed_comment(database: &Database) {
     submit_producer_package(database, &submission)
         .await
         .unwrap();
+    super::material_projection_media_fixture::assign_synthetic_material_to_legacy_domain(
+        database,
+        "note-api-comments",
+    )
+    .await;
 }
 
 pub(super) async fn proof_database(schema: &str) -> Database {

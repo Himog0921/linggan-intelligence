@@ -9,10 +9,6 @@ mod collection_target;
 mod collection_task_read;
 mod content_reobservation;
 mod creator_lifecycle;
-mod cross_industry_admission;
-mod cross_industry_observation;
-pub mod cross_industry_read;
-mod cross_industry_sample_facts;
 mod directory_boundary;
 mod dispatch;
 mod execution_input_eligibility;
@@ -42,7 +38,8 @@ mod media_acquisition;
 mod monitor_rule_read;
 pub use keyword_archive_detail::{
     KeywordDetailAdvance, KeywordDetailTickSummary, advance_keyword_archive_detail,
-    keyword_targets_pending_detail, run_keyword_archive_details,
+    advance_keyword_archive_detail_for_domain, keyword_targets_pending_detail,
+    run_keyword_archive_details,
 };
 
 pub use queue_position::{TargetQueuePosition, read_target_queue_positions};
@@ -78,10 +75,12 @@ pub use acquisition_chain::{
     DETAIL_WINDOW_REPLY_EXPAND_LIMIT, MaterialDeepeningTarget, ProgressiveArchiveTickSummary,
     RequestLeaseError, RequestLeaseOutcome, RequestOutcome, acquisition_chain_schema_is_ready,
     grant_authorization, read_capacity, request_admit_and_lease,
-    request_admit_material_targets_and_lease, request_and_admit,
-    request_and_admit_material_targets, request_and_admit_material_targets_under_authorization,
-    request_creator_directory_gaps, request_progressive_archive,
-    request_progressive_archive_and_lease, run_progressive_archives,
+    request_admit_material_targets_and_lease, request_and_admit, request_and_admit_for_domain,
+    request_and_admit_material_targets, request_and_admit_material_targets_for_domain,
+    request_and_admit_material_targets_under_authorization, request_creator_directory_gaps,
+    request_creator_directory_gaps_for_domain, request_progressive_archive,
+    request_progressive_archive_and_lease, request_progressive_archive_for_domain,
+    run_progressive_archives,
 };
 pub use archive_completeness::{
     ArchiveCompleteness, ArchiveDirectoryBaseline, BlockedMaterial, read_archive_completeness,
@@ -104,9 +103,10 @@ pub use collection_control::{
 pub use collection_target::{
     CollectionTargetError, ObservationTarget, ObservationTargetAvatar, StoreOutcome, TargetCounts,
     TargetDeletionOutcome, TargetDeletionPreview, TargetDomainAssignmentOutcome,
-    assign_target_domain, collection_target_schema_is_ready, count_targets,
-    delete_observation_target, list_targets, list_targets_in_state, read_target,
-    read_target_avatars, read_target_deletion_preview, store_pending_target, transition_target,
+    assign_target_domain, assign_target_domain_with_role, collection_target_schema_is_ready,
+    count_targets, delete_observation_target, list_targets, list_targets_in_state, read_target,
+    read_target_avatars, read_target_deletion_preview, remove_target_domain,
+    set_target_domain_role, store_pending_target, transition_target,
 };
 pub use collection_task_read::{
     CollectionTaskExecution, CollectionTaskTimeline, DeliveryConclusion,
@@ -116,7 +116,8 @@ pub use collection_task_read::{
 pub use content_reobservation::{
     ContentReobservation, ContentReobservationEligibility, ContentReobservationError,
     ContentReobservationStatus, ReobservationMediaPolicy, ReobservationTask, content_reobservation,
-    read_content_reobservation, read_content_reobservation_eligibility,
+    content_reobservation_in_domain, read_content_reobservation,
+    read_content_reobservation_eligibility, read_content_reobservation_eligibility_in_domain,
 };
 pub use creator_lifecycle::{
     CreatorLifecycleAssociation, CreatorLifecycleExclusions, CreatorLifecycleMetric,
@@ -225,8 +226,7 @@ pub use step_report::{StepFailure, StepOutcome, StepReport};
 pub use target_catalog::{
     CatalogDetailState, CatalogSource, CatalogWork, CreatorDirectoryProjection,
     KeywordCatalogCounts, KeywordHitProjection, read_creator_directory,
-    read_cross_industry_creator_directory, read_cross_industry_hits, read_keyword_catalog_counts,
-    read_keyword_hits,
+    read_keyword_catalog_counts, read_keyword_hits,
 };
 pub use target_enrichment::{
     TargetEnrichmentError, TargetSyncOutcome, sync_target_from_author_profile,
@@ -247,7 +247,7 @@ pub use work_resource_read::{
     WorkResource, WorkResourceCollectionContext, WorkResourceDisplay, WorkResourceEngagement,
     WorkResourceIdentity, WorkResourceLaneSummary, WorkResourcePage, WorkResourcePreview,
     WorkResourceReadError, WorkResourceSummary, read_work_resource, read_work_resources,
-    work_resource_schema_is_ready,
+    validate_work_resource_query, work_resource_schema_is_ready,
 };
 
 pub mod collection_repair;

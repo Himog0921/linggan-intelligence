@@ -266,6 +266,10 @@ WHERE ($1::text IS NULL
   {substantive_ocr_search}
   OR EXISTS (SELECT 1 FROM linggan_material_author_profile author JOIN linggan_runtime_capture_package author_package USING(package_ref) WHERE author.platform=current.platform AND author.author_external_id=current.author_external_id AND author_package.accepted_at <= $2::timestamptz AND (lower(COALESCE(author.display_name,'')) LIKE '%' || lower($1) || '%' OR lower(COALESCE(author.biography,'')) LIKE '%' || lower($1) || '%')))
 AND ($8::uuid IS NULL OR current.public_ref=$8)
+AND ($9::uuid IS NULL OR EXISTS (
+  SELECT 1 FROM linggan_material_domain_usage domain_usage
+  WHERE domain_usage.content_public_ref=current.public_ref
+    AND domain_usage.domain_ref=$9))
 AND current.observed_at IS NOT NULL
 AND ($6::text IS NULL
   OR ($6='detail' AND current.detail_material_ref IS NOT NULL)

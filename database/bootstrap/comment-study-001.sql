@@ -32,7 +32,7 @@ CREATE TABLE linggan_comment_study_policy (
 );
 
 CREATE TABLE linggan_comment_study_active_policy (
-    singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),
+    domain_ref uuid PRIMARY KEY REFERENCES observation_domain(domain_ref),
     policy_ref uuid NOT NULL REFERENCES linggan_comment_study_policy(policy_ref),
     updated_at timestamptz NOT NULL DEFAULT scope_001_now()
 );
@@ -86,6 +86,7 @@ CREATE TABLE linggan_comment_study_work (
     run_ref uuid NOT NULL REFERENCES linggan_comment_study_run(run_ref),
     content_public_ref uuid NOT NULL REFERENCES linggan_material_content(public_ref),
     domain_ref uuid NOT NULL REFERENCES observation_domain(domain_ref),
+    observation_role text NOT NULL CHECK(observation_role IN ('primary','reference')),
     selection_reason text NOT NULL CHECK(selection_reason IN ('user_selected','budget_selected')),
     context_state text NOT NULL CHECK(context_state IN ('ready','partial','missing')),
     context_manifest jsonb NOT NULL CHECK(jsonb_typeof(context_manifest)='object'),

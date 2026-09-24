@@ -1,7 +1,7 @@
 # 文档总索引
 
 > 状态: 权威当前
-> 最后核对: 2026-09-23
+> 最后核对: 2026-09-24
 > 适用范围: 全仓库文档导航、权威状态与渐进式披露
 > 事实来源: 当前 Git 文件树、`AGENTS.md` 与文档状态头
 > 冲突时以谁为准: `AGENTS.md` 和真实代码、合同、测试、运行结果
@@ -19,13 +19,14 @@
 
 | 文档 | 状态 | 用途 |
 |---|---|---|
-| [plans/active/domain-unification-001.md](plans/active/domain-unification-001.md) | 活跃计划；实施待 root 同步 Issue #130 | 多个正式 Domain 平权、Domain–Target role、统一 Material/Comment/Media、Comment Study 领域化、领域管理与开发期旧 cross 模型清理的唯一推进文件 |
+| [plans/active/domain-unification-001.md](plans/active/domain-unification-001.md) | 活跃计划；WP0–WP5 与 WP4 隔离浏览器验收完成，待 exact commit/root 集成审查 | 多个正式 Domain 平权、Domain–Target role、统一 Material/Comment/Media、Comment Study 领域化、领域管理与开发期旧 cross 模型清理的唯一推进文件 |
 | [plans/active/account-observation-bootstrap-002.md](plans/active/account-observation-bootstrap-002.md) | 活跃计划 | Issue #218：新安装插件的首单软准入、账号观察启动、人工绑定审计与无秘密配置诊断 |
 | [plans/active/detail-page-session-replay-safety-001.md](plans/active/detail-page-session-replay-safety-001.md) | 活跃计划；受保护工作树 | 同一 Work Order/内容详情页的单次导航授权、浏览器持久消费闸门、缓存缺失 fail-closed 与既得数据重传边界 |
 | [plans/active/collection-upgrade-001.md](plans/active/collection-upgrade-001.md) | 活跃计划；受保护工作树 | Mog 交付包：缺输入止转、跨工单重试预算、交付恢复、统一材料完成判据与运行诊断的 S0–S6 对照表 |
 | [plans/active/corpus-evidence-read-recovery-001.md](plans/active/corpus-evidence-read-recovery-001.md) | 活跃计划；Issue #308 已关闭；main/本机 loopback 已部署 | Comment Study 重建后恢复 Evidence 列表与受控评论读取，不复活 V1 研究合同 |
 | [plans/active/ocr-content-layering-001.md](plans/active/ocr-content-layering-001.md) | 活跃计划；Issue #296；受保护工作树 | PaddleOCR 替换、逐行版面/内容分层、封面标题补位与 Tesseract OCR 可审计退役 |
 | [decisions/0007-ocr-content-layering.md](decisions/0007-ocr-content-layering.md) | 权威当前 | OCR 原始事实、内容分层、视觉选择边界和展示标题来源的长期决定 |
+| [decisions/0008-peer-domains-and-unified-material-pipeline.md](decisions/0008-peer-domains-and-unified-material-pipeline.md) | 权威当前 | 平级 Domain、共享真实 Target、primary/reference 用途、统一材料链与 Domain pause 的长期决定 |
 | [data-contracts/ocr-content-layering.md](data-contracts/ocr-content-layering.md) | 权威当前 | OCR raw/layout/行引用、分层状态、标题回退与视觉模型输出闭集 |
 | [runbooks/paddle-ocr-runtime.md](runbooks/paddle-ocr-runtime.md) | 权威当前 | 本机 Paddle runtime 准备、无 Tesseract 回退、迁移后受控重排步骤 |
 | [decisions/0006-comment-research-clean-rebuild.md](decisions/0006-comment-research-clean-rebuild.md) | 权威当前 | Issue #295：开发期销毁旧评论研究派生层，保留原始 Evidence 与资格事实；唯一的新评论研究合同与本机 reset 边界 |
@@ -130,12 +131,15 @@
 | [design/acceptance/evidence-cover-card-proportion-002-acceptance.md](design/acceptance/evidence-cover-card-proportion-002-acceptance.md) | 一次性报告；main 已合并、本机 runtime 已刷新 | `ACC-EVIDENCE-COVER-CARD-PROPORTION-002`：自动合同、真实本机只读预览与 3000 运行回执；Mog 前端验收仍独立 |
 | [design/changes/evidence-cover-card-material-004-ui-change-manifest.md](design/changes/evidence-cover-card-material-004-ui-change-manifest.md) | 已合并 main；`:3000` runtime 已切换 | `EVIDENCE-COVER-CARD-MATERIAL-004`：封面作品卡的四级表面分层、卡面材质、舞台测量场、标题字阶与结果区横条删除；不改变读取、详情或状态语义 |
 | [design/acceptance/evidence-cover-card-material-004-acceptance.md](design/acceptance/evidence-cover-card-material-004-acceptance.md) | 一次性报告；已部署到本机 `:3000` | `ACC-EVIDENCE-COVER-CARD-MATERIAL-004`：只读预览代理上的六列实测、翻面位移与封面填充核对；远端生产与真实触摸设备未验证 |
-| [design/changes/corpus-cross-domain-render-001-ui-change-manifest.md](design/changes/corpus-cross-domain-render-001-ui-change-manifest.md) | 权威当前；未部署 | 外部领域列表级参照样本显示与 Context Bar 领域链接菜单；不含领域自助配置 |
+| [design/changes/domain-unification-001-ui-change-manifest.md](design/changes/domain-unification-001-ui-change-manifest.md) | 权威当前；隔离浏览器验收完成，未部署 | 平级 Domain、领域管理、primary/reference、统一 Evidence Library 与 Domain-scoped Comment Study |
+| [design/acceptance/domain-unification-001-acceptance.md](design/acceptance/domain-unification-001-acceptance.md) | 一次性报告；隔离数据库与浏览器已验收，未部署 | ACC-DOMAIN-UNIFICATION-001：领域管理交互、跨 Domain role、1440/390 布局与边界 |
+| [design/changes/corpus-cross-domain-render-001-ui-change-manifest.md](design/changes/corpus-cross-domain-render-001-ui-change-manifest.md) | 历史基线；已由 DOMAIN-UNIFICATION-001 取代 | 旧双轨样本列表与只读领域切换器；不得作为当前 Evidence、Domain 或材料能力合同 |
 | [design/acceptance/corpus-cross-domain-render-001-acceptance.md](design/acceptance/corpus-cross-domain-render-001-acceptance.md) | 一次性报告 | `ACC-CORPUS-CROSS-DOMAIN-RENDER-001`：外部样本 21 行、列表级 Inspector、LIDS 菜单与未部署边界 |
 | [design/changes/work-resource-read-001-ui-change-manifest.md](design/changes/work-resource-read-001-ui-change-manifest.md) | 交付分支实现；Issue #110 | Evidence Library 的共享 Work Resource 接口、作者/目标诚实表达、时间来源状态和研读/表格/封面三种排版变更清单 |
 | [design/changes/evidence-v9-001-ui-change-manifest.md](design/changes/evidence-v9-001-ui-change-manifest.md) | 交付分支实现；EVIDENCE-V9-001 | `/corpus/evidence` 的 V9 研读密度、行级原声引用读能力、Inspector 三档宽度与 LOCAL MEDIA 横向材料浏览变更清单，含七处与 V9 的有据偏离 |
 | [design/pages/evidence-library-multi-material-reference.html](design/pages/evidence-library-multi-material-reference.html) | 权威当前；静态参考 | `EVIDENCE-PAGE-002`：多材料 Evidence Library 合成高保真参考；不连接 API、真实平台、媒体或处理器 |
-| [design/pages/collection-workspace-page.md](design/pages/collection-workspace-page.md) | 权威当前；PAGE-COLLECTION-001 | Collection 五个子面的职责、状态诚实性、页面级例外与未证明边界 |
+| [design/pages/collection-workspace-page.md](design/pages/collection-workspace-page.md) | 权威当前；PAGE-COLLECTION-001 | Collection 六个子面的职责、状态诚实性、页面级例外与未证明边界 |
+| [design/pages/domain-management-page.md](design/pages/domain-management-page.md) | 权威当前；PAGE-DOMAIN-MANAGEMENT-001 | Domain 与 Target 用途管理、pause 后果、材料 lane 与状态合同；候选实现待验收 |
 | [design/pages/collection-operations-html-prototype-brief.md](design/pages/collection-operations-html-prototype-brief.md) | 权威当前；静态原型委托书 | 面向无法读取本地仓库的外部模型的自包含 Collection 静态原型说明；不是运行实现或事实来源 |
 | [design/pages/topic-workspace-page.md](design/pages/topic-workspace-page.md) | 交付分支权威；PAGE-TOPIC-WORKSPACE-001 | 真实但明确暂定的 L2 Topic 工作区：定义、人工裁定、冻结材料与来源边界 |
 | [design/changes/topic-workspace-real-001-ui-change-manifest.md](design/changes/topic-workspace-real-001-ui-change-manifest.md) | 交付分支实现；Issue #112 | Topic runtime page 的来源回执、LIDS 影响、状态与响应式变更清单 |

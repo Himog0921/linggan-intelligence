@@ -28,6 +28,7 @@ pub mod collection_control_surface_view {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Section {
     Targets,
+    Domains,
     Operations,
     Attention,
     Tasks,
@@ -84,7 +85,7 @@ struct SectionMeta {
 /// them, so they were free to change. It does define 工位, which is why 执行工位 keeps it.
 ///
 /// Slugs are untouched: they are the URL contract the browser plugin and bookmarks hold.
-const SECTIONS: [(Section, SectionMeta); 5] = [
+const SECTIONS: [(Section, SectionMeta); 6] = [
     (
         Section::Attention,
         SectionMeta {
@@ -128,6 +129,15 @@ const SECTIONS: [(Section, SectionMeta); 5] = [
             index: "05",
             zh: "执行工位",
             title: "执行工位",
+        },
+    ),
+    (
+        Section::Domains,
+        SectionMeta {
+            slug: "domains",
+            index: "06",
+            zh: "领域管理",
+            title: "领域管理",
         },
     ),
 ];
@@ -619,9 +629,14 @@ fn runtime_body(state: Option<&SurfaceState>) -> String {
     )
 }
 
+fn domains_body() -> String {
+    "<!-- DOMAIN_MANAGEMENT_CONTENT -->".to_owned()
+}
+
 fn body(section: Section, mode: OperationsMode, state: Option<&SurfaceState>) -> String {
     match section {
         Section::Targets => targets_body(state),
+        Section::Domains => domains_body(),
         Section::Operations => operations_body(mode, state),
         Section::Attention => attention_body(state),
         Section::Tasks => tasks_body(state),
@@ -706,6 +721,7 @@ fn head_readout(section: Section, state: Option<&SurfaceState>) -> String {
             ("UNKNOWN", "待处理", "当前恢复事项投影尚未读取"),
             ("UNKNOWN", "数据缺失", "当前缺失投影尚未读取"),
         ]),
+        (Section::Domains, _) => String::new(),
         (Section::Targets, Some(state)) => {
             let monitoring = display_count(state.monitoring_targets);
             let archiving = display_count(state.archiving_targets);
@@ -852,17 +868,17 @@ fn second_bar(
                 _ => None,
             };
             let mut domain_options = String::new();
-            for domain in domains {
+            for domain in domains.iter().filter(|domain| domain.status == "active") {
                 let value = domain.domain_ref.to_string();
                 let selected = if preselected == Some(value.as_str()) {
                     " selected"
                 } else {
                     ""
                 };
-                let suffix = if domain.is_own_domain {
-                    "（本行业·材料进证据库）"
+                let suffix = if domain.status == "paused" {
+                    "（已暂停）"
                 } else {
-                    "（参照·材料进跨行业语料）"
+                    ""
                 };
                 domain_options.push_str(&format!(
                     r#"<option value="{value}"{selected}>{name}{suffix}</option>"#,
@@ -887,12 +903,11 @@ fn second_bar(
               <div class="c-tg-batch-overlay" data-target-domain-modal hidden>
                 <section id="target-domain-modal" class="c-tg-batch-dialog" role="dialog" aria-modal="true" aria-labelledby="target-domain-title">
                   <div>
-                    <h2 id="target-domain-title">这个目标属于哪个领域</h2>
-                    <p>领域决定它采回来的材料进本行业证据库，还是作为参照进跨行业语料。这一项不做推断——猜错会让参照物混进证据，之后任何读证据的地方都不会再提醒你。</p>
+                    <h2 id="target-domain-title">这个目标参与哪个领域</h2>
+                    <p>同一 Target 可以关联多个领域；每个领域分别设置 primary 或 reference。材料统一进入共享材料链。</p>
                   </div>
-                  <label>领域<span class="c-tg-field" data-drawn-select><select name="domain" data-target-domain-select required>{domain_options}<option value="__new__">＋ 新建一个领域…</option></select></span></label>
-                  <label data-target-domain-new hidden>新领域名称<input name="new_domain_name" type="text" maxlength="80" placeholder="例如：考研自习" data-target-domain-name /></label>
-                  <p data-target-domain-new-note hidden>新领域一律作为<b>参照领域</b>建立：它采回来的材料进跨行业语料，不进本行业证据库。本行业只能有一个，不能新建。</p>
+                  <label>领域<span class="c-tg-field" data-drawn-select><select name="domain" data-target-domain-select required>{domain_options}</select></span></label>
+                  <p>需要新建领域或调整角色？<a href="/collection/domains">打开领域管理</a>。</p>
                   <div class="c-tg-batch-dialog-actions"><button class="c-btn-secondary" type="button" data-target-domain-close>取消</button><button class="c-btn-primary" type="submit">建立目标</button></div>
                 </section>
               </div>
@@ -934,7 +949,7 @@ fn second_bar(
             </div>"#,
             )
         }
-        Section::Attention | Section::Tasks | Section::Runtime => String::new(),
+        Section::Attention | Section::Domains | Section::Tasks | Section::Runtime => String::new(),
     }
 }
 
@@ -1000,7 +1015,7 @@ pub fn render_in_domain(
     // ledger. Repeating patrol count, archive count, scheduler, patrol state and timezone in
     // the breadcrumb band made that band a second status dashboard without helping the user
     // decide anything. Other Collection surfaces still keep their scoped operational readouts.
-    let meta_row = if section == Section::Targets {
+    let meta_row = if matches!(section, Section::Targets | Section::Domains) {
         String::new()
     } else {
         format!(

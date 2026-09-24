@@ -333,11 +333,7 @@ fn delivery_section(delivery: Option<&[DetailDeliveryReconciliation]>) -> String
 
 fn delivery_row(session: &DetailDeliveryReconciliation) -> String {
     let (label, slug, note) = match session.conclusion {
-        DeliveryConclusion::Delivered => (
-            "已交付",
-            "delivered",
-            "冻结通道的包都已拿到回执",
-        ),
+        DeliveryConclusion::Delivered => ("已交付", "delivered", "冻结通道的包都已拿到回执"),
         DeliveryConclusion::AwaitingDelivery => ("待交付", "awaiting_delivery", "还有通道没有回执"),
         DeliveryConclusion::RecoveryUnverified => (
             "恢复待核实",
@@ -356,7 +352,10 @@ fn delivery_row(session: &DetailDeliveryReconciliation) -> String {
         .target_display_name
         .as_deref()
         .unwrap_or("目标关联当前未知");
-    let content = session.content_external_id.as_deref().unwrap_or("内容引用未知");
+    let content = session
+        .content_external_id
+        .as_deref()
+        .unwrap_or("内容引用未知");
     let platform = session.platform.as_deref().unwrap_or("平台未知");
     let lanes = if session.prepared_lanes == 0 {
         "没有可核对的冻结通道".to_owned()
@@ -426,7 +425,10 @@ struct TaskStateView {
 /// 拿到回执只说明服务端收到了这次提交；材料有没有通过接纳是另一条结论。
 /// 两者都不写回执那一格是「未收到」，也不把没记录的接纳结论写成「未接纳」。
 fn receipt_column(task: &CollectionTaskExecution) -> &'static str {
-    match (task.receipt_ref.is_some(), task.material_admission.as_deref()) {
+    match (
+        task.receipt_ref.is_some(),
+        task.material_admission.as_deref(),
+    ) {
         (false, _) => "—",
         (true, Some("ACCEPTED")) => "已接纳",
         (true, _) => "接纳结论未记录",

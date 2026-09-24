@@ -274,6 +274,8 @@ migrate() {
   apply_migration_once "0100_collection_hot_path_indexes" "$project_root/database/migrations/0100_collection_hot_path_indexes.sql"
   apply_migration_once "0101_collection_command_reason_vocabulary" "$project_root/database/migrations/0101_collection_command_reason_vocabulary.sql"
   apply_migration_once "0102_cross_industry_creator_directory" "$project_root/database/migrations/0102_cross_industry_creator_directory.sql"
+  apply_migration_once "0103_domain_membership_and_usage" "$project_root/database/migrations/0103_domain_membership_and_usage.sql"
+  apply_migration_once "0104_unified_domain_schema_cleanup" "$project_root/database/migrations/0104_unified_domain_schema_cleanup.sql"
 }
 
 case "$command_name" in

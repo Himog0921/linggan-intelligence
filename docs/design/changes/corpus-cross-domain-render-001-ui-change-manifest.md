@@ -1,10 +1,12 @@
 # CORPUS-CROSS-DOMAIN-RENDER-001 · 外部领域样本显示与领域切换器
 
-> 状态: 权威当前
+> 状态: 历史归档
 > 最后核对: 2026-09-08
 > 适用范围: `GET /corpus/evidence?domain=<external-domain-ref>` 的既有外部样本读取、以及该页 Context Bar 的当前观察领域切换器
 > 事实来源: Mog 2026-09-08 的运行页反馈、Issue #130、`PAGE-EVIDENCE-001`、LIDS v7、当前 Rust/JS/CSS 与只读运行核验
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实运行/代码/合同、ACCEPTED 决定；本清单不扩大领域配置、采集、数据写入或部署授权
+
+> 历史说明：本清单记录旧 `cross_industry_sample` 双轨下的列表级参照呈现。Domain 平权决定已由 [DEC-0008](../../decisions/0008-peer-domains-and-unified-material-pipeline.md) 与 [DOMAIN-UNIFICATION-001](../../plans/active/domain-unification-001.md) 取代。其视觉走查仅为历史证据；不得用于约束当前材料身份、能力、API 或访问资格。
 
 ## 1. 用户结果与分类
 

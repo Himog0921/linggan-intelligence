@@ -1,52 +1,90 @@
 const endpoint = '/api/local/comment-study/';
+const domainRef = new URLSearchParams(window.location.search).get('domain');
+const domainName = document.body.dataset.domainName || '当前领域';
 const esc = value => String(value ?? '').replace(/[&<>\"]/g, character => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'
 }[character]));
 
 const get = async path => {
-  const response = await fetch(endpoint + path, { headers: { Accept: 'application/json' } });
+  const url = new URL(endpoint + path, window.location.origin);
+  if (domainRef) url.searchParams.set('domain', domainRef);
+  const response = await fetch(url, { headers: { Accept: 'application/json' } });
   if (!response.ok) throw new Error(`请求失败（状态码 ${response.status}）`);
   return response.json();
 };
 const post = async (path, body) => {
-  const response = await fetch(endpoint + path, { method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const response = await fetch(endpoint + path, { method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, ...(domainRef ? { domainRef } : {}) }) });
   if (!response.ok) throw new Error(`请求失败（状态码 ${response.status}）`);
   return response.json();
 };
 const list = (items, render, empty) => items?.length ? items.map(render).join('') : `<p class="muted">${esc(empty)}</p>`;
 let loadedWorks = [];
 let sourcePreview = null;
-const selectedWorkRefs = new Set();
+const selectedWorkRoles = new Map();
+let includeReferenceWorks = false;
 
 const normalizedFilter = () => document.querySelector('#work-filter').value.trim().toLocaleLowerCase('zh-CN');
 const visibleWorks = () => {
   const filter = normalizedFilter();
-  return filter ? loadedWorks.filter(work => String(work.title ?? '').toLocaleLowerCase('zh-CN').includes(filter)) : loadedWorks;
+  const selectable = loadedWorks.filter(work => work.availableRoles.includes('primary') || includeReferenceWorks);
+  return filter ? selectable.filter(work => String(work.title ?? '').toLocaleLowerCase('zh-CN').includes(filter)) : selectable;
 };
-const selectedWorks = () => [...selectedWorkRefs];
+const selectedWorks = () => [...selectedWorkRoles].map(([contentPublicRef, observationRole]) => ({
+  contentPublicRef,
+  observationRole
+}));
+
+function preferredRole(work) {
+  const current = selectedWorkRoles.get(work.workRef);
+  if (current && work.availableRoles.includes(current) && (current === 'primary' || includeReferenceWorks)) return current;
+  if (work.availableRoles.includes('primary')) return 'primary';
+  return includeReferenceWorks ? 'reference' : null;
+}
+
+function mergeEligibleWorks(primaryWorks, referenceWorks) {
+  const works = new Map();
+  const add = (items, role) => items.forEach(item => {
+    const work = works.get(item.workRef) || {
+      workRef: item.workRef,
+      title: item.title,
+      availableRoles: [],
+      eligibleCommentsByRole: {}
+    };
+    work.availableRoles.push(role);
+    work.eligibleCommentsByRole[role] = Number(item.eligibleCommentCount || 0);
+    works.set(item.workRef, work);
+  });
+  add(primaryWorks, 'primary');
+  add(referenceWorks, 'reference');
+  return [...works.values()].map(work => ({
+    ...work,
+    availableRoles: [...new Set(work.availableRoles)]
+  })).sort((left, right) => left.title.localeCompare(right.title, 'zh-CN') || left.workRef.localeCompare(right.workRef));
+}
 
 function updateSelection() {
   const count = selectedWorks().length;
   const selectedEligible = loadedWorks
-    .filter(work => selectedWorkRefs.has(work.workRef))
-    .reduce((total, work) => total + Number(work.eligibleCommentCount || 0), 0);
+    .filter(work => selectedWorkRoles.has(work.workRef))
+    .reduce((total, work) => total + Number(work.eligibleCommentsByRole[selectedWorkRoles.get(work.workRef)] || 0), 0);
   const budget = Number(document.querySelector('#comment-budget').value || 0);
   const frozenCount = budget > 0 ? Math.min(selectedEligible, budget) : 0;
   document.querySelector('#selected-count').textContent = count
-    ? `已选择 ${count} 篇 · 合格 ${selectedEligible} 条 · 本次最多冻结 ${frozenCount} 条`
+    ? `已选择 ${count}/100 篇 · 合格 ${selectedEligible} 条 · 本次最多冻结 ${frozenCount} 条`
     : '已选择 0 篇';
   document.querySelector('#start-run').disabled = count === 0;
   const visible = visibleWorks();
   const selectVisible = document.querySelector('#select-visible-works');
-  const selectedVisibleCount = visible.filter(work => selectedWorkRefs.has(work.workRef)).length;
+  const selectedVisibleCount = visible.filter(work => selectedWorkRoles.has(work.workRef)).length;
   selectVisible.checked = visible.length > 0 && selectedVisibleCount === visible.length;
   selectVisible.indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < visible.length;
+  selectVisible.disabled = selectedWorkRoles.size >= 100 && selectedVisibleCount < visible.length;
 }
 
-function renderSourcePreview(preview) {
-  const target = document.querySelector('#source-preview');
+function renderSourcePreview(preview, targetId, roleLabel) {
+  const target = document.querySelector(targetId);
   if (!preview) {
-    target.textContent = '评论资格统计暂不可用。';
+    target.textContent = `${roleLabel}来源资格统计暂不可用。`;
     return;
   }
   const excluded = preview.excludedCounts || {};
@@ -63,22 +101,36 @@ function renderSourcePreview(preview) {
     .filter(([, count]) => count > 0)
     .map(([label, count]) => `${label} ${count} 条`);
   const excludedCount = Number(preview.totalCommentCount || 0) - Number(preview.eligibleCommentCount || 0);
-  target.textContent = `截至 ${String(preview.asOf || '').replace('T', ' ')}：共 ${Number(preview.totalCommentCount || 0)} 条评论；可研究 ${Number(preview.eligibleCommentCount || 0)} 条；未纳入 ${excludedCount} 条${reasons.length ? `（${reasons.join('；')}）` : ''}。`;
+  target.textContent = `${roleLabel} · 截至 ${String(preview.asOf || '').replace('T', ' ')}：共 ${Number(preview.totalCommentCount || 0)} 条评论；可研究 ${Number(preview.eligibleCommentCount || 0)} 条；未纳入 ${excludedCount} 条${reasons.length ? `（${reasons.join('；')}）` : ''}。`;
 }
 function renderWorks() {
   const container = document.querySelector('#works');
   const visible = visibleWorks();
   const filter = normalizedFilter();
+  const referenceCount = loadedWorks.filter(work => work.availableRoles.includes('reference')).length;
   document.querySelector('#work-filter-status').textContent = filter
-    ? `当前筛选命中 ${visible.length} 篇，已加载 ${loadedWorks.length} 篇可研究作品。`
-    : `已加载 ${loadedWorks.length} 篇可研究作品。`;
+    ? `当前筛选命中 ${visible.length} 篇，已加载 ${visibleWorks().length} 篇可研究作品。`
+    : `已加载 ${loadedWorks.filter(work => work.availableRoles.includes('primary')).length} 篇 primary 作品；${referenceCount} 篇 reference 作品${includeReferenceWorks ? '已显示' : '默认隐藏'}。`;
   container.innerHTML = visible.length
-    ? visible.map(work => `<tr><td><input id="work-${esc(work.workRef)}" type="checkbox" name="work-ref" value="${esc(work.workRef)}" aria-label="选择作品：${esc(work.title)}"${selectedWorkRefs.has(work.workRef) ? ' checked' : ''}></td><td><label for="work-${esc(work.workRef)}"><span class="study-work-title">${esc(work.title)}</span></label></td><td>${Number(work.eligibleCommentCount)}</td></tr>`).join('')
-    : `<tr><td class="study-table-empty" colspan="3">${filter ? '当前筛选没有命中已加载作品。' : '当前没有符合条件的 ADHD 作品。'}</td></tr>`;
+    ? visible.map(work => {
+      const selected = selectedWorkRoles.has(work.workRef);
+      const role = preferredRole(work);
+      const availableRoles = work.availableRoles.filter(value => value === 'primary' || includeReferenceWorks);
+      const roleChoices = availableRoles.map(value => `<option value="${value}"${role === value ? ' selected' : ''}>${value}</option>`).join('');
+      const capped = !selected && selectedWorkRoles.size >= 100;
+      return `<tr><td><input id="work-${esc(work.workRef)}" type="checkbox" name="work-ref" value="${esc(work.workRef)}" aria-label="选择作品：${esc(work.title)}"${selected ? ' checked' : ''}${capped ? ' disabled' : ''}></td><td><label for="work-${esc(work.workRef)}"><span class="study-work-title">${esc(work.title)}</span></label></td><td><select name="work-role" data-work-ref="${esc(work.workRef)}" aria-label="${esc(work.title)} 的领域角色"${selected ? '' : ' disabled'}>${roleChoices}</select></td><td>${Number(work.eligibleCommentsByRole[role] || 0)}</td></tr>`;
+    }).join('')
+    : `<tr><td class="study-table-empty" colspan="4">${filter ? '当前筛选没有命中已加载作品。' : `当前没有符合条件的 ${esc(domainName)} 作品。`}</td></tr>`;
   container.querySelectorAll('input[name="work-ref"]').forEach(input => input.addEventListener('change', event => {
-    if (event.currentTarget.checked) selectedWorkRefs.add(event.currentTarget.value);
-    else selectedWorkRefs.delete(event.currentTarget.value);
-    updateSelection();
+    const work = loadedWorks.find(item => item.workRef === event.currentTarget.value);
+    if (event.currentTarget.checked && work) selectedWorkRoles.set(work.workRef, preferredRole(work));
+    else selectedWorkRoles.delete(event.currentTarget.value);
+    renderWorks();
+  }));
+  container.querySelectorAll('select[name="work-role"]').forEach(select => select.addEventListener('change', event => {
+    const workRef = event.currentTarget.dataset.workRef;
+    if (selectedWorkRoles.has(workRef)) selectedWorkRoles.set(workRef, event.currentTarget.value);
+    renderWorks();
   }));
   updateSelection();
 }
@@ -88,29 +140,41 @@ async function loadSetup() {
     const setup = await get('setup');
     const select = document.querySelector('#model-config');
     select.innerHTML = list(setup.modelConfigs, config => `<option value="${esc(config.configRef)}">${esc(config.modelId)} · 输入上限 ${Number(config.inputTokenLimit)} 词元／输出上限 ${Number(config.outputTokenLimit)} 词元</option>`, '没有可用模型配置。');
-    const available = setup.modelConfigs?.length > 0;
+    const available = setup.modelConfigs?.length > 0 && setup.domainStatus === 'active';
     select.disabled = !available;
     document.querySelector('#save-policy').disabled = !available;
     sourcePreview = setup.sourcePreview || null;
-    renderSourcePreview(sourcePreview);
-    loadedWorks = setup.eligibleWorks || [];
-    selectedWorkRefs.clear();
+    renderSourcePreview(sourcePreview, '#source-preview', 'primary');
+    renderSourcePreview(setup.referenceSourcePreview, '#reference-source-preview', 'reference');
+    const primaryWorks = setup.eligibleWorks || [];
+    const referenceWorks = setup.referenceEligibleWorks || [];
+    loadedWorks = mergeEligibleWorks(primaryWorks, referenceWorks);
+    selectedWorkRoles.clear();
+    includeReferenceWorks = false;
+    const referenceToggle = document.querySelector('#include-reference-works');
+    referenceToggle.checked = false;
+    referenceToggle.disabled = referenceWorks.length === 0;
+    document.querySelector('#reference-source-preview').hidden = Number(setup.referenceSourcePreview?.totalCommentCount || 0) === 0;
     renderWorks();
     status.dataset.kind = available ? 'info' : 'error';
-    status.textContent = available ? `已加载 ${setup.eligibleWorks?.length || 0} 篇可选作品；此列表最多展示 100 篇。` : '没有启用的模型配置，无法保存策略。';
+    status.textContent = setup.domainStatus === 'paused'
+      ? `${domainName}已暂停；历史结果可读，不能创建新策略或运行。`
+      : available ? `已加载 ${primaryWorks.length} 篇 primary 作品；reference 默认不纳入研究。` : '没有启用的模型配置，无法保存策略。';
   } catch (error) {
     status.dataset.kind = 'error';
     status.textContent = `无法读取准备信息：${error.message}`;
     document.querySelector('#work-filter-status').textContent = '作品列表不可用。';
     sourcePreview = null;
-    renderSourcePreview(null);
-    document.querySelector('#works').innerHTML = '<tr><td class="study-table-empty" colspan="3">作品列表不可用。</td></tr>';
+    renderSourcePreview(null, '#source-preview', 'primary');
+    renderSourcePreview(null, '#reference-source-preview', 'reference');
+    document.querySelector('#works').innerHTML = '<tr><td class="study-table-empty" colspan="4">作品列表不可用。</td></tr>';
   }
 }
 const targetStateLabel = {
   ready: '准备就绪', needs_context: '等待语境', excluded: '来源受限，未处理', queued: '排队中',
   running: '处理中', succeeded: '已产出结果', no_signal: '已处理 · 无信号', failed: '处理失败'
 };
+const observationRoleLabel = { primary: 'primary · 本领域', reference: 'reference · 参考领域' };
 const eligibilityLabel = {
   eligible: '具备归并资格', deferred_context: '语境不足，暂缓', not_user_problem: '不构成用户问题',
   not_applicable: '不适用（非问题/需求类信号）'
@@ -184,7 +248,7 @@ async function renderOverviewTab() {
   return `
     <article class="study-overview-run">
       <header><p class="study-label">最新一次运行</p><h3>${esc(latest.runRef)}</h3><p>创建于 ${esc(latest.createdAt)}${latest.finishedAt ? ` · 结束于 ${esc(latest.finishedAt)}` : ' · 尚未结束'}</p></header>
-      <p>选择作品 ${Number(latest.selectedWorkCount)} 篇，冻结评论目标 ${targetTotal} 条。</p>
+      <p>选择作品 ${Number(latest.selectedWorkCount)} 篇（primary ${Number(latest.primaryWorkCount || 0)} / reference ${Number(latest.referenceWorkCount || 0)}），冻结评论目标 ${targetTotal} 条。</p>
       <div class="study-stat-group"><p class="study-label">目标处理状态</p><div class="study-stat-row">${stateRows(targetStateLabel, latest.targetStates, '尚无目标。')}</div></div>
       <div class="study-stat-group"><p class="study-label">研究信号的归并资格</p><div class="study-stat-row">${stateRows(eligibilityLabel, latest.signalStates, '本次运行没有研究信号。')}</div></div>
       <div class="study-stat-group"><p class="study-label">归并判断结果</p><div class="study-stat-row">${stateRows(resolutionLabel, latest.resolutionStates, '尚无已产生的归并判断。')}</div></div>
@@ -206,7 +270,7 @@ function targetRow(target) {
     ? `<blockquote>${esc(target.commentText)}</blockquote>`
     : `<p class="study-restricted">${esc(restrictionNote || '原文当前不可读取。')}</p>`;
   return `<tr>
-    <td>${commentBlock}</td>
+    <td><span class="study-badge">${esc(observationRoleLabel[target.observationRole] || '来源角色未知')}</span>${commentBlock}</td>
     <td>${esc(label(targetStateLabel, target.state) ?? target.state)}${target.exclusionReason ? `<p>${esc(target.exclusionReason)}</p>` : ''}</td>
     <td>${esc(label(contextStateLabel, target.contextState) ?? target.contextState)}</td>
     <td>${Number(target.signalCount)} 条${target.resolutionState ? `<p>${esc(label(resolutionLabel, target.resolutionState) ?? target.resolutionState)}</p>` : ''}</td>
@@ -239,7 +303,7 @@ function signalCard(signal) {
     : `<p class="study-signal-proposition">${esc(signal.proposition)}</p><blockquote>${esc(signal.evidence)}</blockquote>`;
   return `
     <article class="study-signal-card">
-      <header><span class="study-badge">${esc(label(signalKindLabel, signal.kind) ?? signal.kind)}</span><span>${esc(label(resolutionLabel, signal.resolutionState) ?? '尚未进入归并判断')}</span></header>
+      <header><span class="study-badge">${esc(label(signalKindLabel, signal.kind) ?? signal.kind)}</span><span>${esc(observationRoleLabel[signal.observationRole] || '来源角色未知')} · ${esc(label(resolutionLabel, signal.resolutionState) ?? '尚未进入归并判断')}</span></header>
       ${body}
       <p class="study-signal-meta">归并资格：${esc(label(eligibilityLabel, signal.eligibilityState) ?? signal.eligibilityState)}${signal.eligibilityReason ? ` · ${esc(signal.eligibilityReason)}` : ''}</p>
       ${(signal.pairOutcomes || []).map(pairOutcomeSummary).join('')}
@@ -267,7 +331,7 @@ function runRow(run) {
   return `<tr>
       <td>${esc(run.runRef.slice(0, 8))}…<p>${esc(run.createdAt)}</p></td>
       <td>${esc(label(targetStateLabel, run.state) ?? run.state)}</td>
-      <td>${Number(run.workCount)}</td>
+      <td>${Number(run.workCount)}<p>primary ${Number(run.primaryWorkCount || 0)} · reference ${Number(run.referenceWorkCount || 0)}</p></td>
       <td>${Number(run.targetCount)}</td>
       <td>${Number(run.succeededCount)}</td>
       <td>${Number(run.noSignalCount)}</td>
@@ -354,8 +418,8 @@ document.querySelector('#start-run').addEventListener('click', async () => {
   const result = document.querySelector('#run-result');
   button.disabled = true;
   try {
-    const response = await post('runs', { contentPublicRefs: selectedWorks() });
-    result.textContent = `已创建 ${response.runRef}：覆盖 ${response.coveredWorkCount} 篇作品，冻结 ${response.targetCount} 条目标评论。尚未调用模型。`;
+    const response = await post('runs', { selections: selectedWorks() });
+    result.textContent = `已创建 ${response.runRef}：本次选择 primary ${response.selectedPrimaryWorkCount} / reference ${response.selectedReferenceWorkCount} 篇，实际覆盖 ${response.coveredWorkCount} 篇作品，冻结 ${response.targetCount} 条目标评论。尚未调用模型。`;
     selectedRunRef = response.runRef;
     studyDialog.close();
     activeView = 'runs';
@@ -366,10 +430,22 @@ document.querySelector('#start-run').addEventListener('click', async () => {
 });
 document.querySelector('#work-filter').addEventListener('input', renderWorks);
 document.querySelector('#comment-budget').addEventListener('input', updateSelection);
+document.querySelector('#include-reference-works').addEventListener('change', event => {
+  includeReferenceWorks = event.currentTarget.checked;
+  if (!includeReferenceWorks) {
+    for (const [workRef, role] of selectedWorkRoles) {
+      if (role === 'reference') selectedWorkRoles.delete(workRef);
+    }
+  }
+  renderWorks();
+});
 document.querySelector('#select-visible-works').addEventListener('change', event => {
+  let remaining = 100 - selectedWorkRoles.size;
   visibleWorks().forEach(work => {
-    if (event.currentTarget.checked) selectedWorkRefs.add(work.workRef);
-    else selectedWorkRefs.delete(work.workRef);
+    if (event.currentTarget.checked && !selectedWorkRoles.has(work.workRef) && remaining > 0) {
+      selectedWorkRoles.set(work.workRef, preferredRole(work));
+      remaining -= 1;
+    } else if (!event.currentTarget.checked) selectedWorkRoles.delete(work.workRef);
   });
   renderWorks();
 });

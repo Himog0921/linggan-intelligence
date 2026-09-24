@@ -78,16 +78,31 @@ async fn inspector_separates_queued_from_running_and_keeps_reads_side_effect_fre
     );
     sqlx::query("UPDATE collection_work_order_lease_task SET execution_state='blocked',claimed_at=NULL WHERE lease_ref IN (SELECT lease_ref FROM collection_work_order_lease WHERE work_order_ref=$1)")
         .bind(fixture.work_order_ref).execute(database.pool()).await.unwrap();
-    let blocked = read_target_inspector(&database, fixture.target_ref).await.unwrap().unwrap();
-    assert_eq!(blocked.execution.state, TargetInspectorExecutionState::Blocked);
+    let blocked = read_target_inspector(&database, fixture.target_ref)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        blocked.execution.state,
+        TargetInspectorExecutionState::Blocked
+    );
     assert_eq!(blocked.execution.blocked_tasks, 1);
     sqlx::query("UPDATE collection_work_order_lease SET released_at=scope_001_now(),release_reason='partial' WHERE work_order_ref=$1")
         .bind(fixture.work_order_ref).execute(database.pool()).await.unwrap();
-    let historical = read_target_inspector(&database, fixture.target_ref).await.unwrap().unwrap();
-    assert_eq!(historical.execution.state, TargetInspectorExecutionState::Idle);
+    let historical = read_target_inspector(&database, fixture.target_ref)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        historical.execution.state,
+        TargetInspectorExecutionState::Idle
+    );
     assert_eq!(historical.execution.blocked_tasks, 0);
-    assert_eq!(fact_counts(&database).await, running_before, "ending an execution never erases its history");
-
+    assert_eq!(
+        fact_counts(&database).await,
+        running_before,
+        "ending an execution never erases its history"
+    );
 }
 
 struct Fixture {
@@ -103,11 +118,13 @@ async fn seed_queued_archive(database: &Database) -> Fixture {
     let decision_ref = Uuid::new_v4();
     let work_order_ref = Uuid::new_v4();
     let station_ref = Uuid::new_v4();
-    sqlx::query("INSERT INTO collection_observation_target (target_ref,platform,target_kind,identity_key,display_name,source,lifecycle_state,domain_ref) VALUES ($1,'xhs','creator','inspector-author','Inspector fixture','manual','archiving','00000000-0000-4000-8000-000000000001')")
+    sqlx::query("INSERT INTO collection_observation_target (target_ref,platform,target_kind,identity_key,display_name,source,lifecycle_state) VALUES ($1,'xhs','creator','inspector-author','Inspector fixture','manual','archiving')")
+        .bind(target_ref).execute(database.pool()).await.unwrap();
+    sqlx::query("INSERT INTO observation_domain_target(domain_ref,target_ref,role) VALUES ('00000000-0000-4000-8000-000000000001',$1,'primary')")
         .bind(target_ref).execute(database.pool()).await.unwrap();
     sqlx::query("INSERT INTO collection_acquisition_authorization (authorization_ref,platform,target_kind,lane,max_targets,max_works_per_target,allowed_task_templates,allowed_dispatch_lanes,max_work_units,purpose,granted_by,expires_at) VALUES ($1,'xhs','creator','deep_archive',1,200,ARRAY['creator_archive'],ARRAY['batch'],200,'inspector proof','person',scope_001_now()+interval '1 day')")
         .bind(authorization_ref).execute(database.pool()).await.unwrap();
-    sqlx::query("INSERT INTO collection_acquisition_request (request_ref,target_ref,lane,purpose,requested_by) VALUES ($1,$2,'deep_archive','inspector proof','person')")
+    sqlx::query("INSERT INTO collection_acquisition_request (request_ref,target_ref,domain_ref,observation_role,lane,purpose,requested_by) VALUES ($1,$2,'00000000-0000-4000-8000-000000000001','primary','deep_archive','inspector proof','person')")
         .bind(request_ref).bind(target_ref).execute(database.pool()).await.unwrap();
     sqlx::query("INSERT INTO collection_admission_decision (decision_ref,request_ref,outcome,reason_code,authorization_ref,target_ref) VALUES ($1,$2,'admitted','inspector_proof',$3,$4)")
         .bind(decision_ref).bind(request_ref).bind(authorization_ref).bind(target_ref).execute(database.pool()).await.unwrap();
@@ -115,6 +132,8 @@ async fn seed_queued_archive(database: &Database) -> Fixture {
         .bind(station_ref).execute(database.pool()).await.unwrap();
     sqlx::query("INSERT INTO collection_work_order (work_order_ref,decision_ref,target_ref,lane,max_works,stop_conditions,dispatch_lane,queue_state,scheduled_for,estimated_work_units,station_ref) VALUES ($1,$2,$3,'deep_archive',200,'{\"progressiveArchive\":{\"version\":1}}'::jsonb,'batch','queued',scope_001_now(),1,$4)")
         .bind(work_order_ref).bind(decision_ref).bind(target_ref).bind(station_ref).execute(database.pool()).await.unwrap();
+    sqlx::query("INSERT INTO collection_work_order_domain_usage(work_order_ref,request_ref,domain_ref,role,basis_kind) VALUES ($1,$2,'00000000-0000-4000-8000-000000000001','primary','legacy_migration')")
+        .bind(work_order_ref).bind(request_ref).execute(database.pool()).await.unwrap();
     Fixture {
         target_ref,
         work_order_ref,

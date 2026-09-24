@@ -1,16 +1,16 @@
 # 当前状态与事项队列
 
 > 状态: 权威当前
-> 最后核对: 2026-09-23
+> 最后核对: 2026-09-24
 > 适用范围: 当前阶段、事项顺序、阻塞与下一步
 > 事实来源: 本机实际检查、已确认项目边界和完成计划
 > 冲突时以谁为准: 真实运行结果、ACCEPTED ADR 与用户最新确认
 
-### DOMAIN-UNIFICATION-001（开发推进文件已建立；实施未开始）
+### DOMAIN-UNIFICATION-001（root 在隔离 worktree 推进实现）
 
 Mog 已确认正式 Domain 在基础采集、详情、评论、媒体与研究能力上平权，Domain 只定义研究上下文；Collection 需要新增“领域管理”。当前唯一推进入口是 [DOMAIN-UNIFICATION-001](plans/active/domain-unification-001.md)：它冻结 Domain–Target 的 `primary/reference` 配置、相容多用途共享一次 WorkOrder、统一 canonical Material/Comment/Media、Domain-scoped Corpus 与 Comment Study、pause 真语义，以及开发期旧 `cross_industry` 路径的直接清理。
 
-本计划明确不为旧开发数据建设双写、长期 fallback、逐行审批、down migration 或专用保全系统。现有领域文档中“一级 Domain 只有 ADHD”、旧 `is_own_domain` 分流和旧跨行业 UI manifest 是待 WP0 替换/降级的历史语义，不得覆盖本计划。Issue #130 仍是旧正文并带旧 ready 状态；root 同步它之前不得派实施 Agent。代码、migration、测试、PR、共享数据库、runtime、插件、外部平台和 Mog 业务验收均未执行。
+本计划明确不为旧开发数据建设双写、长期 fallback、逐行审批、down migration 或专用保全系统。WP0–WP5 已在专属 `codex/domain-unification-001` worktree 完成实现，并通过完整 disposable PostgreSQL LOCAL-001 证明；WP4 领域管理已在隔离 PostgreSQL 与本机浏览器完成配置写入、pause/resume、多 Domain role、冲突反馈、1440/390 视口和键盘焦点验收。首轮提交前只读审查发现并推动修复四项：pause 与 Request/claim 的竞态、reference 关系两步写入、旧 peer 样本错误复用首页 Package 血缘、暂停领域保存 Comment Study 策略的错误码。修复后的 `./scripts/test-local-001-discovery-postgres.sh` 与 `cargo check --locked --workspace --tests` 通过，隔离 proof 数据库/容器/卷均已清理；另用 disposable PostgreSQL 通过真实 Comment Study API 回归，确认暂停 Domain 返回 `409 domain_not_active` 且不写入策略。最终 106 文件树经第二轮只读复审未发现新问题，本地候选已提交；exact commit 对比基线、清洁状态与提交内容核对通过。base 为刷新核验后的 `origin/main@a42315e`。下一步门槛是当前 schema 副本升级证明；共享库读取/写入、Issue #130、PR、main 合并、runtime-main、插件、外部平台和 Mog 业务验收均未执行。浏览器验收见 `docs/design/acceptance/domain-unification-001-acceptance.md`。
 
 ### OCR-CONTENT-LAYERING-001 / Issue #296（候选源码；未进入共享运行）
 
@@ -34,6 +34,8 @@ Mog 已确认正式 Domain 在基础采集、详情、评论、媒体与研究�
 
 
 ### COMMENT-STUDY-REBUILD-001 / Issue #295（已发布；作者声音排除修复候选中）
+
+**后续范围修订**：本节后文 ADHD 专属 Comment Study 范围记录的是当时的部署状态。Mog 于 2026-09-23 通过 [DEC-0008](decisions/0008-peer-domains-and-unified-material-pipeline.md) 将其修订为显式 Domain；本 worktree 的 Comment Study Domain/role 隔离目前只有候选源码与隔离 PostgreSQL 证明，尚未合并、发布或浏览器验收。
 
 Mog 于 2026-09-16 明确决定不迁移任何旧评论研究派生结果，并要求不保留旧 V1/V2/V3 代码路径、合同或兼容层。当前唯一权威是 [DEC-0006](decisions/0006-comment-research-clean-rebuild.md) 和 [COMMENT-STUDY-REBUILD-001](plans/active/comment-research-rebuild-001.md)：领域 ADHD 是组织范围，用户选择笔记，评论是研究目标与唯一 Signal 原声证据，标题／正文／OCR／ASR 和确知父评论只作为可追溯语境。开发期本机 reset 仅删除评论研究派生层，保留原始 Evidence、资格事实与媒体 disposition；随后评论研究已合并并刷新到本机 3000，Mog 已开始首次真实手动验收。真实 provider 端到端成功、P3 Recall@K 与业务结论仍分别 `NOT VERIFIED`。
 
@@ -422,7 +424,7 @@ REAL-CANARY #52 的聚合结果已确认：本地库存在已接纳的当前可�
 - GOV-002 已确认使用私有仓库 GitHub Issues、默认五类 triage 角色和单一领域上下文适配；工程技能读取现有 `docs/context/domain-language.md`、`docs/product/domain-invariants.md` 与 `docs/decisions/`，不建立第二套 `CONTEXT.md` 或 `docs/adr/`。
 - DISC-001 已确认必须覆盖完整产品，而非只讨论情报核心：语料库、主题词表、主题地图、市场洞察、选题库和外部 Agent CLI 均已进入设计范围。
 - DISC-001 已确认 Linggan Intelligence 的稳定核心定义是面向垂直领域的持续情报研究系统；语料、主题地图、市场洞察、内容增长和 Agent 调用是共同内核的应用出口，不能因其中一个应用深入而重新定义项目内核。
-- DISC-001 已确认首个领域边界：当前一级 Domain 是 ADHD；ADHD 数学、家庭干预等是 Topic；专题研究和采集计划均发生在 ADHD 内。权威定义见 [`context/domain-language.md`](context/domain-language.md)。
+- DISC-001 在 2026-08 确认了首个领域边界：当时一级 Domain 为 ADHD，ADHD 数学、家庭干预等为 Topic。该单 Domain 范围已由 2026-09-23 的 [DEC-0008](decisions/0008-peer-domains-and-unified-material-pipeline.md) 修订；当前 Domain 与 Topic 定义见 [`context/domain-language.md`](context/domain-language.md)。
 - DISC-001 已确认第一阶段首要用户是产品负责人本人及其小团队，围绕 ADHD 持续进行市场研究、内容判断和选题决策；外部客户与多租户产品能力不进入首期。
 - DISC-001 已确认两种产品发动方式：持续观察是默认日常主循环，主动研究由人的问题或经人确认的候选变化触发；两者使用同一资产底座。目标全量必须由实际 Coverage 证明。
 - DISC-001 已确认五类长期积累视角：世界事实、语料与表达、领域知识、市场与情报认知、行动与学习。它们用于盘点长期价值，不等于五种平级真相、五张表或五个应用模块；Outcome 只校准未来，不改写过去事实或伪造因果。
