@@ -43,6 +43,7 @@ RUST_TEST_THREADS=1 cargo test -p linggan-intelligence \
   --test comment_study_catalog_read_postgres \
   --test comment_study_inspection_postgres \
   --test comment_study_work_catalog_postgres \
-  --test comment_study_p1_closure_postgres --locked \
+  --test comment_study_p1_closure_postgres \
+  --test comment_study_policy_postgres --locked \
   -- --ignored --nocapture --test-threads=1
 printf '%s\n' 'Implemented Comment Study productization PostgreSQL subset passed; not the complete T01-T54 suite'

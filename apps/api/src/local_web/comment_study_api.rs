@@ -1,4 +1,4 @@
-//! Productization directory adapters. Mounted below the existing local Host/Origin guard.
+//! Productization local API adapters. Mounted below the existing local Host/Origin guard.
 //! GET handlers never refresh the cache, create a Run or start a model.
 use super::{LocalDatabaseState, LocalWebState};
 use axum::{
@@ -16,6 +16,9 @@ use linggan_intelligence::comment_study_catalog::{
 use linggan_storage_postgres::Database;
 use serde_json::{Value, json};
 
+#[path = "comment_study_policy_api.rs"]
+mod policy_api;
+
 pub(super) fn routes() -> Router<LocalWebState> {
     Router::new()
         .route("/api/local/comment-study/comments", get(comments))
@@ -24,6 +27,7 @@ pub(super) fn routes() -> Router<LocalWebState> {
         .route("/api/local/comment-study/comments/versions", get(versions))
         .route("/api/local/comment-study/catalog-summary", get(summary))
         .route("/api/local/comment-study/works", get(works))
+        .merge(policy_api::routes())
 }
 
 async fn works(

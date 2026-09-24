@@ -1,5 +1,5 @@
-//! Immutable method compilation for Comment Study. No database or provider side effects.
-//! Persistence/activation must validate the referenced domain, parent and enabled model separately.
+//! Immutable method compilation and version storage for Comment Study. No provider side effects.
+//! Saving never activates a policy or starts research; old workers are not switched here.
 use crate::comment_cleaning::CLEANER_VERSION;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -7,6 +7,10 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 mod templates;
+mod store;
+mod read;
+pub use store::{StudyPolicyStoreError, create_study_policy};
+pub use read::{StudyPolicyQuery, read_study_policies, read_study_policy};
 #[cfg(test)]
 mod tests;
 
@@ -153,6 +157,7 @@ fn bounded_text(text: &str, minimum: usize, maximum: usize) -> bool {
 }
 
 /// Fixed rules for the candidate method. Existing workers are switched only with the full v2 contract.
+#[cfg(test)]
 pub(super) fn base_instruction(stage: StudyStage) -> &'static str { templates::base_instruction(stage) }
 
 /// Compiled Rust schema, checked against the approved contract fixtures in tests.

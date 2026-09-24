@@ -10,7 +10,7 @@ const MAX_CURSOR_BYTES: usize = 2048;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(super) struct CommentPosition {
+pub(crate) struct CommentPosition {
     pub received_at: String,
     pub work_ref: Uuid,
     pub comment_external_id: String,
@@ -18,12 +18,12 @@ pub(super) struct CommentPosition {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(super) struct EntryPosition {
+pub(crate) struct EntryPosition {
     pub created_at: String,
     pub reference: Uuid,
 }
 
-pub(super) trait CursorPosition {
+pub(crate) trait CursorPosition {
     fn timestamp(&self) -> &str;
     fn valid_key(&self) -> bool;
 }
@@ -43,7 +43,7 @@ impl CursorPosition for EntryPosition {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(super) struct Cursor<P = CommentPosition> {
+pub(crate) struct Cursor<P = CommentPosition> {
     v: u8,
     resource: String,
     scope_hash: String,
@@ -51,12 +51,12 @@ pub(super) struct Cursor<P = CommentPosition> {
     pub last: P,
 }
 
-pub(super) fn scope_hash(scope: &Value) -> Result<String, StudyCatalogError> {
+pub(crate) fn scope_hash(scope: &Value) -> Result<String, StudyCatalogError> {
     let bytes = serde_json::to_vec(scope).map_err(|_| StudyCatalogError::InvalidQuery)?;
     Ok(super::sha256_hex(&bytes))
 }
 
-pub(super) fn encode(
+pub(crate) fn encode(
     scope_hash: &str,
     as_of: &str,
     last: CommentPosition,
@@ -64,11 +64,11 @@ pub(super) fn encode(
     encode_for("comments", scope_hash, as_of, last)
 }
 
-pub(super) fn decode(value: &str, expected_scope: &str) -> Result<Cursor, StudyCatalogError> {
+pub(crate) fn decode(value: &str, expected_scope: &str) -> Result<Cursor, StudyCatalogError> {
     decode_for("comments", value, expected_scope)
 }
 
-pub(super) fn encode_for<P: Serialize + CursorPosition>(
+pub(crate) fn encode_for<P: Serialize + CursorPosition>(
     resource: &str,
     scope_hash: &str,
     as_of: &str,
@@ -85,7 +85,7 @@ pub(super) fn encode_for<P: Serialize + CursorPosition>(
     Ok(encoded)
 }
 
-pub(super) fn decode_for<P: DeserializeOwned + CursorPosition>(
+pub(crate) fn decode_for<P: DeserializeOwned + CursorPosition>(
     resource: &str,
     value: &str,
     expected_scope: &str,
@@ -109,7 +109,7 @@ pub(super) fn decode_for<P: DeserializeOwned + CursorPosition>(
 
 fn validate<P: CursorPosition>(cursor: &Cursor<P>) -> Result<(), StudyCatalogError> {
     if cursor.v != 1
-        || !matches!(cursor.resource.as_str(), "comments" | "comment-history" | "comment-versions" | "works")
+        || !matches!(cursor.resource.as_str(), "comments" | "comment-history" | "comment-versions" | "works" | "policies")
         || cursor.scope_hash.len() != 64
         || !cursor.scope_hash.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
         || !utc_timestamp_shape(&cursor.as_of)
