@@ -1,6 +1,9 @@
 name: Comment Study P1 proof
 
 on:
+  push:
+    branches: ['chatgpt/comment-study-productization-001']
+    paths: ['.github/workflows/comment-study-p1.yml']
   pull_request:
     paths:
       - '.github/workflows/comment-study-p1.yml'
@@ -16,12 +19,35 @@ permissions:
   contents: read
 
 concurrency:
-  group: comment-study-p1-${{ github.event.pull_request.number }}
+  group: comment-study-p1-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
+  integration-source-export:
+    # Source transfer only. A green export is not compilation, tests or mergeability proof.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Export exact candidate and approved integration main
+        shell: bash
+        run: |
+          git cat-file -e 46e108375c1d96f16eed1ee039a66e3866485051^{commit}
+          git bundle create /tmp/comment-study-integration.bundle HEAD refs/remotes/origin/main
+          git bundle verify /tmp/comment-study-integration.bundle
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: comment-study-integration-sources-${{ github.sha }}
+          path: /tmp/comment-study-integration.bundle
+          retention-days: 1
+          if-no-files-found: error
   synthetic-proof:
-    if: github.head_ref == 'chatgpt/comment-study-productization-001'
+    if: github.event_name == 'pull_request' && github.head_ref == 'chatgpt/comment-study-productization-001'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
