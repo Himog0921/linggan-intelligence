@@ -1,7 +1,7 @@
 # 领域不变量与对抗性测试基线
 
 > 状态: 权威当前
-> 最后核对: 2026-08-20
+> 最后核对: 2026-09-23
 > 适用范围: DISC-001 后续领域、采集、数据、架构、页面、CLI 与实现验收
 > 事实来源: 用户确认的产品目标、Gate 1–7 设计边界、USER-DEC-01–06 与对抗性案例审查
 > 冲突时以谁为准: 用户最新确认、ACCEPTED ADR、真实 producer/fixture/测试与运行结果
@@ -96,6 +96,15 @@ Linggan Intelligence 是面向垂直领域的持续情报研究系统。它通�
 58. **执行权限与 Evidence 写入必须原子衔接。** authority 有效性检查和 Package 接入使用同一事务 fence 或等价原子条件；Package 接入全包原子，接纳后按 Record / Source Object 隔离身份解析与 Observation/派生失败。控制状态完成和 Evidence 已接纳仍是不同事实。
 59. **批次缺口不得连坐已安全取得的原料。** Work Order/Attempt 是否达到目标、Package 是否通过最小接入硬门、每个 Record 后续是否能形成 Source Observation、材料是否适合某个用途、以及某个 Claim 是否有资格成立，是五次不同判断。Coverage 限制解释范围，不自动拒绝合格原料，也不自动授予总体、趋势或行动资格。
 60. **目标数量、补采和跨批组合必须保留语义。** 只有执行前冻结的已知对象集合才允许记录具体未尝试成员；最大配额、来源穷尽、时间预算、风险预算和探针目的不得用差额制造对象或完成比例。补采形成新的 Attempt、Capture Identity、Package 和 Observation；跨批分析用冻结输入集合或用途化 Material Pack 说明成员、去重、时间、入口和 Coverage，不修改旧包或直接相加记录数。
+61. **Domain 是平级研究边界。** ADHD、考研自习、自闭症干预及未来正式 Domain 共享基础采集、详情、评论、媒体和研究能力；Domain 名称不是关键词，不决定写入哪套材料表或 API。Domain 之间的隔离体现在用途和读取范围，不靠复制真实来源身份。
+62. **Observation Target 保持真实身份唯一并可跨 Domain 使用。** 同一个 creator 或 keyword Target 可以在多个 Domain 中承担不同 role；新增或解除当前关系不改写已经冻结的历史用途。未分配 Domain 的 Target 不可排活。
+63. **primary 与 reference 只改变默认研究用途。** 两种 role 具有相同基础材料能力；primary 默认进入本 Domain 的自动研究和统计，reference 可完整读取并可由人显式选择，但默认不支持本 Domain 的自动结论。role 不能替代 WorkOrder 对媒体、评论、回复、OCR 或 ASR 的具体范围。
+64. **一次执行可承载多个相容的已准入用途。** 每个 Request 明确属于一个 Domain 和 role；合并用途分别保留授权、字段、Coverage、新鲜度、保留与风险边界。首次 claim 后用途集合冻结，不能让一个 Domain 借用另一个 Domain 的权限。
+65. **Domain 材料资格按用途追溯。** 相同平台 Content 在多个 Domain 仍只有一个 canonical 身份；每个 Domain 的 Corpus 读取必须回到被接纳的发现、明确复用或有标识的历史迁移用途，不能从当前 Target 关系、名称或遗留单值字段推断。
+66. **暂停保留历史可读性并关闭新增工作。** paused Domain 不接受新采集 Request、新 WorkOrder claim、新 Comment Study Policy 或 Run；历史材料、Run 与结果继续可读并标明暂停。已 claim 的有界 Attempt 可完成，不能借页面隐藏或状态回落改变事实。
+67. **Domain 选择必须显式且失败封闭。** 缺失、错误或不存在的 Domain 不得静默回落 ADHD，也不得跨 Domain 返回材料；读取与写入都必须保留调用者明确选择的研究范围。
+
+这些 Domain 专属不变量由 [DEC-0008](../decisions/0008-peer-domains-and-unified-material-pipeline.md) 冻结；本文其余 Evidence、隐私、来源身份、Coverage、Claim 和行动边界继续适用。
 
 ## 同一份材料允许说到哪一步
 

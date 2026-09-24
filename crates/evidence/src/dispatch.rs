@@ -343,6 +343,7 @@ impl DispatchDecision {
             Self::NothingWaiting => "nothing_waiting",
             Self::ExecutionLocatorUnavailable { .. } => "execution_locator_unavailable",
             Self::ControlBlocked { reason_code } => match reason_code.as_str() {
+                "domain_paused_or_unscoped" => "domain_paused_or_unscoped",
                 "collection_upgrade_recovery_only" => "collection_upgrade_recovery_only",
                 "risk_paused" => "risk_paused",
                 "installation_risk_cooldown" => "installation_risk_cooldown",
@@ -532,9 +533,8 @@ async fn grant_detail_page_session_inner(
         return Err(DetailPageSessionGrantError::InvalidCredential);
     }
 
-    type ClaimedDetail = (Uuid, Uuid, Option<Uuid>, Option<Uuid>, Value);
     type RawClaimedDetail = (Uuid, Uuid, Uuid, Value);
-    let material_claimed: Option<ClaimedDetail> = sqlx::query_as::<_, RawClaimedDetail>(
+    let claimed: Option<RawClaimedDetail> = sqlx::query_as::<_, RawClaimedDetail>(
         "SELECT lease.lease_ref,lease.work_order_ref,target.content_public_ref,runtime.task_spec \
          FROM collection_work_order_lease_task task \
          JOIN collection_work_order_lease lease ON lease.lease_ref=task.lease_ref \
@@ -551,45 +551,8 @@ async fn grant_detail_page_session_inner(
     .bind(task_id)
     .bind(installation_ref)
     .fetch_optional(&mut *transaction)
-    .await?
-    .map(|(lease_ref, work_order_ref, content_public_ref, task_spec)| {
-        (lease_ref, work_order_ref, Some(content_public_ref), None, task_spec)
-    });
-    let cross_industry_claimed: Option<ClaimedDetail> = if material_claimed.is_none()
-        && sqlx::query_scalar::<_, bool>(
-            "SELECT to_regclass('collection_work_order_cross_industry_target') IS NOT NULL",
-        )
-        .fetch_one(&mut *transaction)
-        .await?
-    {
-        sqlx::query_as::<_, RawClaimedDetail>(
-            "SELECT lease.lease_ref,lease.work_order_ref,sample.sample_ref,runtime.task_spec \
-             FROM collection_work_order_lease_task task \
-             JOIN collection_work_order_lease lease ON lease.lease_ref=task.lease_ref \
-             JOIN linggan_runtime_task runtime ON runtime.task_id=task.task_id \
-             JOIN collection_work_order_cross_industry_target target \
-               ON target.work_order_ref=lease.work_order_ref \
-             JOIN cross_industry_sample sample ON sample.sample_ref=target.sample_ref \
-             WHERE task.task_id=$1 AND task.execution_state='in_progress' \
-               AND task.claimed_by_installation_ref=$2 \
-               AND lease.released_at IS NULL AND lease.expires_at>scope_001_now() \
-               AND runtime.task_spec #>> '{capabilitiesRequested,0}'='content_detail' \
-               AND sample.content_external_id=runtime.task_spec #>> '{target,contentExternalId}' \
-             FOR UPDATE OF task,lease",
-        )
-        .bind(task_id)
-        .bind(installation_ref)
-        .fetch_optional(&mut *transaction)
-        .await?
-        .map(|(lease_ref, work_order_ref, sample_ref, task_spec)| {
-            (lease_ref, work_order_ref, None, Some(sample_ref), task_spec)
-        })
-    } else {
-        None
-    };
-    let Some((lease_ref, work_order_ref, content_public_ref, cross_industry_sample_ref, task_spec)) =
-        material_claimed.or(cross_industry_claimed)
-    else {
+    .await?;
+    let Some((lease_ref, work_order_ref, content_public_ref, task_spec)) = claimed else {
         return Err(DetailPageSessionGrantError::ClaimNotHeld);
     };
     let Some(plan) = page_session_plan_for_task(&mut transaction, lease_ref, &task_spec).await?
@@ -635,13 +598,11 @@ async fn grant_detail_page_session_inner(
          FROM collection_detail_page_session session \
          JOIN plugin_installation owner ON owner.installation_ref=session.owner_installation_ref \
          WHERE work_order_ref=$1 \
-           AND session.content_public_ref IS NOT DISTINCT FROM $2 \
-           AND session.cross_industry_sample_ref IS NOT DISTINCT FROM $3 \
+           AND session.content_public_ref=$2 \
          FOR UPDATE OF session,owner",
     )
     .bind(work_order_ref)
     .bind(content_public_ref)
-    .bind(cross_industry_sample_ref)
     .fetch_optional(&mut *transaction)
     .await?;
     // 通道身份要绑定到**这次实际发出的那份计划**：新授权用刚冻结的这份，重放用会话里
@@ -652,14 +613,13 @@ async fn grant_detail_page_session_inner(
             let session_ref = Uuid::new_v4();
             sqlx::query(
                 "INSERT INTO collection_detail_page_session \
-                     (session_ref,work_order_ref,content_public_ref,cross_industry_sample_ref,owner_installation_ref, \
+                     (session_ref,work_order_ref,content_public_ref,owner_installation_ref, \
                       grant_request_id,initial_lease_ref,plan_snapshot,plan_hash,execution_source_url_sha256,state) \
-                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'authorized')",
+                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'authorized')",
             )
             .bind(session_ref)
             .bind(work_order_ref)
             .bind(content_public_ref)
-            .bind(cross_industry_sample_ref)
             .bind(installation_ref)
             .bind(grant_request_id)
             .bind(lease_ref)
@@ -1957,14 +1917,6 @@ async fn claim_next_queued_work_order(
     // a fallback, but continue looking: another lane/platform may still be
     // runnable by this worker during the same poll.
     let mut deferred_control_block: Option<String> = None;
-    // 跨行业作用域表（`0074`）不在每一套 schema 里：控制面的证明库只装了它需要的那一段
-    // 迁移，跨行业那一串依赖的 `0044` 不在其中。派发必须在两种库上都跑得起来，所以
-    // 这里先问一次表在不在，而不是让整条派发在缺表时 42P01。
-    let cross_industry_scope_ready: bool = sqlx::query_scalar(
-        "SELECT to_regclass('collection_work_order_cross_industry_target') IS NOT NULL",
-    )
-    .fetch_one(&mut **transaction)
-    .await?;
     for (dispatch_lane, weight, concurrent_cap, _virtual_finish) in lanes {
         if concurrent_cap.is_some_and(|cap| {
             active_by_lane.get(&dispatch_lane).copied().unwrap_or(0) >= i64::from(cap)
@@ -1974,14 +1926,10 @@ async fn claim_next_queued_work_order(
         // This is a bounded eligibility probe, not a module queue. A station
         // that cannot run one candidate continues through the lane and then
         // through the other lanes rather than making all later work invisible.
-        let candidates: Vec<Candidate> = sqlx::query_as(if cross_industry_scope_ready {
-            CANDIDATE_SQL_WITH_CROSS_INDUSTRY_SCOPE
-        } else {
-            CANDIDATE_SQL
-        })
-        .bind(&dispatch_lane)
-        .fetch_all(&mut **transaction)
-        .await?;
+        let candidates: Vec<Candidate> = sqlx::query_as(CANDIDATE_SQL)
+            .bind(&dispatch_lane)
+            .fetch_all(&mut **transaction)
+            .await?;
         let mut seen_batch_groups = std::collections::BTreeSet::new();
         for (
             work_order_ref,
@@ -2358,13 +2306,6 @@ async fn page_session_plan_for_task(
     .bind(content_external_id)
     .fetch_optional(&mut **transaction)
     .await?;
-    // 跨行业参照物的作用域住另一张表（`0074`/`0087`）。漏掉这一侧，关键词的跨行业详情补采
-    // 虽然会各自派出 `comments` 任务，却是每样东西再打开一次详情页——「一次打开顺手读完」
-    // 这件事就只发生在证据侧，而 Mog 要的恰好是两侧一致。
-    let scope = match scope {
-        Some(scope) => Some(scope),
-        None => load_cross_industry_page_scope(transaction, lease_ref, content_external_id).await?,
-    };
     let Some((comment_limit, reply_expand_limit, acquire_media, ttl_seconds)) = scope else {
         return Ok(None);
     };
@@ -2387,39 +2328,6 @@ async fn page_session_plan_for_task(
         "replyExpandLimit": reply_expand_limit,
         "cacheTtlSeconds": ttl_seconds,
     })))
-}
-
-/// 跨行业参照物的同页读取范围。与证据侧那一段同一个问题、另一张表。
-///
-/// 媒体恒为 false：跨行业作用域没有媒体授权这一项，它不是「没查」，是这一侧不存在这件事。
-async fn load_cross_industry_page_scope(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    lease_ref: Uuid,
-    content_external_id: &str,
-) -> Result<Option<(i32, i32, bool, i64)>, sqlx::Error> {
-    // 跨行业作用域表不在每一套 schema 里，与派发挑候选时同一个理由（`0074` 依赖的 `0044`
-    // 不在控制面证明库中）。缺表就不是 None 的另一种说法，所以这里先问再读。
-    let schema_ready: bool = sqlx::query_scalar(
-        "SELECT to_regclass('collection_work_order_cross_industry_target') IS NOT NULL",
-    )
-    .fetch_one(&mut **transaction)
-    .await?;
-    if !schema_ready {
-        return Ok(None);
-    }
-    sqlx::query_as(
-        "SELECT scope.comment_limit,scope.reply_expand_limit,false, \
-                GREATEST(1,FLOOR(EXTRACT(EPOCH FROM (lease.expires_at-scope_001_now()))))::bigint \
-         FROM collection_work_order_lease lease \
-         JOIN collection_work_order_cross_industry_target scope \
-           ON scope.work_order_ref=lease.work_order_ref \
-         JOIN cross_industry_sample sample USING(sample_ref) \
-         WHERE lease.lease_ref=$1 AND sample.content_external_id=$2 LIMIT 1",
-    )
-    .bind(lease_ref)
-    .bind(content_external_id)
-    .fetch_optional(&mut **transaction)
-    .await
 }
 
 /// 「这张工单现在就可以派」。
@@ -2459,13 +2367,7 @@ macro_rules! dispatch_order_sql {
 
 pub(crate) use {dispatch_order_sql, dispatch_ready_predicate_sql};
 
-/// 候选工单的选取。两份的差别只有一处：**要不要问跨行业那一侧的作用域**。
-///
-/// 这几问决定要求工位具备哪些能力（冻结了就要 `content_detail`，冻结的额度里有评论就还要
-/// `comments`/`replies`，没冻结就是发现面）。跨行业详情补采把作用域放在 `0074` 那张表上，
-/// 漏问它会让补详情的工单被当成发现任务派给一个不具备详情能力的工位；`0087` 给那张表补上
-/// 额度列之后，**「这一单要不要读评论」也必须同时问两侧**，否则一张要读评论的工单会被派给
-/// 一个读不了评论的工位。媒体不在此列：跨行业作用域没有媒体授权这一项。
+/// 候选工单的选取。冻结的材料作用域决定工位需要哪些能力。
 const CANDIDATE_SQL: &str = concat!(
     "SELECT work_order.work_order_ref,target.platform,target.target_kind,work_order.lane, \
                     EXISTS (SELECT 1 FROM collection_work_order_material_target scope \
@@ -2488,40 +2390,7 @@ const CANDIDATE_SQL: &str = concat!(
     dispatch_ready_predicate_sql!(),
     " ORDER BY ",
     dispatch_order_sql!("$1"),
-    " LIMIT 64 FOR UPDATE OF work_order SKIP LOCKED",
-);
-
-const CANDIDATE_SQL_WITH_CROSS_INDUSTRY_SCOPE: &str = concat!(
-    "SELECT work_order.work_order_ref,target.platform,target.target_kind,work_order.lane, \
-                    (EXISTS (SELECT 1 FROM collection_work_order_material_target scope \
-                             WHERE scope.work_order_ref=work_order.work_order_ref) \
-                     OR EXISTS (SELECT 1 FROM collection_work_order_cross_industry_target scope \
-                                WHERE scope.work_order_ref=work_order.work_order_ref)), \
-                    (EXISTS (SELECT 1 FROM collection_work_order_material_target scope \
-                             WHERE scope.work_order_ref=work_order.work_order_ref \
-                               AND scope.comment_limit>0) \
-                     OR EXISTS (SELECT 1 FROM collection_work_order_cross_industry_target scope \
-                                WHERE scope.work_order_ref=work_order.work_order_ref \
-                                  AND scope.comment_limit>0)), \
-                    (EXISTS (SELECT 1 FROM collection_work_order_material_target scope \
-                             WHERE scope.work_order_ref=work_order.work_order_ref \
-                               AND scope.reply_expand_limit>0) \
-                     OR EXISTS (SELECT 1 FROM collection_work_order_cross_industry_target scope \
-                                WHERE scope.work_order_ref=work_order.work_order_ref \
-                                  AND scope.reply_expand_limit>0)), \
-                    EXISTS (SELECT 1 FROM collection_work_order_material_target scope \
-                            WHERE scope.work_order_ref=work_order.work_order_ref \
-                              AND scope.acquire_media), \
-                    work_order.estimated_work_units, \
-                    COALESCE(work_order.dispatch_group_key, \
-                             concat('work:',work_order.work_order_ref::text)) \
-             FROM collection_work_order work_order \
-             JOIN collection_observation_target target USING(target_ref) \
-             WHERE work_order.dispatch_lane=$1 AND ",
-    dispatch_ready_predicate_sql!(),
-    " ORDER BY ",
-    dispatch_order_sql!("$1"),
-    " LIMIT 64 FOR UPDATE OF work_order SKIP LOCKED",
+    " LIMIT 64 FOR NO KEY UPDATE OF work_order SKIP LOCKED",
 );
 
 /// 发现链接是可过期的执行定位信息，不是作品身份。每次派发都从最新已接纳的
@@ -2559,9 +2428,13 @@ async fn execution_source_url_for_task(
     // 「哪条地址算执行入口」这一条判据住在 `execution_input_eligibility`：候选筛选、准入冻结
     // 与这里问的是同一件事。三处各写一份 URL 形状的判据，正是「候选说能跑、派发说没地址」
     // 这类缺陷的由来。
-    let evidence_predicate = signed_locator_predicate("record.value->'payload'->>'url'");
-    let from_evidence: Option<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-        "SELECT record.value->'payload'->>'url' \
+    let signed_locator = signed_locator_predicate("record.value->'payload'->>'url'");
+    // Pick the newest accepted observation before validating its locator. Filtering unsigned
+    // records inside the query can resurrect an older signed URL after the latest observation
+    // explicitly reported an unusable link.
+    let latest_evidence: Option<(Option<String>, bool)> =
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "SELECT record.value->'payload'->>'url', ({signed_locator}) \
          FROM linggan_material_discovery_finding finding \
          JOIN linggan_material_content content ON content.public_ref=finding.content_public_ref \
          JOIN linggan_runtime_capture_package package USING(package_ref) \
@@ -2570,48 +2443,19 @@ async fn execution_source_url_for_task(
          WHERE content.platform='xhs' AND content.content_external_id=$1 \
            AND record.ordinality=finding.record_ordinal+1 \
            AND record.value->'sourceObject'->>'externalId'=$1 \
-           AND {evidence_predicate} \
          ORDER BY package.accepted_at DESC,finding.created_at DESC LIMIT 1",
-    )))
-    .bind(content_external_id)
-    .fetch_optional(&mut **transaction)
-    .await?
-    .flatten();
-    if let Some(url) = from_evidence {
+        )))
+        .bind(content_external_id)
+        .fetch_optional(&mut **transaction)
+        .await?;
+    if let Some((Some(url), true)) = latest_evidence {
         return if execution_source_url_is_rejected(transaction, &url).await? {
             Ok(None)
         } else {
             Ok(Some(url))
         };
     }
-    // 跨行业参照物不在证据侧，上面那一查对它必然落空。
-    //
-    // 外部领域的材料按 `0044` 的隔离住在 `cross_industry_sample`，那张表上的
-    // `source_url` 正是列表面当时平台返回的那条签名链接（`signed_source_url` 只收
-    // 平台真给过的，从不由作品 ID 拼）。没有这一步，关键词建档的详情补采会在派发这一关
-    // 被判为「没有可用执行入口」——活派不出去，而原因看上去像是链接过期。
-    let cross_industry_ready: bool =
-        sqlx::query_scalar("SELECT to_regclass('cross_industry_sample') IS NOT NULL")
-            .fetch_one(&mut **transaction)
-            .await?;
-    if !cross_industry_ready {
-        return Ok(None);
-    }
-    let sample_predicate = signed_locator_predicate("sample.source_url");
-    let cross_industry_url: Option<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-        "SELECT sample.source_url FROM cross_industry_sample sample \
-         WHERE sample.platform='xhs' AND sample.content_external_id=$1 \
-           AND {sample_predicate} \
-         ORDER BY sample.last_observed_at DESC,sample.sample_ref LIMIT 1",
-    )))
-    .bind(content_external_id)
-    .fetch_optional(&mut **transaction)
-    .await?;
-    match cross_industry_url {
-        Some(url) if execution_source_url_is_rejected(transaction, &url).await? => Ok(None),
-        Some(url) => Ok(Some(url)),
-        None => Ok(None),
-    }
+    Ok(None)
 }
 
 /// Does a changed monitor rule revision stop this dispatch?
@@ -2642,6 +2486,14 @@ fn rule_revision_blocks_dispatch(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_paused_or_unscoped_domain_keeps_its_refusal_code() {
+        let decision = DispatchDecision::ControlBlocked {
+            reason_code: "domain_paused_or_unscoped".to_owned(),
+        };
+        assert_eq!(decision.code(), "domain_paused_or_unscoped");
+    }
 
     #[test]
     fn retry_backoff_is_persistent_bounded_and_never_immediate() {

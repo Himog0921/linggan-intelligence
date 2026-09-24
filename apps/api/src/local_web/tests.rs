@@ -12,6 +12,208 @@ use tower::ServiceExt;
 
 const LOCAL_001_MIGRATIONS: &str = full_schema_fixture::FULL_MIGRATIONS;
 
+#[tokio::test]
+async fn legacy_evidence_route_cannot_bypass_domain_scoped_work_resources() {
+    for uri in [
+        "/api/local/evidence-library/legacy",
+        "/api/local/evidence-library/legacy?domain=00000000-0000-4000-8000-000000000001",
+    ] {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri(uri)
+                    .header(header::HOST, "127.0.0.1:8080")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+}
+
+#[test]
+fn lease_refusal_keeps_the_paused_domain_reason() {
+    assert_eq!(
+        lease_error_code(&LeaseError::ControlBlocked {
+            reason_code: "domain_paused_or_unscoped".to_owned(),
+        }),
+        "domain_paused_or_unscoped"
+    );
+}
+
+#[path = "../../../../crates/evidence/tests/support/material_fixture.rs"]
+mod domain_management_fixture;
+
+#[test]
+fn domain_management_expresses_each_lane_state_and_write_failure_in_chinese() {
+    let domain_ref = uuid::Uuid::new_v4();
+    let lane_states = vec![
+        (
+            domain_ref,
+            "discovery".to_owned(),
+            "SEARCHABLE".to_owned(),
+            3,
+        ),
+        (domain_ref, "discovery".to_owned(), "FAILED".to_owned(), 1),
+        (domain_ref, "comments".to_owned(), "PARTIAL".to_owned(), 2),
+    ];
+    let media_states = vec![(
+        domain_ref,
+        "media_bytes".to_owned(),
+        "REMOTE_ONLY".to_owned(),
+        2,
+    )];
+    let html =
+        render_collection_domain_lanes(domain_ref, false, &lane_states, &media_states, true, true);
+
+    assert!(html.contains("发现"));
+    assert!(html.contains("可检索 3 篇"));
+    assert!(html.contains("执行失败 1 篇"));
+    assert!(html.contains("评论"));
+    assert!(html.contains("部分取得 2 篇"));
+    assert!(html.contains("媒体字节"));
+    assert!(html.contains("仅有远程候选 2 篇"));
+    assert!(!html.contains("discovery"));
+    assert!(!html.contains("REMOTE_ONLY"));
+
+    let empty = render_collection_domain_lanes(domain_ref, true, &[], &[], true, true);
+    assert_eq!(empty.matches("尚未观察").count(), 8);
+    let unavailable = render_collection_domain_lanes(domain_ref, false, &[], &[], false, false);
+    assert_eq!(unavailable.matches("状态未知").count(), 8);
+    assert_eq!(collection_target_kind_label("creator"), "博主");
+    assert_eq!(collection_target_kind_label("keyword"), "关键词");
+    assert_eq!(
+        collection_domain_error_message(Some("database_unavailable")),
+        Some("数据库当前不可用；本次操作没有写入。")
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
+async fn domain_management_page_queries_real_lane_receipts_without_english_or_false_zero() {
+    let database = domain_management_fixture::proof_database("domain_page_lane_receipts").await;
+    let external_id = "domain-page-lane-proof";
+    let package_ref = domain_management_fixture::submit_package(
+        &database,
+        "profile_discovery",
+        serde_json::json!({"authorExternalId":"domain-page-author"}),
+        serde_json::json!({
+            "kind":"profile_discovery_card",
+            "resultPosition":1,
+            "sourceObject":{"platform":"xhs","type":"content","externalId":external_id},
+            "payload":{"title":"领域页通道回执证明"}
+        }),
+    )
+    .await;
+    let content_ref: uuid::Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content \
+         WHERE platform='xhs' AND content_external_id=$1",
+    )
+    .bind(external_id)
+    .fetch_one(database.pool())
+    .await
+    .expect("the submitted producer record creates canonical material");
+    sqlx::query(
+        "INSERT INTO linggan_material_domain_usage \
+            (usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref) \
+         VALUES ($1,$2,'00000000-0000-4000-8000-000000000001','primary', \
+                 'legacy_domain_migration',$3)",
+    )
+    .bind(uuid::Uuid::new_v4())
+    .bind(content_ref)
+    .bind(package_ref)
+    .execute(database.pool())
+    .await
+    .expect("the proof attaches an explicit legacy Domain usage to accepted material");
+    let discovery_facts: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_material_discovery_finding \
+         WHERE package_ref=$1 AND content_public_ref=$2",
+    )
+    .bind(package_ref)
+    .bind(content_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("the accepted package retains its typed discovery fact");
+    assert_eq!(discovery_facts, 1);
+
+    let html = get_successful_utf8_response(
+        app_with_database(database),
+        "/collection/domains?domain=00000000-0000-4000-8000-000000000001",
+    )
+    .await;
+    assert!(html.contains("发现"));
+    assert!(
+        html.contains("可检索 1 篇"),
+        "expected a searchable discovery lane; rendered lane markup: {}",
+        html.split("class=\"domain-lanes\">")
+            .nth(1)
+            .and_then(|rest| rest.split("</div>").next())
+            .unwrap_or("<missing lane markup>")
+    );
+    assert!(html.contains("评论"));
+    assert!(html.contains("状态未知"));
+    assert!(html.contains("图片文字识别"));
+    assert!(html.contains("语音转写"));
+    assert!(!html.contains("COLLECTION / DOMAINS"));
+    assert!(!html.contains("SEARCHABLE"));
+    assert!(!html.contains("UNKNOWN"));
+}
+
+#[tokio::test]
+#[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
+async fn paused_domain_policy_save_returns_the_domain_error_without_writing_a_policy() {
+    let database = domain_management_fixture::proof_database("comment_policy_paused_domain").await;
+    sqlx::raw_sql(include_str!(
+        "../../../../database/bootstrap/comment-study-001.sql"
+    ))
+    .execute(database.pool())
+    .await
+    .expect("the Comment Study derived schema is initialized for the API route proof");
+    let domain_ref = uuid::Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap();
+    sqlx::query("UPDATE observation_domain SET status='paused' WHERE domain_ref=$1")
+        .bind(domain_ref)
+        .execute(database.pool())
+        .await
+        .expect("the test Domain is paused before the policy write");
+    let model_config_ref = uuid::Uuid::new_v4();
+    let response = app_with_database(database.clone())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/local/comment-study/policy")
+                .header(header::HOST, "127.0.0.1:8080")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "domainRef":domain_ref,
+                        "modelConfigRef":model_config_ref,
+                        "commentBudget":100,
+                        "contextCharacterBudget":12000
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(payload["error"], "domain_not_active");
+    let policy_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_comment_study_policy \
+         WHERE domain_ref=$1 AND model_config_ref=$2",
+    )
+    .bind(domain_ref)
+    .bind(model_config_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(policy_count, 0, "a paused Domain retains no new policy");
+}
+
 #[test]
 fn check_in_payload_returns_the_server_canonical_station_name_and_pause_state() {
     let station_ref = uuid::Uuid::new_v4();
@@ -593,6 +795,7 @@ fn default_local_query_is_latest_accepted_discovery_and_explicit_windows_remain_
         lane_state: None,
         media_kind: None,
         restriction: None,
+        domain: None,
     })
     .expect("an omitted URL window selects the explicit default discovery view");
     assert_eq!(
@@ -610,6 +813,7 @@ fn default_local_query_is_latest_accepted_discovery_and_explicit_windows_remain_
         lane_state: None,
         media_kind: None,
         restriction: None,
+        domain: None,
     })
     .expect("an explicit published window remains valid");
     assert_eq!(
@@ -1297,7 +1501,7 @@ async fn a_never_archived_keyword_starts_its_first_stage_when_asked_to_archive()
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                 .body(Body::from(
                     "target_kind=keyword&identity=archive-first-stage-proof\
-                     &domain=__new__&new_domain_name=archive-first-stage-proof-domain",
+                     &domain=00000000-0000-4000-8000-000000000001",
                 ))
                 .unwrap(),
         )
@@ -1397,7 +1601,7 @@ async fn a_patrolling_keyword_can_repair_its_missing_first_stage_archive() {
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                 .body(Body::from(
                     "target_kind=keyword&identity=archive-patrolling-refusal\
-                     &domain=__new__&new_domain_name=archive-patrolling-refusal-domain",
+                     &domain=00000000-0000-4000-8000-000000000001",
                 ))
                 .unwrap(),
         )
@@ -1490,7 +1694,7 @@ async fn creator_gap_route_never_falls_back_to_a_homepage_rescan() {
     let created = application.clone().oneshot(Request::builder()
         .method("POST").uri("/collection/targets/new")
         .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-        .body(Body::from("target_kind=creator&identity=69aad16e000000003201b111&domain=__new__&new_domain_name=creator-gap-proof")).unwrap()).await.unwrap();
+        .body(Body::from("target_kind=creator&identity=69aad16e000000003201b111&domain=00000000-0000-4000-8000-000000000001")).unwrap()).await.unwrap();
     assert_eq!(created.status(), StatusCode::SEE_OTHER);
     let target_ref: uuid::Uuid = sqlx::query_scalar("SELECT target_ref FROM collection_observation_target WHERE identity_key='69aad16e000000003201b111'")
         .fetch_one(database.pool()).await.unwrap();
@@ -2836,6 +3040,7 @@ fn collection_orders_its_surfaces_by_urgency_and_opens_on_the_one_that_expires()
         ("03", "operations"),
         ("04", "tasks"),
         ("05", "runtime"),
+        ("06", "domains"),
     ] {
         let entry = format!("href=\"/collection/{slug}\"");
         let at = rail
@@ -3054,24 +3259,17 @@ fn evidence_runtime_uses_material_projection_as_its_only_default_read_source() {
 }
 
 #[test]
-fn corpus_cross_industry_samples_keep_their_list_level_boundary() {
-    // A cross-industry item has `sampleRef`, not the Work Resource `publicRef` which licenses
-    // the evidence-detail route. This source-level contract prevents the old blank-list bug
-    // from returning as a fake detail lookup.
-    assert!(
-        EVIDENCE_LIBRARY_JS
-            .contains("const CROSS_INDUSTRY_ROOT = '/api/local/cross-industry/samples'")
-    );
-    assert!(EVIDENCE_LIBRARY_JS.contains("function crossIndustryListItem(sample)"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("identity: {\n        sampleRef:"));
-    assert!(
-        EVIDENCE_LIBRARY_JS.contains("function selectCrossIndustrySample(item, selectionSource)")
-    );
-    assert!(EVIDENCE_LIBRARY_JS.contains("跨行业列表级参照样本"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("不参与本领域判断"));
-    assert!(EVIDENCE_LIBRARY_JS.contains(
-        "if (CORPUS_DOMAIN.isOwn && model.selectedRef) params.set('work', model.selectedRef)"
-    ));
+fn evidence_library_requires_a_domain_and_uses_work_resources_only() {
+    assert!(EVIDENCE_LIBRARY_JS.contains("const API_ROOT = '/api/local/work-resources'"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("return item?.identity?.publicRef || null;"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("if (!CORPUS_DOMAIN.hasDomain) {"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("setFeedback('empty', '请选择研究领域'"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("item.domainUsage?.role === 'reference'"));
+    assert!(!EVIDENCE_LIBRARY_JS.contains("/api/local/cross-industry/samples"));
+    assert!(!EVIDENCE_LIBRARY_JS.contains("crossIndustryListItem"));
+    assert!(!EVIDENCE_LIBRARY_JS.contains("selectCrossIndustrySample"));
+    assert!(!EVIDENCE_LIBRARY_JS.contains("LIST LEVEL ONLY"));
+    assert!(!EVIDENCE_LIBRARY_JS.contains("CORPUS_DOMAIN.isOwn"));
     assert!(!EVIDENCE_LIBRARY_JS.contains("[data-public-ref]"));
 }
 
@@ -3081,24 +3279,32 @@ fn corpus_domain_picker_is_a_lids_owned_link_menu_not_a_native_select() {
         ObservationDomain {
             domain_ref: uuid::Uuid::new_v4(),
             name: "ADHD".to_owned(),
-            is_own_domain: true,
+            description: None,
+            research_goal: None,
             status: "active".to_owned(),
             sample_count: None,
+            target_count: 0,
+            primary_target_count: 0,
+            reference_target_count: 0,
         },
         ObservationDomain {
             domain_ref: uuid::Uuid::new_v4(),
             name: "考研自习".to_owned(),
-            is_own_domain: false,
+            description: None,
+            research_goal: None,
             status: "active".to_owned(),
             sample_count: Some(21),
+            target_count: 0,
+            primary_target_count: 0,
+            reference_target_count: 0,
         },
     ];
     let html = evidence_library_html(None, &domains, Some(&domains[1]));
 
     assert!(html.contains("<details class=\"v7-domain-picker\">"));
     assert!(html.contains("<nav aria-label=\"可选观察领域\">"));
-    assert!(html.contains("考研自习</span><small>21 条样本</small>"));
-    assert!(html.contains("aria-label=\"考研自习，21 条样本\""));
+    assert!(html.contains("考研自习</span><small>0 个目标 · 21 篇作品</small>"));
+    assert!(html.contains("aria-label=\"考研自习，0 个目标 · 21 篇作品\""));
     assert!(html.contains(&format!(
         "href=\"/corpus/evidence?domain={}\" aria-current=\"page\"",
         domains[1].domain_ref
@@ -3254,13 +3460,13 @@ fn evidence_cover_layout_keeps_a_stationary_data_plate_and_one_shared_flip_stage
         "min-height:calc(var(--lgi-space-16) + var(--lgi-space-6) + var(--lgi-space-4) + var(--lgi-space-2))",
         "grid-template-columns:minmax(0,1fr) minmax(0,1fr)",
         "grid-template-columns:minmax(0,1fr) minmax(0,10ch)",
-        ".ev-cover-cross-boundary",
     ] {
         assert!(
             EVIDENCE_LIBRARY_CSS.contains(marker),
             "missing cover-card visual contract: {marker}"
         );
     }
+    assert!(!EVIDENCE_LIBRARY_CSS.contains(".ev-cover-cross-boundary"));
     assert!(
         !EVIDENCE_LIBRARY_JS.contains("facts.append(material.rail, status)"),
         "the cover data plate must not reintroduce the large multi-colour material rail"
@@ -3292,15 +3498,10 @@ fn evidence_cover_layout_keeps_a_stationary_data_plate_and_one_shared_flip_stage
         "the cover state line must retain the real state label while omitting its technical enum"
     );
     assert!(
-        EVIDENCE_LIBRARY_JS
-            .contains("if (publishedState === 'SOURCE_TEXT_ONLY') return '来源时间';"),
-        "a source-text-only publish time must not overrun the compact cover date slot"
-    );
-    assert!(
         EVIDENCE_LIBRARY_JS.contains(
-            "node('span', 'ev-cover-cross-boundary', '列表级参照物 · 详情、媒体与材料未读取')"
+            "if (item.display?.publishedAtState === 'SOURCE_TEXT_ONLY') return '来源时间';"
         ),
-        "a cross-industry sample must consume exactly one bottom-band state cell"
+        "a source-text-only publish time must not overrun the compact cover date slot"
     );
 }
 

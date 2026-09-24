@@ -4,9 +4,12 @@
 //! 条派发通道内**比较：immediate 与 scheduled、batch 各有各的队列、各自独立出队，
 //! 「在 batch 里排第 1」与「在 immediate 里排第 51」之间没有先后关系。
 
+#[path = "support/domain_fixture.rs"]
+mod domain;
 #[path = "support/material_fixture.rs"]
 mod fixture;
 
+use domain::ADHD_DOMAIN;
 use fixture::proof_database;
 use linggan_evidence::read_target_queue_positions;
 use linggan_storage_postgres::Database;
@@ -16,8 +19,11 @@ use uuid::Uuid;
 async fn queue_work_order(database: &Database, target_ref: Uuid, dispatch_lane: &str) -> Uuid {
     let request_ref = Uuid::new_v4();
     sqlx::query(
-        "INSERT INTO collection_acquisition_request (request_ref,target_ref,lane,purpose,requested_by) \
-         VALUES ($1,$2,'patrol','queue position proof','person')",
+        "INSERT INTO collection_acquisition_request \
+             (request_ref,target_ref,domain_ref,observation_role,lane,purpose,requested_by) \
+         SELECT $1,$2,relation.domain_ref,relation.role,'patrol','queue position proof','person' \
+           FROM observation_domain_target relation \
+          WHERE relation.target_ref=$2 AND relation.role='primary'",
     )
     .bind(request_ref)
     .bind(target_ref)
@@ -81,6 +87,15 @@ async fn keyword_target(database: &Database, identity_key: &str) -> Uuid {
     .execute(database.pool())
     .await
     .expect("target fixture is stored");
+    sqlx::query(
+        "INSERT INTO observation_domain_target(domain_ref,target_ref,role) \
+         VALUES ($1::uuid,$2,'primary')",
+    )
+    .bind(ADHD_DOMAIN)
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .expect("target fixture has an explicit Domain relation");
     target_ref
 }
 

@@ -32,15 +32,6 @@ pub(crate) async fn insert_typed_materials(
     .map_err(ProducerRuntimeError::Internal)?
     .into_iter()
     .collect::<HashSet<_>>();
-    // 落库分流。采集链路对两种领域完全相同，插件不知道领域的存在；材料去哪张表
-    // 只在这一刻决定。外部领域的内容是参照物，不进证据侧——共用一张表等于把参照物
-    // 混进证据，将来任何读证据的地方都得记得排除它。
-    if let crate::cross_industry_admission::PackageDomain::External(domain) =
-        crate::cross_industry_admission::resolve_package_domain(tx, package).await?
-    {
-        return crate::cross_industry_admission::insert(tx, package, &domain, &accepted_ordinals)
-            .await;
-    }
     match package.package_kind() {
         "discovery_search" | "profile_discovery" => {
             insert_discovery_records(tx, package, &accepted_ordinals).await?
@@ -70,6 +61,13 @@ async fn insert_discovery_records(
             continue;
         };
         let content_public_ref = ensure_content(tx, package, finding.content_id).await?;
+        insert_material_domain_usage(
+            tx,
+            package.package_ref(),
+            content_public_ref,
+            i32::try_from(ordinal).expect("record count is bounded"),
+        )
+        .await?;
         let title = exact_string(finding.payload, "title");
         let creator = exact_string(finding.payload, "authorName");
         let published = exact_scalar_text(finding.payload, "publishedAtText");
@@ -102,6 +100,55 @@ async fn insert_discovery_records(
             )
             .await?;
         }
+    }
+    Ok(())
+}
+
+async fn insert_material_domain_usage(
+    tx: &mut Transaction<'_, Postgres>,
+    package_ref: Uuid,
+    content_public_ref: Uuid,
+    record_ordinal: i32,
+) -> Result<(), ProducerRuntimeError> {
+    // This typed projection runs before submit_producer_package writes its receipt, inside the
+    // same transaction. The receipt is inserted after all typed rows succeed, so joining it here
+    // would silently suppress every Domain usage while still accepting the discovery itself.
+    let rows: Vec<(Uuid, Uuid, Uuid, String)> = sqlx::query_as(
+        "SELECT usage.work_order_ref,usage.request_ref,usage.domain_ref,usage.role \
+         FROM linggan_runtime_capture_package package \
+         JOIN collection_work_order_lease_task lease_task ON lease_task.task_id=package.task_id \
+         JOIN collection_work_order_lease lease USING(lease_ref) \
+         JOIN collection_work_order_domain_usage usage USING(work_order_ref) \
+         JOIN linggan_runtime_record_disposition disposition \
+           ON disposition.package_ref=package.package_ref \
+          AND disposition.record_ordinal=$2 \
+          AND disposition.disposition='accepted_for_library_discovery' \
+         WHERE package.package_ref=$1",
+    )
+    .bind(package_ref)
+    .bind(record_ordinal)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
+    for (work_order_ref, request_ref, domain_ref, role) in rows {
+        sqlx::query(
+            "INSERT INTO linggan_material_domain_usage \
+             (usage_ref,content_public_ref,domain_ref,role,basis_kind,request_ref,work_order_ref,package_ref,record_ordinal) \
+             VALUES($1,$2,$3,$4,'accepted_discovery',$5,$6,$7,$8) \
+             ON CONFLICT (content_public_ref,domain_ref,package_ref,record_ordinal,request_ref) \
+             WHERE basis_kind='accepted_discovery' DO NOTHING",
+        )
+        .bind(Uuid::new_v4())
+        .bind(content_public_ref)
+        .bind(domain_ref)
+        .bind(role)
+        .bind(request_ref)
+        .bind(work_order_ref)
+        .bind(package_ref)
+        .bind(record_ordinal)
+        .execute(&mut **tx)
+        .await
+        .map_err(ProducerRuntimeError::Internal)?;
     }
     Ok(())
 }

@@ -206,7 +206,10 @@ async fn library(database: &Database) -> Value {
     let response = app_with_database(database.clone())
         .oneshot(
             Request::builder()
-                .uri("/api/local/work-resources?lane=media_slots")
+                .uri(format!(
+                    "/api/local/work-resources?lane=media_slots&domain={}",
+                    super::material_projection_media_fixture::ADHD_DOMAIN_REF
+                ))
                 .body(Body::empty())
                 .unwrap(),
         )

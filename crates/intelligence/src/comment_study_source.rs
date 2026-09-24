@@ -4,12 +4,10 @@
 
 use crate::comment_cleaning::{CLEANER_VERSION, clean};
 use linggan_storage_postgres::Database;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::{Executor, Postgres, Row};
 use uuid::Uuid;
-
-pub const ADHD_DOMAIN_REF: &str = "00000000-0000-4000-8000-000000000001";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct StudySource {
@@ -21,6 +19,23 @@ pub struct StudySource {
     pub context_manifest: Value,
     pub parent_source_ref: Option<Uuid>,
     pub parent_research_text: Option<String>,
+    pub observation_role: StudySourceRole,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StudySourceRole {
+    Primary,
+    Reference,
+}
+
+impl StudySourceRole {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Primary => "primary",
+            Self::Reference => "reference",
+        }
+    }
 }
 
 /// A read-only explanation of the exact source gate used by StudyRun freezing.  It deliberately
@@ -30,6 +45,7 @@ pub struct StudySource {
 #[serde(rename_all = "camelCase")]
 pub struct StudySourcePreview {
     pub as_of: String,
+    pub observation_role: StudySourceRole,
     pub total_comment_count: usize,
     pub eligible_comment_count: usize,
     pub excluded_counts: StudySourceExcludedCounts,
@@ -106,8 +122,62 @@ pub async fn preview_sources(
     domain_ref: Uuid,
     as_of: &str,
 ) -> Result<StudySourcePreview, StudySourceError> {
-    ensure_domain(domain_ref)?;
-    let candidates = fetch_source_candidates(database.pool(), domain_ref, as_of, None).await?;
+    preview_sources_for_role(database, domain_ref, as_of, StudySourceRole::Primary).await
+}
+
+pub async fn preview_sources_for_role(
+    database: &Database,
+    domain_ref: Uuid,
+    as_of: &str,
+    observation_role: StudySourceRole,
+) -> Result<StudySourcePreview, StudySourceError> {
+    let mut previews =
+        preview_sources_for_roles(database, domain_ref, as_of, &[observation_role]).await?;
+    Ok(previews
+        .remove(&observation_role)
+        .expect("a requested source role always receives a preview"))
+}
+
+pub async fn preview_sources_for_roles(
+    database: &Database,
+    domain_ref: Uuid,
+    as_of: &str,
+    observation_roles: &[StudySourceRole],
+) -> Result<std::collections::BTreeMap<StudySourceRole, StudySourcePreview>, StudySourceError> {
+    ensure_domain_exists(database, domain_ref).await?;
+    let role_values: Vec<&str> = observation_roles.iter().map(|role| role.as_str()).collect();
+    let candidates = fetch_source_candidates(
+        database.pool(),
+        domain_ref,
+        as_of,
+        None,
+        None,
+        Some(&role_values),
+    )
+    .await?;
+    let mut candidates_by_role =
+        std::collections::BTreeMap::<StudySourceRole, Vec<SourceCandidate>>::new();
+    for candidate in candidates {
+        candidates_by_role
+            .entry(candidate.observation_role)
+            .or_default()
+            .push(candidate);
+    }
+    Ok(observation_roles
+        .iter()
+        .copied()
+        .map(|role| {
+            let candidates = candidates_by_role.remove(&role).unwrap_or_default();
+            (role, build_source_preview(candidates, role, as_of))
+        })
+        .collect())
+}
+
+fn build_source_preview(
+    candidates: Vec<SourceCandidate>,
+    observation_role: StudySourceRole,
+    as_of: &str,
+) -> StudySourcePreview {
     let total_comment_count = candidates.len();
     let mut excluded_counts = StudySourceExcludedCounts::default();
     let mut eligible_by_work = std::collections::BTreeMap::<Uuid, (String, usize)>::new();
@@ -142,13 +212,14 @@ pub async fn preview_sources(
             .then_with(|| left.work_ref.cmp(&right.work_ref))
     });
     works.truncate(100);
-    Ok(StudySourcePreview {
+    StudySourcePreview {
         as_of: as_of.to_owned(),
+        observation_role,
         total_comment_count,
         eligible_comment_count,
         excluded_counts,
         works,
-    })
+    }
 }
 
 async fn load_eligible_sources(
@@ -158,45 +229,68 @@ async fn load_eligible_sources(
     content_public_refs: Option<&[Uuid]>,
     limit: i64,
 ) -> Result<Vec<StudySource>, StudySourceError> {
-    ensure_domain(domain_ref)?;
+    ensure_domain_exists(database, domain_ref).await?;
     fetch_eligible_sources(
         database.pool(),
         domain_ref,
         as_of,
         content_public_refs,
+        StudySourceRole::Primary,
         limit,
     )
     .await
 }
 
-pub(crate) async fn eligible_sources_in_transaction(
+async fn ensure_domain_exists(
+    database: &Database,
+    domain_ref: Uuid,
+) -> Result<(), StudySourceError> {
+    let exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM observation_domain WHERE domain_ref=$1)")
+            .bind(domain_ref)
+            .fetch_one(database.pool())
+            .await?;
+    exists.then_some(()).ok_or(StudySourceError::InvalidDomain)
+}
+
+pub(crate) async fn eligible_sources_in_transaction_for_selections(
     transaction: &mut sqlx::Transaction<'_, Postgres>,
     domain_ref: Uuid,
     as_of: &str,
-    content_public_refs: &[Uuid],
+    selections: &[(Uuid, StudySourceRole)],
     limit: i64,
 ) -> Result<Vec<StudySource>, StudySourceError> {
-    ensure_domain(domain_ref)?;
-    fetch_eligible_sources(
+    let domain_exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM observation_domain WHERE domain_ref=$1)")
+            .bind(domain_ref)
+            .fetch_one(&mut **transaction)
+            .await?;
+    if !domain_exists {
+        return Err(StudySourceError::InvalidDomain);
+    }
+    let limit = limit.clamp(1, 3000);
+    let work_refs: Vec<Uuid> = selections.iter().map(|(work_ref, _)| *work_ref).collect();
+    let roles: Vec<&str> = selections.iter().map(|(_, role)| role.as_str()).collect();
+    Ok(fetch_source_candidates(
         &mut **transaction,
         domain_ref,
         as_of,
-        Some(content_public_refs),
-        limit,
+        Some(&work_refs),
+        Some(&roles),
+        None,
     )
-    .await
-}
-
-fn ensure_domain(domain_ref: Uuid) -> Result<(), StudySourceError> {
-    (domain_ref.to_string() == ADHD_DOMAIN_REF)
-        .then_some(())
-        .ok_or(StudySourceError::InvalidDomain)
+    .await?
+    .into_iter()
+    .filter_map(|candidate| classify_candidate(candidate).ok())
+    .take(limit as usize)
+    .collect())
 }
 
 #[derive(Debug)]
 struct SourceCandidate {
     source_ref: Uuid,
     content_public_ref: Uuid,
+    observation_role: StudySourceRole,
     work_title: String,
     body_text: Option<String>,
     body_state: String,
@@ -274,6 +368,7 @@ fn classify_candidate(candidate: SourceCandidate) -> Result<StudySource, SourceE
         parent_research_text: parent_cleaned.and_then(|value| {
             matches!(value.state.as_str(), "direct" | "context").then_some(value.text)
         }),
+        observation_role: candidate.observation_role,
     })
 }
 
@@ -285,20 +380,32 @@ async fn fetch_eligible_sources<'e, E>(
     domain_ref: Uuid,
     as_of: &str,
     content_public_refs: Option<&[Uuid]>,
+    observation_role: StudySourceRole,
     limit: i64,
 ) -> Result<Vec<StudySource>, StudySourceError>
 where
     E: Executor<'e, Database = Postgres>,
 {
     let limit = limit.clamp(1, 3000);
-    Ok(
-        fetch_source_candidates(executor, domain_ref, as_of, content_public_refs)
-            .await?
-            .into_iter()
-            .filter_map(|candidate| classify_candidate(candidate).ok())
-            .take(limit as usize)
-            .collect(),
+    let uniform_roles =
+        content_public_refs.map(|works| vec![observation_role.as_str(); works.len()]);
+    let preview_roles = content_public_refs
+        .is_none()
+        .then(|| vec![observation_role.as_str()]);
+    let sources = fetch_source_candidates(
+        executor,
+        domain_ref,
+        as_of,
+        content_public_refs,
+        uniform_roles.as_deref(),
+        preview_roles.as_deref(),
     )
+    .await?
+    .into_iter()
+    .filter_map(|candidate| classify_candidate(candidate).ok())
+    .take(limit as usize)
+    .collect();
+    Ok(sources)
 }
 
 /// Loads the frozen, de-duplicated comment candidates once.  All consumers turn a candidate into
@@ -309,12 +416,14 @@ async fn fetch_source_candidates<'e, E>(
     domain_ref: Uuid,
     as_of: &str,
     content_public_refs: Option<&[Uuid]>,
+    selected_roles: Option<&[&str]>,
+    preview_roles: Option<&[&str]>,
 ) -> Result<Vec<SourceCandidate>, StudySourceError>
 where
     E: Executor<'e, Database = Postgres>,
 {
     let rows = sqlx::query(
-        "SELECT source.material_ref,source.content_public_ref,source.body_text,source.body_state, \
+        "SELECT source.material_ref,source.content_public_ref,source_domain_role.observation_role,source.body_text,source.body_state, \
                 source.author_external_id,content_author.author_external_id AS work_author_external_id, \
                 COALESCE((SELECT detail.title FROM linggan_material_content_detail detail \
                   JOIN linggan_runtime_capture_package title_package USING(package_ref) \
@@ -337,6 +446,14 @@ where
            ORDER BY comment.content_public_ref,comment.comment_external_id, \
                     comment.observed_at::timestamptz DESC,comment.created_at DESC,comment.material_ref DESC \
          ) source \
+         JOIN LATERAL ( \
+           SELECT selected.observation_role \
+           FROM unnest($3::uuid[],$4::text[]) AS selected(content_public_ref,observation_role) \
+           WHERE selected.content_public_ref=source.content_public_ref \
+           UNION ALL SELECT preview.observation_role \
+             FROM unnest($5::text[]) AS preview(observation_role) \
+            WHERE $3::uuid[] IS NULL \
+         ) source_domain_role ON true \
          JOIN linggan_material_content content ON content.public_ref=source.content_public_ref \
          LEFT JOIN linggan_material_content_author content_author \
            ON content_author.content_public_ref=source.content_public_ref \
@@ -431,8 +548,10 @@ where
                    OR disposition.slot_key=job.slot_key)) \
            ) context_fragments \
          ) context ON true \
-         WHERE content.domain_ref=$1 \
-           AND ($3::uuid[] IS NULL OR source.content_public_ref=ANY($3::uuid[])) \
+         WHERE EXISTS (SELECT 1 FROM linggan_material_domain_usage usage \
+                       WHERE usage.content_public_ref=content.public_ref \
+                         AND usage.domain_ref=$1 \
+                         AND usage.role=source_domain_role.observation_role) \
          ORDER BY row_number() OVER ( \
                     PARTITION BY source.content_public_ref \
                     ORDER BY source.created_at DESC,source.material_ref DESC \
@@ -441,6 +560,8 @@ where
     .bind(domain_ref)
     .bind(as_of)
     .bind(content_public_refs.map(<[Uuid]>::to_vec))
+    .bind(selected_roles.map(<[&str]>::to_vec))
+    .bind(preview_roles.map(<[&str]>::to_vec))
     .fetch_all(executor)
     .await?;
     Ok(rows
@@ -448,6 +569,11 @@ where
         .map(|row| SourceCandidate {
             source_ref: row.get("material_ref"),
             content_public_ref: row.get("content_public_ref"),
+            observation_role: match row.get::<String, _>("observation_role").as_str() {
+                "primary" => StudySourceRole::Primary,
+                "reference" => StudySourceRole::Reference,
+                _ => unreachable!("the source-role query only returns selected Domain roles"),
+            },
             work_title: row.get("work_title"),
             body_text: row.get("body_text"),
             body_state: row.get("body_state"),

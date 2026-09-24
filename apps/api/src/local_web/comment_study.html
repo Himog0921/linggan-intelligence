@@ -96,18 +96,20 @@
     </section>
     <section class="study-workspace" aria-labelledby="work-picker-title">
       <header class="study-workspace-header">
-        <div><p class="study-label">研究输入</p><h3 id="work-picker-title">选择要研究的 ADHD 作品</h3></div>
+        <div><p class="study-label">研究输入</p><h3 id="work-picker-title">选择要研究的作品</h3></div>
         <div class="study-workspace-tools">
           <label class="study-filter">筛选已加载作品<input id="work-filter" type="search" placeholder="按作品标题筛选" autocomplete="off"></label>
+          <label class="study-reference-toggle"><input id="include-reference-works" type="checkbox" disabled>显式纳入 reference 作品</label>
           <span id="selected-count" class="selection-count" role="status">已选择 0 篇</span>
         </div>
       </header>
+      <p id="reference-source-preview" class="study-table-status" role="status" hidden></p>
       <p id="work-filter-status" class="study-table-status" role="status">正在读取可研究作品…</p>
       <div class="study-table-wrap">
         <table class="study-table" aria-labelledby="work-picker-title" aria-describedby="work-filter-status">
-          <caption class="v7-sr-only">可选择进入本次评论研究的 ADHD 作品</caption>
-          <thead><tr><th scope="col"><input id="select-visible-works" type="checkbox" aria-label="选择当前筛选结果中的作品"></th><th scope="col">作品</th><th scope="col">可研究评论</th></tr></thead>
-          <tbody id="works" aria-live="polite"><tr><td colspan="3">正在读取作品…</td></tr></tbody>
+          <caption class="v7-sr-only">可选择进入本次评论研究的作品及其领域角色</caption>
+          <thead><tr><th scope="col"><input id="select-visible-works" type="checkbox" aria-label="选择当前筛选结果中的作品"></th><th scope="col">作品</th><th scope="col">领域角色</th><th scope="col">可研究评论</th></tr></thead>
+          <tbody id="works" aria-live="polite"><tr><td colspan="4">正在读取作品…</td></tr></tbody>
         </table>
       </div>
       <footer class="study-workspace-footer">

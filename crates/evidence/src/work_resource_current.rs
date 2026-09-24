@@ -4,7 +4,7 @@
 //! `read_work_resource(s)` interface; derived read models can reuse Current inside the same
 //! transaction and `as_of` without inventing another HTTP truth seam or issuing N+1 reads.
 
-use sqlx::{postgres::PgRow, AssertSqlSafe, Postgres, Row, Transaction};
+use sqlx::{AssertSqlSafe, Postgres, Row, Transaction, postgres::PgRow};
 use uuid::Uuid;
 
 #[derive(Clone, Debug)]
@@ -70,6 +70,7 @@ pub(crate) struct WorkResourceCurrentPageQuery<'a> {
     pub lane: Option<&'a str>,
     pub media_kind: Option<&'a str>,
     pub one_public_ref: Option<Uuid>,
+    pub domain_ref: Option<Uuid>,
 }
 
 pub(crate) async fn read_work_resource_current_page(
@@ -92,6 +93,7 @@ pub(crate) async fn read_work_resource_current_page(
         .bind(query.lane)
         .bind(query.media_kind)
         .bind(query.one_public_ref)
+        .bind(query.domain_ref)
         .fetch_all(&mut **tx)
         .await
         .map(|rows| rows.into_iter().map(map_current).collect())

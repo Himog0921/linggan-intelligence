@@ -60,8 +60,6 @@ pub struct ObservationTarget {
     /// `None` 表示目标尚未明确分配领域，或领域表尚未建立。页面必须保持这个未知边界，
     /// 不能把空值显示成本领域；写入侧会在明确分配前拒绝采集。
     pub domain_name: Option<String>,
-    /// 该领域是不是本领域。用于列表里给外部领域加标记；`None` 同上。
-    pub domain_is_own: Option<bool>,
 }
 
 /// Whether a store call created a target or found the one already there.
@@ -75,9 +73,7 @@ pub enum StoreOutcome {
     AlreadyPresent,
 }
 
-/// Result of the explicit person-owned step that turns a plugin-discovered candidate into a
-/// domain-scoped observation target. Repeating the same assignment is safe; changing an existing
-/// assignment is a different product decision and is deliberately rejected here.
+/// Result of the explicit step that associates a global target with a Domain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TargetDomainAssignmentOutcome {
     Assigned,
@@ -89,23 +85,37 @@ pub async fn assign_target_domain(
     target_ref: Uuid,
     domain_ref: Uuid,
 ) -> Result<TargetDomainAssignmentOutcome, CollectionTargetError> {
+    assign_target_domain_with_role(database, target_ref, domain_ref, "primary").await
+}
+
+/// Atomically associates a Target with an active Domain using the requested observation role.
+pub async fn assign_target_domain_with_role(
+    database: &Database,
+    target_ref: Uuid,
+    domain_ref: Uuid,
+    role: &str,
+) -> Result<TargetDomainAssignmentOutcome, CollectionTargetError> {
+    if !matches!(role, "primary" | "reference") {
+        return Err(CollectionTargetError::UnknownDomain);
+    }
     if !collection_target_schema_is_ready(database).await?
         || !crate::observation_domain::observation_domain_schema_is_ready(database).await?
     {
         return Err(CollectionTargetError::SchemaUnavailable);
     }
     let mut tx = database.pool().begin().await?;
-    let current: Option<Option<Uuid>> = sqlx::query_scalar(
-        "SELECT domain_ref FROM collection_observation_target WHERE target_ref=$1 FOR UPDATE",
+    let stored_target: Option<Uuid> = sqlx::query_scalar(
+        "SELECT target_ref FROM collection_observation_target WHERE target_ref=$1 FOR UPDATE",
     )
     .bind(target_ref)
     .fetch_optional(&mut *tx)
     .await?;
-    let Some(current) = current else {
+    if stored_target.is_none() {
         return Err(CollectionTargetError::UnknownTarget);
-    };
+    }
     let domain_is_active: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM observation_domain WHERE domain_ref=$1 AND status='active')",
+        "SELECT EXISTS(SELECT 1 FROM observation_domain \
+         WHERE domain_ref=$1 AND status='active' FOR SHARE)",
     )
     .bind(domain_ref)
     .fetch_one(&mut *tx)
@@ -113,24 +123,109 @@ pub async fn assign_target_domain(
     if !domain_is_active {
         return Err(CollectionTargetError::UnknownDomain);
     }
-    match current {
-        Some(current) if current == domain_ref => {
-            tx.commit().await?;
-            Ok(TargetDomainAssignmentOutcome::AlreadyAssigned)
-        }
-        Some(_) => Err(CollectionTargetError::DomainAlreadyAssigned),
-        None => {
-            sqlx::query(
-                "UPDATE collection_observation_target SET domain_ref=$2 WHERE target_ref=$1",
-            )
+    let inserted = sqlx::query(
+        "INSERT INTO observation_domain_target(domain_ref,target_ref,role) \
+         VALUES($1,$2,$3) ON CONFLICT(domain_ref,target_ref) DO NOTHING",
+    )
+    .bind(domain_ref)
+    .bind(target_ref)
+    .bind(role)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    if inserted == 0 {
+        sqlx::query(
+            "UPDATE observation_domain_target SET role=$3,updated_at=scope_001_now() \
+             WHERE domain_ref=$1 AND target_ref=$2",
+        )
+        .bind(domain_ref)
+        .bind(target_ref)
+        .bind(role)
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+    if inserted == 1 {
+        Ok(TargetDomainAssignmentOutcome::Assigned)
+    } else {
+        Ok(TargetDomainAssignmentOutcome::AlreadyAssigned)
+    }
+}
+
+pub async fn set_target_domain_role(
+    database: &Database,
+    target_ref: Uuid,
+    domain_ref: Uuid,
+    role: &str,
+) -> Result<(), CollectionTargetError> {
+    if !matches!(role, "primary" | "reference") {
+        return Err(CollectionTargetError::UnknownDomain);
+    }
+    let mut tx = database.pool().begin().await?;
+    let stored_target: Option<Uuid> = sqlx::query_scalar(
+        "SELECT target_ref FROM collection_observation_target WHERE target_ref=$1 FOR UPDATE",
+    )
+    .bind(target_ref)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if stored_target.is_none() {
+        return Err(CollectionTargetError::UnknownTarget);
+    }
+    let active_domain: Option<Uuid> = sqlx::query_scalar(
+        "SELECT domain_ref FROM observation_domain \
+         WHERE domain_ref=$1 AND status='active' FOR SHARE",
+    )
+    .bind(domain_ref)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if active_domain.is_none() {
+        return Err(CollectionTargetError::UnknownDomain);
+    }
+    let changed = sqlx::query(
+        "UPDATE observation_domain_target relation \
+         SET role=$3, updated_at=scope_001_now() \
+         WHERE relation.target_ref=$1 AND relation.domain_ref=$2",
+    )
+    .bind(target_ref)
+    .bind(domain_ref)
+    .bind(role)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    if changed == 0 {
+        return Err(CollectionTargetError::UnknownDomain);
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
+pub async fn remove_target_domain(
+    database: &Database,
+    target_ref: Uuid,
+    domain_ref: Uuid,
+) -> Result<(), CollectionTargetError> {
+    let mut tx = database.pool().begin().await?;
+    let stored_target: Option<Uuid> = sqlx::query_scalar(
+        "SELECT target_ref FROM collection_observation_target WHERE target_ref=$1 FOR UPDATE",
+    )
+    .bind(target_ref)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if stored_target.is_none() {
+        return Err(CollectionTargetError::UnknownTarget);
+    }
+    let deleted =
+        sqlx::query("DELETE FROM observation_domain_target WHERE target_ref=$1 AND domain_ref=$2")
             .bind(target_ref)
             .bind(domain_ref)
             .execute(&mut *tx)
-            .await?;
-            tx.commit().await?;
-            Ok(TargetDomainAssignmentOutcome::Assigned)
-        }
+            .await?
+            .rows_affected();
+    if deleted == 0 {
+        return Err(CollectionTargetError::UnknownDomain);
     }
+    tx.commit().await?;
+    Ok(())
 }
 
 /// Presentation eligibility for a creator avatar. A target may retain its observed source URL
@@ -247,8 +342,8 @@ pub async fn store_pending_target(
     let target_ref = Uuid::new_v4();
     let inserted = sqlx::query_scalar::<_, Uuid>(
         "INSERT INTO collection_observation_target \
-             (target_ref, platform, target_kind, identity_key, display_name, identity_facts, source, domain_ref) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
+             (target_ref, platform, target_kind, identity_key, display_name, identity_facts, source) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7) \
          ON CONFLICT (platform, target_kind, identity_key) DO NOTHING \
          RETURNING target_ref",
     )
@@ -259,11 +354,14 @@ pub async fn store_pending_target(
     .bind(display_name)
     .bind(identity_facts)
     .bind(source.as_str())
-    .bind(domain)
     .fetch_optional(database.pool())
     .await?;
 
     let stored = read_target_by_identity(database, identity).await?;
+
+    if let Some(domain_ref) = domain {
+        assign_target_domain(database, stored.target_ref, domain_ref).await?;
+    }
 
     if inserted.is_some() {
         record_transition(
@@ -356,7 +454,7 @@ macro_rules! listed_target_columns {
 const READ_TARGET_WITH_DOMAIN: &str = concat!(
     "SELECT ",
     listed_target_columns!(),
-    ", domain.name, domain.is_own_domain \
+    ", domain.names \
      FROM collection_observation_target target \
      LEFT JOIN LATERAL ( \
        SELECT COALESCE(bool_or(COALESCE(revision.automatic_enabled,false)),false) \
@@ -367,13 +465,16 @@ const READ_TARGET_WITH_DOMAIN: &str = concat!(
        LEFT JOIN collection_monitor_rule_revision revision \
               ON revision.rule_revision_ref=rule.active_revision_ref \
        WHERE rule.target_ref=target.target_ref AND rule.retired_at IS NULL) rules ON true \
-     LEFT JOIN observation_domain domain ON domain.domain_ref = target.domain_ref \
+     LEFT JOIN LATERAL (SELECT string_agg(domain.name, ', ' ORDER BY domain.name) AS names \
+                        FROM observation_domain_target relation \
+                        JOIN observation_domain domain USING(domain_ref) \
+                        WHERE relation.target_ref=target.target_ref) domain ON true \
      WHERE target.target_ref = $1"
 );
 const READ_TARGET_WITHOUT_DOMAIN: &str = concat!(
     "SELECT ",
     listed_target_columns!(),
-    ", NULL::text, NULL::boolean \
+    ", NULL::text \
      FROM collection_observation_target target \
      LEFT JOIN LATERAL ( \
        SELECT COALESCE(bool_or(COALESCE(revision.automatic_enabled,false)),false) \
@@ -389,7 +490,7 @@ const READ_TARGET_WITHOUT_DOMAIN: &str = concat!(
 const LIST_TARGETS_WITH_DOMAIN: &str = concat!(
     "SELECT ",
     listed_target_columns!(),
-    ", domain.name, domain.is_own_domain \
+    ", domain.names \
      FROM collection_observation_target target \
      LEFT JOIN LATERAL ( \
        SELECT COALESCE(bool_or(COALESCE(revision.automatic_enabled,false)),false) \
@@ -400,16 +501,21 @@ const LIST_TARGETS_WITH_DOMAIN: &str = concat!(
        LEFT JOIN collection_monitor_rule_revision revision \
               ON revision.rule_revision_ref=rule.active_revision_ref \
        WHERE rule.target_ref=target.target_ref AND rule.retired_at IS NULL) rules ON true \
-     LEFT JOIN observation_domain domain ON domain.domain_ref = target.domain_ref \
+     LEFT JOIN LATERAL (SELECT string_agg(domain.name, ', ' ORDER BY domain.name) AS names \
+                        FROM observation_domain_target relation \
+                        JOIN observation_domain domain USING(domain_ref) \
+                        WHERE relation.target_ref=target.target_ref) domain ON true \
      WHERE ($1::text IS NULL OR target.target_kind = $1) \
        AND ($2::text IS NULL OR target.lifecycle_state = $2) \
-       AND ($4::uuid IS NULL OR target.domain_ref = $4) \
+       AND ($4::uuid IS NULL OR EXISTS (SELECT 1 FROM observation_domain_target relation \
+                                         WHERE relation.target_ref=target.target_ref \
+                                           AND relation.domain_ref=$4)) \
      ORDER BY target.first_stored_at DESC LIMIT $3"
 );
 const LIST_TARGETS_WITHOUT_DOMAIN: &str = concat!(
     "SELECT ",
     listed_target_columns!(),
-    ", NULL::text, NULL::boolean \
+    ", NULL::text \
      FROM collection_observation_target target \
      LEFT JOIN LATERAL ( \
        SELECT COALESCE(bool_or(COALESCE(revision.automatic_enabled,false)),false) \
@@ -489,7 +595,9 @@ pub async fn count_targets(
                     WHERE rule.target_ref=target.target_ref AND rule.retired_at IS NULL \
                       AND revision.automatic_enabled)) \
          FROM collection_observation_target target \
-         WHERE $1::uuid IS NULL OR target.domain_ref = $1"
+         WHERE $1::uuid IS NULL OR EXISTS (SELECT 1 FROM observation_domain_target relation \
+                                            WHERE relation.target_ref=target.target_ref \
+                                              AND relation.domain_ref=$1)"
     );
     let row: (i64, i64, i64, i64, i64) = if domain_ready {
         sqlx::query_as(COUNT_IN_DOMAIN).bind(domain)
@@ -564,7 +672,6 @@ fn listed_target(row: ListedTargetRow) -> ObservationTarget {
         last_patrol_succeeded_at: row.12,
         next_patrol_at: row.13,
         domain_name: row.14,
-        domain_is_own: row.15,
         ..ObservationTarget::from((
             row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7, row.8,
         ))
@@ -587,7 +694,6 @@ type ListedTargetRow = (
     Option<String>,
     Option<String>,
     Option<String>,
-    Option<bool>,
 );
 
 pub async fn list_targets_in_state(
@@ -752,7 +858,6 @@ impl From<TargetRow> for ObservationTarget {
             last_patrol_succeeded_at: None,
             next_patrol_at: None,
             domain_name: None,
-            domain_is_own: None,
         }
     }
 }
@@ -776,8 +881,12 @@ pub struct TargetDeletionPreview {
     /// 归属这个作者、会保留下来的作品数。关键词目标没有作者可言，为 0。
     pub retained_works: i64,
     pub retained_details: i64,
-    /// 跨行业样本是已采集的参照材料，不能随观察决定一起抹掉。
-    pub blocking_cross_industry_samples: i64,
+    /// Material usage rows keep their Request and WorkOrder lineage, so the target cannot be
+    /// deleted while those durable usage facts exist.
+    pub blocking_material_usages: i64,
+    /// Work Order Domain usages are immutable execution-purpose snapshots and likewise prevent
+    /// deletion of their referenced Target.
+    pub blocking_work_order_usages: i64,
     /// 明确风险页是安装级安全事实；目标删除不能借机清掉仍可触发 cooldown 的信号。
     pub blocking_risk_signals: i64,
     /// 随目标控制面一起删除的、只在该目标目录内成立的人工作品失效结论。
@@ -788,7 +897,7 @@ pub async fn read_target_deletion_preview(
     database: &Database,
     target_ref: Uuid,
 ) -> Result<Option<TargetDeletionPreview>, sqlx::Error> {
-    let row: Option<(String, String, i64, i64, i64, i64, i64, i64, i64, i64, i64)> = sqlx::query_as(
+    let row: Option<(String, String, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)> = sqlx::query_as(
         "SELECT COALESCE(NULLIF(btrim(target.display_name),''),target.identity_key),target.target_kind, \
                 (SELECT count(*) FROM collection_work_order w WHERE w.target_ref=target.target_ref), \
                 (SELECT count(*) FROM collection_work_order w \
@@ -808,7 +917,14 @@ pub async fn read_target_deletion_preview(
                  JOIN linggan_material_content_detail d \
                    ON d.content_public_ref=a.content_public_ref \
                  WHERE a.author_external_id=target.identity_key AND a.platform=target.platform), \
-                0::bigint, \
+                (SELECT count(*) FROM linggan_material_domain_usage usage \
+                 WHERE usage.request_ref IN (SELECT request_ref FROM collection_acquisition_request \
+                                              WHERE target_ref=target.target_ref) \
+                    OR usage.work_order_ref IN (SELECT work_order_ref FROM collection_work_order \
+                                                WHERE target_ref=target.target_ref)), \
+                (SELECT count(*) FROM collection_work_order_domain_usage usage \
+                 JOIN collection_work_order work USING(work_order_ref) \
+                 WHERE work.target_ref=target.target_ref), \
                 (SELECT count(*) FROM collection_material_retirement retirement \
                  WHERE retirement.target_ref=target.target_ref) \
          FROM collection_observation_target target WHERE target.target_ref=$1",
@@ -826,14 +942,12 @@ pub async fn read_target_deletion_preview(
         requests: row.6,
         retained_works: row.7,
         retained_details: row.8,
-        blocking_cross_industry_samples: row.9,
+        blocking_material_usages: row.9,
+        blocking_work_order_usages: row.10,
         blocking_risk_signals: 0,
-        material_retirements: row.10,
+        material_retirements: row.11,
     });
     if let Some(preview) = preview.as_mut() {
-        let mut connection = database.pool().acquire().await?;
-        preview.blocking_cross_industry_samples =
-            protected_cross_industry_sample_count(&mut connection, target_ref).await?;
         let risk_schema_ready: bool = sqlx::query_scalar(
             "SELECT to_regclass('collection_installation_risk_signal') IS NOT NULL \
                   AND to_regclass('collection_detail_page_session') IS NOT NULL",
@@ -861,39 +975,6 @@ pub async fn read_target_deletion_preview(
     Ok(preview)
 }
 
-const PROTECTED_CROSS_INDUSTRY_SAMPLE_COUNT_SQL: &str = "SELECT count(*) FROM ( \
-       SELECT sample_ref FROM cross_industry_sample WHERE target_ref=$1 \
-       UNION \
-       SELECT seen.sample_ref \
-       FROM cross_industry_creator_sample_observation seen \
-       JOIN linggan_runtime_capture_package package USING(package_ref) \
-       JOIN collection_work_order_lease_task lease_task ON lease_task.task_id=package.task_id \
-       JOIN collection_work_order_lease lease USING(lease_ref) \
-       JOIN collection_work_order work_order USING(work_order_ref) \
-       WHERE work_order.target_ref=$1 \
-     ) protected_cross_industry_fact";
-
-/// 删除预览与实际删除共用这一句：前端看到的阻断数必须就是提交时采用的阻断数。
-async fn protected_cross_industry_sample_count(
-    connection: &mut sqlx::PgConnection,
-    target_ref: Uuid,
-) -> Result<i64, sqlx::Error> {
-    let creator_observation_ready: bool = sqlx::query_scalar(
-        "SELECT to_regclass('cross_industry_creator_sample_observation') IS NOT NULL",
-    )
-    .fetch_one(&mut *connection)
-    .await?;
-    let sql = if creator_observation_ready {
-        PROTECTED_CROSS_INDUSTRY_SAMPLE_COUNT_SQL
-    } else {
-        "SELECT count(*) FROM cross_industry_sample WHERE target_ref=$1"
-    };
-    sqlx::query_scalar(sql)
-        .bind(target_ref)
-        .fetch_one(&mut *connection)
-        .await
-}
-
 /// 删除的结果。「删不了」与「没找到」是两件事，不能都报成失败。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TargetDeletionOutcome {
@@ -901,7 +982,7 @@ pub enum TargetDeletionOutcome {
     UnknownTarget,
     /// 输入的名字与目标名字不一致。不可逆操作要求手打名字，点两下太容易了。
     NameMismatch,
-    /// 有必须保留的跨行业材料挂在它下面，不能把材料和观察决定一起抹掉。
+    /// 有不可改写的材料用途、工单 Domain 用途或安装风险信号，不能一并删除其来源 Target。
     BlockedByProtectedFacts {
         rows: i64,
     },
@@ -909,8 +990,9 @@ pub enum TargetDeletionOutcome {
 
 /// 彻底删除一个观察目标：删掉控制面，保留采集事实。
 ///
-/// 采集事实（作品、详情、评论、采集包、回执）在数据库层挂着 append-only 触发器，删除会被
-/// 直接拒绝——那是这个系统的地基，不为一次清理去拆。而这些事实本来也不需要跟着走：
+/// 采集事实（作品、详情、评论、采集包、回执）与 WorkOrder Domain 用途在数据库层挂着
+/// append-only 触发器，删除会被直接拒绝——那是这个系统的地基，不为一次清理去拆。而这些
+/// 事实本来也不需要跟着走：
 /// 「这篇笔记是这个博主发的」是世界的事实，「我要盯着这个人」是我的决定，删掉后者不该
 /// 让前者失效。作者归属推自 append-only 事实（见 `linggan_material_content_author`），
 /// 因此删除之后作品仍然属于这个博主、仍然检索得到。
@@ -947,7 +1029,24 @@ pub async fn delete_observation_target(
         )
         .fetch_one(&mut *tx)
         .await?;
-    let mut blocking = protected_cross_industry_sample_count(&mut *tx, target_ref).await?;
+    let mut blocking = sqlx::query_scalar::<_, i64>(
+        "SELECT count(*) FROM linggan_material_domain_usage usage \
+         WHERE usage.request_ref IN (SELECT request_ref FROM collection_acquisition_request \
+                                      WHERE target_ref=$1) \
+            OR usage.work_order_ref IN (SELECT work_order_ref FROM collection_work_order \
+                                        WHERE target_ref=$1)",
+    )
+    .bind(target_ref)
+    .fetch_one(&mut *tx)
+    .await?;
+    blocking += sqlx::query_scalar::<_, i64>(
+        "SELECT count(*) FROM collection_work_order_domain_usage usage \
+         JOIN collection_work_order work USING(work_order_ref) \
+         WHERE work.target_ref=$1",
+    )
+    .bind(target_ref)
+    .fetch_one(&mut *tx)
+    .await?;
     if risk_signal_ready {
         blocking += sqlx::query_scalar::<_, i64>(
             "SELECT count(*) FROM collection_installation_risk_signal signal \
@@ -969,27 +1068,10 @@ pub async fn delete_observation_target(
         tx.rollback().await?;
         return Ok(TargetDeletionOutcome::BlockedByProtectedFacts { rows: blocking });
     }
-
-    // 跨行业详情补采的作用域（`0074`）挂在工单上。漏了它，删一个做过详情补采的关键词
-    // 会在删工单那一步撞外键，整笔回滚——而界面只会说「删除没有完成」。
-    //
-    // 单独一条而不是并进下面那串：只装了控制面那一段 schema 的库里没有这张表，而
-    // PostgreSQL **在解析阶段就会因表不存在报错**，写在 `WHERE` 里的存在性判断根本来不及
-    // 生效。它只 FK 工单，先删掉不影响其余顺序。
-    let cross_industry_scope_ready: bool = sqlx::query_scalar(
-        "SELECT to_regclass('collection_work_order_cross_industry_target') IS NOT NULL",
-    )
-    .fetch_one(&mut *tx)
-    .await?;
-    if cross_industry_scope_ready {
-        sqlx::query(
-            "DELETE FROM collection_work_order_cross_industry_target WHERE work_order_ref IN ( \
-               SELECT work_order_ref FROM collection_work_order WHERE target_ref=$1)",
-        )
+    sqlx::query("DELETE FROM observation_domain_target WHERE target_ref=$1")
         .bind(target_ref)
         .execute(&mut *tx)
         .await?;
-    }
 
     if detail_session_ready {
         // 页面会话、授权回执与 lane preparation 都是目标执行控制记录；它们不证明材料
@@ -1080,6 +1162,10 @@ pub async fn delete_observation_target(
             .execute(&mut *tx)
             .await?;
     }
+    sqlx::query("DELETE FROM observation_domain_target WHERE target_ref=$1")
+        .bind(target_ref)
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await?;
     Ok(TargetDeletionOutcome::Deleted)
 }

@@ -6,14 +6,19 @@ use linggan_contracts::{
 use linggan_evidence::{
     LocalAttemptOutcome, LocalSubmissionOutcome, LocalTaskOutcome, MediaUploadFinalizeClaim,
     ProducerRuntimeError, RuntimeAttemptOutcome, RuntimeSubmissionOutcome, RuntimeTaskOutcome,
-    admit_media_blob,
-    begin_media_upload, claim_media_upload_finalize, complete_media_upload, create_manual_task,
-    create_producer_task, read_runtime_library, record_media_download_failure,
+    admit_media_blob, begin_media_upload, claim_media_upload_finalize, complete_media_upload,
+    create_manual_task, create_producer_task, read_runtime_library, record_media_download_failure,
     record_media_upload_chunk, start_local_attempt, start_producer_attempt, submit_local_package,
     submit_producer_package,
 };
 use linggan_storage_postgres::{Database, testing::isolated_proof_schema};
 use sqlx::Row;
+
+#[path = "support/material_fixture.rs"]
+mod domain_fixture;
+
+const PROOF_DOMAIN_REF: uuid::Uuid =
+    uuid::Uuid::from_u128(0x0000_0000_0000_4000_8000_0000_0000_0001);
 
 const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0001_scope_001_capture_evidence.sql"),
@@ -174,7 +179,7 @@ async fn full_runtime_accepts_each_capability_without_collapsing_partial_media_o
     assert_ne!(failed_attempt, uuid::Uuid::nil());
     prove_resumable_media_upload(&database).await;
     prove_materialized_session_without_a_download_attempt_is_refused(&database).await;
-    let query = serde_json::from_str(r#"{"text":null,"scope":"all_accepted_material","window":"last_30_days","sort":"latest_discovery"}"#)
+    let query = serde_json::from_str(r#"{"text":null,"scope":"all_accepted_material","window":"last_30_days","sort":"latest_discovery","domainRef":"00000000-0000-4000-8000-000000000001"}"#)
         .expect("read query is valid");
     let projection = read_runtime_library(&database, &query)
         .await
@@ -254,7 +259,7 @@ async fn every_declared_capability_admits_one_typed_package_without_a_second_tra
 #[tokio::test]
 #[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
 async fn runtime_search_twenty_cards_reaches_the_library_without_promoting_retained_raw_records() {
-    let database = proof_database("plugin_runtime_search_twenty").await;
+    let database = domain_fixture::proof_database("plugin_runtime_search_twenty").await;
     let task_id = uuid::Uuid::new_v4();
     let producer_instance_id = uuid::Uuid::new_v4();
     let attempt_id = uuid::Uuid::new_v4();
@@ -303,8 +308,9 @@ async fn runtime_search_twenty_cards_reaches_the_library_without_promoting_retai
     // The package preserves a malformed raw record, but the default Evidence Library must not
     // silently promote it into a browsable Evidence card.
     records.push(serde_json::json!({"kind":"raw_unparsed","payload":"retained only"}));
+    let package_ref = uuid::Uuid::new_v4();
     let package = serde_json::json!({
-        "contractVersion":"linggan.producer.capture-package.v1", "packageRef":uuid::Uuid::new_v4(),
+        "contractVersion":"linggan.producer.capture-package.v1", "packageRef":package_ref,
         "packageKind":"discovery_search", "platform":"xhs",
         "observedAt":"2026-08-25T00:00:00Z", "capturedAt":"2026-08-25T00:00:01Z",
         "coverage":{"target":{"basis":"maximum_quota","query":"ADHD","maximumQuota":20},"layers":[{
@@ -323,9 +329,10 @@ async fn runtime_search_twenty_cards_reaches_the_library_without_promoting_retai
         submit_producer_package(&database, &submission).await,
         Ok(RuntimeSubmissionOutcome::Acknowledged { .. })
     ));
+    seed_proof_domain_usage(&database, package_ref).await;
 
     let query: EvidenceQuery = serde_json::from_str(
-        r#"{"text":"ADHD","scope":"all_accepted_material","window":"last_30_days","sort":"latest_discovery"}"#,
+        r#"{"text":"ADHD","scope":"all_accepted_material","window":"latest_accepted_discovery","sort":"latest_discovery","domainRef":"00000000-0000-4000-8000-000000000001"}"#,
     )
     .expect("Evidence Library query is valid");
     let projection = read_runtime_library(&database, &query)
@@ -362,7 +369,7 @@ async fn runtime_search_twenty_cards_reaches_the_library_without_promoting_retai
 
 async fn assert_unknown_publication_default_and_explicit_window(database: &Database) {
     let default_unknown_query: EvidenceQuery = serde_json::from_str(
-        r#"{"text":"unknown publication","scope":"all_accepted_material","window":"latest_accepted_discovery","sort":"latest_discovery"}"#,
+        r#"{"text":"unknown publication","scope":"all_accepted_material","window":"latest_accepted_discovery","sort":"latest_discovery","domainRef":"00000000-0000-4000-8000-000000000001"}"#,
     )
     .expect("the explicit default discovery view is valid");
     let default_unknown_projection = read_runtime_library(database, &default_unknown_query)
@@ -385,7 +392,7 @@ async fn assert_unknown_publication_default_and_explicit_window(database: &Datab
     );
 
     let unknown_query: EvidenceQuery = serde_json::from_str(
-        r#"{"text":"unknown publication","scope":"all_accepted_material","window":"last_30_days","sort":"latest_discovery"}"#,
+        r#"{"text":"unknown publication","scope":"all_accepted_material","window":"last_30_days","sort":"latest_discovery","domainRef":"00000000-0000-4000-8000-000000000001"}"#,
     )
     .expect("filtered unknown query is valid");
     let unknown_projection = read_runtime_library(database, &unknown_query)
@@ -398,14 +405,19 @@ async fn assert_unknown_publication_default_and_explicit_window(database: &Datab
 #[tokio::test]
 #[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
 async fn runtime_unknown_published_count_keeps_platform_content_identities_separate() {
-    let database = proof_database("plugin_runtime_platform_identity_unknown").await;
+    let database = domain_fixture::proof_database("plugin_runtime_platform_identity_unknown").await;
     let shared_external_id = "synthetic-shared-external-id";
+    let recent_published_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock is after the Unix epoch")
+        .as_secs() as i64
+        - 86_400;
     submit_runtime_discovery_fixture(
         &database,
         "xhs",
         shared_external_id,
         "synthetic cross platform identity",
-        Some(1_787_589_214),
+        Some(recent_published_at),
     )
     .await;
     submit_runtime_discovery_fixture(
@@ -418,7 +430,7 @@ async fn runtime_unknown_published_count_keeps_platform_content_identities_separ
     .await;
 
     let query: EvidenceQuery = serde_json::from_str(
-        r#"{"text":"cross platform identity","scope":"all_accepted_material","window":"last_30_days","sort":"latest_discovery"}"#,
+        r#"{"text":"cross platform identity","scope":"all_accepted_material","window":"last_30_days","sort":"latest_discovery","domainRef":"00000000-0000-4000-8000-000000000001"}"#,
     )
     .expect("strict library query is valid");
     let projection = read_runtime_library(&database, &query)
@@ -467,8 +479,9 @@ async fn submit_runtime_discovery_fixture(
     if let Some(published_at) = published_at {
         payload["publishedAt"] = serde_json::json!(published_at);
     }
+    let package_ref = uuid::Uuid::new_v4();
     let package = serde_json::json!({
-        "contractVersion":"linggan.producer.capture-package.v1", "packageRef":uuid::Uuid::new_v4(),
+        "contractVersion":"linggan.producer.capture-package.v1", "packageRef":package_ref,
         "packageKind":"discovery_search", "platform":platform,
         "observedAt":"2026-08-25T00:00:00Z", "capturedAt":"2026-08-25T00:00:01Z",
         "coverage":{"target":{"basis":"maximum_quota","query":"synthetic identity fixture","maximumQuota":1},"layers":[{
@@ -488,6 +501,26 @@ async fn submit_runtime_discovery_fixture(
         submit_producer_package(database, &submission).await,
         Ok(RuntimeSubmissionOutcome::Acknowledged { .. })
     ));
+    seed_proof_domain_usage(database, package_ref).await;
+}
+
+async fn seed_proof_domain_usage(database: &Database, package_ref: uuid::Uuid) {
+    // These direct producer fixtures stand in for previously accepted canonical material. Attach
+    // the explicit Domain membership the Corpus query now requires before asserting its projection.
+    sqlx::query(
+        "INSERT INTO linggan_material_domain_usage( \
+            usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref \
+         ) SELECT gen_random_uuid(),public_ref,$2,'primary','legacy_domain_migration',first_package_ref \
+             FROM linggan_material_content \
+            WHERE first_package_ref=$1 \
+         ON CONFLICT (content_public_ref,domain_ref) \
+             WHERE basis_kind='legacy_domain_migration' DO NOTHING",
+    )
+    .bind(package_ref)
+    .bind(PROOF_DOMAIN_REF)
+    .execute(database.pool())
+    .await
+    .expect("synthetic accepted material has a Domain usage in the proof fixture");
 }
 
 async fn prove_resumable_media_upload(database: &Database) {
@@ -811,7 +844,7 @@ async fn records_beyond_the_task_quota_still_enter_the_library_but_say_so() {
     // 早已付掉，把它挡在语料库外并不能让访问没发生，只会让风险白付、情报白丢。
     // 因此超额记录照常入库，但必须在 reason 上说明自己超出了任务上限——Coverage 不能
     // 因为材料入库了就声称自己守住了那条边界。
-    let database = proof_database("plugin_runtime_quota_bound").await;
+    let database = domain_fixture::proof_database("plugin_runtime_quota_bound").await;
     let task_id = uuid::Uuid::new_v4();
     let producer_instance_id = uuid::Uuid::new_v4();
     let attempt_id = uuid::Uuid::new_v4();

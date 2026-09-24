@@ -370,42 +370,6 @@ pub async fn read_archive_completeness(
         );
     }
 
-    // 外部领域创作者的作品与详情物理上不在 Evidence 表。根工单、Attempt、Package、隔离和
-    // 目录边界仍由上面的共同控制链读取；这里只替换材料侧三个互斥计数。目标范围必须沿
-    // creator observation 的 Package 血缘计算，不能使用 sample.target_ref（同一篇样本可被
-    // 多个目标看到，而那一列只保留第一次带回它的目标）。
-    let cross_schema_ready: bool = sqlx::query_scalar(
-        "SELECT to_regclass('cross_industry_creator_sample_observation') IS NOT NULL \
-              AND to_regclass('cross_industry_sample_detail') IS NOT NULL",
-    )
-    .fetch_one(database.pool())
-    .await?;
-    if cross_schema_ready {
-        let cross_rows: Vec<(String, i64, i64, i64)> = sqlx::query_as(concat!(
-            "WITH ",
-            crate::archive_ledger::cross_industry_creator_directory_sql!(
-                "target.platform=$1 AND target.target_kind='creator'",
-                "true"
-            ),
-            " SELECT target.identity_key,count(*)::bigint, \
-                     count(*) FILTER (WHERE directory.has_detail)::bigint, \
-                     count(*) FILTER (WHERE NOT directory.has_detail)::bigint \
-              FROM cross_directory_work directory \
-              JOIN collection_observation_target target USING(target_ref) \
-              GROUP BY target.identity_key"
-        ))
-        .bind(platform)
-        .fetch_all(database.pool())
-        .await?;
-        for (author_external_id, works_listed, details_captured, pending_details) in cross_rows {
-            let archive = totals.entry(author_external_id).or_default();
-            archive.works_listed = works_listed;
-            archive.details_captured = details_captured;
-            archive.retired_works = 0;
-            archive.pending_details = pending_details;
-        }
-    }
-
     // The 200-link contract applies to a newly-established standard directory.  It does not
     // erase an older target-scoped directory that has already been accepted.  Keep those
     // historical works visible when their details are complete; the UI can then say exactly

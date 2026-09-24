@@ -2,7 +2,7 @@
 #[path = "support/material_fixture.rs"]
 mod fixture;
 
-use fixture::{proof_database, proof_database_before_cross_industry_creator_directory};
+use fixture::proof_database;
 use linggan_contracts::{
     AdmissionOutcome, ProducerTaskSpec, parse_producer_attempt, parse_producer_submission,
     parse_producer_task_spec,
@@ -14,13 +14,13 @@ use linggan_evidence::{
     DispatchFailureOutcome, InstallationCheckIn, MaterialExecutionKind, RequestLeaseError,
     RuntimeAttemptOutcome, RuntimeSubmissionOutcome, TargetDeletionOutcome,
     TargetDomainAssignmentOutcome, activate_installation_credential, assign_target_domain,
-    bind_observation_account, check_in_installation, decide_dispatch, delete_observation_target,
-    grant_authorization, list_targets, open_claim_window, read_archive_completeness,
-    read_creator_directory, read_creator_lifecycle, read_cross_industry_creator_directory,
+    assign_target_domain_with_role, bind_observation_account, check_in_installation,
+    decide_dispatch, delete_observation_target, grant_authorization, list_targets,
+    open_claim_window, read_archive_completeness, read_creator_directory, read_creator_lifecycle,
     read_target, read_target_deletion_preview, register_station, report_account_eligibility,
-    request_admit_and_lease, request_progressive_archive_and_lease, requeue_failed_dispatch,
-    retire_materials, run_progressive_archives, set_station_accepting, start_producer_attempt,
-    submit_producer_package,
+    request_admit_and_lease, request_and_admit_for_domain, request_progressive_archive_and_lease,
+    requeue_failed_dispatch, retire_materials, run_progressive_archives, set_station_accepting,
+    start_producer_attempt, submit_producer_package,
 };
 use linggan_storage_postgres::Database;
 use std::time::Duration;
@@ -30,7 +30,291 @@ const DIGEST_KEY: &[u8] = b"observation-target-dossier-postgres-proof-v1";
 
 #[tokio::test]
 #[ignore = "requires a disposable PostgreSQL 16 proof database"]
-async fn a_plugin_candidate_stays_unassigned_until_a_person_picks_an_active_domain() {
+async fn compatible_concurrent_requests_from_peer_domains_share_one_execution() {
+    let database = proof_database("dossier_peer_domain_request_merge").await;
+    let target_ref = seed_creator_target(&database, "creator-peer-domain-merge").await;
+    let primary_domain = Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap();
+    let reference_domain = Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap();
+    sqlx::query(
+        "INSERT INTO observation_domain_target(domain_ref,target_ref,role) \
+         VALUES ($1,$2,'reference')",
+    )
+    .bind(reference_domain)
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .expect("the same Target can be used as a reference in the peer Domain");
+    grant_deep_archive(&database, "同范围双领域并发合并证明", 200).await;
+
+    let mut target_gate = database.pool().begin().await.unwrap();
+    sqlx::query(
+        "SELECT target_ref FROM collection_observation_target WHERE target_ref=$1 FOR UPDATE",
+    )
+    .bind(target_ref)
+    .fetch_one(&mut *target_gate)
+    .await
+    .expect("the test holds the shared Target admission lock before both Requests start");
+    let primary_database = database.clone();
+    let reference_database = database.clone();
+    let primary_request = tokio::spawn(async move {
+        request_and_admit_for_domain(
+            &primary_database,
+            target_ref,
+            primary_domain,
+            "deep_archive",
+            "同范围双领域并发合并证明",
+            "person",
+        )
+        .await
+    });
+    let reference_request = tokio::spawn(async move {
+        request_and_admit_for_domain(
+            &reference_database,
+            target_ref,
+            reference_domain,
+            "deep_archive",
+            "同范围双领域并发合并证明",
+            "person",
+        )
+        .await
+    });
+    wait_for_blocked_query_count(
+        &database,
+        "%FROM collection_observation_target%FOR UPDATE%",
+        2,
+    )
+    .await;
+    target_gate
+        .commit()
+        .await
+        .expect("both Requests reached the held Target lock before release");
+    let primary = primary_request.await.unwrap();
+    let reference = reference_request.await.unwrap();
+    let primary = primary.expect("primary-domain request is recorded and admitted");
+    let reference = reference.expect("reference-domain request is recorded and admitted");
+    assert_eq!(primary.work_order_ref, reference.work_order_ref);
+    let mut outcomes = [primary.outcome.code(), reference.outcome.code()];
+    outcomes.sort_unstable();
+    assert_eq!(outcomes, ["admitted", "merge"]);
+
+    let work_order_ref = primary
+        .work_order_ref
+        .expect("one shared WorkOrder is written");
+    let queued_work_orders: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_work_order WHERE target_ref=$1 \
+         AND lane='deep_archive' AND queue_state='queued'",
+    )
+    .bind(target_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(queued_work_orders, 1);
+
+    let frozen_usages: Vec<(Uuid, String)> = sqlx::query_as(
+        "SELECT domain_ref,role FROM collection_work_order_domain_usage \
+         WHERE work_order_ref=$1 ORDER BY domain_ref",
+    )
+    .bind(work_order_ref)
+    .fetch_all(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        frozen_usages,
+        vec![
+            (primary_domain, "primary".to_owned()),
+            (reference_domain, "reference".to_owned()),
+        ],
+        "each Request keeps an independent frozen Domain role"
+    );
+
+    let first_installation = ready_installation(&database, "peer-domain-merge-station").await;
+    let task_spec = match decide_dispatch(
+        &database,
+        &first_installation.install_key,
+        &first_installation.secret,
+    )
+    .await
+    .expect("the shared WorkOrder is dispatched once")
+    {
+        DispatchDecision::Dispatch { task_spec, .. } => task_spec,
+        other => panic!("expected the one shared task, got {other:?}"),
+    };
+    let task = parse_producer_task_spec(&task_spec.to_string()).unwrap();
+    let producer_instance_id = Uuid::parse_str(&first_installation.install_key).unwrap();
+    let attempt = parse_producer_attempt(
+        &serde_json::json!({
+            "contractVersion":"linggan.producer.attempt.v1",
+            "producerInstanceId":producer_instance_id,
+            "taskId":task.task_id(),
+            "attemptId":Uuid::new_v4(),
+        })
+        .to_string(),
+    )
+    .unwrap();
+    assert!(matches!(
+        start_producer_attempt(&database, &attempt).await,
+        Ok(RuntimeAttemptOutcome::Started { .. })
+    ));
+    let submission = bounded_root_submission(&task, &attempt, producer_instance_id);
+    assert!(matches!(
+        submit_producer_package(&database, &submission).await,
+        Ok(RuntimeSubmissionOutcome::Acknowledged { .. })
+    ));
+
+    let attempts: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM linggan_runtime_attempt WHERE task_id=$1")
+            .bind(task.task_id())
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    let packages: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM linggan_runtime_capture_package WHERE task_id=$1")
+            .bind(task.task_id())
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(attempts, 1, "the shared instruction starts one Attempt");
+    assert_eq!(packages, 1, "the shared instruction produces one Package");
+}
+
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn committed_domain_pause_blocks_a_request_waiting_on_the_domain_row() {
+    let database = proof_database("dossier_domain_pause_request_race").await;
+    let target_ref = seed_creator_target(&database, "creator-domain-pause-request-race").await;
+    let domain_ref = Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap();
+    grant_deep_archive(&database, "暂停领域请求竞态证明", 200).await;
+
+    let mut pause_transaction = database.pool().begin().await.unwrap();
+    sqlx::query("UPDATE observation_domain SET status='paused' WHERE domain_ref=$1")
+        .bind(domain_ref)
+        .execute(&mut *pause_transaction)
+        .await
+        .expect("the uncommitted pause holds the Domain row lock");
+    let request_database = database.clone();
+    let request = tokio::spawn(async move {
+        request_and_admit_for_domain(
+            &request_database,
+            target_ref,
+            domain_ref,
+            "deep_archive",
+            "暂停领域请求竞态证明",
+            "person",
+        )
+        .await
+    });
+    wait_for_blocked_query_count(
+        &database,
+        "%FROM observation_domain_target relation%FOR SHARE OF domain%",
+        1,
+    )
+    .await;
+    pause_transaction
+        .commit()
+        .await
+        .expect("the pause commits only after the Request is waiting on its row lock");
+    let request_result = request.await.unwrap();
+    assert!(matches!(
+        request_result,
+        Err(AcquisitionChainError::TargetDomainUnassigned)
+    ));
+    let requests: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_acquisition_request WHERE target_ref=$1",
+    )
+    .bind(target_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(requests, 0, "a committed pause leaves no new Request");
+}
+
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn committed_domain_pause_blocks_a_queued_work_order_claim() {
+    let database = proof_database("dossier_domain_pause_claim_race").await;
+    let target_ref = seed_creator_target(&database, "creator-domain-pause-claim-race").await;
+    let domain_ref = Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap();
+    grant_deep_archive(&database, "暂停领域 claim 竞态证明", 200).await;
+    let installation = ready_installation(&database, "domain-pause-claim-station").await;
+    let request = request_and_admit_for_domain(
+        &database,
+        target_ref,
+        domain_ref,
+        "deep_archive",
+        "暂停领域 claim 竞态证明",
+        "person",
+    )
+    .await
+    .unwrap();
+    let work_order_ref = request
+        .work_order_ref
+        .expect("admission leaves a queued WorkOrder");
+
+    let mut pause_transaction = database.pool().begin().await.unwrap();
+    sqlx::query("UPDATE observation_domain SET status='paused' WHERE domain_ref=$1")
+        .bind(domain_ref)
+        .execute(&mut *pause_transaction)
+        .await
+        .expect("the uncommitted pause holds the Domain row lock");
+    let claim_database = database.clone();
+    let claim_install_key = installation.install_key.clone();
+    let claim_secret = installation.secret.clone();
+    let claim = tokio::spawn(async move {
+        decide_dispatch(&claim_database, &claim_install_key, &claim_secret).await
+    });
+    wait_for_blocked_query_count(
+        &database,
+        "%collection_work_order_domain_usage usage%FOR SHARE OF domain%",
+        1,
+    )
+    .await;
+    pause_transaction
+        .commit()
+        .await
+        .expect("the pause commits only after the claim is waiting on its row lock");
+    let claim_result = claim.await.unwrap().unwrap();
+    assert!(matches!(
+        claim_result,
+        DispatchDecision::ControlBlocked { reason_code }
+            if reason_code == "domain_paused_or_unscoped"
+    ));
+    let leases: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_work_order_lease WHERE work_order_ref=$1",
+    )
+    .bind(work_order_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        leases, 0,
+        "a committed pause leaves the queued order unclaimed"
+    );
+}
+
+async fn wait_for_blocked_query_count(database: &Database, query_pattern: &str, minimum: i64) {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let blocked: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM pg_stat_activity \
+                 WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE $1",
+            )
+            .bind(query_pattern)
+            .fetch_one(database.pool())
+            .await
+            .expect("the proof database exposes this session's blocked queries");
+            if blocked >= minimum {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the expected queries reached the deliberate row-lock barrier");
+}
+
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn a_plugin_candidate_stays_unassigned_until_a_person_adds_active_domain_relations() {
     let database = proof_database("dossier_domain_assignment").await;
     let target_ref = Uuid::new_v4();
     sqlx::query(
@@ -81,18 +365,36 @@ async fn a_plugin_candidate_stays_unassigned_until_a_person_picks_an_active_doma
         .unwrap()
         .expect("assigned target remains readable");
     assert_eq!(assigned.domain_name.as_deref(), Some("ADHD"));
-    assert_eq!(assigned.domain_is_own, Some(true));
 
     let other_domain = Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap();
-    assert!(matches!(
-        assign_target_domain(&database, target_ref, other_domain).await,
-        Err(linggan_evidence::CollectionTargetError::DomainAlreadyAssigned)
-    ));
+    assert_eq!(
+        assign_target_domain_with_role(&database, target_ref, other_domain, "reference")
+            .await
+            .unwrap(),
+        TargetDomainAssignmentOutcome::Assigned,
+        "a global Target can serve more than one Domain"
+    );
+    let memberships: Vec<(String, String)> = sqlx::query_as(
+        "SELECT domain.name,relation.role FROM observation_domain_target relation \
+         JOIN observation_domain domain USING(domain_ref) \
+         WHERE relation.target_ref=$1 ORDER BY domain.name",
+    )
+    .bind(target_ref)
+    .fetch_all(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        memberships,
+        vec![
+            ("ADHD".to_owned(), "primary".to_owned()),
+            ("考研自习".to_owned(), "reference".to_owned())
+        ]
+    );
 }
 
 #[tokio::test]
 #[ignore = "requires a disposable PostgreSQL 16 proof database"]
-async fn deleting_a_target_removes_its_retirement_decisions_but_keeps_material() {
+async fn deleting_a_target_with_immutable_domain_history_preserves_all_linked_facts() {
     let database = proof_database("dossier_target_deletion_retirement").await;
     let target_ref = Uuid::new_v4();
     sqlx::query(
@@ -229,13 +531,15 @@ async fn deleting_a_target_removes_its_retirement_decisions_but_keeps_material()
         .unwrap()
         .expect("target deletion preview remains available");
     assert_eq!(preview.material_retirements, 1);
+    assert_eq!(preview.blocking_work_order_usages, 1);
     assert_eq!(
         delete_observation_target(&database, target_ref, "删除目标")
             .await
             .unwrap(),
-        TargetDeletionOutcome::Deleted
+        TargetDeletionOutcome::BlockedByProtectedFacts { rows: 1 },
+        "an immutable WorkOrder Domain usage cannot be erased with its Target"
     );
-    let counts: (i64, i64, i64, i64, i64, i64, i64, i64, i64) = sqlx::query_as(
+    let counts: (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64) = sqlx::query_as(
         "SELECT \
            (SELECT count(*) FROM collection_observation_target WHERE target_ref=$1), \
            (SELECT count(*) FROM collection_material_retirement WHERE target_ref=$1), \
@@ -245,7 +549,8 @@ async fn deleting_a_target_removes_its_retirement_decisions_but_keeps_material()
            (SELECT count(*) FROM collection_detail_page_session_grant_attempt WHERE session_ref=$3), \
            (SELECT count(*) FROM collection_detail_page_session_lane_preparation WHERE session_ref=$3), \
            (SELECT count(*) FROM collection_work_order WHERE work_order_ref=$4), \
-           (SELECT count(*) FROM collection_work_order_lease WHERE lease_ref=$5)",
+           (SELECT count(*) FROM collection_work_order_lease WHERE lease_ref=$5), \
+           (SELECT count(*) FROM collection_work_order_domain_usage WHERE work_order_ref=$4)",
     )
     .bind(target_ref)
     .bind(content_ref)
@@ -255,7 +560,7 @@ async fn deleting_a_target_removes_its_retirement_decisions_but_keeps_material()
     .fetch_one(database.pool())
     .await
     .unwrap();
-    assert_eq!(counts, (0, 0, 1, 0, 0, 0, 0, 0, 0));
+    assert_eq!(counts, (1, 1, 1, 1, 1, 1, 1, 1, 1, 1));
 }
 
 #[tokio::test]
@@ -309,11 +614,12 @@ async fn target_deletion_preserves_installation_risk_signals_by_refusing_the_del
         .unwrap()
         .expect("target deletion preview remains available");
     assert_eq!(preview.blocking_risk_signals, 1);
+    assert_eq!(preview.blocking_work_order_usages, 1);
     assert_eq!(
         delete_observation_target(&database, target_ref, "风险页目标")
             .await
             .unwrap(),
-        TargetDeletionOutcome::BlockedByProtectedFacts { rows: 1 }
+        TargetDeletionOutcome::BlockedByProtectedFacts { rows: 2 }
     );
     let retained: (i64, i64) = sqlx::query_as(
         "SELECT \
@@ -322,92 +628,6 @@ async fn target_deletion_preserves_installation_risk_signals_by_refusing_the_del
     )
     .bind(target_ref)
     .bind(risk_signal_ref)
-    .fetch_one(database.pool())
-    .await
-    .unwrap();
-    assert_eq!(retained, (1, 1));
-}
-
-#[tokio::test]
-#[ignore = "requires a disposable PostgreSQL 16 proof database"]
-async fn target_deletion_preserves_cross_industry_creator_relation_when_sample_was_seen_elsewhere_first()
- {
-    let database = proof_database("dossier_target_deletion_cross_creator_relation").await;
-    let installation = ready_installation(&database, "target-delete-cross-creator").await;
-    let creator_ref = seed_creator_target_in_domain(
-        &database,
-        "creator-delete-cross-relation",
-        "00000000-0000-4000-8000-000000000002",
-    )
-    .await;
-    grant_deep_archive(&database, "建立创作者档案", 200).await;
-    request_progressive_archive_and_lease(&database, creator_ref, "建立创作者档案", "person", 30)
-        .await
-        .unwrap();
-    complete_progressive_root_with_partial_directory(&database, &installation, 1, "surface_ended")
-        .await;
-
-    let keyword_ref = Uuid::new_v4();
-    sqlx::query(
-        "INSERT INTO collection_observation_target \
-           (target_ref,platform,target_kind,identity_key,display_name,source,domain_ref) \
-         VALUES ($1,'xhs','keyword','考研自习','考研自习','manual', \
-                 '00000000-0000-4000-8000-000000000002')",
-    )
-    .bind(keyword_ref)
-    .execute(database.pool())
-    .await
-    .unwrap();
-    sqlx::query(
-        "UPDATE cross_industry_sample SET target_ref=$1 \
-         WHERE content_external_id='creator-delete-cross-relation-partial-0'",
-    )
-    .bind(keyword_ref)
-    .execute(database.pool())
-    .await
-    .unwrap();
-    let direct_creator_samples: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM cross_industry_sample WHERE target_ref=$1")
-            .bind(creator_ref)
-            .fetch_one(database.pool())
-            .await
-            .unwrap();
-    assert_eq!(
-        direct_creator_samples, 0,
-        "the sample's first-seen owner no longer identifies the creator relation"
-    );
-
-    let preview = read_target_deletion_preview(&database, creator_ref)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(
-        preview.blocking_cross_industry_samples, 1,
-        "the confirmation dialog must expose the same creator-relation block as deletion"
-    );
-
-    let outcome =
-        delete_observation_target(&database, creator_ref, "creator-delete-cross-relation")
-            .await
-            .unwrap();
-    assert!(
-        matches!(
-            outcome,
-            TargetDeletionOutcome::BlockedByProtectedFacts { rows } if rows > 0
-        ),
-        "the immutable relation's Package lineage must prevent target deletion: {outcome:?}"
-    );
-    let retained: (i64, i64) = sqlx::query_as(
-        "SELECT \
-           (SELECT count(*) FROM collection_observation_target WHERE target_ref=$1), \
-           (SELECT count(*) FROM cross_industry_creator_sample_observation seen \
-             JOIN linggan_runtime_capture_package package USING(package_ref) \
-             JOIN collection_work_order_lease_task lease_task ON lease_task.task_id=package.task_id \
-             JOIN collection_work_order_lease lease USING(lease_ref) \
-             JOIN collection_work_order work_order USING(work_order_ref) \
-             WHERE work_order.target_ref=$1)",
-    )
-    .bind(creator_ref)
     .fetch_one(database.pool())
     .await
     .unwrap();
@@ -434,9 +654,7 @@ async fn target_drawer_read_uses_the_same_full_projection_as_the_target_list() {
     assert_eq!(drawer_target.target_ref, list_target.target_ref);
     assert_eq!(drawer_target.identity_key, list_target.identity_key);
     assert_eq!(drawer_target.domain_name, list_target.domain_name);
-    assert_eq!(drawer_target.domain_is_own, list_target.domain_is_own);
     assert_eq!(drawer_target.domain_name.as_deref(), Some("ADHD"));
-    assert_eq!(drawer_target.domain_is_own, Some(true));
 }
 
 #[tokio::test]
@@ -576,389 +794,6 @@ async fn clean_200_work_progressive_root_establishes_the_bounded_creator_baselin
     );
 }
 
-#[tokio::test]
-#[ignore = "requires a disposable PostgreSQL 16 proof database"]
-async fn cross_industry_creator_directory_schedules_cross_industry_detail_children() {
-    let database = proof_database("dossier_cross_industry_creator").await;
-    let installation = ready_installation(&database, "dossier-cross-industry-creator").await;
-    let target_ref = seed_creator_target_in_domain(
-        &database,
-        "creator-cross-industry",
-        "00000000-0000-4000-8000-000000000002",
-    )
-    .await;
-    grant_deep_archive(&database, "建立创作者档案", 200).await;
-    let root = request_progressive_archive_and_lease(
-        &database,
-        target_ref,
-        "建立创作者档案",
-        "person",
-        30,
-    )
-    .await
-    .unwrap()
-    .request
-    .work_order_ref
-    .unwrap();
-
-    complete_progressive_root_with_partial_directory(&database, &installation, 3, "surface_ended")
-        .await;
-
-    let directory = read_cross_industry_creator_directory(&database, target_ref)
-        .await
-        .unwrap()
-        .expect("跨领域创作者的已接纳主页作品应当出现在创作者目录");
-    assert_eq!(directory.works.len(), 3);
-    assert!(
-        directory
-            .works
-            .iter()
-            .all(|work| work.detail_state == CatalogDetailState::Pending)
-    );
-    let evidence_rows: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM linggan_material_discovery_finding finding \
-         JOIN linggan_runtime_capture_package package USING(package_ref) \
-         WHERE package.package_kind='profile_discovery'",
-    )
-    .fetch_one(database.pool())
-    .await
-    .unwrap();
-    assert_eq!(
-        evidence_rows, 0,
-        "跨领域目录只进入 cross_industry，不得为了让页面可见而复制进本领域 Evidence"
-    );
-
-    let completeness = read_archive_completeness(&database, "xhs").await.unwrap();
-    let completeness = completeness.get("creator-cross-industry").unwrap();
-    assert_eq!(
-        (
-            completeness.works_listed,
-            completeness.details_captured,
-            completeness.pending_details,
-        ),
-        (3, 0, 3)
-    );
-
-    let tick = run_progressive_archives(&database).await.unwrap();
-    assert!(
-        tick.queued.contains(&target_ref),
-        "主页目录接纳后，渐进建档应立即排出详情子工单：{tick:?}"
-    );
-    let child: Uuid = sqlx::query_scalar(
-        "SELECT work_order_ref FROM collection_work_order \
-         WHERE target_ref=$1 AND work_order_ref<>$2 \
-         ORDER BY created_at DESC,work_order_ref DESC LIMIT 1",
-    )
-    .bind(target_ref)
-    .bind(root)
-    .fetch_one(database.pool())
-    .await
-    .unwrap();
-    let cross_scope: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM collection_work_order_cross_industry_target \
-         WHERE work_order_ref=$1",
-    )
-    .bind(child)
-    .fetch_one(database.pool())
-    .await
-    .unwrap();
-    let evidence_scope: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM collection_work_order_material_target WHERE work_order_ref=$1",
-    )
-    .bind(child)
-    .fetch_one(database.pool())
-    .await
-    .unwrap();
-    assert_eq!((cross_scope, evidence_scope), (3, 0));
-}
-
-#[tokio::test]
-#[ignore = "requires a disposable PostgreSQL 16 proof database"]
-async fn interrupted_cross_industry_patrol_does_not_expand_the_directory_or_gap_scope() {
-    let database = proof_database("dossier_cross_patrol_boundary").await;
-    let installation = ready_installation(&database, "dossier-cross-patrol-boundary").await;
-    let target_ref = seed_creator_target_in_domain(
-        &database,
-        "creator-cross-patrol-boundary",
-        "00000000-0000-4000-8000-000000000002",
-    )
-    .await;
-    grant_deep_archive(&database, "建立创作者档案", 200).await;
-    request_progressive_archive_and_lease(&database, target_ref, "建立创作者档案", "person", 30)
-        .await
-        .unwrap();
-    complete_progressive_root_with_partial_directory(&database, &installation, 3, "surface_ended")
-        .await;
-    grant_patrol(&database, "巡查建档创作者").await;
-    submit_patrol_round(
-        &database,
-        &installation,
-        target_ref,
-        "巡查建档创作者",
-        PatrolRound::InterruptedWithUsableWork,
-    )
-    .await;
-
-    let raw_relation_exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS ( \
-           SELECT 1 FROM cross_industry_creator_sample_observation seen \
-           JOIN cross_industry_sample sample USING(sample_ref) \
-           WHERE sample.content_external_id='creator-patrol-interrupted-work')",
-    )
-    .fetch_one(database.pool())
-    .await
-    .unwrap();
-    assert!(
-        raw_relation_exists,
-        "the interrupted Package remains immutable history; qualification happens at consumption"
-    );
-    let directory = read_cross_industry_creator_directory(&database, target_ref)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(directory.works.len(), 3);
-    assert!(
-        directory
-            .works
-            .iter()
-            .all(|work| work.content_external_id != "creator-patrol-interrupted-work")
-    );
-    let completeness = read_archive_completeness(&database, "xhs").await.unwrap();
-    let completeness = completeness.get("creator-cross-patrol-boundary").unwrap();
-    assert_eq!(
-        (completeness.works_listed, completeness.pending_details),
-        (3, 3)
-    );
-
-    let retry = linggan_evidence::request_creator_directory_gaps(
-        &database,
-        target_ref,
-        "建立创作者档案",
-        "person",
-    )
-    .await
-    .unwrap();
-    let scoped_ids: Vec<String> = sqlx::query_scalar(
-        "SELECT sample.content_external_id \
-         FROM collection_work_order_cross_industry_target scope \
-         JOIN cross_industry_sample sample USING(sample_ref) \
-         WHERE scope.work_order_ref=$1 ORDER BY sample.content_external_id",
-    )
-    .bind(retry.work_order_ref.unwrap())
-    .fetch_all(database.pool())
-    .await
-    .unwrap();
-    assert_eq!(scoped_ids.len(), 3);
-    assert!(
-        !scoped_ids
-            .iter()
-            .any(|identity| identity == "creator-patrol-interrupted-work")
-    );
-}
-
-#[tokio::test]
-#[ignore = "requires a disposable PostgreSQL 16 proof database"]
-async fn conflicting_discovery_payload_identity_is_quarantined_before_cross_industry_projection() {
-    let database = proof_database("dossier_cross_identity_conflict").await;
-    let installation = ready_installation(&database, "dossier-cross-identity-conflict").await;
-    let target_ref = seed_creator_target_in_domain(
-        &database,
-        "creator-cross-identity-conflict",
-        "00000000-0000-4000-8000-000000000002",
-    )
-    .await;
-    grant_deep_archive(&database, "建立创作者档案", 200).await;
-    request_progressive_archive_and_lease(&database, target_ref, "建立创作者档案", "person", 30)
-        .await
-        .unwrap();
-    complete_progressive_root_with_partial_directory(&database, &installation, 1, "surface_ended")
-        .await;
-    grant_patrol(&database, "巡查建档创作者").await;
-    submit_patrol_round(
-        &database,
-        &installation,
-        target_ref,
-        "巡查建档创作者",
-        PatrolRound::ConflictingPayloadIdentity,
-    )
-    .await;
-
-    let disposition: (String, String) = sqlx::query_as(
-        "SELECT disposition.disposition,disposition.reason \
-         FROM linggan_runtime_record_disposition disposition \
-         JOIN linggan_runtime_capture_package package USING(package_ref) \
-         JOIN collection_work_order_lease_task lease_task ON lease_task.task_id=package.task_id \
-         JOIN collection_work_order_lease lease USING(lease_ref) \
-         JOIN collection_work_order work_order USING(work_order_ref) \
-         WHERE work_order.target_ref=$1 \
-           AND package.payload #>> '{records,0,sourceObject,externalId}'='canonical-source-identity'",
-    )
-    .bind(target_ref)
-    .fetch_one(database.pool())
-    .await
-    .unwrap();
-    assert_eq!(
-        disposition,
-        (
-            "quarantined".to_owned(),
-            "typed_discovery_identity_invalid".to_owned()
-        )
-    );
-    let projected: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM cross_industry_sample \
-         WHERE content_external_id IN ('canonical-source-identity','forged-payload-identity')",
-    )
-    .fetch_one(database.pool())
-    .await
-    .unwrap();
-    assert_eq!(projected, 0);
-}
-
-#[tokio::test]
-#[ignore = "requires a disposable PostgreSQL 16 proof database"]
-async fn migration_backfills_cross_industry_creator_directory_and_reopens_the_false_completion() {
-    let database = proof_database_before_cross_industry_creator_directory(
-        "dossier_cross_industry_creator_migration",
-    )
-    .await;
-    let installation = ready_installation(&database, "dossier-cross-creator-migration").await;
-    let target_ref = seed_creator_target_in_domain(
-        &database,
-        "creator-cross-migration",
-        "00000000-0000-4000-8000-000000000002",
-    )
-    .await;
-    grant_deep_archive(&database, "建立创作者档案", 200).await;
-    let root = request_progressive_archive_and_lease(
-        &database,
-        target_ref,
-        "建立创作者档案",
-        "person",
-        30,
-    )
-    .await
-    .unwrap()
-    .request
-    .work_order_ref
-    .unwrap();
-    complete_progressive_root_with_partial_directory(&database, &installation, 3, "surface_ended")
-        .await;
-
-    let historical_samples: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM cross_industry_sample WHERE target_ref=$1")
-            .bind(target_ref)
-            .fetch_one(database.pool())
-            .await
-            .unwrap();
-    assert_eq!(
-        historical_samples, 3,
-        "旧运行已经存下样本，只缺目标目录关系"
-    );
-    let relation_before: Option<String> =
-        sqlx::query_scalar("SELECT to_regclass('cross_industry_creator_sample_observation')::text")
-            .fetch_one(database.pool())
-            .await
-            .unwrap();
-    assert_eq!(relation_before, None);
-    sqlx::query(
-        "UPDATE collection_work_order SET stop_conditions=jsonb_set( \
-             jsonb_set(stop_conditions,'{progressiveArchive,status}','\"completed\"'::jsonb,true), \
-             '{progressiveArchive,completedAt}',to_jsonb(scope_001_now()),true) \
-         WHERE work_order_ref=$1",
-    )
-    .bind(root)
-    .execute(database.pool())
-    .await
-    .unwrap();
-
-    let interrupted_target_ref = seed_creator_target_in_domain(
-        &database,
-        "creator-cross-migration-interrupted",
-        "00000000-0000-4000-8000-000000000002",
-    )
-    .await;
-    let interrupted_root = request_progressive_archive_and_lease(
-        &database,
-        interrupted_target_ref,
-        "建立创作者档案",
-        "person",
-        30,
-    )
-    .await
-    .unwrap()
-    .request
-    .work_order_ref
-    .unwrap();
-    complete_progressive_root_with_partial_directory(&database, &installation, 1, "risk_control")
-        .await;
-    sqlx::query(
-        "UPDATE collection_work_order SET stop_conditions=jsonb_set( \
-             jsonb_set(stop_conditions,'{progressiveArchive,status}','\"completed\"'::jsonb,true), \
-             '{progressiveArchive,completedAt}',to_jsonb(scope_001_now()),true) \
-         WHERE work_order_ref=$1",
-    )
-    .bind(interrupted_root)
-    .execute(database.pool())
-    .await
-    .unwrap();
-
-    sqlx::raw_sql(include_str!(
-        "../../../database/migrations/0102_cross_industry_creator_directory.sql"
-    ))
-    .execute(database.pool())
-    .await
-    .expect("0102 backfills immutable package records and repairs the false root completion");
-
-    let backfilled: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM cross_industry_creator_sample_observation")
-            .fetch_one(database.pool())
-            .await
-            .unwrap();
-    assert_eq!(
-        backfilled, 4,
-        "both qualified and interrupted Packages remain immutable history; only root recovery is qualified"
-    );
-    let state: (String, String) = sqlx::query_as(
-        "SELECT stop_conditions #>> '{progressiveArchive,status}', \
-                stop_conditions #>> '{progressiveArchive,recoveryReason}' \
-         FROM collection_work_order WHERE work_order_ref=$1",
-    )
-    .bind(root)
-    .fetch_one(database.pool())
-    .await
-    .unwrap();
-    assert_eq!(
-        state,
-        (
-            "active".to_owned(),
-            "cross_industry_creator_directory_reconstructed".to_owned(),
-        )
-    );
-    let directory = read_cross_industry_creator_directory(&database, target_ref)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(directory.works.len(), 3);
-    let interrupted_state: String = sqlx::query_scalar(
-        "SELECT stop_conditions #>> '{progressiveArchive,status}' \
-         FROM collection_work_order WHERE work_order_ref=$1",
-    )
-    .bind(interrupted_root)
-    .fetch_one(database.pool())
-    .await
-    .unwrap();
-    assert_eq!(
-        interrupted_state, "completed",
-        "an unproven risk-stopped Package must not be reopened into an unschedulable active root"
-    );
-    let interrupted_directory =
-        read_cross_industry_creator_directory(&database, interrupted_target_ref)
-            .await
-            .unwrap()
-            .unwrap();
-    assert!(interrupted_directory.works.is_empty());
-}
-
 /// 人确认「这篇在平台上没了」之后，作品仍留在目录里，只是不再计入待补齐。
 ///
 /// 抹掉分母会让「档案完成」建立在一个修饰过的数字上——这个博主当时确实发过这几篇。
@@ -1067,10 +902,14 @@ async fn a_detail_accepted_without_a_title_still_counts_as_captured() {
     .unwrap();
     seed_untitled_detail_observation(&database, captured_ref).await;
 
-    let directory = read_creator_directory(&database, target_ref)
-        .await
-        .unwrap()
-        .expect("已证明的目录可以被读出来");
+    let directory = read_creator_directory(
+        &database,
+        target_ref,
+        Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
+    )
+    .await
+    .unwrap()
+    .expect("已证明的目录可以被读出来");
     let captured = directory
         .works
         .iter()
@@ -1622,10 +1461,14 @@ async fn completed_progressive_archive_never_turns_a_patrol_addition_into_deepen
 
     // Only a new explicit person request may freeze the patrol-only gap. It must never
     // re-open the completed root or revisit the already-qualified canonical member.
-    let directory = read_creator_directory(&database, target_ref)
-        .await
-        .unwrap()
-        .unwrap();
+    let directory = read_creator_directory(
+        &database,
+        target_ref,
+        Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
     let expected: Vec<Uuid> = directory
         .works
         .iter()
@@ -2763,12 +2606,20 @@ async fn seed_creator_target_in_domain(
     let target_ref = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO collection_observation_target \
-           (target_ref,platform,target_kind,identity_key,display_name,source,domain_ref) \
-         VALUES ($1,'xhs','creator',$2,$2,'manual',$3::uuid)",
+           (target_ref,platform,target_kind,identity_key,display_name,source) \
+         VALUES ($1,'xhs','creator',$2,$2,'manual')",
     )
     .bind(target_ref)
     .bind(identity_key)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO observation_domain_target(domain_ref,target_ref,role) \
+         VALUES ($1::uuid,$2,'primary')",
+    )
     .bind(domain_ref)
+    .bind(target_ref)
     .execute(database.pool())
     .await
     .unwrap();
@@ -3225,10 +3076,14 @@ async fn member_display_state(
     target_ref: Uuid,
     content_external_id: &str,
 ) -> (CatalogDetailState, Option<MaterialExecutionKind>) {
-    let directory = read_creator_directory(database, target_ref)
-        .await
-        .expect("the creator directory stays readable")
-        .expect("the directory surface is ready for this target");
+    let directory = read_creator_directory(
+        database,
+        target_ref,
+        Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
+    )
+    .await
+    .expect("the creator directory stays readable")
+    .expect("the directory surface is ready for this target");
     let work = directory
         .works
         .iter()
@@ -3613,6 +3468,29 @@ async fn seed_historical_patrol(
     station_ref: Uuid,
     issued_at: &str,
 ) -> Uuid {
+    let domain_ref: Option<Uuid> = sqlx::query_scalar(
+        "SELECT domain_ref FROM observation_domain_target \
+         WHERE target_ref=$1 AND role='primary' ORDER BY domain_ref LIMIT 1",
+    )
+    .bind(target_ref)
+    .fetch_optional(database.pool())
+    .await
+    .unwrap();
+    let domain_ref = if let Some(domain_ref) = domain_ref {
+        domain_ref
+    } else {
+        let domain_ref = Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap();
+        sqlx::query(
+            "INSERT INTO observation_domain_target(domain_ref,target_ref,role) \
+             VALUES ($1,$2,'primary') ON CONFLICT(domain_ref,target_ref) DO NOTHING",
+        )
+        .bind(domain_ref)
+        .bind(target_ref)
+        .execute(database.pool())
+        .await
+        .unwrap();
+        domain_ref
+    };
     let authorization_ref = Uuid::new_v4();
     let request_ref = Uuid::new_v4();
     let decision_ref = Uuid::new_v4();
@@ -3634,11 +3512,12 @@ async fn seed_historical_patrol(
     .unwrap();
     sqlx::query(
         "INSERT INTO collection_acquisition_request \
-           (request_ref,target_ref,lane,purpose,requested_by,requested_at) \
-         VALUES ($1,$2,'patrol','历史巡查','person',$3::timestamptz)",
+           (request_ref,target_ref,domain_ref,observation_role,lane,purpose,requested_by,requested_at) \
+         VALUES ($1,$2,$3,'primary','patrol','历史巡查','person',$4::timestamptz)",
     )
     .bind(request_ref)
     .bind(target_ref)
+    .bind(domain_ref)
     .bind(issued_at)
     .execute(database.pool())
     .await
@@ -3660,14 +3539,36 @@ async fn seed_historical_patrol(
     .unwrap();
     sqlx::query(
         "INSERT INTO collection_work_order \
-           (work_order_ref,decision_ref,target_ref,lane,max_works,stop_conditions,station_ref,created_at) \
-         VALUES ($1,$2,$3,'patrol',20,'{\"maximumQuota\":20}'::jsonb,$4,$5::timestamptz)",
+           (work_order_ref,decision_ref,target_ref,lane,max_works,stop_conditions, \
+            dispatch_lane,queue_state,scheduled_for,created_at) \
+         VALUES ($1,$2,$3,'patrol',20,'{\"maximumQuota\":20}'::jsonb, \
+                 'scheduled','queued',$4::timestamptz,$4::timestamptz)",
     )
     .bind(work_order_ref)
     .bind(decision_ref)
     .bind(target_ref)
-    .bind(station_ref)
     .bind(issued_at)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    // Freeze the historical Domain usage while the fixture WorkOrder is still unclaimed.
+    sqlx::query(
+        "INSERT INTO collection_work_order_domain_usage \
+           (work_order_ref,request_ref,domain_ref,role,basis_kind) \
+         VALUES ($1,$2,$3,'primary','legacy_migration')",
+    )
+    .bind(work_order_ref)
+    .bind(request_ref)
+    .bind(domain_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE collection_work_order SET station_ref=$2,queue_state='legacy' \
+         WHERE work_order_ref=$1",
+    )
+    .bind(work_order_ref)
+    .bind(station_ref)
     .execute(database.pool())
     .await
     .unwrap();

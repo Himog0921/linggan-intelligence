@@ -767,7 +767,6 @@ fn sample_target(index: u128, target_kind: &str) -> ObservationTarget {
         last_patrol_succeeded_at: None,
         next_patrol_at: None,
         domain_name: Some("ADHD 家庭".to_owned()),
-        domain_is_own: Some(true),
     }
 }
 

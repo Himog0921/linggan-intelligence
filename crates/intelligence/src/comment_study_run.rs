@@ -4,9 +4,11 @@
 //! budget in one repeatable-read transaction. This creates no provider invocation and does not
 //! silently add an unselected work.
 
-use crate::comment_study_source::{StudySource, StudySourceError, eligible_sources_in_transaction};
+use crate::comment_study_source::{
+    StudySource, StudySourceError, StudySourceRole, eligible_sources_in_transaction_for_selections,
+};
 use linggan_storage_postgres::Database;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use sqlx::Row;
@@ -18,7 +20,20 @@ const MAX_SELECTED_WORKS: usize = 100;
 
 #[derive(Debug, Clone)]
 pub struct PrepareStudyRunRequest {
+    pub domain_ref: Uuid,
     pub content_public_refs: Vec<Uuid>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StudyWorkSelection {
+    pub content_public_ref: Uuid,
+    pub observation_role: StudySourceRole,
+}
+
+pub struct PrepareStudyRunWithSelectionsRequest {
+    pub domain_ref: Uuid,
+    pub selections: Vec<StudyWorkSelection>,
 }
 
 #[derive(Debug, Serialize)]
@@ -27,6 +42,8 @@ pub struct PreparedStudyRun {
     pub run_ref: Uuid,
     pub as_of: String,
     pub selected_work_count: usize,
+    pub selected_primary_work_count: usize,
+    pub selected_reference_work_count: usize,
     pub covered_work_count: usize,
     pub target_count: usize,
     pub needs_context_count: usize,
@@ -59,20 +76,56 @@ pub async fn prepare_study_run(
     database: &Database,
     request: PrepareStudyRunRequest,
 ) -> Result<PreparedStudyRun, PrepareStudyRunError> {
-    let selected = normalized_work_selection(request.content_public_refs)?;
+    let selections = request
+        .content_public_refs
+        .into_iter()
+        .map(|content_public_ref| StudyWorkSelection {
+            content_public_ref,
+            observation_role: StudySourceRole::Primary,
+        })
+        .collect();
+    prepare_study_run_with_selections(
+        database,
+        PrepareStudyRunWithSelectionsRequest {
+            domain_ref: request.domain_ref,
+            selections,
+        },
+    )
+    .await
+}
+
+pub async fn prepare_study_run_with_selections(
+    database: &Database,
+    request: PrepareStudyRunWithSelectionsRequest,
+) -> Result<PreparedStudyRun, PrepareStudyRunError> {
+    let selected = normalized_work_selection(request.selections)?;
     let mut transaction = database.pool().begin().await?;
     sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
         .execute(&mut *transaction)
         .await?;
-    let policy = read_active_policy(&mut transaction).await?;
+    let policy = read_active_policy(&mut transaction, request.domain_ref).await?;
+    let domain_active: Option<Uuid> = sqlx::query_scalar(
+        "SELECT domain_ref FROM observation_domain \
+         WHERE domain_ref=$1 AND status='active' FOR SHARE",
+    )
+    .bind(policy.domain_ref)
+    .fetch_one(&mut *transaction)
+    .await?;
+    if domain_active.is_none() {
+        return Err(PrepareStudyRunError::PolicyMissing);
+    }
     let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text")
         .fetch_one(&mut *transaction)
         .await?;
-    let sources = eligible_sources_in_transaction(
+    let source_selection: Vec<(Uuid, StudySourceRole)> = selected
+        .iter()
+        .map(|selection| (selection.content_public_ref, selection.observation_role))
+        .collect();
+    let sources = eligible_sources_in_transaction_for_selections(
         &mut transaction,
         policy.domain_ref,
         &as_of,
-        &selected,
+        &source_selection,
         i64::from(policy.comment_budget),
     )
     .await?;
@@ -97,6 +150,14 @@ pub async fn prepare_study_run(
         run_ref,
         as_of,
         selected_work_count: selected.len(),
+        selected_primary_work_count: selected
+            .iter()
+            .filter(|selection| selection.observation_role == StudySourceRole::Primary)
+            .count(),
+        selected_reference_work_count: selected
+            .iter()
+            .filter(|selection| selection.observation_role == StudySourceRole::Reference)
+            .count(),
         covered_work_count: count_covered_works(database, run_ref).await?,
         target_count: count_targets(database, run_ref).await?,
         needs_context_count,
@@ -104,27 +165,34 @@ pub async fn prepare_study_run(
     })
 }
 
-fn normalized_work_selection(values: Vec<Uuid>) -> Result<Vec<Uuid>, PrepareStudyRunError> {
-    let selected: Vec<Uuid> = values
-        .into_iter()
-        .collect::<BTreeSet<_>>()
-        .into_iter()
+fn normalized_work_selection(
+    mut selections: Vec<StudyWorkSelection>,
+) -> Result<Vec<StudyWorkSelection>, PrepareStudyRunError> {
+    selections.sort_by_key(|selection| selection.content_public_ref);
+    let distinct: BTreeSet<Uuid> = selections
+        .iter()
+        .map(|selection| selection.content_public_ref)
         .collect();
-    if selected.is_empty() || selected.len() > MAX_SELECTED_WORKS {
+    if selections.is_empty()
+        || selections.len() > MAX_SELECTED_WORKS
+        || distinct.len() != selections.len()
+    {
         return Err(PrepareStudyRunError::InvalidSelection);
     }
-    Ok(selected)
+    Ok(selections)
 }
 
 async fn read_active_policy(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    domain_ref: Uuid,
 ) -> Result<ActivePolicy, PrepareStudyRunError> {
     let row = sqlx::query(
         "SELECT policy.policy_ref,policy.domain_ref,policy.comment_budget,policy.context_character_budget \
          FROM linggan_comment_study_active_policy active \
          JOIN linggan_comment_study_policy policy USING(policy_ref) \
-         WHERE active.singleton FOR SHARE OF active",
+         WHERE active.domain_ref=$1 FOR SHARE OF active",
     )
+    .bind(domain_ref)
     .fetch_optional(&mut **transaction)
     .await?
     .ok_or(PrepareStudyRunError::PolicyMissing)?;
@@ -136,11 +204,11 @@ async fn read_active_policy(
     })
 }
 
-fn group_sources(sources: Vec<StudySource>) -> BTreeMap<Uuid, Vec<StudySource>> {
+fn group_sources(sources: Vec<StudySource>) -> BTreeMap<(Uuid, StudySourceRole), Vec<StudySource>> {
     let mut grouped = BTreeMap::new();
     for source in sources {
         grouped
-            .entry(source.content_public_ref)
+            .entry((source.content_public_ref, source.observation_role))
             .or_insert_with(Vec::new)
             .push(source);
     }
@@ -152,8 +220,8 @@ async fn insert_run(
     run_ref: Uuid,
     policy: &ActivePolicy,
     as_of: &str,
-    selected: &[Uuid],
-    grouped: &BTreeMap<Uuid, Vec<StudySource>>,
+    selected: &[StudyWorkSelection],
+    grouped: &BTreeMap<(Uuid, StudySourceRole), Vec<StudySource>>,
 ) -> Result<(), sqlx::Error> {
     let selected_sources: Vec<Uuid> = grouped
         .values()
@@ -161,8 +229,9 @@ async fn insert_run(
         .collect();
     let manifest = json!({
         "contract":"comment-study.run-selection.v1",
-        "requestedWorkRefs":selected,
-        "coveredWorkRefs":grouped.keys().collect::<Vec<_>>(),
+        "requestedWorkRefs":selected.iter().map(|selection| selection.content_public_ref).collect::<Vec<_>>(),
+        "requestedWorkRoles":selected,
+        "coveredWorkRoles":grouped.keys().map(|(work_ref, role)| json!({"workRef":work_ref,"observationRole":role})).collect::<Vec<_>>(),
         "targetSourceRefs":selected_sources,
         "commentBudget":policy.comment_budget
     });
@@ -185,10 +254,10 @@ async fn insert_work_and_targets(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     run_ref: Uuid,
     policy: &ActivePolicy,
-    grouped: BTreeMap<Uuid, Vec<StudySource>>,
+    grouped: BTreeMap<(Uuid, StudySourceRole), Vec<StudySource>>,
 ) -> Result<usize, sqlx::Error> {
     let mut needs_context_count = 0;
-    for (work_ref, sources) in grouped {
+    for ((work_ref, observation_role), sources) in grouped {
         let context_manifest = bounded_context_manifest(
             &sources[0].context_manifest,
             usize::try_from(policy.context_character_budget).expect("policy budget is positive"),
@@ -199,6 +268,7 @@ async fn insert_work_and_targets(
             run_ref,
             work_ref,
             policy.domain_ref,
+            observation_role,
             context_state,
             &context_manifest,
         )
@@ -217,17 +287,19 @@ async fn insert_work(
     run_ref: Uuid,
     work_ref: Uuid,
     domain_ref: Uuid,
+    observation_role: StudySourceRole,
     context_state: &str,
     context_manifest: &Value,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         "INSERT INTO linggan_comment_study_work( \
-           run_ref,content_public_ref,domain_ref,selection_reason,context_state,context_manifest,context_hash \
-         ) VALUES($1,$2,$3,'user_selected',$4,$5,$6)",
+           run_ref,content_public_ref,domain_ref,observation_role,selection_reason,context_state,context_manifest,context_hash \
+         ) VALUES($1,$2,$3,$4,'user_selected',$5,$6,$7)",
     )
     .bind(run_ref)
     .bind(work_ref)
     .bind(domain_ref)
+    .bind(observation_role.as_str())
     .bind(context_state)
     .bind(context_manifest)
     .bind(hash_value(context_manifest))

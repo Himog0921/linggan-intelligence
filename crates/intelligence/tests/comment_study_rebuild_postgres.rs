@@ -10,7 +10,7 @@ use linggan_evidence::{
     ensure_media_processing_work, record_derivative_disposition,
 };
 use linggan_intelligence::comment_study_source::{
-    ADHD_DOMAIN_REF, StudySourceError, eligible_sources, preview_sources,
+    StudySourceError, eligible_sources, preview_sources,
 };
 use linggan_intelligence::{
     comment_study_acceptance::accept_target_output,
@@ -59,6 +59,15 @@ use uuid::Uuid;
 
 const RESET_SQL: &str = include_str!("../../../database/bootstrap/comment-study-reset.sql");
 const STUDY_SCHEMA_SQL: &str = include_str!("../../../database/bootstrap/comment-study-001.sql");
+const PROOF_DOMAIN_REF: Uuid = Uuid::from_u128(0x0000_0000_0000_4000_8000_0000_0000_0001);
+
+fn domain_read_query(run_ref: Option<Uuid>) -> CommentStudyReadQuery {
+    CommentStudyReadQuery {
+        domain: Some(PROOF_DOMAIN_REF),
+        run_ref,
+        ..Default::default()
+    }
+}
 
 struct UnavailableModelSecrets;
 
@@ -100,7 +109,7 @@ async fn source_gate_selects_only_adhd_current_readable_and_unrestricted_comment
         "2026-09-16T08:00:00Z",
     )
     .await;
-    let domain_ref = Uuid::parse_str(ADHD_DOMAIN_REF).unwrap();
+    let domain_ref = PROOF_DOMAIN_REF;
     let as_of = "2099-01-01T00:00:00Z";
 
     let selected = eligible_sources(&database, domain_ref, as_of, 10)
@@ -222,14 +231,9 @@ async fn source_gate_excludes_content_author_voice_and_unknown_roles() {
     )
     .await;
 
-    let selected = eligible_sources(
-        &database,
-        Uuid::parse_str(ADHD_DOMAIN_REF).unwrap(),
-        "2099-01-01T00:00:00Z",
-        10,
-    )
-    .await
-    .unwrap();
+    let selected = eligible_sources(&database, PROOF_DOMAIN_REF, "2099-01-01T00:00:00Z", 10)
+        .await
+        .unwrap();
 
     assert_eq!(selected.len(), 1);
     assert_eq!(selected[0].source_ref, reader_comment);
@@ -306,7 +310,7 @@ async fn setup_preview_counts_the_same_source_gate_that_freezes_targets() {
     .await
     .unwrap();
 
-    let domain_ref = Uuid::parse_str(ADHD_DOMAIN_REF).unwrap();
+    let domain_ref = PROOF_DOMAIN_REF;
     let as_of = "2099-01-01T00:00:00Z";
     let preview = preview_sources(&database, domain_ref, as_of).await.unwrap();
     let frozen = eligible_sources(&database, domain_ref, as_of, 3000)
@@ -422,7 +426,7 @@ async fn source_gate_excludes_withdrawn_ocr_but_keeps_the_comment_target() {
     )
     .await
     .unwrap();
-    let domain_ref = Uuid::parse_str(ADHD_DOMAIN_REF).unwrap();
+    let domain_ref = PROOF_DOMAIN_REF;
     let as_of = "2099-01-01T00:00:00Z";
     let before_withdrawal = eligible_sources(&database, domain_ref, as_of, 10)
         .await
@@ -534,14 +538,9 @@ async fn source_context_admits_only_the_latest_accepted_nonretired_ocr_semantic_
     .await
     .unwrap();
 
-    let sources = eligible_sources(
-        &database,
-        Uuid::parse_str(ADHD_DOMAIN_REF).unwrap(),
-        "2099-01-01T00:00:00Z",
-        10,
-    )
-    .await
-    .unwrap();
+    let sources = eligible_sources(&database, PROOF_DOMAIN_REF, "2099-01-01T00:00:00Z", 10)
+        .await
+        .unwrap();
     let ocr_fragments: Vec<_> = sources[0].context_manifest["sources"]
         .as_array()
         .unwrap()
@@ -787,7 +786,7 @@ async fn a_reobserved_media_slot_contributes_one_context_fragment_per_derived_te
         "the fixture has to produce a genuinely re-observed slot for this proof to mean anything"
     );
 
-    let domain_ref = Uuid::parse_str(ADHD_DOMAIN_REF).unwrap();
+    let domain_ref = PROOF_DOMAIN_REF;
     let sources = eligible_sources(&database, domain_ref, "2099-01-01T00:00:00Z", 10)
         .await
         .unwrap();
@@ -1075,7 +1074,7 @@ async fn clean_read_projection_reports_new_lifecycle_states_without_old_result_f
     )
     .await
     .unwrap();
-    let query = CommentStudyReadQuery::default();
+    let query = domain_read_query(None);
     let overview = read_overview(&database, &query).await.unwrap();
     assert_eq!(overview["contract"], "comment-study.read.v1");
     assert_eq!(overview["cleanLayerState"], "configured");
@@ -1085,10 +1084,7 @@ async fn clean_read_projection_reports_new_lifecycle_states_without_old_result_f
     );
     let runs = read_runs(&database, &query).await.unwrap();
     let run_ref = runs["runs"][0]["runRef"].as_str().unwrap().parse().unwrap();
-    let run_query = CommentStudyReadQuery {
-        run_ref: Some(run_ref),
-        ..Default::default()
-    };
+    let run_query = domain_read_query(Some(run_ref));
     let targets = read_targets(&database, &run_query).await.unwrap();
     assert_eq!(targets["targets"][0]["state"], "succeeded");
     assert_eq!(
@@ -1156,7 +1152,7 @@ async fn overview_counts_a_final_json_schema_rejection_as_a_semantic_contract_fa
     .await
     .unwrap();
 
-    let overview = read_overview(&database, &CommentStudyReadQuery::default())
+    let overview = read_overview(&database, &domain_read_query(None))
         .await
         .unwrap();
     assert_eq!(
@@ -1208,13 +1204,10 @@ async fn read_targets_hides_comment_text_once_the_source_becomes_restricted_afte
     )
     .await
     .unwrap();
-    let query = CommentStudyReadQuery::default();
+    let query = domain_read_query(None);
     let runs = read_runs(&database, &query).await.unwrap();
     let run_ref = runs["runs"][0]["runRef"].as_str().unwrap().parse().unwrap();
-    let run_query = CommentStudyReadQuery {
-        run_ref: Some(run_ref),
-        ..Default::default()
-    };
+    let run_query = domain_read_query(Some(run_ref));
     let before = read_targets(&database, &run_query).await.unwrap();
     assert_eq!(
         before["targets"][0]["commentText"],
@@ -1307,13 +1300,10 @@ async fn read_targets_reports_unknown_source_state_without_panicking_when_body_t
     let policy_ref = seed_study_policy(&database).await;
     seed_running_target(&database, policy_ref, content_public_ref, source_ref).await;
 
-    let query = CommentStudyReadQuery::default();
+    let query = domain_read_query(None);
     let runs = read_runs(&database, &query).await.unwrap();
     let run_ref = runs["runs"][0]["runRef"].as_str().unwrap().parse().unwrap();
-    let run_query = CommentStudyReadQuery {
-        run_ref: Some(run_ref),
-        ..Default::default()
-    };
+    let run_query = domain_read_query(Some(run_ref));
     let targets = read_targets(&database, &run_query).await.unwrap();
     assert!(
         targets["targets"][0]["commentText"].is_null(),
@@ -1372,13 +1362,10 @@ async fn read_signals_hides_evidence_and_proposition_once_the_source_becomes_res
     )
     .await
     .unwrap();
-    let query = CommentStudyReadQuery::default();
+    let query = domain_read_query(None);
     let runs = read_runs(&database, &query).await.unwrap();
     let run_ref = runs["runs"][0]["runRef"].as_str().unwrap().parse().unwrap();
-    let run_query = CommentStudyReadQuery {
-        run_ref: Some(run_ref),
-        ..Default::default()
-    };
+    let run_query = domain_read_query(Some(run_ref));
     let before = read_signals(&database, &run_query).await.unwrap();
     assert_eq!(before["signals"][0]["sourceState"], "known");
     assert_eq!(
@@ -1464,13 +1451,9 @@ async fn user_selected_work_run_freezes_only_selected_comments() {
         .execute(database.pool())
         .await
         .unwrap();
-    let preview = preview_sources(
-        &database,
-        Uuid::parse_str(ADHD_DOMAIN_REF).unwrap(),
-        "2099-01-01T00:00:00Z",
-    )
-    .await
-    .unwrap();
+    let preview = preview_sources(&database, PROOF_DOMAIN_REF, "2099-01-01T00:00:00Z")
+        .await
+        .unwrap();
     assert_eq!(
         preview
             .works
@@ -1483,6 +1466,7 @@ async fn user_selected_work_run_freezes_only_selected_comments() {
     let prepared = prepare_study_run(
         &database,
         PrepareStudyRunRequest {
+            domain_ref: PROOF_DOMAIN_REF,
             content_public_refs: vec![selected_work],
         },
     )
@@ -1555,6 +1539,7 @@ async fn next_run_needing_batch_finds_a_freshly_created_runs_queued_targets_and_
     let prepared = prepare_study_run(
         &database,
         PrepareStudyRunRequest {
+            domain_ref: PROOF_DOMAIN_REF,
             content_public_refs: vec![work_ref],
         },
     )
@@ -1683,6 +1668,7 @@ async fn a_run_whose_target_never_fits_its_model_budget_does_not_starve_a_later_
     let stuck_run = prepare_study_run(
         &database,
         PrepareStudyRunRequest {
+            domain_ref: PROOF_DOMAIN_REF,
             content_public_refs: vec![stuck_work],
         },
     )
@@ -1693,6 +1679,7 @@ async fn a_run_whose_target_never_fits_its_model_budget_does_not_starve_a_later_
     let fine_run = prepare_study_run(
         &database,
         PrepareStudyRunRequest {
+            domain_ref: PROOF_DOMAIN_REF,
             content_public_refs: vec![fine_work],
         },
     )
@@ -1797,6 +1784,7 @@ async fn batch_freezes_only_one_work_context_and_marks_only_its_targets_running(
     let run = prepare_study_run(
         &database,
         PrepareStudyRunRequest {
+            domain_ref: PROOF_DOMAIN_REF,
             content_public_refs: vec![first_work, second_work],
         },
     )
@@ -1889,6 +1877,7 @@ async fn a_malformed_sibling_result_does_not_undo_the_signals_of_a_valid_target(
     let run = prepare_study_run(
         &database,
         PrepareStudyRunRequest {
+            domain_ref: PROOF_DOMAIN_REF,
             content_public_refs: vec![work_ref],
         },
     )
@@ -2057,6 +2046,7 @@ async fn a_run_closes_as_completed_once_every_target_resolves() {
     let run = prepare_study_run(
         &database,
         PrepareStudyRunRequest {
+            domain_ref: PROOF_DOMAIN_REF,
             content_public_refs: vec![work_ref],
         },
     )
@@ -2166,6 +2156,7 @@ async fn batch_admission_keeps_valid_target_when_a_sibling_is_missing() {
     let run = prepare_study_run(
         &database,
         PrepareStudyRunRequest {
+            domain_ref: PROOF_DOMAIN_REF,
             content_public_refs: vec![work_ref],
         },
     )
@@ -2330,6 +2321,7 @@ async fn dispatch_one_batch_through_the_test_adapter(
     let run = prepare_study_run(
         database,
         PrepareStudyRunRequest {
+            domain_ref: PROOF_DOMAIN_REF,
             content_public_refs: vec![work_ref],
         },
     )
@@ -2541,6 +2533,7 @@ async fn repeated_dispatch_failures_exhaust_a_target_instead_of_re_leasing_it_fo
     let run = prepare_study_run(
         &database,
         PrepareStudyRunRequest {
+            domain_ref: PROOF_DOMAIN_REF,
             content_public_refs: vec![work_ref],
         },
     )
@@ -2690,6 +2683,7 @@ async fn expired_batch_lease_rejects_late_output_and_returns_target_to_queue() {
     let run = prepare_study_run(
         &database,
         PrepareStudyRunRequest {
+            domain_ref: PROOF_DOMAIN_REF,
             content_public_refs: vec![work_ref],
         },
     )
@@ -2819,6 +2813,7 @@ async fn source_restriction_after_freeze_cancels_batch_without_leasing_it() {
     let run = prepare_study_run(
         &database,
         PrepareStudyRunRequest {
+            domain_ref: PROOF_DOMAIN_REF,
             content_public_refs: vec![work_ref],
         },
     )
@@ -2929,6 +2924,7 @@ async fn reply_context_is_frozen_as_context_but_not_evidence() {
     let prepared = prepare_study_run(
         &database,
         PrepareStudyRunRequest {
+            domain_ref: PROOF_DOMAIN_REF,
             content_public_refs: vec![work_ref],
         },
     )
@@ -3030,11 +3026,11 @@ async fn two_eligible_signals_from(
     .fetch_one(database.pool())
     .await
     .unwrap();
-    // The active policy is a singleton by design — one installation, one current policy — so a
-    // second work in the same test reuses it instead of trying to install a rival.
+    // A Domain has one active policy. Reuse it when a second work in this test shares the Domain.
     let existing: Option<Uuid> = sqlx::query_scalar(
-        "SELECT policy_ref FROM linggan_comment_study_active_policy WHERE singleton",
+        "SELECT policy_ref FROM linggan_comment_study_active_policy WHERE domain_ref=$1",
     )
+    .bind(PROOF_DOMAIN_REF)
     .fetch_optional(database.pool())
     .await
     .unwrap();
@@ -3050,6 +3046,7 @@ async fn two_eligible_signals_from(
     let run = prepare_study_run(
         database,
         PrepareStudyRunRequest {
+            domain_ref: PROOF_DOMAIN_REF,
             content_public_refs: vec![work_ref],
         },
     )
@@ -3149,7 +3146,7 @@ async fn seed_membership(
     )
     .bind(resolution_ref)
     .bind(signal_ref)
-    .bind(Uuid::parse_str(ADHD_DOMAIN_REF).unwrap())
+    .bind(PROOF_DOMAIN_REF)
     .bind(problem_ref)
     .execute(database.pool())
     .await
@@ -3221,15 +3218,10 @@ async fn representatives_are_chosen_for_reach_rather_than_for_being_nearest() {
         seed_membership(&database, member, problem).await;
     }
 
-    let chosen = problem_representatives(
-        &database,
-        profile,
-        &hash(lead).await,
-        Uuid::parse_str(ADHD_DOMAIN_REF).unwrap(),
-        3,
-    )
-    .await
-    .unwrap();
+    let chosen =
+        problem_representatives(&database, profile, &hash(lead).await, PROOF_DOMAIN_REF, 3)
+            .await
+            .unwrap();
     assert_eq!(chosen.len(), 3);
     assert_eq!(chosen[0], lead, "a seed leads, whatever the distances say");
     assert_eq!(
@@ -3691,7 +3683,7 @@ async fn a_problem_reached_through_both_its_core_and_a_member_appears_once() {
     )
     .bind(Uuid::new_v4())
     .bind(first)
-    .bind(Uuid::parse_str(ADHD_DOMAIN_REF).unwrap())
+    .bind(PROOF_DOMAIN_REF)
     .bind(problem)
     .execute(database.pool())
     .await
@@ -3985,7 +3977,7 @@ async fn no_existing_match_stays_deferred_until_two_independent_signals_create_o
         .unwrap(),
         2
     );
-    let problems = read_problems(&database, &CommentStudyReadQuery::default())
+    let problems = read_problems(&database, &domain_read_query(None))
         .await
         .unwrap();
     let created = problems["problems"]
@@ -4110,7 +4102,7 @@ async fn seed_existing_problem(
 ) -> Uuid {
     let problem_ref = Uuid::new_v4();
     let revision_ref = Uuid::new_v4();
-    let domain_ref = Uuid::parse_str(ADHD_DOMAIN_REF).unwrap();
+    let domain_ref = PROOF_DOMAIN_REF;
     sqlx::query(
         "INSERT INTO linggan_comment_study_problem(problem_ref,domain_ref,state) \
          VALUES($1,$2,'active')",
@@ -4157,13 +4149,14 @@ async fn seed_study_policy(database: &linggan_storage_postgres::Database) -> Uui
          ) VALUES($1,$2,'comment-study.v1',100,12000)",
     )
     .bind(policy_ref)
-    .bind(Uuid::parse_str(ADHD_DOMAIN_REF).unwrap())
+    .bind(PROOF_DOMAIN_REF)
     .execute(database.pool())
     .await
     .unwrap();
     sqlx::query(
-        "INSERT INTO linggan_comment_study_active_policy(singleton,policy_ref) VALUES(true,$1)",
+        "INSERT INTO linggan_comment_study_active_policy(domain_ref,policy_ref) VALUES($1,$2)",
     )
+    .bind(PROOF_DOMAIN_REF)
     .bind(policy_ref)
     .execute(database.pool())
     .await
@@ -4256,12 +4249,12 @@ async fn seed_running_target(
     .unwrap();
     sqlx::query(
         "INSERT INTO linggan_comment_study_work( \
-           run_ref,content_public_ref,domain_ref,selection_reason,context_state,context_manifest,context_hash \
-         ) VALUES($1,$2,$3,'user_selected','ready',jsonb_build_object('workRef',$2::text),$4)",
+           run_ref,content_public_ref,domain_ref,observation_role,selection_reason,context_state,context_manifest,context_hash \
+         ) VALUES($1,$2,$3,'primary','user_selected','ready',jsonb_build_object('workRef',$2::text),$4)",
     )
     .bind(run_ref)
     .bind(content_public_ref)
-    .bind(Uuid::parse_str(ADHD_DOMAIN_REF).unwrap())
+    .bind(PROOF_DOMAIN_REF)
     .bind(hash)
     .execute(database.pool())
     .await
@@ -4630,15 +4623,9 @@ async fn one_primary_comparison_does_not_expand_after_a_valid_non_create_outcome
     .fetch_one(database.pool())
     .await
     .unwrap();
-    let signals = read_signals(
-        &database,
-        &CommentStudyReadQuery {
-            run_ref: Some(run_ref),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
+    let signals = read_signals(&database, &domain_read_query(Some(run_ref)))
+        .await
+        .unwrap();
     let projected = signals["signals"]
         .as_array()
         .unwrap()

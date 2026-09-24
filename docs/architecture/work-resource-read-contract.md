@@ -1,7 +1,7 @@
 # WORK-RESOURCE-READ-001 · Intelligence 共享作品资源读取合同
 
 > 状态: 权威当前
-> 最后核对: 2026-09-04
+> 最后核对: 2026-09-24
 > 适用范围: Intelligence 中需要展示作品封面、标题、作者、发布时间、互动、材料状态与来源血缘的页面
 > 事实来源: Issue #110 / #128 / #148、PR #132 / #151 review remediation、Media V2、当前 Material Projection、Browser Producer `0.8.28`、additive migrations `0026_work_resource_read.sql` / `0027_unified_media_resource.sql` / `0029_author_avatar_media.sql` / `0030_comment_image_media.sql`
 > 冲突时以谁为准: 用户最新确认、不可变 Capture Package、类型化材料事实、Media V2、当前代码与数据库约束
@@ -63,7 +63,7 @@ API：它只公开 target/window/as-of、Work public ref、规则版本、covera
 进程内消费共享 typed projection，以显示图表所需的最小摘要，但这不把内部 projection 晋升为另一份
 公共事实合同。
 
-内部的 typed Material Projection、Media V2 slot/origin/blob/materialization、评论与作者版本化读取可以继续拆模块；它们对页面只通过这个小 Interface 暴露。显式 `/api/local/evidence-library/legacy` 仅为旧发现卡兼容读取，不是共享资源入口，不得成为新页面 fallback。
+内部的 typed Material Projection、Media V2 slot/origin/blob/materialization、评论与作者版本化读取可以继续拆模块；它们对页面只通过这个小 Interface 暴露。DOMAIN-UNIFICATION-001 移除旧发现卡兼容 HTTP 入口 `/api/local/evidence-library/legacy`；作品列表只通过显式 Domain 的共享 Work Resource 入口读取，不能以旧投影绕过 Domain usage。
 
 ## 2. 一个作品资源的最小合同
 

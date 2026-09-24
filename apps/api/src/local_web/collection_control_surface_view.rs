@@ -1448,6 +1448,8 @@ mod tests {
             "INSERT INTO collection_observation_target \
                  (target_ref,platform,target_kind,identity_key,display_name,source,lifecycle_state) \
              VALUES ('a1000000-0000-4000-8000-000000000001','xhs','creator','v4-multi-task','双任务冻结证明','manual','archiving'); \
+             INSERT INTO observation_domain_target(domain_ref,target_ref,role) \
+             VALUES ('00000000-0000-4000-8000-000000000001','a1000000-0000-4000-8000-000000000001','primary'); \
              INSERT INTO execution_station (station_ref,display_name) \
              VALUES ('a5000000-0000-4000-8000-000000000001','双任务冻结工位'); \
              INSERT INTO collection_acquisition_authorization \
@@ -1458,14 +1460,17 @@ mod tests {
                      ARRAY['creator_archive','material_deepening'],ARRAY['immediate','batch'],20, \
                      '双任务冻结读取证明','person',scope_001_now()+interval '1 day'); \
              INSERT INTO collection_acquisition_request \
-                 (request_ref,target_ref,lane,purpose,requested_by) \
-             VALUES ('a3000000-0000-4000-8000-000000000001','a1000000-0000-4000-8000-000000000001','deep_archive','双任务冻结读取证明','person'); \
+                 (request_ref,target_ref,lane,purpose,requested_by,domain_ref,observation_role) \
+             VALUES ('a3000000-0000-4000-8000-000000000001','a1000000-0000-4000-8000-000000000001','deep_archive','双任务冻结读取证明','person','00000000-0000-4000-8000-000000000001','primary'); \
              INSERT INTO collection_admission_decision \
                  (decision_ref,request_ref,outcome,reason_code,authorization_ref,target_ref,station_ref) \
              VALUES ('a4000000-0000-4000-8000-000000000001','a3000000-0000-4000-8000-000000000001','admitted','proof_admitted','a2000000-0000-4000-8000-000000000001','a1000000-0000-4000-8000-000000000001','a5000000-0000-4000-8000-000000000001'); \
              INSERT INTO collection_work_order \
-                 (work_order_ref,decision_ref,target_ref,lane,max_works,stop_conditions,station_ref) \
-             VALUES ('a8000000-0000-4000-8000-000000000001','a4000000-0000-4000-8000-000000000001','a1000000-0000-4000-8000-000000000001','deep_archive',20,'{}','a5000000-0000-4000-8000-000000000001'); \
+                 (work_order_ref,decision_ref,target_ref,lane,max_works,stop_conditions,station_ref,dispatch_lane,queue_state,scheduled_for) \
+             VALUES ('a8000000-0000-4000-8000-000000000001','a4000000-0000-4000-8000-000000000001','a1000000-0000-4000-8000-000000000001','deep_archive',20,'{}','a5000000-0000-4000-8000-000000000001','immediate','queued',scope_001_now()); \
+             INSERT INTO collection_work_order_domain_usage \
+                 (work_order_ref,request_ref,domain_ref,role,basis_kind) \
+             VALUES ('a8000000-0000-4000-8000-000000000001','a3000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000001','primary','admitted'); \
              INSERT INTO linggan_runtime_task \
                  (task_id,task_spec_hash,task_spec,source,platform,page_type) VALUES \
                  ('a6000000-0000-4000-8000-000000000001',repeat('1',64),'{}','scheduled','xhs','author_profile'), \

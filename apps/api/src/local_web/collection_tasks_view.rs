@@ -147,9 +147,9 @@ fn task_row(task: &CollectionTaskExecution, selected: bool) -> String {
         sequence
     );
     format!(
-        r#"<button type="button" class="c-task-row{selected_class}" data-task-row data-task-id="{task_id}" data-task-title="{target}" data-task-ref="{task_ref}" data-task-meta="{meta}" data-task-state="{state}" data-task-state-class="{state_class}" data-task-state-note="{state_note}" data-task-attempt="{attempt}" data-task-package="{package}" data-task-receipt="{receipt}" data-task-effect="{effect_text}" data-task-effect-code="{effect_code}" data-task-failure="{previous_failure}" data-task-created="{created}" data-task-capabilities="{capabilities}" aria-pressed="{pressed}">
+        r#"<button type="button" class="c-task-row{selected_class}" data-task-row data-task-id="{task_id}" data-task-title="{target}" data-task-ref="{task_ref}" data-task-meta="{meta}" data-task-state="{state}" data-task-state-class="{state_class}" data-task-state-note="{state_note}" data-task-attempt="{attempt}" data-task-package="{package}" data-task-receipt="{receipt}" data-task-effect="{effect_text}" data-task-effect-code="{effect_code}" data-task-failure="{previous_failure}" data-task-created="{created}" data-task-capabilities="{capabilities}" data-task-domains="{domain_usage}" aria-pressed="{pressed}">
               <span class="c-task-id">#{task_ref}</span>
-              <span class="c-task-target"><b>{target}</b><small>{source}</small></span>
+              <span class="c-task-target"><b>{target}</b><small>{source}</small><small>{domain_usage}</small></span>
               <span class="c-task-stage">{capabilities}</span>
               <span class="c-task-state {state_class}"><b>{state}</b><small>{state_note}</small></span>
               <span class="c-task-receipt">{receipt_state}</span>
@@ -161,6 +161,7 @@ fn task_row(task: &CollectionTaskExecution, selected: bool) -> String {
         source = escape(source_label(&task.source)),
         meta = escape(&meta),
         capabilities = escape(&task.capabilities),
+        domain_usage = escape(&task.domain_usage),
         target = escape(target),
         task_ref = escape(task_ref),
         task_id = task.task_id,
@@ -247,7 +248,7 @@ fn task_inspector(task: &CollectionTaskExecution) -> String {
              <div class="c-task-inspector-head"><span data-task-inspector-ref>任务 #{task_ref}</span><h2 data-task-inspector-title>{target}</h2><p data-task-inspector-meta>{source} · {platform} · {page_type}</p></div>
              <nav class="c-task-inspector-tabs" aria-label="任务详情" role="tablist"><button type="button" class="is-active" id="task-tab-overview" data-task-tab="overview" role="tab" aria-selected="true" aria-controls="task-panel-overview" tabindex="0">概览</button><button type="button" id="task-tab-attempt" data-task-tab="attempt" role="tab" aria-selected="false" aria-controls="task-panel-attempt" tabindex="-1">Attempt</button><button type="button" id="task-tab-package" data-task-tab="package" role="tab" aria-selected="false" aria-controls="task-panel-package" tabindex="-1">Package</button><button type="button" id="task-tab-receipt" data-task-tab="receipt" role="tab" aria-selected="false" aria-controls="task-panel-receipt" tabindex="-1">Receipt</button><button type="button" id="task-tab-frozen" data-task-tab="frozen" role="tab" aria-selected="false" aria-controls="task-panel-frozen" tabindex="-1">冻结资源</button></nav>
              <div class="c-task-inspector-body">
-               <section class="c-task-panel is-active" id="task-panel-overview" data-task-panel="overview" role="tabpanel" aria-labelledby="task-tab-overview"><div class="c-state-line {state_class}" data-task-inspector-state-view><span><i></i><b data-task-inspector-state>{state}</b></span><span data-task-inspector-state-note>{state_note}</span></div><dl><div><dt>阶段</dt><dd data-task-inspector-capabilities>{capabilities}</dd></div><div><dt>创建时间</dt><dd data-task-inspector-created>{created}</dd></div><div><dt>历史</dt><dd data-task-inspector-failure>{failure}</dd></div></dl></section>
+               <section class="c-task-panel is-active" id="task-panel-overview" data-task-panel="overview" role="tabpanel" aria-labelledby="task-tab-overview"><div class="c-state-line {state_class}" data-task-inspector-state-view><span><i></i><b data-task-inspector-state>{state}</b></span><span data-task-inspector-state-note>{state_note}</span></div><dl><div><dt>阶段</dt><dd data-task-inspector-capabilities>{capabilities}</dd></div><div><dt>冻结领域用途</dt><dd data-task-inspector-domains>{domain_usage}</dd></div><div><dt>创建时间</dt><dd data-task-inspector-created>{created}</dd></div><div><dt>历史</dt><dd data-task-inspector-failure>{failure}</dd></div></dl></section>
                <section class="c-task-panel" id="task-panel-attempt" data-task-panel="attempt" role="tabpanel" aria-labelledby="task-tab-attempt" hidden><h3>Attempt</h3><p data-task-inspector-attempt>{attempt}</p></section>
                <section class="c-task-panel" id="task-panel-package" data-task-panel="package" role="tabpanel" aria-labelledby="task-tab-package" hidden><h3>Package</h3><p data-task-inspector-package>{package}</p></section>
                <section class="c-task-panel" id="task-panel-receipt" data-task-panel="receipt" role="tabpanel" aria-labelledby="task-tab-receipt" hidden><h3>Receipt</h3><p data-task-inspector-receipt>{receipt}</p><p><span data-task-inspector-effect>{effect_text}</span><code data-task-inspector-effect-code>{effect_code}</code></p></section>
@@ -263,6 +264,7 @@ fn task_inspector(task: &CollectionTaskExecution) -> String {
         state_class = state.class_name,
         state_note = escape(state.note),
         capabilities = escape(&task.capabilities),
+        domain_usage = escape(&task.domain_usage),
         created = escape(&task.created_at),
         failure = escape(&failure),
         attempt = escape(&attempt),
@@ -333,11 +335,7 @@ fn delivery_section(delivery: Option<&[DetailDeliveryReconciliation]>) -> String
 
 fn delivery_row(session: &DetailDeliveryReconciliation) -> String {
     let (label, slug, note) = match session.conclusion {
-        DeliveryConclusion::Delivered => (
-            "已交付",
-            "delivered",
-            "冻结通道的包都已拿到回执",
-        ),
+        DeliveryConclusion::Delivered => ("已交付", "delivered", "冻结通道的包都已拿到回执"),
         DeliveryConclusion::AwaitingDelivery => ("待交付", "awaiting_delivery", "还有通道没有回执"),
         DeliveryConclusion::RecoveryUnverified => (
             "恢复待核实",
@@ -356,7 +354,10 @@ fn delivery_row(session: &DetailDeliveryReconciliation) -> String {
         .target_display_name
         .as_deref()
         .unwrap_or("目标关联当前未知");
-    let content = session.content_external_id.as_deref().unwrap_or("内容引用未知");
+    let content = session
+        .content_external_id
+        .as_deref()
+        .unwrap_or("内容引用未知");
     let platform = session.platform.as_deref().unwrap_or("平台未知");
     let lanes = if session.prepared_lanes == 0 {
         "没有可核对的冻结通道".to_owned()
@@ -426,7 +427,10 @@ struct TaskStateView {
 /// 拿到回执只说明服务端收到了这次提交；材料有没有通过接纳是另一条结论。
 /// 两者都不写回执那一格是「未收到」，也不把没记录的接纳结论写成「未接纳」。
 fn receipt_column(task: &CollectionTaskExecution) -> &'static str {
-    match (task.receipt_ref.is_some(), task.material_admission.as_deref()) {
+    match (
+        task.receipt_ref.is_some(),
+        task.material_admission.as_deref(),
+    ) {
         (false, _) => "—",
         (true, Some("ACCEPTED")) => "已接纳",
         (true, _) => "接纳结论未记录",
@@ -547,6 +551,7 @@ mod tests {
             has_live_lease: Some(false),
             target_display_name: Some("<真实目标>".to_owned()),
             target_identity_key: Some("creator-001".to_owned()),
+            domain_usage: "考研自习 · 主研究 · 当前已暂停；效率学习 · 参照 · 当前运行中".to_owned(),
             attempt_id: Some(Uuid::new_v4()),
             attempt_started_at: Some("2026-09-02T16:57:08Z".to_owned()),
             package_kind: Some("author_profile".to_owned()),
@@ -576,6 +581,10 @@ mod tests {
         assert!(html.contains("后续回执已保留"));
         assert!(html.contains("&lt;真实目标&gt;"));
         assert!(!html.contains("<真实目标>"));
+        assert!(html.contains(
+            "data-task-domains=\"考研自习 · 主研究 · 当前已暂停；效率学习 · 参照 · 当前运行中\""
+        ));
+        assert!(html.contains("data-task-inspector-domains"));
         assert!(!html.contains("采集任务当前未知"));
     }
 

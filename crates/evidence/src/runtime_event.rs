@@ -69,7 +69,11 @@ pub const EVENT_FIELD_WHITELIST: &[&str] = &[
 pub fn runtime_revision() -> &'static str {
     static REVISION: OnceLock<String> = OnceLock::new();
     REVISION.get_or_init(|| {
-        revision_from_identity_path(std::env::var("LINGGAN_RUNTIME_IDENTITY_PATH").ok().as_deref())
+        revision_from_identity_path(
+            std::env::var("LINGGAN_RUNTIME_IDENTITY_PATH")
+                .ok()
+                .as_deref(),
+        )
     })
 }
 
@@ -230,11 +234,7 @@ struct EventLine {
 /// `0098_scheduler_tick_steps_and_readiness`），截出来的是那个标识的前缀而不是编出来的词，
 /// 完整的那份在心跳的 `readiness_detail` 里另存。
 pub(crate) fn bounded_code(value: &str) -> String {
-    if value.is_empty()
-        || !value
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
-    {
+    if value.is_empty() || !value.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
         return "unclassified".to_owned();
     }
     value
@@ -371,7 +371,9 @@ mod tests {
         let value: serde_json::Value = serde_json::from_str(&json).unwrap();
         let reason = value["reason"].as_str().unwrap();
         assert!(
-            reason.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
+            reason
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
             "a reason must stay a bounded code, got {reason}"
         );
         assert!(reason.len() <= 32);

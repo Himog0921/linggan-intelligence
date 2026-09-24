@@ -1,10 +1,20 @@
 # 当前状态与事项队列
 
 > 状态: 权威当前
-> 最后核对: 2026-09-22
+> 最后核对: 2026-09-24
 > 适用范围: 当前阶段、事项顺序、阻塞与下一步
 > 事实来源: 本机实际检查、已确认项目边界和完成计划
 > 冲突时以谁为准: 真实运行结果、ACCEPTED ADR 与用户最新确认
+
+### DOMAIN-UNIFICATION-001（root 在隔离 worktree 推进实现）
+
+Mog 已确认正式 Domain 在基础采集、详情、评论、媒体与研究能力上平权，Domain 只定义研究上下文；Collection 需要新增“领域管理”。当前唯一推进入口是 [DOMAIN-UNIFICATION-001](plans/active/domain-unification-001.md)：它冻结 Domain–Target 的 `primary/reference` 配置、相容多用途共享一次 WorkOrder、统一 canonical Material/Comment/Media、Domain-scoped Corpus 与 Comment Study、pause 真语义，以及开发期旧 `cross_industry` 路径的直接清理。
+
+本计划明确不为旧开发数据建设双写、长期 fallback、逐行审批、down migration 或专用保全系统。WP0–WP5 已在专属 `codex/domain-unification-001` worktree 实施；WP4 领域管理此前在隔离 PostgreSQL 与本机浏览器完成配置写入、pause/resume、多 Domain role、冲突反馈、1440/390 视口和键盘焦点验收。早期审查修复了 pause 与 Request/claim 竞态、reference 关系两步写入、旧 peer 样本错误复用首页 Package 血缘、暂停领域保存 Comment Study 策略错误码，以及 0104 的活跃旧 scope 漏检。PR #343 首次独立审查随后发现旧 Evidence 兼容接口可跨 Domain 读取、任务缺少冻结领域用途、暂停拒绝原因被折叠、CSS token 问题；本轮均已修复，并通过修复后的完整隔离 PostgreSQL 套件与双轴独立复审。API 单元测试另外暴露领域管理导航测试与现行页面合同不符、隐藏字段 CSS 覆盖问题；前者已按原五面后追加领域管理的现行顺序更新断言，后者已修样式。新布局轨道改用可收缩网格，最终版本仍待部署浏览器 smoke。
+
+当前 schema 副本升级门槛已通过：将 runtime-main 的 0102 数据库以只读 `pg_dump` 流式恢复到 disposable PostgreSQL，不落 dump 文件，再应用 0103→0104。副本保持 1,352 条 canonical Content，并为 1,352 条建立 `legacy_domain_migration` usage；24 个无 canonical Content 的旧会话被清理，24 条 grant attempt 保留并解除旧会话引用，72 条已回执的会话级 lane preparation 随会话退役，其余 196 条保留。cleanup PostgreSQL 套件覆盖 orphan session 活动 lease、session-free 旧 scope 活动 lease、无提交回执 preparation 三个拦截条件。迁移也锁定旧 scope 表，避免预检后有新 scope 写入。副本检查显示 unprojectable 旧 scope 的活跃 lease 为 0；源库只读核对仍为 0102、1,352 条 Content、24 条旧 sample，迁移前后计数一致，未写源库。临时数据库、容器与卷已清理。
+
+Issue #130 已改为当前 DOMAIN-UNIFICATION-001 交付记录，移除旧 `ready-for-agent` 并标记 `ready-for-human`。PR #343 保持 Draft；Mog 已授权完成审查修复后合入 `main` 并刷新本机运行，技术集成顺序为先 #343、再让 Draft PR #338 基于新 `main` 重排候选 0103–0105 migration 并修订 Comment Study 读取。当前共享迁移、main 合并、runtime-main 切换和 Mog 业务验收均未执行；插件重载与外部平台访问也未发生。浏览器验收见 `docs/design/acceptance/domain-unification-001-acceptance.md`。
 
 ### OCR-CONTENT-LAYERING-001 / Issue #296（候选源码；未进入共享运行）
 
@@ -28,6 +38,8 @@
 
 
 ### COMMENT-STUDY-REBUILD-001 / Issue #295（已发布；作者声音排除修复候选中）
+
+**后续范围修订**：本节后文 ADHD 专属 Comment Study 范围记录的是当时的部署状态。Mog 于 2026-09-23 通过 [DEC-0008](decisions/0008-peer-domains-and-unified-material-pipeline.md) 将其修订为显式 Domain；本 worktree 的 Comment Study Domain/role 隔离目前只有候选源码与隔离 PostgreSQL 证明，尚未合并、发布或浏览器验收。
 
 Mog 于 2026-09-16 明确决定不迁移任何旧评论研究派生结果，并要求不保留旧 V1/V2/V3 代码路径、合同或兼容层。当前唯一权威是 [DEC-0006](decisions/0006-comment-research-clean-rebuild.md) 和 [COMMENT-STUDY-REBUILD-001](plans/active/comment-research-rebuild-001.md)：领域 ADHD 是组织范围，用户选择笔记，评论是研究目标与唯一 Signal 原声证据，标题／正文／OCR／ASR 和确知父评论只作为可追溯语境。开发期本机 reset 仅删除评论研究派生层，保留原始 Evidence、资格事实与媒体 disposition；随后评论研究已合并并刷新到本机 3000，Mog 已开始首次真实手动验收。真实 provider 端到端成功、P3 Recall@K 与业务结论仍分别 `NOT VERIFIED`。
 
@@ -356,7 +368,7 @@ Material Projection 已接纳搜索/主页发现面带回的真实标题、作�
 
 ### MATERIAL-PROJECTION-001 / Issue #86（Draft stacked 实现）
 
-基于 `MEDIA-RECON-001`，新的 accepted Package 已有作品级类型化材料投影：发现、详情、评论、回复、作者、媒体槽位、媒体字节状态及 OCR/ASR 生命周期共用一个 `items` 读取 envelope。默认 `/api/local/work-resources` 返回共享作品资源投影；旧 `cards` 仅由显式 `/api/local/evidence-library/legacy` 兼容入口提供，不再默认混读。逐字段未知不补值；评论/回复保留稳定身份、根/父关系与各自 Coverage；作者资料按观察版本追加；媒体保留 Producer 顺序与未知展示顺序、多候选来源、generation、Live Photo partial、Blob/本地 Materialization、处理事件/派生和处置状态。普通 API 不返回远程候选 URI、storage key 或临时上传状态，`batch_checkpoint` 不生成材料或整体完成声明。插件到页面的现行映射见 [`architecture/material-projection-data-map.md`](architecture/material-projection-data-map.md)。
+基于 `MEDIA-RECON-001`，新的 accepted Package 已有作品级类型化材料投影：发现、详情、评论、回复、作者、媒体槽位、媒体字节状态及 OCR/ASR 生命周期共用一个 `items` 读取 envelope。`/api/local/work-resources` 返回共享作品资源投影；DOMAIN-UNIFICATION-001 的待合并分支已移除旧 `cards` HTTP 兼容入口，避免它跨 Domain 读取。逐字段未知不补值；评论/回复保留稳定身份、根/父关系与各自 Coverage；作者资料按观察版本追加；媒体保留 Producer 顺序与未知展示顺序、多候选来源、generation、Live Photo partial、Blob/本地 Materialization、处理事件/派生和处置状态。普通 API 不返回远程候选 URI、storage key 或临时上传状态，`batch_checkpoint` 不生成材料或整体完成声明。插件到页面的映射见 [`architecture/material-projection-data-map.md`](architecture/material-projection-data-map.md)；运行版本是否已切换仍以 PID 与迁移台账为准。
 
 独立审查后的隔离 PostgreSQL 16 proof 已覆盖 Task/Package/Record/Coverage 的平台、能力与目标绑定，逐 Record 隔离且健康 sibling 不连坐，评论/回复数据库关系约束，媒体 `observationRef` 历史冲突与同包重复隔离，首次同槽位并发 generation，作品级查询，以及固定 `asOf` 的 50 项 keyset cursor。读取会先把 lane/media-kind 存在性下推，再在单次最多扫描 200 个作品的预算内补页；预算触发时返回 `scanLimited + cursor`，后续从最后扫描键继续，不重复扫描已排除对象。这个预算只关闭了无界事务风险，没有关闭 enrichment 的有界 N+1：当前最坏仍可达到每个候选 7 次、单响应最多 1,404 次 enrichment/base 查询，批量化债务由 Issue #89 单独承接。
 
@@ -416,7 +428,7 @@ REAL-CANARY #52 的聚合结果已确认：本地库存在已接纳的当前可�
 - GOV-002 已确认使用私有仓库 GitHub Issues、默认五类 triage 角色和单一领域上下文适配；工程技能读取现有 `docs/context/domain-language.md`、`docs/product/domain-invariants.md` 与 `docs/decisions/`，不建立第二套 `CONTEXT.md` 或 `docs/adr/`。
 - DISC-001 已确认必须覆盖完整产品，而非只讨论情报核心：语料库、主题词表、主题地图、市场洞察、选题库和外部 Agent CLI 均已进入设计范围。
 - DISC-001 已确认 Linggan Intelligence 的稳定核心定义是面向垂直领域的持续情报研究系统；语料、主题地图、市场洞察、内容增长和 Agent 调用是共同内核的应用出口，不能因其中一个应用深入而重新定义项目内核。
-- DISC-001 已确认首个领域边界：当前一级 Domain 是 ADHD；ADHD 数学、家庭干预等是 Topic；专题研究和采集计划均发生在 ADHD 内。权威定义见 [`context/domain-language.md`](context/domain-language.md)。
+- DISC-001 在 2026-08 确认了首个领域边界：当时一级 Domain 为 ADHD，ADHD 数学、家庭干预等为 Topic。该单 Domain 范围已由 2026-09-23 的 [DEC-0008](decisions/0008-peer-domains-and-unified-material-pipeline.md) 修订；当前 Domain 与 Topic 定义见 [`context/domain-language.md`](context/domain-language.md)。
 - DISC-001 已确认第一阶段首要用户是产品负责人本人及其小团队，围绕 ADHD 持续进行市场研究、内容判断和选题决策；外部客户与多租户产品能力不进入首期。
 - DISC-001 已确认两种产品发动方式：持续观察是默认日常主循环，主动研究由人的问题或经人确认的候选变化触发；两者使用同一资产底座。目标全量必须由实际 Coverage 证明。
 - DISC-001 已确认五类长期积累视角：世界事实、语料与表达、领域知识、市场与情报认知、行动与学习。它们用于盘点长期价值，不等于五种平级真相、五张表或五个应用模块；Outcome 只校准未来，不改写过去事实或伪造因果。

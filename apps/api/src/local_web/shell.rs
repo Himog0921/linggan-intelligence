@@ -137,16 +137,14 @@ const CONTEXT_CODES: [(&str, &str); 13] = [
 ];
 
 fn localize_boundary_label(label: &str) -> String {
-    let chinese = match label {
-        "LOCAL HOST / NO READ MODEL" => "本机服务 / 读模型未接通",
-        "LOCAL HOST / ACCEPTED DISCOVERY" => "本机服务 / 已接纳发现",
-        "LOCAL HOST / NO COLLECTION RUNTIME" => "本机服务 / 采集运行时未接通",
-        "LOCAL HOST / COLLECTION STATE UNKNOWN" => "本机服务 / 采集状态未知",
-        "LOCAL HOST / NO PLATFORM ACCESS" => "本机服务 / 不访问任何平台",
-        _ => "本机服务状态",
-    };
-
-    chinese_first(chinese, label)
+    match label {
+        "LOCAL HOST / NO READ MODEL" => "读模型未接通".to_owned(),
+        "LOCAL HOST / ACCEPTED DISCOVERY" => "已接纳发现".to_owned(),
+        "LOCAL HOST / NO COLLECTION RUNTIME" => "采集运行时未接通".to_owned(),
+        "LOCAL HOST / COLLECTION STATE UNKNOWN" => "采集状态未知".to_owned(),
+        "LOCAL HOST / NO PLATFORM ACCESS" => "本机不访问平台".to_owned(),
+        _ => "本机服务状态".to_owned(),
+    }
 }
 
 /// Renders the 128px global header: the 78px global row plus the 50px context row.

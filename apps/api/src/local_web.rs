@@ -45,12 +45,9 @@ use axum::{
     routing::{get, post},
 };
 use linggan_contracts::{
-    EvidenceQuery, LifecycleState, parse_local_producer_attempt, parse_local_producer_submission,
+    LifecycleState, parse_local_producer_attempt, parse_local_producer_submission,
     parse_local_task_spec, parse_producer_attempt, parse_producer_submission,
     parse_producer_task_spec,
-};
-use linggan_evidence::cross_industry_read::{
-    CrossIndustryReadError, read_cross_industry_comments, read_cross_industry_samples,
 };
 use linggan_evidence::observation_domain::{
     ObservationDomain, read_observation_domains, resolve_current_domain,
@@ -73,16 +70,15 @@ use linggan_evidence::{
     keyword_baselines_qualified, list_targets, list_targets_in_state,
     local_discovery_schema_is_ready, local_producer_schema_is_ready,
     media_acquisition_schema_is_ready, open_claim_window, probe_runtime_readiness,
-    producer_runtime_has_packages, producer_runtime_schema_is_ready, read_archive_completeness,
-    read_blocked_materials, read_collection_task_timeline, read_creator_directory,
-    read_creator_lifecycle, read_cross_industry_hits, read_detail_delivery_reconciliation,
-    read_discovery_library, read_keyword_hits, read_media_upload_session, read_runtime_capacity,
-    read_runtime_library, read_scheduler_heartbeat, read_station_capabilities,
+    producer_runtime_schema_is_ready, read_archive_completeness, read_blocked_materials,
+    read_collection_task_timeline, read_creator_directory, read_creator_lifecycle,
+    read_detail_delivery_reconciliation, read_keyword_hits, read_media_upload_session,
+    read_runtime_capacity, read_scheduler_heartbeat, read_station_capabilities,
     read_station_overview, read_target, read_target_avatars, read_target_deletion_preview,
     read_target_inspector, read_target_observation_summaries, record_media_acquisition_failure,
     record_media_download_failure, record_media_upload_chunk, register_station,
-    release_media_upload_finalize, rename_station, request_and_admit,
-    request_and_admit_material_targets, request_progressive_archive, retire_materials,
+    release_media_upload_finalize, rename_station, request_and_admit_for_domain,
+    request_and_admit_material_targets_for_domain, request_progressive_archive, retire_materials,
     retire_station, set_group_for_many, set_station_accepting, start_local_attempt,
     start_producer_attempt, station_schema_is_ready, store_pending_target, submit_local_package,
     submit_producer_package, sync_target_from_author_profile, toggle_target_patrol,
@@ -335,6 +331,9 @@ fn router(state: LocalWebState) -> Router {
         .route("/corpus/evidence", get(evidence_library))
         .route("/collection", get(collection_entry))
         .route("/collection/targets", get(collection_targets))
+        .route("/collection/domains", get(collection_domains))
+        .route("/collection/domains/save", post(collection_domain_save))
+        .route("/collection/domains/target", post(collection_domain_target))
         .route("/collection/targets/new", post(collection_target_create))
         .route(
             "/collection/targets/rules",
@@ -429,21 +428,6 @@ fn material_api_routes() -> Router<LocalWebState> {
             get(local_media_routes::derivative),
         )
         .route("/api/local/work-resources", get(evidence_library_json))
-        // 跨行业是**另一条查询路径**，不是给上面那个接口加参数。规格的接口红线：
-        // 不得为跨行业给证据库接口增加任何参数或字段——两条路不共享，隔离才不
-        // 依赖任何人记得在某处加一个条件。
-        .route(
-            "/api/local/cross-industry/samples",
-            get(cross_industry_samples_json),
-        )
-        .route(
-            "/api/local/cross-industry/comments",
-            get(cross_industry_comments_json),
-        )
-        .route(
-            "/api/local/evidence-library/legacy",
-            get(material_projection::legacy_json),
-        )
         .route(
             "/api/local/work-resources/{public_ref}/comments",
             get(material_projection::research_comments_json).layer(axum::middleware::from_fn(
@@ -652,90 +636,63 @@ async fn evidence_library(
     State(state): State<LocalWebState>,
     Query(params): Query<CorpusSurfaceParams>,
 ) -> Html<String> {
-    let collection_state = match state.database.database() {
-        Some(database) => match count_targets(database, None).await {
-            Ok(counts) if counts.total > 0 => Some("观察中"),
-            Ok(_) => Some("无观察目标"),
-            Err(_) => Some("状态未知"),
-        },
-        None => None,
+    let Some(database) = state.database.database() else {
+        return Html(corpus_message_html(
+            "Corpus 当前不可读",
+            "本机数据库连接不可用；页面没有回退到其他领域。",
+        ));
+    };
+    let collection_state = match count_targets(database, None).await {
+        Ok(counts) if counts.total > 0 => Some("观察中"),
+        Ok(_) => Some("无观察目标"),
+        Err(_) => Some("状态未知"),
     };
     // 领域读不出来时给空列表：切换器随之隐藏，页面照常以本领域呈现。缺一个切换器远好过
     // 显示一个点不动的假控件。
-    let domains = match state.database.database() {
-        Some(database) => read_observation_domains(database).await.unwrap_or_default(),
-        None => Vec::new(),
+    let domains = match read_observation_domains(database).await {
+        Ok(domains) => domains,
+        Err(_) => {
+            return Html(corpus_message_html(
+                "领域范围当前不可读",
+                "领域配置读取失败；页面未把未知结果显示成空列表。",
+            ));
+        }
     };
     let current = resolve_current_domain(&domains, params.domain.as_deref());
+    if current.is_none() {
+        return Html(corpus_domain_required_html(&domains));
+    }
     Html(evidence_library_html(collection_state, &domains, current))
 }
 
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CrossIndustryQuery {
-    domain: uuid::Uuid,
+fn corpus_message_html(title: &str, message: &str) -> String {
+    format!(
+        "<!doctype html><html lang=\"zh-CN\"><meta charset=\"utf-8\"><title>{}</title><main><h1>{}</h1><p>{}</p></main></html>",
+        html_escape(title),
+        html_escape(title),
+        html_escape(message),
+    )
 }
 
-/// 读一个外部领域的样本。
-///
-/// 本领域走的是 `/api/local/work-resources`，不是这里。传入本领域会得到一个明确的
-/// 拒绝而不是空列表：空列表会被读成「这个领域还没采过」，而真相是问错了地方。
-/// 读一个外部领域的评论原声。
-///
-/// 本领域的评论在证据侧（`/api/local/comment-research`），不在这里。两条查询路径不
-/// 共享接口，隔离因此不依赖任何人记得在某处加条件。
-async fn cross_industry_comments_json(
-    State(state): State<LocalWebState>,
-    Query(query): Query<CrossIndustryQuery>,
-) -> Response {
-    let Some(database) = state.database.database() else {
-        return local_read_json_error(
-            axum::http::StatusCode::SERVICE_UNAVAILABLE,
-            "read_model_not_connected",
-        );
-    };
-    match read_cross_industry_comments(database, query.domain).await {
-        Ok(payload) => Json(payload).into_response(),
-        Err(CrossIndustryReadError::HomeDomainHasNoSamples) => local_read_json_error(
-            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
-            "home_domain_reads_evidence",
-        ),
-        Err(CrossIndustryReadError::SchemaUnavailable) => local_read_json_error(
-            axum::http::StatusCode::SERVICE_UNAVAILABLE,
-            "cross_industry_schema_unavailable",
-        ),
-        Err(CrossIndustryReadError::Database(_)) => local_read_json_error(
-            axum::http::StatusCode::SERVICE_UNAVAILABLE,
-            "cross_industry_read_unavailable",
-        ),
-    }
-}
-
-async fn cross_industry_samples_json(
-    State(state): State<LocalWebState>,
-    Query(query): Query<CrossIndustryQuery>,
-) -> Response {
-    let Some(database) = state.database.database() else {
-        return local_read_json_error(
-            axum::http::StatusCode::SERVICE_UNAVAILABLE,
-            "read_model_not_connected",
-        );
-    };
-    match read_cross_industry_samples(database, query.domain).await {
-        Ok(payload) => Json(payload).into_response(),
-        Err(CrossIndustryReadError::HomeDomainHasNoSamples) => local_read_json_error(
-            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
-            "home_domain_reads_evidence",
-        ),
-        Err(CrossIndustryReadError::SchemaUnavailable) => local_read_json_error(
-            axum::http::StatusCode::SERVICE_UNAVAILABLE,
-            "cross_industry_schema_unavailable",
-        ),
-        Err(CrossIndustryReadError::Database(_)) => local_read_json_error(
-            axum::http::StatusCode::SERVICE_UNAVAILABLE,
-            "cross_industry_read_unavailable",
-        ),
-    }
+fn corpus_domain_required_html(domains: &[ObservationDomain]) -> String {
+    let options = domains
+        .iter()
+        .map(|domain| {
+            format!(
+                "<li><a href=\"/corpus/evidence?domain={}\">{}</a> · {}</li>",
+                domain.domain_ref,
+                html_escape(&domain.name),
+                if domain.status == "paused" {
+                    "已暂停 · 历史材料可读"
+                } else {
+                    "运行中"
+                }
+            )
+        })
+        .collect::<String>();
+    format!(
+        "<!doctype html><html lang=\"zh-CN\"><meta charset=\"utf-8\"><title>选择领域 · Corpus</title><main><h1>先选择一个领域</h1><p>Corpus 只显示明确选择的领域材料，不会自动切换到其他领域。</p><ul>{options}</ul></main></html>"
+    )
 }
 
 async fn evidence_library_json(
@@ -748,12 +705,41 @@ async fn evidence_library_json(
             "read_model_not_connected",
         );
     };
+    let Some(domain_ref) = params.domain else {
+        return local_read_json_error(axum::http::StatusCode::BAD_REQUEST, "domain_required");
+    };
     let Ok(query) = material_projection::local_query(&params) else {
         return local_read_json_error(
             axum::http::StatusCode::BAD_REQUEST,
             "invalid_local_evidence_query",
         );
     };
+    let domain_exists: bool = match sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM observation_domain WHERE domain_ref=$1)",
+    )
+    .bind(domain_ref)
+    .fetch_one(database.pool())
+    .await
+    {
+        Ok(exists) => exists,
+        Err(_) => match linggan_evidence::validate_work_resource_query(database, &query).await {
+            Err(WorkResourceReadError::InvalidCursor | WorkResourceReadError::UnsupportedSort) => {
+                return local_read_json_error(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    "invalid_material_query_cursor_or_sort",
+                );
+            }
+            Err(_) | Ok(()) => {
+                return local_read_json_error(
+                    axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                    "domain_read_unavailable",
+                );
+            }
+        },
+    };
+    if !domain_exists {
+        return local_read_json_error(axum::http::StatusCode::NOT_FOUND, "unknown_domain");
+    }
     match material_projection::compose_json(database, &query).await {
         Ok(response) => Json(response).into_response(),
         Err(WorkResourceReadError::InvalidCursor | WorkResourceReadError::UnsupportedSort) => {
@@ -1139,6 +1125,7 @@ async fn station_claim(State(state): State<LocalWebState>, body: Bytes) -> Respo
 #[serde(rename_all = "camelCase")]
 struct ArchiveRequestBody {
     target_ref: uuid::Uuid,
+    domain_ref: Option<uuid::Uuid>,
     purpose: String,
     #[serde(default)]
     requested_by: Option<String>,
@@ -1152,6 +1139,7 @@ struct ArchiveRequestBody {
 #[serde(rename_all = "camelCase")]
 struct MaterialDeepeningRequestBody {
     target_ref: uuid::Uuid,
+    domain_ref: Option<uuid::Uuid>,
     purpose: String,
     materials: Vec<MaterialDeepeningRequestItem>,
 }
@@ -1206,6 +1194,12 @@ async fn collection_material_deepening(
             "material_deepening_request_invalid",
         );
     };
+    let Some(domain_ref) = request.domain_ref else {
+        return local_read_json_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "domain_required",
+        );
+    };
     let targets: Vec<MaterialDeepeningTarget> = request
         .materials
         .into_iter()
@@ -1218,9 +1212,10 @@ async fn collection_material_deepening(
             allow_asr: material.allow_asr,
         })
         .collect();
-    let outcome = match request_and_admit_material_targets(
+    let outcome = match request_and_admit_material_targets_for_domain(
         database,
         request.target_ref,
+        domain_ref,
         &request.purpose,
         "person",
         &targets,
@@ -1254,6 +1249,7 @@ async fn collection_material_deepening(
         return Json(json!({
             "requestRef": outcome.request_ref,
             "decisionRef": outcome.decision_ref,
+            "domainRef": domain_ref,
             "admission": outcome.outcome.code(),
             "workOrderRef": null,
             "execution": "NOT_STARTED",
@@ -1263,6 +1259,7 @@ async fn collection_material_deepening(
     Json(json!({
         "requestRef": outcome.request_ref,
         "decisionRef": outcome.decision_ref,
+        "domainRef": domain_ref,
         "admission": outcome.outcome.code(),
         "workOrderRef": work_order_ref,
         "materialCount": targets.len(),
@@ -1288,11 +1285,18 @@ async fn collection_archive_request(State(state): State<LocalWebState>, body: By
             "archive_request_invalid",
         );
     };
+    let Some(domain_ref) = request.domain_ref else {
+        return local_read_json_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "domain_required",
+        );
+    };
     let requested_by = request.requested_by.as_deref().unwrap_or("person");
     let lane = request.lane.as_deref().unwrap_or("deep_archive");
-    match request_and_admit(
+    match request_and_admit_for_domain(
         database,
         request.target_ref,
+        domain_ref,
         lane,
         &request.purpose,
         requested_by,
@@ -1302,6 +1306,7 @@ async fn collection_archive_request(State(state): State<LocalWebState>, body: By
         Ok(result) => Json(serde_json::json!({
             "requestRef": result.request_ref,
             "decisionRef": result.decision_ref,
+            "domainRef": domain_ref,
             "admission": result.outcome.code(),
             "unansweredQuestion": result.outcome.unanswered_question().map(|q| q.number()),
             "questionText": result.outcome.unanswered_question().map(|q| q.describe()),
@@ -1371,19 +1376,6 @@ async fn collection_targets_json(State(state): State<LocalWebState>) -> Response
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
             "collection_targets_unavailable",
         ),
-    }
-}
-
-async fn read_evidence_library(
-    database: &Database,
-    query: &EvidenceQuery,
-) -> Result<linggan_evidence::DiscoveryLibraryProjection, sqlx::Error> {
-    if producer_runtime_schema_is_ready(database).await?
-        && producer_runtime_has_packages(database).await?
-    {
-        read_runtime_library(database, query).await
-    } else {
-        read_discovery_library(database, query).await
     }
 }
 
@@ -2397,7 +2389,7 @@ async fn stylesheet() -> Response {
 
 /// Collection sub-surface handlers. The section is part of the path and the Operations mode
 /// is a query parameter, so every view is a real, shareable, refresh-safe address.
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 struct CollectionParams {
     mode: Option<String>,
     drawer: Option<String>,
@@ -2521,9 +2513,12 @@ async fn collection_targets(
         None => None,
     };
     // 领域读不出来时给空列表：选择器随之隐藏，列表照常以全部领域呈现。
-    let domains = match database {
-        Some(database) => read_observation_domains(database).await.unwrap_or_default(),
-        None => Vec::new(),
+    let (domains, _domains_readable) = match database {
+        Some(database) => match read_observation_domains(database).await {
+            Ok(domains) => (domains, true),
+            Err(_) => (Vec::new(), false),
+        },
+        None => (Vec::new(), false),
     };
     let current_domain = linggan_evidence::observation_domain::resolve_collection_domain(
         &domains,
@@ -2662,32 +2657,25 @@ async fn collection_targets(
     } else {
         Ok(None)
     };
-    let creator_catalog = match drawer_target.as_ref().ok().and_then(Option::as_ref) {
-        Some(target) if target.target_kind == "creator" => {
-            if target_is_cross_industry(database, target.target_ref).await {
-                linggan_evidence::read_cross_industry_creator_directory(database, target.target_ref)
-                    .await
-                    .ok()
-            } else {
-                read_creator_directory(database, target.target_ref)
-                    .await
-                    .ok()
-            }
+    let creator_catalog = match (
+        current_domain.map(|domain| domain.domain_ref),
+        drawer_target.as_ref().ok().and_then(Option::as_ref),
+    ) {
+        (Some(domain_ref), Some(target)) if target.target_kind == "creator" => {
+            read_creator_directory(database, target.target_ref, domain_ref)
+                .await
+                .ok()
         }
         _ => None,
     };
-    // 命中作品按**领域**决定读哪一侧：本领域的材料在证据库，外部领域的在跨行业语料
-    // （`0044` 的隔离）。只读证据侧的话，跨行业目标的作品页永远是空的——采回来 204 篇，
-    // 界面上一篇看不到，而且看不出是没采到还是读错了地方。
-    let keyword_catalog = match drawer_target.as_ref().ok().and_then(Option::as_ref) {
-        Some(target) if target.target_kind == "keyword" => {
-            if target_is_cross_industry(database, target.target_ref).await {
-                read_cross_industry_hits(database, target.target_ref)
-                    .await
-                    .ok()
-            } else {
-                read_keyword_hits(database, target.target_ref).await.ok()
-            }
+    let keyword_catalog = match (
+        current_domain.map(|domain| domain.domain_ref),
+        drawer_target.as_ref().ok().and_then(Option::as_ref),
+    ) {
+        (Some(domain_ref), Some(target)) if target.target_kind == "keyword" => {
+            read_keyword_hits(database, target.target_ref, domain_ref)
+                .await
+                .ok()
         }
         _ => None,
     };
@@ -2763,10 +2751,16 @@ async fn collection_targets(
                     .ok();
             // 命中多少篇、补到多少篇详情：两侧一起数（本领域在证据侧，外部领域在跨行业
             // 语料），只数一侧另一侧会显示成 0——而 0 与「还没采」在界面上长得一样。
-            let keyword_counts =
-                linggan_evidence::read_keyword_catalog_counts(database, &keyword_refs)
-                    .await
-                    .ok();
+            let keyword_counts = match current_domain {
+                Some(domain) => linggan_evidence::read_keyword_catalog_counts(
+                    database,
+                    &keyword_refs,
+                    domain.domain_ref,
+                )
+                .await
+                .ok(),
+                None => None,
+            };
             collection_targets_view::render_stored_targets_with_observation(
                 &base,
                 &targets,
@@ -2950,6 +2944,666 @@ fn should_read_target_lifecycle(
         .unwrap_or(false)
         && active_tab == target_drawer::TargetDrawerTab::Baseline
         && works_view == target_drawer::TargetWorksView::Performance
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+struct CollectionDomainForm {
+    domain_ref: Option<uuid::Uuid>,
+    name: String,
+    description: Option<String>,
+    research_goal: Option<String>,
+    status: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+struct CollectionDomainTargetForm {
+    domain_ref: uuid::Uuid,
+    target_ref: uuid::Uuid,
+    action: String,
+    role: Option<String>,
+}
+
+fn collection_domain_draft_form(form: &CollectionDomainForm) -> String {
+    let domain_ref = form
+        .domain_ref
+        .map(|domain_ref| {
+            format!("<input type=\"hidden\" name=\"domain_ref\" value=\"{domain_ref}\">")
+        })
+        .unwrap_or_default();
+    let title = if form.domain_ref.is_some() {
+        "未保存的领域更改"
+    } else {
+        "创建领域"
+    };
+    let button = if form.domain_ref.is_some() {
+        "重试保存领域设置"
+    } else {
+        "重试创建领域"
+    };
+    let status = form.status.as_deref().unwrap_or("active");
+    format!(
+        "<form class=\"domain-draft\" method=\"post\" action=\"/collection/domains/save\"><h2>{title}</h2><p>本次内容尚未写入；可在此修改后重试。</p>{domain_ref}<label>名称<input name=\"name\" required maxlength=\"120\" value=\"{}\"></label><label>说明<input name=\"description\" maxlength=\"1000\" value=\"{}\"></label><label>研究目标<input name=\"research_goal\" maxlength=\"1000\" value=\"{}\"></label><label>状态<select name=\"status\"><option value=\"active\"{}>运行中</option><option value=\"paused\"{}>已暂停</option></select></label><button type=\"submit\">{button}</button></form>",
+        html_escape(&form.name),
+        html_escape(form.description.as_deref().unwrap_or("")),
+        html_escape(form.research_goal.as_deref().unwrap_or("")),
+        if status == "active" { " selected" } else { "" },
+        if status == "paused" { " selected" } else { "" },
+    )
+}
+
+async fn collection_domain_save_failure(
+    state: LocalWebState,
+    form: &CollectionDomainForm,
+    error: &str,
+) -> Html<String> {
+    let mut params = CollectionParams {
+        domain: form.domain_ref.map(|domain_ref| domain_ref.to_string()),
+        error: Some(error.to_owned()),
+        ..CollectionParams::default()
+    };
+    if form.domain_ref.is_none() {
+        params.domain = None;
+    }
+    let mut page = collection_domains(State(state), Query(params)).await.0;
+    if !page.contains("domain-feedback-error") {
+        if let Some(message) = collection_domain_error_message(Some(error)) {
+            let feedback = format!(
+                "<p role=\"alert\" class=\"domain-feedback domain-feedback-error\">{message}</p>"
+            );
+            if let Some(at) = page.find("</body>") {
+                page.insert_str(at, &feedback);
+            }
+        }
+    }
+    let draft = collection_domain_draft_form(form);
+    if form.domain_ref.is_none() {
+        if let (Some(start), Some(relative_end)) = (
+            page.find("<form class=\"domain-create\""),
+            page.find("<form class=\"domain-create\"")
+                .and_then(|start| {
+                    page[start..]
+                        .find("</form>")
+                        .map(|end| start + end + "</form>".len())
+                }),
+        ) {
+            page.replace_range(start..relative_end, &draft);
+        }
+    } else if let Some(at) = page.find("<form class=\"domain-create\"") {
+        page.insert_str(at, &draft);
+    } else if let Some(at) = page.find("</body>") {
+        page.insert_str(at, &draft);
+    }
+    Html(page)
+}
+
+fn collection_domain_error_message(error: Option<&str>) -> Option<&'static str> {
+    match error {
+        Some("database_unavailable") => Some("数据库当前不可用；本次操作没有写入。"),
+        Some("name_taken") => Some("已有同名领域；本次操作没有写入。"),
+        Some("name_required") => Some("请填写领域名称；本次操作没有写入。"),
+        Some("save_failed") => Some("领域保存失败；请核对内容后重试，本次操作没有写入。"),
+        Some("relation_failed") => Some("目标关联或用途变更失败；本次操作没有写入。"),
+        Some("action_invalid") => Some("无法识别这项关联操作；本次操作没有写入。"),
+        _ => None,
+    }
+}
+
+fn collection_target_kind_label(kind: &str) -> &'static str {
+    match kind {
+        "creator" => "博主",
+        "keyword" => "关键词",
+        _ => "类型未知",
+    }
+}
+
+fn collection_target_lifecycle_label(state: &str) -> &'static str {
+    match state {
+        "pending_decision" => "待决定",
+        "archiving" => "建档中",
+        "archived" => "已建档",
+        "monitoring" => "巡检中",
+        "paused" => "已暂停",
+        "dismissed" => "已停用",
+        _ => "状态未知",
+    }
+}
+
+fn collection_domain_lane_label(lane: &str) -> &'static str {
+    match lane {
+        "discovery" => "发现",
+        "detail" => "详情",
+        "comments" => "评论",
+        "replies" => "回复",
+        "media_slots" => "媒体槽位",
+        "media_bytes" => "媒体字节",
+        "ocr" => "图片文字识别",
+        "asr" => "语音转写",
+        _ => "未归类通道",
+    }
+}
+
+fn collection_domain_lane_state_label(state: &str) -> &'static str {
+    match state {
+        "UNKNOWN" => "状态未知",
+        "NOT_REQUESTED" => "本次未申请",
+        "NOT_OBSERVED" => "尚未观察",
+        "OBSERVED" => "已完成观察",
+        "PARTIAL" => "部分取得",
+        "FAILED" => "执行失败",
+        "RISK_CONTROL" => "风险控制停止",
+        "SEARCHABLE" => "可检索",
+        "REMOTE_ONLY" => "仅有远程候选",
+        "LOCALIZED" => "已有本地材料",
+        "PROCESSING" => "处理中",
+        _ => "状态未归类",
+    }
+}
+
+fn render_collection_domain_lanes(
+    domain_ref: uuid::Uuid,
+    empty_domain: bool,
+    lane_states: &[(uuid::Uuid, String, String, i64)],
+    media_states: &[(uuid::Uuid, String, String, i64)],
+    lanes_readable: bool,
+    media_readable: bool,
+) -> String {
+    const LANES: [&str; 8] = [
+        "discovery",
+        "detail",
+        "comments",
+        "replies",
+        "media_slots",
+        "media_bytes",
+        "ocr",
+        "asr",
+    ];
+
+    let rows = LANES
+        .iter()
+        .map(|lane| {
+            let source_readable = if *lane == "media_bytes" {
+                media_readable
+            } else {
+                lanes_readable
+            };
+            let states = if !source_readable {
+                vec![("UNKNOWN", 0)]
+            } else {
+                let source = if *lane == "media_bytes" {
+                    media_states
+                } else {
+                    lane_states
+                };
+                let observed = source
+                    .iter()
+                    .filter(|row| row.0 == domain_ref && row.1 == *lane)
+                    .map(|row| (row.2.as_str(), row.3))
+                    .collect::<Vec<_>>();
+                if observed.is_empty() {
+                    vec![(
+                        if empty_domain {
+                            "NOT_OBSERVED"
+                        } else {
+                            "UNKNOWN"
+                        },
+                        0,
+                    )]
+                } else {
+                    observed
+                }
+            };
+            let state_summary = states
+                .iter()
+                .map(|(state, count)| {
+                    if *count > 0 {
+                        format!("{} {} 篇", collection_domain_lane_state_label(state), count)
+                    } else {
+                        collection_domain_lane_state_label(state).to_owned()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" · ");
+            format!(
+                "<li><span>{}</span><span>{}</span></li>",
+                collection_domain_lane_label(lane),
+                state_summary
+            )
+        })
+        .collect::<String>();
+
+    format!(
+        "<ul aria-label=\"各材料通道状态\">{rows}</ul><small>一般通道按每篇作品最新的已接纳通道回执统计；媒体字节依据本地物化与远程候选事实统计。</small>"
+    )
+}
+
+async fn collection_domains(
+    State(state): State<LocalWebState>,
+    Query(params): Query<CollectionParams>,
+) -> Html<String> {
+    let database = state.database.database();
+    let reads = match database {
+        Some(database) => Some(read_collection_surface(database).await),
+        None => None,
+    };
+    let (domains, domains_readable) = match database {
+        Some(database) => match read_observation_domains(database).await {
+            Ok(domains) => (domains, true),
+            Err(_) => (Vec::new(), false),
+        },
+        None => (Vec::new(), false),
+    };
+    let current_domain = linggan_evidence::observation_domain::resolve_collection_domain(
+        &domains,
+        params.domain.as_deref(),
+    );
+    let nav_domain = collection_nav_domain(&domains, current_domain);
+    let base = collection::render_in_domain(
+        collection::Section::Domains,
+        collection::OperationsMode::Now,
+        None,
+        reads.as_ref().and_then(|reads| reads.counts.as_ref()),
+        reads.as_ref().map(|reads| &reads.surface_state),
+        collection::DomainBar {
+            picker: "",
+            nav_domain: nav_domain.as_deref(),
+            domains: &domains,
+        },
+    );
+    let Some(database) = database else {
+        return Html(target_drawer::attach_to_collection_document(
+            &base.replace(
+                "<!-- DOMAIN_MANAGEMENT_CONTENT -->",
+                "<p>领域配置当前读不到。</p>",
+            ),
+            "",
+        ));
+    };
+    if !domains_readable {
+        return Html(target_drawer::attach_to_collection_document(
+            &base.replace(
+                "<!-- DOMAIN_MANAGEMENT_CONTENT -->",
+                "<p>领域配置和关联关系当前读不到；页面未把未知状态显示为零。</p>",
+            ),
+            "",
+        ));
+    }
+
+    let (targets, targets_readable): (Vec<(uuid::Uuid, String, String)>, bool) = match sqlx::query_as(
+        "SELECT target.target_ref,COALESCE(NULLIF(btrim(target.display_name),''),target.identity_key),target.target_kind \
+         FROM collection_observation_target target \
+         ORDER BY target.first_stored_at DESC,target.target_ref",
+    )
+    .fetch_all(database.pool())
+    .await
+    {
+        Ok(values) => (values, true),
+        Err(_) => (Vec::new(), false),
+    };
+    let (relations, relations_readable): (
+        Vec<(uuid::Uuid, uuid::Uuid, String, String, String, String)>,
+        bool,
+    ) = match sqlx::query_as(
+        "SELECT relation.domain_ref,relation.target_ref, \
+                COALESCE(NULLIF(btrim(target.display_name),''),target.identity_key), \
+                target.target_kind,relation.role,target.lifecycle_state \
+         FROM observation_domain_target relation \
+         JOIN collection_observation_target target USING(target_ref) \
+         ORDER BY relation.domain_ref,target.first_stored_at DESC,target.target_ref",
+    )
+    .fetch_all(database.pool())
+    .await
+    {
+        Ok(values) => (values, true),
+        Err(_) => (Vec::new(), false),
+    };
+    let (lane_states, lanes_readable): (Vec<(uuid::Uuid, String, String, i64)>, bool) =
+        match sqlx::query_as(
+            "WITH domain_content AS ( \
+                 SELECT DISTINCT domain_ref,content_public_ref \
+                   FROM linggan_material_domain_usage \
+             ), discovery_classified AS ( \
+                 SELECT usage.domain_ref,usage.content_public_ref,'discovery'::text AS lane, \
+                        'SEARCHABLE'::text AS state \
+                   FROM linggan_material_domain_usage usage \
+                   JOIN linggan_material_discovery_finding finding \
+                     ON finding.content_public_ref=usage.content_public_ref \
+                    AND finding.package_ref=usage.package_ref \
+                   JOIN linggan_runtime_capture_package package \
+                     ON package.package_ref=finding.package_ref \
+                  GROUP BY usage.domain_ref,usage.content_public_ref \
+             ), latest_lane AS ( \
+                 SELECT DISTINCT ON (work_usage.domain_ref,lane.content_public_ref,lane.lane) \
+                        work_usage.domain_ref,lane.content_public_ref,lane.lane,lane.retained, \
+                        lane.producer_acquired,lane.failed,lane.known_unattempted, \
+                        lane.unknown_count,lane.stopped_reason,package.coverage \
+                   FROM linggan_material_lane_observation lane \
+                   JOIN linggan_runtime_capture_package package USING(package_ref) \
+                   JOIN linggan_runtime_task task ON task.task_id=package.task_id \
+                   JOIN collection_work_order_lease_task lease_task \
+                     ON lease_task.task_id=task.task_id \
+                   JOIN collection_work_order_lease lease USING(lease_ref) \
+                   JOIN collection_work_order_domain_usage work_usage USING(work_order_ref) \
+                   JOIN domain_content dc \
+                     ON dc.domain_ref=work_usage.domain_ref \
+                    AND dc.content_public_ref=lane.content_public_ref \
+                  ORDER BY work_usage.domain_ref,lane.content_public_ref,lane.lane, \
+                           package.accepted_at DESC,lane.created_at DESC \
+             ), classified AS ( \
+                 SELECT domain_ref,content_public_ref,lane,CASE \
+                     WHEN lane IN ('comments','replies') \
+                          AND coverage #>> '{target,commentCollection,state}'='invalid_target' \
+                          THEN 'FAILED' \
+                     WHEN lane IN ('comments','replies') \
+                          AND coverage #>> '{target,commentCollection,state}'='partial' \
+                          THEN 'PARTIAL' \
+                     WHEN lane IN ('comments','replies') \
+                          AND coverage #>> '{target,commentCollection,state}'='complete' \
+                          AND retained=0 THEN 'OBSERVED' \
+                     WHEN lane IN ('comments','replies') \
+                          AND coverage #>> '{target,commentCollection,state}'='complete' \
+                          THEN 'SEARCHABLE' \
+                     WHEN stopped_reason='risk_control' THEN 'RISK_CONTROL' \
+                     WHEN retained IS NULL OR producer_acquired IS NULL THEN 'UNKNOWN' \
+                     WHEN retained <> producer_acquired THEN 'PARTIAL' \
+                     WHEN retained > 0 AND (COALESCE(failed,0)>0 OR \
+                          COALESCE(known_unattempted,0)>0 OR COALESCE(unknown_count,0)>0) \
+                          THEN 'PARTIAL' \
+                     WHEN retained > 0 THEN 'SEARCHABLE' \
+                     WHEN COALESCE(failed,0)>0 THEN 'FAILED' \
+                     WHEN COALESCE(unknown_count,0)>0 THEN 'UNKNOWN' \
+                     WHEN retained=0 THEN 'NOT_OBSERVED' \
+                     ELSE 'UNKNOWN' END AS state \
+                   FROM latest_lane \
+                 UNION ALL \
+                 SELECT domain_ref,content_public_ref,lane,state \
+                   FROM discovery_classified \
+             ) \
+             SELECT domain_ref,lane,state,count(DISTINCT content_public_ref)::bigint \
+               FROM classified GROUP BY domain_ref,lane,state",
+        )
+        .fetch_all(database.pool())
+        .await
+        {
+            Ok(values) => (values, true),
+            Err(_) => (Vec::new(), false),
+        };
+    let (media_states, media_readable): (Vec<(uuid::Uuid, String, String, i64)>, bool) =
+        match sqlx::query_as(
+            "WITH domain_content AS ( \
+                 SELECT DISTINCT domain_ref,content_public_ref \
+                   FROM linggan_material_domain_usage \
+             ), current_origins AS ( \
+                 SELECT DISTINCT ON (dc.domain_ref,dc.content_public_ref,origin.slot_key) \
+                        dc.domain_ref,dc.content_public_ref,origin.observation_ref,origin.slot_key \
+                   FROM domain_content dc \
+                   LEFT JOIN linggan_material_media_origin origin \
+                     ON origin.content_public_ref=dc.content_public_ref \
+                  ORDER BY dc.domain_ref,dc.content_public_ref,origin.slot_key, \
+                           origin.source_generation DESC NULLS LAST,origin.created_at DESC NULLS LAST \
+             ), slot_facts AS ( \
+                 SELECT dc.domain_ref,dc.content_public_ref,origin.slot_key, \
+                        EXISTS (SELECT 1 FROM linggan_material_media_candidate candidate \
+                                 WHERE candidate.observation_ref=origin.observation_ref) AS has_remote, \
+                        EXISTS (SELECT 1 FROM linggan_media_download_attempt attempt \
+                                 JOIN linggan_media_materialization materialization \
+                                   USING(download_attempt_ref) \
+                                 WHERE attempt.media_observation_ref=origin.observation_ref \
+                                   AND NOT EXISTS ( \
+                                       SELECT 1 FROM linggan_current_material_media_disposition disposition \
+                                        WHERE disposition.slot_key=origin.slot_key \
+                                           OR disposition.materialization_ref=materialization.materialization_ref \
+                                           OR disposition.blob_sha256=materialization.blob_sha256)) AS localized, \
+                        EXISTS (SELECT 1 FROM linggan_media_download_attempt attempt \
+                                 WHERE attempt.media_observation_ref=origin.observation_ref \
+                                   AND attempt.ended_at IS NOT NULL \
+                                   AND attempt.terminal_reason IS NOT NULL \
+                                   AND attempt.terminal_reason <> 'acquired') AS failed \
+                   FROM current_origins origin \
+                   JOIN domain_content dc USING(domain_ref,content_public_ref) \
+             ), content_facts AS ( \
+                 SELECT domain_ref,content_public_ref,count(slot_key)::bigint AS slots, \
+                        count(slot_key) FILTER (WHERE localized)::bigint AS localized_slots, \
+                        count(slot_key) FILTER (WHERE has_remote AND NOT localized)::bigint AS remote_slots, \
+                        count(slot_key) FILTER (WHERE failed AND NOT localized)::bigint AS failed_slots \
+                   FROM slot_facts GROUP BY domain_ref,content_public_ref \
+             ), classified AS ( \
+                 SELECT domain_ref,CASE \
+                     WHEN slots=0 THEN 'UNKNOWN' \
+                     WHEN localized_slots=slots THEN 'LOCALIZED' \
+                     WHEN localized_slots>0 THEN 'PARTIAL' \
+                     WHEN remote_slots>0 THEN 'REMOTE_ONLY' \
+                     WHEN failed_slots>0 THEN 'FAILED' \
+                     ELSE 'UNKNOWN' END AS state \
+                   FROM content_facts \
+             ) \
+             SELECT domain_ref,'media_bytes'::text,state,count(*)::bigint \
+               FROM classified GROUP BY domain_ref,state",
+        )
+        .fetch_all(database.pool())
+        .await
+        {
+            Ok(values) => (values, true),
+            Err(_) => (Vec::new(), false),
+        };
+    let (comment_counts, comments_readable): (Vec<(uuid::Uuid, i64)>, bool) = match sqlx::query_as(
+        "SELECT usage.domain_ref,count(DISTINCT comment.material_ref)::bigint \
+         FROM linggan_material_domain_usage usage \
+         JOIN linggan_material_comment comment USING(content_public_ref) \
+         GROUP BY usage.domain_ref",
+    )
+    .fetch_all(database.pool())
+    .await
+    {
+        Ok(values) => (values, true),
+        Err(_) => (Vec::new(), false),
+    };
+    let (last_observations, last_readable): (Vec<(uuid::Uuid, Option<String>)>, bool) =
+        match sqlx::query_as(
+            "SELECT usage.domain_ref,max(package.accepted_at)::text \
+         FROM linggan_material_domain_usage usage \
+         JOIN linggan_runtime_capture_package package USING(package_ref) \
+         GROUP BY usage.domain_ref",
+        )
+        .fetch_all(database.pool())
+        .await
+        {
+            Ok(values) => (values, true),
+            Err(_) => (Vec::new(), false),
+        };
+
+    let mut cards = String::new();
+    for domain in &domains {
+        let ref_text = domain.domain_ref.to_string();
+        let status_label = if domain.status == "paused" {
+            "已暂停"
+        } else {
+            "运行中"
+        };
+        let assigned = relations
+            .iter()
+            .filter(|relation| relation.0 == domain.domain_ref);
+        let mut creator_targets = 0;
+        let mut keyword_targets = 0;
+        let mut assigned_html = String::new();
+        for (_, target_ref, target_name, target_kind, role, lifecycle_state) in assigned {
+            match target_kind.as_str() {
+                "creator" => creator_targets += 1,
+                "keyword" => keyword_targets += 1,
+                _ => {}
+            }
+            assigned_html.push_str(&format!(
+                r#"<tr><td>{target_name}<small>{target_kind} · {lifecycle_state}</small></td><td><form method="post" action="/collection/domains/target"><input type="hidden" name="domain_ref" value="{domain_ref}"><input type="hidden" name="target_ref" value="{target_ref}"><input type="hidden" name="action" value="role"><select name="role"><option value="primary"{primary}>主研究</option><option value="reference"{reference}>参照</option></select><button class="c-btn-secondary" type="submit">保存</button></form></td><td><form method="post" action="/collection/domains/target"><input type="hidden" name="domain_ref" value="{domain_ref}"><input type="hidden" name="target_ref" value="{target_ref}"><input type="hidden" name="action" value="remove"><button class="c-btn-quiet" type="submit">解除关联</button></form></td></tr>"#,
+                target_name=html_escape(target_name),target_kind=collection_target_kind_label(target_kind),
+                lifecycle_state=collection_target_lifecycle_label(lifecycle_state),domain_ref=ref_text,target_ref=target_ref,
+                primary=if role=="primary" {" selected"} else {""},
+                reference=if role=="reference" {" selected"} else {""},
+            ));
+        }
+        if !relations_readable {
+            assigned_html.push_str("<tr><td colspan=\"3\">关联关系未知</td></tr>");
+        } else if assigned_html.is_empty() {
+            assigned_html.push_str("<tr><td colspan=\"3\">当前没有关联观察目标。</td></tr>");
+        }
+        let available_targets = targets
+            .iter()
+            .map(|(target_ref, name, kind)| {
+                format!(
+                    "<option value=\"{target_ref}\">{name} · {kind}</option>",
+                    target_ref = target_ref,
+                    name = html_escape(name),
+                    kind = collection_target_kind_label(kind),
+                )
+            })
+            .collect::<String>();
+        let lanes = render_collection_domain_lanes(
+            domain.domain_ref,
+            domain.sample_count == Some(0),
+            &lane_states,
+            &media_states,
+            lanes_readable,
+            media_readable,
+        );
+        let comments = if comments_readable {
+            comment_counts
+                .iter()
+                .find(|row| row.0 == domain.domain_ref)
+                .map(|row| row.1.to_string())
+                .unwrap_or_else(|| "0".to_owned())
+        } else {
+            "未知".to_owned()
+        };
+        let last = if last_readable {
+            last_observations
+                .iter()
+                .find(|row| row.0 == domain.domain_ref)
+                .and_then(|row| row.1.as_deref())
+                .unwrap_or("暂无接纳回执")
+        } else {
+            "未知"
+        };
+        let works = domain
+            .sample_count
+            .map(|count| count.to_string())
+            .unwrap_or_else(|| "未知".to_owned());
+        cards.push_str(&format!(
+            r#"<article class="domain-card"><header><div><h2>{name}</h2><span>{status_label}</span></div><p>{description}</p></header><form class="domain-fields" method="post" action="/collection/domains/save"><input type="hidden" name="domain_ref" value="{domain_ref}"><label>名称<input name="name" required maxlength="120" value="{name}"></label><label>说明<input name="description" maxlength="1000" value="{description}"></label><label>研究目标<input name="research_goal" maxlength="1000" value="{research_goal}"></label><label>状态<select name="status"><option value="active"{active}>运行中</option><option value="paused"{paused}>已暂停</option></select></label><button class="c-btn-secondary" type="submit">保存领域设置</button></form><div class="domain-counts"><span>{targets} 个观察目标：博主 {creators} · 关键词 {keywords}</span><span>主研究 {primary} · 参照 {reference}</span><span>{works} 篇作品 · {comments} 条评论</span><span>最近接纳：{last}</span></div><div class="domain-lanes">{lanes}</div><table><thead><tr><th>观察目标</th><th>研究角色</th><th>关联</th></tr></thead><tbody>{assigned}</tbody></table><form class="domain-target-add" method="post" action="/collection/domains/target"><input type="hidden" name="domain_ref" value="{domain_ref}"><input type="hidden" name="action" value="assign"><label>关联现有目标<select name="target_ref" required>{available_targets}</select></label><label>角色<select name="role"><option value="primary">主研究</option><option value="reference">参照</option></select></label><button class="c-btn-secondary" type="submit"{disabled}>关联目标</button></form><footer><a href="/collection/targets?domain={domain_ref}">查看该领域目标</a> · <a href="/corpus/evidence?domain={domain_ref}">查看该领域材料</a></footer></article>"#,
+            name=html_escape(&domain.name),status_label=status_label,
+            description=html_escape(domain.description.as_deref().unwrap_or("暂无领域说明")),
+            domain_ref=ref_text,
+            research_goal=html_escape(domain.research_goal.as_deref().unwrap_or("")),
+            active=if domain.status=="active" {" selected"} else {""},
+            paused=if domain.status=="paused" {" selected"} else {""},
+            targets=domain.target_count,creators=creator_targets,keywords=keyword_targets,
+            primary=domain.primary_target_count,reference=domain.reference_target_count,
+            works=works,comments=comments,
+            last=html_escape(last),lanes=lanes,
+            assigned=assigned_html,available_targets=available_targets,
+            disabled=if domain.status=="paused" || !targets_readable || !relations_readable {" disabled"} else {""},
+        ));
+    }
+    if domains.is_empty() {
+        cards.push_str("<p>暂无领域。创建领域只保存研究边界，不会触发采集。</p>");
+    }
+    let feedback = collection_domain_error_message(params.error.as_deref())
+        .map(|message| {
+            format!(
+                "<p role=\"alert\" class=\"domain-feedback domain-feedback-error\">{message}</p>"
+            )
+        })
+        .unwrap_or_default();
+    let content = format!(
+        r#"<section class="domain-management">{feedback}<form class="domain-create" method="post" action="/collection/domains/save"><h2>创建领域</h2><label>名称<input name="name" required maxlength="120"></label><label>说明<input name="description" maxlength="1000"></label><label>研究目标<input name="research_goal" maxlength="1000"></label><input type="hidden" name="status" value="active"><button class="c-btn-primary" type="submit">创建领域</button></form>{cards}</section>"#
+    );
+    Html(base.replace("<!-- DOMAIN_MANAGEMENT_CONTENT -->", &content))
+}
+
+async fn collection_domain_save(
+    State(state): State<LocalWebState>,
+    axum::extract::Form(form): axum::extract::Form<CollectionDomainForm>,
+) -> Response {
+    let Some(database) = state.database.database() else {
+        return collection_domain_save_failure(state, &form, "database_unavailable")
+            .await
+            .into_response();
+    };
+    let result = if let Some(domain_ref) = form.domain_ref {
+        linggan_evidence::observation_domain::update_observation_domain(
+            database,
+            domain_ref,
+            &form.name,
+            form.description.as_deref(),
+            form.research_goal.as_deref(),
+            form.status.as_deref().unwrap_or("active"),
+        )
+        .await
+        .map(|_| domain_ref)
+    } else {
+        linggan_evidence::observation_domain::create_observation_domain_with_details(
+            database,
+            &form.name,
+            form.description.as_deref(),
+            form.research_goal.as_deref(),
+        )
+        .await
+        .map(|domain| domain.domain_ref)
+    };
+    match result {
+        Ok(domain_ref) => {
+            Redirect::to(&format!("/collection/domains?domain={domain_ref}")).into_response()
+        }
+        Err(linggan_evidence::observation_domain::ObservationDomainError::DuplicateName) => {
+            collection_domain_save_failure(state, &form, "name_taken")
+                .await
+                .into_response()
+        }
+        Err(linggan_evidence::observation_domain::ObservationDomainError::EmptyName) => {
+            collection_domain_save_failure(state, &form, "name_required")
+                .await
+                .into_response()
+        }
+        Err(_) => collection_domain_save_failure(state, &form, "save_failed")
+            .await
+            .into_response(),
+    }
+}
+
+async fn collection_domain_target(
+    State(state): State<LocalWebState>,
+    axum::extract::Form(form): axum::extract::Form<CollectionDomainTargetForm>,
+) -> Redirect {
+    let return_to = format!("/collection/domains?domain={}", form.domain_ref);
+    let Some(database) = state.database.database() else {
+        return Redirect::to(&format!("{return_to}&error=database_unavailable"));
+    };
+    let result = match form.action.as_str() {
+        "assign" => linggan_evidence::assign_target_domain_with_role(
+            database,
+            form.target_ref,
+            form.domain_ref,
+            form.role.as_deref().unwrap_or("primary"),
+        )
+        .await
+        .map(|_| ()),
+        "role" => {
+            linggan_evidence::set_target_domain_role(
+                database,
+                form.target_ref,
+                form.domain_ref,
+                form.role.as_deref().unwrap_or("primary"),
+            )
+            .await
+        }
+        "remove" => {
+            linggan_evidence::remove_target_domain(database, form.target_ref, form.domain_ref).await
+        }
+        _ => return Redirect::to(&format!("{return_to}&error=action_invalid")),
+    };
+    Redirect::to(&match result {
+        Ok(()) => return_to,
+        Err(_) => format!("{return_to}&error=relation_failed"),
+    })
 }
 
 async fn collection_operations(
@@ -3499,6 +4153,7 @@ fn lease_error_code(error: &LeaseError) -> &'static str {
         // and whether it can come back on its own — lives on the execution-input ledger.
         LeaseError::OnlyStoppedMembersRemain => "work_order_only_stopped_members_remain",
         LeaseError::ControlBlocked { reason_code } => match reason_code.as_str() {
+            "domain_paused_or_unscoped" => "domain_paused_or_unscoped",
             "risk_paused" => "risk_paused",
             "station_unavailable" => "station_unavailable",
             "station_not_accepting" => "station_not_accepting",
@@ -3535,11 +4190,8 @@ fn lease_error_code(error: &LeaseError) -> &'static str {
 struct NewTargetForm {
     target_kind: String,
     identity: String,
-    /// 这个目标归属的领域，由新建弹窗当场选定——**不再是「当前正在看的领域」**。
-    /// 值为 `__new__` 时表示同时新建一个领域，名字在 `new_domain_name` 里。
+    /// 这个目标新建时关联的现有领域，由弹窗明确选择。
     domain: Option<String>,
-    /// 新领域的名字。只在 `domain == "__new__"` 时有意义。
-    new_domain_name: Option<String>,
 }
 
 /// COLLECTION-001 · 从页面加入一个观察目标。
@@ -3572,13 +4224,8 @@ async fn collection_target_create(
     State(state): State<LocalWebState>,
     axum::extract::Form(form): axum::extract::Form<NewTargetForm>,
 ) -> Redirect {
-    // 领域必须由人明确选定，不能由「当前在看哪个领域」推断出来。
-    //
-    // 此前在「全部领域」视图下新建时表单不带这一项，服务端按本领域处置——于是一个本想
-    // 用作跨行业参照的关键词被静默归进了本领域，它采回来的材料**直接写进证据侧**。
-    // 2026-09-11 真实发生过一次：两个「数学思维」目标因此把 413 条笔记写进了 ADHD
-    // 证据库，而跨行业语料表里一条都没有。领域不是一个可以猜的默认值，猜错的代价是
-    // 参照物混进证据，且任何读证据的地方都不会再提醒你。
+    // Target identity is global. The person selects the Domain relation explicitly; a paused or
+    // unknown Domain cannot receive a new relation.
     let domain_param = form
         .domain
         .as_deref()
@@ -3591,30 +4238,6 @@ async fn collection_target_create(
     let domain = domain_param
         .as_deref()
         .and_then(|value| uuid::Uuid::parse_str(value).ok());
-    // 选了「＋ 新建一个领域」时先把领域建出来，再用它建目标。两件事同一个动作里完成，
-    // 但**不共用一个事务**：领域建成而目标没建成时，多一个空领域是可解释的；反过来
-    // 目标挂在一个不存在的领域上则连外键都过不去。
-    let domain = if domain_param.as_deref() == Some("__new__") {
-        let Some(database) = state.database.database() else {
-            return Redirect::to(&back_to_targets(None, Some("read_model_not_connected")));
-        };
-        let name = form.new_domain_name.as_deref().unwrap_or_default();
-        match linggan_evidence::observation_domain::create_observation_domain(database, name).await
-        {
-            Ok(created) => Some(created.domain_ref),
-            Err(linggan_evidence::observation_domain::ObservationDomainError::EmptyName) => {
-                return Redirect::to(&back_to_targets(None, Some("domain_name_required")));
-            }
-            Err(linggan_evidence::observation_domain::ObservationDomainError::DuplicateName) => {
-                return Redirect::to(&back_to_targets(None, Some("domain_name_taken")));
-            }
-            Err(_) => {
-                return Redirect::to(&back_to_targets(None, Some("domain_create_failed")));
-            }
-        }
-    } else {
-        domain
-    };
     // 没选领域就不建。前端也会挡一道，但真正的闸门在这里——前端禁用是提示，不是保证。
     let Some(domain) = domain else {
         return Redirect::to(&back_to_targets(
@@ -3628,6 +4251,19 @@ async fn collection_target_create(
             Some("read_model_not_connected"),
         ));
     };
+    let domain_active: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM observation_domain WHERE domain_ref=$1 AND status='active')",
+    )
+    .bind(domain)
+    .fetch_one(database.pool())
+    .await
+    .unwrap_or(false);
+    if !domain_active {
+        return Redirect::to(&back_to_targets(
+            domain_param.as_deref(),
+            Some("target_domain_unavailable"),
+        ));
+    }
     let raw = form.identity.trim();
     // 创作者用主页链接就够了——平台 ID 藏在 URL 里，让人自己去扒是把工具的活推给使用者。
     let identity = match form.target_kind.as_str() {
@@ -4111,7 +4747,10 @@ enum TargetArchiveAction {
 struct TargetArchiveForm {
     row_target_ref: uuid::Uuid,
     archive_action: Option<TargetArchiveAction>,
+    /// A concrete acquisition Domain selected by the collection navigation context.
+    domain_ref: Option<uuid::Uuid>,
     /// Closed list state only. These fields are navigation context, never acquisition input.
+    return_domain: Option<String>,
     return_filter: Option<String>,
     return_sort: Option<String>,
 }
@@ -4136,6 +4775,12 @@ fn target_archive_return_path_with_queue(
     ahead: Option<i64>,
 ) -> String {
     let mut pairs = Vec::new();
+    if let Some(domain) = form.return_domain.as_deref().filter(|domain| {
+        *domain == linggan_evidence::observation_domain::ALL_DOMAINS
+            || uuid::Uuid::parse_str(domain).is_ok()
+    }) {
+        pairs.push(format!("domain={domain}"));
+    }
     if let Some(filter @ ("creator" | "keyword" | "archiving" | "monitoring")) =
         form.return_filter.as_deref()
     {
@@ -4165,6 +4810,7 @@ fn target_archive_return_path_with_queue(
 async fn collection_retire_materials(State(state): State<LocalWebState>, body: Bytes) -> Redirect {
     let mut target_ref: Option<uuid::Uuid> = None;
     let mut contents: Vec<uuid::Uuid> = Vec::new();
+    let mut return_domain: Option<String> = None;
     let mut return_filter: Option<String> = None;
     let mut return_sort: Option<String> = None;
     for (key, value) in parse_form_pairs(&body) {
@@ -4175,6 +4821,7 @@ async fn collection_retire_materials(State(state): State<LocalWebState>, body: B
                     contents.push(parsed);
                 }
             }
+            "return_domain" => return_domain = Some(value),
             "return_filter" => return_filter = Some(value),
             "return_sort" => return_sort = Some(value),
             _ => {}
@@ -4186,6 +4833,8 @@ async fn collection_retire_materials(State(state): State<LocalWebState>, body: B
     let form = TargetArchiveForm {
         row_target_ref: target_ref,
         archive_action: None,
+        domain_ref: None,
+        return_domain,
         return_filter,
         return_sort,
     };
@@ -4222,6 +4871,12 @@ async fn collection_retire_materials(State(state): State<LocalWebState>, body: B
 /// 回到抽屉里发起这次判断的那一段，而不是回到列表顶部——人做完一个决定要看到它的结果。
 fn target_retire_return_path(form: &TargetArchiveForm, error: Option<&str>) -> String {
     let mut pairs = Vec::new();
+    if let Some(domain) = form.return_domain.as_deref().filter(|domain| {
+        *domain == linggan_evidence::observation_domain::ALL_DOMAINS
+            || uuid::Uuid::parse_str(domain).is_ok()
+    }) {
+        pairs.push(format!("domain={domain}"));
+    }
     if let Some(filter @ ("creator" | "keyword" | "archiving" | "monitoring")) =
         form.return_filter.as_deref()
     {
@@ -4473,26 +5128,6 @@ async fn collection_target_toggle_monitoring(
 ///
 /// 失败原因原样带回页面：没有覆盖深度建档的授权、目标已在建档中、工位不在岗，这三种
 /// 情况的处置完全不同，压成一句「失败」等于让人自己去猜。
-/// 这个观察目标的材料落在跨行业语料那一侧吗？
-///
-/// 读不出来时按**本领域**处理，与 `0041` 对既有目标的处置一致：历史上的采集全发生在
-/// 只有一个领域的时候，把它们算成别的领域会改写历史。这里只影响「读哪张表」，读错的
-/// 后果是看不到作品，不会把材料写错地方——写入侧的领域判定另有一套，并且有复合外键兜底。
-async fn target_is_cross_industry(database: &Database, target_ref: uuid::Uuid) -> bool {
-    sqlx::query_scalar::<_, bool>(
-        "SELECT COALESCE(domain.is_own_domain,true)=false \
-         FROM collection_observation_target target \
-         LEFT JOIN observation_domain domain USING(domain_ref) \
-         WHERE target.target_ref=$1",
-    )
-    .bind(target_ref)
-    .fetch_optional(database.pool())
-    .await
-    .ok()
-    .flatten()
-    .unwrap_or(false)
-}
-
 #[derive(serde::Deserialize)]
 struct MonitorRuleRetireForm {
     row_target_ref: uuid::Uuid,
@@ -4622,13 +5257,24 @@ async fn collection_target_deep_archive(
             ),
             // 第二段：链接有了、详情还欠着，补下一批。
             target_drawer::KeywordArchiveRead::DetailPending => {
-                let advanced = linggan_evidence::advance_keyword_archive_detail(
-                    database,
-                    form.row_target_ref,
-                    "从观察目标页发起关键词历史建档",
-                    "person",
-                )
-                .await;
+                let advanced = if let Some(domain_ref) = form.domain_ref {
+                    linggan_evidence::advance_keyword_archive_detail_for_domain(
+                        database,
+                        form.row_target_ref,
+                        domain_ref,
+                        "从观察目标页发起关键词历史建档",
+                        "person",
+                    )
+                    .await
+                } else {
+                    linggan_evidence::advance_keyword_archive_detail(
+                        database,
+                        form.row_target_ref,
+                        "从观察目标页发起关键词历史建档",
+                        "person",
+                    )
+                    .await
+                };
                 Redirect::to(&match advanced {
                     Ok(linggan_evidence::KeywordDetailAdvance::Queued { .. }) => {
                         let ahead = queued_ahead_for(database, form.row_target_ref).await;
@@ -4663,14 +5309,26 @@ async fn collection_target_deep_archive(
             // 第一段：搜索面还没翻完。**这一段不经过第二段**——一个作品链接都还没有的词，
             // 第二段能问出来的只有「没有可补的详情」，那不是「已补齐」。
             target_drawer::KeywordArchiveRead::NotArchived => {
-                let requested = linggan_evidence::request_and_admit(
-                    database,
-                    form.row_target_ref,
-                    "deep_archive",
-                    "从观察目标页发起关键词历史建档",
-                    "person",
-                )
-                .await;
+                let requested = if let Some(domain_ref) = form.domain_ref {
+                    linggan_evidence::request_and_admit_for_domain(
+                        database,
+                        form.row_target_ref,
+                        domain_ref,
+                        "deep_archive",
+                        "从观察目标页发起关键词历史建档",
+                        "person",
+                    )
+                    .await
+                } else {
+                    linggan_evidence::request_and_admit(
+                        database,
+                        form.row_target_ref,
+                        "deep_archive",
+                        "从观察目标页发起关键词历史建档",
+                        "person",
+                    )
+                    .await
+                };
                 Redirect::to(&match requested {
                     Ok(outcome) if outcome.work_order_ref.is_some() => {
                         target_archive_return_path_with_queue(
@@ -4702,22 +5360,44 @@ async fn collection_target_deep_archive(
     }
     let filling_gaps = matches!(form.archive_action, Some(TargetArchiveAction::Gaps));
     let outcome = if filling_gaps {
-        linggan_evidence::request_creator_directory_gaps(
-            database,
-            form.row_target_ref,
-            "从观察目标页发起深度建档",
-            "person",
-        )
-        .await
-        .map_err(RequestLeaseError::Acquisition)
+        let requested = if let Some(domain_ref) = form.domain_ref {
+            linggan_evidence::request_creator_directory_gaps_for_domain(
+                database,
+                form.row_target_ref,
+                domain_ref,
+                "从观察目标页发起深度建档",
+                "person",
+            )
+            .await
+        } else {
+            linggan_evidence::request_creator_directory_gaps(
+                database,
+                form.row_target_ref,
+                "从观察目标页发起深度建档",
+                "person",
+            )
+            .await
+        };
+        requested.map_err(RequestLeaseError::Acquisition)
     } else {
-        request_progressive_archive(
-            database,
-            form.row_target_ref,
-            "从观察目标页发起深度建档",
-            "person",
-        )
-        .await
+        if let Some(domain_ref) = form.domain_ref {
+            linggan_evidence::request_progressive_archive_for_domain(
+                database,
+                form.row_target_ref,
+                domain_ref,
+                "从观察目标页发起深度建档",
+                "person",
+            )
+            .await
+        } else {
+            request_progressive_archive(
+                database,
+                form.row_target_ref,
+                "从观察目标页发起深度建档",
+                "person",
+            )
+            .await
+        }
     };
     let outcome = match outcome {
         Ok(outcome) => outcome,
@@ -4965,15 +5645,20 @@ fn corpus_domain_picker(
     action: &str,
     all_domains_label: Option<&str>,
 ) -> String {
-    if current.is_none() && all_domains_label.is_none() {
-        return String::new();
-    }
-    if domains.len() < 2 {
+    if domains.is_empty() || (domains.len() < 2 && current.is_some()) {
         return String::new();
     }
     let mut options = String::new();
-    let mut current_label = String::new();
-    let mut current_meta = String::new();
+    let mut current_label = if all_domains_label.is_none() {
+        "选择领域".to_owned()
+    } else {
+        String::new()
+    };
+    let mut current_meta = if all_domains_label.is_none() {
+        "请选择一个领域".to_owned()
+    } else {
+        String::new()
+    };
     if let Some(label) = all_domains_label {
         let selected = current.is_none();
         if selected {
@@ -4990,13 +5675,13 @@ fn corpus_domain_picker(
     }
     for domain in domains {
         let selected = current.is_some_and(|current| current.domain_ref == domain.domain_ref);
-        // 本领域只带一个角标，不单列一类：它在这个列表里是普通一项。
-        let meta = if domain.is_own_domain {
-            "本领域".to_owned()
-        } else if let Some(count) = domain.sample_count {
-            format!("{count} 条样本")
+        let meta = if domain.status == "paused" {
+            "已暂停".to_owned()
         } else {
-            "样本数未知".to_owned()
+            let work_count = domain
+                .sample_count
+                .map_or_else(|| "未知".to_owned(), |count| count.to_string());
+            format!("{} 个目标 · {} 篇作品", domain.target_count, work_count)
         };
         if selected {
             current_label = domain.name.clone();
@@ -5069,7 +5754,7 @@ fn evidence_library_html(
     <script src="/assets/evidence-observation.js" defer></script>
     <script src="/assets/evidence-library.js" defer></script>
   </head>
-  <body data-corpus-domain="__CORPUS_DOMAIN_REF__" data-corpus-domain-own="__CORPUS_DOMAIN_OWN__" data-corpus-domain-name="__CORPUS_DOMAIN_NAME__">
+  <body data-corpus-domain="__CORPUS_DOMAIN_REF__" data-corpus-domain-selected="__CORPUS_DOMAIN_SELECTED__" data-corpus-domain-name="__CORPUS_DOMAIN_NAME__">
     <div class="v7-app">
       <!-- GLOBAL_HEADER_START --><!-- GLOBAL_HEADER_END -->
       <div class="v7-shell">
@@ -5225,12 +5910,8 @@ fn evidence_library_html(
             .unwrap_or_default(),
     )
     .replace(
-        "__CORPUS_DOMAIN_OWN__",
-        if current.is_none_or(|d| d.is_own_domain) {
-            "true"
-        } else {
-            "false"
-        },
+        "__CORPUS_DOMAIN_SELECTED__",
+        if current.is_some() { "true" } else { "false" },
     )
     .replace(
         "__CORPUS_DOMAIN_NAME__",

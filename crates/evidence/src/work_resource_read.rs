@@ -24,6 +24,13 @@ pub async fn read_work_resources(
     crate::material_projection::read_material_library(database, query).await
 }
 
+pub async fn validate_work_resource_query(
+    database: &Database,
+    query: &EvidenceQuery,
+) -> Result<(), WorkResourceReadError> {
+    crate::material_projection::validate_material_query(database, query).await
+}
+
 pub async fn read_work_resource(
     database: &Database,
     public_ref: Uuid,

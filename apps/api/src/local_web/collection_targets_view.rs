@@ -288,17 +288,17 @@ fn action_feedback_markup(error: Option<&str>, ahead: Option<i64>) -> String {
         "target_domain_unassigned" => (
             "c-src-feedback c-src-feedback-warn",
             "这个目标还没归属领域",
-            "采集没有开始。领域决定这个目标采回来的材料写进本行业证据库还是跨行业参照语料，没有它就只能靠推断，而推断错会让参照物混进证据。请先给这个目标指定领域，再发起采集——不是等状态流转，也不是服务出了问题。",
+            "采集没有开始。请先把这个目标关联到一个研究领域，再发起采集。领域限定后续语料和研究范围；作品材料仍进入共享材料链。",
         ),
         "target_domain_required" => (
             "c-src-feedback c-src-feedback-warn",
             "还没选领域",
-            "新建观察目标前要先选定它属于哪个领域。领域决定这个目标采回来的材料进本行业证据库还是跨行业参照语料——选错会让参照物混进证据，而且之后任何读证据的地方都不会再提醒你，所以这一项不做推断。",
+            "新建观察目标前先选一个现有研究领域。新关联默认使用 primary 角色；之后可在领域管理调整。作品材料统一进入共享材料链。",
         ),
         "target_domain_assigned" => (
             "c-src-feedback c-src-feedback-ok",
             "领域已分配",
-            "这个目标现在有了明确材料归属，可以继续建立档案。没有重新采集博主，也没有复制或改写已有材料。",
+            "这个目标已按 primary 角色关联到领域，可以继续建立档案。没有重新采集博主，也没有复制或改写已有材料。",
         ),
         "target_domain_already_assigned" => (
             "c-src-feedback c-src-feedback-warn",
@@ -946,14 +946,10 @@ fn domain_assignment_modal(
         .unwrap_or(&target.identity_key);
     let options = domains
         .iter()
+        .filter(|domain| domain.status == "active")
         .map(|domain| {
-            let suffix = if domain.is_own_domain {
-                "本行业，材料进入证据库"
-            } else {
-                "参照领域，材料进入跨行业语料"
-            };
             format!(
-                r#"<option value="{value}">{name}（{suffix}）</option>"#,
+                r#"<option value="{value}">{name}</option>"#,
                 value = domain.domain_ref,
                 name = escape(&domain.name),
             )
@@ -979,7 +975,7 @@ fn domain_assignment_modal(
         r#"<div class="c-tg-batch-overlay">
              <section class="c-tg-batch-dialog" role="dialog" aria-modal="true" aria-labelledby="target-domain-assignment-title">
                <div><h2 id="target-domain-assignment-title">为「{name}」分配领域</h2>
-               <p>插件只负责带回博主身份，不替你判断业务领域。这里的选择决定后续材料进入本行业证据库还是跨行业参照语料；确认后才能建立档案。</p></div>
+               <p>插件只负责带回博主身份，不替你选择研究领域。分配后先按 primary 角色关联，可在领域管理调整；作品材料仍进入共享材料链。</p></div>
                {submit}
              </section>
            </div>"#,
@@ -999,13 +995,21 @@ fn deletion_modal(
     error: Option<&str>,
     list_context: super::target_drawer::TargetListContext<'_>,
 ) -> String {
-    let blocked = preview.blocking_cross_industry_samples > 0 || preview.blocking_risk_signals > 0;
+    let blocked = preview.blocking_material_usages > 0
+        || preview.blocking_work_order_usages > 0
+        || preview.blocking_risk_signals > 0;
     let note = if blocked {
         let mut reasons = Vec::new();
-        if preview.blocking_cross_industry_samples > 0 {
+        if preview.blocking_material_usages > 0 {
             reasons.push(format!(
-                "{} 条跨行业样本已经进入参照语料",
-                preview.blocking_cross_industry_samples
+                "{} 条材料领域用途仍保留这个目标的准入血缘",
+                preview.blocking_material_usages
+            ));
+        }
+        if preview.blocking_work_order_usages > 0 {
+            reasons.push(format!(
+                "{} 条工单领域用途是不可改写的执行快照",
+                preview.blocking_work_order_usages
             ));
         }
         if preview.blocking_risk_signals > 0 {
@@ -1015,7 +1019,7 @@ fn deletion_modal(
             ));
         }
         format!(
-            r#"<p class="c-tg-delete-blocked">这个目标关联 {reasons}。删除目标不能把材料或安装级安全事实一起抹掉；在有独立保留方案前，这里不提供删除。</p>"#,
+            r#"<p class="c-tg-delete-blocked">这个目标关联 {reasons}。删除目标不能抹掉不可变的领域用途或安装级安全事实；在有独立保留方案前，这里不提供删除。</p>"#,
             reasons = escape(&reasons.join("、")),
         )
     } else {
@@ -1293,7 +1297,6 @@ mod tests {
             last_patrol_succeeded_at: None,
             next_patrol_at: None,
             domain_name: Some("ADHD".to_owned()),
-            domain_is_own: Some(true),
         }
     }
 
@@ -1344,13 +1347,16 @@ mod tests {
         let base = format!("before{EMPTY_STATE_OPEN}empty{EMPTY_STATE_CLOSE}after");
         let mut creator = target("creator", Some("待分配作者"));
         creator.domain_name = None;
-        creator.domain_is_own = None;
         let home = ObservationDomain {
             domain_ref: Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
             name: "ADHD".to_owned(),
-            is_own_domain: true,
+            description: None,
+            research_goal: None,
             status: "active".to_owned(),
             sample_count: None,
+            target_count: 0,
+            primary_target_count: 0,
+            reference_target_count: 0,
         };
         let html = render_stored_targets_with_observation(
             &base,
@@ -1373,7 +1379,7 @@ mod tests {
         assert!(html.contains(">分配领域</a>"));
         assert!(html.contains("为「待分配作者」分配领域"));
         assert!(html.contains(r#"action="/collection/targets/domain""#));
-        assert!(html.contains("ADHD（本行业，材料进入证据库）"));
+        assert!(html.contains(">ADHD</option>"));
         assert!(!html.contains(">建立档案</button>"));
     }
 
@@ -1382,13 +1388,16 @@ mod tests {
         let base = format!("before{EMPTY_STATE_OPEN}empty{EMPTY_STATE_CLOSE}after");
         let mut creator = target("creator", Some("过滤外候选"));
         creator.domain_name = None;
-        creator.domain_is_own = None;
         let home = ObservationDomain {
             domain_ref: Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
             name: "ADHD".to_owned(),
-            is_own_domain: true,
+            description: None,
+            research_goal: None,
             status: "active".to_owned(),
             sample_count: None,
+            target_count: 0,
+            primary_target_count: 0,
+            reference_target_count: 0,
         };
         let html = render_stored_targets_with_observation(
             &base,
@@ -1564,7 +1573,8 @@ mod tests {
             requests: 1,
             retained_works: 2,
             retained_details: 1,
-            blocking_cross_industry_samples: 0,
+            blocking_material_usages: 0,
+            blocking_work_order_usages: 0,
             blocking_risk_signals: 0,
             material_retirements: 4,
         };
@@ -1985,7 +1995,6 @@ mod keyword_archive_action_tests {
             last_patrol_succeeded_at: None,
             next_patrol_at: None,
             domain_name: Some("ADHD".to_owned()),
-            domain_is_own: Some(true),
         }
     }
 
@@ -2399,18 +2408,16 @@ mod keyword_archive_read_tests {
 mod domain_gate_tests {
     use super::*;
 
-    /// 领域必须由人选定，不能由「当前在看哪个领域」推断。
-    ///
-    /// 2026-09-11 真实发生：两个本想做跨行业参照的关键词在「全部领域」视图下建出来，
-    /// 被静默归进本领域，413 条笔记直接写进了 ADHD 证据库，而跨行业语料表一条都没有。
-    /// 参照物一旦混进证据，之后任何读证据的地方都不会再提醒。
+    /// 领域必须由人选定，不能由「当前在看哪个领域」推断；领域只限定语料与研究范围，
+    /// 不改变共享材料链的接纳路径。
     #[test]
     fn the_missing_domain_notice_explains_what_the_choice_decides() {
         let markup = action_feedback_markup(Some("target_domain_required"), None);
         assert!(markup.contains("还没选领域"));
-        // 提示必须说清后果，而不只是「请选择」——不然人不知道为什么这一项不能省。
-        assert!(markup.contains("证据库"));
-        assert!(markup.contains("跨行业"));
+        assert!(markup.contains("研究领域"));
+        assert!(markup.contains("primary 角色"));
+        assert!(markup.contains("共享材料链"));
+        assert!(!markup.contains("跨行业"));
     }
 
     /// 建档提示此前只说「主页作品链接」，那是创作者的说法；关键词翻的是搜索面。
@@ -2439,9 +2446,10 @@ mod domain_unassigned_notice_tests {
         let markup = action_feedback_markup(Some("target_domain_unassigned"), None);
         assert!(markup.contains("还没归属领域"));
         assert!(markup.contains("采集没有开始"), "要先说清什么都没发生");
-        assert!(markup.contains("先给这个目标指定领域"), "要给出下一步");
-        // 明确排除两条错误的归因，免得再被读成状态问题或故障。
-        assert!(markup.contains("不是等状态流转"));
-        assert!(markup.contains("不是服务出了问题"));
+        assert!(
+            markup.contains("先把这个目标关联到一个研究领域"),
+            "要给出下一步"
+        );
+        assert!(markup.contains("作品材料仍进入共享材料链"));
     }
 }

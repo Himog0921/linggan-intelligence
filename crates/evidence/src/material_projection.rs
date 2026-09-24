@@ -76,6 +76,32 @@ pub async fn read_material_library(
     read_latest_material_page(tx, query, cursor, as_of).await
 }
 
+/// Validate the parts of a work-resource query that do not depend on the material projection
+/// tables. Corpus uses this when the domain registry is unavailable so malformed cursors still
+/// receive a client error instead of being hidden by an unrelated schema-read failure.
+pub async fn validate_material_query(
+    database: &Database,
+    query: &EvidenceQuery,
+) -> Result<(), MaterialReadError> {
+    if query.sort() != EvidenceQuerySort::LatestDiscovery {
+        return Err(MaterialReadError::UnsupportedSort);
+    }
+    let Some(cursor) = query
+        .cursor()
+        .map(|value| material_cursor::decode(query, value).ok_or(MaterialReadError::InvalidCursor))
+        .transpose()?
+    else {
+        return Ok(());
+    };
+    let mut tx = database.pool().begin().await?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        .execute(&mut *tx)
+        .await?;
+    validate_cursor_times(&mut tx, Some(&cursor), &cursor.as_of).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
 async fn read_latest_material_page(
     mut tx: Transaction<'_, Postgres>,
     query: &EvidenceQuery,
@@ -105,6 +131,7 @@ async fn read_latest_material_page(
                 lane: query.lane().map(|lane| lane.as_str()),
                 media_kind: query.media_kind().map(|kind| kind.as_purpose()),
                 one_public_ref: None,
+                domain_ref: query.domain_ref(),
             },
         )
         .await?;
