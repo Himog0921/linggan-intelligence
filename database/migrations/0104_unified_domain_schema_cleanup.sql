@@ -4,6 +4,18 @@
 -- usage and executable scope; unprojected cross rows are renewable projections and are dropped.
 -- This migration never invents Content, accepted details, comments, or discovery facts.
 
+-- The migration runner wraps the file and checksum write in one transaction. Stop new writes to
+-- the session/lease/delivery facts before checking them so no late authorization can slip between
+-- preflight and cleanup; ordinary readers remain unblocked by SHARE ROW EXCLUSIVE.
+LOCK TABLE collection_detail_page_session,
+           collection_detail_page_session_grant_attempt,
+           collection_detail_page_session_lane_preparation,
+           collection_installation_risk_signal,
+           collection_work_order_lease,
+           collection_work_order_cross_industry_target,
+           linggan_runtime_submission_receipt
+    IN SHARE ROW EXCLUSIVE MODE;
+
 DO $domain_unification_cleanup_preflight$
 BEGIN
     IF EXISTS (SELECT 1 FROM cross_industry_note) THEN
@@ -85,6 +97,50 @@ BEGIN
     ) THEN
         RAISE EXCEPTION 'domain cleanup blocked: legacy scopes for one Content have different comment or reply grants';
     END IF;
+
+    IF EXISTS (
+        SELECT 1
+          FROM collection_work_order_cross_industry_target legacy_scope
+          JOIN cross_industry_sample sample USING(sample_ref)
+          JOIN collection_work_order_lease lease
+            ON lease.work_order_ref=legacy_scope.work_order_ref
+         WHERE NOT EXISTS (
+                   SELECT 1
+                     FROM linggan_material_content content
+                    WHERE content.platform=sample.platform
+                      AND content.content_external_id=sample.content_external_id
+               )
+           AND lease.released_at IS NULL
+           AND lease.expires_at>scope_001_now()
+    ) THEN
+        RAISE EXCEPTION 'domain cleanup blocked: an unprojectable legacy scope has an active WorkOrder lease';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+          FROM collection_detail_page_session session
+          JOIN collection_work_order_lease lease
+            ON lease.work_order_ref=session.work_order_ref
+         WHERE session.cross_industry_sample_ref IS NOT NULL
+           AND session.content_public_ref IS NULL
+           AND lease.released_at IS NULL
+           AND lease.expires_at>scope_001_now()
+    ) THEN
+        RAISE EXCEPTION 'domain cleanup blocked: an unprojectable legacy detail session has an active WorkOrder lease';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+          FROM collection_detail_page_session_lane_preparation preparation
+          JOIN collection_detail_page_session session USING(session_ref)
+          LEFT JOIN linggan_runtime_submission_receipt receipt
+            ON receipt.attempt_id=preparation.attempt_id
+         WHERE session.cross_industry_sample_ref IS NOT NULL
+           AND session.content_public_ref IS NULL
+           AND receipt.attempt_id IS NULL
+    ) THEN
+        RAISE EXCEPTION 'domain cleanup blocked: an unprojectable legacy detail session has an unreceipted lane preparation';
+    END IF;
 END
 $domain_unification_cleanup_preflight$;
 
@@ -98,6 +154,30 @@ UPDATE collection_detail_page_session session
     ON content.platform=sample.platform
    AND content.content_external_id=sample.content_external_id
  WHERE session.cross_industry_sample_ref=sample.sample_ref;
+
+-- Orphan cross sessions cannot survive the canonical Content NOT NULL boundary. Keep the
+-- independently auditable grant/risk outcomes, but detach their optional session references;
+-- navigation preparations are session-scoped authorization identities, not execution Attempts
+-- or Evidence, so retire those rows with their unprojectable session.
+UPDATE collection_detail_page_session_grant_attempt attempt
+   SET session_ref=NULL
+  FROM collection_detail_page_session session
+ WHERE attempt.session_ref=session.session_ref
+   AND session.cross_industry_sample_ref IS NOT NULL
+   AND session.content_public_ref IS NULL;
+
+UPDATE collection_installation_risk_signal signal
+   SET detail_page_session_ref=NULL
+  FROM collection_detail_page_session session
+ WHERE signal.detail_page_session_ref=session.session_ref
+   AND session.cross_industry_sample_ref IS NOT NULL
+   AND session.content_public_ref IS NULL;
+
+DELETE FROM collection_detail_page_session_lane_preparation preparation
+ USING collection_detail_page_session session
+ WHERE preparation.session_ref=session.session_ref
+   AND session.cross_industry_sample_ref IS NOT NULL
+   AND session.content_public_ref IS NULL;
 
 DELETE FROM collection_detail_page_session
  WHERE cross_industry_sample_ref IS NOT NULL

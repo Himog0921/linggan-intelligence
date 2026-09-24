@@ -19,7 +19,7 @@
 
 | 文档 | 状态 | 用途 |
 |---|---|---|
-| [plans/active/domain-unification-001.md](plans/active/domain-unification-001.md) | 活跃计划；WP0–WP5 与 WP4 隔离浏览器验收完成，待 exact commit/root 集成审查 | 多个正式 Domain 平权、Domain–Target role、统一 Material/Comment/Media、Comment Study 领域化、领域管理与开发期旧 cross 模型清理的唯一推进文件 |
+| [plans/active/domain-unification-001.md](plans/active/domain-unification-001.md) | 活跃计划；WP0–WP5、WP4 隔离浏览器验收及当前 schema 副本升级证明完成；0104 follow-up 已提交，待 Issue #130 同步与 PR/root 集成 | 多个正式 Domain 平权、Domain–Target role、统一 Material/Comment/Media、Comment Study 领域化、领域管理与开发期旧 cross 模型清理的唯一推进文件 |
 | [plans/active/account-observation-bootstrap-002.md](plans/active/account-observation-bootstrap-002.md) | 活跃计划 | Issue #218：新安装插件的首单软准入、账号观察启动、人工绑定审计与无秘密配置诊断 |
 | [plans/active/detail-page-session-replay-safety-001.md](plans/active/detail-page-session-replay-safety-001.md) | 活跃计划；受保护工作树 | 同一 Work Order/内容详情页的单次导航授权、浏览器持久消费闸门、缓存缺失 fail-closed 与既得数据重传边界 |
 | [plans/active/collection-upgrade-001.md](plans/active/collection-upgrade-001.md) | 活跃计划；受保护工作树 | Mog 交付包：缺输入止转、跨工单重试预算、交付恢复、统一材料完成判据与运行诊断的 S0–S6 对照表 |

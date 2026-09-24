@@ -225,6 +225,133 @@ async fn cleanup_reprojects_legacy_scope_to_canonical_content_and_retires_old_sc
 
 #[tokio::test]
 #[ignore = "requires the isolated LOCAL-001 PostgreSQL proof harness"]
+async fn cleanup_stops_when_unprojectable_legacy_scope_has_an_active_lease_without_a_session() {
+    let database =
+        proof_database_before_domain_cleanup("domain_unification_cleanup_scope_lease_guard").await;
+    let external_id = format!("scope-only-{}", Uuid::new_v4());
+    let package_external_id = format!("scope-only-package-{}", Uuid::new_v4());
+    let package_ref = submit_package_for_domain(
+        &database,
+        "00000000-0000-4000-8000-000000000001",
+        &format!("scope-only-keyword-{external_id}"),
+        "deep_archive",
+        json!({"query":"未请求详情的活动旧 scope","ranking":"most_liked","scrollRounds":4}),
+        200,
+        "discovery_search",
+        search_coverage("未请求详情的活动旧 scope", 1),
+        json!({"surfaceReceipt":{"stopReason":"bottom_confirmed"}}),
+        vec![discovery_card(
+            &package_external_id,
+            "活跃旧 scope 保护证明",
+            "17",
+            &format!(
+                "https://www.xiaohongshu.com/search_result/{package_external_id}?xsec_token=ABcleanup"
+            ),
+        )],
+    )
+    .await;
+    let (work_order_ref, lease_ref): (Uuid, Uuid) = sqlx::query_as(
+        "SELECT work.work_order_ref,lease.lease_ref \
+           FROM linggan_runtime_capture_package package \
+           JOIN collection_work_order_lease_task lease_task USING(task_id) \
+           JOIN collection_work_order_lease lease USING(lease_ref) \
+           JOIN collection_work_order work USING(work_order_ref) \
+          WHERE package.package_ref=$1",
+    )
+    .bind(package_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("the accepted Package supplies a disposable WorkOrder lease");
+    let has_detail_session: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM collection_detail_page_session \
+         WHERE work_order_ref=$1)",
+    )
+    .bind(work_order_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("the fixture can inspect detail-session state");
+    assert!(
+        !has_detail_session,
+        "this active legacy scope must be tested before any detail grant creates a session"
+    );
+
+    let sample_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO cross_industry_sample \
+             (sample_ref,domain_ref,platform,content_external_id) \
+         VALUES ($1,'00000000-0000-4000-8000-000000000002','xhs',$2)",
+    )
+    .bind(sample_ref)
+    .bind(&external_id)
+    .execute(database.pool())
+    .await
+    .expect("the sample has no accepted canonical Content projection");
+    let sample_is_unprojectable: bool = sqlx::query_scalar(
+        "SELECT NOT EXISTS (SELECT 1 FROM linggan_material_content \
+          WHERE platform='xhs' AND content_external_id=$1)",
+    )
+    .bind(&external_id)
+    .fetch_one(database.pool())
+    .await
+    .expect("the test can verify the legacy sample lacks canonical Content");
+    assert!(
+        sample_is_unprojectable,
+        "the scope guard proof requires a sample with no canonical Content identity"
+    );
+    sqlx::query(
+        "INSERT INTO collection_work_order_cross_industry_target \
+             (work_order_ref,sample_ref,ordinal,comment_limit,reply_expand_limit) \
+         VALUES ($1,$2,1,7,1)",
+    )
+    .bind(work_order_ref)
+    .bind(sample_ref)
+    .execute(database.pool())
+    .await
+    .expect("the legacy sample is part of the frozen WorkOrder scope");
+    sqlx::query(
+        "UPDATE collection_work_order_lease \
+            SET released_at=NULL,release_reason=NULL, \
+                expires_at=scope_001_now()+interval '5 minutes' \
+          WHERE lease_ref=$1",
+    )
+    .bind(lease_ref)
+    .execute(database.pool())
+    .await
+    .expect("the disposable lease is active while its legacy scope is in flight");
+
+    let error = sqlx::raw_sql(include_str!(
+        "../../../database/migrations/0104_unified_domain_schema_cleanup.sql"
+    ))
+    .execute(database.pool())
+    .await
+    .expect_err("cleanup must stop before dropping an active scope without a detail session");
+    assert!(
+        error
+            .to_string()
+            .contains("unprojectable legacy scope has an active WorkOrder lease"),
+        "the migration names the in-flight scope blocker: {error}"
+    );
+    let scope_and_sample_remain: bool = sqlx::query_scalar(
+        "SELECT to_regclass('cross_industry_sample') IS NOT NULL \
+           AND EXISTS (SELECT 1 FROM cross_industry_sample WHERE sample_ref=$1) \
+           AND EXISTS (SELECT 1 FROM collection_work_order_cross_industry_target \
+                       WHERE work_order_ref=$2 AND sample_ref=$1) \
+           AND NOT EXISTS (SELECT 1 FROM collection_detail_page_session \
+                           WHERE work_order_ref=$2)",
+    )
+    .bind(sample_ref)
+    .bind(work_order_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("a blocked migration leaves the session-free legacy scope intact");
+    assert!(
+        scope_and_sample_remain,
+        "the active scope failure is atomic and does not fabricate a detail session"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated LOCAL-001 PostgreSQL proof harness"]
 async fn cleanup_stops_when_user_authored_legacy_notes_have_no_replacement() {
     let database =
         proof_database_before_domain_cleanup("domain_unification_cleanup_note_guard").await;
@@ -279,6 +406,47 @@ async fn cleanup_drops_unprojected_legacy_samples_without_fabricating_material_h
             .await;
     let sample_ref = Uuid::new_v4();
     let external_id = format!("unprojected-{}", sample_ref);
+    let execution_external_id = format!("cleanup-execution-{}", sample_ref);
+    let package_ref = submit_package_for_domain(
+        &database,
+        "00000000-0000-4000-8000-000000000001",
+        &format!("cleanup-execution-keyword-{sample_ref}"),
+        "deep_archive",
+        json!({"query":"清理迁移执行范围","ranking":"most_liked","scrollRounds":4}),
+        200,
+        "discovery_search",
+        search_coverage("清理迁移执行范围", 1),
+        json!({"surfaceReceipt":{"stopReason":"bottom_confirmed"}}),
+        vec![discovery_card(
+            &execution_external_id,
+            "清理迁移执行范围材料",
+            "17",
+            &format!(
+                "https://www.xiaohongshu.com/search_result/{execution_external_id}?xsec_token=ABcleanup"
+            ),
+        )],
+    )
+    .await;
+    let (work_order_ref, task_id, lease_ref, installation_ref, delivered_attempt_id): (
+        Uuid,
+        Uuid,
+        Uuid,
+        Uuid,
+        Uuid,
+    ) = sqlx::query_as(
+        "SELECT work.work_order_ref,package.task_id,lease.lease_ref, \
+                    installation.installation_ref,package.attempt_id \
+               FROM linggan_runtime_capture_package package \
+               JOIN collection_work_order_lease_task lease_task USING(task_id) \
+               JOIN collection_work_order_lease lease USING(lease_ref) \
+               JOIN collection_work_order work USING(work_order_ref) \
+               JOIN plugin_installation installation ON installation.station_ref=lease.station_ref \
+              WHERE package.package_ref=$1",
+    )
+    .bind(package_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("the fixture package has a completed WorkOrder, Task, Lease, and Installation");
     sqlx::query(
         "INSERT INTO cross_industry_sample \
              (sample_ref,domain_ref,platform,content_external_id) \
@@ -289,13 +457,144 @@ async fn cleanup_drops_unprojected_legacy_samples_without_fabricating_material_h
     .execute(database.pool())
     .await
     .expect("the disposable legacy sample is stored without a canonical Package projection");
+    let session_ref = Uuid::new_v4();
+    let grant_request_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_detail_page_session \
+             (session_ref,work_order_ref,cross_industry_sample_ref,owner_installation_ref, \
+              grant_request_id,initial_lease_ref,plan_snapshot,plan_hash,state) \
+         VALUES ($1,$2,$3,$4,$5,$6,jsonb_build_object('contentExternalId',$7),repeat('b',64),'authorized')",
+    )
+    .bind(session_ref)
+    .bind(work_order_ref)
+    .bind(sample_ref)
+    .bind(installation_ref)
+    .bind(grant_request_id)
+    .bind(lease_ref)
+    .bind(&external_id)
+    .execute(database.pool())
+    .await
+    .expect("the old detail session points at the unprojectable sample");
+    sqlx::query(
+        "INSERT INTO collection_detail_page_session_grant_attempt \
+             (grant_attempt_ref,work_order_ref,task_id,lease_ref,installation_ref, \
+              grant_request_id,attempt_no,outcome,session_ref) \
+         VALUES ($1,$2,$3,$4,$5,$6,1,'authorized',$7)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(work_order_ref)
+    .bind(task_id)
+    .bind(lease_ref)
+    .bind(installation_ref)
+    .bind(grant_request_id)
+    .bind(session_ref)
+    .execute(database.pool())
+    .await
+    .expect("the server grant outcome is independently auditable");
+    let pending_preparation_attempt_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_detail_page_session_lane_preparation \
+             (preparation_ref,session_ref,owner_installation_ref,capability,task_id,lease_ref, \
+              attempt_id,plan_hash) \
+         VALUES ($1,$2,$3,'comments',$4,$5,$6,repeat('c',64)), \
+                ($7,$2,$3,'replies',$4,$5,$8,repeat('d',64))",
+    )
+    .bind(Uuid::new_v4())
+    .bind(session_ref)
+    .bind(installation_ref)
+    .bind(task_id)
+    .bind(lease_ref)
+    .bind(delivered_attempt_id)
+    .bind(Uuid::new_v4())
+    .bind(pending_preparation_attempt_id)
+    .execute(database.pool())
+    .await
+    .expect("the session has both receipted and not-yet-submitted lane identities");
+    let risk_signal_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_installation_risk_signal \
+             (risk_signal_ref,installation_ref,task_id,lease_ref,detail_page_session_ref, \
+              platform,signal_code,detector_version) \
+         VALUES ($1,$2,$3,$4,$5,'xhs','risk_control_interstitial','cleanup-proof-v1')",
+    )
+    .bind(risk_signal_ref)
+    .bind(installation_ref)
+    .bind(task_id)
+    .bind(lease_ref)
+    .bind(session_ref)
+    .execute(database.pool())
+    .await
+    .expect("the risk observation keeps its own audit identity");
 
+    sqlx::query(
+        "UPDATE collection_work_order_lease \
+            SET released_at=NULL,release_reason=NULL, \
+                expires_at=scope_001_now()+interval '5 minutes' \
+          WHERE lease_ref=$1",
+    )
+    .bind(lease_ref)
+    .execute(database.pool())
+    .await
+    .expect("the disposable WorkOrder lease is made active for the migration guard proof");
+    let active_lease_error = sqlx::raw_sql(include_str!(
+        "../../../database/migrations/0104_unified_domain_schema_cleanup.sql"
+    ))
+    .execute(database.pool())
+    .await
+    .expect_err("cleanup must stop while the orphan session WorkOrder lease is active");
+    assert!(
+        active_lease_error
+            .to_string()
+            .contains("unprojectable legacy detail session has an active WorkOrder lease"),
+        "the migration explains the active-lease blocker: {active_lease_error}"
+    );
+    let legacy_state_intact: bool = sqlx::query_scalar(
+        "SELECT to_regclass('cross_industry_sample') IS NOT NULL \
+           AND EXISTS (SELECT 1 FROM cross_industry_sample WHERE sample_ref=$1) \
+           AND EXISTS (SELECT 1 FROM collection_detail_page_session WHERE session_ref=$2) \
+           AND EXISTS (SELECT 1 FROM collection_detail_page_session_lane_preparation \
+                       WHERE attempt_id=$3)",
+    )
+    .bind(sample_ref)
+    .bind(session_ref)
+    .bind(pending_preparation_attempt_id)
+    .fetch_one(database.pool())
+    .await
+    .expect("a blocked migration leaves all legacy rows available");
+    assert!(legacy_state_intact, "active-lease failure is atomic");
+
+    sqlx::query(
+        "UPDATE collection_work_order_lease \
+            SET released_at=scope_001_now(),release_reason='completed' \
+          WHERE lease_ref=$1",
+    )
+    .bind(lease_ref)
+    .execute(database.pool())
+    .await
+    .expect("the disposable WorkOrder lease is returned to its completed state");
+    let unreceipted_preparation_error = sqlx::raw_sql(include_str!(
+        "../../../database/migrations/0104_unified_domain_schema_cleanup.sql"
+    ))
+    .execute(database.pool())
+    .await
+    .expect_err("cleanup must stop while a lane preparation has no submission receipt");
+    assert!(
+        unreceipted_preparation_error
+            .to_string()
+            .contains("unprojectable legacy detail session has an unreceipted lane preparation"),
+        "the migration explains the pending-delivery blocker: {unreceipted_preparation_error}"
+    );
+    sqlx::query("DELETE FROM collection_detail_page_session_lane_preparation WHERE attempt_id=$1")
+        .bind(pending_preparation_attempt_id)
+        .execute(database.pool())
+        .await
+        .expect("the fixture removes its intentionally pending preparation before final cleanup");
     sqlx::raw_sql(include_str!(
         "../../../database/migrations/0104_unified_domain_schema_cleanup.sql"
     ))
     .execute(database.pool())
     .await
-    .expect("optional projection can be skipped while old disposable rows are dropped");
+    .expect("once active work and unreceipted delivery are absent, cleanup proceeds");
 
     let no_material_was_invented: bool = sqlx::query_scalar(
         "SELECT NOT EXISTS (SELECT 1 FROM linggan_material_content WHERE content_external_id=$1) \
@@ -308,5 +607,40 @@ async fn cleanup_drops_unprojected_legacy_samples_without_fabricating_material_h
     assert!(
         no_material_was_invented,
         "projection cleanup does not fabricate accepted Content"
+    );
+    let (session_count, grant_attempt_count, grant_session_ref, delivered_preparation_count,
+        risk_signal_count, risk_session_ref): (i64, i64, Option<Uuid>, i64, i64, Option<Uuid>) = sqlx::query_as(
+        "SELECT \
+           (SELECT count(*) FROM collection_detail_page_session WHERE session_ref=$1), \
+           (SELECT count(*) FROM collection_detail_page_session_grant_attempt WHERE grant_request_id=$2), \
+           (SELECT session_ref FROM collection_detail_page_session_grant_attempt WHERE grant_request_id=$2), \
+           (SELECT count(*) FROM collection_detail_page_session_lane_preparation WHERE attempt_id=$3), \
+           (SELECT count(*) FROM collection_installation_risk_signal WHERE risk_signal_ref=$4), \
+           (SELECT detail_page_session_ref FROM collection_installation_risk_signal WHERE risk_signal_ref=$4)",
+    )
+    .bind(session_ref)
+    .bind(grant_request_id)
+    .bind(delivered_attempt_id)
+    .bind(risk_signal_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("the discarded session has no surviving required child reference");
+    assert_eq!(session_count, 0, "the unprojectable session is retired");
+    assert_eq!(
+        grant_attempt_count, 1,
+        "the append-only grant outcome is preserved"
+    );
+    assert_eq!(
+        grant_session_ref, None,
+        "the optional session link is detached"
+    );
+    assert_eq!(
+        delivered_preparation_count, 0,
+        "session-scoped preparation is retired"
+    );
+    assert_eq!(risk_signal_count, 1, "the risk observation is preserved");
+    assert_eq!(
+        risk_session_ref, None,
+        "the optional risk session link is detached"
     );
 }

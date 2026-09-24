@@ -263,5 +263,5 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "('0101_collection_command_reason_vocabulary', 'fda3711ea7bb38af6bb5a6a28264a39ac0c04024aef3e6feeb931e07a9b074c1'),\n",
     "('0102_cross_industry_creator_directory', '972ece37c29d79a2a5a9f37cfe3dd4fe71a25446a9884873fb014d36dc7ba8e4'),\n",
     "('0103_domain_membership_and_usage', '4345fbd8ed530f5a5184fb9a44d42b32e4702e150ec3301896750a2b7eb80001'), ",
-    "('0104_unified_domain_schema_cleanup', '509940dfe48b9f9ed5f7a1938047a9c3d838b0a0323b249e99ba7bca02dddc21');\n",
+    "('0104_unified_domain_schema_cleanup', '3a75ffdc34bf60cb69f8a9b8d04cfa3cd6c4207522083a122aeedbb9ac1f3788');\n",
 );
