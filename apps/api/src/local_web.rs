@@ -647,8 +647,6 @@ async fn evidence_library(
         Ok(_) => Some("无观察目标"),
         Err(_) => Some("状态未知"),
     };
-    // 领域读不出来时给空列表：切换器随之隐藏，页面照常以本领域呈现。缺一个切换器远好过
-    // 显示一个点不动的假控件。
     let domains = match read_observation_domains(database).await {
         Ok(domains) => domains,
         Err(_) => {
@@ -659,9 +657,6 @@ async fn evidence_library(
         }
     };
     let current = resolve_current_domain(&domains, params.domain.as_deref());
-    if current.is_none() {
-        return Html(corpus_domain_required_html(&domains));
-    }
     Html(evidence_library_html(collection_state, &domains, current))
 }
 
@@ -674,24 +669,34 @@ fn corpus_message_html(title: &str, message: &str) -> String {
     )
 }
 
-fn corpus_domain_required_html(domains: &[ObservationDomain]) -> String {
+fn corpus_domain_choice_dialog(domains: &[ObservationDomain]) -> String {
     let options = domains
         .iter()
         .map(|domain| {
+            let status = if domain.status == "paused" {
+                "已暂停 · 历史材料可读".to_owned()
+            } else {
+                let works = domain.sample_count.map_or_else(
+                    || "作品数未知".to_owned(),
+                    |count| format!("{count} 篇作品"),
+                );
+                format!("运行中 · {} 个目标 · {works}", domain.target_count)
+            };
             format!(
-                "<li><a href=\"/corpus/evidence?domain={}\">{}</a> · {}</li>",
+                "<a class=\"ev-domain-choice\" href=\"/corpus/evidence?domain={}\"><span class=\"ev-domain-choice-name\">{}</span><span class=\"ev-domain-choice-meta\">{}</span><span class=\"ev-domain-choice-arrow\" aria-hidden=\"true\">→</span></a>",
                 domain.domain_ref,
                 html_escape(&domain.name),
-                if domain.status == "paused" {
-                    "已暂停 · 历史材料可读"
-                } else {
-                    "运行中"
-                }
+                html_escape(&status),
             )
         })
         .collect::<String>();
+    let choices = if domains.is_empty() {
+        "<p class=\"ev-domain-choice-empty\">还没有可选择的研究领域。</p><a class=\"ev-domain-manage\" href=\"/collection/domains\">前往领域管理 →</a>".to_owned()
+    } else {
+        format!("<nav class=\"ev-domain-choices\" aria-label=\"选择语料领域\">{options}</nav>")
+    };
     format!(
-        "<!doctype html><html lang=\"zh-CN\"><meta charset=\"utf-8\"><title>选择领域 · Corpus</title><main><h1>先选择一个领域</h1><p>Corpus 只显示明确选择的领域材料，不会自动切换到其他领域。</p><ul>{options}</ul></main></html>"
+        "<dialog class=\"ev-domain-dialog\" id=\"ev-domain-dialog\" aria-labelledby=\"ev-domain-dialog-title\" aria-describedby=\"ev-domain-dialog-copy\"><div class=\"ev-domain-dialog-head\"><div><p class=\"ev-domain-dialog-key\">语料范围 <span class=\"v7-tech-key\">CORPUS SCOPE</span></p><h2 id=\"ev-domain-dialog-title\">选择研究领域</h2></div><button class=\"ev-domain-dialog-close\" id=\"ev-domain-dialog-close\" type=\"button\" aria-label=\"关闭领域选择\">×</button></div><p class=\"ev-domain-dialog-copy\" id=\"ev-domain-dialog-copy\">选择后读取该领域的作品材料；也可随后在页头切换。</p>{choices}</dialog>"
     )
 }
 
@@ -5607,15 +5612,8 @@ async fn evidence_observation_script() -> Response {
 /// 选中它，语料下的每个子页都跟着换数据源，页面结构一律不变。
 ///
 /// 只有一个领域（或读不出来）时整个控件不渲染——一个永远只有一项的下拉是噪音。
-/// 导航链接该不该带领域参数，与选择器渲不渲染用的是同一个判断：少于两个领域时
-/// 页面上没有可切换的东西，链接再带一个参数只会让地址假装有得选。
-fn corpus_nav_domain(
-    domains: &[ObservationDomain],
-    current: Option<&ObservationDomain>,
-) -> Option<String> {
-    if domains.len() < 2 {
-        return None;
-    }
+/// 子页导航始终保留已选领域；即使只剩一个领域，评论研究也不能失去读取范围。
+fn corpus_nav_domain(current: Option<&ObservationDomain>) -> Option<String> {
     current.map(|domain| domain.domain_ref.to_string())
 }
 
@@ -5821,6 +5819,7 @@ fn evidence_library_html(
             <section class="ev-results" aria-labelledby="results-title">
               <h2 class="v7-sr-only" id="results-title">作品材料结果</h2>
               <div class="ev-feedback" id="ev-feedback" role="status" aria-live="polite"></div>
+              <!-- CORPUS_EMPTY_DOMAIN_LINK_START --><!-- CORPUS_EMPTY_DOMAIN_LINK_END -->
               <div class="ev-table-head" id="ev-table-head" aria-hidden="true" hidden><span>作品</span><span>作者</span><span>材料</span><span class="ev-head-metrics" id="ev-head-metrics" aria-label="互动数据"></span><span>发布时间</span><span>最近观察</span></div>
               <div class="ev-work-list" id="ev-work-list" role="listbox" aria-label="作品材料集合"></div>
               <div class="ev-list-footer"><button class="ev-button ev-button--secondary" id="ev-next-list" type="button" hidden>继续读取作品</button></div>
@@ -5884,16 +5883,17 @@ fn evidence_library_html(
         </main>
       </div>
     </div>
+    <!-- CORPUS_DOMAIN_DIALOG_START --><!-- CORPUS_DOMAIN_DIALOG_END -->
   </body>
 </html>"#;
     let header = evidence_library_header(collection_state, domains, current);
     let side_nav = shell::corpus_side_nav(
         shell::CorpusPage::Evidence,
-        corpus_nav_domain(domains, current).as_deref(),
+        corpus_nav_domain(current).as_deref(),
         r#"<span class="v7-side-dot"></span><span class="v7-zh-status">只读本机材料投影</span><br><span class="v7-zh-status">列表与详情不触发采集</span>"#,
     );
     // 当前领域随页面一起下发，前端据此决定读哪条查询路径。放在 body 属性上而不是
-    // 让前端自己解析地址：地址里的 domain 可能是无效值，回落判定由服务端做过一次了，
+    // 让前端自己解析地址：地址里的 domain 可能是无效值，有效性判定由服务端做过一次了，
     // 前端再判一次就会出现两处规则，早晚不一致。
     base.replace(
         "<!-- GLOBAL_HEADER_START --><!-- GLOBAL_HEADER_END -->",
@@ -5902,6 +5902,21 @@ fn evidence_library_html(
     .replace(
         "<!-- CORPUS_SIDE_NAV_START --><!-- CORPUS_SIDE_NAV_END -->",
         &side_nav,
+    )
+    .replace(
+        "<!-- CORPUS_DOMAIN_DIALOG_START --><!-- CORPUS_DOMAIN_DIALOG_END -->",
+        &current
+            .is_none()
+            .then(|| corpus_domain_choice_dialog(domains))
+            .unwrap_or_default(),
+    )
+    .replace(
+        "<!-- CORPUS_EMPTY_DOMAIN_LINK_START --><!-- CORPUS_EMPTY_DOMAIN_LINK_END -->",
+        if current.is_none() && domains.is_empty() {
+            "<a class=\"ev-domain-manage ev-domain-manage--inline\" href=\"/collection/domains\">前往领域管理 →</a>"
+        } else {
+            ""
+        },
     )
     .replace(
         "__CORPUS_DOMAIN_REF__",

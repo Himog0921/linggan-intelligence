@@ -405,6 +405,10 @@ Mog 明确将四区常驻设置改为单页+关键配置弹窗。复用 L1 Setti
 - **LIDS 修复**：`corpus_domain_picker` 从原生 `select` 改成方形 `details/summary` 触发器和链接菜单；菜单使用现有 `--lgi-*`、1px Ink 边界、白色 Surface、单层 `--lgi-shadow-brutal`、中文主标签和 focus-visible。无 Token、通用 CMP、导航区或新数据能力。
 - **验证边界**：候选 `:3107` 用当前本机只读数据实际显示 21 行，首项 Inspector 不再显示“来源信息不完整”；focused Rust/DOM、format 与 JS 检查通过。未修改数据库/API/插件、未部署 :3000、未合并 main，Mog 验收待后续集成。
 
+## 2026-09-24 · DOMAIN-UNIFICATION-001-CORPUS-ENTRY 语料领域入口
+
+语料未选领域入口改为现有 Evidence Library 壳层上的原生 `<dialog>`；外观只消费 LIDS 现有 token、黑白结构、中文主标题、红色信号，不增 Token/CMP/Scene。共享页头按既有 `--lgi-z-header` 层级高于评论研究 sticky 工具条，修复领域菜单被内容覆盖。桌面及 390/375px 本机浏览器验证见 `../changes/domain-unification-001-ui-change-manifest.md` §6；此条不是部署回执。
+
 ## 2026-09-15 · EVIDENCE-COVER-CARD-MATERIAL-004 第七种材料 `M-06` 纸面残留
 
 - **来源与事项**：Mog 2026-09-15 派定只改 `/corpus/evidence?layout=cover` 作品卡的视觉层级、材质、3:4 主视觉区与既有 hover 翻面，并在材质选型（候选 B「采样残留」）落地后明确指示「登记为第七种」。这是 `LIDS-MAT-001` §1 家族程序要求的路径：先证明格点归属，再按 [design-governance.md](../design-governance.md) 的变更分类成为长期决定。

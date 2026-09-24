@@ -2,7 +2,7 @@
   'use strict';
 
   const API_ROOT = '/api/local/work-resources';
-  // 当前领域由服务端随页面下发。地址里的 domain 可能无效，回落判定服务端已经做过一次，
+  // 当前领域由服务端随页面下发。地址里的 domain 可能无效，有效性判定服务端已经做过一次，
   // 前端再判一次就会出现两处规则，早晚不一致。
   const CORPUS_DOMAIN = {
     ref: document.body.dataset.corpusDomain || '',
@@ -2565,4 +2565,17 @@
   clearInspector();
   activateTab(tabs.find((tab) => tab.dataset.evTab === model.activeTab) || tabs[0]);
   loadList({ keepSelection: true, revealUrlSelection: true });
+  if (!CORPUS_DOMAIN.hasDomain) {
+    const dialog = document.getElementById('ev-domain-dialog');
+    if (dialog) {
+      const firstChoice = dialog.querySelector('.ev-domain-choice');
+      const closeButton = document.getElementById('ev-domain-dialog-close');
+      closeButton?.addEventListener('click', () => dialog.close());
+      dialog.addEventListener('close', () => {
+        document.querySelector('.v7-domain-picker summary, .ev-domain-manage--inline')?.focus();
+      });
+      dialog.showModal();
+      firstChoice?.focus();
+    }
+  }
 })();

@@ -109,6 +109,27 @@
 .ev-feedback p{margin:0 0 7px;color:var(--v7-muted);font-size:12px;line-height:1.6}
 .ev-feedback[data-kind="error"]{border-color:var(--v7-red);background:var(--v7-soft-red)}
 .ev-feedback[data-kind="empty"]{border-style:dashed}
+
+/* The first Corpus visit keeps the real shell visible behind a focused, domain-scoped choice. */
+.ev-domain-dialog{box-sizing:border-box;width:min(calc(var(--lgi-space-24)*6),calc(100vw - var(--lgi-space-8)));max-height:calc(100vh - var(--lgi-space-8));overflow:auto;border:2px solid var(--lgi-border-solid);padding:var(--lgi-space-6);background:var(--lgi-canvas);color:var(--lgi-ink);box-shadow:var(--lgi-shadow-brutal)}
+.ev-domain-dialog::backdrop{background:var(--lgi-canvas-overlay)}
+.ev-domain-dialog-head{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--lgi-space-4);padding-bottom:var(--lgi-space-4);border-bottom:2px solid var(--lgi-border-solid)}
+.ev-domain-dialog-key{margin:0 0 var(--lgi-space-2);color:var(--lgi-muted);font:var(--lgi-weight-bold) var(--lgi-text-label)/var(--lgi-lh-heading) var(--lgi-font-sans)}
+.ev-domain-dialog-head h2{margin:0;font:var(--lgi-weight-bold) var(--lgi-text-section)/var(--lgi-lh-heading) var(--lgi-font-sans)}
+.ev-domain-dialog-close{width:var(--lgi-space-10);height:var(--lgi-space-10);flex:none;border:1px solid var(--lgi-border-solid);background:var(--lgi-canvas);color:var(--lgi-ink);font-size:var(--lgi-text-section);line-height:var(--lgi-lh-title);cursor:pointer}
+.ev-domain-dialog-close:hover,.ev-domain-dialog-close:focus-visible{background:var(--lgi-ink);color:var(--lgi-canvas)}
+.ev-domain-dialog-copy{margin:var(--lgi-space-4) 0;color:var(--lgi-muted);font:var(--lgi-text-body)/var(--lgi-lh-body) var(--lgi-font-sans)}
+.ev-domain-choices{display:grid;gap:var(--lgi-space-2)}
+.ev-domain-choice{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:var(--lgi-space-4);align-items:center;min-height:var(--lgi-space-16);padding:var(--lgi-space-3) var(--lgi-space-4);color:var(--lgi-ink);text-decoration:none}
+.ev-domain-choice:hover,.ev-domain-choice:focus-visible{background:var(--lgi-canvas-low)}
+.ev-domain-choice:focus-visible,.ev-domain-manage:focus-visible{outline:2px solid var(--lgi-focus);outline-offset:2px}
+.ev-domain-choice-name{min-width:0;font:var(--lgi-weight-bold) var(--lgi-text-body)/var(--lgi-lh-heading) var(--lgi-font-sans)}
+.ev-domain-choice-meta{grid-column:1;color:var(--lgi-muted);font:var(--lgi-text-label)/var(--lgi-lh-data) var(--lgi-font-sans)}
+.ev-domain-choice-arrow{grid-column:2;grid-row:1/3;color:var(--lgi-signal);font-size:var(--lgi-text-section)}
+.ev-domain-choice-empty{margin:0 0 var(--lgi-space-3);color:var(--lgi-muted)}
+.ev-domain-manage{display:inline-flex;align-items:center;min-height:var(--lgi-space-10);color:var(--lgi-ink);font-weight:var(--lgi-weight-bold)}
+.ev-domain-manage--inline{margin:0 var(--lgi-space-4)}
+@media(max-width:640px){.ev-domain-dialog{padding:var(--lgi-space-4)}}
 .ev-work-list{min-width:0}
 .ev-list-footer{min-height:60px;display:grid;place-items:center;padding:14px}
 
