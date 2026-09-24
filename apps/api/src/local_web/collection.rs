@@ -1,9 +1,8 @@
 //! Collection Workspace — the continuous observation execution layer.
 //!
-//! Five sub-surfaces. The V4 field-workspace reference froze the set; DESIGN-006 reordered and renamed
-//! them so the row reads by urgency rather than by pipeline stage:
+//! Six sub-surfaces. DESIGN-006 ordered the original five by urgency:
 //! 待处理 / 观察目标 / 生产流 / 采集任务 / 执行工位.
-//! The slugs behind them are unchanged and remain the URL contract.
+//! DOMAIN-UNIFICATION-001 appended 领域管理 without changing the original URL slugs.
 //!
 //! Every surface here is structurally complete and remains honest about the projection it
 //! can read. Collection domain objects now exist, but a route can still be unavailable or

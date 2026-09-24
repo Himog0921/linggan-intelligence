@@ -45,7 +45,7 @@ use axum::{
     routing::{get, post},
 };
 use linggan_contracts::{
-    EvidenceQuery, LifecycleState, parse_local_producer_attempt, parse_local_producer_submission,
+    LifecycleState, parse_local_producer_attempt, parse_local_producer_submission,
     parse_local_task_spec, parse_producer_attempt, parse_producer_submission,
     parse_producer_task_spec,
 };
@@ -70,13 +70,12 @@ use linggan_evidence::{
     keyword_baselines_qualified, list_targets, list_targets_in_state,
     local_discovery_schema_is_ready, local_producer_schema_is_ready,
     media_acquisition_schema_is_ready, open_claim_window, probe_runtime_readiness,
-    producer_runtime_has_packages, producer_runtime_schema_is_ready, read_archive_completeness,
-    read_blocked_materials, read_collection_task_timeline, read_creator_directory,
-    read_creator_lifecycle, read_detail_delivery_reconciliation, read_discovery_library,
-    read_keyword_hits, read_media_upload_session, read_runtime_capacity, read_runtime_library,
-    read_scheduler_heartbeat, read_station_capabilities, read_station_overview, read_target,
-    read_target_avatars, read_target_deletion_preview, read_target_inspector,
-    read_target_observation_summaries, record_media_acquisition_failure,
+    producer_runtime_schema_is_ready, read_archive_completeness, read_blocked_materials,
+    read_collection_task_timeline, read_creator_directory, read_creator_lifecycle,
+    read_detail_delivery_reconciliation, read_keyword_hits, read_media_upload_session,
+    read_runtime_capacity, read_scheduler_heartbeat, read_station_capabilities,
+    read_station_overview, read_target, read_target_avatars, read_target_deletion_preview,
+    read_target_inspector, read_target_observation_summaries, record_media_acquisition_failure,
     record_media_download_failure, record_media_upload_chunk, register_station,
     release_media_upload_finalize, rename_station, request_and_admit_for_domain,
     request_and_admit_material_targets_for_domain, request_progressive_archive, retire_materials,
@@ -429,10 +428,6 @@ fn material_api_routes() -> Router<LocalWebState> {
             get(local_media_routes::derivative),
         )
         .route("/api/local/work-resources", get(evidence_library_json))
-        .route(
-            "/api/local/evidence-library/legacy",
-            get(material_projection::legacy_json),
-        )
         .route(
             "/api/local/work-resources/{public_ref}/comments",
             get(material_projection::research_comments_json).layer(axum::middleware::from_fn(
@@ -1381,19 +1376,6 @@ async fn collection_targets_json(State(state): State<LocalWebState>) -> Response
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
             "collection_targets_unavailable",
         ),
-    }
-}
-
-async fn read_evidence_library(
-    database: &Database,
-    query: &EvidenceQuery,
-) -> Result<linggan_evidence::DiscoveryLibraryProjection, sqlx::Error> {
-    if producer_runtime_schema_is_ready(database).await?
-        && producer_runtime_has_packages(database).await?
-    {
-        read_runtime_library(database, query).await
-    } else {
-        read_discovery_library(database, query).await
     }
 }
 
@@ -4171,6 +4153,7 @@ fn lease_error_code(error: &LeaseError) -> &'static str {
         // and whether it can come back on its own — lives on the execution-input ledger.
         LeaseError::OnlyStoppedMembersRemain => "work_order_only_stopped_members_remain",
         LeaseError::ControlBlocked { reason_code } => match reason_code.as_str() {
+            "domain_paused_or_unscoped" => "domain_paused_or_unscoped",
             "risk_paused" => "risk_paused",
             "station_unavailable" => "station_unavailable",
             "station_not_accepting" => "station_not_accepting",

@@ -12,6 +12,36 @@ use tower::ServiceExt;
 
 const LOCAL_001_MIGRATIONS: &str = full_schema_fixture::FULL_MIGRATIONS;
 
+#[tokio::test]
+async fn legacy_evidence_route_cannot_bypass_domain_scoped_work_resources() {
+    for uri in [
+        "/api/local/evidence-library/legacy",
+        "/api/local/evidence-library/legacy?domain=00000000-0000-4000-8000-000000000001",
+    ] {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri(uri)
+                    .header(header::HOST, "127.0.0.1:8080")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+}
+
+#[test]
+fn lease_refusal_keeps_the_paused_domain_reason() {
+    assert_eq!(
+        lease_error_code(&LeaseError::ControlBlocked {
+            reason_code: "domain_paused_or_unscoped".to_owned(),
+        }),
+        "domain_paused_or_unscoped"
+    );
+}
+
 #[path = "../../../../crates/evidence/tests/support/material_fixture.rs"]
 mod domain_management_fixture;
 
@@ -3007,10 +3037,10 @@ fn collection_orders_its_surfaces_by_urgency_and_opens_on_the_one_that_expires()
     for (index, slug) in [
         ("01", "attention"),
         ("02", "targets"),
-        ("03", "domains"),
-        ("04", "operations"),
-        ("05", "tasks"),
-        ("06", "runtime"),
+        ("03", "operations"),
+        ("04", "tasks"),
+        ("05", "runtime"),
+        ("06", "domains"),
     ] {
         let entry = format!("href=\"/collection/{slug}\"");
         let at = rail

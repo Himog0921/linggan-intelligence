@@ -30,47 +30,6 @@ pub(super) struct EvidenceLibraryParams {
     pub(super) domain: Option<uuid::Uuid>,
 }
 
-pub(super) async fn legacy_json(
-    State(state): State<LocalWebState>,
-    Query(params): Query<EvidenceLibraryParams>,
-) -> Response {
-    let Some(database) = state.database.database() else {
-        return local_read_json_error(
-            axum::http::StatusCode::SERVICE_UNAVAILABLE,
-            "read_model_not_connected",
-        );
-    };
-    let Ok(query) = local_query(&params) else {
-        return local_read_json_error(
-            axum::http::StatusCode::BAD_REQUEST,
-            "invalid_local_evidence_query",
-        );
-    };
-    match super::read_evidence_library(database, &query).await {
-        Ok(mut projection) => {
-            let truncated = projection.cards.len() > 50;
-            if truncated {
-                projection.cards.truncate(50);
-            }
-            let returned = projection.cards.len();
-            Json(json!({
-                "compatibilityState":"EXPLICIT_LEGACY_DISCOVERY","cards":projection.cards,
-                "returned":returned,"truncated":truncated,"nextCursor":Value::Null,
-                "excludedUnknownPublishedAt":projection.excluded_unknown_published_at,
-                "timeView":projection.time_view
-            }))
-            .into_response()
-        }
-        Err(error) => {
-            eprintln!("legacy evidence projection unavailable: {error}");
-            local_read_json_error(
-                axum::http::StatusCode::SERVICE_UNAVAILABLE,
-                "legacy_read_projection_unavailable",
-            )
-        }
-    }
-}
-
 #[derive(Deserialize)]
 pub(super) struct MaterialChannelParams {
     cursor: Option<String>,

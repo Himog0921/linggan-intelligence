@@ -343,6 +343,7 @@ impl DispatchDecision {
             Self::NothingWaiting => "nothing_waiting",
             Self::ExecutionLocatorUnavailable { .. } => "execution_locator_unavailable",
             Self::ControlBlocked { reason_code } => match reason_code.as_str() {
+                "domain_paused_or_unscoped" => "domain_paused_or_unscoped",
                 "collection_upgrade_recovery_only" => "collection_upgrade_recovery_only",
                 "risk_paused" => "risk_paused",
                 "installation_risk_cooldown" => "installation_risk_cooldown",
@@ -2485,6 +2486,14 @@ fn rule_revision_blocks_dispatch(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_paused_or_unscoped_domain_keeps_its_refusal_code() {
+        let decision = DispatchDecision::ControlBlocked {
+            reason_code: "domain_paused_or_unscoped".to_owned(),
+        };
+        assert_eq!(decision.code(), "domain_paused_or_unscoped");
+    }
 
     #[test]
     fn retry_backoff_is_persistent_bounded_and_never_immediate() {

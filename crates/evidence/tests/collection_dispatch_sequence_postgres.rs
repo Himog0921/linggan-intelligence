@@ -604,6 +604,44 @@ async fn creator_lease_claims_and_completes_two_scheduled_tasks_in_order() {
 async fn task_read_projection_keeps_queue_attempt_package_and_receipt_distinct() {
     let database = proof_database_for("collection_task_read_projection").await;
     let fixture = seed_creator_work_order(&database).await;
+    let reference_domain = Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap();
+    let target_ref: Uuid =
+        sqlx::query_scalar("SELECT target_ref FROM collection_work_order WHERE work_order_ref=$1")
+            .bind(fixture.work_order_ref)
+            .fetch_one(database.pool())
+            .await
+            .expect("the fixture Work Order names its Target");
+    sqlx::query(
+        "INSERT INTO observation_domain_target(domain_ref,target_ref,role) VALUES ($1,$2,'reference')",
+    )
+    .bind(reference_domain)
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .expect("the Target may also serve a reference Domain");
+    let reference_request = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_acquisition_request \
+             (request_ref,target_ref,lane,purpose,requested_by,domain_ref,observation_role) \
+         VALUES ($1,$2,'deep_archive','focused sequence proof','person',$3,'reference')",
+    )
+    .bind(reference_request)
+    .bind(target_ref)
+    .bind(reference_domain)
+    .execute(database.pool())
+    .await
+    .expect("the reference purpose is recorded");
+    sqlx::query(
+        "INSERT INTO collection_work_order_domain_usage \
+             (work_order_ref,request_ref,domain_ref,role,basis_kind) \
+         VALUES ($1,$2,$3,'reference','merged')",
+    )
+    .bind(fixture.work_order_ref)
+    .bind(reference_request)
+    .bind(reference_domain)
+    .execute(database.pool())
+    .await
+    .expect("the shared Work Order freezes both Domain purposes before claim");
     let lease = issue_work_order_lease(&database, fixture.work_order_ref, 60)
         .await
         .expect("creator work order is leased");
@@ -618,6 +656,11 @@ async fn task_read_projection_keeps_queue_attempt_package_and_receipt_distinct()
     run_scheduled_task(&database, &first_task, fixture.producer_instance_id).await;
     assert_task_state(&database, first_task.task_id(), "completed").await;
     assert!(lease_is_live(&database, lease.lease_ref).await);
+    sqlx::query("UPDATE observation_domain SET status='paused' WHERE domain_ref=$1")
+        .bind(reference_domain)
+        .execute(database.pool())
+        .await
+        .expect("a later Domain pause does not rewrite frozen Work Order usage");
 
     let timeline = read_collection_task_timeline(&database, 100)
         .await
@@ -639,6 +682,16 @@ async fn task_read_projection_keeps_queue_attempt_package_and_receipt_distinct()
     assert!(completed.package_ref.is_some());
     assert!(completed.receipt_ref.is_some());
     assert_eq!(completed.material_admission.as_deref(), Some("ACCEPTED"));
+    assert!(
+        completed
+            .domain_usage
+            .contains("ADHD · 主研究 · 当前运行中")
+    );
+    assert!(
+        completed
+            .domain_usage
+            .contains("考研自习 · 参照 · 当前已暂停")
+    );
     assert_eq!(
         completed.target_display_name.as_deref(),
         Some("顺序派发夹具")
@@ -655,6 +708,7 @@ async fn task_read_projection_keeps_queue_attempt_package_and_receipt_distinct()
     assert!(pending.attempt_id.is_none());
     assert!(pending.package_ref.is_none());
     assert!(pending.receipt_ref.is_none());
+    assert_eq!(pending.domain_usage, completed.domain_usage);
 }
 
 #[tokio::test]

@@ -5,7 +5,7 @@
 > 适用范围: 平级 Domain、Domain 与观察目标关系、统一材料/评论/媒体接纳与读取、Comment Study 领域化、领域管理页面、开发期旧模型清理、主线集成与本机上线
 > 事实来源: Mog 2026-09-23 最新决定；origin/main@a42315eb539ee26f42cc3228817001db73ca12a5 的代码与 migration；隔离 worktree 代码与 disposable PostgreSQL 证明；Issue #130 与 #337 的历史事实
 > 冲突时以谁为准: Mog 最新明确决定；其次是真实运行、数据库副作用和可复现测试；再其次是当前代码、migration、ACCEPTED ADR 和权威当前文档
-> 当前阶段: WP0–WP5 已完成。提交前 commit-reviewer 审查已发现并修复 4 项问题；完整隔离 PostgreSQL 套件、并发 pause/Merge 屏障与领域管理页隔离浏览器验收均已通过。当前 schema 副本从 0102 经 0103→0104 升级通过；0104 cleanup follow-up 覆盖 orphan session 活动 lease、无回执 preparation，以及尚无 detail session 的活跃旧 scope，并锁住相关 scope 写表。定点 PostgreSQL 4/4 与当前 schema 副本证明通过，follow-up 已提交。Issue #130 已同步，PR #343 已推送并创建为 Draft，等待独立 reviewer 与 PR #338 的集成顺序决定；共享 migration、main 合并、runtime-main 切换、部署与 Mog 业务验收仍未执行。验证基线=`origin/main@a42315eb539ee26f42cc3228817001db73ca12a5`
+> 当前阶段: WP0–WP5 已实施；并发 pause/Merge 屏障、领域管理隔离浏览器和当前 schema 副本 0102→0103→0104 证明均已通过。Issue #130 与 Draft PR #343 已建立。首次独立审查发现的旧兼容读取跨 Domain、任务冻结用途不可见、暂停拒绝原因折叠及 CSS token 缺口已修复；修复后完整隔离 PostgreSQL 套件与双轴独立复审通过，待提交推送。Mog 已授权复审后合并及本机部署；集成顺序定为先 #343、后 #338，后者须在新 main 上调整候选 migration 与 Comment Study 查询。共享 migration、main 合并、runtime-main 切换、部署与 Mog 业务验收尚未发生。验证基线=`origin/main@a42315eb539ee26f42cc3228817001db73ca12a5`
 
 ## 0. 下一位 Agent 从这里开始
 
@@ -27,8 +27,8 @@
 ### 0.1 Issue 与协作入口
 
 - 复用 GitHub Issue #130 作为唯一主 Issue，不为 WP0–WP6 新建一串重复 Issue。
-- Issue #130 原正文冻结的是旧架构：is_own_domain、跨行业独立表/独立 API、外部材料不是 Evidence。2026-09-24 已将原内容降为 Issue 历史，按当前 DEC-0008 与本计划重写标题/正文并链接权威文件；移除 `ready-for-agent`，改为 `ready-for-human`，等待 Mog 指定 reviewer 与集成顺序，未分配 assignee。
-- PR #343 已关联 Issue #130 并保持 Draft；该 PR 的独立 reviewer 与 exact-head verdict 仍待 Mog安排。
+- Issue #130 原正文冻结的是旧架构：is_own_domain、跨行业独立表/独立 API、外部材料不是 Evidence。2026-09-24 已将原内容降为 Issue 历史，按当前 DEC-0008 与本计划重写标题/正文并链接权威文件；移除 `ready-for-agent`，改为 `ready-for-human`。首次独立审查指出实施前 Claim 评论缺失，不能倒填成事前 Claim；PR 正文保留实际执行身份与提交证据。
+- PR #343 已关联 Issue #130 并保持 Draft；独立规格与规范审查已在 `c56486ca` 完成并提出整改。Mog 已授权 root 修复、复审后合入 `main` 并本机部署，#338 在 #343 后调整集成。
 - root 持有 codex/domain-unification-001 集成分支；各 Work Package 可以使用独立 worktree/commit，但最终只形成一个模块级 PR。
 - 默认由一个写入 owner 按 WP0 → WP6 串行落到 `codex/domain-unification-001` 专属 worktree；其他 subagent 只读走查。只有 root 明确划定不重叠文件和集成点后，才允许并行写入。
 - 其他 Agent 不得自行领取 #130、自行新建派生 Issue、自行增加 subagent 或自行改变并发。
@@ -796,18 +796,18 @@ shared 文件必须由 root 指定 integration owner；实施 Agent不得因为�
 |---|---|
 | 产品决定 | 已确认 |
 | 活跃计划 | 已建立 |
-| Issue #130 同步 | 未执行 |
+| Issue #130 同步 | 已完成旧架构正文降级与当前交付同步；事前 Claim 评论缺失已如实记录 |
 | WP0 权威合同 | 已完成（DEC-0008、共同语言、不变量、页面合同、UI manifest、索引与进度已同步） |
 | WP1 schema/context | 实施与隔离 PostgreSQL 证明完成（0103 additive migration、Domain–Target relation、Request/WorkOrder/Material usage；多 primary 拒绝任意择一；Request admission 与 lease claim 对 Domain status 持行共享锁至提交，pause 与新写入线性化；Merge 按授权、目的、执行边界和未 claim 状态匹配；数据库锁定首次 claim 并保护 usage 不可变；Target 锁覆盖 Request/首次 claim 并发边界；有持锁屏障证明） |
 | WP2 unified admission/media | 实施与隔离 PostgreSQL 证明完成（统一接纳及 Domain usage；归档与精确材料补采 API 显式传 Domain；目标抽屉将 Domain 传到关键词基线/详情、创作者缺口和分批建档；Merge 共享 WorkOrder 并记录独立用途；scope/merge/reply/media lane 由完整 LOCAL-001 隔离证明覆盖） |
-| WP3 Corpus/Comment Study | 实施与隔离 PostgreSQL 证明完成（Corpus list/detail/comments/cursor 按显式 Domain；移除 isOwn UI/API 分支与 LIST LEVEL ONLY；未选 Domain 显示选择提示且不发语料请求；Comment Study setup/policy/run/source 显式 Domain，reference 预览后显式纳入，Run/运行记录/评论目标/信号投影冻结 role；策略保存与 Run 创建对 active Domain 持共享行锁至提交，暂停竞态不能落新研究写入；旧 cross 运行路径由 WP5 清理） |
+| WP3 Corpus/Comment Study | 实施与隔离 PostgreSQL 证明完成（Corpus list/detail/comments/cursor 按显式 Domain；移除 isOwn UI/API 分支与 LIST LEVEL ONLY；未选 Domain 显示选择提示且不发语料请求；Comment Study setup/policy/run/source 显式 Domain，reference 预览后显式纳入，Run/运行记录/评论目标/信号投影冻结 role；策略保存与 Run 创建对 active Domain 持共享行锁至提交，暂停竞态不能落新研究写入；旧 cross 运行路径由 WP5 清理）。独立审查发现的无 Domain 兼容发现卡 HTTP 入口已在修复分支移除。 |
 | WP4 Domain Management | SSR 页面与配置/关系操作、错误反馈已实现；reference 关联和 role 在同一事务提交，Target 行锁串行化关系变更与 Request；8 个材料通道状态按来源事实分别汇总；隔离 PostgreSQL API 路由与 2026-09-24 浏览器交互证明通过：配置创建/编辑、暂停/恢复、同一 Target 多 Domain 不同 role、冲突无写入；1440×1000 与 390×844 目视、按钮焦点环通过。精确 DOM overflow、数据库不可读浏览器态、非空媒体 lane 与 Mog 验收仍未做 |
 | WP5 reset/cleanup | 实施与隔离 PostgreSQL 证明完成。0104 cleanup migration 已登记至 fixtures 与本机迁移链；canonical legacy usage 只从旧 `content.domain_ref`/`first_package_ref` 事实 seed；旧 cross sample 没有 canonical Package 血缘时不会借用 Content 的首页 Package 冒充 peer 来源；可再生旧样本投影按合同清理/重投影，缺少替代事实的用户笔记会阻止清理；运行时代码不再引用旧 cross admission/read/routes/worker 分支。首轮当前 schema 副本升级发现 grant-attempt FK 阻止孤儿会话清理后，0104 改为保留 grant/risk 审计、解除可空会话引用并退役 session-scoped preparation；当前另保护 orphan session、session-free 旧 scope 的活跃 lease 和无提交回执 preparation，且锁定 scope 写表至迁移事务结束。|
-| 自动检查 | 完整 `./scripts/test-local-001-discovery-postgres.sh` 与真实 Comment Study API 回归在本轮 follow-up 前通过；本轮 `cargo check --locked --workspace --tests`、0104 cleanup PostgreSQL 4/4、定点 `rustfmt --check`、`git diff --check` 通过。当前 schema 副本再次从 runtime-main 0102 流式克隆后，0103→0104 成功，源库计数不变且 disposable 数据库/容器/卷已清理。全仓 `cargo fmt --all -- --check` 仍被未修改基线文件的格式漂移阻断 |
+| 自动检查 | 修复后完整 `./scripts/test-local-001-discovery-postgres.sh` 退出 0（含新增双 Domain 冻结任务用途与暂停状态回归；隔离资源清理确认）；API 非数据库单测 269 passed / 0 failed / 29 ignored，隔离 API 29/29、派发任务序列 36/36、worker 隔离 3/3。`cargo check --locked --workspace --tests --quiet`、定点 `rustfmt --check`、`node --check`、`git diff --check`、项目治理和 UI design handbook 检查通过。此前当前 schema 副本 0102→0103→0104 通过、源库未写；全仓 `cargo fmt --all -- --check` 仍被未修改基线文件的格式漂移阻断 |
 | Fresh PostgreSQL | 完成：完整 LOCAL-001 disposable PostgreSQL 套件通过，包括 migration 全链、跨 Domain 并发合并及冻结用途、WP1–WP5 关键正反例、领域管理 API、worker 与调度证明；临时资源清理已核实 |
 | 当前 schema 升级 | 通过：只读流式克隆 runtime-main 0102 数据库后应用 0103→0104。副本 1,352 Content 全部 seed 为 1,352 legacy usage、缺失 seed 为 0；24 条孤儿旧会话与对应 72 条已回执 preparation 清理，24 条 grant attempt 保留并 detach，其他 196 条 preparation 保留；旧 cross 表和 canonical 单值 Domain 列均为 0。unprojectable 旧 scope 的有效 lease 为 0。源库仍为 0102，1,352 Content/24 sample；迁移前后计数一致，未写源库 |
-| Root 合同/标准复核 | 主体 106 文件候选已完成此前两轮审查与 exact commit 基线核对。本轮 follow-up 的 session-free active scope 漏检已按审查发现修复并由 4/4 定点 PostgreSQL 与当前 schema 副本 proof 覆盖；提交 `62685468` 已推送。Issue #130 已同步；PR #343 Draft 等待独立 reviewer 与 PR #338 迁移顺序审查 |
-| PR | #343 Draft 已创建，关联 `Refs #130`；reviewer 未指派，未授权合并 |
+| Root 合同/标准复核 | 首次独立审查在 `c56486ca` 指出跨 Domain 旧读取入口、任务用途可见性、暂停原因码和 CSS token 缺口；修复后规格轴复审未发现可复现缺陷。规范轴复审再指出固定列宽，已改为可收缩网格并完成最终只读复验，无剩余本轮代码 blocker。Issue 事前 Claim 缺失作为历史事实保留；#343→#338 技术顺序已确定，#338 的候选 migration/读取适配留在后续集成。 |
+| PR | #343 Draft 已创建，关联 `Refs #130`；Mog 已授权审查修复、复审后合并与本机部署，当前未合并 |
 | origin/main 合并 | 未执行 |
 | 共享开发库 migration | 未执行 |
 | runtime-main 上线 | 未执行 |

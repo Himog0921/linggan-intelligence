@@ -151,6 +151,7 @@
         stateView.classList.add(stateClasses.indexOf(row.dataset.taskStateClass) >= 0 ? row.dataset.taskStateClass : "c-task-state-wait");
       }
       setTaskText("[data-task-inspector-capabilities]", row.dataset.taskCapabilities);
+      setTaskText("[data-task-inspector-domains]", row.dataset.taskDomains);
       setTaskText("[data-task-inspector-created]", row.dataset.taskCreated);
       setTaskText("[data-task-inspector-failure]", row.dataset.taskFailure);
       setTaskText("[data-task-inspector-attempt]", row.dataset.taskAttempt);

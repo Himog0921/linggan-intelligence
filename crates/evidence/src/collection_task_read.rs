@@ -27,6 +27,9 @@ pub struct CollectionTaskExecution {
     pub has_live_lease: Option<bool>,
     pub target_display_name: Option<String>,
     pub target_identity_key: Option<String>,
+    /// Immutable Work Order Domain/role uses, with each Domain's current pause state
+    /// labelled separately. A manual Task without a Work Order is identified as such.
+    pub domain_usage: String,
     pub attempt_id: Option<Uuid>,
     pub attempt_started_at: Option<String>,
     pub package_kind: Option<String>,
@@ -77,6 +80,7 @@ pub async fn read_collection_task_timeline(
             has_live_lease: row.get("has_live_lease"),
             target_display_name: row.get("target_display_name"),
             target_identity_key: row.get("target_identity_key"),
+            domain_usage: row.get("domain_usage"),
             attempt_id: row.get("attempt_id"),
             attempt_started_at: row.get("attempt_started_at"),
             package_kind: row.get("package_kind"),
@@ -271,6 +275,10 @@ SELECT
     END AS has_live_lease,
     COALESCE(linked_target.display_name, fallback_target.display_name) AS target_display_name,
     COALESCE(linked_target.identity_key, fallback_target.identity_key) AS target_identity_key,
+    COALESCE(domain_scope.domain_usage, CASE
+        WHEN work_order.work_order_ref IS NULL THEN '未关联受控工单'
+        ELSE '工单冻结领域用途缺失'
+    END) AS domain_usage,
     attempt.attempt_id,
     attempt.started_at::text AS attempt_started_at,
     package.package_kind,
@@ -286,6 +294,20 @@ FROM linggan_runtime_task task
 LEFT JOIN collection_work_order_lease_task lease_task ON lease_task.task_id = task.task_id
 LEFT JOIN collection_work_order_lease lease ON lease.lease_ref = lease_task.lease_ref
 LEFT JOIN collection_work_order work_order ON work_order.work_order_ref = lease.work_order_ref
+LEFT JOIN LATERAL (
+    SELECT string_agg(
+        domain.name || ' · ' ||
+        CASE usage.role WHEN 'primary' THEN '主研究' ELSE '参照' END ||
+        CASE domain.status WHEN 'paused' THEN ' · 当前已暂停' ELSE ' · 当前运行中' END,
+        '；' ORDER BY domain.name, usage.domain_ref, usage.role
+    ) AS domain_usage
+    FROM (
+        SELECT DISTINCT domain_ref, role
+        FROM collection_work_order_domain_usage
+        WHERE work_order_ref = work_order.work_order_ref
+    ) usage
+    JOIN observation_domain domain ON domain.domain_ref = usage.domain_ref
+) domain_scope ON true
 LEFT JOIN collection_observation_target linked_target
        ON linked_target.target_ref = work_order.target_ref
 LEFT JOIN LATERAL (

@@ -10,11 +10,11 @@
 
 Mog 已确认正式 Domain 在基础采集、详情、评论、媒体与研究能力上平权，Domain 只定义研究上下文；Collection 需要新增“领域管理”。当前唯一推进入口是 [DOMAIN-UNIFICATION-001](plans/active/domain-unification-001.md)：它冻结 Domain–Target 的 `primary/reference` 配置、相容多用途共享一次 WorkOrder、统一 canonical Material/Comment/Media、Domain-scoped Corpus 与 Comment Study、pause 真语义，以及开发期旧 `cross_industry` 路径的直接清理。
 
-本计划明确不为旧开发数据建设双写、长期 fallback、逐行审批、down migration 或专用保全系统。WP0–WP5 已在专属 `codex/domain-unification-001` worktree 完成实现，并通过完整 disposable PostgreSQL LOCAL-001 证明；WP4 领域管理已在隔离 PostgreSQL 与本机浏览器完成配置写入、pause/resume、多 Domain role、冲突反馈、1440/390 视口和键盘焦点验收。首轮提交前只读审查发现并推动修复四项：pause 与 Request/claim 的竞态、reference 关系两步写入、旧 peer 样本错误复用首页 Package 血缘、暂停领域保存 Comment Study 策略的错误码。修复后的 `./scripts/test-local-001-discovery-postgres.sh` 与 `cargo check --locked --workspace --tests` 通过；另用 disposable PostgreSQL 通过真实 Comment Study API 回归，确认暂停 Domain 返回 `409 domain_not_active` 且不写入策略。最终 106 文件树第二轮只读复审未发现新问题；0104 后续活跃 scope 漏检已修复并通过定点 PostgreSQL/当前 schema 副本证明，最后提交为 `62685468`。
+本计划明确不为旧开发数据建设双写、长期 fallback、逐行审批、down migration 或专用保全系统。WP0–WP5 已在专属 `codex/domain-unification-001` worktree 实施；WP4 领域管理此前在隔离 PostgreSQL 与本机浏览器完成配置写入、pause/resume、多 Domain role、冲突反馈、1440/390 视口和键盘焦点验收。早期审查修复了 pause 与 Request/claim 竞态、reference 关系两步写入、旧 peer 样本错误复用首页 Package 血缘、暂停领域保存 Comment Study 策略错误码，以及 0104 的活跃旧 scope 漏检。PR #343 首次独立审查随后发现旧 Evidence 兼容接口可跨 Domain 读取、任务缺少冻结领域用途、暂停拒绝原因被折叠、CSS token 问题；本轮均已修复，并通过修复后的完整隔离 PostgreSQL 套件与双轴独立复审。API 单元测试另外暴露领域管理导航测试与现行页面合同不符、隐藏字段 CSS 覆盖问题；前者已按原五面后追加领域管理的现行顺序更新断言，后者已修样式。新布局轨道改用可收缩网格，最终版本仍待部署浏览器 smoke。
 
 当前 schema 副本升级门槛已通过：将 runtime-main 的 0102 数据库以只读 `pg_dump` 流式恢复到 disposable PostgreSQL，不落 dump 文件，再应用 0103→0104。副本保持 1,352 条 canonical Content，并为 1,352 条建立 `legacy_domain_migration` usage；24 个无 canonical Content 的旧会话被清理，24 条 grant attempt 保留并解除旧会话引用，72 条已回执的会话级 lane preparation 随会话退役，其余 196 条保留。cleanup PostgreSQL 套件覆盖 orphan session 活动 lease、session-free 旧 scope 活动 lease、无提交回执 preparation 三个拦截条件。迁移也锁定旧 scope 表，避免预检后有新 scope 写入。副本检查显示 unprojectable 旧 scope 的活跃 lease 为 0；源库只读核对仍为 0102、1,352 条 Content、24 条旧 sample，迁移前后计数一致，未写源库。临时数据库、容器与卷已清理。
 
-Issue #130 已改为当前 DOMAIN-UNIFICATION-001 交付记录，移除旧 `ready-for-agent` 并标记 `ready-for-human`，等待 Mog 指定 PR reviewer 与集成顺序。PR #343 已推送并创建为 Draft；Draft PR #338 同时修改 Comment Study 读取/UI 且有候选 0103–0105 migration，需明确先后次序。共享迁移、main 合并、runtime-main 切换、部署、插件重载、外部平台访问和 Mog 业务验收均未执行。浏览器验收见 `docs/design/acceptance/domain-unification-001-acceptance.md`。
+Issue #130 已改为当前 DOMAIN-UNIFICATION-001 交付记录，移除旧 `ready-for-agent` 并标记 `ready-for-human`。PR #343 保持 Draft；Mog 已授权完成审查修复后合入 `main` 并刷新本机运行，技术集成顺序为先 #343、再让 Draft PR #338 基于新 `main` 重排候选 0103–0105 migration 并修订 Comment Study 读取。当前共享迁移、main 合并、runtime-main 切换和 Mog 业务验收均未执行；插件重载与外部平台访问也未发生。浏览器验收见 `docs/design/acceptance/domain-unification-001-acceptance.md`。
 
 ### OCR-CONTENT-LAYERING-001 / Issue #296（候选源码；未进入共享运行）
 
@@ -368,7 +368,7 @@ Material Projection 已接纳搜索/主页发现面带回的真实标题、作�
 
 ### MATERIAL-PROJECTION-001 / Issue #86（Draft stacked 实现）
 
-基于 `MEDIA-RECON-001`，新的 accepted Package 已有作品级类型化材料投影：发现、详情、评论、回复、作者、媒体槽位、媒体字节状态及 OCR/ASR 生命周期共用一个 `items` 读取 envelope。默认 `/api/local/work-resources` 返回共享作品资源投影；旧 `cards` 仅由显式 `/api/local/evidence-library/legacy` 兼容入口提供，不再默认混读。逐字段未知不补值；评论/回复保留稳定身份、根/父关系与各自 Coverage；作者资料按观察版本追加；媒体保留 Producer 顺序与未知展示顺序、多候选来源、generation、Live Photo partial、Blob/本地 Materialization、处理事件/派生和处置状态。普通 API 不返回远程候选 URI、storage key 或临时上传状态，`batch_checkpoint` 不生成材料或整体完成声明。插件到页面的现行映射见 [`architecture/material-projection-data-map.md`](architecture/material-projection-data-map.md)。
+基于 `MEDIA-RECON-001`，新的 accepted Package 已有作品级类型化材料投影：发现、详情、评论、回复、作者、媒体槽位、媒体字节状态及 OCR/ASR 生命周期共用一个 `items` 读取 envelope。`/api/local/work-resources` 返回共享作品资源投影；DOMAIN-UNIFICATION-001 的待合并分支已移除旧 `cards` HTTP 兼容入口，避免它跨 Domain 读取。逐字段未知不补值；评论/回复保留稳定身份、根/父关系与各自 Coverage；作者资料按观察版本追加；媒体保留 Producer 顺序与未知展示顺序、多候选来源、generation、Live Photo partial、Blob/本地 Materialization、处理事件/派生和处置状态。普通 API 不返回远程候选 URI、storage key 或临时上传状态，`batch_checkpoint` 不生成材料或整体完成声明。插件到页面的映射见 [`architecture/material-projection-data-map.md`](architecture/material-projection-data-map.md)；运行版本是否已切换仍以 PID 与迁移台账为准。
 
 独立审查后的隔离 PostgreSQL 16 proof 已覆盖 Task/Package/Record/Coverage 的平台、能力与目标绑定，逐 Record 隔离且健康 sibling 不连坐，评论/回复数据库关系约束，媒体 `observationRef` 历史冲突与同包重复隔离，首次同槽位并发 generation，作品级查询，以及固定 `asOf` 的 50 项 keyset cursor。读取会先把 lane/media-kind 存在性下推，再在单次最多扫描 200 个作品的预算内补页；预算触发时返回 `scanLimited + cursor`，后续从最后扫描键继续，不重复扫描已排除对象。这个预算只关闭了无界事务风险，没有关闭 enrichment 的有界 N+1：当前最坏仍可达到每个候选 7 次、单响应最多 1,404 次 enrichment/base 查询，批量化债务由 Issue #89 单独承接。
 
