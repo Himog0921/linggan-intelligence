@@ -5,7 +5,7 @@
 > 适用范围: 平级 Domain、Domain 与观察目标关系、统一材料/评论/媒体接纳与读取、Comment Study 领域化、领域管理页面、开发期旧模型清理、主线集成与本机上线
 > 事实来源: Mog 2026-09-23 最新决定；origin/main@a42315eb539ee26f42cc3228817001db73ca12a5 的代码与 migration；隔离 worktree 代码与 disposable PostgreSQL 证明；Issue #130 与 #337 的历史事实
 > 冲突时以谁为准: Mog 最新明确决定；其次是真实运行、数据库副作用和可复现测试；再其次是当前代码、migration、ACCEPTED ADR 和权威当前文档
-> 当前阶段: WP0–WP5 已完成。提交前 commit-reviewer 审查已发现并修复 4 项问题；完整隔离 PostgreSQL 套件、并发 pause/Merge 屏障与领域管理页隔离浏览器验收均已通过。当前 schema 副本从 0102 经 0103→0104 升级通过；0104 cleanup follow-up 覆盖 orphan session 活动 lease、无回执 preparation，以及尚无 detail session 的活跃旧 scope，并锁住相关 scope 写表。定点 PostgreSQL 4/4 与当前 schema 副本证明通过，follow-up 已完成只读审查并本地提交。Issue #130 旧正文未同步，PR/root 集成、共享 migration、main 合并、runtime-main 切换、部署与 Mog 业务验收仍未执行。验证基线=`origin/main@a42315eb539ee26f42cc3228817001db73ca12a5`
+> 当前阶段: WP0–WP5 已完成。提交前 commit-reviewer 审查已发现并修复 4 项问题；完整隔离 PostgreSQL 套件、并发 pause/Merge 屏障与领域管理页隔离浏览器验收均已通过。当前 schema 副本从 0102 经 0103→0104 升级通过；0104 cleanup follow-up 覆盖 orphan session 活动 lease、无回执 preparation，以及尚无 detail session 的活跃旧 scope，并锁住相关 scope 写表。定点 PostgreSQL 4/4 与当前 schema 副本证明通过，follow-up 已提交。Issue #130 已同步，PR #343 已推送并创建为 Draft，等待独立 reviewer 与 PR #338 的集成顺序决定；共享 migration、main 合并、runtime-main 切换、部署与 Mog 业务验收仍未执行。验证基线=`origin/main@a42315eb539ee26f42cc3228817001db73ca12a5`
 
 ## 0. 下一位 Agent 从这里开始
 
@@ -27,8 +27,8 @@
 ### 0.1 Issue 与协作入口
 
 - 复用 GitHub Issue #130 作为唯一主 Issue，不为 WP0–WP6 新建一串重复 Issue。
-- Issue #130 当前正文冻结的是旧架构：is_own_domain、跨行业独立表/独立 API、外部材料不是 Evidence。它只作为历史证据，不能继续作为实现要求。
-- root 在派工前移除旧 ready-for-agent 状态，改写标题与正文，链接本文件，再按当前交付包派定 owner。
+- Issue #130 原正文冻结的是旧架构：is_own_domain、跨行业独立表/独立 API、外部材料不是 Evidence。2026-09-24 已将原内容降为 Issue 历史，按当前 DEC-0008 与本计划重写标题/正文并链接权威文件；移除 `ready-for-agent`，改为 `ready-for-human`，等待 Mog 指定 reviewer 与集成顺序，未分配 assignee。
+- PR #343 已关联 Issue #130 并保持 Draft；该 PR 的独立 reviewer 与 exact-head verdict 仍待 Mog安排。
 - root 持有 codex/domain-unification-001 集成分支；各 Work Package 可以使用独立 worktree/commit，但最终只形成一个模块级 PR。
 - 默认由一个写入 owner 按 WP0 → WP6 串行落到 `codex/domain-unification-001` 专属 worktree；其他 subagent 只读走查。只有 root 明确划定不重叠文件和集成点后，才允许并行写入。
 - 其他 Agent 不得自行领取 #130、自行新建派生 Issue、自行增加 subagent 或自行改变并发。
@@ -806,8 +806,8 @@ shared 文件必须由 root 指定 integration owner；实施 Agent不得因为�
 | 自动检查 | 完整 `./scripts/test-local-001-discovery-postgres.sh` 与真实 Comment Study API 回归在本轮 follow-up 前通过；本轮 `cargo check --locked --workspace --tests`、0104 cleanup PostgreSQL 4/4、定点 `rustfmt --check`、`git diff --check` 通过。当前 schema 副本再次从 runtime-main 0102 流式克隆后，0103→0104 成功，源库计数不变且 disposable 数据库/容器/卷已清理。全仓 `cargo fmt --all -- --check` 仍被未修改基线文件的格式漂移阻断 |
 | Fresh PostgreSQL | 完成：完整 LOCAL-001 disposable PostgreSQL 套件通过，包括 migration 全链、跨 Domain 并发合并及冻结用途、WP1–WP5 关键正反例、领域管理 API、worker 与调度证明；临时资源清理已核实 |
 | 当前 schema 升级 | 通过：只读流式克隆 runtime-main 0102 数据库后应用 0103→0104。副本 1,352 Content 全部 seed 为 1,352 legacy usage、缺失 seed 为 0；24 条孤儿旧会话与对应 72 条已回执 preparation 清理，24 条 grant attempt 保留并 detach，其他 196 条 preparation 保留；旧 cross 表和 canonical 单值 Domain 列均为 0。unprojectable 旧 scope 的有效 lease 为 0。源库仍为 0102，1,352 Content/24 sample；迁移前后计数一致，未写源库 |
-| Root 合同/标准复核 | 主体 106 文件候选已完成此前两轮审查与 exact commit 基线核对。本轮 follow-up 的 session-free active scope 漏检已按审查发现修复并由 4/4 定点 PostgreSQL 与当前 schema 副本 proof 覆盖；本地只读核对和提交已完成。Issue #130 同步、PR 集成审查仍待做 |
-| PR | 未创建 |
+| Root 合同/标准复核 | 主体 106 文件候选已完成此前两轮审查与 exact commit 基线核对。本轮 follow-up 的 session-free active scope 漏检已按审查发现修复并由 4/4 定点 PostgreSQL 与当前 schema 副本 proof 覆盖；提交 `62685468` 已推送。Issue #130 已同步；PR #343 Draft 等待独立 reviewer 与 PR #338 迁移顺序审查 |
+| PR | #343 Draft 已创建，关联 `Refs #130`；reviewer 未指派，未授权合并 |
 | origin/main 合并 | 未执行 |
 | 共享开发库 migration | 未执行 |
 | runtime-main 上线 | 未执行 |
