@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
 mod input;
+pub(crate) mod snapshot;
 #[cfg(test)]
 mod tests;
 pub use input::{PreparedStudyInput, prepare_study_input};
@@ -199,7 +200,8 @@ pub fn study_domain_lock_key(domain: Uuid) -> Result<i64, StudySelectionError> {
 #[serde(rename_all = "snake_case")]
 pub enum StudyTargetState { Ready, Queued, Running, Succeeded, NoSignal, NeedsContext, Failed, Excluded, Cancelled }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SelectionHistory {
     pub state: StudyTargetState,
     pub input_fingerprint: Option<String>,

@@ -83,3 +83,13 @@ Mog 已在当前对话报告 P1 手动产品验收合格并授权 P2。用户未
 验证目标：688/100 选样交集、四模式/未知历史/在途优先级、完整十项排除计数、作品公平轮转、显式三预算与请求 hash、材料换 ID 不误判输入变化、raw 标点和真实父语境变化、未入保留语境的 OCR 不触发重研；所有用例均为合成确定性证明，不冒充数据库或真实模型证明。独立复审仍交 Codex；本工具环境不能调用仓库约定的 commit-reviewer，不以自审替代。
 
 实现候选：新增共用命令/选择器和输入准备器、28个合成单元测试。当前纯函数只消费快照，不是冻结查询或收费入口：没有幂等回执 SQL、实际 domain lock、Run/Target 插入或 dispatch 切换，T11–T16 等不得标为通过。Python 独立生成 fingerprint 与 signed big-endian lock key golden；批准手册字节校验与diff检查已过；Rust/PG以exact-head CI回执为准。本环境无Cargo且Rust下载域名不能解析，未运行fmt/clippy。治理检查实测仍72项既有/未解决问题，未修改批准正文以凑通过。
+
+## P2 第四增量 · 单快照读取与事务回执（实施前边界）
+
+2026-09-24 / Issue #295 / PR #338，基线 `7a062315`，main 仍为 `a42315eb`。复用批准的 selection/policy/source 合同。本轮实现一个事务内冻结 SELECT（只读非 HOLD 游标分段消费同一快照）、实际 domain advisory lock、方法核对、准确 Run/Work/Target 写入及 requestRef 回执；不在锁内外发、不新建表或服务。游标仅活于本次短事务，每次 FETCH 128 行；不将全库原文 fetch_all 留在 Rust，至多保留预算内输入和每作品一份语境。整个扫描另设 15 秒 deadline，FETCH 不重取另一份语境。PostgreSQL DECLARE 的 insensitive snapshot 语义须以并发 PG 用例验证。
+
+新写所需约束候选单独编号；不改 0103/0104 和共享迁移注册。原 HTTP `/runs`、页面与三阶段 P3 dispatcher 不在本增量切换。新内部启动的 v2 Run 不得进入旧 v1 batch，必须有明确隔离并测试；完整外发/成本 gates 和新 HTTP 启动随后接通。预览只读，无 request 占位或 Run；重放从既有回执返回，不重新选择。独立复审仍交 Codex，不用自审冒充仓库 commit-reviewer。
+
+实现候选已形成：`selection/snapshot.rs`/`snapshot.sql` 只读冻结；`run/start.rs`/`write.rs` 处理预览与带重放的原子保存；现有 policy 数据库方法仅扩大 crate 内可见性，既有 batch 只增加 v1 输入隔离；`build.rs` 记录真实编译 Git revision，无法确定时拒绝新 Run，不写死基线。0105 约束只补有证据的稳定身份，保留历史 fingerprint/时间为未知；新输入/预算冻结、活动评论唯一性和回执不可变均为候选，未共享应用。HTTP 启动、默认版本切换、P3 外发尚未启用，不能把内部函数证明当页面已上线。
+
+新增9项隔离PG候选：688条两次选择100、同请求并发重放与不同载荷冲突、不同请求无交叉占用、no_work/index_pending回执固定、父语境补齐与同文重采、写回执失败整事务回滚、冻结/不可变/旧dispatcher隔离、锁等待后读取已提交新材料、缺范围/缺guard拒绝。脚本必须显式运行本组，不以ignore算PASS。批准手册静态校验、bash语法及diff检查通过；Rust/PG/并发与新schema运行结论待exact-head CI，未完成大型库性能、浏览器、全包T01–T54或独立审查。前序文档治理问题未靠改写手册消除。

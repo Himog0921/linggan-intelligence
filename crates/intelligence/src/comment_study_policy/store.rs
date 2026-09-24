@@ -36,7 +36,7 @@ pub(super) fn validate_domain(domain: Uuid) -> Result<(), StudyPolicyStoreError>
     Ok(())
 }
 
-pub(super) async fn ensure_schema(
+pub(crate) async fn ensure_schema(
     tx: &mut Transaction<'_, Postgres>, writing: bool,
 ) -> Result<(), StudyPolicyStoreError> {
     let columns: bool = sqlx::query_scalar(
@@ -59,7 +59,7 @@ pub(super) async fn ensure_schema(
     Ok(())
 }
 
-pub(super) async fn model_snapshot(
+pub(crate) async fn model_snapshot(
     tx: &mut Transaction<'_, Postgres>, config: Uuid, writing: bool,
 ) -> Result<(StudyModelSnapshot, bool), StudyPolicyStoreError> {
     const SQL: &str = "SELECT c.config_ref,c.input_token_limit,c.output_token_limit,c.timeout_seconds, \
@@ -110,7 +110,7 @@ pub(super) fn summary(row: &sqlx::postgres::PgRow) -> Result<Value, sqlx::Error>
     }))
 }
 
-pub(super) async fn load_policy(
+pub(crate) async fn load_policy(
     tx: &mut Transaction<'_, Postgres>, domain: Uuid, reference: Uuid,
 ) -> Result<Value, StudyPolicyStoreError> {
     let statement = format!("SELECT {SUMMARY_COLUMNS},p.method_manifest \

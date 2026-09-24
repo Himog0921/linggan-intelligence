@@ -14,6 +14,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 use uuid::Uuid;
 
+mod start;
+pub use start::{StudyStartError, StudyStartReceipt, TrustedStudyOrigin, preview_study_selection, start_study_run};
+
 const MAX_SELECTED_WORKS: usize = 100;
 
 #[derive(Debug, Clone)]

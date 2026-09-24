@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 mod templates;
-mod store;
+pub(crate) mod store;
 mod read;
 pub use store::{StudyPolicyStoreError, create_study_policy};
 pub use read::{StudyPolicyQuery, read_study_policies, read_study_policy};
