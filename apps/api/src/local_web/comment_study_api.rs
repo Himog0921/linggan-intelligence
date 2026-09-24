@@ -19,6 +19,12 @@ use serde_json::{Value, json};
 #[path = "comment_study_policy_api.rs"]
 mod policy_api;
 
+// Compile and test the next command router without enabling a second public write path.
+// Compose it only with the coordinated page/dispatcher cutover.
+#[allow(dead_code, reason = "P2 command adapter awaits the UI/dispatch cutover")]
+#[path = "comment_study_command_api.rs"]
+pub(super) mod command_api;
+
 pub(super) fn routes() -> Router<LocalWebState> {
     Router::new()
         .route("/api/local/comment-study/comments", get(comments))

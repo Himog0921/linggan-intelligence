@@ -93,3 +93,18 @@ Mog 已在当前对话报告 P1 手动产品验收合格并授权 P2。用户未
 实现候选已形成：`selection/snapshot.rs`/`snapshot.sql` 只读冻结；`run/start.rs`/`write.rs` 处理预览与带重放的原子保存；现有 policy 数据库方法仅扩大 crate 内可见性，既有 batch 只增加 v1 输入隔离；`build.rs` 记录真实编译 Git revision，无法确定时拒绝新 Run，不写死基线。0105 约束只补有证据的稳定身份，保留历史 fingerprint/时间为未知；新输入/预算冻结、活动评论唯一性和回执不可变均为候选，未共享应用。HTTP 启动、默认版本切换、P3 外发尚未启用，不能把内部函数证明当页面已上线。
 
 新增9项隔离PG候选：688条两次选择100、同请求并发重放与不同载荷冲突、不同请求无交叉占用、no_work/index_pending回执固定、父语境补齐与同文重采、写回执失败整事务回滚、冻结/不可变/旧dispatcher隔离、锁等待后读取已提交新材料、缺范围/缺guard拒绝。脚本必须显式运行本组，不以ignore算PASS。批准手册静态校验、bash语法及diff检查通过；Rust/PG/并发与新schema运行结论待exact-head CI，未完成大型库性能、浏览器、全包T01–T54或独立审查。前序文档治理问题未靠改写手册消除。
+
+
+## P2 第五增量 · 默认方法 CAS 与命令 HTTP 验收
+
+2026-09-24 / Issue #295 / PR #338，基线 `c2a90945`，main 核对为 `a42315eb`。对应开发手册 §5、HTTP 合同 §1/§3–5/§12；继续使用已有 policy、selection 与 start 事务，不重复实现选样和请求回执。前序第四增量已有 exact-head CI run `35950332361`：编译、单元及37项隔离PG通过，含9项实际启动事务证明；不再把该事务记为待开发。
+
+- `comment_study_policy/activate.rs` 复用原 singleton 默认指针。expectedActivePolicyRef 必须出现，可明确为 NULL，禁止省略／nil／额外字段；domain lock、已记录方法和实际启用模型行锁、锁后再次验证方法，最后条件 UPDATE 或 INSERT。并发默认变化返回 control_version_conflict；不修改方法正文、既有Run或模型工作。当前合同仍只支持现有单领域，不凭空扩展领域默认表。
+- `comment_study_command_api.rs` 是受测的下一版路由组合：selection-preview、runs、policies/{policyRef}/activate 和旧policy的410返回。复用现有 Host/Origin 判定，统一安全错误、requestRef、no-store/nosniff；HTTP只映射现有DTO，origin由服务器固定Manual。新Run201，重放/no_work/index_pending为200；错误不泄漏SQL、DSN、原声或供应商正文，不承诺提交阶段网络失败一定无副作用。
+- 此路由本轮只编译并由真实HTTP测试调用，**未merge到生产Router**，无第二公开路径、环境开关或影子写通道。现有页面、旧/policy与/runs、默认指针和Worker在用户环境没有切换。激活函数不是已经替用户选择了默认方法；必须与页面及执行边界对齐后再启用。
+- `comment_study_command_tests.rs` 新增9项无DB边界测试；`comment_study_command_postgres.rs` 新增6项真实Axum＋隔离PG测试。脚本显式运行该ignored组，不以编译成功或ignored代替运行。对应T09、T11–T17、T29/T34等的本层子集，不给全部T编号自动勾PASS。
+- PG范围包括同请求并发201/200与预算绑定、不同请求不重复占用、无工作/等待索引回执固定、默认CAS保护历史方法与Run、首次默认并发及无效/停用方法拒绝、缺范围/部分schema没有部分写入；统一断言模型调用数为0。旧生产入口保持原样由路由测试单独检查。
+
+没有新增或修改migration、注册共享升级、执行真实模型、重置历史、合并或部署。批准手册正文保持原字节；阶段记录是实施状态，不改写原字段和目标。局部diff与shell语法检查可在当前环境完成，Rust/PG真实结论以本次exact-head CI回执为准；fmt/clippy、全仓治理（前序月报正文尚未追加）及浏览器不冒充已通过。最终CI回执写PR描述，避免为了记结果再次改变已验证代码head。
+
+下一执行点：受控弹窗的方法查看／复制／默认选择与显式三预算、持久requestRef；旧入口退役和新路由挂载须与执行路径安全边界一同切换。P2整体仍未完成，P3三阶段真实请求快照／共享额度／恢复仍待做，自动日计划不在本轮启用。

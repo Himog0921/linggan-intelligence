@@ -21,6 +21,8 @@ pub enum StudyPolicyStoreError {
     SchemaUnavailable,
     #[error("resource_not_found")]
     NotFound,
+    #[error("control_version_conflict")]
+    ActiveConflict,
     #[error("policy_unrecorded")]
     Unrecorded,
     #[error("policy_model_unavailable")]

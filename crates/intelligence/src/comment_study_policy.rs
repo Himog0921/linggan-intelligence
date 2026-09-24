@@ -9,6 +9,8 @@ use uuid::Uuid;
 mod templates;
 pub(crate) mod store;
 mod read;
+mod activate;
+pub use activate::{ActivateStudyPolicyCommand, activate_study_policy};
 pub use store::{StudyPolicyStoreError, create_study_policy};
 pub use read::{StudyPolicyQuery, read_study_policies, read_study_policy};
 #[cfg(test)]
