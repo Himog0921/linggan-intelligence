@@ -54,3 +54,7 @@
 - 没有新增产品语义、Domain 状态或决策；没有新增 DECISION_REQUIRED。
 - 不能从隔离浏览器和 0 WorkOrder 推断已部署、已开始采集、真实材料能力完整或 Mog 已接受。
 - 临时 PostgreSQL、API 进程、容器与卷已清理；`docker ps`、`docker volume ls` 与进程查询均未发现该临时资源。
+
+## 6. 后续发布补充（2026-09-24；不改写上方隔离验收历史）
+
+本报告上方的“未部署”是隔离验收当时的事实。随后经 Mog 另行授权，PR #343 已合并为 `main@46e10837`，共享开发库应用 0103/0104，`runtime-main` 与 API、巡检 worker、媒体 worker 已切换。部署后本机浏览器确认 `/collection/domains` 和 `/collection/tasks` 可读，任务列表与详情同显冻结 Domain/role；390、1085、1440 CSS px 下实测 `document.documentElement.scrollWidth === innerWidth`。本机 API/运行健康与迁移计数详见 [2026-09 月度进度](../../progress/2026-09.md) 的“PR #343 合并与本机发布回执”。这补充本机部署后的 smoke，不补写当时未做的隔离验收，也不代表真实非空媒体、跨 Domain 评论研究、外部平台采集或 Mog 业务验收。

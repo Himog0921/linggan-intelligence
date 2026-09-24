@@ -63,7 +63,7 @@
 | Comment Study | `apps/api/src/local_web/comment_study.js`、`comment_study.rs` | Domain、primary/reference 选择与结果 role 已接入 |
 | 自动检查 | `scripts/verify-ui-design-handbook.sh`、完整 LOCAL-001 隔离 PostgreSQL 套件 | 通过 |
 | 领域管理浏览器交互 | 隔离 PostgreSQL 浏览器流程 | create/edit/pause/resume、同一 Target 在两个 Domain 分设 primary/reference、重复名称冲突保留表单并明确未写入，均已验证 |
-| 视觉、响应式与焦点 | `docs/design/acceptance/domain-unification-001-acceptance.md` | 1440×1000、390×844 目视通过；键盘 Tab 到主按钮时焦点环可见；精确 DOM `scrollWidth` / viewport overflow 未测量，完整共享 shell LIDS 合规未声明 |
-| runtime 部署与 Mog 验收 | 尚未执行 | NOT VERIFIED |
+| 视觉、响应式与焦点 | `docs/design/acceptance/domain-unification-001-acceptance.md` | 隔离浏览器 1440×1000、390×844 目视与键盘焦点通过；本机部署后 1440/1085/390 的 `scrollWidth === innerWidth`；完整共享 shell LIDS 合规未声明 |
+| runtime 部署与 Mog 验收 | `runtime-main@46e10837`、共享迁移 0104、本机 API/浏览器 smoke | 本机部署 VERIFIED；真实媒体/跨 Domain 业务数据与 Mog 验收 NOT VERIFIED |
 
 通道读数仅总结来源事实，不把未出现的通道回执推断成“未申请”；页面提供通往目标/材料读取面的链接以检查原始来源。写入失败通过可见错误反馈说明未写入，并保留当前领域读取上下文。视觉规则沿用 L1 Operations 的 Collection Control；本次不新增 Token、Primitive、CMP、Scene 或 Motion。

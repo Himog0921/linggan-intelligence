@@ -19,7 +19,7 @@
 
 | 文档 | 状态 | 用途 |
 |---|---|---|
-| [plans/active/domain-unification-001.md](plans/active/domain-unification-001.md) | 活跃计划；WP0–WP5 已实施、当前 schema 副本与修复后完整隔离证明通过；Issue #130 已同步，Draft PR #343 已完成双轴独立复审，待提交/合并/本机切换；#338 后续适配 | 多个正式 Domain 平权、Domain–Target role、统一 Material/Comment/Media、Comment Study 领域化、领域管理与开发期旧 cross 模型清理的唯一推进文件 |
+| [plans/active/domain-unification-001.md](plans/active/domain-unification-001.md) | 活跃计划；WP0–WP5 与独立复审完成，PR #343 已合并、共享 0103/0104 与本机运行已切换；#338 后续适配，Mog 业务验收待办 | 多个正式 Domain 平权、Domain–Target role、统一 Material/Comment/Media、Comment Study 领域化、领域管理与开发期旧 cross 模型清理的唯一推进文件 |
 | [plans/active/account-observation-bootstrap-002.md](plans/active/account-observation-bootstrap-002.md) | 活跃计划 | Issue #218：新安装插件的首单软准入、账号观察启动、人工绑定审计与无秘密配置诊断 |
 | [plans/active/detail-page-session-replay-safety-001.md](plans/active/detail-page-session-replay-safety-001.md) | 活跃计划；受保护工作树 | 同一 Work Order/内容详情页的单次导航授权、浏览器持久消费闸门、缓存缺失 fail-closed 与既得数据重传边界 |
 | [plans/active/collection-upgrade-001.md](plans/active/collection-upgrade-001.md) | 活跃计划；受保护工作树 | Mog 交付包：缺输入止转、跨工单重试预算、交付恢复、统一材料完成判据与运行诊断的 S0–S6 对照表 |
@@ -131,8 +131,8 @@
 | [design/acceptance/evidence-cover-card-proportion-002-acceptance.md](design/acceptance/evidence-cover-card-proportion-002-acceptance.md) | 一次性报告；main 已合并、本机 runtime 已刷新 | `ACC-EVIDENCE-COVER-CARD-PROPORTION-002`：自动合同、真实本机只读预览与 3000 运行回执；Mog 前端验收仍独立 |
 | [design/changes/evidence-cover-card-material-004-ui-change-manifest.md](design/changes/evidence-cover-card-material-004-ui-change-manifest.md) | 已合并 main；`:3000` runtime 已切换 | `EVIDENCE-COVER-CARD-MATERIAL-004`：封面作品卡的四级表面分层、卡面材质、舞台测量场、标题字阶与结果区横条删除；不改变读取、详情或状态语义 |
 | [design/acceptance/evidence-cover-card-material-004-acceptance.md](design/acceptance/evidence-cover-card-material-004-acceptance.md) | 一次性报告；已部署到本机 `:3000` | `ACC-EVIDENCE-COVER-CARD-MATERIAL-004`：只读预览代理上的六列实测、翻面位移与封面填充核对；远端生产与真实触摸设备未验证 |
-| [design/changes/domain-unification-001-ui-change-manifest.md](design/changes/domain-unification-001-ui-change-manifest.md) | 权威当前；隔离浏览器验收完成，未部署 | 平级 Domain、领域管理、primary/reference、统一 Evidence Library 与 Domain-scoped Comment Study |
-| [design/acceptance/domain-unification-001-acceptance.md](design/acceptance/domain-unification-001-acceptance.md) | 一次性报告；隔离数据库与浏览器已验收，未部署 | ACC-DOMAIN-UNIFICATION-001：领域管理交互、跨 Domain role、1440/390 布局与边界 |
+| [design/changes/domain-unification-001-ui-change-manifest.md](design/changes/domain-unification-001-ui-change-manifest.md) | 权威当前；隔离交互与本机部署后浏览器 smoke 已验证，Mog 验收待办 | 平级 Domain、领域管理、primary/reference、统一 Evidence Library 与 Domain-scoped Comment Study |
+| [design/acceptance/domain-unification-001-acceptance.md](design/acceptance/domain-unification-001-acceptance.md) | 一次性隔离验收报告；附本机部署后 smoke 补充，非 Mog 业务验收 | ACC-DOMAIN-UNIFICATION-001：领域管理交互、跨 Domain role、1440/390 布局与边界 |
 | [design/changes/corpus-cross-domain-render-001-ui-change-manifest.md](design/changes/corpus-cross-domain-render-001-ui-change-manifest.md) | 历史基线；已由 DOMAIN-UNIFICATION-001 取代 | 旧双轨样本列表与只读领域切换器；不得作为当前 Evidence、Domain 或材料能力合同 |
 | [design/acceptance/corpus-cross-domain-render-001-acceptance.md](design/acceptance/corpus-cross-domain-render-001-acceptance.md) | 一次性报告 | `ACC-CORPUS-CROSS-DOMAIN-RENDER-001`：外部样本 21 行、列表级 Inspector、LIDS 菜单与未部署边界 |
 | [design/changes/work-resource-read-001-ui-change-manifest.md](design/changes/work-resource-read-001-ui-change-manifest.md) | 交付分支实现；Issue #110 | Evidence Library 的共享 Work Resource 接口、作者/目标诚实表达、时间来源状态和研读/表格/封面三种排版变更清单 |

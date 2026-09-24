@@ -6,15 +6,15 @@
 > 事实来源: 本机实际检查、已确认项目边界和完成计划
 > 冲突时以谁为准: 真实运行结果、ACCEPTED ADR 与用户最新确认
 
-### DOMAIN-UNIFICATION-001（root 在隔离 worktree 推进实现）
+### DOMAIN-UNIFICATION-001（#343 已合并并刷新本机运行；待业务验收）
 
 Mog 已确认正式 Domain 在基础采集、详情、评论、媒体与研究能力上平权，Domain 只定义研究上下文；Collection 需要新增“领域管理”。当前唯一推进入口是 [DOMAIN-UNIFICATION-001](plans/active/domain-unification-001.md)：它冻结 Domain–Target 的 `primary/reference` 配置、相容多用途共享一次 WorkOrder、统一 canonical Material/Comment/Media、Domain-scoped Corpus 与 Comment Study、pause 真语义，以及开发期旧 `cross_industry` 路径的直接清理。
 
-本计划明确不为旧开发数据建设双写、长期 fallback、逐行审批、down migration 或专用保全系统。WP0–WP5 已在专属 `codex/domain-unification-001` worktree 实施；WP4 领域管理此前在隔离 PostgreSQL 与本机浏览器完成配置写入、pause/resume、多 Domain role、冲突反馈、1440/390 视口和键盘焦点验收。早期审查修复了 pause 与 Request/claim 竞态、reference 关系两步写入、旧 peer 样本错误复用首页 Package 血缘、暂停领域保存 Comment Study 策略错误码，以及 0104 的活跃旧 scope 漏检。PR #343 首次独立审查随后发现旧 Evidence 兼容接口可跨 Domain 读取、任务缺少冻结领域用途、暂停拒绝原因被折叠、CSS token 问题；本轮均已修复，并通过修复后的完整隔离 PostgreSQL 套件与双轴独立复审。API 单元测试另外暴露领域管理导航测试与现行页面合同不符、隐藏字段 CSS 覆盖问题；前者已按原五面后追加领域管理的现行顺序更新断言，后者已修样式。新布局轨道改用可收缩网格，最终版本仍待部署浏览器 smoke。
+本计划明确不为旧开发数据建设双写、长期 fallback、逐行审批、down migration 或专用保全系统。WP0–WP5 已实施并经完整隔离 PostgreSQL 套件与双轴独立复审；#343 修复了旧 Evidence 兼容读取跨 Domain、任务冻结用途不可见、暂停拒绝原因折叠和 CSS token/窄屏问题，合并为 `main@46e10837`。WP4 领域管理在隔离 PostgreSQL 与浏览器完成配置写入、pause/resume、多 Domain role、冲突反馈和键盘焦点验收；部署后本机浏览器确认页面可读、任务列表与详情均显示冻结领域用途，390/1085/1440 视口均无 DOM 横向溢出。
 
-当前 schema 副本升级门槛已通过：将 runtime-main 的 0102 数据库以只读 `pg_dump` 流式恢复到 disposable PostgreSQL，不落 dump 文件，再应用 0103→0104。副本保持 1,352 条 canonical Content，并为 1,352 条建立 `legacy_domain_migration` usage；24 个无 canonical Content 的旧会话被清理，24 条 grant attempt 保留并解除旧会话引用，72 条已回执的会话级 lane preparation 随会话退役，其余 196 条保留。cleanup PostgreSQL 套件覆盖 orphan session 活动 lease、session-free 旧 scope 活动 lease、无提交回执 preparation 三个拦截条件。迁移也锁定旧 scope 表，避免预检后有新 scope 写入。副本检查显示 unprojectable 旧 scope 的活跃 lease 为 0；源库只读核对仍为 0102、1,352 条 Content、24 条旧 sample，迁移前后计数一致，未写源库。临时数据库、容器与卷已清理。
+此前的当前 schema 隔离副本升级已证明 0102→0103→0104 对旧数据可行（当时源库 1,352 Content）。随后对共享 `linggan_intelligence_dev` 制作迁移前有效快照，并在受控停止 API、巡检 worker、媒体 worker 后应用 0103/0104：升级前实际为 1,362 Content、24 条旧 cross sample/detail、245 条旧评论；升级后 1,362 Content 均有 `legacy_domain_migration` usage、缺失 0，旧 cross 表与 canonical 单值 Domain 列在 `public` 下均为 0。24 个孤儿 session 与 72 条旧 preparation 退役，212 条 grant attempt 保留、其中 24 条解除旧 session 引用。快照只用于可恢复性，不建立长期兼容层；旧考研样本/评论没有 canonical Package 血缘，因此当前考研正式领域为 0 篇/0 评论，没有伪造重投影或访问平台重采。
 
-Issue #130 已改为当前 DOMAIN-UNIFICATION-001 交付记录，移除旧 `ready-for-agent` 并标记 `ready-for-human`。PR #343 保持 Draft；Mog 已授权完成审查修复后合入 `main` 并刷新本机运行，技术集成顺序为先 #343、再让 Draft PR #338 基于新 `main` 重排候选 0103–0105 migration 并修订 Comment Study 读取。当前共享迁移、main 合并、runtime-main 切换和 Mog 业务验收均未执行；插件重载与外部平台访问也未发生。浏览器验收见 `docs/design/acceptance/domain-unification-001-acceptance.md`。
+Issue #130 保持开启并标记 `ready-for-human`，等待 Mog 对实际业务页面和数据后果验收。PR #343 已合并；共享迁移、本机 `runtime-main@46e10837` 切换与基本 API/浏览器 smoke 已执行。Draft PR #338 仍需基于新 `main` 重排候选 0103–0105 migration 并修订 Comment Study 重叠读取，不能按旧基线直接合入。真实平台重采、插件重载、非空媒体与跨 Domain Comment Study 实际数据验收均未发生；不从健康页推断完整业务交付。隔离和本机浏览器分层回执见 `docs/design/acceptance/domain-unification-001-acceptance.md` 与本月进度。
 
 ### OCR-CONTENT-LAYERING-001 / Issue #296（候选源码；未进入共享运行）
 
