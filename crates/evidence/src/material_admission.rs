@@ -1,11 +1,179 @@
 //! Qualification of accepted producer records into typed material observations.
 
 use crate::producer_runtime::ProducerRuntimeError;
-use linggan_contracts::ProducerCapturePackage;
+use linggan_contracts::{ProducerCapturePackage, parse_producer_capture_package};
+use linggan_storage_postgres::Database;
+use serde::Serialize;
 use serde_json::Value;
-use sqlx::{Postgres, Transaction};
-use std::collections::HashSet;
+use sqlx::{Postgres, Row, Transaction};
+use std::collections::{BTreeMap, HashSet};
 use uuid::Uuid;
+
+/// One-time operator projection of original accepted packages for a known Target/Domain pair.
+/// It writes no new CapturePackage, Receipt or disposition, and never reads retired cross tables.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TargetMaterialReprojection {
+    pub target_ref: Uuid,
+    pub domain_ref: Uuid,
+    pub selected_packages: usize,
+    pub already_projected_packages: usize,
+    pub projected_packages: usize,
+    pub eligible_by_kind: BTreeMap<String, usize>,
+}
+
+pub async fn reproject_accepted_target_materials(
+    database: &Database,
+    target_ref: Uuid,
+    domain_ref: Uuid,
+    apply: bool,
+) -> Result<TargetMaterialReprojection, ProducerRuntimeError> {
+    let mut tx = database
+        .pool()
+        .begin()
+        .await
+        .map_err(ProducerRuntimeError::Internal)?;
+    let rows = sqlx::query(
+        "SELECT package.package_ref,package.package_kind,package.payload \
+         FROM linggan_runtime_capture_package package \
+         JOIN linggan_runtime_submission_receipt receipt USING(package_ref) \
+         WHERE receipt.material_admission='ACCEPTED' \
+           AND package.package_kind IN ('profile_discovery','content_detail','comments','author_profile') \
+           AND EXISTS (SELECT 1 FROM linggan_runtime_record_disposition disposition \
+                       WHERE disposition.package_ref=package.package_ref \
+                         AND disposition.disposition IN \
+                           ('accepted_for_library_discovery','accepted_for_library_content')) \
+           AND EXISTS (SELECT 1 FROM collection_work_order_lease_task lease_task \
+                       JOIN collection_work_order_lease lease USING(lease_ref) \
+                       JOIN collection_work_order work USING(work_order_ref) \
+                       JOIN collection_work_order_domain_usage usage USING(work_order_ref) \
+                       WHERE lease_task.task_id=package.task_id \
+                         AND work.target_ref=$1 AND usage.domain_ref=$2) \
+         ORDER BY CASE package.package_kind \
+                    WHEN 'profile_discovery' THEN 0 WHEN 'author_profile' THEN 1 \
+                    WHEN 'content_detail' THEN 2 ELSE 3 END,package.accepted_at,package.package_ref",
+    )
+    .bind(target_ref)
+    .bind(domain_ref)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
+    let mut report = TargetMaterialReprojection {
+        target_ref,
+        domain_ref,
+        selected_packages: rows.len(),
+        already_projected_packages: 0,
+        projected_packages: 0,
+        eligible_by_kind: BTreeMap::new(),
+    };
+    for row in rows {
+        let package_ref: Uuid = row.get("package_ref");
+        let package_kind: String = row.get("package_kind");
+        let (projected_rows, completed_lane, accepted_rows): (i64, bool, i64) = sqlx::query_as(
+            "SELECT CASE $2::text \
+                      WHEN 'profile_discovery' THEN (SELECT count(*) FROM linggan_material_discovery_finding WHERE package_ref=$1) \
+                      WHEN 'content_detail' THEN (SELECT count(*) FROM linggan_material_content_detail WHERE package_ref=$1) \
+                      WHEN 'comments' THEN (SELECT count(*) FROM linggan_material_comment WHERE package_ref=$1) \
+                      ELSE (SELECT count(*) FROM linggan_material_author_profile WHERE package_ref=$1) END, \
+                    EXISTS(SELECT 1 FROM linggan_material_lane_observation WHERE package_ref=$1), \
+                    (SELECT count(*) FROM linggan_runtime_record_disposition WHERE package_ref=$1 \
+                       AND disposition IN ('accepted_for_library_discovery','accepted_for_library_content'))",
+        )
+        .bind(package_ref)
+        .bind(&package_kind)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(ProducerRuntimeError::Internal)?;
+        let uninterpreted: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM linggan_runtime_record_disposition \
+             WHERE package_ref=$1 AND disposition='retained_uninterpreted')",
+        )
+        .bind(package_ref)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(ProducerRuntimeError::Internal)?;
+        if uninterpreted {
+            return Err(ProducerRuntimeError::MaterialIdentityConflict);
+        }
+        if projected_rows > 0 || completed_lane {
+            if projected_rows != accepted_rows
+                || (package_kind != "profile_discovery" && !completed_lane)
+            {
+                return Err(ProducerRuntimeError::MaterialIdentityConflict);
+            }
+            let missing_typed_ordinals: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM linggan_runtime_record_disposition disposition \
+                 WHERE disposition.package_ref=$1 \
+                   AND disposition.disposition IN ('accepted_for_library_discovery','accepted_for_library_content') \
+                   AND NOT CASE $2::text \
+                     WHEN 'profile_discovery' THEN EXISTS (SELECT 1 FROM linggan_material_discovery_finding finding \
+                       WHERE finding.package_ref=disposition.package_ref AND finding.record_ordinal=disposition.record_ordinal) \
+                     WHEN 'content_detail' THEN EXISTS (SELECT 1 FROM linggan_material_content_detail detail \
+                       WHERE detail.package_ref=disposition.package_ref AND detail.record_ordinal=disposition.record_ordinal) \
+                     WHEN 'comments' THEN EXISTS (SELECT 1 FROM linggan_material_comment comment \
+                       WHERE comment.package_ref=disposition.package_ref AND comment.record_ordinal=disposition.record_ordinal) \
+                     ELSE EXISTS (SELECT 1 FROM linggan_material_author_profile author \
+                       WHERE author.package_ref=disposition.package_ref AND author.record_ordinal=disposition.record_ordinal) \
+                   END",
+            )
+            .bind(package_ref)
+            .bind(&package_kind)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(ProducerRuntimeError::Internal)?;
+            if missing_typed_ordinals > 0 {
+                return Err(ProducerRuntimeError::MaterialIdentityConflict);
+            }
+            if package_kind == "profile_discovery" {
+                let missing_domain_usages: i64 = sqlx::query_scalar(
+                    "SELECT count(*) FROM linggan_material_discovery_finding finding \
+                     JOIN linggan_runtime_record_disposition disposition \
+                       ON disposition.package_ref=finding.package_ref \
+                      AND disposition.record_ordinal=finding.record_ordinal \
+                     WHERE finding.package_ref=$1 \
+                       AND disposition.disposition='accepted_for_library_discovery' \
+                       AND NOT EXISTS (SELECT 1 FROM linggan_material_domain_usage usage \
+                         WHERE usage.package_ref=finding.package_ref \
+                           AND usage.record_ordinal=finding.record_ordinal \
+                           AND usage.content_public_ref=finding.content_public_ref \
+                           AND usage.domain_ref=$2 AND usage.basis_kind='accepted_discovery')",
+                )
+                .bind(package_ref)
+                .bind(domain_ref)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(ProducerRuntimeError::Internal)?;
+                if missing_domain_usages > 0 {
+                    return Err(ProducerRuntimeError::MaterialIdentityConflict);
+                }
+            }
+            report.already_projected_packages += 1;
+            continue;
+        }
+        *report
+            .eligible_by_kind
+            .entry(package_kind.clone())
+            .or_default() += 1;
+        if !apply {
+            continue;
+        }
+        let raw: Value = row.get("payload");
+        let package = parse_producer_capture_package(&raw.to_string())?;
+        if package.package_ref() != package_ref || package.package_kind() != package_kind {
+            return Err(ProducerRuntimeError::MaterialIdentityConflict);
+        }
+        insert_typed_materials(&mut tx, &package).await?;
+        report.projected_packages += 1;
+    }
+    if apply {
+        tx.commit().await.map_err(ProducerRuntimeError::Internal)?;
+    } else {
+        tx.rollback()
+            .await
+            .map_err(ProducerRuntimeError::Internal)?;
+    }
+    Ok(report)
+}
 
 pub(crate) async fn insert_typed_materials(
     tx: &mut Transaction<'_, Postgres>,
@@ -351,8 +519,7 @@ pub(crate) async fn ensure_content(
     package: &ProducerCapturePackage,
     content_id: &str,
 ) -> Result<Uuid, ProducerRuntimeError> {
-    // 不填 domain_ref：证据表只装本领域作品是表的性质，由 0044 给该列的默认值兜住，
-    // 写入点不必记得带上它——要求每处都记得，就是漏一次即破。
+    // Content 是跨 Domain 的同一份来源身份；用途由 discovery 的 MaterialDomainUsage 记录。
     sqlx::query("INSERT INTO linggan_material_content (platform,content_external_id,public_ref,first_package_ref) VALUES ($1,$2,$3,$4) ON CONFLICT (platform,content_external_id) DO NOTHING")
         .bind(package.platform()).bind(content_id).bind(Uuid::new_v4()).bind(package.package_ref())
         .execute(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;

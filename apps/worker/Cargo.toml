@@ -32,5 +32,9 @@ path = "src/bin/media_requeue.rs"
 name = "linggan-collection-repair"
 path = "src/bin/collection_repair.rs"
 
+[[bin]]
+name = "linggan-material-reproject"
+path = "src/bin/material_reproject.rs"
+
 [lints]
 workspace = true

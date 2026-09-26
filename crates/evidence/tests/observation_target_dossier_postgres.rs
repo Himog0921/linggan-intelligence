@@ -11,16 +11,17 @@ use linggan_evidence::{
     AccountEligibilityObservation, AcquisitionChainError, AuthorizationGrant, CatalogDetailState,
     CheckInOutcome, CreatorLifecycleAssociation, CreatorLifecycleMetric, CreatorLifecycleQuery,
     CreatorLifecycleStatus, CreatorLifecycleWindow, DispatchDecision, DispatchFailureCode,
-    DispatchFailureOutcome, InstallationCheckIn, MaterialExecutionKind, RequestLeaseError,
-    RuntimeAttemptOutcome, RuntimeSubmissionOutcome, TargetDeletionOutcome,
+    DispatchFailureOutcome, InstallationCheckIn, MaterialExecutionKind, ProducerRuntimeError,
+    RequestLeaseError, RuntimeAttemptOutcome, RuntimeSubmissionOutcome, TargetDeletionOutcome,
     TargetDomainAssignmentOutcome, activate_installation_credential, assign_target_domain,
     assign_target_domain_with_role, bind_observation_account, check_in_installation,
     decide_dispatch, delete_observation_target, grant_authorization, list_targets,
     open_claim_window, read_archive_completeness, read_creator_directory, read_creator_lifecycle,
     read_target, read_target_deletion_preview, register_station, report_account_eligibility,
-    request_admit_and_lease, request_and_admit_for_domain, request_progressive_archive_and_lease,
-    requeue_failed_dispatch, retire_materials, run_progressive_archives, set_station_accepting,
-    start_producer_attempt, submit_producer_package,
+    reproject_accepted_target_materials, request_admit_and_lease, request_and_admit_for_domain,
+    request_progressive_archive_and_lease, requeue_failed_dispatch, retire_materials,
+    run_progressive_archives, set_station_accepting, start_producer_attempt,
+    submit_producer_package,
 };
 use linggan_storage_postgres::Database;
 use std::time::Duration;
@@ -905,7 +906,7 @@ async fn a_detail_accepted_without_a_title_still_counts_as_captured() {
     let directory = read_creator_directory(
         &database,
         target_ref,
-        Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
+        Some(Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap()),
     )
     .await
     .unwrap()
@@ -915,6 +916,17 @@ async fn a_detail_accepted_without_a_title_still_counts_as_captured() {
         .iter()
         .find(|work| work.public_ref == captured_ref)
         .expect("有详情的那一篇就在目录里");
+    let all_domains = read_creator_directory(&database, target_ref, None)
+        .await
+        .unwrap()
+        .expect("全部领域仍读取同一份可查证目录");
+    assert_eq!(all_domains.works.len(), directory.works.len());
+    assert!(
+        all_domains
+            .works
+            .iter()
+            .any(|work| work.public_ref == captured_ref)
+    );
     assert_eq!(
         captured.detail_state,
         CatalogDetailState::Complete,
@@ -1464,7 +1476,7 @@ async fn completed_progressive_archive_never_turns_a_patrol_addition_into_deepen
     let directory = read_creator_directory(
         &database,
         target_ref,
-        Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
+        Some(Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap()),
     )
     .await
     .unwrap()
@@ -2343,6 +2355,66 @@ async fn archive_completeness_deduplicates_work_and_follows_the_exact_lease_targ
 
 #[tokio::test]
 #[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn replay_refuses_a_typed_discovery_without_its_domain_usage() {
+    let database = proof_database("dossier_replay_missing_domain_usage").await;
+    let target_ref = seed_creator_target(&database, "creator-replay-domain-usage").await;
+    let domain_ref = Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap();
+    let station_ref = register_station(&database, "replay-domain-usage", 200)
+        .await
+        .unwrap();
+    let lease_ref =
+        seed_historical_patrol(&database, target_ref, station_ref, "2026-09-22T08:00:00Z").await;
+    let work_ref = seed_surface_work(
+        &database,
+        lease_ref,
+        1,
+        "creator-replay-domain-usage",
+        "replay-domain-usage-work",
+        "2026-09-22T09:00:00Z",
+    )
+    .await;
+    let error = reproject_accepted_target_materials(&database, target_ref, domain_ref, false)
+        .await
+        .expect_err("a typed row without Domain usage must not be reported as complete");
+    assert!(matches!(
+        error,
+        ProducerRuntimeError::MaterialIdentityConflict
+    ));
+
+    let package_ref: Uuid = sqlx::query_scalar(
+        "SELECT package_ref FROM linggan_material_discovery_finding WHERE content_public_ref=$1",
+    )
+    .bind(work_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_material_domain_usage \
+           (usage_ref,content_public_ref,domain_ref,role,basis_kind,request_ref,work_order_ref,package_ref,record_ordinal) \
+         SELECT $1,$2,$3,'primary','accepted_discovery',usage.request_ref,lease.work_order_ref,$4,0 \
+         FROM collection_work_order_lease lease \
+         JOIN collection_work_order_domain_usage usage USING(work_order_ref) \
+         WHERE lease.lease_ref=$5 AND usage.domain_ref=$3",
+    )
+    .bind(Uuid::new_v4())
+    .bind(work_ref)
+    .bind(domain_ref)
+    .bind(package_ref)
+    .bind(lease_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let report = reproject_accepted_target_materials(&database, target_ref, domain_ref, false)
+        .await
+        .expect("the accepted typed row and its Domain usage now form one complete projection");
+    assert_eq!(
+        (report.selected_packages, report.already_projected_packages),
+        (1, 1)
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
 async fn lifecycle_distinguishes_directory_confirmed_and_latest_patrol_points() {
     let database = proof_database("dossier_lifecycle_association").await;
     sqlx::query(
@@ -3079,7 +3151,7 @@ async fn member_display_state(
     let directory = read_creator_directory(
         database,
         target_ref,
-        Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
+        Some(Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap()),
     )
     .await
     .expect("the creator directory stays readable")
