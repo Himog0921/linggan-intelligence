@@ -8,6 +8,9 @@
     ref: document.body.dataset.corpusDomain || '',
     hasDomain: document.body.dataset.corpusDomainSelected === 'true',
   };
+  const pendingWork = new URLSearchParams(window.location.search).get('work');
+  const PENDING_WORK_REF = pendingWork && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pendingWork)
+    ? pendingWork : null;
   const laneOrder = [
     'discovery', 'detail', 'comments', 'replies', 'author',
     'media_slots', 'media_bytes', 'ocr', 'asr',
@@ -390,6 +393,7 @@
     if (model.activeLayout !== 'research') params.set('layout', model.activeLayout);
     // `work` addresses a Work Resource in the selected Domain.
     if (CORPUS_DOMAIN.hasDomain && model.selectedRef) params.set('work', model.selectedRef);
+    else if (!CORPUS_DOMAIN.hasDomain && PENDING_WORK_REF) params.set('work', PENDING_WORK_REF);
     if (model.activeTab !== 'overview') params.set('tab', model.activeTab);
     if (model.inspectorClosed) params.set('panel', 'closed');
     else if (model.inspectorWidth !== 'normal') params.set('panel', model.inspectorWidth);
@@ -1396,6 +1400,16 @@
     } catch (error) {
       if (error.name === 'AbortError') return;
       refs.inspectorFeedback.hidden = false;
+      if (error.code === 'material_not_found' && selectionSource === 'url') {
+        refs.inspectorFeedback.replaceChildren(
+          node('strong', null, '所选领域未收录这篇作品'),
+          tech(error.code),
+        );
+        panels.forEach((panel) => panel.replaceChildren(sourceIncompleteBlock(
+          '请切换到这篇作品所属的领域，或从当前领域的作品列表重新选择。',
+        )));
+        return;
+      }
       // error.code is a contract value and keeps its technical rendering; the invented English
       // fallback does not, so an unlabelled failure just says so in Chinese.
       refs.inspectorFeedback.replaceChildren(node('strong', null, '当前作品详情读取失败'));
@@ -2568,6 +2582,14 @@
   if (!CORPUS_DOMAIN.hasDomain) {
     const dialog = document.getElementById('ev-domain-dialog');
     if (dialog) {
+      // 从“全部领域”作品行进入时，先选研究领域，但不能丢掉指定的作品。
+      if (PENDING_WORK_REF) {
+        dialog.querySelectorAll('.ev-domain-choice').forEach((choice) => {
+          const destination = new URL(choice.href);
+          destination.searchParams.set('work', PENDING_WORK_REF);
+          choice.href = destination.pathname + destination.search;
+        });
+      }
       const firstChoice = dialog.querySelector('.ev-domain-choice');
       const closeButton = document.getElementById('ev-domain-dialog-close');
       closeButton?.addEventListener('click', () => dialog.close());

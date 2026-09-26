@@ -1,7 +1,7 @@
 # DOMAIN-UNIFICATION-001 · 平级 Domain 与统一材料链 UI 变更清单
 
 > 状态: 权威当前
-> 最后核对: 2026-09-24
+> 最后核对: 2026-09-26
 > 适用范围: Collection 领域管理、Observation Target role、Evidence Library 与 Comment Study 的 Domain 隔离
 > 事实来源: Mog 2026-09-23 的决定、DEC-0008、PAGE-DOMAIN-MANAGEMENT-001、现行 UI 执行合同与 LIDS
 > 冲突时以谁为准: 用户最新决定、AGENTS.md、DEC-0008、真实合同与代码；源码实现记录不代表浏览器验收、部署或用户接受
@@ -89,3 +89,9 @@
 - Chrome 实际点击：`/collection/domains` 的全局「语料」→ `/corpus/evidence` 弹窗显示 ADHD/考研自习/自闭症干预 → 选考研进入 `?domain=...0002` 的成功空查询 → 面包屑切 ADHD `...0001` 并读取本次分页 50 篇作品 → 评论研究打开菜单，链接中心点击命中菜单自身（页头 z=40、sticky 工具条 z=30）→ 切回考研评论研究 `...0002`。
 - 390px 弹窗边界在视口内、`scrollWidth=390`；375px 弹窗关闭后焦点回到领域面包屑、搜索禁用，Enter 重新展开并选 ADHD，`scrollWidth=360 ≤ innerWidth=375`。这是本机浏览器回执，不代表真实移动设备或 Mog 业务验收。
 - 定向 Rust 测试、`node --check`、UI handbook 检查通过；完整自动测试与独立提交审查的最终结果记入进度。未合并、未部署，`:3000` 仍为已发布 main。
+
+## 7. 全部领域作品直达补充（2026-09-26；隔离候选）
+
+Collection 的 creator/keyword 目录在“全部领域”汇总标准材料，不建立混域证据库。作品行使用稳定 `work` 引用：已选领域时直接打开该领域的作品；未选领域时先出现既有领域弹窗，选定后同一 `work` 才交给 Inspector。若误选不收录该作品的领域，详情 API 的 `material_not_found` 在原反馈区以中文说明“所选领域未收录这篇作品”，建议切换到所属领域或从当前列表重选；不能冒充详情已读取，也不能静默显示空作品。这里不增加弹窗层级、Token、组件、API 或跨领域读取。
+
+表面为 Collection 目标抽屉作品行、语料领域弹窗与 Evidence Inspector；状态为有作品且可读、未选领域、所选领域未收录、详情读取失败。依赖仍是现有 Work Resource、Domain 显式范围和 `work` 深链。验收以 creator/keyword 隔离 PostgreSQL 目录回归、作品链接单测、真实数据副本上 Collection → 弹窗 → 正确 Domain → 同篇 Inspector 浏览器流程为准；误选领域反馈的独立浏览器检查尚未执行，不把源码分支等同视觉验收。共享库补投影、主线合并、`:3000` 部署与 Mog 业务验收均未发生。

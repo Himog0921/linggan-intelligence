@@ -816,6 +816,19 @@ shared 文件必须由 root 指定 integration owner；实施 Agent不得因为�
 | 外部平台重采 | 不在自动上线范围 |
 | Mog 业务验收 | 未执行 |
 
+## 11.1 2026-09-26 · 全部领域作品读取与旧包补投影候选
+
+本节修订 3.2 节当时的“旧 cross 样本没有 canonical Package 血缘”判断。只读走查确认：“全都给姐上岸”的 24 篇详情、245 条评论及主页发现仍在原始 accepted CapturePackage/RecordDisposition 中，并可经 WorkOrder 的冻结 Domain usage 定位；缺的是统一 Material 投影，不是另一个正在运行的旧数据库。0104 已删除旧 cross 表，本修复不恢复旧表、双读或新的材料抽象。
+
+| Surface / 状态 | 依赖与候选处理 | 验收 |
+|---|---|---|
+| Collection → 观察目标 → 全部领域 → creator 抽屉 | `domain=None` 读取该目标所有冻结领域用途与 canonical Material 的交集；按作品去重；具体领域仍只读自己的用途 | 历史目标补投影后在全部领域看到 24 篇，考研自习看到 24 篇，其他领域不能串读；“查看”保留作品引用，全部领域先选领域再打开原作品 |
+| Collection → 观察目标 → 全部领域 → keyword 列表与抽屉 | 汇总所有冻结领域用途下的标准发现与合格详情；计数按作品去重 | A/B 两个正式 Domain 的关键词作品在全部领域均可见，选 A 不显示只属 B 的作品 |
+| Corpus → 考研自习 → Evidence / comments | 保持显式 Domain 的统一材料读取，不提供混域 Corpus；修复材料来源后消费已有读链 | 24 篇详情及 245 条评论可由考研范围读取；未选 Domain 仍先选领域 |
+| 原始旧包补投影 | 一次性操作工具只选指定 Target/Domain、accepted Receipt 与 discovery/content disposition；默认预览，`--apply` 才以单事务调用现有类型化材料接纳函数 | 原包 50 个合格包首次投影，第二次 0；24 个 quarantined reply 包不选；无新 CapturePackage/Receipt/disposition、无远程媒体字节伪造 |
+
+“无作品”只在 canonical 查询成功且结果确为 0 时显示；读取失败不能降格为 0。隔离 PostgreSQL 回归、共享库副本上的重复运行和真实浏览器从 Collection 到目标再到 Corpus 是发布前证明。当前仅为 worktree 候选，不能把隔离副本的 24/24/245 当作共享库已修复或 Mog 已验收。开发期不新增逐行人工审批、长期兼容、专门保全层或新 migration。
+
 ## 12. 直接参考
 
 - [领域共同语言](../../context/domain-language.md)

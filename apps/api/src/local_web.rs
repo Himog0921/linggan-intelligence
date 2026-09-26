@@ -2662,26 +2662,24 @@ async fn collection_targets(
     } else {
         Ok(None)
     };
-    let creator_catalog = match (
-        current_domain.map(|domain| domain.domain_ref),
-        drawer_target.as_ref().ok().and_then(Option::as_ref),
-    ) {
-        (Some(domain_ref), Some(target)) if target.target_kind == "creator" => {
-            read_creator_directory(database, target.target_ref, domain_ref)
-                .await
-                .ok()
-        }
+    let creator_catalog = match drawer_target.as_ref().ok().and_then(Option::as_ref) {
+        Some(target) if target.target_kind == "creator" => read_creator_directory(
+            database,
+            target.target_ref,
+            current_domain.map(|domain| domain.domain_ref),
+        )
+        .await
+        .ok(),
         _ => None,
     };
-    let keyword_catalog = match (
-        current_domain.map(|domain| domain.domain_ref),
-        drawer_target.as_ref().ok().and_then(Option::as_ref),
-    ) {
-        (Some(domain_ref), Some(target)) if target.target_kind == "keyword" => {
-            read_keyword_hits(database, target.target_ref, domain_ref)
-                .await
-                .ok()
-        }
+    let keyword_catalog = match drawer_target.as_ref().ok().and_then(Option::as_ref) {
+        Some(target) if target.target_kind == "keyword" => read_keyword_hits(
+            database,
+            target.target_ref,
+            current_domain.map(|domain| domain.domain_ref),
+        )
+        .await
+        .ok(),
         _ => None,
     };
     // 只有真的点了删除才去读预览：列表每次渲染都读一遍，等于为一个多数时候不显示的
@@ -2754,18 +2752,14 @@ async fn collection_targets(
                 linggan_evidence::keyword_targets_pending_detail(database, &keyword_refs)
                     .await
                     .ok();
-            // 命中多少篇、补到多少篇详情：两侧一起数（本领域在证据侧，外部领域在跨行业
-            // 语料），只数一侧另一侧会显示成 0——而 0 与「还没采」在界面上长得一样。
-            let keyword_counts = match current_domain {
-                Some(domain) => linggan_evidence::read_keyword_catalog_counts(
-                    database,
-                    &keyword_refs,
-                    domain.domain_ref,
-                )
-                .await
-                .ok(),
-                None => None,
-            };
+            // 命中多少篇、补到多少篇详情均从标准材料链读取；全部领域汇总时按作品去重。
+            let keyword_counts = linggan_evidence::read_keyword_catalog_counts(
+                database,
+                &keyword_refs,
+                current_domain.map(|domain| domain.domain_ref),
+            )
+            .await
+            .ok();
             collection_targets_view::render_stored_targets_with_observation(
                 &base,
                 &targets,
