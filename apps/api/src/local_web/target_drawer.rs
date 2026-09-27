@@ -1326,13 +1326,23 @@ fn works_list(
                 id = escape(&work.content_external_id),
                 published = escape(published),
             );
+            let corpus_href = match list_context
+                .domain
+                .and_then(|value| uuid::Uuid::parse_str(value).ok())
+            {
+                Some(domain_ref) => format!(
+                    "/corpus/evidence?domain={domain_ref}&work={}",
+                    work.public_ref
+                ),
+                None => format!("/corpus/evidence?work={}", work.public_ref),
+            };
             let tail = format!(
-                r#"<td><span class="c-dw-catalog-state" data-state="{detail_state}">{detail}</span></td><td>{media}</td><td>{comments}</td><td>{last}</td><td><a class="c-btn-secondary c-dw-work-open" href="/corpus/evidence?selected={work_ref}">查看</a></td>"#,
+                r#"<td><span class="c-dw-catalog-state" data-state="{detail_state}">{detail}</span></td><td>{media}</td><td>{comments}</td><td>{last}</td><td><a class="c-btn-secondary c-dw-work-open" href="{corpus_href}">查看</a></td>"#,
                 detail = detail,
                 media = work.media_state,
                 comments = comments,
                 last = escape(last),
-                work_ref = work.public_ref,
+                corpus_href = escape(&corpus_href),
             );
             if is_creator {
                 format!(r#"<tr>{common}<td>{source}</td>{tail}</tr>"#)
@@ -3599,6 +3609,52 @@ mod tests {
         target.identity_key = "考研自习".to_owned();
         target.display_name = Some("考研自习".to_owned());
         target
+    }
+
+    #[test]
+    fn work_links_keep_the_work_and_an_explicit_domain_when_selected() {
+        let work_ref = uuid::Uuid::from_u128(42);
+        let work = linggan_evidence::CatalogWork {
+            public_ref: work_ref,
+            content_external_id: "xhs-note".to_owned(),
+            title: Some("一篇作品".to_owned()),
+            creator_display_name: Some("作者".to_owned()),
+            match_position: None,
+            published_at: None,
+            source: CatalogSource::InitialArchive,
+            detail_state: CatalogDetailState::Complete,
+            execution_state: None,
+            media_state: "—",
+            comment_count: Some(2),
+            last_captured_at: None,
+        };
+        let catalog = linggan_evidence::CreatorDirectoryProjection { works: vec![work] };
+        let target = target("monitoring");
+        let all = works_list(
+            &target,
+            TargetCatalogView::Creator(Some(&catalog)),
+            None,
+            None,
+            TargetListContext {
+                domain: Some("all"),
+                ..TargetListContext::default()
+            },
+        );
+        assert!(all.contains(&format!("href=\"/corpus/evidence?work={work_ref}\"")));
+        let domain_ref = uuid::Uuid::from_u128(2);
+        let scoped = works_list(
+            &target,
+            TargetCatalogView::Creator(Some(&catalog)),
+            None,
+            None,
+            TargetListContext {
+                domain: Some("00000000-0000-0000-0000-000000000002"),
+                ..TargetListContext::default()
+            },
+        );
+        assert!(scoped.contains(&format!(
+            "href=\"/corpus/evidence?domain={domain_ref}&amp;work={work_ref}\""
+        )));
     }
 
     #[test]

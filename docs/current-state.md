@@ -6,19 +6,21 @@
 > 事实来源: 本机实际检查、已确认项目边界和完成计划
 > 冲突时以谁为准: 真实运行结果、ACCEPTED ADR 与用户最新确认
 
-### GREENFIELD Comment Research / Draft PR #338（P2 已对齐主线；整包未完成）
+### GREENFIELD Comment Research / Draft PR #338（最新 main 已整合；最终证明进行中）
 
-PR #338 本身仍为 Open/Draft，远端 head `07a46a531aa9aa309dbcd2f71de0b713dbe54397` 尚落后于当前 `main@2587fba486434acf2c94a8e7f64ce245b87a38f6`。此前 #338 覆盖的若干前序能力已通过独立 PR（包括 #323–#327、#329、#335、#336）进入 main；这不代表 #338 整体已合并。当前 PR 专属 worktree 正在收口：已合入至 `30fe306` 的主线基线，但还需整合后续到 `2587fba` 的 6 个提交；Comment Study 新增 migration 已排到 0105–0107，方法/预算/preview/start 已接入当前候选 Axum router 与页面。隔离证明脚本已通过 37 个 Intelligence 与 6 个 Axum API 子项；这不是最新 main 集成后的最终验证、T01–T54 全验收或真实模型质量。只读核验本机 `:3000` health 为 200，部署身份 `2587fba4`、构建于 2026-09-27 05:04 UTC、migration head 0104，且与当前 main 匹配；PR 的 0105–0107 未应用、P2 UI 未发布。备份恢复、Mog 页面验收以及 P0 专项历史/在途任务保护证明仍未完成。PR 分支推送、exact-head CI 与逐阶段人工/环境证明以本包验收账本和本月记录为准。
+PR #338 本身仍为 Open/Draft，远端 head `07a46a531aa9aa309dbcd2f71de0b713dbe54397` 尚落后于当前 `main@2587fba486434acf2c94a8e7f64ce245b87a38f6`。此前 #338 覆盖的若干前序能力已通过独立 PR（包括 #323–#327、#329、#335、#336）进入 main；这不代表 #338 整体已合并。当前 PR 专属 worktree 已合并 `main@2587fba` 并保留 Domain/Material usage 0103/0104；Comment Study 新增 migration 排到 0105–0107，方法/预算/preview/start 接入候选 Axum router 与页面。最新 main 合并树上的隔离脚本通过 37 个 Intelligence 与 6 个 Axum API 子项；同树 unit suites 为 Intelligence 123/123、API 287/287。源码证明仍不代表 T01–T54 全验收或真实模型质量。只读核验本机 `:3000` health 为 200，部署身份 `2587fba4`、构建于 2026-09-27 05:04 UTC、migration head 0104，且与当前 main 匹配；PR 的 0105–0107 未应用、P2 UI 未发布。备份恢复、Mog 页面验收以及 P0 专项历史/在途任务保护证明仍未完成。PR 分支推送、exact-head CI 与逐阶段人工/环境证明以本包验收账本和本月记录为准。
 
-### DOMAIN-UNIFICATION-001（#343 已合并并刷新本机运行；待业务验收）
+### DOMAIN-UNIFICATION-001（#343/#344 已合并并刷新本机运行；作品读取修复候选待集成）
 
 Mog 已确认正式 Domain 在基础采集、详情、评论、媒体与研究能力上平权，Domain 只定义研究上下文；Collection 需要新增“领域管理”。当前唯一推进入口是 [DOMAIN-UNIFICATION-001](plans/active/domain-unification-001.md)：它冻结 Domain–Target 的 `primary/reference` 配置、相容多用途共享一次 WorkOrder、统一 canonical Material/Comment/Media、Domain-scoped Corpus 与 Comment Study、pause 真语义，以及开发期旧 `cross_industry` 路径的直接清理。
 
-本计划明确不为旧开发数据建设双写、长期 fallback、逐行审批、down migration 或专用保全系统。WP0–WP5 已实施并经完整隔离 PostgreSQL 套件与双轴独立复审；#343 修复了旧 Evidence 兼容读取跨 Domain、任务冻结用途不可见、暂停拒绝原因折叠和 CSS token/窄屏问题，合并为 `main@46e10837`。WP4 领域管理在隔离 PostgreSQL 与浏览器完成配置写入、pause/resume、多 Domain role、冲突反馈和键盘焦点验收；部署后本机浏览器确认页面可读、任务列表与详情均显示冻结领域用途，390/1085/1440 视口均无 DOM 横向溢出。
+本计划明确不为旧开发数据建设双写、长期 fallback、逐行审批、down migration 或专用保全系统。WP0–WP5 已实施并经完整隔离 PostgreSQL 套件与双轴独立复审；#343 修复了旧 Evidence 兼容读取跨 Domain、任务冻结用途不可见、暂停拒绝原因折叠和 CSS token/窄屏问题，合并时为 `main@46e10837`。后续 #344 语料入口与评论研究领域菜单修复已合并，2026-09-26 核对 `origin/main` 与本机 `runtime-main` 均为 `30fe3063`。WP4 领域管理在隔离 PostgreSQL 与浏览器完成配置写入、pause/resume、多 Domain role、冲突反馈和键盘焦点验收；部署后本机浏览器确认页面可读、任务列表与详情均显示冻结领域用途，390/1085/1440 视口均无 DOM 横向溢出。
 
-此前的当前 schema 隔离副本升级已证明 0102→0103→0104 对旧数据可行（当时源库 1,352 Content）。随后对共享 `linggan_intelligence_dev` 制作迁移前有效快照，并在受控停止 API、巡检 worker、媒体 worker 后应用 0103/0104：升级前实际为 1,362 Content、24 条旧 cross sample/detail、245 条旧评论；升级后 1,362 Content 均有 `legacy_domain_migration` usage、缺失 0，旧 cross 表与 canonical 单值 Domain 列在 `public` 下均为 0。24 个孤儿 session 与 72 条旧 preparation 退役，212 条 grant attempt 保留、其中 24 条解除旧 session 引用。快照只用于可恢复性，不建立长期兼容层；旧考研样本/评论没有 canonical Package 血缘，因此当前考研正式领域为 0 篇/0 评论，没有伪造重投影或访问平台重采。
+此前的当前 schema 隔离副本升级已证明 0102→0103→0104 对旧数据可行（当时源库 1,352 Content）。随后对共享 `linggan_intelligence_dev` 制作迁移前有效快照，并在受控停止 API、巡检 worker、媒体 worker 后应用 0103/0104：升级前实际为 1,362 Content、24 条旧 cross sample/detail、245 条旧评论；升级后 1,362 Content 均有 `legacy_domain_migration` usage、缺失 0，旧 cross 表与 canonical 单值 Domain 列在 `public` 下均为 0。24 个孤儿 session 与 72 条旧 preparation 退役，212 条 grant attempt 保留、其中 24 条解除旧 session 引用。快照只用于可恢复性，不建立长期兼容层。当时记录的“旧考研样本/评论没有 canonical Package 血缘”现已被 2026-09-26 的原始包走查证伪：它们没有**已投影的 canonical Material**，但原始 accepted Package、WorkOrder/Domain usage 与 record disposition 仍在同一共享库。当前运行库考研正式领域仍为 0 篇/0 评论；隔离修复候选可从原包补投影，尚未写共享库。
 
-Issue #130 保持开启并标记 `ready-for-human`，等待 Mog 对实际业务页面和数据后果验收。PR #343 已合并；共享迁移、本机 `runtime-main@46e10837` 切换与基本 API/浏览器 smoke 已执行。PR #338 在独立 worktree 已基于当前 main 对齐，migration 重排与 Comment Study domain usage 读取适配已完成候选实现；它仍未合并 main。真实平台重采、插件重载、非空媒体与跨 Domain Comment Study 实际数据验收均未发生；不从健康页推断完整业务交付。隔离和本机浏览器分层回执见 `docs/design/acceptance/domain-unification-001-acceptance.md` 与本月进度。
+2026-09-26 候选 `codex/all-domain-works-130` 修复 Collection“全部领域”目标抽屉与关键词列表跳过标准作品目录的问题；目录仍只从已接纳的 canonical Material 及冻结 Domain usage 读取，不恢复旧 `cross_industry` 表或运行时 fallback。针对“全都给姐上岸”的一次性限定目标/领域补投影工具默认预览，仅复用现有接纳函数。隔离真实数据副本首次补出 24 篇作品、24 条详情、245 条评论，再跑新增为 0；166 条 quarantined 回复不进入材料。此为候选和隔离证明，不代表共享库修复、`main` 合并、`:3000` 刷新或 Mog 验收。
+
+Issue #130 保持开启并标记 `ready-for-human`，等待 Mog 对实际业务页面和数据后果验收。PR #343/#344 已合并；共享迁移及本机 `runtime-main@2587fba4` 的基本 API/浏览器 smoke 已执行，`:3000` health 为 200，runtime identity 的 migration head 为 0104。PR #338 仍为 OPEN/Draft，P2 候选尚未推送/合入/发布。真实平台重采、插件重载、非空媒体与本次作品修复的共享库补投影及 Mog 验收均未发生；不从健康页推断完整业务交付。隔离和本机浏览器分层回执见 `docs/design/acceptance/domain-unification-001-acceptance.md` 与本月进度。
 
 ### OCR-CONTENT-LAYERING-001 / Issue #296（候选源码；未进入共享运行）
 

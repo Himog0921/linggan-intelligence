@@ -1,6 +1,6 @@
 # P1 实施记录：批次计数与目录基础
 
-> 状态: 代码候选；Rust和隔离PostgreSQL尚未执行
+> 状态: 一次性报告
 > 最后核对: 2026-09-23
 > 适用范围: COMMENT-STUDY-PRODUCTIZATION-001 的P1增量
 > 事实来源: main@c74d72e3、PR #338及本轮实际命令回执

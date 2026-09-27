@@ -1,6 +1,11 @@
 # 评论研究产品化：数据库与数据合同
 
-> 状态：技术设计定稿，待用户批准开发；不是已实现或已验收声明
+> 状态: 权威当前
+> 最后核对: 2026-09-27
+> 适用范围: COMMENT-STUDY-PRODUCTIZATION-001 数据库字段、迁移与事务合同
+> 事实来源: GREENFIELD v1.0 手册与其数据库规格
+> 冲突时以谁为准: 用户最新授权、AGENTS.md、当前 migration/schema 与真实 PostgreSQL 证明
+> 当前实现状态: P2 迁移候选 0105–0107 仅在 disposable PostgreSQL 验证，未应用共享库
 > 交付包：COMMENT-STUDY-PRODUCTIZATION-001 · 文档版 1.0
 > 核对日期：2026-09-22
 > 源码基线：`main@c74d72e3d17b9d5ecfb9953de025713c47e4560e`

@@ -1,7 +1,7 @@
 # 文档总索引
 
 > 状态: 权威当前
-> 最后核对: 2026-09-24
+> 最后核对: 2026-09-26
 > 适用范围: 全仓库文档导航、权威状态与渐进式披露
 > 事实来源: 当前 Git 文件树、`AGENTS.md` 与文档状态头
 > 冲突时以谁为准: `AGENTS.md` 和真实代码、合同、测试、运行结果
@@ -14,6 +14,8 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发。先读[完整手�
 
 本包保留当前 clean-study 合法历史，不延用 DEC-0006 的旧 reset 授权；只替代对应五 Tab 与旧启动交互的目标规格，不恢复 V1 路径。自动化分册是后续 P6 设计，不是定时外发授权。2026-09-27 的 P0–P8 推进快照见 COMMENT-STUDY-PRODUCTIZATION-001 验收账本；不表示历史 T01–T54 或下方所有状态已重新核验。
 
+本包分册索引：[执行入口](agents/comment-study-productization-001-handoff.md)、[架构](architecture/comment-study-productization-001.md)、[P0 回执](audits/comment-study-productization-001/p0-execution.md)、[P1 闭环](audits/comment-study-productization-001/p1-closure.md)、[P1 计数与目录](audits/comment-study-productization-001/p1-read-counts.md)、[P1 作品目录](audits/comment-study-productization-001/p1-work-catalog.md)、[数据库合同](data-contracts/comment-study-productization-001.md)、[HTTP 合同](data-contracts/comment-study-http-001.md)、[机器合同](data-contracts/comment-study-productization-001/README.md)、[总体计划](plans/active/comment-study-productization-001.md)、[自动化后续计划](plans/active/comment-study-automation-002.md)、[开发与升级手册](runbooks/comment-study-productization-001.md)。
+
 ## 固定阅读顺序
 
 1. 根目录 [`AGENTS.md`](../AGENTS.md)：最高约束、事实优先级和不可违反规则。
@@ -25,7 +27,7 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发。先读[完整手�
 
 | 文档 | 状态 | 用途 |
 |---|---|---|
-| [plans/active/domain-unification-001.md](plans/active/domain-unification-001.md) | 活跃计划；WP0–WP5 与独立复审完成，PR #343 已合并、共享 0103/0104 与本机运行已切换；#338 后续适配，Mog 业务验收待办 | 多个正式 Domain 平权、Domain–Target role、统一 Material/Comment/Media、Comment Study 领域化、领域管理与开发期旧 cross 模型清理的唯一推进文件 |
+| [plans/active/domain-unification-001.md](plans/active/domain-unification-001.md) | 活跃计划；#343/#344 已合并，全部领域作品读取与原包补投影为隔离候选、尚未写共享库或刷新运行；#338 后续适配，Mog 业务验收待办 | 多个正式 Domain 平权、Domain–Target role、统一 Material/Comment/Media、Comment Study 领域化、领域管理与开发期旧 cross 模型清理的唯一推进文件 |
 | [plans/active/account-observation-bootstrap-002.md](plans/active/account-observation-bootstrap-002.md) | 活跃计划 | Issue #218：新安装插件的首单软准入、账号观察启动、人工绑定审计与无秘密配置诊断 |
 | [plans/active/detail-page-session-replay-safety-001.md](plans/active/detail-page-session-replay-safety-001.md) | 活跃计划；受保护工作树 | 同一 Work Order/内容详情页的单次导航授权、浏览器持久消费闸门、缓存缺失 fail-closed 与既得数据重传边界 |
 | [plans/active/collection-upgrade-001.md](plans/active/collection-upgrade-001.md) | 活跃计划；受保护工作树 | Mog 交付包：缺输入止转、跨工单重试预算、交付恢复、统一材料完成判据与运行诊断的 S0–S6 对照表 |

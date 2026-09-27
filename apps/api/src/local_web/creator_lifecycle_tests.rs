@@ -559,6 +559,7 @@ fn invalid_lifecycle_query_is_visible_and_never_claims_defaults() {
 #[test]
 fn corpus_work_deep_link_does_not_fall_back_when_the_work_is_off_page() {
     assert!(EVIDENCE_LIBRARY_JS.contains("function directWorkItem(publicRef)"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("detailUrl: `${API_ROOT}/${encodeURIComponent(publicRef)}?domain=${encodeURIComponent(CORPUS_DOMAIN.ref)}`"));
     assert!(EVIDENCE_LIBRARY_JS.contains("revealUrlSelection = false"));
     assert!(
         EVIDENCE_LIBRARY_JS.contains(
