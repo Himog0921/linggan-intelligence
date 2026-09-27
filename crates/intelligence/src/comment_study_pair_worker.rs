@@ -37,6 +37,15 @@ pub enum PairWorkerError {
     #[error("pair manifest is invalid")]
     Manifest,
 }
+
+/// Reports provider dispatch separately from local queue cleanup and response admission.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PairExecution {
+    Idle,
+    LocalProgress,
+    ProviderAttempt { accepted: bool },
+}
+
 struct Claim {
     pair: Uuid,
     invocation: Uuid,
@@ -53,14 +62,28 @@ pub async fn run_one_problem_pair(
     secrets: &dyn ModelSecretStore,
     adapter: &PiAdapter,
 ) -> Result<bool, PairWorkerError> {
+    run_one_problem_pair_with_outcome(database, secrets, adapter)
+        .await
+        .map(|outcome| {
+            matches!(outcome, PairExecution::LocalProgress)
+                || matches!(outcome, PairExecution::ProviderAttempt { accepted: true })
+        })
+}
+
+/// Detailed counterpart used by the scheduler to enforce its per-tick provider-call limit.
+pub async fn run_one_problem_pair_with_outcome(
+    database: &Database,
+    secrets: &dyn ModelSecretStore,
+    adapter: &PiAdapter,
+) -> Result<PairExecution, PairWorkerError> {
     if !crate::comment_study_request_ledger::pair_failure_state_supported(database).await? {
-        return Ok(false);
+        return Ok(PairExecution::Idle);
     }
     if retire_one_legacy_cross_run_pair(database).await? {
-        return Ok(true);
+        return Ok(PairExecution::LocalProgress);
     }
     let Some(claim) = claim(database).await? else {
-        return Ok(false);
+        return Ok(PairExecution::Idle);
     };
     let mut request = match connection_request(database, secrets, claim.version).await {
         Ok(request) => request,
@@ -127,9 +150,11 @@ pub async fn run_one_problem_pair(
             {
                 Ok(_) => {
                     finish_invocation(database,claim.invocation,Some(&response),true,None,&json!({"contract":PROBLEM_PAIR_CONTRACT,"pairRef":claim.pair,"accepted":true})).await?;
-                    Ok(true)
+                    Ok(PairExecution::ProviderAttempt { accepted: true })
                 }
-                Err(ProblemStoreError::ModelRequestUnavailable) => Ok(false),
+                Err(ProblemStoreError::ModelRequestUnavailable) => {
+                    Ok(PairExecution::ProviderAttempt { accepted: false })
+                }
                 Err(ProblemStoreError::Contract(error)) => {
                     finish(
                         database,

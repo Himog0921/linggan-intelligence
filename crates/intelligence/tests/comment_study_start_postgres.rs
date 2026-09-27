@@ -5,9 +5,14 @@ mod fixture;
 mod research_fixture;
 use linggan_intelligence::{
     comment_study_acceptance::{SemanticAcceptanceError, accept_target_output},
-    comment_study_batch::{PrepareStudyBatchRequest, next_run_needing_batch, prepare_study_batch},
+    comment_study_batch::{
+        PrepareStudyBatchRequest, next_run_needing_batch, next_run_needing_batch_after,
+        prepare_study_batch,
+    },
     comment_study_batch_acceptance::accept_study_batch_output,
-    comment_study_batch_worker::{claim_next_study_batch, recover_expired_study_batch_leases},
+    comment_study_batch_worker::{
+        claim_next_study_batch, claim_next_study_batch_after, recover_expired_study_batch_leases,
+    },
     comment_study_catalog::refresh_clean_cache,
     comment_study_model_dispatch::{
         StudyModelDispatchError, mark_study_batch_model_dispatch_started,
@@ -26,7 +31,9 @@ use linggan_intelligence::{
     },
     comment_study_selection::{StartStudyRunCommand, StudySelectionMode, study_domain_lock_key},
     model_invocation::checkpoint_invocation_usage,
-    model_runner::run_model_work_once,
+    model_runner::{
+        ModelWorkerFairness, prepare_next_batch_across_runs_with_fairness, run_model_work_once,
+    },
     model_secrets::{ModelSecretStore, SyntheticModelSecrets},
     model_settings::ModelError,
     pi_adapter::PiAdapter,
@@ -795,6 +802,213 @@ async fn new_run_is_frozen_and_method_bound_dispatch_accepts_only_the_valid_targ
     .unwrap();
     assert_eq!(v["engineRevision"].as_str().unwrap().len(), 40);
     assert_eq!(effects(&db).await, json!([1, 2, 1, 1]));
+}
+
+#[tokio::test]
+#[ignore = "isolated synthetic PostgreSQL; no shared database or model"]
+async fn worker_preparation_and_claim_rotate_across_queued_runs() {
+    // Each Run has more than MAX_TARGETS_PER_BATCH queued targets. A and then B/C retain real
+    // backlog after their first prepared batch, so oldest-first selection would keep choosing
+    // the same Run and fail the assertions below.
+    let (db, mut command, _) = setup("worker_run_round_robin", 75).await;
+    command.limits.comment_budget = 25;
+    let mut run_refs = Vec::new();
+    for _ in 0..3 {
+        let run_ref = start_study_run(&db, next(&command), TrustedStudyOrigin::Manual)
+            .await
+            .unwrap()
+            .run_ref
+            .unwrap();
+        run_refs.push(run_ref);
+    }
+
+    // The initial pick remains oldest-first; after it, the process-local cursor walks the stable
+    // Run identity order once and wraps, instead of rescanning the same oldest Run every tick.
+    let mut cursor = None;
+    let mut order = Vec::new();
+    for _ in 0..=run_refs.len() {
+        let run_ref = next_run_needing_batch_after(&db, &[], cursor)
+            .await
+            .unwrap()
+            .expect("all Runs still have a queued target");
+        cursor = Some(run_ref);
+        order.push(run_ref);
+    }
+    assert_eq!(order[0], order[run_refs.len()]);
+    assert_eq!(
+        order[..run_refs.len()]
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        run_refs.len()
+    );
+
+    let mut fairness = ModelWorkerFairness::default();
+    let mut prepared_runs = Vec::new();
+    for _ in 0..run_refs.len() * 2 {
+        let before: std::collections::BTreeMap<Uuid, i64> = sqlx::query_as(
+            "SELECT run_ref,count(*)::bigint FROM linggan_comment_study_batch \
+             WHERE run_ref=ANY($1) AND state='prepared' GROUP BY run_ref",
+        )
+        .bind(&run_refs)
+        .fetch_all(db.pool())
+        .await
+        .unwrap()
+        .into_iter()
+        .collect();
+        assert!(
+            prepare_next_batch_across_runs_with_fairness(&db, &mut fairness)
+                .await
+                .unwrap(),
+            "each eligible Run should get a batch before a Run gets a second turn"
+        );
+        let after: Vec<(Uuid, i64)> = sqlx::query_as(
+            "SELECT run_ref,count(*)::bigint FROM linggan_comment_study_batch \
+             WHERE run_ref=ANY($1) AND state='prepared' GROUP BY run_ref",
+        )
+        .bind(&run_refs)
+        .fetch_all(db.pool())
+        .await
+        .unwrap();
+        let newly_prepared: Vec<_> = after
+            .into_iter()
+            .filter(|(run_ref, count)| *count > before.get(run_ref).copied().unwrap_or(0))
+            .map(|(run_ref, _)| run_ref)
+            .collect();
+        assert_eq!(newly_prepared.len(), 1);
+        prepared_runs.push(newly_prepared[0]);
+    }
+    assert_eq!(
+        prepared_runs[..run_refs.len()],
+        prepared_runs[run_refs.len()..]
+    );
+    assert_eq!(
+        prepared_runs[..run_refs.len()]
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        run_refs.len(),
+        "every Run receives its next batch while all three still have queued backlog"
+    );
+    for run_ref in &run_refs {
+        let prepared_count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM linggan_comment_study_batch \
+             WHERE run_ref=$1 AND state='prepared'",
+        )
+        .bind(run_ref)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        assert_eq!(prepared_count, 2);
+        let queued_targets: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM linggan_comment_study_target \
+             WHERE run_ref=$1 AND state='queued'",
+        )
+        .bind(run_ref)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        assert!(queued_targets > 0, "each Run must retain a true backlog");
+    }
+
+    // Give the first Run one extra prepared batch to make the claim side's backlog asymmetric.
+    prepare_study_batch(
+        &db,
+        PrepareStudyBatchRequest {
+            run_ref: run_refs[0],
+            maximum_targets: 12,
+        },
+    )
+    .await
+    .unwrap();
+
+    // Claim has its own cursor over already-prepared work, so a backlog from one Run cannot
+    // monopolize a worker after a restart or after concurrent workers expose older batches.
+    let mut claim_cursor = None;
+    let mut claimed_runs = Vec::new();
+    for _ in 0..run_refs.len() * 2 {
+        let claim = claim_next_study_batch_after(&db, Uuid::new_v4(), 60, &mut claim_cursor)
+            .await
+            .unwrap()
+            .expect("each Run has at least two prepared batches");
+        let run_ref: Uuid = sqlx::query_scalar(
+            "SELECT run_ref FROM linggan_comment_study_batch WHERE batch_ref=$1",
+        )
+        .bind(claim.batch_ref)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        claimed_runs.push(run_ref);
+    }
+    assert_eq!(
+        claimed_runs[..run_refs.len()],
+        claimed_runs[run_refs.len()..]
+    );
+    assert_eq!(
+        claimed_runs[..run_refs.len()]
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        run_refs.len(),
+        "claim rotates across all Runs even though the first Run has the larger queue"
+    );
+}
+
+#[tokio::test]
+#[ignore = "isolated synthetic PostgreSQL; no shared database or model"]
+async fn expired_batch_lease_recovery_is_bounded_to_32_per_tick() {
+    let (db, command, _) = setup("expired_batch_recovery_bound", 1).await;
+    let run_ref = start_study_run(&db, command, TrustedStudyOrigin::Manual)
+        .await
+        .unwrap()
+        .run_ref
+        .unwrap();
+    let content_public_ref: Uuid = sqlx::query_scalar(
+        "SELECT content_public_ref FROM linggan_comment_study_work \
+         WHERE run_ref=$1 ORDER BY content_public_ref LIMIT 1",
+    )
+    .bind(run_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_comment_study_batch( \
+           batch_ref,run_ref,content_public_ref,state,input_manifest,input_hash, \
+           lease_token,leased_by,lease_expires_at \
+         ) SELECT gen_random_uuid(),$1,$2,'leased','{}'::jsonb,repeat('a',64), \
+                  gen_random_uuid(),gen_random_uuid(),scope_001_now()-interval '1 second' \
+           FROM generate_series(1,33)",
+    )
+    .bind(run_ref)
+    .bind(content_public_ref)
+    .execute(db.pool())
+    .await
+    .unwrap();
+
+    assert_eq!(recover_expired_study_batch_leases(&db).await.unwrap(), 32);
+    let remaining: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_comment_study_batch \
+         WHERE run_ref=$1 AND state='leased' AND lease_expires_at<=scope_001_now()",
+    )
+    .bind(run_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        remaining, 1,
+        "one expired batch must carry over to the next tick"
+    );
+
+    assert_eq!(recover_expired_study_batch_leases(&db).await.unwrap(), 1);
+    let (expired_leased, failed): (i64, i64) = sqlx::query_as(
+        "SELECT count(*) FILTER (WHERE state='leased'),count(*) FILTER (WHERE state='failed') \
+         FROM linggan_comment_study_batch WHERE run_ref=$1",
+    )
+    .bind(run_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!((expired_leased, failed), (0, 33));
 }
 
 #[tokio::test]
@@ -2446,6 +2660,113 @@ async fn problem_stage_retry_limit_uses_the_configured_two_attempts() {
 }
 
 #[tokio::test]
+#[ignore = "isolated synthetic PostgreSQL and local Pi child; no provider call"]
+async fn scheduler_stops_after_a_dispatched_resolution_response_is_no_longer_admissible() {
+    let (db, command, _) = setup("late_resolution_uses_tick_budget", 2).await;
+    let run_ref = start_study_run(&db, command, TrustedStudyOrigin::Manual)
+        .await
+        .unwrap()
+        .run_ref
+        .unwrap();
+    let (_, _, resolution_ref, pair_ref) = seed_problem_stage_fixtures(&db, run_ref).await;
+    let adapter = PiAdapter::configured_with_test_command(
+        std::path::PathBuf::from("/bin/sh"),
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/support/comment_study_late_response_adapter.sh"),
+    );
+    let worker_database = db.clone();
+    let worker = tokio::spawn(async move {
+        run_model_work_once(&worker_database, &SyntheticModelSecrets, &adapter).await
+    });
+
+    let mut dispatched_invocation: Option<Uuid> = None;
+    for _ in 0..300 {
+        dispatched_invocation = sqlx::query_scalar(
+            "SELECT invocation_ref FROM linggan_comment_study_model_request \
+             WHERE run_ref=$1 AND resolution_ref=$2 AND dispatch_started_at IS NOT NULL \
+             ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(run_ref)
+        .bind(resolution_ref)
+        .fetch_optional(db.pool())
+        .await
+        .unwrap();
+        if dispatched_invocation.is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    let dispatched_invocation = dispatched_invocation.expect("resolution crossed dispatch fence");
+    // The request ledger deadline is immutable in production. In this disposable proof only,
+    // temporarily bypass that trigger to model wall-clock expiry while the synthetic child waits.
+    sqlx::raw_sql(
+        "ALTER TABLE linggan_comment_study_model_request DISABLE TRIGGER cs_request_immutable",
+    )
+    .execute(db.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE linggan_comment_study_model_request \
+         SET deadline_at=scope_001_now()-interval '1 second' WHERE invocation_ref=$1",
+    )
+    .bind(dispatched_invocation)
+    .execute(db.pool())
+    .await
+    .unwrap();
+    sqlx::raw_sql(
+        "ALTER TABLE linggan_comment_study_model_request ENABLE TRIGGER cs_request_immutable",
+    )
+    .execute(db.pool())
+    .await
+    .unwrap();
+
+    assert!(worker.await.unwrap().unwrap());
+    let invocation_checkpoint: (String, Option<i64>, Option<i64>, Option<i64>, bool, bool) =
+        sqlx::query_as(
+            "SELECT invocation.state,invocation.input_tokens,invocation.output_tokens, \
+                    invocation.charged_tokens,invocation.result->>'callStarted'='true', \
+                    invocation.result->>'validationPending'='true' \
+             FROM linggan_model_invocation invocation WHERE invocation.invocation_ref=$1",
+        )
+        .bind(dispatched_invocation)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        invocation_checkpoint,
+        ("running".into(), Some(1), Some(1), Some(2), true, true),
+        "the synthetic provider response must be checkpointed while its invocation stays open after the active-request fence rejects admission"
+    );
+    let stage_request_counts: (i64, i64) = sqlx::query_as(
+        "SELECT count(*) FILTER (WHERE stage='resolution'), \
+                count(*) FILTER (WHERE stage='pair') \
+         FROM linggan_comment_study_model_request WHERE run_ref=$1",
+    )
+    .bind(run_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        stage_request_counts,
+        (1, 0),
+        "a provider response rejected by the active-request fence still consumes the tick's call allowance"
+    );
+    let (resolution_state, pair_state): (String, String) = sqlx::query_as(
+        "SELECT resolution.state,pair.state \
+         FROM linggan_comment_study_resolution resolution \
+         CROSS JOIN linggan_comment_study_problem_pair pair \
+         WHERE resolution.resolution_ref=$1 AND pair.pair_ref=$2",
+    )
+    .bind(resolution_ref)
+    .bind(pair_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(resolution_state, "pending");
+    assert_eq!(pair_state, "pending");
+}
+
+#[tokio::test]
 #[ignore = "isolated synthetic PostgreSQL; no shared database or model"]
 async fn expired_pair_recovery_waits_for_the_0109_terminal_state_constraint() {
     let (db, command, _) = setup("problem_stage_partial_0109", 2).await;
@@ -3050,21 +3371,19 @@ async fn pre_ledger_invocation_usage_blocks_p3_reservation() {
             .unwrap(),
         "the first worker tick closes the stale pre-ledger invocation"
     );
-    let (legacy_state, legacy_charge, legacy_run_ref, subject_state, subject_pointer): (
-        String,
-        i64,
-        Option<String>,
-        String,
-        Option<Uuid>,
-    ) = sqlx::query_as(
-        "SELECT invocation.state,invocation.charged_tokens,invocation.result->>'legacyRunRef', \
-                pair.state,pair.model_invocation_ref \
-         FROM linggan_model_invocation invocation \
-         JOIN linggan_comment_study_problem_pair pair \
-           ON pair.model_invocation_ref=invocation.invocation_ref \
-         WHERE invocation.invocation_ref=$1",
+    let (legacy_state, legacy_charge, legacy_run_ref): (String, i64, Option<String>) =
+        sqlx::query_as(
+            "SELECT invocation.state,invocation.charged_tokens,invocation.result->>'legacyRunRef' \
+         FROM linggan_model_invocation invocation WHERE invocation.invocation_ref=$1",
+        )
+        .bind(legacy_invocation)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    let (subject_state, subject_pointer): (String, Option<Uuid>) = sqlx::query_as(
+        "SELECT state,model_invocation_ref FROM linggan_comment_study_problem_pair WHERE pair_ref=$1",
     )
-    .bind(legacy_invocation)
+    .bind(pair_ref)
     .fetch_one(db.pool())
     .await
     .unwrap();
@@ -3073,25 +3392,19 @@ async fn pre_ledger_invocation_usage_blocks_p3_reservation() {
         (
             legacy_state.as_str(),
             legacy_charge,
-            legacy_run_ref.as_deref(),
-            subject_state.as_str(),
-            subject_pointer
+            legacy_run_ref.as_deref()
         ),
-        (
-            "failed",
-            900,
-            Some(expected_legacy_run_ref.as_str()),
-            "rejected",
-            Some(legacy_invocation)
-        )
+        ("failed", 900, Some(expected_legacy_run_ref.as_str()))
     );
-    assert!(
-        linggan_intelligence::comment_study_problem_store::
-            resume_pre_v2_pair_contract_rejection_for_enabled_v2_run(&db)
-            .await
-            .unwrap(),
-        "the v2 scheduler reopens the legacy rejected pair for a versioned retry"
+    assert_eq!(
+        (subject_state.as_str(), subject_pointer),
+        ("failed", None),
+        "the same worker tick resumes the subject, then safely stops it when legacy spend exhausts the Run budget"
     );
+    assert!(!linggan_intelligence::comment_study_problem_store::
+        resume_pre_v2_pair_contract_rejection_for_enabled_v2_run(&db)
+        .await
+        .unwrap());
     let resumed_pointer: Option<Uuid> = sqlx::query_scalar(
         "SELECT model_invocation_ref FROM linggan_comment_study_problem_pair WHERE pair_ref=$1",
     )

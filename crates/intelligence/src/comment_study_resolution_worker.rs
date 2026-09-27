@@ -36,6 +36,14 @@ pub enum ResolutionWorkerError {
     Manifest,
 }
 
+/// Reports whether this invocation crossed the provider boundary, independently of whether its
+/// response was still eligible for admission when it returned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResolutionExecution {
+    Idle,
+    ProviderAttempt { accepted: bool },
+}
+
 struct ClaimedResolution {
     resolution_ref: Uuid,
     signal_ref: Uuid,
@@ -55,11 +63,27 @@ pub async fn run_one_problem_resolution(
     secrets: &dyn ModelSecretStore,
     adapter: &PiAdapter,
 ) -> Result<bool, ResolutionWorkerError> {
+    run_one_problem_resolution_with_outcome(database, secrets, adapter)
+        .await
+        .map(|outcome| {
+            matches!(
+                outcome,
+                ResolutionExecution::ProviderAttempt { accepted: true }
+            )
+        })
+}
+
+/// Detailed counterpart used by the scheduler to enforce its per-tick provider-call limit.
+pub async fn run_one_problem_resolution_with_outcome(
+    database: &Database,
+    secrets: &dyn ModelSecretStore,
+    adapter: &PiAdapter,
+) -> Result<ResolutionExecution, ResolutionWorkerError> {
     if !crate::comment_study_request_ledger::pair_failure_state_supported(database).await? {
-        return Ok(false);
+        return Ok(ResolutionExecution::Idle);
     }
     let Some(claim) = claim_resolution(database).await? else {
-        return Ok(false);
+        return Ok(ResolutionExecution::Idle);
     };
     let mut request =
         match connection_request(database, secrets, claim.connection_version_ref).await {
@@ -139,9 +163,11 @@ pub async fn run_one_problem_resolution(
                     )
                     .await;
                     finish_invocation(database, claim.invocation_ref, Some(&response), true, None, &json!({"contract":PROBLEM_RESOLUTION_CONTRACT,"resolutionRef":claim.resolution_ref,"accepted":true})).await?;
-                    Ok(true)
+                    Ok(ResolutionExecution::ProviderAttempt { accepted: true })
                 }
-                Err(ProblemStoreError::ModelRequestUnavailable) => Ok(false),
+                Err(ProblemStoreError::ModelRequestUnavailable) => {
+                    Ok(ResolutionExecution::ProviderAttempt { accepted: false })
+                }
                 Err(ProblemStoreError::Contract(_)) => {
                     finish_failure(
                         database,

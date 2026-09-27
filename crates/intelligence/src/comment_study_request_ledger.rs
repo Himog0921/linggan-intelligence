@@ -11,6 +11,8 @@ use sqlx::{Postgres, Row, Transaction};
 use thiserror::Error;
 use uuid::Uuid;
 
+const MAX_PROBLEM_STAGE_RECOVERIES_PER_TICK: i64 = 32;
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ProblemStageSubject {
     Resolution(Uuid),
@@ -635,29 +637,40 @@ pub(crate) async fn recover_expired_problem_stage_requests(
         return Ok(0);
     }
     let pair_failure_state_supported = pair_failure_state_supported(database).await?;
+    // Recover a bounded page per stage. Keep the older no-ledger receipts inside the same
+    // per-stage allowance below, so legacy cleanup cannot double the intended tick budget.
     let recoverable: Vec<(Uuid, Uuid, String, Option<Uuid>, Option<Uuid>)> = sqlx::query_as(
-        "SELECT request.run_ref,request.invocation_ref,request.stage, \
-                request.resolution_ref,request.pair_ref \
-         FROM linggan_comment_study_model_request request \
-         JOIN linggan_model_invocation invocation USING(invocation_ref) \
-         WHERE request.stage IN ('resolution','pair') \
-           AND ($1 OR request.stage<>'pair') AND ( \
-           (invocation.state='running' AND request.deadline_at<=scope_001_now()) OR \
-           (invocation.state='failed' AND ( \
-             (request.stage='resolution' AND EXISTS(SELECT 1 \
-               FROM linggan_comment_study_resolution resolution \
-               WHERE resolution.resolution_ref=request.resolution_ref \
-                 AND resolution.state='pending' AND resolution.model_invocation_ref=request.invocation_ref)) OR \
-             (request.stage='pair' AND EXISTS(SELECT 1 \
-               FROM linggan_comment_study_problem_pair pair \
-               WHERE pair.pair_ref=request.pair_ref \
-                 AND pair.state='pending' AND pair.model_invocation_ref=request.invocation_ref))))) \
-         ORDER BY request.deadline_at,request.invocation_ref",
+        "WITH eligible AS ( \
+           SELECT request.run_ref,request.invocation_ref,request.stage, \
+                  request.resolution_ref,request.pair_ref,request.deadline_at \
+           FROM linggan_comment_study_model_request request \
+           JOIN linggan_model_invocation invocation USING(invocation_ref) \
+           WHERE request.stage IN ('resolution','pair') \
+             AND ($1 OR request.stage<>'pair') AND ( \
+             (invocation.state='running' AND request.deadline_at<=scope_001_now()) OR \
+             (invocation.state='failed' AND ( \
+               (request.stage='resolution' AND EXISTS(SELECT 1 \
+                 FROM linggan_comment_study_resolution resolution \
+                 WHERE resolution.resolution_ref=request.resolution_ref \
+                   AND resolution.state='pending' AND resolution.model_invocation_ref=request.invocation_ref)) OR \
+               (request.stage='pair' AND EXISTS(SELECT 1 \
+                 FROM linggan_comment_study_problem_pair pair \
+                 WHERE pair.pair_ref=request.pair_ref \
+                   AND pair.state='pending' AND pair.model_invocation_ref=request.invocation_ref))))) \
+         ), ranked AS ( \
+           SELECT eligible.*,row_number() OVER (PARTITION BY stage ORDER BY deadline_at,invocation_ref) AS stage_ordinal \
+           FROM eligible \
+         ) \
+         SELECT run_ref,invocation_ref,stage,resolution_ref,pair_ref \
+         FROM ranked WHERE stage_ordinal<=$2 ORDER BY deadline_at,invocation_ref",
     )
     .bind(pair_failure_state_supported)
+    .bind(MAX_PROBLEM_STAGE_RECOVERIES_PER_TICK)
     .fetch_all(database.pool())
     .await?;
     let mut recovered = 0_u64;
+    let mut recovered_resolution = 0_u64;
+    let mut recovered_pair = 0_u64;
     for (run_ref, invocation_ref, stage, resolution_ref, pair_ref) in recoverable {
         let mut transaction = database.pool().begin().await?;
         let locked_run: Option<Uuid> = sqlx::query_scalar(
@@ -737,6 +750,11 @@ pub(crate) async fn recover_expired_problem_stage_requests(
             close_run_if_settled(&mut transaction, run_ref).await?;
             transaction.commit().await?;
             recovered = recovered.saturating_add(1);
+            match stage.as_str() {
+                "resolution" => recovered_resolution = recovered_resolution.saturating_add(1),
+                "pair" => recovered_pair = recovered_pair.saturating_add(1),
+                _ => {}
+            }
             continue;
         }
         if invocation_state != "running" || !invocation.get::<bool, _>("expired") {
@@ -788,10 +806,21 @@ pub(crate) async fn recover_expired_problem_stage_requests(
         close_run_if_settled(&mut transaction, run_ref).await?;
         transaction.commit().await?;
         recovered = recovered.saturating_add(1);
+        match stage.as_str() {
+            "resolution" => recovered_resolution = recovered_resolution.saturating_add(1),
+            "pair" => recovered_pair = recovered_pair.saturating_add(1),
+            _ => {}
+        }
     }
     recovered = recovered.saturating_add(
-        recover_pre_ledger_v2_problem_stage_invocations(database, pair_failure_state_supported)
-            .await?,
+        recover_pre_ledger_v2_problem_stage_invocations(
+            database,
+            pair_failure_state_supported,
+            (MAX_PROBLEM_STAGE_RECOVERIES_PER_TICK as u64).saturating_sub(recovered_resolution)
+                as i64,
+            (MAX_PROBLEM_STAGE_RECOVERIES_PER_TICK as u64).saturating_sub(recovered_pair) as i64,
+        )
+        .await?,
     );
     Ok(recovered)
 }
@@ -830,38 +859,50 @@ pub(crate) async fn pair_failure_state_supported(
 async fn recover_pre_ledger_v2_problem_stage_invocations(
     database: &linggan_storage_postgres::Database,
     pair_failure_state_supported: bool,
+    resolution_remaining: i64,
+    pair_remaining: i64,
 ) -> Result<u64, sqlx::Error> {
     let orphans: Vec<(Uuid, String, Uuid, Uuid)> = sqlx::query_as(
-        "SELECT target.run_ref,'resolution'::text,resolution.resolution_ref,invocation.invocation_ref \
-         FROM linggan_comment_study_resolution resolution \
-         JOIN linggan_comment_study_signal signal USING(signal_ref) \
-         JOIN linggan_comment_study_target target USING(target_ref) \
-         JOIN linggan_comment_study_run run ON run.run_ref=target.run_ref \
-         JOIN linggan_model_invocation invocation ON invocation.invocation_ref=resolution.model_invocation_ref \
-         LEFT JOIN linggan_model_config config ON config.config_ref=invocation.config_ref \
-         WHERE run.selection_manifest->>'contract'='comment-study.run-selection.v2' \
-           AND (invocation.state='failed' OR (invocation.state='running' AND \
-             invocation.created_at+make_interval(secs=>COALESCE(config.timeout_seconds,30)+30)<=scope_001_now())) \
-           AND COALESCE(invocation.result->>'legacyRequestLedgerMissing','false')<>'true' \
-           AND NOT EXISTS(SELECT 1 FROM linggan_comment_study_model_request request \
-             WHERE request.invocation_ref=invocation.invocation_ref) \
-         UNION ALL \
-         SELECT first_target.run_ref,'pair'::text,pair.pair_ref,invocation.invocation_ref \
-         FROM linggan_comment_study_problem_pair pair \
-         JOIN linggan_comment_study_signal first_signal ON first_signal.signal_ref=pair.first_signal_ref \
-         JOIN linggan_comment_study_target first_target USING(target_ref) \
-         JOIN linggan_comment_study_run run ON run.run_ref=first_target.run_ref \
-         JOIN linggan_model_invocation invocation ON invocation.invocation_ref=pair.model_invocation_ref \
-         LEFT JOIN linggan_model_config config ON config.config_ref=invocation.config_ref \
-         WHERE $1 AND run.selection_manifest->>'contract'='comment-study.run-selection.v2' \
-           AND (invocation.state='failed' OR (invocation.state='running' AND \
-             invocation.created_at+make_interval(secs=>COALESCE(config.timeout_seconds,30)+30)<=scope_001_now())) \
-           AND COALESCE(invocation.result->>'legacyRequestLedgerMissing','false')<>'true' \
-           AND NOT EXISTS(SELECT 1 FROM linggan_comment_study_model_request request \
-             WHERE request.invocation_ref=invocation.invocation_ref) \
-         ORDER BY 1,2,3,4",
+        "WITH candidates AS ( \
+           SELECT target.run_ref,'resolution'::text AS stage,resolution.resolution_ref AS subject_ref, \
+                  invocation.invocation_ref \
+           FROM linggan_comment_study_resolution resolution \
+           JOIN linggan_comment_study_signal signal USING(signal_ref) \
+           JOIN linggan_comment_study_target target USING(target_ref) \
+           JOIN linggan_comment_study_run run ON run.run_ref=target.run_ref \
+           JOIN linggan_model_invocation invocation ON invocation.invocation_ref=resolution.model_invocation_ref \
+           LEFT JOIN linggan_model_config config ON config.config_ref=invocation.config_ref \
+           WHERE run.selection_manifest->>'contract'='comment-study.run-selection.v2' \
+             AND (invocation.state='failed' OR (invocation.state='running' AND \
+               invocation.created_at+make_interval(secs=>COALESCE(config.timeout_seconds,30)+30)<=scope_001_now())) \
+             AND COALESCE(invocation.result->>'legacyRequestLedgerMissing','false')<>'true' \
+             AND NOT EXISTS(SELECT 1 FROM linggan_comment_study_model_request request \
+               WHERE request.invocation_ref=invocation.invocation_ref) \
+           UNION ALL \
+           SELECT first_target.run_ref,'pair'::text,pair.pair_ref,invocation.invocation_ref \
+           FROM linggan_comment_study_problem_pair pair \
+           JOIN linggan_comment_study_signal first_signal ON first_signal.signal_ref=pair.first_signal_ref \
+           JOIN linggan_comment_study_target first_target USING(target_ref) \
+           JOIN linggan_comment_study_run run ON run.run_ref=first_target.run_ref \
+           JOIN linggan_model_invocation invocation ON invocation.invocation_ref=pair.model_invocation_ref \
+           LEFT JOIN linggan_model_config config ON config.config_ref=invocation.config_ref \
+           WHERE $1 AND run.selection_manifest->>'contract'='comment-study.run-selection.v2' \
+             AND (invocation.state='failed' OR (invocation.state='running' AND \
+               invocation.created_at+make_interval(secs=>COALESCE(config.timeout_seconds,30)+30)<=scope_001_now())) \
+             AND COALESCE(invocation.result->>'legacyRequestLedgerMissing','false')<>'true' \
+             AND NOT EXISTS(SELECT 1 FROM linggan_comment_study_model_request request \
+               WHERE request.invocation_ref=invocation.invocation_ref) \
+         ), ranked AS ( \
+           SELECT candidates.*,row_number() OVER (PARTITION BY stage ORDER BY run_ref,subject_ref,invocation_ref) AS stage_ordinal \
+           FROM candidates \
+         ) \
+         SELECT run_ref,stage,subject_ref,invocation_ref FROM ranked \
+         WHERE stage_ordinal<=CASE stage WHEN 'resolution' THEN $2 ELSE $3 END \
+         ORDER BY run_ref,stage,subject_ref,invocation_ref",
     )
     .bind(pair_failure_state_supported)
+    .bind(resolution_remaining)
+    .bind(pair_remaining)
     .fetch_all(database.pool())
     .await?;
     let mut recovered = 0_u64;

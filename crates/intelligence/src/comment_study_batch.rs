@@ -235,6 +235,18 @@ pub async fn next_run_needing_batch(
     database: &Database,
     exclude_run_refs: &[Uuid],
 ) -> Result<Option<Uuid>, sqlx::Error> {
+    next_run_needing_batch_after(database, exclude_run_refs, None).await
+}
+
+/// Finds the next batchable Run in a process-local circular order. Advancing the cursor after
+/// every examined Run prevents a bounded scan of unbatchable legacy Runs from hiding later Runs
+/// on every worker tick. The cursor is scheduling state only; losing it on restart does not alter
+/// any Run or target state.
+pub async fn next_run_needing_batch_after(
+    database: &Database,
+    exclude_run_refs: &[Uuid],
+    after_run_ref: Option<Uuid>,
+) -> Result<Option<Uuid>, sqlx::Error> {
     sqlx::query_scalar(
         "SELECT run.run_ref FROM linggan_comment_study_run run \
          WHERE run.state IN ('prepared','queued','running') \
@@ -245,9 +257,12 @@ pub async fn next_run_needing_batch(
            AND NOT (run.run_ref = ANY($1)) \
            AND EXISTS(SELECT 1 FROM linggan_comment_study_target target \
                       WHERE target.run_ref=run.run_ref AND target.state='queued') \
-         ORDER BY run.created_at,run.run_ref LIMIT 1",
+         ORDER BY CASE WHEN $2::uuid IS NULL THEN run.created_at END NULLS LAST, \
+                  CASE WHEN $2::uuid IS NULL THEN 0 \
+                       WHEN run.run_ref>$2 THEN 0 ELSE 1 END,run.run_ref LIMIT 1",
     )
     .bind(exclude_run_refs)
+    .bind(after_run_ref)
     .fetch_optional(database.pool())
     .await
 }

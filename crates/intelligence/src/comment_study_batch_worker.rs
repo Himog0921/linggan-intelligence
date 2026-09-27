@@ -14,6 +14,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 pub const DEFAULT_BATCH_LEASE_SECONDS: i64 = 60;
+const MAX_EXPIRED_BATCHES_PER_TICK: i64 = 32;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -41,6 +42,19 @@ pub async fn claim_next_study_batch(
     worker_ref: Uuid,
     lease_seconds: i64,
 ) -> Result<Option<ClaimedStudyBatch>, StudyBatchWorkerError> {
+    let mut last_run_ref = None;
+    claim_next_study_batch_after(database, worker_ref, lease_seconds, &mut last_run_ref).await
+}
+
+/// Claims one prepared batch using a process-local circular Run cursor and `FOR UPDATE SKIP
+/// LOCKED`. This keeps a Run with many prepared batches from monopolizing a worker after restart
+/// or after older queued work becomes eligible. Cursor loss is harmless: it affects order only.
+pub async fn claim_next_study_batch_after(
+    database: &Database,
+    worker_ref: Uuid,
+    lease_seconds: i64,
+    last_run_ref: &mut Option<Uuid>,
+) -> Result<Option<ClaimedStudyBatch>, StudyBatchWorkerError> {
     if !(1..=300).contains(&lease_seconds) {
         return Err(StudyBatchWorkerError::InvalidLeaseDuration);
     }
@@ -53,16 +67,22 @@ pub async fn claim_next_study_batch(
                 OR (run.selection_manifest->>'contract'='comment-study.run-selection.v2' \
                     AND to_jsonb(run)->>'dispatch_state'='enabled' \
                     AND to_jsonb(run)->>'dispatch_reason' IS NULL)) \
-         ORDER BY (SELECT min(batch.created_at) FROM linggan_comment_study_batch batch \
-                   WHERE batch.run_ref=run.run_ref AND batch.state='prepared'),run.run_ref \
+         ORDER BY CASE WHEN $1::uuid IS NULL THEN \
+                           (SELECT min(batch.created_at) FROM linggan_comment_study_batch batch \
+                            WHERE batch.run_ref=run.run_ref AND batch.state='prepared') \
+                       END NULLS LAST, \
+                  CASE WHEN $1::uuid IS NULL THEN 0 \
+                       WHEN run.run_ref>$1 THEN 0 ELSE 1 END,run.run_ref \
          LIMIT 1 FOR UPDATE OF run SKIP LOCKED",
     )
+    .bind(*last_run_ref)
     .fetch_optional(&mut *transaction)
     .await?;
     let Some(run_ref) = run_ref else {
         transaction.commit().await?;
         return Ok(None);
     };
+    *last_run_ref = Some(run_ref);
     let row = sqlx::query(
         "SELECT batch_ref,run_ref,input_manifest FROM linggan_comment_study_batch \
          WHERE run_ref=$1 AND state='prepared' ORDER BY created_at,batch_ref \
@@ -122,12 +142,15 @@ pub async fn recover_expired_study_batch_leases(
             .fetch_one(&mut *transaction)
             .await?;
     let run_refs: Vec<Uuid> = sqlx::query_scalar(
-        "SELECT DISTINCT run_ref FROM linggan_comment_study_batch \
-         WHERE state='leased' AND lease_expires_at<=scope_001_now() ORDER BY run_ref",
+        "SELECT run_ref FROM linggan_comment_study_batch \
+         WHERE state='leased' AND lease_expires_at<=scope_001_now() \
+         GROUP BY run_ref ORDER BY min(lease_expires_at),run_ref LIMIT $1",
     )
+    .bind(MAX_EXPIRED_BATCHES_PER_TICK)
     .fetch_all(&mut *transaction)
     .await?;
     let mut recovered = 0_u64;
+    let mut remaining = MAX_EXPIRED_BATCHES_PER_TICK;
     for run_ref in run_refs {
         let locked_run: Option<Uuid> = sqlx::query_scalar(
             "SELECT run_ref FROM linggan_comment_study_run WHERE run_ref=$1 FOR UPDATE SKIP LOCKED",
@@ -141,9 +164,10 @@ pub async fn recover_expired_study_batch_leases(
         let batches = sqlx::query(
             "SELECT batch_ref,run_ref,model_invocation_ref FROM linggan_comment_study_batch \
              WHERE run_ref=$1 AND state='leased' AND lease_expires_at<=scope_001_now() \
-             ORDER BY batch_ref FOR UPDATE SKIP LOCKED",
+             ORDER BY lease_expires_at,batch_ref LIMIT $2 FOR UPDATE SKIP LOCKED",
         )
         .bind(run_ref)
+        .bind(remaining)
         .fetch_all(&mut *transaction)
         .await?;
         for batch in &batches {
@@ -220,6 +244,10 @@ pub async fn recover_expired_study_batch_leases(
             // close here too, not only on the acceptance path.
             close_run_if_settled(&mut transaction, run_ref).await?;
             recovered += 1;
+        }
+        remaining -= i64::try_from(batches.len()).unwrap_or(remaining);
+        if remaining <= 0 {
+            break;
         }
     }
     transaction.commit().await?;

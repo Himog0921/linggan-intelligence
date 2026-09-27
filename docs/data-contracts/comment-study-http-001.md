@@ -249,11 +249,11 @@ pause/stop 不撤销已经发出的远端请求，不承诺停止上游计费。
 
 ## 9. 小型 Worker 顺序，不建新调度器
 
-每次 tick 固定先回收全部三阶段的到期请求（每类最多 32），再清洗至多 128 条；随后循环尝试 semantic/resolution/pair 三个 lane，从上次成功 lane 的下一个开始。每个 tick 至多一次外部模型请求；至多 16 条本地 embedding。游标只为进程内公平性，重启归零不影响数据正确性。
+每次 tick 先有界回收 resolution 与 pair 到期请求（每类最多 32）及 semantic batch lease（最多 32），再清洗至多 128 条；本地 embedding 至多 16 条。回收有积压时仍可推进 lane，但一个 tick 至多进入一次 provider 调用。游标只为进程内公平性，重启归零不改变持久业务状态。
 
-resolution lane：先完整缓存命中，再召回／补齐条件，再外发；pair lane 只处理合格且未完成的 pair。semantic lane 有已准备 batch 时优先执行，而不是不断准备新 batch；本 tick 可先准备一批再执行，不用“准备成功”返回阻断所有执行。
+semantic/resolution/pair 三个 lane 按进程内轮转游标尝试，游标在每次尝试前前移，因此空闲 lane 和已知未外发错误不会固定压在队列前端。semantic 先领取已准备 batch；没有可领取批次时，才尝试准备一批。准备与 claim 共用循环 Run 游标，按稳定 Run UUID 轮转；每 tick 最多检查 5 个暂不可打包的 Run，下一轮从最后检查位置之后继续。resolution lane 先完整缓存命中，再召回／补齐候选，最后才外发；pair lane 只处理合格且未完成的 pair。
 
-单 lane Model/Adapter/契约错误写安全原因并继续试其他 lane；数据库连接整体失败则结束该 tick。embedding 不可用降级为 retrieval_incomplete，但不阻塞 semantic。重任务 OCR/ASR 在运行时仍沿用已有本地资源让路机制。
+可确认未越过 provider dispatch fence 的配置、预算或合同错误写安全原因后继续试其他 lane；已经外发或结果不确定的错误保守占用该 tick 唯一调用额度并结束本 tick，避免一次 tick 隐式多发。数据库错误结束该 tick。embedding 不可用只记录安全错误并继续 model lanes，不阻塞 semantic。重任务 OCR/ASR 在运行时仍沿用已有本地资源让路机制。
 
 保持现有 10 秒 tick 初值和 drain 接口；这些是工程起点，可通过实测优化。不得新增每 Tab 轮询一次 Worker 或启动多进程模型竞争来提高表面吞吐。
 
