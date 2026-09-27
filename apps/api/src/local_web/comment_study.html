@@ -87,27 +87,41 @@
       <h3 id="setup-title" class="v7-sr-only">研究策略</h3>
       <form id="policy-form" class="policy-form">
         <label>模型配置<select id="model-config" required disabled><option>正在读取…</option></select></label>
+        <label>本次使用的方法版本<select id="study-policy" required disabled><option value="">先保存一版研究方法</option></select></label>
+        <label>方法名称<input id="method-name" type="text" maxlength="100" value="评论研究方法" required></label>
         <label>本次最多评论数<input id="comment-budget" type="number" min="1" max="3000" value="100" required></label>
         <label>单作品语境字符上限<input id="context-character-budget" type="number" min="1" max="20000" value="6000" required></label>
-        <button id="save-policy" type="submit" disabled>保存研究策略</button>
+        <label class="study-instruction">语义提取补充说明<textarea id="stage-semantic" maxlength="32000" rows="3"></textarea></label>
+        <label class="study-instruction">归并判断补充说明<textarea id="stage-resolution" maxlength="32000" rows="3"></textarea></label>
+        <label class="study-instruction">问题配对补充说明<textarea id="stage-pair" maxlength="32000" rows="3"></textarea></label>
+        <div class="study-policy-actions"><button id="save-policy" type="submit" disabled>保存新方法版本</button><button id="activate-policy" type="button" disabled>设为默认方法</button></div>
       </form>
       <p id="policy-status" class="study-dialog-note" role="status"></p>
       <p id="source-preview" class="study-dialog-note" role="status">正在核对评论资格…</p>
     </section>
     <section class="study-workspace" aria-labelledby="work-picker-title">
       <header class="study-workspace-header">
-        <div><p class="study-label">研究输入</p><h3 id="work-picker-title">选择要研究的 ADHD 作品</h3></div>
+        <div><p class="study-label">研究输入</p><h3 id="work-picker-title">选择要研究的作品</h3></div>
         <div class="study-workspace-tools">
-          <label class="study-filter">搜索全部作品<input id="work-filter" type="search" placeholder="按作品标题搜索" autocomplete="off"></label>
+          <label class="study-filter">搜索作品目录<input id="work-filter" type="search" placeholder="按作品标题搜索" autocomplete="off"></label>
+          <label class="study-reference-toggle"><input id="include-reference-works" type="checkbox" disabled>显式纳入 reference 作品</label>
           <span id="selected-count" class="selection-count" role="status">已选择 0 篇</span>
         </div>
       </header>
+      <p id="reference-source-preview" class="study-table-status" role="status" hidden></p>
+      <div class="study-run-settings">
+        <label>启动模式<select id="study-mode"><option value="new_only">只研究尚未研究的评论</option><option value="input_changed">只重研输入已变化的评论</option><option value="retry_failed">重试失败评论</option><option value="reanalyse">重新分析所选评论</option></select></label>
+        <label>本次模型词元上限<input id="token-budget" type="number" min="1024" max="10000000" value="100000"></label>
+        <label id="study-reason-label" hidden>本次重研原因<input id="study-reason" type="text" maxlength="500" placeholder="说明这次重研的原因"></label>
+        <button id="preview-run" type="button" disabled>预览本次选择</button>
+      </div>
+      <p id="selection-preview" class="study-table-status" role="status"></p>
       <p id="work-filter-status" class="study-table-status" role="status">正在读取可研究作品…</p>
       <div class="study-table-wrap">
         <table class="study-table" aria-labelledby="work-picker-title" aria-describedby="work-filter-status">
-          <caption class="v7-sr-only">可选择进入本次评论研究的 ADHD 作品</caption>
-          <thead><tr><th scope="col"><input id="select-visible-works" type="checkbox" aria-label="选择当前筛选结果中的作品"></th><th scope="col">作品</th><th scope="col">可研究评论</th></tr></thead>
-          <tbody id="works" aria-live="polite"><tr><td colspan="3">正在读取作品…</td></tr></tbody>
+          <caption class="v7-sr-only">可选择进入本次评论研究的作品及其领域角色</caption>
+          <thead><tr><th scope="col"><input id="select-visible-works" type="checkbox" aria-label="选择当前筛选结果中的作品"></th><th scope="col">作品</th><th scope="col">领域角色</th><th scope="col">可研究评论</th></tr></thead>
+          <tbody id="works" aria-live="polite"><tr><td colspan="4">正在读取作品…</td></tr></tbody>
         </table>
       </div>
       <nav class="study-pagination" aria-label="作品目录翻页">

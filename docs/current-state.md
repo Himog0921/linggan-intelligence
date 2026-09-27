@@ -1,10 +1,24 @@
 # 当前状态与事项队列
 
 > 状态: 权威当前
-> 最后核对: 2026-09-22
+> 最后核对: 2026-09-27
 > 适用范围: 当前阶段、事项顺序、阻塞与下一步
 > 事实来源: 本机实际检查、已确认项目边界和完成计划
 > 冲突时以谁为准: 真实运行结果、ACCEPTED ADR 与用户最新确认
+
+### GREENFIELD Comment Research / Draft PR #338（P2 已对齐主线；整包未完成）
+
+PR #338 本身仍为 Open/Draft，远端 head `07a46a531aa9aa309dbcd2f71de0b713dbe54397` 尚落后于当前 `main@2587fba486434acf2c94a8e7f64ce245b87a38f6`。此前 #338 覆盖的若干前序能力已通过独立 PR（包括 #323–#327、#329、#335、#336）进入 main；这不代表 #338 整体已合并。当前 PR 专属 worktree 正在收口：已合入至 `30fe306` 的主线基线，但还需整合后续到 `2587fba` 的 6 个提交；Comment Study 新增 migration 已排到 0105–0107，方法/预算/preview/start 已接入当前候选 Axum router 与页面。隔离证明脚本已通过 37 个 Intelligence 与 6 个 Axum API 子项；这不是最新 main 集成后的最终验证、T01–T54 全验收或真实模型质量。只读核验本机 `:3000` health 为 200，部署身份 `2587fba4`、构建于 2026-09-27 05:04 UTC、migration head 0104，且与当前 main 匹配；PR 的 0105–0107 未应用、P2 UI 未发布。备份恢复、Mog 页面验收以及 P0 专项历史/在途任务保护证明仍未完成。PR 分支推送、exact-head CI 与逐阶段人工/环境证明以本包验收账本和本月记录为准。
+
+### DOMAIN-UNIFICATION-001（#343 已合并并刷新本机运行；待业务验收）
+
+Mog 已确认正式 Domain 在基础采集、详情、评论、媒体与研究能力上平权，Domain 只定义研究上下文；Collection 需要新增“领域管理”。当前唯一推进入口是 [DOMAIN-UNIFICATION-001](plans/active/domain-unification-001.md)：它冻结 Domain–Target 的 `primary/reference` 配置、相容多用途共享一次 WorkOrder、统一 canonical Material/Comment/Media、Domain-scoped Corpus 与 Comment Study、pause 真语义，以及开发期旧 `cross_industry` 路径的直接清理。
+
+本计划明确不为旧开发数据建设双写、长期 fallback、逐行审批、down migration 或专用保全系统。WP0–WP5 已实施并经完整隔离 PostgreSQL 套件与双轴独立复审；#343 修复了旧 Evidence 兼容读取跨 Domain、任务冻结用途不可见、暂停拒绝原因折叠和 CSS token/窄屏问题，合并为 `main@46e10837`。WP4 领域管理在隔离 PostgreSQL 与浏览器完成配置写入、pause/resume、多 Domain role、冲突反馈和键盘焦点验收；部署后本机浏览器确认页面可读、任务列表与详情均显示冻结领域用途，390/1085/1440 视口均无 DOM 横向溢出。
+
+此前的当前 schema 隔离副本升级已证明 0102→0103→0104 对旧数据可行（当时源库 1,352 Content）。随后对共享 `linggan_intelligence_dev` 制作迁移前有效快照，并在受控停止 API、巡检 worker、媒体 worker 后应用 0103/0104：升级前实际为 1,362 Content、24 条旧 cross sample/detail、245 条旧评论；升级后 1,362 Content 均有 `legacy_domain_migration` usage、缺失 0，旧 cross 表与 canonical 单值 Domain 列在 `public` 下均为 0。24 个孤儿 session 与 72 条旧 preparation 退役，212 条 grant attempt 保留、其中 24 条解除旧 session 引用。快照只用于可恢复性，不建立长期兼容层；旧考研样本/评论没有 canonical Package 血缘，因此当前考研正式领域为 0 篇/0 评论，没有伪造重投影或访问平台重采。
+
+Issue #130 保持开启并标记 `ready-for-human`，等待 Mog 对实际业务页面和数据后果验收。PR #343 已合并；共享迁移、本机 `runtime-main@46e10837` 切换与基本 API/浏览器 smoke 已执行。PR #338 在独立 worktree 已基于当前 main 对齐，migration 重排与 Comment Study domain usage 读取适配已完成候选实现；它仍未合并 main。真实平台重采、插件重载、非空媒体与跨 Domain Comment Study 实际数据验收均未发生；不从健康页推断完整业务交付。隔离和本机浏览器分层回执见 `docs/design/acceptance/domain-unification-001-acceptance.md` 与本月进度。
 
 ### OCR-CONTENT-LAYERING-001 / Issue #296（候选源码；未进入共享运行）
 
@@ -28,6 +42,8 @@
 
 
 ### COMMENT-STUDY-REBUILD-001 / Issue #295（已发布；作者声音排除修复候选中）
+
+**后续范围修订**：本节后文 ADHD 专属 Comment Study 范围记录的是当时的部署状态。Mog 于 2026-09-23 通过 [DEC-0008](decisions/0008-peer-domains-and-unified-material-pipeline.md) 将其修订为显式 Domain；本 worktree 的 Comment Study Domain/role 隔离目前只有候选源码与隔离 PostgreSQL 证明，尚未合并、发布或浏览器验收。
 
 Mog 于 2026-09-16 明确决定不迁移任何旧评论研究派生结果，并要求不保留旧 V1/V2/V3 代码路径、合同或兼容层。当前唯一权威是 [DEC-0006](decisions/0006-comment-research-clean-rebuild.md) 和 [COMMENT-STUDY-REBUILD-001](plans/active/comment-research-rebuild-001.md)：领域 ADHD 是组织范围，用户选择笔记，评论是研究目标与唯一 Signal 原声证据，标题／正文／OCR／ASR 和确知父评论只作为可追溯语境。开发期本机 reset 仅删除评论研究派生层，保留原始 Evidence、资格事实与媒体 disposition；随后评论研究已合并并刷新到本机 3000，Mog 已开始首次真实手动验收。真实 provider 端到端成功、P3 Recall@K 与业务结论仍分别 `NOT VERIFIED`。
 
@@ -356,7 +372,7 @@ Material Projection 已接纳搜索/主页发现面带回的真实标题、作�
 
 ### MATERIAL-PROJECTION-001 / Issue #86（Draft stacked 实现）
 
-基于 `MEDIA-RECON-001`，新的 accepted Package 已有作品级类型化材料投影：发现、详情、评论、回复、作者、媒体槽位、媒体字节状态及 OCR/ASR 生命周期共用一个 `items` 读取 envelope。默认 `/api/local/work-resources` 返回共享作品资源投影；旧 `cards` 仅由显式 `/api/local/evidence-library/legacy` 兼容入口提供，不再默认混读。逐字段未知不补值；评论/回复保留稳定身份、根/父关系与各自 Coverage；作者资料按观察版本追加；媒体保留 Producer 顺序与未知展示顺序、多候选来源、generation、Live Photo partial、Blob/本地 Materialization、处理事件/派生和处置状态。普通 API 不返回远程候选 URI、storage key 或临时上传状态，`batch_checkpoint` 不生成材料或整体完成声明。插件到页面的现行映射见 [`architecture/material-projection-data-map.md`](architecture/material-projection-data-map.md)。
+基于 `MEDIA-RECON-001`，新的 accepted Package 已有作品级类型化材料投影：发现、详情、评论、回复、作者、媒体槽位、媒体字节状态及 OCR/ASR 生命周期共用一个 `items` 读取 envelope。`/api/local/work-resources` 返回共享作品资源投影；DOMAIN-UNIFICATION-001 的待合并分支已移除旧 `cards` HTTP 兼容入口，避免它跨 Domain 读取。逐字段未知不补值；评论/回复保留稳定身份、根/父关系与各自 Coverage；作者资料按观察版本追加；媒体保留 Producer 顺序与未知展示顺序、多候选来源、generation、Live Photo partial、Blob/本地 Materialization、处理事件/派生和处置状态。普通 API 不返回远程候选 URI、storage key 或临时上传状态，`batch_checkpoint` 不生成材料或整体完成声明。插件到页面的映射见 [`architecture/material-projection-data-map.md`](architecture/material-projection-data-map.md)；运行版本是否已切换仍以 PID 与迁移台账为准。
 
 独立审查后的隔离 PostgreSQL 16 proof 已覆盖 Task/Package/Record/Coverage 的平台、能力与目标绑定，逐 Record 隔离且健康 sibling 不连坐，评论/回复数据库关系约束，媒体 `observationRef` 历史冲突与同包重复隔离，首次同槽位并发 generation，作品级查询，以及固定 `asOf` 的 50 项 keyset cursor。读取会先把 lane/media-kind 存在性下推，再在单次最多扫描 200 个作品的预算内补页；预算触发时返回 `scanLimited + cursor`，后续从最后扫描键继续，不重复扫描已排除对象。这个预算只关闭了无界事务风险，没有关闭 enrichment 的有界 N+1：当前最坏仍可达到每个候选 7 次、单响应最多 1,404 次 enrichment/base 查询，批量化债务由 Issue #89 单独承接。
 
@@ -416,7 +432,7 @@ REAL-CANARY #52 的聚合结果已确认：本地库存在已接纳的当前可�
 - GOV-002 已确认使用私有仓库 GitHub Issues、默认五类 triage 角色和单一领域上下文适配；工程技能读取现有 `docs/context/domain-language.md`、`docs/product/domain-invariants.md` 与 `docs/decisions/`，不建立第二套 `CONTEXT.md` 或 `docs/adr/`。
 - DISC-001 已确认必须覆盖完整产品，而非只讨论情报核心：语料库、主题词表、主题地图、市场洞察、选题库和外部 Agent CLI 均已进入设计范围。
 - DISC-001 已确认 Linggan Intelligence 的稳定核心定义是面向垂直领域的持续情报研究系统；语料、主题地图、市场洞察、内容增长和 Agent 调用是共同内核的应用出口，不能因其中一个应用深入而重新定义项目内核。
-- DISC-001 已确认首个领域边界：当前一级 Domain 是 ADHD；ADHD 数学、家庭干预等是 Topic；专题研究和采集计划均发生在 ADHD 内。权威定义见 [`context/domain-language.md`](context/domain-language.md)。
+- DISC-001 在 2026-08 确认了首个领域边界：当时一级 Domain 为 ADHD，ADHD 数学、家庭干预等为 Topic。该单 Domain 范围已由 2026-09-23 的 [DEC-0008](decisions/0008-peer-domains-and-unified-material-pipeline.md) 修订；当前 Domain 与 Topic 定义见 [`context/domain-language.md`](context/domain-language.md)。
 - DISC-001 已确认第一阶段首要用户是产品负责人本人及其小团队，围绕 ADHD 持续进行市场研究、内容判断和选题决策；外部客户与多租户产品能力不进入首期。
 - DISC-001 已确认两种产品发动方式：持续观察是默认日常主循环，主动研究由人的问题或经人确认的候选变化触发；两者使用同一资产底座。目标全量必须由实际 Coverage 证明。
 - DISC-001 已确认五类长期积累视角：世界事实、语料与表达、领域知识、市场与情报认知、行动与学习。它们用于盘点长期价值，不等于五种平级真相、五张表或五个应用模块；Outcome 只校准未来，不改写过去事实或伪造因果。

@@ -3,12 +3,14 @@
 //! 这三件事的共同点是**跑起来全都自洽**：工单发得出去、回执正常、材料落库、覆盖度完整，
 //! 只有采回来的东西按了错误的口径。没有断言就等于没修。
 
+#[path = "support/domain_fixture.rs"]
+mod domain;
 #[path = "support/material_fixture.rs"]
 mod fixture;
-#[path = "support/cross_industry_fixture.rs"]
-mod cross_industry;
 
-use cross_industry::{EXTERNAL_DOMAIN, discovery_card, search_coverage, submit_external_package};
+use domain::{
+    discovery_card, search_coverage, submit_package_for_target, submit_peer_domain_package,
+};
 use fixture::proof_database;
 use linggan_evidence::{
     MonitorCommandActor, MonitorCommandKind, MonitorCommandOutcomeKind, MonitorRuleCommand,
@@ -22,7 +24,7 @@ async fn seed_keyword(database: &Database, identity_key: &str) -> Uuid {
     // 多规则只属于关键词；不能为保住槽位测试而跳过新产品门槛。这里造一轮真正接纳的
     // deep_archive 搜索面，并把唯一已发现样本的详情事实补齐，得到「可以进入巡查」的词。
     let external_id = format!("slot-proof-{}", Uuid::new_v4());
-    let package_ref = submit_external_package(
+    let _package_ref = submit_peer_domain_package(
         database,
         identity_key,
         "deep_archive",
@@ -45,26 +47,26 @@ async fn seed_keyword(database: &Database, identity_key: &str) -> Uuid {
     .fetch_one(database.pool())
     .await
     .expect("the archived keyword target exists");
-    let sample_ref: Uuid = sqlx::query_scalar(
-        "SELECT sample_ref FROM cross_industry_sample WHERE target_ref=$1",
+    submit_package_for_target(
+        database,
+        target_ref,
+        "detail-slot-proof",
+        "deep_archive",
+        serde_json::json!({"contentExternalId":external_id}),
+        200,
+        "content_detail",
+        serde_json::json!({
+            "target":{"basis":"known_set","contentExternalId":external_id},
+            "layers":[fixture::coverage_layer("content_detail",1)]
+        }),
+        serde_json::Value::Null,
+        vec![serde_json::json!({
+            "kind":"content_detail",
+            "sourceObject":{"platform":"xhs","type":"content","externalId":external_id},
+            "payload":{"title":"已取得详情","bodyText":"规则槽位建档详情"}
+        })],
     )
-    .bind(target_ref)
-    .fetch_one(database.pool())
-    .await
-    .expect("the archived keyword sample exists");
-    sqlx::query(
-        "INSERT INTO cross_industry_sample_detail \
-             (detail_ref,sample_ref,domain_ref,package_ref,record_ordinal,body_text,body_state, \
-              published_at_source_text,published_at_source_text_state,observed_at) \
-         VALUES ($1,$2,$3::uuid,$4,0,'已取得详情','KNOWN',NULL,'UNKNOWN',scope_001_now())",
-    )
-    .bind(Uuid::new_v4())
-    .bind(sample_ref)
-    .bind(EXTERNAL_DOMAIN)
-    .bind(package_ref)
-    .execute(database.pool())
-    .await
-    .expect("the archive sample has a real detail fact");
+    .await;
     target_ref
 }
 

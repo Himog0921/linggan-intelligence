@@ -302,7 +302,7 @@ async fn queue_one_due_rule(
         "patrol",
         "定时巡检",
         "agent",
-        &[],
+        None,
         &[],
         None,
         Some(rule_revision_ref),
@@ -317,7 +317,12 @@ async fn queue_one_due_rule(
                 request.work_order_ref,
                 request.work_order_ref.is_some(),
             ),
-            AdmissionOutcome::Merge { .. } => ("deferred", "in_flight_work_covers_it", None, true),
+            AdmissionOutcome::Merge { .. } => (
+                "deferred",
+                "in_flight_work_covers_it",
+                request.work_order_ref,
+                true,
+            ),
             _ => (
                 "rejected",
                 scheduler_decision_reason(request.reason_code),
@@ -332,12 +337,7 @@ async fn queue_one_due_rule(
         // 归属领域」「授权没签」「授权额度不够 200 篇」「schema 没装」「目标不存在」全部
         // 情况。界面上只看到「目标不可请求」——而真实原因是目标没有领域，排查多花了两轮。
         // 一个压平的原因码比没有原因码更坏：它看起来是个答案。
-        Err(error) => (
-            "rejected",
-            acquisition_failure_code(&error),
-            None,
-            false,
-        ),
+        Err(error) => ("rejected", acquisition_failure_code(&error), None, false),
     };
 
     if let Some(work_order_ref) = work_order_ref {

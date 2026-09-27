@@ -34,12 +34,11 @@ pub async fn read_comment_observation_series(
         return Err(CommentStudyReadError::SchemaUnavailable);
     }
 
-    let domain_exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM observation_domain WHERE domain_ref=$1)",
-    )
-    .bind(domain_ref)
-    .fetch_one(database.pool())
-    .await?;
+    let domain_exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM observation_domain WHERE domain_ref=$1)")
+            .bind(domain_ref)
+            .fetch_one(database.pool())
+            .await?;
     if !domain_exists {
         return Err(CommentStudyReadError::InvalidQuery);
     }
@@ -59,7 +58,10 @@ pub async fn read_comment_observation_series(
            FROM linggan_material_comment comment \
            JOIN linggan_runtime_capture_package package USING(package_ref) \
            JOIN linggan_material_content content ON content.public_ref=comment.content_public_ref \
-           JOIN params ON params.domain_ref=content.domain_ref \
+           JOIN params ON EXISTS (SELECT 1 FROM linggan_material_domain_usage usage \
+                                  WHERE usage.content_public_ref=content.public_ref \
+                                    AND usage.domain_ref=params.domain_ref \
+                                    AND usage.role='primary') \
            GROUP BY comment.content_public_ref,comment.comment_external_id \
          ), new_comments AS ( \
            SELECT (first_observed_at AT TIME ZONE $3)::date AS day, \
@@ -119,7 +121,10 @@ pub async fn read_comment_observation_series(
            FROM linggan_material_lane_observation lane \
            JOIN linggan_runtime_capture_package package USING(package_ref) \
            JOIN linggan_material_content content ON content.public_ref=lane.content_public_ref \
-           JOIN params ON params.domain_ref=content.domain_ref \
+           JOIN params ON EXISTS (SELECT 1 FROM linggan_material_domain_usage usage \
+                                  WHERE usage.content_public_ref=content.public_ref \
+                                    AND usage.domain_ref=params.domain_ref \
+                                    AND usage.role='primary') \
            WHERE lane.lane IN ('comments','replies') \
              AND package.accepted_at >= (params.end_date-(params.window_days-1))::timestamp AT TIME ZONE $3 \
              AND package.accepted_at < (params.end_date+1)::timestamp AT TIME ZONE $3 \

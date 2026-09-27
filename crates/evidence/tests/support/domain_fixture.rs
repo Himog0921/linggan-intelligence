@@ -1,7 +1,7 @@
-//! 跨行业采集链路的共用夹具。
+//! Domain 采集链路的共用夹具。
 //!
-//! 领域判定靠一整条链（包 → 任务 → 租约 → 工单 → 观察目标），少任何一环，包都会被当作
-//! 本领域材料写进证据侧——那恰恰是这套分流要防的事。所以造一次真实的链路比 mock 便宜：
+//! Domain 用途靠一整条链（包 → 任务 → 租约 → WorkOrder → Domain relation），少任何一环，
+//! 已接纳材料就没有可追溯的用途。所以造一次真实的链路比 mock 便宜：
 //! 抄近路的夹具正是此前让「建档请求必然撞 CHECK」这个 100% 必现的缺陷躲过 14 条绿测试
 //! 的原因。
 //!
@@ -15,23 +15,22 @@ use linggan_evidence::{
 use linggan_storage_postgres::Database;
 use uuid::Uuid;
 
-/// 迁移预置的外部领域「考研自习」。
-pub const EXTERNAL_DOMAIN: &str = "00000000-0000-4000-8000-000000000002";
+/// 迁移预置的 peer Domain「考研自习」。
+pub const PEER_DOMAIN: &str = "00000000-0000-4000-8000-000000000002";
 
 /// 迁移预置的本领域（ADHD）。本领域只有一个，由 `0041` 预置。
-pub const HOME_DOMAIN: &str = "00000000-0000-4000-8000-000000000001";
+pub const ADHD_DOMAIN: &str = "00000000-0000-4000-8000-000000000001";
 
 /// 夹具默认的单子篇数上限（授权给的额度）。
 ///
 /// 它和规则口径的「取赞前 N」是两个数：额度 200 配口径 20 时两者取小仍是 20，看不出区别；
-/// 要证明记录读的是哪一个，就得有一条额度更小的链路，见 `submit_external_package_with_quota`。
+/// 要证明记录读的是哪一个，就得有一条额度更小的链路，见 `submit_peer_domain_package_with_quota`。
 pub const FIXTURE_QUOTA: i32 = 200;
 
-/// 造出一条完整的「外部领域关键词目标 → 工单 → 租约 → 任务 → 包」链路并提交。
+/// 造出一条完整的「peer Domain 关键词目标 → 工单 → 租约 → 任务 → 包」链路并提交。
 ///
-/// 领域判定靠的正是这条链（`resolve_package_domain` 从包一路 JOIN 回观察目标），
-/// 所以少任何一环，包都会被当作本领域材料写进证据侧——那恰恰是这套分流要防的事。
-pub async fn submit_external_package(
+/// Domain 使用从 WorkOrder 冻结的用途推导，所以少任何一环，材料就没有可追溯的用途。
+pub async fn submit_peer_domain_package(
     database: &Database,
     identity_key: &str,
     lane: &str,
@@ -43,9 +42,9 @@ pub async fn submit_external_package(
     checkpoint: serde_json::Value,
     records: Vec<serde_json::Value>,
 ) -> Uuid {
-    submit_package_in_domain(
+    submit_package_for_domain(
         database,
-        EXTERNAL_DOMAIN,
+        PEER_DOMAIN,
         identity_key,
         lane,
         task_target,
@@ -62,7 +61,7 @@ pub async fn submit_external_package(
 ///
 /// 「规则口径要 20」与「这一单能拿回 8」是两个数。上限不小于口径时，从哪个数推都得出同一个
 /// 答案，缺陷因此藏得住；只有上限更小的这一条链路才问得清记录里记的到底是哪一个。
-pub async fn submit_external_package_with_quota(
+pub async fn submit_peer_domain_package_with_quota(
     database: &Database,
     identity_key: &str,
     lane: &str,
@@ -73,9 +72,9 @@ pub async fn submit_external_package_with_quota(
     checkpoint: serde_json::Value,
     records: Vec<serde_json::Value>,
 ) -> Uuid {
-    submit_package_in_domain(
+    submit_package_for_domain(
         database,
-        EXTERNAL_DOMAIN,
+        PEER_DOMAIN,
         identity_key,
         lane,
         task_target,
@@ -88,9 +87,9 @@ pub async fn submit_external_package_with_quota(
     .await
 }
 
-/// 同一条链路，领域可选。本领域与外部领域走的是同一套采集，只在落库那一刻分流。
+/// 同一条链路，Domain 可选。每个 Domain 都走同一套采集和材料接纳。
 #[allow(clippy::too_many_arguments)]
-pub async fn submit_package_in_domain(
+pub async fn submit_package_for_domain(
     database: &Database,
     domain_ref: &str,
     identity_key: &str,
@@ -129,15 +128,23 @@ async fn create_target(
 ) {
     sqlx::query(
         "INSERT INTO collection_observation_target \
-             (target_ref,platform,target_kind,identity_key,display_name,source,domain_ref) \
-         VALUES ($1,'xhs','keyword',$2,$2,'manual',$3::uuid)",
+             (target_ref,platform,target_kind,identity_key,display_name,source) \
+         VALUES ($1,'xhs','keyword',$2,$2,'manual')",
     )
     .bind(target_ref)
     .bind(identity_key)
-    .bind(domain_ref)
     .execute(database.pool())
     .await
-    .expect("the domain-bound target is stored");
+    .expect("the target is stored");
+    sqlx::query(
+        "INSERT INTO observation_domain_target(domain_ref,target_ref,role) \
+         VALUES ($1::uuid,$2,'primary')",
+    )
+    .bind(domain_ref)
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .expect("the target has an explicit Domain relation");
 }
 
 /// 同一条链路，但挂在**已有的观察目标**上。
@@ -159,8 +166,11 @@ pub async fn submit_package_for_target(
 ) -> Uuid {
     let request_ref = Uuid::new_v4();
     sqlx::query(
-        "INSERT INTO collection_acquisition_request (request_ref,target_ref,lane,purpose,requested_by) \
-         VALUES ($1,$2,$3,'cross industry sampling proof','person')",
+        "INSERT INTO collection_acquisition_request \
+             (request_ref,target_ref,domain_ref,observation_role,lane,purpose,requested_by) \
+         SELECT $1,$2,relation.domain_ref,relation.role,$3,'domain sampling proof','person' \
+           FROM observation_domain_target relation \
+          WHERE relation.target_ref=$2 AND relation.role='primary'",
     )
     .bind(request_ref)
     .bind(target_ref)
@@ -175,7 +185,7 @@ pub async fn submit_package_for_target(
         "INSERT INTO collection_acquisition_authorization \
              (authorization_ref,platform,target_kind,lane,purpose,granted_by,expires_at, \
               allowed_task_templates,allowed_dispatch_lanes,max_work_units) \
-         VALUES ($1,'xhs','keyword',$2,'cross industry sampling proof','person', \
+         VALUES ($1,'xhs','keyword',$2,'domain sampling proof','person', \
                  scope_001_now()+interval '1 day', \
                  CASE WHEN $2='deep_archive' THEN ARRAY['keyword_archive','material_deepening'] \
                       ELSE ARRAY['keyword_patrol'] END, \
@@ -193,7 +203,7 @@ pub async fn submit_package_for_target(
     sqlx::query(
         "INSERT INTO collection_admission_decision \
              (decision_ref,request_ref,outcome,reason_code,authorization_ref,target_ref) \
-         VALUES ($1,$2,'admitted','cross_industry_sampling_proof',$3,$4)",
+         VALUES ($1,$2,'admitted','domain_sampling_proof',$3,$4)",
     )
     .bind(decision_ref)
     .bind(request_ref)
@@ -205,8 +215,9 @@ pub async fn submit_package_for_target(
 
     let work_order_ref = Uuid::new_v4();
     sqlx::query(
-        "INSERT INTO collection_work_order (work_order_ref,decision_ref,target_ref,lane,max_works,stop_conditions) \
-         VALUES ($1,$2,$3,$4,$5,'[\"maximum_quota\"]'::jsonb)",
+        "INSERT INTO collection_work_order \
+             (work_order_ref,decision_ref,target_ref,lane,max_works,stop_conditions,dispatch_lane,queue_state,scheduled_for) \
+         VALUES ($1,$2,$3,$4,$5,'[\"maximum_quota\"]'::jsonb,'batch','queued',scope_001_now())",
     )
     .bind(work_order_ref)
     .bind(decision_ref)
@@ -216,10 +227,21 @@ pub async fn submit_package_for_target(
     .execute(database.pool())
     .await
     .expect("work order fixture is stored");
+    sqlx::query(
+        "INSERT INTO collection_work_order_domain_usage \
+             (work_order_ref,request_ref,domain_ref,role,basis_kind) \
+             SELECT $1,request.request_ref,request.domain_ref,request.observation_role,'admitted' \
+           FROM collection_acquisition_request request WHERE request.request_ref=$2",
+    )
+    .bind(work_order_ref)
+    .bind(request_ref)
+    .execute(database.pool())
+    .await
+    .expect("the fixture WorkOrder has a frozen Domain purpose");
 
     // 工位名在同一个证明库里必须唯一：一条用例会连着提交两轮（列表面 + 详情面）。
     let station_ref =
-        register_station(database, &format!("跨行业采样证明工位 {identity_key}"), 200)
+        register_station(database, &format!("Domain采样证明工位 {identity_key}"), 200)
             .await
             .expect("station fixture is stored");
     let lease_ref = Uuid::new_v4();
@@ -325,7 +347,7 @@ pub async fn submit_package_for_target(
     let outcome = submit_producer_package(database, &submission).await;
     assert!(
         matches!(outcome, Ok(RuntimeSubmissionOutcome::Acknowledged { .. })),
-        "cross-industry submission must be acknowledged: {outcome:?}"
+        "domain submission must be acknowledged: {outcome:?}"
     );
     package_ref
 }

@@ -11,10 +11,10 @@ use uuid::Uuid;
 
 #[path = "comment_study_catalog/cursor.rs"]
 pub(crate) mod cursor;
-#[path = "comment_study_catalog/read.rs"]
-mod read;
 #[path = "comment_study_catalog/detail.rs"]
 mod detail;
+#[path = "comment_study_catalog/read.rs"]
+mod read;
 #[path = "comment_study_catalog/works.rs"]
 mod works;
 
@@ -30,8 +30,10 @@ pub use detail::{
 pub use works::{WorkCatalogQuery, read_work_catalog};
 
 pub(super) fn facts_sql() -> String {
-    include_str!("comment_study_catalog/facts.sql")
-        .replace("/*SOURCE_ELIGIBILITY_CASE*/", &crate::comment_study_source::gate::sql_case())
+    include_str!("comment_study_catalog/facts.sql").replace(
+        "/*SOURCE_ELIGIBILITY_CASE*/",
+        &crate::comment_study_source::gate::sql_case(),
+    )
 }
 
 const MAX_REFRESH_LIMIT: i64 = 200;
@@ -93,9 +95,7 @@ pub(super) fn sha256_hex(bytes: &[u8]) -> String {
 fn projection(raw_prefix: &str, raw_sha256: String) -> Result<CacheProjection, StudyCatalogError> {
     // SQL bounds transfer to 16001 scalars while hashing the complete immutable raw UTF-8.
     // For short inputs the complete text is available, so verify SQL/Rust hash agreement too.
-    if raw_prefix.chars().count() <= 16000
-        && sha256_hex(raw_prefix.as_bytes()) != raw_sha256
-    {
+    if raw_prefix.chars().count() <= 16000 && sha256_hex(raw_prefix.as_bytes()) != raw_sha256 {
         return Err(StudyCatalogError::CacheConflict);
     }
     let cleaned = clean(raw_prefix);
@@ -126,7 +126,6 @@ pub async fn refresh_clean_cache(
         .execute(&mut *transaction)
         .await?;
     let rows = sqlx::query(include_str!("comment_study_catalog/refresh_candidates.sql"))
-        .bind(domain_ref)
         .bind(CLEANER_VERSION)
         .bind(limit)
         .fetch_all(&mut *transaction)
@@ -146,7 +145,6 @@ pub async fn refresh_clean_cache(
             .bind(&item.research_text)
             .bind(&item.clean_state)
             .bind(json!(item.clean_reasons))
-            .bind(domain_ref)
             .execute(&mut *transaction)
             .await?;
         if written.rows_affected() == 1 {
@@ -184,14 +182,21 @@ pub async fn refresh_clean_cache(
 /// feature has not been installed, not permission to bootstrap or reset a live database.
 pub async fn maintain_comment_catalog(
     database: &Database,
-) -> Result<Option<CleanCacheRefresh>,StudyCatalogError> {
-    let installed: bool=sqlx::query_scalar(
-        "SELECT to_regclass('linggan_comment_study_clean_cache') IS NOT NULL",
-    ).fetch_one(database.pool()).await?;
-    if !installed { return Ok(None); }
-    let domain=Uuid::parse_str(crate::comment_study_source::ADHD_DOMAIN_REF)
-        .map_err(|_|StudyCatalogError::UnsupportedDomain)?;
-    refresh_clean_cache(database,domain,128).await.map(Some)
+) -> Result<Option<CleanCacheRefresh>, StudyCatalogError> {
+    let installed: bool =
+        sqlx::query_scalar("SELECT to_regclass('linggan_comment_study_clean_cache') IS NOT NULL")
+            .fetch_one(database.pool())
+            .await?;
+    if !installed {
+        return Ok(None);
+    }
+    let domain: Option<Uuid> = sqlx::query_scalar(
+        "SELECT domain_ref FROM observation_domain WHERE status='active' ORDER BY created_at,domain_ref LIMIT 1",
+    ).fetch_optional(database.pool()).await?;
+    let Some(domain) = domain else {
+        return Ok(None);
+    };
+    refresh_clean_cache(database, domain, 128).await.map(Some)
 }
 
 /// A bind parameter for `ILIKE $n ESCAPE E'\\\\'`, not a SQL expression or FTS query.
@@ -225,7 +230,14 @@ mod tests {
 
     #[test]
     fn projection_reuses_the_existing_cleaner_without_persisting_offsets() {
-        for raw in ["😀😀", "@小明 ", "写作业很困难😀", "我也是", "", "Ａ&amp;Ｂ"] {
+        for raw in [
+            "😀😀",
+            "@小明 ",
+            "写作业很困难😀",
+            "我也是",
+            "",
+            "Ａ&amp;Ｂ",
+        ] {
             let expected = clean(raw);
             let actual = from_raw(raw);
             assert_eq!(actual.research_text, expected.text);
@@ -246,14 +258,23 @@ mod tests {
         assert_eq!(actual.clean_state, "anomaly");
         assert!(actual.research_text.is_empty());
         assert_eq!(actual.clean_reasons, vec!["source_too_long"]);
-        assert!(matches!(projection("证据", "0".repeat(64)), Err(StudyCatalogError::CacheConflict)));
+        assert!(matches!(
+            projection("证据", "0".repeat(64)),
+            Err(StudyCatalogError::CacheConflict)
+        ));
     }
 
     #[test]
     fn literal_search_escapes_wildcards_and_keeps_short_chinese_queries() {
         assert_eq!(literal_substring_pattern("").unwrap(), None);
-        assert_eq!(literal_substring_pattern("药").unwrap().as_deref(), Some("%药%"));
-        assert_eq!(literal_substring_pattern(r"50%_\").unwrap().as_deref(), Some(r"%50\%\_\\%"));
+        assert_eq!(
+            literal_substring_pattern("药").unwrap().as_deref(),
+            Some("%药%")
+        );
+        assert_eq!(
+            literal_substring_pattern(r"50%_\").unwrap().as_deref(),
+            Some(r"%50\%\_\\%")
+        );
         assert!(literal_substring_pattern(&"中".repeat(200)).is_ok());
         assert!(literal_substring_pattern(&"中".repeat(201)).is_err());
     }

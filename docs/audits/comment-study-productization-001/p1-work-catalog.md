@@ -29,7 +29,7 @@ Mog 已连续授权按手册开发、追加 PR #338，并要求明确剩余工�
 
 原始目录回执完成时，作品选择器尚未切换新接口。PR #338 后续提交已把弹窗接到 `/works`，并实现用户评论、筛选、详情和历史读取；本回合在合并后的浏览器对这些路径作了合成数据验证。P1的全部语境资格、冻结选择与边界状态仍须按手册完成整体验收。
 
-不新增表、依赖、Worker、执行通道或 migration；不改手册字段。`0103_comment_study_productization_schema.sql` 仍是候选，未注册或执行到共享库。无共享库、真实模型或计划副作用。
+不新增表、依赖、Worker、执行通道或 migration；不改手册字段。`0105_comment_study_productization_schema.sql` 仍是候选，未注册或执行到共享库。无共享库、真实模型或计划副作用。
 
 ## 4. 测试与真实验证边界
 
@@ -54,6 +54,6 @@ Mog 已连续授权按手册开发、追加 PR #338，并要求明确剩余工�
 
 ## 最新主线整合与浏览器验证 · 2026-09-24
 
-分支已合并 `origin/main@a42315eb`。主线占用 `0102_cross_industry_creator_directory`，因此本包迁移候选及五个隔离 PG proof 均改用 `0103_comment_study_productization_schema.sql`；该迁移仍未注册进 `local-runtime.sh`，没有修改共享数据库。LIDS 的负 8 像素间距改为现有 spacing token。
+分支已合并 `origin/main@a42315eb`。主线占用 `0102_cross_industry_creator_directory`，因此本包迁移候选及五个隔离 PG proof 均改用 `0105_comment_study_productization_schema.sql`；该迁移仍未注册进 `local-runtime.sh`，没有修改共享数据库。LIDS 的负 8 像素间距改为现有 spacing token。
 
 上述编译、单元、22 个 PostgreSQL proof 与浏览器操作都针对代码提交 `d5b2d0cd`。浏览器用全新合成数据库，没有接触已存在容器、共享数据库、模型或用户页面 `:3000`。隔离 API/数据库留在本机供 Mog 继续查看；不是部署结果。

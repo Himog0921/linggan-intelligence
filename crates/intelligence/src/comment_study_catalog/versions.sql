@@ -6,7 +6,10 @@ WITH scoped AS MATERIALIZED (
     FROM linggan_material_comment source
     JOIN linggan_material_content work ON work.public_ref = source.content_public_ref
     JOIN linggan_runtime_capture_package package ON package.package_ref = source.package_ref
-    WHERE work.domain_ref = $1 AND source.content_public_ref = $2 AND source.comment_external_id = $3
+    WHERE EXISTS (
+        SELECT 1 FROM linggan_material_domain_usage usage
+        WHERE usage.content_public_ref = work.public_ref AND usage.domain_ref = $1
+    ) AND source.content_public_ref = $2 AND source.comment_external_id = $3
       AND package.accepted_at <= $4::timestamptz AND source.created_at <= $4::timestamptz
 ), page AS MATERIALIZED (
     SELECT * FROM scoped

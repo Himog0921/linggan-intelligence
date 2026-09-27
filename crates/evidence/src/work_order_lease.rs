@@ -59,6 +59,7 @@ pub async fn lease_schema_is_ready(database: &Database) -> Result<bool, sqlx::Er
     sqlx::query_scalar::<_, bool>(
         "SELECT to_regclass('collection_work_order_lease') IS NOT NULL \
                 AND to_regclass('collection_work_order_lease_task') IS NOT NULL \
+                AND to_regclass('collection_work_order_domain_usage') IS NOT NULL \
                 AND EXISTS (SELECT 1 FROM information_schema.columns \
                             WHERE table_name='collection_work_order' \
                               AND column_name='retry_not_before_at')",
@@ -177,6 +178,24 @@ pub(crate) async fn issue_work_order_lease_in_transaction(
         return Err(LeaseError::InvalidLeaseDuration);
     }
     let subject = load_subject(transaction, work_order_ref).await?;
+    let domain_statuses: Vec<(Uuid, String)> = sqlx::query_as(
+        "SELECT domain.domain_ref,domain.status \
+           FROM collection_work_order_domain_usage usage \
+           JOIN observation_domain domain USING(domain_ref) \
+          WHERE usage.work_order_ref=$1 \
+          ORDER BY domain.domain_ref \
+          FOR SHARE OF domain",
+    )
+    .bind(work_order_ref)
+    .fetch_all(&mut **transaction)
+    .await?;
+    let domain_usage_active =
+        !domain_statuses.is_empty() && domain_statuses.iter().all(|(_, status)| status == "active");
+    if !domain_usage_active {
+        return Err(LeaseError::ControlBlocked {
+            reason_code: "domain_paused_or_unscoped".to_owned(),
+        });
+    }
     reject_if_already_leased(transaction, work_order_ref).await?;
     reject_if_authorization_lapsed(transaction, &subject).await?;
     reject_if_rule_changed(&subject)?;
@@ -682,9 +701,28 @@ async fn load_subject(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     work_order_ref: Uuid,
 ) -> Result<LeaseSubject, LeaseError> {
-    // Lock the same target row used by admission.  A pre-existing Work Order may be leased by a
-    // scheduler while a person requests reobservation; without this shared serialization point,
-    // each path could make its live-scope decision before seeing the other's lease.
+    // Request/merge and first claim must take locks in the same order: Target, then Work Order.
+    // The dispatch selector uses NO KEY UPDATE so a merge's WorkOrderUsage foreign key can be
+    // inserted while the selector waits on Target; once Target is locked, this claim upgrades the
+    // Work Order lock and observes the committed usage set before checking Domain pause.
+    let target_ref: Option<Uuid> =
+        sqlx::query_scalar("SELECT target_ref FROM collection_work_order WHERE work_order_ref=$1")
+            .bind(work_order_ref)
+            .fetch_optional(&mut **transaction)
+            .await?;
+    let Some(target_ref) = target_ref else {
+        return Err(LeaseError::UnknownWorkOrder);
+    };
+    let target_locked: Option<Uuid> = sqlx::query_scalar(
+        "SELECT target_ref FROM collection_observation_target WHERE target_ref=$1 FOR UPDATE",
+    )
+    .bind(target_ref)
+    .fetch_optional(&mut **transaction)
+    .await?;
+    if target_locked.is_none() {
+        return Err(LeaseError::UnknownWorkOrder);
+    }
+
     let row: Option<SubjectRow> = sqlx::query_as(
         "SELECT w.target_ref, w.station_ref, w.lane, w.max_works, \
                 t.platform, t.target_kind, t.identity_key, d.authorization_ref, \
@@ -705,7 +743,7 @@ async fn load_subject(
            ON owning_rule.rule_ref=frozen.rule_ref AND owning_rule.retired_at IS NULL \
          LEFT JOIN collection_monitor_rule_revision current_revision \
            ON current_revision.rule_revision_ref=owning_rule.active_revision_ref \
-         WHERE w.work_order_ref = $1 FOR UPDATE OF w, t",
+         WHERE w.work_order_ref = $1 FOR UPDATE OF w",
     )
     .bind(work_order_ref)
     .fetch_optional(&mut **transaction)
@@ -1059,16 +1097,6 @@ async fn content_external_ids_for_object_refs_in_transaction(
             .await?,
         );
     }
-    if !objects.cross_industry.is_empty() {
-        contents.extend(
-            sqlx::query_scalar::<_, String>(
-                "SELECT content_external_id FROM cross_industry_sample WHERE sample_ref=ANY($1)",
-            )
-            .bind(&objects.cross_industry)
-            .fetch_all(&mut **transaction)
-            .await?,
-        );
-    }
     Ok(contents.into_iter().collect())
 }
 
@@ -1303,7 +1331,7 @@ async fn load_material_targets(
     .bind(work_order_ref)
     .fetch_all(&mut **transaction)
     .await?;
-    let mut targets: Vec<MaterialTarget> = rows
+    let targets: Vec<MaterialTarget> = rows
         .into_iter()
         .map(|row| MaterialTarget {
             content_external_id: row.0,
@@ -1312,52 +1340,7 @@ async fn load_material_targets(
             acquire_media: row.3,
         })
         .collect();
-    targets.extend(load_cross_industry_targets(transaction, work_order_ref).await?);
     Ok(targets)
-}
-
-/// 这张工单要补详情的跨行业样本。
-///
-/// 与证据侧那张作用域表分开存（`0074`），到这里合成同一串逐篇任务：对插件而言，「按已知
-/// 作品去取它的详情」是同一件事，材料最终落哪张表由落库那一刻的领域判定决定，不由任务
-/// 形状决定。
-///
-/// **这一单读到什么由作用域行说了算**（`0087` 的 `comment_limit` / `reply_expand_limit`），
-/// 与证据侧同义：`comment_limit = 0` 是「只读详情」这个明确授权，不是这里替它默认的值。
-/// 媒体仍只可能来自证据侧——跨行业作用域没有媒体授权这一项。
-async fn load_cross_industry_targets(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    work_order_ref: Uuid,
-) -> Result<Vec<MaterialTarget>, LeaseError> {
-    // 这一句要读两张表：作用域行（`0087`）说冻了什么额度和顺序，样本行（`0044`）给作品
-    // 身份。少查一张，缺表的环境会在这一句上直接报 42P01，而不是如实回「这一侧没有」。
-    let schema_ready: bool = sqlx::query_scalar(
-        "SELECT to_regclass('collection_work_order_cross_industry_target') IS NOT NULL \
-             AND to_regclass('cross_industry_sample') IS NOT NULL",
-    )
-    .fetch_one(&mut **transaction)
-    .await?;
-    if !schema_ready {
-        return Ok(Vec::new());
-    }
-    let rows: Vec<(String, i32, i32)> = sqlx::query_as(
-        "SELECT sample.content_external_id,scope.comment_limit,scope.reply_expand_limit \
-         FROM collection_work_order_cross_industry_target scope \
-         JOIN cross_industry_sample sample USING(sample_ref) \
-         WHERE scope.work_order_ref=$1 ORDER BY scope.ordinal",
-    )
-    .bind(work_order_ref)
-    .fetch_all(&mut **transaction)
-    .await?;
-    Ok(rows
-        .into_iter()
-        .map(|row| MaterialTarget {
-            content_external_id: row.0,
-            comment_limit: row.1,
-            reply_expand_limit: row.2,
-            acquire_media: false,
-        })
-        .collect())
 }
 
 async fn insert_scheduled_task(

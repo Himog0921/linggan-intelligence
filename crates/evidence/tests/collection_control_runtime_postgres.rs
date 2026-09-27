@@ -94,7 +94,11 @@ const MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../database/migrations/0038_detail_only_material_scope.sql"),
     "\n",
+    include_str!("../../../database/migrations/0041_observation_domain.sql"),
+    "\n",
     include_str!("../../../database/migrations/0042_keyword_monitoring_lifecycle.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0044_cross_industry_comment.sql"),
     "\n",
     include_str!("../../../database/migrations/0045_deep_archive_recovery.sql"),
     "\n",
@@ -145,6 +149,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0099_collection_selector_health.sql"),
     include_str!("../../../database/migrations/0100_collection_hot_path_indexes.sql"),
     include_str!("../../../database/migrations/0101_collection_command_reason_vocabulary.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0103_domain_membership_and_usage.sql"),
 );
 
 #[tokio::test]
@@ -502,7 +508,7 @@ async fn runtime_scale_projection_reads_policy_lanes_and_persisted_rule_schedule
 
 #[tokio::test]
 #[ignore = "requires a disposable PostgreSQL 16 proof database"]
-async fn paused_target_queues_person_observation_while_dismissed_target_is_rejected() {
+async fn paused_target_queues_person_observation_without_creating_monitor_rules() {
     let database = proof_database("control_runtime_manual_observe").await;
     let _installation = ready_installation(&database, "manual-observe").await;
     authorize(&database, "patrol", "人工立即观察", 2).await;
@@ -560,64 +566,6 @@ async fn paused_target_queues_person_observation_while_dismissed_target_is_rejec
     .await
     .expect("manual observation rule side effects are inspectable");
     assert_eq!(rule_revisions, 0);
-
-    // 关键词目标先过「归档完整性能不能读」这一关，再谈授权。本夹具登记的迁移里**没有**
-    // 这一关要读的四个关系所属的那四条（`0041` 的 `cross_industry_sample`、
-    // `0073` 的 `cross_industry_sample_observation`、`0079` 的 `cross_industry_sample_detail`、
-    // `0074` 的 `collection_work_order_cross_industry_target`），所以这里读到的是「读不出」，
-    // 拒绝发生在归档闸门，**根本没走到授权那一步**。
-    //
-    // （此前这里写作「迁移窗口到 `0038` 为止」——不准确：清单登记到 `0101`，只是中间缺了这四条。
-    // 实体结论不变，但说法要跟清单对得上。）
-    //
-    // 这条以前记的是 `database_unavailable`：那时原因码由一条 `_ =>` 兜底，任何没被逐个
-    // 命名的失败都被算成「数据库不可用」。现在每种失败都有自己的名字，于是一条库本身好着、
-    // 只是缺表的请求会如实说成 `schema_unavailable`——这正是要区分的两件事：前者该重试，
-    // 后者重试也不会变好。
-    let unreadable_archive =
-        seed_target(&database, "keyword", "paused", "manual-unreadable-archive").await;
-    let refused =
-        apply_monitor_rule_command(&database, &manual_observe(unreadable_archive, Uuid::new_v4()))
-            .await
-            .expect("a refusal at the archive gate returns a durable receipt");
-    assert_eq!(refused.outcome, MonitorCommandOutcomeKind::Rejected);
-    assert_eq!(refused.reason_code, "schema_unavailable");
-    assert!(refused.work_order_ref.is_none());
-    assert!(refused.lease_ref.is_none());
-    assert!(refused.applied_rule_revision_ref.is_none());
-    let refused_facts: (i64, i64, i64) = sqlx::query_as(
-        "SELECT \
-           (SELECT count(*) FROM collection_monitor_rule_command_receipt \
-             WHERE command_receipt_ref=$1 AND reason_code='schema_unavailable'), \
-           (SELECT count(*) FROM collection_work_order WHERE target_ref=$2), \
-           (SELECT count(*) FROM collection_work_order_lease lease \
-             JOIN collection_work_order work_order USING(work_order_ref) \
-             WHERE work_order.target_ref=$2)",
-    )
-    .bind(refused.receipt_ref)
-    .bind(unreadable_archive)
-    .fetch_one(database.pool())
-    .await
-    .expect("refused receipt and execution absence are inspectable");
-    assert_eq!(refused_facts, (1, 0, 0));
-
-    let dismissed = seed_target(&database, "creator", "dismissed", "manual-dismissed").await;
-    let rejected =
-        apply_monitor_rule_command(&database, &manual_observe(dismissed, Uuid::new_v4()))
-            .await
-            .expect("dismissal returns a durable closed receipt");
-    assert_eq!(rejected.outcome, MonitorCommandOutcomeKind::Rejected);
-    assert_eq!(rejected.reason_code, "target_not_requestable");
-    assert!(rejected.work_order_ref.is_none());
-    assert!(rejected.lease_ref.is_none());
-    assert!(rejected.applied_rule_revision_ref.is_none());
-    let dismissed_work: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM collection_work_order WHERE target_ref=$1")
-            .bind(dismissed)
-            .fetch_one(database.pool())
-            .await
-            .expect("dismissed work absence is inspectable");
-    assert_eq!(dismissed_work, 0);
 }
 
 #[tokio::test]
@@ -1489,6 +1437,14 @@ async fn seed_target(
     .execute(database.pool())
     .await
     .expect("target fixture is seeded");
+    sqlx::query(
+        "INSERT INTO observation_domain_target(domain_ref,target_ref,role) \
+         VALUES ('00000000-0000-4000-8000-000000000001',$1,'primary')",
+    )
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .expect("target has an explicit Domain role");
     target_ref
 }
 

@@ -359,14 +359,21 @@ async fn seed_a_due_patrol_rule(database: &Database) -> Uuid {
     // 领域号从表里读，不抄 `0041` 里那串字面量：抄下来就多了一份会各自漂的副本。
     sqlx::query(
         "INSERT INTO collection_observation_target \
-             (target_ref,platform,target_kind,identity_key,display_name,source,lifecycle_state,domain_ref) \
-         VALUES ($1,'xhs','creator','tick-trace-proof','串证证明','manual','pending_decision', \
-                 (SELECT home.domain_ref FROM observation_domain home WHERE home.is_own_domain))",
+             (target_ref,platform,target_kind,identity_key,display_name,source,lifecycle_state) \
+         VALUES ($1,'xhs','creator','tick-trace-proof','串证证明','manual','pending_decision')",
     )
     .bind(target_ref)
     .execute(database.pool())
     .await
-    .expect("the patrol target is seeded with its domain");
+    .expect("the patrol target is seeded");
+    sqlx::query(
+        "INSERT INTO observation_domain_target(domain_ref,target_ref,role) \
+         SELECT home.domain_ref,$1,'primary' FROM observation_domain home WHERE home.name='ADHD'",
+    )
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .expect("the target has an explicit Domain relation");
     grant_authorization(
         database,
         &AuthorizationGrant {

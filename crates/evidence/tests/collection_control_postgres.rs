@@ -104,6 +104,8 @@ const MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../database/migrations/0042_keyword_monitoring_lifecycle.sql"),
     "\n",
+    include_str!("../../../database/migrations/0044_cross_industry_comment.sql"),
+    "\n",
     include_str!("../../../database/migrations/0045_deep_archive_recovery.sql"),
     "\n",
     include_str!("../../../database/migrations/0046_keyword_sampling_policy.sql"),
@@ -155,6 +157,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0099_collection_selector_health.sql"),
     include_str!("../../../database/migrations/0100_collection_hot_path_indexes.sql"),
     include_str!("../../../database/migrations/0101_collection_command_reason_vocabulary.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0103_domain_membership_and_usage.sql"),
 );
 
 #[tokio::test]
@@ -1247,7 +1251,7 @@ async fn unified_capacity_exposes_distinct_recoverable_reasons() {
 
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL proof database"]
-async fn target_deletion_removes_control_history_before_its_work_order_and_lease() {
+async fn target_deletion_preserves_immutable_domain_usage_and_its_work_order_history() {
     let database = proof_database("target_deletion_control_history").await;
     let target_ref = seed_target(
         &database,
@@ -1271,8 +1275,9 @@ async fn target_deletion_removes_control_history_before_its_work_order_and_lease
     let request_ref = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO collection_acquisition_request \
-             (request_ref,target_ref,lane,purpose,requested_by) \
-         VALUES ($1,$2,'deep_archive','target deletion proof','person')",
+             (request_ref,target_ref,domain_ref,observation_role,lane,purpose,requested_by) \
+         VALUES ($1,$2,'00000000-0000-4000-8000-000000000001','primary', \
+                 'deep_archive','target deletion proof','person')",
     )
     .bind(request_ref)
     .bind(target_ref)
@@ -1295,8 +1300,10 @@ async fn target_deletion_removes_control_history_before_its_work_order_and_lease
     let work_order_ref = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO collection_work_order \
-             (work_order_ref,decision_ref,target_ref,lane,max_works,stop_conditions) \
-         VALUES ($1,$2,$3,'deep_archive',20,'[\"maximum_quota\"]'::jsonb)",
+             (work_order_ref,decision_ref,target_ref,lane,max_works,stop_conditions, \
+              dispatch_lane,queue_state,scheduled_for) \
+         VALUES ($1,$2,$3,'deep_archive',20,'[\"maximum_quota\"]'::jsonb, \
+                 'immediate','queued',scope_001_now())",
     )
     .bind(work_order_ref)
     .bind(decision_ref)
@@ -1304,6 +1311,16 @@ async fn target_deletion_removes_control_history_before_its_work_order_and_lease
     .execute(database.pool())
     .await
     .expect("work order fixture is stored");
+    sqlx::query(
+        "INSERT INTO collection_work_order_domain_usage \
+             (work_order_ref,request_ref,domain_ref,role,basis_kind) \
+         VALUES ($1,$2,'00000000-0000-4000-8000-000000000001','primary','admitted')",
+    )
+    .bind(work_order_ref)
+    .bind(request_ref)
+    .execute(database.pool())
+    .await
+    .expect("the WorkOrder freezes its Domain purpose before the Lease");
     let station_ref = register_station(&database, "删除证明工位", 20)
         .await
         .expect("station fixture is stored");
@@ -1377,11 +1394,12 @@ async fn target_deletion_removes_control_history_before_its_work_order_and_lease
         .expect("target remains visible before deletion");
     assert_eq!(preview.work_orders, 1);
     assert_eq!(preview.leases, 1);
+    assert_eq!(preview.blocking_work_order_usages, 1);
     assert_eq!(
         delete_observation_target(&database, target_ref, "target-deletion-history")
             .await
-            .expect("deletion handles all dependent control records"),
-        TargetDeletionOutcome::Deleted
+            .expect("deletion preserves immutable Domain usage"),
+        TargetDeletionOutcome::BlockedByProtectedFacts { rows: 1 }
     );
     for (relation, query) in [
         (
@@ -1410,10 +1428,7 @@ async fn target_deletion_removes_control_history_before_its_work_order_and_lease
             .fetch_one(database.pool())
             .await
             .expect("deleted control relation is queryable");
-        assert_eq!(
-            count, 0,
-            "{relation} no longer retains target control state"
-        );
+        assert_eq!(count, 1, "{relation} remains with immutable Domain history");
     }
     let lease_count: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM collection_work_order_lease WHERE work_order_ref=$1",
@@ -1423,8 +1438,8 @@ async fn target_deletion_removes_control_history_before_its_work_order_and_lease
     .await
     .expect("deleted lease is queryable");
     assert_eq!(
-        lease_count, 0,
-        "the work order lease is deleted before its work order"
+        lease_count, 1,
+        "the lease remains attached to its provenance"
     );
 }
 
@@ -1455,49 +1470,6 @@ async fn target_deletion_uses_identity_key_when_display_name_is_unknown() {
             .expect("identity confirmation deletes the target"),
         TargetDeletionOutcome::Deleted
     );
-}
-
-#[tokio::test]
-#[ignore = "requires an isolated PostgreSQL proof database"]
-async fn target_deletion_preserves_cross_industry_samples() {
-    let database = proof_database("target_deletion_preserves_cross_industry").await;
-    let target_ref = seed_target(
-        &database,
-        "keyword",
-        "pending_decision",
-        "cross-industry-delete-block",
-    )
-    .await;
-    sqlx::query(
-        "INSERT INTO cross_industry_sample \
-             (sample_ref,domain_ref,target_ref,platform,content_external_id) \
-         VALUES ($1,'00000000-0000-4000-8000-000000000002',$2,'xhs','cross-industry-delete-block')",
-    )
-    .bind(Uuid::new_v4())
-    .bind(target_ref)
-    .execute(database.pool())
-    .await
-    .expect("cross-industry sample is retained material");
-
-    let preview = read_target_deletion_preview(&database, target_ref)
-        .await
-        .expect("preview query succeeds")
-        .expect("target remains visible");
-    assert_eq!(preview.blocking_cross_industry_samples, 1);
-    assert_eq!(
-        delete_observation_target(&database, target_ref, "cross-industry-delete-block")
-            .await
-            .expect("protected facts are evaluated"),
-        TargetDeletionOutcome::BlockedByProtectedFacts { rows: 1 }
-    );
-    let target_count: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM collection_observation_target WHERE target_ref=$1",
-    )
-    .bind(target_ref)
-    .fetch_one(database.pool())
-    .await
-    .expect("target remains queryable after blocked deletion");
-    assert_eq!(target_count, 1);
 }
 
 #[tokio::test]
@@ -2298,7 +2270,10 @@ async fn seed_monitored_patrol_order(
 
     let request_ref = Uuid::new_v4();
     sqlx::query(
-        "INSERT INTO collection_acquisition_request (request_ref,target_ref,lane,purpose,requested_by)          VALUES ($1,$2,'patrol','patrol blocked state proof','person')",
+        "INSERT INTO collection_acquisition_request \
+             (request_ref,target_ref,domain_ref,observation_role,lane,purpose,requested_by) \
+         VALUES ($1,$2,'00000000-0000-4000-8000-000000000001','primary', \
+                 'patrol','patrol blocked state proof','person')",
     )
     .bind(request_ref)
     .bind(target_ref)
@@ -2422,11 +2397,9 @@ async fn seed_target(
 ) -> Uuid {
     let target_ref = Uuid::new_v4();
     sqlx::query(
-        // 领域写实：采集准入会拒绝未归属领域的目标——材料该进本行业证据侧还是跨行业
-        // 参照侧，不能靠回落去猜。共享夹具默认本领域。
         "INSERT INTO collection_observation_target \
-             (target_ref,platform,target_kind,identity_key,display_name,source,lifecycle_state,domain_ref) \
-         VALUES ($1,'xhs',$2,$3,$3,'manual',$4,'00000000-0000-4000-8000-000000000001')",
+             (target_ref,platform,target_kind,identity_key,display_name,source,lifecycle_state) \
+         VALUES ($1,'xhs',$2,$3,$3,'manual',$4)",
     )
     .bind(target_ref)
     .bind(target_kind)
@@ -2435,6 +2408,21 @@ async fn seed_target(
     .execute(database.pool())
     .await
     .expect("target fixture is seeded");
+    let relation_schema_ready: bool =
+        sqlx::query_scalar("SELECT to_regclass('observation_domain_target') IS NOT NULL")
+            .fetch_one(database.pool())
+            .await
+            .expect("Domain relation readiness is readable");
+    if relation_schema_ready {
+        sqlx::query(
+            "INSERT INTO observation_domain_target(domain_ref,target_ref,role) \
+             VALUES ('00000000-0000-4000-8000-000000000001',$1,'primary')",
+        )
+        .bind(target_ref)
+        .execute(database.pool())
+        .await
+        .expect("target is explicitly assigned to the ADHD Domain");
+    }
     target_ref
 }
 

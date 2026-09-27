@@ -137,16 +137,14 @@ const CONTEXT_CODES: [(&str, &str); 13] = [
 ];
 
 fn localize_boundary_label(label: &str) -> String {
-    let chinese = match label {
-        "LOCAL HOST / NO READ MODEL" => "本机服务 / 读模型未接通",
-        "LOCAL HOST / ACCEPTED DISCOVERY" => "本机服务 / 已接纳发现",
-        "LOCAL HOST / NO COLLECTION RUNTIME" => "本机服务 / 采集运行时未接通",
-        "LOCAL HOST / COLLECTION STATE UNKNOWN" => "本机服务 / 采集状态未知",
-        "LOCAL HOST / NO PLATFORM ACCESS" => "本机服务 / 不访问任何平台",
-        _ => "本机服务状态",
-    };
-
-    chinese_first(chinese, label)
+    match label {
+        "LOCAL HOST / NO READ MODEL" => "读模型未接通".to_owned(),
+        "LOCAL HOST / ACCEPTED DISCOVERY" => "已接纳发现".to_owned(),
+        "LOCAL HOST / NO COLLECTION RUNTIME" => "采集运行时未接通".to_owned(),
+        "LOCAL HOST / COLLECTION STATE UNKNOWN" => "采集状态未知".to_owned(),
+        "LOCAL HOST / NO PLATFORM ACCESS" => "本机不访问平台".to_owned(),
+        _ => "本机服务状态".to_owned(),
+    }
 }
 
 /// Renders the 128px global header: the 78px global row plus the 50px context row.
@@ -243,8 +241,8 @@ const CORPUS_ENTRIES: [CorpusEntry; 3] = [
     },
 ];
 
-/// `domain_ref` 传 `None` 时链接保持裸路径（少于两个领域时选择器本就不渲染，
-/// 带一个参数只会让地址假装有得选）。传了就每一条都带上：本领域同样带，
+/// `domain_ref` 传 `None` 时链接保持裸路径（尚未选择领域时不能传入虚假的读取范围）。
+/// 传了就每一条都带上：本领域同样带，
 /// 这样导航行为不因当前是哪个领域而不同。
 pub fn corpus_side_nav(active: CorpusPage, domain_ref: Option<&str>, foot: &str) -> String {
     let mut items = String::new();

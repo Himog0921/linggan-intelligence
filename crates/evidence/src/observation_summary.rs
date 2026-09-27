@@ -129,48 +129,10 @@ pub async fn read_target_observation_summaries(
     .fetch_all(database.pool())
     .await?;
 
-    // 跨行业那一侧单独问一次。
-    //
-    // 上面那条走的是 `linggan_material_discovery_finding`——外部领域的材料按 `0044` 的隔离
-    // 一条都不进证据侧，于是**每一个跨行业目标的「最近命中」都永远是「读不到」、巡查状态
-    // 永远停在「等待首轮」**，哪怕它刚采回来两百篇。而这一列上「读不到」与「采了但一篇
-    // 都没有」长得一样，看不出是哪种。
-    //
-    // 不给上面那条查询加参数、也不 UNION 进去：那是 `0044` 的接口红线，漏写一次即破且无声。
-    // 两条路各自查，在 Rust 里按目标合并——一个目标要么本领域要么外部领域，`cross_industry_sample`
-    // 的 `CHECK (is_own_domain = false)` 保证这张表里不会有本领域的行，所以两侧不会对同一个
-    // 目标同时给出数字。
-    let cross_ready: bool =
-        sqlx::query_scalar("SELECT to_regclass('cross_industry_sample_observation') IS NOT NULL")
-            .fetch_one(database.pool())
-            .await?;
-    let cross_counts: HashMap<Uuid, (i64, i64)> = if cross_ready {
-        sqlx::query_as::<_, (Uuid, i64, i64)>(
-            "WITH latest AS (                  SELECT target_ref,package_ref,accepted_at FROM (                      SELECT work_order.target_ref,package.package_ref,package.accepted_at,                             row_number() OVER (PARTITION BY work_order.target_ref                                                ORDER BY package.accepted_at DESC,                                                         package.package_ref DESC) AS package_rank                      FROM collection_work_order work_order                      JOIN collection_work_order_lease lease USING(work_order_ref)                      JOIN collection_work_order_lease_task lease_task USING(lease_ref)                      JOIN linggan_runtime_task task ON task.task_id=lease_task.task_id                      JOIN linggan_runtime_capture_package package ON package.task_id=task.task_id                      JOIN linggan_runtime_submission_receipt receipt USING(package_ref)                      WHERE work_order.target_ref=ANY($1)                        AND work_order.lane='patrol'                        AND package.package_kind='discovery_search'                        AND package.platform=task.platform                        AND receipt.execution_effect='COMPLETED_LIVE_STEP'                        AND receipt.material_admission='ACCEPTED'                        AND EXISTS (SELECT 1 FROM cross_industry_sample_observation probe                                     WHERE probe.package_ref=package.package_ref)) ranked                   WHERE package_rank=1              )              SELECT latest.target_ref,count(*),                     count(*) FILTER (WHERE NOT EXISTS (                       SELECT 1 FROM cross_industry_sample_observation earlier                       JOIN linggan_runtime_capture_package earlier_package                         ON earlier_package.package_ref=earlier.package_ref                       JOIN collection_work_order_lease_task earlier_lease_task                         ON earlier_lease_task.task_id=earlier_package.task_id                       JOIN collection_work_order_lease earlier_lease USING(lease_ref)                       JOIN collection_work_order earlier_order USING(work_order_ref)                       WHERE earlier.sample_ref=seen.sample_ref                         AND earlier_order.target_ref=latest.target_ref                         AND earlier_package.accepted_at < latest.accepted_at))              FROM latest              JOIN cross_industry_sample_observation seen USING(package_ref)              GROUP BY latest.target_ref",
-        )
-        .bind(&refs)
-        .fetch_all(database.pool())
-        .await?
-        .into_iter()
-        .map(|(target_ref, hits, newly)| (target_ref, (hits, newly)))
-        .collect()
-    } else {
-        HashMap::new()
-    };
-
     Ok(rows
         .into_iter()
         .map(
             |(target_ref, hits, newly_discovered, monitoring_enabled, running, blocked)| {
-                // 证据侧没有数字时才看跨行业侧。两侧同时有数字是不可能的（见上面那段），
-                // 真出现了也宁可保留证据侧那个，而不是把参照物加进证据计数里。
-                let (hits, newly_discovered) = match hits {
-                    Some(_) => (hits, newly_discovered),
-                    None => match cross_counts.get(&target_ref) {
-                        Some(&(cross_hits, cross_newly)) => (Some(cross_hits), Some(cross_newly)),
-                        None => (None, None),
-                    },
-                };
                 let patrol_state = if !monitoring_enabled {
                     PatrolReadState::Disabled
                 } else if running {

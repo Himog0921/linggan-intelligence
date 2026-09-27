@@ -3581,7 +3581,10 @@ mod monitor_command_reason_tests {
             closed_monitor_reason("some_future_code_from_a_newer_build"),
             MONITOR_COMMAND_REASON_NOT_RECOGNIZED
         );
-        assert_ne!(MONITOR_COMMAND_REASON_NOT_RECOGNIZED, "database_unavailable");
+        assert_ne!(
+            MONITOR_COMMAND_REASON_NOT_RECOGNIZED,
+            "database_unavailable"
+        );
     }
 
     /// 词表里不该有重复——重复说明有人把同一个码加了两遍，也说明分组注释在撒谎。
@@ -3703,7 +3706,9 @@ mod monitor_command_reason_tests {
             AcquisitionChainError::ProgressiveArchiveAuthorizationTooSmall { current_bound: 50 },
             AcquisitionChainError::ProgressiveArchiveAuthorizationMissing,
             AcquisitionChainError::ProgressiveArchivePurposeMismatch,
-            AcquisitionChainError::ProgressiveArchiveNotReady { reason: "未就绪" },
+            AcquisitionChainError::ProgressiveArchiveNotReady {
+                reason: "未就绪"
+            },
             AcquisitionChainError::Database(sqlx::Error::RowNotFound),
         ];
         let mut seen: Vec<usize> = all.iter().map(acquisition_error_index).collect();
@@ -3782,10 +3787,7 @@ mod monitor_command_reason_tests {
                 }
                 let marker = format!("ADD CONSTRAINT {constraint}");
                 let added = text.find(&marker).unwrap_or_else(|| {
-                    panic!(
-                        "{} 提到了 {constraint}，却没有把它建立起来",
-                        path.display()
-                    )
+                    panic!("{} 提到了 {constraint}，却没有把它建立起来", path.display())
                 });
                 let head = format!("CHECK ({column} IN (");
                 let open = text[added..].find(&head).unwrap_or_else(|| {
@@ -3795,10 +3797,7 @@ mod monitor_command_reason_tests {
                     )
                 }) + added
                     + head.len();
-                let close = open
-                    + text[open..]
-                        .find("));")
-                        .expect("CHECK 清单有收尾");
+                let close = open + text[open..].find("));").expect("CHECK 清单有收尾");
                 let listed: BTreeSet<String> = text[open..close]
                     .split(',')
                     .map(|piece| piece.trim().trim_matches('\'').to_owned())

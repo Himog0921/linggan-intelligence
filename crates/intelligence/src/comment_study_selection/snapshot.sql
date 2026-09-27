@@ -1,8 +1,14 @@
 -- One insensitive cursor statement. $1 domain, $2 cutoff, $3 cleaner, $4 works,
--- $5 exact comment keys or null. FETCH consumes this snapshot; it is not another source SELECT.
-WITH requested_works AS MATERIALIZED (
-    SELECT public_ref FROM linggan_material_content
-    WHERE domain_ref=$1 AND public_ref=ANY($4::uuid[])
+-- $5 exact comment keys or null, $6 selected work roles. FETCH consumes this snapshot.
+WITH requested_roles AS MATERIALIZED (
+    SELECT selected."contentPublicRef" AS work_ref, selected."observationRole" AS observation_role
+    FROM jsonb_to_recordset($6::jsonb) AS selected("contentPublicRef" uuid,"observationRole" text)
+), requested_works AS MATERIALIZED (
+    SELECT DISTINCT usage.content_public_ref AS public_ref
+    FROM linggan_material_domain_usage usage
+    JOIN requested_roles selected ON selected.work_ref=usage.content_public_ref
+                                 AND selected.observation_role=usage.role
+    WHERE usage.domain_ref=$1 AND usage.content_public_ref=ANY($4::uuid[])
 ), requested_keys AS (
     SELECT * FROM jsonb_to_recordset(COALESCE($5::jsonb,'[]')) AS k("workRef" uuid,"commentExternalId" text)
 ), latest AS MATERIALIZED (

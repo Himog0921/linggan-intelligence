@@ -92,28 +92,21 @@ pub(crate) fn locator_fingerprint_sql(url_expression: &str) -> String {
 
 /// 此刻这一篇内容可用于执行的地址，以及它出自哪条记录。
 ///
-/// 形状与 `dispatch.rs::execution_source_url_for_task` 一致——按内容外部 ID 取**最新已接纳**
-/// 的发现地址，证据侧优先，跨行业样本兜底。两处必须同形：不一致的话，候选认为「有地址」
-/// 而派发解析不出来，就正好复现了这次要修的缺陷。
+/// 形状与 `dispatch.rs::execution_source_url_for_task` 一致——按内容外部 ID 取最新已接纳发现地址。
 ///
 /// 返回三列：`url`、`source_kind`、`source_ref`。找不到可用的地址时返回零行——**零行是一条
 /// 真实观察到的事实**（这一篇此刻没有入口），不是一个待补的默认值，所以调用方用
 /// `IS NULL` / 零行来读它，而不是拿一个空串当默认。
 ///
 /// 调用方把这个片段当子查询或 `LATERAL` 用，所以它自带 `SELECT … FROM … WHERE … LIMIT 1`。
-/// `cross_industry_ready` 为假时只给证据侧那一段：控制面的证明库没有 `0044` 的样本表，
-/// 「这个环境没有跨行业这一侧」与「这一篇没有地址」是两件事，不能混成同一个零行。
-pub(crate) fn candidate_locator_sql(
-    content_external_id_expression: &str,
-    cross_industry_ready: bool,
-) -> String {
+pub(crate) fn candidate_locator_sql(content_external_id_expression: &str) -> String {
     // Private aliases must not shadow the correlated expression supplied by the caller.
     let evidence_signed = signed_locator_predicate("locator_record.value->'payload'->>'url'");
     let evidence = format!(
-        "SELECT locator_record.value->'payload'->>'url' AS url, \
-                'discovery_finding'::text AS source_kind, \
-                locator_finding.material_ref AS source_ref, \
-                locator_package.accepted_at AS observed_at \
+        "SELECT CASE WHEN {evidence_signed} THEN locator_record.value->'payload'->>'url' END AS url, \
+                CASE WHEN {evidence_signed} THEN 'discovery_finding'::text END AS source_kind, \
+                CASE WHEN {evidence_signed} THEN locator_finding.material_ref END AS source_ref, \
+                CASE WHEN {evidence_signed} THEN locator_package.accepted_at END AS observed_at \
          FROM linggan_material_discovery_finding locator_finding \
          JOIN linggan_material_content locator_content ON locator_content.public_ref=locator_finding.content_public_ref \
          JOIN linggan_runtime_capture_package locator_package USING(package_ref) \
@@ -123,30 +116,9 @@ pub(crate) fn candidate_locator_sql(
            AND locator_content.content_external_id={content_external_id_expression} \
            AND locator_record.ordinality=locator_finding.record_ordinal+1 \
            AND locator_record.value->'sourceObject'->>'externalId'={content_external_id_expression} \
-           AND {evidence_signed} \
          ORDER BY locator_package.accepted_at DESC,locator_finding.created_at DESC LIMIT 1"
     );
-    if !cross_industry_ready {
-        return evidence;
-    }
-    let sample_signed = signed_locator_predicate("locator_sample.source_url");
-    // 证据侧优先，跨行业样本只在证据侧解析不出来时兜底——与 `execution_source_url_for_task`
-    // 的先后完全一致。写成显式的 `priority` 而不是把两段 `UNION ALL` 起来再排序：后者在
-    // 「两侧都有地址」时挑到的可能是另一条，于是候选筛选与派发解析对着同一篇作品各说各话。
-    format!(
-        "SELECT locator.url,locator.source_kind,locator.source_ref FROM ( \
-             SELECT 1 AS priority,evidence.url,evidence.source_kind,evidence.source_ref \
-             FROM ({evidence}) evidence \
-             UNION ALL \
-             SELECT 2 AS priority,locator_sample.source_url,'cross_industry_sample'::text, \
-                    locator_sample.sample_ref \
-             FROM cross_industry_sample locator_sample \
-             WHERE locator_sample.platform='xhs' \
-               AND locator_sample.content_external_id={content_external_id_expression} \
-               AND {sample_signed} \
-         ) locator \
-         ORDER BY locator.priority LIMIT 1"
-    )
+    evidence
 }
 
 /// 「这一篇现在仍然不该被执行」——此前在这里停过，而且**输入没有变**。
@@ -166,9 +138,8 @@ pub(crate) fn unchanged_input_block_predicate(
     object_kind: &str,
     object_ref_expression: &str,
     content_external_id_expression: &str,
-    cross_industry_ready: bool,
 ) -> String {
-    let locator = candidate_locator_sql(content_external_id_expression, cross_industry_ready);
+    let locator = candidate_locator_sql(content_external_id_expression);
     let fingerprint = locator_fingerprint_sql("locator.url");
     format!(
         "EXISTS ( \
@@ -189,11 +160,8 @@ pub(crate) fn unchanged_input_block_predicate(
 ///
 /// 与上面那条不同：这里不看台账，只问此刻能不能解析出地址。它是**入口**判据——一个从来没被
 /// 排过队的对象没有台账行，但一样可能没有地址。
-pub(crate) fn has_executable_locator_predicate(
-    content_external_id_expression: &str,
-    cross_industry_ready: bool,
-) -> String {
-    let locator = candidate_locator_sql(content_external_id_expression, cross_industry_ready);
+pub(crate) fn has_executable_locator_predicate(content_external_id_expression: &str) -> String {
+    let locator = candidate_locator_sql(content_external_id_expression);
     format!("(SELECT locator.url FROM ({locator}) locator) IS NOT NULL")
 }
 
@@ -207,26 +175,12 @@ pub(crate) async fn blocked_object_refs_in_transaction(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     work_order_ref: Uuid,
 ) -> Result<BlockedObjects, sqlx::Error> {
-    // 这一侧要用**两张**表：样本表记材料（`0044`），工单作用域表记「哪张工单冻了它」
-    // （`0087`）。只检查前者会让控制面证明库（有样本表、没有作用域表）在一句不可能有结果的
-    // 查询上直接报 42P01——「这个环境没有跨行业这一侧」是一次能力缺失，不是一次故障。
-    let cross_industry_sample_ready: bool =
-        sqlx::query_scalar("SELECT to_regclass('cross_industry_sample') IS NOT NULL")
-            .fetch_one(&mut **transaction)
-            .await?;
-    let cross_industry_scope_ready: bool = sqlx::query_scalar(
-        "SELECT to_regclass('cross_industry_sample') IS NOT NULL \
-             AND to_regclass('collection_work_order_cross_industry_target') IS NOT NULL",
-    )
-    .fetch_one(&mut **transaction)
-    .await?;
     let material_predicate = unchanged_input_block_predicate(
         "order_row.target_ref",
         "own_domain",
         "material_content",
         "scope.content_public_ref",
         "content.content_external_id",
-        cross_industry_sample_ready,
     );
     let material: Vec<Uuid> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT scope.content_public_ref \
@@ -238,39 +192,13 @@ pub(crate) async fn blocked_object_refs_in_transaction(
     .bind(work_order_ref)
     .fetch_all(&mut **transaction)
     .await?;
-    let cross_industry: Vec<Uuid> = if cross_industry_scope_ready {
-        let sample_predicate = unchanged_input_block_predicate(
-            "order_row.target_ref",
-            "cross_industry",
-            "cross_industry_sample",
-            "scope.sample_ref",
-            "sample.content_external_id",
-            true,
-        );
-        sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-            "SELECT scope.sample_ref \
-             FROM collection_work_order_cross_industry_target scope \
-             JOIN collection_work_order order_row USING(work_order_ref) \
-             JOIN cross_industry_sample sample USING(sample_ref) \
-             WHERE scope.work_order_ref=$1 AND {sample_predicate}",
-        )))
-        .bind(work_order_ref)
-        .fetch_all(&mut **transaction)
-        .await?
-    } else {
-        Vec::new()
-    };
-    Ok(BlockedObjects {
-        material,
-        cross_industry,
-    })
+    Ok(BlockedObjects { material })
 }
 
-/// 一个工单里被停掉的成员，两侧分开。
+/// 一个工单里被停掉的材料成员。
 #[derive(Debug, Default, Clone)]
 pub(crate) struct BlockedObjects {
     pub material: Vec<Uuid>,
-    pub cross_industry: Vec<Uuid>,
 }
 
 /// 停掉一个成员的执行资格：台账记下原因，同一篇的其余通道一并收束。
@@ -296,13 +224,11 @@ pub(crate) async fn stop_material_for_missing_execution_input_in_transaction(
     let Some(target_ref) = subject.target_ref else {
         return Ok(None);
     };
-    let (domain_scope, object_kind, object_ref) = match (&subject.content_public_ref, &subject.sample_ref)
-    {
-        (Some(content_public_ref), _) => ("own_domain", "material_content", *content_public_ref),
-        (_, Some(sample_ref)) => ("cross_industry", "cross_industry_sample", *sample_ref),
-        _ => return Ok(None),
+    let Some(object_ref) = subject.content_public_ref else {
+        return Ok(None);
     };
-    let locator = candidate_locator_sql("$9", subject.cross_industry_ready);
+    let (domain_scope, object_kind) = ("own_domain", "material_content");
+    let locator = candidate_locator_sql("$9");
     // 台账是 upsert 而不是 insert：同一篇在同一个 epoch 里，**同一份输入**只有一条资格
     // （身份键含指纹），同一件事重复上报不该长出第二行。`input_fingerprint` 按**此刻**重新
     // 解析，所以「输入变了没有」是这一行随时可核对的当前值，而不是一次性的历史快照。
@@ -480,15 +406,10 @@ pub(crate) async fn open_successors_for_reopened_inputs_in_transaction(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     target_ref: Uuid,
     material_objects: &[Uuid],
-    cross_industry_objects: &[Uuid],
 ) -> Result<u32, sqlx::Error> {
-    let cross_industry_ready: bool =
-        sqlx::query_scalar("SELECT to_regclass('cross_industry_sample') IS NOT NULL")
-            .fetch_one(&mut **transaction)
-            .await?;
     let mut predecessors: Vec<(Uuid, ResolvedExecutionInput)> = Vec::new();
     if !material_objects.is_empty() {
-        let locator = candidate_locator_sql("content.content_external_id", cross_industry_ready);
+        let locator = candidate_locator_sql("content.content_external_id");
         let rows = reopened_input_predecessors(
             transaction,
             &format!(
@@ -498,20 +419,6 @@ pub(crate) async fn open_successors_for_reopened_inputs_in_transaction(
             "material_content",
             target_ref,
             material_objects,
-            &locator,
-        )
-        .await?;
-        predecessors.extend(rows);
-    }
-    if !cross_industry_objects.is_empty() && cross_industry_ready {
-        let locator = candidate_locator_sql("sample.content_external_id", true);
-        let rows = reopened_input_predecessors(
-            transaction,
-            "JOIN cross_industry_sample sample ON sample.sample_ref=eligibility.object_ref",
-            "cross_industry",
-            "cross_industry_sample",
-            target_ref,
-            cross_industry_objects,
             &locator,
         )
         .await?;
@@ -591,10 +498,8 @@ async fn reopened_input_predecessors(
 struct TaskExecutionSubject {
     target_ref: Option<Uuid>,
     content_public_ref: Option<Uuid>,
-    sample_ref: Option<Uuid>,
     content_external_id: String,
     lease_ref: Uuid,
-    cross_industry_ready: bool,
     /// 这张工单作用域内的输入此前有没有被冻结过。决定台账行如实记 `frozen` 还是
     /// `legacy_input_unfrozen`——不补造历史，也不声称「它从出生起就没有地址」。
     scope_was_frozen: bool,
@@ -604,21 +509,10 @@ async fn load_task_execution_subject_in_transaction(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     task_id: Uuid,
 ) -> Result<Option<TaskExecutionSubject>, sqlx::Error> {
-    // 与 `blocked_object_refs_in_transaction` 同一个判据：这一侧要用两张表——样本表
-    // （`0044`）与工单作用域表（`0087`）。只查前者，控制面证明库会在 `sample_sql` 上
-    // 报 42P01，把「这个环境没有这一侧」变成一次故障。
-    let cross_industry_ready: bool = sqlx::query_scalar(
-        "SELECT to_regclass('cross_industry_sample') IS NOT NULL \
-             AND to_regclass('collection_work_order_cross_industry_target') IS NOT NULL",
-    )
-    .fetch_one(&mut **transaction)
-    .await?;
-    // 一篇作品属于哪一侧，由它落在哪张作用域表上回答，不由任务形状回答——同一次页面打开
-    // 在两侧长得一样，落点不同（`0044` 的隔离）。
     // 「这张工单冻过输入没有」问的是**工单**，不是台账。反过来由台账推会得出相反的答案：
     // 一次停止也会为某个对象写下 `input_source_status='frozen'`，于是「这个对象停过」会被
     // 读成「这张工单冻过输入」。冻结发生在建单那一刻，标记就记在建单事务里（`0097`）。
-    let material_sql = "SELECT order_row.target_ref,material.content_public_ref,NULL::uuid, \
+    let material_sql = "SELECT order_row.target_ref,material.content_public_ref, \
                 material_content.content_external_id,lease.lease_ref, \
                 order_row.execution_input_frozen_at IS NOT NULL \
          FROM collection_work_order_lease_task task \
@@ -631,44 +525,20 @@ async fn load_task_execution_subject_in_transaction(
            ON material_content.public_ref=material.content_public_ref \
          WHERE task.task_id=$1 \
            AND material_content.content_external_id=runtime.task_spec #>> '{target,contentExternalId}'";
-    let sample_sql = "SELECT order_row.target_ref,NULL::uuid,cross_scope.sample_ref, \
-                sample.content_external_id,lease.lease_ref, \
-                order_row.execution_input_frozen_at IS NOT NULL \
-         FROM collection_work_order_lease_task task \
-         JOIN collection_work_order_lease lease USING(lease_ref) \
-         JOIN collection_work_order order_row USING(work_order_ref) \
-         JOIN linggan_runtime_task runtime ON runtime.task_id=task.task_id \
-         JOIN collection_work_order_cross_industry_target cross_scope \
-           ON cross_scope.work_order_ref=order_row.work_order_ref \
-         JOIN cross_industry_sample sample ON sample.sample_ref=cross_scope.sample_ref \
-         WHERE task.task_id=$1 \
-           AND sample.content_external_id=runtime.task_spec #>> '{target,contentExternalId}'";
-    let sql = if cross_industry_ready {
-        format!("{material_sql} UNION ALL {sample_sql} LIMIT 1")
-    } else {
-        format!("{material_sql} LIMIT 1")
-    };
-    let row: Option<(Option<Uuid>, Option<Uuid>, Option<Uuid>, String, Uuid, bool)> =
-        sqlx::query_as(sqlx::AssertSqlSafe(sql))
+    let row: Option<(Option<Uuid>, Option<Uuid>, String, Uuid, bool)> =
+        sqlx::query_as(sqlx::AssertSqlSafe(material_sql))
             .bind(task_id)
             .fetch_optional(&mut **transaction)
             .await?;
     Ok(row.map(
-        |(
-            target_ref,
-            content_public_ref,
-            sample_ref,
-            content_external_id,
-            lease_ref,
-            scope_was_frozen,
-        )| TaskExecutionSubject {
-            target_ref,
-            content_public_ref,
-            sample_ref,
-            content_external_id,
-            lease_ref,
-            cross_industry_ready,
-            scope_was_frozen,
+        |(target_ref, content_public_ref, content_external_id, lease_ref, scope_was_frozen)| {
+            TaskExecutionSubject {
+                target_ref,
+                content_public_ref,
+                content_external_id,
+                lease_ref,
+                scope_was_frozen,
+            }
         },
     ))
 }
@@ -746,12 +616,6 @@ pub(crate) async fn budget_exhausted_object_refs_in_transaction(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     work_order_ref: Uuid,
 ) -> Result<BlockedObjects, sqlx::Error> {
-    let cross_industry_ready: bool = sqlx::query_scalar(
-        "SELECT to_regclass('cross_industry_sample') IS NOT NULL \
-             AND to_regclass('collection_work_order_cross_industry_target') IS NOT NULL",
-    )
-    .fetch_one(&mut **transaction)
-    .await?;
     let material: Vec<Uuid> = sqlx::query_scalar(
         "SELECT scope.content_public_ref \
          FROM collection_work_order_material_target scope \
@@ -768,30 +632,7 @@ pub(crate) async fn budget_exhausted_object_refs_in_transaction(
     .bind(work_order_ref)
     .fetch_all(&mut **transaction)
     .await?;
-    let cross_industry: Vec<Uuid> = if cross_industry_ready {
-        sqlx::query_scalar(
-            "SELECT scope.sample_ref \
-             FROM collection_work_order_cross_industry_target scope \
-             JOIN collection_work_order order_row USING(work_order_ref) \
-             JOIN collection_execution_input_eligibility budget \
-               ON budget.target_ref=order_row.target_ref \
-              AND budget.domain_scope='cross_industry' \
-              AND budget.object_kind='cross_industry_sample' \
-              AND budget.object_ref=scope.sample_ref \
-              AND budget.capability='content_detail' \
-              AND budget.state='budget_exhausted' \
-             WHERE scope.work_order_ref=$1",
-        )
-        .bind(work_order_ref)
-        .fetch_all(&mut **transaction)
-        .await?
-    } else {
-        Vec::new()
-    };
-    Ok(BlockedObjects {
-        material,
-        cross_industry,
-    })
+    Ok(BlockedObjects { material })
 }
 
 /// 记一次「页面读了一次没读成」，把预算累计到台账的当前行上。
@@ -825,12 +666,10 @@ pub(crate) async fn record_detail_page_read_failure_in_transaction(
     let Some(target_ref) = subject.target_ref else {
         return Ok(None);
     };
-    let (domain_scope, object_kind, object_ref) = match (&subject.content_public_ref, &subject.sample_ref)
-    {
-        (Some(content_public_ref), _) => ("own_domain", "material_content", *content_public_ref),
-        (_, Some(sample_ref)) => ("cross_industry", "cross_industry_sample", *sample_ref),
-        _ => return Ok(None),
+    let Some(object_ref) = subject.content_public_ref else {
+        return Ok(None);
     };
+    let (domain_scope, object_kind) = ("own_domain", "material_content");
     let mut current = current_budget_row_in_transaction(
         transaction,
         target_ref,
@@ -845,7 +684,7 @@ pub(crate) async fn record_detail_page_read_failure_in_transaction(
         //
         // 冲突什么都不做：并发的另一条上报、或一条已经停下的行，都可能占住这个身份。占了就
         // 让位，随后重新读一次当前行——**不覆盖**别人写下的事实，也不把停止行改写成可执行。
-        let locator = candidate_locator_sql("$9", subject.cross_industry_ready);
+        let locator = candidate_locator_sql("$9");
         sqlx::query(sqlx::AssertSqlSafe(format!(
             "WITH resolved AS ( \
                  SELECT locator.url,locator.source_kind,locator.source_ref \
@@ -866,13 +705,7 @@ pub(crate) async fn record_detail_page_read_failure_in_transaction(
              FROM resolved \
              ON CONFLICT DO NOTHING",
             fingerprint = locator_fingerprint_sql("resolved.url"),
-            unverified = unverified_prior_failures_sql(
-                "$1",
-                domain_scope,
-                object_kind,
-                "$9",
-                subject.cross_industry_ready,
-            ),
+            unverified = unverified_prior_failures_sql("$1", "$9",),
         )))
         .bind(target_ref)
         .bind(domain_scope)
@@ -1004,24 +837,8 @@ async fn current_budget_row_in_transaction(
 /// 所以只有 `collection_work_order.execution_input_frozen_at` 能回答它。
 fn unverified_prior_failures_sql(
     target_ref_expression: &str,
-    domain_scope: &str,
-    object_kind: &str,
     content_external_id_expression: &str,
-    cross_industry_ready: bool,
 ) -> String {
-    let scope_join = match (domain_scope, object_kind) {
-        ("own_domain", _) => "JOIN collection_work_order_material_target scope \
-                              ON scope.work_order_ref=order_row.work_order_ref \
-                             AND scope.content_public_ref=$4"
-            .to_owned(),
-        _ if cross_industry_ready => "JOIN collection_work_order_cross_industry_target scope \
-                                       ON scope.work_order_ref=order_row.work_order_ref \
-                                      AND scope.sample_ref=$4"
-            .to_owned(),
-        _ => "JOIN collection_work_order_cross_industry_target scope \
-              ON scope.work_order_ref=order_row.work_order_ref AND false"
-            .to_owned(),
-    };
     format!(
         "(SELECT COUNT(*) \
           FROM collection_work_order_lease_task_dispatch_failure failure \
@@ -1029,7 +846,8 @@ fn unverified_prior_failures_sql(
           JOIN collection_work_order_lease lease ON lease.lease_ref=task.lease_ref \
           JOIN collection_work_order order_row ON order_row.work_order_ref=lease.work_order_ref \
           JOIN linggan_runtime_task runtime ON runtime.task_id=task.task_id \
-          {scope_join} \
+          JOIN collection_work_order_material_target scope \
+            ON scope.work_order_ref=order_row.work_order_ref AND scope.content_public_ref=$4 \
           WHERE order_row.target_ref={target_ref_expression} \
             AND order_row.execution_input_frozen_at IS NULL \
             AND failure.failure_code='page_read_failed' \
@@ -1044,10 +862,7 @@ fn unverified_prior_failures_sql(
 /// 交付并发到达，而那份材料已经落库。已经拿到的材料不因为一次旧的读失败倒退，也不该再被
 /// 算进预算——那个预算问的是「要不要再试」，而这里已经没有要补的东西了。
 ///
-/// 判据与档案完整度、目标列表、补齐资格用的是**同一句**：本领域侧是
-/// `qualified_detail.rs` 里那条合格详情材料（材料本体 + 已接纳来源 + 未被隔离），跨行业侧
-/// 是 `cross_industry_sample_detail` 有没有行。**整包被隔离时两处都不会有行**，所以「任务说
-/// 完成、材料没进来」不会被误读成已取得。
+/// 判据与档案完整度、目标列表、补齐资格用的是同一条合格详情材料查询。
 pub(crate) async fn detail_material_already_accepted_in_transaction(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     task_id: Uuid,
@@ -1057,33 +872,18 @@ pub(crate) async fn detail_material_already_accepted_in_transaction(
         return Ok(false);
     };
     if let Some(content_public_ref) = subject.content_public_ref {
-        return sqlx::query_scalar(concat!(
-            "SELECT ",
-            qualified_detail_exists_sql!("$1"),
-        ))
-        .bind(content_public_ref)
-        .fetch_one(&mut **transaction)
-        .await;
+        return sqlx::query_scalar(concat!("SELECT ", qualified_detail_exists_sql!("$1"),))
+            .bind(content_public_ref)
+            .fetch_one(&mut **transaction)
+            .await;
     }
-    let Some(sample_ref) = subject.sample_ref else {
+    let Some(content_public_ref) = subject.content_public_ref else {
         return Ok(false);
     };
-    // 控制面证明库里没有跨行业那几张表：「这个环境没有这一侧」是一次能力缺失，不是「没有材料」。
-    let ready: bool = sqlx::query_scalar(
-        "SELECT to_regclass('cross_industry_sample_detail') IS NOT NULL",
-    )
-    .fetch_one(&mut **transaction)
-    .await?;
-    if !ready {
-        return Ok(false);
-    }
-    sqlx::query_scalar(
-        "SELECT EXISTS (SELECT 1 FROM cross_industry_sample_detail detail \
-                        WHERE detail.sample_ref=$1)",
-    )
-    .bind(sample_ref)
-    .fetch_one(&mut **transaction)
-    .await
+    sqlx::query_scalar(concat!("SELECT ", qualified_detail_exists_sql!("$1"),))
+        .bind(content_public_ref)
+        .fetch_one(&mut **transaction)
+        .await
 }
 
 /// 一个对象在「取详情」这件事上**此刻说了算的那一行**：能不能执行、不能执行时欠的是什么。

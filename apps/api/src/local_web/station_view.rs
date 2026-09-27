@@ -1586,6 +1586,11 @@ const DISPATCH_ANSWER_EXPLANATIONS: &[(&str, &str, &str)] = &[
         "去观察目标页把它的巡查重新打开。",
     ),
     (
+        "domain_paused_or_unscoped",
+        "工单的领域已暂停或没有冻结领域用途",
+        "到领域管理核对工单涉及的全部领域；暂停的领域恢复运行后，重新检查这张工单。",
+    ),
+    (
         "authorization_expired_or_revoked",
         "这一单的授权已撤销或过期",
         "工单已终结，不会再重试。需要的话在观察目标页重新发起一次。",

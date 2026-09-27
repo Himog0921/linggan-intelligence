@@ -4,7 +4,10 @@ const RULES: [(&str, &str); 7] = [
     ("sourceRestricted", "source_restricted"),
     ("bodyUnavailable", "body_state <> 'KNOWN' OR NOT has_body"),
     ("indexPending", "cached_source_ref IS NULL"),
-    ("textNotResearchable", "clean_state NOT IN ('direct', 'context')"),
+    (
+        "textNotResearchable",
+        "clean_state NOT IN ('direct', 'context')",
+    ),
     ("workAuthorUnknown", "work_author_unknown"),
     ("commentAuthorUnknown", "comment_author_unknown"),
     ("creatorVoice", "voice_role = 'creator'"),
@@ -20,7 +23,10 @@ pub(crate) fn sql_case() -> String {
 }
 
 pub(crate) fn exclusion(flags: [bool; 7]) -> Option<&'static str> {
-    RULES.iter().zip(flags).find_map(|((code, _), excluded)| excluded.then_some(*code))
+    RULES
+        .iter()
+        .zip(flags)
+        .find_map(|((code, _), excluded)| excluded.then_some(*code))
 }
 
 #[cfg(test)]

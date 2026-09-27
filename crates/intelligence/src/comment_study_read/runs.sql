@@ -14,6 +14,8 @@ SELECT run.run_ref,
        run.created_at::text AS created_at,
        run.finished_at::text AS finished_at,
        works.work_count,
+       works.primary_work_count,
+       works.reference_work_count,
        targets.target_count,
        targets.succeeded_count,
        targets.no_signal_count,
@@ -22,7 +24,9 @@ SELECT run.run_ref,
        targets.excluded_count
 FROM selected_runs run
 CROSS JOIN LATERAL (
-    SELECT count(*) AS work_count
+    SELECT count(*) AS work_count,
+           count(*) FILTER (WHERE work.observation_role = 'primary') AS primary_work_count,
+           count(*) FILTER (WHERE work.observation_role = 'reference') AS reference_work_count
     FROM linggan_comment_study_work work
     WHERE work.run_ref = run.run_ref
 ) works

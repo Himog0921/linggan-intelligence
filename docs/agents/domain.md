@@ -49,7 +49,7 @@ docs/decisions/
 
 ## 单一领域上下文的含义
 
-当前 Linggan Intelligence 是一个统一产品、一个一级研究 Domain（ADHD）、一个模块化 Rust 单体、一个 PostgreSQL 主库、API 和 worker 两个组合入口，以及一个受控插件执行边界。
+当前 Linggan Intelligence 是一个统一产品、多个平级一级研究 Domain、一个模块化 Rust 单体、一个 PostgreSQL 主库、API 和 worker 两个组合入口，以及一个受控插件执行边界。多个 Domain 不等于多个 bounded context、服务、数据库或插件；它们共享基础材料能力，并按各自的研究用途隔离读取和结论资格。
 
 `apps/`、`crates/` 或逻辑模块的存在不自动产生新的领域上下文。文件数量、crate 数量、页面导航、数据库表、专门 Agent 工具或独立实现目录本身都不能成为拆分多上下文的理由。
 

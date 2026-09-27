@@ -1,7 +1,7 @@
 # 讨论上下文与当前结论
 
 > 状态: 权威当前
-> 最后核对: 2026-08-21
+> 最后核对: 2026-09-23
 > 适用范围: 已确认讨论结论与待决定问题摘要
 > 事实来源: 用户确认、ACCEPTED ADR 与当前项目文档
 > 冲突时以谁为准: 用户最新确认、ACCEPTED ADR 和 `docs/current-state.md`
@@ -69,7 +69,7 @@
 - Topic 的定义性/知识性关系与数据共现、市场关联、因果假设分开。后者先是有输入与版本的 Derived Analysis 或 Claim，不能因为人工点击确认就写成正式父子关系。
 - Corpus 不是复制的评论池，也不只是页面投影；可长期保存用途、选择规则和成员历史。Topic Map 是知识导航视图；CLI/Agent Interface 是受控服务入口，不把三者压成同一种 Projection。
 - Decision、Action、Outcome Observation 和 Evaluation 分开。Outcome 只能通过新 Claim 或有记录的定义修订影响后续认知，不能直接“反向更新 Knowledge”。
-- 当前唯一一级 Domain 仍为 ADHD，`家庭干预`是 Topic/研究范围。对话提出的第二 Domain、Domain Relationship、Domain Seed、万能 Knowledge Graph 和固定 10/12 个核心对象不进入当前首期模型。
+- 历史决定（2026-08-21）：当时将 ADHD 定为唯一一级 Domain，并暂不采用 Domain Relationship。该范围于 2026-09-23 由 [DEC-0008](../decisions/0008-peer-domains-and-unified-material-pipeline.md) 修订：正式 Domain 平级，Target 可跨 Domain 使用；原文保留为决定演进记录，不再约束当前模型。
 - “Knowledge Layer First”可以描述重视长期知识资产，但不取代已确认的“领域情报研究系统”核心定义；外部 Agent 仍可以在隐私和用途授权下检索真实原声，不被强制只能读取已确认知识。
 - 不新增 `Gate 3-A`。所谓“采集现实约束反向审查”属于 Gate 4 的 producer、Identity、Time、Coverage、工位和插件合同审计。
 - 外部讨论使用的 `DEC-01`–`DEC-15` 只是该对话内部编号，与本项目活动计划中的 `DEC-01`–`DEC-05` 无关，不写入项目决定目录。

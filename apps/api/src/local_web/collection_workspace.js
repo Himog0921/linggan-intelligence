@@ -151,6 +151,7 @@
         stateView.classList.add(stateClasses.indexOf(row.dataset.taskStateClass) >= 0 ? row.dataset.taskStateClass : "c-task-state-wait");
       }
       setTaskText("[data-task-inspector-capabilities]", row.dataset.taskCapabilities);
+      setTaskText("[data-task-inspector-domains]", row.dataset.taskDomains);
       setTaskText("[data-task-inspector-created]", row.dataset.taskCreated);
       setTaskText("[data-task-inspector-failure]", row.dataset.taskFailure);
       setTaskText("[data-task-inspector-attempt]", row.dataset.taskAttempt);
@@ -318,19 +319,6 @@
   var domainModal = document.querySelector("[data-target-domain-modal]");
   var domainClose = document.querySelector("[data-target-domain-close]");
   var domainSelect = document.querySelector("[data-target-domain-select]");
-  var domainNewField = document.querySelector("[data-target-domain-new]");
-  var domainNewNote = document.querySelector("[data-target-domain-new-note]");
-  var domainNewName = document.querySelector("[data-target-domain-name]");
-
-  function syncDomainChoice() {
-    if (!domainSelect) return;
-    var creating = domainSelect.value === "__new__";
-    if (domainNewField) domainNewField.hidden = !creating;
-    if (domainNewNote) domainNewNote.hidden = !creating;
-    // 只有真的在新建领域时才要求填名字，否则这个隐藏字段会挡住整个表单的提交。
-    if (domainNewName) domainNewName.required = creating;
-    if (creating && domainNewName) domainNewName.focus();
-  }
 
   function closeDomainModal() {
     if (domainModal) domainModal.hidden = true;
@@ -342,9 +330,9 @@
       var form = domainOpen.closest("form");
       // 目标本身的输入（类型、排序、链接/关键词）先过一遍浏览器校验，免得人选完领域
       // 才被告诉「关键词没填」。
-      if (form && typeof form.reportValidity === "function" && !form.reportValidity()) return;
+      var identity = form && form.querySelector('[name="identity"]');
+      if (identity && typeof identity.reportValidity === "function" && !identity.reportValidity()) return;
       domainModal.hidden = false;
-      syncDomainChoice();
       if (domainSelect) domainSelect.focus();
     });
     domainModal.addEventListener("click", function (event) {
@@ -355,8 +343,6 @@
     });
   }
   if (domainClose) domainClose.addEventListener("click", closeDomainModal);
-  if (domainSelect) domainSelect.addEventListener("change", syncDomainChoice);
-  syncDomainChoice();
 
   var drawer = document.getElementById("c-drawer");
   if (!drawer) {

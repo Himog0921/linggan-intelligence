@@ -7,7 +7,7 @@ use linggan_evidence::{
 };
 use linggan_storage_postgres::{Database, testing::isolated_proof_schema};
 
-const MIGRATIONS: &str = concat!(
+pub const MIGRATIONS: &str = concat!(
     "CREATE TABLE linggan_local_schema_migration (\n",
     "  migration_id text PRIMARY KEY,\n",
     "  migration_sha256 text NOT NULL CHECK (migration_sha256 ~ '^[0-9a-f]{64}$'),\n",
@@ -217,6 +217,10 @@ const MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../../database/migrations/0102_cross_industry_creator_directory.sql"),
     "\n",
+    include_str!("../../../../database/migrations/0103_domain_membership_and_usage.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0104_unified_domain_schema_cleanup.sql"),
+    "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ",
     "('0025_comment_current_projection', '64fd9474647834358f8d2d4f1c25e4345e26a3ff79dbfc53a7846915576b0885'), ",
     "('0026_work_resource_read', '08712c71e9b6f97d270739649a7c264da2f115315bef90fabaedded50cf774bd'), ",
@@ -252,7 +256,9 @@ const MIGRATIONS: &str = concat!(
     "('0099_collection_selector_health', '31bd088d59d027abceceef3584aba221803795a576cda21cb462e1f5466baf4f'), ",
     "('0100_collection_hot_path_indexes', 'a26c7006e1c210f226ab8e432651b949f0456ca99055dc41df055b1e6a52dc6c'), ",
     "('0101_collection_command_reason_vocabulary', 'fda3711ea7bb38af6bb5a6a28264a39ac0c04024aef3e6feeb931e07a9b074c1'),\n",
-    "('0102_cross_industry_creator_directory', '972ece37c29d79a2a5a9f37cfe3dd4fe71a25446a9884873fb014d36dc7ba8e4');\n",
+    "('0102_cross_industry_creator_directory', '972ece37c29d79a2a5a9f37cfe3dd4fe71a25446a9884873fb014d36dc7ba8e4'), ",
+    "('0103_domain_membership_and_usage', '4345fbd8ed530f5a5184fb9a44d42b32e4702e150ec3301896750a2b7eb80001'), ",
+    "('0104_unified_domain_schema_cleanup', '3a75ffdc34bf60cb69f8a9b8d04cfa3cd6c4207522083a122aeedbb9ac1f3788');\n",
 );
 
 pub fn coverage_layer(capability: &str, acquired: i64) -> serde_json::Value {
@@ -387,14 +393,15 @@ pub async fn proof_database(schema: &str) -> Database {
         .expect("migrations apply")
 }
 
-pub async fn proof_database_before_cross_industry_creator_directory(schema: &str) -> Database {
+#[allow(dead_code)]
+pub async fn proof_database_before_domain_cleanup(schema: &str) -> Database {
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").expect("proof URL is supplied");
     let (before, _) = MIGRATIONS
         .split_once(include_str!(
-            "../../../../database/migrations/0102_cross_industry_creator_directory.sql"
+            "../../../../database/migrations/0104_unified_domain_schema_cleanup.sql"
         ))
-        .expect("0102 is present exactly once in the complete proof ledger");
+        .expect("0104 is present exactly once in the complete proof ledger");
     isolated_proof_schema(&url, schema, before)
         .await
-        .expect("migrations before 0102 apply")
+        .expect("migrations before 0104 apply")
 }

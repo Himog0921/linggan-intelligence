@@ -2,6 +2,7 @@
 //! Callers must supply one authorized snapshot; this module does not establish source permissions,
 //! database idempotency, model readiness or the absence of concurrent/in-flight work.
 use crate::comment_study_policy::json_hash;
+use crate::comment_study_source::StudySourceRole;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -16,9 +17,16 @@ pub use input::{PreparedStudyInput, prepare_study_input};
 
 pub const SELECTION_ORDER: &str = "work_round_robin_oldest_first.v1";
 const EXCLUSIONS: [&str; 10] = [
-    "sourceRestricted", "bodyUnavailable", "indexPending", "textNotResearchable",
-    "workAuthorUnknown", "commentAuthorUnknown", "creatorVoice", "inProgress",
-    "notSelectedByMode", "budgetNotSelected",
+    "sourceRestricted",
+    "bodyUnavailable",
+    "indexPending",
+    "textNotResearchable",
+    "workAuthorUnknown",
+    "commentAuthorUnknown",
+    "creatorVoice",
+    "inProgress",
+    "notSelectedByMode",
+    "budgetNotSelected",
 ];
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -42,9 +50,13 @@ pub struct CommentKey {
 
 impl CommentKey {
     pub fn validate(&self) -> Result<(), StudySelectionError> {
-        if self.work_ref.is_nil() || self.comment_external_id.trim().is_empty()
-            || self.comment_external_id.len() > 512 || self.comment_external_id.contains('\0')
-        { return Err(StudySelectionError::InvalidRequest); }
+        if self.work_ref.is_nil()
+            || self.comment_external_id.trim().is_empty()
+            || self.comment_external_id.len() > 512
+            || self.comment_external_id.contains('\0')
+        {
+            return Err(StudySelectionError::InvalidRequest);
+        }
         Ok(())
     }
 }
@@ -52,8 +64,14 @@ impl CommentKey {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum StudyScope {
-    Works { #[serde(rename = "workRefs")] work_refs: Vec<Uuid> },
-    Comments { #[serde(rename = "commentKeys")] comment_keys: Vec<CommentKey> },
+    Works {
+        #[serde(rename = "workRefs")]
+        work_refs: Vec<Uuid>,
+    },
+    Comments {
+        #[serde(rename = "commentKeys")]
+        comment_keys: Vec<CommentKey>,
+    },
 }
 
 impl StudyScope {
@@ -70,10 +88,18 @@ impl StudyScope {
                 if !(1..=3000).contains(&comment_keys.len()) {
                     return Err(StudySelectionError::InvalidRequest);
                 }
-                for key in comment_keys.iter() { key.validate()?; }
+                for key in comment_keys.iter() {
+                    key.validate()?;
+                }
                 comment_keys.sort_unstable();
                 comment_keys.dedup();
-                if comment_keys.iter().map(|k| k.work_ref).collect::<BTreeSet<_>>().len() > 100 {
+                if comment_keys
+                    .iter()
+                    .map(|k| k.work_ref)
+                    .collect::<BTreeSet<_>>()
+                    .len()
+                    > 100
+                {
                     return Err(StudySelectionError::InvalidRequest);
                 }
             }
@@ -91,7 +117,12 @@ impl StudyScope {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum StudySelectionMode { NewOnly, InputChanged, RetryFailed, Reanalyse }
+pub enum StudySelectionMode {
+    NewOnly,
+    InputChanged,
+    RetryFailed,
+    Reanalyse,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -106,7 +137,9 @@ impl StudyRunLimits {
         if !(1..=3000).contains(&self.comment_budget)
             || !(1..=20000).contains(&self.context_character_budget)
             || !(1024..=10000000).contains(&self.token_limit)
-        { return Err(StudySelectionError::InvalidLimit); }
+        {
+            return Err(StudySelectionError::InvalidLimit);
+        }
         Ok(())
     }
 }
@@ -117,6 +150,8 @@ pub struct SelectionPreviewCommand {
     pub domain_ref: Uuid,
     pub policy_ref: Uuid,
     pub scope: StudyScope,
+    #[serde(default)]
+    pub work_roles: Vec<StudyWorkRole>,
     pub mode: StudySelectionMode,
     pub limits: StudyRunLimits,
 }
@@ -124,9 +159,13 @@ pub struct SelectionPreviewCommand {
 impl SelectionPreviewCommand {
     pub fn normalize(mut self) -> Result<Self, StudySelectionError> {
         validate_domain(self.domain_ref)?;
-        if self.policy_ref.is_nil() { return Err(StudySelectionError::InvalidRequest); }
+        if self.policy_ref.is_nil() {
+            return Err(StudySelectionError::InvalidRequest);
+        }
         self.limits.validate()?;
         self.scope.normalize()?;
+        let works = scope_works(&self.scope);
+        normalize_work_roles(&mut self.work_roles, &works)?;
         Ok(self)
     }
 }
@@ -138,11 +177,60 @@ pub struct StartStudyRunCommand {
     pub domain_ref: Uuid,
     pub policy_ref: Uuid,
     pub scope: StudyScope,
+    #[serde(default)]
+    pub work_roles: Vec<StudyWorkRole>,
     pub mode: StudySelectionMode,
     pub limits: StudyRunLimits,
     // Missing is not equivalent to explicit null: the approved start Schema requires this field.
     #[serde(deserialize_with = "required_reason")]
     pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StudyWorkRole {
+    pub content_public_ref: Uuid,
+    pub observation_role: StudySourceRole,
+}
+
+fn scope_works(scope: &StudyScope) -> Vec<Uuid> {
+    match scope {
+        StudyScope::Works { work_refs } => work_refs.clone(),
+        StudyScope::Comments { comment_keys } => comment_keys
+            .iter()
+            .map(|key| key.work_ref)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect(),
+    }
+}
+
+fn normalize_work_roles(
+    roles: &mut Vec<StudyWorkRole>,
+    works: &[Uuid],
+) -> Result<(), StudySelectionError> {
+    if roles.is_empty() {
+        roles.extend(
+            works
+                .iter()
+                .copied()
+                .map(|content_public_ref| StudyWorkRole {
+                    content_public_ref,
+                    observation_role: StudySourceRole::Primary,
+                }),
+        );
+    }
+    roles.sort_unstable();
+    let role_works: BTreeSet<_> = roles.iter().map(|role| role.content_public_ref).collect();
+    let selected_works: BTreeSet<_> = works.iter().copied().collect();
+    if roles.len() != works.len()
+        || roles.iter().any(|role| role.content_public_ref.is_nil())
+        || role_works.len() != roles.len()
+        || role_works != selected_works
+    {
+        return Err(StudySelectionError::InvalidRequest);
+    }
+    Ok(())
 }
 
 fn required_reason<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
@@ -151,22 +239,38 @@ fn required_reason<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D:
 
 impl StartStudyRunCommand {
     pub fn normalize(mut self) -> Result<Self, StudySelectionError> {
-        if self.request_ref.is_nil() { return Err(StudySelectionError::InvalidRequest); }
+        if self.request_ref.is_nil() {
+            return Err(StudySelectionError::InvalidRequest);
+        }
         let selection = self.preview().normalize()?;
         self.scope = selection.scope;
+        self.work_roles = selection.work_roles;
         match (self.mode, &self.reason) {
-            (StudySelectionMode::NewOnly, None) => {},
-            (StudySelectionMode::NewOnly, Some(_)) => return Err(StudySelectionError::InvalidRequest),
-            (_, Some(reason)) if !reason.contains('\0') && reason.chars().count() <= 500
-                && !reason.trim().is_empty() => { self.reason = Some(reason.trim().to_owned()); },
+            (StudySelectionMode::NewOnly, None) => {}
+            (StudySelectionMode::NewOnly, Some(_)) => {
+                return Err(StudySelectionError::InvalidRequest);
+            }
+            (_, Some(reason))
+                if !reason.contains('\0')
+                    && reason.chars().count() <= 500
+                    && !reason.trim().is_empty() =>
+            {
+                self.reason = Some(reason.trim().to_owned());
+            }
             _ => return Err(StudySelectionError::InvalidRequest),
         }
         Ok(self)
     }
 
     pub fn preview(&self) -> SelectionPreviewCommand {
-        SelectionPreviewCommand { domain_ref: self.domain_ref, policy_ref: self.policy_ref,
-            scope: self.scope.clone(), mode: self.mode, limits: self.limits.clone() }
+        SelectionPreviewCommand {
+            domain_ref: self.domain_ref,
+            policy_ref: self.policy_ref,
+            scope: self.scope.clone(),
+            work_roles: self.work_roles.clone(),
+            mode: self.mode,
+            limits: self.limits.clone(),
+        }
     }
 
     /// Manual intent checksum only; SQL must still persist/check request_ref atomically.
@@ -174,14 +278,15 @@ impl StartStudyRunCommand {
     pub fn manual_request_hash(&self) -> Result<String, StudySelectionError> {
         let command = self.clone().normalize()?;
         let value = json!({"domainRef":command.domain_ref,"policyRef":command.policy_ref,
-            "scope":command.scope,"mode":command.mode,"limits":command.limits,"reason":command.reason,
+            "scope":command.scope,"workRoles":command.work_roles,
+            "mode":command.mode,"limits":command.limits,"reason":command.reason,
             "origin":"manual","originRef":null,"scheduledFor":null});
         json_hash(&value).map_err(|_| StudySelectionError::InvalidRequest)
     }
 }
 
 fn validate_domain(domain: Uuid) -> Result<(), StudySelectionError> {
-    if domain.to_string() != crate::comment_study_source::ADHD_DOMAIN_REF {
+    if domain.is_nil() {
         return Err(StudySelectionError::UnsupportedDomain);
     }
     Ok(())
@@ -198,7 +303,17 @@ pub fn study_domain_lock_key(domain: Uuid) -> Result<i64, StudySelectionError> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum StudyTargetState { Ready, Queued, Running, Succeeded, NoSignal, NeedsContext, Failed, Excluded, Cancelled }
+pub enum StudyTargetState {
+    Ready,
+    Queued,
+    Running,
+    Succeeded,
+    NoSignal,
+    NeedsContext,
+    Failed,
+    Excluded,
+    Cancelled,
+}
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -234,19 +349,33 @@ pub struct StudySelection {
 }
 
 fn valid_fingerprint(value: &str) -> bool {
-    value.len() == 64 && value.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 fn selected_by_mode(mode: StudySelectionMode, row: &SelectionCandidate) -> bool {
     use StudySelectionMode::*;
     use StudyTargetState::*;
-    let Some(history) = &row.latest else { return matches!(mode, NewOnly | Reanalyse); };
-    let terminal = matches!(history.state, Succeeded | NoSignal | NeedsContext | Failed | Excluded | Cancelled);
+    let Some(history) = &row.latest else {
+        return matches!(mode, NewOnly | Reanalyse);
+    };
+    let terminal = matches!(
+        history.state,
+        Succeeded | NoSignal | NeedsContext | Failed | Excluded | Cancelled
+    );
     let stopped_legacy = !terminal && history.legacy_stopped_without_live_invocation;
     match mode {
         NewOnly => false,
-        InputChanged => terminal && history.input_fingerprint.as_ref().is_some_and(|old|
-            row.input_fingerprint.as_ref().is_some_and(|current| current != old)),
+        InputChanged => {
+            terminal
+                && history.input_fingerprint.as_ref().is_some_and(|old| {
+                    row.input_fingerprint
+                        .as_ref()
+                        .is_some_and(|current| current != old)
+                })
+        }
         RetryFailed => matches!(history.state, Failed | Cancelled) || stopped_legacy,
         Reanalyse => terminal || stopped_legacy,
     }
@@ -255,7 +384,8 @@ fn selected_by_mode(mode: StudySelectionMode, row: &SelectionCandidate) -> bool 
 /// One selection rule for both entry points. This does not reserve targets, perform a lookup,
 /// or assert that missing comment keys exist. The SQL snapshot reader owns those obligations.
 pub fn choose_study_targets(
-    command: &SelectionPreviewCommand, rows: &[SelectionCandidate],
+    command: &SelectionPreviewCommand,
+    rows: &[SelectionCandidate],
 ) -> Result<StudySelection, StudySelectionError> {
     let command = command.clone().normalize()?;
     let mut seen = BTreeSet::new();
@@ -264,35 +394,79 @@ pub fn choose_study_targets(
     let mut counts: BTreeMap<_, _> = EXCLUSIONS.into_iter().map(|name| (name, 0)).collect();
     for (index, row) in rows.iter().enumerate() {
         row.comment_key.validate()?;
-        if row.source_ref.is_nil() || row.source_rank == 0 || !command.scope.contains(&row.comment_key)
-            || !seen.insert(row.comment_key.clone()) || !seen_sources.insert(row.source_ref)
-            || row.input_fingerprint.as_ref().is_some_and(|h| !valid_fingerprint(h))
-            || row.latest.as_ref().and_then(|h| h.input_fingerprint.as_ref())
+        if row.source_ref.is_nil()
+            || row.source_rank == 0
+            || !command.scope.contains(&row.comment_key)
+            || !seen.insert(row.comment_key.clone())
+            || !seen_sources.insert(row.source_ref)
+            || row
+                .input_fingerprint
+                .as_ref()
                 .is_some_and(|h| !valid_fingerprint(h))
-        { return Err(StudySelectionError::InvalidSnapshot); }
+            || row
+                .latest
+                .as_ref()
+                .and_then(|h| h.input_fingerprint.as_ref())
+                .is_some_and(|h| !valid_fingerprint(h))
+        {
+            return Err(StudySelectionError::InvalidSnapshot);
+        }
         let reason = crate::comment_study_source::gate::exclusion(row.source_flags);
-        if let Some(reason) = reason { *counts.get_mut(reason).ok_or(StudySelectionError::InvalidSnapshot)? += 1; }
-        else if row.in_progress { *counts.get_mut("inProgress").ok_or(StudySelectionError::InvalidSnapshot)? += 1; }
-        else {
-            if row.input_fingerprint.is_none() { return Err(StudySelectionError::InvalidSnapshot); }
+        if let Some(reason) = reason {
+            *counts
+                .get_mut(reason)
+                .ok_or(StudySelectionError::InvalidSnapshot)? += 1;
+        } else if row.in_progress {
+            *counts
+                .get_mut("inProgress")
+                .ok_or(StudySelectionError::InvalidSnapshot)? += 1;
+        } else {
+            if row.input_fingerprint.is_none() {
+                return Err(StudySelectionError::InvalidSnapshot);
+            }
             if !selected_by_mode(command.mode, row) {
-                *counts.get_mut("notSelectedByMode").ok_or(StudySelectionError::InvalidSnapshot)? += 1;
-            } else { groups.entry(row.comment_key.work_ref).or_default().push(index); }
+                *counts
+                    .get_mut("notSelectedByMode")
+                    .ok_or(StudySelectionError::InvalidSnapshot)? += 1;
+            } else {
+                groups
+                    .entry(row.comment_key.work_ref)
+                    .or_default()
+                    .push(index);
+            }
         }
     }
     if let StudyScope::Comments { comment_keys } = &command.scope
         && comment_keys.len() != seen.len()
-    { return Err(StudySelectionError::InvalidSnapshot); }
+    {
+        return Err(StudySelectionError::InvalidSnapshot);
+    }
     let mut order = Vec::new();
     for (work, indices) in &mut groups {
         indices.sort_by_key(|i| (rows[*i].source_rank, rows[*i].source_ref));
         for (rank, index) in indices.iter().enumerate() {
-            order.push((rank, *work, rows[*index].comment_key.comment_external_id.as_str(), *index));
+            order.push((
+                rank,
+                *work,
+                rows[*index].comment_key.comment_external_id.as_str(),
+                *index,
+            ));
         }
     }
     order.sort_unstable();
     let target_count = order.len().min(command.limits.comment_budget as usize);
-    *counts.get_mut("budgetNotSelected").ok_or(StudySelectionError::InvalidSnapshot)? = order.len() - target_count;
-    let selected_indices = order.into_iter().take(target_count).map(|item| item.3).collect();
-    Ok(StudySelection { scope_comment_count: rows.len(), target_count, selected_indices, exclusion_counts: counts })
+    *counts
+        .get_mut("budgetNotSelected")
+        .ok_or(StudySelectionError::InvalidSnapshot)? = order.len() - target_count;
+    let selected_indices = order
+        .into_iter()
+        .take(target_count)
+        .map(|item| item.3)
+        .collect();
+    Ok(StudySelection {
+        scope_comment_count: rows.len(),
+        target_count,
+        selected_indices,
+        exclusion_counts: counts,
+    })
 }

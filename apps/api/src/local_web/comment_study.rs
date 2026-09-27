@@ -18,8 +18,7 @@ use linggan_intelligence::comment_study_read::{
 };
 use linggan_intelligence::{
     comment_study_embedding::EmbeddingError,
-    comment_study_run::{PrepareStudyRunRequest, prepare_study_run},
-    comment_study_source::{ADHD_DOMAIN_REF, preview_sources},
+    comment_study_source::{StudySourceRole, preview_sources_for_roles},
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -34,35 +33,37 @@ pub(super) fn routes() -> Router<LocalWebState> {
         .route("/assets/comment-study.css", get(stylesheet))
         .route("/assets/comment-study.js", get(script))
         .route("/api/local/comment-study/overview", get(read_overview))
-        .route("/api/local/comment-study/runs", get(read_runs))
+        .route(
+            "/api/local/comment-study/runs",
+            get(read_runs).post(catalog_api::start),
+        )
         .route("/api/local/comment-study/targets", get(read_targets))
         .route("/api/local/comment-study/signals", get(read_signals))
         .route("/api/local/comment-study/problems", get(read_problems))
         .route("/api/local/comment-study/setup", get(read_setup))
-        .route("/api/local/comment-study/policy", post(save_policy))
-        .route("/api/local/comment-study/runs", post(start_run))
+        .route(
+            "/api/local/comment-study/policy",
+            post(catalog_api::retired),
+        )
         .route(
             "/api/local/comment-study/embedding-probe",
             post(run_embedding_probe),
         )
+        .merge(catalog_api::command_routes())
         .merge(catalog_api::routes())
         .layer(middleware::from_fn(local_comment_study_guard))
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct SavePolicy {
-    model_config_ref: Uuid,
-    comment_budget: i32,
-    context_character_budget: i32,
-}
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct StartRun {
-    content_public_refs: Vec<Uuid>,
+struct DomainQuery {
+    domain: Option<Uuid>,
 }
 
-async fn read_setup(State(state): State<LocalWebState>) -> Response {
+async fn read_setup(
+    State(state): State<LocalWebState>,
+    Query(query): Query<DomainQuery>,
+) -> Response {
     let database = match database(&state) {
         Ok(v) => v,
         Err(e) => return e,
@@ -91,22 +92,45 @@ async fn read_setup(State(state): State<LocalWebState>) -> Response {
     let Ok(as_of) = as_of else {
         return error(StatusCode::SERVICE_UNAVAILABLE, "comment_study_unavailable");
     };
-    let Ok(preview) = preview_sources(
+    let Some(domain_ref) = query.domain else {
+        return error(StatusCode::BAD_REQUEST, "domain_required");
+    };
+    let domain_state: Option<String> =
+        sqlx::query_scalar("SELECT status FROM observation_domain WHERE domain_ref=$1")
+            .bind(domain_ref)
+            .fetch_optional(database.pool())
+            .await
+            .unwrap_or(None);
+    let Some(domain_state) = domain_state else {
+        return error(StatusCode::NOT_FOUND, "domain_not_found");
+    };
+    let Ok(mut previews) = preview_sources_for_roles(
         database,
-        Uuid::parse_str(ADHD_DOMAIN_REF).expect("static UUID"),
+        domain_ref,
         &as_of,
+        &[StudySourceRole::Primary, StudySourceRole::Reference],
     )
     .await
     else {
         return error(StatusCode::SERVICE_UNAVAILABLE, "comment_study_unavailable");
     };
-    let eligible_works = preview.works.clone();
+    let Some(primary_preview) = previews.remove(&StudySourceRole::Primary) else {
+        return error(StatusCode::SERVICE_UNAVAILABLE, "comment_study_unavailable");
+    };
+    let Some(reference_preview) = previews.remove(&StudySourceRole::Reference) else {
+        return error(StatusCode::SERVICE_UNAVAILABLE, "comment_study_unavailable");
+    };
+    let eligible_works = primary_preview.works.clone();
+    let reference_eligible_works = reference_preview.works.clone();
     Json(json!({
         "contract":"comment-study.setup.v2",
-        "domainRef":ADHD_DOMAIN_REF,
+        "domainRef":domain_ref,
+        "domainStatus":domain_state,
         "modelConfigs":configs,
-        "sourcePreview":preview,
-        "eligibleWorks":eligible_works
+        "sourcePreview":primary_preview,
+        "eligibleWorks":eligible_works,
+        "referenceSourcePreview":reference_preview,
+        "referenceEligibleWorks":reference_eligible_works
     }))
     .into_response()
 }
@@ -144,56 +168,50 @@ fn embedding_probe_error_code(error: &EmbeddingError) -> &'static str {
     }
 }
 
-async fn save_policy(
+async fn page(
     State(state): State<LocalWebState>,
-    Json(request): Json<SavePolicy>,
-) -> Response {
-    if !(1..=3000).contains(&request.comment_budget)
-        || (1..=20000).contains(&request.context_character_budget) == false
-    {
-        return error(StatusCode::BAD_REQUEST, "invalid_comment_study_policy");
-    };
-    let database = match database(&state) {
-        Ok(v) => v,
-        Err(e) => return e,
-    };
-    let result:Result<Value,sqlx::Error>=async{let mut tx=database.pool().begin().await?;let valid:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_model_config config JOIN linggan_model_entry model USING(model_ref) JOIN linggan_model_connection_version version ON version.version_ref=model.connection_version_ref JOIN linggan_model_connection connection USING(connection_ref) WHERE config.config_ref=$1 AND connection.enabled)").bind(request.model_config_ref).fetch_one(&mut *tx).await?;if !valid{return Ok(json!({"error":"model_config_unavailable"}))};let policy=Uuid::new_v4();sqlx::query("INSERT INTO linggan_comment_study_policy(policy_ref,domain_ref,model_config_ref,contract,comment_budget,context_character_budget) VALUES($1,$2,$3,'comment-study.v1',$4,$5)").bind(policy).bind(Uuid::parse_str(ADHD_DOMAIN_REF).expect("static uuid")).bind(request.model_config_ref).bind(request.comment_budget).bind(request.context_character_budget).execute(&mut *tx).await?;sqlx::query("INSERT INTO linggan_comment_study_active_policy(singleton,policy_ref) VALUES(true,$1) ON CONFLICT(singleton) DO UPDATE SET policy_ref=EXCLUDED.policy_ref,updated_at=scope_001_now()").bind(policy).execute(&mut *tx).await?;tx.commit().await?;Ok(json!({"policyRef":policy,"saved":true}))}.await;
-    match result {
-        Ok(value) if value.get("error").is_none() => Json(value).into_response(),
-        Ok(_) => error(StatusCode::CONFLICT, "model_config_unavailable"),
-        Err(_) => error(StatusCode::SERVICE_UNAVAILABLE, "comment_study_unavailable"),
-    }
-}
-async fn start_run(State(state): State<LocalWebState>, Json(request): Json<StartRun>) -> Response {
-    let database = match database(&state) {
-        Ok(v) => v,
-        Err(e) => return e,
-    };
-    match prepare_study_run(
-        database,
-        PrepareStudyRunRequest {
-            content_public_refs: request.content_public_refs,
-        },
-    )
-    .await
-    {
-        Ok(value) => Json(value).into_response(),
-        Err(_) => error(StatusCode::CONFLICT, "comment_study_run_unavailable"),
-    }
-}
-
-async fn page(State(state): State<LocalWebState>) -> Html<String> {
+    Query(query): Query<DomainQuery>,
+) -> Html<String> {
     let configured = matches!(state.database, LocalDatabaseState::Ready(_));
+    let domains = state.database.database().map(|database| async move {
+        linggan_evidence::observation_domain::read_observation_domains(database)
+            .await
+            .unwrap_or_default()
+    });
+    let domains = match domains {
+        Some(read) => read.await,
+        None => Vec::new(),
+    };
+    let domain_value = query.domain.map(|value| value.to_string());
+    let selected = linggan_evidence::observation_domain::resolve_current_domain(
+        &domains,
+        domain_value.as_deref(),
+    );
+    let selected_name = selected
+        .map(|domain| domain.name.as_str())
+        .unwrap_or("选择领域");
+    let selected_status = selected
+        .map(|domain| domain.status.as_str())
+        .unwrap_or("unknown");
+    let picker = super::corpus_domain_picker(&domains, selected, "/corpus/comments", None);
+    let crumb = if picker.is_empty() {
+        "语料 <span class=\"v7-slash\">/</span> <b>评论研究</b>".to_owned()
+    } else {
+        format!(
+            "语料 <span class=\"v7-slash\">/</span> {picker} <span class=\"v7-slash\">/</span> <b>评论研究</b>"
+        )
+    };
     let header = shell::global_header(
         shell::PrimarySurface::Corpus,
         "本机研究",
-        "语料 <span class=\"v7-slash\">/</span> <b>评论研究</b>",
-        "当前研究与证据",
+        &crumb,
+        &format!("{selected_name} · 状态 {selected_status}"),
         None,
     );
+    let domain_nav = domain_value.as_deref();
     let nav = shell::corpus_side_nav(
         shell::CorpusPage::Comments,
-        None,
+        domain_nav,
         "只读呈现新评论研究链路<br>自动排程保持关闭",
     );
     Html(
@@ -203,6 +221,14 @@ async fn page(State(state): State<LocalWebState>) -> Html<String> {
             .replace(
                 "{{DATABASE_STATE}}",
                 if configured { "已连接" } else { "未连接" },
+            )
+            .replace("ADHD", selected_name)
+            .replace(
+                "<body>",
+                &format!(
+                    "<body data-domain-name=\"{}\">",
+                    super::html_escape(selected_name)
+                ),
             ),
     )
 }
@@ -393,13 +419,12 @@ mod tests {
     #[test]
     fn work_selection_keeps_its_canonical_set_when_the_visible_table_is_filtered() {
         let script = include_str!("comment_study.js");
-        assert!(script.contains("const selectedWorkRefs = new Set();"));
+        assert!(script.contains("const selectedWorkRoles = new Map();"));
         assert!(script.contains("const visibleWorks = ()"));
-        assert!(script.contains("visibleWorks().forEach(work=>") || script.contains("visibleWorks().forEach(work =>"));
-        assert!(script.contains("selectedWorkRefs.has(work.workRef)"));
-        assert!(script.contains("document.querySelector('#work-filter').addEventListener('input'"));
-        assert!(script.contains("searchWorksNow()"));
-        assert!(script.contains("MAX_SELECTED_WORKS = 100"));
+        assert!(script.contains("visibleWorks().forEach(work =>"));
+        assert!(script.contains("selectedWorkRoles.has(work.workRef)"));
+        assert!(script.contains("workCatalogPath(cursor=null)"));
+        assert!(script.contains("workCatalogState.observationRole"));
         assert!(script.contains("comments/history"));
         assert!(script.contains("继续读取研究历史"));
         assert!(script.contains("loadWorksPage(workCatalogState.nextCursor)"));
@@ -607,11 +632,12 @@ mod tests {
     #[test]
     fn comment_study_script_explains_source_eligibility_and_budget_in_chinese() {
         let script = include_str!("comment_study.js");
-        assert!(script.contains("function renderSourcePreview(preview)"));
+        assert!(script.contains("function renderSourcePreview(preview, targetId, roleLabel)"));
         assert!(script.contains("评论作者身份未知"));
         assert!(script.contains("作品作者本人"));
         assert!(script.contains("本次最多冻结"));
         assert!(script.contains("服务端作品目录"));
+        assert!(script.contains("MAX_SELECTED_WORKS = 100"));
     }
 
     #[test]
@@ -711,16 +737,37 @@ mod tests {
     }
     #[test]
     fn p1_comments_use_catalog_detail_and_server_side_work_pagination() {
-        let page=include_str!("comment_study.html");let script=include_str!("comment_study.js");
-        assert!(page.contains("data-view=\"comments\">用户评论"));assert!(page.contains("id=\"comment-detail-dialog\""));
-        for token in ["catalogQuery('comments',params)","catalogQuery('catalog-summary',summaryParams)","catalogQuery('comments/detail',{workRef,commentExternalId})","catalogQuery('works',{q:query,limit:20})","workCatalogPath(cursor)"] { assert!(script.contains(token),"missing P1 client contract: {token}"); }
-        assert!(!script.contains("setup.eligibleWorks || []"));assert!(!page.contains("筛选已加载作品"));
+        let page = include_str!("comment_study.html");
+        let script = include_str!("comment_study.js");
+        assert!(page.contains("data-view=\"comments\">用户评论"));
+        assert!(page.contains("id=\"comment-detail-dialog\""));
+        for token in [
+            "catalogQuery('comments',params)",
+            "catalogQuery('catalog-summary',summaryParams)",
+            "catalogQuery('comments/detail',{workRef,commentExternalId})",
+            "catalogQuery('works',{q:query,limit:20})",
+            "workCatalogPath(cursor)",
+        ] {
+            assert!(
+                script.contains(token),
+                "missing P1 client contract: {token}"
+            );
+        }
+        assert!(!script.contains("setup.eligibleWorks || []"));
+        assert!(!page.contains("筛选已加载作品"));
     }
     #[test]
     fn p1_comment_detail_keeps_raw_context_cleaning_and_history_visibly_distinct() {
-        let page=include_str!("comment_study.html");let script=include_str!("comment_study.js");
-        for label in ["原声证据","所属作品","父评论语境","清洗文本","研究历史"] { assert!(page.contains(label)||script.contains(label),"missing detail layer: {label}"); }
-        assert!(script.contains("仅作为语境，不作为当前评论的独立证据"));assert!(script.contains("历史未记录"));
+        let page = include_str!("comment_study.html");
+        let script = include_str!("comment_study.js");
+        for label in ["原声证据", "所属作品", "父评论语境", "清洗文本", "研究历史"]
+        {
+            assert!(
+                page.contains(label) || script.contains(label),
+                "missing detail layer: {label}"
+            );
+        }
+        assert!(script.contains("仅作为语境，不作为当前评论的独立证据"));
+        assert!(script.contains("历史未记录"));
     }
-
 }

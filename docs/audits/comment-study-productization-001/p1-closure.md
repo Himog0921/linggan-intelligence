@@ -30,7 +30,7 @@ exact head `7f22b14e` / CI run `35848941778`：Rust compile、单元测试、隔
 
 ## 最新主线整合与本机只读浏览器回执 · 2026-09-24
 
-- `origin/main@a42315eb` 已合入独立 PR worktree；合并提交为 `1c43495d`。迁移号冲突已修正为 `0103_comment_study_productization_schema.sql`，仍未注册或应用到共享运行路径。
+- `origin/main@a42315eb` 已合入独立 PR worktree；合并提交为 `1c43495d`。迁移号冲突已修正为 `0105_comment_study_productization_schema.sql`，仍未注册或应用到共享运行路径。
 - 合并后 `cargo +stable check -p linggan-intelligence -p linggan-api --locked` 与 `cargo +stable test -p linggan-intelligence -p linggan-api --locked` 均通过。`scripts/test-comment-study-productization-postgres.sh` 的 6 个隔离 target 共 22/22 通过；这些是选定 P1 proof，不是 T01–T54 全量。
 - GitHub Actions run `35887043720` 在 exact PR head `5fe1818e` 全绿（编译、单元、隔离 PostgreSQL）。CI 只安装 Playwright/Chromium；可选 `scripts/test-comment-study-p1-ui.mjs` 不存在，因此 CI 没有实际浏览器交互证明，浏览器证据来自本机手动操作。
 - 本机 HTTP 页面连接本轮新建的合成 PostgreSQL；健康检查、HTML 页面、setup 和作品目录 API 均返回 200。浏览器验证了概览计数、用户评论列表与未知声音标注、按“老师”搜索、详情中的原声/清洗文本/空研究历史、Escape 关闭、作品作者声音筛选、作品目录搜索和复选。

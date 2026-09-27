@@ -12,7 +12,10 @@ WITH scoped AS MATERIALIZED (
     JOIN linggan_comment_study_run run ON run.run_ref = target.run_ref
     JOIN linggan_comment_study_policy policy ON policy.policy_ref = run.policy_ref
     JOIN linggan_material_content work ON work.public_ref = source.content_public_ref
-    WHERE policy.domain_ref = $1 AND work.domain_ref = $1
+    WHERE policy.domain_ref = $1 AND EXISTS (
+        SELECT 1 FROM linggan_material_domain_usage usage
+        WHERE usage.content_public_ref = work.public_ref AND usage.domain_ref = $1
+    )
       AND target.content_public_ref = $2 AND source.content_public_ref = $2
       AND source.comment_external_id = $3 AND target.created_at <= $4::timestamptz
 ), page AS MATERIALIZED (

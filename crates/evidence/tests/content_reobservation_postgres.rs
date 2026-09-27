@@ -11,15 +11,14 @@ use linggan_evidence::{
     bind_observation_account, content_reobservation, decide_dispatch, grant_detail_page_session,
     issue_work_order_lease, read_content_reobservation, read_detail_delivery_reconciliation,
     record_detail_page_session_navigation, record_detail_page_session_progress,
-    report_account_eligibility,
-    rotate_installation_credential, set_station_accepting, start_producer_attempt,
-    submit_producer_package,
+    report_account_eligibility, rotate_installation_credential, set_station_accepting,
+    start_producer_attempt, submit_producer_package,
 };
 use uuid::Uuid;
 
 #[tokio::test]
 #[ignore = "requires the isolated PostgreSQL 16 proof harness"]
-async fn reobservation_uses_the_existing_authorized_lease_path_without_new_media_work() {
+async fn reobservation_never_merges_into_a_claimed_work_order() {
     let database = proof_database("content_reobservation_authorized_lease").await;
     let content_external_id = "note-reobserve-1";
     submit_package(
@@ -137,13 +136,14 @@ async fn reobservation_uses_the_existing_authorized_lease_path_without_new_media
     assert_eq!(queued.tasks[1].comment_limit, serde_json::json!(30));
     assert_eq!(queued.tasks[2].comment_limit, serde_json::json!(30));
 
-    let live_merged = content_reobservation(&database, content_public_ref)
+    let after_claim = content_reobservation(&database, content_public_ref)
         .await
-        .expect("a live exact scope still merges rather than creating parallel work");
-    assert_eq!(live_merged.admission, "MERGE");
-    assert_eq!(live_merged.execution, "MERGED");
-    assert_eq!(live_merged.lease_ref, Some(lease_ref));
-    assert_eq!(live_merged.tasks.len(), 3);
+        .expect("a claimed Work Order keeps its usage set frozen, even for the same scope");
+    assert_eq!(after_claim.admission, "ADMITTED");
+    assert_eq!(after_claim.execution, "QUEUED");
+    assert_ne!(after_claim.work_order_ref, command.work_order_ref);
+    assert_eq!(after_claim.lease_ref, None);
+    assert!(after_claim.tasks.is_empty());
 
     let attempt = parse_producer_attempt(
         &serde_json::json!({
@@ -439,9 +439,11 @@ async fn concurrent_reobservation_is_one_atomic_frozen_scope_and_one_queued_work
         "SELECT count(*) FROM collection_work_order work_order \
          JOIN collection_admission_decision decision ON decision.decision_ref=work_order.decision_ref \
          JOIN collection_work_order_material_target scope ON scope.work_order_ref=work_order.work_order_ref \
-         WHERE work_order.target_ref=$1 AND decision.authorization_ref=$2 \
-           AND scope.content_public_ref=$3 AND work_order.queue_state='queued'",
+         WHERE work_order.work_order_ref=$1 AND work_order.target_ref=$2 \
+           AND decision.authorization_ref=$3 AND scope.content_public_ref=$4 \
+           AND work_order.queue_state='queued'",
     )
+    .bind(first.work_order_ref.expect("concurrent requests share a Work Order"))
     .bind(fixture.target_ref)
     .bind(fixture.authorization_ref)
     .bind(content_public_ref)
@@ -541,13 +543,14 @@ async fn seed_authorized_material_context(
     let installation_ref = Uuid::new_v4();
     let producer_instance_id = Uuid::new_v4();
     let install_key = producer_instance_id.to_string();
-    // 领域必须写：一个**已建档**的目标在真实系统里不可能没有领域归属，而采集准入现在
-    // 会拒绝未归属的目标——材料该写进本行业证据侧还是跨行业参照侧，不能靠回落去猜。
-    sqlx::query("INSERT INTO collection_observation_target (target_ref,platform,target_kind,identity_key,display_name,source,lifecycle_state,domain_ref) VALUES ($1,'xhs','creator','creator-reobserve','复观测夹具','manual','archived','00000000-0000-4000-8000-000000000001')")
+    // 已建档目标必须通过明确 Domain relation 归属，准入不会猜用途。
+    sqlx::query("INSERT INTO collection_observation_target (target_ref,platform,target_kind,identity_key,display_name,source,lifecycle_state) VALUES ($1,'xhs','creator','creator-reobserve','复观测夹具','manual','archived')")
+        .bind(target_ref).execute(database.pool()).await.unwrap();
+    sqlx::query("INSERT INTO observation_domain_target (domain_ref,target_ref,role) VALUES ('00000000-0000-4000-8000-000000000001',$1,'primary')")
         .bind(target_ref).execute(database.pool()).await.unwrap();
     sqlx::query("INSERT INTO collection_acquisition_authorization (authorization_ref,platform,target_kind,lane,max_targets,max_works_per_target,allowed_task_templates,allowed_dispatch_lanes,max_work_units,purpose,granted_by,expires_at) VALUES ($1,'xhs','creator','deep_archive',10,20,ARRAY['creator_archive','material_deepening'],ARRAY['immediate','batch'],20,'content reobservation proof','person',scope_001_now()+interval '1 day')")
         .bind(authorization_ref).execute(database.pool()).await.unwrap();
-    sqlx::query("INSERT INTO collection_acquisition_request (request_ref,target_ref,lane,purpose,requested_by) VALUES ($1,$2,'deep_archive','content reobservation proof','person')")
+    sqlx::query("INSERT INTO collection_acquisition_request (request_ref,target_ref,domain_ref,observation_role,lane,purpose,requested_by) VALUES ($1,$2,'00000000-0000-4000-8000-000000000001','primary','deep_archive','content reobservation proof','person')")
         .bind(request_ref).bind(target_ref).execute(database.pool()).await.unwrap();
     sqlx::query("INSERT INTO collection_admission_decision (decision_ref,request_ref,outcome,reason_code,authorization_ref) VALUES ($1,$2,'admitted','fixture',$3)")
         .bind(decision_ref).bind(request_ref).bind(authorization_ref).execute(database.pool()).await.unwrap();
@@ -588,8 +591,10 @@ async fn seed_authorized_material_context(
     sqlx::query("UPDATE collection_admission_decision SET target_ref=$2,station_ref=$3,installation_ref=$4,account_ref=$5 WHERE decision_ref=$1")
         .bind(decision_ref).bind(target_ref).bind(station_ref).bind(installation_ref).bind(account_ref)
         .execute(database.pool()).await.unwrap();
-    sqlx::query("INSERT INTO collection_work_order (work_order_ref,decision_ref,target_ref,lane,max_works,stop_conditions,station_ref,installation_ref,account_ref) VALUES ($1,$2,$3,'deep_archive',20,'[\"maximum_quota\",\"time_budget\"]'::jsonb,$4,$5,$6)")
+    sqlx::query("INSERT INTO collection_work_order (work_order_ref,decision_ref,target_ref,lane,max_works,stop_conditions,dispatch_lane,queue_state,scheduled_for,station_ref,installation_ref,account_ref) VALUES ($1,$2,$3,'deep_archive',20,'[\"maximum_quota\",\"time_budget\"]'::jsonb,'batch','queued',scope_001_now()+interval '1 day',$4,$5,$6)")
         .bind(work_order_ref).bind(decision_ref).bind(target_ref).bind(station_ref).bind(installation_ref).bind(account_ref).execute(database.pool()).await.unwrap();
+    sqlx::query("INSERT INTO collection_work_order_domain_usage (work_order_ref,request_ref,domain_ref,role,basis_kind) VALUES ($1,$2,'00000000-0000-4000-8000-000000000001','primary','admitted')")
+        .bind(work_order_ref).bind(request_ref).execute(database.pool()).await.unwrap();
     sqlx::query("INSERT INTO collection_work_order_material_target (work_order_ref,content_public_ref,ordinal,comment_limit,reply_expand_limit,acquire_media,allow_ocr,allow_asr) VALUES ($1,$2,1,30,2,false,false,false)")
         .bind(work_order_ref).bind(content_public_ref).execute(database.pool()).await.unwrap();
     AuthorizedFixture {

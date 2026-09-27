@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use uuid::Uuid;
 
 const FIRST_DISCOVERY_QUERY: &str = "ADHD";
 const FIRST_DISCOVERY_MAXIMUM_QUOTA: u16 = 20;
@@ -53,6 +54,10 @@ pub struct EvidenceQuery {
     restriction: Option<EvidenceRestriction>,
     #[serde(default)]
     cursor: Option<String>,
+    /// Required by the Corpus adapter; optional in the shared query contract for older internal
+    /// callers that operate over an already-scoped material set.
+    #[serde(default)]
+    domain_ref: Option<Uuid>,
 }
 
 impl EvidenceQuery {
@@ -101,6 +106,10 @@ impl EvidenceQuery {
 
     pub fn cursor(&self) -> Option<&str> {
         self.cursor.as_deref()
+    }
+
+    pub fn domain_ref(&self) -> Option<Uuid> {
+        self.domain_ref
     }
 }
 

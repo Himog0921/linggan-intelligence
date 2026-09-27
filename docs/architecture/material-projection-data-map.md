@@ -1,7 +1,7 @@
 # 插件产出到 Evidence 材料投影映射
 
 > 状态: 权威当前
-> 最后核对: 2026-08-31
+> 最后核对: 2026-09-24
 > 适用范围: 当前 Browser Producer 实际产出、服务接纳、Material Projection 与本机 Evidence API
 > 插件运行合同版本: `v0.8.19` 候选；scheduled TaskSpec 身份贯穿、详情/评论/回复/作者/媒体槽位执行、部分材料回执、媒体工作与统一资源读取共用同一受控链。
 > 事实来源: `plugins/linggan-intelligence-browser/src/linggan/producerRuntime.js`、`contentRuntimeAdapter.js`、Rust 接纳/投影代码、migration 0015–0027 与隔离 PostgreSQL fixture
@@ -27,6 +27,6 @@
 - `/api/local/work-resources/{publicRef}` 与 `/comments` 是共享详情/授权评论通道；页面不得另读表或 Package JSON 拼标题、作者、时间、封面。
 - 统一媒体关系固定为 `author.avatar`、`content.cover`、`content.image`、`content.video`、`content.ocr`、`content.transcript`、`comment.image`；新接纳事实写权威关系，旧材料只在共享读模型内部按既有 purpose 兼容，不要求破坏性回填。
 - `media` 同时表达资源关系、可用状态、受控本地句柄和原始尺寸/时长事实；Evidence 列表与 Inspector 必须读取它。`preview` 仅为旧调用兼容字段，不得成为新业务页面的媒体来源。
-- `/api/local/evidence-library/legacy` 是显式兼容入口，最多返回 50 张旧 discovery cards；默认入口不混读。
+- DOMAIN-UNIFICATION-001 移除 `/api/local/evidence-library/legacy` 兼容入口；全部作品资源列表从 `/api/local/work-resources` 读取，并显式携带 Domain。旧发现卡投影不得绕过材料的 Domain usage。
 - `snapshot_at/asOf` 只冻结分页中可见的已接纳材料；媒体处置始终按当前 `recorded_at + effective_at` 资格求值，所以旧 cursor 不能绕过已生效撤回。
 - 本卡没有实现 OCR/ASR provider、清理 worker、处置管理 UI、企业权限或 Issue #89 的 N+1 批量化。

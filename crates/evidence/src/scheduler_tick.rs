@@ -36,7 +36,6 @@ pub const TICK_STEP_KEYS: &[&str] = &[
     STEP_PATROL,
 ];
 
-
 /// 一轮 tick 的账本句柄。
 #[derive(Debug, Clone)]
 pub struct TickLedger {
@@ -194,9 +193,12 @@ impl TickLedger {
     /// 工单），其余步骤的数在各自己的步骤行里。心跳只报巡查步的产出与跳过数，keeping 既有
     /// 页面的口径不变；「有一步失败」则整轮记失败，错误写受限的 `步骤:分类`。
     pub async fn finish(&self, reports: &[StepReport]) -> Result<(), sqlx::Error> {
-        let failed = reports
-            .iter()
-            .find_map(|report| report.outcome.error_class().map(|class| (report.step_key, class)));
+        let failed = reports.iter().find_map(|report| {
+            report
+                .outcome
+                .error_class()
+                .map(|class| (report.step_key, class))
+        });
         let patrol = reports.iter().find(|report| report.step_key == STEP_PATROL);
         let considered = patrol
             .and_then(|report| match &report.outcome {

@@ -3,7 +3,7 @@
 use linggan_storage_postgres::Database;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use sqlx::{Postgres, Row, Transaction};
+use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
 use super::{StudyCatalogError, cursor, read};
@@ -28,7 +28,7 @@ pub struct CommentHistoryQuery {
 
 impl CommentDetailQuery {
     fn validate(&self) -> Result<(), StudyCatalogError> {
-        if self.domain.to_string() != crate::comment_study_source::ADHD_DOMAIN_REF {
+        if self.domain.is_nil() {
             return Err(StudyCatalogError::UnsupportedDomain);
         }
         if self.work_ref.is_nil()
@@ -128,12 +128,22 @@ async fn read_detail(
     // These independently pageable metadata collections never load all historical bodies.
     let history = collection_page(&mut tx, query, Collection::History, &as_of, None, 50).await?;
     let versions = collection_page(&mut tx, query, Collection::Versions, &as_of, None, 50).await?;
-    let work=crate::comment_study_source::context::read_work_contexts(
-        &mut tx,query.domain,&[query.work_ref],&as_of).await
-        .map_err(|error|match error {
-            crate::comment_study_source::StudySourceError::Database(e)=>StudyCatalogError::Database(e),
-            crate::comment_study_source::StudySourceError::InvalidDomain=>StudyCatalogError::ResourceNotFound,
-        })?.remove(&query.work_ref);
+    let work = crate::comment_study_source::context::read_work_contexts(
+        &mut tx,
+        query.domain,
+        &[query.work_ref],
+        &as_of,
+    )
+    .await
+    .map_err(|error| match error {
+        crate::comment_study_source::StudySourceError::Database(e) => {
+            StudyCatalogError::Database(e)
+        }
+        crate::comment_study_source::StudySourceError::InvalidDomain => {
+            StudyCatalogError::ResourceNotFound
+        }
+    })?
+    .remove(&query.work_ref);
     tx.commit().await?;
     Ok(json!({
         "contract": "comment-study.read.v2", "domainRef": query.domain, "asOf": as_of, "work":work,
@@ -177,7 +187,9 @@ async fn read_collection(
     let previous = query
         .cursor
         .as_deref()
-        .map(|value| cursor::decode_for::<cursor::EntryPosition>(collection.resource(), value, &hash))
+        .map(|value| {
+            cursor::decode_for::<cursor::EntryPosition>(collection.resource(), value, &hash)
+        })
         .transpose()?;
     let mut tx = begin_read(database).await?;
     let as_of = read::resolve_as_of(&mut tx, previous.as_ref()).await?;
@@ -291,8 +303,13 @@ async fn read_parent(
     id: &str,
     as_of: &str,
 ) -> Result<Value, StudyCatalogError> {
-    let parents=crate::comment_study_source::context::read_parents(tx,&[(work,id.to_owned())],as_of).await?;
-    Ok(parents.get(&(work,id.to_owned())).cloned().unwrap_or(Value::Null))
+    let parents =
+        crate::comment_study_source::context::read_parents(tx, &[(work, id.to_owned())], as_of)
+            .await?;
+    Ok(parents
+        .get(&(work, id.to_owned()))
+        .cloned()
+        .unwrap_or(Value::Null))
 }
 
 #[cfg(test)]
@@ -317,14 +334,22 @@ mod tests {
     }
 
     #[test]
-    fn detail_rejects_cross_domain_and_unknown_fields() {
+    fn detail_requires_a_domain_and_rejects_unknown_fields() {
         let mut value = query("one");
         value.domain = Uuid::new_v4();
-        assert!(matches!(value.validate(), Err(StudyCatalogError::UnsupportedDomain)));
-        assert!(serde_json::from_value::<CommentDetailQuery>(json!({
-            "domain": crate::comment_study_source::ADHD_DOMAIN_REF,
-            "workRef": Uuid::from_u128(1), "commentExternalId": "one", "origin": "scheduled"
-        })).is_err());
+        assert!(value.validate().is_ok());
+        value.domain = Uuid::nil();
+        assert!(matches!(
+            value.validate(),
+            Err(StudyCatalogError::UnsupportedDomain)
+        ));
+        assert!(
+            serde_json::from_value::<CommentDetailQuery>(json!({
+                "domain": crate::comment_study_source::ADHD_DOMAIN_REF,
+                "workRef": Uuid::from_u128(1), "commentExternalId": "one", "origin": "scheduled"
+            }))
+            .is_err()
+        );
     }
 
     #[test]

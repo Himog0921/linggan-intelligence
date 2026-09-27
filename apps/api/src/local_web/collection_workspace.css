@@ -972,6 +972,7 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 .c-task-id,.c-task-attempt,.c-task-row time { color:var(--v7-muted); font:var(--c-fw-medium) var(--c-fs-100)/1.45 var(--lgi-font-mono); }
 .c-task-target b { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--v7-black); font-size:var(--c-fs-200); }
 .c-task-target small,.c-task-state small { display:block; margin-top:calc(var(--c-cell) * .5); color:var(--v7-ghost); font-size:var(--c-fs-100); }
+.c-task-target small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .c-task-stage,.c-task-receipt { color:var(--v7-body); font-size:var(--c-fs-100); overflow-wrap:anywhere; }
 .c-task-row .c-task-state { width:auto; flex:initial; padding:var(--c-cell); }
 .c-task-row .c-task-state b { font-size:var(--c-fs-100); }
@@ -1418,4 +1419,61 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 @media (max-width:1380px){
   .c-runtime-board-body{grid-template-columns:1fr}
   .c-runtime-board-metrics{border-top:var(--c-line-hair) solid var(--v7-line);border-left:0}
+}
+
+/* DOMAIN-UNIFICATION-001 · Domain configuration and Domain–Target membership.
+ * Keep the L1 surface in the existing Collection Control language: one create form,
+ * flat domain sections, current counts and source-specific lanes. */
+.domain-management{display:grid;gap:var(--lgi-space-6);min-width:0}
+.domain-create,.domain-draft{display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) auto;align-items:end;gap:var(--lgi-space-3);min-width:0;padding-bottom:var(--lgi-space-5);border-bottom:var(--c-line-rail) solid var(--v7-black)}
+.domain-create{padding-bottom:0;border-bottom:0}
+.domain-create h2,.domain-draft h2{grid-column:1/-1;margin:0;color:var(--v7-black);font-size:var(--lgi-text-section);font-weight:700;line-height:var(--lgi-lh-heading)}
+.domain-draft p{grid-column:1/-1;margin:0;color:var(--v7-muted);font-size:var(--lgi-text-label);line-height:var(--lgi-lh-body)}
+.domain-management form label:not([hidden]){display:grid;gap:var(--lgi-space-1);min-width:0;color:var(--v7-muted);font-size:var(--lgi-text-label)}
+.domain-management form input:not([type="hidden"]),.domain-management form select{width:100%;min-width:0;min-height:var(--lgi-space-10);padding:0 var(--lgi-space-3);border:var(--c-line-hair) solid var(--v7-line-strong);border-radius:0;background:var(--v7-white);color:var(--v7-black);font:var(--c-fw-medium) var(--lgi-text-label)/var(--lgi-lh-data) var(--lgi-font-sans)}
+.domain-create button,.domain-draft button{min-height:var(--lgi-space-10);white-space:nowrap}
+.domain-card{display:grid;gap:var(--lgi-space-4);min-width:0;padding:var(--lgi-space-5) 0;border-top:var(--c-line-rail) solid var(--v7-black)}
+.domain-card>header{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--lgi-space-5)}
+.domain-card>header>div{display:flex;align-items:center;gap:var(--lgi-space-3);min-width:0}
+.domain-card h2{margin:0;color:var(--v7-black);font-size:var(--lgi-text-section);font-weight:700;line-height:var(--lgi-lh-heading)}
+.domain-card>header span{flex:0 0 auto;padding:var(--lgi-space-1) var(--lgi-space-2);border:var(--c-line-hair) solid var(--v7-line-strong);color:var(--v7-body);font-size:var(--lgi-text-label);line-height:var(--lgi-lh-data)}
+.domain-card>header p{min-width:0;margin:0;color:var(--v7-muted);font-size:var(--lgi-text-label);line-height:var(--lgi-lh-body);overflow-wrap:anywhere;text-align:right}
+.domain-fields{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr) minmax(0,1.3fr) minmax(0,.7fr) auto;align-items:end;gap:var(--lgi-space-3);min-width:0;padding:var(--lgi-space-4) 0;border-top:var(--c-line-hair) solid var(--v7-line)}
+.domain-fields button,.domain-target-add button{min-height:var(--lgi-space-10);white-space:nowrap}
+.domain-counts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--lgi-space-3)}
+.domain-counts span{min-width:0;padding-top:var(--lgi-space-2);border-top:var(--c-line-hair) solid var(--v7-line);color:var(--v7-body);font-size:var(--lgi-text-label);line-height:var(--lgi-lh-body);font-variant-numeric:tabular-nums}
+.domain-lanes ul{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0 var(--lgi-space-4);margin:0;padding:0;list-style:none}
+.domain-lanes li{display:flex;align-items:baseline;justify-content:space-between;gap:var(--lgi-space-2);min-width:0;padding:var(--lgi-space-2) 0;border-top:var(--c-line-hair) solid var(--v7-line)}
+.domain-lanes li>span:first-child{flex:0 0 auto;color:var(--v7-body);font-size:var(--lgi-text-label)}
+.domain-lanes li>span:last-child{min-width:0;color:var(--v7-muted);font-size:var(--lgi-text-label);text-align:right}
+.domain-lanes>small{display:block;margin-top:var(--lgi-space-2);color:var(--v7-muted);font-size:var(--lgi-text-label);line-height:var(--lgi-lh-body)}
+.domain-card table{width:100%;border-collapse:collapse;font-size:var(--lgi-text-label)}
+.domain-card th{padding:var(--lgi-space-2);border-bottom:var(--c-line-hair) solid var(--v7-line-strong);color:var(--v7-muted);font-weight:600;text-align:left}
+.domain-card td{padding:var(--lgi-space-2);border-bottom:var(--c-line-hair) solid var(--v7-line);color:var(--v7-body);vertical-align:middle}
+.domain-card td small{display:block;margin-top:var(--lgi-space-1);color:var(--v7-muted);font-size:var(--lgi-text-label)}
+.domain-card td form{display:flex;align-items:center;gap:var(--lgi-space-2);margin:0}
+.domain-card td select{width:auto;min-width:calc(var(--lgi-space-24) + var(--lgi-space-2))}
+.domain-card td button{min-height:calc(var(--lgi-space-8) + var(--lgi-space-1));padding:0 var(--lgi-space-3);white-space:nowrap}
+.domain-target-add{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,.5fr) auto;align-items:end;gap:var(--lgi-space-3);padding-bottom:var(--lgi-space-4);border-bottom:var(--c-line-hair) solid var(--v7-line)}
+.domain-card footer{display:flex;flex-wrap:wrap;gap:var(--lgi-space-2);color:var(--v7-muted);font-size:var(--lgi-text-label)}
+.domain-card footer a{color:var(--v7-body);text-underline-offset:var(--lgi-space-1)}
+.domain-feedback{margin:0;padding:var(--lgi-space-3);font-size:var(--lgi-text-label);line-height:var(--lgi-lh-body)}
+.domain-feedback-error{border-left:var(--c-line-mode) solid var(--v7-bad);background:var(--v7-bad-soft);color:var(--v7-black)}
+.domain-management>p{margin:0;padding:var(--lgi-space-4) 0;border-top:var(--c-line-hair) solid var(--v7-line-strong);color:var(--v7-muted);font-size:var(--lgi-text-body);line-height:var(--lgi-lh-body)}
+.domain-management .c-btn-primary:focus-visible,.domain-management .c-btn-secondary:focus-visible,.domain-management .c-btn-quiet:focus-visible{outline:var(--c-line-rail) solid var(--lgi-focus);outline-offset:var(--c-line-rail)}
+@media(max-width:1180px){
+  .domain-create,.domain-draft{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .domain-create button,.domain-draft button{justify-self:start}
+  .domain-fields{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .domain-fields button{justify-self:start}
+  .domain-counts,.domain-lanes ul{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:900px){
+  .c-page:has(.domain-management){min-width:0}
+  .domain-create,.domain-draft,.domain-fields,.domain-target-add{grid-template-columns:minmax(0,1fr)}
+  .domain-create h2,.domain-draft h2,.domain-draft p{grid-column:auto}
+  .domain-card>header{flex-direction:column;gap:var(--lgi-space-2)}
+  .domain-card>header p{text-align:left}
+  .domain-counts,.domain-lanes ul{grid-template-columns:minmax(0,1fr)}
+  .domain-card table{display:block;overflow-x:auto}
 }

@@ -6,7 +6,7 @@
 
 use crate::acquisition_chain::{
     DETAIL_WINDOW_COMMENT_LIMIT, DETAIL_WINDOW_REPLY_EXPAND_LIMIT,
-    in_flight_work_for_exact_material_scope_in_transaction,
+    request_and_admit_material_targets_under_authorization_for_domain_in_transaction,
     request_and_admit_material_targets_under_authorization_in_transaction,
 };
 use crate::work_order_lease::expire_lapsed_leases_in_transaction;
@@ -29,8 +29,6 @@ pub enum ContentReobservationError {
     PlatformNotSupported,
     #[error("this work has no active target-linked deepening authorization")]
     AuthorizedTargetMissing,
-    #[error("the strict reobservation merge no longer has the lease it was admitted against")]
-    EquivalentLeaseMissing,
     #[error(transparent)]
     Acquisition(#[from] AcquisitionChainError),
     #[error(transparent)]
@@ -115,6 +113,22 @@ pub async fn content_reobservation(
     database: &Database,
     public_ref: Uuid,
 ) -> Result<ContentReobservation, ContentReobservationError> {
+    content_reobservation_in_domain_inner(database, public_ref, None).await
+}
+
+pub async fn content_reobservation_in_domain(
+    database: &Database,
+    public_ref: Uuid,
+    domain_ref: Uuid,
+) -> Result<ContentReobservation, ContentReobservationError> {
+    content_reobservation_in_domain_inner(database, public_ref, Some(domain_ref)).await
+}
+
+async fn content_reobservation_in_domain_inner(
+    database: &Database,
+    public_ref: Uuid,
+    domain_ref: Option<Uuid>,
+) -> Result<ContentReobservation, ContentReobservationError> {
     if !acquisition_chain_schema_is_ready(database).await? {
         return Err(ContentReobservationError::Acquisition(
             AcquisitionChainError::SchemaUnavailable,
@@ -140,7 +154,7 @@ pub async fn content_reobservation(
         return Err(ContentReobservationError::PlatformNotSupported);
     }
     let Some(linked_authorization) =
-        linked_authorization_in_transaction(&mut transaction, public_ref).await?
+        linked_authorization_in_transaction(&mut transaction, public_ref, domain_ref).await?
     else {
         return Err(ContentReobservationError::AuthorizedTargetMissing);
     };
@@ -157,46 +171,39 @@ pub async fn content_reobservation(
         allow_asr: false,
     }];
     // This is one transaction by design. `request_and_admit…` holds the observation-target lock
-    // while it writes the exact queued scope, so a concurrent click sees that durable Work Order
-    // and merges instead of producing a parallel immediate request. A later eligible station is
-    // the only owner allowed to turn it into a Lease.
+    // while it writes or merges the exact unclaimed scope, so concurrent clicks cannot create
+    // parallel queued work. Once a Work Order has ever been claimed, a later request gets its own
+    // Work Order instead of changing the frozen purpose set. A later eligible station is the only
+    // owner allowed to turn queued work into a Lease.
     expire_lapsed_leases_in_transaction(&mut transaction).await?;
-    let outcome = request_and_admit_material_targets_under_authorization_in_transaction(
-        &mut transaction,
-        linked_authorization.target_ref,
-        &linked_authorization.purpose,
-        "person",
-        &targets,
-        linked_authorization.authorization_ref,
-    )
-    .await?;
+    let outcome = if let Some(domain_ref) = domain_ref {
+        request_and_admit_material_targets_under_authorization_for_domain_in_transaction(
+            &mut transaction,
+            linked_authorization.target_ref,
+            domain_ref,
+            &linked_authorization.purpose,
+            "person",
+            &targets,
+            linked_authorization.authorization_ref,
+        )
+        .await?
+    } else {
+        request_and_admit_material_targets_under_authorization_in_transaction(
+            &mut transaction,
+            linked_authorization.target_ref,
+            &linked_authorization.purpose,
+            "person",
+            &targets,
+            linked_authorization.authorization_ref,
+        )
+        .await?
+    };
     let media = reobservation_media_policy();
     let admission = admission_label(outcome.outcome.code());
     let admission_reason = admission_reason(&outcome.outcome);
     let (work_order_ref, lease_ref, expires_at, execution) =
         if let Some(work_order_ref) = outcome.work_order_ref {
             (Some(work_order_ref), None, None, "QUEUED")
-        } else if matches!(&outcome.outcome, AdmissionOutcome::Merge { .. }) {
-            let existing = in_flight_work_for_exact_material_scope_in_transaction(
-                &mut transaction,
-                linked_authorization.target_ref,
-                "deep_archive",
-                linked_authorization.authorization_ref,
-                &targets,
-            )
-            .await?
-            .ok_or(ContentReobservationError::EquivalentLeaseMissing)?;
-            let execution = if existing.lease_ref.is_some() {
-                "MERGED"
-            } else {
-                "QUEUED"
-            };
-            (
-                Some(existing.work_order_ref),
-                existing.lease_ref,
-                existing.expires_at,
-                execution,
-            )
         } else {
             (None, None, None, "NOT_STARTED")
         };
@@ -233,6 +240,15 @@ pub async fn read_content_reobservation_eligibility(
     database: &Database,
     public_ref: Uuid,
 ) -> Result<Option<ContentReobservationEligibility>, ContentReobservationError> {
+    read_content_reobservation_eligibility_in_domain(database, public_ref, None).await
+}
+
+pub async fn read_content_reobservation_eligibility_in_domain(
+    database: &Database,
+    public_ref: Uuid,
+    domain_ref: impl Into<Option<Uuid>>,
+) -> Result<Option<ContentReobservationEligibility>, ContentReobservationError> {
+    let domain_ref = domain_ref.into();
     let mut transaction = database.pool().begin().await?;
     let platform: Option<String> =
         sqlx::query_scalar("SELECT platform FROM linggan_material_content WHERE public_ref=$1")
@@ -242,9 +258,10 @@ pub async fn read_content_reobservation_eligibility(
     let eligibility = match platform.as_deref() {
         None => None,
         Some("xhs") => {
-            let eligible = linked_authorization_in_transaction(&mut transaction, public_ref)
-                .await?
-                .is_some();
+            let eligible =
+                linked_authorization_in_transaction(&mut transaction, public_ref, domain_ref)
+                    .await?
+                    .is_some();
             Some(ContentReobservationEligibility {
                 supported: true,
                 eligible,
@@ -347,6 +364,7 @@ struct LinkedAuthorization {
 async fn linked_authorization_in_transaction(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     public_ref: Uuid,
+    domain_ref: Option<Uuid>,
 ) -> Result<Option<LinkedAuthorization>, sqlx::Error> {
     let row = sqlx::query(
         "WITH linked_authority AS ( \
@@ -355,6 +373,7 @@ async fn linked_authorization_in_transaction(
              JOIN collection_work_order work_order ON work_order.work_order_ref=scope.work_order_ref \
              JOIN collection_admission_decision decision ON decision.decision_ref=work_order.decision_ref \
              WHERE scope.content_public_ref=$1 \
+               AND ($2::uuid IS NULL OR EXISTS (SELECT 1 FROM collection_work_order_domain_usage usage WHERE usage.work_order_ref=work_order.work_order_ref AND usage.domain_ref=$2)) \
              UNION ALL \
              SELECT work_order.target_ref,decision.authorization_ref,finding.observed_at::timestamptz AS linked_at \
              FROM linggan_material_discovery_finding finding \
@@ -364,6 +383,7 @@ async fn linked_authorization_in_transaction(
              JOIN collection_work_order work_order ON work_order.work_order_ref=lease.work_order_ref \
              JOIN collection_admission_decision decision ON decision.decision_ref=work_order.decision_ref \
              WHERE finding.content_public_ref=$1 \
+               AND ($2::uuid IS NULL OR EXISTS (SELECT 1 FROM collection_work_order_domain_usage usage WHERE usage.work_order_ref=work_order.work_order_ref AND usage.domain_ref=$2)) \
          ) \
          SELECT linked_authority.target_ref,acquisition_auth.authorization_ref,acquisition_auth.purpose \
          FROM linked_authority \
@@ -374,6 +394,7 @@ async fn linked_authorization_in_transaction(
          ORDER BY linked_authority.linked_at DESC LIMIT 1",
     )
     .bind(public_ref)
+    .bind(domain_ref)
     .fetch_optional(&mut **transaction)
     .await?;
     Ok(row.map(|row| LinkedAuthorization {
@@ -425,12 +446,7 @@ fn task_from_row(row: &sqlx::postgres::PgRow, lease_released: bool) -> Reobserva
     let attempt_id: Option<Uuid> = row.get("attempt_id");
     let package_ref: Option<Uuid> = row.get("package_ref");
     let receipt_ref: Option<Uuid> = row.get("receipt_ref");
-    let state = task_state(
-        &execution_state,
-        lease_released,
-        attempt_id,
-        receipt_ref,
-    );
+    let state = task_state(&execution_state, lease_released, attempt_id, receipt_ref);
     ReobservationTask {
         task_id: row.get("task_id"),
         capability: row.get("capability"),
@@ -492,7 +508,10 @@ mod tests {
             task_state("input_blocked", true, None, None),
             "INPUT_BLOCKED",
         );
-        assert_eq!(task_state("input_blocked", false, None, None), "INPUT_BLOCKED");
+        assert_eq!(
+            task_state("input_blocked", false, None, None),
+            "INPUT_BLOCKED"
+        );
     }
 
     /// 词表其余分支与顺序一并钉住：租约已释放只解释 **pending**，不能把已经说明过原因的
@@ -503,14 +522,20 @@ mod tests {
             task_state("unavailable", true, None, None),
             "PAGE_UNAVAILABLE"
         );
-        assert_eq!(task_state("blocked", true, None, None), "DETAIL_READ_BLOCKED");
+        assert_eq!(
+            task_state("blocked", true, None, None),
+            "DETAIL_READ_BLOCKED"
+        );
         assert_eq!(
             task_state("pending", true, None, None),
             "EXPIRED_WITHOUT_RECEIPT"
         );
         assert_eq!(task_state("pending", false, None, None), "QUEUED");
         let attempt = Uuid::nil();
-        assert_eq!(task_state("in_progress", false, Some(attempt), None), "RUNNING");
+        assert_eq!(
+            task_state("in_progress", false, Some(attempt), None),
+            "RUNNING"
+        );
         assert_eq!(task_state("in_progress", false, None, None), "CLAIMED");
         let receipt = Uuid::nil();
         assert_eq!(

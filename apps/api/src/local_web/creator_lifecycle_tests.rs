@@ -216,7 +216,6 @@ fn creator_drawer_uses_three_business_tabs_and_two_level_work_association() {
         last_patrol_succeeded_at: Some("2026-09-04 15:30:00+08".to_owned()),
         next_patrol_at: None,
         domain_name: None,
-        domain_is_own: None,
     };
     target.identity_facts = Some(serde_json::json!({
         "redId": "creator-red-id",
@@ -788,6 +787,8 @@ fn archive_return_path_drops_untrusted_navigation_fields() {
     let unsafe_form = TargetArchiveForm {
         archive_action: None,
         row_target_ref: target_ref,
+        domain_ref: None,
+        return_domain: None,
         return_filter: Some("\"><svg onload=alert(1)>".to_owned()),
         return_sort: Some("https://example.invalid".to_owned()),
     };
@@ -801,6 +802,8 @@ fn archive_return_path_drops_untrusted_navigation_fields() {
     let valid_form = TargetArchiveForm {
         archive_action: None,
         row_target_ref: target_ref,
+        domain_ref: None,
+        return_domain: None,
         return_filter: Some("creator".to_owned()),
         return_sort: Some("last".to_owned()),
     };
@@ -993,7 +996,6 @@ fn sample_target(target_kind: &str) -> linggan_evidence::ObservationTarget {
         last_patrol_succeeded_at: None,
         next_patrol_at: None,
         domain_name: Some("ADHD".to_owned()),
-        domain_is_own: Some(true),
     }
 }
 

@@ -7,9 +7,7 @@ mod fixture;
 mod research_fixture;
 
 use fixture::proof_database;
-use linggan_intelligence::comment_study_read::{
-    CommentStudyReadQuery, read_runs,
-};
+use linggan_intelligence::comment_study_read::{CommentStudyReadQuery, read_runs};
 use linggan_intelligence::comment_study_source::ADHD_DOMAIN_REF;
 use research_fixture::{comment_with_author, detail_with_author};
 use serde_json::json;
@@ -52,12 +50,18 @@ async fn run_counts_are_independent_of_work_count_and_keep_empty_runs() {
     .await
     .unwrap();
 
-    let states = ["succeeded", "no_signal", "needs_context", "failed", "excluded", "queued"];
+    let states = [
+        "succeeded",
+        "no_signal",
+        "needs_context",
+        "failed",
+        "excluded",
+        "queued",
+    ];
     for (index, state) in states.iter().enumerate() {
         let note = format!("synthetic-count-note-{}", index / 3);
         if index % 3 == 0 {
-            detail_with_author(&database, &note, "SYNTHETIC 计数测试作品", Some("creator"))
-                .await;
+            detail_with_author(&database, &note, "SYNTHETIC 计数测试作品", Some("creator")).await;
         }
         let source_ref = comment_with_author(
             &database,
@@ -77,8 +81,8 @@ async fn run_counts_are_independent_of_work_count_and_keep_empty_runs() {
         .unwrap();
         sqlx::query(
             "INSERT INTO linggan_comment_study_work \
-             (run_ref,content_public_ref,domain_ref,selection_reason,context_state,context_manifest,context_hash) \
-             VALUES($1,$2,$3,'user_selected','missing',$4,$5) \
+             (run_ref,content_public_ref,domain_ref,observation_role,selection_reason,context_state,context_manifest,context_hash) \
+             VALUES($1,$2,$3,'primary','user_selected','missing',$4,$5) \
              ON CONFLICT(run_ref,content_public_ref) DO NOTHING",
         )
         .bind(run_ref)
@@ -126,7 +130,13 @@ async fn run_counts_are_independent_of_work_count_and_keep_empty_runs() {
     assert_eq!(runs.len(), 1);
     assert_eq!(runs[0]["workCount"], 2);
     assert_eq!(runs[0]["targetCount"], 6);
-    for field in ["succeededCount", "noSignalCount", "needsContextCount", "failedCount", "excludedCount"] {
+    for field in [
+        "succeededCount",
+        "noSignalCount",
+        "needsContextCount",
+        "failedCount",
+        "excludedCount",
+    ] {
         assert_eq!(runs[0][field], 1, "wrong independent count for {field}");
     }
 
@@ -145,15 +155,42 @@ async fn run_counts_are_independent_of_work_count_and_keep_empty_runs() {
     let result = read_runs(&database, &query).await.unwrap();
     let rows = result["runs"].as_array().unwrap();
     let empty_id = empty_run.to_string();
-    let empty = rows.iter().find(|row| row["runRef"].as_str() == Some(empty_id.as_str())).unwrap();
+    let empty = rows
+        .iter()
+        .find(|row| row["runRef"].as_str() == Some(empty_id.as_str()))
+        .unwrap();
     assert_eq!(empty["workCount"], 0);
     assert_eq!(empty["targetCount"], 0);
-    for field in ["succeededCount", "noSignalCount", "needsContextCount", "failedCount", "excludedCount"] {
+    for field in [
+        "succeededCount",
+        "noSignalCount",
+        "needsContextCount",
+        "failedCount",
+        "excludedCount",
+    ] {
         assert_eq!(empty[field], 0);
     }
     let mut bounded = query.clone();
     bounded.limit = Some(1);
-    assert_eq!(read_runs(&database, &bounded).await.unwrap()["runs"].as_array().unwrap().len(), 1);
-    bounded.domain = Some(Uuid::new_v4());
-    assert!(read_runs(&database, &bounded).await.unwrap()["runs"].as_array().unwrap().is_empty());
+    assert_eq!(
+        read_runs(&database, &bounded).await.unwrap()["runs"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    let other_domain = Uuid::new_v4();
+    sqlx::query("INSERT INTO observation_domain(domain_ref,name,status) VALUES($1,$2,'active')")
+        .bind(other_domain)
+        .bind(format!("SYNTHETIC {other_domain}"))
+        .execute(database.pool())
+        .await
+        .unwrap();
+    bounded.domain = Some(other_domain);
+    assert!(
+        read_runs(&database, &bounded).await.unwrap()["runs"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 }

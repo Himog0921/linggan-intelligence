@@ -16,7 +16,7 @@
            max(latest_created_at) AS last_study_at
     FROM qualified GROUP BY content_public_ref
 ), work_rows AS MATERIALIZED (
-    SELECT scope.work_ref, scope.work_created_at,
+    SELECT scope.work_ref, scope.work_created_at, scope.observation_role,
            title.display_title, title.display_title_source,
            COALESCE(counts.eligible,0) AS eligible, COALESCE(counts.indexed,0) AS indexed,
            COALESCE(counts.pending,0) AS pending, COALESCE(counts.studied,0) AS studied,
@@ -61,6 +61,7 @@ SELECT jsonb_build_object(
         'item', jsonb_build_object(
             'workRef', work_ref, 'displayTitle', COALESCE(display_title,'未命名作品'),
             'displayTitleSource', display_title_source,
+            'observationRole', observation_role,
             'eligibleCommentCount', eligible, 'indexedCommentCount', indexed,
             'pendingIndexCount', pending, 'studiedCommentCount', studied,
             'inProgressCommentCount', in_progress, 'needsContextCount', needs_context,

@@ -373,6 +373,18 @@ impl<'a> TargetListContext<'a> {
         }
         fields
     }
+
+    /// Acquisition input must be a concrete Domain. The collection-wide sentinel is navigation
+    /// context only and deliberately does not become a hidden Domain choice.
+    pub fn acquisition_domain_field(self) -> String {
+        let Some(domain_ref) = self
+            .domain
+            .and_then(|value| uuid::Uuid::parse_str(value).ok())
+        else {
+            return String::new();
+        };
+        format!(r#"<input type="hidden" name="domain_ref" value="{domain_ref}"/>"#)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -1008,8 +1020,9 @@ fn drawer_primary_action(
                 Some(TargetDrawerTab::Baseline),
                 Some("target-archive"),
             );
+            let domain_field = list_context.acquisition_domain_field();
             format!(
-                r#"<form class="c-dw-primary-form" method="post" action="/collection/targets/archive">{fields}{gap_field}<button class="c-btn-primary" type="submit" name="row_target_ref" value="{target_ref}">{label}</button></form>"#,
+                r#"<form class="c-dw-primary-form" method="post" action="/collection/targets/archive">{fields}{domain_field}{gap_field}<button class="c-btn-primary" type="submit" name="row_target_ref" value="{target_ref}">{label}</button></form>"#,
                 target_ref = target.target_ref,
             )
         }
@@ -1683,33 +1696,33 @@ fn inspector_overview(
     // 抽屉顶部相同的领域动作；否则这里会生成一个必然被准入拒绝的“建立档案”POST。
     let primary_action =
         target_primary_action(target, true, archive, KeywordArchiveRead::Unavailable);
-    let (action_title, action_note, action_control) =
-        if primary_action == TargetPrimaryAction::AssignDomain
-            || (target.lifecycle_state == "dismissed"
-                && primary_action == TargetPrimaryAction::ViewCreator)
-        {
-            let action = primary_action;
-            let (title, note) = required_action_copy(action);
-            (
-                title,
-                note,
-                required_action_control(
-                    target,
-                    archive,
-                    true,
-                    KeywordArchiveRead::Unavailable,
-                    list_context,
-                ),
-            )
-        } else {
-            let action = inspector.required_action;
-            let (title, note) = inspector_action_copy(action);
-            (
-                title,
-                note,
-                inspector_action_control(target, action, list_context),
-            )
-        };
+    let (action_title, action_note, action_control) = if primary_action
+        == TargetPrimaryAction::AssignDomain
+        || (target.lifecycle_state == "dismissed"
+            && primary_action == TargetPrimaryAction::ViewCreator)
+    {
+        let action = primary_action;
+        let (title, note) = required_action_copy(action);
+        (
+            title,
+            note,
+            required_action_control(
+                target,
+                archive,
+                true,
+                KeywordArchiveRead::Unavailable,
+                list_context,
+            ),
+        )
+    } else {
+        let action = inspector.required_action;
+        let (title, note) = inspector_action_copy(action);
+        (
+            title,
+            note,
+            inspector_action_control(target, action, list_context),
+        )
+    };
     let directory = inspector_count_copy(inspector.coverage.directory_works);
     let detail = inspector_detail_copy(
         inspector.coverage.captured_details,
@@ -1885,8 +1898,9 @@ fn inspector_action_control(
                 Some(TargetDrawerTab::Overview),
                 Some("archive-problems"),
             );
+            let domain_field = list_context.acquisition_domain_field();
             format!(
-                r#"<form class="c-dw-primary-form" method="post" action="/collection/targets/archive">{fields}{gap_field}<button class="c-btn-primary" type="submit" name="row_target_ref" value="{target_ref}">{label}</button></form>"#,
+                r#"<form class="c-dw-primary-form" method="post" action="/collection/targets/archive">{fields}{domain_field}{gap_field}<button class="c-btn-primary" type="submit" name="row_target_ref" value="{target_ref}">{label}</button></form>"#,
                 target_ref = target.target_ref,
             )
         }
@@ -1943,7 +1957,7 @@ fn required_action_copy(action: TargetPrimaryAction) -> (&'static str, &'static 
     match action {
         TargetPrimaryAction::AssignDomain => (
             "需要分配领域",
-            "这个目标来自插件采集，但还没有决定材料归入本行业证据库还是跨行业参照语料。",
+            "这个目标还没有关联研究领域。先选择领域再建立档案；作品材料仍走共享材料链。",
         ),
         TargetPrimaryAction::EstablishArchive => (
             "需要建立档案",
@@ -3242,8 +3256,9 @@ fn archive_tab(
                 Some(TargetDrawerTab::Baseline),
                 Some("target-archive"),
             );
+            let domain_field = list_context.acquisition_domain_field();
             format!(
-                r#"<form class="c-dw-primary-form" method="post" action="/collection/targets/archive">{fields}{gap_field}<button class="c-btn-primary" type="submit" name="row_target_ref" value="{target_ref}">{label}</button></form>"#,
+                r#"<form class="c-dw-primary-form" method="post" action="/collection/targets/archive">{fields}{domain_field}{gap_field}<button class="c-btn-primary" type="submit" name="row_target_ref" value="{target_ref}">{label}</button></form>"#,
                 target_ref = target.target_ref,
             )
         }
@@ -3575,7 +3590,6 @@ mod tests {
             last_patrol_succeeded_at: None,
             next_patrol_at: None,
             domain_name: Some("ADHD".to_owned()),
-            domain_is_own: Some(true),
         }
     }
 
@@ -3633,7 +3647,6 @@ mod tests {
     fn unassigned_creator_inspector_cannot_offer_archive_before_domain_assignment() {
         let mut creator = target("pending_decision");
         creator.domain_name = None;
-        creator.domain_is_own = None;
         let mut inspector = keyword_projection(&creator);
         inspector.required_action = TargetInspectorAction::StartArchive;
 
@@ -3749,7 +3762,10 @@ mod tests {
         let pending = render(KeywordArchiveRead::DetailPending);
         assert!(pending.contains("有详情缺口需要补采"), "{pending}");
         assert!(pending.contains(">补采缺口</button>"), "{pending}");
-        assert!(pending.contains(r#"name="archive_action" value="gaps""#), "{pending}");
+        assert!(
+            pending.contains(r#"name="archive_action" value="gaps""#),
+            "{pending}"
+        );
 
         let complete = render(KeywordArchiveRead::Complete);
         assert!(complete.contains("开始每周巡检"), "{complete}");
@@ -3799,7 +3815,10 @@ mod tests {
         assert!(pending.contains("目标状态暂时读不到"), "{pending}");
         assert!(pending.contains("有详情缺口需要补采"), "{pending}");
         assert!(pending.contains(">补采缺口</button>"), "{pending}");
-        assert!(pending.contains(r#"name="archive_action" value="gaps""#), "{pending}");
+        assert!(
+            pending.contains(r#"name="archive_action" value="gaps""#),
+            "{pending}"
+        );
     }
 
     /// **还没建过档的词，就算在巡查也仍然给「建立档案」。**

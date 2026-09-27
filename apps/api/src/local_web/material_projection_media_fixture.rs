@@ -12,6 +12,31 @@ use tower::ServiceExt;
 
 const PROOF_BLOB_SHA256: &str = "8a126be6897fab75359a5d57f5889376aac0fadec42a4c4be9dcf1080cccdd62";
 const OCR_PROOF_SHA256: &str = "1320b046a60f7c39a3480dea50b655ca92ce61db269ea07e4037e7a6f0788e5a";
+pub(super) const ADHD_DOMAIN_REF: &str = "00000000-0000-4000-8000-000000000001";
+
+/// These API fixtures preload canonical content as if it had crossed the one-time legacy
+/// projection. That keeps the HTTP proofs focused on read isolation while still requiring an
+/// explicit Domain usage, just like the production Corpus query.
+pub(super) async fn assign_synthetic_material_to_legacy_domain(
+    database: &Database,
+    content_external_id: &str,
+) {
+    sqlx::query(
+        "INSERT INTO linggan_material_domain_usage \
+         (usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref) \
+         SELECT gen_random_uuid(),content.public_ref,$2::uuid,'primary', \
+                'legacy_domain_migration',content.first_package_ref \
+           FROM linggan_material_content content \
+          WHERE content.platform='xhs' AND content.content_external_id=$1 \
+         ON CONFLICT (content_public_ref,domain_ref) \
+             WHERE basis_kind='legacy_domain_migration' DO NOTHING",
+    )
+    .bind(content_external_id)
+    .bind(ADHD_DOMAIN_REF)
+    .execute(database.pool())
+    .await
+    .expect("the synthetic canonical material has an explicit Domain usage");
+}
 
 pub(super) async fn assert_disposition_precedence(
     database: Database,
@@ -33,7 +58,9 @@ pub(super) async fn assert_disposition_precedence(
     let response = app_with_database(database.clone())
         .oneshot(
             Request::builder()
-                .uri("/api/local/work-resources?restriction=BYTES_CLEANED")
+                .uri(format!(
+                    "/api/local/work-resources?restriction=BYTES_CLEANED&domain={ADHD_DOMAIN_REF}"
+                ))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -82,7 +109,7 @@ pub(super) async fn assert_disposition_precedence(
     let response = app_with_database(database.clone())
         .oneshot(
             Request::builder()
-                .uri("/api/local/work-resources?restriction=WITHDRAWN_OR_RESTRICTED")
+                .uri(format!("/api/local/work-resources?restriction=WITHDRAWN_OR_RESTRICTED&domain={ADHD_DOMAIN_REF}"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -137,7 +164,7 @@ async fn assert_derivative_disposition(
     let response = app_with_database(database.clone())
         .oneshot(
             Request::builder()
-                .uri("/api/local/work-resources?lane=ocr&restriction=WITHDRAWN_OR_RESTRICTED")
+                .uri(format!("/api/local/work-resources?lane=ocr&restriction=WITHDRAWN_OR_RESTRICTED&domain={ADHD_DOMAIN_REF}"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -199,6 +226,7 @@ pub(super) async fn seed_media(database: &Database) -> uuid::Uuid {
     .unwrap();
     let package = json!({"contractVersion":"linggan.producer.capture-package.v1","packageRef":uuid::Uuid::new_v4(),"packageKind":"media_slots","platform":"xhs","observedAt":"2026-08-28T10:00:00Z","capturedAt":"2026-08-28T10:00:01Z","coverage":{"target":{"basis":"known_set","contentExternalId":"note-api-media"},"layers":[{"capability":"media_slots","observed":1,"attempted":0,"acquired":0,"verified":0,"failed":0,"notAttempted":1,"unknown":0,"stoppedReason":"media_acquisition_not_started"}]},"records":[{"kind":"media_slot","slotKey":"xhs:note-api-media:image:1","observationRef":observation_ref,"slot":{"role":"image","ordinal":1},"observation":{"externalUri":"https://media.example/primary","candidateUris":["https://media.example/primary","https://media.example/backup"],"observedAt":"2026-08-28T10:00:00Z"},"sourceObject":{"platform":"xhs","type":"content","externalId":"note-api-media"}}]});
     submit(database, producer_instance_id, task_id, attempt_id, package).await;
+    assign_synthetic_material_to_legacy_domain(database, "note-api-media").await;
     observation_ref
 }
 
@@ -223,6 +251,7 @@ pub(super) async fn seed_shared_media(database: &Database) -> uuid::Uuid {
     .unwrap();
     let package = json!({"contractVersion":"linggan.producer.capture-package.v1","packageRef":uuid::Uuid::new_v4(),"packageKind":"media_slots","platform":"xhs","observedAt":"2026-08-28T10:00:00Z","capturedAt":"2026-08-28T10:00:01Z","coverage":{"target":{"basis":"known_set","contentExternalId":"note-api-media-shared"},"layers":[{"capability":"media_slots","observed":1,"attempted":0,"acquired":0,"verified":0,"failed":0,"notAttempted":1,"unknown":0,"stoppedReason":"media_acquisition_not_started"}]},"records":[{"kind":"media_slot","slotKey":"xhs:note-api-media-shared:image:1","observationRef":observation_ref,"slot":{"role":"image","ordinal":1},"observation":{"externalUri":"https://media.example/shared","candidateUris":["https://media.example/shared"],"observedAt":"2026-08-28T10:00:00Z"},"sourceObject":{"platform":"xhs","type":"content","externalId":"note-api-media-shared"}}]});
     submit(database, producer_id, task_id, attempt_id, package).await;
+    assign_synthetic_material_to_legacy_domain(database, "note-api-media-shared").await;
     observation_ref
 }
 
@@ -263,6 +292,7 @@ pub(super) async fn seed_media_refresh(database: &Database) {
     .unwrap();
     let package = json!({"contractVersion":"linggan.producer.capture-package.v1","packageRef":uuid::Uuid::new_v4(),"packageKind":"media_slots","platform":"xhs","observedAt":"2026-08-28T10:05:00Z","capturedAt":"2026-08-28T10:05:01Z","coverage":{"target":{"basis":"known_set","contentExternalId":"note-api-media"},"layers":[{"capability":"media_slots","observed":1,"attempted":0,"acquired":0,"verified":0,"failed":0,"notAttempted":1,"unknown":0,"stoppedReason":"media_acquisition_not_started"}]},"records":[{"kind":"media_slot","slotKey":"xhs:note-api-media:image:1","observationRef":observation_ref,"slot":{"role":"image","ordinal":1},"observation":{"externalUri":"https://media.example/refreshed","candidateUris":["https://media.example/refreshed","https://media.example/refreshed-backup"],"observedAt":"2026-08-28T10:05:00Z"},"sourceObject":{"platform":"xhs","type":"content","externalId":"note-api-media"}}]});
     submit(database, producer_id, task_id, attempt_id, package).await;
+    assign_synthetic_material_to_legacy_domain(database, "note-api-media").await;
 }
 
 async fn submit(

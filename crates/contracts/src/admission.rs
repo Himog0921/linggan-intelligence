@@ -270,8 +270,9 @@ pub struct AdmissionFacts {
     pub authorization_ref: Option<String>,
     /// Closed explanation when no authorization reference is usable.
     pub authorization_failure: Option<AuthorizationBoundaryFailure>,
-    /// Does an in-flight Work already cover this target and lane?
-    pub in_flight_work_exists: bool,
+    /// Is there an exact, compatible, never-claimed queued Work Order that this request may join?
+    /// The caller may set this only after proving the new request has a live matching grant.
+    pub mergeable_work_order_exists: bool,
     /// Has this target already been archived to the standard the purpose needs?
     pub need_already_satisfied: bool,
     /// What question 5 found. A queued order deliberately defers this check to
@@ -295,10 +296,11 @@ pub fn decide_admission(facts: &AdmissionFacts) -> AdmissionOutcome {
         };
     }
 
-    // 2 差额 — an in-flight Work covering the same ground is a merge, not a second order.
-    if facts.in_flight_work_exists {
+    // 2 差额 — only an exact, compatible queued Work Order may accept another purpose.
+    // A claimed Work Order has frozen its usage set and must never be represented as a merge.
+    if facts.mergeable_work_order_exists {
         return AdmissionOutcome::Merge {
-            reason: "已有在途工作覆盖同一目标与 lane，等待它而不是再开一个".to_owned(),
+            reason: "相同授权与执行范围的工单仍在队列中，本次用途并入该工单".to_owned(),
         };
     }
 
@@ -350,7 +352,7 @@ mod tests {
         AdmissionFacts {
             authorization_ref: Some("auth-1".to_owned()),
             authorization_failure: None,
-            in_flight_work_exists: false,
+            mergeable_work_order_exists: false,
             need_already_satisfied: false,
             capacity: Capacity::Available {
                 station_ref: "station-1".to_owned(),
@@ -410,7 +412,7 @@ mod tests {
     #[test]
     fn in_flight_work_is_merged_not_duplicated() {
         let outcome = decide_admission(&AdmissionFacts {
-            in_flight_work_exists: true,
+            mergeable_work_order_exists: true,
             ..facts()
         });
         assert!(matches!(outcome, AdmissionOutcome::Merge { .. }));

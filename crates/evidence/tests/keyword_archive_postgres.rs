@@ -8,14 +8,14 @@
 //! 不用 SQL 抄近路造工单：此前本仓库全部用例都抄近路，于是「建档请求在写工单那一步必然
 //! 撞上 `0042` 的 CHECK」这个 100% 必现的缺陷被 14 条绿测试整齐漏掉。
 
-#[path = "support/cross_industry_fixture.rs"]
-mod cross_industry;
+#[path = "support/domain_fixture.rs"]
+mod domain;
 #[path = "support/material_fixture.rs"]
 mod fixture;
 
-use cross_industry::{
-    EXTERNAL_DOMAIN, FIXTURE_QUOTA, HOME_DOMAIN, discovery_card, search_coverage,
-    submit_external_package, submit_package_for_target, submit_package_in_domain,
+use domain::{
+    ADHD_DOMAIN, FIXTURE_QUOTA, PEER_DOMAIN, discovery_card, search_coverage,
+    submit_package_for_domain, submit_package_for_target, submit_peer_domain_package,
 };
 use fixture::proof_database;
 use linggan_evidence::{
@@ -23,7 +23,7 @@ use linggan_evidence::{
     DETAIL_WINDOW_REPLY_EXPAND_LIMIT, DispatchDecision, InstallationCheckIn, KeywordDetailAdvance,
     MaterialExecutionKind, activate_installation_credential, advance_keyword_archive_detail,
     bind_observation_account, check_in_installation, decide_dispatch, keyword_baselines_qualified,
-    keyword_targets_pending_detail, open_claim_window, read_cross_industry_hits, register_station,
+    keyword_targets_pending_detail, open_claim_window, read_keyword_hits, register_station,
     report_account_eligibility, request_and_admit, set_station_accepting,
 };
 use linggan_storage_postgres::Database;
@@ -154,7 +154,7 @@ async fn a_keyword_archive_that_never_reached_the_bottom_does_not_count() {
 #[ignore = "requires the isolated PostgreSQL 16 proof harness"]
 async fn a_complete_patrol_round_is_not_an_archive() {
     let database = proof_database("keyword_patrol_is_not_archive").await;
-    submit_external_package(
+    submit_peer_domain_package(
         &database,
         "考研自习::patrol-only",
         "patrol",
@@ -249,7 +249,7 @@ async fn submit_keyword_archive_of_url(
 ) -> Uuid {
     let (coverage, checkpoint, records) =
         keyword_archive_round(note_external_id, stop_reason, acquired, failed, url);
-    submit_external_package(
+    submit_peer_domain_package(
         database,
         identity_key,
         "deep_archive",
@@ -261,16 +261,33 @@ async fn submit_keyword_archive_of_url(
         records,
     )
     .await;
-    sqlx::query_scalar("SELECT target_ref FROM collection_observation_target WHERE identity_key=$1")
-        .bind(identity_key)
-        .fetch_one(database.pool())
-        .await
-        .expect("the archived target exists")
+    let target_ref: Uuid = sqlx::query_scalar(
+        "SELECT target_ref FROM collection_observation_target WHERE identity_key=$1",
+    )
+    .bind(identity_key)
+    .fetch_one(database.pool())
+    .await
+    .expect("the archived target exists");
+    // This helper represents a completed accepted search round. Its synthetic producer chain
+    // does not run the normal final-task transition, so close the unscoped search WorkOrders it
+    // seeded; otherwise dispatch proofs can be blocked by a stale discovery task while testing
+    // the later material-detail WorkOrder.
+    sqlx::query(
+        "UPDATE collection_work_order work_order SET queue_state='completed' \
+         WHERE work_order.target_ref=$1 AND work_order.queue_state='queued' \
+           AND NOT EXISTS (SELECT 1 FROM collection_work_order_material_target scope \
+                          WHERE scope.work_order_ref=work_order.work_order_ref)",
+    )
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .expect("the submitted search round is terminal in the proof fixture");
+    target_ref
 }
 
 /// 同一个目标上的**下一轮**建档：目标是既有的，不能再建一次。
 ///
-/// 「平台这次给的是另一条链接」只可能发生在**同一个目标**上。`submit_external_package`
+/// 「平台这次给的是另一条链接」只可能发生在**同一个目标**上。`submit_peer_domain_package`
 /// 每一轮都从建目标开始，而 `collection_observation_target` 上「平台+类型+身份」是唯一的：
 /// 拿它再采一轮，撞的是目标身份，不是链接——换一个目标则更糟，那不是「同一篇又采到一次」，
 /// 而是另一篇，按 `target_ref` 关联的判据会静默落空、让用例因为错误的原因变绿。
@@ -302,6 +319,16 @@ async fn submit_keyword_archive_round(
         records,
     )
     .await;
+    sqlx::query(
+        "UPDATE collection_work_order work_order SET queue_state='completed' \
+         WHERE work_order.target_ref=$1 AND work_order.queue_state='queued' \
+           AND NOT EXISTS (SELECT 1 FROM collection_work_order_material_target scope \
+                          WHERE scope.work_order_ref=work_order.work_order_ref)",
+    )
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .expect("the submitted search round is terminal in the proof fixture");
 }
 
 /// 一轮关键词建档的包体：覆盖率（含停在什么地方）、检查点与发现记录。
@@ -336,10 +363,14 @@ async fn hit_display_state(
     target_ref: Uuid,
     content_external_id: &str,
 ) -> (CatalogDetailState, Option<MaterialExecutionKind>) {
-    let projection = read_cross_industry_hits(database, target_ref)
-        .await
-        .expect("the cross-industry hit list stays readable")
-        .expect("the sampling surface is ready for this target");
+    let projection = read_keyword_hits(
+        database,
+        target_ref,
+        Uuid::parse_str(PEER_DOMAIN).expect("the fixture Domain is a UUID"),
+    )
+    .await
+    .expect("the Domain-scoped keyword hit list stays readable")
+    .expect("the selected Domain has a discovery surface");
     let work = projection
         .works
         .iter()
@@ -358,6 +389,122 @@ async fn hit_display_state(
         work.detail_state,
         work.execution_state.as_ref().map(|state| state.kind),
     )
+}
+
+struct DetailStation {
+    install_key: String,
+    credential: Option<String>,
+}
+
+/// Create an idle detail-capable station whose plugin is authenticated and bound to an account.
+async fn ready_detail_station(
+    database: &Database,
+    label: &str,
+    capabilities: serde_json::Value,
+) -> DetailStation {
+    let station_ref = register_station(database, label, 200)
+        .await
+        .expect("station is registered");
+    open_claim_window(database, station_ref, 1)
+        .await
+        .expect("station claim window opens");
+    let install_key = Uuid::new_v4().to_string();
+    let outcome = check_in_installation(
+        database,
+        &InstallationCheckIn {
+            install_key: &install_key,
+            installation_credential: None,
+            plugin_version: "0.8.48",
+            browser_label: Some(label),
+            capabilities,
+            selector_health: None,
+        },
+    )
+    .await
+    .expect("installation checks in");
+    let CheckInOutcome::Claimed {
+        installation_ref,
+        credential,
+        ..
+    } = outcome
+    else {
+        panic!("an open claim window must claim the installation; got {outcome:?}");
+    };
+    let credential = credential.map(|issued| {
+        (
+            issued.credential_ref,
+            issued.raw_credential.expose_once().to_owned(),
+        )
+    });
+    let credential = if let Some((credential_ref, raw)) = credential {
+        activate_installation_credential(database, installation_ref, credential_ref, &raw)
+            .await
+            .expect("the proof installation activates its pending credential");
+        Some(raw)
+    } else {
+        None
+    };
+    set_station_accepting(database, station_ref, true, "person")
+        .await
+        .expect("person enables station acceptance");
+    let receipt = report_account_eligibility(
+        database,
+        installation_ref,
+        credential
+            .as_deref()
+            .expect("the proof installation holds a credential"),
+        AccountEligibilityObservation::Authenticated {
+            raw_platform_account_id: "detail-dispatch-account",
+        },
+        Some(&[7_u8; 32]),
+    )
+    .await
+    .expect("account eligibility is reported");
+    bind_observation_account(
+        database,
+        receipt.account_ref.expect("account ref exists"),
+        installation_ref,
+        "person",
+    )
+    .await
+    .expect("person binds the account");
+    DetailStation {
+        install_key,
+        credential,
+    }
+}
+
+async fn submit_home_domain_keyword_archive(database: &Database, identity_key: &str) -> Uuid {
+    let mut coverage = search_coverage("学不进去", 4);
+    coverage["layers"][0]["stoppedReason"] = serde_json::json!("bottom_confirmed");
+    coverage["target"]["query"] = serde_json::json!("学不进去");
+    submit_package_for_domain(
+        database,
+        ADHD_DOMAIN,
+        identity_key,
+        "deep_archive",
+        serde_json::json!({"query":"学不进去","ranking":"most_liked","scrollRounds":10}),
+        FIXTURE_QUOTA,
+        "discovery_search",
+        coverage,
+        serde_json::json!({"surfaceReceipt":{"stopReason":"bottom_confirmed"}}),
+        (1..=4)
+            .map(|index| {
+                discovery_card(
+                    &format!("note-home-{index}"),
+                    &format!("本领域建档样本 {index}"),
+                    &format!("{}", index * 1000),
+                    &format!("https://www.xiaohongshu.com/search_result/note-home-{index}?xsec_token=ABhome"),
+                )
+            })
+            .collect(),
+    )
+    .await;
+    sqlx::query_scalar("SELECT target_ref FROM collection_observation_target WHERE identity_key=$1")
+        .bind(identity_key)
+        .fetch_one(database.pool())
+        .await
+        .expect("the ADHD target exists")
 }
 
 /// 建档拿到链接之后，必须接着把详情补上。
@@ -393,17 +540,17 @@ async fn an_archived_keyword_advances_from_links_to_details() {
     };
     assert_eq!(works, 1, "这一轮只采回一篇，就只该补一篇的详情");
 
-    // 作用域落在跨行业样本上，而不是证据侧那张表——参照物不进证据库。
+    // 该 Domain 的目标材料使用规范 Content 身份进入冻结范围。
     let scoped: Vec<String> = sqlx::query_scalar(
-        "SELECT sample.content_external_id \
-         FROM collection_work_order_cross_industry_target scope \
-         JOIN cross_industry_sample sample USING(sample_ref) \
+        "SELECT content.content_external_id \
+         FROM collection_work_order_material_target scope \
+         JOIN linggan_material_content content ON content.public_ref=scope.content_public_ref \
          WHERE scope.work_order_ref=$1 ORDER BY scope.ordinal",
     )
     .bind(work_order_ref)
     .fetch_all(database.pool())
     .await
-    .expect("the cross-industry scope is readable");
+    .expect("the canonical material scope is readable");
     assert_eq!(scoped, vec!["note-archive-1".to_owned()]);
     let evidence_scope: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM collection_work_order_material_target WHERE work_order_ref=$1",
@@ -412,28 +559,25 @@ async fn an_archived_keyword_advances_from_links_to_details() {
     .fetch_one(database.pool())
     .await
     .unwrap();
-    assert_eq!(evidence_scope, 0, "跨行业参照物不得写进证据侧的作用域表");
+    assert_eq!(evidence_scope, 1);
 
-    // 详情读的窗口冻在作用域行上，与创作者观察同口径：一次打开带回详情 + 前 30 条评论
-    // + 2 层回复。跨行业这张表此前根本没有这两列（`0074` 只有身份与顺序），于是关键词
-    // 的详情补采按构造就是 detail-only——采回来的材料有评论数、没有一条评论内容，而这一
-    // 切在纸面上看不出来：作用域行「看起来」是完整的。
+    // 详情读的窗口冻在规范材料作用域上：详情 + 前 30 条评论 + 2 层回复。
     let policy: Vec<(i32, i32)> = sqlx::query_as(
         "SELECT scope.comment_limit,scope.reply_expand_limit \
-         FROM collection_work_order_cross_industry_target scope \
+         FROM collection_work_order_material_target scope \
          WHERE scope.work_order_ref=$1 ORDER BY scope.ordinal",
     )
     .bind(work_order_ref)
     .fetch_all(database.pool())
     .await
-    .expect("the frozen cross-industry policy is readable");
+    .expect("the frozen Domain material policy is readable");
     assert_eq!(
         policy,
         vec![(
             DETAIL_WINDOW_COMMENT_LIMIT,
             DETAIL_WINDOW_REPLY_EXPAND_LIMIT
         )],
-        "跨行业侧的详情补采也必须冻上评论与回复的窗口"
+        "peer Domain 的详情补采也必须冻上评论与回复的窗口"
     );
 
     // 已经排上的那一篇不会被第二次排进来——重复补采同一篇不产生新事实，只多花一次
@@ -545,7 +689,7 @@ async fn a_home_domain_keyword_also_advances_to_details() {
         "该先补点赞最高的三篇"
     );
 
-    // 作用域落在**证据侧**那张表，不是跨行业那张——本领域的材料不进跨行业语料。
+    // 作用域落在所有 Domain 共用的规范材料表。
     let evidence_scope: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM collection_work_order_material_target WHERE work_order_ref=$1",
     )
@@ -554,15 +698,6 @@ async fn a_home_domain_keyword_also_advances_to_details() {
     .await
     .unwrap();
     assert_eq!(evidence_scope, 3);
-    let cross_scope: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM collection_work_order_cross_industry_target \
-         WHERE work_order_ref=$1",
-    )
-    .bind(work_order_ref)
-    .fetch_one(database.pool())
-    .await
-    .unwrap();
-    assert_eq!(cross_scope, 0, "本领域的作品不得写进跨行业作用域表");
 
     // 三篇都按同一个窗口冻：正文 + 前 30 条评论 + 2 层回复 + 媒体。
     //
@@ -637,14 +772,22 @@ async fn a_keyword_archive_request_passes_admission_and_writes_a_work_order() {
     let target_ref = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO collection_observation_target \
-             (target_ref,platform,target_kind,identity_key,display_name,source,domain_ref) \
-         VALUES ($1,'xhs','keyword','考研自习::most_liked','考研自习','manual',$2::uuid)",
+             (target_ref,platform,target_kind,identity_key,display_name,source) \
+         VALUES ($1,'xhs','keyword','考研自习::most_liked','考研自习','manual')",
     )
     .bind(target_ref)
-    .bind(EXTERNAL_DOMAIN)
     .execute(database.pool())
     .await
     .expect("target is stored");
+    sqlx::query(
+        "INSERT INTO observation_domain_target(domain_ref,target_ref,role) \
+         VALUES ($1::uuid,$2,'primary')",
+    )
+    .bind(PEER_DOMAIN)
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .expect("the target has an explicit Domain relation");
     sqlx::query(
         "INSERT INTO collection_acquisition_authorization \
              (authorization_ref,platform,target_kind,lane,purpose,granted_by,expires_at, \
@@ -702,14 +845,22 @@ async fn a_creator_archive_request_still_advances_the_lifecycle() {
     // 本行业创作者，领域写实：采集准入会拒绝未归属领域的目标。
     sqlx::query(
         "INSERT INTO collection_observation_target \
-             (target_ref,platform,target_kind,identity_key,display_name,source,domain_ref) \
-         VALUES ($1,'xhs','creator','69aad16e000000003201b172','木可可','manual', \
-                 '00000000-0000-4000-8000-000000000001')",
+             (target_ref,platform,target_kind,identity_key,display_name,source) \
+         VALUES ($1,'xhs','creator','69aad16e000000003201b172','木可可','manual')",
     )
     .bind(target_ref)
     .execute(database.pool())
     .await
     .expect("target is stored");
+    sqlx::query(
+        "INSERT INTO observation_domain_target(domain_ref,target_ref,role) \
+         VALUES ($1::uuid,$2,'primary')",
+    )
+    .bind(ADHD_DOMAIN)
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .expect("the creator belongs to the ADHD Domain");
     sqlx::query(
         "INSERT INTO collection_acquisition_authorization \
              (authorization_ref,platform,target_kind,lane,purpose,granted_by,expires_at, \
@@ -754,7 +905,7 @@ async fn a_creator_archive_request_still_advances_the_lifecycle() {
 async fn a_target_without_a_domain_cannot_start_acquiring() {
     let database = proof_database("acquisition_requires_domain").await;
     let target_ref = Uuid::new_v4();
-    // 刻意不写 domain_ref：模拟浏览器上报或插件推送建出来的候选目标。
+    // 刻意不建 Domain relation：模拟尚未归属的浏览器/插件候选目标。
     sqlx::query(
         "INSERT INTO collection_observation_target \
              (target_ref,platform,target_kind,identity_key,display_name,source) \
@@ -804,12 +955,15 @@ async fn a_target_without_a_domain_cannot_start_acquiring() {
     assert_eq!(requests, 0, "连请求都不该落下，它还没到该被审的那一步");
 
     // 指定领域之后，同一个请求就该通过——证明闸挡的确实只是「没归属」。
-    sqlx::query("UPDATE collection_observation_target SET domain_ref=$2::uuid WHERE target_ref=$1")
-        .bind(target_ref)
-        .bind(EXTERNAL_DOMAIN)
-        .execute(database.pool())
-        .await
-        .expect("domain is assigned");
+    sqlx::query(
+        "INSERT INTO observation_domain_target(domain_ref,target_ref,role) \
+         VALUES ($1::uuid,$2,'primary')",
+    )
+    .bind(PEER_DOMAIN)
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .expect("the Domain relation is assigned");
     let admitted = request_and_admit(
         &database,
         target_ref,
@@ -888,7 +1042,7 @@ async fn a_detail_batch_is_claimable_and_carries_a_signed_entry_point() {
     let installation = ready_detail_station(
         &database,
         "详情补采证明工位",
-        serde_json::json!(["content_detail", "comments", "replies"]),
+        serde_json::json!(["content_detail", "media_slots", "comments", "replies"]),
     )
     .await;
     let decision = decide_dispatch(
@@ -926,9 +1080,8 @@ async fn a_detail_batch_is_claimable_and_carries_a_signed_entry_point() {
             .and_then(serde_json::Value::as_str),
         Some("note-archive-1")
     );
-    // 冻结的窗口要真的展开成任务，而不是只体现在同一页计划里：作用域行写着 30 条评论、
-    // 2 层回复，这一单就该排出三步。**此前跨行业这一侧排不出后两步**——那正是「关键词的
-    // 语料有评论数、没有评论内容」的来处。
+    // 冻结的窗口要真的展开成任务，而不是只体现在同一页计划里：同一篇材料冻结了媒体、30 条
+    // 评论和 2 层回复，这一单就该排出四步，且每一步都只请求一种能力。
     let steps: Vec<(String, String, i32)> = sqlx::query_as(
         "SELECT task.task_spec->'capabilitiesRequested'->>0, task.task_spec->>'commentLimit', \
                 (task.task_spec->>'maximumQuota')::integer \
@@ -944,6 +1097,7 @@ async fn a_detail_batch_is_claimable_and_carries_a_signed_entry_point() {
         steps,
         vec![
             ("content_detail".to_owned(), "not_requested".to_owned(), 1),
+            ("media_slots".to_owned(), "not_requested".to_owned(), 1),
             (
                 "comments".to_owned(),
                 DETAIL_WINDOW_COMMENT_LIMIT.to_string(),
@@ -955,23 +1109,21 @@ async fn a_detail_batch_is_claimable_and_carries_a_signed_entry_point() {
                 DETAIL_WINDOW_COMMENT_LIMIT
             ),
         ],
-        "跨行业详情补采要按作用域行排出「详情 + 前 30 条评论 + 2 层回复」三步"
+        "统一详情补采要按作用域行排出「详情 + 媒体 + 前 30 条评论 + 2 层回复」四步"
     );
-    // 入口必须是列表面当时平台返回的那条带签名的链接。裸 `/explore/{id}` 打不开，
-    // 而这条链接在证据侧根本不存在——它只在跨行业样本表上。
+    // 入口必须是列表面当时平台返回的那条带签名的链接，不能退化成裸 `/explore/{id}`。
     assert_eq!(
         execution_source_url.as_deref(),
         Some("https://www.xiaohongshu.com/search_result/note-archive-1?xsec_token=ABarchive"),
         "详情任务必须带上跨行业样本记下的签名链接"
     );
-    // 同一次开页的服务范围也读跨行业那张表。这一路此前只认证据侧，跨行业的详情任务因此
-    // 拿不到页面计划：插件只好为评论另开一次页面，或者干脆不读。
+    // 同一次开页的服务范围从统一的材料 scope 读取，确保插件按冻结授权读评论与回复。
     let plan = page_session_plan.expect("跨行业的详情任务也要带上同页计划");
     assert_eq!(plan["contractVersion"], "linggan.detail-page-session.v1");
     assert_eq!(plan["contentExternalId"], "note-archive-1");
     assert_eq!(
         plan["lanes"],
-        serde_json::json!(["content_detail", "comments", "replies"])
+        serde_json::json!(["content_detail", "media_slots", "comments", "replies"])
     );
     assert_eq!(plan["commentLimit"], DETAIL_WINDOW_COMMENT_LIMIT);
     assert_eq!(plan["replyExpandLimit"], DETAIL_WINDOW_REPLY_EXPAND_LIMIT);
@@ -1036,7 +1188,7 @@ async fn a_new_signed_address_after_a_stop_opens_a_successor_eligibility_through
     let station = ready_detail_station(
         &database,
         "缺输入后继证明工位",
-        serde_json::json!(["content_detail", "comments", "replies"]),
+        serde_json::json!(["content_detail", "media_slots", "comments", "replies"]),
     )
     .await;
     let decision = decide_dispatch(
@@ -1068,7 +1220,7 @@ async fn a_new_signed_address_after_a_stop_opens_a_successor_eligibility_through
     let stopped: (String, Option<String>, i32) = sqlx::query_as(
         "SELECT state,input_fingerprint,retry_epoch \
          FROM collection_execution_input_eligibility \
-         WHERE target_ref=$1 AND object_kind='cross_industry_sample' \
+         WHERE target_ref=$1 AND object_kind='material_content' \
            AND capability='content_detail'",
     )
     .bind(target_ref)
@@ -1130,7 +1282,7 @@ async fn a_new_signed_address_after_a_stop_opens_a_successor_eligibility_through
     let rows: Vec<(Uuid, i32, String, Option<Uuid>, Option<String>)> = sqlx::query_as(
         "SELECT eligibility_ref,retry_epoch,state,successor_eligibility_ref,input_fingerprint \
          FROM collection_execution_input_eligibility \
-         WHERE target_ref=$1 AND object_kind='cross_industry_sample' \
+         WHERE target_ref=$1 AND object_kind='material_content' \
            AND capability='content_detail'",
     )
     .bind(target_ref)
@@ -1238,7 +1390,7 @@ async fn a_new_signed_address_after_a_stop_opens_a_successor_eligibility_through
         "SELECT count(*) FILTER (WHERE state='input_blocked'), \
                 count(*) FILTER (WHERE state<>'input_blocked') \
          FROM collection_execution_input_eligibility \
-         WHERE target_ref=$1 AND object_kind='cross_industry_sample' \
+         WHERE target_ref=$1 AND object_kind='material_content' \
            AND capability='content_detail'",
     )
     .bind(target_ref)
@@ -1256,253 +1408,88 @@ async fn a_new_signed_address_after_a_stop_opens_a_successor_eligibility_through
     );
 }
 
-/// 跨行业侧的额度不是「写进去就算数」：这张表自己拒绝自相矛盾的作用域行。
-///
-/// 两条边界与证据侧那张表逐字同义（`0038` / `0087`）：评论 0..30；回复只有在评论也授权了
-/// 的前提下才允许展开。少了后一条，一行 `comment_limit=0, reply_expand_limit=2` 会被当成
-/// 合法作用域写下去，发租时展开成「补回复但不补评论」的任务——插件只能空手而回，而工单上
-/// 看起来一切正常。**边界要被真的撞一次**：只核对迁移文件里写着这条 CHECK，挡不住后来
-/// 一次 DROP 把它拿掉。
-///
-/// 每条无效行还得落在**没有别的理由被拒**的格子上：这张表有三条约束守着同一行——主键
-/// `(work_order_ref, sample_ref)`、唯一键 `(work_order_ref, ordinal)`、以及下面那两条 CHECK。
-/// 一行同时犯两条时，用例只能靠 PostgreSQL 先查 CHECK、后插索引这个内部顺序才绿，那是运气
-/// 不是保证。所以三篇样本、三张工单，正面控制与两条负例各占一格互不相干的坐标。
+/// Frozen material scopes reject comment limits that authorize replies without comments.
 #[tokio::test]
 #[ignore = "requires the isolated PostgreSQL 16 proof harness"]
-async fn a_cross_industry_scope_cannot_authorize_replies_without_comments() {
-    let database = proof_database("keyword_detail_scope_policy").await;
-    // 三篇互不相同的参照物只能在采回来的时候就换掉——两个目标采回同一篇，冻出来的就是同一
-    // 行样本，后面的格子就不够分了。（这不是假设：这条用例第一版只采了两篇，于是「合法行
-    // 必须被接受」这一步先撞上了主键，红得与额度毫无关系。）
+async fn a_material_scope_cannot_authorize_replies_without_comments() {
+    let database = proof_database("keyword_material_scope_policy").await;
     let mut orders = Vec::new();
-    for (identity, note_external_id) in [
-        ("考研自习::policy-a", "note-archive-1"),
+    for (identity, content_id) in [
+        ("考研自习::policy-a", "note-policy-a"),
         ("考研自习::policy-b", "note-policy-b"),
         ("考研自习::policy-c", "note-policy-c"),
     ] {
-        let target_ref = submit_keyword_archive_of(
-            &database,
-            identity,
-            note_external_id,
-            "bottom_confirmed",
-            1,
-            0,
-        )
-        .await;
+        let target_ref =
+            submit_keyword_archive_of(&database, identity, content_id, "bottom_confirmed", 1, 0)
+                .await;
         let advance = advance_keyword_archive_detail(&database, target_ref, "建档补详情", "person")
             .await
             .expect("the detail advance runs");
         let KeywordDetailAdvance::Queued { work_order_ref, .. } = advance else {
-            panic!("前置：先要有一张带上作用域的工单，实际是 {advance:?}");
+            panic!("a missing detail should create its bounded WorkOrder: {advance:?}");
         };
         orders.push(work_order_ref);
     }
-    // 每张工单**各自**冻的那一篇。不能跨工单 `ORDER BY ordinal` 一把抓回来：三张工单的
-    // ordinal 都是 1，谁排在前由算子说了算，抓出来的「第二篇」可能就是某张工单自己那篇，
-    // 正面控制便撞上主键、红得与额度无关。
-    let mut frozen = Vec::new();
+
+    let mut contents = Vec::new();
     for work_order_ref in &orders {
-        let sample_ref: Uuid = sqlx::query_scalar(
-            "SELECT sample_ref FROM collection_work_order_cross_industry_target \
-             WHERE work_order_ref = $1",
+        let content_ref: Uuid = sqlx::query_scalar(
+            "SELECT content_public_ref FROM collection_work_order_material_target \
+             WHERE work_order_ref=$1",
         )
         .bind(work_order_ref)
         .fetch_one(database.pool())
         .await
-        .expect("每张工单冻了一篇参照物");
-        frozen.push(sample_ref);
+        .expect("each WorkOrder freezes one canonical Content");
+        contents.push(content_ref);
     }
-    assert_eq!(orders.len(), 3, "三个目标各排出了一张工单");
-    assert_eq!(frozen.len(), 3, "三张工单各冻了一篇参照物");
 
-    // 正面控制：同一形状的合法行必须写得进去。否则下面两条「被拒绝」可能只是因为整张表
-    // 什么都收不下，而不是因为这两条越界。它占 (orders[0], frozen[1])——两张工单交叉的一格，
-    // 与任何一条已冻结的行都不重。
     sqlx::query(
-        "INSERT INTO collection_work_order_cross_industry_target \
-             (work_order_ref,sample_ref,ordinal,comment_limit,reply_expand_limit) \
+        "INSERT INTO collection_work_order_material_target \
+             (work_order_ref,content_public_ref,ordinal,comment_limit,reply_expand_limit) \
          VALUES ($1,$2,2,$3,$4)",
     )
     .bind(orders[0])
-    .bind(frozen[1])
+    .bind(contents[1])
     .bind(DETAIL_WINDOW_COMMENT_LIMIT)
     .bind(DETAIL_WINDOW_REPLY_EXPAND_LIMIT)
     .execute(database.pool())
     .await
-    .expect("合法的作用域行必须被接受");
+    .expect("a valid second scope row is accepted");
 
-    // 两条负例各占一格没人用过的坐标，ordinal 都取那两张工单上空着的 2：于是这一刻能拒它
-    // 的只剩下 CHECK 那两条。
-    //
-    // 名字按**库里实际存的**写。PostgreSQL 把标识符截到 63 字节，而这条与证据侧逐字同名的
-    // 约束在迁移文件里是 72 字节——写全名去比对，报错里那个名字永远对不上。证据侧那张表
-    // 存下来的同样是截断后的名字（`collection_work_order_material_target_reply_requires_comment_ch`），
-    // 两边的行为一致，只是名字都比源码里短。（这条限制在本用例里被真的撞到过一次。）
-    for (work_order_ref, sample_ref, comment_limit, reply_expand_limit, constraint) in [
+    for (work_order_ref, content_ref, comment_limit, reply_expand_limit, constraint) in [
         (
             orders[1],
-            frozen[0],
+            contents[0],
             0,
             2,
-            "collection_work_order_cross_industry_target_reply_requires_comm",
+            "collection_work_order_material_target_reply_requires_comment_ch",
         ),
         (
             orders[2],
-            frozen[1],
+            contents[1],
             31,
             0,
-            "collection_work_order_cross_industry_target_comment_limit_check",
+            "collection_work_order_material_target_comment_limit_check",
         ),
     ] {
         let refusal = sqlx::query(
-            "INSERT INTO collection_work_order_cross_industry_target \
-                 (work_order_ref,sample_ref,ordinal,comment_limit,reply_expand_limit) \
+            "INSERT INTO collection_work_order_material_target \
+                 (work_order_ref,content_public_ref,ordinal,comment_limit,reply_expand_limit) \
              VALUES ($1,$2,2,$3,$4)",
         )
         .bind(work_order_ref)
-        .bind(sample_ref)
+        .bind(content_ref)
         .bind(comment_limit)
         .bind(reply_expand_limit)
         .execute(database.pool())
         .await
-        .expect_err("越界的作用域行必须被拒绝");
+        .expect_err("the invalid material-scope row must be rejected");
         assert!(
             refusal.to_string().contains(constraint),
-            "该由 {constraint} 拒它，而不是别的冲突：{refusal}"
+            "expected {constraint} to reject the scope, got {refusal}"
         );
     }
-}
-
-struct DetailStation {
-    install_key: String,
-    credential: Option<String>,
-}
-
-/// 一个空闲的详情工位：认领窗口开着、接活开关打开、账号已绑定，能力由调用方给定。
-///
-/// 这四项缺任何一项，派发都会以一个**别的**理由拒绝，用例就会为错误的原因变红或变绿。
-///
-/// 能力列表是参数，不是写死的一项：工单要什么能力由作用域行的冻结额度推出来，所以
-/// 「都能读的工位领得走」和「只会补详情的工位领不走」是两条各自要钉的事——写死一个
-/// 列表就只能钉其中一条。
-async fn ready_detail_station(
-    database: &Database,
-    label: &str,
-    capabilities: serde_json::Value,
-) -> DetailStation {
-    let station_ref = register_station(database, label, 200)
-        .await
-        .expect("station is registered");
-    open_claim_window(database, station_ref, 1)
-        .await
-        .expect("station claim window opens");
-    let install_key = Uuid::new_v4().to_string();
-    let outcome = check_in_installation(
-        database,
-        &InstallationCheckIn {
-            install_key: &install_key,
-            installation_credential: None,
-            plugin_version: "0.8.48",
-            browser_label: Some(label),
-            // **故意不给 `discovery_search`。**
-            //
-            // 派发是按「这张工单有没有冻结具体作品」挑能力要求的：冻结了就要
-            // `content_detail`，没冻结就要 `discovery_search`。若那个判断只认证据侧
-            // 那张表、把跨行业作用域看成空，这张工单就会去要 `discovery_search`，
-            // 这个工位于是被排除，活永远派不出去。一个同时具备两种能力的工位两边都
-            // 合格，测不出这件事。
-            capabilities,
-            selector_health: None,
-        },
-    )
-    .await
-    .expect("installation checks in");
-    let CheckInOutcome::Claimed {
-        installation_ref,
-        credential,
-        ..
-    } = outcome
-    else {
-        panic!("开着的认领窗口必须认领这次安装；实际是 {outcome:?}");
-    };
-    let credential = credential.map(|issued| {
-        let raw = issued.raw_credential.expose_once().to_owned();
-        (issued.credential_ref, raw)
-    });
-    let credential = if let Some((credential_ref, raw)) = credential {
-        activate_installation_credential(database, installation_ref, credential_ref, &raw)
-            .await
-            .expect("the proof installation activates its pending credential");
-        Some(raw)
-    } else {
-        None
-    };
-    set_station_accepting(database, station_ref, true, "person")
-        .await
-        .expect("person enables station acceptance");
-    let receipt = report_account_eligibility(
-        database,
-        installation_ref,
-        credential
-            .as_deref()
-            .expect("the proof installation holds a credential"),
-        AccountEligibilityObservation::Authenticated {
-            raw_platform_account_id: "detail-dispatch-account",
-        },
-        Some(&[7_u8; 32]),
-    )
-    .await
-    .expect("account eligibility is reported");
-    bind_observation_account(
-        database,
-        receipt.account_ref.expect("account ref exists"),
-        installation_ref,
-        "person",
-    )
-    .await
-    .expect("person binds the account");
-    DetailStation {
-        install_key,
-        credential,
-    }
-}
-
-/// 造一轮**本领域**关键词建档：材料走证据侧，跨行业样本表里一条都不该有。
-async fn submit_home_domain_keyword_archive(database: &Database, identity_key: &str) -> Uuid {
-    let mut coverage = search_coverage("学不进去", 4);
-    coverage["layers"][0]["stoppedReason"] = serde_json::json!("bottom_confirmed");
-    coverage["target"]["query"] = serde_json::json!("学不进去");
-    submit_package_in_domain(
-        database,
-        HOME_DOMAIN,
-        identity_key,
-        "deep_archive",
-        serde_json::json!({"query":"学不进去","ranking":"most_liked","scrollRounds":10}),
-        FIXTURE_QUOTA,
-        "discovery_search",
-        coverage,
-        serde_json::json!({"surfaceReceipt":{"stopReason":"bottom_confirmed"}}),
-        // 四篇、点赞各不相同：一批只补三篇，于是这一批挑的是哪三篇本身就是判据。
-        (1..=4)
-            .map(|index| {
-                discovery_card(
-                    &format!("note-home-{index}"),
-                    &format!("本领域建档样本 {index}"),
-                    &format!("{}", index * 1000),
-                    &format!(
-                        "https://www.xiaohongshu.com/search_result/note-home-{index}?xsec_token=ABhome"
-                    ),
-                )
-            })
-            .collect(),
-    )
-    .await;
-    sqlx::query_scalar("SELECT target_ref FROM collection_observation_target WHERE identity_key=$1")
-        .bind(identity_key)
-        .fetch_one(database.pool())
-        .await
-        .expect("the home-domain target exists")
 }
 
 /// **准入直接报错时，调度要如实说出是哪一种。**
@@ -1519,16 +1506,22 @@ async fn a_scheduler_tick_names_the_actual_admission_failure() {
     let target_ref = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO collection_observation_target \
-             (target_ref,platform,target_kind,identity_key,display_name,source,lifecycle_state, \
-              domain_ref) \
-         VALUES ($1,'xhs','creator','creator-scheduler-reason','调度原因样本','manual','pending_decision', \
-                 $2::uuid)",
+             (target_ref,platform,target_kind,identity_key,display_name,source,lifecycle_state) \
+         VALUES ($1,'xhs','creator','creator-scheduler-reason','调度原因样本','manual','pending_decision')",
     )
     .bind(target_ref)
-    .bind(HOME_DOMAIN)
     .execute(database.pool())
     .await
     .expect("target fixture is stored");
+    sqlx::query(
+        "INSERT INTO observation_domain_target(domain_ref,target_ref,role) \
+         VALUES ($1::uuid,$2,'primary')",
+    )
+    .bind(ADHD_DOMAIN)
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .expect("the target is assigned before saving a rule");
     // 规则得先立起来（保存规则本身要求目标有领域），之后再把领域摘掉——模拟历史上那些
     // 先被发现、领域还没定的目标。
     let saved = linggan_evidence::apply_monitor_rule_command(
@@ -1579,11 +1572,11 @@ async fn a_scheduler_tick_names_the_actual_admission_failure() {
     .execute(database.pool())
     .await
     .expect("authorization is granted");
-    sqlx::query("UPDATE collection_observation_target SET domain_ref=NULL WHERE target_ref=$1")
+    sqlx::query("DELETE FROM observation_domain_target WHERE target_ref=$1")
         .bind(target_ref)
         .execute(database.pool())
         .await
-        .expect("the target is left without an observation domain");
+        .expect("the target is left without an observation Domain");
     sqlx::query(
         "UPDATE collection_monitor_rule \
          SET monitor_next_run_at=scope_001_now()-interval '1 second' WHERE target_ref=$1",
@@ -1616,33 +1609,50 @@ async fn recovery_phase_skips_keyword_candidate_scan() {
     const SCHEMA: &str = "keyword_recovery_scan";
     if let Ok(target_ref) = std::env::var("KEYWORD_RECOVERY_SCAN_CHILD") {
         let database = Database::connect_within_schema(
-            &std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap(), SCHEMA,
-        ).await.unwrap();
+            &std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap(),
+            SCHEMA,
+        )
+        .await
+        .unwrap();
         let summary = tokio::time::timeout(
             std::time::Duration::from_secs(2),
             linggan_evidence::run_keyword_archive_details(&database, "proof"),
-        ).await.expect("recovery must not wait for the locked candidate table").unwrap();
+        )
+        .await
+        .expect("recovery must not wait for the locked candidate table")
+        .unwrap();
         assert!(summary.queued.is_empty());
         assert!(summary.skipped.contains(&(
-            Uuid::parse_str(&target_ref).unwrap(), "collection_upgrade_recovery_only".to_owned(),
+            Uuid::parse_str(&target_ref).unwrap(),
+            "collection_upgrade_recovery_only".to_owned(),
         )));
         return;
     }
     let database = proof_database(SCHEMA).await;
-    let target_ref = submit_keyword_archive(
-        &database, "recovery-scan-proof", "bottom_confirmed", 1, 0,
-    ).await;
+    let target_ref =
+        submit_keyword_archive(&database, "recovery-scan-proof", "bottom_confirmed", 1, 0).await;
     let mut blocker = database.pool().begin().await.unwrap();
-    sqlx::query("LOCK TABLE cross_industry_sample IN ACCESS EXCLUSIVE MODE")
-        .execute(&mut *blocker).await.unwrap();
+    sqlx::query("LOCK TABLE linggan_material_discovery_finding IN ACCESS EXCLUSIVE MODE")
+        .execute(&mut *blocker)
+        .await
+        .unwrap();
     let result = std::process::Command::new(std::env::current_exe().unwrap())
-        .args(["--ignored", "--exact", "recovery_phase_skips_keyword_candidate_scan"])
+        .args([
+            "--ignored",
+            "--exact",
+            "recovery_phase_skips_keyword_candidate_scan",
+        ])
         .env("LINGGAN_COLLECTION_UPGRADE_PHASE", "recovery")
         .env("KEYWORD_RECOVERY_SCAN_CHILD", target_ref.to_string())
-        .output().unwrap();
+        .output()
+        .unwrap();
     blocker.rollback().await.unwrap();
-    assert!(result.status.success(), "{} {}",
-        String::from_utf8_lossy(&result.stdout), String::from_utf8_lossy(&result.stderr));
+    assert!(
+        result.status.success(),
+        "{} {}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
 }
 
 #[tokio::test]
@@ -1650,27 +1660,63 @@ async fn recovery_phase_skips_keyword_candidate_scan() {
 async fn an_unsigned_work_cannot_borrow_another_works_signed_locator() {
     let database = proof_database("keyword_locator_correlation").await;
     submit_home_domain_keyword_archive(&database, "unrelated-home-signed").await;
-    submit_keyword_archive_of(&database, "unrelated-sample-signed", "signed-sample", "bottom_confirmed", 1, 0).await;
+    submit_keyword_archive_of(
+        &database,
+        "unrelated-sample-signed",
+        "signed-sample",
+        "bottom_confirmed",
+        1,
+        0,
+    )
+    .await;
     let mut borrowed = Vec::new();
-    for (domain, identity) in [(HOME_DOMAIN, "unsigned-home"), (EXTERNAL_DOMAIN, "unsigned-sample")] {
+    for (domain, identity) in [
+        (ADHD_DOMAIN, "unsigned-home"),
+        (PEER_DOMAIN, "unsigned-sample"),
+    ] {
         let (coverage, checkpoint, records) = keyword_archive_round(
-            identity, "bottom_confirmed", 1, 0,
+            identity,
+            "bottom_confirmed",
+            1,
+            0,
             &format!("https://www.xiaohongshu.com/explore/{identity}"),
         );
-        submit_package_in_domain(
-            &database, domain, identity, "deep_archive",
+        submit_package_for_domain(
+            &database,
+            domain,
+            identity,
+            "deep_archive",
             serde_json::json!({"query":"考研自习","ranking":"most_liked","scrollRounds":10}),
-            FIXTURE_QUOTA, "discovery_search", coverage, checkpoint, records,
-        ).await;
+            FIXTURE_QUOTA,
+            "discovery_search",
+            coverage,
+            checkpoint,
+            records,
+        )
+        .await;
         let target_ref: Uuid = sqlx::query_scalar(
             "SELECT target_ref FROM collection_observation_target WHERE identity_key=$1",
-        ).bind(identity).fetch_one(database.pool()).await.unwrap();
-        let pending = keyword_targets_pending_detail(&database, &[target_ref]).await.unwrap();
+        )
+        .bind(identity)
+        .fetch_one(database.pool())
+        .await
+        .unwrap();
+        let pending = keyword_targets_pending_detail(&database, &[target_ref])
+            .await
+            .unwrap();
         if pending.contains(&target_ref) {
             borrowed.push(identity);
             continue;
         }
-        assert!(!matches!(advance_keyword_archive_detail(&database, target_ref, "proof", "agent").await.unwrap(), KeywordDetailAdvance::Queued { .. }));
+        assert!(!matches!(
+            advance_keyword_archive_detail(&database, target_ref, "proof", "agent")
+                .await
+                .unwrap(),
+            KeywordDetailAdvance::Queued { .. }
+        ));
     }
-    assert!(borrowed.is_empty(), "unsigned works borrowed unrelated locators: {borrowed:?}");
+    assert!(
+        borrowed.is_empty(),
+        "unsigned works borrowed unrelated locators: {borrowed:?}"
+    );
 }

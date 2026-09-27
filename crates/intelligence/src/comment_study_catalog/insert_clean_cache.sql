@@ -4,7 +4,10 @@ INSERT INTO linggan_comment_study_clean_cache
 SELECT source.material_ref, $2, $3, $4, $5, $6
 FROM linggan_material_comment source
 JOIN linggan_material_content content ON content.public_ref = source.content_public_ref
-WHERE source.material_ref = $1 AND content.domain_ref = $7
+WHERE source.material_ref = $1 AND EXISTS (
+    SELECT 1 FROM linggan_material_domain_usage usage
+    WHERE usage.content_public_ref = content.public_ref
+)
   AND source.body_state = 'KNOWN' AND source.body_text IS NOT NULL
   AND encode(sha256(convert_to(source.body_text, 'UTF8')), 'hex') = $3
   AND NOT EXISTS (

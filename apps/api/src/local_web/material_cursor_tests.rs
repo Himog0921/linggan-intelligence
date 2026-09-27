@@ -7,6 +7,7 @@ use linggan_storage_postgres::testing::isolated_proof_schema;
 use tower::ServiceExt;
 
 const MIGRATIONS: &str = full_schema_fixture::FULL_MIGRATIONS;
+const ADHD_DOMAIN: &str = "00000000-0000-4000-8000-000000000001";
 
 const LEGACY_MIGRATIONS: &str = concat!(
     "CREATE TABLE linggan_local_schema_migration (migration_id text PRIMARY KEY, migration_sha256 text NOT NULL, applied_at timestamptz NOT NULL DEFAULT clock_timestamp());\n",
@@ -46,7 +47,9 @@ async fn legacy_schema_validates_cursor_before_refusing_an_unfulfillable_page() 
     let response = app_with_database(legacy)
         .oneshot(
             Request::builder()
-                .uri(format!("/api/local/work-resources?cursor={cursor}"))
+                .uri(format!(
+                    "/api/local/work-resources?cursor={cursor}&domain={ADHD_DOMAIN}"
+                ))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -336,6 +339,10 @@ async fn submit_detail(
         observed_at,
     )
     .await;
+    super::material_projection_media_fixture::assign_synthetic_material_to_legacy_domain(
+        database, content_id,
+    )
+    .await;
 }
 
 async fn submit_package(
@@ -396,7 +403,12 @@ async fn submit_package(
 
 async fn get_json(database: &Database, uri: &str) -> Value {
     let response = app_with_database(database.clone())
-        .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri(with_default_domain(uri))
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
@@ -405,10 +417,23 @@ async fn get_json(database: &Database, uri: &str) -> Value {
 
 async fn get_status(database: &Database, uri: &str) -> StatusCode {
     app_with_database(database.clone())
-        .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri(with_default_domain(uri))
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap()
         .status()
+}
+
+fn with_default_domain(uri: &str) -> String {
+    if uri.contains("domain=") {
+        return uri.to_owned();
+    }
+    let separator = if uri.contains('?') { '&' } else { '?' };
+    format!("{uri}{separator}domain={ADHD_DOMAIN}")
 }
 
 fn item_ids(payload: &Value) -> std::collections::BTreeSet<String> {

@@ -4,9 +4,6 @@
 //! target-scoped discovery records rather than reconstructing a directory from
 //! a creator name or an unscoped corpus search.
 
-use crate::cross_industry_sample_facts::{
-    sample_detail_obtained_sql, sample_facts_schema_ready_sql, sample_observed_by_target_sql,
-};
 use crate::execution_input_eligibility::{MaterialExecutionState, read_material_execution_states};
 use crate::qualified_detail::qualified_detail_exists_sql;
 use linggan_storage_postgres::Database;
@@ -59,109 +56,25 @@ pub struct KeywordHitProjection {
 pub async fn read_creator_directory(
     database: &Database,
     target_ref: Uuid,
+    domain_ref: Uuid,
 ) -> Result<Option<CreatorDirectoryProjection>, sqlx::Error> {
-    let Some(mut works) =
-        read_catalog(database, target_ref, "creator", "profile_discovery").await?
+    let Some(mut works) = read_catalog(
+        database,
+        target_ref,
+        domain_ref,
+        "creator",
+        "profile_discovery",
+    )
+    .await?
     else {
         return Ok(None);
     };
     stamp_material_execution_states(
         database,
         target_ref,
+        domain_ref,
         "own_domain",
         "material_content",
-        &mut works,
-    )
-    .await?;
-    Ok(Some(CreatorDirectoryProjection { works }))
-}
-
-/// 一个外部领域创作者的作品目录。
-///
-/// 创作者主页发现没有关键词和榜单排序，不能借用关键词观察表。目录范围来自
-/// `cross_industry_creator_sample_observation`，每一行都由 Package 血缘回到当前目标；样本
-/// 事实和详情仍分别住在跨行业自己的表中，不穿过 `0044` 的隔离边界。
-pub async fn read_cross_industry_creator_directory(
-    database: &Database,
-    target_ref: Uuid,
-) -> Result<Option<CreatorDirectoryProjection>, sqlx::Error> {
-    let schema_ready: bool = sqlx::query_scalar(
-        "SELECT to_regclass('cross_industry_creator_sample_observation') IS NOT NULL \
-              AND to_regclass('cross_industry_sample_detail') IS NOT NULL",
-    )
-    .fetch_one(database.pool())
-    .await?;
-    if !schema_ready {
-        return Ok(None);
-    }
-    let target_exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS (SELECT 1 FROM collection_observation_target \
-                        WHERE target_ref=$1 AND target_kind='creator')",
-    )
-    .bind(target_ref)
-    .fetch_one(database.pool())
-    .await?;
-    if !target_exists {
-        return Ok(None);
-    }
-    let rows = sqlx::query(concat!(
-        "WITH ",
-        crate::archive_ledger::cross_industry_creator_directory_sql!(
-            "target.target_ref=$1",
-            "true"
-        ),
-        " \
-         SELECT sample.sample_ref,sample.content_external_id,sample.title, \
-                (directory.discovery_order+1)::bigint AS match_position, \
-                linggan_human_moment(detail.published_at_source_text) AS published_on, \
-                directory.lane,detail.detail_ref, \
-                (SELECT count(*)::bigint FROM cross_industry_comment comment \
-                  WHERE comment.sample_ref=sample.sample_ref) AS comment_count, \
-                linggan_human_moment(COALESCE(detail.observed_at,directory.observed_at)) \
-                    AS last_captured_at \
-         FROM cross_directory_work directory \
-         JOIN cross_industry_sample sample USING(sample_ref) \
-         LEFT JOIN LATERAL ( \
-             SELECT candidate.detail_ref,candidate.published_at_source_text,candidate.observed_at \
-             FROM cross_industry_sample_detail candidate \
-             WHERE candidate.sample_ref=sample.sample_ref \
-             ORDER BY candidate.created_at DESC,candidate.detail_ref DESC LIMIT 1 \
-         ) detail ON true \
-         ORDER BY sample.last_observed_at DESC,sample.sample_ref"
-    ))
-    .bind(target_ref)
-    .fetch_all(database.pool())
-    .await?;
-    let mut works = rows
-        .into_iter()
-        .map(|row| CatalogWork {
-            public_ref: row.get("sample_ref"),
-            content_external_id: row.get("content_external_id"),
-            title: row.get("title"),
-            creator_display_name: None,
-            match_position: row.get("match_position"),
-            published_at: row.get("published_on"),
-            source: if row.get::<String, _>("lane") == "patrol" {
-                CatalogSource::PatrolDiscovery
-            } else {
-                CatalogSource::InitialArchive
-            },
-            detail_state: if row.get::<Option<Uuid>, _>("detail_ref").is_some() {
-                CatalogDetailState::Complete
-            } else {
-                CatalogDetailState::Pending
-            },
-            execution_state: None,
-            media_state: "NOT_APPLICABLE",
-            comment_count: row.get("comment_count"),
-            last_captured_at: row.get("last_captured_at"),
-        })
-        .collect::<Vec<_>>();
-    stamp_material_execution_states(
-        database,
-        target_ref,
-        "cross_industry",
-        "cross_industry_sample",
         &mut works,
     )
     .await?;
@@ -171,14 +84,23 @@ pub async fn read_cross_industry_creator_directory(
 pub async fn read_keyword_hits(
     database: &Database,
     target_ref: Uuid,
+    domain_ref: Uuid,
 ) -> Result<Option<KeywordHitProjection>, sqlx::Error> {
-    let Some(mut works) = read_catalog(database, target_ref, "keyword", "discovery_search").await?
+    let Some(mut works) = read_catalog(
+        database,
+        target_ref,
+        domain_ref,
+        "keyword",
+        "discovery_search",
+    )
+    .await?
     else {
         return Ok(None);
     };
     stamp_material_execution_states(
         database,
         target_ref,
+        domain_ref,
         "own_domain",
         "material_content",
         &mut works,
@@ -195,6 +117,7 @@ pub async fn read_keyword_hits(
 async fn stamp_material_execution_states(
     database: &Database,
     target_ref: Uuid,
+    _domain_ref: Uuid,
     domain_scope: &str,
     object_kind: &str,
     works: &mut [CatalogWork],
@@ -214,119 +137,14 @@ async fn stamp_material_execution_states(
     Ok(())
 }
 
-/// 一个**跨行业**关键词目标的命中作品。
-///
-/// 外部领域的材料按 `0044` 的隔离住在 `cross_industry_sample`，证据侧一条都没有。检查器
-/// 此前只读证据侧，于是跨行业目标的作品页永远是「0 条可查证命中」「当前筛选没有匹配的
-/// 作品」——采回来 204 篇，界面上一篇都看不到，而且看不出是"没采到"还是"读错了地方"。
-///
-/// 返回形状与证据侧那条刻意一致（`CatalogWork`），同一套渲染直接吃两种领域的数据：
-/// **界面统一，数据不合并**。这不是给证据侧查询加参数——那是规格的接口红线，两条路
-/// 不共享查询、不共享接口，隔离才不依赖任何人记得在某处加一个条件。
-pub async fn read_cross_industry_hits(
-    database: &Database,
-    target_ref: Uuid,
-) -> Result<Option<KeywordHitProjection>, sqlx::Error> {
-    let schema_ready: bool =
-        sqlx::query_scalar(concat!("SELECT ", sample_facts_schema_ready_sql!()))
-            .fetch_one(database.pool())
-            .await?;
-    if !schema_ready {
-        return Ok(None);
-    }
-    let rows = sqlx::query(concat!(
-        "SELECT sample.sample_ref,sample.content_external_id,sample.title,sample.author_name, \
-                sample.published_at IS NOT NULL AS has_published, \
-                to_char(sample.published_at,'YYYY-MM-DD') AS published_on, \
-                linggan_human_moment(sample.last_observed_at) AS last_captured_at, \
-                sample.comment_count, \
-                -- `discovery_order` 是 integer，而展示合同上的名次是 bigint。不显式转换
-                -- 的话这一列会在解码时炸掉（`INT4` 对不上 `Option<i64>`），而且只有在真的
-                -- 有观察记录的目标上才炸——空库一路绿灯。
-                --
-                -- 名次只算**这个目标自己那几轮**看到的位次。跨目标取 min 会把另一个关键词
-                -- 那一轮的位次摆在这个关键词的作品页上——同一篇在两个词底下的位次本来就
-                -- 不是同一件事，混起来看不出是错的。
-                (SELECT (min(seen.discovery_order)+1)::bigint \
-                   FROM cross_industry_sample_observation seen \
-                   JOIN linggan_runtime_capture_package seen_package \
-                     ON seen_package.package_ref=seen.package_ref \
-                   JOIN collection_work_order_lease_task seen_lease_task \
-                     ON seen_lease_task.task_id=seen_package.task_id \
-                   JOIN collection_work_order_lease seen_lease USING(lease_ref) \
-                   JOIN collection_work_order seen_order USING(work_order_ref) \
-                  WHERE seen.sample_ref=sample.sample_ref \
-                    AND seen_order.target_ref=$1) AS match_position, \
-                -- 「详情到手了」看的是 `0079` 那条材料事实，不是运行任务的状态。
-                ",
-        sample_detail_obtained_sql!(),
-        " AS detail_done
-         FROM cross_industry_sample sample
-         -- 命中范围按**观察记录**算，不按样本行上的 `target_ref`：那一列只在第一次插入时
-         -- 写定，同一篇被另一个关键词先看到，这个目标就永远看不到它。
-         WHERE ",
-        sample_observed_by_target_sql!("$1"),
-        " ORDER BY sample.like_count DESC NULLS LAST,sample.first_seen_at,sample.sample_ref",
-    ))
-    .bind(target_ref)
-    .fetch_all(database.pool())
-    .await?;
-    let mut works: Vec<CatalogWork> = rows
-        .into_iter()
-        .map(|row| CatalogWork {
-            public_ref: row.get("sample_ref"),
-            content_external_id: row.get("content_external_id"),
-            title: row.get("title"),
-            creator_display_name: row.get("author_name"),
-            match_position: row.get("match_position"),
-            published_at: row.get("published_on"),
-            // 跨行业样本目前不区分「建档带回」与「巡检新增」：两者都 upsert 进同一行，
-            // 哪一轮先看到它记在观察记录里（`0073`），不在样本行上。统一记作建档来源，
-            // 而不是编一个分不出来的巡检标记。
-            source: CatalogSource::InitialArchive,
-            detail_state: if row.get::<bool, _>("detail_done") {
-                CatalogDetailState::Complete
-            } else {
-                CatalogDetailState::Pending
-            },
-            // 台账里的当前状态在这一页读完之后统一贴上：这条查询只读样本与观察记录，不自己
-            // 拼一份资格判据（`0044` 的隔离正是靠「谁都不许顺手加一个条件」守住的）。
-            execution_state: None,
-            // 跨行业侧不下载媒体，也不做 OCR/转录：参照物只看列表与正文。
-            media_state: "NOT_APPLICABLE",
-            comment_count: row.get("comment_count"),
-            last_captured_at: row.get("last_captured_at"),
-        })
-        .collect();
-    stamp_material_execution_states(
-        database,
-        target_ref,
-        "cross_industry",
-        "cross_industry_sample",
-        &mut works,
-    )
-    .await?;
-    Ok(Some(KeywordHitProjection { works }))
-}
-
-/// 一批关键词各自**命中了多少篇、其中多少篇取到了详情**。
-///
-/// 列表页一次要显示很多行，逐行查会变成 N+1。两侧都要数：本领域的材料在证据侧，外部
-/// 领域的在跨行业语料（`0044` 的隔离）。只数一侧，另一侧那些行会显示成 0——而 0 和
-/// 「还没采」在界面上长得一样。
-///
-/// 读不到时返回 `Err`，由调用方如实呈现；不把读不到压成 0。
 pub async fn read_keyword_catalog_counts(
     database: &Database,
     target_refs: &[Uuid],
+    domain_ref: Uuid,
 ) -> Result<std::collections::HashMap<Uuid, KeywordCatalogCounts>, sqlx::Error> {
     if target_refs.is_empty() {
         return Ok(std::collections::HashMap::new());
     }
-    let cross_industry_ready: bool =
-        sqlx::query_scalar(concat!("SELECT ", sample_facts_schema_ready_sql!()))
-            .fetch_one(database.pool())
-            .await?;
     let mut counts: std::collections::HashMap<Uuid, KeywordCatalogCounts> =
         std::collections::HashMap::new();
 
@@ -344,51 +162,25 @@ pub async fn read_keyword_catalog_counts(
          JOIN linggan_runtime_capture_package package ON package.task_id=task.task_id \
          JOIN linggan_runtime_submission_receipt receipt USING(package_ref) \
          JOIN linggan_material_discovery_finding finding USING(package_ref) \
+         JOIN collection_work_order_domain_usage work_usage USING(work_order_ref) \
+         JOIN linggan_material_domain_usage material_usage \
+           ON material_usage.content_public_ref=finding.content_public_ref \
+          AND material_usage.domain_ref=work_usage.domain_ref \
          JOIN linggan_runtime_record_disposition disposition \
            ON disposition.package_ref=finding.package_ref \
           AND disposition.record_ordinal=finding.record_ordinal \
          WHERE work_order.target_ref=ANY($1) \
+           AND work_usage.domain_ref=$2 \
            AND finding.discovery_kind='discovery_search' \
            AND receipt.material_admission='ACCEPTED' \
            AND disposition.disposition='accepted_for_library_discovery' \
          GROUP BY 1",
     ))
     .bind(target_refs)
+    .bind(domain_ref)
     .fetch_all(database.pool())
     .await?;
     for (target_ref, works, details) in evidence {
-        let entry = counts.entry(target_ref).or_default();
-        entry.works += works;
-        entry.details += details;
-    }
-    if !cross_industry_ready {
-        return Ok(counts);
-    }
-
-    // 跨行业侧：口径与检查器那条完全一致——两处共用 `cross_industry_sample_facts` 里的
-    // 同一份判据，不再各写一遍。**按目标分组也走观察记录**：样本行上的 `target_ref` 只在
-    // 第一次插入时写定，用它分组会把同一篇只记在最早看到它的那个关键词名下。
-    let cross: Vec<(Uuid, i64, i64)> = sqlx::query_as(concat!(
-        "SELECT seen_order.target_ref, \
-                count(DISTINCT sample.sample_ref), \
-                count(DISTINCT sample.sample_ref) FILTER (WHERE ",
-        sample_detail_obtained_sql!(),
-        ") \
-         FROM cross_industry_sample sample \
-         JOIN cross_industry_sample_observation seen \
-           ON seen.sample_ref=sample.sample_ref \
-         JOIN linggan_runtime_capture_package seen_package \
-           ON seen_package.package_ref=seen.package_ref \
-         JOIN collection_work_order_lease_task seen_lease_task \
-           ON seen_lease_task.task_id=seen_package.task_id \
-         JOIN collection_work_order_lease seen_lease USING(lease_ref) \
-         JOIN collection_work_order seen_order USING(work_order_ref) \
-         WHERE seen_order.target_ref=ANY($1) GROUP BY 1",
-    ))
-    .bind(target_refs)
-    .fetch_all(database.pool())
-    .await?;
-    for (target_ref, works, details) in cross {
         let entry = counts.entry(target_ref).or_default();
         entry.works += works;
         entry.details += details;
@@ -406,6 +198,7 @@ pub struct KeywordCatalogCounts {
 async fn read_catalog(
     database: &Database,
     target_ref: Uuid,
+    domain_ref: Uuid,
     target_kind: &str,
     discovery_kind: &str,
 ) -> Result<Option<Vec<CatalogWork>>, sqlx::Error> {
@@ -436,6 +229,12 @@ async fn read_catalog(
                ON disposition.package_ref=finding.package_ref AND disposition.record_ordinal=finding.record_ordinal \
              WHERE work_order.target_ref=$1 AND work_order.lane IN ('deep_archive','patrol') \
                AND finding.discovery_kind=$2 AND receipt.material_admission='ACCEPTED' \
+               AND EXISTS (SELECT 1 FROM collection_work_order_domain_usage work_usage \
+                            WHERE work_usage.work_order_ref=work_order.work_order_ref \
+                              AND work_usage.domain_ref=$3) \
+               AND EXISTS (SELECT 1 FROM linggan_material_domain_usage material_usage \
+                            WHERE material_usage.content_public_ref=finding.content_public_ref \
+                              AND material_usage.domain_ref=$3) \
                AND disposition.disposition <> 'quarantined' \
          ), attributed AS ( \
              -- 作者归属来自作品自己（`linggan_material_content_author` 推自 append-only 事实），
@@ -444,10 +243,13 @@ async fn read_catalog(
              SELECT author.content_public_ref \
              FROM linggan_material_content_author author \
              JOIN collection_observation_target target \
-               ON target.identity_key=author.author_external_id \
+              ON target.identity_key=author.author_external_id \
               AND target.platform=author.platform \
               AND target.target_kind='creator' \
              WHERE target.target_ref=$1 \
+               AND EXISTS (SELECT 1 FROM linggan_material_domain_usage material_usage \
+                            WHERE material_usage.content_public_ref=author.content_public_ref \
+                              AND material_usage.domain_ref=$3) \
          ), owned AS ( \
              -- 目标是创作者时以作者归属为准；关键词目标没有作者可言，仍按发现所属的工单算。
              SELECT * FROM discoveries \
@@ -498,6 +300,7 @@ async fn read_catalog(
     )
     .bind(target_ref)
     .bind(discovery_kind)
+    .bind(domain_ref)
     .fetch_all(database.pool())
     .await?;
 
