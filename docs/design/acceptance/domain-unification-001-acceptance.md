@@ -1,11 +1,11 @@
 # ACC-DOMAIN-UNIFICATION-001 · 领域管理页隔离浏览器验收
 
 > 状态: 一次性报告
-> 最后核对: 2026-09-24
+> 最后核对: 2026-09-27
 > 验收日期: 2026-09-24
-> 适用范围: WP4 Domain Management；候选 worktree `codex/domain-unification-001`
-> 验收环境: Codex In-App Browser、临时 loopback API `127.0.0.1:65435`、一次性 PostgreSQL schema `domain_browser_acceptance`
-> 数据边界: 合成验收 Domain 与关键词 Target；没有连接共享数据库、外部平台或常驻 runtime
+> 适用范围: §1–6 为 WP4 Domain Management 与 PR #343 后续回执；§7 为 PR #345 的全部领域作品直达候选验收
+> 验收环境: §1–6 为 Codex In-App Browser、临时 loopback API `127.0.0.1:65435` 与一次性 PostgreSQL schema `domain_browser_acceptance`；§7 的环境另见该节
+> 数据边界: §1–6 使用合成 Domain/Target；§7 使用共享开发库的只读流式副本；均未写共享库、访问外部平台或切换常驻 runtime
 > 事实来源: 本机浏览器 AX/截图观察、一次性 API POST/redirect 读回、隔离 PostgreSQL 查询与当前页面合同
 > 冲突时以谁为准: 用户最新确认、页面/数据合同、真实浏览器与隔离 PostgreSQL 结果；本记录不授权发布
 
