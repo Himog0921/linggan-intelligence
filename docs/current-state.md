@@ -8,7 +8,7 @@
 
 ### GREENFIELD Comment Research / Draft PR #338（最新 main 已整合；最终证明进行中）
 
-PR #338 本身仍为 Open/Draft，远端 head `07a46a531aa9aa309dbcd2f71de0b713dbe54397` 尚落后于当前 `main@2587fba486434acf2c94a8e7f64ce245b87a38f6`。此前 #338 覆盖的若干前序能力已通过独立 PR（包括 #323–#327、#329、#335、#336）进入 main；这不代表 #338 整体已合并。当前 PR 专属 worktree 已合并 `main@2587fba` 并保留 Domain/Material usage 0103/0104；Comment Study 新增 migration 排到 0105–0107，方法/预算/preview/start 接入候选 Axum router 与页面。最新 main 合并树上的隔离脚本通过 37 个 Intelligence 与 6 个 Axum API 子项；同树 unit suites 为 Intelligence 123/123、API 287/287。源码证明仍不代表 T01–T54 全验收或真实模型质量。只读核验本机 `:3000` health 为 200，部署身份 `2587fba4`、构建于 2026-09-27 05:04 UTC、migration head 0104，且与当前 main 匹配；PR 的 0105–0107 未应用、P2 UI 未发布。备份恢复、Mog 页面验收以及 P0 专项历史/在途任务保护证明仍未完成。PR 分支推送、exact-head CI 与逐阶段人工/环境证明以本包验收账本和本月记录为准。
+PR #338 仍为 Open/Draft，远端当前 head `d10b94563c63934d737c2195a9ffc7a67ccf4e0c`，base 与 `origin/main@2587fba486434acf2c94a8e7f64ce245b87a38f6` 一致，状态 MERGEABLE；此前 #338 覆盖的部分前序能力已由独立 PR（#323–#327、#329、#335、#336）进入 main，这不代表 #338 整体已合并。最新 PR worktree 在此 head 上形成未推送的 P2 执行候选：v2 queued Run 进入 semantic batch worker、冻结方法 request snapshot、调用前 lease/dispatch fence、Run 级 token budget、按完整方法请求预打包、实测 usage 累计和 Run→Batch→Target 一致锁序；并新增恢复时对已开始但 usage 未知的调用按 reservation 保守记费，同时验证未 dispatch 过期时释放 reservation。候选 migration 为 0105–0108，均仅在 disposable PostgreSQL 验证，未注册共享升级入口；0107 保持原 checksum。当前隔离脚本 Intelligence PG 45/45、Axum/PG 6/6；unit suites 为 Intelligence 123/123、API 287 通过/35 ignored；治理、UI handbook、定点格式、shell 语法和 diff 检查通过。独立最终复审未发现 blocker；现提交并推送候选，后续核验新 exact-head CI。源码和合成数据库证据不等于 T01–T54 全验收或真实模型质量。本机 `:3000` 上次只读身份核验为 main `2587fba4`、migration head 0104；候选的 0105–0108 和 P2 UI 未发布。备份恢复、Mog 页面验收及 P0 专项历史/在途任务保护证明仍未完成。
 
 ### DOMAIN-UNIFICATION-001（#343/#344 已合并并刷新本机运行；作品读取修复候选待集成）
 

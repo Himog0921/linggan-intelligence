@@ -67,6 +67,9 @@ async fn setup(name: &str, count: usize) -> Proof {
         ),
         include_str!("../../../../database/migrations/0106_comment_study_policy_constraints.sql"),
         include_str!("../../../../database/migrations/0107_comment_study_start_constraints.sql"),
+        include_str!(
+            "../../../../database/migrations/0108_comment_study_request_snapshot_constraints.sql"
+        ),
     ] {
         sqlx::raw_sql(migration).execute(db.pool()).await.unwrap();
     }

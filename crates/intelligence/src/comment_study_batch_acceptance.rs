@@ -180,6 +180,17 @@ async fn lock_batch(
     batch_ref: Uuid,
     lease_token: Uuid,
 ) -> Result<LockedBatch, BatchAcceptanceError> {
+    let run_ref: Uuid = sqlx::query_scalar(
+        "SELECT run_ref FROM linggan_comment_study_batch \
+         WHERE batch_ref=$1 AND state='leased' AND lease_token=$2 \
+           AND lease_expires_at>scope_001_now()",
+    )
+    .bind(batch_ref)
+    .bind(lease_token)
+    .fetch_optional(&mut **transaction)
+    .await?
+    .ok_or(BatchAcceptanceError::BatchUnavailable)?;
+    lock_run(transaction, run_ref).await?;
     let batch = sqlx::query(
         "SELECT run_ref,content_public_ref,model_invocation_ref FROM linggan_comment_study_batch \
          WHERE batch_ref=$1 AND state='leased' AND lease_token=$2 \
@@ -195,7 +206,7 @@ async fn lock_batch(
          FROM linggan_comment_study_batch_target member \
          JOIN linggan_comment_study_target target ON target.target_ref=member.target_ref \
          JOIN linggan_material_comment source ON source.material_ref=target.source_ref \
-         WHERE member.batch_ref=$1 FOR UPDATE OF target",
+         WHERE member.batch_ref=$1 ORDER BY target.target_ref FOR UPDATE OF target",
     )
     .bind(batch_ref)
     .fetch_all(&mut **transaction)
@@ -222,6 +233,22 @@ async fn lock_batch(
         model_invocation_ref: batch.get("model_invocation_ref"),
         targets,
     })
+}
+
+async fn lock_run(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    run_ref: Uuid,
+) -> Result<(), BatchAcceptanceError> {
+    let locked: Option<Uuid> = sqlx::query_scalar(
+        "SELECT run_ref FROM linggan_comment_study_run WHERE run_ref=$1 FOR UPDATE",
+    )
+    .bind(run_ref)
+    .fetch_optional(&mut **transaction)
+    .await?;
+    if locked.is_none() {
+        return Err(BatchAcceptanceError::BatchUnavailable);
+    }
+    Ok(())
 }
 
 async fn accept_target(
@@ -404,6 +431,17 @@ pub async fn reject_study_batch_dispatch(
     provider_failure_code: Option<&str>,
 ) -> Result<BatchAcceptanceReceipt, BatchAcceptanceError> {
     let mut transaction = database.pool().begin().await?;
+    let run_ref: Uuid = sqlx::query_scalar(
+        "SELECT run_ref FROM linggan_comment_study_batch \
+         WHERE batch_ref=$1 AND state='leased' AND lease_token=$2 \
+           AND lease_expires_at>scope_001_now()",
+    )
+    .bind(batch_ref)
+    .bind(lease_token)
+    .fetch_optional(&mut *transaction)
+    .await?
+    .ok_or(BatchAcceptanceError::BatchUnavailable)?;
+    lock_run(&mut transaction, run_ref).await?;
     let batch = sqlx::query(
         "SELECT run_ref,model_invocation_ref FROM linggan_comment_study_batch \
          WHERE batch_ref=$1 AND state='leased' AND lease_token=$2 \
@@ -433,7 +471,13 @@ pub async fn reject_study_batch_dispatch(
         "retriedTargetCount":retried_target_count,
         "failedTargetCount":failed_target_count
     });
-    finish_batch(&mut transaction, batch_ref, "failed", output_manifest.clone()).await?;
+    finish_batch(
+        &mut transaction,
+        batch_ref,
+        "failed",
+        output_manifest.clone(),
+    )
+    .await?;
     finish_model_invocation(
         &mut transaction,
         model_invocation_ref,
@@ -548,11 +592,33 @@ async fn update_target_state(
     target_ref: Uuid,
     state: &str,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE linggan_comment_study_target SET state=$2 WHERE target_ref=$1")
+    let has_productization_columns: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM information_schema.columns \
+         WHERE table_schema=current_schema() AND table_name='linggan_comment_study_target' \
+           AND column_name='terminal_reason')",
+    )
+    .fetch_one(&mut **transaction)
+    .await?;
+    if has_productization_columns {
+        let terminal_reason = (state == "failed").then_some("attempts_exhausted");
+        sqlx::query(
+            "UPDATE linggan_comment_study_target SET state=$2, \
+             finished_at=CASE WHEN $2 IN ('succeeded','no_signal','needs_context','failed','excluded','cancelled') \
+                              THEN scope_001_now() ELSE NULL END, \
+             terminal_reason=$3 WHERE target_ref=$1",
+        )
         .bind(target_ref)
         .bind(state)
+        .bind(terminal_reason)
         .execute(&mut **transaction)
         .await?;
+    } else {
+        sqlx::query("UPDATE linggan_comment_study_target SET state=$2 WHERE target_ref=$1")
+            .bind(target_ref)
+            .bind(state)
+            .execute(&mut **transaction)
+            .await?;
+    }
     Ok(())
 }
 

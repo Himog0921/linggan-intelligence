@@ -118,9 +118,15 @@ pub async fn run_model_work_once(
         return Ok(false);
     };
     let output =
-        call_study_batch_model(database, store, adapter, claim.batch_ref, claim.lease_token)
+        match call_study_batch_model(database, store, adapter, claim.batch_ref, claim.lease_token)
             .await
-            .map_err(runner_error)?;
+        {
+            Ok(output) => output,
+            Err(StudyModelRunnerError::Dispatch(StudyModelDispatchError::BudgetDeferred)) => {
+                return Ok(true);
+            }
+            Err(error) => return Err(runner_error(error)),
+        };
     accept_study_batch_output(database, claim.batch_ref, claim.lease_token, output.output)
         .await
         .map_err(|_| ModelError::InvalidOutput)?;
@@ -225,7 +231,9 @@ pub async fn run_model_worker_with_drain(
 
 fn catalog_error(error: crate::comment_study_catalog::StudyCatalogError) -> ModelError {
     match error {
-        crate::comment_study_catalog::StudyCatalogError::Database(error) => ModelError::Database(error),
+        crate::comment_study_catalog::StudyCatalogError::Database(error) => {
+            ModelError::Database(error)
+        }
         _ => ModelError::Conflict,
     }
 }
@@ -246,6 +254,12 @@ fn runner_error(error: StudyModelRunnerError) -> ModelError {
         }
         StudyModelRunnerError::Dispatch(StudyModelDispatchError::InputLimit) => {
             ModelError::InputLimit
+        }
+        StudyModelRunnerError::Dispatch(StudyModelDispatchError::BudgetExhausted) => {
+            ModelError::Budget
+        }
+        StudyModelRunnerError::Dispatch(StudyModelDispatchError::BudgetDeferred) => {
+            ModelError::Conflict
         }
         StudyModelRunnerError::Dispatch(_) | StudyModelRunnerError::BatchUnavailable => {
             ModelError::Conflict

@@ -16,6 +16,11 @@ case "$request" in
     # known here: it is what the old order discarded by returning before the checkpoint.
     printf '%s' '{"version":"linggan.pi.v1/0.85.1","ok":true,"text":"这不是合同要求的 JSON","failureCode":null,"modelIds":null,"modelListOrigin":null,"usage":{"inputTokens":111,"outputTokens":222,"costUsd":null},"elapsedMs":9}'
     ;;
+  *补充研究说明只影响研究侧重点*comment-study.note-batch.v1*)
+    # Proves the v2 method instruction and frozen batch envelope reached the real Pi adapter
+    # boundary. The response is still synthetic and never contacts a model provider.
+    printf '%s' '{"version":"linggan.pi.v1/0.85.1","ok":false,"text":null,"failureCode":"v2_request_snapshot_verified","modelIds":null,"modelListOrigin":null,"usage":{"inputTokens":null,"outputTokens":null,"costUsd":null},"elapsedMs":1}'
+    ;;
   *)
     printf '%s' '{"version":"linggan.pi.v1/0.85.1","ok":false,"text":null,"failureCode":"provider_failed","modelIds":null,"modelListOrigin":null,"usage":{"inputTokens":null,"outputTokens":null,"costUsd":null},"elapsedMs":1}'
     ;;

@@ -348,6 +348,7 @@ pub(crate) async fn close_run_if_settled(
         "SELECT count(*) FILTER (WHERE state IN ('ready','queued','running')) AS unsettled, \
                 count(*) FILTER (WHERE state='failed') AS failed, \
                 count(*) FILTER (WHERE state='excluded') AS excluded, \
+                count(*) FILTER (WHERE state='cancelled') AS cancelled, \
                 count(*) AS total \
          FROM linggan_comment_study_target WHERE run_ref=$1",
     )
@@ -361,9 +362,10 @@ pub(crate) async fn close_run_if_settled(
     }
     let failed: i64 = counts.get("failed");
     let excluded: i64 = counts.get("excluded");
-    let state = if excluded == total {
+    let cancelled: i64 = counts.get("cancelled");
+    let state = if excluded + cancelled == total {
         "cancelled"
-    } else if failed > 0 || excluded > 0 {
+    } else if failed > 0 || excluded > 0 || cancelled > 0 {
         "completed_with_failures"
     } else {
         "completed"

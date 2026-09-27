@@ -15,14 +15,14 @@
 
 ## 当前剩余工作：严格沿用原 P0–P8
 
-本表是 2026-09-27 的新快照，替代上方历史增量在当时记录的旧状态。PR #338 的远端源分支头为 `07a46a5`。worktree 已先整合 `30fe306`，再整合最新 `origin/main@2587fba` 的 6 个后续提交；月报和 current-state 的文字冲突已处理，最新合并树上完整 Comment Study 隔离 PG 子集与 unit suites 均通过。代码、隔离数据库、生产运行时、人工标注和业务验收分层报告，测试数量不折算成阶段百分比。
+本表是 2026-09-27 的新快照，替代上方历史增量在当时记录的旧状态。PR #338 的远端源分支头为 `d10b945`；当前 worktree 在该 head 上有待复审的 P2 候选改动。worktree 已先整合 `30fe306`，再整合最新 `origin/main@2587fba` 的 6 个后续提交；月报和 current-state 的文字冲突已处理，完整 Comment Study 隔离 PG 子集与 unit suites 已在候选树通过。代码、隔离数据库、生产运行时、人工标注和业务验收分层报告，测试数量不折算成阶段百分比。
 
 | 手册阶段 | 当前已有证据 | 未完成/下一关 | 状态 |
 |---|---|---|---|
-| P0 外围接线与隔离启动 | 手册和来源已固定；`:3000` 健康检查 200，`runtime-identity` 为 `2587fba4`、migration head 0104；候选 0105–0107 只在 disposable PostgreSQL 迁移链中通过 | 用户环境历史摘要、在途任务专项基线、迁移 drain 与恢复演练 | 主线运行身份已核实；P2 migrations 未应用，后续现场保护证明未完成 |
+| P0 外围接线与隔离启动 | 手册和来源已固定；`:3000` 健康检查 200，`runtime-identity` 为 `2587fba4`、migration head 0104；候选 0105–0108 只在 disposable PostgreSQL 迁移链中通过 | 用户环境历史摘要、在途任务专项基线、迁移 drain 与恢复演练 | 主线运行身份已核实；P2 migrations 未应用，后续现场保护证明未完成 |
 | P1 原声、清洗与语境 | 前序 #323–#336 已并入 main 的材料/评论目录、详情历史、清洗和选择能力；本轮保留 main 的统一 domain usage 并重跑既有回归 | T01–T54 全量、剩余边界及用户指定 exact-head 的完整产品验收 | 已有交付在 main；整阶段验收未结 |
-| P2 选择、预算、抽取 | 方法版本/读取复制、按领域默认 CAS、显式预算、共享 preview/start、请求幂等与并发隔离、正式 router 和方法/Run UI 已接通；项目隔离 PG 脚本 37 个 Intelligence + 6 个 Axum 子项通过（其中包含 P1 回归） | exact-head CI、人工 UI 验收；真实 ModelPort 调用账本、Schema/失败/部分接纳、取消/重启执行闭环 | 代码候选已接通；运行/产品出口未结 |
-| P3 本地向量与空库建题 | P3 质量闸门与标注合同已有记录 | 独立人工 Gold Set、离线 Recall@K、隔离 Rust→WeMM 回放和同篇双账号冷启动证明 | `BLOCKED_ON_HUMAN_ANNOTATION`，不是验证失败 |
+| P2 选择、预算、启动 | 方法版本/读取复制、按领域默认 CAS、显式预算、共享 preview/start、请求幂等与并发隔离、正式 router 和方法/Run UI 已接通；新增 v2 queued Run 到现有 semantic worker 的接线、冻结方法 request snapshot、调用前 fence、Run 级预算及实测用量累计；隔离 PG 45 项 + Axum/PG 6 项，unit suites Intelligence 123/123、API 287/287（35 ignored） | 当前候选 exact-head CI、真实浏览器逐动作验收；估算与 provider 实测用量差异仍需 P3 完整账本承接 | 源码与隔离证明通过；用户/运行出口未结 |
+| P3 有界执行、质量与恢复 | 新 Run 的 semantic 阶段已有 synthetic worker/receipt 路径；P3 质量闸门与人工标注合同已记录 | 三阶段 request/usage 账本与共享预算、失败/部分接纳、pause/resume/stop 与控制 CAS、崩溃/过期恢复、公平调度；独立人工 Gold Set、离线 Recall@K、隔离 Rust→WeMM 回放和同篇双账号冷启动证明 | 执行闭环未完成；质量验证 `BLOCKED_ON_HUMAN_ANNOTATION`，不是验证失败 |
 | P4 长期归并与纠偏 | 既有 Problem、membership、撤销/重研等候选路径可复用 | 有效 head、跨下游限制传播、合并/撤销及支持版本历史的同版 PG 证明 | 部分候选；整阶段 NOT_VERIFIED |
 | P5 指标、语言与情报接口 | Intelligence 已有材料和事实读取基础 | 六视角、窗口/cohort/distinct 对账、durable event 与下游消费 | 未形成完整验收 |
 | P6 每日增量与资源 | 自动化衔接仅有设计 | dirty 合并、时区/计划开关、预算续办、退避及资源争用证明 | 未启用、未验收 |
@@ -121,3 +121,21 @@ Mog 已在当前对话报告 P1 手动产品验收合格并授权 P2。用户未
 验证：`./scripts/test-comment-study-productization-postgres.sh` 在脚本创建并清理的 disposable PostgreSQL 中全通过：Intelligence 8 个测试目标共 37 项（包括 9 项启动事务用例）以及真实 Axum 路由 6 项，总计 43 项。证明覆盖当前迁移链、领域 usage、方法保存/复制/约束、按域 CAS、启动幂等/并发、terminal receipts 和 HTTP 边界；不覆盖完整 T01–T54、真实模型质量、生产规模性能或恢复。此前同版本 `cargo check -p linggan-intelligence -p linggan-api`、两个单元套件与 `node --check` 通过；最终 exact-head CI 尚待推送后回执。
 
 P2 下一关为 exact-head CI 与 Mog 对真实页面/数字/动作的验收；执行阶段的真实模型调用账本、Schema 校验/部分接纳、取消/重启还没有项目级闭环。之后按 P3 质量闸门执行：目前唯一前置阻塞是独立人工 Gold Set 标注，不能由 Agent 自标。P4–P8 按上方矩阵续办，环境级迁移/生产调用/部署/恢复各自保留授权与证明边界。
+
+## P2 第七增量 · 新 Run 接入 semantic worker（2026-09-27）
+
+本增量从最新整合树 `main@2587fba486434acf2c94a8e7f64ce245b87a38f6` 开始，PR #338 远端前一 head 为 `d10b94563c63934d737c2195a9ffc7a67ccf4e0c`。核对开发手册 §5–6 与 HTTP 合同 §7–8 后，修复新 `run-selection.v2` Run 已写成 queued、却被旧 batch selector 限定为 v1 的断路：selector 和 batch preparer 现在只接收 dispatch 已启用且无停止理由的 v2 Run，继续兼容历史 v1 Run。
+
+每个新 semantic invocation 在事务中验证 Run 冻结的 method hash，读取不可变方法中的 instruction/Schema，序列化准确 provider payload，将 request manifest/hash 与通用 invocation hash 对齐保存。获得 live batch lease 后、紧邻 adapter 调用前，CAS 写入 `dispatch_started_at` 并标记通用 invocation 的 callStarted。Run 行锁串行累计 request 的保守输入估算与模型 max output reservation；预算不足时不创建 invocation，停止未外发 Run，并给取消的 Target 写 terminal reason/timestamp；仍有其他调用时先将该 batch 返回 prepared。合成结果证明合法 no_signal 可接纳、缺失的兄弟 Target 独立重试。新增 0108 migration 为 model request snapshot 提供 UPDATE/DELETE/TRUNCATE 不可变保护，避免改写已发布的 0107 checksum；启动 schema guard 要求对应 triggers。
+
+验证：`./scripts/test-comment-study-productization-postgres.sh` 的 8 个 Intelligence PostgreSQL 目标共 38/38、Axum+PostgreSQL 6/6；`cargo test -p linggan-intelligence --lib --locked` 123/123；`cargo test -p linggan-api --bin linggan-api --locked` 287 passed、35 ignored。以上为本机 disposable/synthetic 验证，不发真实模型请求。此前精确 head `d10b945` 的 Actions run [36301233256](https://github.com/Himog0921/linggan-intelligence/actions/runs/36301233256) 中 synthetic-proof 成功，integration-source-export 因条件跳过；它不覆盖本增量。当前增量尚需推送后的 exact-head CI。
+
+### 提交前复审修正与增量复验（2026-09-27）
+
+第一轮独立审查发现输入限额没有计入完整 v2 方法指令/Schema/封装、已 checkpoint 的实测用量仍被预算累计当作预留、调用前估值误计为 charged，以及接受/预算停止间的 Run/Target 锁序反转。复审后续轮次正在检查全部修正；实现统一用冻结方法和完整 semantic request 做预打包，批次过大时顺序缩小，单目标仍超限则无 invocation 地终止并记 `input_limit_exceeded`；已知完整 usage 用于后续累计，未知仍保留 reservation，尚未开始外发的 invocation 计费为 0；准备、claim、dispatch、accept、reject 和 lease recovery 统一按 Run → Batch → Target 锁序。新增本地 PiAdapter synthetic-child 用例从真实 worker 函数传递 v2 冻结方法和输入，不访问 provider。
+
+复验：隔离脚本 8 个 Intelligence PostgreSQL 目标共 45/45，Axum/PostgreSQL 6/6；Intelligence 单元 123/123；API 单元 287 passed、35 ignored；定点 rustfmt 与 `git diff --check` 通过。隔离脚本会清理临时数据库/容器/卷。证据不包括完整 T01–T54、人工浏览器验收、真实 provider、共享 migration 或部署；待本地 reviewer 结果、推送后的 exact-head CI 与用户页面/数字验收。
+
+后续独立复审补出两项边界：开始 provider dispatch 后、usage checkpoint 前崩溃时，过期恢复必须继续按 reservation 计入预算；以及已发布 0107 不得因增加 snapshot trigger 而改变 checksum。候选现以未注册的 0108 独立承载 request snapshot trigger，并分别为“已 dispatch、usage 未知”与“尚未 dispatch”的过期调用增加保守结算/释放 reservation 回归。0107 与父提交 SHA-256 同为 `da0fc26c23949cb52137ecfbbd9f82698c10e244b52656e34d75f91365ec1dd7`。最新隔离复跑 Intelligence PostgreSQL 45/45、Axum/PG 6/6；单元 123/123 与 287 passed/35 ignored；治理、UI handbook、定点 rustfmt、shell 语法和 diff 检查均通过。独立最终复审未发现 blocker，候选可提交；推送后的 exact-head CI 和 Mog 页面验收仍待完成。
+
+未完成仍按原手册分层：P2 需 exact-head CI 与真实页面逐动作/逐数字验收；P3 需 semantic/resolution/pair 统一 request/usage ledger 与预算、pause/resume/stop CAS、失败/部分接纳与崩溃恢复、公平调度。P3 Recall@K 需独立人工 Gold Set；Agent 不自行标注。后续顺序为 P4 有效结果 head 与限制传播 → P5 六视角与 durable events → P6 每日增量/额度/退避 → P7 真实 API、空错旧态、键盘/1440/1024/390/200% zoom 与 Mog 验收 → P8 隔离恢复、有限授权发布与回退。P0 用户环境历史、在途任务与数据保护/恢复证明继续并列跟踪。未修改 T01–T54 台账状态，未共享迁移、调用 provider、部署或合并。
