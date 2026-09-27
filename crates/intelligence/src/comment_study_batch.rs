@@ -141,14 +141,25 @@ pub async fn prepare_study_batch(
         fit_targets_to_model_budget(&mut transaction, request.run_ref, &work, candidate_targets)
             .await?;
     if let Some(target_ref) = fitted.input_limit_target {
-        sqlx::query(
-            "UPDATE linggan_comment_study_target \
-             SET state='failed',finished_at=scope_001_now(),terminal_reason='input_limit_exceeded' \
-             WHERE target_ref=$1 AND state='queued'",
+        let has_productization_columns: bool = sqlx::query_scalar(
+            "SELECT count(*)=2 FROM information_schema.columns \
+             WHERE table_schema=current_schema() AND table_name='linggan_comment_study_target' \
+               AND column_name IN ('finished_at','terminal_reason')",
         )
-        .bind(target_ref)
-        .execute(&mut *transaction)
+        .fetch_one(&mut *transaction)
         .await?;
+        if has_productization_columns {
+            sqlx::query(
+                "UPDATE linggan_comment_study_target \
+                 SET state='failed',finished_at=scope_001_now(),terminal_reason='input_limit_exceeded' \
+                 WHERE target_ref=$1 AND state='queued'",
+            )
+            .bind(target_ref)
+            .execute(&mut *transaction)
+            .await?;
+        }
+        // Older v1 installs have no terminal metadata yet. Leave their target queued and let the
+        // scheduler's per-pass exclusion skip it, preserving the legacy contract.
         close_run_if_settled(&mut transaction, request.run_ref).await?;
         transaction.commit().await?;
         return Err(StudyBatchError::InputLimitExceeded);

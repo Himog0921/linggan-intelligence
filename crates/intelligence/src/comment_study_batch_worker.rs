@@ -113,6 +113,10 @@ pub async fn recover_expired_study_batch_leases(
     database: &Database,
 ) -> Result<u64, StudyBatchWorkerError> {
     let mut transaction = database.pool().begin().await?;
+    let has_model_request_table: bool =
+        sqlx::query_scalar("SELECT to_regclass('linggan_comment_study_model_request') IS NOT NULL")
+            .fetch_one(&mut *transaction)
+            .await?;
     let run_refs: Vec<Uuid> = sqlx::query_scalar(
         "SELECT DISTINCT run_ref FROM linggan_comment_study_batch \
          WHERE state='leased' AND lease_expires_at<=scope_001_now() ORDER BY run_ref",
@@ -163,28 +167,50 @@ pub async fn recover_expired_study_batch_leases(
             .execute(&mut *transaction)
             .await?;
             if let Some(invocation_ref) = model_invocation_ref {
-                sqlx::query(
-                    "UPDATE linggan_model_invocation invocation \
-                     SET charged_tokens=CASE \
-                           WHEN EXISTS(SELECT 1 FROM linggan_comment_study_model_request request \
-                                       WHERE request.invocation_ref=invocation.invocation_ref \
-                                         AND request.dispatch_started_at IS NULL) THEN 0 \
-                           WHEN invocation.input_tokens IS NOT NULL AND invocation.output_tokens IS NOT NULL \
-                             THEN COALESCE(invocation.charged_tokens,invocation.reserved_tokens) \
-                           ELSE GREATEST(invocation.reserved_tokens,COALESCE(invocation.charged_tokens,0)) \
-                         END, \
-                         state='failed',failure_code='lease_expired', \
-                         result=COALESCE(result,'{}'::jsonb)||$2,finished_at=scope_001_now() \
-                     WHERE invocation.invocation_ref=$1 AND invocation.state='running'",
-                )
-                .bind(invocation_ref)
-                .bind(json!({
+                let result = json!({
                     "stage":"comment-study.semantic.v1",
                     "batchRef":batch_ref,
                     "leaseExpired":true
-                }))
-                .execute(&mut *transaction)
-                .await?;
+                });
+                if has_model_request_table {
+                    sqlx::query(
+                        "UPDATE linggan_model_invocation invocation \
+                         SET charged_tokens=CASE \
+                               WHEN EXISTS(SELECT 1 FROM linggan_comment_study_model_request request \
+                                           WHERE request.invocation_ref=invocation.invocation_ref \
+                                             AND request.dispatch_started_at IS NULL) THEN 0 \
+                               WHEN invocation.input_tokens IS NOT NULL AND invocation.output_tokens IS NOT NULL \
+                                 THEN COALESCE(invocation.charged_tokens,invocation.reserved_tokens) \
+                               ELSE GREATEST(invocation.reserved_tokens,COALESCE(invocation.charged_tokens,0)) \
+                             END, \
+                             state='failed',failure_code='lease_expired', \
+                             result=COALESCE(result,'{}'::jsonb)||$2,finished_at=scope_001_now() \
+                         WHERE invocation.invocation_ref=$1 AND invocation.state='running'",
+                    )
+                    .bind(invocation_ref)
+                    .bind(result)
+                    .execute(&mut *transaction)
+                    .await?;
+                } else {
+                    // Before the request ledger exists there is no durable fence proving that a
+                    // leased call was never dispatched. Keep the reservation charged unless full
+                    // measured usage is already present.
+                    sqlx::query(
+                        "UPDATE linggan_model_invocation invocation \
+                         SET charged_tokens=CASE \
+                               WHEN invocation.input_tokens IS NOT NULL AND invocation.output_tokens IS NOT NULL \
+                                 THEN COALESCE(invocation.charged_tokens,invocation.reserved_tokens) \
+                               ELSE GREATEST(invocation.reserved_tokens,COALESCE(invocation.charged_tokens,0)) \
+                             END, \
+                             state='failed',failure_code='lease_expired', \
+                             result=COALESCE(result,'{}'::jsonb)||$2,finished_at=scope_001_now() \
+                         WHERE invocation.invocation_ref=$1 AND invocation.state='running'",
+                    )
+                    .bind(invocation_ref)
+                    .bind(result)
+                    .execute(&mut *transaction)
+                    .await?;
+                }
             }
             // Recovery can be what makes a run's last target terminal, so the run has to be able to
             // close here too, not only on the acceptance path.
