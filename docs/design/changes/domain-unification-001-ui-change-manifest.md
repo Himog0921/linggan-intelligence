@@ -92,6 +92,6 @@
 
 ## 7. 全部领域作品直达补充（2026-09-26；隔离候选）
 
-Collection 的 creator/keyword 目录在“全部领域”汇总标准材料，不建立混域证据库。作品行使用稳定 `work` 引用：已选领域时直接打开该领域的作品；未选领域时先出现既有领域弹窗，选定后同一 `work` 才交给 Inspector。若误选不收录该作品的领域，详情 API 的 `material_not_found` 在原反馈区以中文说明“所选领域未收录这篇作品”，建议切换到所属领域或从当前列表重选；不能冒充详情已读取，也不能静默显示空作品。这里不增加弹窗层级、Token、组件、API 或跨领域读取。
+Collection 的 creator/keyword 目录在“全部领域”汇总标准材料，不建立混域证据库。作品行使用稳定 `work` 引用：已选领域时直接打开该领域的作品；未选领域时先出现既有领域弹窗，选定后同一 `work` 才交给 Inspector。详情 API 的 `material_not_found` 在原反馈区以中文说明“当前领域无法读取这篇作品”，建议切换领域或从作品列表重选；该错误码既可能来自领域未收录，也可能来自已收录但材料暂时不可读，不能冒充详情已读取或静默显示空作品。这里不增加弹窗层级、Token、组件、API 或跨领域读取。
 
-表面为 Collection 目标抽屉作品行、语料领域弹窗与 Evidence Inspector；状态为有作品且可读、未选领域、所选领域未收录、详情读取失败。依赖仍是现有 Work Resource、Domain 显式范围和 `work` 深链。验收以 creator/keyword 隔离 PostgreSQL 目录回归、作品链接单测、真实数据副本上 Collection → 弹窗 → 正确 Domain → 同篇 Inspector 浏览器流程为准；误选领域反馈的独立浏览器检查尚未执行，不把源码分支等同视觉验收。共享库补投影、主线合并、`:3000` 部署与 Mog 业务验收均未发生。
+表面为 Collection 目标抽屉作品行、语料领域弹窗与 Evidence Inspector；状态为有作品且可读、未选领域、当前领域材料不可读、详情读取失败。依赖仍是现有 Work Resource、Domain 显式范围和 `work` 深链。验收以 creator/keyword 隔离 PostgreSQL 目录回归、作品链接单测、真实数据副本上 Collection → 弹窗 → 正确 Domain → 同篇 Inspector 浏览器流程为准；`material_not_found` 反馈的独立浏览器检查尚未执行，不把源码分支等同视觉验收。共享库补投影、主线合并、`:3000` 部署与 Mog 业务验收均未发生。

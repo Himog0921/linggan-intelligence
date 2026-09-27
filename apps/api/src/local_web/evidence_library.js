@@ -1402,11 +1402,11 @@
       refs.inspectorFeedback.hidden = false;
       if (error.code === 'material_not_found' && selectionSource === 'url') {
         refs.inspectorFeedback.replaceChildren(
-          node('strong', null, '所选领域未收录这篇作品'),
+          node('strong', null, '当前领域无法读取这篇作品'),
           tech(error.code),
         );
         panels.forEach((panel) => panel.replaceChildren(sourceIncompleteBlock(
-          '请切换到这篇作品所属的领域，或从当前领域的作品列表重新选择。',
+          '这篇作品可能未收录于所选领域，或当前缺少可读取的材料；请切换领域或从作品列表重新选择。',
         )));
         return;
       }

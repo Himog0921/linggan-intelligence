@@ -411,7 +411,7 @@ Mog 明确将四区常驻设置改为单页+关键配置弹窗。复用 L1 Setti
 
 ## 2026-09-26 · DOMAIN-UNIFICATION-001 全部领域作品直达
 
-Collection 的“全部领域”作品深链经既有领域弹窗保留 `work`，正确领域进入同篇 Inspector；错误领域的 `material_not_found` 由中文反馈区解释为“所选领域未收录这篇作品”。只改既有 Page 交互与状态表达，不新增 Token、Primitive、CMP、Pattern、材质或动效。真实数据副本的正确领域流程已浏览器验证；错误领域反馈尚未独立浏览器验证，`main`/`:3000` 未刷新。范围与回执见 `../changes/domain-unification-001-ui-change-manifest.md` §7。
+Collection 的“全部领域”作品深链经既有领域弹窗保留 `work`，正确领域进入同篇 Inspector；`material_not_found` 由中文反馈区解释为“当前领域无法读取这篇作品”，不将其一概断言为领域未收录。只改既有 Page 交互与状态表达，不新增 Token、Primitive、CMP、Pattern、材质或动效。真实数据副本的正确领域流程已浏览器验证；不可读反馈尚未独立浏览器验证，`main`/`:3000` 未刷新。范围与回执见 `../changes/domain-unification-001-ui-change-manifest.md` §7。
 
 ## 2026-09-15 · EVIDENCE-COVER-CARD-MATERIAL-004 第七种材料 `M-06` 纸面残留
 
