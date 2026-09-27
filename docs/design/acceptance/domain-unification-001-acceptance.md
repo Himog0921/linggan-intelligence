@@ -3,9 +3,9 @@
 > 状态: 一次性报告
 > 最后核对: 2026-09-27
 > 验收日期: 2026-09-24
-> 适用范围: §1–6 为 WP4 Domain Management 与 PR #343 后续回执；§7 为 PR #345 的全部领域作品直达候选验收
-> 验收环境: §1–6 为 Codex In-App Browser、临时 loopback API `127.0.0.1:65435` 与一次性 PostgreSQL schema `domain_browser_acceptance`；§7 的环境另见该节
-> 数据边界: §1–6 使用合成 Domain/Target；§7 使用共享开发库的只读流式副本；均未写共享库、访问外部平台或切换常驻 runtime
+> 适用范围: §1–5 为 WP4 Domain Management 隔离验收；§6 为 PR #343 发布后回执；§7 为 PR #345 全部领域作品直达候选验收
+> 验收环境: §1–5 使用 Codex In-App Browser、临时 loopback API `127.0.0.1:65435` 与一次性 PostgreSQL schema `domain_browser_acceptance`；§6 的已发布环境、§7 的候选环境分别见各节
+> 数据边界: §1–5 使用合成 Domain/Target 且未写共享库或切换常驻 runtime；§6 如实记录已发生的共享库迁移和 runtime 切换；§7 使用共享开发库只读流式副本，未写共享库或切换常驻 runtime
 > 事实来源: 本机浏览器 AX/截图观察、一次性 API POST/redirect 读回、隔离 PostgreSQL 查询与当前页面合同
 > 冲突时以谁为准: 用户最新确认、页面/数据合同、真实浏览器与隔离 PostgreSQL 结果；本记录不授权发布
 
