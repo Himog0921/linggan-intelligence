@@ -19,7 +19,7 @@
 
 | 手册阶段 | 当前已有证据 | 未完成/下一关 | 状态 |
 |---|---|---|---|
-| P0 外围接线与隔离启动 | 手册和来源已固定；`:3000` 健康检查 200，`runtime-identity` 为 `2587fba4`、migration head 0104；候选 0105–0108 只在 disposable PostgreSQL 迁移链中通过 | 用户环境历史摘要、在途任务专项基线、迁移 drain 与恢复演练 | 主线运行身份已核实；P2 migrations 未应用，后续现场保护证明未完成 |
+| P0 外围接线与隔离启动 | 2026-09-27 只读确认 `:3000` health ready、`runtime-identity=2587fba4`、共享开发库 migration head 0104；聚合快照为 4,880 material comments、7 Study Runs、945 Targets、1,412 semantic attempts、764 Signals、0 Problems；prepared/leased batches 0/0，running invocations 0，其他 active SQL sessions 0。Request ledger 不存在（0105 未应用） | 历史行数/采样 hash 基线、原文资格盘点、迁移前备份、worker drain 与恢复演练 | 运行身份和在途计数级状态已核；数据内容/hash 与发布保护演练未核，P2 migrations 未应用 |
 | P1 原声、清洗与语境 | 前序 #323–#336 已并入 main 的材料/评论目录、详情历史、清洗和选择能力；本轮保留 main 的统一 domain usage 并重跑既有回归 | T01–T54 全量、剩余边界及用户指定 exact-head 的完整产品验收 | 已有交付在 main；整阶段验收未结 |
 | P2 选择、预算、启动 | 方法版本/读取复制、按领域默认 CAS、显式预算、共享 preview/start、请求幂等与并发隔离、正式 router 和方法/Run UI 已接通；新增 v2 queued Run 到现有 semantic worker 的接线、冻结方法 request snapshot、调用前 fence、Run 级预算及实测用量累计；隔离 PG 45 项 + Axum/PG 6 项，unit suites Intelligence 123/123、API 287 passed（35 ignored） | 真实浏览器逐动作验收；估算与 provider 实测用量差异仍需完整账本承接 | exact-head run 36311074498 成功（eec）；用户页面/业务接受未结 |
 | P3 有界执行、质量与恢复 | 新 Run semantic worker/receipt synthetic 路径；旧版 schema 下 P2 终态写入与 lease recovery 已保留兼容；rebuild PG 47/47，P2 worker PG 45/45 + Axum/PG 6/6；exact-head run 36311074498 成功 | 三阶段 request/usage 账本与共享预算、失败/部分接纳、pause/resume/stop 与控制 CAS、崩溃/过期恢复、公平调度；独立人工 Gold Set、离线 Recall@K、隔离 Rust→WeMM 回放和同篇双账号冷启动证明 | synthetic contract 回归通过；执行闭环未完成；质量验证 `BLOCKED_ON_HUMAN_ANNOTATION`，不是验证失败 |
