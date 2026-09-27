@@ -198,6 +198,17 @@ const signalKindLabel = {
 const problemStateLabel = { active: '生效中', retired: '已停用' };
 const contextStateLabel = { ready: '语境完整', partial: '语境部分（有截断）', missing: '缺少语境' };
 const sourceStateLabel = { known: null, restricted: '来源已被限制，原文不再显示', unknown: '原文未知（来源未采集到正文）' };
+const runStateLabel = {
+  queued: '排队中', running: '处理中', completed: '已完成',
+  completed_with_failures: '已结束 · 有目标未完成', cancelled: '已停止'
+};
+const dispatchStateLabel = { enabled: '允许继续派发', paused: '已暂停派发', stopped: '已停止派发' };
+const dispatchReasonLabel = {
+  user_paused: '用户暂停', user_stopped: '用户停止', budget_exhausted: '预算已用尽',
+  legacy_unrecorded: '历史方法未记录', upgrade_guard: '升级保护', method_unavailable: '方法不可用'
+};
+let cancelDialogRunRef = null;
+let cancelDialogDomainRef = null;
 const label = (map, value) => (value == null ? null : (map[value] ?? '未知状态'));
 const PENDING_RESOLUTION_STATES = new Set(['pending', 'deferred_context', 'deferred_ambiguous', 'deferred_novel', 'retrieval_incomplete', 'budget_stopped']);
 
@@ -394,9 +405,14 @@ async function renderProblemsTab() {
 }
 
 function runRow(run) {
+  const canCancel = run.selectionContract === 'comment-study.run-selection.v2'
+    && Boolean(run.cancelDomainRef) && !run.finishedAt
+    && ['enabled', 'paused'].includes(run.dispatchState);
+  const dispatchLabel = dispatchStateLabel[run.dispatchState] || '派发状态未知';
+  const dispatchReason = dispatchReasonLabel[run.dispatchReason];
   return `<tr>
       <td>${esc(run.runRef.slice(0, 8))}…<p>${esc(run.createdAt)}</p></td>
-      <td>${esc(label(targetStateLabel, run.state) ?? run.state)}</td>
+      <td>${esc(runStateLabel[run.state] || run.state)}<p>${esc(dispatchLabel)}${dispatchReason ? ` · ${esc(dispatchReason)}` : ''}</p></td>
       <td>${Number(run.workCount)}<p>primary ${Number(run.primaryWorkCount || 0)} · reference ${Number(run.referenceWorkCount || 0)}</p></td>
       <td>${Number(run.targetCount)}</td>
       <td>${Number(run.succeededCount)}</td>
@@ -404,12 +420,14 @@ function runRow(run) {
       <td>${Number(run.needsContextCount)}</td>
       <td>${Number(run.failedCount)}</td>
       <td>${Number(run.excludedCount)}</td>
+      <td>${canCancel ? `<button class="study-run-cancel" type="button" data-cancel-run="${esc(run.runRef)}" data-cancel-domain="${esc(run.cancelDomainRef)}" data-target-count="${Number(run.targetCount)}" data-pending-count="${Number(run.pendingCount || 0)}">停止本次运行</button>` : '—'}</td>
     </tr>`;
 }
 async function renderRunsTab() {
   const data = await get('runs?limit=50');
   if (!data.runs?.length) return '<p class="study-empty">尚未创建过研究运行。</p>';
-  return `<div class="study-review-table-wrap"><table class="study-review-table"><thead><tr><th scope="col">运行</th><th scope="col">状态</th><th scope="col">作品</th><th scope="col">目标</th><th scope="col">已产出</th><th scope="col">无信号</th><th scope="col">等待语境</th><th scope="col">失败</th><th scope="col">来源受限</th></tr></thead><tbody>${data.runs.map(runRow).join('')}</tbody></table></div>`;
+  const scopedRuns = data.runs.map(run => ({ ...run, cancelDomainRef: data.domainRef || domainRef }));
+  return `<div class="study-review-table-wrap"><table class="study-review-table"><thead><tr><th scope="col">运行</th><th scope="col">状态</th><th scope="col">作品</th><th scope="col">目标</th><th scope="col">已产出</th><th scope="col">无信号</th><th scope="col">等待语境</th><th scope="col">失败</th><th scope="col">来源受限</th><th scope="col">操作</th></tr></thead><tbody>${scopedRuns.map(runRow).join('')}</tbody></table></div>`;
 }
 
 const TAB_RENDERERS = { overview: renderOverviewTab, comments: renderCommentsTab, pending: renderPendingTab, problems: renderProblemsTab, runs: renderRunsTab };
@@ -434,7 +452,70 @@ async function renderActiveTab() {
   container.innerHTML = html;
   container.setAttribute('aria-busy', 'false');
   if (view === 'comments') bindCommentsView();
+  if (view === 'runs') bindRunControls(container);
 }
+
+function bindRunControls(container) {
+  container.querySelectorAll('[data-cancel-run]').forEach(button => {
+    button.addEventListener('click', () => {
+      cancelDialogRunRef = button.dataset.cancelRun;
+      cancelDialogDomainRef = button.dataset.cancelDomain;
+      document.querySelector('#study-cancel-run-identity').textContent =
+        `Run ${cancelDialogRunRef} · 当前未终态 ${Number(button.dataset.pendingCount)} 条 · 目标总数 ${Number(button.dataset.targetCount)} 条`;
+      document.querySelector('#study-cancel-error').textContent = '';
+      const dialog = document.querySelector('#study-cancel-dialog');
+      const confirm = document.querySelector('#study-cancel-confirm');
+      confirm.disabled = false;
+      confirm.textContent = '确认停止';
+      dialog.showModal();
+      document.querySelector('#study-cancel-dismiss').focus();
+    });
+  });
+}
+
+async function submitRunCancellation() {
+  if (!cancelDialogRunRef) return;
+  const runRef = cancelDialogRunRef;
+  const dialog = document.querySelector('#study-cancel-dialog');
+  const confirm = document.querySelector('#study-cancel-confirm');
+  const status = document.querySelector('#study-cancel-error');
+  confirm.disabled = true;
+  confirm.textContent = '正在提交…';
+  status.textContent = '';
+  try {
+    const response = await fetch(`${endpoint}runs/${encodeURIComponent(runRef)}/cancel`, {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ domain_ref: cancelDialogDomainRef })
+    });
+    const receipt = await response.json();
+    if (!response.ok) throw new Error(receipt.error?.message || `请求失败（状态码 ${response.status}）`);
+    if (receipt.data?.runRef !== runRef || receipt.data?.domainRef !== cancelDialogDomainRef) {
+      throw new Error('服务回执与所选运行或领域不匹配。');
+    }
+    dialog.close();
+    cancelDialogRunRef = null;
+    cancelDialogDomainRef = null;
+    await renderActiveTab();
+  } catch (error) {
+    status.textContent = `停止未获确认：${error.message}`;
+    confirm.disabled = false;
+    confirm.textContent = '重试停止';
+  }
+}
+
+document.querySelector('#study-cancel-confirm').addEventListener('click', submitRunCancellation);
+document.querySelector('#study-cancel-dismiss').addEventListener('click', () => {
+  if (!document.querySelector('#study-cancel-confirm').disabled) {
+    document.querySelector('#study-cancel-dialog').close();
+    cancelDialogRunRef = null;
+    cancelDialogDomainRef = null;
+  }
+});
+document.querySelector('#study-cancel-dialog').addEventListener('cancel', event => {
+  if (document.querySelector('#study-cancel-confirm').disabled) event.preventDefault();
+  else { cancelDialogRunRef = null; cancelDialogDomainRef = null; }
+});
 
 async function loadProjection() {
   try {

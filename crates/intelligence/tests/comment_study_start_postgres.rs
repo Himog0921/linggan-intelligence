@@ -21,7 +21,8 @@ use linggan_intelligence::{
     comment_study_problem_store::{accept_problem_pair, accept_problem_resolution},
     comment_study_resolution_worker::run_one_problem_resolution,
     comment_study_run::{
-        StudyStartError, TrustedStudyOrigin, preview_study_selection, start_study_run,
+        StudyStartError, TrustedStudyOrigin, cancel_study_run, preview_study_selection,
+        start_study_run,
     },
     comment_study_selection::{StartStudyRunCommand, StudySelectionMode, study_domain_lock_key},
     model_invocation::checkpoint_invocation_usage,
@@ -72,6 +73,15 @@ async fn setup_with_model_input_limit(
     count: usize,
     model_input_limit: i32,
 ) -> (Database, StartStudyRunCommand, Uuid) {
+    setup_with_model_config(name, count, model_input_limit, 30).await
+}
+
+async fn setup_with_model_config(
+    name: &str,
+    count: usize,
+    model_input_limit: i32,
+    timeout_seconds: i32,
+) -> (Database, StartStudyRunCommand, Uuid) {
     let db = fixture::proof_database(name).await;
     sqlx::raw_sql(include_str!(
         "../../../database/bootstrap/comment-study-001.sql"
@@ -119,7 +129,7 @@ async fn setup_with_model_input_limit(
     sqlx::query("INSERT INTO linggan_model_entry(model_ref,connection_version_ref,model_id,origin) VALUES($1,$2,'synthetic','manual')")
         .bind(model).bind(version).execute(db.pool()).await.unwrap();
     sqlx::query("INSERT INTO linggan_model_config(config_ref,model_ref,input_token_limit,output_token_limit,timeout_seconds,max_attempts) \
-        VALUES($1,$2,$3,1024,30,2)").bind(config).bind(model).bind(model_input_limit).execute(db.pool()).await.unwrap();
+        VALUES($1,$2,$3,1024,$4,2)").bind(config).bind(model).bind(model_input_limit).bind(timeout_seconds).execute(db.pool()).await.unwrap();
     let policy: CreateStudyPolicyCommand = serde_json::from_value(
         json!({"domainRef":domain(),"methodName":"SYNTHETIC", "parentPolicyRef":null,
         "modelConfigRef":config,"defaults":{"commentBudget":1,"contextCharacterBudget":1},
@@ -785,6 +795,130 @@ async fn new_run_is_frozen_and_method_bound_dispatch_accepts_only_the_valid_targ
     .unwrap();
     assert_eq!(v["engineRevision"].as_str().unwrap().len(), 40);
     assert_eq!(effects(&db).await, json!([1, 2, 1, 1]));
+}
+
+#[tokio::test]
+#[ignore = "isolated synthetic PostgreSQL; no shared database or model"]
+async fn response_after_request_deadline_is_not_accepted_after_run_stop() {
+    let (db, command, _) =
+        setup_with_model_config("late_response_after_deadline", 2, 8192, 1).await;
+    let run_ref = start_study_run(&db, command, TrustedStudyOrigin::Manual)
+        .await
+        .unwrap()
+        .run_ref
+        .unwrap();
+    let prepared = prepare_study_batch(
+        &db,
+        PrepareStudyBatchRequest {
+            run_ref,
+            maximum_targets: 12,
+        },
+    )
+    .await
+    .unwrap();
+    let claimed = claim_next_study_batch(&db, Uuid::new_v4(), 60)
+        .await
+        .unwrap()
+        .unwrap();
+    let reservation = reserve_study_batch_model_call(&db, prepared.batch_ref, claimed.lease_token)
+        .await
+        .unwrap();
+    let effective_timeout_ms = mark_study_batch_model_dispatch_started(
+        &db,
+        reservation.invocation_ref,
+        prepared.batch_ref,
+        claimed.lease_token,
+    )
+    .await
+    .unwrap();
+    assert!(effective_timeout_ms > 0 && effective_timeout_ms <= 750);
+
+    let stopped = cancel_study_run(&db, domain(), run_ref).await.unwrap();
+    assert_eq!(stopped.dispatch_reason.as_deref(), Some("user_stopped"));
+    tokio::time::sleep(std::time::Duration::from_millis(1_100)).await;
+    sqlx::query(
+        "UPDATE linggan_model_invocation SET input_tokens=17,output_tokens=4,charged_tokens=21 \
+         WHERE invocation_ref=$1",
+    )
+    .bind(reservation.invocation_ref)
+    .execute(db.pool())
+    .await
+    .unwrap();
+
+    let target_refs: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT target_ref FROM linggan_comment_study_batch_target WHERE batch_ref=$1 ORDER BY ordinal",
+    )
+    .bind(prepared.batch_ref)
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+    let late_output = json!({
+        "contract":"comment-study.note-batch.v1",
+        "batchRef":prepared.batch_ref,
+        "contentPublicRef":prepared.content_public_ref,
+        "results":target_refs.iter().map(|target_ref| json!({
+            "targetRef":target_ref,
+            "outcome":"no_signal",
+            "reason":"SYNTHETIC late response",
+            "signals":[]
+        })).collect::<Vec<_>>()
+    });
+    let receipt =
+        accept_study_batch_output(&db, prepared.batch_ref, claimed.lease_token, late_output)
+            .await
+            .unwrap();
+    assert_eq!(receipt.accepted_target_count, 0);
+    assert_eq!(receipt.cancelled_target_count, 2);
+    assert_eq!(receipt.retried_target_count, 0);
+    let rejected_attempts: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_comment_study_semantic_attempt \
+         WHERE batch_ref=$1 AND state='rejected' \
+           AND rejection_code='semantic_batch_contract' \
+           AND output_manifest->>'failureCode'='request_deadline_expired'",
+    )
+    .bind(prepared.batch_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(rejected_attempts, 2);
+
+    let target_states: Vec<(String, String)> = sqlx::query_as(
+        "SELECT state,terminal_reason FROM linggan_comment_study_target \
+         WHERE run_ref=$1 ORDER BY target_ref",
+    )
+    .bind(run_ref)
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(target_states.len(), 2);
+    assert!(
+        target_states
+            .iter()
+            .all(|(state, reason)| { state == "cancelled" && reason == "user_stopped" })
+    );
+    let no_signal_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_comment_study_target WHERE run_ref=$1 AND state='no_signal'",
+    )
+    .bind(run_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(no_signal_count, 0);
+    let invocation: (String, Option<String>, Option<i64>) = sqlx::query_as(
+        "SELECT state,failure_code,charged_tokens FROM linggan_model_invocation WHERE invocation_ref=$1",
+    )
+    .bind(reservation.invocation_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        invocation,
+        (
+            "failed".to_owned(),
+            Some("request_deadline_expired".to_owned()),
+            Some(21)
+        )
+    );
 }
 
 #[tokio::test]

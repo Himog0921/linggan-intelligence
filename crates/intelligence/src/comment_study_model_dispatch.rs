@@ -448,7 +448,7 @@ pub async fn mark_study_batch_model_dispatch_started(
     invocation_ref: Uuid,
     batch_ref: Uuid,
     lease_token: Uuid,
-) -> Result<(), StudyModelDispatchError> {
+) -> Result<i64, StudyModelDispatchError> {
     let mut transaction = database.pool().begin().await?;
     let run_ref: Uuid = sqlx::query_scalar(
         "SELECT batch.run_ref FROM linggan_comment_study_batch batch \
@@ -481,26 +481,28 @@ pub async fn mark_study_batch_model_dispatch_started(
     if locked_batch.is_none() {
         return Err(StudyModelDispatchError::InvocationUnavailable);
     }
-    let changed = sqlx::query(
+    let remaining_timeout_ms: Option<i64> = sqlx::query_scalar(
         "UPDATE linggan_comment_study_model_request request \
          SET dispatch_started_at=scope_001_now() \
          FROM linggan_comment_study_batch batch,linggan_comment_study_run run \
          WHERE request.invocation_ref=$1 AND request.batch_ref=$2 AND request.stage='semantic' \
-           AND request.dispatch_started_at IS NULL AND request.deadline_at>scope_001_now() \
+           AND request.dispatch_started_at IS NULL \
+           AND request.deadline_at>scope_001_now()+interval '250 milliseconds' \
            AND batch.batch_ref=request.batch_ref AND batch.run_ref=run.run_ref \
            AND batch.state='leased' AND batch.lease_token=$3 \
            AND batch.lease_expires_at>scope_001_now() \
            AND to_jsonb(run)->>'dispatch_state'='enabled' \
-           AND to_jsonb(run)->>'dispatch_reason' IS NULL",
+           AND to_jsonb(run)->>'dispatch_reason' IS NULL \
+         RETURNING floor(extract(epoch FROM (request.deadline_at-request.dispatch_started_at))*1000)::bigint-250",
     )
     .bind(invocation_ref)
     .bind(batch_ref)
     .bind(lease_token)
-    .execute(&mut *transaction)
+    .fetch_optional(&mut *transaction)
     .await?;
-    if changed.rows_affected() != 1 {
+    let Some(remaining_timeout_ms) = remaining_timeout_ms.filter(|remaining| *remaining > 0) else {
         return Err(StudyModelDispatchError::InvocationUnavailable);
-    }
+    };
     let invocation_changed = sqlx::query(
         "UPDATE linggan_model_invocation SET result=COALESCE(result,'{}'::jsonb)||'{\"callStarted\":true}'::jsonb \
          WHERE invocation_ref=$1 AND state='running'",
@@ -512,5 +514,5 @@ pub async fn mark_study_batch_model_dispatch_started(
         return Err(StudyModelDispatchError::InvocationUnavailable);
     }
     transaction.commit().await?;
-    Ok(())
+    Ok(remaining_timeout_ms)
 }

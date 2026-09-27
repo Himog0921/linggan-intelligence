@@ -1,7 +1,15 @@
 //! Disposable PostgreSQL + actual Axum router. No mock transaction or provider I/O.
 use super::tests::{app, send};
 use super::*;
+use linggan_intelligence::comment_study_batch::{PrepareStudyBatchRequest, prepare_study_batch};
+use linggan_intelligence::comment_study_batch_acceptance::{
+    BatchAcceptanceError, accept_study_batch_output,
+};
+use linggan_intelligence::comment_study_batch_worker::claim_next_study_batch;
 use linggan_intelligence::comment_study_catalog::refresh_clean_cache;
+use linggan_intelligence::comment_study_model_dispatch::{
+    mark_study_batch_model_dispatch_started, reserve_study_batch_model_call,
+};
 use linggan_intelligence::comment_study_policy::{CreateStudyPolicyCommand, create_study_policy};
 use linggan_intelligence::comment_study_source::ADHD_DOMAIN_REF;
 use linggan_storage_postgres::Database;
@@ -449,4 +457,201 @@ async fn http_missing_scope_and_partial_schema_fail_without_partial_writes() {
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(body["error"]["code"], "study_schema_unavailable");
     assert_eq!(effects(&p.db).await, json!([0, 0, 0, 0]));
+}
+
+#[tokio::test]
+#[ignore = "isolated command HTTP PostgreSQL proof; no shared database or model"]
+async fn http_cancel_is_idempotent_and_restart_selects_only_explicitly_retryable_targets() {
+    let p = setup("http_cancel_restart", 2).await;
+    let (status, started) = send(
+        p.application.clone(),
+        "/api/local/comment-study/runs",
+        p.command.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let run_ref: Uuid = serde_json::from_value(started["runRef"].clone()).unwrap();
+    let path = format!("/api/local/comment-study/runs/{run_ref}/cancel");
+    let cancel = json!({"domain_ref":domain()});
+    let (status, first) = send(p.application.clone(), &path, cancel.clone()).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(first["data"]["runRef"], json!(run_ref));
+    assert_eq!(first["data"]["state"], "cancelled");
+    assert_eq!(first["data"]["dispatchState"], "stopped");
+    assert_eq!(first["data"]["dispatchReason"], "user_stopped");
+    assert_eq!(first["data"]["controlVersion"], 1);
+    assert!(first["data"]["finishedAt"].is_string());
+    let (status, second) = send(p.application.clone(), &path, cancel).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(second["data"]["controlVersion"], 1);
+    assert_eq!(second["data"]["dispatchReason"], "user_stopped");
+    let cancelled: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_comment_study_target WHERE run_ref=$1 AND state='cancelled' \
+         AND terminal_reason='user_stopped' AND finished_at IS NOT NULL",
+    )
+    .bind(run_ref)
+    .fetch_one(p.db.pool())
+    .await
+    .unwrap();
+    assert_eq!(cancelled, 2);
+
+    let mut restart = next(&p.command);
+    restart["mode"] = json!("retry_failed");
+    restart["reason"] = json!("明确续做已取消目标");
+    let (status, resumed) = send(
+        p.application.clone(),
+        "/api/local/comment-study/runs",
+        restart,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_ne!(resumed["runRef"], json!(run_ref));
+    assert_eq!(resumed["targetCount"], 2);
+}
+
+#[tokio::test]
+#[ignore = "isolated command HTTP PostgreSQL proof; no shared database or model"]
+async fn http_cancel_rejects_unstarted_late_output_but_keeps_dispatched_output_authorized() {
+    let p = setup("http_cancel_late", 2).await;
+    let (status, started) = send(
+        p.application.clone(),
+        "/api/local/comment-study/runs",
+        p.command.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let run_ref: Uuid = serde_json::from_value(started["runRef"].clone()).unwrap();
+    let prepared = prepare_study_batch(
+        &p.db,
+        PrepareStudyBatchRequest {
+            run_ref,
+            maximum_targets: 2,
+        },
+    )
+    .await
+    .unwrap();
+    let lease = claim_next_study_batch(&p.db, Uuid::new_v4(), 60)
+        .await
+        .unwrap()
+        .unwrap();
+    let reserved = reserve_study_batch_model_call(&p.db, lease.batch_ref, lease.lease_token)
+        .await
+        .unwrap();
+    let path = format!("/api/local/comment-study/runs/{run_ref}/cancel");
+    let (status, stopped) =
+        send(p.application.clone(), &path, json!({"domain_ref":domain()})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(stopped["data"]["dispatchState"], "stopped");
+
+    let late = accept_study_batch_output(
+        &p.db,
+        lease.batch_ref,
+        lease.lease_token,
+        json!({"contract":"comment-study.note-batch.v1","batchRef":lease.batch_ref,
+            "contentPublicRef":prepared.content_public_ref,"results":[{"targetRef":prepared.target_refs[0],
+                "outcome":"no_signal","reason":"合成回执","signals":[]}]}),
+    )
+    .await;
+    assert!(matches!(late, Err(BatchAcceptanceError::BatchUnavailable)));
+    let unstarted: Value=sqlx::query_scalar(
+        "SELECT jsonb_build_object('invocation',(SELECT jsonb_build_array(state,charged_tokens,failure_code) \
+             FROM linggan_model_invocation WHERE invocation_ref=$1), \
+           'target',(SELECT jsonb_build_array(state,terminal_reason) FROM linggan_comment_study_target WHERE target_ref=$2), \
+           'signals',(SELECT count(*) FROM linggan_comment_study_signal WHERE target_ref=$2))",
+    )
+    .bind(reserved.invocation_ref)
+    .bind(prepared.target_refs[0])
+    .fetch_one(p.db.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        unstarted["invocation"],
+        json!(["failed", 0, "user_stopped"])
+    );
+    assert_eq!(unstarted["target"], json!(["cancelled", "user_stopped"]));
+    assert_eq!(unstarted["signals"], 0);
+
+    let p = setup("http_cancel_authorized", 2).await;
+    let (status, started) = send(
+        p.application.clone(),
+        "/api/local/comment-study/runs",
+        p.command.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let run_ref: Uuid = serde_json::from_value(started["runRef"].clone()).unwrap();
+    let prepared = prepare_study_batch(
+        &p.db,
+        PrepareStudyBatchRequest {
+            run_ref,
+            maximum_targets: 2,
+        },
+    )
+    .await
+    .unwrap();
+    let lease = claim_next_study_batch(&p.db, Uuid::new_v4(), 60)
+        .await
+        .unwrap()
+        .unwrap();
+    let reserved = reserve_study_batch_model_call(&p.db, lease.batch_ref, lease.lease_token)
+        .await
+        .unwrap();
+    mark_study_batch_model_dispatch_started(
+        &p.db,
+        reserved.invocation_ref,
+        lease.batch_ref,
+        lease.lease_token,
+    )
+    .await
+    .unwrap();
+    let path = format!("/api/local/comment-study/runs/{run_ref}/cancel");
+    let (status, stopped) =
+        send(p.application.clone(), &path, json!({"domain_ref":domain()})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(stopped["data"]["dispatchState"], "stopped");
+    let receipt = accept_study_batch_output(
+        &p.db,
+        lease.batch_ref,
+        lease.lease_token,
+        json!({"contract":"comment-study.note-batch.v1","batchRef":lease.batch_ref,
+            "contentPublicRef":prepared.content_public_ref,"results":[{"targetRef":prepared.target_refs[0],
+                "outcome":"no_signal","reason":"合成回执","signals":[]}]}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(receipt.accepted_target_count, 1);
+    assert_eq!(receipt.cancelled_target_count, 1);
+    let settled: Value=sqlx::query_scalar(
+        "SELECT jsonb_build_object('run',(SELECT jsonb_build_array(state,dispatch_state,dispatch_reason,control_version) \
+             FROM linggan_comment_study_run WHERE run_ref=$1), \
+           'invocation',(SELECT jsonb_build_array(state,charged_tokens,failure_code) \
+             FROM linggan_model_invocation WHERE invocation_ref=$2), \
+           'targets',jsonb_build_array( \
+             (SELECT count(*) FROM linggan_comment_study_target WHERE run_ref=$1 AND state='no_signal'), \
+             (SELECT count(*) FROM linggan_comment_study_target WHERE run_ref=$1 AND state='cancelled' \
+                AND terminal_reason='user_stopped')))",
+    )
+    .bind(run_ref)
+    .bind(reserved.invocation_ref)
+    .fetch_one(p.db.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        settled["run"],
+        json!(["completed_with_failures", "stopped", "user_stopped", 1])
+    );
+    assert_eq!(settled["invocation"][0], "succeeded");
+    assert_eq!(settled["targets"], json!([1, 1]));
+
+    let mut restart = next(&p.command);
+    restart["mode"] = json!("retry_failed");
+    restart["reason"] = json!("只续做停止后未完成的目标");
+    let (status, resumed) = send(
+        p.application.clone(),
+        "/api/local/comment-study/runs",
+        restart,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(resumed["targetCount"], 1);
 }

@@ -61,6 +61,28 @@ fn exhausted_pair_requests_have_a_truthful_ui_state_label() {
 }
 
 #[test]
+fn run_cancellation_requires_confirmation_and_refreshes_from_the_server_receipt() {
+    let html = include_str!("comment_study.html");
+    let script = include_str!("comment_study.js");
+    assert!(html.contains("id=\"study-cancel-dialog\""));
+    assert!(html.contains("id=\"study-cancel-run-identity\""));
+    assert!(
+        html.contains("aria-describedby=\"study-cancel-run-identity study-cancel-description\"")
+    );
+    assert!(html.contains("已经开始的调用无法保证中断，可能仍产生费用"));
+    assert!(script.contains("dialog.showModal()"));
+    assert!(script.contains("data-pending-count=\"${Number(run.pendingCount || 0)}\""));
+    assert!(script.contains("Run ${cancelDialogRunRef} · 当前未终态"));
+    assert!(script.contains("runs/${encodeURIComponent(runRef)}/cancel"));
+    assert!(script.contains("JSON.stringify({ domain_ref: cancelDialogDomainRef })"));
+    assert!(script.contains("receipt.data?.runRef !== runRef"));
+    assert!(script.contains("receipt.data?.domainRef !== cancelDialogDomainRef"));
+    assert!(script.contains("await renderActiveTab()"));
+    assert!(!script.contains("window.confirm("));
+    assert!(!script.contains("run.dispatchState = 'stopped'"));
+}
+
+#[test]
 fn activation_expected_pointer_is_required_nullable_and_closed() {
     assert!(serde_json::from_value::<ActivateStudyPolicyCommand>(json!({})).is_err());
     let value: ActivateStudyPolicyCommand =
@@ -84,8 +106,10 @@ async fn origin_guard_precedes_json_and_storage_on_every_command() {
         "/api/local/comment-study/policies/{}/activate",
         Uuid::new_v4()
     );
+    let cancel = format!("/api/local/comment-study/runs/{}/cancel", Uuid::new_v4());
     for path in [
         "/api/local/comment-study/runs",
+        cancel.as_str(),
         "/api/local/comment-study/selection-preview",
         activate.as_str(),
         "/api/local/comment-study/policy",
@@ -235,6 +259,46 @@ async fn preview_has_no_request_identity_and_activation_validates_path_before_st
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn cancel_contract_is_domain_scoped_closed_and_idempotent_at_the_http_boundary() {
+    let path = format!("/api/local/comment-study/runs/{}/cancel", Uuid::new_v4());
+    for body in [
+        json!({}),
+        json!({"domain_ref":Uuid::nil()}),
+        json!({"domain_ref":ADHD_DOMAIN_REF,"domainRef":ADHD_DOMAIN_REF}),
+    ] {
+        let (status, body) = send(app(LocalDatabaseState::NotConfigured), &path, body).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error"]["code"], "invalid_request");
+    }
+    let (status, body) = send(
+        app(LocalDatabaseState::NotConfigured),
+        &format!("/api/local/comment-study/runs/not-a-uuid/cancel"),
+        json!({"domain_ref":ADHD_DOMAIN_REF}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["error"]["code"], "invalid_request");
+
+    let (status, body) = send(
+        app(LocalDatabaseState::NotConfigured),
+        &path,
+        json!({"domain_ref":ADHD_DOMAIN_REF}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(body["error"]["code"], "catalog_unavailable");
+
+    let (status, body) = send(
+        app(LocalDatabaseState::NotConfigured),
+        &format!("{path}?domain={ADHD_DOMAIN_REF}"),
+        json!({"domain_ref":ADHD_DOMAIN_REF}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["error"]["code"], "invalid_request");
 }
 
 #[tokio::test]

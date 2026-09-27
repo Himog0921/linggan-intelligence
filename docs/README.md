@@ -1,7 +1,7 @@
 # 文档总索引
 
 > 状态: 权威当前
-> 最后核对: 2026-09-26
+> 最后核对: 2026-09-28
 > 适用范围: 全仓库文档导航、权威状态与渐进式披露
 > 事实来源: 当前 Git 文件树、`AGENTS.md` 与文档状态头
 > 冲突时以谁为准: `AGENTS.md` 和真实代码、合同、测试、运行结果
@@ -12,7 +12,7 @@
 
 Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发。先读[完整手册入口](runbooks/comment-study-productization-package.md)，再按职责读取其中的八个分册、机器合同与验收台账；每步对照 P0–P8 和 T01–T54。当前阶段与未验证项以该入口及实施回执为准，不将文档入库视为代码、数据库或 UI 已交付。实施状态见[当前项目账本](audits/comment-study-productization-001/README.md)；页面合同见[评论研究产品化 UI 规格](design/pages/comment-study-productization-001.md)。
 
-本包保留当前 clean-study 合法历史，不延用 DEC-0006 的旧 reset 授权；只替代对应五 Tab 与旧启动交互的目标规格，不恢复 V1 路径。自动化分册是后续 P6 设计，不是定时外发授权。2026-09-27 的 P0–P8 推进快照见 COMMENT-STUDY-PRODUCTIZATION-001 验收账本；不表示历史 T01–T54 或下方所有状态已重新核验。
+本包保留当前 clean-study 合法历史，不延用 DEC-0006 的旧 reset 授权；只替代对应五 Tab 与旧启动交互的目标规格，不恢复 V1 路径。自动化分册是后续 P6 设计，不是定时外发授权。2026-09-28 的 P0–P8 推进快照见 COMMENT-STUDY-PRODUCTIZATION-001 验收账本；不表示历史 T01–T54 或下方所有状态已重新核验。
 
 本包分册索引：[执行入口](agents/comment-study-productization-001-handoff.md)、[架构](architecture/comment-study-productization-001.md)、[P0 回执](audits/comment-study-productization-001/p0-execution.md)、[P1 闭环](audits/comment-study-productization-001/p1-closure.md)、[P1 计数与目录](audits/comment-study-productization-001/p1-read-counts.md)、[P1 作品目录](audits/comment-study-productization-001/p1-work-catalog.md)、[数据库合同](data-contracts/comment-study-productization-001.md)、[HTTP 合同](data-contracts/comment-study-http-001.md)、[机器合同](data-contracts/comment-study-productization-001/README.md)、[总体计划](plans/active/comment-study-productization-001.md)、[自动化后续计划](plans/active/comment-study-automation-002.md)、[开发与升级手册](runbooks/comment-study-productization-001.md)。
 

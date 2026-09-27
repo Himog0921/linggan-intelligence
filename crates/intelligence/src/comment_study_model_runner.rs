@@ -75,7 +75,7 @@ pub async fn call_study_batch_model(
         };
     provider.operation = "analyze".into();
     provider.model_id = reservation.model_id.clone();
-    provider.timeout_ms = match u64::try_from(reservation.timeout_seconds) {
+    let configured_timeout_ms = match u64::try_from(reservation.timeout_seconds) {
         Ok(seconds) => seconds.saturating_mul(1_000),
         Err(_) => {
             settle_pre_provider_failure(
@@ -88,6 +88,7 @@ pub async fn call_study_batch_model(
             return Err(StudyModelRunnerError::Model(ModelError::Invalid));
         }
     };
+    provider.timeout_ms = configured_timeout_ms;
     provider.max_output_tokens = reservation.output_token_limit;
     provider.system = reservation
         .system_instruction
@@ -117,13 +118,16 @@ pub async fn call_study_batch_model(
     };
 
     if reservation.system_instruction.is_some() {
-        mark_study_batch_model_dispatch_started(
+        let deadline_timeout_ms = mark_study_batch_model_dispatch_started(
             database,
             reservation.invocation_ref,
             batch_ref,
             lease_token,
         )
         .await?;
+        let deadline_timeout_ms = u64::try_from(deadline_timeout_ms)
+            .map_err(|_| StudyModelRunnerError::Model(ModelError::Invalid))?;
+        provider.timeout_ms = provider.timeout_ms.min(deadline_timeout_ms);
     }
 
     let response = adapter.call(&provider).await;

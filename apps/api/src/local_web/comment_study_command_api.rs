@@ -18,7 +18,8 @@ use linggan_intelligence::{
         activate_study_policy,
     },
     comment_study_run::{
-        StudyStartError, TrustedStudyOrigin, preview_study_selection, start_study_run,
+        StudyStartError, TrustedStudyOrigin, cancel_study_run, preview_study_selection,
+        start_study_run,
     },
     comment_study_selection::{SelectionPreviewCommand, StartStudyRunCommand, StudySelectionError},
 };
@@ -29,6 +30,7 @@ use uuid::Uuid;
 pub(super) fn additional_routes() -> Router<LocalWebState> {
     Router::new()
         .route("/api/local/comment-study/selection-preview", post(preview))
+        .route("/api/local/comment-study/runs/{id}/cancel", post(cancel))
         .route(
             "/api/local/comment-study/policies/{policy_ref}/activate",
             post(activate),
@@ -125,6 +127,41 @@ pub(crate) async fn start(
     }
 }
 
+async fn cancel(
+    State(state): State<LocalWebState>,
+    Path(reference): Path<String>,
+    RawQuery(query): RawQuery,
+    body: Result<Json<CancelStudyRunRequest>, JsonRejection>,
+) -> Response {
+    if query.is_some_and(|query| !query.is_empty()) {
+        return invalid(None);
+    }
+    let Ok(run_ref) = Uuid::parse_str(&reference) else {
+        return invalid(None);
+    };
+    let Ok(Json(command)) = body else {
+        return invalid(None);
+    };
+    if run_ref.is_nil() || command.domain_ref.is_nil() {
+        return invalid(None);
+    }
+    let LocalDatabaseState::Ready(db) = &state.database else {
+        return database_unavailable(&state, None);
+    };
+    match cancel_study_run(db, command.domain_ref, run_ref).await {
+        Ok(receipt) => {
+            let as_of = receipt.as_of.clone();
+            Json(json!({
+                "request_id":Uuid::new_v4(),
+                "data_as_of":as_of,
+                "data":receipt
+            }))
+            .into_response()
+        }
+        Err(error) => failure(error, None),
+    }
+}
+
 async fn activate(
     State(state): State<LocalWebState>,
     Path(reference): Path<String>,
@@ -167,6 +204,12 @@ pub(crate) async fn retired() -> Response {
 #[serde(deny_unknown_fields)]
 struct ActivateQuery {
     domain: Uuid,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CancelStudyRunRequest {
+    domain_ref: Uuid,
 }
 
 fn invalid(reference: Option<Uuid>) -> Response {

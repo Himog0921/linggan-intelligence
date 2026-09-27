@@ -144,6 +144,20 @@
     <div id="comment-detail-body" class="study-detail-body" aria-live="polite"></div>
   </dialog>
 
+  <dialog id="study-cancel-dialog" aria-labelledby="study-cancel-title" aria-describedby="study-cancel-run-identity study-cancel-description">
+    <div class="study-cancel-dialog-body">
+      <p class="study-label">运行控制</p>
+      <h2 id="study-cancel-title">停止本次研究？</h2>
+      <p id="study-cancel-run-identity" class="study-cancel-run-identity"></p>
+      <p id="study-cancel-description">尚未外发的目标会标记为取消，已接纳结果会保留。已经开始的调用无法保证中断，可能仍产生费用；获准的在途结果仍会结算。停止后不能恢复原 Run，如需续做，请创建新 Run 并选择“重试失败”。</p>
+      <p id="study-cancel-error" class="study-cancel-error" role="status" aria-live="polite"></p>
+      <div class="study-cancel-actions">
+        <button id="study-cancel-confirm" type="button" class="study-danger-button">确认停止</button>
+        <button id="study-cancel-dismiss" type="button" autofocus>返回</button>
+      </div>
+    </div>
+  </dialog>
+
   <script src="/assets/comment-study.js"></script>
   <script>
 /* COMMENT-STUDY-INTELLIGENCE-OVERVIEW-002 */

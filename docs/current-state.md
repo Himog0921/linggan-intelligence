@@ -6,11 +6,13 @@
 > 事实来源: 本机实际检查、已确认项目边界和完成计划
 > 冲突时以谁为准: 真实运行结果、ACCEPTED ADR 与用户最新确认
 
-### GREENFIELD Comment Research / Draft PR #338（最新 main 已整合；最终证明进行中）
+### GREENFIELD Comment Research / Draft PR #338（最新 main 已整合；P2/P3 候选持续推进）
 
-P3 代码提交 `68d98caf7cffd92b95d819952f3bf9c4e806925c` 已推送至 PR #338；该精确提交的 run [36333884008](https://github.com/Himog0921/linggan-intelligence/actions/runs/36333884008) synthetic proof 成功，source-export 按 push-only 条件跳过。PR #338 仍 OPEN/Draft，未合入。
+PR #338 当前仍 OPEN/Draft、base=`main@2587fba486434acf2c94a8e7f64ce245b87a38f6`；前序 P3 code head `68d98caf7cffd92b95d819952f3bf9c4e806925c` 的 exact-head synthetic run [36333884008](https://github.com/Himog0921/linggan-intelligence/actions/runs/36333884008) 成功。#338 之前的部分 P1/P2 能力由独立 PR #323–#327、#329、#335、#336 进入 main；这不表示 #338 合入或整体完成。
 
-PR #338 仍为 Open/Draft，base 与 `origin/main@2587fba486434acf2c94a8e7f64ce245b87a38f6` 一致。此前 P2 远端 head `eec203286b48e6c6d38a1dce93e7db6b7e5d9427` 的 exact-head run [36311074498](https://github.com/Himog0921/linggan-intelligence/actions/runs/36311074498) 成功，export job 按 push-only 条件跳过。提交 `eec20328` 修复旧 schema 兼容：v1 超限 Target 保持 queued，由当轮 exclusion 防饥饿；旧 schema 无 request ledger 时过期恢复保守计入 reservation。此前完整验证为 rebuild PG 48/48、P2 worker PG 45/45、Axum/PG 6/6、Intelligence unit 123/123、API 287 passed/35 ignored；独立 reviewer 对两处代码为 PASS。此前 #338 覆盖的部分前序能力已由独立 PR（#323–#327、#329、#335、#336）进入 main，这不代表 #338 整体已合并。当前 P2 候选已接通 v2 queued Run 到 semantic batch worker、冻结方法 request snapshot、调用前 lease/dispatch fence、Run 级 token budget、按完整方法请求预打包、实测 usage 累计和 Run→Batch→Target 一致锁序；过期恢复对未 dispatch 请求释放 reservation，对已 dispatch 但 usage 未知的调用保守保留 reservation。P3 commit `68d98caf7cffd92b95d819952f3bf9c4e806925c` 已推送；exact-head run [36333884008](https://github.com/Himog0921/linggan-intelligence/actions/runs/36333884008) synthetic proof 成功，source-export 跳过。P3 本地完整验证为 56 个 Comment Study Intelligence PG、Axum/PG 6/6、rebuild PG 48/48、Intelligence unit 123/123、API 288 passed/35 ignored。候选迁移 0105–0109 仅在 disposable PostgreSQL 验证，未注册共享升级入口；0107 保持原 checksum。工作流未运行浏览器自动化验收。P2 页面逐动作/数字和 Mog 验收仍待完成。本机 `:3000` 上次只读身份核验为 main `2587fba4`、migration head 0104；候选 UI 与迁移未发布。2026-09-27 的共享开发库只读聚合快照为 4,880 Material Comments、7 Study Runs、945 Targets、1,412 semantic attempts、764 Signals、0 Problems，prepared/leased batches 0/0、running model invocations 0、其他活动 SQL 0；request ledger 不存在。该结果不是历史内容/hash 基线或质量验收；未查询评论正文。备份恢复及 P0 专项历史/在途任务保护证明仍未完成。
+当前 P2 候选在本分支补上 Run 取消与显式重试：Run 锁与持久 dispatch fence 串行化停止/外发；未越过 fence 的调用按零费用收口；在途结果超过冻结 request deadline 时不接纳，已观测用量保留；provider timeout 受 deadline 剩余时间限制。停止确认框展示 Run ID、未终态目标数和目标总数；继续执行需创建新 Run 并选择 `retry_failed`。2026-09-28 本地验证：产品化 disposable PostgreSQL Intelligence 57/57、真实 Axum/PG 8/8、Intelligence unit 123/123、API 290 passed / 37 ignored。该增量仍待独立最终复审、提交、push 与 exact-head CI；浏览器和 Mog 页面验收未完成。全仓 rustfmt check 有未改文件的既有格式漂移，定点改动文件格式通过。候选迁移 0105–0109 仍只用于隔离证明，未注册共享升级入口；没有 provider 调用、共享 migration、部署、runtime 切换或 merge。
+
+P2 仍缺真实浏览器逐动作/逐数字走查和 Mog 页面/业务验收；P3 还缺 pause/resume/stop CAS、公平调度、完整失败/部分接纳矩阵与运行态 drain。P3 Recall@K 与质量出口 `BLOCKED_ON_HUMAN_ANNOTATION`，等待独立 Gold Set，Agent 不自标。之后按 P4→P5→P6→P7→P8 顺序推进，P0 用户环境历史/在途保护、迁移前数据基线与备份恢复演练并行跟踪。`:3000` 上次只读身份仍是 main `2587fba4`、migration head 0104；候选 UI 未发布。2026-09-27 共享开发库只读聚合快照仍只代表那次计数，不是历史内容/hash 基线或质量验收。
 
 ### DOMAIN-UNIFICATION-001（#343/#344 已合并并刷新本机运行；作品读取修复候选待集成）
 
@@ -22,7 +24,7 @@ Mog 已确认正式 Domain 在基础采集、详情、评论、媒体与研究�
 
 2026-09-26 候选 `codex/all-domain-works-130` 修复 Collection“全部领域”目标抽屉与关键词列表跳过标准作品目录的问题；目录仍只从已接纳的 canonical Material 及冻结 Domain usage 读取，不恢复旧 `cross_industry` 表或运行时 fallback。针对“全都给姐上岸”的一次性限定目标/领域补投影工具默认预览，仅复用现有接纳函数。隔离真实数据副本首次补出 24 篇作品、24 条详情、245 条评论，再跑新增为 0；166 条 quarantined 回复不进入材料。此为候选和隔离证明，不代表共享库修复、`main` 合并、`:3000` 刷新或 Mog 验收。
 
-Issue #130 保持开启并标记 `ready-for-human`，等待 Mog 对实际业务页面和数据后果验收。PR #343/#344 已合并；共享迁移及本机 `runtime-main@2587fba4` 的基本 API/浏览器 smoke 已执行，`:3000` health 为 200，runtime identity 的 migration head 为 0104。PR #338 仍为 OPEN/Draft，P2 候选尚未推送/合入/发布。真实平台重采、插件重载、非空媒体与本次作品修复的共享库补投影及 Mog 验收均未发生；不从健康页推断完整业务交付。隔离和本机浏览器分层回执见 `docs/design/acceptance/domain-unification-001-acceptance.md` 与本月进度。
+Issue #130 保持开启并标记 `ready-for-human`，等待 Mog 对实际业务页面和数据后果验收。PR #343/#344 已合并；共享迁移及本机 `runtime-main@2587fba4` 的基本 API/浏览器 smoke 已执行，`:3000` health 为 200，runtime identity 的 migration head 为 0104。PR #338 仍为 OPEN/Draft；当前候选未合入、未应用共享 migration、未发布。真实平台重采、插件重载、非空媒体与本次作品修复的共享库补投影及 Mog 验收均未发生；不从健康页推断完整业务交付。隔离和本机浏览器分层回执见 `docs/design/acceptance/domain-unification-001-acceptance.md` 与本月进度。
 
 ### OCR-CONTENT-LAYERING-001 / Issue #296（候选源码；未进入共享运行）
 

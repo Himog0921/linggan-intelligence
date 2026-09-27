@@ -64,6 +64,19 @@ pub struct StudyStartReceipt {
     pub idempotent_replay: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StudyRunCancellationReceipt {
+    pub run_ref: Uuid,
+    pub domain_ref: Uuid,
+    pub state: String,
+    pub dispatch_state: String,
+    pub dispatch_reason: Option<String>,
+    pub control_version: i64,
+    pub as_of: String,
+    pub finished_at: Option<String>,
+}
+
 pub(crate) async fn ensure_start_schema(
     tx: &mut Transaction<'_, Postgres>,
 ) -> Result<(), StudyStartError> {
@@ -145,6 +158,145 @@ async fn as_of(tx: &mut Transaction<'_, Postgres>) -> Result<String, sqlx::Error
     )
     .fetch_one(&mut **tx)
     .await
+}
+
+/// Stops future dispatch for one v2 Run while preserving any request that already crossed its
+/// durable provider-dispatch fence. Requests still reserved but not dispatched are settled at
+/// zero charge, and their unprocessed targets become explicit user-stopped history.
+pub async fn cancel_study_run(
+    database: &Database,
+    domain_ref: Uuid,
+    run_ref: Uuid,
+) -> Result<StudyRunCancellationReceipt, StudyStartError> {
+    if domain_ref.is_nil() || run_ref.is_nil() {
+        return Err(StudyStartError::NotFound);
+    }
+    let mut tx = begin(database).await?;
+    ensure_start_schema(&mut tx).await?;
+    let locked = sqlx::query(
+        "SELECT run.run_ref,policy.domain_ref,run.selection_manifest->>'contract' AS selection_contract, \
+                run.state,run.finished_at::text AS finished_at,run.dispatch_state,run.dispatch_reason,run.control_version \
+         FROM linggan_comment_study_run run \
+         JOIN linggan_comment_study_policy policy USING(policy_ref) \
+         WHERE run.run_ref=$1 AND policy.domain_ref=$2 FOR UPDATE OF run",
+    )
+    .bind(run_ref)
+    .bind(domain_ref)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(StudyStartError::NotFound)?;
+    if locked
+        .get::<Option<String>, _>("selection_contract")
+        .as_deref()
+        != Some("comment-study.run-selection.v2")
+    {
+        return Err(StudyStartError::NotFound);
+    }
+
+    let finished_at: Option<String> = locked.get("finished_at");
+    let dispatch_state: String = locked.get("dispatch_state");
+    let dispatch_reason: Option<String> = locked.get("dispatch_reason");
+    let should_apply_user_stop = finished_at.is_none()
+        && (matches!(dispatch_state.as_str(), "enabled" | "paused")
+            || (dispatch_state == "stopped" && dispatch_reason.as_deref() == Some("user_stopped")));
+
+    if finished_at.is_none() && matches!(dispatch_state.as_str(), "enabled" | "paused") {
+        sqlx::query(
+            "UPDATE linggan_comment_study_run \
+             SET dispatch_state='stopped',dispatch_reason='user_stopped',control_version=control_version+1 \
+             WHERE run_ref=$1 AND dispatch_state IN ('enabled','paused')",
+        )
+        .bind(run_ref)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    if should_apply_user_stop {
+        // Resolution and pair reservations have not acquired permission to call a provider yet.
+        // Release their reservation and detach the pending subject so a later explicit Run may
+        // resume it. The request snapshot itself is append-only and remains available for audit.
+        sqlx::query(
+            "UPDATE linggan_model_invocation invocation \
+             SET state='failed',charged_tokens=0,failure_code='user_stopped', \
+                 result=COALESCE(invocation.result,'{}'::jsonb)||jsonb_build_object('ok',false,'failureCode','user_stopped'), \
+                 finished_at=scope_001_now() \
+             FROM linggan_comment_study_model_request request \
+             WHERE request.invocation_ref=invocation.invocation_ref AND request.run_ref=$1 \
+               AND request.dispatch_started_at IS NULL AND invocation.state='running'",
+        )
+        .bind(run_ref)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "UPDATE linggan_comment_study_resolution resolution SET model_invocation_ref=NULL \
+             FROM linggan_comment_study_model_request request \
+             WHERE request.run_ref=$1 AND request.stage='resolution' AND request.dispatch_started_at IS NULL \
+               AND resolution.resolution_ref=request.resolution_ref AND resolution.state='pending' \
+               AND resolution.model_invocation_ref=request.invocation_ref",
+        )
+        .bind(run_ref)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "UPDATE linggan_comment_study_problem_pair pair SET model_invocation_ref=NULL \
+             FROM linggan_comment_study_model_request request \
+             WHERE request.run_ref=$1 AND request.stage='pair' AND request.dispatch_started_at IS NULL \
+               AND pair.pair_ref=request.pair_ref AND pair.state='pending' \
+               AND pair.model_invocation_ref=request.invocation_ref",
+        )
+        .bind(run_ref)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "UPDATE linggan_comment_study_batch batch \
+             SET state='cancelled',lease_token=NULL,leased_by=NULL,lease_expires_at=NULL, \
+                 output_manifest=jsonb_build_object('reason','user_stopped'),finished_at=scope_001_now() \
+             WHERE batch.run_ref=$1 AND batch.state IN ('prepared','leased') \
+               AND NOT EXISTS(SELECT 1 FROM linggan_comment_study_model_request request \
+                 WHERE request.batch_ref=batch.batch_ref AND request.stage='semantic' \
+                   AND request.dispatch_started_at IS NOT NULL)",
+        )
+        .bind(run_ref)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "UPDATE linggan_comment_study_target target \
+             SET state='cancelled',finished_at=scope_001_now(),terminal_reason='user_stopped' \
+             WHERE target.run_ref=$1 AND target.state IN ('ready','queued','running') \
+               AND NOT EXISTS( \
+                 SELECT 1 FROM linggan_comment_study_batch_target member \
+                 JOIN linggan_comment_study_batch batch ON batch.batch_ref=member.batch_ref \
+                 JOIN linggan_comment_study_model_request request ON request.batch_ref=batch.batch_ref \
+                 JOIN linggan_model_invocation invocation ON invocation.invocation_ref=request.invocation_ref \
+                 WHERE member.target_ref=target.target_ref AND request.stage='semantic' \
+                   AND request.dispatch_started_at IS NOT NULL AND invocation.state='running')",
+        )
+        .bind(run_ref)
+        .execute(&mut *tx)
+        .await?;
+        super::close_run_if_settled(&mut tx, run_ref).await?;
+    }
+
+    let current = sqlx::query(
+        "SELECT state,dispatch_state,dispatch_reason,control_version,finished_at::text AS finished_at \
+         FROM linggan_comment_study_run WHERE run_ref=$1",
+    )
+    .bind(run_ref)
+    .fetch_one(&mut *tx)
+    .await?;
+    let as_of = as_of(&mut tx).await?;
+    let receipt = StudyRunCancellationReceipt {
+        run_ref,
+        domain_ref,
+        state: current.get("state"),
+        dispatch_state: current.get("dispatch_state"),
+        dispatch_reason: current.get("dispatch_reason"),
+        control_version: current.get("control_version"),
+        as_of,
+        finished_at: current.get("finished_at"),
+    };
+    tx.commit().await?;
+    Ok(receipt)
 }
 
 /// The preview owns no reservation and starts no work. Its selection is advisory until start commits.

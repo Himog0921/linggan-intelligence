@@ -21,8 +21,8 @@
 |---|---|---|---|
 | P0 外围接线与隔离启动 | 2026-09-27 只读确认 `:3000` health ready、`runtime-identity=2587fba4`、共享开发库 migration head 0104；聚合快照为 4,880 material comments、7 Study Runs、945 Targets、1,412 semantic attempts、764 Signals、0 Problems；prepared/leased batches 0/0，running invocations 0，其他 active SQL sessions 0。Request ledger 不存在（0105 未应用） | 历史行数/采样 hash 基线、原文资格盘点、迁移前备份、worker drain 与恢复演练 | 运行身份和在途计数级状态已核；数据内容/hash 与发布保护演练未核，P2 migrations 未应用 |
 | P1 原声、清洗与语境 | 前序 #323–#336 已并入 main 的材料/评论目录、详情历史、清洗和选择能力；本轮保留 main 的统一 domain usage 并重跑既有回归 | T01–T54 全量、剩余边界及用户指定 exact-head 的完整产品验收 | 已有交付在 main；整阶段验收未结 |
-| P2 选择、预算、启动 | 方法版本/读取复制、按领域默认 CAS、显式预算、共享 preview/start、请求幂等与并发隔离、正式 router 和方法/Run UI 已接通；新增 v2 queued Run 到现有 semantic worker 的接线、冻结方法 request snapshot、调用前 fence、Run 级预算及实测用量累计；隔离 PG 45 项 + Axum/PG 6 项，unit suites Intelligence 123/123、API 287 passed（35 ignored） | 真实浏览器逐动作验收；估算与 provider 实测用量差异仍需完整账本承接 | exact-head run 36311074498 成功（eec）；用户页面/业务接受未结 |
-| P3 有界执行、质量与恢复 | 已推送 PR 的 P3 候选让 resolution/pair 与 semantic 共用不可变 request ledger 和 Run 级 token reservation；每阶段按冻结模型配置限制同上下文尝试数（默认 2 次）；有 dispatch/deadline fence、过期恢复、零费用释放/未知用量保守结算、迟到响应拒绝，并允许已授权且未过期响应在 stop 后结算。精确 head `68d98caf` 的 exact-head synthetic proof 成功，source export 跳过；本地验证：56 个 Comment Study Intelligence PG、Axum/PG 6 个、rebuild PG 48 个、Intelligence unit 123 个、API 288 passed/35 ignored | 控制 API 的 pause/resume/stop CAS、调度公平性、完整失败/部分接纳矩阵与运行态 drain；独立人工 Gold Set、离线 Recall@K、隔离 Rust→WeMM 回放和同篇双账号冷启动证明 | P3 候选已在 PR #338 远端但未合入，P3 执行闭环未完成。质量验证 `BLOCKED_ON_HUMAN_ANNOTATION`，不是验证失败 |
+| P2 选择、预算、启动与取消/重试 | 方法版本/读取复制、按领域默认 CAS、显式预算、共享 preview/start、请求幂等与并发隔离、正式 router 和方法/Run UI；v2 Run→semantic worker、冻结请求快照、调用前 fence、Run 级预算及 usage 累计；本增量新增 Run 取消、deadline 到期拒绝迟到结果、按剩余 deadline 限制 provider timeout、部分响应停止收口和新 Run 显式 `retry_failed`。本地隔离 PG 57 项 + Axum/PG 8 项，Intelligence unit 123/123、API 290 passed/37 ignored | 精确 head CI、真实浏览器逐动作/逐数字与 Mog 接受；估算与 provider 实测用量差异仍需完整账本承接 | 本地候选已通过定向合成证明；PR exact-head 回执与用户页面/业务接受待完成，P2 整体未结 |
+| P3 有界执行、质量与恢复 | resolution/pair 与 semantic 共用不可变 request ledger 和 Run 级 token reservation；每阶段按冻结模型配置限制同上下文尝试数（默认 2 次）；有 dispatch/deadline fence、过期恢复、零费用释放/未知用量保守结算、迟到响应拒绝。此次补证：stop 后保留已越过 dispatch fence 的合法在途结果，遗漏的兄弟目标按停止原因终态化。 | pause/resume/stop 全套 CAS 控制 API、公平调度、完整失败/部分接纳矩阵与运行态 drain；独立人工 Gold Set、离线 Recall@K、隔离 Rust→WeMM 回放和同篇双账号冷启动证明 | P3 候选在 PR #338、仍未合入；执行控制和质量闭环未完成。质量验证 `BLOCKED_ON_HUMAN_ANNOTATION`，不是验证失败 |
 | P4 长期归并与纠偏 | 既有 Problem、membership、撤销/重研等候选路径可复用 | 有效 head、跨下游限制传播、合并/撤销及支持版本历史的同版 PG 证明 | 部分候选；整阶段 NOT_VERIFIED |
 | P5 指标、语言与情报接口 | Intelligence 已有材料和事实读取基础 | 六视角、窗口/cohort/distinct 对账、durable event 与下游消费 | 未形成完整验收 |
 | P6 每日增量与资源 | 自动化衔接仅有设计 | dirty 合并、时区/计划开关、预算续办、退避及资源争用证明 | 未启用、未验收 |
@@ -139,3 +139,16 @@ P2 下一关为 exact-head CI 与 Mog 对真实页面/数字/动作的验收；�
 后续独立复审补出两项边界：开始 provider dispatch 后、usage checkpoint 前崩溃时，过期恢复必须继续按 reservation 计入预算；以及已发布 0107 不得因增加 snapshot trigger 而改变 checksum。候选现以未注册的 0108 独立承载 request snapshot trigger，并分别为“已 dispatch、usage 未知”与“尚未 dispatch”的过期调用增加保守结算/释放 reservation 回归。0107 与父提交 SHA-256 同为 `da0fc26c23949cb52137ecfbbd9f82698c10e244b52656e34d75f91365ec1dd7`。最新隔离复跑 Intelligence PostgreSQL 45/45、Axum/PG 6/6；单元 123/123 与 287 passed/35 ignored；治理、UI handbook、定点 rustfmt、shell 语法和 diff 检查均通过。独立最终复审未发现 blocker。PR head `4b177bdeb484581b95c892b8e6a331f1640d02e9` 的 exact-head run [36309022127](https://github.com/Himog0921/linggan-intelligence/actions/runs/36309022127) 成功；push-only `integration-source-export` 按条件跳过，工作流的前端行为脚本当前不存在，因此未执行浏览器 UI 自动化；Mog 页面验收仍待完成。
 
 未完成仍按原手册分层：P2 需 exact-head CI 与真实页面逐动作/逐数字验收；P3 需补 pause/resume/stop control CAS、公平调度、失败/部分接纳与运行态 drain 的完整证明。P3 Recall@K 需独立人工 Gold Set；Agent 不自行标注。后续顺序为 P4 有效结果 head 与限制传播 → P5 六视角与 durable events → P6 每日增量/额度/退避 → P7 真实 API、空错旧态、键盘/1440/1024/390/200% zoom 与 Mog 验收 → P8 隔离恢复、有限授权发布与回退。P0 用户环境历史、在途任务与数据保护/恢复证明继续并列跟踪。未修改 T01–T54 台账状态，未共享迁移、调用 provider、部署或合并。
+
+## P2 第八增量 · 停止、迟到回执与显式重试（2026-09-28）
+
+对照 GREENFIELD 手册第 10 章 P2 顺序及 AC062/AC072，并沿用 HTTP 合同取消/重启边界。这里实现并证明一个候选切片，不把页面代码或合成数据库证明等同于用户验收。
+
+- `POST /api/local/comment-study/runs/{id}/cancel` 严格接收 `{domain_ref}`，拒绝未知字段、错误 UUID、nil 领域和 query 参数；领域不匹配或非 v2 Run 不暴露资源。事务先锁 Run，与 model dispatch fence 共用锁序，control_version 只在首次状态转换递增，重复请求幂等。
+- 停止阻断后续 dispatch；已预留但尚未越过 fence 的调用按零费用失败收口、目标取消。已越过 fence 的调用保持在途与结算机会；合法且租约/期限仍有效的响应可接纳，缺失的兄弟目标记一条失败尝试并按 `user_stopped` 取消，不会重新入队。已有 Signals 保留。重试通过新 Run 的 `retry_failed` 明确选择，不重置旧 Run 或重放已接纳结果。
+- Run 列表显示服务端派发状态；仅对仍活动的 v2 Run 提供 Danger 停止按钮。采用页面规格要求的自定义确认对话框，说明在途费用与结果边界；提交后核验回执身份并重新读取页面，不乐观改写状态。兼容 main 0104 的只读 Run 查询使用 `to_jsonb(run)` 读取候选字段，不直接引用尚未共享的列。
+- 代码影响：`comment_study_run/start.rs`、`comment_study_batch_acceptance.rs`、`comment_study_read/runs.sql` 与投影、local command API/测试和 comment-study HTML/JS/CSS。无新 migration、无共享库写入、无真实 provider、无部署或 merge。
+- 验证：`./scripts/test-comment-study-productization-postgres.sh` disposable PostgreSQL：Intelligence 8 组 **56/56**、Axum+PostgreSQL **8/8**；单元：Intelligence **123/123**、API **290 passed / 37 ignored**；取消 UI 的静态回执断言 **1/1**，`cargo check -p linggan-intelligence -p linggan-api --locked`、node syntax、定点 rustfmt、UI handbook 与 diff 检查通过。全仓 `cargo fmt --all -- --check` 仍因未改文件的既有漂移失败；项目治理检查待补本月记录后重跑。首轮隔离运行暴露新增 SQL 的字符串续行带入反斜杠，六个既有 P3/usage 用例失败；修正续行后从头重跑，全套通过。隔离容器与卷由脚本清理。
+- **未验证**：真实浏览器交互、部署后的 API、Mog 页面/业务验收；此提交不改变 T01–T54 状态。此次只证明隔离合成路径，不证明 shared migration、线上计费或 provider 行为。精确 head CI 在推送后记录。
+
+下一关仍按手册顺序：先由 exact-head CI 核对本增量；P2 页面逐动作/数字与 Mog 验收仍需在人机界面完成。之后接 P3 剩余 pause/resume/stop 的 CAS 控制、公平调度、失败/部分接纳全矩阵与 drain；Recall@K 必须等待独立 Gold Set。再进入 P4→P5→P6→P7→P8，P0 历史/在途与备份恢复保护并行跟踪。

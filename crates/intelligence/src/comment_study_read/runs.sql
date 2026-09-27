@@ -1,7 +1,11 @@
 -- COMMENT-STUDY-PRODUCTIZATION-001 / P1 / T44 counterexample.
 -- Bound the Run page first; Work and Target are separate one-to-many relations.
 WITH selected_runs AS MATERIALIZED (
-    SELECT run.run_ref, run.as_of, run.state, run.created_at, run.finished_at
+    SELECT run.run_ref, run.as_of, run.state, run.created_at, run.finished_at,
+           to_jsonb(run)->'selection_manifest'->>'contract' AS selection_contract,
+           COALESCE(to_jsonb(run)->>'dispatch_state','stopped') AS dispatch_state,
+           to_jsonb(run)->>'dispatch_reason' AS dispatch_reason,
+           COALESCE((to_jsonb(run)->>'control_version')::bigint,0) AS control_version
     FROM linggan_comment_study_run run
     JOIN linggan_comment_study_policy policy USING (policy_ref)
     WHERE ($1::uuid IS NULL OR policy.domain_ref = $1)
@@ -13,10 +17,15 @@ SELECT run.run_ref,
        run.state,
        run.created_at::text AS created_at,
        run.finished_at::text AS finished_at,
+       run.selection_contract,
+       run.dispatch_state,
+       run.dispatch_reason,
+       run.control_version,
        works.work_count,
        works.primary_work_count,
        works.reference_work_count,
        targets.target_count,
+       targets.pending_count,
        targets.succeeded_count,
        targets.no_signal_count,
        targets.needs_context_count,
@@ -32,6 +41,7 @@ CROSS JOIN LATERAL (
 ) works
 CROSS JOIN LATERAL (
     SELECT count(*) AS target_count,
+           count(*) FILTER (WHERE target.state IN ('ready','queued','running')) AS pending_count,
            count(*) FILTER (WHERE target.state = 'succeeded') AS succeeded_count,
            count(*) FILTER (WHERE target.state = 'no_signal') AS no_signal_count,
            count(*) FILTER (WHERE target.state = 'needs_context') AS needs_context_count,
