@@ -56,7 +56,7 @@ pub struct KeywordHitProjection {
 pub async fn read_creator_directory(
     database: &Database,
     target_ref: Uuid,
-    domain_ref: Uuid,
+    domain_ref: Option<Uuid>,
 ) -> Result<Option<CreatorDirectoryProjection>, sqlx::Error> {
     let Some(mut works) = read_catalog(
         database,
@@ -72,7 +72,6 @@ pub async fn read_creator_directory(
     stamp_material_execution_states(
         database,
         target_ref,
-        domain_ref,
         "own_domain",
         "material_content",
         &mut works,
@@ -84,7 +83,7 @@ pub async fn read_creator_directory(
 pub async fn read_keyword_hits(
     database: &Database,
     target_ref: Uuid,
-    domain_ref: Uuid,
+    domain_ref: Option<Uuid>,
 ) -> Result<Option<KeywordHitProjection>, sqlx::Error> {
     let Some(mut works) = read_catalog(
         database,
@@ -100,7 +99,6 @@ pub async fn read_keyword_hits(
     stamp_material_execution_states(
         database,
         target_ref,
-        domain_ref,
         "own_domain",
         "material_content",
         &mut works,
@@ -109,15 +107,10 @@ pub async fn read_keyword_hits(
     Ok(Some(KeywordHitProjection { works }))
 }
 
-/// 把台账里此刻的状态贴到这一页作品上。
-///
-/// 两侧（本领域材料 / 跨行业样本）只差「哪一套作用域取值」这一件事，而它正是两域边界所在
-/// （`0044` 的隔离）：写成一个函数、由调用方明写取值，比在两个查询里各拼一遍 `LATERAL` 更难
-/// 漂移，也让「界面不自己拼第二套资格」落在类型上——页面只读 `CatalogWork.execution_state`。
+/// 把同一标准材料资格台账中的当前状态贴到这一页作品上；页面不自行拼第二套判据。
 async fn stamp_material_execution_states(
     database: &Database,
     target_ref: Uuid,
-    _domain_ref: Uuid,
     domain_scope: &str,
     object_kind: &str,
     works: &mut [CatalogWork],
@@ -140,7 +133,7 @@ async fn stamp_material_execution_states(
 pub async fn read_keyword_catalog_counts(
     database: &Database,
     target_refs: &[Uuid],
-    domain_ref: Uuid,
+    domain_ref: Option<Uuid>,
 ) -> Result<std::collections::HashMap<Uuid, KeywordCatalogCounts>, sqlx::Error> {
     if target_refs.is_empty() {
         return Ok(std::collections::HashMap::new());
@@ -148,7 +141,7 @@ pub async fn read_keyword_catalog_counts(
     let mut counts: std::collections::HashMap<Uuid, KeywordCatalogCounts> =
         std::collections::HashMap::new();
 
-    // 证据侧：本领域关键词的命中作品与它们的详情。
+    // 同一标准材料链：具体 Domain 限定用途，None 汇总全部有冻结用途的领域。
     let evidence: Vec<(Uuid, i64, i64)> = sqlx::query_as(concat!(
         "SELECT work_order.target_ref, \
                 count(DISTINCT finding.content_public_ref), \
@@ -170,7 +163,7 @@ pub async fn read_keyword_catalog_counts(
            ON disposition.package_ref=finding.package_ref \
           AND disposition.record_ordinal=finding.record_ordinal \
          WHERE work_order.target_ref=ANY($1) \
-           AND work_usage.domain_ref=$2 \
+           AND ($2::uuid IS NULL OR work_usage.domain_ref=$2) \
            AND finding.discovery_kind='discovery_search' \
            AND receipt.material_admission='ACCEPTED' \
            AND disposition.disposition='accepted_for_library_discovery' \
@@ -198,7 +191,7 @@ pub struct KeywordCatalogCounts {
 async fn read_catalog(
     database: &Database,
     target_ref: Uuid,
-    domain_ref: Uuid,
+    domain_ref: Option<Uuid>,
     target_kind: &str,
     discovery_kind: &str,
 ) -> Result<Option<Vec<CatalogWork>>, sqlx::Error> {
@@ -230,11 +223,11 @@ async fn read_catalog(
              WHERE work_order.target_ref=$1 AND work_order.lane IN ('deep_archive','patrol') \
                AND finding.discovery_kind=$2 AND receipt.material_admission='ACCEPTED' \
                AND EXISTS (SELECT 1 FROM collection_work_order_domain_usage work_usage \
+                           JOIN linggan_material_domain_usage material_usage \
+                             ON material_usage.domain_ref=work_usage.domain_ref \
+                            AND material_usage.content_public_ref=finding.content_public_ref \
                             WHERE work_usage.work_order_ref=work_order.work_order_ref \
-                              AND work_usage.domain_ref=$3) \
-               AND EXISTS (SELECT 1 FROM linggan_material_domain_usage material_usage \
-                            WHERE material_usage.content_public_ref=finding.content_public_ref \
-                              AND material_usage.domain_ref=$3) \
+                              AND ($3::uuid IS NULL OR work_usage.domain_ref=$3)) \
                AND disposition.disposition <> 'quarantined' \
          ), attributed AS ( \
              -- 作者归属来自作品自己（`linggan_material_content_author` 推自 append-only 事实），
@@ -247,9 +240,9 @@ async fn read_catalog(
               AND target.platform=author.platform \
               AND target.target_kind='creator' \
              WHERE target.target_ref=$1 \
-               AND EXISTS (SELECT 1 FROM linggan_material_domain_usage material_usage \
+               AND ($3::uuid IS NULL OR EXISTS (SELECT 1 FROM linggan_material_domain_usage material_usage \
                             WHERE material_usage.content_public_ref=author.content_public_ref \
-                              AND material_usage.domain_ref=$3) \
+                              AND material_usage.domain_ref=$3)) \
          ), owned AS ( \
              -- 目标是创作者时以作者归属为准；关键词目标没有作者可言，仍按发现所属的工单算。
              SELECT * FROM discoveries \

@@ -23,11 +23,92 @@ use linggan_evidence::{
     DETAIL_WINDOW_REPLY_EXPAND_LIMIT, DispatchDecision, InstallationCheckIn, KeywordDetailAdvance,
     MaterialExecutionKind, activate_installation_credential, advance_keyword_archive_detail,
     bind_observation_account, check_in_installation, decide_dispatch, keyword_baselines_qualified,
-    keyword_targets_pending_detail, open_claim_window, read_keyword_hits, register_station,
-    report_account_eligibility, request_and_admit, set_station_accepting,
+    keyword_targets_pending_detail, open_claim_window, read_keyword_catalog_counts,
+    read_keyword_hits, register_station, report_account_eligibility, request_and_admit,
+    set_station_accepting,
 };
 use linggan_storage_postgres::Database;
 use uuid::Uuid;
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn all_domains_reads_real_keyword_works_without_cross_target_leakage() {
+    let database = proof_database("keyword_catalog_all_domains").await;
+    for (domain_ref, keyword, content_id) in [
+        (ADHD_DOMAIN, "all-domain-adhd", "all-domain-work-adhd"),
+        (PEER_DOMAIN, "all-domain-peer", "all-domain-work-peer"),
+    ] {
+        submit_package_for_domain(
+            &database,
+            domain_ref,
+            keyword,
+            "deep_archive",
+            serde_json::json!({"query":keyword,"ranking":"most_liked","scrollRounds":2}),
+            FIXTURE_QUOTA,
+            "discovery_search",
+            search_coverage(keyword, 1),
+            serde_json::json!({"surfaceReceipt":{"stopReason":"bottom_confirmed"}}),
+            vec![discovery_card(
+                content_id,
+                "可查证作品",
+                "12",
+                &format!("https://www.xiaohongshu.com/search_result/{content_id}?xsec_token=ABall"),
+            )],
+        )
+        .await;
+    }
+    let targets: Vec<(Uuid, String)> = sqlx::query_as(
+        "SELECT target_ref,identity_key FROM collection_observation_target \
+         WHERE identity_key IN ('all-domain-adhd','all-domain-peer') ORDER BY identity_key",
+    )
+    .fetch_all(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(targets.len(), 2);
+    let adhd = targets[0].0;
+    let peer = targets[1].0;
+    let adhd_domain = Uuid::parse_str(ADHD_DOMAIN).unwrap();
+    let peer_domain = Uuid::parse_str(PEER_DOMAIN).unwrap();
+
+    let all_adhd = read_keyword_hits(&database, adhd, None)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(all_adhd.works.len(), 1);
+    assert_eq!(
+        all_adhd.works[0].content_external_id,
+        "all-domain-work-adhd"
+    );
+    assert_eq!(
+        read_keyword_hits(&database, adhd, Some(peer_domain))
+            .await
+            .unwrap()
+            .unwrap()
+            .works
+            .len(),
+        0,
+        "a concrete Domain must not inherit another Domain's works"
+    );
+    assert_eq!(
+        read_keyword_hits(&database, peer, None)
+            .await
+            .unwrap()
+            .unwrap()
+            .works[0]
+            .content_external_id,
+        "all-domain-work-peer"
+    );
+    let counts = read_keyword_catalog_counts(&database, &[adhd, peer], None)
+        .await
+        .unwrap();
+    assert_eq!(counts.get(&adhd).unwrap().works, 1);
+    assert_eq!(counts.get(&peer).unwrap().works, 1);
+    let adhd_counts = read_keyword_catalog_counts(&database, &[adhd, peer], Some(adhd_domain))
+        .await
+        .unwrap();
+    assert_eq!(adhd_counts.get(&adhd).unwrap().works, 1);
+    assert!(!adhd_counts.contains_key(&peer));
+}
 
 /// 一轮把搜索面翻到底、且没有一条材料被隔离的建档，应当被判为**已建档**。
 ///
@@ -366,7 +447,7 @@ async fn hit_display_state(
     let projection = read_keyword_hits(
         database,
         target_ref,
-        Uuid::parse_str(PEER_DOMAIN).expect("the fixture Domain is a UUID"),
+        Some(Uuid::parse_str(PEER_DOMAIN).expect("the fixture Domain is a UUID")),
     )
     .await
     .expect("the Domain-scoped keyword hit list stays readable")
