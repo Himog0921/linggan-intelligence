@@ -3,9 +3,9 @@
 > 状态: 一次性报告
 > 最后核对: 2026-09-27
 > 验收日期: 2026-09-24
-> 适用范围: §1–5 为 WP4 Domain Management 隔离验收；§6 为 PR #343 发布后回执；§7 为 PR #345 全部领域作品直达候选验收
-> 验收环境: §1–5 使用 Codex In-App Browser、临时 loopback API `127.0.0.1:65435` 与一次性 PostgreSQL schema `domain_browser_acceptance`；§6 的已发布环境、§7 的候选环境分别见各节
-> 数据边界: §1–5 使用合成 Domain/Target 且未写共享库或切换常驻 runtime；§6 如实记录已发生的共享库迁移和 runtime 切换；§7 使用共享开发库只读流式副本，未写共享库或切换常驻 runtime
+> 适用范围: §1–5 为 WP4 Domain Management 隔离验收；§6 为 PR #343 发布后回执；§7 为 PR #345 候选验收；§8 为 PR #345 发布回执与跟进反例
+> 验收环境: §1–5 使用 Codex In-App Browser、临时 loopback API `127.0.0.1:65435` 与一次性 PostgreSQL schema `domain_browser_acceptance`；§6–8 的环境分别见各节
+> 数据边界: §1–5 使用合成 Domain/Target 且未写共享库或切换常驻 runtime；§6 和 §8 如实记录已发生的共享库/运行变更；§7 使用共享开发库只读流式副本，未写共享库或切换常驻 runtime
 > 事实来源: 本机浏览器 AX/截图观察、一次性 API POST/redirect 读回、隔离 PostgreSQL 查询与当前页面合同
 > 冲突时以谁为准: 用户最新确认、页面/数据合同、真实浏览器与隔离 PostgreSQL 结果；本记录不授权发布
 
@@ -72,3 +72,9 @@
 | 窄屏、键盘与焦点 | 用窄屏或键盘完成本次作品直达 | 弹窗、Inspector 的本次链路不得遮挡或丢失焦点 | 先前语料弹窗在 375/390 CSS px 验过；本次作品直达未重测窄屏与键盘 | NOT VERIFIED（本次链路） |
 
 本切片沿用 LIDS Collection Control 与 Evidence Library 现有壳层、弹窗和反馈区，没有新增 Token、Primitive、CMP、Pattern 或动效。自动检查为完整隔离 PostgreSQL `test-local-001-discovery-postgres.sh`、API 单测 271 通过/0 失败/29 忽略、workspace check、JS 语法、UI handbook、治理与 diff 检查；它们不替代真实浏览器或生产数据验收。当前结论：前端/组件实现及正确领域的隔离真实链路 VERIFIED；错误反馈的浏览器表现、共享库有界补投影、`main` 合并、`:3000` 部署与 Mog 业务验收均 NOT VERIFIED。部署后的检查若执行，应追加新回执，不得把本节的候选证明改写成已上线事实。
+
+## 8. PR #345 发布后反例与跟进候选（2026-09-27）
+
+PR #345 合并与 `:3000` 切换后，Chrome 实点 Collection `domain=all` → “全都给姐上岸” → 作品（24 条）→ 首篇“查看” → 领域弹窗“考研自习” → 同篇 Inspector，标题、正文与该篇留存评论可读；评论研究显示观察 245 条、可研究 243 条，面包屑领域菜单没有被首行遮挡。共享库补投影 50/50，第二次预览 50/50 已投影且 0 待处理；这些是本机发布后的回执，不是 §7 候选副本的延伸推断。
+
+另以同一 `work` 深链误选 ADHD 时，Chrome 看到 `domain_required` 而非预期的 `material_not_found`：该 Work 不在 ADHD 首页，合成详情 URL 遗漏 `domain`。跟进候选只为这个列表外直达路径补上已选领域查询参数，并增加回归断言。误选领域的正确中文反馈与本次窄屏/键盘路径在该候选合并部署前仍 NOT VERIFIED；不把已发现反例写成通过，也不触发平台采集或研究运行。

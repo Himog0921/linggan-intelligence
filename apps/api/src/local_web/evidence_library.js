@@ -1183,7 +1183,9 @@
     }
     return {
       identity: { publicRef },
-      detailUrl: `${API_ROOT}/${encodeURIComponent(publicRef)}`,
+      // Off-page deep links have no list row to supply a scoped detailUrl. The detail API
+      // requires Domain even when the Work is absent from it, so keep the selected scope.
+      detailUrl: `${API_ROOT}/${encodeURIComponent(publicRef)}?domain=${encodeURIComponent(CORPUS_DOMAIN.ref)}`,
       display: { title: null, titleState: 'UNKNOWN' },
     };
   }
