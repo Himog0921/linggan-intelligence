@@ -18,8 +18,6 @@ use std::collections::BTreeMap;
 use thiserror::Error;
 use uuid::Uuid;
 
-const MAX_SEMANTIC_ATTEMPTS: i32 = 3;
-
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BatchAcceptanceReceipt {
@@ -343,7 +341,9 @@ async fn reject_target_with_detail(
     detail: Value,
 ) -> Result<&'static str, sqlx::Error> {
     let ordinal = next_attempt_ordinal(transaction, target_ref).await?;
-    let next_state = if ordinal >= MAX_SEMANTIC_ATTEMPTS {
+    let max_attempts =
+        crate::comment_study_acceptance::configured_max_attempts(transaction, target_ref).await?;
+    let next_state = if ordinal >= max_attempts {
         "failed"
     } else {
         "queued"
@@ -497,6 +497,83 @@ pub async fn reject_study_batch_dispatch(
     })
 }
 
+/// Terminalizes a frozen semantic envelope that already exceeds its immutable model input limit.
+/// This deterministic mismatch cannot be repaired by retrying the same lease or repacking the
+/// already-frozen batch.
+pub async fn reject_study_batch_input_limit(
+    database: &Database,
+    batch_ref: Uuid,
+    lease_token: Uuid,
+) -> Result<BatchAcceptanceReceipt, BatchAcceptanceError> {
+    let mut transaction = database.pool().begin().await?;
+    let batch = lock_batch(&mut transaction, batch_ref, lease_token).await?;
+    if batch.model_invocation_ref.is_some() {
+        return Err(BatchAcceptanceError::BatchUnavailable);
+    }
+    for target_ref in batch.targets.keys().copied() {
+        let ordinal = next_attempt_ordinal(&mut transaction, target_ref).await?;
+        insert_attempt(
+            &mut transaction,
+            batch_ref,
+            target_ref,
+            ordinal,
+            "rejected",
+            json!({
+                "contract":"comment-study.note-batch.v1",
+                "batchRef":batch_ref,
+                "targetRef":target_ref,
+                "stage":"dispatch",
+                "failureCode":"input_limit_exceeded"
+            }),
+            Some("provider_failure"),
+            None,
+        )
+        .await?;
+        let has_productization_columns: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM information_schema.columns \
+             WHERE table_schema=current_schema() AND table_name='linggan_comment_study_target' \
+               AND column_name='terminal_reason')",
+        )
+        .fetch_one(&mut *transaction)
+        .await?;
+        if has_productization_columns {
+            sqlx::query(
+                "UPDATE linggan_comment_study_target SET state='failed',finished_at=scope_001_now(), \
+                 terminal_reason='input_limit_exceeded' WHERE target_ref=$1 AND state='running'",
+            )
+            .bind(target_ref)
+            .execute(&mut *transaction)
+            .await?;
+        } else {
+            sqlx::query(
+                "UPDATE linggan_comment_study_target SET state='failed' \
+                 WHERE target_ref=$1 AND state='running'",
+            )
+            .bind(target_ref)
+            .execute(&mut *transaction)
+            .await?;
+        }
+    }
+    let output = json!({
+        "contract":"comment-study.note-batch.v1",
+        "runRef":batch.run_ref,
+        "batchRef":batch_ref,
+        "stage":"dispatch",
+        "failureCode":"input_limit_exceeded",
+        "failedTargetCount":batch.targets.len()
+    });
+    finish_batch(&mut transaction, batch_ref, "failed", output).await?;
+    close_run_if_settled(&mut transaction, batch.run_ref).await?;
+    transaction.commit().await?;
+    Ok(BatchAcceptanceReceipt {
+        batch_ref,
+        state: "failed".to_owned(),
+        accepted_target_count: 0,
+        retried_target_count: 0,
+        failed_target_count: batch.targets.len(),
+    })
+}
+
 async fn next_attempt_ordinal(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     target_ref: Uuid,
@@ -507,7 +584,12 @@ async fn next_attempt_ordinal(
     .bind(target_ref)
     .fetch_one(&mut **transaction)
     .await?;
-    Ok(i32::try_from(count).unwrap_or(MAX_SEMANTIC_ATTEMPTS) + 1)
+    let max_attempts =
+        crate::comment_study_acceptance::configured_max_attempts(transaction, target_ref).await?;
+    if count >= i64::from(max_attempts) {
+        return Err(sqlx::Error::RowNotFound);
+    }
+    i32::try_from(count + 1).map_err(|_| sqlx::Error::RowNotFound)
 }
 
 async fn insert_attempt(

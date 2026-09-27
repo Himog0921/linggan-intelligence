@@ -7,8 +7,12 @@
 use crate::comment_study_embedding::active_profile;
 use crate::comment_study_problem_store::{
     PairSelection, PreparedProblemResolution, ProblemStoreError, accept_problem_resolution,
-    prepare_problem_pair, prepare_problem_resolution, resolve_retrieval_incomplete,
-    resume_pre_v2_pair_contract_rejection, resume_retrieval_incomplete_resolution,
+    prepare_problem_pair, prepare_problem_pair_for_enabled_v2_run, prepare_problem_resolution,
+    prepare_problem_resolution_for_enabled_v2_run, resolve_retrieval_incomplete,
+    resume_pre_v2_pair_contract_rejection,
+    resume_pre_v2_pair_contract_rejection_for_enabled_v2_run,
+    resume_retrieval_incomplete_resolution,
+    resume_retrieval_incomplete_resolution_for_enabled_v2_run,
 };
 use crate::comment_study_recall::{RecallCompleteness, recall_candidates};
 use linggan_storage_postgres::Database;
@@ -40,7 +44,32 @@ pub struct RecalledProblemCandidate {
 pub async fn advance_next_problem_pair(
     database: &Database,
 ) -> Result<bool, ProblemCandidateRecallError> {
-    if resume_pre_v2_pair_contract_rejection(database).await? {
+    advance_next_problem_pair_inner(database, false).await
+}
+
+/// Scheduler entry point: P3 work is only created for an enabled v2 Run whose request ledger
+/// enforces shared budget, dispatch fencing, and recovery. Legacy Runs remain readable and can
+/// still be exercised through the explicit unscoped recall helper above.
+pub async fn advance_next_problem_pair_for_enabled_v2_run(
+    database: &Database,
+) -> Result<bool, ProblemCandidateRecallError> {
+    advance_next_problem_pair_inner(database, true).await
+}
+
+async fn advance_next_problem_pair_inner(
+    database: &Database,
+    enabled_v2_only: bool,
+) -> Result<bool, ProblemCandidateRecallError> {
+    let resumed_contract = if enabled_v2_only {
+        match resume_pre_v2_pair_contract_rejection_for_enabled_v2_run(database).await {
+            Ok(resumed) => resumed,
+            Err(ProblemStoreError::RunUnavailable) => false,
+            Err(error) => return Err(error.into()),
+        }
+    } else {
+        resume_pre_v2_pair_contract_rejection(database).await?
+    };
+    if resumed_contract {
         return Ok(true);
     }
     // Path C is a vector search. With no qualified profile there is no pool to search at all, and
@@ -48,7 +77,7 @@ pub async fn advance_next_problem_pair(
     let Some(profile_ref) = active_profile(database).await? else {
         return Ok(false);
     };
-    for seeker in novel_signals_awaiting_pairing(database).await? {
+    for seeker in novel_signals_awaiting_pairing(database, enabled_v2_only).await? {
         let recalled = recall_candidates(database, profile_ref, seeker).await?;
         // A Signal is only `deferred_novel` relative to the catalogue as it stood when it was
         // resolved. If the catalogue cannot be fully searched now, the Problem this pair would
@@ -56,21 +85,44 @@ pub async fn advance_next_problem_pair(
         if recalled.completeness != RecallCompleteness::Complete {
             continue;
         }
-        if let Some(partner) =
-            nearest_admissible_partner(database, seeker, &recalled.pool_signal_refs).await?
+        if let Some(partner) = nearest_admissible_partner(
+            database,
+            seeker,
+            &recalled.pool_signal_refs,
+            enabled_v2_only,
+        )
+        .await?
         {
-            prepare_problem_pair(
-                database,
-                seeker,
-                partner.signal_ref,
-                PairSelection {
-                    profile_ref,
-                    recall_rank: partner.recall_rank,
-                    admissible_rank: partner.admissible_rank,
-                },
-            )
-            .await?;
-            return Ok(true);
+            let prepared_pair = if enabled_v2_only {
+                prepare_problem_pair_for_enabled_v2_run(
+                    database,
+                    seeker,
+                    partner.signal_ref,
+                    PairSelection {
+                        profile_ref,
+                        recall_rank: partner.recall_rank,
+                        admissible_rank: partner.admissible_rank,
+                    },
+                )
+                .await
+            } else {
+                prepare_problem_pair(
+                    database,
+                    seeker,
+                    partner.signal_ref,
+                    PairSelection {
+                        profile_ref,
+                        recall_rank: partner.recall_rank,
+                        admissible_rank: partner.admissible_rank,
+                    },
+                )
+                .await
+            };
+            match prepared_pair {
+                Ok(_) => return Ok(true),
+                Err(ProblemStoreError::RunUnavailable) if enabled_v2_only => continue,
+                Err(error) => return Err(error.into()),
+            }
         }
     }
     Ok(false)
@@ -89,10 +141,17 @@ const MAX_PAIR_SEEKERS_PER_TICK: i64 = 8;
 /// background retry loop.
 async fn novel_signals_awaiting_pairing(
     database: &Database,
+    enabled_v2_only: bool,
 ) -> Result<Vec<Uuid>, ProblemCandidateRecallError> {
     Ok(sqlx::query_scalar(
         "SELECT resolution.signal_ref FROM linggan_comment_study_resolution resolution \
+         JOIN linggan_comment_study_signal signal USING(signal_ref) \
+         JOIN linggan_comment_study_target target USING(target_ref) \
+         JOIN linggan_comment_study_run run ON run.run_ref=target.run_ref \
          WHERE resolution.state='deferred_novel' \
+           AND (NOT $2 OR (run.selection_manifest->>'contract'='comment-study.run-selection.v2' \
+             AND to_jsonb(run)->>'dispatch_state'='enabled' \
+             AND to_jsonb(run)->>'dispatch_reason' IS NULL)) \
            AND NOT EXISTS(SELECT 1 FROM linggan_comment_study_problem_membership membership \
                  WHERE membership.signal_ref=resolution.signal_ref) \
            AND NOT EXISTS(SELECT 1 FROM linggan_comment_study_problem_pair pair \
@@ -101,6 +160,7 @@ async fn novel_signals_awaiting_pairing(
          ORDER BY resolution.created_at,resolution.signal_ref LIMIT $1",
     )
     .bind(MAX_PAIR_SEEKERS_PER_TICK)
+    .bind(enabled_v2_only)
     .fetch_all(database.pool())
     .await?)
 }
@@ -125,13 +185,14 @@ async fn nearest_admissible_partner(
     database: &Database,
     seeker: Uuid,
     pool: &[Uuid],
+    same_run_only: bool,
 ) -> Result<Option<AdmissiblePartner>, ProblemCandidateRecallError> {
     if pool.is_empty() {
         return Ok(None);
     }
     Ok(sqlx::query_as::<_, (Uuid, i64, i64)>(
         "WITH seeker AS ( \
-           SELECT target.source_ref,source.author_external_id \
+           SELECT target.source_ref,target.run_ref,source.author_external_id \
            FROM linggan_comment_study_signal signal \
            JOIN linggan_comment_study_target target USING(target_ref) \
            JOIN linggan_material_comment source ON source.material_ref=target.source_ref \
@@ -147,6 +208,7 @@ async fn nearest_admissible_partner(
          JOIN linggan_material_comment source ON source.material_ref=target.source_ref \
          CROSS JOIN seeker \
          WHERE resolution.state='deferred_novel' \
+           AND (NOT $3 OR target.run_ref=seeker.run_ref) \
            AND target.source_ref<>seeker.source_ref \
            AND source.author_external_id IS NOT NULL \
            AND seeker.author_external_id IS NOT NULL \
@@ -162,6 +224,7 @@ async fn nearest_admissible_partner(
     )
     .bind(seeker)
     .bind(pool)
+    .bind(same_run_only)
     .fetch_optional(database.pool())
     .await?
     .map(
@@ -281,6 +344,21 @@ pub async fn prepare_recalled_problem_resolution(
 pub async fn advance_next_problem_resolution(
     database: &Database,
 ) -> Result<bool, ProblemCandidateRecallError> {
+    advance_next_problem_resolution_inner(database, false).await
+}
+
+/// Scheduler entry point paired with the request-ledger workers: only enabled v2 Runs can create
+/// resolution work that those workers are permitted to dispatch.
+pub async fn advance_next_problem_resolution_for_enabled_v2_run(
+    database: &Database,
+) -> Result<bool, ProblemCandidateRecallError> {
+    advance_next_problem_resolution_inner(database, true).await
+}
+
+async fn advance_next_problem_resolution_inner(
+    database: &Database,
+    enabled_v2_only: bool,
+) -> Result<bool, ProblemCandidateRecallError> {
     // Without a qualified encoding profile there is no catalogue to search at all. Falling back to
     // the lexical path here would be worse than doing nothing: it would answer "no candidates"
     // with a method that cannot see semantic matches, and that answer creates duplicates.
@@ -289,18 +367,34 @@ pub async fn advance_next_problem_resolution(
         "SELECT signal.signal_ref,resolution.resolution_ref \
          FROM linggan_comment_study_signal signal \
          LEFT JOIN linggan_comment_study_resolution resolution USING(signal_ref) \
+         JOIN linggan_comment_study_target target USING(target_ref) \
+         JOIN linggan_comment_study_run run ON run.run_ref=target.run_ref \
          WHERE signal.kind IN ('problem','need') AND signal.eligibility_state='eligible' \
+           AND (NOT $2 OR (run.selection_manifest->>'contract'='comment-study.run-selection.v2' \
+             AND to_jsonb(run)->>'dispatch_state'='enabled' \
+             AND to_jsonb(run)->>'dispatch_reason' IS NULL)) \
            AND (resolution.signal_ref IS NULL OR ($1 AND resolution.state='retrieval_incomplete')) \
          ORDER BY signal.created_at,signal.signal_ref LIMIT 1",
     )
     .bind(profile_ref.is_some())
+    .bind(enabled_v2_only)
     .fetch_optional(database.pool())
     .await?;
     let Some((signal_ref, existing_resolution_ref)) = candidate else {
         return Ok(false);
     };
     let Some(profile_ref) = profile_ref else {
-        let prepared = prepare_problem_resolution(database, signal_ref, Vec::new()).await?;
+        let prepared = if enabled_v2_only {
+            match prepare_problem_resolution_for_enabled_v2_run(database, signal_ref, Vec::new())
+                .await
+            {
+                Ok(prepared) => prepared,
+                Err(ProblemStoreError::RunUnavailable) => return Ok(false),
+                Err(error) => return Err(error.into()),
+            }
+        } else {
+            prepare_problem_resolution(database, signal_ref, Vec::new()).await?
+        };
         if prepared.state == "pending" {
             resolve_retrieval_incomplete(database, prepared.resolution_ref, "no_qualified_profile")
                 .await?;
@@ -316,18 +410,39 @@ pub async fn advance_next_problem_resolution(
             candidate_problem_refs.push(problem_ref);
         }
     }
-    let prepared = match existing_resolution_ref {
-        Some(resolution_ref) => {
+    let prepared_result = match (enabled_v2_only, existing_resolution_ref) {
+        (true, Some(resolution_ref)) => {
+            resume_retrieval_incomplete_resolution_for_enabled_v2_run(
+                database,
+                resolution_ref,
+                candidate_problem_refs.clone(),
+            )
+            .await
+        }
+        (true, None) => {
+            prepare_problem_resolution_for_enabled_v2_run(
+                database,
+                signal_ref,
+                candidate_problem_refs.clone(),
+            )
+            .await
+        }
+        (false, Some(resolution_ref)) => {
             resume_retrieval_incomplete_resolution(
                 database,
                 resolution_ref,
                 candidate_problem_refs.clone(),
             )
-            .await?
+            .await
         }
-        None => {
-            prepare_problem_resolution(database, signal_ref, candidate_problem_refs.clone()).await?
+        (false, None) => {
+            prepare_problem_resolution(database, signal_ref, candidate_problem_refs.clone()).await
         }
+    };
+    let prepared = match prepared_result {
+        Ok(prepared) => prepared,
+        Err(ProblemStoreError::RunUnavailable) if enabled_v2_only => return Ok(false),
+        Err(error) => return Err(error.into()),
     };
     if prepared.state != "pending" {
         return Ok(true);

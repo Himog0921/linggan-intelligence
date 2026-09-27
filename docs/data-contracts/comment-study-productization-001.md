@@ -5,7 +5,7 @@
 > 适用范围: COMMENT-STUDY-PRODUCTIZATION-001 数据库字段、迁移与事务合同
 > 事实来源: GREENFIELD v1.0 手册与其数据库规格
 > 冲突时以谁为准: 用户最新授权、AGENTS.md、当前 migration/schema 与真实 PostgreSQL 证明
-> 当前实现状态: P2 迁移候选 0105–0108 仅在 disposable PostgreSQL 验证，未应用共享库
+> 当前实现状态: P2/P3 迁移候选 0105–0109 仅在 disposable PostgreSQL 验证，未应用共享库
 > 交付包：COMMENT-STUDY-PRODUCTIZATION-001 · 文档版 1.0
 > 核对日期：2026-09-22
 > 源码基线：`main@c74d72e3d17b9d5ecfb9953de025713c47e4560e`
@@ -174,7 +174,7 @@ PK `(source_ref,cleaner_version)`。不保存 offsets：需要证据偏移时对
 | `batch_ref` | uuid | NULL 允许 FK study_batch |
 | `resolution_ref` | uuid | NULL 允许 FK study_resolution |
 | `pair_ref` | uuid | NULL 允许 FK study_problem_pair |
-| `attempt_ordinal` | integer | NOT NULL 1–3；semantic 按 batch 固定 1，目标的多次尝试仍由 semantic_attempt 计 |
+| `attempt_ordinal` | integer | 数据库范围 1–3；P3 resolution/pair 必须不超过 invocation 冻结模型配置的 `max_attempts`（默认 2），semantic 的目标级尝试由 `semantic_attempt` 计 |
 | `input_context_hash` | text | NOT NULL SHA-256(stageHash＋冻结比较输入)，不含尝试序号／时间；用于同上下文有限重试 |
 | `request_manifest` | jsonb | NOT NULL object；实际 system、prompt、参数与材料依赖，见 §5.3 |
 | `request_hash` | text | NOT NULL SHA-256；与对应通用 invocation.request_hash 一致 |
@@ -185,6 +185,8 @@ PK `(source_ref,cleaner_version)`。不保存 offsets：需要证据偏移时对
 CHECK 三个 subject_ref 中恰好一个非 NULL，且与 stage 对应。分别建 `cs_request_resolution_attempt_uq(resolution_ref,input_context_hash,attempt_ordinal)` 与 `cs_request_pair_attempt_uq(pair_ref,input_context_hash,attempt_ordinal)` 部分 UNIQUE；semantic 对 batch_ref 建部分 UNIQUE。索引 `cs_request_run_idx(run_ref,created_at,invocation_ref)`、`cs_request_deadline_idx(deadline_at,invocation_ref)`。
 
 字段内容与依赖不可改；只允许 dispatch_started_at 单向 CAS，deadline_at 不延长。请求失败、重试、subject 重新开启都追加新的 invocation/snapshot，不覆盖旧请求。不增加自己的 success/failed 状态列；调用成败仍在通用 ledger，业务结果仍在对应接受器。
+
+Problem Pair 的 `failed` 是有限请求预算／deadline 用尽或冻结输入超限后的执行终态，表示没有得到可接纳的输出；它与模型明确拒绝归并的 `rejected` 不同。Pair 对同一比较上下文最多尝试三次，耗尽时保留已失败 invocation 与费用事实，不再自动重开。
 
 ## 5. JSON 合同：所有必填键固定
 

@@ -172,7 +172,10 @@ const resolutionLabel = {
   budget_stopped: '归并预算已到上限，当前未完成判断',
   not_user_problem: '判定不构成用户问题', protocol_rejected: '模型输出不合规，已拒绝', failed: '归并判断失败'
 };
-const pairStateLabel = { pending: '正在比较首个合格候选', approved: '已共同建立用户问题', rejected: '未共同建立用户问题' };
+const pairStateLabel = {
+  pending: '正在比较首个合格候选', approved: '已共同建立用户问题', rejected: '未共同建立用户问题',
+  failed: '比较未完成，请查看原因'
+};
 const pairDecisionLabel = {
   approved: '两条独立证据支持同一用户问题，已建立问题',
   not_same_problem: '关键维度不同，当前不是同一用户问题',
@@ -183,7 +186,10 @@ const pairDecisionLabel = {
   contract_rejected_candidate_set_mismatch: '模型返回的比较对象不符合约定，未接纳',
   contract_rejected_invalid_verdict: '模型返回的维度判断无效，未接纳',
   contract_rejected_invalid_problem_definition: '模型给出的问题定义不完整，未接纳',
-  contract_rejected_pair_signal_mismatch: '模型返回的研究信号不对应当前配对，未接纳'
+  contract_rejected_pair_signal_mismatch: '模型返回的研究信号不对应当前配对，未接纳',
+  attempts_exhausted: '请求尝试次数已用尽，未收到可接纳结果',
+  budget_exhausted: '运行预算已用尽，比较未完成',
+  input_limit_exceeded: '请求超过模型输入上限，未发送'
 };
 const signalKindLabel = {
   problem: '问题', need: '需求', belief: '观念', emotion: '情绪', experience: '经历',

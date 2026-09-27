@@ -79,6 +79,14 @@ pub(crate) async fn ensure_start_schema(
         AND (SELECT count(*)=2 FROM pg_trigger WHERE NOT tgisinternal AND tgenabled IN ('O','A') \
           AND tgrelid=to_regclass('linggan_comment_study_model_request') \
           AND tgname IN ('cs_request_immutable','cs_request_no_truncate')) \
+        AND EXISTS(SELECT 1 FROM pg_constraint \
+          WHERE conrelid=to_regclass('linggan_comment_study_problem_pair') \
+            AND conname='cs_problem_pair_state_ck' AND contype='c' \
+            AND pg_get_constraintdef(oid) LIKE '%failed%') \
+        AND EXISTS(SELECT 1 FROM pg_constraint \
+          WHERE conrelid=to_regclass('linggan_comment_study_problem_pair') \
+            AND conname='cs_problem_pair_terminal_ck' AND contype='c' \
+            AND pg_get_constraintdef(oid) LIKE '%failed%') \
         AND EXISTS(SELECT 1 FROM pg_index WHERE indexrelid=to_regclass('cs_target_active_comment_uq') \
           AND indisunique AND indisvalid AND indisready)")
         .fetch_one(&mut **tx).await?;

@@ -9,6 +9,7 @@ use crate::comment_study_problem_resolution::{
     ExistingResolutionDecision, NewProblemDefinition, PROBLEM_PAIR_CONTRACT, PairCreationDecision,
     ProblemResolutionContractError, decide_existing_resolution, decide_pair_creation,
 };
+use crate::comment_study_request_ledger::ProblemStageSubject;
 use linggan_storage_postgres::Database;
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -76,12 +77,16 @@ pub enum ProblemStoreError {
     ResolutionUnavailable,
     #[error("the pair is absent or is not awaiting a shared-definition comparison")]
     PairUnavailable,
+    #[error("the model response no longer belongs to an active, unexpired request")]
+    ModelRequestUnavailable,
     #[error(
         "a candidate Problem is absent, retired, from another domain, duplicated, or exceeds the maximum candidate count"
     )]
     InvalidCandidateSet,
     #[error("only eligible Problem or Need Signals may receive a candidate comparison")]
     SignalNotEligible,
+    #[error("the owning Run is not an enabled v2 Run")]
+    RunUnavailable,
     #[error(
         "a new Problem pair requires two independently authored source comments that are both deferred as novel"
     )]
@@ -110,8 +115,29 @@ pub async fn prepare_problem_resolution(
     signal_ref: Uuid,
     server_candidate_refs: Vec<Uuid>,
 ) -> Result<PreparedProblemResolution, ProblemStoreError> {
+    prepare_problem_resolution_inner(database, signal_ref, server_candidate_refs, false).await
+}
+
+/// Scheduler variant that serializes stage creation with Run stop and budget exhaustion.
+pub async fn prepare_problem_resolution_for_enabled_v2_run(
+    database: &Database,
+    signal_ref: Uuid,
+    server_candidate_refs: Vec<Uuid>,
+) -> Result<PreparedProblemResolution, ProblemStoreError> {
+    prepare_problem_resolution_inner(database, signal_ref, server_candidate_refs, true).await
+}
+
+async fn prepare_problem_resolution_inner(
+    database: &Database,
+    signal_ref: Uuid,
+    server_candidate_refs: Vec<Uuid>,
+    enabled_v2_only: bool,
+) -> Result<PreparedProblemResolution, ProblemStoreError> {
     let candidates = normalized_candidates(server_candidate_refs)?;
     let mut transaction = database.pool().begin().await?;
+    if enabled_v2_only {
+        lock_enabled_v2_run_for_signal(&mut transaction, signal_ref).await?;
+    }
     let signal = lock_signal_for_resolution(&mut transaction, signal_ref).await?;
     let (state, candidate_problem_refs) = match signal.eligibility_state.as_str() {
         "eligible" => {
@@ -160,7 +186,7 @@ pub async fn resolve_retrieval_incomplete(
     reason: &str,
 ) -> Result<ProblemResolutionReceipt, ProblemStoreError> {
     let mut transaction = database.pool().begin().await?;
-    lock_pending_resolution(&mut transaction, resolution_ref).await?;
+    lock_pending_resolution(&mut transaction, resolution_ref, None).await?;
     finish_resolution(
         &mut transaction,
         resolution_ref,
@@ -190,8 +216,41 @@ pub async fn resume_retrieval_incomplete_resolution(
     resolution_ref: Uuid,
     server_candidate_refs: Vec<Uuid>,
 ) -> Result<PreparedProblemResolution, ProblemStoreError> {
+    resume_retrieval_incomplete_resolution_inner(
+        database,
+        resolution_ref,
+        server_candidate_refs,
+        false,
+    )
+    .await
+}
+
+/// Scheduler variant that cannot reopen work after the Run has stopped.
+pub async fn resume_retrieval_incomplete_resolution_for_enabled_v2_run(
+    database: &Database,
+    resolution_ref: Uuid,
+    server_candidate_refs: Vec<Uuid>,
+) -> Result<PreparedProblemResolution, ProblemStoreError> {
+    resume_retrieval_incomplete_resolution_inner(
+        database,
+        resolution_ref,
+        server_candidate_refs,
+        true,
+    )
+    .await
+}
+
+async fn resume_retrieval_incomplete_resolution_inner(
+    database: &Database,
+    resolution_ref: Uuid,
+    server_candidate_refs: Vec<Uuid>,
+    enabled_v2_only: bool,
+) -> Result<PreparedProblemResolution, ProblemStoreError> {
     let candidates = normalized_candidates(server_candidate_refs)?;
     let mut transaction = database.pool().begin().await?;
+    if enabled_v2_only {
+        lock_enabled_v2_run_for_resolution(&mut transaction, resolution_ref).await?;
+    }
     let resolution = lock_retrieval_incomplete_resolution(&mut transaction, resolution_ref).await?;
     validate_candidates(&mut transaction, resolution.domain_ref, &candidates).await?;
     let manifest = json!({
@@ -224,8 +283,53 @@ pub async fn accept_problem_resolution(
     resolution_ref: Uuid,
     raw_output: Value,
 ) -> Result<ProblemResolutionReceipt, ProblemStoreError> {
+    accept_problem_resolution_inner(database, resolution_ref, None, raw_output).await
+}
+
+#[doc(hidden)]
+pub async fn accept_problem_resolution_from_invocation(
+    database: &Database,
+    resolution_ref: Uuid,
+    invocation_ref: Uuid,
+    raw_output: Value,
+) -> Result<ProblemResolutionReceipt, ProblemStoreError> {
+    accept_problem_resolution_inner(database, resolution_ref, Some(invocation_ref), raw_output)
+        .await
+}
+
+async fn accept_problem_resolution_inner(
+    database: &Database,
+    resolution_ref: Uuid,
+    expected_invocation: Option<Uuid>,
+    raw_output: Value,
+) -> Result<ProblemResolutionReceipt, ProblemStoreError> {
     let mut transaction = database.pool().begin().await?;
-    let row = lock_pending_resolution(&mut transaction, resolution_ref).await?;
+    let row = if let Some(invocation_ref) = expected_invocation {
+        let run_ref = lock_problem_stage_run(
+            &mut transaction,
+            ProblemStageSubject::Resolution(resolution_ref),
+            invocation_ref,
+        )
+        .await?;
+        let row = lock_pending_resolution(&mut transaction, resolution_ref, Some(invocation_ref))
+            .await
+            .map_err(|error| match error {
+                ProblemStoreError::ResolutionUnavailable => {
+                    ProblemStoreError::ModelRequestUnavailable
+                }
+                other => other,
+            })?;
+        lock_active_problem_stage_request(
+            &mut transaction,
+            ProblemStageSubject::Resolution(resolution_ref),
+            run_ref,
+            invocation_ref,
+        )
+        .await?;
+        row
+    } else {
+        lock_pending_resolution(&mut transaction, resolution_ref, None).await?
+    };
     let candidates = candidate_refs(&row.candidate_manifest)?;
     let decision = match decide_existing_resolution(raw_output.clone(), &candidates) {
         Ok(decision) => decision,
@@ -313,11 +417,48 @@ pub async fn prepare_problem_pair(
     second_signal_ref: Uuid,
     selection: PairSelection,
 ) -> Result<PreparedProblemPair, ProblemStoreError> {
+    prepare_problem_pair_inner(
+        database,
+        first_signal_ref,
+        second_signal_ref,
+        selection,
+        false,
+    )
+    .await
+}
+
+/// Scheduler variant that serializes pair creation with Run stop and budget exhaustion.
+pub async fn prepare_problem_pair_for_enabled_v2_run(
+    database: &Database,
+    first_signal_ref: Uuid,
+    second_signal_ref: Uuid,
+    selection: PairSelection,
+) -> Result<PreparedProblemPair, ProblemStoreError> {
+    prepare_problem_pair_inner(
+        database,
+        first_signal_ref,
+        second_signal_ref,
+        selection,
+        true,
+    )
+    .await
+}
+
+async fn prepare_problem_pair_inner(
+    database: &Database,
+    first_signal_ref: Uuid,
+    second_signal_ref: Uuid,
+    selection: PairSelection,
+    enabled_v2_only: bool,
+) -> Result<PreparedProblemPair, ProblemStoreError> {
     if first_signal_ref == second_signal_ref {
         return Err(ProblemStoreError::PairNotIndependentOrNovel);
     }
     let (first_ref, second_ref) = ordered_pair(first_signal_ref, second_signal_ref);
     let mut transaction = database.pool().begin().await?;
+    if enabled_v2_only {
+        lock_enabled_v2_run_for_pair(&mut transaction, first_ref, second_ref).await?;
+    }
     let first = lock_novel_signal(&mut transaction, first_ref).await?;
     let second = lock_novel_signal(&mut transaction, second_ref).await?;
     if first.domain_ref != second.domain_ref
@@ -369,20 +510,66 @@ pub async fn prepare_problem_pair(
 pub async fn resume_pre_v2_pair_contract_rejection(
     database: &Database,
 ) -> Result<bool, ProblemStoreError> {
+    resume_pre_v2_pair_contract_rejection_inner(database, false).await
+}
+
+/// Scheduler variant that only reopens a contract-rejected pair owned by an enabled v2 Run.
+pub async fn resume_pre_v2_pair_contract_rejection_for_enabled_v2_run(
+    database: &Database,
+) -> Result<bool, ProblemStoreError> {
+    resume_pre_v2_pair_contract_rejection_inner(database, true).await
+}
+
+async fn resume_pre_v2_pair_contract_rejection_inner(
+    database: &Database,
+    enabled_v2_only: bool,
+) -> Result<bool, ProblemStoreError> {
     let mut transaction = database.pool().begin().await?;
     let pair_ref: Option<Uuid> = sqlx::query_scalar(
         "SELECT pair.pair_ref FROM linggan_comment_study_problem_pair pair \
          JOIN linggan_model_invocation invocation ON invocation.invocation_ref=pair.model_invocation_ref \
+         JOIN linggan_comment_study_signal signal ON signal.signal_ref=pair.first_signal_ref \
+         JOIN linggan_comment_study_target target USING(target_ref) \
+         JOIN linggan_comment_study_run run ON run.run_ref=target.run_ref \
          WHERE pair.state='rejected' AND invocation.failure_code='pair_contract_rejected' \
            AND pair.pair_manifest->>'outputContractVersion' IS NULL \
-         ORDER BY pair.created_at,pair.pair_ref LIMIT 1 FOR UPDATE OF pair SKIP LOCKED",
+           AND (NOT $1 OR (run.selection_manifest->>'contract'='comment-study.run-selection.v2' \
+             AND to_jsonb(run)->>'dispatch_state'='enabled' \
+             AND to_jsonb(run)->>'dispatch_reason' IS NULL)) \
+         ORDER BY pair.created_at,pair.pair_ref LIMIT 1",
     )
+    .bind(enabled_v2_only)
     .fetch_optional(&mut *transaction)
     .await?;
     let Some(pair_ref) = pair_ref else {
         transaction.commit().await?;
         return Ok(false);
     };
+    if enabled_v2_only {
+        lock_enabled_v2_run_for_pair_ref(&mut transaction, pair_ref).await?;
+    }
+    let locked_pair_ref: Option<Uuid> = sqlx::query_scalar(
+        "SELECT pair.pair_ref FROM linggan_comment_study_problem_pair pair \
+         JOIN linggan_model_invocation invocation ON invocation.invocation_ref=pair.model_invocation_ref \
+         JOIN linggan_comment_study_signal signal ON signal.signal_ref=pair.first_signal_ref \
+         JOIN linggan_comment_study_target target USING(target_ref) \
+         JOIN linggan_comment_study_run run ON run.run_ref=target.run_ref \
+         WHERE pair.pair_ref=$1 AND pair.state='rejected' \
+           AND invocation.failure_code='pair_contract_rejected' \
+           AND pair.pair_manifest->>'outputContractVersion' IS NULL \
+           AND (NOT $2 OR (run.selection_manifest->>'contract'='comment-study.run-selection.v2' \
+             AND to_jsonb(run)->>'dispatch_state'='enabled' \
+             AND to_jsonb(run)->>'dispatch_reason' IS NULL)) \
+         FOR UPDATE OF pair SKIP LOCKED",
+    )
+    .bind(pair_ref)
+    .bind(enabled_v2_only)
+    .fetch_optional(&mut *transaction)
+    .await?;
+    if locked_pair_ref.is_none() {
+        transaction.commit().await?;
+        return Ok(false);
+    }
     sqlx::query(
         "UPDATE linggan_comment_study_problem_pair \
          SET state='pending',model_invocation_ref=NULL,resolved_at=NULL,proposed_problem=NULL, \
@@ -404,8 +591,50 @@ pub async fn accept_problem_pair(
     pair_ref: Uuid,
     raw_output: Value,
 ) -> Result<ProblemPairReceipt, ProblemStoreError> {
+    accept_problem_pair_inner(database, pair_ref, None, raw_output).await
+}
+
+#[doc(hidden)]
+pub async fn accept_problem_pair_from_invocation(
+    database: &Database,
+    pair_ref: Uuid,
+    invocation_ref: Uuid,
+    raw_output: Value,
+) -> Result<ProblemPairReceipt, ProblemStoreError> {
+    accept_problem_pair_inner(database, pair_ref, Some(invocation_ref), raw_output).await
+}
+
+async fn accept_problem_pair_inner(
+    database: &Database,
+    pair_ref: Uuid,
+    expected_invocation: Option<Uuid>,
+    raw_output: Value,
+) -> Result<ProblemPairReceipt, ProblemStoreError> {
     let mut transaction = database.pool().begin().await?;
-    let pair = lock_pending_pair(&mut transaction, pair_ref).await?;
+    let pair = if let Some(invocation_ref) = expected_invocation {
+        let run_ref = lock_problem_stage_run(
+            &mut transaction,
+            ProblemStageSubject::Pair(pair_ref),
+            invocation_ref,
+        )
+        .await?;
+        let pair = lock_pending_pair(&mut transaction, pair_ref, Some(invocation_ref))
+            .await
+            .map_err(|error| match error {
+                ProblemStoreError::PairUnavailable => ProblemStoreError::ModelRequestUnavailable,
+                other => other,
+            })?;
+        lock_active_problem_stage_request(
+            &mut transaction,
+            ProblemStageSubject::Pair(pair_ref),
+            run_ref,
+            invocation_ref,
+        )
+        .await?;
+        pair
+    } else {
+        lock_pending_pair(&mut transaction, pair_ref, None).await?
+    };
     let (domain_ref, independent_sources, independent_authors) = pair_manifest(&pair.manifest)?;
     let decision = match decide_pair_creation(
         raw_output.clone(),
@@ -620,13 +849,17 @@ async fn lock_retrieval_incomplete_resolution(
 async fn lock_pending_resolution(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     resolution_ref: Uuid,
+    expected_invocation: Option<Uuid>,
 ) -> Result<PendingResolution, ProblemStoreError> {
     let row = sqlx::query(
         "SELECT signal_ref,domain_ref,candidate_manifest \
          FROM linggan_comment_study_resolution \
-         WHERE resolution_ref=$1 AND state='pending' FOR UPDATE",
+         WHERE resolution_ref=$1 AND state='pending' \
+           AND (($2::uuid IS NULL AND model_invocation_ref IS NULL) \
+                OR model_invocation_ref=$2) FOR UPDATE",
     )
     .bind(resolution_ref)
+    .bind(expected_invocation)
     .fetch_optional(&mut **transaction)
     .await?
     .ok_or(ProblemStoreError::ResolutionUnavailable)?;
@@ -710,6 +943,89 @@ async fn lock_novel_signal(
     })
 }
 
+async fn lock_enabled_v2_run_for_signal(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    signal_ref: Uuid,
+) -> Result<Uuid, ProblemStoreError> {
+    let run_ref: Option<Uuid> = sqlx::query_scalar(
+        "SELECT target.run_ref FROM linggan_comment_study_signal signal \
+         JOIN linggan_comment_study_target target USING(target_ref) WHERE signal.signal_ref=$1",
+    )
+    .bind(signal_ref)
+    .fetch_optional(&mut **transaction)
+    .await?;
+    let run_ref = run_ref.ok_or(ProblemStoreError::RunUnavailable)?;
+    lock_enabled_v2_run(transaction, run_ref).await
+}
+
+async fn lock_enabled_v2_run_for_resolution(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    resolution_ref: Uuid,
+) -> Result<Uuid, ProblemStoreError> {
+    let run_ref: Option<Uuid> = sqlx::query_scalar(
+        "SELECT target.run_ref FROM linggan_comment_study_resolution resolution \
+         JOIN linggan_comment_study_signal signal USING(signal_ref) \
+         JOIN linggan_comment_study_target target USING(target_ref) \
+         WHERE resolution.resolution_ref=$1",
+    )
+    .bind(resolution_ref)
+    .fetch_optional(&mut **transaction)
+    .await?;
+    let run_ref = run_ref.ok_or(ProblemStoreError::RunUnavailable)?;
+    lock_enabled_v2_run(transaction, run_ref).await
+}
+
+async fn lock_enabled_v2_run_for_pair(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    first_signal_ref: Uuid,
+    second_signal_ref: Uuid,
+) -> Result<Uuid, ProblemStoreError> {
+    let run_refs: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT DISTINCT target.run_ref FROM linggan_comment_study_signal signal \
+         JOIN linggan_comment_study_target target USING(target_ref) \
+         WHERE signal.signal_ref=ANY($1) ORDER BY target.run_ref",
+    )
+    .bind(vec![first_signal_ref, second_signal_ref])
+    .fetch_all(&mut **transaction)
+    .await?;
+    if run_refs.len() != 1 {
+        return Err(ProblemStoreError::RunUnavailable);
+    }
+    lock_enabled_v2_run(transaction, run_refs[0]).await
+}
+
+async fn lock_enabled_v2_run_for_pair_ref(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    pair_ref: Uuid,
+) -> Result<Uuid, ProblemStoreError> {
+    let signals: Option<(Uuid, Uuid)> = sqlx::query_as(
+        "SELECT first_signal_ref,second_signal_ref FROM linggan_comment_study_problem_pair \
+         WHERE pair_ref=$1",
+    )
+    .bind(pair_ref)
+    .fetch_optional(&mut **transaction)
+    .await?;
+    let (first_signal_ref, second_signal_ref) = signals.ok_or(ProblemStoreError::RunUnavailable)?;
+    lock_enabled_v2_run_for_pair(transaction, first_signal_ref, second_signal_ref).await
+}
+
+async fn lock_enabled_v2_run(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    run_ref: Uuid,
+) -> Result<Uuid, ProblemStoreError> {
+    sqlx::query_scalar(
+        "SELECT run.run_ref FROM linggan_comment_study_run run \
+         WHERE run.run_ref=$1 AND run.selection_manifest->>'contract'='comment-study.run-selection.v2' \
+           AND to_jsonb(run)->>'dispatch_state'='enabled' \
+           AND to_jsonb(run)->>'dispatch_reason' IS NULL \
+         FOR UPDATE",
+    )
+    .bind(run_ref)
+    .fetch_optional(&mut **transaction)
+    .await?
+    .ok_or(ProblemStoreError::RunUnavailable)
+}
+
 struct PendingPair {
     first_signal_ref: Uuid,
     second_signal_ref: Uuid,
@@ -719,13 +1035,17 @@ struct PendingPair {
 async fn lock_pending_pair(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     pair_ref: Uuid,
+    expected_invocation: Option<Uuid>,
 ) -> Result<PendingPair, ProblemStoreError> {
     let row = sqlx::query(
         "SELECT first_signal_ref,second_signal_ref,pair_manifest \
          FROM linggan_comment_study_problem_pair \
-         WHERE pair_ref=$1 AND state='pending' FOR UPDATE",
+         WHERE pair_ref=$1 AND state='pending' \
+           AND (($2::uuid IS NULL AND model_invocation_ref IS NULL) \
+                OR model_invocation_ref=$2) FOR UPDATE",
     )
     .bind(pair_ref)
+    .bind(expected_invocation)
     .fetch_optional(&mut **transaction)
     .await?
     .ok_or(ProblemStoreError::PairUnavailable)?;
@@ -734,6 +1054,91 @@ async fn lock_pending_pair(
         second_signal_ref: row.get("second_signal_ref"),
         manifest: row.get("pair_manifest"),
     })
+}
+
+async fn lock_problem_stage_run(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    subject: ProblemStageSubject,
+    invocation_ref: Uuid,
+) -> Result<Uuid, ProblemStoreError> {
+    let run_ref: Option<Uuid> = match subject {
+        ProblemStageSubject::Resolution(resolution_ref) => {
+            sqlx::query_scalar(
+                "SELECT run_ref FROM linggan_comment_study_model_request \
+             WHERE invocation_ref=$1 AND stage='resolution' AND resolution_ref=$2",
+            )
+            .bind(invocation_ref)
+            .bind(resolution_ref)
+            .fetch_optional(&mut **transaction)
+            .await?
+        }
+        ProblemStageSubject::Pair(pair_ref) => {
+            sqlx::query_scalar(
+                "SELECT request.run_ref FROM linggan_comment_study_model_request request \
+             JOIN linggan_comment_study_problem_pair pair ON pair.pair_ref=request.pair_ref \
+             JOIN linggan_comment_study_signal first_signal ON first_signal.signal_ref=pair.first_signal_ref \
+             JOIN linggan_comment_study_target first_target USING(target_ref) \
+             JOIN linggan_comment_study_signal second_signal ON second_signal.signal_ref=pair.second_signal_ref \
+             JOIN linggan_comment_study_target second_target ON second_target.target_ref=second_signal.target_ref \
+             WHERE request.invocation_ref=$1 AND request.stage='pair' AND request.pair_ref=$2 \
+               AND first_target.run_ref=request.run_ref AND second_target.run_ref=request.run_ref",
+            )
+            .bind(invocation_ref)
+            .bind(pair_ref)
+            .fetch_optional(&mut **transaction)
+            .await?
+        }
+    };
+    let run_ref = run_ref.ok_or(ProblemStoreError::ModelRequestUnavailable)?;
+    let locked_run: Option<Uuid> = sqlx::query_scalar(
+        "SELECT run_ref FROM linggan_comment_study_run \
+         WHERE run_ref=$1 AND selection_manifest->>'contract'='comment-study.run-selection.v2' \
+         FOR UPDATE",
+    )
+    .bind(run_ref)
+    .fetch_optional(&mut **transaction)
+    .await?;
+    locked_run.ok_or(ProblemStoreError::ModelRequestUnavailable)
+}
+
+async fn lock_active_problem_stage_request(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    subject: ProblemStageSubject,
+    run_ref: Uuid,
+    invocation_ref: Uuid,
+) -> Result<(), ProblemStoreError> {
+    let active: Option<Uuid> =
+        match subject {
+            ProblemStageSubject::Resolution(resolution_ref) => sqlx::query_scalar(
+                "SELECT request.invocation_ref FROM linggan_comment_study_model_request request \
+             JOIN linggan_model_invocation invocation USING(invocation_ref) \
+             WHERE request.invocation_ref=$1 AND request.run_ref=$2 AND request.stage='resolution' \
+               AND request.resolution_ref=$3 AND request.dispatch_started_at IS NOT NULL \
+               AND request.deadline_at>scope_001_now() AND invocation.state='running' \
+             FOR UPDATE OF request,invocation",
+            )
+            .bind(invocation_ref)
+            .bind(run_ref)
+            .bind(resolution_ref)
+            .fetch_optional(&mut **transaction)
+            .await?,
+            ProblemStageSubject::Pair(pair_ref) => sqlx::query_scalar(
+                "SELECT request.invocation_ref FROM linggan_comment_study_model_request request \
+             JOIN linggan_model_invocation invocation USING(invocation_ref) \
+             WHERE request.invocation_ref=$1 AND request.run_ref=$2 AND request.stage='pair' \
+               AND request.pair_ref=$3 AND request.dispatch_started_at IS NOT NULL \
+               AND request.deadline_at>scope_001_now() AND invocation.state='running' \
+             FOR UPDATE OF request,invocation",
+            )
+            .bind(invocation_ref)
+            .bind(run_ref)
+            .bind(pair_ref)
+            .fetch_optional(&mut **transaction)
+            .await?,
+        };
+    active
+        .map(|_| ())
+        .ok_or(ProblemStoreError::ModelRequestUnavailable)
 }
 
 fn pair_manifest(manifest: &Value) -> Result<(Uuid, bool, bool), ProblemStoreError> {

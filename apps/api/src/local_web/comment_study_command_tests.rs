@@ -52,6 +52,15 @@ fn assert_headers(headers: &HeaderMap) {
 }
 
 #[test]
+fn exhausted_pair_requests_have_a_truthful_ui_state_label() {
+    let script = include_str!("comment_study.js");
+    assert!(script.contains("failed: '比较未完成，请查看原因'"));
+    assert!(script.contains("attempts_exhausted: '请求尝试次数已用尽，未收到可接纳结果'"));
+    assert!(script.contains("budget_exhausted: '运行预算已用尽，比较未完成'"));
+    assert!(script.contains("input_limit_exceeded: '请求超过模型输入上限，未发送'"));
+}
+
+#[test]
 fn activation_expected_pointer_is_required_nullable_and_closed() {
     assert!(serde_json::from_value::<ActivateStudyPolicyCommand>(json!({})).is_err());
     let value: ActivateStudyPolicyCommand =

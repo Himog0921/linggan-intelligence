@@ -224,22 +224,58 @@ pub async fn reserve_study_batch_model_call(
             .and_then(|v| v.parse::<i64>().ok())
             .ok_or(StudyModelDispatchError::MethodUnavailable)?;
         let charged_tokens: i64 = sqlx::query_scalar(
-            "SELECT COALESCE(SUM(CASE WHEN invocation.state='running' \
+             "SELECT COALESCE(SUM(CASE WHEN invocation.state='running' \
                                      AND (invocation.input_tokens IS NULL OR invocation.output_tokens IS NULL) \
-                                     THEN invocation.reserved_tokens \
+                                     THEN GREATEST(invocation.reserved_tokens,COALESCE(invocation.charged_tokens,0)) \
                                      ELSE COALESCE(invocation.charged_tokens,invocation.reserved_tokens) END),0)::bigint \
-             FROM linggan_comment_study_model_request request \
-             JOIN linggan_model_invocation invocation USING(invocation_ref) \
-             WHERE request.run_ref=$1",
+             FROM linggan_model_invocation invocation \
+             WHERE invocation.invocation_ref IN ( \
+               SELECT request.invocation_ref FROM linggan_comment_study_model_request request WHERE request.run_ref=$1 \
+               UNION SELECT resolution.model_invocation_ref \
+                 FROM linggan_comment_study_resolution resolution \
+                 JOIN linggan_comment_study_signal signal USING(signal_ref) \
+                 JOIN linggan_comment_study_target target USING(target_ref) \
+                 JOIN linggan_comment_study_run run ON run.run_ref=target.run_ref \
+                 WHERE target.run_ref=$1 AND run.selection_manifest->>'contract'='comment-study.run-selection.v2' \
+                   AND resolution.model_invocation_ref IS NOT NULL \
+               UNION SELECT pair.model_invocation_ref \
+                 FROM linggan_comment_study_problem_pair pair \
+                 JOIN linggan_comment_study_signal signal ON signal.signal_ref=pair.first_signal_ref \
+                 JOIN linggan_comment_study_target target USING(target_ref) \
+                 JOIN linggan_comment_study_run run ON run.run_ref=target.run_ref \
+                 WHERE target.run_ref=$1 AND run.selection_manifest->>'contract'='comment-study.run-selection.v2' \
+                   AND pair.model_invocation_ref IS NOT NULL \
+               UNION SELECT legacy.invocation_ref FROM linggan_model_invocation legacy \
+                 WHERE legacy.result->>'legacyRequestLedgerMissing'='true' \
+                   AND legacy.result->>'legacyRunRef'=$1::text \
+             )",
         )
         .bind(run_ref)
         .fetch_one(&mut *transaction)
         .await?;
         if charged_tokens.saturating_add(*reserved_tokens) > run_token_limit {
             let active_calls: i64 = sqlx::query_scalar(
-                "SELECT count(*) FROM linggan_comment_study_model_request request \
-                 JOIN linggan_model_invocation invocation USING(invocation_ref) \
-                 WHERE request.run_ref=$1 AND invocation.state='running'",
+                "SELECT count(*) FROM linggan_model_invocation invocation \
+                 WHERE invocation.state='running' AND invocation.invocation_ref IN ( \
+                   SELECT request.invocation_ref FROM linggan_comment_study_model_request request WHERE request.run_ref=$1 \
+                   UNION SELECT resolution.model_invocation_ref \
+                     FROM linggan_comment_study_resolution resolution \
+                     JOIN linggan_comment_study_signal signal USING(signal_ref) \
+                     JOIN linggan_comment_study_target target USING(target_ref) \
+                     JOIN linggan_comment_study_run run ON run.run_ref=target.run_ref \
+                     WHERE target.run_ref=$1 AND run.selection_manifest->>'contract'='comment-study.run-selection.v2' \
+                       AND resolution.model_invocation_ref IS NOT NULL \
+                   UNION SELECT pair.model_invocation_ref \
+                     FROM linggan_comment_study_problem_pair pair \
+                     JOIN linggan_comment_study_signal signal ON signal.signal_ref=pair.first_signal_ref \
+                     JOIN linggan_comment_study_target target USING(target_ref) \
+                     JOIN linggan_comment_study_run run ON run.run_ref=target.run_ref \
+                     WHERE target.run_ref=$1 AND run.selection_manifest->>'contract'='comment-study.run-selection.v2' \
+                       AND pair.model_invocation_ref IS NOT NULL \
+                   UNION SELECT legacy.invocation_ref FROM linggan_model_invocation legacy \
+                     WHERE legacy.result->>'legacyRequestLedgerMissing'='true' \
+                       AND legacy.result->>'legacyRunRef'=$1::text \
+                 )",
             )
             .bind(run_ref)
             .fetch_one(&mut *transaction)

@@ -1,7 +1,7 @@
 # 评论研究产品化 · 来源和验收账本
 
 > 状态: 权威当前
-> 最后核对: 2026-09-27
+> 最后核对: 2026-09-28
 > 适用范围: COMMENT-STUDY-PRODUCTIZATION-001
 > 事实来源: 用户提供的手册v1.0与本分支的实际提交
 > 冲突时以谁为准: 实际执行证据与对应版本合同
@@ -15,14 +15,14 @@
 
 ## 当前剩余工作：严格沿用原 P0–P8
 
-本表是 2026-09-27 的新快照，替代上方历史增量在当时记录的旧状态。PR #338 最新代码 head 为 `eec203286b48e6c6d38a1dce93e7db6b7e5d9427`；旧 schema 兼容修复已复审、提交并推送。worktree 已整合最新 `origin/main@2587fba`；P2、P3 合成 PostgreSQL 子集与 Intelligence/API unit suites 现均通过。代码、隔离数据库、生产运行时、人工标注和业务验收分层报告，测试数量不折算成阶段百分比。
+本表是 2026-09-28 的新快照，替代上方历史增量在当时记录的旧状态。核对时 PR #338 为 OPEN/Draft，base 与 `origin/main@2587fba486434acf2c94a8e7f64ce245b87a38f6` 一致，远端 head 仍为 docs-only `2e4f15b3aaec12958835e3fe52f9131f891a12d9`；exact-head run [36312844533](https://github.com/Himog0921/linggan-intelligence/actions/runs/36312844533) 的 synthetic proof 成功、source export 按 push-only 条件跳过。最近远端带代码 head 为 `eec203286b48e6c6d38a1dce93e7db6b7e5d9427`，run [36311074498](https://github.com/Himog0921/linggan-intelligence/actions/runs/36311074498) 成功。当前 worktree 的 P3 增量尚未提交/推送；下方测试为本地候选证明，不属于远端 head。worktree 已整合最新 `origin/main@2587fba`；代码、隔离数据库、生产运行时、人工标注和业务验收分层报告，测试数量不折算成阶段百分比。
 
 | 手册阶段 | 当前已有证据 | 未完成/下一关 | 状态 |
 |---|---|---|---|
 | P0 外围接线与隔离启动 | 2026-09-27 只读确认 `:3000` health ready、`runtime-identity=2587fba4`、共享开发库 migration head 0104；聚合快照为 4,880 material comments、7 Study Runs、945 Targets、1,412 semantic attempts、764 Signals、0 Problems；prepared/leased batches 0/0，running invocations 0，其他 active SQL sessions 0。Request ledger 不存在（0105 未应用） | 历史行数/采样 hash 基线、原文资格盘点、迁移前备份、worker drain 与恢复演练 | 运行身份和在途计数级状态已核；数据内容/hash 与发布保护演练未核，P2 migrations 未应用 |
 | P1 原声、清洗与语境 | 前序 #323–#336 已并入 main 的材料/评论目录、详情历史、清洗和选择能力；本轮保留 main 的统一 domain usage 并重跑既有回归 | T01–T54 全量、剩余边界及用户指定 exact-head 的完整产品验收 | 已有交付在 main；整阶段验收未结 |
 | P2 选择、预算、启动 | 方法版本/读取复制、按领域默认 CAS、显式预算、共享 preview/start、请求幂等与并发隔离、正式 router 和方法/Run UI 已接通；新增 v2 queued Run 到现有 semantic worker 的接线、冻结方法 request snapshot、调用前 fence、Run 级预算及实测用量累计；隔离 PG 45 项 + Axum/PG 6 项，unit suites Intelligence 123/123、API 287 passed（35 ignored） | 真实浏览器逐动作验收；估算与 provider 实测用量差异仍需完整账本承接 | exact-head run 36311074498 成功（eec）；用户页面/业务接受未结 |
-| P3 有界执行、质量与恢复 | 新 Run semantic worker/receipt synthetic 路径；旧版 schema 下 P2 终态写入与 lease recovery 已保留兼容；rebuild PG 47/47，P2 worker PG 45/45 + Axum/PG 6/6；exact-head run 36311074498 成功 | 三阶段 request/usage 账本与共享预算、失败/部分接纳、pause/resume/stop 与控制 CAS、崩溃/过期恢复、公平调度；独立人工 Gold Set、离线 Recall@K、隔离 Rust→WeMM 回放和同篇双账号冷启动证明 | synthetic contract 回归通过；执行闭环未完成；质量验证 `BLOCKED_ON_HUMAN_ANNOTATION`，不是验证失败 |
+| P3 有界执行、质量与恢复 | 本地候选已让 resolution/pair 与 semantic 共用不可变 request ledger 和 Run 级 token reservation；每阶段按冻结模型配置限制同上下文尝试数（默认 2 次）；有 dispatch/deadline fence、过期恢复、零费用释放/未知用量保守结算、迟到响应拒绝，并允许已授权且未过期响应在 stop 后结算。最新本地验证：56 个 Comment Study Intelligence PG、Axum/PG 6 个、rebuild PG 48 个、Intelligence unit 123 个、API 288 passed/35 ignored | 控制 API 的 pause/resume/stop CAS、调度公平性、完整失败/部分接纳矩阵与运行态 drain；独立人工 Gold Set、离线 Recall@K、隔离 Rust→WeMM 回放和同篇双账号冷启动证明 | 上述 P3 增量仍是未提交 worktree 候选，不属于远端 exact-head；P3 执行闭环未完成。质量验证 `BLOCKED_ON_HUMAN_ANNOTATION`，不是验证失败 |
 | P4 长期归并与纠偏 | 既有 Problem、membership、撤销/重研等候选路径可复用 | 有效 head、跨下游限制传播、合并/撤销及支持版本历史的同版 PG 证明 | 部分候选；整阶段 NOT_VERIFIED |
 | P5 指标、语言与情报接口 | Intelligence 已有材料和事实读取基础 | 六视角、窗口/cohort/distinct 对账、durable event 与下游消费 | 未形成完整验收 |
 | P6 每日增量与资源 | 自动化衔接仅有设计 | dirty 合并、时区/计划开关、预算续办、退避及资源争用证明 | 未启用、未验收 |
@@ -138,4 +138,4 @@ P2 下一关为 exact-head CI 与 Mog 对真实页面/数字/动作的验收；�
 
 后续独立复审补出两项边界：开始 provider dispatch 后、usage checkpoint 前崩溃时，过期恢复必须继续按 reservation 计入预算；以及已发布 0107 不得因增加 snapshot trigger 而改变 checksum。候选现以未注册的 0108 独立承载 request snapshot trigger，并分别为“已 dispatch、usage 未知”与“尚未 dispatch”的过期调用增加保守结算/释放 reservation 回归。0107 与父提交 SHA-256 同为 `da0fc26c23949cb52137ecfbbd9f82698c10e244b52656e34d75f91365ec1dd7`。最新隔离复跑 Intelligence PostgreSQL 45/45、Axum/PG 6/6；单元 123/123 与 287 passed/35 ignored；治理、UI handbook、定点 rustfmt、shell 语法和 diff 检查均通过。独立最终复审未发现 blocker。PR head `4b177bdeb484581b95c892b8e6a331f1640d02e9` 的 exact-head run [36309022127](https://github.com/Himog0921/linggan-intelligence/actions/runs/36309022127) 成功；push-only `integration-source-export` 按条件跳过，工作流的前端行为脚本当前不存在，因此未执行浏览器 UI 自动化；Mog 页面验收仍待完成。
 
-未完成仍按原手册分层：P2 需 exact-head CI 与真实页面逐动作/逐数字验收；P3 需 semantic/resolution/pair 统一 request/usage ledger 与预算、pause/resume/stop CAS、失败/部分接纳与崩溃恢复、公平调度。P3 Recall@K 需独立人工 Gold Set；Agent 不自行标注。后续顺序为 P4 有效结果 head 与限制传播 → P5 六视角与 durable events → P6 每日增量/额度/退避 → P7 真实 API、空错旧态、键盘/1440/1024/390/200% zoom 与 Mog 验收 → P8 隔离恢复、有限授权发布与回退。P0 用户环境历史、在途任务与数据保护/恢复证明继续并列跟踪。未修改 T01–T54 台账状态，未共享迁移、调用 provider、部署或合并。
+未完成仍按原手册分层：P2 需 exact-head CI 与真实页面逐动作/逐数字验收；P3 需补 pause/resume/stop control CAS、公平调度、失败/部分接纳与运行态 drain 的完整证明。P3 Recall@K 需独立人工 Gold Set；Agent 不自行标注。后续顺序为 P4 有效结果 head 与限制传播 → P5 六视角与 durable events → P6 每日增量/额度/退避 → P7 真实 API、空错旧态、键盘/1440/1024/390/200% zoom 与 Mog 验收 → P8 隔离恢复、有限授权发布与回退。P0 用户环境历史、在途任务与数据保护/恢复证明继续并列跟踪。未修改 T01–T54 台账状态，未共享迁移、调用 provider、部署或合并。

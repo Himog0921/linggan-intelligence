@@ -10,12 +10,15 @@ use crate::{
         MAX_TARGETS_PER_BATCH, PrepareStudyBatchRequest, StudyBatchError, next_run_needing_batch,
         prepare_study_batch,
     },
-    comment_study_batch_acceptance::accept_study_batch_output,
+    comment_study_batch_acceptance::{accept_study_batch_output, reject_study_batch_input_limit},
     comment_study_batch_worker::{
         DEFAULT_BATCH_LEASE_SECONDS, StudyBatchWorkerError, claim_next_study_batch,
         recover_expired_study_batch_leases,
     },
-    comment_study_candidate_recall::{advance_next_problem_pair, advance_next_problem_resolution},
+    comment_study_candidate_recall::{
+        advance_next_problem_pair_for_enabled_v2_run,
+        advance_next_problem_resolution_for_enabled_v2_run,
+    },
     comment_study_embedding::{EmbeddingError, EmbeddingOutcome, embed_pending_signals},
     comment_study_model_dispatch::StudyModelDispatchError,
     comment_study_model_runner::{StudyModelRunnerError, call_study_batch_model},
@@ -35,53 +38,73 @@ pub async fn run_model_work_once(
     store: &dyn ModelSecretStore,
     adapter: &PiAdapter,
 ) -> Result<bool, ModelError> {
+    // P3 recovery must run before any fresh work. Unsent reservations settle at zero; dispatched
+    // requests with unknown usage retain their reservation before their subject can be retried.
+    let recovered_stage_requests =
+        crate::comment_study_request_ledger::recover_expired_problem_stage_requests(database)
+            .await
+            .map_err(ModelError::Database)?;
+    let recovered_batches = recover_expired_study_batch_leases(database)
+        .await
+        .map_err(worker_error)?;
+    if recovered_stage_requests > 0 || recovered_batches > 0 {
+        return Ok(true);
+    }
     // P1 deterministic maintenance shares this existing 10s worker tick. It is bounded and local:
     // no provider call, no Run creation and no second scheduler. On pre-P1 schemas it is a no-op.
     crate::comment_study_catalog::maintain_comment_catalog(database)
         .await
         .map_err(catalog_error)?;
-    if run_one_problem_pair(database, store, adapter)
-        .await
-        .map_err(|error| match error {
-            crate::comment_study_pair_worker::PairWorkerError::Model(error) => error,
-            crate::comment_study_pair_worker::PairWorkerError::Database(error) => {
-                ModelError::Database(error)
-            }
-            crate::comment_study_pair_worker::PairWorkerError::Store(
-                crate::comment_study_problem_store::ProblemStoreError::Database(error),
-            ) => ModelError::Database(error),
-            crate::comment_study_pair_worker::PairWorkerError::Store(_) => ModelError::Conflict,
-            crate::comment_study_pair_worker::PairWorkerError::Manifest => ModelError::Conflict,
-        })?
-    {
-        return Ok(true);
+    let problem_stages_ready =
+        crate::comment_study_request_ledger::pair_failure_state_supported(database)
+            .await
+            .map_err(ModelError::Database)?;
+    if problem_stages_ready {
+        if run_one_problem_pair(database, store, adapter)
+            .await
+            .map_err(|error| match error {
+                crate::comment_study_pair_worker::PairWorkerError::Model(error) => error,
+                crate::comment_study_pair_worker::PairWorkerError::Database(error) => {
+                    ModelError::Database(error)
+                }
+                crate::comment_study_pair_worker::PairWorkerError::Store(
+                    crate::comment_study_problem_store::ProblemStoreError::Database(error),
+                ) => ModelError::Database(error),
+                crate::comment_study_pair_worker::PairWorkerError::Store(_) => ModelError::Conflict,
+                crate::comment_study_pair_worker::PairWorkerError::Manifest => ModelError::Conflict,
+            })?
+        {
+            return Ok(true);
+        }
+        if run_one_problem_resolution(database, store, adapter)
+            .await
+            .map_err(|error| match error {
+                crate::comment_study_resolution_worker::ResolutionWorkerError::Model(error) => {
+                    error
+                }
+                crate::comment_study_resolution_worker::ResolutionWorkerError::Database(error) => {
+                    ModelError::Database(error)
+                }
+                crate::comment_study_resolution_worker::ResolutionWorkerError::Idle
+                | crate::comment_study_resolution_worker::ResolutionWorkerError::Manifest => {
+                    ModelError::Conflict
+                }
+            })?
+        {
+            return Ok(true);
+        }
+        // Ahead of the resolution worker: a comparison the cache can answer never becomes a call.
+        if crate::comment_study_comparison_cache::serve_pending_resolutions_from_cache(database)
+            .await
+            .map_err(|_| ModelError::Conflict)?
+            > 0
+        {
+            return Ok(true);
+        }
     }
-    if run_one_problem_resolution(database, store, adapter)
-        .await
-        .map_err(|error| match error {
-            crate::comment_study_resolution_worker::ResolutionWorkerError::Model(error) => error,
-            crate::comment_study_resolution_worker::ResolutionWorkerError::Database(error) => {
-                ModelError::Database(error)
-            }
-            crate::comment_study_resolution_worker::ResolutionWorkerError::Idle
-            | crate::comment_study_resolution_worker::ResolutionWorkerError::Manifest => {
-                ModelError::Conflict
-            }
-        })?
-    {
-        return Ok(true);
-    }
-    // Ahead of the resolution worker: a comparison the cache can answer never becomes a call.
-    if crate::comment_study_comparison_cache::serve_pending_resolutions_from_cache(database)
-        .await
-        .map_err(|_| ModelError::Conflict)?
-        > 0
-    {
-        return Ok(true);
-    }
-    // Ahead of recall: an unencoded Signal is not a Signal without matches, and recall can only
-    // report it as `retrieval_incomplete`. Encoding is local work with no provider cost, so it is
-    // the cheapest way to turn "could not search" back into an answerable question.
+    // Keep deterministic local embedding available on P1/legacy schemas even when the newer P3
+    // request ledger is not installed. An unencoded Signal cannot be recalled; embedding has no
+    // provider cost and does not depend on the P3 request/terminal-state migrations.
     if let EmbeddingOutcome::Encoded { encoded, .. } = embed_pending_signals(database, adapter)
         .await
         .map_err(|error| match error {
@@ -93,24 +116,23 @@ pub async fn run_model_work_once(
     {
         return Ok(true);
     }
-    if advance_next_problem_resolution(database)
-        .await
-        .map_err(|_| ModelError::Conflict)?
-    {
-        return Ok(true);
-    }
-    if advance_next_problem_pair(database)
-        .await
-        .map_err(|_| ModelError::Conflict)?
-    {
-        return Ok(true);
+    if problem_stages_ready {
+        if advance_next_problem_resolution_for_enabled_v2_run(database)
+            .await
+            .map_err(|_| ModelError::Conflict)?
+        {
+            return Ok(true);
+        }
+        if advance_next_problem_pair_for_enabled_v2_run(database)
+            .await
+            .map_err(|_| ModelError::Conflict)?
+        {
+            return Ok(true);
+        }
     }
     if prepare_next_batch_across_runs(database).await? {
         return Ok(true);
     }
-    recover_expired_study_batch_leases(database)
-        .await
-        .map_err(worker_error)?;
     let Some(claim) = claim_next_study_batch(database, Uuid::new_v4(), DEFAULT_BATCH_LEASE_SECONDS)
         .await
         .map_err(worker_error)?
@@ -123,6 +145,12 @@ pub async fn run_model_work_once(
         {
             Ok(output) => output,
             Err(StudyModelRunnerError::Dispatch(StudyModelDispatchError::BudgetDeferred)) => {
+                return Ok(true);
+            }
+            Err(StudyModelRunnerError::Dispatch(StudyModelDispatchError::InputLimit)) => {
+                reject_study_batch_input_limit(database, claim.batch_ref, claim.lease_token)
+                    .await
+                    .map_err(|_| ModelError::Conflict)?;
                 return Ok(true);
             }
             Err(error) => return Err(runner_error(error)),
