@@ -8,11 +8,11 @@
 
 ### GREENFIELD Comment Research / Draft PR #338（最新 main 已整合；P2/P3 候选持续推进）
 
-PR #338 当前仍 OPEN/Draft、base=`main@2587fba486434acf2c94a8e7f64ce245b87a38f6`；前序 P3 code head `68d98caf7cffd92b95d819952f3bf9c4e806925c` 的 exact-head synthetic run [36333884008](https://github.com/Himog0921/linggan-intelligence/actions/runs/36333884008) 成功。#338 之前的部分 P1/P2 能力由独立 PR #323–#327、#329、#335、#336 进入 main；这不表示 #338 合入或整体完成。
+PR #338 当前仍 OPEN/Draft，head=`d60508ed6a2fc2262cb175ea5c4cc2d45979e845`，base=`main@2587fba486434acf2c94a8e7f64ce245b87a38f6`；GitHub 返回 `mergedAt=null`、`mergeCommit=null`。该精确 head 的 Actions run [36342688035](https://github.com/Himog0921/linggan-intelligence/actions/runs/36342688035) 成功，compile/unit/隔离 PostgreSQL 步骤通过。source-export 按 push-only 条件跳过；前端行为测试脚本不存在，工作流步骤没有实际运行 UI 测试。#338 历史中的 d10b945 和 c2af487 是将 main 更新合入该分支；另有 PR #323–#327、#329、#335、#336 已分别合并 main，不能写成 #338 已合并。
 
-当前 P2 候选在本分支补上 Run 取消与显式重试：Run 锁与持久 dispatch fence 串行化停止/外发；未越过 fence 的调用按零费用收口；在途结果超过冻结 request deadline 时不接纳，已观测用量保留；provider timeout 受 deadline 剩余时间限制。停止确认框展示 Run ID、未终态目标数和目标总数；继续执行需创建新 Run 并选择 `retry_failed`。2026-09-28 本地验证：产品化 disposable PostgreSQL Intelligence 57/57、真实 Axum/PG 8/8、Intelligence unit 123/123、API 290 passed / 37 ignored。该增量仍待独立最终复审、提交、push 与 exact-head CI；浏览器和 Mog 页面验收未完成。全仓 rustfmt check 有未改文件的既有格式漂移，定点改动文件格式通过。候选迁移 0105–0109 仍只用于隔离证明，未注册共享升级入口；没有 provider 调用、共享 migration、部署、runtime 切换或 merge。
+当前 P2 候选在本分支补上 Run 取消与显式重试：Run 锁与持久 dispatch fence 串行化停止/外发；未越过 fence 的调用按零费用收口；在途结果超过冻结 request deadline 时不接纳，已观测用量保留；provider timeout 受 deadline 剩余时间限制。停止确认框展示 Run ID、未终态目标数和目标总数；继续执行需创建新 Run 并选择 `retry_failed`。本地验证：产品化 disposable PostgreSQL Intelligence 57/57、Axum/PG 8/8、Intelligence unit 123/123、API 290 passed / 37 ignored。以上代码由 exact-head run 36342688035 验证通过。真实浏览器和 Mog 页面验收未完成；CI 前端行为步骤未运行测试脚本。全仓 rustfmt check 有未改文件上的既有格式漂移，定点改动文件格式通过。候选迁移 0105–0109 仍只用于隔离证明，未注册共享升级入口；没有 provider 调用、共享 migration、部署、runtime 切换或 merge。
 
-P2 仍缺真实浏览器逐动作/逐数字走查和 Mog 页面/业务验收；P3 还缺 pause/resume/stop CAS、公平调度、完整失败/部分接纳矩阵与运行态 drain。P3 Recall@K 与质量出口 `BLOCKED_ON_HUMAN_ANNOTATION`，等待独立 Gold Set，Agent 不自标。之后按 P4→P5→P6→P7→P8 顺序推进，P0 用户环境历史/在途保护、迁移前数据基线与备份恢复演练并行跟踪。`:3000` 上次只读身份仍是 main `2587fba4`、migration head 0104；候选 UI 未发布。2026-09-27 共享开发库只读聚合快照仍只代表那次计数，不是历史内容/hash 基线或质量验收。
+P2 仍缺真实浏览器逐动作/逐数字走查和 Mog 页面/业务验收；P3 还缺 pause/resume/stop CAS、公平调度、完整失败/部分接纳矩阵与运行态 drain。P3 Recall@K 与质量出口 `BLOCKED_ON_HUMAN_ANNOTATION`，等待独立 Gold Set，Agent 不自标。之后按 P4→P5→P6→P7→P8 顺序推进，P0 用户环境历史/在途保护、迁移前数据基线与备份恢复演练并行跟踪。2026-09-28 只读复核 `:3000/health` 为 ready，runtime identity 文件仍为 revision `2587fba4`、migration head `0104_unified_domain_schema_cleanup`；候选 UI 未发布。本机身份文件 builtAt 是 2026-09-27，服务健康读取为 2026-09-28；共享库内容/hash 基线与历史快照仍未补。
 
 ### DOMAIN-UNIFICATION-001（#343/#344 已合并并刷新本机运行；作品读取修复候选待集成）
 
