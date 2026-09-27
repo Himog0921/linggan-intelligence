@@ -15,14 +15,14 @@
 
 ## 当前剩余工作：严格沿用原 P0–P8
 
-本表是 2026-09-27 的新快照，替代上方历史增量在当时记录的旧状态。PR #338 最新已推送 head 为 `8c1a4cc34c11a27a7cd1df823d6942039749c192`；本地工作树当前在其上包含待提交的旧 schema 兼容修复。worktree 已整合最新 `origin/main@2587fba`；P2、P3 合成 PostgreSQL 子集与 Intelligence/API unit suites 现均在候选树通过。代码、隔离数据库、生产运行时、人工标注和业务验收分层报告，测试数量不折算成阶段百分比。
+本表是 2026-09-27 的新快照，替代上方历史增量在当时记录的旧状态。PR #338 最新代码 head 为 `eec203286b48e6c6d38a1dce93e7db6b7e5d9427`；旧 schema 兼容修复已复审、提交并推送。worktree 已整合最新 `origin/main@2587fba`；P2、P3 合成 PostgreSQL 子集与 Intelligence/API unit suites 现均通过。代码、隔离数据库、生产运行时、人工标注和业务验收分层报告，测试数量不折算成阶段百分比。
 
 | 手册阶段 | 当前已有证据 | 未完成/下一关 | 状态 |
 |---|---|---|---|
 | P0 外围接线与隔离启动 | 手册和来源已固定；`:3000` 健康检查 200，`runtime-identity` 为 `2587fba4`、migration head 0104；候选 0105–0108 只在 disposable PostgreSQL 迁移链中通过 | 用户环境历史摘要、在途任务专项基线、迁移 drain 与恢复演练 | 主线运行身份已核实；P2 migrations 未应用，后续现场保护证明未完成 |
 | P1 原声、清洗与语境 | 前序 #323–#336 已并入 main 的材料/评论目录、详情历史、清洗和选择能力；本轮保留 main 的统一 domain usage 并重跑既有回归 | T01–T54 全量、剩余边界及用户指定 exact-head 的完整产品验收 | 已有交付在 main；整阶段验收未结 |
-| P2 选择、预算、启动 | 方法版本/读取复制、按领域默认 CAS、显式预算、共享 preview/start、请求幂等与并发隔离、正式 router 和方法/Run UI 已接通；新增 v2 queued Run 到现有 semantic worker 的接线、冻结方法 request snapshot、调用前 fence、Run 级预算及实测用量累计；隔离 PG 45 项 + Axum/PG 6 项，unit suites Intelligence 123/123、API 287 passed（35 ignored） | 真实浏览器逐动作验收；估算与 provider 实测用量差异仍需完整账本承接 | exact-head run 36309847719 成功（8c docs-only head）；用户页面/业务接受未结 |
-| P3 有界执行、质量与恢复 | 新 Run semantic worker/receipt synthetic 路径；旧版 schema 下 P2 终态写入与 lease recovery 已保留兼容；rebuild PG 47/47，P2 worker PG 45/45 + Axum/PG 6/6 | 三阶段 request/usage 账本与共享预算、失败/部分接纳、pause/resume/stop 与控制 CAS、崩溃/过期恢复、公平调度；独立人工 Gold Set、离线 Recall@K、隔离 Rust→WeMM 回放和同篇双账号冷启动证明 | synthetic contract 回归通过；执行闭环未完成；质量验证 `BLOCKED_ON_HUMAN_ANNOTATION`，不是验证失败 |
+| P2 选择、预算、启动 | 方法版本/读取复制、按领域默认 CAS、显式预算、共享 preview/start、请求幂等与并发隔离、正式 router 和方法/Run UI 已接通；新增 v2 queued Run 到现有 semantic worker 的接线、冻结方法 request snapshot、调用前 fence、Run 级预算及实测用量累计；隔离 PG 45 项 + Axum/PG 6 项，unit suites Intelligence 123/123、API 287 passed（35 ignored） | 真实浏览器逐动作验收；估算与 provider 实测用量差异仍需完整账本承接 | exact-head run 36311074498 成功（eec）；用户页面/业务接受未结 |
+| P3 有界执行、质量与恢复 | 新 Run semantic worker/receipt synthetic 路径；旧版 schema 下 P2 终态写入与 lease recovery 已保留兼容；rebuild PG 47/47，P2 worker PG 45/45 + Axum/PG 6/6；exact-head run 36311074498 成功 | 三阶段 request/usage 账本与共享预算、失败/部分接纳、pause/resume/stop 与控制 CAS、崩溃/过期恢复、公平调度；独立人工 Gold Set、离线 Recall@K、隔离 Rust→WeMM 回放和同篇双账号冷启动证明 | synthetic contract 回归通过；执行闭环未完成；质量验证 `BLOCKED_ON_HUMAN_ANNOTATION`，不是验证失败 |
 | P4 长期归并与纠偏 | 既有 Problem、membership、撤销/重研等候选路径可复用 | 有效 head、跨下游限制传播、合并/撤销及支持版本历史的同版 PG 证明 | 部分候选；整阶段 NOT_VERIFIED |
 | P5 指标、语言与情报接口 | Intelligence 已有材料和事实读取基础 | 六视角、窗口/cohort/distinct 对账、durable event 与下游消费 | 未形成完整验收 |
 | P6 每日增量与资源 | 自动化衔接仅有设计 | dirty 合并、时区/计划开关、预算续办、退避及资源争用证明 | 未启用、未验收 |
