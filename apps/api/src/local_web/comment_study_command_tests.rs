@@ -61,25 +61,92 @@ fn exhausted_pair_requests_have_a_truthful_ui_state_label() {
 }
 
 #[test]
-fn run_cancellation_requires_confirmation_and_refreshes_from_the_server_receipt() {
+fn run_controls_use_cas_receipts_and_confirmation_for_irreversible_stop() {
     let html = include_str!("comment_study.html");
     let script = include_str!("comment_study.js");
-    assert!(html.contains("id=\"study-cancel-dialog\""));
-    assert!(html.contains("id=\"study-cancel-run-identity\""));
-    assert!(
-        html.contains("aria-describedby=\"study-cancel-run-identity study-cancel-description\"")
-    );
+    assert!(html.contains("id=\"study-stop-dialog\""));
+    assert!(html.contains("id=\"study-stop-run-identity\""));
+    assert!(html.contains("aria-describedby=\"study-stop-run-identity study-stop-description\""));
     assert!(html.contains("已经开始的调用无法保证中断，可能仍产生费用"));
     assert!(script.contains("dialog.showModal()"));
-    assert!(script.contains("data-pending-count=\"${Number(run.pendingCount || 0)}\""));
-    assert!(script.contains("Run ${cancelDialogRunRef} · 当前未终态"));
-    assert!(script.contains("runs/${encodeURIComponent(runRef)}/cancel"));
-    assert!(script.contains("JSON.stringify({ domain_ref: cancelDialogDomainRef })"));
+    assert!(script.contains("run.pendingCount == null ? '未知' : Number(run.pendingCount)"));
+    assert!(script.contains("data-pending-count=\"${pendingCount}\""));
+    assert!(!script.contains("run.pendingCount || 0"));
+    assert!(script.contains("Run ${stopDialogRunRef} · 当前未终态"));
+    assert!(script.contains("data-run-control=\"pause\""));
+    assert!(script.contains("data-run-control=\"resume\""));
+    assert!(script.contains("runs/${encodeURIComponent(runRef)}/${action}"));
+    assert!(script.contains("JSON.stringify({ expectedControlVersion })"));
     assert!(script.contains("receipt.data?.runRef !== runRef"));
-    assert!(script.contains("receipt.data?.domainRef !== cancelDialogDomainRef"));
+    assert!(script.contains("receipt.data?.controlVersion) !== expectedControlVersion + 1"));
+    assert!(script.contains("pause: 'user_paused', resume: null, stop: 'user_stopped'"));
     assert!(script.contains("await renderActiveTab()"));
+    assert!(script.contains("runControlOutcomeNeedsRefresh"));
+    assert!(script.contains("运行列表刷新失败"));
+    assert!(script.contains("命令结果未获确认，最新运行状态未重新读取"));
+    assert!(script.contains("if (nextControl) nextControl.focus()"));
+    assert!(script.contains("else document.querySelector('#study-run-control-feedback')?.focus()"));
+    assert!(script.contains("请核对后再操作。"));
+    assert!(!script.contains("/cancel"));
     assert!(!script.contains("window.confirm("));
     assert!(!script.contains("run.dispatchState = 'stopped'"));
+}
+
+#[test]
+fn run_control_request_is_closed_and_requires_a_nonnegative_version() {
+    assert!(serde_json::from_value::<StudyRunControlCommand>(json!({})).is_err());
+    assert!(
+        serde_json::from_value::<StudyRunControlCommand>(json!({
+            "expectedControlVersion":0
+        }))
+        .unwrap()
+        .validate()
+        .is_ok()
+    );
+    assert!(
+        serde_json::from_value::<StudyRunControlCommand>(json!({
+            "expectedControlVersion":-1
+        }))
+        .unwrap()
+        .validate()
+        .is_err()
+    );
+    assert!(
+        serde_json::from_value::<StudyRunControlCommand>(json!({
+            "expectedControlVersion":0,"domainRef":Uuid::new_v4()
+        }))
+        .is_err()
+    );
+}
+
+#[tokio::test]
+async fn run_control_routes_validate_closed_body_path_and_query_before_database_access() {
+    let path = format!("/api/local/comment-study/runs/{}/pause", Uuid::new_v4());
+    for value in [
+        json!({}),
+        json!({"expectedControlVersion":0,"domainRef":Uuid::new_v4()}),
+        json!({"expectedControlVersion":-1}),
+    ] {
+        let (status, body) = send(app(LocalDatabaseState::NotConfigured), &path, value).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error"]["code"], "invalid_request");
+    }
+    let (status, body) = send(
+        app(LocalDatabaseState::NotConfigured),
+        &path,
+        json!({"expectedControlVersion":0}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(body["error"]["code"], "catalog_unavailable");
+    let (status, body) = send(
+        app(LocalDatabaseState::NotConfigured),
+        &format!("{path}?domainRef={}", Uuid::new_v4()),
+        json!({"expectedControlVersion":0}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["error"]["code"], "invalid_request");
 }
 
 #[test]
@@ -107,9 +174,15 @@ async fn origin_guard_precedes_json_and_storage_on_every_command() {
         Uuid::new_v4()
     );
     let cancel = format!("/api/local/comment-study/runs/{}/cancel", Uuid::new_v4());
+    let pause = format!("/api/local/comment-study/runs/{}/pause", Uuid::new_v4());
+    let resume = format!("/api/local/comment-study/runs/{}/resume", Uuid::new_v4());
+    let stop = format!("/api/local/comment-study/runs/{}/stop", Uuid::new_v4());
     for path in [
         "/api/local/comment-study/runs",
         cancel.as_str(),
+        pause.as_str(),
+        resume.as_str(),
+        stop.as_str(),
         "/api/local/comment-study/selection-preview",
         activate.as_str(),
         "/api/local/comment-study/policy",

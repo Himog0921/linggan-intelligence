@@ -18,8 +18,9 @@ use uuid::Uuid;
 
 mod start;
 pub use start::{
-    StudyRunCancellationReceipt, StudyStartError, StudyStartReceipt, TrustedStudyOrigin,
-    cancel_study_run, preview_study_selection, start_study_run,
+    StudyRunCancellationReceipt, StudyRunControlAction, StudyRunControlCommand,
+    StudyRunControlReceipt, StudyStartError, StudyStartReceipt, TrustedStudyOrigin,
+    cancel_study_run, control_study_run, preview_study_selection, start_study_run,
 };
 
 const MAX_SELECTED_WORKS: usize = 100;

@@ -49,6 +49,10 @@ pub async fn claim_next_study_batch(
         "SELECT run.run_ref FROM linggan_comment_study_run run \
          WHERE EXISTS(SELECT 1 FROM linggan_comment_study_batch batch \
                      WHERE batch.run_ref=run.run_ref AND batch.state='prepared') \
+           AND (run.selection_manifest->>'contract'='comment-study.run-selection.v1' \
+                OR (run.selection_manifest->>'contract'='comment-study.run-selection.v2' \
+                    AND to_jsonb(run)->>'dispatch_state'='enabled' \
+                    AND to_jsonb(run)->>'dispatch_reason' IS NULL)) \
          ORDER BY (SELECT min(batch.created_at) FROM linggan_comment_study_batch batch \
                    WHERE batch.run_ref=run.run_ref AND batch.state='prepared'),run.run_ref \
          LIMIT 1 FOR UPDATE OF run SKIP LOCKED",

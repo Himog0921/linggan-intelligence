@@ -1,5 +1,7 @@
-//! P2 transaction core. Not exposed by the legacy HTTP /runs handler; no model dispatch here.
-use crate::comment_study_policy::{StudyPolicyStoreError, store};
+//! P2 start and P3 run-control transaction core; provider dispatch lives in the worker path.
+use crate::comment_study_policy::{
+    CompiledStudyMethod, StudyPolicyStoreError, store, verify_study_method,
+};
 use crate::comment_study_selection::{
     SelectionPreviewCommand, StartStudyRunCommand, StudyRunLimits, StudySelectionError,
     snapshot::{FrozenSelection, read_frozen_selection},
@@ -38,6 +40,12 @@ pub enum StudyStartError {
     BuildUnrecorded,
     #[error("study_receipt_invalid")]
     ReceiptInvalid,
+    #[error("control_version_conflict")]
+    ControlVersionConflict(Box<StudyRunControlReceipt>),
+    #[error("run_stopped")]
+    RunStopped(Box<StudyRunControlReceipt>),
+    #[error("run_resume_unavailable")]
+    ResumeUnavailable(Box<StudyRunControlReceipt>),
 }
 
 /// Constructed only by trusted callers; never Deserialize and never supplied by an HTTP body.
@@ -66,7 +74,29 @@ pub struct StudyStartReceipt {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct StudyRunCancellationReceipt {
+pub struct StudyRunControlCommand {
+    pub expected_control_version: i64,
+}
+
+impl StudyRunControlCommand {
+    pub fn validate(&self) -> Result<(), StudySelectionError> {
+        if self.expected_control_version < 0 {
+            return Err(StudySelectionError::InvalidRequest);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StudyRunControlAction {
+    Pause,
+    Resume,
+    Stop,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StudyRunControlReceipt {
     pub run_ref: Uuid,
     pub domain_ref: Uuid,
     pub state: String,
@@ -76,6 +106,8 @@ pub struct StudyRunCancellationReceipt {
     pub as_of: String,
     pub finished_at: Option<String>,
 }
+
+pub type StudyRunCancellationReceipt = StudyRunControlReceipt;
 
 pub(crate) async fn ensure_start_schema(
     tx: &mut Transaction<'_, Postgres>,
@@ -212,69 +244,7 @@ pub async fn cancel_study_run(
     }
 
     if should_apply_user_stop {
-        // Resolution and pair reservations have not acquired permission to call a provider yet.
-        // Release their reservation and detach the pending subject so a later explicit Run may
-        // resume it. The request snapshot itself is append-only and remains available for audit.
-        sqlx::query(
-            "UPDATE linggan_model_invocation invocation \
-             SET state='failed',charged_tokens=0,failure_code='user_stopped', \
-                 result=COALESCE(invocation.result,'{}'::jsonb)||jsonb_build_object('ok',false,'failureCode','user_stopped'), \
-                 finished_at=scope_001_now() \
-             FROM linggan_comment_study_model_request request \
-             WHERE request.invocation_ref=invocation.invocation_ref AND request.run_ref=$1 \
-               AND request.dispatch_started_at IS NULL AND invocation.state='running'",
-        )
-        .bind(run_ref)
-        .execute(&mut *tx)
-        .await?;
-        sqlx::query(
-            "UPDATE linggan_comment_study_resolution resolution SET model_invocation_ref=NULL \
-             FROM linggan_comment_study_model_request request \
-             WHERE request.run_ref=$1 AND request.stage='resolution' AND request.dispatch_started_at IS NULL \
-               AND resolution.resolution_ref=request.resolution_ref AND resolution.state='pending' \
-               AND resolution.model_invocation_ref=request.invocation_ref",
-        )
-        .bind(run_ref)
-        .execute(&mut *tx)
-        .await?;
-        sqlx::query(
-            "UPDATE linggan_comment_study_problem_pair pair SET model_invocation_ref=NULL \
-             FROM linggan_comment_study_model_request request \
-             WHERE request.run_ref=$1 AND request.stage='pair' AND request.dispatch_started_at IS NULL \
-               AND pair.pair_ref=request.pair_ref AND pair.state='pending' \
-               AND pair.model_invocation_ref=request.invocation_ref",
-        )
-        .bind(run_ref)
-        .execute(&mut *tx)
-        .await?;
-        sqlx::query(
-            "UPDATE linggan_comment_study_batch batch \
-             SET state='cancelled',lease_token=NULL,leased_by=NULL,lease_expires_at=NULL, \
-                 output_manifest=jsonb_build_object('reason','user_stopped'),finished_at=scope_001_now() \
-             WHERE batch.run_ref=$1 AND batch.state IN ('prepared','leased') \
-               AND NOT EXISTS(SELECT 1 FROM linggan_comment_study_model_request request \
-                 WHERE request.batch_ref=batch.batch_ref AND request.stage='semantic' \
-                   AND request.dispatch_started_at IS NOT NULL)",
-        )
-        .bind(run_ref)
-        .execute(&mut *tx)
-        .await?;
-        sqlx::query(
-            "UPDATE linggan_comment_study_target target \
-             SET state='cancelled',finished_at=scope_001_now(),terminal_reason='user_stopped' \
-             WHERE target.run_ref=$1 AND target.state IN ('ready','queued','running') \
-               AND NOT EXISTS( \
-                 SELECT 1 FROM linggan_comment_study_batch_target member \
-                 JOIN linggan_comment_study_batch batch ON batch.batch_ref=member.batch_ref \
-                 JOIN linggan_comment_study_model_request request ON request.batch_ref=batch.batch_ref \
-                 JOIN linggan_model_invocation invocation ON invocation.invocation_ref=request.invocation_ref \
-                 WHERE member.target_ref=target.target_ref AND request.stage='semantic' \
-                   AND request.dispatch_started_at IS NOT NULL AND invocation.state='running')",
-        )
-        .bind(run_ref)
-        .execute(&mut *tx)
-        .await?;
-        super::close_run_if_settled(&mut tx, run_ref).await?;
+        settle_stopped_run(&mut tx, run_ref).await?;
     }
 
     let current = sqlx::query(
@@ -285,7 +255,7 @@ pub async fn cancel_study_run(
     .fetch_one(&mut *tx)
     .await?;
     let as_of = as_of(&mut tx).await?;
-    let receipt = StudyRunCancellationReceipt {
+    let receipt = StudyRunControlReceipt {
         run_ref,
         domain_ref,
         state: current.get("state"),
@@ -295,6 +265,336 @@ pub async fn cancel_study_run(
         as_of,
         finished_at: current.get("finished_at"),
     };
+    tx.commit().await?;
+    Ok(receipt)
+}
+
+async fn settle_stopped_run(
+    tx: &mut Transaction<'_, Postgres>,
+    run_ref: Uuid,
+) -> Result<(), StudyStartError> {
+    // Release reservations that never crossed the dispatch fence. Keep already-dispatched
+    // invocations eligible for their bounded, immutable settlement window.
+    sqlx::query(
+        "UPDATE linggan_model_invocation invocation \
+         SET state='failed',charged_tokens=0,failure_code='user_stopped', \
+             result=COALESCE(invocation.result,'{}'::jsonb)||jsonb_build_object('ok',false,'failureCode','user_stopped'), \
+             finished_at=scope_001_now() \
+         FROM linggan_comment_study_model_request request \
+         WHERE request.invocation_ref=invocation.invocation_ref AND request.run_ref=$1 \
+           AND request.dispatch_started_at IS NULL AND invocation.state='running'",
+    )
+    .bind(run_ref)
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query(
+        "UPDATE linggan_comment_study_resolution resolution SET model_invocation_ref=NULL \
+         FROM linggan_comment_study_model_request request \
+         WHERE request.run_ref=$1 AND request.stage='resolution' AND request.dispatch_started_at IS NULL \
+           AND resolution.resolution_ref=request.resolution_ref AND resolution.state='pending' \
+           AND resolution.model_invocation_ref=request.invocation_ref",
+    )
+    .bind(run_ref)
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query(
+        "UPDATE linggan_comment_study_problem_pair pair SET model_invocation_ref=NULL \
+         FROM linggan_comment_study_model_request request \
+         WHERE request.run_ref=$1 AND request.stage='pair' AND request.dispatch_started_at IS NULL \
+           AND pair.pair_ref=request.pair_ref AND pair.state='pending' \
+           AND pair.model_invocation_ref=request.invocation_ref",
+    )
+    .bind(run_ref)
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query(
+        "UPDATE linggan_comment_study_batch batch \
+         SET state='cancelled',lease_token=NULL,leased_by=NULL,lease_expires_at=NULL, \
+             output_manifest=jsonb_build_object('reason','user_stopped'),finished_at=scope_001_now() \
+         WHERE batch.run_ref=$1 AND batch.state IN ('prepared','leased') \
+           AND NOT EXISTS(SELECT 1 FROM linggan_comment_study_model_request request \
+             WHERE request.batch_ref=batch.batch_ref AND request.stage='semantic' \
+               AND request.dispatch_started_at IS NOT NULL)",
+    )
+    .bind(run_ref)
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query(
+        "UPDATE linggan_comment_study_target target \
+         SET state='cancelled',finished_at=scope_001_now(),terminal_reason='user_stopped' \
+         WHERE target.run_ref=$1 AND target.state IN ('ready','queued','running') \
+           AND NOT EXISTS( \
+             SELECT 1 FROM linggan_comment_study_batch_target member \
+             JOIN linggan_comment_study_batch batch ON batch.batch_ref=member.batch_ref \
+             JOIN linggan_comment_study_model_request request ON request.batch_ref=batch.batch_ref \
+             JOIN linggan_model_invocation invocation ON invocation.invocation_ref=request.invocation_ref \
+             WHERE member.target_ref=target.target_ref AND request.stage='semantic' \
+               AND request.dispatch_started_at IS NOT NULL AND invocation.state='running')",
+    )
+    .bind(run_ref)
+    .execute(&mut **tx)
+    .await?;
+    super::close_run_if_settled(tx, run_ref).await?;
+    Ok(())
+}
+
+async fn control_receipt(
+    tx: &mut Transaction<'_, Postgres>,
+    run_ref: Uuid,
+) -> Result<StudyRunControlReceipt, StudyStartError> {
+    let row = sqlx::query(
+        "SELECT run.state,policy.domain_ref,run.dispatch_state,run.dispatch_reason, \
+                run.control_version,run.finished_at::text AS finished_at \
+         FROM linggan_comment_study_run run \
+         JOIN linggan_comment_study_policy policy USING(policy_ref) WHERE run.run_ref=$1",
+    )
+    .bind(run_ref)
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(StudyRunControlReceipt {
+        run_ref,
+        domain_ref: row.get("domain_ref"),
+        state: row.get("state"),
+        dispatch_state: row.get("dispatch_state"),
+        dispatch_reason: row.get("dispatch_reason"),
+        control_version: row.get("control_version"),
+        as_of: as_of(tx).await?,
+        finished_at: row.get("finished_at"),
+    })
+}
+
+async fn run_has_budget_remaining(
+    tx: &mut Transaction<'_, Postgres>,
+    run_ref: Uuid,
+    token_limit: i64,
+) -> Result<bool, StudyStartError> {
+    let spent_or_reserved: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(CASE WHEN invocation.state='running' \
+                                 AND (invocation.input_tokens IS NULL OR invocation.output_tokens IS NULL) \
+                                 THEN GREATEST(invocation.reserved_tokens,COALESCE(invocation.charged_tokens,0)) \
+                                 ELSE COALESCE(invocation.charged_tokens,invocation.reserved_tokens) END),0)::bigint \
+         FROM linggan_model_invocation invocation \
+         WHERE invocation.invocation_ref IN ( \
+           SELECT request.invocation_ref FROM linggan_comment_study_model_request request WHERE request.run_ref=$1 \
+           UNION SELECT resolution.model_invocation_ref \
+             FROM linggan_comment_study_resolution resolution \
+             JOIN linggan_comment_study_signal signal USING(signal_ref) \
+             JOIN linggan_comment_study_target target USING(target_ref) \
+             WHERE target.run_ref=$1 AND resolution.model_invocation_ref IS NOT NULL \
+           UNION SELECT pair.model_invocation_ref \
+             FROM linggan_comment_study_problem_pair pair \
+             JOIN linggan_comment_study_signal signal ON signal.signal_ref=pair.first_signal_ref \
+             JOIN linggan_comment_study_target target USING(target_ref) \
+             WHERE target.run_ref=$1 AND pair.model_invocation_ref IS NOT NULL \
+           UNION SELECT legacy.invocation_ref FROM linggan_model_invocation legacy \
+             WHERE legacy.result->>'legacyRequestLedgerMissing'='true' \
+               AND legacy.result->>'legacyRunRef'=$1::text \
+         )",
+    )
+    .bind(run_ref)
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(spent_or_reserved < token_limit)
+}
+
+async fn resume_is_available(
+    tx: &mut Transaction<'_, Postgres>,
+    domain_ref: Uuid,
+    policy_ref: Uuid,
+    execution_manifest: &Value,
+    token_limit: i64,
+    run_ref: Uuid,
+) -> Result<bool, StudyStartError> {
+    let domain_status: Option<String> =
+        sqlx::query_scalar("SELECT status FROM observation_domain WHERE domain_ref=$1 FOR SHARE")
+            .bind(domain_ref)
+            .fetch_optional(&mut **tx)
+            .await?;
+    if domain_status.as_deref() != Some("active") {
+        return Ok(false);
+    }
+    let policy = match store::load_policy(tx, domain_ref, policy_ref).await {
+        Ok(policy) => policy,
+        Err(StudyPolicyStoreError::Database(error)) => {
+            return Err(StudyStartError::Database(error));
+        }
+        Err(_) => return Ok(false),
+    };
+    if policy["recordingState"] != "recorded"
+        || execution_manifest["contract"] != "comment-study.execution.v1"
+        || execution_manifest["methodHash"] != policy["methodHash"]
+    {
+        return Ok(false);
+    }
+    let Ok(config_ref) =
+        serde_json::from_value::<Uuid>(policy["methodManifest"]["modelConfigRef"].clone())
+    else {
+        return Ok(false);
+    };
+    let (model, enabled) = match store::model_snapshot(tx, config_ref, true).await {
+        Ok(snapshot) => snapshot,
+        Err(StudyPolicyStoreError::Database(error)) => {
+            return Err(StudyStartError::Database(error));
+        }
+        Err(_) => return Ok(false),
+    };
+    if !enabled {
+        return Ok(false);
+    }
+    let Ok(manifest) = serde_json::from_value(policy["methodManifest"].clone()) else {
+        return Ok(false);
+    };
+    let Some(method_hash) = policy["methodHash"].as_str() else {
+        return Ok(false);
+    };
+    if verify_study_method(
+        &CompiledStudyMethod {
+            manifest,
+            method_hash: method_hash.to_owned(),
+        },
+        &model,
+    )
+    .is_err()
+    {
+        return Ok(false);
+    }
+    run_has_budget_remaining(tx, run_ref, token_limit).await
+}
+
+/// Applies the P3 run control contract under the same Run row lock used by each dispatch fence.
+/// The compare-and-set version is checked before any pause, resume, or stop effect is written.
+pub async fn control_study_run(
+    database: &Database,
+    run_ref: Uuid,
+    command: StudyRunControlCommand,
+    action: StudyRunControlAction,
+) -> Result<StudyRunControlReceipt, StudyStartError> {
+    command.validate()?;
+    if run_ref.is_nil() {
+        return Err(StudyStartError::NotFound);
+    }
+    let mut tx = begin(database).await?;
+    ensure_start_schema(&mut tx).await?;
+    let locked = sqlx::query(
+        "SELECT run.run_ref,policy.domain_ref,run.policy_ref, \
+                run.selection_manifest->>'contract' AS selection_contract,run.state, \
+                run.finished_at::text AS finished_at,run.dispatch_state,run.dispatch_reason, \
+                run.control_version,run.execution_manifest,run.token_limit \
+         FROM linggan_comment_study_run run \
+         JOIN linggan_comment_study_policy policy USING(policy_ref) \
+         WHERE run.run_ref=$1 FOR UPDATE OF run",
+    )
+    .bind(run_ref)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(StudyStartError::NotFound)?;
+    if locked
+        .get::<Option<String>, _>("selection_contract")
+        .as_deref()
+        != Some("comment-study.run-selection.v2")
+    {
+        return Err(StudyStartError::NotFound);
+    }
+    let current_version: i64 = locked.get("control_version");
+    if command.expected_control_version != current_version {
+        let receipt = control_receipt(&mut tx, run_ref).await?;
+        tx.commit().await?;
+        return Err(StudyStartError::ControlVersionConflict(Box::new(receipt)));
+    }
+    let current_state: String = locked.get("dispatch_state");
+    let current_reason: Option<String> = locked.get("dispatch_reason");
+    let finished_at: Option<String> = locked.get("finished_at");
+    if finished_at.is_some() || current_state == "stopped" {
+        let receipt = control_receipt(&mut tx, run_ref).await?;
+        tx.commit().await?;
+        return Err(StudyStartError::RunStopped(Box::new(receipt)));
+    }
+
+    match action {
+        StudyRunControlAction::Pause if current_state == "enabled" && current_reason.is_none() => {
+            let changed = sqlx::query(
+                "UPDATE linggan_comment_study_run \
+                 SET dispatch_state='paused',dispatch_reason='user_paused',control_version=control_version+1 \
+                 WHERE run_ref=$1 AND control_version=$2 AND dispatch_state='enabled' AND dispatch_reason IS NULL",
+            )
+            .bind(run_ref)
+            .bind(current_version)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
+            if changed != 1 {
+                let receipt = control_receipt(&mut tx, run_ref).await?;
+                tx.commit().await?;
+                return Err(StudyStartError::ControlVersionConflict(Box::new(receipt)));
+            }
+        }
+        StudyRunControlAction::Pause
+            if current_state == "paused" && current_reason.as_deref() == Some("user_paused") => {}
+        StudyRunControlAction::Resume if current_state == "enabled" && current_reason.is_none() => {
+        }
+        StudyRunControlAction::Resume
+            if current_state == "paused" && current_reason.as_deref() == Some("user_paused") =>
+        {
+            let domain_ref: Uuid = locked.get("domain_ref");
+            let policy_ref: Uuid = locked.get("policy_ref");
+            let execution_manifest: Value = locked.get("execution_manifest");
+            let token_limit: i64 = locked.get("token_limit");
+            if !resume_is_available(
+                &mut tx,
+                domain_ref,
+                policy_ref,
+                &execution_manifest,
+                token_limit,
+                run_ref,
+            )
+            .await?
+            {
+                let receipt = control_receipt(&mut tx, run_ref).await?;
+                tx.commit().await?;
+                return Err(StudyStartError::ResumeUnavailable(Box::new(receipt)));
+            }
+            let changed = sqlx::query(
+                "UPDATE linggan_comment_study_run \
+                 SET dispatch_state='enabled',dispatch_reason=NULL,control_version=control_version+1 \
+                 WHERE run_ref=$1 AND control_version=$2 AND dispatch_state='paused' AND dispatch_reason='user_paused'",
+            )
+            .bind(run_ref)
+            .bind(current_version)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
+            if changed != 1 {
+                let receipt = control_receipt(&mut tx, run_ref).await?;
+                tx.commit().await?;
+                return Err(StudyStartError::ControlVersionConflict(Box::new(receipt)));
+            }
+        }
+        StudyRunControlAction::Stop if matches!(current_state.as_str(), "enabled" | "paused") => {
+            let changed = sqlx::query(
+                "UPDATE linggan_comment_study_run \
+                 SET dispatch_state='stopped',dispatch_reason='user_stopped',control_version=control_version+1 \
+                 WHERE run_ref=$1 AND control_version=$2 AND dispatch_state IN ('enabled','paused')",
+            )
+            .bind(run_ref)
+            .bind(current_version)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
+            if changed != 1 {
+                let receipt = control_receipt(&mut tx, run_ref).await?;
+                tx.commit().await?;
+                return Err(StudyStartError::ControlVersionConflict(Box::new(receipt)));
+            }
+            settle_stopped_run(&mut tx, run_ref).await?;
+        }
+        _ => {
+            let receipt = control_receipt(&mut tx, run_ref).await?;
+            tx.commit().await?;
+            return Err(StudyStartError::ControlVersionConflict(Box::new(receipt)));
+        }
+    }
+
+    let receipt = control_receipt(&mut tx, run_ref).await?;
     tx.commit().await?;
     Ok(receipt)
 }

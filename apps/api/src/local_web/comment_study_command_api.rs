@@ -1,5 +1,5 @@
-//! P2 command adapter, NOT composed into the live router before UI/dispatch cutover.
-//! Tests exercise this exact router; no alternate public URL or enable flag is added.
+//! P2/P3 local commands mounted in the existing Comment Study router.
+//! Tests exercise these same handlers; there is no alternate public URL or enable flag.
 use super::{LocalDatabaseState, LocalWebState};
 use axum::{
     Json, Router,
@@ -18,8 +18,8 @@ use linggan_intelligence::{
         activate_study_policy,
     },
     comment_study_run::{
-        StudyStartError, TrustedStudyOrigin, cancel_study_run, preview_study_selection,
-        start_study_run,
+        StudyRunControlAction, StudyRunControlCommand, StudyStartError, TrustedStudyOrigin,
+        cancel_study_run, control_study_run, preview_study_selection, start_study_run,
     },
     comment_study_selection::{SelectionPreviewCommand, StartStudyRunCommand, StudySelectionError},
 };
@@ -31,6 +31,9 @@ pub(super) fn additional_routes() -> Router<LocalWebState> {
     Router::new()
         .route("/api/local/comment-study/selection-preview", post(preview))
         .route("/api/local/comment-study/runs/{id}/cancel", post(cancel))
+        .route("/api/local/comment-study/runs/{id}/pause", post(pause))
+        .route("/api/local/comment-study/runs/{id}/resume", post(resume))
+        .route("/api/local/comment-study/runs/{id}/stop", post(stop))
         .route(
             "/api/local/comment-study/policies/{policy_ref}/activate",
             post(activate),
@@ -162,6 +165,103 @@ async fn cancel(
     }
 }
 
+async fn pause(
+    State(state): State<LocalWebState>,
+    Path(reference): Path<String>,
+    RawQuery(query): RawQuery,
+    body: Result<Json<StudyRunControlCommand>, JsonRejection>,
+) -> Response {
+    run_control(state, reference, query, body, StudyRunControlAction::Pause).await
+}
+
+async fn resume(
+    State(state): State<LocalWebState>,
+    Path(reference): Path<String>,
+    RawQuery(query): RawQuery,
+    body: Result<Json<StudyRunControlCommand>, JsonRejection>,
+) -> Response {
+    run_control(state, reference, query, body, StudyRunControlAction::Resume).await
+}
+
+async fn stop(
+    State(state): State<LocalWebState>,
+    Path(reference): Path<String>,
+    RawQuery(query): RawQuery,
+    body: Result<Json<StudyRunControlCommand>, JsonRejection>,
+) -> Response {
+    run_control(state, reference, query, body, StudyRunControlAction::Stop).await
+}
+
+async fn run_control(
+    state: LocalWebState,
+    reference: String,
+    query: Option<String>,
+    body: Result<Json<StudyRunControlCommand>, JsonRejection>,
+    action: StudyRunControlAction,
+) -> Response {
+    if query.is_some_and(|query| !query.is_empty()) {
+        return invalid(None);
+    }
+    let Ok(run_ref) = Uuid::parse_str(&reference) else {
+        return invalid(None);
+    };
+    let Ok(Json(command)) = body else {
+        return invalid(None);
+    };
+    if run_ref.is_nil() || command.validate().is_err() {
+        return invalid(None);
+    }
+    let LocalDatabaseState::Ready(db) = &state.database else {
+        return database_unavailable(&state, None);
+    };
+    match control_study_run(db, run_ref, command, action).await {
+        Ok(receipt) => {
+            let as_of = receipt.as_of.clone();
+            Json(json!({
+                "request_id":Uuid::new_v4(),
+                "data_as_of":as_of,
+                "data":receipt
+            }))
+            .into_response()
+        }
+        Err(StudyStartError::ControlVersionConflict(receipt)) => run_control_error(
+            StatusCode::CONFLICT,
+            "control_version_conflict",
+            "运行状态已变化，请读取当前状态后重试。",
+            *receipt,
+        ),
+        Err(StudyStartError::RunStopped(receipt)) => run_control_error(
+            StatusCode::CONFLICT,
+            "run_stopped",
+            "此运行已停止或结束，不能再恢复或更改控制状态。",
+            *receipt,
+        ),
+        Err(StudyStartError::ResumeUnavailable(receipt)) => run_control_error(
+            StatusCode::CONFLICT,
+            "policy_unavailable",
+            "原方法或运行预算当前不可用，未恢复运行。",
+            *receipt,
+        ),
+        Err(error) => failure(error, None),
+    }
+}
+
+fn run_control_error(
+    status: StatusCode,
+    code: &str,
+    message: &str,
+    current: linggan_intelligence::comment_study_run::StudyRunControlReceipt,
+) -> Response {
+    (
+        status,
+        Json(json!({
+            "error":{"code":code,"message":message,"retryable":false,"details":{"current":current}},
+            "requestRef":null
+        })),
+    )
+        .into_response()
+}
+
 async fn activate(
     State(state): State<LocalWebState>,
     Path(reference): Path<String>,
@@ -267,6 +367,24 @@ fn failure(cause: StudyStartError, reference: Option<Uuid>) -> Response {
             StatusCode::CONFLICT,
             "idempotency_conflict",
             "请求编号已用于其他命令；新意图须使用新编号。",
+            false,
+        ),
+        E::ControlVersionConflict(_) => (
+            StatusCode::CONFLICT,
+            "control_version_conflict",
+            "运行状态已变化，请读取当前状态后重试。",
+            false,
+        ),
+        E::RunStopped(_) => (
+            StatusCode::CONFLICT,
+            "run_stopped",
+            "此运行已停止或结束，不能再恢复或更改控制状态。",
+            false,
+        ),
+        E::ResumeUnavailable(_) => (
+            StatusCode::CONFLICT,
+            "policy_unavailable",
+            "原方法或运行预算当前不可用，未恢复运行。",
             false,
         ),
         E::Policy(P::ActiveConflict) => (

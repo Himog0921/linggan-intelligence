@@ -147,6 +147,9 @@ pub async fn run_model_work_once(
             Err(StudyModelRunnerError::Dispatch(StudyModelDispatchError::BudgetDeferred)) => {
                 return Ok(true);
             }
+            Err(StudyModelRunnerError::Dispatch(StudyModelDispatchError::PreDispatchDeferred)) => {
+                return Ok(false);
+            }
             Err(StudyModelRunnerError::Dispatch(StudyModelDispatchError::InputLimit)) => {
                 reject_study_batch_input_limit(database, claim.batch_ref, claim.lease_token)
                     .await

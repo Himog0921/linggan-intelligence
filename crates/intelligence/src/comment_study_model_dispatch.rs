@@ -60,6 +60,8 @@ pub enum StudyModelDispatchError {
     RequestSnapshotUnavailable,
     #[error("the batch was returned to the queue while existing reserved calls settle")]
     BudgetDeferred,
+    #[error("the undispatched batch was safely returned for a later Run tick")]
+    PreDispatchDeferred,
     #[error("the StudyRun exhausted its frozen token budget before this request")]
     BudgetExhausted,
 }
@@ -120,6 +122,28 @@ pub async fn reserve_study_batch_model_call(
     .fetch_optional(&mut *transaction)
     .await?
     .ok_or(StudyModelDispatchError::BatchUnavailable)?;
+    let selection_contract: String = row.get("selection_contract");
+    if selection_contract == "comment-study.run-selection.v2"
+        && (row.get::<Option<String>, _>("dispatch_state").as_deref() != Some("enabled")
+            || row.get::<Option<String>, _>("dispatch_reason").is_some())
+    {
+        // A worker may have leased the batch just before a concurrent pause committed.
+        // The Run row lock above serializes this decision with pause; if no model invocation
+        // has been reserved, return the batch to prepared so resume can continue promptly
+        // instead of waiting for the lease timeout. Never detach an existing invocation.
+        sqlx::query(
+            "UPDATE linggan_comment_study_batch \
+             SET state='prepared',lease_token=NULL,leased_by=NULL,lease_expires_at=NULL \
+             WHERE batch_ref=$1 AND state='leased' AND lease_token=$2 \
+               AND model_invocation_ref IS NULL",
+        )
+        .bind(batch_ref)
+        .bind(lease_token)
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        return Err(StudyModelDispatchError::PreDispatchDeferred);
+    }
     let config_ref = row
         .get::<Option<Uuid>, _>("model_config_ref")
         .ok_or(StudyModelDispatchError::ModelConfigurationMissing)?;
@@ -145,13 +169,7 @@ pub async fn reserve_study_batch_model_call(
         .get::<Option<i32>, _>("timeout_seconds")
         .ok_or(StudyModelDispatchError::ModelUnavailable)?;
     let input_manifest = row.get::<serde_json::Value, _>("input_manifest");
-    let selection_contract: String = row.get("selection_contract");
     let v2_request = if selection_contract == "comment-study.run-selection.v2" {
-        if row.get::<Option<String>, _>("dispatch_state").as_deref() != Some("enabled")
-            || row.get::<Option<String>, _>("dispatch_reason").is_some()
-        {
-            return Err(StudyModelDispatchError::BatchUnavailable);
-        }
         let policy_manifest = row
             .get::<Option<Value>, _>("method_manifest")
             .ok_or(StudyModelDispatchError::MethodUnavailable)?;
@@ -472,10 +490,12 @@ pub async fn mark_study_batch_model_dispatch_started(
     let locked_batch: Option<Uuid> = sqlx::query_scalar(
         "SELECT batch_ref FROM linggan_comment_study_batch \
          WHERE batch_ref=$1 AND state='leased' AND lease_token=$2 \
-           AND lease_expires_at>scope_001_now() FOR UPDATE",
+           AND lease_expires_at>scope_001_now() AND model_invocation_ref=$3 \
+         FOR UPDATE",
     )
     .bind(batch_ref)
     .bind(lease_token)
+    .bind(invocation_ref)
     .fetch_optional(&mut *transaction)
     .await?;
     if locked_batch.is_none() {
@@ -501,6 +521,64 @@ pub async fn mark_study_batch_model_dispatch_started(
     .fetch_optional(&mut *transaction)
     .await?;
     let Some(remaining_timeout_ms) = remaining_timeout_ms.filter(|remaining| *remaining > 0) else {
+        let paused = sqlx::query_scalar::<_, bool>(
+            "SELECT to_jsonb(run)->>'dispatch_state'='paused' \
+             FROM linggan_comment_study_run run WHERE run.run_ref=$1",
+        )
+        .bind(run_ref)
+        .fetch_optional(&mut *transaction)
+        .await?
+        .unwrap_or(false);
+        if paused {
+            let invocation = sqlx::query(
+                "UPDATE linggan_model_invocation invocation \
+                 SET state='failed',charged_tokens=0,failure_code='user_paused_before_dispatch', \
+                     result=COALESCE(invocation.result,'{}'::jsonb)||jsonb_build_object( \
+                       'ok',false,'callStarted',false,'failureCode','user_paused_before_dispatch'), \
+                     finished_at=scope_001_now() \
+                 WHERE invocation.invocation_ref=$1 AND invocation.state='running' \
+                   AND invocation.result->>'callStarted'='false' \
+                   AND EXISTS(SELECT 1 FROM linggan_comment_study_model_request request \
+                              WHERE request.invocation_ref=invocation.invocation_ref \
+                                AND request.batch_ref=$2 AND request.stage='semantic' \
+                                AND request.dispatch_started_at IS NULL)",
+            )
+            .bind(invocation_ref)
+            .bind(batch_ref)
+            .execute(&mut *transaction)
+            .await?;
+            if invocation.rows_affected() == 1 {
+                let batch = sqlx::query(
+                    "UPDATE linggan_comment_study_batch \
+                     SET state='cancelled',lease_token=NULL,leased_by=NULL,lease_expires_at=NULL, \
+                         output_manifest=jsonb_build_object('reason','user_paused_before_dispatch'), \
+                         finished_at=scope_001_now() \
+                     WHERE batch_ref=$1 AND run_ref=$2 AND state='leased' \
+                       AND lease_token=$3 AND model_invocation_ref=$4",
+                )
+                .bind(batch_ref)
+                .bind(run_ref)
+                .bind(lease_token)
+                .bind(invocation_ref)
+                .execute(&mut *transaction)
+                .await?;
+                if batch.rows_affected() != 1 {
+                    return Err(StudyModelDispatchError::InvocationUnavailable);
+                }
+                sqlx::query(
+                    "UPDATE linggan_comment_study_target target \
+                     SET state='queued',finished_at=NULL,terminal_reason=NULL \
+                     FROM linggan_comment_study_batch_target member \
+                     WHERE member.batch_ref=$1 AND member.target_ref=target.target_ref \
+                       AND target.state='running'",
+                )
+                .bind(batch_ref)
+                .execute(&mut *transaction)
+                .await?;
+                transaction.commit().await?;
+                return Err(StudyModelDispatchError::PreDispatchDeferred);
+            }
+        }
         return Err(StudyModelDispatchError::InvocationUnavailable);
     };
     let invocation_changed = sqlx::query(

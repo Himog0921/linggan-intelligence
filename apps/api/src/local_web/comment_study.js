@@ -207,8 +207,10 @@ const dispatchReasonLabel = {
   user_paused: '用户暂停', user_stopped: '用户停止', budget_exhausted: '预算已用尽',
   legacy_unrecorded: '历史方法未记录', upgrade_guard: '升级保护', method_unavailable: '方法不可用'
 };
-let cancelDialogRunRef = null;
-let cancelDialogDomainRef = null;
+let stopDialogRunRef = null;
+let stopDialogControlVersion = null;
+let runControlFeedback = '';
+let runControlOutcomeNeedsRefresh = false;
 const label = (map, value) => (value == null ? null : (map[value] ?? '未知状态'));
 const PENDING_RESOLUTION_STATES = new Set(['pending', 'deferred_context', 'deferred_ambiguous', 'deferred_novel', 'retrieval_incomplete', 'budget_stopped']);
 
@@ -405,9 +407,21 @@ async function renderProblemsTab() {
 }
 
 function runRow(run) {
-  const canCancel = run.selectionContract === 'comment-study.run-selection.v2'
-    && Boolean(run.cancelDomainRef) && !run.finishedAt
-    && ['enabled', 'paused'].includes(run.dispatchState);
+  const canControl = run.selectionContract === 'comment-study.run-selection.v2'
+    && !run.finishedAt && run.controlVersion != null
+    && Number.isInteger(Number(run.controlVersion))
+    && Number(run.controlVersion) >= 0;
+  const actions = [];
+  if (canControl && run.dispatchState === 'enabled') {
+    actions.push(`<button class="study-run-control" type="button" data-run-control="pause" data-run="${esc(run.runRef)}" data-control-version="${Number(run.controlVersion)}">暂停派发</button>`);
+  }
+  if (canControl && run.dispatchState === 'paused' && run.dispatchReason === 'user_paused') {
+    actions.push(`<button class="study-run-control" type="button" data-run-control="resume" data-run="${esc(run.runRef)}" data-control-version="${Number(run.controlVersion)}">恢复派发</button>`);
+  }
+  if (canControl && ['enabled', 'paused'].includes(run.dispatchState)) {
+    const pendingCount = run.pendingCount == null ? '未知' : Number(run.pendingCount);
+    actions.push(`<button class="study-run-control study-run-stop" type="button" data-run-control="stop" data-run="${esc(run.runRef)}" data-control-version="${Number(run.controlVersion)}" data-target-count="${Number(run.targetCount)}" data-pending-count="${pendingCount}">停止本次运行</button>`);
+  }
   const dispatchLabel = dispatchStateLabel[run.dispatchState] || '派发状态未知';
   const dispatchReason = dispatchReasonLabel[run.dispatchReason];
   return `<tr>
@@ -420,14 +434,14 @@ function runRow(run) {
       <td>${Number(run.needsContextCount)}</td>
       <td>${Number(run.failedCount)}</td>
       <td>${Number(run.excludedCount)}</td>
-      <td>${canCancel ? `<button class="study-run-cancel" type="button" data-cancel-run="${esc(run.runRef)}" data-cancel-domain="${esc(run.cancelDomainRef)}" data-target-count="${Number(run.targetCount)}" data-pending-count="${Number(run.pendingCount || 0)}">停止本次运行</button>` : '—'}</td>
+      <td><div class="study-run-actions">${actions.join('') || '—'}</div></td>
     </tr>`;
 }
 async function renderRunsTab() {
   const data = await get('runs?limit=50');
-  if (!data.runs?.length) return '<p class="study-empty">尚未创建过研究运行。</p>';
-  const scopedRuns = data.runs.map(run => ({ ...run, cancelDomainRef: data.domainRef || domainRef }));
-  return `<div class="study-review-table-wrap"><table class="study-review-table"><thead><tr><th scope="col">运行</th><th scope="col">状态</th><th scope="col">作品</th><th scope="col">目标</th><th scope="col">已产出</th><th scope="col">无信号</th><th scope="col">等待语境</th><th scope="col">失败</th><th scope="col">来源受限</th><th scope="col">操作</th></tr></thead><tbody>${scopedRuns.map(runRow).join('')}</tbody></table></div>`;
+  const feedback = '<p id="study-run-control-feedback" class="study-run-control-feedback" role="status" aria-live="polite" tabindex="-1">' + esc(runControlFeedback) + '</p>';
+  if (!data.runs?.length) return feedback + '<p class="study-empty">尚未创建过研究运行。</p>';
+  return feedback + '<div class="study-review-table-wrap"><table class="study-review-table"><thead><tr><th scope="col">运行</th><th scope="col">状态</th><th scope="col">作品</th><th scope="col">目标</th><th scope="col">已产出</th><th scope="col">无信号</th><th scope="col">等待语境</th><th scope="col">失败</th><th scope="col">来源受限</th><th scope="col">操作</th></tr></thead><tbody>' + data.runs.map(runRow).join('') + '</tbody></table></div>';
 }
 
 const TAB_RENDERERS = { overview: renderOverviewTab, comments: renderCommentsTab, pending: renderPendingTab, problems: renderProblemsTab, runs: renderRunsTab };
@@ -443,78 +457,145 @@ async function renderActiveTab() {
   const view = activeView;
   container.setAttribute('aria-busy', 'true');
   let html;
+  let renderFailed = false;
   try {
     html = await TAB_RENDERERS[view]();
   } catch (error) {
-    html = `<p class="study-empty">读取失败：${esc(error.message)}</p>`;
+    renderFailed = true;
+    if (view === 'runs') {
+      const confirmed = runControlFeedback.startsWith('已按服务端回执');
+      const outcome = runControlOutcomeNeedsRefresh
+        ? runControlFeedback + (confirmed
+          ? ' 运行列表刷新失败；以上为本次命令回执，最新运行状态未重新读取。'
+          : ' 运行列表刷新也失败；命令结果未获确认，最新运行状态未重新读取。')
+        : '';
+      const detail = (outcome ? outcome + ' ' : '运行列表读取失败：') + error.message;
+      html = '<p id="study-run-control-feedback" class="study-run-control-feedback" role="status" aria-live="polite" tabindex="-1">' + esc(detail) + '</p>';
+    } else {
+      html = `<p class="study-empty">读取失败：${esc(error.message)}</p>`;
+    }
   }
   if (token !== renderToken) return;
   container.innerHTML = html;
   container.setAttribute('aria-busy', 'false');
   if (view === 'comments') bindCommentsView();
   if (view === 'runs') bindRunControls(container);
+  if (view === 'runs' && !renderFailed) {
+    runControlOutcomeNeedsRefresh = false;
+    runControlFeedback = '';
+  }
 }
 
 function bindRunControls(container) {
-  container.querySelectorAll('[data-cancel-run]').forEach(button => {
+  container.querySelectorAll('[data-run-control="stop"]').forEach(button => {
     button.addEventListener('click', () => {
-      cancelDialogRunRef = button.dataset.cancelRun;
-      cancelDialogDomainRef = button.dataset.cancelDomain;
-      document.querySelector('#study-cancel-run-identity').textContent =
-        `Run ${cancelDialogRunRef} · 当前未终态 ${Number(button.dataset.pendingCount)} 条 · 目标总数 ${Number(button.dataset.targetCount)} 条`;
-      document.querySelector('#study-cancel-error').textContent = '';
-      const dialog = document.querySelector('#study-cancel-dialog');
-      const confirm = document.querySelector('#study-cancel-confirm');
+      stopDialogRunRef = button.dataset.run;
+      stopDialogControlVersion = Number(button.dataset.controlVersion);
+      const pendingLabel = button.dataset.pendingCount === '未知'
+        ? '未知' : `${Number(button.dataset.pendingCount)} 条`;
+      document.querySelector('#study-stop-run-identity').textContent =
+        `Run ${stopDialogRunRef} · 当前未终态 ${pendingLabel} · 目标总数 ${Number(button.dataset.targetCount)} 条`;
+      document.querySelector('#study-stop-error').textContent = '';
+      const dialog = document.querySelector('#study-stop-dialog');
+      const confirm = document.querySelector('#study-stop-confirm');
       confirm.disabled = false;
       confirm.textContent = '确认停止';
       dialog.showModal();
-      document.querySelector('#study-cancel-dismiss').focus();
+      document.querySelector('#study-stop-dismiss').focus();
     });
+  });
+  container.querySelectorAll('[data-run-control="pause"], [data-run-control="resume"]').forEach(button => {
+    button.addEventListener('click', () => submitRunControl(button));
   });
 }
 
-async function submitRunCancellation() {
-  if (!cancelDialogRunRef) return;
-  const runRef = cancelDialogRunRef;
-  const dialog = document.querySelector('#study-cancel-dialog');
-  const confirm = document.querySelector('#study-cancel-confirm');
-  const status = document.querySelector('#study-cancel-error');
+async function postRunControl(runRef, action, expectedControlVersion) {
+  const response = await fetch(`${endpoint}runs/${encodeURIComponent(runRef)}/${action}`, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ expectedControlVersion })
+  });
+  const receipt = await response.json();
+  if (!response.ok) {
+    const error = new Error(receipt.error?.message || `请求失败（状态码 ${response.status}）`);
+    error.status = response.status;
+    throw error;
+  }
+  if (receipt.data?.runRef !== runRef
+      || Number(receipt.data?.controlVersion) !== expectedControlVersion + 1
+      || receipt.data?.dispatchState !== ({ pause: 'paused', resume: 'enabled', stop: 'stopped' })[action]
+      || receipt.data?.dispatchReason !== ({ pause: 'user_paused', resume: null, stop: 'user_stopped' })[action]) {
+    throw new Error('服务回执与本次控制命令不匹配。');
+  }
+  return receipt.data;
+}
+
+async function submitRunControl(button) {
+  const runRef = button.dataset.run;
+  const action = button.dataset.runControl;
+  const expectedControlVersion = Number(button.dataset.controlVersion);
+  const feedback = document.querySelector('#study-run-control-feedback');
+  button.disabled = true;
+  runControlFeedback = action === 'pause' ? '正在暂停派发…' : '正在恢复派发…';
+  if (feedback) feedback.textContent = runControlFeedback;
+  try {
+    await postRunControl(runRef, action, expectedControlVersion);
+    runControlFeedback = action === 'pause' ? '已按服务端回执暂停派发。' : '已按服务端回执恢复派发。';
+    runControlOutcomeNeedsRefresh = true;
+    await renderActiveTab();
+    const nextAction = action === 'pause' ? 'resume' : 'pause';
+    const nextControl = document.querySelector('#study-tab-result [data-run="' + CSS.escape(runRef) + '"][data-run-control="' + nextAction + '"]');
+    if (nextControl) nextControl.focus();
+    else document.querySelector('#study-run-control-feedback')?.focus();
+  } catch (error) {
+    runControlFeedback = `控制未获确认：${error.message}`;
+    runControlOutcomeNeedsRefresh = true;
+    await renderActiveTab();
+    document.querySelector('#study-run-control-feedback')?.focus();
+  }
+}
+
+async function submitRunStop() {
+  if (!stopDialogRunRef || stopDialogControlVersion == null) return;
+  const runRef = stopDialogRunRef;
+  const expectedControlVersion = stopDialogControlVersion;
+  const dialog = document.querySelector('#study-stop-dialog');
+  const confirm = document.querySelector('#study-stop-confirm');
+  const status = document.querySelector('#study-stop-error');
   confirm.disabled = true;
   confirm.textContent = '正在提交…';
   status.textContent = '';
   try {
-    const response = await fetch(`${endpoint}runs/${encodeURIComponent(runRef)}/cancel`, {
-      method: 'POST',
-      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ domain_ref: cancelDialogDomainRef })
-    });
-    const receipt = await response.json();
-    if (!response.ok) throw new Error(receipt.error?.message || `请求失败（状态码 ${response.status}）`);
-    if (receipt.data?.runRef !== runRef || receipt.data?.domainRef !== cancelDialogDomainRef) {
-      throw new Error('服务回执与所选运行或领域不匹配。');
-    }
+    await postRunControl(runRef, 'stop', expectedControlVersion);
     dialog.close();
-    cancelDialogRunRef = null;
-    cancelDialogDomainRef = null;
+    stopDialogRunRef = null;
+    stopDialogControlVersion = null;
+    runControlFeedback = '已按服务端回执停止本次运行。';
+    runControlOutcomeNeedsRefresh = true;
     await renderActiveTab();
+    document.querySelector('#study-run-control-feedback')?.focus();
   } catch (error) {
-    status.textContent = `停止未获确认：${error.message}`;
-    confirm.disabled = false;
-    confirm.textContent = '重试停止';
+    dialog.close();
+    stopDialogRunRef = null;
+    stopDialogControlVersion = null;
+    runControlFeedback = `停止未获确认：${error.message}；已重新读取当前运行状态，请核对后再操作。`;
+    runControlOutcomeNeedsRefresh = true;
+    await renderActiveTab();
+    document.querySelector('#study-run-control-feedback')?.focus();
   }
 }
 
-document.querySelector('#study-cancel-confirm').addEventListener('click', submitRunCancellation);
-document.querySelector('#study-cancel-dismiss').addEventListener('click', () => {
-  if (!document.querySelector('#study-cancel-confirm').disabled) {
-    document.querySelector('#study-cancel-dialog').close();
-    cancelDialogRunRef = null;
-    cancelDialogDomainRef = null;
+document.querySelector('#study-stop-confirm').addEventListener('click', submitRunStop);
+document.querySelector('#study-stop-dismiss').addEventListener('click', () => {
+  if (!document.querySelector('#study-stop-confirm').disabled) {
+    document.querySelector('#study-stop-dialog').close();
+    stopDialogRunRef = null;
+    stopDialogControlVersion = null;
   }
 });
-document.querySelector('#study-cancel-dialog').addEventListener('cancel', event => {
-  if (document.querySelector('#study-cancel-confirm').disabled) event.preventDefault();
-  else { cancelDialogRunRef = null; cancelDialogDomainRef = null; }
+document.querySelector('#study-stop-dialog').addEventListener('cancel', event => {
+  if (document.querySelector('#study-stop-confirm').disabled) event.preventDefault();
+  else { stopDialogRunRef = null; stopDialogControlVersion = null; }
 });
 
 async function loadProjection() {
