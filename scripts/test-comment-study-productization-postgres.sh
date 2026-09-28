@@ -52,4 +52,9 @@ RUST_TEST_THREADS=1 cargo test -p linggan-intelligence \
 RUST_TEST_THREADS=1 cargo test -p linggan-api --locked \
   local_web::comment_study::catalog_api::command_api::postgres_tests:: \
   -- --ignored --nocapture --test-threads=1
+# Exercise the real worker binary's OS signal handler while a synthetic model child is blocked in
+# flight. The test uses only the disposable PostgreSQL database created above and never starts a provider.
+RUST_TEST_THREADS=1 cargo test -p linggan-worker --test startup_contract --locked \
+  sigterm_drains_an_in_flight_comment_study_model_call \
+  -- --ignored --nocapture --test-threads=1
 printf '%s\n' 'Implemented Comment Study productization PostgreSQL subset passed; not the complete T01-T54 suite'

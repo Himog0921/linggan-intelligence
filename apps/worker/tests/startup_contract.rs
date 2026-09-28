@@ -11,7 +11,21 @@ use std::io::{BufRead, BufReader};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
+#[path = "../../../crates/evidence/tests/support/material_fixture.rs"]
+mod fixture;
+#[path = "../../../crates/intelligence/tests/support/comment_research_fixture.rs"]
+mod research_fixture;
+use linggan_intelligence::{
+    comment_study_catalog::refresh_clean_cache,
+    comment_study_policy::{
+        CreateStudyPolicyCommand, StudyPolicyDefaults, StudyStageInstructions, create_study_policy,
+    },
+    comment_study_run::{TrustedStudyOrigin, start_study_run},
+    comment_study_selection::StartStudyRunCommand,
+};
 use linggan_storage_postgres::{Database, testing::isolated_proof_schema};
+use serde_json::json;
+use uuid::Uuid;
 
 const WORKER_BINARY: &str = env!("CARGO_BIN_EXE_linggan-worker");
 const MEDIA_WORKER_BINARY: &str = env!("CARGO_BIN_EXE_linggan-media-worker");
@@ -304,13 +318,21 @@ fn migrations_missing(missing: &str) -> String {
     );
     let mut registered = Vec::new();
     for path in &paths {
-        sql.push_str(&std::fs::read_to_string(path).expect("the migration is readable"));
-        sql.push('\n');
         let id = path
             .file_stem()
             .expect("a migration file has a stem")
             .to_string_lossy()
             .into_owned();
+        if id == "0105_comment_study_productization_schema" {
+            // The clean-study bootstrap is deliberately distinct from the shared migration chain.
+            // This disposable process proof needs that candidate schema before its delta migrations.
+            sql.push_str(include_str!(
+                "../../../database/bootstrap/comment-study-001.sql"
+            ));
+            sql.push('\n');
+        }
+        sql.push_str(&std::fs::read_to_string(path).expect("the migration is readable"));
+        sql.push('\n');
         if id != missing {
             registered.push(id);
         }
@@ -405,4 +427,259 @@ async fn sigterm_drains_even_while_the_collection_tick_is_blocked() {
     let receipt = std::fs::read_to_string(&ack).expect("the worker confirms drain");
     assert!(receipt.contains(&format!("pid={}\nstate=drained\n", worker.0.id())));
     blocker.rollback().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn sigterm_drains_an_in_flight_comment_study_model_call() {
+    let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").expect("proof URL is supplied");
+    let schema = "worker_sigterm_model_drain";
+    let database = isolated_proof_schema(&url, schema, &migrations_missing("none"))
+        .await
+        .expect("the complete isolated schema is built");
+    let run_ref = seed_synthetic_study(&database).await;
+
+    let control_dir = std::env::temp_dir().join(format!(
+        "linggan-worker-model-drain-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir(&control_dir).unwrap();
+    let started = control_dir.join("model-call-started");
+    let release = control_dir.join("release-model-call");
+    let ack = control_dir.join("ack");
+    let adapter_script = control_dir.join("synthetic-pi-node");
+    std::fs::write(
+        &adapter_script,
+        format!(
+            "#!/bin/sh\ncat >/dev/null\ntouch {}\nwhile [ ! -e {} ]; do sleep 0.02; done\nprintf '%s' '{{\"version\":\"linggan.pi.v1/0.85.1\",\"ok\":false,\"text\":null,\"failureCode\":\"synthetic_sigterm_failure\",\"modelIds\":null,\"modelListOrigin\":null,\"usage\":{{\"inputTokens\":null,\"outputTokens\":null,\"costUsd\":null}},\"elapsedMs\":1}}'\n",
+            shell_quote(&started),
+            shell_quote(&release)
+        ),
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&adapter_script, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+    struct ProcessGuard(Child, std::path::PathBuf, std::path::PathBuf);
+    impl Drop for ProcessGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::write(&self.2, "release");
+            std::thread::sleep(Duration::from_millis(100));
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+            let _ = std::fs::remove_dir_all(&self.1);
+        }
+    }
+    let scoped_database_url = format!("{url}?options=-csearch_path%3D{schema}");
+    let mut worker = ProcessGuard(
+        Command::new(WORKER_BINARY)
+            .env("LINGGAN_LOCAL_DATABASE_URL", scoped_database_url)
+            .env("LINGGAN_WORKER_DRAIN_ACK_PATH", &ack)
+            .env("LINGGAN_COLLECTION_UPGRADE_PHASE", "recovery")
+            .env("LINGGAN_MODEL_SYNTHETIC_PREVIEW", "SYNTHETIC-NOT-EVIDENCE")
+            .env("LINGGAN_PI_NODE", &adapter_script)
+            .env_remove("LINGGAN_SUPPORT_DIR")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+        control_dir,
+        release.clone(),
+    );
+
+    tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            let dispatched: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM linggan_comment_study_model_request \
+                 WHERE run_ref=$1 AND stage='semantic' AND dispatch_started_at IS NOT NULL)",
+            )
+            .bind(run_ref)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+            if dispatched && started.exists() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("the real worker dispatched the synthetic call and its child is blocked in flight");
+
+    assert!(
+        Command::new("kill")
+            .args(["-TERM", &worker.0.id().to_string()])
+            .status()
+            .unwrap()
+            .success()
+    );
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    assert!(
+        worker.0.try_wait().unwrap().is_none(),
+        "SIGTERM must wait for the active model call and receipt settlement"
+    );
+    assert!(
+        !ack.exists(),
+        "drain acknowledgement must follow settlement"
+    );
+    std::fs::write(&release, "release").unwrap();
+
+    let status = tokio::time::timeout(Duration::from_secs(12), async {
+        loop {
+            if let Some(status) = worker.0.try_wait().unwrap() {
+                break status;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("the worker drains the released synthetic call within its grace");
+    assert!(status.success());
+    let receipt = std::fs::read_to_string(&ack).expect("the worker confirms drain");
+    assert!(receipt.contains(&format!("pid={}\nstate=drained\n", worker.0.id())));
+
+    let settled: (i64, String, Option<String>, String, String) = sqlx::query_as(
+        "SELECT count(*),min(invocation.state),min(invocation.failure_code), \
+                min(batch.state),min(target.state) \
+         FROM linggan_comment_study_model_request request \
+         JOIN linggan_model_invocation invocation USING(invocation_ref) \
+         JOIN linggan_comment_study_batch batch USING(batch_ref) \
+         JOIN linggan_comment_study_batch_target batch_target USING(batch_ref) \
+         JOIN linggan_comment_study_target target USING(target_ref) \
+         WHERE request.run_ref=$1 AND request.stage='semantic' \
+           AND request.dispatch_started_at IS NOT NULL",
+    )
+    .bind(run_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        settled,
+        (
+            1,
+            "failed".into(),
+            Some("synthetic_sigterm_failure".into()),
+            "failed".into(),
+            "queued".into()
+        ),
+        "the one in-flight failure is receipted and no retry is reserved after drain"
+    );
+    let no_extra_requests: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_comment_study_model_request WHERE run_ref=$1",
+    )
+    .bind(run_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(no_extra_requests, 1);
+}
+
+async fn seed_synthetic_study(database: &Database) -> Uuid {
+    let domain =
+        Uuid::parse_str(linggan_intelligence::comment_study_source::ADHD_DOMAIN_REF).unwrap();
+    research_fixture::detail_with_author(
+        database,
+        "worker-drain",
+        "SYNTHETIC study",
+        Some("creator"),
+    )
+    .await;
+    research_fixture::comment_with_author(
+        database,
+        "worker-drain",
+        "synthetic-comment",
+        "SYNTHETIC / NOT EVIDENCE · drain fixture",
+        Some("reader"),
+        "2026-09-28T08:00:00Z",
+    )
+    .await;
+    let work_ref: Uuid = sqlx::query_scalar(
+        "SELECT content_public_ref FROM linggan_material_domain_usage WHERE domain_ref=$1 LIMIT 1",
+    )
+    .bind(domain)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let connection = Uuid::new_v4();
+    let version = Uuid::new_v4();
+    let model = Uuid::new_v4();
+    let config = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_model_connection(connection_ref,enabled,revision) VALUES($1,true,1)",
+    )
+    .bind(connection)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_model_connection_version( \
+           version_ref,connection_ref,revision,name,api,base_url,local_endpoint,secret_ref) \
+         VALUES($1,$2,1,'SYNTHETIC','openai-completions','http://127.0.0.1:18080',true,$3)",
+    )
+    .bind(version)
+    .bind(connection)
+    .bind(Uuid::new_v4())
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_model_entry(model_ref,connection_version_ref,model_id,origin) \
+         VALUES($1,$2,'synthetic','manual')",
+    )
+    .bind(model)
+    .bind(version)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_model_config(config_ref,model_ref,input_token_limit,output_token_limit,timeout_seconds,max_attempts) \
+         VALUES($1,$2,8192,1024,30,2)",
+    )
+    .bind(config)
+    .bind(model)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let policy = create_study_policy(
+        database,
+        CreateStudyPolicyCommand {
+            domain_ref: domain,
+            method_name: "WORKER_SIGTERM_DRAIN_SYNTHETIC".into(),
+            parent_policy_ref: None,
+            model_config_ref: config,
+            defaults: StudyPolicyDefaults {
+                comment_budget: 1,
+                context_character_budget: 6000,
+            },
+            stage_instructions: StudyStageInstructions {
+                semantic: "synthetic test only".into(),
+                resolution: String::new(),
+                pair: String::new(),
+            },
+        },
+    )
+    .await
+    .unwrap();
+    let policy_ref: Uuid = serde_json::from_value(policy["policy"]["policyRef"].clone()).unwrap();
+    refresh_clean_cache(database, domain, 128).await.unwrap();
+    let command: StartStudyRunCommand = serde_json::from_value(json!({
+        "requestRef": Uuid::new_v4(),
+        "domainRef": domain,
+        "policyRef": policy_ref,
+        "scope": {"kind":"works","workRefs":[work_ref]},
+        "mode":"new_only",
+        "limits":{"commentBudget":1,"contextCharacterBudget":6000,"tokenLimit":100000},
+        "reason":null
+    }))
+    .unwrap();
+    let run_ref = start_study_run(database, command, TrustedStudyOrigin::Manual)
+        .await
+        .unwrap()
+        .run_ref
+        .unwrap();
+    run_ref
+}
+
+fn shell_quote(path: &std::path::Path) -> String {
+    format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"))
 }
