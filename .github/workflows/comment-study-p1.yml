@@ -79,8 +79,4 @@ jobs:
           P1_BROWSER_PROOF: '1'
         run: bash scripts/test-comment-study-productization-postgres.sh
       - name: Frontend behavior tests when present
-        shell: bash
-        run: |
-          if test -f scripts/test-comment-study-p1-ui.mjs; then
-            node --test scripts/test-comment-study-p1-ui.mjs
-          fi
+        run: python3 scripts/test-comment-study-productization-ui.py
