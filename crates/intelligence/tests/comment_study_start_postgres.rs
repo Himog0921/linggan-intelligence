@@ -29,7 +29,9 @@ use linggan_intelligence::{
         StudyStartError, TrustedStudyOrigin, cancel_study_run, preview_study_selection,
         start_study_run,
     },
-    comment_study_selection::{StartStudyRunCommand, StudySelectionMode, study_domain_lock_key},
+    comment_study_selection::{
+        StartStudyRunCommand, StudyScope, StudySelectionMode, study_domain_lock_key,
+    },
     model_invocation::checkpoint_invocation_usage,
     model_runner::{
         ModelWorkerFairness, prepare_next_batch_across_runs_with_fairness, run_model_work_once,
@@ -2703,6 +2705,227 @@ async fn failed_resolution_and_pair_ledgers_settle_pending_subject_pointers() {
     .await
     .unwrap();
     assert_eq!(request_count, 2, "recovery must not invent another request");
+}
+
+#[tokio::test]
+#[ignore = "isolated synthetic PostgreSQL; no shared database or model"]
+async fn oversized_semantic_target_is_terminal_and_does_not_block_later_runs() {
+    let (db, base_command, _) = setup("oversized_target_scheduler_progress", 0).await;
+    let oversized_body = (0..240)
+        .map(|index| {
+            format!("第 {index} 次记录中，孩子开始作业前先说出遇到的具体困难，再和家长安排下一步。")
+        })
+        .collect::<String>();
+    comment_with_author(
+        &db,
+        "selected",
+        "a-oversized",
+        &oversized_body,
+        Some("reader-a"),
+        "2026-09-19T08:00:00Z",
+    )
+    .await;
+    detail_with_author(
+        &db,
+        "normal-b",
+        "SYNTHETIC normal work B",
+        Some("creator-b"),
+    )
+    .await;
+    comment_with_author(
+        &db,
+        "normal-b",
+        "b-normal-1",
+        "SYNTHETIC 常规评论一",
+        Some("reader-b1"),
+        "2026-09-20T08:00:00Z",
+    )
+    .await;
+    comment_with_author(
+        &db,
+        "normal-b",
+        "b-normal-2",
+        "SYNTHETIC 常规评论二",
+        Some("reader-b2"),
+        "2026-09-21T08:00:00Z",
+    )
+    .await;
+    detail_with_author(
+        &db,
+        "normal-c",
+        "SYNTHETIC normal work C",
+        Some("creator-c"),
+    )
+    .await;
+    comment_with_author(
+        &db,
+        "normal-c",
+        "c-normal-1",
+        "SYNTHETIC 另一 Run 的常规评论",
+        Some("reader-c"),
+        "2026-09-22T08:00:00Z",
+    )
+    .await;
+    refresh_clean_cache(&db, domain(), 128).await.unwrap();
+
+    let work_a: Uuid = sqlx::query_scalar(
+        "SELECT usage.content_public_ref FROM linggan_material_domain_usage usage \
+         JOIN linggan_material_content content ON content.public_ref=usage.content_public_ref \
+         WHERE usage.domain_ref=$1 AND content.content_external_id='selected'",
+    )
+    .bind(domain())
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    let work_b: Uuid = sqlx::query_scalar(
+        "SELECT usage.content_public_ref FROM linggan_material_domain_usage usage \
+         JOIN linggan_material_content content ON content.public_ref=usage.content_public_ref \
+         WHERE usage.domain_ref=$1 AND content.content_external_id='normal-b'",
+    )
+    .bind(domain())
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    let work_c: Uuid = sqlx::query_scalar(
+        "SELECT usage.content_public_ref FROM linggan_material_domain_usage usage \
+         JOIN linggan_material_content content ON content.public_ref=usage.content_public_ref \
+         WHERE usage.domain_ref=$1 AND content.content_external_id='normal-c'",
+    )
+    .bind(domain())
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+
+    let mut oversized_command = next(&base_command);
+    oversized_command.scope = StudyScope::Works {
+        work_refs: vec![work_a],
+    };
+    let oversized_run = start_study_run(&db, oversized_command, TrustedStudyOrigin::Manual)
+        .await
+        .unwrap()
+        .run_ref
+        .unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+
+    let mut normal_b_command = next(&base_command);
+    normal_b_command.scope = StudyScope::Works {
+        work_refs: vec![work_b],
+    };
+    let normal_b_run = start_study_run(&db, normal_b_command, TrustedStudyOrigin::Manual)
+        .await
+        .unwrap()
+        .run_ref
+        .unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+
+    let mut normal_c_command = next(&base_command);
+    normal_c_command.scope = StudyScope::Works {
+        work_refs: vec![work_c],
+    };
+    let normal_c_run = start_study_run(&db, normal_c_command, TrustedStudyOrigin::Manual)
+        .await
+        .unwrap()
+        .run_ref
+        .unwrap();
+
+    let oversized_target: (String, Option<String>) = sqlx::query_as(
+        "SELECT state,terminal_reason FROM linggan_comment_study_target WHERE run_ref=$1",
+    )
+    .bind(oversized_run)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(oversized_target, ("queued".into(), None));
+    let mut fairness = ModelWorkerFairness::default();
+    assert!(
+        prepare_next_batch_across_runs_with_fairness(&db, &mut fairness)
+            .await
+            .unwrap()
+    );
+
+    let oversized_target: (String, Option<String>) = sqlx::query_as(
+        "SELECT state,terminal_reason FROM linggan_comment_study_target WHERE run_ref=$1",
+    )
+    .bind(oversized_run)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        oversized_target,
+        ("failed".into(), Some("input_limit_exceeded".into()))
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM linggan_comment_study_batch WHERE run_ref=$1",
+        )
+        .bind(oversized_run)
+        .fetch_one(db.pool())
+        .await
+        .unwrap(),
+        0
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM linggan_comment_study_model_request WHERE run_ref=$1",
+        )
+        .bind(oversized_run)
+        .fetch_one(db.pool())
+        .await
+        .unwrap(),
+        0
+    );
+
+    // The first normal Run after the oversized one must prepare in the same bounded scan;
+    // the circular cursor must let the other normal Run prepare on the next scan as well.
+    let prepared_runs: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT run_ref FROM linggan_comment_study_batch WHERE run_ref=ANY($1) ORDER BY run_ref",
+    )
+    .bind(vec![normal_b_run, normal_c_run])
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(prepared_runs.len(), 1);
+    assert!(
+        prepare_next_batch_across_runs_with_fairness(&db, &mut fairness)
+            .await
+            .unwrap()
+    );
+    let prepared_runs: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT run_ref FROM linggan_comment_study_batch WHERE run_ref=ANY($1) ORDER BY run_ref",
+    )
+    .bind(vec![normal_b_run, normal_c_run])
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        prepared_runs.len(),
+        2,
+        "a single oversized target cannot head-of-line block normal work from other Runs"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM linggan_comment_study_batch_target target \
+             JOIN linggan_comment_study_batch batch USING(batch_ref) \
+             WHERE batch.run_ref=$1",
+        )
+        .bind(normal_b_run)
+        .fetch_one(db.pool())
+        .await
+        .unwrap(),
+        2
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM linggan_comment_study_batch_target target \
+             JOIN linggan_comment_study_batch batch USING(batch_ref) \
+             WHERE batch.run_ref=$1",
+        )
+        .bind(normal_c_run)
+        .fetch_one(db.pool())
+        .await
+        .unwrap(),
+        1
+    );
 }
 
 #[tokio::test]
