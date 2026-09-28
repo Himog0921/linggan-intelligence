@@ -24,7 +24,10 @@ use linggan_intelligence::{
     comment_study_policy::{
         CreateStudyPolicyCommand, StudyPolicyDefaults, StudyStageInstructions, create_study_policy,
     },
-    comment_study_problem_store::{accept_problem_pair, accept_problem_resolution},
+    comment_study_problem_store::{
+        PairSelection, ProblemStoreError, accept_problem_pair, accept_problem_resolution,
+        prepare_problem_pair_for_enabled_v2_run, prepare_problem_resolution_for_enabled_v2_run,
+    },
     comment_study_recall::{RecallCompleteness, recall_candidates},
     comment_study_resolution_worker::run_one_problem_resolution,
     comment_study_run::{
@@ -3533,6 +3536,214 @@ async fn worker_drain_finishes_the_in_flight_receipt_without_reserving_another_c
         ),
         "the active response is settled before the drain exits, leaving only its bounded retry"
     );
+}
+
+#[tokio::test]
+#[ignore = "isolated synthetic PostgreSQL; no shared database or model"]
+async fn same_work_cold_start_requires_two_known_authors_and_an_unambiguous_pair() {
+    let (db, command, _) = setup("same_work_two_author_cold_start", 0).await;
+    let authors = ["reader-1", "reader-1", "reader-2", "reader-3"];
+    for (index, author) in authors.iter().enumerate() {
+        research_fixture::comment_with_author(
+            &db,
+            "selected",
+            &format!("cold-start-comment-{index}"),
+            "孩子每天写作业都要催，不催就不开始，我很着急。",
+            Some(author),
+            &format!("2026-09-28T08:0{index}:00Z"),
+        )
+        .await;
+    }
+    refresh_clean_cache(&db, domain(), 128).await.unwrap();
+    let run_ref = start_study_run(&db, command, TrustedStudyOrigin::Manual)
+        .await
+        .unwrap()
+        .run_ref
+        .unwrap();
+    let work_count: i64 = sqlx::query_scalar(
+        "SELECT count(DISTINCT target.content_public_ref) \
+         FROM linggan_comment_study_target target WHERE target.run_ref=$1",
+    )
+    .bind(run_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        work_count, 1,
+        "all four comments belong to the same selected work"
+    );
+
+    let prepared = prepare_study_batch(
+        &db,
+        PrepareStudyBatchRequest {
+            run_ref,
+            maximum_targets: 12,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(prepared.target_refs.len(), authors.len());
+    let claim = claim_next_study_batch(&db, Uuid::new_v4(), 60)
+        .await
+        .unwrap()
+        .unwrap();
+    let signals = prepared
+        .target_refs
+        .iter()
+        .map(|target_ref| {
+            json!({
+                "targetRef":target_ref,
+                "outcome":"signals",
+                "reason":null,
+                "signals":[{
+                    "kind":"problem",
+                    "proposition":"孩子在家庭作业中存在自主启动困难。",
+                    "evidence":"孩子每天写作业都要催",
+                    "problemFrame":{
+                        "actor":{"value":"孩子","basis":"孩子"},
+                        "goalOrExpectedState":{"value":"自主开始作业","basis":"不催就不开始"},
+                        "barrierOrUnmetNeed":{"value":"需要外部催促","basis":"都要催"},
+                        "context":{"value":"家庭作业","basis":"写作业"}
+                    }
+                }]
+            })
+        })
+        .collect::<Vec<_>>();
+    let batch_receipt = accept_study_batch_output(
+        &db,
+        prepared.batch_ref,
+        claim.lease_token,
+        json!({
+            "contract":"comment-study.note-batch.v1",
+            "batchRef":prepared.batch_ref,
+            "contentPublicRef":prepared.content_public_ref,
+            "results":signals
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(batch_receipt.accepted_target_count, authors.len());
+
+    let signals: Vec<(Uuid, String)> = sqlx::query_as(
+        "SELECT signal.signal_ref,comment.author_external_id \
+         FROM linggan_comment_study_signal signal \
+         JOIN linggan_comment_study_target target USING(target_ref) \
+         JOIN linggan_material_comment comment ON comment.material_ref=target.source_ref \
+         WHERE target.run_ref=$1 ORDER BY comment.comment_external_id",
+    )
+    .bind(run_ref)
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(signals.len(), authors.len());
+    for (signal_ref, _) in &signals {
+        let resolution = prepare_problem_resolution_for_enabled_v2_run(&db, *signal_ref, vec![])
+            .await
+            .unwrap();
+        let receipt = accept_problem_resolution(
+            &db,
+            resolution.resolution_ref,
+            json!({"contract":"comment-study.problem-resolution.v1","candidates":[]}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(receipt.state, "deferred_novel");
+    }
+
+    let selection = PairSelection {
+        // Pair creation is exercised as a transaction gate here; no recall ranking is claimed.
+        profile_ref: Uuid::new_v4(),
+        recall_rank: 1,
+        admissible_rank: 1,
+    };
+    let same_author =
+        prepare_problem_pair_for_enabled_v2_run(&db, signals[0].0, signals[1].0, selection.clone())
+            .await
+            .expect_err("two comments from one author are not independent support");
+    assert!(matches!(
+        same_author,
+        ProblemStoreError::PairNotIndependentOrNovel
+    ));
+
+    let uncertain =
+        prepare_problem_pair_for_enabled_v2_run(&db, signals[2].0, signals[3].0, selection.clone())
+            .await
+            .unwrap();
+    let uncertainty_receipt = accept_problem_pair(
+        &db,
+        uncertain.pair_ref,
+        json!({
+            "contract":"comment-study.problem-pair.v1",
+            "firstSignalRef":uncertain.first_signal_ref,
+            "secondSignalRef":uncertain.second_signal_ref,
+            "dimensions":{
+                "actor":"same","goalOrExpectedState":"unknown",
+                "barrierOrUnmetNeed":"same","context":"same"
+            },
+            "proposedProblem":null
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(uncertainty_receipt.state, "rejected");
+    assert_eq!(uncertainty_receipt.decision_reason, "ambiguous");
+    let problems_after_uncertainty: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM linggan_comment_study_problem")
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    assert_eq!(problems_after_uncertainty, 0);
+
+    let independent =
+        prepare_problem_pair_for_enabled_v2_run(&db, signals[0].0, signals[2].0, selection)
+            .await
+            .unwrap();
+    let accepted = accept_problem_pair(
+        &db,
+        independent.pair_ref,
+        json!({
+            "contract":"comment-study.problem-pair.v1",
+            "firstSignalRef":independent.first_signal_ref,
+            "secondSignalRef":independent.second_signal_ref,
+            "dimensions":{
+                "actor":"same","goalOrExpectedState":"same",
+                "barrierOrUnmetNeed":"same","context":"same"
+            },
+            "proposedProblem":{
+                "title":"家庭作业自主启动困难",
+                "definition":"孩子需要持续外部催促才能开始家庭作业",
+                "stableIdentity":{"actor":"孩子","barrier":"需要外部催促"},
+                "includeCriteria":["需要持续外部催促才能开始家庭作业"],
+                "excludeCriteria":["仅一次忘记作业"]
+            }
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(accepted.state, "approved");
+    let problem_ref = accepted.problem_ref.unwrap();
+    let supporter_accounts: Vec<String> = sqlx::query_scalar(
+        "SELECT array_agg(DISTINCT comment.author_external_id ORDER BY comment.author_external_id) \
+         FROM linggan_comment_study_problem_membership membership \
+         JOIN linggan_comment_study_signal signal USING(signal_ref) \
+         JOIN linggan_comment_study_target target USING(target_ref) \
+         JOIN linggan_material_comment comment ON comment.material_ref=target.source_ref \
+         WHERE membership.problem_ref=$1",
+    )
+    .bind(problem_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(supporter_accounts, ["reader-1", "reader-2"]);
+    let (problems, memberships): (i64, i64) = sqlx::query_as(
+        "SELECT (SELECT count(*) FROM linggan_comment_study_problem), \
+                (SELECT count(*) FROM linggan_comment_study_problem_membership WHERE problem_ref=$1)",
+    )
+    .bind(problem_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!((problems, memberships), (1, 2));
 }
 
 #[tokio::test]
