@@ -58,6 +58,7 @@ pub struct StudySourcePreview {
     pub observation_role: StudySourceRole,
     pub total_comment_count: usize,
     pub eligible_comment_count: usize,
+    pub unknown_author_count: usize,
     pub excluded_counts: StudySourceExcludedCounts,
     pub works: Vec<StudySourcePreviewWork>,
 }
@@ -65,6 +66,7 @@ pub struct StudySourcePreview {
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StudySourceExcludedCounts {
+    /// Kept as a zero-valued compatibility key. Unknown comment authors are not excluded.
     pub comment_author_unknown: usize,
     pub work_author_unknown: usize,
     pub creator_voice: usize,
@@ -234,7 +236,6 @@ fn classify(row: &sqlx::postgres::PgRow) -> Result<Result<Candidate, &'static st
         false,
         !matches!(cleaned.state.as_str(), "direct" | "context"),
         work_author.is_none(),
-        author.is_none(),
         author.is_some() && author == work_author,
     ]);
     if let Some(reason) = reason {
@@ -370,6 +371,7 @@ pub async fn preview_sources_for_role(
         .await?;
     let mut after = (0, Uuid::nil());
     let mut total = 0;
+    let mut unknown_author_count = 0;
     let mut counts = BTreeMap::<Uuid, usize>::new();
     let mut excluded = StudySourceExcludedCounts::default();
     loop {
@@ -378,6 +380,15 @@ pub async fn preview_sources_for_role(
         for row in &page {
             total += 1;
             after = (row.try_get("rank")?, row.try_get("content_public_ref")?);
+            let author: Option<String> = row.try_get("author_external_id")?;
+            if author
+                .as_deref()
+                .map(str::trim)
+                .filter(|author| !author.is_empty())
+                .is_none()
+            {
+                unknown_author_count += 1;
+            }
             match classify(row)? {
                 Ok(candidate) => {
                     *counts
@@ -421,6 +432,7 @@ pub async fn preview_sources_for_role(
         observation_role,
         total_comment_count: total,
         eligible_comment_count: eligible,
+        unknown_author_count,
         excluded_counts: excluded,
         works,
     })
@@ -447,7 +459,8 @@ fn increment_exclusion(counts: &mut StudySourceExcludedCounts, reason: &str) {
         "sourceRestricted" => counts.source_restricted += 1,
         "bodyUnavailable" => counts.body_unavailable += 1,
         "workAuthorUnknown" => counts.work_author_unknown += 1,
-        "commentAuthorUnknown" => counts.comment_author_unknown += 1,
+        // Stable response key only: unknown comment identity is measured separately, not excluded.
+        "commentAuthorUnknown" => {}
         "creatorVoice" => counts.creator_voice += 1,
         _ => counts.text_not_researchable += 1,
     }

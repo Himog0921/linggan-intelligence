@@ -38,7 +38,7 @@ asOf 是列表材料截止时间，不是跨 HTTP 长期持有的数据库快照
 
 indexCoverage 恰含 state(`ready/partial/unavailable`)、indexedCount(integer或NULL)、pendingCount(integer或NULL)、asOf。indexedCount 是当前scope的最新可读材料中存在匹配cleaner缓存的条数，包含已经判为dropped的缓存；它不是“可研究数”。pendingCount 是尚无该缓存的最新可读材料数。只有完成范围核对且pendingCount=0才ready；数据库失败用503，不返回假ready。
 
-开始/预览的 exclusionCounts 键固定：sourceRestricted、bodyUnavailable、indexPending、textNotResearchable、workAuthorUnknown、commentAuthorUnknown、creatorVoice、inProgress、notSelectedByMode、budgetNotSelected，值均非负整数。按此顺序每个稳定评论只归入一个计数；通过全部条件且入包者计入targetCount，needs_context也属于目标。相同冻结快照内 `scopeCommentCount = targetCount + sum(exclusionCounts)`。未知的commentKey/跨domain引用是请求错误，不混为“清洗排除”；有效作品但无评论可正常no_work。
+开始/预览的 exclusionCounts 键固定：sourceRestricted、bodyUnavailable、indexPending、textNotResearchable、workAuthorUnknown、commentAuthorUnknown、creatorVoice、inProgress、notSelectedByMode、budgetNotSelected，值均非负整数。`commentAuthorUnknown` 为兼容保留键，未知评论作者本身不构成排除原因，故新请求恒为 0；仍满足其他资格的评论进入 targetCount。来源预览单独返回 `unknownAuthorCount`，评论目录的 `unknownIdentityCount` 也保留未知身份事实。未知账号不等于独立用户，不能为新 Problem 提供第二个独立作者支持；但可以在现有候选比较通过后加入已有 Problem。按固定 exclusion 顺序每个稳定评论只归入一个计数；相同冻结快照内 `scopeCommentCount = targetCount + sum(exclusionCounts)`。未知的commentKey/跨domain引用是请求错误，不混为“清洗排除”；有效作品但无评论可正常no_work。
 
 latestStudy/effectiveStudy 恰含 runRef、targetRef、state、createdAt、finishedAt(可NULL)、inputComparison(`same/changed/unknown`)、sourceState(`known/unknown/restricted`)，对象本身可NULL。effectiveState（评论行字段）为 `none/effective/source_changed/source_unavailable`；旧失败不会抹去有效head，当前正文变化不伪装为当前有效。
 

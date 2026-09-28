@@ -63,7 +63,6 @@ WITH requested_roles AS MATERIALIZED (
     SELECT l.*,cache.source_ref AS cached_source_ref,cache.clean_state,cache.raw_sha256,
         cache.research_text,raw.body_text IS NOT NULL AS has_body,
         NULLIF(btrim(a.author_external_id),'') IS NULL AS work_author_unknown,
-        NULLIF(btrim(l.author_external_id),'') IS NULL AS comment_author_unknown,
         CASE WHEN btrim(l.author_external_id)=btrim(a.author_external_id) THEN 'creator' ELSE 'reader' END AS voice_role,
         EXISTS(SELECT 1 FROM linggan_material_comment_restriction x
           WHERE x.content_public_ref=l.content_public_ref AND x.comment_external_id=l.comment_external_id) AS source_restricted,

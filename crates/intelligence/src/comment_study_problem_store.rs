@@ -108,6 +108,15 @@ struct NovelSignal {
     author_external_id: Option<String>,
 }
 
+fn independently_authored(first: Option<&str>, second: Option<&str>) -> bool {
+    let first = first.map(str::trim).filter(|id| !id.is_empty());
+    let second = second.map(str::trim).filter(|id| !id.is_empty());
+    match (first, second) {
+        (Some(first), Some(second)) => first != second,
+        _ => false,
+    }
+}
+
 /// Freezes a server-selected candidate set. A deferred-context or not-user-problem Signal is
 /// terminally categorized without invoking a comparison model.
 pub async fn prepare_problem_resolution(
@@ -463,8 +472,10 @@ async fn prepare_problem_pair_inner(
     let second = lock_novel_signal(&mut transaction, second_ref).await?;
     if first.domain_ref != second.domain_ref
         || first.source_ref == second.source_ref
-        || first.author_external_id.is_none()
-        || first.author_external_id == second.author_external_id
+        || !independently_authored(
+            first.author_external_id.as_deref(),
+            second.author_external_id.as_deref(),
+        )
     {
         return Err(ProblemStoreError::PairNotIndependentOrNovel);
     }
@@ -502,6 +513,22 @@ async fn prepare_problem_pair_inner(
         first_signal_ref: first.signal_ref,
         second_signal_ref: second.signal_ref,
     })
+}
+
+#[cfg(test)]
+mod author_independence_tests {
+    use super::independently_authored;
+
+    #[test]
+    fn independent_pair_requires_both_known_nonblank_and_distinct_accounts() {
+        assert!(independently_authored(Some("reader-a"), Some("reader-b")));
+        assert!(!independently_authored(Some("reader-a"), Some("reader-a")));
+        assert!(!independently_authored(Some("reader-a"), None));
+        assert!(!independently_authored(None, Some("reader-a")));
+        assert!(!independently_authored(None, None));
+        assert!(!independently_authored(Some("  "), Some("reader-a")));
+        assert!(!independently_authored(Some("reader-a"), Some(" \t")));
+    }
 }
 
 /// Gives a pair one bounded retry when its earlier provider output was rejected solely because it

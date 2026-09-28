@@ -633,7 +633,8 @@ mod tests {
     fn comment_study_script_explains_source_eligibility_and_budget_in_chinese() {
         let script = include_str!("comment_study.js");
         assert!(script.contains("function renderSourcePreview(preview, targetId, roleLabel)"));
-        assert!(script.contains("评论作者身份未知"));
+        assert!(script.contains("作者身份未知"));
+        assert!(script.contains("不作为独立用户计数"));
         assert!(script.contains("作品作者本人"));
         assert!(script.contains("本次最多冻结"));
         assert!(script.contains("服务端作品目录"));

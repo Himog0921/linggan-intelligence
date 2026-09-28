@@ -19,7 +19,7 @@ fn candidate(work: u128, rank: u64) -> SelectionCandidate {
         comment_key: key(work, &format!("comment-{rank}")),
         source_ref: Uuid::from_u128(work * 10000 + u128::from(rank)),
         source_rank: rank,
-        source_flags: [false; 7],
+        source_flags: [false; 6],
         in_progress: false,
         latest: None,
         input_fingerprint: Some("a".repeat(64)),
@@ -424,7 +424,7 @@ fn legacy_unfinished_requires_proven_stop_and_no_live_invocation() {
 #[test]
 fn shared_source_precedence_and_all_ten_count_keys_are_preserved() {
     let mut rows = Vec::new();
-    for i in 0..7 {
+    for i in 0..6 {
         let mut row = candidate(10, i + 1);
         row.source_flags[i as usize..].fill(true);
         row.in_progress = true;
@@ -432,9 +432,17 @@ fn shared_source_precedence_and_all_ten_count_keys_are_preserved() {
     }
     let result = selections(&rows, StudySelectionMode::Reanalyse);
     assert_eq!(result.exclusion_counts.len(), 10);
-    for name in EXCLUSIONS.iter().take(7) {
+    for name in [
+        "sourceRestricted",
+        "bodyUnavailable",
+        "indexPending",
+        "textNotResearchable",
+        "workAuthorUnknown",
+        "creatorVoice",
+    ] {
         assert_eq!(result.exclusion_counts[name], 1);
     }
+    assert_eq!(result.exclusion_counts["commentAuthorUnknown"], 0);
     assert_eq!(result.exclusion_counts["inProgress"], 0);
 }
 #[test]

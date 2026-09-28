@@ -170,7 +170,12 @@ async fn catalog_distinguishes_visibility_eligibility_and_pending_index() {
         .iter()
         .find(|row| row["voiceRole"] == "unknown")
         .unwrap();
-    assert_eq!(unknown["studyEligibility"]["eligible"], false);
+    assert_eq!(unknown["studyEligibility"]["eligible"], true);
+    assert_eq!(unknown["studyEligibility"]["reasons"], serde_json::json!([]));
+    let summary_query: CatalogSummaryQuery =
+        serde_json::from_value(json!({"domain":ADHD_DOMAIN_REF})).unwrap();
+    let summary = read_catalog_summary(&db, &summary_query).await.unwrap();
+    assert_eq!(summary["summary"]["unknownIdentityCount"], 1);
     let mut creator = query();
     creator.voice_role = CatalogVoiceRole::Creator;
     let result = read_comment_catalog(&db, &creator).await.unwrap();

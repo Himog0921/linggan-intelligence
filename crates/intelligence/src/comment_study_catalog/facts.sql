@@ -52,7 +52,6 @@ WITH latest AS MATERIALIZED (
              ELSE 'reader'
            END AS voice_role,
            NULLIF(btrim(author.author_external_id), '') IS NULL AS work_author_unknown,
-           NULLIF(btrim(latest.author_external_id), '') IS NULL AS comment_author_unknown,
            EXISTS (
                SELECT 1 FROM linggan_material_comment_restriction restriction
                WHERE restriction.content_public_ref = latest.content_public_ref

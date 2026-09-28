@@ -3748,6 +3748,226 @@ async fn same_work_cold_start_requires_two_known_authors_and_an_unambiguous_pair
 
 #[tokio::test]
 #[ignore = "isolated synthetic PostgreSQL; no shared database or model"]
+async fn unknown_authors_are_retained_can_join_existing_problem_but_cannot_support_a_new_pair() {
+    let (db, command, _) =
+        setup_with_model_input_limit("unknown_author_problem_membership", 2, 32_768).await;
+    let seed_run = start_study_run(&db, command.clone(), TrustedStudyOrigin::Manual)
+        .await
+        .unwrap()
+        .run_ref
+        .unwrap();
+    let (_, problem_ref, _, _) = seed_problem_stage_fixtures(&db, seed_run).await;
+
+    for (id, author, minute) in [
+        ("known-novel", Some("reader-9"), "00"),
+        ("unknown-novel-a", None, "01"),
+        ("unknown-novel-b", None, "02"),
+        ("unknown-assigned-a", None, "03"),
+        ("unknown-assigned-b", None, "04"),
+    ] {
+        research_fixture::comment_with_author(
+            &db,
+            "selected",
+            id,
+            "孩子每天写作业都要催，不催就不开始，我很着急。",
+            author,
+            &format!("2026-09-28T09:{minute}:00Z"),
+        )
+        .await;
+    }
+    refresh_clean_cache(&db, domain(), 128).await.unwrap();
+    let run_ref = start_study_run(&db, next(&command), TrustedStudyOrigin::Manual)
+        .await
+        .unwrap()
+        .run_ref
+        .unwrap();
+    let target_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM linggan_comment_study_target WHERE run_ref=$1")
+            .bind(run_ref)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        target_count, 5,
+        "all four unknown-account comments are frozen targets"
+    );
+
+    let mut accepted_target_count = 0;
+    for _ in 0..2 {
+        let prepared = prepare_study_batch(
+            &db,
+            PrepareStudyBatchRequest {
+                run_ref,
+                maximum_targets: 8,
+            },
+        )
+        .await
+        .unwrap();
+        assert!(!prepared.target_refs.is_empty());
+        let claim = claim_next_study_batch(&db, Uuid::new_v4(), 60)
+            .await
+            .unwrap()
+            .unwrap();
+        let results = prepared
+            .target_refs
+            .iter()
+            .map(|target_ref| {
+                json!({
+                    "targetRef":target_ref,
+                    "outcome":"signals",
+                    "reason":null,
+                    "signals":[{
+                        "kind":"problem",
+                        "proposition":"孩子在家庭作业中存在自主启动困难。",
+                        "evidence":"孩子每天写作业都要催",
+                        "problemFrame":{
+                            "actor":{"value":"孩子","basis":"孩子"},
+                            "goalOrExpectedState":{"value":"自主开始作业","basis":"不催就不开始"},
+                            "barrierOrUnmetNeed":{"value":"需要外部催促","basis":"都要催"},
+                            "context":{"value":"家庭作业","basis":"写作业"}
+                        }
+                    }]
+                })
+            })
+            .collect::<Vec<_>>();
+        let semantic_receipt = accept_study_batch_output(
+            &db,
+            prepared.batch_ref,
+            claim.lease_token,
+            json!({
+                "contract":"comment-study.note-batch.v1",
+                "batchRef":prepared.batch_ref,
+                "contentPublicRef":prepared.content_public_ref,
+                "results":results
+            }),
+        )
+        .await
+        .unwrap();
+        accepted_target_count += semantic_receipt.accepted_target_count;
+    }
+    assert_eq!(accepted_target_count, 5);
+
+    let signals: Vec<(String, Uuid, Option<String>)> = sqlx::query_as(
+        "SELECT comment.comment_external_id,signal.signal_ref,comment.author_external_id \
+         FROM linggan_comment_study_signal signal \
+         JOIN linggan_comment_study_target target USING(target_ref) \
+         JOIN linggan_material_comment comment ON comment.material_ref=target.source_ref \
+         WHERE target.run_ref=$1 ORDER BY comment.comment_external_id",
+    )
+    .bind(run_ref)
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(signals.len(), 5);
+    for (comment_id, signal_ref, _) in &signals {
+        let candidates = if comment_id.starts_with("unknown-assigned") {
+            vec![problem_ref]
+        } else {
+            Vec::new()
+        };
+        let resolution =
+            prepare_problem_resolution_for_enabled_v2_run(&db, *signal_ref, candidates.clone())
+                .await
+                .unwrap();
+        let output = if candidates.is_empty() {
+            json!({"contract":"comment-study.problem-resolution.v1","candidates":[]})
+        } else {
+            json!({
+                "contract":"comment-study.problem-resolution.v1",
+                "candidates":[{
+                    "problemRef":problem_ref,
+                    "dimensions":{
+                        "actor":"same",
+                        "goalOrExpectedState":"same",
+                        "barrierOrUnmetNeed":"same",
+                        "context":"same"
+                    }
+                }]
+            })
+        };
+        let receipt = accept_problem_resolution(&db, resolution.resolution_ref, output)
+            .await
+            .unwrap();
+        assert_eq!(
+            receipt.state,
+            if comment_id.starts_with("unknown-assigned") {
+                "assigned"
+            } else {
+                "deferred_novel"
+            }
+        );
+        if comment_id.starts_with("unknown-assigned") {
+            assert_eq!(receipt.problem_ref, Some(problem_ref));
+        }
+    }
+
+    let signal_ref = |comment_id: &str| {
+        signals
+            .iter()
+            .find(|(id, _, _)| id == comment_id)
+            .map(|(_, signal_ref, _)| *signal_ref)
+            .unwrap()
+    };
+    let pair_selection = PairSelection {
+        profile_ref: Uuid::new_v4(),
+        recall_rank: 1,
+        admissible_rank: 1,
+    };
+    for (first, second) in [
+        ("unknown-novel-a", "unknown-novel-b"),
+        ("unknown-novel-a", "known-novel"),
+    ] {
+        let rejected = prepare_problem_pair_for_enabled_v2_run(
+            &db,
+            signal_ref(first),
+            signal_ref(second),
+            pair_selection.clone(),
+        )
+        .await
+        .expect_err("an unknown author cannot count as independent support");
+        assert!(matches!(
+            rejected,
+            ProblemStoreError::PairNotIndependentOrNovel
+        ));
+    }
+    let assigned_signal_refs = signals
+        .iter()
+        .filter(|(comment_id, _, _)| comment_id.starts_with("unknown-assigned"))
+        .map(|(_, signal_ref, _)| *signal_ref)
+        .collect::<Vec<_>>();
+    assert_eq!(assigned_signal_refs.len(), 2);
+    let assigned_membership_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_comment_study_problem_membership membership \
+         JOIN linggan_comment_study_signal signal USING(signal_ref) \
+         JOIN linggan_comment_study_target target USING(target_ref) \
+         JOIN linggan_material_comment comment ON comment.material_ref=target.source_ref \
+         WHERE membership.problem_ref=$1 AND signal.signal_ref=ANY($2) \
+           AND comment.author_external_id IS NULL",
+    )
+    .bind(problem_ref)
+    .bind(&assigned_signal_refs)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(assigned_membership_count, 2);
+    let rejected_pair_rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_comment_study_problem_pair pair \
+         WHERE (pair.first_signal_ref=$1 AND pair.second_signal_ref=$2) \
+            OR (pair.first_signal_ref=$2 AND pair.second_signal_ref=$1) \
+            OR (pair.first_signal_ref=$1 AND pair.second_signal_ref=$3) \
+            OR (pair.first_signal_ref=$3 AND pair.second_signal_ref=$1)",
+    )
+    .bind(signal_ref("unknown-novel-a"))
+    .bind(signal_ref("unknown-novel-b"))
+    .bind(signal_ref("known-novel"))
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(rejected_pair_rows, 0);
+}
+
+#[tokio::test]
+#[ignore = "isolated synthetic PostgreSQL; no shared database or model"]
 async fn expired_pair_recovery_waits_for_the_0109_terminal_state_constraint() {
     let (db, command, _) = setup("problem_stage_partial_0109", 2).await;
     let run_ref = start_study_run(&db, command, TrustedStudyOrigin::Manual)

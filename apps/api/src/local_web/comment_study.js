@@ -58,10 +58,11 @@ function renderSourcePreview(preview, targetId, roleLabel) {
   if (!target) return;
   if (!preview) { target.textContent = `${roleLabel}来源资格统计暂不可用。`; return; }
   const excluded = preview.excludedCounts || {};
-  const labels = { commentAuthorUnknown:'评论作者身份未知',workAuthorUnknown:'作品作者身份未知',creatorVoice:'作品作者本人',bodyUnavailable:'正文不可研究',sourceRestricted:'来源受限',textNotResearchable:'文本不具研究条件' };
+  const labels = { workAuthorUnknown:'作品作者身份未知',creatorVoice:'作品作者本人',bodyUnavailable:'正文不可研究',sourceRestricted:'来源受限',textNotResearchable:'文本不具研究条件' };
   const reasons = Object.entries(labels).map(([key,label])=>[label,Number(excluded[key]||0)]).filter(([,count])=>count>0).map(([label,count])=>`${label} ${count} 条`);
   const excludedCount=Number(preview.totalCommentCount||0)-Number(preview.eligibleCommentCount||0);
-  target.textContent=`${roleLabel} · 截至 ${String(preview.asOf||'').replace('T',' ')}：共 ${Number(preview.totalCommentCount||0)} 条评论；可研究 ${Number(preview.eligibleCommentCount||0)} 条；未纳入 ${excludedCount} 条${reasons.length?`（${reasons.join('；')}）`:''}。`;
+  const unknownAuthors=Number(preview.unknownAuthorCount||0);
+  target.textContent=`${roleLabel} · 截至 ${String(preview.asOf||'').replace('T',' ')}：共 ${Number(preview.totalCommentCount||0)} 条评论；可研究 ${Number(preview.eligibleCommentCount||0)} 条；未纳入 ${excludedCount} 条${unknownAuthors?`；作者身份未知 ${unknownAuthors} 条（不作为独立用户计数）`:''}${reasons.length?`（${reasons.join('；')}）`:''}。`;
 }
 function workCatalogPath(cursor=null){
   const query=new URLSearchParams({domain:domainRef,observationRole:workCatalogState.observationRole,limit:'50'});
@@ -303,7 +304,7 @@ function commentStatus(item){
 }
 function commentEligibility(item){
   if(item.studyEligibility?.eligible)return'可研究';
-  const map={sourceRestricted:'来源受限',bodyUnavailable:'正文不可用',indexPending:'等待本地清洗',textNotResearchable:'纯无效文本',workAuthorUnknown:'作品作者身份未知',commentAuthorUnknown:'评论作者身份未知',creatorVoice:'作品作者声音'};
+  const map={sourceRestricted:'来源受限',bodyUnavailable:'正文不可用',indexPending:'等待本地清洗',textNotResearchable:'纯无效文本',workAuthorUnknown:'作品作者身份未知',creatorVoice:'作品作者声音'};
   return(item.studyEligibility?.reasons||[]).map(reason=>map[reason]||reason).join('；')||'暂不可研究';
 }
 async function renderCommentsTab(){

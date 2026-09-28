@@ -331,7 +331,7 @@ pub struct SelectionCandidate {
     pub comment_key: CommentKey,
     pub source_ref: Uuid,
     pub source_rank: u64,
-    pub source_flags: [bool; 7],
+    pub source_flags: [bool; 6],
     pub in_progress: bool,
     pub latest: Option<SelectionHistory>,
     pub input_fingerprint: Option<String>,

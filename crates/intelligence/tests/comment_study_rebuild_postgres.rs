@@ -157,7 +157,7 @@ async fn source_gate_selects_only_adhd_current_readable_and_unrestricted_comment
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof"]
-async fn source_gate_excludes_content_author_voice_and_unknown_roles() {
+async fn source_gate_keeps_unknown_comment_authors_but_excludes_creator_and_unknown_work() {
     let database = proof_database("comment_study_source_author_role").await;
     sqlx::raw_sql(STUDY_SCHEMA_SQL)
         .execute(database.pool())
@@ -198,7 +198,7 @@ async fn source_gate_excludes_content_author_voice_and_unknown_roles() {
         "2026-09-16T08:02:00Z",
     )
     .await;
-    comment_with_author(
+    let unknown_comment = comment_with_author(
         &database,
         "study-author-role-note",
         "study-author-role-unknown-commenter",
@@ -207,7 +207,7 @@ async fn source_gate_excludes_content_author_voice_and_unknown_roles() {
         "2026-09-16T08:03:00Z",
     )
     .await;
-    comment_with_author(
+    let blank_author_comment = comment_with_author(
         &database,
         "study-author-role-note",
         "study-author-role-blank-commenter",
@@ -237,8 +237,22 @@ async fn source_gate_excludes_content_author_voice_and_unknown_roles() {
         .await
         .unwrap();
 
-    assert_eq!(selected.len(), 1);
-    assert_eq!(selected[0].source_ref, reader_comment);
+    assert_eq!(selected.len(), 3);
+    assert!(
+        selected
+            .iter()
+            .any(|source| source.source_ref == reader_comment)
+    );
+    assert!(
+        selected
+            .iter()
+            .any(|source| source.source_ref == unknown_comment)
+    );
+    assert!(
+        selected
+            .iter()
+            .any(|source| source.source_ref == blank_author_comment)
+    );
 }
 
 #[tokio::test]
@@ -274,7 +288,7 @@ async fn setup_preview_counts_the_same_source_gate_that_freezes_targets() {
         "2026-09-16T08:01:00Z",
     )
     .await;
-    comment_with_author(
+    let unknown = comment_with_author(
         &database,
         "study-preview-note",
         "study-preview-unknown",
@@ -321,14 +335,16 @@ async fn setup_preview_counts_the_same_source_gate_that_freezes_targets() {
 
     assert_eq!(preview.total_comment_count, 5);
     assert_eq!(preview.eligible_comment_count, frozen.len());
-    assert_eq!(frozen.len(), 1);
-    assert_eq!(frozen[0].source_ref, reader);
+    assert_eq!(frozen.len(), 2);
+    assert!(frozen.iter().any(|source| source.source_ref == reader));
+    assert!(frozen.iter().any(|source| source.source_ref == unknown));
+    assert_eq!(preview.unknown_author_count, 1);
     assert_eq!(preview.excluded_counts.creator_voice, 1);
-    assert_eq!(preview.excluded_counts.comment_author_unknown, 1);
+    assert_eq!(preview.excluded_counts.comment_author_unknown, 0);
     assert_eq!(preview.excluded_counts.source_restricted, 1);
     assert_eq!(preview.excluded_counts.text_not_researchable, 1);
     assert_eq!(preview.works.len(), 1);
-    assert_eq!(preview.works[0].eligible_comment_count, 1);
+    assert_eq!(preview.works[0].eligible_comment_count, 2);
 }
 
 #[tokio::test]
