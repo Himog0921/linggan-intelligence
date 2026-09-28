@@ -214,7 +214,7 @@ pub(super) async fn seed_media(database: &Database) -> uuid::Uuid {
     let producer_instance_id = uuid::Uuid::new_v4();
     let attempt_id = uuid::Uuid::new_v4();
     let observation_ref = uuid::Uuid::new_v4();
-    let task = json!({"contractVersion":"linggan.producer.task-spec.v1","taskId":task_id,"source":"manual","platform":"xhs","pageType":"synthetic_material_proof","target":{"contentExternalId":"note-api-media"},"capabilitiesRequested":["media_slots"],"maximumQuota":1,"commentLimit":"not_requested","acquireMedia":"slots","riskPolicy":"local_trusted_user_initiated","stopConditions":["maximum_quota"]});
+    let task = json!({"contractVersion":"linggan.producer.task-spec.v2","taskId":task_id,"source":"manual","platform":"xhs","pageType":"synthetic_material_proof","target":{"contentExternalId":"note-api-media"},"capabilitiesRequested":["media_slots"],"maximumQuota":1,"commentLimit":"not_requested","acquireMedia":"slots","riskPolicy":"local_trusted_user_initiated","stopConditions":["maximum_quota"]});
     let task = parse_producer_task_spec(&task.to_string()).unwrap();
     create_producer_task(database, &task).await.unwrap();
     let attempt = json!({"contractVersion":"linggan.producer.attempt.v1","producerInstanceId":producer_instance_id,"taskId":task_id,"attemptId":attempt_id});
@@ -235,7 +235,7 @@ pub(super) async fn seed_shared_media(database: &Database) -> uuid::Uuid {
     let producer_id = uuid::Uuid::new_v4();
     let attempt_id = uuid::Uuid::new_v4();
     let observation_ref = uuid::Uuid::new_v4();
-    let task = json!({"contractVersion":"linggan.producer.task-spec.v1","taskId":task_id,"source":"manual","platform":"xhs","pageType":"synthetic_material_proof","target":{"contentExternalId":"note-api-media-shared"},"capabilitiesRequested":["media_slots"],"maximumQuota":1,"commentLimit":"not_requested","acquireMedia":"slots","riskPolicy":"local_trusted_user_initiated","stopConditions":["maximum_quota"]});
+    let task = json!({"contractVersion":"linggan.producer.task-spec.v2","taskId":task_id,"source":"manual","platform":"xhs","pageType":"synthetic_material_proof","target":{"contentExternalId":"note-api-media-shared"},"capabilitiesRequested":["media_slots"],"maximumQuota":1,"commentLimit":"not_requested","acquireMedia":"slots","riskPolicy":"local_trusted_user_initiated","stopConditions":["maximum_quota"]});
     create_producer_task(
         database,
         &parse_producer_task_spec(&task.to_string()).unwrap(),
@@ -276,7 +276,7 @@ pub(super) async fn seed_media_refresh(database: &Database) {
     let producer_id = uuid::Uuid::new_v4();
     let attempt_id = uuid::Uuid::new_v4();
     let observation_ref = uuid::Uuid::new_v4();
-    let task = json!({"contractVersion":"linggan.producer.task-spec.v1","taskId":task_id,"source":"manual","platform":"xhs","pageType":"synthetic_material_proof","target":{"contentExternalId":"note-api-media"},"capabilitiesRequested":["media_slots"],"maximumQuota":1,"commentLimit":"not_requested","acquireMedia":"slots","riskPolicy":"local_trusted_user_initiated","stopConditions":["maximum_quota"]});
+    let task = json!({"contractVersion":"linggan.producer.task-spec.v2","taskId":task_id,"source":"manual","platform":"xhs","pageType":"synthetic_material_proof","target":{"contentExternalId":"note-api-media"},"capabilitiesRequested":["media_slots"],"maximumQuota":1,"commentLimit":"not_requested","acquireMedia":"slots","riskPolicy":"local_trusted_user_initiated","stopConditions":["maximum_quota"]});
     create_producer_task(
         database,
         &parse_producer_task_spec(&task.to_string()).unwrap(),

@@ -22,7 +22,8 @@ pub(super) const ARCHIVE_SQL: &str = concat!(
 WITH orders AS (
  SELECT work_order_ref FROM collection_work_order WHERE target_ref=$1 AND lane='deep_archive' AND created_at<=$2::timestamptz
 ), records AS (
- SELECT orders.work_order_ref,task.task_spec,package.package_ref,package.package_kind,package.coverage,package.checkpoint,disposition.record_ordinal,disposition.disposition
+ SELECT orders.work_order_ref,task.task_spec,package.package_ref,package.package_kind,package.coverage,package.checkpoint,disposition.record_ordinal,
+        CASE WHEN disposition.requalified_at>$2::timestamptz THEN disposition.initial_disposition ELSE disposition.disposition END AS disposition
  FROM orders JOIN collection_work_order_lease lease USING(work_order_ref)
  JOIN collection_work_order_lease_task lease_task USING(lease_ref)
  JOIN linggan_runtime_task task ON task.task_id=lease_task.task_id

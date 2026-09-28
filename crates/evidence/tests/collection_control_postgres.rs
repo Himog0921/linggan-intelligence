@@ -292,7 +292,7 @@ async fn claimed_installation_auto_accepts_but_a_person_pause_survives_replaceme
         &InstallationCheckIn {
             install_key: "auto-accept-first",
             installation_credential: None,
-            plugin_version: "0.8.47",
+            plugin_version: "0.8.57",
             browser_label: Some("Chrome"),
             capabilities: serde_json::json!(["author_profile"]),
             selector_health: None,
@@ -331,7 +331,7 @@ async fn claimed_installation_auto_accepts_but_a_person_pause_survives_replaceme
         &InstallationCheckIn {
             install_key: "auto-accept-replacement",
             installation_credential: None,
-            plugin_version: "0.8.47",
+            plugin_version: "0.8.57",
             browser_label: Some("Chrome"),
             capabilities: serde_json::json!(["author_profile"]),
             selector_health: None,
@@ -390,7 +390,7 @@ async fn legacy_registered_closed_default_also_auto_accepts_when_claimed() {
         &InstallationCheckIn {
             install_key: "legacy-default-claim",
             installation_credential: None,
-            plugin_version: "0.8.47",
+            plugin_version: "0.8.57",
             browser_label: Some("Chrome"),
             capabilities: serde_json::json!(["author_profile"]),
             selector_health: None,
@@ -418,7 +418,7 @@ async fn legacy_registered_closed_default_also_auto_accepts_when_claimed() {
 #[ignore = "requires an isolated PostgreSQL proof database"]
 async fn account_identity_and_installation_credential_are_hash_only() {
     let database = proof_database("collection_control_hash_only").await;
-    let installation = install(&database, "hash-only", "0.8.47").await;
+    let installation = install(&database, "hash-only", "0.8.57").await;
     let raw_credential = installation
         .credential
         .as_deref()
@@ -526,7 +526,7 @@ async fn credentials_require_compatible_version_and_rotation_activates_before_re
     .expect("legacy credential absence is readable");
     assert_eq!(legacy_credential_count, 0);
 
-    let current = install(&database, "current-credential", "0.8.47").await;
+    let current = install(&database, "current-credential", "0.8.57").await;
     let first_secret = current
         .credential
         .as_deref()
@@ -993,7 +993,7 @@ async fn account_observation_bootstrap_preserves_the_0064_current_projection_for
 #[ignore = "requires an isolated PostgreSQL proof database"]
 async fn unified_capacity_exposes_distinct_recoverable_reasons() {
     let database = proof_database("collection_control_capacity_reasons").await;
-    let installation = install(&database, "capacity-reasons", "0.8.47").await;
+    let installation = install(&database, "capacity-reasons", "0.8.57").await;
     let original_secret = installation
         .credential
         .as_deref()
@@ -1035,7 +1035,7 @@ async fn unified_capacity_exposes_distinct_recoverable_reasons() {
     assert_capacity_reason(&database, "plugin_version_unsupported").await;
 
     sqlx::query(
-        "UPDATE plugin_installation SET plugin_version='0.8.47', \
+        "UPDATE plugin_installation SET plugin_version='0.8.57', \
              last_seen_at=scope_001_now()-interval '21 minutes' WHERE installation_ref=$1",
     )
     .bind(installation.installation_ref)
@@ -1903,7 +1903,7 @@ async fn rule_schedule_migration_renumbers_a_target_that_already_has_two_rules()
                   fallback_interval_seconds,surface_key,task_contract_version, \
                   rule_payload_digest,created_by) \
              VALUES ($1,$2,$3,$4,'fixed',true,'Asia/Shanghai',true,true,true,86400,86400, \
-                     'keyword_search','linggan.producer.task-spec.v1',repeat('a',64),'person')",
+                     'keyword_search','linggan.producer.task-spec.v2',repeat('a',64),'person')",
         )
         .bind(revision_ref)
         .bind(target_ref)
@@ -1954,7 +1954,7 @@ async fn keyword_lifecycle_migration_repairs_legacy_state_and_closes_the_write_p
               run_on_weekdays,run_on_weekends,all_day,fixed_interval_seconds, \
               fallback_interval_seconds,surface_key,task_contract_version,rule_payload_digest,created_by) \
          VALUES ($1,$2,1,'fixed',true,'Asia/Shanghai',true,true,true,86400,86400, \
-                 'keyword_search','linggan.producer.task-spec.v1',repeat('a',64),'person')",
+                 'keyword_search','linggan.producer.task-spec.v2',repeat('a',64),'person')",
     )
     .bind(rule_ref)
     .bind(target_ref)
@@ -2023,7 +2023,7 @@ fn dynamic_cadence_requires_distinct_comparable_rounds_and_clamps_median_half() 
             &[first.clone(), duplicate_round],
             "creator_profile",
             Some("default"),
-            "linggan.producer.task-spec.v1",
+            "linggan.producer.task-spec.v2",
             account_ref,
             rule_revision_ref,
         ),
@@ -2043,7 +2043,7 @@ fn dynamic_cadence_requires_distinct_comparable_rounds_and_clamps_median_half() 
             &rounds,
             "creator_profile",
             Some("default"),
-            "linggan.producer.task-spec.v1",
+            "linggan.producer.task-spec.v2",
             account_ref,
             rule_revision_ref,
         ),
@@ -2061,7 +2061,7 @@ fn dynamic_cadence_requires_distinct_comparable_rounds_and_clamps_median_half() 
             &too_fast,
             "creator_profile",
             Some("default"),
-            "linggan.producer.task-spec.v1",
+            "linggan.producer.task-spec.v2",
             account_ref,
             rule_revision_ref,
         ),
@@ -2079,7 +2079,7 @@ fn dynamic_cadence_requires_distinct_comparable_rounds_and_clamps_median_half() 
             &too_slow,
             "creator_profile",
             Some("default"),
-            "linggan.producer.task-spec.v1",
+            "linggan.producer.task-spec.v2",
             account_ref,
             rule_revision_ref,
         ),
@@ -2098,7 +2098,7 @@ fn dynamic_cadence_requires_distinct_comparable_rounds_and_clamps_median_half() 
             ],
             "creator_profile",
             Some("default"),
-            "linggan.producer.task-spec.v1",
+            "linggan.producer.task-spec.v2",
             account_ref,
             rule_revision_ref,
         ),
@@ -2175,7 +2175,7 @@ async fn install(database: &Database, label: &str, version: &str) -> Installed {
 }
 
 async fn ready_installation_without_account(database: &Database, label: &str) -> Installed {
-    let installation = install(database, label, "0.8.47").await;
+    let installation = install(database, label, "0.8.57").await;
     set_station_accepting(database, installation.station_ref, true, "person")
         .await
         .expect("person enables station acceptance");
@@ -2245,7 +2245,7 @@ async fn seed_monitored_patrol_order(
     .await
     .expect("monitor rule identity fixture is stored");
     sqlx::query(
-        "INSERT INTO collection_monitor_rule_revision              (rule_revision_ref,target_ref,rule_ref,revision,mode,automatic_enabled,timezone,               run_on_weekdays,run_on_weekends,all_day,fixed_interval_seconds,               fallback_interval_seconds,surface_key,task_contract_version,rule_payload_digest,created_by)          VALUES ($1,$2,$3,1,'fixed',true,'Asia/Shanghai',true,true,true,86400,86400,                  'keyword_search','linggan.producer.task-spec.v1',repeat('a',64),'person')",
+        "INSERT INTO collection_monitor_rule_revision              (rule_revision_ref,target_ref,rule_ref,revision,mode,automatic_enabled,timezone,               run_on_weekdays,run_on_weekends,all_day,fixed_interval_seconds,               fallback_interval_seconds,surface_key,task_contract_version,rule_payload_digest,created_by)          VALUES ($1,$2,$3,1,'fixed',true,'Asia/Shanghai',true,true,true,86400,86400,                  'keyword_search','linggan.producer.task-spec.v2',repeat('a',64),'person')",
     )
     .bind(rule_ref)
     .bind(target_ref)
@@ -2499,7 +2499,7 @@ fn fixed_rule(ranking_key: Option<&str>) -> MonitorRuleDraft {
         scroll_rounds: None,
         top_by_likes: None,
         published_within_days: None,
-        task_contract_version: "linggan.producer.task-spec.v1".to_owned(),
+        task_contract_version: "linggan.producer.task-spec.v2".to_owned(),
     }
 }
 
@@ -2524,7 +2524,7 @@ fn comparable_round(
         coverage_qualified: true,
         surface_key: "creator_profile".to_owned(),
         ranking_key: Some("default".to_owned()),
-        task_contract_version: "linggan.producer.task-spec.v1".to_owned(),
+        task_contract_version: "linggan.producer.task-spec.v2".to_owned(),
         account_ref,
     }
 }

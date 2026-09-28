@@ -369,7 +369,7 @@ async fn seed_detail(database: &Database) {
     let producer_instance_id = uuid::Uuid::new_v4();
     let attempt_id = uuid::Uuid::new_v4();
     let task = json!({
-        "contractVersion":"linggan.producer.task-spec.v1","taskId":task_id,"source":"manual",
+        "contractVersion":"linggan.producer.task-spec.v2","taskId":task_id,"source":"manual",
         "platform":"xhs","pageType":"synthetic_material_proof","target":{"contentExternalId":"note-api-1"},
         "capabilitiesRequested":["content_detail"],"maximumQuota":1,"commentLimit":"not_requested",
         "acquireMedia":"not_requested","riskPolicy":"local_trusted_user_initiated","stopConditions":["maximum_quota"]
@@ -402,7 +402,7 @@ async fn seed_comment(database: &Database) {
     let producer_instance_id = uuid::Uuid::new_v4();
     let attempt_id = uuid::Uuid::new_v4();
     let task = json!({
-        "contractVersion":"linggan.producer.task-spec.v1","taskId":task_id,"source":"manual",
+        "contractVersion":"linggan.producer.task-spec.v2","taskId":task_id,"source":"manual",
         "platform":"xhs","pageType":"synthetic_material_proof","target":{"contentExternalId":"note-api-comments"},
         "capabilitiesRequested":["comments"],"maximumQuota":3,"commentLimit":3,
         "acquireMedia":"not_requested","riskPolicy":"local_trusted_user_initiated","stopConditions":["maximum_quota"]

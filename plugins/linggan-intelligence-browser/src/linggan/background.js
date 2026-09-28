@@ -29,7 +29,6 @@ import {
   selectorHealthForCheckIn,
 } from './selectorHealthReport.js';
 import { localMediaOutbox, localProducerOutbox } from './localProducerOutbox.js';
-import { createManualRuntimeTask, packageDiscovery } from './producerRuntime.js';
 import {
   detailPageSessionStore,
   detailPageNavigationGrantStore,
@@ -218,31 +217,6 @@ async function ensureMediaWorker() {
     if (!/single offscreen document|already exists/i.test(String(error?.message || error))) throw error;
   }).finally(() => { creatingMediaWorker = null; });
   return creatingMediaWorker;
-}
-
-async function queueManualDiscovery(discoveryPackage) {
-  // Mature page readers emit one surface-card shape and all delivery is routed
-  // through this one runtime; there is no second delivery protocol.
-  const cards = Array.isArray(discoveryPackage?.cards) ? discoveryPackage.cards : [];
-  const platform = String(discoveryPackage?.platform || 'xhs');
-  const query = String(discoveryPackage?.query || '').trim();
-  const authorExternalId = String(discoveryPackage?.authorExternalId || '').trim();
-  if (!query && !authorExternalId) throw new Error('linggan_discovery_target_required');
-  const capturePackage = packageDiscovery({
-    platform, cards, query, authorExternalId,
-    observedAt: String(discoveryPackage?.observedAt || new Date().toISOString()),
-    surface: String(discoveryPackage?.surface || 'current_visible_surface'),
-  });
-  const capability = authorExternalId ? 'profile_discovery' : 'discovery_search';
-  return queueCapturePackage({
-    taskSpec: createManualRuntimeTask({
-      platform, pageType: authorExternalId ? 'profile' : 'search_results',
-      target: authorExternalId ? { authorExternalId, surface: 'current_visible_surface' } : { query, surface: 'current_visible_surface' },
-      capabilitiesRequested: [capability], maximumQuota: Math.max(1, capturePackage.records.length),
-      stopConditions: ['current_surface_read_once', 'maximum_quota'],
-    }),
-    capturePackage,
-  });
 }
 
 async function deterministicUuid(seed) {
@@ -1380,7 +1354,7 @@ async function runDispatchedTask() {
       maximumQuota: dispatchedMaximumQuota(spec, 1),
       commentLimit: spec.commentLimit,
       maxTotal: dispatchedCommentMaxTotal(spec, capability),
-      maxSubComments: Number(spec.target?.replyExpandLimit) || 0,
+      maxSubComments: Number(spec.replyExpandLimit) || 0,
       commentDepthMode: capability === 'replies' ? 'allReplies' : 'twoLevel',
       // The page collector must submit against this exact server-issued identity. Rebuilding a
       // manual task here would leave the claimed scheduled task without Attempt or Receipt.
@@ -1537,9 +1511,6 @@ chrome.runtime.onMessage.addListener((message = {}, sender, sendResponse) => {
         : markDetailPageSessionTaskQueued(message);
     }
     if (action === LINGGAN_RUNTIME_ACTION.TEST_FLYWHEEL_CONNECTION) return getLingganStatus();
-    if (action === LINGGAN_RUNTIME_ACTION.SUBMIT_DISCOVERY_PACKAGE) {
-      return queueManualDiscovery(message.discoveryPackage);
-    }
     if (action === LINGGAN_RUNTIME_ACTION.SUBMIT_CAPTURE_PACKAGE) {
       return queueCapturePackage({
         taskSpec: message.taskSpec,
@@ -1559,7 +1530,7 @@ chrome.runtime.onMessage.addListener((message = {}, sender, sendResponse) => {
       const producerInstanceId = await producerInstanceId();
       const taskSpec = createTaskSpec({
         source: 'manual', platform: 'xhs', pageType: 'search_results',
-        target: { query: '__manual_placeholder__', surface: 'local_intent_only' }, capabilitiesRequested: ['discovery_search'],
+        target: { query: '__manual_placeholder__' }, surface: 'local_intent_only', capabilitiesRequested: ['discovery_search'],
         maximumQuota: 20, commentLimit: 'not_requested', acquireMedia: 'not_requested',
         riskPolicy: 'local_trusted_user_initiated', stopConditions: ['manual_stop', 'maximum_quota'],
       });

@@ -12,9 +12,9 @@ const { createLocalAttempt, createLocalSubmission, createManualTaskSpec } = awai
 test('manual TaskSpec remains flat while scheduled control is never fabricated', () => {
   const spec = createManualTaskSpec({ taskId: '11111111-1111-4111-8111-111111111111' });
   assert.deepEqual(spec, {
-    contractVersion: 'linggan.producer.task-spec.v1',
+    contractVersion: 'linggan.producer.task-spec.v2',
     taskId: '11111111-1111-4111-8111-111111111111', source: 'manual', platform: 'xhs',
-    pageType: 'search_results', target: { query: '__manual_placeholder__', surface: 'current_visible_search_surface' },
+    pageType: 'search_results', target: { query: '__manual_placeholder__' }, surface: 'current_visible_search_surface',
     capabilitiesRequested: ['discovery_search'], maximumQuota: 20,
     commentLimit: 'not_requested', acquireMedia: 'not_requested',
     riskPolicy: 'local_trusted_user_initiated',
@@ -34,7 +34,7 @@ test('outbox preserves one submission across an in-flight timeout and acknowledg
   });
   const submission = createLocalSubmission({
     producerInstanceId: attempt.producerInstanceId, taskId: taskSpec.taskId, attemptId: attempt.attemptId,
-    submissionId: '44444444-4444-4444-8444-444444444444', discoveryPackage: { contractVersion: 'synthetic' },
+    submissionId: '44444444-4444-4444-8444-444444444444', capturePackage: { contractVersion: 'synthetic' },
   });
   await outbox.enqueue({ ...submission, taskSpec, attempt });
   await outbox.markInFlight(submission.submissionId, { at: timestamp, timeoutMs: 10 });

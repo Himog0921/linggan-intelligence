@@ -219,7 +219,7 @@ async fn every_declared_capability_admits_one_typed_package_without_a_second_tra
             _ => serde_json::json!({"contentExternalId":"content-synthetic"}),
         };
         let task_wire = serde_json::json!({
-            "contractVersion":"linggan.producer.task-spec.v1", "taskId":task_id,
+            "contractVersion":"linggan.producer.task-spec.v2", "taskId":task_id,
             "source":"manual", "platform":"xhs", "pageType":"synthetic",
             "target":target, "capabilitiesRequested":[capability], "maximumQuota":1,
             "commentLimit":"not_requested",
@@ -264,7 +264,7 @@ async fn runtime_search_twenty_cards_reaches_the_library_without_promoting_retai
     let producer_instance_id = uuid::Uuid::new_v4();
     let attempt_id = uuid::Uuid::new_v4();
     let task_wire = serde_json::json!({
-        "contractVersion":"linggan.producer.task-spec.v1", "taskId":task_id,
+        "contractVersion":"linggan.producer.task-spec.v2", "taskId":task_id,
         "source":"manual", "platform":"xhs", "pageType":"search_results",
         "target":{"query":"ADHD"}, "capabilitiesRequested":["discovery_search"],
         "maximumQuota":20, "commentLimit":"not_requested", "acquireMedia":"not_requested",
@@ -454,7 +454,7 @@ async fn submit_runtime_discovery_fixture(
     let producer_instance_id = uuid::Uuid::new_v4();
     let attempt_id = uuid::Uuid::new_v4();
     let task_wire = serde_json::json!({
-        "contractVersion":"linggan.producer.task-spec.v1", "taskId":task_id,
+        "contractVersion":"linggan.producer.task-spec.v2", "taskId":task_id,
         "source":"manual", "platform":platform, "pageType":"search_results",
         "target":{"query":"synthetic identity fixture"}, "capabilitiesRequested":["discovery_search"],
         "maximumQuota":1, "commentLimit":"not_requested", "acquireMedia":"not_requested",
@@ -826,7 +826,7 @@ fn submission_wire() -> String {
 }
 
 fn runtime_task_spec() -> &'static str {
-    r#"{"contractVersion":"linggan.producer.task-spec.v1","taskId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","source":"manual","platform":"xhs","pageType":"note_detail","target":{"contentExternalId":"note-a"},"capabilitiesRequested":["media_slots"],"maximumQuota":1,"commentLimit":"not_requested","acquireMedia":"slots","riskPolicy":"local_trusted_user_initiated","stopConditions":["manual_stop","maximum_quota"]}"#
+    r#"{"contractVersion":"linggan.producer.task-spec.v2","taskId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","source":"manual","platform":"xhs","pageType":"note_detail","target":{"contentExternalId":"note-a"},"capabilitiesRequested":["media_slots"],"maximumQuota":1,"commentLimit":"not_requested","acquireMedia":"slots","riskPolicy":"local_trusted_user_initiated","stopConditions":["manual_stop","maximum_quota"]}"#
 }
 
 fn runtime_attempt() -> &'static str {
@@ -849,7 +849,7 @@ async fn records_beyond_the_task_quota_still_enter_the_library_but_say_so() {
     let producer_instance_id = uuid::Uuid::new_v4();
     let attempt_id = uuid::Uuid::new_v4();
     let task_wire = serde_json::json!({
-        "contractVersion":"linggan.producer.task-spec.v1", "taskId":task_id,
+        "contractVersion":"linggan.producer.task-spec.v2", "taskId":task_id,
         "source":"manual", "platform":"xhs", "pageType":"search_results",
         "target":{"query":"ADHD"}, "capabilitiesRequested":["discovery_search"],
         "maximumQuota":2, "commentLimit":"not_requested", "acquireMedia":"not_requested",

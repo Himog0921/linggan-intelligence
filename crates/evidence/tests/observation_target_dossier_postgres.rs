@@ -2943,7 +2943,7 @@ async fn ready_installation(database: &Database, label: &str) -> Installed {
         &InstallationCheckIn {
             install_key: &install_key,
             installation_credential: None,
-            plugin_version: "0.8.47",
+            plugin_version: "0.8.57",
             browser_label: Some(label),
             capabilities: serde_json::json!([
                 "author_profile",
@@ -3394,7 +3394,7 @@ async fn seed_bound_task(
     .bind(task_id)
     .bind(hash_for(task_id))
     .bind(serde_json::json!({
-        "contractVersion":"linggan.producer.task-spec.v1",
+        "contractVersion":"linggan.producer.task-spec.v2",
         "taskId":task_id,
         "source":"scheduled",
         "platform":"xhs",

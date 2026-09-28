@@ -19,7 +19,10 @@ mod keyword_archive_detail;
 mod local_discovery;
 mod local_producer;
 mod material_admission;
-pub use material_admission::{TargetMaterialReprojection, reproject_accepted_target_materials};
+pub use material_admission::{
+    ReplyRequalification, TargetMaterialReprojection, reproject_accepted_target_materials,
+    requalify_reply_contract_records,
+};
 mod material_asset_read;
 mod material_contract_validation;
 mod material_cursor;

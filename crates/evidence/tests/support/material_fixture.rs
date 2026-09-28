@@ -221,6 +221,8 @@ pub const MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../../database/migrations/0104_unified_domain_schema_cleanup.sql"),
     "\n",
+    include_str!("../../../../database/migrations/0105_reply_disposition_requalification.sql"),
+    "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ",
     "('0025_comment_current_projection', '64fd9474647834358f8d2d4f1c25e4345e26a3ff79dbfc53a7846915576b0885'), ",
     "('0026_work_resource_read', '08712c71e9b6f97d270739649a7c264da2f115315bef90fabaedded50cf774bd'), ",
@@ -258,7 +260,8 @@ pub const MIGRATIONS: &str = concat!(
     "('0101_collection_command_reason_vocabulary', 'fda3711ea7bb38af6bb5a6a28264a39ac0c04024aef3e6feeb931e07a9b074c1'),\n",
     "('0102_cross_industry_creator_directory', '972ece37c29d79a2a5a9f37cfe3dd4fe71a25446a9884873fb014d36dc7ba8e4'), ",
     "('0103_domain_membership_and_usage', '4345fbd8ed530f5a5184fb9a44d42b32e4702e150ec3301896750a2b7eb80001'), ",
-    "('0104_unified_domain_schema_cleanup', '3a75ffdc34bf60cb69f8a9b8d04cfa3cd6c4207522083a122aeedbb9ac1f3788');\n",
+    "('0104_unified_domain_schema_cleanup', '3a75ffdc34bf60cb69f8a9b8d04cfa3cd6c4207522083a122aeedbb9ac1f3788'), ",
+    "('0105_reply_disposition_requalification', 'bef9c6cee526068148daddbaeb863c03a5a232bce74bbdf9604f32a53338ec38');\n",
 );
 
 pub fn coverage_layer(capability: &str, acquired: i64) -> serde_json::Value {
@@ -344,7 +347,7 @@ async fn submit_custom_package_at(
     let producer_instance_id = uuid::Uuid::new_v4();
     let attempt_id = uuid::Uuid::new_v4();
     let task = serde_json::json!({
-        "contractVersion":"linggan.producer.task-spec.v1","taskId":task_id,"source":"manual",
+        "contractVersion":"linggan.producer.task-spec.v2","taskId":task_id,"source":"manual",
         "platform":task_platform,"pageType":"synthetic_material_proof","target":task_target,
         "capabilitiesRequested":capabilities,"maximumQuota":records.len().max(1),
         "commentLimit":"not_requested","acquireMedia":"not_requested",

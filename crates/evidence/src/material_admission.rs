@@ -9,6 +9,210 @@ use sqlx::{Postgres, Row, Transaction};
 use std::collections::{BTreeMap, HashSet};
 use uuid::Uuid;
 
+/// One bounded, operator-triggered requalification of replies rejected solely because the
+/// historical task put execution instructions in its identity target. The capture and original
+/// task remain immutable. The canonical disposition retains its first decision in audit columns.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplyRequalification {
+    pub candidate_packages: usize,
+    pub eligible_packages: usize,
+    pub eligible_records: usize,
+    pub eligible_admissions: usize,
+    pub requalified_packages: usize,
+    pub requalified_records: usize,
+    pub admitted_records: usize,
+}
+
+pub async fn requalify_reply_contract_records(
+    database: &Database,
+    apply: bool,
+) -> Result<ReplyRequalification, ProducerRuntimeError> {
+    let mut tx = database
+        .pool()
+        .begin()
+        .await
+        .map_err(ProducerRuntimeError::Internal)?;
+    let rows = sqlx::query(
+        "SELECT package.package_ref,package.payload,task.task_spec,task.task_id \
+         FROM linggan_runtime_capture_package package \
+         JOIN linggan_runtime_task task ON task.task_id=package.task_id \
+         JOIN linggan_runtime_submission_receipt receipt ON receipt.package_ref=package.package_ref \
+         WHERE package.package_kind='replies' \
+           AND receipt.material_admission='ACCEPTED' \
+           AND EXISTS (SELECT 1 FROM linggan_runtime_record_disposition disposition \
+             WHERE disposition.package_ref=package.package_ref \
+               AND disposition.disposition='quarantined' \
+               AND disposition.reason='task_package_contract_mismatch' \
+               AND disposition.initial_disposition IS NULL) \
+         ORDER BY package.accepted_at,package.package_ref",
+    )
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
+    let mut report = ReplyRequalification {
+        candidate_packages: rows.len(),
+        eligible_packages: 0,
+        eligible_records: 0,
+        eligible_admissions: 0,
+        requalified_packages: 0,
+        requalified_records: 0,
+        admitted_records: 0,
+    };
+    for row in rows {
+        let package_ref: Uuid = row.get("package_ref");
+        let raw: Value = row.get("payload");
+        let package = parse_producer_capture_package(&raw.to_string())?;
+        if package.package_ref() != package_ref || package.package_kind() != "replies" {
+            return Err(ProducerRuntimeError::MaterialIdentityConflict);
+        }
+        let original_task: Value = row.get("task_spec");
+        let Some(task) = historical_reply_task_as_current_contract(&original_task) else {
+            continue;
+        };
+        if !crate::material_contract_validation::task_package_binding_valid(&task, &package) {
+            continue;
+        }
+        let previous = sqlx::query(
+            "SELECT record_ordinal,disposition,reason,initial_disposition \
+             FROM linggan_runtime_record_disposition WHERE package_ref=$1 ORDER BY record_ordinal",
+        )
+        .bind(package_ref)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(ProducerRuntimeError::Internal)?;
+        if previous.len() != package.records().len()
+            || previous.iter().enumerate().any(|(ordinal, decision)| {
+                decision.get::<i32, _>("record_ordinal") != ordinal as i32
+                    || decision.get::<String, _>("disposition") != "quarantined"
+                    || decision.get::<String, _>("reason") != "task_package_contract_mismatch"
+                    || decision
+                        .get::<Option<String>, _>("initial_disposition")
+                        .is_some()
+            })
+        {
+            continue;
+        }
+        let quota = task.get("maximumQuota").and_then(Value::as_u64);
+        let mut decisions = Vec::with_capacity(package.records().len());
+        for (ordinal, record) in package.records().iter().enumerate() {
+            let Some((disposition, reason)) =
+                crate::material_contract_validation::record_disposition(&package, ordinal, record)
+            else {
+                return Err(ProducerRuntimeError::MaterialIdentityConflict);
+            };
+            let reason = if quota.is_some_and(|limit| ordinal as u64 >= limit) {
+                format!("{reason}__beyond_task_maximum_quota")
+            } else {
+                reason.to_owned()
+            };
+            decisions.push((ordinal as i32, disposition, reason));
+        }
+        if decisions.len() != package.records().len() || decisions.is_empty() {
+            continue;
+        }
+        let already_projected: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM linggan_material_comment WHERE package_ref=$1) \
+                OR EXISTS(SELECT 1 FROM linggan_material_lane_observation WHERE package_ref=$1)",
+        )
+        .bind(package_ref)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(ProducerRuntimeError::Internal)?;
+        if already_projected {
+            return Err(ProducerRuntimeError::MaterialIdentityConflict);
+        }
+        report.eligible_packages += 1;
+        report.eligible_records += decisions.len();
+        let admitted = decisions
+            .iter()
+            .filter(|(_, disposition, _)| *disposition == "accepted_for_library_content")
+            .count();
+        report.eligible_admissions += admitted;
+        if !apply {
+            continue;
+        }
+        for (ordinal, disposition, reason) in &decisions {
+            let updated = sqlx::query(
+                "UPDATE linggan_runtime_record_disposition \
+                 SET initial_disposition=disposition,initial_reason=reason, \
+                     disposition=$3,reason=$4, \
+                     requalified_at=scope_001_now(),requalification_basis='reply_task_identity_v2' \
+                 WHERE package_ref=$1 AND record_ordinal=$2 \
+                   AND disposition='quarantined' AND reason='task_package_contract_mismatch' \
+                   AND initial_disposition IS NULL",
+            )
+            .bind(package_ref)
+            .bind(ordinal)
+            .bind(disposition)
+            .bind(reason)
+            .execute(&mut *tx)
+            .await
+            .map_err(ProducerRuntimeError::Internal)?;
+            if updated.rows_affected() != 1 {
+                return Err(ProducerRuntimeError::MaterialIdentityConflict);
+            }
+        }
+        insert_typed_materials(&mut tx, &package).await?;
+        let projected: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM linggan_material_comment WHERE package_ref=$1 AND is_reply",
+        )
+        .bind(package_ref)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(ProducerRuntimeError::Internal)?;
+        if projected != admitted as i64 {
+            return Err(ProducerRuntimeError::MaterialIdentityConflict);
+        }
+        report.requalified_packages += 1;
+        report.requalified_records += decisions.len();
+        report.admitted_records += admitted;
+    }
+    if apply {
+        tx.commit().await.map_err(ProducerRuntimeError::Internal)?;
+    } else {
+        tx.rollback()
+            .await
+            .map_err(ProducerRuntimeError::Internal)?;
+    }
+    Ok(report)
+}
+
+fn historical_reply_task_as_current_contract(original: &Value) -> Option<Value> {
+    if original.get("contractVersion")?.as_str()? != "linggan.producer.task-spec.v1"
+        || original.get("source")?.as_str()? != "scheduled"
+        || original.pointer("/capabilitiesRequested/0")?.as_str()? != "replies"
+        || original.get("capabilitiesRequested")?.as_array()?.len() != 1
+    {
+        return None;
+    }
+    let target = original.get("target")?.as_object()?;
+    if !target.keys().all(|key| {
+        matches!(
+            key.as_str(),
+            "contentExternalId" | "replyExpandLimit" | "commentScope" | "requestedCommentLimit"
+        )
+    }) {
+        return None;
+    }
+    let content_id = target.get("contentExternalId")?.as_str()?;
+    let limit = target.get("replyExpandLimit")?.as_u64()?;
+    if content_id.trim().is_empty() || limit == 0 {
+        return None;
+    }
+    let mut current = original.clone();
+    current["contractVersion"] =
+        Value::String(linggan_contracts::PRODUCER_TASK_SPEC_VERSION.to_owned());
+    current["target"] = serde_json::json!({"contentExternalId": content_id});
+    for key in ["replyExpandLimit", "commentScope", "requestedCommentLimit"] {
+        if let Some(value) = target.get(key) {
+            current[key] = value.clone();
+        }
+    }
+    linggan_contracts::parse_producer_task_spec(&current.to_string()).ok()?;
+    Some(current)
+}
+
 /// One-time operator projection of original accepted packages for a known Target/Domain pair.
 /// It writes no new CapturePackage, Receipt or disposition, and never reads retired cross tables.
 #[derive(Debug, Serialize)]

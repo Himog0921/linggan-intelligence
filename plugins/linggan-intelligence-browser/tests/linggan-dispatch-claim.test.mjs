@@ -14,6 +14,19 @@ import {
 
 const HEALTH = { routes: { dispatch: { claim: '/api/local/dispatch/claim' } } };
 
+test('execution instruction types and bounds match the server task contract', () => {
+  const base = { taskId: '20000000-0000-4000-8000-000000000099', source: 'manual', platform: 'xhs',
+    pageType: 'note_detail', target: { contentExternalId: 'note-1' }, capabilitiesRequested: ['replies'],
+    commentLimit: 20, stopConditions: ['maximum_quota'] };
+  for (const replyExpandLimit of [-1, 0, 2.5, 0x100000000]) {
+    assert.throws(() => createTaskSpec({ ...base, replyExpandLimit }), /task_spec_reply_expand_limit_invalid/);
+  }
+  assert.equal(createTaskSpec({ ...base, replyExpandLimit: 2 }).replyExpandLimit, 2);
+  const search = { ...base, target: { query: 'query' }, capabilitiesRequested: ['discovery_search'] };
+  assert.throws(() => createTaskSpec({ ...search, ranking: 123 }), /task_spec_ranking_invalid/);
+  assert.throws(() => createTaskSpec({ ...search, scrollRounds: 0x100000000 }), /task_spec_scrollRounds_invalid/);
+});
+
 test('the claim route comes from /health and is namespace-checked', () => {
   assert.equal(dispatchClaimRouteFromHealth(HEALTH), '/api/local/dispatch/claim');
   assert.equal(dispatchClaimRouteFromHealth({ routes: {} }), null);
@@ -119,7 +132,7 @@ test('only an explicit permission is treated as permission', async () => {
 
 test('a permitted claim carries the task and its lease', async () => {
   const taskSpec = {
-    contractVersion: 'linggan.producer.task-spec.v1',
+    contractVersion: 'linggan.producer.task-spec.v2',
     taskId: '11111111-1111-4111-8111-111111111111',
     source: 'scheduled',
     platform: 'xhs',

@@ -9,7 +9,7 @@ use serde_json::Value;
 use thiserror::Error;
 use uuid::Uuid;
 
-pub const PRODUCER_TASK_SPEC_VERSION: &str = "linggan.producer.task-spec.v1";
+pub const PRODUCER_TASK_SPEC_VERSION: &str = "linggan.producer.task-spec.v2";
 pub const PRODUCER_ATTEMPT_VERSION: &str = "linggan.producer.attempt.v1";
 pub const CAPTURE_PACKAGE_VERSION: &str = "linggan.producer.capture-package.v1";
 
@@ -76,6 +76,15 @@ struct TaskSpecWire {
     /// 记成完成（宁可漏记一次，不可误记一次）。
     expected_count: Option<u32>,
     comment_limit: Value,
+    /// Instructions are separate from the source-object identity in `target`.
+    reply_expand_limit: Option<u32>,
+    ranking: Option<String>,
+    scroll_rounds: Option<u32>,
+    top_by_likes: Option<u32>,
+    published_within_days: Option<u32>,
+    comment_scope: Option<String>,
+    requested_comment_limit: Option<u32>,
+    surface: Option<String>,
     acquire_media: Value,
     risk_policy: String,
     stop_conditions: Vec<String>,
@@ -292,6 +301,7 @@ pub fn parse_producer_task_spec(
     }
     if wire.capabilities_requested.len() != 1
         || !valid_target_for_capability(&wire.target, &wire.capabilities_requested[0])
+        || !valid_execution_for_capability(&wire)
         || !valid_comment_limit(&wire.comment_limit)
         || !valid_acquire_media(&wire.acquire_media)
     {
@@ -585,6 +595,9 @@ pub const LOCAL_TRUSTED_RISK_POLICY: &str = "local_trusted_user_initiated";
 pub const SERVER_LEASED_RISK_POLICY: &str = "server_authorized_leased";
 
 fn valid_target_for_capability(target: &Value, capability: &str) -> bool {
+    let Some(fields) = target.as_object() else {
+        return false;
+    };
     let non_empty = |key: &str| {
         target
             .get(key)
@@ -592,16 +605,67 @@ fn valid_target_for_capability(target: &Value, capability: &str) -> bool {
             .is_some_and(|value| !value.trim().is_empty())
     };
     match capability {
-        "discovery_search" => non_empty("query"),
-        "profile_discovery" | "author_profile" => non_empty("authorExternalId"),
-        "content_detail" | "comments" | "replies" | "media_bytes" => non_empty("contentExternalId"),
+        "discovery_search" => fields.len() == 1 && non_empty("query"),
+        "profile_discovery" | "author_profile" => {
+            fields.len() == 1 && non_empty("authorExternalId")
+        }
+        "content_detail" | "comments" | "replies" | "media_bytes" => {
+            fields.len() == 1 && non_empty("contentExternalId")
+        }
         // A media slot either belongs to a work or to an independently observed creator
         // profile.  Requiring exactly one prevents a producer from inventing a work context
         // for an author avatar or from smuggling an ambiguous mixed target through the lane.
-        "media_slots" => non_empty("contentExternalId") ^ non_empty("authorExternalId"),
-        "batch_checkpoint" => non_empty("taskType"),
+        "media_slots" => {
+            fields.len() == 1 && (non_empty("contentExternalId") ^ non_empty("authorExternalId"))
+        }
+        "batch_checkpoint" => fields.len() == 1 && non_empty("taskType"),
         _ => false,
     }
+}
+
+fn valid_execution_for_capability(wire: &TaskSpecWire) -> bool {
+    let capability = wire.capabilities_requested[0].as_str();
+    let search_instruction = wire.ranking.is_some()
+        || wire.scroll_rounds.is_some()
+        || wire.top_by_likes.is_some()
+        || wire.published_within_days.is_some();
+    let discussion_instruction =
+        wire.comment_scope.is_some() || wire.requested_comment_limit.is_some();
+    if (search_instruction && capability != "discovery_search")
+        || (discussion_instruction && !matches!(capability, "comments" | "replies"))
+        || (wire.reply_expand_limit.is_some() && capability != "replies")
+        || (wire.surface.is_some()
+            && !matches!(capability, "discovery_search" | "profile_discovery"))
+    {
+        return false;
+    }
+    if capability == "replies"
+        && wire.source == "scheduled"
+        && !wire.reply_expand_limit.is_some_and(|limit| limit > 0)
+    {
+        return false;
+    }
+    if wire.reply_expand_limit == Some(0)
+        || wire.scroll_rounds == Some(0)
+        || wire.top_by_likes == Some(0)
+        || wire.published_within_days == Some(0)
+        || wire
+            .ranking
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        || wire
+            .comment_scope
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        || wire
+            .surface
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+    {
+        return false;
+    }
+    wire.requested_comment_limit
+        .is_none_or(|limit| limit > 0 && wire.comment_limit.as_u64() == Some(u64::from(limit)))
 }
 
 fn valid_comment_limit(value: &Value) -> bool {
@@ -648,10 +712,46 @@ mod tests {
 
     #[test]
     fn task_spec_allows_manual_and_scheduled_without_implementing_a_poller() {
-        let value = r#"{"contractVersion":"linggan.producer.task-spec.v1","taskId":"11111111-1111-4111-8111-111111111111","source":"scheduled","platform":"xhs","pageType":"detail","target":{"contentExternalId":"note-1"},"capabilitiesRequested":["content_detail"],"maximumQuota":1,"commentLimit":"not_requested","acquireMedia":"slots","riskPolicy":"server_authorized_leased","stopConditions":["maximum_quota"]}"#;
+        let value = r#"{"contractVersion":"linggan.producer.task-spec.v2","taskId":"11111111-1111-4111-8111-111111111111","source":"scheduled","platform":"xhs","pageType":"detail","target":{"contentExternalId":"note-1"},"capabilitiesRequested":["content_detail"],"maximumQuota":1,"commentLimit":"not_requested","acquireMedia":"slots","riskPolicy":"server_authorized_leased","stopConditions":["maximum_quota"]}"#;
         let spec = parse_producer_task_spec(value).expect("flat task spec is accepted");
         assert_eq!(spec.source(), "scheduled");
         assert_eq!(spec.platform(), "xhs");
+    }
+
+    #[test]
+    fn reply_and_search_instructions_cannot_become_target_identity() {
+        let base = serde_json::json!({
+            "contractVersion": PRODUCER_TASK_SPEC_VERSION,
+            "taskId": "11111111-1111-4111-8111-111111111111",
+            "source": "scheduled", "platform": "xhs", "pageType": "note_detail",
+            "target": {"contentExternalId": "note-1"},
+            "capabilitiesRequested": ["replies"], "maximumQuota": 20,
+            "commentLimit": 20, "replyExpandLimit": 2,
+            "acquireMedia": "not_requested", "riskPolicy": SERVER_LEASED_RISK_POLICY,
+            "stopConditions": ["maximum_quota"]
+        });
+        assert!(parse_producer_task_spec(&base.to_string()).is_ok());
+        let mut inside_target = base.clone();
+        inside_target["target"]["replyExpandLimit"] = serde_json::json!(2);
+        assert!(parse_producer_task_spec(&inside_target.to_string()).is_err());
+        let mut missing = base.clone();
+        missing.as_object_mut().unwrap().remove("replyExpandLimit");
+        assert!(parse_producer_task_spec(&missing.to_string()).is_err());
+        let mut invalid_limit = base.clone();
+        invalid_limit["source"] = serde_json::json!("manual");
+        invalid_limit["riskPolicy"] = serde_json::json!(LOCAL_TRUSTED_RISK_POLICY);
+        invalid_limit["replyExpandLimit"] = serde_json::json!(0);
+        assert!(parse_producer_task_spec(&invalid_limit.to_string()).is_err());
+        let mut search = base;
+        search["target"] = serde_json::json!({"query": "考研自习"});
+        search["capabilitiesRequested"] = serde_json::json!(["discovery_search"]);
+        search["pageType"] = serde_json::json!("search_results");
+        search.as_object_mut().unwrap().remove("replyExpandLimit");
+        search["ranking"] = serde_json::json!("most_liked");
+        search["scrollRounds"] = serde_json::json!(3);
+        assert!(parse_producer_task_spec(&search.to_string()).is_ok());
+        search["target"]["ranking"] = serde_json::json!("most_liked");
+        assert!(parse_producer_task_spec(&search.to_string()).is_err());
     }
 
     #[test]

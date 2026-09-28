@@ -8,7 +8,7 @@ use linggan_contracts::{
 
 fn spec(source: &str, risk_policy: &str) -> String {
     format!(
-        r#"{{"contractVersion":"linggan.producer.task-spec.v1",
+        r#"{{"contractVersion":"linggan.producer.task-spec.v2",
                 "taskId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","source":"{source}",
                 "platform":"xhs","pageType":"profile","target":{{"authorExternalId":"a"}},
                 "capabilitiesRequested":["profile_discovery"],"maximumQuota":200,

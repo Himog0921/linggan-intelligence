@@ -38,6 +38,10 @@ export function taskFor(platform, capability, target, options = {}) {
     maximumQuota: Object.hasOwn(options, 'maximumQuota') ? options.maximumQuota : 1,
     commentLimit: options.commentLimit ?? 'not_requested', acquireMedia: options.acquireMedia ?? 'not_requested',
     stopConditions: options.stopConditions || ['manual_stop', 'maximum_quota'],
+    replyExpandLimit: options.replyExpandLimit,
+    commentScope: options.commentScope,
+    requestedCommentLimit: options.requestedCommentLimit,
+    surface: options.surface,
   });
 }
 
@@ -53,11 +57,9 @@ export function commentTaskInstruction(noteId, maxTotal) {
     // bound execution without rewriting the returned count into a fictional prior quota.
     maximumQuota: limited === 'not_requested' ? null : limited,
     commentLimit: limited,
-    target: {
-      contentExternalId: String(noteId || ''),
-      commentScope: limited === 'not_requested' ? 'all_public_until_natural_end' : 'maximum_quota',
-      ...(limited === 'not_requested' ? {} : { requestedCommentLimit: limited }),
-    },
+    target: { contentExternalId: String(noteId || '') },
+    commentScope: limited === 'not_requested' ? 'all_public_until_natural_end' : 'maximum_quota',
+    ...(limited === 'not_requested' ? {} : { requestedCommentLimit: limited }),
     stopConditions: limited === 'not_requested'
       ? ['manual_stop', 'collector_complete', 'time_budget', 'risk_budget']
       : ['manual_stop', 'maximum_quota', 'collector_complete', 'time_budget', 'risk_budget'],
@@ -83,13 +85,14 @@ export function createLingganContentRuntime({ platform } = {}) {
       const packageValue = packageDiscovery({ platform, cards, query, authorExternalId, surface, pageFacts });
       const capability = authorExternalId ? 'profile_discovery' : 'discovery_search';
       const target = authorExternalId
-        ? { authorExternalId: String(authorExternalId), surface }
-        : { query: String(query || ''), surface };
+        ? { authorExternalId: String(authorExternalId) }
+        : { query: String(query || '') };
       return submit(taskFor(platform, capability, target, {
         // The requested target is execution intent.  A short page result must never silently
         // rewrite it to the actual count returned by the collector.
         maximumQuota: Math.max(1, Number(maximumQuota) || packageValue.records.length),
         stopConditions: ['manual_stop', 'maximum_quota', 'surface_ended', 'time_budget', 'risk_budget'],
+        surface,
         taskSpec,
       }), packageValue);
     },
@@ -104,12 +107,11 @@ export function createLingganContentRuntime({ platform } = {}) {
     },
     async submitComments(result, noteId, settings = {}) {
       const instruction = commentTaskInstruction(noteId, settings.maxTotal);
-      const taskTarget = settings.taskSpec?.target || instruction.target;
       if (settings.taskSpec) {
         const capability = settings.taskSpec.capabilitiesRequested?.[0];
         const packageValue = capability === 'replies'
-          ? packageReplies({ platform, result, noteId, taskTarget })
-          : packageComments({ platform, result, noteId, taskTarget });
+          ? packageReplies({ platform, result, noteId })
+          : packageComments({ platform, result, noteId });
         return submit(
           taskFor(platform, capability, instruction.target, {
             ...instruction,
@@ -118,12 +120,12 @@ export function createLingganContentRuntime({ platform } = {}) {
           packageValue,
         );
       }
-      const packageValue = packageComments({ platform, result, noteId, taskTarget });
+      const packageValue = packageComments({ platform, result, noteId });
       const comments = await submit(
         taskFor(platform, 'comments', instruction.target, instruction),
         packageValue,
       );
-      const repliesPackage = packageReplies({ platform, result, noteId, taskTarget });
+      const repliesPackage = packageReplies({ platform, result, noteId });
       if (repliesPackage.records.length === 0) {
         return { ...comments, replies: { delivery: 'not_applicable' } };
       }

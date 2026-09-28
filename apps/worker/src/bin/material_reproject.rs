@@ -1,5 +1,5 @@
 //! Bounded operator tool: preview by default, project original accepted packages with --apply.
-use linggan_evidence::reproject_accepted_target_materials;
+use linggan_evidence::{reproject_accepted_target_materials, requalify_reply_contract_records};
 use std::process::ExitCode;
 use uuid::Uuid;
 
@@ -16,6 +16,15 @@ async fn main() -> ExitCode {
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if matches!(args.as_slice(), [flag] if flag == "--requalify-replies")
+        || matches!(args.as_slice(), [flag, apply] if flag == "--requalify-replies" && apply == "--apply")
+    {
+        let url = std::env::var("LINGGAN_LOCAL_DATABASE_URL")?;
+        let database = linggan_storage_postgres::Database::connect(&url).await?;
+        let report = requalify_reply_contract_records(&database, args.len() == 2).await?;
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(());
+    }
     let (target_ref, domain_ref, apply) = match args.as_slice() {
         [target_flag, target, domain_flag, domain]
             if target_flag == "--target" && domain_flag == "--domain" =>

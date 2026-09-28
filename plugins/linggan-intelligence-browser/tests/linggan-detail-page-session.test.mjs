@@ -135,6 +135,7 @@ function task(capability, taskId = `${capability}-task`) {
     taskId: /^[0-9a-f-]{36}$/.test(taskId) ? taskId : `00000000-0000-4000-8000-${String(['content_detail','media_slots','comments','replies'].indexOf(capability)+1).padStart(12,'0')}`,
     source: 'scheduled', platform: 'xhs', pageType: 'note_detail',
     target: { contentExternalId: 'note-1' }, capabilitiesRequested: [capability],
+    ...(capability === 'replies' ? { replyExpandLimit: 2 } : {}),
     maximumQuota: 1, riskPolicy: 'server_authorized_leased', stopConditions: ['maximum_quota'],
   });
 }

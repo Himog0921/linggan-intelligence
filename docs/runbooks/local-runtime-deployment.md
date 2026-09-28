@@ -84,6 +84,12 @@ cd /Users/moglenny/proma/linggan-intelligence
 「读不到迁移台账」并**跳过检查继续启动**——硬拦会让服务在数据库没起来时永远起不来。
 因此开机后第一次启动不保证迁移检查生效；手工重启一次即可获得完整检查。
 
+### 回复 TaskSpec v2 的一次切换（COLLECTION-REPLIES-CONTRACT-001）
+
+本次升级把唯一 Browser Producer TaskSpec 切为 v2，服务端最低插件版本为 0.8.57。先停止新工单领取，核对未到期租约与浏览器 durable outbox 中的 v1 交付；让已入队材料按原合同完成交付，再同时切换 API、巡检 worker 与插件。不得让旧插件领取 v2 任务，也不得让新版插件把旧 outbox 的 v1 TaskSpec 当成新任务重发。恢复领取前核对插件安装版本、三进程 revision、迁移台账与一条真实 Task→Attempt→Package→Receipt→disposition 链；再单独执行 `linggan-material-reproject --requalify-replies` 预览，核对候选数并安排低负载窗口后才由获授权的运维人员执行 `--apply`。该命令一次读取候选包并在单事务内重判，是历史重判的唯一受控写入入口；数据库 trigger 约束一次写入的形状，身份与逐条关系校验由命令完成。
+
+2026-09-28 的只读盘点显示共享库没有未到期且未释放的租约；历史 v1 租约任务仍有 `pending=852`、`in_progress=26`，均须按租约当前有效性判断，不能按状态字符串直接当作正在运行。最近 24 小时报到的两个安装仍为 0.8.56；浏览器 outbox 是否仍有待发送的 v1 envelope 尚未核对，因此候选代码、迁移和 0.8.57 ZIP 不构成已完成切换的证明。
+
 ## 5. 三个服务
 
 | 服务 | launchd label | 二进制 |
@@ -262,6 +268,19 @@ recovery 下旧包的 Attempt 重放与 Submission 保持开放，不应清空�
 未经新库兼容实证不得切回旧二进制。恢复阶段的 PostgreSQL 用例证明禁止新 claim 时旧包仍可接纳。
 
 历史处置工具默认只读（命令运行环境需设置正确的 `LINGGAN_LOCAL_DATABASE_URL`）：
+
+`COLLECTION-REPLIES-CONTRACT-001` 的回复历史恢复使用同一个 `linggan-material-reproject` 运维入口，
+但只处理旧任务把 `replyExpandLimit` 放入 `target`、且原处置恰为
+`task_package_contract_mismatch` 的 replies Package。先执行 `0105` migration，再预览；
+预览只读。`--apply` 在一个事务内用当前任务/包绑定与逐条回复关系 validator 重判，
+将原始隔离判定留在同一 disposition 行的 `initial_*` 字段，并调用既有 Material 投影。
+身份不符、已有投影或不完整的原包均不得恢复；关系不合格的记录不得准入，同包合法回复仍可恢复。该操作不扫描实时提交流程的历史，
+不改不可变 Task、Attempt、CapturePackage 或 Receipt。共享库执行需受控发布授权和运行态核验。
+
+```bash
+cargo run --locked -p linggan-worker --bin linggan-material-reproject -- --requalify-replies
+cargo run --locked -p linggan-worker --bin linggan-material-reproject -- --requalify-replies --apply
+```
 
 ```bash
 cargo run --locked -p linggan-worker --bin linggan-collection-repair > /tmp/collection-repair-preview.json
