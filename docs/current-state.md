@@ -8,11 +8,11 @@
 
 ### GREENFIELD Comment Research / Draft PR #338（P2 候选；P3 自动化证明通过，阶段质量出口未达成）
 
-2026-09-28 核对：PR #338 仍 OPEN/Draft，head=`4c00605669386c198fcc0e1ee33d4391c6731676`，base=`main@f54778562fbaaff56f482cb3d9fa46b0bbf51965`，mergeable/CLEAN。精确 Actions run [36380357360](https://github.com/Himog0921/linggan-intelligence/actions/runs/36380357360) 的 compile、unit、隔离 PostgreSQL synthetic proof 成功；push-only source export 跳过。该 head 的旧前端步骤因测试脚本不存在而没有实际浏览器断言。本次新增的 P2 浏览器回归现已在本机 Playwright Chromium 通过，使用真实页面 HTML/CSS/JS、合成 API 回执，覆盖保存/激活方法、预算预览、Run 启动和停止反馈；该脚本尚未进入 exact-head CI，且不替代数据库真实回执或 Mog 页面验收。
+2026-09-28 核对：PR #338 仍 OPEN/Draft，head=`c25c07f81c8e8cfed0010d68bbadfe3d591a49f4`，base=`main@f54778562fbaaff56f482cb3d9fa46b0bbf51965`，mergeable/CLEAN。精确 Actions run [36382763627](https://github.com/Himog0921/linggan-intelligence/actions/runs/36382763627) 的 compile、unit、隔离 PostgreSQL synthetic proof 和前端行为步骤均成功；push-only source export 跳过。新增 P2 Playwright 回归使用真实页面 HTML/CSS/JS 和合成 API 回执，覆盖保存/激活方法、预算预览、Run 启动及停止反馈；这只是合成接口下的自动行为证据，不替代真实 Axum/PG 页面与 Mog 业务验收。
 
 主线/上线状态已分开核实：`127.0.0.1:3000/health` ready；服务进程工作目录是本机 `runtime-main`，该 checkout 干净并精确位于 `f54778562fbaaff56f482cb3d9fa46b0bbf51965`，与当前 `origin/main` 一致。PR #338 本身没有合并；main 上 #323–#327、#329、#335–#336、#347 是独立 PR。当前 #338 分支相对 main 有 55 个提交，`git cherry` 没发现 patch-equivalent 提交。因此“相关评论研究功能已在 main/运行时”成立；“当前 #338 的独有增量已合并上线”不成立。当前 runtime 健康接口未发布数据库迁移 head；不沿用 9/27 migration 0104 快照冒充本次核验。
 
-P2 的方法版本、preview/start、预算绑定、幂等与 v2 执行、取消/显式重试已有源码及隔离 PG/Axum 证明；P2 仍待 Mog 对真实页面动作、数字和回执验收。P3 的 pause/resume/stop CAS、公平调度、分阶段恢复、Problem lifecycle、SIGTERM/SIGKILL recovery 和 AC043 未知作者语义有 exact-head CI 证明；P3 质量出口仍需负责人确认独立标注、分层 Recall@K、获批真实模型语义及 HTTP 路径。私有标注文件的存在或行数不等于 Gold Set 质量门通过。按你要求保留人工/业务验收外部门槛，不自行自标、自评或跳入 P4；P4→P5→P6→P7→P8 仍按手册顺序续办。T01–T54 仍为 49 `NOT_RUN`、5 `PASS`（T23–T26、T43），未按代码测试数折算阶段完成度。
+P2 的方法版本、preview/start、预算绑定、幂等与 v2 执行、取消/显式重试已有源码及隔离 PG/Axum 证明；新加的合成 API 浏览器回归也通过 exact-head CI 36382763627。P2 仍待 Mog 对真实页面动作、数字和回执验收。P3 的 pause/resume/stop CAS、公平调度、分阶段恢复、Problem lifecycle、SIGTERM/SIGKILL recovery 和 AC043 未知作者语义有 exact-head CI 证明；P3 质量出口仍需负责人确认独立标注、分层 Recall@K、获批真实模型语义及 HTTP 路径。私有标注文件的存在或行数不等于 Gold Set 质量门通过。按你要求保留人工/业务验收外部门槛，不自行自标、自评或跳入 P4；P4→P5→P6→P7→P8 仍按手册顺序续办。T01–T54 仍为 49 `NOT_RUN`、5 `PASS`（T23–T26、T43），未按代码测试数折算阶段完成度。
 
 本轮没有改动 `:3000` 运行时、共享数据库或 migration，没有调用真实 provider、切换/部署或合并；隔离测试继续只使用 disposable 数据库和 synthetic adapter。P0 的数据库细项与 P8 备份恢复属于独立现场证据；它们不阻塞本轮隔离代码开发，但仍需按阶段记录，不能算作已取得现场证明。
 

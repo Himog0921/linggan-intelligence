@@ -15,18 +15,18 @@
 
 ## 当前剩余工作：严格沿用原 P0–P8
 
-本表是 2026-09-28 的状态快照。PR #338 仍 OPEN/Draft；当前远端 head=`4c00605669386c198fcc0e1ee33d4391c6731676`，base=`main@f54778562fbaaff56f482cb3d9fa46b0bbf51965`；exact-head run [36380357360](https://github.com/Himog0921/linggan-intelligence/actions/runs/36380357360) 的 compile、unit 与隔离 PostgreSQL synthetic proof 成功，source export 按 push-only 条件跳过。此 run 的前端步骤当时没有 UI 测试脚本，故没有浏览器断言。本次新增 P2 合成浏览器回归已在本机 Playwright Chromium 通过，但尚未进入该 exact-head CI。`:3000` health 当前为 ready；进程 cwd `runtime-main` 的干净 checkout 与当前 `origin/main` 同为 `f5477856`。PR #338 自身仍未合并；main 上的 #323–#327、#329、#335–#336、#347 是独立 PR。当前 #338 分支相对 main 的 55 个提交没有 patch-equivalent 提交，因此相关能力已在 main/运行时不等于 #338 独有增量已合并。共享 migration、真实 provider、业务验收与部署仍独立计证；测试数量不折算成阶段百分比。
+本表是 2026-09-28 的状态快照。PR #338 仍 OPEN/Draft；当前远端 head=`c25c07f81c8e8cfed0010d68bbadfe3d591a49f4`，base=`main@f54778562fbaaff56f482cb3d9fa46b0bbf51965`；精确 head Actions run [36382763627](https://github.com/Himog0921/linggan-intelligence/actions/runs/36382763627) 的 compile、unit、隔离 PostgreSQL synthetic proof 与前端行为步骤全部成功，push-only source export 按条件跳过。`:3000` health 当前为 ready；进程 cwd `runtime-main` 的干净 checkout 与当前 `origin/main` 同为 `f5477856`。PR #338 自身仍未合并；main 上的 #323–#327、#329、#335–#336、#347 是独立 PR。当前 #338 分支相对 main 的 55 个提交没有 patch-equivalent 提交，因此相关能力已在 main/运行时不等于 #338 独有增量已合并。共享 migration、真实 provider、业务验收与部署仍独立计证；测试数量不折算成阶段百分比。
 
 | 手册阶段 | 当前已有证据 | 未完成/下一关 | 状态 |
 |---|---|---|---|
 | P0 外围接线与隔离启动 | 当前 `:3000/health` ready；进程从 `runtime-main` 启动，其干净 checkout 精确为 `main@f5477856`。当前 health 不公开 migration head，本轮未查询共享数据库明细；9/27 的 migration/活动请求快照留作历史记录，不冒充今天的核验 | 用户环境数据库细项、迁移/在途记录与 P8 恢复证据按现场范围分别核验；不阻塞本轮隔离代码开发 | 运行版本与健康已核；共享库当前 migration/业务数据未复核 |
 | P1 原声、清洗与语境 | #323–#336 等独立 PR 已合入 main，`main@f5477856` 正是当前 `:3000` 运行 checkout；材料/评论目录、详情历史、清洗和选择能力已在该运行版本 | T01–T54 全量、剩余边界及 Mog 对当前运行页面的完整验收 | 相关已合入能力在运行；整阶段验收未结 |
-| P2 选择、预算、启动与取消/重试 | 方法版本、preview/start、请求幂等、预算与 v2 semantic worker、request snapshot/fence、Run 取消及显式 `retry_failed` 已在 PR 候选；exact-head CI 36380357360 compile/unit/隔离 PG synthetic proof 成功。新添 Playwright 回归已本机通过，覆盖方法保存/激活、三预算预览、Run 启动与停止 UI 反馈（API 回执为 synthetic） | 真实接口逐动作/逐数字与 Mog 页面验收；估算和 provider 实测用量差异仍需账本承接 | 源码、隔离 API/PG 与本机 synthetic browser 已验证；新浏览器脚本尚无 exact-head CI；P2 未验收 |
+| P2 选择、预算、启动与取消/重试 | 方法版本、preview/start、请求幂等、预算与 v2 semantic worker、request snapshot/fence、Run 取消及显式 `retry_failed` 已在 PR 候选；exact-head CI 36382763627 的 compile/unit/隔离 PG synthetic proof/前端行为步骤全部成功。Playwright 覆盖方法保存/激活、三预算预览、Run 启动与停止 UI 反馈（API 回执为 synthetic） | 真实接口逐动作/逐数字与 Mog 页面验收；估算和 provider 实测用量差异仍需账本承接 | 源码、隔离 API/PG 与 synthetic browser CI 已验证；真实页面/业务验收仍待完成 |
 | P3 有界执行、质量与恢复 | 公平调度、有限恢复、T23–T26、M4 Rust adapter→WeMM 合成探针、SIGTERM drain、同作品冷启动、AC040–AC052 Problem lifecycle、SIGKILL/restart 和 AC043 均有隔离及 exact-head CI 证据；未知作者信号保留，但新 Problem 仍需两个已知且不同作者 | 负责人确认独立 Gold Set 与分层 Recall@K、真实模型语义/HTTP 路径；M4 尚未采集 system memory pressure/swap。手册 P3 出口前不进入 P4 | 自动化执行/恢复证明通过；质量出口 `BLOCKED_ON_HUMAN_ANNOTATION`，文件存在和合成测试都不能替代人工确认 |
 | P4 长期归并与纠偏 | 既有 Problem、membership、撤销/重研等候选路径可复用 | 有效 head、跨下游限制传播、合并/撤销及支持版本历史的同版 PG 证明 | 部分候选；整阶段 NOT_VERIFIED |
 | P5 指标、语言与情报接口 | Intelligence 已有材料和事实读取基础 | 六视角、窗口/cohort/distinct 对账、durable event 与下游消费 | 未形成完整验收 |
 | P6 每日增量与资源 | 自动化衔接仅有设计 | dirty 合并、时区/计划开关、预算续办、退避及资源争用证明 | 未启用、未验收 |
-| P7 前端完整验收 | P1 有历史合成浏览器回执；本轮新增了 P2 真实页面源码 + synthetic API 的浏览器行为回归 | 真实 API/数据逐动作逐数字核对、空错旧态、键盘与 1440/1024/390/200% 多视口；Mog 业务确认 | 自动行为子集已过本机；完整 P7 `NOT_RUN` |
+| P7 前端完整验收 | P1 有历史合成浏览器回执；P2 真实页面源码 + synthetic API 的行为回归已进入 exact-head CI 并通过 | 真实 API/数据逐动作逐数字核对、空错旧态、键盘与 1440/1024/390/200% 多视口；Mog 业务确认 | 自动行为子集通过；完整 P7 `NOT_RUN` |
 | P8 小流量发布与恢复 | 当前没有本轮生产调用或发布 | 备份/隔离恢复、锁定依赖、合规小流量、发布/回退回执与完整差异表 | NOT_RUN |
 
 数据库的constraints/views、历史身份回填和所有新写入约束是P1–P4配套工作，不额外算成一个独立系统；完整同版验收后才能注册/运行迁移。原型全文入库、月报正文追加和大型文件格式检查同样不能漏在集成之外。
