@@ -14,6 +14,7 @@ use linggan_intelligence::{
         claim_next_study_batch, claim_next_study_batch_after, recover_expired_study_batch_leases,
     },
     comment_study_catalog::refresh_clean_cache,
+    comment_study_embedding::register_embedding_profile,
     comment_study_model_dispatch::{
         StudyModelDispatchError, mark_study_batch_model_dispatch_started,
         reserve_study_batch_model_call,
@@ -24,6 +25,7 @@ use linggan_intelligence::{
         CreateStudyPolicyCommand, StudyPolicyDefaults, StudyStageInstructions, create_study_policy,
     },
     comment_study_problem_store::{accept_problem_pair, accept_problem_resolution},
+    comment_study_recall::{RecallCompleteness, recall_candidates},
     comment_study_resolution_worker::run_one_problem_resolution,
     comment_study_run::{
         StudyStartError, TrustedStudyOrigin, cancel_study_run, preview_study_selection,
@@ -448,6 +450,95 @@ async fn seed_problem_stage_fixtures(
     .await
     .unwrap();
     (signals, problem_ref, resolution_ref, pair_ref)
+}
+
+#[tokio::test]
+#[ignore = "isolated synthetic PostgreSQL and local child processes; no provider or embedding model"]
+async fn embedding_runtime_failure_does_not_block_semantic_and_recall_reports_incomplete() {
+    let (db, command, _) = setup("embedding_failure_keeps_semantic_live", 3).await;
+    let run_ref = start_study_run(&db, command, TrustedStudyOrigin::Manual)
+        .await
+        .unwrap()
+        .run_ref
+        .unwrap();
+    let (signals, _, _, _) = seed_problem_stage_fixtures(&db, run_ref).await;
+    prepare_study_batch(
+        &db,
+        PrepareStudyBatchRequest {
+            run_ref,
+            maximum_targets: 12,
+        },
+    )
+    .await
+    .unwrap();
+    let profile_ref = register_embedding_profile(
+        &db,
+        "synthetic-failure-proof",
+        json!({"backend":"local-test","dtype":"test"}),
+        Some(json!({"probe":"synthetic-only","dimension":512})),
+    )
+    .await
+    .unwrap();
+    // Keep the Signal searchable so this assertion isolates the missing active Problem core.
+    // The failing embedding process will have work to do only for the Problem revision.
+    let vector = format!(
+        "[{}]",
+        std::iter::once("1.0")
+            .chain(std::iter::repeat_n("0.0", 511))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    sqlx::query(
+        "INSERT INTO linggan_comment_study_embedding_cache(profile_ref,canonical_hash,embedding) \
+         VALUES($1,'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',$2::text::public.vector)",
+    )
+    .bind(profile_ref)
+    .bind(vector)
+    .execute(db.pool())
+    .await
+    .unwrap();
+
+    let adapter = PiAdapter::configured_with_test_runtimes(
+        std::path::PathBuf::from("/bin/sh"),
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/support/comment_study_settlement_adapter.sh"),
+        std::path::PathBuf::from("/bin/false"),
+        std::path::PathBuf::from("unused-no-network-runtime"),
+    );
+    assert!(
+        run_model_work_once(&db, &SyntheticModelSecrets, &adapter)
+            .await
+            .unwrap(),
+        "the tick must continue into the semantic lane after local embedding fails"
+    );
+
+    let semantic_request: (bool, String, Option<String>) = sqlx::query_as(
+        "SELECT request.dispatch_started_at IS NOT NULL,invocation.state,invocation.failure_code \
+         FROM linggan_comment_study_model_request request \
+         JOIN linggan_model_invocation invocation USING(invocation_ref) \
+         WHERE request.run_ref=$1 AND request.stage='semantic'",
+    )
+    .bind(run_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert!(semantic_request.0, "semantic crossed the dispatch fence");
+    assert_eq!(semantic_request.1, "failed");
+    assert_eq!(
+        semantic_request.2.as_deref(),
+        Some("v2_request_snapshot_verified")
+    );
+
+    let recalled = recall_candidates(&db, profile_ref, signals[0])
+        .await
+        .unwrap();
+    assert_eq!(
+        recalled.completeness,
+        RecallCompleteness::Incomplete {
+            reason: "problem_core_vectors_incomplete"
+        },
+        "an unavailable embedding runtime must not be reported as an empty, complete catalogue"
+    );
 }
 
 #[tokio::test]

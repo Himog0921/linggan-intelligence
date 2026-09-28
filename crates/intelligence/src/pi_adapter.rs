@@ -366,6 +366,22 @@ impl PiAdapter {
         adapter
     }
 
+    /// Lets an isolated worker proof exercise both child-process lanes with local fixtures: one
+    /// semantic adapter and one embedding runtime. Neither child loads a model or reaches a
+    /// provider; keeping them on the same adapter verifies the production worker ordering.
+    #[doc(hidden)]
+    pub fn configured_with_test_runtimes(
+        node: PathBuf,
+        script: PathBuf,
+        wemm_python: PathBuf,
+        wemm_script: PathBuf,
+    ) -> Self {
+        let mut adapter = Self::configured_with_test_command(node, script);
+        adapter.wemm_python = wemm_python;
+        adapter.wemm_script = wemm_script;
+        adapter
+    }
+
     pub async fn call(&self, request: &PiRequest) -> Result<PiResponse, ModelError> {
         let input = serde_json::to_vec(request).map_err(|_| ModelError::Invalid)?;
         if input.len() > 131072 {
