@@ -33,9 +33,11 @@ use linggan_intelligence::{
     model_invocation::checkpoint_invocation_usage,
     model_runner::{
         ModelWorkerFairness, prepare_next_batch_across_runs_with_fairness, run_model_work_once,
+        run_model_worker_with_test_dependencies,
     },
     model_secrets::{ModelSecretStore, SyntheticModelSecrets},
     model_settings::ModelError,
+    model_worker_drain::ModelWorkerDrain,
     pi_adapter::PiAdapter,
     pi_adapter::{PiResponse, PiUsage},
 };
@@ -43,6 +45,7 @@ use linggan_storage_postgres::Database;
 use research_fixture::{comment_with_author, detail_with_author, reply_with_author};
 use serde_json::{Value, json};
 use sqlx::Row;
+use std::sync::Arc;
 use uuid::Uuid;
 const GUARDS: &str =
     include_str!("../../../database/migrations/0107_comment_study_start_constraints.sql");
@@ -87,6 +90,16 @@ async fn setup_with_model_config(
     name: &str,
     count: usize,
     model_input_limit: i32,
+    timeout_seconds: i32,
+) -> (Database, StartStudyRunCommand, Uuid) {
+    setup_with_model_limits(name, count, model_input_limit, 1024, timeout_seconds).await
+}
+
+async fn setup_with_model_limits(
+    name: &str,
+    count: usize,
+    model_input_limit: i32,
+    model_output_limit: i32,
     timeout_seconds: i32,
 ) -> (Database, StartStudyRunCommand, Uuid) {
     let db = fixture::proof_database(name).await;
@@ -136,7 +149,7 @@ async fn setup_with_model_config(
     sqlx::query("INSERT INTO linggan_model_entry(model_ref,connection_version_ref,model_id,origin) VALUES($1,$2,'synthetic','manual')")
         .bind(model).bind(version).execute(db.pool()).await.unwrap();
     sqlx::query("INSERT INTO linggan_model_config(config_ref,model_ref,input_token_limit,output_token_limit,timeout_seconds,max_attempts) \
-        VALUES($1,$2,$3,1024,$4,2)").bind(config).bind(model).bind(model_input_limit).bind(timeout_seconds).execute(db.pool()).await.unwrap();
+        VALUES($1,$2,$3,$4,$5,2)").bind(config).bind(model).bind(model_input_limit).bind(model_output_limit).bind(timeout_seconds).execute(db.pool()).await.unwrap();
     let policy: CreateStudyPolicyCommand = serde_json::from_value(
         json!({"domainRef":domain(),"methodName":"SYNTHETIC", "parentPolicyRef":null,
         "modelConfigRef":config,"defaults":{"commentBudget":1,"contextCharacterBudget":1},
@@ -802,6 +815,153 @@ async fn new_run_is_frozen_and_method_bound_dispatch_accepts_only_the_valid_targ
     .unwrap();
     assert_eq!(v["engineRevision"].as_str().unwrap().len(), 40);
     assert_eq!(effects(&db).await, json!([1, 2, 1, 1]));
+}
+
+#[tokio::test]
+#[ignore = "isolated synthetic PostgreSQL; no shared database or model"]
+async fn twelve_target_partial_response_preserves_valid_results_and_retries_only_bad_targets() {
+    // Use the maximum supported context so the full twelve-target batch remains one frozen
+    // request rather than being split by method-aware packing.
+    let (db, command, _) =
+        setup_with_model_limits("partial_response_matrix", 12, 32_768, 8_192, 30).await;
+    let run_ref = start_study_run(&db, command, TrustedStudyOrigin::Manual)
+        .await
+        .unwrap()
+        .run_ref
+        .unwrap();
+    let prepared = prepare_study_batch(
+        &db,
+        PrepareStudyBatchRequest {
+            run_ref,
+            maximum_targets: 12,
+        },
+    )
+    .await
+    .unwrap();
+    let claim = claim_next_study_batch(&db, Uuid::new_v4(), 60)
+        .await
+        .unwrap()
+        .unwrap();
+    let reservation = reserve_study_batch_model_call(&db, prepared.batch_ref, claim.lease_token)
+        .await
+        .unwrap();
+    mark_study_batch_model_dispatch_started(
+        &db,
+        reservation.invocation_ref,
+        prepared.batch_ref,
+        claim.lease_token,
+    )
+    .await
+    .unwrap();
+
+    let target_refs: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT target_ref FROM linggan_comment_study_batch_target \
+         WHERE batch_ref=$1 ORDER BY ordinal",
+    )
+    .bind(prepared.batch_ref)
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(target_refs.len(), 12);
+
+    // Two valid no_signal outcomes; target_refs[2] is omitted; the remaining nine have an
+    // invalid outcome enum. This exercises mixed target-local acceptance in one dispatched batch.
+    let mut results = vec![
+        json!({
+            "targetRef":target_refs[0],
+            "outcome":"no_signal",
+            "reason":"SYNTHETIC no-signal result",
+            "signals":[]
+        }),
+        json!({
+            "targetRef":target_refs[1],
+            "outcome":"no_signal",
+            "reason":"SYNTHETIC no-signal result",
+            "signals":[]
+        }),
+    ];
+    results.extend(target_refs.iter().skip(3).map(|target_ref| {
+        json!({
+            "targetRef":target_ref,
+            "outcome":"experience",
+            "reason":null,
+            "signals":[]
+        })
+    }));
+    let receipt = accept_study_batch_output(
+        &db,
+        prepared.batch_ref,
+        claim.lease_token,
+        json!({
+            "contract":"comment-study.note-batch.v1",
+            "batchRef":prepared.batch_ref,
+            "contentPublicRef":prepared.content_public_ref,
+            "results":results
+        }),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(receipt.state, "completed_with_failures");
+    assert_eq!(receipt.accepted_target_count, 2);
+    assert_eq!(receipt.retried_target_count, 10);
+    assert_eq!(receipt.failed_target_count, 0);
+    assert_eq!(receipt.cancelled_target_count, 0);
+
+    let target_states: Vec<(Uuid, String)> = sqlx::query_as(
+        "SELECT target_ref,state FROM linggan_comment_study_target \
+         WHERE run_ref=$1 ORDER BY target_ref",
+    )
+    .bind(run_ref)
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(target_states.len(), 12);
+    assert_eq!(
+        target_states
+            .iter()
+            .filter(|(_, state)| state == "no_signal")
+            .count(),
+        2
+    );
+    assert_eq!(
+        target_states
+            .iter()
+            .filter(|(_, state)| state == "queued")
+            .count(),
+        10
+    );
+    assert_eq!(
+        target_states
+            .iter()
+            .find(|(target_ref, _)| *target_ref == target_refs[2])
+            .map(|(_, state)| state.as_str()),
+        Some("queued"),
+        "an omitted target must stay retryable, never become no_signal"
+    );
+
+    let attempt_counts: (i64, i64, i64) = sqlx::query_as(
+        "SELECT count(*) FILTER (WHERE state='accepted'), \
+                count(*) FILTER (WHERE state='rejected' AND rejection_code='semantic_json_schema'), \
+                count(*) FILTER (WHERE state='rejected' AND rejection_code='semantic_target_missing') \
+         FROM linggan_comment_study_semantic_attempt WHERE batch_ref=$1",
+    )
+    .bind(prepared.batch_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(attempt_counts, (2, 9, 1));
+
+    let invocation: (String, Option<String>, i64, i64) = sqlx::query_as(
+        "SELECT state,failure_code,(result->>'acceptedTargetCount')::bigint, \
+                (result->>'retriedTargetCount')::bigint \
+         FROM linggan_model_invocation WHERE invocation_ref=$1",
+    )
+    .bind(reservation.invocation_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(invocation, ("succeeded".into(), None, 2, 10));
 }
 
 #[tokio::test]
@@ -2764,6 +2924,120 @@ async fn scheduler_stops_after_a_dispatched_resolution_response_is_no_longer_adm
     .unwrap();
     assert_eq!(resolution_state, "pending");
     assert_eq!(pair_state, "pending");
+}
+
+#[tokio::test]
+#[ignore = "isolated synthetic PostgreSQL; no shared database or model"]
+async fn worker_drain_finishes_the_in_flight_receipt_without_reserving_another_call() {
+    let (db, command, _) = setup("worker_drain_in_flight_model", 1).await;
+    let run_ref = start_study_run(&db, command, TrustedStudyOrigin::Manual)
+        .await
+        .unwrap()
+        .run_ref
+        .unwrap();
+    let prepared = prepare_study_batch(
+        &db,
+        PrepareStudyBatchRequest {
+            run_ref,
+            maximum_targets: 12,
+        },
+    )
+    .await
+    .unwrap();
+    let drain = ModelWorkerDrain::new();
+    let adapter = PiAdapter::configured_with_test_command(
+        std::path::PathBuf::from("/bin/sh"),
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/support/comment_study_drain_adapter.sh"),
+    );
+    let worker_database = db.clone();
+    let worker_drain = drain.clone();
+    let worker = tokio::spawn(async move {
+        run_model_worker_with_test_dependencies(
+            worker_database,
+            worker_drain,
+            Arc::new(SyntheticModelSecrets),
+            adapter,
+        )
+        .await
+    });
+
+    let mut dispatched_invocation: Option<Uuid> = None;
+    for _ in 0..300 {
+        dispatched_invocation = sqlx::query_scalar(
+            "SELECT invocation_ref FROM linggan_comment_study_model_request \
+             WHERE run_ref=$1 AND batch_ref=$2 AND stage='semantic' \
+               AND dispatch_started_at IS NOT NULL ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(run_ref)
+        .bind(prepared.batch_ref)
+        .fetch_optional(db.pool())
+        .await
+        .unwrap();
+        if dispatched_invocation.is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    let dispatched_invocation = dispatched_invocation.expect("worker crossed provider dispatch");
+    drain.request();
+
+    tokio::time::timeout(std::time::Duration::from_secs(5), worker)
+        .await
+        .expect("the worker drains the in-flight local provider call")
+        .unwrap()
+        .unwrap();
+
+    let request_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_comment_study_model_request WHERE run_ref=$1",
+    )
+    .bind(run_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(request_count, 1, "drain must prevent another reservation");
+    let receipt: (String, Option<String>, bool, bool, String) = sqlx::query_as(
+        "SELECT invocation.state,invocation.failure_code, \
+                request.dispatch_started_at IS NOT NULL, \
+                invocation.result->>'callStarted'='true',batch.state \
+         FROM linggan_model_invocation invocation \
+         JOIN linggan_comment_study_model_request request USING(invocation_ref) \
+         JOIN linggan_comment_study_batch batch USING(batch_ref) \
+         WHERE invocation.invocation_ref=$1",
+    )
+    .bind(dispatched_invocation)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        receipt,
+        (
+            "failed".into(),
+            Some("synthetic_drain_failure".into()),
+            true,
+            true,
+            "failed".into()
+        )
+    );
+    let attempt: (String, String, String) = sqlx::query_as(
+        "SELECT target.state,attempt.state,attempt.rejection_code \
+         FROM linggan_comment_study_target target \
+         JOIN linggan_comment_study_semantic_attempt attempt USING(target_ref) \
+         WHERE target.run_ref=$1",
+    )
+    .bind(run_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        attempt,
+        (
+            "queued".into(),
+            "rejected".into(),
+            "provider_failure".into()
+        ),
+        "the active response is settled before the drain exits, leaving only its bounded retry"
+    );
 }
 
 #[tokio::test]

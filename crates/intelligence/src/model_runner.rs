@@ -32,6 +32,7 @@ use crate::{
     pi_adapter::PiAdapter,
 };
 use linggan_storage_postgres::Database;
+use std::sync::Arc;
 use uuid::Uuid;
 
 pub async fn run_model_work_once(
@@ -525,8 +526,33 @@ pub async fn run_model_worker_with_drain(
     database: Database,
     drain: ModelWorkerDrain,
 ) -> Result<(), ModelError> {
-    let store = model_secret_store();
-    let adapter = PiAdapter::configured();
+    run_model_worker_with_dependencies(
+        database,
+        drain,
+        model_secret_store(),
+        PiAdapter::configured(),
+    )
+    .await
+}
+
+/// Isolated PostgreSQL proofs inject a synthetic secret store and local Pi child so a drain can
+/// be requested while the real worker loop owns an in-flight provider boundary.
+#[doc(hidden)]
+pub async fn run_model_worker_with_test_dependencies(
+    database: Database,
+    drain: ModelWorkerDrain,
+    store: Arc<dyn ModelSecretStore>,
+    adapter: PiAdapter,
+) -> Result<(), ModelError> {
+    run_model_worker_with_dependencies(database, drain, store, adapter).await
+}
+
+async fn run_model_worker_with_dependencies(
+    database: Database,
+    drain: ModelWorkerDrain,
+    store: Arc<dyn ModelSecretStore>,
+    adapter: PiAdapter,
+) -> Result<(), ModelError> {
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(10));
     let mut shutdown = drain.subscribe();
     let mut fairness = ModelWorkerFairness::default();
