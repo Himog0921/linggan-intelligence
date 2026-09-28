@@ -431,6 +431,8 @@ def run_live_api(
         page.locator(f"#study-policy option[value='{existing_policy_ref}']").wait_for(state="attached")
         assert page.locator("#study-policy").input_value() == existing_policy_ref
 
+        page.get_by_role("button", name="编辑方法").click()
+        page.locator("#method-name").wait_for(state="visible")
         page.locator("#method-name").fill("隔离浏览器方法")
         page.locator("#stage-semantic").fill("仅用于真实 Axum 与隔离 PostgreSQL 浏览器回归")
         page.locator("#save-policy").click()
