@@ -574,6 +574,221 @@ async fn sigterm_drains_an_in_flight_comment_study_model_call() {
     assert_eq!(no_extra_requests, 1);
 }
 
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn forced_worker_kill_recovers_the_dispatched_call_after_restart() {
+    let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").expect("proof URL is supplied");
+    let schema = "worker_forced_kill_recovery";
+    let database = isolated_proof_schema(&url, schema, &migrations_missing("none"))
+        .await
+        .expect("the complete isolated schema is built");
+    let run_ref = seed_synthetic_study(&database).await;
+
+    let control_dir = std::env::temp_dir().join(format!(
+        "linggan-worker-forced-kill-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir(&control_dir).unwrap();
+    let started = control_dir.join("model-call-started");
+    let release = control_dir.join("release-model-call");
+    let first_ack = control_dir.join("first-worker-ack");
+    let second_ack = control_dir.join("restarted-worker-ack");
+    let adapter_script = control_dir.join("synthetic-pi-node");
+    std::fs::write(
+        &adapter_script,
+        format!(
+            "#!/bin/sh\ncat >/dev/null\ntouch {}\nwhile [ ! -e {} ]; do sleep 0.02; done\nprintf '%s' '{{\"version\":\"linggan.pi.v1/0.85.1\",\"ok\":false,\"text\":null,\"failureCode\":\"synthetic_restart_failure\",\"modelIds\":null,\"modelListOrigin\":null,\"usage\":{{\"inputTokens\":null,\"outputTokens\":null,\"costUsd\":null}},\"elapsedMs\":1}}'\n",
+            shell_quote(&started),
+            shell_quote(&release)
+        ),
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&adapter_script, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+    struct ProcessGuard(Child, std::path::PathBuf, std::path::PathBuf);
+    impl Drop for ProcessGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::write(&self.2, "release");
+            std::thread::sleep(Duration::from_millis(100));
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+            std::thread::sleep(Duration::from_millis(100));
+            let _ = std::fs::remove_dir_all(&self.1);
+        }
+    }
+    let scoped_database_url = format!("{url}?options=-csearch_path%3D{schema}");
+    let start_worker = |ack: &std::path::Path| {
+        Command::new(WORKER_BINARY)
+            .env("LINGGAN_LOCAL_DATABASE_URL", &scoped_database_url)
+            .env("LINGGAN_WORKER_DRAIN_ACK_PATH", ack)
+            .env("LINGGAN_COLLECTION_UPGRADE_PHASE", "recovery")
+            .env("LINGGAN_MODEL_SYNTHETIC_PREVIEW", "SYNTHETIC-NOT-EVIDENCE")
+            .env("LINGGAN_PI_NODE", &adapter_script)
+            .env_remove("LINGGAN_SUPPORT_DIR")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap()
+    };
+    let mut worker = ProcessGuard(
+        start_worker(&first_ack),
+        control_dir.clone(),
+        release.clone(),
+    );
+
+    tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            let dispatched: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM linggan_comment_study_model_request \
+                 WHERE run_ref=$1 AND stage='semantic' AND dispatch_started_at IS NOT NULL)",
+            )
+            .bind(run_ref)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+            if dispatched && started.exists() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("the real worker dispatched a call and its synthetic child is blocked");
+
+    let first_invocation: Uuid = sqlx::query_scalar(
+        "SELECT invocation_ref FROM linggan_comment_study_model_request \
+         WHERE run_ref=$1 AND stage='semantic' ORDER BY created_at LIMIT 1",
+    )
+    .bind(run_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let reserved_tokens: i64 = sqlx::query_scalar(
+        "SELECT reserved_tokens FROM linggan_model_invocation WHERE invocation_ref=$1",
+    )
+    .bind(first_invocation)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert!(reserved_tokens > 0);
+
+    assert!(
+        Command::new("kill")
+            .args(["-KILL", &worker.0.id().to_string()])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let killed = worker.0.wait().expect("the worker process is reaped");
+    assert!(
+        !killed.success(),
+        "SIGKILL must not look like a clean drain"
+    );
+    std::fs::write(&release, "release orphaned synthetic child").unwrap();
+    assert!(
+        !first_ack.exists(),
+        "a hard kill cannot write a drain receipt"
+    );
+
+    let expired_batches: i64 = sqlx::query(
+        "UPDATE linggan_comment_study_batch \
+         SET lease_expires_at=scope_001_now()-interval '1 second' \
+         WHERE run_ref=$1 AND state='leased'",
+    )
+    .bind(run_ref)
+    .execute(database.pool())
+    .await
+    .unwrap()
+    .rows_affected() as i64;
+    assert_eq!(expired_batches, 1, "only the killed worker's lease expires");
+
+    let mut restarted = ProcessGuard(
+        start_worker(&second_ack),
+        control_dir.clone(),
+        release.clone(),
+    );
+    tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            let request_count: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM linggan_comment_study_model_request WHERE run_ref=$1",
+            )
+            .bind(run_ref)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+            let recovered: bool = sqlx::query_scalar(
+                "SELECT state='failed' AND failure_code='lease_expired' \
+                 FROM linggan_model_invocation WHERE invocation_ref=$1",
+            )
+            .bind(first_invocation)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+            if request_count == 2 && recovered {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("restart recovery settles the killed request before starting the authorized retry");
+
+    let first_receipt: (String, String, i64) = sqlx::query_as(
+        "SELECT invocation.state,batch.state,invocation.charged_tokens \
+         FROM linggan_comment_study_model_request request \
+         JOIN linggan_model_invocation invocation USING(invocation_ref) \
+         JOIN linggan_comment_study_batch batch USING(batch_ref) \
+         WHERE invocation.invocation_ref=$1",
+    )
+    .bind(first_invocation)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        first_receipt,
+        ("failed".into(), "failed".into(), reserved_tokens),
+        "unknown usage after hard kill is conservatively charged and the old lease is terminal"
+    );
+
+    assert!(
+        Command::new("kill")
+            .args(["-TERM", &restarted.0.id().to_string()])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let status = tokio::time::timeout(Duration::from_secs(12), async {
+        loop {
+            if let Some(status) = restarted.0.try_wait().unwrap() {
+                break status;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("the restarted worker exits cleanly after the retry is receipted");
+    assert!(status.success());
+    assert!(
+        std::fs::read_to_string(&second_ack)
+            .unwrap()
+            .contains(&format!("pid={}\nstate=drained\n", restarted.0.id()))
+    );
+
+    let final_requests: (i64, i64, i64) = sqlx::query_as(
+        "SELECT count(*),count(*) FILTER (WHERE invocation.state='failed'), \
+                count(*) FILTER (WHERE invocation.failure_code='lease_expired') \
+         FROM linggan_comment_study_model_request request \
+         JOIN linggan_model_invocation invocation USING(invocation_ref) \
+         WHERE request.run_ref=$1 AND request.stage='semantic'",
+    )
+    .bind(run_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(final_requests, (2, 2, 1));
+}
+
 async fn seed_synthetic_study(database: &Database) -> Uuid {
     let domain =
         Uuid::parse_str(linggan_intelligence::comment_study_source::ADHD_DOMAIN_REF).unwrap();

@@ -57,4 +57,7 @@ RUST_TEST_THREADS=1 cargo test -p linggan-api --locked \
 RUST_TEST_THREADS=1 cargo test -p linggan-worker --test startup_contract --locked \
   sigterm_drains_an_in_flight_comment_study_model_call \
   -- --ignored --nocapture --test-threads=1
+RUST_TEST_THREADS=1 cargo test -p linggan-worker --test startup_contract --locked \
+  forced_worker_kill_recovers_the_dispatched_call_after_restart \
+  -- --ignored --nocapture --test-threads=1
 printf '%s\n' 'Implemented Comment Study productization PostgreSQL subset passed; not the complete T01-T54 suite'
