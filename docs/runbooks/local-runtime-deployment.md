@@ -86,6 +86,8 @@ cd /Users/moglenny/proma/linggan-intelligence
 
 ### 回复 TaskSpec v2 的一次切换（COLLECTION-REPLIES-CONTRACT-001）
 
+历史回复重判涉及同一处置表上的 0105 和 0106 两次迁移：0106 允许旧任务超出 `maximumQuota` 的合同失配原始原因参与同一逐条重判，不建立第二套准入账本。迁移必须在新版服务启动前完成。
+
 本次升级把唯一 Browser Producer TaskSpec 切为 v2，服务端最低插件版本为 0.8.57。先停止新工单领取，核对未到期租约与浏览器 durable outbox 中的 v1 交付；让已入队材料按原合同完成交付，再同时切换 API、巡检 worker 与插件。不得让旧插件领取 v2 任务，也不得让新版插件把旧 outbox 的 v1 TaskSpec 当成新任务重发。恢复领取前核对插件安装版本、三进程 revision、迁移台账与一条真实 Task→Attempt→Package→Receipt→disposition 链；再单独执行 `linggan-material-reproject --requalify-replies` 预览，核对候选数并安排低负载窗口后才由获授权的运维人员执行 `--apply`。该命令一次读取候选包并在单事务内重判，是历史重判的唯一受控写入入口；数据库 trigger 约束一次写入的形状，身份与逐条关系校验由命令完成。
 
 2026-09-28 的只读盘点显示共享库没有未到期且未释放的租约；历史 v1 租约任务仍有 `pending=852`、`in_progress=26`，均须按租约当前有效性判断，不能按状态字符串直接当作正在运行。最近 24 小时报到的两个安装仍为 0.8.56；浏览器 outbox 是否仍有待发送的 v1 envelope 尚未核对，因此候选代码、迁移和 0.8.57 ZIP 不构成已完成切换的证明。

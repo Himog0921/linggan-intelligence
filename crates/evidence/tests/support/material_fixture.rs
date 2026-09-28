@@ -223,6 +223,10 @@ pub const MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../../database/migrations/0105_reply_disposition_requalification.sql"),
     "\n",
+    include_str!(
+        "../../../../database/migrations/0106_reply_disposition_quota_requalification.sql"
+    ),
+    "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ",
     "('0025_comment_current_projection', '64fd9474647834358f8d2d4f1c25e4345e26a3ff79dbfc53a7846915576b0885'), ",
     "('0026_work_resource_read', '08712c71e9b6f97d270739649a7c264da2f115315bef90fabaedded50cf774bd'), ",
@@ -261,7 +265,8 @@ pub const MIGRATIONS: &str = concat!(
     "('0102_cross_industry_creator_directory', '972ece37c29d79a2a5a9f37cfe3dd4fe71a25446a9884873fb014d36dc7ba8e4'), ",
     "('0103_domain_membership_and_usage', '4345fbd8ed530f5a5184fb9a44d42b32e4702e150ec3301896750a2b7eb80001'), ",
     "('0104_unified_domain_schema_cleanup', '3a75ffdc34bf60cb69f8a9b8d04cfa3cd6c4207522083a122aeedbb9ac1f3788'), ",
-    "('0105_reply_disposition_requalification', 'bef9c6cee526068148daddbaeb863c03a5a232bce74bbdf9604f32a53338ec38');\n",
+    "('0105_reply_disposition_requalification', 'bef9c6cee526068148daddbaeb863c03a5a232bce74bbdf9604f32a53338ec38'), ",
+    "('0106_reply_disposition_quota_requalification', '184f91bff325cf335424df212874a53a621169fa388d6b29290c70a5260e0773');\n",
 );
 
 pub fn coverage_layer(capability: &str, acquired: i64) -> serde_json::Value {

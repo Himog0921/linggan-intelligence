@@ -43,7 +43,8 @@ pub async fn requalify_reply_contract_records(
            AND EXISTS (SELECT 1 FROM linggan_runtime_record_disposition disposition \
              WHERE disposition.package_ref=package.package_ref \
                AND disposition.disposition='quarantined' \
-               AND disposition.reason='task_package_contract_mismatch' \
+               AND disposition.reason IN ('task_package_contract_mismatch', \
+                 'task_package_contract_mismatch__beyond_task_maximum_quota') \
                AND disposition.initial_disposition IS NULL) \
          ORDER BY package.accepted_at,package.package_ref",
     )
@@ -81,11 +82,17 @@ pub async fn requalify_reply_contract_records(
         .fetch_all(&mut *tx)
         .await
         .map_err(ProducerRuntimeError::Internal)?;
+        let quota = task.get("maximumQuota").and_then(Value::as_u64);
         if previous.len() != package.records().len()
             || previous.iter().enumerate().any(|(ordinal, decision)| {
+                let expected_reason = if quota.is_some_and(|limit| ordinal as u64 >= limit) {
+                    "task_package_contract_mismatch__beyond_task_maximum_quota"
+                } else {
+                    "task_package_contract_mismatch"
+                };
                 decision.get::<i32, _>("record_ordinal") != ordinal as i32
                     || decision.get::<String, _>("disposition") != "quarantined"
-                    || decision.get::<String, _>("reason") != "task_package_contract_mismatch"
+                    || decision.get::<String, _>("reason") != expected_reason
                     || decision
                         .get::<Option<String>, _>("initial_disposition")
                         .is_some()
@@ -93,7 +100,6 @@ pub async fn requalify_reply_contract_records(
         {
             continue;
         }
-        let quota = task.get("maximumQuota").and_then(Value::as_u64);
         let mut decisions = Vec::with_capacity(package.records().len());
         for (ordinal, record) in package.records().iter().enumerate() {
             let Some((disposition, reason)) =
@@ -139,7 +145,9 @@ pub async fn requalify_reply_contract_records(
                      disposition=$3,reason=$4, \
                      requalified_at=scope_001_now(),requalification_basis='reply_task_identity_v2' \
                  WHERE package_ref=$1 AND record_ordinal=$2 \
-                   AND disposition='quarantined' AND reason='task_package_contract_mismatch' \
+                   AND disposition='quarantined' \
+                   AND reason IN ('task_package_contract_mismatch', \
+                     'task_package_contract_mismatch__beyond_task_maximum_quota') \
                    AND initial_disposition IS NULL",
             )
             .bind(package_ref)
@@ -180,7 +188,7 @@ pub async fn requalify_reply_contract_records(
 
 fn historical_reply_task_as_current_contract(original: &Value) -> Option<Value> {
     if original.get("contractVersion")?.as_str()? != "linggan.producer.task-spec.v1"
-        || original.get("source")?.as_str()? != "scheduled"
+        || !matches!(original.get("source")?.as_str()?, "manual" | "scheduled")
         || original.pointer("/capabilitiesRequested/0")?.as_str()? != "replies"
         || original.get("capabilitiesRequested")?.as_array()?.len() != 1
     {
@@ -196,8 +204,11 @@ fn historical_reply_task_as_current_contract(original: &Value) -> Option<Value> 
         return None;
     }
     let content_id = target.get("contentExternalId")?.as_str()?;
-    let limit = target.get("replyExpandLimit")?.as_u64()?;
-    if content_id.trim().is_empty() || limit == 0 {
+    if content_id.trim().is_empty()
+        || target
+            .get("replyExpandLimit")
+            .is_some_and(|value| value.as_u64().is_none_or(|limit| limit == 0))
+    {
         return None;
     }
     let mut current = original.clone();
