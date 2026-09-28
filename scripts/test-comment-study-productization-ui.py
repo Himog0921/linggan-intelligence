@@ -205,6 +205,25 @@ def run_synthetic() -> None:
             }
         elif request.method == "GET" and path == "policies":
             response = policies(query.get("cursor", [None])[0])
+        elif request.method == "GET" and path == f"policies/{OLD_POLICY_REF}":
+            response = {
+                "policy": {
+                    "policyRef": OLD_POLICY_REF,
+                    "methodName": "原默认方法",
+                    "defaults": {"commentBudget": 100, "contextCharacterBudget": 6000},
+                    "methodManifest": {
+                        "modelConfigRef": "00000000-0000-4000-8000-000000000006",
+                        "stages": {
+                            stage: {
+                                "systemInstruction": (
+                                    "基础研究规则\n<stage-instructions>\n原有补充说明\n</stage-instructions>"
+                                )
+                            }
+                            for stage in ("semantic", "resolution", "pair")
+                        },
+                    },
+                }
+            }
         elif request.method == "GET" and path == "runs":
             response = {"runs": [run_record()] if state["created"] else []}
         elif request.method == "GET" and path == "overview":
@@ -267,10 +286,12 @@ def run_synthetic() -> None:
             page.locator(f"#work-{WORK_REF}").wait_for(state="visible")
             page.locator(f"#study-policy option[value='{OLD_POLICY_REF}']").wait_for(state="attached")
 
+            page.get_by_role("button", name="编辑方法").click()
+            page.locator("#method-name").wait_for(state="visible")
             page.locator("#method-name").fill("回归验收方法")
             page.locator("#stage-semantic").fill("只用于隔离浏览器回归")
             page.locator("#save-policy").click()
-            page.get_by_text("已保存不可变方法版本", exact=False).wait_for()
+            page.get_by_text("已保存并选中新方法版本", exact=False).wait_for()
             page.locator("#study-policy").select_option(NEW_POLICY_REF)
             page.locator("#activate-policy").click()
             page.get_by_text("已将所选方法设为当前领域默认版本。", exact=True).wait_for()
@@ -437,7 +458,7 @@ def run_live_api(
         page.locator("#stage-semantic").fill("仅用于真实 Axum 与隔离 PostgreSQL 浏览器回归")
         page.locator("#save-policy").click()
         try:
-            page.get_by_text("已保存不可变方法版本", exact=False).wait_for()
+            page.get_by_text("已保存并选中新方法版本", exact=False).wait_for()
         except Exception as error:
             raise AssertionError(
                 "Method creation did not receive its success feedback; "
