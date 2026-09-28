@@ -85,16 +85,20 @@
     </header>
     <section class="study-command" aria-labelledby="setup-title">
       <h3 id="setup-title" class="v7-sr-only">研究策略</h3>
-      <form id="policy-form" class="policy-form">
-        <label>模型配置<select id="model-config" required disabled><option>正在读取…</option></select></label>
+      <div class="study-policy-current">
         <label>本次使用的方法版本<select id="study-policy" required disabled><option value="">先保存一版研究方法</option></select></label>
+        <div class="study-policy-current-actions"><button id="edit-policy" type="button" disabled>编辑方法</button><button id="activate-policy" type="button" disabled>设为默认方法</button></div>
+      </div>
+      <p id="selected-policy-summary" class="study-dialog-note" role="status">正在读取研究方法…</p>
+      <form id="policy-form" class="policy-form" hidden>
+        <label>模型配置<select id="model-config" required disabled><option>正在读取…</option></select></label>
         <label>方法名称<input id="method-name" type="text" maxlength="100" value="评论研究方法" required></label>
         <label>本次最多评论数<input id="comment-budget" type="number" min="1" max="3000" value="100" required></label>
         <label>单作品语境字符上限<input id="context-character-budget" type="number" min="1" max="20000" value="6000" required></label>
         <label class="study-instruction">语义提取补充说明<textarea id="stage-semantic" maxlength="32000" rows="3"></textarea></label>
         <label class="study-instruction">归并判断补充说明<textarea id="stage-resolution" maxlength="32000" rows="3"></textarea></label>
         <label class="study-instruction">问题配对补充说明<textarea id="stage-pair" maxlength="32000" rows="3"></textarea></label>
-        <div class="study-policy-actions"><button id="save-policy" type="submit" disabled>保存新方法版本</button><button id="activate-policy" type="button" disabled>设为默认方法</button></div>
+        <div class="study-policy-actions"><button id="save-policy" type="submit" disabled>保存新版本</button><button id="cancel-policy-edit" type="button">取消</button></div>
       </form>
       <p id="policy-status" class="study-dialog-note" role="status"></p>
       <p id="source-preview" class="study-dialog-note" role="status">正在核对评论资格…</p>

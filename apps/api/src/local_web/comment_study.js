@@ -24,6 +24,7 @@ const selectedWorkRoles = new Map();
 const selectedWorkMeta = new Map();
 const workCatalogState = { cursor: null, nextCursor: null, history: [], q: '', total: 0, coverage: null, observationRole: 'primary' };
 let workSearchTimer = null;
+let retryWorksCursor = null;
 const MAX_SELECTED_WORKS = 100;
 const workTitleSourceLabel = { platform_title: '平台标题', cover_ocr: '封面 OCR', unknown: '标题未记录' };
 const selectedWorks = () => [...selectedWorkRoles].map(([contentPublicRef, observationRole]) => ({ contentPublicRef, observationRole }));
@@ -32,6 +33,7 @@ let savedPolicies = [];
 let activePolicyRef = null;
 let pendingStartSignature = null;
 let pendingStartRef = null;
+let parentPolicyRef = null;
 
 function updateSelection() {
   const count = selectedWorkRoles.size;
@@ -103,13 +105,27 @@ function renderWorks(){
 }
 async function loadWorksPage(cursor=null){
   if(!domainRef)return;
-  const data=await get(workCatalogPath(cursor));
-  loadedWorks=(data.items||[]).map(item=>({...item,observationRole:item.observationRole||workCatalogState.observationRole}));
-  workCatalogState.cursor=cursor;
-  workCatalogState.nextCursor=data.page?.nextCursor||null;
-  workCatalogState.total=Number(data.totalWorkCount||0);
-  workCatalogState.coverage=data.indexCoverage||null;
-  renderWorks();
+  retryWorksCursor=cursor;
+  try{
+    const data=await get(workCatalogPath(cursor));
+    loadedWorks=(data.items||[]).map(item=>({...item,observationRole:item.observationRole||workCatalogState.observationRole}));
+    workCatalogState.cursor=cursor;
+    workCatalogState.nextCursor=data.page?.nextCursor||null;
+    workCatalogState.total=Number(data.totalWorkCount||0);
+    workCatalogState.coverage=data.indexCoverage||null;
+    renderWorks();
+    return true;
+  }catch(error){
+    loadedWorks=[];workCatalogState.nextCursor=null;
+    document.querySelector('#work-filter-status').textContent=`作品目录加载失败：${error.message}。可重试或调整搜索条件。`;
+    document.querySelector('#work-page-status').textContent=`第 ${workCatalogState.history.length+1} 页`;
+    document.querySelector('#work-prev').disabled=workCatalogState.history.length===0;
+    document.querySelector('#work-next').disabled=true;
+    document.querySelector('#works').innerHTML=`<tr><td class="study-table-empty" colspan="4">作品列表暂不可用：${esc(error.message)} <button id="retry-work-catalog" type="button">重试</button></td></tr>`;
+    document.querySelector('#retry-work-catalog').addEventListener('click',event=>{event.currentTarget.disabled=true;void loadWorksPage(retryWorksCursor);});
+    updateSelection();
+    return false;
+  }
 }
 async function searchWorksNow(){
   workCatalogState.q=document.querySelector('#work-filter').value.trim();
@@ -132,10 +148,11 @@ async function loadSetup(){
     document.querySelector('#work-filter').value='';
     const referenceToggle=document.querySelector('#include-reference-works');referenceToggle.checked=false;
     referenceToggle.disabled=setup.domainStatus!=='active'||Number(setup.referenceSourcePreview?.totalCommentCount||0)===0;
-    await loadWorksPage(null);
-    await loadPolicies();
+    const [worksResult,policiesResult]=await Promise.allSettled([loadWorksPage(null),loadPolicies()]);
+    const worksLoaded=worksResult.status==='fulfilled'&&worksResult.value;
+    if(policiesResult.status==='rejected')document.querySelector('#policy-status').textContent=`研究方法列表加载失败：${policiesResult.reason.message}`;
     status.dataset.kind=available?'info':'error';
-    status.textContent=setup.domainStatus==='paused'?`${domainName}已暂停；历史结果可读，不能创建新策略或运行。`:available?`已加载 ${workCatalogState.total} 篇 primary 作品；可显式切换查看 reference 作品。`:'没有启用的模型配置，无法保存策略。';
+    status.textContent=setup.domainStatus==='paused'?`${domainName}已暂停；历史结果可读，不能创建新策略或运行。`:available?(worksLoaded?`已加载 ${workCatalogState.total} 篇 primary 作品；可显式切换查看 reference 作品。`:'准备信息已加载；作品目录暂时不可用，请在下方重试。'):'没有启用的模型配置，无法保存策略。';
   }catch(error){
     status.dataset.kind='error';status.textContent=`无法读取准备信息：${error.message}`;
     document.querySelector('#work-filter-status').textContent='作品目录不可用。';
@@ -166,7 +183,77 @@ async function loadPolicies(preferredRef=null){
     ||savedPolicies[0]?.policyRef||'';
   if(desired)select.value=desired;
   document.querySelector('#activate-policy').disabled=!select.value||select.value===activePolicyRef;
+  updatePolicySummary();
+  document.querySelector('#edit-policy').disabled=!document.querySelector('#model-config').value;
+  if(!savedPolicies.length&&document.querySelector('#model-config').value)await openPolicyEditor();
   updateSelection();
+}
+
+function updatePolicySummary(){
+  const reference=document.querySelector('#study-policy').value;
+  const policy=savedPolicies.find(item=>item.policyRef===reference);
+  const summary=document.querySelector('#selected-policy-summary');
+  const button=document.querySelector('#edit-policy');
+  button.textContent=policy?'编辑方法':'新建方法';
+  summary.textContent=policy
+    ?`${policy.methodName||'未命名方法'} · 版本 ${String(policy.policyRef).slice(0,8)} · 评论上限 ${Number(policy.defaults?.commentBudget||0)} 条 · 语境上限 ${Number(policy.defaults?.contextCharacterBudget||0)} 字符${policy.isActive?' · 当前默认':''}`
+    :'还没有已保存的方法版本。首次使用前需要创建一版研究方法。';
+}
+
+function instructionExtra(instruction){
+  const match=String(instruction||'').match(/<stage-instructions>\n([\s\S]*?)\n<\/stage-instructions>$/);
+  return match?match[1]:null;
+}
+
+function closePolicyEditor(){
+  document.querySelector('#policy-form').hidden=true;
+  document.querySelector('#study-policy').disabled=savedPolicies.length===0;
+  parentPolicyRef=null;
+  document.querySelector('#edit-policy').disabled=!document.querySelector('#model-config').value;
+}
+
+async function openPolicyEditor(){
+  const form=document.querySelector('#policy-form');
+  const button=document.querySelector('#edit-policy');
+  const status=document.querySelector('#policy-status');
+  const reference=document.querySelector('#study-policy').value;
+  if(!document.querySelector('#model-config').value)return;
+  form.hidden=false;button.disabled=true;
+  document.querySelector('#study-policy').disabled=true;
+  document.querySelector('#save-policy').disabled=true;
+  status.textContent=reference?'正在读取所选方法版本…':'创建第一版研究方法。';
+  try{
+    parentPolicyRef=reference||null;
+    document.querySelector('#method-name').value='评论研究方法';
+    document.querySelector('#comment-budget').value='100';
+    document.querySelector('#context-character-budget').value='6000';
+    document.querySelector('#stage-semantic').value='';
+    document.querySelector('#stage-resolution').value='';
+    document.querySelector('#stage-pair').value='';
+    if(reference){
+      const response=await get(`policies/${encodeURIComponent(reference)}`);
+      const policy=response.policy||{};
+      const manifest=policy.methodManifest;
+      if(!manifest?.stages)throw new Error('所选方法没有可编辑的完整版本记录');
+      const semantic=instructionExtra(manifest.stages.semantic?.systemInstruction);
+      const resolution=instructionExtra(manifest.stages.resolution?.systemInstruction);
+      const pair=instructionExtra(manifest.stages.pair?.systemInstruction);
+      if([semantic,resolution,pair].some(value=>value===null))throw new Error('无法安全还原此版本的补充说明；原版本未更改');
+      document.querySelector('#method-name').value=policy.methodName||'评论研究方法';
+      document.querySelector('#comment-budget').value=String(policy.defaults?.commentBudget||100);
+      document.querySelector('#context-character-budget').value=String(policy.defaults?.contextCharacterBudget||6000);
+      document.querySelector('#stage-semantic').value=semantic;
+      document.querySelector('#stage-resolution').value=resolution;
+      document.querySelector('#stage-pair').value=pair;
+      const configuredModel=manifest.modelConfigRef;
+      if([...document.querySelector('#model-config').options].some(option=>option.value===configuredModel))document.querySelector('#model-config').value=configuredModel;
+      status.textContent='编辑副本已载入；保存会生成新的不可变方法版本，原版本与已运行研究保持不变。';
+    }
+    document.querySelector('#save-policy').disabled=false;
+  }catch(error){
+    status.textContent=`无法打开方法编辑：${error.message}`;
+    closePolicyEditor();
+  }finally{button.disabled=false;}
 }
 
 const targetStateLabel = {
@@ -643,6 +730,11 @@ document.querySelector('#study-run-select').addEventListener('change', async eve
 const studyDialog = document.querySelector('#study-dialog');
 document.querySelector('#open-study-dialog').addEventListener('click', () => studyDialog.showModal());
 document.querySelector('#study-dialog-close').addEventListener('click', () => studyDialog.close());
+document.querySelector('#edit-policy').addEventListener('click', openPolicyEditor);
+document.querySelector('#cancel-policy-edit').addEventListener('click', () => {
+  closePolicyEditor();
+  document.querySelector('#policy-status').textContent='';
+});
 document.querySelector('#policy-form').addEventListener('submit', async event => {
   event.preventDefault();
   const button = document.querySelector('#save-policy');
@@ -652,7 +744,7 @@ document.querySelector('#policy-form').addEventListener('submit', async event =>
   try {
     const response = await post('policies', {
       methodName: document.querySelector('#method-name').value,
-      parentPolicyRef: null,
+      parentPolicyRef,
       modelConfigRef: document.querySelector('#model-config').value,
       defaults: { commentBudget: Number(document.querySelector('#comment-budget').value), contextCharacterBudget: Number(document.querySelector('#context-character-budget').value) },
       stageInstructions: { semantic: document.querySelector('#stage-semantic').value, resolution: document.querySelector('#stage-resolution').value, pair: document.querySelector('#stage-pair').value }
@@ -664,7 +756,8 @@ document.querySelector('#policy-form').addEventListener('submit', async event =>
       return;
     }
     await loadPolicies(reference);
-    status.textContent = `已保存不可变方法版本：${reference}。选择该版本后可用于本次预览和启动。`;
+    closePolicyEditor();
+    status.textContent = `已保存并选中新方法版本：${reference}。可直接用于本次预览和启动。`;
   } catch (error) {
     status.textContent = policySaved
       ? `方法已保存，但方法目录刷新失败：${error.message}`
@@ -674,6 +767,7 @@ document.querySelector('#policy-form').addEventListener('submit', async event =>
 });
 document.querySelector('#study-policy').addEventListener('change', () => {
   document.querySelector('#activate-policy').disabled = !document.querySelector('#study-policy').value || document.querySelector('#study-policy').value === activePolicyRef;
+  updatePolicySummary();
   pendingStartSignature = null; pendingStartRef = null; updateSelection();
 });
 document.querySelector('#activate-policy').addEventListener('click', async () => {

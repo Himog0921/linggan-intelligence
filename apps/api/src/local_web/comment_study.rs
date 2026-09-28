@@ -525,6 +525,29 @@ mod tests {
     }
 
     #[test]
+    fn method_editor_starts_compact_and_saves_one_immutable_child_version() {
+        let page = include_str!("comment_study.html");
+        let script = include_str!("comment_study.js");
+        assert!(page.contains("id=\"edit-policy\""));
+        assert!(page.contains("id=\"policy-form\" class=\"policy-form\" hidden"));
+        assert!(page.contains("id=\"save-policy\" type=\"submit\" disabled>保存新版本"));
+        assert!(page.contains("id=\"cancel-policy-edit\""));
+        assert!(script.contains("async function openPolicyEditor()"));
+        assert!(script.contains("get(`policies/${encodeURIComponent(reference)}`)"));
+        assert!(script.contains("parentPolicyRef,"));
+        assert!(script.contains("保存会生成新的不可变方法版本"));
+    }
+
+    #[test]
+    fn work_catalog_failure_is_reported_without_marking_setup_unavailable() {
+        let script = include_str!("comment_study.js");
+        assert!(script.contains("作品目录加载失败：${error.message}"));
+        assert!(script.contains("准备信息已加载；作品目录暂时不可用"));
+        assert!(script.contains("Promise.allSettled([loadWorksPage(null),loadPolicies()])"));
+        assert!(script.contains("retry-work-catalog"));
+    }
+
+    #[test]
     fn comment_study_script_wires_the_dialog_open_close_and_auto_switches_to_runs_after_creating_one()
      {
         let script = include_str!("comment_study.js");
