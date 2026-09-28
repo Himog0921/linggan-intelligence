@@ -150,8 +150,8 @@
 
 固定源码 `apps/api/src/local_web/comment_study.html/js/css` 与 LIDS/UI 执行合同，链接在架构手册来源目录。上传的 Design System v7 规定白场、边缘纹理、显式状态与文字 Tab；示例数值、假运行文字以及所有模拟动作均不继承为产品事实。
 
-## 10. 当前 P2 页面实施边界（2026-09-27）
+## 10. 当前 P2 页面实施边界（2026-09-28）
 
-当前候选在页面内提供不可变方法版本的创建/复制/选择和默认切换；本次开始表单显式呈现三阶段说明、方法默认值与本次三项预算，先调用 selection preview，再以保留的 `requestRef` 提交 start。预览、保存方法、激活默认值和 Run 启动分别以 API 回执为准。项目通过的 disposable PostgreSQL/Axum proof 可证明 API 路径和持久化约束，不证明浏览器视觉、可访问性、生产页面或真实 ModelPort 执行。
+当前候选在页面内提供不可变方法版本的创建/复制/选择和默认切换；开始表单显式呈现三阶段说明、方法默认值与本次三项预算，先调用 selection preview，再以保留的 `requestRef` 提交 start。新增的真实浏览器回归经 Axum Comment Study 路由访问 disposable PostgreSQL，验证首页遇到活动 `legacy_unrecorded` 方法时会选择可记录版本，并完成新方法 POST 保存、CAS 激活、preview、start、stop；Run 与新方法绑定。对于活动指针所在方法早于目录首页 100 条的情况，浏览器会继续沿 `nextCursor` 读取到活动 ref，再提交正确的 CAS expected ref；方法选择列表本身仍只展示首页已记录版本。所有成功与失败状态均以 HTTP/数据库事实为准。
 
-UI Surface/State/Dependency/Acceptance manifest 与验收分层结果记录在 PR #338 当前变更说明；代码 diff、隔离 PG 和 API 测试通过后，设计规格一致性及自动检查可核验，浏览器走查、真实回执、部署和 Mog 业务验收仍为 `NOT VERIFIED`。页面完整验收继续按本规格第 8 节和技术手册 P7 执行。
+UI Surface/State/Dependency/Acceptance manifest 与验收分层结果记录在 PR #338 当前变更说明。本机真实浏览器/Axum/隔离 PostgreSQL 与合成分页回归已通过；对应的 PR #338 exact-head CI 仍待本地提交推送。该证明不等于生产页面、真实 ModelPort 执行或 Mog 业务验收；视觉、可访问性、真实 API/数据逐动作逐数字核对仍为 `NOT VERIFIED`。页面完整验收继续按本规格第 8 节和技术手册 P7 执行。
