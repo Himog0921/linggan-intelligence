@@ -14,7 +14,7 @@ import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from playwright.sync_api import sync_playwright
 
@@ -61,11 +61,51 @@ def run_synthetic() -> None:
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     base_url = f"http://127.0.0.1:{httpd.server_port}"
 
-    state = {"active_policy": OLD_POLICY_REF, "created": False, "stopped": False}
+    state = {
+        "active_policy": OLD_POLICY_REF,
+        "created": False,
+        "stopped": False,
+        "deep_active_mode": False,
+        "policy_page_cursors": [],
+    }
     requests: dict[str, dict] = {}
     unexpected: list[str] = []
 
-    def policies() -> dict:
+    def policies(cursor: str | None = None) -> dict:
+        if state["deep_active_mode"]:
+            state["policy_page_cursors"].append(cursor)
+            if cursor == "older-page":
+                return {
+                    "items": [
+                        {
+                            "policyRef": OLD_POLICY_REF,
+                            "methodName": "历史默认方法",
+                            "recordingState": "legacy_unrecorded",
+                            "isActive": state["active_policy"] == OLD_POLICY_REF,
+                        }
+                    ],
+                    "page": {"hasMore": False, "nextCursor": None},
+                }
+            return {
+                "items": [
+                    {
+                        "policyRef": NEW_POLICY_REF,
+                        "methodName": "最近记录方法",
+                        "recordingState": "recorded",
+                        "isActive": state["active_policy"] == NEW_POLICY_REF,
+                    },
+                    *[
+                        {
+                            "policyRef": f"00000000-0000-4000-8000-{index:012d}",
+                            "methodName": f"记录方法 {index}",
+                            "recordingState": "recorded",
+                            "isActive": False,
+                        }
+                        for index in range(6, 105)
+                    ],
+                ],
+                "page": {"hasMore": True, "nextCursor": "older-page"},
+            }
         return {
             "items": [
                 {
@@ -115,6 +155,7 @@ def run_synthetic() -> None:
         request = route.request
         parsed = urlsplit(request.url)
         path = parsed.path.removeprefix("/api/local/comment-study/")
+        query = parse_qs(parsed.query)
         payload = request.post_data_json if request.method == "POST" else None
         response: dict
 
@@ -163,7 +204,7 @@ def run_synthetic() -> None:
                 "page": {"nextCursor": None},
             }
         elif request.method == "GET" and path == "policies":
-            response = policies()
+            response = policies(query.get("cursor", [None])[0])
         elif request.method == "GET" and path == "runs":
             response = {"runs": [run_record()] if state["created"] else []}
         elif request.method == "GET" and path == "overview":
@@ -173,10 +214,11 @@ def run_synthetic() -> None:
         elif request.method == "POST" and path == "policies":
             requests["policy"] = payload
             response = {"policy": {"policyRef": NEW_POLICY_REF}}
-        elif request.method == "POST" and path == f"policies/{NEW_POLICY_REF}/activate":
+        elif request.method == "POST" and path.endswith("/activate"):
             requests["activate"] = payload
-            state["active_policy"] = NEW_POLICY_REF
-            response = {"data": {"policyRef": NEW_POLICY_REF}}
+            activated_ref = path.split("/")[1]
+            state["active_policy"] = activated_ref
+            response = {"data": {"policyRef": activated_ref}}
         elif request.method == "POST" and path == "selection-preview":
             requests["preview"] = payload
             response = {
@@ -261,10 +303,37 @@ def run_synthetic() -> None:
             assert start.get("workRoles") == [{"contentPublicRef": WORK_REF, "observationRole": "primary"}]
             assert requests.get("stop", {}).get("expectedControlVersion") == 0
             assert not unexpected, "Unexpected API calls: " + "; ".join(unexpected)
+
+            state.update(
+                active_policy=OLD_POLICY_REF,
+                created=False,
+                stopped=False,
+                deep_active_mode=True,
+            )
+            cursor_start = len(state["policy_page_cursors"])
+            page = browser.new_page()
+            page.route("**/api/local/comment-study/**", api_reply)
+            page.goto(f"{base_url}/corpus/comments?domain={DOMAIN_REF}")
+            page.locator(f"#work-{WORK_REF}").wait_for(state="attached")
+            page.locator(f"#study-policy option[value='{NEW_POLICY_REF}']").wait_for(state="attached")
+            page.get_by_role("button", name="发起研究").click()
+            page.locator("#activate-policy").click()
+            page.get_by_text("已将所选方法设为当前领域默认版本。", exact=True).wait_for()
+            assert state["policy_page_cursors"][cursor_start : cursor_start + 2] == [None, "older-page"]
+            assert requests.get("activate", {}).get("expectedActivePolicyRef") == OLD_POLICY_REF
+            assert not unexpected, "Unexpected API calls: " + "; ".join(unexpected)
+            page.close()
             browser.close()
 
         try:
-            run_live_api(base_url, DOMAIN_REF, WORK_REF, NEW_POLICY_REF, "not-the-live-proof-token")
+            run_live_api(
+                base_url,
+                DOMAIN_REF,
+                WORK_REF,
+                NEW_POLICY_REF,
+                OLD_POLICY_REF,
+                "not-the-live-proof-token",
+            )
         except ValueError as error:
             assert "not the isolated browser proof server" in str(error)
         else:
@@ -280,7 +349,8 @@ def run_live_api(
     base_url: str,
     domain_ref: str,
     work_ref: str,
-    target_policy_ref: str,
+    existing_policy_ref: str,
+    initial_active_policy_ref: str,
     proof_token: str,
 ) -> None:
     parsed_base = urlsplit(base_url)
@@ -358,8 +428,27 @@ def run_live_api(
             ) from error
         page.get_by_role("button", name="发起研究").click()
         page.locator(f"#work-{work_ref}").wait_for(state="visible")
-        page.locator(f"#study-policy option[value='{target_policy_ref}']").wait_for(state="attached")
-        page.locator("#study-policy").select_option(target_policy_ref)
+        page.locator(f"#study-policy option[value='{existing_policy_ref}']").wait_for(state="attached")
+        assert page.locator("#study-policy").input_value() == existing_policy_ref
+
+        page.locator("#method-name").fill("隔离浏览器方法")
+        page.locator("#stage-semantic").fill("仅用于真实 Axum 与隔离 PostgreSQL 浏览器回归")
+        page.locator("#save-policy").click()
+        try:
+            page.get_by_text("已保存不可变方法版本", exact=False).wait_for()
+        except Exception as error:
+            raise AssertionError(
+                "Method creation did not receive its success feedback; "
+                f"requests={[item for item in calls if item['method'] == 'POST']!r}; "
+                f"responses={[item for item in responses if item['method'] == 'POST']!r}; "
+                f"page_errors={page_errors!r}; save_disabled={page.locator('#save-policy').is_disabled()}; "
+                f"form_valid={page.locator('#policy-form').evaluate('(form) => form.checkValidity()')}; "
+               f"status={page.locator('#policy-status').inner_text()!r}"
+            ) from error
+        created_policy_ref = page.locator("#study-policy").input_value()
+        assert created_policy_ref and created_policy_ref != existing_policy_ref
+        page.locator("#activate-policy").click()
+        page.get_by_text("已将所选方法设为当前领域默认版本。", exact=True).wait_for()
 
         page.locator(f"#work-{work_ref}").check()
         page.locator("#comment-budget").fill("2")
@@ -396,11 +485,28 @@ def run_live_api(
             "contextCharacterBudget": 3500,
             "tokenLimit": 4096,
         }
-        assert start and start["payload"]["policyRef"] == target_policy_ref
+        policy = next(
+            (item for item in calls if item["method"] == "POST" and item["path"].endswith("/policies")),
+            None,
+        )
+        assert policy and policy["payload"]["methodName"] == "隔离浏览器方法"
+        assert policy["payload"]["stageInstructions"] == {
+            "semantic": "仅用于真实 Axum 与隔离 PostgreSQL 浏览器回归",
+            "resolution": "",
+            "pair": "",
+        }
+        activation = next(
+            (item for item in calls if item["method"] == "POST" and item["path"].endswith("/activate")),
+            None,
+        )
+        assert activation and activation["payload"]["expectedActivePolicyRef"] == initial_active_policy_ref
+        assert start and start["payload"]["policyRef"] == created_policy_ref
         assert start["payload"]["requestRef"]
         assert start["payload"]["workRoles"] == [{"contentPublicRef": work_ref, "observationRole": "primary"}]
         assert stop and stop["payload"]["expectedControlVersion"] == 0
         assert any(item["path"].endswith("/selection-preview") and item["status"] == 200 for item in responses)
+        assert any(item["method"] == "POST" and item["path"].endswith("/policies") and item["status"] == 201 for item in responses)
+        assert any(item["method"] == "POST" and item["path"].endswith("/activate") and item["status"] == 200 for item in responses)
         start_response = next(
             item for item in responses if item["method"] == "POST" and item["path"].endswith("/runs")
         )
@@ -423,14 +529,16 @@ def main() -> None:
     parser.add_argument("--api-base-url")
     parser.add_argument("--domain-ref")
     parser.add_argument("--work-ref")
-    parser.add_argument("--target-policy-ref")
+    parser.add_argument("--existing-policy-ref")
+    parser.add_argument("--initial-active-policy-ref")
     parser.add_argument("--proof-token")
     args = parser.parse_args()
     if args.api_base_url:
         required = {
             "--domain-ref": args.domain_ref,
             "--work-ref": args.work_ref,
-            "--target-policy-ref": args.target_policy_ref,
+            "--existing-policy-ref": args.existing_policy_ref,
+            "--initial-active-policy-ref": args.initial_active_policy_ref,
             "--proof-token": args.proof_token,
         }
         missing = [name for name, value in required.items() if not value]
@@ -440,11 +548,12 @@ def main() -> None:
             args.api_base_url.rstrip("/"),
             args.domain_ref,
             args.work_ref,
-            args.target_policy_ref,
+            args.existing_policy_ref,
+            args.initial_active_policy_ref,
             args.proof_token,
         )
         return
-    if any((args.domain_ref, args.work_ref, args.target_policy_ref, args.proof_token)):
+    if any((args.domain_ref, args.work_ref, args.existing_policy_ref, args.initial_active_policy_ref, args.proof_token)):
         parser.error("fixture references are only valid with --api-base-url")
     run_synthetic()
 

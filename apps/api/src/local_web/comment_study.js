@@ -146,12 +146,24 @@ async function loadSetup(){
 
 async function loadPolicies(preferredRef=null){
   const select=document.querySelector('#study-policy');
-  const result=await get('policies?limit=100');
-  savedPolicies=(result.items||[]).filter(item=>item.recordingState==='recorded');
-  activePolicyRef=(result.items||[]).find(item=>item.isActive)?.policyRef||null;
+  const firstPage=await get('policies?limit=100');
+  let result=firstPage;
+  let policyItems=firstPage.items||[];
+  activePolicyRef=policyItems.find(item=>item.isActive)?.policyRef||null;
+  while(!activePolicyRef&&result.page?.hasMore){
+    const cursor=result.page.nextCursor;
+    if(!cursor)throw new Error('方法目录分页回执不完整');
+    result=await get(`policies?limit=100&cursor=${encodeURIComponent(cursor)}`);
+    policyItems=result.items||[];
+    activePolicyRef=policyItems.find(item=>item.isActive)?.policyRef||null;
+  }
+  savedPolicies=(firstPage.items||[]).filter(item=>item.recordingState==='recorded');
   select.innerHTML=savedPolicies.length?savedPolicies.map(item=>`<option value="${esc(item.policyRef)}">${esc(item.methodName||'未命名方法')}${item.isActive?' · 默认':''} · ${esc(item.policyRef.slice(0,8))}</option>`).join(''):'<option value="">没有已记录的方法版本</option>';
   select.disabled=savedPolicies.length===0;
-  const desired=preferredRef||activePolicyRef||savedPolicies[0]?.policyRef||'';
+  const isRecorded=reference=>savedPolicies.some(item=>item.policyRef===reference);
+  const desired=(isRecorded(preferredRef)?preferredRef:null)
+    ||(isRecorded(activePolicyRef)?activePolicyRef:null)
+    ||savedPolicies[0]?.policyRef||'';
   if(desired)select.value=desired;
   document.querySelector('#activate-policy').disabled=!select.value||select.value===activePolicyRef;
   updateSelection();

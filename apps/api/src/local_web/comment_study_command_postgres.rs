@@ -971,6 +971,13 @@ async fn browser_real_axum_postgres_previews_starts_and_stops_without_provider_d
     .fetch_one(p.db.pool())
     .await
     .unwrap();
+    let initial_active_policy_ref: Uuid = sqlx::query_scalar(
+        "SELECT policy_ref FROM linggan_comment_study_active_policy WHERE domain_ref=$1",
+    )
+    .bind(domain())
+    .fetch_one(p.db.pool())
+    .await
+    .unwrap();
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -998,6 +1005,7 @@ async fn browser_real_axum_postgres_previews_starts_and_stops_without_provider_d
     let domain_ref = domain().to_string();
     let work_ref_arg = work_ref.to_string();
     let target_policy_ref_arg = target_policy_ref.to_string();
+    let initial_active_policy_ref_arg = initial_active_policy_ref.to_string();
     let proof_token_arg = proof_token;
     let python = std::env::var("PYTHON").unwrap_or_else(|_| "python3".to_owned());
     let browser_result = tokio::task::spawn_blocking(move || {
@@ -1009,8 +1017,10 @@ async fn browser_real_axum_postgres_previews_starts_and_stops_without_provider_d
             .arg(domain_ref)
             .arg("--work-ref")
             .arg(work_ref_arg)
-            .arg("--target-policy-ref")
+            .arg("--existing-policy-ref")
             .arg(target_policy_ref_arg)
+            .arg("--initial-active-policy-ref")
+            .arg(initial_active_policy_ref_arg)
             .arg("--proof-token")
             .arg(proof_token_arg)
             .output()
@@ -1037,4 +1047,34 @@ async fn browser_real_axum_postgres_previews_starts_and_stops_without_provider_d
     assert_eq!(dispatch_state, "stopped");
     assert_eq!(run_state, "cancelled");
     assert_eq!(control_version, 1);
+
+    let (created_policy_ref, manifest): (Uuid, Value) = sqlx::query_as(
+        "SELECT policy_ref,method_manifest FROM linggan_comment_study_policy \
+         WHERE domain_ref=$1 AND method_name='隔离浏览器方法'",
+    )
+    .bind(domain())
+    .fetch_one(p.db.pool())
+    .await
+    .unwrap();
+    let active_policy_ref: Uuid = sqlx::query_scalar(
+        "SELECT policy_ref FROM linggan_comment_study_active_policy WHERE domain_ref=$1",
+    )
+    .bind(domain())
+    .fetch_one(p.db.pool())
+    .await
+    .unwrap();
+    assert_eq!(created_policy_ref, active_policy_ref);
+    assert_ne!(created_policy_ref, target_policy_ref);
+    assert!(
+        manifest["stages"]["semantic"]["systemInstruction"]
+            .as_str()
+            .unwrap()
+            .contains("仅用于真实 Axum 与隔离 PostgreSQL 浏览器回归")
+    );
+    let run_policy_ref: Uuid =
+        sqlx::query_scalar("SELECT policy_ref FROM linggan_comment_study_run LIMIT 1")
+            .fetch_one(p.db.pool())
+            .await
+            .unwrap();
+    assert_eq!(run_policy_ref, created_policy_ref);
 }
