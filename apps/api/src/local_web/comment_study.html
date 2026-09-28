@@ -60,7 +60,7 @@
         <header class="study-toolbar">
           <nav class="study-tabs" aria-label="评论研究视图">
             <button type="button" data-view="overview" aria-current="page">概览</button>
-            <button type="button" data-view="targets">评论目标</button>
+            <button type="button" data-view="comments">用户评论</button>
             <button type="button" data-view="pending">待归并</button>
             <button type="button" data-view="problems">用户问题</button>
             <button type="button" data-view="runs">运行记录</button>
@@ -87,9 +87,14 @@
       <h3 id="setup-title" class="v7-sr-only">研究策略</h3>
       <form id="policy-form" class="policy-form">
         <label>模型配置<select id="model-config" required disabled><option>正在读取…</option></select></label>
+        <label>本次使用的方法版本<select id="study-policy" required disabled><option value="">先保存一版研究方法</option></select></label>
+        <label>方法名称<input id="method-name" type="text" maxlength="100" value="评论研究方法" required></label>
         <label>本次最多评论数<input id="comment-budget" type="number" min="1" max="3000" value="100" required></label>
         <label>单作品语境字符上限<input id="context-character-budget" type="number" min="1" max="20000" value="6000" required></label>
-        <button id="save-policy" type="submit" disabled>保存研究策略</button>
+        <label class="study-instruction">语义提取补充说明<textarea id="stage-semantic" maxlength="32000" rows="3"></textarea></label>
+        <label class="study-instruction">归并判断补充说明<textarea id="stage-resolution" maxlength="32000" rows="3"></textarea></label>
+        <label class="study-instruction">问题配对补充说明<textarea id="stage-pair" maxlength="32000" rows="3"></textarea></label>
+        <div class="study-policy-actions"><button id="save-policy" type="submit" disabled>保存新方法版本</button><button id="activate-policy" type="button" disabled>设为默认方法</button></div>
       </form>
       <p id="policy-status" class="study-dialog-note" role="status"></p>
       <p id="source-preview" class="study-dialog-note" role="status">正在核对评论资格…</p>
@@ -98,12 +103,19 @@
       <header class="study-workspace-header">
         <div><p class="study-label">研究输入</p><h3 id="work-picker-title">选择要研究的作品</h3></div>
         <div class="study-workspace-tools">
-          <label class="study-filter">筛选已加载作品<input id="work-filter" type="search" placeholder="按作品标题筛选" autocomplete="off"></label>
+          <label class="study-filter">搜索作品目录<input id="work-filter" type="search" placeholder="按作品标题搜索" autocomplete="off"></label>
           <label class="study-reference-toggle"><input id="include-reference-works" type="checkbox" disabled>显式纳入 reference 作品</label>
           <span id="selected-count" class="selection-count" role="status">已选择 0 篇</span>
         </div>
       </header>
       <p id="reference-source-preview" class="study-table-status" role="status" hidden></p>
+      <div class="study-run-settings">
+        <label>启动模式<select id="study-mode"><option value="new_only">只研究尚未研究的评论</option><option value="input_changed">只重研输入已变化的评论</option><option value="retry_failed">重试失败评论</option><option value="reanalyse">重新分析所选评论</option></select></label>
+        <label>本次模型词元上限<input id="token-budget" type="number" min="1024" max="10000000" value="100000"></label>
+        <label id="study-reason-label" hidden>本次重研原因<input id="study-reason" type="text" maxlength="500" placeholder="说明这次重研的原因"></label>
+        <button id="preview-run" type="button" disabled>预览本次选择</button>
+      </div>
+      <p id="selection-preview" class="study-table-status" role="status"></p>
       <p id="work-filter-status" class="study-table-status" role="status">正在读取可研究作品…</p>
       <div class="study-table-wrap">
         <table class="study-table" aria-labelledby="work-picker-title" aria-describedby="work-filter-status">
@@ -112,11 +124,38 @@
           <tbody id="works" aria-live="polite"><tr><td colspan="4">正在读取作品…</td></tr></tbody>
         </table>
       </div>
+      <nav class="study-pagination" aria-label="作品目录翻页">
+        <button id="work-prev" type="button" disabled>上一页</button>
+        <span id="work-page-status" role="status">第 1 页</span>
+        <button id="work-next" type="button" disabled>下一页</button>
+      </nav>
       <footer class="study-workspace-footer">
         <p>只冻结当前所选作品中、受评论数上限约束的可研究评论；创建研究运行不会调用模型。</p>
         <div class="run-actions"><button id="start-run" type="button" disabled>创建研究运行</button><p id="run-result" role="status"></p></div>
       </footer>
     </section>
+  </dialog>
+
+  <dialog id="comment-detail-dialog" class="study-detail-dialog" aria-labelledby="comment-detail-title">
+    <header class="study-dialog-header">
+      <div><p class="study-label">原声证据</p><h2 id="comment-detail-title">评论详情</h2></div>
+      <button type="button" id="comment-detail-close">关闭</button>
+    </header>
+    <div id="comment-detail-body" class="study-detail-body" aria-live="polite"></div>
+  </dialog>
+
+  <dialog id="study-stop-dialog" aria-labelledby="study-stop-title" aria-describedby="study-stop-run-identity study-stop-description">
+    <div class="study-stop-dialog-body">
+      <p class="study-label">运行控制</p>
+      <h2 id="study-stop-title">停止本次研究？</h2>
+      <p id="study-stop-run-identity" class="study-stop-run-identity"></p>
+      <p id="study-stop-description">尚未外发的目标会标记为取消，已接纳结果会保留。已经开始的调用无法保证中断，可能仍产生费用；获准的在途结果仍会结算。停止后不能恢复原 Run，如需续做，请创建新 Run 并选择“重试失败”。</p>
+      <p id="study-stop-error" class="study-stop-error" role="status" aria-live="polite"></p>
+      <div class="study-stop-actions">
+        <button id="study-stop-confirm" type="button" class="study-danger-button">确认停止</button>
+        <button id="study-stop-dismiss" type="button" autofocus>返回</button>
+      </div>
+    </div>
   </dialog>
 
   <script src="/assets/comment-study.js"></script>
@@ -134,7 +173,7 @@
   function overviewKinds(signals){const counts=new Map();signals.forEach(signal=>counts.set(signal.kind,(counts.get(signal.kind)||0)+1));return[...counts.entries()].sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]))}
   function overviewExpressions(signals){const groups=new Map();signals.forEach(signal=>{if(signal.sourceState==='restricted')return;const proposition=String(signal.proposition||'').trim();if(!proposition)return;const group=groups.get(proposition)||{proposition,signals:[]};group.signals.push(signal);groups.set(proposition,group)});return[...groups.values()].sort((a,b)=>b.signals.length-a.signals.length||a.proposition.localeCompare(b.proposition)).slice(0,8)}
   function overviewProblemHighlights(problems,signals){const current=new Map();signals.forEach(signal=>{if(!signal.resolvedProblemRef)return;const group=current.get(signal.resolvedProblemRef)||[];group.push(signal);current.set(signal.resolvedProblemRef,group)});const active=(problems||[]).filter(problem=>problem.state==='active');const changed=active.filter(problem=>current.has(problem.problemRef)).map(problem=>({problem,signals:current.get(problem.problemRef)})).sort((a,b)=>b.signals.length-a.signals.length||Number(b.problem.membershipCount)-Number(a.problem.membershipCount));if(changed.length)return changed.slice(0,3);return active.sort((a,b)=>Number(b.membershipCount)-Number(a.membershipCount)).slice(0,3).map(problem=>({problem,signals:[]}))}
-  function overviewUnresolved(latest){if(!latest)return[];const rows=[];['deferred_novel','deferred_ambiguous','deferred_context','retrieval_incomplete','budget_stopped','pending','protocol_rejected','failed'].forEach(state=>{const count=Number(latest.resolutionStates?.[state]||0);if(count)rows.push({text:label(resolutionLabel,state)??state,count,view:RUN_RECORD_RESOLUTION_STATES.has(state)?'runs':'pending'})});[['needs_context','仍在等待评论语境'],['failed','评论研究处理失败'],['excluded','来源受限，未继续处理']].forEach(([state,text])=>{const count=Number(latest.targetStates?.[state]||0);if(count)rows.push({text,count,view:'targets'})});return rows}
+  function overviewUnresolved(latest){if(!latest)return[];const rows=[];['deferred_novel','deferred_ambiguous','deferred_context','retrieval_incomplete','budget_stopped','pending','protocol_rejected','failed'].forEach(state=>{const count=Number(latest.resolutionStates?.[state]||0);if(count)rows.push({text:label(resolutionLabel,state)??state,count,view:RUN_RECORD_RESOLUTION_STATES.has(state)?'runs':'pending'})});[['needs_context','仍在等待评论语境'],['failed','评论研究处理失败'],['excluded','来源受限，未继续处理']].forEach(([state,text])=>{const count=Number(latest.targetStates?.[state]||0);if(count)rows.push({text,count,view:'comments'})});return rows}
   function overviewVoices(data){const byTarget=new Map();data.signals.forEach(signal=>{const group=byTarget.get(signal.targetRef)||[];group.push(signal);byTarget.set(signal.targetRef,group)});let targets=data.targets.filter(target=>target.commentText);if(overviewState.kind!=='all')targets=targets.filter(target=>(byTarget.get(target.targetRef)||[]).some(signal=>signal.kind===overviewState.kind));if(overviewState.expression)targets=targets.filter(target=>(byTarget.get(target.targetRef)||[]).some(signal=>signal.proposition===overviewState.expression));targets.sort((a,b)=>(byTarget.get(b.targetRef)||[]).length-(byTarget.get(a.targetRef)||[]).length||String(b.createdAt).localeCompare(String(a.createdAt)));return targets.slice(0,4).map(target=>({target,signals:byTarget.get(target.targetRef)||[]}))}
   const coverageLabel=state=>({recorded:'有观察记录',partial:'部分观察',none:'无观察记录'}[state]||'观察状态未知');
   const observationPoints=series=>(Array.isArray(series?.points)?series.points:[]).slice(-overviewState.seriesDays);

@@ -12,8 +12,6 @@ use sqlx::Row;
 use thiserror::Error;
 use uuid::Uuid;
 
-const MAX_SEMANTIC_ATTEMPTS: i32 = 3;
-
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SemanticAcceptanceReceipt {
@@ -141,11 +139,28 @@ async fn next_attempt_ordinal(
     .bind(target_ref)
     .fetch_one(&mut **transaction)
     .await?;
-    let ordinal = i32::try_from(completed).unwrap_or(MAX_SEMANTIC_ATTEMPTS) + 1;
-    if ordinal > MAX_SEMANTIC_ATTEMPTS {
+    let max_attempts = configured_max_attempts(transaction, target_ref).await?;
+    if completed >= i64::from(max_attempts) {
         return Err(SemanticAcceptanceError::AttemptsExhausted);
     }
-    Ok(ordinal)
+    i32::try_from(completed + 1).map_err(|_| SemanticAcceptanceError::AttemptsExhausted)
+}
+
+pub(crate) async fn configured_max_attempts(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    target_ref: Uuid,
+) -> Result<i32, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT config.max_attempts \
+         FROM linggan_comment_study_target target \
+         JOIN linggan_comment_study_run run USING(run_ref) \
+         JOIN linggan_comment_study_policy policy USING(policy_ref) \
+         JOIN linggan_model_config config ON config.config_ref=policy.model_config_ref \
+         WHERE target.target_ref=$1",
+    )
+    .bind(target_ref)
+    .fetch_one(&mut **transaction)
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -214,11 +229,33 @@ async fn complete_target(
     target_ref: Uuid,
     state: &str,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE linggan_comment_study_target SET state=$2 WHERE target_ref=$1")
+    let has_productization_columns: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM information_schema.columns \
+         WHERE table_schema=current_schema() AND table_name='linggan_comment_study_target' \
+           AND column_name='terminal_reason')",
+    )
+    .fetch_one(&mut **transaction)
+    .await?;
+    if has_productization_columns {
+        let terminal_reason = (state == "failed").then_some("attempts_exhausted");
+        sqlx::query(
+            "UPDATE linggan_comment_study_target SET state=$2, \
+             finished_at=CASE WHEN $2 IN ('succeeded','no_signal','needs_context','failed','excluded','cancelled') \
+                              THEN scope_001_now() ELSE NULL END, \
+             terminal_reason=$3 WHERE target_ref=$1",
+        )
         .bind(target_ref)
         .bind(state)
+        .bind(terminal_reason)
         .execute(&mut **transaction)
         .await?;
+    } else {
+        sqlx::query("UPDATE linggan_comment_study_target SET state=$2 WHERE target_ref=$1")
+            .bind(target_ref)
+            .bind(state)
+            .execute(&mut **transaction)
+            .await?;
+    }
     Ok(())
 }
 
@@ -246,7 +283,8 @@ async fn rejected_receipt(
         Some(code),
     )
     .await?;
-    let next_state = if attempt_ordinal == MAX_SEMANTIC_ATTEMPTS {
+    let max_attempts = configured_max_attempts(transaction, target_ref).await?;
+    let next_state = if attempt_ordinal >= max_attempts {
         "failed"
     } else {
         "queued"

@@ -339,14 +339,17 @@ pub async fn probe_and_register_embedding_profile(
     });
 
     let mut vectors = Vec::new();
+    let mut encode_measurements = Vec::new();
     for (_, text) in probe_texts() {
         let response = adapter.embed_wemm_document(&text).await?;
+        encode_measurements.push(runtime_measurement(&response));
         vectors.push(single_unit_vector(&response)?);
     }
     // Encoding the first text a second time. A runtime returning random vectors passes "different
     // texts differ" and fails here, which is the case the manual calls out by name.
-    let repeat = adapter.embed_wemm_document(&probe_texts()[0].1).await?;
-    let repeat = single_unit_vector(&repeat)?;
+    let repeat_response = adapter.embed_wemm_document(&probe_texts()[0].1).await?;
+    let repeat_measurement = runtime_measurement(&repeat_response);
+    let repeat = single_unit_vector(&repeat_response)?;
 
     let repeat_cosine = cosine(&vectors[0], &repeat);
     let near_cosine = cosine(&vectors[0], &vectors[1]);
@@ -363,6 +366,8 @@ pub async fn probe_and_register_embedding_profile(
         // Named rather than left to be inferred from their absence: the manual asks for these and
         // this runtime cannot produce them without a dependency the verified venv does not carry.
         "notCaptured": ["systemMemoryPressure", "swapActivity"],
+        "encodeMeasurements": encode_measurements,
+        "repeatMeasurement": repeat_measurement,
         "repeatCosine": repeat_cosine,
         "nearCosine": near_cosine,
         "unrelatedCosine": unrelated_cosine,
@@ -393,6 +398,15 @@ pub async fn probe_and_register_embedding_profile(
     Ok(ProbeOutcome::Qualified {
         profile_ref,
         evidence,
+    })
+}
+
+fn runtime_measurement(response: &crate::pi_adapter::WeMMResponse) -> Value {
+    json!({
+        "elapsedMs": response.elapsed_ms,
+        "peakRssBytes": response.peak_rss_bytes,
+        "mpsAllocatedBytes": response.mps_allocated_bytes,
+        "mpsDriverBytes": response.mps_driver_bytes,
     })
 }
 

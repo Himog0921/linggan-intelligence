@@ -18,8 +18,6 @@ use std::collections::BTreeMap;
 use thiserror::Error;
 use uuid::Uuid;
 
-const MAX_SEMANTIC_ATTEMPTS: i32 = 3;
-
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BatchAcceptanceReceipt {
@@ -28,6 +26,7 @@ pub struct BatchAcceptanceReceipt {
     pub accepted_target_count: usize,
     pub retried_target_count: usize,
     pub failed_target_count: usize,
+    pub cancelled_target_count: usize,
 }
 
 #[derive(Debug, Error)]
@@ -44,11 +43,15 @@ struct LockedBatch {
     run_ref: Uuid,
     content_public_ref: Uuid,
     model_invocation_ref: Option<Uuid>,
+    retry_authorized: bool,
+    stop_terminal_reason: &'static str,
+    request_deadline_expired: bool,
     targets: BTreeMap<Uuid, String>,
 }
 
-/// Accepts the valid part of a batch response and makes omitted targets retriable. A malformed
-/// outer response is a bounded rejected attempt for every target in that batch, never no_signal.
+/// Accepts the valid part of an authorized batch response. Omitted targets are retried only while
+/// the Run permits future dispatch; after stop they retain a rejected attempt and close as cancelled.
+/// A malformed outer response is a bounded rejected attempt for every target, never no_signal.
 pub async fn accept_study_batch_output(
     database: &Database,
     batch_ref: Uuid,
@@ -57,6 +60,54 @@ pub async fn accept_study_batch_output(
 ) -> Result<BatchAcceptanceReceipt, BatchAcceptanceError> {
     let mut transaction = database.pool().begin().await?;
     let batch = lock_batch(&mut transaction, batch_ref, lease_token).await?;
+    if batch.request_deadline_expired {
+        let (retried_target_count, failed_target_count, cancelled_target_count) =
+            reject_all_targets(
+                &mut transaction,
+                batch_ref,
+                batch.model_invocation_ref,
+                &batch.targets,
+                "semantic_batch_contract",
+                json!({
+                    "failureCode":"request_deadline_expired",
+                    "responseReceivedAfterDeadline":true
+                }),
+                batch.retry_authorized,
+                batch.stop_terminal_reason,
+            )
+            .await?;
+        finish_batch(
+            &mut transaction,
+            batch_ref,
+            "failed",
+            json!({"reason":"request_deadline_expired","rawResponse":raw_output}),
+        )
+        .await?;
+        finish_model_invocation(
+            &mut transaction,
+            batch.model_invocation_ref,
+            false,
+            Some("request_deadline_expired"),
+            json!({
+                "contract":"comment-study.note-batch.v1",
+                "runRef":batch.run_ref,
+                "batchRef":batch_ref,
+                "responseReceivedAfterDeadline":true,
+                "acceptedTargetCount":0
+            }),
+        )
+        .await?;
+        close_run_if_settled(&mut transaction, batch.run_ref).await?;
+        transaction.commit().await?;
+        return Ok(BatchAcceptanceReceipt {
+            batch_ref,
+            state: "failed".to_owned(),
+            accepted_target_count: 0,
+            retried_target_count,
+            failed_target_count,
+            cancelled_target_count,
+        });
+    }
     let parsed = match parse_batch_output(
         raw_output.clone(),
         batch_ref,
@@ -65,14 +116,18 @@ pub async fn accept_study_batch_output(
     ) {
         Ok(parsed) => parsed,
         Err(error) => {
-            let (_retried_target_count, _failed_target_count) = reject_all_targets(
-                &mut transaction,
-                batch_ref,
-                batch.model_invocation_ref,
-                &batch.targets,
-                "semantic_batch_contract",
-            )
-            .await?;
+            let (_retried_target_count, _failed_target_count, _cancelled_target_count) =
+                reject_all_targets(
+                    &mut transaction,
+                    batch_ref,
+                    batch.model_invocation_ref,
+                    &batch.targets,
+                    "semantic_batch_contract",
+                    json!({}),
+                    batch.retry_authorized,
+                    batch.stop_terminal_reason,
+                )
+                .await?;
             finish_batch(&mut transaction, batch_ref, "failed", raw_output).await?;
             finish_model_invocation(
                 &mut transaction,
@@ -108,6 +163,7 @@ pub async fn accept_study_batch_output(
     }
     let mut retried_target_count = 0;
     let mut failed_target_count = 0;
+    let mut cancelled_target_count = 0;
     // A result that is malformed on its own is that target's failed attempt only. Its siblings in
     // the same response keep whatever they legitimately produced.
     for rejected in parsed.rejected_targets {
@@ -117,13 +173,17 @@ pub async fn accept_study_batch_output(
             batch.model_invocation_ref,
             rejected.target_ref,
             rejected.rejection_code,
+            json!({}),
+            batch.retry_authorized,
+            batch.stop_terminal_reason,
         )
         .await?;
-        if state == "queued" {
-            retried_target_count += 1;
-        } else {
-            failed_target_count += 1;
-        }
+        count_rejection_state(
+            state,
+            &mut retried_target_count,
+            &mut failed_target_count,
+            &mut cancelled_target_count,
+        );
     }
     for target_ref in parsed.missing_target_refs {
         let state = reject_target(
@@ -132,19 +192,24 @@ pub async fn accept_study_batch_output(
             batch.model_invocation_ref,
             target_ref,
             "semantic_target_missing",
+            json!({}),
+            batch.retry_authorized,
+            batch.stop_terminal_reason,
         )
         .await?;
-        if state == "queued" {
-            retried_target_count += 1;
-        } else {
-            failed_target_count += 1;
-        }
+        count_rejection_state(
+            state,
+            &mut retried_target_count,
+            &mut failed_target_count,
+            &mut cancelled_target_count,
+        );
     }
-    let state = if retried_target_count == 0 && failed_target_count == 0 {
-        "accepted"
-    } else {
-        "completed_with_failures"
-    };
+    let state =
+        if retried_target_count == 0 && failed_target_count == 0 && cancelled_target_count == 0 {
+            "accepted"
+        } else {
+            "completed_with_failures"
+        };
     finish_batch(&mut transaction, batch_ref, state, raw_output).await?;
     finish_model_invocation(
         &mut transaction,
@@ -159,6 +224,7 @@ pub async fn accept_study_batch_output(
             "acceptedTargetCount":accepted_target_count,
             "retriedTargetCount":retried_target_count,
             "failedTargetCount":failed_target_count,
+            "cancelledTargetCount":cancelled_target_count,
             "unattributableResultCount":unattributable_result_count,
             "unexpectedResultCount":unexpected_result_count
         }),
@@ -172,6 +238,7 @@ pub async fn accept_study_batch_output(
         accepted_target_count,
         retried_target_count,
         failed_target_count,
+        cancelled_target_count,
     })
 }
 
@@ -180,6 +247,19 @@ async fn lock_batch(
     batch_ref: Uuid,
     lease_token: Uuid,
 ) -> Result<LockedBatch, BatchAcceptanceError> {
+    let run_ref: Uuid = sqlx::query_scalar(
+        "SELECT run_ref FROM linggan_comment_study_batch \
+         WHERE batch_ref=$1 AND state='leased' AND lease_token=$2 \
+           AND lease_expires_at>scope_001_now()",
+    )
+    .bind(batch_ref)
+    .bind(lease_token)
+    .fetch_optional(&mut **transaction)
+    .await?
+    .ok_or(BatchAcceptanceError::BatchUnavailable)?;
+    lock_run(transaction, run_ref).await?;
+    let (retry_authorized, stop_terminal_reason) =
+        dispatch_retry_policy(transaction, run_ref).await?;
     let batch = sqlx::query(
         "SELECT run_ref,content_public_ref,model_invocation_ref FROM linggan_comment_study_batch \
          WHERE batch_ref=$1 AND state='leased' AND lease_token=$2 \
@@ -190,12 +270,36 @@ async fn lock_batch(
     .fetch_optional(&mut **transaction)
     .await?
     .ok_or(BatchAcceptanceError::BatchUnavailable)?;
+    let request_deadline_expired =
+        if let Some(invocation_ref) = batch.get::<Option<Uuid>, _>("model_invocation_ref") {
+            let request_table_exists: bool = sqlx::query_scalar(
+                "SELECT to_regclass('linggan_comment_study_model_request') IS NOT NULL",
+            )
+            .fetch_one(&mut **transaction)
+            .await?;
+            if request_table_exists {
+                sqlx::query_scalar(
+                    "SELECT deadline_at<=scope_001_now() \
+                 FROM linggan_comment_study_model_request \
+                 WHERE invocation_ref=$1 AND batch_ref=$2 AND stage='semantic'",
+                )
+                .bind(invocation_ref)
+                .bind(batch_ref)
+                .fetch_optional(&mut **transaction)
+                .await?
+                .unwrap_or(false)
+            } else {
+                false
+            }
+        } else {
+            false
+        };
     let rows = sqlx::query(
         "SELECT target.target_ref,source.body_text,source.body_state,target.state \
          FROM linggan_comment_study_batch_target member \
          JOIN linggan_comment_study_target target ON target.target_ref=member.target_ref \
          JOIN linggan_material_comment source ON source.material_ref=target.source_ref \
-         WHERE member.batch_ref=$1 FOR UPDATE OF target",
+         WHERE member.batch_ref=$1 ORDER BY target.target_ref FOR UPDATE OF target",
     )
     .bind(batch_ref)
     .fetch_all(&mut **transaction)
@@ -220,8 +324,27 @@ async fn lock_batch(
         run_ref: batch.get("run_ref"),
         content_public_ref: batch.get("content_public_ref"),
         model_invocation_ref: batch.get("model_invocation_ref"),
+        retry_authorized,
+        stop_terminal_reason,
+        request_deadline_expired,
         targets,
     })
+}
+
+async fn lock_run(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    run_ref: Uuid,
+) -> Result<(), BatchAcceptanceError> {
+    let locked: Option<Uuid> = sqlx::query_scalar(
+        "SELECT run_ref FROM linggan_comment_study_run WHERE run_ref=$1 FOR UPDATE",
+    )
+    .bind(run_ref)
+    .fetch_optional(&mut **transaction)
+    .await?;
+    if locked.is_none() {
+        return Err(BatchAcceptanceError::BatchUnavailable);
+    }
+    Ok(())
 }
 
 async fn accept_target(
@@ -259,7 +382,7 @@ async fn accept_target(
         BatchTargetState::NoSignal => "no_signal",
         BatchTargetState::NeedsContext => "needs_context",
     };
-    update_target_state(transaction, target.target_ref, state).await
+    update_target_state(transaction, target.target_ref, state, None).await
 }
 
 async fn reject_all_targets(
@@ -268,9 +391,13 @@ async fn reject_all_targets(
     model_invocation_ref: Option<Uuid>,
     targets: &BTreeMap<Uuid, String>,
     rejection_code: &str,
-) -> Result<(usize, usize), sqlx::Error> {
+    detail: Value,
+    retry_authorized: bool,
+    stop_terminal_reason: &'static str,
+) -> Result<(usize, usize, usize), sqlx::Error> {
     let mut retry = 0;
     let mut failed = 0;
+    let mut cancelled = 0;
     for target_ref in targets.keys().copied() {
         let state = reject_target(
             transaction,
@@ -278,15 +405,14 @@ async fn reject_all_targets(
             model_invocation_ref,
             target_ref,
             rejection_code,
+            detail.clone(),
+            retry_authorized,
+            stop_terminal_reason,
         )
         .await?;
-        if state == "queued" {
-            retry += 1;
-        } else {
-            failed += 1;
-        }
+        count_rejection_state(state, &mut retry, &mut failed, &mut cancelled);
     }
-    Ok((retry, failed))
+    Ok((retry, failed, cancelled))
 }
 
 async fn reject_target(
@@ -295,6 +421,9 @@ async fn reject_target(
     model_invocation_ref: Option<Uuid>,
     target_ref: Uuid,
     rejection_code: &str,
+    detail: Value,
+    retry_authorized: bool,
+    stop_terminal_reason: &'static str,
 ) -> Result<&'static str, sqlx::Error> {
     reject_target_with_detail(
         transaction,
@@ -302,7 +431,9 @@ async fn reject_target(
         model_invocation_ref,
         target_ref,
         rejection_code,
-        json!({}),
+        detail,
+        retry_authorized,
+        stop_terminal_reason,
     )
     .await
 }
@@ -314,9 +445,15 @@ async fn reject_target_with_detail(
     target_ref: Uuid,
     rejection_code: &str,
     detail: Value,
+    retry_authorized: bool,
+    stop_terminal_reason: &'static str,
 ) -> Result<&'static str, sqlx::Error> {
     let ordinal = next_attempt_ordinal(transaction, target_ref).await?;
-    let next_state = if ordinal >= MAX_SEMANTIC_ATTEMPTS {
+    let max_attempts =
+        crate::comment_study_acceptance::configured_max_attempts(transaction, target_ref).await?;
+    let next_state = if !retry_authorized {
+        "cancelled"
+    } else if ordinal >= max_attempts {
         "failed"
     } else {
         "queued"
@@ -342,8 +479,49 @@ async fn reject_target_with_detail(
         model_invocation_ref,
     )
     .await?;
-    update_target_state(transaction, target_ref, next_state).await?;
+    let terminal_reason = match next_state {
+        "failed" => Some("attempts_exhausted"),
+        "cancelled" => Some(stop_terminal_reason),
+        _ => None,
+    };
+    update_target_state(transaction, target_ref, next_state, terminal_reason).await?;
     Ok(next_state)
+}
+
+fn count_rejection_state(
+    state: &str,
+    retried: &mut usize,
+    failed: &mut usize,
+    cancelled: &mut usize,
+) {
+    match state {
+        "queued" => *retried += 1,
+        "cancelled" => *cancelled += 1,
+        _ => *failed += 1,
+    }
+}
+
+async fn dispatch_retry_policy(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    run_ref: Uuid,
+) -> Result<(bool, &'static str), sqlx::Error> {
+    let row = sqlx::query(
+        "SELECT COALESCE(to_jsonb(run)->>'dispatch_state','enabled') AS dispatch_state, \
+                to_jsonb(run)->>'dispatch_reason' AS dispatch_reason \
+         FROM linggan_comment_study_run run WHERE run.run_ref=$1",
+    )
+    .bind(run_ref)
+    .fetch_one(&mut **transaction)
+    .await?;
+    let dispatch_state: String = row.get("dispatch_state");
+    let reason: Option<String> = row.get("dispatch_reason");
+    let retry_authorized = dispatch_state != "stopped";
+    let terminal_reason = match reason.as_deref() {
+        Some("budget_exhausted") => "budget_exhausted",
+        Some("user_stopped") | Some("user_paused") => "user_stopped",
+        _ => "legacy_execution_stopped",
+    };
+    Ok((retry_authorized, terminal_reason))
 }
 
 /// Settles every target a dispatched batch left `running`.
@@ -363,7 +541,14 @@ pub(crate) async fn settle_dispatched_batch_targets(
     model_invocation_ref: Option<Uuid>,
     stage: &str,
     provider_failure_code: Option<&str>,
-) -> Result<(usize, usize), sqlx::Error> {
+) -> Result<(usize, usize, usize), sqlx::Error> {
+    let run_ref: Uuid =
+        sqlx::query_scalar("SELECT run_ref FROM linggan_comment_study_batch WHERE batch_ref=$1")
+            .bind(batch_ref)
+            .fetch_one(&mut **transaction)
+            .await?;
+    let (retry_authorized, stop_terminal_reason) =
+        dispatch_retry_policy(transaction, run_ref).await?;
     let target_refs: Vec<Uuid> = sqlx::query_scalar(
         "SELECT target.target_ref \
          FROM linggan_comment_study_batch_target member \
@@ -376,6 +561,7 @@ pub(crate) async fn settle_dispatched_batch_targets(
     .await?;
     let mut retried = 0;
     let mut failed = 0;
+    let mut cancelled = 0;
     for target_ref in target_refs {
         let state = reject_target_with_detail(
             transaction,
@@ -384,15 +570,13 @@ pub(crate) async fn settle_dispatched_batch_targets(
             target_ref,
             "provider_failure",
             json!({"stage":stage,"providerFailureCode":provider_failure_code}),
+            retry_authorized,
+            stop_terminal_reason,
         )
         .await?;
-        if state == "queued" {
-            retried += 1;
-        } else {
-            failed += 1;
-        }
+        count_rejection_state(state, &mut retried, &mut failed, &mut cancelled);
     }
-    Ok((retried, failed))
+    Ok((retried, failed, cancelled))
 }
 
 /// In-process settlement for a batch whose provider call has just failed, while its lease is still
@@ -404,6 +588,17 @@ pub async fn reject_study_batch_dispatch(
     provider_failure_code: Option<&str>,
 ) -> Result<BatchAcceptanceReceipt, BatchAcceptanceError> {
     let mut transaction = database.pool().begin().await?;
+    let run_ref: Uuid = sqlx::query_scalar(
+        "SELECT run_ref FROM linggan_comment_study_batch \
+         WHERE batch_ref=$1 AND state='leased' AND lease_token=$2 \
+           AND lease_expires_at>scope_001_now()",
+    )
+    .bind(batch_ref)
+    .bind(lease_token)
+    .fetch_optional(&mut *transaction)
+    .await?
+    .ok_or(BatchAcceptanceError::BatchUnavailable)?;
+    lock_run(&mut transaction, run_ref).await?;
     let batch = sqlx::query(
         "SELECT run_ref,model_invocation_ref FROM linggan_comment_study_batch \
          WHERE batch_ref=$1 AND state='leased' AND lease_token=$2 \
@@ -416,14 +611,15 @@ pub async fn reject_study_batch_dispatch(
     .ok_or(BatchAcceptanceError::BatchUnavailable)?;
     let run_ref: Uuid = batch.get("run_ref");
     let model_invocation_ref: Option<Uuid> = batch.get("model_invocation_ref");
-    let (retried_target_count, failed_target_count) = settle_dispatched_batch_targets(
-        &mut transaction,
-        batch_ref,
-        model_invocation_ref,
-        "provider_dispatch",
-        provider_failure_code,
-    )
-    .await?;
+    let (retried_target_count, failed_target_count, cancelled_target_count) =
+        settle_dispatched_batch_targets(
+            &mut transaction,
+            batch_ref,
+            model_invocation_ref,
+            "provider_dispatch",
+            provider_failure_code,
+        )
+        .await?;
     let output_manifest = json!({
         "contract":"comment-study.note-batch.v1",
         "runRef":run_ref,
@@ -431,9 +627,16 @@ pub async fn reject_study_batch_dispatch(
         "stage":"provider_dispatch",
         "providerFailureCode":provider_failure_code,
         "retriedTargetCount":retried_target_count,
-        "failedTargetCount":failed_target_count
+        "failedTargetCount":failed_target_count,
+        "cancelledTargetCount":cancelled_target_count
     });
-    finish_batch(&mut transaction, batch_ref, "failed", output_manifest.clone()).await?;
+    finish_batch(
+        &mut transaction,
+        batch_ref,
+        "failed",
+        output_manifest.clone(),
+    )
+    .await?;
     finish_model_invocation(
         &mut transaction,
         model_invocation_ref,
@@ -450,6 +653,85 @@ pub async fn reject_study_batch_dispatch(
         accepted_target_count: 0,
         retried_target_count,
         failed_target_count,
+        cancelled_target_count,
+    })
+}
+
+/// Terminalizes a frozen semantic envelope that already exceeds its immutable model input limit.
+/// This deterministic mismatch cannot be repaired by retrying the same lease or repacking the
+/// already-frozen batch.
+pub async fn reject_study_batch_input_limit(
+    database: &Database,
+    batch_ref: Uuid,
+    lease_token: Uuid,
+) -> Result<BatchAcceptanceReceipt, BatchAcceptanceError> {
+    let mut transaction = database.pool().begin().await?;
+    let batch = lock_batch(&mut transaction, batch_ref, lease_token).await?;
+    if batch.model_invocation_ref.is_some() {
+        return Err(BatchAcceptanceError::BatchUnavailable);
+    }
+    for target_ref in batch.targets.keys().copied() {
+        let ordinal = next_attempt_ordinal(&mut transaction, target_ref).await?;
+        insert_attempt(
+            &mut transaction,
+            batch_ref,
+            target_ref,
+            ordinal,
+            "rejected",
+            json!({
+                "contract":"comment-study.note-batch.v1",
+                "batchRef":batch_ref,
+                "targetRef":target_ref,
+                "stage":"dispatch",
+                "failureCode":"input_limit_exceeded"
+            }),
+            Some("provider_failure"),
+            None,
+        )
+        .await?;
+        let has_productization_columns: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM information_schema.columns \
+             WHERE table_schema=current_schema() AND table_name='linggan_comment_study_target' \
+               AND column_name='terminal_reason')",
+        )
+        .fetch_one(&mut *transaction)
+        .await?;
+        if has_productization_columns {
+            sqlx::query(
+                "UPDATE linggan_comment_study_target SET state='failed',finished_at=scope_001_now(), \
+                 terminal_reason='input_limit_exceeded' WHERE target_ref=$1 AND state='running'",
+            )
+            .bind(target_ref)
+            .execute(&mut *transaction)
+            .await?;
+        } else {
+            sqlx::query(
+                "UPDATE linggan_comment_study_target SET state='failed' \
+                 WHERE target_ref=$1 AND state='running'",
+            )
+            .bind(target_ref)
+            .execute(&mut *transaction)
+            .await?;
+        }
+    }
+    let output = json!({
+        "contract":"comment-study.note-batch.v1",
+        "runRef":batch.run_ref,
+        "batchRef":batch_ref,
+        "stage":"dispatch",
+        "failureCode":"input_limit_exceeded",
+        "failedTargetCount":batch.targets.len()
+    });
+    finish_batch(&mut transaction, batch_ref, "failed", output).await?;
+    close_run_if_settled(&mut transaction, batch.run_ref).await?;
+    transaction.commit().await?;
+    Ok(BatchAcceptanceReceipt {
+        batch_ref,
+        state: "failed".to_owned(),
+        accepted_target_count: 0,
+        retried_target_count: 0,
+        failed_target_count: batch.targets.len(),
+        cancelled_target_count: 0,
     })
 }
 
@@ -463,7 +745,12 @@ async fn next_attempt_ordinal(
     .bind(target_ref)
     .fetch_one(&mut **transaction)
     .await?;
-    Ok(i32::try_from(count).unwrap_or(MAX_SEMANTIC_ATTEMPTS) + 1)
+    let max_attempts =
+        crate::comment_study_acceptance::configured_max_attempts(transaction, target_ref).await?;
+    if count >= i64::from(max_attempts) {
+        return Err(sqlx::Error::RowNotFound);
+    }
+    i32::try_from(count + 1).map_err(|_| sqlx::Error::RowNotFound)
 }
 
 async fn insert_attempt(
@@ -547,12 +834,36 @@ async fn update_target_state(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     target_ref: Uuid,
     state: &str,
+    terminal_reason: Option<&str>,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE linggan_comment_study_target SET state=$2 WHERE target_ref=$1")
+    let has_productization_columns: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM information_schema.columns \
+         WHERE table_schema=current_schema() AND table_name='linggan_comment_study_target' \
+           AND column_name='terminal_reason')",
+    )
+    .fetch_one(&mut **transaction)
+    .await?;
+    if has_productization_columns {
+        let terminal_reason =
+            terminal_reason.or_else(|| (state == "failed").then_some("attempts_exhausted"));
+        sqlx::query(
+            "UPDATE linggan_comment_study_target SET state=$2, \
+             finished_at=CASE WHEN $2 IN ('succeeded','no_signal','needs_context','failed','excluded','cancelled') \
+                              THEN scope_001_now() ELSE NULL END, \
+             terminal_reason=$3 WHERE target_ref=$1",
+        )
         .bind(target_ref)
         .bind(state)
+        .bind(terminal_reason)
         .execute(&mut **transaction)
         .await?;
+    } else {
+        sqlx::query("UPDATE linggan_comment_study_target SET state=$2 WHERE target_ref=$1")
+            .bind(target_ref)
+            .bind(state)
+            .execute(&mut **transaction)
+            .await?;
+    }
     Ok(())
 }
 

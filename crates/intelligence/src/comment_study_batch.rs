@@ -4,6 +4,11 @@
 //! source: every output carries its target reference and is later admitted against that target's
 //! own immutable comment text.
 
+use crate::comment_study_policy::{
+    CompiledStudyMethod, StudyMethodManifest, StudyModelIdentity, StudyModelSnapshot,
+    verify_study_method,
+};
+use crate::comment_study_run::close_run_if_settled;
 use crate::comment_study_semantic::{AcceptedSignal, SEMANTIC_CONTRACT, accept_semantic_output};
 use linggan_storage_postgres::Database;
 use serde::{Deserialize, Serialize};
@@ -77,6 +82,10 @@ pub enum StudyBatchError {
     RunUnavailable,
     #[error("the StudyRun has no queued target eligible for a same-work batch")]
     NoQueuedTargets,
+    #[error("the frozen semantic request exceeds the configured model input limit")]
+    InputLimitExceeded,
+    #[error("the StudyRun does not have a valid immutable method snapshot")]
+    MethodUnavailable,
     #[error("batch output does not satisfy the JSON contract")]
     OutputSchema,
     #[error("batch output names a different contract, batch, or work")]
@@ -101,6 +110,11 @@ struct BatchTargetRow {
     input_manifest: Value,
 }
 
+struct FittedBatchTargets {
+    targets: Vec<BatchTargetRow>,
+    input_limit_target: Option<Uuid>,
+}
+
 /// Freezes a same-work batch that fits the configured input and output budget. The caller's
 /// maximum remains a hard safety ceiling; a configured model may reduce it further.
 pub async fn prepare_study_batch(
@@ -123,9 +137,34 @@ pub async fn prepare_study_batch(
     if candidate_targets.is_empty() {
         return Err(StudyBatchError::NoQueuedTargets);
     }
-    let targets =
+    let fitted =
         fit_targets_to_model_budget(&mut transaction, request.run_ref, &work, candidate_targets)
             .await?;
+    if let Some(target_ref) = fitted.input_limit_target {
+        let has_productization_columns: bool = sqlx::query_scalar(
+            "SELECT count(*)=2 FROM information_schema.columns \
+             WHERE table_schema=current_schema() AND table_name='linggan_comment_study_target' \
+               AND column_name IN ('finished_at','terminal_reason')",
+        )
+        .fetch_one(&mut *transaction)
+        .await?;
+        if has_productization_columns {
+            sqlx::query(
+                "UPDATE linggan_comment_study_target \
+                 SET state='failed',finished_at=scope_001_now(),terminal_reason='input_limit_exceeded' \
+                 WHERE target_ref=$1 AND state='queued'",
+            )
+            .bind(target_ref)
+            .execute(&mut *transaction)
+            .await?;
+        }
+        // Older v1 installs have no terminal metadata yet. Leave their target queued and let the
+        // scheduler's per-pass exclusion skip it, preserving the legacy contract.
+        close_run_if_settled(&mut transaction, request.run_ref).await?;
+        transaction.commit().await?;
+        return Err(StudyBatchError::InputLimitExceeded);
+    }
+    let targets = fitted.targets;
     if targets.is_empty() {
         return Err(StudyBatchError::NoQueuedTargets);
     }
@@ -196,15 +235,34 @@ pub async fn next_run_needing_batch(
     database: &Database,
     exclude_run_refs: &[Uuid],
 ) -> Result<Option<Uuid>, sqlx::Error> {
+    next_run_needing_batch_after(database, exclude_run_refs, None).await
+}
+
+/// Finds the next batchable Run in a process-local circular order. Advancing the cursor after
+/// every examined Run prevents a bounded scan of unbatchable legacy Runs from hiding later Runs
+/// on every worker tick. The cursor is scheduling state only; losing it on restart does not alter
+/// any Run or target state.
+pub async fn next_run_needing_batch_after(
+    database: &Database,
+    exclude_run_refs: &[Uuid],
+    after_run_ref: Option<Uuid>,
+) -> Result<Option<Uuid>, sqlx::Error> {
     sqlx::query_scalar(
         "SELECT run.run_ref FROM linggan_comment_study_run run \
          WHERE run.state IN ('prepared','queued','running') \
+           AND (run.selection_manifest->>'contract'='comment-study.run-selection.v1' \
+                OR (run.selection_manifest->>'contract'='comment-study.run-selection.v2' \
+                    AND to_jsonb(run)->>'dispatch_state'='enabled' \
+                    AND to_jsonb(run)->>'dispatch_reason' IS NULL)) \
            AND NOT (run.run_ref = ANY($1)) \
            AND EXISTS(SELECT 1 FROM linggan_comment_study_target target \
                       WHERE target.run_ref=run.run_ref AND target.state='queued') \
-         ORDER BY run.created_at,run.run_ref LIMIT 1",
+         ORDER BY CASE WHEN $2::uuid IS NULL THEN run.created_at END NULLS LAST, \
+                  CASE WHEN $2::uuid IS NULL THEN 0 \
+                       WHEN run.run_ref>$2 THEN 0 ELSE 1 END,run.run_ref LIMIT 1",
     )
     .bind(exclude_run_refs)
+    .bind(after_run_ref)
     .fetch_optional(database.pool())
     .await
 }
@@ -214,17 +272,68 @@ async fn fit_targets_to_model_budget(
     run_ref: Uuid,
     work: &BatchWork,
     candidates: Vec<BatchTargetRow>,
-) -> Result<Vec<BatchTargetRow>, StudyBatchError> {
-    let limits: Option<(i32, i32)> = sqlx::query_as(
-        "SELECT config.input_token_limit,config.output_token_limit \
-         FROM linggan_comment_study_run run JOIN linggan_comment_study_policy policy USING(policy_ref) \
-         JOIN linggan_model_config config ON config.config_ref=policy.model_config_ref WHERE run.run_ref=$1",
+) -> Result<FittedBatchTargets, StudyBatchError> {
+    let limits = sqlx::query(
+        "SELECT run.selection_manifest->>'contract' AS selection_contract, \
+                to_jsonb(run)->'execution_manifest' AS execution_manifest, \
+                to_jsonb(policy)->'method_manifest' AS method_manifest, \
+                to_jsonb(policy)->>'method_hash' AS method_hash, \
+                policy.model_config_ref,config.input_token_limit,config.output_token_limit, \
+                config.timeout_seconds,model.model_ref,model.model_id,version.version_ref \
+         FROM linggan_comment_study_run run \
+         JOIN linggan_comment_study_policy policy USING(policy_ref) \
+         JOIN linggan_model_config config ON config.config_ref=policy.model_config_ref \
+         JOIN linggan_model_entry model ON model.model_ref=config.model_ref \
+         JOIN linggan_model_connection_version version ON version.version_ref=model.connection_version_ref \
+         WHERE run.run_ref=$1",
     )
     .bind(run_ref)
     .fetch_optional(&mut **transaction)
     .await?;
-    let Some((input_limit, output_limit)) = limits else {
-        return Ok(candidates);
+    let Some(row) = limits else {
+        return Ok(FittedBatchTargets {
+            targets: candidates,
+            input_limit_target: None,
+        });
+    };
+    let input_limit: i32 = row.get("input_token_limit");
+    let output_limit: i32 = row.get("output_token_limit");
+    let v2 = row.get::<String, _>("selection_contract") == "comment-study.run-selection.v2";
+    let method = if v2 {
+        let manifest = row
+            .get::<Option<Value>, _>("method_manifest")
+            .ok_or(StudyBatchError::MethodUnavailable)?;
+        let method_hash = row
+            .get::<Option<String>, _>("method_hash")
+            .ok_or(StudyBatchError::MethodUnavailable)?;
+        let execution_manifest = row
+            .get::<Option<Value>, _>("execution_manifest")
+            .ok_or(StudyBatchError::MethodUnavailable)?;
+        if execution_manifest["methodHash"].as_str() != Some(method_hash.as_str()) {
+            return Err(StudyBatchError::MethodUnavailable);
+        }
+        let manifest: StudyMethodManifest =
+            serde_json::from_value(manifest).map_err(|_| StudyBatchError::MethodUnavailable)?;
+        let model_snapshot = StudyModelSnapshot {
+            model_config_ref: row.get("model_config_ref"),
+            identity: StudyModelIdentity {
+                model_ref: row.get("model_ref"),
+                connection_version_ref: row.get("version_ref"),
+                model_id: row.get("model_id"),
+            },
+            input_token_limit: input_limit,
+            output_token_limit: output_limit,
+            timeout_seconds: row.get("timeout_seconds"),
+        };
+        let compiled = CompiledStudyMethod {
+            manifest,
+            method_hash,
+        };
+        verify_study_method(&compiled, &model_snapshot)
+            .map_err(|_| StudyBatchError::MethodUnavailable)?;
+        Some(compiled)
+    } else {
+        None
     };
     let maximum_targets = usize::try_from((output_limit / 256).max(1)).unwrap_or(1);
     let mut selected = Vec::new();
@@ -232,15 +341,63 @@ async fn fit_targets_to_model_budget(
         if selected.len() >= maximum_targets {
             break;
         }
+        let candidate_ref = candidate.target_ref;
         let mut next = selected.clone();
         next.push(candidate);
         let probe = batch_manifest(Uuid::nil(), run_ref, work, &next);
-        if conservative_token_estimate_json(&probe) > i64::from(input_limit) {
+        let input_tokens = if let Some(method) = &method {
+            semantic_model_request_manifest(
+                Uuid::nil(),
+                run_ref,
+                &probe,
+                &method.manifest.stages.semantic.system_instruction,
+                &method.manifest.stages.semantic.output_schema,
+            )
+            .map(|(_, manifest)| conservative_token_estimate_json(&manifest))
+            .map_err(|_| StudyBatchError::MethodUnavailable)?
+        } else {
+            conservative_token_estimate_json(&probe)
+        };
+        if input_tokens > i64::from(input_limit) {
+            if selected.is_empty() {
+                return Ok(FittedBatchTargets {
+                    targets: selected,
+                    input_limit_target: Some(candidate_ref),
+                });
+            }
             break;
         }
         selected = next;
     }
-    Ok(selected)
+    Ok(FittedBatchTargets {
+        targets: selected,
+        input_limit_target: None,
+    })
+}
+
+/// Builds the exact semantic payload used by both input fitting and dispatch reservation.
+pub(crate) fn semantic_model_request_manifest(
+    batch_ref: Uuid,
+    run_ref: Uuid,
+    input_manifest: &Value,
+    system_instruction: &str,
+    output_schema: &Value,
+) -> Result<(String, Value), serde_json::Error> {
+    let payload = json!({
+        "contract":BATCH_CONTRACT,
+        "batchRef":batch_ref,
+        "runRef":run_ref,
+        "input":input_manifest,
+        "outputSchema":output_schema,
+    });
+    let prompt = serde_json::to_string(&payload)?;
+    let request_manifest = json!({
+        "stage":"semantic",
+        "systemInstruction":system_instruction,
+        "prompt":prompt,
+        "outputSchema":output_schema,
+    });
+    Ok((prompt, request_manifest))
 }
 
 /// A provider-independent conservative estimator: every non-ASCII scalar costs two tokens,
@@ -348,7 +505,12 @@ async fn ensure_batchable_run(
     run_ref: Uuid,
 ) -> Result<(), StudyBatchError> {
     let state: Option<String> = sqlx::query_scalar(
-        "SELECT state FROM linggan_comment_study_run WHERE run_ref=$1 FOR UPDATE",
+        "SELECT state FROM linggan_comment_study_run WHERE run_ref=$1 \
+         AND (selection_manifest->>'contract'='comment-study.run-selection.v1' \
+              OR (selection_manifest->>'contract'='comment-study.run-selection.v2' \
+                  AND to_jsonb(linggan_comment_study_run)->>'dispatch_state'='enabled' \
+                  AND to_jsonb(linggan_comment_study_run)->>'dispatch_reason' IS NULL)) \
+         FOR UPDATE",
     )
     .bind(run_ref)
     .fetch_optional(&mut **transaction)
@@ -634,7 +796,10 @@ mod tests {
         assert!(parsed.targets.is_empty());
         assert_eq!(parsed.rejected_targets.len(), 1);
         assert_eq!(parsed.rejected_targets[0].target_ref, target);
-        assert_eq!(parsed.rejected_targets[0].rejection_code, "semantic_contract");
+        assert_eq!(
+            parsed.rejected_targets[0].rejection_code,
+            "semantic_contract"
+        );
     }
 
     #[test]
@@ -647,10 +812,8 @@ mod tests {
         let healthy = Uuid::new_v4();
         let malformed = Uuid::new_v4();
         let source = "孩子每天写作业都要催，不催就不开始，我很着急。";
-        let targets = BTreeMap::from([
-            (healthy, source.to_owned()),
-            (malformed, source.to_owned()),
-        ]);
+        let targets =
+            BTreeMap::from([(healthy, source.to_owned()), (malformed, source.to_owned())]);
         let output = json!({
             "contract":BATCH_CONTRACT,
             "batchRef":batch_ref,

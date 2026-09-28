@@ -31,8 +31,12 @@ git clone <repo> && cd linggan-intelligence
 cp env.example .env && $EDITOR .env      # 填数据库口令
 ./scripts/dev-db.sh up                   # 起 PostgreSQL
 ./scripts/local-runtime.sh migrate       # 应用迁移
+./scripts/init-comment-study.sh          # 仅首次安装：初始化 clean-study 基础 schema
+./scripts/local-runtime.sh migrate       # 应用 clean-study 增量迁移
 ./scripts/runtime/install.sh             # 建运行目录、写 launchd、启动三个服务
 ```
+
+若数据库已经有完整 clean-study 基础表，跳过 `init-comment-study.sh`，只运行一次 `migrate`。如果首次 `migrate` 因 Comment Study 基础表缺失而停止，先运行初始化脚本再重试。初始化脚本会拒绝任何已有或部分存在的 `linggan_comment_study_*` 表，不执行 reset，也不恢复旧研究派生数据。
 
 `install.sh` 幂等：已装好时重跑只刷新 plist 并重启。它**不**跑迁移、不装依赖、不碰远端环境。
 
@@ -77,8 +81,12 @@ git -C ~/Library/Application\ Support/Linggan\ Intelligence/runtime-main log -1 
 
 ```bash
 cd /Users/moglenny/proma/linggan-intelligence
+./scripts/runtime/install.sh --prepare-migration
 ./scripts/local-runtime.sh migrate
+./scripts/runtime/install.sh
 ```
+
+`--prepare-migration` 会先通过旧巡检 worker 的 drain 回执，再停止 API 与媒体 worker；该模式不切换代码、不重启服务。持久数据库的 `migrate` 会检查三个 launchd 服务、对应进程和 3000 端口都已停止，否则拒绝继续。增量迁移成功后再用普通 `install.sh` 同步并启动三个服务。不要在服务运行时直接调用 `migrate`。
 
 **已知边界**：开机时 API 可能比 Docker PostgreSQL 先起来。此时读不到台账，脚本会记录
 「读不到迁移台账」并**跳过检查继续启动**——硬拦会让服务在数据库没起来时永远起不来。

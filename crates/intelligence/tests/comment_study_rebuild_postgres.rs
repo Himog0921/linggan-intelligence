@@ -25,7 +25,9 @@ use linggan_intelligence::{
         DEFAULT_BATCH_LEASE_SECONDS, claim_next_study_batch, recover_expired_study_batch_leases,
     },
     comment_study_candidate_recall::{
-        advance_next_problem_pair, advance_next_problem_resolution, recall_problem_candidates,
+        advance_next_problem_pair, advance_next_problem_pair_for_enabled_v2_run,
+        advance_next_problem_resolution, advance_next_problem_resolution_for_enabled_v2_run,
+        recall_problem_candidates,
     },
     comment_study_comparison_cache::{
         record_resolution_comparisons, serve_pending_resolutions_from_cache,
@@ -155,7 +157,7 @@ async fn source_gate_selects_only_adhd_current_readable_and_unrestricted_comment
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof"]
-async fn source_gate_excludes_content_author_voice_and_unknown_roles() {
+async fn source_gate_keeps_unknown_comment_authors_but_excludes_creator_and_unknown_work() {
     let database = proof_database("comment_study_source_author_role").await;
     sqlx::raw_sql(STUDY_SCHEMA_SQL)
         .execute(database.pool())
@@ -196,7 +198,7 @@ async fn source_gate_excludes_content_author_voice_and_unknown_roles() {
         "2026-09-16T08:02:00Z",
     )
     .await;
-    comment_with_author(
+    let unknown_comment = comment_with_author(
         &database,
         "study-author-role-note",
         "study-author-role-unknown-commenter",
@@ -205,7 +207,7 @@ async fn source_gate_excludes_content_author_voice_and_unknown_roles() {
         "2026-09-16T08:03:00Z",
     )
     .await;
-    comment_with_author(
+    let blank_author_comment = comment_with_author(
         &database,
         "study-author-role-note",
         "study-author-role-blank-commenter",
@@ -235,8 +237,22 @@ async fn source_gate_excludes_content_author_voice_and_unknown_roles() {
         .await
         .unwrap();
 
-    assert_eq!(selected.len(), 1);
-    assert_eq!(selected[0].source_ref, reader_comment);
+    assert_eq!(selected.len(), 3);
+    assert!(
+        selected
+            .iter()
+            .any(|source| source.source_ref == reader_comment)
+    );
+    assert!(
+        selected
+            .iter()
+            .any(|source| source.source_ref == unknown_comment)
+    );
+    assert!(
+        selected
+            .iter()
+            .any(|source| source.source_ref == blank_author_comment)
+    );
 }
 
 #[tokio::test]
@@ -272,7 +288,7 @@ async fn setup_preview_counts_the_same_source_gate_that_freezes_targets() {
         "2026-09-16T08:01:00Z",
     )
     .await;
-    comment_with_author(
+    let unknown = comment_with_author(
         &database,
         "study-preview-note",
         "study-preview-unknown",
@@ -319,14 +335,16 @@ async fn setup_preview_counts_the_same_source_gate_that_freezes_targets() {
 
     assert_eq!(preview.total_comment_count, 5);
     assert_eq!(preview.eligible_comment_count, frozen.len());
-    assert_eq!(frozen.len(), 1);
-    assert_eq!(frozen[0].source_ref, reader);
+    assert_eq!(frozen.len(), 2);
+    assert!(frozen.iter().any(|source| source.source_ref == reader));
+    assert!(frozen.iter().any(|source| source.source_ref == unknown));
+    assert_eq!(preview.unknown_author_count, 1);
     assert_eq!(preview.excluded_counts.creator_voice, 1);
-    assert_eq!(preview.excluded_counts.comment_author_unknown, 1);
+    assert_eq!(preview.excluded_counts.comment_author_unknown, 0);
     assert_eq!(preview.excluded_counts.source_restricted, 1);
     assert_eq!(preview.excluded_counts.text_not_researchable, 1);
     assert_eq!(preview.works.len(), 1);
-    assert_eq!(preview.works[0].eligible_comment_count, 1);
+    assert_eq!(preview.works[0].eligible_comment_count, 2);
 }
 
 #[tokio::test]
@@ -2544,7 +2562,7 @@ async fn repeated_dispatch_failures_exhaust_a_target_instead_of_re_leasing_it_fo
     // as a transport failure rather than a contract response, so nothing reaches semantic
     // acceptance and the old code recorded no attempt at all.
     let mut target_states = Vec::new();
-    for _ in 0..3 {
+    for _ in 0..2 {
         let batch = prepare_study_batch(
             &database,
             PrepareStudyBatchRequest {
@@ -2579,7 +2597,7 @@ async fn repeated_dispatch_failures_exhaust_a_target_instead_of_re_leasing_it_fo
             .unwrap(),
         );
     }
-    assert_eq!(target_states, vec!["queued", "queued", "failed"]);
+    assert_eq!(target_states, vec!["queued", "failed"]);
 
     let attempts: Vec<(i32, String, Option<String>)> = sqlx::query_as(
         "SELECT attempt_ordinal,state,rejection_code \
@@ -2598,11 +2616,6 @@ async fn repeated_dispatch_failures_exhaust_a_target_instead_of_re_leasing_it_fo
             ),
             (
                 2,
-                "rejected".to_owned(),
-                Some("provider_failure".to_owned())
-            ),
-            (
-                3,
                 "rejected".to_owned(),
                 Some("provider_failure".to_owned())
             ),
@@ -3736,15 +3749,11 @@ async fn provider_workers_read_problem_revisions_and_release_pre_dispatch_claims
         .await
         .unwrap();
     let adapter = PiAdapter::configured();
-    let error = run_one_problem_resolution(&database, &UnavailableModelSecrets, &adapter)
-        .await
-        .expect_err("the synthetic missing secret prevents provider I/O");
-    assert!(matches!(
-        error,
-        linggan_intelligence::comment_study_resolution_worker::ResolutionWorkerError::Model(
-            ModelError::SecretUnavailable
-        )
-    ));
+    assert!(
+        !run_one_problem_resolution(&database, &UnavailableModelSecrets, &adapter)
+            .await
+            .expect("legacy v1 Run is stopped and does not claim model work")
+    );
     assert_eq!(
         sqlx::query_scalar::<_, Option<Uuid>>(
             "SELECT model_invocation_ref FROM linggan_comment_study_resolution WHERE resolution_ref=$1",
@@ -3754,7 +3763,7 @@ async fn provider_workers_read_problem_revisions_and_release_pre_dispatch_claims
         .await
         .unwrap(),
         None,
-        "a failed request build must release the Resolution for a later configured worker"
+        "a legacy Run remains unclaimed and its resolution stays untouched"
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
@@ -3764,8 +3773,8 @@ async fn provider_workers_read_problem_revisions_and_release_pre_dispatch_claims
         .fetch_one(database.pool())
         .await
         .unwrap(),
-        1,
-        "the failed request build remains auditable even though the Resolution was released"
+        0,
+        "no invocation is created for a legacy Run"
     );
 
     accept_problem_resolution(
@@ -3797,15 +3806,11 @@ async fn provider_workers_read_problem_revisions_and_release_pre_dispatch_claims
     let pair = prepare_problem_pair(&database, first, second, test_pair_selection())
         .await
         .unwrap();
-    let error = run_one_problem_pair(&database, &UnavailableModelSecrets, &adapter)
-        .await
-        .expect_err("the synthetic missing secret prevents provider I/O");
-    assert!(matches!(
-        error,
-        linggan_intelligence::comment_study_pair_worker::PairWorkerError::Model(
-            ModelError::SecretUnavailable
-        )
-    ));
+    assert!(
+        !run_one_problem_pair(&database, &UnavailableModelSecrets, &adapter)
+            .await
+            .expect("legacy v1 Run is stopped and does not claim model work")
+    );
     assert_eq!(
         sqlx::query_scalar::<_, Option<Uuid>>(
             "SELECT model_invocation_ref FROM linggan_comment_study_problem_pair WHERE pair_ref=$1",
@@ -4211,7 +4216,7 @@ async fn seed_study_model_config_with_input_limit(
     sqlx::query(
         "INSERT INTO linggan_model_config( \
            config_ref,model_ref,input_token_limit,output_token_limit,timeout_seconds,max_attempts \
-         ) VALUES($1,$2,$3,2000,30,1)",
+         ) VALUES($1,$2,$3,2000,30,2)",
     )
     .bind(config_ref)
     .bind(model_ref)
@@ -4234,6 +4239,16 @@ async fn seed_running_target(
     content_public_ref: Uuid,
     source_ref: Uuid,
 ) -> Uuid {
+    let has_model_config: bool = sqlx::query_scalar(
+        "SELECT model_config_ref IS NOT NULL FROM linggan_comment_study_policy WHERE policy_ref=$1",
+    )
+    .bind(policy_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    if !has_model_config {
+        seed_study_model_config(database, policy_ref).await;
+    }
     let run_ref = Uuid::new_v4();
     let hash = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
     sqlx::query(
@@ -4490,6 +4505,114 @@ async fn a_pair_partner_is_the_nearest_admissible_signal_not_the_earliest_one() 
 
 #[tokio::test]
 #[ignore = "requires the local PostgreSQL proof database"]
+async fn scheduler_does_not_create_problem_stages_for_legacy_runs() {
+    let database = proof_database("comment_study_legacy_problem_stage").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    let (first, _) = two_eligible_signals_from(
+        &database,
+        "legacy-stage-note-a",
+        ["reader-1", "reader-2"],
+        ["需要外部催促", "自己不愿动笔"],
+    )
+    .await;
+    let (second, _) = two_eligible_signals_from(
+        &database,
+        "legacy-stage-note-b",
+        ["reader-3", "reader-4"],
+        ["拖到很晚才开始", "写一半就走神"],
+    )
+    .await;
+    let run_refs: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT DISTINCT target.run_ref FROM linggan_comment_study_signal signal \
+         JOIN linggan_comment_study_target target USING(target_ref) \
+         WHERE signal.signal_ref=ANY($1)",
+    )
+    .bind(vec![first, second])
+    .fetch_all(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(run_refs.len(), 2);
+    for run_ref in run_refs {
+        sqlx::query(
+            "UPDATE linggan_comment_study_run SET selection_manifest='{}' WHERE run_ref=$1",
+        )
+        .bind(run_ref)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    }
+
+    assert!(
+        !advance_next_problem_resolution_for_enabled_v2_run(&database)
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_comment_study_resolution")
+            .fetch_one(database.pool())
+            .await
+            .unwrap(),
+        0,
+        "legacy Runs remain readable but do not receive unclaimable P3 stages"
+    );
+
+    let first_resolution = prepare_problem_resolution(&database, first, Vec::new())
+        .await
+        .unwrap();
+    accept_problem_resolution(
+        &database,
+        first_resolution.resolution_ref,
+        serde_json::json!({"contract":"comment-study.problem-resolution.v1","candidates":[]}),
+    )
+    .await
+    .unwrap();
+    let second_resolution = prepare_problem_resolution(&database, second, Vec::new())
+        .await
+        .unwrap();
+    accept_problem_resolution(
+        &database,
+        second_resolution.resolution_ref,
+        serde_json::json!({"contract":"comment-study.problem-resolution.v1","candidates":[]}),
+    )
+    .await
+    .unwrap();
+    let profile = seed_embedding_profile(&database).await;
+    seed_vector(
+        &database,
+        profile,
+        &signal_canonical_hash(&database, first).await,
+        0.0,
+    )
+    .await;
+    seed_vector(
+        &database,
+        profile,
+        &signal_canonical_hash(&database, second).await,
+        0.1,
+    )
+    .await;
+    assert!(
+        !advance_next_problem_pair_for_enabled_v2_run(&database)
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_comment_study_problem_pair")
+            .fetch_one(database.pool())
+            .await
+            .unwrap(),
+        0,
+        "pair scheduler filters legacy Runs before creating a pending pair"
+    );
+    // The unscoped proof helpers deliberately retain legacy fixture behavior; production ticks
+    // use the strict v2 scheduler variants above and must not claim these rows.
+}
+
+#[tokio::test]
+#[ignore = "requires the local PostgreSQL proof database"]
 async fn one_primary_comparison_does_not_expand_after_a_valid_non_create_outcome() {
     let database = proof_database("comment_study_pair_retry").await;
     sqlx::raw_sql(STUDY_SCHEMA_SQL)
@@ -4687,31 +4810,13 @@ async fn a_tick_encodes_a_waiting_signal_before_it_tries_to_recall_against_it() 
         vectors(&database).await > 0,
         "the waiting Signal was encoded through the real adapter boundary"
     );
-    // The order is what the outcome turns on, so the assertion is about the outcome rather than
-    // about which branch ran. Recall reached before encoding answers `retrieval_incomplete`, and
-    // that answer is final: the Signal stays stuck behind a condition the same tick could have
-    // cleared for free, with no provider call involved.
-    // Stops as soon as both Signals have been judged. Carrying on would reach the pair worker,
-    // which calls the provider — a different boundary, stubbed by a different script, and not
-    // what this proof is about.
-    for _ in 0..20 {
-        if resolution_state_for(&database, first).await.is_some()
-            && resolution_state_for(&database, second).await.is_some()
-        {
-            break;
-        }
-        assert!(
-            run_model_work_once(&database, &SyntheticModelSecrets, &adapter)
-                .await
-                .unwrap(),
-            "the tick still has local work to do"
-        );
-    }
+    // This legacy fixture exercises the order of local maintenance only. The production tick
+    // deliberately does not create P3 Resolution/Pair stages for pre-v2 Runs.
     for signal in [first, second] {
         assert_eq!(
             resolution_state_for(&database, signal).await,
-            Some(("deferred_novel".to_owned(), None)),
-            "an encoded Signal against an empty catalogue is novel, not unsearchable"
+            None,
+            "the same tick returns after encoding; it does not judge an unsearchable Signal"
         );
     }
 }

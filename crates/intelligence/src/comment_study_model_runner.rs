@@ -7,7 +7,8 @@
 use crate::{
     comment_study_batch_acceptance::reject_study_batch_dispatch,
     comment_study_model_dispatch::{
-        ReservedStudyModelCall, StudyModelDispatchError, reserve_study_batch_model_call,
+        ReservedStudyModelCall, StudyModelDispatchError, mark_study_batch_model_dispatch_started,
+        reserve_study_batch_model_call,
     },
     model_invocation::{checkpoint_invocation_usage, connection_request, finish_invocation},
     model_secrets::ModelSecretStore,
@@ -74,7 +75,7 @@ pub async fn call_study_batch_model(
         };
     provider.operation = "analyze".into();
     provider.model_id = reservation.model_id.clone();
-    provider.timeout_ms = match u64::try_from(reservation.timeout_seconds) {
+    let configured_timeout_ms = match u64::try_from(reservation.timeout_seconds) {
         Ok(seconds) => seconds.saturating_mul(1_000),
         Err(_) => {
             settle_pre_provider_failure(
@@ -87,27 +88,47 @@ pub async fn call_study_batch_model(
             return Err(StudyModelRunnerError::Model(ModelError::Invalid));
         }
     };
+    provider.timeout_ms = configured_timeout_ms;
     provider.max_output_tokens = reservation.output_token_limit;
-    provider.system = semantic_system_instruction();
-    provider.prompt = match serde_json::to_string(&json!({
-        "contract":"comment-study.note-batch.v1",
-        "batchRef":reservation.batch_ref,
-        "runRef":reservation.run_ref,
-        "input":manifest,
-        "outputSchema":batch_output_schema()
-    })) {
-        Ok(prompt) => prompt,
-        Err(_) => {
-            settle_pre_provider_failure(
-                database,
-                &reservation,
-                lease_token,
-                "invalid_model_command",
-            )
-            .await?;
-            return Err(StudyModelRunnerError::Model(ModelError::Invalid));
-        }
+    provider.system = reservation
+        .system_instruction
+        .clone()
+        .unwrap_or_else(semantic_system_instruction);
+    provider.prompt = match reservation.prompt.clone() {
+        Some(prompt) => prompt,
+        None => match serde_json::to_string(&json!({
+            "contract":"comment-study.note-batch.v1",
+            "batchRef":reservation.batch_ref,
+            "runRef":reservation.run_ref,
+            "input":manifest,
+            "outputSchema":batch_output_schema()
+        })) {
+            Ok(prompt) => prompt,
+            Err(_) => {
+                settle_pre_provider_failure(
+                    database,
+                    &reservation,
+                    lease_token,
+                    "invalid_model_command",
+                )
+                .await?;
+                return Err(StudyModelRunnerError::Model(ModelError::Invalid));
+            }
+        },
     };
+
+    if reservation.system_instruction.is_some() {
+        let deadline_timeout_ms = mark_study_batch_model_dispatch_started(
+            database,
+            reservation.invocation_ref,
+            batch_ref,
+            lease_token,
+        )
+        .await?;
+        let deadline_timeout_ms = u64::try_from(deadline_timeout_ms)
+            .map_err(|_| StudyModelRunnerError::Model(ModelError::Invalid))?;
+        provider.timeout_ms = provider.timeout_ms.min(deadline_timeout_ms);
+    }
 
     let response = adapter.call(&provider).await;
     match response {
@@ -173,6 +194,13 @@ async fn settle_pre_provider_failure(
         Some(code),
         &result,
     )
+    .await?;
+    sqlx::query(
+        "UPDATE linggan_model_invocation SET charged_tokens=0 \
+         WHERE invocation_ref=$1 AND state='failed' AND result->>'callStarted'='false'",
+    )
+    .bind(reservation.invocation_ref)
+    .execute(database.pool())
     .await?;
     settle_dispatched_batch(database, reservation.batch_ref, lease_token, Some(code)).await;
     Ok(())

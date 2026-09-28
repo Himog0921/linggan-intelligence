@@ -164,28 +164,13 @@ pub async fn read_runs(
     ensure_schema(database).await?;
     let limit = query.limit()?;
     let domain_ref = resolved_domain(database, query.domain).await?;
-    let rows = sqlx::query(
-        "SELECT run.run_ref,run.as_of::text AS as_of,run.state,run.created_at::text AS created_at,run.finished_at::text AS finished_at, \
-                count(DISTINCT work.content_public_ref) AS work_count, \
-                count(DISTINCT work.content_public_ref) FILTER (WHERE work.observation_role='primary') AS primary_work_count, \
-                count(DISTINCT work.content_public_ref) FILTER (WHERE work.observation_role='reference') AS reference_work_count, \
-                count(target.target_ref) AS target_count, \
-                count(target.target_ref) FILTER (WHERE target.state='succeeded') AS succeeded_count, \
-                count(target.target_ref) FILTER (WHERE target.state='no_signal') AS no_signal_count, \
-                count(target.target_ref) FILTER (WHERE target.state='needs_context') AS needs_context_count, \
-                count(target.target_ref) FILTER (WHERE target.state='failed') AS failed_count, \
-                count(target.target_ref) FILTER (WHERE target.state='excluded') AS excluded_count \
-         FROM linggan_comment_study_run run \
-         JOIN linggan_comment_study_policy policy USING(policy_ref) \
-         LEFT JOIN linggan_comment_study_work work ON work.run_ref=run.run_ref \
-         LEFT JOIN linggan_comment_study_target target ON target.run_ref=run.run_ref \
-         WHERE ($1::uuid IS NULL OR policy.domain_ref=$1) \
-         GROUP BY run.run_ref ORDER BY run.created_at DESC,run.run_ref DESC LIMIT $2",
-    )
-    .bind(domain_ref)
-    .bind(limit)
-    .fetch_all(database.pool())
-    .await?;
+    // Aggregate each child relation independently after bounding the run page. Joining both
+    // children on run_ref would count every target once for each selected work.
+    let rows = sqlx::query(include_str!("comment_study_read/runs.sql"))
+        .bind(domain_ref)
+        .bind(limit)
+        .fetch_all(database.pool())
+        .await?;
     Ok(json!({
         "contract":"comment-study.read.v1",
         "domainRef":domain_ref,
@@ -193,10 +178,15 @@ pub async fn read_runs(
             "runRef":row.get::<Uuid,_>("run_ref"),"asOf":row.get::<String,_>("as_of"),
             "state":row.get::<String,_>("state"),"createdAt":row.get::<String,_>("created_at"),
             "finishedAt":row.get::<Option<String>,_>("finished_at"),
+            "selectionContract":row.get::<Option<String>,_>("selection_contract"),
+            "dispatchState":row.get::<String,_>("dispatch_state"),
+            "dispatchReason":row.get::<Option<String>,_>("dispatch_reason"),
+            "controlVersion":row.get::<i64,_>("control_version"),
             "workCount":row.get::<i64,_>("work_count"),
             "primaryWorkCount":row.get::<i64,_>("primary_work_count"),
             "referenceWorkCount":row.get::<i64,_>("reference_work_count"),
             "targetCount":row.get::<i64,_>("target_count"),
+            "pendingCount":row.get::<i64,_>("pending_count"),
             "succeededCount":row.get::<i64,_>("succeeded_count"),"noSignalCount":row.get::<i64,_>("no_signal_count"),
             "needsContextCount":row.get::<i64,_>("needs_context_count"),"failedCount":row.get::<i64,_>("failed_count"),
             "excludedCount":row.get::<i64,_>("excluded_count")
@@ -269,7 +259,7 @@ pub async fn read_signals(
         "SELECT signal.signal_ref,signal.target_ref,signal.kind,signal.proposition,signal.evidence,work.observation_role, \
                 signal.problem_frame,signal.eligibility_state,signal.eligibility_reason,signal.created_at::text AS created_at, \
                 resolution.resolution_ref,resolution.state AS resolution_state,resolution.resolved_problem_ref, \
-                membership.membership_ref, \
+                membership.membership_ref,to_jsonb(membership)->>'problem_revision_ref' AS problem_revision_ref, \
                 COALESCE((SELECT jsonb_agg(jsonb_build_object( \
                     'pairRef',pair.pair_ref,'state',pair.state, \
                     'decisionReason',pair.pair_manifest->'decision'->>'code', \
@@ -317,6 +307,7 @@ pub async fn read_signals(
             "eligibilityState":row.get::<String,_>("eligibility_state"),"eligibilityReason":row.get::<Option<String>,_>("eligibility_reason"),
             "resolutionRef":row.get::<Option<Uuid>,_>("resolution_ref"),"resolutionState":row.get::<Option<String>,_>("resolution_state"),
             "resolvedProblemRef":row.get::<Option<Uuid>,_>("resolved_problem_ref"),"membershipRef":row.get::<Option<Uuid>,_>("membership_ref"),
+            "problemRevisionRef":row.get::<Option<String>,_>("problem_revision_ref"),
             "pairOutcomes":row.get::<Value,_>("pair_outcomes"),
             "createdAt":row.get::<String,_>("created_at")
         })}).collect::<Vec<_>>()

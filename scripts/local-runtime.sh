@@ -10,7 +10,7 @@ usage: ./scripts/local-runtime.sh {migrate|repair-password|serve} [--database da
 
   migrate          apply the approved local Linggan migrations exactly once
   repair-password  explicitly align the local persistent database role with .env
-  serve            migrate, then start the API, scheduler and local media processor
+serve            migrate, then start the API, scheduler and local media processor
 
 The optional --database form is reserved for an exact, disposable runtime proof
 database. It refuses every name except linggan_intelligence_runtime_proof_<hex>.
@@ -110,6 +110,68 @@ verify_application_database_credentials() {
   fi
 }
 
+verify_persistent_runtime_is_stopped_for_migration() {
+  local label launchctl_result
+  [[ "$database_name" == "$POSTGRES_DB" ]] || return 0
+  if ! command -v launchctl >/dev/null 2>&1; then
+    echo "cannot verify local runtime services are stopped; refusing persistent database migration" >&2
+    exit 1
+  fi
+  for label in com.linggan-intelligence.local-runtime \
+    com.linggan-intelligence.patrol-worker com.linggan-intelligence.media-worker; do
+    if launchctl_result="$(launchctl print "gui/$(id -u)/$label" 2>&1)"; then
+      echo "${label} must be stopped before persistent database migration; use scripts/runtime/install.sh --prepare-migration" >&2
+      exit 1
+    fi
+    if [[ "$launchctl_result" != *"Could not find service \"$label\" "* ]]; then
+      echo "cannot confirm $label is stopped; refusing persistent database migration" >&2
+      echo "$launchctl_result" >&2
+      exit 1
+    fi
+  done
+  for process in linggan-api linggan-worker linggan-media-worker; do
+    if pgrep -x "$process" >/dev/null 2>&1; then
+      echo "${process} is still running; refusing persistent database migration" >&2
+      exit 1
+    fi
+  done
+  if lsof -nP -iTCP:3000 -sTCP:LISTEN >/dev/null 2>&1; then
+    echo "port 3000 is still serving; refusing persistent database migration" >&2
+    exit 1
+  fi
+}
+
+verify_comment_study_base_schema() {
+  local missing_relation
+  missing_relation="$(psql_in_container -At <<'SQL'
+WITH required(relation_name) AS (
+  SELECT unnest(ARRAY[
+    'observation_domain','linggan_material_comment','linggan_model_invocation',
+    'linggan_comment_study_policy','linggan_comment_study_run','linggan_comment_study_target',
+    'linggan_comment_study_batch','linggan_comment_study_resolution',
+    'linggan_comment_study_problem_pair','linggan_comment_study_problem_revision',
+    'linggan_comment_study_problem_membership'
+  ])
+)
+SELECT relation_name FROM required
+WHERE to_regclass(relation_name) IS NULL
+ORDER BY array_position(ARRAY[
+    'observation_domain','linggan_material_comment','linggan_model_invocation',
+    'linggan_comment_study_policy','linggan_comment_study_run','linggan_comment_study_target',
+    'linggan_comment_study_batch','linggan_comment_study_resolution',
+    'linggan_comment_study_problem_pair','linggan_comment_study_problem_revision',
+    'linggan_comment_study_problem_membership'
+  ], relation_name)
+LIMIT 1;
+SQL
+)"
+  if [[ -n "$missing_relation" ]]; then
+    echo "comment_study_schema_prerequisite_missing: ${missing_relation}" >&2
+    echo "For a first clean-study installation, run ./scripts/init-comment-study.sh, then retry migrate." >&2
+    exit 1
+  fi
+}
+
 repair_password() {
   "$project_root/scripts/dev-db.sh" up >/dev/null
   # The container may have been created with an older secret. Pass the value
@@ -167,6 +229,7 @@ apply_migration_once() {
 }
 
 migrate() {
+  verify_persistent_runtime_is_stopped_for_migration
   "$project_root/scripts/dev-db.sh" up >/dev/null
   verify_runtime_port_binding
   verify_application_database_credentials
@@ -278,6 +341,13 @@ migrate() {
   apply_migration_once "0104_unified_domain_schema_cleanup" "$project_root/database/migrations/0104_unified_domain_schema_cleanup.sql"
   apply_migration_once "0105_reply_disposition_requalification" "$project_root/database/migrations/0105_reply_disposition_requalification.sql"
   apply_migration_once "0106_reply_disposition_quota_requalification" "$project_root/database/migrations/0106_reply_disposition_quota_requalification.sql"
+  verify_comment_study_base_schema
+  apply_migration_once "0107_comment_study_productization_schema" "$project_root/database/migrations/0107_comment_study_productization_schema.sql"
+  apply_migration_once "0108_comment_study_policy_constraints" "$project_root/database/migrations/0108_comment_study_policy_constraints.sql"
+  apply_migration_once "0109_comment_study_start_constraints" "$project_root/database/migrations/0109_comment_study_start_constraints.sql"
+  apply_migration_once "0110_comment_study_request_snapshot_constraints" "$project_root/database/migrations/0110_comment_study_request_snapshot_constraints.sql"
+  apply_migration_once "0111_comment_study_pair_failure_state" "$project_root/database/migrations/0111_comment_study_pair_failure_state.sql"
+  apply_migration_once "0112_comment_study_membership_revision" "$project_root/database/migrations/0112_comment_study_membership_revision.sql"
 }
 
 case "$command_name" in

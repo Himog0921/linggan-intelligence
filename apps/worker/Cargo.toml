@@ -19,6 +19,7 @@ uuid = { workspace = true, features = ["v4"] }
 [dev-dependencies]
 # 只给 `startup_contract` 用：它要读回 worker 写进心跳的那一行。产品的三条依赖里没有
 # 数据库客户端——worker 自己不拼 SQL，SQL 都在 `linggan-evidence` 里。
+linggan-contracts = { path = "../../crates/contracts" }
 sqlx.workspace = true
 
 [[bin]]

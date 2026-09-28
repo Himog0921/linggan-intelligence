@@ -145,6 +145,10 @@ LIDS 现在统一约束全项目的设计表达，但其成熟度仍为 Proposed
 
 [页面规格](pages/comment-study-rebuild-page.md)、[变更清单](changes/comment-study-rebuild-001-ui-change-manifest.md)、[布局验收记录](acceptance/comment-study-layout-001-acceptance.md) 记录 Issue #295 新评论研究初始输入面的 L1 表格布局、筛选/选择边界及浏览器走查；该候选尚未合并或刷新本机 3000。
 
+## COMMENT-STUDY-PRODUCTIZATION-001 / PR #338 P2/P3 页面候选
+
+[四视图与交互规格](pages/comment-study-productization-001.md) 是当前 P2 页面目标，并规定 P3 Run 控制状态；P2/P3 的 Surface、State、Dependency 与 Acceptance 清单记录在 [PR #338](https://github.com/Himog0921/linggan-intelligence/pull/338) 变更说明中，P3 控制分层验收见[Run 控制验收记录](acceptance/comment-study-productization-001-p3-control-acceptance.md)，阶段证据见[实施账本](../audits/comment-study-productization-001/README.md)。候选 UI 已接入源码 router，但仍需浏览器/可访问性走查与 Mog 验收；未部署或声称生产运行。
+
 ## MODEL-PI-001 交付分支
 
 [页面规格](pages/model-ai-settings-page.md)、[变更清单](changes/model-pi-001-ui-change-manifest.md)、[实施验收](acceptance/model-pi-001-acceptance.md) 记录四区设置、个人菜单最小适配、真实 SDK 与来源授权边界。

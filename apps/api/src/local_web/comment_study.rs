@@ -18,14 +18,14 @@ use linggan_intelligence::comment_study_read::{
 };
 use linggan_intelligence::{
     comment_study_embedding::EmbeddingError,
-    comment_study_run::{
-        PrepareStudyRunWithSelectionsRequest, StudyWorkSelection, prepare_study_run_with_selections,
-    },
     comment_study_source::{StudySourceRole, preview_sources_for_roles},
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
 use uuid::Uuid;
+
+#[path = "comment_study_api.rs"]
+mod catalog_api;
 
 pub(super) fn routes() -> Router<LocalWebState> {
     Router::new()
@@ -33,33 +33,25 @@ pub(super) fn routes() -> Router<LocalWebState> {
         .route("/assets/comment-study.css", get(stylesheet))
         .route("/assets/comment-study.js", get(script))
         .route("/api/local/comment-study/overview", get(read_overview))
-        .route("/api/local/comment-study/runs", get(read_runs))
+        .route(
+            "/api/local/comment-study/runs",
+            get(read_runs).post(catalog_api::start),
+        )
         .route("/api/local/comment-study/targets", get(read_targets))
         .route("/api/local/comment-study/signals", get(read_signals))
         .route("/api/local/comment-study/problems", get(read_problems))
         .route("/api/local/comment-study/setup", get(read_setup))
-        .route("/api/local/comment-study/policy", post(save_policy))
-        .route("/api/local/comment-study/runs", post(start_run))
+        .route(
+            "/api/local/comment-study/policy",
+            post(catalog_api::retired),
+        )
         .route(
             "/api/local/comment-study/embedding-probe",
             post(run_embedding_probe),
         )
+        .merge(catalog_api::command_routes())
+        .merge(catalog_api::routes())
         .layer(middleware::from_fn(local_comment_study_guard))
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct SavePolicy {
-    domain_ref: Uuid,
-    model_config_ref: Uuid,
-    comment_budget: i32,
-    context_character_budget: i32,
-}
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct StartRun {
-    domain_ref: Uuid,
-    selections: Vec<StudyWorkSelection>,
 }
 
 #[derive(Deserialize)]
@@ -173,99 +165,6 @@ fn embedding_probe_error_code(error: &EmbeddingError) -> &'static str {
         // remain deliberately closed, safe codes rather than exposing adapter or database text.
         EmbeddingError::Database(_) => "embedding_probe_storage_unavailable",
         EmbeddingError::Model(_) | EmbeddingError::InvalidVector => "embedding_runtime_unavailable",
-    }
-}
-
-async fn save_policy(
-    State(state): State<LocalWebState>,
-    Json(request): Json<SavePolicy>,
-) -> Response {
-    if !(1..=3000).contains(&request.comment_budget)
-        || (1..=20000).contains(&request.context_character_budget) == false
-    {
-        return error(StatusCode::BAD_REQUEST, "invalid_comment_study_policy");
-    };
-    let database = match database(&state) {
-        Ok(v) => v,
-        Err(e) => return e,
-    };
-    let result: Result<Value, sqlx::Error> = async {
-        let mut tx = database.pool().begin().await?;
-        let active_domain: Option<Uuid> = sqlx::query_scalar(
-            "SELECT domain_ref FROM observation_domain \
-             WHERE domain_ref=$1 AND status='active' FOR SHARE",
-        )
-        .bind(request.domain_ref)
-        .fetch_optional(&mut *tx)
-        .await?;
-        if active_domain.is_none() {
-            return Ok(json!({"error":"domain_not_active"}));
-        }
-        let valid: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM linggan_model_config config \
-             JOIN linggan_model_entry model USING(model_ref) \
-             JOIN linggan_model_connection_version version \
-               ON version.version_ref=model.connection_version_ref \
-             JOIN linggan_model_connection connection USING(connection_ref) \
-             WHERE config.config_ref=$1 AND connection.enabled)",
-        )
-        .bind(request.model_config_ref)
-        .fetch_one(&mut *tx)
-        .await?;
-        if !valid {
-            return Ok(json!({"error":"model_config_unavailable"}));
-        }
-        let policy = Uuid::new_v4();
-        sqlx::query(
-            "INSERT INTO linggan_comment_study_policy \
-             (policy_ref,domain_ref,model_config_ref,contract,comment_budget,context_character_budget) \
-             VALUES($1,$2,$3,'comment-study.v1',$4,$5)",
-        )
-        .bind(policy)
-        .bind(request.domain_ref)
-        .bind(request.model_config_ref)
-        .bind(request.comment_budget)
-        .bind(request.context_character_budget)
-        .execute(&mut *tx)
-        .await?;
-        sqlx::query(
-            "INSERT INTO linggan_comment_study_active_policy(domain_ref,policy_ref) \
-             VALUES($1,$2) ON CONFLICT(domain_ref) DO UPDATE \
-             SET policy_ref=EXCLUDED.policy_ref,updated_at=scope_001_now()",
-        )
-        .bind(request.domain_ref)
-        .bind(policy)
-        .execute(&mut *tx)
-        .await?;
-        tx.commit().await?;
-        Ok(json!({"policyRef":policy,"domainRef":request.domain_ref,"saved":true}))
-    }
-    .await;
-    match result {
-        Ok(value) => match value.get("error").and_then(Value::as_str) {
-            None => Json(value).into_response(),
-            Some("domain_not_active") => error(StatusCode::CONFLICT, "domain_not_active"),
-            Some(_) => error(StatusCode::CONFLICT, "model_config_unavailable"),
-        },
-        Err(_) => error(StatusCode::SERVICE_UNAVAILABLE, "comment_study_unavailable"),
-    }
-}
-async fn start_run(State(state): State<LocalWebState>, Json(request): Json<StartRun>) -> Response {
-    let database = match database(&state) {
-        Ok(v) => v,
-        Err(e) => return e,
-    };
-    match prepare_study_run_with_selections(
-        database,
-        PrepareStudyRunWithSelectionsRequest {
-            domain_ref: request.domain_ref,
-            selections: request.selections,
-        },
-    )
-    .await
-    {
-        Ok(value) => Json(value).into_response(),
-        Err(_) => error(StatusCode::CONFLICT, "comment_study_run_unavailable"),
     }
 }
 
@@ -524,9 +423,11 @@ mod tests {
         assert!(script.contains("const visibleWorks = ()"));
         assert!(script.contains("visibleWorks().forEach(work =>"));
         assert!(script.contains("selectedWorkRoles.has(work.workRef)"));
-        assert!(script.contains(
-            "document.querySelector('#work-filter').addEventListener('input', renderWorks)"
-        ));
+        assert!(script.contains("workCatalogPath(cursor=null)"));
+        assert!(script.contains("workCatalogState.observationRole"));
+        assert!(script.contains("comments/history"));
+        assert!(script.contains("继续读取研究历史"));
+        assert!(script.contains("loadWorksPage(workCatalogState.nextCursor)"));
     }
 
     #[test]
@@ -641,10 +542,10 @@ mod tests {
     }
 
     #[test]
-    fn comment_study_page_offers_the_five_approved_review_tabs_with_no_leftover_mini_readout() {
+    fn comment_study_page_exposes_user_comments_without_restoring_the_old_target_tab() {
         let page = include_str!("comment_study.html");
         assert!(page.contains("<nav class=\"study-tabs\" aria-label=\"评论研究视图\">"));
-        for view in ["overview", "targets", "pending", "problems", "runs"] {
+        for view in ["overview", "comments", "pending", "problems", "runs"] {
             assert!(
                 page.contains(&format!("data-view=\"{view}\"")),
                 "missing tab button for view={view}"
@@ -661,7 +562,7 @@ mod tests {
     #[test]
     fn comment_study_script_renders_a_run_scoped_targets_tab_with_original_comment_text() {
         let script = include_str!("comment_study.js");
-        assert!(script.contains("const RUN_SCOPED_VIEWS = new Set(['targets', 'pending']);"));
+        assert!(script.contains("const RUN_SCOPED_VIEWS = new Set(['pending']);"));
         assert!(script.contains("async function renderTargetsTab()"));
         assert!(
             script.contains("`targets?runRef=${encodeURIComponent(selectedRunRef)}&limit=100`")
@@ -732,10 +633,12 @@ mod tests {
     fn comment_study_script_explains_source_eligibility_and_budget_in_chinese() {
         let script = include_str!("comment_study.js");
         assert!(script.contains("function renderSourcePreview(preview, targetId, roleLabel)"));
-        assert!(script.contains("评论作者身份未知"));
+        assert!(script.contains("作者身份未知"));
+        assert!(script.contains("不作为独立用户计数"));
         assert!(script.contains("作品作者本人"));
         assert!(script.contains("本次最多冻结"));
-        assert!(script.contains("selectedWorkRoles.size >= 100"));
+        assert!(script.contains("服务端作品目录"));
+        assert!(script.contains("MAX_SELECTED_WORKS = 100"));
     }
 
     #[test]
@@ -832,5 +735,40 @@ mod tests {
         ));
         assert!(stylesheet.contains(".study-review-table blockquote{"));
         assert!(stylesheet.contains("var(--lgi-font-evidence)"));
+    }
+    #[test]
+    fn p1_comments_use_catalog_detail_and_server_side_work_pagination() {
+        let page = include_str!("comment_study.html");
+        let script = include_str!("comment_study.js");
+        assert!(page.contains("data-view=\"comments\">用户评论"));
+        assert!(page.contains("id=\"comment-detail-dialog\""));
+        for token in [
+            "catalogQuery('comments',params)",
+            "catalogQuery('catalog-summary',summaryParams)",
+            "catalogQuery('comments/detail',{workRef,commentExternalId})",
+            "catalogQuery('works',{q:query,limit:20})",
+            "workCatalogPath(cursor)",
+        ] {
+            assert!(
+                script.contains(token),
+                "missing P1 client contract: {token}"
+            );
+        }
+        assert!(!script.contains("setup.eligibleWorks || []"));
+        assert!(!page.contains("筛选已加载作品"));
+    }
+    #[test]
+    fn p1_comment_detail_keeps_raw_context_cleaning_and_history_visibly_distinct() {
+        let page = include_str!("comment_study.html");
+        let script = include_str!("comment_study.js");
+        for label in ["原声证据", "所属作品", "父评论语境", "清洗文本", "研究历史"]
+        {
+            assert!(
+                page.contains(label) || script.contains(label),
+                "missing detail layer: {label}"
+            );
+        }
+        assert!(script.contains("仅作为语境，不作为当前评论的独立证据"));
+        assert!(script.contains("历史未记录"));
     }
 }
