@@ -34,12 +34,13 @@ let activePolicyRef = null;
 let pendingStartSignature = null;
 let pendingStartRef = null;
 let parentPolicyRef = null;
+let runLimitsPolicyRef = null;
 
 function updateSelection() {
   const count = selectedWorkRoles.size;
   const selectedEligible = [...selectedWorkRoles.keys()].reduce((total, ref) =>
     total + Number(selectedWorkMeta.get(ref)?.eligibleCommentCount || 0), 0);
-  const budget = Number(document.querySelector('#comment-budget').value || 0);
+  const budget = Number(document.querySelector('#run-comment-budget').value || 0);
   const frozenCount = budget > 0 ? Math.min(selectedEligible, budget) : 0;
   document.querySelector('#selected-count').textContent = count
     ? `已选择 ${count}/${MAX_SELECTED_WORKS} 篇 · 当前已知合格 ${selectedEligible} 条 · 本次最多冻结 ${frozenCount} 条`
@@ -198,6 +199,11 @@ function updatePolicySummary(){
   summary.textContent=policy
     ?`${policy.methodName||'未命名方法'} · 版本 ${String(policy.policyRef).slice(0,8)} · 评论上限 ${Number(policy.defaults?.commentBudget||0)} 条 · 语境上限 ${Number(policy.defaults?.contextCharacterBudget||0)} 字符${policy.isActive?' · 当前默认':''}`
     :'还没有已保存的方法版本。首次使用前需要创建一版研究方法。';
+  if(reference!==runLimitsPolicyRef){
+    document.querySelector('#run-comment-budget').value=String(policy?.defaults?.commentBudget||100);
+    document.querySelector('#run-context-character-budget').value=String(policy?.defaults?.contextCharacterBudget||6000);
+    runLimitsPolicyRef=reference;
+  }
 }
 
 function instructionExtra(instruction){
@@ -795,7 +801,7 @@ function selectionCommand() {
     scope: { kind: 'works', workRefs: works.map(work => work.contentPublicRef) },
     workRoles: works,
     mode: document.querySelector('#study-mode').value,
-    limits: { commentBudget: Number(document.querySelector('#comment-budget').value), contextCharacterBudget: Number(document.querySelector('#context-character-budget').value), tokenLimit: Number(document.querySelector('#token-budget').value) }
+    limits: { commentBudget: Number(document.querySelector('#run-comment-budget').value), contextCharacterBudget: Number(document.querySelector('#run-context-character-budget').value), tokenLimit: Number(document.querySelector('#token-budget').value) }
   };
 }
 document.querySelector('#preview-run').addEventListener('click', async () => {
@@ -835,7 +841,9 @@ document.querySelector('#start-run').addEventListener('click', async () => {
 document.querySelector('#work-filter').addEventListener('input',()=>{clearTimeout(workSearchTimer);workSearchTimer=setTimeout(()=>{void searchWorksNow().catch(error=>{document.querySelector('#work-filter-status').textContent=`作品搜索失败：${error.message}`;});},250);});
 document.querySelector('#work-prev').addEventListener('click',async()=>{const previous=workCatalogState.history.pop()??null;await loadWorksPage(previous);});
 document.querySelector('#work-next').addEventListener('click',async()=>{if(!workCatalogState.nextCursor)return;workCatalogState.history.push(workCatalogState.cursor);await loadWorksPage(workCatalogState.nextCursor);});
-document.querySelector('#comment-budget').addEventListener('input', updateSelection);
+['#run-comment-budget','#run-context-character-budget'].forEach(selector => document.querySelector(selector).addEventListener('input', () => {
+  pendingStartSignature = null; pendingStartRef = null; updateSelection();
+}));
 document.querySelector('#token-budget').addEventListener('input', () => { pendingStartSignature = null; pendingStartRef = null; updateSelection(); });
 document.querySelector('#study-reason').addEventListener('input', () => { pendingStartSignature = null; pendingStartRef = null; });
 document.querySelector('#include-reference-works').addEventListener('change', async event => {

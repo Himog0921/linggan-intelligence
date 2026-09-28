@@ -93,8 +93,8 @@
       <form id="policy-form" class="policy-form" hidden>
         <label>模型配置<select id="model-config" required disabled><option>正在读取…</option></select></label>
         <label>方法名称<input id="method-name" type="text" maxlength="100" value="评论研究方法" required></label>
-        <label>本次最多评论数<input id="comment-budget" type="number" min="1" max="3000" value="100" required></label>
-        <label>单作品语境字符上限<input id="context-character-budget" type="number" min="1" max="20000" value="6000" required></label>
+        <label>方法默认最多评论数<input id="comment-budget" type="number" min="1" max="3000" value="100" required></label>
+        <label>方法默认单作品语境字符上限<input id="context-character-budget" type="number" min="1" max="20000" value="6000" required></label>
         <label class="study-instruction">语义提取补充说明<textarea id="stage-semantic" maxlength="32000" rows="3"></textarea></label>
         <label class="study-instruction">归并判断补充说明<textarea id="stage-resolution" maxlength="32000" rows="3"></textarea></label>
         <label class="study-instruction">问题配对补充说明<textarea id="stage-pair" maxlength="32000" rows="3"></textarea></label>
@@ -115,6 +115,8 @@
       <p id="reference-source-preview" class="study-table-status" role="status" hidden></p>
       <div class="study-run-settings">
         <label>启动模式<select id="study-mode"><option value="new_only">只研究尚未研究的评论</option><option value="input_changed">只重研输入已变化的评论</option><option value="retry_failed">重试失败评论</option><option value="reanalyse">重新分析所选评论</option></select></label>
+        <label>本次最多评论数<input id="run-comment-budget" type="number" min="1" max="3000" value="100"></label>
+        <label>单作品语境字符上限<input id="run-context-character-budget" type="number" min="1" max="20000" value="6000"></label>
         <label>本次模型词元上限<input id="token-budget" type="number" min="1024" max="10000000" value="100000"></label>
         <label id="study-reason-label" hidden>本次重研原因<input id="study-reason" type="text" maxlength="500" placeholder="说明这次重研的原因"></label>
         <button id="preview-run" type="button" disabled>预览本次选择</button>
