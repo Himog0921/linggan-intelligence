@@ -647,6 +647,7 @@ document.querySelector('#policy-form').addEventListener('submit', async event =>
   event.preventDefault();
   const button = document.querySelector('#save-policy');
   const status = document.querySelector('#policy-status');
+  let policySaved = false;
   button.disabled = true;
   try {
     const response = await post('policies', {
@@ -656,10 +657,19 @@ document.querySelector('#policy-form').addEventListener('submit', async event =>
       defaults: { commentBudget: Number(document.querySelector('#comment-budget').value), contextCharacterBudget: Number(document.querySelector('#context-character-budget').value) },
       stageInstructions: { semantic: document.querySelector('#stage-semantic').value, resolution: document.querySelector('#stage-resolution').value, pair: document.querySelector('#stage-pair').value }
     });
+    policySaved = true;
     const reference = response.policy?.policyRef;
-    status.textContent = `已保存不可变方法版本：${reference}。选择该版本后可用于本次预览和启动。`;
+    if (!reference) {
+      status.textContent = '方法已保存，但保存回执缺少方法版本编号，未能自动选中此版本。';
+      return;
+    }
     await loadPolicies(reference);
-  } catch (error) { status.textContent = `未保存方法版本：${error.message}`; }
+    status.textContent = `已保存不可变方法版本：${reference}。选择该版本后可用于本次预览和启动。`;
+  } catch (error) {
+    status.textContent = policySaved
+      ? `方法已保存，但方法目录刷新失败：${error.message}`
+      : `未保存方法版本：${error.message}`;
+  }
   finally { button.disabled = !document.querySelector('#model-config').value; }
 });
 document.querySelector('#study-policy').addEventListener('change', () => {

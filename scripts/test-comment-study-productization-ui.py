@@ -443,10 +443,32 @@ def run_live_api(
                 f"responses={[item for item in responses if item['method'] == 'POST']!r}; "
                 f"page_errors={page_errors!r}; save_disabled={page.locator('#save-policy').is_disabled()}; "
                 f"form_valid={page.locator('#policy-form').evaluate('(form) => form.checkValidity()')}; "
-               f"status={page.locator('#policy-status').inner_text()!r}"
+                f"status={page.locator('#policy-status').inner_text()!r}"
             ) from error
         created_policy_ref = page.locator("#study-policy").input_value()
-        assert created_policy_ref and created_policy_ref != existing_policy_ref
+        policy_response = next(
+            (item for item in responses if item["method"] == "POST" and item["path"].endswith("/policies")),
+            None,
+        )
+        response_policy_ref = (
+            policy_response.get("body", {}).get("policy", {}).get("policyRef")
+            if policy_response
+            else None
+        )
+        if (
+            not created_policy_ref
+            or created_policy_ref == existing_policy_ref
+            or not policy_response
+            or policy_response["status"] != 201
+            or created_policy_ref != response_policy_ref
+        ):
+            raise AssertionError(
+                "Saved method success feedback did not select the policy returned by the API; "
+                f"selected={created_policy_ref!r}; existing={existing_policy_ref!r}; "
+                f"response_status={policy_response['status'] if policy_response else None!r}; "
+                f"response_policy_ref={response_policy_ref!r}; "
+                f"options={page.locator('#study-policy').locator('option').evaluate_all('(options) => options.map(option => option.value)')!r}"
+            )
         page.locator("#activate-policy").click()
         page.get_by_text("已将所选方法设为当前领域默认版本。", exact=True).wait_for()
 

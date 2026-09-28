@@ -6,15 +6,19 @@
 > 事实来源: 本机实际检查、已确认项目边界和完成计划
 > 冲突时以谁为准: 真实运行结果、ACCEPTED ADR 与用户最新确认
 
-### GREENFIELD Comment Research / Draft PR #338（P2 页面/API 隔离回执通过；人工验收待办；P3 质量出口未达成）
+### GREENFIELD Comment Research / Draft PR #338（P0 主线运行库已只读盘点；P2 exact-head 浏览器 CI 修复待复验；P3 质量出口未达成）
 
-2026-09-28 最新核对：PR #338 仍 OPEN/Draft，远端 head=`d700649fb06397a4e0132d36b0835d860fc44a3e`，base=`main@f54778562fbaaff56f482cb3d9fa46b0bbf51965`，mergeable。远端 exact-head run [36387389302](https://github.com/Himog0921/linggan-intelligence/actions/runs/36387389302) 成功，但只对应 `d700649`。本地新提交 `677e38a8b03d7662e4916a333b4f5eec9e9afe47` 尚未推送，因此该旧 CI 不能算作新提交验证；新提交的完整本地隔离套件已通过，远端精确 head CI 待提交文档并推送后核验。
+2026-09-28 最新远端核对：PR #338 仍 OPEN/Draft，head=`c376cf60e9f26df18364fc9065ebdf327218a2fa`，base=`main@f54778562fbaaff56f482cb3d9fa46b0bbf51965`，`mergeable=MERGEABLE`、check 状态 `UNSTABLE`。exact-head Actions [36391635088](https://github.com/Himog0921/linggan-intelligence/actions/runs/36391635088) 仅在真实 Axum/隔离 PostgreSQL 浏览器回归失败：保存成功提示早于方法目录刷新，测试因此读到旧选择。当前 worktree 已将成功提示推迟到目录刷新后，并断言 UI 选中的 `policyRef` 与 HTTP 201 回执一致；修复尚未提交、推送，新的 exact-head CI 待复验。该 run 的 push-only source export 按条件跳过。
 
-主线与上线分开核对：`origin/main` 当前为 `f54778562fbaaff56f482cb3d9fa46b0bbf51965`，`:3000/health` 返回 ready。PR #338 自身未合并；#323–#327、#329、#335–#336、#347 已分别以独立 PR 合并，其中 #347 的 merge commit 正是当前 main。当前 #338 的候选增量仍未进入 main 或本机运行；运行健康不证明迁移 head、研究页面或完整业务验收。没有用旧 migration 快照替代当前共享库核验。
+PR 合并事实单独记录：#338 的 `mergedAt` 为空，PR issue timeline 没有 merge/close/reopen 事件；以当前 base 比较，分支有 60 个独有提交，`git cherry` 未发现 patch-equivalent upstream 提交。分支中的 `1c43495`、`c2af487`、`d10b945`、`c7e23f6` 是把当时的 main 合回 PR 分支。已有相关能力确已上线，来源是独立合并的 #323–#327、#329、#335、#336；#347 是 Collection 改动。当前本机 `runtime-main` 正是干净的 `main@f54778562fbaaff56f482cb3d9fa46b0bbf51965`，包含这些独立 PR 的结果，但不包含 #338 候选增量。
 
-P2 方法版本、preview/start、预算绑定、幂等、v2 执行、取消/显式重试已有源码和隔离 PG/Axum 证明。本地提交 `677e38a8` 又覆盖真实页面经 Axum 路由和 disposable PostgreSQL 的方法新建（HTTP 201）、CAS 激活（200）、预览、启动及停止；直接数据库断言 Run/Target/start receipt/model invocation=`1/2/1/0`，Run=`cancelled`，controlVersion=`1`。夹具先设活动 `legacy_unrecorded` 方法，证明浏览器会选取已记录版本；额外合成浏览器场景模拟目录第一页 100 条、活动 legacy 在下一页，确认激活请求仍携带正确 CAS ref。Playwright、Intelligence/PostgreSQL 67/67、Problem rebuild 48/48、Axum/PostgreSQL 10/10、worker SIGTERM 1/1、SIGKILL/restart 1/1 均通过本机隔离执行；不证明部署页面、真实 provider 或 Mog 业务验收。
+P0 本机只读快照：`:3000/health` 为 ready、loopback-only；`runtime-identity.json` 的 migration head=`0106_reply_disposition_quota_requalification`。以 `BEGIN READ ONLY` 查询本机 `linggan_intelligence_dev`（PostgreSQL 16.14），ledger 共 107 条，最新 migration SHA=`184f91bff325cf335424df212874a53a621169fa388d6b29290c70a5260e0773`，与运行身份一致。#338 候选 `0105`–`0109` 五个迁移 ID 均未登记；方法版本列、Run 预算列、Target 稳定评论 ID/终态列及 model request 表也未出现。Comment Study 19 张表有 41 个已验证 FK、99 个已验证 CHECK、41 个有效索引、0 个禁用用户触发器。原声表计数：Material Content 1,459、Material Comment 6,257、Media Blob 3,009、Media Slot 3,064。
 
-仍需 Mog 对真实页面动作、范围、预算数字和回执进行业务验收；真实模型质量样本须在明确样本与预算后单独授权。P3 自动化执行/恢复已有隔离证明，但质量出口仍需负责人独立标注 Gold Set、分别核验既有 Problem 与未归并池的分层 Recall@K、获批真实模型语义/HTTP 质量路径，并补 M4 system memory pressure/swap 实测。Gold Set 未通过前不进入 P4；其后严格按 P4→P5→P6→P7→P8。P0 用户环境共享库细项与 P8 备份/恢复仍是现场证据，不从隔离测试推断。T01–T54 仍为 5 `PASS`（T23–T26、T43）和 49 `NOT_RUN`，不按测试数量折算阶段完成度。
+同一只读快照中已有历史 Comment Study Run 7 个（均 `completed_with_failures`）、Work 22、Target 945（succeeded 613、failed 158、no_signal 70、needs_context 104）、semantic attempt 1,412、Signal 764、Resolution 79、Problem Pair 145、Problem/Revision/Membership 均 0；219 个 batch 都是终态。通用 model invocation 共 2,379、当前 `running` 为 0；除盘点连接外 active SQL 为 0。以上是历史账本和当时状态，不把 completed_with_failures 报成在途故障。此次 P0 只读事务没有修改共享数据；任何候选 migration 前仍需临近执行时复核并保存受保护行基线，P8 备份/恢复另行完成。
+
+P2 方法版本、preview/start、预算绑定、幂等、v2 执行、取消/显式重试已有源码和隔离 PG/Axum 证明。本地提交 `677e38a8` 又覆盖真实页面经 Axum 路由和 disposable PostgreSQL 的方法新建（HTTP 201）、CAS 激活（200）、预览、启动及停止；直接数据库断言 Run/Target/start receipt/model invocation=`1/2/1/0`，Run=`cancelled`，controlVersion=`1`。夹具先设活动 `legacy_unrecorded` 方法，证明浏览器会选取已记录版本；额外合成浏览器场景模拟目录第一页 100 条、活动 legacy 在下一页，确认激活请求仍携带正确 CAS ref。修复后完整本机隔离套件复跑通过：Intelligence/PostgreSQL 67/67、Problem rebuild 48/48、Axum/PostgreSQL 10/10、worker SIGTERM 1/1、SIGKILL/restart 1/1；合成分页 Playwright 及 `node --check`、Python AST、`git diff --check` 通过。不证明部署页面、真实 provider 或 Mog 业务验收。
+
+仍需 Mog 对真实页面动作、范围、预算数字和回执进行业务验收；真实模型质量样本须在明确样本与预算后单独授权。P3 自动化执行/恢复已有隔离证明，但质量出口仍需负责人独立标注 Gold Set、分别核验既有 Problem 与未归并池的分层 Recall@K、获批真实模型语义/HTTP 质量路径，并补 M4 system memory pressure/swap 实测。Gold Set 未通过前不进入 P4；其后严格按 P4→P5→P6→P7→P8。P0 本机 main 运行库已完成一次只读现场盘点；P8 备份/恢复仍待单独建立与演练，不从隔离测试推断。T01–T54 仍为 5 `PASS`（T23–T26、T43）和 49 `NOT_RUN`，不按测试数量折算阶段完成度。
 
 本增量未改动 `:3000` 运行时、共享数据库或 migration，未调用真实 provider，未部署或合并；PG 证明使用一次性 disposable database/container/volume 和 synthetic adapter。原工作区 `AGENTS.md` 改动未纳入候选提交。
 
