@@ -323,7 +323,7 @@ fn migrations_missing(missing: &str) -> String {
             .expect("a migration file has a stem")
             .to_string_lossy()
             .into_owned();
-        if id == "0105_comment_study_productization_schema" {
+        if id == "0107_comment_study_productization_schema" {
             // The clean-study bootstrap is deliberately distinct from the shared migration chain.
             // This disposable process proof needs that candidate schema before its delta migrations.
             sql.push_str(include_str!(

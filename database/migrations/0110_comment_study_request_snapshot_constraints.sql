@@ -1,5 +1,6 @@
--- COMMENT-STUDY-PRODUCTIZATION-001 / P2 request snapshot protection CANDIDATE.
--- Not registered for shared upgrade. Apply after 0107; preserves the already-issued 0107 checksum.
+-- COMMENT-STUDY-PRODUCTIZATION-001 / P2 request snapshot protection.
+-- Applied after 0109; protects the immutable request manifest.
+
 DO $$ BEGIN
     IF to_regclass('linggan_comment_study_model_request') IS NULL THEN
         RAISE EXCEPTION 'comment_study_model_request_schema_prerequisite_missing';

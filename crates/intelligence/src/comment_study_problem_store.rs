@@ -148,19 +148,23 @@ async fn prepare_problem_resolution_inner(
         lock_enabled_v2_run_for_signal(&mut transaction, signal_ref).await?;
     }
     let signal = lock_signal_for_resolution(&mut transaction, signal_ref).await?;
-    let (state, candidate_problem_refs) = match signal.eligibility_state.as_str() {
-        "eligible" => {
-            validate_candidates(&mut transaction, signal.domain_ref, &candidates).await?;
-            ("pending", candidates)
-        }
-        "deferred_context" => ("deferred_context", Vec::new()),
-        "not_user_problem" => ("not_user_problem", Vec::new()),
-        _ => return Err(ProblemStoreError::SignalNotEligible),
-    };
+    let (state, candidate_problem_refs, candidate_problem_revisions) =
+        match signal.eligibility_state.as_str() {
+            "eligible" => {
+                let revisions =
+                    freeze_candidate_revisions(&mut transaction, signal.domain_ref, &candidates)
+                        .await?;
+                ("pending", candidates, revisions)
+            }
+            "deferred_context" => ("deferred_context", Vec::new(), Vec::new()),
+            "not_user_problem" => ("not_user_problem", Vec::new(), Vec::new()),
+            _ => return Err(ProblemStoreError::SignalNotEligible),
+        };
     let resolution_ref = Uuid::new_v4();
     let manifest = json!({
         "contract":"comment-study.problem-candidate-set.v1",
         "candidateProblemRefs":candidate_problem_refs,
+        "candidateProblemRevisions":candidate_problem_revisions,
     });
     sqlx::query(
         "INSERT INTO linggan_comment_study_resolution( \
@@ -261,10 +265,12 @@ async fn resume_retrieval_incomplete_resolution_inner(
         lock_enabled_v2_run_for_resolution(&mut transaction, resolution_ref).await?;
     }
     let resolution = lock_retrieval_incomplete_resolution(&mut transaction, resolution_ref).await?;
-    validate_candidates(&mut transaction, resolution.domain_ref, &candidates).await?;
+    let candidate_problem_revisions =
+        freeze_candidate_revisions(&mut transaction, resolution.domain_ref, &candidates).await?;
     let manifest = json!({
         "contract":"comment-study.problem-candidate-set.v1",
         "candidateProblemRefs":candidates,
+        "candidateProblemRevisions":candidate_problem_revisions,
         "priorRetrievalIncomplete":resolution.decision_manifest,
     });
     sqlx::query(
@@ -358,25 +364,51 @@ async fn accept_problem_resolution_inner(
     let receipt = match decision {
         ExistingResolutionDecision::Assign(problem_ref) => {
             validate_candidates(&mut transaction, row.domain_ref, &[problem_ref]).await?;
+            let mut decision_manifest = raw_output.clone();
+            let problem_revision_ref = if membership_revision_supported(&mut transaction).await? {
+                let revision_ref = candidate_revision_ref(&row.candidate_manifest, problem_ref)?;
+                decision_manifest
+                    .as_object_mut()
+                    .ok_or(ProblemStoreError::StoredManifest)?
+                    .insert("problemRevisionRef".into(), json!(revision_ref));
+                Some(revision_ref)
+            } else {
+                None
+            };
             finish_resolution(
                 &mut transaction,
                 resolution_ref,
                 "assigned",
                 Some(problem_ref),
-                raw_output,
+                decision_manifest,
             )
             .await?;
-            sqlx::query(
-                "INSERT INTO linggan_comment_study_problem_membership( \
-                   membership_ref,signal_ref,problem_ref,resolution_ref \
-                 ) VALUES($1,$2,$3,$4)",
-            )
-            .bind(Uuid::new_v4())
-            .bind(row.signal_ref)
-            .bind(problem_ref)
-            .bind(resolution_ref)
-            .execute(&mut *transaction)
-            .await?;
+            if let Some(problem_revision_ref) = problem_revision_ref {
+                sqlx::query(
+                    "INSERT INTO linggan_comment_study_problem_membership( \
+                       membership_ref,signal_ref,problem_ref,resolution_ref,problem_revision_ref \
+                     ) VALUES($1,$2,$3,$4,$5)",
+                )
+                .bind(Uuid::new_v4())
+                .bind(row.signal_ref)
+                .bind(problem_ref)
+                .bind(resolution_ref)
+                .bind(problem_revision_ref)
+                .execute(&mut *transaction)
+                .await?;
+            } else {
+                sqlx::query(
+                    "INSERT INTO linggan_comment_study_problem_membership( \
+                       membership_ref,signal_ref,problem_ref,resolution_ref \
+                     ) VALUES($1,$2,$3,$4)",
+                )
+                .bind(Uuid::new_v4())
+                .bind(row.signal_ref)
+                .bind(problem_ref)
+                .bind(resolution_ref)
+                .execute(&mut *transaction)
+                .await?;
+            }
             ProblemResolutionReceipt {
                 resolution_ref,
                 state: "assigned".to_owned(),
@@ -688,7 +720,7 @@ async fn accept_problem_pair_inner(
     };
     let receipt = match decision {
         PairCreationDecision::Create(definition) => {
-            let problem_ref = insert_or_find_problem(
+            let (problem_ref, problem_revision_ref) = insert_or_find_problem(
                 &mut transaction,
                 domain_ref,
                 &definition,
@@ -699,6 +731,7 @@ async fn accept_problem_pair_inner(
                 &mut transaction,
                 pair.first_signal_ref,
                 problem_ref,
+                problem_revision_ref,
                 pair_ref,
             )
             .await?;
@@ -706,6 +739,7 @@ async fn accept_problem_pair_inner(
                 &mut transaction,
                 pair.second_signal_ref,
                 problem_ref,
+                problem_revision_ref,
                 pair_ref,
             )
             .await?;
@@ -834,6 +868,53 @@ async fn validate_candidates(
     Ok(())
 }
 
+async fn membership_revision_supported(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM information_schema.columns \
+         WHERE table_schema=current_schema() \
+           AND table_name='linggan_comment_study_problem_membership' \
+           AND column_name='problem_revision_ref')",
+    )
+    .fetch_one(&mut **transaction)
+    .await
+}
+
+async fn freeze_candidate_revisions(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    domain_ref: Uuid,
+    candidates: &[Uuid],
+) -> Result<Vec<Value>, ProblemStoreError> {
+    validate_candidates(transaction, domain_ref, candidates).await?;
+    let rows = sqlx::query(
+        "SELECT problem.problem_ref,revision.revision_ref \
+         FROM linggan_comment_study_problem problem \
+         JOIN linggan_comment_study_problem_revision revision \
+           ON revision.revision_ref=problem.current_revision_ref \
+          AND revision.problem_ref=problem.problem_ref \
+         WHERE problem.domain_ref=$1 AND problem.state='active' \
+           AND problem.problem_ref=ANY($2) \
+         ORDER BY problem.problem_ref",
+    )
+    .bind(domain_ref)
+    .bind(candidates)
+    .fetch_all(&mut **transaction)
+    .await?;
+    if rows.len() != candidates.len() {
+        return Err(ProblemStoreError::InvalidCandidateSet);
+    }
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            json!({
+                "problemRef":row.get::<Uuid,_>("problem_ref"),
+                "problemRevisionRef":row.get::<Uuid,_>("revision_ref")
+            })
+        })
+        .collect())
+}
+
 struct PendingResolution {
     signal_ref: Uuid,
     domain_ref: Uuid,
@@ -938,6 +1019,36 @@ fn candidate_refs(manifest: &Value) -> Result<Vec<Uuid>, ProblemStoreError> {
                 })
         })
         .collect()
+}
+
+fn candidate_revision_ref(manifest: &Value, problem_ref: Uuid) -> Result<Uuid, ProblemStoreError> {
+    if !candidate_refs(manifest)?.contains(&problem_ref) {
+        return Err(ProblemStoreError::StoredManifest);
+    }
+    let problem_ref = problem_ref.to_string();
+    let revisions = manifest
+        .get("candidateProblemRevisions")
+        .and_then(Value::as_array)
+        .ok_or(ProblemStoreError::StoredManifest)?;
+    let matches: Vec<Uuid> = revisions
+        .iter()
+        .filter(|candidate| {
+            candidate.get("problemRef").and_then(Value::as_str) == Some(problem_ref.as_str())
+        })
+        .map(|candidate| {
+            candidate
+                .get("problemRevisionRef")
+                .and_then(Value::as_str)
+                .ok_or(ProblemStoreError::StoredManifest)
+                .and_then(|value| {
+                    Uuid::parse_str(value).map_err(|_| ProblemStoreError::StoredManifest)
+                })
+        })
+        .collect::<Result<_, _>>()?;
+    if matches.len() != 1 {
+        return Err(ProblemStoreError::StoredManifest);
+    }
+    Ok(matches[0])
 }
 
 async fn lock_novel_signal(
@@ -1202,7 +1313,7 @@ async fn insert_or_find_problem(
     domain_ref: Uuid,
     definition: &NewProblemDefinition,
     seed_signal_refs: &[Uuid],
-) -> Result<Uuid, sqlx::Error> {
+) -> Result<(Uuid, Uuid), sqlx::Error> {
     let definition_value = json!({
         "title":definition.title,
         "definition":definition.definition,
@@ -1211,8 +1322,8 @@ async fn insert_or_find_problem(
         "excludeCriteria":definition.exclude_criteria,
     });
     let definition_hash = sha256_json(&definition_value);
-    if let Some(existing) = sqlx::query_scalar::<_, Uuid>(
-        "SELECT problem.problem_ref FROM linggan_comment_study_problem problem \
+    if let Some(existing) = sqlx::query_as::<_, (Uuid, Uuid)>(
+        "SELECT problem.problem_ref,revision.revision_ref FROM linggan_comment_study_problem problem \
          JOIN linggan_comment_study_problem_revision revision \
            ON revision.revision_ref=problem.current_revision_ref \
          WHERE problem.domain_ref=$1 AND revision.definition_hash=$2 AND problem.state='active'",
@@ -1265,39 +1376,63 @@ async fn insert_or_find_problem(
     .bind(revision_ref)
     .execute(&mut **transaction)
     .await?;
-    Ok(problem_ref)
+    Ok((problem_ref, revision_ref))
 }
 
 async fn assign_novel_signal_from_pair(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     signal_ref: Uuid,
     problem_ref: Uuid,
+    problem_revision_ref: Uuid,
     pair_ref: Uuid,
 ) -> Result<(), sqlx::Error> {
+    let revision_supported = membership_revision_supported(transaction).await?;
+    let decision_manifest = if revision_supported {
+        json!({
+            "contract":PROBLEM_PAIR_CONTRACT,
+            "pairRef":pair_ref,
+            "problemRevisionRef":problem_revision_ref
+        })
+    } else {
+        json!({"contract":PROBLEM_PAIR_CONTRACT,"pairRef":pair_ref})
+    };
     let resolution_ref: Uuid = sqlx::query_scalar(
         "UPDATE linggan_comment_study_resolution \
-         SET state='assigned',resolved_problem_ref=$2, \
-             decision_manifest=jsonb_build_object('contract',$3,'pairRef',$4),resolved_at=scope_001_now() \
+         SET state='assigned',resolved_problem_ref=$2,decision_manifest=$3,resolved_at=scope_001_now() \
          WHERE signal_ref=$1 AND state='deferred_novel' \
          RETURNING resolution_ref",
     )
     .bind(signal_ref)
     .bind(problem_ref)
-    .bind(PROBLEM_PAIR_CONTRACT)
-    .bind(pair_ref)
+    .bind(decision_manifest)
     .fetch_one(&mut **transaction)
     .await?;
-    sqlx::query(
-        "INSERT INTO linggan_comment_study_problem_membership( \
-           membership_ref,signal_ref,problem_ref,resolution_ref \
-         ) VALUES($1,$2,$3,$4)",
-    )
-    .bind(Uuid::new_v4())
-    .bind(signal_ref)
-    .bind(problem_ref)
-    .bind(resolution_ref)
-    .execute(&mut **transaction)
-    .await?;
+    if revision_supported {
+        sqlx::query(
+            "INSERT INTO linggan_comment_study_problem_membership( \
+               membership_ref,signal_ref,problem_ref,resolution_ref,problem_revision_ref \
+             ) VALUES($1,$2,$3,$4,$5)",
+        )
+        .bind(Uuid::new_v4())
+        .bind(signal_ref)
+        .bind(problem_ref)
+        .bind(resolution_ref)
+        .bind(problem_revision_ref)
+        .execute(&mut **transaction)
+        .await?;
+    } else {
+        sqlx::query(
+            "INSERT INTO linggan_comment_study_problem_membership( \
+               membership_ref,signal_ref,problem_ref,resolution_ref \
+             ) VALUES($1,$2,$3,$4)",
+        )
+        .bind(Uuid::new_v4())
+        .bind(signal_ref)
+        .bind(problem_ref)
+        .bind(resolution_ref)
+        .execute(&mut **transaction)
+        .await?;
+    }
     Ok(())
 }
 

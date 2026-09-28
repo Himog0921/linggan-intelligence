@@ -22,7 +22,7 @@ async fn database(name: &str) -> Database {
     .await
     .unwrap();
     sqlx::raw_sql(include_str!(
-        "../../../database/migrations/0105_comment_study_productization_schema.sql"
+        "../../../database/migrations/0107_comment_study_productization_schema.sql"
     ))
     .execute(db.pool())
     .await

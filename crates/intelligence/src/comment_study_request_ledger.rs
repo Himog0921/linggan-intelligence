@@ -825,7 +825,7 @@ pub(crate) async fn recover_expired_problem_stage_requests(
     Ok(recovered)
 }
 
-/// New P3 starts require migration 0109, but a partially applied sequence may have 0108's request
+/// New P3 starts require migration 0111, but a partially applied sequence may have 0108's request
 /// ledger without the terminal Pair state. Keep P3 work fenced until both Pair constraints exist.
 pub(crate) async fn pair_failure_state_supported(
     database: &linggan_storage_postgres::Database,

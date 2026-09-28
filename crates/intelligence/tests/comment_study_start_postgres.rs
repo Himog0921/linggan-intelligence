@@ -55,12 +55,14 @@ use sqlx::Row;
 use std::sync::Arc;
 use uuid::Uuid;
 const GUARDS: &str =
-    include_str!("../../../database/migrations/0107_comment_study_start_constraints.sql");
+    include_str!("../../../database/migrations/0109_comment_study_start_constraints.sql");
 const REQUEST_GUARDS: &str = include_str!(
-    "../../../database/migrations/0108_comment_study_request_snapshot_constraints.sql"
+    "../../../database/migrations/0110_comment_study_request_snapshot_constraints.sql"
 );
 const PAIR_FAILURE_STATE: &str =
-    include_str!("../../../database/migrations/0109_comment_study_pair_failure_state.sql");
+    include_str!("../../../database/migrations/0111_comment_study_pair_failure_state.sql");
+const MEMBERSHIP_REVISION: &str =
+    include_str!("../../../database/migrations/0112_comment_study_membership_revision.sql");
 fn domain() -> Uuid {
     Uuid::parse_str(linggan_intelligence::comment_study_source::ADHD_DOMAIN_REF).unwrap()
 }
@@ -117,13 +119,13 @@ async fn setup_with_model_limits(
     .await
     .unwrap();
     sqlx::raw_sql(include_str!(
-        "../../../database/migrations/0105_comment_study_productization_schema.sql"
+        "../../../database/migrations/0107_comment_study_productization_schema.sql"
     ))
     .execute(db.pool())
     .await
     .unwrap();
     sqlx::raw_sql(include_str!(
-        "../../../database/migrations/0106_comment_study_policy_constraints.sql"
+        "../../../database/migrations/0108_comment_study_policy_constraints.sql"
     ))
     .execute(db.pool())
     .await
@@ -134,6 +136,10 @@ async fn setup_with_model_limits(
         .await
         .unwrap();
     sqlx::raw_sql(PAIR_FAILURE_STATE)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    sqlx::raw_sql(MEMBERSHIP_REVISION)
         .execute(db.pool())
         .await
         .unwrap();
@@ -431,12 +437,15 @@ async fn seed_problem_stage_fixtures(
            resolution_ref,signal_ref,domain_ref,state,candidate_manifest \
          ) VALUES($1,$2,$3,'pending', \
            jsonb_build_object('contract','comment-study.problem-candidate-set.v1', \
-             'candidateProblemRefs',jsonb_build_array($4::text)))",
+             'candidateProblemRefs',jsonb_build_array($4::text), \
+             'candidateProblemRevisions',jsonb_build_array(jsonb_build_object( \
+               'problemRef',$4::text,'problemRevisionRef',$5::text))))",
     )
     .bind(resolution_ref)
     .bind(signals[0])
     .bind(domain())
     .bind(problem_ref)
+    .bind(revision_ref)
     .execute(db.pool())
     .await
     .unwrap();
@@ -2432,7 +2441,7 @@ async fn problem_stage_requests_share_budget_and_recover_expired_dispatches() {
            resolution_ref,signal_ref,domain_ref,state,candidate_manifest,decision_manifest, \
            model_invocation_ref,resolved_at \
          ) VALUES($1,$2,$3,'deferred_novel', \
-           '{\"contract\":\"comment-study.problem-candidate-set.v1\",\"candidateProblemRefs\":[]}'::jsonb, \
+           '{\"contract\":\"comment-study.problem-candidate-set.v1\",\"candidateProblemRefs\":[],\"candidateProblemRevisions\":[]}'::jsonb, \
            '{\"reason\":\"no_matching_problem\"}'::jsonb,$4,scope_001_now())",
     )
     .bind(terminal_subject_resolution)
@@ -2469,7 +2478,10 @@ async fn problem_stage_requests_share_budget_and_recover_expired_dispatches() {
            resolution_ref,signal_ref,domain_ref,state,candidate_manifest \
          ) VALUES($1,$2,$3,'pending', \
            jsonb_build_object('contract','comment-study.problem-candidate-set.v1', \
-             'candidateProblemRefs',jsonb_build_array($4::text)))",
+             'candidateProblemRefs',jsonb_build_array($4::text), \
+             'candidateProblemRevisions',jsonb_build_array(jsonb_build_object( \
+               'problemRef',$4::text,'problemRevisionRef', \
+                 (SELECT current_revision_ref::text FROM linggan_comment_study_problem WHERE problem_ref=$4)))))",
     )
     .bind(orphan_resolution_ref)
     .bind(signals[1])
@@ -3735,15 +3747,20 @@ async fn same_work_cold_start_requires_two_known_authors_and_an_unambiguous_pair
     .await
     .unwrap();
     assert_eq!(supporter_accounts, ["reader-1", "reader-2"]);
-    let (problems, memberships): (i64, i64) = sqlx::query_as(
+    let (problems, memberships, lineaged_memberships): (i64, i64, i64) = sqlx::query_as(
         "SELECT (SELECT count(*) FROM linggan_comment_study_problem), \
-                (SELECT count(*) FROM linggan_comment_study_problem_membership WHERE problem_ref=$1)",
+                (SELECT count(*) FROM linggan_comment_study_problem_membership WHERE problem_ref=$1), \
+                (SELECT count(*) FROM linggan_comment_study_problem_membership membership \
+                   JOIN linggan_comment_study_resolution resolution USING(resolution_ref) \
+                   WHERE membership.problem_ref=$1 \
+                     AND membership.problem_revision_ref IS NOT NULL \
+                     AND resolution.decision_manifest->>'problemRevisionRef'=membership.problem_revision_ref::text)",
     )
     .bind(problem_ref)
     .fetch_one(db.pool())
     .await
     .unwrap();
-    assert_eq!((problems, memberships), (1, 2));
+    assert_eq!((problems, memberships, lineaged_memberships), (1, 2, 2));
 }
 
 #[tokio::test]
@@ -3898,6 +3915,18 @@ async fn unknown_authors_are_retained_can_join_existing_problem_but_cannot_suppo
         );
         if comment_id.starts_with("unknown-assigned") {
             assert_eq!(receipt.problem_ref, Some(problem_ref));
+            let (membership_revision_ref, decision_revision_ref): (Uuid, String) = sqlx::query_as(
+                "SELECT membership.problem_revision_ref, \
+                            resolution.decision_manifest->>'problemRevisionRef' \
+                     FROM linggan_comment_study_problem_membership membership \
+                     JOIN linggan_comment_study_resolution resolution USING(resolution_ref) \
+                     WHERE membership.signal_ref=$1",
+            )
+            .bind(*signal_ref)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+            assert_eq!(membership_revision_ref.to_string(), decision_revision_ref);
         }
     }
 
@@ -3950,6 +3979,80 @@ async fn unknown_authors_are_retained_can_join_existing_problem_but_cannot_suppo
     .await
     .unwrap();
     assert_eq!(assigned_membership_count, 2);
+
+    // Independent foreign keys are insufficient here: the membership's Signal and its
+    // resolution must also refer to the same row, even when both decisions point at the same
+    // Problem revision.
+    let mismatched_membership_signal = signal_ref("unknown-novel-a");
+    let (target_ref, semantic_attempt_ref): (Uuid, Uuid) = sqlx::query_as(
+        "SELECT target_ref,semantic_attempt_ref FROM linggan_comment_study_signal WHERE signal_ref=$1",
+    )
+    .bind(mismatched_membership_signal)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    let resolution_signal_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_comment_study_signal( \
+           signal_ref,target_ref,semantic_attempt_ref,kind,proposition,evidence, \
+           evidence_start,evidence_end,eligibility_state \
+         ) VALUES($1,$2,$3,'question','synthetic resolution signal','SYNTHETIC',9000,9010,'not_applicable')",
+    )
+    .bind(resolution_signal_ref)
+    .bind(target_ref)
+    .bind(semantic_attempt_ref)
+    .execute(db.pool())
+    .await
+    .unwrap();
+    let resolution_revision_ref: Uuid = sqlx::query_scalar(
+        "SELECT problem_revision_ref FROM linggan_comment_study_problem_membership WHERE signal_ref=$1",
+    )
+    .bind(signal_ref("unknown-assigned-a"))
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    let mismatched_resolution_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_comment_study_resolution( \
+           resolution_ref,signal_ref,domain_ref,state,candidate_manifest,decision_manifest, \
+           resolved_problem_ref,resolved_at \
+         ) VALUES($1,$2,$3,'assigned','{}'::jsonb,$4,$5,scope_001_now())",
+    )
+    .bind(mismatched_resolution_ref)
+    .bind(resolution_signal_ref)
+    .bind(domain())
+    .bind(json!({"problemRevisionRef":resolution_revision_ref}))
+    .bind(problem_ref)
+    .execute(db.pool())
+    .await
+    .unwrap();
+    let mismatch_error = sqlx::query(
+        "INSERT INTO linggan_comment_study_problem_membership( \
+           membership_ref,signal_ref,problem_ref,resolution_ref,problem_revision_ref \
+         ) VALUES($1,$2,$3,$4,$5)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(mismatched_membership_signal)
+    .bind(problem_ref)
+    .bind(mismatched_resolution_ref)
+    .bind(resolution_revision_ref)
+    .execute(db.pool())
+    .await
+    .expect_err("membership must reject a resolution for a different Signal");
+    assert_eq!(
+        mismatch_error
+            .as_database_error()
+            .unwrap()
+            .code()
+            .as_deref(),
+        Some("23514")
+    );
+    assert!(
+        mismatch_error
+            .to_string()
+            .contains("comment_study_membership_signal_resolution_mismatch")
+    );
+
     let rejected_pair_rows: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM linggan_comment_study_problem_pair pair \
          WHERE (pair.first_signal_ref=$1 AND pair.second_signal_ref=$2) \
@@ -3968,8 +4071,8 @@ async fn unknown_authors_are_retained_can_join_existing_problem_but_cannot_suppo
 
 #[tokio::test]
 #[ignore = "isolated synthetic PostgreSQL; no shared database or model"]
-async fn expired_pair_recovery_waits_for_the_0109_terminal_state_constraint() {
-    let (db, command, _) = setup("problem_stage_partial_0109", 2).await;
+async fn expired_pair_recovery_waits_for_the_0111_terminal_state_constraint() {
+    let (db, command, _) = setup("problem_stage_partial_0111", 2).await;
     let run_ref = start_study_run(&db, command, TrustedStudyOrigin::Manual)
         .await
         .unwrap()
@@ -4743,7 +4846,8 @@ async fn exhausted_problem_stage_budget_closes_all_pending_siblings() {
            resolution_ref,signal_ref,domain_ref,state,candidate_manifest \
          ) VALUES($1,$2,$3,'pending', \
            jsonb_build_object('contract','comment-study.problem-candidate-set.v1', \
-             'candidateProblemRefs','[]'::jsonb))",
+             'candidateProblemRefs','[]'::jsonb, \
+             'candidateProblemRevisions','[]'::jsonb))",
     )
     .bind(sibling_resolution_ref)
     .bind(signals[1])

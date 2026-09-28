@@ -12,9 +12,9 @@ use uuid::Uuid;
 
 const BASE: &str = include_str!("../../../database/bootstrap/comment-study-001.sql");
 const DELTA: &str =
-    include_str!("../../../database/migrations/0105_comment_study_productization_schema.sql");
+    include_str!("../../../database/migrations/0107_comment_study_productization_schema.sql");
 const GUARDS: &str =
-    include_str!("../../../database/migrations/0106_comment_study_policy_constraints.sql");
+    include_str!("../../../database/migrations/0108_comment_study_policy_constraints.sql");
 fn domain() -> Uuid {
     Uuid::parse_str(linggan_intelligence::comment_study_source::ADHD_DOMAIN_REF).unwrap()
 }

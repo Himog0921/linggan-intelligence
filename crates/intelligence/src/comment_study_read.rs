@@ -259,7 +259,7 @@ pub async fn read_signals(
         "SELECT signal.signal_ref,signal.target_ref,signal.kind,signal.proposition,signal.evidence,work.observation_role, \
                 signal.problem_frame,signal.eligibility_state,signal.eligibility_reason,signal.created_at::text AS created_at, \
                 resolution.resolution_ref,resolution.state AS resolution_state,resolution.resolved_problem_ref, \
-                membership.membership_ref, \
+                membership.membership_ref,to_jsonb(membership)->>'problem_revision_ref' AS problem_revision_ref, \
                 COALESCE((SELECT jsonb_agg(jsonb_build_object( \
                     'pairRef',pair.pair_ref,'state',pair.state, \
                     'decisionReason',pair.pair_manifest->'decision'->>'code', \
@@ -307,6 +307,7 @@ pub async fn read_signals(
             "eligibilityState":row.get::<String,_>("eligibility_state"),"eligibilityReason":row.get::<Option<String>,_>("eligibility_reason"),
             "resolutionRef":row.get::<Option<Uuid>,_>("resolution_ref"),"resolutionState":row.get::<Option<String>,_>("resolution_state"),
             "resolvedProblemRef":row.get::<Option<Uuid>,_>("resolved_problem_ref"),"membershipRef":row.get::<Option<Uuid>,_>("membership_ref"),
+            "problemRevisionRef":row.get::<Option<String>,_>("problem_revision_ref"),
             "pairOutcomes":row.get::<Value,_>("pair_outcomes"),
             "createdAt":row.get::<String,_>("created_at")
         })}).collect::<Vec<_>>()

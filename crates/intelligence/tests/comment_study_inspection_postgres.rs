@@ -18,7 +18,7 @@ use uuid::Uuid;
 
 const BASE: &str = include_str!("../../../database/bootstrap/comment-study-001.sql");
 const DELTA: &str =
-    include_str!("../../../database/migrations/0105_comment_study_productization_schema.sql");
+    include_str!("../../../database/migrations/0107_comment_study_productization_schema.sql");
 
 fn domain() -> Uuid {
     Uuid::parse_str(ADHD_DOMAIN_REF).unwrap()

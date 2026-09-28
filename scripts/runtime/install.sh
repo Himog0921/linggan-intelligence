@@ -21,14 +21,21 @@ worker_drain_ack="$drain_dir/worker-drain-ack"
 worker_update_permit="$drain_dir/worker-update-permit"
 worker_label="com.linggan-intelligence.patrol-worker"
 allow_legacy_bootstrap=0
+prepare_migration=0
 
 log() { print -r -- "[install] $*"; }
 
-if (( $# > 1 )) || { (( $# == 1 )) && [[ "$1" != "--bootstrap-no-drain" ]]; }; then
-  print -r -- "usage: ./scripts/runtime/install.sh [--bootstrap-no-drain]" >&2
+if (( $# > 1 )) || { (( $# == 1 )) && [[ "$1" != "--bootstrap-no-drain" && "$1" != "--prepare-migration" ]]; }; then
+  print -r -- "usage: ./scripts/runtime/install.sh [--prepare-migration | --bootstrap-no-drain]" >&2
   exit 1
 fi
-(( $# == 0 )) || allow_legacy_bootstrap=1
+if (( $# == 1 )); then
+  if [[ "$1" == "--bootstrap-no-drain" ]]; then
+    allow_legacy_bootstrap=1
+  else
+    prepare_migration=1
+  fi
+fi
 
 write_worker_update_permit() {
   local state="$1" from_revision="$2" target_revision="$3"
@@ -117,6 +124,53 @@ request_worker_drain() {
   exit 1
 }
 
+stop_service_for_migration() {
+  local label="$1" inspection
+  if inspection="$(launchctl print "gui/$(id -u)/$label" 2>&1)"; then
+    log "停止 $label，准备应用数据库迁移"
+    launchctl bootout "gui/$(id -u)/$label"
+    return
+  fi
+  if [[ "$inspection" == *"Could not find service \"$label\" "* ]]; then
+    log "$label 当前未加载"
+    return
+  fi
+  print -r -- "无法查询 $label；未继续数据库迁移准备" >&2
+  print -r -- "$inspection" >&2
+  exit 1
+}
+
+finish_migration_preparation() {
+  local label inspection waited=0
+  stop_service_for_migration "$worker_label"
+  stop_service_for_migration "com.linggan-intelligence.local-runtime"
+  stop_service_for_migration "com.linggan-intelligence.media-worker"
+  while (( waited < 30 )); do
+    local busy=0
+    for label in com.linggan-intelligence.local-runtime \
+      com.linggan-intelligence.patrol-worker com.linggan-intelligence.media-worker; do
+      if inspection="$(launchctl print "gui/$(id -u)/$label" 2>&1)"; then
+        busy=1
+      elif [[ "$inspection" != *"Could not find service \"$label\" "* ]]; then
+        print -r -- "无法确认 $label 已停止；迁移准备未完成" >&2
+        print -r -- "$inspection" >&2
+        exit 1
+      fi
+    done
+    if (( ! busy )) && ! lsof -nP -iTCP:3000 -sTCP:LISTEN >/dev/null 2>&1 \
+      && ! pgrep -x linggan-api >/dev/null 2>&1 \
+      && ! pgrep -x linggan-worker >/dev/null 2>&1 \
+      && ! pgrep -x linggan-media-worker >/dev/null 2>&1; then
+      log "巡检 worker 已 drain；API、巡检 worker 和媒体 worker 均已停止。现在可以单独运行 local-runtime.sh migrate。"
+      return
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  print -r -- "运行服务未全部停止；迁移准备未完成，请勿执行 migrate" >&2
+  exit 1
+}
+
 [[ -f "$repo_root/.env" ]] || { print -r -- "缺少 $repo_root/.env，先照 env.example 建好" >&2; exit 1; }
 
 mkdir -p "$log_dir" "$agents_dir" "$drain_dir"
@@ -142,6 +196,11 @@ else
 fi
 runtime_revision="$(git -C "$runtime_dir" rev-parse HEAD)"
 request_worker_drain "$runtime_revision" "$target_revision"
+
+if (( prepare_migration )); then
+  finish_migration_preparation
+  exit 0
+fi
 
 # 启动时由新 revision 的 sync.sh 消费上面的 target-specific drain permit，再把运行目录同步到
 # origin/main。安装入口不能先 reset 再去停 worker，否则旧进程可能在已被替换的工作树上

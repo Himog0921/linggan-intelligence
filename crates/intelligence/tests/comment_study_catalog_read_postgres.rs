@@ -18,7 +18,7 @@ use uuid::Uuid;
 
 const BASE: &str = include_str!("../../../database/bootstrap/comment-study-001.sql");
 const DELTA: &str =
-    include_str!("../../../database/migrations/0105_comment_study_productization_schema.sql");
+    include_str!("../../../database/migrations/0107_comment_study_productization_schema.sql");
 
 async fn database(name: &str) -> Database {
     let db = proof_database(name).await;
@@ -171,7 +171,10 @@ async fn catalog_distinguishes_visibility_eligibility_and_pending_index() {
         .find(|row| row["voiceRole"] == "unknown")
         .unwrap();
     assert_eq!(unknown["studyEligibility"]["eligible"], true);
-    assert_eq!(unknown["studyEligibility"]["reasons"], serde_json::json!([]));
+    assert_eq!(
+        unknown["studyEligibility"]["reasons"],
+        serde_json::json!([])
+    );
     let summary_query: CatalogSummaryQuery =
         serde_json::from_value(json!({"domain":ADHD_DOMAIN_REF})).unwrap();
     let summary = read_catalog_summary(&db, &summary_query).await.unwrap();

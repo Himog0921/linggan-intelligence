@@ -1,7 +1,6 @@
 -- COMMENT-STUDY-PRODUCTIZATION-001 / schema phase.
--- CANDIDATE: not registered in local-runtime.sh until constraints/views and dispatch gates land.
--- The authorized migration runner must apply this file in one transaction after worker drain.
--- Existing installations: delta only. Never bootstrap/reset an existing clean-study schema.
+-- Ordered after main-owned 0105/0106; existing installations receive a delta only.
+-- Never bootstrap or reset an existing clean-study schema.
 
 DO $$
 DECLARE
@@ -77,8 +76,8 @@ ALTER TABLE linggan_comment_study_target
     ));
 
 ALTER TABLE linggan_comment_study_problem_membership
-    ADD COLUMN problem_revision_ref uuid REFERENCES linggan_comment_study_problem_revision(revision_ref);
--- The constraints phase strengthens this to the documented (revision_ref, problem_ref) FK.
+    ADD COLUMN problem_revision_ref uuid;
+-- 0112 adds the composite revision/problem foreign key and guards new membership writes.
 
 CREATE FUNCTION cs_clean_reasons_are_strings(value jsonb) RETURNS boolean
 LANGUAGE sql IMMUTABLE STRICT AS $$

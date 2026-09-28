@@ -1,7 +1,7 @@
--- COMMENT-STUDY-PRODUCTIZATION-001 / P3 bounded pair execution CANDIDATE.
--- Not registered in the shared upgrade path. Adds a truthful terminal state for a pair that
--- cannot produce an admissible result due to exhausted attempts/budget/deadline or input overflow;
--- it is distinct from a semantic rejection.
+-- COMMENT-STUDY-PRODUCTIZATION-001 / P3 bounded pair execution.
+-- Adds a truthful terminal state for pair attempts that cannot produce an admissible result;
+-- distinct from a semantic rejection.
+
 DO $$ BEGIN
     IF to_regclass('linggan_comment_study_problem_pair') IS NULL THEN
         RAISE EXCEPTION 'comment_study_pair_schema_prerequisite_missing';

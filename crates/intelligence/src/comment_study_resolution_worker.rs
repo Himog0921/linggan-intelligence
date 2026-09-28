@@ -311,7 +311,8 @@ async fn claim_resolution(
     if !row.get::<bool, _>("enabled") {
         return Err(ResolutionWorkerError::Model(ModelError::Disabled));
     }
-    let candidates = row.get::<Value, _>("candidate_manifest")["candidateProblemRefs"]
+    let candidate_manifest = row.get::<Value, _>("candidate_manifest");
+    let candidates = candidate_manifest["candidateProblemRefs"]
         .as_array()
         .cloned()
         .ok_or(ResolutionWorkerError::Manifest)?;
@@ -323,21 +324,31 @@ async fn claim_resolution(
         .map(|value| value.as_str().and_then(|value| value.parse::<Uuid>().ok()))
         .collect::<Option<Vec<_>>>()
         .ok_or(ResolutionWorkerError::Manifest)?;
+    let candidate_revisions = candidate_manifest["candidateProblemRevisions"]
+        .as_array()
+        .cloned()
+        .ok_or(ResolutionWorkerError::Manifest)?;
+    if candidate_revisions.len() != refs.len() {
+        return Err(ResolutionWorkerError::Manifest);
+    }
     let problems: Vec<Value> = sqlx::query_scalar(
         "SELECT jsonb_build_object( \
            'problemRef',problem.problem_ref, \
+           'problemRevisionRef',revision.revision_ref, \
            'definition',revision.definition, \
            'stableIdentity',revision.core_frame, \
            'includeCriteria',revision.inclusions, \
            'excludeCriteria',revision.exclusions \
          ) \
-         FROM linggan_comment_study_problem problem \
+         FROM jsonb_to_recordset($1::jsonb) AS candidate(\"problemRef\" uuid,\"problemRevisionRef\" uuid) \
+         JOIN linggan_comment_study_problem problem \
+           ON problem.problem_ref=candidate.\"problemRef\" AND problem.state='active' \
          JOIN linggan_comment_study_problem_revision revision \
-           ON revision.revision_ref=problem.current_revision_ref \
-         WHERE problem.problem_ref=ANY($1) AND problem.state='active' \
+           ON revision.revision_ref=candidate.\"problemRevisionRef\" \
+          AND revision.problem_ref=problem.problem_ref \
          ORDER BY problem.created_at,problem.problem_ref",
     )
-    .bind(&refs)
+    .bind(json!(candidate_revisions))
     .fetch_all(&mut *tx)
     .await?;
     if problems.len() != refs.len() {

@@ -222,7 +222,7 @@ RUST_TEST_THREADS=1 cargo test -p linggan-intelligence \
 
 ## 11. 发布与回退
 
-经 Mog 明确授权后：锁 exact head → 本机备份与只读基线 → drain所有旧模型Worker → 确认无在途／过期已结算 → 单独 migrate → 约束／回填核验 → 新API与新Worker同版本启动 → 本地只读烟测 → 有限授权模型试运行 → Mog业务验收。自动计划保持关闭。
+经 Mog 明确授权后：锁 exact head → 本机备份与只读基线 → `scripts/runtime/install.sh --prepare-migration`（drain旧巡检 worker 并停 API／媒体 worker）→ 确认无在途／过期已结算 → 单独 migrate → 约束／回填核验 → 普通 `scripts/runtime/install.sh` 启动同版本服务 → 本地只读烟测 → 有限授权模型试运行 → Mog业务验收。自动计划保持关闭。
 
 默认不带任何已保存的旧自动计划启用标记；既有 generic active_auto_plan_ref 或旧 automation 数据不可被新流程默认为授权。
 

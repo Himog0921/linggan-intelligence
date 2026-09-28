@@ -72,14 +72,15 @@ async fn setup(name: &str, count: usize) -> Proof {
     .unwrap();
     for migration in [
         include_str!(
-            "../../../../database/migrations/0105_comment_study_productization_schema.sql"
+            "../../../../database/migrations/0107_comment_study_productization_schema.sql"
         ),
-        include_str!("../../../../database/migrations/0106_comment_study_policy_constraints.sql"),
-        include_str!("../../../../database/migrations/0107_comment_study_start_constraints.sql"),
+        include_str!("../../../../database/migrations/0108_comment_study_policy_constraints.sql"),
+        include_str!("../../../../database/migrations/0109_comment_study_start_constraints.sql"),
         include_str!(
-            "../../../../database/migrations/0108_comment_study_request_snapshot_constraints.sql"
+            "../../../../database/migrations/0110_comment_study_request_snapshot_constraints.sql"
         ),
-        include_str!("../../../../database/migrations/0109_comment_study_pair_failure_state.sql"),
+        include_str!("../../../../database/migrations/0111_comment_study_pair_failure_state.sql"),
+        include_str!("../../../../database/migrations/0112_comment_study_membership_revision.sql"),
     ] {
         sqlx::raw_sql(migration).execute(db.pool()).await.unwrap();
     }

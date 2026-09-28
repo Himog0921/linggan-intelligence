@@ -52,7 +52,7 @@ RUST_TEST_THREADS=1 cargo test -p linggan-intelligence --test comment_study_rebu
   --locked -- --ignored --nocapture --test-threads=1
 # These are actual Axum requests over the same disposable PostgreSQL proof database.
 # Run the ignored group explicitly; absence of a test file is never treated as a pass.
-RUST_TEST_THREADS=1 cargo test -p linggan-api --locked \
+P1_BROWSER_PROOF=1 RUST_TEST_THREADS=1 cargo test -p linggan-api --locked \
   local_web::comment_study::catalog_api::command_api::postgres_tests:: \
   -- --ignored --nocapture --test-threads=1
 # Exercise the real worker binary's OS signal handler while a synthetic model child is blocked in

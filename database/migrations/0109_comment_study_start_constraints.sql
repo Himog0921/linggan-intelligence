@@ -1,5 +1,6 @@
--- COMMENT-STUDY-PRODUCTIZATION-001 / P2 start constraints CANDIDATE.
--- Not registered for shared upgrade. Apply after 0103/0104 and worker drain, never reset.
+-- COMMENT-STUDY-PRODUCTIZATION-001 / P2 start constraints.
+-- Ordered after 0107/0108 and worker drain; never reset.
+
 DO $$ BEGIN
     IF to_regclass('linggan_comment_study_start_request') IS NULL
        OR to_regprocedure('cs_policy_validate_insert()') IS NULL THEN

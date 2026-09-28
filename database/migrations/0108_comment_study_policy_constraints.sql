@@ -1,6 +1,6 @@
 -- COMMENT-STUDY-PRODUCTIZATION-001 / constraints phase, policy portion only.
--- CANDIDATE: not registered for shared migration until the start/dispatch cutover is complete.
--- Apply transactionally after 0103. Does not update/delete historical policies or active pointer.
+-- Ordered after 0107. Does not update/delete historical policies or active pointer.
+
 DO $$
 BEGIN
     IF (SELECT count(*) FROM information_schema.columns

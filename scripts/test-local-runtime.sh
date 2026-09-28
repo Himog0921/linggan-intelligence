@@ -56,10 +56,44 @@ cleanup() {
       RUNTIME_PROOF_OLD_PASSWORD="$repair_old_password" \
       docker compose down --volumes --remove-orphans >/dev/null || exit_code=1
   fi
-  rm -rf "$proof_directory"
+  if [[ "$exit_code" -ne 0 && "${KEEP_RUNTIME_PROOF_ARTIFACTS:-0}" == "1" ]]; then
+    echo "runtime proof artifacts preserved at $proof_directory" >&2
+  else
+    rm -rf "$proof_directory"
+  fi
   exit "$exit_code"
 }
 trap cleanup EXIT INT TERM
+
+launchctl_guard_directory="$proof_directory/launchctl-guard"
+mkdir -p "$launchctl_guard_directory"
+cat > "$launchctl_guard_directory/launchctl" <<'EOF'
+#!/usr/bin/env sh
+echo "simulated launchctl query failure" >&2
+exit 1
+EOF
+cat > "$launchctl_guard_directory/docker" <<'EOF'
+#!/usr/bin/env sh
+echo "Docker must not be reached after an unknown launchctl result" >&2
+exit 97
+EOF
+chmod 700 "$launchctl_guard_directory/launchctl" "$launchctl_guard_directory/docker"
+if PATH="$launchctl_guard_directory:$PATH" "$project_root/scripts/local-runtime.sh" migrate \
+  >"$proof_directory/migrate-launchctl-failure.log" 2>&1; then
+  echo "runtime proof expected an unknown launchctl result to stop persistent migration" >&2
+  exit 1
+fi
+if ! grep -q 'cannot confirm com.linggan-intelligence.local-runtime is stopped' \
+  "$proof_directory/migrate-launchctl-failure.log"; then
+  cat "$proof_directory/migrate-launchctl-failure.log" >&2
+  echo "persistent migration did not fail closed on the launchctl query error" >&2
+  exit 1
+fi
+if grep -q 'Docker must not be reached' "$proof_directory/migrate-launchctl-failure.log"; then
+  cat "$proof_directory/migrate-launchctl-failure.log" >&2
+  echo "persistent migration reached Docker before rejecting the unknown launchctl result" >&2
+  exit 1
+fi
 
 compose_client_authentication() {
   local password="$1"
@@ -159,6 +193,43 @@ require_password_repair_uses_current_env
 
 docker compose exec -T postgres psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d postgres \
   -c "CREATE DATABASE ${proof_database};" >/dev/null
+
+# A brand-new application database has the retained Evidence/model schema after the ordinary
+# migration chain, but the clean Comment Study base schema is an explicit initialization step.
+# Let the runtime migration runner stop at that boundary, initialize only this disposable proof
+# database, then prove the same runner applies the productization delta in order.
+if "$project_root/scripts/local-runtime.sh" --database "$proof_database" migrate \
+  >"$proof_directory/migrate-before-comment-study-init.log" 2>&1; then
+  echo "runtime proof expected the uninitialized Comment Study prerequisite to stop the first migration pass" >&2
+  exit 1
+fi
+if ! grep -q 'comment_study_schema_prerequisite_missing: linggan_comment_study_policy' \
+  "$proof_directory/migrate-before-comment-study-init.log"; then
+  cat "$proof_directory/migrate-before-comment-study-init.log" >&2
+  echo "runtime proof stopped for a reason other than the documented Comment Study initialization boundary" >&2
+  exit 1
+fi
+
+bootstrap_table_count="$(docker compose exec -T postgres psql -X -v ON_ERROR_STOP=1 -At \
+  -U "$POSTGRES_USER" -d "$proof_database" \
+  -c "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_name LIKE 'linggan_comment_study_%';")"
+if [[ "$bootstrap_table_count" != "0" ]]; then
+  echo "runtime proof refused to bootstrap a disposable database with existing Comment Study tables" >&2
+  exit 1
+fi
+"$project_root/scripts/init-comment-study.sh" --database "$proof_database"
+if "$project_root/scripts/init-comment-study.sh" --database "$proof_database" \
+  >"$proof_directory/bootstrap-second-run.log" 2>&1; then
+  echo "runtime proof expected first-time Comment Study initialization to refuse a second bootstrap" >&2
+  exit 1
+fi
+if ! grep -q 'Comment Study tables already exist or are partial' \
+  "$proof_directory/bootstrap-second-run.log"; then
+  cat "$proof_directory/bootstrap-second-run.log" >&2
+  echo "runtime proof second bootstrap stopped for an unexpected reason" >&2
+  exit 1
+fi
+
 "$project_root/scripts/local-runtime.sh" --database "$proof_database" migrate
 
 observed_at="$(docker compose exec -T postgres psql -X -v ON_ERROR_STOP=1 -At -U "$POSTGRES_USER" -d "$proof_database" \
@@ -240,21 +311,20 @@ require_contains "$proof_directory/health.json" '"schema":"PLUGIN_RUNTIME_002_SC
 curl --fail --silent --show-error -H 'content-type: application/json' --data-binary @"$payload_path" \
   "http://localhost:${proof_port}/api/local/discovery-packages" >"$proof_directory/ingress.json"
 require_contains "$proof_directory/ingress.json" '"admission":"accepted"' "synthetic discovery was not accepted"
-# This payload exercises the retained discovery-only ingress, so its persisted card is read back
-# through the explicit legacy projection. Work Resource data is formed only from accepted Browser
-# Producer packages and is covered by the isolated material/API PostgreSQL proof.
-curl --fail --silent "http://localhost:${proof_port}/api/local/evidence-library/legacy?q=Synthetic" >"$proof_directory/read-before-restart.json"
-require_contains "$proof_directory/read-before-restart.json" 'runtime-proof-card' "readback did not contain the accepted card"
+# The removed legacy evidence route is not part of the runtime proof. Read through the current
+# Comment Study page instead; canonical Work Resource admission is covered by its own API proof.
+curl --fail --silent "http://localhost:${proof_port}/corpus/comments?domain=00000000-0000-4000-8000-000000000001" \
+  >"$proof_directory/comment-study-before-restart.html"
+require_contains "$proof_directory/comment-study-before-restart.html" '评论研究' \
+  "the current Comment Study page did not render"
 stop_server
 
 start_server
 require_contains "$proof_directory/health.json" '"state":"READY"' "restarted health did not report ready"
-curl --fail --silent "http://localhost:${proof_port}/api/local/evidence-library/legacy?q=Synthetic" >"$proof_directory/read-after-restart.json"
-require_contains "$proof_directory/read-after-restart.json" 'runtime-proof-card' "restart lost the accepted card"
-if grep -q 'example.invalid' "$proof_directory/read-after-restart.json"; then
-  echo "runtime proof exposed a remote cover candidate" >&2
-  exit 1
-fi
+curl --fail --silent "http://localhost:${proof_port}/corpus/comments?domain=00000000-0000-4000-8000-000000000001" \
+  >"$proof_directory/comment-study-after-restart.html"
+require_contains "$proof_directory/comment-study-after-restart.html" '评论研究' \
+  "Comment Study page did not survive the runtime restart"
 
 # This removes only new connections to the exact disposable proof database and terminates
 # only its sessions. The already-running API must stop reporting READY after its pool loses
@@ -273,11 +343,11 @@ require_contains "$proof_directory/health-after-loss.json" \
   '"schema":"LOCAL_001_DATABASE_UNAVAILABLE"' \
   "health did not identify post-start database loss"
 read_after_loss_status="$(curl --silent --output "$proof_directory/read-after-loss.json" --write-out '%{http_code}' \
-  "http://localhost:${proof_port}/api/local/work-resources?q=Synthetic")"
+  "http://localhost:${proof_port}/api/local/work-resources?domain=00000000-0000-4000-8000-000000000001&q=Synthetic")"
 if [[ "$read_after_loss_status" != "503" ]]; then
   echo "runtime proof expected a 503 local read after proof database loss, got ${read_after_loss_status}" >&2
   exit 1
 fi
 stop_server
 
-echo "local runtime proof passed: target mismatch rejection, migration, accepted synthetic discovery, restart persistence, post-start database-loss readiness, and local-only readback"
+echo "local runtime proof passed: target mismatch rejection, first-time Comment Study bootstrap, migration, accepted synthetic discovery, current Comment Study page, restart, and post-start database-loss readiness"
