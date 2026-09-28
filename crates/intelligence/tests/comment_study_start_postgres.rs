@@ -2526,6 +2526,187 @@ async fn problem_stage_requests_share_budget_and_recover_expired_dispatches() {
 
 #[tokio::test]
 #[ignore = "isolated synthetic PostgreSQL; no shared database or model"]
+async fn failed_resolution_and_pair_ledgers_settle_pending_subject_pointers() {
+    let (db, command, _) = setup("failed_problem_request_pointers", 2).await;
+    let run_ref = start_study_run(&db, command, TrustedStudyOrigin::Manual)
+        .await
+        .unwrap()
+        .run_ref
+        .unwrap();
+    let (_, _, resolution_ref, pair_ref) = seed_problem_stage_fixtures(&db, run_ref).await;
+    let (policy_ref, config_ref, model_ref, version_ref): (Uuid, Uuid, Uuid, Uuid) =
+        sqlx::query_as(
+            "SELECT run.policy_ref,config.config_ref,model.model_ref,version.version_ref \
+             FROM linggan_comment_study_run run \
+             JOIN linggan_comment_study_policy policy USING(policy_ref) \
+             JOIN linggan_model_config config ON config.config_ref=policy.model_config_ref \
+             JOIN linggan_model_entry model ON model.model_ref=config.model_ref \
+             JOIN linggan_model_connection_version version ON version.version_ref=model.connection_version_ref \
+             WHERE run.run_ref=$1",
+        )
+        .bind(run_ref)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+
+    let stages: [(&str, Option<Uuid>, Option<Uuid>, &str, &str); 2] = [
+        (
+            "resolution",
+            Some(resolution_ref),
+            None,
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        ),
+        (
+            "pair",
+            None,
+            Some(pair_ref),
+            "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        ),
+    ];
+    let mut invocation_refs = Vec::new();
+    for (stage, resolution_subject, pair_subject, input_hash, request_hash) in stages {
+        let invocation_ref = Uuid::new_v4();
+        invocation_refs.push(invocation_ref);
+        sqlx::query(
+            "INSERT INTO linggan_model_invocation( \
+               invocation_ref,connection_version_ref,model_ref,config_ref,operation,request_hash, \
+               state,reserved_tokens,charged_tokens,failure_code,result,finished_at \
+             ) VALUES($1,$2,$3,$4,'analyze',$5,'failed',1500,1500,'provider_failed', \
+               '{\"ok\":false,\"callStarted\":true}'::jsonb,scope_001_now())",
+        )
+        .bind(invocation_ref)
+        .bind(version_ref)
+        .bind(model_ref)
+        .bind(config_ref)
+        .bind(request_hash)
+        .execute(db.pool())
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO linggan_comment_study_model_request( \
+               invocation_ref,run_ref,policy_ref,stage,resolution_ref,pair_ref,attempt_ordinal, \
+               input_context_hash,request_manifest,request_hash,dispatch_started_at,deadline_at \
+             ) VALUES($1,$2,$3,$4,$5,$6,2,$7, \
+               jsonb_build_object('contract','comment-study.model-request.v1','stage',$4),$8, \
+               scope_001_now()-interval '1 minute',scope_001_now()+interval '1 hour')",
+        )
+        .bind(invocation_ref)
+        .bind(run_ref)
+        .bind(policy_ref)
+        .bind(stage)
+        .bind(resolution_subject)
+        .bind(pair_subject)
+        .bind(input_hash)
+        .bind(request_hash)
+        .execute(db.pool())
+        .await
+        .unwrap();
+        match stage {
+            "resolution" => {
+                sqlx::query(
+                    "UPDATE linggan_comment_study_resolution SET model_invocation_ref=$2 \
+                     WHERE resolution_ref=$1 AND state='pending'",
+                )
+                .bind(resolution_ref)
+                .bind(invocation_ref)
+                .execute(db.pool())
+                .await
+                .unwrap();
+            }
+            "pair" => {
+                sqlx::query(
+                    "UPDATE linggan_comment_study_problem_pair SET model_invocation_ref=$2 \
+                     WHERE pair_ref=$1 AND state='pending'",
+                )
+                .bind(pair_ref)
+                .bind(invocation_ref)
+                .execute(db.pool())
+                .await
+                .unwrap();
+            }
+            _ => unreachable!("the proof contains only problem stages"),
+        }
+    }
+
+    // Keep the recovery tick from claiming new work after it settles the stale subject pointers.
+    sqlx::query(
+        "UPDATE linggan_comment_study_run SET dispatch_state='stopped', \
+           dispatch_reason='user_stopped',control_version=control_version+1 WHERE run_ref=$1",
+    )
+    .bind(run_ref)
+    .execute(db.pool())
+    .await
+    .unwrap();
+
+    assert!(
+        run_model_work_once(&db, &NoModelSecrets, &PiAdapter::configured())
+            .await
+            .unwrap(),
+        "a worker tick must settle both failed ledgers whose subjects still point to them"
+    );
+
+    let resolution: (String, Option<Uuid>, Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT state,model_invocation_ref,decision_manifest->>'reason', \
+                decision_manifest->>'lastFailureCode' \
+         FROM linggan_comment_study_resolution WHERE resolution_ref=$1",
+    )
+    .bind(resolution_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        resolution,
+        (
+            "failed".into(),
+            Some(invocation_refs[0]),
+            Some("attempts_exhausted".into()),
+            Some("provider_failed".into())
+        )
+    );
+    let pair: (String, Option<Uuid>, Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT state,model_invocation_ref,pair_manifest->'decision'->>'code', \
+                pair_manifest->'decision'->>'lastFailureCode' \
+         FROM linggan_comment_study_problem_pair WHERE pair_ref=$1",
+    )
+    .bind(pair_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        pair,
+        (
+            "failed".into(),
+            Some(invocation_refs[1]),
+            Some("attempts_exhausted".into()),
+            Some("provider_failed".into())
+        )
+    );
+    let invocations: Vec<(Uuid, String, i64, String)> = sqlx::query_as(
+        "SELECT invocation_ref,state,charged_tokens,failure_code \
+         FROM linggan_model_invocation WHERE invocation_ref=ANY($1) ORDER BY invocation_ref",
+    )
+    .bind(&invocation_refs)
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(invocations.len(), 2);
+    assert!(invocations.iter().all(|(_, state, charged, code)| {
+        state == "failed" && *charged == 1500 && code == "provider_failed"
+    }));
+    let request_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_comment_study_model_request WHERE run_ref=$1",
+    )
+    .bind(run_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(request_count, 2, "recovery must not invent another request");
+}
+
+#[tokio::test]
+#[ignore = "isolated synthetic PostgreSQL; no shared database or model"]
 async fn legacy_cross_run_pairs_are_retired_before_model_admission() {
     let (db, mut command, _) = setup("cross_run_legacy_pair", 4).await;
     command.limits.comment_budget = 2;
