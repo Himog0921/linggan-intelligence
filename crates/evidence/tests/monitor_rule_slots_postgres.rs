@@ -28,7 +28,7 @@ async fn seed_keyword(database: &Database, identity_key: &str) -> Uuid {
         database,
         identity_key,
         "deep_archive",
-        serde_json::json!({"query":identity_key,"ranking":"comprehensive","scrollRounds":10}),
+        serde_json::json!({"query":identity_key}),
         "discovery_search",
         search_coverage(identity_key, 1),
         serde_json::json!({"surfaceReceipt":{"stopReason":"bottom_confirmed"}}),
@@ -99,7 +99,7 @@ fn save_rule(
             scroll_rounds: Some(3),
             top_by_likes: Some(20),
             published_within_days: Some(7),
-            task_contract_version: "linggan.producer.task-spec.v1".to_owned(),
+            task_contract_version: "linggan.producer.task-spec.v2".to_owned(),
         }),
     }
 }

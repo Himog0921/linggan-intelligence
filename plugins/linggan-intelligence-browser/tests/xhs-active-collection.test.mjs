@@ -16,20 +16,16 @@ test('unlimited deep comments use an explicit all-public execution target instea
   assert.deepEqual(commentTaskInstruction('note_1', 0), {
     maximumQuota: null,
     commentLimit: 'not_requested',
-    target: {
-      contentExternalId: 'note_1',
-      commentScope: 'all_public_until_natural_end',
-    },
+    target: { contentExternalId: 'note_1' },
+    commentScope: 'all_public_until_natural_end',
     stopConditions: ['manual_stop', 'collector_complete', 'time_budget', 'risk_budget'],
   });
   assert.deepEqual(commentTaskInstruction('note_1', 80), {
     maximumQuota: 80,
     commentLimit: 80,
-    target: {
-      contentExternalId: 'note_1',
-      commentScope: 'maximum_quota',
-      requestedCommentLimit: 80,
-    },
+    target: { contentExternalId: 'note_1' },
+    commentScope: 'maximum_quota',
+    requestedCommentLimit: 80,
     stopConditions: ['manual_stop', 'maximum_quota', 'collector_complete', 'time_budget', 'risk_budget'],
   });
 });
@@ -46,7 +42,7 @@ test('the standard detail comment window stays capped at 30 without limiting a s
   assert.equal(receipt.comments.expectedCount, 30);
   assert.equal(receipt.comments.uniqueCollectedCount, 30);
   assert.equal(receipt.comments.state, 'complete');
-  assert.equal(commentTaskInstruction('note_1', 0).target.commentScope, 'all_public_until_natural_end');
+  assert.equal(commentTaskInstruction('note_1', 0).commentScope, 'all_public_until_natural_end');
 });
 
 test('an explicit empty comment page counts as a completed batch target and remains resumable', () => {

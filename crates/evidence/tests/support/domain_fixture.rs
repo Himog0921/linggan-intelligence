@@ -272,7 +272,7 @@ pub async fn submit_package_for_target(
         None => quota,
     };
     let task = serde_json::json!({
-        "contractVersion":"linggan.producer.task-spec.v1","taskId":task_id,"source":"scheduled",
+        "contractVersion":"linggan.producer.task-spec.v2","taskId":task_id,"source":"scheduled",
         "platform":"xhs","pageType":"search_results","target":task_target,
         "capabilitiesRequested":[package_kind],"maximumQuota":quota,
         "expectedCount":expected_count,

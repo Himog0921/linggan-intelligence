@@ -39,7 +39,7 @@ test('one adapter uses the same bounded package shape for every retained collect
 
 test('scheduled page delivery preserves the exact leased TaskSpec while manual delivery still creates a manual task', () => {
   const scheduled = {
-    contractVersion: 'linggan.producer.task-spec.v1',
+    contractVersion: 'linggan.producer.task-spec.v2',
     taskId: '11111111-1111-4111-8111-111111111111',
     source: 'scheduled',
     platform: 'xhs',
@@ -122,7 +122,7 @@ test('profile-only author avatar uses the stable author target without inventing
   assert.equal(packageValue.records[0].sourceObject.type, 'author');
   assert.equal(Object.hasOwn(packageValue.records[0], 'contextContentExternalId'), false);
   assert.equal(
-    taskFor('xhs', 'media_slots', packageValue.coverage.target, { acquireMedia: 'bytes' }).pageType,
+    taskFor('xhs', 'media_slots', { authorExternalId: 'author-profile-1' }, { acquireMedia: 'bytes' }).pageType,
     'profile',
   );
 });
@@ -380,10 +380,10 @@ test('real xhs fallback comment identities stay in the right lane and bind to th
   };
   const instruction = commentTaskInstruction('note-real-shape', 30);
   const comments = packageComments({
-    platform: 'xhs', result: source, noteId: source.noteId, taskTarget: instruction.target,
+    platform: 'xhs', result: source, noteId: source.noteId,
   });
   const replies = packageReplies({
-    platform: 'xhs', result: source, noteId: source.noteId, taskTarget: instruction.target,
+    platform: 'xhs', result: source, noteId: source.noteId,
   });
   const commentTask = taskFor('xhs', 'comments', instruction.target, instruction);
   const replyTask = taskFor('xhs', 'replies', instruction.target, instruction);
@@ -402,10 +402,12 @@ test('real xhs fallback comment identities stay in the right lane and bind to th
   assert.equal(Object.hasOwn(replies.records[0].payload, 'replyToCommentId'), false);
   assert.equal(commentTask.maximumQuota, 30);
   assert.equal(replyTask.maximumQuota, 30);
-  assert.equal(comments.coverage.target.commentScope, instruction.target.commentScope);
-  assert.equal(comments.coverage.target.requestedCommentLimit, 30);
-  assert.equal(replies.coverage.target.commentScope, instruction.target.commentScope);
-  assert.equal(replies.coverage.target.requestedCommentLimit, 30);
+  assert.equal(commentTask.commentScope, instruction.commentScope);
+  assert.equal(commentTask.requestedCommentLimit, 30);
+  assert.equal(replyTask.commentScope, instruction.commentScope);
+  assert.equal(replyTask.requestedCommentLimit, 30);
+  assert.equal(comments.coverage.target.contentExternalId, replies.coverage.target.contentExternalId);
+  assert.equal(comments.coverage.target.commentCollection.requestedLimit, 30);
 });
 
 test('unlimited deep comments keep a real natural-end target without inventing a result quota', () => {
@@ -414,8 +416,8 @@ test('unlimited deep comments keep a real natural-end target without inventing a
   assert.equal(instruction.commentLimit, 'not_requested');
   assert.equal(instruction.maximumQuota, null);
   assert.equal(task.maximumQuota, null);
-  assert.equal(instruction.target.commentScope, 'all_public_until_natural_end');
-  assert.equal(Object.hasOwn(instruction.target, 'requestedCommentLimit'), false);
+  assert.equal(instruction.commentScope, 'all_public_until_natural_end');
+  assert.equal(Object.hasOwn(instruction, 'requestedCommentLimit'), false);
 });
 
 test('nested replies retain one exact parent identity for material admission', () => {

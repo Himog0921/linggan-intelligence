@@ -198,7 +198,7 @@ async fn creator_rule_queues_once_without_a_baseline_or_a_preassigned_station() 
                 scroll_rounds: None,
                 top_by_likes: None,
                 published_within_days: None,
-                task_contract_version: "linggan.producer.task-spec.v1".to_owned(),
+                task_contract_version: "linggan.producer.task-spec.v2".to_owned(),
             }),
         },
     )
@@ -2049,7 +2049,7 @@ async fn navigation_time_lane_identities_outlive_a_closed_lease_without_imperson
     let replacement_installation_ref = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO plugin_installation (installation_ref, install_key, plugin_version, capabilities) \
-         VALUES ($1, $2, '0.8.54', '[]'::jsonb)",
+         VALUES ($1, $2, '0.8.57', '[]'::jsonb)",
     )
     .bind(replacement_installation_ref)
     .bind(Uuid::new_v4().to_string())
@@ -2372,7 +2372,7 @@ async fn replacement_installation_releases_stale_work_instead_of_adopting_it() {
         &database,
         &InstallationCheckIn {
             install_key: &intermediate_install_key,
-            plugin_version: "0.8.47",
+            plugin_version: "0.8.57",
             browser_label: Some("intermediate fixture"),
             capabilities: serde_json::json!(["author_profile", "profile_discovery"]),
             selector_health: None,
@@ -2403,7 +2403,7 @@ async fn replacement_installation_releases_stale_work_instead_of_adopting_it() {
         &database,
         &InstallationCheckIn {
             install_key: &replacement_install_key,
-            plugin_version: "0.8.47",
+            plugin_version: "0.8.57",
             browser_label: Some("replacement fixture"),
             capabilities: serde_json::json!([
                 "author_profile",
@@ -4362,7 +4362,7 @@ async fn seed_creator_work_order(database: &Database) -> Fixture {
     sqlx::query(
         "INSERT INTO plugin_installation \
              (installation_ref, install_key, station_ref, claim_kind, claimed_at, plugin_version, capabilities) \
-         VALUES ($1, $2, $3, 'person', scope_001_now(), '0.8.47', \
+         VALUES ($1, $2, $3, 'person', scope_001_now(), '0.8.57', \
                  '[\"author_profile\",\"profile_discovery\",\"content_detail\",\"media_slots\",\"comments\",\"replies\"]'::jsonb)",
     )
     .bind(installation_ref)
@@ -4507,7 +4507,7 @@ async fn save_patrol_rule(
                 scroll_rounds: (target_kind == "keyword").then_some(3),
                 top_by_likes,
                 published_within_days: (target_kind == "keyword").then_some(7),
-                task_contract_version: "linggan.producer.task-spec.v1".to_owned(),
+                task_contract_version: "linggan.producer.task-spec.v2".to_owned(),
             }),
         },
     )
@@ -4703,7 +4703,7 @@ async fn submit_profile_discovery(
 ) {
     let task = parse_producer_task_spec(
         &serde_json::json!({
-            "contractVersion":"linggan.producer.task-spec.v1",
+            "contractVersion":"linggan.producer.task-spec.v2",
             "taskId":Uuid::new_v4(),
             "source":"manual",
             "platform":"xhs",
@@ -5011,7 +5011,7 @@ async fn execution_scene(database: &Database, task_id: Uuid, lease_ref: Uuid) ->
 fn manual_task() -> ProducerTaskSpec {
     parse_producer_task_spec(
         &serde_json::json!({
-            "contractVersion": "linggan.producer.task-spec.v1",
+            "contractVersion": "linggan.producer.task-spec.v2",
             "taskId": Uuid::new_v4(),
             "source": "manual",
             "platform": "xhs",

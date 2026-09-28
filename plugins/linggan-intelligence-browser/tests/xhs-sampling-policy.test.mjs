@@ -56,14 +56,14 @@ test('服务端的排序词翻成页面筛选值', () => {
     ['comprehensive', 'general'],
   ]) {
     assert.equal(
-      samplingFiltersFromTaskSpec({ target: { ranking } }).sortBasis,
+      samplingFiltersFromTaskSpec({ ranking }).sortBasis,
       sortBasis,
     );
   }
 });
 
 test('认不出来的排序不设筛选，让页面保持当前排序', () => {
-  const filters = samplingFiltersFromTaskSpec({ target: { ranking: 'by_vibes' } });
+  const filters = samplingFiltersFromTaskSpec({ ranking: 'by_vibes' });
   assert.equal(filters.sortBasis, undefined);
 });
 
@@ -73,7 +73,7 @@ test('没有口径的任务不产生任何筛选', () => {
 });
 
 test('天数向上取到不小于请求的那一档——宁可多采也不能漏采', () => {
-  const at = (days) => samplingFiltersFromTaskSpec({ target: { publishedWithinDays: days } }).publishTime;
+  const at = (days) => samplingFiltersFromTaskSpec({ publishedWithinDays: days }).publishTime;
   assert.equal(at(1), 'one_day');
   // 要 3 天却给「一天内」会漏掉第 2、3 天的内容；给「一周内」只是多采一些。
   assert.equal(at(3), 'one_week');

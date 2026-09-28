@@ -726,7 +726,7 @@ async fn credential_response_loss_rotation_and_activation_are_recoverable_and_ha
         &InstallationCheckIn {
             install_key: &install_key,
             installation_credential: None,
-            plugin_version: "0.8.47",
+            plugin_version: "0.8.57",
             browser_label: Some("credential-recovery"),
             capabilities: capabilities(),
             selector_health: None,
@@ -1083,7 +1083,7 @@ async fn check_in_selector_health(
         &InstallationCheckIn {
             install_key: &installation.install_key,
             installation_credential: Some(&installation.secret),
-            plugin_version: "0.8.54",
+            plugin_version: "0.8.57",
             browser_label: Some("Chrome"),
             capabilities: capabilities(),
             selector_health: Some(selector_health),
@@ -1148,7 +1148,7 @@ async fn claim_pending_installation(
         &InstallationCheckIn {
             install_key: &install_key,
             installation_credential: None,
-            plugin_version: "0.8.47",
+            plugin_version: "0.8.57",
             browser_label: Some(label),
             capabilities: capabilities(),
             selector_health: None,
@@ -1400,7 +1400,7 @@ fn save_rule(
             scroll_rounds: None,
             top_by_likes: None,
             published_within_days: None,
-            task_contract_version: "linggan.producer.task-spec.v1".to_owned(),
+            task_contract_version: "linggan.producer.task-spec.v2".to_owned(),
         }),
     }
 }

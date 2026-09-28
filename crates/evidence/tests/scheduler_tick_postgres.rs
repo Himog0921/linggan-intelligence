@@ -413,7 +413,7 @@ async fn seed_a_due_patrol_rule(database: &Database) -> Uuid {
                 scroll_rounds: None,
                 top_by_likes: None,
                 published_within_days: None,
-                task_contract_version: "linggan.producer.task-spec.v1".to_owned(),
+                task_contract_version: "linggan.producer.task-spec.v2".to_owned(),
             }),
         },
     )

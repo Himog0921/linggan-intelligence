@@ -1,5 +1,5 @@
 export const LINGGAN_LOCAL_ORIGIN = 'http://localhost:3000';
-const TASK_SPEC_VERSION = 'linggan.producer.task-spec.v1';
+const TASK_SPEC_VERSION = 'linggan.producer.task-spec.v2';
 const ATTEMPT_VERSION = 'linggan.producer.attempt.v1';
 const SUBMISSION_VERSION = 'linggan.producer.capture-package.v1';
 const FULL_LOCAL_PRODUCER_READINESS = Object.freeze({
@@ -823,7 +823,7 @@ export async function claimLingganMediaAcquisition({
 export function createManualTaskSpec({ taskId = crypto.randomUUID() } = {}) {
   return createTaskSpec({
     taskId, source: 'manual', platform: 'xhs', pageType: 'search_results',
-    target: { query: '__manual_placeholder__', surface: 'current_visible_search_surface' }, capabilitiesRequested: ['discovery_search'],
+    target: { query: '__manual_placeholder__' }, surface: 'current_visible_search_surface', capabilitiesRequested: ['discovery_search'],
     maximumQuota: 20, commentLimit: 'not_requested', acquireMedia: 'not_requested',
     riskPolicy: 'local_trusted_user_initiated', stopConditions: ['current_surface_read_once', 'maximum_quota'],
   });
@@ -833,14 +833,24 @@ export function createTaskSpec({
   taskId = crypto.randomUUID(), source = 'manual', platform, pageType, target,
   capabilitiesRequested, maximumQuota = null, commentLimit = 'not_requested',
   acquireMedia = 'not_requested', riskPolicy = 'local_trusted_user_initiated', stopConditions = [],
+  replyExpandLimit, ranking, scrollRounds, topByLikes, publishedWithinDays,
+  commentScope, requestedCommentLimit, surface,
 } = {}) {
   const value = {
-    contractVersion: 'linggan.producer.task-spec.v1', taskId, source, platform, pageType,
+    contractVersion: TASK_SPEC_VERSION, taskId, source, platform, pageType,
     target: target && typeof target === 'object' && !Array.isArray(target) ? target : {},
     capabilitiesRequested: Array.isArray(capabilitiesRequested) ? capabilitiesRequested : [],
     maximumQuota: Number.isInteger(maximumQuota) && maximumQuota > 0 ? maximumQuota : null,
     commentLimit, acquireMedia, riskPolicy,
     stopConditions: Array.isArray(stopConditions) ? stopConditions : [],
+    ...(replyExpandLimit === undefined ? {} : { replyExpandLimit }),
+    ...(ranking === undefined ? {} : { ranking }),
+    ...(scrollRounds === undefined ? {} : { scrollRounds }),
+    ...(topByLikes === undefined ? {} : { topByLikes }),
+    ...(publishedWithinDays === undefined ? {} : { publishedWithinDays }),
+    ...(commentScope === undefined ? {} : { commentScope }),
+    ...(requestedCommentLimit === undefined ? {} : { requestedCommentLimit }),
+    ...(surface === undefined ? {} : { surface }),
   };
   validateTaskSpec(value);
   return value;
@@ -878,6 +888,37 @@ export function validateTaskSpec(spec = {}) {
     if (hasContent === hasAuthor) throw new Error('task_spec_media_slots_target_invalid');
   }
   if (capability === 'batch_checkpoint') requireText('taskType');
+  const allowedTargetKeys = capability === 'discovery_search' ? ['query']
+    : ['profile_discovery', 'author_profile'].includes(capability) ? ['authorExternalId']
+      : capability === 'media_slots' ? [target.contentExternalId ? 'contentExternalId' : 'authorExternalId']
+        : capability === 'batch_checkpoint' ? ['taskType'] : ['contentExternalId'];
+  if (Object.keys(target).length !== 1 || !allowedTargetKeys.includes(Object.keys(target)[0])) {
+    throw new Error('task_spec_target_identity_only');
+  }
+  const searchInstruction = ['ranking', 'scrollRounds', 'topByLikes', 'publishedWithinDays'].some((key) => spec[key] !== undefined);
+  const discussionInstruction = ['commentScope', 'requestedCommentLimit'].some((key) => spec[key] !== undefined);
+  if ((searchInstruction && capability !== 'discovery_search')
+    || (discussionInstruction && !['comments', 'replies'].includes(capability))
+    || (spec.replyExpandLimit !== undefined && capability !== 'replies')
+    || (spec.surface !== undefined && !['discovery_search', 'profile_discovery'].includes(capability))) {
+    throw new Error('task_spec_execution_capability_mismatch');
+  }
+  if ((capability === 'replies' && spec.source === 'scheduled' && spec.replyExpandLimit === undefined)
+    || (spec.replyExpandLimit !== undefined && (!Number.isInteger(spec.replyExpandLimit)
+      || spec.replyExpandLimit <= 0 || spec.replyExpandLimit > 0xffffffff))) {
+    throw new Error('task_spec_reply_expand_limit_invalid');
+  }
+  for (const key of ['scrollRounds', 'topByLikes', 'publishedWithinDays', 'requestedCommentLimit']) {
+    if (spec[key] !== undefined && (!Number.isInteger(spec[key]) || spec[key] <= 0 || spec[key] > 0xffffffff)) {
+      throw new Error(`task_spec_${key}_invalid`);
+    }
+  }
+  for (const key of ['ranking', 'commentScope', 'surface']) {
+    if (spec[key] !== undefined && (typeof spec[key] !== 'string' || !spec[key].trim())) throw new Error(`task_spec_${key}_invalid`);
+  }
+  if (spec.requestedCommentLimit !== undefined && spec.requestedCommentLimit !== spec.commentLimit) {
+    throw new Error('task_spec_requested_comment_limit_mismatch');
+  }
   if (!(spec.commentLimit === 'not_requested' || (Number.isInteger(spec.commentLimit) && spec.commentLimit > 0))) throw new Error('task_spec_comment_limit_invalid');
   if (!['not_requested', 'slots', 'bytes'].includes(spec.acquireMedia)) throw new Error('task_spec_acquire_media_invalid');
   // 风险策略与来源必须配对，与服务端同一条规则：
@@ -897,12 +938,8 @@ export function createLocalAttempt({ producerInstanceId, taskId, attemptId = cry
   return { contractVersion: ATTEMPT_VERSION, producerInstanceId, taskId, attemptId };
 }
 
-export function createLocalSubmission({ producerInstanceId, taskId, attemptId, capturePackage, discoveryPackage, submissionId = crypto.randomUUID() } = {}) {
-  // `discoveryPackage` is deliberately accepted only as a compatibility input while callers move
-  // to the typed shared runtime. It is wrapped as an explicit discovery package, never silently
-  // treated as a completed detail/comment/media capture.
-  const packageValue = capturePackage || discoveryPackage;
-  return { contractVersion: SUBMISSION_VERSION, producerInstanceId, taskId, attemptId, submissionId, capturePackage: packageValue };
+export function createLocalSubmission({ producerInstanceId, taskId, attemptId, capturePackage, submissionId = crypto.randomUUID() } = {}) {
+  return { contractVersion: SUBMISSION_VERSION, producerInstanceId, taskId, attemptId, submissionId, capturePackage };
 }
 
 export async function localPost(path, body, fetchImpl = globalThis.fetch) {

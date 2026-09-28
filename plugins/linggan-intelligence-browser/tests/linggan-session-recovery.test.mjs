@@ -21,7 +21,8 @@ const lanes = ['content_detail', 'media_slots', 'comments', 'replies'];
 function spec(capability, index = lanes.indexOf(capability)) {
   return createTaskSpec({ taskId: `20000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
     source: 'scheduled', platform: 'xhs', pageType: 'note_detail', target: { contentExternalId: 'synthetic-note' },
-    capabilitiesRequested: [capability], maximumQuota: 1, riskPolicy: 'server_authorized_leased', stopConditions: ['maximum_quota'] });
+    capabilitiesRequested: [capability], maximumQuota: 1, riskPolicy: 'server_authorized_leased', stopConditions: ['maximum_quota'],
+    ...(capability === 'replies' ? { replyExpandLimit: 2 } : {}) });
 }
 function database(name) {
   const db = new Dexie(name);

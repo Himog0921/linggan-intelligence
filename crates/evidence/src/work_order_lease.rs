@@ -796,34 +796,8 @@ async fn load_subject(
 /// 口径缺失的项一概不写进去，让插件按自己的默认走——编一个数会让回执里出现一份
 /// 从未被约定过的口径。
 fn keyword_search_target(subject: &LeaseSubject) -> Value {
-    let mut target = serde_json::Map::new();
-    target.insert(
-        "query".to_owned(),
-        json!(search_term(
-            &subject.identity_key,
-            subject.sampling.ranking.as_deref()
-        )),
-    );
-    for (key, value) in sampling_directives(&subject.sampling) {
-        if let Some(value) = value {
-            target.insert(key.to_owned(), value);
-        }
-    }
-    Value::Object(target)
+    json!({ "query": search_term(&subject.identity_key, subject.sampling.ranking.as_deref()) })
 }
-
-/// 关键词任务 target 里属于**采样口径**的键——即「怎么取」，而不是「取谁」。
-///
-/// 这份名单是唯一真源：[`keyword_search_target`] 按它下发，
-/// [`crate::material_contract_validation::task_package_binding_valid`] 按它豁免。
-/// 加新口径时改这一处，两边同时生效；`sampling_directives_are_all_declared_exempt`
-/// 会在漏改时变红。
-pub(crate) const SAMPLING_DIRECTIVE_KEYS: [&str; 4] = [
-    "ranking",
-    "scrollRounds",
-    "topByLikes",
-    "publishedWithinDays",
-];
 
 /// 口径缺失的项返回 `None`，调用方不写进去，让插件按自己的默认走。
 fn sampling_directives(sampling: &SamplingPolicy) -> [(&'static str, Option<Value>); 4] {
@@ -847,6 +821,16 @@ fn sampling_directives(sampling: &SamplingPolicy) -> [(&'static str, Option<Valu
     ]
 }
 
+fn keyword_search_execution(subject: &LeaseSubject) -> Value {
+    let mut fields = serde_json::Map::new();
+    for (key, value) in sampling_directives(&subject.sampling) {
+        if let Some(value) = value {
+            fields.insert(key.to_owned(), value);
+        }
+    }
+    Value::Object(fields)
+}
+
 /// 首次建档要下发给插件的东西。
 ///
 /// 与巡检口径的区别只有三处，但每一处都是建档之所以是建档的原因：
@@ -859,11 +843,7 @@ fn sampling_directives(sampling: &SamplingPolicy) -> [(&'static str, Option<Valu
 /// **不设取前 N 是有意的**：截断只会把第 N+1 名之后的永久扔掉，而「点赞最高的前 100」
 /// 是读取时按点赞排序就能得到的事，不必在采集时先砍一刀。
 fn keyword_archive_target(subject: &LeaseSubject) -> Value {
-    json!({
-        "query": search_term(&subject.identity_key, Some(ARCHIVE_RANKING)),
-        "ranking": ARCHIVE_RANKING,
-        "scrollRounds": ARCHIVE_SCROLL_ROUNDS,
-    })
+    json!({ "query": search_term(&subject.identity_key, Some(ARCHIVE_RANKING)) })
 }
 
 /// 建档按点赞排序。这是建档的目的，不是可配项。
@@ -1129,6 +1109,7 @@ fn expand_into_tasks(
                 subject,
                 "content_detail",
                 target.clone(),
+                json!({}),
                 1,
                 1,
                 json!("not_requested"),
@@ -1139,6 +1120,7 @@ fn expand_into_tasks(
                     subject,
                     "media_slots",
                     target.clone(),
+                    json!({}),
                     1,
                     1,
                     json!("not_requested"),
@@ -1152,6 +1134,7 @@ fn expand_into_tasks(
                     subject,
                     "comments",
                     target.clone(),
+                    json!({}),
                     material.comment_limit,
                     material.comment_limit,
                     json!(material.comment_limit),
@@ -1159,14 +1142,11 @@ fn expand_into_tasks(
                 )?);
             }
             if material.reply_expand_limit > 0 {
-                let reply_target = json!({
-                    "contentExternalId": material.content_external_id,
-                    "replyExpandLimit": material.reply_expand_limit,
-                });
                 tasks.push(build_task_spec(
                     subject,
                     "replies",
-                    reply_target,
+                    target.clone(),
+                    json!({ "replyExpandLimit": material.reply_expand_limit }),
                     material.comment_limit,
                     material.comment_limit,
                     json!(material.comment_limit),
@@ -1177,21 +1157,23 @@ fn expand_into_tasks(
         return Ok(tasks);
     }
 
-    // 每一步是（能力, 目标, 配额, **这一轮该拿回多少**）。四元组里最后一个数只有关键词巡查
+    // 每一步是（能力, 身份, 执行指令, 配额, **这一轮该拿回多少**）。最后一个数只有关键词巡查
     // 与配额不同，其余臂两者相同——让每一步自己把话说清楚，好过一个藏在判据里的推算。
-    type Step = (&'static str, Value, i32, i32);
+    type Step = (&'static str, Value, Value, i32, i32);
     let steps: Vec<Step> = match (subject.target_kind.as_str(), subject.lane.as_str()) {
         ("creator", "deep_archive") => vec![
             // 作者档案只取一份，配额固定为 1，不受工单篇数上限影响。
             (
                 "author_profile",
                 json!({ "authorExternalId": subject.identity_key }),
+                json!({}),
                 1,
                 1,
             ),
             (
                 "profile_discovery",
                 json!({ "authorExternalId": subject.identity_key }),
+                json!({}),
                 subject.max_works,
                 subject.max_works,
             ),
@@ -1203,12 +1185,14 @@ fn expand_into_tasks(
             (
                 "author_profile",
                 json!({ "authorExternalId": subject.identity_key }),
+                json!({}),
                 1,
                 1,
             ),
             (
                 "profile_discovery",
                 json!({ "authorExternalId": subject.identity_key }),
+                json!({}),
                 subject.max_works.min(30),
                 subject.max_works.min(30),
             ),
@@ -1216,6 +1200,7 @@ fn expand_into_tasks(
         ("creator", _) => vec![(
             "profile_discovery",
             json!({ "authorExternalId": subject.identity_key }),
+            json!({}),
             subject.max_works,
             subject.max_works,
         )],
@@ -1230,6 +1215,7 @@ fn expand_into_tasks(
         ("keyword", "deep_archive") => vec![(
             "discovery_search",
             keyword_archive_target(subject),
+            json!({ "ranking": ARCHIVE_RANKING, "scrollRounds": ARCHIVE_SCROLL_ROUNDS }),
             subject.max_works,
             // 建档不设取前 N：能取多少取多少，所以「该拿回多少」就是这一单的篇数配额本身。
             subject.max_works,
@@ -1237,6 +1223,7 @@ fn expand_into_tasks(
         _ => vec![(
             "discovery_search",
             keyword_search_target(subject),
+            keyword_search_execution(subject),
             subject.max_works,
             keyword_patrol_expected_count(subject),
         )],
@@ -1244,11 +1231,12 @@ fn expand_into_tasks(
 
     steps
         .into_iter()
-        .map(|(capability, target, quota, expected_count)| {
+        .map(|(capability, target, execution, quota, expected_count)| {
             build_task_spec(
                 subject,
                 capability,
                 target,
+                execution,
                 quota,
                 expected_count,
                 json!("not_requested"),
@@ -1282,6 +1270,7 @@ fn build_task_spec(
     subject: &LeaseSubject,
     capability: &str,
     target: Value,
+    execution: Value,
     quota: i32,
     expected_count: i32,
     comment_limit: Value,
@@ -1292,7 +1281,7 @@ fn build_task_spec(
         "discovery_search" => "search_results",
         _ => "note_detail",
     };
-    let raw = json!({
+    let mut raw = json!({
         "contractVersion": PRODUCER_TASK_SPEC_VERSION,
         "taskId": Uuid::new_v4(),
         // 服务端派发。它与 riskPolicy 必须配对，插件与服务端同一条规则。
@@ -1313,6 +1302,14 @@ fn build_task_spec(
         // time_budget 就是租约：租约到期即止损，执行端不得自行放宽。
         "stopConditions": ["maximum_quota", "surface_ended", "time_budget"],
     });
+    let fields = execution.as_object().ok_or(LeaseError::TaskSpecInvalid(
+        "execution_fields_invalid".into(),
+    ))?;
+    for (key, value) in fields {
+        raw.as_object_mut()
+            .expect("task spec is an object")
+            .insert(key.clone(), value.clone());
+    }
     parse_producer_task_spec(&raw.to_string())
         .map_err(|error| LeaseError::TaskSpecInvalid(error.to_string()))
 }
@@ -1410,7 +1407,7 @@ fn freeze_capture_identity(subject: &LeaseSubject) -> Value {
 mod tests {
     use super::{LeaseSubject, MaterialTarget, expand_into_tasks};
     use linggan_contracts::ProducerTaskSpec;
-    use serde_json::Value;
+    use serde_json::{Value, json};
     use uuid::Uuid;
 
     fn subject() -> LeaseSubject {
@@ -1466,7 +1463,11 @@ mod tests {
                     .is_some_and(|values| values.len() == 1)
         }));
         assert_eq!(tasks[2].raw()["commentLimit"], 20);
-        assert_eq!(tasks[3].raw()["target"]["replyExpandLimit"], 2);
+        assert_eq!(tasks[3].raw()["replyExpandLimit"], 2);
+        assert_eq!(
+            tasks[3].raw()["target"],
+            json!({"contentExternalId": "note-fixture"})
+        );
     }
 
     #[test]
@@ -1590,7 +1591,7 @@ mod keyword_search_target_tests {
     /// 此前 `query` 传的是身份键原文，插件拿它根本搜不出东西。
     #[test]
     fn the_query_carries_the_term_alone_not_the_identity_key() {
-        let target = keyword_search_target(&subject(
+        let scope = subject(
             "考研自习::most_liked",
             SamplingPolicy {
                 ranking: Some("most_liked".to_owned()),
@@ -1598,29 +1599,27 @@ mod keyword_search_target_tests {
                 top_by_likes: Some(20),
                 published_within_days: Some(7),
             },
-        ));
+        );
+        let target = keyword_search_target(&scope);
+        let execution = keyword_search_execution(&scope);
         assert_eq!(target["query"], json!("考研自习"));
-        assert_eq!(target["ranking"], json!("most_liked"));
-        assert_eq!(target["scrollRounds"], json!(3));
-        assert_eq!(target["topByLikes"], json!(20));
-        assert_eq!(target["publishedWithinDays"], json!(7));
+        assert_eq!(target.as_object().map(|fields| fields.len()), Some(1));
+        assert_eq!(execution["ranking"], json!("most_liked"));
+        assert_eq!(execution["scrollRounds"], json!(3));
+        assert_eq!(execution["topByLikes"], json!(20));
+        assert_eq!(execution["publishedWithinDays"], json!(7));
     }
 
     /// 没有口径就不写那几项，让插件按自己的默认走——编一个数会让回执里出现一份
     /// 从未被约定过的口径。`query` 仍必须是能搜的词。
     #[test]
     fn a_rule_without_a_policy_only_sends_the_term() {
-        let target =
-            keyword_search_target(&subject("adhd::comprehensive", SamplingPolicy::default()));
+        let scope = subject("adhd::comprehensive", SamplingPolicy::default());
+        let target = keyword_search_target(&scope);
+        let execution = keyword_search_execution(&scope);
         assert_eq!(target["query"], json!("adhd"));
-        for absent in [
-            "ranking",
-            "scrollRounds",
-            "topByLikes",
-            "publishedWithinDays",
-        ] {
-            assert!(target.get(absent).is_none(), "{absent} 不该被编出来");
-        }
+        assert_eq!(target.as_object().map(|fields| fields.len()), Some(1));
+        assert_eq!(execution, json!({}));
     }
 
     /// 建档与巡检读的必须是两套口径。共用一份时，走了建档通道拿回来的仍然是最近一周的
@@ -1633,23 +1632,26 @@ mod keyword_search_target_tests {
             top_by_likes: Some(20),
             published_within_days: Some(7),
         };
-        let target = keyword_archive_target(&subject("考研自习::most_liked", patrol_policy));
+        let mut scope = subject("考研自习::most_liked", patrol_policy);
+        scope.lane = "deep_archive".to_owned();
+        let task = expand_into_tasks(&scope, &[]).unwrap().remove(0);
+        let target = &task.raw()["target"];
 
         assert_eq!(target["query"], json!("考研自习"));
-        assert_eq!(target["ranking"], json!(ARCHIVE_RANKING));
+        assert_eq!(task.raw()["ranking"], json!(ARCHIVE_RANKING));
         // 建档要历史全量：**一天都不能限**，否则挖不到这个词真正的高赞。
         assert!(
-            target.get("publishedWithinDays").is_none(),
+            task.raw().get("publishedWithinDays").is_none(),
             "建档不限发布时间"
         );
         // 也不截断：截断只会把第 N+1 名之后的永久扔掉，而「前 100」是读取时排序的事。
-        assert!(target.get("topByLikes").is_none(), "建档不设取前 N");
+        assert!(task.raw().get("topByLikes").is_none(), "建档不设取前 N");
     }
 
     /// 巡检那一路照旧读规则口径，不受建档改动影响。
     #[test]
     fn patrolling_a_keyword_still_follows_the_rule() {
-        let target = keyword_search_target(&subject(
+        let scope = subject(
             "考研自习::most_liked",
             SamplingPolicy {
                 ranking: Some("most_liked".to_owned()),
@@ -1657,9 +1659,11 @@ mod keyword_search_target_tests {
                 top_by_likes: Some(20),
                 published_within_days: Some(7),
             },
-        ));
-        assert_eq!(target["publishedWithinDays"], json!(7));
-        assert_eq!(target["topByLikes"], json!(20));
+        );
+        let task = expand_into_tasks(&scope, &[]).unwrap().remove(0);
+        assert_eq!(task.raw()["target"], json!({"query": "考研自习"}));
+        assert_eq!(task.raw()["publishedWithinDays"], json!(7));
+        assert_eq!(task.raw()["topByLikes"], json!(20));
     }
 
     /// **这一轮该拿回多少**在派发时算一次，写进任务说明书；判据只读那个数。
@@ -1692,10 +1696,9 @@ mod keyword_search_target_tests {
         assert_eq!(expected_count(30, None), json!(30));
     }
 
-    /// 名单漏改会让被漏掉的那个口径重新参与身份比对，而插件不会回显它——
-    /// 于是那一类关键词采集重新整包隔离，且没有任何报错。这条测试是那件事的唯一防线。
+    /// Every sampling instruction belongs on the task, never in its identity target.
     #[test]
-    fn sampling_directives_are_all_declared_exempt() {
+    fn sampling_directives_never_enter_target_identity() {
         let sampling = SamplingPolicy {
             ranking: Some("most_liked".to_owned()),
             scroll_rounds: Some(3),
@@ -1709,23 +1712,22 @@ mod keyword_search_target_tests {
                 key
             })
             .collect();
-        assert_eq!(emitted, SAMPLING_DIRECTIVE_KEYS);
-
-        let target = keyword_search_target(&subject("考研自习::most_liked", sampling));
-        let mut carried: Vec<&str> = target
-            .as_object()
-            .expect("target is an object")
-            .keys()
-            .map(String::as_str)
-            .filter(|key| *key != "query")
-            .collect();
-        carried.sort_unstable();
-        let mut exempt = SAMPLING_DIRECTIVE_KEYS.to_vec();
-        exempt.sort_unstable();
         assert_eq!(
-            carried, exempt,
-            "下发的口径键必须与豁免名单逐项一致，否则关键词采集会被整包隔离"
+            emitted,
+            [
+                "ranking",
+                "scrollRounds",
+                "topByLikes",
+                "publishedWithinDays"
+            ]
         );
+        let task = expand_into_tasks(&subject("考研自习::most_liked", sampling), &[])
+            .unwrap()
+            .remove(0);
+        assert_eq!(task.raw()["target"], json!({"query": "考研自习"}));
+        for key in emitted {
+            assert!(task.raw().get(key).is_some());
+        }
     }
 
     /// 词里含 `::` 时从右边切，排序不含 `::`，所以切得对。

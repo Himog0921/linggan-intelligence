@@ -75,6 +75,7 @@ cargo test -p linggan-evidence --test local_discovery_postgres --locked -- --ign
 cargo test -p linggan-evidence --test local_producer_postgres --locked -- --ignored
 cargo test -p linggan-evidence --test content_reobservation_postgres --locked -- --ignored
 cargo test -p linggan-evidence --test material_projection_postgres --locked -- --ignored
+cargo test -p linggan-evidence --test reply_requalification_postgres --locked -- --ignored
 cargo test -p linggan-evidence --test domain_unification_postgres --locked -- --ignored
 cargo test -p linggan-evidence --test domain_unification_cleanup_postgres --locked -- --ignored
 cargo test -p linggan-evidence --test keyword_archive_postgres --locked -- --ignored
