@@ -90,12 +90,18 @@ mod title_tests {
     #[test]
     fn catalog_titles_reuse_current_and_the_single_cover_selector() {
         let sql = work_display_title_ctes(true).unwrap();
-        let native = crate::material_query_sql::work_resource_currents_sql()
-            .replacen("$1::uuid[]", "ARRAY(SELECT work_ref FROM cs_title_scope)", 1);
+        let native = crate::material_query_sql::work_resource_currents_sql().replacen(
+            "$1::uuid[]",
+            "ARRAY(SELECT work_ref FROM cs_title_scope)",
+            1,
+        );
         assert!(sql.contains(&native));
         assert!(sql.contains(&COVER_HEADLINE_SQL.replacen(" = $1", " = current.public_ref", 1)));
         assert!(!sql.contains("$1::uuid[]"));
-        assert!(include_str!("material_projection.rs").contains("sqlx::query(crate::work_resource_read::COVER_HEADLINE_SQL)"));
+        assert!(
+            include_str!("material_projection.rs")
+                .contains("sqlx::query(crate::work_resource_read::COVER_HEADLINE_SQL)")
+        );
     }
 
     #[test]
@@ -108,12 +114,30 @@ mod title_tests {
 
     #[test]
     fn cover_headline_requires_live_owned_qualified_media_not_raw_ocr() {
-        for required in ["origin.content_public_ref = $1", "display_ordinal BETWEEN 1 AND 3",
-            "retired.retired_job_ref", "WITHDRAWN_OR_RESTRICTED", "= 'succeeded'",
-            "package.accepted_at <= $2", "result.layering_ref DESC"] {
+        for required in [
+            "origin.content_public_ref = $1",
+            "display_ordinal BETWEEN 1 AND 3",
+            "retired.retired_job_ref",
+            "WITHDRAWN_OR_RESTRICTED",
+            "= 'succeeded'",
+            "package.accepted_at <= $2",
+            "result.layering_ref DESC",
+        ] {
             assert!(COVER_HEADLINE_SQL.contains(required), "missing {required}");
         }
         assert!(!COVER_HEADLINE_SQL.contains("text_content"));
         assert!(!COVER_HEADLINE_SQL.contains("image_substantive_text"));
+    }
+
+    #[test]
+    fn cover_headline_lookup_starts_from_the_selected_works_media_origins() {
+        assert!(COVER_HEADLINE_SQL.contains("WITH current_origin AS MATERIALIZED"));
+        assert!(COVER_HEADLINE_SQL.contains("FROM current_origin origin"));
+        assert!(
+            COVER_HEADLINE_SQL.contains(
+                "JOIN linggan_media_processing_job job ON job.slot_key = origin.slot_key"
+            )
+        );
+        assert!(!COVER_HEADLINE_SQL.contains("JOIN LATERAL"));
     }
 }

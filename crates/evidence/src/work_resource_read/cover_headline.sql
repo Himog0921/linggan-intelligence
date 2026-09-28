@@ -1,19 +1,20 @@
 -- Shared cover-headline selector. $1 is the work UUID; $2 is the material cutoff.
--- Used by the existing Evidence renderer and the set-based study work catalog.
-SELECT result.cover_headline, origin.display_ordinal, job.slot_key, layout.layout_ref
-FROM linggan_media_ocr_layering_result result
-JOIN linggan_media_ocr_layout layout USING (layout_ref)
-JOIN linggan_media_derivative derivative ON derivative.derivative_ref = layout.ocr_derivative_ref
-JOIN linggan_media_processing_job job ON job.job_ref = derivative.job_ref
-JOIN LATERAL (
-    SELECT origin.purpose, origin.display_ordinal
+-- Start from this work's accepted media origins so one title lookup does not scan every OCR job.
+WITH current_origin AS MATERIALIZED (
+    SELECT DISTINCT ON (origin.slot_key)
+           origin.slot_key, origin.purpose, origin.display_ordinal
     FROM linggan_material_media_origin origin
     JOIN linggan_runtime_capture_package package ON package.package_ref = origin.package_ref
-    WHERE origin.slot_key = job.slot_key AND origin.content_public_ref = $1
+    WHERE origin.content_public_ref = $1
       AND origin.created_at <= $2::timestamptz AND package.accepted_at <= $2::timestamptz
-    ORDER BY origin.created_at DESC, origin.package_ref DESC
-    LIMIT 1
-) origin ON true
+    ORDER BY origin.slot_key, origin.created_at DESC, origin.package_ref DESC
+)
+SELECT result.cover_headline, origin.display_ordinal, job.slot_key, layout.layout_ref
+FROM current_origin origin
+JOIN linggan_media_processing_job job ON job.slot_key = origin.slot_key
+JOIN linggan_media_derivative derivative ON derivative.job_ref = job.job_ref
+JOIN linggan_media_ocr_layout layout ON layout.ocr_derivative_ref = derivative.derivative_ref
+JOIN linggan_media_ocr_layering_result result USING (layout_ref)
 WHERE result.state IN ('ACCEPTED', 'PARTIAL')
   AND NULLIF(btrim(result.cover_headline), '') IS NOT NULL
   AND job.processor_kind = 'image_ocr'

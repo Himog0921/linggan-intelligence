@@ -80,6 +80,7 @@ def run_synthetic() -> None:
                         {
                             "policyRef": OLD_POLICY_REF,
                             "methodName": "历史默认方法",
+                            "defaults": {"commentBudget": 100, "contextCharacterBudget": 6000},
                             "recordingState": "legacy_unrecorded",
                             "isActive": state["active_policy"] == OLD_POLICY_REF,
                         }
@@ -91,6 +92,7 @@ def run_synthetic() -> None:
                     {
                         "policyRef": NEW_POLICY_REF,
                         "methodName": "最近记录方法",
+                        "defaults": {"commentBudget": 100, "contextCharacterBudget": 6000},
                         "recordingState": "recorded",
                         "isActive": state["active_policy"] == NEW_POLICY_REF,
                     },
@@ -98,6 +100,7 @@ def run_synthetic() -> None:
                         {
                             "policyRef": f"00000000-0000-4000-8000-{index:012d}",
                             "methodName": f"记录方法 {index}",
+                            "defaults": {"commentBudget": 100, "contextCharacterBudget": 6000},
                             "recordingState": "recorded",
                             "isActive": False,
                         }
@@ -111,6 +114,7 @@ def run_synthetic() -> None:
                 {
                     "policyRef": OLD_POLICY_REF,
                     "methodName": "原默认方法",
+                    "defaults": {"commentBudget": 100, "contextCharacterBudget": 6000},
                     "recordingState": "recorded",
                     "isActive": state["active_policy"] == OLD_POLICY_REF,
                 },
@@ -119,6 +123,7 @@ def run_synthetic() -> None:
                         {
                             "policyRef": NEW_POLICY_REF,
                             "methodName": "回归验收方法",
+                            "defaults": {"commentBudget": 100, "contextCharacterBudget": 6000},
                             "recordingState": "recorded",
                             "isActive": state["active_policy"] == NEW_POLICY_REF,
                         }
@@ -205,6 +210,25 @@ def run_synthetic() -> None:
             }
         elif request.method == "GET" and path == "policies":
             response = policies(query.get("cursor", [None])[0])
+        elif request.method == "GET" and path == f"policies/{OLD_POLICY_REF}":
+            response = {
+                "policy": {
+                    "policyRef": OLD_POLICY_REF,
+                    "methodName": "原默认方法",
+                    "defaults": {"commentBudget": 100, "contextCharacterBudget": 6000},
+                    "methodManifest": {
+                        "modelConfigRef": "00000000-0000-4000-8000-000000000006",
+                        "stages": {
+                            stage: {
+                                "systemInstruction": (
+                                    "基础研究规则\n<stage-instructions>\n原有补充说明\n</stage-instructions>"
+                                )
+                            }
+                            for stage in ("semantic", "resolution", "pair")
+                        },
+                    },
+                }
+            }
         elif request.method == "GET" and path == "runs":
             response = {"runs": [run_record()] if state["created"] else []}
         elif request.method == "GET" and path == "overview":
@@ -267,17 +291,20 @@ def run_synthetic() -> None:
             page.locator(f"#work-{WORK_REF}").wait_for(state="visible")
             page.locator(f"#study-policy option[value='{OLD_POLICY_REF}']").wait_for(state="attached")
 
+            page.get_by_role("button", name="编辑方法").click()
+            page.locator("#method-name").wait_for(state="visible")
             page.locator("#method-name").fill("回归验收方法")
             page.locator("#stage-semantic").fill("只用于隔离浏览器回归")
             page.locator("#save-policy").click()
-            page.get_by_text("已保存不可变方法版本", exact=False).wait_for()
+            page.get_by_text("已保存并选中新方法版本", exact=False).wait_for()
+            assert page.locator("#policy-form").is_hidden()
             page.locator("#study-policy").select_option(NEW_POLICY_REF)
             page.locator("#activate-policy").click()
             page.get_by_text("已将所选方法设为当前领域默认版本。", exact=True).wait_for()
 
             page.locator(f"#work-{WORK_REF}").check()
-            page.locator("#comment-budget").fill("2")
-            page.locator("#context-character-budget").fill("3500")
+            page.locator("#run-comment-budget").fill("2")
+            page.locator("#run-context-character-budget").fill("3500")
             page.locator("#token-budget").fill("4096")
             page.locator("#preview-run").click()
             page.get_by_text("预计创建 2 条目标", exact=False).wait_for()
@@ -431,11 +458,14 @@ def run_live_api(
         page.locator(f"#study-policy option[value='{existing_policy_ref}']").wait_for(state="attached")
         assert page.locator("#study-policy").input_value() == existing_policy_ref
 
+        page.get_by_role("button", name="编辑方法").click()
+        page.locator("#method-name").wait_for(state="visible")
         page.locator("#method-name").fill("隔离浏览器方法")
         page.locator("#stage-semantic").fill("仅用于真实 Axum 与隔离 PostgreSQL 浏览器回归")
         page.locator("#save-policy").click()
         try:
-            page.get_by_text("已保存不可变方法版本", exact=False).wait_for()
+            page.get_by_text("已保存并选中新方法版本", exact=False).wait_for()
+            assert page.locator("#policy-form").is_hidden()
         except Exception as error:
             raise AssertionError(
                 "Method creation did not receive its success feedback; "
@@ -473,8 +503,8 @@ def run_live_api(
         page.get_by_text("已将所选方法设为当前领域默认版本。", exact=True).wait_for()
 
         page.locator(f"#work-{work_ref}").check()
-        page.locator("#comment-budget").fill("2")
-        page.locator("#context-character-budget").fill("3500")
+        page.locator("#run-comment-budget").fill("2")
+        page.locator("#run-context-character-budget").fill("3500")
         page.locator("#token-budget").fill("4096")
         page.locator("#preview-run").click()
         page.get_by_text("预计创建 2 条目标", exact=False).wait_for()

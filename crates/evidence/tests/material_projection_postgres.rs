@@ -98,6 +98,15 @@ async fn blank_platform_title_falls_back_only_to_an_accepted_front_cover_headlin
     .execute(database.pool())
     .await
     .expect("the accepted cover headline is appendable");
+    sqlx::query(
+        "INSERT INTO linggan_media_processing_job_event(event_ref,job_ref,state,reason,occurred_at) \
+         VALUES($1,$2,'succeeded','synthetic OCR completion',clock_timestamp())",
+    )
+    .bind(Uuid::new_v4())
+    .bind(job_ref)
+    .execute(database.pool())
+    .await
+    .expect("the synthetic OCR job reaches succeeded before its result is projected");
 
     let item = read_work_resource(&database, content_ref)
         .await

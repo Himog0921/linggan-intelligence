@@ -80,17 +80,38 @@ impl WorkCatalogQuery {
     }
 }
 
-fn statement(ocr_schema_ready: bool) -> Result<String, StudyCatalogError> {
+fn statement(ocr_schema_ready: bool, title_search: bool) -> Result<String, StudyCatalogError> {
     let titles = linggan_evidence::work_display_title_ctes(ocr_schema_ready)
         .map_err(|_| StudyCatalogError::ProjectionInvalid)?;
     // All fragments are owned compile-time constants. Caller values are only bind parameters.
-    Ok(format!(
-        "{}{},\n{}\n{}",
-        super::facts_sql(),
-        WORK_SCOPE,
-        titles,
-        include_str!("works.sql")
-    ))
+    if title_search {
+        Ok(format!(
+            "{}{},\n{}\n{}",
+            super::facts_sql(),
+            WORK_SCOPE,
+            titles,
+            include_str!("works.sql")
+        ))
+    } else {
+        // The ordinary picker page does not need to resolve OCR titles for the entire corpus.
+        // Resolve canonical titles only for the already-paginated rows. Search still uses the
+        // complete canonical title projection above pagination.
+        let page_title_ctes = titles
+            .replace(
+                "ARRAY(SELECT work_ref FROM cs_title_scope)",
+                "ARRAY(SELECT work_ref FROM work_page)",
+            )
+            .replace("FROM cs_title_scope scope", "FROM work_page scope");
+        let page_titles = format!(",\n{page_title_ctes}");
+        let work_query =
+            include_str!("works_unfiltered.sql").replace("/*PAGE_TITLE_CTES*/", &page_titles);
+        Ok(format!(
+            "{}{}\n{}",
+            super::facts_sql(),
+            WORK_SCOPE,
+            work_query
+        ))
+    }
 }
 
 pub async fn read_work_catalog(
@@ -127,19 +148,20 @@ async fn read_page(
     )
     .fetch_one(&mut *tx)
     .await?;
-    let projection: Value = sqlx::query_scalar(AssertSqlSafe(statement(ready)?))
-        .bind(query.domain)
-        .bind(&as_of)
-        .bind(CLEANER_VERSION)
-        .bind(Option::<Uuid>::None)
-        .bind(Option::<&str>::None)
-        .bind(&scope.pattern)
-        .bind(&scope.study)
-        .bind(previous.as_ref().map(|cursor| cursor.last.reference))
-        .bind(scope.limit + 1)
-        .bind(scope.observation_role.as_str())
-        .fetch_one(&mut *tx)
-        .await?;
+    let projection: Value =
+        sqlx::query_scalar(AssertSqlSafe(statement(ready, scope.pattern.is_some())?))
+            .bind(query.domain)
+            .bind(&as_of)
+            .bind(CLEANER_VERSION)
+            .bind(Option::<Uuid>::None)
+            .bind(Option::<&str>::None)
+            .bind(&scope.pattern)
+            .bind(&scope.study)
+            .bind(previous.as_ref().map(|cursor| cursor.last.reference))
+            .bind(scope.limit + 1)
+            .bind(scope.observation_role.as_str())
+            .fetch_one(&mut *tx)
+            .await?;
     tx.commit().await?;
     response(query.domain, &scope, &as_of, projection)
 }
@@ -235,7 +257,7 @@ mod tests {
 
     #[test]
     fn title_search_precedes_pagination_and_has_no_full_work_read_loop() {
-        let sql = statement(true).unwrap();
+        let sql = statement(true, true).unwrap();
         assert!(sql.contains(&super::super::facts_sql()));
         assert!(sql.contains("display_title ILIKE $6"));
         assert!(
@@ -245,5 +267,17 @@ mod tests {
         assert!(!sql.contains("LIMIT 100"));
         assert!(!sql.contains("OFFSET "));
         assert!(!sql.contains("$1::uuid[]"));
+    }
+
+    #[test]
+    fn unfiltered_work_pages_resolve_canonical_titles_after_pagination() {
+        let sql = statement(true, false).unwrap();
+        let page = sql.find("work_page AS").unwrap();
+        let titles = sql.find("cs_display_titles AS").unwrap();
+        let totals = sql.find("work_totals AS").unwrap();
+        assert!(page < titles && titles < totals);
+        assert!(sql.contains("ARRAY(SELECT work_ref FROM work_page)"));
+        assert!(sql.contains("FROM work_page scope"));
+        assert!(!sql.contains("FROM cs_title_scope scope\nLEFT JOIN LATERAL"));
     }
 }
