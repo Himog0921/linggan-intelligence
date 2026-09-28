@@ -18,7 +18,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-pub const MINIMUM_PLUGIN_VERSION: &str = "0.8.47";
+pub const MINIMUM_PLUGIN_VERSION: &str = "0.8.57";
 /// How recently an installation must have checked in to be considered on duty.
 ///
 /// This is a liveness question — is that browser still there — and it stays short. A worker
@@ -3110,9 +3110,10 @@ mod tests {
     #[test]
     fn semantic_version_gate_rejects_old_and_malformed_versions() {
         assert!(!version_at_least("0.8.33", MINIMUM_PLUGIN_VERSION));
-        assert!(version_at_least("0.8.47", MINIMUM_PLUGIN_VERSION));
+        assert!(!version_at_least("0.8.56", MINIMUM_PLUGIN_VERSION));
+        assert!(version_at_least("0.8.57", MINIMUM_PLUGIN_VERSION));
         assert!(version_at_least("v0.9.0", MINIMUM_PLUGIN_VERSION));
-        assert!(!version_at_least("0.8.47-beta.1", MINIMUM_PLUGIN_VERSION));
+        assert!(!version_at_least("0.8.57-beta.1", MINIMUM_PLUGIN_VERSION));
         assert!(!version_at_least("current", MINIMUM_PLUGIN_VERSION));
     }
 

@@ -25,9 +25,8 @@ import { parseCount } from '../shared/utils.js';
  * 这层映射是有损的，所以采完之后回写的是**页面上实际生效的筛选**，不是这里请求的值。
  */
 function samplingFiltersFromTaskSpec(taskSpec) {
-  const target = taskSpec?.target || {};
   const filters = {};
-  const ranking = String(target.ranking || '').trim();
+  const ranking = String(taskSpec?.ranking || '').trim();
   // 服务端的排序词与筛选表的取值是同一套（most_liked / most_commented / most_collected /
   // latest / comprehensive→general）；认不出来的一概不设，让页面保持当前排序。
   const RANKING_TO_SORT = {
@@ -38,7 +37,7 @@ function samplingFiltersFromTaskSpec(taskSpec) {
     comprehensive: 'general',
   };
   if (RANKING_TO_SORT[ranking]) filters.sortBasis = RANKING_TO_SORT[ranking];
-  const days = Number(target.publishedWithinDays);
+  const days = Number(taskSpec?.publishedWithinDays);
   if (Number.isFinite(days) && days > 0) {
     filters.publishTime = days <= 1 ? 'one_day' : (days <= 7 ? 'one_week' : 'half_year');
   }
@@ -449,7 +448,7 @@ export function createXhsPageController({
               // value. Zero means all public comments until a real stop, never "one comment".
               maxComments: Math.max(0, Number(params.maxTotal || 0) || 0),
               commentDepthMode: capability === 'replies' ? COMMENT_DEPTH_MODE.ALL_REPLIES : COMMENT_DEPTH_MODE.TWO_LEVEL,
-              maxSubComments: Number(params.taskSpec.target?.replyExpandLimit) || 0,
+              maxSubComments: Number(params.taskSpec.replyExpandLimit) || 0,
             };
           } else {
             try {
@@ -526,13 +525,13 @@ export function createXhsPageController({
           const discovered = await discoverSurface({
             mode,
             maximumQuota,
-            scrollRounds: params.taskSpec?.target?.scrollRounds,
+            scrollRounds: params.taskSpec?.scrollRounds,
           });
           const loaded = Array.isArray(discovered) ? discovered : (Array.isArray(discovered?.cards) ? discovered.cards : []);
           // 先按点赞取前 N，再交付：口径说的是「从加载出来的里面取 20 篇」，
           // 把全部加载结果都提交上去会让「取前 20」这句话没有落到实处。
           const cards = mode === COLLECT_MODE.SEARCH
-            ? pickTopByLikes(loaded, params.taskSpec?.target?.topByLikes)
+            ? pickTopByLikes(loaded, params.taskSpec?.topByLikes)
             : loaded;
           const target = new URL(window.location.href);
           const query = target.searchParams.get('keyword') || target.searchParams.get('q') || '';

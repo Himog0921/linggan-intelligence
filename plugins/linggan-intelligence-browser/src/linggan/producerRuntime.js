@@ -101,6 +101,8 @@ export function createManualRuntimeTask({
   commentLimit = 'not_requested',
   acquireMedia = 'not_requested',
   stopConditions = ['manual_stop', 'maximum_quota'],
+  replyExpandLimit, ranking, scrollRounds, topByLikes, publishedWithinDays,
+  commentScope, requestedCommentLimit, surface,
   taskId,
 } = {}) {
   return createTaskSpec({
@@ -115,6 +117,8 @@ export function createManualRuntimeTask({
     acquireMedia,
     riskPolicy: 'local_trusted_user_initiated',
     stopConditions,
+    replyExpandLimit, ranking, scrollRounds, topByLikes, publishedWithinDays,
+    commentScope, requestedCommentLimit, surface,
   });
 }
 
@@ -155,7 +159,7 @@ export function packageContentDetail({ platform, note, observedAt, capturedAt } 
 }
 
 export function packageComments({
-  platform, result, noteId, observedAt, capturedAt, taskTarget = {},
+  platform, result, noteId, observedAt, capturedAt,
 } = {}) {
   const collection = normalizedCommentCollectionReceipt(result, noteId);
   const comments = collection?.analysisUsability === 'not_usable'
@@ -167,7 +171,6 @@ export function packageComments({
     observedAt,
     capturedAt,
     target: {
-      ...taskTarget,
       basis: 'known_set',
       contentExternalId: String(noteId || result?.noteId || ''),
       ...(collection ? { commentCollection: collection } : {}),
@@ -193,7 +196,7 @@ export function packageComments({
 // in the same array as top-level comments.  This keeps a parent/reply relationship from being
 // silently flattened into a generic comment count or a second Content observation.
 export function packageReplies({
-  platform, result, noteId, observedAt, capturedAt, taskTarget = {},
+  platform, result, noteId, observedAt, capturedAt,
 } = {}) {
   const collection = normalizedCommentCollectionReceipt(result, noteId);
   const replies = collection?.analysisUsability === 'not_usable'
@@ -205,7 +208,6 @@ export function packageReplies({
     observedAt,
     capturedAt,
     target: {
-      ...taskTarget,
       basis: 'known_set',
       contentExternalId: String(noteId || result?.noteId || ''),
     },

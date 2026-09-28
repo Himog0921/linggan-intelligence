@@ -982,20 +982,12 @@ async fn card_engagement_text_including_the_ten_thousand_unit_projects_as_counts
     assert_eq!(row.get::<String, _>("share_count_state"), "UNKNOWN");
 }
 
-/// 关键词任务带上采样口径后，整包被判为 `task_package_contract_mismatch` 而全部隔离。
-///
-/// 真实形状：任务 target 有 `query` + 四项口径，插件回执的 `coverage.target` 只回显
-/// `query` 与 surface 事实。既有的 discovery 集成用例全都只用 `{"query": ...}` 这种
-/// 不带口径的 target，所以 2026-09-08 起线上每一次关键词采集整包隔离，没有任何一条
-/// 测试变红。这条用例补上那个缺口。
+/// The v2 task target contains only the search term; sampling is a separate instruction.
 #[tokio::test]
 #[ignore = "requires the isolated PostgreSQL 16 proof harness"]
-async fn a_keyword_search_carrying_sampling_directives_projects_instead_of_quarantining() {
+async fn a_keyword_search_with_identity_only_target_projects_instead_of_quarantining() {
     let database = proof_database("material_keyword_sampling_slice").await;
-    let task_target = serde_json::json!({
-        "query":"考研自习","ranking":"most_liked",
-        "topByLikes":20,"scrollRounds":3,"publishedWithinDays":7
-    });
+    let task_target = serde_json::json!({"query":"考研自习"});
     submit_custom_package(
         &database,
         "xhs",
@@ -1054,7 +1046,7 @@ async fn a_keyword_search_reporting_another_term_is_still_quarantined() {
         &database,
         "xhs",
         &["discovery_search"],
-        serde_json::json!({"query":"考研自习","ranking":"most_liked"}),
+        serde_json::json!({"query":"考研自习"}),
         "discovery_search",
         "xhs",
         serde_json::json!({

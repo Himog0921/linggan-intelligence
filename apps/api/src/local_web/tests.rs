@@ -2683,7 +2683,7 @@ fn evidence_page_stylesheet() -> String {
 }
 
 fn runtime_producer_task_spec() -> String {
-    r#"{"contractVersion":"linggan.producer.task-spec.v1","taskId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","source":"manual","platform":"xhs","pageType":"note_detail","target":{"contentExternalId":"note-a"},"capabilitiesRequested":["media_slots"],"maximumQuota":1,"commentLimit":"not_requested","acquireMedia":"slots","riskPolicy":"local_trusted_user_initiated","stopConditions":["manual_stop","maximum_quota"]}"#.to_owned()
+    r#"{"contractVersion":"linggan.producer.task-spec.v2","taskId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","source":"manual","platform":"xhs","pageType":"note_detail","target":{"contentExternalId":"note-a"},"capabilitiesRequested":["media_slots"],"maximumQuota":1,"commentLimit":"not_requested","acquireMedia":"slots","riskPolicy":"local_trusted_user_initiated","stopConditions":["manual_stop","maximum_quota"]}"#.to_owned()
 }
 
 fn runtime_producer_attempt() -> String {
@@ -2695,7 +2695,7 @@ fn runtime_producer_submission() -> String {
 }
 
 fn runtime_author_producer_task_spec() -> String {
-    r#"{"contractVersion":"linggan.producer.task-spec.v1","taskId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab","source":"manual","platform":"xhs","pageType":"profile","target":{"authorExternalId":"author-route-1"},"capabilitiesRequested":["author_profile"],"maximumQuota":1,"commentLimit":"not_requested","acquireMedia":"not_requested","riskPolicy":"local_trusted_user_initiated","stopConditions":["manual_stop","maximum_quota"]}"#.to_owned()
+    r#"{"contractVersion":"linggan.producer.task-spec.v2","taskId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab","source":"manual","platform":"xhs","pageType":"profile","target":{"authorExternalId":"author-route-1"},"capabilitiesRequested":["author_profile"],"maximumQuota":1,"commentLimit":"not_requested","acquireMedia":"not_requested","riskPolicy":"local_trusted_user_initiated","stopConditions":["manual_stop","maximum_quota"]}"#.to_owned()
 }
 
 fn runtime_author_producer_attempt() -> String {

@@ -276,6 +276,8 @@ migrate() {
   apply_migration_once "0102_cross_industry_creator_directory" "$project_root/database/migrations/0102_cross_industry_creator_directory.sql"
   apply_migration_once "0103_domain_membership_and_usage" "$project_root/database/migrations/0103_domain_membership_and_usage.sql"
   apply_migration_once "0104_unified_domain_schema_cleanup" "$project_root/database/migrations/0104_unified_domain_schema_cleanup.sql"
+  apply_migration_once "0105_reply_disposition_requalification" "$project_root/database/migrations/0105_reply_disposition_requalification.sql"
+  apply_migration_once "0106_reply_disposition_quota_requalification" "$project_root/database/migrations/0106_reply_disposition_quota_requalification.sql"
 }
 
 case "$command_name" in

@@ -5,21 +5,8 @@ use serde_json::Value;
 
 /// 这个包是不是这张任务单要的东西。
 ///
-/// target 的比对只问**身份**（搜的是不是这个词、这个博主、这篇内容），不问采样口径。
-/// 口径是下发给插件的**执行指令**（怎么排序、滚几次、取赞前几名、限几天内），插件照做，
-/// 但回执的 `coverage.target` 只回显身份，不会把指令抄回来——它本来也没有义务抄：
-/// 「插件有没有守住口径」由 `coverage` 的 `attempted/acquired` 如实记录，不靠回显一份
-/// 指令副本来证明。
-///
-/// 2026-09-08 的 `45c04f2` 给关键词任务加上口径下发后，这条比对就必然为假，
-/// 此后**每一次**带口径的关键词采集都被整包判为 `task_package_contract_mismatch`
-/// 并隔离：09-08 至 09-10 共 120 条搜索结果采回来却全部进不了库。
-/// 创作者/内容任务的 target 只有一个身份键，不受影响，所以问题只在关键词这一条通道。
-///
-/// 同一条错误判定此前在 `creator_lifecycle` 的巡检采样 SQL 里也有一份，09-08 的
-/// `58fce3f` 已经把那条 `@>` 比对整条删掉、改用 `package.task_id=task.task_id` 定归属；
-/// 那里现在只剩一段记录经过的注释。**当时没有一并改这里**——而这里才是决定材料
-/// 能不能入库的那道闸。
+/// TaskSpec.target contains only source-object identity. Execution instructions are separate
+/// TaskSpec fields, so identity comparison needs no capability-specific exemption list.
 pub(crate) fn task_package_binding_valid(
     task_spec: &Value,
     package: &ProducerCapturePackage,
@@ -41,20 +28,8 @@ pub(crate) fn task_package_binding_valid(
             .is_some_and(|(expected, actual)| {
                 expected
                     .iter()
-                    .filter(|(key, _)| !is_exempt_sampling_directive(package, key))
                     .all(|(key, value)| actual.get(key) == Some(value))
             })
-}
-
-/// 采样口径只在**关键词搜索**这一条通道上豁免身份比对。
-///
-/// 豁免按 `package_kind` 而不是只按键名生效：只有 `discovery_search` 会下发口径，
-/// 别的通道即使将来出现同名字段（比如给创作者作品排序也叫 `ranking`），那也是它自己的
-/// 身份口径，必须照常逐键比对，不该被这里顺手放过。名单的唯一真源在
-/// [`crate::work_order_lease::SAMPLING_DIRECTIVE_KEYS`]。
-fn is_exempt_sampling_directive(package: &ProducerCapturePackage, key: &str) -> bool {
-    package.package_kind() == "discovery_search"
-        && crate::work_order_lease::SAMPLING_DIRECTIVE_KEYS.contains(&key)
 }
 
 pub(crate) fn record_disposition(
@@ -320,33 +295,24 @@ mod task_package_binding_tests {
         })
     }
 
-    /// 回归：2026-09-08 起带口径的关键词任务被整包判为不匹配，120 条搜索结果因此隔离。
+    /// Sampling instructions live alongside the task identity, so the search term binds exactly.
     #[test]
-    fn a_keyword_task_carrying_sampling_directives_still_binds() {
-        let spec = task_spec(
-            "discovery_search",
-            json!({
-                "query": "考研自习",
-                "ranking": "most_liked",
-                "topByLikes": 20,
-                "scrollRounds": 3,
-                "publishedWithinDays": 7,
-            }),
-        );
+    fn a_keyword_task_with_separate_sampling_instructions_binds() {
+        let mut spec = task_spec("discovery_search", json!({ "query": "考研自习" }));
+        spec["ranking"] = json!("most_liked");
+        spec["topByLikes"] = json!(20);
+        spec["scrollRounds"] = json!(3);
+        spec["publishedWithinDays"] = json!(7);
         assert!(task_package_binding_valid(
             &spec,
             &package("discovery_search", keyword_coverage_target())
         ));
     }
 
-    /// 豁免的只有口径。搜索词本身对不上，仍然必须判为不匹配——
-    /// 否则这次修改就成了「关键词包一律放行」。
+    /// Search term identity must match the observed package.
     #[test]
     fn a_keyword_task_whose_term_differs_does_not_bind() {
-        let spec = task_spec(
-            "discovery_search",
-            json!({ "query": "考研自习", "ranking": "most_liked" }),
-        );
+        let spec = task_spec("discovery_search", json!({ "query": "考研自习" }));
         let mut elsewhere = keyword_coverage_target();
         elsewhere["query"] = json!("adhd");
         assert!(!task_package_binding_valid(
