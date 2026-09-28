@@ -6,9 +6,9 @@
 > 事实来源: 本机实际检查、已确认项目边界和完成计划
 > 冲突时以谁为准: 真实运行结果、ACCEPTED ADR 与用户最新确认
 
-### GREENFIELD Comment Research / Draft PR #338（P0 主线运行库已只读盘点；P2 exact-head 浏览器 CI 修复待复验；P3 质量出口未达成）
+### GREENFIELD Comment Research / Draft PR #338（P0 主线运行库已只读盘点；P2 exact-head 浏览器 CI 已通过；P3 质量出口未达成）
 
-2026-09-28 最新远端核对：PR #338 仍 OPEN/Draft，head=`c376cf60e9f26df18364fc9065ebdf327218a2fa`，base=`main@f54778562fbaaff56f482cb3d9fa46b0bbf51965`，`mergeable=MERGEABLE`、check 状态 `UNSTABLE`。exact-head Actions [36391635088](https://github.com/Himog0921/linggan-intelligence/actions/runs/36391635088) 仅在真实 Axum/隔离 PostgreSQL 浏览器回归失败：保存成功提示早于方法目录刷新，测试因此读到旧选择。当前 worktree 已将成功提示推迟到目录刷新后，并断言 UI 选中的 `policyRef` 与 HTTP 201 回执一致；修复尚未提交、推送，新的 exact-head CI 待复验。该 run 的 push-only source export 按条件跳过。
+2026-09-28 最新远端核对：PR #338 仍 OPEN/Draft，head=`47de9bf04cd6aee0afa9beed9147635f1260265f`，base=`main@f54778562fbaaff56f482cb3d9fa46b0bbf51965`，`mergeable=MERGEABLE`、check 状态 `CLEAN`。修复了方法保存成功提示早于方法目录刷新完成的竞态；真实 Axum/隔离 PostgreSQL 浏览器回归核对刷新后的选中 `policyRef` 等于 HTTP 201 回执且不同于原方法。精确 head Actions [36394260704](https://github.com/Himog0921/linggan-intelligence/actions/runs/36394260704) 全绿：compile、unit、隔离 PostgreSQL proofs、frontend behavior tests 均通过；push-only `integration-source-export` 按条件跳过。
 
 PR 合并事实单独记录：#338 的 `mergedAt` 为空，PR issue timeline 没有 merge/close/reopen 事件；以当前 base 比较，分支有 60 个独有提交，`git cherry` 未发现 patch-equivalent upstream 提交。分支中的 `1c43495`、`c2af487`、`d10b945`、`c7e23f6` 是把当时的 main 合回 PR 分支。已有相关能力确已上线，来源是独立合并的 #323–#327、#329、#335、#336；#347 是 Collection 改动。当前本机 `runtime-main` 正是干净的 `main@f54778562fbaaff56f482cb3d9fa46b0bbf51965`，包含这些独立 PR 的结果，但不包含 #338 候选增量。
 
