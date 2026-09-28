@@ -941,3 +941,100 @@ async fn http_run_control_cas_pauses_resumes_and_stops_without_losing_safe_state
     .unwrap();
     assert_eq!(targets, 2);
 }
+
+#[tokio::test]
+#[ignore = "isolated disposable PostgreSQL + real Axum page/API + Playwright; no worker/provider"]
+async fn browser_real_axum_postgres_previews_starts_and_stops_without_provider_dispatch() {
+    use std::path::Path;
+    use std::process::Command;
+    use tokio::net::TcpListener;
+
+    assert_eq!(
+        std::env::var("P1_BROWSER_PROOF").as_deref(),
+        Ok("1"),
+        "the isolated proof harness must explicitly enable browser tests"
+    );
+
+    let p = setup("browser_live_axum", 3).await;
+    let work_ref: Uuid = sqlx::query_scalar(
+        "SELECT content_public_ref FROM linggan_material_domain_usage WHERE domain_ref=$1 LIMIT 1",
+    )
+    .bind(domain())
+    .fetch_one(p.db.pool())
+    .await
+    .unwrap();
+    let target_policy_ref: Uuid = sqlx::query_scalar(
+        "SELECT policy_ref FROM linggan_comment_study_policy \
+         WHERE domain_ref=$1 AND method_name='SYNTHETIC A'",
+    )
+    .bind(domain())
+    .fetch_one(p.db.pool())
+    .await
+    .unwrap();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let proof_token = Uuid::new_v4().to_string();
+    let route_proof_token = proof_token.clone();
+    let application = crate::local_web::comment_study::routes()
+        .route(
+            "/__comment-study-browser-proof",
+            axum::routing::get(move || {
+                let token = route_proof_token.clone();
+                async move { token }
+            }),
+        )
+        .with_state(super::tests::state(LocalDatabaseState::Ready(p.db.clone())));
+    let server = tokio::spawn(async move {
+        axum::serve(listener, application).await.unwrap();
+    });
+
+    let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("scripts/test-comment-study-productization-ui.py")
+        .canonicalize()
+        .unwrap();
+    let api_base_url = format!("http://{address}");
+    let domain_ref = domain().to_string();
+    let work_ref_arg = work_ref.to_string();
+    let target_policy_ref_arg = target_policy_ref.to_string();
+    let proof_token_arg = proof_token;
+    let python = std::env::var("PYTHON").unwrap_or_else(|_| "python3".to_owned());
+    let browser_result = tokio::task::spawn_blocking(move || {
+        Command::new(python)
+            .arg(script)
+            .arg("--api-base-url")
+            .arg(api_base_url)
+            .arg("--domain-ref")
+            .arg(domain_ref)
+            .arg("--work-ref")
+            .arg(work_ref_arg)
+            .arg("--target-policy-ref")
+            .arg(target_policy_ref_arg)
+            .arg("--proof-token")
+            .arg(proof_token_arg)
+            .output()
+    })
+    .await
+    .unwrap();
+    server.abort();
+    let _ = server.await;
+    let browser_result = browser_result.unwrap();
+    assert!(
+        browser_result.status.success(),
+        "live API browser regression failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&browser_result.stdout),
+        String::from_utf8_lossy(&browser_result.stderr)
+    );
+
+    assert_eq!(effects(&p.db).await, json!([1, 2, 1, 0]));
+    let (dispatch_state, run_state, control_version): (String, String, i64) = sqlx::query_as(
+        "SELECT dispatch_state,state,control_version FROM linggan_comment_study_run LIMIT 1",
+    )
+    .fetch_one(p.db.pool())
+    .await
+    .unwrap();
+    assert_eq!(dispatch_state, "stopped");
+    assert_eq!(run_state, "cancelled");
+    assert_eq!(control_version, 1);
+}

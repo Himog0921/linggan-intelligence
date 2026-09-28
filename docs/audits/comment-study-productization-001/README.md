@@ -152,3 +152,13 @@ P2 下一关为 exact-head CI 与 Mog 对真实页面/数字/动作的验收；�
 - **未验证**：真实浏览器交互、部署后的 API、Mog 页面/业务验收；此提交不改变 T01–T54 状态。此次只证明隔离合成路径，不证明 shared migration、线上计费或 provider 行为。精确 head CI 在推送后记录。
 
 下一关仍按手册顺序：先由 exact-head CI 核对本增量；P2 页面逐动作/数字与 Mog 验收仍需在人机界面完成。之后接 P3 剩余 pause/resume/stop 的 CAS 控制、公平调度、失败/部分接纳全矩阵与 drain；Recall@K 必须等待独立 Gold Set。再进入 P4→P5→P6→P7→P8，P0 历史/在途与备份恢复保护并行跟踪。
+
+## P2 第九增量 · 真实浏览器到 Axum/PostgreSQL 回执（2026-09-28）
+
+对照手册 §10 P2 的页面操作与服务端回执要求，新增一个只在显式隔离证明开关下运行的真实页面集成用例。Playwright 加载 `comment_study::routes()` 提供的真实页面、脚本和 CSS，经同一 Axum router 调真实 works/policy/preview/start/stop API；数据来自 `setup()` 建立的 disposable PostgreSQL fixture。所选方法与作品均为 synthetic fixture；没有运行 worker、外发模型请求、访问共享数据库或应用共享 migration。HTTP base URL 限定为明确端口的 loopback；在任何产品 API 请求前，脚本还必须先取得测试进程临时挂载的随机 proof-token 回执，因此普通本机 runtime（例如 `:3000`）不会被误认为该测试服务。
+
+浏览器选择 fixture 中已记录的方法和作品，设置评论上限 2、语境字符上限 3500、token 上限 4096，取得真实 preview 与创建回执，再按确认对话框停止。检查浏览器请求 payload 和服务端响应，并直接读数据库核对计数 `[Run=1, Target=2, start receipt=1, model invocation=0]`，Run `dispatch_state=stopped`、`state=cancelled`、`control_version=1`。同一脚本原有 synthetic-browser 路径保留并通过；方法保存/激活 UI 合成覆盖仍单独存在。中间发现的 404 是测试误挂载了 command-only router，随后发现的 legacy policy selector 错误也来自测试 fixture；均已修正为真实 Comment Study router 和 fixture 内已记录方法，没有证据表明产品路由缺陷。
+
+验证：本机 synthetic Playwright 回归通过，其中也验证不带正确随机 proof-token 的本机服务会在页面/API操作前被拒；真实浏览器单项通过 `cargo test -p linggan-api --bin linggan-api ...browser_real_axum_postgres_previews_starts_and_stops_without_provider_dispatch... -- --ignored --exact`，使用一次性 PostgreSQL 容器/卷并在退出时清理；定点 `rustfmt --check`、UI design handbook check、项目治理检查及 `git diff --check` 通过。`python3 scripts/verify-comment-study-productization-docs.py` 仍失败：它固定的 approved-v1 SHA 与当前八份合同/手册均不匹配；本增量未改这些文件或其 pin，未擅自裁定新版合同。代码尚需提交到 PR #338 并取得新 exact-head CI 回执。此项只补自动化页面/API/PG 路径证据，不完成 Mog 真实页面验收，不改变 T01–T54 台账（仍 5 PASS、49 NOT_RUN），不满足 P3 Gold Set、分层 Recall@K 或获批真实模型质量门。
+
+下一节奏：先将这一完整 P2 集成证据提交并推到同一 PR #338，核验 exact-head CI；随后整理 P2 待 Mog 对照真实页面、预算数字和回执逐项确认的清单。P3 技术工作按手册补齐 failure/partial-acceptance 与跨 Run fairness/drain 的自动化矩阵；Recall@K 留在独立人工 Gold Set 条件之后，不跨入 P4。P0/P8 的真实环境证据独立登记，不作为隔离开发的前置条件。
