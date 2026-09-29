@@ -6,6 +6,9 @@
 request=$(cat)
 
 case "$request" in
+  *SETTLEMENT_SECRET_MISSING*)
+    printf '%s' '{"version":"linggan.pi.v1/0.85.1","ok":false,"text":null,"failureCode":"model_secret_unavailable","modelIds":null,"modelListOrigin":null,"usage":{"inputTokens":null,"outputTokens":null,"costUsd":null},"elapsedMs":1}'
+    ;;
   *SETTLEMENT_TRANSPORT_LIMIT*)
     # What #305 saw: the response body outgrew the transport guard, so no model text exists and
     # no usage is known.

@@ -111,7 +111,8 @@ fn parent_context(
     // Absence of a parent relationship means this is a root comment. Its work context is still
     // available to the semantic stage; do not turn a short root comment into a missing-parent
     // failure. A reply whose parent could not be read is represented by Some(parent) with an
-    // unknown/restricted source state below and remains needs_context.
+    // unknown/restricted source state below. The model decides whether that missing context
+    // actually prevents understanding this reply.
     let Some(parent) = parent else {
         return Ok((Value::Null, Value::Null, None, "self_contained"));
     };

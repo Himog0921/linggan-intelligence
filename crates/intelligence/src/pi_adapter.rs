@@ -57,6 +57,7 @@ pub struct PiDiagnostic {
     pub response_started: Option<bool>,
     pub terminal_received: Option<bool>,
     pub received_bytes: Option<u64>,
+    pub limit_kind: Option<String>,
     pub finish_reason: Option<String>,
     pub elapsed_ms: u64,
     pub usage_known: bool,
@@ -79,6 +80,12 @@ impl PiDiagnostic {
             )
             && self.http_status.is_none_or(|v| (100..=599).contains(&v))
             && self.received_bytes.is_none_or(|v| v <= 100_000_000)
+            && self.limit_kind.as_deref().is_none_or(|v| {
+                matches!(
+                    v,
+                    "sse_stream_262144" | "final_text_65536" | "output_tokens"
+                )
+            })
             && self.elapsed_ms <= 86_400_000
             && self.finish_reason.as_deref().is_none_or(|v| {
                 matches!(
@@ -111,6 +118,7 @@ impl PiDiagnostic {
             response_started: None,
             terminal_received: None,
             received_bytes: None,
+            limit_kind: None,
             finish_reason: None,
             elapsed_ms,
             usage_known: false,

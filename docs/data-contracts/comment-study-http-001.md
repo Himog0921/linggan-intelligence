@@ -1,11 +1,11 @@
 # 评论研究产品化：接口、事务与执行合同
 
 > 状态: 权威当前
-> 最后核对: 2026-09-27
+> 最后核对: 2026-09-29
 > 适用范围: COMMENT-STUDY-PRODUCTIZATION-001 HTTP、事务、预算与执行合同
 > 事实来源: GREENFIELD v1.0 手册与其 HTTP/执行规格
 > 冲突时以谁为准: 用户最新授权、AGENTS.md、当前 API 源码和真实回执
-> 当前实现状态: P2 有候选实现；具体未验证/未部署层见审计账本
+> 当前实现状态: P2 已合入主线；本轮完整性修复在隔离分支，验证层见审计账本
 > 交付包：COMMENT-STUDY-PRODUCTIZATION-001 · 文档版 1.0
 > 核对日期：2026-09-22
 > 源码基线：`main@c74d72e3d17b9d5ecfb9953de025713c47e4560e`
@@ -102,7 +102,7 @@ POST `/runs`，所有字段均必填，scope 与 reason 规则如下：
 
 示例数值是合成配置，不是推荐真实 token 预算。scope.kind 为 works 时恰有 kind/workRefs，1–100 个 UUID；为 comments 时恰有 kind/commentKeys，1–3000 个 `{workRef,commentExternalId}`，且作品去重 ≤100。commentExternalId 字节上限 512，必须逐字匹配原始字段。集合规范化去重；不得静默新增未选择作品或评论。
 
-mode=new_only/continue_ready/input_changed/retry_failed/reanalyse。new_only 与 continue_ready 的 reason 必须为 NULL；其他模式必须有 trim 后 1–500 字 reason，并在最终确认中展示；不是逐条人工审核，只是一次批量意图确认。reason只作动作审计，不自动插进模型提示词。自动调用暂不通过 HTTP 接受，origin=manual 由服务器注入。
+普通 `/selection-preview` 和 `/runs` 命令接受 mode=new_only/input_changed/retry_failed/reanalyse，拒绝 `continue_ready`；后者仅由 `/runs/{runRef}/recover` 的服务端精确范围使用。new_only 的 reason 必须为 NULL；其他普通模式必须有 trim 后 1–500 字 reason，并在最终确认中展示；不是逐条人工审核，只是一次批量意图确认。reason只作动作审计，不自动插进模型提示词。自动调用暂不通过 HTTP 接受，origin=manual 由服务器注入。
 
 返回 HTTP 201（新 Run），200（同请求回放或 no_work/index_pending）：requestRef、outcome、runRef（可 NULL）、asOf、requestedWorkCount、coveredWorkCount、targetCount、queuedCount、needsContextCount、limits、exclusionCounts、indexCoverage、dispatchState、idempotentReplay。**文字是“已创建并进入执行队列”，不能说“尚未授权模型”。** Worker 还未领取时显示排队，不伪造 running。
 
@@ -149,7 +149,9 @@ TrustedStudyOrigin 本轮 Manual；Scheduled{schedule_ref,scheduled_for} 只用�
 | 旧excluded，但当前来源已恢复合格 | 跳过 | 选择 | fingerprint明确变化才选择 | 不选择，使用input_changed | 可明确重研 |
 | 来源当前受限／身份不合格／无效文本 | 不选择 | 不选择 | 不选择 | 不选择 | 不选择 |
 
-continue_ready 是页面推荐默认：选择新目标、失败/取消/安全停止后可继续的未完成目标，以及冻结输入指纹已明确变化的 needs_context 项；不重复成功、无信号或输入未变的 needs_context 项。new_only 保留为仅新增目标模式。下一阶段自动计划仍默认只处理 new_only；本模式不自动启用。
+普通页面启动默认 `new_only`，直到 Mog 明确批准扩大默认模型调用范围。`continue_ready` 只由源 Run 的显式“补跑未完成”操作使用：范围限于源 Run 未完成的稳定评论键，重新检查当前资格、后续成功、在途和输入指纹；不重复成功、无信号或输入未变的 needs_context 项。用户主动停止的源 Run 只有再次明确确认补跑才构成新授权。后续自动计划仍默认只处理 `new_only`。
+
+POST `/runs/{runRef}/recover` 仅接受 `{domainRef,requestRef}`，要求源 Run 已结束且为 `comment-study.run-selection.v2`。服务端从源 Run 未完成 Target 构造精确评论范围，沿用源 Run 的方法、作品角色与三项预算，再调用同一 `start_study_run` 事务；新 Run 的 `selection_manifest.recoverySourceRunRef` 和 start request 的命令记录来源。空集合返回 `no_recovery_targets`；集合非空但当前均不可恢复则写幂等 `no_work`/`index_pending` 回执，不创建空 Run。旧 Run 与 Attempt 保持不变。
 
 排序：各选定作品内部按首次可用材料的稳定顺序取最早未处理评论，再按作品逐条轮转，最多 commentBudget。具体序 `(row_number_in_work,content_public_ref,comment_external_id COLLATE "C")`，作品内 `(source.created_at ASC,source.material_ref ASC)`；排序不是“随机代表性样本”。新 Run 记录 selectionOrder。缺缓存的材料不作无效删除，部分可用量如实入队。
 
@@ -170,8 +172,8 @@ continue_ready 是页面推荐默认：选择新目标、失败/取消/安全停
 3. 读取明确 policy_ref，确认完整方法与当前 domain；读取不可变 model_config 和连接启用事实；不读活动 policy 代替参数。
 4. 获取服务端 asOf；执行单条冻结查询，按已定义模式、资格、输入和稳定评论历史选择。context 按作品仅组装一次，不在每评论 lateral 重复巨量 JSON。
 5. 0 个结果：有待清洗则 index_pending，否则 no_work；写终态 request 回执，提交，不创建空 Run。
-6. >0：写入 queued Run、实际预算、选择／执行快照、Work 和 Target；needs_context 可直接终态，不依赖模型。写入稳定身份及 fingerprint，让数据库在途唯一约束兜底。
-7. 调用 close_run_if_settled，使全 needs_context 的 Run 也能结束语义阶段；写入 request.created 回执。提交后 Worker 方可处理。
+6. >0：写入 queued Run、实际预算、选择／执行快照、Work 和 Target。缺父评论是冻结的依赖事实，不预先终结目标；由语义阶段判断该条回复是否真的需要父语境。写入稳定身份及 fingerprint，让数据库在途唯一约束兜底。
+7. 调用 close_run_if_settled；写入 request.created 回执。提交后 Worker 方可处理。
 8. 返回 committed receipt；请求响应丢失后由同 request_ref 重放，不猜执行是否发生。
 
 事务锁超时 3 秒、statement_timeout 初值 15 秒、序列化／死锁／在途唯一冲突最多重试整个事务 3 次（退避 50/150/450ms，仅工程初值）。retry 时保持 request_ref，重新读取最新资格；真正的 request_hash 冲突不可重试成另一个动作。超限返回 retryable 错误，不创建半个 Run。
@@ -191,6 +193,8 @@ semantic/resolution/pair 都从 owner Run.policy_ref 读取 frozen method。完�
 最多 12 个同篇 Target；输入给每 Target rawText/researchText/parentContext，workContext 一次。按完整 system＋prompt＋outputSchema 的估算决定装入数量，不能只估 inner manifest。单个目标也不适配时标 failed/input_limit_exceeded，不无限留 queued 卡队首；不能裁掉原评论让模型凭残文引用。
 
 模型输出保持现有闭集 results `{targetRef,outcome,reason,signals}`。每个 Signal 为 kind/proposition/evidence/problemFrame；problem/need 的 frame 四字段为 actor/goalOrExpectedState/barrierOrUnmetNeed/context，每项 value/basis；其余 kind 的 frame=NULL。no_signal 和 needs_context 是明确模型结果，遗漏目标不等于 no_signal。局部合法目标独立保存，其他目标有界重试。
+
+不可恢复的 `model_secret_unavailable`、认证/请求/端点拒绝以及输入超限按一次确定性失败结算，不重复外发。多目标的 `response_too_large` 或 `output_limit` 只对未接纳目标记录一次拆为单目标的策略，仍受原 Run tokenLimit 与尝试上限约束；单目标仍超限即终止。Pi diagnostic 的 `limitKind` 明确区分 `sse_stream_262144`、`final_text_65536`、`output_tokens`，读取面只投影已记录的值，不根据是否收到结束事件猜测限制位置；usage 未知仍为 NULL。目标评论或冻结父评论后来受限后，目标读取屏蔽顶层和 `latestAttempt.modelReason`，Signal 读取屏蔽可能复述受限来源的 proposition、evidence 和 problemFrame；保留非文本状态及不可变研究历史。
 
 ### 6.2 归并与配对
 

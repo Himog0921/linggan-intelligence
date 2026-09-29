@@ -5,7 +5,7 @@
 > 适用范围: COMMENT-STUDY-PRODUCTIZATION-001 P0–P8 分阶段实现与验收
 > 事实来源: 已批准 GREENFIELD v1.0 手册、用户授权和当前项目证据
 > 冲突时以谁为准: 用户最新授权、AGENTS.md、实际代码/数据库/运行证据
-> 当前实现状态: PR #338/#348 已并入 current main；COMMENT-STUDY-P2-CLOSEOUT-001 在隔离分支实施，P2 收口与 Mog 验收未完成
+> 当前实现状态: PR #338/#350 已并入 current main；P2 完整性修复在 `codex/comment-study-p2-integrity-001` 隔离分支，真实模型成功和 Mog 验收未完成
 > 交付包：COMMENT-STUDY-PRODUCTIZATION-001 · 文档版 1.0
 > 核对日期：2026-09-28
 > 源码基线：`origin/main@df021f72548cc37d93d9e3df1a6f4bd0a6d250dd`
@@ -68,10 +68,10 @@ P1–P4 可拆成内部提交，但只有 Mog 决定 Issue、人员、并行和 
 
 ### P2 closeout 增补（2026-09-29）
 
-当前 P2 收口候选基于 `origin/main@df021f72548cc37d93d9e3df1a6f4bd0a6d250dd`，实施范围为：
+当前 P2 收口增量基于 `origin/main@7f5a0796f06e76e6ad489a358bfaf7b4ea56bbaf`，实施范围为：
 
 1. 研究目标快照依据真实 `parent_comment_external_id` 带入直接父评论；无父评论的 root 使用已有作品语境继续判断，不因短文本自动拦截。预览、冻结、预算估算和 dispatch 共用这一输入装配路径；父语境只解释指代，不能充作评论证据。
-2. 手动默认模式继续处理从未研究、失败/取消、安全停住的旧目标，以及输入指纹变化后已可研究的 needs_context/恢复资格目标；跳过成功、在途和输入未变的 needs_context；不创建部分响应解析器。
+2. 手动默认保持 `new_only`；源 Run 的显式“补跑未完成”使用现有 `continue_ready` 选择和同一预算/幂等事务，重新排除后续成功、在途、受限与输入未变的 needs_context。是否将普通默认扩大为新增加可恢复项仍待 Mog 决定；不创建部分响应解析器。
 3. `response_too_large` 区分 SSE 流 256 KiB 与最终文本 64 KiB 上限。多目标调用超限时仅对未接纳目标进行一次单目标恢复，并保留 per-target max attempts；临时网络类仍按既有上限重试，认证失败不重放，未知 usage 仍保守记账并明确显示未知。
 4. 用户可从目标详情查看原声、Run 冻结作品语境/父评论、Signal 或精确 needs_context/失败原因及当前可执行的恢复建议。所有合格 Signal 直接出现在所选 Run 结果中；Run 汇总区分成功、无信号、等待语境、失败与排除。
 5. 作品目录以 workRef + observation role 归并重复采集关联，再从研究候选中排除 eligible comment count 为零的作品；预览与启动继续共享选择器。

@@ -25,6 +25,7 @@ WORK_REF = "00000000-0000-4000-8000-000000000002"
 OLD_POLICY_REF = "00000000-0000-4000-8000-000000000003"
 NEW_POLICY_REF = "00000000-0000-4000-8000-000000000004"
 RUN_REF = "00000000-0000-4000-8000-000000000005"
+RECOVERY_RUN_REF = "00000000-0000-4000-8000-000000000010"
 OLDER_RUN_REF = "10000000-0000-4000-8000-000000000007"
 MODEL_REASON = "评论仅缺少直接父评论中的指代对象，无法确认具体情境。"
 
@@ -67,6 +68,7 @@ def run_synthetic() -> None:
         "active_policy": OLD_POLICY_REF,
         "created": False,
         "stopped": False,
+        "recovered": False,
         "deep_active_mode": False,
         "policy_page_cursors": [],
         "run_page_cursors": [],
@@ -147,7 +149,7 @@ def run_synthetic() -> None:
             "dispatchState": "stopped" if state["stopped"] else "enabled",
             "dispatchReason": "user_stopped" if state["stopped"] else None,
             "controlVersion": 1 if state["stopped"] else 0,
-            "pendingCount": 2,
+            "pendingCount": 0 if state["stopped"] else 2,
             "workCount": 1,
             "primaryWorkCount": 1,
             "referenceWorkCount": 0,
@@ -157,6 +159,8 @@ def run_synthetic() -> None:
             "needsContextCount": 0,
             "failedCount": 0,
             "excludedCount": 0,
+            "cancelledCount": 2 if state["stopped"] else 0,
+            "limits": {"commentBudget": 2, "contextCharacterBudget": 3500, "tokenLimit": 4096},
         }
 
     def api_reply(route) -> None:
@@ -246,18 +250,38 @@ def run_synthetic() -> None:
                     "dispatchReason": "user_stopped",
                     "targetCount": 5,
                     "pendingCount": 0,
+                    "cancelledCount": 0,
                 }
                 response = {"runs": [older_run], "page": {"hasMore": False, "nextCursor": None}}
             else:
                 response = {
-                    "runs": [run_record()] if state["created"] else [],
+                    "runs": ([{**run_record(), "runRef": RECOVERY_RUN_REF, "recoverySourceRunRef": RUN_REF,
+                              "finishedAt": None, "state": "queued", "dispatchState": "enabled",
+                              "cancelledCount": 0, "pendingCount": 1}, run_record()]
+                             if state["recovered"] else [run_record()] if state["created"] else []),
                     "page": {"hasMore": state["created"], "nextCursor": "older-run" if state["created"] else None},
                 }
         elif request.method == "GET" and path == "targets":
+            requested_run = query.get("runRef", [None])[0]
             response = {
-                "runRef": RUN_REF,
+                "runRef": requested_run,
                 "page": {"hasMore": False, "nextCursor": None},
-                "targets": [
+                "targets": ([{
+                    "targetRef": "00000000-0000-4000-8000-000000000011",
+                    "sourceRef": "00000000-0000-4000-8000-000000000009",
+                    "workRef": WORK_REF,
+                    "observationRole": "primary",
+                    "commentText": "补跑目标重新冻结的评论",
+                    "sourceState": "known",
+                    "researchText": "补跑目标重新冻结的评论",
+                    "dependencyState": "self_contained",
+                    "contextState": "ready",
+                    "state": "queued",
+                    "workContext": {"sources": []},
+                    "parentContext": {"state": "none"},
+                    "attemptCount": 0,
+                    "signalCount": 0,
+                }] if requested_run == RECOVERY_RUN_REF else [
                     {
                         "targetRef": "00000000-0000-4000-8000-000000000008",
                         "sourceRef": "00000000-0000-4000-8000-000000000009",
@@ -287,7 +311,7 @@ def run_synthetic() -> None:
                         "attemptCount": 1,
                         "signalCount": 0,
                     }
-                ],
+                ]),
             }
         elif request.method == "GET" and path == "overview":
             response = {"cleanLayerState": "ready", "latestRun": None}
@@ -330,6 +354,11 @@ def run_synthetic() -> None:
                     "dispatchReason": "user_stopped",
                 }
             }
+        elif request.method == "POST" and path == f"runs/{RUN_REF}/recover":
+            requests["recover"] = payload
+            state["recovered"] = True
+            response = {"outcome": "created", "runRef": RECOVERY_RUN_REF,
+                        "targetCount": 1, "requestRef": payload["requestRef"]}
         else:
             unexpected.append(f"{request.method} {request.url}")
             route.fulfill(status=501, content_type="application/json", body='{"error":"unexpected request"}')
@@ -348,7 +377,7 @@ def run_synthetic() -> None:
             page.get_by_role("button", name="发起研究").click()
             page.locator(f"#work-{WORK_REF}").wait_for(state="visible")
             page.locator(f"#study-policy option[value='{OLD_POLICY_REF}']").wait_for(state="attached")
-            assert page.locator("#study-mode").input_value() == "continue_ready"
+            assert page.locator("#study-mode").input_value() == "new_only"
 
             page.get_by_role("button", name="编辑方法").click()
             page.locator("#method-name").wait_for(state="visible")
@@ -374,13 +403,19 @@ def run_synthetic() -> None:
             page.get_by_text("查看本次输入、原因与处理建议", exact=True).click()
             page.get_by_text(MODEL_REASON, exact=True).wait_for()
             page.get_by_text("本条是回复，但本次运行没有冻结父评论", exact=True).wait_for()
-            page.get_by_text("这次 Run 漏带了父评论；修正输入组装后再启动，输入指纹变化时会进入默认续做。", exact=True).wait_for()
+            page.get_by_text("这次 Run 漏带了父评论；修正输入组装后可从源 Run 显式补跑。", exact=True).wait_for()
             page.get_by_role("button", name="加载更早运行").click()
             page.locator(".study-review-table tbody tr").filter(has_text=OLDER_RUN_REF[:8]).wait_for()
             page.get_by_role("button", name="停止本次运行").click()
             page.get_by_text(f"Run {RUN_REF} · 当前未终态 2 条 · 目标总数 2 条", exact=True).wait_for()
             page.locator("#study-stop-confirm").click()
             page.get_by_text("已按服务端回执停止本次运行。", exact=True).wait_for()
+            page.locator(".study-review-table tbody tr").filter(has_text=RUN_REF[:8]).get_by_role("button", name="补跑未完成").click()
+            page.get_by_text(f"源 Run {RUN_REF}。", exact=False).wait_for()
+            page.locator("#study-recover-confirm").click()
+            page.get_by_text(f"已按服务端回执创建补跑 Run {RECOVERY_RUN_REF}", exact=False).wait_for()
+            page.locator(".study-run-detail blockquote").filter(has_text="补跑目标重新冻结的评论").wait_for()
+            assert page.get_by_text(MODEL_REASON, exact=True).count() == 0
 
             assert requests.get("policy", {}).get("stageInstructions", {}).get("semantic") == "只用于隔离浏览器回归", requests.get("policy")
             assert requests.get("activate", {}).get("expectedActivePolicyRef") == OLD_POLICY_REF
@@ -393,15 +428,41 @@ def run_synthetic() -> None:
             start = requests.get("start", {})
             assert start.get("policyRef") == NEW_POLICY_REF
             assert start.get("requestRef")
-            assert start.get("mode") == "continue_ready"
+            assert start.get("mode") == "new_only"
             assert start.get("workRoles") == [{"contentPublicRef": WORK_REF, "observationRole": "primary"}]
             assert requests.get("stop", {}).get("expectedControlVersion") == 0
+            assert requests.get("recover", {}).get("domainRef") == DOMAIN_REF
+            assert requests.get("recover", {}).get("requestRef")
             assert not unexpected, "Unexpected API calls: " + "; ".join(unexpected)
+
+            assert page.evaluate("""async () => {
+              const originalFetch = window.fetch;
+              const pending = [];
+              const template = allRuns[0];
+              window.fetch = (url, options) => String(url).includes('/api/local/comment-study/runs?')
+                ? new Promise(resolve => pending.push(resolve)) : originalFetch(url, options);
+              try {
+                const older = loadRunListPage(true);
+                const newer = loadRunListPage(true);
+                if (pending.length !== 2) return false;
+                const reply = state => new Response(JSON.stringify({
+                  runs: [{ ...template, state }], page: { nextCursor: null }
+                }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+                pending[1](reply('running'));
+                await newer;
+                pending[0](reply('cancelled'));
+                await older;
+                return allRuns.length === 1 && allRuns[0].state === 'running';
+              } finally {
+                window.fetch = originalFetch;
+              }
+            }"""), "a late Run-list response replaced the newer server snapshot"
 
             state.update(
                 active_policy=OLD_POLICY_REF,
                 created=False,
                 stopped=False,
+                recovered=False,
                 deep_active_mode=True,
             )
             cursor_start = len(state["policy_page_cursors"])

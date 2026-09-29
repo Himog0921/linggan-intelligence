@@ -456,14 +456,18 @@ async fn reject_target_with_detail(
     let deterministic_failure = matches!(
         provider_failure,
         Some(
-            "authentication_failed"
+            "model_secret_unavailable"
+                | "authentication_failed"
                 | "provider_request_rejected"
                 | "provider_endpoint_not_found"
                 | "provider_redirect_rejected"
                 | "provider_content_filtered"
+                | "model_input_limit"
         )
-    ) || (provider_failure == Some("response_too_large")
-        && !single_target_retry);
+    ) || (matches!(
+        provider_failure,
+        Some("response_too_large" | "output_limit")
+    ) && !single_target_retry);
     let next_state = if !retry_authorized {
         "cancelled"
     } else if deterministic_failure {
@@ -580,8 +584,10 @@ pub(crate) async fn settle_dispatched_batch_targets(
     let mut retried = 0;
     let mut failed = 0;
     let mut cancelled = 0;
-    let split_response =
-        provider_failure_code == Some("response_too_large") && target_refs.len() > 1;
+    let split_response = matches!(
+        provider_failure_code,
+        Some("response_too_large" | "output_limit")
+    ) && target_refs.len() > 1;
     for target_ref in target_refs {
         let mut detail = json!({"stage":stage,"providerFailureCode":provider_failure_code});
         if split_response && retry_authorized {

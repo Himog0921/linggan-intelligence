@@ -3,7 +3,8 @@ use crate::comment_study_policy::{
     CompiledStudyMethod, StudyPolicyStoreError, store, verify_study_method,
 };
 use crate::comment_study_selection::{
-    SelectionPreviewCommand, StartStudyRunCommand, StudyRunLimits, StudySelectionError,
+    CommentKey, SelectionPreviewCommand, StartStudyRunCommand, StudyRunLimits, StudyScope,
+    StudySelectionError, StudySelectionMode, StudyWorkRole,
     snapshot::{FrozenSelection, read_frozen_selection},
     study_domain_lock_key,
 };
@@ -11,7 +12,7 @@ use linggan_storage_postgres::Database;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::{Postgres, Row, Transaction};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -30,6 +31,8 @@ pub enum StudyStartError {
     SchemaUnavailable,
     #[error("resource_not_found")]
     NotFound,
+    #[error("no_recovery_targets")]
+    NoRecoveryTargets,
     #[error("idempotency_conflict")]
     IdempotencyConflict,
     #[error("study_busy")]
@@ -633,10 +636,110 @@ pub async fn start_study_run(
     origin: TrustedStudyOrigin,
 ) -> Result<StudyStartReceipt, StudyStartError> {
     let TrustedStudyOrigin::Manual = origin;
+    start_study_run_for_source(database, command, None).await
+}
+
+/// A source Run supplies only an exact immutable scope and its original limits. Eligibility,
+/// later successful results, restrictions and in-flight work are checked again by start_once.
+pub async fn recover_study_run(
+    database: &Database,
+    domain_ref: Uuid,
+    source_run_ref: Uuid,
+    request_ref: Uuid,
+) -> Result<StudyStartReceipt, StudyStartError> {
+    if domain_ref.is_nil() || source_run_ref.is_nil() || request_ref.is_nil() {
+        return Err(StudySelectionError::InvalidRequest.into());
+    }
+    let mut tx = begin(database).await?;
+    sqlx::query("SET TRANSACTION READ ONLY")
+        .execute(&mut *tx)
+        .await?;
+    ensure_start_schema(&mut tx).await?;
+    let source = sqlx::query(
+        "SELECT run.policy_ref,run.comment_budget,run.context_character_budget,run.token_limit \
+         FROM linggan_comment_study_run run JOIN linggan_comment_study_policy policy USING(policy_ref) \
+         WHERE run.run_ref=$1 AND policy.domain_ref=$2 AND run.finished_at IS NOT NULL \
+           AND run.selection_manifest->>'contract'='comment-study.run-selection.v2'",
+    )
+    .bind(source_run_ref)
+    .bind(domain_ref)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(StudyStartError::NotFound)?;
+    let keys = sqlx::query(
+        "SELECT target.content_public_ref,target.comment_external_id \
+         FROM linggan_comment_study_target target WHERE target.run_ref=$1 \
+           AND target.state IN ('failed','cancelled','excluded','needs_context') \
+         ORDER BY target.content_public_ref,target.comment_external_id",
+    )
+    .bind(source_run_ref)
+    .fetch_all(&mut *tx)
+    .await?
+    .into_iter()
+    .map(|row| CommentKey {
+        work_ref: row.get("content_public_ref"),
+        comment_external_id: row.get("comment_external_id"),
+    })
+    .collect::<Vec<_>>();
+    if keys.is_empty() {
+        return Err(StudyStartError::NoRecoveryTargets);
+    }
+    let work_refs = keys.iter().map(|key| key.work_ref).collect::<BTreeSet<_>>();
+    let roles = sqlx::query(
+        "SELECT content_public_ref,observation_role FROM linggan_comment_study_work WHERE run_ref=$1",
+    )
+    .bind(source_run_ref)
+    .fetch_all(&mut *tx)
+    .await?
+    .into_iter()
+    .filter(|row| work_refs.contains(&row.get::<Uuid, _>("content_public_ref")))
+    .map(|row| {
+        let role: String = row.get("observation_role");
+        Ok(StudyWorkRole {
+            content_public_ref: row.get("content_public_ref"),
+            observation_role: match role.as_str() {
+                "primary" => crate::comment_study_source::StudySourceRole::Primary,
+                "reference" => crate::comment_study_source::StudySourceRole::Reference,
+                _ => return Err(StudySelectionError::InvalidSnapshot),
+            },
+        })
+    })
+    .collect::<Result<Vec<_>, StudySelectionError>>()?;
+    tx.commit().await?;
+    let command = StartStudyRunCommand {
+        request_ref,
+        domain_ref,
+        policy_ref: source.get("policy_ref"),
+        scope: StudyScope::Comments { comment_keys: keys },
+        work_roles: roles,
+        mode: StudySelectionMode::ContinueReady,
+        limits: StudyRunLimits {
+            comment_budget: source.get("comment_budget"),
+            context_character_budget: source.get("context_character_budget"),
+            token_limit: source.get("token_limit"),
+        },
+        reason: None,
+    };
+    start_study_run_for_source(database, command, Some(source_run_ref)).await
+}
+
+async fn start_study_run_for_source(
+    database: &Database,
+    command: StartStudyRunCommand,
+    source_run_ref: Option<Uuid>,
+) -> Result<StudyStartReceipt, StudyStartError> {
     let command = command.normalize()?;
-    let hash = command.manual_request_hash()?;
+    let command_hash = command.manual_request_hash()?;
+    let hash = if let Some(source_run_ref) = source_run_ref {
+        crate::comment_study_policy::json_hash(&json!({
+            "commandHash":command_hash,"recoverySourceRunRef":source_run_ref
+        }))
+        .map_err(|_| StudySelectionError::InvalidRequest)?
+    } else {
+        command_hash
+    };
     for attempt in 0..=3 {
-        match start_once(database, &command, &hash).await {
+        match start_once(database, &command, &hash, source_run_ref).await {
             Ok(receipt) => return Ok(receipt),
             Err(error) if retryable(&error) => {
                 if attempt == 3 {
@@ -704,6 +807,7 @@ async fn start_once(
     database: &Database,
     command: &StartStudyRunCommand,
     hash: &str,
+    source_run_ref: Option<Uuid>,
 ) -> Result<StudyStartReceipt, StudyStartError> {
     let mut tx = begin(database).await?;
     sqlx::query("SELECT pg_advisory_xact_lock($1)")
@@ -736,13 +840,16 @@ async fn start_once(
     };
     let receipt = write::receipt(&snapshot, command.request_ref, &command.limits, run);
     if let Some(run) = run {
-        write::insert_run(&mut tx, command, run, &policy, snapshot).await?;
+        write::insert_run(&mut tx, command, run, &policy, snapshot, source_run_ref).await?;
     }
     let inserted = sqlx::query("INSERT INTO linggan_comment_study_start_request \
         (request_ref,domain_ref,policy_ref,request_hash,origin,command_manifest,outcome,run_ref,result_manifest) \
         VALUES($1,$2,$3,$4,'manual',$5,$6,$7,$8) ON CONFLICT(request_ref) DO NOTHING")
         .bind(command.request_ref).bind(command.domain_ref).bind(command.policy_ref).bind(hash)
-        .bind(json!(command)).bind(&receipt.outcome).bind(run).bind(json!(receipt))
+        .bind(if let Some(source_run_ref) = source_run_ref {
+            json!({"command":command,"recoverySourceRunRef":source_run_ref})
+        } else { json!(command) })
+        .bind(&receipt.outcome).bind(run).bind(json!(receipt))
         .execute(&mut *tx).await?;
     if inserted.rows_affected() != 1 {
         return Err(StudyStartError::IdempotencyConflict);

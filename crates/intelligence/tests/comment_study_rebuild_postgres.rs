@@ -1398,7 +1398,23 @@ async fn read_targets_hides_comment_text_once_the_source_becomes_restricted_afte
     let runs = read_runs(&database, &query).await.unwrap();
     let run_ref = runs["runs"][0]["runRef"].as_str().unwrap().parse().unwrap();
     let run_query = domain_read_query(Some(run_ref));
+    sqlx::query(
+        "INSERT INTO linggan_comment_study_semantic_attempt( \
+           attempt_ref,target_ref,attempt_ordinal,request_hash,state,output_manifest,rejection_code,finished_at \
+         ) VALUES($1,$2,2,$3,'rejected',$4,'semantic_contract',scope_001_now())",
+    )
+    .bind(Uuid::new_v4())
+    .bind(target_ref)
+    .bind("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+    .bind(serde_json::json!({"outcome":"needs_context","reason":"SYNTHETIC-PRIVATE-MODEL-REASON"}))
+    .execute(database.pool())
+    .await
+    .unwrap();
     let before = read_targets(&database, &run_query).await.unwrap();
+    assert_eq!(
+        before["targets"][0]["latestAttempt"]["modelReason"],
+        "SYNTHETIC-PRIVATE-MODEL-REASON"
+    );
     assert_eq!(
         before["targets"][0]["commentText"],
         "孩子每天写作业都要催，不催就不开始，我很着急。"
@@ -1422,6 +1438,9 @@ async fn read_targets_hides_comment_text_once_the_source_becomes_restricted_afte
         "after={after}"
     );
     assert_eq!(after["targets"][0]["sourceState"], "restricted");
+    assert!(after["targets"][0]["modelReason"].is_null());
+    assert!(after["targets"][0]["latestAttempt"]["modelReason"].is_null());
+    assert!(!after.to_string().contains("SYNTHETIC-PRIVATE-MODEL-REASON"));
     assert_eq!(
         after["targets"][0]["state"], "succeeded",
         "restriction must not silently change the frozen target lifecycle state"
@@ -1522,6 +1541,25 @@ async fn read_targets_distinguishes_missing_and_frozen_parent_context_and_honors
         frozen["targets"][0]["parentContext"]["researchText"],
         parent.1
     );
+    sqlx::query(
+        "INSERT INTO linggan_comment_study_semantic_attempt( \
+           attempt_ref,target_ref,attempt_ordinal,request_hash,state,output_manifest,rejection_code,finished_at \
+         ) VALUES($1,$2,1,$3,'rejected',$4,'semantic_contract',scope_001_now())",
+    )
+    .bind(Uuid::new_v4())
+    .bind(target_ref)
+    .bind("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+    .bind(serde_json::json!({"outcome":"needs_context","reason":format!("父评论写道：{}", parent.1)}))
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let before_restriction = read_targets(&database, &run_query).await.unwrap();
+    assert!(
+        before_restriction["targets"][0]["modelReason"]
+            .as_str()
+            .unwrap()
+            .contains(&parent.1)
+    );
 
     sqlx::query(
         "INSERT INTO linggan_material_comment_restriction( \
@@ -1539,6 +1577,9 @@ async fn read_targets_distinguishes_missing_and_frozen_parent_context_and_honors
         "restricted"
     );
     assert!(restricted["targets"][0]["parentContext"]["researchText"].is_null());
+    assert!(restricted["targets"][0]["modelReason"].is_null());
+    assert!(restricted["targets"][0]["latestAttempt"]["modelReason"].is_null());
+    assert!(!restricted.to_string().contains(&parent.1));
 }
 
 #[tokio::test]
@@ -1702,6 +1743,99 @@ async fn read_signals_hides_evidence_and_proposition_once_the_source_becomes_res
     assert_eq!(
         after["signals"][0]["eligibilityState"], "eligible",
         "restriction must not silently change the signal's own eligibility fact"
+    );
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn read_signals_hides_derived_text_when_the_frozen_parent_becomes_restricted() {
+    let database = proof_database("comment_study_read_signals_parent_restricted").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    apply_productization_schema(&database).await;
+    detail_with_author(
+        &database,
+        "parent-signal-note",
+        "ADHD 笔记",
+        Some("creator-1"),
+    )
+    .await;
+    let parent_ref = comment_with_author(
+        &database,
+        "parent-signal-note",
+        "parent-signal-comment",
+        "SYNTHETIC-PRIVATE-PARENT-CONTEXT",
+        Some("reader-1"),
+        "2026-09-16T08:00:00Z",
+    )
+    .await;
+    let reply_ref = reply_with_author(
+        &database,
+        "parent-signal-note",
+        "parent-signal-reply",
+        "parent-signal-comment",
+        "孩子每天写作业都要催，不催就不开始，我很着急。",
+        Some("reader-2"),
+        "2026-09-16T08:00:01Z",
+    )
+    .await;
+    let work_ref: Uuid = sqlx::query_scalar(
+        "SELECT content_public_ref FROM linggan_material_comment WHERE material_ref=$1",
+    )
+    .bind(reply_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let policy_ref = seed_study_policy(&database).await;
+    let target_ref = seed_running_target(&database, policy_ref, work_ref, reply_ref).await;
+    sqlx::query("UPDATE linggan_comment_study_target SET parent_source_ref=$2 WHERE target_ref=$1")
+        .bind(target_ref)
+        .bind(parent_ref)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    let mut output = semantic_output("每天写作业都要催,不催就不开始");
+    output["signals"][0]["proposition"] = serde_json::json!("SYNTHETIC-PRIVATE-PARENT-CONTEXT");
+    output["signals"][0]["problemFrame"]["context"]["value"] =
+        serde_json::json!("SYNTHETIC-PRIVATE-PARENT-CONTEXT");
+    let accepted = accept_target_output(
+        &database,
+        target_ref,
+        "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        None,
+        output,
+    )
+    .await
+    .unwrap();
+    assert_eq!(accepted.state, "accepted");
+    assert_eq!(accepted.signal_count, 1);
+    let runs = read_runs(&database, &domain_read_query(None))
+        .await
+        .unwrap();
+    let run_ref = runs["runs"][0]["runRef"].as_str().unwrap().parse().unwrap();
+    let run_query = domain_read_query(Some(run_ref));
+    let before = read_signals(&database, &run_query).await.unwrap();
+    assert!(
+        before
+            .to_string()
+            .contains("SYNTHETIC-PRIVATE-PARENT-CONTEXT"),
+        "before={before}"
+    );
+    sqlx::query(
+        "INSERT INTO linggan_material_comment_restriction(content_public_ref,comment_external_id,reason) \
+         VALUES($1,'parent-signal-comment','restricted parent signal proof')",
+    ).bind(work_ref).execute(database.pool()).await.unwrap();
+    let after = read_signals(&database, &run_query).await.unwrap();
+    assert_eq!(after["signals"][0]["sourceState"], "restricted");
+    assert!(after["signals"][0]["proposition"].is_null());
+    assert!(after["signals"][0]["evidence"].is_null());
+    assert!(after["signals"][0]["problemFrame"].is_null());
+    assert!(
+        !after
+            .to_string()
+            .contains("SYNTHETIC-PRIVATE-PARENT-CONTEXT")
     );
 }
 
@@ -2755,6 +2889,45 @@ async fn a_transport_failure_from_the_provider_settles_the_batch_it_dispatched()
         .await
         .unwrap(),
         ("failed".to_owned(), Some("response_too_large".to_owned()))
+    );
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn missing_model_secret_fails_once_without_requeueing_the_same_target() {
+    let database = proof_database("comment_study_secret_missing").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    apply_productization_schema(&database).await;
+    let (_batch_ref, target_ref, error) = dispatch_one_batch_through_the_test_adapter(
+        &database,
+        "study-secret-missing-note",
+        "study-secret-missing-comment",
+        "孩子每天写作业都要催。SETTLEMENT_SECRET_MISSING",
+    )
+    .await;
+    assert!(matches!(error, StudyModelRunnerError::ProviderFailure));
+    assert_eq!(
+        sqlx::query_as::<_, (String, i32, Option<String>)>(
+            "SELECT target.state,attempt.attempt_ordinal,attempt.output_manifest->>'providerFailureCode' \
+             FROM linggan_comment_study_target target \
+             JOIN linggan_comment_study_semantic_attempt attempt USING(target_ref) \
+             WHERE target.target_ref=$1",
+        )
+        .bind(target_ref)
+        .fetch_one(database.pool())
+        .await
+        .unwrap(),
+        ("failed".to_owned(), 1, Some("model_secret_unavailable".to_owned()))
+    );
+    assert_eq!(
+        claim_next_study_batch(&database, Uuid::new_v4(), DEFAULT_BATCH_LEASE_SECONDS)
+            .await
+            .unwrap()
+            .map(|claim| claim.batch_ref),
+        None
     );
 }
 

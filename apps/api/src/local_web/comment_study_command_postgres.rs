@@ -463,7 +463,27 @@ async fn http_missing_scope_and_partial_schema_fail_without_partial_writes() {
 
 #[tokio::test]
 #[ignore = "isolated command HTTP PostgreSQL proof; no shared database or model"]
-async fn http_cancel_is_idempotent_and_restart_selects_only_explicitly_retryable_targets() {
+async fn http_continue_ready_requires_the_source_run_recovery_endpoint() {
+    let p = setup("http_recovery_scope", 1).await;
+    let mut command = p.command.clone();
+    command["mode"] = json!("continue_ready");
+    for (path, body) in [
+        ("/api/local/comment-study/runs", command.clone()),
+        (
+            "/api/local/comment-study/selection-preview",
+            preview_command(&command),
+        ),
+    ] {
+        let (status, response) = send(p.application.clone(), path, body).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(response["error"]["code"], "invalid_request");
+    }
+    assert_eq!(effects(&p.db).await, json!([0, 0, 0, 0]));
+}
+
+#[tokio::test]
+#[ignore = "isolated command HTTP PostgreSQL proof; no shared database or model"]
+async fn http_cancel_is_idempotent_and_source_recovery_keeps_the_exact_targets() {
     let p = setup("http_cancel_restart", 2).await;
     let (status, started) = send(
         p.application.clone(),
@@ -497,18 +517,29 @@ async fn http_cancel_is_idempotent_and_restart_selects_only_explicitly_retryable
     .unwrap();
     assert_eq!(cancelled, 2);
 
-    let mut restart = next(&p.command);
-    restart["mode"] = json!("retry_failed");
-    restart["reason"] = json!("明确续做已取消目标");
-    let (status, resumed) = send(
-        p.application.clone(),
-        "/api/local/comment-study/runs",
-        restart,
-    )
-    .await;
+    add_comment(&p.db, "c0002").await;
+    refresh_clean_cache(&p.db, domain(), 128).await.unwrap();
+
+    let recover_path = format!("/api/local/comment-study/runs/{run_ref}/recover");
+    let recover = json!({"domainRef":domain(),"requestRef":Uuid::new_v4()});
+    let (status, resumed) = send(p.application.clone(), &recover_path, recover.clone()).await;
     assert_eq!(status, StatusCode::CREATED);
     assert_ne!(resumed["runRef"], json!(run_ref));
     assert_eq!(resumed["targetCount"], 2);
+    let recovered_ref: Uuid = serde_json::from_value(resumed["runRef"].clone()).unwrap();
+    let identities: Vec<String> = sqlx::query_scalar(
+        "SELECT comment_external_id FROM linggan_comment_study_target \
+         WHERE run_ref=$1 ORDER BY comment_external_id",
+    )
+    .bind(recovered_ref)
+    .fetch_all(p.db.pool())
+    .await
+    .unwrap();
+    assert_eq!(identities, vec!["c0000".to_owned(), "c0001".to_owned()]);
+    let (status, replay) = send(p.application.clone(), &recover_path, recover).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(replay["runRef"], resumed["runRef"]);
+    assert_eq!(replay["idempotentReplay"], true);
 }
 
 #[tokio::test]
