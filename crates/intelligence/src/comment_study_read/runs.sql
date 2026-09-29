@@ -2,6 +2,7 @@
 -- Bound the Run page first; Work and Target are separate one-to-many relations.
 WITH selected_runs AS MATERIALIZED (
     SELECT run.run_ref, run.as_of, run.state, run.created_at, run.finished_at,
+           to_char(run.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_created_at,
            to_jsonb(run)->'selection_manifest'->>'contract' AS selection_contract,
            COALESCE(to_jsonb(run)->>'dispatch_state','stopped') AS dispatch_state,
            to_jsonb(run)->>'dispatch_reason' AS dispatch_reason,
@@ -9,13 +10,17 @@ WITH selected_runs AS MATERIALIZED (
     FROM linggan_comment_study_run run
     JOIN linggan_comment_study_policy policy USING (policy_ref)
     WHERE ($1::uuid IS NULL OR policy.domain_ref = $1)
+      AND run.created_at <= $2::text::timestamptz
+      AND ($3::text IS NULL OR run.created_at < $3::text::timestamptz
+        OR (run.created_at = $3::text::timestamptz AND run.run_ref < $4::uuid))
     ORDER BY run.created_at DESC, run.run_ref DESC
-    LIMIT $2
+    LIMIT $5
 )
 SELECT run.run_ref,
        run.as_of::text AS as_of,
        run.state,
        run.created_at::text AS created_at,
+       run.cursor_created_at,
        run.finished_at::text AS finished_at,
        run.selection_contract,
        run.dispatch_state,

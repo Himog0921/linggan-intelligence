@@ -366,6 +366,12 @@ fn read_response(result: Result<serde_json::Value, CommentStudyReadError>) -> Re
     match result {
         Ok(value) => Json(value).into_response(),
         Err(CommentStudyReadError::InvalidQuery) => error(StatusCode::BAD_REQUEST, "invalid_query"),
+        Err(CommentStudyReadError::InvalidCursor) => {
+            error(StatusCode::BAD_REQUEST, "invalid_cursor")
+        }
+        Err(CommentStudyReadError::CursorScopeMismatch) => {
+            error(StatusCode::BAD_REQUEST, "cursor_scope_mismatch")
+        }
         Err(CommentStudyReadError::RunUnavailable) => {
             error(StatusCode::NOT_FOUND, "comment_study_run_unavailable")
         }
@@ -568,12 +574,13 @@ mod tests {
     fn comment_study_page_exposes_user_comments_without_restoring_the_old_target_tab() {
         let page = include_str!("comment_study.html");
         assert!(page.contains("<nav class=\"study-tabs\" aria-label=\"评论研究视图\">"));
-        for view in ["overview", "comments", "pending", "problems", "runs"] {
+        for view in ["overview", "comments", "runs", "problems"] {
             assert!(
                 page.contains(&format!("data-view=\"{view}\"")),
                 "missing tab button for view={view}"
             );
         }
+        assert!(!page.contains("data-view=\"results\""));
         assert!(page.contains("data-view=\"overview\" aria-current=\"page\""));
         assert!(page.contains("id=\"study-run-picker\" class=\"study-run-picker\" hidden"));
         assert!(page.contains("id=\"study-run-select\""));
@@ -583,13 +590,19 @@ mod tests {
     }
 
     #[test]
-    fn comment_study_script_renders_a_run_scoped_targets_tab_with_original_comment_text() {
+    fn comment_study_results_render_targets_and_signals_for_the_selected_run() {
         let script = include_str!("comment_study.js");
-        assert!(script.contains("const RUN_SCOPED_VIEWS = new Set(['pending']);"));
-        assert!(script.contains("async function renderTargetsTab()"));
-        assert!(
-            script.contains("`targets?runRef=${encodeURIComponent(selectedRunRef)}&limit=100`")
-        );
+        assert!(script.contains("const RUN_SCOPED_VIEWS = new Set(['runs']);"));
+        assert!(script.contains("function renderTargetsPanel(targets)"));
+        assert!(script.contains("async function renderSelectedRunPanel()"));
+        assert!(script.contains("await renderSelectedRunPanel()"));
+        assert!(script.contains("async function loadRunPanelPage(panel, reset = false)"));
+        assert!(script.contains("state.nextCursor = response.page?.nextCursor || null"));
+        assert!(script.contains("runListNextCursor = response.page?.nextCursor || null"));
+        assert!(script.contains("data-run-list-load-more"));
+        assert!(script.contains("list(state.items, signalCard"));
+        assert!(script.contains("data-run-panel=\"targets\""));
+        assert!(script.contains("data-run-panel=\"signals\""));
         assert!(script.contains("target.commentText"));
         assert!(script.contains("sourceStateLabel[target.sourceState]"));
         assert!(script.contains(
@@ -616,19 +629,16 @@ mod tests {
                         .is_some_and(|reload_index| selection_index < reload_index)
                 }),
             "creating a run must select it before reloading the review tabs, otherwise \
-             the targets/pending tabs keep showing the previously selected run"
+             the selected Run panel keeps showing the previously selected run"
         );
     }
 
     #[test]
-    fn comment_study_script_filters_pending_signals_by_resolution_state_not_by_kind() {
+    fn comment_study_results_include_signals_in_every_resolution_state() {
         let script = include_str!("comment_study.js");
-        assert!(script.contains(
-            "const PENDING_RESOLUTION_STATES = new Set(['pending', 'deferred_context', 'deferred_ambiguous', 'deferred_novel', 'retrieval_incomplete', 'budget_stopped']);"
-        ));
-        assert!(script.contains(
-            "signal.resolutionState == null || PENDING_RESOLUTION_STATES.has(signal.resolutionState)"
-        ));
+        assert!(script.contains("async function renderSelectedRunPanel()"));
+        assert!(script.contains("list(state.items, signalCard"));
+        assert!(!script.contains("PENDING_RESOLUTION_STATES"));
     }
 
     #[test]
@@ -670,7 +680,7 @@ mod tests {
         assert!(
             script.contains("signal.sourceState === 'restricted'"),
             "a Signal's evidence is a literal quote of the original comment (see \
-             comment_study_semantic.rs); the pending-merge tab must stop quoting it once the \
+             comment_study_semantic.rs); the result panel must stop quoting it once the \
              backend reports the source as restricted, the same way the targets tab already does"
         );
         assert!(script.contains("来源已被限制，原声与摘要不再显示"));
@@ -688,8 +698,7 @@ mod tests {
         assert!(script.contains("if (token !== renderToken) return;"));
         for renderer in [
             "async function renderOverviewTab()",
-            "async function renderTargetsTab()",
-            "async function renderPendingTab()",
+            "async function renderSelectedRunPanel()",
             "async function renderProblemsTab()",
             "async function renderRunsTab()",
         ] {

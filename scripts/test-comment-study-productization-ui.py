@@ -25,6 +25,8 @@ WORK_REF = "00000000-0000-4000-8000-000000000002"
 OLD_POLICY_REF = "00000000-0000-4000-8000-000000000003"
 NEW_POLICY_REF = "00000000-0000-4000-8000-000000000004"
 RUN_REF = "00000000-0000-4000-8000-000000000005"
+OLDER_RUN_REF = "10000000-0000-4000-8000-000000000007"
+MODEL_REASON = "评论仅缺少直接父评论中的指代对象，无法确认具体情境。"
 
 
 class StaticPageHandler(BaseHTTPRequestHandler):
@@ -67,6 +69,7 @@ def run_synthetic() -> None:
         "stopped": False,
         "deep_active_mode": False,
         "policy_page_cursors": [],
+        "run_page_cursors": [],
     }
     requests: dict[str, dict] = {}
     unexpected: list[str] = []
@@ -230,7 +233,62 @@ def run_synthetic() -> None:
                 }
             }
         elif request.method == "GET" and path == "runs":
-            response = {"runs": [run_record()] if state["created"] else []}
+            cursor = query.get("cursor", [None])[0]
+            state["run_page_cursors"].append(cursor)
+            if cursor == "older-run":
+                older_run = {
+                    **run_record(),
+                    "runRef": OLDER_RUN_REF,
+                    "createdAt": "2026-09-20T08:00:00Z",
+                    "finishedAt": "2026-09-20T08:01:00Z",
+                    "state": "completed",
+                    "dispatchState": "stopped",
+                    "dispatchReason": "user_stopped",
+                    "targetCount": 5,
+                    "pendingCount": 0,
+                }
+                response = {"runs": [older_run], "page": {"hasMore": False, "nextCursor": None}}
+            else:
+                response = {
+                    "runs": [run_record()] if state["created"] else [],
+                    "page": {"hasMore": state["created"], "nextCursor": "older-run" if state["created"] else None},
+                }
+        elif request.method == "GET" and path == "targets":
+            response = {
+                "runRef": RUN_REF,
+                "page": {"hasMore": False, "nextCursor": None},
+                "targets": [
+                    {
+                        "targetRef": "00000000-0000-4000-8000-000000000008",
+                        "sourceRef": "00000000-0000-4000-8000-000000000009",
+                        "parentSourceRef": None,
+                        "workRef": WORK_REF,
+                        "observationRole": "primary",
+                        "commentText": "黑脸了。可能和上课心情一样",
+                        "sourceState": "known",
+                        "researchText": "黑脸了。可能和上课心情一样",
+                        "dependencyState": "self_contained",
+                        "contextState": "ready",
+                        "state": "needs_context",
+                        "workContext": {"sources": [{"kind": "native_title", "text": "一年级的奔溃时刻"}]},
+                        "parentContext": {"state": "not_included"},
+                        "modelReason": MODEL_REASON,
+                        "latestAttempt": {
+                            "attemptOrdinal": 1,
+                            "state": "accepted",
+                            "usageKnown": True,
+                            "inputTokens": 500,
+                            "outputTokens": 200,
+                            "chargedTokens": 700,
+                            "httpStatus": 200,
+                            "receivedBytes": 1200,
+                            "terminalReceived": True,
+                        },
+                        "attemptCount": 1,
+                        "signalCount": 0,
+                    }
+                ],
+            }
         elif request.method == "GET" and path == "overview":
             response = {"cleanLayerState": "ready", "latestRun": None}
         elif request.method == "GET" and path == "problems":
@@ -290,9 +348,11 @@ def run_synthetic() -> None:
             page.get_by_role("button", name="发起研究").click()
             page.locator(f"#work-{WORK_REF}").wait_for(state="visible")
             page.locator(f"#study-policy option[value='{OLD_POLICY_REF}']").wait_for(state="attached")
+            assert page.locator("#study-mode").input_value() == "continue_ready"
 
             page.get_by_role("button", name="编辑方法").click()
             page.locator("#method-name").wait_for(state="visible")
+            page.get_by_text("编辑副本已载入", exact=False).wait_for()
             page.locator("#method-name").fill("回归验收方法")
             page.locator("#stage-semantic").fill("只用于隔离浏览器回归")
             page.locator("#save-policy").click()
@@ -311,12 +371,18 @@ def run_synthetic() -> None:
 
             page.locator("#start-run").click()
             page.get_by_role("button", name="停止本次运行").wait_for()
+            page.get_by_text("查看本次输入、原因与处理建议", exact=True).click()
+            page.get_by_text(MODEL_REASON, exact=True).wait_for()
+            page.get_by_text("本条是回复，但本次运行没有冻结父评论", exact=True).wait_for()
+            page.get_by_text("这次 Run 漏带了父评论；修正输入组装后再启动，输入指纹变化时会进入默认续做。", exact=True).wait_for()
+            page.get_by_role("button", name="加载更早运行").click()
+            page.locator(".study-review-table tbody tr").filter(has_text=OLDER_RUN_REF[:8]).wait_for()
             page.get_by_role("button", name="停止本次运行").click()
             page.get_by_text(f"Run {RUN_REF} · 当前未终态 2 条 · 目标总数 2 条", exact=True).wait_for()
             page.locator("#study-stop-confirm").click()
             page.get_by_text("已按服务端回执停止本次运行。", exact=True).wait_for()
 
-            assert requests.get("policy", {}).get("stageInstructions", {}).get("semantic") == "只用于隔离浏览器回归"
+            assert requests.get("policy", {}).get("stageInstructions", {}).get("semantic") == "只用于隔离浏览器回归", requests.get("policy")
             assert requests.get("activate", {}).get("expectedActivePolicyRef") == OLD_POLICY_REF
             preview = requests.get("preview", {})
             assert preview.get("limits") == {
@@ -327,6 +393,7 @@ def run_synthetic() -> None:
             start = requests.get("start", {})
             assert start.get("policyRef") == NEW_POLICY_REF
             assert start.get("requestRef")
+            assert start.get("mode") == "continue_ready"
             assert start.get("workRoles") == [{"contentPublicRef": WORK_REF, "observationRole": "primary"}]
             assert requests.get("stop", {}).get("expectedControlVersion") == 0
             assert not unexpected, "Unexpected API calls: " + "; ".join(unexpected)
@@ -460,6 +527,7 @@ def run_live_api(
 
         page.get_by_role("button", name="编辑方法").click()
         page.locator("#method-name").wait_for(state="visible")
+        page.get_by_text("编辑副本已载入", exact=False).wait_for()
         page.locator("#method-name").fill("隔离浏览器方法")
         page.locator("#stage-semantic").fill("仅用于真实 Axum 与隔离 PostgreSQL 浏览器回归")
         page.locator("#save-policy").click()
@@ -541,7 +609,9 @@ def run_live_api(
             (item for item in calls if item["method"] == "POST" and item["path"].endswith("/policies")),
             None,
         )
-        assert policy and policy["payload"]["methodName"] == "隔离浏览器方法"
+        assert policy and policy["payload"]["methodName"] == "隔离浏览器方法", (
+            f"captured policy name={policy['payload'].get('methodName') if policy else None!r}"
+        )
         assert policy["payload"]["stageInstructions"] == {
             "semantic": "仅用于真实 Axum 与隔离 PostgreSQL 浏览器回归",
             "resolution": "",

@@ -27,7 +27,7 @@
     FROM cs_title_scope scope
     JOIN cs_display_titles title USING (work_ref)
     LEFT JOIN work_counts counts USING (work_ref)
-), matching_works AS MATERIALIZED (
+), matching_work_scope AS MATERIALIZED (
     SELECT * FROM work_rows
     WHERE ($6::text IS NULL OR display_title ILIKE $6 ESCAPE E'\\')
       AND CASE $7
@@ -39,20 +39,24 @@
           WHEN 'failed' THEN failed > 0
           ELSE false
       END
+), matching_works AS MATERIALIZED (
+    SELECT * FROM matching_work_scope WHERE eligible > 0
 ), work_page AS (
     SELECT * FROM matching_works
     WHERE $8::uuid IS NULL OR work_ref > $8
     ORDER BY work_ref ASC LIMIT $9
 ), work_totals AS (
-    SELECT count(*) AS total_works, COALESCE(sum(indexed),0)::bigint AS indexed,
-           COALESCE(sum(pending),0)::bigint AS pending FROM matching_works
+    SELECT count(*) AS total_works FROM matching_works
+), coverage_totals AS (
+    SELECT COALESCE(sum(indexed),0)::bigint AS indexed,
+           COALESCE(sum(pending),0)::bigint AS pending FROM matching_work_scope
 )
 SELECT jsonb_build_object(
     'totalWorkCount', (SELECT total_works FROM work_totals),
     'indexCoverage', (SELECT jsonb_build_object(
         'state', CASE WHEN pending = 0 THEN 'ready' ELSE 'partial' END,
         'indexedCount', indexed, 'pendingCount', pending, 'asOf', $2::text
-    ) FROM work_totals),
+    ) FROM coverage_totals),
     'rows', COALESCE((SELECT jsonb_agg(jsonb_build_object(
         'position', jsonb_build_object(
             'createdAt', to_char(work_created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),

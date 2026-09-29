@@ -108,8 +108,12 @@ fn parent_context(
             "parent_required_missing",
         )
     };
+    // Absence of a parent relationship means this is a root comment. Its work context is still
+    // available to the semantic stage; do not turn a short root comment into a missing-parent
+    // failure. A reply whose parent could not be read is represented by Some(parent) with an
+    // unknown/restricted source state below and remains needs_context.
     let Some(parent) = parent else {
-        return Ok(missing(Value::Null));
+        return Ok((Value::Null, Value::Null, None, "self_contained"));
     };
     let parent_key: CommentKey = serde_json::from_value(parent["commentKey"].clone())
         .map_err(|_| StudySelectionError::InvalidSnapshot)?;
@@ -165,12 +169,11 @@ pub fn prepare_study_input(
         return Err(StudySelectionError::InvalidSnapshot);
     }
     let context = retained_context(key, work_context)?;
+    // Parent context follows the actual reply relationship, not the cleaner's text-length
+    // classification. It may help resolve a direct comment's pronouns without ever becoming
+    // evidence for a Signal.
     let (parent_manifest, parent_identity, parent_source_ref, dependency_state) =
-        if cleaned.state == "direct" {
-            (Value::Null, Value::Null, None, "self_contained")
-        } else {
-            parent_context(key, parent)?
-        };
+        parent_context(key, parent)?;
     let raw_sha256 = hash_text(raw);
     let research_sha256 = hash_text(&cleaned.text);
     let input_fingerprint = hash(&json!({"contract":"comment-study.input-fingerprint.v1",

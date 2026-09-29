@@ -119,6 +119,7 @@ impl StudyScope {
 #[serde(rename_all = "snake_case")]
 pub enum StudySelectionMode {
     NewOnly,
+    ContinueReady,
     InputChanged,
     RetryFailed,
     Reanalyse,
@@ -246,8 +247,8 @@ impl StartStudyRunCommand {
         self.scope = selection.scope;
         self.work_roles = selection.work_roles;
         match (self.mode, &self.reason) {
-            (StudySelectionMode::NewOnly, None) => {}
-            (StudySelectionMode::NewOnly, Some(_)) => {
+            (StudySelectionMode::NewOnly | StudySelectionMode::ContinueReady, None) => {}
+            (StudySelectionMode::NewOnly | StudySelectionMode::ContinueReady, Some(_)) => {
                 return Err(StudySelectionError::InvalidRequest);
             }
             (_, Some(reason))
@@ -359,7 +360,7 @@ fn selected_by_mode(mode: StudySelectionMode, row: &SelectionCandidate) -> bool 
     use StudySelectionMode::*;
     use StudyTargetState::*;
     let Some(history) = &row.latest else {
-        return matches!(mode, NewOnly | Reanalyse);
+        return matches!(mode, NewOnly | ContinueReady | Reanalyse);
     };
     let terminal = matches!(
         history.state,
@@ -368,6 +369,16 @@ fn selected_by_mode(mode: StudySelectionMode, row: &SelectionCandidate) -> bool 
     let stopped_legacy = !terminal && history.legacy_stopped_without_live_invocation;
     match mode {
         NewOnly => false,
+        ContinueReady => {
+            matches!(history.state, Failed | Cancelled | Excluded)
+                || (history.state == NeedsContext
+                    && history.input_fingerprint.as_ref().is_some_and(|old| {
+                        row.input_fingerprint
+                            .as_ref()
+                            .is_some_and(|current| current != old)
+                    }))
+                || stopped_legacy
+        }
         InputChanged => {
             terminal
                 && history.input_fingerprint.as_ref().is_some_and(|old| {

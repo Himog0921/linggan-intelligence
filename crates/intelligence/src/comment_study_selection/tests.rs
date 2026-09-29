@@ -280,11 +280,17 @@ fn manual_intent_hash_binds_policy_scope_and_every_budget_not_the_receipt_key() 
     intent.mode = StudySelectionMode::Reanalyse;
     intent.reason = Some("复核".into());
     assert_ne!(original, intent.manual_request_hash().unwrap());
+    let mut continuation = command();
+    continuation.mode = StudySelectionMode::ContinueReady;
+    assert_ne!(original, continuation.manual_request_hash().unwrap());
+    assert!(continuation.clone().normalize().is_ok());
+    continuation.reason = Some("不应接受自由重研理由".into());
+    assert!(continuation.normalize().is_err());
 }
 
 #[test]
 fn work_roles_are_normalized_bound_to_selected_works_and_included_in_intent_hash() {
-    let mut primary = command().normalize().unwrap();
+    let primary = command().normalize().unwrap();
     assert_eq!(
         primary.work_roles,
         vec![StudyWorkRole {
@@ -369,10 +375,72 @@ fn mode_truth_table_preserves_unknown_and_does_not_retry_every_day() {
     );
     assert_eq!(selections(&[candidate(10, 1)], RetryFailed).target_count, 0);
 }
+
+#[test]
+fn continue_ready_selects_only_new_or_provably_recoverable_targets() {
+    use StudySelectionMode::ContinueReady;
+    use StudyTargetState::*;
+    assert_eq!(
+        selections(&[candidate(10, 1)], ContinueReady).target_count,
+        1
+    );
+
+    for state in [Failed, Cancelled, Excluded] {
+        let row = SelectionCandidate {
+            latest: Some(history(state)),
+            ..candidate(10, 1)
+        };
+        assert_eq!(
+            selections(&[row], ContinueReady).target_count,
+            1,
+            "{state:?}"
+        );
+    }
+
+    let mut changed_context = candidate(10, 1);
+    changed_context.latest = Some(history(NeedsContext));
+    changed_context.input_fingerprint = Some("b".repeat(64));
+    assert_eq!(
+        selections(&[changed_context.clone()], ContinueReady).target_count,
+        1
+    );
+    changed_context.input_fingerprint = Some("a".repeat(64));
+    assert_eq!(
+        selections(&[changed_context.clone()], ContinueReady).target_count,
+        0
+    );
+    changed_context.latest.as_mut().unwrap().input_fingerprint = None;
+    changed_context.input_fingerprint = Some("b".repeat(64));
+    assert_eq!(
+        selections(&[changed_context], ContinueReady).target_count,
+        0
+    );
+
+    for state in [Succeeded, NoSignal] {
+        let row = SelectionCandidate {
+            latest: Some(history(state)),
+            input_fingerprint: Some("b".repeat(64)),
+            ..candidate(10, 1)
+        };
+        assert_eq!(
+            selections(&[row], ContinueReady).target_count,
+            0,
+            "{state:?}"
+        );
+    }
+
+    let mut ineligible = candidate(10, 1);
+    ineligible.latest = Some(history(Excluded));
+    ineligible.source_flags[0] = true;
+    let result = selections(&[ineligible], ContinueReady);
+    assert_eq!(result.target_count, 0);
+    assert_eq!(result.exclusion_counts["sourceRestricted"], 1);
+}
 #[test]
 fn authorized_in_progress_wins_over_all_modes_even_after_a_newer_success() {
     for mode in [
         StudySelectionMode::NewOnly,
+        StudySelectionMode::ContinueReady,
         StudySelectionMode::InputChanged,
         StudySelectionMode::RetryFailed,
         StudySelectionMode::Reanalyse,
@@ -408,6 +476,10 @@ fn legacy_unfinished_requires_proven_stop_and_no_live_invocation() {
             .legacy_stopped_without_live_invocation = true;
         assert_eq!(
             selections(&[row.clone()], StudySelectionMode::RetryFailed).target_count,
+            1
+        );
+        assert_eq!(
+            selections(&[row.clone()], StudySelectionMode::ContinueReady).target_count,
             1
         );
         assert_eq!(
@@ -609,7 +681,7 @@ fn filling_parent_dependency_changes_fingerprint_without_changing_raw() {
         Some(&p),
     )
     .unwrap();
-    assert_eq!(missing.dependency_state, "parent_required_missing");
+    assert_eq!(missing.dependency_state, "self_contained");
     assert_eq!(filled.dependency_state, "parent_available");
     assert_eq!(missing.raw_sha256, filled.raw_sha256);
     assert_ne!(missing.input_fingerprint, filled.input_fingerprint);
@@ -672,7 +744,7 @@ fn restricted_and_unknown_parents_never_leak_attached_stale_text() {
     assert_eq!(fingerprints[0], fingerprints[1]);
 }
 #[test]
-fn direct_comment_does_not_fingerprint_unused_parent_context() {
+fn direct_reply_includes_real_parent_context_in_fingerprint() {
     let first = prepared("孩子做作业总是拖延");
     let p = parent("known");
     let second = prepare_study_input(
@@ -683,8 +755,19 @@ fn direct_comment_does_not_fingerprint_unused_parent_context() {
         Some(&p),
     )
     .unwrap();
-    assert_eq!(first.input_fingerprint, second.input_fingerprint);
-    assert!(second.input_manifest["parentContext"].is_null());
+    assert_ne!(first.input_fingerprint, second.input_fingerprint);
+    assert_eq!(second.dependency_state, "parent_available");
+    assert_eq!(
+        second.input_manifest["parentContext"]["researchText"],
+        "孩子做作业需要家长督促"
+    );
+}
+
+#[test]
+fn short_root_comment_uses_work_context_without_a_parent_requirement() {
+    let root = prepared("求分享");
+    assert_eq!(root.dependency_state, "self_contained");
+    assert!(root.input_manifest["parentContext"].is_null());
 }
 #[test]
 fn corrupt_context_parent_and_unusable_raw_are_rejected_without_truncation() {

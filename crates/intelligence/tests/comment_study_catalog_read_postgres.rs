@@ -12,7 +12,7 @@ use linggan_intelligence::comment_study_catalog::{
 use linggan_intelligence::comment_study_source::ADHD_DOMAIN_REF;
 use linggan_storage_postgres::Database;
 use research_fixture::{comment_with_author, detail_with_author};
-use serde_json::{Value, json};
+use serde_json::json;
 use std::collections::BTreeSet;
 use uuid::Uuid;
 

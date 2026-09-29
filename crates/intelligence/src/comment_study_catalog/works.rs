@@ -21,6 +21,7 @@ cs_title_scope AS MATERIALIZED (
     WHERE usage.domain_ref = $1 AND usage.role = $10
       AND content.created_at <= $2::timestamptz
       AND package.accepted_at <= $2::timestamptz
+    GROUP BY content.public_ref,content.created_at,usage.role
 )"#;
 
 #[derive(Debug, Clone, Deserialize)]
