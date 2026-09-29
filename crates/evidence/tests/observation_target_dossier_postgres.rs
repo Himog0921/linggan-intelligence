@@ -863,6 +863,81 @@ async fn a_retired_work_stays_in_the_directory_and_leaves_the_pending_count() {
     );
 }
 
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn creator_gap_request_freezes_each_work_once_with_multiple_domain_usages() {
+    let database = proof_database("dossier_gap_duplicate_domain_usage").await;
+    let installation = ready_installation(&database, "dossier-gap-duplicate-usage").await;
+    let target_ref = seed_creator_target(&database, "creator-gap-duplicate-usage").await;
+    grant_deep_archive(&database, "建立创作者档案", 200).await;
+    request_progressive_archive_and_lease(&database, target_ref, "建立创作者档案", "person", 30)
+        .await
+        .unwrap();
+    complete_progressive_root_with_partial_directory(&database, &installation, 3, "surface_ended")
+        .await;
+
+    let repeated_work: Uuid = sqlx::query_scalar(
+        "SELECT content_public_ref FROM linggan_material_domain_usage \
+         WHERE basis_kind='accepted_discovery' ORDER BY content_public_ref LIMIT 1",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_material_domain_usage \
+           (usage_ref,content_public_ref,domain_ref,role,basis_kind,request_ref,package_ref) \
+         SELECT $1,content_public_ref,domain_ref,role,'admission_reuse',request_ref,package_ref \
+         FROM linggan_material_domain_usage \
+         WHERE content_public_ref=$2 AND basis_kind='accepted_discovery' LIMIT 1",
+    )
+    .bind(Uuid::new_v4())
+    .bind(repeated_work)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let usage_rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_material_domain_usage WHERE content_public_ref=$1",
+    )
+    .bind(repeated_work)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        usage_rows, 2,
+        "one Work now has two valid Domain usage rows"
+    );
+
+    let request = linggan_evidence::request_creator_directory_gaps(
+        &database,
+        target_ref,
+        "建立创作者档案",
+        "person",
+    )
+    .await
+    .expect("Domain usage history must not duplicate the frozen Work scope");
+    let scope: Vec<(Uuid, i32, i32, bool, bool, bool)> = sqlx::query_as(
+        "SELECT content_public_ref,comment_limit,reply_expand_limit, \
+                acquire_media,allow_ocr,allow_asr \
+         FROM collection_work_order_material_target WHERE work_order_ref=$1 ORDER BY ordinal",
+    )
+    .bind(request.work_order_ref.unwrap())
+    .fetch_all(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(scope.len(), 3);
+    assert_eq!(
+        scope.iter().filter(|row| row.0 == repeated_work).count(),
+        1,
+        "the repeated Work is frozen exactly once"
+    );
+    assert!(
+        scope
+            .iter()
+            .all(|row| (row.1, row.2, row.3, row.4, row.5) == (30, 2, true, true, true)),
+        "gap repair preserves the approved detail, comments, replies, and media scope"
+    );
+}
+
 /// T19：**详情已经取到、只是平台没给标题**，仍然算「详情已取得」。
 ///
 /// 此前这张目录用 `detail_title.is_some()` 回答「这一篇有没有详情」。于是一篇详情已经落库、

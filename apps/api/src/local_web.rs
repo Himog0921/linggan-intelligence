@@ -5247,6 +5247,96 @@ fn keyword_archive_error_receipt(error: &AcquisitionChainError) -> &'static str 
     }
 }
 
+fn creator_archive_error_receipt(error: &RequestLeaseError) -> &'static str {
+    match error {
+        RequestLeaseError::Acquisition(
+            AcquisitionChainError::ProgressiveArchiveAuthorizationTooSmall { .. },
+        ) => "archive_authorization_below_200",
+        RequestLeaseError::Acquisition(
+            AcquisitionChainError::ProgressiveArchiveAuthorizationMissing,
+        ) => "archive_refuse",
+        RequestLeaseError::Acquisition(AcquisitionChainError::ProgressiveArchiveNotReady {
+            reason: "detail_batch_in_flight",
+        }) => "archive_in_progress",
+        RequestLeaseError::Acquisition(AcquisitionChainError::ProgressiveArchiveNotReady {
+            reason: "no_missing_accepted_work",
+        }) => "archive_nothing_to_continue",
+        RequestLeaseError::Acquisition(AcquisitionChainError::ProgressiveArchiveNotReady {
+            reason: "archive_baseline_complete",
+        }) => "archive_baseline_complete",
+        RequestLeaseError::Acquisition(AcquisitionChainError::ProgressiveArchiveNotReady {
+            reason: "detail_gap_not_schedulable",
+        }) => "archive_gap_not_schedulable",
+        RequestLeaseError::Acquisition(AcquisitionChainError::TargetDomainUnassigned) => {
+            "target_domain_unassigned"
+        }
+        RequestLeaseError::Acquisition(AcquisitionChainError::UnknownTarget) => {
+            "archive_target_missing"
+        }
+        RequestLeaseError::Acquisition(AcquisitionChainError::TargetNotRequestable { .. }) => {
+            "archive_not_requestable"
+        }
+        RequestLeaseError::Acquisition(
+            AcquisitionChainError::ProgressiveArchivePurposeMismatch,
+        ) => "archive_purpose_mismatch",
+        RequestLeaseError::Lease(_) => "archive_lease_failed",
+        RequestLeaseError::Acquisition(
+            AcquisitionChainError::SchemaUnavailable
+            | AcquisitionChainError::KeywordArchiveIncomplete
+            | AcquisitionChainError::ProgressiveArchiveNotReady { .. }
+            | AcquisitionChainError::InvalidMaterialTargets
+            | AcquisitionChainError::Database(_),
+        ) => "archive_request_failed",
+    }
+}
+
+fn creator_archive_database_kind(error: &sqlx::Error) -> &'static str {
+    match error {
+        sqlx::Error::Database(_) => "database_server",
+        sqlx::Error::RowNotFound => "database_row_not_found",
+        sqlx::Error::PoolTimedOut => "database_pool_timeout",
+        sqlx::Error::PoolClosed => "database_pool_closed",
+        sqlx::Error::Io(_) => "database_io",
+        sqlx::Error::Protocol(_) => "database_protocol",
+        _ => "database_other",
+    }
+}
+
+fn log_creator_archive_failure(
+    error: &RequestLeaseError,
+    target_ref: uuid::Uuid,
+    filling_gaps: bool,
+    failure_ref: uuid::Uuid,
+) {
+    let (kind, sqlstate, constraint) = match error {
+        RequestLeaseError::Acquisition(AcquisitionChainError::Database(error)) => (
+            creator_archive_database_kind(error),
+            error.as_database_error().and_then(|value| value.code()),
+            error
+                .as_database_error()
+                .and_then(|value| value.constraint()),
+        ),
+        RequestLeaseError::Acquisition(AcquisitionChainError::SchemaUnavailable) => {
+            ("schema_unavailable", None, None)
+        }
+        RequestLeaseError::Acquisition(AcquisitionChainError::ProgressiveArchiveNotReady {
+            ..
+        }) => ("unrecognized_not_ready", None, None),
+        RequestLeaseError::Acquisition(AcquisitionChainError::KeywordArchiveIncomplete) => {
+            ("keyword_archive_incomplete", None, None)
+        }
+        RequestLeaseError::Acquisition(AcquisitionChainError::InvalidMaterialTargets) => {
+            ("invalid_material_targets", None, None)
+        }
+        RequestLeaseError::Lease(_) => ("lease", None, None),
+        _ => ("acquisition", None, None),
+    };
+    eprintln!(
+        "creator archive request failed: failure_ref={failure_ref} target_ref={target_ref} action={} kind={kind} sqlstate={sqlstate:?} constraint={constraint:?}",
+        if filling_gaps { "gaps" } else { "archive" },
+    );
+}
+
 async fn collection_target_deep_archive(
     State(state): State<LocalWebState>,
     axum::extract::Form(form): axum::extract::Form<TargetArchiveForm>,
@@ -5430,41 +5520,14 @@ async fn collection_target_deep_archive(
     };
     let outcome = match outcome {
         Ok(outcome) => outcome,
-        Err(RequestLeaseError::Acquisition(
-            AcquisitionChainError::ProgressiveArchiveAuthorizationTooSmall { .. },
-        )) => {
-            return Redirect::to(&target_archive_return_path(
-                &form,
-                Some("archive_authorization_below_200"),
-            ));
-        }
-        Err(RequestLeaseError::Acquisition(
-            AcquisitionChainError::ProgressiveArchiveAuthorizationMissing,
-        )) => {
-            return Redirect::to(&target_archive_return_path(&form, Some("archive_refuse")));
-        }
-        Err(RequestLeaseError::Acquisition(
-            AcquisitionChainError::ProgressiveArchiveNotReady { reason },
-        )) => {
-            let code = if reason == "detail_batch_in_flight" {
-                "archive_in_progress"
-            } else if reason == "no_missing_accepted_work" {
-                "archive_nothing_to_continue"
-            } else {
-                "archive_not_requestable"
-            };
-            return Redirect::to(&target_archive_return_path(&form, Some(code)));
-        }
-        // 「缺领域」不是「状态不允许」：后者的文案是「目标可能已有同类任务在进行，
-        // 或当前状态不允许再次发起」，会把人引向一个永远不会到来的状态流转。
-        Err(RequestLeaseError::Acquisition(AcquisitionChainError::TargetDomainUnassigned)) => {
-            return Redirect::to(&target_archive_return_path(
-                &form,
-                Some("target_domain_unassigned"),
-            ));
-        }
-        Err(_) => {
-            let code = { "archive_not_requestable" };
+        Err(error) => {
+            let code = creator_archive_error_receipt(&error);
+            if code == "archive_request_failed" {
+                let failure_ref = uuid::Uuid::new_v4();
+                log_creator_archive_failure(&error, form.row_target_ref, filling_gaps, failure_ref);
+                let receipt = format!("archive_request_failed_{failure_ref}");
+                return Redirect::to(&target_archive_return_path(&form, Some(&receipt)));
+            }
             return Redirect::to(&target_archive_return_path(&form, Some(code)));
         }
     };

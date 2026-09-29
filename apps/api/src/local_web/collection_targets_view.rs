@@ -269,6 +269,14 @@ fn action_feedback_markup(error: Option<&str>, ahead: Option<i64>) -> String {
     let Some(code) = error else {
         return String::new();
     };
+    let failure_ref = code
+        .strip_prefix("archive_request_failed_")
+        .and_then(|raw| uuid::Uuid::parse_str(raw).ok());
+    let code = if failure_ref.is_some() {
+        "archive_request_failed"
+    } else {
+        code
+    };
     let (class, heading, explanation) = match code {
         "domain_name_required" => (
             "c-src-feedback c-src-feedback-warn",
@@ -327,8 +335,8 @@ fn action_feedback_markup(error: Option<&str>, ahead: Option<i64>) -> String {
         ),
         "creator_detail_requested" => (
             "c-src-feedback c-src-feedback-ok",
-            "已排入详情补采",
-            "已按当前目录冻结这次待补作品，最多 200 篇，等待空闲工位执行。已有详情、已确认失效和正在采集的作品不会重复排入；完成情况以实际材料回执为准。",
+            "已排入缺口补采",
+            "已按当前目录冻结尚缺详情的作品，最多 200 篇；每篇补采详情、评论、回复与媒体，并允许图片文字识别和语音转写。已有合格详情、已确认失效和正在采集的作品不会重复排入；实际取得情况以各项材料回执为准。",
         ),
         "keyword_detail_requested" => (
             "c-src-feedback c-src-feedback-ok",
@@ -479,7 +487,22 @@ fn action_feedback_markup(error: Option<&str>, ahead: Option<i64>) -> String {
         "archive_not_requestable" => (
             "c-src-failure",
             "没有完成",
-            "现在不能重复提交建档或补采。目标可能已有同类任务在进行，或当前状态不允许再次发起。",
+            "目标当前所处阶段不接受这次建档或补采申请。没有新建工单；请查看目标状态。",
+        ),
+        "archive_purpose_mismatch" => (
+            "c-src-failure",
+            "没有完成",
+            "这次建档用途与已有档案任务的冻结用途不一致，没有新建工单。请核对目标原建档用途与当前授权。",
+        ),
+        "archive_target_missing" => (
+            "c-src-failure",
+            "没有完成",
+            "这个观察目标已不存在，没有发起采集。请刷新列表。",
+        ),
+        "archive_request_failed" => (
+            "c-src-feedback c-src-feedback-warn",
+            "提交结果待核对",
+            "建档或补采申请未收到可靠的提交结果。请先刷新目标与采集任务，保留诊断编号供排查，避免直接重复发起。",
         ),
         "archive_in_progress" => (
             "c-src-failure",
@@ -490,6 +513,16 @@ fn action_feedback_markup(error: Option<&str>, ahead: Option<i64>) -> String {
             "c-src-failure",
             "没有完成",
             "当前作品目录没有待补详情，无需重复发起。",
+        ),
+        "archive_baseline_complete" => (
+            "c-src-feedback c-src-feedback-ok",
+            "本轮建档已收口",
+            "本轮根建档基线已收口，没有新建根建档工单。巡检新增作品的缺口请从补采入口查看；其它内容覆盖仍以材料回执为准。",
+        ),
+        "archive_gap_not_schedulable" => (
+            "c-src-feedback c-src-feedback-warn",
+            "缺口暂不能排入",
+            "目录仍有缺详情作品，但当前没有符合执行输入与重试条件的可排任务。本次没有新建工单；请查看受阻作品和采集任务。",
         ),
         "archive_refuse" => (
             "c-src-failure",
@@ -504,7 +537,7 @@ fn action_feedback_markup(error: Option<&str>, ahead: Option<i64>) -> String {
         "archive_lease_failed" => (
             "c-src-failure",
             "没有完成",
-            "建档已完成准备，但暂时没有可用执行资源；稍后可以重试。",
+            "工单准备或执行资源分配未完成；请查看当前采集阶段与工位状态后再试。",
         ),
         "archive_authorization_below_200" => (
             "c-src-failure",
@@ -582,8 +615,11 @@ fn action_feedback_markup(error: Option<&str>, ahead: Option<i64>) -> String {
             explanation = escape(explanation),
         );
     }
+    let diagnostic = failure_ref
+        .map(|reference| format!(" 诊断编号：{reference}。"))
+        .unwrap_or_default();
     format!(
-        r#"<p class="{class}" role="status"><b>{heading}</b>{explanation}</p>"#,
+        r#"<p class="{class}" role="status"><b>{heading}</b>{explanation}{diagnostic}</p>"#,
         class = class,
         heading = heading,
         explanation = escape(explanation),
@@ -1279,6 +1315,31 @@ mod tests {
     use super::super::target_drawer::TargetListContext;
     use super::*;
     use uuid::Uuid;
+
+    #[test]
+    fn creator_archive_failure_shows_only_a_valid_diagnostic_reference() {
+        let reference = Uuid::from_u128(42);
+        let markup =
+            action_feedback_markup(Some(&format!("archive_request_failed_{reference}")), None);
+        assert!(markup.contains("提交结果待核对"));
+        assert!(markup.contains(&format!("诊断编号：{reference}")));
+        assert!(!markup.contains("同类任务"));
+
+        let untrusted = action_feedback_markup(
+            Some("archive_request_failed_<script>alert(1)</script>"),
+            None,
+        );
+        assert!(!untrusted.contains("<script>"));
+        assert!(!untrusted.contains("诊断编号"));
+
+        let complete = action_feedback_markup(Some("archive_baseline_complete"), None);
+        assert!(complete.contains("本轮建档已收口"));
+        assert!(complete.contains("巡检新增作品的缺口"));
+        assert!(!complete.contains("提交结果待核对"));
+        let unschedulable = action_feedback_markup(Some("archive_gap_not_schedulable"), None);
+        assert!(unschedulable.contains("缺口暂不能排入"));
+        assert!(!unschedulable.contains("提交结果待核对"));
+    }
 
     fn target(kind: &str, name: Option<&str>) -> ObservationTarget {
         ObservationTarget {

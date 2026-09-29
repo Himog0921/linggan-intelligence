@@ -725,9 +725,10 @@ async fn request_creator_directory_gaps_inner(
               AND (scoped_order.queue_state='queued'
                    OR (lease.released_at IS NULL AND lease.expires_at>scope_001_now()))) AS in_flight
           FROM directory_work
-          JOIN linggan_material_domain_usage usage
-            ON usage.content_public_ref=directory_work.content_public_ref AND usage.domain_ref=$2
           WHERE NOT directory_work.has_detail AND NOT directory_work.is_retired
+            AND EXISTS (SELECT 1 FROM linggan_material_domain_usage usage
+                        WHERE usage.content_public_ref=directory_work.content_public_ref
+                          AND usage.domain_ref=$2)
           ORDER BY directory_work.content_public_ref"#,
     ))
     .bind(target_ref)

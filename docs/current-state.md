@@ -12,6 +12,12 @@ PR #338、#350 与 [#351](https://github.com/Himog0921/linggan-intelligence/pull
 
 [正式验收账本](audits/comment-study-productization-001/README.md)的 2026-09-30 逐项核验确认机读状态仍为 T23–T26、T43 共 **5 PASS**，其余 **49 NOT_RUN**；隔离测试子场景不自动提升完整 T 编号。T06 旧文字要求未知评论作者不进入研究，而现有 AC043 代码与隔离测试允许其形成 Target/Signal、仅禁止作为新 Problem 的独立已知作者，待合同版本裁定。approved-v1 文档校验仍有八份 SHA 不符。P2 代码已合并，真实页面/数字、真实模型路径与 Mog 业务验收未完成；P3 质量出口仍受独立 Gold Set、分层 Recall@K、获批真实模型和 M4 资源实测约束，P4 尚不放行。
 
+### CREATOR-GAP-REQUEST-20260929（本地候选；未进入运行）
+
+南瓜哒哒“补采缺口”失败的只读复算显示：9 篇缺合格详情的作品被 Domain usage 多行 join 展开为 23 行，`ensure_material_targets_belong_to_platform` 比较唯一内容行数与含重复的候选长度后返回 `InvalidMaterialTargets`，事务回滚。独立分支 `codex/creator-gap-error-20260929` 已用存在性查询消除重复，并把 creator 请求的数据库/合同失败从“当前不能重复提交”改为可追踪的真实失败提示；隔离 PostgreSQL 冻结范围回归与 API/UI 定向单测通过。当前 `origin/main`、常驻 `:3000`、共享库、插件及真实补采均未改变。
+
+Mog 已明确“补采缺口”包括未取得完整详情、标题、正文、媒体、评论等。目前候选选择器仍只识别缺合格详情的作品；其它字段独立缺口的资格和停止条件尚未落地，不能把本次 9 篇去重修复称作完整补采实现。分层边界与待决点见[变更清单](design/changes/creator-gap-request-20260929-ui-change-manifest.md)，本月验证见[进度记录](progress/2026-09.md)。
+
 ### 2026-09-28 · GREENFIELD Comment Research 历史快照（当时 PR #338 为 Draft）
 
 2026-09-28 最新远端核对：PR #338 仍 OPEN/Draft，head=`47de9bf04cd6aee0afa9beed9147635f1260265f`，base=`main@f54778562fbaaff56f482cb3d9fa46b0bbf51965`，`mergeable=MERGEABLE`、check 状态 `CLEAN`。修复了方法保存成功提示早于方法目录刷新完成的竞态；真实 Axum/隔离 PostgreSQL 浏览器回归核对刷新后的选中 `policyRef` 等于 HTTP 201 回执且不同于原方法。精确 head Actions [36394260704](https://github.com/Himog0921/linggan-intelligence/actions/runs/36394260704) 全绿：compile、unit、隔离 PostgreSQL proofs、frontend behavior tests 均通过；push-only `integration-source-export` 按条件跳过。
