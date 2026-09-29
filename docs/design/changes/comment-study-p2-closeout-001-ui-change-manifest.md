@@ -54,6 +54,7 @@
 | 上下文与续做 | 固定样本验证 root、reply、parent missing、context fingerprint 改变及不变 | 待实施 | 人工 Gold Set 与语义质量 |
 | 响应恢复 | 注入 SSE 262144 字节超限，验证仅未接纳目标拆为单目标尝试 | 待实施 | 真实 provider 端容量与成本 |
 | 页面与结果 | API/静态脚本及隔离浏览器检查；Run 理由、冻结上下文与所有合法 Signal 可见 | 待实施 | 共享运行时 `:3000` 和 Mog 人工验收 |
+| 页面 URL 路由 | 页面入口接受页面规格登记的导航字段（domain、view、q、workRef、runRef、problemRef、commentExternalId、state、cursor、detail、panel），API 查询仍各自严格 | 候选分支已修正，待 exact-head 检查 | 候选修复尚未部署到共享运行时 `:3000`；修复后的回归和 Mog 人工验收未完成 |
 
 ## 6. 交接
 

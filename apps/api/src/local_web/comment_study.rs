@@ -60,6 +60,35 @@ struct DomainQuery {
     domain: Option<Uuid>,
 }
 
+/// The page's browser-owned route state is part of its URL and is read after the HTML loads.
+/// Keep the page query strict while accepting the documented navigation fields; API query
+/// structs remain limited to their own contracts.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CommentStudyPageQuery {
+    domain: Option<Uuid>,
+    #[serde(rename = "q")]
+    _q: Option<String>,
+    #[serde(rename = "workRef")]
+    _work_ref: Option<String>,
+    #[serde(rename = "view")]
+    _view: Option<String>,
+    #[serde(rename = "runRef")]
+    _run_ref: Option<String>,
+    #[serde(rename = "problemRef")]
+    _problem_ref: Option<String>,
+    #[serde(rename = "commentExternalId")]
+    _comment_external_id: Option<String>,
+    #[serde(rename = "state")]
+    _state: Option<String>,
+    #[serde(rename = "cursor")]
+    _cursor: Option<String>,
+    #[serde(rename = "detail")]
+    _detail: Option<String>,
+    #[serde(rename = "panel")]
+    _panel: Option<String>,
+}
+
 async fn read_setup(
     State(state): State<LocalWebState>,
     Query(query): Query<DomainQuery>,
@@ -170,7 +199,7 @@ fn embedding_probe_error_code(error: &EmbeddingError) -> &'static str {
 
 async fn page(
     State(state): State<LocalWebState>,
-    Query(query): Query<DomainQuery>,
+    Query(query): Query<CommentStudyPageQuery>,
 ) -> Html<String> {
     let configured = matches!(state.database, LocalDatabaseState::Ready(_));
     let domains = state.database.database().map(|database| async move {
