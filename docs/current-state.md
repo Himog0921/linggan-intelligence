@@ -14,7 +14,7 @@ PR #338、#350 与 [#351](https://github.com/Himog0921/linggan-intelligence/pull
 
 ### CREATOR-GAP-REQUEST-20260929（本地候选；未进入运行）
 
-南瓜哒哒“补采缺口”失败的只读复算显示：9 篇缺合格详情的作品被 Domain usage 多行 join 展开为 23 行，`ensure_material_targets_belong_to_platform` 比较唯一内容行数与含重复的候选长度后返回 `InvalidMaterialTargets`，事务回滚。独立分支 `codex/creator-gap-error-20260929` 已用存在性查询消除重复，并把 creator 请求的数据库/合同失败从“当前不能重复提交”改为可追踪的真实失败提示；隔离 PostgreSQL 冻结范围回归与 API/UI 定向单测通过。当前 `origin/main`、常驻 `:3000`、共享库、插件及真实补采均未改变。
+南瓜哒哒“补采缺口”失败的只读复算显示：9 篇缺合格详情的作品被 Domain usage 多行 join 展开为 23 行，`ensure_material_targets_belong_to_platform` 比较唯一内容行数与含重复的候选长度后返回 `InvalidMaterialTargets`，事务回滚。独立分支 `codex/creator-gap-error-20260929` 的本地提交 `cd9fee02` 已用存在性查询消除重复，并把 creator 请求的数据库/合同失败从“当前不能重复提交”改为可追踪的真实失败提示；隔离 PostgreSQL 冻结范围回归与 API/UI 定向单测通过。推送 GitHub 被自动审批拒绝，当前 `origin/main`、常驻 `:3000`、共享库、插件及真实补采均未改变。
 
 Mog 已明确“补采缺口”包括未取得完整详情、标题、正文、媒体、评论等。目前候选选择器仍只识别缺合格详情的作品；其它字段独立缺口的资格和停止条件尚未落地，不能把本次 9 篇去重修复称作完整补采实现。分层边界与待决点见[变更清单](design/changes/creator-gap-request-20260929-ui-change-manifest.md)，本月验证见[进度记录](progress/2026-09.md)。
 
