@@ -6,7 +6,10 @@
 // platform identity, Cookie, HTML, payload, Evidence content or free-form platform error.
 
 use linggan_contracts::Capacity;
-use linggan_evidence::{MINIMUM_PLUGIN_VERSION, collection_control_schema_is_ready, read_capacity};
+use linggan_evidence::{
+    MINIMUM_PLUGIN_VERSION, collection_control_schema_is_ready, collection_governance_enabled,
+    read_capacity,
+};
 use linggan_storage_postgres::Database;
 use sqlx::Row;
 use uuid::Uuid;
@@ -20,6 +23,11 @@ const EMPTY_STATE_CLOSE: &str = "</section>";
 const BODY_OPEN: &str = "<div class=\"c-body\">";
 const BODY_SLOT_START: &str = "<!-- collection-body:start -->";
 const BODY_SLOT_END: &str = "<!-- collection-body:end -->";
+const RUNTIME_LANES: [(&str, &str, &str); 3] = [
+    ("创作者基线", "creator", "deep_archive"),
+    ("创作者巡检", "creator", "patrol"),
+    ("关键词巡检", "keyword", "patrol"),
+];
 
 #[derive(Debug, Clone)]
 pub enum CollectionControlSurfaceRead {
@@ -135,15 +143,17 @@ pub async fn read_collection_control_surface(
     let decisions = read_recent_decisions(database, limit).await?;
     let works = read_frozen_works(database, limit).await?;
     let runtime_resources = read_runtime_resources(database).await?;
-    let mut runtime_lanes = Vec::with_capacity(3);
-    for (label, target_kind, lane) in [
-        ("创作者基线", "creator", "deep_archive"),
-        ("创作者巡检", "creator", "patrol"),
-        ("关键词巡检", "keyword", "patrol"),
-    ] {
-        let capacity = read_capacity(database, "xhs", target_kind, lane).await?;
-        runtime_lanes.push(runtime_lane(label, target_kind, lane, capacity));
-    }
+    let governance_enabled = collection_governance_enabled();
+    let runtime_lanes = if governance_enabled {
+        let mut lanes = Vec::with_capacity(RUNTIME_LANES.len());
+        for (label, target_kind, lane) in RUNTIME_LANES {
+            let capacity = read_capacity(database, "xhs", target_kind, lane).await?;
+            lanes.push(runtime_lane(label, target_kind, lane, capacity));
+        }
+        lanes
+    } else {
+        recovery_runtime_lanes()
+    };
     Ok(CollectionControlSurfaceRead::Ready(
         CollectionControlSurfaceProjection {
             latest_run,
@@ -422,6 +432,23 @@ fn runtime_lane(
             reason,
         } => blocked_lane(label, target_kind, lane, reason_code.as_str(), reason),
     }
+}
+
+/// The global dispatch gate is known even when the detailed control read fails. The runtime
+/// route uses this projection in recovery so its capacity-only fallback cannot claim readiness.
+pub(crate) fn recovery_runtime_lanes() -> Vec<RuntimeLaneControlView> {
+    RUNTIME_LANES
+        .into_iter()
+        .map(|(label, target_kind, lane)| {
+            blocked_lane(
+                label,
+                target_kind,
+                lane,
+                "collection_upgrade_recovery_only",
+                "采集处于恢复阶段，暂不派发新任务。".to_owned(),
+            )
+        })
+        .collect()
 }
 
 fn blocked_lane(
@@ -1122,6 +1149,31 @@ fn escape(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recovery_phase_blocks_dispatch_even_when_a_station_has_capacity() {
+        let paused = recovery_runtime_lanes()
+            .into_iter()
+            .find(|lane| lane.target_kind == "creator" && lane.lane == "patrol")
+            .expect("the patrol lane exists");
+        assert!(!paused.available);
+        assert!(!paused.queueable);
+        assert_eq!(paused.reason_code, Some("collection_upgrade_recovery_only"));
+        assert_eq!(
+            paused.reason.as_deref(),
+            Some("采集处于恢复阶段，暂不派发新任务。")
+        );
+
+        let ready = runtime_lane(
+            "创作者巡检",
+            "creator",
+            "patrol",
+            Capacity::Available {
+                station_ref: "ready-station".to_owned(),
+            },
+        );
+        assert!(ready.available);
+    }
 
     fn projection() -> CollectionControlSurfaceProjection {
         CollectionControlSurfaceProjection {

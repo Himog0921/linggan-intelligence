@@ -3858,13 +3858,19 @@ async fn collection_runtime(
         )
         | Err(_) => None,
     };
-    let control = control
-        .as_ref()
-        .map(|projection| station_view::RuntimeControl {
-            lanes: &projection.runtime_lanes,
-            resources: &projection.runtime_resources,
-            account_observation_available: state.account_digest_key.is_some(),
-        });
+    // The detailed control read may fail independently of the capacity read. Recovery is a
+    // process-wide dispatch gate, so a capacity-only fallback must not claim that work can start.
+    let recovery_lanes = if control.is_none() && !linggan_evidence::collection_governance_enabled()
+    {
+        Some(collection::collection_control_surface_view::recovery_runtime_lanes())
+    } else {
+        None
+    };
+    let control = runtime_control_for_page(
+        control.as_ref(),
+        recovery_lanes.as_deref(),
+        state.account_digest_key.is_some(),
+    );
     let rendered = match reads.roster.as_ref() {
         Some((stations, unclaimed)) => station_view::render_runtime(
             &base,
@@ -3885,6 +3891,30 @@ async fn collection_runtime(
         ),
     };
     Html(rendered)
+}
+
+fn runtime_control_for_page<'a>(
+    projection: Option<
+        &'a collection::collection_control_surface_view::CollectionControlSurfaceProjection,
+    >,
+    recovery_lanes: Option<
+        &'a [collection::collection_control_surface_view::RuntimeLaneControlView],
+    >,
+    account_observation_available: bool,
+) -> Option<station_view::RuntimeControl<'a>> {
+    projection
+        .map(|projection| station_view::RuntimeControl {
+            lanes: &projection.runtime_lanes,
+            resources: &projection.runtime_resources,
+            account_observation_available,
+        })
+        .or_else(|| {
+            recovery_lanes.map(|lanes| station_view::RuntimeControl {
+                lanes,
+                resources: &[],
+                account_observation_available,
+            })
+        })
 }
 
 /// COLLECTION-001 · the person-facing station actions on the 执行工位 surface.

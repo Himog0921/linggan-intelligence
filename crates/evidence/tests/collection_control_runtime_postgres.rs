@@ -508,6 +508,71 @@ async fn runtime_scale_projection_reads_policy_lanes_and_persisted_rule_schedule
 
 #[tokio::test]
 #[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn runtime_backlog_excludes_expired_queued_work() {
+    let database = proof_database("control_runtime_expired_backlog").await;
+    let target_ref = seed_target(&database, "creator", "pending_decision", "expired-backlog").await;
+    authorize(&database, "deep_archive", "expired backlog proof", 1).await;
+    let work_order_ref = admitted_work(&database, target_ref, "expired backlog proof").await;
+
+    let before = read_runtime_capacity(&database)
+        .await
+        .expect("backlog is readable");
+    assert_eq!(
+        before
+            .dispatch_backlog
+            .iter()
+            .map(|lane| lane.queued_work_orders)
+            .sum::<i64>(),
+        1,
+    );
+
+    sqlx::query(
+        "CREATE OR REPLACE FUNCTION scope_001_now() RETURNS timestamptz LANGUAGE sql VOLATILE \
+         AS $$ SELECT now() + interval '2 days' $$",
+    )
+    .execute(database.pool())
+    .await
+    .expect("proof clock advances beyond the queue expiry");
+    let persisted_state: String =
+        sqlx::query_scalar("SELECT queue_state FROM collection_work_order WHERE work_order_ref=$1")
+            .bind(work_order_ref)
+            .fetch_one(database.pool())
+            .await
+            .expect("expired work remains in durable history");
+    assert_eq!(persisted_state, "queued");
+    let after = read_runtime_capacity(&database)
+        .await
+        .expect("backlog is readable");
+    assert_eq!(
+        after
+            .dispatch_backlog
+            .iter()
+            .map(|lane| lane.queued_work_orders)
+            .sum::<i64>(),
+        0,
+    );
+
+    sqlx::query("UPDATE collection_work_order SET expires_at=NULL WHERE work_order_ref=$1")
+        .bind(work_order_ref)
+        .execute(database.pool())
+        .await
+        .expect("a queued order may have no expiry");
+    let no_expiry = read_runtime_capacity(&database)
+        .await
+        .expect("backlog is readable");
+    assert_eq!(
+        no_expiry
+            .dispatch_backlog
+            .iter()
+            .map(|lane| lane.queued_work_orders)
+            .sum::<i64>(),
+        1,
+        "a queued order without an expiry remains dispatchable",
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
 async fn paused_target_queues_person_observation_without_creating_monitor_rules() {
     let database = proof_database("control_runtime_manual_observe").await;
     let _installation = ready_installation(&database, "manual-observe").await;
