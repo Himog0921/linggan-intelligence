@@ -127,7 +127,14 @@ fn validate<P: CursorPosition>(cursor: &Cursor<P>) -> Result<(), StudyCatalogErr
     if cursor.v != 1
         || !matches!(
             cursor.resource.as_str(),
-            "comments" | "comment-history" | "comment-versions" | "works" | "policies"
+            "comments"
+                | "comment-history"
+                | "comment-versions"
+                | "runs"
+                | "works"
+                | "policies"
+                | "targets"
+                | "signals"
         )
         || cursor.scope_hash.len() != 64
         || !cursor

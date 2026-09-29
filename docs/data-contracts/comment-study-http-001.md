@@ -102,7 +102,7 @@ POST `/runs`，所有字段均必填，scope 与 reason 规则如下：
 
 示例数值是合成配置，不是推荐真实 token 预算。scope.kind 为 works 时恰有 kind/workRefs，1–100 个 UUID；为 comments 时恰有 kind/commentKeys，1–3000 个 `{workRef,commentExternalId}`，且作品去重 ≤100。commentExternalId 字节上限 512，必须逐字匹配原始字段。集合规范化去重；不得静默新增未选择作品或评论。
 
-mode=new_only/input_changed/retry_failed/reanalyse。new_only 的 reason 必须为 NULL；非 new_only 必须有 trim 后 1–500 字 reason，并在最终确认中展示；不是逐条人工审核，只是一次批量意图确认。reason只作动作审计，不自动插进模型提示词。自动调用暂不通过 HTTP 接受，origin=manual 由服务器注入。
+mode=new_only/continue_ready/input_changed/retry_failed/reanalyse。new_only 与 continue_ready 的 reason 必须为 NULL；其他模式必须有 trim 后 1–500 字 reason，并在最终确认中展示；不是逐条人工审核，只是一次批量意图确认。reason只作动作审计，不自动插进模型提示词。自动调用暂不通过 HTTP 接受，origin=manual 由服务器注入。
 
 返回 HTTP 201（新 Run），200（同请求回放或 no_work/index_pending）：requestRef、outcome、runRef（可 NULL）、asOf、requestedWorkCount、coveredWorkCount、targetCount、queuedCount、needsContextCount、limits、exclusionCounts、indexCoverage、dispatchState、idempotentReplay。**文字是“已创建并进入执行队列”，不能说“尚未授权模型”。** Worker 还未领取时显示排队，不伪造 running。
 
@@ -134,22 +134,22 @@ TrustedStudyOrigin 本轮 Manual；Scheduled{schedule_ref,scheduled_for} 只用�
 
 先检查动态资格，再排除已有获准在途 Target。所有模式都受同一在途唯一性限制。
 
-| 历史／当前事实 | new_only | input_changed | retry_failed | reanalyse |
-|---|---|---|---|---|
-| 从未创建过 Target | 选择 | 不选择 | 不选择 | 选择，需明确理由 |
-| succeeded 或 no_signal，输入未变 | 跳过 | 跳过 | 跳过 | 选择 |
-| 成功结果且 fingerprint 明确变化 | 跳过 | 选择 | 跳过 | 选择 |
-| needs_context，依赖仍相同／缺失 | 跳过 | 跳过 | 不选择 | 可选择，但 UI 说明仍可能无调用 |
-| needs_context，父语境明确补齐且 fingerprint 变化 | 跳过 | 选择 | 不选择 | 选择 |
-| failed | 跳过 | 仅输入确实变化时 | 选择 | 选择 |
-| cancelled | 跳过 | 仅输入确实变化时 | 选择 | 选择 |
-| 任何获准在途目标 | 跳过 | 跳过 | 跳过 | 跳过，不支持 force |
-| 旧方法未记录、所属Run已安全stopped且无存活调用的历史未完成目标 | 跳过 | 跳过 | 可明确续做 | 可明确重研 |
-| 历史输入方法无法确定 | 有历史 Target 则跳过 | 跳过并标 unknown | 失败记录可选 | 明确重研可选 |
-| 旧excluded，但当前来源已恢复合格 | 跳过 | fingerprint明确变化才选择 | 不选择，使用input_changed | 可明确重研 |
-| 来源当前受限／身份不合格／无效文本 | 不选择 | 不选择 | 不选择 | 不选择 |
+| 历史／当前事实 | new_only | continue_ready | input_changed | retry_failed | reanalyse |
+|---|---|---|---|---|---|
+| 从未创建过 Target | 选择 | 选择 | 不选择 | 不选择 | 选择，需明确理由 |
+| succeeded 或 no_signal，输入未变 | 跳过 | 跳过 | 跳过 | 跳过 | 选择 |
+| 成功结果且 fingerprint 明确变化 | 跳过 | 跳过 | 选择 | 跳过 | 选择 |
+| needs_context，依赖仍相同／缺失 | 跳过 | 跳过 | 跳过 | 跳过 | 可选择，但 UI 说明仍可能无调用 |
+| needs_context，父语境明确补齐且 fingerprint 变化 | 跳过 | 选择 | 选择 | 跳过 | 选择 |
+| failed | 跳过 | 选择 | 仅输入确实变化时 | 选择 | 选择 |
+| cancelled | 跳过 | 选择 | 仅输入确实变化时 | 选择 | 选择 |
+| 任何获准在途目标 | 跳过 | 跳过 | 跳过 | 跳过 | 跳过，不支持 force |
+| 旧方法未记录、所属Run已安全stopped且无存活调用的历史未完成目标 | 跳过 | 选择 | 跳过 | 可明确续做 | 可明确重研 |
+| 历史输入方法无法确定 | 有历史 Target 则跳过 | 跳过并标 unknown | 跳过并标 unknown | 失败记录可选 | 明确重研可选 |
+| 旧excluded，但当前来源已恢复合格 | 跳过 | 选择 | fingerprint明确变化才选择 | 不选择，使用input_changed | 可明确重研 |
+| 来源当前受限／身份不合格／无效文本 | 不选择 | 不选择 | 不选择 | 不选择 | 不选择 |
 
-new_only 是避免自动重复成本的保守默认，不等于“把所有没有成功的东西每天无限重试”。未调用就取消的目标也保留历史，使用 retry_failed 批量续做。下一阶段自动计划默认只处理 new_only；可单独授权输入补齐模式，不擅自启用所有失败重放。
+continue_ready 是页面推荐默认：选择新目标、失败/取消/安全停止后可继续的未完成目标，以及冻结输入指纹已明确变化的 needs_context 项；不重复成功、无信号或输入未变的 needs_context 项。new_only 保留为仅新增目标模式。下一阶段自动计划仍默认只处理 new_only；本模式不自动启用。
 
 排序：各选定作品内部按首次可用材料的稳定顺序取最早未处理评论，再按作品逐条轮转，最多 commentBudget。具体序 `(row_number_in_work,content_public_ref,comment_external_id COLLATE "C")`，作品内 `(source.created_at ASC,source.material_ref ASC)`；排序不是“随机代表性样本”。新 Run 记录 selectionOrder。缺缓存的材料不作无效删除，部分可用量如实入队。
 

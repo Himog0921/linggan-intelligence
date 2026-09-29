@@ -451,8 +451,23 @@ async fn reject_target_with_detail(
     let ordinal = next_attempt_ordinal(transaction, target_ref).await?;
     let max_attempts =
         crate::comment_study_acceptance::configured_max_attempts(transaction, target_ref).await?;
+    let provider_failure = detail["providerFailureCode"].as_str();
+    let single_target_retry = detail["retryStrategy"] == "split_single_target";
+    let deterministic_failure = matches!(
+        provider_failure,
+        Some(
+            "authentication_failed"
+                | "provider_request_rejected"
+                | "provider_endpoint_not_found"
+                | "provider_redirect_rejected"
+                | "provider_content_filtered"
+        )
+    ) || (provider_failure == Some("response_too_large")
+        && !single_target_retry);
     let next_state = if !retry_authorized {
         "cancelled"
+    } else if deterministic_failure {
+        "failed"
     } else if ordinal >= max_attempts {
         "failed"
     } else {
@@ -480,6 +495,9 @@ async fn reject_target_with_detail(
     )
     .await?;
     let terminal_reason = match next_state {
+        // `terminal_reason` is a coarse lifecycle enum. Preserve the exact provider code in the
+        // attempt manifest and model invocation diagnostics, where the read projection exposes it.
+        "failed" if deterministic_failure => Some("provider_failed"),
         "failed" => Some("attempts_exhausted"),
         "cancelled" => Some(stop_terminal_reason),
         _ => None,
@@ -562,14 +580,20 @@ pub(crate) async fn settle_dispatched_batch_targets(
     let mut retried = 0;
     let mut failed = 0;
     let mut cancelled = 0;
+    let split_response =
+        provider_failure_code == Some("response_too_large") && target_refs.len() > 1;
     for target_ref in target_refs {
+        let mut detail = json!({"stage":stage,"providerFailureCode":provider_failure_code});
+        if split_response && retry_authorized {
+            detail["retryStrategy"] = json!("split_single_target");
+        }
         let state = reject_target_with_detail(
             transaction,
             batch_ref,
             model_invocation_ref,
             target_ref,
             "provider_failure",
-            json!({"stage":stage,"providerFailureCode":provider_failure_code}),
+            detail,
             retry_authorized,
             stop_terminal_reason,
         )

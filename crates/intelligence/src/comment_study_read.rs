@@ -3,6 +3,8 @@
 //! An empty clean layer is an honest empty state, not a reason to relabel historical derived
 //! results as a new StudyRun.
 
+use crate::comment_study_catalog::StudyCatalogError;
+use crate::comment_study_catalog::cursor::{self, EntryPosition};
 use linggan_storage_postgres::Database;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -18,6 +20,7 @@ const MAX_LIMIT: i64 = 100;
 pub struct CommentStudyReadQuery {
     pub domain: Option<Uuid>,
     pub run_ref: Option<Uuid>,
+    pub cursor: Option<String>,
     pub limit: Option<i64>,
 }
 
@@ -37,10 +40,81 @@ pub enum CommentStudyReadError {
     Database(#[from] sqlx::Error),
     #[error("the requested query is invalid")]
     InvalidQuery,
+    #[error("the requested cursor is invalid")]
+    InvalidCursor,
+    #[error("the requested cursor belongs to another query")]
+    CursorScopeMismatch,
     #[error("the clean comment-study schema is unavailable")]
     SchemaUnavailable,
     #[error("the requested run is absent or outside the selected domain")]
     RunUnavailable,
+}
+
+struct ReadPage {
+    limit: i64,
+    as_of: String,
+    after: Option<EntryPosition>,
+    scope_hash: String,
+}
+
+async fn read_page(
+    database: &Database,
+    query: &CommentStudyReadQuery,
+    resource: &'static str,
+    scope: Value,
+    order: &'static str,
+) -> Result<ReadPage, CommentStudyReadError> {
+    let scope_hash = cursor::scope_hash(&json!({
+        "scope":scope,
+        "resource":resource,
+        "order":order
+    }))
+    .map_err(map_cursor_error)?;
+    let (as_of, after) = if let Some(value) = query.cursor.as_deref() {
+        let decoded = cursor::decode_for::<EntryPosition>(resource, value, &scope_hash)
+            .map_err(map_cursor_error)?;
+        (decoded.as_of, Some(decoded.last))
+    } else {
+        let as_of = sqlx::query_scalar::<_, String>(
+            "SELECT to_char(statement_timestamp() AT TIME ZONE 'UTC', \
+                    'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')",
+        )
+        .fetch_one(database.pool())
+        .await?;
+        (as_of, None)
+    };
+    Ok(ReadPage {
+        limit: query.limit()?,
+        as_of,
+        after,
+        scope_hash,
+    })
+}
+
+fn map_cursor_error(error: StudyCatalogError) -> CommentStudyReadError {
+    match error {
+        StudyCatalogError::InvalidCursor => CommentStudyReadError::InvalidCursor,
+        StudyCatalogError::CursorScopeMismatch => CommentStudyReadError::CursorScopeMismatch,
+        _ => CommentStudyReadError::InvalidQuery,
+    }
+}
+
+fn encode_next_cursor(
+    page: &ReadPage,
+    resource: &'static str,
+    created_at: String,
+    reference: Uuid,
+) -> Result<String, CommentStudyReadError> {
+    cursor::encode_for(
+        resource,
+        &page.scope_hash,
+        &page.as_of,
+        EntryPosition {
+            created_at,
+            reference,
+        },
+    )
+    .map_err(map_cursor_error)
 }
 
 pub async fn schema_ready(database: &Database) -> Result<bool, CommentStudyReadError> {
@@ -162,18 +236,49 @@ pub async fn read_runs(
     query: &CommentStudyReadQuery,
 ) -> Result<Value, CommentStudyReadError> {
     ensure_schema(database).await?;
-    let limit = query.limit()?;
     let domain_ref = resolved_domain(database, query.domain).await?;
+    let page = read_page(
+        database,
+        query,
+        "runs",
+        json!({"domainRef":domain_ref}),
+        "created_at_desc.run_ref_desc.v1",
+    )
+    .await?;
     // Aggregate each child relation independently after bounding the run page. Joining both
     // children on run_ref would count every target once for each selected work.
-    let rows = sqlx::query(include_str!("comment_study_read/runs.sql"))
+    let mut rows = sqlx::query(include_str!("comment_study_read/runs.sql"))
         .bind(domain_ref)
-        .bind(limit)
+        .bind(&page.as_of)
+        .bind(
+            page.after
+                .as_ref()
+                .map(|position| position.created_at.as_str()),
+        )
+        .bind(page.after.as_ref().map(|position| position.reference))
+        .bind(page.limit + 1)
         .fetch_all(database.pool())
         .await?;
+    let has_more = rows.len() > page.limit as usize;
+    rows.truncate(page.limit as usize);
+    let next_cursor = if has_more {
+        rows.last()
+            .map(|row| {
+                encode_next_cursor(
+                    &page,
+                    "runs",
+                    row.get("cursor_created_at"),
+                    row.get("run_ref"),
+                )
+            })
+            .transpose()?
+    } else {
+        None
+    };
     Ok(json!({
         "contract":"comment-study.read.v1",
         "domainRef":domain_ref,
+        "page":{"limit":page.limit,"hasMore":has_more,"nextCursor":next_cursor,"asOf":page.as_of},
         "runs":rows.into_iter().map(|row| json!({
             "runRef":row.get::<Uuid,_>("run_ref"),"asOf":row.get::<String,_>("as_of"),
             "state":row.get::<String,_>("state"),"createdAt":row.get::<String,_>("created_at"),
@@ -199,16 +304,54 @@ pub async fn read_targets(
     query: &CommentStudyReadQuery,
 ) -> Result<Value, CommentStudyReadError> {
     ensure_schema(database).await?;
-    let limit = query.limit()?;
     let run_ref = required_run(database, query).await?;
-    let rows = sqlx::query(
+    let page = read_page(
+        database,
+        query,
+        "targets",
+        json!({"domainRef":query.domain,"runRef":run_ref}),
+        "created_at_asc.target_ref_asc.v1",
+    )
+    .await?;
+    let mut rows = sqlx::query(
         "SELECT target.target_ref,target.source_ref,target.parent_source_ref,target.research_text, \
-                target.dependency_state,target.state,target.exclusion_reason,target.created_at::text AS created_at, \
-                work.context_state,work.content_public_ref,work.observation_role, \
-                comment.body_text,comment.body_state, \
+                target.input_manifest,target.dependency_state,target.state,target.exclusion_reason, \
+                target.terminal_reason,to_char(target.created_at AT TIME ZONE 'UTC', \
+                    'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS created_at, \
+                work.context_state,work.context_manifest,work.content_public_ref,work.observation_role, \
+                comment.body_text,comment.body_state,comment.parent_comment_external_id, \
                 EXISTS(SELECT 1 FROM linggan_material_comment_restriction restriction \
                   WHERE restriction.content_public_ref=comment.content_public_ref \
                     AND restriction.comment_external_id=comment.comment_external_id) AS source_restricted, \
+                EXISTS(SELECT 1 FROM linggan_material_comment parent_comment \
+                  JOIN linggan_material_comment_restriction restriction \
+                    ON restriction.content_public_ref=parent_comment.content_public_ref \
+                   AND restriction.comment_external_id=parent_comment.comment_external_id \
+                  WHERE parent_comment.material_ref=target.parent_source_ref) AS parent_restricted, \
+                (SELECT jsonb_build_object( \
+                    'attemptOrdinal',attempt.attempt_ordinal,'state',attempt.state, \
+                    'rejectionCode',attempt.rejection_code, \
+                    'retryStrategy',attempt.output_manifest->>'retryStrategy', \
+                    'modelReason',CASE WHEN attempt.output_manifest->>'outcome'='needs_context' \
+                      THEN attempt.output_manifest->>'reason' ELSE NULL END, \
+                    'providerFailureCode',COALESCE(invocation.result->>'failureCode',invocation.failure_code), \
+                    'stage',invocation.result->'diagnostic'->>'stage', \
+                    'responseLimit',CASE WHEN COALESCE(invocation.result->>'failureCode',invocation.failure_code)='response_too_large' \
+                      THEN CASE WHEN invocation.result->'diagnostic'->'terminalReceived'='true'::jsonb \
+                        THEN 'final_text_65536' ELSE 'sse_stream_262144' END ELSE NULL END, \
+                    'httpStatus',invocation.result->'diagnostic'->>'httpStatus', \
+                    'receivedBytes',invocation.result->'diagnostic'->'receivedBytes', \
+                    'terminalReceived',invocation.result->'diagnostic'->'terminalReceived', \
+                    'usageKnown',invocation.input_tokens IS NOT NULL AND invocation.output_tokens IS NOT NULL, \
+                    'inputTokens',invocation.input_tokens,'outputTokens',invocation.output_tokens, \
+                    'reservedTokens',invocation.reserved_tokens,'chargedTokens',invocation.charged_tokens \
+                  ) FROM linggan_comment_study_semantic_attempt attempt \
+                  LEFT JOIN linggan_model_invocation invocation \
+                    ON invocation.invocation_ref=attempt.model_invocation_ref \
+                  WHERE attempt.target_ref=target.target_ref \
+                  ORDER BY attempt.attempt_ordinal DESC LIMIT 1) AS latest_attempt, \
+                (SELECT count(*) FROM linggan_comment_study_semantic_attempt attempt \
+                  WHERE attempt.target_ref=target.target_ref) AS attempt_count, \
                 (SELECT count(*) FROM linggan_comment_study_signal signal WHERE signal.target_ref=target.target_ref) AS signal_count, \
                 (SELECT resolution.state FROM linggan_comment_study_resolution resolution \
                    JOIN linggan_comment_study_signal signal USING(signal_ref) \
@@ -216,14 +359,37 @@ pub async fn read_targets(
          FROM linggan_comment_study_target target \
          JOIN linggan_comment_study_work work ON work.run_ref=target.run_ref AND work.content_public_ref=target.content_public_ref \
          JOIN linggan_material_comment comment ON comment.material_ref=target.source_ref \
-         WHERE target.run_ref=$1 ORDER BY target.created_at,target.target_ref LIMIT $2",
+         WHERE target.run_ref=$1 AND target.created_at <= $2::text::timestamptz \
+           AND ($3::text IS NULL OR target.created_at > $3::text::timestamptz \
+             OR (target.created_at=$3::text::timestamptz AND target.target_ref>$4::uuid)) \
+         ORDER BY target.created_at,target.target_ref LIMIT $5",
     )
     .bind(run_ref)
-    .bind(limit)
+    .bind(&page.as_of)
+    .bind(page.after.as_ref().map(|position| position.created_at.as_str()))
+    .bind(page.after.as_ref().map(|position| position.reference))
+    .bind(page.limit + 1)
     .fetch_all(database.pool())
     .await?;
+    let has_more = rows.len() > page.limit as usize;
+    rows.truncate(page.limit as usize);
+    let next_cursor = if has_more {
+        rows.last()
+            .map(|row| {
+                encode_next_cursor(
+                    &page,
+                    "targets",
+                    row.get("created_at"),
+                    row.get("target_ref"),
+                )
+            })
+            .transpose()?
+    } else {
+        None
+    };
     Ok(json!({
         "contract":"comment-study.read.v1","runRef":run_ref,
+        "page":{"limit":page.limit,"hasMore":has_more,"nextCursor":next_cursor,"asOf":page.as_of},
         "targets":rows.into_iter().map(|row| {
             let restricted: bool = row.get("source_restricted");
             let body_state: String = row.get("body_state");
@@ -235,13 +401,49 @@ pub async fn read_targets(
             } else {
                 (None, "unknown")
             };
+            let parent_manifest: Value = row.get("input_manifest");
+            let source_parent: Option<String> = row.get("parent_comment_external_id");
+            let frozen_parent_ref: Option<Uuid> = row.get("parent_source_ref");
+            let parent_restricted: bool = row.get("parent_restricted");
+            let frozen_parent = if parent_restricted {
+                json!({"state":"restricted","sourceRef":frozen_parent_ref})
+            } else if let Some(source_ref) = frozen_parent_ref {
+                let manifest = &parent_manifest["parentContext"];
+                if let Some(text) = manifest["researchText"].as_str() {
+                    json!({"state":"available","sourceRef":source_ref,"researchText":text})
+                } else {
+                    json!({"state":"missing","sourceRef":source_ref})
+                }
+            } else if source_parent.is_some() {
+                let manifest = &parent_manifest["parentContext"];
+                if manifest["state"] == "missing" {
+                    json!({"state":"missing"})
+                } else {
+                    json!({"state":"not_included"})
+                }
+            } else {
+                json!({"state":"none"})
+            };
+            let latest_attempt: Option<Value> = row.get("latest_attempt");
+            let model_reason = if source_state == "known" {
+                latest_attempt
+                    .as_ref()
+                    .and_then(|attempt| attempt["modelReason"].as_str().map(str::to_owned))
+            } else {
+                None
+            };
             json!({
             "targetRef":row.get::<Uuid,_>("target_ref"),"sourceRef":row.get::<Uuid,_>("source_ref"),
             "parentSourceRef":row.get::<Option<Uuid>,_>("parent_source_ref"),"workRef":row.get::<Uuid,_>("content_public_ref"),
             "observationRole":row.get::<String,_>("observation_role"),
             "commentText":comment_text,"sourceState":source_state,
-            "researchText":row.get::<String,_>("research_text"),"dependencyState":row.get::<String,_>("dependency_state"),
+            "researchText":if source_state == "known" { json!(row.get::<String,_>("research_text")) } else { Value::Null },
+            "dependencyState":row.get::<String,_>("dependency_state"),
             "contextState":row.get::<String,_>("context_state"),"state":row.get::<String,_>("state"),
+            "workContext":row.get::<Value,_>("context_manifest"),"parentContext":frozen_parent,
+            "modelReason":model_reason,
+            "latestAttempt":latest_attempt,"attemptCount":row.get::<i64,_>("attempt_count"),
+            "terminalReason":row.get::<Option<String>,_>("terminal_reason"),
             "exclusionReason":row.get::<Option<String>,_>("exclusion_reason"),"signalCount":row.get::<i64,_>("signal_count"),
             "resolutionState":row.get::<Option<String>,_>("resolution_state"),"createdAt":row.get::<String,_>("created_at")
         })}).collect::<Vec<_>>()
@@ -253,11 +455,19 @@ pub async fn read_signals(
     query: &CommentStudyReadQuery,
 ) -> Result<Value, CommentStudyReadError> {
     ensure_schema(database).await?;
-    let limit = query.limit()?;
     let run_ref = required_run(database, query).await?;
-    let rows = sqlx::query(
+    let page = read_page(
+        database,
+        query,
+        "signals",
+        json!({"domainRef":query.domain,"runRef":run_ref}),
+        "created_at_desc.signal_ref_desc.v1",
+    )
+    .await?;
+    let mut rows = sqlx::query(
         "SELECT signal.signal_ref,signal.target_ref,signal.kind,signal.proposition,signal.evidence,work.observation_role, \
-                signal.problem_frame,signal.eligibility_state,signal.eligibility_reason,signal.created_at::text AS created_at, \
+                signal.problem_frame,signal.eligibility_state,signal.eligibility_reason, \
+                to_char(signal.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS created_at, \
                 resolution.resolution_ref,resolution.state AS resolution_state,resolution.resolved_problem_ref, \
                 membership.membership_ref,to_jsonb(membership)->>'problem_revision_ref' AS problem_revision_ref, \
                 COALESCE((SELECT jsonb_agg(jsonb_build_object( \
@@ -280,14 +490,37 @@ pub async fn read_signals(
          JOIN linggan_material_comment comment ON comment.material_ref=target.source_ref \
          LEFT JOIN linggan_comment_study_resolution resolution USING(signal_ref) \
          LEFT JOIN linggan_comment_study_problem_membership membership USING(signal_ref) \
-         WHERE target.run_ref=$1 ORDER BY signal.created_at,signal.signal_ref LIMIT $2",
+         WHERE target.run_ref=$1 AND signal.created_at <= $2::text::timestamptz \
+           AND ($3::text IS NULL OR signal.created_at < $3::text::timestamptz \
+             OR (signal.created_at=$3::text::timestamptz AND signal.signal_ref<$4::uuid)) \
+         ORDER BY signal.created_at DESC,signal.signal_ref DESC LIMIT $5",
     )
     .bind(run_ref)
-    .bind(limit)
+    .bind(&page.as_of)
+    .bind(page.after.as_ref().map(|position| position.created_at.as_str()))
+    .bind(page.after.as_ref().map(|position| position.reference))
+    .bind(page.limit + 1)
     .fetch_all(database.pool())
     .await?;
+    let has_more = rows.len() > page.limit as usize;
+    rows.truncate(page.limit as usize);
+    let next_cursor = if has_more {
+        rows.last()
+            .map(|row| {
+                encode_next_cursor(
+                    &page,
+                    "signals",
+                    row.get("created_at"),
+                    row.get("signal_ref"),
+                )
+            })
+            .transpose()?
+    } else {
+        None
+    };
     Ok(json!({
         "contract":"comment-study.read.v1","runRef":run_ref,
+        "page":{"limit":page.limit,"hasMore":has_more,"nextCursor":next_cursor,"asOf":page.as_of},
         "signals":rows.into_iter().map(|row| {
             let restricted: bool = row.get("source_restricted");
             let source_state = if restricted { "restricted" } else { "known" };

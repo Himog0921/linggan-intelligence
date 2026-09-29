@@ -352,6 +352,99 @@ fn next(command: &StartStudyRunCommand) -> StartStudyRunCommand {
     c
 }
 
+#[tokio::test]
+#[ignore = "isolated synthetic PostgreSQL; no shared database or model"]
+async fn continue_ready_start_freezes_real_parent_context_and_resumes_only_new_or_recoverable_comments()
+ {
+    let (db, command, _) = setup("continue_ready_start", 2).await;
+    let parent_ref: Uuid = sqlx::query_scalar(
+        "SELECT material_ref FROM linggan_material_comment WHERE comment_external_id='c0000' LIMIT 1",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    let reply_ref = reply_with_author(
+        &db,
+        "selected",
+        "r0000",
+        "c0000",
+        "SYNTHETIC 对父评论的回复",
+        Some("reader-2"),
+        "2026-09-21T08:00:01Z",
+    )
+    .await;
+    linggan_intelligence::comment_study_catalog::refresh_clean_cache(&db, domain(), 20)
+        .await
+        .unwrap();
+
+    let first = start_study_run(&db, next(&command), TrustedStudyOrigin::Manual)
+        .await
+        .unwrap();
+    let first_run = first.run_ref.unwrap();
+    assert_eq!(first.target_count, 3);
+    let reply_input: (Option<Uuid>, String, Value) = sqlx::query_as(
+        "SELECT target.parent_source_ref,target.dependency_state,target.input_manifest \
+         FROM linggan_comment_study_target target WHERE target.run_ref=$1 AND target.source_ref=$2",
+    )
+    .bind(first_run)
+    .bind(reply_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(reply_input.0, Some(parent_ref));
+    assert_eq!(reply_input.1, "parent_available");
+    assert_eq!(
+        reply_input.2["parentContext"]["researchText"],
+        "SYNTHETIC 用户评论"
+    );
+    let root_dependency: String = sqlx::query_scalar(
+        "SELECT target.dependency_state FROM linggan_comment_study_target target \
+         WHERE target.run_ref=$1 AND target.source_ref=$2",
+    )
+    .bind(first_run)
+    .bind(parent_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(root_dependency, "self_contained");
+
+    // Keep one historical needs_context target unchanged. It must not be silently repeated by
+    // the default continuation mode; the other unfinished targets are safely stopped below.
+    sqlx::query(
+        "UPDATE linggan_comment_study_target SET state='needs_context',finished_at=scope_001_now() \
+         WHERE run_ref=$1 AND source_ref=$2",
+    )
+    .bind(first_run)
+    .bind(parent_ref)
+    .execute(db.pool())
+    .await
+    .unwrap();
+    cancel_study_run(&db, domain(), first_run).await.unwrap();
+
+    add(&db, "c0002").await;
+    linggan_intelligence::comment_study_catalog::refresh_clean_cache(&db, domain(), 20)
+        .await
+        .unwrap();
+    let mut continuation = next(&command);
+    continuation.mode = StudySelectionMode::ContinueReady;
+    let resumed = start_study_run(&db, continuation, TrustedStudyOrigin::Manual)
+        .await
+        .unwrap();
+    assert_eq!(resumed.outcome, "created");
+    assert_eq!(resumed.target_count, 3);
+    let resumed_external_ids: Vec<String> = sqlx::query_scalar(
+        "SELECT source.comment_external_id FROM linggan_comment_study_target target \
+         JOIN linggan_material_comment source ON source.material_ref=target.source_ref \
+         WHERE target.run_ref=$1 ORDER BY source.comment_external_id",
+    )
+    .bind(resumed.run_ref.unwrap())
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(resumed_external_ids, vec!["c0001", "c0002", "r0000"]);
+    assert!(!resumed_external_ids.contains(&"c0000".to_owned()));
+}
+
 async fn seed_problem_stage_fixtures(
     db: &Database,
     run_ref: Uuid,

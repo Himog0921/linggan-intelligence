@@ -108,6 +108,7 @@ struct BatchTargetRow {
     research_text: String,
     dependency_state: String,
     input_manifest: Value,
+    single_target_retry: bool,
 }
 
 struct FittedBatchTargets {
@@ -550,17 +551,22 @@ async fn lock_work_targets(
     target_limit: i64,
 ) -> Result<Vec<BatchTargetRow>, sqlx::Error> {
     let rows = sqlx::query(
-        "SELECT target.target_ref,target.source_ref,target.research_text,target.dependency_state,target.input_manifest \
+        "SELECT target.target_ref,target.source_ref,target.research_text,target.dependency_state,target.input_manifest, \
+                COALESCE(previous.output_manifest->>'retryStrategy'='split_single_target',false) AS single_target_retry \
          FROM linggan_comment_study_target target \
+         LEFT JOIN LATERAL ( \
+           SELECT attempt.output_manifest FROM linggan_comment_study_semantic_attempt attempt \
+           WHERE attempt.target_ref=target.target_ref ORDER BY attempt.attempt_ordinal DESC LIMIT 1 \
+         ) previous ON true \
          WHERE target.run_ref=$1 AND target.content_public_ref=$2 AND target.state='queued' \
-         ORDER BY target.created_at,target.target_ref LIMIT $3 FOR UPDATE SKIP LOCKED",
+         ORDER BY target.created_at,target.target_ref LIMIT $3 FOR UPDATE OF target SKIP LOCKED",
     )
     .bind(run_ref)
     .bind(content_public_ref)
     .bind(target_limit)
     .fetch_all(&mut **transaction)
     .await?;
-    Ok(rows
+    let mut targets = rows
         .into_iter()
         .map(|row| BatchTargetRow {
             target_ref: row.get("target_ref"),
@@ -568,8 +574,18 @@ async fn lock_work_targets(
             research_text: row.get("research_text"),
             dependency_state: row.get("dependency_state"),
             input_manifest: row.get("input_manifest"),
+            single_target_retry: row.get("single_target_retry"),
         })
-        .collect())
+        .collect::<Vec<_>>();
+    if targets
+        .first()
+        .is_some_and(|target| target.single_target_retry)
+    {
+        targets.truncate(1);
+    } else if let Some(split_at) = targets.iter().position(|target| target.single_target_retry) {
+        targets.truncate(split_at);
+    }
+    Ok(targets)
 }
 
 fn batch_manifest(

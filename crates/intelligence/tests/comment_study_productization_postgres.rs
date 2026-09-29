@@ -123,6 +123,7 @@ async fn run_counts_are_independent_of_work_count_and_keep_empty_runs() {
     let query = CommentStudyReadQuery {
         domain: Some(domain_ref),
         run_ref: None,
+        cursor: None,
         limit: Some(50),
     };
     let result = read_runs(&database, &query).await.unwrap();

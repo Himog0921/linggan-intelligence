@@ -44,6 +44,62 @@ async fn work_ref(db: &Database, note: &str) -> Uuid {
     .unwrap()
 }
 
+async fn add_reuse_usage_for_duplicate_proof(db: &Database, work: Uuid) {
+    let domain_ref = Uuid::parse_str(ADHD_DOMAIN_REF).unwrap();
+    let package: Uuid = sqlx::query_scalar(
+        "SELECT first_package_ref FROM linggan_material_content WHERE public_ref=$1",
+    )
+    .bind(work)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    let target_ref = Uuid::new_v4();
+    let request_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_observation_target( \
+           target_ref,platform,target_kind,identity_key,source \
+         ) VALUES($1,'xhs','keyword',$2,'manual')",
+    )
+    .bind(target_ref)
+    .bind(format!("synthetic-work-usage-{work}"))
+    .execute(db.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO collection_acquisition_request( \
+           request_ref,target_ref,lane,purpose,requested_by,domain_ref,observation_role \
+         ) VALUES($1,$2,'patrol','synthetic duplicate work usage proof','person',$3,'primary')",
+    )
+    .bind(request_ref)
+    .bind(target_ref)
+    .bind(domain_ref)
+    .execute(db.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO collection_admission_decision(decision_ref,request_ref,outcome,reason_code) \
+         VALUES($1,$2,'reuse','synthetic_duplicate_work_usage_proof')",
+    )
+    .bind(Uuid::new_v4())
+    .bind(request_ref)
+    .execute(db.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_material_domain_usage( \
+           usage_ref,content_public_ref,domain_ref,role,basis_kind,request_ref,package_ref \
+         ) VALUES($1,$2,$3,'primary','admission_reuse',$4,$5)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(work)
+    .bind(domain_ref)
+    .bind(request_ref)
+    .bind(package)
+    .execute(db.pool())
+    .await
+    .unwrap();
+}
+
 fn find_work(response: &Value, work: Uuid) -> &Value {
     let id = work.to_string();
     response["items"]
@@ -66,7 +122,24 @@ async fn all_125_works_are_pageable_and_titles_after_the_first_100_are_searchabl
             Some("creator"),
         )
         .await;
+        comment_with_author(
+            &db,
+            &format!("work-page-{index:03}"),
+            &format!("work-page-comment-{index:03}"),
+            "SYNTHETIC 可研究评论",
+            Some("reader-1"),
+            "2026-09-22T08:00:00Z",
+        )
+        .await;
     }
+    add_reuse_usage_for_duplicate_proof(&db, work_ref(&db, "work-page-000").await).await;
+    assert_eq!(
+        refresh_clean_cache(&db, Uuid::parse_str(ADHD_DOMAIN_REF).unwrap(), 200)
+            .await
+            .unwrap()
+            .inserted_count,
+        125
+    );
     let mut request = query();
     request.limit = Some(37);
     let mut ids = Vec::new();
@@ -86,7 +159,7 @@ async fn all_125_works_are_pageable_and_titles_after_the_first_100_are_searchabl
             let id = item["workRef"].as_str().unwrap().to_owned();
             assert!(unique.insert(id.clone()), "duplicate work across pages");
             ids.push(id);
-            assert_eq!(item["eligibleCommentCount"], 0);
+            assert_eq!(item["eligibleCommentCount"], 1);
             last_work = Some(item.clone());
         }
         request.cursor = response["page"]["nextCursor"].as_str().map(str::to_owned);
@@ -115,7 +188,7 @@ async fn all_125_works_are_pageable_and_titles_after_the_first_100_are_searchabl
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof; never connect to a shared database"]
-async fn work_counts_share_comment_qualification_and_keep_zero_comment_works() {
+async fn work_counts_share_comment_qualification_and_hide_zero_eligible_works() {
     let db = database("study_work_counts").await;
     detail_with_author(&db, "work-counts", "SYNTHETIC 数量", Some("creator")).await;
     detail_with_author(&db, "work-empty", "SYNTHETIC 零评论", Some("creator")).await;
@@ -136,9 +209,9 @@ async fn work_counts_share_comment_qualification_and_keep_zero_comment_works() {
         }
     }
     let before = read_work_catalog(&db, &query()).await.unwrap();
-    assert_eq!(before["totalWorkCount"], 2);
-    assert_eq!(find_work(&before, empty)["indexedCommentCount"], 0);
-    assert_eq!(find_work(&before, work)["pendingIndexCount"], 5);
+    assert_eq!(before["totalWorkCount"], 0);
+    assert!(before["items"].as_array().unwrap().is_empty());
+    assert_eq!(before["indexCoverage"]["pendingCount"], 5);
     assert_eq!(before["indexCoverage"]["state"], "partial");
     assert_eq!(
         refresh_clean_cache(&db, query().domain, 200)
@@ -148,6 +221,14 @@ async fn work_counts_share_comment_qualification_and_keep_zero_comment_works() {
         5
     );
     let after = read_work_catalog(&db, &query()).await.unwrap();
+    assert_eq!(after["totalWorkCount"], 1);
+    assert!(
+        after["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|item| item["workRef"] != empty.to_string())
+    );
     let row = find_work(&after, work);
     assert_eq!(row["eligibleCommentCount"], 3);
     assert_eq!(row["indexedCommentCount"], 5); // dropped still has a deterministic cache entry
@@ -168,7 +249,7 @@ async fn work_counts_share_comment_qualification_and_keep_zero_comment_works() {
     ).bind(restricted).execute(db.pool()).await.unwrap();
     let restricted_view = read_work_catalog(&db, &query()).await.unwrap();
     assert_eq!(find_work(&restricted_view, work)["eligibleCommentCount"], 2);
-    assert_eq!(restricted_view["totalWorkCount"], 2);
+    assert_eq!(restricted_view["totalWorkCount"], 1);
     let cached: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_comment_study_clean_cache")
         .fetch_one(db.pool())
         .await
@@ -189,6 +270,25 @@ async fn native_title_and_literal_search_match_the_shared_evidence_display() {
         Some("creator"),
     )
     .await;
+    comment_with_author(
+        &db,
+        "work-title-literal",
+        "work-title-literal-comment",
+        "SYNTHETIC 标题搜索可研究评论",
+        Some("reader-1"),
+        "2026-09-22T08:00:00Z",
+    )
+    .await;
+    comment_with_author(
+        &db,
+        "work-title-decoy",
+        "work-title-decoy-comment",
+        "SYNTHETIC 标题搜索可研究评论",
+        Some("reader-2"),
+        "2026-09-22T08:00:00Z",
+    )
+    .await;
+    refresh_clean_cache(&db, query().domain, 10).await.unwrap();
     let work = work_ref(&db, "work-title-literal").await;
     let evidence = linggan_evidence::read_work_resource(&db, work)
         .await
@@ -223,7 +323,17 @@ async fn work_cursor_cannot_be_reused_after_query_scope_changes() {
             Some("creator"),
         )
         .await;
+        comment_with_author(
+            &db,
+            &format!("work-cursor-{index}"),
+            &format!("work-cursor-comment-{index}"),
+            "SYNTHETIC 游标可研究评论",
+            Some("reader-1"),
+            "2026-09-22T08:00:00Z",
+        )
+        .await;
     }
+    refresh_clean_cache(&db, query().domain, 10).await.unwrap();
     let mut request = query();
     request.limit = Some(1);
     let page = read_work_catalog(&db, &request).await.unwrap();

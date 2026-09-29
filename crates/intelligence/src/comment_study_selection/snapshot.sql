@@ -93,7 +93,7 @@ WITH requested_roles AS MATERIALIZED (
               'inputFingerprint',q.last_fingerprint,'legacyStoppedWithoutLiveInvocation',q.safely_stopped_legacy) END,
           'rawText',CASE WHEN q.exclusion_reason IS NULL AND NOT q.in_progress THEN left(raw.body_text,16001) ELSE NULL END,
           'rawSha256',q.raw_sha256,'researchText',CASE WHEN q.exclusion_reason IS NULL AND NOT q.in_progress THEN q.research_text ELSE NULL END,
-          'parent',CASE WHEN q.parent_comment_external_id IS NULL OR q.clean_state<>'context' OR q.exclusion_reason IS NOT NULL OR q.in_progress THEN NULL
+          'parent',CASE WHEN q.parent_comment_external_id IS NULL OR q.exclusion_reason IS NOT NULL OR q.in_progress THEN NULL
               ELSE jsonb_build_object('commentKey',jsonb_build_object('workRef',q.content_public_ref,'commentExternalId',q.parent_comment_external_id),
                   'sourceRef',parent.material_ref,'sourceState',CASE WHEN restricted.content_public_ref IS NOT NULL THEN 'restricted'
                     WHEN parent.body_state='KNOWN' AND parent.body_text IS NOT NULL THEN 'known' ELSE 'unknown' END,
@@ -102,7 +102,7 @@ WITH requested_roles AS MATERIALIZED (
     LEFT JOIN LATERAL (
         SELECT c.material_ref,c.body_state,c.body_text FROM linggan_material_comment c
         JOIN linggan_runtime_capture_package p USING(package_ref)
-        WHERE q.exclusion_reason IS NULL AND NOT q.in_progress AND q.clean_state='context'
+        WHERE q.exclusion_reason IS NULL AND NOT q.in_progress
           AND c.content_public_ref=q.content_public_ref AND c.comment_external_id=q.parent_comment_external_id
           AND p.accepted_at<=$2::text::timestamptz AND c.created_at<=$2::text::timestamptz
         ORDER BY c.observed_at::timestamptz DESC,c.created_at DESC,c.material_ref DESC LIMIT 1
