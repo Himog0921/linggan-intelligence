@@ -12,6 +12,20 @@ use tower::ServiceExt;
 
 const LOCAL_001_MIGRATIONS: &str = full_schema_fixture::FULL_MIGRATIONS;
 
+#[test]
+fn recovery_control_read_failure_still_blocks_the_runtime_page() {
+    let recovery_lanes = collection::collection_control_surface_view::recovery_runtime_lanes();
+    let control = runtime_control_for_page(None, Some(&recovery_lanes), false)
+        .expect("the known recovery gate supplies a control projection");
+    assert_eq!(control.lanes.len(), 3);
+    assert!(control.lanes.iter().all(|lane| {
+        !lane.available
+            && !lane.queueable
+            && lane.reason_code == Some("collection_upgrade_recovery_only")
+    }));
+    assert!(runtime_control_for_page(None, None, false).is_none());
+}
+
 #[tokio::test]
 async fn legacy_evidence_route_cannot_bypass_domain_scoped_work_resources() {
     for uri in [

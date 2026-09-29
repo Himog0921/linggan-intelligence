@@ -300,11 +300,14 @@ pub async fn read_runtime_capacity(
 
     let dispatch_backlog = sqlx::query_as::<_, DispatchLaneRow>(
         "SELECT policy.dispatch_lane,policy.concurrent_cap, \
-                count(work_order.work_order_ref) FILTER (WHERE work_order.queue_state='queued'), \
+                count(work_order.work_order_ref) FILTER (WHERE work_order.queue_state='queued' \
+                    AND (work_order.expires_at IS NULL OR work_order.expires_at>scope_001_now())), \
                 count(work_order.work_order_ref) FILTER (WHERE work_order.queue_state='leased'), \
                 count(work_order.work_order_ref) FILTER (WHERE work_order.queue_state='queued' \
+                    AND (work_order.expires_at IS NULL OR work_order.expires_at>scope_001_now()) \
                     AND work_order.retry_not_before_at>scope_001_now()), \
                 linggan_human_moment(min(work_order.scheduled_for) FILTER (WHERE work_order.queue_state='queued' \
+                    AND (work_order.expires_at IS NULL OR work_order.expires_at>scope_001_now()) \
                     AND work_order.retry_not_before_at<=scope_001_now() \
                     AND work_order.scheduled_for<=scope_001_now())) \
          FROM collection_dispatch_lane_fairness policy \

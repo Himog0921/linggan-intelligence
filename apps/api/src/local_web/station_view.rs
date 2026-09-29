@@ -210,6 +210,13 @@ fn verdict_state(rows: Option<&Vec<LaneRow>>) -> (&'static str, &'static str) {
     let Some(rows) = rows else {
         return ("读不到", "unknown");
     };
+    if !rows.is_empty()
+        && rows
+            .iter()
+            .all(|row| row.reason_code.as_deref() == Some("collection_upgrade_recovery_only"))
+    {
+        return ("采集暂停", "blocked");
+    }
     match verdict_of(rows) {
         Verdict::All => ("能接活", "ok"),
         Verdict::Some => ("部分接不了活", "partial"),
@@ -322,9 +329,8 @@ fn deck_markup(overview: Option<&RuntimeCapacityOverview>, lanes: Option<&Vec<La
 /// 数字（2/2 在岗、55/200 篇）是支撑判断的证据，不是主角；把它们当主角，读的人得
 /// 自己在脑子里做一次判定，而那次判定服务端已经做过了。
 ///
-/// 判断的来源只有一个：能读到通道判定就用它，读不到才退回产能概览。**两者都渲染
-/// 会让同一件事在一屏里有两个答案**——改写前顶部说「三条通道可接活」、下面说
-/// 「两条通道可接活」，同一个 `deep_archive` 一处叫「基线建档」、一处叫「批量建档」。
+/// 能读到通道判定就用它，读不到才退回产能概览。恢复阶段的路由必须补上全局暂停
+/// 判定，因为单独的产能概览不知道派发闸门是否开放。
 ///
 /// v7.2 把这一块从「一段散文加几个格子」改成**仪器面**：深色表头一句话给出判定与
 /// 阻塞数量，左边逐条列出通道，右边四个读数。改的是外壳，判定与文案一个字没动。
@@ -359,7 +365,9 @@ fn verdict_markup(
         .iter()
         .filter(|row| !row.available && row.queueable)
         .count();
-    let badge = if blocked > 0 {
+    let badge = if state == "采集暂停" {
+        "恢复阶段".to_owned()
+    } else if blocked > 0 {
         format!("{blocked} 项阻塞")
     } else if queueable > 0 {
         format!("{queueable} 项等工位")
@@ -520,8 +528,6 @@ fn lane_rows(
                 .collect(),
         );
     }
-    // 通道判定读不到时退回产能概览。它的粒度更粗（不分创作者与关键词），但它与
-    // 上面的判断出自同一次读取，不会自相矛盾。
     let overview = overview?;
     Some(
         overview
@@ -556,6 +562,8 @@ fn lane_state(row: &LaneRow) -> (&'static str, &'static str) {
         ("c-lane-ok", "可接活")
     } else if row.queueable {
         ("c-lane-queueable", "可排队，等工位")
+    } else if row.reason_code.as_deref() == Some("collection_upgrade_recovery_only") {
+        ("c-lane-blocked", "暂不派发")
     } else {
         ("c-lane-blocked", "接不了")
     }
@@ -1596,6 +1604,11 @@ const DISPATCH_ANSWER_EXPLANATIONS: &[(&str, &str, &str)] = &[
         "工单已终结，不会再重试。需要的话在观察目标页重新发起一次。",
     ),
     (
+        "collection_upgrade_recovery_only",
+        "采集暂停",
+        "系统处于恢复阶段，暂不派发新任务。",
+    ),
+    (
         "target_not_requestable",
         "这个观察目标已被弃置",
         "弃置的目标不能再发起采集。要用它就先恢复这个目标。",
@@ -2182,6 +2195,24 @@ mod tests {
     };
     use uuid::Uuid;
 
+    #[test]
+    fn recovery_phase_is_a_single_pause_state_across_the_runtime_board() {
+        let rows = vec![LaneRow {
+            name: "创作者巡检".to_owned(),
+            needs: "查作品清单",
+            available: false,
+            queueable: false,
+            reason: Some("采集处于恢复阶段，暂不派发新任务。".to_owned()),
+            reason_code: Some("collection_upgrade_recovery_only".to_owned()),
+        }];
+        let html = verdict_markup(None, None, Some(&rows));
+        assert!(html.contains("采集暂停"));
+        assert!(html.contains("恢复阶段"));
+        assert!(html.contains("暂不派发"));
+        assert!(!html.contains("全部通畅"));
+        assert!(!html.contains("可接活"));
+    }
+
     /// 固定时刻，让「最近 / 更早」的分组在测试里是确定的。
     ///
     /// 从同一个解析函数算出来，而不是写一个魔数：写死的分钟数会在解析规则变动时
@@ -2434,7 +2465,7 @@ mod tests {
         assert!(!html.contains("批量建档"));
     }
 
-    /// 通道判定读不到时才退回产能概览，且退回后仍然只有一套名字。
+    /// 治理阶段控制投影读不到时退回产能概览；恢复阶段由路由补上全局暂停判定。
     #[test]
     fn the_capacity_overview_is_only_a_fallback_for_unreadable_lane_control() {
         let html = render(
