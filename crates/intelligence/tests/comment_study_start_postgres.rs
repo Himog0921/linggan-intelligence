@@ -32,7 +32,7 @@ use linggan_intelligence::{
     comment_study_resolution_worker::run_one_problem_resolution,
     comment_study_run::{
         StudyStartError, TrustedStudyOrigin, cancel_study_run, preview_study_selection,
-        start_study_run,
+        recover_study_run, start_study_run,
     },
     comment_study_selection::{
         StartStudyRunCommand, StudyScope, StudySelectionMode, study_domain_lock_key,
@@ -445,6 +445,73 @@ async fn continue_ready_start_freezes_real_parent_context_and_resumes_only_new_o
     assert!(!resumed_external_ids.contains(&"c0000".to_owned()));
 }
 
+#[tokio::test]
+#[ignore = "isolated synthetic PostgreSQL; no shared database or model"]
+async fn source_run_recovery_uses_exact_failed_keys_and_keeps_original_history() {
+    let (db, command, _) = setup("source_run_recovery", 2).await;
+    let original = start_study_run(&db, command, TrustedStudyOrigin::Manual)
+        .await
+        .unwrap()
+        .run_ref
+        .unwrap();
+    sqlx::query(
+        "UPDATE linggan_comment_study_target SET \
+           state=CASE WHEN comment_external_id='c0000' THEN 'succeeded' ELSE 'failed' END, \
+           terminal_reason=CASE WHEN comment_external_id='c0000' THEN NULL ELSE 'provider_failed' END, \
+           finished_at=scope_001_now() WHERE run_ref=$1",
+    )
+    .bind(original)
+    .execute(db.pool())
+    .await
+    .unwrap();
+    cancel_study_run(&db, domain(), original).await.unwrap();
+
+    let request_ref = Uuid::new_v4();
+    let recovered = recover_study_run(&db, domain(), original, request_ref)
+        .await
+        .unwrap();
+    assert_eq!(recovered.target_count, 1);
+    let new_run = recovered.run_ref.unwrap();
+    let identity: String = sqlx::query_scalar(
+        "SELECT comment_external_id FROM linggan_comment_study_target WHERE run_ref=$1",
+    )
+    .bind(new_run)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(identity, "c0001");
+    let source_ref: String = sqlx::query_scalar(
+        "SELECT selection_manifest->>'recoverySourceRunRef' FROM linggan_comment_study_run WHERE run_ref=$1",
+    )
+    .bind(new_run)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(source_ref, original.to_string());
+    let replay = recover_study_run(&db, domain(), original, request_ref)
+        .await
+        .unwrap();
+    assert_eq!(replay.run_ref, Some(new_run));
+    assert!(replay.idempotent_replay);
+
+    sqlx::query("UPDATE linggan_comment_study_target SET state='succeeded',finished_at=scope_001_now() WHERE run_ref=$1")
+        .bind(new_run).execute(db.pool()).await.unwrap();
+    cancel_study_run(&db, domain(), new_run).await.unwrap();
+    let later = recover_study_run(&db, domain(), original, Uuid::new_v4())
+        .await
+        .unwrap();
+    assert_eq!(later.outcome, "no_work");
+    assert!(later.run_ref.is_none());
+    let original_failed: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_comment_study_target WHERE run_ref=$1 AND state='failed'",
+    )
+    .bind(original)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(original_failed, 1);
+}
+
 async fn seed_problem_stage_fixtures(
     db: &Database,
     run_ref: Uuid,
@@ -754,7 +821,7 @@ async fn empty_and_index_pending_receipts_remain_terminal_after_material_changes
 
 #[tokio::test]
 #[ignore = "isolated synthetic PostgreSQL; no shared database or model"]
-async fn missing_parent_settles_without_model_and_reobservation_is_not_changed_input() {
+async fn missing_parent_reaches_model_and_only_changed_context_requeues_after_needs_context() {
     let (db, c, _) = setup("start_context", 0).await;
     reply_with_author(
         &db,
@@ -770,14 +837,29 @@ async fn missing_parent_settles_without_model_and_reobservation_is_not_changed_i
     let first = start_study_run(&db, c.clone(), TrustedStudyOrigin::Manual)
         .await
         .unwrap();
-    assert_eq!(first.needs_context_count, 1);
+    assert_eq!(first.needs_context_count, 0);
+    assert_eq!(first.queued_count, 1);
     let state: String =
         sqlx::query_scalar("SELECT state FROM linggan_comment_study_run WHERE run_ref=$1")
             .bind(first.run_ref)
             .fetch_one(db.pool())
             .await
             .unwrap();
-    assert_eq!(state, "completed");
+    assert_eq!(state, "queued");
+    let dependency: String = sqlx::query_scalar(
+        "SELECT dependency_state FROM linggan_comment_study_target WHERE run_ref=$1",
+    )
+    .bind(first.run_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(dependency, "parent_required_missing");
+    // The semantic stage, not the input freezer, may decide this particular reply needs context.
+    sqlx::query("UPDATE linggan_comment_study_target SET state='needs_context',finished_at=scope_001_now() WHERE run_ref=$1")
+        .bind(first.run_ref).execute(db.pool()).await.unwrap();
+    cancel_study_run(&db, domain(), first.run_ref.unwrap())
+        .await
+        .unwrap();
     let mut changed = next(&c);
     changed.mode = StudySelectionMode::InputChanged;
     changed.reason = Some("SYNTHETIC parent repair".into());

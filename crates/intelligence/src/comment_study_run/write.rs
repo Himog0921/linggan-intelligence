@@ -10,11 +10,6 @@ pub(super) fn receipt(
     limits: &StudyRunLimits,
     run: Option<Uuid>,
 ) -> StudyStartReceipt {
-    let needs = snapshot
-        .inputs
-        .values()
-        .filter(|i| i.dependency_state == "parent_required_missing")
-        .count();
     let target_count = snapshot.selection.target_count;
     let covered = snapshot
         .selection
@@ -41,8 +36,8 @@ pub(super) fn receipt(
         requested_work_count: snapshot.requested_works.len(),
         covered_work_count: covered,
         target_count,
-        queued_count: target_count - needs,
-        needs_context_count: needs,
+        queued_count: target_count,
+        needs_context_count: 0,
         limits: limits.clone(),
         exclusion_counts: snapshot
             .selection
@@ -80,6 +75,7 @@ pub(super) async fn insert_run(
     run: Uuid,
     policy: &Value,
     mut snapshot: FrozenSelection,
+    source_run_ref: Option<Uuid>,
 ) -> Result<(), StudyStartError> {
     let covered: BTreeSet<_> = snapshot
         .selection
@@ -94,11 +90,14 @@ pub(super) async fn insert_run(
         .map(|i| snapshot.rows[*i].source_ref)
         .collect();
     let limits = &command.limits;
-    let manifest = json!({"contract":"comment-study.run-selection.v2","requestedWorkRefs":snapshot.requested_works,
+    let mut manifest = json!({"contract":"comment-study.run-selection.v2","requestedWorkRefs":snapshot.requested_works,
         "requestedWorkRoles":command.work_roles,
         "coveredWorkRefs":covered,"targetSourceRefs":sources,"selectionMode":command.mode,
         "commentBudget":limits.comment_budget,"contextCharacterBudget":limits.context_character_budget,
         "tokenLimit":limits.token_limit,"indexCoverage":snapshot.index_coverage,"exclusionCounts":snapshot.selection.exclusion_counts});
+    if let Some(source_run_ref) = source_run_ref {
+        manifest["recoverySourceRunRef"] = json!(source_run_ref);
+    }
     sqlx::query("INSERT INTO linggan_comment_study_run \
         (run_ref,policy_ref,as_of,state,selection_manifest,selection_hash,comment_budget,context_character_budget, \
          token_limit,execution_manifest,dispatch_state,dispatch_reason) \
@@ -138,14 +137,13 @@ pub(super) async fn insert_run(
         let row = &snapshot.rows[*index];
         targets.push(json!({"ref":Uuid::new_v4(),"work":row.comment_key.work_ref,"id":row.comment_key.comment_external_id,
             "source":row.source_ref,"parent":input.parent_source_ref,"text":input.research_text,"text_hash":input.research_sha256,
-            "dependency":input.dependency_state,"state":if input.dependency_state=="parent_required_missing" {"needs_context"} else {"queued"},
+            "dependency":input.dependency_state,"state":"queued",
             "manifest":input.input_manifest,"hash":input.input_hash,"fingerprint":input.input_fingerprint}));
     }
     sqlx::query("INSERT INTO linggan_comment_study_target \
         (target_ref,run_ref,content_public_ref,comment_external_id,source_ref,parent_source_ref,research_text,research_sha256, \
-         dependency_state,state,input_manifest,input_hash,input_fingerprint,finished_at) \
-        SELECT x.ref,$1,x.work,x.id,x.source,x.parent,x.text,x.text_hash,x.dependency,x.state,x.manifest,x.hash,x.fingerprint, \
-          CASE WHEN x.state='needs_context' THEN scope_001_now() ELSE NULL END \
+         dependency_state,state,input_manifest,input_hash,input_fingerprint) \
+        SELECT x.ref,$1,x.work,x.id,x.source,x.parent,x.text,x.text_hash,x.dependency,x.state,x.manifest,x.hash,x.fingerprint \
         FROM jsonb_to_recordset($2::jsonb) AS x(ref uuid,work uuid,id text,source uuid,parent uuid,text text,text_hash text, \
           dependency text,state text,manifest jsonb,hash text,fingerprint text)")
         .bind(run).bind(json!(targets)).execute(&mut **tx).await?;

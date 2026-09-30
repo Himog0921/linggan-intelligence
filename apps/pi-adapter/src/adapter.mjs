@@ -96,7 +96,7 @@ function scopedFetch(base,signal,usage,failure,observation) {
     const inspect=line=>observeSseLine(observation,line,usage,usageFrom);
     const body=response.body.pipeThrough(new TransformStream({transform(chunk,controller){
       receivedChunk(observation,chunk.byteLength);
-      if(observation.diagnostic.receivedBytes>262144){failure.code='response_too_large';throw new Rejected(failure.code);}
+      if(observation.diagnostic.receivedBytes>262144){observation.diagnostic.limitKind='sse_stream_262144';failure.code='response_too_large';throw new Rejected(failure.code);}
       buffer+=decoder.decode(chunk,{stream:true});
       const lines=buffer.split(/\r?\n/);buffer=lines.pop()??'';
       for(const line of lines)inspect(line);
@@ -163,7 +163,7 @@ export async function execute(r) {
     if(['stop','length','toolUse','tool_calls','content_filter'].includes(message.stopReason))terminalReceived(observation,finishReason);
     if(message.stopReason!=='stop') {
       if(failure.code)throw new Rejected(failure.code);
-      if(observation.diagnostic.finishReason==='length')throw new Rejected('output_limit');
+      if(observation.diagnostic.finishReason==='length'){observation.diagnostic.limitKind='output_tokens';throw new Rejected('output_limit');}
       if(observation.diagnostic.finishReason==='content_filter')throw new Rejected('provider_content_filtered');
       if(observation.diagnostic.finishReason==='tool_calls')throw new Rejected('unexpected_content');
       if(message.stopReason==='aborted')throw new Rejected('provider_timeout');
@@ -171,7 +171,7 @@ export async function execute(r) {
     }
     if(message.content.some(b=>b.type!=='text'))throw new Rejected('unexpected_content');
     const text=message.content.map(b=>b.text).join('');
-    if(Buffer.byteLength(text)>65536)throw new Rejected('response_too_large');
+    if(Buffer.byteLength(text)>65536){observation.diagnostic.limitKind='final_text_65536';throw new Rejected('response_too_large');}
     let normalized=text;try{normalized=JSON.stringify(JSON.parse(text));}catch{ /* business validation follows */ }
     if(r.apiKey&&(text.includes(r.apiKey)||normalized.includes(r.apiKey)))throw new Rejected('secret_echo_rejected');
     succeeded(observation,'stop');

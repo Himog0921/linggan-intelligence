@@ -19,9 +19,12 @@ use linggan_intelligence::{
     },
     comment_study_run::{
         StudyRunControlAction, StudyRunControlCommand, StudyStartError, TrustedStudyOrigin,
-        cancel_study_run, control_study_run, preview_study_selection, start_study_run,
+        cancel_study_run, control_study_run, preview_study_selection, recover_study_run,
+        start_study_run,
     },
-    comment_study_selection::{SelectionPreviewCommand, StartStudyRunCommand, StudySelectionError},
+    comment_study_selection::{
+        SelectionPreviewCommand, StartStudyRunCommand, StudySelectionError, StudySelectionMode,
+    },
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -34,6 +37,7 @@ pub(super) fn additional_routes() -> Router<LocalWebState> {
         .route("/api/local/comment-study/runs/{id}/pause", post(pause))
         .route("/api/local/comment-study/runs/{id}/resume", post(resume))
         .route("/api/local/comment-study/runs/{id}/stop", post(stop))
+        .route("/api/local/comment-study/runs/{id}/recover", post(recover))
         .route(
             "/api/local/comment-study/policies/{policy_ref}/activate",
             post(activate),
@@ -85,6 +89,9 @@ async fn preview(
     let Ok(Json(command)) = body else {
         return invalid(None);
     };
+    if command.mode == StudySelectionMode::ContinueReady {
+        return invalid(None);
+    }
     let command = match command.normalize() {
         Ok(command) => command,
         Err(e) => return failure(e.into(), None),
@@ -110,6 +117,9 @@ pub(crate) async fn start(
         return invalid(None);
     };
     let reference = (!command.request_ref.is_nil()).then_some(command.request_ref);
+    if command.mode == StudySelectionMode::ContinueReady {
+        return invalid(reference);
+    }
     let command = match command.normalize() {
         Ok(command) => command,
         Err(e) => return failure(e.into(), reference),
@@ -162,6 +172,45 @@ async fn cancel(
             .into_response()
         }
         Err(error) => failure(error, None),
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RecoverStudyRunRequest {
+    domain_ref: Uuid,
+    request_ref: Uuid,
+}
+
+async fn recover(
+    State(state): State<LocalWebState>,
+    Path(reference): Path<String>,
+    RawQuery(query): RawQuery,
+    body: Result<Json<RecoverStudyRunRequest>, JsonRejection>,
+) -> Response {
+    if query.is_some_and(|query| !query.is_empty()) {
+        return invalid(None);
+    }
+    let Ok(source_run_ref) = Uuid::parse_str(&reference) else {
+        return invalid(None);
+    };
+    let Ok(Json(command)) = body else {
+        return invalid(None);
+    };
+    let request_ref = Some(command.request_ref);
+    let LocalDatabaseState::Ready(db) = &state.database else {
+        return database_unavailable(&state, request_ref);
+    };
+    match recover_study_run(db, command.domain_ref, source_run_ref, command.request_ref).await {
+        Ok(receipt) => {
+            let status = if receipt.outcome == "created" && !receipt.idempotent_replay {
+                StatusCode::CREATED
+            } else {
+                StatusCode::OK
+            };
+            (status, Json(receipt)).into_response()
+        }
+        Err(error) => failure(error, request_ref),
     }
 }
 
@@ -361,6 +410,12 @@ fn failure(cause: StudyStartError, reference: Option<Uuid>) -> Response {
             StatusCode::NOT_FOUND,
             "resource_not_found",
             "未找到可访问的方法或所选材料。",
+            false,
+        ),
+        E::NoRecoveryTargets => (
+            StatusCode::CONFLICT,
+            "no_recovery_targets",
+            "原运行没有待补跑的目标。",
             false,
         ),
         E::IdempotencyConflict => (

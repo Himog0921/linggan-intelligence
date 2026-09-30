@@ -712,7 +712,7 @@ mod tests {
              comment_study_semantic.rs); the result panel must stop quoting it once the \
              backend reports the source as restricted, the same way the targets tab already does"
         );
-        assert!(script.contains("来源已被限制，原声与摘要不再显示"));
+        assert!(script.contains("本条或父语境已受限，研究衍生文本不再显示。"));
     }
 
     #[test]
@@ -724,7 +724,7 @@ mod tests {
              whatever the user switched to in the meantime"
         );
         assert!(script.contains("const token = ++renderToken;"));
-        assert!(script.contains("if (token !== renderToken) return;"));
+        assert!(script.contains("if (token !== renderToken) return false;"));
         for renderer in [
             "async function renderOverviewTab()",
             "async function renderSelectedRunPanel()",

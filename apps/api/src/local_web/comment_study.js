@@ -317,6 +317,8 @@ const dispatchReasonLabel = {
 };
 let stopDialogRunRef = null;
 let stopDialogControlVersion = null;
+let recoveryRunRef = null;
+const recoveryRequestRefs = new Map();
 let runControlFeedback = '';
 let runControlOutcomeNeedsRefresh = false;
 const label = (map, value) => (value == null ? null : (map[value] ?? '未知状态'));
@@ -324,6 +326,8 @@ let allRuns = [];
 let runListNextCursor = null;
 let runListLoaded = false;
 let runListLoading = false;
+let runListRequest = null;
+let runListGeneration = 0;
 const validStudyViews = new Set(['overview', 'comments', 'runs', 'problems']);
 const initialStudyRoute = new URLSearchParams(window.location.search);
 let activeView = validStudyViews.has(initialStudyRoute.get('view')) ? initialStudyRoute.get('view') : 'overview';
@@ -334,6 +338,7 @@ const runPanelCache = {
   targets: { runRef: null, items: [], nextCursor: null, loaded: false },
   signals: { runRef: null, items: [], nextCursor: null, loaded: false },
 };
+let runPanelGeneration = 0;
 
 function syncStudyRoute(push = false) {
   const url = new URL(window.location.href);
@@ -350,6 +355,7 @@ function syncStudyRoute(push = false) {
 }
 
 function resetRunPanelCache() {
+  runPanelGeneration += 1;
   for (const state of Object.values(runPanelCache)) {
     state.runRef = null;
     state.items = [];
@@ -434,20 +440,20 @@ function targetRow(target) {
   const failureCode = attempt?.providerFailureCode || attempt?.rejectionCode || target.terminalReason;
   const recovery = target.state === 'needs_context'
     ? (parent.state === 'none' && target.dependencyState === 'parent_required_missing'
-      ? '这条是根评论，没有父评论关系；旧规则把短文本错误标成缺父评论。修正后新建 Run，让输入指纹变化触发续做。'
+      ? '这条是根评论，没有父评论关系；旧规则把短文本错误标成缺父评论。可从源 Run 显式补跑。'
       : parent.state === 'not_included'
-      ? '这次 Run 漏带了父评论；修正输入组装后再启动，输入指纹变化时会进入默认续做。'
+      ? '这次 Run 漏带了父评论；修正输入组装后可从源 Run 显式补跑。'
       : parent.state === 'missing'
-        ? '当前没有可用父评论原文；先补齐来源输入，再启动。相同输入不会被默认反复重试。'
+        ? '当前没有可用父评论原文；可先补齐来源输入再显式补跑。相同输入不会反复重试。'
         : !target.modelReason
           ? '目标在进入模型前就被判定缺语境；先核对冻结的作品语境和依赖判定。'
           : '模型拿到了当前冻结文本但仍无法确认指代；只有补充了有效语境后才值得重跑。')
-    : failureCode === 'response_too_large'
+    : ['response_too_large', 'output_limit'].includes(failureCode)
       ? (attempt?.retryStrategy === 'split_single_target'
         ? '大批次已改为单目标处理；单条仍超过响应上限时会停止，不会原样重复请求。'
         : '响应超过 adapter 上限；系统会避免原样重试，按单目标恢复或给出终态原因。')
-      : ['authentication_failed', 'provider_authentication_failed'].includes(failureCode)
-        ? '先修复模型连接认证；认证错误不会重复扣预算重试。'
+      : ['authentication_failed', 'provider_authentication_failed', 'model_secret_unavailable'].includes(failureCode)
+        ? '先修复模型连接凭证；固定配置错误不会在同一 Run 内重复尝试。'
         : target.state === 'failed'
           ? '根据下方故障码先处理输入、连接或响应问题，再创建续做运行。'
           : '查看本次冻结输入和研究结果。';
@@ -456,7 +462,7 @@ function targetRow(target) {
     : attempt?.reservedTokens != null
       ? `用量未知；按预留额度 ${Number(attempt.reservedTokens)} Token 保守记账（计入 ${Number(attempt.chargedTokens || 0)} Token）`
       : '模型用量记录不可用';
-  const responseLimit = { sse_stream_262144: 'SSE 响应流超过 262,144 bytes', final_text_65536: '最终文本超过 65,536 bytes' }[attempt?.responseLimit];
+  const responseLimit = { sse_stream_262144: 'SSE 响应流超过 262,144 bytes', final_text_65536: '最终文本超过 65,536 bytes', output_tokens: '模型输出词元上限' }[attempt?.responseLimit];
   const diagnostics = attempt
     ? `<details class="study-target-diagnostics"><summary>技术诊断</summary><p>尝试 ${Number(target.attemptCount || 0)} 次 · ${esc(attempt.state || '状态未知')}${attempt.rejectionCode ? ` · 拒绝码 ${esc(attempt.rejectionCode)}` : ''}${attempt.providerFailureCode ? ` · 调用错误 ${esc(attempt.providerFailureCode)}` : ''}${attempt.retryStrategy ? ` · 后续策略 ${esc(attempt.retryStrategy)}` : ''}</p><p>阶段 ${esc(attempt.stage || '未记录')} · HTTP ${esc(attempt.httpStatus ?? '未记录')} · 接收 ${esc(attempt.receivedBytes ?? '未记录')} bytes · 收到结束事件 ${attempt.terminalReceived == null ? '未知' : (attempt.terminalReceived ? '是' : '否')}${responseLimit ? ` · ${esc(responseLimit)}` : ''}</p><p>${esc(usage)}${target.terminalReason ? ` · 终态 ${esc(target.terminalReason)}` : ''}</p></details>`
     : `<p class="study-detail-muted">没有模型调用记录（尝试 ${Number(target.attemptCount || 0)} 次）。</p>`;
@@ -563,7 +569,7 @@ function pairOutcomeSummary(outcome) {
 }
 function signalCard(signal) {
   const body = signal.sourceState === 'restricted'
-    ? `<p class="study-restricted">来源已被限制，原声与摘要不再显示。</p>`
+    ? `<p class="study-restricted">本条或父语境已受限，研究衍生文本不再显示。</p>`
     : `<p class="study-signal-proposition">${esc(signal.proposition)}</p><blockquote>${esc(signal.evidence)}</blockquote>`;
   return `
     <article class="study-signal-card">
@@ -589,6 +595,8 @@ async function renderSelectedRunPanel() {
 
 async function loadRunPanelPage(panel, reset = false) {
   const state = runPanelCache[panel];
+  const requestedRunRef = selectedRunRef;
+  const generation = runPanelGeneration;
   if (reset || state.runRef !== selectedRunRef) {
     state.runRef = selectedRunRef;
     state.items = [];
@@ -600,7 +608,8 @@ async function loadRunPanelPage(panel, reset = false) {
   const query = new URLSearchParams({ runRef: selectedRunRef, limit: '50' });
   if (cursor) query.set('cursor', cursor);
   const response = await get(`${panel}?${query}`);
-  if (state.runRef !== selectedRunRef) return;
+  if (generation !== runPanelGeneration || state.runRef !== requestedRunRef || selectedRunRef !== requestedRunRef) return;
+  if (response.runRef !== requestedRunRef) throw new Error('运行详情回执与当前选择不一致。');
   const items = response[panel] || [];
   state.items = cursor ? [...state.items, ...items] : items;
   state.nextCursor = response.page?.nextCursor || null;
@@ -634,11 +643,16 @@ function runRow(run) {
     const pendingCount = run.pendingCount == null ? '未知' : Number(run.pendingCount);
     actions.push(`<button class="study-run-control study-run-stop" type="button" data-run-control="stop" data-run="${esc(run.runRef)}" data-control-version="${Number(run.controlVersion)}" data-target-count="${Number(run.targetCount)}" data-pending-count="${pendingCount}">停止本次运行</button>`);
   }
+  const unfinished = Number(run.failedCount || 0) + Number(run.cancelledCount || 0)
+    + Number(run.needsContextCount || 0) + Number(run.excludedCount || 0);
+  if (run.selectionContract === 'comment-study.run-selection.v2' && run.finishedAt && unfinished > 0) {
+    actions.push(`<button type="button" class="study-link" data-run-recover="${esc(run.runRef)}">补跑未完成</button>`);
+  }
   actions.push(`<button type="button" class="study-link" data-run-open="${esc(run.runRef)}">${selectedRunRef === run.runRef ? '当前查看' : '查看结果'}</button>`);
   const dispatchLabel = dispatchStateLabel[run.dispatchState] || '派发状态未知';
   const dispatchReason = dispatchReasonLabel[run.dispatchReason];
   return `<tr>
-      <td>${esc(run.runRef.slice(0, 8))}…<p>${esc(run.createdAt)}</p></td>
+      <td>${esc(run.runRef.slice(0, 8))}…<p>${esc(run.createdAt)}</p>${run.recoverySourceRunRef ? `<p>补跑自 ${esc(run.recoverySourceRunRef.slice(0, 8))}…</p>` : ''}</td>
       <td>${esc(runStateLabel[run.state] || run.state)}<p>${esc(dispatchLabel)}${dispatchReason ? ` · ${esc(dispatchReason)}` : ''}</p></td>
       <td>${Number(run.workCount)}<p>primary ${Number(run.primaryWorkCount || 0)} · reference ${Number(run.referenceWorkCount || 0)}</p></td>
       <td>${Number(run.targetCount)}</td>
@@ -651,39 +665,55 @@ function runRow(run) {
     </tr>`;
 }
 async function renderRunsTab() {
-  if (!runListLoaded) await loadRunListPage(true);
+  if (!runListLoaded || runControlOutcomeNeedsRefresh) await loadRunListPage(true);
   const feedback = '<p id="study-run-control-feedback" class="study-run-control-feedback" role="status" aria-live="polite" tabindex="-1">' + esc(runControlFeedback) + '</p>';
   if (!allRuns.length) return feedback + '<p class="study-empty">尚未创建过研究运行。</p>';
   const table = '<div class="study-review-table-wrap"><table class="study-review-table"><thead><tr><th scope="col">运行</th><th scope="col">状态</th><th scope="col">作品</th><th scope="col">目标</th><th scope="col">有信号</th><th scope="col">无信号</th><th scope="col">等待语境</th><th scope="col">处理失败</th><th scope="col">已排除</th><th scope="col">操作</th></tr></thead><tbody>' + allRuns.map(runRow).join('') + '</tbody></table></div>';
   const more = runListNextCursor
     ? `<p class="study-run-page-status">已显示 ${allRuns.length} 次运行 <button type="button" class="study-link" data-run-list-load-more${runListLoading ? ' disabled' : ''}>${runListLoading ? '读取中…' : '加载更早运行'}</button></p>`
     : `<p class="study-run-page-status">已显示 ${allRuns.length} 次运行，已到列表末尾</p>`;
-  return feedback + table + more + await renderSelectedRunPanel();
+  let panel;
+  try {
+    panel = await renderSelectedRunPanel();
+  } catch (error) {
+    panel = `<p class="study-empty">运行详情读取失败：${esc(error.message)}</p>`;
+  }
+  return feedback + table + more + panel;
 }
 
 async function loadRunListPage(reset = false) {
-  if (runListLoading) return;
+  if (runListRequest && !reset) return runListRequest;
   if (reset) {
+    runListGeneration += 1;
     allRuns = [];
     runListNextCursor = null;
     runListLoaded = false;
   } else if (!runListNextCursor) {
     return;
   }
+  const generation = runListGeneration;
   runListLoading = true;
   const cursor = reset ? null : runListNextCursor;
-  try {
+  const request = (async () => {
     const query = new URLSearchParams({ limit: '50' });
     if (cursor) query.set('cursor', cursor);
     const response = await get(`runs?${query}`);
+    if (generation !== runListGeneration) return;
     const rows = response.runs || [];
     allRuns = cursor ? [...allRuns, ...rows] : rows;
     runListNextCursor = response.page?.nextCursor || null;
     runListLoaded = true;
     if (!selectedRunRef) selectedRunRef = allRuns[0]?.runRef ?? null;
     renderRunPicker();
+  })();
+  runListRequest = request;
+  try {
+    await request;
   } finally {
-    runListLoading = false;
+    if (runListRequest === request) {
+      runListLoading = false;
+      runListRequest = null;
+    }
   }
 }
 
@@ -731,6 +761,20 @@ async function renderActiveTab() {
 }
 
 function bindRunControls(container) {
+  container.querySelectorAll('[data-run-recover]').forEach(button => {
+    button.addEventListener('click', () => {
+      const run = allRuns.find(item => item.runRef === button.dataset.runRecover);
+      if (!run) return;
+      recoveryRunRef = run.runRef;
+      const limits = run.limits || {};
+      document.querySelector('#study-recover-description').textContent =
+        `源 Run ${run.runRef}。仅从本次未完成评论中重新核对当前资格，跳过后续已成功、在途、受限或仍不可恢复的评论；沿用原方法与本次最多 ${Number(limits.commentBudget)} 条、${Number(limits.tokenLimit)} 词元预算。新 Run 会保留源 Run 关联，原记录不改写。`;
+      document.querySelector('#study-recover-error').textContent = '';
+      document.querySelector('#study-recover-confirm').disabled = false;
+      document.querySelector('#study-recover-dialog').showModal();
+      document.querySelector('#study-recover-dismiss').focus();
+    });
+  });
   container.querySelectorAll('[data-run-control="stop"]').forEach(button => {
     button.addEventListener('click', () => {
       stopDialogRunRef = button.dataset.run;
@@ -877,6 +921,43 @@ async function submitRunStop() {
   }
 }
 
+async function submitRunRecovery() {
+  if (!recoveryRunRef) return;
+  const sourceRunRef = recoveryRunRef;
+  const confirm = document.querySelector('#study-recover-confirm');
+  const status = document.querySelector('#study-recover-error');
+  confirm.disabled = true;
+  status.textContent = '正在重新核对并创建运行…';
+  const requestRef = recoveryRequestRefs.get(sourceRunRef) || crypto.randomUUID();
+  recoveryRequestRefs.set(sourceRunRef, requestRef);
+  try {
+    const receipt = await post(`runs/${encodeURIComponent(sourceRunRef)}/recover`, { requestRef });
+    recoveryRequestRefs.delete(sourceRunRef);
+    document.querySelector('#study-recover-dialog').close();
+    recoveryRunRef = null;
+    runControlFeedback = receipt.outcome === 'created'
+      ? `已按服务端回执创建补跑 Run ${receipt.runRef}，本次冻结 ${Number(receipt.targetCount)} 条。`
+      : '本次没有仍可恢复的评论；未创建空运行。';
+    runControlOutcomeNeedsRefresh = true;
+    if (receipt.runRef) { selectedRunRef = receipt.runRef; selectedRunPanel = 'targets'; resetRunPanelCache(); syncStudyRoute(true); }
+    await renderActiveTab();
+    document.querySelector('#study-run-control-feedback')?.focus();
+  } catch (error) {
+    status.textContent = `补跑未获确认：${error.message}。重试将沿用本次请求编号。`;
+    confirm.disabled = false;
+  }
+}
+
+document.querySelector('#study-recover-confirm').addEventListener('click', submitRunRecovery);
+document.querySelector('#study-recover-dismiss').addEventListener('click', () => {
+  document.querySelector('#study-recover-dialog').close();
+  recoveryRunRef = null;
+});
+document.querySelector('#study-recover-dialog').addEventListener('cancel', event => {
+  if (document.querySelector('#study-recover-confirm').disabled) event.preventDefault();
+  else recoveryRunRef = null;
+});
+
 document.querySelector('#study-stop-confirm').addEventListener('click', submitRunStop);
 document.querySelector('#study-stop-dismiss').addEventListener('click', () => {
   if (!document.querySelector('#study-stop-confirm').disabled) {
@@ -986,7 +1067,7 @@ document.querySelector('#activate-policy').addEventListener('click', async () =>
   } catch (error) { status.textContent = `未能切换默认方法：${error.message}`; button.disabled = false; }
 });
 document.querySelector('#study-mode').addEventListener('change', event => {
-  const needsReason = !['new_only', 'continue_ready'].includes(event.currentTarget.value);
+  const needsReason = event.currentTarget.value !== 'new_only';
   document.querySelector('#study-reason-label').hidden = !needsReason;
   pendingStartSignature = null; pendingStartRef = null;
 });
@@ -1018,7 +1099,7 @@ document.querySelector('#start-run').addEventListener('click', async () => {
   try {
     const command = selectionCommand();
     const mode = command.mode;
-    command.reason = ['new_only', 'continue_ready'].includes(mode) ? null : document.querySelector('#study-reason').value;
+    command.reason = mode === 'new_only' ? null : document.querySelector('#study-reason').value;
     const signature = JSON.stringify(command);
     if (pendingStartSignature !== signature || !pendingStartRef) {
       pendingStartSignature = signature;

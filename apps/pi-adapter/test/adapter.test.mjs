@@ -10,7 +10,7 @@ async function server(handler) {
 const request=(baseUrl,extra={})=>({version:VERSION,operation:'probe',api:'openai-completions',baseUrl,
   localEndpoint:true,apiKey:'synthetic-credential-only',modelId:'synthetic-model',timeoutMs:3000,maxOutputTokens:128,
   system:'Synthetic protocol proof, no real material.',prompt:'Return a JSON object.',...extra});
-const DIAGNOSTIC_KEYS=['elapsedMs','finishReason','httpStatus','receivedBytes','responseStarted','retryClass','schemaVersion','sdkErrorType','stage','terminalReceived','usageKnown'];
+const DIAGNOSTIC_KEYS=['elapsedMs','finishReason','httpStatus','limitKind','receivedBytes','responseStarted','retryClass','schemaVersion','sdkErrorType','stage','terminalReceived','usageKnown'];
 function assertDiagnostic(result,expected={}) {
   const d=result.diagnostic;
   assert.deepEqual(Object.keys(d).sort(),DIAGNOSTIC_KEYS);
@@ -62,7 +62,13 @@ test('actual Pi SDK distinguishes an interrupted stream, missing terminal, and o
   const interrupted=await server((req,res)=>{res.writeHead(200,{'Content-Type':'text/event-stream'});res.write(`data: ${JSON.stringify(first)}\n\n`);setTimeout(()=>res.socket.destroy(),5);});
   try{const r=await execute(request(interrupted.url));assert.equal(r.failureCode,'provider_stream_interrupted');const d=assertDiagnostic(r,{stage:'failed',httpStatus:200,responseStarted:true,terminalReceived:null,finishReason:null,usageKnown:false,sdkErrorType:'stream_interrupted',retryClass:'manual_review'});assert.ok(d.receivedBytes>0);}finally{await interrupted.close();}
   const limited=await server((req,res)=>{const chunk=(delta,finishReason=null)=>({id:'synthetic-response',object:'chat.completion.chunk',choices:[{index:0,delta,finish_reason:finishReason}]});res.writeHead(200,{'Content-Type':'text/event-stream'});res.write(`data: ${JSON.stringify(chunk({role:'assistant',content:'{"ok":true}'}))}\n\n`);res.write(`data: ${JSON.stringify(chunk({},'length'))}\n\n`);res.end('data: [DONE]\n\n');});
-  try{const r=await execute(request(limited.url));assert.equal(r.failureCode,'output_limit');const d=assertDiagnostic(r,{stage:'terminal',httpStatus:200,responseStarted:true,terminalReceived:true,finishReason:'length',usageKnown:false,sdkErrorType:null,retryClass:'never'});assert.ok(d.receivedBytes>0);}finally{await limited.close();}
+  try{const r=await execute(request(limited.url));assert.equal(r.failureCode,'output_limit');const d=assertDiagnostic(r,{stage:'terminal',httpStatus:200,responseStarted:true,terminalReceived:true,finishReason:'length',limitKind:'output_tokens',usageKnown:false,sdkErrorType:null,retryClass:'never'});assert.ok(d.receivedBytes>0);}finally{await limited.close();}
+});
+test('recorded limit kind distinguishes wire bytes from final text bytes',async()=>{
+  const wire=await server((req,res)=>{res.writeHead(200,{'Content-Type':'text/event-stream'});res.end(`: ${'x'.repeat(262145)}\n\n`);});
+  try{const result=await execute(request(wire.url));assert.equal(result.failureCode,'response_too_large');assertDiagnostic(result,{limitKind:'sse_stream_262144'});}finally{await wire.close();}
+  const final=await server((req,res)=>success(res,'x'.repeat(65537),false));
+  try{const result=await execute(request(final.url));assert.equal(result.failureCode,'response_too_large');assertDiagnostic(result,{limitKind:'final_text_65536'});}finally{await final.close();}
 });
 test('real Anthropic SDK protocol preserves start input and final output usage',async()=>{
   const s=await server(async(req,res)=>{

@@ -281,9 +281,14 @@ pub async fn read_runs(
         "page":{"limit":page.limit,"hasMore":has_more,"nextCursor":next_cursor,"asOf":page.as_of},
         "runs":rows.into_iter().map(|row| json!({
             "runRef":row.get::<Uuid,_>("run_ref"),"asOf":row.get::<String,_>("as_of"),
+            "policyRef":row.get::<Uuid,_>("policy_ref"),
+            "limits":{"commentBudget":row.get::<Option<i32>,_>("comment_budget"),
+                "contextCharacterBudget":row.get::<Option<i32>,_>("context_character_budget"),
+                "tokenLimit":row.get::<Option<i64>,_>("token_limit")},
             "state":row.get::<String,_>("state"),"createdAt":row.get::<String,_>("created_at"),
             "finishedAt":row.get::<Option<String>,_>("finished_at"),
             "selectionContract":row.get::<Option<String>,_>("selection_contract"),
+            "recoverySourceRunRef":row.get::<Option<String>,_>("recovery_source_run_ref"),
             "dispatchState":row.get::<String,_>("dispatch_state"),
             "dispatchReason":row.get::<Option<String>,_>("dispatch_reason"),
             "controlVersion":row.get::<i64,_>("control_version"),
@@ -294,7 +299,8 @@ pub async fn read_runs(
             "pendingCount":row.get::<i64,_>("pending_count"),
             "succeededCount":row.get::<i64,_>("succeeded_count"),"noSignalCount":row.get::<i64,_>("no_signal_count"),
             "needsContextCount":row.get::<i64,_>("needs_context_count"),"failedCount":row.get::<i64,_>("failed_count"),
-            "excludedCount":row.get::<i64,_>("excluded_count")
+            "excludedCount":row.get::<i64,_>("excluded_count"),
+            "cancelledCount":row.get::<i64,_>("cancelled_count")
         })).collect::<Vec<_>>()
     }))
 }
@@ -336,9 +342,7 @@ pub async fn read_targets(
                       THEN attempt.output_manifest->>'reason' ELSE NULL END, \
                     'providerFailureCode',COALESCE(invocation.result->>'failureCode',invocation.failure_code), \
                     'stage',invocation.result->'diagnostic'->>'stage', \
-                    'responseLimit',CASE WHEN COALESCE(invocation.result->>'failureCode',invocation.failure_code)='response_too_large' \
-                      THEN CASE WHEN invocation.result->'diagnostic'->'terminalReceived'='true'::jsonb \
-                        THEN 'final_text_65536' ELSE 'sse_stream_262144' END ELSE NULL END, \
+                    'responseLimit',invocation.result->'diagnostic'->>'limitKind', \
                     'httpStatus',invocation.result->'diagnostic'->>'httpStatus', \
                     'receivedBytes',invocation.result->'diagnostic'->'receivedBytes', \
                     'terminalReceived',invocation.result->'diagnostic'->'terminalReceived', \
@@ -424,8 +428,14 @@ pub async fn read_targets(
             } else {
                 json!({"state":"none"})
             };
-            let latest_attempt: Option<Value> = row.get("latest_attempt");
-            let model_reason = if source_state == "known" {
+            let mut latest_attempt: Option<Value> = row.get("latest_attempt");
+            let reason_readable = source_state == "known" && !parent_restricted;
+            if !reason_readable {
+                if let Some(attempt) = latest_attempt.as_mut() {
+                    attempt["modelReason"] = Value::Null;
+                }
+            }
+            let model_reason = if reason_readable {
                 latest_attempt
                     .as_ref()
                     .and_then(|attempt| attempt["modelReason"].as_str().map(str::to_owned))
@@ -483,7 +493,12 @@ pub async fn read_signals(
                  '[]'::jsonb) AS pair_outcomes, \
                 EXISTS(SELECT 1 FROM linggan_material_comment_restriction restriction \
                   WHERE restriction.content_public_ref=comment.content_public_ref \
-                    AND restriction.comment_external_id=comment.comment_external_id) AS source_restricted \
+                    AND restriction.comment_external_id=comment.comment_external_id) AS source_restricted, \
+                EXISTS(SELECT 1 FROM linggan_material_comment parent_comment \
+                  JOIN linggan_material_comment_restriction restriction \
+                    ON restriction.content_public_ref=parent_comment.content_public_ref \
+                   AND restriction.comment_external_id=parent_comment.comment_external_id \
+                  WHERE parent_comment.material_ref=target.parent_source_ref) AS parent_restricted \
          FROM linggan_comment_study_signal signal \
          JOIN linggan_comment_study_target target USING(target_ref) \
          JOIN linggan_comment_study_work work ON work.run_ref=target.run_ref AND work.content_public_ref=target.content_public_ref \
@@ -522,21 +537,22 @@ pub async fn read_signals(
         "contract":"comment-study.read.v1","runRef":run_ref,
         "page":{"limit":page.limit,"hasMore":has_more,"nextCursor":next_cursor,"asOf":page.as_of},
         "signals":rows.into_iter().map(|row| {
-            let restricted: bool = row.get("source_restricted");
+            let restricted: bool = row.get::<bool,_>("source_restricted") || row.get::<bool,_>("parent_restricted");
             let source_state = if restricted { "restricted" } else { "known" };
-            let (proposition, evidence) = if restricted {
-                (None, None)
+            let (proposition, evidence, problem_frame) = if restricted {
+                (None, None, None)
             } else {
                 (
                     Some(row.get::<String, _>("proposition")),
                     Some(row.get::<String, _>("evidence")),
+                    row.get::<Option<Value>,_>("problem_frame"),
                 )
             };
             json!({
             "signalRef":row.get::<Uuid,_>("signal_ref"),"targetRef":row.get::<Uuid,_>("target_ref"),
             "observationRole":row.get::<String,_>("observation_role"),
             "kind":row.get::<String,_>("kind"),"proposition":proposition,
-            "evidence":evidence,"sourceState":source_state,"problemFrame":row.get::<Option<Value>,_>("problem_frame"),
+            "evidence":evidence,"sourceState":source_state,"problemFrame":problem_frame,
             "eligibilityState":row.get::<String,_>("eligibility_state"),"eligibilityReason":row.get::<Option<String>,_>("eligibility_reason"),
             "resolutionRef":row.get::<Option<Uuid>,_>("resolution_ref"),"resolutionState":row.get::<Option<String>,_>("resolution_state"),
             "resolvedProblemRef":row.get::<Option<Uuid>,_>("resolved_problem_ref"),"membershipRef":row.get::<Option<Uuid>,_>("membership_ref"),

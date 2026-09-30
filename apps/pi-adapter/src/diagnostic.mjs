@@ -18,6 +18,7 @@ export function createObservation() {
       responseStarted: null,
       terminalReceived: null,
       receivedBytes: null,
+      limitKind: null,
       finishReason: null,
       elapsedMs: 0,
       usageKnown: false,

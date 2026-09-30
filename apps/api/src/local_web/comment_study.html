@@ -113,7 +113,7 @@
       </header>
       <p id="reference-source-preview" class="study-table-status" role="status" hidden></p>
       <div class="study-run-settings">
-        <label>启动模式<select id="study-mode"><option value="continue_ready">新评论 + 续做可恢复项（推荐）</option><option value="new_only">只研究新评论</option><option value="input_changed">只重研输入已变化的评论</option><option value="retry_failed">重试失败评论</option><option value="reanalyse">重新分析所选评论</option></select></label>
+        <label>启动模式<select id="study-mode"><option value="new_only">只研究新评论</option><option value="input_changed">只重研输入已变化的评论</option><option value="retry_failed">重试失败评论</option><option value="reanalyse">重新分析所选评论</option></select></label>
         <label>本次最多评论数<input id="run-comment-budget" type="number" min="1" max="3000" value="100"></label>
         <label>单作品语境字符上限<input id="run-context-character-budget" type="number" min="1" max="20000" value="6000"></label>
         <label>本次模型词元上限<input id="token-budget" type="number" min="1024" max="10000000" value="100000"></label>
@@ -154,11 +154,24 @@
       <p class="study-label">运行控制</p>
       <h2 id="study-stop-title">停止本次研究？</h2>
       <p id="study-stop-run-identity" class="study-stop-run-identity"></p>
-      <p id="study-stop-description">尚未外发的目标会标记为取消，已接纳结果会保留。已经开始的调用无法保证中断，可能仍产生费用；获准的在途结果仍会结算。停止后不能恢复原 Run；创建新 Run 时可选择“新评论 + 续做可恢复项”。</p>
+      <p id="study-stop-description">尚未外发的目标会标记为取消，已接纳结果会保留。已经开始的调用无法保证中断，可能仍产生费用；获准的在途结果仍会结算。停止后不能恢复原 Run；可从该运行显式补跑未完成评论。</p>
       <p id="study-stop-error" class="study-stop-error" role="status" aria-live="polite"></p>
       <div class="study-stop-actions">
         <button id="study-stop-confirm" type="button" class="study-danger-button">确认停止</button>
         <button id="study-stop-dismiss" type="button" autofocus>返回</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="study-recover-dialog" aria-labelledby="study-recover-title" aria-describedby="study-recover-description">
+    <div class="study-stop-dialog-body">
+      <p class="study-label">有界恢复</p>
+      <h2 id="study-recover-title">补跑未完成评论？</h2>
+      <p id="study-recover-description"></p>
+      <p id="study-recover-error" class="study-stop-error" role="status" aria-live="polite"></p>
+      <div class="study-stop-actions">
+        <button id="study-recover-confirm" type="button">确认创建新运行</button>
+        <button id="study-recover-dismiss" type="button" autofocus>返回</button>
       </div>
     </div>
   </dialog>
