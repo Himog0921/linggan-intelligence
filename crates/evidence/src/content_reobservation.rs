@@ -159,7 +159,7 @@ async fn content_reobservation_in_domain_inner(
         return Err(ContentReobservationError::AuthorizedTargetMissing);
     };
     // 复观测读的也是那张已经打开过的详情页，所以窗口与「详情补采」同口径（ADR-0002）：一次
-    // 打开带回详情与前 30 条评论、2 层回复。额度只有一处定义，免得两个入口各写一个 30。
+    // 打开带回详情与最多 30 条评论（含回复），每条主评论最多 2 条回复。
     let targets = [MaterialDeepeningTarget {
         content_public_ref: public_ref,
         comment_limit: DETAIL_WINDOW_COMMENT_LIMIT,

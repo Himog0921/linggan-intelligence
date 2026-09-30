@@ -112,6 +112,8 @@ const PROGRESSIVE_ARCHIVE_VERSION: i32 = 1;
 const PROGRESSIVE_ARCHIVE_DIRECTORY_LIMIT: i32 = 200;
 const PROGRESSIVE_ARCHIVE_BATCH_SIZE: i64 = 3;
 const PROGRESSIVE_ARCHIVE_MAX_GENERATION_PER_TICK: usize = 100;
+const CREATOR_FOLLOW_RESERVED_GENERATION_PER_TICK: usize = 20;
+const CREATOR_PATROL_DETAIL_FOLLOW_PURPOSE: &str = "巡查新增作品自动详情补采";
 
 /// One already-admitted material identity that a person has explicitly selected for deepening.
 ///
@@ -130,7 +132,7 @@ pub struct MaterialDeepeningTarget {
 /// 一条笔记的详情读默认带回来的东西（ADR-0002 的固定窗口）。
 ///
 /// 它不是「评论采集」这个独立动作的额度，而是详情页**已经打开着**时顺手读回来的上界：
-/// 一次打开最多 30 条一级评论与 2 层回复。创建者观察与关键词观察在这一点上同口径——
+/// 一次打开最多 30 条评论（含回复），每条主评论最多 2 条回复。创建者观察与关键词观察同口径——
 /// 「单篇详情采集」是一件有确定形状的事，不该按入口各表一套。媒体不在此列：它是一次
 /// 独立的、范围更大的决定（下载字节、OCR、转录），由 `acquire_media` 单独授权。
 pub const DETAIL_WINDOW_COMMENT_LIMIT: i32 = 30;
@@ -656,7 +658,8 @@ pub async fn request_creator_directory_gaps(
     purpose: &str,
     requested_by: &str,
 ) -> Result<RequestOutcome, AcquisitionChainError> {
-    request_creator_directory_gaps_inner(database, target_ref, None, purpose, requested_by).await
+    request_creator_directory_gaps_inner(database, target_ref, None, purpose, requested_by, None)
+        .await
 }
 
 pub async fn request_creator_directory_gaps_for_domain(
@@ -672,6 +675,7 @@ pub async fn request_creator_directory_gaps_for_domain(
         Some(domain_ref),
         purpose,
         requested_by,
+        None,
     )
     .await
 }
@@ -682,6 +686,7 @@ async fn request_creator_directory_gaps_inner(
     explicit_domain_ref: Option<Uuid>,
     purpose: &str,
     requested_by: &str,
+    required_authorization_ref: Option<Uuid>,
 ) -> Result<RequestOutcome, AcquisitionChainError> {
     let mut transaction = database.pool().begin().await?;
     let kind: Option<String> = sqlx::query_scalar(
@@ -693,6 +698,28 @@ async fn request_creator_directory_gaps_inner(
     if kind.as_deref() != Some("creator") {
         return Err(AcquisitionChainError::UnknownTarget);
     }
+    let follow_rule_revision_ref: Option<Uuid> = if requested_by == "agent"
+        && purpose == CREATOR_PATROL_DETAIL_FOLLOW_PURPOSE
+    {
+        let revision: Option<Uuid> = sqlx::query_scalar(
+            "SELECT revision.rule_revision_ref FROM collection_observation_target target \
+             JOIN collection_monitor_rule rule ON rule.target_ref=target.target_ref \
+             JOIN collection_monitor_rule_revision revision \
+               ON revision.rule_revision_ref=rule.active_revision_ref \
+             WHERE target.target_ref=$1 AND target.lifecycle_state='monitoring' \
+               AND target.monitoring_enabled AND rule.retired_at IS NULL \
+               AND revision.automatic_enabled AND revision.creator_follow_details \
+             ORDER BY rule.created_at,rule.rule_ref LIMIT 1",
+        )
+        .bind(target_ref)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        Some(revision.ok_or(AcquisitionChainError::ProgressiveArchiveNotReady {
+            reason: "auto_detail_rule_disabled",
+        })?)
+    } else {
+        None
+    };
     let candidate_domains: Vec<Uuid> = sqlx::query_scalar(
         "SELECT relation.domain_ref FROM observation_domain_target relation \
          JOIN observation_domain domain USING(domain_ref) \
@@ -712,9 +739,10 @@ async fn request_creator_directory_gaps_inner(
     }) else {
         return Err(AcquisitionChainError::TargetDomainUnassigned);
     };
-    let gaps: Vec<(Uuid, bool)> = sqlx::query_as(concat!(
+    let gaps: Vec<(Uuid, bool, bool, bool, bool)> = sqlx::query_as(sqlx::AssertSqlSafe(concat!(
         "WITH ", crate::archive_ledger::directory_works_sql!("target.target_ref=$1", "true"),
-        r#" SELECT directory_work.content_public_ref, EXISTS (
+        r#" SELECT directory_work.content_public_ref, NOT directory_work.has_detail AS needs_detail,
+            (directory_work.has_detail AND $3='person' AND comment_need.needs_comments) AS needs_comments, EXISTS (
             SELECT 1 FROM collection_work_order scoped_order
             JOIN collection_work_order_material_target scope USING(work_order_ref)
             JOIN collection_work_order_domain_usage scoped_usage USING(work_order_ref)
@@ -722,42 +750,190 @@ async fn request_creator_directory_gaps_inner(
             WHERE scoped_order.target_ref=$1
               AND scoped_usage.domain_ref=$2
               AND scope.content_public_ref=directory_work.content_public_ref
-              AND (scoped_order.queue_state='queued'
-                   OR (lease.released_at IS NULL AND lease.expires_at>scope_001_now()))) AS in_flight
+              AND (scoped_order.queue_state IN ('queued','leased')
+                   OR (lease.released_at IS NULL AND lease.expires_at>scope_001_now()))) AS in_flight,
+            (/*executable*/ AND ($3='person' OR (
+              NOT /*already_stopped*/ AND NOT /*budget_blocked*/
+            ))) AS schedulable
           FROM directory_work
-          WHERE NOT directory_work.has_detail AND NOT directory_work.is_retired
+          JOIN linggan_material_content content ON content.public_ref=directory_work.content_public_ref
+          LEFT JOIN LATERAL (
+            SELECT detail.comment_count_state,detail.comment_count
+            FROM linggan_material_content_detail detail
+            JOIN linggan_runtime_capture_package detail_package ON detail_package.package_ref=detail.package_ref
+            JOIN linggan_runtime_submission_receipt detail_receipt ON detail_receipt.package_ref=detail.package_ref
+            JOIN linggan_runtime_record_disposition detail_disposition
+              ON detail_disposition.package_ref=detail.package_ref
+             AND detail_disposition.record_ordinal=detail.record_ordinal
+            WHERE detail.content_public_ref=directory_work.content_public_ref
+              AND detail_receipt.material_admission='ACCEPTED'
+              AND detail_disposition.disposition<>'quarantined'
+            ORDER BY detail_package.accepted_at DESC,detail.created_at DESC LIMIT 1
+          ) latest_detail ON true
+          LEFT JOIN LATERAL (
+            SELECT comment_package.package_ref,
+                   comment_package.coverage#>'{target,commentCollection}' AS receipt,
+                   EXISTS (SELECT 1 FROM linggan_material_comment admitted_comment
+                           WHERE admitted_comment.package_ref=comment_package.package_ref
+                             AND admitted_comment.content_public_ref=directory_work.content_public_ref
+                             AND NOT admitted_comment.is_reply) AS has_comment_material
+            FROM linggan_runtime_capture_package comment_package
+            JOIN linggan_runtime_submission_receipt comment_receipt
+              ON comment_receipt.package_ref=comment_package.package_ref
+            WHERE comment_package.package_kind='comments'
+              AND comment_package.platform=content.platform
+              AND comment_package.coverage#>>'{target,contentExternalId}'=content.content_external_id
+              AND comment_receipt.material_admission='ACCEPTED'
+            ORDER BY comment_package.accepted_at DESC LIMIT 1
+          ) latest_comments ON true
+          CROSS JOIN LATERAL (SELECT (
+              ((latest_comments.package_ref IS NULL
+                OR NOT COALESCE(latest_comments.has_comment_material,false))
+               AND latest_detail.comment_count_state='KNOWN'
+               AND latest_detail.comment_count>0)
+              OR (latest_comments.receipt->>'state'='partial'
+                  AND latest_comments.receipt->>'stopReason' IN
+                      ('comment_area_end','no_progress','collector_stopped_without_target'))
+              OR (latest_detail.comment_count_state='UNKNOWN'
+                  AND latest_comments.receipt->>'state'='complete'
+                  AND latest_comments.receipt->>'stopReason'='no_progress'
+                  AND latest_comments.receipt->>'pageCommentCount'='0'
+                  AND latest_comments.receipt->>'uniqueCollectedCount'='0')
+          ) AS needs_comments) comment_need
+          WHERE (NOT directory_work.has_detail OR ($3='person' AND directory_work.has_detail AND comment_need.needs_comments))
+            AND NOT directory_work.is_retired
+            AND ($3='person' OR (
+              EXISTS (SELECT 1 FROM ledger_patrol_packages patrol
+                      JOIN linggan_material_discovery_finding finding
+                        ON finding.package_ref=patrol.package_ref
+                      WHERE patrol.target_ref=directory_work.target_ref
+                        AND finding.content_public_ref=directory_work.content_public_ref)
+              AND NOT EXISTS (SELECT 1 FROM ledger_registered_packages root
+                              JOIN linggan_material_discovery_finding finding
+                                ON finding.package_ref=root.package_ref
+                              WHERE root.target_ref=directory_work.target_ref
+                                AND root.lane='deep_archive'
+                                AND EXISTS (SELECT 1 FROM linggan_runtime_record_disposition disposition
+                                            WHERE disposition.package_ref=finding.package_ref
+                                              AND disposition.record_ordinal=finding.record_ordinal
+                                              AND disposition.disposition='accepted_for_library_discovery')
+                                AND finding.content_public_ref=directory_work.content_public_ref)
+            ))
             AND EXISTS (SELECT 1 FROM linggan_material_domain_usage usage
                         WHERE usage.content_public_ref=directory_work.content_public_ref
                           AND usage.domain_ref=$2)
           ORDER BY directory_work.content_public_ref"#,
-    ))
+    )
+    .replace(
+        "/*executable*/",
+        &crate::execution_input_eligibility::has_executable_locator_predicate(
+            "content.content_external_id",
+        ),
+    )
+    .replace(
+        "/*already_stopped*/",
+        &crate::execution_input_eligibility::unchanged_input_block_predicate(
+            "$1",
+            "own_domain",
+            "material_content",
+            "directory_work.content_public_ref",
+            "content.content_external_id",
+        ),
+    )
+    .replace(
+        "/*budget_blocked*/",
+        &crate::execution_input_eligibility::budget_blocks_new_work_predicate(
+            "$1",
+            "own_domain",
+            "material_content",
+            "directory_work.content_public_ref",
+        ),
+    )))
     .bind(target_ref)
     .bind(domain_ref)
+    .bind(requested_by)
     .fetch_all(&mut *transaction)
     .await?;
     if gaps.is_empty() {
         return Err(AcquisitionChainError::ProgressiveArchiveNotReady {
-            reason: "no_missing_accepted_work",
+            reason: if requested_by == "agent" {
+                "no_eligible_follow_work"
+            } else {
+                "no_missing_accepted_work"
+            },
         });
     }
     let materials: Vec<MaterialDeepeningTarget> = gaps
         .iter()
-        .filter(|(_, in_flight)| !in_flight)
-        .take(200)
-        .map(|(content_public_ref, _)| MaterialDeepeningTarget {
+        .filter(|(_, _, _, in_flight, schedulable)| !in_flight && *schedulable)
+        .take(if requested_by == "agent" { 3 } else { 200 })
+        .map(|(content_public_ref, needs_detail, needs_comments, _, _)| MaterialDeepeningTarget {
             content_public_ref: *content_public_ref,
-            comment_limit: 30,
-            reply_expand_limit: 2,
-            acquire_media: true,
-            allow_ocr: true,
-            allow_asr: true,
+            comment_limit: if *needs_detail || *needs_comments { 30 } else { 0 },
+            reply_expand_limit: if *needs_detail || *needs_comments { 2 } else { 0 },
+            acquire_media: *needs_detail,
+            allow_ocr: *needs_detail,
+            allow_asr: *needs_detail,
         })
         .collect();
     if materials.is_empty() {
         return Err(AcquisitionChainError::ProgressiveArchiveNotReady {
-            reason: "detail_batch_in_flight",
+            reason: if requested_by == "agent" {
+                "no_eligible_follow_work"
+            } else if gaps.iter().all(|(_, _, _, in_flight, _)| *in_flight) {
+                "detail_batch_in_flight"
+            } else {
+                "detail_gap_not_schedulable"
+            },
         });
     }
+    if follow_rule_revision_ref.is_some() {
+        let required = required_capabilities_for("creator", "deep_archive", true, true, true, true);
+        let (ready_claimants, multiplier) =
+            ready_batch_claim_slots_in(&mut transaction, "xhs", &required).await?;
+        let ready_cap = ready_claimants.saturating_mul(i64::from(multiplier));
+        let active_group_work: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM collection_work_order \
+             WHERE dispatch_lane='batch' AND dispatch_group_key=$1 \
+               AND queue_state IN ('queued','leased')",
+        )
+        .bind(format!("target:{target_ref}"))
+        .fetch_one(&mut *transaction)
+        .await?;
+        if ready_cap == 0 || active_group_work >= ready_cap {
+            return Err(AcquisitionChainError::ProgressiveArchiveNotReady {
+                reason: "auto_detail_capacity_full",
+            });
+        }
+    }
+    let authorization_ref = if requested_by == "agent"
+        && purpose == CREATOR_PATROL_DETAIL_FOLLOW_PURPOSE
+    {
+        // The scope is now frozen. Pick a grant for this exact purpose that can cover it;
+        // selecting a grant before knowing the number of works can strand a valid batch.
+        let work_count = i32::try_from(materials.len()).unwrap_or(i32::MAX);
+        Some(
+            sqlx::query_scalar(
+                "SELECT authorization_ref FROM collection_acquisition_authorization \
+                 WHERE platform='xhs' AND target_kind='creator' AND lane='deep_archive' \
+                   AND purpose=$1 AND revoked_at IS NULL AND expires_at>scope_001_now() \
+                   AND 'material_deepening'=ANY(allowed_task_templates) \
+                   AND 'batch'=ANY(allowed_dispatch_lanes) \
+                   AND (max_works_per_target IS NULL OR max_works_per_target >= $2) \
+                   AND max_work_units >= $2 \
+                 ORDER BY expires_at DESC,authorization_ref LIMIT 1 FOR UPDATE",
+            )
+            .bind(purpose)
+            .bind(work_count)
+            .fetch_optional(&mut *transaction)
+            .await?
+            .ok_or(AcquisitionChainError::ProgressiveArchiveNotReady {
+                reason: "auto_detail_authorization_scope_insufficient",
+            })?,
+        )
+    } else {
+        required_authorization_ref
+    };
     let outcome = request_and_admit_in_transaction_scoped(
         &mut transaction,
         target_ref,
@@ -766,8 +942,8 @@ async fn request_creator_directory_gaps_inner(
         requested_by,
         explicit_domain_ref,
         &materials,
-        None,
-        None,
+        authorization_ref,
+        follow_rule_revision_ref,
         false,
     )
     .await?;
@@ -1114,7 +1290,7 @@ pub(crate) async fn request_and_admit_in_transaction_scoped(
         }
         "deep_archive" if !scope.is_empty() => matches!(
             lifecycle_state.as_str(),
-            "archiving" | "archived" | "monitoring" | "paused"
+            "pending_decision" | "archiving" | "archived" | "monitoring" | "paused"
         ),
         "deep_archive" if allow_progressive_resume && target_kind == "creator" => matches!(
             lifecycle_state.as_str(),
@@ -1934,11 +2110,10 @@ fn reason_text(outcome: &AdmissionOutcome) -> String {
     }
 }
 
-/// Write the bounded instruction and move the target into archiving.
+/// Write the bounded instruction and, for a creator root archive, move the target into archiving.
 ///
-/// Both happen together: a target sitting in `archiving` with no order behind it, or an
-/// order with the target still `pending_decision`, would each be a lie about what stage the
-/// chain reached.
+/// A material-scoped follow-up may run before a root archive; its Work Order must not
+/// claim that the creator baseline has started.
 async fn write_work_order(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     decision_ref: Uuid,
@@ -2003,7 +2178,8 @@ async fn write_work_order(
     .execute(&mut **transaction)
     .await?;
 
-    // 只有深度建档会推进生命周期。**巡检不改状态**：它是一个已建档目标的常规动作，
+    // 只有创作者整批建档会推进生命周期。详情补采即使复用 deep_archive lane，也不
+    // 代表首页基线已开始；**巡检不改状态**：它是一个已建档目标的常规动作，
     // 每跑一次就改一次状态，会把「这个目标处于什么阶段」变成「它最近被派过一次」。
     //
     // **而关键词连这一步都不做**：`0042` 的 CHECK 禁止关键词进入 `archiving`，理由是
@@ -2015,7 +2191,7 @@ async fn write_work_order(
     // 关键词「正在建档 / 建过档了」不靠生命周期字段表达，而是从证据里查
     // （`collection_control::keyword_baselines_qualified`），所以这里跳过它是完整的，
     // 不是少做了一步。
-    if lane == "deep_archive" {
+    if lane == "deep_archive" && scope.is_empty() {
         let moved = sqlx::query(
             "UPDATE collection_observation_target \
              SET lifecycle_state = 'archiving', lifecycle_changed_at = scope_001_now() \
@@ -2576,14 +2752,29 @@ pub async fn run_progressive_archives(
     .map_err(AcquisitionChainError::from)?;
 
     let mut summary = ProgressiveArchiveTickSummary::default();
+    let has_follow_rule: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM collection_observation_target target \
+         JOIN collection_monitor_rule rule ON rule.target_ref=target.target_ref \
+         JOIN collection_monitor_rule_revision revision \
+           ON revision.rule_revision_ref=rule.active_revision_ref \
+         WHERE target.platform='xhs' AND target.target_kind='creator' \
+           AND target.lifecycle_state='monitoring' AND target.monitoring_enabled \
+           AND rule.retired_at IS NULL AND revision.automatic_enabled \
+           AND revision.creator_follow_details)",
+    )
+    .fetch_one(database.pool())
+    .await
+    .map_err(AcquisitionChainError::from)?;
+    let root_generation_limit = PROGRESSIVE_ARCHIVE_MAX_GENERATION_PER_TICK
+        - if has_follow_rule { CREATOR_FOLLOW_RESERVED_GENERATION_PER_TICK } else { 0 };
     let mut generated = 0_usize;
-    while generated < PROGRESSIVE_ARCHIVE_MAX_GENERATION_PER_TICK {
+    while generated < root_generation_limit {
         let mut advanced_any = false;
         // A pass takes at most one batch per source. Repeating passes only
         // while a source remains below its persisted cap yields round-robin
         // production without an in-memory source cursor.
         for (target_ref, root_work_order_ref, purpose) in &plans {
-            if generated >= PROGRESSIVE_ARCHIVE_MAX_GENERATION_PER_TICK {
+            if generated >= root_generation_limit {
                 break;
             }
             let mut transaction = database
@@ -2771,6 +2962,84 @@ pub async fn run_progressive_archives(
         }
         if !advanced_any {
             break;
+        }
+    }
+    // A completed root stays completed. Opted-in creator patrols may request an ordinary,
+    // bounded material WorkOrder for accepted discoveries that still lack detail.
+    // A separate person grant with this exact purpose prevents a page-initiated archive grant
+    // from silently becoming permission for ongoing automatic collection.
+    let follow_targets: Vec<(Uuid, Option<Uuid>)> = sqlx::query_as(
+        "SELECT target.target_ref, ( \
+           SELECT auth.authorization_ref FROM collection_acquisition_authorization auth \
+           WHERE auth.platform=target.platform AND auth.target_kind='creator' \
+             AND auth.lane='deep_archive' AND auth.purpose=$1 \
+             AND auth.revoked_at IS NULL AND auth.expires_at>scope_001_now() \
+             AND 'material_deepening'=ANY(auth.allowed_task_templates) \
+             AND 'batch'=ANY(auth.allowed_dispatch_lanes) \
+           ORDER BY auth.expires_at DESC LIMIT 1) AS authorization_ref \
+         FROM collection_observation_target target \
+         JOIN collection_monitor_rule rule ON rule.target_ref=target.target_ref \
+         JOIN collection_monitor_rule_revision revision \
+           ON revision.rule_revision_ref=rule.active_revision_ref \
+         WHERE target.platform='xhs' AND target.target_kind='creator' \
+           AND target.lifecycle_state='monitoring' AND target.monitoring_enabled \
+           AND rule.retired_at IS NULL AND revision.automatic_enabled \
+           AND revision.creator_follow_details \
+         ORDER BY target.last_scheduler_considered_at NULLS FIRST,target.target_ref LIMIT $2",
+    )
+    .bind(CREATOR_PATROL_DETAIL_FOLLOW_PURPOSE)
+    .bind(i64::try_from(PROGRESSIVE_ARCHIVE_MAX_GENERATION_PER_TICK - generated).unwrap_or(0))
+    .fetch_all(database.pool())
+    .await
+    .map_err(AcquisitionChainError::from)?;
+    for (target_ref, authorization_ref) in follow_targets {
+        // Rotate every inspected target, including those without a grant or a current gap.
+        // Otherwise an always-empty first page can starve later opted-in creators forever.
+        sqlx::query(
+            "UPDATE collection_observation_target \
+             SET last_scheduler_considered_at=scope_001_now() WHERE target_ref=$1",
+        )
+        .bind(target_ref)
+        .execute(database.pool())
+        .await
+        .map_err(AcquisitionChainError::from)?;
+        let Some(authorization_ref) = authorization_ref else {
+            summary
+                .skipped
+                .push((target_ref, "auto_detail_authorization_missing".to_owned()));
+            continue;
+        };
+        match request_creator_directory_gaps_inner(
+            database,
+            target_ref,
+            None,
+            CREATOR_PATROL_DETAIL_FOLLOW_PURPOSE,
+            "agent",
+            Some(authorization_ref),
+        )
+        .await
+        {
+            Ok(outcome) if outcome.work_order_ref.is_some() => summary.queued.push(target_ref),
+            Ok(outcome) => summary
+                .skipped
+                .push((target_ref, outcome.reason_code.to_owned())),
+            Err(AcquisitionChainError::ProgressiveArchiveNotReady {
+                reason: "no_eligible_follow_work",
+            }) => {}
+            Err(AcquisitionChainError::ProgressiveArchiveNotReady {
+                reason: "detail_batch_in_flight",
+            }) => {}
+            Err(AcquisitionChainError::ProgressiveArchiveNotReady {
+                reason: "auto_detail_capacity_full",
+            }) => summary
+                .skipped
+                .push((target_ref, "auto_detail_capacity_full".to_owned())),
+            Err(AcquisitionChainError::ProgressiveArchiveNotReady {
+                reason: "auto_detail_rule_disabled",
+            }) => {}
+            Err(error) => summary
+                .skipped
+                .push((target_ref, format!("auto_detail_{error:?}"))),
         }
     }
     Ok(summary)

@@ -20,9 +20,9 @@
 //!
 //! # 现在的唯一定义
 //!
-//! - **目录作品**：来自**已证明的主页目录**（当前建档轮次里最新一个通过目录判据的发现包）
-//!   加上**合格的巡检发现**，按作品去重。未证明的目录不参与——一轮还在建、或中途被风控
-//!   打断的扫描不能拿出来当分母，否则「还差多少篇」会建立在一个自己都不确定的清单上。
+//! - **已登记作品**：根建档和巡查中逐条接纳的发现记录，按作品去重。扫描中断只影响
+//!   「主页目录基线已证明」的结论，不撤销先前逐条接纳的作品。这里的分母是已登记作品，
+//!   不声称已经覆盖作者主页全部作品；基线证明仍由 `directory_proven_sql!()` 独立判定。
 //! - **已有详情**：目录作品中，素材库里存在详情行的那些。**不限定建档轮次**——这与执行侧
 //!   挑下一批时用的 `NOT EXISTS (SELECT 1 FROM linggan_material_content_detail ...)` 是同一个
 //!   判断，因此界面说「还差 N 篇」与系统实际会去采的篇数永远一致。
@@ -104,8 +104,8 @@ macro_rules! directory_works_sql {
                         WHERE disposition.package_ref=package.package_ref \
                           AND disposition.disposition='accepted_for_library_discovery') \
                        =COALESCE((layer->>'acquired')::integer,-1) \
-             ), ledger_patrol_packages AS ( \
-                 SELECT DISTINCT target.target_ref,package.package_ref \
+             ), ledger_registered_packages AS ( \
+                 SELECT DISTINCT target.target_ref,work_order.lane,package.package_ref \
                  FROM collection_observation_target target \
                  JOIN collection_work_order work_order USING(target_ref) \
                  JOIN collection_work_order_lease lease USING(work_order_ref) \
@@ -117,27 +117,18 @@ macro_rules! directory_works_sql {
                  CROSS JOIN LATERAL jsonb_array_elements( \
                    CASE WHEN jsonb_typeof(package.coverage->'layers')='array' \
                         THEN package.coverage->'layers' ELSE '[]'::jsonb END) layer \
-                 WHERE work_order.lane='patrol' \
+                 WHERE work_order.lane IN ('deep_archive','patrol') \
                    AND package.package_kind='profile_discovery' \
-                   AND receipt.execution_effect='COMPLETED_LIVE_STEP' \
+                   AND package.platform=target.platform AND package.platform=task.platform \
+                   AND task.task_spec->'capabilitiesRequested' ? package.package_kind \
                    AND receipt.material_admission='ACCEPTED' \
                    AND layer->>'capability'='profile_discovery' \
-                   AND ", crate::directory_boundary::surface_scan_complete_sql!(), " \
                    AND ", $as_of, " \
                    AND ", $scope, " \
-                   AND NOT EXISTS (SELECT 1 FROM linggan_runtime_record_disposition disposition \
-                                   WHERE disposition.package_ref=package.package_ref \
-                                     AND disposition.disposition='quarantined') \
-                   -- 回执说采了几条，落库就得有几条。对不上说明这一包只落了一半，
-                   -- 它的清单不能拿来当分母。
-                   AND (SELECT count(*) FROM linggan_runtime_record_disposition disposition \
-                        WHERE disposition.package_ref=package.package_ref \
-                          AND disposition.disposition='accepted_for_library_discovery') \
-                       =COALESCE((layer->>'acquired')::integer,-1) \
+             ), ledger_patrol_packages AS ( \
+                 SELECT target_ref,package_ref FROM ledger_registered_packages WHERE lane='patrol' \
              ), ledger_directory_packages AS ( \
-                 SELECT target_ref,package_ref FROM ledger_proven_directory WHERE package_rank=1 \
-                 UNION \
-                 SELECT target_ref,package_ref FROM ledger_patrol_packages \
+                 SELECT target_ref,package_ref FROM ledger_registered_packages \
              ), directory_work AS ( \
                  SELECT DISTINCT packages.target_ref,finding.content_public_ref, \
                         ", crate::qualified_detail::qualified_detail_exists_sql!(
@@ -156,7 +147,7 @@ macro_rules! directory_works_sql {
                  JOIN linggan_runtime_record_disposition disposition \
                    ON disposition.package_ref=finding.package_ref \
                   AND disposition.record_ordinal=finding.record_ordinal \
-                 WHERE disposition.disposition<>'quarantined' \
+                 WHERE disposition.disposition='accepted_for_library_discovery' \
              )"
         )
     };

@@ -87,6 +87,7 @@ fn save_rule(
         draft: Some(MonitorRuleDraft {
             mode: MonitorRuleMode::Fixed,
             automatic_enabled: true,
+            creator_follow_details: false,
             run_on_weekdays: true,
             run_on_weekends: true,
             all_day: true,

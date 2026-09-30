@@ -9,7 +9,7 @@
 use crate::collection_control::{
     creator_baseline_qualified, required_capabilities_for, revalidate_frozen_capacity_in,
 };
-use crate::directory_boundary::surface_scan_complete_sql;
+use crate::directory_boundary::patrol_scan_qualified_sql;
 use linggan_contracts::{
     PRODUCER_TASK_SPEC_VERSION, ProducerTaskSpec, SERVER_LEASED_RISK_POLICY,
     parse_producer_task_spec,
@@ -572,15 +572,8 @@ async fn patrol_completion_qualified(
              AND receipt.execution_effect='COMPLETED_LIVE_STEP' \
              AND layer->>'capability'=package.package_kind \
              AND ",
-        surface_scan_complete_sql!(),
-        " \
-             AND NOT EXISTS (SELECT 1 FROM linggan_runtime_record_disposition disposition \
-                             WHERE disposition.package_ref=package.package_ref \
-                               AND disposition.disposition='quarantined') \
-             AND (SELECT count(*) FROM linggan_runtime_record_disposition disposition \
-                  WHERE disposition.package_ref=package.package_ref \
-                    AND disposition.disposition='accepted_for_library_discovery') = \
-                 COALESCE((layer->>'acquired')::integer,-1))",
+        patrol_scan_qualified_sql!(),
+        ")",
     ))
     .bind(lease_ref)
     .bind(target_ref)
@@ -727,7 +720,8 @@ async fn load_subject(
         "SELECT w.target_ref, w.station_ref, w.lane, w.max_works, \
                 t.platform, t.target_kind, t.identity_key, d.authorization_ref, \
                 w.installation_ref,w.account_ref,w.monitor_rule_revision_ref, \
-                owning_rule.active_revision_ref,current_revision.automatic_enabled,t.lifecycle_state, \
+                owning_rule.active_revision_ref, \
+                (t.monitoring_enabled AND current_revision.automatic_enabled),t.lifecycle_state, \
                 request.requested_by \
          FROM collection_work_order w \
          JOIN collection_observation_target t ON t.target_ref = w.target_ref \
@@ -914,6 +908,15 @@ fn reject_if_rule_changed(subject: &LeaseSubject) -> Result<(), LeaseError> {
                 reason_code: "monitoring_paused".to_owned(),
             });
         }
+    } else if subject.requested_by == "agent"
+        && subject.lane == "deep_archive"
+        && subject.monitor_rule_revision_ref.is_some()
+        && (subject.active_rule_automatic_enabled != Some(true)
+            || subject.lifecycle_state != "monitoring")
+    {
+        return Err(LeaseError::ControlBlocked {
+            reason_code: "monitoring_paused".to_owned(),
+        });
     } else if subject.requested_by == "person" && subject.lifecycle_state == "dismissed" {
         return Err(LeaseError::ControlBlocked {
             reason_code: "target_not_requestable".to_owned(),
@@ -1405,7 +1408,7 @@ fn freeze_capture_identity(subject: &LeaseSubject) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::{LeaseSubject, MaterialTarget, expand_into_tasks};
+    use super::{LeaseError, LeaseSubject, MaterialTarget, expand_into_tasks, reject_if_rule_changed};
     use linggan_contracts::ProducerTaskSpec;
     use serde_json::{Value, json};
     use uuid::Uuid;
@@ -1429,6 +1432,25 @@ mod tests {
             requested_by: "person".to_owned(),
             sampling: super::SamplingPolicy::default(),
         }
+    }
+
+    #[test]
+    fn automatic_detail_follow_cannot_claim_after_its_rule_is_disabled() {
+        let mut follow = subject();
+        let revision = Uuid::new_v4();
+        follow.lane = "deep_archive".to_owned();
+        follow.requested_by = "agent".to_owned();
+        follow.lifecycle_state = "monitoring".to_owned();
+        follow.monitor_rule_revision_ref = Some(revision);
+        follow.current_revision_of_same_rule = Some(revision);
+        follow.active_rule_automatic_enabled = Some(true);
+        assert!(reject_if_rule_changed(&follow).is_ok());
+
+        follow.active_rule_automatic_enabled = Some(false);
+        assert!(matches!(reject_if_rule_changed(&follow), Err(LeaseError::ControlBlocked { reason_code }) if reason_code == "monitoring_paused"));
+        follow.active_rule_automatic_enabled = Some(true);
+        follow.current_revision_of_same_rule = Some(Uuid::new_v4());
+        assert!(matches!(reject_if_rule_changed(&follow), Err(LeaseError::ControlBlocked { reason_code }) if reason_code == "rule_revision_changed"));
     }
 
     #[test]

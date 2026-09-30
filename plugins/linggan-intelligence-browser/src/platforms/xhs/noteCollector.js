@@ -122,14 +122,6 @@ function normalizeNoteData(noteData) {
   return note || null;
 }
 
-function firstPresentValue(source = {}, keys = []) {
-  if (!source || typeof source !== 'object') return null;
-  for (const key of keys) {
-    if (source[key] != null && source[key] !== '') return source[key];
-  }
-  return null;
-}
-
 // XHS reports a zero interaction count as an empty string, not as "0". Every count key that
 // can carry that representation has to be listed here, because a hydrated `interactInfo` is
 // the only thing that separates a real zero from a field the page has not filled in yet.
@@ -140,17 +132,41 @@ const XHS_INTERACT_COUNT_KEYS = [
   'shareCount', 'shares',
 ];
 
+function parseXhsCountValue(value) {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) && value >= 0 ? Math.round(value) : null;
+  }
+  if (typeof value === 'string') {
+    const compact = value.trim().replace(/\s+/g, '').replace(/[,，]/g, '').replace(/＋/g, '+');
+    if (!/^\d+(?:\.\d+)?(?:千|万|亿|[wWkK])?\+?$/.test(compact)) return null;
+    return parseCount(value);
+  }
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const candidates = [
+      value.displayText, value.display_text, value.displayCount, value.display_count,
+      value.text, value.countText, value.count_text, value.value, value.count,
+      value.num, value.number,
+    ];
+    const valid = candidates.map((candidate) => ({
+      candidate,
+      count: parseXhsCountValue(candidate),
+    })).filter(({ count }) => count !== null);
+    if (valid.length === 0) return null;
+    const unitBased = valid.filter(({ candidate }) =>
+      typeof candidate === 'string' && /[万亿千wWkK+]/.test(candidate),
+    );
+    return Math.max(...(unitBased.length > 0 ? unitBased : valid).map(({ count }) => count));
+  }
+  return null;
+}
+
 /// Has this `interactInfo` been filled in at all?
 ///
 /// One populated count proves the object is hydrated. Before that, every key reads as an empty
 /// string and no key can be told apart from a real zero.
 function xhsInteractInfoIsHydrated(interactInfo) {
   if (!interactInfo || typeof interactInfo !== 'object') return false;
-  return XHS_INTERACT_COUNT_KEYS.some((key) => {
-    const value = interactInfo[key];
-    if (typeof value === 'number') return Number.isFinite(value);
-    return typeof value === 'string' && value.trim() !== '';
-  });
+  return XHS_INTERACT_COUNT_KEYS.some((key) => parseXhsCountValue(interactInfo[key]) !== null);
 }
 
 /// Read one interaction count, telling a real zero apart from an unobserved field.
@@ -160,12 +176,17 @@ function xhsInteractInfoIsHydrated(interactInfo) {
 /// work has zero comments. Reading *every* empty string as zero would be the opposite error:
 /// an unhydrated page would be published as a confirmed zero. Hydration is what separates them.
 export function parseXhsInteractCount(interactInfo = {}, keys = []) {
-  const value = firstPresentValue(interactInfo, keys);
-  if (value != null) return parseCount(value);
+  let emptyStringPresent = false;
+  for (const key of keys) {
+    const value = interactInfo?.[key];
+    if (value === '') {
+      emptyStringPresent = true;
+      continue;
+    }
+    const parsed = parseXhsCountValue(value);
+    if (parsed !== null) return parsed;
+  }
   if (!xhsInteractInfoIsHydrated(interactInfo)) return null;
-  const emptyStringPresent = keys.some(
-    (key) => typeof interactInfo?.[key] === 'string' && interactInfo[key].trim() === '',
-  );
   return emptyStringPresent ? 0 : null;
 }
 
@@ -186,12 +207,7 @@ export function isCollectedNoteUsable(note = {}, expectedNoteId = '', { requireS
 
   if (!requireStats) {
     const interactInfo = note?.interactInfo || {};
-    const hasStats = Boolean(
-      firstPresentValue(interactInfo, ['likedCount', 'likeCount', 'likes'])
-      || firstPresentValue(interactInfo, ['commentCount', 'comments'])
-      || firstPresentValue(interactInfo, ['shareCount', 'shares'])
-      || firstPresentValue(interactInfo, ['collectedCount', 'collectCount', 'collects', 'favoriteCount'])
-    );
+    const hasStats = xhsInteractInfoIsHydrated(interactInfo);
     return hasText || hasMedia || hasAuthor || hasStats;
   }
 
@@ -199,9 +215,9 @@ export function isCollectedNoteUsable(note = {}, expectedNoteId = '', { requireS
   const interactInfo = note?.interactInfo;
   const hasFullStats = Boolean(
     interactInfo
-    && (interactInfo.likedCount != null || interactInfo.likeCount != null)
-    && (interactInfo.collectedCount != null || interactInfo.collectCount != null)
-    && (interactInfo.commentCount != null || interactInfo.comments != null)
+    && parseXhsInteractCount(interactInfo, ['likedCount', 'likeCount', 'likes']) !== null
+    && parseXhsInteractCount(interactInfo, ['collectedCount', 'collectCount', 'collects', 'favoriteCount']) !== null
+    && parseXhsInteractCount(interactInfo, ['commentCount', 'comments']) !== null
   );
   const hasValidMedia = Boolean(
     (Array.isArray(note?.imageList) && note.imageList.length > 0 && (note.imageList[0]?.url || note.imageList[0]?.urlDefault))
@@ -1029,7 +1045,7 @@ export function normalizeProfilePostedNote(note = {}, {
     shares: pickFirstText(interact, ['shared_count', 'sharedCount', 'share_count', 'shareCount']) || '',
     isPinned: readBoolean(interact.sticky ?? interact.isSticky ?? note.sticky ?? note.isSticky),
     sticky: readBoolean(interact.sticky ?? interact.isSticky ?? note.sticky ?? note.isSticky),
-    type: pickFirstText(note, ['type', 'note_type', 'noteType']) || 'normal',
+    type: pickFirstText(note, ['type', 'note_type', 'noteType']),
     cover,
     coverImg: cover,
     coverUrl: cover,
@@ -1170,7 +1186,7 @@ export function normalizeSearchSurfaceNote(item = {}, {
     shares: pickFirstText(interact, ['shared_count', 'sharedCount', 'share_count', 'shareCount']) || '',
     isPinned: false,
     sticky: false,
-    type: pickFirstText(noteCard, ['type', 'note_type', 'noteType']) || 'normal',
+    type: pickFirstText(noteCard, ['type', 'note_type', 'noteType']),
     cover,
     coverImg: cover,
     coverUrl: cover,

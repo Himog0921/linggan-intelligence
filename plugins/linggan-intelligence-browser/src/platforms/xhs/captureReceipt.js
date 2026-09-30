@@ -22,11 +22,14 @@ function text(value = '') {
 }
 
 function nonNegative(value) {
+  if (typeof value !== 'number' && typeof value !== 'string') return null;
+  if (typeof value === 'string' && value.trim() === '') return null;
   const number = Number(value);
   return Number.isFinite(number) && number >= 0 ? Math.floor(number) : null;
 }
 
 function knownPublicCommentCount(note = {}) {
+  if (note?.publicCommentCountKnown === false) return null;
   const direct = nonNegative(note?.publicCommentCount);
   if (direct !== null) return direct;
   if (note?.publicCommentCountKnown !== true) return null;
@@ -72,7 +75,8 @@ export function buildXhsCommentCollectionReceipt({
 } = {}) {
   const scope = collectionScope(maxTotal);
   const received = nonNegative(actual) ?? 0;
-  const pageCount = nonNegative(publicCommentCount);
+  const observedPageCount = nonNegative(publicCommentCount);
+  const pageCount = observedPageCount === null && explicitEmptyState ? 0 : observedPageCount;
   const requested = scope === XHS_COMMENT_COLLECTION_SCOPE.DETAIL_WINDOW
     ? normalizeXhsDetailCommentLimit(requestedLimit ?? maxTotal)
     : null;

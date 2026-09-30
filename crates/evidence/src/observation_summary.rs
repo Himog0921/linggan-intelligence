@@ -6,6 +6,7 @@
 //! packages already tied to this target's patrol Work Orders.
 
 use crate::ObservationTarget;
+use crate::directory_boundary::patrol_scan_qualified_sql;
 use linggan_storage_postgres::Database;
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -49,14 +50,13 @@ pub async fn read_target_observation_summaries(
         .iter()
         .map(|target| target.target_ref)
         .collect::<Vec<_>>();
-    let rows: Vec<(Uuid, Option<i64>, Option<i64>, bool, bool, bool)> = sqlx::query_as(
+    let rows: Vec<(Uuid, Option<i64>, Option<i64>, bool, bool, bool, bool)> = sqlx::query_as(concat!(
         "WITH selected AS ( \
              SELECT target_ref,target_kind,monitoring_enabled,lifecycle_state \
              FROM collection_observation_target WHERE target_ref=ANY($1) \
-         ), successful AS ( \
+         ), scans AS ( \
              SELECT selected.target_ref,package.package_ref,package.accepted_at, \
-                    row_number() OVER (PARTITION BY selected.target_ref \
-                                       ORDER BY package.accepted_at DESC,package.package_ref DESC) AS package_rank \
+                    (receipt.execution_effect='COMPLETED_LIVE_STEP' AND ", patrol_scan_qualified_sql!(), ") AS scan_complete \
              FROM selected \
              JOIN collection_work_order work_order USING(target_ref) \
              JOIN collection_work_order_lease lease USING(work_order_ref) \
@@ -64,19 +64,30 @@ pub async fn read_target_observation_summaries(
              JOIN linggan_runtime_task task ON task.task_id=lease_task.task_id \
              JOIN linggan_runtime_capture_package package ON package.task_id=task.task_id \
              JOIN linggan_runtime_submission_receipt receipt USING(package_ref) \
+             CROSS JOIN LATERAL jsonb_array_elements( \
+                 CASE WHEN jsonb_typeof(package.coverage->'layers')='array' \
+                      THEN package.coverage->'layers' ELSE '[]'::jsonb END) layer \
              WHERE work_order.lane='patrol' \
                AND package.package_kind=CASE WHEN selected.target_kind='creator' \
                                               THEN 'profile_discovery' ELSE 'discovery_search' END \
                AND package.platform=task.platform \
                AND task.task_spec->'capabilitiesRequested' ? package.package_kind \
-               AND receipt.execution_effect='COMPLETED_LIVE_STEP' \
+               AND layer->>'capability'=package.package_kind \
                AND receipt.material_admission='ACCEPTED' \
+         ), successful AS ( \
+             SELECT scans.target_ref,scans.package_ref,scans.accepted_at, \
+                    row_number() OVER (PARTITION BY scans.target_ref \
+                                       ORDER BY scans.accepted_at DESC,scans.package_ref DESC) AS package_rank \
+             FROM scans WHERE scans.scan_complete \
+         ), latest_scan AS ( \
+             SELECT target_ref,scan_complete,row_number() OVER (PARTITION BY target_ref \
+                 ORDER BY accepted_at DESC,package_ref DESC) AS scan_rank FROM scans \
          ), latest AS ( \
              SELECT target_ref,package_ref,accepted_at FROM successful WHERE package_rank=1 \
          ), latest_counts AS ( \
              SELECT latest.target_ref, \
-                    count(*) FILTER (WHERE disposition.disposition <> 'quarantined') AS hits, \
-                    count(*) FILTER (WHERE disposition.disposition <> 'quarantined' AND NOT EXISTS ( \
+                    count(finding.content_public_ref) FILTER (WHERE disposition.disposition='accepted_for_library_discovery') AS hits, \
+                    count(finding.content_public_ref) FILTER (WHERE disposition.disposition='accepted_for_library_discovery' AND NOT EXISTS ( \
                         SELECT 1 FROM linggan_material_discovery_finding earlier \
                         JOIN linggan_runtime_capture_package earlier_package USING(package_ref) \
                         JOIN linggan_runtime_submission_receipt earlier_receipt USING(package_ref) \
@@ -92,8 +103,8 @@ pub async fn read_target_observation_summaries(
                           AND earlier_package.accepted_at < latest.accepted_at \
                     )) AS newly_discovered \
              FROM latest \
-             JOIN linggan_material_discovery_finding finding USING(package_ref) \
-             JOIN linggan_runtime_record_disposition disposition \
+             LEFT JOIN linggan_material_discovery_finding finding USING(package_ref) \
+             LEFT JOIN linggan_runtime_record_disposition disposition \
                ON disposition.package_ref=finding.package_ref AND disposition.record_ordinal=finding.record_ordinal \
              GROUP BY latest.target_ref \
          ), active_patrol AS ( \
@@ -119,12 +130,13 @@ pub async fn read_target_observation_summaries(
          ) \
          SELECT selected.target_ref,latest_counts.hits,latest_counts.newly_discovered, \
                 selected.monitoring_enabled,active_patrol.target_ref IS NOT NULL, \
-                blocked_patrol.target_ref IS NOT NULL \
+                blocked_patrol.target_ref IS NOT NULL, \
+                EXISTS (SELECT 1 FROM latest_scan scan WHERE scan.target_ref=selected.target_ref \
+                        AND scan.scan_rank=1 AND NOT scan.scan_complete) \
          FROM selected \
          LEFT JOIN latest_counts USING(target_ref) \
          LEFT JOIN active_patrol USING(target_ref) \
-         LEFT JOIN blocked_patrol USING(target_ref)",
-    )
+         LEFT JOIN blocked_patrol USING(target_ref)"))
     .bind(&refs)
     .fetch_all(database.pool())
     .await?;
@@ -132,12 +144,12 @@ pub async fn read_target_observation_summaries(
     Ok(rows
         .into_iter()
         .map(
-            |(target_ref, hits, newly_discovered, monitoring_enabled, running, blocked)| {
+            |(target_ref, hits, newly_discovered, monitoring_enabled, running, blocked, interrupted)| {
                 let patrol_state = if !monitoring_enabled {
                     PatrolReadState::Disabled
                 } else if running {
                     PatrolReadState::Running
-                } else if blocked {
+                } else if blocked || interrupted {
                     PatrolReadState::Blocked
                 } else if hits.is_some() {
                     PatrolReadState::Normal

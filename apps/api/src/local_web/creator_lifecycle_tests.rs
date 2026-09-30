@@ -23,6 +23,20 @@ fn creator_archive_errors_do_not_report_database_failures_as_duplicate_work() {
         "archive_request_failed"
     );
     assert_eq!(
+        creator_archive_error_receipt(&RequestLeaseError::Lease(LeaseError::Database(
+            sqlx::Error::PoolTimedOut,
+        ))),
+        "archive_request_failed"
+    );
+    assert_eq!(
+        creator_archive_error_receipt(&RequestLeaseError::Lease(LeaseError::SchemaUnavailable)),
+        "archive_request_failed"
+    );
+    assert_eq!(
+        creator_archive_error_receipt(&RequestLeaseError::Lease(LeaseError::NoStation)),
+        "archive_lease_failed"
+    );
+    assert_eq!(
         creator_archive_error_receipt(&RequestLeaseError::Acquisition(
             AcquisitionChainError::InvalidMaterialTargets,
         )),

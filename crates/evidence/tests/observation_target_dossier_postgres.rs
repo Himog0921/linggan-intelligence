@@ -13,11 +13,11 @@ use linggan_evidence::{
     CreatorLifecycleStatus, CreatorLifecycleWindow, DispatchDecision, DispatchFailureCode,
     DispatchFailureOutcome, InstallationCheckIn, MaterialExecutionKind, ProducerRuntimeError,
     RequestLeaseError, RuntimeAttemptOutcome, RuntimeSubmissionOutcome, TargetDeletionOutcome,
-    TargetDomainAssignmentOutcome, activate_installation_credential, assign_target_domain,
+    TargetDomainAssignmentOutcome, TargetInspectorCount, TargetInspectorPatrolState, PatrolReadState, activate_installation_credential, assign_target_domain,
     assign_target_domain_with_role, bind_observation_account, check_in_installation,
     decide_dispatch, delete_observation_target, grant_authorization, list_targets,
     open_claim_window, read_archive_completeness, read_creator_directory, read_creator_lifecycle,
-    read_target, read_target_deletion_preview, register_station, report_account_eligibility,
+    read_target, read_target_deletion_preview, read_target_inspector, read_target_observation_summaries, register_station, report_account_eligibility,
     reproject_accepted_target_materials, request_admit_and_lease, request_and_admit_for_domain,
     request_progressive_archive_and_lease, requeue_failed_dispatch, retire_materials,
     run_progressive_archives, set_station_accepting, start_producer_attempt,
@@ -1087,8 +1087,8 @@ async fn incomplete_directory_is_rebuilt_as_a_new_current_baseline_without_mutat
     let before = read_archive_completeness(&database, "xhs").await.unwrap();
     let before = before.get("creator-rebuild-incomplete").unwrap();
     assert_eq!(
-        before.works_listed, 0,
-        "a partial historical directory cannot become the current detail denominator"
+        before.works_listed, 31,
+        "accepted partial-root cards are registered without proving a homepage baseline"
     );
     assert!(before.requires_directory_rebuild());
     assert!(!before.has_displayable_directory());
@@ -1146,8 +1146,8 @@ async fn incomplete_directory_is_rebuilt_as_a_new_current_baseline_without_mutat
     let current = current.get("creator-rebuild-incomplete").unwrap();
     assert!(current.work_in_progress);
     assert_eq!(
-        current.works_listed, 0,
-        "old partial links are not the new directory denominator"
+        current.works_listed, 31,
+        "a new root does not retract previously accepted individual works"
     );
     assert!(!current.has_displayable_directory());
 }
@@ -1386,6 +1386,78 @@ async fn fully_detailed_legacy_directory_stays_visible_without_claiming_the_200_
         !baseline.requires_directory_rebuild(),
         "existing complete in-library history is not relabelled as missing"
     );
+    let historical_inspector = read_target_inspector(&database, target_ref).await.unwrap().unwrap();
+    assert_eq!(historical_inspector.archive.directory_state,
+        linggan_evidence::TargetInspectorDirectoryState::Historical);
+
+    // This disposable counterfactual changes only the frozen stop receipt: all 3 accepted
+    // works and details remain. A risk-stopped old root must not be called a built directory.
+    sqlx::query(
+        "ALTER TABLE linggan_runtime_capture_package DISABLE TRIGGER linggan_runtime_package_is_append_only",
+    ).execute(database.pool()).await.unwrap();
+    sqlx::query(
+        "UPDATE linggan_runtime_capture_package package
+         SET checkpoint=jsonb_set(package.checkpoint,'{surfaceReceipt,stopReason}','\"risk_control\"'::jsonb)
+         FROM collection_work_order_lease_task lease_task
+         JOIN collection_work_order_lease lease USING(lease_ref)
+         WHERE package.task_id=lease_task.task_id AND lease.work_order_ref=$1
+           AND package.package_kind='profile_discovery'",
+    ).bind(old_root).execute(database.pool()).await.unwrap();
+    sqlx::query(
+        "ALTER TABLE linggan_runtime_capture_package ENABLE TRIGGER linggan_runtime_package_is_append_only",
+    ).execute(database.pool()).await.unwrap();
+    let interrupted = read_archive_completeness(&database, "xhs").await.unwrap();
+    assert_eq!(interrupted.get("creator-historical-complete").unwrap().directory_baseline,
+        linggan_evidence::ArchiveDirectoryBaseline::RebuildRequired);
+    let interrupted_inspector = read_target_inspector(&database, target_ref).await.unwrap().unwrap();
+    assert_eq!(interrupted_inspector.archive.directory_state,
+        linggan_evidence::TargetInspectorDirectoryState::RebuildRequired);
+    assert_ne!(interrupted_inspector.archive.state,
+        linggan_evidence::TargetInspectorArchiveState::Complete);
+    sqlx::query(
+        "ALTER TABLE linggan_runtime_capture_package DISABLE TRIGGER linggan_runtime_package_is_append_only",
+    ).execute(database.pool()).await.unwrap();
+    sqlx::query(
+        "UPDATE linggan_runtime_capture_package package
+         SET checkpoint=jsonb_set(package.checkpoint,'{surfaceReceipt,stopReason}','\"bottom_confirmed\"'::jsonb)
+         FROM collection_work_order_lease_task lease_task
+         JOIN collection_work_order_lease lease USING(lease_ref)
+         WHERE package.task_id=lease_task.task_id AND lease.work_order_ref=$1
+           AND package.package_kind='profile_discovery'",
+    ).bind(old_root).execute(database.pool()).await.unwrap();
+    sqlx::query(
+        "ALTER TABLE linggan_runtime_capture_package ENABLE TRIGGER linggan_runtime_package_is_append_only",
+    ).execute(database.pool()).await.unwrap();
+
+    let new_root = request_progressive_archive_and_lease(
+        &database, target_ref, "建立创作者档案", "person", 30,
+    ).await.unwrap().request.work_order_ref.unwrap();
+    assert_ne!(new_root, old_root);
+    // Counterfactual old standard root: a newer interrupted root takes precedence even
+    // when an older 200-quota package independently proves a complete homepage scan.
+    sqlx::query(
+        "ALTER TABLE linggan_runtime_task DISABLE TRIGGER linggan_runtime_task_is_append_only",
+    ).execute(database.pool()).await.unwrap();
+    sqlx::query(
+        "UPDATE linggan_runtime_task task
+         SET task_spec=jsonb_set(task.task_spec,'{maximumQuota}','200'::jsonb)
+         FROM collection_work_order_lease_task lease_task
+         JOIN collection_work_order_lease lease USING(lease_ref)
+         WHERE task.task_id=lease_task.task_id AND lease.work_order_ref=$1",
+    ).bind(old_root).execute(database.pool()).await.unwrap();
+    sqlx::query(
+        "ALTER TABLE linggan_runtime_task ENABLE TRIGGER linggan_runtime_task_is_append_only",
+    ).execute(database.pool()).await.unwrap();
+    complete_progressive_root_with_partial_directory(&database, &installation, 1, "risk_control").await;
+    let after_rebuild = read_archive_completeness(&database, "xhs").await.unwrap();
+    let after_rebuild = after_rebuild.get("creator-historical-complete").unwrap();
+    assert_eq!(after_rebuild.directory_baseline,
+        linggan_evidence::ArchiveDirectoryBaseline::RebuildRequired,
+        "an older 200-work result cannot certify a newer interrupted root");
+    assert!(after_rebuild.works_listed >= 3, "the historical accepted works remain registered");
+    let after_rebuild_inspector = read_target_inspector(&database, target_ref).await.unwrap().unwrap();
+    assert_eq!(after_rebuild_inspector.archive.directory_state,
+        linggan_evidence::TargetInspectorDirectoryState::RebuildRequired);
 }
 
 #[tokio::test]
@@ -1556,6 +1628,12 @@ async fn completed_progressive_archive_never_turns_a_patrol_addition_into_deepen
     .await
     .unwrap()
     .unwrap();
+    assert!(directory.works.iter().any(|work|
+        work.content_external_id == "creator-completed-archive-patrol-partial-0"
+            && work.recorded_kind == Some("视频")));
+    assert!(directory.works.iter().any(|work|
+        work.content_external_id == "creator-patrol-success-new-work"
+            && work.recorded_kind.is_none()));
     let expected: Vec<Uuid> = directory
         .works
         .iter()
@@ -1598,6 +1676,447 @@ async fn completed_progressive_archive_never_turns_a_patrol_addition_into_deepen
     let state: (i64, String) = sqlx::query_as("SELECT (SELECT count(*) FROM collection_work_order WHERE target_ref=$1 AND stop_conditions #>> '{progressiveArchive,rootWorkOrderRef}'=work_order_ref::text), (SELECT stop_conditions #>> '{progressiveArchive,status}' FROM collection_work_order WHERE work_order_ref=$2)")
         .bind(target_ref).bind(root).fetch_one(database.pool()).await.unwrap();
     assert_eq!(state, (1, "completed".into()));
+}
+
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn opted_in_creator_follow_uses_its_own_grant_and_never_reopens_the_root() {
+    let database = proof_database("dossier_opted_in_patrol_follow").await;
+    let installation = ready_installation(&database, "dossier-opted-in-patrol-follow").await;
+    let target_ref = seed_creator_target(&database, "creator-opted-in-patrol-follow").await;
+    grant_deep_archive(&database, "从观察目标页发起深度建档", 200).await;
+    let root = request_progressive_archive_and_lease(
+        &database, target_ref, "从观察目标页发起深度建档", "person", 30,
+    )
+    .await
+    .unwrap()
+    .request
+    .work_order_ref
+    .unwrap();
+    complete_progressive_root_with_partial_directory(&database, &installation, 1, "surface_ended")
+        .await;
+    let initial_work: Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content \
+         WHERE platform='xhs' AND content_external_id='creator-opted-in-patrol-follow-partial-0'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    seed_detail_observation(
+        &database, initial_work, "creator-opted-in-patrol-follow-partial-0",
+        Some("creator-opted-in-patrol-follow"), 1, "2026-09-03T00:00:00Z",
+    )
+    .await;
+    run_progressive_archives(&database).await.unwrap();
+
+    let command = linggan_evidence::MonitorRuleCommand {
+        target_ref,
+        expected_revision: 0,
+        idempotency_key: Uuid::new_v4(),
+        kind: linggan_evidence::MonitorCommandKind::SaveRule,
+        actor: linggan_evidence::MonitorCommandActor::Person,
+        source: "targets_ui",
+        draft: Some(linggan_evidence::MonitorRuleDraft {
+            mode: linggan_evidence::MonitorRuleMode::Fixed,
+            automatic_enabled: true,
+            creator_follow_details: true,
+            run_on_weekdays: true,
+            run_on_weekends: true,
+            all_day: true,
+            window_start_minute: None,
+            window_end_minute: None,
+            fixed_interval_seconds: Some(86_400),
+            fallback_interval_seconds: 86_400,
+            surface_key: "creator_profile".to_owned(),
+            ranking_key: None,
+            scroll_rounds: None,
+            top_by_likes: None,
+            published_within_days: None,
+            task_contract_version: linggan_contracts::PRODUCER_TASK_SPEC_VERSION.to_owned(),
+        }),
+        slot_key: None,
+    };
+    let saved = linggan_evidence::apply_monitor_rule_command(&database, &command)
+        .await
+        .unwrap();
+    assert_eq!(saved.reason_code, "rule_saved");
+    grant_patrol(&database, "巡查建档创作者").await;
+    submit_patrol_round(
+        &database, &installation, target_ref, "巡查建档创作者", PatrolRound::ThreeUsableWorks,
+    )
+    .await;
+
+    let missing_grant = run_progressive_archives(&database).await.unwrap();
+    assert!(missing_grant.skipped.iter().any(|(target, reason)| {
+        *target == target_ref && reason == "auto_detail_authorization_missing"
+    }));
+    submit_patrol_round(
+        &database, &installation, target_ref, "巡查建档创作者", PatrolRound::OneUnlinkedWork,
+    )
+    .await;
+    let sufficient_grant = grant_deep_archive(&database, "巡查新增作品自动详情补采", 3).await;
+    let smaller_later_grant = grant_authorization(
+        &database,
+        &AuthorizationGrant {
+            platform: "xhs",
+            target_kind: "creator",
+            lane: "deep_archive",
+            purpose: "巡查新增作品自动详情补采",
+            max_targets: Some(1),
+            max_works_per_target: Some(1),
+            valid_for_days: 2,
+        },
+    )
+    .await
+    .unwrap();
+    let queued = run_progressive_archives(&database).await.unwrap();
+    assert!(queued.queued.contains(&target_ref), "{queued:?}");
+    let scope: Vec<(Uuid, i32, bool, Uuid)> = sqlx::query_as(
+        "SELECT scope.content_public_ref,scope.comment_limit,scope.acquire_media,decision.authorization_ref \
+         FROM collection_work_order_material_target scope \
+         JOIN collection_work_order work_order USING(work_order_ref) \
+         JOIN collection_admission_decision decision USING(decision_ref) \
+         JOIN collection_acquisition_request request USING(request_ref) \
+         WHERE work_order.target_ref=$1 AND work_order.work_order_ref<>$2 \
+           AND request.purpose='巡查新增作品自动详情补采' AND request.requested_by='agent'",
+    )
+    .bind(target_ref)
+    .bind(root)
+    .fetch_all(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(scope.len(), 3);
+    assert!(scope.iter().all(|item| item.1 == 30 && item.2));
+    assert!(scope.iter().all(|item| item.3 == sufficient_grant));
+    assert_ne!(sufficient_grant, smaller_later_grant);
+    let unlinked_in_scope: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_work_order_material_target scope \
+         JOIN linggan_material_content content ON content.public_ref=scope.content_public_ref \
+         WHERE content.content_external_id='creator-patrol-unlinked-new-work'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(unlinked_in_scope, 0, "an unsigned patrol card cannot enter automatic detail work");
+    let follow_work_order: Uuid = sqlx::query_scalar(
+        "SELECT work_order.work_order_ref FROM collection_work_order work_order \
+         JOIN collection_admission_decision decision USING(decision_ref) \
+         JOIN collection_acquisition_request request USING(request_ref) \
+         WHERE work_order.target_ref=$1 AND request.purpose='巡查新增作品自动详情补采' \
+         ORDER BY work_order.created_at DESC LIMIT 1",
+    )
+    .bind(target_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let queue_state: String = sqlx::query_scalar(
+        "SELECT queue_state FROM collection_work_order WHERE work_order_ref=$1",
+    )
+    .bind(follow_work_order)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(queue_state, "queued", "the automatic follow-up enters the normal claimant queue");
+    let frozen_revision: Option<Uuid> = sqlx::query_scalar(
+        "SELECT monitor_rule_revision_ref FROM collection_work_order WHERE work_order_ref=$1",
+    ).bind(follow_work_order).fetch_one(database.pool()).await.unwrap();
+    assert!(frozen_revision.is_some(), "rule opt-out must invalidate an unclaimed automatic follow-up");
+    let dispatch = decide_dispatch(&database, &installation.install_key, &installation.secret)
+        .await
+        .unwrap();
+    match dispatch {
+        DispatchDecision::Dispatch {
+            task_spec,
+            execution_source_url,
+            page_session_plan,
+            ..
+        } => {
+            assert_eq!(task_spec["capabilitiesRequested"][0], "content_detail");
+            assert!(execution_source_url.as_deref().is_some_and(|url| url.contains("xsec_token=SIGNED_FIXTURE")));
+            let plan = page_session_plan.expect("follow-up detail opens one bounded page session");
+            assert_eq!(plan["commentLimit"], 30);
+            assert_eq!(plan["replyExpandLimit"], 2);
+            assert_eq!(plan["lanes"], serde_json::json!(["content_detail", "media_slots", "comments", "replies"]));
+        }
+        other => panic!("patrol follow-up must dispatch an executable detail task: {other:?}"),
+    }
+    let again = run_progressive_archives(&database).await.unwrap();
+    assert!(!again.queued.contains(&target_ref), "{again:?}");
+    let root_status: String = sqlx::query_scalar(
+        "SELECT stop_conditions#>>'{progressiveArchive,status}' \
+         FROM collection_work_order WHERE work_order_ref=$1",
+    )
+    .bind(root)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(root_status, "completed");
+}
+
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn opted_in_creator_follow_rotates_past_a_full_page_without_grants() {
+    let database = proof_database("dossier_follow_scheduler_fairness").await;
+    let mut targets = Vec::new();
+    for ordinal in 0..101 {
+        let target_ref = seed_creator_target(&database, &format!("creator-follow-fair-{ordinal}"))
+            .await;
+        sqlx::query(
+            "UPDATE collection_observation_target SET lifecycle_state='archived' WHERE target_ref=$1",
+        )
+        .bind(target_ref)
+        .execute(database.pool())
+        .await
+        .unwrap();
+        linggan_evidence::apply_monitor_rule_command(
+            &database,
+            &linggan_evidence::MonitorRuleCommand {
+                target_ref,
+                expected_revision: 0,
+                idempotency_key: Uuid::new_v4(),
+                kind: linggan_evidence::MonitorCommandKind::SaveRule,
+                actor: linggan_evidence::MonitorCommandActor::Person,
+                source: "targets_ui",
+                draft: Some(linggan_evidence::MonitorRuleDraft {
+                    mode: linggan_evidence::MonitorRuleMode::Fixed,
+                    automatic_enabled: true,
+                    creator_follow_details: true,
+                    run_on_weekdays: true,
+                    run_on_weekends: true,
+                    all_day: true,
+                    window_start_minute: None,
+                    window_end_minute: None,
+                    fixed_interval_seconds: Some(86_400),
+                    fallback_interval_seconds: 86_400,
+                    surface_key: "creator_profile".to_owned(),
+                    ranking_key: None,
+                    scroll_rounds: None,
+                    top_by_likes: None,
+                    published_within_days: None,
+                    task_contract_version: linggan_contracts::PRODUCER_TASK_SPEC_VERSION.to_owned(),
+                }),
+                slot_key: None,
+            },
+        )
+        .await
+        .unwrap();
+        targets.push(target_ref);
+    }
+    let first = run_progressive_archives(&database).await.unwrap();
+    assert_eq!(first.skipped.len(), 100, "one tick inspects only its bounded page");
+    let considered_after_first: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_observation_target \
+         WHERE target_ref=ANY($1) AND last_scheduler_considered_at IS NOT NULL",
+    )
+    .bind(&targets)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(considered_after_first, 100);
+
+    run_progressive_archives(&database).await.unwrap();
+    let considered_after_second: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_observation_target \
+         WHERE target_ref=ANY($1) AND last_scheduler_considered_at IS NOT NULL",
+    )
+    .bind(&targets)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(considered_after_second, 101, "the remaining creator gets a turn");
+}
+
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn comment_gap_reuses_a_bounded_detail_visit_without_media_download_scope() {
+    let database = proof_database("dossier_comment_gap_detail_visit").await;
+    let installation = ready_installation(&database, "dossier-comment-gap-detail-visit").await;
+    let target_ref = seed_creator_target(&database, "creator-comment-gap-detail-visit").await;
+    grant_deep_archive(&database, "建立创作者档案", 200).await;
+    request_progressive_archive_and_lease(&database, target_ref, "建立创作者档案", "person", 30)
+        .await
+        .unwrap();
+    complete_progressive_root_with_partial_directory(&database, &installation, 1, "surface_ended")
+        .await;
+    let work_ref: Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content \
+         WHERE content_external_id='creator-comment-gap-detail-visit-partial-0'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    seed_detail_observation_with_comment_count(
+        &database, work_ref, "creator-comment-gap-detail-visit-partial-0",
+        Some("creator-comment-gap-detail-visit"), 1, "2026-09-03T00:00:00Z",
+        Some(4),
+    )
+    .await;
+
+    // A different platform may reuse the same external ID. Its accepted comments
+    // must not satisfy the XHS work's comment gap.
+    let foreign_task = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_runtime_task \
+           (task_id,task_spec_hash,task_spec,source,platform,page_type) \
+         VALUES ($1,$2,$3,'manual','douyin','synthetic_dossier_proof')",
+    )
+    .bind(foreign_task)
+    .bind(hash_for(foreign_task))
+    .bind(serde_json::json!({
+        "target":{"contentExternalId":"creator-comment-gap-detail-visit-partial-0"},
+        "capabilitiesRequested":["comments"],
+        "maximumQuota":1
+    }))
+    .execute(database.pool())
+    .await
+    .unwrap();
+    seed_runtime_package_on_platform(
+        &database,
+        foreign_task,
+        "comments",
+        "2026-09-04T00:00:00Z",
+        "douyin",
+        Some(serde_json::json!({
+            "state":"complete",
+            "stopReason":"target_reached",
+            "uniqueCollectedCount":30
+        })),
+    )
+    .await;
+
+    let request = linggan_evidence::request_creator_directory_gaps(
+        &database, target_ref, "建立创作者档案", "person",
+    )
+    .await
+    .unwrap();
+    let scope: (Uuid, i32, i32, bool, bool, bool) = sqlx::query_as(
+        "SELECT content_public_ref,comment_limit,reply_expand_limit, \
+                acquire_media,allow_ocr,allow_asr \
+         FROM collection_work_order_material_target WHERE work_order_ref=$1",
+    )
+    .bind(request.work_order_ref.unwrap())
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(scope, (work_ref, 30, 2, false, false, false));
+}
+
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn accepted_legacy_comment_package_without_collection_metadata_is_not_an_absent_package() {
+    let database = proof_database("dossier_legacy_comment_receipt_unknown").await;
+    let installation = ready_installation(&database, "dossier-legacy-comment-receipt").await;
+    let target_ref = seed_creator_target(&database, "creator-legacy-comment-receipt").await;
+    grant_deep_archive(&database, "建立创作者档案", 200).await;
+    request_progressive_archive_and_lease(&database, target_ref, "建立创作者档案", "person", 30)
+        .await.unwrap();
+    complete_progressive_root_with_partial_directory(&database, &installation, 1, "surface_ended")
+        .await;
+    let content_external_id = "creator-legacy-comment-receipt-partial-0";
+    let work_ref: Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content WHERE content_external_id=$1",
+    ).bind(content_external_id).fetch_one(database.pool()).await.unwrap();
+    seed_detail_observation_with_comment_count(
+        &database, work_ref, content_external_id,
+        Some("creator-legacy-comment-receipt"), 1, "2026-09-03T00:00:00Z", Some(4),
+    ).await;
+    let legacy_task = seed_standalone_task(
+        &database, "comments", serde_json::json!({"contentExternalId":content_external_id}),
+    ).await;
+    let legacy_package =
+        seed_runtime_package(&database, legacy_task, "comments", "2026-09-04T00:00:00Z").await;
+    sqlx::query(
+        "INSERT INTO linggan_runtime_record_disposition
+         (package_ref,record_ordinal,disposition,reason)
+         VALUES ($1,0,'accepted_for_library_content','legacy accepted comment proof')",
+    ).bind(legacy_package).execute(database.pool()).await.unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_material_comment
+         (material_ref,content_public_ref,package_ref,record_ordinal,comment_external_id,
+          root_comment_external_id,is_reply,body_text,body_state,observed_at)
+         VALUES ($1,$2,$3,0,'legacy-comment-0','legacy-comment-0',false,
+                 '旧版已接纳评论','KNOWN','2026-09-04T00:00:00Z')",
+    ).bind(Uuid::new_v4()).bind(work_ref).bind(legacy_package)
+    .execute(database.pool()).await.unwrap();
+    assert!(matches!(
+        linggan_evidence::request_creator_directory_gaps(
+            &database, target_ref, "建立创作者档案", "person",
+        ).await,
+        Err(AcquisitionChainError::ProgressiveArchiveNotReady {
+            reason: "no_missing_accepted_work"
+        })
+    ), "a legacy accepted comment package with unknown collection metadata is not absent");
+}
+
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn comment_gap_without_a_signed_locator_is_reported_as_unschedulable() {
+    let database = proof_database("dossier_comment_gap_without_locator").await;
+    let installation = ready_installation(&database, "dossier-comment-gap-no-locator").await;
+    let target_ref = seed_creator_target(&database, "creator-comment-gap-no-locator").await;
+    grant_deep_archive(&database, "建立创作者档案", 200).await;
+    request_progressive_archive_and_lease(&database, target_ref, "建立创作者档案", "person", 30)
+        .await
+        .unwrap();
+    complete_progressive_root_with_partial_directory(&database, &installation, 1, "surface_ended")
+        .await;
+    let root_work_ref: Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content \
+         WHERE content_external_id='creator-comment-gap-no-locator-partial-0'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    seed_detail_observation_with_comment_count(
+        &database,
+        root_work_ref,
+        "creator-comment-gap-no-locator-partial-0",
+        Some("creator-comment-gap-no-locator"),
+        1,
+        "2026-09-03T00:00:00Z",
+        Some(0),
+    )
+    .await;
+    run_progressive_archives(&database).await.unwrap();
+
+    grant_patrol(&database, "巡查建档创作者").await;
+    submit_patrol_round(
+        &database,
+        &installation,
+        target_ref,
+        "巡查建档创作者",
+        PatrolRound::OneUnlinkedWork,
+    )
+    .await;
+    let unlinked_ref: Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content \
+         WHERE content_external_id='creator-patrol-unlinked-new-work'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    seed_detail_observation_with_comment_count(
+        &database,
+        unlinked_ref,
+        "creator-patrol-unlinked-new-work",
+        Some("creator-comment-gap-no-locator"),
+        1,
+        "2026-09-03T00:00:00Z",
+        Some(4),
+    )
+    .await;
+    assert!(matches!(
+        linggan_evidence::request_creator_directory_gaps(
+            &database,
+            target_ref,
+            "建立创作者档案",
+            "person"
+        )
+        .await,
+        Err(AcquisitionChainError::ProgressiveArchiveNotReady {
+            reason: "detail_gap_not_schedulable"
+        })
+    ));
 }
 
 /// **「这一篇不再自动重试」不等于「这份目录已经齐了」。**
@@ -2418,13 +2937,11 @@ async fn archive_completeness_deduplicates_work_and_follows_the_exact_lease_targ
     assert!(completeness.work_in_progress);
     assert_eq!(completeness.author_profile_captures, 0);
     assert_eq!(
-        completeness.works_listed, 0,
-        "a still-building root does not expose partial links as a current directory"
+        completeness.works_listed, 1,
+        "a still-building root retains each accepted work without proving the baseline"
     );
-    assert_eq!(
-        completeness.details_captured, 0,
-        "details are not a visible denominator before the current directory is proven"
-    );
+    assert_eq!(completeness.details_captured, 1);
+    assert!(!completeness.has_displayable_directory());
     assert_eq!(completeness.quarantined, 0);
 }
 
@@ -2607,6 +3124,156 @@ async fn lifecycle_distinguishes_directory_confirmed_and_latest_patrol_points() 
         CreatorLifecycleAssociation::AuthorConfirmed
     );
     assert!(!confirmed.new_in_latest_patrol);
+}
+
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn interrupted_patrol_keeps_accepted_work_schedulable_without_claiming_scan_success() {
+    let database = proof_database("dossier_interrupted_patrol_accepted_card").await;
+    set_proof_clock(&database, "2026-09-04T08:00:00Z").await;
+    let installation = ready_installation(&database, "dossier-interrupted-patrol").await;
+    let target_ref = seed_creator_target(&database, "creator-interrupted-patrol").await;
+    grant_patrol(&database, "巡查建档创作者").await;
+    submit_patrol_round(
+        &database, &installation, target_ref, "巡查建档创作者", PatrolRound::ValidZeroNew,
+    ).await;
+    let last_success: Option<String> = sqlx::query_scalar(
+        "SELECT last_patrol_succeeded_at::text FROM collection_observation_target WHERE target_ref=$1",
+    ).bind(target_ref).fetch_one(database.pool()).await.unwrap();
+    assert!(last_success.is_some());
+
+    set_proof_clock(&database, "2026-09-04T09:00:00Z").await;
+    refresh_installation_at_proof_clock(&database, &installation).await;
+    submit_patrol_round(
+        &database, &installation, target_ref, "巡查建档创作者", PatrolRound::InterruptedWithUsableWork,
+    ).await;
+    let after_interruption: Option<String> = sqlx::query_scalar(
+        "SELECT last_patrol_succeeded_at::text FROM collection_observation_target WHERE target_ref=$1",
+    ).bind(target_ref).fetch_one(database.pool()).await.unwrap();
+    assert_eq!(after_interruption, last_success, "a risk-stopped scan is not a successful patrol");
+    let catalog = read_creator_directory(&database, target_ref, None).await.unwrap().unwrap();
+    let accepted = catalog.works.iter().find(|work|
+        work.content_external_id == "creator-patrol-interrupted-work"
+    ).expect("a single accepted card remains visible despite the interrupted scan");
+    let completeness = read_archive_completeness(&database, "xhs").await.unwrap();
+    let completeness = completeness.get("creator-interrupted-patrol").unwrap();
+    assert_eq!(completeness.works_listed, 1);
+    assert_eq!(completeness.pending_details, 1);
+    assert_eq!(completeness.quarantined, 1, "the second card in that package remains a visible problem");
+    assert!(!completeness.has_displayable_directory(), "a patrol card does not prove a homepage root");
+    let inspector = read_target_inspector(&database, target_ref).await.unwrap().unwrap();
+    assert_eq!(inspector.coverage.quarantined_records, TargetInspectorCount::Known(1));
+    assert_eq!(inspector.patrol.latest_hits, TargetInspectorCount::Known(0),
+        "the interrupted card is not a completed patrol hit count");
+    let target = read_target(&database, target_ref).await.unwrap().unwrap();
+    let summaries = read_target_observation_summaries(&database, &[target]).await.unwrap();
+    let summary = summaries.get(&target_ref).unwrap();
+    assert_eq!(summary.latest_hits, Some(0));
+    assert_eq!(summary.latest_new, Some(0));
+
+    grant_deep_archive(&database, "补采已见作品", 1).await;
+    let request = linggan_evidence::request_creator_directory_gaps(
+        &database, target_ref, "补采已见作品", "person",
+    ).await.unwrap();
+    let scoped: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT content_public_ref FROM collection_work_order_material_target WHERE work_order_ref=$1",
+    ).bind(request.work_order_ref.unwrap()).fetch_all(database.pool()).await.unwrap();
+    assert_eq!(scoped, vec![accepted.public_ref]);
+    let lifecycle_after_material_follow: String = sqlx::query_scalar(
+        "SELECT lifecycle_state FROM collection_observation_target WHERE target_ref=$1",
+    ).bind(target_ref).fetch_one(database.pool()).await.unwrap();
+    assert_eq!(lifecycle_after_material_follow, "pending_decision",
+        "following one accepted patrol work must not claim a creator root archive has started");
+    let during_follow = read_archive_completeness(&database, "xhs").await.unwrap();
+    let during_follow = during_follow.get("creator-interrupted-patrol").unwrap();
+    assert!(!during_follow.started);
+    assert_eq!(during_follow.directory_baseline,
+        linggan_evidence::ArchiveDirectoryBaseline::NotStarted);
+    assert!(!during_follow.work_in_progress,
+        "a queued material follow-up is not a homepage baseline in progress");
+    let during_inspector = read_target_inspector(&database, target_ref).await.unwrap().unwrap();
+    assert!(!during_inspector.archive.started);
+    assert_eq!(during_inspector.archive.directory_state,
+        linggan_evidence::TargetInspectorDirectoryState::NotStarted);
+    assert_eq!(during_inspector.archive.state,
+        linggan_evidence::TargetInspectorArchiveState::NotStarted);
+    assert_eq!(during_inspector.required_action,
+        linggan_evidence::TargetInspectorAction::StartArchive);
+
+    let saved = linggan_evidence::apply_monitor_rule_command(&database, &linggan_evidence::MonitorRuleCommand {
+        target_ref,
+        expected_revision: 0,
+        idempotency_key: Uuid::new_v4(),
+        kind: linggan_evidence::MonitorCommandKind::SaveRule,
+        actor: linggan_evidence::MonitorCommandActor::Person,
+        source: "targets_ui",
+        draft: Some(linggan_evidence::MonitorRuleDraft {
+            mode: linggan_evidence::MonitorRuleMode::Fixed,
+            automatic_enabled: true,
+            creator_follow_details: false,
+            run_on_weekdays: true,
+            run_on_weekends: true,
+            all_day: true,
+            window_start_minute: None,
+            window_end_minute: None,
+            fixed_interval_seconds: Some(86_400),
+            fallback_interval_seconds: 86_400,
+            surface_key: "creator_profile".to_owned(),
+            ranking_key: None,
+            scroll_rounds: None,
+            top_by_likes: None,
+            published_within_days: None,
+            task_contract_version: linggan_contracts::PRODUCER_TASK_SPEC_VERSION.to_owned(),
+        }),
+        slot_key: None,
+    }).await.unwrap();
+    assert_eq!(saved.reason_code, "rule_saved");
+    let target = read_target(&database, target_ref).await.unwrap().unwrap();
+    assert!(target.monitoring_enabled);
+    let summaries = read_target_observation_summaries(&database, &[target]).await.unwrap();
+    assert_eq!(summaries.get(&target_ref).unwrap().patrol_state, PatrolReadState::Blocked);
+    let inspector = read_target_inspector(&database, target_ref).await.unwrap().unwrap();
+    assert_eq!(inspector.patrol.state, TargetInspectorPatrolState::Blocked);
+
+    // A later accepted detail can close this one Work gap without creating a homepage root.
+    // Keep the queued manual follow-up in place to prove that execution does not certify scope.
+    let patrol_lease: Uuid = sqlx::query_scalar(
+        "SELECT lease.lease_ref FROM collection_work_order_lease lease
+         JOIN collection_work_order work_order USING(work_order_ref)
+         WHERE work_order.target_ref=$1 AND work_order.lane='patrol'
+         ORDER BY work_order.created_at DESC,lease.lease_ref DESC LIMIT 1",
+    ).bind(target_ref).fetch_one(database.pool()).await.unwrap();
+    let detail_task = seed_bound_task(&database, patrol_lease, 900, "content_detail",
+        serde_json::json!({"contentExternalId":"creator-patrol-interrupted-work"})).await;
+    let detail_package = seed_runtime_package(
+        &database, detail_task, "content_detail", "2026-09-04T02:00:00Z",
+    ).await;
+    sqlx::query(
+        "INSERT INTO linggan_runtime_record_disposition
+         (package_ref,record_ordinal,disposition,reason)
+         VALUES ($1,0,'accepted_for_library_content','no-root detail projection proof')",
+    ).bind(detail_package).execute(database.pool()).await.unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_material_content_detail
+         (material_ref,content_public_ref,package_ref,record_ordinal,observed_at,
+          title,title_state,body_text,body_state,creator_display_name,
+          creator_display_name_state,published_at_source_text,
+          published_at_source_text_state,searchable_text)
+         VALUES ($1,$2,$3,0,'2026-09-04T02:00:00Z',
+                 '巡查已见作品','KNOWN',NULL,'UNKNOWN',NULL,'UNKNOWN',
+                 NULL,'UNKNOWN','巡查已见作品')",
+    ).bind(Uuid::new_v4()).bind(accepted.public_ref).bind(detail_package)
+    .execute(database.pool()).await.unwrap();
+    let after_detail = read_archive_completeness(&database, "xhs").await.unwrap();
+    let after_detail = after_detail.get("creator-interrupted-patrol").unwrap();
+    assert_eq!((after_detail.works_listed, after_detail.details_captured), (1, 1));
+    assert_eq!(after_detail.directory_baseline,
+        linggan_evidence::ArchiveDirectoryBaseline::NotStarted);
+    let after_detail_inspector = read_target_inspector(&database, target_ref).await.unwrap().unwrap();
+    assert_eq!(after_detail_inspector.archive.directory_state,
+        linggan_evidence::TargetInspectorDirectoryState::NotStarted);
+    assert_eq!(after_detail_inspector.archive.state,
+        linggan_evidence::TargetInspectorArchiveState::NotStarted);
 }
 
 #[tokio::test]
@@ -2833,6 +3500,8 @@ async fn set_proof_clock(database: &Database, at: &str) {
 #[derive(Clone, Copy)]
 enum PatrolRound {
     OneUsableWork,
+    OneUnlinkedWork,
+    ThreeUsableWorks,
     ValidZeroNew,
     AllQuarantined,
     UnknownRiskStop,
@@ -2908,8 +3577,48 @@ async fn submit_patrol_round(
                     "platform":"xhs","type":"content",
                     "externalId":"creator-patrol-success-new-work"
                 },
-                "payload":{"title":"patrol success work"}
+                "payload":{
+                    "title":"patrol success work",
+                    "url":"https://www.xiaohongshu.com/explore/creator-patrol-success-new-work?xsec_token=SIGNED_FIXTURE&xsec_source=pc_user"
+                }
             })],
+        ),
+        PatrolRound::OneUnlinkedWork => (
+            1,
+            1,
+            1,
+            0,
+            "surface_ended",
+            vec![serde_json::json!({
+                "kind":"profile_discovery_card",
+                "resultPosition":1,
+                "sourceObject":{
+                    "platform":"xhs","type":"content",
+                    "externalId":"creator-patrol-unlinked-new-work"
+                },
+                "payload":{"title":"patrol work without a signed address"}
+            })],
+        ),
+        PatrolRound::ThreeUsableWorks => (
+            3,
+            3,
+            3,
+            0,
+            "surface_ended",
+            (0..3)
+                .map(|ordinal| serde_json::json!({
+                    "kind":"profile_discovery_card",
+                    "resultPosition":ordinal + 1,
+                    "sourceObject":{
+                        "platform":"xhs","type":"content",
+                        "externalId":format!("creator-patrol-follow-new-work-{ordinal}")
+                    },
+                    "payload":{
+                        "title":format!("patrol follow work {ordinal}"),
+                        "url":format!("https://www.xiaohongshu.com/explore/creator-patrol-follow-new-work-{ordinal}?xsec_token=SIGNED_FIXTURE&xsec_source=pc_user")
+                    }
+                }))
+                .collect(),
         ),
         PatrolRound::ValidZeroNew => (0, 0, 0, 0, "surface_ended", Vec::new()),
         PatrolRound::AllQuarantined => (
@@ -2929,20 +3638,33 @@ async fn submit_patrol_round(
         ),
         PatrolRound::UnknownRiskStop => (1, 1, 0, 1, "risk_budget", Vec::new()),
         PatrolRound::InterruptedWithUsableWork => (
-            1,
-            1,
-            1,
+            2,
+            2,
+            2,
             0,
             "risk_control",
-            vec![serde_json::json!({
-                "kind":"profile_discovery_card",
-                "resultPosition":1,
-                "sourceObject":{
-                    "platform":"xhs","type":"content",
-                    "externalId":"creator-patrol-interrupted-work"
-                },
-                "payload":{"title":"accepted card from an interrupted patrol"}
-            })],
+            vec![
+                serde_json::json!({
+                    "kind":"profile_discovery_card",
+                    "resultPosition":1,
+                    "sourceObject":{
+                        "platform":"xhs","type":"content",
+                        "externalId":"creator-patrol-interrupted-work"
+                    },
+                    "payload":{
+                        "title":"accepted card from an interrupted patrol",
+                        "url":"https://www.xiaohongshu.com/explore/creator-patrol-interrupted-work?xsec_token=SIGNED_FIXTURE&xsec_source=pc_user"
+                    }
+                }),
+                serde_json::json!({
+                    "kind":"profile_discovery_card",
+                    "resultPosition":2,
+                    "sourceObject":{
+                        "platform":"xhs","type":"author","externalId":"invalid-discovery-identity"
+                    },
+                    "payload":{"title":"quarantined card from the same interrupted patrol"}
+                }),
+            ],
         ),
         PatrolRound::ConflictingPayloadIdentity => (
             1,
@@ -3331,7 +4053,7 @@ fn partial_directory_submission(
     let records = (0..directory_size)
         .map(|ordinal| {
             let external_id = format!("{identity}-partial-{ordinal}");
-            let mut payload = serde_json::json!({"title":format!("partial work {ordinal}")});
+            let mut payload = serde_json::json!({"title":format!("partial work {ordinal}"),"type":"video"});
             if signed_links {
                 // 真实插件的发现卡带的就是这条签名链接，补详情要靠它当执行入口。夹具里少了
                 // 它，目录成员一到派发就被停成「缺执行输入」——补详情那条链一步都走不出去，
@@ -3529,13 +4251,25 @@ async fn seed_runtime_package(
     package_kind: &str,
     accepted_at: &str,
 ) -> Uuid {
+    seed_runtime_package_on_platform(database, task_id, package_kind, accepted_at, "xhs", None)
+        .await
+}
+
+async fn seed_runtime_package_on_platform(
+    database: &Database,
+    task_id: Uuid,
+    package_kind: &str,
+    accepted_at: &str,
+    platform: &str,
+    comment_collection: Option<serde_json::Value>,
+) -> Uuid {
     let task_target: serde_json::Value =
         sqlx::query_scalar("SELECT task_spec->'target' FROM linggan_runtime_task WHERE task_id=$1")
             .bind(task_id)
             .fetch_one(database.pool())
             .await
             .unwrap();
-    let coverage = serde_json::json!({
+    let mut coverage = serde_json::json!({
         "target":task_target,
         "layers":[{
             "capability":package_kind,
@@ -3543,6 +4277,9 @@ async fn seed_runtime_package(
             "failed":0,"notAttempted":0,"unknown":0,"stoppedReason":"surface_ended"
         }]
     });
+    if let Some(comment_collection) = comment_collection {
+        coverage["target"]["commentCollection"] = comment_collection;
+    }
     let checkpoint = surface_receipt("surface_ended");
     let attempt_id = Uuid::new_v4();
     let producer_instance_id = Uuid::new_v4();
@@ -3563,7 +4300,7 @@ async fn seed_runtime_package(
         "INSERT INTO linggan_runtime_capture_package \
            (package_ref,attempt_id,task_id,producer_instance_id,package_kind,platform, \
             package_hash,observed_at,captured_at,coverage,checkpoint,payload,accepted_at) \
-         VALUES ($1,$2,$3,$4,$5,'xhs',$6,$7,$7,$8,$9,'{}',$7::timestamptz)",
+         VALUES ($1,$2,$3,$4,$5,$10,$6,$7,$7,$8,$9,'{}',$7::timestamptz)",
     )
     .bind(package_ref)
     .bind(attempt_id)
@@ -3574,6 +4311,7 @@ async fn seed_runtime_package(
     .bind(accepted_at)
     .bind(coverage)
     .bind(checkpoint)
+    .bind(platform)
     .execute(database.pool())
     .await
     .unwrap();
@@ -3828,6 +4566,21 @@ async fn seed_detail_observation(
     likes: i64,
     published_at: &str,
 ) {
+    seed_detail_observation_with_comment_count(
+        database, work_ref, content_external_id, author_external_id, likes, published_at, None,
+    )
+    .await;
+}
+
+async fn seed_detail_observation_with_comment_count(
+    database: &Database,
+    work_ref: Uuid,
+    content_external_id: &str,
+    author_external_id: Option<&str>,
+    likes: i64,
+    published_at: &str,
+    comment_count: Option<i64>,
+) {
     let task_id = seed_standalone_task(
         database,
         "content_detail",
@@ -3850,11 +4603,11 @@ async fn seed_detail_observation(
            (material_ref,content_public_ref,package_ref,record_ordinal,observed_at, \
             title,title_state,body_text,body_state,creator_display_name, \
             creator_display_name_state,published_at_source_text,published_at_source_text_state, \
-            searchable_text,author_external_id,like_count,like_count_state,published_at, \
+            searchable_text,author_external_id,like_count,like_count_state,comment_count,comment_count_state,published_at, \
             published_at_source_field,published_at_source_kind,published_at_precision, \
             published_at_parser_version) \
          VALUES ($1,$2,$3,0,'2026-09-03T11:00:00Z',$4,'KNOWN',NULL,'UNKNOWN',NULL,'UNKNOWN', \
-                 $5,'KNOWN',$4,$6,$7,'KNOWN',$5::timestamptz,'publishTime','platform_epoch', \
+                 $5,'KNOWN',$4,$6,$7,'KNOWN',$8,CASE WHEN $8::bigint IS NULL THEN 'UNKNOWN' ELSE 'KNOWN' END,$5::timestamptz,'publishTime','platform_epoch', \
                  'second','xhs-detail-time-v2')",
     )
     .bind(Uuid::new_v4())
@@ -3864,6 +4617,7 @@ async fn seed_detail_observation(
     .bind(published_at)
     .bind(author_external_id)
     .bind(likes)
+    .bind(comment_count)
     .execute(database.pool())
     .await
     .unwrap();

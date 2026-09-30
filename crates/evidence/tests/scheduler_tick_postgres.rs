@@ -401,6 +401,7 @@ async fn seed_a_due_patrol_rule(database: &Database) -> Uuid {
             draft: Some(MonitorRuleDraft {
                 mode: MonitorRuleMode::Fixed,
                 automatic_enabled: true,
+                creator_follow_details: false,
                 run_on_weekdays: true,
                 run_on_weekends: true,
                 all_day: true,

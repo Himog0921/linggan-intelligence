@@ -98,6 +98,51 @@ macro_rules! directory_proven_sql {
     };
 }
 
+/// A patrol round may advance its success clock only when the surface ended under the
+/// bounded scan contract and every acquired card received an accepted record disposition.
+/// Callers provide `package`, `layer`, `task_spec`, and `checkpoint` in scope.
+macro_rules! patrol_scan_qualified_sql {
+    () => {
+        concat!(
+            "(", crate::directory_boundary::surface_scan_complete_sql!(),
+            " AND NOT EXISTS (SELECT 1 FROM linggan_runtime_record_disposition disposition \
+                              WHERE disposition.package_ref=package.package_ref \
+                                AND disposition.disposition='quarantined') \
+               AND (SELECT count(*) FROM linggan_runtime_record_disposition disposition \
+                    WHERE disposition.package_ref=package.package_ref \
+                      AND disposition.disposition='accepted_for_library_discovery') \
+                   =COALESCE((layer->>'acquired')::integer,-1))"
+        )
+    };
+}
+
+/// A pre-standard creator root may remain displayable as a historical directory only when
+/// its own bounded homepage scan actually completed and every acquired card was accepted.
+/// Callers provide `package`, `layer`, `task_spec`, `checkpoint`, and `work_order`.
+macro_rules! historical_directory_scan_qualified_sql {
+    () => {
+        concat!(
+            "(package.package_kind='profile_discovery' \
+             AND layer->>'capability'='profile_discovery' \
+             AND COALESCE((layer->>'acquired')::integer,0)>0 \
+             AND ", crate::directory_boundary::surface_scan_complete_sql!(),
+            " AND EXISTS (SELECT 1 FROM linggan_runtime_submission_receipt receipt \
+                          WHERE receipt.package_ref=package.package_ref \
+                            AND receipt.material_admission='ACCEPTED' \
+                            AND receipt.execution_effect='COMPLETED_LIVE_STEP') \
+               AND NOT EXISTS (SELECT 1 FROM linggan_runtime_record_disposition rejected \
+                               WHERE rejected.package_ref=package.package_ref \
+                                 AND rejected.disposition='quarantined') \
+               AND (SELECT count(*) FROM linggan_runtime_record_disposition accepted \
+                    WHERE accepted.package_ref=package.package_ref \
+                      AND accepted.disposition='accepted_for_library_discovery') \
+                   =COALESCE((layer->>'acquired')::integer,-1) \
+               AND NOT EXISTS (SELECT 1 FROM collection_work_order_material_target material_scope \
+                               WHERE material_scope.work_order_ref=work_order.work_order_ref))"
+        )
+    };
+}
+
 /// 一次**作者资料读取**是否完成。
 ///
 /// 作者资料没有滚动，也就没有 `surfaceReceipt`；它只有一条记录，读到了就是读到了。
@@ -115,4 +160,4 @@ macro_rules! profile_read_complete_sql {
     };
 }
 
-pub(crate) use {directory_proven_sql, profile_read_complete_sql, surface_scan_complete_sql};
+pub(crate) use {directory_proven_sql, historical_directory_scan_qualified_sql, patrol_scan_qualified_sql, profile_read_complete_sql, surface_scan_complete_sql};

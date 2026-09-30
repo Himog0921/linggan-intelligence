@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 #[path = "target_inspector_sql.rs"]
 mod sql;
-use sql::{ARCHIVE_SQL, EXECUTION_SQL, LATEST_PATROL_SQL};
+use sql::{ARCHIVE_SQL, EXECUTION_SQL, LATEST_PATROL_INTERRUPTED_SQL, LATEST_PATROL_SQL};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "state", content = "value")]
@@ -172,6 +172,7 @@ struct ArchiveFacts {
     quarantined: i64,
     blocked_details: i64,
     standard_directory_ready: bool,
+    historical_root_eligible: bool,
 }
 
 /// Read one target without acquiring material or persisting a derived status.
@@ -248,14 +249,14 @@ pub async fn read_target_inspector(
     let facts = read_archive_facts(&mut tx, target.target_ref, &as_of)
         .await
         .map_err(map_schema_error)?;
-    let (latest_hits, latest_new) =
+    let (latest_hits, latest_new, latest_interrupted) =
         read_latest_patrol(&mut tx, target.target_ref, &target.target_kind, &as_of)
             .await
             .map_err(map_schema_error)?;
     tx.commit().await?;
 
     let (archive, coverage) = archive_projection(&target.target_kind, &facts, execution.state);
-    let patrol = patrol_projection(&target, &patrol_lane, latest_hits, latest_new);
+    let patrol = patrol_projection(&target, &patrol_lane, latest_hits, latest_new, latest_interrupted);
     let required_action =
         resolve_action(&archive, &coverage, &execution, target.monitoring_enabled);
     Ok(Some(TargetInspectorProjection {
@@ -312,12 +313,15 @@ fn archive_projection(
         .works
         .saturating_sub(facts.details)
         .saturating_sub(facts.retired_works);
-    let historical = !facts.standard_directory_ready && facts.works > 0 && missing == 0;
+    let historical = !facts.standard_directory_ready
+        && facts.historical_root_eligible
+        && facts.works > 0
+        && missing == 0;
     let directory_state = if facts.standard_directory_ready {
         TargetInspectorDirectoryState::Ready
     } else if historical {
         TargetInspectorDirectoryState::Historical
-    } else if !facts.started && facts.works == 0 {
+    } else if !facts.started {
         TargetInspectorDirectoryState::NotStarted
     } else if matches!(
         execution,
@@ -329,7 +333,9 @@ fn archive_projection(
     } else {
         TargetInspectorDirectoryState::RebuildRequired
     };
-    let state = match execution {
+    let state = if !facts.started {
+        TargetInspectorArchiveState::NotStarted
+    } else { match execution {
         TargetInspectorExecutionState::Running => TargetInspectorArchiveState::Running,
         TargetInspectorExecutionState::Queued | TargetInspectorExecutionState::AwaitingProducer => {
             TargetInspectorArchiveState::Queued
@@ -337,7 +343,6 @@ fn archive_projection(
         _ if facts.quarantined > 0 || facts.blocked_details > 0 => {
             TargetInspectorArchiveState::Blocked
         }
-        _ if !facts.started && facts.works == 0 => TargetInspectorArchiveState::NotStarted,
         _ if matches!(
             directory_state,
             TargetInspectorDirectoryState::Ready | TargetInspectorDirectoryState::Historical
@@ -346,7 +351,7 @@ fn archive_projection(
             TargetInspectorArchiveState::Complete
         }
         _ => TargetInspectorArchiveState::Partial,
-    };
+    }};
     (
         TargetInspectorArchive {
             state,
@@ -380,6 +385,7 @@ fn patrol_projection(
     counts: &LaneCounts,
     latest_hits: TargetInspectorCount,
     latest_new: TargetInspectorCount,
+    latest_interrupted: bool,
 ) -> TargetInspectorPatrol {
     let state = if !target.monitoring_enabled {
         TargetInspectorPatrolState::Disabled
@@ -389,7 +395,7 @@ fn patrol_projection(
         TargetInspectorPatrolState::AwaitingProducer
     } else if counts.queued > 0 {
         TargetInspectorPatrolState::Queued
-    } else if counts.blocked > 0 {
+    } else if counts.blocked > 0 || latest_interrupted {
         TargetInspectorPatrolState::Blocked
     } else if matches!(latest_hits, TargetInspectorCount::Known(_)) {
         TargetInspectorPatrolState::Normal
@@ -412,6 +418,11 @@ fn resolve_action(
     execution: &TargetInspectorExecution,
     monitoring_enabled: bool,
 ) -> TargetInspectorAction {
+    // Material follow-up and an interrupted patrol can leave accepted works and execution
+    // history before a homepage root exists. The root action remains independently available.
+    if archive.directory_state == TargetInspectorDirectoryState::NotStarted {
+        return TargetInspectorAction::StartArchive;
+    }
     // Execution ownership and archive problems are independent facts: trapped material — a
     // quarantined record or a blocked detail — outranks execution state and cannot be erased.
     if archive.state == TargetInspectorArchiveState::Blocked
@@ -470,6 +481,7 @@ async fn read_archive_facts(
         quarantined: row.get("quarantined"),
         blocked_details: row.get("blocked_details"),
         standard_directory_ready: row.get("standard_directory_ready"),
+        historical_root_eligible: row.get("historical_root_eligible"),
     })
 }
 
@@ -478,8 +490,14 @@ async fn read_latest_patrol(
     target_ref: Uuid,
     target_kind: &str,
     as_of: &str,
-) -> Result<(TargetInspectorCount, TargetInspectorCount), sqlx::Error> {
+) -> Result<(TargetInspectorCount, TargetInspectorCount, bool), sqlx::Error> {
     let row = sqlx::query(LATEST_PATROL_SQL)
+        .bind(target_ref)
+        .bind(target_kind)
+        .bind(as_of)
+        .fetch_optional(&mut **tx)
+        .await?;
+    let interrupted: Option<bool> = sqlx::query_scalar(LATEST_PATROL_INTERRUPTED_SQL)
         .bind(target_ref)
         .bind(target_kind)
         .bind(as_of)
@@ -489,8 +507,9 @@ async fn read_latest_patrol(
         Some(row) => (
             TargetInspectorCount::Known(row.get("hits")),
             TargetInspectorCount::Known(row.get("newly_discovered")),
+            interrupted.unwrap_or(false),
         ),
-        None => (TargetInspectorCount::Unknown, TargetInspectorCount::Unknown),
+        None => (TargetInspectorCount::Unknown, TargetInspectorCount::Unknown, interrupted.unwrap_or(false)),
     })
 }
 

@@ -92,6 +92,11 @@ test('profile api note normalization maps Xiaohongshu user_posted cards into sur
   assert.ok(note.cover.includes('cover-small.jpg'));
 });
 
+test('profile api notes without a type do not become image notes by default', () => {
+  const note = normalizeProfilePostedNote({ note_id: 'unknown-type-note', display_title: '未提供类型' });
+  assert.equal(note.type, '');
+});
+
 test('profile surface discovery prefers captured user_posted pages without scrolling', async () => {
   const notes = await discoverProfileSurfaceNotesFromApi({
     expectedCount: 2,

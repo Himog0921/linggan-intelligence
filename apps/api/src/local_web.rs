@@ -2443,6 +2443,7 @@ struct CollectionParams {
     /// 规则提交失败后，服务端将用户刚刚提交的受限字段值带回 modal；这些值只用于
     /// 修复表单，不参与任何读取或执行事实。
     rule_automatic_enabled: Option<String>,
+    rule_creator_follow_details: Option<String>,
     rule_fixed_interval_seconds: Option<String>,
     rule_surface_key: Option<String>,
     rule_ranking_key: Option<String>,
@@ -4349,6 +4350,7 @@ struct MonitorRuleWire {
     idempotency_key: uuid::Uuid,
     command_kind: String,
     automatic_enabled: Option<String>,
+    creator_follow_details: Option<String>,
     fixed_interval_seconds: Option<String>,
     surface_key: Option<String>,
     ranking_key: Option<String>,
@@ -4469,6 +4471,11 @@ fn monitor_rule_redirect(
         );
         push_rule_query(
             &mut params,
+            "rule_creator_follow_details",
+            Some(if form.creator_follow_details.is_some() { "1" } else { "0" }),
+        );
+        push_rule_query(
+            &mut params,
             "rule_fixed_interval_seconds",
             form.fixed_interval_seconds.as_deref(),
         );
@@ -4523,6 +4530,10 @@ fn rule_form_from_query(
     form.automatic_enabled = rule_bool_query(
         params.rule_automatic_enabled.as_deref(),
         form.automatic_enabled,
+    );
+    form.creator_follow_details = rule_bool_query(
+        params.rule_creator_follow_details.as_deref(),
+        form.creator_follow_details,
     );
     if let Some(value) = params.rule_fixed_interval_seconds.as_deref() {
         form.fixed_interval_seconds = value.to_owned();
@@ -4643,6 +4654,8 @@ async fn collection_target_rule_command(
         Some(MonitorRuleDraft {
             mode: MonitorRuleMode::Fixed,
             automatic_enabled: form.automatic_enabled.is_some(),
+            creator_follow_details: form.creator_follow_details.is_some()
+                && form.surface_key.as_deref() == Some("creator_profile"),
             run_on_weekdays: true,
             run_on_weekends: true,
             all_day: true,
@@ -5279,6 +5292,9 @@ fn creator_archive_error_receipt(error: &RequestLeaseError) -> &'static str {
         RequestLeaseError::Acquisition(
             AcquisitionChainError::ProgressiveArchivePurposeMismatch,
         ) => "archive_purpose_mismatch",
+        RequestLeaseError::Lease(LeaseError::Database(_) | LeaseError::SchemaUnavailable) => {
+            "archive_request_failed"
+        }
         RequestLeaseError::Lease(_) => "archive_lease_failed",
         RequestLeaseError::Acquisition(
             AcquisitionChainError::SchemaUnavailable
@@ -5327,6 +5343,14 @@ fn log_creator_archive_failure(
         }
         RequestLeaseError::Acquisition(AcquisitionChainError::InvalidMaterialTargets) => {
             ("invalid_material_targets", None, None)
+        }
+        RequestLeaseError::Lease(LeaseError::Database(error)) => (
+            creator_archive_database_kind(error),
+            error.as_database_error().and_then(|value| value.code()),
+            error.as_database_error().and_then(|value| value.constraint()),
+        ),
+        RequestLeaseError::Lease(LeaseError::SchemaUnavailable) => {
+            ("lease_schema_unavailable", None, None)
         }
         RequestLeaseError::Lease(_) => ("lease", None, None),
         _ => ("acquisition", None, None),

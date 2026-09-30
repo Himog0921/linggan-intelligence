@@ -176,7 +176,7 @@ async fn domain_management_page_queries_real_lane_receipts_without_english_or_fa
 
 #[tokio::test]
 #[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
-async fn paused_domain_policy_save_returns_the_domain_error_without_writing_a_policy() {
+async fn retired_policy_endpoint_cannot_write_even_for_a_paused_domain() {
     let database = domain_management_fixture::proof_database("comment_policy_paused_domain").await;
     sqlx::raw_sql(include_str!(
         "../../../../database/bootstrap/comment-study-001.sql"
@@ -212,10 +212,10 @@ async fn paused_domain_policy_save_returns_the_domain_error_without_writing_a_po
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert_eq!(response.status(), StatusCode::GONE);
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(payload["error"], "domain_not_active");
+    assert_eq!(payload["error"]["code"], "policy_endpoint_retired");
     let policy_count: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM linggan_comment_study_policy \
          WHERE domain_ref=$1 AND model_config_ref=$2",

@@ -336,12 +336,12 @@ fn action_feedback_markup(error: Option<&str>, ahead: Option<i64>) -> String {
         "creator_detail_requested" => (
             "c-src-feedback c-src-feedback-ok",
             "已排入缺口补采",
-            "已按当前目录冻结尚缺详情的作品，最多 200 篇；每篇补采详情、评论、回复与媒体，并允许图片文字识别和语音转写。已有合格详情、已确认失效和正在采集的作品不会重复排入；实际取得情况以各项材料回执为准。",
+            "已按已登记作品冻结可补采范围，最多 200 篇。缺详情的作品会采详情、最多 30 条评论（含回复）及媒体，并按授权进行图片文字识别和语音转写；仅缺评论的作品会重访详情页，采最多 30 条评论（含回复），每条主评论最多 2 条回复，不重复下载媒体。已确认失效及正在采集的作品不会重复排入；实际取得情况以材料回执为准。",
         ),
         "keyword_detail_requested" => (
             "c-src-feedback c-src-feedback-ok",
             "已排入详情补采",
-            "这个词的链接已经拿到，正在按点赞从高到低逐篇补详情：正文、发布时间、前 30 条评论与 2 层回复，并把图片与视频文件一并取回（其中的文字与语音随后识别）。一次补三篇，补完之后调度会自己接着补下一批。执行要等一个空闲工位。",
+            "这个词的链接已经拿到，正在按点赞从高到低逐篇补详情：正文、发布时间、最多 30 条评论（含回复，每条主评论最多 2 条回复），并把图片与视频文件一并取回（其中的文字与语音随后识别）。一次补三篇，补完之后调度会自己接着补下一批。执行要等一个空闲工位。",
         ),
         "keyword_detail_complete" => (
             "c-src-feedback c-src-feedback-ok",
@@ -511,8 +511,8 @@ fn action_feedback_markup(error: Option<&str>, ahead: Option<i64>) -> String {
         ),
         "archive_nothing_to_continue" => (
             "c-src-failure",
-            "没有完成",
-            "当前作品目录没有待补详情，无需重复发起。",
+            "当前无可补采内容缺口",
+            "当前目录没有可判定的详情或评论缺口；未知正文和零条评论本身不构成重采依据。",
         ),
         "archive_baseline_complete" => (
             "c-src-feedback c-src-feedback-ok",
@@ -522,7 +522,7 @@ fn action_feedback_markup(error: Option<&str>, ahead: Option<i64>) -> String {
         "archive_gap_not_schedulable" => (
             "c-src-feedback c-src-feedback-warn",
             "缺口暂不能排入",
-            "目录仍有缺详情作品，但当前没有符合执行输入与重试条件的可排任务。本次没有新建工单；请查看受阻作品和采集任务。",
+            "目录仍有详情或评论缺口，但当前缺少可用访问地址，或受执行输入与重试条件限制。本次没有新建工单；请查看受阻作品和采集任务。",
         ),
         "archive_refuse" => (
             "c-src-failure",
@@ -791,6 +791,12 @@ fn archive_state(
     }
     let (tone, label) = match archive {
         TargetArchiveRead::Unavailable => ("neutral", "档案暂不可读"),
+        TargetArchiveRead::Known(Some(value))
+            if value.directory_baseline
+                == linggan_evidence::ArchiveDirectoryBaseline::NotStarted =>
+        {
+            ("neutral", "尚未建立")
+        }
         TargetArchiveRead::Known(Some(value)) if value.has_actionable_problems() => {
             ("warn", "档案有问题")
         }
@@ -1187,10 +1193,12 @@ fn archive_count(archive: super::target_drawer::TargetArchiveRead<'_>) -> String
     match archive {
         super::target_drawer::TargetArchiveRead::Unavailable => "当前读不到".to_owned(),
         super::target_drawer::TargetArchiveRead::Known(value) => value
-            .filter(|value| value.has_displayable_directory())
-            // The table column is count-only by the approved page display
-            // contract, so canonical and historical directories scan alike.
-            .map(|value| format!("{} 篇", value.works_listed))
+            .filter(|value| value.works_listed > 0)
+            .map(|value| if value.has_displayable_directory() {
+                format!("{} 篇", value.works_listed)
+            } else {
+                format!("{} 篇已见", value.works_listed)
+            })
             .unwrap_or_else(|| "—".to_owned()),
     }
 }
@@ -1199,8 +1207,12 @@ fn detail_count(archive: super::target_drawer::TargetArchiveRead<'_>) -> String 
     match archive {
         super::target_drawer::TargetArchiveRead::Unavailable => "当前读不到".to_owned(),
         super::target_drawer::TargetArchiveRead::Known(value) => value
-            .filter(|value| value.has_displayable_directory() && value.works_listed > 0)
-            .map(|value| format!("{}/{}", value.details_captured, value.works_listed))
+            .filter(|value| value.works_listed > 0)
+            .map(|value| if value.has_displayable_directory() {
+                format!("{}/{}", value.details_captured, value.works_listed)
+            } else {
+                format!("{}/{} 已见", value.details_captured, value.works_listed)
+            })
             .unwrap_or_else(|| "—".to_owned()),
     }
 }
@@ -1338,7 +1350,17 @@ mod tests {
         assert!(!complete.contains("提交结果待核对"));
         let unschedulable = action_feedback_markup(Some("archive_gap_not_schedulable"), None);
         assert!(unschedulable.contains("缺口暂不能排入"));
+        assert!(unschedulable.contains("详情或评论缺口"));
+        assert!(unschedulable.contains("缺少可用访问地址"));
         assert!(!unschedulable.contains("提交结果待核对"));
+    }
+
+    #[test]
+    fn creator_gap_receipt_describes_detail_and_comment_only_scopes() {
+        let markup = action_feedback_markup(Some("creator_detail_requested"), None);
+        assert!(markup.contains("仅缺评论的作品会重访详情页"));
+        assert!(markup.contains("最多 30 条评论（含回复）"));
+        assert!(markup.contains("不重复下载媒体"));
     }
 
     fn target(kind: &str, name: Option<&str>) -> ObservationTarget {
@@ -1711,6 +1733,7 @@ mod tests {
                 retired_works: 0,
                 pending_details: 0,
                 quarantined: 1,
+                directory_baseline: linggan_evidence::ArchiveDirectoryBaseline::RebuildRequired,
                 ..ArchiveCompleteness::default()
             },
         );
@@ -1744,6 +1767,7 @@ mod tests {
                 works_listed: 8,
                 details_captured: 5,
                 blocked_details: 1,
+                directory_baseline: linggan_evidence::ArchiveDirectoryBaseline::Building,
                 ..ArchiveCompleteness::default()
             },
         );
@@ -1764,6 +1788,34 @@ mod tests {
     }
 
     #[test]
+    fn accepted_interrupted_patrol_work_does_not_claim_a_homepage_archive() {
+        let base = format!("{EMPTY_STATE_OPEN}empty{EMPTY_STATE_CLOSE}");
+        let creator = target("creator", Some("巡查先发现作者"));
+        let mut completeness = HashMap::new();
+        completeness.insert(
+            creator.identity_key.clone(),
+            ArchiveCompleteness {
+                works_listed: 1,
+                pending_details: 1,
+                quarantined: 1,
+                directory_baseline: linggan_evidence::ArchiveDirectoryBaseline::NotStarted,
+                ..ArchiveCompleteness::default()
+            },
+        );
+        let html = render_stored_targets(
+            &base,
+            &[creator],
+            &HashMap::new(),
+            Some(&completeness),
+            None,
+            TargetListContext::default(),
+        );
+        assert!(html.contains("尚未建立"), "{html}");
+        assert!(html.contains("建立档案"), "{html}");
+        assert!(!html.contains("档案有问题"), "{html}");
+    }
+
+    #[test]
     fn archive_progress_failures_use_business_language() {
         assert!(
             action_feedback_markup(Some("archive_in_progress"), None)
@@ -1771,7 +1823,7 @@ mod tests {
         );
         assert!(
             action_feedback_markup(Some("archive_nothing_to_continue"), None)
-                .contains("当前作品目录没有待补详情")
+                .contains("当前目录没有可判定的详情或评论缺口")
         );
         assert!(action_feedback_markup(Some("archive_requested"), None).contains("建档已入队"));
         assert!(action_feedback_markup(Some("archive_merge"), None).contains("未重复提交"));
@@ -1805,8 +1857,9 @@ mod tests {
 
         assert!(html.contains("异常"));
         assert!(html.contains(">处理异常</button>"));
-        assert!(!html.contains("31 篇"));
-        assert!(!html.contains("27/31"));
+        assert!(html.contains("31 篇已见"));
+        assert!(html.contains("27/31 已见"));
+        assert!(!html.contains("档案已建立"));
     }
 
     #[test]
@@ -2225,7 +2278,7 @@ mod queue_toast_tests {
 
     /// 回执说的范围必须就是真去读的范围。
     ///
-    /// 关键词详情补采与创作者观察同口径：一次打开带回详情、前 30 条评论与 2 层回复
+    /// 关键词详情补采与创作者观察同口径：一次打开带回详情、最多 30 条评论（含回复），每条主评论最多 2 条回复
     /// （`DETAIL_WINDOW_*`），以及媒体文件。这句写着「只补正文与发布时间」的时候，人和系统
     /// 对同一次采集的理解差着两样东西——纸面窄、实际宽，人就不会去等评论，也不会去查它们
     /// 为什么没回来。
@@ -2244,7 +2297,7 @@ mod queue_toast_tests {
             "回执没有说这次会读回评论区：{markup}"
         );
         assert!(
-            markup.contains(&format!("{DETAIL_WINDOW_REPLY_EXPAND_LIMIT} 层回复")),
+            markup.contains(&format!("最多 {DETAIL_WINDOW_REPLY_EXPAND_LIMIT} 条回复")),
             "回执没有说这次会展开回复：{markup}"
         );
         assert!(

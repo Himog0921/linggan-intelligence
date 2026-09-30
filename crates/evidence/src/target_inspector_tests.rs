@@ -26,6 +26,27 @@ fn known_zero_is_distinct_from_unknown() {
 }
 
 #[test]
+fn interrupted_patrol_does_not_read_as_normal_when_monitoring_is_enabled() {
+    let target = TargetRow {
+        target_ref: Uuid::new_v4(),
+        target_kind: "creator".to_owned(),
+        monitoring_enabled: true,
+        last_dispatched_at: None,
+        last_succeeded_at: None,
+        next_run_at: None,
+    };
+    let patrol = patrol_projection(
+        &target,
+        &LaneCounts::default(),
+        TargetInspectorCount::Known(0),
+        TargetInspectorCount::Known(0),
+        true,
+    );
+    assert_eq!(patrol.state, TargetInspectorPatrolState::Blocked);
+    assert_eq!(patrol.latest_hits, TargetInspectorCount::Known(0));
+}
+
+#[test]
 fn queued_work_is_not_running_and_needs_no_manual_action() {
     let execution = execution_projection(&LaneCounts {
         queued: 1,
