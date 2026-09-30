@@ -1,7 +1,7 @@
 # MODEL-SECRET-DEV-001 · 开发期模型凭据单一路径
 
 > 状态: 活跃计划
-> 最后核对: 2026-09-30
+> 最后核对: 2026-10-01
 > 适用范围: 本机模型连接凭据保存与 API/worker 读取
 > 事实来源: Mog 当前请求、三批 Comment Study 调用账本、现行 SecretStore 与本机运行进程
 > 冲突时以谁为准: 用户当前决定、真实运行回执、当前代码与权限检查
@@ -22,3 +22,7 @@
 ## 停止与回退
 
 若权限、迁移验证、仓库复审或受控安装失败，保持旧运行版本与 Keychain 条目；新文件不得被旧进程误读。切换后如需回退到旧代码，须先恢复其凭据读取资格，不能静默回退到 Keychain/文件双路。
+
+## 2026-10-01 实际交付
+
+PR #356 的 exact head `a09e97c5` 经独立复核与 CI 通过后合并为 `f05b0655`。两项远端 DeepSeek 密钥逐字迁移；本机 WeMM 连接原无 Keychain 条目，按空凭据合同迁移。新版 Rust SecretStore 对三项在运行 support dir 中实读 3/3，随后受控 install 刷新三个服务，API ready 且模型设置投影为 `LOCAL_PRIVATE_FILE`；旧工作区 Keychain service 已清空。未发起新 Run 或真实 provider 探针，故无弹窗的下一次真实模型调用与 Mog 业务验收仍待观察；旧失败记录不回写。

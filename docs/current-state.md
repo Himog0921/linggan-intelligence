@@ -1,14 +1,14 @@
 # 当前状态与事项队列
 
 > 状态: 权威当前
-> 最后核对: 2026-09-30
+> 最后核对: 2026-10-01
 > 适用范围: 当前阶段、事项顺序、阻塞与下一步
 > 事实来源: 本机实际检查、已确认项目边界和完成计划
 > 冲突时以谁为准: 真实运行结果、ACCEPTED ADR 与用户最新确认
 
 ### 2026-09-30 · Comment Study 当前合并与验收状态
 
-PR #338、#350 与 [#351](https://github.com/Himog0921/linggan-intelligence/pull/351) 均已合并；#351 的代码 merge commit 是 `c6cf2d9c`，当前 main 包含该提交。#351 最终 head `fd15b056` 的 [exact-head CI](https://github.com/Himog0921/linggan-intelligence/actions/runs/36658996689) 已通过 compile、unit、隔离 PostgreSQL 和前端行为验证。Mog 后续明确要求刷新本机 3000；现行 `runtime-main@1e94252a`、三个 launchd 进程与 `:3000/health` 均已核对，数据库 READY。合并、部署、模型调用与 Mog 业务验收是不同事实。
+PR #338、#350 与 [#351](https://github.com/Himog0921/linggan-intelligence/pull/351) 均已合并；#351 的代码 merge commit 是 `c6cf2d9c`，当前 main 包含该提交。#351 最终 head `fd15b056` 的 [exact-head CI](https://github.com/Himog0921/linggan-intelligence/actions/runs/36658996689) 已通过 compile、unit、隔离 PostgreSQL 和前端行为验证。Mog 后续明确要求刷新本机 3000；现行 `runtime-main@f05b0655`、三个 launchd 进程与 `:3000/health` 均已核对，数据库 READY。合并、部署、模型调用与 Mog 业务验收是不同事实。
 
 [正式验收账本](audits/comment-study-productization-001/README.md)的 2026-09-30 逐项核验确认机读状态仍为 T23–T26、T43 共 **5 PASS**，其余 **49 NOT_RUN**；隔离测试子场景不自动提升完整 T 编号。T06 旧文字要求未知评论作者不进入研究，而现有 AC043 代码与隔离测试允许其形成 Target/Signal、仅禁止作为新 Problem 的独立已知作者，待合同版本裁定。approved-v1 文档校验仍有八份 SHA 不符。P2 代码已合并，真实页面/数字、真实模型路径与 Mog 业务验收未完成；P3 质量出口仍受独立 Gold Set、分层 Recall@K、获批真实模型和 M4 资源实测约束，P4 尚不放行。
 
@@ -16,10 +16,13 @@ PR #338、#350 与 [#351](https://github.com/Himog0921/linggan-intelligence/pull
 
 南瓜哒哒“补采缺口”失败的只读复算显示：9 篇缺合格详情的作品被 Domain usage 多行 join 展开为 23 行，`ensure_material_targets_belong_to_platform` 比较唯一内容行数与含重复的候选长度后返回 `InvalidMaterialTargets`，事务回滚。独立分支 `codex/creator-gap-error-20260929` 已用存在性查询消除重复，并把 creator 请求的数据库/合同失败从“当前不能重复提交”改为可追踪的真实失败提示；隔离 PostgreSQL 全套与 API/UI 回归通过。分支已推送供 PR 审查；本修复尚未合并、部署或触发真实补采，常驻 `:3000` 和共享库未改变。
 
-Mog 已明确“补采缺口”包括未取得完整详情、标题、正文、媒体、评论等，并确认差评论时可重新打开一次详情页，采集最多 30 条评论。新增本地候选将可证实的评论缺口纳入人工补采；已接纳巡查新增且缺详情的作品，仅在创作者规则显式开启并另有精确用途授权时自动跟进，每次最多 3 篇，默认关闭。新插件不再把未知平台评论数误写成 0，作品目录可按已接纳发现卡的原始类型标记显示视频/图文/未标记分布。视频正文 `UNKNOWN` 和旧原始 `normal` 类型缺少足够来源，不能单凭它们扩张补采或声称图文/视频类型已入 canonical 材料。分层边界见[变更清单](design/changes/creator-gap-request-20260929-ui-change-manifest.md)，验证状态见[进度记录](progress/2026-09.md)。
-### 2026-09-30 · 模型密钥运行故障与开发期单路径修复
+Mog 已明确“补采缺口”包括未取得完整详情、标题、正文、媒体、评论等，并确认差评论时可重新打开一次详情页，采集最多 30 条评论。新增候选将可证实的评论缺口纳入人工补采；已接纳巡查新增且缺详情的作品，仅在创作者规则显式开启并另有精确用途授权时自动跟进，每次最多 3 篇，默认关闭。新插件不再把未知平台评论数误写成 0，作品目录可按已接纳发现卡的原始类型标记显示视频/图文/未标记分布。视频正文 `UNKNOWN` 和旧原始 `normal` 类型缺少足够来源，不能单凭它们扩张补采或声称图文/视频类型已入 canonical 材料。分层边界见[变更清单](design/changes/creator-gap-request-20260929-ui-change-manifest.md)，验证状态见[进度记录](progress/2026-09.md)。
 
-9 月 29 日 18:18、9 月 30 日 10:26 和 12:18 三个 Comment Study Run 大量目标失败；模型回执均为 `model_secret_unavailable`、`callStarted=false`、计费 token 0。故障早于本次 3000 刷新。macOS Keychain 中原条目存在且交互式终端可读，但常驻 worker 不能读取；具体底层错误类别仍未知。Mog 要求开发期不再反复手工授权，现以 [MODEL-SECRET-DEV-001](plans/active/model-secret-dev-001.md) 改为唯一的本机私有文件 SecretStore。只读数据库曾核对 3 个旧密钥引用；受控读取旧值触发系统授权等待，当时尚未迁移。代码已进入 `main@f05b0655`；凭据迁移和运行刷新未在本交付包核实，旧失败回执保持原样。
+### 2026-10-01 · 模型密钥单路径修复已合并并部署
+
+9 月 29 日 18:18、9 月 30 日 10:26 和 12:18 三个 Comment Study Run 大量目标失败；模型回执均为 `model_secret_unavailable`、`callStarted=false`、计费 token 0。旧 Keychain 条目可在用户一次授权后交互式读取，但常驻 worker 不能稳定读取；具体底层错误类别仍未知。[MODEL-SECRET-DEV-001](plans/active/model-secret-dev-001.md) 的 [PR #356](https://github.com/Himog0921/linggan-intelligence/pull/356) 已合并（merge commit `f05b0655`），其 [exact-head CI](https://github.com/Himog0921/linggan-intelligence/actions/runs/36686765817) 和独立代码审查通过。
+
+本机数据库引用的两项 DeepSeek 密钥已逐字迁入单一文件 SecretStore；第三项本机 WeMM Runtime 原无 Keychain 条目，按空凭据合同建立空文件。三个文件经新版 Rust SecretStore 在实际 support dir 下 3/3 读取通过，目录 0700、文件 0600；旧 Keychain 工作区 service 已清空。受控 install 收到旧 worker drain 回执，三个 launchd 进程运行 `runtime-main@f05b0655`，`:3000/health` ready、数据库 READY，模型设置 API 报告 `LOCAL_PRIVATE_FILE`。部署后尚无新的模型调用回执，故真实 provider 路径和评论研究业务验收仍未证明；旧失败回执保持原样。
 
 ### 2026-09-28 · GREENFIELD Comment Research 历史快照（当时 PR #338 为 Draft）
 
