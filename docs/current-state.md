@@ -8,9 +8,13 @@
 
 ### 2026-09-30 · Comment Study 当前合并与验收状态
 
-PR #338、#350 与 [#351](https://github.com/Himog0921/linggan-intelligence/pull/351) 均已合并；#351 的代码 merge commit 是 `c6cf2d9c`，当前 main 包含该提交。#351 最终 head `fd15b056` 的 [exact-head CI](https://github.com/Himog0921/linggan-intelligence/actions/runs/36658996689) 已通过 compile、unit、隔离 PostgreSQL 和前端行为验证。本机 `runtime-main@bbc33f8c` 工作区干净、`:3000/health` ready，但尚未部署 #351；合并、部署、模型调用与 Mog 业务验收是不同事实。
+PR #338、#350 与 [#351](https://github.com/Himog0921/linggan-intelligence/pull/351) 均已合并；#351 的代码 merge commit 是 `c6cf2d9c`，当前 main 包含该提交。#351 最终 head `fd15b056` 的 [exact-head CI](https://github.com/Himog0921/linggan-intelligence/actions/runs/36658996689) 已通过 compile、unit、隔离 PostgreSQL 和前端行为验证。Mog 后续明确要求刷新本机 3000；现行 `runtime-main@1e94252a`、三个 launchd 进程与 `:3000/health` 均已核对，数据库 READY。合并、部署、模型调用与 Mog 业务验收是不同事实。
 
 [正式验收账本](audits/comment-study-productization-001/README.md)的 2026-09-30 逐项核验确认机读状态仍为 T23–T26、T43 共 **5 PASS**，其余 **49 NOT_RUN**；隔离测试子场景不自动提升完整 T 编号。T06 旧文字要求未知评论作者不进入研究，而现有 AC043 代码与隔离测试允许其形成 Target/Signal、仅禁止作为新 Problem 的独立已知作者，待合同版本裁定。approved-v1 文档校验仍有八份 SHA 不符。P2 代码已合并，真实页面/数字、真实模型路径与 Mog 业务验收未完成；P3 质量出口仍受独立 Gold Set、分层 Recall@K、获批真实模型和 M4 资源实测约束，P4 尚不放行。
+
+### 2026-09-30 · 模型密钥运行故障与开发期单路径修复
+
+9 月 29 日 18:18、9 月 30 日 10:26 和 12:18 三个 Comment Study Run 大量目标失败；模型回执均为 `model_secret_unavailable`、`callStarted=false`、计费 token 0。故障早于本次 3000 刷新。macOS Keychain 中原条目存在且交互式终端可读，但常驻 worker 不能读取；具体底层错误类别仍未知。Mog 要求开发期不再反复手工授权，现以 [MODEL-SECRET-DEV-001](plans/active/model-secret-dev-001.md) 在专属分支改为唯一的本机私有文件 SecretStore。只读数据库已核对 3 个旧密钥引用；受控读取旧值触发系统授权等待，尚未迁移。当前只是代码候选，尚未合并或刷新运行态；旧失败回执保持原样。
 
 ### 2026-09-28 · GREENFIELD Comment Research 历史快照（当时 PR #338 为 Draft）
 

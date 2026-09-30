@@ -1,7 +1,7 @@
 # 模型与 Pi 本机运行说明
 
 > 状态: 权威当前
-> 最后核对: 2026-09-10
+> 最后核对: 2026-09-30
 > 适用范围: COMMENT-RESEARCH-RESET-001 V1 的 Pi adapter 依赖、模型连接与受控调用
 > 事实来源: `.nvmrc`、固定 npm lock、V1 worker/API 合同与本机 runtime 部署手册
 > 冲突时以谁为准: 用户对真实外发/费用的授权、真实运行回执和当前代码
@@ -20,7 +20,9 @@ npm test --prefix apps/pi-adapter
 
 安装只在当前 checkout 的 `apps/pi-adapter/node_modules/` 执行 `npm ci --ignore-scripts`，并写入 gitignored 安装 hash；不读取模型凭据、不访问数据库或调用 provider。adapter 由构建该 Rust binary 的 checkout 定位，不能脱离来源目录单独搬运。
 
-正式凭据由 API 写入 macOS Keychain，service 为 `Linggan.Intelligence.Models.<workspace UUID>`，account 是随机不可变 secret UUID。不得将 API key 写入环境文件、数据库、日志、Git 或测试 fixture；Keychain 不可用时关闭调用，不降级为明文。
+开发期正式凭据由 API 写入唯一的本机文件 SecretStore：`<LINGGAN_SUPPORT_DIR>/model-secrets/<workspace UUID>/<secret UUID>`，未显式设置 support dir 时使用 `~/Library/Application Support/Linggan Intelligence`。目录只允许当前用户访问（0700），每个凭据文件为 0600，写入先落同目录临时文件再原子替换；宽权限或符号链接会拒绝读写。API 与 worker 通过同一 workspace/secret 引用读写此目录，不查 macOS Keychain、不做第二路径回退。文件在磁盘上未额外加密；本机账户、磁盘和备份保护是使用条件。不得把 API key 写入 `.env`、数据库、日志、Git 或测试 fixture。
+
+从旧版本升级时，先逐项从旧 Keychain 条目读入并校验新文件，切换到新 SecretStore 后删除旧条目；历史调用账本和配置版本不改。迁移失败时保留原件并停止切换，不能把缺钥作为成功模型调用。旧版本的 Keychain 使用方式仅是升级来源，不再是运行时合同。
 
 ## V1 调用边界
 
@@ -36,7 +38,7 @@ npm test --prefix apps/pi-adapter
 
 - `bash scripts/test-comment-research-postgres.sh`：随机隔离 PostgreSQL 的 V1 schema、queue、poison isolation、结果与 route proof；不访问共享数据库或 provider。
 - `npm test --prefix apps/pi-adapter`：Pi SDK/transport/structured-output fixture proof；不含真实凭据或评论。
-- `cargo test -p linggan-intelligence --test model_keychain --locked -- --ignored`：只读取、替换、删除随机 synthetic Keychain secret，不枚举已有秘密。
+- `cargo test -p linggan-intelligence --test model_secrets_file --locked`：仅在随机系统临时目录写合成凭据，验证重启后读取、替换/删除和权限拒绝；不读取正式凭据。
 - `docs/runbooks/local-runtime-deployment.md`：共享开发库 migration、runtime 切换与 :3000 验收的唯一运行步骤。
 
 这些证明不等于真实 provider 可用、真实评论语义正确或用户业务验收。

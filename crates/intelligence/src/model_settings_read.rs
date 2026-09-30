@@ -123,7 +123,7 @@ fn model_settings_projection(
 ) -> Value {
     json!({
         "workspaceRef": workspace.get::<Uuid, _>("workspace_ref"),
-        "secretStorage": if synthetic { "SYNTHETIC_PREVIEW_ONLY" } else { "MACOS_KEYCHAIN" },
+        "secretStorage": if synthetic { "SYNTHETIC_PREVIEW_ONLY" } else { "LOCAL_PRIVATE_FILE" },
         "worker": {
             "lastSeenAt": workspace.get::<Option<String>, _>("worker_seen"),
             "recent": workspace.get::<Option<bool>, _>("worker_recent").unwrap_or(false),

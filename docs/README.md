@@ -41,6 +41,7 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发。先读[完整手�
 | [decisions/0006-comment-research-clean-rebuild.md](decisions/0006-comment-research-clean-rebuild.md) | 权威当前 | Issue #295：开发期销毁旧评论研究派生层，保留原始 Evidence 与资格事实；唯一的新评论研究合同与本机 reset 边界 |
 | [plans/active/comment-research-rebuild-001.md](plans/active/comment-research-rebuild-001.md) | 活跃计划；Issue #295；实现中 | 按领域选择笔记、冻结同篇语境与评论目标、严格语义接纳、长期 Problem 归并及旧路径删除的交付顺序 |
 | [plans/active/comment-study-p3-quality-gate-010.md](plans/active/comment-study-p3-quality-gate-010.md) | 活跃计划；Issue #316；受保护工作树 | P3 候选的主线整合准备、Gold Set/Recall@K 协议與无真实评论/模型调用的验证边界 |
+| [plans/active/model-secret-dev-001.md](plans/active/model-secret-dev-001.md) | 活跃计划；Issue #354；代码候选 | 开发期模型凭据单一文件存储、旧 Keychain 凭据一次性迁移与无弹窗运行验证 |
 | [plans/active/comment-research-reset-001.md](plans/active/comment-research-reset-001.md) | 历史基础 | 旧评论研究 reset 的历史记录；不再规定当前 schema、Run、输入或 UI 合同 |
 | [plans/active/comment-research-v1-real-closure-001.md](plans/active/comment-research-v1-real-closure-001.md) | 历史基线 | V1 Derivation/Run 运行记录；不得作为新实现或兼容路径 |
 | [plans/active/comment-research-semantic-output-001.md](plans/active/comment-research-semantic-output-001.md) | 历史基线 | V1 结构化输出修复记录；新输出合同由 COMMENT-STUDY-REBUILD-001 单独定义 |
@@ -82,7 +83,7 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发。先读[完整手�
 | [archive/model-pi-001.md](archive/model-pi-001.md) | 历史归档 | Issue #169 的模型设置/Pi 基础能力历史记录；当前调用路径由 COMMENT-RESEARCH-RESET-001 定义 |
 | [pages/model-ai-settings.md](pages/model-ai-settings.md) | 权威当前；交付分支 | 单页供应商弹窗、调用限制与用量语义 |
 | [design/pages/model-ai-settings-page.md](design/pages/model-ai-settings-page.md) | 权威当前；交付分支 | L1 模型与 AI 页面/状态/交互规格 |
-| [design/changes/model-pi-001-ui-change-manifest.md](design/changes/model-pi-001-ui-change-manifest.md) | 权威当前；交付分支 | 模型设置及个人菜单的授权、共享接缝和验证矩阵 |
+| [design/changes/model-pi-001-ui-change-manifest.md](design/changes/model-pi-001-ui-change-manifest.md) | 历史归档；#169 交付分支 | 当时模型设置及个人菜单的授权、共享接缝和验证矩阵；当前密钥合同见模型运行说明 |
 | [design/acceptance/model-pi-001-acceptance.md](design/acceptance/model-pi-001-acceptance.md) | 一次性报告 | 真实 SDK/隔离 PG/HTTP/Keychain 与未证实层 |
 | [runbooks/model-pi-runtime.md](runbooks/model-pi-runtime.md) | 权威当前；交付分支 | 固定 Node/lock、worker、隔离预览与真实试验前提 |
 | [archive/comment-research-001.md](archive/comment-research-001.md) | 历史归档 | Issue #167 的首包与模型接入证据；后续评论研究架构由 COMMENT-RESEARCH-RESET-001 规定 |
