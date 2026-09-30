@@ -724,7 +724,7 @@ mod tests {
              whatever the user switched to in the meantime"
         );
         assert!(script.contains("const token = ++renderToken;"));
-        assert!(script.contains("if (token !== renderToken) return;"));
+        assert!(script.contains("if (token !== renderToken) return false;"));
         for renderer in [
             "async function renderOverviewTab()",
             "async function renderSelectedRunPanel()",

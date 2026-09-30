@@ -1,7 +1,7 @@
 # COMMENT-STUDY-P2-CLOSEOUT-001 · UI 变更清单
 
 > 状态: 草案
-> 最后核对: 2026-09-29
+> 最后核对: 2026-09-30
 > 适用范围: `/corpus/comments` 的研究选择、目标详情、研究结果与运行汇总
 > 事实来源: 用户确认的 P2 交付范围、COMMENT-STUDY-PRODUCTIZATION-001、当前 API/数据合同及 2026-09-29 Run `4685462d-96e3-40c5-8496-e4805421414e`
 > 冲突时以谁为准: 用户最新确认、`AGENTS.md`、当前数据库事实、当前代码与合同
@@ -56,10 +56,16 @@
 | 上下文与续做 | root、reply、parent missing、context fingerprint 改变及不变；源 Run 精确补跑 | 隔离 PostgreSQL 的 `missing_parent_reaches_model_and_only_changed_context_requeues_after_needs_context` 与 `source_run_recovery_uses_exact_failed_keys_and_keeps_original_history` 通过 | 人工 Gold Set 与语义质量 |
 | 响应恢复 | 传输/文本上限定位；多目标拆为单目标；凭证缺失只失败一次 | adapter 合成 31/31；隔离 PostgreSQL 拆分和凭证缺失用例通过 | 真实 provider 端容量与成本 |
 | 页面与结果 | Run 回执、默认范围、显式补跑、冻结输入与受限态 | synthetic Playwright 通过；真实 Axum/PG 浏览器 1/1，命令 API 11/11；补跑 HTTP 精确范围反例另单项通过 | 共享运行时 `:3000` 和 Mog 人工验收 |
-| 页面 URL 路由 | 页面入口接受页面规格登记的导航字段（domain、view、q、workRef、runRef、problemRef、commentExternalId、state、cursor、detail、panel），API 查询仍各自严格 | `origin/main` 与 `runtime-main` 已同步到 `50a1906d136a3ee757da0ce4ce06f69f33696dfa`；页面 URL HTTP 200，健康端点 ready | 已验证页面入口返回 HTML；未验证真实 Run 结果内容/交互，Mog 人工验收待完成 |
+| 页面 URL 路由 | 页面入口接受页面规格登记的导航字段（domain、view、q、workRef、runRef、problemRef、commentExternalId、state、cursor、detail、panel），API 查询仍各自严格 | `origin/main` 与 `runtime-main` 已同步到 `08d995fc2e695bdda589a6591c5a7d2e881992c9`；真实 Run 的结果入口可切换 URL、滚动并聚焦详情 | 浏览器键盘激活原生结果按钮已验证；Mog 对实际鼠标点击与业务内容的人工验收仍待完成 |
 
 ## 6. 交接
 
 - 预期文件: selection/context、batch failure handling、read projection/API、`comment_study.html/js/css`、HTTP 合同、总体计划、progress 与本清单。
 - 验证命令：`npm test`（Pi adapter 31/31）、`scripts/test-comment-study-productization-ui.py`（synthetic Playwright）、`scripts/test-comment-study-productization-postgres.sh`（一次性 PostgreSQL 中 Intelligence 122/122、Axum 命令 11/11、worker 2/2）。补跑 HTTP 的第三条新评论排除反例在最终小幅增强后另用一次性 PostgreSQL 单项 1/1 通过。PR exact-head CI 待建立后核验。
 - 不申请共享迁移或真实 provider。PR 提交后由 Mog 决定合并与 `:3000` 运行时切换；Mog 的实际页面验收仍待完成。
+
+## 7. 结果查看的可见反馈（2026-09-30）
+
+- 复现：真实 Run 行的“查看结果”会切换 URL 并加载“目标评论与上下文”，但结果区在运行列表下方；页面仍停留在列表顶部，仅按钮文案变为“当前查看”，所以用户看起来像没有反应。
+- 候选：仅当当前渲染已提交且用户仍在研究批次页、所选 Run 未变化时，才滚动到详情并把键盘焦点移到详情标题。桌面详情使用滚动边距避开 sticky 工具栏；用户偏好减少动态效果时使用即时滚动。详情标题可被程序化聚焦，避免按钮随 DOM 更新消失后键盘/读屏用户失去位置。
+- 状态：首轮独立复审发现标题可能被 sticky 工具栏遮挡、JS 平滑滚动未响应减少动态效果偏好；两项已修正。二次独立复审无阻断；`git diff --check`、项目治理和 UI 手册检查通过。提交 `08d995fc` 已直接快进合入 `main`；官方 `runtime-main/scripts/runtime/install.sh` 确认 worker drain、迁移台账最新、无模型调用，三个服务已重启，health 为 ready。浏览器用真实 Run 验证：原生按钮 Enter 激活后 URL 切换、详情标题获得焦点并在桌面视口中避开 sticky toolbar。鼠标点击与 Mog 业务验收仍待人工确认；不得将 P2 整体验收表述为完成。
