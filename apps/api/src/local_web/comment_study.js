@@ -584,7 +584,7 @@ async function renderSelectedRunPanel() {
   const more = state.nextCursor
     ? '<button type="button" class="study-link" data-run-load-more>加载下一页</button>'
     : '';
-  return `<section class="study-run-detail"><header><h2>${esc(labels[selectedRunPanel])}</h2><p>当前运行 ${esc(selectedRunRef)}</p></header><nav class="study-run-panels" role="tablist" aria-label="本次运行内容"><button type="button" role="tab" data-run-panel="targets" aria-selected="${selectedRunPanel === 'targets'}">目标评论</button><button type="button" role="tab" data-run-panel="signals" aria-selected="${selectedRunPanel === 'signals'}">研究信号</button></nav><p class="study-run-page-status">当前显示 ${state.items.length} 条${state.nextCursor ? '，还有后续内容' : '，已到本次列表末尾'}</p>${content}${more}</section>`;
+  return `<section class="study-run-detail"><header><h2 tabindex="-1">${esc(labels[selectedRunPanel])}</h2><p>当前运行 ${esc(selectedRunRef)}</p></header><nav class="study-run-panels" role="tablist" aria-label="本次运行内容"><button type="button" role="tab" data-run-panel="targets" aria-selected="${selectedRunPanel === 'targets'}">目标评论</button><button type="button" role="tab" data-run-panel="signals" aria-selected="${selectedRunPanel === 'signals'}">研究信号</button></nav><p class="study-run-page-status">当前显示 ${state.items.length} 条${state.nextCursor ? '，还有后续内容' : '，已到本次列表末尾'}</p>${content}${more}</section>`;
 }
 
 async function loadRunPanelPage(panel, reset = false) {
@@ -718,7 +718,7 @@ async function renderActiveTab() {
       html = `<p class="study-empty">读取失败：${esc(error.message)}</p>`;
     }
   }
-  if (token !== renderToken) return;
+  if (token !== renderToken) return false;
   container.innerHTML = html;
   container.setAttribute('aria-busy', 'false');
   if (view === 'comments') bindCommentsView();
@@ -727,6 +727,7 @@ async function renderActiveTab() {
     runControlOutcomeNeedsRefresh = false;
     runControlFeedback = '';
   }
+  return true;
 }
 
 function bindRunControls(container) {
@@ -752,12 +753,19 @@ function bindRunControls(container) {
   });
   container.querySelectorAll('[data-run-open]').forEach(button => {
     button.addEventListener('click', async () => {
-      selectedRunRef = button.dataset.runOpen;
+      const requestedRun = button.dataset.runOpen;
+      selectedRunRef = requestedRun;
       selectedRunPanel = 'targets';
       resetRunPanelCache();
       renderRunPicker();
       syncStudyRoute(true);
-      await renderActiveTab();
+      const rendered = await renderActiveTab();
+      if (!rendered || activeView !== 'runs' || selectedRunRef !== requestedRun) return;
+      const detail = container.querySelector('.study-run-detail');
+      if (!detail) return;
+      const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+      detail.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+      detail.querySelector('h2')?.focus({ preventScroll: true });
     });
   });
   container.querySelectorAll('[data-run-panel]').forEach(button => {
