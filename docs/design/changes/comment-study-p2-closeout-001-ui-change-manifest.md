@@ -54,7 +54,7 @@
 | 上下文与续做 | 固定样本验证 root、reply、parent missing、context fingerprint 改变及不变 | 待实施 | 人工 Gold Set 与语义质量 |
 | 响应恢复 | 注入 SSE 262144 字节超限，验证仅未接纳目标拆为单目标尝试 | 待实施 | 真实 provider 端容量与成本 |
 | 页面与结果 | API/静态脚本及隔离浏览器检查；Run 理由、冻结上下文与所有合法 Signal 可见 | 待实施 | 共享运行时 `:3000` 和 Mog 人工验收 |
-| 页面 URL 路由 | 页面入口接受页面规格登记的导航字段（domain、view、q、workRef、runRef、problemRef、commentExternalId、state、cursor、detail、panel），API 查询仍各自严格 | `origin/main` 与 `runtime-main` 已同步到 `7f5a0796f06e76e6ad489a358bfaf7b4ea56bbaf`；浏览器点击真实 Run 后 URL 与目标详情均加载 | 点击曾只改当前行状态，详情留在长列表下方；本清单 §6 跟踪可见导航修复，尚待合并后浏览器复验与 Mog 验收 |
+| 页面 URL 路由 | 页面入口接受页面规格登记的导航字段（domain、view、q、workRef、runRef、problemRef、commentExternalId、state、cursor、detail、panel），API 查询仍各自严格 | `origin/main` 与 `runtime-main` 已同步到 `08d995fc2e695bdda589a6591c5a7d2e881992c9`；真实 Run 的结果入口可切换 URL、滚动并聚焦详情 | 浏览器键盘激活原生结果按钮已验证；Mog 对实际鼠标点击与业务内容的人工验收仍待完成 |
 
 ## 6. 交接
 
@@ -66,4 +66,4 @@
 
 - 复现：真实 Run 行的“查看结果”会切换 URL 并加载“目标评论与上下文”，但结果区在运行列表下方；页面仍停留在列表顶部，仅按钮文案变为“当前查看”，所以用户看起来像没有反应。
 - 候选：仅当当前渲染已提交且用户仍在研究批次页、所选 Run 未变化时，才滚动到详情并把键盘焦点移到详情标题。桌面详情使用滚动边距避开 sticky 工具栏；用户偏好减少动态效果时使用即时滚动。详情标题可被程序化聚焦，避免按钮随 DOM 更新消失后键盘/读屏用户失去位置。
-- 状态：首轮独立复审发现标题可能被 sticky 工具栏遮挡、JS 平滑滚动未响应减少动态效果偏好；两项已修正。二次独立复审无阻断；修改后的 `git diff --check`、项目治理和 UI 手册检查均通过。提交、推送/合并、`runtime-main` 刷新及修复后真实浏览器复验待完成。不得将源码候选表述为已发布或业务验收通过。
+- 状态：首轮独立复审发现标题可能被 sticky 工具栏遮挡、JS 平滑滚动未响应减少动态效果偏好；两项已修正。二次独立复审无阻断；`git diff --check`、项目治理和 UI 手册检查通过。提交 `08d995fc` 已直接快进合入 `main`；官方 `runtime-main/scripts/runtime/install.sh` 确认 worker drain、迁移台账最新、无模型调用，三个服务已重启，health 为 ready。浏览器用真实 Run 验证：原生按钮 Enter 激活后 URL 切换、详情标题获得焦点并在桌面视口中避开 sticky toolbar。鼠标点击与 Mog 业务验收仍待人工确认；不得将 P2 整体验收表述为完成。
