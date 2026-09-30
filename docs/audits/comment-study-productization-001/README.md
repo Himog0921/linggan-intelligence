@@ -15,7 +15,7 @@
 
 ## 2026-09-30 · 正式验收核验
 
-本节是当前结论；下方 2026-09-28 表格及逐次增量记录保留为当时快照。GitHub 已确认 #338 于 09-28、#350 于 09-29、[#351](https://github.com/Himog0921/linggan-intelligence/pull/351) 于 09-30 合并；远端 `main@c6cf2d9ce247101850f20e189d9286a5e6faf3ef` 包含 #351 的 P2 完整性修复。#351 最终 head `fd15b056` 的 [exact-head CI](https://github.com/Himog0921/linggan-intelligence/actions/runs/36658996689) 中 compile、unit、隔离 PostgreSQL 和前端行为步骤均通过，source export 按工作流条件跳过。合并前的本地 API 单测 297/297、合成浏览器、项目治理与 UI 规范检查通过；独立代码复核无阻断。
+本节是当前结论；下方 2026-09-28 表格及逐次增量记录保留为当时快照。GitHub 已确认 #338 于 09-28、#350 于 09-29、[#351](https://github.com/Himog0921/linggan-intelligence/pull/351) 于 09-30 合并；#351 的代码合并提交是 `c6cf2d9ce247101850f20e189d9286a5e6faf3ef`，后续纯文档提交不改变这项代码事实。#351 最终 head `fd15b056` 的 [exact-head CI](https://github.com/Himog0921/linggan-intelligence/actions/runs/36658996689) 中 compile、unit、隔离 PostgreSQL 和前端行为步骤均通过，source export 按工作流条件跳过。合并前的本地 API 单测 297/297、合成浏览器、项目治理与 UI 规范检查通过；独立代码复核无阻断。
 
 **机读台账仍为 5 `PASS`（T23–T26、T43）、49 `NOT_RUN`**。核对 `acceptance-status.json`：T01–T54 连续且无重复，五项 PASS 均有提交/测试/CI 证据，NOT_RUN 的证据字段均为空。#351 没有提供新的完整 T 编号验收回执，因此不凭合并、测试总数或相近用例批量改写机读状态。当前隔离测试已证明多项子场景，例如 T01 的 688/100 选择、T11–T14 的幂等与并发、T27–T28 的控制边界和 T46 的部分请求竞态；它们不等于各项手册要求的完整场景及业务验收。T44 的既有计数反例仅为 6 个目标，不能代替要求的 300 目标/多作品/全量翻页。
 

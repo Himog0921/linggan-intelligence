@@ -8,7 +8,7 @@
 
 ### 2026-09-30 · Comment Study 当前合并与验收状态
 
-PR #338、#350 与 [#351](https://github.com/Himog0921/linggan-intelligence/pull/351) 均已合并；`origin/main@c6cf2d9c` 是 #351 的 merge commit。#351 最终 head `fd15b056` 的 [exact-head CI](https://github.com/Himog0921/linggan-intelligence/actions/runs/36658996689) 已通过 compile、unit、隔离 PostgreSQL 和前端行为验证。本机 `runtime-main@bbc33f8c` 工作区干净、`:3000/health` ready，但尚未部署 #351；合并、部署、模型调用与 Mog 业务验收是不同事实。
+PR #338、#350 与 [#351](https://github.com/Himog0921/linggan-intelligence/pull/351) 均已合并；#351 的代码 merge commit 是 `c6cf2d9c`，当前 main 包含该提交。#351 最终 head `fd15b056` 的 [exact-head CI](https://github.com/Himog0921/linggan-intelligence/actions/runs/36658996689) 已通过 compile、unit、隔离 PostgreSQL 和前端行为验证。本机 `runtime-main@bbc33f8c` 工作区干净、`:3000/health` ready，但尚未部署 #351；合并、部署、模型调用与 Mog 业务验收是不同事实。
 
 [正式验收账本](audits/comment-study-productization-001/README.md)的 2026-09-30 逐项核验确认机读状态仍为 T23–T26、T43 共 **5 PASS**，其余 **49 NOT_RUN**；隔离测试子场景不自动提升完整 T 编号。T06 旧文字要求未知评论作者不进入研究，而现有 AC043 代码与隔离测试允许其形成 Target/Signal、仅禁止作为新 Problem 的独立已知作者，待合同版本裁定。approved-v1 文档校验仍有八份 SHA 不符。P2 代码已合并，真实页面/数字、真实模型路径与 Mog 业务验收未完成；P3 质量出口仍受独立 Gold Set、分层 Recall@K、获批真实模型和 M4 资源实测约束，P4 尚不放行。
 
