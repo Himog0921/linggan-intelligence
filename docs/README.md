@@ -41,7 +41,7 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发。先读[完整手�
 | [decisions/0006-comment-research-clean-rebuild.md](decisions/0006-comment-research-clean-rebuild.md) | 权威当前 | Issue #295：开发期销毁旧评论研究派生层，保留原始 Evidence 与资格事实；唯一的新评论研究合同与本机 reset 边界 |
 | [plans/active/comment-research-rebuild-001.md](plans/active/comment-research-rebuild-001.md) | 活跃计划；Issue #295；实现中 | 按领域选择笔记、冻结同篇语境与评论目标、严格语义接纳、长期 Problem 归并及旧路径删除的交付顺序 |
 | [plans/active/comment-study-p3-quality-gate-010.md](plans/active/comment-study-p3-quality-gate-010.md) | 活跃计划；Issue #316；受保护工作树 | P3 候选的主线整合准备、Gold Set/Recall@K 协议與无真实评论/模型调用的验证边界 |
-| [plans/active/model-secret-dev-001.md](plans/active/model-secret-dev-001.md) | 活跃计划；Issue #354；代码候选 | 开发期模型凭据单一文件存储、旧 Keychain 凭据一次性迁移与无弹窗运行验证 |
+| [plans/active/model-secret-dev-001.md](plans/active/model-secret-dev-001.md) | 活跃计划；Issue #354；已合并部署，真实调用待验 | 开发期模型凭据单一文件存储、旧 Keychain 凭据清理与运行核验 |
 | [plans/active/comment-research-reset-001.md](plans/active/comment-research-reset-001.md) | 历史基础 | 旧评论研究 reset 的历史记录；不再规定当前 schema、Run、输入或 UI 合同 |
 | [plans/active/comment-research-v1-real-closure-001.md](plans/active/comment-research-v1-real-closure-001.md) | 历史基线 | V1 Derivation/Run 运行记录；不得作为新实现或兼容路径 |
 | [plans/active/comment-research-semantic-output-001.md](plans/active/comment-research-semantic-output-001.md) | 历史基线 | V1 结构化输出修复记录；新输出合同由 COMMENT-STUDY-REBUILD-001 单独定义 |
@@ -276,9 +276,9 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发。先读[完整手�
 | [`plans/completed/gov-001-project-file-governance.md`](plans/completed/gov-001-project-file-governance.md) | 已完成计划 | GOV-001 的范围、交付和验收记录 |
 | [`plans/completed/gov-002-agent-skills-configuration.md`](plans/completed/gov-002-agent-skills-configuration.md) | 已完成计划 | Matt Pocock 工程技能、GitHub Issues、triage 与领域文档适配的配置记录 |
 | [`progress/README.md`](progress/README.md) | 权威当前 | 变更记录规则和月份索引 |
+| [`progress/2026-10.md`](progress/2026-10.md) | 权威当前 | 2026-10 的重要变更记录 |
 | [`progress/2026-09.md`](progress/2026-09.md) | 权威当前 | 2026-09 的重要变更记录 |
 | [`progress/2026-08.md`](progress/2026-08.md) | 权威当前 | 2026-08 的重要变更记录 |
-| [`progress/2026-09.md`](progress/2026-09.md) | 权威当前 | 2026-09 的重要变更记录 |
 
 ## 仓库外层资料入口
 
