@@ -1,10 +1,12 @@
 # MODEL-PI-001 UI 变更清单
 
-> 状态: 权威当前
-> 最后核对: 2026-09-06
+> 状态: 历史归档
+> 最后核对: 2026-09-30
 > 适用范围: Issue #169；MODEL-PI-001 已授权模型设置与评论分析包
 > 事实来源: 用户当前派定、Issue Claim、LIDS、0040 与当前 API/worker
 > 冲突时以谁为准: 用户最新确认、AGENTS、真实数据/权限与 LIDS
+
+> 替代说明（2026-09-30）：本清单保留 #169 当时的 UI 交付与 Keychain 测试事实；当前模型凭据存储合同以 [模型运行说明](../../runbooks/model-pi-runtime.md) 和 [模型设置页面规格](../../pages/model-ai-settings.md) 为准。
 
 读取回执：AGENTS → docs README → current-state → governance/agent-collaboration/file-placement 与 Issue 规则 → UI execution contract → LIDS README、tokens、patterns、materials、shell-zones、language-policy、data-boundaries。预先表面/状态/依赖/验收矩阵在 [历史实施计划](../../archive/model-pi-001.md)。本包是状态、权限/行动与交互的混合变更。
 

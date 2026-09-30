@@ -489,7 +489,7 @@ async fn claim_resolution(
 }
 
 /// A claim is persisted before provider I/O so two workers cannot buy the same comparison.  If
-/// the request cannot even be built (for example, a Keychain entry is temporarily unavailable),
+/// the request cannot even be built (for example, a model secret is unavailable),
 /// preserve that failed invocation receipt but release the pending comparison for a later retry.
 async fn release_pre_dispatch_claim(
     database: &Database,
