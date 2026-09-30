@@ -21,9 +21,6 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["time", "process", "io-util", "fs", "sync", "macros"] }
 uuid = { workspace = true, features = ["serde", "v4"] }
 
-[target.'cfg(target_os = "macos")'.dependencies]
-keyring = { version = "=3.6.3", features = ["apple-native"] }
-
 [dev-dependencies]
 linggan-contracts = { path = "../contracts" }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
