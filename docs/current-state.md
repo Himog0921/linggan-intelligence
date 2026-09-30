@@ -1,12 +1,18 @@
 # 当前状态与事项队列
 
 > 状态: 权威当前
-> 最后核对: 2026-09-28
+> 最后核对: 2026-09-30
 > 适用范围: 当前阶段、事项顺序、阻塞与下一步
 > 事实来源: 本机实际检查、已确认项目边界和完成计划
 > 冲突时以谁为准: 真实运行结果、ACCEPTED ADR 与用户最新确认
 
-### GREENFIELD Comment Research / Draft PR #338（P0 主线运行库已只读盘点；P2 exact-head 浏览器 CI 已通过；P3 质量出口未达成）
+### 2026-09-30 · Comment Study 当前合并与验收状态
+
+PR #338、#350 与 [#351](https://github.com/Himog0921/linggan-intelligence/pull/351) 均已合并；`origin/main@c6cf2d9c` 是 #351 的 merge commit。#351 最终 head `fd15b056` 的 [exact-head CI](https://github.com/Himog0921/linggan-intelligence/actions/runs/36658996689) 已通过 compile、unit、隔离 PostgreSQL 和前端行为验证。本机 `runtime-main@bbc33f8c` 工作区干净、`:3000/health` ready，但尚未部署 #351；合并、部署、模型调用与 Mog 业务验收是不同事实。
+
+[正式验收账本](audits/comment-study-productization-001/README.md)的 2026-09-30 逐项核验确认机读状态仍为 T23–T26、T43 共 **5 PASS**，其余 **49 NOT_RUN**；隔离测试子场景不自动提升完整 T 编号。T06 旧文字要求未知评论作者不进入研究，而现有 AC043 代码与隔离测试允许其形成 Target/Signal、仅禁止作为新 Problem 的独立已知作者，待合同版本裁定。approved-v1 文档校验仍有八份 SHA 不符。P2 代码已合并，真实页面/数字、真实模型路径与 Mog 业务验收未完成；P3 质量出口仍受独立 Gold Set、分层 Recall@K、获批真实模型和 M4 资源实测约束，P4 尚不放行。
+
+### 2026-09-28 · GREENFIELD Comment Research 历史快照（当时 PR #338 为 Draft）
 
 2026-09-28 最新远端核对：PR #338 仍 OPEN/Draft，head=`47de9bf04cd6aee0afa9beed9147635f1260265f`，base=`main@f54778562fbaaff56f482cb3d9fa46b0bbf51965`，`mergeable=MERGEABLE`、check 状态 `CLEAN`。修复了方法保存成功提示早于方法目录刷新完成的竞态；真实 Axum/隔离 PostgreSQL 浏览器回归核对刷新后的选中 `policyRef` 等于 HTTP 201 回执且不同于原方法。精确 head Actions [36394260704](https://github.com/Himog0921/linggan-intelligence/actions/runs/36394260704) 全绿：compile、unit、隔离 PostgreSQL proofs、frontend behavior tests 均通过；push-only `integration-source-export` 按条件跳过。
 

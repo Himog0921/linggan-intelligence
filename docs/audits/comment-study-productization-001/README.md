@@ -1,7 +1,7 @@
 # 评论研究产品化 · 来源和验收账本
 
 > 状态: 权威当前
-> 最后核对: 2026-09-28
+> 最后核对: 2026-09-30
 > 适用范围: COMMENT-STUDY-PRODUCTIZATION-001
 > 事实来源: 用户提供的手册v1.0与本分支的实际提交
 > 冲突时以谁为准: 实际执行证据与对应版本合同
@@ -13,7 +13,17 @@
 - [P1前序回看](p1-read-counts.md)：批次计数、schema-phase候选、清洗缓存、评论目录/详情/历史和各次验证边界。
 - [P1作品目录与共享标题](p1-work-catalog.md)：`/works` 后端、Evidence标题复用、迁移编号对齐，以及隔离PG/合成浏览器回执。
 
-## 当前剩余工作：严格沿用原 P0–P8
+## 2026-09-30 · 正式验收核验
+
+本节是当前结论；下方 2026-09-28 表格及逐次增量记录保留为当时快照。GitHub 已确认 #338 于 09-28、#350 于 09-29、[#351](https://github.com/Himog0921/linggan-intelligence/pull/351) 于 09-30 合并；远端 `main@c6cf2d9ce247101850f20e189d9286a5e6faf3ef` 包含 #351 的 P2 完整性修复。#351 最终 head `fd15b056` 的 [exact-head CI](https://github.com/Himog0921/linggan-intelligence/actions/runs/36658996689) 中 compile、unit、隔离 PostgreSQL 和前端行为步骤均通过，source export 按工作流条件跳过。合并前的本地 API 单测 297/297、合成浏览器、项目治理与 UI 规范检查通过；独立代码复核无阻断。
+
+**机读台账仍为 5 `PASS`（T23–T26、T43）、49 `NOT_RUN`**。核对 `acceptance-status.json`：T01–T54 连续且无重复，五项 PASS 均有提交/测试/CI 证据，NOT_RUN 的证据字段均为空。#351 没有提供新的完整 T 编号验收回执，因此不凭合并、测试总数或相近用例批量改写机读状态。当前隔离测试已证明多项子场景，例如 T01 的 688/100 选择、T11–T14 的幂等与并发、T27–T28 的控制边界和 T46 的部分请求竞态；它们不等于各项手册要求的完整场景及业务验收。T44 的既有计数反例仅为 6 个目标，不能代替要求的 300 目标/多作品/全量翻页。
+
+**T06 存在合同冲突，保持 `NOT_RUN` 并待版本裁定。** 当前隔离 PostgreSQL 用例 `source_gate_keeps_unknown_comment_authors_but_excludes_creator_and_unknown_work` 明确让未知评论作者进入 `StudySource`；09-28 的 AC043 实施回执也记录未知作者可以形成 Target/Signal，但不能充当新 Problem 的独立已知作者。现行 T06 文本和 `comment-research-rebuild-001.md` 则要求未知作者原声可见、不能作为研究目标。不能把代码当前行为写成 T06 PASS，也不能未经决定把 T06 改成另一套验收标准。`python3 scripts/verify-comment-study-productization-docs.py` 仍因八份 approved-v1 文档 SHA 不符而失败，并报告 `businessAcceptance=NOT_RUN`；版本冲突需显式裁定。
+
+运行层单独计证：09-30 核对本机干净 `runtime-main@bbc33f8c`、`:3000/health` ready；它包含此前 #338/#350 及结果导航修复，但 **尚未包含 #351 merge commit**。本次没有部署、共享数据库写入、真实 provider 调用或 Mog 对 #351 的页面/数字验收。P2 代码可在 main 审查，整体业务验收仍未收口；P3 质量出口仍需独立 Gold Set、分层 Recall@K、获批真实语义/HTTP 路径与 M4 资源实测，未达出口前不放行 P4。
+
+## 2026-09-28 剩余工作快照：严格沿用原 P0–P8
 
 本表是 2026-09-28 的状态快照。PR #338 仍 OPEN/Draft；head=`47de9bf04cd6aee0afa9beed9147635f1260265f`，base=`main@f54778562fbaaff56f482cb3d9fa46b0bbf51965`，mergeState=CLEAN。精确 head Actions run [36394260704](https://github.com/Himog0921/linggan-intelligence/actions/runs/36394260704) 全绿：compile、unit、隔离 PostgreSQL proofs、frontend behavior tests 均通过；push-only `integration-source-export` 按条件跳过。该修复让 UI 等待 `/policies` 刷新，并核对所选 `policyRef` 与 HTTP 201 回执相同且不同于原方法。修复后的完整本地 disposable suite：Intelligence/PostgreSQL 67/67、Problem rebuild 48/48、Axum/PostgreSQL 10/10、worker SIGTERM 1/1、SIGKILL/restart 1/1，synthetic Playwright 通过。`origin/main` 与 #338 base 为 `f54778562fbaaff56f482cb3d9fa46b0bbf51965`，`:3000/health` 为 ready。PR #338 自身未合并；#323–#327、#329、#335、#336 是相关的独立合入 PR，#347 是 Collection 改动。main/runtime 上有相关能力不等于 #338 独有增量已合并。共享 migration、真实 provider、业务验收与部署仍独立计证；测试数量不折算阶段百分比.
 
