@@ -70,6 +70,7 @@ pub const COLLECTION_RUNTIME_REQUIREMENTS: RuntimeRequirements = RuntimeRequirem
         "0036_monitor_scheduling_clarity",
         "0097_collection_execution_input_eligibility",
         "0098_scheduler_tick_steps_and_readiness",
+        "0113_creator_patrol_detail_follow",
     ],
     tables: &[
         "collection_scheduler_run",

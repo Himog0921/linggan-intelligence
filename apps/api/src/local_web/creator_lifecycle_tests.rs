@@ -6,6 +6,82 @@ use axum::{
 use linggan_storage_postgres::testing::isolated_proof_schema;
 use tower::ServiceExt;
 
+#[test]
+fn creator_archive_errors_do_not_report_database_failures_as_duplicate_work() {
+    assert_eq!(
+        creator_archive_database_kind(&sqlx::Error::RowNotFound),
+        "database_row_not_found"
+    );
+    assert_eq!(
+        creator_archive_database_kind(&sqlx::Error::PoolTimedOut),
+        "database_pool_timeout"
+    );
+    let database =
+        RequestLeaseError::Acquisition(AcquisitionChainError::Database(sqlx::Error::RowNotFound));
+    assert_eq!(
+        creator_archive_error_receipt(&database),
+        "archive_request_failed"
+    );
+    assert_eq!(
+        creator_archive_error_receipt(&RequestLeaseError::Lease(LeaseError::Database(
+            sqlx::Error::PoolTimedOut,
+        ))),
+        "archive_request_failed"
+    );
+    assert_eq!(
+        creator_archive_error_receipt(&RequestLeaseError::Lease(LeaseError::SchemaUnavailable)),
+        "archive_request_failed"
+    );
+    assert_eq!(
+        creator_archive_error_receipt(&RequestLeaseError::Lease(LeaseError::NoStation)),
+        "archive_lease_failed"
+    );
+    assert_eq!(
+        creator_archive_error_receipt(&RequestLeaseError::Acquisition(
+            AcquisitionChainError::InvalidMaterialTargets,
+        )),
+        "archive_request_failed"
+    );
+    assert_eq!(
+        creator_archive_error_receipt(&RequestLeaseError::Acquisition(
+            AcquisitionChainError::ProgressiveArchivePurposeMismatch,
+        )),
+        "archive_purpose_mismatch"
+    );
+    assert_eq!(
+        creator_archive_error_receipt(&RequestLeaseError::Acquisition(
+            AcquisitionChainError::ProgressiveArchiveNotReady {
+                reason: "detail_batch_in_flight",
+            },
+        )),
+        "archive_in_progress"
+    );
+    assert_eq!(
+        creator_archive_error_receipt(&RequestLeaseError::Acquisition(
+            AcquisitionChainError::ProgressiveArchiveNotReady {
+                reason: "archive_baseline_complete",
+            },
+        )),
+        "archive_baseline_complete"
+    );
+    assert_eq!(
+        creator_archive_error_receipt(&RequestLeaseError::Acquisition(
+            AcquisitionChainError::ProgressiveArchiveNotReady {
+                reason: "detail_gap_not_schedulable",
+            },
+        )),
+        "archive_gap_not_schedulable"
+    );
+    assert_eq!(
+        creator_archive_error_receipt(&RequestLeaseError::Acquisition(
+            AcquisitionChainError::TargetNotRequestable {
+                state: "monitoring".to_owned(),
+            },
+        )),
+        "archive_not_requestable"
+    );
+}
+
 #[tokio::test]
 async fn lifecycle_api_keeps_a_closed_query_contract() {
     let invalid_enum = app()

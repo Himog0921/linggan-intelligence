@@ -24,6 +24,8 @@ const MAX_ATTACHED_COMMENTS = 30;
 
 function text(value = '') { return String(value || '').trim(); }
 function nonNegative(value) {
+  if (typeof value !== 'number' && typeof value !== 'string') return null;
+  if (typeof value === 'string' && !value.trim()) return null;
   const number = Number(value);
   return Number.isFinite(number) && number >= 0 ? Math.floor(number) : null;
 }
@@ -180,6 +182,7 @@ function expectedCommentCount({ expectedCommentCount = null, publicCommentCount 
 }
 
 export function publicCommentCountFromXhsNote(note = {}) {
+  if (note?.publicCommentCountKnown === false) return null;
   const direct = nonNegative(note?.publicCommentCount);
   if (direct !== null) return direct;
   return note?.publicCommentCountKnown === true ? nonNegative(note.comments ?? note.commentCount ?? note.commentNum) : null;

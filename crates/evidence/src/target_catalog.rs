@@ -33,6 +33,10 @@ pub struct CatalogWork {
     pub match_position: Option<i64>,
     pub published_at: Option<String>,
     pub source: CatalogSource,
+    /// The accepted discovery card's raw type marker. Historical `normal` may have been
+    /// supplied by the browser collector's fallback, so this is a card label, not a
+    /// canonical claim about the platform work.
+    pub recorded_kind: Option<&'static str>,
     pub detail_state: CatalogDetailState,
     /// 这一篇此刻「能不能取详情、不能时欠的是什么」——`0097` 台账的唯一读取口。
     ///
@@ -209,7 +213,8 @@ async fn read_catalog(
         "WITH discoveries AS ( \
              SELECT finding.content_public_ref,content.content_external_id,work_order.lane,package.accepted_at, \
                     finding.title,finding.title_state,finding.creator_display_name,finding.creator_state, \
-                    finding.result_position,finding.published_at_source_text \
+                    finding.result_position,finding.published_at_source_text, \
+                    package.payload #>> ARRAY['records',finding.record_ordinal::text,'payload','type'] AS recorded_type \
              FROM collection_work_order work_order \
              JOIN collection_work_order_lease lease USING(work_order_ref) \
              JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
@@ -259,6 +264,7 @@ async fn read_catalog(
                 linggan_human_moment(first_discovery.published_at_source_text) \
                     AS published_at_source_text, \
                 first_discovery.lane, \
+                first_discovery.recorded_type, \
                 detail.content_public_ref AS qualified_detail_ref, \
                 detail.title AS detail_title, \
                 linggan_human_moment(detail.published_at) AS detail_published_at, \
@@ -323,6 +329,11 @@ async fn read_catalog(
                         CatalogSource::PatrolDiscovery
                     } else {
                         CatalogSource::InitialArchive
+                    },
+                    recorded_kind: match row.get::<Option<String>, _>("recorded_type").as_deref() {
+                        Some("video") => Some("视频"),
+                        Some("normal") => Some("图文"),
+                        _ => None,
                     },
                     detail_state,
                     // 台账里的当前状态在 `read_creator_directory` / `read_keyword_hits` 里贴上：

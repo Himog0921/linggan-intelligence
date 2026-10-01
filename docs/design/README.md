@@ -98,6 +98,7 @@
 | [changes/keyword-archive-002-ui-change-manifest.md](changes/keyword-archive-002-ui-change-manifest.md) | KEYWORD-ARCHIVE-002：关键词建档入口可达性、两段路由与回执层级 | 交付分支实施中；Issue #286 |
 | [changes/runtime-station-v7-2-001-ui-change-manifest.md](changes/runtime-station-v7-2-001-ui-change-manifest.md) | RUNTIME-STATION-V7-2-001：执行工位内容区按 v7.2 稿复刻、运行概览抽屉与稿中无源数值的替代 | 交付分支实施完成、验证通过；未推送未部署 |
 | [changes/collection-runtime-state-20260929-ui-change-manifest.md](changes/collection-runtime-state-20260929-ui-change-manifest.md) | COLLECTION-RUNTIME-STATE-20260929：全局暂停与排队读数的真实状态 | 候选实现；待集成与页面验收 |
+| [changes/creator-gap-request-20260929-ui-change-manifest.md](changes/creator-gap-request-20260929-ui-change-manifest.md) | CREATOR-GAP-REQUEST-20260929：缺详情/评论补采、巡查自动跟进与真实失败回执 | 活跃计划；候选实现未集成 |
 | [acceptance/keyword-archive-002-acceptance.md](acceptance/keyword-archive-002-acceptance.md) | ACC-KEYWORD-ARCHIVE-002：建档入口与回执真实性的分层验收 | 交付分支验收记录；Issue #286 |
 | [acceptance/collection-five-page-v4-ui-001-visual-acceptance.md](acceptance/collection-five-page-v4-ui-001-visual-acceptance.md) | ACC-COLLECTION-FIVE-PAGE-V4-UI-001：五页结构、隔离 PostgreSQL、1440×900 浏览器互动与未部署边界 | 一次性报告 |
 | [acceptance/design-009-runtime-capacity-surface-acceptance.md](acceptance/design-009-runtime-capacity-surface-acceptance.md) | ACC-RUNTIME-001：产能判定、状态诚实性与视觉的验收记录 | 一次性报告 |

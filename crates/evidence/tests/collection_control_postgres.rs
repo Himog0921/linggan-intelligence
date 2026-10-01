@@ -159,6 +159,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0101_collection_command_reason_vocabulary.sql"),
     "\n",
     include_str!("../../../database/migrations/0103_domain_membership_and_usage.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0113_creator_patrol_detail_follow.sql"),
 );
 
 #[tokio::test]
@@ -2487,6 +2489,7 @@ fn fixed_rule(ranking_key: Option<&str>) -> MonitorRuleDraft {
     MonitorRuleDraft {
         mode: MonitorRuleMode::Fixed,
         automatic_enabled: true,
+        creator_follow_details: false,
         run_on_weekdays: true,
         run_on_weekends: true,
         all_day: true,

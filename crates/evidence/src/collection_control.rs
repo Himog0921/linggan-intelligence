@@ -1539,6 +1539,8 @@ impl MonitorCommandKind {
 pub struct MonitorRuleDraft {
     pub mode: MonitorRuleMode,
     pub automatic_enabled: bool,
+    #[serde(default)]
+    pub creator_follow_details: bool,
     pub run_on_weekdays: bool,
     pub run_on_weekends: bool,
     pub all_day: bool,
@@ -2600,6 +2602,9 @@ fn validate_monitor_command(
     if draft.surface_key.trim().is_empty() || draft.task_contract_version.trim().is_empty() {
         return Err("invalid_mode");
     }
+    if draft.creator_follow_details && draft.surface_key.trim() != "creator_profile" {
+        return Err("invalid_mode");
+    }
     // The first delivery deliberately exposes one unambiguous cadence: fixed
     // interval anchored at enable/resume. Weekday, window, fallback and dynamic
     // combinations used to form a second scheduler hidden behind the same rule.
@@ -2737,12 +2742,12 @@ async fn insert_monitor_rule_revision(
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         "INSERT INTO collection_monitor_rule_revision \
-             (rule_revision_ref,target_ref,rule_ref,revision,mode,automatic_enabled,timezone, \
+             (rule_revision_ref,target_ref,rule_ref,revision,mode,automatic_enabled,creator_follow_details,timezone, \
               run_on_weekdays,run_on_weekends,all_day,window_start_minute,window_end_minute, \
               fixed_interval_seconds,fallback_interval_seconds,surface_key,ranking_key, \
               scroll_rounds,top_by_likes,published_within_days, \
               task_contract_version,rule_payload_digest,created_by) \
-         VALUES ($1,$2,$21,$3,$4,$5,'Asia/Shanghai',$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)",
+         VALUES ($1,$2,$21,$3,$4,$5,$22,'Asia/Shanghai',$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)",
     )
     .bind(rule_revision_ref)
     .bind(target_ref)
@@ -2771,6 +2776,7 @@ async fn insert_monitor_rule_revision(
     .bind(payload_digest)
     .bind(actor.as_str())
     .bind(rule_ref)
+    .bind(draft.creator_follow_details)
     .execute(&mut **transaction)
     .await?;
     Ok(())
@@ -2789,14 +2795,14 @@ async fn copy_monitor_rule_revision(
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         "INSERT INTO collection_monitor_rule_revision \
-             (rule_revision_ref,target_ref,rule_ref,revision,mode,automatic_enabled,timezone, \
+             (rule_revision_ref,target_ref,rule_ref,revision,mode,automatic_enabled,creator_follow_details,timezone, \
               run_on_weekdays,run_on_weekends,all_day,window_start_minute,window_end_minute, \
               fixed_interval_seconds,fallback_interval_seconds,surface_key,ranking_key, \
               scroll_rounds,top_by_likes,published_within_days, \
               task_contract_version,rule_payload_digest,created_by) \
          -- 暂停／恢复复制的是**同一条规则**的上一个版本，规则身份跟着原样带过来：
          -- 换个规则身份等于把这条口径的历史切断，之后没人说得清它改过几次。
-         SELECT $3,$1,rule_ref,$4,COALESCE($5,mode),$6,timezone,run_on_weekdays,run_on_weekends, \
+         SELECT $3,$1,rule_ref,$4,COALESCE($5,mode),$6,creator_follow_details,timezone,run_on_weekdays,run_on_weekends, \
                 all_day,window_start_minute,window_end_minute, \
                 CASE WHEN $5='manual_only' THEN NULL ELSE fixed_interval_seconds END, \
                 fallback_interval_seconds,surface_key,ranking_key, \

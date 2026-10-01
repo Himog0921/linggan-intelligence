@@ -6,11 +6,59 @@ import { commentTaskInstruction } from '../src/linggan/contentRuntimeAdapter.js'
 import {
   buildXhsBatchCommentsProgressPatch,
   buildXhsBatchCommentsRunPatch,
+  buildXhsAttachedCommentResult,
+  publicCommentCountFromXhsNote,
 } from '../src/linggan/localExecutionSupport.js';
+import { BatchNoteController } from '../src/platforms/xhs/batchController.js';
 import { buildDiscoveryPlan } from '../src/platforms/xhs/noteCollector.js';
 import { buildXhsDetailCaptureReceipt } from '../src/platforms/xhs/captureReceipt.js';
 import { createCommentTaskController } from '../src/content/commentTaskController.js';
 import { requireBatchTargetCount } from '../src/shared/batchLimits.js';
+
+test('unknown public comment counts stay unknown through the batch detail decision', async () => {
+  for (const value of [null, '', '  ', false]) {
+    assert.equal(publicCommentCountFromXhsNote({ publicCommentCount: value }), null);
+  }
+  assert.equal(publicCommentCountFromXhsNote({
+    publicCommentCount: 0, publicCommentCountKnown: false, comments: null,
+  }), null);
+  assert.equal(publicCommentCountFromXhsNote({
+    publicCommentCount: 0, publicCommentCountKnown: true,
+  }), 0);
+  const attached = buildXhsAttachedCommentResult({
+    noteId: 'note_unknown',
+    collectionReceipt: {
+      pageCommentCount: null,
+      expectedCount: null,
+      uniqueCollectedCount: 0,
+      state: 'partial',
+    },
+  });
+  assert.equal(attached.publicCommentCount, null);
+  assert.equal(attached.expectedCommentCount, null);
+
+  const controller = Object.create(BatchNoteController.prototype);
+  Object.assign(controller, {
+    _includeComments: true,
+    _commentLimit: 30,
+    isRunning: true,
+    currentIndex: 1,
+    noteList: [{ noteId: 'note_unknown' }],
+    commentResults: [],
+  });
+  let enteredCollection = false;
+  controller._emitProgress = () => {
+    enteredCollection = true;
+    throw new Error('stop_batch_probe_before_browser_read');
+  };
+  const result = await controller._collectAttachedComments(
+    { noteId: 'note_unknown' },
+    '',
+    { publicCommentCount: null, publicCommentCountKnown: false, comments: null },
+  );
+  assert.equal(enteredCollection, true, 'unknown must not take the known-zero shortcut');
+  assert.equal(Object.hasOwn(result, 'publicCommentCount'), false);
+});
 
 test('unlimited deep comments use an explicit all-public execution target instead of invalid zero quota', () => {
   assert.deepEqual(commentTaskInstruction('note_1', 0), {

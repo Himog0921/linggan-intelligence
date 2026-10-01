@@ -49,6 +49,25 @@ test('detail receipt treats an explicit 0 / 0 comment page as a complete empty w
   });
 });
 
+test('unknown public comment count stays unknown instead of becoming a complete zero window', () => {
+  for (const value of [null, undefined, '', ' ', false]) {
+    const receipt = buildXhsCommentCollectionReceipt({
+      noteId: 'unknown_count', maxTotal: 30, publicCommentCount: value,
+      actual: 0, stopReason: 'no_progress',
+    });
+    assert.equal(receipt.pageCommentCount, null);
+    assert.equal(receipt.expectedCount, 30);
+    assert.equal(receipt.state, XHS_COMMENT_COLLECTION_STATE.PARTIAL);
+  }
+
+  const detail = buildXhsDetailCaptureReceipt({
+    note: { noteId: 'unknown_count', publicCommentCountKnown: false, publicCommentCount: 0 },
+    commentResult: { total: 0, stopReason: 'no_progress' },
+  });
+  assert.equal(detail.comments.pageCommentCount, null);
+  assert.equal(detail.comments.state, XHS_COMMENT_COLLECTION_STATE.PARTIAL);
+});
+
 test('detail receipt reports a short nonempty collection without fabricating completion', () => {
   const receipt = buildXhsDetailCaptureReceipt({
     note: { noteId: 'note_2', publicCommentCount: 80, publicCommentCountKnown: true },

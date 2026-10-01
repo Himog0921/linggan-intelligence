@@ -91,6 +91,34 @@ test('parseXhsInteractCount stays unknown for a key absent from a hydrated inter
   assert.equal(parseXhsInteractCount({ likedCount: '84' }, ['shareCount', 'shares']), null);
 });
 
+test('invalid XHS interaction values never become known zero or prove hydration', () => {
+  for (const value of ['  ', false, true, -1, 'abc', '?', {}, { count: null }]) {
+    assert.equal(parseXhsInteractCount({ likedCount: '84', commentCount: value },
+      ['commentCount', 'comments']), null);
+    assert.equal(parseXhsInteractCount({ likedCount: value, commentCount: '' },
+      ['commentCount', 'comments']), null);
+  }
+  assert.equal(parseXhsInteractCount(
+    { likedCount: '84', commentCount: '', comments: '43' },
+    ['commentCount', 'comments'],
+  ), 43, 'a valid alias outranks the empty-string zero representation');
+});
+
+test('detail completeness waits for valid hydrated interaction values', () => {
+  const note = {
+    noteId: 'note_unhydrated_stats',
+    title: '已取得标题',
+    imageList: [{ urlDefault: 'https://img.example.com/cover.jpg' }],
+    interactInfo: { likedCount: '', collectedCount: '', commentCount: '' },
+  };
+  assert.equal(classifyXhsNoteDetail(note, note.noteId), 'partial_stats');
+  note.interactInfo.likedCount = '84';
+  assert.equal(classifyXhsNoteDetail(note, note.noteId), 'complete',
+    'hydrated empty collect/comment fields are known zero');
+  note.interactInfo.commentCount = false;
+  assert.equal(classifyXhsNoteDetail(note, note.noteId), 'partial_stats');
+});
+
 test('isCollectedNoteUsable treats aliased xhs metrics as complete stats', () => {
   assert.equal(isCollectedNoteUsable({
     noteId: 'note_alias_metrics',

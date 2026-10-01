@@ -12,6 +12,12 @@ PR #338、#350 与 [#351](https://github.com/Himog0921/linggan-intelligence/pull
 
 [正式验收账本](audits/comment-study-productization-001/README.md)的 2026-09-30 逐项核验确认机读状态仍为 T23–T26、T43 共 **5 PASS**，其余 **49 NOT_RUN**；隔离测试子场景不自动提升完整 T 编号。T06 旧文字要求未知评论作者不进入研究，而现有 AC043 代码与隔离测试允许其形成 Target/Signal、仅禁止作为新 Problem 的独立已知作者，待合同版本裁定。approved-v1 文档校验仍有八份 SHA 不符。P2 代码已合并，真实页面/数字、真实模型路径与 Mog 业务验收未完成；P3 质量出口仍受独立 Gold Set、分层 Recall@K、获批真实模型和 M4 资源实测约束，P4 尚不放行。
 
+### CREATOR-GAP-REQUEST-20260929（交付分支候选；未进入运行）
+
+南瓜哒哒“补采缺口”失败的只读复算显示：9 篇缺合格详情的作品被 Domain usage 多行 join 展开为 23 行，`ensure_material_targets_belong_to_platform` 比较唯一内容行数与含重复的候选长度后返回 `InvalidMaterialTargets`，事务回滚。独立分支 `codex/creator-gap-error-20260929` 已用存在性查询消除重复，并把 creator 请求的数据库/合同失败从“当前不能重复提交”改为可追踪的真实失败提示；隔离 PostgreSQL 全套与 API/UI 回归通过。分支已推送供 PR 审查；本修复尚未合并、部署或触发真实补采，常驻 `:3000` 和共享库未改变。
+
+Mog 已明确“补采缺口”包括未取得完整详情、标题、正文、媒体、评论等，并确认差评论时可重新打开一次详情页，采集最多 30 条评论。新增候选将可证实的评论缺口纳入人工补采；已接纳巡查新增且缺详情的作品，仅在创作者规则显式开启并另有精确用途授权时自动跟进，每次最多 3 篇，默认关闭。新插件不再把未知平台评论数误写成 0，作品目录可按已接纳发现卡的原始类型标记显示视频/图文/未标记分布。视频正文 `UNKNOWN` 和旧原始 `normal` 类型缺少足够来源，不能单凭它们扩张补采或声称图文/视频类型已入 canonical 材料。分层边界见[变更清单](design/changes/creator-gap-request-20260929-ui-change-manifest.md)，验证状态见[进度记录](progress/2026-09.md)。
+
 ### 2026-10-01 · 模型密钥单路径修复已合并并部署
 
 9 月 29 日 18:18、9 月 30 日 10:26 和 12:18 三个 Comment Study Run 大量目标失败；模型回执均为 `model_secret_unavailable`、`callStarted=false`、计费 token 0。旧 Keychain 条目可在用户一次授权后交互式读取，但常驻 worker 不能稳定读取；具体底层错误类别仍未知。[MODEL-SECRET-DEV-001](plans/active/model-secret-dev-001.md) 的 [PR #356](https://github.com/Himog0921/linggan-intelligence/pull/356) 已合并（merge commit `f05b0655`），其 [exact-head CI](https://github.com/Himog0921/linggan-intelligence/actions/runs/36686765817) 和独立代码审查通过。

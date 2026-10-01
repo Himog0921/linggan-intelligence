@@ -9,17 +9,14 @@
 //! `authorExternalId` 反查，渐进补齐的详情会全部丢失归属。
 
 use crate::archive_ledger::directory_works_sql;
-use crate::directory_boundary::{directory_proven_sql, surface_scan_complete_sql};
+use crate::directory_boundary::{directory_proven_sql, historical_directory_scan_qualified_sql, surface_scan_complete_sql};
 use crate::qualified_detail::qualified_detail_missing_sql;
 use linggan_storage_postgres::Database;
 use std::collections::HashMap;
 use uuid::Uuid;
 
-/// 当前目录基线能否作为「作品目录」和「详情进度」的分母。
-///
-/// 旧的发现包仍是不可变历史，但只有当前根工单以 `surface_ended` 或完整的 200 篇配额
-/// 证明目录边界后，才可以把它呈现在观察台账里。否则 31 条旧记录会被误当成一个已建立
-/// 的作品目录，进而把「继续补详情」伪装成正确动作。
+/// 当前主页扫描是否证明了基线边界。已接纳的单篇作品可以先登记和补采，
+/// 但它们的数量不能代替 `surface_ended` 或完整配额来证明主页目录已经建成。
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
 pub enum ArchiveDirectoryBaseline {
     #[default]
@@ -37,11 +34,11 @@ pub enum ArchiveDirectoryBaseline {
 /// 每一层都可能是「没做过」，那与「做了但一条都没拿到」不同，因此用计数而不是布尔。
 #[derive(Debug, Default, Clone)]
 pub struct ArchiveCompleteness {
-    /// 是否已经形成过一张受控 deep-archive Work Order。
+    /// 是否已经形成过创作者主页根建档 Work Order；逐篇材料补采不算。
     pub started: bool,
-    /// 是否有执行 Attempt 已经从这张目标自己的 deep-archive Lease Task 开始。
+    /// 是否有执行 Attempt 已经从这张目标自己的根建档 Lease Task 开始。
     pub attempted: bool,
-    /// 是否存在执行中的租约，或尚未领取、等待重试的既有建档任务。
+    /// 是否存在执行中的根建档租约，或尚未领取、等待重试的根建档任务。
     ///
     /// 这是「查看建档状态」的 durable 依据；不能用目标生命周期或一次按钮点击猜测在途状态。
     pub work_in_progress: bool,
@@ -310,20 +307,31 @@ pub async fn read_archive_completeness(
              JOIN collection_observation_target target \
                ON target.target_ref=ledger.target_ref \
              GROUP BY target.identity_key \
+         ), patrol_quarantined AS ( \
+             SELECT target.identity_key AS author_external_id,count(*) AS quarantined \
+             FROM ledger_registered_packages packages \
+             JOIN collection_observation_target target ON target.target_ref=packages.target_ref \
+             JOIN linggan_runtime_record_disposition disposition \
+               ON disposition.package_ref=packages.package_ref \
+             WHERE packages.lane='patrol' AND disposition.disposition='quarantined' \
+             GROUP BY target.identity_key \
          ) \
-         SELECT roots.author_external_id,coalesce(progress.started,false),coalesce(progress.attempted,false), \
+         SELECT target.identity_key AS author_external_id,coalesce(progress.started,false),coalesce(progress.attempted,false), \
                 coalesce(progress.work_in_progress,false),coalesce(totals.author_profile_captures,0), \
                 coalesce(ledger.works_listed,0),coalesce(ledger.details_captured,0), \
                 coalesce(ledger.retired_works,0),coalesce(ledger.pending_details,0), \
-                coalesce(totals.quarantined,0), \
+                coalesce(totals.quarantined,0)+coalesce(patrol_quarantined.quarantined,0), \
                 coalesce(blocked_details.blocked_details,0), \
                 directories.package_ref IS NOT NULL \
-         FROM active_roots roots \
-         LEFT JOIN record_totals totals USING(author_external_id) \
-         LEFT JOIN archive_progress progress USING(author_external_id) \
-         LEFT JOIN blocked_details USING(author_external_id) \
-         LEFT JOIN ledger_totals ledger USING(author_external_id) \
-         LEFT JOIN directory_packages directories USING(author_external_id)",
+         FROM collection_observation_target target \
+         LEFT JOIN active_roots roots ON roots.target_ref=target.target_ref \
+         LEFT JOIN record_totals totals ON totals.author_external_id=target.identity_key \
+         LEFT JOIN archive_progress progress ON progress.author_external_id=target.identity_key \
+         LEFT JOIN blocked_details ON blocked_details.author_external_id=target.identity_key \
+         LEFT JOIN ledger_totals ledger ON ledger.author_external_id=target.identity_key \
+         LEFT JOIN patrol_quarantined ON patrol_quarantined.author_external_id=target.identity_key \
+         LEFT JOIN directory_packages directories ON directories.author_external_id=target.identity_key \
+         WHERE target.platform=$1 AND target.target_kind='creator'",
         ),
     )
     .bind(platform)
@@ -363,6 +371,8 @@ pub async fn read_archive_completeness(
                     ArchiveDirectoryBaseline::Ready
                 } else if work_in_progress {
                     ArchiveDirectoryBaseline::Building
+                } else if !started {
+                    ArchiveDirectoryBaseline::NotStarted
                 } else {
                     ArchiveDirectoryBaseline::RebuildRequired
                 },
@@ -374,7 +384,7 @@ pub async fn read_archive_completeness(
     // erase an older target-scoped directory that has already been accepted.  Keep those
     // historical works visible when their details are complete; the UI can then say exactly
     // what is known instead of converting a real 41/41 archive into an empty “rebuild” row.
-    let historical_rows: Vec<(String, i64, i64)> = sqlx::query_as(
+    let historical_rows: Vec<(String, i64, i64, bool, bool)> = sqlx::query_as(concat!(
         "SELECT target.identity_key, \
                 count(DISTINCT finding.content_public_ref) FILTER ( \
                     WHERE package.package_kind='profile_discovery' \
@@ -383,12 +393,29 @@ pub async fn read_archive_completeness(
                 count(DISTINCT detail.content_public_ref) FILTER ( \
                     WHERE package.package_kind='content_detail' \
                       AND disposition.disposition <> 'quarantined' \
-                ) AS details_captured \
+                ) AS details_captured, \
+                coalesce(bool_or(", historical_directory_scan_qualified_sql!(), " \
+                  AND (task.task_spec->>'maximumQuota')::integer BETWEEN 1 AND 199 \
+                  AND work_order.work_order_ref=( \
+                    SELECT current_root.work_order_ref FROM collection_work_order current_root \
+                    WHERE current_root.target_ref=target.target_ref \
+                      AND current_root.lane='deep_archive' \
+                      AND current_root.stop_conditions #>> '{progressiveArchive,version}'='1' \
+                      AND current_root.stop_conditions #>> '{progressiveArchive,rootWorkOrderRef}' \
+                          =current_root.work_order_ref::text \
+                    ORDER BY current_root.created_at DESC,current_root.work_order_ref DESC LIMIT 1 \
+                  )),false) \
+                  AS legacy_smaller_quota, \
+                coalesce(bool_or(", historical_directory_scan_qualified_sql!(), "),false) \
+                  AS historical_scan_eligible \
          FROM collection_observation_target target \
          JOIN collection_work_order work_order USING(target_ref) \
          JOIN collection_work_order_lease lease USING(work_order_ref) \
          JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
          JOIN linggan_runtime_capture_package package ON package.task_id=lease_task.task_id \
+         JOIN linggan_runtime_task task ON task.task_id=package.task_id \
+         CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(package.coverage->'layers')='array' \
+           THEN package.coverage->'layers' ELSE '[]'::jsonb END) layer \
          JOIN linggan_runtime_record_disposition disposition ON disposition.package_ref=package.package_ref \
          LEFT JOIN linggan_material_discovery_finding finding \
            ON finding.package_ref=package.package_ref AND finding.record_ordinal=disposition.record_ordinal \
@@ -397,12 +424,15 @@ pub async fn read_archive_completeness(
          WHERE target.platform=$1 AND target.target_kind='creator' \
            AND work_order.lane='deep_archive' AND package.platform=$1 \
            AND disposition.disposition <> 'retained_uninterpreted' \
-         GROUP BY target.identity_key",
+         GROUP BY target.identity_key"),
     )
     .bind(platform)
     .fetch_all(database.pool())
     .await?;
-    for (author_external_id, works_listed, details_captured) in historical_rows {
+    for (author_external_id, works_listed, details_captured, legacy_smaller_quota, historical_scan_eligible) in historical_rows {
+        if !historical_scan_eligible {
+            continue;
+        }
         let archive = totals.entry(author_external_id).or_default();
         archive.started = true;
         // A current progressive root takes precedence over any earlier accepted rows.  Until
@@ -410,7 +440,8 @@ pub async fn read_archive_completeness(
         // into the visible denominator.  The historical fallback is only for targets that do
         // not have an active current root (the legacy South-Pumpkin case).
         if !archive.work_in_progress
-            && archive.directory_baseline != ArchiveDirectoryBaseline::Ready
+            && (archive.directory_baseline == ArchiveDirectoryBaseline::NotStarted
+                || legacy_smaller_quota)
             && works_listed > 0
             && details_captured >= works_listed
         {
@@ -420,9 +451,9 @@ pub async fn read_archive_completeness(
         }
     }
 
-    // Admission deduplicates every target-scoped deep-archive WorkOrder, including jobs created
-    // before progressive markers existed.  Read the same durable pending state here so the UI
-    // never offers “建立档案” and then immediately reports that the identical job already exists.
+    // A pending material-scoped follow-up is not a homepage baseline in progress. Progressive
+    // root children are already covered by `archive_progress`; this fallback recognizes legacy
+    // root WorkOrders without a progressive marker.
     let pending_rows: Vec<String> = sqlx::query_scalar(
         "SELECT DISTINCT target.identity_key \
          FROM collection_observation_target target \
@@ -431,6 +462,8 @@ pub async fn read_archive_completeness(
          LEFT JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
          WHERE target.platform=$1 AND target.target_kind='creator' \
            AND work_order.lane='deep_archive' \
+           AND NOT EXISTS (SELECT 1 FROM collection_work_order_material_target material_scope \
+                           WHERE material_scope.work_order_ref=work_order.work_order_ref) \
            AND (work_order.queue_state='queued' \
                 OR (lease_task.execution_state IN ('pending','in_progress') \
                     AND lease.released_at IS NULL AND lease.expires_at>scope_001_now()))",

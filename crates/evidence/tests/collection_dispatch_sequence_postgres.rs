@@ -186,6 +186,7 @@ async fn creator_rule_queues_once_without_a_baseline_or_a_preassigned_station() 
             draft: Some(MonitorRuleDraft {
                 mode: MonitorRuleMode::Fixed,
                 automatic_enabled: true,
+                creator_follow_details: false,
                 run_on_weekdays: true,
                 run_on_weekends: true,
                 all_day: true,
@@ -4493,6 +4494,7 @@ async fn save_patrol_rule(
             draft: Some(MonitorRuleDraft {
                 mode: MonitorRuleMode::Fixed,
                 automatic_enabled: true,
+                creator_follow_details: false,
                 run_on_weekdays: true,
                 run_on_weekends: true,
                 all_day: true,

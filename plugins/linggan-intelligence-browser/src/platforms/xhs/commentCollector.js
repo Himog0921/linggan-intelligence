@@ -467,7 +467,11 @@ async function collectCommentsViaApi({
   let retainedSnapshot = null;
   let freshAttemptStarted = false;
   let freshAttemptReady = false;
-  let observedPublicCommentCount = Number.isFinite(Number(publicCommentCount))
+  let observedPublicCommentCount = publicCommentCount !== null
+    && publicCommentCount !== undefined
+    && (typeof publicCommentCount === 'number' || typeof publicCommentCount === 'string')
+    && String(publicCommentCount).trim() !== ''
+    && Number.isFinite(Number(publicCommentCount))
     ? Math.max(0, Math.floor(Number(publicCommentCount)))
     : null;
   const publishCountedProgress = (payload) => {

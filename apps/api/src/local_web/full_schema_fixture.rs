@@ -204,6 +204,8 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../../database/migrations/0106_reply_disposition_quota_requalification.sql"),
     "\n",
+    include_str!("../../../../database/migrations/0113_creator_patrol_detail_follow.sql"),
+    "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES\n",
     "('0001_scope_001_capture_evidence', 'a0deb8d5bf6cbd3bc0b8343691167fe02170abe7469f7ba270017dada442cd98'),\n",
     "('0002_local_001_discovery', '26ae29e0e00bddd2804aebc5576e8868936af746858e61cc24769579333ecdbe'),\n",
@@ -269,5 +271,6 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "('0103_domain_membership_and_usage', '4345fbd8ed530f5a5184fb9a44d42b32e4702e150ec3301896750a2b7eb80001'), ",
     "('0104_unified_domain_schema_cleanup', '3a75ffdc34bf60cb69f8a9b8d04cfa3cd6c4207522083a122aeedbb9ac1f3788'), ",
     "('0105_reply_disposition_requalification', 'bef9c6cee526068148daddbaeb863c03a5a232bce74bbdf9604f32a53338ec38'), ",
-    "('0106_reply_disposition_quota_requalification', '184f91bff325cf335424df212874a53a621169fa388d6b29290c70a5260e0773');\n",
+    "('0106_reply_disposition_quota_requalification', '184f91bff325cf335424df212874a53a621169fa388d6b29290c70a5260e0773'),\n",
+    "('0113_creator_patrol_detail_follow', '8b4aa5eb9a78ab904ad949bbfff510de3cf5a6d9b66e29d8f382c91941914715');\n",
 );

@@ -68,6 +68,7 @@ pub struct ActiveMonitorRule {
     pub rule_revision_ref: Uuid,
     pub revision: i32,
     pub automatic_enabled: bool,
+    pub creator_follow_details: bool,
     pub fixed_interval_seconds: Option<i32>,
     pub fallback_interval_seconds: i32,
     pub surface_key: String,
@@ -98,6 +99,7 @@ pub struct MonitorRuleFormState {
     pub expected_revision: i32,
     pub idempotency_key: Uuid,
     pub automatic_enabled: bool,
+    pub creator_follow_details: bool,
     pub fixed_interval_seconds: String,
     pub surface_key: String,
     pub ranking_key: String,
@@ -151,6 +153,7 @@ impl MonitorRuleFormState {
                 expected_revision: 0,
                 idempotency_key: Uuid::new_v4(),
                 automatic_enabled: false,
+                creator_follow_details: false,
                 fixed_interval_seconds: DEFAULT_INTERVAL_SECONDS.to_string(),
                 surface_key: default_surface.to_owned(),
                 ranking_key: default_ranking.to_owned(),
@@ -168,6 +171,7 @@ impl MonitorRuleFormState {
             // in the immutable rule table, but opening it must not silently
             // retain a second scheduling language through hidden inputs.
             automatic_enabled: rule.automatic_enabled,
+            creator_follow_details: rule.creator_follow_details,
             fixed_interval_seconds: rule
                 .fixed_interval_seconds
                 .unwrap_or(rule.fallback_interval_seconds)
@@ -315,7 +319,7 @@ async fn read_active_rule(
     rule_ref: Uuid,
 ) -> Result<Option<ActiveMonitorRule>, sqlx::Error> {
     let row = sqlx::query(
-        "SELECT rule_revision_ref,revision,automatic_enabled,fixed_interval_seconds, \
+        "SELECT rule_revision_ref,revision,automatic_enabled,creator_follow_details,fixed_interval_seconds, \
                 fallback_interval_seconds,surface_key,ranking_key, \
                 scroll_rounds,top_by_likes,published_within_days, \
                 task_contract_version,created_at::text AS created_at \
@@ -331,6 +335,7 @@ async fn read_active_rule(
             rule_revision_ref: row.try_get("rule_revision_ref")?,
             revision: row.try_get("revision")?,
             automatic_enabled: row.try_get("automatic_enabled")?,
+            creator_follow_details: row.try_get("creator_follow_details")?,
             fixed_interval_seconds: row.try_get("fixed_interval_seconds")?,
             fallback_interval_seconds: row.try_get("fallback_interval_seconds")?,
             surface_key: row.try_get("surface_key")?,
@@ -446,6 +451,7 @@ pub fn render_monitor_rule_modal(
                     <input type="checkbox" name="automatic_enabled" value="true"{automatic_checked}{disabled_attr}>
                     <span><b>按规则自动观察</b><small>关闭后不再产生未来定时工单；人工观察仍可申请。</small></span>
                   </label>
+                  {creator_follow_option}
                   <div class="c-rule-grid">
                     {interval}
                   </div>
@@ -494,6 +500,14 @@ pub fn render_monitor_rule_modal(
         dismissed = dismissed_markup(disabled),
         errors = errors_markup(error),
         automatic_checked = checked(form.automatic_enabled),
+        creator_follow_option = if panel.target_kind == "creator" {
+            format!(r#"<label class="c-rule-switch">
+                    <input type="checkbox" name="creator_follow_details" value="true"{}{disabled_attr}>
+                    <span><b>巡查新增后补采详情</b><small>只跟进已接纳、尚无详情的作品；每篇一次详情、媒体及最多 30 条评论。需另有覆盖自动深化的有效授权。</small></span>
+                  </label>"#, checked(form.creator_follow_details), disabled_attr=if disabled { " disabled" } else { "" })
+        } else {
+            String::new()
+        },
         disabled_attr = if disabled { " disabled" } else { "" },
         readonly = disabled,
         interval = interval_select(
@@ -901,6 +915,7 @@ mod tests {
                 rule_revision_ref: Uuid::parse_str("0da99cb2-0f4a-4da5-ac1b-c99e10bb64ed").unwrap(),
                 revision: 3,
                 automatic_enabled: true,
+                creator_follow_details: false,
                 fixed_interval_seconds: Some(86_400),
                 fallback_interval_seconds: 86_400,
                 surface_key: "creator_profile".to_owned(),
@@ -1040,6 +1055,7 @@ mod sampling_policy_tests {
             rule_revision_ref: Uuid::parse_str("0da99cb2-0f4a-4da5-ac1b-c99e10bb64ed").unwrap(),
             revision: 2,
             automatic_enabled: true,
+            creator_follow_details: false,
             fixed_interval_seconds: Some(86_400),
             fallback_interval_seconds: 86_400,
             surface_key: "keyword_search".to_owned(),

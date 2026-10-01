@@ -540,6 +540,7 @@ fn catalog_work(
         match_position: Some(index as i64),
         published_at: None,
         source: linggan_evidence::CatalogSource::InitialArchive,
+        recorded_kind: None,
         detail_state,
         execution_state: execution.map(|kind| linggan_evidence::MaterialExecutionState {
             kind,
