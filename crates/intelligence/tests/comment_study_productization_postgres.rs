@@ -7,19 +7,31 @@ mod fixture;
 mod research_fixture;
 
 use fixture::proof_database;
-use linggan_intelligence::comment_study_read::{CommentStudyReadQuery, read_runs};
+use linggan_intelligence::comment_study_read::{
+    CommentStudyReadQuery, read_run_detail, read_run_requests, read_runs,
+};
 use linggan_intelligence::comment_study_source::ADHD_DOMAIN_REF;
 use research_fixture::{comment_with_author, detail_with_author};
 use serde_json::json;
 use uuid::Uuid;
 
-const STUDY_SCHEMA_SQL: &str = include_str!("../../../database/bootstrap/comment-study-001.sql");
+const STUDY_SCHEMA_SQL: &str = concat!(
+    include_str!("../../../database/bootstrap/comment-study-001.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0114_comment_study_effective_head.sql")
+);
+const PRODUCTIZATION_SCHEMA_SQL: &str =
+    include_str!("../../../database/migrations/0107_comment_study_productization_schema.sql");
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof; never use a shared or real-data database"]
 async fn run_counts_are_independent_of_work_count_and_keep_empty_runs() {
     let database = proof_database("comment_study_productization_run_counts").await;
     sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    sqlx::raw_sql(PRODUCTIZATION_SCHEMA_SQL)
         .execute(database.pool())
         .await
         .unwrap();
@@ -125,11 +137,27 @@ async fn run_counts_are_independent_of_work_count_and_keep_empty_runs() {
         run_ref: None,
         cursor: None,
         limit: Some(50),
+        q: None,
+        state: None,
+        problem_ref: None,
     };
     let result = read_runs(&database, &query).await.unwrap();
     let runs = result["runs"].as_array().unwrap();
     assert_eq!(runs.len(), 1);
     assert_eq!(runs[0]["workCount"], 2);
+    let detail = read_run_detail(&database, &query, run_ref).await.unwrap();
+    assert_eq!(detail["run"]["targetStates"]["succeeded"], 1);
+    assert_eq!(detail["run"]["workCount"], 2);
+    assert_eq!(detail["run"]["semanticSummary"]["targetCount"], 6);
+    assert_eq!(detail["run"]["semanticSummary"]["currentSignalCount"], 0);
+    assert_eq!(detail["run"]["knowledgeSummary"]["eligibleSignalCount"], 0);
+    assert_eq!(detail["run"]["costSummary"]["recordingState"], "unrecorded");
+    assert!(detail["run"]["costSummary"]["requestCount"].is_null());
+    assert!(detail["run"]["costSummary"]["usageUnknownRequestCount"].is_null());
+    assert!(detail["run"]["costSummary"]["totalInputTokens"].is_null());
+    assert!(detail["run"]["costSummary"]["billingAmount"].is_null());
+    let requests = read_run_requests(&database, &query, run_ref).await.unwrap();
+    assert_eq!(requests["requests"].as_array().unwrap().len(), 0);
     assert_eq!(runs[0]["targetCount"], 6);
     for field in [
         "succeededCount",
@@ -153,6 +181,26 @@ async fn run_counts_are_independent_of_work_count_and_keep_empty_runs() {
     .execute(database.pool())
     .await
     .unwrap();
+    sqlx::query(
+        "UPDATE linggan_comment_study_run \
+         SET selection_manifest=jsonb_build_object('contract','comment-study.run-selection.v2') \
+         WHERE run_ref=$1",
+    )
+    .bind(empty_run)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let empty_detail = read_run_detail(&database, &query, empty_run).await.unwrap();
+    assert_eq!(
+        empty_detail["run"]["costSummary"]["recordingState"],
+        "recorded"
+    );
+    assert_eq!(empty_detail["run"]["costSummary"]["requestCount"], 0);
+    assert_eq!(
+        empty_detail["run"]["costSummary"]["usageUnknownRequestCount"],
+        0
+    );
+    assert_eq!(empty_detail["run"]["costSummary"]["totalInputTokens"], 0);
     let result = read_runs(&database, &query).await.unwrap();
     let rows = result["runs"].as_array().unwrap();
     let empty_id = empty_run.to_string();

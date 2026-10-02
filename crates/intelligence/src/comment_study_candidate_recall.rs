@@ -145,10 +145,10 @@ async fn novel_signals_awaiting_pairing(
 ) -> Result<Vec<Uuid>, ProblemCandidateRecallError> {
     Ok(sqlx::query_scalar(
         "SELECT resolution.signal_ref FROM linggan_comment_study_resolution resolution \
-         JOIN linggan_comment_study_signal signal USING(signal_ref) \
+         JOIN linggan_comment_study_effective_signal signal USING(signal_ref) \
          JOIN linggan_comment_study_target target USING(target_ref) \
          JOIN linggan_comment_study_run run ON run.run_ref=target.run_ref \
-         WHERE resolution.state='deferred_novel' \
+         WHERE resolution.state='deferred_novel' AND signal.eligibility_state='eligible' \
            AND (NOT $2 OR (run.selection_manifest->>'contract'='comment-study.run-selection.v2' \
              AND to_jsonb(run)->>'dispatch_state'='enabled' \
              AND to_jsonb(run)->>'dispatch_reason' IS NULL)) \
@@ -192,10 +192,9 @@ async fn nearest_admissible_partner(
     }
     Ok(sqlx::query_as::<_, (Uuid, i64, i64)>(
         "WITH seeker AS ( \
-           SELECT target.source_ref,target.run_ref,source.author_external_id \
-           FROM linggan_comment_study_signal signal \
+           SELECT target.source_ref,target.run_ref,signal.current_author_external_id AS author_external_id \
+           FROM linggan_comment_study_effective_signal signal \
            JOIN linggan_comment_study_target target USING(target_ref) \
-           JOIN linggan_material_comment source ON source.material_ref=target.source_ref \
            WHERE signal.signal_ref=$1), \
          ranked AS (SELECT signal_ref,ordinality FROM unnest($2::uuid[]) \
                     WITH ORDINALITY AS entry(signal_ref,ordinality)) \
@@ -203,16 +202,13 @@ async fn nearest_admissible_partner(
                 row_number() OVER (ORDER BY ranked.ordinality) AS admissible_rank \
          FROM ranked \
          JOIN linggan_comment_study_resolution resolution USING(signal_ref) \
-         JOIN linggan_comment_study_signal signal USING(signal_ref) \
+         JOIN linggan_comment_study_effective_signal signal USING(signal_ref) \
          JOIN linggan_comment_study_target target ON target.target_ref=signal.target_ref \
-         JOIN linggan_material_comment source ON source.material_ref=target.source_ref \
          CROSS JOIN seeker \
-         WHERE resolution.state='deferred_novel' \
+         WHERE resolution.state='deferred_novel' AND signal.eligibility_state='eligible' \
            AND (NOT $3 OR target.run_ref=seeker.run_ref) \
            AND target.source_ref<>seeker.source_ref \
-           AND source.author_external_id IS NOT NULL \
-           AND seeker.author_external_id IS NOT NULL \
-           AND source.author_external_id<>seeker.author_external_id \
+           AND signal.current_author_external_id<>seeker.author_external_id \
            AND NOT EXISTS(SELECT 1 FROM linggan_comment_study_problem_membership membership \
                  WHERE membership.signal_ref=ranked.signal_ref) \
            AND NOT EXISTS(SELECT 1 FROM linggan_comment_study_problem_pair pair \
@@ -265,7 +261,7 @@ pub async fn recall_problem_candidates(
 ) -> Result<ProblemCandidateRecall, ProblemCandidateRecallError> {
     let signal = sqlx::query(
         "SELECT signal.target_ref,target.run_ref,policy.domain_ref,signal.proposition,signal.problem_frame \
-         FROM linggan_comment_study_signal signal \
+         FROM linggan_comment_study_effective_signal signal \
          JOIN linggan_comment_study_target target USING(target_ref) \
          JOIN linggan_comment_study_run run ON run.run_ref=target.run_ref \
          JOIN linggan_comment_study_policy policy USING(policy_ref) \
@@ -287,10 +283,10 @@ pub async fn recall_problem_candidates(
                        OR lower(revision.core_frame::text) LIKE '%' || lower(term) || '%') AS lexical_overlap, \
                 COALESCE((SELECT count(*) FROM terms WHERE lower(revision.definition) LIKE '%' || lower(term) || '%' \
                        OR lower(revision.core_frame::text) LIKE '%' || lower(term) || '%'),0) AS overlap_count \
-         FROM linggan_comment_study_problem problem \
+         FROM linggan_comment_study_current_problem problem \
          JOIN linggan_comment_study_problem_revision revision \
            ON revision.revision_ref=problem.current_revision_ref \
-         WHERE problem.domain_ref=$1 AND problem.state='active' \
+         WHERE problem.domain_ref=$1 AND problem.state IN ('active','support_insufficient') \
          ORDER BY overlap_count DESC,problem.created_at DESC,problem.problem_ref DESC LIMIT $3",
     )
     .bind(domain_ref)
@@ -365,7 +361,7 @@ async fn advance_next_problem_resolution_inner(
     let profile_ref = active_profile(database).await?;
     let candidate: Option<(Uuid, Option<Uuid>)> = sqlx::query_as(
         "SELECT signal.signal_ref,resolution.resolution_ref \
-         FROM linggan_comment_study_signal signal \
+         FROM linggan_comment_study_effective_signal signal \
          LEFT JOIN linggan_comment_study_resolution resolution USING(signal_ref) \
          JOIN linggan_comment_study_target target USING(target_ref) \
          JOIN linggan_comment_study_run run ON run.run_ref=target.run_ref \

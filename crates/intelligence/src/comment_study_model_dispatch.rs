@@ -6,6 +6,7 @@
 
 use crate::{
     comment_study_batch::{conservative_token_estimate_json, semantic_model_request_manifest},
+    comment_study_batch_worker::{cancel_unqualified_batch, sources_remain_qualified},
     comment_study_policy::{
         CompiledStudyMethod, StudyMethodManifest, StudyModelIdentity, StudyModelSnapshot,
         json_hash, verify_study_method,
@@ -222,7 +223,7 @@ pub async fn reserve_study_batch_model_call(
             prompt,
             request_manifest,
             request_hash,
-            request_input_tokens.saturating_add(i64::from(output_token_limit)),
+            i64::from(input_limit).saturating_add(i64::from(output_token_limit)),
         ))
     } else {
         None
@@ -501,6 +502,12 @@ pub async fn mark_study_batch_model_dispatch_started(
     if locked_batch.is_none() {
         return Err(StudyModelDispatchError::InvocationUnavailable);
     }
+    if !sources_remain_qualified(&mut transaction, batch_ref).await? {
+        cancel_unqualified_before_dispatch(&mut transaction, run_ref, batch_ref, invocation_ref)
+            .await?;
+        transaction.commit().await?;
+        return Err(StudyModelDispatchError::PreDispatchDeferred);
+    }
     let remaining_timeout_ms: Option<i64> = sqlx::query_scalar(
         "UPDATE linggan_comment_study_model_request request \
          SET dispatch_started_at=scope_001_now() \
@@ -513,6 +520,25 @@ pub async fn mark_study_batch_model_dispatch_started(
            AND batch.lease_expires_at>scope_001_now() \
            AND to_jsonb(run)->>'dispatch_state'='enabled' \
            AND to_jsonb(run)->>'dispatch_reason' IS NULL \
+           AND NOT EXISTS(SELECT 1 FROM linggan_comment_study_batch_target member \
+             JOIN linggan_comment_study_target target ON target.target_ref=member.target_ref \
+             JOIN linggan_material_comment source ON source.material_ref=target.source_ref \
+             LEFT JOIN linggan_material_content_author work_author \
+               ON work_author.content_public_ref=source.content_public_ref \
+             LEFT JOIN linggan_material_comment_restriction restriction \
+               ON restriction.content_public_ref=source.content_public_ref \
+              AND restriction.comment_external_id=source.comment_external_id \
+             LEFT JOIN linggan_material_comment parent ON parent.material_ref=target.parent_source_ref \
+             LEFT JOIN linggan_material_comment_restriction parent_restriction \
+               ON parent_restriction.content_public_ref=parent.content_public_ref \
+              AND parent_restriction.comment_external_id=parent.comment_external_id \
+             WHERE member.batch_ref=batch.batch_ref \
+               AND (source.body_state<>'KNOWN' OR source.body_text IS NULL OR btrim(source.body_text)='' \
+                    OR restriction.comment_external_id IS NOT NULL \
+                    OR parent_restriction.comment_external_id IS NOT NULL \
+                    OR NULLIF(btrim(source.author_external_id),'') IS NULL \
+                    OR NULLIF(btrim(work_author.author_external_id),'') IS NULL \
+                    OR btrim(source.author_external_id)=btrim(work_author.author_external_id))) \
          RETURNING floor(extract(epoch FROM (request.deadline_at-request.dispatch_started_at))*1000)::bigint-250",
     )
     .bind(invocation_ref)
@@ -521,6 +547,17 @@ pub async fn mark_study_batch_model_dispatch_started(
     .fetch_optional(&mut *transaction)
     .await?;
     let Some(remaining_timeout_ms) = remaining_timeout_ms.filter(|remaining| *remaining > 0) else {
+        if !sources_remain_qualified(&mut transaction, batch_ref).await? {
+            cancel_unqualified_before_dispatch(
+                &mut transaction,
+                run_ref,
+                batch_ref,
+                invocation_ref,
+            )
+            .await?;
+            transaction.commit().await?;
+            return Err(StudyModelDispatchError::PreDispatchDeferred);
+        }
         let paused = sqlx::query_scalar::<_, bool>(
             "SELECT to_jsonb(run)->>'dispatch_state'='paused' \
              FROM linggan_comment_study_run run WHERE run.run_ref=$1",
@@ -593,4 +630,96 @@ pub async fn mark_study_batch_model_dispatch_started(
     }
     transaction.commit().await?;
     Ok(remaining_timeout_ms)
+}
+
+/// Legacy v1 has no request snapshot row. It still needs a last source fence before provider I/O.
+pub async fn verify_legacy_study_batch_before_dispatch(
+    database: &Database,
+    invocation_ref: Uuid,
+    batch_ref: Uuid,
+    lease_token: Uuid,
+) -> Result<(), StudyModelDispatchError> {
+    let mut transaction = database.pool().begin().await?;
+    let run_ref: Uuid = sqlx::query_scalar(
+        "SELECT run_ref FROM linggan_comment_study_batch \
+         WHERE batch_ref=$1 AND state='leased' AND lease_token=$2 \
+           AND model_invocation_ref=$3 AND lease_expires_at>scope_001_now()",
+    )
+    .bind(batch_ref)
+    .bind(lease_token)
+    .bind(invocation_ref)
+    .fetch_optional(&mut *transaction)
+    .await?
+    .ok_or(StudyModelDispatchError::InvocationUnavailable)?;
+    sqlx::query("SELECT run_ref FROM linggan_comment_study_run WHERE run_ref=$1 FOR UPDATE")
+        .bind(run_ref)
+        .fetch_one(&mut *transaction)
+        .await?;
+    sqlx::query(
+        "SELECT batch_ref FROM linggan_comment_study_batch \
+         WHERE batch_ref=$1 AND state='leased' AND lease_token=$2 \
+           AND model_invocation_ref=$3 FOR UPDATE",
+    )
+    .bind(batch_ref)
+    .bind(lease_token)
+    .bind(invocation_ref)
+    .fetch_one(&mut *transaction)
+    .await?;
+    let qualified = sources_remain_qualified(&mut transaction, batch_ref).await?;
+    if !qualified {
+        let invocation = sqlx::query(
+            "UPDATE linggan_model_invocation SET state='failed',charged_tokens=0, \
+             failure_code='source_unavailable_before_dispatch', \
+             result=COALESCE(result,'{}'::jsonb)||'{\"ok\":false,\"callStarted\":false,\"failureCode\":\"source_unavailable_before_dispatch\"}'::jsonb, \
+             finished_at=scope_001_now() \
+             WHERE invocation_ref=$1 AND state='running' AND result->>'callStarted'='false'",
+        ).bind(invocation_ref).execute(&mut *transaction).await?;
+        if invocation.rows_affected() != 1 {
+            return Err(StudyModelDispatchError::InvocationUnavailable);
+        }
+        cancel_unqualified_batch(&mut transaction, batch_ref).await?;
+        close_run_if_settled(&mut transaction, run_ref).await?;
+        transaction.commit().await?;
+        return Err(StudyModelDispatchError::PreDispatchDeferred);
+    }
+    let started = sqlx::query(
+        "UPDATE linggan_model_invocation SET result=COALESCE(result,'{}'::jsonb)||'{\"callStarted\":true}'::jsonb \
+         WHERE invocation_ref=$1 AND state='running' AND result->>'callStarted'='false'",
+    ).bind(invocation_ref).execute(&mut *transaction).await?;
+    if started.rows_affected() != 1 {
+        return Err(StudyModelDispatchError::InvocationUnavailable);
+    }
+    transaction.commit().await?;
+    Ok(())
+}
+
+async fn cancel_unqualified_before_dispatch(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    run_ref: Uuid,
+    batch_ref: Uuid,
+    invocation_ref: Uuid,
+) -> Result<(), StudyModelDispatchError> {
+    let invocation = sqlx::query(
+        "UPDATE linggan_model_invocation invocation \
+         SET state='failed',charged_tokens=0,failure_code='source_unavailable_before_dispatch', \
+             result=COALESCE(invocation.result,'{}'::jsonb)||jsonb_build_object( \
+               'ok',false,'callStarted',false,'failureCode','source_unavailable_before_dispatch'), \
+             finished_at=scope_001_now() \
+         WHERE invocation.invocation_ref=$1 AND invocation.state='running' \
+           AND invocation.result->>'callStarted'='false' \
+           AND EXISTS(SELECT 1 FROM linggan_comment_study_model_request request \
+             WHERE request.invocation_ref=invocation.invocation_ref \
+               AND request.batch_ref=$2 AND request.stage='semantic' \
+               AND request.dispatch_started_at IS NULL)",
+    )
+    .bind(invocation_ref)
+    .bind(batch_ref)
+    .execute(&mut **transaction)
+    .await?;
+    if invocation.rows_affected() != 1 {
+        return Err(StudyModelDispatchError::InvocationUnavailable);
+    }
+    cancel_unqualified_batch(transaction, batch_ref).await?;
+    close_run_if_settled(transaction, run_ref).await?;
+    Ok(())
 }

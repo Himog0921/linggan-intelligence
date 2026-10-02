@@ -25,6 +25,8 @@ WORK_REF = "00000000-0000-4000-8000-000000000002"
 OLD_POLICY_REF = "00000000-0000-4000-8000-000000000003"
 NEW_POLICY_REF = "00000000-0000-4000-8000-000000000004"
 RUN_REF = "00000000-0000-4000-8000-000000000005"
+REQUEST_REF = "00000000-0000-4000-8000-000000000012"
+SIGNAL_REF = "00000000-0000-4000-8000-000000000013"
 RECOVERY_RUN_REF = "00000000-0000-4000-8000-000000000010"
 OLDER_RUN_REF = "10000000-0000-4000-8000-000000000007"
 MODEL_REASON = "评论仅缺少直接父评论中的指代对象，无法确认具体情境。"
@@ -39,7 +41,8 @@ class StaticPageHandler(BaseHTTPRequestHandler):
             body = body.replace("{{SIDE_NAV}}", "<nav aria-label='测试导航'></nav>")
             content_type = "text/html; charset=utf-8"
         elif path == "/assets/comment-study.css":
-            body = (ROOT / "apps/api/src/local_web/comment_study.css").read_text()
+            body = "\n".join((ROOT / f"apps/api/src/local_web/{name}").read_text()
+                             for name in ("lids_tokens.css", "shell.css", "comment_study.css"))
             content_type = "text/css; charset=utf-8"
         elif path == "/assets/comment-study.js":
             body = (ROOT / "apps/api/src/local_web/comment_study.js").read_text()
@@ -70,6 +73,9 @@ def run_synthetic() -> None:
         "stopped": False,
         "recovered": False,
         "deep_active_mode": False,
+        "overview_with_run": False,
+        "candidate_fail": False,
+        "request_source_state": "known",
         "policy_page_cursors": [],
         "run_page_cursors": [],
     }
@@ -261,6 +267,41 @@ def run_synthetic() -> None:
                              if state["recovered"] else [run_record()] if state["created"] else []),
                     "page": {"hasMore": state["created"], "nextCursor": "older-run" if state["created"] else None},
                 }
+        elif request.method == "GET" and path in (f"runs/{RUN_REF}", f"runs/{RECOVERY_RUN_REF}", f"runs/{OLDER_RUN_REF}"):
+            requested_run = path.split("/")[1]
+            historical = requested_run == OLDER_RUN_REF
+            response = {"run": {**run_record(), "runRef": requested_run,
+                                "policyRef": OLD_POLICY_REF,
+                                "method": {"name": "合成方法", "hash": "synthetic-hash",
+                                           "manifest": {"stages": {}}},
+                                "semanticSummary": {"targetCount": 2, "succeededTargetCount": 1,
+                                                    "noSignalTargetCount": 1,
+                                                    "needsContextTargetCount": 0,
+                                                    "failedTargetCount": 0, "excludedTargetCount": 0,
+                                                    "attemptCount": 2, "signalCount": 1,
+                                                    "currentSignalCount": 1},
+                                "knowledgeSummary": {"eligibleSignalCount": 1,
+                                                     "assignedSignalCount": 0,
+                                                     "createdProblemCount": 0,
+                                                     "pendingResolutionCount": 0,
+                                                     "pendingPairCount": 0,
+                                                     "deferredNovelCount": 1,
+                                                     "deferredAmbiguousCount": 0,
+                                                     "deferredContextCount": 0,
+                                                     "retrievalIncompleteCount": 0,
+                                                     "budgetStoppedCount": 0,
+                                                     "protocolRejectedCount": 0,
+                                                     "failedResolutionCount": 0},
+                                "costSummary": {"recordingState": "unrecorded" if historical else "recorded",
+                                                "requestCount": None if historical else 1,
+                                                "dispatchedRequestCount": None if historical else 1,
+                                                "usageKnownRequestCount": None if historical else 1,
+                                                "usageUnknownRequestCount": None if historical else 0,
+                                                "knownInputTokens": None if historical else 100,
+                                                "knownOutputTokens": None if historical else 20,
+                                                "totalInputTokens": None if historical else 100,
+                                                "totalOutputTokens": None if historical else 20,
+                                                "chargedTokens": None if historical else 120}}}
         elif request.method == "GET" and path == "targets":
             requested_run = query.get("runRef", [None])[0]
             response = {
@@ -313,10 +354,99 @@ def run_synthetic() -> None:
                     }
                 ]),
             }
+        elif request.method == "GET" and path == "signals":
+            response = {"runRef": query.get("runRef", [RUN_REF])[0],
+                        "page": {"nextCursor": None},
+                        "signals": [{"signalRef": SIGNAL_REF,
+                                     "targetRef": "00000000-0000-4000-8000-000000000008",
+                                     "observationRole": "primary", "kind": "problem",
+                                     "proposition": "合成待建档表达", "evidence": "合成证据",
+                                     "sourceState": "known", "eligibilityState": "eligible",
+                                     "resolutionState": "deferred_novel"}]}
+        elif request.method == "GET" and path == f"runs/{RUN_REF}/requests":
+            response = {"runRef": RUN_REF, "page": {"nextCursor": None},
+                        "requests": [{"invocationRef": REQUEST_REF, "stage": "semantic",
+                                      "state": "accepted", "dispatched": True,
+                                      "modelIdentity": {"modelRef": "00000000-0000-4000-8000-000000000017",
+                                                        "connectionVersionRef": "00000000-0000-4000-8000-000000000018",
+                                                        "modelId": "synthetic-model"},
+                                      "modelConfigRef": "00000000-0000-4000-8000-000000000006",
+                                      "createdAt": "2026-09-28T08:00:00Z", "attemptOrdinal": 1,
+                                      "usageKnown": True, "inputTokens": 100,
+                                      "outputTokens": 20, "chargedTokens": 120}]}
+        elif request.method == "GET" and path == f"requests/{REQUEST_REF}":
+            source_state = state["request_source_state"]
+            response = {"request": {"invocationRef": REQUEST_REF, "runRef": RUN_REF,
+                                    "stage": "semantic", "state": "accepted", "dispatched": True,
+                                    "modelIdentity": {"modelRef": "00000000-0000-4000-8000-000000000017",
+                                                      "connectionVersionRef": "00000000-0000-4000-8000-000000000018",
+                                                      "modelId": "synthetic-model"},
+                                    "modelConfigRef": "00000000-0000-4000-8000-000000000006",
+                                    "createdAt": "2026-09-28T08:00:00Z", "recordingState": "recorded",
+                                    "sourceState": source_state,
+                                    "requestManifest": {"prompt": "合成请求快照"} if source_state == "known" else None}}
         elif request.method == "GET" and path == "overview":
-            response = {"cleanLayerState": "ready", "latestRun": None}
+            response = {"cleanLayerState": "ready", "latestRun": run_record() if state["overview_with_run"] else None,
+                        "asOf": "2026-09-28T08:00:00Z", "domainRef": DOMAIN_REF,
+                        "corpusSummaryState": "known",
+                        "corpusSummary": {"displayableCommentCount": 3, "eligibleCommentCount": 2},
+                        "indexCoverage": {"indexedCount": 3, "pendingCount": 0},
+                        "researchSummary": {"studiedCommentCount": 1, "succeededCommentCount": 1,
+                                            "noSignalCommentCount": 0, "currentSignalCount": 1},
+                        "knowledgeSummary": {"problemCount": 0, "activeProblemCount": 0,
+                                             "supportInsufficientProblemCount": 0,
+                                             "assignedSignalCount": 0, "deferredNovelCount": 1,
+                                             "supportWindowDays": 28, "problemSupportPreview": [],
+                                             "voicePreview": [], "solutionPreview": [],
+                                             "experiencePreview": []},
+                        "observationSeries": {"timezone": "Asia/Shanghai", "points": [
+                            {"date": "2026-09-28", "newObservedCommentCount": 3,
+                             "studiedCommentCount": 1, "acceptedSignalCount": 1,
+                             "coveredWorkCount": 1, "observationCoverage": "recorded"}]}}
         elif request.method == "GET" and path == "problems":
             response = {"problems": []}
+        elif request.method == "GET" and path == "problem-candidates":
+            if state["candidate_fail"]:
+                route.fulfill(status=503, content_type="application/json", body='{"error":"temporarily unavailable"}')
+                return
+            candidate_state = query.get("state", ["all"])[0]
+            novel = {"resolutionRef": "00000000-0000-4000-8000-000000000014",
+                     "signalRef": SIGNAL_REF,
+                     "targetRef": "00000000-0000-4000-8000-000000000008",
+                     "runRef": RUN_REF, "state": "deferred_novel", "kind": "problem",
+                     "proposition": "合成待建档表达", "evidence": "合成证据",
+                     "commentText": "合成评论原声", "authorDisplayName": "合成作者",
+                     "commentKey": {"workRef": WORK_REF, "commentExternalId": "comment-1"},
+                     "pairOutcomes": [{"pairRef": "00000000-0000-4000-8000-000000000015",
+                                       "state": "rejected", "decisionReason": "not_same_problem"}],
+                     "sourceState": "known", "createdAt": "2026-09-28T08:00:00Z"}
+            budget_stopped = {**novel, "resolutionRef": "00000000-0000-4000-8000-000000000016",
+                              "state": "budget_stopped", "pairOutcomes": [],
+                              "proposition": "合成机器未完成表达"}
+            pending = {**novel, "resolutionRef": "00000000-0000-4000-8000-000000000019",
+                       "state": "pending", "pairOutcomes": [], "proposition": "合成归并中表达"}
+            expressions = [novel, budget_stopped, pending] if candidate_state == "all" else (
+                [novel] if candidate_state == "deferred_novel" else
+                [budget_stopped] if candidate_state == "budget_stopped" else
+                [pending] if candidate_state == "pending" else [])
+            response = {"expressions": expressions,
+                        "page": {"nextCursor": None, "asOf": "2026-09-28T08:00:00Z"}}
+        elif request.method == "GET" and path == "catalog-summary":
+            response = {"summary": {"displayableCommentCount": 3, "eligibleCommentCount": 2},
+                        "indexCoverage": {"indexedCount": 3, "pendingCount": 0}}
+        elif request.method == "GET" and path == "comments":
+            cursor = query.get("cursor", [None])[0]
+            def comment_item(comment_id: str, eligible: bool) -> dict:
+                return {"commentKey": {"workRef": WORK_REF, "commentExternalId": comment_id},
+                        "commentText": f"合成评论 {comment_id}", "workTitle": "合成作品 A",
+                        "workTitleSource": "platform_title", "authorDisplayName": "合成作者",
+                        "observationRole": "primary", "observedAt": "2026-09-28T08:00:00Z",
+                        "studyEligibility": {"eligible": eligible,
+                                             "reasons": [] if eligible else ["commentAuthorUnknown"]}}
+            response = {"items": [comment_item("comment-3", True)] if cursor == "page-2" else [
+                comment_item("comment-1", True), comment_item("comment-2", False)],
+                "page": {"nextCursor": None if cursor == "page-2" else "page-2"},
+                "indexCoverage": {"indexedCount": 3, "pendingCount": 0}}
         elif request.method == "POST" and path == "policies":
             requests["policy"] = payload
             response = {"policy": {"policyRef": NEW_POLICY_REF}}
@@ -478,6 +608,126 @@ def run_synthetic() -> None:
             assert requests.get("activate", {}).get("expectedActivePolicyRef") == OLD_POLICY_REF
             assert not unexpected, "Unexpected API calls: " + "; ".join(unexpected)
             page.close()
+
+            state.update(deep_active_mode=False, candidate_fail=True)
+            page = browser.new_page()
+            page.route("**/api/local/comment-study/**", api_reply)
+            page.goto(f"{base_url}/corpus/comments?domain={DOMAIN_REF}&view=overview")
+            page.locator(".study-series-chart").wait_for()
+            page.get_by_text("序列截至 2026-09-28", exact=False).wait_for()
+            page.locator(".study-readout-label").get_by_text("可研究评论", exact=True).wait_for()
+            page.locator('.study-tabs [data-view="problems"]').click()
+            page.get_by_role("heading", name="已建档用户问题").wait_for()
+            page.get_by_text("未建档表达暂时读取失败；已建档问题仍可查看。", exact=True).wait_for()
+            page.close()
+
+            state["candidate_fail"] = False
+            page = browser.new_page()
+            page.route("**/api/local/comment-study/**", api_reply)
+            page.goto(f"{base_url}/corpus/comments?domain={DOMAIN_REF}&view=comments&q=合成&workRef={WORK_REF}&state=never_studied")
+            page.locator("#comment-query").wait_for()
+            assert page.locator("#comment-query").input_value() == "合成"
+            assert page.locator("#comment-study-state").input_value() == "never_studied"
+            assert page.locator("[data-select-comment]").count() == 2
+            assert page.locator("[data-select-comment]").nth(1).is_disabled()
+            page.locator("#comment-next").click()
+            page.locator("[data-comment-id='comment-3']").first.wait_for()
+            assert "cursor=page-2" in page.url
+            page.reload()
+            page.locator("[data-comment-id='comment-3']").first.wait_for()
+            page.go_back()
+            page.locator("[data-comment-id='comment-1']").first.wait_for()
+            assert "cursor=" not in page.url
+            page.locator("[data-select-comment]").first.check()
+            assert page.locator("#comment-selection-count").inner_text().startswith("已选 1/3000")
+            page.locator("#comment-next").click()
+            page.locator("[data-comment-id='comment-3']").first.wait_for()
+            assert page.locator("#comment-selection-count").inner_text().startswith("已选 1/3000"), page.locator("#comment-selection-count").inner_text()
+            page.locator("[data-select-comment]").first.check()
+            selected_status = page.locator("#comment-selection-count").inner_text()
+            assert selected_status.startswith("已选 2/3000 条评论"), selected_status
+            page.locator("#study-selected-comments").click()
+            page.locator("#preview-run").click()
+            page.get_by_text("预计创建 2 条目标", exact=False).wait_for()
+            assert requests["preview"]["scope"] == {"kind": "comments", "commentKeys": [
+                {"workRef": WORK_REF, "commentExternalId": "comment-1"},
+                {"workRef": WORK_REF, "commentExternalId": "comment-3"}]}
+            assert requests["preview"]["workRoles"] == [{"contentPublicRef": WORK_REF, "observationRole": "primary"}]
+            page.close()
+
+            state["created"] = True
+            page = browser.new_page()
+            page.route("**/api/local/comment-study/**", api_reply)
+            page.goto(f"{base_url}/corpus/comments?domain={DOMAIN_REF}&view=targets&runRef={RUN_REF}")
+            page.locator("[data-target-ref]").first.wait_for()
+            assert "view=runs" in page.url and "panel=targets" in page.url
+            page.locator(".study-run-summary").get_by_text("新表达暂缓 1 条", exact=False).wait_for()
+            page.locator(".study-run-summary").get_by_text("请求 1 次", exact=False).wait_for()
+            page.get_by_role("tab", name="调用记录").click()
+            page.locator(f'[data-request-detail="{REQUEST_REF}"]').click()
+            page.locator(".study-request-detail").get_by_text("合成请求快照", exact=False).wait_for()
+            page.locator(".study-request-card > p").get_by_text("模型：synthetic-model", exact=True).wait_for()
+            state["request_source_state"] = "unavailable"
+            page.locator(f'[data-request-detail="{REQUEST_REF}"]').click()
+            page.locator(f'[data-request-detail="{REQUEST_REF}"]').click()
+            page.locator(".study-request-detail").get_by_text("来源或候选当前不可用", exact=False).wait_for()
+            page.locator(".study-request-detail").get_by_text("模型：synthetic-model", exact=True).wait_for()
+            assert page.locator(".study-request-detail").get_by_text("合成请求快照", exact=False).count() == 0
+            page.get_by_role("button", name="用户问题").first.click()
+            page.locator(".study-problem-candidates .study-candidate-card").first.wait_for()
+            page.locator(".study-problem-candidates .study-candidate-card").first.get_by_text("关键维度不同", exact=False).wait_for()
+            assert page.get_by_text("尚无足够独立依据", exact=False).count() == 0
+            page.locator("#problem-candidate-state").select_option("budget_stopped")
+            page.locator(".study-problem-candidates .study-candidate-card .study-restricted").get_by_text("机器处理未完成", exact=False).wait_for()
+            page.locator(".study-problem-candidates [data-candidate-signal]").get_by_text("查看运行与信号诊断", exact=True).wait_for()
+            page.locator("#problem-candidate-state").select_option("pending")
+            page.locator(".study-problem-candidates .study-candidate-card").get_by_text("待归并判断", exact=True).wait_for()
+            assert page.locator(".study-problem-candidates .study-candidate-card .study-restricted").count() == 0
+            page.locator("#problem-candidate-state").select_option("deferred_novel")
+            page.locator(".study-problem-candidates .study-candidate-card").first.wait_for()
+            page.locator(".study-problem-candidates [data-candidate-signal]").first.click()
+            page.locator(f'[data-signal-ref="{SIGNAL_REF}"]').wait_for()
+            page.go_back()
+            page.locator(".study-problem-candidates .study-candidate-card").first.wait_for()
+            page.goto(f"{base_url}/corpus/comments?domain={DOMAIN_REF}&view=runs&runRef={OLDER_RUN_REF}&panel=method")
+            page.locator(".study-run-summary").get_by_text("历史调用记录未记录", exact=False).wait_for()
+            assert page.locator(".study-run-summary").get_by_text("请求 0 次", exact=False).count() == 0
+            page.close()
+
+            for width, height, scale in ((1440, 900, 1), (1024, 768, 1),
+                                         (390, 844, 1), (720, 450, 2)):
+                viewport_page = browser.new_page(viewport={"width": width, "height": height},
+                                                 device_scale_factor=scale)
+                viewport_page.route("**/api/local/comment-study/**", api_reply)
+                viewport_page.goto(f"{base_url}/corpus/comments?domain={DOMAIN_REF}&view=overview")
+                viewport_page.locator("#study-observation-title").wait_for()
+                for name, view in (("用户评论", "comments"), ("研究运行", "runs"),
+                                   ("用户问题", "problems"), ("总览", "overview")):
+                    viewport_page.locator(f'.study-tabs [data-view="{view}"]').click()
+                    viewport_page.wait_for_url(f"**view={view}*")
+                viewport_page.locator("#open-study-dialog").click()
+                viewport_page.locator("#study-dialog[open]").wait_for()
+                close = viewport_page.locator("#study-dialog-close")
+                assert close.is_visible(), f"study dialog close hidden at {width} px / {scale}x"
+                try:
+                    close.click(timeout=2000)
+                except Exception as error:
+                    raise AssertionError(
+                        f"study dialog close unreachable at {width}px/{scale}x; "
+                        f"close_box={close.bounding_box()!r}; dialog_box={viewport_page.locator('#study-dialog').bounding_box()!r}"
+                    ) from error
+                viewport_page.locator("#study-dialog[open]").wait_for(state="hidden")
+                horizontal = viewport_page.evaluate(
+                    """() => ({scroll:document.documentElement.scrollWidth,
+                      visible:document.documentElement.clientWidth,
+                      offenders:[...document.querySelectorAll('*')].filter(element =>
+                        element.getBoundingClientRect().right > innerWidth + 2 &&
+                        getComputedStyle(element).position !== 'fixed').slice(0,12).map(element =>
+                        [element.tagName,element.id,element.className,
+                         Math.round(element.getBoundingClientRect().right)])})""")
+                assert horizontal["scroll"] <= horizontal["visible"] + 2, (
+                    f"page horizontal overflow at {width} px / {scale}x: {horizontal}")
+                viewport_page.close()
             browser.close()
 
         try:
@@ -707,6 +957,139 @@ def run_live_api(
     print("Comment Study P2 live Axum/PostgreSQL browser regression passed")
 
 
+def run_live_e2e_readonly(base_url: str, domain_ref: str, run_ref: str,
+                          problem_ref: str, proof_token: str) -> None:
+    """Walk a seeded positive Problem through the real Axum router and isolated PG."""
+    from urllib.parse import urlencode
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.set_default_timeout(15000)
+        page_errors: list[str] = []
+        writes: list[str] = []
+        api_requests: list[str] = []
+        api_responses: list[str] = []
+        failed_requests: list[str] = []
+        page.on("pageerror", lambda error: page_errors.append(str(error)))
+        page.on("request", lambda request: writes.append(request.url)
+                if request.method != "GET" and "/api/local/comment-study/" in request.url else None)
+        page.on("request", lambda request: api_requests.append(f"{request.method} {urlsplit(request.url).path}")
+                if "/api/local/comment-study/" in request.url else None)
+        page.on("response", lambda response: api_responses.append(
+            f"{response.request.method} {urlsplit(response.url).path} {response.status}")
+                if "/api/local/comment-study/" in response.url else None)
+        page.on("requestfailed", lambda request: failed_requests.append(
+            f"{request.method} {urlsplit(request.url).path}: {request.failure}"))
+        proof = page.request.get(f"{base_url}/__comment-study-browser-proof")
+        assert proof.status == 200 and proof.text() == proof_token, "isolated proof handshake failed"
+        target_url = f"{base_url}/api/local/comment-study/targets?{urlencode({'domain': domain_ref, 'runRef': run_ref, 'limit': 100})}"
+        target_response = page.request.get(target_url)
+        assert target_response.status == 200, f"seeded Run targets returned {target_response.status}"
+        target_data = target_response.json()
+        target = next((item for item in target_data.get("targets", [])
+                       if item.get("commentKey", {}).get("commentExternalId") and item.get("signalCount", 0)), None)
+        assert target, "seeded positive Problem has no navigable Target commentKey"
+        key = target["commentKey"]
+        comment_url = f"{base_url}/corpus/comments?{urlencode({'domain': domain_ref, 'view': 'comments', 'commentWorkRef': key['workRef'], 'commentExternalId': key['commentExternalId']})}"
+        navigation = page.goto(comment_url)
+        try:
+            page.locator("#comment-detail-dialog[open]").wait_for()
+        except Exception as error:
+            raise AssertionError(
+                "Initial comment deep link did not open its detail dialog; "
+                f"navigation_status={navigation.status if navigation else None}; "
+                f"url={page.url!r}; body={page.locator('body').inner_text()[:600]!r}; "
+                f"page_errors={page_errors!r}; api_requests={api_requests[-30:]!r}; "
+                f"api_responses={api_responses[-30:]!r}; failed_requests={failed_requests[-30:]!r}"
+            ) from error
+        page.get_by_role("heading", name="父评论语境").wait_for()
+        history = page.locator(f'#comment-detail-body [data-history-run="{run_ref}"]')
+        assert history.count() >= 3, "comment history did not link the seeded Run"
+        history.filter(has_text="查看本次方法").first.click()
+        page.get_by_role("heading", name="本次方法").wait_for()
+        assert f"runRef={run_ref}" in page.url and "panel=method" in page.url
+        page.locator(".study-method-detail").wait_for()
+
+        page.get_by_role("tab", name="调用记录").click()
+        page.get_by_role("heading", name="调用记录").wait_for()
+        assert "panel=requests" in page.url
+        page.locator("[data-request-detail]").first.click()
+        page.locator(".study-request-detail").get_by_text("SYNTHETIC / NOT EVIDENCE", exact=False).wait_for()
+        page.get_by_role("tab", name="研究信号").click()
+        page.get_by_role("heading", name="研究结果").wait_for()
+        problem_link = page.locator(f'[data-signal-problem="{problem_ref}"]').first
+        problem_link.wait_for()
+        problem_link.click()
+        page.locator(f'[data-problem-ref="{problem_ref}"]').wait_for()
+        page.locator(".study-problem-detail").wait_for()
+        assert f"problemRef={problem_ref}" in page.url
+        page.locator("[data-problem-close]").click()
+        page.locator(".study-problem-detail").wait_for(state="hidden")
+        assert "problemRef=" not in page.url
+        page.locator(f'[data-problem-open="{problem_ref}"]').click()
+        page.locator(".study-problem-detail").wait_for()
+        assert f"problemRef={problem_ref}" in page.url
+        page.locator(".study-problem-evidence blockquote").first.wait_for()
+        page.locator(".study-problem-evidence [data-evidence-id]").first.click()
+        page.locator("#comment-detail-dialog[open]").wait_for()
+        assert "commentExternalId=" in page.url
+        page.go_back()
+        page.locator("#comment-detail-dialog").wait_for(state="hidden")
+        page.locator(".study-problem-detail").wait_for()
+        assert f"problemRef={problem_ref}" in page.url
+        page.go_back()
+        page.locator(".study-problem-detail").wait_for(state="hidden")
+        assert "problemRef=" not in page.url
+        page.go_back()
+        page.locator(".study-problem-detail").wait_for()
+        assert f"problemRef={problem_ref}" in page.url
+        page.go_back()
+        page.get_by_role("heading", name="研究结果").wait_for()
+        page.get_by_role("tab", name="目标评论").click()
+        page.locator(f'[data-target-ref="{target["targetRef"]}"]').first.wait_for()
+        page.get_by_role("tab", name="本次方法").click()
+        page.get_by_role("heading", name="本次方法").wait_for()
+        page.get_by_role("button", name="用户问题").first.click()
+        try:
+            page.locator(".study-problem-candidates .study-candidate-card").first.wait_for()
+        except Exception as error:
+            candidate_reply = page.request.get(
+                f"{base_url}/api/local/comment-study/problem-candidates?"
+                f"{urlencode({'domain': domain_ref, 'limit': 5})}"
+            )
+            raise AssertionError(
+                "Seeded deferred expression did not render; "
+                f"candidate_api_status={candidate_reply.status}; "
+                f"candidate_api_body={candidate_reply.text()[:900]!r}; "
+                f"problem_section={page.locator('#study-tab-result').inner_text()[:900]!r}; "
+                f"page_errors={page_errors!r}; api_responses={api_responses[-25:]!r}"
+            ) from error
+        page.locator("#problem-candidate-state").select_option("deferred_novel")
+        candidate = page.locator(".study-problem-candidates .study-candidate-card").first
+        candidate.wait_for()
+        candidate.locator("[data-candidate-signal]").click()
+        page.locator(f'[data-signal-ref]').first.wait_for()
+        assert "panel=signals" in page.url
+        page.go_back()
+        try:
+            page.locator(".study-problem-candidates .study-candidate-card").first.wait_for()
+        except Exception as error:
+            raise AssertionError(
+                "Back from deferred Signal did not restore candidate list; "
+                f"url={page.url!r}; problem_section={page.locator('#study-tab-result').inner_text()[:1100]!r}; "
+                f"page_errors={page_errors!r}; api_responses={api_responses[-25:]!r}"
+            ) from error
+        page.locator(".study-problem-candidates [data-evidence-id]").first.click()
+        page.locator("#comment-detail-dialog[open]").wait_for()
+        page.go_back()
+        page.locator(".study-problem-candidates .study-candidate-card").first.wait_for()
+        assert not writes, f"read-only E2E unexpectedly wrote: {writes!r}"
+        assert not page_errors, f"browser errors: {page_errors!r}"
+        browser.close()
+    print("Comment Study positive Problem Axum/PostgreSQL read-only browser E2E passed")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--api-base-url")
@@ -715,26 +1098,33 @@ def main() -> None:
     parser.add_argument("--existing-policy-ref")
     parser.add_argument("--initial-active-policy-ref")
     parser.add_argument("--proof-token")
+    parser.add_argument("--e2e-run-ref")
+    parser.add_argument("--e2e-problem-ref")
     args = parser.parse_args()
     if args.api_base_url:
-        required = {
-            "--domain-ref": args.domain_ref,
-            "--work-ref": args.work_ref,
-            "--existing-policy-ref": args.existing_policy_ref,
-            "--initial-active-policy-ref": args.initial_active_policy_ref,
-            "--proof-token": args.proof_token,
-        }
+        e2e = bool(args.e2e_run_ref or args.e2e_problem_ref)
+        required = {"--domain-ref": args.domain_ref, "--proof-token": args.proof_token}
+        if not e2e:
+            required.update({"--work-ref": args.work_ref,
+                             "--existing-policy-ref": args.existing_policy_ref,
+                             "--initial-active-policy-ref": args.initial_active_policy_ref})
         missing = [name for name, value in required.items() if not value]
         if missing:
             parser.error("--api-base-url requires " + ", ".join(missing))
-        run_live_api(
-            args.api_base_url.rstrip("/"),
-            args.domain_ref,
-            args.work_ref,
-            args.existing_policy_ref,
-            args.initial_active_policy_ref,
-            args.proof_token,
-        )
+        if e2e:
+            if not args.e2e_run_ref or not args.e2e_problem_ref:
+                parser.error("positive Problem E2E requires both --e2e-run-ref and --e2e-problem-ref")
+            run_live_e2e_readonly(args.api_base_url.rstrip("/"), args.domain_ref,
+                                  args.e2e_run_ref, args.e2e_problem_ref, args.proof_token)
+        else:
+            run_live_api(
+                args.api_base_url.rstrip("/"),
+                args.domain_ref,
+                args.work_ref,
+                args.existing_policy_ref,
+                args.initial_active_policy_ref,
+                args.proof_token,
+            )
         return
     if any((args.domain_ref, args.work_ref, args.existing_policy_ref, args.initial_active_policy_ref, args.proof_token)):
         parser.error("fixture references are only valid with --api-base-url")

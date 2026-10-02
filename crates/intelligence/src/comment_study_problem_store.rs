@@ -345,6 +345,25 @@ async fn accept_problem_resolution_inner(
     } else {
         lock_pending_resolution(&mut transaction, resolution_ref, None).await?
     };
+    let current: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM linggan_comment_study_effective_signal \
+         WHERE signal_ref=$1 AND eligibility_state='eligible')",
+    )
+    .bind(row.signal_ref)
+    .fetch_one(&mut *transaction)
+    .await?;
+    if !current {
+        finish_resolution(
+            &mut transaction,
+            resolution_ref,
+            "failed",
+            None,
+            json!({"reason":"source_superseded"}),
+        )
+        .await?;
+        transaction.commit().await?;
+        return Err(ProblemStoreError::SignalUnavailable);
+    }
     let candidates = candidate_refs(&row.candidate_manifest)?;
     let decision = match decide_existing_resolution(raw_output.clone(), &candidates) {
         Ok(decision) => decision,
@@ -694,13 +713,48 @@ async fn accept_problem_pair_inner(
     } else {
         lock_pending_pair(&mut transaction, pair_ref, None).await?
     };
-    let (domain_ref, independent_sources, independent_authors) = pair_manifest(&pair.manifest)?;
+    let current_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_comment_study_effective_signal \
+         WHERE signal_ref=ANY($1) AND eligibility_state='eligible'",
+    )
+    .bind(vec![pair.first_signal_ref, pair.second_signal_ref])
+    .fetch_one(&mut *transaction)
+    .await?;
+    if current_count != 2 {
+        finish_pair(
+            &mut transaction,
+            pair_ref,
+            "failed",
+            None,
+            "source_superseded",
+            json!({}),
+        )
+        .await?;
+        transaction.commit().await?;
+        return Err(ProblemStoreError::SignalUnavailable);
+    }
+    let (domain_ref, independent_sources, frozen_independent_authors) =
+        pair_manifest(&pair.manifest)?;
+    let current_independent_authors: bool = sqlx::query_scalar(
+        "SELECT first.domain_ref=second.domain_ref AND first.domain_ref=$3 \
+           AND btrim(first.current_author_external_id)<>btrim(second.current_author_external_id) \
+         FROM linggan_comment_study_effective_signal first \
+         JOIN linggan_comment_study_effective_signal second ON second.signal_ref=$2 \
+         WHERE first.signal_ref=$1 AND first.eligibility_state='eligible' \
+           AND second.eligibility_state='eligible'",
+    )
+    .bind(pair.first_signal_ref)
+    .bind(pair.second_signal_ref)
+    .bind(domain_ref)
+    .fetch_optional(&mut *transaction)
+    .await?
+    .unwrap_or(false);
     let decision = match decide_pair_creation(
         raw_output.clone(),
         pair.first_signal_ref,
         pair.second_signal_ref,
         independent_sources,
-        independent_authors,
+        frozen_independent_authors && current_independent_authors,
     ) {
         Ok(decision) => decision,
         Err(error) => {
@@ -827,6 +881,8 @@ async fn lock_signal_for_resolution(
          JOIN linggan_comment_study_policy run_policy ON run_policy.policy_ref=run.policy_ref \
          LEFT JOIN linggan_comment_study_resolution resolution USING(signal_ref) \
          WHERE signal.signal_ref=$1 AND resolution.signal_ref IS NULL \
+           AND EXISTS(SELECT 1 FROM linggan_comment_study_effective_signal effective \
+                      WHERE effective.signal_ref=signal.signal_ref) \
          FOR UPDATE OF signal",
     )
     .bind(signal_ref)
@@ -855,8 +911,8 @@ async fn validate_candidates(
         return Err(ProblemStoreError::InvalidCandidateSet);
     }
     let valid_count: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM linggan_comment_study_problem \
-         WHERE domain_ref=$1 AND state='active' AND problem_ref=ANY($2)",
+        "SELECT count(*) FROM linggan_comment_study_current_problem \
+         WHERE domain_ref=$1 AND state IN ('active','support_insufficient') AND problem_ref=ANY($2)",
     )
     .bind(domain_ref)
     .bind(candidates)
@@ -889,11 +945,11 @@ async fn freeze_candidate_revisions(
     validate_candidates(transaction, domain_ref, candidates).await?;
     let rows = sqlx::query(
         "SELECT problem.problem_ref,revision.revision_ref \
-         FROM linggan_comment_study_problem problem \
+         FROM linggan_comment_study_current_problem problem \
          JOIN linggan_comment_study_problem_revision revision \
            ON revision.revision_ref=problem.current_revision_ref \
           AND revision.problem_ref=problem.problem_ref \
-         WHERE problem.domain_ref=$1 AND problem.state='active' \
+         WHERE problem.domain_ref=$1 AND problem.state IN ('active','support_insufficient') \
            AND problem.problem_ref=ANY($2) \
          ORDER BY problem.problem_ref",
     )
@@ -1056,12 +1112,13 @@ async fn lock_novel_signal(
     signal_ref: Uuid,
 ) -> Result<NovelSignal, ProblemStoreError> {
     let row = sqlx::query(
-        "SELECT signal.signal_ref,policy.domain_ref,target.source_ref,source.author_external_id \
+        "SELECT signal.signal_ref,policy.domain_ref,target.source_ref, \
+                effective.current_author_external_id AS author_external_id \
          FROM linggan_comment_study_signal signal \
          JOIN linggan_comment_study_resolution resolution USING(signal_ref) \
          JOIN linggan_comment_study_target target USING(target_ref) \
-         JOIN linggan_material_comment source ON source.material_ref=target.source_ref \
-         JOIN linggan_comment_study_run run USING(run_ref) \
+         JOIN linggan_comment_study_effective_signal effective USING(signal_ref) \
+         JOIN linggan_comment_study_run run ON run.run_ref=target.run_ref \
          JOIN linggan_comment_study_policy policy ON policy.policy_ref=run.policy_ref \
          LEFT JOIN linggan_comment_study_problem_membership membership USING(signal_ref) \
          WHERE signal.signal_ref=$1 AND signal.kind IN ('problem','need') \
@@ -1322,11 +1379,16 @@ async fn insert_or_find_problem(
         "excludeCriteria":definition.exclude_criteria,
     });
     let definition_hash = sha256_json(&definition_value);
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text || ':' || $2::text,0))")
+        .bind(domain_ref)
+        .bind(&definition_hash)
+        .execute(&mut **transaction)
+        .await?;
     if let Some(existing) = sqlx::query_as::<_, (Uuid, Uuid)>(
-        "SELECT problem.problem_ref,revision.revision_ref FROM linggan_comment_study_problem problem \
+        "SELECT problem.problem_ref,revision.revision_ref FROM linggan_comment_study_current_problem problem \
          JOIN linggan_comment_study_problem_revision revision \
            ON revision.revision_ref=problem.current_revision_ref \
-         WHERE problem.domain_ref=$1 AND revision.definition_hash=$2 AND problem.state='active'",
+         WHERE problem.domain_ref=$1 AND revision.definition_hash=$2",
     )
     .bind(domain_ref)
     .bind(&definition_hash)

@@ -92,6 +92,7 @@ async fn catalog_paginates_more_than_100_comments_without_a_run_and_searches_lit
         }
         assert_eq!(response["indexCoverage"]["indexedCount"], 124);
         for row in response["items"].as_array().unwrap() {
+            assert_eq!(row["observationRole"], "primary");
             assert!(
                 seen.insert(
                     row["commentKey"]["commentExternalId"]
@@ -170,10 +171,10 @@ async fn catalog_distinguishes_visibility_eligibility_and_pending_index() {
         .iter()
         .find(|row| row["voiceRole"] == "unknown")
         .unwrap();
-    assert_eq!(unknown["studyEligibility"]["eligible"], true);
+    assert_eq!(unknown["studyEligibility"]["eligible"], false);
     assert_eq!(
         unknown["studyEligibility"]["reasons"],
-        serde_json::json!([])
+        serde_json::json!(["commentAuthorUnknown"])
     );
     let summary_query: CatalogSummaryQuery =
         serde_json::from_value(json!({"domain":ADHD_DOMAIN_REF})).unwrap();

@@ -15,7 +15,6 @@ use sha2::{Digest, Sha256};
 use sqlx::Row;
 use uuid::Uuid;
 
-
 /// Resolves whatever the cache can answer, before any invocation is reserved.
 ///
 /// Placed ahead of the claim on purpose: serving a cached verdict through the normal worker would
@@ -26,9 +25,10 @@ pub async fn serve_pending_resolutions_from_cache(
     database: &Database,
 ) -> Result<usize, ComparisonCacheError> {
     let pending: Vec<(Uuid, Value)> = sqlx::query_as(
-        "SELECT resolution_ref,candidate_manifest FROM linggan_comment_study_resolution \
+        "SELECT resolution.resolution_ref,resolution.candidate_manifest FROM linggan_comment_study_resolution resolution \
+         JOIN linggan_comment_study_effective_signal signal USING(signal_ref) \
          WHERE state='pending' AND model_invocation_ref IS NULL \
-         ORDER BY created_at,resolution_ref LIMIT 32",
+         ORDER BY resolution.created_at,resolution.resolution_ref LIMIT 32",
     )
     .fetch_all(database.pool())
     .await?;
@@ -49,7 +49,8 @@ pub async fn serve_pending_resolutions_from_cache(
                     .collect()
             })
             .unwrap_or_default();
-        let Some(output) = cached_resolution_output(database, signal_ref, &candidates).await? else {
+        let Some(output) = cached_resolution_output(database, signal_ref, &candidates).await?
+        else {
             continue;
         };
         crate::comment_study_problem_store::accept_problem_resolution(
@@ -139,7 +140,10 @@ pub async fn record_resolution_comparisons(
         else {
             continue;
         };
-        let Some(dimensions) = candidate.get("dimensions").filter(|value| value.is_object()) else {
+        let Some(dimensions) = candidate
+            .get("dimensions")
+            .filter(|value| value.is_object())
+        else {
             continue;
         };
         let Some(right_hash) = problem_core_hash(database, problem_ref).await? else {
@@ -182,7 +186,7 @@ async fn comparison_context(
 ) -> Result<Option<ComparisonContext>, sqlx::Error> {
     let row = sqlx::query(
         "SELECT work.domain_ref,run.policy_ref,signal.canonical_hash \
-         FROM linggan_comment_study_signal signal \
+         FROM linggan_comment_study_effective_signal signal \
          JOIN linggan_comment_study_target target USING(target_ref) \
          JOIN linggan_comment_study_run run ON run.run_ref=target.run_ref \
          JOIN linggan_comment_study_work work \
@@ -206,7 +210,7 @@ async fn problem_core_hash(
     problem_ref: Uuid,
 ) -> Result<Option<String>, sqlx::Error> {
     sqlx::query_scalar(
-        "SELECT revision.canonical_hash FROM linggan_comment_study_problem problem \
+        "SELECT revision.canonical_hash FROM linggan_comment_study_current_problem problem \
          JOIN linggan_comment_study_problem_revision revision \
            ON revision.revision_ref=problem.current_revision_ref \
          WHERE problem.problem_ref=$1",
@@ -228,7 +232,12 @@ fn cache_key(left_hash: &str, right_hash: &str, policy_ref: Uuid) -> String {
 /// different or unknown. A stored verdict that disagreed with its own dimensions would be a second
 /// opinion nobody asked for.
 fn verdict_of(dimensions: &Value) -> &'static str {
-    let read = |key: &str| dimensions.get(key).and_then(Value::as_str).unwrap_or("unknown");
+    let read = |key: &str| {
+        dimensions
+            .get(key)
+            .and_then(Value::as_str)
+            .unwrap_or("unknown")
+    };
     let goal = read("goalOrExpectedState");
     let barrier = read("barrierOrUnmetNeed");
     let actor = read("actor");
@@ -260,11 +269,21 @@ mod tests {
     #[test]
     fn every_core_dimension_must_line_up_before_a_verdict_is_same() {
         assert_eq!(
-            verdict_of(&dimensions("equivalent", "equivalent", "equivalent", "equivalent")),
+            verdict_of(&dimensions(
+                "equivalent",
+                "equivalent",
+                "equivalent",
+                "equivalent"
+            )),
             "same"
         );
         assert_eq!(
-            verdict_of(&dimensions("compatible", "equivalent", "equivalent", "compatible")),
+            verdict_of(&dimensions(
+                "compatible",
+                "equivalent",
+                "equivalent",
+                "compatible"
+            )),
             "same",
             "subject may be merely compatible; goal and barrier may not"
         );
@@ -275,7 +294,12 @@ mod tests {
         // The manual's own counter-example: wanting to finish homework on time is one goal, but
         // "cannot read the question" and "cannot get started" are different problems.
         assert_eq!(
-            verdict_of(&dimensions("equivalent", "equivalent", "different", "equivalent")),
+            verdict_of(&dimensions(
+                "equivalent",
+                "equivalent",
+                "different",
+                "equivalent"
+            )),
             "different"
         );
     }
@@ -283,11 +307,21 @@ mod tests {
     #[test]
     fn an_unproven_dimension_yields_uncertain_rather_than_a_guess() {
         assert_eq!(
-            verdict_of(&dimensions("equivalent", "unknown", "equivalent", "equivalent")),
+            verdict_of(&dimensions(
+                "equivalent",
+                "unknown",
+                "equivalent",
+                "equivalent"
+            )),
             "uncertain"
         );
         assert_eq!(
-            verdict_of(&dimensions("equivalent", "equivalent", "equivalent", "unknown")),
+            verdict_of(&dimensions(
+                "equivalent",
+                "equivalent",
+                "equivalent",
+                "unknown"
+            )),
             "uncertain",
             "an identity-bearing context that nobody established cannot support sameness"
         );
@@ -298,7 +332,10 @@ mod tests {
         let policy = Uuid::new_v4();
         let other_policy = Uuid::new_v4();
         assert_ne!(cache_key("a", "b", policy), cache_key("b", "a", policy));
-        assert_ne!(cache_key("a", "b", policy), cache_key("a", "b", other_policy));
+        assert_ne!(
+            cache_key("a", "b", policy),
+            cache_key("a", "b", other_policy)
+        );
         assert_eq!(cache_key("a", "b", policy), cache_key("a", "b", policy));
     }
 }

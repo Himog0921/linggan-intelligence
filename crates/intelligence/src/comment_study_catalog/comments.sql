@@ -74,6 +74,7 @@ SELECT jsonb_build_object(
         'item', jsonb_build_object(
             'commentKey', jsonb_build_object('workRef', page.content_public_ref, 'commentExternalId', page.comment_external_id),
             'sourceRef', page.material_ref, 'commentText', raw.body_text,
+            'observationRole', page.observation_role,
             'researchText', page.research_text, 'voiceRole', page.voice_role,
             'cleanState', page.clean_state, 'cleanReasons', page.clean_reasons, 'sourceState', 'known',
             'studyEligibility', jsonb_build_object('eligible', page.exclusion_reason IS NULL,

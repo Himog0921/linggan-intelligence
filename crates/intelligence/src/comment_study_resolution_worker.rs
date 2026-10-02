@@ -241,7 +241,7 @@ async fn claim_resolution(
     let candidate: Option<(Uuid, Uuid)> = sqlx::query_as(
         "SELECT resolution.resolution_ref,target.run_ref \
          FROM linggan_comment_study_resolution resolution \
-         JOIN linggan_comment_study_signal signal USING(signal_ref) \
+         JOIN linggan_comment_study_effective_signal signal USING(signal_ref) \
          JOIN linggan_comment_study_target target USING(target_ref) \
          JOIN linggan_comment_study_run run ON run.run_ref=target.run_ref \
          WHERE resolution.state='pending' AND resolution.model_invocation_ref IS NULL \
@@ -291,7 +291,7 @@ async fn claim_resolution(
                 config.max_attempts, \
                 model.model_ref,model.model_id,version.version_ref,connection.enabled \
          FROM linggan_comment_study_resolution resolution \
-         JOIN linggan_comment_study_signal signal USING(signal_ref) \
+         JOIN linggan_comment_study_effective_signal signal USING(signal_ref) \
          JOIN linggan_comment_study_target target USING(target_ref) \
          JOIN linggan_comment_study_run run ON run.run_ref=target.run_ref \
          JOIN linggan_comment_study_policy policy USING(policy_ref) \
@@ -341,8 +341,9 @@ async fn claim_resolution(
            'excludeCriteria',revision.exclusions \
          ) \
          FROM jsonb_to_recordset($1::jsonb) AS candidate(\"problemRef\" uuid,\"problemRevisionRef\" uuid) \
-         JOIN linggan_comment_study_problem problem \
-           ON problem.problem_ref=candidate.\"problemRef\" AND problem.state='active' \
+         JOIN linggan_comment_study_current_problem problem \
+           ON problem.problem_ref=candidate.\"problemRef\" \
+          AND problem.current_revision_ref=candidate.\"problemRevisionRef\" \
          JOIN linggan_comment_study_problem_revision revision \
            ON revision.revision_ref=candidate.\"problemRevisionRef\" \
           AND revision.problem_ref=problem.problem_ref \
@@ -352,7 +353,19 @@ async fn claim_resolution(
     .fetch_all(&mut *tx)
     .await?;
     if problems.len() != refs.len() {
-        return Err(ResolutionWorkerError::Manifest);
+        sqlx::query(
+            "UPDATE linggan_comment_study_resolution \
+             SET state='retrieval_incomplete', \
+                 decision_manifest=jsonb_build_object('reason','candidate_revision_unavailable'), \
+                 resolved_at=scope_001_now() \
+             WHERE resolution_ref=$1 AND state='pending' AND model_invocation_ref IS NULL",
+        )
+        .bind(resolution_ref)
+        .execute(&mut *tx)
+        .await?;
+        crate::comment_study_run::close_run_if_settled(&mut tx, run_ref).await?;
+        tx.commit().await?;
+        return Ok(None);
     }
     let input = json!({"resolutionRef":row.get::<Uuid,_>("resolution_ref"),"signal":{"proposition":row.get::<String,_>("proposition"),"problemFrame":row.get::<Value,_>("problem_frame")},"candidates":problems});
     let input_limit: i32 = row.get("input_token_limit");
@@ -439,9 +452,8 @@ async fn claim_resolution(
         tx.commit().await?;
         return Ok(None);
     }
-    let reserved_tokens =
-        crate::comment_study_batch::conservative_token_estimate_json(&request_manifest)
-            .saturating_add(i64::from(model_snapshot.output_token_limit));
+    let reserved_tokens = i64::from(model_snapshot.input_token_limit)
+        .saturating_add(i64::from(model_snapshot.output_token_limit));
     let invocation_ref = match reserve_problem_stage_call(
         &mut tx,
         ProblemStageSubject::Resolution(resolution_ref),

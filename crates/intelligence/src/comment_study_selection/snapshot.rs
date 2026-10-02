@@ -190,7 +190,7 @@ impl Scan {
                 self.pending += 1;
             }
         }
-        let mut flags = [false; 6];
+        let mut flags = [false; 7];
         if let Some(reason) = &raw.exclusion_reason {
             let index = crate::comment_study_source::gate::rule_index(reason)
                 .ok_or(StudySelectionError::InvalidSnapshot)?;

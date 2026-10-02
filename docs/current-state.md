@@ -1,12 +1,18 @@
 # 当前状态与事项队列
 
 > 状态: 权威当前
-> 最后核对: 2026-10-01
+> 最后核对: 2026-10-02
 > 适用范围: 当前阶段、事项顺序、阻塞与下一步
-> 事实来源: 本机实际检查、已确认项目边界和完成计划
+> 事实来源: 2026-10-02 用户要求、实时 GitHub 主线、本机进程/HTTP/只读数据库/浏览器检查与已确认项目边界
 > 冲突时以谁为准: 真实运行结果、ACCEPTED ADR 与用户最新确认
 
-### 2026-09-30 · Comment Study 当前合并与验收状态
+### 2026-10-02 · 评论研究整包收口在 Issue #358 开发中
+
+Mog 要求以附带手册的 P0–P5 功能与四视图为收口目标，降低开发期形式测试门槛，以真实接口浏览器端到端路径验收；允许继续开发 P3/P4，不将独立 Gold Set、完整 T01–T54、历史数据迁移或备份恢复演练作为代码推进前置。质量、共享库、发布与 Mog 业务验收仍分别记证。自动每日计划属于下阶段，保持关闭。实时 GitHub 核对 #338 已于 09-28 合并，`origin/main@74f1a486`；本机三个服务进程及 runtime identity 均为该 SHA，`:3000/health` READY，migration head 0113。只读数据库与浏览器看到现有真实 Run/Signal 和 provider 用量回执，Problem 为 0；这证明模型调用已发生，不证明语义质量或 Problem 正向路径。
+
+现行已部署页面四 Tab 可打开，但评论详情没有到作品、Run、Signal 的可点击路径，Run 选择器对已结束状态显示“未知状态”；Problem 当前支持与后台召回尚未统一最近成功/无信号 Target head。受保护分支 `codex/comment-study-complete-001` 已实现有效依据、来源资格、服务端概览汇总及页面可回证导航。独立 PostgreSQL 上两条真实 Axum／浏览器端到端路径和关键后端定向场景已通过；新分支尚未合并、部署到共享运行，也未由 Mog 验收，不能将隔离结果写成现行页面状态。上文历史快照不作为此轮门槛或现场状态。
+
+### 2026-09-30 · Comment Study 历史合并与验收状态
 
 PR #338、#350 与 [#351](https://github.com/Himog0921/linggan-intelligence/pull/351) 均已合并；#351 的代码 merge commit 是 `c6cf2d9c`，当前 main 包含该提交。#351 最终 head `fd15b056` 的 [exact-head CI](https://github.com/Himog0921/linggan-intelligence/actions/runs/36658996689) 已通过 compile、unit、隔离 PostgreSQL 和前端行为验证。Mog 后续明确要求刷新本机 3000；现行 `runtime-main@f05b0655`、三个 launchd 进程与 `:3000/health` 均已核对，数据库 READY。合并、部署、模型调用与 Mog 业务验收是不同事实。
 

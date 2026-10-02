@@ -66,7 +66,6 @@ pub struct StudySourcePreview {
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StudySourceExcludedCounts {
-    /// Kept as a zero-valued compatibility key. Unknown comment authors are not excluded.
     pub comment_author_unknown: usize,
     pub work_author_unknown: usize,
     pub creator_voice: usize,
@@ -236,6 +235,7 @@ fn classify(row: &sqlx::postgres::PgRow) -> Result<Result<Candidate, &'static st
         false,
         !matches!(cleaned.state.as_str(), "direct" | "context"),
         work_author.is_none(),
+        author.is_none(),
         author.is_some() && author == work_author,
     ]);
     if let Some(reason) = reason {
@@ -459,8 +459,7 @@ fn increment_exclusion(counts: &mut StudySourceExcludedCounts, reason: &str) {
         "sourceRestricted" => counts.source_restricted += 1,
         "bodyUnavailable" => counts.body_unavailable += 1,
         "workAuthorUnknown" => counts.work_author_unknown += 1,
-        // Stable response key only: unknown comment identity is measured separately, not excluded.
-        "commentAuthorUnknown" => {}
+        "commentAuthorUnknown" => counts.comment_author_unknown += 1,
         "creatorVoice" => counts.creator_voice += 1,
         _ => counts.text_not_researchable += 1,
     }

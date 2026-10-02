@@ -263,9 +263,9 @@ async fn claim(database: &Database) -> Result<Option<Claim>, PairWorkerError> {
     let candidate: Option<(Uuid, Uuid)> = sqlx::query_as(
         "SELECT pair.pair_ref,target.run_ref \
          FROM linggan_comment_study_problem_pair pair \
-         JOIN linggan_comment_study_signal signal ON signal.signal_ref=pair.first_signal_ref \
+         JOIN linggan_comment_study_effective_signal signal ON signal.signal_ref=pair.first_signal_ref \
          JOIN linggan_comment_study_target target USING(target_ref) \
-         JOIN linggan_comment_study_signal second_signal ON second_signal.signal_ref=pair.second_signal_ref \
+         JOIN linggan_comment_study_effective_signal second_signal ON second_signal.signal_ref=pair.second_signal_ref \
          JOIN linggan_comment_study_target second_target ON second_target.target_ref=second_signal.target_ref \
          JOIN linggan_comment_study_run run ON run.run_ref=target.run_ref \
          WHERE pair.state='pending' AND pair.model_invocation_ref IS NULL \
@@ -315,9 +315,9 @@ async fn claim(database: &Database) -> Result<Option<Claim>, PairWorkerError> {
                 to_jsonb(run)->'execution_manifest' AS execution_manifest, \
                 model.model_ref,model.model_id,version.version_ref,connection.enabled \
          FROM linggan_comment_study_problem_pair pair \
-         JOIN linggan_comment_study_signal signal ON signal.signal_ref=pair.first_signal_ref \
+         JOIN linggan_comment_study_effective_signal signal ON signal.signal_ref=pair.first_signal_ref \
          JOIN linggan_comment_study_target target USING(target_ref) \
-         JOIN linggan_comment_study_signal second_signal ON second_signal.signal_ref=pair.second_signal_ref \
+         JOIN linggan_comment_study_effective_signal second_signal ON second_signal.signal_ref=pair.second_signal_ref \
          JOIN linggan_comment_study_target second_target ON second_target.target_ref=second_signal.target_ref \
          JOIN linggan_comment_study_run run ON run.run_ref=target.run_ref \
          JOIN linggan_comment_study_policy policy USING(policy_ref) \
@@ -427,9 +427,8 @@ async fn claim(database: &Database) -> Result<Option<Claim>, PairWorkerError> {
         tx.commit().await?;
         return Ok(None);
     }
-    let reserved_tokens =
-        crate::comment_study_batch::conservative_token_estimate_json(&request_manifest)
-            .saturating_add(i64::from(model_snapshot.output_token_limit));
+    let reserved_tokens = i64::from(model_snapshot.input_token_limit)
+        .saturating_add(i64::from(model_snapshot.output_token_limit));
     let invocation = match reserve_problem_stage_call(
         &mut tx,
         ProblemStageSubject::Pair(pair_ref),

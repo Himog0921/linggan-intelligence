@@ -230,7 +230,7 @@ async fn work_counts_share_comment_qualification_and_hide_zero_eligible_works() 
             .all(|item| item["workRef"] != empty.to_string())
     );
     let row = find_work(&after, work);
-    assert_eq!(row["eligibleCommentCount"], 3);
+    assert_eq!(row["eligibleCommentCount"], 2);
     assert_eq!(row["indexedCommentCount"], 5); // dropped still has a deterministic cache entry
     assert_eq!(row["pendingIndexCount"], 0);
     let summary: CatalogSummaryQuery = serde_json::from_value(json!({
@@ -248,7 +248,7 @@ async fn work_counts_share_comment_qualification_and_hide_zero_eligible_works() 
          FROM linggan_material_comment WHERE material_ref=$1",
     ).bind(restricted).execute(db.pool()).await.unwrap();
     let restricted_view = read_work_catalog(&db, &query()).await.unwrap();
-    assert_eq!(find_work(&restricted_view, work)["eligibleCommentCount"], 2);
+    assert_eq!(find_work(&restricted_view, work)["eligibleCommentCount"], 1);
     assert_eq!(restricted_view["totalWorkCount"], 1);
     let cached: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_comment_study_clean_cache")
         .fetch_one(db.pool())

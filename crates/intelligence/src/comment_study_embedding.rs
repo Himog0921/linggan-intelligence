@@ -193,14 +193,14 @@ async fn pending_canonical_texts(
            SELECT source.canonical_hash,source.canonical_text,min(source.created_at) AS created_at \
            FROM ( \
              SELECT signal.canonical_hash,signal.canonical_text,signal.created_at \
-             FROM linggan_comment_study_signal signal \
+             FROM linggan_comment_study_effective_signal signal \
              WHERE signal.canonical_hash IS NOT NULL \
              UNION ALL \
              SELECT revision.canonical_hash,revision.canonical_text,revision.created_at \
-             FROM linggan_comment_study_problem problem \
+             FROM linggan_comment_study_current_problem problem \
              JOIN linggan_comment_study_problem_revision revision \
                ON revision.revision_ref=problem.current_revision_ref \
-             WHERE problem.state='active' \
+             WHERE problem.state IN ('active','support_insufficient') \
            ) source \
            GROUP BY source.canonical_hash,source.canonical_text \
          ) candidate \
@@ -222,13 +222,13 @@ async fn pending_canonical_texts(
 async fn pending_count(database: &Database, profile_ref: Uuid) -> Result<i64, sqlx::Error> {
     sqlx::query_scalar(
         "SELECT count(*) FROM ( \
-           SELECT signal.canonical_hash FROM linggan_comment_study_signal signal \
+           SELECT signal.canonical_hash FROM linggan_comment_study_effective_signal signal \
            WHERE signal.canonical_hash IS NOT NULL \
            UNION \
-           SELECT revision.canonical_hash FROM linggan_comment_study_problem problem \
+           SELECT revision.canonical_hash FROM linggan_comment_study_current_problem problem \
            JOIN linggan_comment_study_problem_revision revision \
              ON revision.revision_ref=problem.current_revision_ref \
-           WHERE problem.state='active' \
+           WHERE problem.state IN ('active','support_insufficient') \
          ) candidate WHERE NOT EXISTS( \
            SELECT 1 FROM linggan_comment_study_embedding_cache cache \
            WHERE cache.profile_ref=$1 AND cache.canonical_hash=candidate.canonical_hash)",
