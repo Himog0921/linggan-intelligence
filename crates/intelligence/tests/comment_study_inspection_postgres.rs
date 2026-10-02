@@ -257,7 +257,11 @@ async fn restricted_unknown_and_dropped_current_sources_do_not_leak_history_text
         .await
         .unwrap();
     assert_eq!(readable["comment"]["voiceRole"], "unknown");
-    assert_eq!(readable["comment"]["studyEligibility"]["eligible"], true);
+    assert_eq!(readable["comment"]["studyEligibility"]["eligible"], false);
+    assert_eq!(
+        readable["comment"]["studyEligibility"]["reasons"],
+        json!(["commentAuthorUnknown"])
+    );
 }
 
 async fn record_attempt(

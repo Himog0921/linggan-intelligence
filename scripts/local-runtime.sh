@@ -349,6 +349,7 @@ migrate() {
   apply_migration_once "0111_comment_study_pair_failure_state" "$project_root/database/migrations/0111_comment_study_pair_failure_state.sql"
   apply_migration_once "0112_comment_study_membership_revision" "$project_root/database/migrations/0112_comment_study_membership_revision.sql"
   apply_migration_once "0113_creator_patrol_detail_follow" "$project_root/database/migrations/0113_creator_patrol_detail_follow.sql"
+  apply_migration_once "0114_comment_study_effective_head" "$project_root/database/migrations/0114_comment_study_effective_head.sql"
 }
 
 case "$command_name" in

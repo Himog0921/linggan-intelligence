@@ -1,7 +1,7 @@
 # 评论研究产品化：接口、事务与执行合同
 
 > 状态: 权威当前
-> 最后核对: 2026-09-29
+> 最后核对: 2026-10-02
 > 适用范围: COMMENT-STUDY-PRODUCTIZATION-001 HTTP、事务、预算与执行合同
 > 事实来源: GREENFIELD v1.0 手册与其 HTTP/执行规格
 > 冲突时以谁为准: 用户最新授权、AGENTS.md、当前 API 源码和真实回执
@@ -38,7 +38,7 @@ asOf 是列表材料截止时间，不是跨 HTTP 长期持有的数据库快照
 
 indexCoverage 恰含 state(`ready/partial/unavailable`)、indexedCount(integer或NULL)、pendingCount(integer或NULL)、asOf。indexedCount 是当前scope的最新可读材料中存在匹配cleaner缓存的条数，包含已经判为dropped的缓存；它不是“可研究数”。pendingCount 是尚无该缓存的最新可读材料数。只有完成范围核对且pendingCount=0才ready；数据库失败用503，不返回假ready。
 
-开始/预览的 exclusionCounts 键固定：sourceRestricted、bodyUnavailable、indexPending、textNotResearchable、workAuthorUnknown、commentAuthorUnknown、creatorVoice、inProgress、notSelectedByMode、budgetNotSelected，值均非负整数。`commentAuthorUnknown` 为兼容保留键，未知评论作者本身不构成排除原因，故新请求恒为 0；仍满足其他资格的评论进入 targetCount。来源预览单独返回 `unknownAuthorCount`，评论目录的 `unknownIdentityCount` 也保留未知身份事实。未知账号不等于独立用户，不能为新 Problem 提供第二个独立作者支持；但可以在现有候选比较通过后加入已有 Problem。按固定 exclusion 顺序每个稳定评论只归入一个计数；相同冻结快照内 `scopeCommentCount = targetCount + sum(exclusionCounts)`。未知的commentKey/跨domain引用是请求错误，不混为“清洗排除”；有效作品但无评论可正常no_work。
+开始/预览的 exclusionCounts 键固定：sourceRestricted、bodyUnavailable、indexPending、textNotResearchable、workAuthorUnknown、commentAuthorUnknown、creatorVoice、inProgress、notSelectedByMode、budgetNotSelected，值均非负整数。评论作者身份未知时，原声仍可查阅，但当前研究目标必须计入 `commentAuthorUnknown`，不得形成新 Target；未知作者也不能作为新 Problem 的独立作者支持。来源预览单独返回 `unknownAuthorCount`，评论目录的 `unknownIdentityCount` 保留未知身份事实。此口径依 Mog 2026-10-02 对附带设计手册的本轮目标授权，取代 2026-09-28 AC043 的相反实施口径；历史回执保留在进度记录与审计台账。按固定 exclusion 顺序每个稳定评论只归入一个计数；相同冻结快照内 `scopeCommentCount = targetCount + sum(exclusionCounts)`。未知的commentKey/跨domain引用是请求错误，不混为“清洗排除”；有效作品但无评论可正常no_work。
 
 latestStudy/effectiveStudy 恰含 runRef、targetRef、state、createdAt、finishedAt(可NULL)、inputComparison(`same/changed/unknown`)、sourceState(`known/unknown/restricted`)，对象本身可NULL。effectiveState（评论行字段）为 `none/effective/source_changed/source_unavailable`；旧失败不会抹去有效head，当前正文变化不伪装为当前有效。
 
@@ -60,7 +60,7 @@ q 是 1–200 字的**字面子串**，Unicode 正常文本可查；空字符串
 
 voiceRole 闭集 reader/creator/unknown/reader_and_unknown/all，默认 reader_and_unknown；creator 只可查阅，不进入当前研究。studyState 闭集 all/never_studied/in_progress/studied/needs_context/failed/input_changed。这些是投影，不新增落库研究状态。
 
-CommentItem 必填：`commentKey:{workRef,commentExternalId},sourceRef,commentText,researchText,voiceRole,cleanState,cleanReasons,sourceState,studyEligibility,latestStudy,effectiveStudy,effectiveState,observedAt,receivedAt`。可空：authorDisplayName、authorExternalId、parentCommentKey、likeCount、likeCountAsOf、publishedAt。原材料没有可靠点赞／发布时间就为 NULL；不得从作品点赞推评论点赞，observedAt 不当 publishedAt。
+CommentItem 必填：`commentKey:{workRef,commentExternalId},sourceRef,commentText,researchText,observationRole,voiceRole,cleanState,cleanReasons,sourceState,studyEligibility,latestStudy,effectiveStudy,effectiveState,observedAt,receivedAt`。`observationRole` 取该作品在当前 Domain 已登记的 primary/reference 来源角色；同一作品两种角色均有时，列表及精确评论启动默认使用 primary。可空：authorDisplayName、authorExternalId、parentCommentKey、likeCount、likeCountAsOf、publishedAt。原材料没有可靠点赞／发布时间就为 NULL；不得从作品点赞推评论点赞，observedAt 不当 publishedAt。
 
 studyEligibility=`{eligible:boolean,reasons:string[]}`；latestStudy/effectiveStudy 分别表示最后尝试和当前有效结果，可 NULL。两者至少有 targetRef/runRef/state/createdAt/inputComparison；这样最后一次失败不会覆盖仍有效的旧结果。
 

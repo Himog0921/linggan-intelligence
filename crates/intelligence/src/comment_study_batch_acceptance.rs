@@ -7,6 +7,7 @@
 use crate::comment_study_batch::{
     BatchTargetState, ParsedBatchTarget, StudyBatchError, parse_batch_output,
 };
+use crate::comment_study_batch_worker::{cancel_unqualified_batch, unqualified_batch_target_refs};
 use crate::comment_study_canonical::{canonical_hash, canonical_text};
 use crate::comment_study_run::close_run_if_settled;
 use crate::comment_study_semantic::AcceptedSignal;
@@ -60,13 +61,105 @@ pub async fn accept_study_batch_output(
 ) -> Result<BatchAcceptanceReceipt, BatchAcceptanceError> {
     let mut transaction = database.pool().begin().await?;
     let batch = lock_batch(&mut transaction, batch_ref, lease_token).await?;
+    let unqualified = unqualified_batch_target_refs(&mut transaction, batch_ref).await?;
+    if unqualified.len() == batch.targets.len() {
+        // A restriction can arrive after leasing or even after provider I/O. Keep the provider
+        // usage receipt, but never persist a response derived from restricted frozen input.
+        cancel_unqualified_batch(&mut transaction, batch_ref).await?;
+        let (retried, cancelled): (i64, i64) = sqlx::query_as(
+            "SELECT count(*) FILTER (WHERE target.state='queued'), \
+                    count(*) FILTER (WHERE target.state='excluded') \
+             FROM linggan_comment_study_batch_target member \
+             JOIN linggan_comment_study_target target USING(target_ref) WHERE member.batch_ref=$1",
+        )
+        .bind(batch_ref)
+        .fetch_one(&mut *transaction)
+        .await?;
+        finish_model_invocation(
+            &mut transaction,
+            batch.model_invocation_ref,
+            false,
+            Some("source_unavailable_after_dispatch"),
+            json!({
+                "contract":"comment-study.note-batch.v1","runRef":batch.run_ref,
+                "batchRef":batch_ref,"acceptedTargetCount":0,
+                "sourceUnavailableAfterDispatch":true
+            }),
+        )
+        .await?;
+        close_run_if_settled(&mut transaction, batch.run_ref).await?;
+        transaction.commit().await?;
+        return Ok(BatchAcceptanceReceipt {
+            batch_ref,
+            state: "cancelled".to_owned(),
+            accepted_target_count: 0,
+            retried_target_count: usize::try_from(retried).unwrap_or(0),
+            failed_target_count: 0,
+            cancelled_target_count: usize::try_from(cancelled).unwrap_or(0),
+        });
+    }
+    // A restriction committed after provider dispatch affects only that target. Exclude it and
+    // discard its provider result; valid siblings can still be admitted from the same paid call.
+    let valid_targets: BTreeMap<Uuid, String> = batch
+        .targets
+        .iter()
+        .filter(|(target_ref, _)| !unqualified.contains(target_ref))
+        .map(|(target_ref, text)| (*target_ref, text.clone()))
+        .collect();
+    let safe_output = if unqualified.is_empty() {
+        raw_output.clone()
+    } else if let Some(results) = raw_output["results"].as_array() {
+        json!({
+            "contract":raw_output["contract"],
+            "batchRef":raw_output["batchRef"],
+            "contentPublicRef":raw_output["contentPublicRef"],
+            "results":results.iter()
+                .filter(|result| result["targetRef"].as_str()
+                    .and_then(|reference| Uuid::parse_str(reference).ok())
+                    .is_some_and(|reference| valid_targets.contains_key(&reference)))
+                .cloned().collect::<Vec<_>>()
+        })
+    } else {
+        json!({"redacted":true})
+    };
+    let has_terminal_reason: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM information_schema.columns \
+         WHERE table_schema=current_schema() AND table_name='linggan_comment_study_target' \
+           AND column_name='terminal_reason')",
+    )
+    .fetch_one(&mut *transaction)
+    .await?;
+    for target_ref in &unqualified {
+        if has_terminal_reason {
+            sqlx::query(
+                "UPDATE linggan_comment_study_target \
+                 SET state='excluded',dependency_state='input_invalid', \
+                     exclusion_reason='frozen_input_restricted', \
+                     terminal_reason='source_unavailable',finished_at=scope_001_now() \
+                 WHERE target_ref=$1 AND state='running'",
+            )
+            .bind(target_ref)
+            .execute(&mut *transaction)
+            .await?;
+        } else {
+            sqlx::query(
+                "UPDATE linggan_comment_study_target \
+                 SET state='excluded',dependency_state='input_invalid', \
+                     exclusion_reason='frozen_input_restricted' \
+                 WHERE target_ref=$1 AND state='running'",
+            )
+            .bind(target_ref)
+            .execute(&mut *transaction)
+            .await?;
+        }
+    }
     if batch.request_deadline_expired {
         let (retried_target_count, failed_target_count, cancelled_target_count) =
             reject_all_targets(
                 &mut transaction,
                 batch_ref,
                 batch.model_invocation_ref,
-                &batch.targets,
+                &valid_targets,
                 "semantic_batch_contract",
                 json!({
                     "failureCode":"request_deadline_expired",
@@ -80,7 +173,7 @@ pub async fn accept_study_batch_output(
             &mut transaction,
             batch_ref,
             "failed",
-            json!({"reason":"request_deadline_expired","rawResponse":raw_output}),
+            json!({"reason":"request_deadline_expired","rawResponse":safe_output}),
         )
         .await?;
         finish_model_invocation(
@@ -105,14 +198,14 @@ pub async fn accept_study_batch_output(
             accepted_target_count: 0,
             retried_target_count,
             failed_target_count,
-            cancelled_target_count,
+            cancelled_target_count: cancelled_target_count + unqualified.len(),
         });
     }
     let parsed = match parse_batch_output(
-        raw_output.clone(),
+        safe_output.clone(),
         batch_ref,
         batch.content_public_ref,
-        &batch.targets,
+        &valid_targets,
     ) {
         Ok(parsed) => parsed,
         Err(error) => {
@@ -121,14 +214,14 @@ pub async fn accept_study_batch_output(
                     &mut transaction,
                     batch_ref,
                     batch.model_invocation_ref,
-                    &batch.targets,
+                    &valid_targets,
                     "semantic_batch_contract",
                     json!({}),
                     batch.retry_authorized,
                     batch.stop_terminal_reason,
                 )
                 .await?;
-            finish_batch(&mut transaction, batch_ref, "failed", raw_output).await?;
+            finish_batch(&mut transaction, batch_ref, "failed", safe_output).await?;
             finish_model_invocation(
                 &mut transaction,
                 batch.model_invocation_ref,
@@ -163,7 +256,7 @@ pub async fn accept_study_batch_output(
     }
     let mut retried_target_count = 0;
     let mut failed_target_count = 0;
-    let mut cancelled_target_count = 0;
+    let mut cancelled_target_count = unqualified.len();
     // A result that is malformed on its own is that target's failed attempt only. Its siblings in
     // the same response keep whatever they legitimately produced.
     for rejected in parsed.rejected_targets {
@@ -210,7 +303,7 @@ pub async fn accept_study_batch_output(
         } else {
             "completed_with_failures"
         };
-    finish_batch(&mut transaction, batch_ref, state, raw_output).await?;
+    finish_batch(&mut transaction, batch_ref, state, safe_output).await?;
     finish_model_invocation(
         &mut transaction,
         batch.model_invocation_ref,
@@ -306,15 +399,12 @@ async fn lock_batch(
     .await?;
     let mut targets = BTreeMap::new();
     for row in rows {
-        if row.get::<String, _>("state") != "running"
-            || row.get::<String, _>("body_state") != "KNOWN"
-        {
+        if row.get::<String, _>("state") != "running" {
             return Err(BatchAcceptanceError::BatchUnavailable);
         }
         let source = row
             .get::<Option<String>, _>("body_text")
-            .filter(|text| !text.trim().is_empty())
-            .ok_or(BatchAcceptanceError::BatchUnavailable)?;
+            .unwrap_or_default();
         targets.insert(row.get("target_ref"), source);
     }
     if targets.is_empty() {

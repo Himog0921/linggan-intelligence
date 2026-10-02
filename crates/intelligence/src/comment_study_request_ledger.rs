@@ -42,6 +42,29 @@ pub(crate) enum RequestLedgerError {
     SnapshotUnavailable,
 }
 
+pub(crate) fn frozen_candidate_revision_refs(request_manifest: &Value) -> Option<Vec<Uuid>> {
+    request_manifest["prompt"]
+        .as_str()
+        .and_then(|prompt| serde_json::from_str::<Value>(prompt).ok())
+        .and_then(|payload| {
+            payload
+                .pointer("/input/candidates")
+                .and_then(Value::as_array)
+                .cloned()
+        })
+        .and_then(|candidates| {
+            candidates
+                .into_iter()
+                .map(|candidate| {
+                    candidate["problemRevisionRef"]
+                        .as_str()
+                        .and_then(|value| Uuid::parse_str(value).ok())
+                })
+                .collect::<Option<Vec<_>>>()
+        })
+        .filter(|revisions| !revisions.is_empty())
+}
+
 /// Builds and hashes the exact prompt and provider request that a problem-stage worker will send.
 pub(crate) fn problem_stage_request_manifest(
     stage: &'static str,
@@ -320,15 +343,23 @@ pub(crate) async fn mark_problem_stage_dispatch_started(
     invocation_ref: Uuid,
 ) -> Result<(), sqlx::Error> {
     let mut transaction = database.pool().begin().await?;
-    let request_run: Option<Uuid> = sqlx::query_scalar(
-        "SELECT run_ref FROM linggan_comment_study_model_request \
+    let request_row = sqlx::query(
+        "SELECT run_ref,request_manifest FROM linggan_comment_study_model_request \
          WHERE invocation_ref=$1 AND stage=$2",
     )
     .bind(invocation_ref)
     .bind(subject.stage())
     .fetch_optional(&mut *transaction)
     .await?;
-    let run_ref = request_run.ok_or(sqlx::Error::RowNotFound)?;
+    let request_row = request_row.ok_or(sqlx::Error::RowNotFound)?;
+    let run_ref: Uuid = request_row.get("run_ref");
+    let frozen_candidate_revisions = match subject {
+        ProblemStageSubject::Resolution(_) => {
+            frozen_candidate_revision_refs(&request_row.get::<Value, _>("request_manifest"))
+                .ok_or(sqlx::Error::RowNotFound)?
+        }
+        ProblemStageSubject::Pair(_) => Vec::new(),
+    };
     let subject_ref = match subject {
         ProblemStageSubject::Resolution(reference) | ProblemStageSubject::Pair(reference) => {
             reference
@@ -377,11 +408,37 @@ pub(crate) async fn mark_problem_stage_dispatch_started(
            AND ((request.stage='resolution' AND request.resolution_ref=$3) \
              OR (request.stage='pair' AND request.pair_ref=$3)) \
            AND request.deadline_at>scope_001_now() AND run.dispatch_state='enabled' \
-           AND run.dispatch_reason IS NULL",
+           AND run.dispatch_reason IS NULL \
+           AND ( \
+             (request.stage='resolution' AND EXISTS ( \
+               SELECT 1 FROM linggan_comment_study_resolution resolution \
+               JOIN linggan_comment_study_effective_signal signal USING(signal_ref) \
+               WHERE resolution.resolution_ref=request.resolution_ref \
+                 AND signal.eligibility_state='eligible' \
+                 AND cardinality($4::uuid[])>0 \
+                 AND NOT EXISTS ( \
+                   SELECT 1 FROM unnest($4::uuid[]) candidate(revision_ref) \
+                   LEFT JOIN linggan_comment_study_current_problem problem \
+                     ON problem.current_revision_ref=candidate.revision_ref \
+                   WHERE problem.problem_ref IS NULL))) \
+             OR (request.stage='pair' AND EXISTS ( \
+               SELECT 1 FROM linggan_comment_study_problem_pair pair \
+               JOIN linggan_comment_study_effective_signal first_signal \
+                 ON first_signal.signal_ref=pair.first_signal_ref \
+                AND first_signal.eligibility_state='eligible' \
+               JOIN linggan_comment_study_effective_signal second_signal \
+                 ON second_signal.signal_ref=pair.second_signal_ref \
+                AND second_signal.eligibility_state='eligible' \
+               WHERE pair.pair_ref=request.pair_ref \
+                 AND first_signal.domain_ref=second_signal.domain_ref \
+                 AND btrim(first_signal.current_author_external_id)<> \
+                     btrim(second_signal.current_author_external_id))) \
+           )",
     )
     .bind(invocation_ref)
     .bind(subject.stage())
     .bind(subject_ref)
+    .bind(&frozen_candidate_revisions)
     .execute(&mut *transaction)
     .await?;
     if fenced.rows_affected() != 1 {
@@ -492,6 +549,29 @@ pub(crate) async fn release_problem_stage_before_dispatch(
     if released.rows_affected() != 1 {
         return Err(sqlx::Error::RowNotFound);
     }
+    if let ProblemStageSubject::Resolution(reference) = subject {
+        // A frozen candidate whose revision or seed became unavailable cannot be retried with
+        // its old definition. Keep the reason visible in the unfiled expression queue.
+        sqlx::query(
+            "UPDATE linggan_comment_study_resolution resolution \
+             SET state='retrieval_incomplete', \
+                 decision_manifest=jsonb_build_object('reason','candidate_revision_unavailable'), \
+                 resolved_at=scope_001_now() \
+             WHERE resolution.resolution_ref=$1 AND resolution.state='pending' \
+               AND jsonb_typeof(resolution.candidate_manifest->'candidateProblemRevisions')='array' \
+               AND EXISTS ( \
+                 SELECT 1 FROM jsonb_to_recordset(resolution.candidate_manifest->'candidateProblemRevisions') \
+                   AS candidate(\"problemRef\" uuid,\"problemRevisionRef\" uuid) \
+                 LEFT JOIN linggan_comment_study_current_problem problem \
+                   ON problem.problem_ref=candidate.\"problemRef\" \
+                  AND problem.current_revision_ref=candidate.\"problemRevisionRef\" \
+                 WHERE problem.problem_ref IS NULL)",
+        )
+        .bind(reference)
+        .execute(&mut *transaction)
+        .await?;
+    }
+    close_run_if_settled(&mut transaction, run_ref).await?;
     transaction.commit().await?;
     Ok(())
 }

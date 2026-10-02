@@ -254,7 +254,7 @@ pub async fn recover_expired_study_batch_leases(
     Ok(recovered)
 }
 
-async fn sources_remain_qualified(
+pub(crate) async fn sources_remain_qualified(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     batch_ref: Uuid,
 ) -> Result<bool, sqlx::Error> {
@@ -263,12 +263,22 @@ async fn sources_remain_qualified(
          FROM linggan_comment_study_batch_target member \
          JOIN linggan_comment_study_target target ON target.target_ref=member.target_ref \
          JOIN linggan_material_comment source ON source.material_ref=target.source_ref \
+         LEFT JOIN linggan_material_content_author work_author \
+           ON work_author.content_public_ref=source.content_public_ref \
          LEFT JOIN linggan_material_comment_restriction restriction \
            ON restriction.content_public_ref=source.content_public_ref \
           AND restriction.comment_external_id=source.comment_external_id \
+         LEFT JOIN linggan_material_comment parent ON parent.material_ref=target.parent_source_ref \
+         LEFT JOIN linggan_material_comment_restriction parent_restriction \
+           ON parent_restriction.content_public_ref=parent.content_public_ref \
+          AND parent_restriction.comment_external_id=parent.comment_external_id \
          WHERE member.batch_ref=$1 \
            AND (source.body_state<>'KNOWN' OR source.body_text IS NULL OR btrim(source.body_text)='' \
-                OR restriction.comment_external_id IS NOT NULL)",
+                OR restriction.comment_external_id IS NOT NULL \
+                OR parent_restriction.comment_external_id IS NOT NULL \
+                OR NULLIF(btrim(source.author_external_id),'') IS NULL \
+                OR NULLIF(btrim(work_author.author_external_id),'') IS NULL \
+                OR btrim(source.author_external_id)=btrim(work_author.author_external_id))",
     )
     .bind(batch_ref)
     .fetch_one(&mut **transaction)
@@ -276,7 +286,39 @@ async fn sources_remain_qualified(
     Ok(invalid == 0)
 }
 
-async fn cancel_unqualified_batch(
+pub(crate) async fn unqualified_batch_target_refs(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    batch_ref: Uuid,
+) -> Result<Vec<Uuid>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT target.target_ref \
+         FROM linggan_comment_study_batch_target member \
+         JOIN linggan_comment_study_target target USING(target_ref) \
+         JOIN linggan_material_comment source ON source.material_ref=target.source_ref \
+         LEFT JOIN linggan_material_content_author work_author \
+           ON work_author.content_public_ref=source.content_public_ref \
+         LEFT JOIN linggan_material_comment_restriction restriction \
+           ON restriction.content_public_ref=source.content_public_ref \
+          AND restriction.comment_external_id=source.comment_external_id \
+         LEFT JOIN linggan_material_comment parent ON parent.material_ref=target.parent_source_ref \
+         LEFT JOIN linggan_material_comment_restriction parent_restriction \
+           ON parent_restriction.content_public_ref=parent.content_public_ref \
+          AND parent_restriction.comment_external_id=parent.comment_external_id \
+         WHERE member.batch_ref=$1 \
+           AND (source.body_state<>'KNOWN' OR source.body_text IS NULL OR btrim(source.body_text)='' \
+                OR restriction.comment_external_id IS NOT NULL \
+                OR parent_restriction.comment_external_id IS NOT NULL \
+                OR NULLIF(btrim(source.author_external_id),'') IS NULL \
+                OR NULLIF(btrim(work_author.author_external_id),'') IS NULL \
+                OR btrim(source.author_external_id)=btrim(work_author.author_external_id)) \
+         ORDER BY target.target_ref",
+    )
+    .bind(batch_ref)
+    .fetch_all(&mut **transaction)
+    .await
+}
+
+pub(crate) async fn cancel_unqualified_batch(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     batch_ref: Uuid,
 ) -> Result<(), sqlx::Error> {
@@ -289,52 +331,68 @@ async fn cancel_unqualified_batch(
     .await?;
     if has_productization_columns {
         sqlx::query(
-            "UPDATE linggan_comment_study_target target \
-         SET state=CASE WHEN source.body_state='KNOWN' AND source.body_text IS NOT NULL \
-                             AND btrim(source.body_text)<>'' AND restriction.comment_external_id IS NULL \
-                        THEN 'queued' ELSE 'excluded' END, \
-             dependency_state=CASE WHEN source.body_state='KNOWN' AND source.body_text IS NOT NULL \
-                                        AND btrim(source.body_text)<>'' AND restriction.comment_external_id IS NULL \
-                                   THEN target.dependency_state ELSE 'input_invalid' END, \
-             exclusion_reason=CASE WHEN source.body_state='KNOWN' AND source.body_text IS NOT NULL \
-                                        AND btrim(source.body_text)<>'' AND restriction.comment_external_id IS NULL \
-                                   THEN NULL ELSE 'source_unavailable_after_freeze' END, \
-             finished_at=CASE WHEN source.body_state='KNOWN' AND source.body_text IS NOT NULL \
-                                  AND btrim(source.body_text)<>'' AND restriction.comment_external_id IS NULL \
-                             THEN NULL ELSE scope_001_now() END, \
-             terminal_reason=CASE WHEN source.body_state='KNOWN' AND source.body_text IS NOT NULL \
-                                      AND btrim(source.body_text)<>'' AND restriction.comment_external_id IS NULL \
-                                 THEN NULL ELSE 'source_unavailable' END \
-         FROM linggan_comment_study_batch_target member, \
-              linggan_material_comment source \
-         LEFT JOIN linggan_material_comment_restriction restriction \
-           ON restriction.content_public_ref=source.content_public_ref \
-          AND restriction.comment_external_id=source.comment_external_id \
-         WHERE member.batch_ref=$1 AND target.target_ref=member.target_ref \
-           AND source.material_ref=target.source_ref AND target.state='running'",
+            "WITH qualification AS MATERIALIZED ( \
+               SELECT member.target_ref, \
+                 (source.body_state='KNOWN' AND source.body_text IS NOT NULL \
+                  AND btrim(source.body_text)<>'' AND restriction.comment_external_id IS NULL \
+                  AND parent_restriction.comment_external_id IS NULL \
+                  AND NULLIF(btrim(source.author_external_id),'') IS NOT NULL \
+                  AND NULLIF(btrim(work_author.author_external_id),'') IS NOT NULL \
+                  AND btrim(source.author_external_id)<>btrim(work_author.author_external_id)) AS qualified \
+               FROM linggan_comment_study_batch_target member \
+               JOIN linggan_comment_study_target target USING(target_ref) \
+               JOIN linggan_material_comment source ON source.material_ref=target.source_ref \
+               LEFT JOIN linggan_material_content_author work_author \
+                 ON work_author.content_public_ref=source.content_public_ref \
+               LEFT JOIN linggan_material_comment_restriction restriction \
+                 ON restriction.content_public_ref=source.content_public_ref \
+                AND restriction.comment_external_id=source.comment_external_id \
+               LEFT JOIN linggan_material_comment parent ON parent.material_ref=target.parent_source_ref \
+               LEFT JOIN linggan_material_comment_restriction parent_restriction \
+                 ON parent_restriction.content_public_ref=parent.content_public_ref \
+                AND parent_restriction.comment_external_id=parent.comment_external_id \
+               WHERE member.batch_ref=$1 AND target.state='running' \
+             ) \
+             UPDATE linggan_comment_study_target target \
+             SET state=CASE WHEN qualification.qualified THEN 'queued' ELSE 'excluded' END, \
+                 dependency_state=CASE WHEN qualification.qualified THEN target.dependency_state ELSE 'input_invalid' END, \
+                 exclusion_reason=CASE WHEN qualification.qualified THEN NULL ELSE 'source_unavailable_after_freeze' END, \
+                 finished_at=CASE WHEN qualification.qualified THEN NULL ELSE scope_001_now() END, \
+                 terminal_reason=CASE WHEN qualification.qualified THEN NULL ELSE 'source_unavailable' END \
+             FROM qualification WHERE target.target_ref=qualification.target_ref AND target.state='running'",
         )
         .bind(batch_ref)
         .execute(&mut **transaction)
         .await?;
     } else {
         sqlx::query(
-            "UPDATE linggan_comment_study_target target \
-         SET state=CASE WHEN source.body_state='KNOWN' AND source.body_text IS NOT NULL \
-                             AND btrim(source.body_text)<>'' AND restriction.comment_external_id IS NULL \
-                        THEN 'queued' ELSE 'excluded' END, \
-             dependency_state=CASE WHEN source.body_state='KNOWN' AND source.body_text IS NOT NULL \
-                                        AND btrim(source.body_text)<>'' AND restriction.comment_external_id IS NULL \
-                                   THEN target.dependency_state ELSE 'input_invalid' END, \
-             exclusion_reason=CASE WHEN source.body_state='KNOWN' AND source.body_text IS NOT NULL \
-                                        AND btrim(source.body_text)<>'' AND restriction.comment_external_id IS NULL \
-                                   THEN NULL ELSE 'source_unavailable_after_freeze' END \
-         FROM linggan_comment_study_batch_target member, \
-              linggan_material_comment source \
-         LEFT JOIN linggan_material_comment_restriction restriction \
-           ON restriction.content_public_ref=source.content_public_ref \
-          AND restriction.comment_external_id=source.comment_external_id \
-         WHERE member.batch_ref=$1 AND target.target_ref=member.target_ref \
-           AND source.material_ref=target.source_ref AND target.state='running'",
+            "WITH qualification AS MATERIALIZED ( \
+               SELECT member.target_ref, \
+                 (source.body_state='KNOWN' AND source.body_text IS NOT NULL \
+                  AND btrim(source.body_text)<>'' AND restriction.comment_external_id IS NULL \
+                  AND parent_restriction.comment_external_id IS NULL \
+                  AND NULLIF(btrim(source.author_external_id),'') IS NOT NULL \
+                  AND NULLIF(btrim(work_author.author_external_id),'') IS NOT NULL \
+                  AND btrim(source.author_external_id)<>btrim(work_author.author_external_id)) AS qualified \
+               FROM linggan_comment_study_batch_target member \
+               JOIN linggan_comment_study_target target USING(target_ref) \
+               JOIN linggan_material_comment source ON source.material_ref=target.source_ref \
+               LEFT JOIN linggan_material_content_author work_author \
+                 ON work_author.content_public_ref=source.content_public_ref \
+               LEFT JOIN linggan_material_comment_restriction restriction \
+                 ON restriction.content_public_ref=source.content_public_ref \
+                AND restriction.comment_external_id=source.comment_external_id \
+               LEFT JOIN linggan_material_comment parent ON parent.material_ref=target.parent_source_ref \
+               LEFT JOIN linggan_material_comment_restriction parent_restriction \
+                 ON parent_restriction.content_public_ref=parent.content_public_ref \
+                AND parent_restriction.comment_external_id=parent.comment_external_id \
+               WHERE member.batch_ref=$1 AND target.state='running' \
+             ) \
+             UPDATE linggan_comment_study_target target \
+             SET state=CASE WHEN qualification.qualified THEN 'queued' ELSE 'excluded' END, \
+                 dependency_state=CASE WHEN qualification.qualified THEN target.dependency_state ELSE 'input_invalid' END, \
+                 exclusion_reason=CASE WHEN qualification.qualified THEN NULL ELSE 'source_unavailable_after_freeze' END \
+             FROM qualification WHERE target.target_ref=qualification.target_ref AND target.state='running'",
         )
         .bind(batch_ref)
         .execute(&mut **transaction)
@@ -342,7 +400,8 @@ async fn cancel_unqualified_batch(
     }
     sqlx::query(
         "UPDATE linggan_comment_study_batch \
-         SET state='cancelled',output_manifest=$2,finished_at=scope_001_now() WHERE batch_ref=$1",
+         SET state='cancelled',lease_token=NULL,leased_by=NULL,lease_expires_at=NULL, \
+             output_manifest=$2,finished_at=scope_001_now() WHERE batch_ref=$1",
     )
     .bind(batch_ref)
     .bind(json!({"reason":"source_unavailable_after_freeze"}))

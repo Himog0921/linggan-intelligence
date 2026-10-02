@@ -7,7 +7,7 @@
 use super::{LocalDatabaseState, LocalWebState, shell};
 use axum::{
     Json, Router,
-    extract::{Query, Request, State},
+    extract::{Path, Query, Request, State},
     http::{HeaderMap, StatusCode, header},
     middleware::{self, Next},
     response::{Html, IntoResponse, Response},
@@ -37,9 +37,33 @@ pub(super) fn routes() -> Router<LocalWebState> {
             "/api/local/comment-study/runs",
             get(read_runs).post(catalog_api::start),
         )
+        .route(
+            "/api/local/comment-study/runs/{run_ref}",
+            get(read_run_detail),
+        )
+        .route(
+            "/api/local/comment-study/runs/{run_ref}/requests",
+            get(read_run_requests),
+        )
+        .route(
+            "/api/local/comment-study/requests/{invocation_ref}",
+            get(read_request_detail),
+        )
         .route("/api/local/comment-study/targets", get(read_targets))
         .route("/api/local/comment-study/signals", get(read_signals))
         .route("/api/local/comment-study/problems", get(read_problems))
+        .route(
+            "/api/local/comment-study/problem-candidates",
+            get(read_deferred_expressions),
+        )
+        .route(
+            "/api/local/comment-study/problems/{problem_ref}",
+            get(read_problem_detail),
+        )
+        .route(
+            "/api/local/comment-study/problems/{problem_ref}/evidence",
+            get(read_problem_evidence),
+        )
         .route("/api/local/comment-study/setup", get(read_setup))
         .route(
             "/api/local/comment-study/policy",
@@ -71,10 +95,16 @@ struct CommentStudyPageQuery {
     _q: Option<String>,
     #[serde(rename = "workRef")]
     _work_ref: Option<String>,
+    #[serde(rename = "commentWorkRef")]
+    _comment_work_ref: Option<String>,
     #[serde(rename = "view")]
     _view: Option<String>,
     #[serde(rename = "runRef")]
     _run_ref: Option<String>,
+    #[serde(rename = "targetRef")]
+    _target_ref: Option<String>,
+    #[serde(rename = "signalRef")]
+    _signal_ref: Option<String>,
     #[serde(rename = "problemRef")]
     _problem_ref: Option<String>,
     #[serde(rename = "commentExternalId")]
@@ -346,6 +376,48 @@ async fn read_runs(
     read_response(read::read_runs(database, &query).await)
 }
 
+async fn read_run_detail(
+    State(state): State<LocalWebState>,
+    Path(run_ref): Path<Uuid>,
+    Query(query): Query<CommentStudyReadQuery>,
+) -> Response {
+    if query.run_ref.is_some_and(|requested| requested != run_ref) {
+        return error(StatusCode::BAD_REQUEST, "invalid_query");
+    }
+    let database = match database(&state) {
+        Ok(database) => database,
+        Err(response) => return response,
+    };
+    read_response(read::read_run_detail(database, &query, run_ref).await)
+}
+
+async fn read_run_requests(
+    State(state): State<LocalWebState>,
+    Path(run_ref): Path<Uuid>,
+    Query(query): Query<CommentStudyReadQuery>,
+) -> Response {
+    if query.run_ref.is_some_and(|requested| requested != run_ref) {
+        return error(StatusCode::BAD_REQUEST, "invalid_query");
+    }
+    let database = match database(&state) {
+        Ok(database) => database,
+        Err(response) => return response,
+    };
+    read_response(read::read_run_requests(database, &query, run_ref).await)
+}
+
+async fn read_request_detail(
+    State(state): State<LocalWebState>,
+    Path(invocation_ref): Path<Uuid>,
+    Query(query): Query<CommentStudyReadQuery>,
+) -> Response {
+    let database = match database(&state) {
+        Ok(database) => database,
+        Err(response) => return response,
+    };
+    read_response(read::read_request_detail(database, &query, invocation_ref).await)
+}
+
 async fn read_targets(
     State(state): State<LocalWebState>,
     Query(query): Query<CommentStudyReadQuery>,
@@ -379,6 +451,53 @@ async fn read_problems(
     read_response(read::read_problems(database, &query).await)
 }
 
+async fn read_deferred_expressions(
+    State(state): State<LocalWebState>,
+    Query(query): Query<CommentStudyReadQuery>,
+) -> Response {
+    let database = match database(&state) {
+        Ok(database) => database,
+        Err(response) => return response,
+    };
+    read_response(read::read_deferred_expressions(database, &query).await)
+}
+
+async fn read_problem_detail(
+    State(state): State<LocalWebState>,
+    Path(problem_ref): Path<Uuid>,
+    Query(query): Query<CommentStudyReadQuery>,
+) -> Response {
+    if query
+        .problem_ref
+        .is_some_and(|requested| requested != problem_ref)
+    {
+        return error(StatusCode::BAD_REQUEST, "invalid_query");
+    }
+    let database = match database(&state) {
+        Ok(database) => database,
+        Err(response) => return response,
+    };
+    read_response(read::read_problem_detail(database, &query, problem_ref).await)
+}
+
+async fn read_problem_evidence(
+    State(state): State<LocalWebState>,
+    Path(problem_ref): Path<Uuid>,
+    Query(query): Query<CommentStudyReadQuery>,
+) -> Response {
+    if query
+        .problem_ref
+        .is_some_and(|requested| requested != problem_ref)
+    {
+        return error(StatusCode::BAD_REQUEST, "invalid_query");
+    }
+    let database = match database(&state) {
+        Ok(database) => database,
+        Err(response) => return response,
+    };
+    read_response(read::read_problem_evidence(database, &query, problem_ref).await)
+}
+
 fn database(state: &LocalWebState) -> Result<&linggan_storage_postgres::Database, Response> {
     match &state.database {
         LocalDatabaseState::Ready(database) => Ok(database),
@@ -403,6 +522,12 @@ fn read_response(result: Result<serde_json::Value, CommentStudyReadError>) -> Re
         }
         Err(CommentStudyReadError::RunUnavailable) => {
             error(StatusCode::NOT_FOUND, "comment_study_run_unavailable")
+        }
+        Err(CommentStudyReadError::ProblemUnavailable) => {
+            error(StatusCode::NOT_FOUND, "comment_study_problem_unavailable")
+        }
+        Err(CommentStudyReadError::RequestUnavailable) => {
+            error(StatusCode::NOT_FOUND, "comment_study_request_unavailable")
         }
         Err(CommentStudyReadError::SchemaUnavailable | CommentStudyReadError::Database(_)) => {
             error(StatusCode::SERVICE_UNAVAILABLE, "comment_study_unavailable")
@@ -630,8 +755,9 @@ mod tests {
         assert!(script.contains("runListNextCursor = response.page?.nextCursor || null"));
         assert!(script.contains("data-run-list-load-more"));
         assert!(script.contains("list(state.items, signalCard"));
-        assert!(script.contains("data-run-panel=\"targets\""));
-        assert!(script.contains("data-run-panel=\"signals\""));
+        assert!(script.contains("targets:'目标评论',signals:'研究信号'"));
+        assert!(script.contains("data-run-panel=\"${key}\""));
+        assert!(script.contains("selectedRunPanel = button.dataset.runPanel;"));
         assert!(script.contains("target.commentText"));
         assert!(script.contains("sourceStateLabel[target.sourceState]"));
         assert!(script.contains(
@@ -696,7 +822,7 @@ mod tests {
         let script = include_str!("comment_study.js");
         assert!(script.contains("function renderSourcePreview(preview, targetId, roleLabel)"));
         assert!(script.contains("作者身份未知"));
-        assert!(script.contains("不作为独立用户计数"));
+        assert!(script.contains("commentAuthorUnknown:'评论作者身份未知，不纳入研究'"));
         assert!(script.contains("作品作者本人"));
         assert!(script.contains("本次最多冻结"));
         assert!(script.contains("服务端作品目录"));
@@ -706,13 +832,24 @@ mod tests {
     #[test]
     fn comment_study_script_hides_signal_evidence_once_its_source_is_restricted() {
         let script = include_str!("comment_study.js");
+        let signal_card = script
+            .split("function signalCard(signal) {")
+            .nth(1)
+            .and_then(|rest| rest.split("async function renderSelectedRunPanel()").next())
+            .expect("Signal card renderer is present");
         assert!(
-            script.contains("signal.sourceState === 'restricted'"),
+            signal_card.contains("const sourceReadable=signal.sourceState==='known';")
+                && signal_card.contains("const body = !sourceReadable")
+                && signal_card.contains("${esc(signal.proposition)}")
+                && signal_card.contains("${esc(signal.evidence)}"),
             "a Signal's evidence is a literal quote of the original comment (see \
-             comment_study_semantic.rs); the result panel must stop quoting it once the \
-             backend reports the source as restricted, the same way the targets tab already does"
+             comment_study_semantic.rs); quote and proposition require the source to be \
+             explicitly known, so restricted and unavailable sources cannot expose them"
         );
-        assert!(script.contains("本条或父语境已受限，研究衍生文本不再显示。"));
+        assert!(signal_card.contains("本条或父语境已受限，研究衍生文本不再显示。"));
+        assert!(signal_card.contains(
+            "${sourceReadable?(signal.pairOutcomes || []).map(pairOutcomeSummary).join(''):''}"
+        ));
     }
 
     #[test]
@@ -726,7 +863,7 @@ mod tests {
         assert!(script.contains("const token = ++renderToken;"));
         assert!(script.contains("if (token !== renderToken) return false;"));
         for renderer in [
-            "async function renderOverviewTab()",
+            "async function renderIntelligenceOverviewTab()",
             "async function renderSelectedRunPanel()",
             "async function renderProblemsTab()",
             "async function renderRunsTab()",
@@ -749,39 +886,37 @@ mod tests {
                 .filter(|character| !character.is_whitespace())
                 .collect()
         };
-        let page = compact(include_str!("comment_study.html"));
+        let script = compact(include_str!("comment_study.js"));
         assert!(
-            page.contains("TAB_RENDERERS.overview=renderIntelligenceOverviewTab;"),
+            script.contains("constTAB_RENDERERS={overview:renderIntelligenceOverviewTab"),
             "情报总览必须是默认工作面的渲染器，否则首屏仍会落回旧的工程报告"
         );
         assert!(
-            page.contains("if(activeView!=='overview'||!overviewState.cache)return;"),
+            script.contains("functionrerenderIntelligenceOverview(){if(activeView!=='overview'||!overviewState.cache)return;"),
             "总览的本地重渲染只能作用于当前工作面；没有这道判断，一次旧筛选的 innerHTML \
              写入会覆盖用户已经切到的其它 Tab"
         );
         assert!(
-            page.contains(
-                "constRUN_RECORD_RESOLUTION_STATES=newSet(['protocol_rejected','failed']);"
-            ),
+            script.contains("['protocol_rejected','协议拒绝',null]")
+                && script.contains("['failed','归并处理失败',null]")
+                && script.contains("item.candidate?`data-overview-pending-state"),
             "协议拒绝与失败不在「待归并」页的状态集合里；它们必须指向运行记录，否则\
              「尚未看清」里的「查看」会落到一个必定为空的列表上"
         );
-        let loader = page
+        assert!(script.contains("constknowledge=overview.knowledgeSummary||null;"));
+        assert!(script.contains("knowledge?.problemSupportPreview"));
+        assert!(script.contains("knowledge?.voicePreview"));
+        let loader = script
             .split("asyncfunctionloadIntelligenceOverview()")
             .nth(1)
             .and_then(|rest| {
                 rest.split("asyncfunctionrenderIntelligenceOverviewTab()")
                     .next()
             })
-            .expect("总览必须有独立的加载函数，组合既有读取端点");
-        for read in [
-            "get(overviewPath('overview'))",
-            "get(overviewPath('problems',{limit:100}))",
-            "get(overviewPath('targets',{runRef:overview.latestRun.runRef,limit:100}))",
-            "get(overviewPath('signals',{runRef:overview.latestRun.runRef,limit:100}))",
-        ] {
-            assert!(loader.contains(read), "总览只组合既有读取事实：{read}");
-        }
+            .expect("总览必须通过服务端汇总读取函数加载");
+        assert!(loader.contains("get(overviewPath('overview'))"));
+        assert!(!loader.contains("get(overviewPath('targets'"));
+        assert!(!loader.contains("get(overviewPath('signals'"));
         assert!(
             !loader.contains("post("),
             "总览的加载路径必须只读：浏览、筛选与下钻不得创建 Run、保存策略或调用模型"

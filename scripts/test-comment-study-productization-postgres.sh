@@ -47,7 +47,7 @@ RUST_TEST_THREADS=1 cargo test -p linggan-intelligence \
   --test comment_study_policy_postgres \
   --test comment_study_start_postgres --locked \
   -- --ignored --nocapture --test-threads=1
-# P3 Problem lifecycle matrix (AC040–AC052), including AC043 unknown-account retention and pairing.
+# P3 Problem lifecycle matrix (AC040–AC052), including current T06 unknown-author exclusion and pairing.
 RUST_TEST_THREADS=1 cargo test -p linggan-intelligence --test comment_study_rebuild_postgres \
   --locked -- --ignored --nocapture --test-threads=1
 # These are actual Axum requests over the same disposable PostgreSQL proof database.

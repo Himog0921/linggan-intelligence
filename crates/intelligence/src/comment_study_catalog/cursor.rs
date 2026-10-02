@@ -135,6 +135,10 @@ fn validate<P: CursorPosition>(cursor: &Cursor<P>) -> Result<(), StudyCatalogErr
                 | "policies"
                 | "targets"
                 | "signals"
+                | "problems"
+                | "problem-evidence"
+                | "run-requests"
+                | "deferred-expressions"
         )
         || cursor.scope_hash.len() != 64
         || !cursor

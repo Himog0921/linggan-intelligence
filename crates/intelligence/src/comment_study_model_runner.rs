@@ -8,7 +8,7 @@ use crate::{
     comment_study_batch_acceptance::reject_study_batch_dispatch,
     comment_study_model_dispatch::{
         ReservedStudyModelCall, StudyModelDispatchError, mark_study_batch_model_dispatch_started,
-        reserve_study_batch_model_call,
+        reserve_study_batch_model_call, verify_legacy_study_batch_before_dispatch,
     },
     model_invocation::{checkpoint_invocation_usage, connection_request, finish_invocation},
     model_secrets::ModelSecretStore,
@@ -128,6 +128,14 @@ pub async fn call_study_batch_model(
         let deadline_timeout_ms = u64::try_from(deadline_timeout_ms)
             .map_err(|_| StudyModelRunnerError::Model(ModelError::Invalid))?;
         provider.timeout_ms = provider.timeout_ms.min(deadline_timeout_ms);
+    } else {
+        verify_legacy_study_batch_before_dispatch(
+            database,
+            reservation.invocation_ref,
+            batch_ref,
+            lease_token,
+        )
+        .await?;
     }
 
     let response = adapter.call(&provider).await;

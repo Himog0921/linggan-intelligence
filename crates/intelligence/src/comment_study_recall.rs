@@ -115,7 +115,7 @@ async fn target_signal(
 ) -> Result<Option<TargetSignal>, sqlx::Error> {
     let row = sqlx::query(
         "SELECT work.domain_ref,signal.canonical_hash \
-         FROM linggan_comment_study_signal signal \
+         FROM linggan_comment_study_effective_signal signal \
          JOIN linggan_comment_study_target target USING(target_ref) \
          JOIN linggan_comment_study_work work \
            ON work.run_ref=target.run_ref AND work.content_public_ref=target.content_public_ref \
@@ -137,10 +137,10 @@ async fn uncovered_problem_cores(
     domain_ref: Uuid,
 ) -> Result<i64, sqlx::Error> {
     sqlx::query_scalar(
-        "SELECT count(*) FROM linggan_comment_study_problem problem \
+        "SELECT count(*) FROM linggan_comment_study_current_problem problem \
          JOIN linggan_comment_study_problem_revision revision \
            ON revision.revision_ref=problem.current_revision_ref \
-         WHERE problem.domain_ref=$1 AND problem.state='active' \
+         WHERE problem.domain_ref=$1 AND problem.state IN ('active','support_insufficient') \
            AND NOT EXISTS( \
              SELECT 1 FROM linggan_comment_study_embedding_cache cache \
              WHERE cache.profile_ref=$2 AND cache.canonical_hash=revision.canonical_hash)",
@@ -157,10 +157,10 @@ async fn identity_matches(
     canonical_hash: &str,
 ) -> Result<Vec<Uuid>, sqlx::Error> {
     sqlx::query_scalar(
-        "SELECT problem.problem_ref FROM linggan_comment_study_problem problem \
+        "SELECT problem.problem_ref FROM linggan_comment_study_current_problem problem \
          JOIN linggan_comment_study_problem_revision revision \
            ON revision.revision_ref=problem.current_revision_ref \
-         WHERE problem.domain_ref=$1 AND problem.state='active' \
+         WHERE problem.domain_ref=$1 AND problem.state IN ('active','support_insufficient') \
            AND revision.canonical_hash=$2 \
          ORDER BY problem.created_at,problem.problem_ref",
     )
@@ -205,23 +205,23 @@ FROM (
                     member.created_at,member.signal_ref) AS reach_rank
   FROM (
   SELECT membership.problem_ref,signal.signal_ref,signal.created_at,
-         source.author_external_id,study_target.content_public_ref,
+         signal.current_author_external_id AS author_external_id,study_target.content_public_ref,
          cache.embedding OPERATOR(public.<=>) (SELECT embedding FROM target) AS distance,
          (signal.signal_ref = first_value(signal.signal_ref) OVER lead_window) AS is_lead,
-         first_value(source.author_external_id) OVER lead_window AS lead_author,
+         first_value(signal.current_author_external_id) OVER lead_window AS lead_author,
          first_value(study_target.content_public_ref) OVER lead_window AS lead_content,
          cache.embedding OPERATOR(public.<=>)
            first_value(cache.embedding) OVER lead_window AS lead_distance
   FROM linggan_comment_study_problem_membership membership
-  JOIN linggan_comment_study_problem problem USING(problem_ref)
+  JOIN linggan_comment_study_current_problem problem USING(problem_ref)
   JOIN linggan_comment_study_problem_revision revision
     ON revision.revision_ref=problem.current_revision_ref
-  JOIN linggan_comment_study_signal signal ON signal.signal_ref=membership.signal_ref
+  JOIN linggan_comment_study_effective_signal signal ON signal.signal_ref=membership.signal_ref
   JOIN linggan_comment_study_target study_target ON study_target.target_ref=signal.target_ref
-  JOIN linggan_material_comment source ON source.material_ref=study_target.source_ref
   JOIN linggan_comment_study_embedding_cache cache
     ON cache.profile_ref=$1 AND cache.canonical_hash=signal.canonical_hash
-  WHERE problem.domain_ref=$3 AND problem.state='active'
+  WHERE problem.domain_ref=$3 AND problem.state IN ('active','support_insufficient')
+    AND signal.eligibility_state='eligible'
   WINDOW lead_window AS (
     PARTITION BY membership.problem_ref
     ORDER BY (signal.signal_ref = ANY(revision.seed_signal_refs)) DESC,
@@ -277,12 +277,12 @@ async fn nearest_problems(
          candidate AS ( \
            SELECT problem.problem_ref, \
                   cache.embedding OPERATOR(public.<=>) (SELECT embedding FROM target) AS distance \
-           FROM linggan_comment_study_problem problem \
+           FROM linggan_comment_study_current_problem problem \
            JOIN linggan_comment_study_problem_revision revision \
              ON revision.revision_ref=problem.current_revision_ref \
            JOIN linggan_comment_study_embedding_cache cache \
              ON cache.profile_ref=$1 AND cache.canonical_hash=revision.canonical_hash \
-           WHERE problem.domain_ref=$3 AND problem.state='active' \
+           WHERE problem.domain_ref=$3 AND problem.state IN ('active','support_insufficient') \
            UNION ALL \
            SELECT representative.problem_ref,representative.distance FROM (",
         representative_ranking!(),
@@ -317,7 +317,7 @@ async fn unmerged_pool(
         "WITH target AS ( \
            SELECT embedding FROM linggan_comment_study_embedding_cache \
            WHERE profile_ref=$1 AND canonical_hash=$2) \
-         SELECT signal.signal_ref FROM linggan_comment_study_signal signal \
+         SELECT signal.signal_ref FROM linggan_comment_study_effective_signal signal \
          JOIN linggan_comment_study_target study_target USING(target_ref) \
          JOIN linggan_comment_study_work work \
            ON work.run_ref=study_target.run_ref \

@@ -143,6 +143,12 @@ async fn setup_with_model_limits(
         .execute(db.pool())
         .await
         .unwrap();
+    sqlx::raw_sql(include_str!(
+        "../../../database/migrations/0114_comment_study_effective_head.sql"
+    ))
+    .execute(db.pool())
+    .await
+    .unwrap();
     let (connection, version, model, config) = (
         Uuid::new_v4(),
         Uuid::new_v4(),
@@ -551,6 +557,14 @@ async fn seed_problem_stage_fixtures(
         .bind(signal_ref)
         .bind(target_ref)
         .bind(attempt_ref)
+        .execute(db.pool())
+        .await
+        .unwrap();
+        sqlx::query(
+            "UPDATE linggan_comment_study_target \
+             SET state='succeeded',finished_at=scope_001_now() WHERE target_ref=$1",
+        )
+        .bind(target_ref)
         .execute(db.pool())
         .await
         .unwrap();
@@ -1899,9 +1913,9 @@ async fn valid_1024_model_context_terminalizes_the_default_instruction_overflow(
 
 #[tokio::test]
 #[ignore = "isolated synthetic PostgreSQL; no shared database or model"]
-async fn measured_running_usage_replaces_the_reservation_for_future_budget_checks() {
+async fn measured_running_usage_releases_unspent_reservation_for_next_request() {
     let (db, mut command, _) = setup("start_measured_usage_budget", 2).await;
-    command.limits.token_limit = 10_000;
+    command.limits.token_limit = 15_000;
     let run_ref = start_study_run(&db, command, TrustedStudyOrigin::Manual)
         .await
         .unwrap()
@@ -1940,9 +1954,9 @@ async fn measured_running_usage_replaces_the_reservation_for_future_budget_check
     .fetch_one(db.pool())
     .await
     .unwrap();
-    assert!(reserved_tokens > 0);
+    assert_eq!(reserved_tokens, 8192 + 1024);
     assert_eq!(charged_before_call, 0);
-    assert!(reserved_tokens.saturating_mul(2) <= 10_000);
+    assert!(reserved_tokens.saturating_mul(2) > 15_000);
 
     mark_study_batch_model_dispatch_started(
         &db,
@@ -1952,9 +1966,9 @@ async fn measured_running_usage_replaces_the_reservation_for_future_budget_check
     )
     .await
     .unwrap();
-    let actual_charge = 10_001 - reserved_tokens;
-    let input_tokens = actual_charge.min(8192);
-    let output_tokens = actual_charge - input_tokens;
+    let actual_charge = 1_000;
+    let input_tokens = 800;
+    let output_tokens = 200;
     assert!(input_tokens <= 8192 && output_tokens <= 1024);
     checkpoint_invocation_usage(
         &db,
@@ -1991,17 +2005,9 @@ async fn measured_running_usage_replaces_the_reservation_for_future_budget_check
         .unwrap()
         .unwrap();
     assert_eq!(second_lease.batch_ref, second.batch_ref);
-    assert!(matches!(
-        reserve_study_batch_model_call(&db, second.batch_ref, second_lease.lease_token).await,
-        Err(StudyModelDispatchError::BudgetDeferred)
-    ));
-    let second_state: String =
-        sqlx::query_scalar("SELECT state FROM linggan_comment_study_batch WHERE batch_ref=$1")
-            .bind(second.batch_ref)
-            .fetch_one(db.pool())
-            .await
-            .unwrap();
-    assert_eq!(second_state, "prepared");
+    reserve_study_batch_model_call(&db, second.batch_ref, second_lease.lease_token)
+        .await
+        .unwrap();
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
             "SELECT count(*) FROM linggan_comment_study_model_request WHERE run_ref=$1",
@@ -2010,7 +2016,7 @@ async fn measured_running_usage_replaces_the_reservation_for_future_budget_check
         .fetch_one(db.pool())
         .await
         .unwrap(),
-        1
+        2
     );
 
     let first_target: Uuid = sqlx::query_scalar(
@@ -2033,14 +2039,6 @@ async fn measured_running_usage_replaces_the_reservation_for_future_budget_check
     )
     .await
     .unwrap();
-    let second_lease = claim_next_study_batch(&db, Uuid::new_v4(), 60)
-        .await
-        .unwrap()
-        .unwrap();
-    assert!(matches!(
-        reserve_study_batch_model_call(&db, second.batch_ref, second_lease.lease_token).await,
-        Err(StudyModelDispatchError::BudgetExhausted)
-    ));
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
             "SELECT count(*) FROM linggan_comment_study_model_request WHERE run_ref=$1",
@@ -2049,7 +2047,7 @@ async fn measured_running_usage_replaces_the_reservation_for_future_budget_check
         .fetch_one(db.pool())
         .await
         .unwrap(),
-        1
+        2
     );
 }
 

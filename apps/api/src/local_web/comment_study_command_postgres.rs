@@ -81,6 +81,7 @@ async fn setup(name: &str, count: usize) -> Proof {
         ),
         include_str!("../../../../database/migrations/0111_comment_study_pair_failure_state.sql"),
         include_str!("../../../../database/migrations/0112_comment_study_membership_revision.sql"),
+        include_str!("../../../../database/migrations/0114_comment_study_effective_head.sql"),
     ] {
         sqlx::raw_sql(migration).execute(db.pool()).await.unwrap();
     }
@@ -1109,4 +1110,329 @@ async fn browser_real_axum_postgres_previews_starts_and_stops_without_provider_d
             .await
             .unwrap();
     assert_eq!(run_policy_ref, created_policy_ref);
+}
+
+/// Build one small, internally consistent read fixture. No worker or provider is started; the
+/// browser still talks to real Axum handlers and PostgreSQL for every detail and navigation step.
+async fn seed_browser_problem(p: &Proof) -> (Uuid, Uuid) {
+    let (status, started) = send(
+        p.application.clone(),
+        "/api/local/comment-study/runs",
+        p.command.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let run_ref: Uuid = serde_json::from_value(started["runRef"].clone()).unwrap();
+    let targets: Vec<(Uuid,)> = sqlx::query_as(
+        "SELECT target_ref FROM linggan_comment_study_target \
+         WHERE run_ref=$1 ORDER BY created_at,target_ref LIMIT 3",
+    )
+    .bind(run_ref)
+    .fetch_all(p.db.pool())
+    .await
+    .unwrap();
+    assert_eq!(targets.len(), 3);
+
+    let mut signal_refs = Vec::new();
+    for (target_ref,) in targets.iter().take(2).copied() {
+        let attempt_ref = Uuid::new_v4();
+        let signal_ref = Uuid::new_v4();
+        sqlx::query(
+            "UPDATE linggan_comment_study_target \
+             SET state='succeeded',finished_at=scope_001_now() WHERE target_ref=$1",
+        )
+        .bind(target_ref)
+        .execute(p.db.pool())
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO linggan_comment_study_semantic_attempt( \
+               attempt_ref,target_ref,attempt_ordinal,request_hash,state,output_manifest,finished_at) \
+             VALUES($1,$2,1,repeat('a',64),'accepted','{}'::jsonb,scope_001_now())",
+        )
+        .bind(attempt_ref)
+        .bind(target_ref)
+        .execute(p.db.pool())
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO linggan_comment_study_signal( \
+               signal_ref,target_ref,semantic_attempt_ref,kind,proposition,evidence, \
+               evidence_start,evidence_end,problem_frame,eligibility_state,canonical_text,canonical_hash) \
+             VALUES($1,$2,$3,'problem','用户需要外部催促才能开始作业','SYNTHETIC', \
+               0,9,'{}'::jsonb,'eligible','用户无法自主启动家庭作业',repeat('b',64))",
+        )
+        .bind(signal_ref)
+        .bind(target_ref)
+        .bind(attempt_ref)
+        .execute(p.db.pool())
+        .await
+        .unwrap();
+        signal_refs.push(signal_ref);
+    }
+    let deferred_target_ref = targets[2].0;
+    let deferred_attempt_ref = Uuid::new_v4();
+    let deferred_signal_ref = Uuid::new_v4();
+    sqlx::query(
+        "UPDATE linggan_comment_study_target \
+         SET state='succeeded',finished_at=scope_001_now() WHERE target_ref=$1",
+    )
+    .bind(deferred_target_ref)
+    .execute(p.db.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_comment_study_semantic_attempt( \
+           attempt_ref,target_ref,attempt_ordinal,request_hash,state,output_manifest,finished_at) \
+         VALUES($1,$2,1,repeat('a',64),'accepted','{}'::jsonb,scope_001_now())",
+    )
+    .bind(deferred_attempt_ref)
+    .bind(deferred_target_ref)
+    .execute(p.db.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_comment_study_signal( \
+           signal_ref,target_ref,semantic_attempt_ref,kind,proposition,evidence, \
+           evidence_start,evidence_end,problem_frame,eligibility_state,canonical_text,canonical_hash) \
+         VALUES($1,$2,$3,'problem','尚未建档的作业表达','SYNTHETIC', \
+           0,9,'{}'::jsonb,'eligible','尚未建档的作业表达',repeat('e',64))",
+    )
+    .bind(deferred_signal_ref)
+    .bind(deferred_target_ref)
+    .bind(deferred_attempt_ref)
+    .execute(p.db.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_comment_study_resolution( \
+           resolution_ref,signal_ref,domain_ref,state,candidate_manifest,decision_manifest,resolved_at) \
+         VALUES($1,$2,$3,'deferred_novel','{}'::jsonb,'{}'::jsonb,scope_001_now())",
+    )
+    .bind(Uuid::new_v4())
+    .bind(deferred_signal_ref)
+    .bind(domain())
+    .execute(p.db.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE linggan_comment_study_target \
+         SET state='no_signal',finished_at=scope_001_now() \
+         WHERE run_ref=$1 AND state='queued'",
+    )
+    .bind(run_ref)
+    .execute(p.db.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE linggan_comment_study_run \
+         SET state='completed',finished_at=scope_001_now() WHERE run_ref=$1",
+    )
+    .bind(run_ref)
+    .execute(p.db.pool())
+    .await
+    .unwrap();
+
+    let problem_ref = Uuid::new_v4();
+    let revision_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_comment_study_problem( \
+           problem_ref,domain_ref,identity_version,support_version,state) \
+         VALUES($1,$2,1,2,'active')",
+    )
+    .bind(problem_ref)
+    .bind(domain())
+    .execute(p.db.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_comment_study_problem_revision( \
+           revision_ref,problem_ref,domain_ref,identity_version,title,definition,core_frame, \
+           inclusions,exclusions,seed_signal_refs,canonical_text,canonical_hash,definition_hash,reason) \
+         VALUES($1,$2,$3,1,'作业启动困难','孩子在家庭作业中需要外部催促才能开始', \
+           '{}'::jsonb,'[\"需要外部催促\"]'::jsonb,'[]'::jsonb,$4, \
+           '孩子在家庭作业中需要外部催促才能开始',repeat('c',64),repeat('d',64),'SYNTHETIC / NOT EVIDENCE')",
+    )
+    .bind(revision_ref)
+    .bind(problem_ref)
+    .bind(domain())
+    .bind(&signal_refs)
+    .execute(p.db.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE linggan_comment_study_problem SET current_revision_ref=$2 WHERE problem_ref=$1",
+    )
+    .bind(problem_ref)
+    .bind(revision_ref)
+    .execute(p.db.pool())
+    .await
+    .unwrap();
+    let mut first_resolution_ref = None;
+    for signal_ref in signal_refs {
+        let resolution_ref = Uuid::new_v4();
+        if first_resolution_ref.is_none() {
+            first_resolution_ref = Some(resolution_ref);
+        }
+        sqlx::query(
+            "INSERT INTO linggan_comment_study_resolution( \
+               resolution_ref,signal_ref,domain_ref,state,candidate_manifest,decision_manifest, \
+               resolved_problem_ref,resolved_at) \
+             VALUES($1,$2,$3,'assigned','{}'::jsonb,$4,$5,scope_001_now())",
+        )
+        .bind(resolution_ref)
+        .bind(signal_ref)
+        .bind(domain())
+        .bind(json!({"problemRevisionRef":revision_ref}))
+        .bind(problem_ref)
+        .execute(p.db.pool())
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO linggan_comment_study_problem_membership( \
+               membership_ref,signal_ref,problem_ref,resolution_ref,problem_revision_ref) \
+             VALUES($1,$2,$3,$4,$5)",
+        )
+        .bind(Uuid::new_v4())
+        .bind(signal_ref)
+        .bind(problem_ref)
+        .bind(resolution_ref)
+        .bind(revision_ref)
+        .execute(p.db.pool())
+        .await
+        .unwrap();
+    }
+    // A recorded request makes the protected detail screen testable without dispatching a model.
+    let invocation_ref = Uuid::new_v4();
+    let resolution_ref = first_resolution_ref.unwrap();
+    let (model_ref, version_ref): (Uuid, Uuid) = sqlx::query_as(
+        "SELECT model.model_ref,model.connection_version_ref \
+         FROM linggan_model_config config JOIN linggan_model_entry model USING(model_ref) \
+         WHERE config.config_ref=$1",
+    )
+    .bind(p.config)
+    .fetch_one(p.db.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_model_invocation( \
+           invocation_ref,connection_version_ref,model_ref,config_ref,operation,request_hash, \
+           state,reserved_tokens,charged_tokens,input_tokens,output_tokens,finished_at) \
+         VALUES($1,$2,$3,$4,'analyze',repeat('f',64),'succeeded',9216,14,10,4,scope_001_now())",
+    )
+    .bind(invocation_ref)
+    .bind(version_ref)
+    .bind(model_ref)
+    .bind(p.config)
+    .execute(p.db.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_comment_study_model_request( \
+           invocation_ref,run_ref,policy_ref,stage,resolution_ref,attempt_ordinal, \
+           input_context_hash,request_manifest,request_hash,dispatch_started_at,deadline_at) \
+         VALUES($1,$2,$3,'resolution',$4,1,repeat('c',64),$5,repeat('f',64), \
+                scope_001_now(),scope_001_now()+interval '5 minutes')",
+    )
+    .bind(invocation_ref)
+    .bind(run_ref)
+    .bind(serde_json::from_value::<Uuid>(p.command["policyRef"].clone()).unwrap())
+    .bind(resolution_ref)
+    .bind(json!({
+        "systemInstruction":"SYNTHETIC / NOT EVIDENCE",
+        "prompt":serde_json::to_string(&json!({
+            "input":{"candidates":[{"problemRevisionRef":revision_ref}]}
+        })).unwrap()
+    }))
+    .execute(p.db.pool())
+    .await
+    .unwrap();
+    (run_ref, problem_ref)
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL + real Axum browser read flow; no worker/provider"]
+async fn browser_real_axum_postgres_traces_comment_run_signal_problem_evidence() {
+    use std::path::Path;
+    use std::process::Command;
+    use tokio::net::TcpListener;
+
+    assert_eq!(std::env::var("P1_BROWSER_PROOF").as_deref(), Ok("1"));
+    let p = setup("browser_comment_problem_e2e", 3).await;
+    let (run_ref, problem_ref) = seed_browser_problem(&p).await;
+    let deferred = linggan_intelligence::comment_study_read::read_deferred_expressions(
+        &p.db,
+        &linggan_intelligence::comment_study_read::CommentStudyReadQuery {
+            domain: Some(domain()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        deferred["expressions"].as_array().unwrap().len(),
+        1,
+        "{deferred}"
+    );
+    let existing_policy_ref = p.command["policyRef"].as_str().unwrap().to_owned();
+    let initial_active_policy_ref = p.legacy.to_string();
+    let work_ref: Uuid = sqlx::query_scalar(
+        "SELECT content_public_ref FROM linggan_material_domain_usage WHERE domain_ref=$1 LIMIT 1",
+    )
+    .bind(domain())
+    .fetch_one(p.db.pool())
+    .await
+    .unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let proof_token = Uuid::new_v4().to_string();
+    let route_proof_token = proof_token.clone();
+    let application = crate::local_web::comment_study::routes()
+        .route(
+            "/__comment-study-browser-proof",
+            axum::routing::get(move || {
+                let token = route_proof_token.clone();
+                async move { token }
+            }),
+        )
+        .with_state(super::tests::state(LocalDatabaseState::Ready(p.db.clone())));
+    let server = tokio::spawn(async move { axum::serve(listener, application).await.unwrap() });
+    let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("scripts/test-comment-study-productization-ui.py")
+        .canonicalize()
+        .unwrap();
+    let python = std::env::var("PYTHON").unwrap_or_else(|_| "python3".to_owned());
+    let browser_result = tokio::task::spawn_blocking(move || {
+        Command::new(python)
+            .arg(script)
+            .arg("--api-base-url")
+            .arg(format!("http://{address}"))
+            .arg("--domain-ref")
+            .arg(domain().to_string())
+            .arg("--work-ref")
+            .arg(work_ref.to_string())
+            .arg("--existing-policy-ref")
+            .arg(existing_policy_ref)
+            .arg("--initial-active-policy-ref")
+            .arg(initial_active_policy_ref)
+            .arg("--proof-token")
+            .arg(proof_token)
+            .arg("--e2e-run-ref")
+            .arg(run_ref.to_string())
+            .arg("--e2e-problem-ref")
+            .arg(problem_ref.to_string())
+            .output()
+    })
+    .await
+    .unwrap();
+    server.abort();
+    let _ = server.await;
+    let browser_result = browser_result.unwrap();
+    assert!(
+        browser_result.status.success(),
+        "browser stdout: {}\nbrowser stderr: {}",
+        String::from_utf8_lossy(&browser_result.stdout),
+        String::from_utf8_lossy(&browser_result.stderr)
+    );
 }
