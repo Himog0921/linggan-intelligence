@@ -139,6 +139,12 @@ async function searchWorksNow(){
 }
 async function loadSetup(){
   const status=document.querySelector('#setup-status');
+  if(!domainRef){
+    status.dataset.kind='info';
+    status.textContent='请先在页头选择观察领域。';
+    document.querySelector('#open-study-dialog').disabled=true;
+    return;
+  }
   try{
     const setup=await get('setup');domainRef=setup.domainRef;
     const select=document.querySelector('#model-config');
@@ -314,6 +320,8 @@ const runStateLabel = {
   queued: '排队中', running: '处理中', completed: '已完成',
   completed_with_failures: '已结束 · 有目标未完成', cancelled: '已停止'
 };
+const requestStageLabel = { semantic: '评论语义提取', resolution: '问题归并', pair: '独立证据配对' };
+const modelRequestStateLabel = { running: '处理中', succeeded: '已完成', failed: '处理失败' };
 const dispatchStateLabel = { enabled: '允许继续派发', paused: '已暂停派发', stopped: '已停止派发' };
 const dispatchReasonLabel = {
   user_paused: '用户暂停', user_stopped: '用户停止', budget_exhausted: '预算已用尽',
@@ -713,15 +721,14 @@ function renderRunMethodPanel(run) {
   return `<div class="study-method-detail"><p><strong>${esc(run.method?.name||'未命名方法')}</strong> · 版本 ${esc(run.policyRef)} · hash ${esc(run.method?.hash||'未记录')}</p>${frozen}${stageRows}<details><summary>固定规则、清洗器与模型配置</summary><pre>${esc(JSON.stringify(fixed,null,2))}</pre></details></div>`;
 }
 function renderRunRequestsPanel(requests){
-  const stageName={semantic:'评论语义提取',resolution:'问题归并',pair:'独立证据配对'};
   return list(requests,request=>{
     const usage=request.usageKnown?`输入 ${Number(request.inputTokens)} · 输出 ${Number(request.outputTokens)} · 计费 ${Number(request.chargedTokens)} Token`:`用量未知 · 预留 ${Number(request.reservedTokens)} Token · 保守计入 ${Number(request.chargedTokens)} Token`;
-    return `<article class="study-request-card"><header><strong>${esc(stageName[request.stage]||request.stage)}</strong><span>${esc(request.state||'状态未知')} · ${request.dispatched?'已派发':'未派发'}</span></header><p>模型：${esc(request.modelIdentity?.modelId||'名称未记录')}</p><p>${esc(String(request.createdAt||'').replace('T',' '))} · 尝试 ${Number(request.attemptOrdinal||0)}</p><p>${esc(usage)}${request.elapsedMs!=null?` · ${Number(request.elapsedMs)} ms`:''}</p>${request.failureCode?`<p>错误码：${esc(request.failureCode)}</p>`:''}${request.invocationRef?`<button type="button" class="study-link" data-request-detail="${esc(request.invocationRef)}" aria-expanded="false">查看本次请求详情</button><div class="study-request-detail" hidden></div>`:'<p class="study-detail-muted">请求编号未记录，无法读取完整快照。</p>'}</article>`;
+    return `<article class="study-request-card"><header><strong>${esc(requestStageLabel[request.stage]||'未知阶段')}</strong><span>${esc(label(modelRequestStateLabel,request.state)||'状态未记录')} · ${request.dispatched?'已派发':'未派发'}</span></header><p>模型：${esc(request.modelIdentity?.modelId||'名称未记录')}</p><p>${esc(String(request.createdAt||'').replace('T',' '))} · 尝试 ${Number(request.attemptOrdinal||0)}</p><p>${esc(usage)}${request.elapsedMs!=null?` · ${Number(request.elapsedMs)} ms`:''}</p>${request.failureCode?`<p>错误码：${esc(request.failureCode)}</p>`:''}${request.invocationRef?`<button type="button" class="study-link" data-request-detail="${esc(request.invocationRef)}" aria-expanded="false">查看本次请求详情</button><div class="study-request-detail" hidden></div>`:'<p class="study-detail-muted">请求编号未记录，无法读取完整快照。</p>'}</article>`;
   },'本次 Run 没有模型请求记录。');
 }
 function renderRequestDetail(request){
   const identity=request.modelIdentity||{};
-  const meta=`<p>请求 ${esc(request.invocationRef)} · ${esc(request.stage||'阶段未记录')} · ${esc(request.state||'状态未记录')} · ${request.dispatched?'已派发':'未派发'}</p><p>模型：${esc(identity.modelId||'名称未记录')}</p><details><summary>查看冻结模型身份</summary><p>modelRef ${esc(identity.modelRef||'未记录')} · connectionVersionRef ${esc(identity.connectionVersionRef||'未记录')} · modelConfigRef ${esc(request.modelConfigRef||'未记录')}</p></details><p>创建于 ${esc(String(request.createdAt||'').replace('T',' '))}${request.dispatchStartedAt?` · 派发于 ${esc(String(request.dispatchStartedAt).replace('T',' '))}`:''}</p>`;
+  const meta=`<p>请求 ${esc(request.invocationRef)} · ${esc(requestStageLabel[request.stage]||'未知阶段')} · ${esc(label(modelRequestStateLabel,request.state)||'状态未记录')} · ${request.dispatched?'已派发':'未派发'}</p><p>模型：${esc(identity.modelId||'名称未记录')}</p><details><summary>查看冻结模型身份</summary><p>modelRef ${esc(identity.modelRef||'未记录')} · connectionVersionRef ${esc(identity.connectionVersionRef||'未记录')} · modelConfigRef ${esc(request.modelConfigRef||'未记录')}</p></details><p>创建于 ${esc(String(request.createdAt||'').replace('T',' '))}${request.dispatchStartedAt?` · 派发于 ${esc(String(request.dispatchStartedAt).replace('T',' '))}`:''}</p>`;
   if(request.sourceState==='restricted')return `${meta}<p class="study-restricted">来源当前受限，本次请求正文快照不再显示。</p>`;
   if(request.sourceState==='unavailable')return `${meta}<p class="study-restricted">来源或候选当前不可用，本次请求正文快照不再显示。</p>`;
   if(request.sourceState!=='known')return `${meta}<p class="study-restricted">来源状态未确认，本次请求正文快照不显示。</p>`;
@@ -925,6 +932,11 @@ async function renderActiveTab() {
   const container = document.querySelector('#study-tab-result');
   const token = ++renderToken;
   const view = activeView;
+  if (!domainRef) {
+    container.innerHTML = '<p class="study-empty">请先在页头选择观察领域，再查看评论研究。</p>';
+    container.setAttribute('aria-busy', 'false');
+    return true;
+  }
   container.setAttribute('aria-busy', 'true');
   let html;
   let renderFailed = false;
@@ -1242,9 +1254,11 @@ document.querySelector('#study-stop-dialog').addEventListener('cancel', event =>
 });
 
 async function loadProjection() {
-  try {
-    await loadRunListPage(true);
-  } catch (error) { allRuns = []; }
+  if (domainRef) {
+    try {
+      await loadRunListPage(true);
+    } catch (error) { allRuns = []; }
+  }
   highlightTab(activeView);
   syncStudyRoute(false);
   await renderActiveTab();
@@ -1502,7 +1516,7 @@ document.querySelector('#comment-detail-body').addEventListener('click',async ev
     const coverage=overview.indexCoverage;
     const coverageNote=coverage?`已索引 ${overviewNum(coverage.indexedCount)} 条；待索引 ${overviewNum(coverage.pendingCount)} 条`:'索引覆盖暂不可读';
     return `<div class="study-overview">
-      <div class="study-overview-scope"><span><strong>ADHD 评论研究</strong> · ${esc(scope)}</span><code>${esc(overview.domainRef||overviewDomainRef||'领域未记录')} · ${esc(asOf)}</code></div>
+      <div class="study-overview-scope"><span><strong>${esc(domainName)} 评论研究</strong> · ${esc(scope)}</span><code>${esc(overview.domainRef||overviewDomainRef||'领域未记录')} · ${esc(asOf)}</code></div>
       <section class="study-readout-strip" aria-label="评论研究观察基础">
         ${overviewReadout('可显示评论',overviewNum(corpus?.displayableCommentCount),'条',corpus?coverageNote:'评论库存汇总暂不可读')}
         ${overviewReadout('可研究评论',overviewNum(corpus?.eligibleCommentCount),'条',corpus?'按当前来源资格':'来源资格暂不可读',true)}
@@ -1513,7 +1527,7 @@ document.querySelector('#comment-detail-body').addEventListener('click',async ev
       ${renderObservationSeries(overview.observationSeries)}
       <div class="study-overview-grid">
         <section class="study-overview-section" aria-labelledby="study-problem-title"><div class="study-section-head"><h2 id="study-problem-title">近期获得新依据的问题</h2><button class="study-link" type="button" data-study-view="problems">查看用户问题</button></div><p class="study-section-note">近 ${overviewNum(knowledge?.supportWindowDays)} 天新增不同评论依据；展示当前可读的最多 3 个问题，不按需求强度排序。</p>${problems.length?`<ol class="study-problem-list">${problems.map((item,index)=>`<li class="study-problem-item"><div class="study-problem-top"><span class="study-problem-index">0${index+1}</span><h3 class="study-problem-title">${esc(item.title||'问题标题未记录')}</h3></div><p class="study-problem-meta">近 28 天新增 ${overviewNum(item.addedSupportCommentCount)} 条不同评论依据 · 当前支持 ${overviewNum(item.supportCommentCount)} 条</p>${item.voice?.sourceState==='known'?`<blockquote class="study-problem-quote">“${esc(item.voice.commentText||'')}”</blockquote>`:'<p class="study-restricted">原声当前不可读。</p>'}<div class="study-link-actions"><button class="study-link" type="button" data-overview-problem="${esc(item.problemRef)}">查看问题定义与依据</button>${item.voice?.commentKey?.workRef&&item.voice?.commentKey?.commentExternalId?`<button class="study-link" type="button" data-overview-comment-work="${esc(item.voice.commentKey.workRef)}" data-overview-comment-id="${esc(item.voice.commentKey.commentExternalId)}">查看原声</button>`:''}</div></li>`).join('')}</ol>`:'<p class="study-empty">近 28 天没有新增可读的不同评论依据；全部问题仍可在用户问题页查看。</p>'}</section>
-        <section class="study-overview-section" aria-labelledby="study-run-title"><div class="study-section-head"><h2 id="study-run-title">研究与归并进度</h2><button class="study-link" type="button" data-study-view="runs">查看运行记录</button></div><p>当前有 ${overviewNum(research?.succeededCommentCount)} 条评论形成研究信号，${overviewNum(research?.noSignalCommentCount)} 条评论在当前有效研究中未提取到信号。</p><p>已归入问题 ${overviewNum(knowledge?.assignedSignalCount)} 条信号；活跃问题 ${overviewNum(knowledge?.activeProblemCount)} 个，支持不足 ${overviewNum(knowledge?.supportInsufficientProblemCount)} 个。</p>${overview.latestRun?`<p>最近 Run：${esc(overview.latestRun.state||'状态未记录')} · ${esc(String(overview.latestRun.createdAt||'').replace('T',' '))}</p><button class="study-link" type="button" data-overview-run="${esc(overview.latestRun.runRef)}">查看本次方法、目标和调用记录</button>`:'<p class="study-empty">尚无 Run；可从评论列表选择评论发起研究。</p>'}</section>
+        <section class="study-overview-section" aria-labelledby="study-run-title"><div class="study-section-head"><h2 id="study-run-title">研究与归并进度</h2><button class="study-link" type="button" data-study-view="runs">查看运行记录</button></div><p>当前有 ${overviewNum(research?.succeededCommentCount)} 条评论形成研究信号，${overviewNum(research?.noSignalCommentCount)} 条评论在当前有效研究中未提取到信号。</p><p>已归入问题 ${overviewNum(knowledge?.assignedSignalCount)} 条信号；活跃问题 ${overviewNum(knowledge?.activeProblemCount)} 个，支持不足 ${overviewNum(knowledge?.supportInsufficientProblemCount)} 个。</p>${overview.latestRun?`<p>最近 Run：${esc(label(runStateLabel,overview.latestRun.state)||'状态未记录')} · ${esc(String(overview.latestRun.createdAt||'').replace('T',' '))}</p><button class="study-link" type="button" data-overview-run="${esc(overview.latestRun.runRef)}">查看本次方法、目标和调用记录</button>`:'<p class="study-empty">尚无 Run；可从评论列表选择评论发起研究。</p>'}</section>
       </div>
       <div class="study-overview-grid" data-balance="equal">
         <section class="study-overview-section" aria-labelledby="study-method-title"><div class="study-section-head"><h2 id="study-method-title">用户提到的办法与经历</h2><span>不替用户判断有效性</span></div><div class="study-method-switcher" role="tablist" aria-label="办法与经历"><button type="button" role="tab" data-method-kind="solution" aria-selected="${methodKind==='solution'}">解决办法</button><button type="button" role="tab" data-method-kind="experience" aria-selected="${methodKind==='experience'}">使用经历</button></div><p class="study-section-note">当前 ${overviewNum(methodCount)} 条信号，覆盖 ${overviewNum(methodWorkCount)} 篇作品；下方为服务端当前可读预览，最多 3 条。</p>${methods.length?`<div class="study-voice-list">${methods.map(overviewVoiceCard).join('')}</div>`:'<p class="study-empty">当前没有可读预览，可到研究运行查看分页结果。</p>'}</section>

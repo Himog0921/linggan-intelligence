@@ -1,20 +1,28 @@
 # 当前状态与事项队列
 
 > 状态: 权威当前
-> 最后核对: 2026-10-02
+> 最后核对: 2026-10-06
 > 适用范围: 当前阶段、事项顺序、阻塞与下一步
-> 事实来源: 2026-10-02 用户要求、实时 GitHub 主线、本机进程/HTTP/只读数据库/浏览器检查与已确认项目边界
+> 事实来源: 用户要求、2026-10-06 GitHub 主线与 CI、本机运行身份和只读 HTTP，以及此前的现场检查
 > 冲突时以谁为准: 真实运行结果、ACCEPTED ADR 与用户最新确认
 
-### 2026-10-02 · 评论研究整包收口在 Issue #358 开发中
+### 2026-10-06 · 评论研究四视图已合并并在本机运行
+
+[#338](https://github.com/Himog0921/linggan-intelligence/pull/338) 于 09-28 合并；[#359](https://github.com/Himog0921/linggan-intelligence/pull/359) 的精确 head 为 `fe90f290`，于 10-02 合并为 `main@8ec92f3d`。其 [exact-head CI](https://github.com/Himog0921/linggan-intelligence/actions/runs/37012606180) 的编译、单元、隔离 PostgreSQL 与前端步骤通过；日志确认两条真实 Axum＋隔离 PostgreSQL＋Playwright 路径均实际运行并通过，分别覆盖方法选择／预览／启动／停止，以及评论→Run→请求→Signal→Problem→证据→返回。`integration-source-export` 按仅 push 触发的条件跳过。
+
+2026-10-06 只读核对：干净的本机 `runtime-main@8ec92f3d` 与远端 `main` 一致；`runtime-identity.json` 记录构建于 10-03、migration head 为 `0114_comment_study_effective_head`，共享数据库最新迁移账本的 0114 hash 与仓库迁移文件一致。`:3000/health` 返回 ready、数据库 READY、scheduler running；当前 `/api/local/comment-study/overview` 返回 HTTP 200、`comment-study.read.v2` 和三类服务端汇总，`/corpus/comments` 返回 HTTP 200 与四个视图入口。真实浏览器在正式 `:3000` 打开四视图及评论详情／Run 链路；后续页面修正又通过只替换 JS 的只读 `:3001` 代理验证跨领域、无领域与评论→Signal→返回路径。后者是候选脚本验收，尚未合并部署。[页面验收记录](design/acceptance/comment-study-release-polish-358-acceptance.md)列明边界。
+
+这次核查未创建新的 Run 或发起模型调用。部署后的新真实 Run、Problem 正向质量和 Mog 对当前页面的业务验收均无本次回执；[正式验收账本](audits/comment-study-productization-001/acceptance-status.json)仍为 5 `PASS`、49 `NOT_RUN`，不能按隔离测试数量批量提升。Issue [#358](https://github.com/Himog0921/linggan-intelligence/issues/358) 在 #359 合并后重新打开，继续承载运行与业务验收收口。每日自动计划仍属下一阶段。
+
+### 2026-10-02 · 评论研究整包收口开发时快照
 
 Mog 要求以附带手册的 P0–P5 功能与四视图为收口目标，降低开发期形式测试门槛，以真实接口浏览器端到端路径验收；允许继续开发 P3/P4，不将独立 Gold Set、完整 T01–T54、历史数据迁移或备份恢复演练作为代码推进前置。质量、共享库、发布与 Mog 业务验收仍分别记证。自动每日计划属于下阶段，保持关闭。实时 GitHub 核对 #338 已于 09-28 合并，`origin/main@74f1a486`；本机三个服务进程及 runtime identity 均为该 SHA，`:3000/health` READY，migration head 0113。只读数据库与浏览器看到现有真实 Run/Signal 和 provider 用量回执，Problem 为 0；这证明模型调用已发生，不证明语义质量或 Problem 正向路径。
 
-现行已部署页面四 Tab 可打开，但评论详情没有到作品、Run、Signal 的可点击路径，Run 选择器对已结束状态显示“未知状态”；Problem 当前支持与后台召回尚未统一最近成功/无信号 Target head。受保护分支 `codex/comment-study-complete-001` 已实现有效依据、来源资格、服务端概览汇总及页面可回证导航。独立 PostgreSQL 上两条真实 Axum／浏览器端到端路径和关键后端定向场景已通过；新分支尚未合并、部署到共享运行，也未由 Mog 验收，不能将隔离结果写成现行页面状态。上文历史快照不作为此轮门槛或现场状态。
+当时已部署页面四 Tab 可打开，但评论详情没有到作品、Run、Signal 的可点击路径，Run 选择器对已结束状态显示“未知状态”；Problem 当前支持与后台召回尚未统一最近成功/无信号 Target head。受保护分支 `codex/comment-study-complete-001` 已实现有效依据、来源资格、服务端概览汇总及页面可回证导航。独立 PostgreSQL 上两条真实 Axum／浏览器端到端路径和关键后端定向场景已通过；截至该日分支尚未合并、部署到共享运行，也未由 Mog 验收。此段只记录 10-02 发布前状态。
 
 ### 2026-09-30 · Comment Study 历史合并与验收状态
 
-PR #338、#350 与 [#351](https://github.com/Himog0921/linggan-intelligence/pull/351) 均已合并；#351 的代码 merge commit 是 `c6cf2d9c`，当前 main 包含该提交。#351 最终 head `fd15b056` 的 [exact-head CI](https://github.com/Himog0921/linggan-intelligence/actions/runs/36658996689) 已通过 compile、unit、隔离 PostgreSQL 和前端行为验证。Mog 后续明确要求刷新本机 3000；现行 `runtime-main@f05b0655`、三个 launchd 进程与 `:3000/health` 均已核对，数据库 READY。合并、部署、模型调用与 Mog 业务验收是不同事实。
+PR #338、#350 与 [#351](https://github.com/Himog0921/linggan-intelligence/pull/351) 均已合并；#351 的代码 merge commit 是 `c6cf2d9c`，当时 main 包含该提交。#351 最终 head `fd15b056` 的 [exact-head CI](https://github.com/Himog0921/linggan-intelligence/actions/runs/36658996689) 已通过 compile、unit、隔离 PostgreSQL 和前端行为验证。Mog 后续明确要求刷新本机 3000；当时 `runtime-main@f05b0655`、三个 launchd 进程与 `:3000/health` 均已核对，数据库 READY。合并、部署、模型调用与 Mog 业务验收是不同事实。
 
 [正式验收账本](audits/comment-study-productization-001/README.md)的 2026-09-30 逐项核验确认机读状态仍为 T23–T26、T43 共 **5 PASS**，其余 **49 NOT_RUN**；隔离测试子场景不自动提升完整 T 编号。T06 旧文字要求未知评论作者不进入研究，而现有 AC043 代码与隔离测试允许其形成 Target/Signal、仅禁止作为新 Problem 的独立已知作者，待合同版本裁定。approved-v1 文档校验仍有八份 SHA 不符。P2 代码已合并，真实页面/数字、真实模型路径与 Mog 业务验收未完成；P3 质量出口仍受独立 Gold Set、分层 Recall@K、获批真实模型和 M4 资源实测约束，P4 尚不放行。
 
