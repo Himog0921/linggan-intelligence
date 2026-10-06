@@ -23,6 +23,7 @@ use crate::{
 use linggan_storage_postgres::Database;
 use serde_json::{Value, json};
 use sqlx::Row;
+use std::time::{Duration, Instant};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -85,6 +86,7 @@ pub async fn run_one_problem_pair_with_outcome(
     let Some(claim) = claim(database).await? else {
         return Ok(PairExecution::Idle);
     };
+    let connection_started = Instant::now();
     let mut request = match connection_request(database, secrets, claim.version).await {
         Ok(request) => request,
         Err(error) => {
@@ -92,6 +94,12 @@ pub async fn run_one_problem_pair_with_outcome(
             return Err(PairWorkerError::Model(error));
         }
     };
+    if connection_started.elapsed() >= Duration::from_secs(1) {
+        eprintln!(
+            "linggan worker: problem stage connection timing stage=pair connection_ms={}",
+            connection_started.elapsed().as_millis()
+        );
+    }
     request.operation = "analyze".into();
     request.model_id = claim.model.clone();
     request.timeout_ms = match u64::try_from(claim.timeout) {
@@ -429,6 +437,7 @@ async fn claim(database: &Database) -> Result<Option<Claim>, PairWorkerError> {
     }
     let reserved_tokens = i64::from(model_snapshot.input_token_limit)
         .saturating_add(i64::from(model_snapshot.output_token_limit));
+    let reservation_started = Instant::now();
     let invocation = match reserve_problem_stage_call(
         &mut tx,
         ProblemStageSubject::Pair(pair_ref),
@@ -469,6 +478,12 @@ async fn claim(database: &Database) -> Result<Option<Claim>, PairWorkerError> {
         prompt,
     };
     tx.commit().await?;
+    if reservation_started.elapsed() >= Duration::from_secs(1) {
+        eprintln!(
+            "linggan worker: problem stage reservation timing stage=pair reservation_commit_ms={}",
+            reservation_started.elapsed().as_millis()
+        );
+    }
     Ok(Some(value))
 }
 async fn signal_input(

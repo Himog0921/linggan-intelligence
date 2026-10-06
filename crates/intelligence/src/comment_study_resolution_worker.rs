@@ -21,6 +21,7 @@ use crate::{
 use linggan_storage_postgres::Database;
 use serde_json::{Value, json};
 use sqlx::Row;
+use std::time::{Duration, Instant};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -85,6 +86,7 @@ pub async fn run_one_problem_resolution_with_outcome(
     let Some(claim) = claim_resolution(database).await? else {
         return Ok(ResolutionExecution::Idle);
     };
+    let connection_started = Instant::now();
     let mut request =
         match connection_request(database, secrets, claim.connection_version_ref).await {
             Ok(request) => request,
@@ -93,6 +95,12 @@ pub async fn run_one_problem_resolution_with_outcome(
                 return Err(ResolutionWorkerError::Model(error));
             }
         };
+    if connection_started.elapsed() >= Duration::from_secs(1) {
+        eprintln!(
+            "linggan worker: problem stage connection timing stage=resolution connection_ms={}",
+            connection_started.elapsed().as_millis()
+        );
+    }
     request.operation = "analyze".into();
     request.model_id = claim.model_id.clone();
     request.timeout_ms = match u64::try_from(claim.timeout_seconds) {
@@ -454,6 +462,7 @@ async fn claim_resolution(
     }
     let reserved_tokens = i64::from(model_snapshot.input_token_limit)
         .saturating_add(i64::from(model_snapshot.output_token_limit));
+    let reservation_started = Instant::now();
     let invocation_ref = match reserve_problem_stage_call(
         &mut tx,
         ProblemStageSubject::Resolution(resolution_ref),
@@ -497,6 +506,12 @@ async fn claim_resolution(
         prompt,
     };
     tx.commit().await?;
+    if reservation_started.elapsed() >= Duration::from_secs(1) {
+        eprintln!(
+            "linggan worker: problem stage reservation timing stage=resolution reservation_commit_ms={}",
+            reservation_started.elapsed().as_millis()
+        );
+    }
     Ok(Some(claim))
 }
 

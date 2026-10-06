@@ -8,6 +8,7 @@ use crate::comment_study_policy::{StudyModelIdentity, json_hash};
 use crate::comment_study_run::close_run_if_settled;
 use serde_json::{Value, json};
 use sqlx::{Postgres, Row, Transaction};
+use std::time::{Duration, Instant};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -342,7 +343,9 @@ pub(crate) async fn mark_problem_stage_dispatch_started(
     subject: ProblemStageSubject,
     invocation_ref: Uuid,
 ) -> Result<(), sqlx::Error> {
+    let started = Instant::now();
     let mut transaction = database.pool().begin().await?;
+    let pool_wait = started.elapsed();
     let request_row = sqlx::query(
         "SELECT run_ref,request_manifest FROM linggan_comment_study_model_request \
          WHERE invocation_ref=$1 AND stage=$2",
@@ -365,6 +368,7 @@ pub(crate) async fn mark_problem_stage_dispatch_started(
             reference
         }
     };
+    let request_read_wait = started.elapsed().saturating_sub(pool_wait);
     let locked: Option<Uuid> = sqlx::query_scalar(
         "SELECT run_ref FROM linggan_comment_study_run WHERE run_ref=$1 FOR UPDATE",
     )
@@ -374,6 +378,9 @@ pub(crate) async fn mark_problem_stage_dispatch_started(
     if locked.is_none() {
         return Err(sqlx::Error::RowNotFound);
     }
+    let run_lock_wait = started
+        .elapsed()
+        .saturating_sub(pool_wait + request_read_wait);
     let subject_locked = match subject {
         ProblemStageSubject::Resolution(reference) => {
             sqlx::query_scalar::<_, Uuid>(
@@ -399,7 +406,10 @@ pub(crate) async fn mark_problem_stage_dispatch_started(
     if subject_locked.is_none() {
         return Err(sqlx::Error::RowNotFound);
     }
-    let fenced = sqlx::query(
+    let subject_lock_wait = started
+        .elapsed()
+        .saturating_sub(pool_wait + request_read_wait + run_lock_wait);
+    let fenced = sqlx::query_scalar::<_, bool>(
         "UPDATE linggan_comment_study_model_request request \
          SET dispatch_started_at=scope_001_now() \
          FROM linggan_comment_study_run run \
@@ -433,15 +443,33 @@ pub(crate) async fn mark_problem_stage_dispatch_started(
                  AND first_signal.domain_ref=second_signal.domain_ref \
                  AND btrim(first_signal.current_author_external_id)<> \
                      btrim(second_signal.current_author_external_id))) \
-           )",
+           ) \
+         RETURNING request.dispatch_started_at < request.deadline_at",
     )
     .bind(invocation_ref)
     .bind(subject.stage())
     .bind(subject_ref)
     .bind(&frozen_candidate_revisions)
-    .execute(&mut *transaction)
+    .fetch_optional(&mut *transaction)
     .await?;
-    if fenced.rows_affected() != 1 {
+    let eligibility_wait = started
+        .elapsed()
+        .saturating_sub(pool_wait + request_read_wait + run_lock_wait + subject_lock_wait);
+    if started.elapsed() >= Duration::from_secs(1) || fenced == Some(false) {
+        eprintln!(
+            "linggan worker: problem stage fence timing stage={} pool_ms={} request_ms={} run_lock_ms={} subject_lock_ms={} eligibility_ms={} late={}",
+            subject.stage(),
+            pool_wait.as_millis(),
+            request_read_wait.as_millis(),
+            run_lock_wait.as_millis(),
+            subject_lock_wait.as_millis(),
+            eligibility_wait.as_millis(),
+            fenced == Some(false)
+        );
+    }
+    // The WHERE deadline predicate can be evaluated before expensive eligibility work. The
+    // timestamp written by SET is authoritative; rollback if it crossed the deadline meanwhile.
+    if fenced != Some(true) {
         return Err(sqlx::Error::RowNotFound);
     }
     let marked = sqlx::query(
