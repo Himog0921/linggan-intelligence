@@ -13,6 +13,7 @@
 //! catalogue was simply not searchable. That reads exactly like "this is a new problem" and
 //! creates a duplicate.
 
+use crate::comment_study_problem_store::independently_authored;
 use linggan_storage_postgres::Database;
 use serde::Serialize;
 use sqlx::Row;
@@ -56,6 +57,26 @@ pub async fn recall_candidates(
     profile_ref: Uuid,
     signal_ref: Uuid,
 ) -> Result<RecallCandidates, sqlx::Error> {
+    recall_candidates_with_pool_scope(database, profile_ref, signal_ref, None).await
+}
+
+/// Pair scheduling spends its bounded pool slots only on Signals that can actually receive a
+/// first comparison. The final pair admission still rechecks these conditions transactionally.
+pub async fn recall_pair_candidates(
+    database: &Database,
+    profile_ref: Uuid,
+    signal_ref: Uuid,
+    same_run_only: bool,
+) -> Result<RecallCandidates, sqlx::Error> {
+    recall_candidates_with_pool_scope(database, profile_ref, signal_ref, Some(same_run_only)).await
+}
+
+async fn recall_candidates_with_pool_scope(
+    database: &Database,
+    profile_ref: Uuid,
+    signal_ref: Uuid,
+    pair_same_run_only: Option<bool>,
+) -> Result<RecallCandidates, sqlx::Error> {
     let Some(target) = target_signal(database, signal_ref).await? else {
         return Ok(empty("signal_not_eligible_or_unvectorised"));
     };
@@ -77,6 +98,7 @@ pub async fn recall_candidates(
         target.domain_ref,
         signal_ref,
         &target.canonical_hash,
+        pair_same_run_only,
     )
     .await?;
     Ok(RecallCandidates {
@@ -303,16 +325,28 @@ async fn nearest_problems(
 /// compared with, and every later one would look equally novel.
 ///
 /// The target itself is excluded, but a different Signal with the same canonical sentence stays
-/// eligible for recall.  Canonical equality is evidence that two expressions deserve comparison,
-/// not evidence that they came from the same person: source and author independence are enforced
-/// by the pairing admission boundary after recall has ranked the pool.
+/// eligible for recall. Canonical equality is evidence for comparison, not a same-Problem verdict.
+/// Pair scheduling applies its deterministic admission filters before the bounded ranking;
+/// otherwise ineligible Signals can occupy every slot and hide a legal partner indefinitely.
 async fn unmerged_pool(
     database: &Database,
     profile_ref: Uuid,
     domain_ref: Uuid,
     signal_ref: Uuid,
     canonical_hash: &str,
+    pair_same_run_only: Option<bool>,
 ) -> Result<Vec<Uuid>, sqlx::Error> {
+    if let Some(same_run_only) = pair_same_run_only {
+        return pair_pool(
+            database,
+            profile_ref,
+            domain_ref,
+            signal_ref,
+            canonical_hash,
+            same_run_only,
+        )
+        .await;
+    }
     sqlx::query_scalar(
         "WITH target AS ( \
            SELECT embedding FROM linggan_comment_study_embedding_cache \
@@ -338,4 +372,78 @@ async fn unmerged_pool(
     .bind(MAX_POOL_CANDIDATES)
     .fetch_all(database.pool())
     .await
+}
+
+/// Fetches ranked, deterministically eligible partners in small pages. Author independence is
+/// checked with the same Rust trim rule as pair admission, before sixteen comparison slots are
+/// spent; SQL whitespace rules do not cover every character that `str::trim` covers.
+async fn pair_pool(
+    database: &Database,
+    profile_ref: Uuid,
+    domain_ref: Uuid,
+    signal_ref: Uuid,
+    canonical_hash: &str,
+    same_run_only: bool,
+) -> Result<Vec<Uuid>, sqlx::Error> {
+    const PAGE_SIZE: i64 = MAX_POOL_CANDIDATES * 4;
+    let mut pool = Vec::new();
+    let mut offset = 0_i64;
+    loop {
+        let rows: Vec<(Uuid, Option<String>, Option<String>)> = sqlx::query_as(
+            "WITH target AS ( \
+               SELECT embedding FROM linggan_comment_study_embedding_cache \
+               WHERE profile_ref=$1 AND canonical_hash=$2), \
+             seeker AS ( \
+               SELECT study_target.run_ref,study_target.source_ref,signal.current_author_external_id \
+               FROM linggan_comment_study_effective_signal signal \
+               JOIN linggan_comment_study_target study_target USING(target_ref) \
+               WHERE signal.signal_ref=$4) \
+             SELECT signal.signal_ref,signal.current_author_external_id, \
+                    seeker.current_author_external_id \
+             FROM linggan_comment_study_effective_signal signal \
+             JOIN linggan_comment_study_target study_target USING(target_ref) \
+             JOIN linggan_comment_study_work work \
+               ON work.run_ref=study_target.run_ref \
+              AND work.content_public_ref=study_target.content_public_ref \
+             JOIN linggan_comment_study_resolution resolution USING(signal_ref) \
+             JOIN linggan_comment_study_embedding_cache cache \
+               ON cache.profile_ref=$1 AND cache.canonical_hash=signal.canonical_hash \
+             CROSS JOIN seeker \
+             WHERE work.domain_ref=$3 AND signal.eligibility_state='eligible' \
+               AND signal.signal_ref<>$4 AND resolution.state='deferred_novel' \
+               AND (NOT $5 OR study_target.run_ref=seeker.run_ref) \
+               AND study_target.source_ref<>seeker.source_ref \
+               AND NOT EXISTS(SELECT 1 FROM linggan_comment_study_problem_membership membership \
+                 WHERE membership.signal_ref=signal.signal_ref) \
+               AND NOT EXISTS(SELECT 1 FROM linggan_comment_study_problem_pair pair \
+                 WHERE pair.first_signal_ref=signal.signal_ref \
+                    OR pair.second_signal_ref=signal.signal_ref \
+                    OR pair.first_signal_ref=$4 \
+                    OR pair.second_signal_ref=$4) \
+             ORDER BY cache.embedding OPERATOR(public.<=>) (SELECT embedding FROM target),signal.signal_ref \
+             LIMIT $6 OFFSET $7",
+        )
+        .bind(profile_ref)
+        .bind(canonical_hash)
+        .bind(domain_ref)
+        .bind(signal_ref)
+        .bind(same_run_only)
+        .bind(PAGE_SIZE)
+        .bind(offset)
+        .fetch_all(database.pool())
+        .await?;
+        let fetched = rows.len() as i64;
+        for (candidate, candidate_author, seeker_author) in rows {
+            if independently_authored(candidate_author.as_deref(), seeker_author.as_deref()) {
+                pool.push(candidate);
+                if pool.len() == MAX_POOL_CANDIDATES as usize {
+                    return Ok(pool);
+                }
+            }
+        }
+        if fetched < PAGE_SIZE {
+            return Ok(pool);
+        }
+        offset += fetched;
+    }
 }
