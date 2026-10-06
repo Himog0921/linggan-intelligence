@@ -3850,8 +3850,10 @@ async fn same_work_cold_start_requires_two_known_authors_and_an_unambiguous_pair
         ProblemStoreError::PairNotIndependentOrNovel
     ));
 
+    // Spend the ambiguous first comparison on different Signals from the later approved pair.
+    // A valid non-create outcome must not give either Signal a second automatic first comparison.
     let uncertain =
-        prepare_problem_pair_for_enabled_v2_run(&db, signals[2].0, signals[3].0, selection.clone())
+        prepare_problem_pair_for_enabled_v2_run(&db, signals[1].0, signals[3].0, selection.clone())
             .await
             .unwrap();
     let uncertainty_receipt = accept_problem_pair(
