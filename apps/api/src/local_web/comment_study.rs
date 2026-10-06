@@ -51,6 +51,14 @@ pub(super) fn routes() -> Router<LocalWebState> {
         )
         .route("/api/local/comment-study/targets", get(read_targets))
         .route("/api/local/comment-study/signals", get(read_signals))
+        .route(
+            "/api/local/comment-study/current-signals",
+            get(read_current_signals),
+        )
+        .route(
+            "/api/local/comment-study/comments/related",
+            get(read_comment_related),
+        )
         .route("/api/local/comment-study/problems", get(read_problems))
         .route(
             "/api/local/comment-study/problem-candidates",
@@ -438,6 +446,28 @@ async fn read_signals(
         Err(response) => return response,
     };
     read_response(read::read_signals(database, &query).await)
+}
+
+async fn read_current_signals(
+    State(state): State<LocalWebState>,
+    Query(query): Query<CommentStudyReadQuery>,
+) -> Response {
+    let database = match database(&state) {
+        Ok(database) => database,
+        Err(response) => return response,
+    };
+    read_response(read::read_current_signals(database, &query).await)
+}
+
+async fn read_comment_related(
+    State(state): State<LocalWebState>,
+    Query(query): Query<CommentStudyReadQuery>,
+) -> Response {
+    let database = match database(&state) {
+        Ok(database) => database,
+        Err(response) => return response,
+    };
+    read_response(read::read_comment_related(database, &query).await)
 }
 
 async fn read_problems(

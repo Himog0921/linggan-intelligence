@@ -269,6 +269,8 @@ semantic/resolution/pair 三个 lane 按进程内轮转游标尝试，游标在�
 | GET `/runs/{runRef}` | domain | frozen scope/limits/method、semanticSummary、knowledgeSummary、costSummary；历史缺失字段标 NULL |
 | GET `/targets` | domain/runRef/state/cursor/limit | 完整分页目标，source 状态、latest attempt、停止或依赖原因 |
 | GET `/signals` | domain/runRef/kind/resolutionState/cursor/limit | 完整分页 Signal 和原声、问题关联；不混合当前 head 与历史口径 |
+| GET `/current-signals` | domain/kind(`solution` 或 `experience`)/cursor/limit | 跨 Run 的当前有效 Signal 逐条分页；总数按 Signal 行，不按概览预览的不同评论去重；来源受限后从当前列表退出 |
+| GET `/comments/related` | domain/workRef/commentExternalId/cursor/limit | 指定稳定评论的当前有效 Signal／Problem 关联分页；受限时只返回安全状态和空列表 |
 | GET `/runs/{runRef}/requests` | domain/cursor/limit | 三阶段请求元数据、模型、次数、耗时、usage／未知费用 |
 | GET `/requests/{invocationRef}` | domain | 有权限时完整 snapshot；缺记录或受限明确返回 recordingState |
 | GET `/problems` | domain/q/state/cursor/limit | title、definition、定义可读性、边界、revisionRef、不同评论/作者/作品数、supportState、最近新增依据 |
@@ -280,6 +282,8 @@ semantic/resolution/pair 三个 lane 按进程内轮转游标尝试，游标在�
 knowledgeSummary 精确字段：assignedSignalCount、pendingResolutionCount、retrievalIncompleteCount、deferredNovelCount、deferredAmbiguousCount、deferredContextCount、budgetStoppedCount、protocolRejectedCount、pendingPairCount。不是每条 Signal 只能显示一个“最终成功百分比”；维度计数不必强行加成100%。
 
 Run.state completed 仅意味着目标语义阶段结束；UI 用“提取结束”。knowledgeSummary 仍可能有 pending/deferred。Problem 内容来自 revision，不由前端临时概括；未建档表达仍可读、可查理由，不为填页面降低“两评论不同作者”建档要求。
+
+2026-10-06 的 Issue #358 只读投影增补：`/runs` 每项带 `methodName`（旧方法可为 NULL）、`origin`（旧记录可为 NULL）、`pendingResolutionCount`、`pendingPairCount`；`/problems` 带当前不同评论依据近 28 天新增数 `recentAddedSupportCommentCount` 和最近加入时间。`/problems/{problemRef}` 的 `revisionHistory` 逐版返回可读定义，旧版必须用该版 `seed_signal_refs` 及冻结父评论分别检查限制；不安全时仅返回 revisionRef、版本号、时间和 `definitionReadable=false`。`sourceDistribution` 按当前有效、可读、合格依据汇总作品和 UTC 加入日期，不能从首屏证据推算。当前 Signal 的游标绑定领域、类型与排序；来源或有效 head 改变后，后页可以收缩，不把 `asOf` 解释成数据库冻结快照。
 
 ## 11. 页面刷新与读取负载
 
