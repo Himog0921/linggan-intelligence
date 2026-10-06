@@ -5564,10 +5564,10 @@ async fn pair_pool_uses_trimmed_author_identity_before_distance_ranking() {
         ["seeker-barrier", "same-author-barrier"],
     )
     .await;
-    let (independent, same_author_later) = two_eligible_signals_from(
+    let (independent, other_independent) = two_eligible_signals_from(
         &database,
         "pair-pool-independent",
-        ["reader-b", "reader-a"],
+        ["reader-b", "reader-b"],
         ["independent-barrier", "unused-barrier"],
     )
     .await;
@@ -5576,7 +5576,7 @@ async fn pair_pool_uses_trimmed_author_identity_before_distance_ranking() {
         (seeker, 0.0),
         (same_author, 0.01),
         (independent, 0.1),
-        (same_author_later, 0.2),
+        (other_independent, 0.2),
     ] {
         seed_vector(
             &database,
@@ -5592,7 +5592,11 @@ async fn pair_pool_uses_trimmed_author_identity_before_distance_ranking() {
     let paired = recall_pair_candidates(&database, profile, seeker, false)
         .await
         .unwrap();
-    assert_eq!(paired.pool_signal_refs, vec![independent]);
+    assert_eq!(
+        paired.pool_signal_refs,
+        vec![independent, other_independent]
+    );
+    assert!(!paired.pool_signal_refs.contains(&same_author));
 }
 
 #[tokio::test]
