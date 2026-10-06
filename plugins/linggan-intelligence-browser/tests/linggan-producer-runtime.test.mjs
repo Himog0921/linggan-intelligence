@@ -15,6 +15,7 @@ import {
   packageReplies,
 } from '../src/linggan/producerRuntime.js';
 import { buildDiscoveryExecutionSummary } from '../src/platforms/xhs/noteCollector.js';
+import { readCurrentXhsSearchSurfaceContext } from '../src/platforms/xhs/searchFilters.js';
 import { requireControlReceipt } from '../src/linggan/controlReceipt.js';
 import { resolveDouyinBatchControlReceipt } from '../src/platforms/douyin/controlReceipt.js';
 import { commentTaskInstruction, taskFor } from '../src/linggan/contentRuntimeAdapter.js';
@@ -303,6 +304,31 @@ test('search discovery retains its page receipt in the contract-supported checkp
   assert.equal(packageValue.checkpoint.surfaceReceipt.resultSetComplete, false);
   assert.equal(packageValue.checkpoint.surfaceReceipt.scrollTrace[0].stopReason, 'risk_control');
   assert.equal(JSON.stringify(packageValue.checkpoint.surfaceReceipt.scrollTrace).includes('must_not_leave_the_page'), false);
+});
+
+test('completed search scroll actions survive the execution summary, surface context, and package checkpoint', () => {
+  const executionSummary = buildDiscoveryExecutionSummary({
+    stopReason: 'scroll_budget_completed',
+    rounds: 4,
+    maxRounds: 4,
+    scrollActions: 3,
+  });
+  const pageFacts = readCurrentXhsSearchSurfaceContext({
+    doc: { querySelectorAll: () => [] },
+    win: {},
+    requestedLimit: 20,
+    loadedCount: 20,
+    ...executionSummary,
+  });
+  const packageValue = packageDiscovery({
+    platform: 'xhs',
+    query: 'ADHD',
+    cards: Array.from({ length: 20 }, (_, index) => ({ noteId: `note-${index}` })),
+    pageFacts,
+  });
+  assert.equal(packageValue.checkpoint.surfaceReceipt.stopReason, 'scroll_budget_completed');
+  assert.equal(packageValue.checkpoint.surfaceReceipt.scrollActions, 3);
+  assert.equal(packageValue.checkpoint.surfaceReceipt.loadedCount, 20);
 });
 
 test('standard detail media submits slots and immediately queues the approved byte lane', () => {

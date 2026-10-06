@@ -202,6 +202,7 @@ export function readCurrentXhsSearchSurfaceContext({
   stopReason = 'current_surface_read_once',
   rounds = 0,
   maxRounds = 0,
+  scrollActions = 0,
   scrollTrace = [],
   scrollTraceTruncated = false,
 } = {}) {
@@ -219,6 +220,7 @@ export function readCurrentXhsSearchSurfaceContext({
     }),
     rounds: Math.max(0, Math.round(Number(rounds || 0))),
     maxRounds: Math.max(0, Math.round(Number(maxRounds || 0))),
+    scrollActions: Math.max(0, Math.round(Number(scrollActions || 0))),
     scrollTrace: Array.isArray(scrollTrace) ? scrollTrace : [],
     scrollTraceTruncated: Boolean(scrollTraceTruncated),
     suggestions,

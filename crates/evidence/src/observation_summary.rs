@@ -17,6 +17,7 @@ pub enum PatrolReadState {
     Waiting,
     Running,
     Normal,
+    Partial,
     Blocked,
     Unavailable,
 }
@@ -149,8 +150,10 @@ pub async fn read_target_observation_summaries(
                     PatrolReadState::Disabled
                 } else if running {
                     PatrolReadState::Running
-                } else if blocked || interrupted {
+                } else if blocked {
                     PatrolReadState::Blocked
+                } else if interrupted {
+                    PatrolReadState::Partial
                 } else if hits.is_some() {
                     PatrolReadState::Normal
                 } else {

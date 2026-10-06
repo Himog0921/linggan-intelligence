@@ -65,6 +65,7 @@ pub enum TargetInspectorPatrolState {
     AwaitingProducer,
     Running,
     Normal,
+    Partial,
     Blocked,
 }
 
@@ -395,8 +396,10 @@ fn patrol_projection(
         TargetInspectorPatrolState::AwaitingProducer
     } else if counts.queued > 0 {
         TargetInspectorPatrolState::Queued
-    } else if counts.blocked > 0 || latest_interrupted {
+    } else if counts.blocked > 0 {
         TargetInspectorPatrolState::Blocked
+    } else if latest_interrupted {
+        TargetInspectorPatrolState::Partial
     } else if matches!(latest_hits, TargetInspectorCount::Known(_)) {
         TargetInspectorPatrolState::Normal
     } else {

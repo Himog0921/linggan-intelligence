@@ -3231,9 +3231,9 @@ async fn interrupted_patrol_keeps_accepted_work_schedulable_without_claiming_sca
     let target = read_target(&database, target_ref).await.unwrap().unwrap();
     assert!(target.monitoring_enabled);
     let summaries = read_target_observation_summaries(&database, &[target]).await.unwrap();
-    assert_eq!(summaries.get(&target_ref).unwrap().patrol_state, PatrolReadState::Blocked);
+    assert_eq!(summaries.get(&target_ref).unwrap().patrol_state, PatrolReadState::Partial);
     let inspector = read_target_inspector(&database, target_ref).await.unwrap().unwrap();
-    assert_eq!(inspector.patrol.state, TargetInspectorPatrolState::Blocked);
+    assert_eq!(inspector.patrol.state, TargetInspectorPatrolState::Partial);
 
     // A later accepted detail can close this one Work gap without creating a homepage root.
     // Keep the queued manual follow-up in place to prove that execution does not certify scope.

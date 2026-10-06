@@ -394,6 +394,7 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 .c-lane-mark { width:var(--c-cell); height:var(--c-cell); display:block; background:var(--v7-unknown-fill); }
 .c-instr-issue[data-capacity-state="available"] .c-lane-mark { background:var(--v7-ok-fill); }
 .c-instr-issue[data-capacity-state="queueable"] .c-lane-mark { background:var(--v7-warn-fill); }
+.c-instr-issue[data-capacity-state="waiting"] .c-lane-mark { background:var(--v7-warn-fill); }
 .c-instr-issue[data-capacity-state="blocked"] .c-lane-mark { background:var(--v7-bad-fill); }
 /* 装不下就截断，不换行。用户 2026-09-20：「这些描述太长了，直接截断，不允许换行，
  * 拉高整个行高」——要消掉的是后半句：那句备注是服务端给的完整一句话，长度不归这一栏管，

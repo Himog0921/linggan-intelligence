@@ -11,6 +11,7 @@ fn facts() -> ArchiveFacts {
         quarantined: 0,
         blocked_details: 0,
         standard_directory_ready: true,
+        historical_root_eligible: false,
     }
 }
 
@@ -42,7 +43,7 @@ fn interrupted_patrol_does_not_read_as_normal_when_monitoring_is_enabled() {
         TargetInspectorCount::Known(0),
         true,
     );
-    assert_eq!(patrol.state, TargetInspectorPatrolState::Blocked);
+    assert_eq!(patrol.state, TargetInspectorPatrolState::Partial);
     assert_eq!(patrol.latest_hits, TargetInspectorCount::Known(0));
 }
 

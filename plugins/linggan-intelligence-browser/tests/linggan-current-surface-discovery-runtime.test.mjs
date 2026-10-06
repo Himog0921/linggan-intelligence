@@ -105,7 +105,7 @@ test('the target-driven discovery handler preserves its requested quota when it 
 
     assert.equal(selectorCalls, 0, 'the controller delegates loading to the target-driven collector');
     assert.equal(toasts.some(({ level }) => level === 'error'), false, 'the TDZ must not become a page error');
-    assert.match(toasts.at(-1)?.message || '', /已采集 2\/50 条，bottom_confirmed/);
+    assert.match(toasts.at(-1)?.message || '', /发现 2\/50 条候选，保留 2\/50 条；已到页面底部/);
     assert.equal(localFetches >= 0, true, 'the synthetic test has no platform request');
   } finally {
     globalThis.chrome = original.chrome;
