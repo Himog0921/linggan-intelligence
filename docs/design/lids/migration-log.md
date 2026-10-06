@@ -1,10 +1,14 @@
 # LIDS-LOG-001 · LIDS 迁移与变更记录
 
 > 状态: 权威当前
-> 最后核对: 2026-09-20
+> 最后核对: 2026-10-06
 > 适用范围: Linggan Intelligence LIDS Token、Primitive、Component、Pattern、Page、Motion、Scene 和 Data Truth 规则的实际变更、替代、例外与验证边界
 > 事实来源: [system.md](system.md)、[README.md](README.md)、DESIGN-002 Issue #7、项目 progress 记录和实际验证输出
 > 冲突时以谁为准: 真实代码/合同/测试、用户最新确认、当前 SCOPE 和 ACCEPTED 决策；本日志不把计划写成已实现事实
+
+## 2026-10-06 · COMMENT-STUDY-RELEASE-POLISH-358 · 页面领域和状态表达
+
+评论研究 L1 页面复用现有 `data-domain-name`，使概览标题跟随所选领域；最近 Run 复用已存在的中文状态词典。调用记录的状态沿数据库闭集译为中文，阶段沿现有三阶段名称显示。未选领域时四视图呈现选择引导，研究入口禁用。没有修改 Token、Primitive、Component、Pattern、共享 shell、数据合同或模型动作。真实 API 的只读本机代理浏览器验证 ADHD、考研自习、无领域四 Tab、评论→信号→浏览器返回和调用记录详情；这是候选脚本验收，正式 `:3000` 尚未刷新。见[变更清单](../changes/comment-study-release-polish-358-ui-change-manifest.md)和[验收记录](../acceptance/comment-study-release-polish-358-acceptance.md)。
 
 ## 2026-09-20 · COMMENT-STUDY-P3-QUALITY-GATE-010 未完成归并状态投影
 

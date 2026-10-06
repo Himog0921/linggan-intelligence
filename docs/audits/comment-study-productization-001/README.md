@@ -1,19 +1,27 @@
 # 评论研究产品化 · 来源和验收账本
 
 > 状态: 权威当前
-> 最后核对: 2026-10-02
+> 最后核对: 2026-10-06
 > 适用范围: COMMENT-STUDY-PRODUCTIZATION-001
-> 事实来源: 用户提供的手册v1.0与本分支的实际提交
+> 事实来源: 用户提供的手册v1.0、#359 精确 head CI、本机运行身份与只读 HTTP
 > 冲突时以谁为准: 实际执行证据与对应版本合同
 
 - `source-lock.json`：成文时固定源码和LIDS附件的来源回执，不是当前全量部署状态。
 - `document-check.original.json`：2026-09-22文档交付时的静态检查原回执。保留其“未写GitHub”等历史描述，不以它报告本次状态。
 - `acceptance-status.json`：T01–T54实际业务验收台账；每条由对应层级的执行证据才能改为PASS，文档或Schema检查不能替代Rust/数据库/浏览器证明。
-- [P0来源与现场边界](p0-execution.md)：源码部分已核对，本机数据库与在途调用未核验。
+- [P0来源与现场边界](p0-execution.md)：保留当时的基线盘点；本机最新运行状态见下方 2026-10-06 回执。
 - [P1前序回看](p1-read-counts.md)：批次计数、schema-phase候选、清洗缓存、评论目录/详情/历史和各次验证边界。
 - [P1作品目录与共享标题](p1-work-catalog.md)：`/works` 后端、Evidence标题复用、迁移编号对齐，以及隔离PG/合成浏览器回执。
 
-## 2026-10-02 · Issue #358 当前执行口径
+## 2026-10-06 · #359 合并与本机发布核验
+
+[#338](https://github.com/Himog0921/linggan-intelligence/pull/338) 已于 09-28 合并；[#359](https://github.com/Himog0921/linggan-intelligence/pull/359) 的 exact head `fe90f290` 于 10-02 合并为 `main@8ec92f3d`。[Actions 37012606180](https://github.com/Himog0921/linggan-intelligence/actions/runs/37012606180) 在该 head 成功，日志确认两个真实 Axum＋隔离 PostgreSQL＋Playwright 用例实际运行并通过；合成数据库脚本覆盖已实现的 145 条用例，不能据此把完整 T01–T54 批量记为通过。`integration-source-export` 按 push-only 条件跳过。
+
+2026-10-06 本机只读核对：`runtime-main` 干净且为 `8ec92f3d`，与远端 main 一致；运行身份记录 10-03 构建、migration head `0114_comment_study_effective_head`，共享数据库最新 0114 账本 hash 与迁移文件一致。`:3000/health` 为 ready／数据库 READY；评论研究概览 API 返回 HTTP 200、`comment-study.read.v2` 与服务端语料／研究／知识汇总。真实浏览器在正式 `:3000` 走查四视图及评论详情／Run；只读 `:3001` 代理让候选 JS 接现行真实 API，验证跨领域标题、无领域四 Tab 和评论→Signal→返回。代理拒绝 POST，因此不证明真实新 Run；候选脚本也尚未部署。[页面验收记录](../../design/acceptance/comment-study-release-polish-358-acceptance.md)列明路径。10-02 以下的“尚未合并／部署”和旧 migration head 是当时快照，不再描述现状。
+
+**尚待验收**：这次核查没有新建 Run、调用真实模型或取得部署后新真实 Problem 的正向质量回执。Mog 对当前页面和业务结果的验收未登记；机读 `acceptance-status.json` 仍为 5 `PASS`（T23–T26、T43）／49 `NOT_RUN`。Issue [#358](https://github.com/Himog0921/linggan-intelligence/issues/358) 在 #359 合并后重新打开，保留运行与业务验收事项。自动每日计划属下一阶段，未因本次发布启用。
+
+## 2026-10-02 · Issue #358 开发时执行口径
 
 Mog 本次要求以附带手册 P0–P5 的完整四视图功能与可回证页面为目标，尽快推进，开发期降低形式测试门槛，页面走真实接口端到端验收。历史数据迁移、备份恢复演练、逐 T 编号独立 fixture、百万规模合成性能矩阵和 Gold Set 标注不再阻塞 P3/P4 代码开发；质量、真实模型语义、发布与 Mog 业务验收仍分别报告，未运行的旧 T 项不批量改为 PASS。每日自动计划属于下阶段，保持关闭。下方 2026-09-30 的“P3 未通过前不放行 P4”描述是当时门槛，已被本次用户要求替代。
 
@@ -25,7 +33,7 @@ Mog 本次要求以附带手册 P0–P5 的完整四视图功能与可回证页�
 
 ## 2026-09-30 · 正式验收核验
 
-本节是当前结论；下方 2026-09-28 表格及逐次增量记录保留为当时快照。GitHub 已确认 #338 于 09-28、#350 于 09-29、[#351](https://github.com/Himog0921/linggan-intelligence/pull/351) 于 09-30 合并；#351 的代码合并提交是 `c6cf2d9ce247101850f20e189d9286a5e6faf3ef`，后续纯文档提交不改变这项代码事实。#351 最终 head `fd15b056` 的 [exact-head CI](https://github.com/Himog0921/linggan-intelligence/actions/runs/36658996689) 中 compile、unit、隔离 PostgreSQL 和前端行为步骤均通过，source export 按工作流条件跳过。合并前的本地 API 单测 297/297、合成浏览器、项目治理与 UI 规范检查通过；独立代码复核无阻断。
+本节是 2026-09-30 当时的结论；下方 2026-09-28 表格及逐次增量记录同样保留为历史快照。GitHub 已确认 #338 于 09-28、#350 于 09-29、[#351](https://github.com/Himog0921/linggan-intelligence/pull/351) 于 09-30 合并；#351 的代码合并提交是 `c6cf2d9ce247101850f20e189d9286a5e6faf3ef`，后续纯文档提交不改变这项代码事实。#351 最终 head `fd15b056` 的 [exact-head CI](https://github.com/Himog0921/linggan-intelligence/actions/runs/36658996689) 中 compile、unit、隔离 PostgreSQL 和前端行为步骤均通过，source export 按工作流条件跳过。合并前的本地 API 单测 297/297、合成浏览器、项目治理与 UI 规范检查通过；独立代码复核无阻断。
 
 **机读台账仍为 5 `PASS`（T23–T26、T43）、49 `NOT_RUN`**。核对 `acceptance-status.json`：T01–T54 连续且无重复，五项 PASS 均有提交/测试/CI 证据，NOT_RUN 的证据字段均为空。#351 没有提供新的完整 T 编号验收回执，因此不凭合并、测试总数或相近用例批量改写机读状态。当前隔离测试已证明多项子场景，例如 T01 的 688/100 选择、T11–T14 的幂等与并发、T27–T28 的控制边界和 T46 的部分请求竞态；它们不等于各项手册要求的完整场景及业务验收。T44 的既有计数反例仅为 6 个目标，不能代替要求的 300 目标/多作品/全量翻页。
 

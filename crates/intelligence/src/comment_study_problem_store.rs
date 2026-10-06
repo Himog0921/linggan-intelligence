@@ -108,7 +108,7 @@ struct NovelSignal {
     author_external_id: Option<String>,
 }
 
-fn independently_authored(first: Option<&str>, second: Option<&str>) -> bool {
+pub(crate) fn independently_authored(first: Option<&str>, second: Option<&str>) -> bool {
     let first = first.map(str::trim).filter(|id| !id.is_empty());
     let second = second.map(str::trim).filter(|id| !id.is_empty());
     match (first, second) {
@@ -521,8 +521,19 @@ async fn prepare_problem_pair_inner(
     }
     let first = lock_novel_signal(&mut transaction, first_ref).await?;
     let second = lock_novel_signal(&mut transaction, second_ref).await?;
+    // The row locks serialize competing pair preparations. Recheck after acquiring them so a
+    // comparison committed while we waited cannot give either Signal a second primary pair.
+    let already_paired: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM linggan_comment_study_problem_pair pair \
+         WHERE pair.first_signal_ref=ANY($1::uuid[]) \
+            OR pair.second_signal_ref=ANY($1::uuid[]))",
+    )
+    .bind(vec![first_ref, second_ref])
+    .fetch_one(&mut *transaction)
+    .await?;
     if first.domain_ref != second.domain_ref
         || first.source_ref == second.source_ref
+        || already_paired
         || !independently_authored(
             first.author_external_id.as_deref(),
             second.author_external_id.as_deref(),

@@ -40,14 +40,16 @@ use linggan_intelligence::{
     comment_study_model_runner::{StudyModelRunnerError, call_study_batch_model},
     comment_study_pair_worker::run_one_problem_pair,
     comment_study_problem_store::{
-        PairSelection, PreparedProblemPair, accept_problem_pair, accept_problem_resolution,
-        prepare_problem_pair, prepare_problem_resolution,
+        PairSelection, PreparedProblemPair, ProblemStoreError, accept_problem_pair,
+        accept_problem_resolution, prepare_problem_pair, prepare_problem_resolution,
     },
     comment_study_read::{
         CommentStudyReadQuery, read_deferred_expressions, read_overview, read_problem_evidence,
         read_problems, read_request_detail, read_runs, read_signals, read_targets,
     },
-    comment_study_recall::{RecallCompleteness, problem_representatives, recall_candidates},
+    comment_study_recall::{
+        RecallCompleteness, problem_representatives, recall_candidates, recall_pair_candidates,
+    },
     comment_study_resolution_worker::run_one_problem_resolution,
     comment_study_run::{PrepareStudyRunRequest, prepare_study_run},
     model_runner::prepare_next_batch_across_runs,
@@ -5445,6 +5447,160 @@ async fn the_unmerged_pool_keeps_an_independent_signal_with_the_same_canonical_t
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof"]
+async fn pair_pool_filters_ineligible_neighbours_before_its_sixteen_slot_limit() {
+    let database = proof_database("comment_study_pair_pool_eligible_limit").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    apply_productization_schema(&database).await;
+    let (seeker, partner) = two_eligible_signals_from(
+        &database,
+        "pair-pool-seeker",
+        ["seeker-author", "partner-author"],
+        ["seeker-barrier", "partner-barrier"],
+    )
+    .await;
+    let profile = seed_embedding_profile(&database).await;
+    seed_vector(
+        &database,
+        profile,
+        &signal_canonical_hash(&database, seeker).await,
+        0.0,
+    )
+    .await;
+    seed_vector(
+        &database,
+        profile,
+        &signal_canonical_hash(&database, partner).await,
+        0.3,
+    )
+    .await;
+    for index in 0..8 {
+        let note = format!("pair-pool-other-run-{index}");
+        let first_barrier = format!("closer-barrier-{index}-a");
+        let second_barrier = format!("closer-barrier-{index}-b");
+        let (first, second) = two_eligible_signals_from(
+            &database,
+            &note,
+            ["other-author-a", "other-author-b"],
+            [&first_barrier, &second_barrier],
+        )
+        .await;
+        for (offset, signal) in [first, second].into_iter().enumerate() {
+            seed_vector(
+                &database,
+                profile,
+                &signal_canonical_hash(&database, signal).await,
+                0.01 + (index * 2 + offset) as f64 * 0.01,
+            )
+            .await;
+        }
+    }
+    for _ in 0..18 {
+        assert!(advance_next_problem_resolution(&database).await.unwrap());
+    }
+    let unscoped = recall_candidates(&database, profile, seeker).await.unwrap();
+    assert!(
+        !unscoped.pool_signal_refs.contains(&partner),
+        "sixteen closer Signals from other Runs fill the old global pool"
+    );
+    let paired = recall_pair_candidates(&database, profile, seeker, true)
+        .await
+        .unwrap();
+    assert_eq!(paired.completeness, RecallCompleteness::Complete);
+    assert_eq!(paired.pool_signal_refs, vec![partner]);
+    let run_ref: Uuid = sqlx::query_scalar(
+        "SELECT target.run_ref FROM linggan_comment_study_signal signal \
+         JOIN linggan_comment_study_target target USING(target_ref) \
+         WHERE signal.signal_ref=$1",
+    )
+    .bind(seeker)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE linggan_comment_study_run \
+         SET selection_manifest=jsonb_set(selection_manifest,'{contract}', \
+             '\"comment-study.run-selection.v2\"'::jsonb), \
+             dispatch_state='enabled',dispatch_reason=NULL WHERE run_ref=$1",
+    )
+    .bind(run_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    assert!(
+        advance_next_problem_pair_for_enabled_v2_run(&database)
+            .await
+            .unwrap(),
+        "the production scheduler must select the legal partner beyond the old global top sixteen"
+    );
+    let selected_pair: (Uuid, Uuid) = sqlx::query_as(
+        "SELECT first_signal_ref,second_signal_ref FROM linggan_comment_study_problem_pair",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        [selected_pair.0, selected_pair.1]
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>(),
+        [seeker, partner].into_iter().collect()
+    );
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn pair_pool_uses_trimmed_author_identity_before_distance_ranking() {
+    let database = proof_database("comment_study_pair_pool_trimmed_author").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    let (seeker, same_author) = two_eligible_signals_from(
+        &database,
+        "pair-pool-same-author",
+        ["reader-a", "reader-a\t"],
+        ["seeker-barrier", "same-author-barrier"],
+    )
+    .await;
+    let (independent, other_independent) = two_eligible_signals_from(
+        &database,
+        "pair-pool-independent",
+        ["reader-b", "reader-b"],
+        ["independent-barrier", "unused-barrier"],
+    )
+    .await;
+    let profile = seed_embedding_profile(&database).await;
+    for (signal, angle) in [
+        (seeker, 0.0),
+        (same_author, 0.01),
+        (independent, 0.1),
+        (other_independent, 0.2),
+    ] {
+        seed_vector(
+            &database,
+            profile,
+            &signal_canonical_hash(&database, signal).await,
+            angle,
+        )
+        .await;
+    }
+    for _ in 0..4 {
+        assert!(advance_next_problem_resolution(&database).await.unwrap());
+    }
+    let paired = recall_pair_candidates(&database, profile, seeker, false)
+        .await
+        .unwrap();
+    assert_eq!(
+        paired.pool_signal_refs,
+        vec![independent, other_independent]
+    );
+    assert!(!paired.pool_signal_refs.contains(&same_author));
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
 async fn an_active_problem_without_an_encoded_core_makes_recall_report_itself_incomplete() {
     let database = proof_database("comment_study_recall_incomplete").await;
     sqlx::raw_sql(STUDY_SCHEMA_SQL)
@@ -6545,6 +6701,13 @@ async fn one_primary_comparison_does_not_expand_after_a_valid_non_create_outcome
     .fetch_one(database.pool())
     .await
     .unwrap();
+    assert!(
+        matches!(
+            prepare_problem_pair(&database, first, third, test_pair_selection()).await,
+            Err(ProblemStoreError::PairNotIndependentOrNovel)
+        ),
+        "a second primary pair for an already compared Signal must be refused"
+    );
     // The model reports a conflicting dimension: these two are not the same Problem.
     let receipt = accept_problem_pair(
         &database,

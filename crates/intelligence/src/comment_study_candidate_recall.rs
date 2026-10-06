@@ -14,7 +14,7 @@ use crate::comment_study_problem_store::{
     resume_retrieval_incomplete_resolution,
     resume_retrieval_incomplete_resolution_for_enabled_v2_run,
 };
-use crate::comment_study_recall::{RecallCompleteness, recall_candidates};
+use crate::comment_study_recall::{RecallCompleteness, recall_candidates, recall_pair_candidates};
 use linggan_storage_postgres::Database;
 use serde::Serialize;
 use serde_json::Value;
@@ -78,7 +78,8 @@ async fn advance_next_problem_pair_inner(
         return Ok(false);
     };
     for seeker in novel_signals_awaiting_pairing(database, enabled_v2_only).await? {
-        let recalled = recall_candidates(database, profile_ref, seeker).await?;
+        let recalled =
+            recall_pair_candidates(database, profile_ref, seeker, enabled_v2_only).await?;
         // A Signal is only `deferred_novel` relative to the catalogue as it stood when it was
         // resolved. If the catalogue cannot be fully searched now, the Problem this pair would
         // create may already exist unseen — which is the duplicate this module exists to prevent.
@@ -121,6 +122,7 @@ async fn advance_next_problem_pair_inner(
             match prepared_pair {
                 Ok(_) => return Ok(true),
                 Err(ProblemStoreError::RunUnavailable) if enabled_v2_only => continue,
+                Err(ProblemStoreError::PairNotIndependentOrNovel) => continue,
                 Err(error) => return Err(error.into()),
             }
         }
@@ -167,10 +169,9 @@ async fn novel_signals_awaiting_pairing(
 
 /// The nearest pool candidate that may actually be admitted, keeping the recall's distance order.
 ///
-/// The pool deliberately recalls same-account Signals too — they are evidence that the pool is not
-/// empty — but a second reading from the same account is not independent support, so it can never
-/// become a pair. Filtering here rather than letting `prepare_problem_pair` refuse means the
-/// *nearest admissible* candidate is found instead of stopping at the nearest one overall.
+/// The pair pool already filters deterministic exclusions before its top-16 ranking. Recheck here
+/// because source, author, resolution, and pair state can change before admission; a second
+/// reading from the same account is never independent support.
 ///
 /// Both sides must be awaiting their first automatic primary comparison. This prevents the worker
 /// from turning one valid no-create result into an implicit exhaustive search, while retaining the
@@ -208,7 +209,9 @@ async fn nearest_admissible_partner(
          WHERE resolution.state='deferred_novel' AND signal.eligibility_state='eligible' \
            AND (NOT $3 OR target.run_ref=seeker.run_ref) \
            AND target.source_ref<>seeker.source_ref \
-           AND signal.current_author_external_id<>seeker.author_external_id \
+           AND NULLIF(btrim(signal.current_author_external_id),'') IS NOT NULL \
+           AND NULLIF(btrim(seeker.author_external_id),'') IS NOT NULL \
+           AND btrim(signal.current_author_external_id)<>btrim(seeker.author_external_id) \
            AND NOT EXISTS(SELECT 1 FROM linggan_comment_study_problem_membership membership \
                  WHERE membership.signal_ref=ranked.signal_ref) \
            AND NOT EXISTS(SELECT 1 FROM linggan_comment_study_problem_pair pair \
