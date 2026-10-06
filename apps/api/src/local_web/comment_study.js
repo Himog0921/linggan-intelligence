@@ -639,7 +639,7 @@ function renderCommentRelated(related,key,sourceReadable){
   if(!sourceReadable)return '<p class="study-restricted">来源当前受限，关联研究内容不显示。</p>';
   if(related?.error)return `<p class="study-restricted">关联研究读取失败：${esc(related.error)}</p>`;
   if(related?.sourceState!=='known')return '<p class="study-restricted">关联研究来源状态未确认，暂不显示。</p>';
-  const rows=related.signals||[];
+  const rows=Array.isArray(related.signals)?related.signals:[];
   const more=related.page?.nextCursor?`<button type="button" id="comment-related-more" data-work="${esc(key.workRef)}" data-comment-id="${esc(key.commentExternalId)}" data-cursor="${esc(related.page.nextCursor)}">加载更多关联信号</button>`:'';
   return `<p class="study-run-page-status">当前显示 ${rows.length} 条当前有效信号${more?'，还有后续内容':''}。</p><div id="comment-related-signals">${rows.length?rows.map(renderCommentRelatedSignal).join(''):'<p class="study-empty">当前没有有效研究信号或关联用户问题。</p>'}</div>${more}`;
 }
@@ -669,13 +669,15 @@ function bindCommentHistoryMore(){
 function bindCommentRelatedMore(){
   const button=document.querySelector('#comment-related-more');if(!button)return;
   button.addEventListener('click',async()=>{
+    const request=commentDetailRequest;
     button.disabled=true;button.textContent='正在读取…';
     try{
       const data=await get(catalogQuery('comments/related',{workRef:button.dataset.work,commentExternalId:button.dataset.commentId,cursor:button.dataset.cursor,limit:50}));
-      if(data.sourceState!=='known')throw new Error('来源状态已变化，请重新打开评论详情');
+      if(request!==commentDetailRequest)return;
+      if(data.sourceState!=='known'){void openCommentDetail(button.dataset.work,button.dataset.commentId,{push:false});return;}
       document.querySelector('#comment-related-signals')?.insertAdjacentHTML('beforeend',(data.signals||[]).map(renderCommentRelatedSignal).join(''));
       if(data.page?.nextCursor){button.dataset.cursor=data.page.nextCursor;button.disabled=false;button.textContent='加载更多关联信号';}else button.remove();
-    }catch(error){button.disabled=false;button.textContent=`读取失败，重试：${error.message}`;}
+    }catch(error){if(request===commentDetailRequest){button.disabled=false;button.textContent=`读取失败，重试：${error.message}`;}}
   });
 }
 let commentDetailRequest = 0;
