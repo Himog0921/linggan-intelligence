@@ -140,6 +140,7 @@ async fn run_counts_are_independent_of_work_count_and_keep_empty_runs() {
         q: None,
         state: None,
         problem_ref: None,
+        ..Default::default()
     };
     let result = read_runs(&database, &query).await.unwrap();
     let runs = result["runs"].as_array().unwrap();
