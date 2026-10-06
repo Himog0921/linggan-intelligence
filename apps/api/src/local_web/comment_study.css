@@ -9,9 +9,9 @@
 .study-tabs button:hover{color:var(--lgi-ink)}
 .study-tabs button[aria-current="page"]{border-color:var(--lgi-signal);color:var(--lgi-ink);font-weight:var(--lgi-weight-semibold)}
 .study-toolbar-actions{display:flex;align-items:center;justify-content:flex-end;gap:var(--lgi-space-3);padding-bottom:var(--lgi-space-2)}
-.study-setup-status{max-width:420px;color:var(--lgi-muted);font-size:var(--lgi-text-label)}
+.study-setup-status{min-width:0;max-width:420px;color:var(--lgi-muted);font-size:var(--lgi-text-label)}
 .study-setup-status[data-kind="error"]{color:var(--lgi-danger)}
-.study-primary-action{min-height:var(--lgi-space-10);border:2px solid var(--lgi-ink);padding:0 var(--lgi-space-5);background:var(--lgi-signal-hover);box-shadow:var(--lgi-shadow-brutal);color:var(--lgi-on-dark);font-weight:var(--lgi-weight-semibold);cursor:pointer}
+.study-primary-action{flex:none;min-height:var(--lgi-space-10);border:2px solid var(--lgi-ink);padding:0 var(--lgi-space-5);background:var(--lgi-signal-hover);box-shadow:var(--lgi-shadow-brutal);color:var(--lgi-on-dark);font-weight:var(--lgi-weight-semibold);white-space:nowrap;cursor:pointer}
 .study-primary-action:hover{background:var(--lgi-signal-ink)}
 .study-primary-action:active{transform:translate(2px,2px);box-shadow:none}
 .study-run-picker{padding:var(--lgi-space-3) 0;border-bottom:var(--study-hair) solid var(--lgi-hairline)}
