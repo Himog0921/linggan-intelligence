@@ -773,7 +773,7 @@ pub async fn read_runs(
     };
     let run_refs: Vec<Uuid> = rows.iter().map(|row| row.get("run_ref")).collect();
     let extra_rows = sqlx::query(
-        "SELECT run.run_ref,policy.method_name, \
+        "SELECT run.run_ref,to_jsonb(policy)->>'method_name' AS method_name, \
            (SELECT count(*) FROM linggan_comment_study_resolution resolution \
             JOIN linggan_comment_study_effective_signal signal USING(signal_ref) \
             JOIN linggan_comment_study_target target ON target.target_ref=signal.target_ref \
