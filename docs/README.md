@@ -28,6 +28,7 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发，并于 2026-10-02 
 | 文档 | 状态 | 用途 |
 |---|---|---|
 | [design/changes/collection-runtime-state-20260929-ui-change-manifest.md](design/changes/collection-runtime-state-20260929-ui-change-manifest.md) | 候选实现；待集成与页面验收 | recovery 全局暂停、当前排队读数和派发回答的状态纠偏 |
+| [design/changes/collection-keyword-sampling-recovery-001-ui-change-manifest.md](design/changes/collection-keyword-sampling-recovery-001-ui-change-manifest.md) | Issue #362 交付分支实施中 | 关键词 3 次下拉／200 候选／20 样本、失败有界恢复、部分巡查和容量等待的状态词义 |
 | [design/changes/creator-gap-request-20260929-ui-change-manifest.md](design/changes/creator-gap-request-20260929-ui-change-manifest.md) | 活跃计划；候选实现未集成 | 创作者缺详情/评论补采、巡查新增自动跟进条件、真实失败回执与未知来源边界 |
 | [plans/active/domain-unification-001.md](plans/active/domain-unification-001.md) | 活跃计划；#343/#344 已合并，全部领域作品读取与原包补投影为隔离候选、尚未写共享库或刷新运行；#338 后续适配，Mog 业务验收待办 | 多个正式 Domain 平权、Domain–Target role、统一 Material/Comment/Media、Comment Study 领域化、领域管理与开发期旧 cross 模型清理的唯一推进文件 |
 | [plans/active/account-observation-bootstrap-002.md](plans/active/account-observation-bootstrap-002.md) | 活跃计划 | Issue #218：新安装插件的首单软准入、账号观察启动、人工绑定审计与无秘密配置诊断 |

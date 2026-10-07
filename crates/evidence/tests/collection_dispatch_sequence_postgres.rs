@@ -922,6 +922,84 @@ async fn failed_browser_start_is_audited_then_returns_work_order_to_shared_queue
 
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL proof database"]
+async fn repeated_author_profile_start_failures_stop_releasing_new_leases() {
+    let database = proof_database_for("collection_dispatch_bounded_profile_failures").await;
+    let fixture = seed_creator_work_order(&database).await;
+    issue_work_order_lease(&database, fixture.work_order_ref, 60)
+        .await
+        .expect("creator work order is leased");
+    for attempt in 1..=5 {
+        let dispatch = decide_dispatch(
+            &database,
+            &fixture.install_key,
+            &fixture.installation_credential,
+        )
+        .await
+        .expect("a claim exists within the bounded retry window");
+        assert_eq!(capability(&dispatch), "author_profile");
+        let outcome = requeue_failed_dispatch(
+            &database,
+            &fixture.install_key,
+            &fixture.installation_credential,
+            task_id(&dispatch),
+            Uuid::new_v4(),
+            DispatchFailureCode::TabUnavailable,
+        )
+        .await
+        .expect("the page-start failure is recorded");
+        if attempt < 5 {
+            assert!(matches!(outcome, DispatchFailureOutcome::Requeued { .. }));
+            sqlx::query(
+                "UPDATE collection_work_order SET retry_not_before_at=scope_001_now()-interval '1 second' \
+                 WHERE work_order_ref=$1",
+            )
+            .bind(fixture.work_order_ref)
+            .execute(database.pool())
+            .await
+            .expect("only the isolated proof clock advances");
+        } else {
+            assert_eq!(outcome, DispatchFailureOutcome::Unavailable);
+            assert_task_state(&database, task_id(&dispatch), "unavailable").await;
+            let state: (String, i32) = sqlx::query_as(
+                "SELECT queue_state,dispatch_failure_count FROM collection_work_order \
+                 WHERE work_order_ref=$1",
+            )
+            .bind(fixture.work_order_ref)
+            .fetch_one(database.pool())
+            .await
+            .expect("the bounded failure count is readable");
+            assert_eq!(state.1, 5);
+            assert_ne!(state.0, "queued", "the failed profile cannot requeue forever");
+            let sibling: (Uuid, String) = sqlx::query_as(
+                "SELECT task.task_id,task.execution_state FROM collection_work_order_lease_task task JOIN collection_work_order_lease lease ON lease.lease_ref=task.lease_ref JOIN linggan_runtime_task runtime ON runtime.task_id=task.task_id WHERE lease.work_order_ref=$1 AND lease.released_at IS NULL AND runtime.task_spec #>> '{capabilitiesRequested,0}'='profile_discovery'",
+            )
+            .bind(fixture.work_order_ref)
+            .fetch_one(database.pool())
+            .await
+            .expect("the independent discovery sibling remains in the current lease");
+            assert_eq!(sibling.1, "pending");
+            let sibling_dispatch = decide_dispatch(
+                &database,
+                &fixture.install_key,
+                &fixture.installation_credential,
+            )
+            .await
+            .expect("the independent discovery sibling remains claimable");
+            assert_eq!(task_id(&sibling_dispatch), sibling.0);
+            let lease_count: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM collection_work_order_lease WHERE work_order_ref=$1",
+            )
+            .bind(fixture.work_order_ref)
+            .fetch_one(database.pool())
+            .await
+            .expect("the bounded lease history is readable");
+            assert_eq!(lease_count, 5, "a sixth Lease was not minted for the failed profile");
+        }
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
 async fn unavailable_detail_is_audited_without_blocking_later_materials() {
     let database = proof_database_for("collection_dispatch_detail_session_recovery").await;
     let fixture = seed_creator_work_order(&database).await;

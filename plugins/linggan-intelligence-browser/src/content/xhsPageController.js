@@ -13,6 +13,7 @@ import {
   readXhsSearchFilterSnapshotByInject,
 } from '../platforms/xhs/searchFilters.js';
 import { parseCount } from '../shared/utils.js';
+import { parseXhsCountValue } from '../platforms/xhs/noteCollector.js';
 
 
 /**
@@ -62,6 +63,27 @@ function pickTopByLikes(cards, topByLikes) {
     .map((entry, rank) => ({ ...entry, rank: rank + 1 }))
     .sort((a, b) => a.position - b.position);
   return ranked.map((entry) => ({ ...entry.card, __topRank: entry.rank }));
+}
+
+/** Keep the dispatched ranking when trimming a searched page to its sample size. */
+function pickSearchSample(cards, limit, ranking) {
+  if (!Array.isArray(cards)) return cards;
+  const count = Number(limit);
+  if (!Number.isInteger(count) || count <= 0 || cards.length <= count) return cards;
+  if (ranking === 'most_liked' || !ranking) return pickTopByLikes(cards, count);
+  const metric = ranking === 'most_commented' ? 'comments'
+    : (ranking === 'most_collected' ? 'collects' : null);
+  if (!metric || cards.some((card) => parseXhsCountValue(card?.[metric]) === null)) {
+    // Search cards do not always expose comment/collect counts. In that case
+    // the applied platform order is the only observed ranking, not a made-up 0.
+    return cards.slice(0, count);
+  }
+  return cards
+    .map((card, position) => ({ card, position, value: parseXhsCountValue(card[metric]) }))
+    .sort((a, b) => b.value - a.value || a.position - b.position)
+    .slice(0, count)
+    .sort((a, b) => a.position - b.position)
+    .map(({ card }) => card);
 }
 
 /**
@@ -528,10 +550,10 @@ export function createXhsPageController({
             scrollRounds: params.taskSpec?.scrollRounds,
           });
           const loaded = Array.isArray(discovered) ? discovered : (Array.isArray(discovered?.cards) ? discovered.cards : []);
-          // 先按点赞取前 N，再交付：口径说的是「从加载出来的里面取 20 篇」，
-          // 把全部加载结果都提交上去会让「取前 20」这句话没有落到实处。
+          // The historical topByLikes field supplies the retained sample size;
+          // the frozen ranking decides which cards are retained.
           const cards = mode === COLLECT_MODE.SEARCH
-            ? pickTopByLikes(loaded, params.taskSpec?.topByLikes)
+            ? pickSearchSample(loaded, params.taskSpec?.topByLikes, params.taskSpec?.ranking)
             : loaded;
           const target = new URL(window.location.href);
           const query = target.searchParams.get('keyword') || target.searchParams.get('q') || '';
@@ -550,9 +572,18 @@ export function createXhsPageController({
             taskSpec: params.taskSpec,
           });
           const stopReason = Array.isArray(discovered) ? '' : discovered?.discoveryMeta?.stopReason;
-          const resultText = stopReason === 'target_reached'
-            ? `已达到目标，采集 ${cards.length}/${maximumQuota} 条`
-            : `已采集 ${cards.length}/${maximumQuota} 条，${stopReason || '页面加载已停止'}`;
+          const stopCopy = {
+            scroll_budget_completed: `已执行 ${discovered?.discoveryMeta?.scrollActions || 0} 次下拉`,
+            bottom_confirmed: '已到页面底部',
+            target_reached: '候选上限已达到',
+            risk_control: '页面限制已触发',
+            no_progress: '页面未继续加载',
+          }[stopReason] || '页面加载已停止';
+          const sampleLimit = mode === COLLECT_MODE.SEARCH
+            ? (Number(params.taskSpec?.topByLikes) || maximumQuota) : maximumQuota;
+          const resultText = mode === COLLECT_MODE.SEARCH
+            ? `发现 ${loaded.length}/${maximumQuota} 条候选，保留 ${cards.length}/${sampleLimit} 条；${stopCopy}`
+            : `已采集 ${cards.length}/${maximumQuota} 条；${stopCopy}`;
           showToast(delivery?.delivery === 'acknowledged'
             ? `Linggan 已接纳：${resultText}`
             : `${resultText}，待本机 Linggan 交付`, delivery?.delivery === 'acknowledged' ? 'success' : 'info');

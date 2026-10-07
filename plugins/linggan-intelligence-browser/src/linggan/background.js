@@ -1224,8 +1224,10 @@ async function runDispatchedTask() {
     return requeueClaimedTaskFailure({
       claim: { ...claim, health: readiness.health },
       installKey,
-      state: 'detail_page_session_recovery_required',
-      message: '详情页许可已消费但页面未能确认打开；为避免重复访问，已标记为不可自动恢复。',
+      state: navigationGrant ? 'detail_page_session_recovery_required' : 'tab_unavailable',
+      message: navigationGrant
+        ? '详情页许可已消费但页面未能确认打开；为避免重复访问，已标记为不可自动恢复。'
+        : '执行页面未能打开；本次未执行页面读取，任务按有界退避重试。',
     });
   }
   const { windowId, tabId } = opened;
@@ -1241,8 +1243,10 @@ async function runDispatchedTask() {
     return requeueClaimedTaskFailure({
       claim: { ...claim, health: readiness.health },
       installKey,
-      state: 'detail_page_session_recovery_required',
-      message: '详情页许可已消费但没有可确认的页面；为避免重复访问，已标记为不可自动恢复。',
+      state: navigationGrant ? 'detail_page_session_recovery_required' : 'tab_unavailable',
+      message: navigationGrant
+        ? '详情页许可已消费但没有可确认的页面；为避免重复访问，已标记为不可自动恢复。'
+        : '执行窗口没有可确认的页面；本次未执行页面读取，任务按有界退避重试。',
     });
   }
   if (navigationGrant?.grantKey) {
@@ -1292,8 +1296,10 @@ async function runDispatchedTask() {
       return requeueClaimedTaskFailure({
         claim: { ...claim, health: readiness.health },
         installKey,
-        state: 'detail_page_session_recovery_required',
-        message: '已消费详情页导航许可但页面未就绪；为避免重复开页，冻结 lane 已结束为不可用。',
+        state: navigationGrant ? 'detail_page_session_recovery_required' : 'page_timeout',
+        message: navigationGrant
+          ? '已消费详情页导航许可但页面未就绪；为避免重复开页，冻结 lane 已结束为不可用。'
+          : '执行页面未在等待时间内就绪；本次未读取页面，任务按有界退避重试。',
       });
     }
     if (navigationGrant?.sessionRef) {

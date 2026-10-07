@@ -35,6 +35,7 @@ use uuid::Uuid;
 /// not immediately reopen a page that just failed its readiness probe.
 pub const DISPATCH_FAILURE_RETRY_AFTER_SECONDS: u32 = 60;
 const MAX_DISPATCH_FAILURE_RETRY_AFTER_SECONDS: u32 = 900;
+const MAX_NON_DETAIL_DISPATCH_FAILURES_PER_WORK_ORDER: i32 = 5;
 /// A browser page-read failure has no producer Attempt, so repeated automatic
 /// retries only repeat the same uncertain pre-execution state.  Keep two
 /// bounded recoveries, then make that exact frozen detail material visibly
@@ -1357,6 +1358,56 @@ pub async fn requeue_failed_dispatch(
         } else {
             DispatchFailureOutcome::Blocked
         });
+    }
+    // A browser that cannot open or ready a discovery/profile page must not
+    // mint a new Task/Lease forever. The limit belongs to this WorkOrder; a
+    // future scheduled patrol can still create a new one after the fault clears.
+    if matches!(capability.as_str(), "discovery_search" | "profile_discovery" | "author_profile") {
+        let prior_failures: i32 = sqlx::query_scalar(
+            "SELECT dispatch_failure_count FROM collection_work_order \
+             WHERE work_order_ref=$1 AND queue_state='leased' FOR UPDATE",
+        )
+        .bind(work_order_ref)
+        .fetch_one(&mut *transaction)
+        .await?;
+        if prior_failures + 1 >= MAX_NON_DETAIL_DISPATCH_FAILURES_PER_WORK_ORDER {
+            let terminalized = sqlx::query(
+                "UPDATE collection_work_order_lease_task \
+                 SET execution_state='unavailable',claimed_at=NULL,claimed_by_installation_ref=NULL \
+                 WHERE task_id=$1 AND execution_state='pending'",
+            )
+            .bind(current_task_id)
+            .execute(&mut *transaction)
+            .await?;
+            if terminalized.rows_affected() != 1 {
+                return Err(DispatchFailureError::ClaimNotHeld);
+            }
+            sqlx::query(
+                "UPDATE collection_work_order SET dispatch_failure_count=dispatch_failure_count+1 \
+                 WHERE work_order_ref=$1 AND queue_state='leased'",
+            )
+            .bind(work_order_ref)
+            .execute(&mut *transaction)
+            .await?;
+            record_terminal_dispatch_failure_in_transaction(
+                &mut transaction, failure_ref, task_id, installation_ref, lease_ref,
+                work_order_ref, failure_code.as_str(), "unavailable",
+            )
+            .await?;
+            // No accepted task means this round stopped; it did not complete.
+            sqlx::query(
+                "UPDATE collection_work_order SET queue_state='cancelled' \
+                 WHERE work_order_ref=$1 AND queue_state='completed' \
+                   AND NOT EXISTS (SELECT 1 FROM collection_work_order_lease_task task \
+                                   JOIN collection_work_order_lease lease USING(lease_ref) \
+                                   WHERE lease.work_order_ref=$1 AND task.execution_state='completed')",
+            )
+            .bind(work_order_ref)
+            .execute(&mut *transaction)
+            .await?;
+            transaction.commit().await?;
+            return Ok(DispatchFailureOutcome::Unavailable);
+        }
     }
     let retry_after_seconds = record_recoverable_dispatch_failure_in_transaction(
         &mut transaction,

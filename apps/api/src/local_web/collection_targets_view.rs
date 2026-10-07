@@ -844,6 +844,7 @@ fn patrol_state(
         Some(PatrolReadState::Waiting) => ("neutral", "等待巡查"),
         Some(PatrolReadState::Running) => ("info", "巡查中"),
         Some(PatrolReadState::Normal) => ("ok", "正常"),
+        Some(PatrolReadState::Partial) => ("warn", "最近巡查未完成"),
         Some(PatrolReadState::Blocked) => ("warn", "受阻"),
         Some(PatrolReadState::Unavailable) | None => {
             super::target_drawer::lifecycle_patrol_copy(target)

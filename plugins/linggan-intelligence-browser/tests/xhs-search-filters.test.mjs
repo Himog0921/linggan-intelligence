@@ -43,6 +43,7 @@ test('readCurrentXhsSearchFilterSnapshot maps Xiaohongshu active search filters'
       filter_note_range: ['已看过'],
       filter_pos_distance: ['附近'],
     },
+    readable: true,
   });
 });
 
@@ -116,6 +117,7 @@ test('readCurrentXhsSearchFilterSnapshot unwraps live Xiaohongshu ref filter sta
       filter_note_range: ['不限'],
       filter_pos_distance: ['不限'],
     },
+    readable: true,
   });
 });
 

@@ -217,6 +217,9 @@ fn verdict_state(rows: Option<&Vec<LaneRow>>) -> (&'static str, &'static str) {
     {
         return ("采集暂停", "blocked");
     }
+    if !rows.is_empty() && rows.iter().all(is_capacity_wait) {
+        return ("等待执行容量", "partial");
+    }
     match verdict_of(rows) {
         Verdict::All => ("能接活", "ok"),
         Verdict::Some => ("部分接不了活", "partial"),
@@ -359,18 +362,18 @@ fn verdict_markup(
     let (state, tone) = verdict_state(Some(rows));
     let blocked = rows
         .iter()
-        .filter(|row| !row.available && !row.queueable)
+        .filter(|row| !row.available && !row.queueable && !is_capacity_wait(row))
         .count();
     let queueable = rows
         .iter()
-        .filter(|row| !row.available && row.queueable)
+        .filter(|row| !row.available && (row.queueable || is_capacity_wait(row)))
         .count();
     let badge = if state == "采集暂停" {
         "恢复阶段".to_owned()
     } else if blocked > 0 {
         format!("{blocked} 项阻塞")
     } else if queueable > 0 {
-        format!("{queueable} 项等工位")
+        format!("{queueable} 项等容量")
     } else {
         "全部通畅".to_owned()
     };
@@ -483,6 +486,13 @@ struct LaneRow {
     reason_code: Option<String>,
 }
 
+fn is_capacity_wait(row: &LaneRow) -> bool {
+    !row.available && matches!(
+        row.reason_code.as_deref(),
+        Some("station_busy" | "account_busy" | "platform_concurrency_reached")
+    )
+}
+
 fn verdict_of(rows: &[LaneRow]) -> Verdict {
     if rows.iter().all(|row| row.available) {
         Verdict::All
@@ -560,6 +570,8 @@ fn lane_rows(
 fn lane_state(row: &LaneRow) -> (&'static str, &'static str) {
     if row.available {
         ("c-lane-ok", "可接活")
+    } else if is_capacity_wait(row) {
+        ("c-lane-queueable", "等当前任务完成")
     } else if row.queueable {
         ("c-lane-queueable", "可排队，等工位")
     } else if row.reason_code.as_deref() == Some("collection_upgrade_recovery_only") {
@@ -573,6 +585,8 @@ fn lane_state(row: &LaneRow) -> (&'static str, &'static str) {
 fn capacity_state(row: &LaneRow) -> &'static str {
     if row.available {
         "available"
+    } else if is_capacity_wait(row) {
+        "waiting"
     } else if row.queueable {
         "queueable"
     } else {
@@ -2605,6 +2619,24 @@ mod tests {
         assert!(html.contains("观察账号需要重新登录"));
         assert!(html.contains("account_needs_login"));
         assert!(html.contains("data-capacity-state=\"blocked\""));
+    }
+
+    #[test]
+    fn busy_station_is_capacity_wait_instead_of_a_blockage() {
+        let rows = vec![LaneRow {
+            name: "关键词巡查".to_owned(),
+            needs: "查一遍搜索结果有没有新命中",
+            available: false,
+            queueable: false,
+            reason: Some("当前任务尚未结束".to_owned()),
+            reason_code: Some("station_busy".to_owned()),
+        }];
+        assert_eq!(verdict_state(Some(&rows)), ("等待执行容量", "partial"));
+        assert_eq!(lane_state(&rows[0]).1, "等当前任务完成");
+        assert_eq!(capacity_state(&rows[0]), "waiting");
+        let html = verdict_markup(None, None, Some(&rows));
+        assert!(html.contains("1 项等容量"));
+        assert!(!html.contains("1 项阻塞"));
     }
 
     #[test]

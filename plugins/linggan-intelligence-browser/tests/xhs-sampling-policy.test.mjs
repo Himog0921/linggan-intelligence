@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { parseCount } from '../src/shared/utils.js';
+import { parseXhsCountValue } from '../src/platforms/xhs/noteCollector.js';
 
 /**
  * 采样口径的三个纯函数住在 content 脚本里，那个模块导入了一堆浏览器环境的东西。
@@ -30,22 +32,13 @@ function extract(name) {
   throw new Error(`${name} 的函数体没有闭合`);
 }
 
-// parseCount 是这几个函数唯一的外部依赖，按真实实现给一个等价物。
-const preamble = `
-  function parseCount(text) {
-    const raw = String(text ?? '').trim();
-    if (/万/.test(raw)) return Math.round(parseFloat(raw) * 10000);
-    const n = parseFloat(raw.replace(/[^0-9.]/g, ''));
-    return Number.isFinite(n) ? n : 0;
-  }
-`;
-
-const { samplingFiltersFromTaskSpec, pickTopByLikes } = new Function(
-  `${preamble}
-   ${extract('samplingFiltersFromTaskSpec')}
+const { samplingFiltersFromTaskSpec, pickTopByLikes, pickSearchSample } = new Function(
+  'parseCount', 'parseXhsCountValue',
+  `${extract('samplingFiltersFromTaskSpec')}
    ${extract('pickTopByLikes')}
-   return { samplingFiltersFromTaskSpec, pickTopByLikes };`,
-)();
+   ${extract('pickSearchSample')}
+   return { samplingFiltersFromTaskSpec, pickTopByLikes, pickSearchSample };`,
+)(parseCount, parseXhsCountValue);
 
 test('服务端的排序词翻成页面筛选值', () => {
   for (const [ranking, sortBasis] of [
@@ -103,6 +96,28 @@ test('加载数不足 N 时原样返回，不做无谓重排', () => {
   assert.equal(pickTopByLikes(cards, 20), cards);
   assert.equal(pickTopByLikes(cards, 0), cards);
   assert.equal(pickTopByLikes(cards, undefined), cards);
+});
+
+test('最多评论从已知评论数取样；缺评论数时沿用已生效的页面顺序', () => {
+  const cards = [
+    { id: 'a', likes: '3000', comments: '3' },
+    { id: 'b', likes: '1', comments: '80' },
+    { id: 'c', likes: '800', comments: '12' },
+  ];
+  assert.deepEqual(pickSearchSample(cards, 2, 'most_commented').map((card) => card.id), ['b', 'c']);
+  const unknown = cards.map(({ comments, ...card }) => card);
+  assert.deepEqual(pickSearchSample(unknown, 2, 'most_commented').map((card) => card.id), ['a', 'b']);
+  const placeholders = [
+    { id: 'a', comments: '--' },
+    { id: 'b', comments: '50' },
+    { id: 'c', comments: '40' },
+  ];
+  assert.deepEqual(pickSearchSample(placeholders, 2, 'most_commented').map((card) => card.id), ['a', 'b']);
+  assert.deepEqual(pickSearchSample([{ ...placeholders[0], comments: '未知' }, ...placeholders.slice(1)], 2, 'most_commented').map((card) => card.id), ['a', 'b']);
+  assert.deepEqual(pickSearchSample([{ ...placeholders[0], comments: '未知1' }, ...placeholders.slice(1)], 2, 'most_commented').map((card) => card.id), ['a', 'b']);
+  assert.deepEqual(pickSearchSample([{ ...placeholders[0], comments: '1/20' }, ...placeholders.slice(1)], 2, 'most_commented').map((card) => card.id), ['a', 'b']);
+  assert.deepEqual(pickSearchSample(cards, 2, 'latest').map((card) => card.id), ['a', 'b']);
+  assert.deepEqual(pickSearchSample(cards, 2, 'most_liked').map((card) => card.id), ['a', 'c']);
 });
 
 /**

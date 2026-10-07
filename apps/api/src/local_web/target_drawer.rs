@@ -1838,6 +1838,7 @@ fn inspector_patrol_copy(state: TargetInspectorPatrolState) -> &'static str {
         TargetInspectorPatrolState::AwaitingProducer => "等待执行工位",
         TargetInspectorPatrolState::Running => "正在巡查",
         TargetInspectorPatrolState::Normal => "运行正常",
+        TargetInspectorPatrolState::Partial => "最近巡查未完成，已取得的内容保留",
         TargetInspectorPatrolState::Blocked => "巡查已阻塞",
     }
 }

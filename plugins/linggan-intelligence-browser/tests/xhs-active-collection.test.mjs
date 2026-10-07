@@ -355,10 +355,11 @@ test('batch target counts are explicit and never silently clamped', () => {
   assert.throws(() => requireBatchTargetCount(4.5), /batch_target_count_must_be_1_to_50/);
 });
 
-test('search target size expands the active DOM-loading plan beyond its old ten-round snapshot', () => {
-  const plan = buildDiscoveryPlan('.feeds-container', { expectedCount: 50 });
-  assert.equal(plan.maxRounds, 40);
-  assert.equal(plan.expectedCount, 50);
+test('search scan budget counts actual scroll actions separately from candidate count', () => {
+  const plan = buildDiscoveryPlan('.feeds-container', { maxScrolls: 3, expectedCount: 200 });
+  assert.equal(plan.maxRounds, 4);
+  assert.equal(plan.requireBottomOrExpected, true);
+  assert.equal(plan.expectedCount, 200);
 });
 
 test('page discovery exposes target count and current search filters before active loading', () => {
