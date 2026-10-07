@@ -43,9 +43,14 @@
       <h3 id="setup-title" class="v7-sr-only">研究策略</h3>
       <div class="study-policy-current">
         <label>本次使用的方法版本<select id="study-policy" required disabled><option value="">先保存一版研究方法</option></select></label>
-        <div class="study-policy-current-actions"><button id="edit-policy" type="button" disabled>编辑方法</button><button id="activate-policy" type="button" disabled>设为默认方法</button></div>
+        <div class="study-policy-current-actions"><button id="view-policy" type="button" disabled>查看方法</button><button id="edit-policy" type="button" disabled>复制并编辑</button><button id="activate-policy" type="button" disabled>设为默认方法</button></div>
       </div>
       <p id="selected-policy-summary" class="study-dialog-note" role="status">正在读取研究方法…</p>
+      <section id="policy-viewer" class="study-policy-viewer" aria-label="方法版本详情" hidden>
+        <div class="study-policy-viewer-toolbar"><label>并排对比其他版本<select id="compare-policy"><option value="">不对比</option></select></label><button id="close-policy-viewer" type="button">收起方法详情</button></div>
+        <p id="policy-viewer-status" role="status"></p>
+        <div id="policy-viewer-content" class="study-policy-compare"></div>
+      </section>
       <form id="policy-form" class="policy-form" hidden>
         <label>模型配置<select id="model-config" required disabled><option>正在读取…</option></select></label>
         <label>方法名称<input id="method-name" type="text" maxlength="100" value="评论研究方法" required></label>

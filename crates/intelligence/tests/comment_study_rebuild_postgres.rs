@@ -44,7 +44,8 @@ use linggan_intelligence::{
         accept_problem_resolution, prepare_problem_pair, prepare_problem_resolution,
     },
     comment_study_read::{
-        CommentStudyReadQuery, read_deferred_expressions, read_overview, read_problem_evidence,
+        CommentStudyReadQuery, read_comment_related, read_current_signals,
+        read_deferred_expressions, read_overview, read_problem_detail, read_problem_evidence,
         read_problems, read_request_detail, read_runs, read_signals, read_targets,
     },
     comment_study_recall::{
@@ -1297,6 +1298,92 @@ async fn run_target_and_signal_readers_page_through_every_row_with_query_bound_c
         run_page_one["runs"][0]["runRef"],
         run_page_two["runs"][0]["runRef"]
     );
+    assert!(
+        run_page_one["runs"][0]["methodName"].is_null(),
+        "legacy policy without a recorded name must remain readable"
+    );
+    assert!(run_page_one["runs"][0]["pendingResolutionCount"].is_number());
+
+    // Current knowledge pages by Signal, unlike the overview's one-voice-per-comment preview.
+    sqlx::query(
+        "UPDATE linggan_comment_study_signal signal SET kind='solution',problem_frame=NULL, \
+         eligibility_state='not_applicable',canonical_text=NULL,canonical_hash=NULL \
+         FROM linggan_comment_study_target target \
+         WHERE signal.target_ref=target.target_ref AND target.run_ref=$1",
+    )
+    .bind(prepared.run_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let mut current_query = domain_read_query(None);
+    current_query.kind = Some("solution".to_owned());
+    current_query.limit = Some(1);
+    let first_current = read_current_signals(&database, &current_query)
+        .await
+        .unwrap();
+    assert_eq!(first_current["page"]["totalCount"], 2);
+    assert_eq!(first_current["signals"].as_array().unwrap().len(), 1);
+    assert_eq!(first_current["page"]["hasMore"], true);
+    current_query.cursor = first_current["page"]["nextCursor"]
+        .as_str()
+        .map(str::to_owned);
+    let second_current = read_current_signals(&database, &current_query)
+        .await
+        .unwrap();
+    assert_eq!(second_current["page"]["totalCount"], 2);
+    assert_eq!(second_current["page"]["hasMore"], false);
+    assert_ne!(
+        first_current["signals"][0]["signalRef"],
+        second_current["signals"][0]["signalRef"]
+    );
+    current_query.kind = Some("experience".to_owned());
+    assert!(matches!(
+        read_current_signals(&database, &current_query).await,
+        Err(linggan_intelligence::comment_study_read::CommentStudyReadError::CursorScopeMismatch)
+    ));
+
+    let mut related_query = domain_read_query(None);
+    related_query.work_ref = Some(work_ref);
+    related_query.comment_external_id = Some("study-read-pages-first".to_owned());
+    let related = read_comment_related(&database, &related_query)
+        .await
+        .unwrap();
+    assert_eq!(related["sourceState"], "known");
+    assert_eq!(related["signals"].as_array().unwrap().len(), 1);
+    let before_restriction = read_current_signals(
+        &database,
+        &CommentStudyReadQuery {
+            kind: Some("solution".to_owned()),
+            ..domain_read_query(None)
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(before_restriction["page"]["totalCount"], 2);
+    sqlx::query(
+        "INSERT INTO linggan_material_comment_restriction \
+         (content_public_ref,comment_external_id,reason) VALUES($1,$2,'synthetic restriction')",
+    )
+    .bind(work_ref)
+    .bind("study-read-pages-first")
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let after_restriction = read_current_signals(
+        &database,
+        &CommentStudyReadQuery {
+            kind: Some("solution".to_owned()),
+            ..domain_read_query(None)
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(after_restriction["page"]["totalCount"], 1);
+    let restricted_related = read_comment_related(&database, &related_query)
+        .await
+        .unwrap();
+    assert_eq!(restricted_related["sourceState"], "restricted");
+    assert!(restricted_related["signals"].as_array().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -4499,6 +4586,24 @@ async fn effective_head_and_problem_support_follow_current_raw_evidence() {
     assert_eq!(initial["problems"][0]["supportCommentCount"], 2);
     assert_eq!(initial["problems"][0]["supportAuthorCount"], 2);
     assert_eq!(initial["problems"][0]["definitionState"], "current");
+    assert_eq!(initial["problems"][0]["recentAddedSupportCommentCount"], 2);
+    assert!(initial["problems"][0]["recentAddedAt"].is_string());
+    let first_detail = read_problem_detail(&database, &query, problem)
+        .await
+        .unwrap();
+    assert_eq!(
+        first_detail["revisionHistory"][0]["definitionReadable"],
+        true
+    );
+    assert_eq!(
+        first_detail["revisionHistory"][0]["title"],
+        "孩子写作业需要催促"
+    );
+    assert_eq!(first_detail["sourceDistribution"]["supportCommentCount"], 2);
+    assert_eq!(
+        first_detail["sourceDistribution"]["works"][0]["commentCount"],
+        2
+    );
     let mut searched = query.clone();
     searched.q = Some("孩子写作业需要催促".to_owned());
     assert_eq!(
@@ -4527,6 +4632,10 @@ async fn effective_head_and_problem_support_follow_current_raw_evidence() {
     let repeated = read_problems(&database, &query).await.unwrap();
     assert_eq!(repeated["problems"][0]["supportCommentCount"], 2);
     assert_eq!(repeated["problems"][0]["supportAuthorCount"], 2);
+    assert_eq!(
+        repeated["problems"][0]["recentAddedSupportCommentCount"], 2,
+        "re-research must not invent a third newly added comment"
+    );
     let current_first: Vec<Uuid> = sqlx::query_scalar(
         "SELECT signal_ref FROM linggan_comment_study_effective_signal \
          WHERE comment_external_id=$1",
@@ -4581,6 +4690,18 @@ async fn effective_head_and_problem_support_follow_current_raw_evidence() {
     assert_eq!(
         restricted["problems"][0]["definition"],
         serde_json::Value::Null
+    );
+    let restricted_detail = read_problem_detail(&database, &query, problem)
+        .await
+        .unwrap();
+    assert_eq!(
+        restricted_detail["revisionHistory"][0]["definitionReadable"],
+        false
+    );
+    assert!(restricted_detail["revisionHistory"][0]["definition"].is_null());
+    assert_eq!(
+        restricted_detail["sourceDistribution"]["supportCommentCount"],
+        0
     );
     assert!(
         read_problems(&database, &searched).await.unwrap()["problems"]
@@ -4651,6 +4772,79 @@ async fn effective_head_and_problem_support_follow_current_raw_evidence() {
         restricted_comment
     );
     assert_eq!(remaining[0]["sourceState"], "known");
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn historical_problem_revision_checks_its_own_seeds_not_the_current_revision() {
+    let database = proof_database("comment_study_historical_revision_gate").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    let (old_first, old_second) = two_eligible_signals(&database, "study-old-revision").await;
+    let (new_first, new_second) = two_eligible_signals(&database, "study-new-revision").await;
+    let problem = seed_existing_problem(
+        &database,
+        "旧版问题定义",
+        &"a".repeat(64),
+        &[old_first, old_second],
+    )
+    .await;
+    for signal in [old_first, old_second, new_first, new_second] {
+        seed_membership(&database, signal, problem).await;
+    }
+    let current_revision = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_comment_study_problem_revision( \
+           revision_ref,problem_ref,domain_ref,identity_version,title,definition,core_frame, \
+           inclusions,exclusions,seed_signal_refs,canonical_text,canonical_hash,definition_hash,reason) \
+         VALUES($1,$2,$3,2,'新版问题定义','新版问题定义', \
+           '{\"actor\":\"new\"}'::jsonb,'[\"new inclusion\"]'::jsonb,'[]'::jsonb, \
+           $4,'新版问题定义',$5,$6,'synthetic_revision')",
+    ).bind(current_revision).bind(problem).bind(PROOF_DOMAIN_REF)
+     .bind(vec![new_first,new_second]).bind("f".repeat(64)).bind("e".repeat(64))
+     .execute(database.pool()).await.unwrap();
+    sqlx::query(
+        "UPDATE linggan_comment_study_problem SET current_revision_ref=$2, \
+       identity_version=2 WHERE problem_ref=$1",
+    )
+    .bind(problem)
+    .bind(current_revision)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let (old_work, old_comment): (Uuid, String) = sqlx::query_as(
+        "SELECT source.content_public_ref,source.comment_external_id \
+         FROM linggan_comment_study_signal signal \
+         JOIN linggan_comment_study_target target USING(target_ref) \
+         JOIN linggan_material_comment source ON source.material_ref=target.source_ref \
+         WHERE signal.signal_ref=$1",
+    )
+    .bind(old_first)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_material_comment_restriction \
+       (content_public_ref,comment_external_id,reason) VALUES($1,$2,'synthetic restriction')",
+    )
+    .bind(old_work)
+    .bind(old_comment)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let detail = read_problem_detail(&database, &domain_read_query(None), problem)
+        .await
+        .unwrap();
+    assert_eq!(detail["problem"]["definition"], "新版问题定义");
+    assert_eq!(detail["revisionHistory"][0]["definitionReadable"], true);
+    assert_eq!(detail["revisionHistory"][0]["title"], "新版问题定义");
+    assert_eq!(detail["revisionHistory"][1]["definitionReadable"], false);
+    assert!(detail["revisionHistory"][1]["title"].is_null());
+    assert!(detail["revisionHistory"][1]["definition"].is_null());
+    assert!(detail["revisionHistory"][1]["stableIdentity"].is_null());
+    assert_eq!(detail["sourceDistribution"]["supportCommentCount"], 3);
 }
 
 #[tokio::test]

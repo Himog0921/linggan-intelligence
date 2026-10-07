@@ -509,7 +509,7 @@ def run_synthetic() -> None:
             page.locator(f"#study-policy option[value='{OLD_POLICY_REF}']").wait_for(state="attached")
             assert page.locator("#study-mode").input_value() == "new_only"
 
-            page.get_by_role("button", name="编辑方法").click()
+            page.locator("#edit-policy").click()
             page.locator("#method-name").wait_for(state="visible")
             page.get_by_text("编辑副本已载入", exact=False).wait_for()
             page.locator("#method-name").fill("回归验收方法")
@@ -836,7 +836,12 @@ def run_live_api(
         page.locator(f"#study-policy option[value='{existing_policy_ref}']").wait_for(state="attached")
         assert page.locator("#study-policy").input_value() == existing_policy_ref
 
-        page.get_by_role("button", name="编辑方法").click()
+        page.locator("#view-policy").click()
+        existing_method = page.locator("#policy-viewer-content > .study-method-detail")
+        existing_method.wait_for()
+        assert existing_policy_ref in existing_method.inner_text()
+        page.locator("#close-policy-viewer").click()
+        page.locator("#edit-policy").click()
         page.locator("#method-name").wait_for(state="visible")
         page.get_by_text("编辑副本已载入", exact=False).wait_for()
         page.locator("#method-name").fill("隔离浏览器方法")
@@ -878,6 +883,18 @@ def run_live_api(
                 f"response_policy_ref={response_policy_ref!r}; "
                 f"options={page.locator('#study-policy').locator('option').evaluate_all('(options) => options.map(option => option.value)')!r}"
             )
+        page.locator("#view-policy").click()
+        current_method = page.locator("#policy-viewer-content > .study-method-detail")
+        current_method.wait_for()
+        assert created_policy_ref in current_method.inner_text()
+        assert "仅用于真实 Axum 与隔离 PostgreSQL 浏览器回归" in current_method.text_content()
+        page.locator("#compare-policy").select_option(existing_policy_ref)
+        compared_method = page.locator("#policy-viewer-content [data-policy-comparison] .study-method-detail")
+        compared_method.wait_for()
+        assert existing_policy_ref in compared_method.inner_text()
+        assert "仅用于真实 Axum 与隔离 PostgreSQL 浏览器回归" not in compared_method.text_content()
+        assert page.locator("#policy-viewer-content .study-method-detail").count() == 2
+        page.locator("#close-policy-viewer").click()
         page.locator("#activate-policy").click()
         page.get_by_text("已将所选方法设为当前领域默认版本。", exact=True).wait_for()
 

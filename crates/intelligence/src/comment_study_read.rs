@@ -5,13 +5,14 @@
 
 use crate::comment_study_catalog::cursor::{self, CommentPosition, EntryPosition};
 use crate::comment_study_catalog::{
-    CatalogStudyState, CatalogSummaryQuery, CatalogVoiceRole, StudyCatalogError,
-    read_catalog_summary,
+    CatalogStudyState, CatalogSummaryQuery, CatalogVoiceRole, CommentDetailQuery,
+    StudyCatalogError, read_catalog_summary, read_comment_detail,
 };
 use linggan_storage_postgres::Database;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sqlx::Row;
+use std::collections::HashMap;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -23,6 +24,9 @@ const MAX_LIMIT: i64 = 100;
 pub struct CommentStudyReadQuery {
     pub domain: Option<Uuid>,
     pub run_ref: Option<Uuid>,
+    pub kind: Option<String>,
+    pub work_ref: Option<Uuid>,
+    pub comment_external_id: Option<String>,
     pub cursor: Option<String>,
     pub limit: Option<i64>,
     pub q: Option<String>,
@@ -425,6 +429,239 @@ async fn read_signal_voice_preview(
     ))
 }
 
+/// Domain-wide current Signal rows. The overview preview groups voices by comment, whereas this
+/// page keeps every effective Signal so its pagination and total use the same unit.
+pub async fn read_current_signals(
+    database: &Database,
+    query: &CommentStudyReadQuery,
+) -> Result<Value, CommentStudyReadError> {
+    ensure_schema(database).await?;
+    let domain_ref = resolved_domain(database, query.domain)
+        .await?
+        .ok_or(CommentStudyReadError::InvalidQuery)?;
+    let kind = query
+        .kind
+        .as_deref()
+        .ok_or(CommentStudyReadError::InvalidQuery)?;
+    if !matches!(kind, "solution" | "experience") {
+        return Err(CommentStudyReadError::InvalidQuery);
+    }
+    let page = read_page(
+        database,
+        query,
+        "signals",
+        json!({"domainRef":domain_ref,"kind":kind}),
+        "created_at_desc.signal_ref_desc.v1",
+    )
+    .await?;
+    let rows = sqlx::query(
+        "WITH eligible AS MATERIALIZED ( \
+           SELECT signal.signal_ref,signal.target_ref,target.run_ref,signal.kind, \
+                  signal.proposition,signal.evidence,signal.content_public_ref, \
+                  signal.comment_external_id,signal.created_at, \
+                  current_comment.body_text,current_comment.author_display_name \
+           FROM linggan_comment_study_effective_signal signal \
+           JOIN linggan_comment_study_target target ON target.target_ref=signal.target_ref \
+           JOIN linggan_comment_study_run run ON run.run_ref=target.run_ref \
+           JOIN linggan_comment_study_policy policy ON policy.policy_ref=run.policy_ref \
+           JOIN linggan_comment_study_current_comment current_comment \
+             ON current_comment.content_public_ref=signal.content_public_ref \
+            AND current_comment.comment_external_id=signal.comment_external_id \
+           WHERE policy.domain_ref=$1 AND signal.domain_ref=$1 AND signal.kind=$2 \
+             AND signal.created_at <= $3::text::timestamptz \
+         ), total AS (SELECT count(*) AS total_count FROM eligible), page AS ( \
+           SELECT * FROM eligible \
+           WHERE $4::text IS NULL OR created_at < $4::text::timestamptz \
+             OR (created_at=$4::text::timestamptz AND signal_ref<$5::uuid) \
+           ORDER BY created_at DESC,signal_ref DESC LIMIT $6 \
+         ) \
+         SELECT page.signal_ref,page.target_ref,page.run_ref,page.kind,page.proposition, \
+                page.evidence,page.content_public_ref,page.comment_external_id, \
+                to_char(page.created_at AT TIME ZONE 'UTC', \
+                  'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS created_at, \
+                page.body_text,page.author_display_name,total.total_count, \
+                detail.title AS work_title \
+         FROM total LEFT JOIN page ON true \
+         LEFT JOIN LATERAL ( \
+           SELECT detail.title FROM linggan_material_content_detail detail \
+           JOIN linggan_runtime_capture_package package ON package.package_ref=detail.package_ref \
+           WHERE detail.content_public_ref=page.content_public_ref \
+             AND detail.title_state='KNOWN' AND package.accepted_at IS NOT NULL \
+           ORDER BY detail.observed_at::timestamptz DESC,detail.created_at DESC,detail.material_ref DESC \
+           LIMIT 1 \
+         ) detail ON true \
+         ORDER BY page.created_at DESC,page.signal_ref DESC",
+    )
+    .bind(domain_ref)
+    .bind(kind)
+    .bind(&page.as_of)
+    .bind(page.after.as_ref().map(|position| position.created_at.as_str()))
+    .bind(page.after.as_ref().map(|position| position.reference))
+    .bind(page.limit + 1)
+    .fetch_all(database.pool())
+    .await?;
+    let total_count: i64 = rows.first().map(|row| row.get("total_count")).unwrap_or(0);
+    let mut items: Vec<_> = rows
+        .into_iter()
+        .filter(|row| row.get::<Option<Uuid>, _>("signal_ref").is_some())
+        .collect();
+    let has_more = items.len() > page.limit as usize;
+    items.truncate(page.limit as usize);
+    let next_cursor = if has_more {
+        items
+            .last()
+            .map(|row| {
+                encode_next_cursor(
+                    &page,
+                    "signals",
+                    row.get("created_at"),
+                    row.get("signal_ref"),
+                )
+            })
+            .transpose()?
+    } else {
+        None
+    };
+    Ok(json!({
+        "contract":"comment-study.current-signals.v1","domainRef":domain_ref,"kind":kind,
+        "page":{"limit":page.limit,"hasMore":has_more,"nextCursor":next_cursor,
+            "asOf":page.as_of,"totalCount":total_count},
+        "signals":items.into_iter().map(|row| json!({
+            "signalRef":row.get::<Uuid,_>("signal_ref"),"targetRef":row.get::<Uuid,_>("target_ref"),
+            "runRef":row.get::<Uuid,_>("run_ref"),"kind":row.get::<String,_>("kind"),
+            "proposition":row.get::<String,_>("proposition"),"evidence":row.get::<String,_>("evidence"),
+            "commentText":row.get::<String,_>("body_text"),
+            "authorDisplayName":row.get::<Option<String>,_>("author_display_name"),
+            "commentKey":{"workRef":row.get::<Uuid,_>("content_public_ref"),
+                "commentExternalId":row.get::<String,_>("comment_external_id")},
+            "workRef":row.get::<Uuid,_>("content_public_ref"),
+            "workTitle":row.get::<Option<String>,_>("work_title"),
+            "sourceState":"known","createdAt":row.get::<String,_>("created_at")
+        })).collect::<Vec<_>>()
+    }))
+}
+
+/// Current related results for one stable comment. This keeps the catalog's domain and source
+/// decision, then reads only the effective head; historical Run rows remain under /signals.
+pub async fn read_comment_related(
+    database: &Database,
+    query: &CommentStudyReadQuery,
+) -> Result<Value, CommentStudyReadError> {
+    ensure_schema(database).await?;
+    let domain_ref = resolved_domain(database, query.domain)
+        .await?
+        .ok_or(CommentStudyReadError::InvalidQuery)?;
+    let work_ref = query.work_ref.ok_or(CommentStudyReadError::InvalidQuery)?;
+    let comment_external_id = query
+        .comment_external_id
+        .as_deref()
+        .ok_or(CommentStudyReadError::InvalidQuery)?;
+    if work_ref.is_nil()
+        || comment_external_id.is_empty()
+        || comment_external_id.len() > 512
+        || comment_external_id.contains('\0')
+    {
+        return Err(CommentStudyReadError::InvalidQuery);
+    }
+    let detail = read_comment_detail(
+        database,
+        &CommentDetailQuery {
+            domain: domain_ref,
+            work_ref,
+            comment_external_id: comment_external_id.to_owned(),
+        },
+    )
+    .await
+    .map_err(|error| match error {
+        StudyCatalogError::Database(database_error) => {
+            CommentStudyReadError::Database(database_error)
+        }
+        _ => CommentStudyReadError::InvalidQuery,
+    })?;
+    let source_state = detail["source"]["sourceState"]
+        .as_str()
+        .unwrap_or("unavailable");
+    let page = read_page(
+        database,
+        query,
+        "signals",
+        json!({"domainRef":domain_ref,"workRef":work_ref,"commentExternalId":comment_external_id}),
+        "created_at_desc.signal_ref_desc.v1",
+    )
+    .await?;
+    if source_state != "known" {
+        return Ok(json!({
+            "contract":"comment-study.comment-related.v1","domainRef":domain_ref,
+            "commentKey":{"workRef":work_ref,"commentExternalId":comment_external_id},
+            "sourceState":source_state,
+            "page":{"limit":page.limit,"hasMore":false,"nextCursor":null,"asOf":page.as_of},
+            "signals":[]
+        }));
+    }
+    let mut rows = sqlx::query(
+        "SELECT signal.signal_ref,signal.target_ref,target.run_ref,signal.kind, \
+                signal.proposition,signal.evidence, \
+                resolution.state AS resolution_state,resolution.resolved_problem_ref, \
+                to_jsonb(membership)->>'problem_revision_ref' AS problem_revision_ref, \
+                to_char(signal.created_at AT TIME ZONE 'UTC', \
+                  'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS created_at \
+         FROM linggan_comment_study_effective_signal signal \
+         JOIN linggan_comment_study_target target ON target.target_ref=signal.target_ref \
+         LEFT JOIN linggan_comment_study_resolution resolution USING(signal_ref) \
+         LEFT JOIN linggan_comment_study_problem_membership membership USING(signal_ref) \
+         WHERE signal.domain_ref=$1 AND signal.content_public_ref=$2 \
+           AND signal.comment_external_id=$3 AND signal.created_at<=$4::text::timestamptz \
+           AND ($5::text IS NULL OR signal.created_at<$5::text::timestamptz \
+             OR (signal.created_at=$5::text::timestamptz AND signal.signal_ref<$6::uuid)) \
+         ORDER BY signal.created_at DESC,signal.signal_ref DESC LIMIT $7",
+    )
+    .bind(domain_ref)
+    .bind(work_ref)
+    .bind(comment_external_id)
+    .bind(&page.as_of)
+    .bind(
+        page.after
+            .as_ref()
+            .map(|position| position.created_at.as_str()),
+    )
+    .bind(page.after.as_ref().map(|position| position.reference))
+    .bind(page.limit + 1)
+    .fetch_all(database.pool())
+    .await?;
+    let has_more = rows.len() > page.limit as usize;
+    rows.truncate(page.limit as usize);
+    let next_cursor = if has_more {
+        rows.last()
+            .map(|row| {
+                encode_next_cursor(
+                    &page,
+                    "signals",
+                    row.get("created_at"),
+                    row.get("signal_ref"),
+                )
+            })
+            .transpose()?
+    } else {
+        None
+    };
+    Ok(json!({
+        "contract":"comment-study.comment-related.v1","domainRef":domain_ref,
+        "commentKey":{"workRef":work_ref,"commentExternalId":comment_external_id},
+        "sourceState":"known",
+        "page":{"limit":page.limit,"hasMore":has_more,"nextCursor":next_cursor,"asOf":page.as_of},
+        "signals":rows.into_iter().map(|row| json!({
+            "signalRef":row.get::<Uuid,_>("signal_ref"),
+            "targetRef":row.get::<Uuid,_>("target_ref"),"runRef":row.get::<Uuid,_>("run_ref"),
+            "kind":row.get::<String,_>("kind"),"proposition":row.get::<String,_>("proposition"),
+            "evidence":row.get::<String,_>("evidence"),
+            "resolutionState":row.get::<Option<String>,_>("resolution_state"),
+            "resolvedProblemRef":row.get::<Option<Uuid>,_>("resolved_problem_ref"),
+            "problemRevisionRef":row.get::<Option<String>,_>("problem_revision_ref"),
+            "createdAt":row.get::<String,_>("created_at")
+        })).collect::<Vec<_>>()
+    }))
+}
+
 async fn read_problem_support_preview(
     database: &Database,
     domain_ref: Uuid,
@@ -534,13 +771,78 @@ pub async fn read_runs(
     } else {
         None
     };
+    let run_refs: Vec<Uuid> = rows.iter().map(|row| row.get("run_ref")).collect();
+    let extra_rows = sqlx::query(
+        "SELECT run.run_ref,to_jsonb(policy)->>'method_name' AS method_name, \
+           (SELECT count(*) FROM linggan_comment_study_resolution resolution \
+            JOIN linggan_comment_study_effective_signal signal USING(signal_ref) \
+            JOIN linggan_comment_study_target target ON target.target_ref=signal.target_ref \
+            WHERE target.run_ref=run.run_ref AND signal.eligibility_state='eligible' \
+              AND resolution.state='pending') AS pending_resolution_count, \
+           (SELECT count(*) FROM linggan_comment_study_problem_pair pair \
+            JOIN linggan_comment_study_effective_signal first_signal \
+              ON first_signal.signal_ref=pair.first_signal_ref \
+             AND first_signal.eligibility_state='eligible' \
+            JOIN linggan_comment_study_effective_signal second_signal \
+              ON second_signal.signal_ref=pair.second_signal_ref \
+             AND second_signal.eligibility_state='eligible' \
+            JOIN linggan_comment_study_target first_target \
+              ON first_target.target_ref=first_signal.target_ref \
+            JOIN linggan_comment_study_target second_target \
+              ON second_target.target_ref=second_signal.target_ref \
+            WHERE first_target.run_ref=run.run_ref AND second_target.run_ref=run.run_ref \
+              AND pair.state='pending') AS pending_pair_count \
+         FROM linggan_comment_study_run run \
+         JOIN linggan_comment_study_policy policy USING(policy_ref) \
+         WHERE run.run_ref=ANY($1::uuid[])",
+    )
+    .bind(&run_refs)
+    .fetch_all(database.pool())
+    .await?;
+    let extras: HashMap<Uuid, (Option<String>, i64, i64)> = extra_rows
+        .into_iter()
+        .map(|row| {
+            (
+                row.get("run_ref"),
+                (
+                    row.get("method_name"),
+                    row.get("pending_resolution_count"),
+                    row.get("pending_pair_count"),
+                ),
+            )
+        })
+        .collect();
+    let has_start_request: bool =
+        sqlx::query_scalar("SELECT to_regclass('linggan_comment_study_start_request') IS NOT NULL")
+            .fetch_one(database.pool())
+            .await?;
+    let origins: HashMap<Uuid, String> = if has_start_request {
+        sqlx::query(
+            "SELECT run_ref,origin FROM linggan_comment_study_start_request \
+             WHERE run_ref=ANY($1::uuid[])",
+        )
+        .bind(&run_refs)
+        .fetch_all(database.pool())
+        .await?
+        .into_iter()
+        .map(|row| (row.get("run_ref"), row.get("origin")))
+        .collect()
+    } else {
+        HashMap::new()
+    };
     Ok(json!({
         "contract":"comment-study.read.v1",
         "domainRef":domain_ref,
         "page":{"limit":page.limit,"hasMore":has_more,"nextCursor":next_cursor,"asOf":page.as_of},
-        "runs":rows.into_iter().map(|row| json!({
+        "runs":rows.into_iter().map(|row| {
+          let extra = extras.get(&row.get::<Uuid,_>("run_ref"));
+          json!({
             "runRef":row.get::<Uuid,_>("run_ref"),"asOf":row.get::<String,_>("as_of"),
             "policyRef":row.get::<Uuid,_>("policy_ref"),
+            "methodName":extra.and_then(|item| item.0.as_deref()),
+            "origin":origins.get(&row.get::<Uuid,_>("run_ref")),
+            "pendingResolutionCount":extra.map(|item| item.1),
+            "pendingPairCount":extra.map(|item| item.2),
             "limits":{"commentBudget":row.get::<Option<i32>,_>("comment_budget"),
                 "contextCharacterBudget":row.get::<Option<i32>,_>("context_character_budget"),
                 "tokenLimit":row.get::<Option<i64>,_>("token_limit")},
@@ -560,7 +862,7 @@ pub async fn read_runs(
             "needsContextCount":row.get::<i64,_>("needs_context_count"),"failedCount":row.get::<i64,_>("failed_count"),
             "excludedCount":row.get::<i64,_>("excluded_count"),
             "cancelledCount":row.get::<i64,_>("cancelled_count")
-        })).collect::<Vec<_>>()
+        })}).collect::<Vec<_>>()
     }))
 }
 
@@ -1434,10 +1736,56 @@ pub async fn read_problems(
     } else {
         None
     };
+    let problem_refs: Vec<Uuid> = rows.iter().map(|row| row.get("problem_ref")).collect();
+    let recent_rows = sqlx::query(
+        "WITH first_membership AS ( \
+           SELECT membership.problem_ref,source.content_public_ref,source.comment_external_id, \
+                  min(membership.created_at) AS first_added_at \
+           FROM linggan_comment_study_problem_membership membership \
+           JOIN linggan_comment_study_signal signal USING(signal_ref) \
+           JOIN linggan_comment_study_target target ON target.target_ref=signal.target_ref \
+           JOIN linggan_comment_study_run run ON run.run_ref=target.run_ref \
+           JOIN linggan_comment_study_policy policy ON policy.policy_ref=run.policy_ref \
+           JOIN linggan_material_comment source ON source.material_ref=target.source_ref \
+           WHERE membership.problem_ref=ANY($1::uuid[]) AND policy.domain_ref=$3 \
+           GROUP BY membership.problem_ref,source.content_public_ref,source.comment_external_id \
+         ), current_support AS ( \
+           SELECT DISTINCT membership.problem_ref,signal.content_public_ref,signal.comment_external_id \
+           FROM linggan_comment_study_problem_membership membership \
+           JOIN linggan_comment_study_effective_signal signal USING(signal_ref) \
+           WHERE membership.problem_ref=ANY($1::uuid[]) AND signal.domain_ref=$3 \
+             AND signal.eligibility_state='eligible' \
+         ) \
+         SELECT current_support.problem_ref, \
+                count(*) FILTER (WHERE first.first_added_at >= \
+                  $2::text::timestamptz - interval '28 days') AS recent_count, \
+                to_char(max(first.first_added_at) FILTER (WHERE first.first_added_at >= \
+                  $2::text::timestamptz - interval '28 days') AT TIME ZONE 'UTC', \
+                  'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS recent_added_at \
+         FROM current_support JOIN first_membership first USING( \
+           problem_ref,content_public_ref,comment_external_id) \
+         GROUP BY current_support.problem_ref",
+    )
+    .bind(&problem_refs)
+    .bind(&page.as_of)
+    .bind(domain_ref)
+    .fetch_all(database.pool())
+    .await?;
+    let recent: HashMap<Uuid, (i64, Option<String>)> = recent_rows
+        .into_iter()
+        .map(|row| {
+            (
+                row.get("problem_ref"),
+                (row.get("recent_count"), row.get("recent_added_at")),
+            )
+        })
+        .collect();
     Ok(json!({
         "contract":"comment-study.read.v1","domainRef":domain_ref,
         "page":{"limit":page.limit,"hasMore":has_more,"nextCursor":next_cursor,"asOf":page.as_of},
-        "problems":rows.into_iter().map(|row| json!({
+        "problems":rows.into_iter().map(|row| {
+            let recent_support = recent.get(&row.get::<Uuid,_>("problem_ref"));
+            json!({
             "problemRef":row.get::<Uuid,_>("problem_ref"),"domainRef":row.get::<Uuid,_>("domain_ref"),
             "revisionRef":row.get::<Uuid,_>("revision_ref"),
             "title":if row.get::<bool,_>("definition_readable") { Some(row.get::<String,_>("title")) } else { None },
@@ -1454,18 +1802,18 @@ pub async fn read_problems(
             "supportCommentCount":row.get::<i64,_>("support_comment_count"),
             "supportAuthorCount":row.get::<i64,_>("support_author_count"),
             "supportWorkCount":row.get::<i64,_>("support_work_count"),
+            "recentAddedSupportCommentCount":recent_support.map(|item| item.0).unwrap_or(0),
+            "recentAddedAt":recent_support.and_then(|item| item.1.as_deref()),
             "supportState":if !row.get::<bool,_>("definition_current") { "definition_stale" }
                 else if row.get::<i64,_>("support_author_count") >= 2 { "supported" }
                 else { "support_insufficient" },
             "createdAt":row.get::<String,_>("created_at"),
             "retiredAt":row.get::<Option<String>,_>("retired_at")
-        })).collect::<Vec<_>>()
+        })}).collect::<Vec<_>>()
     }))
 }
 
-/// One long-lived Problem, with current support and revision identities. Revision text is not
-/// returned here: an older definition may have a restricted seed even when the current one does
-/// not, and its historical record requires its own restriction-aware reader.
+/// One long-lived Problem, with each historical revision checked against its own seed lineage.
 pub async fn read_problem_detail(
     database: &Database,
     query: &CommentStudyReadQuery,
@@ -1484,23 +1832,121 @@ pub async fn read_problem_detail(
         .cloned()
         .ok_or(CommentStudyReadError::ProblemUnavailable)?;
     let revisions = sqlx::query(
-        "SELECT revision_ref,identity_version, \
-                to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS created_at \
-         FROM linggan_comment_study_problem_revision \
-         WHERE problem_ref=$1 ORDER BY identity_version DESC LIMIT 100",
+        "SELECT revision.revision_ref,revision.identity_version,revision.title, \
+                revision.definition,revision.core_frame,revision.inclusions,revision.exclusions, \
+                to_char(revision.created_at AT TIME ZONE 'UTC', \
+                  'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS created_at, \
+                cardinality(revision.seed_signal_refs)>0 AND NOT EXISTS( \
+                  SELECT 1 FROM unnest(revision.seed_signal_refs) seed(signal_ref) \
+                  LEFT JOIN linggan_comment_study_signal signal ON signal.signal_ref=seed.signal_ref \
+                  LEFT JOIN linggan_comment_study_target target ON target.target_ref=signal.target_ref \
+                  LEFT JOIN linggan_comment_study_run run ON run.run_ref=target.run_ref \
+                  LEFT JOIN linggan_comment_study_policy policy ON policy.policy_ref=run.policy_ref \
+                  LEFT JOIN linggan_material_comment source ON source.material_ref=target.source_ref \
+                  WHERE source.material_ref IS NULL \
+                     OR policy.domain_ref IS DISTINCT FROM revision.domain_ref \
+                     OR EXISTS(SELECT 1 FROM linggan_material_comment_restriction restriction \
+                       WHERE restriction.content_public_ref=source.content_public_ref \
+                         AND restriction.comment_external_id=source.comment_external_id) \
+                     OR EXISTS(SELECT 1 FROM linggan_material_comment parent \
+                       JOIN linggan_material_comment_restriction restriction \
+                         ON restriction.content_public_ref=parent.content_public_ref \
+                        AND restriction.comment_external_id=parent.comment_external_id \
+                       WHERE parent.material_ref=target.parent_source_ref) \
+                ) AS definition_readable \
+         FROM linggan_comment_study_problem_revision revision \
+         WHERE revision.problem_ref=$1 AND revision.domain_ref=$2 \
+         ORDER BY revision.identity_version DESC",
     )
     .bind(problem_ref)
+    .bind(query.domain)
     .fetch_all(database.pool())
+    .await?;
+    let source_distribution = read_problem_source_distribution(
+        database,
+        problem_ref,
+        query.domain.ok_or(CommentStudyReadError::InvalidQuery)?,
+    )
     .await?;
     Ok(json!({
         "contract":"comment-study.problem-detail.v1",
         "domainRef":problem["domainRef"],"problem":problem,
-        "revisionHistory":revisions.into_iter().map(|row| json!({
-            "revisionRef":row.get::<Uuid,_>("revision_ref"),
-            "identityVersion":row.get::<i32,_>("identity_version"),
-            "createdAt":row.get::<String,_>("created_at")
-        })).collect::<Vec<_>>()
+        "revisionHistory":revisions.into_iter().map(|row| {
+            let readable: bool = row.get("definition_readable");
+            json!({
+                "revisionRef":row.get::<Uuid,_>("revision_ref"),
+                "identityVersion":row.get::<i32,_>("identity_version"),
+                "createdAt":row.get::<String,_>("created_at"),
+                "definitionReadable":readable,
+                "title":if readable { Some(row.get::<String,_>("title")) } else { None },
+                "definition":if readable { Some(row.get::<String,_>("definition")) } else { None },
+                "stableIdentity":if readable { Some(row.get::<Value,_>("core_frame")) } else { None },
+                "includeCriteria":if readable { Some(row.get::<Value,_>("inclusions")) } else { None },
+                "excludeCriteria":if readable { Some(row.get::<Value,_>("exclusions")) } else { None }
+            })
+        }).collect::<Vec<_>>(),
+        "sourceDistribution":source_distribution
     }))
+}
+
+async fn read_problem_source_distribution(
+    database: &Database,
+    problem_ref: Uuid,
+    domain_ref: Uuid,
+) -> Result<Value, CommentStudyReadError> {
+    let distribution: Value = sqlx::query_scalar(
+        "WITH first_membership AS ( \
+           SELECT source.content_public_ref,source.comment_external_id, \
+                  min(membership.created_at) AS added_at \
+           FROM linggan_comment_study_problem_membership membership \
+           JOIN linggan_comment_study_signal signal USING(signal_ref) \
+           JOIN linggan_comment_study_target target ON target.target_ref=signal.target_ref \
+           JOIN linggan_comment_study_run run ON run.run_ref=target.run_ref \
+           JOIN linggan_comment_study_policy policy ON policy.policy_ref=run.policy_ref \
+           JOIN linggan_material_comment source ON source.material_ref=target.source_ref \
+           WHERE membership.problem_ref=$1 AND policy.domain_ref=$2 \
+           GROUP BY source.content_public_ref,source.comment_external_id \
+         ), support AS MATERIALIZED ( \
+           SELECT DISTINCT signal.content_public_ref,signal.comment_external_id,first.added_at \
+           FROM linggan_comment_study_problem_membership membership \
+           JOIN linggan_comment_study_effective_signal signal USING(signal_ref) \
+           JOIN first_membership first \
+             ON first.content_public_ref=signal.content_public_ref \
+            AND first.comment_external_id=signal.comment_external_id \
+           WHERE membership.problem_ref=$1 AND signal.domain_ref=$2 \
+             AND signal.eligibility_state='eligible' \
+         ), by_work AS ( \
+           SELECT content_public_ref,count(*) AS comment_count,max(added_at) AS latest_added_at \
+           FROM support GROUP BY content_public_ref \
+         ), by_day AS ( \
+           SELECT to_char(added_at AT TIME ZONE 'UTC','YYYY-MM-DD') AS day, \
+                  count(*) AS comment_count FROM support GROUP BY 1 \
+         ) \
+         SELECT jsonb_build_object( \
+           'supportCommentCount',(SELECT count(*) FROM support), \
+           'works',COALESCE((SELECT jsonb_agg(jsonb_build_object( \
+             'workRef',work.content_public_ref,'workTitle',detail.title, \
+             'commentCount',work.comment_count, \
+             'latestAddedAt',to_char(work.latest_added_at AT TIME ZONE 'UTC', \
+               'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')) \
+             ORDER BY work.comment_count DESC,work.content_public_ref) \
+             FROM by_work work LEFT JOIN LATERAL ( \
+               SELECT detail.title FROM linggan_material_content_detail detail \
+               JOIN linggan_runtime_capture_package package \
+                 ON package.package_ref=detail.package_ref \
+               WHERE detail.content_public_ref=work.content_public_ref \
+                 AND detail.title_state='KNOWN' AND package.accepted_at IS NOT NULL \
+               ORDER BY detail.observed_at::timestamptz DESC,detail.created_at DESC,detail.material_ref DESC \
+               LIMIT 1) detail ON true),'[]'::jsonb), \
+           'timeBuckets',COALESCE((SELECT jsonb_agg(jsonb_build_object( \
+             'date',day,'commentCount',comment_count) ORDER BY day DESC) \
+             FROM by_day),'[]'::jsonb))",
+    )
+    .bind(problem_ref)
+    .bind(domain_ref)
+    .fetch_one(database.pool())
+    .await?;
+    Ok(distribution)
 }
 
 /// Current evidence is paged by stable comment identity. Multiple Signals from one comment are

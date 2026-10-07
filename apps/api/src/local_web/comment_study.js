@@ -176,16 +176,17 @@ async function loadPolicies(preferredRef=null){
   const select=document.querySelector('#study-policy');
   const firstPage=await get('policies?limit=100');
   let result=firstPage;
-  let policyItems=firstPage.items||[];
-  activePolicyRef=policyItems.find(item=>item.isActive)?.policyRef||null;
-  while(!activePolicyRef&&result.page?.hasMore){
+  const policyItems=[...(firstPage.items||[])];
+  const seenCursors=new Set();
+  while(result.page?.hasMore){
     const cursor=result.page.nextCursor;
-    if(!cursor)throw new Error('方法目录分页回执不完整');
+    if(!cursor||seenCursors.has(cursor))throw new Error('方法目录分页回执不完整');
+    seenCursors.add(cursor);
     result=await get(`policies?limit=100&cursor=${encodeURIComponent(cursor)}`);
-    policyItems=result.items||[];
-    activePolicyRef=policyItems.find(item=>item.isActive)?.policyRef||null;
+    policyItems.push(...(result.items||[]));
   }
-  savedPolicies=(firstPage.items||[]).filter(item=>item.recordingState==='recorded');
+  activePolicyRef=policyItems.find(item=>item.isActive)?.policyRef||null;
+  savedPolicies=policyItems.filter(item=>item.recordingState==='recorded');
   select.innerHTML=savedPolicies.length?savedPolicies.map(item=>`<option value="${esc(item.policyRef)}">${esc(item.methodName||'未命名方法')}${item.isActive?' · 默认':''} · ${esc(item.policyRef.slice(0,8))}</option>`).join(''):'<option value="">没有已记录的方法版本</option>';
   select.disabled=savedPolicies.length===0;
   const isRecorded=reference=>savedPolicies.some(item=>item.policyRef===reference);
@@ -194,6 +195,7 @@ async function loadPolicies(preferredRef=null){
     ||savedPolicies[0]?.policyRef||'';
   if(desired)select.value=desired;
   document.querySelector('#activate-policy').disabled=!select.value||select.value===activePolicyRef;
+  document.querySelector('#view-policy').disabled=!select.value;
   updatePolicySummary();
   document.querySelector('#edit-policy').disabled=!document.querySelector('#model-config').value;
   if(!savedPolicies.length&&document.querySelector('#model-config').value)await openPolicyEditor();
@@ -205,7 +207,7 @@ function updatePolicySummary(){
   const policy=savedPolicies.find(item=>item.policyRef===reference);
   const summary=document.querySelector('#selected-policy-summary');
   const button=document.querySelector('#edit-policy');
-  button.textContent=policy?'编辑方法':'新建方法';
+  button.textContent=policy?'复制并编辑':'新建方法';
   summary.textContent=policy
     ?`${policy.methodName||'未命名方法'} · 版本 ${String(policy.policyRef).slice(0,8)} · 评论上限 ${Number(policy.defaults?.commentBudget||0)} 条 · 语境上限 ${Number(policy.defaults?.contextCharacterBudget||0)} 字符${policy.isActive?' · 当前默认':''}`
     :'还没有已保存的方法版本。首次使用前需要创建一版研究方法。';
@@ -214,6 +216,53 @@ function updatePolicySummary(){
     document.querySelector('#run-context-character-budget').value=String(policy?.defaults?.contextCharacterBudget||6000);
     runLimitsPolicyRef=reference;
   }
+}
+
+function renderPolicySnapshot(policy){
+  const manifest=policy.methodManifest;
+  if(!manifest?.stages)return '<p class="study-restricted">这个历史方法的完整内容未记录。</p>';
+  const stageNames={semantic:'评论语义提取',resolution:'问题归并',pair:'独立证据配对'};
+  const stages=Object.entries(stageNames).map(([key,title])=>{
+    const stage=manifest.stages[key];
+    if(!stage)return `<section><h3>${title}</h3><p>本阶段说明未记录。</p></section>`;
+    return `<section><h3>${title}</h3><pre>${esc(stage.systemInstruction||'说明未记录')}</pre><details><summary>查看严格输出 Schema</summary><pre>${esc(stage.outputSchema==null?'未记录':JSON.stringify(stage.outputSchema,null,2))}</pre></details></section>`;
+  }).join('');
+  const fixed=Object.fromEntries(Object.entries(manifest).filter(([key])=>key!=='stages'));
+  return `<article class="study-method-detail"><h3>${esc(policy.methodName||'未命名方法')}</h3><p>版本 ${esc(policy.policyRef)} · ${esc(String(policy.createdAt||'').replace('T',' '))}${policy.isActive?' · 当前默认':''}</p><p>默认评论上限 ${Number(policy.defaults?.commentBudget).toLocaleString('zh-CN')} 条；语境上限 ${Number(policy.defaults?.contextCharacterBudget).toLocaleString('zh-CN')} 字符。版本 hash ${esc(policy.methodHash||'未记录')}。</p>${stages}<details><summary>固定证据规则、清洗器与模型配置</summary><pre>${esc(JSON.stringify({...fixed,model:policy.model||null},null,2))}</pre></details></article>`;
+}
+
+async function showPolicyViewer(){
+  const reference=document.querySelector('#study-policy').value;
+  if(!reference)return;
+  const viewer=document.querySelector('#policy-viewer');
+  const compare=document.querySelector('#compare-policy');
+  const status=document.querySelector('#policy-viewer-status');
+  const content=document.querySelector('#policy-viewer-content');
+  viewer.hidden=false;
+  compare.innerHTML='<option value="">不对比</option>'+savedPolicies.filter(item=>item.policyRef!==reference).map(item=>`<option value="${esc(item.policyRef)}">${esc(item.methodName||'未命名方法')} · ${esc(item.policyRef.slice(0,8))}</option>`).join('');
+  compare.value='';compare.disabled=true;status.textContent='正在读取完整方法版本…';content.innerHTML='';
+  try{
+    const response=await get(`policies/${encodeURIComponent(reference)}`);
+    if(document.querySelector('#study-policy').value!==reference)return;
+    content.innerHTML=renderPolicySnapshot(response.policy||{});
+    compare.disabled=false;
+    status.textContent='当前方法为不可变版本；复制并编辑会保存为新版本。';
+  }catch(error){status.textContent=`方法详情读取失败：${error.message}`;}
+}
+
+async function comparePolicyVersion(){
+  const reference=document.querySelector('#compare-policy').value;
+  const content=document.querySelector('#policy-viewer-content');
+  const status=document.querySelector('#policy-viewer-status');
+  content.querySelector('[data-policy-comparison]')?.remove();
+  if(!reference)return;
+  status.textContent='正在读取对比版本…';
+  try{
+    const response=await get(`policies/${encodeURIComponent(reference)}`);
+    if(document.querySelector('#compare-policy').value!==reference)return;
+    content.insertAdjacentHTML('beforeend',`<div data-policy-comparison>${renderPolicySnapshot(response.policy||{})}</div>`);
+    status.textContent='两版完整方法并排显示；旧版本不会被修改。';
+  }catch(error){status.textContent=`对比版本读取失败：${error.message}`;}
 }
 
 function instructionExtra(instruction){
@@ -313,6 +362,7 @@ const signalKindLabel = {
   solution: '解决方案', quote: '引述', context: '语境', question: '疑问'
 };
 const problemStateLabel = { active: '生效中', retired: '已停用' };
+const problemSupportLabel = {supported:'有不同作者支持',support_insufficient:'当前支持不足',definition_stale:'定义依据已失效'};
 const contextStateLabel = { ready: '语境完整', partial: '语境部分（有截断）', missing: '缺少语境' };
 const dependencyStateLabel = { self_contained: '不依赖父评论', parent_available: '父评论已冻结', parent_required_missing: '判定缺少父评论' };
 const sourceStateLabel = { known: null, restricted: '来源已被限制，原文不再显示', unknown: '原文未知（来源未采集到正文）' };
@@ -349,6 +399,7 @@ let selectedRunPanel = initialStudyRoute.get('view') === 'targets' ? 'targets' :
 let focusedTargetRef = initialStudyRoute.get('targetRef');
 let focusedSignalRef = initialStudyRoute.get('signalRef');
 let selectedProblemRef = initialStudyRoute.get('problemRef');
+let selectedProblemRevisionVersions = new Map();
 const problemListCache={items:[],nextCursor:null,loaded:false,hasMore:false};
 const problemCandidateState={state:'all',items:[],nextCursor:null,loaded:false,asOf:null,error:null};
 const RUN_SCOPED_VIEWS = new Set(['runs']);
@@ -581,7 +632,18 @@ function commentHistoryRow(item){
   const actions = run ? `<div class="study-link-actions"><button type="button" class="study-link" data-history-run="${esc(run)}" data-history-panel="targets" data-history-target="${esc(item.targetRef||'')}">查看本次目标</button><button type="button" class="study-link" data-history-run="${esc(run)}" data-history-panel="signals" data-history-target="${esc(item.targetRef||'')}">查看本次信号</button><button type="button" class="study-link" data-history-run="${esc(run)}" data-history-panel="method">查看本次方法</button></div>` : '<span>历史 Run 编号未记录，无法跳转。</span>';
   return `<li><strong>${esc(label(targetStateLabel,item.state)??item.state)}</strong><span>${esc(String(item.createdAt||'').replace('T',' '))}</span><span>Signal ${Number(item.signalCount||0)} 条</span><span>方法：${esc(item.method?.recordingState==='recorded'?(item.method.methodName||item.method.policyRef):'历史未记录')}</span>${actions}</li>`;
 }
-function renderCommentDetail(data){
+function renderCommentRelatedSignal(signal){
+  return `<article class="study-related-signal"><p><strong>${esc(label(signalKindLabel,signal.kind)??signal.kind)}</strong> · ${esc(signal.proposition||'归一表达未记录')}</p>${signal.evidence?`<blockquote>${esc(signal.evidence)}</blockquote>`:''}<div class="study-link-actions">${signal.runRef?`<button type="button" class="study-link" data-related-run="${esc(signal.runRef)}" data-related-target="${esc(signal.targetRef||'')}" data-related-signal="${esc(signal.signalRef||'')}">查看本次信号</button>`:''}${signal.resolvedProblemRef?`<button type="button" class="study-link" data-related-problem="${esc(signal.resolvedProblemRef)}">查看用户问题</button>`:''}</div></article>`;
+}
+function renderCommentRelated(related,key,sourceReadable){
+  if(!sourceReadable)return '<p class="study-restricted">来源当前受限，关联研究内容不显示。</p>';
+  if(related?.error)return `<p class="study-restricted">关联研究读取失败：${esc(related.error)}</p>`;
+  if(related?.sourceState!=='known')return '<p class="study-restricted">关联研究来源状态未确认，暂不显示。</p>';
+  const rows=Array.isArray(related.signals)?related.signals:[];
+  const more=related.page?.nextCursor?`<button type="button" id="comment-related-more" data-work="${esc(key.workRef)}" data-comment-id="${esc(key.commentExternalId)}" data-cursor="${esc(related.page.nextCursor)}">加载更多关联信号</button>`:'';
+  return `<p class="study-run-page-status">当前显示 ${rows.length} 条当前有效信号${more?'，还有后续内容':''}。</p><div id="comment-related-signals">${rows.length?rows.map(renderCommentRelatedSignal).join(''):'<p class="study-empty">当前没有有效研究信号或关联用户问题。</p>'}</div>${more}`;
+}
+function renderCommentDetail(data,related){
   const comment=data.comment,source=data.source||{},work=data.work||{},parent=data.parentContext,history=data.studyHistory?.items||[];
   const sourceReadable=source.sourceState==='known';
   const raw=sourceReadable&&comment?.commentText?`<blockquote>${esc(comment.commentText)}</blockquote>`:`<p class="study-restricted">当前原声不可显示：${esc(source.displayState||source.sourceState||'unknown')}</p>`;
@@ -592,7 +654,7 @@ function renderCommentDetail(data){
   const historyBody=history.length?`<ol class="study-history-list">${history.map(commentHistoryRow).join('')}</ol>`:'<p class="muted">尚无研究历史。</p>';
   const next=data.studyHistory?.page?.nextCursor;
   const more=next?`<button type="button" id="comment-history-more" data-work="${esc(data.commentKey.workRef)}" data-comment-id="${esc(data.commentKey.commentExternalId)}" data-cursor="${esc(next)}">继续读取研究历史</button>`:'';
-  return raw+detailSection('所属作品',workBody)+detailSection('父评论语境',parentBody)+detailSection('清洗文本',cleanBody)+detailSection(`研究历史（${Number(data.studyHistory?.totalCount||0)}）`,historyBody+more);
+  return raw+detailSection('所属作品',workBody)+detailSection('父评论语境',parentBody)+detailSection('清洗文本',cleanBody)+detailSection(`研究历史（${Number(data.studyHistory?.totalCount||0)}）`,historyBody+more)+detailSection('相关信号与用户问题',renderCommentRelated(related,data.commentKey,sourceReadable));
 }
 async function loadMoreCommentHistory(button){
   const data=await get(catalogQuery('comments/history',{workRef:button.dataset.work,commentExternalId:button.dataset.commentId,cursor:button.dataset.cursor,limit:50}));
@@ -603,6 +665,20 @@ async function loadMoreCommentHistory(button){
 function bindCommentHistoryMore(){
   const button=document.querySelector('#comment-history-more');if(!button)return;
   button.addEventListener('click',async()=>{button.disabled=true;button.textContent='正在读取…';try{await loadMoreCommentHistory(button);}catch(error){button.disabled=false;button.textContent=`读取失败，重试：${error.message}`;}});
+}
+function bindCommentRelatedMore(){
+  const button=document.querySelector('#comment-related-more');if(!button)return;
+  button.addEventListener('click',async()=>{
+    const request=commentDetailRequest;
+    button.disabled=true;button.textContent='正在读取…';
+    try{
+      const data=await get(catalogQuery('comments/related',{workRef:button.dataset.work,commentExternalId:button.dataset.commentId,cursor:button.dataset.cursor,limit:50}));
+      if(request!==commentDetailRequest)return;
+      if(data.sourceState!=='known'){void openCommentDetail(button.dataset.work,button.dataset.commentId,{push:false});return;}
+      document.querySelector('#comment-related-signals')?.insertAdjacentHTML('beforeend',(data.signals||[]).map(renderCommentRelatedSignal).join(''));
+      if(data.page?.nextCursor){button.dataset.cursor=data.page.nextCursor;button.disabled=false;button.textContent='加载更多关联信号';}else button.remove();
+    }catch(error){if(request===commentDetailRequest){button.disabled=false;button.textContent=`读取失败，重试：${error.message}`;}}
+  });
 }
 let commentDetailRequest = 0;
 async function openCommentDetail(workRef,commentExternalId,{push=true}={}){
@@ -618,7 +694,12 @@ async function openCommentDetail(workRef,commentExternalId,{push=true}={}){
   }
   const request=++commentDetailRequest;
   const dialog=document.querySelector('#comment-detail-dialog'),body=document.querySelector('#comment-detail-body');body.innerHTML='<p class="study-empty">正在读取评论详情…</p>';if(!dialog.open)dialog.showModal();
-  try{const data=await get(catalogQuery('comments/detail',{workRef,commentExternalId}));if(request!==commentDetailRequest)return;body.innerHTML=renderCommentDetail(data);bindCommentHistoryMore();}catch(error){if(request===commentDetailRequest)body.innerHTML=`<p class="study-empty">评论详情读取失败：${esc(error.message)}</p>`;}
+  try{
+    const [data,relatedResult]=await Promise.all([get(catalogQuery('comments/detail',{workRef,commentExternalId})),get(catalogQuery('comments/related',{workRef,commentExternalId,limit:50})).then(value=>({value}),error=>({error:error.message}))]);
+    if(request!==commentDetailRequest)return;
+    body.innerHTML=renderCommentDetail(data,relatedResult.value||relatedResult);
+    bindCommentHistoryMore();bindCommentRelatedMore();
+  }catch(error){if(request===commentDetailRequest)body.innerHTML=`<p class="study-empty">评论详情读取失败：${esc(error.message)}</p>`;}
 }
 function closeCommentDetail({back=true}={}){
   const dialog=document.querySelector('#comment-detail-dialog');
@@ -770,11 +851,11 @@ async function renderProblemsTab() {
   problemCandidateState.error=candidateResult.status==='rejected';
   const rows = problemListCache.items;
   const count = problemListCache.hasMore ? `当前读取 ${rows.length} 个，还有后续问题` : `当前读取 ${rows.length} 个问题`;
-  const cards = list(rows, problem => `<article class="study-problem-card" data-problem-ref="${esc(problem.problemRef)}" data-focus="${selectedProblemRef===problem.problemRef}"><header><span>${esc(label(problemStateLabel, problem.state) ?? problem.state)}</span><span>关联研究信号 ${Number(problem.membershipCount||0)} 条</span></header><h3 class="study-signal-proposition">${esc(problem.title||problem.definition||'定义当前不可读取')}</h3><p class="study-signal-meta">支持评论 ${Number(problem.supportCommentCount||0)} 条 · 独立作者 ${Number(problem.supportAuthorCount||0)} 位 · 作品 ${Number(problem.supportWorkCount||0)} 篇${problem.definitionCurrent===false?' · 当前定义依据已失效':''}</p><button type="button" class="study-link" data-problem-open="${esc(problem.problemRef)}">查看定义与原声依据</button></article>`, '尚无已建立的长期用户问题。');
+  const cards = list(rows, problem => `<article class="study-problem-card" data-problem-ref="${esc(problem.problemRef)}" data-focus="${selectedProblemRef===problem.problemRef}"><header><span>${esc(label(problemStateLabel, problem.state) ?? problem.state)}</span><span>${esc(problemSupportLabel[problem.supportState]||'支持状态未记录')}</span></header><h3 class="study-signal-proposition">${esc(problem.title||problem.definition||'定义当前不可读取')}</h3><p class="study-signal-meta">支持评论 ${Number(problem.supportCommentCount||0)} 条 · 独立作者 ${Number(problem.supportAuthorCount||0)} 位 · 作品 ${Number(problem.supportWorkCount||0)} 篇${problem.recentAddedSupportCommentCount==null?'':` · 近 28 天新增 ${Number(problem.recentAddedSupportCommentCount)} 条不同评论依据`}${problem.definitionCurrent===false?' · 当前定义依据已失效':''}</p><button type="button" class="study-link" data-problem-open="${esc(problem.problemRef)}">查看定义与原声依据</button></article>`, '尚无已建立的长期用户问题。');
   const more=problemListCache.nextCursor?'<button type="button" class="study-link" data-problem-list-more>加载更多用户问题</button>':'';
   let detailHtml='';
   if(selectedProblemRef){
-    try{const [detail,evidence]=await Promise.all([get(`problems/${encodeURIComponent(selectedProblemRef)}`),get(`problems/${encodeURIComponent(selectedProblemRef)}/evidence?limit=50`)]);if(detail.problem?.problemRef!==selectedProblemRef||evidence.problemRef!==selectedProblemRef)throw new Error('用户问题详情与当前选择不一致。');detailHtml=renderProblemDetail(detail.problem,evidence,detail.revisionHistory||[]);}catch(error){detailHtml=`<p class="study-restricted">问题详情读取失败：${esc(error.message)}</p>`;}
+    try{const [detail,evidence]=await Promise.all([get(`problems/${encodeURIComponent(selectedProblemRef)}`),get(`problems/${encodeURIComponent(selectedProblemRef)}/evidence?limit=50`)]);if(detail.problem?.problemRef!==selectedProblemRef||evidence.problemRef!==selectedProblemRef)throw new Error('用户问题详情与当前选择不一致。');detailHtml=renderProblemDetail(detail.problem,evidence,detail.revisionHistory||[],detail.sourceDistribution);}catch(error){detailHtml=`<p class="study-restricted">问题详情读取失败：${esc(error.message)}</p>`;}
   }
   return `<section aria-labelledby="filed-problems-title"><h2 id="filed-problems-title">已建档用户问题</h2>${problemError?'<p class="study-restricted">已建档问题列表暂时读取失败。</p>':`<p class="study-run-page-status">${esc(count)}</p>${cards}${more}`}${detailHtml}</section>${renderProblemCandidates()}`;
 }
@@ -814,21 +895,36 @@ async function loadProblemPage(reset=false){
 function renderProblemEvidence(row){
   const sourceReadable=row.sourceState==='known'&&typeof row.commentText==='string'&&row.commentText.length>0;
   const key=row.commentKey||{};
-  const signals=sourceReadable?(row.signals||[]).map(signal=>`<li><span>${esc(label(signalKindLabel,signal.kind)??signal.kind)}</span> · ${esc(signal.proposition||'未记录归一表达')}${signal.evidence?`<blockquote>${esc(signal.evidence)}</blockquote>`:''}</li>`).join(''):'';
-  return `<article class="study-problem-evidence">${sourceReadable?`<blockquote>${esc(row.commentText)}</blockquote>`:'<p class="study-restricted">来源当前受限，原声及衍生内容不再显示。</p>'}${sourceReadable?`<p class="study-signal-meta">${esc(row.authorDisplayName||'作者未记录')} · ${esc(row.workRef||'作品未记录')}</p>`:''}${signals?`<ul>${signals}</ul>`:''}${key.workRef&&key.commentExternalId?`<button type="button" class="study-link" data-evidence-work="${esc(key.workRef)}" data-evidence-id="${esc(key.commentExternalId)}">查看评论及父语境</button>`:''}</article>`;
+  const signals=sourceReadable?(row.signals||[]).map(signal=>`<li><span>${esc(label(signalKindLabel,signal.kind)??signal.kind)}</span> · ${esc(signal.proposition||'未记录归一表达')}<small> · ${signal.problemRevisionRef?`匹配时版本 ${esc(selectedProblemRevisionVersions.get(signal.problemRevisionRef)||signal.problemRevisionRef)}`:'历史匹配版本未记录'}</small>${signal.evidence?`<blockquote>${esc(signal.evidence)}</blockquote>`:''}</li>`).join(''):'';
+  return `<article class="study-problem-evidence">${sourceReadable?`<blockquote>${esc(row.commentText)}</blockquote>`:'<p class="study-restricted">来源当前受限，原声及衍生内容不再显示。</p>'}${sourceReadable?`<p class="study-signal-meta">${esc(row.authorDisplayName||'作者未记录')} · ${esc(row.workRef||'作品未记录')}${row.addedAt?` · 依据加入于 ${esc(String(row.addedAt).replace('T',' '))}`:''}</p>`:''}${signals?`<ul>${signals}</ul>`:''}${key.workRef&&key.commentExternalId?`<button type="button" class="study-link" data-evidence-work="${esc(key.workRef)}" data-evidence-id="${esc(key.commentExternalId)}">查看评论及父语境</button>`:''}</article>`;
 }
 function renderProblemIdentity(identity){
   const fields=[['actor','谁遇到问题'],['goalOrExpectedState','期望达到'],['barrierOrUnmetNeed','阻碍或未满足需求'],['context','发生情境']];
   return `<dl class="study-problem-identity">${fields.map(([key,title])=>`<div><dt>${title}</dt><dd>${esc(identity?.[key]||'当前未知')}</dd></div>`).join('')}</dl>`;
 }
 function renderProblemCriteria(items){return Array.isArray(items)&&items.length?`<ul>${items.map(item=>`<li>${esc(typeof item==='string'?item:JSON.stringify(item))}</li>`).join('')}</ul>`:'<p>尚未记录具体条件。</p>';}
-function renderProblemDetail(problem,evidence,revisionHistory){
+function renderProblemRevision(item){
+  const body=item.definitionReadable===true
+    ? `<h4>${esc(item.title||'标题未记录')}</h4><p>${esc(item.definition||'定义未记录')}</p>${renderProblemIdentity(item.stableIdentity)}<h4>纳入条件</h4>${renderProblemCriteria(item.includeCriteria)}<h4>排除条件</h4>${renderProblemCriteria(item.excludeCriteria)}`
+    : '<p class="study-restricted">这一版定义的种子原声当前受限或无法验证；历史定义和边界不显示。</p>';
+  return `<li><details><summary>版本 ${Number(item.identityVersion)} · ${esc(String(item.createdAt||'').replace('T',' '))}</summary><p class="study-signal-meta">修订 ${esc(item.revisionRef)}</p>${body}</details></li>`;
+}
+function renderProblemDistribution(distribution){
+  if(!distribution)return '<p class="study-detail-muted">来源分布暂不可读。</p>';
+  const works=Array.isArray(distribution.works)?distribution.works:[];
+  const days=Array.isArray(distribution.timeBuckets)?distribution.timeBuckets:[];
+  const workRows=works.map(item=>`<tr><td>${esc(item.workTitle||'标题未记录')}</td><td>${Number(item.commentCount).toLocaleString('zh-CN')}</td><td>${esc(String(item.latestAddedAt||'未记录').replace('T',' '))}</td></tr>`).join('');
+  const dayRows=days.map(item=>`<tr><td>${esc(item.date||'日期未记录')}</td><td>${Number(item.commentCount).toLocaleString('zh-CN')}</td></tr>`).join('');
+  return `<p>当前可读的不同评论依据共 ${Number(distribution.supportCommentCount).toLocaleString('zh-CN')} 条，分布于 ${works.length} 篇作品。</p><details><summary>按作品查看来源</summary>${works.length?`<div class="study-review-table-wrap"><table class="study-review-table"><thead><tr><th scope="col">作品</th><th scope="col">不同评论</th><th scope="col">最近加入依据</th></tr></thead><tbody>${workRows}</tbody></table></div>`:'<p>暂无可读来源。</p>'}</details><details><summary>按加入日期查看</summary>${days.length?`<div class="study-review-table-wrap"><table class="study-review-table"><thead><tr><th scope="col">日期（UTC）</th><th scope="col">不同评论</th></tr></thead><tbody>${dayRows}</tbody></table></div>`:'<p>暂无可读日期。</p>'}</details>`;
+}
+function renderProblemDetail(problem,evidence,revisionHistory,sourceDistribution){
+  selectedProblemRevisionVersions=new Map(revisionHistory.map(item=>[item.revisionRef,item.identityVersion]));
   const next=evidence.page?.nextCursor;
   const revision=problem.revisionRef?` · 修订 ${esc(problem.revisionRef)}`:'';
   const readable=problem.definitionReadable===true;
-  const definition=readable?`<section><h3>当前定义</h3><p>${esc(problem.definition||'未记录')}</p>${renderProblemIdentity(problem.stableIdentity)}</section><section><h3>纳入依据</h3>${renderProblemCriteria(problem.includeCriteria)}</section><section><h3>排除依据</h3>${renderProblemCriteria(problem.excludeCriteria)}</section>`:'<p class="study-restricted">定义所依赖的种子原声当前受限，定义与条件已隐藏。</p>';
-  const revisions=revisionHistory.length?`<details><summary>定义修订记录（${revisionHistory.length}）</summary><ol>${revisionHistory.map(item=>`<li>版本 ${Number(item.identityVersion)} · ${esc(String(item.createdAt||'').replace('T',' '))} · ${esc(item.revisionRef)}</li>`).join('')}</ol></details>`:'';
-  return `<section class="study-problem-detail" aria-label="用户问题详情"><header><h2 tabindex="-1">${esc(problem.title||problem.definition||'定义当前不可读取')}</h2><button type="button" class="study-link" data-problem-close>返回问题列表</button></header><p class="study-signal-meta">${esc(label(problemStateLabel,problem.state)??problem.state)}${revision} · 支持评论 ${Number(problem.supportCommentCount||0)} 条 · 独立作者 ${Number(problem.supportAuthorCount||0)} 位 · 作品 ${Number(problem.supportWorkCount||0)} 篇${problem.definitionCurrent===false?' · 当前定义依据已失效':''}</p>${definition}${revisions}<section><h3>原声与关联信号</h3><p class="study-run-page-status">当前显示 ${(evidence.evidence||[]).length} 条${next?'，还有后续内容':'，已到列表末尾'}</p><div id="study-problem-evidence">${list(evidence.evidence,renderProblemEvidence,'当前没有可显示的原声依据。')}</div>${next?`<button type="button" class="study-link" data-problem-evidence-more="${esc(next)}">加载更多原声</button>`:''}</section></section>`;
+  const definition=readable?`<section><h3>当前定义</h3><p>${esc(problem.definition||'未记录')}</p>${renderProblemIdentity(problem.stableIdentity)}</section><section><h3>纳入依据</h3>${renderProblemCriteria(problem.includeCriteria)}</section><section><h3>排除依据</h3>${renderProblemCriteria(problem.excludeCriteria)}</section>`:'<p class="study-restricted">定义所依赖的种子原声当前受限或无法验证，定义与条件已隐藏。</p>';
+  const revisions=revisionHistory.length?`<section><h3>当时定义与修订</h3><ol class="study-problem-revisions">${revisionHistory.map(renderProblemRevision).join('')}</ol></section>`:'';
+  return `<section class="study-problem-detail" aria-label="用户问题详情"><header><h2 tabindex="-1">${esc(problem.title||problem.definition||'定义当前不可读取')}</h2><button type="button" class="study-link" data-problem-close>返回问题列表</button></header><p class="study-signal-meta">${esc(label(problemStateLabel,problem.state)??problem.state)} · ${esc(problemSupportLabel[problem.supportState]||'支持状态未记录')}${revision} · 支持评论 ${Number(problem.supportCommentCount||0)} 条 · 独立作者 ${Number(problem.supportAuthorCount||0)} 位 · 作品 ${Number(problem.supportWorkCount||0)} 篇${problem.definitionCurrent===false?' · 当前定义依据已失效':''}</p>${definition}<section><h3>来源与时间分布</h3>${renderProblemDistribution(sourceDistribution)}</section>${revisions}<section><h3>原声与关联信号</h3><p class="study-run-page-status">当前显示 ${(evidence.evidence||[]).length} 条${next?'，还有后续内容':'，已到列表末尾'}</p><div id="study-problem-evidence">${list(evidence.evidence,renderProblemEvidence,'当前没有可显示的原声依据。')}</div>${next?`<button type="button" class="study-link" data-problem-evidence-more="${esc(next)}">加载更多原声</button>`:''}</section></section>`;
 }
 
 function runRow(run) {
@@ -855,9 +951,13 @@ function runRow(run) {
   actions.push(`<button type="button" class="study-link" data-run-open="${esc(run.runRef)}">${selectedRunRef === run.runRef ? '当前查看' : '查看结果'}</button>`);
   const dispatchLabel = dispatchStateLabel[run.dispatchState] || '派发状态未知';
   const dispatchReason = dispatchReasonLabel[run.dispatchReason];
+  const originLabel = run.recoverySourceRunRef?'补跑未完成':({manual:'手动发起',scheduled:'定时发起'}[run.origin]||'来源未记录');
+  const pendingResolution=run.pendingResolutionCount==null?'—':Number(run.pendingResolutionCount).toLocaleString('zh-CN');
+  const pendingPair=run.pendingPairCount==null?'—':Number(run.pendingPairCount).toLocaleString('zh-CN');
   return `<tr>
-      <td>${esc(run.runRef.slice(0, 8))}…<p>${esc(run.createdAt)}</p>${run.recoverySourceRunRef ? `<p>补跑自 ${esc(run.recoverySourceRunRef.slice(0, 8))}…</p>` : ''}</td>
+      <td><strong>${esc(run.methodName||'方法未记录')}</strong><p>${esc(originLabel)} · ${esc(String(run.createdAt||'').replace('T',' '))}</p><p>运行 ${esc(run.runRef.slice(0, 8))}…${run.recoverySourceRunRef ? ` · 补跑自 ${esc(run.recoverySourceRunRef.slice(0, 8))}…` : ''}</p></td>
       <td>${esc(runStateLabel[run.state] || run.state)}<p>${esc(dispatchLabel)}${dispatchReason ? ` · ${esc(dispatchReason)}` : ''}</p></td>
+      <td>归并 ${pendingResolution}<p>配对 ${pendingPair}</p></td>
       <td>${Number(run.workCount)}<p>primary ${Number(run.primaryWorkCount || 0)} · reference ${Number(run.referenceWorkCount || 0)}</p></td>
       <td>${Number(run.targetCount)}</td>
       <td>${Number(run.succeededCount)}</td>
@@ -872,7 +972,7 @@ async function renderRunsTab() {
   if (!runListLoaded || runControlOutcomeNeedsRefresh) await loadRunListPage(true);
   const feedback = '<p id="study-run-control-feedback" class="study-run-control-feedback" role="status" aria-live="polite" tabindex="-1">' + esc(runControlFeedback) + '</p>';
   if (!allRuns.length) return feedback + '<p class="study-empty">尚未创建过研究运行。</p>';
-  const table = '<div class="study-review-table-wrap"><table class="study-review-table"><thead><tr><th scope="col">运行</th><th scope="col">状态</th><th scope="col">作品</th><th scope="col">目标</th><th scope="col">有信号</th><th scope="col">无信号</th><th scope="col">等待语境</th><th scope="col">处理失败</th><th scope="col">已排除</th><th scope="col">操作</th></tr></thead><tbody>' + allRuns.map(runRow).join('') + '</tbody></table></div>';
+  const table = '<div class="study-review-table-wrap"><table class="study-review-table"><thead><tr><th scope="col">方法与来源</th><th scope="col">执行状态</th><th scope="col">归并待办</th><th scope="col">作品</th><th scope="col">目标</th><th scope="col">有信号</th><th scope="col">无信号</th><th scope="col">等待语境</th><th scope="col">处理失败</th><th scope="col">已排除</th><th scope="col">操作</th></tr></thead><tbody>' + allRuns.map(runRow).join('') + '</tbody></table></div>';
   const more = runListNextCursor
     ? `<p class="study-run-page-status">已显示 ${allRuns.length} 次运行 <button type="button" class="study-link" data-run-list-load-more${runListLoading ? ' disabled' : ''}>${runListLoading ? '读取中…' : '加载更早运行'}</button></p>`
     : `<p class="study-run-page-status">已显示 ${allRuns.length} 次运行，已到列表末尾</p>`;
@@ -1321,6 +1421,9 @@ function setStudySelectionKind(kind){
 }
 document.querySelector('#open-study-dialog').addEventListener('click', () => {setStudySelectionKind('works');studyDialog.showModal();});
 document.querySelector('#study-dialog-close').addEventListener('click', () => studyDialog.close());
+document.querySelector('#view-policy').addEventListener('click', showPolicyViewer);
+document.querySelector('#close-policy-viewer').addEventListener('click', () => {document.querySelector('#policy-viewer').hidden=true;});
+document.querySelector('#compare-policy').addEventListener('change', comparePolicyVersion);
 document.querySelector('#edit-policy').addEventListener('click', openPolicyEditor);
 document.querySelector('#cancel-policy-edit').addEventListener('click', () => {
   closePolicyEditor();
@@ -1358,6 +1461,8 @@ document.querySelector('#policy-form').addEventListener('submit', async event =>
 });
 document.querySelector('#study-policy').addEventListener('change', () => {
   document.querySelector('#activate-policy').disabled = !document.querySelector('#study-policy').value || document.querySelector('#study-policy').value === activePolicyRef;
+  document.querySelector('#view-policy').disabled=!document.querySelector('#study-policy').value;
+  document.querySelector('#policy-viewer').hidden=true;
   updatePolicySummary();
   pendingStartSignature = null; pendingStartRef = null; updateSelection();
 });
@@ -1469,6 +1574,10 @@ document.querySelector('#comment-detail-dialog').addEventListener('cancel',event
 document.querySelector('#comment-detail-body').addEventListener('click',async event=>{
   const history=event.target.closest('[data-history-run]');
   if(history){await navigateToRun(history.dataset.historyRun,history.dataset.historyPanel,history.dataset.historyTarget||null);return;}
+  const relatedRun=event.target.closest('[data-related-run]');
+  if(relatedRun){await navigateToRun(relatedRun.dataset.relatedRun,'signals',relatedRun.dataset.relatedTarget||null,relatedRun.dataset.relatedSignal||null);return;}
+  const relatedProblem=event.target.closest('[data-related-problem]');
+  if(relatedProblem){await navigateToProblem(relatedProblem.dataset.relatedProblem);return;}
   const parent=event.target.closest('[data-detail-parent-work][data-detail-parent-id]');
   if(parent){void openCommentDetail(parent.dataset.detailParentWork,parent.dataset.detailParentId);return;}
   const work=event.target.closest('[data-detail-work]');
@@ -1476,7 +1585,7 @@ document.querySelector('#comment-detail-body').addEventListener('click',async ev
 });
 /* COMMENT-STUDY-INTELLIGENCE-OVERVIEW-002 */
   const overviewDomainRef = new URLSearchParams(window.location.search).get('domain');
-  const overviewState = {method:'solution',seriesDays:28,seriesView:window.matchMedia('(max-width:620px)').matches?'table':'chart',cache:null};
+  const overviewState = {method:'solution',seriesDays:28,seriesView:window.matchMedia('(max-width:620px)').matches?'table':'chart',cache:null,currentSignals:{open:false,kind:'solution',items:[],nextCursor:null,totalCount:null,error:null,loading:false}};
   const overviewNum = value => value == null || Number.isNaN(Number(value)) ? '—' : new Intl.NumberFormat('zh-CN').format(Number(value));
   const overviewPath = (path,extra={}) => {const query=new URLSearchParams();if(overviewDomainRef)query.set('domain',overviewDomainRef);Object.entries(extra).forEach(([key,value])=>{if(value!=null&&value!=='')query.set(key,value)});return query.size?`${path}?${query}`:path};
   const overviewReadout = (text,value,unit,note,active=false)=>`<div class="study-readout" data-active="${active}"><span class="study-readout-label">${esc(text)}</span><div class="study-readout-value"><b>${esc(value)}</b>${unit?`<span>${esc(unit)}</span>`:''}</div><span class="study-readout-note">${esc(note)}</span></div>`;
@@ -1488,6 +1597,30 @@ document.querySelector('#comment-detail-body').addEventListener('click',async ev
   function overviewVoiceCard(item){
     const readable=item?.sourceState==='known',key=item?.commentKey||{};
     return `<article class="study-voice">${readable?`<blockquote>“${esc(item.commentText||'原声暂不可读')}”</blockquote>${item.proposition?`<p>${esc(item.proposition)}</p>`:''}`:'<p class="study-restricted">来源当前受限，原声与研究衍生文本不显示。</p>'}<div class="study-voice-footer"><span>${esc(item.workTitle||'来源作品')}</span>${key.workRef&&key.commentExternalId?`<button class="study-link" type="button" data-overview-comment-work="${esc(key.workRef)}" data-overview-comment-id="${esc(key.commentExternalId)}">查看评论及父语境</button>`:''}</div></article>`;
+  }
+  function renderCurrentSignalDirectory(){
+    const state=overviewState.currentSignals;
+    if(!state.open)return '';
+    const title=state.kind==='solution'?'解决办法':'使用经历';
+    const rows=state.items.map(item=>`<div class="study-current-signal">${overviewVoiceCard(item)}${item.runRef?`<button class="study-link" type="button" data-overview-run="${esc(item.runRef)}">查看研究批次</button>`:''}</div>`).join('');
+    const body=state.error?`<p class="study-restricted">${esc(state.error)}</p><button type="button" class="study-link" data-current-signals-more>重试读取</button>`:rows||(!state.loading?'<p class="study-empty">当前没有可读的此类信号。</p>':'');
+    return `<div class="study-current-signals" aria-label="全部${title}"><h3>全部${title}</h3><p class="study-section-note">按当前有效信号逐条分页；同一评论的多条信号会分别出现。${state.totalCount==null?'总数暂不可读':`共 ${Number(state.totalCount).toLocaleString('zh-CN')} 条`}，已加载 ${state.items.length} 条${state.nextCursor?'，还有后续内容':''}。</p>${body}${state.loading?'<p role="status">正在读取…</p>':''}${state.nextCursor&&!state.error?'<button type="button" class="study-link" data-current-signals-more>加载更多</button>':''}</div>`;
+  }
+  async function loadCurrentSignalDirectory(reset=false){
+    const state=overviewState.currentSignals;
+    if(state.loading)return;
+    const kind=overviewState.method, domain=domainRef;
+    if(reset){state.kind=kind;state.items=[];state.nextCursor=null;state.totalCount=null;}
+    state.loading=true;state.error=null;rerenderIntelligenceOverview();
+    try{
+      const query=new URLSearchParams({kind,limit:'50'});
+      if(!reset&&state.nextCursor)query.set('cursor',state.nextCursor);
+      const result=await get(`current-signals?${query}`);
+      if(domainRef!==domain||overviewState.method!==kind||!state.open)return;
+      state.items=reset?(result.signals||[]):[...state.items,...(result.signals||[])];
+      state.nextCursor=result.page?.nextCursor||null;state.totalCount=result.page?.totalCount??null;
+    }catch(error){if(domainRef===domain&&overviewState.method===kind)state.error=`完整列表读取失败：${error.message}`;}
+    finally{state.loading=false;rerenderIntelligenceOverview();}
   }
   function renderIntelligenceOverview(data){
     const overview=data.overview;
@@ -1530,7 +1663,7 @@ document.querySelector('#comment-detail-body').addEventListener('click',async ev
         <section class="study-overview-section" aria-labelledby="study-run-title"><div class="study-section-head"><h2 id="study-run-title">研究与归并进度</h2><button class="study-link" type="button" data-study-view="runs">查看运行记录</button></div><p>当前有 ${overviewNum(research?.succeededCommentCount)} 条评论形成研究信号，${overviewNum(research?.noSignalCommentCount)} 条评论在当前有效研究中未提取到信号。</p><p>已归入问题 ${overviewNum(knowledge?.assignedSignalCount)} 条信号；活跃问题 ${overviewNum(knowledge?.activeProblemCount)} 个，支持不足 ${overviewNum(knowledge?.supportInsufficientProblemCount)} 个。</p>${overview.latestRun?`<p>最近 Run：${esc(label(runStateLabel,overview.latestRun.state)||'状态未记录')} · ${esc(String(overview.latestRun.createdAt||'').replace('T',' '))}</p><button class="study-link" type="button" data-overview-run="${esc(overview.latestRun.runRef)}">查看本次方法、目标和调用记录</button>`:'<p class="study-empty">尚无 Run；可从评论列表选择评论发起研究。</p>'}</section>
       </div>
       <div class="study-overview-grid" data-balance="equal">
-        <section class="study-overview-section" aria-labelledby="study-method-title"><div class="study-section-head"><h2 id="study-method-title">用户提到的办法与经历</h2><span>不替用户判断有效性</span></div><div class="study-method-switcher" role="tablist" aria-label="办法与经历"><button type="button" role="tab" data-method-kind="solution" aria-selected="${methodKind==='solution'}">解决办法</button><button type="button" role="tab" data-method-kind="experience" aria-selected="${methodKind==='experience'}">使用经历</button></div><p class="study-section-note">当前 ${overviewNum(methodCount)} 条信号，覆盖 ${overviewNum(methodWorkCount)} 篇作品；下方为服务端当前可读预览，最多 3 条。</p>${methods.length?`<div class="study-voice-list">${methods.map(overviewVoiceCard).join('')}</div>`:'<p class="study-empty">当前没有可读预览，可到研究运行查看分页结果。</p>'}</section>
+        <section class="study-overview-section" aria-labelledby="study-method-title"><div class="study-section-head"><h2 id="study-method-title">用户提到的办法与经历</h2><button class="study-link" type="button" data-current-signals-toggle>${overviewState.currentSignals.open?"收起完整列表":`查看全部${methodKind==='solution'?'解决办法':'使用经历'}`}</button></div><div class="study-method-switcher" role="tablist" aria-label="办法与经历"><button type="button" role="tab" data-method-kind="solution" aria-selected="${methodKind==='solution'}">解决办法</button><button type="button" role="tab" data-method-kind="experience" aria-selected="${methodKind==='experience'}">使用经历</button></div><p class="study-section-note">当前 ${overviewNum(methodCount)} 条信号，覆盖 ${overviewNum(methodWorkCount)} 篇作品；下方为服务端当前可读预览，最多 3 条。</p>${methods.length?`<div class="study-voice-list">${methods.map(overviewVoiceCard).join('')}</div>`:'<p class="study-empty">当前没有可读预览，可查看完整列表确认。</p>'}${renderCurrentSignalDirectory()}</section>
         <section class="study-overview-section" aria-labelledby="study-voice-title"><div class="study-section-head"><h2 id="study-voice-title">原声预览</h2><button class="study-link" type="button" data-study-view="comments">查看评论目录</button></div><p class="study-section-note">从当前有效来源读取最多 3 条不同评论；回到评论详情可看父语境与研究历史。</p>${voices.length?`<div class="study-voice-list">${voices.map(overviewVoiceCard).join('')}</div>`:'<p class="study-empty">当前没有可读的研究原声预览。</p>'}</section>
       </div>
       <section class="study-overview-section" aria-labelledby="study-unknown-title"><div class="study-section-head"><h2 id="study-unknown-title">尚未看清的部分</h2><button class="study-link" type="button" data-study-view="problems">查看未建档表达</button></div><p class="study-section-note">以下为当前有效信号的服务端归并状态，不是人工审核待办。</p>${pending.length?`<div class="study-unknown-list">${pending.map(item=>`<div class="study-unknown-row"><span>${esc(item.title)}</span><b>${overviewNum(item.count)}</b><button type="button" ${item.candidate?`data-overview-pending-state="${esc(item.candidate)}"`:'data-study-view="runs"'}>查看</button></div>`).join('')}</div>`:'<p class="study-empty">当前没有待说明的归并状态。</p>'}</section>
@@ -1543,7 +1676,7 @@ document.querySelector('#comment-detail-body').addEventListener('click',async ev
   }
   async function renderIntelligenceOverviewTab(){overviewState.cache=await loadIntelligenceOverview();return renderIntelligenceOverview(overviewState.cache)}
   function rerenderIntelligenceOverview(){if(activeView!=='overview'||!overviewState.cache)return;document.querySelector('#study-tab-result').innerHTML=renderIntelligenceOverview(overviewState.cache)}
-  document.querySelector('#study-tab-result').addEventListener('click',event=>{const view=event.target.closest('[data-study-view]');if(view){switchToView(view.dataset.studyView);return}const seriesDays=event.target.closest('[data-series-days]');if(seriesDays){overviewState.seriesDays=Number(seriesDays.dataset.seriesDays);rerenderIntelligenceOverview();return}const seriesView=event.target.closest('[data-series-view]');if(seriesView){overviewState.seriesView=seriesView.dataset.seriesView;rerenderIntelligenceOverview();return}const selectedProblem=event.target.closest('[data-overview-problem]');if(selectedProblem){void navigateToProblem(selectedProblem.dataset.overviewProblem);return}const comment=event.target.closest('[data-overview-comment-work][data-overview-comment-id]');if(comment){void navigateToComment(comment.dataset.overviewCommentWork,comment.dataset.overviewCommentId);return}const run=event.target.closest('[data-overview-run]');if(run){void navigateToRun(run.dataset.overviewRun);return}const pending=event.target.closest('[data-overview-pending-state]');if(pending){problemCandidateState.state=pending.dataset.overviewPendingState;problemCandidateState.loaded=false;void switchToView('problems');return}const method=event.target.closest('[data-method-kind]');if(method){overviewState.method=method.dataset.methodKind;rerenderIntelligenceOverview()}});
+  document.querySelector('#study-tab-result').addEventListener('click',event=>{const view=event.target.closest('[data-study-view]');if(view){switchToView(view.dataset.studyView);return}const seriesDays=event.target.closest('[data-series-days]');if(seriesDays){overviewState.seriesDays=Number(seriesDays.dataset.seriesDays);rerenderIntelligenceOverview();return}const seriesView=event.target.closest('[data-series-view]');if(seriesView){overviewState.seriesView=seriesView.dataset.seriesView;rerenderIntelligenceOverview();return}const selectedProblem=event.target.closest('[data-overview-problem]');if(selectedProblem){void navigateToProblem(selectedProblem.dataset.overviewProblem);return}const comment=event.target.closest('[data-overview-comment-work][data-overview-comment-id]');if(comment){void navigateToComment(comment.dataset.overviewCommentWork,comment.dataset.overviewCommentId);return}const run=event.target.closest('[data-overview-run]');if(run){void navigateToRun(run.dataset.overviewRun);return}const pending=event.target.closest('[data-overview-pending-state]');if(pending){problemCandidateState.state=pending.dataset.overviewPendingState;problemCandidateState.loaded=false;void switchToView('problems');return}const currentSignalsToggle=event.target.closest('[data-current-signals-toggle]');if(currentSignalsToggle){overviewState.currentSignals.open=!overviewState.currentSignals.open;if(overviewState.currentSignals.open)void loadCurrentSignalDirectory(true);else rerenderIntelligenceOverview();return}const currentSignalsMore=event.target.closest('[data-current-signals-more]');if(currentSignalsMore){void loadCurrentSignalDirectory(overviewState.currentSignals.items.length===0);return}const method=event.target.closest('[data-method-kind]');if(method){overviewState.method=method.dataset.methodKind;overviewState.currentSignals={open:false,kind:overviewState.method,items:[],nextCursor:null,totalCount:null,error:null,loading:false};rerenderIntelligenceOverview()}});
   const setupStatus=document.querySelector('#setup-status');
   const statusObserver=new MutationObserver(()=>{setupStatus.hidden=!setupStatus.textContent.trim()});
   statusObserver.observe(setupStatus,{childList:true,characterData:true,subtree:true});
