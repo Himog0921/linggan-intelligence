@@ -409,49 +409,133 @@ pub(crate) async fn mark_problem_stage_dispatch_started(
     let subject_lock_wait = started
         .elapsed()
         .saturating_sub(pool_wait + request_read_wait + run_lock_wait);
-    let fenced = sqlx::query_scalar::<_, bool>(
-        "UPDATE linggan_comment_study_model_request request \
-         SET dispatch_started_at=scope_001_now() \
-         FROM linggan_comment_study_run run \
-         WHERE request.invocation_ref=$1 AND request.run_ref=run.run_ref \
-           AND request.stage=$2 AND request.dispatch_started_at IS NULL \
-           AND ((request.stage='resolution' AND request.resolution_ref=$3) \
-             OR (request.stage='pair' AND request.pair_ref=$3)) \
-           AND request.deadline_at>scope_001_now() AND run.dispatch_state='enabled' \
-           AND run.dispatch_reason IS NULL \
-           AND ( \
-             (request.stage='resolution' AND EXISTS ( \
-               SELECT 1 FROM linggan_comment_study_resolution resolution \
-               JOIN linggan_comment_study_effective_signal signal USING(signal_ref) \
-               WHERE resolution.resolution_ref=request.resolution_ref \
-                 AND signal.eligibility_state='eligible' \
-                 AND cardinality($4::uuid[])>0 \
-                 AND NOT EXISTS ( \
-                   SELECT 1 FROM unnest($4::uuid[]) candidate(revision_ref) \
-                   LEFT JOIN linggan_comment_study_current_problem problem \
-                     ON problem.current_revision_ref=candidate.revision_ref \
-                   WHERE problem.problem_ref IS NULL))) \
-             OR (request.stage='pair' AND EXISTS ( \
-               SELECT 1 FROM linggan_comment_study_problem_pair pair \
-               JOIN linggan_comment_study_effective_signal first_signal \
-                 ON first_signal.signal_ref=pair.first_signal_ref \
-                AND first_signal.eligibility_state='eligible' \
-               JOIN linggan_comment_study_effective_signal second_signal \
-                 ON second_signal.signal_ref=pair.second_signal_ref \
-                AND second_signal.eligibility_state='eligible' \
-               WHERE pair.pair_ref=request.pair_ref \
-                 AND first_signal.domain_ref=second_signal.domain_ref \
-                 AND btrim(first_signal.current_author_external_id)<> \
-                     btrim(second_signal.current_author_external_id))) \
-           ) \
-         RETURNING request.dispatch_started_at < request.deadline_at",
-    )
-    .bind(invocation_ref)
-    .bind(subject.stage())
-    .bind(subject_ref)
-    .bind(&frozen_candidate_revisions)
-    .fetch_optional(&mut *transaction)
-    .await?;
+    let fenced = match subject {
+        ProblemStageSubject::Resolution(_) => {
+            sqlx::query_scalar::<_, bool>(
+                "UPDATE linggan_comment_study_model_request request \
+                 SET dispatch_started_at=scope_001_now() \
+                 FROM linggan_comment_study_run run \
+                 WHERE request.invocation_ref=$1 AND request.run_ref=run.run_ref \
+                   AND request.stage='resolution' AND request.resolution_ref=$2 \
+                   AND request.dispatch_started_at IS NULL \
+                   AND request.deadline_at>scope_001_now() \
+                   AND run.dispatch_state='enabled' AND run.dispatch_reason IS NULL \
+                   AND EXISTS ( \
+                     SELECT 1 FROM linggan_comment_study_resolution resolution \
+                     JOIN linggan_comment_study_effective_signal signal USING(signal_ref) \
+                     WHERE resolution.resolution_ref=request.resolution_ref \
+                       AND signal.eligibility_state='eligible' \
+                       AND cardinality($3::uuid[])>0 \
+                       AND NOT EXISTS ( \
+                         SELECT 1 FROM unnest($3::uuid[]) candidate(revision_ref) \
+                         LEFT JOIN linggan_comment_study_current_problem problem \
+                           ON problem.current_revision_ref=candidate.revision_ref \
+                         WHERE problem.problem_ref IS NULL)) \
+                 RETURNING request.dispatch_started_at < request.deadline_at",
+            )
+            .bind(invocation_ref)
+            .bind(subject_ref)
+            .bind(&frozen_candidate_revisions)
+            .fetch_optional(&mut *transaction)
+            .await?
+        }
+        ProblemStageSubject::Pair(_) => {
+            // The effective_signal view computes the latest head for every comment. Joining it
+            // twice inside UPDATE took 380 seconds on the local corpus. Resolve only this pair's
+            // two frozen signals, using the same head/current-comment ordering and restrictions.
+            sqlx::query_scalar::<_, bool>(
+                r#"WITH wanted AS MATERIALIZED (
+                     SELECT signal.signal_ref, signal.eligibility_state, target.target_ref,
+                            target.content_public_ref, target.parent_source_ref, target.state,
+                            policy.domain_ref, studied.comment_external_id,
+                            studied.content_public_ref AS studied_work_ref,
+                            studied.body_state AS studied_body_state,
+                            studied.body_text AS studied_body_text
+                     FROM linggan_comment_study_problem_pair pair
+                     CROSS JOIN LATERAL (VALUES (pair.first_signal_ref),
+                                                (pair.second_signal_ref)) refs(signal_ref)
+                     JOIN linggan_comment_study_signal signal ON signal.signal_ref=refs.signal_ref
+                     JOIN linggan_comment_study_target target ON target.target_ref=signal.target_ref
+                     JOIN linggan_comment_study_run owner ON owner.run_ref=target.run_ref
+                     JOIN linggan_comment_study_policy policy ON policy.policy_ref=owner.policy_ref
+                     JOIN linggan_material_comment studied ON studied.material_ref=target.source_ref
+                     WHERE pair.pair_ref=$2
+                   ), eligible AS (
+                     SELECT wanted.signal_ref, wanted.domain_ref,
+                            current_comment.author_external_id
+                     FROM wanted
+                     JOIN LATERAL (
+                       SELECT newer.target_ref, newer.state
+                       FROM linggan_comment_study_target newer
+                       JOIN linggan_material_comment source ON source.material_ref=newer.source_ref
+                       JOIN linggan_comment_study_run newer_run ON newer_run.run_ref=newer.run_ref
+                       JOIN linggan_comment_study_policy newer_policy
+                         ON newer_policy.policy_ref=newer_run.policy_ref
+                       WHERE newer.content_public_ref=wanted.content_public_ref
+                         AND source.content_public_ref=newer.content_public_ref
+                         AND source.comment_external_id=wanted.comment_external_id
+                         AND newer_policy.domain_ref=wanted.domain_ref
+                         AND newer.state IN ('succeeded','no_signal')
+                       ORDER BY newer.created_at DESC, newer.target_ref DESC LIMIT 1
+                     ) head ON head.target_ref=wanted.target_ref AND head.state='succeeded'
+                     JOIN LATERAL (
+                       SELECT comment.author_external_id, comment.body_state, comment.body_text
+                       FROM linggan_material_comment comment
+                       JOIN linggan_runtime_capture_package package
+                         ON package.package_ref=comment.package_ref
+                       WHERE comment.content_public_ref=wanted.content_public_ref
+                         AND comment.comment_external_id=wanted.comment_external_id
+                         AND package.accepted_at IS NOT NULL
+                       ORDER BY comment.observed_at::timestamptz DESC,
+                                comment.created_at DESC, comment.material_ref DESC LIMIT 1
+                     ) current_comment ON true
+                     WHERE wanted.state='succeeded'
+                       AND wanted.eligibility_state='eligible'
+                       AND wanted.comment_external_id IS NOT NULL
+                       AND wanted.content_public_ref=wanted.studied_work_ref
+                       AND wanted.studied_body_state='KNOWN'
+                       AND wanted.studied_body_text IS NOT NULL
+                       AND current_comment.body_state='KNOWN'
+                       AND current_comment.body_text IS NOT NULL
+                       AND current_comment.body_text=wanted.studied_body_text
+                       AND NULLIF(btrim(current_comment.author_external_id),'') IS NOT NULL
+                       AND EXISTS (
+                         SELECT 1 FROM linggan_material_content_author work_author
+                         WHERE work_author.content_public_ref=wanted.content_public_ref
+                           AND NULLIF(btrim(work_author.author_external_id),'') IS NOT NULL
+                           AND btrim(current_comment.author_external_id)<>
+                               btrim(work_author.author_external_id))
+                       AND NOT EXISTS (
+                         SELECT 1 FROM linggan_material_comment_restriction restriction
+                         WHERE restriction.content_public_ref=wanted.content_public_ref
+                           AND restriction.comment_external_id=wanted.comment_external_id)
+                       AND NOT EXISTS (
+                         SELECT 1 FROM linggan_material_comment parent
+                         JOIN linggan_material_comment_restriction restriction
+                           ON restriction.content_public_ref=parent.content_public_ref
+                          AND restriction.comment_external_id=parent.comment_external_id
+                         WHERE parent.material_ref=wanted.parent_source_ref)
+                   )
+                   UPDATE linggan_comment_study_model_request request
+                   SET dispatch_started_at=scope_001_now()
+                   FROM linggan_comment_study_run run
+                   WHERE request.invocation_ref=$1 AND request.run_ref=run.run_ref
+                     AND request.stage='pair' AND request.pair_ref=$2
+                     AND request.dispatch_started_at IS NULL
+                     AND request.deadline_at>scope_001_now()
+                     AND run.dispatch_state='enabled' AND run.dispatch_reason IS NULL
+                     AND (SELECT count(DISTINCT signal_ref)=2
+                                   AND count(DISTINCT domain_ref)=1
+                                   AND count(DISTINCT btrim(author_external_id))=2
+                          FROM eligible)
+                   RETURNING request.dispatch_started_at < request.deadline_at"#,
+            )
+            .bind(invocation_ref)
+            .bind(subject_ref)
+            .fetch_optional(&mut *transaction)
+            .await?
+        }
+    };
     let eligibility_wait = started
         .elapsed()
         .saturating_sub(pool_wait + request_read_wait + run_lock_wait + subject_lock_wait);
