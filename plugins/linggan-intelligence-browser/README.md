@@ -1,7 +1,7 @@
 # Linggan Intelligence Browser
 
 > 状态: 自动观察与固定材料深化 Producer
-> 版本: `0.8.58`（评论数未知保真候选；未加载到 Chrome）
+> 版本: `0.8.59`（关键词采样与失败恢复候选；未加载到 Chrome）
 > 适用范围: `OBSERVATION-RUNTIME-001`、`MEDIA-ACQUISITION-001` 与 `MATERIAL-DEEPENING-001`（GitHub Issue #103）
 > 事实来源: 当前 package source、`MIGRATION-MAP.md`、构建与隔离检查输出
 > 冲突时以谁为准: 用户最新确认、仓库 `AGENTS.md`、当前代码和实际运行证明
@@ -306,7 +306,10 @@ URL 的 SHA-256，使相同 URL 以后不再被派发或重新打开；它不把
 才形成零评论结论。主页/搜索 API 没有作品类型字段时保留未标记，不再默认为图文；历史
 发现卡的 `normal` 可能来自旧缺省，目录分布只按原始卡片标记供核查。
 
-当前候选发行包生成在 `releases/linggan-intelligence-browser-v0.8.58.zip`。打包器以
+`0.8.59` 将关键词候选上限、实际下拉次数和最终样本分开；最多评论等排序保留对应页面顺序或已知数值，
+不会一律改按点赞。普通发现任务的开页失败上报普通失败码；详情页许可已消费的单页保护仍有效。
+
+当前候选发行包生成在 `releases/linggan-intelligence-browser-v0.8.59.zip`。打包器以
 固定 ZIP 时间戳和稳定文件顺序生成；`releases/release-manifest.json` 记录已提交
 ZIP 的 SHA-256。`npm run verify` 不会改写 release ZIP：它会以新的 `npm ci`、build
 和临时 ZIP 重新打包，并要求该 SHA-256 与已提交 ZIP 完全一致，然后运行已退役控制面隔离扫描。

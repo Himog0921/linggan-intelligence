@@ -34,6 +34,8 @@
 //!
 //! - `bottom_confirmed`：滚到底部且连续几轮不再出现新内容——**他就这么多作品**。
 //! - `target_reached`：拿满了本次下发的配额——**够了，产品规则本就是 200 篇封顶**。
+//! - `scroll_budget_completed`：关键词任务真的执行了冻结的下拉次数；只有取得
+//!   `expectedCount` 份有效样本后才完成这轮巡查，候选上限仍是独立的 `maximumQuota`。
 //! - `max_rounds_reached` / `no_progress` / `risk_control`：**没到底也没拿满就停了**。
 //!   这才是「明明有 200 篇却只给了 50 篇」，判据为假，界面显示「处理异常」交给人决定。
 //!
@@ -52,7 +54,7 @@
 /// 用宏而不是常量：Rust 的 `concat!` 只接受字面量，只有展开成字面量的宏才能嵌进调用方
 /// 那些编译期拼好的 SQL 常量里。这是「只有一份定义」在这个语言里的代价，值得付。
 ///
-/// **`target_reached` 那一支优先读 `expectedCount`，不是 `maximumQuota`。** 两者是两件事：
+/// **`target_reached` 与关键词下拉预算分支优先读 `expectedCount`，不是 `maximumQuota`。** 两者是两件事：
 /// `maximumQuota` 是授权上限、也是搜索结果页的加载预算；`expectedCount` 才是这一轮该拿回
 /// 多少。关键词巡查上它们不是同一个数——规则说「取赞前 20」（adhd = 20），授权给的加载预算
 /// 是 200。它此前读 `maximumQuota`，于是那一轮采回 20 篇、按规则停得完全正确，判据却要求
@@ -70,7 +72,13 @@ macro_rules! surface_scan_complete_sql {
            OR (checkpoint #>> '{surfaceReceipt,stopReason}'='target_reached' \
                AND COALESCE((layer->>'acquired')::integer,0) \
                    >= COALESCE((task_spec->>'expectedCount')::integer, \
-                               (task_spec->>'maximumQuota')::integer,2147483647)))"
+                               (task_spec->>'maximumQuota')::integer,2147483647)) \
+           OR (checkpoint #>> '{surfaceReceipt,stopReason}'='scroll_budget_completed' \
+               AND task_spec->'capabilitiesRequested' ? 'discovery_search' \
+               AND COALESCE((checkpoint #>> '{surfaceReceipt,scrollActions}')::integer,0) \
+                   >= COALESCE((task_spec->>'scrollRounds')::integer,2147483647) \
+               AND COALESCE((layer->>'acquired')::integer,0) \
+                   >= COALESCE((task_spec->>'expectedCount')::integer,2147483647)))"
     };
 }
 
@@ -161,3 +169,52 @@ macro_rules! profile_read_complete_sql {
 }
 
 pub(crate) use {directory_proven_sql, historical_directory_scan_qualified_sql, patrol_scan_qualified_sql, profile_read_complete_sql, surface_scan_complete_sql};
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    #[tokio::test]
+    #[ignore = "requires an isolated PostgreSQL proof database"]
+    async fn keyword_scroll_budget_needs_observed_actions_and_the_retained_sample() {
+        let url = std::env::var("COLLECTION_DISPATCH_PROOF_DATABASE_URL")
+            .expect("isolated proof database URL is supplied");
+        let pool = sqlx::PgPool::connect(&url)
+            .await
+            .expect("isolated proof database accepts connections");
+        const SQL: &str = concat!(
+            "SELECT (",
+            surface_scan_complete_sql!(),
+            ") FROM (SELECT $1::jsonb AS layer, $2::jsonb AS task_spec, $3::jsonb AS checkpoint) proof"
+        );
+        let task_spec = json!({
+            "capabilitiesRequested": ["discovery_search"],
+            "maximumQuota": 200,
+            "expectedCount": 20,
+            "scrollRounds": 3
+        });
+        for (scroll_actions, acquired, expected) in [
+            (3, 20, true),
+            (2, 20, false),
+            (3, 19, false),
+            (0, 20, false),
+        ] {
+            let layer = json!({"failed": 0, "notAttempted": 0, "acquired": acquired});
+            let checkpoint = json!({
+                "surfaceReceipt": {
+                    "stopReason": "scroll_budget_completed",
+                    "scrollActions": scroll_actions
+                }
+            });
+            let qualified: bool = sqlx::query_scalar(SQL)
+                .bind(layer)
+                .bind(&task_spec)
+                .bind(checkpoint)
+                .fetch_one(&pool)
+                .await
+                .expect("the exact directory boundary SQL evaluates");
+            assert_eq!(qualified, expected, "actions={scroll_actions}, acquired={acquired}");
+        }
+        pool.close().await;
+    }
+}

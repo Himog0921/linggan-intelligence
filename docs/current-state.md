@@ -6,6 +6,12 @@
 > 事实来源: 用户要求、2026-10-06 GitHub 主线与 CI、本机运行身份和只读 HTTP，以及此前的现场检查
 > 冲突时以谁为准: 真实运行结果、ACCEPTED ADR 与用户最新确认
 
+### 2026-10-06 · Collection 关键词采样与恢复候选
+
+Issue [#362](https://github.com/Himog0921/linggan-intelligence/issues/362) 的独立分支基于 `origin/main@b6415315` 修正关键词巡查的三个数量：下拉预算、候选上限与最终保留数；最多评论等排序不再一律按点赞重排。候选回执记录真实下拉数，服务端只在下拉预算已执行且取得冻结的样本数、达到候选上限或确认到底时认定本轮完整；未完成轮次已接纳的材料仍可用于详情追采。普通发现开页失败按真实阶段上报并有单工单失败上限；目标页区分最近巡查未完成与当前受阻，工位页把 `station_busy` 解释为容量等待。
+
+这仍是未合并、未部署的源代码与隔离测试候选。当前 `:3000` 和已安装插件不因此改变，旧 CapturePackage、Receipt 与共享数据库未改写；真实平台回采与 Mog 页面验收尚无新回执。状态词义与验收边界见[变更清单](design/changes/collection-keyword-sampling-recovery-001-ui-change-manifest.md)。
+
 ### 2026-10-06 · 评论研究四视图已合并并在本机运行
 
 [#338](https://github.com/Himog0921/linggan-intelligence/pull/338) 于 09-28 合并；[#359](https://github.com/Himog0921/linggan-intelligence/pull/359) 的精确 head 为 `fe90f290`，于 10-02 合并为 `main@8ec92f3d`。其 [exact-head CI](https://github.com/Himog0921/linggan-intelligence/actions/runs/37012606180) 的编译、单元、隔离 PostgreSQL 与前端步骤通过；日志确认两条真实 Axum＋隔离 PostgreSQL＋Playwright 路径均实际运行并通过，分别覆盖方法选择／预览／启动／停止，以及评论→Run→请求→Signal→Problem→证据→返回。`integration-source-export` 按仅 push 触发的条件跳过。

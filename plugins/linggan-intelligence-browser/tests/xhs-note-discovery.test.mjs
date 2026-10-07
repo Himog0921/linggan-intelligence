@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 
 import {
   buildDiscoveryPlan,
+  buildDiscoveryExecutionSummary,
   getScrollMetrics,
   discoverNotesFromDOM,
   readCurrentVisibleSurfaceNotes,
@@ -409,15 +410,17 @@ test('deep profile discovery allows enough bounded page-loading rounds for 200-l
   assert.equal(plan.adaptivePageScroll, true);
 });
 
-test('search discovery keeps the old eager stop behavior', () => {
+test('search discovery does not stop before its scroll budget when cards have not advanced', () => {
   const plan = buildDiscoveryPlan('.feeds-container', {
-    maxScrolls: 10,
-    expectedCount: 50,
+    maxScrolls: 3,
+    expectedCount: 200,
   });
 
   assert.equal(plan.isProfileMode, false);
+  assert.equal(plan.maxRounds, 4);
+  assert.equal(buildDiscoveryPlan('.feeds-container', { maxScrolls: 0, expectedCount: 200 }).maxRounds, 1);
   assert.equal(plan.stableNoNewLimit, 2);
-  assert.equal(plan.requireBottomOrExpected, false);
+  assert.equal(plan.requireBottomOrExpected, true);
 
   assert.equal(shouldStopDiscovery({
     noNewCount: 2,
@@ -426,7 +429,103 @@ test('search discovery keeps the old eager stop behavior', () => {
     expectedCount: plan.expectedCount,
     atBottom: false,
     requireBottomOrExpected: plan.requireBottomOrExpected,
-  }), true);
+  }), false);
+});
+
+test('three search scrolls execute despite two unchanged card reads', async () => {
+  const originalDocument = globalThis.document;
+  const originalWindow = globalThis.window;
+  const originalNow = Date.now;
+  let top = 0;
+  let clock = 0;
+  const sections = Array.from({ length: 20 }, (_, index) => ({
+    querySelector(selector) {
+      if (selector === 'a.cover') return {
+        getAttribute(name) {
+          return name === 'href'
+            ? `/explore/68${String(index).padStart(22, '0')}?xsec_token=token-${index}` : null;
+        },
+      };
+      if (selector === '.footer span' || selector === '.title') return { textContent: `标题 ${index}` };
+      if (selector === '.like-wrapper .count') return { textContent: String(index) };
+      return null;
+    },
+    getBoundingClientRect() { return { top: index * 10, left: 0 }; },
+  }));
+  const scroller = {
+    get scrollTop() { return top; },
+    set scrollTop(value) { top = Number(value); },
+    clientHeight: 1000,
+    scrollHeight: 10000,
+    parentElement: null,
+  };
+  globalThis.document = {
+    documentElement: { scrollTop: 0, clientHeight: 1000, scrollHeight: 1000 },
+    body: { scrollTop: 0, clientHeight: 1000, scrollHeight: 1000 },
+    querySelector(selector) { return selector === '.feeds-container' ? scroller : null; },
+    querySelectorAll(selector) { return selector === '.feeds-container section' ? sections : []; },
+  };
+  globalThis.window = { scrollY: 0, innerHeight: 1000, scrollTo() {}, scrollBy() {} };
+  Date.now = () => { clock += 5000; return clock; };
+  try {
+    const records = await discoverWithScroll('.feeds-container', 3, { expectedCount: 200 });
+    assert.equal(records.length, 20);
+    assert.equal(records.discoveryMeta.stopReason, 'scroll_budget_completed');
+    assert.equal(records.discoveryMeta.scrollActions, 3);
+    assert.equal(buildDiscoveryExecutionSummary(records.discoveryMeta).scrollActions, 3);
+    assert.equal(records.discoveryMeta.scrollTrace.filter((entry) => entry.action === 'scroll').length, 3);
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.window = originalWindow;
+    Date.now = originalNow;
+  }
+});
+
+test('search scroll commands that do not move the page cannot claim the scroll budget completed', async () => {
+  const originalDocument = globalThis.document;
+  const originalWindow = globalThis.window;
+  const originalNow = Date.now;
+  let clock = 0;
+  const sections = Array.from({ length: 20 }, (_, index) => ({
+    querySelector(selector) {
+      if (selector === 'a.cover') return {
+        getAttribute(name) {
+          return name === 'href'
+            ? `/explore/68${String(index).padStart(22, '0')}?xsec_token=token-${index}` : null;
+        },
+      };
+      if (selector === '.footer span' || selector === '.title') return { textContent: `标题 ${index}` };
+      if (selector === '.like-wrapper .count') return { textContent: String(index) };
+      return null;
+    },
+    getBoundingClientRect() { return { top: index * 10, left: 0 }; },
+  }));
+  const scroller = {
+    scrollTop: 0,
+    clientHeight: 1000,
+    scrollHeight: 10000,
+    parentElement: null,
+  };
+  Object.defineProperty(scroller, 'scrollTop', { get: () => 0, set() {} });
+  globalThis.document = {
+    documentElement: { scrollTop: 0, clientHeight: 1000, scrollHeight: 1000 },
+    body: { scrollTop: 0, clientHeight: 1000, scrollHeight: 1000 },
+    querySelector(selector) { return selector === '.feeds-container' ? scroller : null; },
+    querySelectorAll(selector) { return selector === '.feeds-container section' ? sections : []; },
+  };
+  globalThis.window = { scrollY: 0, innerHeight: 1000, scrollTo() {}, scrollBy() {} };
+  Date.now = () => { clock += 5000; return clock; };
+  try {
+    const records = await discoverWithScroll('.feeds-container', 3, { expectedCount: 200 });
+    assert.equal(records.length, 20);
+    assert.equal(records.discoveryMeta.stopReason, 'no_progress');
+    assert.equal(records.discoveryMeta.scrollActions, 0);
+    assert.equal(records.discoveryMeta.scrollTrace.filter((entry) => entry.action === 'scroll').length, 0);
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.window = originalWindow;
+    Date.now = originalNow;
+  }
 });
 
 test('profile discovery accumulates virtualized cards beyond the visible 28 items', async () => {
