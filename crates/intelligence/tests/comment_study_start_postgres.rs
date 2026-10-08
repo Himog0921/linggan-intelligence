@@ -639,6 +639,121 @@ async fn seed_problem_stage_fixtures(
 }
 
 #[tokio::test]
+#[ignore = "isolated synthetic PostgreSQL and local fake adapter; no provider"]
+async fn problem_stage_fences_dispatch_current_pair_and_resolution() {
+    let (db, command, _) = setup("pair_current_dispatch_fence", 0).await;
+    for (comment_id, author) in [("c0000", "reader-a"), ("c0001", "reader-b")] {
+        comment_with_author(
+            &db,
+            "selected",
+            comment_id,
+            "SYNTHETIC 用户评论",
+            Some(author),
+            "2026-09-21T08:00:00Z",
+        )
+        .await;
+    }
+    refresh_clean_cache(&db, domain(), 128).await.unwrap();
+    let run_ref = start_study_run(&db, command, TrustedStudyOrigin::Manual)
+        .await
+        .unwrap()
+        .run_ref
+        .unwrap();
+    let (_, _, resolution_ref, pair_ref) = seed_problem_stage_fixtures(&db, run_ref).await;
+    let adapter = PiAdapter::configured_with_test_runtimes(
+        std::path::PathBuf::from("/bin/sh"),
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/support/comment_study_settlement_adapter.sh"),
+        std::path::PathBuf::from("/bin/false"),
+        std::path::PathBuf::from("unused-no-network-runtime"),
+    );
+
+    let resolution = run_one_problem_resolution(&db, &SyntheticModelSecrets, &adapter).await;
+    assert!(matches!(
+        resolution,
+        Err(
+            linggan_intelligence::comment_study_resolution_worker::ResolutionWorkerError::Model(
+                ModelError::AdapterUnavailable
+            )
+        )
+    ));
+    let resolution_dispatched: bool = sqlx::query_scalar(
+        "SELECT dispatch_started_at IS NOT NULL FROM linggan_comment_study_model_request \
+         WHERE resolution_ref=$1 AND attempt_ordinal=1",
+    )
+    .bind(resolution_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert!(resolution_dispatched);
+
+    let first = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_one_problem_pair(&db, &SyntheticModelSecrets, &adapter),
+    )
+    .await
+    .expect("synthetic pair worker should finish within ten seconds");
+    assert!(matches!(
+        first,
+        Err(
+            linggan_intelligence::comment_study_pair_worker::PairWorkerError::Model(
+                ModelError::AdapterUnavailable
+            )
+        )
+    ));
+    let dispatched: bool = sqlx::query_scalar(
+        "SELECT dispatch_started_at IS NOT NULL FROM linggan_comment_study_model_request \
+         WHERE pair_ref=$1 AND attempt_ordinal=1",
+    )
+    .bind(pair_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert!(dispatched);
+
+    let (content_public_ref, comment_external_id): (Uuid, String) = sqlx::query_as(
+        "SELECT target.content_public_ref,source.comment_external_id \
+         FROM linggan_comment_study_problem_pair pair \
+         JOIN linggan_comment_study_signal signal ON signal.signal_ref=pair.first_signal_ref \
+         JOIN linggan_comment_study_target target USING(target_ref) \
+         JOIN linggan_material_comment source ON source.material_ref=target.source_ref \
+         WHERE pair.pair_ref=$1",
+    )
+    .bind(pair_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_material_comment_restriction( \
+           content_public_ref,comment_external_id,reason) \
+         VALUES($1,$2,'synthetic_fence_proof')",
+    )
+    .bind(content_public_ref)
+    .bind(comment_external_id)
+    .execute(db.pool())
+    .await
+    .unwrap();
+    // The existing claim gate sees the new restriction before it can reserve a second request.
+    // This assertion covers that early gate; the successful first call above covers the new fence.
+    let second = run_one_problem_pair(&db, &SyntheticModelSecrets, &adapter).await;
+    assert!(
+        matches!(second, Ok(false)),
+        "second pair result: {second:?}"
+    );
+    let request_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_comment_study_model_request WHERE pair_ref=$1",
+    )
+    .bind(pair_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        request_count, 1,
+        "the restriction prevents another reservation"
+    );
+}
+
+#[tokio::test]
 #[ignore = "isolated synthetic PostgreSQL and local child processes; no provider or embedding model"]
 async fn embedding_runtime_failure_does_not_block_semantic_and_recall_reports_incomplete() {
     let (db, command, _) = setup("embedding_failure_keeps_semantic_live", 3).await;
