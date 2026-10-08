@@ -21,7 +21,6 @@ const list = (items, render, empty) => items?.length ? items.map(render).join(''
 let loadedWorks = [];
 let sourcePreview = null;
 const selectedWorkRoles = new Map();
-const selectedWorkMeta = new Map();
 const workCatalogState = { cursor: null, nextCursor: null, history: [], q: '', total: 0, coverage: null, observationRole: 'primary' };
 let workSearchTimer = null;
 let retryWorksCursor = null;
@@ -36,28 +35,54 @@ let savedPolicies = [];
 let activePolicyRef = null;
 let pendingStartSignature = null;
 let pendingStartRef = null;
+let previewSelectionSignature = null;
+let previewTargetCount = null;
+let previewRequestSeq = 0;
 let parentPolicyRef = null;
 let runLimitsPolicyRef = null;
 
 function updateSelection() {
   const count = studySelectionKind === 'comments' ? selectedCommentKeys.size : selectedWorkRoles.size;
-  const selectedEligible = [...selectedWorkRoles.keys()].reduce((total, ref) =>
-    total + Number(selectedWorkMeta.get(ref)?.eligibleCommentCount || 0), 0);
   const budget = Number(document.querySelector('#run-comment-budget').value || 0);
-  const frozenCount = budget > 0 ? Math.min(selectedEligible, budget) : 0;
-  document.querySelector('#selected-count').textContent = studySelectionKind === 'comments'
-    ? `已选择 ${count}/${MAX_SELECTED_COMMENTS} 条评论 · 本次最多冻结 ${budget>0?Math.min(count,budget):0} 条`
-    : count ? `已选择 ${count}/${MAX_SELECTED_WORKS} 篇 · 当前已知合格 ${selectedEligible} 条 · 本次最多冻结 ${frozenCount} 条`
-    : `已选择 0 篇 · 最多 ${MAX_SELECTED_WORKS} 篇`;
-  const hasPolicy = Boolean(document.querySelector('#study-policy').value);
-  document.querySelector('#start-run').disabled = count === 0 || !hasPolicy;
-  document.querySelector('#preview-run').disabled = count === 0 || !hasPolicy;
   const visible = visibleWorks();
-  const selectVisible = document.querySelector('#select-visible-works');
   const selectedVisibleCount = visible.filter(work => selectedWorkRoles.get(work.workRef) === work.observationRole).length;
+  document.querySelector('#selected-count').textContent = studySelectionKind === 'comments'
+    ? `已选 ${count}/${MAX_SELECTED_COMMENTS} 条评论 · 本次上限 ${budget || '—'} 条`
+    : `已选 ${count}/${MAX_SELECTED_WORKS} 篇 · 当前页 ${selectedVisibleCount}/${visible.length} 篇`;
+  const hasPolicy = Boolean(document.querySelector('#study-policy').value);
+  const signature = count && hasPolicy ? JSON.stringify(selectionCommand()) : null;
+  const previewCurrent = signature && signature === previewSelectionSignature;
+  if (previewSelectionSignature && !previewCurrent) {
+    document.querySelector('#selection-preview').textContent = '选择、模式、方法或预算已变化，请重新预览。';
+    previewSelectionSignature = null;
+    previewTargetCount = null;
+  }
+  document.querySelector('#start-run').disabled = !previewCurrent || !(previewTargetCount > 0);
+  document.querySelector('#preview-run').disabled = count === 0 || !hasPolicy;
+  const selectVisible = document.querySelector('#select-visible-works');
   selectVisible.checked = visible.length > 0 && selectedVisibleCount === visible.length;
   selectVisible.indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < visible.length;
   selectVisible.disabled = selectedWorkRoles.size >= MAX_SELECTED_WORKS && selectedVisibleCount < visible.length;
+}
+
+const studyModeLabel = { new_only:'只研究新评论', input_changed:'只重研输入已变化的评论', retry_failed:'重试失败评论', reanalyse:'重新分析所选评论' };
+function studyTime(value) {
+  const date=new Date(value||'');
+  return Number.isNaN(date.valueOf())?'时间未记录':new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(date);
+}
+const selectionExclusionLabels = {
+  sourceRestricted:'来源受限', bodyUnavailable:'正文不可用', indexPending:'清洗索引未完成',
+  textNotResearchable:'文本不具研究条件', workAuthorUnknown:'作品作者身份未知',
+  commentAuthorUnknown:'评论作者身份未知', creatorVoice:'作品作者本人',
+  inProgress:'已有运行处理中', notSelectedByMode:'不符合本次研究模式', budgetNotSelected:'评论上限截断'
+};
+function exclusionSummary(counts, mode) {
+  const labels = {...selectionExclusionLabels};
+  if (mode === 'new_only') labels.notSelectedByMode = '已有研究记录';
+  const rows = Object.entries(labels).map(([key, title]) => [title, counts?.[key]])
+    .filter(([, value]) => value != null && Number(value) > 0)
+    .map(([title, value]) => `${title} ${Number(value).toLocaleString('zh-CN')} 条`);
+  return rows.length ? rows.join('；') : '没有被排除的评论';
 }
 
 function renderSourcePreview(preview, targetId, roleLabel) {
@@ -81,8 +106,8 @@ function renderWorks(){
   const container=document.querySelector('#works');
   const coverage=workCatalogState.coverage||{};
   const pending=coverage.pendingCount==null?'未知':Number(coverage.pendingCount);
-  const roleLabel=workCatalogState.observationRole==='primary'?'primary':'reference';
-  document.querySelector('#work-filter-status').textContent=`服务端作品目录（${roleLabel}）：当前页 ${loadedWorks.length} 篇 / 匹配 ${workCatalogState.total} 篇；已索引评论 ${Number(coverage.indexedCount||0)}，待索引 ${pending}。`;
+  const roleLabel=workCatalogState.observationRole==='primary'?'当前领域':'参考';
+  document.querySelector('#work-filter-status').textContent=`${roleLabel}作品：当前页 ${loadedWorks.length} 篇 / 匹配 ${workCatalogState.total} 篇；已索引评论 ${Number(coverage.indexedCount||0)}，待索引 ${pending}。`;
   document.querySelector('#work-page-status').textContent=`第 ${workCatalogState.history.length+1} 页`;
   document.querySelector('#work-prev').disabled=workCatalogState.history.length===0;
   document.querySelector('#work-next').disabled=!workCatalogState.nextCursor;
@@ -93,7 +118,7 @@ function renderWorks(){
     const alreadySelected=selectedWorkRoles.has(workRef);
     const capped=!alreadySelected&&selectedWorkRoles.size>=MAX_SELECTED_WORKS;
     const title=work.displayTitle||'未命名作品';
-    return `<tr><td><input id="work-${esc(workRef)}" type="checkbox" name="work-ref" value="${esc(workRef)}" aria-label="选择作品：${esc(title)}"${checked?' checked':''}${capped?' disabled':''}></td><td><label for="work-${esc(workRef)}"><span class="study-work-title">${esc(title)}</span><small>${esc(workTitleSourceLabel[work.displayTitleSource]||work.displayTitleSource||'标题未记录')}</small></label></td><td>${esc(role)}</td><td>${Number(work.eligibleCommentCount||0)}</td></tr>`;
+    return `<tr><td><input id="work-${esc(workRef)}" type="checkbox" name="work-ref" value="${esc(workRef)}" aria-label="选择作品：${esc(title)}"${checked?' checked':''}${capped?' disabled':''}></td><td><label for="work-${esc(workRef)}"><span class="study-work-title">${esc(title)}</span><small>${esc(workTitleSourceLabel[work.displayTitleSource]||work.displayTitleSource||'标题未记录')}</small></label></td><td>${role==='primary'?'当前领域':role==='reference'?'参考':'来源未记录'}</td><td>${Number(work.eligibleCommentCount||0)}</td></tr>`;
   }).join(''):'<tr><td class="study-table-empty" colspan="4">当前搜索没有匹配作品。</td></tr>';
   container.querySelectorAll('input[name="work-ref"]').forEach(input=>input.addEventListener('change',event=>{
     const work=loadedWorks.find(item=>String(item.workRef)===event.currentTarget.value);
@@ -102,8 +127,7 @@ function renderWorks(){
     if(event.currentTarget.checked){
       if(!selectedWorkRoles.has(work.workRef)&&selectedWorkRoles.size>=MAX_SELECTED_WORKS){event.currentTarget.checked=false;document.querySelector('#work-filter-status').textContent=`最多选择 ${MAX_SELECTED_WORKS} 篇作品；已保留原选择。`;return;}
       selectedWorkRoles.set(work.workRef,role);
-      selectedWorkMeta.set(work.workRef,{eligibleCommentCount:Number(work.eligibleCommentCount||0)});
-    }else if(selectedWorkRoles.get(work.workRef)===role){selectedWorkRoles.delete(work.workRef);selectedWorkMeta.delete(work.workRef);}
+    }else if(selectedWorkRoles.get(work.workRef)===role){selectedWorkRoles.delete(work.workRef);}
     renderWorks();
   }));
   updateSelection();
@@ -155,7 +179,7 @@ async function loadSetup(){
     renderSourcePreview(sourcePreview,'#source-preview','primary');
     renderSourcePreview(setup.referenceSourcePreview,'#reference-source-preview','reference');
     document.querySelector('#reference-source-preview').hidden=Number(setup.referenceSourcePreview?.totalCommentCount||0)===0;
-    selectedWorkRoles.clear();selectedWorkMeta.clear();workCatalogState.q='';workCatalogState.history=[];workCatalogState.cursor=null;workCatalogState.observationRole='primary';
+    selectedWorkRoles.clear();workCatalogState.q='';workCatalogState.history=[];workCatalogState.cursor=null;workCatalogState.observationRole='primary';
     document.querySelector('#work-filter').value='';
     const referenceToggle=document.querySelector('#include-reference-works');referenceToggle.checked=false;
     referenceToggle.disabled=setup.domainStatus!=='active'||Number(setup.referenceSourcePreview?.totalCommentCount||0)===0;
@@ -163,7 +187,7 @@ async function loadSetup(){
     const worksLoaded=worksResult.status==='fulfilled'&&worksResult.value;
     if(policiesResult.status==='rejected')document.querySelector('#policy-status').textContent=`研究方法列表加载失败：${policiesResult.reason.message}`;
     status.dataset.kind=available?'info':'error';
-    status.textContent=setup.domainStatus==='paused'?`${domainName}已暂停；历史结果可读，不能创建新策略或运行。`:available?(worksLoaded?`已加载 ${workCatalogState.total} 篇 primary 作品；可显式切换查看 reference 作品。`:'准备信息已加载；作品目录暂时不可用，请在下方重试。'):'没有启用的模型配置，无法保存策略。';
+    status.textContent=setup.domainStatus==='paused'?`${domainName}已暂停；历史结果可读，不能创建新策略或运行。`:available?(worksLoaded?`已加载 ${workCatalogState.total} 篇当前领域作品；可切换查看参考作品。`:'准备信息已加载；作品目录暂时不可用，请在下方重试。'):'没有启用的模型配置，无法保存策略。';
   }catch(error){
     status.dataset.kind='error';status.textContent=`无法读取准备信息：${error.message}`;
     document.querySelector('#work-filter-status').textContent='作品目录不可用。';
@@ -430,11 +454,11 @@ function syncStudyRoute(push = false) {
   if (activeView === 'problems' && selectedProblemRef) url.searchParams.set('problemRef', selectedProblemRef);
   else url.searchParams.delete('problemRef');
   if (activeView === 'comments') {
-    for (const [key,value] of [['q',commentCatalogState.q],['workRef',commentCatalogState.workRef],['state',commentCatalogState.studyState==='all'?null:commentCatalogState.studyState],['cursor',commentCatalogState.cursor],['voiceRole',commentCatalogState.voiceRole==='reader_and_unknown'?null:commentCatalogState.voiceRole]]) {
+    for (const [key,value] of [['q',commentCatalogState.q],['workRef',commentCatalogState.workRef],['state',commentCatalogState.studyState==='all'?null:commentCatalogState.studyState],['signalKind',commentCatalogState.signalKind],['cursor',commentCatalogState.cursor],['voiceRole',commentCatalogState.voiceRole==='reader_and_unknown'?null:commentCatalogState.voiceRole]]) {
       if (value) url.searchParams.set(key,value); else url.searchParams.delete(key);
     }
   } else {
-    for (const key of ['q','workRef','state','cursor','voiceRole']) url.searchParams.delete(key);
+    for (const key of ['q','workRef','state','signalKind','cursor','voiceRole']) url.searchParams.delete(key);
   }
   if (activeView !== 'comments') {
     url.searchParams.delete('commentWorkRef');
@@ -456,7 +480,9 @@ function resetRunPanelCache() {
 }
 
 function runOptionLabel(run) {
-  return `${run.runRef.slice(0, 8)}… · ${esc(runStateLabel[run.state] || run.state)} · ${run.createdAt.slice(0, 16).replace('T', ' ')}`;
+  const selected=run.requestedWorkCount==null?'—':Number(run.requestedWorkCount);
+  const covered=run.coveredWorkCount??run.workCount;
+  return `${esc(studyTime(run.createdAt))} · 选 ${selected} 篇 / 入包 ${Number(covered)} 篇 / 目标 ${Number(run.targetCount)} 条 · ${esc(runStateLabel[run.state] || '状态未知')}`;
 }
 function renderRunPicker() {
   const picker = document.querySelector('#study-run-picker');
@@ -542,7 +568,7 @@ function renderTargetsPanel(targets) {
   return `<div class="study-review-table-wrap"><table class="study-review-table"><thead><tr><th scope="col">评论原声</th><th scope="col">处理状态与输入说明</th><th scope="col">语境与依赖</th><th scope="col">研究信号</th></tr></thead><tbody>${targets.map(targetRow).join('')}</tbody></table></div>`;
 }
 
-const commentCatalogState={q:'',studyState:'all',voiceRole:'reader_and_unknown',workRef:null,workLabel:'',cursor:null,history:[],response:null,summary:null,workChoices:[]};
+const commentCatalogState={q:'',studyState:'all',signalKind:null,voiceRole:'reader_and_unknown',workRef:null,workLabel:'',cursor:null,history:[],response:null,summary:null,workChoices:[]};
 const COMMENT_STATES=new Set(['all','never_studied','in_progress','studied','needs_context','failed']);
 const COMMENT_VOICES=new Set(['reader_and_unknown','reader','unknown','creator','all']);
 function restoreCommentRoute(params,snapshot){
@@ -550,11 +576,12 @@ function restoreCommentRoute(params,snapshot){
   commentCatalogState.q=params.get('q')||'';
   commentCatalogState.workRef=params.get('workRef')||null;
   const state=params.get('state');commentCatalogState.studyState=COMMENT_STATES.has(state)?state:'all';
+  const kind=params.get('signalKind');commentCatalogState.signalKind=Object.hasOwn(signalKindLabel,kind)?kind:null;
   const voice=params.get('voiceRole');commentCatalogState.voiceRole=COMMENT_VOICES.has(voice)?voice:'reader_and_unknown';
   commentCatalogState.cursor=params.get('cursor')||null;
   if(!snapshot||snapshot.cursor!==commentCatalogState.cursor)commentCatalogState.history=[];
 }
-function captureCommentFilter(){const {q,studyState,voiceRole,workRef,workLabel,cursor,history,workChoices}=commentCatalogState;return{q,studyState,voiceRole,workRef,workLabel,cursor,history:[...history],workChoices:[...workChoices]};}
+function captureCommentFilter(){const {q,studyState,signalKind,voiceRole,workRef,workLabel,cursor,history,workChoices}=commentCatalogState;return{q,studyState,signalKind,voiceRole,workRef,workLabel,cursor,history:[...history],workChoices:[...workChoices]};}
 function restoreCommentFilter(snapshot){if(!snapshot)return;Object.assign(commentCatalogState,snapshot,{history:[...(snapshot.history||[])],workChoices:[...(snapshot.workChoices||[])]});}
 if(activeView==='comments')restoreCommentRoute(initialStudyRoute,window.history.state?.commentFilter);
 function catalogQuery(path,extra={}){
@@ -566,6 +593,8 @@ function resetCommentPage(){commentCatalogState.cursor=null;commentCatalogState.
 function commentStatus(item){
   if(!item.latestStudy)return'尚未研究';
   const latest=label(targetStateLabel,item.latestStudy.state)??item.latestStudy.state;
+  if(item.effectiveState==='source_changed')return`${latest}；原声已变化，旧结果失效`;
+  if(item.effectiveState==='source_unavailable')return`${latest}；来源不可用，旧结果失效`;
   if(item.effectiveStudy&&item.latestStudy.targetRef!==item.effectiveStudy.targetRef){const effective=label(targetStateLabel,item.effectiveStudy.state)??item.effectiveStudy.state;return`${latest}；历史有效结果：${effective}`;}
   return latest;
 }
@@ -588,17 +617,17 @@ function updateCommentSelectionView(){
 }
 async function renderCommentsTab(){
   if(!domainRef)return'<p class="study-empty">评论目录尚未就绪。</p>';
-  const params={q:commentCatalogState.q,workRef:commentCatalogState.workRef,studyState:commentCatalogState.studyState,voiceRole:commentCatalogState.voiceRole,cursor:commentCatalogState.cursor,limit:50};
+  const params={q:commentCatalogState.q,workRef:commentCatalogState.workRef,studyState:commentCatalogState.studyState,signalKind:commentCatalogState.signalKind,voiceRole:commentCatalogState.voiceRole,cursor:commentCatalogState.cursor,limit:50};
   const summaryParams={...params};delete summaryParams.cursor;delete summaryParams.limit;
   const[data,summary]=await Promise.all([get(catalogQuery('comments',params)),get(catalogQuery('catalog-summary',summaryParams))]);
   commentCatalogState.response=data;commentCatalogState.summary=summary;
   const rows=data.items||[],stats=summary.summary||{},coverage=data.indexCoverage||{},pending=coverage.pendingCount==null?'未知':Number(coverage.pendingCount);
   const workOptions=commentCatalogState.workChoices.map(work=>`<option value="${esc(work.workRef)}"${work.workRef===commentCatalogState.workRef?' selected':''}>${esc(work.displayTitle||'未命名作品')}</option>`).join('');
-  const body=rows.length?rows.map(item=>{const key=commentSelectionKey(item.commentKey),role=item.observationRole,eligible=item.studyEligibility?.eligible===true&&(role==='primary'||role==='reference'),checked=selectedCommentKeys.has(key),newWork=![...selectedCommentKeys.values()].some(selected=>selected.commentKey.workRef===item.commentKey.workRef),capped=!checked&&(selectedCommentKeys.size>=MAX_SELECTED_COMMENTS||(newWork&&selectedCommentWorkCount()>=MAX_SELECTED_WORKS));return`<tr><td><input type="checkbox" data-select-comment data-work-ref="${esc(item.commentKey.workRef)}" data-comment-id="${esc(item.commentKey.commentExternalId)}" data-eligible="${eligible}" aria-label="选择这条评论进入研究"${checked?' checked':''}${!eligible||capped?' disabled':''}></td><td><button type="button" class="study-comment-open" data-comment-work="${esc(item.commentKey.workRef)}" data-comment-id="${esc(item.commentKey.commentExternalId)}"><span class="study-comment-voice">${esc(item.commentText)}</span></button><small>${esc(commentEligibility(item))}</small></td><td><span class="study-work-title">${esc(item.workTitle||'未命名作品')}</span><small>${esc(workTitleSourceLabel[item.workTitleSource]||item.workTitleSource||'标题未记录')}</small></td><td>${esc(commentStatus(item))}</td><td>${esc(item.authorDisplayName||'作者未记录')}<small>${esc(String(item.observedAt||'').replace('T',' '))}</small></td></tr>`}).join(''):'<tr><td colspan="5" class="study-table-empty">当前筛选没有可显示的用户评论。</td></tr>';
+  const body=rows.length?rows.map(item=>{const key=commentSelectionKey(item.commentKey),role=item.observationRole,eligible=item.studyEligibility?.eligible===true&&(role==='primary'||role==='reference'),checked=selectedCommentKeys.has(key),newWork=![...selectedCommentKeys.values()].some(selected=>selected.commentKey.workRef===item.commentKey.workRef),capped=!checked&&(selectedCommentKeys.size>=MAX_SELECTED_COMMENTS||(newWork&&selectedCommentWorkCount()>=MAX_SELECTED_WORKS));const kinds=(item.signalKinds||[]).filter(kind=>Object.hasOwn(signalKindLabel,kind));return`<tr><td><input type="checkbox" data-select-comment data-work-ref="${esc(item.commentKey.workRef)}" data-comment-id="${esc(item.commentKey.commentExternalId)}" data-eligible="${eligible}" aria-label="选择这条评论进入研究"${checked?' checked':''}${!eligible||capped?' disabled':''}></td><td><button type="button" class="study-comment-open" data-comment-work="${esc(item.commentKey.workRef)}" data-comment-id="${esc(item.commentKey.commentExternalId)}"><span class="study-comment-voice">${esc(item.commentText)}</span></button><small>${esc(commentEligibility(item))}</small></td><td><span class="study-work-title">${esc(item.workTitle||'未命名作品')}</span><small>${esc(workTitleSourceLabel[item.workTitleSource]||item.workTitleSource||'标题未记录')}</small></td><td>${esc(commentStatus(item))}</td><td><div class="study-comment-kinds">${kinds.length?kinds.map(kind=>`<span class="study-badge">${esc(signalKindLabel[kind])}</span>`).join(''):'<span class="study-detail-muted">无当前有效标签</span>'}</div></td><td>${esc(item.authorDisplayName||'作者未记录')}<small>${esc(String(item.observedAt||'').replace('T',' '))}</small></td></tr>`}).join(''):'<tr><td colspan="6" class="study-table-empty">当前筛选没有可显示的用户评论。</td></tr>';
   return`<section class="study-comments" aria-labelledby="comments-title"><header class="study-comments-head"><div><p class="study-label">评论证据库</p><h2 id="comments-title">用户评论</h2><p>当前筛选可显示 ${Number(stats.displayableCommentCount||0)} 条；可研究 ${Number(stats.eligibleCommentCount||0)} 条；已索引 ${Number(coverage.indexedCount||0)}，待索引 ${pending}。</p></div><div class="study-comment-selection"><span id="comment-selection-count" role="status"></span><button id="study-selected-comments" type="button" disabled>研究所选评论</button></div></header>
-  <form id="comment-filter-form" class="study-comment-filters"><label>字面搜索<input id="comment-query" type="search" value="${esc(commentCatalogState.q)}" placeholder="搜索清洗后的评论文本"></label><label>研究状态<select id="comment-study-state">${[['all','全部'],['never_studied','从未研究'],['in_progress','处理中'],['studied','已有成功结果'],['needs_context','等待语境'],['failed','最近失败']].map(([v,t])=>`<option value="${v}"${commentCatalogState.studyState===v?' selected':''}>${t}</option>`).join('')}</select></label><label>声音角色<select id="comment-voice-role">${[['reader_and_unknown','用户评论（默认）'],['reader','已知用户'],['unknown','身份未知'],['creator','作品作者'],['all','全部声音']].map(([v,t])=>`<option value="${v}"${commentCatalogState.voiceRole===v?' selected':''}>${t}</option>`).join('')}</select></label><button type="submit">应用筛选</button></form>
+  <form id="comment-filter-form" class="study-comment-filters"><label>字面搜索<input id="comment-query" type="search" value="${esc(commentCatalogState.q)}" placeholder="搜索清洗后的评论文本"></label><label>研究状态<select id="comment-study-state">${[['all','全部'],['never_studied','从未研究'],['in_progress','处理中'],['studied','已有成功结果'],['needs_context','等待语境'],['failed','最近失败']].map(([v,t])=>`<option value="${v}"${commentCatalogState.studyState===v?' selected':''}>${t}</option>`).join('')}</select></label><label>研究标签<select id="comment-signal-kind"><option value="">全部标签</option>${Object.entries(signalKindLabel).map(([kind,title])=>`<option value="${kind}"${commentCatalogState.signalKind===kind?' selected':''}>${esc(title)}</option>`).join('')}</select></label><label>声音角色<select id="comment-voice-role">${[['reader_and_unknown','用户评论（默认）'],['reader','已知用户'],['unknown','身份未知'],['creator','作品作者'],['all','全部声音']].map(([v,t])=>`<option value="${v}"${commentCatalogState.voiceRole===v?' selected':''}>${t}</option>`).join('')}</select></label><button type="submit">应用筛选</button></form>
   <div class="study-comment-work-filter"><form id="comment-work-search-form"><label>所属作品<input id="comment-work-search" type="search" value="${esc(commentCatalogState.workLabel)}" placeholder="搜索作品标题"></label><button type="submit">查找作品</button></form><label>已匹配作品<select id="comment-work-select"><option value="">全部作品</option>${workOptions}</select></label></div>
-  <div class="study-review-table-wrap"><table class="study-review-table study-comments-table"><thead><tr><th scope="col">选择</th><th scope="col">原声</th><th scope="col">所属作品</th><th scope="col">研究状态</th><th scope="col">作者 / 观测</th></tr></thead><tbody>${body}</tbody></table></div>
+  <div class="study-review-table-wrap"><table class="study-review-table study-comments-table"><thead><tr><th scope="col">选择</th><th scope="col">原声</th><th scope="col">所属作品</th><th scope="col">研究状态</th><th scope="col">研究标签</th><th scope="col">作者 / 观测</th></tr></thead><tbody>${body}</tbody></table></div>
   <nav class="study-pagination" aria-label="用户评论翻页"><button id="comment-prev" type="button"${commentCatalogState.history.length?'':' disabled'}>上一页</button><span>第 ${commentCatalogState.history.length+1} 页</span><button id="comment-next" type="button"${data.page?.nextCursor?'':' disabled'}>下一页</button></nav></section>`;
 }
 async function searchCommentWorks(query){
@@ -619,7 +648,7 @@ function bindCommentsView(){
   }));
   document.querySelector('#study-selected-comments').addEventListener('click',()=>{setStudySelectionKind('comments');studyDialog.showModal();});
   updateCommentSelectionView();
-  form.addEventListener('submit',async event=>{event.preventDefault();commentCatalogState.q=document.querySelector('#comment-query').value.trim();commentCatalogState.studyState=document.querySelector('#comment-study-state').value;commentCatalogState.voiceRole=document.querySelector('#comment-voice-role').value;resetCommentPage();syncStudyRoute(true);await renderActiveTab();});
+  form.addEventListener('submit',async event=>{event.preventDefault();commentCatalogState.q=document.querySelector('#comment-query').value.trim();commentCatalogState.studyState=document.querySelector('#comment-study-state').value;commentCatalogState.signalKind=document.querySelector('#comment-signal-kind').value||null;commentCatalogState.voiceRole=document.querySelector('#comment-voice-role').value;resetCommentPage();syncStudyRoute(true);await renderActiveTab();});
   document.querySelector('#comment-work-search-form').addEventListener('submit',async event=>{event.preventDefault();const query=document.querySelector('#comment-work-search').value.trim();commentCatalogState.workLabel=query;try{await searchCommentWorks(query);}catch(error){document.querySelector('#comment-work-select').innerHTML='<option value="">作品读取失败</option>';}});
   document.querySelector('#comment-work-select').addEventListener('change',async event=>{commentCatalogState.workRef=event.currentTarget.value||null;const chosen=commentCatalogState.workChoices.find(work=>work.workRef===commentCatalogState.workRef);commentCatalogState.workLabel=chosen?.displayTitle||'';resetCommentPage();syncStudyRoute(true);await renderActiveTab();});
   document.querySelector('#comment-prev').addEventListener('click',async()=>{commentCatalogState.cursor=commentCatalogState.history.pop()??null;syncStudyRoute(true);await renderActiveTab();});
@@ -766,21 +795,30 @@ async function renderSelectedRunPanel() {
   }
   const tabs = Object.entries({targets:'目标评论',signals:'研究信号',requests:'调用记录',method:'本次方法'})
     .map(([key,text])=>`<button type="button" role="tab" data-run-panel="${key}" aria-selected="${selectedRunPanel===key}">${text}</button>`).join('');
-  return `<section class="study-run-detail"><header><h2 tabindex="-1">${esc(labels[selectedRunPanel])}</h2><p>当前运行 ${esc(selectedRunRef)}</p></header>${runDetail?renderRunSummary(runDetail):'<p class="study-restricted">本次运行摘要暂时读取失败，以下分页内容仍可查看。</p>'}<nav class="study-run-panels" role="tablist" aria-label="本次运行内容">${tabs}</nav>${pageStatus}${content}${more}</section>`;
+  const selectedRun=allRuns.find(run=>run.runRef===selectedRunRef);
+  const controls=selectedRun?runControlActions(selectedRun):'';
+  return `<section class="study-run-detail"><header><h2 tabindex="-1">本次研究 · ${esc(runDetail?.method?.name||'方法未记录')}</h2><p>${esc(studyTime(runDetail?.createdAt))} · <span class="study-run-id">运行编号 ${esc(selectedRunRef)}</span></p></header>${controls?`<div class="study-link-actions study-current-run-actions" aria-label="本次运行操作">${controls}</div>`:''}${runDetail?renderRunSummary(runDetail):'<p class="study-restricted">本次运行摘要暂时读取失败，以下分页内容仍可查看。</p>'}<nav class="study-run-panels" role="tablist" aria-label="本次运行内容">${tabs}</nav><h3 class="study-run-panel-title">${esc(labels[selectedRunPanel])}</h3>${pageStatus}${content}${more}</section>`;
 }
 
 function renderRunSummary(run){
   const semantic=run.semanticSummary,knowledge=run.knowledgeSummary,cost=run.costSummary;
+  const scope=run.scope||{},exclusions=scope.exclusionCounts;
   const n=value=>value==null||Number.isNaN(Number(value))?'—':Number(value).toLocaleString('zh-CN');
-  const semanticBody=semantic?`<p>冻结 ${n(semantic.targetCount)} 条目标评论；提取成功 ${n(semantic.succeededTargetCount)} 条，无信号 ${n(semantic.noSignalTargetCount)} 条，等待语境 ${n(semantic.needsContextTargetCount)} 条，失败 ${n(semantic.failedTargetCount)} 条，排除 ${n(semantic.excludedTargetCount)} 条。</p><p>提取尝试 ${n(semantic.attemptCount)} 次，产生 ${n(semantic.signalCount)} 条信号；其中当前有效 ${n(semantic.currentSignalCount)} 条。</p>`:'<p class="study-detail-muted">提取汇总未记录。</p>';
-  const knowledgeBody=knowledge?`<p>当前有归并资格 ${n(knowledge.eligibleSignalCount)} 条信号；归入问题 ${n(knowledge.assignedSignalCount)} 条，本 Run 已关联问题 ${n(knowledge.linkedProblemCount)} 个。</p><p>归并待处理 ${n(knowledge.pendingResolutionCount)} 条、候选比较待处理 ${n(knowledge.pendingPairCount)} 组；新表达暂缓 ${n(knowledge.deferredNovelCount)} 条、边界未定 ${n(knowledge.deferredAmbiguousCount)} 条、等待语境 ${n(knowledge.deferredContextCount)} 条。</p><p>检索未完成 ${n(knowledge.retrievalIncompleteCount)} 条、预算中止 ${n(knowledge.budgetStoppedCount)} 条、协议拒绝 ${n(knowledge.protocolRejectedCount)} 条、归并失败 ${n(knowledge.failedResolutionCount)} 条。评论提取结束不代表归并全部闭合。</p>`:'<p class="study-detail-muted">归并汇总未记录。</p>';
+  const requested=run.requestedWorkCount??(Array.isArray(scope.requestedWorkRefs)?scope.requestedWorkRefs.length:null);
+  const covered=run.coveredWorkCount??run.workCount;
+  const candidates=exclusions&&semantic?.targetCount!=null
+    ? Number(semantic.targetCount)+Object.values(exclusions).reduce((total,value)=>total+Number(value||0),0)
+    : null;
+  const frozen=`<section class="study-run-frozen" aria-label="本次冻结范围"><h3>本次研究范围</h3><p><strong>选中 ${n(requested)} 篇</strong><span aria-hidden="true"> → </span><strong>实际入包 ${n(covered)} 篇</strong><span aria-hidden="true"> → </span><strong>目标 ${n(semantic?.targetCount)} 条评论</strong></p><p>${candidates==null?'候选评论数量未记录':`候选 ${n(candidates)} 条；未入包：${esc(exclusionSummary(exclusions,scope.selectionMode))}`}。</p><p>模式：${esc(studyModeLabel[scope.selectionMode]||'未记录')} · 评论上限 ${n(run.limits?.commentBudget)} 条 · 单作品语境 ${n(run.limits?.contextCharacterBudget)} 字符 · 模型词元上限 ${n(run.limits?.tokenLimit)}。</p></section>`;
+  const semanticBody=semantic?`<p>成功 ${n(semantic.succeededTargetCount)} · 无信号 ${n(semantic.noSignalTargetCount)} · 等待语境 ${n(semantic.needsContextTargetCount)} · 失败 ${n(semantic.failedTargetCount)}。</p><p>产生 ${n(semantic.signalCount)} 条信号；其中当前有效 ${n(semantic.currentSignalCount)} 条。</p>`:'<p class="study-detail-muted">提取汇总未记录。</p>';
+  const knowledgeBody=knowledge?`<p>归入问题 ${n(knowledge.assignedSignalCount)} 条信号；关联 ${n(knowledge.linkedProblemCount)} 个问题。</p><p>待归并 ${n(knowledge.pendingResolutionCount)} 条 · 待比较 ${n(knowledge.pendingPairCount)} 组。</p><details><summary>查看其他归并状态</summary><p>新表达暂缓 ${n(knowledge.deferredNovelCount)} 条，边界未定 ${n(knowledge.deferredAmbiguousCount)} 条，等待语境 ${n(knowledge.deferredContextCount)} 条；检索未完成 ${n(knowledge.retrievalIncompleteCount)} 条，预算中止 ${n(knowledge.budgetStoppedCount)} 条，协议拒绝 ${n(knowledge.protocolRejectedCount)} 条，归并失败 ${n(knowledge.failedResolutionCount)} 条。</p></details>`:'<p class="study-detail-muted">归并汇总未记录。</p>';
   let costBody='<p class="study-detail-muted">调用账本未记录。</p>';
   if(cost?.recordingState==='unrecorded')costBody='<p class="study-detail-muted">历史调用记录未记录，无法判断请求次数或用量。</p>';
   else if(cost){
     const incomplete=cost.recordingState!=='recorded';
     costBody=`<p>${incomplete?'历史调用记录可能不完整；':''}请求 ${n(cost.requestCount)} 次，已派发 ${n(cost.dispatchedRequestCount)} 次；用量已知 ${n(cost.usageKnownRequestCount)} 次、未知 ${n(cost.usageUnknownRequestCount)} 次。</p><p>${cost.totalInputTokens!=null&&cost.totalOutputTokens!=null?`输入 ${n(cost.totalInputTokens)}、输出 ${n(cost.totalOutputTokens)} Token`:`已知输入 ${n(cost.knownInputTokens)}、已知输出 ${n(cost.knownOutputTokens)} Token；完整用量未知`}${cost.chargedTokens==null?'':`；保守计入 ${n(cost.chargedTokens)} Token`}。账单金额未记录。</p>`;
   }
-  return `<section class="study-run-summary" aria-label="本次运行摘要"><article><h3>评论提取</h3>${semanticBody}</article><article><h3>问题归并</h3>${knowledgeBody}</article><article><h3>调用与用量</h3>${costBody}</article></section>`;
+  return `${frozen}<section class="study-run-summary" aria-label="本次运行摘要"><article><h3>评论提取</h3>${semanticBody}</article><article><h3>问题归并</h3>${knowledgeBody}</article><article><details><summary>模型调用与用量</summary>${costBody}</details></article></section>`;
 }
 
 function renderRunMethodPanel(run) {
@@ -927,7 +965,7 @@ function renderProblemDetail(problem,evidence,revisionHistory,sourceDistribution
   return `<section class="study-problem-detail" aria-label="用户问题详情"><header><h2 tabindex="-1">${esc(problem.title||problem.definition||'定义当前不可读取')}</h2><button type="button" class="study-link" data-problem-close>返回问题列表</button></header><p class="study-signal-meta">${esc(label(problemStateLabel,problem.state)??problem.state)} · ${esc(problemSupportLabel[problem.supportState]||'支持状态未记录')}${revision} · 支持评论 ${Number(problem.supportCommentCount||0)} 条 · 独立作者 ${Number(problem.supportAuthorCount||0)} 位 · 作品 ${Number(problem.supportWorkCount||0)} 篇${problem.definitionCurrent===false?' · 当前定义依据已失效':''}</p>${definition}<section><h3>来源与时间分布</h3>${renderProblemDistribution(sourceDistribution)}</section>${revisions}<section><h3>原声与关联信号</h3><p class="study-run-page-status">当前显示 ${(evidence.evidence||[]).length} 条${next?'，还有后续内容':'，已到列表末尾'}</p><div id="study-problem-evidence">${list(evidence.evidence,renderProblemEvidence,'当前没有可显示的原声依据。')}</div>${next?`<button type="button" class="study-link" data-problem-evidence-more="${esc(next)}">加载更多原声</button>`:''}</section></section>`;
 }
 
-function runRow(run) {
+function runControlActions(run) {
   const canControl = run.selectionContract === 'comment-study.run-selection.v2'
     && !run.finishedAt && run.controlVersion != null
     && Number.isInteger(Number(run.controlVersion))
@@ -948,31 +986,33 @@ function runRow(run) {
   if (run.selectionContract === 'comment-study.run-selection.v2' && run.finishedAt && unfinished > 0) {
     actions.push(`<button type="button" class="study-link" data-run-recover="${esc(run.runRef)}">补跑未完成</button>`);
   }
-  actions.push(`<button type="button" class="study-link" data-run-open="${esc(run.runRef)}">${selectedRunRef === run.runRef ? '当前查看' : '查看结果'}</button>`);
-  const dispatchLabel = dispatchStateLabel[run.dispatchState] || '派发状态未知';
+  return actions.join('');
+}
+
+function runRow(run) {
+  const controls=runControlActions(run);
+  const viewAction=`<button type="button" class="study-link" data-run-open="${esc(run.runRef)}">${selectedRunRef === run.runRef ? '当前查看' : '查看结果'}</button>`;
+  const dispatchLabel = run.finishedAt && run.dispatchState==='enabled' ? '' : (dispatchStateLabel[run.dispatchState] || '派发状态未知');
   const dispatchReason = dispatchReasonLabel[run.dispatchReason];
   const originLabel = run.recoverySourceRunRef?'补跑未完成':({manual:'手动发起',scheduled:'定时发起'}[run.origin]||'来源未记录');
   const pendingResolution=run.pendingResolutionCount==null?'—':Number(run.pendingResolutionCount).toLocaleString('zh-CN');
   const pendingPair=run.pendingPairCount==null?'—':Number(run.pendingPairCount).toLocaleString('zh-CN');
+  const count=value=>value==null?'—':Number(value).toLocaleString('zh-CN');
+  const covered=run.coveredWorkCount??run.workCount;
   return `<tr>
-      <td><strong>${esc(run.methodName||'方法未记录')}</strong><p>${esc(originLabel)} · ${esc(String(run.createdAt||'').replace('T',' '))}</p><p>运行 ${esc(run.runRef.slice(0, 8))}…${run.recoverySourceRunRef ? ` · 补跑自 ${esc(run.recoverySourceRunRef.slice(0, 8))}…` : ''}</p></td>
-      <td>${esc(runStateLabel[run.state] || run.state)}<p>${esc(dispatchLabel)}${dispatchReason ? ` · ${esc(dispatchReason)}` : ''}</p></td>
-      <td>归并 ${pendingResolution}<p>配对 ${pendingPair}</p></td>
-      <td>${Number(run.workCount)}<p>primary ${Number(run.primaryWorkCount || 0)} · reference ${Number(run.referenceWorkCount || 0)}</p></td>
-      <td>${Number(run.targetCount)}</td>
-      <td>${Number(run.succeededCount)}</td>
-      <td>${Number(run.noSignalCount)}</td>
-      <td>${Number(run.needsContextCount)}</td>
-      <td>${Number(run.failedCount)}</td>
-      <td>${Number(run.excludedCount)}</td>
-      <td><div class="study-run-actions">${actions.join('') || '—'}</div></td>
+      <td><strong>${esc(studyTime(run.createdAt))}</strong><p>${esc(run.methodName||'方法未记录')} · ${esc(originLabel)}</p></td>
+      <td><strong>选 ${count(run.requestedWorkCount)} 篇 → 入包 ${count(covered)} 篇</strong><p>目标 ${count(run.targetCount)} 条评论</p></td>
+      <td>成功 ${count(run.succeededCount)} · 无信号 ${count(run.noSignalCount)}<p>等待语境 ${count(run.needsContextCount)} · 失败 ${count(run.failedCount)} · 处理中 ${count(run.pendingCount)}</p></td>
+      <td>待归并 ${pendingResolution}<p>待比较 ${pendingPair}</p></td>
+      <td>${esc(runStateLabel[run.state] || '运行状态未知')}${dispatchLabel||dispatchReason?`<p>${esc(dispatchLabel)}${dispatchReason ? `${dispatchLabel?' · ':''}${esc(dispatchReason)}` : ''}</p>`:''}</td>
+      <td><div class="study-run-actions">${controls}${viewAction}</div></td>
     </tr>`;
 }
 async function renderRunsTab() {
   if (!runListLoaded || runControlOutcomeNeedsRefresh) await loadRunListPage(true);
   const feedback = '<p id="study-run-control-feedback" class="study-run-control-feedback" role="status" aria-live="polite" tabindex="-1">' + esc(runControlFeedback) + '</p>';
   if (!allRuns.length) return feedback + '<p class="study-empty">尚未创建过研究运行。</p>';
-  const table = '<div class="study-review-table-wrap"><table class="study-review-table"><thead><tr><th scope="col">方法与来源</th><th scope="col">执行状态</th><th scope="col">归并待办</th><th scope="col">作品</th><th scope="col">目标</th><th scope="col">有信号</th><th scope="col">无信号</th><th scope="col">等待语境</th><th scope="col">处理失败</th><th scope="col">已排除</th><th scope="col">操作</th></tr></thead><tbody>' + allRuns.map(runRow).join('') + '</tbody></table></div>';
+  const table = '<div class="study-review-table-wrap"><table class="study-review-table study-runs-table"><thead><tr><th scope="col">发起时间与方法</th><th scope="col">选择与冻结</th><th scope="col">评论提取</th><th scope="col">归并待办</th><th scope="col">运行状态</th><th scope="col">操作</th></tr></thead><tbody>' + allRuns.map(runRow).join('') + '</tbody></table></div>';
   const more = runListNextCursor
     ? `<p class="study-run-page-status">已显示 ${allRuns.length} 次运行 <button type="button" class="study-link" data-run-list-load-more${runListLoading ? ' disabled' : ''}>${runListLoading ? '读取中…' : '加载更早运行'}</button></p>`
     : `<p class="study-run-page-status">已显示 ${allRuns.length} 次运行，已到列表末尾</p>`;
@@ -982,7 +1022,7 @@ async function renderRunsTab() {
   } catch (error) {
     panel = `<p class="study-empty">运行详情读取失败：${esc(error.message)}</p>`;
   }
-  return feedback + table + more + panel;
+  return feedback + panel + `<details class="study-run-history"><summary>查看全部研究运行（已加载 ${allRuns.length} 次）</summary>${table}${more}</details>`;
 }
 
 async function loadRunListPage(reset = false) {
@@ -1413,9 +1453,11 @@ function setStudySelectionKind(kind){
   document.querySelector('.study-workspace').dataset.selectionKind=kind;
   document.querySelector('#study-dialog-title').textContent=kind==='comments'?'研究所选评论':'发起一次新研究';
   document.querySelector('#work-picker-title').textContent=kind==='comments'?'已选评论':'选择要研究的作品';
-  document.querySelector('#selection-scope-note').textContent=kind==='comments'?'只冻结当前已选、服务端确认可研究的评论；预览会再次核对资格和预算。创建研究运行不会直接调用模型。':'只冻结当前所选作品中、受评论数上限约束的可研究评论；创建研究运行不会调用模型。';
+  document.querySelector('#selection-scope-note').textContent=kind==='comments'?'服务端会核对所选评论的资格与预算。确认开始后，目标进入模型执行队列，可能产生调用与费用。':'服务端会按所选作品、当前模式和预算冻结目标。确认开始后，目标进入模型执行队列，可能产生调用与费用。';
   document.querySelector('#selection-preview').textContent='';
   document.querySelector('#run-result').textContent='';
+  previewRequestSeq+=1;
+  previewSelectionSignature=null;previewTargetCount=null;
   pendingStartSignature=null;pendingStartRef=null;
   updateSelection();
 }
@@ -1482,6 +1524,7 @@ document.querySelector('#study-mode').addEventListener('change', event => {
   const needsReason = event.currentTarget.value !== 'new_only';
   document.querySelector('#study-reason-label').hidden = !needsReason;
   pendingStartSignature = null; pendingStartRef = null;
+  updateSelection();
 });
 function selectionCommand() {
   if(studySelectionKind==='comments'){
@@ -1508,12 +1551,25 @@ function selectionCommand() {
 document.querySelector('#preview-run').addEventListener('click', async () => {
   const status = document.querySelector('#selection-preview');
   const button = document.querySelector('#preview-run');
+  const request=++previewRequestSeq;
   button.disabled = true;
   try {
-    const preview = await post('selection-preview', selectionCommand());
-    status.textContent = `预览：所选 ${Number(preview.requestedWorkCount||0)} 篇作品，${Number(preview.scopeCommentCount||0)} 条评论符合范围，预计创建 ${Number(preview.targetCount||0)} 条目标；待索引 ${Number(preview.indexCoverage?.pendingCount||0)} 条。预览不保留评论，也不调用模型。`;
-  } catch (error) { status.textContent = `预览失败：${error.message}`; }
-  finally { updateSelection(); }
+    const command=selectionCommand();
+    const signature=JSON.stringify(command);
+    const preview = await post('selection-preview', command);
+    if(request!==previewRequestSeq)return;
+    if(signature!==JSON.stringify(selectionCommand())) {
+      status.textContent='预览期间选择已变化，请重新预览。';
+      return;
+    }
+    previewSelectionSignature=signature;
+    previewTargetCount=preview.targetCount==null?null:Number(preview.targetCount);
+    const count=value=>value==null?'—':Number(value).toLocaleString('zh-CN');
+    const scope=count(preview.scopeCommentCount),selected=count(preview.requestedWorkCount);
+    const covered=count(preview.coveredWorkCount),target=count(preview.targetCount);
+    status.textContent=`按“${studyModeLabel[command.mode]||'本次模式'}”预览：选中 ${selected} 篇作品，范围内 ${scope} 条评论；排除：${exclusionSummary(preview.exclusionCounts,command.mode)}。预计冻结 ${target} 条，实际覆盖 ${covered} 篇；本次上限 ${count(command.limits.commentBudget)} 条。预览只读，提交时会重新冻结，以创建回执为准。`;
+  } catch (error) { if(request===previewRequestSeq){previewSelectionSignature=null;previewTargetCount=null;status.textContent = `预览失败：${error.message}`;} }
+  finally { if(request===previewRequestSeq)updateSelection(); }
 });
 document.querySelector('#start-run').addEventListener('click', async () => {
   const button = document.querySelector('#start-run');
@@ -1532,8 +1588,9 @@ document.querySelector('#start-run').addEventListener('click', async () => {
     const response = await post('runs', command);
     pendingStartSignature = null; pendingStartRef = null;
     result.textContent = response.outcome === 'created'
-      ? `已创建 ${response.runRef}：覆盖 ${Number(response.coveredWorkCount||0)} 篇作品，冻结 ${Number(response.targetCount||0)} 条目标评论。当前运行已排队；实际模型调用由后续执行层控制。`
+      ? `已创建 ${response.runRef}：选中 ${Number(response.requestedWorkCount||0)} 篇，覆盖 ${Number(response.coveredWorkCount||0)} 篇，冻结 ${Number(response.targetCount||0)} 条目标评论。已进入模型执行队列。`
       : `本次未创建空运行：${response.outcome==='no_work'?'没有符合所选模式的新评论':'仍有评论等待索引'}。 requestRef=${response.requestRef}`;
+    runControlFeedback=result.textContent;
     selectedRunRef = response.runRef;
     if(response.runRef){studyDialog.close(); activeView = 'runs'; selectedRunPanel = 'targets'; resetRunPanelCache(); highlightTab('runs'); syncStudyRoute(true); await loadProjection();}
   } catch (error) { result.textContent = `未创建研究运行：${error.message}`; }
@@ -1560,11 +1617,9 @@ document.querySelector('#select-visible-works').addEventListener('change', event
     const role = work.observationRole || workCatalogState.observationRole;
     if (event.currentTarget.checked && selectedWorkRoles.get(work.workRef) !== role && remaining > 0) {
       selectedWorkRoles.set(work.workRef, role);
-      selectedWorkMeta.set(work.workRef, { eligibleCommentCount: Number(work.eligibleCommentCount || 0) });
       remaining -= 1;
     } else if (!event.currentTarget.checked && selectedWorkRoles.get(work.workRef) === role) {
       selectedWorkRoles.delete(work.workRef);
-      selectedWorkMeta.delete(work.workRef);
     }
   });
   renderWorks();

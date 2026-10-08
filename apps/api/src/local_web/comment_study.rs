@@ -854,8 +854,8 @@ mod tests {
         assert!(script.contains("作者身份未知"));
         assert!(script.contains("commentAuthorUnknown:'评论作者身份未知，不纳入研究'"));
         assert!(script.contains("作品作者本人"));
-        assert!(script.contains("本次最多冻结"));
-        assert!(script.contains("服务端作品目录"));
+        assert!(script.contains("预计冻结 ${target} 条，实际覆盖 ${covered} 篇"));
+        assert!(script.contains("本次上限 ${count(command.limits.commentBudget)} 条"));
         assert!(script.contains("MAX_SELECTED_WORKS = 100"));
     }
 

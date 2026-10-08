@@ -1,8 +1,17 @@
 -- Appended to facts.sql. $6 literal query; $7 voice; $8 study filter;
--- $9 received-before; $10 work-after; $11 external-id-after; $12 page size plus one.
-, scoped AS MATERIALIZED (
-    SELECT * FROM qualified
+-- $9 received-before; $10 work-after; $11 external-id-after; $12 page size plus one; $13 signal kind.
+, signal_kinds AS MATERIALIZED (
+    SELECT content_public_ref, comment_external_id,
+           array_agg(DISTINCT kind::text ORDER BY kind::text) AS kinds
+    FROM linggan_comment_study_effective_signal
+    WHERE domain_ref = $1
+    GROUP BY content_public_ref, comment_external_id
+), scoped AS MATERIALIZED (
+    SELECT qualified.*, COALESCE(signal_kinds.kinds, ARRAY[]::text[]) AS signal_kinds
+    FROM qualified
+    LEFT JOIN signal_kinds USING (content_public_ref, comment_external_id)
     WHERE ($7 = 'all' OR voice_role = $7 OR ($7 = 'reader_and_unknown' AND voice_role <> 'creator'))
+      AND ($13::text IS NULL OR $13::text = ANY(COALESCE(signal_kinds.kinds, ARRAY[]::text[])))
       AND CASE $8
           WHEN 'all' THEN true
           WHEN 'never_studied' THEN latest_target_ref IS NULL
@@ -99,6 +108,7 @@ SELECT jsonb_build_object(
                 WHEN page.exclusion_reason IS NOT NULL OR page.effective_source_state <> 'known' THEN 'source_unavailable'
                 ELSE 'effective'
             END,
+            'signalKinds', to_jsonb(page.signal_kinds),
             'observedAt', to_char(page.observed_at::timestamptz AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
             'receivedAt', to_char(page.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
             'authorDisplayName', page.author_display_name, 'authorExternalId', page.author_external_id,
