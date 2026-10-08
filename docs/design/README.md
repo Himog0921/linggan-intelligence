@@ -149,7 +149,7 @@ LIDS 现在统一约束全项目的设计表达，但其成熟度仍为 Proposed
 
 ## COMMENT-STUDY-PRODUCTIZATION-001 / P2 页面与闭环
 
-[四视图与交互规格](pages/comment-study-productization-001.md) 是页面合同；P3 Run 控制分层验收见[Run 控制验收记录](acceptance/comment-study-productization-001-p3-control-acceptance.md)，阶段证据见[实施账本](../audits/comment-study-productization-001/README.md)。已合并基线之后的 P2 缺口收口见 [COMMENT-STUDY-P2-CLOSEOUT-001 UI 变更清单](changes/comment-study-p2-closeout-001-ui-change-manifest.md)；#359 合并与本机运行回执见实施账本。2026-10-06 页面状态修正另见[变更清单](changes/comment-study-release-polish-358-ui-change-manifest.md)和[浏览器验收记录](acceptance/comment-study-release-polish-358-acceptance.md)，尚未合并到本机运行页。
+[四视图与交互规格](pages/comment-study-productization-001.md) 是页面合同；P3 Run 控制分层验收见[Run 控制验收记录](acceptance/comment-study-productization-001-p3-control-acceptance.md)，阶段证据见[实施账本](../audits/comment-study-productization-001/README.md)。已合并基线之后的 P2 缺口收口见 [COMMENT-STUDY-P2-CLOSEOUT-001 UI 变更清单](changes/comment-study-p2-closeout-001-ui-change-manifest.md)；#359 合并与本机运行回执见实施账本。Issue #358 的页面状态修正已随 #361 合并到本机；2026-10-08 窄屏表格候选见同一[变更清单](changes/comment-study-release-polish-358-ui-change-manifest.md)和[浏览器验收记录](acceptance/comment-study-release-polish-358-acceptance.md)，候选尚未合并或刷新。
 
 ## MODEL-PI-001 交付分支
 

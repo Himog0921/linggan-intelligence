@@ -1,10 +1,14 @@
 # LIDS-LOG-001 · LIDS 迁移与变更记录
 
 > 状态: 权威当前
-> 最后核对: 2026-10-06
+> 最后核对: 2026-10-08
 > 适用范围: Linggan Intelligence LIDS Token、Primitive、Component、Pattern、Page、Motion、Scene 和 Data Truth 规则的实际变更、替代、例外与验证边界
 > 事实来源: [system.md](system.md)、[README.md](README.md)、DESIGN-002 Issue #7、项目 progress 记录和实际验证输出
 > 冲突时以谁为准: 真实代码/合同/测试、用户最新确认、当前 SCOPE 和 ACCEPTED 决策；本日志不把计划写成已实现事实
+
+## 2026-10-08 · COMMENT-STUDY-RELEASE-POLISH-358 · 窄屏评论表格候选
+
+评论研究 L1「用户评论」复用既有表格横向滚动包裹层，把原来浏览器计算为 0 的 `calc(var(--lgi-space-24) * 6)` 改为有效的现有 Token 加法，并给五列评论表指定 960px 最小宽度和列宽。未改变 Token 值、Primitive、Pattern、共享 shell、HTML、数据和模型动作。只读 CSS 代理连接已部署 `:3000` 的真实 GET：390／520px 的最小宽度均计算为 960px，390px 可以滚向末列且整页无水平溢出；1440px 五列在页内可见。此为候选验证，未合并或刷新正式运行页。见[变更清单](../changes/comment-study-release-polish-358-ui-change-manifest.md)和[验收记录](../acceptance/comment-study-release-polish-358-acceptance.md)。
 
 ## 2026-10-06 · COMMENT-STUDY-RELEASE-POLISH-358 · 页面领域和状态表达
 
