@@ -94,3 +94,12 @@ Mog 随后授权合并 main 与刷新3000。#368 已合并为 `b182ba83`，实�
 - `cargo fmt --check --package linggan-evidence` 因既有未改文件格式差异未通过；未格式化无关源码。实际编译与数据库证明单独记录，不将该检查报为通过。
 
 - 性能修复最终完整 `scripts/test-local-001-discovery-postgres.sh` 退出0：Rust283、Node3通过，零失败，隔离数据库/容器/卷清理已核验（`/tmp/creator-discovery-performance-local001.log`）。两条独立P1浏览器用例按原入口边界排除，未计为通过；新增媒体资格测试另为3/3。项目治理检查通过。
+
+
+## 领域切换页面上下文收口
+
+性能修复 #371 合并并部署为 `65beecce` 后，3000 实测1658作品/953作者约1.258秒返回，API/worker/media分别PID51009/51015/51023且cwd/executable均来自canonical runtime；配置、预算、模型调用计数与发布前一致。
+
+浏览器发现正文选择另一领域后，SSR页头和侧栏未刷新。窄修改为领域切换完整导航，让服务器统一渲染壳和正文上下文；普通筛选继续AJAX。加载清coverage/pager；导航取消防抖、废弃旧读/弹窗序号，阻止焦点加载及在途注册回执更新旧页；跨领域历史导航重载壳。仅JS改动，未改API、数据库、worker和迁移，node语法与diff检查通过。正式浏览器复验记入本机发布回执，不将之前性能证明当作这一交互的验证。
+
+- 独立复审提出BFCache恢复可能保留导航中空表状态，已确认并以`pageshow.persisted`重载修复；普通加载不触发。语法、diff、项目治理和UI手册治理均通过。旧coverage残留发现已在最终diff中消除，不列为未解决问题。
