@@ -338,11 +338,31 @@ test('readXhsNoteDetailFromDom keeps a current detail page usable when the injec
     user: {
       nickname: '页面作者',
       userId: 'author_dom_1',
+      profileUrl: 'https://www.xiaohongshu.com/user/profile/author_dom_1?xsec_source=pc_user',
       avatar: 'https://img.example.com/avatar.jpg',
     },
     interactInfo: {},
     _captureSource: 'xhs.detail_dom',
   });
+});
+
+test('readXhsNoteDetailFromDom rejects a non-platform author href', () => {
+  const root = {
+    querySelector(selector) {
+      if (selector === '.note-title') return { textContent: '页面标题' };
+      if (selector.startsWith('.author-container a')) return {
+        getAttribute: () => 'https://www.xiaohongshu.com.evil.test/user/profile/author_1',
+      };
+      return null;
+    },
+    querySelectorAll: () => [],
+  };
+  const result = readXhsNoteDetailFromDom({
+    document: { querySelector: () => root },
+    location: { href: 'https://www.xiaohongshu.com/explore/note_1' },
+  }, { expectedNoteId: 'note_1' });
+  assert.equal(result.user.userId, undefined);
+  assert.equal(result.user.profileUrl, undefined);
 });
 
 test('enrichXhsNoteDetailFromDom fills only missing media and author identity fields', () => {
@@ -358,6 +378,7 @@ test('enrichXhsNoteDetailFromDom fills only missing media and author identity fi
     user: {
       nickname: '页面作者',
       userId: 'author_1',
+      profileUrl: 'https://www.xiaohongshu.com/user/profile/author_1?xsec_source=pc_user',
       avatar: 'https://img.example.com/avatar.jpg',
     },
   });
@@ -365,8 +386,17 @@ test('enrichXhsNoteDetailFromDom fills only missing media and author identity fi
   assert.equal(result.title, '结构化标题');
   assert.equal(result.user.nickname, '结构化作者');
   assert.equal(result.user.userId, 'author_1');
+  assert.equal(result.user.profileUrl, 'https://www.xiaohongshu.com/user/profile/author_1?xsec_source=pc_user');
   assert.equal(result.user.avatar, 'https://img.example.com/avatar.jpg');
   assert.deepEqual(result.imageList, [{ urlDefault: 'https://img.example.com/detail.jpg' }]);
+});
+
+test('enrichXhsNoteDetailFromDom does not attach another author profile to the structured author', () => {
+  const result = enrichXhsNoteDetailFromDom({ user: { userId: 'author_1' } }, {
+    user: { userId: 'author_2', profileUrl: 'https://www.xiaohongshu.com/user/profile/author_2' },
+  });
+  assert.equal(result.user.userId, 'author_1');
+  assert.equal(result.user.profileUrl, undefined);
 });
 
 test('enrichXhsNoteDetailFromDom replaces hydrated placeholder objects with observed URLs', () => {

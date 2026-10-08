@@ -1335,6 +1335,16 @@ fn works_list(
                 .unwrap_or_else(|| "—".to_owned());
             let last = work.last_captured_at.as_deref().unwrap_or("—");
             let creator = work.creator_display_name.as_deref().unwrap_or("创作者待取得");
+            let creator_cell = if target.platform == "xhs" {
+                work.creator_external_id.as_deref().filter(|id| !id.trim().is_empty()).map(|id| {
+                    format!(
+                        r#"<a class="c-dw-author-link" href="https://www.xiaohongshu.com/user/profile/{}" target="_blank" rel="noopener noreferrer" title="根据作者 ID 打开小红书主页">{}</a>"#,
+                        percent_encode_component(id), escape(creator)
+                    )
+                })
+            } else {
+                None
+            }.unwrap_or_else(|| escape(creator));
             let position = work.match_position.map(|value| value.to_string()).unwrap_or_else(|| "未提供".to_owned());
             let common = format!(
                 r#"<td><div class="c-dw-catalog-work"><b>{title}</b><span>{id}</span></div></td><td>{published}</td>"#,
@@ -1365,7 +1375,7 @@ fn works_list(
                     kind = work.recorded_kind.unwrap_or("未标记"))
             } else {
                 format!(r#"<tr>{common}<td>{creator}</td><td>{position}</td>{tail}</tr>"#,
-                    creator = escape(creator), position = escape(&position))
+                    creator = creator_cell, position = escape(&position))
             }
         })
         .collect::<String>();
@@ -3678,6 +3688,7 @@ mod tests {
             content_external_id: "xhs-note".to_owned(),
             title: Some("一篇作品".to_owned()),
             creator_display_name: Some("作者".to_owned()),
+            creator_external_id: Some("author-1".to_owned()),
             match_position: None,
             published_at: None,
             source: CatalogSource::InitialArchive,
@@ -3716,6 +3727,35 @@ mod tests {
         assert!(scoped.contains(&format!(
             "href=\"/corpus/evidence?domain={domain_ref}&amp;work={work_ref}\""
         )));
+    }
+
+    #[test]
+    fn keyword_author_link_uses_stable_id_and_escapes_the_label() {
+        let mut work = linggan_evidence::CatalogWork {
+            public_ref: uuid::Uuid::from_u128(43),
+            content_external_id: "note-43".to_owned(),
+            title: Some("一篇作品".to_owned()),
+            creator_display_name: Some("作者 <一>".to_owned()),
+            creator_external_id: Some("author/43".to_owned()),
+            match_position: Some(1),
+            published_at: None,
+            source: CatalogSource::InitialArchive,
+            recorded_kind: None,
+            detail_state: CatalogDetailState::Complete,
+            execution_state: None,
+            media_state: "—",
+            comment_count: None,
+            last_captured_at: None,
+        };
+        let target = keyword_target();
+        let catalog = linggan_evidence::KeywordHitProjection { works: vec![work.clone()] };
+        let html = works_list(&target, TargetCatalogView::Keyword(Some(&catalog)), None, None, TargetListContext::default());
+        assert!(html.contains("https://www.xiaohongshu.com/user/profile/author%2F43"));
+        assert!(html.contains(">作者 &lt;一&gt;</a>"));
+        work.creator_external_id = None;
+        let unknown = linggan_evidence::KeywordHitProjection { works: vec![work] };
+        let html = works_list(&target, TargetCatalogView::Keyword(Some(&unknown)), None, None, TargetListContext::default());
+        assert!(!html.contains("www.xiaohongshu.com/user/profile/"));
     }
 
     #[test]

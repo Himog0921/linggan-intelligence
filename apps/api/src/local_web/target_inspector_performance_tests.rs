@@ -537,6 +537,7 @@ fn catalog_work(
         content_external_id: format!("work-{index}"),
         title: None,
         creator_display_name: Some("示例创作者".to_owned()),
+        creator_external_id: None,
         match_position: Some(index as i64),
         published_at: None,
         source: linggan_evidence::CatalogSource::InitialArchive,

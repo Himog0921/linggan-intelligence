@@ -29,6 +29,8 @@ pub struct CatalogWork {
     pub title: Option<String>,
     /// Present for keyword search hits.  A creator directory already has this owner.
     pub creator_display_name: Option<String>,
+    /// Stable identity observed in the accepted detail of this work, if present.
+    pub creator_external_id: Option<String>,
     /// The rank is a search-result fact, not inferred from table order.
     pub match_position: Option<i64>,
     pub published_at: Option<String>,
@@ -259,7 +261,11 @@ async fn read_catalog(
          ) \
          SELECT first_discovery.content_public_ref,first_discovery.content_external_id, \
                 CASE WHEN first_discovery.title_state='KNOWN' THEN first_discovery.title END AS discovery_title, \
-                CASE WHEN first_discovery.creator_state='KNOWN' THEN first_discovery.creator_display_name END AS creator_display_name, \
+                COALESCE( \
+                    CASE WHEN detail.creator_display_name_state='KNOWN' THEN NULLIF(btrim(detail.creator_display_name),'') END, \
+                    CASE WHEN first_discovery.creator_state='KNOWN' THEN NULLIF(btrim(first_discovery.creator_display_name),'') END \
+                ) AS creator_display_name, \
+                NULLIF(btrim(detail.author_external_id),'') AS creator_external_id, \
                 first_discovery.result_position::bigint AS result_position, \
                 linggan_human_moment(first_discovery.published_at_source_text) \
                     AS published_at_source_text, \
@@ -280,7 +286,8 @@ async fn read_catalog(
          -- `qualified_detail.rs`，这里是它的行级孪生：为了取那一行的字段才把连接写在这里）；
          -- 标题只从这一行顺带取出，**不参与完成判断**。
          LEFT JOIN LATERAL ( \
-             SELECT candidate.content_public_ref,candidate.title,candidate.published_at,candidate.observed_at \
+             SELECT candidate.content_public_ref,candidate.title,candidate.published_at,candidate.observed_at, \
+                    candidate.creator_display_name,candidate.creator_display_name_state,candidate.author_external_id \
              FROM linggan_material_content_detail candidate \
              JOIN linggan_runtime_capture_package package USING(package_ref) \
              JOIN linggan_runtime_submission_receipt receipt USING(package_ref) \
@@ -321,6 +328,7 @@ async fn read_catalog(
                     content_external_id: row.get("content_external_id"),
                     title: detail_title.or_else(|| row.get("discovery_title")),
                     creator_display_name: row.get("creator_display_name"),
+                    creator_external_id: row.get("creator_external_id"),
                     match_position: row.get("result_position"),
                     published_at: row
                         .get::<Option<String>, _>("detail_published_at")

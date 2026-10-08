@@ -74,6 +74,7 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发，并于 2026-10-02 
 | [design/changes/ci-auto-004-ui-change-manifest.md](design/changes/ci-auto-004-ui-change-manifest.md) | 历史实施记录 | 既有 UI 状态证据；新用户路径由 COMMENT-RESEARCH-RESET-001 重新定义 |
 | [data-contracts/comment-research-automation.md](data-contracts/comment-research-automation.md) | 历史基线 | 保留自动清洗、权限、版本与调用账本基础；旧问题/向量/变化合同不再规定未来实现 |
 | [plans/active/target-inspector-performance-001.md](plans/active/target-inspector-performance-001.md) | 活跃计划 | Issue #158 目标列表、统一状态投影、检查器与作品表现实施合同 |
+| [plans/active/keyword-author-evidence-001.md](plans/active/keyword-author-evidence-001.md) | 活跃计划；Issue #369 隔离候选 | 关键词命中作品作者归属、主页链接观察与头像媒体证据边界，含 UI 变更清单和验收矩阵 |
 | [plans/active/target-deletion-author-attribution-001.md](plans/active/target-deletion-author-attribution-001.md) | 活跃计划 | Issue #214 安全撤回观察目标、独立作者归属 projection 与本机发布边界 |
 | [design/changes/target-deletion-author-attribution-001-ui-change-manifest.md](design/changes/target-deletion-author-attribution-001-ui-change-manifest.md) | 活跃计划 | Issue #214 的 Targets 行级停止/恢复、删除确认、保留事实与回执清单 |
 | [design/changes/target-inspector-performance-001-ui-change-manifest.md](design/changes/target-inspector-performance-001-ui-change-manifest.md) | 权威当前 | 目标检查器的信息架构、LIDS 与状态诚实性变更清单 |

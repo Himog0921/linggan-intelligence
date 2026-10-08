@@ -481,6 +481,19 @@ function readDetailText(root, selectors = []) {
   return '';
 }
 
+function observedXhsProfileLink(href, pageUrl) {
+  try {
+    const url = new URL(String(href || ''), pageUrl);
+    const match = url.pathname.match(/^\/user\/profile\/([A-Za-z0-9_-]+)\/?$/);
+    if (url.protocol !== 'https:' || url.hostname !== 'www.xiaohongshu.com'
+      || url.username || url.password || !match) return null;
+    url.hash = '';
+    return { authorId: match[1], profileUrl: url.href };
+  } catch {
+    return null;
+  }
+}
+
 export function readXhsNoteDetailFromDom(wd = window, { expectedNoteId = '' } = {}) {
   const doc = wd?.document;
   const root = doc?.querySelector?.('.note-detail-mask, .note-container, [class*="note-detail"]');
@@ -504,7 +517,7 @@ export function readXhsNoteDetailFromDom(wd = window, { expectedNoteId = '' } = 
   const authorProfileHref = String(root.querySelector?.(
     '.author-container a[href*="/user/profile/"], .author-wrapper > a[href*="/user/profile/"]',
   )?.getAttribute?.('href') || '');
-  const authorId = authorProfileHref.match(/\/user\/profile\/([^/?#]+)/)?.[1] || '';
+  const authorProfile = observedXhsProfileLink(authorProfileHref, wd?.location?.href || '');
   if (!title && !desc && imageList.length === 0 && !authorName) return null;
 
   return {
@@ -515,7 +528,7 @@ export function readXhsNoteDetailFromDom(wd = window, { expectedNoteId = '' } = 
     imageList,
     user: {
       nickname: authorName,
-      ...(authorId ? { userId: authorId } : {}),
+      ...(authorProfile ? { userId: authorProfile.authorId, profileUrl: authorProfile.profileUrl } : {}),
       ...(authorAvatar ? { avatar: authorAvatar } : {}),
     },
     // DOM fallback intentionally leaves metrics unknown. It must not manufacture zero values.
@@ -535,6 +548,8 @@ export function enrichXhsNoteDetailFromDom(note = {}, domNote = null) {
   const domImages = Array.isArray(domNote.imageList) ? domNote.imageList : [];
   const user = note.user && typeof note.user === 'object' ? note.user : {};
   const domUser = domNote.user && typeof domNote.user === 'object' ? domNote.user : {};
+  const authorId = String(user.userId || domUser.userId || '').trim();
+  const observedProfileUrl = domUser.userId === authorId ? domUser.profileUrl : '';
   const structuredAvatar = user.avatar;
   const structuredHasAvatar = typeof structuredAvatar === 'string'
     && structuredAvatar.trim().length > 0;
@@ -547,6 +562,7 @@ export function enrichXhsNoteDetailFromDom(note = {}, domNote = null) {
       ...(!String(user.userId || '').trim() && domUser.userId ? { userId: domUser.userId } : {}),
       ...(!String(user.nickname || '').trim() && domUser.nickname ? { nickname: domUser.nickname } : {}),
       ...(!structuredHasAvatar && domUser.avatar ? { avatar: domUser.avatar } : {}),
+      ...(observedProfileUrl ? { profileUrl: observedProfileUrl } : {}),
     },
   };
 }
@@ -695,6 +711,10 @@ export async function collectNote(wd = window, options = {}) {
     authorEntityId: note.user?.userId ? `xhs_${note.user.userId}` : '',
     authorName: note.user?.nickname || '',
     authorAvatar: note.user?.avatar || '',
+    authorProfileUrl: (() => {
+      const profile = observedXhsProfileLink(note.user?.profileUrl, currentUrl);
+      return profile?.authorId === String(note.user?.userId || '').trim() ? profile.profileUrl : '';
+    })(),
     ...publishedAtEvidence,
     collectedAt,
     updatedAt: collectedAt,
