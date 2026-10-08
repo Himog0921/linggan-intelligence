@@ -1,7 +1,8 @@
 //! Read-only media enrichment for the work-level material projection.
 
 use serde_json::Value;
-use sqlx::{AssertSqlSafe, Postgres, Row, Transaction};
+use sqlx::{AssertSqlSafe, Postgres, Row, Transaction, postgres::PgRow};
+use std::collections::HashMap;
 use uuid::Uuid;
 
 // A standard XHS detail Attempt may carry the work media, one author avatar and up to 30
@@ -599,6 +600,20 @@ pub(crate) async fn read_derivatives(
     content_ref: Uuid,
     as_of: &str,
 ) -> Result<(Vec<Value>, Value, &'static str, &'static str, bool), sqlx::Error> {
+    let mut projections = read_derivatives_batch(tx, &[content_ref], as_of).await?;
+    Ok(projections.remove(&content_ref).unwrap_or_else(|| project_derivative_rows(Vec::new())))
+}
+
+/// One owner for detail and multi-work consumers. Each work keeps the detail reader's
+/// 256 + 1 row boundary and the same disposition, retirement, and OCR qualification.
+pub(crate) async fn read_derivatives_batch(
+    tx: &mut Transaction<'_, Postgres>,
+    content_refs: &[Uuid],
+    as_of: &str,
+) -> Result<HashMap<Uuid, (Vec<Value>, Value, &'static str, &'static str, bool)>, sqlx::Error> {
+    if content_refs.is_empty() {
+        return Ok(HashMap::new());
+    }
     let ocr_retirement_schema_ready: bool =
         sqlx::query_scalar("SELECT to_regclass('linggan_media_ocr_retirement') IS NOT NULL")
             .fetch_one(&mut **tx)
@@ -614,30 +629,56 @@ pub(crate) async fn read_derivatives(
     } else {
         "LEFT JOIN LATERAL (SELECT NULL::uuid AS layout_ref,NULL::text AS state,NULL::text AS decision_source,NULL::text AS cover_headline,NULL::text AS image_substantive_text) layering ON true"
     };
-    let mut derivative_rows = sqlx::query(AssertSqlSafe(format!(
-        "SELECT job.job_ref,job.slot_key,job.processor_kind,job.processor_version,job.input_scope, \
+    let derivative_rows = sqlx::query(AssertSqlSafe(format!(
+        "WITH restricted_disposition AS MATERIALIZED ( \
+             SELECT slot_key,blob_sha256,derivative_ref \
+             FROM linggan_current_material_media_disposition \
+             WHERE state='WITHDRAWN_OR_RESTRICTED' \
+         ), restricted_slots AS (SELECT DISTINCT slot_key FROM restricted_disposition WHERE slot_key IS NOT NULL), \
+         restricted_blobs AS (SELECT DISTINCT blob_sha256 FROM restricted_disposition WHERE blob_sha256 IS NOT NULL), \
+         restricted_derivatives AS (SELECT DISTINCT derivative_ref FROM restricted_disposition WHERE derivative_ref IS NOT NULL), \
+         requested_slots AS ( \
+             SELECT DISTINCT origin.content_public_ref,origin.slot_key \
+             FROM linggan_material_media_origin origin \
+             WHERE origin.content_public_ref=ANY($1::uuid[]) \
+         ), derivative_rows AS ( \
+         SELECT requested_slots.content_public_ref,job.job_ref,job.slot_key,job.processor_kind,job.processor_version,job.input_scope, \
              event.state,event.reason,derivative.derivative_ref,derivative.derivative_kind,derivative.storage_key, \
              derived.display_text,derived.language_state,derived.language_tag, \
              layering.layout_ref AS ocr_layout_ref,layering.state AS ocr_layering_state,layering.decision_source AS ocr_decision_source,layering.cover_headline,layering.image_substantive_text, \
-             disposition.restricted AS disposition_restricted,(retired.retired_job_ref IS NOT NULL) AS retired,count(*) OVER() AS total_count \
-         FROM linggan_media_processing_job job JOIN linggan_media_slot slot USING (slot_key) \
+             (restricted_slot.slot_key IS NOT NULL OR restricted_blob.blob_sha256 IS NOT NULL OR restricted_derivative.derivative_ref IS NOT NULL) AS disposition_restricted, \
+             (retired.retired_job_ref IS NOT NULL) AS retired, \
+             count(*) OVER(PARTITION BY requested_slots.content_public_ref) AS total_count, \
+             row_number() OVER(PARTITION BY requested_slots.content_public_ref ORDER BY job.created_at,job.job_ref,derivative.derivative_ref) AS row_ordinal \
+         FROM requested_slots JOIN linggan_media_processing_job job USING(slot_key) JOIN linggan_media_slot slot USING (slot_key) \
          LEFT JOIN LATERAL (SELECT state,reason FROM linggan_media_processing_job_event event WHERE event.job_ref=job.job_ref AND occurred_at <= $2::timestamptz ORDER BY occurred_at DESC LIMIT 1) event ON true \
          LEFT JOIN linggan_media_derivative derivative ON derivative.job_ref=job.job_ref AND derivative.created_at <= $2::timestamptz \
          LEFT JOIN linggan_material_derived_text derived ON derived.derivative_ref=derivative.derivative_ref AND derived.created_at <= $2::timestamptz \
-         LEFT JOIN LATERAL (SELECT bool_or(disposition.state='WITHDRAWN_OR_RESTRICTED') AS restricted \
-             FROM linggan_current_material_media_disposition disposition \
-             WHERE (disposition.derivative_ref=derivative.derivative_ref OR disposition.blob_sha256=job.blob_sha256 OR disposition.slot_key=job.slot_key)) disposition ON true \
+         LEFT JOIN restricted_slots restricted_slot ON restricted_slot.slot_key=job.slot_key \
+         LEFT JOIN restricted_blobs restricted_blob ON restricted_blob.blob_sha256=job.blob_sha256 \
+         LEFT JOIN restricted_derivatives restricted_derivative ON restricted_derivative.derivative_ref=derivative.derivative_ref \
          {retirement_join} \
          {layering_join} \
-         WHERE EXISTS (SELECT 1 FROM linggan_material_media_origin origin \
-                       WHERE origin.slot_key=job.slot_key AND origin.content_public_ref=$1) \
-           AND job.created_at <= $2::timestamptz ORDER BY job.created_at LIMIT $3"
+         WHERE job.created_at <= $2::timestamptz \
+         ) SELECT * FROM derivative_rows WHERE row_ordinal <= $3 \
+         ORDER BY content_public_ref,row_ordinal"
     )))
-    .bind(content_ref)
+    .bind(content_refs)
     .bind(as_of)
     .bind(i64::try_from(DETAIL_DERIVATIVE_LIMIT + 1).expect("detail derivative limit is bounded"))
     .fetch_all(&mut **tx)
     .await?;
+    let mut grouped: HashMap<Uuid, Vec<PgRow>> = HashMap::new();
+    for row in derivative_rows {
+        grouped.entry(row.get("content_public_ref")).or_default().push(row);
+    }
+    Ok(grouped
+        .into_iter()
+        .map(|(content_ref, rows)| (content_ref, project_derivative_rows(rows)))
+        .collect())
+}
+
+fn project_derivative_rows(mut derivative_rows: Vec<PgRow>) -> (Vec<Value>, Value, &'static str, &'static str, bool) {
     let total = derivative_rows
         .first()
         .map_or(0_i64, |row| row.get("total_count"));
@@ -723,7 +764,7 @@ pub(crate) async fn read_derivatives(
                 .is_some_and(|text| !text.trim().is_empty());
         derivatives.push(serde_json::json!({"jobRef":row.get::<Uuid,_>("job_ref"),"slotKey":row.get::<Option<String>,_>("slot_key"),"kind":row.get::<Option<String>,_>("derivative_kind"),"state":state,"displayText":if restricted || retired {None}else{row.get::<Option<String>,_>("display_text")},"languageState":row.get::<Option<String>,_>("language_state"),"languageTag":if restricted || retired {None}else{row.get::<Option<String>,_>("language_tag")},"dispositionState":if retired{"OCR_RETIRED"}else if restricted{"WITHDRAWN_OR_RESTRICTED"}else{"UNKNOWN"},"processorVersion":row.get::<String,_>("processor_version"),"sourceScope":row.get::<String,_>("input_scope"),"sourceLocation":source_location,"reason":reason,"ocrLayering":if retired {Value::Null}else if let Some(layering_state)=layering_state {serde_json::json!({"layoutRef":row.get::<Option<Uuid>,_>("ocr_layout_ref"),"state":layering_state,"decisionSource":row.get::<Option<String>,_>("ocr_decision_source"),"coverHeadline":row.get::<Option<String>,_>("cover_headline"),"imageSubstantiveText":if clean_corpus_eligible {row.get::<Option<String>,_>("image_substantive_text")} else {None::<String>},"cleanCorpusEligible":clean_corpus_eligible})}else{Value::Null}}));
     }
-    Ok((
+    (
         derivatives,
         serde_json::json!({
             "total":total,"returned":derivative_rows.len(),"truncated":truncated,
@@ -732,7 +773,7 @@ pub(crate) async fn read_derivatives(
         ocr_state,
         asr_state,
         any_restricted,
-    ))
+    )
 }
 
 fn aggregate_bytes_state(

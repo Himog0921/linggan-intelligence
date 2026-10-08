@@ -2,7 +2,7 @@
 
 > 状态: 一次性报告
 > 最后核对: 2026-10-08
-> 适用范围: codex/creator-discovery-001 的语料与创作者模块候选实现
+> 适用范围: CREATOR-DISCOVERY-001 候选验证、授权发布和性能收口
 > 事实来源: 当前分支代码、隔离 PostgreSQL、合成 Pi adapter、HTTP 与独立代码审查
 > 冲突时以谁为准: 用户最新授权、当前代码/运行与可复现测试；本报告不授予部署或真实调用权限
 
@@ -12,7 +12,7 @@
 
 页面 `/corpus/creators` 从当前领域的材料用途读取作品、稳定作者和来源分析；通过现有语料路径读代表作与完整命中集合。迁移新增用途策略、作品/作者派生结果与有界租约状态，并统一作者归属的共享 owner。具体实现由 GPT-6 Sol subagent 执行；主代理负责范围、架构和集成审查，另有独立 Sol reviewer。
 
-## 验证账本
+## 初次候选验证账本
 
 单元、合成数据和本地候选运行都不能代替共享环境部署或 Mog 验收。临时日志按产物登记规则保存在 `/tmp/creator-discovery-*.log`，不提交业务数据或构建产物。
 
@@ -69,3 +69,28 @@ Mog 仍需在可访问的前端验收真实目录、筛选、依据、返回和�
 Mog 随后授权合并 main 与刷新3000。#368 已合并为 `b182ba83`，实际发布前额外执行 `scripts/test-local-001-discovery-postgres.sh`。它暴露此前定向证明未覆盖的两个来源强度消费者：生命周期把主页推得作者计为详情确认，语料 collection context 把它计为 MATCHED。修复从唯一归属 owner 透传 attribution_source；详情确认与目录关联继续分责，不改公共 JSON 或0115字节。原失败断言保持，生命周期补充合格目录作品点反例。
 
 另外两个 control-only 裁剪测试夹具误加0115但不具备模型依赖，已移除这两处无关 include；完整 material/API fixtures 仍覆盖迁移。最终项目入口 `scripts/test-local-001-discovery-postgres.sh` 已完整通过：26次Rust测试调用累计283项通过、Node 3项通过，零失败；worker默认轮忽略的5项在后续数据库轮全部执行通过。关键生命周期5/5、采集控制21/21及运行时15/15、派发37/37、API39/39。日志 `/tmp/creator-discovery-release-local001-final3.log`，退出0且数据库、容器、卷清理已核验。脚本依据原有边界明确排除两条要求 `P1_BROWSER_PROOF=1` 的独立浏览器用例，这两项不计为通过。
+
+
+## 0115 授权迁移与本机发布（2026-10-08）
+
+本节取代上表中 main、共享 migration、3000 及浏览器访问限制的历史状态；隔离测试和真实模型边界保持。Mog 已在当前对话明确授权提交推送合并及刷新3000，另明确授权0115迁移和必要备份。
+
+- #368 与 #370 已合并，部署目标 `54cccc3dd238124378dcaff31b58b8a57719a918`。加密备份96620304字节，权限0600；完整解密流及69684条归档目录校验通过，未落地明文。
+- 0115 已应用；台账 checksum 与源文件 `b935e46868c90819235981749a680ff1a5ae9eb0d5ba69cb9d51e5521c4aed7c` 一致。原模型配置、研究策略、Run控制和调用计数核对不变；创作者policy/job均为0，未启用来源分析。
+- canonical `runtime-main` 的 API 16703、worker 16709、media worker 16716 已分别核验cwd/可执行文件；health为ready，数据库READY。它们是本次点时PID，不承诺后续不变。
+- 浏览器3000可访问；考研自习目录1位作者、24篇作品，点击待判断24进入精确语料，再返回同领域创作者。截图为系统临时目录的 `creator-discovery-release-page.jpg`。
+- ADHD领域1657篇作品请求超过120秒未返回；不能把小领域成功当作大领域验收通过。性能修复在同一交付包继续，结果后续登记。
+
+私有备份与发布回执：`database/backups/creator-discovery-0115-20261008T145542Z/release-receipt.json`（已按生成物登记忽略，不入Git）。真实模型质量、平台采集和Mog业务验收仍未验证。
+
+
+## 大领域读取性能修复验证
+
+原实现对每篇派生候选分别查询；本次由 `material_media_read` 统一按批读取，在批内复用当前撤回集合，每篇独立计数和截断。创作者列表每100篇一批，仍对全领域集合计算统计和指纹。相同创建时间新增 `job_ref`／`derivative_ref` 稳定并列序；原先未定义并列顺序，现在单篇与批量共用这一规则。
+
+- 隔离 PG `creator_discovery_postgres` 最终3/3通过，日志 `/tmp/creator-discovery-batch-proof5.log`。固定预期验证非空 OCR、ASR、三键撤回、OCR退役、未来job、重复origin去重、每篇256+1与稳定并列序；数据容器、数据库和卷已清理。
+- 3107候选使用业务库的只读事务连接，不启动worker；读取1658篇作品、953位作者。首页/第二页/末页返回50/50/3行，耗时1.214/1.066/1.033秒，作者键不重叠、统计一致。摘要回执 `/tmp/creator-discovery-performance-candidate.json` 不含作者身份或作品正文。此为有界点时测量，不是长期P95承诺；原超时盘点后系统新增1篇，不能伪称数据快照完全相同。任务专用3107 PID27120已核验并停止。
+- 独立 GPT-6 Sol reviewer 对冻结差异、共享调用点和最终PG日志复审，未发现已确认P1/P2；主代理核对撤回三键join与原bool_or语义、全量集合及分页，结论一致。API build和diff检查通过。
+- `cargo fmt --check --package linggan-evidence` 因既有未改文件格式差异未通过；未格式化无关源码。实际编译与数据库证明单独记录，不将该检查报为通过。
+
+- 性能修复最终完整 `scripts/test-local-001-discovery-postgres.sh` 退出0：Rust283、Node3通过，零失败，隔离数据库/容器/卷清理已核验（`/tmp/creator-discovery-performance-local001.log`）。两条独立P1浏览器用例按原入口边界排除，未计为通过；新增媒体资格测试另为3/3。项目治理检查通过。

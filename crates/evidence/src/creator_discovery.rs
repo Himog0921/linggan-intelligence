@@ -226,7 +226,24 @@ pub(crate) async fn load_in(
     let derived_refs: std::collections::HashSet<_> = derived_refs.into_iter().collect();
     let broad_refs:Vec<Uuid>=sqlx::query_scalar("SELECT DISTINCT finding.content_public_ref FROM linggan_material_discovery_finding finding JOIN linggan_runtime_capture_package package USING(package_ref) WHERE finding.content_public_ref=ANY($1) AND package.package_kind='profile_discovery' AND package.accepted_at<=$2::timestamptz AND EXISTS(SELECT 1 FROM collection_work_order_lease_task lt JOIN collection_work_order_lease lease USING(lease_ref) JOIN collection_work_order_domain_usage usage USING(work_order_ref) WHERE lt.task_id=package.task_id AND usage.domain_ref=$3)").bind(&refs).bind(&as_of).bind(q.domain).fetch_all(&mut **tx).await?;
     let mut works = Vec::new();
-    for c in currents.into_iter().filter(|c| c.platform == q.platform) {
+    let mut current_iter = currents.into_iter().filter(|c| c.platform == q.platform);
+    loop {
+        let batch: Vec<_> = current_iter.by_ref().take(100).collect();
+        if batch.is_empty() {
+            break;
+        }
+        let derivative_candidates: Vec<_> = batch
+            .iter()
+            .filter(|c| derived_refs.contains(&c.public_ref))
+            .map(|c| c.public_ref)
+            .collect();
+        let mut derivatives_by_work = crate::material_media_read::read_derivatives_batch(
+            tx,
+            &derivative_candidates,
+            &as_of,
+        )
+        .await?;
+        for c in batch {
         let mut fragments: Vec<_> = [
             fragment(
                 c.public_ref,
@@ -251,9 +268,7 @@ pub(crate) async fn load_in(
             c.title.as_deref().unwrap_or(""),
             c.body_text.as_deref().unwrap_or("")
         );
-        if derived_refs.contains(&c.public_ref) {
-            let (derivatives, _, _, _, _) =
-                crate::material_media_read::read_derivatives(tx, c.public_ref, &as_of).await?;
+        if let Some((derivatives, _, _, _, _)) = derivatives_by_work.remove(&c.public_ref) {
             for d in derivatives {
                 if d["dispositionState"] == "WITHDRAWN_OR_RESTRICTED"
                     || d["dispositionState"] == "OCR_RETIRED"
@@ -394,6 +409,7 @@ pub(crate) async fn load_in(
             author_analysis: json!({}),
             acquisition_kind: if broad_refs.contains(&c.public_ref){"profile_discovery"}else{"limited_domain_sample"}.into(),
         });
+        }
     }
     let author_keys: std::collections::HashSet<_> = works.iter().filter_map(|w|w.author_external_id.clone()).collect();
     for author in author_keys {
