@@ -63,8 +63,8 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发，并于 2026-10-02 
 | [design/changes/ocr-content-layering-001-ui-change-manifest.md](design/changes/ocr-content-layering-001-ui-change-manifest.md) | 活跃计划；Issue #296 | Evidence Library 的封面 OCR 标记、标题来源与图片文字可追溯读取边界 |
 | [design/changes/comment-research-reset-001-ui-change-manifest.md](design/changes/comment-research-reset-001-ui-change-manifest.md) | 权威当前；交付分支实现 | 旧评论页面/API/自动计划替代与用户体验验证范围 |
 | [design/changes/comment-study-rebuild-001-ui-change-manifest.md](design/changes/comment-study-rebuild-001-ui-change-manifest.md) | 权威当前；受保护工作树 | 评论研究 clean rebuild 的 API/UI 替换范围、状态词典、依赖与验收矩阵 |
-| [design/changes/comment-study-release-polish-358-ui-change-manifest.md](design/changes/comment-study-release-polish-358-ui-change-manifest.md) | 活跃计划；Issue #358 | 已部署评论研究的跨领域标题、Run 状态码和无领域入口修正范围 |
-| [design/acceptance/comment-study-release-polish-358-acceptance.md](design/acceptance/comment-study-release-polish-358-acceptance.md) | 一次性报告；候选脚本 | 真实 API 只读预览浏览器验收；尚未合并部署或取得新真实 Run |
+| [design/changes/comment-study-release-polish-358-ui-change-manifest.md](design/changes/comment-study-release-polish-358-ui-change-manifest.md) | 活跃计划；Issue #358 | 评论研究页面状态修正及窄屏表格候选的范围 |
+| [design/acceptance/comment-study-release-polish-358-acceptance.md](design/acceptance/comment-study-release-polish-358-acceptance.md) | 一次性报告；分阶段验收 | 页面状态已随 #361 发布；窄屏 CSS 候选只读验收，尚未合并部署 |
 | [design/acceptance/comment-study-layout-001-acceptance.md](design/acceptance/comment-study-layout-001-acceptance.md) | 一次性报告；候选布局 | Issue #295 初始研究输入面的表格布局、实际 100 篇候选读取与浏览器验证；不代表合并或 3000 刷新 |
 | [design/acceptance/comment-study-tabs-001-acceptance.md](design/acceptance/comment-study-tabs-001-acceptance.md) | 一次性报告；候选实现 | Issue #295 补齐概览/评论目标/待归并/用户问题/运行记录 5 个复核 Tab，含原声受限时如实降级；不代表合并或 3000 刷新 |
 | [design/changes/comment-research-problem-resolution-v2-ui-change-manifest.md](design/changes/comment-research-problem-resolution-v2-ui-change-manifest.md) | 权威当前 | Issue #285 的 confirmed/deferred 问题读取、受限原声边界与只读详情 |
