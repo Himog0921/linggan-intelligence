@@ -2,6 +2,16 @@
   'use strict';
 
   const API_ROOT = '/api/local/work-resources';
+  const creatorBacklink = new URLSearchParams(window.location.search);
+  if (creatorBacklink.has('creatorKey') || creatorBacklink.has('creatorFilter')) {
+    const banner = document.createElement('p');
+    banner.textContent = '当前为创作者作品筛选集合 · ';
+    const back = document.createElement('a');
+    const destination = creatorBacklink.get('returnTo');
+    back.href = destination && destination.startsWith('/corpus/creators?') ? destination : '/corpus/creators?domain=' + encodeURIComponent(creatorBacklink.get('domain') || '');
+    back.textContent = '返回创作者'; banner.append(back);
+    document.querySelector('main')?.prepend(banner);
+  }
   // 当前领域由服务端随页面下发。地址里的 domain 可能无效，有效性判定服务端已经做过一次，
   // 前端再判一次就会出现两处规则，早晚不一致。
   const CORPUS_DOMAIN = {
@@ -345,6 +355,7 @@
       const value = selectByName.get(name).value;
       if (value) params.set(name, value);
     });
+    ['creatorKey', 'creatorFilter', 'returnTo'].forEach(name => { const value = new URLSearchParams(window.location.search).get(name); if (value) params.set(name, value); });
     if (cursor) params.set('cursor', cursor);
     return params;
   }

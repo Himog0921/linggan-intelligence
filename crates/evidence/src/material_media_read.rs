@@ -594,7 +594,7 @@ fn media_blob_contract(
     })
 }
 
-async fn read_derivatives(
+pub(crate) async fn read_derivatives(
     tx: &mut Transaction<'_, Postgres>,
     content_ref: Uuid,
     as_of: &str,

@@ -41,6 +41,11 @@ pub async fn read_material_library(
     database: &Database,
     query: &EvidenceQuery,
 ) -> Result<MaterialLibraryProjection, MaterialReadError> {
+    if let Some(refs)=query.public_refs() {
+        if refs.is_empty() || refs.len()>100 || query.cursor().is_some() || query.creator_scope().is_some() || query.domain_ref().is_none() || query.text().is_some_and(|text| !text.trim().is_empty()) || query.published_window().is_some() {return Err(MaterialReadError::InvalidCursor);}
+        if query.sort() != EvidenceQuerySort::LatestDiscovery {return Err(MaterialReadError::UnsupportedSort);}
+        return read_resource_batch(database,query,refs).await;
+    }
     if query.sort() != EvidenceQuerySort::LatestDiscovery {
         return Err(MaterialReadError::UnsupportedSort);
     }
@@ -116,6 +121,22 @@ async fn read_latest_material_page(
     let mut scan_content_external_id = cursor
         .as_ref()
         .map(|cursor| cursor.last_content_external_id.clone());
+    let creator_refs = if let Some(scope) = query.creator_scope() {
+        if Some(scope.domain) != query.domain_ref() || scope.validate().is_err() {
+            return Err(MaterialReadError::InvalidCursor);
+        }
+        let data = crate::creator_discovery::load_in(&mut tx, scope)
+            .await
+            .map_err(|error| match error {
+                crate::creator_discovery::DiscoveryError::Database(e) => {
+                    MaterialReadError::Database(e)
+                }
+                _ => MaterialReadError::InvalidCursor,
+            })?;
+        Some(crate::creator_discovery::matching_work_refs(&data,scope))
+    } else {
+        None
+    };
     let mut items = Vec::with_capacity(MATERIAL_PAGE_SIZE + 1);
     let mut scanned_count = 0;
     let mut scan_limited = false;
@@ -132,6 +153,7 @@ async fn read_latest_material_page(
                 media_kind: query.media_kind().map(|kind| kind.as_purpose()),
                 one_public_ref: None,
                 domain_ref: query.domain_ref(),
+                allowed_refs: creator_refs.as_deref(),
             },
         )
         .await?;
@@ -687,7 +709,9 @@ pub async fn material_projection_schema_is_ready(database: &Database) -> Result<
                 AND to_regclass('linggan_material_lane_observation') IS NOT NULL \
                 AND to_regclass('linggan_material_media_origin') IS NOT NULL \
                 AND to_regclass('linggan_material_discovery_finding') IS NOT NULL \
-                AND to_regclass('linggan_material_comment_current') IS NOT NULL",
+                AND to_regclass('linggan_material_comment_current') IS NOT NULL \
+                AND to_regclass('linggan_creator_discovery_policy') IS NOT NULL \
+                AND to_regproc('linggan_material_content_author_at') IS NOT NULL",
     )
     .fetch_one(database.pool())
     .await?;
@@ -705,6 +729,8 @@ pub async fn material_projection_schema_is_ready(database: &Database) -> Result<
                             WHERE migration_id = '0030_comment_image_media') \
                 AND EXISTS (SELECT 1 FROM linggan_local_schema_migration \
                             WHERE migration_id = '0032_author_profile_avatar_media') \
+                AND EXISTS (SELECT 1 FROM linggan_local_schema_migration \
+                            WHERE migration_id = '0115_creator_discovery') \
                 AND EXISTS (SELECT 1 FROM information_schema.columns \
                             WHERE table_schema=current_schema() \
                               AND table_name='linggan_material_content_detail' \
@@ -889,4 +915,18 @@ fn current_detail_provenance(current: &WorkResourceCurrent) -> (Vec<Uuid>, Vec<V
         include(source.package_ref, source.record_ordinal);
     }
     (package_refs, record_refs)
+}
+
+/// Finite explicit-ref display hydration shares the standard field/media owners and domain gate.
+async fn read_resource_batch(database:&Database,query:&EvidenceQuery,refs:&[uuid::Uuid])->Result<MaterialLibraryProjection,MaterialReadError>{
+ let mut tx=database.pool().begin().await?;
+ sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY").execute(&mut *tx).await?;
+ let as_of:String=sqlx::query_scalar("SELECT scope_001_now()::text").fetch_one(&mut *tx).await?;
+ let allowed:Vec<uuid::Uuid>=sqlx::query_scalar("SELECT DISTINCT content_public_ref FROM linggan_material_domain_usage WHERE domain_ref=$1 AND content_public_ref=ANY($2)").bind(query.domain_ref()).bind(refs).fetch_all(&mut *tx).await?;
+ let currents=crate::work_resource_current::read_work_resource_currents(&mut tx,&allowed,&as_of).await?;
+ let mut items=Vec::new();
+ for current in currents {let mut item=material_item(&current,None);enrich_discovery_material(&mut tx,&mut item,&as_of).await?;material_social_read::enrich(&mut tx,&mut item,None,&as_of).await?;enrich_media_material(&mut tx,&mut item,&as_of).await?;if item_matches_filters(&item,query){items.push(item);}}
+ items.sort_by(|a,b| b.summary.last_observed_at.cmp(&a.summary.last_observed_at).then_with(|| a.identity.platform.cmp(&b.identity.platform)).then_with(|| a.identity.content_external_id.cmp(&b.identity.content_external_id)));
+ tx.commit().await?;
+ Ok(MaterialLibraryProjection{scanned_count:allowed.len(),items,query_scope:"accepted_typed_material_explicit_refs",as_of,cursor:None,truncated:false,scan_limited:false})
 }

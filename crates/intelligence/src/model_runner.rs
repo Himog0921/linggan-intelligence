@@ -55,6 +55,7 @@ pub struct ModelWorkerFairness {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ModelWorkLane {
     Semantic,
+    CreatorDiscovery,
     Resolution,
     Pair,
 }
@@ -85,12 +86,13 @@ fn pair_lane_progress(outcome: PairExecution, prepared: bool) -> LaneProgress {
 
 impl ModelWorkerFairness {
     fn next_lane(&mut self) -> ModelWorkLane {
-        let lane = match self.next_lane_index % 3 {
+        let lane = match self.next_lane_index % 4 {
             0 => ModelWorkLane::Semantic,
             1 => ModelWorkLane::Resolution,
-            _ => ModelWorkLane::Pair,
+            2 => ModelWorkLane::Pair,
+            _ => ModelWorkLane::CreatorDiscovery,
         };
-        self.next_lane_index = (self.next_lane_index + 1) % 3;
+        self.next_lane_index = (self.next_lane_index + 1) % 4;
         lane
     }
 }
@@ -106,16 +108,18 @@ mod tests {
     #[test]
     fn model_work_lanes_rotate_before_each_attempt() {
         let mut fairness = ModelWorkerFairness::default();
-        let actual: Vec<_> = (0..6).map(|_| fairness.next_lane()).collect();
+        let actual: Vec<_> = (0..8).map(|_| fairness.next_lane()).collect();
         assert_eq!(
             actual,
             vec![
                 ModelWorkLane::Semantic,
                 ModelWorkLane::Resolution,
                 ModelWorkLane::Pair,
+                ModelWorkLane::CreatorDiscovery,
                 ModelWorkLane::Semantic,
                 ModelWorkLane::Resolution,
                 ModelWorkLane::Pair,
+                ModelWorkLane::CreatorDiscovery,
             ]
         );
     }
@@ -225,9 +229,20 @@ pub async fn run_model_work_once_with_fairness(
         &mut made_progress,
     )?;
 
-    for _ in 0..3 {
+    for _ in 0..4 {
         let lane = fairness.next_lane();
         let progress = match lane {
+            ModelWorkLane::CreatorDiscovery => {
+                crate::creator_discovery_worker::run_once(database, store, adapter)
+                    .await
+                    .map(|worked| {
+                        if worked {
+                            LaneProgress::ProviderAttempt
+                        } else {
+                            LaneProgress::Idle
+                        }
+                    })
+            }
             ModelWorkLane::Semantic => {
                 run_semantic_lane_once(database, store, adapter, fairness).await
             }

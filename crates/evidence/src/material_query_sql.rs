@@ -42,15 +42,6 @@ latest_detail AS (
   WHERE package.accepted_at <= $2::timestamptz AND detail.creator_display_name_state='KNOWN'
   ORDER BY detail.content_public_ref,detail.observed_at::timestamptz DESC,
            detail.created_at DESC,detail.package_ref DESC,detail.material_ref DESC
-), latest_detail_author AS (
-  SELECT DISTINCT ON (detail.content_public_ref)
-    detail.content_public_ref,detail.author_external_id,detail.material_ref,
-    detail.package_ref,detail.observed_at,detail.created_at
-  FROM linggan_material_content_detail detail
-  JOIN linggan_runtime_capture_package package USING(package_ref)
-  WHERE package.accepted_at <= $2::timestamptz AND detail.author_external_id IS NOT NULL
-  ORDER BY detail.content_public_ref,detail.observed_at::timestamptz DESC,
-           detail.created_at DESC,detail.package_ref DESC,detail.material_ref DESC
 ), latest_detail_published_at AS (
   SELECT DISTINCT ON (detail.content_public_ref)
     detail.content_public_ref,detail.published_at,detail.published_at_source_text,
@@ -194,10 +185,7 @@ latest_detail AS (
     CASE WHEN detail_published_at.published_at IS NOT NULL
          THEN detail_published_at.created_at
          ELSE COALESCE(detail_published_text.created_at,discovery.created_at) END::text AS published_source_recorded_at,
-    detail_author.author_external_id,
-    detail_author.package_ref AS author_source_package_ref,
-    detail_author.observed_at AS author_source_observed_at,
-    detail_author.created_at::text AS author_source_recorded_at,
+    attribution.author_external_id,
     discovery.cover_source_url,
     COALESCE(discovery.cover_source_state,'UNKNOWN') AS cover_source_state,
     latest_like.like_count,CASE WHEN latest_like.like_count IS NULL THEN 'UNKNOWN' ELSE 'KNOWN' END AS like_count_state,
@@ -217,7 +205,7 @@ latest_detail AS (
   LEFT JOIN latest_detail_title detail_title ON detail_title.content_public_ref=content.public_ref
   LEFT JOIN latest_detail_body detail_body ON detail_body.content_public_ref=content.public_ref
   LEFT JOIN latest_detail_creator detail_creator ON detail_creator.content_public_ref=content.public_ref
-  LEFT JOIN latest_detail_author detail_author ON detail_author.content_public_ref=content.public_ref
+  LEFT JOIN LATERAL linggan_material_content_author_at(content.public_ref,$2::timestamptz) attribution ON true
   LEFT JOIN latest_detail_published_at detail_published_at ON detail_published_at.content_public_ref=content.public_ref
   LEFT JOIN latest_detail_published_text detail_published_text ON detail_published_text.content_public_ref=content.public_ref
   LEFT JOIN latest_discovery discovery ON discovery.content_public_ref=content.public_ref
@@ -270,6 +258,7 @@ AND ($9::uuid IS NULL OR EXISTS (
   SELECT 1 FROM linggan_material_domain_usage domain_usage
   WHERE domain_usage.content_public_ref=current.public_ref
     AND domain_usage.domain_ref=$9))
+AND ($10::uuid[] IS NULL OR current.public_ref=ANY($10))
 AND current.observed_at IS NOT NULL
 AND ($6::text IS NULL
   OR ($6='detail' AND current.detail_material_ref IS NOT NULL)

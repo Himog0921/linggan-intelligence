@@ -9,6 +9,7 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+linggan-contracts = { path = "../contracts" }
 linggan-evidence = { path = "../evidence" }
 linggan-storage-postgres = { path = "../storage-postgres" }
 serde = { version = "1", features = ["derive"] }
@@ -22,5 +23,4 @@ tokio = { workspace = true, features = ["time", "process", "io-util", "fs", "syn
 uuid = { workspace = true, features = ["serde", "v4"] }
 
 [dev-dependencies]
-linggan-contracts = { path = "../contracts" }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

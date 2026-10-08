@@ -47,3 +47,10 @@
 - 临时实验输出使用操作系统临时目录；若结果需要成为项目证据，应转写为 `docs/audits/` 的可读报告，敏感原件仍留在忽略目录或外部安全存储。
 - `PLUGIN-MIGRATION-001` 的 Browser Producer release 只包含 extension code、manifest 和由 Linggan runtime token source 打包的视觉 token；不得包含 Cookie、账号、真实页面材料、媒体字节、旧内容工作台运行依赖或运行日志。该发行物可被浏览器加载，不等于已经获得平台访问或实际采集授权。
 - `plugins/linggan-intelligence-browser/` 是当前 Linggan-owned 唯一可发布源。发行物不得包含 Cookie、账号、真实页面材料、媒体字节、旧工作台 host/endpoint/fallback 或运行日志；旧 `plugin-retrofit-*` 与历史副本只可只读对照，不得生成当前 release。
+
+## CREATOR-DISCOVERY-001 隔离验证产物
+
+- 位置：系统临时目录中的 `creator-discovery-*.log`、`creator-discovery-http-check.py`、GitHub body Markdown、隔离 API ledger SQL 与 worker 屏障临时目录（用例自行清理）、本任务 `linggan-creator-discovery-proof-*` 一次性 Docker container（无宿主业务 volume），以及 Cargo 既有忽略目录。
+- 来源：`creator_discovery_postgres`、`creator_discovery_worker_postgres` 与专用本地 API 进程；输入均为合成数据。测试源码是维护的测试输入，不是生成产物。
+- Git：不提交日志、数据库、截图或构建产物；可复现命令与结果转写至 `docs/audits/creator-discovery-001-acceptance.md`。
+- 清理：确认测试和本任务 API 进程结束后停止本任务容器，`--rm` 删除其临时数据；不得清理其他容器、业务库、工作树或共享 runtime。

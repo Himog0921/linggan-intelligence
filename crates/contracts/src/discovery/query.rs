@@ -40,6 +40,10 @@ impl AcquisitionSpec {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EvidenceQuery {
     text: Option<String>,
+    #[serde(default)]
+    creator_scope: Option<crate::creator_discovery::CreatorScope>,
+    #[serde(default)]
+    public_refs: Option<Vec<Uuid>>,
     scope: EvidenceQueryScope,
     #[serde(rename = "window")]
     time_view: EvidenceTimeView,
@@ -61,6 +65,10 @@ pub struct EvidenceQuery {
 }
 
 impl EvidenceQuery {
+    pub fn public_refs(&self)->Option<&[Uuid]>{self.public_refs.as_deref()}
+    pub fn creator_scope(&self) -> Option<&crate::creator_discovery::CreatorScope> {
+        self.creator_scope.as_ref()
+    }
     pub fn text(&self) -> Option<&str> {
         self.text.as_deref()
     }
