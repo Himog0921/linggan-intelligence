@@ -526,21 +526,24 @@ def run_synthetic() -> None:
             page.locator("#run-context-character-budget").fill("3500")
             page.locator("#token-budget").fill("4096")
             page.locator("#preview-run").click()
-            page.get_by_text("预计创建 2 条目标", exact=False).wait_for()
+            page.get_by_text("预计冻结 2 条", exact=False).wait_for()
 
             page.locator("#start-run").click()
-            page.get_by_role("button", name="停止本次运行").wait_for()
+            page.locator(".study-current-run-actions").get_by_role("button", name="停止本次运行").wait_for()
             page.get_by_text("查看本次输入、原因与处理建议", exact=True).click()
             page.get_by_text(MODEL_REASON, exact=True).wait_for()
             page.get_by_text("本条是回复，但本次运行没有冻结父评论", exact=True).wait_for()
             page.get_by_text("这次 Run 漏带了父评论；修正输入组装后可从源 Run 显式补跑。", exact=True).wait_for()
+            page.locator(".study-run-history > summary").click()
             page.get_by_role("button", name="加载更早运行").click()
-            page.locator(".study-review-table tbody tr").filter(has_text=OLDER_RUN_REF[:8]).wait_for()
-            page.get_by_role("button", name="停止本次运行").click()
+            page.locator(".study-run-history > summary").filter(has_text="已加载 2 次").wait_for()
+            page.locator(".study-run-history > summary").click()
+            page.locator(f'.study-run-history [data-run-open="{OLDER_RUN_REF}"]').wait_for()
+            page.locator(".study-current-run-actions").get_by_role("button", name="停止本次运行").click()
             page.get_by_text(f"Run {RUN_REF} · 当前未终态 2 条 · 目标总数 2 条", exact=True).wait_for()
             page.locator("#study-stop-confirm").click()
             page.get_by_text("已按服务端回执停止本次运行。", exact=True).wait_for()
-            page.locator(".study-review-table tbody tr").filter(has_text=RUN_REF[:8]).get_by_role("button", name="补跑未完成").click()
+            page.locator(f'.study-current-run-actions [data-run-recover="{RUN_REF}"]').click()
             page.get_by_text(f"源 Run {RUN_REF}。", exact=False).wait_for()
             page.locator("#study-recover-confirm").click()
             page.get_by_text(f"已按服务端回执创建补跑 Run {RECOVERY_RUN_REF}", exact=False).wait_for()
@@ -648,7 +651,7 @@ def run_synthetic() -> None:
             assert selected_status.startswith("已选 2/3000 条评论"), selected_status
             page.locator("#study-selected-comments").click()
             page.locator("#preview-run").click()
-            page.get_by_text("预计创建 2 条目标", exact=False).wait_for()
+            page.get_by_text("预计冻结 2 条", exact=False).wait_for()
             assert requests["preview"]["scope"] == {"kind": "comments", "commentKeys": [
                 {"workRef": WORK_REF, "commentExternalId": "comment-1"},
                 {"workRef": WORK_REF, "commentExternalId": "comment-3"}]}
@@ -661,7 +664,9 @@ def run_synthetic() -> None:
             page.goto(f"{base_url}/corpus/comments?domain={DOMAIN_REF}&view=targets&runRef={RUN_REF}")
             page.locator("[data-target-ref]").first.wait_for()
             assert "view=runs" in page.url and "panel=targets" in page.url
+            page.locator(".study-run-summary summary").filter(has_text="查看其他归并状态").click()
             page.locator(".study-run-summary").get_by_text("新表达暂缓 1 条", exact=False).wait_for()
+            page.locator(".study-run-summary summary").filter(has_text="模型调用与用量").click()
             page.locator(".study-run-summary").get_by_text("请求 1 次", exact=False).wait_for()
             page.get_by_role("tab", name="调用记录").click()
             page.locator(f'[data-request-detail="{REQUEST_REF}"]').click()
@@ -690,6 +695,7 @@ def run_synthetic() -> None:
             page.go_back()
             page.locator(".study-problem-candidates .study-candidate-card").first.wait_for()
             page.goto(f"{base_url}/corpus/comments?domain={DOMAIN_REF}&view=runs&runRef={OLDER_RUN_REF}&panel=method")
+            page.locator(".study-run-summary summary").filter(has_text="模型调用与用量").click()
             page.locator(".study-run-summary").get_by_text("历史调用记录未记录", exact=False).wait_for()
             assert page.locator(".study-run-summary").get_by_text("请求 0 次", exact=False).count() == 0
             page.close()
@@ -903,7 +909,7 @@ def run_live_api(
         page.locator("#run-context-character-budget").fill("3500")
         page.locator("#token-budget").fill("4096")
         page.locator("#preview-run").click()
-        page.get_by_text("预计创建 2 条目标", exact=False).wait_for()
+        page.get_by_text("预计冻结 2 条", exact=False).wait_for()
 
         page.locator("#start-run").click()
         page.get_by_role("button", name="停止本次运行").wait_for()

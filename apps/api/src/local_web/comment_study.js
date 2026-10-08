@@ -795,7 +795,9 @@ async function renderSelectedRunPanel() {
   }
   const tabs = Object.entries({targets:'目标评论',signals:'研究信号',requests:'调用记录',method:'本次方法'})
     .map(([key,text])=>`<button type="button" role="tab" data-run-panel="${key}" aria-selected="${selectedRunPanel===key}">${text}</button>`).join('');
-  return `<section class="study-run-detail"><header><h2 tabindex="-1">本次研究 · ${esc(runDetail?.method?.name||'方法未记录')}</h2><p>${esc(studyTime(runDetail?.createdAt))} · <span class="study-run-id">运行编号 ${esc(selectedRunRef)}</span></p></header>${runDetail?renderRunSummary(runDetail):'<p class="study-restricted">本次运行摘要暂时读取失败，以下分页内容仍可查看。</p>'}<nav class="study-run-panels" role="tablist" aria-label="本次运行内容">${tabs}</nav><h3 class="study-run-panel-title">${esc(labels[selectedRunPanel])}</h3>${pageStatus}${content}${more}</section>`;
+  const selectedRun=allRuns.find(run=>run.runRef===selectedRunRef);
+  const controls=selectedRun?runControlActions(selectedRun):'';
+  return `<section class="study-run-detail"><header><h2 tabindex="-1">本次研究 · ${esc(runDetail?.method?.name||'方法未记录')}</h2><p>${esc(studyTime(runDetail?.createdAt))} · <span class="study-run-id">运行编号 ${esc(selectedRunRef)}</span></p></header>${controls?`<div class="study-link-actions study-current-run-actions" aria-label="本次运行操作">${controls}</div>`:''}${runDetail?renderRunSummary(runDetail):'<p class="study-restricted">本次运行摘要暂时读取失败，以下分页内容仍可查看。</p>'}<nav class="study-run-panels" role="tablist" aria-label="本次运行内容">${tabs}</nav><h3 class="study-run-panel-title">${esc(labels[selectedRunPanel])}</h3>${pageStatus}${content}${more}</section>`;
 }
 
 function renderRunSummary(run){
@@ -963,7 +965,7 @@ function renderProblemDetail(problem,evidence,revisionHistory,sourceDistribution
   return `<section class="study-problem-detail" aria-label="用户问题详情"><header><h2 tabindex="-1">${esc(problem.title||problem.definition||'定义当前不可读取')}</h2><button type="button" class="study-link" data-problem-close>返回问题列表</button></header><p class="study-signal-meta">${esc(label(problemStateLabel,problem.state)??problem.state)} · ${esc(problemSupportLabel[problem.supportState]||'支持状态未记录')}${revision} · 支持评论 ${Number(problem.supportCommentCount||0)} 条 · 独立作者 ${Number(problem.supportAuthorCount||0)} 位 · 作品 ${Number(problem.supportWorkCount||0)} 篇${problem.definitionCurrent===false?' · 当前定义依据已失效':''}</p>${definition}<section><h3>来源与时间分布</h3>${renderProblemDistribution(sourceDistribution)}</section>${revisions}<section><h3>原声与关联信号</h3><p class="study-run-page-status">当前显示 ${(evidence.evidence||[]).length} 条${next?'，还有后续内容':'，已到列表末尾'}</p><div id="study-problem-evidence">${list(evidence.evidence,renderProblemEvidence,'当前没有可显示的原声依据。')}</div>${next?`<button type="button" class="study-link" data-problem-evidence-more="${esc(next)}">加载更多原声</button>`:''}</section></section>`;
 }
 
-function runRow(run) {
+function runControlActions(run) {
   const canControl = run.selectionContract === 'comment-study.run-selection.v2'
     && !run.finishedAt && run.controlVersion != null
     && Number.isInteger(Number(run.controlVersion))
@@ -984,7 +986,12 @@ function runRow(run) {
   if (run.selectionContract === 'comment-study.run-selection.v2' && run.finishedAt && unfinished > 0) {
     actions.push(`<button type="button" class="study-link" data-run-recover="${esc(run.runRef)}">补跑未完成</button>`);
   }
-  actions.push(`<button type="button" class="study-link" data-run-open="${esc(run.runRef)}">${selectedRunRef === run.runRef ? '当前查看' : '查看结果'}</button>`);
+  return actions.join('');
+}
+
+function runRow(run) {
+  const controls=runControlActions(run);
+  const viewAction=`<button type="button" class="study-link" data-run-open="${esc(run.runRef)}">${selectedRunRef === run.runRef ? '当前查看' : '查看结果'}</button>`;
   const dispatchLabel = run.finishedAt && run.dispatchState==='enabled' ? '' : (dispatchStateLabel[run.dispatchState] || '派发状态未知');
   const dispatchReason = dispatchReasonLabel[run.dispatchReason];
   const originLabel = run.recoverySourceRunRef?'补跑未完成':({manual:'手动发起',scheduled:'定时发起'}[run.origin]||'来源未记录');
@@ -998,7 +1005,7 @@ function runRow(run) {
       <td>成功 ${count(run.succeededCount)} · 无信号 ${count(run.noSignalCount)}<p>等待语境 ${count(run.needsContextCount)} · 失败 ${count(run.failedCount)} · 处理中 ${count(run.pendingCount)}</p></td>
       <td>待归并 ${pendingResolution}<p>待比较 ${pendingPair}</p></td>
       <td>${esc(runStateLabel[run.state] || '运行状态未知')}${dispatchLabel||dispatchReason?`<p>${esc(dispatchLabel)}${dispatchReason ? `${dispatchLabel?' · ':''}${esc(dispatchReason)}` : ''}</p>`:''}</td>
-      <td><div class="study-run-actions">${actions.join('') || '—'}</div></td>
+      <td><div class="study-run-actions">${controls}${viewAction}</div></td>
     </tr>`;
 }
 async function renderRunsTab() {
