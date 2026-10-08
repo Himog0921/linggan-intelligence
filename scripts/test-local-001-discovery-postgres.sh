@@ -96,7 +96,7 @@ cargo test -p linggan-evidence --test scheduler_tick_postgres --locked -- --igno
 cargo test -p linggan-intelligence --test topic_workspace_postgres --locked -- --ignored
 # The live Comment Study browser proof belongs to the separate P1 harness, which explicitly
 # provides Playwright and P1_BROWSER_PROOF. Keep this LOCAL-001 pass focused on its API/DB proof.
-cargo test -p linggan-api --bin linggan-api --locked -- --ignored --skip browser_real_axum_postgres_previews_starts_and_stops_without_provider_dispatch
+cargo test -p linggan-api --bin linggan-api --locked -- --ignored --skip browser_real_axum_postgres_previews_starts_and_stops_without_provider_dispatch --skip browser_real_axum_postgres_traces_comment_run_signal_problem_evidence
 # worker 的启动/退出语义分两层：不需要数据库的那两条（缺地址必须失败、连不上不许装成空闲）
 # 默认就跑；第三条要一个没有迁移台账的真实库，跟着 `--ignored` 走。
 cargo test -p linggan-worker --test startup_contract --locked

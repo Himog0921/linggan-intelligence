@@ -171,7 +171,13 @@ async fn read_latest_material_page(
             scan_content_external_id = Some(row.content_external_id.clone());
             scanned_count += 1;
             let mut item = material_item(&row, text);
-            enrich_discovery_material(&mut tx, &mut item, &as_of).await?;
+            enrich_discovery_material(
+                &mut tx,
+                &mut item,
+                &as_of,
+                row.author_attribution_source.as_deref(),
+            )
+            .await?;
             material_social_read::enrich(&mut tx, &mut item, text, &as_of).await?;
             enrich_media_material(&mut tx, &mut item, &as_of).await?;
             if item_matches_filters(&item, query) {
@@ -265,6 +271,7 @@ pub(crate) async fn enrich_discovery_material(
     tx: &mut Transaction<'_, Postgres>,
     item: &mut MaterialLibraryItem,
     as_of: &str,
+    author_attribution_source: Option<&str>,
 ) -> Result<(), sqlx::Error> {
     let row=sqlx::query("SELECT finding.material_ref,finding.package_ref,finding.discovery_kind,finding.result_position,finding.observed_at,package.coverage,package.task_id,package.attempt_id,task.task_spec,receipt.receipt_ref FROM linggan_material_discovery_finding finding JOIN linggan_runtime_capture_package package USING(package_ref) JOIN linggan_runtime_task task ON task.task_id=package.task_id LEFT JOIN linggan_runtime_submission_receipt receipt ON receipt.package_ref=package.package_ref WHERE finding.content_public_ref=$1 AND package.accepted_at <= $2::timestamptz ORDER BY finding.observed_at::timestamptz DESC,finding.created_at DESC LIMIT 1")
         .bind(item.identity.public_ref).bind(as_of).fetch_optional(&mut **tx).await?;
@@ -348,7 +355,15 @@ pub(crate) async fn enrich_discovery_material(
             );
         }
     }
-    enrich_collection_context(tx, item, &kind, row.get("task_id"), row.get("task_spec")).await?;
+    enrich_collection_context(
+        tx,
+        item,
+        &kind,
+        row.get("task_id"),
+        row.get("task_spec"),
+        author_attribution_source,
+    )
+    .await?;
     Ok(())
 }
 
@@ -358,6 +373,7 @@ async fn enrich_collection_context(
     discovery_kind: &str,
     task_id: Uuid,
     task_spec: Value,
+    author_attribution_source: Option<&str>,
 ) -> Result<(), sqlx::Error> {
     let schema_ready: bool = sqlx::query_scalar(
         "SELECT to_regclass('collection_observation_target') IS NOT NULL \
@@ -422,18 +438,19 @@ async fn enrich_collection_context(
         "UNKNOWN".to_owned()
     };
     item.collection_context.target_display_name = target_display_name;
-    item.collection_context.author_identity_match_state =
-        match item.author_external_id.as_deref() {
-            Some(author_external_id)
-                if target_kind == "creator" && author_external_id == target_identity =>
-            {
-                "MATCHED"
-            }
-            Some(_) if target_kind == "creator" => "MISMATCH",
-            _ if target_kind == "creator" => "NOT_VERIFIED",
-            _ => "NOT_APPLICABLE",
+    item.collection_context.author_identity_match_state = match (
+        target_kind.as_str(),
+        author_attribution_source,
+        item.author_external_id.as_deref(),
+    ) {
+        ("creator", Some("content_detail"), Some(author)) if author == target_identity.as_str() => {
+            "MATCHED"
         }
-        .to_owned();
+        ("creator", Some("content_detail"), Some(_)) => "MISMATCH",
+        ("creator", _, _) => "NOT_VERIFIED",
+        _ => "NOT_APPLICABLE",
+    }
+    .to_owned();
     item.collection_context.work_order_ref = work_order_ref;
     if let Some(provenance) = item
         .inspector
@@ -925,7 +942,7 @@ async fn read_resource_batch(database:&Database,query:&EvidenceQuery,refs:&[uuid
  let allowed:Vec<uuid::Uuid>=sqlx::query_scalar("SELECT DISTINCT content_public_ref FROM linggan_material_domain_usage WHERE domain_ref=$1 AND content_public_ref=ANY($2)").bind(query.domain_ref()).bind(refs).fetch_all(&mut *tx).await?;
  let currents=crate::work_resource_current::read_work_resource_currents(&mut tx,&allowed,&as_of).await?;
  let mut items=Vec::new();
- for current in currents {let mut item=material_item(&current,None);enrich_discovery_material(&mut tx,&mut item,&as_of).await?;material_social_read::enrich(&mut tx,&mut item,None,&as_of).await?;enrich_media_material(&mut tx,&mut item,&as_of).await?;if item_matches_filters(&item,query){items.push(item);}}
+ for current in currents {let mut item=material_item(&current,None);enrich_discovery_material(&mut tx,&mut item,&as_of,current.author_attribution_source.as_deref()).await?;material_social_read::enrich(&mut tx,&mut item,None,&as_of).await?;enrich_media_material(&mut tx,&mut item,&as_of).await?;if item_matches_filters(&item,query){items.push(item);}}
  items.sort_by(|a,b| b.summary.last_observed_at.cmp(&a.summary.last_observed_at).then_with(|| a.identity.platform.cmp(&b.identity.platform)).then_with(|| a.identity.content_external_id.cmp(&b.identity.content_external_id)));
  tx.commit().await?;
  Ok(MaterialLibraryProjection{scanned_count:allowed.len(),items,query_scope:"accepted_typed_material_explicit_refs",as_of,cursor:None,truncated:false,scan_limited:false})

@@ -134,6 +134,7 @@ async fn creator_lifecycle_preserves_unknown_zero_and_exclusion_reasons() {
 
     for content_external_id in [
         "surface-not-verified",
+        "directory-qualified",
         "surface-mismatch",
         "relative-time",
         "metric-unknown",
@@ -161,7 +162,7 @@ async fn creator_lifecycle_preserves_unknown_zero_and_exclusion_reasons() {
     .fetch_all(database.pool())
     .await
     .unwrap();
-    assert_eq!(stored_profile_targets.len(), 5);
+    assert_eq!(stored_profile_targets.len(), 6);
     assert!(
         stored_profile_targets
             .iter()
@@ -175,7 +176,7 @@ async fn creator_lifecycle_preserves_unknown_zero_and_exclusion_reasons() {
     .fetch_one(database.pool())
     .await
     .unwrap();
-    assert_eq!(profile_finding_count, 5);
+    assert_eq!(profile_finding_count, 6);
     let target_surface_count: i64 = sqlx::query_scalar(
         "SELECT count(DISTINCT finding.content_public_ref) \
          FROM linggan_material_discovery_finding finding \
@@ -187,13 +188,25 @@ async fn creator_lifecycle_preserves_unknown_zero_and_exclusion_reasons() {
     .fetch_one(database.pool())
     .await
     .unwrap();
-    assert_eq!(target_surface_count, 5);
+    assert_eq!(target_surface_count, 6);
 
     submit_package(
         &database,
         "content_detail",
         serde_json::json!({"contentExternalId":"surface-mismatch"}),
         qualified_detail("surface-mismatch", "other-author", Some(5)),
+    )
+    .await;
+    let mut directory_detail = qualified_detail("directory-qualified", "author-truth", Some(11));
+    directory_detail["payload"]
+        .as_object_mut()
+        .unwrap()
+        .remove("authorId");
+    submit_package(
+        &database,
+        "content_detail",
+        serde_json::json!({"contentExternalId":"directory-qualified"}),
+        directory_detail,
     )
     .await;
     submit_package(
@@ -252,21 +265,31 @@ async fn creator_lifecycle_preserves_unknown_zero_and_exclusion_reasons() {
     .unwrap()
     .unwrap();
 
-    assert_eq!(projection.summary.linked_work_count, Some(5));
-    assert_eq!(projection.summary.linked_work_count_lower_bound, 5);
+    assert_eq!(projection.summary.linked_work_count, Some(6));
+    assert_eq!(projection.summary.linked_work_count_lower_bound, 6);
     assert_eq!(projection.summary.confirmed_author_work_count, 3);
-    assert_eq!(projection.summary.eligible_point_count, 1);
+    assert_eq!(projection.summary.eligible_point_count, 2);
     assert_eq!(projection.exclusions.author_not_verified, 0);
     assert_eq!(projection.exclusions.author_mismatch, 1);
     assert_eq!(projection.exclusions.published_at_not_qualified, 2);
     assert_eq!(projection.exclusions.metric_unknown, 1);
+    let zero_point = projection
+        .points
+        .iter()
+        .find(|point| point.metric_value == 0)
+        .expect("KNOWN zero is a real point");
     assert_eq!(
-        projection.points[0].metric_value, 0,
-        "KNOWN zero is a real point"
-    );
-    assert_eq!(
-        projection.points[0].association_state,
+        zero_point.association_state,
         CreatorLifecycleAssociation::AuthorConfirmed
+    );
+    let directory_point = projection
+        .points
+        .iter()
+        .find(|point| point.metric_value == 11)
+        .expect("the qualified directory-only work is a point");
+    assert_eq!(
+        directory_point.association_state,
+        CreatorLifecycleAssociation::DirectoryLinked
     );
 }
 
