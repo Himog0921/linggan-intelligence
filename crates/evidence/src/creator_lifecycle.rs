@@ -333,19 +333,29 @@ pub async fn read_creator_lifecycle(
             .get(&work_public_ref)
             .copied()
             .unwrap_or((false, false));
-        let association_state = match candidate.author_external_id.as_deref() {
-            None if surface_linked => CreatorLifecycleAssociation::DirectoryLinked,
-            None => {
+        let association_state = match (
+            candidate.author_external_id.as_deref(),
+            candidate.author_attribution_source.as_deref(),
+        ) {
+            (None, _) if surface_linked => CreatorLifecycleAssociation::DirectoryLinked,
+            (None, _) => {
                 exclusions.author_not_verified += 1;
                 continue;
             }
-            Some(author) if author != target.identity_key => {
+            (Some(author), _) if author != target.identity_key => {
                 exclusions.author_mismatch += 1;
                 continue;
             }
-            Some(_) => {
+            (Some(_), Some("content_detail")) => {
                 confirmed_author_work_count += 1;
                 CreatorLifecycleAssociation::AuthorConfirmed
+            }
+            (Some(_), Some("profile_discovery")) if surface_linked => {
+                CreatorLifecycleAssociation::DirectoryLinked
+            }
+            _ => {
+                exclusions.author_not_verified += 1;
+                continue;
             }
         };
         let metric_value = metric_value(

@@ -31,7 +31,13 @@ pub async fn read_material_detail(
         return Ok(None);
     };
     let mut item = material_item(&current, None);
-    enrich_discovery_material(&mut tx, &mut item, &as_of).await?;
+    enrich_discovery_material(
+        &mut tx,
+        &mut item,
+        &as_of,
+        current.author_attribution_source.as_deref(),
+    )
+    .await?;
     crate::material_social_read::enrich(&mut tx, &mut item, None, &as_of).await?;
     enrich_media_material(&mut tx, &mut item, &as_of).await?;
     // The timeline is a bounded presentation window. It deliberately takes the most recent

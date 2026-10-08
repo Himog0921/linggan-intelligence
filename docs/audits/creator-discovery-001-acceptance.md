@@ -63,3 +63,9 @@ worker 测试另需 `CREATOR_PROOF_NODE` 指向本机 Node 可执行文件；子
 迁移 0115 是新源码的共享作者归属与分析状态前置；代码提交、测试通过或 PR 不意味着已迁移或已部署。共享迁移、合并与更新本机 3000 需要针对最终版本明确授权。正式来源分析用途默认关闭，由用户明确选择模型与预算后才运行。
 
 Mog 仍需在可访问的前端验收真实目录、筛选、依据、返回和纳入观察的产品效果。真实模型效果只能由已授权的小范围真实调用另行证明。
+
+## 授权发布阶段的补充检查
+
+Mog 随后授权合并 main 与刷新3000。#368 已合并为 `b182ba83`，实际发布前额外执行 `scripts/test-local-001-discovery-postgres.sh`。它暴露此前定向证明未覆盖的两个来源强度消费者：生命周期把主页推得作者计为详情确认，语料 collection context 把它计为 MATCHED。修复从唯一归属 owner 透传 attribution_source；详情确认与目录关联继续分责，不改公共 JSON 或0115字节。原失败断言保持，生命周期补充合格目录作品点反例。
+
+另外两个 control-only 裁剪测试夹具误加0115但不具备模型依赖，已移除这两处无关 include；完整 material/API fixtures 仍覆盖迁移。最终项目入口 `scripts/test-local-001-discovery-postgres.sh` 已完整通过：26次Rust测试调用累计283项通过、Node 3项通过，零失败；worker默认轮忽略的5项在后续数据库轮全部执行通过。关键生命周期5/5、采集控制21/21及运行时15/15、派发37/37、API39/39。日志 `/tmp/creator-discovery-release-local001-final3.log`，退出0且数据库、容器、卷清理已核验。脚本依据原有边界明确排除两条要求 `P1_BROWSER_PROOF=1` 的独立浏览器用例，这两项不计为通过。

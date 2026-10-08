@@ -186,6 +186,7 @@ latest_detail AS (
          THEN detail_published_at.created_at
          ELSE COALESCE(detail_published_text.created_at,discovery.created_at) END::text AS published_source_recorded_at,
     attribution.author_external_id,
+    attribution.attribution_source AS author_attribution_source,
     discovery.cover_source_url,
     COALESCE(discovery.cover_source_state,'UNKNOWN') AS cover_source_state,
     latest_like.like_count,CASE WHEN latest_like.like_count IS NULL THEN 'UNKNOWN' ELSE 'KNOWN' END AS like_count_state,
