@@ -319,3 +319,6 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发，并于 2026-10-02 
 - [评论情报验收矩阵](design/acceptance/comment-intelligence-v1-acceptance.md)：一次性报告，84项逐条映射、实际自动证明和未验证层。
 - [评论情报 UI 变更清单](design/changes/comment-intelligence-v1-ui-change-manifest.md)：历史归档，四视角、范围、状态、交互与视觉验收边界。
 - [评论情报离线评测合同](audits/comment-intelligence-evaluation-contract.md)：历史归档；对应旧评测器已删除，不是 V1 质量门。
+
+- [CREATOR-DISCOVERY-001 执行规格](plans/active/creator-discovery-001.md)：活跃计划，当前对话派定的语料与创作者集成交付。
+- [CREATOR-DISCOVERY-001 实施验收](audits/creator-discovery-001-acceptance.md)：隔离验证、独立审查、浏览器限制及发布边界。

@@ -9,6 +9,7 @@ use linggan_contracts::{
 };
 use linggan_storage_postgres::Database;
 use serde_json::Value;
+use sqlx::Row;
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -1168,4 +1169,64 @@ pub async fn delete_observation_target(
         .await?;
     tx.commit().await?;
     Ok(TargetDeletionOutcome::Deleted)
+}
+
+/// Creator discovery registration: atomic, manual, identity-only, and role-preserving on replay.
+/// Existing monitoring configuration and lifecycle are never changed here.
+pub async fn register_discovered_creator(
+    database: &Database,
+    domain: Uuid,
+    creator_key: &str,
+    usage_role: &str,
+) -> Result<serde_json::Value, crate::creator_discovery::DiscoveryError> {
+    use crate::creator_discovery::{DiscoveryError, load_in};
+    if !matches!(usage_role,"primary"|"reference") {
+        return Err(DiscoveryError::Invalid("invalid_usage_role"));
+    }
+    let (platform, author) = linggan_contracts::creator_discovery::decode_creator_key(creator_key)
+        .ok_or(DiscoveryError::Invalid("invalid_creator_key"))?;
+    let identity = TargetIdentity::creator(&platform, &author)
+        .map_err(|_| DiscoveryError::Invalid("unsupported_creator_identity"))?;
+    let mut tx = database.pool().begin().await?;
+    let active:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM observation_domain WHERE domain_ref=$1 AND status='active' FOR SHARE)").bind(domain).fetch_one(&mut *tx).await?;
+    if !active {
+        return Err(DiscoveryError::Invalid("domain_paused_or_missing"));
+    }
+    let mut scope: linggan_contracts::creator_discovery::CreatorScope =
+        serde_json::from_value(serde_json::json!({"domain":domain}))
+            .map_err(|_| DiscoveryError::Invalid("invalid_domain"))?;
+    let mut data = load_in(&mut tx, &scope).await?;
+    if !data.observation_lookup_available {
+        return Err(DiscoveryError::Invalid("observation_lookup_unavailable"));
+    }
+    scope.usage_role = "reference".into();
+    let reference_data=load_in(&mut tx, &scope).await?;
+    if !reference_data.observation_lookup_available {
+        return Err(DiscoveryError::Invalid("observation_lookup_unavailable"));
+    }
+    data.works.extend(reference_data.works);
+    let work = data
+        .works
+        .iter()
+        .find(|w| w.creator_key.as_deref() == Some(creator_key))
+        .ok_or(DiscoveryError::NotFound)?;
+    let proposed = Uuid::new_v4();
+    let inserted:Option<Uuid>=sqlx::query_scalar("INSERT INTO collection_observation_target(target_ref,platform,target_kind,identity_key,display_name,source) VALUES($1,$2,'creator',$3,$4,'manual') ON CONFLICT(platform,target_kind,identity_key) DO NOTHING RETURNING target_ref").bind(proposed).bind(identity.platform()).bind(identity.key()).bind(&work.display_name).fetch_optional(&mut *tx).await?;
+    let target=sqlx::query("SELECT target_ref,lifecycle_state,monitoring_enabled FROM collection_observation_target WHERE platform=$1 AND target_kind='creator' AND identity_key=$2 FOR UPDATE").bind(identity.platform()).bind(identity.key()).fetch_one(&mut *tx).await?;
+    let target_ref: Uuid = target.get("target_ref");
+    let existing_role:Option<String>=sqlx::query_scalar("SELECT role FROM observation_domain_target WHERE domain_ref=$1 AND target_ref=$2 FOR UPDATE").bind(domain).bind(target_ref).fetch_optional(&mut *tx).await?;
+    if existing_role.is_none() && usage_role=="primary" {
+        let other_primary:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM observation_domain_target relation WHERE relation.target_ref=$1 AND relation.domain_ref<>$2 AND relation.role='primary')").bind(target_ref).bind(domain).fetch_one(&mut *tx).await?;
+        if other_primary {
+            return Err(DiscoveryError::Invalid("active_primary_domain_conflict"));
+        }
+    }
+    if inserted.is_some() {
+        sqlx::query("INSERT INTO collection_observation_target_transition(transition_ref,target_ref,from_state,to_state,actor,reason_code) VALUES($1,$2,NULL,'pending_decision','person','creator_discovery_registered')").bind(Uuid::new_v4()).bind(target_ref).execute(&mut *tx).await?;
+    }
+    let added=sqlx::query("INSERT INTO observation_domain_target(domain_ref,target_ref,role) VALUES($1,$2,$3) ON CONFLICT(domain_ref,target_ref) DO NOTHING").bind(domain).bind(target_ref).bind(usage_role).execute(&mut *tx).await?.rows_affected();
+    tx.commit().await?;
+    Ok(
+        serde_json::json!({"targetRef":target_ref,"created":inserted.is_some(),"relationshipAdded":added==1,"inCurrentDomain":true,"usageRole":existing_role.unwrap_or_else(||usage_role.into()),"lifecycleState":target.get::<String,_>("lifecycle_state"),"monitoringEnabled":target.get::<bool,_>("monitoring_enabled"),"collectionRequested":false}),
+    )
 }

@@ -208,6 +208,7 @@ pub fn global_header(
 /// 再发生一次。
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum CorpusPage {
+    Creators,
     Evidence,
     Comments,
 }
@@ -236,8 +237,8 @@ const CORPUS_ENTRIES: [CorpusEntry; 3] = [
     CorpusEntry {
         ordinal: "03",
         label: "创作者",
-        href: None,
-        page: None,
+        href: Some("/corpus/creators"),
+        page: Some(CorpusPage::Creators),
     },
 ];
 

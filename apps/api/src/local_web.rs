@@ -7,6 +7,7 @@ mod comment_study;
 mod creator_lifecycle_api;
 #[cfg(test)]
 mod creator_lifecycle_tests;
+mod creators;
 #[cfg(test)]
 mod evidence_page;
 #[cfg(test)]
@@ -324,6 +325,7 @@ fn router(state: LocalWebState) -> Router {
         .merge(material_api_routes())
         .merge(collection_api_routes())
         .merge(creator_lifecycle_api::routes())
+        .merge(creators::routes())
         .merge(topic_workspace::routes())
         .merge(comment_study::routes())
         .merge(model_settings::routes())
@@ -4472,7 +4474,11 @@ fn monitor_rule_redirect(
         push_rule_query(
             &mut params,
             "rule_creator_follow_details",
-            Some(if form.creator_follow_details.is_some() { "1" } else { "0" }),
+            Some(if form.creator_follow_details.is_some() {
+                "1"
+            } else {
+                "0"
+            }),
         );
         push_rule_query(
             &mut params,
@@ -5347,7 +5353,9 @@ fn log_creator_archive_failure(
         RequestLeaseError::Lease(LeaseError::Database(error)) => (
             creator_archive_database_kind(error),
             error.as_database_error().and_then(|value| value.code()),
-            error.as_database_error().and_then(|value| value.constraint()),
+            error
+                .as_database_error()
+                .and_then(|value| value.constraint()),
         ),
         RequestLeaseError::Lease(LeaseError::SchemaUnavailable) => {
             ("lease_schema_unavailable", None, None)

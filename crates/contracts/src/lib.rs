@@ -5,6 +5,7 @@ mod admission;
 mod canonical;
 mod capture;
 mod collection;
+pub mod creator_discovery;
 mod discovery;
 mod local_producer;
 mod producer_runtime;

@@ -15,8 +15,14 @@ use linggan_storage_postgres::Database;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 pub(super) struct EvidenceLibraryParams {
+    #[serde(rename = "creatorKey")]
+    pub(super) creator_key: Option<String>,
+    #[serde(rename = "creatorFilter")]
+    pub(super) creator_filter: Option<String>,
+    #[serde(rename="publicRefs")]
+    pub(super) public_refs: Option<String>,
     pub(super) q: Option<String>,
     pub(super) window: Option<String>,
     pub(super) sort: Option<String>,
@@ -319,6 +325,28 @@ pub(super) async fn reobservation_status_json(
 }
 
 pub(super) fn local_query(params: &EvidenceLibraryParams) -> Result<EvidenceQuery, ()> {
+    let public_refs=match &params.public_refs {Some(raw)=>{let ids=raw.split(',').map(uuid::Uuid::parse_str).collect::<Result<Vec<_>,_>>().map_err(|_|())?;if ids.is_empty()||ids.len()>100||params.cursor.is_some()||params.creator_filter.is_some()||params.creator_key.is_some()||params.domain.is_none(){return Err(());}Some(ids)},None=>None};
+    let creator_scope = match &params.creator_filter {
+        Some(value) => {
+            let mut scope: linggan_contracts::creator_discovery::CreatorScope =
+                serde_json::from_str(value).map_err(|_| ())?;
+            if Some(scope.domain) != params.domain {
+                return Err(());
+            }
+            scope.creator_key = params.creator_key.clone().or(scope.creator_key);
+            scope.validate().map_err(|_| ())?;
+            Some(scope)
+        }
+        None if params.creator_key.is_some() => {
+            let scope: linggan_contracts::creator_discovery::CreatorScope = serde_json::from_value(
+                json!({"domain":params.domain,"creatorKey":params.creator_key}),
+            )
+            .map_err(|_| ())?;
+            scope.validate().map_err(|_| ())?;
+            Some(scope)
+        }
+        None => None,
+    };
     let window = match params
         .window
         .as_deref()
@@ -335,6 +363,8 @@ pub(super) fn local_query(params: &EvidenceLibraryParams) -> Result<EvidenceQuer
         _ => return Err(()),
     };
     serde_json::from_value(json!({
+        "creatorScope": creator_scope,
+        "publicRefs": public_refs,
         "text": params.q,
         "scope": "all_accepted_material",
         "window": window,

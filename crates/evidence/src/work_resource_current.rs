@@ -71,6 +71,7 @@ pub(crate) struct WorkResourceCurrentPageQuery<'a> {
     pub media_kind: Option<&'a str>,
     pub one_public_ref: Option<Uuid>,
     pub domain_ref: Option<Uuid>,
+    pub allowed_refs: Option<&'a [Uuid]>,
 }
 
 pub(crate) async fn read_work_resource_current_page(
@@ -94,6 +95,7 @@ pub(crate) async fn read_work_resource_current_page(
         .bind(query.media_kind)
         .bind(query.one_public_ref)
         .bind(query.domain_ref)
+        .bind(query.allowed_refs)
         .fetch_all(&mut **tx)
         .await
         .map(|rows| rows.into_iter().map(map_current).collect())
