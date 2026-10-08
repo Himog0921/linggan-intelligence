@@ -8,6 +8,9 @@ WITH selected_runs AS MATERIALIZED (
            run.as_of, run.state, run.created_at, run.finished_at,
            to_char(run.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_created_at,
            to_jsonb(run)->'selection_manifest'->>'contract' AS selection_contract,
+           CASE WHEN jsonb_typeof(to_jsonb(run)->'selection_manifest'->'requestedWorkRefs') = 'array'
+                THEN jsonb_array_length(to_jsonb(run)->'selection_manifest'->'requestedWorkRefs')
+                ELSE NULL END AS requested_work_count,
            to_jsonb(run)->'selection_manifest'->>'recoverySourceRunRef' AS recovery_source_run_ref,
            COALESCE(to_jsonb(run)->>'dispatch_state','stopped') AS dispatch_state,
            to_jsonb(run)->>'dispatch_reason' AS dispatch_reason,
@@ -32,6 +35,7 @@ SELECT run.run_ref,
        run.cursor_created_at,
        run.finished_at::text AS finished_at,
        run.selection_contract,
+       run.requested_work_count,
        run.recovery_source_run_ref,
        run.dispatch_state,
        run.dispatch_reason,

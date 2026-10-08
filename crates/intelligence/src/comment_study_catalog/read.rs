@@ -46,6 +46,7 @@ pub struct CommentCatalogQuery {
     pub voice_role: CatalogVoiceRole,
     #[serde(default)]
     pub study_state: CatalogStudyState,
+    pub signal_kind: Option<String>,
     pub cursor: Option<String>,
     pub limit: Option<i64>,
 }
@@ -60,6 +61,7 @@ pub struct CatalogSummaryQuery {
     pub voice_role: CatalogVoiceRole,
     #[serde(default)]
     pub study_state: CatalogStudyState,
+    pub signal_kind: Option<String>,
 }
 
 struct Scope {
@@ -67,6 +69,7 @@ struct Scope {
     hash: String,
     voice: String,
     study: String,
+    signal_kind: Option<String>,
     limit: i64,
 }
 
@@ -81,6 +84,20 @@ impl CommentCatalogQuery {
         }
         if self.work_ref.is_some_and(|value| value.is_nil())
             || self.q.as_deref().is_some_and(|value| value.contains('\0'))
+            || self.signal_kind.as_deref().is_some_and(|kind| {
+                !matches!(
+                    kind,
+                    "problem"
+                        | "need"
+                        | "belief"
+                        | "emotion"
+                        | "experience"
+                        | "solution"
+                        | "quote"
+                        | "context"
+                        | "question"
+                )
+            })
         {
             return Err(StudyCatalogError::InvalidQuery);
         }
@@ -97,6 +114,7 @@ impl CommentCatalogQuery {
         let hash = cursor::scope_hash(&json!({
             "domain": self.domain, "q": query, "workRef": self.work_ref,
             "voiceRole": voice, "studyState": study, "cleanerVersion": CLEANER_VERSION,
+            "signalKind": self.signal_kind,
             "sort": "received_desc_work_asc_comment_C_asc.v1"
         }))?;
         Ok(Scope {
@@ -110,6 +128,7 @@ impl CommentCatalogQuery {
                 .as_str()
                 .ok_or(StudyCatalogError::InvalidQuery)?
                 .to_owned(),
+            signal_kind: self.signal_kind.clone(),
             limit,
         })
     }
@@ -134,6 +153,7 @@ pub async fn read_catalog_summary(
         work_ref: query.work_ref,
         voice_role: query.voice_role,
         study_state: query.study_state,
+        signal_kind: query.signal_kind.clone(),
         cursor: None,
         limit: Some(50),
     };
@@ -175,6 +195,7 @@ async fn read_catalog(
         .bind(last.map(|value| value.work_ref))
         .bind(last.map(|value| value.comment_external_id.as_str()))
         .bind(if summary_only { 0 } else { scope.limit + 1 })
+        .bind(scope.signal_kind.as_deref())
         .fetch_one(&mut *tx)
         .await?;
     if !summary_only {
@@ -250,6 +271,7 @@ pub(super) async fn read_one_projection(
         .bind(Option::<Uuid>::None)
         .bind(Option::<&str>::None)
         .bind(1_i64)
+        .bind(Option::<&str>::None)
         .fetch_one(&mut **tx)
         .await?;
     if projection.get("currentSource").is_none_or(Value::is_null) {
@@ -384,5 +406,18 @@ mod tests {
             }))
             .is_err()
         );
+    }
+
+    #[test]
+    fn signal_kind_filter_is_closed_and_changes_cursor_scope() {
+        let mut query = query();
+        let unfiltered = query.validate().unwrap().hash;
+        query.signal_kind = Some("need".to_owned());
+        assert_ne!(query.validate().unwrap().hash, unfiltered);
+        query.signal_kind = Some("high_resonance".to_owned());
+        assert!(matches!(
+            query.validate(),
+            Err(StudyCatalogError::InvalidQuery)
+        ));
     }
 }

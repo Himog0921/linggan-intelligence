@@ -27,7 +27,7 @@
           </div>
         </header>
         <div id="study-run-picker" class="study-run-picker" hidden>
-          <label>查看的研究运行<select id="study-run-select"></select></label>
+          <label>切换研究运行<select id="study-run-select"></select></label>
         </div>
         <section id="study-tab-result" aria-live="polite" aria-busy="true"><p class="study-empty">正在读取评论研究…</p></section>
       </main>
@@ -39,6 +39,30 @@
       <div><p class="study-label">受控启动</p><h2 id="study-dialog-title">发起一次新研究</h2></div>
       <button type="button" id="study-dialog-close">关闭</button>
     </header>
+    <section class="study-workspace" aria-labelledby="work-picker-title">
+      <header class="study-workspace-header">
+        <div><p class="study-label">研究输入</p><h3 id="work-picker-title">选择要研究的作品</h3></div>
+        <div class="study-workspace-tools">
+          <label class="study-filter">搜索作品目录<input id="work-filter" type="search" placeholder="按作品标题搜索" autocomplete="off"></label>
+          <label class="study-reference-toggle"><input id="include-reference-works" type="checkbox" disabled>查看参考作品</label>
+          <span id="selected-count" class="selection-count" role="status">已选择 0 篇</span>
+        </div>
+      </header>
+      <p id="reference-source-preview" class="study-table-status" role="status" hidden></p>
+      <p id="work-filter-status" class="study-table-status" role="status">正在读取可研究作品…</p>
+      <div class="study-table-wrap">
+        <table class="study-table" aria-labelledby="work-picker-title" aria-describedby="work-filter-status">
+          <caption class="v7-sr-only">可选择进入本次评论研究的作品及其领域角色</caption>
+          <thead><tr><th scope="col"><input id="select-visible-works" type="checkbox" aria-label="选择当前页的作品"></th><th scope="col">作品</th><th scope="col">作品来源</th><th scope="col">可研究评论</th></tr></thead>
+          <tbody id="works" aria-live="polite"><tr><td colspan="4">正在读取作品…</td></tr></tbody>
+        </table>
+      </div>
+      <nav class="study-pagination" aria-label="作品目录翻页">
+        <button id="work-prev" type="button" disabled>上一页</button>
+        <span id="work-page-status" role="status">第 1 页</span>
+        <button id="work-next" type="button" disabled>下一页</button>
+      </nav>
+    </section>
     <section class="study-command" aria-labelledby="setup-title">
       <h3 id="setup-title" class="v7-sr-only">研究策略</h3>
       <div class="study-policy-current">
@@ -62,18 +86,9 @@
         <div class="study-policy-actions"><button id="save-policy" type="submit" disabled>保存新版本</button><button id="cancel-policy-edit" type="button">取消</button></div>
       </form>
       <p id="policy-status" class="study-dialog-note" role="status"></p>
-      <p id="source-preview" class="study-dialog-note" role="status">正在核对评论资格…</p>
+      <details class="study-catalog-context"><summary>查看领域评论与来源资格</summary><p id="source-preview" class="study-dialog-note" role="status">正在核对评论资格…</p></details>
     </section>
-    <section class="study-workspace" aria-labelledby="work-picker-title">
-      <header class="study-workspace-header">
-        <div><p class="study-label">研究输入</p><h3 id="work-picker-title">选择要研究的作品</h3></div>
-        <div class="study-workspace-tools">
-          <label class="study-filter">搜索作品目录<input id="work-filter" type="search" placeholder="按作品标题搜索" autocomplete="off"></label>
-          <label class="study-reference-toggle"><input id="include-reference-works" type="checkbox" disabled>显式纳入 reference 作品</label>
-          <span id="selected-count" class="selection-count" role="status">已选择 0 篇</span>
-        </div>
-      </header>
-      <p id="reference-source-preview" class="study-table-status" role="status" hidden></p>
+    <section class="study-run-confirm" aria-label="预览并开始研究">
       <div class="study-run-settings">
         <label>启动模式<select id="study-mode"><option value="new_only">只研究新评论</option><option value="input_changed">只重研输入已变化的评论</option><option value="retry_failed">重试失败评论</option><option value="reanalyse">重新分析所选评论</option></select></label>
         <label>本次最多评论数<input id="run-comment-budget" type="number" min="1" max="3000" value="100"></label>
@@ -83,22 +98,9 @@
         <button id="preview-run" type="button" disabled>预览本次选择</button>
       </div>
       <p id="selection-preview" class="study-table-status" role="status"></p>
-      <p id="work-filter-status" class="study-table-status" role="status">正在读取可研究作品…</p>
-      <div class="study-table-wrap">
-        <table class="study-table" aria-labelledby="work-picker-title" aria-describedby="work-filter-status">
-          <caption class="v7-sr-only">可选择进入本次评论研究的作品及其领域角色</caption>
-          <thead><tr><th scope="col"><input id="select-visible-works" type="checkbox" aria-label="选择当前筛选结果中的作品"></th><th scope="col">作品</th><th scope="col">领域角色</th><th scope="col">可研究评论</th></tr></thead>
-          <tbody id="works" aria-live="polite"><tr><td colspan="4">正在读取作品…</td></tr></tbody>
-        </table>
-      </div>
-      <nav class="study-pagination" aria-label="作品目录翻页">
-        <button id="work-prev" type="button" disabled>上一页</button>
-        <span id="work-page-status" role="status">第 1 页</span>
-        <button id="work-next" type="button" disabled>下一页</button>
-      </nav>
       <footer class="study-workspace-footer">
-        <p id="selection-scope-note">只冻结当前所选作品中、受评论数上限约束的可研究评论；创建研究运行不会调用模型。</p>
-        <div class="run-actions"><button id="start-run" type="button" disabled>创建研究运行</button><p id="run-result" role="status"></p></div>
+        <p id="selection-scope-note">确认开始后，目标进入模型执行队列，可能产生调用与费用。</p>
+        <div class="run-actions"><button id="start-run" type="button" disabled>确认并开始研究</button><p id="run-result" role="status"></p></div>
       </footer>
     </section>
   </dialog>

@@ -16,7 +16,11 @@ use serde_json::{Value, json};
 use std::collections::BTreeSet;
 use uuid::Uuid;
 
-const BASE: &str = include_str!("../../../database/bootstrap/comment-study-001.sql");
+const BASE: &str = concat!(
+    include_str!("../../../database/bootstrap/comment-study-001.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0114_comment_study_effective_head.sql")
+);
 const DELTA: &str =
     include_str!("../../../database/migrations/0107_comment_study_productization_schema.sql");
 

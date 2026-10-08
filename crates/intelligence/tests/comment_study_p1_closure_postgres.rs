@@ -15,8 +15,10 @@ use uuid::Uuid;
 
 async fn database(name: &str) -> Database {
     let db = fixture::proof_database(name).await;
-    sqlx::raw_sql(include_str!(
-        "../../../database/bootstrap/comment-study-001.sql"
+    sqlx::raw_sql(concat!(
+        include_str!("../../../database/bootstrap/comment-study-001.sql"),
+        "\n",
+        include_str!("../../../database/migrations/0114_comment_study_effective_head.sql")
     ))
     .execute(db.pool())
     .await

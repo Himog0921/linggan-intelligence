@@ -254,6 +254,7 @@ pub async fn read_overview(
                 work_ref: None,
                 voice_role: CatalogVoiceRole::ReaderAndUnknown,
                 study_state: CatalogStudyState::All,
+                signal_kind: None,
             },
         )
         .await
@@ -853,6 +854,8 @@ pub async fn read_runs(
             "dispatchState":row.get::<String,_>("dispatch_state"),
             "dispatchReason":row.get::<Option<String>,_>("dispatch_reason"),
             "controlVersion":row.get::<i64,_>("control_version"),
+            "requestedWorkCount":row.get::<Option<i32>,_>("requested_work_count"),
+            "coveredWorkCount":row.get::<i64,_>("work_count"),
             "workCount":row.get::<i64,_>("work_count"),
             "primaryWorkCount":row.get::<i64,_>("primary_work_count"),
             "referenceWorkCount":row.get::<i64,_>("reference_work_count"),
@@ -884,6 +887,9 @@ pub async fn read_run_detail(
              'contextCharacterBudget',run.context_character_budget,'tokenLimit',run.token_limit), \
            'selectionContract',run.selection_manifest->>'contract', \
            'scope',run.selection_manifest, \
+           'requestedWorkCount',CASE WHEN jsonb_typeof(run.selection_manifest->'requestedWorkRefs')='array' \
+             THEN jsonb_array_length(run.selection_manifest->'requestedWorkRefs') ELSE NULL END, \
+           'coveredWorkCount',(SELECT count(*) FROM linggan_comment_study_work work WHERE work.run_ref=run.run_ref), \
            'recoverySourceRunRef',run.selection_manifest->>'recoverySourceRunRef', \
            'dispatchState',run.dispatch_state,'dispatchReason',run.dispatch_reason, \
            'controlVersion',run.control_version, \
