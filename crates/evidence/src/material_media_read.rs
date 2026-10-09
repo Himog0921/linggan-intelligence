@@ -43,17 +43,43 @@ struct SlotAccumulator {
     limitations: Vec<&'static str>,
 }
 
-pub(crate) async fn read(
+pub(crate) async fn read_batch(
     tx: &mut Transaction<'_, Postgres>,
-    content_ref: Uuid,
+    refs: &[Uuid],
     as_of: &str,
-) -> Result<MediaReadProjection, sqlx::Error> {
-    let slots = read_slots(tx, content_ref, as_of).await?;
-    let (derivatives, derivative_receipt, ocr_state, asr_state, derivative_restricted) =
-        read_derivatives(tx, content_ref, as_of).await?;
+) -> Result<HashMap<Uuid, MediaReadProjection>, sqlx::Error> {
+    if refs.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let mut slots = read_slots_batch(tx, refs, as_of).await?;
+    let mut derivatives = read_derivatives_batch(tx, refs, as_of).await?;
+    Ok(refs
+        .iter()
+        .map(|content_ref| {
+            let slots = slots
+                .remove(content_ref)
+                .expect("requested slot projection exists");
+            let derivatives = derivatives
+                .remove(content_ref)
+                .unwrap_or_else(|| project_derivative_rows(Vec::new()));
+            (*content_ref, project_media(slots, derivatives))
+        })
+        .collect())
+}
+
+fn project_media(
+    slots: SlotReadProjection,
+    (derivatives, derivative_receipt, ocr_state, asr_state, derivative_restricted): (
+        Vec<Value>,
+        Value,
+        &'static str,
+        &'static str,
+        bool,
+    ),
+) -> MediaReadProjection {
     let (resource, preview_url, preview_purpose) =
         build_media_resource(&slots.slots, &derivatives, ocr_state, asr_state);
-    Ok(MediaReadProjection {
+    MediaReadProjection {
         slots: slots.slots,
         derivatives,
         preview_url,
@@ -70,7 +96,7 @@ pub(crate) async fn read(
         slot_receipt: slots.receipt,
         derivative_receipt,
         resource,
-    })
+    }
 }
 
 fn build_media_resource(
@@ -320,36 +346,47 @@ fn derivative_resources(derivatives: &[Value]) -> (Vec<Value>, Vec<Value>) {
     (ocr, transcript)
 }
 
-async fn read_slots(
+async fn read_slots_batch(
     tx: &mut Transaction<'_, Postgres>,
-    content_ref: Uuid,
+    content_refs: &[Uuid],
     as_of: &str,
-) -> Result<SlotReadProjection, sqlx::Error> {
-    let mut rows = sqlx::query(
-        "WITH current_origin AS ( \
-           SELECT DISTINCT ON (origin.slot_key) origin.* FROM linggan_material_media_origin origin \
+) -> Result<HashMap<Uuid, SlotReadProjection>, sqlx::Error> {
+    let rows = sqlx::query(
+        "WITH current_origin AS MATERIALIZED ( \
+           SELECT DISTINCT ON (origin.content_public_ref,origin.slot_key) origin.* FROM linggan_material_media_origin origin \
            JOIN linggan_runtime_capture_package origin_package USING(package_ref) \
-           WHERE origin.content_public_ref=$1 AND origin_package.accepted_at <= $2::timestamptz \
-           ORDER BY origin.slot_key,origin.source_generation DESC \
-         ) SELECT origin.observation_ref,origin.slot_key,origin.purpose,origin.producer_ordinal,origin.display_ordinal, \
+           WHERE origin.content_public_ref=ANY($1) AND origin_package.accepted_at <= $2::timestamptz \
+           ORDER BY origin.content_public_ref,origin.slot_key,origin.source_generation DESC \
+         ), scoped_download AS MATERIALIZED ( \
+           SELECT attempt.* FROM linggan_media_download_attempt attempt \
+           WHERE attempt.media_observation_ref IN (SELECT observation_ref FROM current_origin) \
+         ), historical_materialization AS MATERIALIZED ( \
+           SELECT historical_origin.slot_key,materialization.*,attempt.started_at, \
+                  attempt.media_observation_ref AS materialization_observation_ref,historical_package.accepted_at \
+           FROM linggan_material_media_origin historical_origin \
+           JOIN linggan_runtime_capture_package historical_package USING(package_ref) \
+           JOIN linggan_media_download_attempt attempt ON attempt.media_observation_ref=historical_origin.observation_ref \
+           JOIN linggan_media_materialization materialization USING(download_attempt_ref) \
+           WHERE historical_origin.slot_key IN (SELECT slot_key FROM current_origin) \
+         ), current_disposition AS MATERIALIZED ( \
+           SELECT * FROM linggan_current_material_media_disposition \
+         ), slot_rows AS (SELECT origin.content_public_ref,origin.observation_ref,origin.slot_key,origin.purpose,origin.producer_ordinal,origin.display_ordinal, \
              origin.display_order_state,origin.display_order_basis,origin.source_generation,origin.candidate_set_state, \
              origin.composite_state,origin.live_photo_still_state,origin.live_photo_motion_state,observation.observed_at, \
              (SELECT count(*) FROM linggan_material_media_candidate candidate WHERE candidate.observation_ref=origin.observation_ref) AS candidate_count, \
              replica.materialization_ref,replica.verified_at,replica.materialization_observation_ref, \
              blob.sha256,blob.mime_type,blob.byte_size,blob.pixel_width,blob.pixel_height,blob.duration_ms,relation.subject_kind,relation.subject_external_id,relation.relationship_kind,relation.relationship_ordinal,current_download.download_attempt_ref,current_download.terminal_reason, \
              disposition.restricted AS disposition_restricted,disposition.cleaned AS disposition_cleaned,disposition.slot_restricted, \
-             excluded.newer_disposed AS newer_disposed,count(*) OVER() AS total_count \
+             excluded.newer_disposed AS newer_disposed,count(*) OVER(PARTITION BY origin.content_public_ref) AS total_count, \
+             row_number() OVER(PARTITION BY origin.content_public_ref ORDER BY origin.producer_ordinal,origin.slot_key) AS row_ordinal \
          FROM current_origin origin JOIN linggan_media_observation observation USING (observation_ref) \
-         LEFT JOIN LATERAL (SELECT attempt.* FROM linggan_media_download_attempt attempt WHERE attempt.media_observation_ref=origin.observation_ref AND attempt.started_at <= $2::timestamptz ORDER BY attempt.started_at DESC LIMIT 1) current_download ON true \
-         LEFT JOIN LATERAL (SELECT materialization.*,attempt.media_observation_ref AS materialization_observation_ref \
-             FROM linggan_material_media_origin historical_origin \
-             JOIN linggan_runtime_capture_package historical_package USING(package_ref) \
-             JOIN linggan_media_download_attempt attempt ON attempt.media_observation_ref=historical_origin.observation_ref \
-             JOIN linggan_media_materialization materialization ON materialization.download_attempt_ref=attempt.download_attempt_ref \
+         LEFT JOIN LATERAL (SELECT attempt.* FROM scoped_download attempt WHERE attempt.media_observation_ref=origin.observation_ref AND attempt.started_at <= $2::timestamptz ORDER BY attempt.started_at DESC LIMIT 1) current_download ON true \
+         LEFT JOIN LATERAL (SELECT materialization.* \
+             FROM historical_materialization materialization \
              JOIN linggan_media_blob candidate_blob ON candidate_blob.sha256=materialization.blob_sha256 \
-             WHERE historical_origin.slot_key=origin.slot_key AND historical_package.accepted_at <= $2::timestamptz \
-               AND attempt.started_at <= $2::timestamptz AND materialization.verified_at <= $2::timestamptz \
-               AND NOT EXISTS (SELECT 1 FROM linggan_current_material_media_disposition event \
+             WHERE materialization.slot_key=origin.slot_key AND materialization.accepted_at <= $2::timestamptz \
+               AND materialization.started_at <= $2::timestamptz AND materialization.verified_at <= $2::timestamptz \
+               AND NOT EXISTS (SELECT 1 FROM current_disposition event \
                  WHERE (event.slot_key=origin.slot_key \
                    OR event.materialization_ref=materialization.materialization_ref OR event.blob_sha256=candidate_blob.sha256)) \
              ORDER BY materialization.verified_at DESC LIMIT 1) replica ON true \
@@ -358,40 +395,27 @@ async fn read_slots(
          LEFT JOIN LATERAL (SELECT bool_or(event.state='WITHDRAWN_OR_RESTRICTED') AS restricted, \
                  bool_or(event.slot_key=origin.slot_key AND event.state='WITHDRAWN_OR_RESTRICTED') AS slot_restricted, \
                  bool_or(event.state='BYTES_CLEANED') AS cleaned \
-             FROM linggan_current_material_media_disposition event \
+             FROM current_disposition event \
              WHERE (event.slot_key=origin.slot_key \
-               OR event.materialization_ref IN (SELECT scoped_materialization.materialization_ref FROM linggan_material_media_origin scoped_origin JOIN linggan_media_download_attempt scoped_attempt ON scoped_attempt.media_observation_ref=scoped_origin.observation_ref JOIN linggan_media_materialization scoped_materialization USING(download_attempt_ref) WHERE scoped_origin.slot_key=origin.slot_key) \
-               OR event.blob_sha256 IN (SELECT scoped_materialization.blob_sha256 FROM linggan_material_media_origin scoped_origin JOIN linggan_media_download_attempt scoped_attempt ON scoped_attempt.media_observation_ref=scoped_origin.observation_ref JOIN linggan_media_materialization scoped_materialization USING(download_attempt_ref) WHERE scoped_origin.slot_key=origin.slot_key)) \
+               OR event.materialization_ref IN (SELECT scoped_materialization.materialization_ref FROM historical_materialization scoped_materialization WHERE scoped_materialization.slot_key=origin.slot_key) \
+               OR event.blob_sha256 IN (SELECT scoped_materialization.blob_sha256 FROM historical_materialization scoped_materialization WHERE scoped_materialization.slot_key=origin.slot_key)) \
          ) disposition ON true \
          LEFT JOIN LATERAL (SELECT EXISTS (SELECT 1 \
-             FROM linggan_material_media_origin excluded_origin \
-             JOIN linggan_media_download_attempt excluded_attempt ON excluded_attempt.media_observation_ref=excluded_origin.observation_ref \
-             JOIN linggan_media_materialization excluded_materialization USING(download_attempt_ref) \
-             WHERE excluded_origin.slot_key=origin.slot_key AND excluded_materialization.verified_at <= $2::timestamptz \
+             FROM historical_materialization excluded_materialization \
+             WHERE excluded_materialization.slot_key=origin.slot_key AND excluded_materialization.verified_at <= $2::timestamptz \
                AND (replica.verified_at IS NULL OR excluded_materialization.verified_at > replica.verified_at) \
-               AND EXISTS (SELECT 1 FROM linggan_current_material_media_disposition excluded_event \
+               AND EXISTS (SELECT 1 FROM current_disposition excluded_event \
                  WHERE (excluded_event.slot_key=origin.slot_key \
                    OR excluded_event.materialization_ref=excluded_materialization.materialization_ref \
                    OR excluded_event.blob_sha256=excluded_materialization.blob_sha256))) AS newer_disposed \
          ) excluded ON true \
-         ORDER BY origin.producer_ordinal,origin.slot_key LIMIT $3",
+          ) SELECT * FROM slot_rows WHERE row_ordinal <= $3 ORDER BY content_public_ref,row_ordinal",
     )
-    .bind(content_ref)
+    .bind(content_refs)
     .bind(as_of)
     .bind(i64::try_from(DETAIL_MEDIA_SLOT_LIMIT + 1).expect("detail slot limit is bounded"))
     .fetch_all(&mut **tx)
     .await?;
-    let total = rows.first().map_or(0_i64, |row| row.get("total_count"));
-    let truncated = rows.len() > DETAIL_MEDIA_SLOT_LIMIT;
-    if truncated {
-        rows.truncate(DETAIL_MEDIA_SLOT_LIMIT);
-    }
-    let next_cursor = truncated
-        .then(|| {
-            rows.last()
-                .map(|row| format!("slot:{}", row.get::<String, _>("slot_key")))
-        })
-        .flatten();
     let component_work_ready: bool = sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM pg_attribute \
          WHERE attrelid=to_regclass('linggan_media_acquisition_work') \
@@ -405,9 +429,9 @@ async fn read_slots(
             "SELECT work.observation_ref,work.component_kind \
              FROM linggan_media_acquisition_work work \
              JOIN linggan_material_media_origin origin USING(observation_ref) \
-             WHERE origin.content_public_ref=$1 AND work.state='completed'",
+             WHERE origin.content_public_ref=ANY($1) AND work.state='completed'",
         )
-        .bind(content_ref)
+        .bind(content_refs)
         .fetch_all(&mut **tx)
         .await?
         {
@@ -417,6 +441,42 @@ async fn read_slots(
             ));
         }
     }
+    let mut grouped: HashMap<Uuid, Vec<PgRow>> = HashMap::new();
+    for row in rows {
+        grouped
+            .entry(row.get("content_public_ref"))
+            .or_default()
+            .push(row);
+    }
+    Ok(content_refs
+        .iter()
+        .map(|content_ref| {
+            (
+                *content_ref,
+                project_slots(
+                    grouped.remove(content_ref).unwrap_or_default(),
+                    &acquired_components,
+                ),
+            )
+        })
+        .collect())
+}
+
+fn project_slots(
+    mut rows: Vec<PgRow>,
+    acquired_components: &std::collections::HashSet<(Uuid, String)>,
+) -> SlotReadProjection {
+    let total = rows.first().map_or(0_i64, |row| row.get("total_count"));
+    let truncated = rows.len() > DETAIL_MEDIA_SLOT_LIMIT;
+    if truncated {
+        rows.truncate(DETAIL_MEDIA_SLOT_LIMIT);
+    }
+    let next_cursor = truncated
+        .then(|| {
+            rows.last()
+                .map(|row| format!("slot:{}", row.get::<String, _>("slot_key")))
+        })
+        .flatten();
     let mut projection = SlotAccumulator {
         slots: Vec::with_capacity(rows.len()),
         ..SlotAccumulator::default()
@@ -429,7 +489,7 @@ async fn read_slots(
         "total":total,"returned":rows.len(),"truncated":truncated,"nextCursor":next_cursor,
         "limit":DETAIL_MEDIA_SLOT_LIMIT
     });
-    Ok(projection)
+    projection
 }
 
 impl SlotAccumulator {
@@ -595,15 +655,6 @@ fn media_blob_contract(
     })
 }
 
-pub(crate) async fn read_derivatives(
-    tx: &mut Transaction<'_, Postgres>,
-    content_ref: Uuid,
-    as_of: &str,
-) -> Result<(Vec<Value>, Value, &'static str, &'static str, bool), sqlx::Error> {
-    let mut projections = read_derivatives_batch(tx, &[content_ref], as_of).await?;
-    Ok(projections.remove(&content_ref).unwrap_or_else(|| project_derivative_rows(Vec::new())))
-}
-
 /// One owner for detail and multi-work consumers. Each work keeps the detail reader's
 /// 256 + 1 row boundary and the same disposition, retirement, and OCR qualification.
 pub(crate) async fn read_derivatives_batch(
@@ -670,7 +721,10 @@ pub(crate) async fn read_derivatives_batch(
     .await?;
     let mut grouped: HashMap<Uuid, Vec<PgRow>> = HashMap::new();
     for row in derivative_rows {
-        grouped.entry(row.get("content_public_ref")).or_default().push(row);
+        grouped
+            .entry(row.get("content_public_ref"))
+            .or_default()
+            .push(row);
     }
     Ok(grouped
         .into_iter()
@@ -678,7 +732,9 @@ pub(crate) async fn read_derivatives_batch(
         .collect())
 }
 
-fn project_derivative_rows(mut derivative_rows: Vec<PgRow>) -> (Vec<Value>, Value, &'static str, &'static str, bool) {
+fn project_derivative_rows(
+    mut derivative_rows: Vec<PgRow>,
+) -> (Vec<Value>, Value, &'static str, &'static str, bool) {
     let total = derivative_rows
         .first()
         .map_or(0_i64, |row| row.get("total_count"));

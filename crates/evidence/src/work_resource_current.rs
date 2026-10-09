@@ -83,10 +83,16 @@ pub(crate) async fn read_work_resource_current_page(
         sqlx::query_scalar("SELECT to_regclass('linggan_media_ocr_retirement') IS NOT NULL")
             .fetch_one(&mut **tx)
             .await?;
-    let sql = crate::material_query_sql::material_page_sql(ocr_retirement_schema_ready);
+    let identity_page = query.text.is_none() && query.lane.is_none() && query.media_kind.is_none();
+    let sql =
+        crate::material_query_sql::material_page_sql(ocr_retirement_schema_ready, identity_page);
     // Both query strings are assembled only from private compile-time literals in
     // `material_query_sql`; no caller input is interpolated. Runtime values stay bound.
+    // Domain, explicit refs and cursor radically change selectivity. A cached generic
+    // PostgreSQL plan lost that scope (live proof: ~2.9s versus ~51ms). Prepare this
+    // bounded Current query per call so its plan sees the actual filter values.
     sqlx::query(AssertSqlSafe(sql))
+        .persistent(false)
         .bind(query.text)
         .bind(query.as_of)
         .bind(query.observed_before)
@@ -111,7 +117,11 @@ pub(crate) async fn read_work_resource_currents(
         return Ok(Vec::new());
     }
     let sql = crate::material_query_sql::work_resource_currents_sql();
+    // Domain, explicit refs and cursor radically change selectivity. A cached generic
+    // PostgreSQL plan lost that scope (live proof: ~2.9s versus ~51ms). Prepare this
+    // bounded Current query per call so its plan sees the actual filter values.
     sqlx::query(AssertSqlSafe(sql))
+        .persistent(false)
         .bind(public_refs)
         .bind(as_of)
         .fetch_all(&mut **tx)

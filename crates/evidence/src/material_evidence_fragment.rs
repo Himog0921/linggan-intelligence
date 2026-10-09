@@ -12,6 +12,7 @@
 
 use crate::material_projection_types::{MaterialEvidenceFragment, MaterialLibraryItem};
 use sqlx::{AssertSqlSafe, Postgres, Row, Transaction};
+use std::collections::HashMap;
 use uuid::Uuid;
 
 /// Total characters an excerpt may carry. Chosen against the V9 research row, where the quote
@@ -38,44 +39,84 @@ const LEAD_IN_CHARS: usize = 20;
 /// Returns `None` when the work genuinely has no readable text yet. That is a real state — an
 /// accepted discovery whose detail, media and comments were never acquired — and the caller
 /// must render it as such instead of inventing a placeholder line.
-pub(crate) async fn read(
+pub(crate) async fn read_batch(
     tx: &mut Transaction<'_, Postgres>,
-    item: &MaterialLibraryItem,
-    body_text: Option<&str>,
+    items: &mut [MaterialLibraryItem],
     query: Option<&str>,
     as_of: &str,
-) -> Result<Option<MaterialEvidenceFragment>, sqlx::Error> {
-    if let Some(query) = query.map(str::trim).filter(|value| !value.is_empty()) {
-        if let Some(fragment) = body_text
-            .and_then(|body| match_in(body, query))
-            .map(|hit| fragment_from(hit, "detail_body", "SEARCH_MATCH", None, None))
-        {
-            return Ok(Some(fragment));
+) -> Result<(), sqlx::Error> {
+    let query = query.map(str::trim).filter(|value| !value.is_empty());
+    if let Some(query) = query {
+        for item in items.iter_mut() {
+            item.evidence_fragment = item
+                .body_text
+                .as_deref()
+                .and_then(|body| match_in(body, query))
+                .map(|hit| fragment_from(hit, "detail_body", "SEARCH_MATCH", None, None));
         }
-        if let Some(fragment) = matched_image_substantive_text(tx, item, query, as_of).await? {
-            return Ok(Some(fragment));
-        }
-        if let Some(fragment) = matched_derived_text(tx, item, query, as_of).await? {
-            return Ok(Some(fragment));
-        }
-        // A work can match on a field this excerpt cannot quote — a creator name, or a title.
-        // Falling through to the unqueried order is honest: the row still shows real evidence,
-        // and `selectionBasis` tells the reader it is not the hit they searched for.
     }
+    // Probe once in this transaction, only when a source-text read is actually needed.
+    let ready = if items.iter().any(|item| item.evidence_fragment.is_none()) {
+        ocr_retirement_schema_ready(tx).await?
+    } else {
+        false
+    };
+    if let Some(query) = query {
+        fill_text_candidates(tx, items, Some(query), as_of, ready, true).await?;
+        fill_text_candidates(tx, items, Some(query), as_of, ready, false).await?;
+    }
+    for item in items
+        .iter_mut()
+        .filter(|item| item.evidence_fragment.is_none())
+    {
+        item.evidence_fragment = item
+            .body_text
+            .as_deref()
+            .map(str::trim)
+            .filter(|body| !body.is_empty())
+            .map(|body| {
+                fragment_from(
+                    window(body, None),
+                    "detail_body",
+                    "FIRST_AVAILABLE",
+                    None,
+                    None,
+                )
+            });
+    }
+    fill_text_candidates(tx, items, None, as_of, ready, true).await?;
+    fill_text_candidates(tx, items, None, as_of, ready, false).await?;
+    for item in items {
+        item.body_text = None;
+    }
+    Ok(())
+}
 
-    if let Some(body) = body_text.map(str::trim).filter(|value| !value.is_empty()) {
-        return Ok(Some(fragment_from(
-            window(body, None),
-            "detail_body",
-            "FIRST_AVAILABLE",
-            None,
-            None,
-        )));
+async fn fill_text_candidates(
+    tx: &mut Transaction<'_, Postgres>,
+    items: &mut [MaterialLibraryItem],
+    query: Option<&str>,
+    as_of: &str,
+    retirement_ready: bool,
+    image_layer: bool,
+) -> Result<(), sqlx::Error> {
+    let refs: Vec<Uuid> = items
+        .iter()
+        .filter(|item| item.evidence_fragment.is_none())
+        .map(|item| item.identity.public_ref)
+        .collect();
+    if refs.is_empty() || (image_layer && !retirement_ready) {
+        return Ok(());
     }
-    if let Some(fragment) = leading_image_substantive_text(tx, item, as_of).await? {
-        return Ok(Some(fragment));
+    let mut fragments =
+        read_text_candidates(tx, &refs, query, as_of, retirement_ready, image_layer).await?;
+    for item in items
+        .iter_mut()
+        .filter(|item| item.evidence_fragment.is_none())
+    {
+        item.evidence_fragment = fragments.remove(&item.identity.public_ref);
     }
-    leading_derived_text(tx, item, as_of).await
+    Ok(())
 }
 
 /// The excerpt plus where the query landed inside it, in characters.
@@ -186,183 +227,80 @@ fn collapse_whitespace(text: &str) -> String {
     out
 }
 
-/// OCR and transcript text that contains the query.
-///
-/// `slot_key` travels with the hit because the Inspector's media rail uses it to jump to the
-/// exact image the text was read from. Without it "GO TO MATCH" would have to guess.
-async fn matched_derived_text(
+/// Same selectors for one or many works: ACCEPTED substantive OCR precedes derived text;
+/// unqueried derived text excludes covers, and no restricted comment becomes a list excerpt.
+async fn read_text_candidates(
     tx: &mut Transaction<'_, Postgres>,
-    item: &MaterialLibraryItem,
-    query: &str,
+    refs: &[Uuid],
+    query: Option<&str>,
     as_of: &str,
-) -> Result<Option<MaterialEvidenceFragment>, sqlx::Error> {
-    let retirement_filter = if ocr_retirement_schema_ready(tx).await? {
+    retirement_ready: bool,
+    image_layer: bool,
+) -> Result<HashMap<Uuid, MaterialEvidenceFragment>, sqlx::Error> {
+    let retirement_filter = if retirement_ready {
         " AND NOT EXISTS (SELECT 1 FROM linggan_media_ocr_retirement retired WHERE retired.retired_job_ref=job.job_ref)"
     } else {
         ""
     };
-    let row = sqlx::query(AssertSqlSafe(format!(
-        "SELECT derived.derivative_ref,derived.kind,derived.display_text,job.slot_key \
-         FROM linggan_material_derived_text derived \
-         JOIN linggan_media_derivative derivative USING(derivative_ref) \
-         JOIN linggan_media_processing_job job USING(job_ref) \
-         WHERE derived.content_public_ref=$1 AND derived.created_at <= $2::timestamptz \
-           AND lower(derived.display_text) LIKE '%' || lower($3) || '%'{retirement_filter} \
-         ORDER BY job.slot_key,derived.created_at DESC LIMIT 1"
-    )))
-    .bind(item.identity.public_ref)
-    .bind(as_of)
-    .bind(query)
-    .fetch_optional(&mut **tx)
-    .await?;
-    Ok(row.and_then(|row| {
-        let display_text: String = row.get("display_text");
-        let kind: String = row.get("kind");
-        match_in(&display_text, query).map(|hit| {
-            fragment_from(
-                hit,
-                derived_source_kind(&kind),
-                "SEARCH_MATCH",
-                row.get::<Option<Uuid>, _>("derivative_ref"),
-                row.get::<Option<String>, _>("slot_key"),
-            )
-        })
-    }))
-}
-
-/// A curated image-text view is readable only when the local layer is ACCEPTED.  `PARTIAL`
-/// remains available in the Inspector's OCR-layering record but cannot quietly become corpus.
-async fn matched_image_substantive_text(
-    tx: &mut Transaction<'_, Postgres>,
-    item: &MaterialLibraryItem,
-    query: &str,
-    as_of: &str,
-) -> Result<Option<MaterialEvidenceFragment>, sqlx::Error> {
-    if !ocr_retirement_schema_ready(tx).await? {
-        return Ok(None);
-    }
-    let row = sqlx::query(
-        "SELECT derivative.derivative_ref,layer.image_substantive_text,job.slot_key \
-         FROM linggan_media_ocr_layering_result layer \
-         JOIN linggan_media_ocr_layout layout USING(layout_ref) \
+    // All SQL fragments are private compile-time literals; search and identity stay bound.
+    let sql = if image_layer {
+        "SELECT DISTINCT ON (layout.content_public_ref) layout.content_public_ref,derivative.derivative_ref,layer.image_substantive_text AS display_text,'image_substantive_text'::text AS kind,job.slot_key \
+         FROM linggan_media_ocr_layering_result layer JOIN linggan_media_ocr_layout layout USING(layout_ref) \
          JOIN linggan_media_derivative derivative ON derivative.derivative_ref=layout.ocr_derivative_ref \
          JOIN linggan_media_processing_job job ON job.job_ref=derivative.job_ref \
-         WHERE layout.content_public_ref=$1 AND layer.state='ACCEPTED' \
-           AND layer.created_at <= $2::timestamptz \
+         WHERE layout.content_public_ref=ANY($1) AND layer.state='ACCEPTED' AND layer.created_at <= $2::timestamptz \
            AND nullif(btrim(layer.image_substantive_text),'') IS NOT NULL \
-           AND lower(layer.image_substantive_text) LIKE '%' || lower($3) || '%' \
-           AND NOT EXISTS (SELECT 1 FROM linggan_media_ocr_retirement retired \
-                           WHERE retired.retired_job_ref=job.job_ref) \
-         ORDER BY layer.created_at DESC LIMIT 1",
-    )
-    .bind(item.identity.public_ref)
-    .bind(as_of)
-    .bind(query)
-    .fetch_optional(&mut **tx)
-    .await?;
-    Ok(row.and_then(|row| {
-        let text: String = row.get("image_substantive_text");
-        match_in(&text, query).map(|hit| {
-            fragment_from(
-                hit,
-                "image_substantive_text",
-                "SEARCH_MATCH",
-                row.get::<Option<Uuid>, _>("derivative_ref"),
-                row.get::<Option<String>, _>("slot_key"),
-            )
-        })
-    }))
-}
-
-/// Machine-read text, used only when a work has neither body nor comments.
-///
-/// Covers are excluded outright. A cover is a designed graphic — layered type, textures, hand
-/// lettering — and OCR of one comes back as noise; this library's own covers produce lines like
-/// `"oy 六 字 =] Li"` and `"6双干失信各关 | oy 一 Re ea aos"`. Quoting that as a work's strongest
-/// evidence would put a broken-looking string where the reader expects a sentence, and would
-/// state something the system cannot actually vouch for. A work whose only text is cover OCR
-/// therefore returns `None` and is rendered as the honest empty state it is.
-///
-/// A cover hit is still quotable through [`matched_derived_text`]: there the reader asked for
-/// that exact string, and the highlight explains why the row is showing it.
-///
-/// Ordering by `slot_key` keeps the choice stable across reads. It asserts nothing about the
-/// platform's own image order, which is unverified upstream.
-async fn leading_derived_text(
-    tx: &mut Transaction<'_, Postgres>,
-    item: &MaterialLibraryItem,
-    as_of: &str,
-) -> Result<Option<MaterialEvidenceFragment>, sqlx::Error> {
-    let retirement_filter = if ocr_retirement_schema_ready(tx).await? {
-        " AND NOT EXISTS (SELECT 1 FROM linggan_media_ocr_retirement retired WHERE retired.retired_job_ref=job.job_ref)"
+           AND ($3::text IS NULL OR lower(layer.image_substantive_text) LIKE '%' || lower($3) || '%') \
+           AND ($3::text IS NOT NULL OR job.slot_key NOT LIKE '%:cover:%') \
+           AND NOT EXISTS (SELECT 1 FROM linggan_media_ocr_retirement retired WHERE retired.retired_job_ref=job.job_ref) \
+         ORDER BY layout.content_public_ref,layer.created_at DESC".to_owned()
     } else {
-        ""
-    };
-    let row = sqlx::query(AssertSqlSafe(format!(
-        "SELECT derived.derivative_ref,derived.kind,derived.display_text,job.slot_key \
-         FROM linggan_material_derived_text derived \
-         JOIN linggan_media_derivative derivative USING(derivative_ref) \
+        format!(
+            "SELECT DISTINCT ON (derived.content_public_ref) derived.content_public_ref,derived.derivative_ref,derived.kind,derived.display_text,job.slot_key \
+         FROM linggan_material_derived_text derived JOIN linggan_media_derivative derivative USING(derivative_ref) \
          JOIN linggan_media_processing_job job USING(job_ref) \
-         WHERE derived.content_public_ref=$1 AND derived.created_at <= $2::timestamptz \
-           AND job.slot_key NOT LIKE '%:cover:%'{retirement_filter} \
-         ORDER BY job.slot_key,derived.created_at DESC LIMIT 1"
-    )))
-    .bind(item.identity.public_ref)
-    .bind(as_of)
-    .fetch_optional(&mut **tx)
-    .await?;
-    Ok(row.and_then(|row| {
-        let display_text: String = row.get("display_text");
-        let kind: String = row.get("kind");
-        let trimmed = display_text.trim();
-        (!trimmed.is_empty()).then(|| {
-            fragment_from(
-                window(trimmed, None),
-                derived_source_kind(&kind),
-                "FIRST_AVAILABLE",
-                row.get::<Option<Uuid>, _>("derivative_ref"),
-                row.get::<Option<String>, _>("slot_key"),
-            )
-        })
-    }))
-}
-
-async fn leading_image_substantive_text(
-    tx: &mut Transaction<'_, Postgres>,
-    item: &MaterialLibraryItem,
-    as_of: &str,
-) -> Result<Option<MaterialEvidenceFragment>, sqlx::Error> {
-    if !ocr_retirement_schema_ready(tx).await? {
-        return Ok(None);
-    }
-    let row = sqlx::query(
-        "SELECT derivative.derivative_ref,layer.image_substantive_text,job.slot_key \
-         FROM linggan_media_ocr_layering_result layer \
-         JOIN linggan_media_ocr_layout layout USING(layout_ref) \
-         JOIN linggan_media_derivative derivative ON derivative.derivative_ref=layout.ocr_derivative_ref \
-         JOIN linggan_media_processing_job job ON job.job_ref=derivative.job_ref \
-         WHERE layout.content_public_ref=$1 AND layer.state='ACCEPTED' \
-           AND layer.created_at <= $2::timestamptz \
-           AND nullif(btrim(layer.image_substantive_text),'') IS NOT NULL \
-           AND job.slot_key NOT LIKE '%:cover:%' \
-           AND NOT EXISTS (SELECT 1 FROM linggan_media_ocr_retirement retired \
-                           WHERE retired.retired_job_ref=job.job_ref) \
-         ORDER BY layer.created_at DESC LIMIT 1",
-    )
-    .bind(item.identity.public_ref)
-    .bind(as_of)
-    .fetch_optional(&mut **tx)
-    .await?;
-    Ok(row.map(|row| {
-        let text: String = row.get("image_substantive_text");
-        fragment_from(
-            window(&text, None),
-            "image_substantive_text",
-            "FIRST_AVAILABLE",
-            row.get::<Option<Uuid>, _>("derivative_ref"),
-            row.get::<Option<String>, _>("slot_key"),
+         WHERE derived.content_public_ref=ANY($1) AND derived.created_at <= $2::timestamptz \
+           AND ($3::text IS NULL OR lower(derived.display_text) LIKE '%' || lower($3) || '%') \
+           AND ($3::text IS NOT NULL OR job.slot_key NOT LIKE '%:cover:%'){retirement_filter} \
+         ORDER BY derived.content_public_ref,job.slot_key,derived.created_at DESC"
         )
-    }))
+    };
+    let rows = sqlx::query(AssertSqlSafe(sql))
+        .bind(refs)
+        .bind(as_of)
+        .bind(query)
+        .fetch_all(&mut **tx)
+        .await?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|row| {
+            let text: String = row.get("display_text");
+            let excerpt = match query {
+                Some(query) => match_in(&text, query),
+                None => {
+                    let trimmed = text.trim();
+                    (!trimmed.is_empty()).then(|| window(trimmed, None))
+                }
+            }?;
+            let kind: String = row.get("kind");
+            let fragment = fragment_from(
+                excerpt,
+                if image_layer {
+                    "image_substantive_text"
+                } else {
+                    derived_source_kind(&kind)
+                },
+                if query.is_some() {
+                    "SEARCH_MATCH"
+                } else {
+                    "FIRST_AVAILABLE"
+                },
+                row.get("derivative_ref"),
+                row.get("slot_key"),
+            );
+            Some((row.get("content_public_ref"), fragment))
+        })
+        .collect())
 }
 
 async fn ocr_retirement_schema_ready(

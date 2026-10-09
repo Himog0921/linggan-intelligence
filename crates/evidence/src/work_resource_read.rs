@@ -100,7 +100,7 @@ mod title_tests {
         assert!(!sql.contains("$1::uuid[]"));
         assert!(
             include_str!("material_projection.rs")
-                .contains("sqlx::query(crate::work_resource_read::COVER_HEADLINE_SQL)")
+                .contains("crate::work_resource_read::COVER_HEADLINE_SQL.replacen")
         );
     }
 

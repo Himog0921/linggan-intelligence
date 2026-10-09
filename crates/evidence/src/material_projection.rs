@@ -19,7 +19,9 @@ use crate::work_resource_current::{
 use linggan_contracts::{EvidenceQuery, EvidenceQuerySort};
 use linggan_storage_postgres::Database;
 use serde_json::Value;
+use sqlx::{AssertSqlSafe, postgres::PgRow};
 use sqlx::{Postgres, Row, Transaction};
+use std::collections::HashMap;
 use uuid::Uuid;
 
 const MATERIAL_PAGE_SIZE: usize = 50;
@@ -41,10 +43,21 @@ pub async fn read_material_library(
     database: &Database,
     query: &EvidenceQuery,
 ) -> Result<MaterialLibraryProjection, MaterialReadError> {
-    if let Some(refs)=query.public_refs() {
-        if refs.is_empty() || refs.len()>100 || query.cursor().is_some() || query.creator_scope().is_some() || query.domain_ref().is_none() || query.text().is_some_and(|text| !text.trim().is_empty()) || query.published_window().is_some() {return Err(MaterialReadError::InvalidCursor);}
-        if query.sort() != EvidenceQuerySort::LatestDiscovery {return Err(MaterialReadError::UnsupportedSort);}
-        return read_resource_batch(database,query,refs).await;
+    if let Some(refs) = query.public_refs() {
+        if refs.is_empty()
+            || refs.len() > 100
+            || query.cursor().is_some()
+            || query.creator_scope().is_some()
+            || query.domain_ref().is_none()
+            || query.text().is_some_and(|text| !text.trim().is_empty())
+            || query.published_window().is_some()
+        {
+            return Err(MaterialReadError::InvalidCursor);
+        }
+        if query.sort() != EvidenceQuerySort::LatestDiscovery {
+            return Err(MaterialReadError::UnsupportedSort);
+        }
+        return read_resource_batch(database, query, refs).await;
     }
     if query.sort() != EvidenceQuerySort::LatestDiscovery {
         return Err(MaterialReadError::UnsupportedSort);
@@ -133,7 +146,7 @@ async fn read_latest_material_page(
                 }
                 _ => MaterialReadError::InvalidCursor,
             })?;
-        Some(crate::creator_discovery::matching_work_refs(&data,scope))
+        Some(crate::creator_discovery::matching_work_refs(&data, scope))
     } else {
         None
     };
@@ -161,31 +174,25 @@ async fn read_latest_material_page(
         if rows.is_empty() {
             break;
         }
-        for row in rows {
-            if scanned_count == MATERIAL_SCAN_BUDGET {
-                scan_limited = true;
-                break 'scan;
-            }
+        let remaining = MATERIAL_SCAN_BUDGET - scanned_count;
+        let reached_budget = rows.len() > remaining;
+        let rows: Vec<_> = rows.into_iter().take(remaining).collect();
+        let mut batch = enrich_current_batch(&mut tx, &rows, text, &as_of).await?;
+        for (row, item) in rows.iter().zip(batch.drain(..)) {
             scan_observed_at = Some(row.observed_at.clone());
             scan_platform = Some(row.platform.clone());
             scan_content_external_id = Some(row.content_external_id.clone());
             scanned_count += 1;
-            let mut item = material_item(&row, text);
-            enrich_discovery_material(
-                &mut tx,
-                &mut item,
-                &as_of,
-                row.author_attribution_source.as_deref(),
-            )
-            .await?;
-            material_social_read::enrich(&mut tx, &mut item, text, &as_of).await?;
-            enrich_media_material(&mut tx, &mut item, &as_of).await?;
             if item_matches_filters(&item, query) {
                 items.push(item);
                 if items.len() > MATERIAL_PAGE_SIZE {
                     break;
                 }
             }
+        }
+        if reached_budget && items.len() <= MATERIAL_PAGE_SIZE {
+            scan_limited = true;
+            break 'scan;
         }
         if items.len() > MATERIAL_PAGE_SIZE || exhausted {
             break;
@@ -273,11 +280,49 @@ pub(crate) async fn enrich_discovery_material(
     as_of: &str,
     author_attribution_source: Option<&str>,
 ) -> Result<(), sqlx::Error> {
-    let row=sqlx::query("SELECT finding.material_ref,finding.package_ref,finding.discovery_kind,finding.result_position,finding.observed_at,package.coverage,package.task_id,package.attempt_id,task.task_spec,receipt.receipt_ref FROM linggan_material_discovery_finding finding JOIN linggan_runtime_capture_package package USING(package_ref) JOIN linggan_runtime_task task ON task.task_id=package.task_id LEFT JOIN linggan_runtime_submission_receipt receipt ON receipt.package_ref=package.package_ref WHERE finding.content_public_ref=$1 AND package.accepted_at <= $2::timestamptz ORDER BY finding.observed_at::timestamptz DESC,finding.created_at DESC LIMIT 1")
-        .bind(item.identity.public_ref).bind(as_of).fetch_optional(&mut **tx).await?;
-    let Some(row) = row else {
+    enrich_discovery_batch(
+        tx,
+        std::slice::from_mut(item),
+        as_of,
+        &[author_attribution_source],
+    )
+    .await
+}
+
+async fn enrich_discovery_batch(
+    tx: &mut Transaction<'_, Postgres>,
+    items: &mut [MaterialLibraryItem],
+    as_of: &str,
+    author_sources: &[Option<&str>],
+) -> Result<(), sqlx::Error> {
+    if items.is_empty() {
         return Ok(());
-    };
+    }
+    let refs: Vec<Uuid> = items.iter().map(|item| item.identity.public_ref).collect();
+    let rows = sqlx::query(
+        "WITH latest AS MATERIALIZED (SELECT DISTINCT ON(finding.content_public_ref) finding.content_public_ref,finding.material_ref,finding.package_ref,finding.discovery_kind,finding.result_position,finding.observed_at,package.coverage,package.task_id,package.attempt_id,task.task_spec,receipt.receipt_ref \
+         FROM linggan_material_discovery_finding finding JOIN linggan_runtime_capture_package package USING(package_ref) \
+         JOIN linggan_runtime_task task ON task.task_id=package.task_id \
+         LEFT JOIN linggan_runtime_submission_receipt receipt ON receipt.package_ref=package.package_ref \
+         WHERE finding.content_public_ref=ANY($1) AND package.accepted_at <= $2::timestamptz \
+         ORDER BY finding.content_public_ref,finding.observed_at::timestamptz DESC,finding.created_at DESC), \
+         retained AS (SELECT package_ref,count(*) AS retained_count FROM linggan_material_discovery_finding \
+             WHERE package_ref IN(SELECT package_ref FROM latest) GROUP BY package_ref) \
+         SELECT latest.*,retained.retained_count FROM latest JOIN retained USING(package_ref)"
+    ).bind(&refs).bind(as_of).fetch_all(&mut **tx).await?;
+    let rows: HashMap<Uuid, PgRow> = rows
+        .into_iter()
+        .map(|row| (row.get("content_public_ref"), row))
+        .collect();
+    for item in items.iter_mut() {
+        if let Some(row) = rows.get(&item.identity.public_ref) {
+            apply_discovery(item, row);
+        }
+    }
+    enrich_collection_context_batch(tx, items, author_sources, &rows).await
+}
+
+fn apply_discovery(item: &mut MaterialLibraryItem, row: &PgRow) {
     let coverage: Value = row.get("coverage");
     let kind: String = row.get("discovery_kind");
     let layer = crate::material_contract_validation::unique_coverage_layer(&coverage, &kind);
@@ -289,12 +334,7 @@ pub(crate) async fn enrich_discovery_material(
     let stopped = layer
         .and_then(|value| value.get("stoppedReason"))
         .and_then(Value::as_str);
-    let retained: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM linggan_material_discovery_finding WHERE package_ref=$1",
-    )
-    .bind(row.get::<Uuid, _>("package_ref"))
-    .fetch_one(&mut **tx)
-    .await?;
+    let retained: i64 = row.get("retained_count");
     let reconciled = count("acquired") == Some(retained);
     let state = if stopped == Some("risk_control") {
         "RISK_CONTROL"
@@ -355,26 +395,17 @@ pub(crate) async fn enrich_discovery_material(
             );
         }
     }
-    enrich_collection_context(
-        tx,
-        item,
-        &kind,
-        row.get("task_id"),
-        row.get("task_spec"),
-        author_attribution_source,
-    )
-    .await?;
-    Ok(())
 }
 
-async fn enrich_collection_context(
+async fn enrich_collection_context_batch(
     tx: &mut Transaction<'_, Postgres>,
-    item: &mut MaterialLibraryItem,
-    discovery_kind: &str,
-    task_id: Uuid,
-    task_spec: Value,
-    author_attribution_source: Option<&str>,
+    items: &mut [MaterialLibraryItem],
+    author_sources: &[Option<&str>],
+    discoveries: &HashMap<Uuid, PgRow>,
 ) -> Result<(), sqlx::Error> {
+    if discoveries.is_empty() {
+        return Ok(());
+    }
     let schema_ready: bool = sqlx::query_scalar(
         "SELECT to_regclass('collection_observation_target') IS NOT NULL \
          AND to_regclass('collection_work_order') IS NOT NULL \
@@ -386,39 +417,71 @@ async fn enrich_collection_context(
     if !schema_ready {
         return Ok(());
     }
-    let target_kind = task_spec
-        .pointer("/target/authorExternalId")
-        .and_then(Value::as_str)
-        .map(|_| "creator")
-        .or_else(|| {
-            task_spec
-                .pointer("/target/query")
+
+    let mut refs = Vec::new();
+    let mut tasks = Vec::new();
+    let mut platforms = Vec::new();
+    let mut kinds = Vec::new();
+    let mut identities = Vec::new();
+    for item in items.iter() {
+        let Some(row) = discoveries.get(&item.identity.public_ref) else {
+            continue;
+        };
+        let spec: Value = row.get("task_spec");
+        refs.push(item.identity.public_ref);
+        tasks.push(row.get::<Uuid, _>("task_id"));
+        platforms.push(item.identity.platform.clone());
+        kinds.push(
+            spec.pointer("/target/authorExternalId")
                 .and_then(Value::as_str)
-                .map(|_| "keyword")
-        });
-    let identity_key = task_spec
-        .pointer("/target/authorExternalId")
-        .or_else(|| task_spec.pointer("/target/query"))
-        .and_then(Value::as_str);
-    let row = sqlx::query(
-        "SELECT target.target_ref,target.target_kind,target.identity_key,target.display_name,work_order.work_order_ref, \
+                .map(|_| "creator")
+                .or_else(|| {
+                    spec.pointer("/target/query")
+                        .and_then(Value::as_str)
+                        .map(|_| "keyword")
+                }),
+        );
+        identities.push(
+            spec.pointer("/target/authorExternalId")
+                .or_else(|| spec.pointer("/target/query"))
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+        );
+    }
+    let contexts = sqlx::query(
+        "WITH requested AS (SELECT * FROM unnest($1::uuid[],$2::uuid[],$3::text[],$4::text[],$5::text[]) AS scope(content_public_ref,task_id,platform,target_kind,identity_key)) \
+         SELECT requested.content_public_ref,context.* FROM requested CROSS JOIN LATERAL ( \
+         SELECT target.target_ref,target.target_kind,target.identity_key,target.display_name,work_order.work_order_ref, \
                 (lease_task.task_id IS NOT NULL) AS task_linked \
          FROM collection_observation_target target \
          LEFT JOIN collection_work_order work_order ON work_order.target_ref=target.target_ref \
          LEFT JOIN collection_work_order_lease lease ON lease.work_order_ref=work_order.work_order_ref \
-         LEFT JOIN collection_work_order_lease_task lease_task ON lease_task.lease_ref=lease.lease_ref AND lease_task.task_id=$1 \
-         WHERE lease_task.task_id=$1 OR (target.platform=$2 AND target.target_kind=$3 AND target.identity_key=$4) \
-         ORDER BY (lease_task.task_id IS NOT NULL) DESC,work_order.created_at DESC NULLS LAST,target.first_stored_at DESC LIMIT 1",
-    )
-    .bind(task_id)
-    .bind(&item.identity.platform)
-    .bind(target_kind)
-    .bind(identity_key)
-    .fetch_optional(&mut **tx)
-    .await?;
-    let Some(row) = row else {
-        return Ok(());
-    };
+         LEFT JOIN collection_work_order_lease_task lease_task ON lease_task.lease_ref=lease.lease_ref AND lease_task.task_id=requested.task_id \
+         WHERE lease_task.task_id=requested.task_id OR (target.platform=requested.platform AND target.target_kind=requested.target_kind AND target.identity_key=requested.identity_key) \
+         ORDER BY (lease_task.task_id IS NOT NULL) DESC,work_order.created_at DESC NULLS LAST,target.first_stored_at DESC LIMIT 1) context"
+    ).bind(&refs).bind(&tasks).bind(&platforms).bind(&kinds).bind(&identities).fetch_all(&mut **tx).await?;
+    let contexts: HashMap<Uuid, PgRow> = contexts
+        .into_iter()
+        .map(|row| (row.get("content_public_ref"), row))
+        .collect();
+    for (item, source) in items.iter_mut().zip(author_sources.iter().copied()) {
+        if let (Some(context), Some(discovery)) = (
+            contexts.get(&item.identity.public_ref),
+            discoveries.get(&item.identity.public_ref),
+        ) {
+            let kind: String = discovery.get("discovery_kind");
+            apply_collection_context(item, context, &kind, source);
+        }
+    }
+    Ok(())
+}
+
+fn apply_collection_context(
+    item: &mut MaterialLibraryItem,
+    row: &PgRow,
+    discovery_kind: &str,
+    author_attribution_source: Option<&str>,
+) {
     let target_kind: String = row.get("target_kind");
     let target_identity: String = row.get("identity_key");
     let target_display_name: Option<String> = row.get("display_name");
@@ -463,7 +526,6 @@ async fn enrich_collection_context(
             serde_json::json!(work_order_ref.into_iter().collect::<Vec<_>>()),
         );
     }
-    Ok(())
 }
 
 pub(crate) async fn enrich_media_material(
@@ -471,8 +533,32 @@ pub(crate) async fn enrich_media_material(
     item: &mut MaterialLibraryItem,
     as_of: &str,
 ) -> Result<(), sqlx::Error> {
-    let media = material_media_read::read(tx, item.identity.public_ref, as_of).await?;
-    apply_cover_ocr_title_fallback(tx, item, as_of).await?;
+    enrich_media_batch(tx, std::slice::from_mut(item), as_of).await
+}
+
+async fn enrich_media_batch(
+    tx: &mut Transaction<'_, Postgres>,
+    items: &mut [MaterialLibraryItem],
+    as_of: &str,
+) -> Result<(), sqlx::Error> {
+    if items.is_empty() {
+        return Ok(());
+    }
+    let refs: Vec<Uuid> = items.iter().map(|item| item.identity.public_ref).collect();
+    let mut media = material_media_read::read_batch(tx, &refs, as_of).await?;
+    apply_cover_ocr_titles(tx, items, as_of).await?;
+    for item in items.iter_mut() {
+        apply_media(
+            item,
+            media
+                .remove(&item.identity.public_ref)
+                .expect("requested media projection exists"),
+        );
+    }
+    apply_observation_target_avatars(tx, items).await
+}
+
+fn apply_media(item: &mut MaterialLibraryItem, media: material_media_read::MediaReadProjection) {
     item.preview.local_asset_url = media.preview_url;
     item.preview.slot_purpose = media.preview_purpose;
     item.preview.bytes_state = media.bytes_state;
@@ -516,7 +602,6 @@ pub(crate) async fn enrich_media_material(
             }
         }
     }
-    apply_observation_target_avatar(tx, item).await?;
     item.summary.restriction_state = media.restriction_state;
     if let Some(first) = media.limitations.first() {
         item.summary.primary_limitation = first;
@@ -532,23 +617,28 @@ pub(crate) async fn enrich_media_material(
             serde_json::to_value(media.limitations).expect("limitations serialize"),
         );
     }
-    Ok(())
 }
 
 /// Fill a blank platform title only from a selected *cover headline*. Raw OCR, substantive image
 /// text, comments, and later images are intentionally ineligible: this is a display fallback,
 /// never a generated summary and never a mutation of the producer's original title field.
-async fn apply_cover_ocr_title_fallback(
+async fn apply_cover_ocr_titles(
     tx: &mut Transaction<'_, Postgres>,
-    item: &mut MaterialLibraryItem,
+    items: &mut [MaterialLibraryItem],
     as_of: &str,
 ) -> Result<(), sqlx::Error> {
-    if item
-        .display
-        .title
-        .as_ref()
-        .is_some_and(|title| !title.trim().is_empty())
-    {
+    let refs: Vec<Uuid> = items
+        .iter()
+        .filter(|item| {
+            !item
+                .display
+                .title
+                .as_ref()
+                .is_some_and(|title| !title.trim().is_empty())
+        })
+        .map(|item| item.identity.public_ref)
+        .collect();
+    if refs.is_empty() {
         return Ok(());
     }
     let ocr_schema_ready: bool = sqlx::query_scalar(
@@ -561,14 +651,35 @@ async fn apply_cover_ocr_title_fallback(
     if !ocr_schema_ready {
         return Ok(());
     }
-    let candidate = sqlx::query(crate::work_resource_read::COVER_HEADLINE_SQL)
-        .bind(item.identity.public_ref)
+
+    // Rebind only a compile-time placeholder to this query's private work scope. The canonical
+    // cover selector remains shared with Comment Study and does not copy its eligibility rules.
+    let selector = crate::work_resource_read::COVER_HEADLINE_SQL.replacen(
+        " = $1",
+        " = requested.content_public_ref",
+        1,
+    );
+    let sql = format!(
+        "SELECT requested.content_public_ref,cover.* FROM unnest($1::uuid[]) AS requested(content_public_ref) CROSS JOIN LATERAL ({selector}) cover"
+    );
+    let candidates = sqlx::query(AssertSqlSafe(sql))
+        .bind(&refs)
         .bind(as_of)
-        .fetch_optional(&mut **tx)
+        .fetch_all(&mut **tx)
         .await?;
-    let Some(candidate) = candidate else {
-        return Ok(());
-    };
+    let candidates: HashMap<Uuid, PgRow> = candidates
+        .into_iter()
+        .map(|row| (row.get("content_public_ref"), row))
+        .collect();
+    for item in items {
+        if let Some(candidate) = candidates.get(&item.identity.public_ref) {
+            apply_cover_ocr_title(item, candidate);
+        }
+    }
+    Ok(())
+}
+
+fn apply_cover_ocr_title(item: &mut MaterialLibraryItem, candidate: &PgRow) {
     let title: String = candidate.get("cover_headline");
     item.display.title = Some(title.clone());
     item.display.title_state = "KNOWN".to_owned();
@@ -587,7 +698,6 @@ async fn apply_cover_ocr_title_fallback(
             }),
         );
     }
-    Ok(())
 }
 
 /// Show the observation target's avatar when the work's own author avatar has not been observed.
@@ -601,23 +711,26 @@ async fn apply_cover_ocr_title_fallback(
 /// this work's author avatar genuinely has not been observed, and `authorIdentityMatchState`
 /// still governs whether the author is confirmed. Callers that need the confirmed-author picture
 /// must read `fallbackUsed`; this mirrors how `cover` already falls back to a body image.
-async fn apply_observation_target_avatar(
+async fn apply_observation_target_avatars(
     tx: &mut Transaction<'_, Postgres>,
-    item: &mut MaterialLibraryItem,
+    items: &mut [MaterialLibraryItem],
 ) -> Result<(), sqlx::Error> {
-    if item.collection_context.target_kind.as_deref() != Some("creator") {
-        return Ok(());
-    }
-    let Some(target_ref) = item.collection_context.target_ref else {
-        return Ok(());
+    let needs_avatar = |item: &MaterialLibraryItem| {
+        item.collection_context.target_kind.as_deref() == Some("creator")
+            && item.collection_context.target_ref.is_some()
+            && !item
+                .media
+                .pointer("/avatar/localAssetUrl")
+                .is_some_and(|url| !url.is_null())
     };
-    // Only fill a genuinely empty avatar. An observed author avatar — even one whose bytes are
-    // still pending — is the work's own fact and must never be replaced by the target's picture.
-    if item
-        .media
-        .pointer("/avatar/localAssetUrl")
-        .is_some_and(|url| !url.is_null())
-    {
+    let mut refs: Vec<Uuid> = items
+        .iter()
+        .filter(|item| needs_avatar(item))
+        .filter_map(|item| item.collection_context.target_ref)
+        .collect();
+    refs.sort_unstable();
+    refs.dedup();
+    if refs.is_empty() {
         return Ok(());
     }
     let schema_ready: bool = sqlx::query_scalar(
@@ -629,11 +742,9 @@ async fn apply_observation_target_avatar(
     if !schema_ready {
         return Ok(());
     }
-    // Same canonical author-avatar relationship and local asset lifecycle the Collection target
-    // list reads, including its withdrawal/restriction exclusion. Only a verified local
-    // materialization of an image blob may be rendered.
-    let row = sqlx::query(
-        "SELECT materialization.local_asset_path,blob.mime_type,blob.byte_size \
+
+    let rows = sqlx::query(
+        "SELECT DISTINCT ON(target.target_ref) target.target_ref,materialization.local_asset_path,blob.mime_type,blob.byte_size \
          FROM collection_observation_target target \
          JOIN linggan_media_resource_relation relation \
               ON relation.platform=target.platform AND relation.subject_kind='author' \
@@ -644,24 +755,35 @@ async fn apply_observation_target_avatar(
               ON attempt.media_observation_ref=observation.observation_ref \
          JOIN linggan_media_materialization materialization USING(download_attempt_ref) \
          JOIN linggan_media_blob blob ON blob.sha256=materialization.blob_sha256 \
-         WHERE target.target_ref=$1 AND blob.mime_type LIKE 'image/%' \
+         WHERE target.target_ref=ANY($1) AND blob.mime_type LIKE 'image/%' \
            AND NOT EXISTS (SELECT 1 FROM linggan_current_material_media_disposition disposition \
                            WHERE disposition.slot_key=relation.slot_key \
                               OR disposition.blob_sha256=materialization.blob_sha256 \
                               OR disposition.materialization_ref=materialization.materialization_ref) \
-         ORDER BY materialization.verified_at DESC LIMIT 1",
-    )
-    .bind(target_ref)
-    .fetch_optional(&mut **tx)
-    .await?;
-    let Some(row) = row else {
-        return Ok(());
-    };
+         ORDER BY target.target_ref,materialization.verified_at DESC",
+    ).bind(&refs).fetch_all(&mut **tx).await?;
+    let rows: HashMap<Uuid, PgRow> = rows
+        .into_iter()
+        .map(|row| (row.get("target_ref"), row))
+        .collect();
+    for item in items.iter_mut().filter(|item| needs_avatar(item)) {
+        if let Some(row) = item
+            .collection_context
+            .target_ref
+            .and_then(|target| rows.get(&target))
+        {
+            apply_target_avatar(item, row);
+        }
+    }
+    Ok(())
+}
+
+fn apply_target_avatar(item: &mut MaterialLibraryItem, row: &PgRow) {
     let local_asset_path: String = row.get("local_asset_path");
     let mime_type: String = row.get("mime_type");
     let byte_size: i64 = row.get("byte_size");
     let Some(avatar) = item.media.get_mut("avatar").and_then(Value::as_object_mut) else {
-        return Ok(());
+        return;
     };
     avatar.insert("localAssetUrl".to_owned(), Value::String(local_asset_path));
     avatar.insert("fallbackUsed".to_owned(), Value::Bool(true));
@@ -678,7 +800,6 @@ async fn apply_observation_target_avatar(
             "byteSize":byte_size
         }),
     );
-    Ok(())
 }
 
 fn item_matches_filters(item: &MaterialLibraryItem, query: &EvidenceQuery) -> bool {
@@ -935,15 +1056,64 @@ fn current_detail_provenance(current: &WorkResourceCurrent) -> (Vec<Uuid>, Vec<V
 }
 
 /// Finite explicit-ref display hydration shares the standard field/media owners and domain gate.
-async fn read_resource_batch(database:&Database,query:&EvidenceQuery,refs:&[uuid::Uuid])->Result<MaterialLibraryProjection,MaterialReadError>{
- let mut tx=database.pool().begin().await?;
- sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY").execute(&mut *tx).await?;
- let as_of:String=sqlx::query_scalar("SELECT scope_001_now()::text").fetch_one(&mut *tx).await?;
- let allowed:Vec<uuid::Uuid>=sqlx::query_scalar("SELECT DISTINCT content_public_ref FROM linggan_material_domain_usage WHERE domain_ref=$1 AND content_public_ref=ANY($2)").bind(query.domain_ref()).bind(refs).fetch_all(&mut *tx).await?;
- let currents=crate::work_resource_current::read_work_resource_currents(&mut tx,&allowed,&as_of).await?;
- let mut items=Vec::new();
- for current in currents {let mut item=material_item(&current,None);enrich_discovery_material(&mut tx,&mut item,&as_of,current.author_attribution_source.as_deref()).await?;material_social_read::enrich(&mut tx,&mut item,None,&as_of).await?;enrich_media_material(&mut tx,&mut item,&as_of).await?;if item_matches_filters(&item,query){items.push(item);}}
- items.sort_by(|a,b| b.summary.last_observed_at.cmp(&a.summary.last_observed_at).then_with(|| a.identity.platform.cmp(&b.identity.platform)).then_with(|| a.identity.content_external_id.cmp(&b.identity.content_external_id)));
- tx.commit().await?;
- Ok(MaterialLibraryProjection{scanned_count:allowed.len(),items,query_scope:"accepted_typed_material_explicit_refs",as_of,cursor:None,truncated:false,scan_limited:false})
+async fn read_resource_batch(
+    database: &Database,
+    query: &EvidenceQuery,
+    refs: &[uuid::Uuid],
+) -> Result<MaterialLibraryProjection, MaterialReadError> {
+    let mut tx = database.pool().begin().await?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        .execute(&mut *tx)
+        .await?;
+    let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text")
+        .fetch_one(&mut *tx)
+        .await?;
+    let allowed:Vec<uuid::Uuid>=sqlx::query_scalar("SELECT DISTINCT content_public_ref FROM linggan_material_domain_usage WHERE domain_ref=$1 AND content_public_ref=ANY($2)").bind(query.domain_ref()).bind(refs).fetch_all(&mut *tx).await?;
+    let currents =
+        crate::work_resource_current::read_work_resource_currents(&mut tx, &allowed, &as_of)
+            .await?;
+    let mut items = Vec::new();
+    for item in enrich_current_batch(&mut tx, &currents, None, &as_of).await? {
+        if item_matches_filters(&item, query) {
+            items.push(item);
+        }
+    }
+    items.sort_by(|a, b| {
+        b.summary
+            .last_observed_at
+            .cmp(&a.summary.last_observed_at)
+            .then_with(|| a.identity.platform.cmp(&b.identity.platform))
+            .then_with(|| {
+                a.identity
+                    .content_external_id
+                    .cmp(&b.identity.content_external_id)
+            })
+    });
+    tx.commit().await?;
+    Ok(MaterialLibraryProjection {
+        scanned_count: allowed.len(),
+        items,
+        query_scope: "accepted_typed_material_explicit_refs",
+        as_of,
+        cursor: None,
+        truncated: false,
+        scan_limited: false,
+    })
+}
+
+async fn enrich_current_batch(
+    tx: &mut Transaction<'_, Postgres>,
+    rows: &[WorkResourceCurrent],
+    text: Option<&str>,
+    as_of: &str,
+) -> Result<Vec<MaterialLibraryItem>, sqlx::Error> {
+    let mut items: Vec<_> = rows.iter().map(|row| material_item(row, text)).collect();
+    let sources: Vec<_> = rows
+        .iter()
+        .map(|row| row.author_attribution_source.as_deref())
+        .collect();
+    enrich_discovery_batch(tx, &mut items, as_of, &sources).await?;
+    material_social_read::enrich_batch(tx, &mut items, text, as_of).await?;
+    enrich_media_batch(tx, &mut items, as_of).await?;
+    Ok(items)
 }
