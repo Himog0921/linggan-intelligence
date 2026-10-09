@@ -154,3 +154,8 @@ LIDS 现在统一约束全项目的设计表达，但其成熟度仍为 Proposed
 ## MODEL-PI-001 交付分支
 
 [页面规格](pages/model-ai-settings-page.md)、[变更清单](changes/model-pi-001-ui-change-manifest.md)、[实施验收](acceptance/model-pi-001-acceptance.md) 记录四区设置、个人菜单最小适配、真实 SDK 与来源授权边界。
+
+## TOPIC-MAP-V41-001
+
+[单一交付包与 UI 变更清单](../plans/active/topic-map-v41-001.md)；用户指定 V4.1 Demo 布局，LIDS 表达，既有静态参考只约束其旧范围。
+[实施验收](acceptance/topic-map-v41-001-acceptance.md)记录自动证明、隔离浏览器和未发布/业务边界。

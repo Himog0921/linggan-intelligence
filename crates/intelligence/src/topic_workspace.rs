@@ -167,33 +167,53 @@ pub async fn import_topic_workspace(
     database: &Database,
     request: &TopicWorkspaceImport,
 ) -> Result<TopicWorkspaceReceipt, TopicWorkspaceError> {
-    validate_import(request)?;
-    let request_sha256 = request_hash(request)?;
     let mut transaction = database.pool().begin().await.map_err(database_error)?;
-    lock_import_scope(&mut transaction, request).await?;
-    if let Some(receipt) = replay_receipt(&mut transaction, request, &request_sha256).await? {
-        transaction.commit().await.map_err(database_error)?;
+    let receipt = import_topic_workspace_in(&mut transaction, request).await?;
+    transaction.commit().await.map_err(database_error)?;
+    Ok(receipt)
+}
+
+pub(crate) async fn import_topic_workspace_in(
+    transaction: &mut Transaction<'_, Postgres>,
+    request: &TopicWorkspaceImport,
+) -> Result<TopicWorkspaceReceipt, TopicWorkspaceError> {
+    import_topic_workspace_in_mode(transaction, request, true).await
+}
+
+pub(crate) async fn import_reclassified_workspace_in(
+    transaction: &mut Transaction<'_, Postgres>,
+    request: &TopicWorkspaceImport,
+) -> Result<TopicWorkspaceReceipt, TopicWorkspaceError> {
+    import_topic_workspace_in_mode(transaction, request, false).await
+}
+
+async fn import_topic_workspace_in_mode(
+    transaction: &mut Transaction<'_, Postgres>,
+    request: &TopicWorkspaceImport,
+    require_counterweight: bool,
+) -> Result<TopicWorkspaceReceipt, TopicWorkspaceError> {
+    validate_import_mode(request, require_counterweight)?;
+    let request_sha256 = request_hash(request)?;
+    lock_import_scope(transaction, request).await?;
+    if let Some(receipt) = replay_receipt(transaction, request, &request_sha256).await? {
         return Ok(receipt);
     }
-    ensure_materials_exist(&mut transaction, &request.members).await?;
-    let (topic_ref, actual_version) = resolve_topic(&mut transaction, request).await?;
+    ensure_materials_exist(transaction, &request.members).await?;
+    let (topic_ref, actual_version) = resolve_topic(transaction, request).await?;
     if request.expected_version != actual_version {
         return Err(TopicWorkspaceError::VersionConflict {
             expected: request.expected_version,
             actual: actual_version,
         });
     }
-    let version = actual_version.unwrap_or(0) + 1;
-    let receipt = insert_workspace_version(
-        &mut transaction,
+    insert_workspace_version(
+        transaction,
         request,
         topic_ref,
-        version,
+        actual_version.unwrap_or(0) + 1,
         &request_sha256,
     )
-    .await?;
-    transaction.commit().await.map_err(database_error)?;
-    Ok(receipt)
+    .await
 }
 
 pub async fn read_topic_workspace(
@@ -226,7 +246,14 @@ pub async fn read_topic_workspace(
     Ok(Some(workspace_from_row(&row, members)))
 }
 
+#[cfg(test)]
 fn validate_import(request: &TopicWorkspaceImport) -> Result<(), TopicWorkspaceError> {
+    validate_import_mode(request, true)
+}
+fn validate_import_mode(
+    request: &TopicWorkspaceImport,
+    require_counterweight: bool,
+) -> Result<(), TopicWorkspaceError> {
     if !valid_idempotency_key(&request.idempotency_key) {
         return Err(TopicWorkspaceError::InvalidRequest(
             "invalid idempotency key",
@@ -243,12 +270,27 @@ fn validate_import(request: &TopicWorkspaceImport) -> Result<(), TopicWorkspaceE
         "invalid adjudication note",
     )?;
     validate_text(&request.source_boundary, 2000, "invalid source boundary")?;
-    if request.members.len() < 2 || request.members.len() > MAX_MEMBERS {
+    if request.members.len() < if require_counterweight { 2 } else { 1 }
+        || request.members.len() > MAX_MEMBERS
+    {
         return Err(TopicWorkspaceError::InvalidRequest(
             "invalid material count",
         ));
     }
-    validate_members(&request.members)
+    if require_counterweight {
+        validate_members(&request.members)
+    } else {
+        let mut seen = BTreeSet::new();
+        for member in &request.members {
+            if !seen.insert(member.work_public_ref) {
+                return Err(TopicWorkspaceError::InvalidRequest(
+                    "duplicate Work Resource",
+                ));
+            }
+            validate_text(&member.rationale, 1000, "invalid member rationale")?;
+        }
+        Ok(())
+    }
 }
 
 fn validate_members(members: &[TopicMaterialMemberImport]) -> Result<(), TopicWorkspaceError> {

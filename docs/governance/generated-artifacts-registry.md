@@ -54,3 +54,11 @@
 - 来源：`creator_discovery_postgres`、`creator_discovery_worker_postgres` 与专用本地 API 进程；输入均为合成数据。测试源码是维护的测试输入，不是生成产物。
 - Git：不提交日志、数据库、截图或构建产物；可复现命令与结果转写至 `docs/audits/creator-discovery-001-acceptance.md`。
 - 清理：确认测试和本任务 API 进程结束后停止本任务容器，`--rm` 删除其临时数据；不得清理其他容器、业务库、工作树或共享 runtime。
+
+## TOPIC-MAP-V41-001 隔离验证
+
+- 来源：主题图谱 Rust/API/JS/CSS 与 `scripts/test-topic-map-postgres.sh`。
+- 固定位置：Cargo缓存在worktree已忽略target；测试输出与临时浏览器证据放 `/tmp/topic-map-v41-*`；供 Mog 审阅的合成截图保存到 Codex 当前任务授权的 visualizations 目录，文件名 `topic-map-demo-corrected-*.jpg`。Docker容器/volume使用上述脚本唯一随机名。
+- 不入Git，不包含真实原文/运行库dump/凭据；脚本退出清理容器与volume并验证成功。
+- 再生：上述脚本 + API focused tests + 隔离合成数据浏览器走查。责任 TOPIC-MAP-V41-001 root。
+- 本机发布追加：经 Mog 单独授权的运行库加密备份、校验和与不含正文/凭据的发布回执保存在既有忽略目录 `database/backups/topic-map-v41-<UTC>/`；密钥继续独立保管。真实3000的浏览器截图归本任务 Codex visualizations，文件名 `topic-map-demo-corrected-runtime-*.jpg`，不入Git。合成截图与运行页截图不得互相替代。

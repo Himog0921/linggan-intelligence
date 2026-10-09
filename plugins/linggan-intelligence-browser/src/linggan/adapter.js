@@ -834,7 +834,7 @@ export function createTaskSpec({
   capabilitiesRequested, maximumQuota = null, commentLimit = 'not_requested',
   acquireMedia = 'not_requested', riskPolicy = 'local_trusted_user_initiated', stopConditions = [],
   replyExpandLimit, ranking, scrollRounds, topByLikes, publishedWithinDays,
-  commentScope, requestedCommentLimit, surface,
+  commentScope, requestedCommentLimit, surface, incrementalCommentBudget, incrementalSearchBudget,
 } = {}) {
   const value = {
     contractVersion: TASK_SPEC_VERSION, taskId, source, platform, pageType,
@@ -851,6 +851,8 @@ export function createTaskSpec({
     ...(commentScope === undefined ? {} : { commentScope }),
     ...(requestedCommentLimit === undefined ? {} : { requestedCommentLimit }),
     ...(surface === undefined ? {} : { surface }),
+    ...(incrementalCommentBudget === undefined ? {} : { incrementalCommentBudget }),
+    ...(incrementalSearchBudget === undefined ? {} : { incrementalSearchBudget }),
   };
   validateTaskSpec(value);
   return value;
@@ -894,6 +896,21 @@ export function validateTaskSpec(spec = {}) {
         : capability === 'batch_checkpoint' ? ['taskType'] : ['contentExternalId'];
   if (Object.keys(target).length !== 1 || !allowedTargetKeys.includes(Object.keys(target)[0])) {
     throw new Error('task_spec_target_identity_only');
+  }
+  if (spec.incrementalSearchBudget !== undefined) {
+    const b = spec.incrementalSearchBudget;
+    if (capability !== 'discovery_search' || spec.source !== 'scheduled' || spec.platform !== 'xhs'
+      || !b || !Number.isInteger(b.maxScrollRounds) || b.maxScrollRounds < 1 || b.maxScrollRounds > 3
+      || !Number.isInteger(b.maxDurationSeconds) || b.maxDurationSeconds < 1 || b.maxDurationSeconds > 180
+      || !Number.isInteger(b.candidateQuota) || b.candidateQuota < 1 || b.candidateQuota > 200 || spec.maximumQuota !== b.candidateQuota
+      || (spec.scrollRounds !== undefined && spec.scrollRounds > b.maxScrollRounds)) throw new Error('incremental_search_budget_invalid');
+  }
+  if (spec.incrementalCommentBudget !== undefined) {
+    const b = spec.incrementalCommentBudget;
+    if (!['comments','replies'].includes(capability) || spec.source !== 'scheduled' || spec.platform !== 'xhs'
+      || !b || !Array.isArray(b.knownCommentIds) || b.knownCommentIds.length > 5000 || b.knownCommentIds.some((id) => typeof id !== 'string' || !id.trim() || id.length > 256)
+      || new Set(b.knownCommentIds).size !== b.knownCommentIds.length || !Number.isInteger(b.newUniqueLimit) || b.newUniqueLimit < 1 || b.newUniqueLimit > 30 || b.newUniqueLimit !== spec.commentLimit
+      || !Number.isInteger(b.maxScrollRounds) || b.maxScrollRounds < 1 || b.maxScrollRounds > 50 || !Number.isInteger(b.maxDurationSeconds) || b.maxDurationSeconds < 1 || b.maxDurationSeconds > 600) throw new Error('incremental_comment_budget_invalid');
   }
   const searchInstruction = ['ranking', 'scrollRounds', 'topByLikes', 'publishedWithinDays'].some((key) => spec[key] !== undefined);
   const discussionInstruction = ['commentScope', 'requestedCommentLimit'].some((key) => spec[key] !== undefined);

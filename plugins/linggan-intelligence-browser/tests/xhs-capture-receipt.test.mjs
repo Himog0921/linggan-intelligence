@@ -157,3 +157,13 @@ test('search surface receipt records a task limit separately from the loaded pag
     resultSetComplete: false,
   });
 });
+
+test('bounded incremental comments preserve new-identity scope and do not infer platform total', () => {
+  const budget = { knownCommentIds: ['old'], newUniqueLimit: 30, maxScrollRounds: 20, maxDurationSeconds: 180 };
+  const receipt = buildXhsCommentCollectionReceipt({ noteId: 'synthetic', maxTotal: 30, incrementalBudget: budget, publicCommentCount: 594, actual: 12, targetIdentity: 'matched', stopReason: 'scroll_budget' });
+  assert.equal(receipt.scope, 'incremental_new');
+  assert.equal(receipt.expectedCount, 30);
+  assert.equal(receipt.uniqueCollectedCount, 12);
+  assert.equal(receipt.pageCommentCount, 594);
+  assert.equal(receipt.state, 'partial');
+});

@@ -33,6 +33,7 @@ mod station_view;
 mod target_drawer;
 #[cfg(test)]
 mod target_inspector_performance_tests;
+mod topic_map;
 mod topic_workspace;
 #[cfg(test)]
 mod topic_workspace_tests;
@@ -327,6 +328,7 @@ fn router(state: LocalWebState) -> Router {
         .merge(creator_lifecycle_api::routes())
         .merge(creators::routes())
         .merge(topic_workspace::routes())
+        .merge(topic_map::routes())
         .merge(comment_study::routes())
         .merge(model_settings::routes())
         .route("/corpus", get(corpus_entry))

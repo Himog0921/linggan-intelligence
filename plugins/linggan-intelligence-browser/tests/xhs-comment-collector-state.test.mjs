@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   collectComments,
+  collectCommentImages,
   initializeCollectedComments,
   parseCommentTextTail,
   resolveCommentContinuationHint,
@@ -372,4 +373,45 @@ test('collectComments stops immediately when the page reports an access risk', a
 
   assert.equal(result.total, 0);
   assert.equal(result.stopReason, 'risk_control');
+});
+
+test('incremental budget counts stable root, parent and reply identities together, skips known and duplicate pages', async () => {
+  const { boundedNewCommentSelection, normalizeIncrementalCommentBudget } = await import('../src/platforms/xhs/commentCollector.js');
+  const budget = { knownCommentIds: ['known'], newUniqueLimit: 30, maxScrollRounds: 20, maxDurationSeconds: 180 };
+  const rows = [{ commentId: 'known' }, { commentId: 'new-parent', level: 1 }, { commentId: 'new-reply', parentCommentId: 'new-parent', level: 2 }, ...Array.from({ length: 40 }, (_, i) => ({ commentId: `n-${i}` })), { commentId: 'new-reply', level: 2 }];
+  const selected = boundedNewCommentSelection(rows, budget);
+  assert.equal(selected.length, 30);
+  assert.equal(selected[0].commentId, 'new-parent');
+  assert.equal(selected[1].commentId, 'new-reply');
+  assert.equal(new Set(selected.map((r) => r.commentId)).size, 30);
+  assert.throws(() => normalizeIncrementalCommentBudget({ ...budget, newUniqueLimit: 31 }));
+  assert.throws(() => normalizeIncrementalCommentBudget({ ...budget, maxScrollRounds: 0 }));
+  assert.throws(() => normalizeIncrementalCommentBudget({ ...budget, knownCommentIds: ['same', 'same'] }));
+});
+
+// Execute the real image collector; page-controller mocks cannot catch lexical failures.
+test('collectCommentImages enters a visible comment container without an incremental budget', async (t) => {
+  const previousWindow = globalThis.window; const previousDocument = globalThis.document;
+  let collecting = 0; let stop = false;
+  const container = { innerText: '暂无评论', getBoundingClientRect: () => ({ width: 300, height: 300 }), querySelectorAll: () => [] };
+  globalThis.window = { getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }) };
+  globalThis.document = { body: { innerText: '' }, querySelector: () => null, querySelectorAll: (selector) => selector === '.comments-container' ? [container] : [] };
+  t.after(() => { globalThis.window = previousWindow; globalThis.document = previousDocument; });
+  const result = await collectCommentImages({ shouldStop: () => stop, onProgress: () => { collecting += 1; stop = true; } });
+  assert.ok(collecting > 0); assert.equal(result.total, 0); assert.equal(result.stopReason, 'manual_stop');
+});
+
+// The actual API-to-DOM fallback must not manufacture platform IDs for the new-ID allowance.
+test('incremental actual DOM fallback excludes synthetic root and reply IDs', async (t) => {
+ const saved = { window:globalThis.window,document:globalThis.document,chrome:globalThis.chrome };
+ const node = (id, text) => ({ dataset: id ? { commentId:id } : {}, innerText:text, querySelector: () => null, querySelectorAll: () => [], getAttribute: () => null });
+ const root = node('', '孩子每天做练习很困难'); const reply = node('', '每天都需要提醒'); const stable = node('stable-root', '怎样开始合成练习');
+ const parents = [{ querySelector: () => root, querySelectorAll: () => [reply] }, { querySelector: () => stable, querySelectorAll: () => [] }];
+ const container = { innerText:'共 3 条评论 - THE END -', scrollTop:0, scrollHeight:300, clientHeight:300, getBoundingClientRect: () => ({ width:300,height:300 }), querySelectorAll: (selector) => selector === '.parent-comment' || selector === '.parent-comment, .comment-item' ? parents : [], querySelector: () => null };
+ globalThis.window = { location:{href:'https://www.xiaohongshu.com/explore/dom-bounded',pathname:'/explore/dom-bounded'}, getComputedStyle:()=>({display:'block',visibility:'visible',opacity:'1'}) };
+ globalThis.document = { body:{innerText:''}, scrollingElement:container, documentElement:container, querySelector:()=>null, querySelectorAll:(selector)=>selector === '.comments-container' ? [container] : [] };
+ globalThis.chrome = { runtime:{ getURL:()=>'' } };
+ t.after(()=>Object.assign(globalThis,saved));
+ const result = await collectComments({ noteId:'dom-bounded',persist:false,emitReceipt:false,taskSpec:{incrementalCommentBudget:{knownCommentIds:[],newUniqueLimit:30,maxScrollRounds:3,maxDurationSeconds:180}},executionPolicy:{minimumCooldownMs:0} });
+ assert.deepEqual(result.comments.map((c)=>c.commentId),['stable-root']); assert.equal(result.total,1);
 });

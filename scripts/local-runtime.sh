@@ -351,6 +351,10 @@ migrate() {
   apply_migration_once "0113_creator_patrol_detail_follow" "$project_root/database/migrations/0113_creator_patrol_detail_follow.sql"
   apply_migration_once "0114_comment_study_effective_head" "$project_root/database/migrations/0114_comment_study_effective_head.sql"
   apply_migration_once "0115_creator_discovery" "$project_root/database/migrations/0115_creator_discovery.sql"
+  apply_migration_once "0116_topic_map" "$project_root/database/migrations/0116_topic_map.sql"
+  apply_migration_once "0117_topic_map_research" "$project_root/database/migrations/0117_topic_map_research.sql"
+  apply_migration_once "0118_topic_map_structure" "$project_root/database/migrations/0118_topic_map_structure.sql"
+  apply_migration_once "0119_topic_map_collection_search" "$project_root/database/migrations/0119_topic_map_collection_search.sql"
 }
 
 case "$command_name" in

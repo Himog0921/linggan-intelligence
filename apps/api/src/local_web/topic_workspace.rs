@@ -5,7 +5,7 @@ use axum::{
     Json, Router,
     extract::{Path, State, rejection::JsonRejection},
     http::{HeaderValue, StatusCode, header},
-    response::{Html, IntoResponse, Redirect, Response},
+    response::{Html, IntoResponse, Response},
     routing::{get, post},
 };
 use linggan_evidence::read_work_resource;
@@ -20,17 +20,12 @@ const TOPIC_JS: &str = include_str!("topic_workspace.js");
 
 pub(super) fn routes() -> Router<LocalWebState> {
     Router::new()
-        .route("/topics", get(entry))
         .route("/topics/{canonical_key}", get(page))
         .route("/api/local/topic-workspaces", post(import_json))
         .route(
             "/api/local/topic-workspaces/{canonical_key}",
             get(read_json),
         )
-}
-
-async fn entry() -> Redirect {
-    Redirect::temporary("/topics/task-initiation-difficulty")
 }
 
 pub(super) async fn stylesheet() -> Response {

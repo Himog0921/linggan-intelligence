@@ -1637,6 +1637,14 @@ async function performDiscoveryScroll(scrollTarget, { currentTop = 0, nextTop = 
   }
 }
 
+export function normalizeIncrementalSearchBudget(value) {
+  if (value == null) return null;
+  if (!Number.isInteger(value.maxScrollRounds) || value.maxScrollRounds < 1 || value.maxScrollRounds > 3
+    || !Number.isInteger(value.maxDurationSeconds) || value.maxDurationSeconds < 1 || value.maxDurationSeconds > 180
+    || !Number.isInteger(value.candidateQuota) || value.candidateQuota < 1 || value.candidateQuota > 200) throw new Error('incremental_search_budget_invalid');
+  return { ...value };
+}
+
 export function buildDiscoveryPlan(containerSelector, {
   maxScrolls = 10,
   expectedCount = 0,
@@ -1709,6 +1717,9 @@ async function probeProfileBottom(containerSelector, previousSnapshot, settleDel
  * 在批量采集前调用，确保尽可能多的笔记被加载到 DOM 中
  */
 export async function discoverWithScroll(containerSelector, maxScrolls = 10, options = {}) {
+  const incrementalBudget = normalizeIncrementalSearchBudget(options.incrementalSearchBudget);
+  const deadline = incrementalBudget ? Date.now() + incrementalBudget.maxDurationSeconds * 1000 : null;
+  if (incrementalBudget) { maxScrolls = Math.min(Number(maxScrolls) || incrementalBudget.maxScrollRounds, incrementalBudget.maxScrollRounds); options = { ...options, expectedCount: Math.min(Number(options.expectedCount) || incrementalBudget.candidateQuota, incrementalBudget.candidateQuota) }; }
   const allNotes = new Map(); // key=noteId，滚动期间持续累积，不依赖回顶后的 DOM
   const scrollTrace = [];
   const scrollTraceLimit = 60;
@@ -1732,6 +1743,7 @@ export async function discoverWithScroll(containerSelector, maxScrolls = 10, opt
   };
 
   for (let i = 0; i < plan.maxRounds; i++) {
+    if (deadline && Date.now() >= deadline) { stopReason = 'time_budget'; break; }
     roundsUsed = i + 1;
     scrollTarget = getDiscoveryScrollTarget(containerSelector);
     if (isRiskControlPage()) {
@@ -1822,6 +1834,7 @@ export async function discoverWithScroll(containerSelector, maxScrolls = 10, opt
       break;
     }
 
+    if (deadline && Date.now() >= deadline) { stopReason = 'time_budget'; break; }
     // Each round uses one finite, container-height-based page-load action.
     const step = Math.round(metrics.viewportHeight * plan.stepRatio);
     const nextTop = Math.min(metrics.maxTop, metrics.scrollTop + step);

@@ -167,7 +167,7 @@ const xhsPageController = createXhsPageController({
   extractNoteId,
   sendToBackground,
   downloadNoteMediaFromRecord: (note, options) => manualMediaDownloadService.downloadNoteMediaFromRecord(note, options),
-  discoverSurface: async ({ mode, maximumQuota, scrollRounds }) => {
+  discoverSurface: async ({ mode, maximumQuota, scrollRounds, incrementalSearchBudget }) => {
     const expectedCount = Math.max(1, Number(maximumQuota) || 20);
     // 下拉次数由服务端的采样口径决定；没给就沿用采集器自己的默认。
     // **按次数控制，不按条数控制**：页面每次加载出多少条不由我们决定，
@@ -176,7 +176,7 @@ const xhsPageController = createXhsPageController({
     const cards = await discoverWithScroll(
       mode === 'profile' ? '#userPostedFeeds' : '.feeds-container',
       Number.isFinite(rounds) && rounds >= 0 ? rounds : undefined,
-      { expectedCount },
+      { expectedCount, incrementalSearchBudget },
     );
     const executionSummary = buildDiscoveryExecutionSummary(cards.discoveryMeta);
     if (mode === 'profile') {
@@ -307,7 +307,8 @@ async function collectApprovedDetailPageSession(message = {}) {
     targetNoteId: contentExternalId,
     includeComments: plan.lanes.includes('comments') || plan.lanes.includes('replies'),
     commentLimit: plan.commentLimit,
-    commentDepthMode: COMMENT_DEPTH_MODE.TWO_LEVEL,
+    commentDepthMode: plan.incrementalCommentBudget ? COMMENT_DEPTH_MODE.ALL_REPLIES : COMMENT_DEPTH_MODE.TWO_LEVEL,
+    incrementalCommentBudget: plan.incrementalCommentBudget,
     maxSubComments: plan.replyExpandLimit,
     taskSpec,
     deferLingganDelivery: true,

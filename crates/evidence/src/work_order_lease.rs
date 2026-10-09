@@ -119,6 +119,7 @@ struct LeaseSubject {
     /// 这次采集的采样口径，取自**工单冻结的那一版规则**而不是目标当前的活跃版本。
     /// 工单发出时约定的口径才是这一轮的依据；中途有人改了规则，也不该改写已发出的这一单。
     sampling: SamplingPolicy,
+    stop_conditions: Value,
 }
 
 /// 一次关键词搜索的取样方式。四项都可能缺失——缺了就不往任务里写那一项，
@@ -136,6 +137,7 @@ struct MaterialTarget {
     comment_limit: i32,
     reply_expand_limit: i32,
     acquire_media: bool,
+    incremental_comment_budget: Option<Value>,
 }
 
 /// 给一张工单发租。
@@ -768,6 +770,12 @@ async fn load_subject(
         lifecycle_state: row.13,
         requested_by: row.14,
         sampling: load_sampling_policy(transaction, row.10).await?,
+        stop_conditions: sqlx::query_scalar(
+            "SELECT stop_conditions FROM collection_work_order WHERE work_order_ref=$1",
+        )
+        .bind(work_order_ref)
+        .fetch_one(&mut **transaction)
+        .await?,
     })
 }
 
@@ -838,6 +846,17 @@ fn keyword_search_execution(subject: &LeaseSubject) -> Value {
 /// 是读取时按点赞排序就能得到的事，不必在采集时先砍一刀。
 fn keyword_archive_target(subject: &LeaseSubject) -> Value {
     json!({ "query": search_term(&subject.identity_key, Some(ARCHIVE_RANKING)) })
+}
+
+/// The temporary research search freezes its finite browser budget in the WorkOrder.
+/// Ordinary long-term archive tasks retain their original execution policy.
+fn keyword_archive_execution(subject: &LeaseSubject) -> Value {
+    if let Some(scope) = subject.stop_conditions.get("topicMapSearch") {
+        return json!({"ranking": ARCHIVE_RANKING, "scrollRounds": 3,
+            "incrementalSearchBudget": {"maxScrollRounds": 3,"maxDurationSeconds": 180,
+                "candidateQuota": scope.get("candidateQuota").and_then(Value::as_i64).unwrap_or(0).min(200)}});
+    }
+    json!({"ranking": ARCHIVE_RANKING, "scrollRounds": ARCHIVE_SCROLL_ROUNDS})
 }
 
 /// 建档按点赞排序。这是建档的目的，不是可配项。
@@ -1137,7 +1156,10 @@ fn expand_into_tasks(
                     subject,
                     "comments",
                     target.clone(),
-                    json!({}),
+                    material
+                        .incremental_comment_budget
+                        .as_ref()
+                        .map_or_else(|| json!({}), |b| json!({"incrementalCommentBudget":b})),
                     material.comment_limit,
                     material.comment_limit,
                     json!(material.comment_limit),
@@ -1149,7 +1171,7 @@ fn expand_into_tasks(
                     subject,
                     "replies",
                     target.clone(),
-                    json!({ "replyExpandLimit": material.reply_expand_limit }),
+                    material.incremental_comment_budget.as_ref().map_or_else(||json!({ "replyExpandLimit": material.reply_expand_limit }),|b|json!({"replyExpandLimit":material.reply_expand_limit,"incrementalCommentBudget":b})),
                     material.comment_limit,
                     material.comment_limit,
                     json!(material.comment_limit),
@@ -1218,7 +1240,7 @@ fn expand_into_tasks(
         ("keyword", "deep_archive") => vec![(
             "discovery_search",
             keyword_archive_target(subject),
-            json!({ "ranking": ARCHIVE_RANKING, "scrollRounds": ARCHIVE_SCROLL_ROUNDS }),
+            keyword_archive_execution(subject),
             subject.max_works,
             // 建档不设取前 N：能取多少取多少，所以「该拿回多少」就是这一单的篇数配额本身。
             subject.max_works,
@@ -1331,15 +1353,26 @@ async fn load_material_targets(
     .bind(work_order_ref)
     .fetch_all(&mut **transaction)
     .await?;
-    let targets: Vec<MaterialTarget> = rows
+    let mut targets: Vec<MaterialTarget> = rows
         .into_iter()
         .map(|row| MaterialTarget {
             content_external_id: row.0,
             comment_limit: row.1,
             reply_expand_limit: row.2,
             acquire_media: row.3,
+            incremental_comment_budget: None,
         })
         .collect();
+    let budget_ready: bool =
+        sqlx::query_scalar("SELECT to_regclass('linggan_topic_map_comment_budget')IS NOT NULL")
+            .fetch_one(&mut **transaction)
+            .await?;
+    if budget_ready {
+        for t in &mut targets {
+            let budget:Option<Value>=sqlx::query_scalar("SELECT jsonb_build_object('knownCommentIds',b.known_comment_ids,'newUniqueLimit',b.new_unique_limit,'maxScrollRounds',b.max_scroll_rounds,'maxDurationSeconds',b.max_duration_seconds)FROM linggan_topic_map_comment_budget b JOIN linggan_material_content c ON c.public_ref=b.content_public_ref WHERE b.work_order_ref=$1 AND c.content_external_id=$2").bind(work_order_ref).bind(&t.content_external_id).fetch_optional(&mut **transaction).await?;
+            t.incremental_comment_budget = budget;
+        }
+    }
     Ok(targets)
 }
 
@@ -1408,7 +1441,9 @@ fn freeze_capture_identity(subject: &LeaseSubject) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::{LeaseError, LeaseSubject, MaterialTarget, expand_into_tasks, reject_if_rule_changed};
+    use super::{
+        LeaseError, LeaseSubject, MaterialTarget, expand_into_tasks, reject_if_rule_changed,
+    };
     use linggan_contracts::ProducerTaskSpec;
     use serde_json::{Value, json};
     use uuid::Uuid;
@@ -1431,6 +1466,7 @@ mod tests {
             lifecycle_state: "archived".to_owned(),
             requested_by: "person".to_owned(),
             sampling: super::SamplingPolicy::default(),
+            stop_conditions: json!({}),
         }
     }
 
@@ -1447,10 +1483,14 @@ mod tests {
         assert!(reject_if_rule_changed(&follow).is_ok());
 
         follow.active_rule_automatic_enabled = Some(false);
-        assert!(matches!(reject_if_rule_changed(&follow), Err(LeaseError::ControlBlocked { reason_code }) if reason_code == "monitoring_paused"));
+        assert!(
+            matches!(reject_if_rule_changed(&follow), Err(LeaseError::ControlBlocked { reason_code }) if reason_code == "monitoring_paused")
+        );
         follow.active_rule_automatic_enabled = Some(true);
         follow.current_revision_of_same_rule = Some(Uuid::new_v4());
-        assert!(matches!(reject_if_rule_changed(&follow), Err(LeaseError::ControlBlocked { reason_code }) if reason_code == "rule_revision_changed"));
+        assert!(
+            matches!(reject_if_rule_changed(&follow), Err(LeaseError::ControlBlocked { reason_code }) if reason_code == "rule_revision_changed")
+        );
     }
 
     #[test]
@@ -1459,6 +1499,7 @@ mod tests {
             &subject(),
             &[MaterialTarget {
                 content_external_id: "note-fixture".to_owned(),
+                incremental_comment_budget: None,
                 comment_limit: 20,
                 reply_expand_limit: 2,
                 acquire_media: true,
@@ -1498,6 +1539,7 @@ mod tests {
             &subject(),
             &[MaterialTarget {
                 content_external_id: "note-text-only".to_owned(),
+                incremental_comment_budget: None,
                 comment_limit: 10,
                 reply_expand_limit: 0,
                 acquire_media: false,
@@ -1515,6 +1557,7 @@ mod tests {
             &subject(),
             &[MaterialTarget {
                 content_external_id: "note-detail-only".to_owned(),
+                incremental_comment_budget: None,
                 comment_limit: 0,
                 reply_expand_limit: 0,
                 acquire_media: false,
@@ -1538,6 +1581,7 @@ mod tests {
         let subject = subject();
         let targets = [MaterialTarget {
             content_external_id: "note-fixture".to_owned(),
+            incremental_comment_budget: None,
             comment_limit: 20,
             reply_expand_limit: 2,
             acquire_media: true,
@@ -1607,6 +1651,7 @@ mod keyword_search_target_tests {
             lifecycle_state: "monitoring".to_owned(),
             requested_by: "person".to_owned(),
             sampling,
+            stop_conditions: json!({}),
         }
     }
 
