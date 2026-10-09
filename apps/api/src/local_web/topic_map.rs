@@ -57,7 +57,7 @@ async fn page() -> Html<String> {
         None,
     );
     Html(format!(
-        r#"<!doctype html><html lang="zh-CN" data-theme="linggan-intelligence"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>主题图谱 · Linggan Intelligence</title><link rel="stylesheet" href="/assets/topic-map.css"><script defer src="/assets/topic-map.js"></script></head><body><div class="v7-app topic-map-app">{header}<div id="topic-map-root" aria-label="主题图谱"><p role="status">正在读取领域与主题图谱…</p></div><noscript>主题图谱需要启用 JavaScript。已有作品可以在语料入口查看。</noscript></div></body></html>"#
+        r#"<!doctype html><html lang="zh-CN" data-theme="linggan-intelligence"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>主题图谱 · Linggan Intelligence</title><link rel="stylesheet" href="/assets/topic-map.css"><script defer src="/assets/topic-map.js"></script></head><body class="topic-map-page"><div class="v7-app topic-map-app">{header}<div id="topic-map-root" aria-label="主题图谱"><p role="status">正在读取领域与主题图谱…</p></div><noscript>主题图谱需要启用 JavaScript。已有作品可以在语料入口查看。</noscript></div></body></html>"#
     ))
 }
 async fn stylesheet() -> Response {

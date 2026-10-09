@@ -58,6 +58,6 @@
 ## TOPIC-MAP-V41-001 隔离验证
 
 - 来源：主题图谱 Rust/API/JS/CSS 与 `scripts/test-topic-map-postgres.sh`。
-- 固定位置：Cargo缓存在worktree已忽略target；测试输出、截图与浏览器证据只放系统临时目录 `/tmp/topic-map-v41-*`；Docker容器/volume使用上述脚本唯一随机名。
+- 固定位置：Cargo缓存在worktree已忽略target；测试输出与临时浏览器证据放 `/tmp/topic-map-v41-*`；供 Mog 审阅的合成截图保存到 Codex 当前任务授权的 visualizations 目录，文件名 `topic-map-demo-corrected-*.jpg`。Docker容器/volume使用上述脚本唯一随机名。
 - 不入Git，不包含真实原文/运行库dump/凭据；脚本退出清理容器与volume并验证成功。
 - 再生：上述脚本 + API focused tests + 隔离合成数据浏览器走查。责任 TOPIC-MAP-V41-001 root。
