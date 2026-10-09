@@ -18,8 +18,12 @@ pub struct CreatorScope {
     pub search_mode: String,
     pub relevance: Option<String>,
     pub traits: Option<String>,
+    /// Exact same-work analysis phrase; this is not a formal Topic identity.
+    pub topic_hint: Option<String>,
     pub focus: Option<String>,
     pub observation: Option<String>,
+    #[serde(default = "recent")]
+    pub sort: String,
     pub min_likes: Option<i64>,
     #[serde(default)]
     pub viral: bool,
@@ -41,6 +45,7 @@ fn platform() -> String {
 fn author() -> String {
     "author".into()
 }
+fn recent() -> String { "recent".into() }
 fn page_size() -> usize {
     50
 }
@@ -53,6 +58,8 @@ impl CreatorScope {
             || self.page > 1_000_000
             || self.min_likes.is_some_and(|x| x < 0)
             || self.query.as_ref().is_some_and(|x| x.chars().count() > 200)
+            || self.topic_hint.as_ref().is_some_and(|x| x.trim().is_empty() || x.chars().count() > 120)
+            || !matches!(self.sort.as_str(), "recent" | "high_likes" | "related_works" | "viral_works")
             || self
                 .relevance
                 .as_deref()
@@ -64,7 +71,7 @@ impl CreatorScope {
             || self
                 .observation
                 .as_deref()
-                .is_some_and(|x| !matches!(x, "outside" | "inside" | "monitoring" | "paused"))
+                .is_some_and(|x| !matches!(x, "outside" | "inside" | "monitoring" | "paused" | "other_domains_only" | "dismissed"))
             || self.traits.as_deref().is_some_and(|x| {
                 x.split(',').any(|v| {
                     !matches!(
@@ -110,8 +117,10 @@ impl CreatorScope {
         q.query = None;
         q.relevance = None;
         q.traits = None;
+        q.topic_hint = None;
         q.focus = None;
         q.observation = None;
+        q.sort = recent();
         q.min_likes = None;
         q.viral = false;
         q.high_likes = false;

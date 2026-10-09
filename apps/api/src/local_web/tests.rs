@@ -46,6 +46,26 @@ async fn legacy_evidence_route_cannot_bypass_domain_scoped_work_resources() {
     }
 }
 
+#[tokio::test]
+async fn evidence_library_rejects_unknown_url_filters_before_reading() {
+    let domain = "00000000-0000-4000-8000-000000000001";
+    let invalid = app().oneshot(Request::builder()
+        .uri(format!("/api/local/work-resources?domain={domain}&creatorKye=typo"))
+        .body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+    let valid = app().oneshot(Request::builder()
+        .uri(format!("/api/local/work-resources?domain={domain}&creatorKey=xhs%3A41&creatorFilter=%7B%22domain%22%3A%22{domain}%22%7D&returnTo=%2Fcorpus%2Fcreators%3Fdomain%3D{domain}"))
+        .body(Body::empty()).unwrap()).await.unwrap();
+    assert_ne!(valid.status(), StatusCode::BAD_REQUEST);
+    let parsed: material_projection::EvidenceLibraryParams = serde_json::from_value(json!({
+        "domain": domain,
+        "creatorKey": "xhs:41",
+        "creatorFilter": format!(r#"{{"domain":"{domain}"}}"#),
+        "returnTo": format!("/corpus/creators?domain={domain}"),
+    })).unwrap();
+    assert!(material_projection::local_query(&parsed).is_ok());
+}
+
 #[test]
 fn lease_refusal_keeps_the_paused_domain_reason() {
     assert_eq!(
@@ -803,6 +823,7 @@ fn default_local_query_is_latest_accepted_discovery_and_explicit_windows_remain_
     let default = material_projection::local_query(&material_projection::EvidenceLibraryParams {
         creator_key: None,
         creator_filter: None,
+        _return_to: None,
         public_refs: None,
         cursor: None,
         q: None,
@@ -824,6 +845,7 @@ fn default_local_query_is_latest_accepted_discovery_and_explicit_windows_remain_
     let explicit = material_projection::local_query(&material_projection::EvidenceLibraryParams {
         creator_key: None,
         creator_filter: None,
+        _return_to: None,
         public_refs: None,
         cursor: None,
         q: None,
