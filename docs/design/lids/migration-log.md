@@ -10,6 +10,8 @@
 
 现有创作者页按 Corpus Explorer 和 DESIGN-003 收回重复视觉标题与常驻说明；搜索、快捷筛选、结果数和作者表格优先，范围筛选、五项统计及高级条件可展开，保留未知/来源限制与全部原行为。仅影响本页组合，不改 Token、Primitive、CMP、共享壳或数据合同。验证和运行边界见 `docs/plans/active/creator-discovery-001.md` 与当月 progress；在本机正式页及 Mog 验收前仍是候选。
 
+同日继续按 Mog 的 Evidence Library 并排走查修正：搜索和按钮改为本页方角粗边框节奏，快捷视图改为文字下划线，作者表格由七列合为五列并去除固定行高。保留当前范围统计与来源分析限制、未知读数、上下分页及观察动作。沿用已有 LIDS Token；不提升为跨页组件，不修改 Evidence 页面或共享壳。
+
 ## 2026-10-08 · COMMENT-STUDY-RELEASE-POLISH-358 · 窄屏评论表格候选
 
 评论研究 L1「用户评论」复用既有表格横向滚动包裹层，把原来浏览器计算为 0 的 `calc(var(--lgi-space-24) * 6)` 改为有效的现有 Token 加法，并给五列评论表指定 960px 最小宽度和列宽。未改变 Token 值、Primitive、Pattern、共享 shell、HTML、数据和模型动作。只读 CSS 代理连接已部署 `:3000` 的真实 GET：390／520px 的最小宽度均计算为 960px，390px 可以滚向末列且整页无水平溢出；1440px 五列在页内可见。此为候选验证，未合并或刷新正式运行页。见[变更清单](../changes/comment-study-release-polish-358-ui-change-manifest.md)和[验收记录](../acceptance/comment-study-release-polish-358-acceptance.md)。
