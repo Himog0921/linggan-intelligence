@@ -1361,7 +1361,7 @@ async function runDispatchedTask() {
       commentLimit: spec.commentLimit,
       maxTotal: dispatchedCommentMaxTotal(spec, capability),
       maxSubComments: Number(spec.replyExpandLimit) || 0,
-      commentDepthMode: capability === 'replies' ? 'allReplies' : 'twoLevel',
+      commentDepthMode: spec.incrementalCommentBudget || capability === 'replies' ? 'allReplies' : 'twoLevel',
       // The page collector must submit against this exact server-issued identity. Rebuilding a
       // manual task here would leave the claimed scheduled task without Attempt or Receipt.
       taskSpec: spec,

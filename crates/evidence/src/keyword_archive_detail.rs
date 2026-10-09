@@ -108,6 +108,12 @@ async fn advance_keyword_archive_detail_inner(
     if !schema_ready {
         return Err(AcquisitionChainError::SchemaUnavailable);
     }
+    let temporary:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM collection_observation_target t WHERE t.target_ref=$1 AND to_jsonb(t)->>'purpose_kind'='research_round')").bind(target_ref).fetch_one(database.pool()).await?;
+    if temporary {
+        return Ok(KeywordDetailAdvance::Skipped(
+            "topic_map_round_owns_detail_scope",
+        ));
+    }
     let mut transaction = database.pool().begin().await?;
     // 与其余所有推进路径同一个加锁顺序：先锁目标，再谈授权与容量。
     let target_kind: Option<String> = sqlx::query_scalar(
@@ -307,7 +313,7 @@ pub async fn keyword_targets_pending_detail(
          JOIN observation_domain_target relation \
            ON relation.target_ref=requested.target_ref AND relation.role='primary' \
          JOIN observation_domain domain ON domain.domain_ref=relation.domain_ref \
-         WHERE domain.status='active' AND EXISTS ( \
+         WHERE domain.status='active' AND NOT EXISTS(SELECT 1 FROM collection_observation_target temporary WHERE temporary.target_ref=requested.target_ref AND to_jsonb(temporary)->>'purpose_kind'='research_round') AND EXISTS ( \
            SELECT 1 FROM collection_work_order work_order \
            JOIN collection_work_order_lease lease USING(work_order_ref) \
            JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
@@ -461,7 +467,7 @@ pub async fn run_keyword_archive_details(
          FROM collection_observation_target target \
          JOIN observation_domain_target relation ON relation.target_ref=target.target_ref \
          JOIN observation_domain domain ON domain.domain_ref=relation.domain_ref \
-         WHERE target.target_kind='keyword' AND target.lifecycle_state <> 'dismissed' \
+         WHERE target.target_kind='keyword' AND target.lifecycle_state <> 'dismissed' AND to_jsonb(target)->>'purpose_kind' IS DISTINCT FROM 'research_round' \
            AND relation.role='primary' AND domain.status='active' \
          ORDER BY target.last_scheduler_considered_at NULLS FIRST,target.target_ref,relation.domain_ref",
     )

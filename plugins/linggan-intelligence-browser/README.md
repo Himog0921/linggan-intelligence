@@ -322,3 +322,9 @@ ZIP 的 SHA-256。`npm run verify` 不会改写 release ZIP：它会以新的 `n
 幂等 receipt。它**不证明**浏览器已加载、真实 XHS 或抖音页面可采、真实内容已入库、
 OCR/ASR/研究链已运行。封面是否已本地化以 Evidence 返回的本地物化句柄为准；来源链接
 只保留为观察事实，不能作为长期展示保证。
+
+## TOPIC-MAP-V41-001 有界增量执行契约（源码开发）
+
+主题图谱专用 TaskSpec 可携带 `incrementalSearchBudget`（最多 3 轮、180 秒、200 张候选卡）和 `incrementalCommentBudget`（冻结已有 stable comment ID，根评论与回复合计最多 30 个新增 ID、20 轮、180 秒）。页面采集器执行服务器冻结的较小限额，重复页、已知 ID、重复回复不消耗新增名额；局部评论 Receipt 使用 `incremental_new`，不将这 30 条当作平台评论总数。普通归档未携带该可选契约时继续原路径。
+
+这项源码与合成测试证明不表示已安装或重载插件，不表示已访问平台、真实补采成功或服务端已部署；WorkOrder、授权、停止状态和材料接纳仍由 Linggan 服务端裁定。

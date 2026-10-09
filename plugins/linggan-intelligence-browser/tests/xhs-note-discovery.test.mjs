@@ -1010,3 +1010,60 @@ test('an element scroll target keeps using the list viewport, not the window', (
     globalThis.window = originalWindow;
   }
 });
+
+test('temporary topic search budget never allows more than three scrolls or 200 candidates', async () => {
+  const { normalizeIncrementalSearchBudget } = await import('../src/platforms/xhs/noteCollector.js');
+  assert.deepEqual(normalizeIncrementalSearchBudget({ maxScrollRounds: 3, maxDurationSeconds: 180, candidateQuota: 67 }), { maxScrollRounds: 3, maxDurationSeconds: 180, candidateQuota: 67 });
+  assert.throws(() => normalizeIncrementalSearchBudget({ maxScrollRounds: 4, maxDurationSeconds: 180, candidateQuota: 67 }));
+  assert.throws(() => normalizeIncrementalSearchBudget({ maxScrollRounds: 3, maxDurationSeconds: 181, candidateQuota: 67 }));
+  assert.throws(() => normalizeIncrementalSearchBudget({ maxScrollRounds: 3, maxDurationSeconds: 180, candidateQuota: 201 }));
+});
+
+test('temporary topic search limits a requested twenty-scroll expansion to one granted scroll', async () => {
+  const originalDocument = globalThis.document;
+  const originalWindow = globalThis.window;
+  const originalNow = Date.now;
+  let top = 0;
+  let clock = 0;
+  const sections = Array.from({ length: 20 }, (_, index) => ({
+    querySelector(selector) {
+      if (selector === 'a.cover') return {
+        getAttribute(name) {
+          return name === 'href'
+            ? `/explore/68${String(index).padStart(22, '0')}?xsec_token=token-${index}` : null;
+        },
+      };
+      if (selector === '.footer span' || selector === '.title') return { textContent: `标题 ${index}` };
+      if (selector === '.like-wrapper .count') return { textContent: String(index) };
+      return null;
+    },
+    getBoundingClientRect() { return { top: index * 10, left: 0 }; },
+  }));
+  const scroller = {
+    get scrollTop() { return top; },
+    set scrollTop(value) { top = Number(value); },
+    clientHeight: 1000,
+    scrollHeight: 10000,
+    parentElement: null,
+  };
+  globalThis.document = {
+    documentElement: { scrollTop: 0, clientHeight: 1000, scrollHeight: 1000 },
+    body: { scrollTop: 0, clientHeight: 1000, scrollHeight: 1000 },
+    querySelector(selector) { return selector === '.feeds-container' ? scroller : null; },
+    querySelectorAll(selector) { return selector === '.feeds-container section' ? sections : []; },
+  };
+  globalThis.window = { scrollY: 0, innerHeight: 1000, scrollTo() {}, scrollBy() {} };
+  Date.now = () => { clock += 5000; return clock; };
+  try {
+    const records = await discoverWithScroll('.feeds-container', 20, { expectedCount: 200, incrementalSearchBudget: { maxScrollRounds: 1, maxDurationSeconds: 180, candidateQuota: 200 } });
+    assert.equal(records.length, 20);
+    assert.equal(records.discoveryMeta.stopReason, 'scroll_budget_completed');
+    assert.equal(records.discoveryMeta.scrollActions, 1);
+    assert.equal(buildDiscoveryExecutionSummary(records.discoveryMeta).scrollActions, 1);
+    assert.equal(records.discoveryMeta.scrollTrace.filter((entry) => entry.action === 'scroll').length, 1);
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.window = originalWindow;
+    Date.now = originalNow;
+  }
+});

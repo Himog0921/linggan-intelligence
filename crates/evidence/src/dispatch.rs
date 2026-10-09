@@ -1362,7 +1362,10 @@ pub async fn requeue_failed_dispatch(
     // A browser that cannot open or ready a discovery/profile page must not
     // mint a new Task/Lease forever. The limit belongs to this WorkOrder; a
     // future scheduled patrol can still create a new one after the fault clears.
-    if matches!(capability.as_str(), "discovery_search" | "profile_discovery" | "author_profile") {
+    if matches!(
+        capability.as_str(),
+        "discovery_search" | "profile_discovery" | "author_profile"
+    ) {
         let prior_failures: i32 = sqlx::query_scalar(
             "SELECT dispatch_failure_count FROM collection_work_order \
              WHERE work_order_ref=$1 AND queue_state='leased' FOR UPDATE",
@@ -1390,8 +1393,14 @@ pub async fn requeue_failed_dispatch(
             .execute(&mut *transaction)
             .await?;
             record_terminal_dispatch_failure_in_transaction(
-                &mut transaction, failure_ref, task_id, installation_ref, lease_ref,
-                work_order_ref, failure_code.as_str(), "unavailable",
+                &mut transaction,
+                failure_ref,
+                task_id,
+                installation_ref,
+                lease_ref,
+                work_order_ref,
+                failure_code.as_str(),
+                "unavailable",
             )
             .await?;
             // No accepted task means this round stopped; it did not complete.
@@ -2371,14 +2380,25 @@ async fn page_session_plan_for_task(
     if reply_expand_limit > 0 {
         lanes.push("replies");
     }
-    Ok(Some(serde_json::json!({
+    let mut plan = serde_json::json!({
         "contractVersion": "linggan.detail-page-session.v1",
         "contentExternalId": content_external_id,
         "lanes": lanes,
         "commentLimit": comment_limit,
         "replyExpandLimit": reply_expand_limit,
         "cacheTtlSeconds": ttl_seconds,
-    })))
+    });
+    let budget_ready: bool =
+        sqlx::query_scalar("SELECT to_regclass('linggan_topic_map_comment_budget')IS NOT NULL")
+            .fetch_one(&mut **transaction)
+            .await?;
+    if budget_ready {
+        let budget:Option<Value>=sqlx::query_scalar("SELECT jsonb_build_object('knownCommentIds',b.known_comment_ids,'newUniqueLimit',b.new_unique_limit,'maxScrollRounds',b.max_scroll_rounds,'maxDurationSeconds',b.max_duration_seconds) FROM collection_work_order_lease l JOIN linggan_topic_map_comment_budget b USING(work_order_ref) JOIN linggan_material_content c ON c.public_ref=b.content_public_ref WHERE l.lease_ref=$1 AND c.content_external_id=$2").bind(lease_ref).bind(content_external_id).fetch_optional(&mut **transaction).await?;
+        if let Some(b) = budget {
+            plan["incrementalCommentBudget"] = b;
+        }
+    }
+    Ok(Some(plan))
 }
 
 /// 「这张工单现在就可以派」。

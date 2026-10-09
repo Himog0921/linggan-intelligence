@@ -323,3 +323,13 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发，并于 2026-10-02 
 
 - [CREATOR-DISCOVERY-001 执行规格](plans/active/creator-discovery-001.md)：活跃计划，当前对话派定的语料与创作者集成交付。
 - [CREATOR-DISCOVERY-001 实施验收](audits/creator-discovery-001-acceptance.md)：隔离验证、独立审查、浏览器限制及发布边界。
+
+## TOPIC-MAP-V41-001
+
+| 文档 | 状态 | 用途 |
+|---|---|---|
+| [product/topic-map-handbook.md](product/topic-map-handbook.md) | 权威当前 | 手册 D01–D39 来源与本包运行边界 |
+| [plans/active/topic-map-v41-001.md](plans/active/topic-map-v41-001.md) | 活跃计划 | 表面、状态、依赖、验收与 Claim |
+| [progress/2026-10.md](progress/2026-10.md) | 代码事实优先 | 本月实现与验证记录 |
+| [data-contracts/topic-map-http.md](data-contracts/topic-map-http.md) | 代码事实优先 | 主题图谱读写、安全与研究接点 |
+| [design/acceptance/topic-map-v41-001-acceptance.md](design/acceptance/topic-map-v41-001-acceptance.md) | 一次性报告 | 自动证明、隔离浏览器与业务验收边界 |

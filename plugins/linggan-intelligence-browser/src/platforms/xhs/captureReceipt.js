@@ -3,6 +3,7 @@ export const XHS_DETAIL_COMMENT_CAP = 30;
 export const XHS_COMMENT_COLLECTION_SCOPE = Object.freeze({
   DETAIL_WINDOW: 'detail_window',
   ALL_PUBLIC_COMMENTS: 'all_public_comments',
+  INCREMENTAL_NEW: 'incremental_new',
 });
 
 export const XHS_COMMENT_COLLECTION_STATE = Object.freeze({
@@ -64,6 +65,7 @@ function terminalCollectionStop(stopReason = '') {
 // question the operator needs answered: for the requested comment scope, how many did the
 // page show and how many unique comments did this Attempt actually bring back?
 export function buildXhsCommentCollectionReceipt({
+  incrementalBudget = null,
   noteId = '',
   maxTotal = 0,
   requestedLimit = null,
@@ -73,14 +75,14 @@ export function buildXhsCommentCollectionReceipt({
   stopReason = '',
   targetIdentity = 'matched',
 } = {}) {
-  const scope = collectionScope(maxTotal);
+  const scope = incrementalBudget ? XHS_COMMENT_COLLECTION_SCOPE.INCREMENTAL_NEW : collectionScope(maxTotal);
   const received = nonNegative(actual) ?? 0;
   const observedPageCount = nonNegative(publicCommentCount);
   const pageCount = observedPageCount === null && explicitEmptyState ? 0 : observedPageCount;
-  const requested = scope === XHS_COMMENT_COLLECTION_SCOPE.DETAIL_WINDOW
+  const requested = scope === XHS_COMMENT_COLLECTION_SCOPE.INCREMENTAL_NEW ? incrementalBudget.newUniqueLimit : scope === XHS_COMMENT_COLLECTION_SCOPE.DETAIL_WINDOW
     ? normalizeXhsDetailCommentLimit(requestedLimit ?? maxTotal)
     : null;
-  const expected = scope === XHS_COMMENT_COLLECTION_SCOPE.DETAIL_WINDOW
+  const expected = scope === XHS_COMMENT_COLLECTION_SCOPE.INCREMENTAL_NEW ? requested : scope === XHS_COMMENT_COLLECTION_SCOPE.DETAIL_WINDOW
     ? (pageCount === null ? requested : Math.min(pageCount, requested))
     : (pageCount === null && explicitEmptyState ? 0 : pageCount);
   const reason = text(stopReason)

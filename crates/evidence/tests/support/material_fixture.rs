@@ -230,6 +230,10 @@ pub const MIGRATIONS: &str = concat!(
     include_str!("../../../../database/migrations/0113_creator_patrol_detail_follow.sql"),
     "\n",
     include_str!("../../../../database/migrations/0115_creator_discovery.sql"),
+    include_str!("../../../../database/migrations/0116_topic_map.sql"),
+    include_str!("../../../../database/migrations/0117_topic_map_research.sql"),
+    include_str!("../../../../database/migrations/0118_topic_map_structure.sql"),
+    include_str!("../../../../database/migrations/0119_topic_map_collection_search.sql"),
     "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ",
     "('0025_comment_current_projection', '64fd9474647834358f8d2d4f1c25e4345e26a3ff79dbfc53a7846915576b0885'), ",
@@ -272,7 +276,11 @@ pub const MIGRATIONS: &str = concat!(
     "('0105_reply_disposition_requalification', 'bef9c6cee526068148daddbaeb863c03a5a232bce74bbdf9604f32a53338ec38'), ",
     "('0106_reply_disposition_quota_requalification', '184f91bff325cf335424df212874a53a621169fa388d6b29290c70a5260e0773'), ",
     "('0113_creator_patrol_detail_follow', '8b4aa5eb9a78ab904ad949bbfff510de3cf5a6d9b66e29d8f382c91941914715'), ",
-    "('0115_creator_discovery', 'b935e46868c90819235981749a680ff1a5ae9eb0d5ba69cb9d51e5521c4aed7c');\n",
+    "('0115_creator_discovery', 'b935e46868c90819235981749a680ff1a5ae9eb0d5ba69cb9d51e5521c4aed7c'),\n",
+    "('0116_topic_map', '6d87e950cb1341c0c30397d26a3ea09feddca6e383a3aadd4a87810ac5be463e'),\n",
+    "('0117_topic_map_research', '84528ecb0f4f88791d4f6bde33beccdb609dc46326e6b4dc88b2d5c305f7cb5c'),\n",
+    "('0118_topic_map_structure', 'cb769810af69e7d6b70b79579379514bc371e64400e2b2fbe75cf3f6bb98e0b1'),\n",
+    "('0119_topic_map_collection_search', 'f205b6a644cdf46296aadb4d73a68b639d34ee00e4764fbefc765ef2e7c57e74');\n",
 );
 
 pub fn coverage_layer(capability: &str, acquired: i64) -> serde_json::Value {

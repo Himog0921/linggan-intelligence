@@ -548,6 +548,7 @@ export function createXhsPageController({
             mode,
             maximumQuota,
             scrollRounds: params.taskSpec?.scrollRounds,
+            incrementalSearchBudget: params.taskSpec?.incrementalSearchBudget,
           });
           const loaded = Array.isArray(discovered) ? discovered : (Array.isArray(discovered?.cards) ? discovered.cards : []);
           // The historical topByLikes field supplies the retained sample size;

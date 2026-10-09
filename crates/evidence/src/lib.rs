@@ -82,7 +82,9 @@ pub use acquisition_chain::{
     RequestLeaseError, RequestLeaseOutcome, RequestOutcome, acquisition_chain_schema_is_ready,
     grant_authorization, read_capacity, request_admit_and_lease,
     request_admit_material_targets_and_lease, request_and_admit, request_and_admit_for_domain,
-    request_and_admit_material_targets, request_and_admit_material_targets_for_domain,
+    request_and_admit_keyword_search_for_domain_in_transaction, request_and_admit_material_targets,
+    request_and_admit_material_targets_for_domain,
+    request_and_admit_material_targets_for_domain_in_transaction,
     request_and_admit_material_targets_under_authorization, request_creator_directory_gaps,
     request_creator_directory_gaps_for_domain, request_progressive_archive,
     request_progressive_archive_and_lease, request_progressive_archive_for_domain,
@@ -200,6 +202,7 @@ pub use producer_runtime::{
     read_runtime_library, record_media_download_failure, record_media_upload_chunk,
     release_media_upload_finalize, start_producer_attempt, submit_producer_package,
 };
+pub use qualified_detail::missing_qualified_detail_refs_in;
 pub use receipt::{IngressOutcome, RejectionCode};
 pub use runtime_capacity::{
     ACCOUNT_CHECK_NOT_CONNECTED, ActiveRiskPause, DispatchLaneBacklog, LaneVerdict, LiveLease,
@@ -252,9 +255,13 @@ pub use work_order_lease::{
 pub use work_resource_read::{
     WorkResource, WorkResourceCollectionContext, WorkResourceDisplay, WorkResourceEngagement,
     WorkResourceIdentity, WorkResourceLaneSummary, WorkResourcePage, WorkResourcePreview,
-    WorkResourceReadError, WorkResourceSummary, read_work_resource, read_work_resources,
-    validate_work_resource_query, work_resource_schema_is_ready,
+    WorkResourceReadError, WorkResourceSummary, read_work_resource,
+    read_work_resource_in_transaction, read_work_resources, validate_work_resource_query,
+    work_resource_schema_is_ready,
 };
 
 pub mod collection_repair;
 pub use work_resource_read::work_display_title_ctes;
+pub use work_resource_read::{
+    frozen_work_fragment_manifest_in_transaction, read_frozen_work_text_in_transaction,
+};
