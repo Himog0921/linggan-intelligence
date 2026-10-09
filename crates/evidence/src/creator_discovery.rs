@@ -107,10 +107,10 @@ fn profile_support_fragment(work:&DiscoveryWork)->Option<Value>{
     let profile=&work.profile;
     let source=profile.get("sourceRef")?.as_str()?.parse::<Uuid>().ok()?;
     let f=fragment(work.work_ref,"biography",profile.get("biography")?.as_str(),Some(source),None)?;
-    Some(json!({"fragmentId":f.fragment_id,"field":"biography","sourceRef":source,"text":f.text.chars().take(200).collect::<String>()}))
+    Some(json!({"fragmentId":f.fragment_id,"field":"biography","sourceType":"author_profile","sourceRef":source,"text":f.text.chars().take(200).collect::<String>()}))
 }
 pub fn work_support_fragments(work:&DiscoveryWork)->Vec<Value>{
-    work.fragments.iter().map(|f|json!({"fragmentId":f.fragment_id,"field":f.field,"sourceRef":f.source_ref,"text":f.text.chars().take(200).collect::<String>()})).collect()
+    work.fragments.iter().map(|f|json!({"fragmentId":f.fragment_id,"field":f.field,"sourceType":"work_material","workRef":work.work_ref,"sourceRef":f.source_ref,"text":f.text.chars().take(200).collect::<String>()})).collect()
 }
 pub fn author_support_fragments(works:&[&DiscoveryWork],field:&str)->Vec<Value>{
     let mut fragments=Vec::new();
@@ -175,6 +175,9 @@ pub(crate) async fn load_in(
     }
     let domain:Value=sqlx::query_scalar("SELECT jsonb_build_object('domainRef',domain_ref,'name',name,'description',description,'researchGoal',research_goal,'status',status,'updatedAt',updated_at::text) FROM observation_domain WHERE domain_ref=$1").bind(q.domain).fetch_optional(&mut **tx).await?.ok_or(DiscoveryError::NotFound)?;
     let policy:Value=sqlx::query_scalar("SELECT jsonb_build_object('likeThreshold',like_threshold,'revision',revision,'analysisEnabled',analysis_enabled,'configRef',config_ref,'dailyTokenLimit',daily_token_limit,'updatedAt',updated_at::text) FROM linggan_creator_discovery_policy WHERE domain_ref=$1 AND platform=$2").bind(q.domain).bind(&q.platform).fetch_optional(&mut **tx).await?.unwrap_or(json!({"likeThreshold":null,"revision":0,"analysisEnabled":false,"configRef":null}));
+    if q.sort == "viral_works" && policy["likeThreshold"].as_i64().is_none() {
+        return Err(DiscoveryError::Invalid("viral_threshold_unset"));
+    }
     let rows=sqlx::query("SELECT content_public_ref,COALESCE(min(created_at) FILTER(WHERE role=$2),min(created_at))::text AS first_added,linggan_human_moment(COALESCE(min(created_at) FILTER(WHERE role=$2),min(created_at))) AS first_added_display,array_agg(DISTINCT role) AS roles FROM linggan_material_domain_usage WHERE domain_ref=$1 GROUP BY content_public_ref").bind(q.domain).bind(&q.usage_role).fetch_all(&mut **tx).await?;
     let added: HashMap<Uuid, String> = rows
         .iter()
@@ -195,7 +198,7 @@ pub(crate) async fn load_in(
         sqlx::query("SELECT moment,linggan_human_moment(moment::timestamptz) AS display FROM unnest($1::text[]) AS moment")
             .bind(&like_moments).fetch_all(&mut **tx).await?.into_iter().map(|r|(r.get("moment"),r.get("display"))).collect()
     };
-    let analyses=sqlx::query("SELECT work_public_ref,result_json,manual_overrides,result_fingerprint,job_state,result_at::text AS result_at,last_error_code FROM linggan_creator_discovery_work_analysis WHERE domain_ref=$1 AND work_public_ref=ANY($2)").bind(q.domain).bind(&refs).fetch_all(&mut **tx).await?;
+    let analyses=sqlx::query("SELECT work_public_ref,result_json,manual_overrides,result_fingerprint,job_state,result_at::text AS result_at,linggan_human_moment(result_at) AS result_at_display,last_error_code FROM linggan_creator_discovery_work_analysis WHERE domain_ref=$1 AND work_public_ref=ANY($2)").bind(q.domain).bind(&refs).fetch_all(&mut **tx).await?;
     let analyses: HashMap<Uuid, _> = analyses
         .into_iter()
         .map(|r| (r.get("work_public_ref"), r))
@@ -212,13 +215,13 @@ pub(crate) async fn load_in(
         .into_iter()
         .map(|r| (r.get("identity_key"), r.get("observation")))
         .collect();
-    let focus_rows=sqlx::query("SELECT author_external_id,result_json,manual_overrides,result_fingerprint,job_state,last_error_code FROM linggan_creator_discovery_author_analysis WHERE domain_ref=$1 AND platform=$2").bind(q.domain).bind(&q.platform).fetch_all(&mut **tx).await?;
-    let focus_rows: HashMap<String, (Value, Value, Option<String>, String, Option<String>)> = focus_rows
+    let focus_rows=sqlx::query("SELECT author_external_id,result_json,manual_overrides,result_fingerprint,job_state,result_at::text AS result_at,linggan_human_moment(result_at) AS result_at_display,last_error_code FROM linggan_creator_discovery_author_analysis WHERE domain_ref=$1 AND platform=$2").bind(q.domain).bind(&q.platform).fetch_all(&mut **tx).await?;
+    let focus_rows: HashMap<String, (Value, Value, Option<String>, String, Option<String>, Option<String>, Option<String>)> = focus_rows
         .into_iter()
         .map(|r| {
             (
                 r.get("author_external_id"),
-                (r.get("result_json"), r.get("manual_overrides"), r.get("result_fingerprint"),r.get("job_state"),r.get("last_error_code")),
+                (r.get("result_json"), r.get("manual_overrides"), r.get("result_fingerprint"),r.get("job_state"),r.get("last_error_code"),r.get("result_at"),r.get("result_at_display")),
             )
         })
         .collect();
@@ -313,12 +316,16 @@ pub(crate) async fn load_in(
         let mut manual = json!({});
         let mut state = "not_analyzed".to_string();
         let mut error_code:Option<String>=None;
+        let mut result_at:Option<String>=None;
+        let mut result_at_display:Option<String>=None;
         if let Some(a) = analyses.get(&c.public_ref) {
             state = a.get("job_state");
             error_code=a.get("last_error_code");
             manual = a.get("manual_overrides");
             if a.get::<Option<String>, _>("result_fingerprint").as_deref() == Some(&fingerprint) {
                 result = a.get("result_json");
+                result_at = a.get("result_at");
+                result_at_display = a.get("result_at_display");
             }
         }
         let allowed:HashSet<String>=fragments.iter().map(|f|f.fragment_id.clone()).collect();
@@ -363,15 +370,15 @@ pub(crate) async fn load_in(
             .author_external_id
             .as_ref()
             .and_then(|a| focus_rows.get(a))
-            .map(|(_, m, _, _, _)| effective_value(&json!({}), m, "focus"))
+            .map(|(_, m, _, _, _, _, _)| effective_value(&json!({}), m, "focus"))
             .unwrap_or(json!({"value":"unknown"}));
         let mut evidence = Vec::new();
         for f in &fragments {
             if result.to_string().contains(&f.fragment_id) {
-                evidence.push(json!({"fragmentId":f.fragment_id,"sourceRef":f.source_ref,"field":f.field,"text":f.text.chars().take(200).collect::<String>(),"start":f.start,"end":f.end,"sourceVersion":f.source_version}));
+                evidence.push(json!({"fragmentId":f.fragment_id,"sourceType":"work_material","workRef":c.public_ref,"sourceRef":f.source_ref,"field":f.field,"text":f.text.chars().take(200).collect::<String>(),"start":f.start,"end":f.end,"sourceVersion":f.source_version}));
             }
         }
-        let support_fragments=fragments.iter().map(|f|json!({"fragmentId":f.fragment_id,"field":f.field,"sourceRef":f.source_ref,"text":f.text.chars().take(120).collect::<String>()})).collect::<Vec<_>>();
+        let support_fragments=fragments.iter().map(|f|json!({"fragmentId":f.fragment_id,"field":f.field,"sourceType":"work_material","workRef":c.public_ref,"sourceRef":f.source_ref,"text":f.text.chars().take(120).collect::<String>()})).collect::<Vec<_>>();
         let likes_observed_display=c.like_source.observed_at.as_ref().and_then(|m|like_displays.get(m)).cloned();
         works.push(DiscoveryWork {
             work_ref: c.public_ref,
@@ -401,7 +408,7 @@ pub(crate) async fn load_in(
             relevance,
             traits,
             topic_hints: hints,
-            analysis: json!({"automatic":result,"manual":manual,"evidence":evidence,"supportFragments":support_fragments,"state":state,"lastErrorCode":error_code}),
+            analysis: json!({"automatic":result,"manual":manual,"evidence":evidence,"supportFragments":support_fragments,"state":state,"lastErrorCode":error_code,"resultAt":result_at,"resultAtDisplay":result_at_display}),
             analysis_state: state,
             observation,
             profile,
@@ -416,7 +423,7 @@ pub(crate) async fn load_in(
         let scoped: Vec<_> = works.iter().filter(|w|w.author_external_id.as_deref()==Some(&author)).collect();
         let profile=scoped.first().map(|w|w.profile.clone()).unwrap_or(Value::Null);
         let fingerprint=focus_fingerprint(&profile,&scoped,&policy["configRef"]);
-        if let Some((result,manual,stored,state,error_code))=focus_rows.get(&author) {
+        if let Some((result,manual,stored,state,error_code,result_at,result_at_display))=focus_rows.get(&author) {
             let focus_fragments=author_support_fragments(&scoped,"focus");
             let identity_fragments=author_support_fragments(&scoped,"institution_or_brand");
             let mut projected_manual=manual.clone();
@@ -428,7 +435,7 @@ pub(crate) async fn load_in(
             let mut automatic=if stored.as_deref()==Some(&fingerprint){result.clone()}else{json!({})};
             automatic["evidence"]=json!(current_author_evidence(&automatic,&focus_fragments));
             let identity=effective_value(&automatic,&projected_manual,"institution_or_brand");
-            for w in works.iter_mut().filter(|w|w.author_external_id.as_deref()==Some(&author)){w.focus=effective.clone();w.author_analysis=json!({"automatic":automatic,"manual":projected_manual,"institution_or_brand":identity,"supportFragments":focus_fragments,"identitySupportFragments":identity_fragments,"state":state,"lastErrorCode":error_code});}
+            for w in works.iter_mut().filter(|w|w.author_external_id.as_deref()==Some(&author)){w.focus=effective.clone();w.author_analysis=json!({"automatic":automatic,"manual":projected_manual,"institution_or_brand":identity,"supportFragments":focus_fragments,"identitySupportFragments":identity_fragments,"state":state,"lastErrorCode":error_code,"resultAt":if stored.as_deref()==Some(&fingerprint){result_at.clone()}else{None},"resultAtDisplay":if stored.as_deref()==Some(&fingerprint){result_at_display.clone()}else{None}});}
         }
     }
     Ok(DiscoveryData {
@@ -480,6 +487,9 @@ pub fn work_matches(w: &DiscoveryWork, q: &CreatorScope, threshold: Option<i64>)
     if q.min_likes.is_some_and(|n| w.likes.is_none_or(|v| v < n)) {
         return false;
     }
+    if q.topic_hint.as_ref().is_some_and(|hint| !w.topic_hints.iter().any(|value| value == hint)) {
+        return false;
+    }
     if let Some(traits) = &q.traits {
         if !traits.split(',').any(|t| if t=="institution_or_brand" {w.author_analysis["institution_or_brand"]["value"]=="yes"}else{w.relevance=="related" && w.traits.iter().any(|x|x==t)}) {
             return false;
@@ -507,6 +517,8 @@ fn author_matches(latest:&DiscoveryWork,works:&[&DiscoveryWork],q:&CreatorScope)
         "inside"=>outside,
         "monitoring"=>outside||latest.observation["monitoringState"]!="monitoring",
         "paused"=>outside||latest.observation["monitoringState"]!="paused",
+        "other_domains_only"=>!outside||latest.observation["existsInOtherDomains"]!=true,
+        "dismissed"=>outside||latest.observation["monitoringState"]!="dismissed",
         _=>true,
     }) {return false;}
     if q.focus.as_deref().is_some_and(|f| latest.focus["value"].as_str().unwrap_or("unknown")!=f || (f=="vertical_tendency" && !works.iter().any(|w|w.relevance=="related"))) {return false;}
@@ -594,18 +606,27 @@ pub fn aggregate(data: &DiscoveryData, q: &CreatorScope) -> Value {
                     2
                 }
             };
-            if q.high_likes || q.viral {
-                b.likes
-                    .cmp(&a.likes)
-                    .then_with(|| a.work_ref.cmp(&b.work_ref))
-            } else {
-                rank(a)
-                    .cmp(&rank(b))
-                    .then_with(|| b.first_added.cmp(&a.first_added))
-                    .then_with(|| a.work_ref.cmp(&b.work_ref))
-            }
+            let fallback = || rank(a).cmp(&rank(b))
+                .then_with(|| b.first_added.cmp(&a.first_added))
+                .then_with(|| a.work_ref.cmp(&b.work_ref));
+            let eligible = |w: &DiscoveryWork| match q.sort.as_str() {
+                "high_likes" => w.relevance != "unrelated" && w.likes.is_some(),
+                "viral_works" => w.relevance == "related" && w.likes.zip(threshold).is_some_and(|(l,t)| l >= t),
+                _ => false,
+            };
+            if matches!(q.sort.as_str(), "high_likes" | "viral_works") {
+                let a_eligible = eligible(a);
+                let b_eligible = eligible(b);
+                b_eligible.cmp(&a_eligible)
+                    .then_with(|| if a_eligible && b_eligible { b.likes.cmp(&a.likes) } else { std::cmp::Ordering::Equal })
+                    .then_with(fallback)
+            } else if q.high_likes || q.viral {
+                b.likes.cmp(&a.likes).then_with(fallback)
+            } else { fallback() }
         });
         let refs: Vec<_> = candidates.iter().map(|w| w.work_ref).collect();
+        let matched_related = candidates.iter().filter(|w| w.relevance == "related").count();
+        let matched_viral = candidates.iter().filter(|w| w.relevance == "related" && w.likes.zip(threshold).is_some_and(|(l,t)| l >= t)).count();
         let max_related = related.iter().filter_map(|w| w.likes).max();
         let high = candidates
             .iter()
@@ -619,16 +640,20 @@ pub fn aggregate(data: &DiscoveryData, q: &CreatorScope) -> Value {
         let mut hints: Vec<_> = related.iter().flat_map(|w| w.topic_hints.clone()).collect();
         hints.sort();
         hints.dedup();
+        if let Some(selected) = &q.topic_hint {
+            // The exact same-work filter may match a phrase beyond the default two-item summary.
+            hints.retain(|hint| hint != selected);
+            hints.insert(0, selected.clone());
+        }
         hints.truncate(2);
-        items.push(json!({"creatorKey":key,"displayName":latest.display_name,"authorExternalId":latest.author_external_id,"platform":latest.platform,"profile":latest.profile,"focus":latest.focus,"authorAnalysis":latest.author_analysis,"traits":traits,"topicHints":hints,"observation":latest.observation,"collectedWorkCount":ws.len(),"relatedWorkCount":related.len(),"unrelatedWorkCount":ws.iter().filter(|w|w.relevance=="unrelated").count(),"unknownRelevanceWorkCount":ws.iter().filter(|w|w.relevance=="unknown").count(),"knownLikeWorkCount":related.iter().filter(|w|w.likes.is_some()).count(),"viralWorkCount":threshold.map(|_|viral),"maxRelatedLikeCount":max_related,"candidateHighLikeCount":high,"matchedWorkRefs":refs,"representatives":candidates.iter().take(3).collect::<Vec<_>>(),"firstAdded":latest.first_added,"firstAddedDisplay":latest.first_added_display}));
+        items.push(json!({"creatorKey":key,"displayName":latest.display_name,"authorExternalId":latest.author_external_id,"platform":latest.platform,"profile":latest.profile,"focus":latest.focus,"authorAnalysis":latest.author_analysis,"traits":traits,"topicHints":hints,"observation":latest.observation,"collectedWorkCount":ws.len(),"relatedWorkCount":related.len(),"matchedRelatedWorkCount":matched_related,"matchedViralWorkCount":threshold.map(|_|matched_viral),"unrelatedWorkCount":ws.iter().filter(|w|w.relevance=="unrelated").count(),"unknownRelevanceWorkCount":ws.iter().filter(|w|w.relevance=="unknown").count(),"knownLikeWorkCount":related.iter().filter(|w|w.likes.is_some()).count(),"viralWorkCount":threshold.map(|_|viral),"maxRelatedLikeCount":max_related,"candidateHighLikeCount":high,"matchedWorkRefs":refs,"representatives":candidates.iter().take(3).collect::<Vec<_>>(),"firstAdded":latest.first_added,"firstAddedDisplay":latest.first_added_display}));
     }
     items.sort_by(|a, b| {
-        if q.high_likes || q.viral {
-            b["candidateHighLikeCount"]
-                .as_i64()
-                .cmp(&a["candidateHighLikeCount"].as_i64())
-        } else {
-            b["firstAdded"].as_str().cmp(&a["firstAdded"].as_str())
+        match q.sort.as_str() {
+            "related_works" => b["matchedRelatedWorkCount"].as_u64().cmp(&a["matchedRelatedWorkCount"].as_u64()),
+            "viral_works" => b["matchedViralWorkCount"].as_u64().cmp(&a["matchedViralWorkCount"].as_u64()),
+            "high_likes" => b["candidateHighLikeCount"].as_i64().cmp(&a["candidateHighLikeCount"].as_i64()),
+            _ => b["firstAdded"].as_str().cmp(&a["firstAdded"].as_str()),
         }
         .then_with(|| a["creatorKey"].as_str().cmp(&b["creatorKey"].as_str()))
     });

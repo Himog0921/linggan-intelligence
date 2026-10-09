@@ -16,11 +16,16 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 #[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct EvidenceLibraryParams {
     #[serde(rename = "creatorKey")]
     pub(super) creator_key: Option<String>,
     #[serde(rename = "creatorFilter")]
     pub(super) creator_filter: Option<String>,
+    // The Evidence page carries its creator-list return address through URL sync and GET reads.
+    // It is navigation state, not a material filter, but must remain a known query key.
+    #[serde(rename = "returnTo")]
+    pub(super) _return_to: Option<String>,
     #[serde(rename="publicRefs")]
     pub(super) public_refs: Option<String>,
     pub(super) q: Option<String>,

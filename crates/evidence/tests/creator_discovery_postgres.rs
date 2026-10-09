@@ -243,6 +243,57 @@ async fn handbook_fixture_and_same_work_counterexamples() {
     assert_eq!(a["stats"]["outside"], 6);
     assert_eq!(a["stats"]["outsideViral"], 3);
     assert_eq!(a["stats"]["unknownDateWorks"], 12);
+    let mut other_only=q.base();
+    other_only.observation=Some("other_domains_only".into());
+    assert_eq!(aggregate(&data,&other_only)["total"],1);
+    assert_eq!(aggregate(&data,&other_only)["items"][0]["authorExternalId"],"A4");
+    let mut related_sort=q.base();
+    related_sort.sort="related_works".into();
+    assert_eq!(aggregate(&data,&related_sort)["items"][0]["authorExternalId"],"A1");
+    let mut viral_sort=q.base();
+    viral_sort.sort="viral_works".into();
+    assert_eq!(aggregate(&data,&viral_sort)["items"][0]["matchedViralWorkCount"],1);
+    let mut high_sort=q.base();
+    high_sort.sort="high_likes".into();
+    let high_rows=aggregate(&data,&high_sort);
+    let a1_high=high_rows["items"].as_array().unwrap().iter().find(|row|row["authorExternalId"]=="A1").unwrap();
+    assert_eq!(a1_high["representatives"][0]["workRef"],refs[0].to_string(),"high-like sort must lead with that author's highest-like matched work");
+    let a3_high=high_rows["items"].as_array().unwrap().iter().find(|row|row["authorExternalId"]=="A3").unwrap();
+    assert_eq!(a3_high["candidateHighLikeCount"],40);
+    assert_eq!(a3_high["representatives"][0]["workRef"],refs[4].to_string(),"unrelated 9000-like work cannot represent a 40-like high-like candidate");
+    let a3_viral=aggregate(&data,&viral_sort)["items"].as_array().unwrap().iter().find(|row|row["authorExternalId"]=="A3").unwrap().clone();
+    assert_eq!(a3_viral["matchedViralWorkCount"],0);
+    assert_eq!(a3_viral["representatives"][0]["workRef"],refs[4].to_string(),"when no viral candidate exists, relevance fallback must outrank unrelated likes");
+    let mut recent_with_high=q.base();
+    recent_with_high.high_likes=true;
+    recent_with_high.sort="recent".into();
+    assert_eq!(aggregate(&data,&recent_with_high)["items"][0]["authorExternalId"],"A8","an explicit recent sort must win over the high-like filter");
+    let mut recent_with_viral=q.base();
+    recent_with_viral.viral=true;
+    recent_with_viral.sort="recent".into();
+    assert_eq!(aggregate(&data,&recent_with_viral)["items"][0]["authorExternalId"],"A5","an explicit recent sort must win over the viral filter");
+    sqlx::query("UPDATE linggan_creator_discovery_work_analysis SET result_json=jsonb_set(result_json,'{topicHints}', '[{\"text\":\"具体方向\",\"evidenceFragmentIds\":[]}]'::jsonb),result_at=scope_001_now() WHERE domain_ref=$1 AND work_public_ref=$2").bind(D).bind(refs[2]).execute(db.pool()).await.unwrap();
+    let topic_data=load(&db,&q).await.unwrap();
+    let mut hint_scope=q.base();
+    hint_scope.topic_hint=Some("具体方向".into());
+    assert_eq!(aggregate(&topic_data,&hint_scope)["total"],1);
+    assert_eq!(aggregate(&topic_data,&hint_scope)["items"][0]["authorExternalId"],"A2");
+    assert_eq!(linggan_evidence::creator_discovery::matching_work_refs(&topic_data,&hint_scope),vec![refs[2]]);
+    let hint_work=topic_data.works.iter().find(|w|w.work_ref==refs[2]).unwrap();
+    assert!(hint_work.analysis["resultAtDisplay"].is_string());
+    assert_eq!(hint_work.analysis["supportFragments"][0]["workRef"],refs[2].to_string());
+    for (work,hints) in [(refs[0],r#"[{"text":"方向 A"},{"text":"方向 B"}]"#),(refs[1],r#"[{"text":"方向 C"}]"#)] {
+        sqlx::query("UPDATE linggan_creator_discovery_work_analysis SET result_json=jsonb_set(result_json,'{topicHints}',$3::jsonb) WHERE domain_ref=$1 AND work_public_ref=$2").bind(D).bind(work).bind(hints).execute(db.pool()).await.unwrap();
+    }
+    let multi_hint_data=load(&db,&q).await.unwrap();
+    let a1_global=aggregate(&multi_hint_data,&q)["items"].as_array().unwrap().iter().find(|row|row["authorExternalId"]=="A1").unwrap().clone();
+    assert_eq!(a1_global["topicHints"],json!(["方向 A","方向 B"]));
+    let mut third_hint=q.base();
+    third_hint.topic_hint=Some("方向 C".into());
+    let a1_selected=aggregate(&multi_hint_data,&third_hint);
+    assert_eq!(a1_selected["total"],1);
+    assert_eq!(a1_selected["items"][0]["topicHints"][0],"方向 C","the exact matched phrase cannot disappear behind the global two-phrase summary");
+    assert_eq!(a1_selected["items"][0]["representatives"][0]["workRef"],refs[1].to_string());
     assert_ne!(a["items"][0]["creatorKey"], a["items"][1]["creatorKey"]);
     let same_name = a["items"].as_array().unwrap().iter().filter(|item| item["displayName"] == "同名作者").count();
     assert_eq!(same_name, 2, "same display name cannot merge stable author IDs");
@@ -310,6 +361,11 @@ async fn handbook_fixture_and_same_work_counterexamples() {
     assert_eq!(reference_receipt["usageRole"],"reference");
     assert_eq!(reference_receipt["lifecycleState"],"dismissed");
     assert_eq!(reference_receipt["monitoringEnabled"],false);
+    let mut dismissed_scope=q.base();
+    dismissed_scope.observation=Some("dismissed".into());
+    let dismissed_data=load(&db,&dismissed_scope).await.unwrap();
+    assert_eq!(aggregate(&dismissed_data,&dismissed_scope)["total"],1);
+    assert_eq!(aggregate(&dismissed_data,&dismissed_scope)["items"][0]["authorExternalId"],"A4");
     let repeated=register_discovered_creator(&db,D,&a4_key,"primary").await.unwrap();
     assert_eq!(repeated["usageRole"],"reference","replay cannot silently promote an existing relation");
     let jobs: i64 = sqlx::query_scalar("SELECT count(*) FROM collection_work_order")
@@ -326,8 +382,12 @@ async fn handbook_fixture_and_same_work_counterexamples() {
     .unwrap();
     let no_rule = load(&db, &q).await.unwrap();
     assert!(aggregate(&no_rule, &q)["stats"]["outsideViral"].is_null());
+    let mut unavailable_viral_sort=q.base();
+    unavailable_viral_sort.sort="viral_works".into();
+    assert_eq!(load(&db,&unavailable_viral_sort).await.unwrap_err().to_string(),"viral_threshold_unset");
     q.high_likes = true;
     q.observation = Some("outside".into());
+    q.sort = "high_likes".into();
     let high = aggregate(&no_rule, &q);
     assert_eq!(high["items"][0]["authorExternalId"], "A6");
     assert_eq!(high["items"][0]["candidateHighLikeCount"], 8000);
@@ -346,6 +406,10 @@ async fn handbook_fixture_and_same_work_counterexamples() {
     let mut unavailable_filter=partial_scope.clone();
     unavailable_filter.observation=Some("outside".into());
     assert!(load(&db,&unavailable_filter).await.is_err(),"unavailable observation filter cannot produce a false empty result");
+    for state in ["other_domains_only","dismissed"] {
+        unavailable_filter.observation=Some(state.into());
+        assert!(load(&db,&unavailable_filter).await.is_err(),"unknown target relationships cannot be treated as a known state");
+    }
     sqlx::query("ALTER TABLE collection_observation_target_unavailable RENAME TO collection_observation_target")
         .execute(db.pool()).await.unwrap();
     sqlx::query("ALTER TABLE collection_monitor_rule_revision RENAME TO collection_monitor_rule_revision_unavailable")
