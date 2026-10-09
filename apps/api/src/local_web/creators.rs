@@ -70,7 +70,7 @@ async fn page(State(state): State<LocalWebState>, Query(q): Query<PageQuery>) ->
         shell::PrimarySurface::Corpus,
         "库内作品的作者",
         &format!("语料 / {picker} / <b>创作者</b>"),
-        "来源特征以作品依据为准",
+        "<span id=\"creator-header-readout\" class=\"creator-header-readout\" aria-live=\"polite\">读取中…</span>",
         None,
     );
     let nav = shell::corpus_side_nav(
@@ -78,28 +78,42 @@ async fn page(State(state): State<LocalWebState>, Query(q): Query<PageQuery>) ->
         q.domain.map(|x| x.to_string()).as_deref(),
         "作者来自当前领域已有作品",
     );
-    let choices = domains
-        .iter()
-        .map(|d| {
-            format!(
-                "<option value=\"{}\"{}>{}</option>",
-                d.domain_ref,
-                if Some(d.domain_ref) == q.domain {
-                    " selected"
-                } else {
-                    ""
-                },
-                html_escape(&d.name)
-            )
-        })
-        .collect::<String>();
-    Html(
-        include_str!("creators.html")
-            .replace("{{HEADER}}", &header)
-            .replace("{{SIDE_NAV}}", &nav)
-            .replace("{{DOMAINS}}", &choices),
-    )
-    .into_response()
+    let domain_value = selected.map(|d| d.domain_ref.to_string()).unwrap_or_default();
+    Html(page_markup(&header, &nav, &domain_value)).into_response()
+}
+fn page_markup(header: &str, nav: &str, domain_value: &str) -> String {
+    include_str!("creators.html")
+        .replace("{{HEADER}}", header)
+        .replace("{{SIDE_NAV}}", nav)
+        .replace("{{DOMAIN_VALUE}}", domain_value)
+}
+
+#[cfg(test)]
+mod page_tests {
+    use super::page_markup;
+
+    #[test]
+    fn creator_page_keeps_one_server_selected_domain_and_one_complete_pager() {
+        let domain = uuid::Uuid::new_v4().to_string();
+        let html = page_markup(
+            "<header id=\"creator-header-readout\"></header>",
+            "<nav></nav>",
+            &domain,
+        );
+        assert!(html.contains(&format!("name=\"domain\" value=\"{domain}\"")));
+        assert!(page_markup("", "", "").contains("name=\"domain\" value=\"\""));
+        assert!(!html.contains("<select name=\"domain\""));
+        assert_eq!(html.matches("data-page-nav").count(), 1);
+        for control in [
+            "data-page-prev",
+            "data-page-next",
+            "data-page-jump",
+            "id=\"page-size\"",
+        ] {
+            assert!(html.contains(control), "missing pager control: {control}");
+        }
+        assert!(html.contains("id=\"creator-results\""));
+    }
 }
 async fn css() -> impl IntoResponse {
     (
