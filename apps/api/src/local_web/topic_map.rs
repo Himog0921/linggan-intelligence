@@ -48,17 +48,55 @@ pub(super) fn routes() -> Router<LocalWebState> {
             super::comment_study::local_comment_study_guard,
         ))
 }
-async fn page() -> Html<String> {
+#[derive(Default, Deserialize)]
+struct PageQuery {
+    #[serde(alias = "domainRef")]
+    domain: Option<Uuid>,
+}
+async fn page(
+    State(state): State<LocalWebState>,
+    query: Result<Query<PageQuery>, QueryRejection>,
+) -> Html<String> {
+    let domain_ref = query.ok().and_then(|Query(q)| q.domain);
+    let domains = match state.database.database() {
+        Some(db) => linggan_evidence::observation_domain::read_observation_domains(db)
+            .await
+            .ok(),
+        None => None,
+    };
+    Html(page_markup(
+        domains.as_deref().unwrap_or_default(),
+        domain_ref,
+    ))
+}
+fn page_markup(
+    domains: &[linggan_evidence::observation_domain::ObservationDomain],
+    domain_ref: Option<Uuid>,
+) -> String {
+    let selected = domain_ref.and_then(|id| domains.iter().find(|d| d.domain_ref == id));
+    let picker = super::corpus_domain_picker(domains, selected, "/topics", None);
+    let domain = if picker.is_empty() {
+        selected.map_or_else(String::new, |d| {
+            format!(
+                " <span class=\"v7-slash\">/</span> {}",
+                super::html_escape(&d.name)
+            )
+        })
+    } else {
+        format!(" <span class=\"v7-slash\">/</span> {picker}")
+    };
     let header = shell::global_header(
         shell::PrimarySurface::Topic,
         "LOCAL HOST / NO PLATFORM ACCESS",
-        "主题图谱 <span class=\"v7-slash\">/</span> <b>领域概览</b>",
-        "<span>样本范围</span><span>研究依据</span>",
+        &format!(
+            "主题图谱{domain} <span class=\"v7-slash\">/</span> <b id=\"topic-map-crumb-current\">主题概览</b>"
+        ),
+        "",
         None,
     );
-    Html(format!(
+    format!(
         r#"<!doctype html><html lang="zh-CN" data-theme="linggan-intelligence"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>主题图谱 · Linggan Intelligence</title><link rel="stylesheet" href="/assets/topic-map.css"><script defer src="/assets/topic-map.js"></script></head><body class="topic-map-page"><div class="v7-app topic-map-app">{header}<div id="topic-map-root" aria-label="主题图谱"><p role="status">正在读取领域与主题图谱…</p></div><noscript>主题图谱需要启用 JavaScript。已有作品可以在语料入口查看。</noscript></div></body></html>"#
-    ))
+    )
 }
 async fn stylesheet() -> Response {
     (

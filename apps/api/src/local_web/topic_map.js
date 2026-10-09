@@ -20,6 +20,9 @@
   if (!views.some(([id]) => id === state.tab)) state.tab = 'structure';
   if (!['overview','journey'].includes(state.view)) state.view = 'overview';
   const params = new URLSearchParams(location.search);
+  // The shared picker links only the new domain; former scope must not follow it.
+  const incomingDomain = params.get('domain') ?? params.get('domainRef');
+  if (params.has('domain') || (incomingDomain !== null && incomingDomain !== state.domainRef)) Object.assign(state, defaults, {domainRef:incomingDomain});
   ['domainRef','topicRef','platform','windowDays','referenceWindowDays'].forEach(key => { if (params.has(key)) state[key] = params.get(key); });
   const extraWorks = new Map();
   let snapshot = null, progress = null, loading = false, readError = '', notice = '', pending = false;
@@ -37,6 +40,7 @@
   function persist() {
     try { sessionStorage.setItem('linggan.topic-map.view', JSON.stringify(state)); } catch (_) {}
     const url = new URL(location.href);
+    url.searchParams.delete('domain');
     ['domainRef','topicRef','platform','windowDays','referenceWindowDays'].forEach(key => state[key] ? url.searchParams.set(key,state[key]) : url.searchParams.delete(key));
     history.replaceState(null, '', url);
   }
@@ -92,8 +96,7 @@
     return `<div class="lgi-tm-pagehead"><div class="lgi-tm-head-title"><h1>主题图谱</h1><p>从领域结构查看内容，再用具体材料判断下一次切入。</p></div><div class="lgi-tm-row">${btn('我的备选','saved')}${btn('研究进度与设置','research')}${btn('我方矩阵','identity')}</div></div><div class="lgi-tm-main-tabs" aria-label="主题图谱视图">${tab('主题概览','view','overview',state.view === 'overview')}${tab('用户生命旅程','view','journey',state.view === 'journey')}</div>`;
   }
   function controls() {
-    const domains = list(snapshot?.domains).map(d => [d.domainRef || d.id,d.displayName || d.name]);
-    return `<div class="lgi-tm-toolbar">${select('domainRef','领域', domains.length ? domains : [['','领域尚未读取']])}${select('platform','平台',[['','全部平台'],['xhs','小红书'],['douyin','抖音']])}${select('windowDays','概览统计窗口',[['','全部发布时间'],['7','近7天'],['30','近30天'],['90','近90天']])}${state.view === 'journey' ? select('path','明确经历',[['','全部经历'],['family','家庭支持'],['adult','成年自我管理']]) : ''}<form class="lgi-tm-search" data-form="search"><label class="v7-sr-only" for="topic-map-search">查找当前范围的作品 / 主题</label><div class="lgi-tm-row"><input id="topic-map-search" name="query" value="${esc(state.query)}" placeholder="输入关键词"><button class="lgi-tm-button" type="submit">查找</button></div></form>${btn('刷新已有结果','refresh')}</div>`;
+    return `<div class="lgi-tm-toolbar">${select('platform','平台',[['','全部平台'],['xhs','小红书'],['douyin','抖音']])}${select('windowDays','概览统计窗口',[['','全部发布时间'],['7','近7天'],['30','近30天'],['90','近90天']])}${state.view === 'journey' ? select('path','明确经历',[['','全部经历'],['family','家庭支持'],['adult','成年自我管理']]) : ''}<form class="lgi-tm-search" data-form="search"><label class="v7-sr-only" for="topic-map-search">查找当前范围的作品 / 主题</label><div class="lgi-tm-row"><input id="topic-map-search" name="query" value="${esc(state.query)}" placeholder="输入关键词"><button class="lgi-tm-button" type="submit">查找</button></div></form>${btn('刷新已有结果','refresh')}</div>`;
   }
   function tree() {
     const topics = list(snapshot?.topics).filter(t=>t.lifecycleState!=='superseded'), roots = topics.filter(t => !t.parentTopicRef || !topics.some(x => x.topicRef === t.parentTopicRef));
@@ -230,12 +233,29 @@
     const ns = selectedWorks().filter(w => !state.stage || (state.metric === 'involved' ? list(w.involvedStages).includes(state.stage) : w.mainStage === state.stage));
     return `<main class="lgi-tm-journey"><div class="lgi-tm-object-head"><div><span class="lgi-tm-eyebrow">内容回应的经历</span><h2>这些作品，覆盖了哪一段经历？</h2><p>${number(j?.denominator)} 篇可读作品 · 主阶段描述内容，不给作者贴人生标签。</p></div>${btn('阶段与统计依据','method')}</div><div class="lgi-tm-toolbar">${[['','全部状态'],['obstruction_recurrence','受阻与反复'],['transition_handoff','环境转换与支持交接']].map(([id,name]) => tab(name,'overlay',id,state.overlay === id)).join('')}<span class="lgi-tm-grow"></span>${tab('主阶段占比','metric','main',state.metric === 'main')}${tab('涉及率','metric','involved',state.metric === 'involved')}${tab('地图','map-mode','map',state.mapMode === 'map')}${tab('列表','map-mode','list',state.mapMode === 'list')}</div>${state.mapMode === 'map' ? map : `<div class="lgi-tm-stage-list">${stations.map((s,i) => `<button class="lgi-tm-panel ${state.stage === s.stage ? 'is-active' : ''}" data-action="stage" data-id="${s.stage}"><span class="lgi-tm-eyebrow">0${i+1}</span><h3>${esc(s.label)}</h3><p>${questions[i]}</p><strong class="lgi-tm-value">${number(s.count)}</strong><p>${pct(s.count,j?.denominator)} · 当前范围作品</p></button>`).join('')}</div>`}<div class="lgi-tm-row lgi-tm-other-stages">${journeyEntries(j).filter(s => !stageNames[s.stage]).map(s => btn(`${esc(otherNames[s.stage] || '其他 / 未归主阶段')} ${number(s.count)} · ${pct(s.count,j.denominator)}`,'stage',s.stage,'lgi-tm-quiet')).join('')}${btn('主题 × 旅程','matrix')}</div><p class="lgi-tm-note">${state.metric === 'main' ? '五主阶段加其他类别以全部可读作品为分母；保留未分析，不舍弃未知。' : '同篇可以实质涉及多个阶段，涉及率合计可以超过100%。'}${state.overlay ? ' 已应用跨阶段覆盖筛选，分母为当前筛选后的作品。' : ''}</p><div class="lgi-tm-section-head"><div><h3>${state.stage ? `${stageNames[state.stage] || otherNames[state.stage] || '当前阶段'}：具体讨论与场景` : '从具体场景，进入关联主题'}</h3><p>阶段不明确时，已有原作和场景仍可查看。</p></div>${state.stage ? btn('回到全部阶段','stage','') : ''}</div>${sceneList(ns)}<div class="lgi-tm-material-grid">${ns.slice(0,6).map(card).join('')}</div>${btn('查看对应全部材料','subset',ns.map(w => w.workRef).join(','),'lgi-tm-quiet')}</main>`;
   }
+  function syncContext() {
+    const current = document.getElementById('topic-map-crumb-current');
+    if (current) current.textContent = (!loading && !readError && state.topicRef ? topicName(state.topicRef) : state.view === 'journey' ? '用户生命旅程' : '主题概览');
+    const picker = document.querySelector('.v7-domain-picker');
+    if (!picker) return;
+    let selected = null;
+    picker.querySelectorAll('nav a').forEach(link => {
+      if (new URL(link.href, location.origin).searchParams.get('domain') === state.domainRef) {
+        link.setAttribute('aria-current','page'); selected = link;
+      } else link.removeAttribute('aria-current');
+    });
+    if (selected) {
+      picker.querySelector('summary span').textContent = selected.querySelector('span').textContent;
+      picker.querySelector('summary small').textContent = selected.querySelector('small').textContent;
+    }
+  }
   function render() {
     const focused = document.activeElement;
     const keepFocus = focused?.id && root.contains(focused) ? focused.id : null;
     content.innerHTML = `${header()}${controls()}<div data-notice class="lgi-tm-feedback" role="status" ${notice ? '' : 'hidden'}>${esc(notice)}</div>${readError ? `<div class="lgi-tm-read-error" role="alert"><strong>当前读取未成功</strong><p>${esc(readError)}</p>${btn('重新读取','refresh')}${snapshot ? '<p>上一次结果保留在本次会话中，当前范围读取未成功，暂不混用旧结果展示。</p>' : ''}</div>` : ''}${loading ? '<div class="lgi-tm-loading" role="status">正在读取已有材料与统计…</div>' : ''}${loading || readError ? '' : snapshot ? changesBar() + (state.view === 'overview' ? overview() : journey()) : empty('当前图谱尚未读取','页面读取不启动模型研究或平台采集。')}<footer class="lgi-tm-footer"><span>${esc(snapshot?.methodVersion || '方法尚未读取')}</span><span>样本统计、来源材料与研究判断分别保留边界</span></footer>${list(state.compare).length ? `<div class="lgi-tm-compare-dock"><span>已选 ${state.compare.length} 个方向 · ${state.compare.map(topicName).map(esc).join(' / ')}</span>${btn('并排比较','compare','','lgi-tm-primary')}${btn('清空','compare-clear','','lgi-tm-quiet')}</div>` : ''}`;
     if (keepFocus) document.getElementById(keepFocus)?.focus({preventScroll:true});
     renderNotice();
+    syncContext();
   }
   function openDialog(type, data = {}, push = true) {
     if (dialog && push && dialogState) dialogStack.push({...dialogState,scroll:dialog.querySelector('.lgi-tm-dialog-body')?.scrollTop || 0});

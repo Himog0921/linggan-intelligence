@@ -66,3 +66,14 @@
 本轮最终检查：API focused入口/跨站拒绝1项通过，API offline构建通过；`node scripts/test-topic-map-ui.cjs`4组通过（8种reader资格形态、跨主题注入、乱序、关闭）；JS/测试语法、所属Rust格式、diff whitespace与项目治理检查通过。独立commit-reviewer最终无阻塞P1/P2。本轮未重新宣称初版workspace613/插件308/本包PG11的全量跑次；它们为本记录此前独立证明，新的运行范围如上。
 
 最终合成截图文件名为 `topic-map-demo-corrected-overview.jpg`、`topic-map-demo-corrected-journey.jpg`、`topic-map-demo-corrected-judgment.jpg`、`topic-map-demo-corrected-mobile.jpg`，位于本任务授权Codex visualizations目录，按生成物登记管理、不入Git。源码/本轮浏览器路径 VERIFIED；Mog视觉/业务验收、origin/main合并、运行库迁移、3000部署仍NOT VERIFIED。
+
+
+## 公共页头和面包屑重新验收（2026-10-09追加）
+
+Mog 要求主题图谱页头沿用其他页面，包含面包屑。本节取代上述64px独立页头的验收方向；保留旧截图作为纠偏历史，最新使用 `topic-map-demo-corrected-shared-header*.jpg`。已删除topic页全部 `.v7-*`覆盖，直接复用global_header/SHELL_CSS/corpus_domain_picker，主体重复领域筛选移除。公共源码和Token未改。
+
+实际隔离浏览器：1440×1000下主题页与同一构建 `/collection/attention` 的页头均128px、导航78px、Context Bar50px、品牌285px、菜单130px，Logo颜色与点阵背景计算值完全相同。主题页文档宽1440；390×844下文档/scrollWidth均390，五个一级入口各78px、个人菜单可见宽76px、面包屑51px；个人菜单与领域菜单Enter展开均可用，设置仍指向/settings。主题概览→旅程更新末级路径，叶主题加载后显示实际主题名。
+
+实际跨域：ADHD叶主题→公共菜单“考研自习”→后端0篇空态，URL规范为domainRef ...0002，旧topicRef不残留；再切回ADHD取得7篇。两个领域来自独占合成库；没有读取运行库、触发provider/worker/平台。复审发现domain/domainRef别名跨域初始化不同步，已统一并入库反例回归。当前脚本5组通过（此前4组加真实初始化的两种别名/同域深链/显式过滤），API入口1项、offline build、JS/测试语法、Rust格式、diff、治理和设计手册结构检查均通过；独立复审无阻塞P1/P2。
+
+源码和隔离浏览器 VERIFIED；Mog视觉验收/main合并/运行库迁移/3000部署仍未执行。本轮未重跑完整workspace/插件/PG套件；仅隔离fixture基础与读取检查、上述focused检查。

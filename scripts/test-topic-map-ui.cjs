@@ -6,8 +6,26 @@ const sourcePath=process.argv[2] || require('node:path').join(__dirname,'../apps
 const blank={replaceChildren(){},addEventListener(){},querySelector(){return null},querySelectorAll(){return []},contains(){return false}};
 const ctx={document:{getElementById(){return blank},createElement(){return {...blank}},activeElement:null},sessionStorage:{getItem(){return null}},location:{search:'',href:'http://127.0.0.1:3109/topics',origin:'http://127.0.0.1:3109'},URL,URLSearchParams,crypto:require('node:crypto').webcrypto,FormData:class{constructor(f){this.f=f}get(k){return this.f.values?.[k]}getAll(k){return this.f.arrays?.[k]||[]}},fetch:null,console};
 const tail=/  load\(\);\n\}\)\(\);\s*$/;let src=fs.readFileSync(sourcePath,'utf8');assert(tail.test(src),'known topic-map initialization boundary');
+const initializationSource=src.replace(tail,'globalThis.initialState=state;})();');
 src=src.replace(tail,`globalThis.audit={readSample,readWork,readerDialog,replaceSamplesDialog,submitDialog,set(s,d,stack=[]){snapshot=s;dialogState=d;dialogStack=stack;state.domainRef='domain';state.topicRef='topic-A';},get(){return dialogState;}};drawDialog=()=>{};render=()=>{};load=async()=>{};openDialog=(type,data)=>{if(dialogState)dialogStack.push(dialogState);dialogState={type,...data};};})();`);vm.runInNewContext(src,ctx);
 (async()=>{
+ const restoredScope={domainRef:'domain-A',topicRef:'OLD_TOPIC',platform:'xhs',windowDays:'7',path:'family',overlay:'obstruction_recurrence',query:'OLD_QUERY',compare:['OLD_TOPIC']};
+ const initialize=search=>{
+   const isolated={...ctx,sessionStorage:{getItem(){return JSON.stringify(restoredScope)}},location:{...ctx.location,search,href:`${ctx.location.origin}/topics${search}`}};
+   vm.runInNewContext(initializationSource,isolated);
+   return JSON.parse(JSON.stringify(isolated.initialState));
+ };
+ for(const search of ['?domain=domain-B','?domainRef=domain-B','?domain=domain-A']){
+   const initial=initialize(search);
+   assert.equal(initial.domainRef,search.includes('domain-B')?'domain-B':'domain-A');
+   for(const key of ['topicRef','path','overlay','query','platform','windowDays'])assert.equal(initial[key],'',`${search}: former domain scope must be cleared`);
+   assert.deepEqual(initial.compare,[],`${search}: former topic comparisons must be cleared`);
+ }
+ const deep=initialize('?domainRef=domain-A&topicRef=DEEP_TOPIC&platform=douyin');
+ assert.equal(deep.topicRef,'DEEP_TOPIC');assert.equal(deep.platform,'douyin');assert.equal(deep.path,'family');assert.equal(deep.query,'OLD_QUERY');assert.deepEqual(deep.compare,['OLD_TOPIC']);
+ const explicit=initialize('?domainRef=domain-B&topicRef=NEW_TOPIC&platform=douyin&windowDays=30');
+ assert.equal(explicit.topicRef,'NEW_TOPIC');assert.equal(explicit.platform,'douyin');assert.equal(explicit.windowDays,'30');assert.equal(explicit.path,'');assert.deepEqual(explicit.compare,[]);
+ console.log('PASS: both domain aliases clear former scope; same-domain deep links preserve session and explicit URL selection');
  const stale={workRef:'A',title:'Synthetic A',readable:true,platform:'xhs',topicRefs:['topic-A'],research:{fragments:[{fragmentId:'old-comment',field:'studied_comment',text:'RESTRICTED_OLD_COMMENT'}],output:{journey:{rationale:'RESTRICTED_OLD_INTERPRETATION'}}},annotation:{rationale:'RESTRICTED_OLD_ANNOTATION'},evidenceFragment:{text:'RESTRICTED_OLD_FALLBACK'}};
  const b={...stale,workRef:'B',title:'UNRELATED_B',topicRefs:['topic-B']};
  const snap={scope:{recentReferenceWorkRefs:['A','B'],ownIdentityState:'known'},topics:[{topicRef:'topic-A',workRefs:['A']},{topicRef:'topic-B',workRefs:['B']}],works:[stale,b],statistics:{platforms:[]}};
