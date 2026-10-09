@@ -110,6 +110,86 @@ async fn all_domains_reads_real_keyword_works_without_cross_target_leakage() {
     assert!(!adhd_counts.contains_key(&peer));
 }
 
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn keyword_hit_uses_accepted_detail_author_when_discovery_author_is_unknown() {
+    let database = proof_database("keyword_detail_author_projection").await;
+    submit_package_for_domain(
+        &database,
+        ADHD_DOMAIN,
+        "author-projection-keyword",
+        "deep_archive",
+        serde_json::json!({"query":"author-projection-keyword"}),
+        FIXTURE_QUOTA,
+        "discovery_search",
+        search_coverage("author-projection-keyword", 1),
+        serde_json::json!({"surfaceReceipt":{"stopReason":"bottom_confirmed"}}),
+        vec![discovery_card(
+            "author-projection-work", "搜索卡片", "3",
+            "https://www.xiaohongshu.com/search_result/author-projection-work?xsec_token=fixture",
+        )],
+    ).await;
+    let (target_ref, work_ref): (Uuid, Uuid) = sqlx::query_as(
+        "SELECT target.target_ref,content.public_ref FROM collection_observation_target target \
+         JOIN linggan_material_content content ON content.content_external_id='author-projection-work' \
+         WHERE target.identity_key='author-projection-keyword'",
+    ).fetch_one(database.pool()).await.unwrap();
+    let before = read_keyword_hits(&database, target_ref, None).await.unwrap().unwrap();
+    assert_eq!(before.works[0].creator_display_name, None);
+    assert_eq!(before.works[0].creator_external_id, None);
+
+    let task_id = Uuid::new_v4();
+    let attempt_id = Uuid::new_v4();
+    let producer_id = Uuid::new_v4();
+    let package_ref = Uuid::new_v4();
+    let hash = "a".repeat(64);
+    sqlx::query("INSERT INTO linggan_runtime_task \
+        (task_id,task_spec_hash,task_spec,source,platform,page_type) \
+        VALUES ($1,$2,$3,'manual','xhs','note_detail')")
+        .bind(task_id).bind(&hash)
+        .bind(serde_json::json!({"target":{"contentExternalId":"author-projection-work"},"capabilitiesRequested":["content_detail"],"maximumQuota":1}))
+        .execute(database.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_runtime_attempt \
+        (attempt_id,task_id,producer_instance_id,started_at) \
+        VALUES ($1,$2,$3,'2026-10-08T00:00:00Z')")
+        .bind(attempt_id).bind(task_id).bind(producer_id)
+        .execute(database.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_runtime_capture_package \
+        (package_ref,attempt_id,task_id,producer_instance_id,package_kind,platform,package_hash, \
+         observed_at,captured_at,coverage,checkpoint,payload,accepted_at) \
+        VALUES ($1,$2,$3,$4,'content_detail','xhs',$5,'2026-10-08T00:00:00Z', \
+                '2026-10-08T00:00:00Z',$6,$7,'{}','2026-10-08T00:00:00Z')")
+        .bind(package_ref).bind(attempt_id).bind(task_id).bind(producer_id).bind(&hash)
+        .bind(serde_json::json!({"target":{"contentExternalId":"author-projection-work"},"layers":[{"capability":"content_detail","observed":1,"attempted":1,"acquired":1,"verified":0,"failed":0,"notAttempted":0,"unknown":0,"stoppedReason":"surface_ended"}]}))
+        .bind(serde_json::json!({"surfaceReceipt":{"stopReason":"surface_ended"}}))
+        .execute(database.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_runtime_submission_receipt \
+        (submission_id,task_id,attempt_id,producer_instance_id,package_hash,package_ref, \
+         receipt_ref,received_at,execution_effect,material_admission) \
+        VALUES ($1,$2,$3,$4,$5,$6,$7,'2026-10-08T00:00:00Z','COMPLETED_LIVE_STEP','ACCEPTED')")
+        .bind(Uuid::new_v4()).bind(task_id).bind(attempt_id).bind(producer_id)
+        .bind(&hash).bind(package_ref).bind(Uuid::new_v4())
+        .execute(database.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_runtime_record_disposition \
+        (package_ref,record_ordinal,disposition,reason) \
+        VALUES ($1,0,'accepted_for_library_content','keyword author projection proof')")
+        .bind(package_ref).execute(database.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_material_content_detail \
+        (material_ref,content_public_ref,package_ref,record_ordinal,observed_at,title,title_state, \
+         body_text,body_state,creator_display_name,creator_display_name_state, \
+         published_at_source_text,published_at_source_text_state,searchable_text,author_external_id) \
+        VALUES ($1,$2,$3,0,'2026-10-08T00:00:00Z','详情标题','KNOWN',NULL,'UNKNOWN', \
+                '详情作者','KNOWN',NULL,'UNKNOWN','详情标题 详情作者','stable-author-1')")
+        .bind(Uuid::new_v4()).bind(work_ref).bind(package_ref)
+        .execute(database.pool()).await.unwrap();
+
+    let after = read_keyword_hits(&database, target_ref, None).await.unwrap().unwrap();
+    assert_eq!(after.works.len(), 1);
+    assert_eq!(after.works[0].detail_state, CatalogDetailState::Complete);
+    assert_eq!(after.works[0].creator_display_name.as_deref(), Some("详情作者"));
+    assert_eq!(after.works[0].creator_external_id.as_deref(), Some("stable-author-1"));
+}
+
 /// 一轮把搜索面翻到底、且没有一条材料被隔离的建档，应当被判为**已建档**。
 ///
 /// 关键词没有建档生命周期（`0042` 的 CHECK 禁止它进入 `archiving`/`archived`），所以
