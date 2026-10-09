@@ -83,11 +83,30 @@ struct TaskSpecWire {
     top_by_likes: Option<u32>,
     published_within_days: Option<u32>,
     comment_scope: Option<String>,
+    incremental_comment_budget: Option<IncrementalCommentBudget>,
+    incremental_search_budget: Option<IncrementalSearchBudget>,
     requested_comment_limit: Option<u32>,
     surface: Option<String>,
     acquire_media: Value,
     risk_policy: String,
     stop_conditions: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct IncrementalCommentBudget {
+    known_comment_ids: Vec<String>,
+    new_unique_limit: u32,
+    max_scroll_rounds: u32,
+    max_duration_seconds: u32,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct IncrementalSearchBudget {
+    max_scroll_rounds: u32,
+    max_duration_seconds: u32,
+    candidate_quota: u32,
 }
 
 /// Flat, bounded execution instruction.  `scheduled` is valid at the protocol boundary but a
@@ -496,7 +515,9 @@ fn validate_comment_collection_receipt(
     let complete_matches_expected = state != Some("complete")
         || match (scope, expected, acquired) {
             (Some("all_public_comments"), Some(expected), Some(acquired)) => acquired >= expected,
-            (Some("detail_window"), Some(expected), Some(acquired)) => acquired == expected,
+            (Some("detail_window" | "incremental_new"), Some(expected), Some(acquired)) => {
+                acquired == expected
+            }
             _ => false,
         };
     let complete_all_public_matches_page = state != Some("complete")
@@ -515,6 +536,12 @@ fn validate_comment_collection_receipt(
         || requested_limit.is_some_and(|limit| {
             let required = page_count.map_or(limit, |page_count| page_count.min(limit));
             expected == Some(required) && acquired == Some(required)
+        });
+    let incremental_valid = scope != Some("incremental_new")
+        || requested_limit.is_some_and(|limit| {
+            (1..=30).contains(&limit)
+                && acquired.is_some_and(|n| n <= limit)
+                && expected == Some(limit)
         });
     let state_matches_identity = matches!(
         (state, target_identity),
@@ -541,7 +568,10 @@ fn validate_comment_collection_receipt(
             )
         );
     if version != Some(1)
-        || !matches!(scope, Some("detail_window") | Some("all_public_comments"))
+        || !matches!(
+            scope,
+            Some("detail_window") | Some("all_public_comments") | Some("incremental_new")
+        )
         || !matches!(
             state,
             Some("complete") | Some("partial") | Some("invalid_target")
@@ -561,6 +591,7 @@ fn validate_comment_collection_receipt(
         || acquired.is_none()
         || !complete_matches_expected
         || !complete_all_public_matches_page
+        || !incremental_valid
         || !detail_window_limit_is_valid
         || !complete_detail_window_is_full
         || !state_matches_identity
@@ -625,6 +656,43 @@ fn valid_target_for_capability(target: &Value, capability: &str) -> bool {
 
 fn valid_execution_for_capability(wire: &TaskSpecWire) -> bool {
     let capability = wire.capabilities_requested[0].as_str();
+    if let Some(b) = &wire.incremental_search_budget {
+        if capability != "discovery_search"
+            || wire.source != "scheduled"
+            || wire.platform != "xhs"
+            || b.max_scroll_rounds == 0
+            || b.max_scroll_rounds > 3
+            || b.max_duration_seconds == 0
+            || b.max_duration_seconds > 180
+            || b.candidate_quota == 0
+            || b.candidate_quota > 200
+            || wire.maximum_quota != Some(b.candidate_quota)
+            || wire.scroll_rounds.is_some_and(|s| s > b.max_scroll_rounds)
+        {
+            return false;
+        }
+    }
+    if let Some(b) = &wire.incremental_comment_budget {
+        let unique: std::collections::HashSet<_> = b.known_comment_ids.iter().collect();
+        if !matches!(capability, "comments" | "replies")
+            || wire.source != "scheduled"
+            || wire.platform != "xhs"
+            || b.new_unique_limit == 0
+            || b.new_unique_limit > 30
+            || wire.comment_limit.as_u64() != Some(u64::from(b.new_unique_limit))
+            || b.max_scroll_rounds == 0
+            || b.max_scroll_rounds > 50
+            || b.max_duration_seconds == 0
+            || b.max_duration_seconds > 600
+            || b.known_comment_ids.len() > 5000
+            || unique.len() != b.known_comment_ids.len()
+            || b.known_comment_ids
+                .iter()
+                .any(|id| id.trim().is_empty() || id.len() > 256)
+        {
+            return false;
+        }
+    }
     let search_instruction = wire.ranking.is_some()
         || wire.scroll_rounds.is_some()
         || wire.top_by_likes.is_some()

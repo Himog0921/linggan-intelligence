@@ -576,3 +576,12 @@ REAL-CANARY #52 的聚合结果已确认：本地库存在已接纳的当前可�
 当前仓库的 Git 提交身份已确认为 `Himog0921 <188755262+Himog0921@users.noreply.github.com>`；它是仓库本地配置，不改变其他项目。
 
 实施前准备矩阵见 [`audits/pre-scope-001-readiness-2026-08-20.md`](audits/pre-scope-001-readiness-2026-08-20.md)，正式范围以当前 `SCOPE-001` 为准。GitHub noreply 身份和设计基线推送已经真实验证；后续提交仍需逐次核对实际 Git 状态。
+
+### TOPIC-MAP-V41-001 / 2026-10-09
+
+Mog 授权按手册 v1.1 与 V4.1 Demo 全面开发主题图谱，并允许 subagent 并行。独立 codex/topic-map-v41 基于 origin/main@5977c7b5；[实施计划](plans/active/topic-map-v41-001.md)记录完整表面、状态、依赖、验收与源授权。开发分支源码与隔离验证已收口，最终workspace613、插件308、本包PostgreSQL11项通过；[实施验收](design/acceptance/topic-map-v41-001-acceptance.md)区分源码、浏览器与业务边界。尚未合并main、迁移运行库、部署3000、启用真实模型/平台采集或取得Mog业务验收。旧 Topic Workspace 深链保留，/topics 默认全域概览在本包替代固定 redirect。
+
+
+2026-10-09 前端追加纠偏：Mog 已指出初版与Demo不一致。当前包按Demo最终布局修复整体页面，并重新核验桌面/窄屏与来源失败状态；初版浏览器只证明功能路径，不能替代本轮视觉核验。修复与证明仍仅在专属开发分支及合成3109环境，尚未进入main/3000，详见同一实施验收与交付计划。
+
+2026-10-09 公共页头追加纠偏：Mog 明确要求沿用其他页面的页头和面包屑，覆盖此前64px独立页头方向。开发分支已恢复shared header/CSS/domain picker；与采集页同构建浏览器计算值一致，1440/390与两域切换实际核验，5组UI回归及独立复审通过。仍未进入main/3000，最新截图/边界见同一实施验收。

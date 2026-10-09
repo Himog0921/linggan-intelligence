@@ -506,7 +506,7 @@ const LIST_TARGETS_WITH_DOMAIN: &str = concat!(
                         FROM observation_domain_target relation \
                         JOIN observation_domain domain USING(domain_ref) \
                         WHERE relation.target_ref=target.target_ref) domain ON true \
-     WHERE ($1::text IS NULL OR target.target_kind = $1) \
+     WHERE to_jsonb(target)->>'purpose_kind' IS DISTINCT FROM 'research_round' AND ($1::text IS NULL OR target.target_kind = $1) \
        AND ($2::text IS NULL OR target.lifecycle_state = $2) \
        AND ($4::uuid IS NULL OR EXISTS (SELECT 1 FROM observation_domain_target relation \
                                          WHERE relation.target_ref=target.target_ref \
@@ -527,7 +527,7 @@ const LIST_TARGETS_WITHOUT_DOMAIN: &str = concat!(
        LEFT JOIN collection_monitor_rule_revision revision \
               ON revision.rule_revision_ref=rule.active_revision_ref \
        WHERE rule.target_ref=target.target_ref AND rule.retired_at IS NULL) rules ON true \
-     WHERE ($1::text IS NULL OR target.target_kind = $1) \
+     WHERE to_jsonb(target)->>'purpose_kind' IS DISTINCT FROM 'research_round' AND ($1::text IS NULL OR target.target_kind = $1) \
        AND ($2::text IS NULL OR target.lifecycle_state = $2) \
        AND $4::uuid IS NULL \
      ORDER BY target.first_stored_at DESC LIMIT $3"
@@ -576,19 +576,19 @@ pub async fn count_targets(
     const COUNT_HEAD: &str = "SELECT count(*), \
                 count(*) FILTER (WHERE target.target_kind = 'creator'), \
                 count(*) FILTER (WHERE target.target_kind = 'keyword'), \
-                count(*) FILTER (WHERE target.lifecycle_state = 'archiving'), \
+                count(*) FILTER (WHERE to_jsonb(target)->>'purpose_kind' IS DISTINCT FROM 'research_round' AND target.lifecycle_state = 'archiving'), \
                 count(*) FILTER (WHERE target.monitoring_enabled AND EXISTS ( \
                     SELECT 1 FROM collection_monitor_rule rule \
                     JOIN collection_monitor_rule_revision revision \
                       ON revision.rule_revision_ref=rule.active_revision_ref \
                     WHERE rule.target_ref=target.target_ref AND rule.retired_at IS NULL \
                       AND revision.automatic_enabled)) \
-         FROM collection_observation_target target";
+         FROM collection_observation_target target WHERE to_jsonb(target)->>'purpose_kind' IS DISTINCT FROM 'research_round'";
     const COUNT_IN_DOMAIN: &str = concat!(
         "SELECT count(*), \
                 count(*) FILTER (WHERE target.target_kind = 'creator'), \
                 count(*) FILTER (WHERE target.target_kind = 'keyword'), \
-                count(*) FILTER (WHERE target.lifecycle_state = 'archiving'), \
+                count(*) FILTER (WHERE to_jsonb(target)->>'purpose_kind' IS DISTINCT FROM 'research_round' AND target.lifecycle_state = 'archiving'), \
                 count(*) FILTER (WHERE target.monitoring_enabled AND EXISTS ( \
                     SELECT 1 FROM collection_monitor_rule rule \
                     JOIN collection_monitor_rule_revision revision \
@@ -596,9 +596,9 @@ pub async fn count_targets(
                     WHERE rule.target_ref=target.target_ref AND rule.retired_at IS NULL \
                       AND revision.automatic_enabled)) \
          FROM collection_observation_target target \
-         WHERE $1::uuid IS NULL OR EXISTS (SELECT 1 FROM observation_domain_target relation \
+         WHERE to_jsonb(target)->>'purpose_kind' IS DISTINCT FROM 'research_round' AND ($1::uuid IS NULL OR EXISTS (SELECT 1 FROM observation_domain_target relation \
                                             WHERE relation.target_ref=target.target_ref \
-                                              AND relation.domain_ref=$1)"
+                                              AND relation.domain_ref=$1))"
     );
     let row: (i64, i64, i64, i64, i64) = if domain_ready {
         sqlx::query_as(COUNT_IN_DOMAIN).bind(domain)
@@ -709,7 +709,7 @@ pub async fn list_targets_in_state(
         "SELECT target_ref, platform, target_kind, identity_key, display_name, identity_facts, \
                 source, lifecycle_state, to_char(first_stored_at, 'YYYY-MM-DD\"T\"HH24:MI:SSOF') \
          FROM collection_observation_target \
-         WHERE lifecycle_state = $1 \
+         WHERE lifecycle_state = $1 AND to_jsonb(collection_observation_target)->>'purpose_kind' IS DISTINCT FROM 'research_round' \
          ORDER BY first_stored_at DESC \
          LIMIT $2",
     )
@@ -1180,7 +1180,7 @@ pub async fn register_discovered_creator(
     usage_role: &str,
 ) -> Result<serde_json::Value, crate::creator_discovery::DiscoveryError> {
     use crate::creator_discovery::{DiscoveryError, load_in};
-    if !matches!(usage_role,"primary"|"reference") {
+    if !matches!(usage_role, "primary" | "reference") {
         return Err(DiscoveryError::Invalid("invalid_usage_role"));
     }
     let (platform, author) = linggan_contracts::creator_discovery::decode_creator_key(creator_key)
@@ -1200,7 +1200,7 @@ pub async fn register_discovered_creator(
         return Err(DiscoveryError::Invalid("observation_lookup_unavailable"));
     }
     scope.usage_role = "reference".into();
-    let reference_data=load_in(&mut tx, &scope).await?;
+    let reference_data = load_in(&mut tx, &scope).await?;
     if !reference_data.observation_lookup_available {
         return Err(DiscoveryError::Invalid("observation_lookup_unavailable"));
     }
@@ -1215,7 +1215,7 @@ pub async fn register_discovered_creator(
     let target=sqlx::query("SELECT target_ref,lifecycle_state,monitoring_enabled FROM collection_observation_target WHERE platform=$1 AND target_kind='creator' AND identity_key=$2 FOR UPDATE").bind(identity.platform()).bind(identity.key()).fetch_one(&mut *tx).await?;
     let target_ref: Uuid = target.get("target_ref");
     let existing_role:Option<String>=sqlx::query_scalar("SELECT role FROM observation_domain_target WHERE domain_ref=$1 AND target_ref=$2 FOR UPDATE").bind(domain).bind(target_ref).fetch_optional(&mut *tx).await?;
-    if existing_role.is_none() && usage_role=="primary" {
+    if existing_role.is_none() && usage_role == "primary" {
         let other_primary:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM observation_domain_target relation WHERE relation.target_ref=$1 AND relation.domain_ref<>$2 AND relation.role='primary')").bind(target_ref).bind(domain).fetch_one(&mut *tx).await?;
         if other_primary {
             return Err(DiscoveryError::Invalid("active_primary_domain_conflict"));

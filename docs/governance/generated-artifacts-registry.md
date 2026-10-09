@@ -61,3 +61,11 @@
 - 位置：`linggan-intelligence-corpus-performance-proof-*` 容器及同名 `-data` volume；系统临时目录中的只读 SQL、EXPLAIN 与 HTTP 比较结果。
 - Git：只提交源码及聚合指标，不提交原文、DSN、数据库或运行日志。
 - 清理：脚本 EXIT 删除并核实本次 proof database/container/volume；比较完成删除真实 HTTP 临时响应并停止本次 3108 候选 API，不触碰共享 3000 或其他任务资源。
+
+## TOPIC-MAP-V41-001 隔离验证
+
+- 来源：主题图谱 Rust/API/JS/CSS 与 `scripts/test-topic-map-postgres.sh`。
+- 固定位置：Cargo缓存在worktree已忽略target；测试输出与临时浏览器证据放 `/tmp/topic-map-v41-*`；供 Mog 审阅的合成截图保存到 Codex 当前任务授权的 visualizations 目录，文件名 `topic-map-demo-corrected-*.jpg`。Docker容器/volume使用上述脚本唯一随机名。
+- 不入Git，不包含真实原文/运行库dump/凭据；脚本退出清理容器与volume并验证成功。
+- 再生：上述脚本 + API focused tests + 隔离合成数据浏览器走查。责任 TOPIC-MAP-V41-001 root。
+- 本机发布追加：经 Mog 单独授权的运行库加密备份、校验和与不含正文/凭据的发布回执保存在既有忽略目录 `database/backups/topic-map-v41-<UTC>/`；密钥继续独立保管。真实3000的浏览器截图归本任务 Codex visualizations，文件名 `topic-map-demo-corrected-runtime-*.jpg`，不入Git。合成截图与运行页截图不得互相替代。

@@ -75,3 +75,17 @@ macro_rules! qualified_detail_missing_sql {
 
 pub(crate) use qualified_detail_exists_sql;
 pub(crate) use qualified_detail_missing_sql;
+
+/// Canonical detail qualification for callers that already own an exact work scope.
+pub async fn missing_qualified_detail_refs_in(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    references: &[uuid::Uuid],
+) -> Result<Vec<uuid::Uuid>, sqlx::Error> {
+    sqlx::query_scalar(concat!(
+        "SELECT requested.work_ref FROM unnest($1::uuid[]) AS requested(work_ref) WHERE ",
+        qualified_detail_missing_sql!("requested.work_ref")
+    ))
+    .bind(references)
+    .fetch_all(&mut **tx)
+    .await
+}

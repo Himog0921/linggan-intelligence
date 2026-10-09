@@ -4,6 +4,12 @@
 pub mod creator_discovery_analysis;
 pub mod creator_discovery_worker;
 pub mod research_text;
+pub mod topic_map;
+pub mod topic_map_collection_search;
+pub mod topic_map_research;
+pub mod topic_map_research_analysis;
+pub mod topic_map_research_collection;
+pub mod topic_map_research_worker;
 mod topic_workspace;
 
 pub use topic_workspace::{
@@ -52,3 +58,5 @@ pub mod comment_study_run;
 pub mod comment_study_selection;
 pub mod comment_study_semantic;
 pub mod comment_study_source;
+
+pub mod topic_map_structure;

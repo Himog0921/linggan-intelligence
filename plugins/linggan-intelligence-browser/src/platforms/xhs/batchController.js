@@ -428,6 +428,7 @@ export class BatchNoteController extends BaseBatchController {
     this._commentLimit = this._includeComments && Number.isFinite(configuredCommentLimit)
       ? Math.max(0, Math.floor(configuredCommentLimit))
       : 0;
+    this._incrementalCommentBudget = settings.incrementalCommentBudget || null;
     this._commentDepthMode = String(settings.commentDepthMode || COMMENT_DEPTH_MODE.TWO_LEVEL).trim() === COMMENT_DEPTH_MODE.ALL_REPLIES
       ? COMMENT_DEPTH_MODE.ALL_REPLIES
       : COMMENT_DEPTH_MODE.TWO_LEVEL;
@@ -1259,6 +1260,7 @@ export class BatchNoteController extends BaseBatchController {
         noteId,
         noteUrl: noteUrl || noteInfo.url || window.location.href,
         maxTotal: this._commentLimit,
+        taskSpec: this._incrementalCommentBudget ? { incrementalCommentBudget: this._incrementalCommentBudget } : undefined,
         observedNoteId: collectedNote.noteId,
         maxSubComments: this._commentDepthMode === COMMENT_DEPTH_MODE.ALL_REPLIES ? 0 : this._maxSubComments,
         commentDepthMode: this._commentDepthMode,

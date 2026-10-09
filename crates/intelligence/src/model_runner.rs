@@ -56,6 +56,7 @@ pub struct ModelWorkerFairness {
 enum ModelWorkLane {
     Semantic,
     CreatorDiscovery,
+    TopicMap,
     Resolution,
     Pair,
 }
@@ -86,13 +87,14 @@ fn pair_lane_progress(outcome: PairExecution, prepared: bool) -> LaneProgress {
 
 impl ModelWorkerFairness {
     fn next_lane(&mut self) -> ModelWorkLane {
-        let lane = match self.next_lane_index % 4 {
+        let lane = match self.next_lane_index % 5 {
             0 => ModelWorkLane::Semantic,
             1 => ModelWorkLane::Resolution,
             2 => ModelWorkLane::Pair,
-            _ => ModelWorkLane::CreatorDiscovery,
+            3 => ModelWorkLane::CreatorDiscovery,
+            _ => ModelWorkLane::TopicMap,
         };
-        self.next_lane_index = (self.next_lane_index + 1) % 4;
+        self.next_lane_index = (self.next_lane_index + 1) % 5;
         lane
     }
 }
@@ -108,7 +110,7 @@ mod tests {
     #[test]
     fn model_work_lanes_rotate_before_each_attempt() {
         let mut fairness = ModelWorkerFairness::default();
-        let actual: Vec<_> = (0..8).map(|_| fairness.next_lane()).collect();
+        let actual: Vec<_> = (0..10).map(|_| fairness.next_lane()).collect();
         assert_eq!(
             actual,
             vec![
@@ -116,10 +118,12 @@ mod tests {
                 ModelWorkLane::Resolution,
                 ModelWorkLane::Pair,
                 ModelWorkLane::CreatorDiscovery,
+                ModelWorkLane::TopicMap,
                 ModelWorkLane::Semantic,
                 ModelWorkLane::Resolution,
                 ModelWorkLane::Pair,
                 ModelWorkLane::CreatorDiscovery,
+                ModelWorkLane::TopicMap,
             ]
         );
     }
@@ -229,9 +233,20 @@ pub async fn run_model_work_once_with_fairness(
         &mut made_progress,
     )?;
 
-    for _ in 0..4 {
+    for _ in 0..5 {
         let lane = fairness.next_lane();
         let progress = match lane {
+            ModelWorkLane::TopicMap => {
+                crate::topic_map_research_worker::run_once(database, store, adapter)
+                    .await
+                    .map(|worked| {
+                        if worked {
+                            LaneProgress::ProviderAttempt
+                        } else {
+                            LaneProgress::Idle
+                        }
+                    })
+            }
             ModelWorkLane::CreatorDiscovery => {
                 crate::creator_discovery_worker::run_once(database, store, adapter)
                     .await

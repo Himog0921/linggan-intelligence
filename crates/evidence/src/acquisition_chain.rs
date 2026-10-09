@@ -650,6 +650,57 @@ pub async fn request_and_admit_material_targets_for_domain(
     Ok(outcome)
 }
 
+/// Topic research composes its frozen round slots with ordinary Collection admission atomically.
+/// The caller holds its purpose/round lock; this helper still runs all existing authorization,
+/// capacity and domain gates and never issues an execution lease or visits a platform.
+pub async fn request_and_admit_material_targets_for_domain_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    target_ref: Uuid,
+    domain_ref: Uuid,
+    purpose: &str,
+    requested_by: &str,
+    material_targets: &[MaterialDeepeningTarget],
+) -> Result<RequestOutcome, AcquisitionChainError> {
+    validate_material_targets(material_targets)?;
+    request_and_admit_in_transaction_scoped(
+        transaction,
+        target_ref,
+        "deep_archive",
+        purpose,
+        requested_by,
+        Some(domain_ref),
+        material_targets,
+        None,
+        None,
+        false,
+    )
+    .await
+}
+
+/// Explicit temporary search uses the same authorization, capacity and domain admission gates.
+pub async fn request_and_admit_keyword_search_for_domain_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    target_ref: Uuid,
+    domain_ref: Uuid,
+    purpose: &str,
+    requested_by: &str,
+    authorization_ref: Uuid,
+) -> Result<RequestOutcome, AcquisitionChainError> {
+    request_and_admit_in_transaction_scoped(
+        transaction,
+        target_ref,
+        "deep_archive",
+        purpose,
+        requested_by,
+        Some(domain_ref),
+        &[],
+        Some(authorization_ref),
+        None,
+        false,
+    )
+    .await
+}
+
 /// A person explicitly requests the current creator-directory gaps, including accepted patrol
 /// additions. Freeze that exact scope in a new ordinary material request; never reopen a root.
 pub async fn request_creator_directory_gaps(
@@ -698,11 +749,10 @@ async fn request_creator_directory_gaps_inner(
     if kind.as_deref() != Some("creator") {
         return Err(AcquisitionChainError::UnknownTarget);
     }
-    let follow_rule_revision_ref: Option<Uuid> = if requested_by == "agent"
-        && purpose == CREATOR_PATROL_DETAIL_FOLLOW_PURPOSE
-    {
-        let revision: Option<Uuid> = sqlx::query_scalar(
-            "SELECT revision.rule_revision_ref FROM collection_observation_target target \
+    let follow_rule_revision_ref: Option<Uuid> =
+        if requested_by == "agent" && purpose == CREATOR_PATROL_DETAIL_FOLLOW_PURPOSE {
+            let revision: Option<Uuid> = sqlx::query_scalar(
+                "SELECT revision.rule_revision_ref FROM collection_observation_target target \
              JOIN collection_monitor_rule rule ON rule.target_ref=target.target_ref \
              JOIN collection_monitor_rule_revision revision \
                ON revision.rule_revision_ref=rule.active_revision_ref \
@@ -710,16 +760,18 @@ async fn request_creator_directory_gaps_inner(
                AND target.monitoring_enabled AND rule.retired_at IS NULL \
                AND revision.automatic_enabled AND revision.creator_follow_details \
              ORDER BY rule.created_at,rule.rule_ref LIMIT 1",
-        )
-        .bind(target_ref)
-        .fetch_optional(&mut *transaction)
-        .await?;
-        Some(revision.ok_or(AcquisitionChainError::ProgressiveArchiveNotReady {
-            reason: "auto_detail_rule_disabled",
-        })?)
-    } else {
-        None
-    };
+            )
+            .bind(target_ref)
+            .fetch_optional(&mut *transaction)
+            .await?;
+            Some(
+                revision.ok_or(AcquisitionChainError::ProgressiveArchiveNotReady {
+                    reason: "auto_detail_rule_disabled",
+                })?,
+            )
+        } else {
+            None
+        };
     let candidate_domains: Vec<Uuid> = sqlx::query_scalar(
         "SELECT relation.domain_ref FROM observation_domain_target relation \
          JOIN observation_domain domain USING(domain_ref) \
@@ -867,14 +919,24 @@ async fn request_creator_directory_gaps_inner(
         .iter()
         .filter(|(_, _, _, in_flight, schedulable)| !in_flight && *schedulable)
         .take(if requested_by == "agent" { 3 } else { 200 })
-        .map(|(content_public_ref, needs_detail, needs_comments, _, _)| MaterialDeepeningTarget {
-            content_public_ref: *content_public_ref,
-            comment_limit: if *needs_detail || *needs_comments { 30 } else { 0 },
-            reply_expand_limit: if *needs_detail || *needs_comments { 2 } else { 0 },
-            acquire_media: *needs_detail,
-            allow_ocr: *needs_detail,
-            allow_asr: *needs_detail,
-        })
+        .map(
+            |(content_public_ref, needs_detail, needs_comments, _, _)| MaterialDeepeningTarget {
+                content_public_ref: *content_public_ref,
+                comment_limit: if *needs_detail || *needs_comments {
+                    30
+                } else {
+                    0
+                },
+                reply_expand_limit: if *needs_detail || *needs_comments {
+                    2
+                } else {
+                    0
+                },
+                acquire_media: *needs_detail,
+                allow_ocr: *needs_detail,
+                allow_asr: *needs_detail,
+            },
+        )
         .collect();
     if materials.is_empty() {
         return Err(AcquisitionChainError::ProgressiveArchiveNotReady {
@@ -906,15 +968,14 @@ async fn request_creator_directory_gaps_inner(
             });
         }
     }
-    let authorization_ref = if requested_by == "agent"
-        && purpose == CREATOR_PATROL_DETAIL_FOLLOW_PURPOSE
-    {
-        // The scope is now frozen. Pick a grant for this exact purpose that can cover it;
-        // selecting a grant before knowing the number of works can strand a valid batch.
-        let work_count = i32::try_from(materials.len()).unwrap_or(i32::MAX);
-        Some(
-            sqlx::query_scalar(
-                "SELECT authorization_ref FROM collection_acquisition_authorization \
+    let authorization_ref =
+        if requested_by == "agent" && purpose == CREATOR_PATROL_DETAIL_FOLLOW_PURPOSE {
+            // The scope is now frozen. Pick a grant for this exact purpose that can cover it;
+            // selecting a grant before knowing the number of works can strand a valid batch.
+            let work_count = i32::try_from(materials.len()).unwrap_or(i32::MAX);
+            Some(
+                sqlx::query_scalar(
+                    "SELECT authorization_ref FROM collection_acquisition_authorization \
                  WHERE platform='xhs' AND target_kind='creator' AND lane='deep_archive' \
                    AND purpose=$1 AND revoked_at IS NULL AND expires_at>scope_001_now() \
                    AND 'material_deepening'=ANY(allowed_task_templates) \
@@ -922,18 +983,18 @@ async fn request_creator_directory_gaps_inner(
                    AND (max_works_per_target IS NULL OR max_works_per_target >= $2) \
                    AND max_work_units >= $2 \
                  ORDER BY expires_at DESC,authorization_ref LIMIT 1 FOR UPDATE",
+                )
+                .bind(purpose)
+                .bind(work_count)
+                .fetch_optional(&mut *transaction)
+                .await?
+                .ok_or(AcquisitionChainError::ProgressiveArchiveNotReady {
+                    reason: "auto_detail_authorization_scope_insufficient",
+                })?,
             )
-            .bind(purpose)
-            .bind(work_count)
-            .fetch_optional(&mut *transaction)
-            .await?
-            .ok_or(AcquisitionChainError::ProgressiveArchiveNotReady {
-                reason: "auto_detail_authorization_scope_insufficient",
-            })?,
-        )
-    } else {
-        required_authorization_ref
-    };
+        } else {
+            required_authorization_ref
+        };
     let outcome = request_and_admit_in_transaction_scoped(
         &mut transaction,
         target_ref,
@@ -2766,7 +2827,11 @@ pub async fn run_progressive_archives(
     .await
     .map_err(AcquisitionChainError::from)?;
     let root_generation_limit = PROGRESSIVE_ARCHIVE_MAX_GENERATION_PER_TICK
-        - if has_follow_rule { CREATOR_FOLLOW_RESERVED_GENERATION_PER_TICK } else { 0 };
+        - if has_follow_rule {
+            CREATOR_FOLLOW_RESERVED_GENERATION_PER_TICK
+        } else {
+            0
+        };
     let mut generated = 0_usize;
     while generated < root_generation_limit {
         let mut advanced_any = false;

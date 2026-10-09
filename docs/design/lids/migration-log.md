@@ -479,3 +479,8 @@ Collection 的“全部领域”作品深链经既有领域弹窗保留 `work`�
 - **规则变更**：Mog 明确允许 `/collection/runtime` 的量化深色右缘 mask 与「暂停／恢复」白底按钮右缘采样栅格；登记为 `M-02E`，同时收窄到本页、两种准确区位和既有 token。`system.md` 的渐变禁令与 `tokens.md` 的 Mosaic 区位说明均显式引用该受控例外，未产生新的 token、颜色或主题。
 - **运行时表达**：保留深色看板表头 35% 的八段硬停止 mask；白底纹理只在真实 POST 动作的 8px 右缘。两处均不覆盖文字、不铺到表格／背景、不作为状态唯一通道。
 - **已验证／未验证**：`station_view` 42 条、完整 API 二进制 243 passed / 21 ignored、JS 语法、API 编译、设计手册／治理／diff 检查已通过；真实浏览器的两处材料范围、管理弹窗与 POST 回执，以及本机 runtime 发布仍待当次回执，不能由本条推断已发布。
+
+
+## 2026-10-09 · TOPIC-MAP-V41-001 公共页头恢复
+
+Mog 最新要求主题图谱页头、个人菜单和面包屑沿用其他页面的同一设计，替代本包初次Demo纠偏的独立64px页头。页面移除所有局部 `.v7-*` 覆盖，复用 `shell::global_header` / `SHELL_CSS` / `corpus_domain_picker`，不改shared shell或Token值；主体仍按Demo布局。既有公共壳层仍有历史规则与运行时差异，本次恢复复用不宣称全站完成LIDS迁移。验收和部署边界见主题图谱实施验收与active plan。

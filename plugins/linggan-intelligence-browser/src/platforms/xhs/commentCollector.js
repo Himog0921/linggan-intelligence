@@ -226,6 +226,30 @@ export async function rewindCommentSurface(container, {
  * @param {string} options.commentDepthMode - 评论深度：twoLevel / allReplies
  * @param {string} options.collectionRunId - 采集批次 ID
  */
+export function normalizeIncrementalCommentBudget(value) {
+  if (value == null) return null;
+  const ids = value.knownCommentIds;
+  if (!Array.isArray(ids) || ids.length > 5000 || ids.some((id) => typeof id !== 'string' || !id.trim() || id.length > 256)
+    || new Set(ids).size !== ids.length || !Number.isInteger(value.newUniqueLimit) || value.newUniqueLimit < 1 || value.newUniqueLimit > 30
+    || !Number.isInteger(value.maxScrollRounds) || value.maxScrollRounds < 1 || value.maxScrollRounds > 50
+    || !Number.isInteger(value.maxDurationSeconds) || value.maxDurationSeconds < 1 || value.maxDurationSeconds > 600) throw new Error('incremental_comment_budget_invalid');
+  return { ...value, knownCommentIds: [...ids] };
+}
+
+export function boundedNewCommentSelection(comments, budget) {
+  const b = normalizeIncrementalCommentBudget(budget);
+  if (!b) return comments;
+  const seen = new Set(b.knownCommentIds);
+  const selected = [];
+  for (const c of comments || []) {
+    const id = String(c?.platformCommentId || c?.commentId || '').trim();
+    if (!id || seen.has(id) || c?.qualityReason === 'synthetic_comment_id') continue;
+    if (selected.length >= b.newUniqueLimit) break;
+    seen.add(id); selected.push(c);
+  }
+  return selected;
+}
+
 export async function collectComments({
   noteId = '',
   noteUrl = '',
@@ -244,19 +268,25 @@ export async function collectComments({
   observedNoteId = '',
   executionPolicy = {},
 } = {}) {
+  const incrementalBudget = normalizeIncrementalCommentBudget(taskSpec?.incrementalCommentBudget);
+  const budgetState = incrementalBudget ? { remainingRounds: incrementalBudget.maxScrollRounds, deadline: Date.now() + incrementalBudget.maxDurationSeconds * 1000, exhausted: false } : null;
+  if (incrementalBudget) maxTotal = incrementalBudget.newUniqueLimit;
+  const budgetShouldStop = () => shouldStop() || Boolean(budgetState && Date.now() >= budgetState.deadline);
   const actionGate = createCommentActionGate({
     minimumCooldownMs: executionPolicy.minimumCooldownMs ?? DEFAULT_COMMENT_ACTION_COOLDOWN_MS,
-    shouldStop,
+    shouldStop: budgetShouldStop,
     waitIfPaused,
   });
   const apiResult = await collectCommentsViaApi({
     noteId,
     noteUrl,
     maxTotal,
+    incrementalBudget,
+    budgetState,
     maxSubComments,
     onProgress,
     onSnapshot,
-    shouldStop,
+    shouldStop: budgetShouldStop,
     waitIfPaused,
     commentDepthMode,
     collectionRunId,
@@ -269,7 +299,7 @@ export async function collectComments({
       total: apiResult.total,
       comments: apiResult.comments,
       stopReason: apiResult.stopReason,
-    }, { noteId, maxTotal, publicCommentCount, observedNoteId });
+    }, { noteId, maxTotal, publicCommentCount, observedNoteId, incrementalBudget });
     if (emitReceipt) {
       result.lingganDelivery = await emitCollectorReceipt('comments', result, { platform: 'xhs', noteId, options: { maxTotal, maxSubComments, commentDepthMode, taskSpec } });
     }
@@ -288,10 +318,12 @@ export async function collectComments({
     noteId,
     noteUrl,
     maxTotal,
+    incrementalBudget,
+    budgetState,
     maxSubComments,
     onProgress,
     onSnapshot,
-    shouldStop,
+    shouldStop: budgetShouldStop,
     waitIfPaused,
     commentDepthMode,
     collectionRunId,
@@ -304,6 +336,7 @@ export async function collectComments({
     maxTotal,
     publicCommentCount,
     observedNoteId,
+    incrementalBudget,
   });
   if (emitReceipt) {
     normalizedResult.lingganDelivery = await emitCollectorReceipt('comments', normalizedResult, { platform: 'xhs', noteId, options: { maxTotal, maxSubComments, commentDepthMode, taskSpec } });
@@ -329,6 +362,7 @@ export function resolveXhsCommentTargetIdentity({
 }
 
 function withCommentCollectionReceipt(result = {}, {
+  incrementalBudget = null,
   noteId = '',
   maxTotal = 0,
   publicCommentCount = null,
@@ -345,6 +379,7 @@ function withCommentCollectionReceipt(result = {}, {
     currentUrl: window.location?.href,
   });
   const receipt = buildXhsCommentCollectionReceipt({
+    incrementalBudget,
     noteId,
     maxTotal,
     publicCommentCount: publicCommentCount ?? context?.publicCommentCount,
@@ -432,6 +467,7 @@ export function resolveCommentContinuationHint(pageCommentCount = 0, publicComme
 }
 
 async function collectCommentsViaApi({
+  incrementalBudget = null, budgetState = null,
   noteId = '',
   noteUrl = '',
   maxTotal = 0,
@@ -454,7 +490,7 @@ async function collectCommentsViaApi({
   let container = resolveContainer();
 
   const allComments = [];
-  const seenIds = new Set();
+  const seenIds = new Set(incrementalBudget?.knownCommentIds || []);
   const depthMode = String(commentDepthMode || COMMENT_DEPTH_MODE.TWO_LEVEL).trim() || COMMENT_DEPTH_MODE.TWO_LEVEL;
   let noNewCount = 0;
   const maxNoNew = depthMode === COMMENT_DEPTH_MODE.ALL_REPLIES ? 8 : 4;
@@ -484,6 +520,7 @@ async function collectCommentsViaApi({
   };
 
   while (!shouldStop()) {
+    if (budgetState && (budgetState.remainingRounds-- <= 0 || Date.now() >= budgetState.deadline)) { budgetState.exhausted = true; break; }
     container = resolveContainer() || container;
     await waitIfPaused();
     if (shouldStop()) break;
@@ -589,8 +626,8 @@ async function collectCommentsViaApi({
         await waitIfPaused();
         if (shouldStop()) break;
         if (maxTotal > 0 && allComments.length >= maxTotal) break;
-        const key = `${comment.commentId}|${comment.parentCommentId || ''}|${comment.level || 1}`;
-        if (!comment.commentId || seenIds.has(key)) continue;
+        const key = incrementalBudget ? String(comment.platformCommentId || comment.commentId || '') : `${comment.commentId}|${comment.parentCommentId || ''}|${comment.level || 1}`;
+        if (!comment.commentId || seenIds.has(key) || (incrementalBudget && comment.qualityReason === 'synthetic_comment_id')) continue;
         seenIds.add(key);
         allComments.push(comment);
         foundNew = true;
@@ -748,6 +785,7 @@ async function collectCommentsViaApi({
 }
 
 async function collectCommentsFromDom({
+  incrementalBudget = null, budgetState = null,
   noteId = '',
   noteUrl = '',
   maxTotal = 0,
@@ -777,6 +815,7 @@ async function collectCommentsFromDom({
   const seeded = initializeCollectedComments(initialComments);
   const allComments = seeded.allComments;
   const seenIds = seeded.seenIds;
+  for (const id of incrementalBudget?.knownCommentIds || []) seenIds.add(id);
   const depthMode = String(commentDepthMode || COMMENT_DEPTH_MODE.TWO_LEVEL).trim() || COMMENT_DEPTH_MODE.TWO_LEVEL;
   let noNewCount = 0;
   const maxNoNew = depthMode === COMMENT_DEPTH_MODE.ALL_REPLIES ? 8 : DEFAULT_DOM_TOP_UP_MAX_NO_NEW;
@@ -786,6 +825,7 @@ async function collectCommentsFromDom({
   let riskStopped = false;
 
   while (!shouldStop()) {
+    if (budgetState && (budgetState.remainingRounds-- <= 0 || Date.now() >= budgetState.deadline)) { budgetState.exhausted = true; break; }
     container = resolveContainer() || container;
     if (!container) break;
     await waitIfPaused();
@@ -822,7 +862,7 @@ async function collectCommentsFromDom({
       const mainItemEl = parentEl.querySelector(':scope > .comment-item:not(.comment-item-sub)')
         || parentEl.querySelector('.comment-item:not(.comment-item-sub)');
       const mainComment = parseCommentNode(mainItemEl);
-      const mainIsNew = Boolean(mainComment?.commentId && !seenIds.has(mainComment.commentId));
+      const mainIsNew = Boolean(mainComment?.commentId && (!incrementalBudget || mainComment.qualityReason !== 'synthetic_comment_id') && !seenIds.has(mainComment.commentId));
 
       if (mainComment) {
         mainComment.noteId = noteId;
@@ -858,7 +898,7 @@ async function collectCommentsFromDom({
         if (maxTotal > 0 && allComments.length >= maxTotal) break;
 
         const subComment = parseCommentNode(subEl);
-        if (!subComment || seenIds.has(subComment.commentId)) continue;
+        if (!subComment || (incrementalBudget && (subComment.qualityReason === 'synthetic_comment_id' || mainComment?.qualityReason === 'synthetic_comment_id')) || seenIds.has(subComment.commentId)) continue;
 
         seenIds.add(subComment.commentId);
         foundNew = true;

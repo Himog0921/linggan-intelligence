@@ -1001,7 +1001,8 @@ pub async fn submit_producer_package(
         .and_then(Value::as_i64)
         .and_then(|value| i32::try_from(value).ok());
     let task_binding_valid =
-        crate::material_contract_validation::task_package_binding_valid(&task_spec, package);
+        crate::material_contract_validation::task_package_binding_valid(&task_spec, package)
+            && incremental_comment_budget_valid_in(&mut tx, &task_spec, package).await?;
     insert_record_dispositions(&mut tx, package, maximum_quota, task_binding_valid).await?;
     if task_binding_valid {
         crate::material_admission::insert_typed_materials(&mut tx, package).await?;
@@ -1092,6 +1093,54 @@ async fn lock_live_scheduled_claim(
 ///
 /// 但**超额本身必须留痕**。它是「执行端没有守住给它的边界」的证据，而 Coverage 也不能
 /// 因此声称自己守住了那条边界。留痕的方式是 reason，不是把材料藏起来。
+/// Validate the joint root/reply new-identity ceiling through the existing WorkOrder lineage.
+/// The advisory lock serializes packages from both lanes before any material projection occurs.
+async fn incremental_comment_budget_valid_in(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    task: &Value,
+    package: &linggan_contracts::ProducerCapturePackage,
+) -> Result<bool, ProducerRuntimeError> {
+    let Some(budget) = task.get("incrementalCommentBudget") else {
+        return Ok(true);
+    };
+    let Some(limit) = budget["newUniqueLimit"]
+        .as_u64()
+        .filter(|n| *n > 0 && *n <= 30)
+    else {
+        return Ok(false);
+    };
+    let known: std::collections::HashSet<String> = budget["knownCommentIds"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|v| v.as_str().map(str::to_owned))
+        .collect();
+    let order:Option<Uuid>=sqlx::query_scalar("SELECT l.work_order_ref FROM collection_work_order_lease_task t JOIN collection_work_order_lease l USING(lease_ref)WHERE t.task_id=$1").bind(task["taskId"].as_str().and_then(|s|s.parse::<Uuid>().ok())).fetch_optional(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;
+    let Some(order) = order else { return Ok(false) };
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,44))")
+        .bind(order.to_string())
+        .execute(&mut **tx)
+        .await
+        .map_err(ProducerRuntimeError::Internal)?;
+    let prior:Vec<String>=sqlx::query_scalar("SELECT DISTINCT record.value->'payload'->>'commentId' FROM collection_work_order_lease l JOIN collection_work_order_lease_task t USING(lease_ref)JOIN linggan_runtime_capture_package p ON p.task_id=t.task_id CROSS JOIN LATERAL jsonb_array_elements(p.payload->'records')WITH ORDINALITY record(value,n) JOIN linggan_runtime_record_disposition d ON d.package_ref=p.package_ref AND d.record_ordinal=record.n-1 WHERE l.work_order_ref=$1 AND p.package_kind IN('comments','replies')AND d.disposition='accepted_for_library_content'AND p.coverage->'target'->>'contentExternalId'=$2").bind(order).bind(task.pointer("/target/contentExternalId").and_then(Value::as_str)).fetch_all(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;
+    let mut ids: std::collections::HashSet<String> =
+        prior.into_iter().filter(|id| !known.contains(id)).collect();
+    for record in package.records() {
+        let Some(id) = record
+            .pointer("/payload/commentId")
+            .and_then(Value::as_str)
+            .filter(|s| !s.trim().is_empty())
+        else {
+            return Ok(false);
+        };
+        if known.contains(id) {
+            return Ok(false);
+        }
+        ids.insert(id.into());
+    }
+    Ok(ids.len() <= limit as usize)
+}
+
 async fn insert_record_dispositions(
     tx: &mut Transaction<'_, Postgres>,
     package: &ProducerCapturePackage,

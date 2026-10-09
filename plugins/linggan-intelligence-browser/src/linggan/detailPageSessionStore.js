@@ -119,6 +119,7 @@ export function validateDetailPageSessionPlan(plan = {}, expectedContentExternal
     lanes,
     commentLimit,
     replyExpandLimit,
+    ...(plan.incrementalCommentBudget ? { incrementalCommentBudget: plan.incrementalCommentBudget } : {}),
     cacheTtlSeconds: Math.min(MAX_CACHE_TTL_SECONDS, Math.floor(cacheTtlSeconds)),
   };
 }
