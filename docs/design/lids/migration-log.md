@@ -6,6 +6,14 @@
 > 事实来源: [system.md](system.md)、[README.md](README.md)、DESIGN-002 Issue #7、项目 progress 记录和实际验证输出
 > 冲突时以谁为准: 真实代码/合同/测试、用户最新确认、当前 SCOPE 和 ACCEPTED 决策；本日志不把计划写成已实现事实
 
+## 2026-10-09 · CREATOR-DISCOVERY-001 创作者 L1 页头候选
+
+现有创作者页按 Corpus Explorer 和 DESIGN-003 收回重复视觉标题与常驻说明；搜索、快捷筛选、结果数和作者表格优先，范围筛选、五项统计及高级条件可展开，保留未知/来源限制与全部原行为。仅影响本页组合，不改 Token、Primitive、CMP、共享壳或数据合同。验证和运行边界见 `docs/plans/active/creator-discovery-001.md` 与当月 progress；在本机正式页及 Mog 验收前仍是候选。
+
+同日继续按 Mog 的 Evidence Library 并排走查修正：搜索和按钮改为本页方角粗边框节奏，快捷视图改为文字下划线，作者表格由七列合为五列并去除固定行高。保留当前范围统计与来源分析限制、未知读数、上下分页及观察动作。沿用已有 LIDS Token；不提升为跨页组件，不修改 Evidence 页面或共享壳。
+
+同页后续反馈收回面包屑下方重复的领域选择与表格前分页；SSR 注入当前合法领域隐藏值，表格后保留完整分页。面包屑领域 picker 已含范围作品数，页头页面 meta 插槽只标注“命中作者”与查询读取时刻（`displayAsOf` 来自 `scope_001_now()`，不表示材料更新），未加载/失败不沿用旧数；此页局部候选依据 Mog 本轮明确反馈，与 `shell-zones.md` 约束区不承载数字的通用规则存在局部冲突，不晋升为共享壳规则。原来源依据说明移入高级条件，状态区正常成功时收起，保留错误、空态、来源限制与动作回执。取消定时及 focus 自动读取。Token、共享 shell、API/数据合同未变；源码检查与运行验收分别记录在活跃计划及当月 progress。
+
 ## 2026-10-08 · COMMENT-STUDY-RELEASE-POLISH-358 · 窄屏评论表格候选
 
 评论研究 L1「用户评论」复用既有表格横向滚动包裹层，把原来浏览器计算为 0 的 `calc(var(--lgi-space-24) * 6)` 改为有效的现有 Token 加法，并给五列评论表指定 960px 最小宽度和列宽。未改变 Token 值、Primitive、Pattern、共享 shell、HTML、数据和模型动作。只读 CSS 代理连接已部署 `:3000` 的真实 GET：390／520px 的最小宽度均计算为 960px，390px 可以滚向末列且整页无水平溢出；1440px 五列在页内可见。此为候选验证，未合并或刷新正式运行页。见[变更清单](../changes/comment-study-release-polish-358-ui-change-manifest.md)和[验收记录](../acceptance/comment-study-release-polish-358-acceptance.md)。
