@@ -11,6 +11,7 @@ latest_detail AS (
     detail.content_public_ref,detail.material_ref,detail.package_ref,detail.record_ordinal,
     detail.observed_at,detail.created_at
   FROM linggan_material_content_detail detail
+  JOIN requested_work scope ON scope.public_ref=detail.content_public_ref
   JOIN linggan_runtime_capture_package package USING(package_ref)
   WHERE package.accepted_at <= $2::timestamptz
   ORDER BY detail.content_public_ref,detail.observed_at::timestamptz DESC,
@@ -20,6 +21,7 @@ latest_detail AS (
     detail.content_public_ref,detail.title,detail.title_state,detail.material_ref,
     detail.package_ref,detail.record_ordinal,detail.observed_at,detail.created_at
   FROM linggan_material_content_detail detail
+  JOIN requested_work scope ON scope.public_ref=detail.content_public_ref
   JOIN linggan_runtime_capture_package package USING(package_ref)
   WHERE package.accepted_at <= $2::timestamptz AND detail.title_state='KNOWN'
   ORDER BY detail.content_public_ref,detail.observed_at::timestamptz DESC,
@@ -29,6 +31,7 @@ latest_detail AS (
     detail.content_public_ref,detail.body_text,detail.body_state,detail.material_ref,
     detail.package_ref,detail.record_ordinal,detail.observed_at,detail.created_at
   FROM linggan_material_content_detail detail
+  JOIN requested_work scope ON scope.public_ref=detail.content_public_ref
   JOIN linggan_runtime_capture_package package USING(package_ref)
   WHERE package.accepted_at <= $2::timestamptz AND detail.body_state='KNOWN'
   ORDER BY detail.content_public_ref,detail.observed_at::timestamptz DESC,
@@ -38,6 +41,7 @@ latest_detail AS (
     detail.content_public_ref,detail.creator_display_name,detail.creator_display_name_state,
     detail.material_ref,detail.package_ref,detail.record_ordinal,detail.observed_at,detail.created_at
   FROM linggan_material_content_detail detail
+  JOIN requested_work scope ON scope.public_ref=detail.content_public_ref
   JOIN linggan_runtime_capture_package package USING(package_ref)
   WHERE package.accepted_at <= $2::timestamptz AND detail.creator_display_name_state='KNOWN'
   ORDER BY detail.content_public_ref,detail.observed_at::timestamptz DESC,
@@ -51,6 +55,7 @@ latest_detail AS (
     detail.published_at_precision,detail.published_at_reference_observed_at,
     detail.published_at_parser_version
   FROM linggan_material_content_detail detail
+  JOIN requested_work scope ON scope.public_ref=detail.content_public_ref
   JOIN linggan_runtime_capture_package package USING(package_ref)
   WHERE package.accepted_at <= $2::timestamptz AND detail.published_at IS NOT NULL
   ORDER BY detail.content_public_ref,detail.observed_at::timestamptz DESC,
@@ -63,6 +68,7 @@ latest_detail AS (
     detail.published_at_source_kind,detail.published_at_precision,
     detail.published_at_reference_observed_at,detail.published_at_parser_version
   FROM linggan_material_content_detail detail
+  JOIN requested_work scope ON scope.public_ref=detail.content_public_ref
   JOIN linggan_runtime_capture_package package USING(package_ref)
   WHERE package.accepted_at <= $2::timestamptz
     AND detail.published_at_source_text_state='KNOWN'
@@ -71,6 +77,7 @@ latest_detail AS (
 ), latest_discovery AS (
   SELECT DISTINCT ON (finding.content_public_ref) finding.*
   FROM linggan_material_discovery_finding finding
+  JOIN requested_work scope ON scope.public_ref=finding.content_public_ref
   JOIN linggan_runtime_capture_package package USING(package_ref)
   WHERE package.accepted_at <= $2::timestamptz
   ORDER BY finding.content_public_ref,finding.observed_at::timestamptz DESC,
@@ -80,6 +87,7 @@ latest_detail AS (
     observation.content_public_ref,observation.like_count,observation.package_ref,
     observation.source_lane,observation.observed_at,observation.created_at
   FROM linggan_material_engagement_observation observation
+  JOIN requested_work scope ON scope.public_ref=observation.content_public_ref
   JOIN linggan_runtime_capture_package package USING(package_ref)
   WHERE package.accepted_at <= $2::timestamptz AND observation.like_count_state='KNOWN'
   ORDER BY observation.content_public_ref,observation.observed_at::timestamptz DESC,
@@ -89,6 +97,7 @@ latest_detail AS (
     observation.content_public_ref,observation.comment_count,observation.package_ref,
     observation.source_lane,observation.observed_at,observation.created_at
   FROM linggan_material_engagement_observation observation
+  JOIN requested_work scope ON scope.public_ref=observation.content_public_ref
   JOIN linggan_runtime_capture_package package USING(package_ref)
   WHERE package.accepted_at <= $2::timestamptz AND observation.comment_count_state='KNOWN'
   ORDER BY observation.content_public_ref,observation.observed_at::timestamptz DESC,
@@ -98,6 +107,7 @@ latest_detail AS (
     observation.content_public_ref,observation.collect_count,observation.package_ref,
     observation.source_lane,observation.observed_at,observation.created_at
   FROM linggan_material_engagement_observation observation
+  JOIN requested_work scope ON scope.public_ref=observation.content_public_ref
   JOIN linggan_runtime_capture_package package USING(package_ref)
   WHERE package.accepted_at <= $2::timestamptz AND observation.collect_count_state='KNOWN'
   ORDER BY observation.content_public_ref,observation.observed_at::timestamptz DESC,
@@ -107,6 +117,7 @@ latest_detail AS (
     observation.content_public_ref,observation.share_count,observation.package_ref,
     observation.source_lane,observation.observed_at,observation.created_at
   FROM linggan_material_engagement_observation observation
+  JOIN requested_work scope ON scope.public_ref=observation.content_public_ref
   JOIN linggan_runtime_capture_package package USING(package_ref)
   WHERE package.accepted_at <= $2::timestamptz AND observation.share_count_state='KNOWN'
   ORDER BY observation.content_public_ref,observation.observed_at::timestamptz DESC,
@@ -114,6 +125,7 @@ latest_detail AS (
 ), latest_lane AS (
   SELECT lane.content_public_ref,linggan_human_moment(max(lane.observed_at::timestamptz)) AS observed_at
   FROM linggan_material_lane_observation lane
+  JOIN requested_work scope ON scope.public_ref=lane.content_public_ref
   JOIN linggan_runtime_capture_package package USING(package_ref)
   WHERE lane.content_public_ref IS NOT NULL AND package.accepted_at <= $2::timestamptz
   GROUP BY lane.content_public_ref
@@ -201,7 +213,7 @@ latest_detail AS (
     latest_share.share_count,CASE WHEN latest_share.share_count IS NULL THEN 'UNKNOWN' ELSE 'KNOWN' END AS share_count_state,
     latest_share.package_ref AS share_source_package_ref,latest_share.source_lane AS share_source_lane,
     latest_share.observed_at AS share_source_observed_at,latest_share.created_at::text AS share_source_recorded_at
-  FROM linggan_material_content content
+  FROM requested_work content
   LEFT JOIN latest_detail detail ON detail.content_public_ref=content.public_ref
   LEFT JOIN latest_detail_title detail_title ON detail_title.content_public_ref=content.public_ref
   LEFT JOIN latest_detail_body detail_body ON detail_body.content_public_ref=content.public_ref
@@ -218,7 +230,63 @@ latest_detail AS (
 )
 "#;
 
-pub(crate) fn material_page_sql(ocr_content_layering_schema_ready: bool) -> String {
+const FILTERED_PAGE_SCOPE: &str = r#"
+requested_work AS MATERIALIZED (
+ SELECT content.* FROM linggan_material_content content
+ WHERE ($8::uuid IS NULL OR content.public_ref=$8)
+ AND ($9::uuid IS NULL OR EXISTS (SELECT 1 FROM linggan_material_domain_usage usage
+      WHERE usage.content_public_ref=content.public_ref AND usage.domain_ref=$9))
+ AND ($10::uuid[] IS NULL OR content.public_ref=ANY($10))
+)
+"#;
+
+// Keep the original detail > discovery > lane time priority and human-minute precision.
+// Computing KNOWN title/body/metrics for every work is unnecessary on an unfiltered page.
+const IDENTITY_PAGE_SCOPE: &str = r#"
+scoped_work AS MATERIALIZED (
+ SELECT content.* FROM linggan_material_content content
+ WHERE ($8::uuid IS NULL OR content.public_ref=$8)
+ AND ($9::uuid IS NULL OR EXISTS (SELECT 1 FROM linggan_material_domain_usage usage
+      WHERE usage.content_public_ref=content.public_ref AND usage.domain_ref=$9))
+ AND ($10::uuid[] IS NULL OR content.public_ref=ANY($10))
+), recent_detail_time AS (
+ SELECT detail.content_public_ref,max(detail.observed_at::timestamptz) AS observed_at
+ FROM linggan_material_content_detail detail JOIN scoped_work scope ON scope.public_ref=detail.content_public_ref
+ JOIN linggan_runtime_capture_package package USING(package_ref)
+ WHERE package.accepted_at <= $2::timestamptz GROUP BY detail.content_public_ref
+), recent_discovery_time AS (
+ SELECT finding.content_public_ref,max(finding.observed_at::timestamptz) AS observed_at
+ FROM linggan_material_discovery_finding finding JOIN scoped_work scope ON scope.public_ref=finding.content_public_ref
+ JOIN linggan_runtime_capture_package package USING(package_ref)
+ WHERE package.accepted_at <= $2::timestamptz GROUP BY finding.content_public_ref
+), recent_lane_time AS (
+ SELECT lane.content_public_ref,max(lane.observed_at::timestamptz) AS observed_at
+ FROM linggan_material_lane_observation lane JOIN scoped_work scope ON scope.public_ref=lane.content_public_ref
+ JOIN linggan_runtime_capture_package package USING(package_ref)
+ WHERE package.accepted_at <= $2::timestamptz GROUP BY lane.content_public_ref
+), requested_work AS MATERIALIZED (
+ SELECT content.* FROM scoped_work content
+ LEFT JOIN recent_detail_time detail ON detail.content_public_ref=content.public_ref
+ LEFT JOIN recent_discovery_time discovery ON discovery.content_public_ref=content.public_ref
+ LEFT JOIN recent_lane_time lane ON lane.content_public_ref=content.public_ref
+ CROSS JOIN LATERAL (SELECT linggan_human_moment(COALESCE(detail.observed_at,discovery.observed_at,lane.observed_at))::timestamptz AS observed_at) moment
+ WHERE moment.observed_at IS NOT NULL
+ AND ($3::text IS NULL OR moment.observed_at < $3::timestamptz
+   OR (moment.observed_at=$3::timestamptz
+     AND (content.platform>$4 OR (content.platform=$4 AND content.content_external_id>$5))))
+ ORDER BY moment.observed_at DESC,content.platform,content.content_external_id LIMIT 51
+)
+"#;
+
+pub(crate) fn material_page_sql(
+    ocr_content_layering_schema_ready: bool,
+    identity_page: bool,
+) -> String {
+    let scope = if identity_page {
+        IDENTITY_PAGE_SCOPE
+    } else {
+        FILTERED_PAGE_SCOPE
+    };
     // PostgreSQL resolves relation names before it evaluates a WHERE condition.  This must be a
     // separate compile-time fragment rather than `to_regclass(...) AND NOT EXISTS (...)`, so a
     // reader on an older migration ledger can still load the work projection while 0091 has not
@@ -237,9 +305,10 @@ pub(crate) fn material_page_sql(ocr_content_layering_schema_ready: bool) -> Stri
         ""
     };
     format!(
-        r#"WITH {WORK_RESOURCE_CURRENT_CTES}, current_comment AS (
+        r#"WITH {scope}, {WORK_RESOURCE_CURRENT_CTES}, current_comment AS (
   SELECT DISTINCT ON (comment.content_public_ref,comment.comment_external_id) comment.*
   FROM linggan_material_comment comment
+  JOIN requested_work scope ON scope.public_ref=comment.content_public_ref
   JOIN linggan_runtime_capture_package package USING(package_ref)
   WHERE package.accepted_at <= $2::timestamptz
   ORDER BY comment.content_public_ref,comment.comment_external_id,
@@ -281,9 +350,9 @@ LIMIT 51"#,
 
 pub(crate) fn work_resource_currents_sql() -> String {
     format!(
-        "WITH {WORK_RESOURCE_CURRENT_CTES} \
-         SELECT current.* FROM work_resource_current current \
-         WHERE current.public_ref=ANY($1::uuid[]) AND current.observed_at IS NOT NULL"
+        "WITH requested_work AS MATERIALIZED (SELECT * FROM linggan_material_content WHERE public_ref=ANY($1::uuid[])), \
+         {WORK_RESOURCE_CURRENT_CTES} \
+         SELECT current.* FROM work_resource_current current WHERE current.observed_at IS NOT NULL"
     )
 }
 
@@ -294,8 +363,10 @@ mod tests {
     #[test]
     fn shared_work_resource_reads_do_not_expand_target_scoped_retirement_to_all_corpus_uses() {
         for sql in [
-            material_page_sql(false),
-            material_page_sql(true),
+            material_page_sql(false, false),
+            material_page_sql(false, true),
+            material_page_sql(true, false),
+            material_page_sql(true, true),
             work_resource_currents_sql(),
         ] {
             assert!(

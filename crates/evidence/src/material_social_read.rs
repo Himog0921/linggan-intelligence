@@ -3,7 +3,9 @@
 use crate::material_projection_types::MaterialLibraryItem;
 use linggan_storage_postgres::Database;
 use serde_json::Value;
+use sqlx::postgres::PgRow;
 use sqlx::{Postgres, Row, Transaction};
+use std::collections::HashMap;
 use uuid::Uuid;
 
 pub(crate) async fn enrich(
@@ -12,42 +14,105 @@ pub(crate) async fn enrich(
     text: Option<&str>,
     as_of: &str,
 ) -> Result<(), sqlx::Error> {
-    let mut coverage = read_lane_coverage(tx, item, as_of).await?;
-    let mut coverage_history = read_lane_coverage_history(tx, item, as_of).await?;
-    let comments = read_comments(item, text);
-    let comments_receipt = read_comment_receipt(tx, item, as_of).await?;
-    let author_context = read_author_context(tx, item, as_of).await?;
+    enrich_batch(tx, std::slice::from_mut(item), text, as_of).await
+}
+
+pub(crate) async fn enrich_batch(
+    tx: &mut Transaction<'_, Postgres>,
+    items: &mut [MaterialLibraryItem],
+    text: Option<&str>,
+    as_of: &str,
+) -> Result<(), sqlx::Error> {
+    if items.is_empty() {
+        return Ok(());
+    }
+    let refs: Vec<Uuid> = items.iter().map(|item| item.identity.public_ref).collect();
+    let latest = sqlx::query(
+        "SELECT DISTINCT ON (lane.content_public_ref,lane.lane) lane.content_public_ref,lane.lane,lane.observed,lane.producer_acquired,lane.retained,lane.failed,lane.known_unattempted,lane.unknown_count,lane.maximum_quota,lane.stopped_reason,lane.observed_at,lane.package_ref,package.coverage \
+         FROM linggan_material_lane_observation lane JOIN linggan_runtime_capture_package package USING(package_ref) \
+         WHERE lane.content_public_ref=ANY($1) AND package.accepted_at <= $2::timestamptz \
+         ORDER BY lane.content_public_ref,lane.lane,lane.observed_at::timestamptz DESC,lane.created_at DESC"
+    ).bind(&refs).bind(as_of).fetch_all(&mut **tx).await?;
+    let histories = sqlx::query(
+        "SELECT lane.content_public_ref,lane.lane,lane.observed,lane.producer_acquired,lane.retained,lane.failed,lane.known_unattempted,lane.unknown_count,lane.maximum_quota,lane.stopped_reason,lane.observed_at,lane.created_at::text AS recorded_at,lane.package_ref,package.coverage,package.task_id,package.attempt_id,receipt.receipt_ref \
+         FROM linggan_material_lane_observation lane JOIN linggan_runtime_capture_package package USING(package_ref) \
+         LEFT JOIN linggan_runtime_submission_receipt receipt ON receipt.package_ref=package.package_ref \
+         WHERE lane.content_public_ref=ANY($1) AND lane.lane IN ('comments','replies') AND package.accepted_at <= $2::timestamptz \
+         ORDER BY lane.content_public_ref,lane.lane,lane.observed_at::timestamptz DESC,lane.created_at DESC"
+    ).bind(&refs).bind(as_of).fetch_all(&mut **tx).await?;
+    let counts: HashMap<Uuid,i64> = sqlx::query_as(
+        "SELECT comment.content_public_ref,count(DISTINCT comment.comment_external_id) FROM linggan_material_comment comment \
+         JOIN linggan_runtime_capture_package package USING(package_ref) WHERE comment.content_public_ref=ANY($1) \
+         AND package.accepted_at <= $2::timestamptz GROUP BY comment.content_public_ref"
+    ).bind(&refs).bind(as_of).fetch_all(&mut **tx).await?.into_iter().collect();
+    let platforms: Vec<&str> = items
+        .iter()
+        .map(|item| item.identity.platform.as_str())
+        .collect();
+    let authors: Vec<Option<&str>> = items
+        .iter()
+        .map(|item| item.author_external_id.as_deref())
+        .collect();
+    let contexts = sqlx::query(
+        "WITH requested AS (SELECT * FROM unnest($1::uuid[],$2::text[],$3::text[]) AS scope(content_public_ref,platform,author_id)) \
+         SELECT DISTINCT ON (requested.content_public_ref) requested.content_public_ref,author.material_ref,author.package_ref,author.observed_at,author.display_name,author.display_name_state,author.biography_state,author.follower_count,author.follower_count_state \
+         FROM requested JOIN linggan_material_author_profile author ON author.platform=requested.platform AND author.author_external_id=requested.author_id \
+         JOIN linggan_runtime_capture_package package USING(package_ref) WHERE package.accepted_at <= $4::timestamptz \
+         ORDER BY requested.content_public_ref,author.observed_at::timestamptz DESC,author.created_at DESC"
+    ).bind(&refs).bind(&platforms).bind(&authors).bind(as_of).fetch_all(&mut **tx).await?;
+    let provenance_rows = sqlx::query(
+        "WITH requested AS (SELECT * FROM unnest($1::uuid[],$2::text[],$3::text[]) AS scope(content_public_ref,platform,author_id)), \
+         refs AS (SELECT lane.content_public_ref,lane.package_ref FROM linggan_material_lane_observation lane WHERE lane.content_public_ref=ANY($1) \
+             UNION SELECT finding.content_public_ref,finding.package_ref FROM linggan_material_discovery_finding finding WHERE finding.content_public_ref=ANY($1) \
+             UNION SELECT requested.content_public_ref,author.package_ref FROM requested JOIN linggan_material_author_profile author ON author.platform=requested.platform AND author.author_external_id=requested.author_id), \
+         ranked AS (SELECT refs.content_public_ref,refs.package_ref,package.task_id,package.attempt_id,package.producer_instance_id,receipt.receipt_ref, \
+             count(*) OVER(PARTITION BY refs.content_public_ref) AS total_count, \
+             row_number() OVER(PARTITION BY refs.content_public_ref ORDER BY package.accepted_at,refs.package_ref) AS row_ordinal \
+         FROM refs JOIN linggan_runtime_capture_package package ON package.package_ref=refs.package_ref \
+         LEFT JOIN linggan_runtime_submission_receipt receipt ON receipt.package_ref=package.package_ref \
+         WHERE package.accepted_at <= $4::timestamptz) SELECT * FROM ranked WHERE row_ordinal<=21 ORDER BY content_public_ref,row_ordinal"
+    ).bind(&refs).bind(&platforms).bind(&authors).bind(as_of).fetch_all(&mut **tx).await?;
+    let mut matches: HashMap<Uuid, Vec<String>> = HashMap::new();
     if let Some(text) = text {
-        let comment_match: bool = sqlx::query_scalar(
-            "WITH current_comment AS ( \
-               SELECT DISTINCT ON (comment.comment_external_id) comment.* \
-               FROM linggan_material_comment comment \
-               JOIN linggan_runtime_capture_package package USING(package_ref) \
-               WHERE comment.content_public_ref=$1 AND package.accepted_at <= $2::timestamptz \
-               ORDER BY comment.comment_external_id,comment.observed_at::timestamptz DESC,comment.created_at DESC,comment.material_ref DESC \
-             ) SELECT EXISTS (SELECT 1 FROM current_comment comment \
-               WHERE lower(COALESCE(comment.body_text,'')) LIKE '%' || lower($3) || '%')",
-        )
-        .bind(item.identity.public_ref)
-        .bind(as_of)
-        .bind(text)
-        .fetch_one(&mut **tx)
-        .await?;
-        if comment_match && !item.matched_fields.contains(&"comment_body") {
-            item.matched_fields.push("comment_body");
+        let comment_matches: Vec<Uuid> = sqlx::query_scalar(
+            "WITH current_comment AS (SELECT DISTINCT ON(comment.content_public_ref,comment.comment_external_id) comment.content_public_ref,comment.body_text \
+             FROM linggan_material_comment comment JOIN linggan_runtime_capture_package package USING(package_ref) \
+             WHERE comment.content_public_ref=ANY($1) AND package.accepted_at <= $2::timestamptz \
+             ORDER BY comment.content_public_ref,comment.comment_external_id,comment.observed_at::timestamptz DESC,comment.created_at DESC,comment.material_ref DESC) \
+             SELECT DISTINCT content_public_ref FROM current_comment WHERE lower(COALESCE(body_text,'')) LIKE '%' || lower($3) || '%'"
+        ).bind(&refs).bind(as_of).bind(text).fetch_all(&mut **tx).await?;
+        for content_ref in comment_matches {
+            matches
+                .entry(content_ref)
+                .or_default()
+                .push("comment_body".to_owned());
         }
-        let derived_kinds: Vec<String> = sqlx::query_scalar(
-            "SELECT DISTINCT kind FROM linggan_material_derived_text \
-             WHERE content_public_ref=$1 AND created_at <= $2::timestamptz \
-               AND lower(text_content) LIKE '%' || lower($3) || '%'",
-        )
-        .bind(item.identity.public_ref)
-        .bind(as_of)
-        .bind(text)
-        .fetch_all(&mut **tx)
-        .await?;
-        for kind in derived_kinds {
+        for (content_ref,kind) in sqlx::query_as::<_,(Uuid,String)>(
+            "SELECT DISTINCT content_public_ref,kind FROM linggan_material_derived_text WHERE content_public_ref=ANY($1) \
+             AND created_at <= $2::timestamptz AND lower(text_content) LIKE '%' || lower($3) || '%'"
+        ).bind(&refs).bind(as_of).bind(text).fetch_all(&mut **tx).await? {
+            matches.entry(content_ref).or_default().push(kind);
+        }
+    }
+    let mut latest = group_rows(latest);
+    let mut histories = group_rows(histories);
+    let contexts: HashMap<Uuid, PgRow> = contexts
+        .into_iter()
+        .map(|row| (row.get("content_public_ref"), row))
+        .collect();
+    let mut provenance_rows = group_rows(provenance_rows);
+    for item in items.iter_mut() {
+        let content_ref = item.identity.public_ref;
+        let mut coverage = lane_coverage(item, latest.remove(&content_ref).unwrap_or_default());
+        let mut coverage_history =
+            coverage_history(&histories.remove(&content_ref).unwrap_or_default());
+        let comments = read_comments(item, text);
+        let comments_receipt = comment_receipt(counts.get(&content_ref).copied().unwrap_or(0));
+        let author_context = author_context(item, contexts.get(&content_ref));
+        let provenance = provenance(provenance_rows.remove(&content_ref).unwrap_or_default());
+        for kind in matches.remove(&content_ref).unwrap_or_default() {
             let field = match kind.as_str() {
+                "comment_body" => "comment_body",
                 "ocr_text" => "ocr_text",
                 "asr_text" => "asr_text",
                 "frame_ocr_text" => "frame_ocr_text",
@@ -57,105 +122,93 @@ pub(crate) async fn enrich(
                 item.matched_fields.push(field);
             }
         }
-    }
-    if !author_context.is_null()
-        && let Some(summary) = item
-            .lane_summaries
-            .iter_mut()
-            .find(|summary| summary.lane == "author")
-    {
-        summary.state = "SEARCHABLE";
-        summary.observed = Some(1);
-        summary.retained = Some(1);
-        summary.value_state = "KNOWN";
-        summary.limitations = vec!["AUTHOR_PROFILE_IS_VERSIONED_CONTEXT"];
-        summary.latest_observed_at = author_context
-            .get("observedAt")
-            .and_then(Value::as_str)
-            .map(str::to_owned);
-    }
-
-    // The row-level excerpt is read after the match flags above, so a search that hit a comment
-    // or an OCR page can be quoted from the same surface it matched on.
-    let body_text = item.body_text.take();
-    item.evidence_fragment =
-        crate::material_evidence_fragment::read(tx, item, body_text.as_deref(), text, as_of)
-            .await?;
-
-    let provenance = read_provenance(tx, item, as_of).await?;
-    if let Some(inspector) = item.inspector.as_object_mut() {
-        inspector.insert("commentThreads".to_owned(), Value::Array(comments));
-        inspector.insert(
-            "commentsAccess".to_owned(),
-            serde_json::json!({
-                "accessLevel":"RESTRICTED_SOURCE",
-                "bodyReturned":false,
-                "externalIdentityReturned":false
-            }),
-        );
-        inspector.insert(
-            "commentsCoverage".to_owned(),
-            coverage.remove("comments").unwrap_or(Value::Null),
-        );
-        inspector.insert(
-            "commentsCoverageHistory".to_owned(),
-            coverage_history
-                .remove("comments")
-                .unwrap_or_else(|| Value::Array(Vec::new())),
-        );
-        inspector.insert("commentsReceipt".to_owned(), comments_receipt);
-        inspector.insert(
-            "repliesCoverage".to_owned(),
-            coverage.remove("replies").unwrap_or(Value::Null),
-        );
-        inspector.insert(
-            "repliesCoverageHistory".to_owned(),
-            coverage_history
-                .remove("replies")
-                .unwrap_or_else(|| Value::Array(Vec::new())),
-        );
-        inspector.insert("authorContext".to_owned(), author_context);
-        // The collection context already wrote targetRefs and workOrderRefs into provenance
-        // before this enrichment runs. Replacing the object wholesale dropped them, so the page
-        // reported SOURCE INCOMPLETE for a target that is in fact linked -- and a reader used
-        // that to conclude the authorization chain was broken. Merge instead of replace.
-        match inspector
-            .get_mut("provenance")
-            .and_then(Value::as_object_mut)
+        if !author_context.is_null()
+            && let Some(summary) = item
+                .lane_summaries
+                .iter_mut()
+                .find(|summary| summary.lane == "author")
         {
-            Some(existing) => {
-                if let Value::Object(read) = provenance {
-                    existing.extend(read);
+            summary.state = "SEARCHABLE";
+            summary.observed = Some(1);
+            summary.retained = Some(1);
+            summary.value_state = "KNOWN";
+            summary.limitations = vec!["AUTHOR_PROFILE_IS_VERSIONED_CONTEXT"];
+            summary.latest_observed_at = author_context
+                .get("observedAt")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+        }
+
+        if let Some(inspector) = item.inspector.as_object_mut() {
+            inspector.insert("commentThreads".to_owned(), Value::Array(comments));
+            inspector.insert(
+                "commentsAccess".to_owned(),
+                serde_json::json!({
+                    "accessLevel":"RESTRICTED_SOURCE",
+                    "bodyReturned":false,
+                    "externalIdentityReturned":false
+                }),
+            );
+            inspector.insert(
+                "commentsCoverage".to_owned(),
+                coverage.remove("comments").unwrap_or(Value::Null),
+            );
+            inspector.insert(
+                "commentsCoverageHistory".to_owned(),
+                coverage_history
+                    .remove("comments")
+                    .unwrap_or_else(|| Value::Array(Vec::new())),
+            );
+            inspector.insert("commentsReceipt".to_owned(), comments_receipt);
+            inspector.insert(
+                "repliesCoverage".to_owned(),
+                coverage.remove("replies").unwrap_or(Value::Null),
+            );
+            inspector.insert(
+                "repliesCoverageHistory".to_owned(),
+                coverage_history
+                    .remove("replies")
+                    .unwrap_or_else(|| Value::Array(Vec::new())),
+            );
+            inspector.insert("authorContext".to_owned(), author_context);
+            // The collection context already wrote targetRefs and workOrderRefs into provenance
+            // before this enrichment runs. Replacing the object wholesale dropped them, so the page
+            // reported SOURCE INCOMPLETE for a target that is in fact linked -- and a reader used
+            // that to conclude the authorization chain was broken. Merge instead of replace.
+            match inspector
+                .get_mut("provenance")
+                .and_then(Value::as_object_mut)
+            {
+                Some(existing) => {
+                    if let Value::Object(read) = provenance {
+                        existing.extend(read);
+                    }
                 }
-            }
-            None => {
-                inspector.insert("provenance".to_owned(), provenance);
+                None => {
+                    inspector.insert("provenance".to_owned(), provenance);
+                }
             }
         }
     }
+    crate::material_evidence_fragment::read_batch(tx, items, text, as_of).await?;
     Ok(())
+}
+
+fn group_rows(rows: Vec<PgRow>) -> HashMap<Uuid, Vec<PgRow>> {
+    let mut grouped = HashMap::new();
+    for row in rows {
+        grouped
+            .entry(row.get("content_public_ref"))
+            .or_insert_with(Vec::new)
+            .push(row);
+    }
+    grouped
 }
 
 /// Historical lane evidence stays a list of individual package receipts. The projection must
 /// never add a detail-window sample to an all-public-comments run, nor copy page counts between
 /// attempts just to present a larger-looking total.
-async fn read_lane_coverage_history(
-    tx: &mut Transaction<'_, Postgres>,
-    item: &MaterialLibraryItem,
-    as_of: &str,
-) -> Result<serde_json::Map<String, Value>, sqlx::Error> {
-    let rows = sqlx::query(
-        "SELECT lane.lane,lane.observed,lane.producer_acquired,lane.retained,lane.failed,lane.known_unattempted,lane.unknown_count,lane.maximum_quota,lane.stopped_reason,lane.observed_at,lane.created_at::text AS recorded_at,lane.package_ref,package.coverage,package.task_id,package.attempt_id,receipt.receipt_ref \
-         FROM linggan_material_lane_observation lane \
-         JOIN linggan_runtime_capture_package package USING(package_ref) \
-         LEFT JOIN linggan_runtime_submission_receipt receipt ON receipt.package_ref=package.package_ref \
-         WHERE lane.content_public_ref=$1 AND lane.lane IN ('comments','replies') AND package.accepted_at <= $2::timestamptz \
-         ORDER BY lane.lane,lane.observed_at::timestamptz DESC,lane.created_at DESC",
-    )
-    .bind(item.identity.public_ref)
-    .bind(as_of)
-    .fetch_all(&mut **tx)
-    .await?;
+fn coverage_history(rows: &[PgRow]) -> serde_json::Map<String, Value> {
     let mut history = serde_json::Map::new();
     for lane in ["comments", "replies"] {
         let entries = rows
@@ -165,7 +218,7 @@ async fn read_lane_coverage_history(
             .collect::<Vec<_>>();
         history.insert(lane.to_owned(), Value::Array(entries));
     }
-    Ok(history)
+    history
 }
 
 fn coverage_history_entry(row: &sqlx::postgres::PgRow) -> Value {
@@ -215,45 +268,14 @@ fn coverage_history_entry(row: &sqlx::postgres::PgRow) -> Value {
     })
 }
 
-async fn read_comment_receipt(
-    tx: &mut Transaction<'_, Postgres>,
-    item: &MaterialLibraryItem,
-    as_of: &str,
-) -> Result<Value, sqlx::Error> {
-    let total = sqlx::query_scalar::<_, i64>(
-        "WITH current_comment AS ( \
-           SELECT DISTINCT ON (comment.comment_external_id) comment.comment_external_id \
-           FROM linggan_material_comment comment \
-           JOIN linggan_runtime_capture_package package USING(package_ref) \
-           WHERE comment.content_public_ref=$1 AND package.accepted_at <= $2::timestamptz \
-           ORDER BY comment.comment_external_id,comment.observed_at::timestamptz DESC,comment.created_at DESC,comment.material_ref DESC \
-         ) SELECT count(*) FROM current_comment",
-    )
-    .bind(item.identity.public_ref)
-    .bind(as_of)
-    .fetch_one(&mut **tx)
-    .await?;
-    Ok(serde_json::json!({
-        "total":total,"returned":0,"truncated":total>0,"nextCursor":Value::Null,
-        "detailRequired":total>0
-    }))
+fn comment_receipt(total: i64) -> Value {
+    serde_json::json!({"total":total,"returned":0,"truncated":total>0,"nextCursor":Value::Null,"detailRequired":total>0})
 }
 
-async fn read_lane_coverage(
-    tx: &mut Transaction<'_, Postgres>,
+fn lane_coverage(
     item: &mut MaterialLibraryItem,
-    as_of: &str,
-) -> Result<serde_json::Map<String, Value>, sqlx::Error> {
-    let lane_rows = sqlx::query(
-        "SELECT DISTINCT ON (lane.lane) lane.lane,lane.observed,lane.producer_acquired,lane.retained,lane.failed,lane.known_unattempted,lane.unknown_count,lane.maximum_quota,lane.stopped_reason,lane.observed_at,lane.package_ref,package.coverage \
-         FROM linggan_material_lane_observation lane JOIN linggan_runtime_capture_package package USING(package_ref) \
-         WHERE content_public_ref=$1 AND package.accepted_at <= $2::timestamptz \
-         ORDER BY lane,lane.observed_at::timestamptz DESC,lane.created_at DESC",
-    )
-    .bind(item.identity.public_ref)
-    .bind(as_of)
-    .fetch_all(&mut **tx)
-    .await?;
+    lane_rows: Vec<PgRow>,
+) -> serde_json::Map<String, Value> {
     let mut coverage = serde_json::Map::new();
     for row in lane_rows {
         let lane: String = row.get("lane");
@@ -372,7 +394,7 @@ async fn read_lane_coverage(
             );
         }
     }
-    Ok(coverage)
+    coverage
 }
 
 fn comment_collection_receipt(coverage: &Value, lane: &str) -> Option<Value> {
@@ -416,31 +438,16 @@ fn read_comments(_item: &mut MaterialLibraryItem, _text: Option<&str>) -> Vec<Va
     Vec::new()
 }
 
-async fn read_author_context(
-    tx: &mut Transaction<'_, Postgres>,
-    item: &MaterialLibraryItem,
-    as_of: &str,
-) -> Result<Value, sqlx::Error> {
+fn author_context(item: &MaterialLibraryItem, row: Option<&PgRow>) -> Value {
     let Some(author_id) = item.author_external_id.as_deref() else {
-        return Ok(Value::Null);
+        return Value::Null;
     };
-    Ok(sqlx::query(
-        "SELECT author.material_ref,author.package_ref,author.observed_at,author.display_name,author.display_name_state,author.biography_state,author.follower_count,author.follower_count_state \
-         FROM linggan_material_author_profile author JOIN linggan_runtime_capture_package package USING(package_ref) \
-         WHERE author.platform=$1 AND author.author_external_id=$2 AND package.accepted_at <= $3::timestamptz \
-         ORDER BY author.observed_at::timestamptz DESC,author.created_at DESC LIMIT 1",
-    )
-    .bind(&item.identity.platform)
-    .bind(author_id)
-    .bind(as_of)
-    .fetch_optional(&mut **tx)
-    .await?
-    .map_or(Value::Null, |row| serde_json::json!({
+    row.map_or(Value::Null, |row| serde_json::json!({
         "authorExternalId":author_id,"displayName":row.get::<Option<String>,_>("display_name"),
         "displayNameState":row.get::<String,_>("display_name_state"),"biographyState":row.get::<String,_>("biography_state"),
         "followerCount":row.get::<Option<i64>,_>("follower_count"),"followerCountState":row.get::<String,_>("follower_count_state"),
         "sourceRef":row.get::<Uuid,_>("material_ref"),"packageRef":row.get::<Uuid,_>("package_ref"),"observedAt":row.get::<String,_>("observed_at")
-    })))
+    }))
 }
 
 /// One row per package means a producer that produced two packages is listed twice. That reads
@@ -456,26 +463,7 @@ fn dedupe_preserving_order(refs: impl Iterator<Item = Uuid>) -> Vec<Uuid> {
     seen
 }
 
-async fn read_provenance(
-    tx: &mut Transaction<'_, Postgres>,
-    item: &MaterialLibraryItem,
-    as_of: &str,
-) -> Result<Value, sqlx::Error> {
-    let mut rows = sqlx::query(
-        "WITH refs AS (SELECT lane.package_ref FROM linggan_material_lane_observation lane WHERE lane.content_public_ref=$1 \
-             UNION SELECT finding.package_ref FROM linggan_material_discovery_finding finding WHERE finding.content_public_ref=$1 \
-             UNION SELECT author.package_ref FROM linggan_material_author_profile author WHERE author.platform=$2 AND author.author_external_id=$3) \
-         SELECT refs.package_ref,package.task_id,package.attempt_id,package.producer_instance_id,receipt.receipt_ref,count(*) OVER() AS total_count \
-         FROM refs JOIN linggan_runtime_capture_package package ON package.package_ref=refs.package_ref \
-         LEFT JOIN linggan_runtime_submission_receipt receipt ON receipt.package_ref=package.package_ref \
-         WHERE package.accepted_at <= $4::timestamptz ORDER BY package.accepted_at,refs.package_ref LIMIT 21",
-    )
-    .bind(item.identity.public_ref)
-    .bind(&item.identity.platform)
-    .bind(item.author_external_id.as_deref())
-    .bind(as_of)
-    .fetch_all(&mut **tx)
-    .await?;
+fn provenance(mut rows: Vec<PgRow>) -> Value {
     let total = rows.first().map_or(0_i64, |row| row.get("total_count"));
     let truncated = rows.len() > 20;
     if truncated {
@@ -487,7 +475,7 @@ async fn read_provenance(
                 .map(|row| format!("package:{}", row.get::<Uuid, _>("package_ref")))
         })
         .flatten();
-    Ok(serde_json::json!({
+    serde_json::json!({
         "packageRefs":rows.iter().map(|row| row.get::<Uuid,_>("package_ref")).collect::<Vec<_>>(),
         "taskRefs":rows.iter().map(|row| row.get::<Uuid,_>("task_id")).collect::<Vec<_>>(),
         "attemptRefs":rows.iter().map(|row| row.get::<Uuid,_>("attempt_id")).collect::<Vec<_>>(),
@@ -495,7 +483,7 @@ async fn read_provenance(
         "producers":dedupe_preserving_order(rows.iter().map(|row| row.get::<Uuid,_>("producer_instance_id"))),
         "stationAccountLens":{"state":"UNKNOWN"},"coverageRefs":rows.iter().map(|row| row.get::<Uuid,_>("package_ref")).collect::<Vec<_>>(),
         "receipt":{"total":total,"returned":rows.len(),"truncated":truncated,"nextCursor":next_cursor,"limit":20}
-    }))
+    })
 }
 
 pub async fn read_authorized_research_comments(

@@ -55,6 +55,13 @@
 - Git：不提交日志、数据库、截图或构建产物；可复现命令与结果转写至 `docs/audits/creator-discovery-001-acceptance.md`。
 - 清理：确认测试和本任务 API 进程结束后停止本任务容器，`--rm` 删除其临时数据；不得清理其他容器、业务库、工作树或共享 runtime。
 
+## CORPUS-PERFORMANCE-089 隔离验证产物
+
+- 来源：`scripts/test-corpus-performance-postgres.sh` 与合成 PostgreSQL fixtures；独立容器启用 pg_stat_statements，仅统计测试库查询次数。
+- 位置：`linggan-intelligence-corpus-performance-proof-*` 容器及同名 `-data` volume；系统临时目录中的只读 SQL、EXPLAIN 与 HTTP 比较结果。
+- Git：只提交源码及聚合指标，不提交原文、DSN、数据库或运行日志。
+- 清理：脚本 EXIT 删除并核实本次 proof database/container/volume；比较完成删除真实 HTTP 临时响应并停止本次 3108 候选 API，不触碰共享 3000 或其他任务资源。
+
 ## TOPIC-MAP-V41-001 隔离验证
 
 - 来源：主题图谱 Rust/API/JS/CSS 与 `scripts/test-topic-map-postgres.sh`。
