@@ -12,6 +12,8 @@
 
 用户已明确允许 subagent 并行；本包即当前派定交付包与本地 Claim，不为 Issue 形式另加等待。独立 worktree codex/topic-map-v41 从 origin/main@5977c7b5 建立；共享 checkout 不改。本包允许必要的 Collection/模型/插件源码接点；未授权运行库迁移、真实模型外发、平台采集、插件发布或加载、merge/deploy。
 
+2026-10-09 发布追加授权取代上述初始 merge/deploy 与迁移边界：Mog 已明确要求提交推送、合并 main 并刷新本机3000，另行同意必要加密备份、0116–0119迁移，以及 Docker Desktop 重启恢复和本任务独占失败合成容器/卷清理。真实模型外发、平台采集、插件发布/加载仍未获本包授权。采用旧 worker drain → 停三个服务 → 明确迁移 → detached runtime-main 安装流程，逐层记录实际结果；现有研究开关及预算保持用户配置。发布后由本机加密备份目录中的不含正文/凭据的 release-receipt.txt 记录最终main、台账校验、三个进程与浏览器结果；源码文档中此前“未执行”的验收描述仍表示各轮当时状态。
+
 ## 读取回执与设计
 
 已读 AGENTS.md、docs/README.md、current-state、全部治理规则、ui-execution-contract、design-governance、LIDS README/tokens/primitives/patterns/materials/shell-zones/data-boundaries/language-policy、scope-001 合同；手册与 Demo 为本次功能/布局来源。LIDS token → button/tab/readout/evidence fragment → topic tree/card/table/dialog → overview/journey page，L2 工作面。
