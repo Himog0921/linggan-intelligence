@@ -70,3 +70,11 @@
 - 不入Git，不包含真实原文/运行库dump/凭据；脚本退出清理容器与volume并验证成功。
 - 再生：上述脚本 + API focused tests + 隔离合成数据浏览器走查。责任 TOPIC-MAP-V41-001 root。
 - 本机发布追加：经 Mog 单独授权的运行库加密备份、校验和与不含正文/凭据的发布回执保存在既有忽略目录 `database/backups/topic-map-v41-<UTC>/`；密钥继续独立保管。真实3000的浏览器截图归本任务 Codex visualizations，文件名 `topic-map-demo-corrected-runtime-*.jpg`，不入Git。合成截图与运行页截图不得互相替代。
+
+## CREATOR-DISCOVERY-001 · 2026-10-10 UI / 调度验证与只读预览
+
+- 来源：`scripts/test-creator-discovery-postgres.sh`、`scripts/test-creator-discovery-ui.cjs` 与当前任务手动只读候选预览；脚本为维护的测试源码。
+- 位置：`/tmp/creator-ui-*.log`、`/tmp/creator-ui-browser/*.png`、`/tmp/creator-ui-*-edit.py`、`/tmp/linggan-creator-ui-target`；交付截图复制到当前任务授权的 Codex visualizations 目录。只读预览脚本为系统临时文件，使用当前候选资产和loopback GET，不转发写入。
+- Git：日志、截图、编译产物、临时脚本和凭据不入Git；合成截图标明验证性质，不能冒充部署或真实模型质量。
+- 再生：运行上述proof脚本；Node/Playwright依赖通过任务环境提供；`CREATOR_PROOF_OUTPUT`指定截图位置，`CREATOR_PROOF_SHELL_URL`仅允许本机creator page只读复用壳层。
+- 清理：PostgreSQL脚本EXIT清理唯一随机命名的本任务容器/volume；浏览器测试finally关闭浏览器与HTTP server。候选只读预览完成后关闭本任务server，不能清理共享runtime或其它任务资源。责任：Issue #367 / task 01a124ee-056a-7393-a34b-6462b102bc4b。
