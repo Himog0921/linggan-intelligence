@@ -141,6 +141,9 @@ async fn read_page(
     sqlx::query("SET LOCAL statement_timeout = '15s'")
         .execute(&mut *tx)
         .await?;
+    // These interactive projections spend more time compiling JIT code than executing it.
+    // Keep the setting transaction-local so pooled connections retain their normal defaults.
+    sqlx::query("SET LOCAL jit = off").execute(&mut *tx).await?;
     let as_of = resolve_as_of(&mut tx, previous.as_ref()).await?;
     let ready: bool = sqlx::query_scalar(
         "SELECT to_regclass('linggan_media_ocr_layout') IS NOT NULL \
@@ -151,6 +154,7 @@ async fn read_page(
     .await?;
     let projection: Value =
         sqlx::query_scalar(AssertSqlSafe(statement(ready, scope.pattern.is_some())?))
+            .persistent(false)
             .bind(query.domain)
             .bind(&as_of)
             .bind(CLEANER_VERSION)

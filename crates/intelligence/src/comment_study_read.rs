@@ -773,33 +773,18 @@ pub async fn read_runs(
         None
     };
     let run_refs: Vec<Uuid> = rows.iter().map(|row| row.get("run_ref")).collect();
-    let extra_rows = sqlx::query(
-        "SELECT run.run_ref,to_jsonb(policy)->>'method_name' AS method_name, \
-           (SELECT count(*) FROM linggan_comment_study_resolution resolution \
-            JOIN linggan_comment_study_effective_signal signal USING(signal_ref) \
-            JOIN linggan_comment_study_target target ON target.target_ref=signal.target_ref \
-            WHERE target.run_ref=run.run_ref AND signal.eligibility_state='eligible' \
-              AND resolution.state='pending') AS pending_resolution_count, \
-           (SELECT count(*) FROM linggan_comment_study_problem_pair pair \
-            JOIN linggan_comment_study_effective_signal first_signal \
-              ON first_signal.signal_ref=pair.first_signal_ref \
-             AND first_signal.eligibility_state='eligible' \
-            JOIN linggan_comment_study_effective_signal second_signal \
-              ON second_signal.signal_ref=pair.second_signal_ref \
-             AND second_signal.eligibility_state='eligible' \
-            JOIN linggan_comment_study_target first_target \
-              ON first_target.target_ref=first_signal.target_ref \
-            JOIN linggan_comment_study_target second_target \
-              ON second_target.target_ref=second_signal.target_ref \
-            WHERE first_target.run_ref=run.run_ref AND second_target.run_ref=run.run_ref \
-              AND pair.state='pending') AS pending_pair_count \
-         FROM linggan_comment_study_run run \
-         JOIN linggan_comment_study_policy policy USING(policy_ref) \
-         WHERE run.run_ref=ANY($1::uuid[])",
-    )
-    .bind(&run_refs)
-    .fetch_all(database.pool())
-    .await?;
+    let mut extras_tx = database.pool().begin().await?;
+    sqlx::query("SET TRANSACTION READ ONLY")
+        .execute(&mut *extras_tx)
+        .await?;
+    sqlx::query("SET LOCAL jit = off")
+        .execute(&mut *extras_tx)
+        .await?;
+    let extra_rows = sqlx::query(include_str!("comment_study_read/runs_extras.sql"))
+        .bind(&run_refs)
+        .fetch_all(&mut *extras_tx)
+        .await?;
+    extras_tx.commit().await?;
     let extras: HashMap<Uuid, (Option<String>, i64, i64)> = extra_rows
         .into_iter()
         .map(|row| {
