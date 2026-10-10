@@ -12,6 +12,7 @@ pub(super) struct Completion<'a> {
     pub response: Option<&'a PiResponse>,
     pub extracted: Option<ResearchOutput>,
     pub resolved: Option<ResolutionOutput>,
+    pub rejection: Option<&'static str>,
     pub prepared: &'a Prepared,
     pub source_current: bool,
     pub candidate_sources_current: bool,
@@ -79,7 +80,7 @@ async fn accept_phase(
 ) -> Result<AcceptedPhase, ModelError> {
     let mut accepted = AcceptedPhase {
         state: "failed",
-        reason: Some("invalid_output"),
+        reason: Some(c.rejection.unwrap_or("invalid_output")),
         output: None,
         units: c.prepared.previous.clone(),
     };

@@ -13,12 +13,57 @@ pub(crate) async fn load_inputs(
     domain: Uuid,
     config: Uuid,
 ) -> Result<Vec<ResearchInput>, ResearchError> {
-    let data = creator_discovery::load_topic_materials(db, domain)
-        .await
-        .map_err(|e| match e {
-            creator_discovery::DiscoveryError::Database(e) => ResearchError::Database(e),
-            _ => ResearchError::Invalid("source_unavailable"),
-        })?;
+    load_scoped_inputs(db, domain, config, None).await
+}
+
+pub(crate) async fn load_inputs_for_works(
+    db: &Database,
+    domain: Uuid,
+    config: Uuid,
+    works: &[Uuid],
+) -> Result<Vec<ResearchInput>, ResearchError> {
+    load_scoped_inputs(db, domain, config, Some(works)).await
+}
+
+/// Match the exact reconstruction scope: ordinary windows have one source;
+/// comparison windows freeze their participants, including in resolve wrappers.
+pub(crate) fn manifest_source_work_refs(work: Uuid, manifest: &Value) -> Vec<Uuid> {
+    let manifest = manifest.get("source").unwrap_or(manifest);
+    if manifest["coverage"]["kind"] != "comparison" {
+        return vec![work];
+    }
+    let context = manifest["contextWorkRefs"].as_array().and_then(|values| {
+        values
+            .iter()
+            .map(|value| value.as_str()?.parse::<Uuid>().ok())
+            .collect::<Option<Vec<_>>>()
+    });
+    let Some(context) = context else {
+        return vec![work];
+    };
+    let scope: BTreeSet<_> = std::iter::once(work)
+        .chain(context.iter().copied())
+        .collect();
+    if scope.len() > 10 || scope.len() != context.len() + 1 {
+        return vec![work];
+    }
+    scope.into_iter().collect()
+}
+
+async fn load_scoped_inputs(
+    db: &Database,
+    domain: Uuid,
+    config: Uuid,
+    work_refs: Option<&[Uuid]>,
+) -> Result<Vec<ResearchInput>, ResearchError> {
+    let data = match work_refs {
+        Some(works) => creator_discovery::load_topic_materials_for_works(db, domain, works).await,
+        None => creator_discovery::load_topic_materials(db, domain).await,
+    }
+    .map_err(|e| match e {
+        creator_discovery::DiscoveryError::Database(e) => ResearchError::Database(e),
+        _ => ResearchError::Invalid("source_unavailable"),
+    })?;
     let rows=sqlx::query("SELECT t.topic_ref,d.definition_ref,d.version,d.display_name,d.definition_text FROM linggan_topic_workspace t JOIN LATERAL(SELECT * FROM linggan_topic_map_binding WHERE topic_ref=t.topic_ref ORDER BY version DESC LIMIT 1)b ON true JOIN LATERAL(SELECT * FROM linggan_topic_definition WHERE topic_ref=t.topic_ref ORDER BY version DESC LIMIT 1)d ON true WHERE b.domain_ref=$1 ORDER BY t.topic_ref").bind(domain).fetch_all(db.pool()).await?;
     let topics=Value::Array(rows.iter().map(|r|json!({"topicRef":r.get::<Uuid,_>("topic_ref"),"definitionRef":r.get::<Uuid,_>("definition_ref"),"version":r.get::<i32,_>("version"),"label":r.get::<String,_>("display_name"),"definition":r.get::<String,_>("definition_text")})).collect());
     let study_ready: bool = sqlx::query_scalar(
@@ -247,4 +292,52 @@ fn comment_inputs(
     }
     fragments.extend(parents.into_values());
     Ok((fragments, comments))
+}
+
+#[cfg(test)]
+mod scope_tests {
+    use super::*;
+
+    #[test]
+    fn extraction_does_not_read_future_comparison_requests() {
+        let work = Uuid::from_u128(1);
+        let other = Uuid::from_u128(2);
+        let manifest = json!({"coverage":{"kind":"source_window"},"contextWorkRefs":[other]});
+        assert_eq!(manifest_source_work_refs(work, &manifest), vec![work]);
+        assert_eq!(
+            manifest_source_work_refs(work, &json!({"source":manifest})),
+            vec![work]
+        );
+    }
+
+    #[test]
+    fn comparison_reads_all_frozen_participants_through_resolve_wrapper() {
+        let work = Uuid::from_u128(2);
+        let other = Uuid::from_u128(1);
+        let manifest = json!({"coverage":{"kind":"comparison"},"contextWorkRefs":[other]});
+        assert_eq!(
+            manifest_source_work_refs(work, &manifest),
+            vec![other, work]
+        );
+        assert_eq!(
+            manifest_source_work_refs(work, &json!({"source":manifest})),
+            vec![other, work]
+        );
+    }
+
+    #[test]
+    fn invalid_comparison_scope_never_expands_or_falls_back_to_domain_read() {
+        let work = Uuid::from_u128(1);
+        let other = Uuid::from_u128(2);
+        for context in [
+            json!([work]),
+            json!([other, other]),
+            json!(["invalid"]),
+            json!((2..=11).map(Uuid::from_u128).collect::<Vec<_>>()),
+            json!(null),
+        ] {
+            let manifest = json!({"coverage":{"kind":"comparison"},"contextWorkRefs":context});
+            assert_eq!(manifest_source_work_refs(work, &manifest), vec![work]);
+        }
+    }
 }

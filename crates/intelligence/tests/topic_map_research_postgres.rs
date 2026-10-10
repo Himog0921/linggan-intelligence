@@ -990,8 +990,11 @@ async fn research_progress_bounds_task_issues_without_losing_totals_or_unknown_r
         }
     }
     let progress = progress_for_run(&db, run).await;
-    assert_eq!(progress["failedCount"], 25);
-    assert_eq!(progress["succeededCount"], 3);
+    assert_eq!(progress["failedCount"], 24);
+    assert_eq!(progress["unknownDispatchCount"], 1);
+    assert_eq!(progress["succeededCount"], 1);
+    assert_eq!(progress["noSignalCount"], 1);
+    assert_eq!(progress["insufficientCount"], 1);
     assert_eq!(progress["queuedCount"], 0);
     let issues = progress["taskIssues"].as_array().unwrap();
     assert_eq!(issues.len(), 20);
@@ -1012,4 +1015,95 @@ async fn research_progress_bounds_task_issues_without_losing_totals_or_unknown_r
             .iter()
             .all(|item| ["failed", "unknown_dispatch"].contains(&item["state"].as_str().unwrap()))
     );
+}
+
+#[tokio::test]
+#[ignore = "disposable PostgreSQL ledger fixture, no provider"]
+async fn research_progress_summary_covers_all_runs_and_keeps_method_pause_and_drafts_distinct() {
+    let (db, config, _) = setup("topic_map_research_progress_summary").await;
+    apply_research_command(&db, &configure(config, 100000, false))
+        .await
+        .unwrap();
+    let work = work(&db, "progress-summary", "SYNTHETIC 全领域任务账本材料。").await;
+    let states = [
+        "queued",
+        "running",
+        "succeeded",
+        "no_signal",
+        "insufficient",
+        "failed",
+        "unknown_dispatch",
+        "stale",
+        "stopped",
+    ];
+    let mut earliest = Uuid::nil();
+    for index in 0..32_i32 {
+        let run = Uuid::new_v4();
+        if index == 0 {
+            earliest = run;
+        }
+        let method = if index < 2 {
+            "topic-map.research.v1.1"
+        } else {
+            "topic-map.research.v2"
+        };
+        sqlx::query("INSERT INTO linggan_topic_map_research_run(run_ref,domain_ref,request_ref,trigger,config_ref,method_version,token_limit,state,created_at) VALUES($1,$2,$3,'incremental',$4,$5,100000,'running','2026-10-10T00:00:00Z'::timestamptz+$6::int*interval '1 second')")
+            .bind(run).bind(D).bind(Uuid::new_v4()).bind(config).bind(method).bind(index).execute(db.pool()).await.unwrap();
+        let state = states[index as usize % states.len()];
+        let phase = if index == 0 { "resolve" } else { "extract" };
+        let draft = if index == 0 {
+            Some(json!({"contract":"SYNTHETIC saved draft"}))
+        } else {
+            None
+        };
+        sqlx::query("INSERT INTO linggan_topic_map_research_task(task_ref,run_ref,domain_ref,work_public_ref,input_hash,input_refs,state,phase,distilled_json) VALUES($1,$2,$3,$4,$5,'{}',$6,$7,$8)")
+            .bind(Uuid::new_v4()).bind(run).bind(D).bind(work).bind(format!("{index:064x}")).bind(state).bind(phase).bind(draft).execute(db.pool()).await.unwrap();
+    }
+    apply_research_command(
+        &db,
+        &ResearchCommand::Pause {
+            request_ref: Uuid::new_v4(),
+            domain_ref: D,
+            run_ref: None,
+        },
+    )
+    .await
+    .unwrap();
+    let progress = read_research_progress(&db, D).await.unwrap();
+    assert_eq!(progress["policy"]["status"], "paused");
+    assert_eq!(progress["runListLimit"], 30);
+    let recent = progress["runs"].as_array().unwrap();
+    assert_eq!(recent.len(), 30);
+    assert!(recent.iter().all(|run| run["runRef"] != json!(earliest)));
+    assert!(
+        recent
+            .iter()
+            .all(|run| run["methodVersion"] == "topic-map.research.v2")
+    );
+    let summary = &progress["summary"];
+    assert_eq!(summary["totalRunCount"], 32);
+    assert_eq!(summary["totalTaskCount"], 32);
+    for (field, count) in [
+        ("queuedCount", 4),
+        ("runningCount", 4),
+        ("succeededCount", 4),
+        ("noSignalCount", 4),
+        ("insufficientCount", 4),
+        ("failedCount", 3),
+        ("unknownDispatchCount", 3),
+        ("staleCount", 3),
+        ("stoppedCount", 3),
+    ] {
+        assert_eq!(summary[field], count, "{field}");
+    }
+    assert_eq!(summary["extractedWindowCount"], 1);
+    assert_eq!(summary["phases"]["resolveQueued"], 1);
+    assert_eq!(summary["phases"]["extractQueued"], 3);
+    assert_eq!(summary["phases"]["extracting"], 4);
+    assert_eq!(
+        summary["succeededCount"], 4,
+        "no signal and insufficient do not inflate accepted results"
+    );
+    // Even though the oldest method lies outside the recent list, the full ledger retains it.
+    assert_eq!(sqlx::query_scalar::<_,i64>("SELECT count(*) FROM linggan_topic_map_research_run WHERE domain_ref=$1 AND method_version='topic-map.research.v1.1'").bind(D).fetch_one(db.pool()).await.unwrap(), 2);
 }

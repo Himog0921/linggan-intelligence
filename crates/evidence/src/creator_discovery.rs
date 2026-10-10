@@ -297,14 +297,33 @@ pub async fn load_topic_materials(
     database: &Database,
     domain: Uuid,
 ) -> Result<DiscoveryData, DiscoveryError> {
+    load_topic_material_scope(database, domain, None).await
+}
+
+/// Read only the requested works through the same current domain/material gates.
+/// An empty selection is an empty scope, never an unbounded domain fallback.
+pub async fn load_topic_materials_for_works(
+    database: &Database,
+    domain: Uuid,
+    work_refs: &[Uuid],
+) -> Result<DiscoveryData, DiscoveryError> {
+    load_topic_material_scope(database, domain, Some(work_refs)).await
+}
+
+async fn load_topic_material_scope(
+    database: &Database,
+    domain: Uuid,
+    work_refs: Option<&[Uuid]>,
+) -> Result<DiscoveryData, DiscoveryError> {
     let mut tx = database.pool().begin().await?;
     sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
         .execute(&mut *tx)
         .await?;
     let mut platforms: Vec<String> = sqlx::query_scalar(
-        "SELECT DISTINCT content.platform FROM linggan_material_domain_usage usage JOIN linggan_material_content content ON content.public_ref=usage.content_public_ref WHERE usage.domain_ref=$1 ORDER BY content.platform",
+        "SELECT DISTINCT content.platform FROM linggan_material_domain_usage usage JOIN linggan_material_content content ON content.public_ref=usage.content_public_ref WHERE usage.domain_ref=$1 AND ($2::uuid[] IS NULL OR usage.content_public_ref=ANY($2)) ORDER BY content.platform",
     )
     .bind(domain)
+    .bind(work_refs)
     .fetch_all(&mut *tx)
     .await?;
     // An empty scope still returns the real domain definition and observation cutoff.
@@ -316,7 +335,7 @@ pub async fn load_topic_materials(
         let scope: CreatorScope =
             serde_json::from_value(json!({"domain":domain,"platform":platform}))
                 .map_err(|_| DiscoveryError::Invalid("invalid_topic_material_scope"))?;
-        let mut part = load_materials_in(&mut tx, &scope, None).await?;
+        let mut part = load_materials_in(&mut tx, &scope, None, work_refs).await?;
         if let Some(data) = data.as_mut() {
             data.works.append(&mut part.works);
             data.observation_lookup_available &= part.observation_lookup_available;
@@ -334,13 +353,14 @@ pub(crate) async fn load_in(
     tx: &mut Transaction<'_, Postgres>,
     q: &CreatorScope,
 ) -> Result<DiscoveryData, DiscoveryError> {
-    load_materials_in(tx, q, Some(4000)).await
+    load_materials_in(tx, q, Some(4000), None).await
 }
 
 async fn load_materials_in(
     tx: &mut Transaction<'_, Postgres>,
     q: &CreatorScope,
     char_limit: Option<usize>,
+    work_refs: Option<&[Uuid]>,
 ) -> Result<DiscoveryData, DiscoveryError> {
     let clock=sqlx::query("SELECT scope_001_now()::text AS now,linggan_human_moment(scope_001_now()) AS display_now,(extract(epoch FROM scope_001_now())*1000)::bigint AS epoch").fetch_one(&mut **tx).await?;
     let as_of: String = clock.get("now");
@@ -360,7 +380,7 @@ async fn load_materials_in(
     if q.sort == "viral_works" && policy["likeThreshold"].as_i64().is_none() {
         return Err(DiscoveryError::Invalid("viral_threshold_unset"));
     }
-    let rows=sqlx::query("SELECT content_public_ref,COALESCE(min(created_at) FILTER(WHERE role=$2),min(created_at))::text AS first_added,linggan_human_moment(COALESCE(min(created_at) FILTER(WHERE role=$2),min(created_at))) AS first_added_display,array_agg(DISTINCT role) AS roles FROM linggan_material_domain_usage WHERE domain_ref=$1 GROUP BY content_public_ref").bind(q.domain).bind(&q.usage_role).fetch_all(&mut **tx).await?;
+    let rows=sqlx::query("SELECT content_public_ref,COALESCE(min(created_at) FILTER(WHERE role=$2),min(created_at))::text AS first_added,linggan_human_moment(COALESCE(min(created_at) FILTER(WHERE role=$2),min(created_at))) AS first_added_display,array_agg(DISTINCT role) AS roles FROM linggan_material_domain_usage WHERE domain_ref=$1 AND ($3::uuid[] IS NULL OR content_public_ref=ANY($3)) GROUP BY content_public_ref").bind(q.domain).bind(&q.usage_role).bind(work_refs).fetch_all(&mut **tx).await?;
     let added: HashMap<Uuid, String> = rows
         .iter()
         .map(|r| (r.get("content_public_ref"), r.get("first_added")))

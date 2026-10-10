@@ -28,9 +28,15 @@
 
 `GET /api/local/topic-map/research?domainRef={uuid}` 返回设置、用量、run/task/result真实进度；`POST /api/local/topic-map/research/commands` 采用action configure/start/pause/resume/stop。configure明确modelConfigRef/dailyTokenLimit/runTokenLimit/automaticEnabled/collectionEnabled；没有具体用量配置不外发。start区分historical/incremental/on_demand。当前prototype按钮/页面读取/筛选/保存不能代替开启授权。
 
-`runs[]` 最多返回最近 30 个运行；`queuedCount/succeededCount/failedCount` 和 `phases` 从当前任务状态聚合。`failedCount` 保留既有口径，包含 `failed` 与 `unknown_dispatch`，不把派发未知算作已知失败或成功。`taskIssues` 按任务 `updated_at`、`task_ref` 降序返回最多 20 项当前处于这两种状态的任务，每项固定 `taskRef/phase/state/reason`；`phase` 为 `extract/resolve/compare`，`reason` 保留数据库原因码或明确的 `null`。明细上限不截断总数；界面说明实际显示项数与完整计数，缺失或未识别原因显示未知，不能暗示自动重试。
+`summary` 聚合当前领域全部历史批次与任务账本，不受最近批次列表上限影响；`totalRunCount/totalTaskCount` 给完整范围。`runListLimit=30`，`runs[]` 最多按 `created_at/run_ref` 倒序返回最近 30 批，并各自返回冻结的 `methodVersion`，不以当前顶层方法版本替代旧运行身份。界面分别显示全领域总览与最近批次边界。
+
+`summary` 与 `runs[]` 的 `queuedCount/runningCount/succeededCount/noSignalCount/insufficientCount/failedCount/unknownDispatchCount/staleCount/stoppedCount` 从任务当前状态分别聚合；`succeededCount` 仅为已接纳结果，**无信号和材料不足不再混计成功，派发未知也不再混计已知失败**。这是修正后的计数语义，前端及回归同步采用新口径。`extractedWindowCount` 仅统计已有 `distilled_json` 的来源窗口任务，包括后续已处理或已过时的历史草稿；草稿不代表已接纳讨论、当前可用主题或质量通过。账本计数不读取原文，不替代当前来源资格。
+
+`taskIssues` 仍包含 `failed/unknown_dispatch` 两类，按任务 `updated_at/task_ref` 降序最多 20 项，每项固定 `taskRef/phase/state/reason`。`phase` 为 `extract/resolve/compare`，`reason` 保留数据库原因码或明确的 `null`。界面以 `failedCount+unknownDispatchCount` 说明明细项数与完整问题总数；缺失或未识别原因显示未知，不能暗示自动重试。新业务拒绝保留闭集安全原因码，如 `output_json_invalid/output_schema_invalid/output_contract_mismatch/invalid_discussion_evidence/invalid_resolution_match`；历史 `invalid_output` 明确表示未保留具体规则，不能回填猜测的历史原因。
 
 `lastReason` 和 `inputScope` 保留兼容及审计含义；其中 `comparison/workComparisons` 是当时的调度检查点，不是实时任务状态。运行已经结束且任务失败时，界面使用 `taskIssues` 解释失败，不能继续用历史 `comparison_queued` 解释当前结果；无失败的已结束运行也不以旧排队码表示实时状态。`phases` 的 `extractQueued/extracting`、`resolveQueued/resolving`、`compareQueued/comparing` 分别显示提炼、归属、比较的待处理与进行中数量。
+
+`policy.status` 是领域调度状态，独立于批次保存状态。领域暂停时明确显示保留进度及已有请求仍须结算，不能把旧批次 `running` 当作仍可调度。既有域级 `pause/resume` 使用 `runRef:null`；有明确 `paused/active` 回执才显示对应恢复/暂停入口。领域暂停下的已暂停批次先恢复领域，防止批次恢复按钮产生继续调度的错觉。`method_superseded` 说明旧方法停止未派发任务并保留历史账本。
 
 运行操作按真实状态显示：`queued/running` 提供暂停、明确停止；`paused` 提供恢复、明确停止；`daily_budget_paused` 表达额度等待并提供暂停、明确停止。`completed/stopped/run_budget_exhausted/failed` 不提供无效的运行恢复操作。明确新 Start 仍经过原输入复用、来源、未知派发及预算守门，读取和显示不改变重试或授权规则。
 

@@ -46,7 +46,7 @@ export LINGGAN_COLLECTION_UPGRADE_PHASE=governance
 export LOCAL_001_PROOF_DATABASE_URL="postgresql://${proof_user}:${proof_password}@127.0.0.1:${proof_port}/${proof_database}"
 # Attempt every selected target, preserving failure so later proofs are not hidden.
 proof_exit=0
-cargo test -p linggan-intelligence --test topic_map_postgres --test topic_map_research_postgres --test topic_map_core_postgres --test topic_map_core_lifecycle_postgres --test topic_map_core_unknown_postgres --test topic_map_core_legacy_postgres --test topic_map_saved_sources_postgres --test topic_map_search_postgres --locked --no-fail-fast -- --ignored --test-threads=1 || proof_exit=$?
+cargo test -p linggan-intelligence --test topic_map_postgres --test topic_map_research_postgres --test topic_map_core_postgres --test topic_map_core_lifecycle_postgres --test topic_map_core_unknown_postgres --test topic_map_core_legacy_postgres --test topic_map_core_recovery_postgres --test topic_map_saved_sources_postgres --test topic_map_search_postgres --locked --no-fail-fast -- --ignored --test-threads=1 || proof_exit=$?
 cargo test -p linggan-evidence --test topic_map_comment_budget_postgres --locked --no-fail-fast -- --ignored --test-threads=1 || proof_exit=$?
 cargo test -p linggan-api --locked --no-fail-fast topic_map -- --ignored --test-threads=1 || proof_exit=$?
 if [[ "$proof_exit" -ne 0 ]]; then

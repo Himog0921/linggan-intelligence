@@ -80,3 +80,93 @@ async fn root_reply_new_identity_budget_is_atomic_and_retains_safe_partial() {
     }
     assert_eq!(sqlx::query_scalar::<_,i64>("SELECT count(DISTINCT comment_external_id)FROM linggan_material_comment WHERE content_public_ref=(SELECT public_ref FROM linggan_material_content WHERE content_external_id='bounded-comments')").fetch_one(db.pool()).await.unwrap(),30);
 }
+
+#[tokio::test]
+#[ignore = "disposable PostgreSQL; qualified finite source scope proof"]
+async fn finite_topic_source_scope_preserves_full_material_and_domain_qualification() {
+    use linggan_evidence::creator_discovery::{
+        load_topic_materials, load_topic_materials_for_works,
+    };
+    let db = fixture::proof_database("topic_map_finite_material_scope").await;
+    let domain = Uuid::from_u128(0x00000000000040008000000000000001);
+    let other_domain = Uuid::new_v4();
+    sqlx::query("INSERT INTO observation_domain(domain_ref,name,description,research_goal) VALUES($1,'合成外域','仅资格测试','范围隔离')")
+        .bind(other_domain).execute(db.pool()).await.unwrap();
+    let mut refs = Vec::new();
+    let body = format!("{}结尾必须保留。", "合成完整正文。".repeat(700));
+    for (index, owner) in [(0, domain), (1, domain), (2, other_domain)] {
+        let external = format!("finite-scope-{index}");
+        let package = fixture::submit_package(&db, "content_detail", json!({"contentExternalId":external}),
+            json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":external},
+                "payload":{"title":"SYNTHETIC 范围读取","bodyText":body,"authorId":format!("scope-author-{index}")}})).await;
+        let work: Uuid = sqlx::query_scalar(
+            "SELECT public_ref FROM linggan_material_content WHERE content_external_id=$1",
+        )
+        .bind(&external)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO linggan_material_domain_usage(usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref) VALUES($1,$2,$3,'primary','legacy_domain_migration',$4)")
+            .bind(Uuid::new_v4()).bind(work).bind(owner).bind(package).execute(db.pool()).await.unwrap();
+        refs.push(work);
+    }
+    let full = load_topic_materials(&db, domain).await.unwrap();
+    assert_eq!(full.works.len(), 2);
+    let limited =
+        load_topic_materials_for_works(&db, domain, &[refs[0], refs[0], refs[2], Uuid::new_v4()])
+            .await
+            .unwrap();
+    assert_eq!(limited.works.len(), 1);
+    let selected = &limited.works[0];
+    let original = full
+        .works
+        .iter()
+        .find(|work| work.work_ref == refs[0])
+        .unwrap();
+    assert_eq!(selected.work_ref, original.work_ref);
+    assert_eq!(selected.usage_roles, original.usage_roles);
+    assert_eq!(selected.fingerprint, original.fingerprint);
+    assert_eq!(
+        serde_json::to_value(&selected.fragments).unwrap(),
+        serde_json::to_value(&original.fragments).unwrap()
+    );
+    assert!(
+        selected
+            .fragments
+            .iter()
+            .any(|fragment| fragment.field == "body"
+                && fragment.text.ends_with("结尾必须保留。")
+                && fragment.end > 4000)
+    );
+    assert!(
+        load_topic_materials_for_works(&db, domain, &[])
+            .await
+            .unwrap()
+            .works
+            .is_empty()
+    );
+    assert!(
+        load_topic_materials_for_works(&db, other_domain, &[refs[0]])
+            .await
+            .unwrap()
+            .works
+            .is_empty()
+    );
+
+    assert_eq!(
+        load_topic_materials_for_works(&db, other_domain, &[refs[2]])
+            .await
+            .unwrap()
+            .works
+            .len(),
+        1
+    );
+    assert_eq!(
+        load_topic_materials_for_works(&db, domain, &[refs[1]])
+            .await
+            .unwrap()
+            .works
+            .len(),
+        1
+    );
+}

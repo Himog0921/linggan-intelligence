@@ -24,6 +24,13 @@ import {
 const API = {'openai-completions':openAICompletionsApi, 'openai-responses':openAIResponsesApi, 'anthropic-messages':anthropicMessagesApi};
 export const VERSION = 'linggan.pi.v1/0.85.1';
 export const TOPIC_TRANSPORT_BYTE_LIMIT = 1_048_576;
+const RESPONSE_BYTE_LIMIT = 262_144;
+const SSE_BYTE_CEILING = 8_388_608;
+// SSE envelopes repeat metadata per token, so wire bytes are not final text bytes.
+// The finite allowance follows the authorized output budget, with a fixed ceiling.
+export function sseByteLimit(maxOutputTokens) {
+  return Math.min(SSE_BYTE_CEILING, RESPONSE_BYTE_LIMIT + maxOutputTokens * 2048);
+}
 const TOPIC_CONTRACTS = new Set(['topic-map.research.v2', 'topic-map.resolve.v1']);
 class Rejected extends Error { constructor(code) { super(code); this.code=code; } }
 const integer = (v,min,max) => Number.isSafeInteger(v) && v>=min && v<=max;
@@ -118,7 +125,7 @@ function providerFailure(status,url) {
   if(status>=500)return 'provider_unavailable';
   return 'provider_failed';
 }
-function scopedFetch(base,signal,usage,failure,observation) {
+function scopedFetch(base,signal,usage,failure,observation,maxOutputTokens) {
   return async (input,init={}) => {
     let url;try{url=new URL(typeof input==='string'||input instanceof URL?input:input.url);}catch{throw new Rejected('endpoint_rejected');}
     const prefix=base.pathname.replace(/\/$/,'');
@@ -131,11 +138,13 @@ function scopedFetch(base,signal,usage,failure,observation) {
     responseStarted(observation,response.status);
     if(!response.ok){failure.code=providerFailure(response.status,url);await response.body?.cancel();throw new Rejected(failure.code);}
     if(!response.body){bodyCompleted(observation);return response;}
+    const sse=response.headers.get('content-type')?.split(';',1)[0].trim().toLowerCase()==='text/event-stream';
+    const byteLimit=sse?sseByteLimit(maxOutputTokens):RESPONSE_BYTE_LIMIT;
     let buffer='';const decoder=new TextDecoder();
     const inspect=line=>observeSseLine(observation,line,usage,usageFrom);
     const body=response.body.pipeThrough(new TransformStream({transform(chunk,controller){
       receivedChunk(observation,chunk.byteLength);
-      if(observation.diagnostic.receivedBytes>262144){observation.diagnostic.limitKind='sse_stream_262144';failure.code='response_too_large';throw new Rejected(failure.code);}
+      if(observation.diagnostic.receivedBytes>byteLimit){observation.diagnostic.limitKind=sse?'sse_stream_token_budget':'sse_stream_262144';failure.code='response_too_large';throw new Rejected(failure.code);}
       buffer+=decoder.decode(chunk,{stream:true});
       const lines=buffer.split(/\r?\n/);buffer=lines.pop()??'';
       for(const line of lines)inspect(line);
@@ -158,7 +167,7 @@ export async function execute(r) {
     if(Buffer.byteLength(JSON.stringify(r))>(topic?TOPIC_TRANSPORT_BYTE_LIMIT:131072))throw new Rejected('invalid_request');
     abort=new AbortController();
     timer=setTimeout(()=>{abort.abort();agent?.abort();},r.timeoutMs);
-    const transport=scopedFetch(base,abort.signal,usage,failure,observation);
+    const transport=scopedFetch(base,abort.signal,usage,failure,observation,r.maxOutputTokens);
     if(r.operation==='embed') {
       const result=await embed(r,base,transport,usage);usage.inputTokens=result.inputTokens;usage.outputTokens=0;
       succeeded(observation);
@@ -215,6 +224,7 @@ export async function execute(r) {
       throw new Rejected(classifyUnterminated(observation));
     }
     if(message.content.some(b=>b.type!=='text'))throw new Rejected('unexpected_content');
+    if(usage.outputTokens!==null&&usage.outputTokens>r.maxOutputTokens){observation.diagnostic.limitKind='output_tokens';throw new Rejected('output_limit');}
     const text=message.content.map(b=>b.text).join('');
     if(Buffer.byteLength(text)>65536){observation.diagnostic.limitKind='final_text_65536';throw new Rejected('response_too_large');}
     let normalized=text;try{normalized=JSON.stringify(JSON.parse(text));}catch{ /* business validation follows */ }

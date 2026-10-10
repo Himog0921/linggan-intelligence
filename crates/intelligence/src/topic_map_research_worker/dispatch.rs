@@ -14,10 +14,11 @@ pub(super) async fn execute(
     let task: Uuid = row.get("task_ref");
     let run: Uuid = row.get("run_ref");
     let config: Uuid = row.get("config_ref");
-    let all = topic_map_research::load_inputs(db, domain, config)
+    let manifest: Value = row.get("input_refs");
+    let source_works = topic_map_research::manifest_source_work_refs(work, &manifest);
+    let all = topic_map_research::load_inputs_for_works(db, domain, config, &source_works)
         .await
         .map_err(err)?;
-    let manifest: Value = row.get("input_refs");
     let input = topic_map_research::restore_scoped_window(&all, work, &manifest);
     let Some(input) = input else {
         sqlx::query("UPDATE linggan_topic_map_research_task SET state='stale',last_reason='source_or_definition_changed' WHERE task_ref=$1 AND state='queued'").bind(task).execute(db.pool()).await?;
@@ -119,10 +120,13 @@ pub(super) async fn source_snapshot(
     row: &sqlx::postgres::PgRow,
 ) -> Result<(bool, std::collections::HashSet<Uuid>), ModelError> {
     let domain: Uuid = row.get("domain_ref");
-    let all = topic_map_research::load_inputs(db, domain, row.get("config_ref"))
-        .await
-        .map_err(err)?;
     let manifest: Value = row.get("input_refs");
+    let source_works =
+        topic_map_research::manifest_source_work_refs(row.get("work_public_ref"), &manifest);
+    let all =
+        topic_map_research::load_inputs_for_works(db, domain, row.get("config_ref"), &source_works)
+            .await
+            .map_err(err)?;
     let unavailable = core::unavailable_definitions(db, Some(domain)).await?;
     let available =
         topic_map_research::restore_scoped_window(&all, row.get("work_public_ref"), &manifest)
@@ -154,12 +158,16 @@ async fn accept_response(
     let row = pending.row;
     let prepared = pending.prepared;
     let (current, unavailable) = source_snapshot(db, row).await?;
-    let (extracted, resolved) = validated_response(
+    let validated = validated_response(
         response,
         &row.get::<String, _>("phase"),
         pending.input,
         prepared,
     );
+    let (extracted, resolved, rejection) = match validated {
+        Ok((extracted, resolved)) => (extracted, resolved, None),
+        Err(reason) => (None, None, Some(reason)),
+    };
     let eligible_definitions = prepared
         .eligible_definitions
         .iter()
@@ -177,6 +185,7 @@ async fn accept_response(
             response,
             extracted,
             resolved,
+            rejection,
             prepared,
             source_current: current,
             candidate_sources_current: candidate_sources_current(prepared, &unavailable),
@@ -309,10 +318,12 @@ async fn authorize_send(
         } else {
             // Another configuration may have been queued before the preceding
             // call became unknown while this task waited for the shared model.
-            let all = topic_map_research::load_inputs(
+            let source_works = unknown_dispatch_scope(pending.input);
+            let all = topic_map_research::load_inputs_for_works(
                 db,
                 pending.row.get("domain_ref"),
                 pending.row.get("config_ref"),
+                &source_works,
             )
             .await
             .map_err(err)?;
@@ -355,34 +366,117 @@ fn dispatch_authorized(
         || core::backfill::task_is_explicitly_authorized(scope, recall, work)
 }
 
+fn unknown_dispatch_scope(input: &ResearchInput) -> Vec<Uuid> {
+    let requested = input.coverage["scopeWorkRefs"]
+        .as_array()
+        .and_then(|values| {
+            if !(1..=10).contains(&values.len()) {
+                return None;
+            }
+            let refs = values
+                .iter()
+                .map(|v| v.as_str()?.parse::<Uuid>().ok())
+                .collect::<Option<Vec<_>>>()?;
+            (refs
+                .iter()
+                .copied()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                == refs.len())
+            .then_some(refs)
+        });
+    requested.unwrap_or_else(|| vec![input.work.work_ref])
+}
+
 fn validated_response(
     response: Option<&PiResponse>,
     phase: &str,
     input: &ResearchInput,
     prepared: &Prepared,
-) -> (Option<ResearchOutput>, Option<ResolutionOutput>) {
-    let text = response
-        .filter(|r| r.ok)
-        .and_then(|r| r.text.as_ref())
-        .filter(|s| s.len() <= 65536);
-    let extracted = if phase == "extract" || phase == "compare" {
-        text.and_then(|s| serde_json::from_str::<ResearchOutput>(s).ok())
-            .filter(|o| {
-                o.contract == analysis::EXTRACT_CONTRACT
-                    && analysis::validate_output(o, &input.fragments, &[]).is_ok()
-            })
+) -> Result<(Option<ResearchOutput>, Option<ResolutionOutput>), &'static str> {
+    let response = response.ok_or("unknown_dispatch")?;
+    if !response.ok {
+        // Never copy provider prose or an arbitrary child-process code into the
+        // business ledger. Known transport failures retain their precise cause.
+        return Err(safe_transport_reason(response.failure_code.as_deref()));
+    }
+    let text = response.text.as_deref().ok_or("output_text_missing")?;
+    if text.len() > 65536 {
+        return Err("response_too_large");
+    }
+    if phase == "extract" || phase == "compare" {
+        let output: ResearchOutput = decode_output(text)?;
+        if output.contract != analysis::EXTRACT_CONTRACT {
+            return Err("output_contract_mismatch");
+        }
+        analysis::validate_output(&output, &input.fragments, &[])?;
+        Ok((Some(output), None))
+    } else if phase == "resolve" {
+        let output: ResolutionOutput = decode_output(text)?;
+        if output.contract != analysis::RESOLVE_CONTRACT {
+            return Err("output_contract_mismatch");
+        }
+        analysis::validate_resolution(&output, &prepared.units, &prepared.candidates)?;
+        Ok((None, Some(output)))
     } else {
-        None
-    };
-    let resolved = if phase == "resolve" {
-        text.and_then(|s| serde_json::from_str::<ResolutionOutput>(s).ok())
-            .filter(|o| {
-                analysis::validate_resolution(o, &prepared.units, &prepared.candidates).is_ok()
-            })
-    } else {
-        None
-    };
-    (extracted, resolved)
+        Err("invalid_research_phase")
+    }
+}
+
+fn decode_output<T: serde::de::DeserializeOwned>(text: &str) -> Result<T, &'static str> {
+    serde_json::from_str(text).map_err(|error| match error.classify() {
+        serde_json::error::Category::Data => "output_schema_invalid",
+        _ => "output_json_invalid",
+    })
+}
+
+fn safe_transport_reason(code: Option<&str>) -> &'static str {
+    match code {
+        Some("response_too_large") => "response_too_large",
+        Some("output_limit") => "output_limit",
+        Some("provider_timeout") => "provider_timeout",
+        Some("provider_network_error") => "provider_network_error",
+        Some("provider_stream_interrupted") => "provider_stream_interrupted",
+        Some("provider_content_filtered") => "provider_content_filtered",
+        Some("unexpected_content") => "unexpected_content",
+        Some("secret_echo_rejected") => "secret_echo_rejected",
+        Some("model_input_limit") => "model_input_limit",
+        Some("authentication_failed") => "authentication_failed",
+        Some("provider_rate_limited") => "provider_rate_limited",
+        Some("provider_unavailable") => "provider_unavailable",
+        Some("provider_terminal_missing") => "provider_terminal_missing",
+        Some("provider_request_rejected") => "provider_request_rejected",
+        Some("provider_endpoint_not_found") => "provider_endpoint_not_found",
+        Some("provider_redirect_rejected") => "provider_redirect_rejected",
+        Some("provider_failed") => "provider_failed",
+        Some("endpoint_rejected") => "endpoint_rejected",
+        Some("invalid_request") => "invalid_request",
+        _ => "provider_response_rejected",
+    }
+}
+
+#[cfg(test)]
+mod response_tests {
+    use super::*;
+    #[test]
+    fn rejection_codes_distinguish_json_schema_and_never_contain_source_text() {
+        assert_eq!(
+            decode_output::<ResearchOutput>("private source").unwrap_err(),
+            "output_json_invalid"
+        );
+        assert_eq!(
+            decode_output::<ResearchOutput>(r#"{"private":"source"}"#).unwrap_err(),
+            "output_schema_invalid"
+        );
+        assert_eq!(
+            safe_transport_reason(Some("response_too_large")),
+            "response_too_large"
+        );
+        assert_eq!(
+            safe_transport_reason(Some("private provider prose")),
+            "provider_response_rejected"
+        );
+    }
 }
 
 /// A model permit may wait while another worker advances this same queued task.

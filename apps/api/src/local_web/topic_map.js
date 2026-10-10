@@ -689,32 +689,49 @@
     const phase=Object.hasOwn(phases,issue.phase)?phases[issue.phase]:'阶段未知';
     const status=issue.state==='unknown_dispatch'?'派发结果未知':issue.state==='failed'?'处理失败':'任务状态未知';
     const reason=typeof issue.reason==='string'&&issue.reason?issue.reason:null;
-    const reasons={model_input_limit:'输入超过模型配置上限，请检查输入范围与模型设置。',invalid_output:'模型返回内容未通过研究结果校验。',request_not_started:'请求未开始执行，当前任务已停止尝试。'};
+    const reasons={model_input_limit:'输入超过模型配置上限，请检查输入范围与模型设置。',invalid_output:'模型返回内容未通过研究结果校验，历史记录未保留具体规则。',output_json_invalid:'模型返回内容不是有效 JSON。',output_schema_invalid:'模型返回字段不符合严格研究格式。',output_contract_mismatch:'模型返回的研究合同版本不匹配。',invalid_evidence:'研究引用未通过来源或原文位置校验。',output_validation_failed:'模型返回内容未通过研究接纳规则。',response_too_large:'模型流或最终文本超过受控响应大小限制。',invalid_response:'模型响应流不完整或格式不可用。',output_limit:'模型输出达到配置上限，结果未完整接纳。',output_text_missing:'模型没有返回可接纳的文本结果。',provider_response_rejected:'模型响应未通过受控传输校验。',provider_timeout:'模型请求超时。',provider_network_error:'模型请求发生网络错误。',provider_stream_interrupted:'模型响应流中断。',provider_terminal_missing:'模型响应缺少完整结束回执。',provider_content_filtered:'模型服务对响应执行了内容过滤。',unexpected_content:'模型返回了不允许的工具或非文本内容。',secret_echo_rejected:'模型输出触发了凭据回显保护。',authentication_failed:'模型连接认证失败。',provider_rate_limited:'模型服务限制了请求速率。',provider_unavailable:'模型服务暂时不可用。',provider_request_rejected:'模型服务拒绝了请求参数。',provider_endpoint_not_found:'模型连接地址不可用。',provider_redirect_rejected:'模型请求被不允许的重定向拒绝。',provider_failed:'模型服务未完成请求。',endpoint_rejected:'模型连接地址不符合受控连接要求。',invalid_request:'模型请求不符合传输合同。',invalid_research_phase:'研究任务阶段不符合合同。',invalid_output_structure:'研究输出的结构、状态或条目数量不符合合同。',invalid_unicode_fragment:'引用片段的 Unicode 位置不符合来源合同。',invalid_journey_evidence:'旅程判断的引用不符合来源或阶段规则。',invalid_discussion_evidence:'讨论的角色、引用或原文位置不符合规则。',invalid_response_evidence:'回应判断缺少合格引用或超出范围。',invalid_action_evidence:'角度或机会判断缺少合格引用或边界。',duplicate_angle_task:'模型重复返回同一角度任务。',duplicate_journey_stage:'模型重复返回同一旅程阶段。',invalid_resolution_candidates:'归属候选定义不符合本次检索范围。',duplicate_resolution_candidate:'归属候选重复。',invalid_resolution_structure:'归属输出的结构不符合合同。',invalid_resolution_units:'归属输出与本次讨论身份不匹配。',invalid_resolution_decision:'归属决定的理由或字段不符合规则。',invalid_resolution_match:'归属匹配不属于本次候选定义。',invalid_resolution_relation:'主题关系不符合候选范围或边界。',missing_proposed_topic:'新主题决定没有附带候选定义。',invalid_new_topic_boundary:'新主题的定义、纳入或排除条件不完整。',invalid_resolution_status:'归属状态不符合严格合同。',request_not_started:'请求未开始执行，当前任务已停止尝试。'};
     const explanation=issue.state==='unknown_dispatch'?'无法确认请求的执行结果，不会自动重发。':reason&&Object.hasOwn(reasons,reason)?reasons[reason]:reason?'原因尚未识别，请核对任务记录。':'未记录具体原因，请核对任务记录。';
     return `<li><strong>${esc(phase)} · ${esc(status)}</strong><p>${esc(explanation)}${reason?` <span class="lgi-tm-num">原因码：${esc(reason)}</span>`:''}</p></li>`;
   }
   function researchRunDetails(run) {
     const issues=list(run.taskIssues).slice(0,20);
-    if(issues.length)return `<div class="lgi-tm-note"><p>失败与派发未知任务 · 显示 ${number(issues.length)} / ${number(run.failedCount)} 项</p><ul>${issues.map(researchTaskIssue).join('')}</ul></div>`;
-    if(Number.isFinite(run.failedCount)&&run.failedCount>0)return '<p class="lgi-tm-note">存在失败或派发未知任务，具体原因尚未取得，请刷新进度。</p>';
+    if(issues.length)return `<div class="lgi-tm-note"><p>失败与派发未知任务 · 显示 ${number(issues.length)} / ${number(researchIssueCount(run))} 项</p><ul>${issues.map(researchTaskIssue).join('')}</ul></div>`;
+    if(known(researchIssueCount(run))&&researchIssueCount(run)>0)return '<p class="lgi-tm-note">存在失败或派发未知任务，具体原因尚未取得，请刷新进度。</p>';
     if(run.lastReason==='comparison_queued')return '';
-    const reasons={daily_budget_paused:'日额度不足，等待额度恢复。',run_budget_exhausted:'本次研究额度已用尽。',paused:'研究已暂停。',stopped:'研究已明确停止。'};
+    const reasons={daily_budget_paused:'日额度不足，等待额度恢复。',run_budget_exhausted:'本次研究额度已用尽。',paused:'研究已暂停。',stopped:'研究已明确停止。',method_superseded:'旧方法已被替代，保留历史账本并停止未派发任务。'};
     return run.lastReason?`<p>${esc(Object.hasOwn(reasons,run.lastReason)?reasons[run.lastReason]:`最近运行回执：${run.lastReason}`)}</p>`:'';
   }
-  function researchRunActions(run) {
+  function researchRunActions(run, policy) {
     if(!['queued','running','daily_budget_paused','paused'].includes(run.state))return '';
     const paused=run.state==='paused';
+    if(paused&&policy?.status==='paused')return `<div class="lgi-tm-row"><p class="lgi-tm-note">恢复批次前，请先恢复领域研究。</p>${btn('明确停止','research-stop',run.runRef,'lgi-tm-danger','data-mutation')}</div>`;
     return `<div class="lgi-tm-row">${btn(paused?'恢复':'暂停',paused?'research-resume':'research-pause',run.runRef,'','data-mutation')}${btn('明确停止','research-stop',run.runRef,'lgi-tm-danger','data-mutation')}</div>`;
   }
-  function researchRun(run) {
-    const state=run.state==='daily_budget_paused'?'等待日额度':run.state==='run_budget_exhausted'?'本次研究额度已用尽':labelState(run.state);
+  function researchIssueCount(run) {
+    return known(run.failedCount)&&known(run.unknownDispatchCount)?run.failedCount+run.unknownDispatchCount:undefined;
+  }
+  function researchCounts(counts) {
+    return `<p>待处理 ${number(counts?.queuedCount)} · 进行中 ${number(counts?.runningCount)} · 已接纳结果 ${number(counts?.succeededCount)}</p><p>无研究信号 ${number(counts?.noSignalCount)} · 材料不足 ${number(counts?.insufficientCount)} · 失败 ${number(counts?.failedCount)} · 派发未知 ${number(counts?.unknownDispatchCount)}</p><p>已保存提炼结果（累计） ${number(counts?.extractedWindowCount)} · 已过时 ${number(counts?.staleCount)} · 已停止 ${number(counts?.stoppedCount)}</p>`;
+  }
+  function researchPolicy(policy) {
+    if(!policy)return '<p class="lgi-tm-note">领域研究尚未设置。</p>';
+    const paused=policy.status==='paused',active=policy.status==='active';
+    const text=paused?'领域研究已暂停；批次与任务账本保留，已发出的请求仍以实际回执结算。':active?'领域研究允许继续调度；实际处理仍受来源资格、批次状态与预算约束。':policy.status==='stopped'?'领域研究已停止。':'领域研究状态尚未识别，请刷新进度。';
+    return `<div class="lgi-tm-callout"><p>${text}</p>${paused||active?btn(paused?'恢复领域研究':'暂停领域研究',paused?'research-domain-resume':'research-domain-pause','','','data-mutation'):''}</div>`;
+  }
+  function researchRun(run, policy) {
+    const waiting=policy?.status==='paused'&&['queued','running','daily_budget_paused'].includes(run.state);
+    const state=waiting?'保留进度 · 等待领域恢复':run.state==='daily_budget_paused'?'等待日额度':run.state==='run_budget_exhausted'?'本次研究额度已用尽':labelState(run.state);
     const trigger=({historical:'历史回填',incremental:'新材料增量',on_demand:'按需研究'})[run.trigger]||run.trigger;
-    return `<article class="lgi-tm-run"><div><h4>${esc(state)} ${badge(trigger)}</h4><p>待处理 ${number(run.queuedCount)} · 已获结果 ${number(run.succeededCount)} · 失败 / 派发未知 ${number(run.failedCount)}</p>${researchPhases(run)}${researchRunDetails(run)}<p>创建于 ${esc(run.createdAt)}</p><small class="lgi-tm-num">${esc(run.runRef)}</small></div>${researchRunActions(run)}</article>`;
+    return `<article class="lgi-tm-run"><div><h4>${esc(state)} ${badge(trigger)}</h4><p>方法版本：${esc(run.methodVersion || '未记录')}</p>${researchCounts(run)}${researchPhases(run)}${researchRunDetails(run)}<p>创建于 ${esc(run.createdAt)}</p><small class="lgi-tm-num">${esc(run.runRef)}</small></div>${researchRunActions(run,policy)}</article>`;
+  }
+  function researchSummary(p) {
+    return `<section class="lgi-tm-section"><h3>全领域任务账本</h3><p>累计 ${number(p?.summary?.totalRunCount)} 个批次 · ${number(p?.summary?.totalTaskCount)} 个任务</p>${researchCounts(p?.summary)}${researchPhases({phases:p?.summary?.phases})}<p class="lgi-tm-note">覆盖本领域全部历史批次。累计提炼结果包含已完成归属的窗口，等待归属数量见阶段计数；已接纳结果按任务计数，无信号与材料不足分别记录。任务、来源窗口、讨论和主题数量不同；历史账本不代表当前可用主题或研究质量。</p></section>`;
   }
   function researchDialog() {
     if (dialogState.loading) return '<p role="status">正在读取研究设置与真实进度回执。</p>';
     const p = dialogState.progress || progress, policy = p?.policy, models = list(p?.models), usage = p?.usage;
-    return `<div class="lgi-tm-callout">开启后，历史材料分批研究、新材料增量处理。只有明确保存开启配置才启动，不因普通开页调用模型。关闭弹窗不取消已发任务，明确停止阻止继续启动新请求。</div><div class="lgi-tm-metrics"><div><span>今日已记账</span><strong>${number(usage?.chargedTokens)}</strong><small>token · ${esc(usage?.timezone || 'Asia/Shanghai')}</small></div><div><span>当前预留</span><strong>${number(usage?.reservedTokens)}</strong><small>token · 不等于已消费</small></div><div><span>每日上限</span><strong>${number(policy?.dailyTokenLimit)}</strong><small>达到上限后延后待处理</small></div><div><span>每次研究上限</span><strong>${number(policy?.runTokenLimit)}</strong><small>token · 与精选10篇不同</small></div></div><form data-form="research-config" class="lgi-tm-form"><h3>研究设置</h3><label><span>已有模型配置</span><select name="modelConfigRef" required><option value="">请选择配置</option>${models.map(m => `<option value="${esc(m.configRef)}" ${policy?.modelConfigRef === m.configRef ? 'selected' : ''}>${esc(m.modelId)} · 输入 ${number(m.inputTokenLimit)} / 输出 ${number(m.outputTokenLimit)} token</option>`).join('')}</select></label><div class="lgi-tm-form-grid"><label><span>每日 token 上限</span><input type="number" name="dailyTokenLimit" min="1024" max="10000000" step="1" required value="${policy?.dailyTokenLimit ?? ''}" placeholder="明确预算后填写"></label><label><span>每次研究 token 上限</span><input type="number" name="runTokenLimit" min="1024" max="10000000" step="1" required value="${policy?.runTokenLimit ?? ''}" placeholder="明确预算后填写"></label></div><label class="lgi-tm-check-label"><input type="checkbox" name="automaticEnabled" ${policy?.automaticEnabled ? 'checked' : ''}><span>明确开启历史回填与新材料自动增量研究</span></label><label class="lgi-tm-check-label"><input type="checkbox" name="collectionEnabled" ${policy?.collectionEnabled ? 'checked' : ''}><span>在已授权范围内允许主题临时补采，每轮最多10篇详情</span></label><p>已有材料仍可用；研究配置不替代平台执行授权、工位范围与采集限制。</p><button type="submit" class="lgi-tm-button lgi-tm-primary" data-mutation>保存明确设置</button></form><section class="lgi-tm-section"><div class="lgi-tm-section-head"><h3>研究进度</h3>${btn('刷新进度','research-refresh')}</div>${list(p?.runs).map(researchRun).join('') || empty('当前没有研究运行','首次开启或明确按需启动后，真实回执会出现在这里。')}</section>`;
+    return `${researchPolicy(policy)}<div class="lgi-tm-callout">开启后，历史材料分批研究、新材料增量处理。只有明确保存开启配置才启动，不因普通开页调用模型。关闭弹窗不取消已发任务，明确停止阻止继续启动新请求。</div><div class="lgi-tm-metrics"><div><span>今日已记账</span><strong>${number(usage?.chargedTokens)}</strong><small>token · ${esc(usage?.timezone || 'Asia/Shanghai')}</small></div><div><span>当前预留</span><strong>${number(usage?.reservedTokens)}</strong><small>token · 不等于已消费</small></div><div><span>每日上限</span><strong>${number(policy?.dailyTokenLimit)}</strong><small>达到上限后延后待处理</small></div><div><span>每次研究上限</span><strong>${number(policy?.runTokenLimit)}</strong><small>token · 与精选10篇不同</small></div></div><form data-form="research-config" class="lgi-tm-form"><h3>研究设置</h3><label><span>已有模型配置</span><select name="modelConfigRef" required><option value="">请选择配置</option>${models.map(m => `<option value="${esc(m.configRef)}" ${policy?.modelConfigRef === m.configRef ? 'selected' : ''}>${esc(m.modelId)} · 输入 ${number(m.inputTokenLimit)} / 输出 ${number(m.outputTokenLimit)} token</option>`).join('')}</select></label><div class="lgi-tm-form-grid"><label><span>每日 token 上限</span><input type="number" name="dailyTokenLimit" min="1024" max="10000000" step="1" required value="${policy?.dailyTokenLimit ?? ''}" placeholder="明确预算后填写"></label><label><span>每次研究 token 上限</span><input type="number" name="runTokenLimit" min="1024" max="10000000" step="1" required value="${policy?.runTokenLimit ?? ''}" placeholder="明确预算后填写"></label></div><label class="lgi-tm-check-label"><input type="checkbox" name="automaticEnabled" ${policy?.automaticEnabled ? 'checked' : ''}><span>明确开启历史回填与新材料自动增量研究</span></label><label class="lgi-tm-check-label"><input type="checkbox" name="collectionEnabled" ${policy?.collectionEnabled ? 'checked' : ''}><span>在已授权范围内允许主题临时补采，每轮最多10篇详情</span></label><p>已有材料仍可用；研究配置不替代平台执行授权、工位范围与采集限制。</p><button type="submit" class="lgi-tm-button lgi-tm-primary" data-mutation>保存明确设置</button></form>${researchSummary(p)}<section class="lgi-tm-section"><div class="lgi-tm-section-head"><h3>最近批次</h3>${btn('刷新进度','research-refresh')}</div><p>显示最近 ${number(p?.runListLimit)} 批次中的 ${number(list(p?.runs).length)} 批 · 全领域共 ${number(p?.summary?.totalRunCount)} 批</p>${list(p?.runs).map(run=>researchRun(run,policy)).join('') || empty('当前没有研究运行','首次开启或明确按需启动后，真实回执会出现在这里。')}</section>`;
   }
   async function researchCommand(payload) {
     if (pending) return null;
@@ -914,6 +931,7 @@
     }
     if (action === 'research') { await openResearch(); return; }
     if (action === 'research-refresh') { await refreshResearch(); return; }
+    if (['research-domain-pause','research-domain-resume'].includes(action)) { const result=await researchCommand({action:action.replace('research-domain-',''),runRef:null});if(result)await refreshResearch();return; }
     if (['research-pause','research-resume','research-stop'].includes(action)) { const result = await researchCommand({action:action.replace('research-',''),runRef:id}); if (result) await refreshResearch(); return; }
     if (action === 'start-topic-research') { await startTopicResearch(id); return; }
     if (action === 'capture-refresh') {await refreshCapture();return;}

@@ -7,7 +7,7 @@ const blank={replaceChildren(){},addEventListener(){},querySelector(){return nul
 const ctx={document:{getElementById(){return blank},createElement(){return {...blank}},activeElement:null},sessionStorage:{getItem(){return null}},location:{search:'',href:'http://127.0.0.1:3109/topics',origin:'http://127.0.0.1:3109'},URL,URLSearchParams,crypto:require('node:crypto').webcrypto,FormData:class{constructor(f){this.f=f}get(k){return this.f.values?.[k]}getAll(k){return this.f.arrays?.[k]||[]}},fetch:null,console};
 const tail=/  load\(\);\n\}\)\(\);\s*$/;let src=fs.readFileSync(sourcePath,'utf8');assert(tail.test(src),'known topic-map initialization boundary');
 const initializationSource=src.replace(tail,'globalThis.initialState=state;})();');
-src=src.replace(tail,`globalThis.audit={readSample,readWork,readerDialog,replaceSamplesDialog,submitDialog,topicBoundary,discussionUnits,discussionGroups,discussionsView,performancePair,curated,researchCoverage,researchPhases,researchDialog,citationText,citationSpans,bodyCitations,readerDiscussions,allCitations,sharesDiscussion,anglesFrom,opportunitiesFrom,anglesView,productContent,sceneList,commentFragmentCount,comparisonScopeNote,set(s,d,stack=[]){snapshot=s;dialogState=d;dialogStack=stack;state.domainRef='domain';state.topicRef='topic-A';},get(){return dialogState;}};drawDialog=()=>{};render=()=>{};load=async()=>{};openDialog=(type,data)=>{if(dialogState)dialogStack.push(dialogState);dialogState={type,...data};};})();`);vm.runInNewContext(src,ctx);
+src=src.replace(tail,`globalThis.audit={dispatchClick,readSample,readWork,readerDialog,replaceSamplesDialog,submitDialog,topicBoundary,discussionUnits,discussionGroups,discussionsView,performancePair,curated,researchCoverage,researchPhases,researchDialog,citationText,citationSpans,bodyCitations,readerDiscussions,allCitations,sharesDiscussion,anglesFrom,opportunitiesFrom,anglesView,productContent,sceneList,commentFragmentCount,comparisonScopeNote,set(s,d,stack=[]){snapshot=s;dialogState=d;dialogStack=stack;state.domainRef='domain';state.topicRef='topic-A';},get(){return dialogState;}};drawDialog=()=>{};render=()=>{};load=async()=>{};openDialog=(type,data)=>{if(dialogState)dialogStack.push(dialogState);dialogState={type,...data};};})();`);vm.runInNewContext(src,ctx);
 (async()=>{
  const restoredScope={domainRef:'domain-A',topicRef:'OLD_TOPIC',platform:'xhs',windowDays:'7',path:'family',overlay:'obstruction_recurrence',query:'OLD_QUERY',compare:['OLD_TOPIC']};
  const initialize=search=>{
@@ -121,17 +121,17 @@ src=src.replace(tail,`globalThis.audit={readSample,readWork,readerDialog,replace
  assert(phases.includes('提炼讨论'));assert(phases.includes('判断归属'));assert(phases.includes('待处理 0'));assert(phases.includes('进行中 —'));assert(!phases.includes('extractQueued'));
  console.log('PASS: inclusion/exclusion, provenance, known zero vs unknown, partial coverage and separate research progress');
 
- const progressRun={runRef:'completed-run',trigger:'on_demand',state:'completed',lastReason:'comparison_queued',queuedCount:0,succeededCount:0,failedCount:1,createdAt:'2026-10-10T00:00:00Z',inputScope:{comparison:{state:'queued'}},phases:{extractQueued:0,extracting:0,resolveQueued:0,resolving:0,compareQueued:0,comparing:0},taskIssues:[{taskRef:'failed-comparison',phase:'compare',state:'failed',reason:'model_input_limit'}]};
+ const progressRun={runRef:'completed-run',trigger:'on_demand',state:'completed',lastReason:'comparison_queued',queuedCount:0,succeededCount:0,failedCount:1,unknownDispatchCount:0,runningCount:0,noSignalCount:0,insufficientCount:0,extractedWindowCount:0,staleCount:0,stoppedCount:0,methodVersion:'topic-map.research.v2',createdAt:'2026-10-10T00:00:00Z',inputScope:{comparison:{state:'queued'}},phases:{extractQueued:0,extracting:0,resolveQueued:0,resolving:0,compareQueued:0,comparing:0},taskIssues:[{taskRef:'failed-comparison',phase:'compare',state:'failed',reason:'model_input_limit'}]};
  const renderProgress=run=>{ctx.audit.set(snap,{type:'research',progress:{runs:[run]}});return ctx.audit.researchDialog();};
  const failedProgress=renderProgress(progressRun);
- assert(failedProgress.includes('已处理'));assert(failedProgress.includes('待处理 0 · 已获结果 0 · 失败 / 派发未知 1'));
+ assert(failedProgress.includes('已处理'));assert(failedProgress.includes('待处理 0 · 进行中 0 · 已接纳结果 0'));
  assert(failedProgress.includes('比较讨论 · 处理失败'));assert(failedProgress.includes('输入超过模型配置上限'));
  assert(failedProgress.includes('原因码：model_input_limit'));assert(failedProgress.includes('显示 1 / 1 项'));
  assert(!failedProgress.includes('comparison_queued'),'historical admission checkpoint cannot explain the current failed task');
  const completedProgress=renderProgress({...progressRun,succeededCount:1,failedCount:0,taskIssues:[]});
- assert(completedProgress.includes('已处理'));assert(completedProgress.includes('待处理 0 · 已获结果 1 · 失败 / 派发未知 0'));
+ assert(completedProgress.includes('已处理'));assert(completedProgress.includes('待处理 0 · 进行中 0 · 已接纳结果 1'));
  assert(!completedProgress.includes('comparison_queued'),'successful completion also must not display an old queued receipt as current status');
- const unknownProgress=renderProgress({...progressRun,taskIssues:[{taskRef:'unknown-comparison',phase:'compare',state:'unknown_dispatch',reason:'unknown_dispatch'}]});
+ const unknownProgress=renderProgress({...progressRun,failedCount:0,unknownDispatchCount:1,taskIssues:[{taskRef:'unknown-comparison',phase:'compare',state:'unknown_dispatch',reason:'unknown_dispatch'}]});
  assert(unknownProgress.includes('比较讨论 · 派发结果未知'));assert(unknownProgress.includes('无法确认请求的执行结果，不会自动重发'));
  assert(!unknownProgress.includes('比较讨论 · 处理失败'),'unknown dispatch is not a known failure');
  const missingReason=renderProgress({...progressRun,taskIssues:[{phase:'resolve',state:'failed',reason:null}]});
@@ -147,6 +147,26 @@ src=src.replace(tail,`globalThis.audit={readSample,readWork,readerDialog,replace
  assert(boundedIssues.includes('显示 20 / 25 项'));assert.equal((boundedIssues.match(/原因码：/g)||[]).length,20);
  assert(!boundedIssues.includes('synthetic_reason_20'),'the UI keeps the documented task detail bound');
  console.log('PASS: completed research shows actual bounded failures, retains unknowns, ignores queued checkpoints and escapes all progress fields');
+ const summary={totalRunCount:94,totalTaskCount:9400,queuedCount:9207,runningCount:1,succeededCount:0,noSignalCount:4,insufficientCount:29,failedCount:42,unknownDispatchCount:1,extractedWindowCount:18,staleCount:0,stoppedCount:0,phases:{extractQueued:9189,extracting:1,resolveQueued:18,resolving:0,compareQueued:0,comparing:0}};
+ ctx.audit.set(snap,{type:'research',progress:{policy:{status:'paused'},summary,runListLimit:30,runs:[{...progressRun,state:'running',methodVersion:'topic-map.research.v1.1',lastReason:'method_superseded'}]}});
+ const fullProgress=ctx.audit.researchDialog();
+ for(const text of ['领域研究已暂停','恢复领域研究','全领域任务账本','累计 94 个批次 · 9,400 个任务','显示最近 30 批次中的 1 批 · 全领域共 94 批','无研究信号 4 · 材料不足 29 · 失败 42 · 派发未知 1','已保存提炼结果（累计） 18','保留进度 · 等待领域恢复','方法版本：topic-map.research.v1.1','历史账本不代表当前可用主题或研究质量'])assert(fullProgress.includes(text),text);
+ assert(!fullProgress.includes('正在处理'),'domain pause does not present an old run state as active scheduling');
+ assert(fullProgress.includes('data-action="research-domain-resume"'));
+ for(const [reason,text] of [['output_json_invalid','不是有效 JSON'],['output_schema_invalid','严格研究格式'],['output_contract_mismatch','版本不匹配'],['response_too_large','受控响应大小限制'],['invalid_discussion_evidence','原文位置不符合规则'],['invalid_resolution_match','本次候选定义']])assert(renderProgress({...progressRun,taskIssues:[{phase:'extract',state:'failed',reason}]}).includes(text),reason);
+ assert(renderProgress({...progressRun,noSignalCount:1,insufficientCount:2,succeededCount:0}).includes('已接纳结果 0'),'no signal/insufficient are not successful research');
+ assert(renderProgress({...progressRun,methodVersion:'<img src=x>'}).includes('方法版本：&lt;img src=x&gt;'));
+ console.log('PASS: full domain ledger, recent 30 boundary, saved drafts, method identity, global pause and distinct outcomes');
+ const domainCommands=[];
+ ctx.fetch=async(url,options)=>{if(options?.method==='POST')domainCommands.push(JSON.parse(options.body));return{ok:true,json:async()=>options?.method==='POST'?{state:'queued'}:{policy:{status:'active'},summary,runs:[],runListLimit:30}};};
+ blank.contains=()=>true;
+ for(const action of ['research-domain-pause','research-domain-resume'])await ctx.audit.dispatchClick({target:{closest(){return{dataset:{action,id:''}}}}});
+ blank.contains=()=>false;
+ assert.deepEqual(domainCommands.map(c=>[c.action,c.runRef]),[['pause',null],['resume',null]],'global controls use the existing null-run domain command');
+ assert(domainCommands.every(c=>c.domainRef==='domain'&&typeof c.requestRef==='string'));
+ console.log('PASS: domain pause/resume uses actual command request and refresh receipt without starting new scope');
+
+
 
  for(const [state,expected] of [['queued',['pause','stop']],['running',['pause','stop']],['daily_budget_paused',['pause','stop']],['paused',['resume','stop']],['completed',[]],['stopped',[]],['run_budget_exhausted',[]],['failed',[]],['unknown_state',[]]]){
    const html=renderProgress({...progressRun,state,failedCount:0,taskIssues:[],phases:{...progressRun.phases,compareQueued:2,comparing:1}});

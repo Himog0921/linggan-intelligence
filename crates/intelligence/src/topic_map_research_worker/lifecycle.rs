@@ -2,6 +2,34 @@
 use super::*;
 use sqlx::{Postgres, Transaction};
 
+/// The new extractor cannot execute a historical method's frozen request. Stop
+/// only unsent work; preserve receipts, failures and transmitted uncertainty.
+pub(super) async fn retire_legacy_runs(db: &Database) -> Result<bool, ModelError> {
+    let mut tx = db.pool().begin().await?;
+    let rows = sqlx::query("SELECT r.run_ref,r.domain_ref FROM linggan_topic_map_research_run r JOIN linggan_topic_map_research_policy p USING(domain_ref) JOIN observation_domain d USING(domain_ref) WHERE r.method_version<>$1 AND r.state NOT IN ('completed','stopped','failed') AND p.status='active' AND d.status='active' ORDER BY r.created_at,r.run_ref LIMIT 32")
+        .bind(analysis::METHOD_VERSION).fetch_all(&mut *tx).await?;
+    let mut changed = false;
+    for row in rows {
+        let policy = sqlx::query("SELECT p.domain_ref FROM linggan_topic_map_research_policy p JOIN observation_domain d USING(domain_ref) WHERE p.domain_ref=$1 AND p.status='active' AND d.status='active' FOR UPDATE OF p SKIP LOCKED")
+            .bind(row.get::<Uuid,_>("domain_ref")).fetch_optional(&mut *tx).await?;
+        if policy.is_none() {
+            continue;
+        }
+        let run: Uuid = row.get("run_ref");
+        let locked = sqlx::query("SELECT run_ref FROM linggan_topic_map_research_run WHERE run_ref=$1 AND method_version<>$2 AND state NOT IN ('completed','stopped') FOR UPDATE SKIP LOCKED")
+            .bind(run).bind(analysis::METHOD_VERSION).fetch_optional(&mut *tx).await?;
+        if locked.is_none() {
+            continue;
+        }
+        changed |= sqlx::query("UPDATE linggan_topic_map_research_task SET state='stopped',last_reason='method_superseded',updated_at=scope_001_now() WHERE run_ref=$1 AND state='queued'")
+            .bind(run).execute(&mut *tx).await?.rows_affected()>0;
+        changed |= sqlx::query("UPDATE linggan_topic_map_research_run SET state='stopped',last_reason='method_superseded',updated_at=scope_001_now() WHERE run_ref=$1 AND NOT EXISTS(SELECT 1 FROM linggan_topic_map_research_task WHERE run_ref=$1 AND state='running')")
+            .bind(run).execute(&mut *tx).await?.rows_affected()>0;
+    }
+    tx.commit().await?;
+    Ok(changed)
+}
+
 /// The maintenance lock distinguishes "busy" from "nothing remains". Policy/run
 /// locks and subsequent fresh statements serialize completion with queue writers.
 pub(super) async fn complete_ready_runs(db: &Database) -> Result<bool, ModelError> {
