@@ -631,6 +631,31 @@ async fn assert_comparison_withdrawn(
     }
 }
 
+async fn comparison_runtime_state(db: &Database, run: Uuid) -> Value {
+    sqlx::query_scalar(
+        r#"SELECT jsonb_build_object(
+            'runRef',r.run_ref,'state',r.state,'reason',r.last_reason,
+            'inputTokenLimit',c.input_token_limit,
+            'comparisonState',r.input_scope#>'{comparison,state}',
+            'comparisonReason',r.input_scope#>'{comparison,reason}',
+            'tasks',COALESCE((SELECT jsonb_agg(jsonb_build_object(
+                'taskRef',t.task_ref,'phase',t.phase,'state',t.state,
+                'reason',t.last_reason,'attempts',t.attempt_count,
+                'invocations',(SELECT count(*) FROM linggan_topic_map_research_request q
+                    WHERE q.task_ref=t.task_ref),
+                'results',(SELECT count(*) FROM linggan_topic_map_research_result result
+                    JOIN linggan_topic_map_research_request q USING(invocation_ref)
+                    WHERE q.task_ref=t.task_ref)) ORDER BY t.created_at,t.task_ref)
+                FROM linggan_topic_map_research_task t WHERE t.run_ref=r.run_ref),'[]'::jsonb))
+            FROM linggan_topic_map_research_run r
+            JOIN linggan_model_config c ON c.config_ref=r.config_ref WHERE r.run_ref=$1"#,
+    )
+    .bind(run)
+    .fetch_one(db.pool())
+    .await
+    .unwrap()
+}
+
 #[tokio::test]
 #[ignore = "disposable PostgreSQL and synthetic child, no provider"]
 async fn comparison_and_comment_citations_are_visible_then_restriction_invalidates() {
@@ -662,7 +687,8 @@ async fn comparison_and_comment_citations_are_visible_then_restriction_invalidat
     assert_eq!(
         results.len(),
         1,
-        "both work views share one persisted comparison result"
+        "both work views share one persisted comparison result; runtime: {}",
+        comparison_runtime_state(&db, run).await
     );
     let result = results[0];
     let query = TopicMapQuery {
