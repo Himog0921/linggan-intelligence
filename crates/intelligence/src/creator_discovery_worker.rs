@@ -59,10 +59,18 @@ async fn finish_without_dispatch(
     Ok(())
 }
 
+/// Internal round-robin within the existing model worker. One lease per visit;
+/// restarting changes only which kind is tried first, never persisted job state.
+#[derive(Default)]
+pub struct CreatorDiscoverySchedule {
+    prefer_author: bool,
+}
+
 pub async fn run_once(
     db: &Database,
     secrets: &dyn ModelSecretStore,
     adapter: &PiAdapter,
+    schedule: &mut CreatorDiscoverySchedule,
 ) -> Result<bool, ModelError> {
     let ready: bool =
         sqlx::query_scalar("SELECT to_regclass('linggan_creator_discovery_policy') IS NOT NULL")
@@ -135,12 +143,20 @@ pub async fn run_once(
             }
         }
     }
+    if schedule.prefer_author && run_focus(db, secrets, adapter).await? {
+        schedule.prefer_author = false;
+        return Ok(true);
+    }
     let lease = Uuid::new_v4();
     let mut tx = db.pool().begin().await?;
     let row=sqlx::query("SELECT a.domain_ref,a.work_public_ref,a.requested_fingerprint,p.config_ref FROM linggan_creator_discovery_work_analysis a JOIN linggan_creator_discovery_policy p ON p.domain_ref=a.domain_ref AND p.platform='xhs' JOIN observation_domain d ON d.domain_ref=a.domain_ref WHERE a.job_state='queued' AND a.attempt_count<3 AND a.next_attempt_at<=scope_001_now() AND p.analysis_enabled AND d.status='active' ORDER BY a.next_attempt_at,a.domain_ref,a.work_public_ref FOR UPDATE OF a SKIP LOCKED LIMIT 1").fetch_optional(&mut *tx).await?;
     let Some(row) = row else {
         tx.commit().await?;
-        return run_focus(db, secrets, adapter).await;
+        let progress = run_focus(db, secrets, adapter).await?;
+        if progress {
+            schedule.prefer_author = false;
+        }
+        return Ok(progress);
     };
     let domain: Uuid = row.get("domain_ref");
     let work: Uuid = row.get("work_public_ref");
@@ -148,6 +164,7 @@ pub async fn run_once(
     let fingerprint: String = row.get("requested_fingerprint");
     sqlx::query("UPDATE linggan_creator_discovery_work_analysis SET job_state='running',attempt_count=attempt_count+1,lease_token=$3,lease_expires_at=scope_001_now()+interval '5 minutes' WHERE domain_ref=$1 AND work_public_ref=$2").bind(domain).bind(work).bind(lease).execute(&mut *tx).await?;
     tx.commit().await?;
+    schedule.prefer_author = true;
     let result = execute(
         db,
         secrets,
@@ -260,7 +277,7 @@ async fn queue_focus(
     config: Uuid,
 ) -> Result<(), ModelError> {
     let fp = discovery::focus_fingerprint(&w.profile, works, &json!(config));
-    sqlx::query("INSERT INTO linggan_creator_discovery_author_analysis(domain_ref,platform,author_external_id,requested_fingerprint) VALUES($1,$2,$3,$4) ON CONFLICT(domain_ref,platform,author_external_id) DO UPDATE SET requested_fingerprint=$4,job_state='queued',attempt_count=0,lease_token=NULL,lease_expires_at=NULL,last_error_code=NULL WHERE linggan_creator_discovery_author_analysis.requested_fingerprint<>$4").bind(domain).bind(&w.platform).bind(&w.author_external_id).bind(fp).execute(db.pool()).await?;
+    sqlx::query("INSERT INTO linggan_creator_discovery_author_analysis(domain_ref,platform,author_external_id,requested_fingerprint) VALUES($1,$2,$3,$4) ON CONFLICT(domain_ref,platform,author_external_id) DO UPDATE SET requested_fingerprint=$4,job_state='queued',attempt_count=0,lease_token=NULL,lease_expires_at=NULL,last_error_code=NULL,next_attempt_at=scope_001_now(),updated_at=scope_001_now() WHERE linggan_creator_discovery_author_analysis.requested_fingerprint<>$4").bind(domain).bind(&w.platform).bind(&w.author_external_id).bind(fp).execute(db.pool()).await?;
     Ok(())
 }
 async fn call(
@@ -364,7 +381,7 @@ async fn run_focus(
     adapter: &PiAdapter,
 ) -> Result<bool, ModelError> {
     let mut tx = db.pool().begin().await?;
-    let row=sqlx::query("SELECT a.domain_ref,a.platform,a.author_external_id,a.requested_fingerprint,p.config_ref FROM linggan_creator_discovery_author_analysis a JOIN linggan_creator_discovery_policy p USING(domain_ref,platform) JOIN observation_domain d USING(domain_ref) WHERE a.job_state='queued' AND a.attempt_count<3 AND a.next_attempt_at<=scope_001_now() AND p.analysis_enabled AND d.status='active' ORDER BY a.next_attempt_at,a.domain_ref FOR UPDATE OF a SKIP LOCKED LIMIT 1").fetch_optional(&mut *tx).await?;
+    let row=sqlx::query("SELECT a.domain_ref,a.platform,a.author_external_id,a.requested_fingerprint,p.config_ref FROM linggan_creator_discovery_author_analysis a JOIN linggan_creator_discovery_policy p USING(domain_ref,platform) JOIN observation_domain d USING(domain_ref) WHERE a.job_state='queued' AND a.attempt_count<3 AND a.next_attempt_at<=scope_001_now() AND p.analysis_enabled AND d.status='active' ORDER BY a.next_attempt_at,a.domain_ref,a.platform,a.author_external_id FOR UPDATE OF a SKIP LOCKED LIMIT 1").fetch_optional(&mut *tx).await?;
     let Some(row) = row else {
         tx.commit().await?;
         return Ok(false);
@@ -413,9 +430,15 @@ async fn run_focus(
     fragments.extend(chosen);summaries.push(summary);
   }
   let input=json!({"domain":data.domain,"works":summaries,"fragments":fragments,"sampleBasis":if broad.len()>=2{"profile_discovery_sample"}else{"limited_domain_sample"}});
-  if fragments.is_empty() {return Ok::<_,ModelError>((validate_focus(&json!({}),&fragments,&related,&broad),None));}
+  if fragments.is_empty() {
+    let mut output=validate_focus(&json!({}),&fragments,&related,&broad);
+    output["sampleWorkCount"]=json!(0);output["availableWorkCount"]=json!(works.len());
+    return Ok::<_,ModelError>((output,None));
+  }
   let (raw,invocation)=call(db,secrets,adapter,domain,config,FOCUS_SYSTEM,&input,"focus",author.clone(),lease,&fingerprint).await?;
-  Ok::<_,ModelError>((validate_focus(&raw,&fragments,&related,&broad),Some(invocation)))
+  let mut output=validate_focus(&raw,&fragments,&related,&broad);
+  output["sampleWorkCount"]=json!(summaries.len());output["availableWorkCount"]=json!(works.len());
+  Ok::<_,ModelError>((output,Some(invocation)))
  }.await;
     match result {
         Ok((result, invocation)) => {

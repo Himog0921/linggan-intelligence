@@ -110,7 +110,7 @@ fn profile_support_fragment(work:&DiscoveryWork)->Option<Value>{
     Some(json!({"fragmentId":f.fragment_id,"field":"biography","sourceType":"author_profile","sourceRef":source,"text":f.text.chars().take(200).collect::<String>()}))
 }
 pub fn work_support_fragments(work:&DiscoveryWork)->Vec<Value>{
-    work.fragments.iter().map(|f|json!({"fragmentId":f.fragment_id,"field":f.field,"sourceType":"work_material","workRef":work.work_ref,"sourceRef":f.source_ref,"text":f.text.chars().take(200).collect::<String>()})).collect()
+    work.fragments.iter().map(|f|json!({"fragmentId":f.fragment_id,"field":f.field,"sourceType":"work_material","workRef":work.work_ref,"workTitle":work.title,"sourceRef":f.source_ref,"text":f.text.chars().take(200).collect::<String>()})).collect()
 }
 pub fn author_support_fragments(works:&[&DiscoveryWork],field:&str)->Vec<Value>{
     let mut fragments=Vec::new();

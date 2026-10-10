@@ -50,6 +50,7 @@ pub async fn run_model_work_once(
 pub struct ModelWorkerFairness {
     next_lane_index: usize,
     last_run_ref: Option<Uuid>,
+    creator_schedule: crate::creator_discovery_worker::CreatorDiscoverySchedule,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -248,7 +249,12 @@ pub async fn run_model_work_once_with_fairness(
                     })
             }
             ModelWorkLane::CreatorDiscovery => {
-                crate::creator_discovery_worker::run_once(database, store, adapter)
+                crate::creator_discovery_worker::run_once(
+                    database,
+                    store,
+                    adapter,
+                    &mut fairness.creator_schedule,
+                )
                     .await
                     .map(|worked| {
                         if worked {
