@@ -57,7 +57,8 @@ pub(super) async fn load_windows(
     let allowed: Vec<_> = topics.iter().map(|t| t.topic_ref).collect();
     for row in rows {
         let work: Uuid = row.get("work_public_ref");
-        if !visible.contains(&work) {
+        let targets = projection_targets(work, &row.get("input_refs"), &visible);
+        if targets.is_empty() {
             continue;
         }
         let domain: Uuid = row.get("domain_ref");
@@ -70,10 +71,33 @@ pub(super) async fn load_windows(
             );
         }
         if let Some(window) = restore_row(&row, &inputs[&(domain, config)], &allowed, unavailable) {
-            windows.entry(work).or_default().push(window);
+            // Reconstruct once using the original primary and complete frozen scope.
+            // Visibility selects readers, never the evidence used to qualify a result.
+            for target in targets {
+                windows.entry(target).or_default().push(window.clone());
+            }
         }
     }
     Ok(windows)
+}
+
+pub(super) fn projection_targets(
+    primary: Uuid,
+    wrapper: &Value,
+    visible: &HashSet<Uuid>,
+) -> Vec<Uuid> {
+    let manifest = wrapper.get("source").unwrap_or(wrapper);
+    let targets = if manifest["coverage"]["kind"] == "comparison" {
+        ComparisonScope::from_manifest(manifest, primary)
+            .map(|scope| scope.selected_work_refs)
+            .unwrap_or_default()
+    } else {
+        vec![primary]
+    };
+    targets
+        .into_iter()
+        .filter(|work| visible.contains(work))
+        .collect()
 }
 
 fn restore_row(

@@ -7,7 +7,7 @@ const blank={replaceChildren(){},addEventListener(){},querySelector(){return nul
 const ctx={document:{getElementById(){return blank},createElement(){return {...blank}},activeElement:null},sessionStorage:{getItem(){return null}},location:{search:'',href:'http://127.0.0.1:3109/topics',origin:'http://127.0.0.1:3109'},URL,URLSearchParams,crypto:require('node:crypto').webcrypto,FormData:class{constructor(f){this.f=f}get(k){return this.f.values?.[k]}getAll(k){return this.f.arrays?.[k]||[]}},fetch:null,console};
 const tail=/  load\(\);\n\}\)\(\);\s*$/;let src=fs.readFileSync(sourcePath,'utf8');assert(tail.test(src),'known topic-map initialization boundary');
 const initializationSource=src.replace(tail,'globalThis.initialState=state;})();');
-src=src.replace(tail,`globalThis.audit={readSample,readWork,readerDialog,replaceSamplesDialog,submitDialog,topicBoundary,discussionUnits,discussionGroups,discussionsView,performancePair,curated,researchCoverage,researchPhases,citationText,citationSpans,bodyCitations,readerDiscussions,allCitations,sharesDiscussion,anglesFrom,opportunitiesFrom,set(s,d,stack=[]){snapshot=s;dialogState=d;dialogStack=stack;state.domainRef='domain';state.topicRef='topic-A';},get(){return dialogState;}};drawDialog=()=>{};render=()=>{};load=async()=>{};openDialog=(type,data)=>{if(dialogState)dialogStack.push(dialogState);dialogState={type,...data};};})();`);vm.runInNewContext(src,ctx);
+src=src.replace(tail,`globalThis.audit={readSample,readWork,readerDialog,replaceSamplesDialog,submitDialog,topicBoundary,discussionUnits,discussionGroups,discussionsView,performancePair,curated,researchCoverage,researchPhases,citationText,citationSpans,bodyCitations,readerDiscussions,allCitations,sharesDiscussion,anglesFrom,opportunitiesFrom,anglesView,productContent,sceneList,commentFragmentCount,comparisonScopeNote,set(s,d,stack=[]){snapshot=s;dialogState=d;dialogStack=stack;state.domainRef='domain';state.topicRef='topic-A';},get(){return dialogState;}};drawDialog=()=>{};render=()=>{};load=async()=>{};openDialog=(type,data)=>{if(dialogState)dialogStack.push(dialogState);dialogState={type,...data};};})();`);vm.runInNewContext(src,ctx);
 (async()=>{
  const restoredScope={domainRef:'domain-A',topicRef:'OLD_TOPIC',platform:'xhs',windowDays:'7',path:'family',overlay:'obstruction_recurrence',query:'OLD_QUERY',compare:['OLD_TOPIC']};
  const initialize=search=>{
@@ -159,7 +159,7 @@ src=src.replace(tail,`globalThis.audit={readSample,readWork,readerDialog,replace
  assert.equal(ctx.audit.anglesFrom([draft]).length,0);assert.equal(ctx.audit.opportunitiesFrom([{work:draft,output:draft.research.output}]).length,0,'accepted partial units do not authorize saving unfinished model drafts');
  console.log('PASS: current comment-only qualification, missing author source, restricted definition and unfinished result origins');
 
- const combined={workRef:'combined',research:{resultRef:'latest-window',methodVersion:'topic-map.research.v2',output:{angles:[{label:'第一窗角度',researchResultRef:'first-window',researchAngleIndex:4},{label:'第二窗角度',researchResultRef:'second-window',researchAngleIndex:0},{label:'旧结果角度'}],productOpportunities:[{need:'第一窗需求',researchResultRef:'first-window',researchOpportunityIndex:2},{need:'第二窗需求',researchResultRef:'second-window',researchOpportunityIndex:0},{need:'旧结果需求'}]}}};
+ const combined={workRef:'combined',research:{resultRef:'latest-window',methodVersion:'topic-map.research.v2',output:{angles:[{label:'第一窗角度',researchResultRef:'first-window',researchMethodVersion:'topic-map.research.v1',researchAngleIndex:4},{label:'第二窗角度',researchResultRef:'second-window',researchAngleIndex:0},{label:'旧结果角度'}],productOpportunities:[{need:'第一窗需求',researchResultRef:'first-window',researchOpportunityIndex:2},{need:'第二窗需求',researchResultRef:'second-window',researchMethodVersion:'topic-map.research.v2',researchOpportunityIndex:0},{need:'旧结果需求'}]}}};
  const angles=ctx.audit.anglesFrom([combined]),opportunities=ctx.audit.opportunitiesFrom([{work:combined,output:combined.research.output}]);
  assert.deepEqual(Array.from(angles,a=>[a.researchResultRef,a.researchAngleIndex]),[['first-window',4],['second-window',0],['latest-window',2]]);
  assert.deepEqual(Array.from(opportunities,a=>[a.researchResultRef,a.researchOpportunityIndex]),[['first-window',2],['second-window',0],['latest-window',2]]);
@@ -169,7 +169,40 @@ src=src.replace(tail,`globalThis.audit={readSample,readWork,readerDialog,replace
    ctx.audit.set(coreSnapshot,{type:'save',topicRef:'topic-A',kind,angle});
    await ctx.audit.submitDialog({preventDefault(){},target:{dataset:{form:'save'},values:{title:'合成保存验证',angle:'保留原窗口依据',rationale:'待核对来源'}}});
    assert.equal(savedPayload.researchResultRef,angle.researchResultRef);assert.equal(savedPayload[indexField],angle[indexField]);
+   assert.equal(savedPayload.methodVersion,kind==='angle'?'topic-map.research.v1':'topic-map.research.v2','each result preserves its own method version across mixed legacy/current windows');
    assert.equal(savedPayload[kind==='angle'?'researchOpportunityIndex':'researchAngleIndex'],null);
  }
  console.log('PASS: combined-window angle/opportunity origins survive the actual save command, including original index zero');
+
+ const crossBody={...fragment,workRef:'core-A',sourceRef:'author-source'},crossComment={...comment,fragmentId:'core-B.comment.tail',workRef:'core-B',sourceRef:'comment-source'};
+ const crossEvidence=[{fragmentId:crossBody.fragmentId,start:102,end:105},{fragmentId:crossComment.fragmentId,start:30,end:34}];
+ const comparisonScope={resultRef:'shared-comparison',scopeWorkRefs:['core-A','core-B','not-selected'],selectedWorkRefs:['core-A','core-B'],state:'partial',boundary:'只覆盖选入的讨论；<script>不得作为市场结论</script>'};
+ const sharedAngle={label:'同名角度',title:'共同的回答任务',answerTask:'需要核对两篇原作',researchResultRef:'shared-comparison',researchAngleIndex:0,evidenceWorkRefs:['core-A','core-B'],comparisonScope,evidence:crossEvidence};
+ const sharedOpportunity={need:'合成需求',hypothesis:'合成支持',verificationQuestion:'先验证什么',alternativeExplanation:'保留其它解释',researchResultRef:'shared-comparison',researchOpportunityIndex:0,evidenceWorkRefs:['core-A','core-B'],comparisonScope,evidence:crossEvidence};
+ const compared=work=>({...work,research:{...work.research,resultRef:'shared-comparison',methodVersion:'topic-map.research.v2',fragments:[crossBody,crossComment],output:{angles:[sharedAngle,{...sharedAngle,researchResultRef:work.workRef+'-independent',evidenceWorkRefs:[work.workRef],comparisonScope:null}],productOpportunities:[sharedOpportunity],scenes:[{label:'共同比较场景',evidence:crossEvidence,comparisonScope}],responseMatches:[{status:'partial',evidence:crossEvidence,comparisonScope}]}}});
+ const comparedA=compared(coreA),comparedB=compared(coreB),comparedWorks=[comparedB,comparedA];
+ ctx.audit.set({...coreSnapshot,works:comparedWorks},null);
+ const crossAngles=ctx.audit.anglesFrom(comparedWorks),crossOpportunities=ctx.audit.opportunitiesFrom(comparedWorks.map(work=>({work,output:work.research.output})));
+ assert.equal(crossAngles.length,3,'one shared comparison, plus each distinct independent result; labels do not determine identity');
+ assert.equal(crossOpportunities.length,1,'one comparison is not duplicated across participating works');
+ assert.equal(crossAngles[0].workRef,'core-B','saving starts from the non-primary participating work');
+ const scopedAngles=ctx.audit.anglesView(comparedWorks),scopedProducts=ctx.audit.productContent(comparedWorks.map(work=>({work,output:work.research.output})));
+ for(const html of [scopedAngles,scopedProducts]){assert(html.includes('选取 2 / 3 篇作品'));assert(html.includes('&lt;script&gt;'));assert(!html.includes('<script>'));}
+ const crossReader=ctx.audit.readerDialog({work:comparedB,resource:{item:{inspector:{detailCurrent:{body:{value:raw}}}}},commentResource:{items:[],total:0}});
+ assert(crossReader.includes('作者正文 · 来自《作者与评论的不同经历》'),'another work’s original text retains its owner in the reader');
+ assert(crossReader.includes('选取 2 / 3 篇作品'),'response relationships retain their actual comparison scope');
+ assert.equal(ctx.audit.bodyCitations(comparedB,raw).length,0,'matching foreign text cannot become the current author’s body citation');
+ assert(ctx.audit.sceneList(comparedWorks).includes('2 篇独立来源作品 · 2 条去重定位依据'));
+ assert.equal(ctx.audit.commentFragmentCount(comparedWorks),1,'reprojected comment fragments count once');
+ const unknownOwner={...comparedA,research:{...comparedA.research,fragments:[{...crossBody,workRef:null},crossComment]}};
+ assert.equal(ctx.audit.bodyCitations(unknownOwner,raw).length,0,'explicitly unknown owner is not inferred from a matching fragment ID');
+ assert(ctx.audit.readerDialog({work:unknownOwner,resource:{item:{inspector:{detailCurrent:{body:{value:raw}}}}},commentResource:{items:[],total:0}}).includes('原文所属作品未知'));
+ assert(ctx.audit.sceneList([unknownOwner]).includes('1 篇已知来源作品 · 2 条去重定位依据'));
+ for(const [kind,angle,indexField] of [['angle',crossAngles[0],'researchAngleIndex'],['product_research',crossOpportunities[0],'researchOpportunityIndex']]){
+   ctx.audit.set({...coreSnapshot,works:comparedWorks},{type:'save',topicRef:'topic-A',kind,angle});
+   await ctx.audit.submitDialog({preventDefault(){},target:{dataset:{form:'save'},values:{title:'非主作品保存比较',angle:'保留两侧依据',rationale:'只保存本次比较'}}});
+   assert.equal(savedPayload.researchResultRef,'shared-comparison');assert.equal(savedPayload[indexField],0);
+   assert.deepEqual(savedPayload.evidenceWorkRefs,['core-A','core-B'],'the original selected participant refs include the physical primary');
+ }
+ console.log('PASS: shared comparisons deduplicate, retain source ownership/scope, and save from either work with original zero indexes');
 })().catch(e=>{console.error(e);process.exitCode=1});

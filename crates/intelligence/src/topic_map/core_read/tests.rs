@@ -3,6 +3,8 @@ use super::*;
 use crate::topic_map_research_analysis::{Citation, Discussion, ResearchOutput};
 use linggan_evidence::creator_discovery::{DiscoveryWork, hash};
 
+#[path = "tests/comparison_projection.rs"]
+mod comparison_projection;
 #[path = "tests/partial_projection.rs"]
 mod partial_projection;
 #[path = "tests/scope_and_identity.rs"]

@@ -12,7 +12,7 @@ const ARRAYS: [&str; 6] = [
 
 #[derive(Default)]
 struct Projection {
-    fragments: Vec<Fragment>,
+    fragments: Vec<Value>,
     fragment_ids: HashSet<String>,
     units: Vec<Value>,
     unit_ids: HashSet<String>,
@@ -34,14 +34,17 @@ impl Projection {
         self.coverage.add(part);
         self.journey.add(part);
         for fragment in &part.input.fragments {
-            if owns_fragment(part, fragment, work) {
+            let owner = fragment_owner(part, fragment);
+            if owner == Some(work) {
                 self.author |=
                     ["title", "body", "ocr", "transcript"].contains(&fragment.field.as_str());
                 self.comments |=
                     ["studied_comment", "unresearched_comment"].contains(&fragment.field.as_str());
             }
             if self.fragment_ids.insert(fragment.fragment_id.clone()) {
-                self.fragments.push(fragment.clone());
+                let mut value = json!(fragment);
+                value["workRef"] = json!(owner);
+                self.fragments.push(value);
             }
         }
         self.add_arrays(part);
@@ -64,6 +67,18 @@ impl Projection {
     }
 
     fn add_arrays(&mut self, part: &Window) {
+        let comparison = part
+            .is_comparison()
+            .then(|| ComparisonScope::from_manifest(&part.manifest, part.input.work.work_ref))
+            .flatten();
+        let evidence_works = if part.is_comparison() {
+            comparison
+                .as_ref()
+                .map(|scope| scope.selected_work_refs.clone())
+                .unwrap_or_default()
+        } else {
+            vec![part.input.work.work_ref]
+        };
         for key in ARRAYS {
             for (index, original) in part.output[key]
                 .as_array()
@@ -72,11 +87,18 @@ impl Projection {
                 .enumerate()
             {
                 let mut value = original.clone();
+                if value.is_object()
+                    && let Some(scope) = &comparison
+                {
+                    value["comparisonScope"] = scope.value(part.result);
+                }
                 if ["angles", "productOpportunities"].contains(&key) {
                     let Some(result) = part.result else {
                         continue;
                     };
                     value["researchResultRef"] = json!(result);
+                    value["researchMethodVersion"] = json!(part.method);
+                    value["evidenceWorkRefs"] = json!(evidence_works);
                     let field = if key == "angles" {
                         "researchAngleIndex"
                     } else {
@@ -93,18 +115,14 @@ impl Projection {
     }
 }
 
-fn owns_fragment(part: &Window, fragment: &Fragment, work: Uuid) -> bool {
-    if let Some(owner) = part.input.coverage["fragmentWorkRefs"][&fragment.fragment_id].as_str() {
-        return owner == work.to_string();
+fn fragment_owner(part: &Window, fragment: &Fragment) -> Option<Uuid> {
+    if part.is_comparison() {
+        return part.input.coverage["fragmentWorkRefs"][&fragment.fragment_id]
+            .as_str()?
+            .parse()
+            .ok();
     }
-    !part.is_comparison()
-        || part
-            .input
-            .work
-            .fragments
-            .iter()
-            .any(|f| f.fragment_id == fragment.fragment_id)
-        || fragment.fragment_id.starts_with(&format!("{work}."))
+    Some(part.input.work.work_ref)
 }
 
 pub(super) fn project_work(

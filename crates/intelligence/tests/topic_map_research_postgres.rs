@@ -4,12 +4,14 @@ mod core_fixture;
 use core_fixture::*;
 #[path = "support/comment_research_fixture.rs"]
 mod research_fixture;
+use linggan_intelligence::topic_map::{self, TopicMapCommand, TopicMapQuery, TopicMapSnapshot};
 use linggan_intelligence::{
     model_secrets::SyntheticModelSecrets,
     topic_map_research::{ResearchCommand, apply_research_command, read_research_progress},
     topic_map_research_worker::run_once,
 };
-use serde_json::json;
+use linggan_storage_postgres::Database;
+use serde_json::{Value, json};
 use uuid::Uuid;
 #[tokio::test]
 #[ignore = "disposable PostgreSQL and synthetic child, no provider"]
@@ -281,35 +283,45 @@ async fn atomic_daily_reservation_and_unknown_dispatch_do_not_resend() {
     );
 }
 
-#[tokio::test]
-#[ignore = "disposable PostgreSQL and synthetic child, no provider"]
-async fn comparison_and_comment_citations_are_visible_then_restriction_invalidates() {
-    let (db, config, adapter) = setup("topic_map_research_comparison").await;
-    let a = work(
-        &db,
-        "comparison-a",
-        "SYNTHETIC COMPARE 家庭练习每次只做一步。",
-    )
-    .await;
-    let b = work(
-        &db,
-        "comparison-b",
-        "SYNTHETIC 外部作者讨论练习先观察反馈。",
-    )
-    .await;
+struct ComparisonProof {
+    works: [Uuid; 2],
+    comment: Uuid,
+    author_body: &'static str,
+    comment_body: &'static str,
+    topic: Uuid,
+    definition: Uuid,
+}
+
+async fn comparison_proof(db: &Database) -> ComparisonProof {
+    let first_body = "SYNTHETIC COMPARE 家庭练习每次只做一步。";
+    let second_body = "SYNTHETIC COMPARE 外部作者讨论练习先观察反馈。";
+    let first = work(db, "comparison-first", first_body).await;
+    let second = work(db, "comparison-second", second_body).await;
+    // Always inspect the non-primary participant first. The author is the lower
+    // UUID and the commenter belongs to the other work, so both sides are real.
+    let (a, b, comment_work, author_body) = if first > second {
+        (first, second, "comparison-first", second_body)
+    } else {
+        (second, first, "comparison-second", first_body)
+    };
+    assert!(
+        a > b,
+        "this regression must not depend on a random primary UUID"
+    );
+    let comment_body = "孩子每天练习都要催，不催就不开始。";
     let comment = research_fixture::comment_with_author(
-        &db,
-        "comparison-b",
+        db,
+        comment_work,
         "reader-q",
-        "孩子每天练习都要催，不催就不开始。",
+        comment_body,
         Some("synthetic-reader"),
         "2026-09-16T08:00:00Z",
     )
     .await;
-    let topic=linggan_intelligence::import_topic_workspace(&db,&serde_json::from_value(json!({"idempotencyKey":"synthetic-comparison-topic","domainKey":"adhd-family","canonicalKey":"synthetic-comparison","displayName":"合成实践主题","definitionText":"合成两侧实践边界","expectedVersion":null,"adjudicationNote":"合成测试","sourceBoundary":"SYNTHETIC","members":[{"workPublicRef":a,"role":"support","rationale":"合成支持"},{"workPublicRef":b,"role":"boundary","rationale":"合成边界"}]})).unwrap()).await.unwrap();
-    linggan_intelligence::topic_map::save_topic_map_command(
-        &db,
-        &linggan_intelligence::topic_map::TopicMapCommand::BindTopic {
+    let topic=linggan_intelligence::import_topic_workspace(db,&serde_json::from_value(json!({"idempotencyKey":"synthetic-comparison-topic","domainKey":"adhd-family","canonicalKey":"synthetic-comparison","displayName":"合成实践主题","definitionText":"合成两侧实践边界","expectedVersion":null,"adjudicationNote":"合成测试","sourceBoundary":"SYNTHETIC","members":[{"workPublicRef":a,"role":"support","rationale":"合成支持"},{"workPublicRef":b,"role":"boundary","rationale":"合成边界"}]})).unwrap()).await.unwrap();
+    topic_map::save_topic_map_command(
+        db,
+        &TopicMapCommand::BindTopic {
             idempotency_key: "synthetic-comparison-bind".into(),
             domain_ref: D,
             topic_ref: topic.topic_ref,
@@ -319,184 +331,364 @@ async fn comparison_and_comment_citations_are_visible_then_restriction_invalidat
     )
     .await
     .unwrap();
-    apply_research_command(&db, &configure(config, 100000, false))
-        .await
-        .unwrap();
-    // Comparison uses already distilled discussions and their current original sources.
-    for work in [a, b] {
-        apply_research_command(&db, &start(vec![work]))
+    ComparisonProof {
+        works: [a, b],
+        comment,
+        author_body,
+        comment_body,
+        topic: topic.topic_ref,
+        definition: topic.definition_ref,
+    }
+}
+
+fn item_work_refs(item: &Value, proof: &ComparisonProof) -> Vec<Uuid> {
+    let refs: Vec<Uuid> = serde_json::from_value(item["evidenceWorkRefs"].clone()).unwrap();
+    assert_eq!(refs.len(), 2);
+    assert!(proof.works.iter().all(|work| refs.contains(work)));
+    refs
+}
+
+fn both_comparison_items(
+    snapshot: &TopicMapSnapshot,
+    proof: &ComparisonProof,
+    result: Uuid,
+) -> (Value, Value) {
+    let mut items = Vec::new();
+    for work in proof.works {
+        let research = snapshot
+            .works
+            .iter()
+            .find(|w| w.work_ref == work)
+            .unwrap()
+            .research
+            .as_ref()
+            .expect("each selected work can read the shared comparison");
+        for key in ["angles", "productOpportunities"] {
+            let matching: Vec<_> = research["output"][key]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|item| item["researchResultRef"] == json!(result))
+                .collect();
+            assert_eq!(
+                matching.len(),
+                1,
+                "one original item is projected once for each participant"
+            );
+            let item = matching[0];
+            item_work_refs(item, proof);
+            assert_eq!(item["comparisonScope"]["resultRef"], json!(result));
+            let selected: Vec<Uuid> =
+                serde_json::from_value(item["comparisonScope"]["selectedWorkRefs"].clone())
+                    .unwrap();
+            assert_eq!(selected.len(), 2);
+            assert!(proof.works.iter().all(|work| selected.contains(work)));
+            let cited: Vec<_> = item["evidence"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|citation| {
+                    research["fragments"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .find(|f| f["fragmentId"] == citation["fragmentId"])
+                        .expect("each view restores the exact original cited fragment")
+                })
+                .collect();
+            assert!(cited.iter().any(|f| {
+                f["field"] == "body"
+                    && f["workRef"] == json!(proof.works[1])
+                    && f["fragmentId"]
+                        .as_str()
+                        .unwrap()
+                        .starts_with(&format!("{}.", proof.works[1]))
+                    && f["text"] == proof.author_body
+            }));
+            assert!(cited.iter().any(|f| {
+                f["field"].as_str().unwrap().ends_with("comment")
+                    && f["workRef"] == json!(proof.works[0])
+                    && f["fragmentId"]
+                        .as_str()
+                        .unwrap()
+                        .starts_with(&format!("{}.comment.", proof.works[0]))
+                    && f["text"] == proof.comment_body
+            }));
+            assert!(
+                research["output"]["responseMatches"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|response| response["status"] == "partial"
+                        && response["evidence"] == item["evidence"])
+            );
+            items.push(item.clone());
+        }
+    }
+    assert_eq!(
+        items[0], items[2],
+        "both views expose the same original angle and scope"
+    );
+    assert_eq!(
+        items[1], items[3],
+        "both views expose the same original opportunity and scope"
+    );
+    // Save the angle from the non-primary work and the opportunity from the other
+    // work. Each uses its own persisted result/index and selected evidence refs.
+    (items.remove(0), items.remove(2))
+}
+
+fn comparison_save_command(
+    proof: &ComparisonProof,
+    item: &Value,
+    product: bool,
+) -> (TopicMapCommand, usize) {
+    let result = item["researchResultRef"].as_str().unwrap().parse().unwrap();
+    let index = item[if product {
+        "researchOpportunityIndex"
+    } else {
+        "researchAngleIndex"
+    }]
+    .as_u64()
+    .unwrap() as usize;
+    (
+        TopicMapCommand::SaveAlternative {
+            idempotency_key: if product {
+                "synthetic-product-research"
+            } else {
+                "synthetic-comment-angle"
+            }
+            .into(),
+            domain_ref: D,
+            topic_ref: proof.topic,
+            definition_ref: proof.definition,
+            title: if product {
+                "修改后的合成产品研究说明"
+            } else {
+                "怎样开始练习"
+            }
+            .into(),
+            angle: "合成评论练习角度与待验证说明".into(),
+            rationale: "合成引用测试，不是市场结论".into(),
+            evidence_work_refs: item_work_refs(item, proof),
+            method_version: item["researchMethodVersion"].as_str().unwrap().into(),
+            research_result_ref: Some(result),
+            research_angle_index: (!product).then_some(index),
+            research_opportunity_index: product.then_some(index),
+        },
+        index,
+    )
+}
+
+async fn save_comparison_items(
+    db: &Database,
+    proof: &ComparisonProof,
+    angle: &Value,
+    opportunity: &Value,
+) -> Vec<Uuid> {
+    let mut saved = Vec::new();
+    let mut product_command = None;
+    for (item, product) in [(angle, false), (opportunity, true)] {
+        let (command, index) = comparison_save_command(proof, item, product);
+        let receipt = topic_map::save_topic_map_command(db, &command)
             .await
             .unwrap();
-        finish_pending(&db, &adapter).await;
+        let saved_ref = receipt.subject_ref.unwrap();
+        let original = topic_map::read_saved_alternative(db, D, saved_ref)
+            .await
+            .unwrap();
+        assert_eq!(original.source_state, "available");
+        assert_eq!(
+            original.research_manifest["resultRef"],
+            item["researchResultRef"]
+        );
+        assert_eq!(
+            original.research_manifest[if product {
+                "opportunityIndex"
+            } else {
+                "angleIndex"
+            }],
+            json!(index)
+        );
+        assert!(
+            original
+                .fragments
+                .iter()
+                .any(|f| f.work_ref == proof.works[0]
+                    && f.field.ends_with("comment")
+                    && !f.cited_ranges.is_empty()
+                    && f.text == proof.comment_body)
+        );
+        assert!(
+            original
+                .fragments
+                .iter()
+                .any(|f| f.work_ref == proof.works[1]
+                    && f.field == "body"
+                    && !f.cited_ranges.is_empty()
+                    && f.text == proof.author_body)
+        );
+        if product {
+            assert_eq!(original.kind, "product_research");
+            assert_eq!(original.title.as_deref(), Some("修改后的合成产品研究说明"));
+            product_command = Some(command);
+        }
+        saved.push(saved_ref);
     }
-    apply_research_command(&db, &start(vec![a, b]))
-        .await
-        .unwrap();
-    finish_pending(&db, &adapter).await;
-    let query = linggan_intelligence::topic_map::TopicMapQuery {
-        domain_ref: Some(D),
-        reference_window_days: Some(0),
-        ..Default::default()
-    };
-    let snapshot = linggan_intelligence::topic_map::read_topic_map(&db, &query)
-        .await
-        .unwrap();
-    let research = snapshot
-        .works
-        .iter()
-        .find(|w| w.work_ref == a)
-        .unwrap()
-        .research
-        .as_ref()
-        .expect("accepted two-work/comment analysis visible");
-    assert_eq!(
-        research["output"]["responseMatches"][0]["status"],
-        "partial"
-    );
-    assert!(
-        research["output"]["angles"][0]["evidence"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|e| e["fragmentId"].as_str().unwrap().contains(".comment."))
-    );
-    assert_eq!(
-        apply_research_command(&db, &start(vec![a, b]))
-            .await
-            .unwrap()["state"],
-        "no_new_input"
-    );
-    let result: Uuid = research["resultRef"].as_str().unwrap().parse().unwrap();
-    linggan_intelligence::topic_map::save_topic_map_command(
-        &db,
-        &linggan_intelligence::topic_map::TopicMapCommand::SaveAlternative {
-            idempotency_key: "synthetic-comment-angle".into(),
-            domain_ref: D,
-            topic_ref: topic.topic_ref,
-            definition_ref: topic.definition_ref,
-            title: "怎样开始练习".into(),
-            angle: "合成评论练习角度".into(),
-            rationale: "合成引用测试".into(),
-            evidence_work_refs: vec![a, b],
-            method_version: "topic-map.research.v2".into(),
-            research_result_ref: Some(result),
-            research_angle_index: Some(0),
-            research_opportunity_index: None,
-        },
-    )
-    .await
-    .unwrap();
-    assert_eq!(
-        linggan_intelligence::topic_map::read_topic_map(&db, &query)
-            .await
-            .unwrap()
-            .alternatives[0]["sourceState"],
-        "available"
-    );
-    let product_command = linggan_intelligence::topic_map::TopicMapCommand::SaveAlternative {
-        idempotency_key: "synthetic-product-research".into(),
-        domain_ref: D,
-        topic_ref: topic.topic_ref,
-        definition_ref: topic.definition_ref,
-        title: "修改后的合成产品研究说明".into(),
-        angle: "分步支持的待验证假设".into(),
-        rationale: "这是待验证说明，不是市场结论".into(),
-        evidence_work_refs: vec![a, b],
-        method_version: "topic-map.research.v2".into(),
-        research_result_ref: Some(result),
-        research_angle_index: None,
-        research_opportunity_index: Some(0),
-    };
-    let product = linggan_intelligence::topic_map::save_topic_map_command(&db, &product_command)
-        .await
-        .unwrap();
-    let original = linggan_intelligence::topic_map::read_saved_alternative(
-        &db,
-        D,
-        product.subject_ref.unwrap(),
-    )
-    .await
-    .unwrap();
-    assert_eq!(original.kind, "product_research");
-    assert_eq!(original.title.as_deref(), Some("修改后的合成产品研究说明"));
-    assert_eq!(original.research_manifest["opportunityIndex"], 0);
-    assert!(
-        original
-            .fragments
-            .iter()
-            .any(|f| f.field.ends_with("comment") && !f.cited_ranges.is_empty())
-    );
-    let mut invalid = product_command.clone();
-    if let linggan_intelligence::topic_map::TopicMapCommand::SaveAlternative {
+    let mut invalid = product_command.unwrap();
+    if let TopicMapCommand::SaveAlternative {
         idempotency_key,
         research_angle_index,
         ..
     } = &mut invalid
     {
         *idempotency_key = "synthetic-product-invalid-both".into();
-        *research_angle_index = Some(0);
+        *research_angle_index = Some(angle["researchAngleIndex"].as_u64().unwrap() as usize);
     }
     assert!(matches!(
-        linggan_intelligence::topic_map::save_topic_map_command(&db, &invalid).await,
-        Err(linggan_intelligence::topic_map::TopicMapError::Invalid(_))
+        topic_map::save_topic_map_command(db, &invalid).await,
+        Err(topic_map::TopicMapError::Invalid(_))
     ));
-    sqlx::query("INSERT INTO linggan_material_comment_restriction(content_public_ref,comment_external_id,reason)SELECT content_public_ref,comment_external_id,'synthetic restriction'FROM linggan_material_comment WHERE material_ref=$1").bind(comment).execute(db.pool()).await.unwrap();
-    let snapshot = linggan_intelligence::topic_map::read_topic_map(&db, &query)
-        .await
-        .unwrap();
-    let retained = snapshot
-        .works
-        .iter()
-        .find(|w| w.work_ref == a)
-        .unwrap()
-        .research
-        .as_ref()
-        .expect("the valid independent work window remains available");
-    assert!(
-        retained["resultRefs"]
-            .as_array()
-            .unwrap()
+    saved
+}
+
+async fn assert_comparison_withdrawn(
+    db: &Database,
+    snapshot: &TopicMapSnapshot,
+    proof: &ComparisonProof,
+    result: Uuid,
+    independent: &[(Uuid, Uuid)],
+    saved: &[Uuid],
+) {
+    for work in proof.works {
+        let retained = snapshot
+            .works
             .iter()
-            .all(|r| r != &json!(result)),
-        "the withdrawn cross-work comparison is no longer projected"
-    );
-    assert!(
-        retained["output"]["angles"]
-            .as_array()
+            .find(|w| w.work_ref == work)
             .unwrap()
-            .iter()
-            .flat_map(|angle| angle["evidence"].as_array().unwrap())
-            .all(|citation| !citation["fragmentId"]
-                .as_str()
+            .research
+            .as_ref()
+            .expect("each independent author window remains available");
+        assert!(
+            retained["resultRefs"]
+                .as_array()
                 .unwrap()
-                .contains(".comment.")),
-        "the cross-work comment angle is hidden"
-    );
-    assert!(
-        retained["output"]["productOpportunities"]
-            .as_array()
+                .iter()
+                .all(|r| r != &json!(result))
+        );
+        let own_result = independent
+            .iter()
+            .find(|(owner, _)| *owner == work)
             .unwrap()
-            .is_empty()
-    );
-    assert_eq!(
-        snapshot.alternatives[0]["sourceState"],
-        "source_unavailable"
-    );
-    let alternative: Uuid = snapshot.alternatives[0]["alternativeRef"]
-        .as_str()
-        .unwrap()
-        .parse()
-        .unwrap();
-    let original = linggan_intelligence::topic_map::read_saved_alternative(&db, D, alternative)
+            .1;
+        assert!(
+            retained["resultRefs"]
+                .as_array()
+                .unwrap()
+                .contains(&json!(own_result))
+        );
+        for key in ["angles", "productOpportunities"] {
+            assert!(
+                retained["output"][key]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|item| {
+                        item["researchResultRef"] != json!(result)
+                            && item["evidence"]
+                                .as_array()
+                                .unwrap()
+                                .iter()
+                                .all(|c| !c["fragmentId"].as_str().unwrap().contains(".comment."))
+                    }),
+                "withdrawal hides this comparison from every participating work"
+            );
+        }
+        assert!(
+            retained["output"]["productOpportunities"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+    }
+    for reference in saved {
+        let alternative = snapshot
+            .alternatives
+            .iter()
+            .find(|a| a["alternativeRef"] == json!(reference))
+            .unwrap();
+        assert_eq!(alternative["sourceState"], "source_unavailable");
+        assert!(alternative["angle"].is_null());
+        let original = topic_map::read_saved_alternative(db, D, *reference)
+            .await
+            .unwrap();
+        assert_eq!(original.source_state, "source_unavailable");
+        assert!(
+            original.fragments.is_empty()
+                && original.angle.is_none()
+                && original.original_definition.is_none()
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore = "disposable PostgreSQL and synthetic child, no provider"]
+async fn comparison_and_comment_citations_are_visible_then_restriction_invalidates() {
+    let (db, config, adapter) = setup("topic_map_research_comparison").await;
+    let proof = comparison_proof(&db).await;
+    apply_research_command(&db, &configure(config, 100000, false))
         .await
         .unwrap();
-    assert_eq!(original.source_state, "source_unavailable");
-    assert!(
-        original.fragments.is_empty()
-            && original.angle.is_none()
-            && original.original_definition.is_none()
+    for work in proof.works {
+        apply_research_command(&db, &start(vec![work]))
+            .await
+            .unwrap();
+        finish_pending(&db, &adapter).await;
+    }
+    let independent: Vec<(Uuid, Uuid)> = sqlx::query_as("SELECT t.work_public_ref,r.result_ref FROM linggan_topic_map_research_result r JOIN linggan_topic_map_research_request q USING(invocation_ref) JOIN linggan_topic_map_research_task t USING(task_ref) WHERE t.work_public_ref=ANY($1) AND q.phase='resolve' AND COALESCE(t.input_refs#>>'{coverage,kind}','source')<>'comparison' AND EXISTS(SELECT 1 FROM jsonb_array_elements(t.input_refs->'fragments') f WHERE f->>'field'='body')")
+        .bind(proof.works.as_slice()).fetch_all(db.pool()).await.unwrap();
+    assert_eq!(
+        independent.len(),
+        2,
+        "both independent author windows have accepted results"
     );
-    assert!(snapshot.alternatives[0]["angle"].is_null());
+    let start_receipt = apply_research_command(&db, &start(proof.works.to_vec()))
+        .await
+        .unwrap();
+    let run: Uuid = start_receipt["runRef"].as_str().unwrap().parse().unwrap();
+    finish_pending(&db, &adapter).await;
+    let results: Vec<Uuid> = sqlx::query_scalar("SELECT r.result_ref FROM linggan_topic_map_research_result r JOIN linggan_topic_map_research_request q USING(invocation_ref) WHERE q.run_ref=$1 AND q.phase='compare'")
+        .bind(run).fetch_all(db.pool()).await.unwrap();
+    assert_eq!(
+        results.len(),
+        1,
+        "both work views share one persisted comparison result"
+    );
+    let result = results[0];
+    let query = TopicMapQuery {
+        domain_ref: Some(D),
+        reference_window_days: Some(0),
+        ..Default::default()
+    };
+    let snapshot = topic_map::read_topic_map(&db, &query).await.unwrap();
+    let (angle, opportunity) = both_comparison_items(&snapshot, &proof, result);
+    assert_eq!(
+        apply_research_command(&db, &start(proof.works.to_vec()))
+            .await
+            .unwrap()["state"],
+        "no_new_input"
+    );
+    let saved = save_comparison_items(&db, &proof, &angle, &opportunity).await;
+    let dispatches: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_topic_map_research_request WHERE run_ref=$1 AND phase='compare' AND dispatch_started_at IS NOT NULL")
+        .bind(run).fetch_one(db.pool()).await.unwrap();
+    assert_eq!(
+        dispatches, 1,
+        "reading/saving from both views does not dispatch twice"
+    );
+    sqlx::query("INSERT INTO linggan_material_comment_restriction(content_public_ref,comment_external_id,reason)SELECT content_public_ref,comment_external_id,'synthetic restriction'FROM linggan_material_comment WHERE material_ref=$1")
+        .bind(proof.comment).execute(db.pool()).await.unwrap();
+    let snapshot = topic_map::read_topic_map(&db, &query).await.unwrap();
+    assert_comparison_withdrawn(&db, &snapshot, &proof, result, &independent, &saved).await;
 }
 
 #[tokio::test]

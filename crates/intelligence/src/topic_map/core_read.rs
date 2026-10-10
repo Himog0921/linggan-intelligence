@@ -19,6 +19,7 @@ mod units;
 #[path = "core_read/work_summary.rs"]
 mod work_summary;
 
+#[derive(Clone)]
 struct Window {
     result: Option<Uuid>,
     task: Uuid,
@@ -29,6 +30,46 @@ struct Window {
     output: Value,
     core: Value,
 }
+
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ComparisonScope {
+    scope_work_refs: Vec<Uuid>,
+    selected_work_refs: Vec<Uuid>,
+    state: String,
+    boundary: String,
+}
+
+impl ComparisonScope {
+    fn from_manifest(manifest: &Value, primary: Uuid) -> Option<Self> {
+        let coverage = &manifest["coverage"];
+        let scope: Self = serde_json::from_value(coverage.clone()).ok()?;
+        let requested: BTreeSet<_> = scope.scope_work_refs.iter().copied().collect();
+        let selected: BTreeSet<_> = scope.selected_work_refs.iter().copied().collect();
+        let discussions: BTreeSet<Uuid> = coverage["selectedDiscussions"]
+            .as_array()?
+            .iter()
+            .map(|discussion| discussion["workRef"].as_str()?.parse().ok())
+            .collect::<Option<_>>()?;
+        if !(1..=10).contains(&requested.len())
+            || requested.len() != scope.scope_work_refs.len()
+            || selected.len() != scope.selected_work_refs.len()
+            || !selected.contains(&primary)
+            || !selected.is_subset(&requested)
+            || selected != discussions
+        {
+            return None;
+        }
+        Some(scope)
+    }
+
+    fn value(&self, result: Option<Uuid>) -> Value {
+        let mut value = json!(self);
+        value["resultRef"] = json!(result);
+        value
+    }
+}
+
 impl Window {
     fn is_comparison(&self) -> bool {
         self.manifest["coverage"]["kind"] == "comparison"

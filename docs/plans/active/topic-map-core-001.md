@@ -69,9 +69,9 @@ Design / Code / Automated checks 随真实结果更新；Real-chain proof（真�
 
 | 提交前检查 | 实际结果 | 证明边界 |
 |---|---|---|
-| `cargo test -p linggan-intelligence topic_map --lib --locked` | 77/77 通过 | 身份、边界、来源窗口、状态与投影逻辑 |
+| `cargo test -p linggan-intelligence topic_map --lib --locked` | 82/82 通过 | 身份、边界、来源窗口、状态与投影逻辑，含比较双侧可见性及原方法版本 |
 | `cargo check -p linggan-intelligence -p linggan-api --locked` | 通过 | 当前组合入口及类型编译；已有 warning 未消除 |
-| `node scripts/test-topic-map-ui.cjs` | 11 组通过 | 界面状态、来源定位与实际保存参数 |
+| `node scripts/test-topic-map-ui.cjs` | 12 组通过 | 界面状态、来源定位、比较去重及实际保存参数 |
 | `node --test apps/pi-adapter/test/structured-output.test.mjs` | 18/18 通过 | 真实 SDK 的合成传输合同，无 provider 外发 |
 | Chrome 合成页面 | 15 状态，1440/390，30 GET；无页面错误或整页横向溢出 | 浏览器布局与交互，不证明真实数据库内容 |
 | 新 native PostgreSQL 目标 `--no-run` | 编译通过 | 原生断言仍须由隔离 Docker CI 实际执行 |
@@ -79,3 +79,9 @@ Design / Code / Automated checks 随真实结果更新；Real-chain proof（真�
 | `check-project-governance.sh` / `git diff --check` | 通过 | 文件归属、索引与差异卫生 |
 
 比较快照的手写回归子模块随既有 lifecycle target 执行，不增加新的运行入口或依赖。完整原生运行回执、独立 reviewer 的精确提交判断与 Draft PR 引用在 Issue #382 及本月进度继续登记。
+
+## 原生 CI 比较结果可见性修正
+
+Draft PR #383 首轮原生 CI `38037431631` 在提交 `a6af2aaa` 实际通过 23 项 PostgreSQL 测试，跨作品比较读取用例失败，后续 saved/search/budget/API 目标尚未执行；隔离容器与卷清理成功。静态复核确认比较结果只挂在按 UUID 排序的物理主作品，另一实际参与作品及筛掉主作品的视图会遗漏同一比较；旧测试同时依赖变量 `a` 和合并层结果引用，无法稳定验证该闭环。
+
+本轮继续完成已有对照/保存合同：数据库保留单份比较结果；读取在所有实际 `selectedWorkRefs` 上投影，仍复核完整冻结来源与定义资格，不把仅请求但未入选的作品算作参与者。既有判断/产品机会列表按原始结果及条目索引去重，保存继续使用条目自己的结果与索引。范围为 `core_read` 读取、`topic_map.js` 的列表/保存引用和对应手写回归；页面布局、Token、Header、研究授权及采集范围不变。验收覆盖两参与作品、筛掉物理主作品、未入选作品、聚合去重、零索引保存以及评论限制后两侧派生结果撤回。
