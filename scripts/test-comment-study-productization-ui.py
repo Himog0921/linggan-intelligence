@@ -73,6 +73,7 @@ def run_synthetic() -> None:
         "stopped": False,
         "recovered": False,
         "deep_active_mode": False,
+        "no_policies": False,
         "overview_with_run": False,
         "candidate_fail": False,
         "request_source_state": "known",
@@ -81,8 +82,11 @@ def run_synthetic() -> None:
     }
     requests: dict[str, dict] = {}
     unexpected: list[str] = []
+    read_paths: list[str] = []
 
     def policies(cursor: str | None = None) -> dict:
+        if state["no_policies"]:
+            return {"items": [], "page": {"hasMore": False, "nextCursor": None}}
         if state["deep_active_mode"]:
             state["policy_page_cursors"].append(cursor)
             if cursor == "older-page":
@@ -173,6 +177,8 @@ def run_synthetic() -> None:
         request = route.request
         parsed = urlsplit(request.url)
         path = parsed.path.removeprefix("/api/local/comment-study/")
+        if request.method == "GET":
+            read_paths.append(path)
         query = parse_qs(parsed.query)
         payload = request.post_data_json if request.method == "POST" else None
         response: dict
@@ -501,11 +507,103 @@ def run_synthetic() -> None:
     try:
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)
+            entry_page = browser.new_page()
+            entry_page.set_default_timeout(10000)
+            entry_page.route("**/api/local/comment-study/**", api_reply)
+            entry_page.add_init_script("""{
+              const originalFetch = window.fetch;
+              window.releaseStudySetup = null;
+              window.fetch = async (url, options) => {
+                const response = await originalFetch(url, options);
+                if (new URL(url).pathname.endsWith('/setup')) {
+                  await new Promise(resolve => { window.releaseStudySetup = resolve; });
+                }
+                return response;
+              };
+            }""")
+            read_paths.clear()
+            entry_page.goto(f"{base_url}/corpus/comments?domain={DOMAIN_REF}&view=overview")
+            entry_page.locator(".study-series-chart").wait_for()
+            assert read_paths == ["overview"], read_paths
+            entry_page.locator("#open-study-dialog").click()
+            entry_page.wait_for_function("typeof window.releaseStudySetup === 'function'")
+            assert entry_page.locator("#preview-run").is_disabled()
+            assert entry_page.locator("#start-run").is_disabled()
+            assert entry_page.locator("#save-policy").is_disabled()
+            entry_page.locator("#study-dialog-close").click()
+            entry_page.locator("#open-study-dialog").click()
+            assert read_paths.count("setup") == 1, read_paths
+            entry_page.evaluate("window.releaseStudySetup()")
+            entry_page.locator(f"#work-{WORK_REF}").wait_for()
+            entry_page.wait_for_function("studySetupReady")
+            entry_page.locator("#study-dialog-close").click()
+            entry_page.locator("#open-study-dialog").click()
+            assert read_paths.count("setup") == 1, read_paths
+            entry_page.close()
+
+            state["no_policies"] = True
+            first_method_page = browser.new_page()
+            first_method_page.set_default_timeout(10000)
+            first_method_page.route("**/api/local/comment-study/**", api_reply)
+            first_method_page.add_init_script("""{
+              const originalFetch = window.fetch;
+              window.releaseStudyWorks = null;
+              window.fetch = async (url, options) => {
+                const response = await originalFetch(url, options);
+                if (new URL(url).pathname.endsWith('/works')) {
+                  await new Promise(resolve => { window.releaseStudyWorks = resolve; });
+                }
+                return response;
+              };
+            }""")
+            first_method_page.goto(f"{base_url}/corpus/comments?domain={DOMAIN_REF}&view=overview")
+            first_method_page.locator(".study-series-chart").wait_for()
+            first_method_page.locator("#open-study-dialog").click()
+            first_method_page.wait_for_function("typeof window.releaseStudyWorks === 'function' && document.querySelector('#selected-policy-summary').textContent.includes('首次使用')")
+            assert not first_method_page.evaluate("studySetupReady")
+            assert first_method_page.locator("#save-policy").is_disabled()
+            assert first_method_page.locator("#edit-policy").is_disabled()
+            assert first_method_page.locator("#policy-form").is_hidden()
+            assert not requests, requests
+            first_method_page.evaluate("window.releaseStudyWorks()")
+            first_method_page.wait_for_function("studySetupReady")
+            first_method_page.locator("#policy-form").wait_for(state="visible")
+            assert first_method_page.locator("#save-policy").is_enabled()
+            assert not requests, requests
+            first_method_page.close()
+            state["no_policies"] = False
+
+            failure_page = browser.new_page()
+            failure_page.set_default_timeout(10000)
+            setup_attempts = 0
+
+            def fail_first_setup(route) -> None:
+                nonlocal setup_attempts
+                if urlsplit(route.request.url).path.endswith("/setup"):
+                    setup_attempts += 1
+                    if setup_attempts == 1:
+                        route.fulfill(status=503, content_type="application/json", body='{"error":"synthetic unavailable"}')
+                        return
+                api_reply(route)
+
+            failure_page.route("**/api/local/comment-study/**", fail_first_setup)
+            failure_page.goto(f"{base_url}/corpus/comments?domain={DOMAIN_REF}&view=overview")
+            failure_page.locator(".study-series-chart").wait_for()
+            failure_page.locator("#open-study-dialog").click()
+            failure_page.locator("#setup-status").get_by_text("无法读取准备信息", exact=False).wait_for()
+            assert failure_page.locator("#preview-run").is_disabled()
+            assert failure_page.locator("#start-run").is_disabled()
+            failure_page.locator("#study-dialog-close").click()
+            failure_page.locator("#open-study-dialog").click()
+            failure_page.locator(f"#work-{WORK_REF}").wait_for()
+            failure_page.wait_for_function("studySetupReady")
+            assert setup_attempts == 2
+            failure_page.close()
+
             page = browser.new_page()
             page.set_default_timeout(10000)
             page.route("**/api/local/comment-study/**", api_reply)
             page.goto(f"{base_url}/corpus/comments?domain={DOMAIN_REF}")
-            page.locator(f"#work-{WORK_REF}").wait_for(state="attached")
             page.get_by_role("button", name="发起研究").click()
             page.locator(f"#work-{WORK_REF}").wait_for(state="visible")
             page.locator(f"#study-policy option[value='{OLD_POLICY_REF}']").wait_for(state="attached")
@@ -604,9 +702,9 @@ def run_synthetic() -> None:
             page = browser.new_page()
             page.route("**/api/local/comment-study/**", api_reply)
             page.goto(f"{base_url}/corpus/comments?domain={DOMAIN_REF}")
+            page.get_by_role("button", name="发起研究").click()
             page.locator(f"#work-{WORK_REF}").wait_for(state="attached")
             page.locator(f"#study-policy option[value='{NEW_POLICY_REF}']").wait_for(state="attached")
-            page.get_by_role("button", name="发起研究").click()
             page.locator("#activate-policy").click()
             page.get_by_text("已将所选方法设为当前领域默认版本。", exact=True).wait_for()
             assert state["policy_page_cursors"][cursor_start : cursor_start + 2] == [None, "older-page"]
@@ -821,6 +919,7 @@ def run_live_api(
             browser.close()
             raise ValueError("live API base URL is not the isolated browser proof server")
         navigation = page.goto(f"{base_url}/corpus/comments?domain={domain_ref}")
+        page.get_by_role("button", name="发起研究").click()
         try:
             page.locator(f"#work-{work_ref}").wait_for(state="attached")
         except Exception as error:
@@ -839,7 +938,6 @@ def run_live_api(
                 f"browser_requests={browser_requests!r}; failed_requests={failed_requests!r}; "
                 f"page={page_summary!r}"
             ) from error
-        page.get_by_role("button", name="发起研究").click()
         page.locator(f"#work-{work_ref}").wait_for(state="visible")
         page.locator(f"#study-policy option[value='{existing_policy_ref}']").wait_for(state="attached")
         assert page.locator("#study-policy").input_value() == existing_policy_ref

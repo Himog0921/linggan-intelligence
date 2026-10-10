@@ -20,6 +20,8 @@ const post = async (path, body, includeDomain = true) => {
 const list = (items, render, empty) => items?.length ? items.map(render).join('') : `<p class="muted">${esc(empty)}</p>`;
 let loadedWorks = [];
 let sourcePreview = null;
+let studySetupReady = false;
+let studySetupRequest = null;
 const selectedWorkRoles = new Map();
 const workCatalogState = { cursor: null, nextCursor: null, history: [], q: '', total: 0, coverage: null, observationRole: 'primary' };
 let workSearchTimer = null;
@@ -49,7 +51,7 @@ function updateSelection() {
   document.querySelector('#selected-count').textContent = studySelectionKind === 'comments'
     ? `已选 ${count}/${MAX_SELECTED_COMMENTS} 条评论 · 本次上限 ${budget || '—'} 条`
     : `已选 ${count}/${MAX_SELECTED_WORKS} 篇 · 当前页 ${selectedVisibleCount}/${visible.length} 篇`;
-  const hasPolicy = Boolean(document.querySelector('#study-policy').value);
+  const hasPolicy = studySetupReady && Boolean(document.querySelector('#study-policy').value);
   const signature = count && hasPolicy ? JSON.stringify(selectionCommand()) : null;
   const previewCurrent = signature && signature === previewSelectionSignature;
   if (previewSelectionSignature && !previewCurrent) {
@@ -62,7 +64,7 @@ function updateSelection() {
   const selectVisible = document.querySelector('#select-visible-works');
   selectVisible.checked = visible.length > 0 && selectedVisibleCount === visible.length;
   selectVisible.indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < visible.length;
-  selectVisible.disabled = selectedWorkRoles.size >= MAX_SELECTED_WORKS && selectedVisibleCount < visible.length;
+  selectVisible.disabled = !studySetupReady || (selectedWorkRoles.size >= MAX_SELECTED_WORKS && selectedVisibleCount < visible.length);
 }
 
 const studyModeLabel = { new_only:'只研究新评论', input_changed:'只重研输入已变化的评论', retry_failed:'重试失败评论', reanalyse:'重新分析所选评论' };
@@ -167,14 +169,13 @@ async function loadSetup(){
     status.dataset.kind='info';
     status.textContent='请先在页头选择观察领域。';
     document.querySelector('#open-study-dialog').disabled=true;
-    return;
+    return false;
   }
   try{
     const setup=await get('setup');domainRef=setup.domainRef;
     const select=document.querySelector('#model-config');
     select.innerHTML=list(setup.modelConfigs,config=>`<option value="${esc(config.configRef)}">${esc(config.modelId)} · 输入上限 ${Number(config.inputTokenLimit)} 词元／输出上限 ${Number(config.outputTokenLimit)} 词元</option>`,'没有可用模型配置。');
     const available=setup.modelConfigs?.length>0&&setup.domainStatus==='active';
-    select.disabled=!available;document.querySelector('#save-policy').disabled=!available;
     sourcePreview=setup.sourcePreview||null;
     renderSourcePreview(sourcePreview,'#source-preview','primary');
     renderSourcePreview(setup.referenceSourcePreview,'#reference-source-preview','reference');
@@ -185,15 +186,42 @@ async function loadSetup(){
     referenceToggle.disabled=setup.domainStatus!=='active'||Number(setup.referenceSourcePreview?.totalCommentCount||0)===0;
     const [worksResult,policiesResult]=await Promise.allSettled([loadWorksPage(null),loadPolicies()]);
     const worksLoaded=worksResult.status==='fulfilled'&&worksResult.value;
+    const ready=policiesResult.status==='fulfilled';
+    select.disabled=!available||!ready;
+    document.querySelector('#save-policy').disabled=!available||!ready;
+    document.querySelector('#edit-policy').disabled=!available||!ready;
     if(policiesResult.status==='rejected')document.querySelector('#policy-status').textContent=`研究方法列表加载失败：${policiesResult.reason.message}`;
     status.dataset.kind=available?'info':'error';
     status.textContent=setup.domainStatus==='paused'?`${domainName}已暂停；历史结果可读，不能创建新策略或运行。`:available?(worksLoaded?`已加载 ${workCatalogState.total} 篇当前领域作品；可切换查看参考作品。`:'准备信息已加载；作品目录暂时不可用，请在下方重试。'):'没有启用的模型配置，无法保存策略。';
+    return ready;
   }catch(error){
     status.dataset.kind='error';status.textContent=`无法读取准备信息：${error.message}`;
     document.querySelector('#work-filter-status').textContent='作品目录不可用。';
     sourcePreview=null;renderSourcePreview(null,'#source-preview','primary');renderSourcePreview(null,'#reference-source-preview','reference');
     document.querySelector('#works').innerHTML='<tr><td class="study-table-empty" colspan="4">作品目录不可用。</td></tr>';
+    return false;
   }
+}
+
+function ensureStudySetup(){
+  if(studySetupReady)return Promise.resolve(true);
+  if(studySetupRequest)return studySetupRequest;
+  document.querySelector('#setup-status').textContent='正在读取研究准备信息…';
+  document.querySelector('#setup-status').dataset.kind='info';
+  for(const id of ['model-config','save-policy','study-policy','edit-policy','activate-policy','view-policy','preview-run','start-run','select-visible-works'])document.querySelector(`#${id}`).disabled=true;
+  studySetupRequest=loadSetup().then(async ready=>{
+    studySetupReady=ready;
+    const reference=document.querySelector('#study-policy').value;
+    document.querySelector('#study-policy').disabled=!ready||savedPolicies.length===0;
+    document.querySelector('#activate-policy').disabled=!ready||!reference||reference===activePolicyRef;
+    document.querySelector('#view-policy').disabled=!ready||!reference;
+    if(ready&&!savedPolicies.length&&!document.querySelector('#model-config').disabled)await openPolicyEditor();
+    return ready;
+  }).finally(()=>{
+    studySetupRequest=null;
+    updateSelection();
+  });
+  return studySetupRequest;
 }
 
 async function loadPolicies(preferredRef=null){
@@ -212,17 +240,17 @@ async function loadPolicies(preferredRef=null){
   activePolicyRef=policyItems.find(item=>item.isActive)?.policyRef||null;
   savedPolicies=policyItems.filter(item=>item.recordingState==='recorded');
   select.innerHTML=savedPolicies.length?savedPolicies.map(item=>`<option value="${esc(item.policyRef)}">${esc(item.methodName||'未命名方法')}${item.isActive?' · 默认':''} · ${esc(item.policyRef.slice(0,8))}</option>`).join(''):'<option value="">没有已记录的方法版本</option>';
-  select.disabled=savedPolicies.length===0;
+  select.disabled=!studySetupReady||savedPolicies.length===0;
   const isRecorded=reference=>savedPolicies.some(item=>item.policyRef===reference);
   const desired=(isRecorded(preferredRef)?preferredRef:null)
     ||(isRecorded(activePolicyRef)?activePolicyRef:null)
     ||savedPolicies[0]?.policyRef||'';
   if(desired)select.value=desired;
-  document.querySelector('#activate-policy').disabled=!select.value||select.value===activePolicyRef;
-  document.querySelector('#view-policy').disabled=!select.value;
+  document.querySelector('#activate-policy').disabled=!studySetupReady||!select.value||select.value===activePolicyRef;
+  document.querySelector('#view-policy').disabled=!studySetupReady||!select.value;
   updatePolicySummary();
-  document.querySelector('#edit-policy').disabled=!document.querySelector('#model-config').value;
-  if(!savedPolicies.length&&document.querySelector('#model-config').value)await openPolicyEditor();
+  document.querySelector('#edit-policy').disabled=!studySetupReady||document.querySelector('#model-config').disabled||!document.querySelector('#model-config').value;
+  if(studySetupReady&&!savedPolicies.length&&!document.querySelector('#model-config').disabled)await openPolicyEditor();
   updateSelection();
 }
 
@@ -296,9 +324,9 @@ function instructionExtra(instruction){
 
 function closePolicyEditor(){
   document.querySelector('#policy-form').hidden=true;
-  document.querySelector('#study-policy').disabled=savedPolicies.length===0;
+  document.querySelector('#study-policy').disabled=!studySetupReady||savedPolicies.length===0;
   parentPolicyRef=null;
-  document.querySelector('#edit-policy').disabled=!document.querySelector('#model-config').value;
+  document.querySelector('#edit-policy').disabled=!studySetupReady||document.querySelector('#model-config').disabled||!document.querySelector('#model-config').value;
 }
 
 async function openPolicyEditor(){
@@ -307,7 +335,7 @@ async function openPolicyEditor(){
   const status=document.querySelector('#policy-status');
   const editableControls=[...form.querySelectorAll('input,select,textarea,button[type="submit"]')];
   const reference=document.querySelector('#study-policy').value;
-  if(!document.querySelector('#model-config').value)return;
+  if(!studySetupReady||document.querySelector('#model-config').disabled||!document.querySelector('#model-config').value)return;
   form.hidden=false;button.disabled=true;
   document.querySelector('#study-policy').disabled=true;
   editableControls.forEach(control=>control.disabled=true);
@@ -646,7 +674,7 @@ function bindCommentsView(){
     }else selectedCommentKeys.delete(identity);
     updateCommentSelectionView();
   }));
-  document.querySelector('#study-selected-comments').addEventListener('click',()=>{setStudySelectionKind('comments');studyDialog.showModal();});
+  document.querySelector('#study-selected-comments').addEventListener('click',()=>openStudyDialog('comments'));
   updateCommentSelectionView();
   form.addEventListener('submit',async event=>{event.preventDefault();commentCatalogState.q=document.querySelector('#comment-query').value.trim();commentCatalogState.studyState=document.querySelector('#comment-study-state').value;commentCatalogState.signalKind=document.querySelector('#comment-signal-kind').value||null;commentCatalogState.voiceRole=document.querySelector('#comment-voice-role').value;resetCommentPage();syncStudyRoute(true);await renderActiveTab();});
   document.querySelector('#comment-work-search-form').addEventListener('submit',async event=>{event.preventDefault();const query=document.querySelector('#comment-work-search').value.trim();commentCatalogState.workLabel=query;try{await searchCommentWorks(query);}catch(error){document.querySelector('#comment-work-select').innerHTML='<option value="">作品读取失败</option>';}});
@@ -1394,11 +1422,8 @@ document.querySelector('#study-stop-dialog').addEventListener('cancel', event =>
 });
 
 async function loadProjection() {
-  if (domainRef) {
-    try {
-      await loadRunListPage(true);
-    } catch (error) { allRuns = []; }
-  }
+  document.querySelector('#open-study-dialog').disabled=!domainRef;
+  if(activeView==='runs')runListLoaded=false;
   highlightTab(activeView);
   syncStudyRoute(false);
   await renderActiveTab();
@@ -1461,7 +1486,12 @@ function setStudySelectionKind(kind){
   pendingStartSignature=null;pendingStartRef=null;
   updateSelection();
 }
-document.querySelector('#open-study-dialog').addEventListener('click', () => {setStudySelectionKind('works');studyDialog.showModal();});
+function openStudyDialog(kind){
+  setStudySelectionKind(kind);
+  studyDialog.showModal();
+  void ensureStudySetup();
+}
+document.querySelector('#open-study-dialog').addEventListener('click', () => openStudyDialog('works'));
 document.querySelector('#study-dialog-close').addEventListener('click', () => studyDialog.close());
 document.querySelector('#view-policy').addEventListener('click', showPolicyViewer);
 document.querySelector('#close-policy-viewer').addEventListener('click', () => {document.querySelector('#policy-viewer').hidden=true;});
@@ -1736,4 +1766,4 @@ document.querySelector('#comment-detail-body').addEventListener('click',async ev
   const statusObserver=new MutationObserver(()=>{setupStatus.hidden=!setupStatus.textContent.trim()});
   statusObserver.observe(setupStatus,{childList:true,characterData:true,subtree:true});
   setupStatus.hidden=!setupStatus.textContent.trim();
-void(async()=>{await loadSetup();await loadProjection();const params=new URLSearchParams(window.location.search);const detailWork=params.get('commentWorkRef')||(params.get('detail')==='comment'?params.get('workRef'):null);if(activeView==='comments'&&detailWork&&params.get('commentExternalId'))void openCommentDetail(detailWork,params.get('commentExternalId'),{push:false});})();
+void(async()=>{await loadProjection();const params=new URLSearchParams(window.location.search);const detailWork=params.get('commentWorkRef')||(params.get('detail')==='comment'?params.get('workRef'):null);if(activeView==='comments'&&detailWork&&params.get('commentExternalId'))void openCommentDetail(detailWork,params.get('commentExternalId'),{push:false});})();
