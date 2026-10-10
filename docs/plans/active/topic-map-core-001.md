@@ -67,14 +67,14 @@ Design / Code / Automated checks 随真实结果更新；Real-chain proof（真�
 
 本机全库 Clippy/函数边界检查存在基线违规，未通过完整 gate；诊断命令的 `--cap-lints warn` 只用于定位，不能作为通过声明。本包新增函数行数/参数数问题已拆分 helper，没有新增 `allow` 或放宽阈值，也没有顺带重构无关大文件。原生 PostgreSQL、远端 CI、合并、部署和真实模型质量分别记录实际回执。
 
-| 提交前检查 | 实际结果 | 证明边界 |
+| 当前候选检查 | 实际结果 | 证明边界 |
 |---|---|---|
 | `cargo test -p linggan-intelligence topic_map --lib --locked` | 82/82 通过 | 身份、边界、来源窗口、状态与投影逻辑，含比较双侧可见性及原方法版本 |
 | `cargo check -p linggan-intelligence -p linggan-api --locked` | 通过 | 当前组合入口及类型编译；已有 warning 未消除 |
 | `node scripts/test-topic-map-ui.cjs` | 14 组通过 | 界面状态、来源定位、比较去重、实际保存参数及失败进度与终态操作 |
 | `node --test apps/pi-adapter/test/structured-output.test.mjs` | 18/18 通过 | 真实 SDK 的合成传输合同，无 provider 外发 |
 | Chrome 合成页面 | 15 状态，1440/390，30 GET；无页面错误或整页横向溢出 | 浏览器布局与交互，不证明真实数据库内容；后续失败进度修正由 JS 回归覆盖，未重复浏览器验收 |
-| 新 native PostgreSQL 目标 `--no-run` | 编译通过 | 原生断言仍须由隔离 Docker CI 实际执行 |
+| 原生 PostgreSQL + pgvector | 34/34 通过，CI `38041566274` / `32887e24` | 全部选定原生目标实际执行；隔离合成证明，不代表真实模型质量 |
 | PGlite 全 schema | DDL 及 vector 检查通过 | WASM 单会话辅助证据，不替代原生事务/并发 |
 | `check-project-governance.sh` / `git diff --check` | 通过 | 文件归属、索引与差异卫生 |
 
@@ -113,3 +113,36 @@ Draft PR #383 首轮原生 CI `38037431631` 在提交 `a6af2aaa` 实际通过 23
 第 5 次 CI [38041040402](https://github.com/Himog0921/linggan-intelligence/actions/runs/38041040402) / `c56ab3b` 已通过 API/core 编译、82 项 Rust、14 组 UI 和 18 项适配器测试；原生入口在第二次 `pg_isready`（当时脚本第 38 行）退出，34 项原生用例均未启动，治理步骤跳过。隔离容器和数据卷清理已核验。本轮没有容器启动日志，因此不能把具体启动竞态记为已确认根因。
 
 两处原探针都未指定 host，会检查 Unix socket。[官方 PostgreSQL 镜像入口](https://github.com/docker-library/postgres/blob/master/docker-entrypoint.sh) 的 `docker_temp_server_start` 明确以 `listen_addresses=''` 启动初始化服务；探针可能把临时服务当作最终服务。修复仅在两处探针显式指定 `127.0.0.1:5432`，等待实际承接 proof 连接的 TCP 服务。保留 30 次有界等待、最终严格检查、全部选定原生目标、非零退出汇总和清理，不修改业务代码、配置预算或测试断言。完整原生结果由后续新提交 CI 另记。
+
+## 最终开发候选回执
+
+[Draft PR #383](https://github.com/Himog0921/linggan-intelligence/pull/383) 的代码提交 `32887e2404c814023c3fcd37e9441a5af44ea8b2` 对应独立已审树 `010f172dc295f80b22a393801b7ad9e07c2c1473`。第 6 次 [CI 38041566274](https://github.com/Himog0921/linggan-intelligence/actions/runs/38041566274) 于 2026-10-10 09:34 UTC 完成 success，根与独立协作者分别读取完整日志核验。API/core 编译、82 项 Rust 单元、14 组实际 JS、18 项结构化适配器、34 项原生 PostgreSQL 及治理/差异检查全部通过；09:34:26 UTC 明确记录隔离容器和数据卷清理成功。
+
+| 原生目标 | 实际通过 |
+|---|---:|
+| core legacy | 2 |
+| core lifecycle（含比较快照竞争） | 4 |
+| core 归属与资格 | 6 |
+| core unknown | 3 |
+| topic map 与结构确认 | 3 |
+| research（含两项新进度用例） | 8 |
+| saved sources | 5 |
+| 临时 search | 1 |
+| evidence 评论预算 | 1 |
+| API 回执/重放/来源守门 | 1 |
+| **合计** | **34，通过；0 失败** |
+
+前序失败的比较评论引用、正文尾段和完整 OCR/ASR 尾段保存均已实际通过；两项新进度用例也通过，分别证明真实输入超限后的失败明细与明确新 Start，以及 25 个失败/未知任务的完整总数和 20 项明细边界。保持原 8192 配置及严格引用、保存、撤回断言，未以提高预算或重试相同代码取得回执。
+
+召回说明：BM25/CJK 与合格本地 WeMM 512 维向量以 RRF `k=60` 融合，常规召回每讨论取前 6，再形成调用批次的候选并集；当前归属准备实际逐条处理讨论，使新候选立即对下一条可见。定义重评还会补入必须复核的精确定义，因此“前 6”不是每次模型输入定义数量的永久上限。窗口、比较和重评均有范围上限，保留部分覆盖及未知状态。
+
+| 完成层 | 本轮状态 |
+|---|---|
+| Design / Code | 已实现并独立复审 |
+| 本包自动化与原生证明 | 上述代码提交全部通过 |
+| 全库 Clippy / 旧函数边界 | 基线失败仍在，未宣称完整 gate 通过 |
+| 真实模型、中文语料质量及大规模时延 | 未验证 |
+| 生产迁移 / Deploy | 未执行 |
+| Mog 业务验收 | 待实际验收 |
+
+后续文档回执只描述本次已验证代码，不改变其业务实现、迁移、测试或预算。合并、部署和真实模型评测依据各自授权及实际回执，不能由本次合成 CI 推定。
