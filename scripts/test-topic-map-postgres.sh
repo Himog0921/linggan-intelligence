@@ -31,11 +31,13 @@ docker volume create "$proof_volume" >/dev/null
 proof_volume_created=1
 docker run -d --name "$proof_container" --mount "type=volume,source=$proof_volume,target=/var/lib/postgresql/data" --env POSTGRES_DB="$proof_database" --env POSTGRES_USER="$proof_user" --env POSTGRES_PASSWORD="$proof_password" --publish 127.0.0.1::5432 "$postgres_image" >/dev/null
 proof_container_created=1
+# The image initializes through a socket-only server. Wait for the final TCP
+# service used by the proof so initialization cannot satisfy this probe early.
 for _ in {1..30}; do
-  docker exec "$proof_container" pg_isready -U "$proof_user" -d "$proof_database" >/dev/null 2>&1 && break
+  docker exec "$proof_container" pg_isready -h 127.0.0.1 -p 5432 -U "$proof_user" -d "$proof_database" >/dev/null 2>&1 && break
   sleep 1
 done
-docker exec "$proof_container" pg_isready -U "$proof_user" -d "$proof_database" >/dev/null
+docker exec "$proof_container" pg_isready -h 127.0.0.1 -p 5432 -U "$proof_user" -d "$proof_database" >/dev/null
 proof_port="$(docker port "$proof_container" 5432/tcp | sed -n 's/^127\.0\.0\.1:\([0-9][0-9]*\)$/\1/p')"
 [[ "$proof_port" =~ ^[0-9]+$ ]] || exit 1
 export CREATOR_PROOF_NODE="${CREATOR_PROOF_NODE:-$(command -v node)}"

@@ -71,9 +71,9 @@ Design / Code / Automated checks 随真实结果更新；Real-chain proof（真�
 |---|---|---|
 | `cargo test -p linggan-intelligence topic_map --lib --locked` | 82/82 通过 | 身份、边界、来源窗口、状态与投影逻辑，含比较双侧可见性及原方法版本 |
 | `cargo check -p linggan-intelligence -p linggan-api --locked` | 通过 | 当前组合入口及类型编译；已有 warning 未消除 |
-| `node scripts/test-topic-map-ui.cjs` | 12 组通过 | 界面状态、来源定位、比较去重及实际保存参数 |
+| `node scripts/test-topic-map-ui.cjs` | 14 组通过 | 界面状态、来源定位、比较去重、实际保存参数及失败进度与终态操作 |
 | `node --test apps/pi-adapter/test/structured-output.test.mjs` | 18/18 通过 | 真实 SDK 的合成传输合同，无 provider 外发 |
-| Chrome 合成页面 | 15 状态，1440/390，30 GET；无页面错误或整页横向溢出 | 浏览器布局与交互，不证明真实数据库内容 |
+| Chrome 合成页面 | 15 状态，1440/390，30 GET；无页面错误或整页横向溢出 | 浏览器布局与交互，不证明真实数据库内容；后续失败进度修正由 JS 回归覆盖，未重复浏览器验收 |
 | 新 native PostgreSQL 目标 `--no-run` | 编译通过 | 原生断言仍须由隔离 Docker CI 实际执行 |
 | PGlite 全 schema | DDL 及 vector 检查通过 | WASM 单会话辅助证据，不替代原生事务/并发 |
 | `check-project-governance.sh` / `git diff --check` | 通过 | 文件归属、索引与差异卫生 |
@@ -107,3 +107,9 @@ Draft PR #383 首轮原生 CI `38037431631` 在提交 `a6af2aaa` 实际通过 23
 | 既有暂停/恢复/停止操作 | queued/running 允许暂停/停止，paused 允许恢复/停止，daily_budget_paused 保持等待额度语义并允许暂停/停止；completed/stopped/run_budget_exhausted 无无效操作 | 实际 JS 渲染按各状态检查动作，不改后端允许状态或发起请求 |
 
 沿用前述 UI 读取回执、LIDS 组件及页面结构；这是状态表达与现有动作可用性的修正，不修改 Token、CSS、公共 Header 或新建页面。当前互斥所有权：进度协作者处理 `topic_map_research.rs` 的只读进度、`topic_map.js`、UI 测试、research native 回归及 HTTP 进度合同；根负责本计划、当月进度、最终集成及验证，其他复审只读分析来源失败。
+
+## 隔离 PostgreSQL 就绪检查
+
+第 5 次 CI [38041040402](https://github.com/Himog0921/linggan-intelligence/actions/runs/38041040402) / `c56ab3b` 已通过 API/core 编译、82 项 Rust、14 组 UI 和 18 项适配器测试；原生入口在第二次 `pg_isready`（当时脚本第 38 行）退出，34 项原生用例均未启动，治理步骤跳过。隔离容器和数据卷清理已核验。本轮没有容器启动日志，因此不能把具体启动竞态记为已确认根因。
+
+两处原探针都未指定 host，会检查 Unix socket。[官方 PostgreSQL 镜像入口](https://github.com/docker-library/postgres/blob/master/docker-entrypoint.sh) 的 `docker_temp_server_start` 明确以 `listen_addresses=''` 启动初始化服务；探针可能把临时服务当作最终服务。修复仅在两处探针显式指定 `127.0.0.1:5432`，等待实际承接 proof 连接的 TCP 服务。保留 30 次有界等待、最终严格检查、全部选定原生目标、非零退出汇总和清理，不修改业务代码、配置预算或测试断言。完整原生结果由后续新提交 CI 另记。
