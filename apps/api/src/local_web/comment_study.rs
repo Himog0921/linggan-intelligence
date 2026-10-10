@@ -970,7 +970,7 @@ mod tests {
         assert!(page.contains("id=\"comment-detail-dialog\""));
         for token in [
             "catalogQuery('comments',params)",
-            "catalogQuery('catalog-summary',summaryParams)",
+            "summary:data.summary",
             "catalogQuery('comments/detail',{workRef,commentExternalId})",
             "catalogQuery('works',{q:query,limit:20})",
             "workCatalogPath(cursor)",
@@ -980,6 +980,7 @@ mod tests {
                 "missing P1 client contract: {token}"
             );
         }
+        assert!(!script.contains("catalogQuery('catalog-summary'"));
         assert!(!script.contains("setup.eligibleWorks || []"));
         assert!(!page.contains("筛选已加载作品"));
     }

@@ -291,6 +291,9 @@ async fn begin_read(database: &Database) -> Result<Transaction<'_, Postgres>, St
     sqlx::query("SET LOCAL statement_timeout = '15s'")
         .execute(&mut *tx)
         .await?;
+    // These interactive projections spend more time compiling JIT code than executing it.
+    // Keep the setting transaction-local so pooled connections retain their normal defaults.
+    sqlx::query("SET LOCAL jit = off").execute(&mut *tx).await?;
     sqlx::query("SET LOCAL lock_timeout = '3s'")
         .execute(&mut *tx)
         .await?;

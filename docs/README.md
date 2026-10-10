@@ -27,6 +27,7 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发，并于 2026-10-02 
 
 | 文档 | 状态 | 用途 |
 |---|---|---|
+| [plans/active/comment-study-read-performance-358.md](plans/active/comment-study-read-performance-358.md) | 活跃计划；Issue #358；独立工作树 | 评论目录、统计、作品选择器和情报总览的等价读取性能优化 |
 | [plans/active/corpus-performance-089.md](plans/active/corpus-performance-089.md) | 活跃计划；Issue #89；受保护工作树 | 共享作品读取提前收窄、批次 enrichment、语义等价和数据库查询次数性能防护 |
 | [design/changes/collection-runtime-state-20260929-ui-change-manifest.md](design/changes/collection-runtime-state-20260929-ui-change-manifest.md) | 候选实现；待集成与页面验收 | recovery 全局暂停、当前排队读数和派发回答的状态纠偏 |
 | [design/changes/collection-keyword-sampling-recovery-001-ui-change-manifest.md](design/changes/collection-keyword-sampling-recovery-001-ui-change-manifest.md) | Issue #362 交付分支实施中 | 关键词 3 次下拉／200 候选／20 样本、失败有界恢复、部分巡查和容量等待的状态词义 |

@@ -311,3 +311,7 @@ Run.state completed 仅意味着目标语义阶段结束；UI 用“提取结束
 | model_runtime_unavailable | 503 | runtime 未就绪；与无待处理材料不同 |
 
 no_work/index_pending 是明确开始回执 outcome，不伪装为网络错误。其后重新点击开始使用新 requestRef；同一个旧请求只回放原结果。
+
+## 评论目录统计读取补充（COMMENT-STUDY-READ-PERFORMANCE-358）
+
+`GET /api/local/comment-study/comments` 在既有 `items`、`page`、`indexCoverage` 外附加 `summary`，字段与同筛选的 `catalog-summary.summary` 相同，计数覆盖该筛选的完整目录而非当前页。其 `asOf` 为 `page.asOf`，翻页延续该快照；来源限制仍在每次读取动态检查。页面直接消费同一次目录查询的统计，不另外重复发起统计请求。独立 `catalog-summary` API 保留，用于单独统计当前目录。此变更不启动清洗缓存、Run、模型或改变研究权限。

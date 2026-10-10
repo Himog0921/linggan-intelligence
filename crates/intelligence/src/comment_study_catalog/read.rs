@@ -180,9 +180,14 @@ async fn read_catalog(
     sqlx::query("SET LOCAL statement_timeout = '15s'")
         .execute(&mut *tx)
         .await?;
+    // These interactive projections spend more time compiling JIT code than executing it.
+    // Keep the setting transaction-local so pooled connections retain their normal defaults.
+    sqlx::query("SET LOCAL jit = off").execute(&mut *tx).await?;
     let as_of = resolve_as_of(&mut tx, previous.as_ref()).await?;
     let last = previous.as_ref().map(|value| &value.last);
     let mut projection: Value = sqlx::query_scalar(sqlx::AssertSqlSafe(page_sql()))
+        // Optional filters need a fresh parameter-aware plan; generic plans scan broadly.
+        .persistent(false)
         .bind(query.domain)
         .bind(&as_of)
         .bind(CLEANER_VERSION)
@@ -259,6 +264,8 @@ pub(super) async fn read_one_projection(
     as_of: &str,
 ) -> Result<Value, StudyCatalogError> {
     let projection: Value = sqlx::query_scalar(sqlx::AssertSqlSafe(page_sql()))
+        // Optional filters need a fresh parameter-aware plan; generic plans scan broadly.
+        .persistent(false)
         .bind(domain)
         .bind(as_of)
         .bind(CLEANER_VERSION)
@@ -334,7 +341,8 @@ fn page_response(
         "contract": "comment-study.read.v2", "domainRef": domain,
         "items": items,
         "page": { "limit": scope.limit, "hasMore": has_more, "nextCursor": next_cursor, "asOf": as_of },
-        "indexCoverage": projection["indexCoverage"]
+        "indexCoverage": projection["indexCoverage"],
+        "summary": projection["summary"]
     }))
 }
 

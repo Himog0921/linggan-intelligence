@@ -88,6 +88,7 @@ async fn catalog_paginates_more_than_100_comments_without_a_run_and_searches_lit
     let mut original_as_of = None;
     for page_number in 0..8 {
         let response = read_comment_catalog(&db, &request).await.unwrap();
+        assert_eq!(response["summary"]["displayableCommentCount"], 124);
         let as_of = response["page"]["asOf"].as_str().unwrap().to_owned();
         if let Some(expected) = &original_as_of {
             assert_eq!(&as_of, expected);

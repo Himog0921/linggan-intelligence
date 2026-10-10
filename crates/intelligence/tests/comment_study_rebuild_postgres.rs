@@ -4443,6 +4443,93 @@ async fn prepared_novel_pair(
         .unwrap()
 }
 
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn run_pending_counts_follow_effective_heads_and_exclude_cross_run_pairs() {
+    let database = proof_database("study_run_pending_counts").await;
+    sqlx::raw_sql(STUDY_SCHEMA_SQL)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    let first_pair = prepared_novel_pair(&database, "pending-count-first").await;
+    let second_pair = prepared_novel_pair(&database, "pending-count-second").await;
+    // Seed a historical cross-Run pair directly. The command path may reject creating it,
+    // but the read contract must still avoid attributing it to either Run.
+    sqlx::query("INSERT INTO linggan_comment_study_problem_pair(pair_ref,first_signal_ref,second_signal_ref,state,pair_manifest) VALUES($1,$2,$3,'pending','{}'::jsonb)")
+        .bind(Uuid::new_v4()).bind(first_pair.first_signal_ref).bind(second_pair.second_signal_ref)
+        .execute(database.pool()).await.unwrap();
+    sqlx::query("UPDATE linggan_comment_study_resolution SET state='pending',resolved_at=NULL")
+        .execute(database.pool())
+        .await
+        .unwrap();
+    let (run_ref, policy_ref, work_ref, source_ref): (Uuid, Uuid, Uuid, Uuid) = sqlx::query_as(
+        "SELECT target.run_ref,run.policy_ref,target.content_public_ref,target.source_ref \
+         FROM linggan_comment_study_signal signal JOIN linggan_comment_study_target target USING(target_ref) \
+         JOIN linggan_comment_study_run run USING(run_ref) WHERE signal.signal_ref=$1",
+    ).bind(first_pair.first_signal_ref).fetch_one(database.pool()).await.unwrap();
+    let query = domain_read_query(None);
+    let runs = read_runs(&database, &query).await.unwrap();
+    assert_eq!(
+        runs["runs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|run| run["pendingResolutionCount"].as_i64().unwrap())
+            .sum::<i64>(),
+        4
+    );
+    assert_eq!(
+        runs["runs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|run| run["pendingPairCount"].as_i64().unwrap())
+            .sum::<i64>(),
+        2
+    );
+
+    let target = seed_running_target(&database, policy_ref, work_ref, source_ref).await;
+    accept_target_output(
+        &database,
+        target,
+        "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        None,
+        serde_json::json!({"contract":"comment-study.semantic.v1","signals":[]}),
+    )
+    .await
+    .unwrap();
+    // Make ordering deterministic even on a proof clock frozen to the same instant.
+    sqlx::query("UPDATE linggan_comment_study_target SET created_at=scope_001_now()+interval '1 second' WHERE target_ref=$1")
+        .bind(target).execute(database.pool()).await.unwrap();
+    let runs = read_runs(&database, &query).await.unwrap();
+    let first_run = runs["runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|run| run["runRef"] == run_ref.to_string())
+        .unwrap();
+    assert_eq!(
+        first_run["pendingResolutionCount"], 1,
+        "a newer no_signal cannot resurrect old Signals"
+    );
+    assert_eq!(first_run["pendingPairCount"], 0);
+    sqlx::query(
+        "INSERT INTO linggan_material_comment_restriction(content_public_ref,comment_external_id,reason) \
+         SELECT target.content_public_ref,source.comment_external_id,'SYNTHETIC restriction' \
+         FROM linggan_comment_study_signal signal JOIN linggan_comment_study_target target USING(target_ref) \
+         JOIN linggan_material_comment source ON source.material_ref=target.source_ref WHERE signal.signal_ref=$1",
+    ).bind(first_pair.second_signal_ref).execute(database.pool()).await.unwrap();
+    let runs = read_runs(&database, &query).await.unwrap();
+    let first_run = runs["runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|run| run["runRef"] == run_ref.to_string())
+        .unwrap();
+    assert_eq!(first_run["pendingResolutionCount"], 0);
+    assert_eq!(first_run["pendingPairCount"], 0);
+}
+
 fn same_problem_pair_output(pair: &PreparedProblemPair) -> serde_json::Value {
     serde_json::json!({
         "contract":"comment-study.problem-pair.v1",

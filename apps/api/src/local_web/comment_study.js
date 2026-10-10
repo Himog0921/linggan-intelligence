@@ -618,8 +618,8 @@ function updateCommentSelectionView(){
 async function renderCommentsTab(){
   if(!domainRef)return'<p class="study-empty">评论目录尚未就绪。</p>';
   const params={q:commentCatalogState.q,workRef:commentCatalogState.workRef,studyState:commentCatalogState.studyState,signalKind:commentCatalogState.signalKind,voiceRole:commentCatalogState.voiceRole,cursor:commentCatalogState.cursor,limit:50};
-  const summaryParams={...params};delete summaryParams.cursor;delete summaryParams.limit;
-  const[data,summary]=await Promise.all([get(catalogQuery('comments',params)),get(catalogQuery('catalog-summary',summaryParams))]);
+  const data=await get(catalogQuery('comments',params));
+  const summary={summary:data.summary,indexCoverage:data.indexCoverage,asOf:data.page?.asOf};
   commentCatalogState.response=data;commentCatalogState.summary=summary;
   const rows=data.items||[],stats=summary.summary||{},coverage=data.indexCoverage||{},pending=coverage.pendingCount==null?'未知':Number(coverage.pendingCount);
   const workOptions=commentCatalogState.workChoices.map(work=>`<option value="${esc(work.workRef)}"${work.workRef===commentCatalogState.workRef?' selected':''}>${esc(work.displayTitle||'未命名作品')}</option>`).join('');

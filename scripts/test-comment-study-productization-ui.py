@@ -432,6 +432,7 @@ def run_synthetic() -> None:
             response = {"expressions": expressions,
                         "page": {"nextCursor": None, "asOf": "2026-09-28T08:00:00Z"}}
         elif request.method == "GET" and path == "catalog-summary":
+            unexpected.append("duplicate catalog-summary read from comments page")
             response = {"summary": {"displayableCommentCount": 3, "eligibleCommentCount": 2},
                         "indexCoverage": {"indexedCount": 3, "pendingCount": 0}}
         elif request.method == "GET" and path == "comments":
@@ -446,6 +447,7 @@ def run_synthetic() -> None:
             response = {"items": [comment_item("comment-3", True)] if cursor == "page-2" else [
                 comment_item("comment-1", True), comment_item("comment-2", False)],
                 "page": {"nextCursor": None if cursor == "page-2" else "page-2"},
+                "summary": {"displayableCommentCount": 3, "eligibleCommentCount": 2},
                 "indexCoverage": {"indexedCount": 3, "pendingCount": 0}}
         elif request.method == "POST" and path == "policies":
             requests["policy"] = payload
