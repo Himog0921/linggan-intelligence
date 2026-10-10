@@ -1,4 +1,6 @@
 //! Canonical Topic Map projection and explicit, versioned human decisions.
+#[path = "topic_map/core_read.rs"]
+mod core_read;
 #[path = "topic_map/read.rs"]
 mod read;
 #[path = "topic_map/saved.rs"]
@@ -72,6 +74,7 @@ pub struct TopicMapTopic {
     pub work_refs: Vec<Uuid>,
     pub statistics: Value,
     pub journey: Value,
+    pub core: Value,
 }
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -216,6 +219,12 @@ pub enum TopicMapError {
 
 #[derive(Debug, Clone)]
 pub(crate) struct TopicMapCandidateRequest {
+    pub definition_text: String,
+    pub inclusion_criteria: Vec<String>,
+    pub exclusion_criteria: Vec<String>,
+    pub invocation_ref: Uuid,
+    pub reuse_definition_refs: Vec<Uuid>,
+    pub evidence_role: String,
     pub label: String,
     pub topic_ref: Option<Uuid>,
     pub evidence_citations: Vec<TopicMapCitation>,

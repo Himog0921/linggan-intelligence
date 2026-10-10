@@ -1,86 +1,16 @@
 //! Disposable PostgreSQL + synthetic adapter proof. No model or platform calls.
-#[path = "../../evidence/tests/support/material_fixture.rs"]
-mod fixture;
+#[path = "support/topic_map_core_fixture.rs"]
+mod core_fixture;
+use core_fixture::*;
 #[path = "support/comment_research_fixture.rs"]
 mod research_fixture;
 use linggan_intelligence::{
     model_secrets::SyntheticModelSecrets,
-    pi_adapter::PiAdapter,
     topic_map_research::{ResearchCommand, apply_research_command, read_research_progress},
     topic_map_research_worker::run_once,
 };
-use linggan_storage_postgres::Database;
 use serde_json::json;
 use uuid::Uuid;
-const D: Uuid = Uuid::from_u128(0x00000000000040008000000000000001);
-async fn setup(name: &str) -> (Database, Uuid, PiAdapter) {
-    let db = fixture::proof_database(name).await;
-    let conn = Uuid::new_v4();
-    let version = Uuid::new_v4();
-    let model = Uuid::new_v4();
-    let config = Uuid::new_v4();
-    sqlx::query("INSERT INTO linggan_model_connection(connection_ref,revision)VALUES($1,1)")
-        .bind(conn)
-        .execute(db.pool())
-        .await
-        .unwrap();
-    sqlx::query("INSERT INTO linggan_model_connection_version(version_ref,connection_ref,revision,name,api,base_url,local_endpoint,secret_ref)VALUES($1,$2,1,'Synthetic','openai-completions','http://127.0.0.1:18080',true,$3)").bind(version).bind(conn).bind(Uuid::new_v4()).execute(db.pool()).await.unwrap();
-    sqlx::query("INSERT INTO linggan_model_entry(model_ref,connection_version_ref,model_id,origin)VALUES($1,$2,'synthetic-topic-map','manual')").bind(model).bind(version).execute(db.pool()).await.unwrap();
-    sqlx::query("INSERT INTO linggan_model_config(config_ref,model_ref,input_token_limit,output_token_limit,timeout_seconds,max_attempts)VALUES($1,$2,8192,1000,30,$3)").bind(config).bind(model).bind(if name=="topic_map_research_unsent"{1}else{3}).execute(db.pool()).await.unwrap();
-    sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,operation,request_hash,state,reserved_tokens,charged_tokens,result)VALUES($1,$2,$3,'probe','synthetic','succeeded',0,0,$4)").bind(Uuid::new_v4()).bind(version).bind(model).bind(json!({"ok":true,"modelCallable":true,"semanticQualified":true})).execute(db.pool()).await.unwrap();
-    let node = std::env::var_os("CREATOR_PROOF_NODE")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            let output = std::process::Command::new("which")
-                .arg("node")
-                .output()
-                .expect("locate synthetic proof Node executable");
-            assert!(
-                output.status.success(),
-                "set CREATOR_PROOF_NODE to a local Node executable"
-            );
-            std::path::PathBuf::from(String::from_utf8(output.stdout).unwrap().trim())
-        });
-    assert!(node.is_file(), "synthetic proof Node executable must exist");
-    let adapter = PiAdapter::configured_with_test_command(
-        node,
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/support/topic_map_research_adapter.mjs"),
-    );
-    (db, config, adapter)
-}
-async fn work(db: &Database, id: &str, body: &str) -> Uuid {
-    let package=fixture::submit_package(db,"content_detail",json!({"contentExternalId":id}),json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":id},"payload":{"title":"SYNTHETIC 合成练习","bodyText":body,"authorId":"synthetic-creator","likes":10}})).await;
-    let work: Uuid = sqlx::query_scalar(
-        "SELECT public_ref FROM linggan_material_content WHERE content_external_id=$1",
-    )
-    .bind(id)
-    .fetch_one(db.pool())
-    .await
-    .unwrap();
-    sqlx::query("INSERT INTO linggan_material_domain_usage(usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref)VALUES($1,$2,$3,'primary','legacy_domain_migration',$4) ON CONFLICT DO NOTHING").bind(Uuid::new_v4()).bind(work).bind(D).bind(package).execute(db.pool()).await.unwrap();
-    work
-}
-fn configure(config: Uuid, daily: i64, auto: bool) -> ResearchCommand {
-    ResearchCommand::Configure {
-        request_ref: Uuid::new_v4(),
-        domain_ref: D,
-        model_config_ref: config,
-        daily_token_limit: daily,
-        run_token_limit: 100000,
-        automatic_enabled: auto,
-        collection_enabled: false,
-    }
-}
-fn start(works: Vec<Uuid>) -> ResearchCommand {
-    ResearchCommand::Start {
-        request_ref: Uuid::new_v4(),
-        domain_ref: D,
-        trigger: "on_demand".into(),
-        work_refs: works,
-        topic_ref: None,
-    }
-}
 #[tokio::test]
 #[ignore = "disposable PostgreSQL and synthetic child, no provider"]
 async fn exact_input_pipeline_idempotency_budget_and_stop() {
@@ -109,6 +39,27 @@ async fn exact_input_pipeline_idempotency_budget_and_stop() {
             .unwrap()
     );
     assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT phase FROM linggan_topic_map_research_task")
+            .fetch_one(db.pool())
+            .await
+            .unwrap(),
+        "resolve"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*)FROM linggan_topic_map_research_result")
+            .fetch_one(db.pool())
+            .await
+            .unwrap(),
+        0,
+        "extraction alone is not accepted membership"
+    );
+    assert!(
+        run_once(&db, &SyntheticModelSecrets, &adapter)
+            .await
+            .unwrap()
+    );
+    finish_pending(&db, &adapter).await;
+    assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*)FROM linggan_topic_map_research_result")
             .fetch_one(db.pool())
             .await
@@ -122,7 +73,7 @@ async fn exact_input_pipeline_idempotency_budget_and_stop() {
             .unwrap(),
         1
     );
-    assert_eq!(sqlx::query_scalar::<_,i64>("SELECT sum(charged_tokens)::bigint FROM linggan_model_invocation WHERE operation='analyze'").fetch_one(db.pool()).await.unwrap(),399);
+    assert_eq!(sqlx::query_scalar::<_,i64>("SELECT sum(charged_tokens)::bigint FROM linggan_model_invocation WHERE operation='analyze'").fetch_one(db.pool()).await.unwrap(),798);
     assert_eq!(
         apply_research_command(&db, &start(vec![w])).await.unwrap()["state"],
         "no_new_input"
@@ -132,13 +83,14 @@ async fn exact_input_pipeline_idempotency_budget_and_stop() {
             .await
             .unwrap()
     );
-    // A repeated observation and counters-only refresh are not substantive new research.
-    work(
-        &db,
-        "research-one",
-        "SYNTHETIC 家庭实践：每次只做一步，并记录反馈。",
-    )
-    .await;
+    // Different accepted observation time and metrics must advance the physical
+    // canonical head without invalidating semantically unchanged source windows.
+    let before: Uuid = sqlx::query_scalar("SELECT (input_refs->'fragments'->0->>'sourceRef')::uuid FROM linggan_topic_map_research_task LIMIT 1")
+        .fetch_one(db.pool()).await.unwrap();
+    work_at(&db,"research-one","","SYNTHETIC 家庭实践：每次只做一步，并记录反馈。",99,"2026-09-29T10:00:00Z").await;
+    let latest: Uuid = sqlx::query_scalar("SELECT material_ref FROM linggan_material_content_detail WHERE content_public_ref=$1 ORDER BY observed_at::timestamptz DESC,created_at DESC,material_ref DESC LIMIT 1")
+        .bind(w).fetch_one(db.pool()).await.unwrap();
+    assert_ne!(before,latest,"the canonical source observation must actually change");
     assert_eq!(
         apply_research_command(&db, &start(vec![w])).await.unwrap()["state"],
         "no_new_input"
@@ -183,7 +135,7 @@ async fn exact_input_pipeline_idempotency_budget_and_stop() {
         .fetch_one(db.pool())
         .await
         .unwrap(),
-        1
+        2
     );
 }
 #[tokio::test]
@@ -293,7 +245,7 @@ async fn atomic_daily_reservation_and_unknown_dispatch_do_not_resend() {
     let invocation = Uuid::new_v4();
     sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,config_ref,operation,request_hash,state,reserved_tokens,charged_tokens)SELECT $1,m.connection_version_ref,c.model_ref,c.config_ref,'analyze',$3,'running',2048,2048 FROM linggan_model_config c JOIN linggan_model_entry m USING(model_ref)WHERE config_ref=$2").bind(invocation).bind(config).bind("0".repeat(64)).execute(db.pool()).await.unwrap();
     sqlx::query("INSERT INTO linggan_topic_map_research_request(invocation_ref,task_ref,run_ref,attempt_ordinal,request_hash,request_manifest,budget_day,dispatch_started_at,deadline_at)VALUES($1,$2,$3,1,$4,'{}',(scope_001_now()AT TIME ZONE 'Asia/Shanghai')::date,scope_001_now()-interval '2 minutes',scope_001_now()-interval '1 minute')").bind(invocation).bind(task).bind(run).bind("0".repeat(64)).execute(db.pool()).await.unwrap();
-    sqlx::query("UPDATE linggan_topic_map_research_task SET state='running',attempt_count=1,lease_token=$2 WHERE task_ref=$1").bind(task).bind(Uuid::new_v4()).execute(db.pool()).await.unwrap();
+    sqlx::query("UPDATE linggan_topic_map_research_task SET state='running',attempt_count=1,phase_attempt_count=1,lease_token=$2 WHERE task_ref=$1").bind(task).bind(Uuid::new_v4()).execute(db.pool()).await.unwrap();
     run_once(&db, &SyntheticModelSecrets, &adapter)
         .await
         .unwrap();
@@ -370,12 +322,17 @@ async fn comparison_and_comment_citations_are_visible_then_restriction_invalidat
     apply_research_command(&db, &configure(config, 100000, false))
         .await
         .unwrap();
+    // Comparison uses already distilled discussions and their current original sources.
+    for work in [a, b] {
+        apply_research_command(&db, &start(vec![work]))
+            .await
+            .unwrap();
+        finish_pending(&db, &adapter).await;
+    }
     apply_research_command(&db, &start(vec![a, b]))
         .await
         .unwrap();
-    run_once(&db, &SyntheticModelSecrets, &adapter)
-        .await
-        .unwrap();
+    finish_pending(&db, &adapter).await;
     let query = linggan_intelligence::topic_map::TopicMapQuery {
         domain_ref: Some(D),
         reference_window_days: Some(0),
@@ -421,7 +378,7 @@ async fn comparison_and_comment_citations_are_visible_then_restriction_invalidat
             angle: "合成评论练习角度".into(),
             rationale: "合成引用测试".into(),
             evidence_work_refs: vec![a, b],
-            method_version: "topic-map.research.v1.1".into(),
+            method_version: "topic-map.research.v2".into(),
             research_result_ref: Some(result),
             research_angle_index: Some(0),
             research_opportunity_index: None,
@@ -445,7 +402,7 @@ async fn comparison_and_comment_citations_are_visible_then_restriction_invalidat
         angle: "分步支持的待验证假设".into(),
         rationale: "这是待验证说明，不是市场结论".into(),
         evidence_work_refs: vec![a, b],
-        method_version: "topic-map.research.v1.1".into(),
+        method_version: "topic-map.research.v2".into(),
         research_result_ref: Some(result),
         research_angle_index: None,
         research_opportunity_index: Some(0),
@@ -487,14 +444,39 @@ async fn comparison_and_comment_citations_are_visible_then_restriction_invalidat
     let snapshot = linggan_intelligence::topic_map::read_topic_map(&db, &query)
         .await
         .unwrap();
+    let retained = snapshot
+        .works
+        .iter()
+        .find(|w| w.work_ref == a)
+        .unwrap()
+        .research
+        .as_ref()
+        .expect("the valid independent work window remains available");
     assert!(
-        snapshot
-            .works
-            .iter()
-            .find(|w| w.work_ref == a)
+        retained["resultRefs"]
+            .as_array()
             .unwrap()
-            .research
-            .is_none()
+            .iter()
+            .all(|r| r != &json!(result)),
+        "the withdrawn cross-work comparison is no longer projected"
+    );
+    assert!(
+        retained["output"]["angles"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|angle| angle["evidence"].as_array().unwrap())
+            .all(|citation| !citation["fragmentId"]
+                .as_str()
+                .unwrap()
+                .contains(".comment.")),
+        "the cross-work comment angle is hidden"
+    );
+    assert!(
+        retained["output"]["productOpportunities"]
+            .as_array()
+            .unwrap()
+            .is_empty()
     );
     assert_eq!(
         snapshot.alternatives[0]["sourceState"],
@@ -550,16 +532,14 @@ async fn unsent_recovery_respects_one_attempt_and_platform_own_identity() {
     use sqlx::Row;
     let task: Uuid = row.get("task_ref");
     let refs: serde_json::Value = row.get("input_refs");
-    assert_eq!(refs["roleMetadata"]["works"][0]["own"], false);
+    assert_eq!(refs["roleMetadata"]["own"], false);
     let invocation = Uuid::new_v4();
     sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,config_ref,operation,request_hash,state,reserved_tokens,charged_tokens)SELECT $1,m.connection_version_ref,c.model_ref,c.config_ref,'analyze',$3,'running',2048,2048 FROM linggan_model_config c JOIN linggan_model_entry m USING(model_ref)WHERE config_ref=$2").bind(invocation).bind(config).bind("0".repeat(64)).execute(db.pool()).await.unwrap();
     sqlx::query("INSERT INTO linggan_topic_map_research_request(invocation_ref,task_ref,run_ref,attempt_ordinal,request_hash,request_manifest,budget_day,deadline_at)VALUES($1,$2,$3,1,$4,'{}',(scope_001_now()AT TIME ZONE 'Asia/Shanghai')::date,scope_001_now()-interval '1 minute')").bind(invocation).bind(task).bind(run).bind("0".repeat(64)).execute(db.pool()).await.unwrap();
-    sqlx::query("UPDATE linggan_topic_map_research_task SET state='running',attempt_count=1,lease_token=$2 WHERE task_ref=$1").bind(task).bind(Uuid::new_v4()).execute(db.pool()).await.unwrap();
-    assert!(
-        !run_once(&db, &SyntheticModelSecrets, &adapter)
-            .await
-            .unwrap()
-    );
+    sqlx::query("UPDATE linggan_topic_map_research_task SET state='running',attempt_count=1,phase_attempt_count=1,lease_token=$2 WHERE task_ref=$1").bind(task).bind(Uuid::new_v4()).execute(db.pool()).await.unwrap();
+    // Recovery and final maintenance may advance state without dispatching. The
+    // ledger below still proves that no retry was reserved or charged.
+    finish_pending(&db, &adapter).await;
     assert_eq!(
         sqlx::query_scalar::<_, String>(
             "SELECT state FROM linggan_topic_map_research_task WHERE task_ref=$1"
@@ -599,5 +579,58 @@ async fn unsent_recovery_respects_one_attempt_and_platform_own_identity() {
         .await
         .unwrap(),
         1
+    );
+}
+
+#[tokio::test]
+#[ignore = "disposable PostgreSQL and synthetic child, no provider"]
+async fn title_and_body_windows_finish_without_assuming_task_order() {
+    let (db, config, adapter) = setup("topic_map_research_windows").await;
+    let w = work_with_title(
+        &db,
+        "separate-source-windows",
+        "SYNTHETIC 先安排一次练习",
+        "SYNTHETIC 再从一个具体步骤开始练习。",
+    )
+    .await;
+    apply_research_command(&db, &configure(config, 100000, false))
+        .await
+        .unwrap();
+    apply_research_command(&db, &start(vec![w])).await.unwrap();
+    let fields: Vec<String> = sqlx::query_scalar("SELECT ARRAY_AGG(DISTINCT f->>'field' ORDER BY f->>'field') FROM linggan_topic_map_research_task t CROSS JOIN LATERAL jsonb_array_elements(t.input_refs->'fragments') f")
+        .fetch_one(db.pool()).await.unwrap();
+    assert_eq!(fields, vec!["body", "title"]);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_topic_map_research_task")
+            .fetch_one(db.pool())
+            .await
+            .unwrap(),
+        2
+    );
+    finish_pending(&db, &adapter).await;
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_topic_map_research_result")
+            .fetch_one(db.pool())
+            .await
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_topic_map_discussion_unit")
+            .fetch_one(db.pool())
+            .await
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_topic_map_research_request")
+            .fetch_one(db.pool())
+            .await
+            .unwrap(),
+        4
+    );
+    assert_eq!(
+        apply_research_command(&db, &start(vec![w])).await.unwrap()["state"],
+        "no_new_input"
     );
 }

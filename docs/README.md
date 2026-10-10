@@ -335,3 +335,9 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发，并于 2026-10-02 
 | [progress/2026-10.md](progress/2026-10.md) | 代码事实优先 | 本月实现与验证记录 |
 | [data-contracts/topic-map-http.md](data-contracts/topic-map-http.md) | 代码事实优先 | 主题图谱读写、安全与研究接点 |
 | [design/acceptance/topic-map-v41-001-acceptance.md](design/acceptance/topic-map-v41-001-acceptance.md) | 一次性报告 | 自动证明、隔离浏览器与业务验收边界 |
+
+## TOPIC-MAP-CORE-001
+
+| 文档 | 状态 | 用途 |
+|---|---|---|
+| [plans/active/topic-map-core-001.md](plans/active/topic-map-core-001.md) | 活跃计划 | Issue #382 研究内核、来源与定义身份、完整闭环及验证 |

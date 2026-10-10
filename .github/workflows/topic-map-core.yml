@@ -1,0 +1,55 @@
+name: Topic Map core proof
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/topic-map-core.yml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'crates/**'
+      - 'apps/api/**'
+      - 'apps/pi-adapter/**'
+      - 'database/**'
+      - 'scripts/test-topic-map*'
+      - 'scripts/runtime/build-pgvector-image.sh'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: topic-map-core-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  synthetic-proof:
+    if: startsWith(github.head_ref, 'codex/topic-map-')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_PROFILE_TEST_DEBUG: '0'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install matching Rust toolchain
+        run: |
+          rustup toolchain install 1.95.0 --profile minimal
+          rustup default 1.95.0
+      - name: Compile API and research core
+        run: cargo check -p linggan-intelligence -p linggan-api --locked
+      - name: Topic unit and frontend contract tests
+        run: |
+          cargo test -p linggan-intelligence topic_map --lib --locked
+          node scripts/test-topic-map-ui.cjs
+          npm --prefix apps/pi-adapter ci
+          node --test apps/pi-adapter/test/structured-output.test.mjs
+      - name: Isolated native PostgreSQL and synthetic adapter proof
+        run: bash scripts/test-topic-map-postgres.sh
+      - name: Governance and whitespace
+        run: |
+          bash scripts/check-project-governance.sh
+          git diff --check

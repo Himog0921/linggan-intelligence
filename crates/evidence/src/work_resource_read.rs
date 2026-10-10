@@ -179,65 +179,129 @@ pub async fn read_frozen_work_text_in_transaction(
     source_ref: Uuid,
     field: &str,
 ) -> Result<Vec<String>, WorkResourceReadError> {
-    match field {
-        "title" | "body" => {
-            let row: Option<(Option<String>,Option<String>)> = sqlx::query_as("SELECT detail.title,detail.body_text FROM linggan_material_content_detail detail JOIN linggan_runtime_record_disposition disposition ON disposition.package_ref=detail.package_ref AND disposition.record_ordinal=detail.record_ordinal WHERE detail.material_ref=$1 AND detail.content_public_ref=$2 AND disposition.disposition<>'quarantined'").bind(source_ref).bind(work_ref).fetch_optional(&mut **tx).await?;
-            if let Some((title, body)) = row {
-                return Ok(if field == "title" { title } else { body }
-                    .into_iter()
-                    .collect());
-            }
-            if field == "title" {
-                return Ok(sqlx::query_scalar("SELECT finding.title FROM linggan_material_discovery_finding finding JOIN linggan_runtime_record_disposition disposition ON disposition.package_ref=finding.package_ref AND disposition.record_ordinal=finding.record_ordinal WHERE finding.material_ref=$1 AND finding.content_public_ref=$2 AND disposition.disposition<>'quarantined' AND finding.title IS NOT NULL").bind(source_ref).bind(work_ref).fetch_all(&mut **tx).await?);
-            }
-            Ok(Vec::new())
-        }
-        "ocr" | "transcript" => {
-            let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text")
-                .fetch_one(&mut **tx)
-                .await?;
-            let mut resources =
-                crate::material_media_read::read_derivatives_batch(tx, &[work_ref], &as_of).await?;
-            let mut texts = Vec::new();
-            if let Some((derivatives, _, _, _, _)) = resources.remove(&work_ref) {
-                for d in derivatives {
-                    if d["jobRef"].as_str() != Some(&source_ref.to_string())
-                        || matches!(
-                            d["dispositionState"].as_str(),
-                            Some("WITHDRAWN_OR_RESTRICTED" | "OCR_RETIRED")
-                        )
-                    {
-                        continue;
-                    }
-                    if field == "transcript" && d["kind"] == "asr_text" {
-                        if let Some(text) = d["displayText"].as_str() {
-                            texts.push(text.into());
-                        }
-                    }
-                    if field == "ocr" {
-                        if d.pointer("/ocrLayering/cleanCorpusEligible")
-                            .and_then(serde_json::Value::as_bool)
-                            != Some(true)
-                        {
-                            continue;
-                        }
-                        if let Some(text) = d
-                            .pointer("/ocrLayering/imageSubstantiveText")
-                            .and_then(serde_json::Value::as_str)
-                        {
-                            texts.push(text.into());
-                        }
-                        // The exact hash retained by the caller chooses an accepted old layout;
-                        // current restriction above remains authoritative for the job and bytes.
-                        let old:Vec<String>=sqlx::query_scalar("SELECT layer.image_substantive_text FROM linggan_media_ocr_layout layout JOIN linggan_media_ocr_layering_result layer USING(layout_ref) JOIN linggan_media_derivative derivative ON derivative.derivative_ref=layout.ocr_derivative_ref WHERE derivative.job_ref=$1 AND layout.content_public_ref=$2 AND layer.state='ACCEPTED' AND layer.image_substantive_text IS NOT NULL").bind(source_ref).bind(work_ref).fetch_all(&mut **tx).await?;
-                        texts.extend(old);
-                    }
-                }
-            }
-            Ok(texts)
-        }
-        _ => Ok(Vec::new()),
+    Ok(
+        read_frozen_work_texts_in_transaction(tx, work_ref, &[(source_ref, field.into())])
+            .await?
+            .remove(&(source_ref, field.into()))
+            .unwrap_or_default(),
+    )
+}
+
+/// Resolve a finite saved decision's requested sources with one complete media
+/// pagination per work. Source text remains in canonical immutable records.
+pub async fn read_frozen_work_texts_in_transaction(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    work_ref: Uuid,
+    sources: &[(Uuid, String)],
+) -> Result<std::collections::HashMap<(Uuid, String), Vec<String>>, WorkResourceReadError> {
+    use std::collections::{HashMap, HashSet};
+    let requested: HashSet<_> = sources.iter().cloned().collect();
+    let mut texts = HashMap::new();
+    for (source, field) in requested
+        .iter()
+        .filter(|(_, field)| matches!(field.as_str(), "title" | "body"))
+    {
+        texts.insert(
+            (*source, field.clone()),
+            read_frozen_native_text(tx, work_ref, *source, field).await?,
+        );
     }
+    if requested
+        .iter()
+        .any(|(_, field)| matches!(field.as_str(), "ocr" | "transcript"))
+    {
+        texts.extend(read_frozen_media_texts(tx, work_ref, &requested).await?);
+    }
+    Ok(texts)
+}
+
+async fn read_frozen_native_text(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    work: Uuid,
+    source: Uuid,
+    field: &str,
+) -> Result<Vec<String>, WorkResourceReadError> {
+    let row: Option<(Option<String>,Option<String>)> = sqlx::query_as("SELECT detail.title,detail.body_text FROM linggan_material_content_detail detail JOIN linggan_runtime_record_disposition disposition ON disposition.package_ref=detail.package_ref AND disposition.record_ordinal=detail.record_ordinal WHERE detail.material_ref=$1 AND detail.content_public_ref=$2 AND disposition.disposition<>'quarantined'").bind(source).bind(work).fetch_optional(&mut **tx).await?;
+    if let Some((title, body)) = row {
+        return Ok(if field == "title" { title } else { body }
+            .into_iter()
+            .collect());
+    }
+    if field == "title" {
+        return Ok(sqlx::query_scalar("SELECT finding.title FROM linggan_material_discovery_finding finding JOIN linggan_runtime_record_disposition disposition ON disposition.package_ref=finding.package_ref AND disposition.record_ordinal=finding.record_ordinal WHERE finding.material_ref=$1 AND finding.content_public_ref=$2 AND disposition.disposition<>'quarantined' AND finding.title IS NOT NULL").bind(source).bind(work).fetch_all(&mut **tx).await?);
+    }
+    Ok(Vec::new())
+}
+
+async fn read_frozen_media_texts(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    work: Uuid,
+    requested: &std::collections::HashSet<(Uuid, String)>,
+) -> Result<std::collections::HashMap<(Uuid, String), Vec<String>>, WorkResourceReadError> {
+    use sqlx::Row;
+    use std::collections::HashMap;
+    let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text")
+        .fetch_one(&mut **tx)
+        .await?;
+    let items = crate::material_media_read::read_topic_derivatives_batch(tx, &[work], &as_of)
+        .await?
+        .remove(&work)
+        .unwrap_or_default();
+    let mut texts = HashMap::<(Uuid, String), Vec<String>>::new();
+    let mut qualified_ocr = HashMap::new();
+    for derivative in items {
+        if derivative["state"] != "ACQUIRED"
+            || matches!(
+                derivative["dispositionState"].as_str(),
+                Some("WITHDRAWN_OR_RESTRICTED" | "OCR_RETIRED")
+            )
+        {
+            continue;
+        }
+        let Some(source) = derivative["jobRef"].as_str().and_then(|s| s.parse().ok()) else {
+            continue;
+        };
+        if requested.contains(&(source, "transcript".into()))
+            && derivative["kind"] == "asr_text"
+            && let Some(text) = derivative["researchText"].as_str()
+        {
+            texts
+                .entry((source, "transcript".into()))
+                .or_default()
+                .push(text.into());
+        }
+        if requested.contains(&(source, "ocr".into()))
+            && derivative["ocrLayering"]["cleanCorpusEligible"] == true
+        {
+            if let Some(text) = derivative["ocrLayering"]["imageSubstantiveText"].as_str() {
+                texts
+                    .entry((source, "ocr".into()))
+                    .or_default()
+                    .push(text.into());
+            }
+            if let Some(reference) = derivative["derivativeRef"]
+                .as_str()
+                .and_then(|s| s.parse::<Uuid>().ok())
+            {
+                qualified_ocr.insert(reference, source);
+            }
+        }
+    }
+    let refs: Vec<_> = qualified_ocr.keys().copied().collect();
+    for refs in refs.chunks(256) {
+        // A qualified sibling in the same job cannot authorize another derivative.
+        let rows = sqlx::query("SELECT layout.ocr_derivative_ref,layer.image_substantive_text FROM linggan_media_ocr_layout layout JOIN linggan_media_ocr_layering_result layer USING(layout_ref) WHERE layout.ocr_derivative_ref=ANY($1) AND layout.content_public_ref=$2 AND layer.state='ACCEPTED' AND layer.image_substantive_text IS NOT NULL")
+            .bind(refs).bind(work).fetch_all(&mut **tx).await?;
+        for row in rows {
+            if let Some(source) = qualified_ocr.get(&row.get::<Uuid, _>("ocr_derivative_ref")) {
+                texts
+                    .entry((*source, "ocr".into()))
+                    .or_default()
+                    .push(row.get("image_substantive_text"));
+            }
+        }
+    }
+    Ok(texts)
 }
 
 /// Freeze exact canonical source identities and text hashes without persisting source text.

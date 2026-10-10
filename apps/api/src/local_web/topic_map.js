@@ -28,6 +28,11 @@
   let snapshot = null, progress = null, loading = false, readError = '', notice = '', pending = false;
   let dialog = null, dialogState = null, dialogStack = [], triggerElement = null, fetchEpoch = 0;
   const title = work => work.title || '标题尚未取得';
+  const readableMaterial = w => Boolean(w?.readable || w?.research?.readable);
+  const commentOnlyResearch = w => w?.research?.readable === true && w.research.authorSourceState === 'source_unavailable' && w.research.commentSourceState === 'available';
+  const authorUnavailable = w => w?.readable === false || w?.research?.authorSourceState === 'source_unavailable';
+  const readLabel = (w, label = '核对原文与讨论') => authorUnavailable(w) ? commentOnlyResearch(w) ? '查看已有评论与讨论' : '核对当前可用材料' : label;
+  const materialSourceNote = w => authorUnavailable(w) ? `<p class="lgi-tm-note">作者原文当前未取得或不可用。${commentOnlyResearch(w) ? '已有合格评论与讨论继续可读。' : '其他来源的可读范围以当前复核结果为准。'}</p>` : '';
   const topic = ref => list(snapshot?.topics).find(t => t.topicRef === ref);
   const work = ref => list(snapshot?.works).find(w => w.workRef === ref) || extraWorks.get(ref);
   const topicName = ref => topic(ref)?.displayName || '主题';
@@ -125,7 +130,7 @@
   }
   function overview() {
     const stats = topic(state.topicRef)?.statistics || snapshot.statistics;
-    return `<div class="lgi-tm-atlas">${tree()}<main class="lgi-tm-main">${identity()}${metrics(stats)}${coverage()}<div class="lgi-tm-work-tabs" aria-label="概览工作视角">${views.map(([id,name]) => tab(name,'tab',id,state.tab === id)).join('')}</div>${state.tab === 'structure' ? structure() : state.tab === 'patterns' ? patterns() : state.tab === 'sources' ? sources() : state.tab === 'candidates' ? candidates() : actionView()}${state.tab !== 'sources' && state.tab !== 'candidates' ? materialsSection() : ''}</main></div>`;
+    return `<div class="lgi-tm-atlas">${tree()}<main class="lgi-tm-main">${identity()}${topicBoundary(topic(state.topicRef))}${metrics(stats)}${coverage()}<div class="lgi-tm-work-tabs" aria-label="概览工作视角">${views.map(([id,name]) => tab(name,'tab',id,state.tab === id)).join('')}</div>${state.tab === 'structure' ? structure() : state.tab === 'patterns' ? patterns() : state.tab === 'sources' ? sources() : state.tab === 'candidates' ? candidates() : actionView()}${state.tab !== 'sources' && state.tab !== 'candidates' ? materialsSection() : ''}</main></div>`;
   }
   function children() { return list(snapshot?.topics).filter(t=>t.lifecycleState!=='superseded').filter(t => state.topicRef ? t.parentTopicRef === state.topicRef : !t.parentTopicRef); }
   function plotPlatform(stats = topic(state.topicRef)?.statistics || snapshot.statistics) {
@@ -162,21 +167,88 @@
     return `<section class="lgi-tm-section"><div class="lgi-tm-section-head"><div><h3>表现结构</h3><p>从整体分布检查常规与高位表现，不只看成功案例。</p></div>${plotSelect(stats)}</div><div class="lgi-tm-distribution-layout"><div class="lgi-tm-bin-list"><div class="lgi-tm-section-head"><strong>${esc(platformName(platform))} · 点赞分布</strong><span>${ns.length} 篇当前读取作品</span></div>${bins.map((b,i)=>`<button type="button" class="lgi-tm-bin-row" data-action="subset" data-id="${esc(b.refs.join(','))}" ${b.refs.length?'':'disabled'} aria-label="${b.label}，${b.refs.length}篇，查看作品"><span>${b.label}</span><span class="lgi-tm-bin-track"><i class="lgi-tm-bin-fill ${i===5?'is-missing':''}" style="width:${b.refs.length/max*100}%"></i></span><b class="lgi-tm-num">${b.refs.length}</b></button>`).join('')}</div><aside class="lgi-tm-dist-aside"><h4>常规表现与高位表现，相差多少？</h4><div class="lgi-tm-row">${badge(`中位赞 ${number(p.medianLikes)}`)}${badge(`P90 ${number(p.p90Likes)}`)}${badge(known(p.medianLikes)&&p.medianLikes>0&&known(p.p90Likes)?`${(p.p90Likes/p.medianLikes).toFixed(1)} 倍`:'倍数未判定')}</div><p>中位数描述样本中间位置，P90描述较高位置。比值用于检查分布差异，不预测再次发布的效果。</p><p class="lgi-tm-note">读数引用后端 ${number(p.workCount)} 篇统计范围；横条只描述当前返回的 ${ns.length} 篇作品。${number(p.unknownLikeCount)} 篇点赞未知不计为0，低互动不等于内容失败。</p>${btn('检查高表现参考来自谁','tab','sources','lgi-tm-quiet')}</aside></div></section>`;
   }
   function annotation(work) { return work.annotation && typeof work.annotation === 'object' ? work.annotation : {}; }
-  function citationText(w, citations) {
-    for (const c of list(citations)) {
-      const f=list(w.research?.fragments).find(f=>f.fragmentId===c.fragmentId), chars=Array.from(f?.text || '');
-      if(Number.isInteger(c.start)&&Number.isInteger(c.end)&&c.start>=0&&c.end>c.start&&c.end<=chars.length)return chars.slice(c.start,c.end).join('');
-    }
-    return '';
+  function topicBoundary(t, source = snapshot) {
+    if (!t) return '';
+    if(t.core?.sourceState === 'source_unavailable')return '<section class="lgi-tm-topic-boundary" aria-label="主题边界来源受限"><h3>主题定义的来源当前受限</h3><p>纳入、排除条件与定义关系暂不可展示。已有当前可读材料仍可核对，不能把来源受限解释为边界尚未定义。</p></section>';
+    const core=t.core, inclusion=list(core?.inclusionCriteria).filter(v=>typeof v==='string'&&v.trim()), exclusion=list(core?.exclusionCriteria).filter(v=>typeof v==='string'&&v.trim());
+    const origin=({machine_induced:'机器提炼的定义',manual:'人工维护的定义',legacy:'历史定义 · 边界未补齐'})[core?.definitionSource] || (core?'定义来源尚未取得':'历史定义 · 边界未补齐');
+    return `<section class="lgi-tm-topic-boundary" aria-label="主题纳入与排除边界"><div class="lgi-tm-section-head"><h3>这个主题包含什么？</h3>${badge(origin)}</div><div class="lgi-tm-criteria"><div><h4>纳入条件</h4>${inclusion.length?`<ul>${inclusion.map(v=>`<li>${esc(v)}</li>`).join('')}</ul>`:'<p class="lgi-tm-note">纳入边界尚未补齐，已有定义与材料继续可读。</p>'}</div><div><h4>排除条件</h4>${exclusion.length?`<ul>${exclusion.map(v=>`<li>${esc(v)}</li>`).join('')}</ul>`:'<p class="lgi-tm-note">排除边界尚未补齐，不能据名称认定范围。</p>'}</div></div>${core?`<p class="lgi-tm-note">当前范围 ${number(core.discussionCount)} 条独立讨论 · 支持 ${number(core.evidenceRoles?.support)} · 反例 ${number(core.evidenceRoles?.challenge)} · 背景 ${number(core.evidenceRoles?.context)}。按讨论计数，不代表作品数或人数；归入同一主题可以保留不同观点。</p>`:''}${relationDetails(core?.relations,source,'本主题')}</section>`;
   }
-  function discussionGroups(ns) {
-    const groups = new Map();
-    ns.forEach(w=>list(w.research?.output?.discussions).forEach(d=>{if(!d.label)return;if(!groups.has(d.label))groups.set(d.label,[]);groups.get(d.label).push({work:w,discussion:d});}));
-    return [...groups].map(([label,rows])=>({label,rows,works:[...new Map(rows.map(r=>[r.work.workRef,r.work])).values()]}));
+  function relationDetails(relations, source = snapshot, subject = '此讨论') {
+    const rows=list(relations).filter(r=>r&&typeof r==='object');
+    if(!rows.length)return '';
+    const names={equivalent:'含义相同',broader:`${subject}范围更宽`,narrower:`${subject}范围更细`,related:'相互关联',distinct:'边界不同',uncertain:'关系未确定'};
+    return `<details class="lgi-tm-core-details"><summary>与已有主题的关系 · ${rows.length}</summary>${rows.map(r=>{const t=list(source?.topics).find(t=>t.topicRef===r.topicRef),name=t?.displayName || r.displayName || r.label || '已有主题';return `<p>${r.topicRef?btn(esc(name),'topic',r.topicRef,'lgi-tm-title-link'):esc(name)} · ${esc(names[r.relation] || '关系未确定')}${r.reason?`<span class="lgi-tm-subline">${esc(r.reason)}</span>`:''}</p>`;}).join('')}<p class="lgi-tm-note">研究关系供核对，主题树按已保存的归属显示。</p></details>`;
+  }
+  function coverageState(w) {
+    const c=w?.research?.core?.coverage;
+    if(!c)return 'unknown';
+    const counts=[c.sourceChars,c.coveredChars,c.totalWindows,c.completedWindows], valid=counts.every(v=>Number.isInteger(v)&&v>=0);
+    return c.state==='complete'&&valid&&c.coveredChars===c.sourceChars&&c.completedWindows===c.totalWindows?'complete':c.state==='partial'||valid?'partial':'unknown';
+  }
+  function researchCoverage(w) {
+    if(!w?.research)return '';
+    const c=w.research.core?.coverage, status=coverageState(w);
+    if(!c)return `<p class="lgi-tm-note">${Array.isArray(w.research.core?.units)?'当前研究的处理范围尚未取得。':'旧研究的处理范围未记录，讨论边界尚未补齐。'}</p>`;
+    return `<p class="lgi-tm-research-coverage ${status==='partial'?'is-partial':''}"><strong>${status==='complete'?'当前可读来源已处理':status==='partial'?'部分来源已处理':'已处理范围尚未确认'}</strong><span>已处理 ${number(c.coveredChars)} / ${number(c.sourceChars)} 字符 · ${number(c.completedWindows)} / ${number(c.totalWindows)} 段来源</span>${status!=='complete'?'<span>已有结果可读，未处理部分的讨论与归属仍未知。</span>':'<span>覆盖范围限于本次可读来源，不代表平台全文或领域观察完整。</span>'}</p>`;
+  }
+  function researchCoverageSummary(ns) {
+    const rows=[...new Map(ns.map(w=>[w.workRef,w])).values()].filter(w=>w.research), counts={complete:0,partial:0,unknown:0};
+    rows.forEach(w=>counts[coverageState(w)]++);
+    return rows.length?`<p class="lgi-tm-note">${rows.length} 篇当前材料有研究结果：${counts.complete} 篇当前可读来源已处理 · ${counts.partial} 篇仅处理部分 · ${counts.unknown} 篇处理范围未确认。一个讨论可涉及多个主题，各组数量不相加为总量。</p>`:'';
+  }
+  function discussionUnits(w) {
+    const hasCore=Array.isArray(w?.research?.core?.units), rows=hasCore?w.research.core.units:list(w?.research?.output?.discussions), seen=new Set();
+    return rows.flatMap((d,index)=>{
+      if(!d||typeof d!=='object')return [];
+      const unitKey=hasCore&&typeof d.unitId==='string'&&d.unitId?d.unitId:JSON.stringify([w.workRef,'legacy',index]);
+      if(seen.has(unitKey))return [];seen.add(unitKey);
+      const candidates=hasCore?['matched','new'].includes(d.status)?list(d.assignments):[]:d.topicRef?[{topicRef:d.topicRef,definitionRef:d.definitionRef,label:d.label}]:[], assigned=new Set();
+      const assignments=candidates.filter(a=>{if(!a||typeof a!=='object')return false;const key=assignmentKey(a);if(!key||assigned.has(key))return false;assigned.add(key);return true;});
+      return [{...d,unitKey,assignments,legacy:!hasCore,evidence:list(d.evidence)}];
+    });
+  }
+  function assignmentKey(a) { return typeof a?.topicRef==='string'&&a.topicRef?`topic:${a.topicRef}`:typeof a?.definitionRef==='string'&&a.definitionRef?`definition:${a.definitionRef}`:''; }
+  function discussionKeys(w) { return new Set(discussionUnits(w).flatMap(d=>d.assignments.map(assignmentKey))); }
+  function sharesDiscussion(a,b) { const keys=discussionKeys(a);return [...discussionKeys(b)].some(key=>keys.has(key)); }
+  function locatedCitations(w, citations) {
+    const fragments=new Map(list(w?.research?.fragments).map(f=>[f.fragmentId,f])), seen=new Set();
+    return list(citations).flatMap(c=>{
+      if(!c||typeof c!=='object')return [];
+      const f=fragments.get(c.fragmentId), chars=Array.from(f?.text || ''), base=Number.isInteger(f?.start)?f.start:0;
+      if(!f||!Number.isInteger(c.start)||!Number.isInteger(c.end)||c.start<base||c.end<=c.start||c.end>base+chars.length)return [];
+      const key=JSON.stringify([c.fragmentId,c.start,c.end]);if(seen.has(key))return [];seen.add(key);
+      return [{...c,fragment:f,localStart:c.start-base,localEnd:c.end-base}];
+    });
+  }
+  function citationText(w, citations) {
+    const c=locatedCitations(w,citations)[0];
+    return c?Array.from(c.fragment.text).slice(c.localStart,c.localEnd).join(''):'';
+  }
+  function discussionGroups(ns, source = dialogState?.snapshot || snapshot) {
+    const groups=new Map();
+    ns.forEach(w=>discussionUnits(w).forEach(d=>(d.assignments.length?d.assignments:[null]).forEach(a=>{
+      const key=a?assignmentKey(a):JSON.stringify(['unassigned',w.workRef,d.unitKey]), t=list(source?.topics).find(t=>a?.topicRef&&t.topicRef===a.topicRef);
+      if(!groups.has(key))groups.set(key,{key,topicRef:a?.topicRef || '',label:t?.displayName || a?.label || d.label || d.statement || '尚未命名的讨论',canonical:Boolean(a),rows:[],seen:new Set()});
+      const group=groups.get(key), rowKey=JSON.stringify([w.workRef,d.unitKey]);if(group.seen.has(rowKey))return;group.seen.add(rowKey);
+      group.rows.push({work:w,discussion:d,assignment:a});
+    })));
+    return [...groups.values()].map(g=>({...g,works:[...new Map(g.rows.map(r=>[r.work.workRef,r.work])).values()],evidenceCount:new Set(g.rows.flatMap(r=>locatedCitations(r.work,r.discussion.evidence).map(c=>JSON.stringify([r.work.workRef,c.fragmentId,c.start,c.end])))).size}));
+  }
+  function discussionUnitView(row, reader = null) {
+    const w=row.work,d=row.discussion, source=dialogState?.snapshot || snapshot;
+    const speaker=({author:'作者表达',commenter:'评论者原声',quoted:'引用或转述',unknown:'来源角色未知'})[d.speakerRole] || '来源角色未知';
+    const role=({support:'支持材料',challenge:'反例或不同经验',context:'背景材料'})[d.evidenceRole] || '材料作用未判定';
+    const status=d.legacy?'旧研究 · 边界未补齐':({matched:'已判断归属',new:'新方向候选',uncertain:'归属尚未确定',out_of_scope:'当前领域外'})[d.status] || '归属尚未确定';
+    const citations=locatedCitations(w,d.evidence), quote=citationText(w,d.evidence);
+    return `<section class="lgi-tm-discussion-unit"><div class="lgi-tm-row">${badge(speaker)}${badge(role)}${badge(status)}</div><h4>${esc(d.label || '具体讨论')}</h4>${d.statement?`<p>${esc(d.statement)}</p>`:''}${d.rationale?`<p class="lgi-tm-note">材料依据：${esc(d.rationale)}</p>`:''}${d.assignments.length?`<div class="lgi-tm-unit-assignments">${d.assignments.map(a=>{const t=list(source?.topics).find(t=>t.topicRef===a.topicRef);return `<p>归属主题：${a.topicRef?btn(esc(t?.displayName || a.label || '已有主题'),'topic',a.topicRef,'lgi-tm-title-link'):esc(a.label || '已有主题')}<span class="lgi-tm-subline">归属理由：${esc(a.reason || (d.legacy?'旧研究未记录具体归属理由。':'归属理由尚未取得。'))}</span></p>`;}).join('')}${d.assignments.length>1?'<p class="lgi-tm-note">同一条讨论涉及多个主题，讨论总量只计一次。</p>':''}</div>`:d.legacy?'<p class="lgi-tm-note">尚无可核对的主题身份，同名讨论分别保留。</p>':'<p class="lgi-tm-note">尚未归入主题，已有讨论与证据保留。</p>'}${d.reason?`<p class="lgi-tm-note">判断说明：${esc(d.reason)}</p>`:''}${quote?`<p class="lgi-tm-note">原文片段 · ${esc(sourceKind(citations[0].fragment.sourceKind || citations[0].fragment.field))}</p><blockquote>${esc(quote)}</blockquote>`:'<p class="lgi-tm-note">当前没有可展示的精确引用片段，可继续核对原作。</p>'}${reader?`<div class="lgi-tm-row">${citations.map(c=>`<a class="lgi-tm-button lgi-tm-quiet" href="#${encodeURIComponent(readerCitationTarget(w,c,reader.raw))}">${esc(sourceKind(c.fragment.sourceKind || c.fragment.field))} · 第 ${number(c.start+1)}–${number(c.end)} 字</a>`).join('')}</div>`:btn(`${esc(title(w))} · ${readLabel(w,'核对原文')}${citations.length?`与 ${citations.length} 条依据`:''}`,'reader',w.workRef,'lgi-tm-quiet')}${relationDetails(d.relations,source)}</section>`;
+  }
+  function discussionGroupDetails(g) {
+    return `<details class="lgi-tm-core-details"><summary>查看 ${g.rows.length} 条具体讨论、来源与归属依据</summary>${g.rows.map(r=>discussionUnitView(r)).join('')}</details>`;
   }
   function patterns() {
     const ns=selectedWorks(), groups=discussionGroups(ns), tasks=ns.flatMap(w=>list(w.research?.output?.angles).filter(a=>a.answerTask).map(a=>({work:w,angle:a})));
-    return `<div class="lgi-tm-section-head"><div><h3>这些内容，实际在怎样讲？</h3><p>当前研究保留具体讨论、场景与回答任务；经验自述、方法说明等讲法分类尚未形成，不用视频或图文形态替代。</p></div></div><div class="lgi-tm-pattern-grid">${groups.map(g=>{const quote=citationText(g.rows[0].work,g.rows[0].discussion.evidence);return `<article class="lgi-tm-panel"><span class="lgi-tm-eyebrow">已研究的具体讨论</span><h4>${esc(g.label)}</h4><p>${g.works.length} 篇当前读取作品 · ${g.rows.reduce((n,r)=>n+list(r.discussion.evidence).length,0)} 条定位依据</p>${quote?`<blockquote>${esc(quote)}</blockquote>`:'<p class="lgi-tm-note">当前没有可展示的精确引用片段，原作品可继续核对。</p>'}${btn('查看这些作品','subset',g.works.map(w=>w.workRef).join(','),'lgi-tm-quiet')}</article>`;}).join('') || empty('讲法分类与具体讨论尚未形成','原文仍然可读；不推断未研究作品的表达方式。')}</div><section class="lgi-tm-section"><h3>哪些具体问题已形成回答任务？</h3><div class="lgi-tm-pattern-grid">${tasks.slice(0,6).map(({work,angle})=>`<article class="lgi-tm-panel"><h4>${esc(angle.label)}</h4><p>${esc(angle.answerTask)}</p>${btn('核对原回答与依据','reader',work.workRef,'lgi-tm-quiet')}</article>`).join('') || empty('当前尚无可引用的回答任务','不能把用户评论问题自动当作原作已有回答。')}</div></section><section class="lgi-tm-section"><h3>具体讨论与场景</h3>${sceneList(ns)}</section>`;
+    return `<div class="lgi-tm-section-head"><div><h3>这些内容，实际在怎样讲？</h3><p>当前研究保留具体讨论、场景与回答任务；经验自述、方法说明等讲法分类尚未形成，不用视频或图文形态替代。</p>${researchCoverageSummary(ns)}</div></div><div class="lgi-tm-pattern-grid">${groups.map(g=>`<article class="lgi-tm-panel"><span class="lgi-tm-eyebrow">${g.canonical?'按已保存主题身份归组':'归属待核对的独立讨论'}</span><h4>${esc(g.label)}</h4><p>${g.rows.length} 条独立讨论 · ${g.works.length} 篇当前读取作品 · ${g.evidenceCount} 条去重定位依据</p>${discussionGroupDetails(g)}${btn('查看这些作品','subset',g.works.map(w=>w.workRef).join(','),'lgi-tm-quiet')}</article>`).join('') || empty('讲法分类与具体讨论尚未形成','原文仍然可读；不推断未研究作品的表达方式。')}</div><section class="lgi-tm-section"><h3>哪些具体问题已形成回答任务？</h3><div class="lgi-tm-pattern-grid">${tasks.slice(0,6).map(({work,angle})=>`<article class="lgi-tm-panel"><h4>${esc(angle.label)}</h4><p>${esc(angle.answerTask)}</p>${btn('核对原回答与依据','reader',work.workRef,'lgi-tm-quiet')}</article>`).join('') || empty('当前尚无可引用的回答任务','不能把用户评论问题自动当作原作已有回答。')}</div></section><section class="lgi-tm-section"><h3>具体讨论与场景</h3>${sceneList(ns)}</section>`;
   }
   function sceneList(ns) {
     const groups=new Map();
@@ -216,7 +288,7 @@
   function avatar(name) { const initials=Array.from(typeof name==='string'?name.trim():'').slice(0,2).join('');return `<span class="lgi-tm-avatar" aria-hidden="true">${esc(initials || '·')}</span>`; }
   function card(w) {
     const cover = coverUrl(w);
-    return `<article class="lgi-tm-material"><button type="button" class="lgi-tm-cover" data-action="reader" data-id="${esc(w.workRef)}" aria-label="打开${esc(title(w))}">${cover ? `<img src="${esc(cover)}" loading="lazy" alt="${esc(title(w))}的已取得封面">` : '<span>▧<br>封面尚未采集</span>'}</button><div class="lgi-tm-row lgi-tm-card-meta"><span>${esc(platformName(w.platform))}</span>${w.own ? badge(w.ownBreakout ? '我方手动爆款' : '我方作品',w.ownBreakout) : ''}</div><h4>${btn(esc(title(w)),'reader',w.workRef,'lgi-tm-title-link')}</h4><p class="lgi-tm-author" title="${esc(w.creatorDisplayName || '作者未知')}">${avatar(w.creatorDisplayName)}${esc(w.creatorDisplayName || '作者未知')}</p><p class="lgi-tm-note">${esc(w.publishedAtSourceText || w.publishedAt || '发布时间未知')}</p><div class="lgi-tm-interactions"><span title="点赞精确值 ${number(w.likes)}">赞 <b>${number(w.likes)}</b></span><span title="收藏精确值 ${number(w.collects)}">藏 <b>${number(w.collects)}</b></span><span title="评论精确值 ${number(w.comments)}">评 <b>${number(w.comments)}</b></span><span title="分享精确值 ${number(w.shares)}">分享 <b>${number(w.shares)}</b></span></div></article>`;
+    return `<article class="lgi-tm-material"><button type="button" class="lgi-tm-cover" data-action="reader" data-id="${esc(w.workRef)}" aria-label="打开${esc(title(w))}">${cover ? `<img src="${esc(cover)}" loading="lazy" alt="${esc(title(w))}的已取得封面">` : '<span>▧<br>封面尚未采集</span>'}</button><div class="lgi-tm-row lgi-tm-card-meta"><span>${esc(platformName(w.platform))}</span>${w.own ? badge(w.ownBreakout ? '我方手动爆款' : '我方作品',w.ownBreakout) : ''}</div><h4>${btn(esc(title(w)),'reader',w.workRef,'lgi-tm-title-link')}</h4>${materialSourceNote(w)}<p class="lgi-tm-author" title="${esc(w.creatorDisplayName || '作者未知')}">${avatar(w.creatorDisplayName)}${esc(w.creatorDisplayName || '作者未知')}</p><p class="lgi-tm-note">${esc(w.publishedAtSourceText || w.publishedAt || '发布时间未知')}</p><div class="lgi-tm-interactions"><span title="点赞精确值 ${number(w.likes)}">赞 <b>${number(w.likes)}</b></span><span title="收藏精确值 ${number(w.collects)}">藏 <b>${number(w.collects)}</b></span><span title="评论精确值 ${number(w.comments)}">评 <b>${number(w.comments)}</b></span><span title="分享精确值 ${number(w.shares)}">分享 <b>${number(w.shares)}</b></span></div></article>`;
   }
   function materialsSection() {
     const ns = sortedMaterials(selectedWorks());
@@ -331,7 +403,7 @@
     const qualified=values[2].status==='fulfilled'?list(values[2].value?.works).find(w=>w.workRef===reader.work.workRef):null;
     reader.qualificationError=values[2].status==='rejected'?values[2].reason.message:!qualified?'当前范围未返回这篇作品的来源资格，旧研究不继续展示。':'';
     reader.work=qualified?{...qualified,annotation:null}:unreadResearchWork(reader.work);
-    if(reader.resourceError||reader.qualificationError)reader.work=unreadResearchWork(reader.work);
+    if(reader.qualificationError||(reader.resourceError&&!commentOnlyResearch(reader.work)))reader.work=unreadResearchWork(reader.work);
     reader.loading=false;
   }
   async function readWork(ref) {
@@ -344,41 +416,54 @@
     if(dialogState===current)drawDialog();
   }
   function fragmentText(fragment) { return typeof fragment === 'string' ? fragment : fragment?.text || ''; }
-  function sourceKind(kind) { return ({detail_body:'作者正文',ocr_text:'图片OCR',image_substantive_text:'图片原文',frame_ocr_text:'视频帧OCR',asr_text:'音视频转写',ocr:'图片OCR',transcript:'音视频转写',title:'作品标题',comment_body:'评论原声',comment:'评论原声',clean_comment:'评论原声',unresearched_comment:'评论原声',studied_comment:'评论原声',body:'作者正文'}[kind] || '来源片段'); }
+  function sourceKind(kind) { return ({detail_body:'作者正文',ocr_text:'图片OCR',image_substantive_text:'图片原文',frame_ocr_text:'视频帧OCR',asr_text:'音视频转写',ocr:'图片OCR',transcript:'音视频转写',title:'作品标题',comment_body:'评论原声',comment:'评论原声',clean_comment:'评论原声',unresearched_comment:'评论原声',studied_comment:'评论原声',parent_comment_context:'父评论上下文',body:'作者正文'}[kind] || '来源片段'); }
   function highlighted(text, spans = []) {
     const chars = Array.from(text || ''), valid = list(spans).filter(s => Number.isInteger(s.start) && Number.isInteger(s.end) && s.start >= 0 && s.end > s.start && s.end <= chars.length).sort((a,b) => a.start - b.start);
+    const merged=[];valid.forEach(s=>{const previous=merged[merged.length-1];if(previous&&s.start<=previous.end)previous.end=Math.max(previous.end,s.end);else merged.push({start:s.start,end:s.end});});
     let position = 0, out = '';
-    valid.forEach(s => { if (s.start < position) return; out += esc(chars.slice(position,s.start).join('')) + `<mark>${esc(chars.slice(s.start,s.end).join(''))}</mark>`; position = s.end; });
+    merged.forEach(s => { out += esc(chars.slice(position,s.start).join('')) + `<mark>${esc(chars.slice(s.start,s.end).join(''))}</mark>`; position = s.end; });
     return out + esc(chars.slice(position).join(''));
+  }
+  function readerFragmentInBody(w,f,raw) {
+    if(f.field!=='body'||!String(f.fragmentId).startsWith(`${w.workRef}.body.`)||!raw)return false;
+    const base=Number.isInteger(f.start)?f.start:0, text=fragmentText(f);
+    return Boolean(text)&&Array.from(raw).slice(base,base+Array.from(text).length).join('')===text;
+  }
+  function readerTitleFragment(w,f) { return f.field==='title'&&String(f.fragmentId).startsWith(`${w.workRef}.title.`)&&fragmentText(f)===title(w); }
+  function readerCitationTarget(w,c,raw) {
+    return readerFragmentInBody(w,c.fragment,raw)?`lgi-tm-source-body-${w.workRef}`:readerTitleFragment(w,c.fragment)?`lgi-tm-source-title-${w.workRef}`:`lgi-tm-source-fragment-${c.fragmentId}`;
+  }
+  function readerDiscussions(w,raw) {
+    if(!w.research)return '';
+    const units=discussionUnits(w);
+    return `${researchCoverage(w)}<section class="lgi-tm-reader-discussions"><h4>具体讨论与主题归属</h4>${units.length?units.map(d=>discussionUnitView({work:w,discussion:d},{raw})).join(''):empty(Array.isArray(w.research.core?.units)?'当前已处理范围未形成具体讨论':'旧研究尚无具体讨论','已有原文与其他研究结果继续可读。')}</section>`;
   }
   function readerDialog(reader = dialogState) {
     const w = reader.work, r = reader.resource;
-    const item = r?.item, research=!reader.loading&&!reader.resourceError&&!reader.qualificationError?w.research:null, body=item?.inspector?.detailCurrent?.body?.value;
-    const raw=body || fragmentText(item?.evidenceFragment);
-    const fragments=list(research?.fragments).filter(f=>!((f.field==='body'&&raw&&raw.includes(fragmentText(f)))||(f.field==='title'&&fragmentText(f)===title(w))));
+    const item = r?.item, research=!reader.loading&&!reader.qualificationError&&(!reader.resourceError||commentOnlyResearch(w))?w.research:null, body=item?.inspector?.detailCurrent?.body?.value;
+    const raw=w.readable===false?'':body || fragmentText(item?.evidenceFragment);
+    const fragments=list(research?.fragments).filter(f=>!(readerFragmentInBody(w,f,raw)||readerTitleFragment(w,f)));
     const comments = list(reader.commentResource?.items);
     const source = '';
-    const analysis=research?.output || {};
-    return `<div class="lgi-tm-reader-head"><div><h3>${esc(title(w))}</h3><p>${avatar(w.creatorDisplayName)}${esc(w.creatorDisplayName || '作者未知')} · ${esc(platformName(w.platform))} · ${esc(w.publishedAtSourceText || w.publishedAt || '发布时间未知')}</p><div class="lgi-tm-row">${badge(w.titleSource === 'cover_ocr' ? '标题来自封面OCR' : '作品标题')}${w.own ? btn(w.ownBreakout ? '取消我方爆款标记' : '标记我方爆款','breakout',w.workRef,'', 'data-mutation') : ''}${source ? `<a class="lgi-tm-button" href="${esc(source)}" target="_blank" rel="noopener noreferrer">打开来源页面</a>` : ''}</div></div><div class="lgi-tm-interactions">赞 ${number(w.likes)} · 藏 ${number(w.collects)} · 评 ${number(w.comments)} · 分享 ${number(w.shares)}</div></div><div class="lgi-tm-reader-layout"><section><h4>原文与可定位片段</h4>${reader.loading ? '<p role="status">正在复核原文、评论与研究来源资格；旧研究片段和解释暂不展示。</p>' : ''}${reader.resourceError ? `<p class="lgi-tm-read-error">原文读取未成功：${esc(reader.resourceError)}</p>` : ''}${raw ? `<div class="lgi-tm-original">${highlighted(raw,bodyCitations(w))}</div>${!body ? '<p class="lgi-tm-note">当前为有界来源片段；完整原文读取与来源资格以材料检查器为准。</p>' : ''}` : empty('当前没有可读取的正文片段','缺少正文不等于原作没有回应。')}${fragments.map(f => `<article class="lgi-tm-fragment"><span>${esc(sourceKind(f.sourceKind || f.field))}</span><blockquote>${highlighted(fragmentText(f),citationSpans(w,f.fragmentId))}</blockquote></article>`).join('')}<a class="lgi-tm-button" href="/corpus/evidence?work=${encodeURIComponent(w.workRef)}&domain=${encodeURIComponent(state.domainRef)}">在材料检查器定位</a></section><aside class="lgi-tm-analysis"><h4>模型解释 / 已保存版本</h4>${reader.qualificationError ? `<p class="lgi-tm-read-error">研究来源资格复核未完成：${esc(reader.qualificationError)}</p>` : ''}${analysis.journey?.rationale ? `<p>${esc(analysis.journey.rationale)}</p>` : '<p>当前没有通过来源资格检查的可引用研究解释，不用旧摘要代替原声。</p>'}<p>${esc(stageNames[analysis.journey?.mainStage] || otherNames[analysis.journey?.mainStage] || '阶段解释未取得')} · ${esc(list(analysis.journey?.overlays).map(v => v === 'obstruction_recurrence' ? '受阻与反复' : '环境转换与交接').join('、'))}</p>${list(analysis.limitations).map(t => `<p class="lgi-tm-note">${esc(t)}</p>`).join('')}<h4>已有回应关系</h4>${list(analysis.responseMatches).map(m => `<p>${esc(({direct:'有直接回应依据',partial:'部分回应',unmatched:'未找到匹配回应',unknown:'回应未知',not_applicable:'当前不适用'})[m.status] || m.status)}</p>`).join('') || '<p>回应尚未研究，不能把评论问题自动当原作回答。</p>'}</aside></div><section class="lgi-tm-section"><div class="lgi-tm-section-head"><div><h3>已有评论原声</h3><p>评论条数不等于人数，作者观点与评论分别保留来源。</p></div>${btn('深入看这篇的讨论','deep-comments',w.workRef,'', 'data-mutation')}</div>${reader.commentError ? `<p class="lgi-tm-read-error">评论读取未成功：${esc(reader.commentError)}</p>` : ''}<p class="lgi-tm-note">当前展示 ${comments.length} / ${number(reader.commentResource?.total)} 条当前可读评论。</p>${comments.length ? comments.map(c => `<article class="lgi-tm-comment"><blockquote>${esc(c.body || '正文未知')}</blockquote><p>${esc('评论作者身份已隐去')} · ${esc(c.sourceRef || '')}</p>${c.parentText ? `<details><summary>父评论上下文</summary><blockquote>${esc(c.parentText)}</blockquote></details>` : ''}</article>`).join('') : empty(reader.loading ? '评论正在读取' : '当前没有可展示的已有评论','不会为了填满原声区域发起采集。')}${reader.commentResource?.nextCursor ? btn('读取下一页已有评论','comments-more') : ''}</section>`;
+    const analysis=research?.output || {}, qualifiedWork={...w,research};
+    return `<div class="lgi-tm-reader-head"><div><h3 id="lgi-tm-source-title-${esc(w.workRef)}">${esc(title(w))}</h3>${materialSourceNote(w)}<p>${avatar(w.creatorDisplayName)}${esc(w.creatorDisplayName || '作者未知')} · ${esc(platformName(w.platform))} · ${esc(w.publishedAtSourceText || w.publishedAt || '发布时间未知')}</p><div class="lgi-tm-row">${badge(w.titleSource === 'cover_ocr' ? '标题来自封面OCR' : '作品标题')}${w.own ? btn(w.ownBreakout ? '取消我方爆款标记' : '标记我方爆款','breakout',w.workRef,'', 'data-mutation') : ''}${source ? `<a class="lgi-tm-button" href="${esc(source)}" target="_blank" rel="noopener noreferrer">打开来源页面</a>` : ''}</div></div><div class="lgi-tm-interactions">赞 ${number(w.likes)} · 藏 ${number(w.collects)} · 评 ${number(w.comments)} · 分享 ${number(w.shares)}</div></div><div class="lgi-tm-reader-layout"><section><h4>原文与可定位片段</h4>${reader.loading ? '<p role="status">正在复核原文、评论与研究来源资格；旧研究片段和解释暂不展示。</p>' : ''}${reader.resourceError ? `<p class="lgi-tm-read-error">原文读取未成功：${esc(reader.resourceError)}</p>` : ''}${raw ? `<div class="lgi-tm-original" id="lgi-tm-source-body-${esc(w.workRef)}">${highlighted(raw,bodyCitations(qualifiedWork,raw))}</div>${!body ? '<p class="lgi-tm-note">当前为有界来源片段；完整原文读取与来源资格以材料检查器为准。</p>' : ''}` : empty('当前没有可读取的正文片段','缺少正文不等于原作没有回应。')}${fragments.map(f => `<article class="lgi-tm-fragment" id="lgi-tm-source-fragment-${esc(f.fragmentId)}"><span>${esc(sourceKind(f.sourceKind || f.field))}</span><blockquote>${highlighted(fragmentText(f),citationSpans(qualifiedWork,f.fragmentId))}</blockquote></article>`).join('')}<a class="lgi-tm-button" href="/corpus/evidence?work=${encodeURIComponent(w.workRef)}&domain=${encodeURIComponent(state.domainRef)}">在材料检查器定位</a></section><aside class="lgi-tm-analysis">${readerDiscussions(qualifiedWork,raw)}<h4>模型解释 / 已保存版本</h4>${reader.qualificationError ? `<p class="lgi-tm-read-error">研究来源资格复核未完成：${esc(reader.qualificationError)}</p>` : ''}${analysis.journey?.rationale ? `<p>${esc(analysis.journey.rationale)}</p>` : '<p>当前没有通过来源资格检查的可引用研究解释，不用旧摘要代替原声。</p>'}<p>${esc(stageNames[analysis.journey?.mainStage] || otherNames[analysis.journey?.mainStage] || '阶段解释未取得')} · ${esc(list(analysis.journey?.overlays).map(v => v === 'obstruction_recurrence' ? '受阻与反复' : '环境转换与交接').join('、'))}</p>${list(analysis.limitations).map(t => `<p class="lgi-tm-note">${esc(t)}</p>`).join('')}<h4>已有回应关系</h4>${list(analysis.responseMatches).map(m => `<p>${esc(({direct:'有直接回应依据',partial:'部分回应',unmatched:'未找到匹配回应',unknown:'回应未知',not_applicable:'当前不适用'})[m.status] || m.status)}</p>`).join('') || '<p>回应尚未研究，不能把评论问题自动当原作回答。</p>'}</aside></div><section class="lgi-tm-section"><div class="lgi-tm-section-head"><div><h3>已有评论原声</h3><p>评论条数不等于人数，作者观点与评论分别保留来源。</p></div>${btn('深入看这篇的讨论','deep-comments',w.workRef,'', 'data-mutation')}</div>${reader.commentError ? `<p class="lgi-tm-read-error">评论读取未成功：${esc(reader.commentError)}</p>` : ''}<p class="lgi-tm-note">当前展示 ${comments.length} / ${number(reader.commentResource?.total)} 条当前可读评论。</p>${comments.length ? comments.map(c => `<article class="lgi-tm-comment"><blockquote>${esc(c.body || '正文未知')}</blockquote><p>${esc('评论作者身份已隐去')} · ${esc(c.sourceRef || '')}</p>${c.parentText ? `<details><summary>父评论上下文</summary><blockquote>${esc(c.parentText)}</blockquote></details>` : ''}</article>`).join('') : empty(reader.loading ? '评论正在读取' : '当前没有可展示的已有评论','不会为了填满原声区域发起采集。')}${reader.commentResource?.nextCursor ? btn('读取下一页已有评论','comments-more') : ''}</section>`;
   }
   function curated(ref, source = snapshot) {
     const t = list(source.topics).find(t => t.topicRef === ref);
-    const candidates = list(source.works).filter(w => w.readable && (!t || list(w.topicRefs).includes(ref) || list(t.workRefs).includes(w.workRef)));
+    const candidates = list(source.works).filter(w => readableMaterial(w) && (!t || list(w.topicRefs).includes(ref) || list(t.workRefs).includes(w.workRef)));
     const recent = new Set(list(source.scope.recentReferenceWorkRefs));
     const eligible = candidates.filter(w => w.own ? Boolean(w.publishedAt || w.publishedAtSourceText) : recent.has(w.workRef));
     const high = eligible.filter(w => w.own ? w.ownBreakout : (known(w.followerCount) && w.followerCount <= 1000 && known(w.likes) && w.likes >= 500) || (known(platformStats(source.statistics).find(p => p.platform === w.platform)?.highPerformanceThreshold) && known(w.likes) && w.likes >= platformStats(source.statistics).find(p => p.platform === w.platform).highPerformanceThreshold));
     high.sort((a,b) => Number(b.ownBreakout)-Number(a.ownBreakout) || a.platform.localeCompare(b.platform) || (b.likes ?? -1)-(a.likes ?? -1));
     const picked = high.slice(0,10);
-    const labels = new Set(picked.flatMap(w => list(w.research?.output?.discussions).map(d => `${w.platform}|${d.label}`)));
-    const contrasts = eligible.filter(w => !picked.some(p => p.workRef === w.workRef) && list(w.research?.output?.discussions).some(d => labels.has(`${w.platform}|${d.label}`)));
+    const contrasts = eligible.filter(w => !picked.some(p => p.workRef === w.workRef) && picked.some(p=>p.platform===w.platform&&sharesDiscussion(p,w)));
     if (!picked.length) return eligible.slice().sort((a,b) => String(b.publishedAt || '').localeCompare(String(a.publishedAt || ''))).slice(0,3);
     const result = [], chosen = new Set();
     const add = w => { if (result.length < 10 && !chosen.has(w.workRef)) { result.push(w); chosen.add(w.workRef); } };
     for (const sample of picked) {
       add(sample);
       if (!sample.own) {
-        const discussions = new Set(list(sample.research?.output?.discussions).map(d => d.label));
-        contrasts.filter(w => w.own && w.platform === sample.platform && list(w.research?.output?.discussions).some(d => discussions.has(d.label))).forEach(add);
+        contrasts.filter(w => w.own && w.platform === sample.platform && sharesDiscussion(sample,w)).forEach(add);
       }
     }
     contrasts.forEach(add);
@@ -390,30 +475,30 @@
   }
   function analysisOutputs(ns) { return ns.map(w => ({work:w,output:w.research?.output || {}})); }
   function judgmentDialog() {
-    const ref=dialogState.topicRef,t=topic(ref),ns=dialogState.works || curated(ref), source=dialogState.snapshot || snapshot, allOwn=ownTopicWorks(ref,source), mode=dialogState.tab || 'discussion';
+    const ref=dialogState.topicRef,source=dialogState.snapshot || snapshot,t=list(source.topics).find(t=>t.topicRef===ref) || topic(ref),ns=dialogState.works || curated(ref),allOwn=ownTopicWorks(ref,source),mode=dialogState.tab || 'discussion';
     const external=list(source.works).filter(w=>!w.own&&list(source.scope.recentReferenceWorkRefs).includes(w.workRef));
     const tabs=[['discussion','方向与讨论'],['samples',`精选样本 · ${ns.length}/10`],['own','我方对照与复用'],['angles','角度与标题']];
-    return `<div class="lgi-tm-object-head"><div><span class="lgi-tm-eyebrow">方向判断 · 定义 v${number(t?.definitionVersion)}</span><h3>${esc(t?.displayName || '当前方向')}</h3><p>${esc(t?.definitionText)}</p><p>我方全部发布历史 / 外部${state.referenceWindowDays==='0'?'全部历史':'近'+state.referenceWindowDays+'天发布'}参考；独立于概览统计窗口。</p></div>${btn('查看全部材料','materials')}</div>${dialogState.loading ? '<p role="status">正在补齐全历史我方作品与独立外部参考范围，已有材料先显示。</p>' : ''}${dialogState.readError ? `<p class="lgi-tm-read-error">完整范围读取未成功：${esc(dialogState.readError)}</p>` : ''}<div class="lgi-tm-judge-facts"><div><strong>${list(source.works).length}</strong><span>篇当前相关材料</span></div><div><strong>${allOwn.length}</strong><span>篇已确认我方发布</span></div><div><strong>${external.filter(w=>known(w.followerCount)&&w.followerCount<=1000&&known(w.likes)&&w.likes>=500).length}</strong><span>篇近期低粉高赞参考</span></div></div><nav class="lgi-tm-work-tabs" aria-label="选题判断内容">${tabs.map(([id,name])=>tab(name,'judge-tab',id,mode===id)).join('')}</nav><div class="lgi-tm-judgment-grid"><div class="lgi-tm-judgment-main">${mode==='samples'?sampleView(ns):mode==='own' ? ownView(ref,allOwn,ns) : mode==='angles' ? anglesView(ns) : discussionsView(ns)}</div><aside class="lgi-tm-judgment-rail"><section class="lgi-tm-rail-box"><h3>这一轮，先判断什么？</h3><p>从同题高表现中找借鉴，用同讨论对照检查条件。先看原文，再决定角度。</p><div class="lgi-tm-rail-stats"><div><b>${ns.length}</b><span>精选作品 / 最多10</span></div><div><b>${ns.reduce((n,w)=>n+list(w.research?.fragments).filter(f=>String(f.field).endsWith('comment')).length,0)}</b><span>可定位的评论来源片段</span></div></div>${btn(mode==='angles'?'回到材料对照':'找角度与标题','judge-tab',mode==='angles'?'samples':'angles','lgi-tm-primary')}${btn('查看全部相关材料','materials','','lgi-tm-quiet')}</section><section class="lgi-tm-rail-box"><h3>依据与资料补充</h3><div class="lgi-tm-rail-links">${btn('高表现参考来自谁','judge-sources')}${btn('本次补充与真实进度','capture',ref)}${btn('放回旅程地图','judge-to-journey',ref)}${btn('查看有限产品机会','judge-product',ref)}</div><p>保存只保留方向与依据，不新建监控。反例和材料不足都继续保留。</p></section><section class="lgi-tm-rail-box"><h3>已有结果继续可读</h3><p>研究仅在明确预算与当前最多10篇冻结集合内启动。</p>${btn('研究当前精选','start-topic-research',ref,'', 'data-mutation')}${btn('研究进度与设置','research','','lgi-tm-quiet')}</section></aside></div>`;
+    return `<div class="lgi-tm-object-head"><div><span class="lgi-tm-eyebrow">方向判断 · 定义 v${number(t?.definitionVersion)}</span><h3>${esc(t?.displayName || '当前方向')}</h3><p>${esc(t?.definitionText)}</p><p>我方全部发布历史 / 外部${state.referenceWindowDays==='0'?'全部历史':'近'+state.referenceWindowDays+'天发布'}参考；独立于概览统计窗口。</p></div>${btn('查看全部材料','materials')}</div>${topicBoundary(t,source)}${dialogState.loading ? '<p role="status">正在补齐全历史我方作品与独立外部参考范围，已有材料先显示。</p>' : ''}${dialogState.readError ? `<p class="lgi-tm-read-error">完整范围读取未成功：${esc(dialogState.readError)}</p>` : ''}<div class="lgi-tm-judge-facts"><div><strong>${list(source.works).length}</strong><span>篇当前相关材料</span></div><div><strong>${allOwn.length}</strong><span>篇已确认我方发布</span></div><div><strong>${external.filter(w=>known(w.followerCount)&&w.followerCount<=1000&&known(w.likes)&&w.likes>=500).length}</strong><span>篇近期低粉高赞参考</span></div></div><nav class="lgi-tm-work-tabs" aria-label="选题判断内容">${tabs.map(([id,name])=>tab(name,'judge-tab',id,mode===id)).join('')}</nav><div class="lgi-tm-judgment-grid"><div class="lgi-tm-judgment-main">${mode==='samples'?sampleView(ns):mode==='own' ? ownView(ref,allOwn,ns) : mode==='angles' ? anglesView(ns) : discussionsView(ns)}</div><aside class="lgi-tm-judgment-rail"><section class="lgi-tm-rail-box"><h3>这一轮，先判断什么？</h3><p>从同题高表现中找借鉴，用同讨论对照检查条件。先看原文，再决定角度。</p><div class="lgi-tm-rail-stats"><div><b>${ns.length}</b><span>精选作品 / 最多10</span></div><div><b>${ns.reduce((n,w)=>n+list(w.research?.fragments).filter(f=>String(f.field).endsWith('comment')).length,0)}</b><span>可定位的评论来源片段</span></div></div>${btn(mode==='angles'?'回到材料对照':'找角度与标题','judge-tab',mode==='angles'?'samples':'angles','lgi-tm-primary')}${btn('查看全部相关材料','materials','','lgi-tm-quiet')}</section><section class="lgi-tm-rail-box"><h3>依据与资料补充</h3><div class="lgi-tm-rail-links">${btn('高表现参考来自谁','judge-sources')}${btn('本次补充与真实进度','capture',ref)}${btn('放回旅程地图','judge-to-journey',ref)}${btn('查看有限产品机会','judge-product',ref)}</div><p>保存只保留方向与依据，不新建监控。反例和材料不足都继续保留。</p></section><section class="lgi-tm-rail-box"><h3>已有结果继续可读</h3><p>研究仅在明确预算与当前最多10篇冻结集合内启动。</p>${btn('研究当前精选','start-topic-research',ref,'', 'data-mutation')}${btn('研究进度与设置','research','','lgi-tm-quiet')}</section></aside></div>`;
   }
   function discussionsView(ns) {
     const groups=discussionGroups(ns);
-    return `<div class="lgi-tm-section-head"><div><h3>同一主题，先分清几种具体讨论</h3><p>分组来自已保存研究中的具体讨论，不按标题换词推断。</p></div></div>${groups.slice(0,5).map((g,i)=>`<article class="lgi-tm-discussion"><div class="lgi-tm-discussion-head"><span class="lgi-tm-discussion-index">${String(i+1).padStart(2,'0')}</span><div><h3>${esc(g.label)}</h3><p>${g.works.length} 篇精选作品 · ${g.rows.reduce((n,r)=>n+list(r.discussion.evidence).length,0)} 条定位依据</p><div class="lgi-tm-row">${g.works.slice(0,3).map(w=>btn(esc(title(w)),'reader',w.workRef,'lgi-tm-quiet')).join('')}</div></div></div></article>`).join('') || empty('具体讨论关系尚待研究','原作可以先读，不用等分析完成。')}<section class="lgi-tm-section"><h3>高低表现：先看差异，不先下归因</h3>${performancePair(ns)}<p class="lgi-tm-note">同题不代表曝光、作者条件与发布时间可比。这里是材料对照，不是写法导致爆款的结论。</p></section><section class="lgi-tm-section"><h3>实际场景与来源</h3>${sceneList(ns)}</section>`;
+    return `<div class="lgi-tm-section-head"><div><h3>同一主题，先分清几种具体讨论</h3><p>按已保存的主题身份归组；同名但边界不同的讨论分别保留。支持、反例和背景可以属于同一主题。</p>${researchCoverageSummary(ns)}</div></div>${groups.map((g,i)=>`<article class="lgi-tm-discussion"><div class="lgi-tm-discussion-head"><span class="lgi-tm-discussion-index">${String(i+1).padStart(2,'0')}</span><div><h3>${esc(g.label)}</h3><p>${g.rows.length} 条独立讨论 · ${g.works.length} 篇精选作品 · ${g.evidenceCount} 条去重定位依据</p>${g.canonical?'':'<p class="lgi-tm-note">主题身份尚未确认，不与其他同名材料自动合组。</p>'}</div></div>${discussionGroupDetails(g)}</article>`).join('') || empty('具体讨论关系尚待研究','原作可以先读，不用等分析完成。')}<section class="lgi-tm-section"><h3>高低表现：先看差异，不先下归因</h3>${performancePair(ns)}<p class="lgi-tm-note">同题不代表曝光、作者条件与发布时间可比。这里是材料对照，不是写法导致爆款的结论。</p></section><section class="lgi-tm-section"><h3>实际场景与来源</h3>${sceneList(ns)}</section>`;
   }
   function performancePair(ns) {
     const high=ns.find(w=>!w.own&&known(w.followerCount)&&w.followerCount<=1000&&known(w.likes)&&w.likes>=500);
-    const labels=new Set(list(high?.research?.output?.discussions).map(d=>d.label));
-    const low=high&&ns.find(w=>!w.own&&w.workRef!==high.workRef&&w.platform===high.platform&&known(w.likes)&&w.likes<=20&&list(w.research?.output?.discussions).some(d=>labels.has(d.label)));
+    const low=high&&ns.find(w=>!w.own&&w.workRef!==high.workRef&&w.platform===high.platform&&known(w.likes)&&w.likes<=20&&sharesDiscussion(high,w));
     if(!high||!low)return empty('当前同讨论、同平台的高低对照尚不充分','先看已有材料，不强凑避坑结论。低互动不等于失败。');
-    return `<div class="lgi-tm-performance-pair">${[high,low].map((w,i)=>{const d=list(w.research?.output?.discussions).find(d=>labels.has(d.label)),quote=citationText(w,d?.evidence);return `<article class="lgi-tm-panel">${badge(i?'低互动对照 · 非失败判定':'低粉高赞参考',!i)}<h4>${esc(title(w))}</h4><p>${esc(platformName(w.platform))} · ${number(w.likes)}赞 · 粉丝${number(w.followerCount)} · ${esc(w.publishedAtSourceText || w.publishedAt || '发布时间未知')}</p>${quote?`<blockquote>${esc(quote)}</blockquote>`:'<p>当前没有可展示的精确引用，请核对原作。</p>'}${btn('打开原文与已有评论','reader',w.workRef,'lgi-tm-quiet')}</article>`;}).join('')}</div>`;
+    const common=new Set([...discussionKeys(high)].filter(key=>discussionKeys(low).has(key)));
+    return `<div class="lgi-tm-performance-pair">${[high,low].map((w,i)=>{const d=discussionUnits(w).find(d=>d.assignments.some(a=>common.has(assignmentKey(a)))),quote=citationText(w,d?.evidence);return `<article class="lgi-tm-panel">${badge(i?'低互动对照 · 非失败判定':'低粉高赞参考',!i)}<h4>${esc(title(w))}</h4><p>${esc(platformName(w.platform))} · ${number(w.likes)}赞 · 粉丝${number(w.followerCount)} · ${esc(w.publishedAtSourceText || w.publishedAt || '发布时间未知')}</p>${quote?`<blockquote>${esc(quote)}</blockquote>`:'<p>当前没有可展示的精确引用，请核对原作。</p>'}${btn(readLabel(w,'打开原文与已有评论'),'reader',w.workRef,'lgi-tm-quiet')}</article>`;}).join('')}</div>`;
   }
-  function anglesFrom(ns) { return analysisOutputs(ns).flatMap(({work,output})=>list(output.angles).map((a,index)=>({...a,workRef:work.workRef,researchResultRef:work.research?.resultRef,researchMethodVersion:work.research?.methodVersion,researchAngleIndex:index,limitations:list(output.limitations)}))); }
+  function anglesFrom(ns) { return analysisOutputs(ns).flatMap(({work,output})=>list(output.angles).map((a,index)=>({...a,workRef:work.workRef,researchResultRef:a.researchResultRef || work.research?.resultRef,researchMethodVersion:work.research?.methodVersion,researchAngleIndex:Number.isInteger(a.researchAngleIndex)?a.researchAngleIndex:index,limitations:list(output.limitations)}))).filter(a=>typeof a.researchResultRef==='string'&&a.researchResultRef.length>0); }
   function anglesView(ns) {
     const angles=anglesFrom(ns);
     return `<div class="lgi-tm-section-head"><div><h3>先选不同角度，再打磨标题</h3><p>角度与回答任务来自当前已保存的研究版本，差异与回答边界需要继续核对原作。</p></div></div>${angles.length ? angles.slice(0,6).map((a,i)=>`<article class="lgi-tm-angle">${badge(`${String(i+1).padStart(2,'0')} · ${a.label}`)}<h3>${esc(a.title)}</h3><p>这篇要回答：${esc(a.answerTask)}</p><p class="lgi-tm-note">与我方已有内容的差别尚待核对，不由标题相似推断覆盖。</p>${a.limitations.map(value=>`<p class="lgi-tm-note">研究限制：${esc(value)}</p>`).join('')}<div class="lgi-tm-row">${btn('核对原作与引用','reader',a.workRef)}${btn('选这个角度，打磨标题','save-angle',String(i),'lgi-tm-primary')}</div></article>`).join('') : empty('当前没有已研究、可引用的不同角度','已有作品可继续读；明确开启研究后才会产生模型角度。')}`;
   }
   function ownView(ref,own,ns) {
     if(snapshot.scope.ownIdentityState==='unknown')return empty('我方矩阵未设置','不能推断全部主题都没有做过。')+btn('设置我方矩阵','identity');
-    return `<div class="lgi-tm-section-head"><div><h3>我方原来讲了什么，外部还有什么？</h3><p>整个已确认矩阵的发布历史；标题相近不等于具体问题已经覆盖。</p></div>${btn('展开全部我方原作','judge-own-all')}</div>${own.map(w=>`<article class="lgi-tm-own-work">${badge(w.ownBreakout?'我方手动爆款':'我方已发布',w.ownBreakout)}<h3>${esc(title(w))}</h3><p>${esc(fragmentText(w.evidenceFragment)) || '当前没有安全可展示的原文片段，请打开原作核对。'}</p><p class="lgi-tm-note">${esc(w.creatorDisplayName || '作者未知')} · ${esc(w.publishedAtSourceText || w.publishedAt)} · ${number(w.likes)}赞</p><div class="lgi-tm-row">${btn('看原题、封面与正文','reader',w.workRef)}${btn('保留复用意图','own-reuse',w.workRef,'lgi-tm-quiet')}</div></article>`).join('') || empty('当前已入库发布历史中尚未观察到本主题我方原作','部分覆盖不代表全矩阵从未做过。')}<section class="lgi-tm-section"><h3>相对我方，继续检查哪些差别？</h3><p>按同一具体讨论并列查看。是否回答了不同问题、遗漏哪些条件，由原作和实际回应共同核对。</p>${discussionGroups(ns).map(g=>{const mine=g.works.filter(w=>w.own),others=g.works.filter(w=>!w.own);return `<article class="lgi-tm-panel"><h4>${esc(g.label)}</h4><div class="lgi-tm-own-comparison"><div><h5>我方原作</h5>${mine.map(w=>btn(esc(title(w)),'reader',w.workRef,'lgi-tm-quiet')).join('') || '<p>当前精选无对应原作。</p>'}</div><div><h5>外部参考</h5>${others.map(w=>btn(esc(title(w)),'reader',w.workRef,'lgi-tm-quiet')).join('') || '<p>当前精选无对应外部参考。</p>'}</div></div></article>`;}).join('') || empty('当前尚无可引用的讨论差异分组','可先核对原文与已有评论，不补写差异结论。')}</section>`;
+    return `<div class="lgi-tm-section-head"><div><h3>我方原来讲了什么，外部还有什么？</h3><p>整个已确认矩阵的发布历史；标题相近不等于具体问题已经覆盖。</p></div>${btn('展开全部我方原作','judge-own-all')}</div>${own.map(w=>`<article class="lgi-tm-own-work">${badge(w.ownBreakout?'我方手动爆款':'我方已发布',w.ownBreakout)}<h3>${esc(title(w))}</h3><p>${esc(fragmentText(w.evidenceFragment)) || '当前没有安全可展示的原文片段，请打开原作核对。'}</p><p class="lgi-tm-note">${esc(w.creatorDisplayName || '作者未知')} · ${esc(w.publishedAtSourceText || w.publishedAt)} · ${number(w.likes)}赞</p><div class="lgi-tm-row">${btn(readLabel(w,'看原题、封面与正文'),'reader',w.workRef)}${btn('保留复用意图','own-reuse',w.workRef,'lgi-tm-quiet',readableMaterial(w)?'':'disabled title="当前没有可引用来源"')}</div></article>`).join('') || empty('当前已入库发布历史中尚未观察到本主题我方原作','部分覆盖不代表全矩阵从未做过。')}<section class="lgi-tm-section"><h3>相对我方，继续检查哪些差别？</h3><p>按同一主题身份下的讨论并列查看。是否回答了不同问题、遗漏哪些条件，由原作和实际回应共同核对；同名未知归属分别保留。</p>${discussionGroups(ns).map(g=>{const mine=g.works.filter(w=>w.own),others=g.works.filter(w=>!w.own);return `<article class="lgi-tm-panel"><h4>${esc(g.label)}</h4><p class="lgi-tm-note">${g.rows.length} 条独立讨论 · ${g.evidenceCount} 条去重定位依据</p><div class="lgi-tm-own-comparison"><div><h5>我方原作</h5>${mine.map(w=>btn(esc(title(w)),'reader',w.workRef,'lgi-tm-quiet')).join('') || '<p>当前精选无对应原作。</p>'}</div><div><h5>外部参考</h5>${others.map(w=>btn(esc(title(w)),'reader',w.workRef,'lgi-tm-quiet')).join('') || '<p>当前精选无对应外部参考。</p>'}</div></div>${discussionGroupDetails(g)}</article>`;}).join('') || empty('当前尚无可引用的讨论差异分组','可先核对原文与已有评论，不补写差异结论。')}</section>`;
   }
   function sampleReason(w) {
     if(w.own)return w.ownBreakout?'我方手动爆款':'我方已发布原作';
@@ -423,11 +508,11 @@
   }
   function sampleView(ns) {
     const selected=ns.find(w=>w.workRef===dialogState.sampleRef) || ns[0], reader=dialogState.inlineReader;
-    return `<div class="lgi-tm-section-head"><div><h3>最多10篇，先读有用的对照</h3><p>我方原作也计入精选上限。不为凑数加入无关内容，替换只改变本次阅读集合。</p></div>${btn('替换当前精选','replace-samples','', '',dialogState.loading?'disabled':'')}</div>${ns.length ? `<div class="lgi-tm-sample-grid"><aside class="lgi-tm-sample-list" aria-label="精选判断样本">${ns.map((w,i)=>`<button type="button" class="lgi-tm-sample-item ${w.workRef===selected?.workRef?'is-active':''}" data-action="sample" data-id="${esc(w.workRef)}" aria-pressed="${w.workRef===selected?.workRef}"><span class="lgi-tm-sample-num">${String(i+1).padStart(2,'0')}</span><div><h4>${esc(title(w))}</h4><small>${esc(platformName(w.platform))} · ${number(w.likes)}赞 · ${esc(w.publishedAtSourceText || w.publishedAt || '发布时间未知')}</small>${badge(sampleReason(w))}</div></button>`).join('')}</aside><article class="lgi-tm-inline-reader">${reader?.work?.workRef===selected?.workRef ? readerDialog(reader) : empty('选择左侧作品，读取原文与已有评论','来源资格通过读取接口复核，不用模型摘要冒充正文。')}${selected&&!reader ? btn('读取这篇原文','sample',selected.workRef) : ''}</article></div>` : empty('当前没有精选材料','可以查看已入库材料，或显式选择当前有界材料集合。')}`;
+    return `<div class="lgi-tm-section-head"><div><h3>最多10篇，先读有用的对照</h3><p>我方原作也计入精选上限。不为凑数加入无关内容，替换只改变本次阅读集合。</p></div>${btn('替换当前精选','replace-samples','', '',dialogState.loading?'disabled':'')}</div>${ns.length ? `<div class="lgi-tm-sample-grid"><aside class="lgi-tm-sample-list" aria-label="精选判断样本">${ns.map((w,i)=>`<button type="button" class="lgi-tm-sample-item ${w.workRef===selected?.workRef?'is-active':''}" data-action="sample" data-id="${esc(w.workRef)}" aria-pressed="${w.workRef===selected?.workRef}"><span class="lgi-tm-sample-num">${String(i+1).padStart(2,'0')}</span><div><h4>${esc(title(w))}</h4><small>${esc(platformName(w.platform))} · ${number(w.likes)}赞 · ${esc(w.publishedAtSourceText || w.publishedAt || '发布时间未知')}</small>${badge(sampleReason(w))}${materialSourceNote(w)}</div></button>`).join('')}</aside><article class="lgi-tm-inline-reader">${reader?.work?.workRef===selected?.workRef ? readerDialog(reader) : empty('选择左侧作品，读取当前可用材料','来源资格通过读取接口复核，不用模型摘要冒充正文。')}${selected&&!reader ? btn(readLabel(selected,'读取这篇原文'),'sample',selected.workRef) : ''}</article></div>` : empty('当前没有精选材料','可以查看已入库材料，或显式选择当前有界材料集合。')}`;
   }
   function replacementCandidates(parent) {
     const source=parent.snapshot || snapshot, recent=new Set(list(source.scope.recentReferenceWorkRefs)), t=list(source.topics).find(t=>t.topicRef===parent.topicRef), members=new Set(list(t?.workRefs));
-    return list(source.works).filter(w=>w.readable&&(members.has(w.workRef)||list(w.topicRefs).includes(parent.topicRef))&&(w.own?Boolean(w.publishedAt || w.publishedAtSourceText):recent.has(w.workRef)));
+    return list(source.works).filter(w=>readableMaterial(w)&&(members.has(w.workRef)||list(w.topicRefs).includes(parent.topicRef))&&(w.own?Boolean(w.publishedAt || w.publishedAtSourceText):recent.has(w.workRef)));
   }
   function replaceSamplesDialog() {
     const parent=dialogState.judgeState,rows=replacementCandidates(parent);
@@ -469,7 +554,7 @@
   function compareDialog() {
     if (dialogState.loading) return '<p role="status">正在读取所选方向的同一范围统计。</p>';
     const source = dialogState.snapshot, topics = list(source?.topics).filter(t => dialogState.refs.includes(t.topicRef));
-    return `<p>${esc(scopeText())} · 各平台分别比较，统计引用同一服务端集合。</p><div class="lgi-tm-compare-grid">${topics.map(t => `<article class="lgi-tm-panel"><h3>${esc(t.displayName)}</h3><p>${esc(t.definitionText)}</p><dl class="lgi-tm-facts"><div><dt>去重作品</dt><dd>${number(t.statistics?.workCount)}</dd></div><div><dt>已观察作者</dt><dd>${number(t.statistics?.authorCount)}</dd></div>${platformStats(t.statistics).map(p => `<div><dt>${esc(platformName(p.platform))} 样本爆款</dt><dd>${p.highPerformanceThreshold == null ? '未设置规则' : `${number(p.highPerformanceCount)} / ${number(p.knownLikeCount)} · ${pct(p.highPerformanceCount,p.knownLikeCount)}`}</dd></div><div><dt>${esc(platformName(p.platform))} 点赞中位数 / P90</dt><dd>${number(p.medianLikes)} / ${number(p.p90Likes)}</dd></div>`).join('')}</dl><h4>主阶段分布</h4>${list(t.journey?.main).map(e => `<p>${esc(stageNames[e.stage] || otherNames[e.stage] || e.stage)} <span class="lgi-tm-num">${number(e.count)} · ${pct(e.count,t.journey.denominator)}</span></p>`).join('')}<h4>我方与外部参考</h4><p>已确认我方发布：${number(t.statistics?.ownHistoryPublishedCount)} · 手动爆款：${number(t.statistics?.ownHistoryBreakoutCount)}</p><p>独立外部近期低粉高赞 ${number(t.statistics?.recentLowFollowerHighLikeCount)} 篇</p>${btn('打开判断','judge',t.topicRef,'lgi-tm-quiet')}</article>`).join('')}</div>`;
+    return `<p>${esc(scopeText())} · 各平台分别比较，统计引用同一服务端集合。</p><div class="lgi-tm-compare-grid">${topics.map(t => `<article class="lgi-tm-panel"><h3>${esc(t.displayName)}</h3><p>${esc(t.definitionText)}</p>${topicBoundary(t,source)}<dl class="lgi-tm-facts"><div><dt>去重作品</dt><dd>${number(t.statistics?.workCount)}</dd></div><div><dt>已观察作者</dt><dd>${number(t.statistics?.authorCount)}</dd></div>${platformStats(t.statistics).map(p => `<div><dt>${esc(platformName(p.platform))} 样本爆款</dt><dd>${p.highPerformanceThreshold == null ? '未设置规则' : `${number(p.highPerformanceCount)} / ${number(p.knownLikeCount)} · ${pct(p.highPerformanceCount,p.knownLikeCount)}`}</dd></div><div><dt>${esc(platformName(p.platform))} 点赞中位数 / P90</dt><dd>${number(p.medianLikes)} / ${number(p.p90Likes)}</dd></div>`).join('')}</dl><h4>主阶段分布</h4>${list(t.journey?.main).map(e => `<p>${esc(stageNames[e.stage] || otherNames[e.stage] || e.stage)} <span class="lgi-tm-num">${number(e.count)} · ${pct(e.count,t.journey.denominator)}</span></p>`).join('')}<h4>我方与外部参考</h4><p>已确认我方发布：${number(t.statistics?.ownHistoryPublishedCount)} · 手动爆款：${number(t.statistics?.ownHistoryBreakoutCount)}</p><p>独立外部近期低粉高赞 ${number(t.statistics?.recentLowFollowerHighLikeCount)} 篇</p>${btn('打开判断','judge',t.topicRef,'lgi-tm-quiet')}</article>`).join('')}</div>`;
   }
   async function openIdentity() {
     openDialog('identity',{loading:true}); await refreshIdentity();
@@ -504,7 +589,7 @@
     return `<h3>${product?'保留需求、支持假设与最先验证的问题':'这个方向，先收下来'}</h3><p>${product?'修改是人工研究说明，不改变模型原研究结果。':'内容备选不是已发布作品，不计入我方发布覆盖。'}保存保留当前主题定义、研究版本与引用，不自动持续跟踪。</p><form data-form="save" class="lgi-tm-form"><label><span>${product?'研究说明标题':'备选标题 · 可继续打磨'}</span><input name="title" value="${esc(a.title)}" maxlength="120" required></label><label><span>${product?'具体需求与支持假设':'切入角度'}</span><textarea name="angle" maxlength="2000" required>${esc(a.label)}</textarea></label><label><span>${product?'可编辑研究说明 / 最先验证什么':'这篇要回答的问题'}</span><textarea name="rationale" maxlength="2000" required>${esc(a.answerTask)}</textarea></label>${product?'':`<fieldset class="lgi-tm-reuse-options"><legend>复用意图 · 可组合</legend>${['沿用标题','保留核心观点','调整封面','切换场景','重新组织内容'].map(value=>`<label class="lgi-tm-check-label"><input type="checkbox" name="reuse" value="${value}"><span>${value}</span></label>`).join('')}</fieldset><label><span>回答边界 · 没有依据时保留未知</span><textarea name="boundary" maxlength="800" placeholder="明确这篇不回答什么、适用条件以及还缺少哪些材料">${esc(list(a.limitations).join('；'))}</textarea></label><label><span>备注（可不填）</span><textarea name="note" maxlength="400" placeholder="以后打开时，帮助自己想起为什么保留。"></textarea></label>`}<div class="lgi-tm-callout"><strong>原始依据与人工说明一起保存</strong><p>${esc(title(work(a.workRef) || {}))} · ${list(a.evidence).length} 条定位引用</p><p>复用意图、回答边界与备注以明确字段标题保存在现有角度和说明中；不改变原始作品或原模型结论。</p></div><button type="submit" class="lgi-tm-button lgi-tm-primary" data-mutation>${product?'保存研究说明与引用':'保存到我的备选'}</button></form>`;
   }
   function opportunitiesFrom(outputs) {
-    return outputs.flatMap(({work,output}) => list(output.productOpportunities).map((o,opportunityIndex) => ({...o,workRef:work.workRef,researchResultRef:work.research?.resultRef,researchMethodVersion:work.research?.methodVersion,researchOpportunityIndex:opportunityIndex})));
+    return outputs.flatMap(({work,output}) => list(output.productOpportunities).map((o,opportunityIndex) => ({...o,workRef:work.workRef,researchResultRef:o.researchResultRef || work.research?.resultRef,researchMethodVersion:work.research?.methodVersion,researchOpportunityIndex:Number.isInteger(o.researchOpportunityIndex)?o.researchOpportunityIndex:opportunityIndex}))).filter(o=>typeof o.researchResultRef==='string'&&o.researchResultRef.length>0);
   }
   function productContent(outputs) {
     const opportunities = opportunitiesFrom(outputs);
@@ -561,10 +646,15 @@
     catch (error) { current.error = error.message; }
     if (dialogState === current) { current.loading = false; drawDialog(); }
   }
+  function researchPhases(run) {
+    if(!run.phases)return '';
+    const p=run.phases;
+    return `<div class="lgi-tm-research-phases"><p><strong>提炼讨论</strong> · 进行中 ${number(p.extracting)} · 待处理 ${number(p.extractQueued)}</p><p><strong>判断归属</strong> · 进行中 ${number(p.resolving)} · 待处理 ${number(p.resolveQueued)}</p></div>`;
+  }
   function researchDialog() {
     if (dialogState.loading) return '<p role="status">正在读取研究设置与真实进度回执。</p>';
     const p = dialogState.progress || progress, policy = p?.policy, models = list(p?.models), usage = p?.usage;
-    return `<div class="lgi-tm-callout">开启后，历史材料分批研究、新材料增量处理。只有明确保存开启配置才启动，不因普通开页调用模型。关闭弹窗不取消已发任务，明确停止阻止继续启动新请求。</div><div class="lgi-tm-metrics"><div><span>今日已记账</span><strong>${number(usage?.chargedTokens)}</strong><small>token · ${esc(usage?.timezone || 'Asia/Shanghai')}</small></div><div><span>当前预留</span><strong>${number(usage?.reservedTokens)}</strong><small>token · 不等于已消费</small></div><div><span>每日上限</span><strong>${number(policy?.dailyTokenLimit)}</strong><small>达到上限后延后待处理</small></div><div><span>每次研究上限</span><strong>${number(policy?.runTokenLimit)}</strong><small>token · 与精选10篇不同</small></div></div><form data-form="research-config" class="lgi-tm-form"><h3>研究设置</h3><label><span>已有模型配置</span><select name="modelConfigRef" required><option value="">请选择配置</option>${models.map(m => `<option value="${esc(m.configRef)}" ${policy?.modelConfigRef === m.configRef ? 'selected' : ''}>${esc(m.modelId)} · 输入 ${number(m.inputTokenLimit)} / 输出 ${number(m.outputTokenLimit)} token</option>`).join('')}</select></label><div class="lgi-tm-form-grid"><label><span>每日 token 上限</span><input type="number" name="dailyTokenLimit" min="1024" max="10000000" step="1" required value="${policy?.dailyTokenLimit ?? ''}" placeholder="明确预算后填写"></label><label><span>每次研究 token 上限</span><input type="number" name="runTokenLimit" min="1024" max="10000000" step="1" required value="${policy?.runTokenLimit ?? ''}" placeholder="明确预算后填写"></label></div><label class="lgi-tm-check-label"><input type="checkbox" name="automaticEnabled" ${policy?.automaticEnabled ? 'checked' : ''}><span>明确开启历史回填与新材料自动增量研究</span></label><label class="lgi-tm-check-label"><input type="checkbox" name="collectionEnabled" ${policy?.collectionEnabled ? 'checked' : ''}><span>在已授权范围内允许主题临时补采，每轮最多10篇详情</span></label><p>已有材料仍可用；研究配置不替代平台执行授权、工位范围与采集限制。</p><button type="submit" class="lgi-tm-button lgi-tm-primary" data-mutation>保存明确设置</button></form><section class="lgi-tm-section"><div class="lgi-tm-section-head"><h3>研究进度</h3>${btn('刷新进度','research-refresh')}</div>${list(p?.runs).map(r => `<article class="lgi-tm-run"><div><h4>${esc(labelState(r.state))} ${badge(({historical:'历史回填',incremental:'新材料增量',on_demand:'按需研究'})[r.trigger] || r.trigger)}</h4><p>待处理 ${number(r.queuedCount)} · 已获结果 ${number(r.succeededCount)} · 失败 / 派发未知 ${number(r.failedCount)}</p><p>${esc(r.lastReason || '暂无额外原因')} · ${esc(r.createdAt)}</p><small class="lgi-tm-num">${esc(r.runRef)}</small></div><div class="lgi-tm-row">${btn('暂停','research-pause',r.runRef,'', 'data-mutation')}${btn('恢复','research-resume',r.runRef,'', 'data-mutation')}${btn('明确停止','research-stop',r.runRef,'lgi-tm-danger','data-mutation')}</div></article>`).join('') || empty('当前没有研究运行','首次开启或明确按需启动后，真实回执会出现在这里。')}</section>`;
+    return `<div class="lgi-tm-callout">开启后，历史材料分批研究、新材料增量处理。只有明确保存开启配置才启动，不因普通开页调用模型。关闭弹窗不取消已发任务，明确停止阻止继续启动新请求。</div><div class="lgi-tm-metrics"><div><span>今日已记账</span><strong>${number(usage?.chargedTokens)}</strong><small>token · ${esc(usage?.timezone || 'Asia/Shanghai')}</small></div><div><span>当前预留</span><strong>${number(usage?.reservedTokens)}</strong><small>token · 不等于已消费</small></div><div><span>每日上限</span><strong>${number(policy?.dailyTokenLimit)}</strong><small>达到上限后延后待处理</small></div><div><span>每次研究上限</span><strong>${number(policy?.runTokenLimit)}</strong><small>token · 与精选10篇不同</small></div></div><form data-form="research-config" class="lgi-tm-form"><h3>研究设置</h3><label><span>已有模型配置</span><select name="modelConfigRef" required><option value="">请选择配置</option>${models.map(m => `<option value="${esc(m.configRef)}" ${policy?.modelConfigRef === m.configRef ? 'selected' : ''}>${esc(m.modelId)} · 输入 ${number(m.inputTokenLimit)} / 输出 ${number(m.outputTokenLimit)} token</option>`).join('')}</select></label><div class="lgi-tm-form-grid"><label><span>每日 token 上限</span><input type="number" name="dailyTokenLimit" min="1024" max="10000000" step="1" required value="${policy?.dailyTokenLimit ?? ''}" placeholder="明确预算后填写"></label><label><span>每次研究 token 上限</span><input type="number" name="runTokenLimit" min="1024" max="10000000" step="1" required value="${policy?.runTokenLimit ?? ''}" placeholder="明确预算后填写"></label></div><label class="lgi-tm-check-label"><input type="checkbox" name="automaticEnabled" ${policy?.automaticEnabled ? 'checked' : ''}><span>明确开启历史回填与新材料自动增量研究</span></label><label class="lgi-tm-check-label"><input type="checkbox" name="collectionEnabled" ${policy?.collectionEnabled ? 'checked' : ''}><span>在已授权范围内允许主题临时补采，每轮最多10篇详情</span></label><p>已有材料仍可用；研究配置不替代平台执行授权、工位范围与采集限制。</p><button type="submit" class="lgi-tm-button lgi-tm-primary" data-mutation>保存明确设置</button></form><section class="lgi-tm-section"><div class="lgi-tm-section-head"><h3>研究进度</h3>${btn('刷新进度','research-refresh')}</div>${list(p?.runs).map(r => `<article class="lgi-tm-run"><div><h4>${esc(labelState(r.state))} ${badge(({historical:'历史回填',incremental:'新材料增量',on_demand:'按需研究'})[r.trigger] || r.trigger)}</h4><p>待处理 ${number(r.queuedCount)} · 已获结果 ${number(r.succeededCount)} · 失败 / 派发未知 ${number(r.failedCount)}</p>${researchPhases(r)}<p>${esc(r.lastReason || '暂无额外原因')} · ${esc(r.createdAt)}</p><small class="lgi-tm-num">${esc(r.runRef)}</small></div><div class="lgi-tm-row">${btn('暂停','research-pause',r.runRef,'', 'data-mutation')}${btn('恢复','research-resume',r.runRef,'', 'data-mutation')}${btn('明确停止','research-stop',r.runRef,'lgi-tm-danger','data-mutation')}</div></article>`).join('') || empty('当前没有研究运行','首次开启或明确按需启动后，真实回执会出现在这里。')}</section>`;
   }
   async function researchCommand(payload) {
     if (pending) return null;
@@ -574,21 +664,18 @@
     finally { pending = false; }
   }
   function allCitations(w) {
-    const o=w.research?.output;if(!o)return [];
-    return [...list(o.journey?.evidence),...['scenes','discussions','responseMatches','angles','productOpportunities'].flatMap(key=>list(o[key]).flatMap(v=>list(v.evidence)))];
+    const o=w.research?.output || {};
+    return [...discussionUnits(w).flatMap(d=>d.evidence),...list(o.journey?.evidence),...['scenes','responseMatches','angles','productOpportunities'].flatMap(key=>list(o[key]).flatMap(v=>list(v.evidence)))];
   }
-  function citationSpans(w,fragmentId) {return allCitations(w).filter(c=>c.fragmentId===fragmentId);}
+  function citationSpans(w,fragmentId) {return locatedCitations(w,allCitations(w)).filter(c=>c.fragmentId===fragmentId).map(c=>({start:c.localStart,end:c.localEnd}));}
   async function recordViewedWork(w) {
     const ref=dialogStack.slice().reverse().find(v=>v.type==='judge')?.topicRef || state.topicRef,t=topic(ref);
     if(!t || (!list(w.topicRefs).includes(ref)&&!list(t.workRefs).includes(w.workRef)))return;
     const current=list(snapshot.changes).find(c=>c.topicRef===ref),refs=[...new Set([...list(current?.lastViewedWorkRefs),w.workRef])].slice(-1000);
     try {await request('/api/local/topic-map/commands',{method:'POST',body:JSON.stringify({action:'viewed',idempotencyKey:uuid(),domainRef:state.domainRef,topicRef:ref,definitionRef:t.definitionRef,workRefs:refs})});if(current){current.lastViewedWorkRefs=refs;current.unviewedWorkRefs=list(current.unviewedWorkRefs).filter(id=>id!==w.workRef);}} catch (_) { /* Read availability remains independent from the optional view receipt. */ }
   }
-  function bodyCitations(w) {
-    const output = w.research?.output;
-    if (!output) return [];
-    const citations = [...list(output.journey?.evidence),...list(output.scenes).flatMap(s => list(s.evidence)),...list(output.discussions).flatMap(s => list(s.evidence))];
-    return citations.filter(c => c.fragmentId.startsWith(`${w.workRef}.body.`));
+  function bodyCitations(w,raw) {
+    return locatedCitations(w,allCitations(w)).filter(c=>readerFragmentInBody(w,c.fragment,raw)).map(c=>({start:c.start,end:c.end}));
   }
   function moveDialog() {
     const ref=dialogState.moveTopicRef || state.topicRef, t=topic(ref), choices=snapshot.topics.filter(t=>t.lifecycleState!=='superseded');
@@ -730,7 +817,7 @@
     if (action === 'judge-product') { openDialog('product',{topicRef:dialogState.topicRef,works:dialogState.works});return; }
     if (action === 'judge-sources') { openDialog('materials',{snapshot:dialogState.snapshot || snapshot,refs:list(dialogState.works).filter(w=>!w.own).map(w=>w.workRef),label:'当前精选外部参考来源'});return; }
     if (action === 'judge-to-journey') { state.topicRef=id;state.view='journey';state.stage='';closeDialog();persist();await load();return; }
-    if (action === 'own-reuse') { const w=work(id);if(!w)return;openDialog('save',{topicRef:dialogState.topicRef,kind:'angle',angle:{workRef:w.workRef,title:title(w),label:`复用我方原作：${title(w)}`,answerTask:'',researchMethodVersion:snapshot.methodVersion}});return; }
+    if (action === 'own-reuse') { const w=work(id);if(!w)return;if(!readableMaterial(w))return dialogFeedback('当前没有可引用的来源，暂不能保留这篇作品的复用依据。');openDialog('save',{topicRef:dialogState.topicRef,kind:'angle',angle:{workRef:w.workRef,title:title(w),label:`复用我方已发布作品：${title(w)}`,answerTask:'',researchMethodVersion:snapshot.methodVersion}});return; }
     if (action === 'judge-own-all') { const source=dialogState.snapshot || snapshot, refs=ownTopicWorks(dialogState.topicRef,source).map(w=>w.workRef);openDialog('materials',{snapshot:source,refs,label:'本主题全部已确认我方发布原作'});return; }
     if (action === 'identity') { await openIdentity(); return; }
     if (action === 'structure-add-destination') { dialogState.destinationCount = Math.min(10,(dialogState.destinationCount || 2)+1); drawDialog(); return; }

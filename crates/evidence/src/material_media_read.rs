@@ -662,8 +662,97 @@ pub(crate) async fn read_derivatives_batch(
     content_refs: &[Uuid],
     as_of: &str,
 ) -> Result<HashMap<Uuid, (Vec<Value>, Value, &'static str, &'static str, bool)>, sqlx::Error> {
+    let rows = read_derivative_rows(
+        tx,
+        content_refs,
+        as_of,
+        0,
+        (DETAIL_DERIVATIVE_LIMIT + 1) as i64,
+    )
+    .await?;
+    let mut grouped: HashMap<Uuid, Vec<PgRow>> = HashMap::new();
+    for row in rows {
+        grouped
+            .entry(row.get("content_public_ref"))
+            .or_default()
+            .push(row);
+    }
+    Ok(grouped
+        .into_iter()
+        .map(|(work, rows)| (work, project_derivative_rows(rows)))
+        .collect())
+}
+
+/// Research exhausts the already acquired derivatives in bounded pages, sharing the
+/// disposition/retirement/OCR projection with the existing preview reader.
+pub(crate) async fn read_topic_derivatives_batch(
+    tx: &mut Transaction<'_, Postgres>,
+    content_refs: &[Uuid],
+    as_of: &str,
+) -> Result<HashMap<Uuid, Vec<Value>>, sqlx::Error> {
+    let mut pending = content_refs.to_vec();
+    let mut after = 0_i64;
+    let mut derivatives = HashMap::<Uuid, Vec<Value>>::new();
+    while !pending.is_empty() {
+        let rows = read_derivative_rows(tx, &pending, as_of, after, DETAIL_DERIVATIVE_LIMIT as i64)
+            .await?;
+        let mut grouped: HashMap<Uuid, Vec<PgRow>> = HashMap::new();
+        for row in rows {
+            grouped
+                .entry(row.get("content_public_ref"))
+                .or_default()
+                .push(row);
+        }
+        pending.clear();
+        for (work, rows) in grouped {
+            if rows.len() == DETAIL_DERIVATIVE_LIMIT {
+                pending.push(work);
+            }
+            let research: Vec<_> = rows
+                .iter()
+                .map(|row| {
+                    (
+                        row.get::<Option<Uuid>, _>("derivative_ref"),
+                        row.get::<Option<String>, _>("research_text"),
+                        crate::creator_discovery::topic_media_source_identity(
+                            &row.get::<String, _>("input_blob_sha256"),
+                            &row.get::<String, _>("slot_key"),
+                            &row.get::<String, _>("input_scope"),
+                            row.get::<Option<Value>, _>("derived_source_location")
+                                .unwrap_or(serde_json::json!({})),
+                        ),
+                    )
+                })
+                .collect();
+            derivatives.entry(work).or_default().extend(
+                project_derivative_rows(rows)
+                    .0
+                    .into_iter()
+                    .zip(research)
+                    .map(|(mut derivative, (reference, text, semantic))| {
+                        derivative["derivativeRef"] = serde_json::json!(reference);
+                        derivative["semanticMediaSource"] = semantic;
+                        if derivative["state"] == "ACQUIRED" && derivative["kind"] == "asr_text" {
+                            derivative["researchText"] = serde_json::json!(text);
+                        }
+                        derivative
+                    }),
+            );
+        }
+        after += DETAIL_DERIVATIVE_LIMIT as i64;
+    }
+    Ok(derivatives)
+}
+
+async fn read_derivative_rows(
+    tx: &mut Transaction<'_, Postgres>,
+    content_refs: &[Uuid],
+    as_of: &str,
+    after_ordinal: i64,
+    page_size: i64,
+) -> Result<Vec<PgRow>, sqlx::Error> {
     if content_refs.is_empty() {
-        return Ok(HashMap::new());
+        return Ok(Vec::new());
     }
     let ocr_retirement_schema_ready: bool =
         sqlx::query_scalar("SELECT to_regclass('linggan_media_ocr_retirement') IS NOT NULL")
@@ -693,9 +782,9 @@ pub(crate) async fn read_derivatives_batch(
              FROM linggan_material_media_origin origin \
              WHERE origin.content_public_ref=ANY($1::uuid[]) \
          ), derivative_rows AS ( \
-         SELECT requested_slots.content_public_ref,job.job_ref,job.slot_key,job.processor_kind,job.processor_version,job.input_scope, \
+         SELECT requested_slots.content_public_ref,job.job_ref,job.slot_key,job.processor_kind,job.processor_version,job.input_scope,job.blob_sha256 AS input_blob_sha256, \
              event.state,event.reason,derivative.derivative_ref,derivative.derivative_kind,derivative.storage_key, \
-             derived.display_text,derived.language_state,derived.language_tag, \
+             derived.display_text,derived.text_content AS research_text,derived.source_location AS derived_source_location,derived.language_state,derived.language_tag, \
              layering.layout_ref AS ocr_layout_ref,layering.state AS ocr_layering_state,layering.decision_source AS ocr_decision_source,layering.cover_headline,layering.image_substantive_text, \
              (restricted_slot.slot_key IS NOT NULL OR restricted_blob.blob_sha256 IS NOT NULL OR restricted_derivative.derivative_ref IS NOT NULL) AS disposition_restricted, \
              (retired.retired_job_ref IS NOT NULL) AS retired, \
@@ -711,25 +800,16 @@ pub(crate) async fn read_derivatives_batch(
          {retirement_join} \
          {layering_join} \
          WHERE job.created_at <= $2::timestamptz \
-         ) SELECT * FROM derivative_rows WHERE row_ordinal <= $3 \
+         ) SELECT * FROM derivative_rows WHERE row_ordinal > $3 AND row_ordinal <= $3 + $4 \
          ORDER BY content_public_ref,row_ordinal"
     )))
     .bind(content_refs)
     .bind(as_of)
-    .bind(i64::try_from(DETAIL_DERIVATIVE_LIMIT + 1).expect("detail derivative limit is bounded"))
+    .bind(after_ordinal)
+    .bind(page_size)
     .fetch_all(&mut **tx)
     .await?;
-    let mut grouped: HashMap<Uuid, Vec<PgRow>> = HashMap::new();
-    for row in derivative_rows {
-        grouped
-            .entry(row.get("content_public_ref"))
-            .or_default()
-            .push(row);
-    }
-    Ok(grouped
-        .into_iter()
-        .map(|(content_ref, rows)| (content_ref, project_derivative_rows(rows)))
-        .collect())
+    Ok(derivative_rows)
 }
 
 fn project_derivative_rows(

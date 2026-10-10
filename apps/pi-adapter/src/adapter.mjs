@@ -23,8 +23,42 @@ import {
 
 const API = {'openai-completions':openAICompletionsApi, 'openai-responses':openAIResponsesApi, 'anthropic-messages':anthropicMessagesApi};
 export const VERSION = 'linggan.pi.v1/0.85.1';
+export const TOPIC_TRANSPORT_BYTE_LIMIT = 1_048_576;
+const TOPIC_CONTRACTS = new Set(['topic-map.research.v2', 'topic-map.resolve.v1']);
 class Rejected extends Error { constructor(code) { super(code); this.code=code; } }
 const integer = (v,min,max) => Number.isSafeInteger(v) && v>=min && v<=max;
+function topicPacket(r) {
+  let packet;try{packet=JSON.parse(r.prompt);}catch{return null;}
+  return TOPIC_CONTRACTS.has(packet?.contract)?packet:null;
+}
+// Reproducible estimate; actual provider usage settles the budget. Not a tokenizer bound.
+// Keep the formula in sync with topic_map_research_analysis::estimate_input_tokens.
+export function estimateTopicInputTokens(system,prompt) {
+  const estimate=value=>{
+    let total=0,asciiRun=0;
+    for(const ch of value){
+      if(/^[A-Za-z0-9]$/.test(ch))asciiRun++;
+      else{total+=Math.ceil(asciiRun/3)+1;asciiRun=0;}
+    }
+    return total+Math.ceil(asciiRun/3);
+  };
+  return estimate(system)+estimate(prompt)+128;
+}
+function completeTopicSchema(schema) {
+  let nodes=0;
+  const visit=(s,depth=0)=>{
+    if(!s||typeof s!=='object'||Array.isArray(s)||depth>20||++nodes>256)return false;
+    if(Array.isArray(s.anyOf))return s.anyOf.length>0&&s.anyOf.every(v=>visit(v,depth+1));
+    if(s.type==='object'){
+      if(!s.properties||typeof s.properties!=='object'||Array.isArray(s.properties)||s.additionalProperties!==false||!Array.isArray(s.required))return false;
+      const keys=Object.keys(s.properties);
+      return keys.length===s.required.length&&new Set(s.required).size===keys.length&&keys.every(k=>s.required.includes(k)&&visit(s.properties[k],depth+1));
+    }
+    if(s.type==='array')return visit(s.items,depth+1);
+    return ['string','integer','number','boolean','null'].includes(s.type);
+  };
+  return visit(schema);
+}
 const DEEPSEEK_TEXT_MODELS=new Set(['deepseek-v4-flash','deepseek-v4-pro','deepseek-v4-flash-vision-exp']);
 // Capability allowlist, not provider-name inference. Unknown models and proxies retain
 // prompt-only output and the same strict server validator until separately qualified.
@@ -34,21 +68,26 @@ function researchOutputFormat(r,base) {
   const schemaNames={
     'comment-research.semantic.v1':'comment_research_semantic_v1','comment-research.semantic.v2':'comment_research_semantic_v2','comment-research.semantic.v3':'comment_research_semantic_v3','comment-research.semantic.v4':'comment_research_semantic_v4','comment-research.semantic.v5':'comment_research_semantic_v5','comment-research.semantic.v6':'comment_research_semantic_v6',
     'comment-research.semantic.v1/problem-resolution':'comment_research_problem_resolution_v1','comment-research.semantic.v2/problem-resolution':'comment_research_problem_resolution_v2','comment-research.semantic.v3/problem-resolution':'comment_research_problem_resolution_v3','comment-research.semantic.v4/problem-resolution':'comment_research_problem_resolution_v4','comment-research.semantic.v5/problem-resolution':'comment_research_problem_resolution_v5','comment-research.semantic.v6/problem-resolution':'comment_research_problem_resolution_v6',
-    'comment-study.note-batch.v1':'comment_study_note_batch_v1','comment-study.problem-resolution.v1':'comment_study_problem_resolution_v1','comment-study.problem-pair.v1':'comment_study_problem_pair_v1'
+    'comment-study.note-batch.v1':'comment_study_note_batch_v1','comment-study.problem-resolution.v1':'comment_study_problem_resolution_v1','comment-study.problem-pair.v1':'comment_study_problem_pair_v1',
+    'topic-map.research.v2':'topic_map_research_v2','topic-map.resolve.v1':'topic_map_resolve_v1'
   };
   const schemaName=schemaNames[packet?.contract];
   if(!schemaName)return null;
   const schema=packet.outputSchema;
-  if(!schema||schema.type!=='object'||!schema.properties||schema.additionalProperties!==false||JSON.stringify(schema).length>6144)throw new Rejected('invalid_request');
+  const topic=TOPIC_CONTRACTS.has(packet.contract);
+  const schemaLength=schema?JSON.stringify(schema).length:0;
+  if(!schema||schema.type!=='object'||!schema.properties||schema.additionalProperties!==false
+    ||schemaLength>(topic?32768:6144)
+    ||(topic&&(!completeTopicSchema(schema)||schema.properties.contract?.enum?.length!==1||schema.properties.contract.enum[0]!==packet.contract)))throw new Rejected('invalid_request');
   const official=base.protocol==='https:'&&!base.port&&['','/','/v1','/v1/'].includes(base.pathname);
   const deepseek=official&&base.hostname==='api.deepseek.com'&&DEEPSEEK_TEXT_MODELS.has(r.modelId);
   const openai=official&&base.hostname==='api.openai.com'&&OPENAI_STRUCTURED_MODELS.has(r.modelId);
   // V1 uses optional fields for its two tagged response variants.  Do not claim strict
   // provider validation when the provider would require every property on the root object;
   // Rust remains the contract authority after transport.
-  if(r.api==='openai-responses'&&(deepseek||openai))return {text:{format:{type:'json_schema',name:schemaName,schema}}};
+  if(r.api==='openai-responses'&&(deepseek||openai))return {text:{format:{type:'json_schema',name:schemaName,schema,...(topic&&openai?{strict:true}:{})}}};
   if(r.api==='openai-completions'&&deepseek)return {response_format:{type:'json_object'}};
-  if(r.api==='openai-completions'&&openai)return {response_format:{type:'json_schema',json_schema:{name:schemaName,schema}}};
+  if(r.api==='openai-completions'&&openai)return {response_format:{type:'json_schema',json_schema:{name:schemaName,schema,...(topic?{strict:true}:{})}}};
   return null;
 }
 function validate(r) {
@@ -115,7 +154,9 @@ export async function execute(r) {
   const observation=createObservation(),failure={code:null};
   const response=payload=>({...payload,diagnostic:completeDiagnostic(observation,usage,started)});
   try {
-    const base=validate(r);abort=new AbortController();
+    const base=validate(r),topic=topicPacket(r);
+    if(Buffer.byteLength(JSON.stringify(r))>(topic?TOPIC_TRANSPORT_BYTE_LIMIT:131072))throw new Rejected('invalid_request');
+    abort=new AbortController();
     timer=setTimeout(()=>{abort.abort();agent?.abort();},r.timeoutMs);
     const transport=scopedFetch(base,abort.signal,usage,failure,observation);
     if(r.operation==='embed') {
@@ -133,10 +174,14 @@ export async function execute(r) {
       succeeded(observation);
       return response({version:VERSION,ok:true,modelIds:ids,modelListOrigin:'ACCOUNT_ENDPOINT',usage,elapsedMs:Date.now()-started});
     }
-    // Unknown provider context capacity: a conservative adapter envelope, not advertised capability.
-    if(Buffer.byteLength(r.prompt)+Buffer.byteLength(r.system)+r.maxOutputTokens>32768)throw new Rejected('model_input_limit');
+    // Topic input tokens and transport bytes have separate limits; other contracts retain
+    // their existing envelope. Configuration is an input budget, not provider capacity.
+    if(topic){
+      if(!integer(topic.inputTokenLimit,1024,32768))throw new Rejected('invalid_request');
+      if(estimateTopicInputTokens(r.system,r.prompt)>topic.inputTokenLimit)throw new Rejected('model_input_limit');
+    }else if(Buffer.byteLength(r.prompt)+Buffer.byteLength(r.system)+r.maxOutputTokens>32768)throw new Rejected('model_input_limit');
     const model={id:r.modelId,name:r.modelId,api:r.api,provider:'linggan-explicit',baseUrl:base.href,
-      reasoning:false,input:['text'],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:32768,maxTokens:r.maxOutputTokens};
+      reasoning:false,input:['text'],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:topic?topic.inputTokenLimit+r.maxOutputTokens:32768,maxTokens:r.maxOutputTokens};
     // Our current contract accepts final text only. DeepSeek V4 otherwise defaults
     // to thinking even when the local model metadata says reasoning:false.
     const deepseekTextOnly=base.hostname==='api.deepseek.com'&&DEEPSEEK_TEXT_MODELS.has(r.modelId);
@@ -190,7 +235,7 @@ export async function execute(r) {
 if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href) {
   let bytes=0,chunks=[];
   try {
-    for await(const chunk of process.stdin){bytes+=chunk.length;if(bytes>131072)throw new Error();chunks.push(chunk);}
+    for await(const chunk of process.stdin){bytes+=chunk.length;if(bytes>TOPIC_TRANSPORT_BYTE_LIMIT)throw new Error();chunks.push(chunk);}
     const request=JSON.parse(Buffer.concat(chunks).toString('utf8'));
     process.stdout.write(JSON.stringify(await execute(request))+'\n');
   } catch {process.stdout.write(JSON.stringify({version:VERSION,ok:false,failureCode:'invalid_request',usage:{inputTokens:null,outputTokens:null,costUsd:null}})+'\n');}

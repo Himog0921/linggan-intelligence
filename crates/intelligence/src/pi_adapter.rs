@@ -392,7 +392,10 @@ impl PiAdapter {
 
     pub async fn call(&self, request: &PiRequest) -> Result<PiResponse, ModelError> {
         let input = serde_json::to_vec(request).map_err(|_| ModelError::Invalid)?;
-        if input.len() > 131072 {
+        let topic_contract = serde_json::from_str::<Value>(&request.prompt).ok()
+            .and_then(|packet|packet["contract"].as_str().map(str::to_owned))
+            .is_some_and(|contract|matches!(contract.as_str(),"topic-map.research.v2"|"topic-map.resolve.v1"));
+        if input.len() > if topic_contract { 1024 * 1024 } else { 131072 } {
             return Err(ModelError::InputLimit);
         }
         let mut child = tokio::process::Command::new(&self.node)

@@ -187,6 +187,7 @@ pub async fn read_topic_map(
             work_refs: Vec::new(),
             statistics: Value::Null,
             journey: Value::Null,
+            core: json!({}),
         })
         .collect();
     let structure_ready: bool =
@@ -391,6 +392,17 @@ pub async fn read_topic_map(
             .cmp(&a.published_at)
             .then_with(|| a.work_ref.cmp(&b.work_ref))
     });
+    super::core_read::summarize_scope(&scoped_works, &mut topics);
+    let scoped_refs: HashSet<_> = scoped_works.iter().map(|w| w.work_ref).collect();
+    let candidates = candidates
+        .into_iter()
+        .filter(|candidate| {
+            candidate["workRef"]
+                .as_str()
+                .and_then(|s| s.parse::<Uuid>().ok())
+                .is_some_and(|work| scoped_refs.contains(&work))
+        })
+        .collect();
     Ok(TopicMapSnapshot {
         domains,
         scope: json!({"domainRef":q.domain_ref,"topicRef":q.topic_ref,"platform":q.platform,"windowDays":q.window_days,"referenceWindowDays":reference_days,"asOf":as_of,"totalWorkCount":work_count,"loadedWorkCount":scoped_works.len(),"canonicalWorkCount":refs.len(),"readableWorkCount":readable,"unclassifiedWorkCount":pending,"readLimit":null,"ownIdentityState":if own_creators.iter().any(|v|v["active"]==true){"partial_observed"}else{"unknown"},"includeReference":q.include_reference,"ownHistoricalWorkRefs":history_own_refs,"ownHistoryPublishedCount":history_own_published,"ownHistoryPublicationUnknownCount":history_own_unknown,"recentReferenceWorkRefs":recent}),
@@ -499,7 +511,7 @@ async fn attach_research(
         sqlx::query_scalar("SELECT to_regclass('linggan_topic_map_research_result')IS NOT NULL")
             .fetch_one(database.pool())
             .await?;
-    let mut candidates = Vec::new();
+    let candidates = Vec::new();
     // All annotations, including human entries, lose applicability when cited fragments change.
     let domains: Vec<Uuid> = sqlx::query_scalar(
         "SELECT domain_ref FROM observation_domain WHERE ($1::uuid IS NULL OR domain_ref=$1)",
@@ -546,7 +558,7 @@ async fn attach_research(
             }
         }
     }
-    let memberships=sqlx::query("SELECT topic_ref,definition_ref,work_public_ref,evidence_citations FROM linggan_topic_map_membership WHERE ($1::uuid IS NULL OR domain_ref=$1)").bind(q.domain_ref).fetch_all(database.pool()).await?;
+    let memberships=sqlx::query("SELECT topic_ref,definition_ref,work_public_ref,evidence_citations FROM linggan_topic_map_membership WHERE method_version<>'topic-map.research.v2' AND ($1::uuid IS NULL OR domain_ref=$1)").bind(q.domain_ref).fetch_all(database.pool()).await?;
     for row in memberships {
         let reference: Uuid = row.get("work_public_ref");
         let def: Uuid = row.get("definition_ref");
@@ -579,88 +591,5 @@ async fn attach_research(
     if !installed {
         return Ok(candidates);
     }
-    let rows=sqlx::query("SELECT DISTINCT ON(r.work_public_ref) r.work_public_ref,r.domain_ref,r.output_json,r.method_version,r.result_ref,r.created_at::text AS time,t.input_refs,run.config_ref FROM linggan_topic_map_research_result r JOIN linggan_topic_map_research_task t ON t.domain_ref=r.domain_ref AND t.work_public_ref=r.work_public_ref AND t.input_hash=r.input_hash JOIN linggan_topic_map_research_run run ON run.run_ref=t.run_ref WHERE ($1::uuid IS NULL OR r.domain_ref=$1) ORDER BY r.work_public_ref,r.created_at DESC,r.result_ref DESC").bind(q.domain_ref).fetch_all(database.pool()).await?;
-    let allowed: Vec<_> = topics.iter().map(|t| t.topic_ref).collect();
-    let mut research_inputs: HashMap<(Uuid, Uuid), Vec<crate::topic_map_research::ResearchInput>> =
-        HashMap::new();
-    for r in rows {
-        let domain: Uuid = r.get("domain_ref");
-        let config: Uuid = r.get("config_ref");
-        if !research_inputs.contains_key(&(domain, config)) {
-            let current = crate::topic_map_research::load_inputs(database, domain, config)
-                .await
-                .map_err(|e| TopicMapError::Source(e.to_string()))?;
-            research_inputs.insert((domain, config), current);
-        }
-        let work_ref: Uuid = r.get("work_public_ref");
-        let Some(w) = works
-            .iter_mut()
-            .find(|w| w.work_ref == work_ref && w.readable)
-        else {
-            continue;
-        };
-        let manifest: Value = r.get("input_refs");
-        let inputs = &research_inputs[&(domain, config)];
-        let Some(primary) = inputs.iter().find(|i| i.work.work_ref == work_ref) else {
-            continue;
-        };
-        let context: Vec<Uuid> = manifest["contextWorkRefs"]
-            .as_array()
-            .map(|vs| {
-                vs.iter()
-                    .filter_map(|v| v.as_str().and_then(|v| v.parse().ok()))
-                    .collect()
-            })
-            .unwrap_or_default();
-        if context.len() > 10
-            || context
-                .iter()
-                .any(|r| !inputs.iter().any(|i| i.work.work_ref == *r))
-        {
-            continue;
-        }
-        let current =
-            crate::topic_map_research::with_comparison_context(primary.clone(), inputs, &context);
-        let fragments = &current.fragments;
-        // Physical recapture IDs may change; applicability follows current qualified text and
-        // stable fragment identity. Every frozen context work is resolved within this domain.
-        let same = manifest["fragments"].as_array().is_some_and(|refs| {
-            refs.len() == fragments.len()
-                && refs.iter().all(|reference| {
-                    fragments.iter().any(|f| {
-                        reference["fragmentId"].as_str() == Some(&f.fragment_id)
-                            && reference["field"].as_str() == Some(&f.field)
-                            && reference["textHash"].as_str()
-                                == Some(&linggan_evidence::creator_discovery::hash(&f.text))
-                    })
-                })
-        });
-        let output: Value = r.get("output_json");
-        let Ok(typed) = serde_json::from_value::<crate::topic_map_research_analysis::ResearchOutput>(
-            output.clone(),
-        ) else {
-            continue;
-        };
-        let same_defs = manifest["topics"].as_array().is_some_and(|defs| {
-            defs.iter().all(|d| {
-                topics
-                    .iter()
-                    .any(|t| d["definitionRef"].as_str() == Some(&t.definition_ref.to_string()))
-            })
-        });
-        if !same
-            || !same_defs
-            || crate::topic_map_research_analysis::validate_output(&typed, fragments, &allowed)
-                .is_err()
-        {
-            continue;
-        }
-        for discussion in typed.discussions.iter().filter(|d| d.topic_ref.is_none()) {
-            candidates.push(json!({"label":discussion.label,"workRef":work_ref,"evidence":discussion.evidence,"resultRef":r.get::<Uuid,_>("result_ref"),"methodVersion":r.get::<String,_>("method_version"),"state":"candidate","formalRelease":false}));
-        }
-        w.research = Some(
-            json!({"resultRef":r.get::<Uuid,_>("result_ref"),"methodVersion":r.get::<String,_>("method_version"),"createdAt":r.get::<String,_>("time"),"output":output,"fragments":fragments}),
-        );
-    }
-    Ok(candidates)
+    super::core_read::attach_windows(database,q,works,topics).await
 }
