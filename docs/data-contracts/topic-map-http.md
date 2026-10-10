@@ -28,6 +28,12 @@
 
 `GET /api/local/topic-map/research?domainRef={uuid}` 返回设置、用量、run/task/result真实进度；`POST /api/local/topic-map/research/commands` 采用action configure/start/pause/resume/stop。configure明确modelConfigRef/dailyTokenLimit/runTokenLimit/automaticEnabled/collectionEnabled；没有具体用量配置不外发。start区分historical/incremental/on_demand。当前prototype按钮/页面读取/筛选/保存不能代替开启授权。
 
+`runs[]` 最多返回最近 30 个运行；`queuedCount/succeededCount/failedCount` 和 `phases` 从当前任务状态聚合。`failedCount` 保留既有口径，包含 `failed` 与 `unknown_dispatch`，不把派发未知算作已知失败或成功。`taskIssues` 按任务 `updated_at`、`task_ref` 降序返回最多 20 项当前处于这两种状态的任务，每项固定 `taskRef/phase/state/reason`；`phase` 为 `extract/resolve/compare`，`reason` 保留数据库原因码或明确的 `null`。明细上限不截断总数；界面说明实际显示项数与完整计数，缺失或未识别原因显示未知，不能暗示自动重试。
+
+`lastReason` 和 `inputScope` 保留兼容及审计含义；其中 `comparison/workComparisons` 是当时的调度检查点，不是实时任务状态。运行已经结束且任务失败时，界面使用 `taskIssues` 解释失败，不能继续用历史 `comparison_queued` 解释当前结果；无失败的已结束运行也不以旧排队码表示实时状态。`phases` 的 `extractQueued/extracting`、`resolveQueued/resolving`、`compareQueued/comparing` 分别显示提炼、归属、比较的待处理与进行中数量。
+
+运行操作按真实状态显示：`queued/running` 提供暂停、明确停止；`paused` 提供恢复、明确停止；`daily_budget_paused` 表达额度等待并提供暂停、明确停止。`completed/stopped/run_budget_exhausted/failed` 不提供无效的运行恢复操作。明确新 Start 仍经过原输入复用、来源、未知派发及预算守门，读取和显示不改变重试或授权规则。
+
 研究输入是 canonical source refs、不可变来源版本与可重建 fragment；不冻结敏感原文到新账本。所有断言引用允许片段内的 Unicode scalar start/end，区间使用原字段的绝对位置。越界、错误来源角色、外域或失效来源拒绝。采集、分析、结果接纳状态分责，已发 unknown 保留预算且不盲重发。日额度与 run 预算在实际 dispatch 之前原子核验；费用未知不计 0。
 
 发送给模型的 coverage 不重复携带服务器使用的 `currentSources`、`sourceHashes`、`fragmentOrigins` 审计映射；这些字段在完整冻结 manifest 和来源恢复中保留。实际原文、引用 ID/绝对坐标、片段所属作品、讨论及选择范围完整传递。输入上限仍检查完整 system 与实际序列化 prompt，run/day 预算还计入输出预留；正文字符数达标不等于请求 token 达标，超限保持明确失败且不发送。

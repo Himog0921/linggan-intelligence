@@ -289,11 +289,54 @@ pub async fn read_research_progress(db: &Database, domain: Uuid) -> Result<Value
     let p=sqlx::query("SELECT *,updated_at::text AS updated FROM linggan_topic_map_research_policy WHERE domain_ref=$1").bind(domain).fetch_optional(db.pool()).await?;
     let policy=p.map(|r|json!({"modelConfigRef":r.get::<Uuid,_>("model_config_ref"),"dailyTokenLimit":r.get::<i64,_>("daily_token_limit"),"runTokenLimit":r.get::<i64,_>("run_token_limit"),"automaticEnabled":r.get::<bool,_>("automatic_enabled"),"collectionEnabled":r.get::<bool,_>("collection_enabled"),"status":r.get::<String,_>("status"),"updatedAt":r.get::<String,_>("updated")}));
     let usage=sqlx::query("SELECT COALESCE(sum(i.charged_tokens),0)::bigint AS charged,COALESCE(sum(i.reserved_tokens)FILTER(WHERE i.state='running'),0)::bigint AS reserved FROM linggan_topic_map_research_request q JOIN linggan_model_invocation i USING(invocation_ref) JOIN linggan_topic_map_research_run r USING(run_ref) WHERE r.domain_ref=$1 AND q.budget_day=(scope_001_now() AT TIME ZONE 'Asia/Shanghai')::date").bind(domain).fetch_one(db.pool()).await?;
-    let rows=sqlx::query("SELECT r.*,r.created_at::text AS created,(SELECT count(*)FROM linggan_topic_map_research_task t WHERE t.run_ref=r.run_ref AND t.state='queued')AS queued_count,(SELECT count(*)FROM linggan_topic_map_research_task t WHERE t.run_ref=r.run_ref AND t.state IN ('succeeded','no_signal','insufficient'))AS succeeded_count,(SELECT count(*)FROM linggan_topic_map_research_task t WHERE t.run_ref=r.run_ref AND t.state IN ('failed','unknown_dispatch'))AS failed_count,(SELECT jsonb_build_object('extractQueued',count(*)FILTER(WHERE phase='extract' AND state='queued'),'resolveQueued',count(*)FILTER(WHERE phase='resolve' AND state='queued'),'compareQueued',count(*)FILTER(WHERE phase='compare' AND state='queued'),'extracting',count(*)FILTER(WHERE phase='extract' AND state='running'),'resolving',count(*)FILTER(WHERE phase='resolve' AND state='running'),'comparing',count(*)FILTER(WHERE phase='compare' AND state='running'))FROM linggan_topic_map_research_task t WHERE t.run_ref=r.run_ref)AS phases FROM linggan_topic_map_research_run r WHERE domain_ref=$1 ORDER BY created_at DESC LIMIT 30").bind(domain).fetch_all(db.pool()).await?;
+    let rows = read_research_runs(db, domain).await?;
     let models=sqlx::query("SELECT c.*,m.model_id FROM linggan_model_config c JOIN linggan_model_entry m USING(model_ref) JOIN linggan_model_connection_version v ON v.version_ref=m.connection_version_ref JOIN linggan_model_connection conn USING(connection_ref) WHERE conn.enabled ORDER BY c.created_at DESC LIMIT 30").fetch_all(db.pool()).await?;
     let targets=sqlx::query("SELECT t.target_ref,t.target_kind,t.display_name,t.identity_key FROM collection_observation_target t JOIN observation_domain_target membership USING(target_ref)WHERE membership.domain_ref=$1 AND t.lifecycle_state<>'dismissed'ORDER BY t.display_name,t.target_ref LIMIT 100").bind(domain).fetch_all(db.pool()).await?;
     let rounds=sqlx::query("SELECT r.*,r.created_at::text AS created,(SELECT count(*)FROM linggan_topic_map_collection_slot s WHERE s.round_ref=r.round_ref)AS reserved_count FROM linggan_topic_map_collection_round r WHERE r.domain_ref=$1 ORDER BY created_at DESC LIMIT 20").bind(domain).fetch_all(db.pool()).await?;
     Ok(
-        json!({"domainRef":domain,"methodVersion":METHOD_VERSION,"policy":policy,"targets":targets.iter().map(|r|json!({"targetRef":r.get::<Uuid,_>("target_ref"),"kind":r.get::<String,_>("target_kind"),"displayName":r.get::<Option<String>,_>("display_name").unwrap_or(r.get::<String,_>("identity_key")),"domainRef":domain})).collect::<Vec<_>>(),"collectionRounds":rounds.iter().map(|r|json!({"roundRef":r.get::<Uuid,_>("round_ref"),"kind":r.get::<String,_>("kind"),"state":r.get::<String,_>("state"),"reason":r.get::<Option<String>,_>("last_reason"),"detailSlotsReserved":r.get::<i64,_>("reserved_count"),"detailLimit":r.get::<i32,_>("detail_limit"),"createdAt":r.get::<String,_>("created")})).collect::<Vec<_>>(),"usage":{"chargedTokens":usage.get::<i64,_>("charged"),"reservedTokens":usage.get::<i64,_>("reserved"),"timezone":"Asia/Shanghai"},"runs":rows.iter().map(|r|json!({"runRef":r.get::<Uuid,_>("run_ref"),"trigger":r.get::<String,_>("trigger"),"state":r.get::<String,_>("state"),"lastReason":r.get::<Option<String>,_>("last_reason"),"queuedCount":r.get::<i64,_>("queued_count"),"succeededCount":r.get::<i64,_>("succeeded_count"),"failedCount":r.get::<i64,_>("failed_count"),"phases":r.get::<Value,_>("phases"),"inputScope":r.get::<Value,_>("input_scope"),"createdAt":r.get::<String,_>("created")})).collect::<Vec<_>>(),"models":models.iter().map(|r|json!({"configRef":r.get::<Uuid,_>("config_ref"),"modelId":r.get::<String,_>("model_id"),"inputTokenLimit":r.get::<i32,_>("input_token_limit"),"outputTokenLimit":r.get::<i32,_>("output_token_limit"),"maxAttempts":r.get::<i32,_>("max_attempts"),"timeoutSeconds":r.get::<i32,_>("timeout_seconds")})).collect::<Vec<_>>() }),
+        json!({"domainRef":domain,"methodVersion":METHOD_VERSION,"policy":policy,"targets":targets.iter().map(|r|json!({"targetRef":r.get::<Uuid,_>("target_ref"),"kind":r.get::<String,_>("target_kind"),"displayName":r.get::<Option<String>,_>("display_name").unwrap_or(r.get::<String,_>("identity_key")),"domainRef":domain})).collect::<Vec<_>>(),"collectionRounds":rounds.iter().map(|r|json!({"roundRef":r.get::<Uuid,_>("round_ref"),"kind":r.get::<String,_>("kind"),"state":r.get::<String,_>("state"),"reason":r.get::<Option<String>,_>("last_reason"),"detailSlotsReserved":r.get::<i64,_>("reserved_count"),"detailLimit":r.get::<i32,_>("detail_limit"),"createdAt":r.get::<String,_>("created")})).collect::<Vec<_>>(),"usage":{"chargedTokens":usage.get::<i64,_>("charged"),"reservedTokens":usage.get::<i64,_>("reserved"),"timezone":"Asia/Shanghai"},"runs":rows.iter().map(|r|json!({"runRef":r.get::<Uuid,_>("run_ref"),"trigger":r.get::<String,_>("trigger"),"state":r.get::<String,_>("state"),"lastReason":r.get::<Option<String>,_>("last_reason"),"queuedCount":r.get::<i64,_>("queued_count"),"succeededCount":r.get::<i64,_>("succeeded_count"),"failedCount":r.get::<i64,_>("failed_count"),"taskIssues":r.get::<Value,_>("task_issues"),"phases":r.get::<Value,_>("phases"),"inputScope":r.get::<Value,_>("input_scope"),"createdAt":r.get::<String,_>("created")})).collect::<Vec<_>>(),"models":models.iter().map(|r|json!({"configRef":r.get::<Uuid,_>("config_ref"),"modelId":r.get::<String,_>("model_id"),"inputTokenLimit":r.get::<i32,_>("input_token_limit"),"outputTokenLimit":r.get::<i32,_>("output_token_limit"),"maxAttempts":r.get::<i32,_>("max_attempts"),"timeoutSeconds":r.get::<i32,_>("timeout_seconds")})).collect::<Vec<_>>() }),
     )
+}
+
+async fn read_research_runs(
+    db: &Database,
+    domain: Uuid,
+) -> Result<Vec<sqlx::postgres::PgRow>, ResearchError> {
+    Ok(sqlx::query(
+        r#"SELECT r.*,r.created_at::text AS created,
+            counts.queued_count,counts.succeeded_count,counts.failed_count,counts.phases,
+            COALESCE(issues.items,'[]'::jsonb) AS task_issues
+        FROM (
+            SELECT * FROM linggan_topic_map_research_run
+            WHERE domain_ref=$1 ORDER BY created_at DESC LIMIT 30
+        ) r
+        CROSS JOIN LATERAL (
+            SELECT count(*) FILTER(WHERE state='queued') AS queued_count,
+                count(*) FILTER(WHERE state IN ('succeeded','no_signal','insufficient')) AS succeeded_count,
+                count(*) FILTER(WHERE state IN ('failed','unknown_dispatch')) AS failed_count,
+                jsonb_build_object(
+                    'extractQueued',count(*) FILTER(WHERE phase='extract' AND state='queued'),
+                    'resolveQueued',count(*) FILTER(WHERE phase='resolve' AND state='queued'),
+                    'compareQueued',count(*) FILTER(WHERE phase='compare' AND state='queued'),
+                    'extracting',count(*) FILTER(WHERE phase='extract' AND state='running'),
+                    'resolving',count(*) FILTER(WHERE phase='resolve' AND state='running'),
+                    'comparing',count(*) FILTER(WHERE phase='compare' AND state='running')) AS phases
+            FROM linggan_topic_map_research_task t WHERE t.run_ref=r.run_ref
+        ) counts
+        CROSS JOIN LATERAL (
+            SELECT jsonb_agg(jsonb_build_object(
+                'taskRef',t.task_ref,'phase',t.phase,'state',t.state,'reason',t.last_reason)
+                ORDER BY t.updated_at DESC,t.task_ref DESC) AS items
+            FROM (
+                SELECT task_ref,phase,state,last_reason,updated_at
+                FROM linggan_topic_map_research_task
+                WHERE run_ref=r.run_ref AND state IN ('failed','unknown_dispatch')
+                ORDER BY updated_at DESC,task_ref DESC LIMIT 20
+            ) t
+        ) issues
+        ORDER BY r.created_at DESC"#,
+    )
+    .bind(domain)
+    .fetch_all(db.pool())
+    .await?)
 }

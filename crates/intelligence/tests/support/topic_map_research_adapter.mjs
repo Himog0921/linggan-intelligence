@@ -54,7 +54,12 @@ function discussion(f, text = f.text, chosenBoundary = boundary) {
   };
 }
 function extract() {
-  const author = fragments.find((f) => f.field === 'body' && f.fragmentId.startsWith(input.workRef))
+  // Only the explicit saved-source fixture model selects the last absolute slice.
+  const tailAuthor = request.modelId === 'synthetic-topic-map-cite-tail'
+    ? fragments.filter((f) => authorFields.includes(f.field))
+      .reduce((last, f) => !last || f.start > last.start ? f : last, null)
+    : null;
+  const author = tailAuthor ?? fragments.find((f) => f.field === 'body' && f.fragmentId.startsWith(input.workRef))
     ?? fragments.find((f) => authorFields.includes(f.field));
   const comment = fragments.find((f) => commentFields.includes(f.field));
   const primary = author ?? comment ?? fragments.find((f) => f.field !== 'parent_comment_context');

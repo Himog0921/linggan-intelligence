@@ -7,7 +7,7 @@ const blank={replaceChildren(){},addEventListener(){},querySelector(){return nul
 const ctx={document:{getElementById(){return blank},createElement(){return {...blank}},activeElement:null},sessionStorage:{getItem(){return null}},location:{search:'',href:'http://127.0.0.1:3109/topics',origin:'http://127.0.0.1:3109'},URL,URLSearchParams,crypto:require('node:crypto').webcrypto,FormData:class{constructor(f){this.f=f}get(k){return this.f.values?.[k]}getAll(k){return this.f.arrays?.[k]||[]}},fetch:null,console};
 const tail=/  load\(\);\n\}\)\(\);\s*$/;let src=fs.readFileSync(sourcePath,'utf8');assert(tail.test(src),'known topic-map initialization boundary');
 const initializationSource=src.replace(tail,'globalThis.initialState=state;})();');
-src=src.replace(tail,`globalThis.audit={readSample,readWork,readerDialog,replaceSamplesDialog,submitDialog,topicBoundary,discussionUnits,discussionGroups,discussionsView,performancePair,curated,researchCoverage,researchPhases,citationText,citationSpans,bodyCitations,readerDiscussions,allCitations,sharesDiscussion,anglesFrom,opportunitiesFrom,anglesView,productContent,sceneList,commentFragmentCount,comparisonScopeNote,set(s,d,stack=[]){snapshot=s;dialogState=d;dialogStack=stack;state.domainRef='domain';state.topicRef='topic-A';},get(){return dialogState;}};drawDialog=()=>{};render=()=>{};load=async()=>{};openDialog=(type,data)=>{if(dialogState)dialogStack.push(dialogState);dialogState={type,...data};};})();`);vm.runInNewContext(src,ctx);
+src=src.replace(tail,`globalThis.audit={readSample,readWork,readerDialog,replaceSamplesDialog,submitDialog,topicBoundary,discussionUnits,discussionGroups,discussionsView,performancePair,curated,researchCoverage,researchPhases,researchDialog,citationText,citationSpans,bodyCitations,readerDiscussions,allCitations,sharesDiscussion,anglesFrom,opportunitiesFrom,anglesView,productContent,sceneList,commentFragmentCount,comparisonScopeNote,set(s,d,stack=[]){snapshot=s;dialogState=d;dialogStack=stack;state.domainRef='domain';state.topicRef='topic-A';},get(){return dialogState;}};drawDialog=()=>{};render=()=>{};load=async()=>{};openDialog=(type,data)=>{if(dialogState)dialogStack.push(dialogState);dialogState={type,...data};};})();`);vm.runInNewContext(src,ctx);
 (async()=>{
  const restoredScope={domainRef:'domain-A',topicRef:'OLD_TOPIC',platform:'xhs',windowDays:'7',path:'family',overlay:'obstruction_recurrence',query:'OLD_QUERY',compare:['OLD_TOPIC']};
  const initialize=search=>{
@@ -120,6 +120,46 @@ src=src.replace(tail,`globalThis.audit={readSample,readWork,readerDialog,replace
  const phases=ctx.audit.researchPhases({phases:{extractQueued:0,extracting:1,resolveQueued:2}});
  assert(phases.includes('提炼讨论'));assert(phases.includes('判断归属'));assert(phases.includes('待处理 0'));assert(phases.includes('进行中 —'));assert(!phases.includes('extractQueued'));
  console.log('PASS: inclusion/exclusion, provenance, known zero vs unknown, partial coverage and separate research progress');
+
+ const progressRun={runRef:'completed-run',trigger:'on_demand',state:'completed',lastReason:'comparison_queued',queuedCount:0,succeededCount:0,failedCount:1,createdAt:'2026-10-10T00:00:00Z',inputScope:{comparison:{state:'queued'}},phases:{extractQueued:0,extracting:0,resolveQueued:0,resolving:0,compareQueued:0,comparing:0},taskIssues:[{taskRef:'failed-comparison',phase:'compare',state:'failed',reason:'model_input_limit'}]};
+ const renderProgress=run=>{ctx.audit.set(snap,{type:'research',progress:{runs:[run]}});return ctx.audit.researchDialog();};
+ const failedProgress=renderProgress(progressRun);
+ assert(failedProgress.includes('已处理'));assert(failedProgress.includes('待处理 0 · 已获结果 0 · 失败 / 派发未知 1'));
+ assert(failedProgress.includes('比较讨论 · 处理失败'));assert(failedProgress.includes('输入超过模型配置上限'));
+ assert(failedProgress.includes('原因码：model_input_limit'));assert(failedProgress.includes('显示 1 / 1 项'));
+ assert(!failedProgress.includes('comparison_queued'),'historical admission checkpoint cannot explain the current failed task');
+ const completedProgress=renderProgress({...progressRun,succeededCount:1,failedCount:0,taskIssues:[]});
+ assert(completedProgress.includes('已处理'));assert(completedProgress.includes('待处理 0 · 已获结果 1 · 失败 / 派发未知 0'));
+ assert(!completedProgress.includes('comparison_queued'),'successful completion also must not display an old queued receipt as current status');
+ const unknownProgress=renderProgress({...progressRun,taskIssues:[{taskRef:'unknown-comparison',phase:'compare',state:'unknown_dispatch',reason:'unknown_dispatch'}]});
+ assert(unknownProgress.includes('比较讨论 · 派发结果未知'));assert(unknownProgress.includes('无法确认请求的执行结果，不会自动重发'));
+ assert(!unknownProgress.includes('比较讨论 · 处理失败'),'unknown dispatch is not a known failure');
+ const missingReason=renderProgress({...progressRun,taskIssues:[{phase:'resolve',state:'failed',reason:null}]});
+ assert(missingReason.includes('判断归属 · 处理失败'));assert(missingReason.includes('未记录具体原因'));
+ const unknownReason=renderProgress({...progressRun,runRef:'<script>run</script>',trigger:'<svg onload=alert(1)>',createdAt:'<img src=x>',taskIssues:[{phase:'future_phase',state:'failed',reason:'<script>unexpected_reason</script>'}]});
+ assert(unknownReason.includes('阶段未知 · 处理失败'));assert(unknownReason.includes('原因尚未识别'));
+ assert(unknownReason.includes('&lt;script&gt;unexpected_reason&lt;/script&gt;'));assert(unknownReason.includes('&lt;script&gt;run&lt;/script&gt;'));
+ assert(unknownReason.includes('&lt;svg onload=alert(1)&gt;'));assert(unknownReason.includes('&lt;img src=x&gt;'));
+ assert(!/<(?:script|img|svg)\b/.test(unknownReason),'all dynamic progress copy remains escaped');
+ const absentIssues=renderProgress({...progressRun,taskIssues:undefined});
+ assert(absentIssues.includes('具体原因尚未取得'));assert(!absentIssues.includes('comparison_queued'));
+ const boundedIssues=renderProgress({...progressRun,failedCount:25,taskIssues:Array.from({length:25},(_,i)=>({phase:'extract',state:'failed',reason:`synthetic_reason_${i}`}))});
+ assert(boundedIssues.includes('显示 20 / 25 项'));assert.equal((boundedIssues.match(/原因码：/g)||[]).length,20);
+ assert(!boundedIssues.includes('synthetic_reason_20'),'the UI keeps the documented task detail bound');
+ console.log('PASS: completed research shows actual bounded failures, retains unknowns, ignores queued checkpoints and escapes all progress fields');
+
+ for(const [state,expected] of [['queued',['pause','stop']],['running',['pause','stop']],['daily_budget_paused',['pause','stop']],['paused',['resume','stop']],['completed',[]],['stopped',[]],['run_budget_exhausted',[]],['failed',[]],['unknown_state',[]]]){
+   const html=renderProgress({...progressRun,state,failedCount:0,taskIssues:[],phases:{...progressRun.phases,compareQueued:2,comparing:1}});
+   const actions=Array.from(html.matchAll(/data-action="research-(pause|resume|stop)"/g),m=>m[1]);
+   assert.deepEqual(actions,expected,`${state}: only useful, backend-accepted run controls appear`);
+   assert(html.includes('<strong>比较讨论</strong> · 进行中 1 · 待处理 2'));
+   assert(!html.includes('comparison_queued'),`${state}: old queue reason is not a current status, including completed without failures`);
+   if(state==='daily_budget_paused')assert(html.includes('等待日额度'));
+   if(state==='run_budget_exhausted')assert(html.includes('本次研究额度已用尽'));
+ }
+ const unknownCompare=renderProgress({...progressRun,phases:{extractQueued:0,extracting:0}});
+ assert(unknownCompare.includes('<strong>比较讨论</strong> · 进行中 — · 待处理 —'));
+ console.log('PASS: comparison phase keeps actual counts and unknowns; terminal runs never offer invalid pause/resume/stop');
 
  assert.equal(ctx.audit.citationText(coreA,support.evidence),'😀原声','nonzero source window uses Unicode scalar offsets');
  assert.equal(JSON.stringify(ctx.audit.citationSpans(coreA,fragment.fragmentId)),JSON.stringify([{start:2,end:5}]));

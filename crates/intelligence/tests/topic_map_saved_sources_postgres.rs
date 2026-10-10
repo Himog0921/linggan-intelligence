@@ -16,6 +16,20 @@ use serde_json::{Value, json};
 use sqlx::Row;
 use uuid::Uuid;
 
+async fn tail_fixture_config(db: &Database, original: Uuid) -> Uuid {
+    let model = Uuid::new_v4();
+    let config = Uuid::new_v4();
+    // Model entries/configs are immutable. Prepare a separate synthetic model
+    // and its callable receipt; keep the original model and every limit intact.
+    sqlx::query("INSERT INTO linggan_model_entry(model_ref,connection_version_ref,model_id,origin) SELECT $1,m.connection_version_ref,'synthetic-topic-map-cite-tail','manual' FROM linggan_model_entry m JOIN linggan_model_config c USING(model_ref) WHERE c.config_ref=$2")
+        .bind(model).bind(original).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_model_config(config_ref,model_ref,input_token_limit,output_token_limit,timeout_seconds,max_attempts) SELECT $1,$2,input_token_limit,output_token_limit,timeout_seconds,max_attempts FROM linggan_model_config WHERE config_ref=$3")
+        .bind(config).bind(model).bind(original).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,operation,request_hash,state,reserved_tokens,charged_tokens,result) SELECT $1,connection_version_ref,model_ref,'probe','synthetic-cite-tail','succeeded',0,0,$3 FROM linggan_model_entry WHERE model_ref=$2")
+        .bind(Uuid::new_v4()).bind(model).bind(json!({"ok":true,"modelCallable":true,"semanticQualified":true})).execute(db.pool()).await.unwrap();
+    config
+}
+
 async fn source_task(
     db: &Database,
     work: Uuid,
@@ -90,10 +104,47 @@ async fn save_task_angle(db: &Database, task: Uuid, work: Uuid, key: &str) -> Uu
         .unwrap()
 }
 
+async fn assert_tail_angle_citation(
+    db: &Database,
+    task: Uuid,
+    field: &str,
+    source: &str,
+    emoji: &str,
+) {
+    let row = sqlx::query("SELECT result.output_json,task.input_refs FROM linggan_topic_map_research_result result JOIN linggan_topic_map_research_request request USING(invocation_ref) JOIN linggan_topic_map_research_task task USING(task_ref) WHERE request.task_ref=$1 ORDER BY result.created_at DESC LIMIT 1")
+        .bind(task).fetch_one(db.pool()).await.unwrap();
+    let output: Value = row.get("output_json");
+    let manifest: Value = row.get("input_refs");
+    let input = manifest.get("source").unwrap_or(&manifest);
+    let tail = input["fragments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|fragment| fragment["field"] == field && fragment["start"] == 12000)
+        .expect("requested tail fragment must be frozen in the accepted input");
+    let end = source.chars().count();
+    assert_eq!(tail["end"], json!(end));
+    let citations = output["angles"][0]["evidence"].as_array().unwrap();
+    assert_eq!(citations.len(), 1, "fixture must explicitly cite its tail");
+    assert_eq!(citations[0]["fragmentId"], tail["fragmentId"]);
+    assert_eq!(citations[0]["start"], json!(12000));
+    assert_eq!(citations[0]["end"], json!(end));
+    let emoji_byte = source.find(emoji).expect("fixture tail contains its emoji");
+    let emoji_start = source[..emoji_byte].chars().count();
+    let emoji_end = emoji_start + emoji.chars().count();
+    assert!(12000 <= emoji_start && emoji_end <= end);
+    let quoted: String = source.chars().skip(12000).take(end - 12000).collect();
+    assert!(
+        quoted.contains(emoji),
+        "actual cited scalar range covers the emoji"
+    );
+}
+
 #[tokio::test]
 #[ignore = "isolated native PostgreSQL; synthetic adapter only"]
 async fn unicode_tail_survives_save_and_same_text_refresh_across_model_configs() {
     let (db, config, adapter) = setup("topic_saved_unicode_tail").await;
+    let config = tail_fixture_config(&db, config).await;
     let body = format!(
         "{}尾部👩‍👧这里才说明开始练习遇到的限制。",
         "前文练习。".repeat(2400)
@@ -107,6 +158,7 @@ async fn unicode_tail_survives_save_and_same_text_refresh_across_model_configs()
         .unwrap();
     let task = source_task(&db, work, config, "body", None, 12000).await;
     finish_source_task(&db, &adapter, task).await;
+    assert_tail_angle_citation(&db, task, "body", &body, "👩‍👧").await;
     let saved = save_task_angle(&db, task, work, "saved-unicode-tail").await;
     let original = topic_map::read_saved_alternative(&db, D, saved)
         .await
@@ -150,6 +202,7 @@ async fn unicode_tail_survives_save_and_same_text_refresh_across_model_configs()
         .unwrap();
     let next = source_task(&db, work, second_config, "body", None, 12000).await;
     finish_source_task(&db, &adapter, next).await;
+    assert_tail_angle_citation(&db, next, "body", &body, "👩‍👧").await;
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
             "SELECT count(*) FROM linggan_topic_map_discussion_unit WHERE work_public_ref=$1"
@@ -347,6 +400,7 @@ async fn accepted_layout(db: &Database, work: Uuid, derivative: Uuid, blob: &str
 #[ignore = "isolated native PostgreSQL; synthetic adapter only"]
 async fn later_media_pages_and_full_asr_ocr_reopen_without_authorizing_restricted_siblings() {
     let (db, config, adapter) = setup("topic_saved_media_tail").await;
+    let config = tail_fixture_config(&db, config).await;
     let work = work(&db, "saved-media-tail", "").await;
     let (slot, blob) = media_slot(&db, "saved-media-tail").await;
     let asr = media_job(&db, &slot, &blob, "asr", "synthetic-full-asr").await;
@@ -408,6 +462,7 @@ async fn later_media_pages_and_full_asr_ocr_reopen_without_authorizing_restricte
         .unwrap();
     let asr_task = source_task(&db, work, config, "transcript", Some(asr), 12000).await;
     finish_source_task(&db, &adapter, asr_task).await;
+    assert_tail_angle_citation(&db, asr_task, "transcript", &transcript, "🙂").await;
     let asr_saved = save_task_angle(&db, asr_task, work, "saved-full-asr-tail").await;
     let reopened = topic_map::read_saved_alternative(&db, D, asr_saved)
         .await
@@ -418,6 +473,7 @@ async fn later_media_pages_and_full_asr_ocr_reopen_without_authorizing_restricte
         && !f.cited_ranges.is_empty()));
     let ocr_task = source_task(&db, work, config, "ocr", Some(ocr), 12000).await;
     finish_source_task(&db, &adapter, ocr_task).await;
+    assert_tail_angle_citation(&db, ocr_task, "ocr", &ocr_text, "👩‍👧").await;
     let ocr_saved = save_task_angle(&db, ocr_task, work, "saved-full-ocr-tail").await;
     let reopened = topic_map::read_saved_alternative(&db, D, ocr_saved)
         .await

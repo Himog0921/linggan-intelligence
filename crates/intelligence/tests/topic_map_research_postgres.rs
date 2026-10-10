@@ -89,10 +89,21 @@ async fn exact_input_pipeline_idempotency_budget_and_stop() {
     // canonical head without invalidating semantically unchanged source windows.
     let before: Uuid = sqlx::query_scalar("SELECT (input_refs->'fragments'->0->>'sourceRef')::uuid FROM linggan_topic_map_research_task LIMIT 1")
         .fetch_one(db.pool()).await.unwrap();
-    work_at(&db,"research-one","","SYNTHETIC 家庭实践：每次只做一步，并记录反馈。",99,"2026-09-29T10:00:00Z").await;
+    work_at(
+        &db,
+        "research-one",
+        "",
+        "SYNTHETIC 家庭实践：每次只做一步，并记录反馈。",
+        99,
+        "2026-09-29T10:00:00Z",
+    )
+    .await;
     let latest: Uuid = sqlx::query_scalar("SELECT material_ref FROM linggan_material_content_detail WHERE content_public_ref=$1 ORDER BY observed_at::timestamptz DESC,created_at DESC,material_ref DESC LIMIT 1")
         .bind(w).fetch_one(db.pool()).await.unwrap();
-    assert_ne!(before,latest,"the canonical source observation must actually change");
+    assert_ne!(
+        before, latest,
+        "the canonical source observation must actually change"
+    );
     assert_eq!(
         apply_research_command(&db, &start(vec![w])).await.unwrap()["state"],
         "no_new_input"
@@ -308,12 +319,15 @@ async fn comparison_proof(db: &Database) -> ComparisonProof {
         a > b,
         "this regression must not depend on a random primary UUID"
     );
-    let comment_body = "孩子每天练习都要催，不催就不开始。";
+    let raw_comment = "孩子每天练习都要催，不催就不开始。";
+    // Research and saved citations use the qualified, cleaned comment text.
+    // Keep this oracle handwritten and distinct from the submitted raw text.
+    let comment_body = "孩子每天练习都要催,不催就不开始。";
     let comment = research_fixture::comment_with_author(
         db,
         comment_work,
         "reader-q",
-        comment_body,
+        raw_comment,
         Some("synthetic-reader"),
         "2026-09-16T08:00:00Z",
     )
@@ -695,7 +709,9 @@ async fn comparison_and_comment_citations_are_visible_then_restriction_invalidat
         .bind(result).fetch_one(db.pool()).await.unwrap();
     for field in ["currentSources", "sourceHashes", "fragmentOrigins"] {
         assert!(
-            coverage[field].as_object().is_some_and(|map| !map.is_empty()),
+            coverage[field]
+                .as_object()
+                .is_some_and(|map| !map.is_empty()),
             "the complete frozen audit mapping remains available: {field}"
         );
     }
@@ -858,5 +874,142 @@ async fn title_and_body_windows_finish_without_assuming_task_order() {
     assert_eq!(
         apply_research_command(&db, &start(vec![w])).await.unwrap()["state"],
         "no_new_input"
+    );
+}
+
+async fn progress_for_run(db: &Database, run: Uuid) -> Value {
+    read_research_progress(db, D).await.unwrap()["runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["runRef"] == json!(run))
+        .unwrap()
+        .clone()
+}
+
+#[tokio::test]
+#[ignore = "disposable PostgreSQL and synthetic child, no provider"]
+async fn completed_comparison_progress_keeps_failure_and_allows_explicit_new_start() {
+    let (db, template, adapter) = setup("topic_map_research_progress_failure").await;
+    let config = Uuid::new_v4();
+    // Keep the shared 8192 configuration immutable. This dedicated limit fits
+    // the independent sources but rejects the larger, three-discussion comparison.
+    sqlx::query("INSERT INTO linggan_model_config(config_ref,model_ref,input_token_limit,output_token_limit,timeout_seconds,max_attempts) SELECT $1,model_ref,7000,output_token_limit,timeout_seconds,max_attempts FROM linggan_model_config WHERE config_ref=$2")
+        .bind(config).bind(template).execute(db.pool()).await.unwrap();
+    let proof = comparison_proof(&db).await;
+    apply_research_command(&db, &configure(config, 100000, false))
+        .await
+        .unwrap();
+    for work in proof.works {
+        apply_research_command(&db, &start(vec![work]))
+            .await
+            .unwrap();
+        finish_pending(&db, &adapter).await;
+    }
+    let mut previous_task = None;
+    let mut previous_run = None;
+    // The second iteration is a new explicit command, never an automatic retry.
+    for _ in 0..2 {
+        let receipt = apply_research_command(&db, &start(proof.works.to_vec()))
+            .await
+            .unwrap();
+        assert_eq!(receipt["state"], "queued");
+        let run: Uuid = receipt["runRef"].as_str().unwrap().parse().unwrap();
+        assert_ne!(previous_run, Some(run));
+        finish_pending(&db, &adapter).await;
+        let progress = progress_for_run(&db, run).await;
+        assert_eq!(progress["state"], "completed");
+        assert_eq!(progress["queuedCount"], 0);
+        assert_eq!(progress["succeededCount"], 0);
+        assert_eq!(progress["failedCount"], 1);
+        assert_eq!(progress["phases"]["compareQueued"], 0);
+        assert_eq!(progress["phases"]["comparing"], 0);
+        assert_eq!(progress["lastReason"], "comparison_queued");
+        assert_eq!(progress["inputScope"]["comparison"]["state"], "queued");
+        let task: Uuid = progress["inputScope"]["comparison"]["taskRef"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert_ne!(previous_task, Some(task));
+        assert_eq!(
+            progress["taskIssues"],
+            json!([{
+                "taskRef":task,"phase":"compare","state":"failed","reason":"model_input_limit"
+            }])
+        );
+        let calls: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM linggan_topic_map_research_request WHERE run_ref=$1",
+        )
+        .bind(run)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        assert_eq!(calls, 0, "input rejection occurs before any invocation");
+        assert!(
+            !run_once(&db, &SyntheticModelSecrets, &adapter)
+                .await
+                .unwrap()
+        );
+        previous_task = Some(task);
+        previous_run = Some(run);
+    }
+}
+
+#[tokio::test]
+#[ignore = "disposable PostgreSQL projection fixture, no provider"]
+async fn research_progress_bounds_task_issues_without_losing_totals_or_unknown_reasons() {
+    let (db, config, _) = setup("topic_map_research_progress_bounds").await;
+    let work = work(&db, "progress-bounds", "SYNTHETIC 进度投影材料。").await;
+    let run = Uuid::new_v4();
+    sqlx::query("INSERT INTO linggan_topic_map_research_run(run_ref,domain_ref,request_ref,trigger,config_ref,method_version,token_limit,state) VALUES($1,$2,$3,'on_demand',$4,'topic-map.research.v2',100000,'completed')")
+        .bind(run).bind(D).bind(Uuid::new_v4()).bind(config).execute(db.pool()).await.unwrap();
+    let mut issue_refs = Vec::new();
+    for index in 0..30 {
+        let task = Uuid::new_v4();
+        let state = match index {
+            24 => "unknown_dispatch",
+            25 => "succeeded",
+            26 => "no_signal",
+            27 => "insufficient",
+            28 => "stale",
+            29 => "stopped",
+            _ => "failed",
+        };
+        let reason = match index {
+            23 => None,
+            24 => Some("unknown_dispatch".to_string()),
+            _ => Some(format!("synthetic_unrecognized_{index}")),
+        };
+        sqlx::query("INSERT INTO linggan_topic_map_research_task(task_ref,run_ref,domain_ref,work_public_ref,input_hash,input_refs,state,phase,last_reason,updated_at) VALUES($1,$2,$3,$4,$5,'{}',$6,$7,$8,'2026-10-10T00:00:00Z'::timestamptz+$9::int*interval '1 second')")
+            .bind(task).bind(run).bind(D).bind(work).bind(format!("{index:064x}"))
+            .bind(state).bind(["extract","resolve","compare"][index % 3]).bind(reason)
+            .bind(i32::try_from(index).unwrap()).execute(db.pool()).await.unwrap();
+        if ["failed", "unknown_dispatch"].contains(&state) {
+            issue_refs.push(json!(task));
+        }
+    }
+    let progress = progress_for_run(&db, run).await;
+    assert_eq!(progress["failedCount"], 25);
+    assert_eq!(progress["succeededCount"], 3);
+    assert_eq!(progress["queuedCount"], 0);
+    let issues = progress["taskIssues"].as_array().unwrap();
+    assert_eq!(issues.len(), 20);
+    assert_eq!(
+        issues
+            .iter()
+            .map(|item| item["taskRef"].clone())
+            .collect::<Vec<_>>(),
+        issue_refs.into_iter().rev().take(20).collect::<Vec<_>>()
+    );
+    assert_eq!(issues[0]["state"], "unknown_dispatch");
+    assert_eq!(issues[0]["phase"], "extract");
+    assert_eq!(issues[0]["reason"], "unknown_dispatch");
+    assert!(issues[1].get("reason").is_some_and(Value::is_null));
+    assert_eq!(issues[2]["reason"], "synthetic_unrecognized_22");
+    assert!(
+        issues
+            .iter()
+            .all(|item| ["failed", "unknown_dispatch"].contains(&item["state"].as_str().unwrap()))
     );
 }
