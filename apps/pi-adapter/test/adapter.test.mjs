@@ -66,7 +66,12 @@ test('actual Pi SDK distinguishes an interrupted stream, missing terminal, and o
 });
 test('recorded limit kind distinguishes wire bytes from final text bytes',async()=>{
   for(const maxOutputTokens of [128,8192]){
-    const wire=await server((req,res)=>{res.writeHead(200,{'Content-Type':'text/event-stream'});res.end(`: ${'x'.repeat(sseByteLimit(maxOutputTokens)+1)}\n\n`);});
+    // Keep SSE lines bounded so this proves aggregate wire rejection rather
+    // than making the SDK parse one multi-megabyte line until its deadline.
+    const frame=`: ${'x'.repeat(1000)}\n\n`;
+    const wireBody=frame.repeat(Math.ceil((sseByteLimit(maxOutputTokens)+1)/Buffer.byteLength(frame)));
+    assert.ok(Buffer.byteLength(wireBody)>sseByteLimit(maxOutputTokens));
+    const wire=await server((req,res)=>{res.writeHead(200,{'Content-Type':'text/event-stream'});res.end(wireBody);});
     try{const result=await execute(request(wire.url,{maxOutputTokens}));assert.equal(result.failureCode,'response_too_large');assertDiagnostic(result,{limitKind:'sse_stream_token_budget',retryClass:'never'});}finally{await wire.close();}
   }
   const final=await server((req,res)=>success(res,'x'.repeat(65537),false));
