@@ -1,7 +1,9 @@
 //! Qualified reconstruction of frozen source ranges, including explicit legacy reads.
 use super::identity::{domain_identity, input_identity, role_identity};
 use super::windows::{is_research_evidence, selected_comment_study, with_comparison_context};
-use super::{INPUT_CONTRACT, ResearchError, ResearchInput, load_inputs};
+use super::{
+    INPUT_CONTRACT, ResearchError, ResearchInput, load_inputs_for_works, manifest_source_work_refs,
+};
 use linggan_evidence::creator_discovery::{self, Fragment};
 use linggan_storage_postgres::Database;
 use serde_json::{Value, json};
@@ -292,8 +294,21 @@ pub(crate) async fn research_result_sources_current(
     let config: Uuid = row.get("config_ref");
     let work: Uuid = row.get("work_public_ref");
     let manifest: Value = row.get("input_refs");
-    let all = load_inputs(db, domain, config).await?;
-    Ok(match row.get::<Option<String>, _>("contract").as_deref() {
+    let contract: Option<String> = row.get("contract");
+    let scope = match contract.as_deref() {
+        Some("topic-map.research.v1") => {
+            let Some(scope) = legacy_source_work_refs(work, &manifest) else {
+                return Ok(false);
+            };
+            scope
+        }
+        Some(crate::topic_map_research_analysis::EXTRACT_CONTRACT) => {
+            manifest_source_work_refs(work, &manifest)
+        }
+        _ => return Ok(false),
+    };
+    let all = load_inputs_for_works(db, domain, config, &scope).await?;
+    Ok(match contract.as_deref() {
         Some("topic-map.research.v1") => all
             .iter()
             .find(|input| input.work.work_ref == work)
@@ -303,4 +318,53 @@ pub(crate) async fn research_result_sources_current(
         }
         _ => false,
     })
+}
+
+fn legacy_source_work_refs(work: Uuid, manifest: &Value) -> Option<Vec<Uuid>> {
+    let manifest = manifest.get("source").unwrap_or(manifest);
+    let context: Vec<Uuid> = manifest["contextWorkRefs"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|value| value.as_str()?.parse().ok())
+        .collect::<Option<_>>()?;
+    if context.len() > 10 {
+        return None;
+    }
+    Some(
+        std::iter::once(work)
+            .chain(context)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect(),
+    )
+}
+
+#[cfg(test)]
+mod finite_legacy_scope_tests {
+    use super::*;
+
+    #[test]
+    fn legacy_keeps_its_ten_context_limit_and_always_reads_primary() {
+        let work = Uuid::from_u128(1);
+        let context: Vec<_> = (2..=11).map(Uuid::from_u128).collect();
+        assert_eq!(legacy_source_work_refs(work, &json!({})), Some(vec![work]));
+        assert_eq!(
+            legacy_source_work_refs(work, &json!({"source":{"contextWorkRefs":context}}))
+                .unwrap()
+                .len(),
+            11
+        );
+        assert_eq!(
+            legacy_source_work_refs(work, &json!({"contextWorkRefs":[work,work]})),
+            Some(vec![work])
+        );
+    }
+
+    #[test]
+    fn invalid_legacy_scope_is_rejected_without_unbounded_reads() {
+        let work = Uuid::from_u128(1);
+        assert!(legacy_source_work_refs(work, &json!({"contextWorkRefs":["invalid"]})).is_none());
+        assert!(legacy_source_work_refs(work, &json!({"contextWorkRefs":vec![work;11]})).is_none());
+    }
 }

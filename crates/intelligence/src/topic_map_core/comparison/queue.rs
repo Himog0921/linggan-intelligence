@@ -122,7 +122,9 @@ pub(crate) async fn queue_once(db: &Database) -> Result<bool, ModelError> {
     let candidate = QueueCandidate::from_row(&row);
     let mut inputs = Vec::new();
     let built = if let Some(requested) = &candidate.requested {
-        match research::load_inputs(db, candidate.domain, candidate.config).await {
+        match research::load_inputs_for_works(db, candidate.domain, candidate.config, requested)
+            .await
+        {
             Ok(loaded) => {
                 let built =
                     load_comparison(db, &loaded, candidate.domain, candidate.config, requested)

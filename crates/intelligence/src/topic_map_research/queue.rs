@@ -171,6 +171,27 @@ pub(crate) async fn queue_research_run(
     works: &[Uuid],
     topic: Option<Uuid>,
 ) -> Result<Option<Uuid>, ResearchError> {
+    queue_run(db, domain, request, trigger, works, topic, false).await
+}
+
+/// Automatic admission never grows the backlog while an earlier batch remains
+/// unfinished, including batches waiting for a human or a budget reset.
+pub(crate) async fn queue_automatic_run(
+    db: &Database,
+    domain: Uuid,
+) -> Result<Option<Uuid>, ResearchError> {
+    queue_run(db, domain, Uuid::new_v4(), "incremental", &[], None, true).await
+}
+
+async fn queue_run(
+    db: &Database,
+    domain: Uuid,
+    request: Uuid,
+    trigger: &str,
+    works: &[Uuid],
+    topic: Option<Uuid>,
+    automatic: bool,
+) -> Result<Option<Uuid>, ResearchError> {
     let p = sqlx::query("SELECT * FROM linggan_topic_map_research_policy WHERE domain_ref=$1")
         .bind(domain)
         .fetch_optional(db.pool())
@@ -198,12 +219,24 @@ pub(crate) async fn queue_research_run(
     };
     let windows = prepare_windows(&input, &scope, trigger);
     let mut tx = db.pool().begin().await?;
-    sqlx::query(
-        "SELECT domain_ref FROM linggan_topic_map_research_policy WHERE domain_ref=$1 FOR UPDATE",
+    let locked = sqlx::query(
+        "SELECT status,automatic_enabled,model_config_ref FROM linggan_topic_map_research_policy WHERE domain_ref=$1 FOR UPDATE",
     )
     .bind(domain)
     .fetch_one(&mut *tx)
     .await?;
+    if automatic {
+        let blocked: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_topic_map_research_run WHERE domain_ref=$1 AND method_version=$2 AND state NOT IN ('completed','stopped','failed'))")
+            .bind(domain).bind(METHOD_VERSION).fetch_one(&mut *tx).await?;
+        if blocked
+            || locked.get::<String, _>("status") != "active"
+            || !locked.get::<bool, _>("automatic_enabled")
+            || locked.get::<Uuid, _>("model_config_ref") != config
+        {
+            tx.commit().await?;
+            return Ok(None);
+        }
+    }
     if let Some(run) = sqlx::query_scalar(
         "SELECT run_ref FROM linggan_topic_map_research_run WHERE request_ref=$1",
     )

@@ -83,7 +83,10 @@ impl PiDiagnostic {
             && self.limit_kind.as_deref().is_none_or(|v| {
                 matches!(
                     v,
-                    "sse_stream_262144" | "final_text_65536" | "output_tokens"
+                    "sse_stream_262144"
+                        | "sse_stream_token_budget"
+                        | "final_text_65536"
+                        | "output_tokens"
                 )
             })
             && self.elapsed_ms <= 86_400_000
@@ -392,9 +395,15 @@ impl PiAdapter {
 
     pub async fn call(&self, request: &PiRequest) -> Result<PiResponse, ModelError> {
         let input = serde_json::to_vec(request).map_err(|_| ModelError::Invalid)?;
-        let topic_contract = serde_json::from_str::<Value>(&request.prompt).ok()
-            .and_then(|packet|packet["contract"].as_str().map(str::to_owned))
-            .is_some_and(|contract|matches!(contract.as_str(),"topic-map.research.v2"|"topic-map.resolve.v1"));
+        let topic_contract = serde_json::from_str::<Value>(&request.prompt)
+            .ok()
+            .and_then(|packet| packet["contract"].as_str().map(str::to_owned))
+            .is_some_and(|contract| {
+                matches!(
+                    contract.as_str(),
+                    "topic-map.research.v2" | "topic-map.resolve.v1"
+                )
+            });
         if input.len() > if topic_contract { 1024 * 1024 } else { 131072 } {
             return Err(ModelError::InputLimit);
         }
@@ -542,6 +551,17 @@ mod diagnostic_tests {
         let mut value = serde_json::to_value(PiDiagnostic::process_timeout(1)).unwrap();
         value["headers"] = serde_json::json!({"authorization":"synthetic"});
         assert!(serde_json::from_value::<PiDiagnostic>(value).is_err());
+    }
+
+    #[test]
+    fn diagnostic_accepts_budgeted_stream_limit_and_historical_receipts() {
+        let mut d = PiDiagnostic::process_timeout(1);
+        for kind in ["sse_stream_262144", "sse_stream_token_budget"] {
+            d.limit_kind = Some(kind.into());
+            assert!(d.valid());
+        }
+        d.limit_kind = Some("provider said: private source content".into());
+        assert!(!d.valid());
     }
 
     #[test]

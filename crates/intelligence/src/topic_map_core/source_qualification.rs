@@ -6,7 +6,7 @@ use crate::{
 use linggan_storage_postgres::Database;
 use serde_json::Value;
 use sqlx::Row;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use uuid::Uuid;
 
 /// Only machine rules are included. Human definitions have their own explicit authority.
@@ -17,7 +17,33 @@ pub(crate) async fn unavailable_definitions(
 ) -> Result<HashSet<Uuid>, ModelError> {
     let rows = sqlx::query("SELECT rule.definition_ref,rule.domain_ref,task.work_public_ref,run.config_ref,request.request_manifest FROM linggan_topic_map_concept_rule rule LEFT JOIN linggan_topic_map_research_request request ON request.invocation_ref=rule.invocation_ref LEFT JOIN linggan_topic_map_research_task task USING(task_ref) LEFT JOIN linggan_topic_map_research_run run ON run.run_ref=task.run_ref WHERE ($1::uuid IS NULL OR rule.domain_ref=$1)")
         .bind(domain).fetch_all(db.pool()).await?;
+    let mut scopes = HashMap::<(Uuid, Uuid), BTreeSet<Uuid>>::new();
+    for row in &rows {
+        let (Some(config), Some(work), Some(manifest)) = (
+            row.get::<Option<Uuid>, _>("config_ref"),
+            row.get::<Option<Uuid>, _>("work_public_ref"),
+            row.get::<Option<Value>, _>("request_manifest"),
+        ) else {
+            continue;
+        };
+        scopes
+            .entry((row.get("domain_ref"), config))
+            .or_default()
+            .extend(topic_map_research::manifest_source_work_refs(
+                work, &manifest,
+            ));
+    }
     let mut inputs = HashMap::<(Uuid, Uuid), Vec<ResearchInput>>::new();
+    for ((domain, config), scope) in scopes {
+        let scope: Vec<_> = scope.into_iter().collect();
+        let loaded = topic_map_research::load_inputs_for_works(db, domain, config, &scope)
+            .await
+            .map_err(|e| match e {
+                topic_map_research::ResearchError::Database(e) => ModelError::Database(e),
+                _ => ModelError::Source,
+            })?;
+        inputs.insert((domain, config), loaded);
+    }
     let mut unavailable = legacy_unverifiable_definitions(db, domain).await?;
     let mut dependencies = HashMap::new();
     for row in rows {
@@ -34,16 +60,6 @@ pub(crate) async fn unavailable_definitions(
             row.get::<Uuid, _>("definition_ref"),
             definition_dependencies(&manifest),
         );
-        if let std::collections::hash_map::Entry::Vacant(entry) = inputs.entry((domain, config)) {
-            entry.insert(
-                topic_map_research::load_inputs(db, domain, config)
-                    .await
-                    .map_err(|e| match e {
-                        topic_map_research::ResearchError::Database(e) => ModelError::Database(e),
-                        _ => ModelError::Source,
-                    })?,
-            );
-        }
         if topic_map_research::restore_scoped_window(&inputs[&(domain, config)], work, &manifest)
             .is_none()
         {

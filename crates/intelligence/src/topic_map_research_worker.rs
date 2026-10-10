@@ -57,6 +57,7 @@ pub async fn run_once(
         return Ok(false);
     }
     recover(db).await?;
+    let retired = lifecycle::retire_legacy_runs(db).await?;
     crate::topic_map_research_collection::advance_comment_rounds_once(db)
         .await
         .map_err(err)?;
@@ -70,25 +71,20 @@ pub async fn run_once(
             .map_err(err)?;
     }
     // One bounded scan per tick, cyclic domain order; no work means no provider call.
-    let p=sqlx::query("SELECT p.domain_ref FROM linggan_topic_map_research_policy p JOIN observation_domain d USING(domain_ref) WHERE p.automatic_enabled AND p.status='active' AND d.status='active' ORDER BY p.updated_at,p.domain_ref LIMIT 1").fetch_optional(db.pool()).await?;
+    let p=sqlx::query("SELECT p.domain_ref FROM linggan_topic_map_research_policy p JOIN observation_domain d USING(domain_ref) WHERE p.automatic_enabled AND p.status='active' AND d.status='active' AND NOT EXISTS(SELECT 1 FROM linggan_topic_map_research_run r WHERE r.domain_ref=p.domain_ref AND r.method_version=$1 AND r.state NOT IN ('completed','stopped','failed')) ORDER BY p.updated_at,p.domain_ref LIMIT 1")
+        .bind(analysis::METHOD_VERSION).fetch_optional(db.pool()).await?;
     if let Some(p) = p {
         let domain: Uuid = p.get("domain_ref");
-        topic_map_research::queue_research_run(
-            db,
-            domain,
-            Uuid::new_v4(),
-            "incremental",
-            &[],
-            None,
-        )
-        .await
-        .map_err(err)?;
+        topic_map_research::queue_automatic_run(db, domain)
+            .await
+            .map_err(err)?;
         sqlx::query("UPDATE linggan_topic_map_research_policy SET updated_at=scope_001_now()WHERE domain_ref=$1").bind(domain).execute(db.pool()).await?;
     }
-    let maintained = core::backfill::advance_once(db).await?;
+    let maintained = core::backfill::advance_once(db).await? || retired;
     let maintained = core::comparison::queue_once(db).await? || maintained;
     let maintained = lifecycle::complete_ready_runs(db).await? || maintained;
-    // Deterministic round-robin: smallest previous dispatch count serves history as well as live work.
+    // Finish available understanding before opening another extraction window.
+    // Within each phase, least recently dispatched runs share the worker.
     let row = next_task(db).await?;
     let Some(row) = row else {
         return Ok(maintained);
@@ -106,6 +102,7 @@ async fn next_task(db: &Database) -> Result<Option<sqlx::postgres::PgRow>, Model
       JOIN linggan_model_config c ON c.config_ref=r.config_ref
       WHERE t.state='queued' AND t.phase_attempt_count<c.max_attempts
         AND r.state IN ('queued','running') AND p.status='active' AND d.status='active'
+        AND r.method_version=$1
         AND (p.automatic_enabled
           OR (r.trigger='on_demand' AND COALESCE(r.input_scope->>'backfillReopened','false')<>'true')
           OR EXISTS(
@@ -119,10 +116,11 @@ async fn next_task(db: &Database) -> Result<Option<sqlx::postgres::PgRow>, Model
                 AND permission->'workRefs' @> (t.recall_manifest#>'{backfill,comparisonScopeWorkRefs}')
               ))
           ))
-      ORDER BY (SELECT count(*) FROM linggan_topic_map_research_request q WHERE q.run_ref=r.run_ref),
-        CASE r.trigger WHEN 'on_demand' THEN 0 WHEN 'incremental' THEN 1 ELSE 2 END,t.created_at
+      ORDER BY CASE t.phase WHEN 'resolve' THEN 0 WHEN 'compare' THEN 1 ELSE 2 END,
+        (SELECT max(q.created_at) FROM linggan_topic_map_research_request q WHERE q.run_ref=r.run_ref) ASC NULLS FIRST,
+        r.created_at,r.run_ref,t.created_at,t.task_ref
       LIMIT 1
-    "#).fetch_optional(db.pool()).await?)
+    "#).bind(analysis::METHOD_VERSION).fetch_optional(db.pool()).await?)
 }
 
 struct Prepared {

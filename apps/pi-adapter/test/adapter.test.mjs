@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { execute, VERSION } from '../src/adapter.mjs';
+import { execute, sseByteLimit, VERSION } from '../src/adapter.mjs';
 
 async function server(handler) {
   const s=http.createServer(handler);await new Promise(resolve=>s.listen(0,'127.0.0.1',resolve));
@@ -65,10 +65,65 @@ test('actual Pi SDK distinguishes an interrupted stream, missing terminal, and o
   try{const r=await execute(request(limited.url));assert.equal(r.failureCode,'output_limit');const d=assertDiagnostic(r,{stage:'terminal',httpStatus:200,responseStarted:true,terminalReceived:true,finishReason:'length',limitKind:'output_tokens',usageKnown:false,sdkErrorType:null,retryClass:'never'});assert.ok(d.receivedBytes>0);}finally{await limited.close();}
 });
 test('recorded limit kind distinguishes wire bytes from final text bytes',async()=>{
-  const wire=await server((req,res)=>{res.writeHead(200,{'Content-Type':'text/event-stream'});res.end(`: ${'x'.repeat(262145)}\n\n`);});
-  try{const result=await execute(request(wire.url));assert.equal(result.failureCode,'response_too_large');assertDiagnostic(result,{limitKind:'sse_stream_262144'});}finally{await wire.close();}
+  for(const maxOutputTokens of [128,8192]){
+    // Keep SSE lines bounded so this proves aggregate wire rejection rather
+    // than making the SDK parse one multi-megabyte line until its deadline.
+    const frame=`: ${'x'.repeat(1000)}\n\n`;
+    const wireBody=frame.repeat(Math.ceil((sseByteLimit(maxOutputTokens)+1)/Buffer.byteLength(frame)));
+    assert.ok(Buffer.byteLength(wireBody)>sseByteLimit(maxOutputTokens));
+    const wire=await server((req,res)=>{res.writeHead(200,{'Content-Type':'text/event-stream'});res.end(wireBody);});
+    try{const result=await execute(request(wire.url,{maxOutputTokens}));assert.equal(result.failureCode,'response_too_large');assertDiagnostic(result,{limitKind:'sse_stream_token_budget',retryClass:'never'});}finally{await wire.close();}
+  }
   const final=await server((req,res)=>success(res,'x'.repeat(65537),false));
   try{const result=await execute(request(final.url));assert.equal(result.failureCode,'response_too_large');assertDiagnostic(result,{limitKind:'final_text_65536'});}finally{await final.close();}
+});
+test('2,000-token fragmented output succeeds above the historical SSE byte cap',async()=>{
+  let calls=0;
+  const expected=`{"synthetic":"${'材'.repeat(1976)}"}`;
+  const s=await server(async(req,res)=>{
+    calls++;const chunks=[];for await(const chunk of req)chunks.push(chunk);
+    const body=JSON.parse(Buffer.concat(chunks));assert.equal(body.max_completion_tokens,2000);
+    res.writeHead(200,{'Content-Type':'text/event-stream'});
+    for(const content of expected)res.write(`data: ${JSON.stringify({id:'synthetic-fragmented-response',object:'chat.completion.chunk',created:1,model:'synthetic-model',choices:[{index:0,delta:{content},finish_reason:null}]})}\n\n`);
+    res.write(`data: ${JSON.stringify({id:'synthetic-fragmented-response',choices:[{index:0,delta:{},finish_reason:'stop'}],usage:{prompt_tokens:17,completion_tokens:2000}})}\n\n`);
+    res.end('data: [DONE]\n\n');
+  });
+  try{
+    const result=await execute(request(s.url,{maxOutputTokens:2000}));
+    assert.equal(result.ok,true);assert.equal(result.text,expected);assert.equal(calls,1);
+    assert.deepEqual(result.usage,{inputTokens:17,outputTokens:2000,costUsd:null});
+    const d=assertDiagnostic(result,{limitKind:null,terminalReceived:true,finishReason:'stop',usageKnown:true,retryClass:'never'});
+    assert.ok(d.receivedBytes>262144);assert.ok(d.receivedBytes<sseByteLimit(2000));
+  }finally{await s.close();}
+});
+test('SSE budget is finite and token-specific while non-stream bodies keep their cap',async()=>{
+  assert.equal(sseByteLimit(2000),4358144);
+  assert.ok(sseByteLimit(16)<sseByteLimit(2000));
+  assert.equal(sseByteLimit(8192),8388608);
+  const s=await server((req,res)=>{res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({data:[],padding:'x'.repeat(262145)}));});
+  try{const result=await execute(request(s.url,{operation:'discover',maxOutputTokens:2000}));assert.equal(result.failureCode,'response_too_large');assertDiagnostic(result,{limitKind:'sse_stream_262144'});}finally{await s.close();}
+});
+test('known provider usage above the authorized token limit is rejected despite stop',async()=>{
+  const s=await server((req,res)=>{
+    res.writeHead(200,{'Content-Type':'text/event-stream'});
+    res.write(`data: ${JSON.stringify({id:'synthetic-response',choices:[{index:0,delta:{role:'assistant',content:'{"ok":true}'},finish_reason:'stop'}],usage:{prompt_tokens:17,completion_tokens:2001}})}\n\n`);
+    res.end('data: [DONE]\n\n');
+  });
+  try{const result=await execute(request(s.url,{maxOutputTokens:2000}));assert.equal(result.ok,false);assert.equal(result.failureCode,'output_limit');assertDiagnostic(result,{limitKind:'output_tokens',usageKnown:true,finishReason:'stop',retryClass:'never'});}finally{await s.close();}
+});
+test('larger SSE allowance never grants tool, filtered, or reasoning output',async()=>{
+  for(const [delta,finishReason,code] of [
+    [{tool_calls:[{index:0,id:'synthetic-tool',type:'function',function:{name:'not_granted',arguments:'{}'}}]},'tool_calls','unexpected_content'],
+    [{content:'synthetic'},'content_filter','provider_content_filtered'],
+    [{reasoning_content:'synthetic reasoning',content:'{"ok":true}'},'stop','unexpected_content'],
+  ]){
+    const s=await server((req,res)=>{
+      res.writeHead(200,{'Content-Type':'text/event-stream'});
+      res.write(`data: ${JSON.stringify({id:'synthetic-response',choices:[{index:0,delta:{role:'assistant',...delta},finish_reason:finishReason}]})}\n\n`);
+      res.end('data: [DONE]\n\n');
+    });
+    try{const result=await execute(request(s.url,{maxOutputTokens:2000}));assert.equal(result.ok,false);assert.equal(result.failureCode,code);assertDiagnostic(result,{retryClass:'never'});}finally{await s.close();}
+  }
 });
 test('real Anthropic SDK protocol preserves start input and final output usage',async()=>{
   const s=await server(async(req,res)=>{
