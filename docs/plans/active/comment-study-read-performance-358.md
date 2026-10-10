@@ -49,3 +49,20 @@ SQL 实测：同一目录 EXPLAIN 总执行 1574.454ms，JIT 1387.538ms；事务
 
 
 最终验证回执：84项隔离PostgreSQL（1+5+4+5+3+66）全通过，JIT guard catalog_calls=4/jit_functions=0、4个后端默认on且重复搜索后目录prepared语句0；新增批次负例通过。43项相关API单元通过（12项明确ignored），18项相关lib单元通过；build、变更Rust格式、JS/bash语法、diff和项目治理通过。合成UI通过；真实候选浏览器已验证列表、第二页、ADHD搜索与研究批次入口。commit-reviewer只读核验完整diff与实际日志，结论PASS；两次测试准备/旧断言失败均已修复，不计为通过。隔离数据库、容器、卷cleanup verified。无关main全仓格式差异未改写；本次没有宣称全仓格式通过。PR CI与合并/部署回执在后续另记。
+
+## 2026-10-10 概览进入等待的后续修复
+
+PR #380 已合并为 main 732bedef；其接口时延不代表页面进入时延。Mog 反馈进入概览仍近7秒，当前代码在初始化时串行等待 loadSetup → 作品/方法 → runs → overview。只读测量 setup 4197.1ms，overview 572.5ms；弹窗准备扫描不属于概览读取依赖。继续 Issue #358，单一实施者在 codex/comment-study-entry-performance，提交前独立 reviewer。
+
+分类为既有加载交互与状态修复（L2 页面局部）；读取 UI execution contract、design/README、design-governance、LIDS README/data-boundaries、comment-study-productization-001 与现行页面/HTTP 合同。Token/Primitive/Component/Pattern 和页面布局均沿用，不新增视觉值或业务能力。
+
+| 表面 | 状态与依赖 | 验收 |
+|---|---|---|
+| 概览/评论/问题入口 | 直接读取当前视图；不等待研究弹窗 setup、works、policies 或无关 runs | 合成慢/悬挂准备接口时概览仍可展示；初始请求只含当前视图 |
+| 研究批次和 URL 返回 | 需要 run 列表才加载；显式 runRef 保留；render token 保留防止旧响应覆盖 | 四视图、深链、Back/Forward、批次分页现有回归 |
+| 发起研究/所选评论弹窗 | 点击即展示已有弹窗，准备中不允许预览/启动/保存方法；同一准备请求合并，关闭再开不重复；失败明确并可再次打开重试 | 悬挂 setup、快速开关、失败恢复、评论选择保留；所有动作只走合成 API |
+| 现有研究方法/模式/预算 | 成功准备后沿用现有资格与预览签名规则；GET 不创建 Run | 完整产品化合成与隔离 API 浏览器回归，无真实 provider |
+
+只修改页面 JS、必要初始按钮状态、相关测试与已索引文档；无 migration/后端语义/模型/预算/自动排程改变。真实页面仅只读检查；不保存真实正文。最终需报告从导航到可用概览的实测或测量边界，不能再将接口中位数写成页面进入证明。
+
+后续候选验证：完整合成UI、相关API单元43+1（12 ignored）、build、JS/Python语法、diff与治理通过。新悬挂setup负例在正式基线JS上预期失败，候选通过。独立review的P2首次方法提前可保存反例成立，修正为完整准备后打开编辑器并加入入口守卫；新增空方法目录+悬挂works用例验证保存/编辑禁用、完成后首次创建仍可用、全过程无POST，reviewer独立真实函数反例复跑及复审PASS。真实只读浏览器初轮正式4637/4500/4401ms、候选668/657/656ms；最终构建候选重复刷新883/783/592ms（中位783ms），包括自动化往返开销，仅代表该本机样本，不是P95或Mog验收。真实弹窗准备中预览/启动/保存禁用，关闭后概览保留；未执行研究命令。PR/精确head CI、合并与正式刷新仍待各自回执。
