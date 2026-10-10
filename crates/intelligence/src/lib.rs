@@ -5,6 +5,7 @@ pub mod creator_discovery_analysis;
 pub mod creator_discovery_worker;
 pub mod research_text;
 pub mod topic_map;
+pub mod topic_map_core;
 pub mod topic_map_collection_search;
 pub mod topic_map_research;
 pub mod topic_map_research_analysis;

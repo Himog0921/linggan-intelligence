@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { execute, VERSION } from '../src/adapter.mjs';
+import { execute, VERSION, estimateTopicInputTokens, TOPIC_TRANSPORT_BYTE_LIMIT } from '../src/adapter.mjs';
 
 // Small synthetic schema tests the V1 wire boundary. The Rust packet owns the real schema.
 const schema={type:'object',properties:{outcome:{type:'string',enum:['atoms','no_signal']},atoms:{type:'array',items:{type:'object',properties:{kind:{type:'string'},proposition:{type:'string'},basis:{type:'string'},evidenceStart:{type:'integer'},evidenceEnd:{type:'integer'}},required:['kind','proposition','basis','evidenceStart','evidenceEnd'],additionalProperties:false}},reason:{type:'string'}},required:['outcome'],additionalProperties:false};
@@ -167,4 +167,97 @@ test('transport never repairs malformed JSON or strips wrappers before business 
     assert.equal(result.ok,true);
     assert.equal(result.text,malformed);
   },{text:malformed});
+});
+
+// Synthetic wire schemas; the Rust unit tests compare the complete production schemas
+// with the serialized business contracts. These exercise SDK payloads, not semantics.
+function topicSchema(contract) {
+  return {type:'object',properties:{
+    contract:{type:'string',enum:[contract]},
+    items:{type:'array',items:{type:'object',properties:{reason:{type:'string'}},required:['reason'],additionalProperties:false}},
+  },required:['contract','items'],additionalProperties:false};
+}
+function topicPrompt(contract,{inputTokenLimit=32768,outputSchema=topicSchema(contract),material='SYNTHETIC ONLY'}={}) {
+  return JSON.stringify({contract,inputTokenLimit,input:{material},outputSchema});
+}
+test('topic extraction and resolution carry named schemas through the actual SDK',async()=>{
+  await fixture(async bodies=>{
+    for(const [contract,name] of [['topic-map.research.v2','topic_map_research_v2'],['topic-map.resolve.v1','topic_map_resolve_v1']]){
+      const outputSchema=topicSchema(contract),prompt=topicPrompt(contract,{outputSchema});
+      for(const api of ['openai-responses','openai-completions']){
+        assert.equal((await execute({...request,api,prompt})).ok,true);
+        if(api==='openai-responses')assert.deepEqual(bodies.at(-1).text.format,{type:'json_schema',name,schema:outputSchema});
+        else assert.deepEqual(bodies.at(-1).response_format,{type:'json_object'});
+        assert.ok(!bodies.at(-1).tools?.length);
+        assert.equal((await execute({...request,api,prompt,baseUrl:'https://api.openai.com/v1',modelId:'gpt-4o-mini'})).ok,true);
+        if(api==='openai-responses')assert.deepEqual(bodies.at(-1).text.format,{type:'json_schema',name,schema:outputSchema,strict:true});
+        else assert.deepEqual(bodies.at(-1).response_format,{type:'json_schema',json_schema:{name,schema:outputSchema,strict:true}});
+      }
+    }
+  });
+});
+test('topic schemas reject incomplete nested objects and contract mismatches before transport',async()=>{
+  await fixture(async bodies=>{
+    for(const invalid of ['missing-required','nested-extra','wrong-contract']){
+      const outputSchema=topicSchema('topic-map.research.v2');
+      if(invalid==='missing-required')outputSchema.properties.items.items.required=[];
+      if(invalid==='nested-extra')outputSchema.properties.items.items.additionalProperties=true;
+      if(invalid==='wrong-contract')outputSchema.properties.contract.enum=['topic-map.resolve.v1'];
+      const result=await execute({...request,prompt:topicPrompt('topic-map.research.v2',{outputSchema})});
+      assert.equal(result.failureCode,'invalid_request');
+    }
+    assert.equal(bodies.length,0);
+  });
+});
+test('topic schema envelope can exceed 6144 without changing the comment contract limit',async()=>{
+  const outputSchema=topicSchema('topic-map.research.v2');
+  outputSchema.description='SYNTHETIC'.repeat(800);
+  assert.ok(JSON.stringify(outputSchema).length>6144);
+  await fixture(async bodies=>{
+    assert.equal((await execute({...request,prompt:topicPrompt('topic-map.research.v2',{outputSchema})})).ok,true);
+    assert.equal(bodies.length,1);
+    const commentPrompt=JSON.stringify({contract:'comment-research.semantic.v1',outputSchema});
+    assert.equal((await execute({...request,prompt:commentPrompt})).failureCode,'invalid_request');
+    assert.equal(bodies.length,1);
+    outputSchema.description='SYNTHETIC'.repeat(4000);
+    assert.equal((await execute({...request,prompt:topicPrompt('topic-map.research.v2',{outputSchema})})).failureCode,'invalid_request');
+    assert.equal(bodies.length,1);
+  });
+});
+test('Unicode topic material uses estimated tokens independently of its UTF-8 byte length',async()=>{
+  const material='甲'.repeat(12000),prompt=topicPrompt('topic-map.research.v2',{inputTokenLimit:16384,material});
+  assert.ok(Buffer.byteLength(prompt)+Buffer.byteLength(request.system)+request.maxOutputTokens>32768);
+  assert.ok(estimateTopicInputTokens(request.system,prompt)<16384);
+  await fixture(async bodies=>{
+    assert.equal((await execute({...request,prompt})).ok,true);
+    assert.equal(bodies.length,1);
+    assert.ok(JSON.stringify(bodies[0]).includes(material));
+    const tooSmall=topicPrompt('topic-map.research.v2',{inputTokenLimit:1024,material});
+    assert.equal((await execute({...request,prompt:tooSmall})).failureCode,'model_input_limit');
+    assert.equal(bodies.length,1);
+    const unrelated=JSON.stringify({contract:'unrelated',inputTokenLimit:16384,input:{material}});
+    assert.equal((await execute({...request,prompt:unrelated})).failureCode,'model_input_limit');
+    assert.equal(bodies.length,1);
+  });
+});
+test('topic token configuration and byte transport limits cannot be silently bypassed',async()=>{
+  await fixture(async bodies=>{
+    for(const limit of [null,undefined,1023,32769,16000.5]){
+      const packet=JSON.parse(topicPrompt('topic-map.resolve.v1'));
+      if(limit===undefined)delete packet.inputTokenLimit;
+      else packet.inputTokenLimit=limit;
+      assert.equal((await execute({...request,prompt:JSON.stringify(packet)})).failureCode,'invalid_request');
+    }
+    const oversized={...request,prompt:topicPrompt('topic-map.resolve.v1'),system:'x'.repeat(TOPIC_TRANSPORT_BYTE_LIMIT)};
+    assert.equal((await execute(oversized)).failureCode,'invalid_request');
+    const nonTopic={...request,system:'x'.repeat(131072)};
+    assert.equal((await execute(nonTopic)).failureCode,'invalid_request');
+    assert.equal(bodies.length,0);
+  });
+});
+test('topic token estimation matches the Rust scalar and ASCII-run vectors',()=>{
+  for(const [system,prompt,expected] of [['','',128],['','abc',129],['','abcd',130],['A','BC',130],['中','😀',130],['','a_b',131],['','甲e\u0301😀',132]]){
+    assert.equal(estimateTopicInputTokens(system,prompt),expected);
+  }
+  assert.equal(estimateTopicInputTokens('','甲'.repeat(12000)),12128);
 });

@@ -234,6 +234,7 @@ pub const MIGRATIONS: &str = concat!(
     include_str!("../../../../database/migrations/0117_topic_map_research.sql"),
     include_str!("../../../../database/migrations/0118_topic_map_structure.sql"),
     include_str!("../../../../database/migrations/0119_topic_map_collection_search.sql"),
+    include_str!("../../../../database/migrations/0120_topic_map_core.sql"),
     "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ",
     "('0025_comment_current_projection', '64fd9474647834358f8d2d4f1c25e4345e26a3ff79dbfc53a7846915576b0885'), ",
@@ -280,7 +281,8 @@ pub const MIGRATIONS: &str = concat!(
     "('0116_topic_map', '6d87e950cb1341c0c30397d26a3ea09feddca6e383a3aadd4a87810ac5be463e'),\n",
     "('0117_topic_map_research', '84528ecb0f4f88791d4f6bde33beccdb609dc46326e6b4dc88b2d5c305f7cb5c'),\n",
     "('0118_topic_map_structure', 'cb769810af69e7d6b70b79579379514bc371e64400e2b2fbe75cf3f6bb98e0b1'),\n",
-    "('0119_topic_map_collection_search', 'f205b6a644cdf46296aadb4d73a68b639d34ee00e4764fbefc765ef2e7c57e74');\n",
+    "('0119_topic_map_collection_search', 'f205b6a644cdf46296aadb4d73a68b639d34ee00e4764fbefc765ef2e7c57e74'),\n",
+    "('0120_topic_map_core', '2675fc250e5b496b48ba89360e542dc0946021faefd059d2ff21da9d9a722fdf');\n",
 );
 
 pub fn coverage_layer(capability: &str, acquired: i64) -> serde_json::Value {

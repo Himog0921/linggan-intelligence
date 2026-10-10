@@ -264,4 +264,5 @@ pub mod collection_repair;
 pub use work_resource_read::work_display_title_ctes;
 pub use work_resource_read::{
     frozen_work_fragment_manifest_in_transaction, read_frozen_work_text_in_transaction,
+    read_frozen_work_texts_in_transaction,
 };

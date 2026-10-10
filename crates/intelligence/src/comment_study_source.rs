@@ -13,6 +13,11 @@ use std::collections::BTreeMap;
 pub(crate) mod context;
 #[path = "comment_study_source/gate.rs"]
 pub(crate) mod gate;
+#[path = "comment_study_source/topic_research.rs"]
+mod topic_research;
+pub(crate) use topic_research::{
+    eligible_sources_for_topic_research, eligible_sources_for_topic_research_in_transaction,
+};
 use uuid::Uuid;
 
 /// Stable identifier used by synthetic fixtures and legacy acceptance examples only.
