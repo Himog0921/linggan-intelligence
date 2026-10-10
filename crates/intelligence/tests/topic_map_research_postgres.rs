@@ -691,6 +691,14 @@ async fn comparison_and_comment_citations_are_visible_then_restriction_invalidat
         comparison_runtime_state(&db, run).await
     );
     let result = results[0];
+    let coverage: Value = sqlx::query_scalar("SELECT q.request_manifest#>'{source,coverage}' FROM linggan_topic_map_research_result r JOIN linggan_topic_map_research_request q USING(invocation_ref) WHERE r.result_ref=$1")
+        .bind(result).fetch_one(db.pool()).await.unwrap();
+    for field in ["currentSources", "sourceHashes", "fragmentOrigins"] {
+        assert!(
+            coverage[field].as_object().is_some_and(|map| !map.is_empty()),
+            "the complete frozen audit mapping remains available: {field}"
+        );
+    }
     let query = TopicMapQuery {
         domain_ref: Some(D),
         reference_window_days: Some(0),

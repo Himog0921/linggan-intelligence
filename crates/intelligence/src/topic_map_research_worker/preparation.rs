@@ -30,7 +30,7 @@ pub(super) async fn prepare(
         prepared.prompt=json!({"contract":analysis::EXTRACT_CONTRACT,"inputTokenLimit":input_limit,
             "input":{"domain":input.domain,"workRef":input.work.work_ref,"fragments":input.fragments,
                 "definitions":[],"commentStudy":input.comment_study,"roleMetadata":input.role_metadata,
-                "coverage":input.coverage,"comparisonWorkRefs":input.context_work_refs,
+                "coverage":provider_coverage(&input.coverage),"comparisonWorkRefs":input.context_work_refs,
                 "comparisonBoundary":if phase=="compare" {"Only selected cited evidence from the listed works is supplied. Distinguish each work and author/commenter role. Compare only these observations; coverage is partial and is not audience prevalence."} else {"A source window is partial evidence. Other selected works are not supplied here; cross-work claims remain unknown."}},
             "outputSchema":analysis::output_schema()}).to_string();
         return Ok(prepared);
@@ -100,6 +100,19 @@ pub(super) async fn prepare(
     prepared.draft = Some(draft);
     Ok(prepared)
 }
+
+fn provider_coverage(coverage: &Value) -> Value {
+    // Physical restoration maps stay in the frozen manifest. Repeating them in
+    // the semantic request can exhaust its budget even for very short evidence.
+    let mut projected = coverage.clone();
+    if let Some(fields) = projected.as_object_mut() {
+        for field in ["currentSources", "sourceHashes", "fragmentOrigins"] {
+            fields.remove(field);
+        }
+    }
+    projected
+}
+
 fn apply_backfill(prepared: &mut Prepared, catalog: &Value, backfill: Option<Value>) {
     if let Some(backfill) = backfill {
         prepared.definition_unavailable = backfill["forcedDefinitionRefs"]

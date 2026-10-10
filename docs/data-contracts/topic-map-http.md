@@ -30,6 +30,8 @@
 
 研究输入是 canonical source refs、不可变来源版本与可重建 fragment；不冻结敏感原文到新账本。所有断言引用允许片段内的 Unicode scalar start/end，区间使用原字段的绝对位置。越界、错误来源角色、外域或失效来源拒绝。采集、分析、结果接纳状态分责，已发 unknown 保留预算且不盲重发。日额度与 run 预算在实际 dispatch 之前原子核验；费用未知不计 0。
 
+发送给模型的 coverage 不重复携带服务器使用的 `currentSources`、`sourceHashes`、`fragmentOrigins` 审计映射；这些字段在完整冻结 manifest 和来源恢复中保留。实际原文、引用 ID/绝对坐标、片段所属作品、讨论及选择范围完整传递。输入上限仍检查完整 system 与实际序列化 prompt，run/day 预算还计入输出预留；正文字符数达标不等于请求 token 达标，超限保持明确失败且不发送。
+
 ### 主题内核与证据归属
 
 候选采用 `topic-map.research.v2` 提炼及 `topic-map.resolve.v1` 归属两个严格结构化合同，内核方法为 `topic-map.core.v1`。第一阶段从来源窗口提炼独立讨论，持久化草稿和进度；第二阶段逐条比较精确主题定义和原文。`matched/new/uncertain/out_of_scope` 分开，允许多主题归属。名称、词频和向量相似度都不是成员资格。新主题包含定义、纳入/排除条件及与召回候选的关系；完整边界等价时复用身份，同名但不同边界保留独立身份。机器只产生候选，正式定义及既有合并/拆分仍需明确操作。

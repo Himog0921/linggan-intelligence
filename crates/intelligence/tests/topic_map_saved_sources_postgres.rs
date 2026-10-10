@@ -34,19 +34,23 @@ async fn finish_source_task(db: &Database, adapter: &PiAdapter, task: Uuid) {
     sqlx::query("UPDATE linggan_topic_map_research_task SET created_at=scope_001_now()-interval '1 hour' WHERE task_ref=$1")
         .bind(task).execute(db.pool()).await.unwrap();
     for _ in 0..8 {
-        let state: String = sqlx::query_scalar(
-            "SELECT state FROM linggan_topic_map_research_task WHERE task_ref=$1",
+        let row = sqlx::query(
+            "SELECT state,phase,last_reason,attempt_count FROM linggan_topic_map_research_task WHERE task_ref=$1",
         )
         .bind(task)
         .fetch_one(db.pool())
         .await
         .unwrap();
+        let state: String = row.get("state");
         if state == "succeeded" {
             return;
         }
         assert!(
             !["failed", "unknown_dispatch", "stopped", "stale"].contains(&state.as_str()),
-            "source task became {state}"
+            "source task {task} became {state}; phase={}, reason={:?}, attempts={}",
+            row.get::<String, _>("phase"),
+            row.get::<Option<String>, _>("last_reason"),
+            row.get::<i32, _>("attempt_count")
         );
         assert!(run_once(db, &SyntheticModelSecrets, adapter).await.unwrap());
     }
