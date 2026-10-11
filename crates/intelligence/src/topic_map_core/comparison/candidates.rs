@@ -33,10 +33,11 @@ pub(super) fn current_candidates(
             }
             let Some(evidence) = unit_evidence(unit, task.work, &window).filter(|e| {
                 e.iter().any(|s| {
-                    source
-                        .fragments
-                        .iter()
-                        .any(|f| f.fragment_id == s.origin && f.field != "parent_comment_context")
+                    s.context_field.is_none()
+                        && source
+                            .fragments
+                            .iter()
+                            .any(|f| f.fragment_id == s.origin && research::is_research_evidence(f))
                 })
             }) else {
                 continue;
@@ -83,6 +84,8 @@ fn unit_evidence(unit: &Value, work: Uuid, window: &ResearchInput) -> Option<Vec
             Some(Span {
                 work,
                 origin: origin.into(),
+                context_field: (!research::is_research_evidence(fragment))
+                    .then(|| fragment.field.clone()),
                 start,
                 end,
             })
@@ -92,24 +95,26 @@ fn unit_evidence(unit: &Value, work: Uuid, window: &ResearchInput) -> Option<Vec
 
 fn speaker_lacks_evidence(unit: &Value, source: &ResearchInput, evidence: &[Span]) -> bool {
     let author_evidence = evidence.iter().any(|span| {
-        source
-            .work
-            .fragments
-            .iter()
-            .any(|fragment| fragment.fragment_id == span.origin)
+        span.context_field.is_none()
+            && source
+                .work
+                .fragments
+                .iter()
+                .any(|fragment| fragment.fragment_id == span.origin)
     });
     let comment_evidence = evidence.iter().any(|span| {
-        source
-            .comment_study
-            .as_array()
-            .into_iter()
-            .flatten()
-            .any(|comment| {
-                comment["sourceFragmentId"]
-                    .as_str()
-                    .or_else(|| comment["fragmentId"].as_str())
-                    == Some(&span.origin)
-            })
+        span.context_field.is_none()
+            && source
+                .comment_study
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|comment| {
+                    comment["sourceFragmentId"]
+                        .as_str()
+                        .or_else(|| comment["fragmentId"].as_str())
+                        == Some(&span.origin)
+                })
     });
     (unit["speakerRole"] == "author" && !author_evidence)
         || (unit["speakerRole"] == "commenter" && !comment_evidence)
@@ -123,7 +128,7 @@ fn with_parent_context(
 ) -> Option<Vec<Span>> {
     // A parent is context for its child, never an additional person's experience.
     let mut spans = evidence.to_vec();
-    for reference in evidence {
+    for reference in evidence.iter().filter(|span| span.context_field.is_none()) {
         let parent = source
             .comment_study
             .as_array()
@@ -137,7 +142,9 @@ fn with_parent_context(
             })
             .and_then(|c| c["parentFragmentId"].as_str());
         if let Some(parent) = parent
-            && !spans.iter().any(|s| s.origin == parent)
+            && !spans.iter().any(|s| {
+                s.origin == parent && s.context_field.as_deref() == Some("parent_comment_context")
+            })
         {
             // Keep the parent segment actually supplied to this accepted window.
             let fragment = window.fragments.iter().find(|f| {
@@ -150,6 +157,7 @@ fn with_parent_context(
             spans.push(Span {
                 work,
                 origin: parent.into(),
+                context_field: Some(fragment.field.clone()),
                 start: fragment.start,
                 end: fragment
                     .end
@@ -169,6 +177,14 @@ fn current_definition_unit(unit: &Value, catalog: &Value) -> Option<Value> {
         .filter_map(Value::as_str)
         .map(str::to_owned)
         .collect();
+    if let Some(parent) = unit["hierarchy"].as_object() {
+        if !catalog.as_array().into_iter().flatten().any(|topic| {
+            topic["topicRef"] == parent["parentTopicRef"]
+                && topic["definitionRef"] == parent["parentDefinitionRef"]
+        }) {
+            return None;
+        }
+    }
     // A rejected neighbour can affect a decision just as an assignment
     // can. Keep that dependency; do not silently discard a stale boundary.
     if compared.iter().any(|definition| {

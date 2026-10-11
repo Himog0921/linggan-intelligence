@@ -95,7 +95,7 @@ pub(crate) fn definition_dependencies(value: &Value) -> HashSet<Uuid> {
             Value::Object(object) => {
                 for (key, value) in object {
                     match key.as_str() {
-                        "definitionRef" | "definition_ref" => {
+                        "definitionRef" | "definition_ref" | "parentDefinitionRef" => {
                             if let Some(id) = value.as_str().and_then(|s| s.parse::<Uuid>().ok()) {
                                 result.insert(id);
                             }
@@ -140,6 +140,12 @@ fn propagate_unavailable(
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn hierarchy_parent_is_an_exact_dependency_without_candidate_comparison() {
+        let parent = Uuid::from_u128(120);
+        let value = json!({"comparedDefinitionRefs":[],"hierarchy":{"parentTopicRef":Uuid::from_u128(119),"parentDefinitionRef":parent},"label":Uuid::from_u128(118).to_string()});
+        assert_eq!(definition_dependencies(&value), HashSet::from([parent]));
+    }
     #[test]
     fn withdrawal_propagates_through_definition_creation_context_without_hiding_independent_rules()
     {

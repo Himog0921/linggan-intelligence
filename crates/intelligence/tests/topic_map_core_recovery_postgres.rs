@@ -215,7 +215,7 @@ async fn legacy_cleanup_keeps_failure_unknown_charge_and_stops_only_unsent_work(
     apply_research_command(&db, &start(vec![unsent]))
         .await
         .unwrap();
-    sqlx::query("UPDATE linggan_topic_map_research_run SET method_version='topic-map.research.v1.1',state='running'")
+    sqlx::query("UPDATE linggan_topic_map_research_run SET method_version='topic-map.research.v2',state='running'")
         .execute(db.pool()).await.unwrap();
     apply_research_command(
         &db,

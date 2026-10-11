@@ -1,10 +1,14 @@
 # LIDS-LOG-001 · LIDS 迁移与变更记录
 
 > 状态: 权威当前
-> 最后核对: 2026-10-10
+> 最后核对: 2026-10-11
 > 适用范围: Linggan Intelligence LIDS Token、Primitive、Component、Pattern、Page、Motion、Scene 和 Data Truth 规则的实际变更、替代、例外与验证边界
 > 事实来源: [system.md](system.md)、[README.md](README.md)、DESIGN-002 Issue #7、项目 progress 记录和实际验证输出
 > 冲突时以谁为准: 真实代码/合同/测试、用户最新确认、当前 SCOPE 和 ACCEPTED 决策；本日志不把计划写成已实现事实
+
+## 2026-10-11 · TOPIC-MAP-CORE-001 候选质量与研究口径
+
+沿用 `/topics` 与既有共享页头、面包屑、Token、控件与阅读 Pattern。旧机器候选在领域树提供可展开的历史入口与明确质量标识；具体讨论显示领域相关性、主题抽象和精确父包含依据。撤回/旧定义版本不继续显示相关派生说明；所有文本转义。进度分开初次任务窗、至少处理一窗的作品和定义维护，说明跨方法/配置或重新分组可能重叠，不计算假的覆盖率。合成 UI 验证与实际浏览器候选验收分别在[活跃计划](../../plans/active/topic-map-core-001.md)记录，正式 3000 和真实模型语义质量尚未验证。
 
 ## 2026-10-10 · TOPIC-MAP-CORE-001 主题内核的页面状态投影
 

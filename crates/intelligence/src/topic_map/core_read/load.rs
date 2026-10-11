@@ -24,7 +24,7 @@ const PARTIALS: &str = r#"
     FROM linggan_topic_map_research_task t
     JOIN linggan_topic_map_research_run run USING(run_ref)
     WHERE ($1::uuid IS NULL OR t.domain_ref=$1) AND t.phase='resolve'
-        AND run.method_version='topic-map.research.v2'
+        AND run.method_version IN ('topic-map.research.v2','topic-map.research.v3')
         AND jsonb_typeof(t.resolutions_json)='array' AND jsonb_array_length(t.resolutions_json)>0
         AND COALESCE(t.input_refs#>>'{source,coverage,kind}',t.input_refs#>>'{coverage,kind}','source')<>'comparison'
         AND NOT EXISTS(SELECT 1 FROM linggan_topic_map_research_request request

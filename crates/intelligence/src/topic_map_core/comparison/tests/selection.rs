@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn shared_topic_counterexample_and_another_speaker_are_selected_before_extra_labels() {
     let (mut inputs, mut tasks, requested) = pair();
-    let comment = source(1, 12, "comment", "合成评论包含不同经历反例");
+    let comment = source(1, 12, "unresearched_comment", "合成评论包含不同经历反例");
     inputs[0] = input(1, vec![inputs[0].fragments[0].clone(), comment.clone()]);
     let fragment = &inputs[0].fragments[0];
     tasks[0] = task(
@@ -47,7 +47,7 @@ fn parent_context_is_bounded_and_never_counts_as_a_second_discussion_source() {
     let child = window
         .fragments
         .iter()
-        .find(|f| f.field == "comment")
+        .find(|f| f.field == "unresearched_comment")
         .unwrap();
     let parent_window = window
         .fragments
@@ -88,7 +88,7 @@ fn parent_context_is_bounded_and_never_counts_as_a_second_discussion_source() {
         comparison
             .fragments
             .iter()
-            .filter(|f| f.field == "comment")
+            .filter(|f| f.field == "unresearched_comment")
             .count(),
         1
     );
@@ -199,7 +199,7 @@ fn duplicate_units_and_overlapping_citations_do_not_inflate_input_or_discussion_
 #[test]
 fn single_work_comparison_keeps_author_and_commenter_with_real_source_roles() {
     let author = source(1, 11, "body", "作者的具体经验观点");
-    let comment = source(1, 12, "comment", "评论原声提出了不同经历");
+    let comment = source(1, 12, "unresearched_comment", "评论原声提出了不同经历");
     let input = input(1, vec![author.clone(), comment.clone()]);
     let tasks = vec![task(
         &input,
@@ -275,13 +275,13 @@ fn single_work_without_both_current_source_roles_cannot_generate_a_response_comp
         comparison.unwrap_err(),
         "comparison_requires_author_and_commenter_discussions"
     );
-    let comment = source(2, 22, "comment", "只有合格评论原声");
+    let comment = source(2, 22, "unresearched_comment", "只有合格评论原声");
     let input = input(2, vec![comment.clone()]);
     let tasks = vec![task(
         &input,
         1002,
         vec![unit(
-            "comment",
+            "unresearched_comment",
             &comment,
             0,
             4,

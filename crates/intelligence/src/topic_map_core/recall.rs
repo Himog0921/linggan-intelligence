@@ -33,9 +33,9 @@ async fn catalog_with<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
     executor: E,
     domain: Uuid,
 ) -> Result<Value, ModelError> {
-    let rows=sqlx::query("SELECT t.topic_ref,d.definition_ref,d.version,d.display_name,d.definition_text,c.inclusion_criteria,c.exclusion_criteria FROM linggan_topic_workspace t JOIN LATERAL(SELECT *FROM linggan_topic_definition WHERE topic_ref=t.topic_ref ORDER BY version DESC LIMIT 1)d ON true JOIN LATERAL(SELECT *FROM linggan_topic_map_binding WHERE topic_ref=t.topic_ref ORDER BY version DESC LIMIT 1)b ON true LEFT JOIN linggan_topic_map_concept_rule c ON c.definition_ref=d.definition_ref WHERE b.domain_ref=$1 AND NOT EXISTS(SELECT 1 FROM linggan_topic_map_structure_source WHERE topic_ref=t.topic_ref) ORDER BY t.topic_ref")
+    let rows=sqlx::query("SELECT t.topic_ref,d.definition_ref,d.version,d.display_name,d.definition_text,c.inclusion_criteria,c.exclusion_criteria,c.method_version AS concept_method,b.parent_topic_ref,d.lifecycle_state,r.method_version AS induction_method FROM linggan_topic_workspace t JOIN LATERAL(SELECT *FROM linggan_topic_definition WHERE topic_ref=t.topic_ref ORDER BY version DESC LIMIT 1)d ON true JOIN LATERAL(SELECT *FROM linggan_topic_map_binding WHERE topic_ref=t.topic_ref ORDER BY version DESC LIMIT 1)b ON true LEFT JOIN linggan_topic_map_concept_rule c ON c.definition_ref=d.definition_ref LEFT JOIN linggan_topic_map_research_request q ON q.invocation_ref=c.invocation_ref LEFT JOIN linggan_topic_map_research_run r USING(run_ref) WHERE b.domain_ref=$1 AND NOT EXISTS(SELECT 1 FROM linggan_topic_map_structure_source WHERE topic_ref=t.topic_ref) ORDER BY t.topic_ref")
         .bind(domain).fetch_all(executor).await?;
-    Ok(json!(rows.iter().map(|r|json!({"topicRef":r.get::<Uuid,_>("topic_ref"),"definitionRef":r.get::<Uuid,_>("definition_ref"),"version":r.get::<i32,_>("version"),"label":r.get::<String,_>("display_name"),"definition":r.get::<String,_>("definition_text"),"inclusionCriteria":r.get::<Option<Vec<String>>,_>("inclusion_criteria").unwrap_or_default(),"exclusionCriteria":r.get::<Option<Vec<String>>,_>("exclusion_criteria").unwrap_or_default()})).collect::<Vec<_>>()))
+    Ok(json!(rows.iter().map(|r|json!({"topicRef":r.get::<Uuid,_>("topic_ref"),"definitionRef":r.get::<Uuid,_>("definition_ref"),"version":r.get::<i32,_>("version"),"label":r.get::<String,_>("display_name"),"definition":r.get::<String,_>("definition_text"),"parentTopicRef":r.get::<Option<Uuid>,_>("parent_topic_ref"),"inductionMethod":r.get::<Option<String>,_>("induction_method"),"qualityState":if r.get::<String,_>("lifecycle_state")=="candidate" && r.get::<Option<String>,_>("induction_method").as_deref()!=Some("topic-map.research.v3"){"legacy_candidate"}else{"current"},"conceptRole":if r.get::<Option<String>,_>("concept_method").as_deref()==Some("topic-map.core.parent.v1"){"parent"}else{"topic"},"inclusionCriteria":r.get::<Option<Vec<String>>,_>("inclusion_criteria").unwrap_or_default(),"exclusionCriteria":r.get::<Option<Vec<String>>,_>("exclusion_criteria").unwrap_or_default()})).collect::<Vec<_>>()))
 }
 pub(crate) async fn catalog_version(db: &Database, domain: Uuid) -> Result<String, ModelError> {
     Ok(hash(&serde_json::json!(catalog_with(db.pool(),domain).await?.as_array().into_iter().flatten().map(|c|serde_json::json!({"topicRef":c["topicRef"],"definitionRef":c["definitionRef"]})).collect::<Vec<_>>()).to_string()))
@@ -317,4 +317,8 @@ mod tests {
         v[2] = f64::NAN;
         assert!(!valid_vector(&v));
     }
+}
+
+pub(crate) fn parent_recall_scores(query: &str, parents: &[Value]) -> Vec<f64> {
+    lexical_scores(query, &parents.iter().map(concept_text).collect::<Vec<_>>())
 }

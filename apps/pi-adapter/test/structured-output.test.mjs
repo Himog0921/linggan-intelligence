@@ -182,7 +182,7 @@ function topicPrompt(contract,{inputTokenLimit=32768,outputSchema=topicSchema(co
 }
 test('topic extraction and resolution carry named schemas through the actual SDK',async()=>{
   await fixture(async bodies=>{
-    for(const [contract,name] of [['topic-map.research.v2','topic_map_research_v2'],['topic-map.resolve.v1','topic_map_resolve_v1']]){
+    for(const [contract,name] of [['topic-map.research.v2','topic_map_research_v2'],['topic-map.resolve.v1','topic_map_resolve_v1'],['topic-map.research.v3','topic_map_research_v3'],['topic-map.resolve.v2','topic_map_resolve_v2']]){
       const outputSchema=topicSchema(contract),prompt=topicPrompt(contract,{outputSchema});
       for(const api of ['openai-responses','openai-completions']){
         assert.equal((await execute({...request,api,prompt})).ok,true);

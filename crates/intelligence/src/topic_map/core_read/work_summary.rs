@@ -39,7 +39,7 @@ impl Coverage {
             .input
             .fragments
             .iter()
-            .filter(|f| f.field != "parent_comment_context")
+            .filter(|f| crate::topic_map_research::is_research_evidence(f))
         {
             // The same source span has one identity even when v1/v2 window IDs differ.
             let origin = crate::topic_map_research::semantic_source_identity(&part.input, f);
@@ -83,7 +83,7 @@ pub(super) fn semantic_window_key(input: &ResearchInput) -> String {
             json!({"source":crate::topic_map_research::semantic_source_identity(input,fragment),
             "start":fragment.start,"end":fragment.end,
             "textHash":linggan_evidence::creator_discovery::hash(&fragment.text),
-            "contextOnly":fragment.field=="parent_comment_context"})
+            "contextOnly":!crate::topic_map_research::is_research_evidence(fragment)})
             .to_string()
         })
         .collect();

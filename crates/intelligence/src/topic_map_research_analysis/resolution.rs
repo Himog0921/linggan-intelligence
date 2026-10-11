@@ -14,11 +14,51 @@ pub struct TopicMatch {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ConceptDefinition {
+    pub label: String,
+    pub definition: String,
+    pub inclusion_criteria: Vec<String>,
+    pub exclusion_criteria: Vec<String>,
+    pub domain_fit: String,
+    pub domain_reason: String,
+    pub abstraction_reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProposedTopic {
     pub label: String,
     pub definition: String,
     pub inclusion_criteria: Vec<String>,
     pub exclusion_criteria: Vec<String>,
+    pub domain_fit: String,
+    pub domain_reason: String,
+    pub abstraction_reason: String,
+    pub parent: ProposedParent,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProposedParent {
+    pub kind: String,
+    #[serde(deserialize_with = "required_nullable_uuid")]
+    pub topic_ref: Option<Uuid>,
+    #[serde(deserialize_with = "required_nullable_uuid")]
+    pub definition_ref: Option<Uuid>,
+    #[serde(deserialize_with = "required_nullable_concept")]
+    pub proposal: Option<ConceptDefinition>,
+    pub reason: String,
+}
+
+fn required_nullable_uuid<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Uuid>, D::Error> {
+    Option::<Uuid>::deserialize(deserializer)
+}
+fn required_nullable_concept<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<ConceptDefinition>, D::Error> {
+    Option::<ConceptDefinition>::deserialize(deserializer)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -151,9 +191,21 @@ pub fn validate_resolution(
                     || !criteria(&proposed.inclusion_criteria, &proposed.exclusion_criteria)
                     || relations.len() != candidates.len()
                     || relations.values().any(|r| *r == "equivalent")
+                    || proposed.domain_fit != "in_scope"
+                    || !text(&proposed.domain_reason, 500)
+                    || !text(&proposed.abstraction_reason, 500)
+                    || proposed.definition.trim()
+                        == units
+                            .iter()
+                            .find(|(id, _)| id == &decision.unit_id)
+                            .unwrap()
+                            .1
+                            .statement
+                            .trim()
                 {
                     return Err("invalid_new_topic_boundary");
                 }
+                validate_parent(proposed, &candidates, &relations)?;
             }
             "uncertain" | "out_of_scope"
                 if matches.is_empty() && decision.proposed_topic.is_none() => {}
@@ -161,4 +213,60 @@ pub fn validate_resolution(
         }
     }
     Ok(())
+}
+
+fn validate_parent(
+    child: &ProposedTopic,
+    candidates: &HashMap<Uuid, Uuid>,
+    relations: &HashMap<Uuid, &str>,
+) -> Result<(), &'static str> {
+    let parent = &child.parent;
+    if !text(&parent.reason, 500) {
+        return Err("invalid_topic_parent");
+    }
+    let valid = match parent.kind.as_str() {
+        "root" => {
+            parent.topic_ref.is_none()
+                && parent.definition_ref.is_none()
+                && parent.proposal.is_none()
+        }
+        "existing" => {
+            parent
+                .topic_ref
+                .zip(parent.definition_ref)
+                .is_some_and(|(topic, definition)| {
+                    candidates.get(&topic) == Some(&definition)
+                        && relations.get(&topic) == Some(&"narrower")
+                })
+                && parent.proposal.is_none()
+        }
+        "proposed" => {
+            parent.topic_ref.is_none()
+                && parent.definition_ref.is_none()
+                && parent.proposal.as_ref().is_some_and(|proposal| {
+                    text(&proposal.label, 120)
+                        && text(&proposal.definition, 1000)
+                        && criteria(&proposal.inclusion_criteria, &proposal.exclusion_criteria)
+                        && proposal.domain_fit == "in_scope"
+                        && text(&proposal.domain_reason, 500)
+                        && text(&proposal.abstraction_reason, 500)
+                        && proposal.label.trim() != child.label.trim()
+                        && crate::topic_map_core::concept_identity(
+                            &proposal.definition,
+                            &proposal.inclusion_criteria,
+                            &proposal.exclusion_criteria,
+                        ) != crate::topic_map_core::concept_identity(
+                            &child.definition,
+                            &child.inclusion_criteria,
+                            &child.exclusion_criteria,
+                        )
+                })
+        }
+        _ => false,
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err("invalid_topic_parent")
+    }
 }

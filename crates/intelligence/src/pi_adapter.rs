@@ -401,7 +401,10 @@ impl PiAdapter {
             .is_some_and(|contract| {
                 matches!(
                     contract.as_str(),
-                    "topic-map.research.v2" | "topic-map.resolve.v1"
+                    "topic-map.research.v2"
+                        | "topic-map.research.v3"
+                        | "topic-map.resolve.v1"
+                        | "topic-map.resolve.v2"
                 )
             });
         if input.len() > if topic_contract { 1024 * 1024 } else { 131072 } {

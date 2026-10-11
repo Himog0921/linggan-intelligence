@@ -2,10 +2,10 @@ use super::*;
 use std::collections::BTreeMap;
 
 pub(super) fn merge_spans(spans: impl IntoIterator<Item = Span>) -> Vec<Span> {
-    let mut sources = BTreeMap::<(Uuid, String), Vec<Span>>::new();
+    let mut sources = BTreeMap::<(Uuid, String, Option<String>), Vec<Span>>::new();
     for span in spans {
         sources
-            .entry((span.work, span.origin.clone()))
+            .entry((span.work, span.origin.clone(), span.context_field.clone()))
             .or_default()
             .push(span);
     }
@@ -16,6 +16,7 @@ pub(super) fn merge_spans(spans: impl IntoIterator<Item = Span>) -> Vec<Span> {
             if let Some(previous) = merged.last_mut()
                 && previous.work == span.work
                 && previous.origin == span.origin
+                && previous.context_field == span.context_field
                 && span.start <= previous.end
             {
                 previous.end = previous.end.max(span.end);

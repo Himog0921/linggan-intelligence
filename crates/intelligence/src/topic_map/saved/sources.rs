@@ -65,7 +65,10 @@ pub(super) async fn restore_saved_fragments(
             return Ok(None);
         };
         if !is_comment_field(field) {
-            native.entry(work).or_default().push((source, field.into()));
+            native.entry(work).or_default().push((
+                source,
+                field.strip_prefix("work_context:").unwrap_or(field).into(),
+            ));
         }
     }
     let mut texts = HashMap::new();
@@ -88,14 +91,18 @@ pub(super) async fn restore_saved_fragments(
         ) else {
             return Ok(None);
         };
-        let context_only = field == "parent_comment_context";
+        let context_only = field == "parent_comment_context" || field.starts_with("work_context:");
         let text = if is_comment_field(field) {
             comments
                 .get(&(work, source, context_only))
                 .and_then(|text| frozen_slice(text, manifest))
         } else {
             texts
-                .get(&(work, source, field.into()))
+                .get(&(
+                    work,
+                    source,
+                    field.strip_prefix("work_context:").unwrap_or(field).into(),
+                ))
                 .into_iter()
                 .flatten()
                 .find_map(|text| frozen_slice(text, manifest))

@@ -88,10 +88,12 @@ async fn pending_definitions(
             JOIN LATERAL(SELECT domain_ref FROM linggan_topic_map_binding
                 WHERE topic_ref=definition.topic_ref ORDER BY version DESC LIMIT 1) binding ON true
             WHERE r.run_ref=$1 AND source.state='succeeded' AND source.distilled_json IS NOT NULL
-                AND source.phase IN ('extract','resolve')
+                AND source.phase IN ('extract','resolve') AND NOT (source.recall_manifest ? 'backfill')
+                AND r.method_version=$2
                 AND binding.domain_ref=r.domain_ref
                 AND definition.version=(SELECT max(version) FROM linggan_topic_definition WHERE topic_ref=definition.topic_ref)
                 AND NOT EXISTS(SELECT 1 FROM linggan_topic_map_structure_source WHERE topic_ref=definition.topic_ref)
+                AND NOT EXISTS(SELECT 1 FROM linggan_topic_map_concept_rule rule WHERE rule.definition_ref=definition.definition_ref AND rule.method_version='topic-map.core.parent.v1')
                 AND (p.automatic_enabled
                     OR (r.trigger='on_demand' AND COALESCE(r.input_scope->>'backfillReopened','false')<>'true'
                         AND definition.created_at>=r.created_at)
@@ -103,5 +105,5 @@ async fn pending_definitions(
                         WHERE q.source_task_ref=source.task_ref AND q.definition_ref=definition.definition_ref
                             AND q.state='pending'))
         )
-    "#).bind(run).fetch_one(&mut **tx).await?)
+    "#).bind(run).bind(analysis::METHOD_VERSION).fetch_one(&mut **tx).await?)
 }

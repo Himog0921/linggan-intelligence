@@ -42,7 +42,12 @@ fn comparison_uses_real_work_metadata_and_absolute_unicode_citations_without_raw
         .unwrap();
     let b = input(
         2,
-        vec![source(2, 22, "comment", "乙🐙评论原声提供反例未选入秘密")],
+        vec![source(
+            2,
+            22,
+            "unresearched_comment",
+            "乙🐙评论原声提供反例未选入秘密",
+        )],
     );
     let tasks = vec![
         task(
@@ -151,7 +156,7 @@ fn equal_text_reobservation_keeps_semantic_comparison_and_frozen_audit_origin() 
     let fragment = current
         .fragments
         .iter()
-        .find(|f| f.field == "comment")
+        .find(|f| f.field == "unresearched_comment")
         .unwrap();
     assert_eq!(fragment.source_ref, inputs[1].fragments[0].source_ref);
     assert_eq!(
@@ -282,4 +287,44 @@ fn semantic_identity_ignores_equal_labels_and_clears_outdated_assignments() {
             .all(|c| c.unit["status"] == "uncertain" && c.unit["assignments"] == json!([]))
     );
     assert!(shared_topics(&candidates).is_empty());
+}
+
+#[test]
+fn hierarchy_parent_must_be_current_even_when_it_was_not_a_compared_candidate() {
+    let (mut inputs, mut tasks, requested) = pair();
+    let parent = Uuid::from_u128(300);
+    let parent_definition = Uuid::from_u128(301);
+    tasks[0].resolutions[0]["hierarchy"] =
+        json!({"parentTopicRef":parent,"parentDefinitionRef":parent_definition,"state":"attached"});
+    tasks[0].resolutions[0]["comparedDefinitionRefs"] = json!([]);
+    tasks[0].resolutions[0]["relations"] = json!([]);
+    let mut catalog = topics();
+    catalog
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"topicRef":parent,"definitionRef":parent_definition,"label":"合成父概念"}));
+    for input in &mut inputs {
+        input.topics = catalog.clone();
+    }
+    let comparison = build_comparison(&inputs, &tasks, &requested, &catalog).unwrap();
+    let manifest = research::reference_manifest(&comparison);
+    assert!(research::restore_scoped_window(&inputs, requested[0], &manifest).is_some());
+    assert_eq!(
+        crate::topic_map_core::definition_dependencies(&manifest),
+        BTreeSet::from([Uuid::from_u128(101), parent_definition])
+            .into_iter()
+            .collect()
+    );
+    let mut changed = inputs.clone();
+    for input in &mut changed {
+        input.topics[2]["definitionRef"] = json!(Uuid::from_u128(302));
+    }
+    assert!(research::restore_scoped_window(&changed, requested[0], &manifest).is_none());
+    for input in &mut changed {
+        input.topics = topics();
+    }
+    assert!(research::restore_scoped_window(&changed, requested[0], &manifest).is_none());
+    catalog[2]["definitionRef"] = json!(Uuid::from_u128(302));
+    assert!(build_comparison(&inputs, &tasks, &requested, &catalog).is_err());
+    assert!(build_comparison(&inputs, &tasks, &requested, &topics()).is_err());
 }

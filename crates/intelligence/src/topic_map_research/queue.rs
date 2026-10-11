@@ -1,4 +1,5 @@
 //! Incremental source work, explicit retry rules and one frozen run budget.
+use super::admission::pending_sources;
 use super::windows::{is_research_evidence, origin_id};
 use super::{
     INPUT_CONTRACT, RESEARCH_WINDOW_CHARS, ResearchError, ResearchInput, load_inputs,
@@ -217,7 +218,6 @@ async fn queue_run(
     } else {
         false
     };
-    let windows = prepare_windows(&input, &scope, trigger);
     let mut tx = db.pool().begin().await?;
     let locked = sqlx::query(
         "SELECT status,automatic_enabled,model_config_ref FROM linggan_topic_map_research_policy WHERE domain_ref=$1 FOR UPDATE",
@@ -246,8 +246,7 @@ async fn queue_run(
     {
         return Ok(Some(run));
     }
-    let (selected, remaining) =
-        select_windows(&mut tx, domain, &scope, &input, windows, trigger).await?;
+    let (selected, remaining) = select_windows(&mut tx, domain, &scope, &input, trigger).await?;
     let reassignment = if trigger == "on_demand" {
         crate::topic_map_core::backfill::authorize_scope(&mut tx, domain, request, &scope)
             .await
@@ -358,9 +357,10 @@ async fn select_windows(
     domain: Uuid,
     scope: &[Uuid],
     input: &[ResearchInput],
-    windows: Vec<ResearchInput>,
     trigger: &str,
 ) -> Result<(Vec<ResearchInput>, bool), sqlx::Error> {
+    let pending = pending_sources(tx, domain, scope, input, trigger).await?;
+    let windows = prepare_windows(&pending, scope, trigger);
     let hashes: Vec<_> = windows.iter().map(|input| input.hash.clone()).collect();
     let mut history = BTreeMap::<String, Vec<String>>::new();
     for hashes in hashes.chunks(500) {

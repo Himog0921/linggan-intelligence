@@ -259,26 +259,19 @@ fn long_parent_is_context_only_and_does_not_duplicate_comment_coverage() {
 }
 
 #[test]
-fn signal_dependency_is_limited_to_the_comment_in_this_window() {
-    let first = source("studied_comment", "已研究评论一。", 20);
-    let second = source("studied_comment", "已研究评论二。", 21);
-    let mut original = input(vec![first.clone(), second.clone()]);
-    original.comment_study = json!([
-        comment_metadata(
-            &first,
-            None,
-            json!([{"signalRef":Uuid::from_u128(40),"kind":"need","proposition":"需要明确第一步"}])
-        ),
-        comment_metadata(
-            &second,
-            None,
-            json!([{"signalRef":Uuid::from_u128(41),"kind":"need","proposition":"需要完成后的反馈"}])
-        )
-    ]);
+fn signal_dependency_is_limited_to_comments_in_this_group() {
+    let comments: Vec<_> = (20..27)
+        .map(|id| source("studied_comment", "独立评论中的具体行动障碍。", id))
+        .collect();
+    let mut original = input(comments.clone());
+    original.comment_study = json!(comments.iter().enumerate().map(|(index,c)|
+        comment_metadata(c,None,json!([{ "signalRef":Uuid::from_u128(40+index as u128),"kind":"need","proposition":"需要明确第一步"}]))
+    ).collect::<Vec<_>>());
     let window = research_windows(&original, 3000).remove(0);
+    assert_eq!(window.comment_study.as_array().unwrap().len(), 6);
     let manifest = reference_manifest(&window);
     let mut changed = original.clone();
-    changed.comment_study[1]["signals"][0]["proposition"] = json!("第二条自己的研究发生变化");
+    changed.comment_study[6]["signals"][0]["proposition"] = json!("未选中评论自己的研究变化");
     assert!(sources_current(&changed, &manifest));
     changed.comment_study[0]["signals"][0]["proposition"] = json!("实际依赖发生变化");
     assert!(!sources_current(&changed, &manifest));
@@ -475,3 +468,6 @@ fn comparison_ignores_physical_task_relinks_and_checks_unassigned_compared_defin
     all[0].topics = json!([]);
     assert!(restore_scoped_window(&all, all[0].work.work_ref, &manifest).is_none());
 }
+
+#[path = "tests/grouped.rs"]
+mod grouped;

@@ -17,12 +17,16 @@ use sqlx::Row;
 use uuid::Uuid;
 
 async fn tail_fixture_config(db: &Database, original: Uuid) -> Uuid {
+    synthetic_citation_config(db, original, "synthetic-topic-map-cite-tail").await
+}
+
+async fn synthetic_citation_config(db: &Database, original: Uuid, selector: &str) -> Uuid {
     let model = Uuid::new_v4();
     let config = Uuid::new_v4();
     // Model entries/configs are immutable. Prepare a separate synthetic model
     // and its callable receipt; keep the original model and every limit intact.
-    sqlx::query("INSERT INTO linggan_model_entry(model_ref,connection_version_ref,model_id,origin) SELECT $1,m.connection_version_ref,'synthetic-topic-map-cite-tail','manual' FROM linggan_model_entry m JOIN linggan_model_config c USING(model_ref) WHERE c.config_ref=$2")
-        .bind(model).bind(original).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_model_entry(model_ref,connection_version_ref,model_id,origin) SELECT $1,m.connection_version_ref,$3,'manual' FROM linggan_model_entry m JOIN linggan_model_config c USING(model_ref) WHERE c.config_ref=$2")
+        .bind(model).bind(original).bind(selector).execute(db.pool()).await.unwrap();
     sqlx::query("INSERT INTO linggan_model_config(config_ref,model_ref,input_token_limit,output_token_limit,timeout_seconds,max_attempts) SELECT $1,$2,input_token_limit,output_token_limit,timeout_seconds,max_attempts FROM linggan_model_config WHERE config_ref=$3")
         .bind(config).bind(model).bind(original).execute(db.pool()).await.unwrap();
     sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,operation,request_hash,state,reserved_tokens,charged_tokens,result) SELECT $1,connection_version_ref,model_ref,'probe','synthetic-cite-tail','succeeded',0,0,$3 FROM linggan_model_entry WHERE model_ref=$2")
@@ -236,6 +240,8 @@ async fn reference_only_work(db: &Database, id: &str) -> Uuid {
 #[ignore = "isolated native PostgreSQL; synthetic adapter only"]
 async fn thirty_first_comment_and_real_creator_parent_reopen_then_restrict_together() {
     let (db, config, adapter) = setup("topic_saved_comment_tail").await;
+    let config =
+        synthetic_citation_config(&db, config, "synthetic-topic-map-cite-linked-reply").await;
     let work = reference_only_work(&db, "saved-comment-tail").await;
     comments::comment_with_author(
         &db,
@@ -256,8 +262,9 @@ async fn thirty_first_comment_and_real_creator_parent_reopen_then_restrict_toget
         "2026-09-16T08:01:00Z",
     )
     .await;
+    let mut expected_comments = vec![child];
     for index in 0..35 {
-        comments::comment_with_author(
+        let added = comments::comment_with_author(
             &db,
             "saved-comment-tail",
             &format!("later-{index:03}"),
@@ -266,6 +273,7 @@ async fn thirty_first_comment_and_real_creator_parent_reopen_then_restrict_toget
             "2026-09-17T08:00:00Z",
         )
         .await;
+        expected_comments.push(added);
     }
     apply_research_command(&db, &configure(config, 100000, false))
         .await
@@ -281,8 +289,16 @@ async fn thirty_first_comment_and_real_creator_parent_reopen_then_restrict_toget
         .fetch_one(db.pool())
         .await
         .unwrap(),
-        36,
-        "no 30-comment cut and no independent creator-parent task"
+        6,
+        "36 primary comments pack into six groups, without independent creator-parent task"
+    );
+    let mut selected_comments: Vec<Uuid> = sqlx::query_scalar("SELECT DISTINCT (f->>'sourceRef')::uuid FROM linggan_topic_map_research_task t CROSS JOIN LATERAL jsonb_array_elements(t.input_refs->'fragments') f WHERE t.work_public_ref=$1 AND f->>'field' IN('studied_comment','unresearched_comment')")
+        .bind(work).fetch_all(db.pool()).await.unwrap();
+    selected_comments.sort();
+    expected_comments.sort();
+    assert_eq!(
+        selected_comments, expected_comments,
+        "every primary comment identity, including after position 30, survives grouping; creator parent is context only"
     );
     let task = source_task(&db, work, config, "unresearched_comment", Some(child), 0).await;
     finish_source_task(&db, &adapter, task).await;

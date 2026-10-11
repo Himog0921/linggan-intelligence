@@ -1,6 +1,9 @@
 use super::*;
 use serde_json::{Value, json};
 
+mod concept_quality;
+use concept_quality::new_proposal;
+
 fn fragment(id: &str, field: &str, start: usize, value: &str) -> Fragment {
     Fragment {
         fragment_id: id.into(),
@@ -258,14 +261,6 @@ fn resolution_case() -> (Vec<(String, Discussion)>, Value, ResolutionOutput) {
         }],
     };
     (units, topics, output)
-}
-fn new_proposal() -> ProposedTopic {
-    ProposedTopic {
-        label: "合成持续注意".into(),
-        definition: "任务开始以后维持注意的困难".into(),
-        inclusion_criteria: vec!["开始后注意中断".into()],
-        exclusion_criteria: vec!["还未开始第一步".into()],
-    }
 }
 #[test]
 fn resolution_covers_every_unit_exactly_once() {

@@ -1,5 +1,5 @@
 //! Qualified reconstruction of frozen source ranges, including explicit legacy reads.
-use super::identity::{domain_identity, input_identity, role_identity};
+use super::identity::{domain_identity, input_identity_for, role_identity};
 use super::windows::{is_research_evidence, selected_comment_study, with_comparison_context};
 use super::{
     INPUT_CONTRACT, ResearchError, ResearchInput, load_inputs_for_works, manifest_source_work_refs,
@@ -53,7 +53,11 @@ pub(crate) fn restore_window(input: &ResearchInput, manifest: &Value) -> Option<
             "author_work"
         });
     }
-    restored.hash = input_identity(&restored);
+    restored.hash = input_identity_for(
+        &restored,
+        manifest["inputContract"].as_str()?,
+        manifest["methodVersion"].as_str()?,
+    );
     if manifest["inputHash"].as_str()? != restored.hash {
         return None;
     }
@@ -62,12 +66,31 @@ pub(crate) fn restore_window(input: &ResearchInput, manifest: &Value) -> Option<
 }
 
 fn current_identity(input: &ResearchInput, manifest: &Value) -> Option<()> {
-    if manifest["inputContract"].as_str()? != INPUT_CONTRACT
+    let contract = manifest["inputContract"].as_str()?;
+    let method = manifest["methodVersion"].as_str()?;
+    if !((contract == INPUT_CONTRACT
+        && method == crate::topic_map_research_analysis::METHOD_VERSION)
+        || (contract == "topic-map.source-windows.v1" && method == "topic-map.research.v2"))
         || manifest["workRef"] != json!(input.work.work_ref)
         || manifest["configRef"] != input.coverage["configRef"]
         || manifest["domainDefinitionHash"].as_str()?
             != creator_discovery::hash(&domain_identity(&input.domain).to_string())
         || manifest["roleIdentity"] != role_identity(input)
+    {
+        return None;
+    }
+    if manifest["coverage"]["kind"] == "comparison"
+        && manifest["coverage"]["selectedDiscussions"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|d| d["hierarchy"].as_object())
+            .any(|parent| {
+                !input.topics.as_array().into_iter().flatten().any(|topic| {
+                    topic["topicRef"] == parent["parentTopicRef"]
+                        && topic["definitionRef"] == parent["parentDefinitionRef"]
+                })
+            })
     {
         return None;
     }
@@ -104,6 +127,26 @@ fn current_identity(input: &ResearchInput, manifest: &Value) -> Option<()> {
     Some(())
 }
 
+// Comparison preparation only combines qualified canonical sources from the
+// declared work scope. A copied work context must retain that exact author owner.
+fn qualified_author_context(input: &ResearchInput, source: &Fragment) -> bool {
+    matches!(
+        source.field.as_str(),
+        "title" | "body" | "ocr" | "transcript"
+    ) && (input
+        .work
+        .fragments
+        .iter()
+        .any(|author| author.fragment_id == source.fragment_id)
+        || input.coverage["kind"] == "comparison"
+            && source
+                .fragment_id
+                .split('.')
+                .next()
+                .and_then(|owner| owner.parse::<Uuid>().ok())
+                .is_some_and(|owner| input.context_work_refs.contains(&owner)))
+}
+
 fn restore_fragments(
     input: &ResearchInput,
     manifest: &Value,
@@ -122,10 +165,15 @@ fn restore_fragments(
         if !ids.insert(id.to_owned()) {
             return None;
         }
-        let source = input
-            .fragments
-            .iter()
-            .find(|f| f.fragment_id == origin && reference["field"] == json!(f.field))?;
+        let source = input.fragments.iter().find(|f| {
+            f.fragment_id == origin
+                && (reference["field"] == json!(f.field)
+                    || reference["field"]
+                        .as_str()
+                        .and_then(|field| field.strip_prefix("work_context:"))
+                        == Some(f.field.as_str())
+                        && qualified_author_context(input, f))
+        })?;
         let frozen_source = reference["sourceRef"].as_str()?.parse().ok()?;
         let frozen_version = reference["sourceVersion"].as_str()?.to_owned();
         if reference["workRef"].as_str()? != origin.split('.').next()?
@@ -140,8 +188,15 @@ fn restore_fragments(
         if start < source.start || end > source.end || start >= end {
             return None;
         }
-        let expected = format!("{origin}.chars.{start}.{end}");
-        if id != expected && !(id == origin && start == source.start && end == source.end) {
+        let work_context = reference["field"].as_str()?.starts_with("work_context:");
+        let expected = if work_context {
+            format!("{origin}.context.chars.{start}.{end}")
+        } else {
+            format!("{origin}.chars.{start}.{end}")
+        };
+        if id != expected
+            && !(!work_context && id == origin && start == source.start && end == source.end)
+        {
             return None;
         }
         let text: String = source
@@ -152,7 +207,9 @@ fn restore_fragments(
             .collect();
         if text.chars().count() != end - start
             || reference["textHash"].as_str()? != creator_discovery::hash(&text)
-            || reference["contextOnly"].as_bool()? != !is_research_evidence(source)
+            || reference["contextOnly"].as_bool()?
+                != (reference["field"].as_str()?.starts_with("work_context:")
+                    || !is_research_evidence(source))
         {
             return None;
         }
@@ -164,7 +221,7 @@ fn restore_fragments(
         fragments.push(Fragment {
             fragment_id: id.to_owned(),
             source_ref: frozen_source,
-            field: source.field.clone(),
+            field: reference["field"].as_str()?.into(),
             source_version: frozen_version,
             start,
             end,
@@ -302,7 +359,8 @@ pub(crate) async fn research_result_sources_current(
             };
             scope
         }
-        Some(crate::topic_map_research_analysis::EXTRACT_CONTRACT) => {
+        Some("topic-map.research.v2")
+        | Some(crate::topic_map_research_analysis::EXTRACT_CONTRACT) => {
             manifest_source_work_refs(work, &manifest)
         }
         _ => return Ok(false),
@@ -313,7 +371,8 @@ pub(crate) async fn research_result_sources_current(
             .iter()
             .find(|input| input.work.work_ref == work)
             .is_some_and(|source| restore_legacy_scoped(&all, source, &manifest).is_some()),
-        Some(crate::topic_map_research_analysis::EXTRACT_CONTRACT) => {
+        Some("topic-map.research.v2")
+        | Some(crate::topic_map_research_analysis::EXTRACT_CONTRACT) => {
             restore_scoped_window(&all, work, &manifest).is_some()
         }
         _ => false,

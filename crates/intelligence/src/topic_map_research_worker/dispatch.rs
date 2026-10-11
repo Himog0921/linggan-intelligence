@@ -26,7 +26,15 @@ pub(super) async fn execute(
     };
     let model=sqlx::query("SELECT c.*,m.model_id,m.connection_version_ref FROM linggan_model_config c JOIN linggan_model_entry m USING(model_ref)WHERE c.config_ref=$1").bind(config).fetch_one(db.pool()).await?;
     let input_limit = i64::from(model.get::<i32, _>("input_token_limit"));
-    let mut prepared = prepare(db, adapter, &input, &row, input_limit).await?;
+    let mut prepared = prepare(
+        db,
+        adapter,
+        &input,
+        &row,
+        input_limit,
+        model.get("output_token_limit"),
+    )
+    .await?;
     if prepared.definition_unavailable {
         sqlx::query("UPDATE linggan_topic_map_research_task SET state='stale',last_reason='definition_source_unavailable' WHERE task_ref=$1 AND state='queued'").bind(task).execute(db.pool()).await?;
         return Ok(true);
@@ -410,6 +418,7 @@ fn validated_response(
             return Err("output_contract_mismatch");
         }
         analysis::validate_output(&output, &input.fragments, &[])?;
+        analysis::validate_context_links(&output, &input.fragments, &input.comment_study)?;
         Ok((Some(output), None))
     } else if phase == "resolve" {
         let output: ResolutionOutput = decode_output(text)?;

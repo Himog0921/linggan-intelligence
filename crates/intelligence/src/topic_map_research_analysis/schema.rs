@@ -33,13 +33,33 @@ fn evidence(min: usize) -> Value {
         12,
     )
 }
-fn proposed_topic() -> Value {
-    object(&[
+fn concept_properties() -> Vec<(&'static str, Value)> {
+    vec![
         ("label", string(120)),
         ("definition", string(1000)),
         ("inclusionCriteria", array(string(300), 1, 8)),
         ("exclusionCriteria", array(string(300), 1, 8)),
-    ])
+        ("domainFit", enumeration(&["in_scope"])),
+        ("domainReason", string(500)),
+        ("abstractionReason", string(500)),
+    ]
+}
+fn proposed_topic() -> Value {
+    let mut properties = concept_properties();
+    properties.push((
+        "parent",
+        object(&[
+            ("kind", enumeration(&["root", "existing", "proposed"])),
+            ("topicRef", json!({"anyOf":[uuid(), {"type":"null"}]})),
+            ("definitionRef", json!({"anyOf":[uuid(), {"type":"null"}]})),
+            (
+                "proposal",
+                json!({"anyOf":[object(&concept_properties()), {"type":"null"}]}),
+            ),
+            ("reason", string(500)),
+        ]),
+    ));
+    object(&properties)
 }
 
 fn discussion() -> Value {
