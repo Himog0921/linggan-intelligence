@@ -70,3 +70,12 @@
 - 不入Git，不包含真实原文/运行库dump/凭据；脚本退出清理容器与volume并验证成功。
 - 再生：上述脚本 + API focused tests + 隔离合成数据浏览器走查。责任 TOPIC-MAP-V41-001 root。
 - 本机发布追加：经 Mog 单独授权的运行库加密备份、校验和与不含正文/凭据的发布回执保存在既有忽略目录 `database/backups/topic-map-v41-<UTC>/`；密钥继续独立保管。真实3000的浏览器截图归本任务 Codex visualizations，文件名 `topic-map-demo-corrected-runtime-*.jpg`，不入Git。合成截图与运行页截图不得互相替代。
+
+
+## CREATOR-DISCOVERY-001 · PR #386 发布验证
+
+- 来源：维护的 `scripts/test-creator-approved-ui.py`、官方Playwright Python v1.57.0源码/既有Node驱动、candidate/current runtime只读GET与受控installer。
+- 位置：系统临时目录 `/tmp/creator-ui-386-*` 的证明日志/截图/代理脚本，`/tmp/creator-386-*` 测试依赖及编译日志；Cargo缓存复用 `/tmp/linggan-creator-ui-target`。审阅截图只放本任务已授权Codex visualizations。
+- 不入Git，不含凭据或数据库dump；真实GET截图为UI运行证明，不是模型语义或写动作验收。测试源为人工维护代码，非生成运行资料。
+- 再生：离线脚本 + 只读候选HTTP浏览器 + 合并后的canonical installer与实际PID/cwd/health/浏览器核验。临时代理拒绝全部非GET且不启动worker。
+- 清理：测试结束关闭本任务浏览器/代理，发布后移除干净且已远端持久化的proof worktree；不清共享runtime、其它任务容器/依赖。责任Issue #367 / root当前授权发布。
