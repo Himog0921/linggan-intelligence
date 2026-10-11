@@ -5,6 +5,10 @@ use sha2::{Digest, Sha256};
 use sqlx::{Postgres, Row, Transaction};
 use std::collections::BTreeSet;
 
+#[path = "store/parent_binding.rs"]
+mod parent_binding;
+pub(crate) use parent_binding::bind_new_candidate_parent_in;
+
 fn text(value: &str, max: usize) -> Result<(), TopicMapError> {
     if value.trim().is_empty() || value.chars().count() > max {
         Err(TopicMapError::Invalid("invalid text"))
@@ -578,7 +582,7 @@ pub(crate) async fn accept_topic_map_candidates_in(
         );
         let stable = hash(&(domain_ref, &identity))?;
         lock(tx, &format!("topic-map:candidate:{stable}")).await?;
-        let existing=sqlx::query("SELECT t.topic_ref,d.definition_ref FROM linggan_topic_workspace t JOIN LATERAL(SELECT * FROM linggan_topic_definition WHERE topic_ref=t.topic_ref ORDER BY version DESC LIMIT 1)d ON true JOIN LATERAL(SELECT * FROM linggan_topic_map_binding WHERE topic_ref=t.topic_ref ORDER BY version DESC LIMIT 1)b ON true WHERE b.domain_ref=$1 AND (($2::uuid IS NOT NULL AND t.topic_ref=$2) OR ($2::uuid IS NULL AND EXISTS(SELECT 1 FROM linggan_topic_map_concept_rule rule WHERE rule.definition_ref=d.definition_ref AND rule.identity_hash=$3 AND d.definition_ref=ANY($4)))) AND NOT EXISTS(SELECT 1 FROM linggan_topic_map_structure_source WHERE topic_ref=t.topic_ref) ORDER BY t.created_at,t.topic_ref LIMIT 1").bind(domain_ref).bind(proposal.topic_ref).bind(&identity).bind(&proposal.reuse_definition_refs).fetch_optional(&mut **tx).await?;
+        let existing=sqlx::query("SELECT t.topic_ref,d.definition_ref FROM linggan_topic_workspace t JOIN LATERAL(SELECT * FROM linggan_topic_definition WHERE topic_ref=t.topic_ref ORDER BY version DESC LIMIT 1)d ON true JOIN LATERAL(SELECT * FROM linggan_topic_map_binding WHERE topic_ref=t.topic_ref ORDER BY version DESC LIMIT 1)b ON true WHERE b.domain_ref=$1 AND (($2::uuid IS NOT NULL AND t.topic_ref=$2) OR ($2::uuid IS NULL AND EXISTS(SELECT 1 FROM linggan_topic_map_concept_rule rule WHERE rule.definition_ref=d.definition_ref AND rule.identity_hash=$3 AND (d.definition_ref=ANY($4) OR rule.invocation_ref=$5)))) AND NOT EXISTS(SELECT 1 FROM linggan_topic_map_structure_source WHERE topic_ref=t.topic_ref) ORDER BY t.created_at,t.topic_ref LIMIT 1").bind(domain_ref).bind(proposal.topic_ref).bind(&identity) .bind(&proposal.reuse_definition_refs).bind(proposal.invocation_ref).fetch_optional(&mut **tx).await?;
         let (topic_ref, definition_ref) = if let Some(row) = existing {
             (row.get("topic_ref"), row.get("definition_ref"))
         } else {
@@ -597,7 +601,7 @@ pub(crate) async fn accept_topic_map_candidates_in(
             sqlx::query("INSERT INTO linggan_topic_classification_run(classification_run_ref,definition_ref,run_kind,run_state,adjudication_note)VALUES($1,$2,'machine_proposed','completed',$3)").bind(run).bind(definition).bind("引用有效材料的机器候选；未作为人工裁定或正式定义发布。").execute(&mut **tx).await?;
             sqlx::query("INSERT INTO linggan_topic_material_pack(material_pack_ref,classification_run_ref,source_boundary)VALUES($1,$2,$3)").bind(pack).bind(run).bind("仅当前已接纳作品；少量样本可形成候选，不能外推市场。").execute(&mut **tx).await?;
             sqlx::query("INSERT INTO linggan_topic_material_member(classification_run_ref,work_public_ref,role,rationale,ordinal)VALUES($1,$2,$3,$4,1)").bind(run).bind(work_ref).bind(match proposal.evidence_role.as_str(){"challenge"=>"challenge","context"=>"boundary",_=>"support"}).bind("本次证据讨论该候选，观点角色与精确依据见讨论归属记录。").execute(&mut **tx).await?;
-            sqlx::query("INSERT INTO linggan_topic_map_concept_rule(definition_ref,domain_ref,identity_hash,inclusion_criteria,exclusion_criteria,method_version,invocation_ref)VALUES($1,$2,$3,$4,$5,$6,$7)").bind(definition).bind(domain_ref).bind(&identity).bind(&proposal.inclusion_criteria).bind(&proposal.exclusion_criteria).bind(crate::topic_map_core::METHOD_VERSION).bind(proposal.invocation_ref).execute(&mut **tx).await?;
+            sqlx::query("INSERT INTO linggan_topic_map_concept_rule(definition_ref,domain_ref,identity_hash,inclusion_criteria,exclusion_criteria,method_version,invocation_ref)VALUES($1,$2,$3,$4,$5,$6,$7)").bind(definition).bind(domain_ref).bind(&identity).bind(&proposal.inclusion_criteria).bind(&proposal.exclusion_criteria).bind(if proposal.is_parent {"topic-map.core.parent.v1"} else {crate::topic_map_core::METHOD_VERSION}).bind(proposal.invocation_ref).execute(&mut **tx).await?;
             let idempotency = format!("topic-map-candidate:{}", topic.simple());
             let r = receipt(tx, &idempotency, &stable, "candidate", Some(topic), 1).await?;
             sqlx::query("INSERT INTO linggan_topic_map_binding(binding_ref,topic_ref,domain_ref,parent_topic_ref,version,receipt_ref)VALUES($1,$2,$3,NULL,1,$4)").bind(Uuid::new_v4()).bind(topic).bind(domain_ref).bind(r.receipt_ref).execute(&mut **tx).await?;

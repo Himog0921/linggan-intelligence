@@ -83,8 +83,8 @@ pub async fn run_once(
     let maintained = core::backfill::advance_once(db).await? || retired;
     let maintained = core::comparison::queue_once(db).await? || maintained;
     let maintained = lifecycle::complete_ready_runs(db).await? || maintained;
-    // Finish available understanding before opening another extraction window.
-    // Within each phase, least recently dispatched runs share the worker.
+    // Initial understanding owns three dispatch slots for each maintenance slot.
+    // Resolve first within that lane; definition maintenance cannot starve coverage.
     let row = next_task(db).await?;
     let Some(row) = row else {
         return Ok(maintained);
@@ -116,7 +116,17 @@ async fn next_task(db: &Database) -> Result<Option<sqlx::postgres::PgRow>, Model
                 AND permission->'workRefs' @> (t.recall_manifest#>'{backfill,comparisonScopeWorkRefs}')
               ))
           ))
-      ORDER BY CASE t.phase WHEN 'resolve' THEN 0 WHEN 'compare' THEN 1 ELSE 2 END,
+      ORDER BY CASE WHEN t.recall_manifest ? 'backfill' THEN
+        CASE WHEN (SELECT count(*)=3 AND bool_and(NOT recent.maintenance) FROM (
+          SELECT prior.recall_manifest ? 'backfill' AS maintenance
+          FROM linggan_topic_map_research_request request
+          JOIN linggan_topic_map_research_task prior USING(task_ref)
+          JOIN linggan_topic_map_research_run prior_run ON prior_run.run_ref=prior.run_ref
+          WHERE prior.domain_ref=t.domain_ref AND prior_run.method_version=$1
+            AND request.dispatch_started_at IS NOT NULL
+          ORDER BY request.created_at DESC,request.invocation_ref DESC LIMIT 3
+        ) recent) THEN 0 ELSE 2 END ELSE 1 END,
+        CASE t.phase WHEN 'resolve' THEN 0 WHEN 'compare' THEN 1 ELSE 2 END,
         (SELECT max(q.created_at) FROM linggan_topic_map_research_request q WHERE q.run_ref=r.run_ref) ASC NULLS FIRST,
         r.created_at,r.run_ref,t.created_at,t.task_ref
       LIMIT 1

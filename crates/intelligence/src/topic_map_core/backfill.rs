@@ -12,6 +12,9 @@ pub(crate) use authorization::{authorize_scope, task_is_explicitly_authorized};
 
 const TASK_LIMIT: usize = 12;
 const DISCUSSION_LIMIT: usize = 240;
+const DEFINITION_BATCH_LIMIT: usize = 6;
+const ACTIVE_TASK_LIMIT: i64 = 2;
+const RECALL_DEBOUNCE_SECONDS: i32 = 15 * 60;
 
 struct UnitCandidate {
     task: Uuid,
@@ -87,7 +90,7 @@ fn keep_other_resolutions(previous: &Value, keys: &[String]) -> Value {
     )
 }
 
-/// One definition event and at most one source window activation per tick. This
+/// A bounded batch of definition events and at most one source activation per tick. This
 /// function never invokes a model, acquires material, or creates a research run.
 pub(crate) async fn advance_once(db: &Database) -> Result<bool, ModelError> {
     let mut tx = db.pool().begin().await?;
@@ -103,7 +106,13 @@ pub(crate) async fn advance_once(db: &Database) -> Result<bool, ModelError> {
         .execute(&mut *tx).await?.rows_affected()>0;
     let blocked = sqlx::query("UPDATE linggan_topic_map_backfill_queue q SET state='skipped',last_reason=COALESCE(t.last_reason,t.state),updated_at=scope_001_now() FROM linggan_topic_map_research_task t WHERE q.source_task_ref=t.task_ref AND q.state='pending' AND t.state IN ('failed','stopped','stale','unknown_dispatch')")
         .execute(&mut *tx).await?.rows_affected()>0;
-    let scanned = scan_one(&mut tx).await?;
+    let mut scanned = false;
+    for _ in 0..DEFINITION_BATCH_LIMIT {
+        if !scan_one(&mut tx).await? {
+            break;
+        }
+        scanned = true;
+    }
     let activated = activate_one(&mut tx).await?;
     tx.commit().await?;
     Ok(settled || blocked || scanned || activated)
@@ -121,6 +130,7 @@ async fn scan_one(tx: &mut Transaction<'_, Postgres>) -> Result<bool, ModelError
         WHERE d.version=(SELECT max(version) FROM linggan_topic_definition WHERE topic_ref=d.topic_ref)
           AND NOT EXISTS(SELECT 1 FROM linggan_topic_map_structure_source WHERE topic_ref=d.topic_ref)
           AND NOT EXISTS(SELECT 1 FROM linggan_topic_map_definition_scan WHERE definition_ref=d.definition_ref)
+          AND COALESCE(rule.method_version,'')<>'topic-map.core.parent.v1'
         ORDER BY d.created_at,d.definition_ref LIMIT 1
     "#).fetch_optional(&mut **tx).await?;
     let Some(definition) = definition else {
@@ -162,7 +172,16 @@ async fn scan_one(tx: &mut Transaction<'_, Postgres>) -> Result<bool, ModelError
             WHERE resolution.unit_ref=unit.unit_ref AND task.state IN ('queued','running','succeeded') AND task.distilled_json IS NOT NULL
             ORDER BY resolution.created_at DESC,resolution.resolution_ref DESC LIMIT 1
           )recent ON true
-          JOIN linggan_topic_map_research_task source ON source.task_ref=recent.task_ref
+          JOIN linggan_topic_map_research_task latest ON latest.task_ref=recent.task_ref
+          JOIN LATERAL(
+            SELECT initial.* FROM linggan_topic_map_research_task initial
+            JOIN linggan_topic_map_research_run initial_run USING(run_ref)
+            WHERE initial.domain_ref=unit.domain_ref AND initial.work_public_ref=unit.work_public_ref
+              AND initial.input_hash=latest.input_hash AND initial.state='succeeded'
+              AND initial.distilled_json IS NOT NULL AND initial.phase<>'compare'
+              AND NOT (initial.recall_manifest ? 'backfill') AND initial_run.method_version=$7
+            ORDER BY initial.created_at,initial.task_ref LIMIT 1
+          )source ON true
           WHERE unit.domain_ref=$1
             AND NOT EXISTS(SELECT 1 FROM linggan_topic_map_unit_resolution compared
               WHERE compared.unit_ref=unit.unit_ref AND (
@@ -172,7 +191,7 @@ async fn scan_one(tx: &mut Transaction<'_, Postgres>) -> Result<bool, ModelError
         SELECT * FROM candidates WHERE dependent OR lower(statement) LIKE ANY($5)
         ORDER BY dependent DESC,source_created DESC,unit_key LIMIT $6
     "#).bind(domain).bind(definition_ref).bind(topic).bind(changed).bind(&terms)
-        .bind((DISCUSSION_LIMIT+1) as i64).fetch_all(&mut **tx).await?;
+        .bind((DISCUSSION_LIMIT+1) as i64).bind(crate::topic_map_research_analysis::METHOD_VERSION).fetch_all(&mut **tx).await?;
     let limited = rows.len() > DISCUSSION_LIMIT;
     let units: Vec<_> = rows
         .into_iter()
@@ -208,14 +227,20 @@ async fn activate_one(tx: &mut Transaction<'_, Postgres>) -> Result<bool, ModelE
     let row = sqlx::query(r#"
         SELECT queue.definition_ref,queue.source_task_ref,queue.unit_keys,queue.reason,
                source.run_ref,source.domain_ref,source.work_public_ref,source.input_hash,
-               source.input_refs,source.distilled_json,source.resolutions_json
+               source.input_refs,source.distilled_json,latest.resolutions_json
         FROM linggan_topic_map_backfill_queue queue
         JOIN linggan_topic_map_research_task source ON source.task_ref=queue.source_task_ref
         JOIN linggan_topic_map_research_run run ON run.run_ref=source.run_ref
+        JOIN LATERAL(SELECT completed.resolutions_json FROM linggan_topic_map_research_task completed
+          WHERE completed.domain_ref=source.domain_ref AND completed.work_public_ref=source.work_public_ref
+            AND completed.input_hash=source.input_hash AND completed.state='succeeded'
+          ORDER BY completed.updated_at DESC,completed.task_ref DESC LIMIT 1)latest ON true
         JOIN linggan_topic_map_research_policy policy ON policy.domain_ref=run.domain_ref
         JOIN observation_domain domain ON domain.domain_ref=run.domain_ref
         JOIN linggan_topic_definition definition ON definition.definition_ref=queue.definition_ref
         WHERE queue.state='pending' AND source.state='succeeded' AND source.distilled_json IS NOT NULL
+          AND NOT (source.recall_manifest ? 'backfill') AND run.method_version=$1
+          AND (SELECT count(*) FROM linggan_topic_map_research_task maintenance JOIN linggan_topic_map_research_run owner ON owner.run_ref=maintenance.run_ref WHERE maintenance.domain_ref=source.domain_ref AND maintenance.recall_manifest ? 'backfill' AND maintenance.state IN ('queued','running') AND owner.state IN ('queued','running','daily_budget_paused'))<$2
           AND run.state IN ('queued','running','completed') AND policy.status='active' AND domain.status='active'
           AND (policy.automatic_enabled
             OR (run.trigger='on_demand' AND run.state IN ('queued','running')
@@ -225,8 +250,19 @@ async fn activate_one(tx: &mut Transaction<'_, Postgres>) -> Result<bool, ModelE
           AND NOT EXISTS(SELECT 1 FROM linggan_topic_map_research_task active
             WHERE active.domain_ref=source.domain_ref AND active.work_public_ref=source.work_public_ref
               AND active.input_hash=source.input_hash AND active.state IN ('queued','running'))
+          AND (queue.reason<>'new_topic_recall'
+            OR (SELECT count(*) FROM linggan_topic_map_backfill_queue pending WHERE pending.source_task_ref=source.task_ref AND pending.state='pending')>=$4
+            OR (SELECT min(pending.created_at) FROM linggan_topic_map_backfill_queue pending WHERE pending.source_task_ref=source.task_ref AND pending.state='pending')<=scope_001_now()-($3::integer*interval '1 second')
+            OR EXISTS(SELECT 1 FROM jsonb_array_elements(COALESCE(run.input_scope->'backfillAuthorizations','[]'::jsonb)) permission
+                WHERE permission->'workRefs' ? source.work_public_ref::text AND permission->'definitionRefs' ? queue.definition_ref::text)
+            OR NOT EXISTS(SELECT 1 FROM linggan_topic_map_research_task initial
+                JOIN linggan_topic_map_research_run initial_run ON initial_run.run_ref=initial.run_ref
+                WHERE initial.domain_ref=source.domain_ref AND initial.state IN ('queued','running')
+                  AND initial.phase<>'compare' AND NOT (initial.recall_manifest ? 'backfill')
+                  AND initial_run.method_version=$1 AND initial_run.state IN ('queued','running')))
+
         ORDER BY queue.created_at,queue.definition_ref,queue.source_task_ref LIMIT 1 FOR UPDATE OF queue SKIP LOCKED
-    "#).fetch_optional(&mut **tx).await?;
+    "#).bind(crate::topic_map_research_analysis::METHOD_VERSION).bind(ACTIVE_TASK_LIMIT).bind(RECALL_DEBOUNCE_SECONDS).bind(DEFINITION_BATCH_LIMIT as i64).fetch_optional(&mut **tx).await?;
     let Some(row) = row else {
         return Ok(false);
     };
@@ -258,23 +294,12 @@ async fn activate_one(tx: &mut Transaction<'_, Postgres>) -> Result<bool, ModelE
     if !enabled {
         return Ok(false);
     }
-    if let Some(reason) = reassignment_blocker(tx, domain, work, definition, &input_hash).await? {
-        skip(tx, definition, source, reason).await?;
+    let batch = coalesce_pending(tx, &permission, &row, authorization).await?;
+    if batch.definitions.is_empty() {
         return Ok(true);
     }
-    let keys: Vec<String> = row.get("unit_keys");
-    let keys: Vec<String> = sqlx::query_scalar(r#"
-        SELECT unit.unit_key FROM linggan_topic_map_discussion_unit unit
-        WHERE unit.domain_ref=$1 AND unit.work_public_ref=$2 AND unit.unit_key=ANY($3)
-          AND NOT EXISTS(SELECT 1 FROM linggan_topic_map_unit_resolution compared WHERE compared.unit_ref=unit.unit_ref AND (
-            compared.candidate_manifest @> jsonb_build_object('topics',jsonb_build_array(jsonb_build_object('definitionRef',$4::uuid)))
-            OR EXISTS(SELECT 1 FROM linggan_topic_map_unit_assignment a WHERE a.resolution_ref=compared.resolution_ref AND a.definition_ref=$4)))
-        ORDER BY unit.unit_key
-    "#).bind(domain).bind(work).bind(&keys).bind(definition).fetch_all(&mut **tx).await?;
-    if keys.is_empty() {
-        skip(tx, definition, source, "definition_already_compared").await?;
-        return Ok(true);
-    }
+    let definitions = batch.definitions;
+    let keys: Vec<_> = batch.keys.into_iter().collect();
     let busy: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_topic_map_research_task WHERE domain_ref=$1 AND work_public_ref=$2 AND input_hash=$3 AND state IN ('queued','running'))")
         .bind(domain).bind(work).bind(&input_hash).fetch_one(&mut **tx).await?;
     if busy {
@@ -282,7 +307,8 @@ async fn activate_one(tx: &mut Transaction<'_, Postgres>) -> Result<bool, ModelE
     }
     let task = Uuid::new_v4();
     let previous = keep_other_resolutions(&row.get::<Value, _>("resolutions_json"), &keys);
-    let scope = json!({"backfill":{"unitKeys":keys,"forcedDefinitionRefs":[definition],
+    let scope = json!({"backfill":{"unitKeys":keys,"forcedDefinitionRefs":definitions,
+        "definitionLimit":DEFINITION_BATCH_LIMIT,"coalesced":true,
         "sourceTaskRef":source,"reason":row.get::<String,_>("reason"),"authorizationRequestRef":authorization}});
     let inserted = sqlx::query("INSERT INTO linggan_topic_map_research_task(task_ref,run_ref,domain_ref,work_public_ref,input_hash,input_refs,phase,distilled_json,resolutions_json,recall_manifest)VALUES($1,$2,$3,$4,$5,$6,'resolve',$7,$8,$9)ON CONFLICT DO NOTHING")
         .bind(task).bind(run).bind(domain).bind(work).bind(&input_hash).bind(row.get::<Value,_>("input_refs"))
@@ -290,11 +316,87 @@ async fn activate_one(tx: &mut Transaction<'_, Postgres>) -> Result<bool, ModelE
     if !inserted {
         return Ok(false);
     }
-    sqlx::query("UPDATE linggan_topic_map_backfill_queue SET state='active',queued_task_ref=$3,last_reason=NULL,updated_at=scope_001_now() WHERE definition_ref=$1 AND source_task_ref=$2 AND state='pending'")
-        .bind(definition).bind(source).bind(task).execute(&mut **tx).await?;
+    sqlx::query("UPDATE linggan_topic_map_backfill_queue SET state='active',queued_task_ref=$3,last_reason=NULL,updated_at=scope_001_now() WHERE definition_ref=ANY($1) AND source_task_ref=$2 AND state='pending'")
+        .bind(&definitions).bind(source).bind(task).execute(&mut **tx).await?;
     sqlx::query("UPDATE linggan_topic_map_research_run SET state='queued',input_scope=jsonb_set(input_scope,'{backfillReopened}','true'::jsonb),last_reason='definition_reassignment',updated_at=scope_001_now() WHERE run_ref=$1 AND state='completed'")
         .bind(run).execute(&mut **tx).await?;
     Ok(true)
+}
+
+struct ReassessmentBatch {
+    definitions: Vec<Uuid>,
+    keys: BTreeSet<String>,
+}
+
+async fn coalesce_pending(
+    tx: &mut Transaction<'_, Postgres>,
+    permission: &sqlx::postgres::PgRow,
+    source: &sqlx::postgres::PgRow,
+    authorization: Option<Uuid>,
+) -> Result<ReassessmentBatch, ModelError> {
+    let anchor: Uuid = source.get("source_task_ref");
+    let domain: Uuid = source.get("domain_ref");
+    let work: Uuid = source.get("work_public_ref");
+    let rows = sqlx::query("SELECT q.definition_ref,q.unit_keys,definition.created_at>=run.created_at AS within_live_run FROM linggan_topic_map_backfill_queue q JOIN linggan_topic_definition definition USING(definition_ref) JOIN linggan_topic_map_research_task task ON task.task_ref=q.source_task_ref JOIN linggan_topic_map_research_run run USING(run_ref) WHERE q.source_task_ref=$1 AND q.state='pending' ORDER BY (q.definition_ref=$3) DESC,q.created_at,q.definition_ref LIMIT $2 FOR UPDATE OF q")
+        .bind(anchor).bind(DEFINITION_BATCH_LIMIT as i64).bind(source.get::<Uuid,_>("definition_ref")).fetch_all(&mut **tx).await?;
+    let mut batch = ReassessmentBatch {
+        definitions: Vec::new(),
+        keys: BTreeSet::new(),
+    };
+    for pending in rows {
+        let definition: Uuid = pending.get("definition_ref");
+        let mut definitions = batch.definitions.clone();
+        definitions.push(definition);
+        let automatic = permission.get::<bool, _>("automatic_enabled");
+        let live = permission.get::<bool, _>("live_on_demand")
+            && pending.get::<bool, _>("within_live_run");
+        let explicit = authorization.is_some()
+            && authorization::matching_authorization(
+                &permission.get::<Value, _>("input_scope"),
+                work,
+                &definitions,
+            ) == authorization;
+        if !automatic && !live && !explicit {
+            continue;
+        }
+        if let Some(reason) = reassignment_blocker(
+            tx,
+            domain,
+            work,
+            definition,
+            &source.get::<String, _>("input_hash"),
+        )
+        .await?
+        {
+            skip(tx, definition, anchor, reason).await?;
+            continue;
+        }
+        let keys = uncompared_keys(tx, domain, work, definition, pending.get("unit_keys")).await?;
+        if keys.is_empty() {
+            skip(tx, definition, anchor, "definition_already_compared").await?;
+            continue;
+        }
+        batch.keys.extend(keys);
+        batch.definitions = definitions;
+    }
+    Ok(batch)
+}
+
+async fn uncompared_keys(
+    tx: &mut Transaction<'_, Postgres>,
+    domain: Uuid,
+    work: Uuid,
+    definition: Uuid,
+    pending_keys: Vec<String>,
+) -> Result<Vec<String>, ModelError> {
+    Ok(sqlx::query_scalar(r#"
+            SELECT unit.unit_key FROM linggan_topic_map_discussion_unit unit
+            WHERE unit.domain_ref=$1 AND unit.work_public_ref=$2 AND unit.unit_key=ANY($3)
+              AND NOT EXISTS(SELECT 1 FROM linggan_topic_map_unit_resolution compared WHERE compared.unit_ref=unit.unit_ref AND (
+                compared.candidate_manifest @> jsonb_build_object('topics',jsonb_build_array(jsonb_build_object('definitionRef',$4::uuid)))
+                OR EXISTS(SELECT 1 FROM linggan_topic_map_unit_assignment a WHERE a.resolution_ref=compared.resolution_ref AND a.definition_ref=$4)))
+            ORDER BY unit.unit_key
+        "#).bind(domain).bind(work).bind(&pending_keys).bind(definition).fetch_all(&mut **tx).await?)
 }
 
 async fn reassignment_blocker(
@@ -304,7 +406,7 @@ async fn reassignment_blocker(
     definition: Uuid,
     input_hash: &str,
 ) -> Result<Option<&'static str>, ModelError> {
-    let current: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_topic_definition d JOIN LATERAL(SELECT domain_ref FROM linggan_topic_map_binding WHERE topic_ref=d.topic_ref ORDER BY version DESC LIMIT 1)b ON true WHERE d.definition_ref=$1 AND d.version=(SELECT max(version)FROM linggan_topic_definition WHERE topic_ref=d.topic_ref) AND b.domain_ref=$2 AND NOT EXISTS(SELECT 1 FROM linggan_topic_map_structure_source WHERE topic_ref=d.topic_ref))")
+    let current: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_topic_definition d JOIN LATERAL(SELECT domain_ref FROM linggan_topic_map_binding WHERE topic_ref=d.topic_ref ORDER BY version DESC LIMIT 1)b ON true WHERE d.definition_ref=$1 AND d.version=(SELECT max(version)FROM linggan_topic_definition WHERE topic_ref=d.topic_ref) AND b.domain_ref=$2 AND NOT EXISTS(SELECT 1 FROM linggan_topic_map_structure_source WHERE topic_ref=d.topic_ref) AND NOT EXISTS(SELECT 1 FROM linggan_topic_map_concept_rule rule WHERE rule.definition_ref=d.definition_ref AND rule.method_version='topic-map.core.parent.v1'))")
         .bind(definition).bind(domain).fetch_one(&mut **tx).await?;
     let unknown: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_topic_map_research_task WHERE domain_ref=$1 AND work_public_ref=$2 AND input_hash=$3 AND state='unknown_dispatch')")
         .bind(domain).bind(work).bind(input_hash).fetch_one(&mut **tx).await?;

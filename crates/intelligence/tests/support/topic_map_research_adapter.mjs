@@ -61,12 +61,16 @@ function extract() {
     : null;
   const author = tailAuthor ?? fragments.find((f) => f.field === 'body' && f.fragmentId.startsWith(input.workRef))
     ?? fragments.find((f) => authorFields.includes(f.field));
-  const comment = fragments.find((f) => commentFields.includes(f.field));
-  const primary = author ?? comment ?? fragments.find((f) => f.field !== 'parent_comment_context');
-  const evidence = primary ? [cite(primary)] : [];
+  const primaryComments = fragments.filter((f) => commentFields.includes(f.field));
+  const comment = primaryComments[0];
+  const linked = request.modelId === 'synthetic-topic-map-cite-linked-reply'
+    ? input.commentStudy?.find(c => c.parentFragmentIds?.length && primaryComments.some(f => f.fragmentId === c.fragmentId)) : null;
+  const linkedChild = linked ? primaryComments.find(f => f.fragmentId === linked.fragmentId) : null;
+  const primary = linkedChild ?? author ?? comment ?? fragments.find((f) => f.field !== 'parent_comment_context' && !f.field.startsWith('work_context:'));
+  const evidence = primary ? [cite(primary), ...(linked?.parentFragmentIds ?? []).map(id => fragments.find(f => f.fragmentId === id)).filter(Boolean).map(cite)] : [];
   const cross = compare && author && comment ? [cite(author), cite(comment)] : evidence;
   const outcome = noSignal ? 'no_signal' : insufficient || !primary ? 'insufficient' : 'analyzed';
-  let discussions = outcome === 'analyzed' ? [primary, ...(comment && comment !== primary ? [comment] : [])].map((f) =>
+  let discussions = outcome === 'analyzed' ? [primary, ...primaryComments.filter(f => f !== primary)].map((f) =>
     discussion(f, f.text, f.text.includes('SUSTAIN_ONLY') ? sustainedBoundary :
       f.text.includes('PRIVATE_RULE') ? {...boundary, definition: 'SYNTHETIC_RESTRICTED_RULE：开始练习的独特合成边界'} : boundary)) : [];
   if (primary && sourceText.includes('SYNTHETIC MULTI')) {
@@ -75,7 +79,7 @@ function extract() {
   }
   const analyzed = outcome === 'analyzed';
   return {
-    contract: 'topic-map.research.v2', outcome, discussions,
+    contract: envelope.contract, outcome, discussions,
     scenes: analyzed ? [{ label: '合成家庭练习场景', evidence }] : [],
     journey: {
       mainStage: analyzed ? 'begin_practice' : 'unclear', involvedStages: analyzed ? ['begin_practice'] : [],
@@ -94,31 +98,54 @@ function extract() {
 function resolve() {
   const candidates = input.definitions;
   return {
-    contract: 'topic-map.resolve.v1',
+    contract: envelope.contract,
     decisions: input.units.map(({ unitId, discussion }) => {
       // Deliberately compare the complete proposed boundary, never just the name.
       const matched = candidates.find((c) => c.definition === discussion.definition
         && JSON.stringify(c.inclusionCriteria) === JSON.stringify(discussion.inclusionCriteria)
         && JSON.stringify(c.exclusionCriteria) === JSON.stringify(discussion.exclusionCriteria));
+      const tree = discussion.statement.includes('TREE_');
+      const badParent = discussion.statement.includes('TREE_BAD_PARENT_VERSION');
+      const parentConcept = {
+        label: '合成任务执行支持', definition: '围绕任务从开始到持续执行的困难与支持',
+        inclusionCriteria: ['已决定任务的启动或持续执行支持'],
+        exclusionCriteria: ['仅讨论选哪一个任务或者任务后的满意程度'],
+        domainFit: 'in_scope', domainReason: '合成领域中的实践任务执行问题',
+        abstractionReason: '启动和维持是执行任务的不同阶段，未虚构其他实际材料',
+      };
+      const existingParent = candidates.find(c => c.definition === parentConcept.definition);
+      const forceReuse = discussion.statement.includes('TREE_REUSE_REPARENT');
+      const chosenMatch = forceReuse ? null : matched;
+      const parent = tree ? existingParent ? {
+        kind: 'existing', topicRef: existingParent.topicRef,
+        definitionRef: badParent ? '00000000-0000-4000-8000-00000000dead' : existingParent.definitionRef,
+        proposal: null, reason: '启动或持续是执行任务支持范围中的具体阶段',
+      } : {kind:'proposed', topicRef:null, definitionRef:null, proposal:parentConcept,
+        reason:'任务执行范围包含启动或持续的具体阶段，未把共现作为包含'} :
+        {kind:'root', topicRef:null, definitionRef:null, proposal:null, reason:'本次无有依据的上位主题，保留根候选'};
       return {
         unitId,
-        status: matched ? 'matched' : 'new',
-        matches: matched ? [{ topicRef: matched.topicRef, definitionRef: matched.definitionRef, reason: '合成完整定义及纳入排除标准一致' }] : [],
-        proposedTopic: matched ? null : {
+        status: chosenMatch ? 'matched' : 'new',
+        matches: chosenMatch ? [{ topicRef: matched.topicRef, definitionRef: matched.definitionRef, reason: '合成完整定义及纳入排除标准一致' }] : [],
+        proposedTopic: chosenMatch ? null : {
           label: discussion.label, definition: discussion.definition,
           inclusionCriteria: discussion.inclusionCriteria, exclusionCriteria: discussion.exclusionCriteria,
+          ...(envelope.contract === 'topic-map.resolve.v2' ? {
+            domainFit:'in_scope', domainReason:'合成领域内执行任务的具体讨论',
+            abstractionReason:'定义跨人物和任务可复用；现场原声及观点留在讨论，不设次数门槛', parent,
+          } : {}),
         },
         relations: candidates.map((c) => ({
-          topicRef: c.topicRef, definitionRef: c.definitionRef, relation: c === matched ? 'equivalent' : 'distinct',
+          topicRef: c.topicRef, definitionRef: c.definitionRef, relation: c === chosenMatch ? 'equivalent' : tree && c === existingParent ? 'narrower' : 'distinct',
           reason: c === matched ? '合成完整边界一致' : '合成候选边界与本讨论定义标准不同',
         })),
-        reason: matched ? '合成定义比较后复用已有主题' : '合成逐个比较后提出明确新边界',
+        reason: chosenMatch ? '合成定义比较后复用已有主题' : forceReuse ? '合成故意重复提案，用于验证旧身份和绑定保护' : '合成逐个比较后提出明确新边界',
       };
     }),
   };
 }
-if (!['topic-map.research.v2', 'topic-map.resolve.v1'].includes(envelope.contract)) throw new Error('unexpected synthetic contract');
-const output = envelope.contract === 'topic-map.resolve.v1' ? resolve() : extract();
+if (!['topic-map.research.v2', 'topic-map.resolve.v1', 'topic-map.research.v3', 'topic-map.resolve.v2'].includes(envelope.contract)) throw new Error('unexpected synthetic contract');
+const output = envelope.contract.startsWith('topic-map.resolve.') ? resolve() : extract();
 process.stdout.write(JSON.stringify({
   version: request.version, ok: true, text: JSON.stringify(output), failureCode: null, modelIds: null, modelListOrigin: null,
   usage: { inputTokens: 299, outputTokens: 100, costUsd: null }, elapsedMs: 1,

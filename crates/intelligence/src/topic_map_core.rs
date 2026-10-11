@@ -4,7 +4,9 @@ mod acceptance;
 pub(crate) use acceptance::{Acceptance, accept_in};
 #[path = "topic_map_core/recall.rs"]
 mod recall;
-pub(crate) use recall::{catalog, catalog_in, catalog_version, recall_topics};
+pub(crate) use recall::{
+    catalog, catalog_in, catalog_version, parent_recall_scores, recall_topics,
+};
 #[path = "topic_map_core/source_qualification.rs"]
 mod source_qualification;
 pub(crate) use source_qualification::{definition_dependencies, unavailable_definitions};

@@ -54,6 +54,8 @@ fn withdrawn_compared_definition_clears_decision_but_preserves_source_discussion
         "relation":"distinct","reason":"已撤回的机密主题定义"}]);
     unit["reason"] = json!("比较后排除了已撤回的机密主题定义");
     unit["recall"] = json!({"candidateLabel":"已撤回的机密主题定义"});
+    unit["proposedTopic"] = json!({"abstractionReason":"已撤回的机密主题定义"});
+    unit["hierarchy"] = json!({"parentTopicRef":Uuid::from_u128(200),"parentDefinitionRef":Uuid::from_u128(201),"reason":"已撤回的机密主题定义"});
     let mut topics = vec![topic(100), topic(200)];
     units::apply_rule(
         &mut topics[1],
@@ -70,6 +72,8 @@ fn withdrawn_compared_definition_clears_decision_but_preserves_source_discussion
     assert_eq!(current["assignments"], json!([]));
     assert_eq!(current["relations"], json!([]));
     assert!(current.get("recall").is_none());
+    assert!(current.get("hierarchy").is_none());
+    assert!(current.get("proposedTopic").is_none());
     assert_eq!(current["statement"], unit["statement"]);
     assert_eq!(current["evidence"], unit["evidence"]);
     assert!(!current.to_string().contains("机密主题定义"));

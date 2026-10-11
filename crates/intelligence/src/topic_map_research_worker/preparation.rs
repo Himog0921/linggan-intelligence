@@ -7,6 +7,7 @@ pub(super) async fn prepare(
     input: &ResearchInput,
     row: &sqlx::postgres::PgRow,
     input_limit: i64,
+    output_limit: i32,
 ) -> Result<Prepared, ModelError> {
     let phase: String = row.get("phase");
     let mut prepared = Prepared {
@@ -27,9 +28,9 @@ pub(super) async fn prepare(
             .unwrap_or_default(),
     };
     if phase == "extract" || phase == "compare" {
-        prepared.prompt=json!({"contract":analysis::EXTRACT_CONTRACT,"inputTokenLimit":input_limit,
-            "input":{"domain":input.domain,"workRef":input.work.work_ref,"fragments":input.fragments,
-                "definitions":[],"commentStudy":input.comment_study,"roleMetadata":input.role_metadata,
+        prepared.prompt=json!({"contract":analysis::EXTRACT_CONTRACT,"inputTokenLimit":input_limit,"outputTokenLimit":output_limit,
+            "input":{"domain":input.domain,"workRef":input.work.work_ref,"fragments":provider_fragments(input.fragments.iter()),
+                "definitions":[],"commentStudy":provider_comments(&input.comment_study),"roleMetadata":input.role_metadata,
                 "coverage":provider_coverage(&input.coverage),"comparisonWorkRefs":input.context_work_refs,
                 "comparisonBoundary":if phase=="compare" {"Only selected cited evidence from the listed works is supplied. Distinguish each work and author/commenter role. Compare only these observations; coverage is partial and is not audience prevalence."} else {"A source window is partial evidence. Other selected works are not supplied here; cross-work claims remain unknown."}},
             "outputSchema":analysis::output_schema()}).to_string();
@@ -82,23 +83,56 @@ pub(super) async fn prepare(
         core::recall_topics(db, adapter, &prepared.units, &catalog).await?;
     prepared.recall["catalogFingerprint"] = json!(catalog_version);
     apply_backfill(&mut prepared, &catalog, backfill);
+    include_parent_candidates(&mut prepared, &catalog);
     prepared.system = analysis::RESOLVE_SYSTEM.into();
-    let cited: std::collections::HashSet<_> = prepared
-        .units
+    let batch_units = core::units(input, &draft);
+    let cited: std::collections::HashSet<_> = batch_units
         .iter()
         .flat_map(|(_, d)| d.evidence.iter().map(|c| c.fragment_id.as_str()))
         .collect();
     let fragments: Vec<_> = input
         .fragments
         .iter()
-        .filter(|f| cited.contains(f.fragment_id.as_str()) || f.field == "parent_comment_context")
+        .filter(|f| {
+            cited.contains(f.fragment_id.as_str()) || !topic_map_research::is_research_evidence(f)
+        })
         .collect();
-    prepared.prompt=json!({"contract":analysis::RESOLVE_CONTRACT,"inputTokenLimit":input_limit,
+    prepared.prompt=json!({"contract":analysis::RESOLVE_CONTRACT,"inputTokenLimit":input_limit,"outputTokenLimit":output_limit,
         "input":{"domain":input.domain,"units":prepared.units.iter().map(|(id,d)|json!({"unitId":id,"discussion":d})).collect::<Vec<_>>(),
-            "fragments":fragments,"definitions":prepared.candidates,"recall":prepared.recall},
+            "batchContext":batch_units.iter().map(|(id,d)|json!({"unitId":id,"statement":d.statement,"speakerRole":d.speaker_role,"evidenceRole":d.evidence_role,"evidence":d.evidence})).collect::<Vec<_>>(),
+            "batchBoundary":"Only input.units may be assigned. batchContext supplies related and contrasting discussions for concept abstraction; its other units are not extra independent people or additional assignments.",
+            "fragments":provider_fragments(fragments.into_iter()),"definitions":prepared.candidates,"recall":prepared.recall},
         "outputSchema":analysis::resolution_schema()}).to_string();
     prepared.draft = Some(draft);
     Ok(prepared)
+}
+
+fn provider_fragments<'a>(
+    fragments: impl Iterator<Item = &'a linggan_evidence::creator_discovery::Fragment>,
+) -> Vec<Value> {
+    fragments
+        .map(|f| {
+            json!({"fragmentId":f.fragment_id,"field":f.field,
+        "start":f.start,"end":f.end,"text":f.text})
+        })
+        .collect()
+}
+
+fn provider_comments(comments: &Value) -> Value {
+    let mut comments = comments.clone();
+    for comment in comments.as_array_mut().into_iter().flatten() {
+        if let Some(fields) = comment.as_object_mut() {
+            for key in [
+                "sourceRef",
+                "parentSourceRef",
+                "sourceFragmentId",
+                "parentFragmentId",
+            ] {
+                fields.remove(key);
+            }
+        }
+    }
+    comments
 }
 
 fn provider_coverage(coverage: &Value) -> Value {
@@ -106,7 +140,16 @@ fn provider_coverage(coverage: &Value) -> Value {
     // the semantic request can exhaust its budget even for very short evidence.
     let mut projected = coverage.clone();
     if let Some(fields) = projected.as_object_mut() {
-        for field in ["currentSources", "sourceHashes", "fragmentOrigins"] {
+        for field in [
+            "currentSources",
+            "sourceHashes",
+            "fragmentOrigins",
+            "sourceFragmentIds",
+            "sourceFragmentId",
+            "windowKey",
+            "configRef",
+            "inputContract",
+        ] {
             fields.remove(field);
         }
     }
@@ -162,4 +205,55 @@ pub(super) fn catalog_fingerprint(catalog: &Value) -> String {
         )
         .to_string(),
     )
+}
+
+fn include_parent_candidates(prepared: &mut Prepared, catalog: &Value) {
+    let ordinary = prepared.candidates.as_array().cloned().unwrap_or_default();
+    let mut selected = Vec::new();
+    // Explicit maintenance definitions retain their frozen comparison obligation.
+    for forced in prepared.recall["backfill"]["forcedDefinitionRefs"]
+        .as_array()
+        .into_iter()
+        .flatten()
+    {
+        if let Some(candidate) = ordinary.iter().find(|c| c["definitionRef"] == *forced) {
+            selected.push(candidate.clone());
+        }
+    }
+    // Reserve a small part of the comparison budget for reusable parent concepts.
+    let parents: Vec<_> = catalog
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|c| c["conceptRole"] == "parent")
+        .cloned()
+        .collect();
+    let query = prepared
+        .units
+        .iter()
+        .map(|(_, d)| format!("{} {}", d.label, d.definition))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let scores = core::parent_recall_scores(&query, &parents);
+    let mut ranked: Vec<_> = parents.into_iter().zip(scores).collect();
+    ranked.sort_by(|a, b| {
+        b.1.total_cmp(&a.1)
+            .then_with(|| a.0["topicRef"].as_str().cmp(&b.0["topicRef"].as_str()))
+    });
+    for (parent, _) in ranked.into_iter().take(2) {
+        if selected.len() < 8 && !selected.iter().any(|c| c["topicRef"] == parent["topicRef"]) {
+            selected.push(parent);
+        }
+    }
+    for candidate in ordinary {
+        if selected.len() < 8
+            && !selected
+                .iter()
+                .any(|c| c["topicRef"] == candidate["topicRef"])
+        {
+            selected.push(candidate);
+        }
+    }
+    prepared.candidates = json!(selected);
+    prepared.recall["parentSelection"] = json!({"method":"bounded_lexical_parent_candidates","maximumCandidates":8,"similarityIsNotMembership":true});
 }

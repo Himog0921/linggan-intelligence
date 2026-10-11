@@ -13,7 +13,9 @@ pub use saved::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-pub(crate) use store::{accept_topic_map_candidates_in, append_work_annotation_in};
+pub(crate) use store::{
+    accept_topic_map_candidates_in, append_work_annotation_in, bind_new_candidate_parent_in,
+};
 pub use store::{append_work_annotation, save_topic_map_command};
 use uuid::Uuid;
 
@@ -219,6 +221,7 @@ pub enum TopicMapError {
 
 #[derive(Debug, Clone)]
 pub(crate) struct TopicMapCandidateRequest {
+    pub is_parent: bool,
     pub definition_text: String,
     pub inclusion_criteria: Vec<String>,
     pub exclusion_criteria: Vec<String>,

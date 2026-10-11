@@ -31,7 +31,7 @@ const SSE_BYTE_CEILING = 8_388_608;
 export function sseByteLimit(maxOutputTokens) {
   return Math.min(SSE_BYTE_CEILING, RESPONSE_BYTE_LIMIT + maxOutputTokens * 2048);
 }
-const TOPIC_CONTRACTS = new Set(['topic-map.research.v2', 'topic-map.resolve.v1']);
+const TOPIC_CONTRACTS = new Set(['topic-map.research.v2', 'topic-map.resolve.v1', 'topic-map.research.v3', 'topic-map.resolve.v2']);
 class Rejected extends Error { constructor(code) { super(code); this.code=code; } }
 const integer = (v,min,max) => Number.isSafeInteger(v) && v>=min && v<=max;
 function topicPacket(r) {
@@ -76,7 +76,7 @@ function researchOutputFormat(r,base) {
     'comment-research.semantic.v1':'comment_research_semantic_v1','comment-research.semantic.v2':'comment_research_semantic_v2','comment-research.semantic.v3':'comment_research_semantic_v3','comment-research.semantic.v4':'comment_research_semantic_v4','comment-research.semantic.v5':'comment_research_semantic_v5','comment-research.semantic.v6':'comment_research_semantic_v6',
     'comment-research.semantic.v1/problem-resolution':'comment_research_problem_resolution_v1','comment-research.semantic.v2/problem-resolution':'comment_research_problem_resolution_v2','comment-research.semantic.v3/problem-resolution':'comment_research_problem_resolution_v3','comment-research.semantic.v4/problem-resolution':'comment_research_problem_resolution_v4','comment-research.semantic.v5/problem-resolution':'comment_research_problem_resolution_v5','comment-research.semantic.v6/problem-resolution':'comment_research_problem_resolution_v6',
     'comment-study.note-batch.v1':'comment_study_note_batch_v1','comment-study.problem-resolution.v1':'comment_study_problem_resolution_v1','comment-study.problem-pair.v1':'comment_study_problem_pair_v1',
-    'topic-map.research.v2':'topic_map_research_v2','topic-map.resolve.v1':'topic_map_resolve_v1'
+    'topic-map.research.v2':'topic_map_research_v2','topic-map.resolve.v1':'topic_map_resolve_v1','topic-map.research.v3':'topic_map_research_v3','topic-map.resolve.v2':'topic_map_resolve_v2'
   };
   const schemaName=schemaNames[packet?.contract];
   if(!schemaName)return null;

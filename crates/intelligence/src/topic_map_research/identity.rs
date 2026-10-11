@@ -108,6 +108,12 @@ fn semantic_discussions(input: &ResearchInput) -> Value {
 }
 
 pub(crate) fn input_identity(input: &ResearchInput) -> String {
+    input_identity_for(input, INPUT_CONTRACT, METHOD_VERSION)
+}
+
+/// A historical frozen request is verified under its original contract/method;
+/// this does not admit historical tasks for new dispatch.
+pub(super) fn input_identity_for(input: &ResearchInput, contract: &str, method: &str) -> String {
     // Definitions affect assignment. Re-observation and unselected source tails
     // retain audit provenance, but cannot invalidate a semantically equal window.
     let mut comparison_scope: Vec<_> = input.coverage["scopeWorkRefs"]
@@ -119,12 +125,12 @@ pub(crate) fn input_identity(input: &ResearchInput) -> String {
     comparison_scope.sort();
     comparison_scope.dedup();
     creator_discovery::hash(&json!({
-        "contract":INPUT_CONTRACT,"kind":input.coverage["kind"].as_str().unwrap_or("source"),
+        "contract":contract,"kind":input.coverage["kind"].as_str().unwrap_or("source"),
         "domain":domain_identity(&input.domain),"workRef":input.work.work_ref,
         "fragments":input.fragments.iter().map(|f|semantic_fragment(input,f)).collect::<Vec<_>>(),
         "commentStudy":semantic_comment_study(input),"roles":role_identity(input),
         "selectedDiscussions":semantic_discussions(input),
         "comparisonScope":if input.coverage["kind"] == "comparison" { json!(comparison_scope) } else { Value::Null },
-        "method":METHOD_VERSION,"config":input.coverage["configRef"],
+        "method":method,"config":input.coverage["configRef"],
     }).to_string())
 }

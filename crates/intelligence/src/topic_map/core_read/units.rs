@@ -8,7 +8,7 @@ pub(super) async fn attach_rules(
     topics: &mut [TopicMapTopic],
     unavailable: &HashSet<Uuid>,
 ) -> Result<(), TopicMapError> {
-    let rows = sqlx::query("SELECT definition_ref,inclusion_criteria,exclusion_criteria FROM linggan_topic_map_concept_rule WHERE ($1::uuid IS NULL OR domain_ref=$1)")
+    let rows = sqlx::query("SELECT c.definition_ref,c.inclusion_criteria,c.exclusion_criteria,c.method_version,r.method_version AS induction_method FROM linggan_topic_map_concept_rule c LEFT JOIN linggan_topic_map_research_request q ON q.invocation_ref=c.invocation_ref LEFT JOIN linggan_topic_map_research_run r USING(run_ref) WHERE ($1::uuid IS NULL OR c.domain_ref=$1)")
         .bind(q.domain_ref).fetch_all(db.pool()).await?;
     for topic in topics {
         let rule = rows
@@ -21,6 +21,25 @@ pub(super) async fn attach_rules(
             )
         });
         apply_rule(topic, criteria, unavailable.contains(&topic.definition_ref));
+        if let Some(rule) = rule {
+            topic.core["inductionMethod"] =
+                json!(rule.get::<Option<String>, _>("induction_method"));
+            topic.core["conceptRole"] = json!(if rule.get::<String, _>("method_version")
+                == "topic-map.core.parent.v1"
+            {
+                "parent"
+            } else {
+                "topic"
+            });
+            topic.core["qualityState"] = json!(if topic.lifecycle_state == "candidate"
+                && rule.get::<Option<String>, _>("induction_method").as_deref()
+                    != Some("topic-map.research.v3")
+            {
+                "legacy_candidate"
+            } else {
+                "current"
+            });
+        }
     }
     Ok(())
 }
@@ -78,6 +97,7 @@ pub(super) fn definition_dependencies(unit: &Value) -> impl Iterator<Item = Uuid
                 .flatten()
                 .map(|r| &r["definitionRef"]),
         )
+        .chain(unit.pointer("/hierarchy/parentDefinitionRef"))
         .filter_map(|v| v.as_str().and_then(|s| s.parse().ok()))
 }
 
@@ -114,6 +134,15 @@ pub(super) fn current_unit(
             .flatten()
             .all(|r| exact_topic(r, topics).is_some())
     });
+    let hierarchy_current = unit["hierarchy"].is_null()
+        || exact_topic(
+            &json!({
+                "topicRef":unit["hierarchy"]["parentTopicRef"],
+                "definitionRef":unit["hierarchy"]["parentDefinitionRef"]
+            }),
+            topics,
+        )
+        .is_some();
     let compared_current = unit["comparedDefinitionRefs"]
         .as_array()
         .into_iter()
@@ -124,7 +153,7 @@ pub(super) fn current_unit(
                     && t.lifecycle_state != "superseded"
             })
         });
-    if withdrawn || !references_current || !compared_current {
+    if withdrawn || !references_current || !compared_current || !hierarchy_current {
         unit["status"] = json!("uncertain");
         unit["reason"] = json!(if withdrawn {
             "比较所依赖的主题定义来源当前不可用，保留原讨论，归属等待重新判断。"
@@ -134,7 +163,9 @@ pub(super) fn current_unit(
         unit["assignments"] = json!([]);
         unit["relations"] = json!([]);
         // Recall diagnostics may contain the former candidate's label or explanation.
-        unit.as_object_mut().unwrap().remove("recall");
+        for key in ["recall", "hierarchy", "proposedTopic"] {
+            unit.as_object_mut().unwrap().remove(key);
+        }
     }
     unit
 }

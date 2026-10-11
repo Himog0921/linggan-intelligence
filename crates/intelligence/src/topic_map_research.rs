@@ -10,6 +10,8 @@ use uuid::Uuid;
 #[path = "topic_map_research/identity.rs"]
 mod identity;
 pub(crate) use identity::semantic_source_identity;
+#[path = "topic_map_research/admission.rs"]
+mod admission;
 #[path = "topic_map_research/queue.rs"]
 mod queue;
 #[path = "topic_map_research/restoration.rs"]
@@ -28,8 +30,8 @@ pub(crate) use restoration::{
 };
 pub(crate) use source::{load_inputs, load_inputs_for_works, manifest_source_work_refs};
 pub(crate) use windows::{
-    input_identity, reference_manifest, research_windows, selected_comment_study,
-    with_comparison_context,
+    input_identity, is_research_evidence, reference_manifest, research_windows,
+    selected_comment_study, with_comparison_context,
 };
 #[cfg(test)]
 #[path = "topic_map_research/tests.rs"]
@@ -141,7 +143,7 @@ pub(crate) struct ResearchInput {
     pub coverage: Value,
 }
 
-const INPUT_CONTRACT: &str = "topic-map.source-windows.v1";
+const INPUT_CONTRACT: &str = "topic-map.source-windows.v2";
 const PARENT_CONTEXT_FIELD: &str = "parent_comment_context";
 const RESEARCH_WINDOW_CHARS: usize = 3000;
 pub async fn apply_research_command(
@@ -314,7 +316,13 @@ macro_rules! task_progress_query {
     'unknownDispatchCount',count(*) FILTER(WHERE state='unknown_dispatch'),
     'staleCount',count(*) FILTER(WHERE state='stale'),
     'stoppedCount',count(*) FILTER(WHERE state='stopped'),
-    'extractedWindowCount',count(*) FILTER(WHERE distilled_json IS NOT NULL),
+    'extractedWindowCount',count(DISTINCT (work_public_ref,input_hash)) FILTER(WHERE distilled_json IS NOT NULL AND phase<>'compare' AND NOT (recall_manifest ? 'backfill')),
+    'initialWindowCount',count(DISTINCT (work_public_ref,input_hash)) FILTER(WHERE phase<>'compare' AND NOT (recall_manifest ? 'backfill')),
+    'completedInitialWindowCount',count(DISTINCT (work_public_ref,input_hash)) FILTER(WHERE state IN ('succeeded','no_signal','insufficient') AND phase<>'compare' AND NOT (recall_manifest ? 'backfill')),
+    'coveredWorkCount',count(DISTINCT work_public_ref) FILTER(WHERE state IN ('succeeded','no_signal','insufficient') AND phase<>'compare' AND NOT (recall_manifest ? 'backfill')),
+    'initialQueuedCount',count(*) FILTER(WHERE state='queued' AND phase<>'compare' AND NOT (recall_manifest ? 'backfill')),
+    'reassessmentQueuedCount',count(*) FILTER(WHERE state='queued' AND recall_manifest ? 'backfill'),
+    'reassessmentCompletedCount',count(*) FILTER(WHERE state='succeeded' AND recall_manifest ? 'backfill'),
     'phases',jsonb_build_object(
         'extractQueued',count(*) FILTER(WHERE phase='extract' AND state='queued'),
         'resolveQueued',count(*) FILTER(WHERE phase='resolve' AND state='queued'),

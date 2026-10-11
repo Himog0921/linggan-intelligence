@@ -24,7 +24,7 @@ fn source(work: u128, id: u128, field: &str, text: &str) -> Fragment {
 
 fn input(work: u128, fragments: Vec<Fragment>) -> ResearchInput {
     let work_ref = Uuid::from_u128(work);
-    let comments: Vec<_> = fragments.iter().filter(|f|f.field=="comment").map(|comment|json!({
+    let comments: Vec<_> = fragments.iter().filter(|f|f.field=="unresearched_comment").map(|comment|json!({
         "workRef":work_ref,"sourceRef":comment.source_ref,"fragmentId":comment.fragment_id,
         "sourceFragmentId":comment.fragment_id,"role":"eligible_user_comment","contextOnly":false,
         "researchState":"accepted","observationRole":"primary","parentFragmentId":null,
@@ -112,7 +112,15 @@ fn task(window: &ResearchInput, task: u128, units: Vec<Value>) -> TaskEvidence {
 
 fn pair() -> (Vec<ResearchInput>, Vec<TaskEvidence>, Vec<Uuid>) {
     let a = input(1, vec![source(1, 11, "body", "作者第一篇观点与边界")]);
-    let b = input(2, vec![source(2, 22, "comment", "评论者提供具体不同经历")]);
+    let b = input(
+        2,
+        vec![source(
+            2,
+            22,
+            "unresearched_comment",
+            "评论者提供具体不同经历",
+        )],
+    );
     let tasks = vec![
         task(
             &a,
@@ -145,3 +153,6 @@ mod selection_tests;
 mod snapshot_tests;
 #[path = "tests/sources.rs"]
 mod source_tests;
+
+#[path = "tests/context.rs"]
+mod context_tests;

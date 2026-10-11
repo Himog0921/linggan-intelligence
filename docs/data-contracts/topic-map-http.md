@@ -1,7 +1,7 @@
 # Topic Map HTTP 合同
 
 > 状态: 代码事实优先
-> 最后核对: 2026-10-10
+> 最后核对: 2026-10-11
 > 适用范围: TOPIC-MAP-V41-001 既有接口及 TOPIC-MAP-CORE-001 研究内核候选
 > 事实来源: 手册 v1.1、当前 TopicMap DTO、0120 migration、Rust HTTP composition 与定向验证
 > 冲突时以谁为准: 用户最新确认、当前代码和来源资格；本合同不授权运行库迁移/外发
@@ -30,7 +30,7 @@
 
 `summary` 聚合当前领域全部历史批次与任务账本，不受最近批次列表上限影响；`totalRunCount/totalTaskCount` 给完整范围。`runListLimit=30`，`runs[]` 最多按 `created_at/run_ref` 倒序返回最近 30 批，并各自返回冻结的 `methodVersion`，不以当前顶层方法版本替代旧运行身份。界面分别显示全领域总览与最近批次边界。
 
-`summary` 与 `runs[]` 的 `queuedCount/runningCount/succeededCount/noSignalCount/insufficientCount/failedCount/unknownDispatchCount/staleCount/stoppedCount` 从任务当前状态分别聚合；`succeededCount` 仅为已接纳结果，**无信号和材料不足不再混计成功，派发未知也不再混计已知失败**。这是修正后的计数语义，前端及回归同步采用新口径。`extractedWindowCount` 仅统计已有 `distilled_json` 的来源窗口任务，包括后续已处理或已过时的历史草稿；草稿不代表已接纳讨论、当前可用主题或质量通过。账本计数不读取原文，不替代当前来源资格。
+`summary` 与 `runs[]` 的 `queuedCount/runningCount/succeededCount/noSignalCount/insufficientCount/failedCount/unknownDispatchCount/staleCount/stoppedCount` 从任务当前状态分别聚合；`succeededCount` 仅为已接纳结果，**无信号和材料不足不再混计成功，派发未知也不再混计已知失败**。这是修正后的计数语义，前端及回归同步采用新口径。`extractedWindowCount` 仅统计已有 `distilled_json` 的初始非比较窗口，按 `(work_public_ref,input_hash)` 去重，排除复制草稿的定义重评；草稿不代表已接纳讨论、当前可用主题或质量通过。账本计数不读取原文，不替代当前来源资格。
 
 `taskIssues` 仍包含 `failed/unknown_dispatch` 两类，按任务 `updated_at/task_ref` 降序最多 20 项，每项固定 `taskRef/phase/state/reason`。`phase` 为 `extract/resolve/compare`，`reason` 保留数据库原因码或明确的 `null`。界面以 `failedCount+unknownDispatchCount` 说明明细项数与完整问题总数；缺失或未识别原因显示未知，不能暗示自动重试。新业务拒绝保留闭集安全原因码，如 `output_json_invalid/output_schema_invalid/output_contract_mismatch/invalid_discussion_evidence/invalid_resolution_match`；历史 `invalid_output` 明确表示未保留具体规则，不能回填猜测的历史原因。
 
@@ -42,25 +42,31 @@
 
 研究输入是 canonical source refs、不可变来源版本与可重建 fragment；不冻结敏感原文到新账本。所有断言引用允许片段内的 Unicode scalar start/end，区间使用原字段的绝对位置。越界、错误来源角色、外域或失效来源拒绝。采集、分析、结果接纳状态分责，已发 unknown 保留预算且不盲重发。日额度与 run 预算在实际 dispatch 之前原子核验；费用未知不计 0。
 
-发送给模型的 coverage 不重复携带服务器使用的 `currentSources`、`sourceHashes`、`fragmentOrigins` 审计映射；这些字段在完整冻结 manifest 和来源恢复中保留。实际原文、引用 ID/绝对坐标、片段所属作品、讨论及选择范围完整传递。输入上限仍检查完整 system 与实际序列化 prompt，run/day 预算还计入输出预留；正文字符数达标不等于请求 token 达标，超限保持明确失败且不发送。
+发送给模型的 coverage 不重复携带服务器使用的 `currentSources`、`sourceHashes`、`fragmentOrigins` 等审计映射和窗口身份；片段物理来源版本也不重复发送。这些字段在完整冻结 manifest 和来源恢复中保留。实际原文、引用 ID/绝对坐标、片段所属作品、父文链接、讨论及选择范围完整传递。提炼与归属 prompt 使用实际配置的 `outputTokenLimit` 约束简洁结构化输出，不自行提高上限。输入上限仍检查完整 system 与实际序列化 prompt，run/day 预算还计入输出预留；正文字符数达标不等于请求 token 达标，超限保持明确失败且不发送。
 
 ### 主题内核与证据归属
 
-候选采用 `topic-map.research.v2` 提炼及 `topic-map.resolve.v1` 归属两个严格结构化合同，内核方法为 `topic-map.core.v1`。第一阶段从来源窗口提炼独立讨论，持久化草稿和进度；第二阶段逐条比较精确主题定义和原文。`matched/new/uncertain/out_of_scope` 分开，允许多主题归属。名称、词频和向量相似度都不是成员资格。新主题包含定义、纳入/排除条件及与召回候选的关系；完整边界等价时复用身份，同名但不同边界保留独立身份。机器只产生候选，正式定义及既有合并/拆分仍需明确操作。
+候选采用 `topic-map.research.v3` 提炼及 `topic-map.resolve.v2` 归属两个严格结构化合同，内核方法为 `topic-map.core.v1`。第一阶段从来源窗口提炼独立讨论，持久化草稿和进度；第二阶段逐条比较精确主题定义和原文。`matched/new/uncertain/out_of_scope` 分开，允许多主题归属。名称、词频和向量相似度都不是成员资格。新主题包含定义、纳入/排除条件及与召回候选的关系；完整边界等价时复用身份，同名但不同边界保留独立身份。机器只产生候选，正式定义及既有合并/拆分仍需明确操作。
 
 `topics[].core` 补充定义来源、纳入/排除条件、当前范围的讨论量、支持/反例/背景计数与有依据的主题关系。`sourceState=source_unavailable` 时隐藏依赖受限来源的机器定义与条件；保留最小身份及受限状态。计数在 `windowDays/path/overlay/platform` 等最终作品范围确定后重算；讨论数、去重作品数和需求人数不同，不能互相替代。父节点继续采用作品并集去重，不把树导航关系冒充概念关系。
 
 `works[].research.core.units[]` 给出稳定讨论身份、陈述、来源角色、证据角色、接受的 resolution、精确定义版本、归属依据、关系及原文引用。`comparedDefinitionRefs` 保留参与决策的定义依赖，未归属的近邻也不能在撤回后继续泄漏。`author/commenter/quoted/unknown` 与 `support/challenge/context` 是两个独立维度。父评论只能作为 `parent_comment_context`，不单独增加人数或当成子评论自己的观点。
 
+新概念必须给 `domainFit=in_scope/domainReason/abstractionReason`；具体询问、年份、年级一般属于样例属性，材料支持不同问题边界时才能作为限定。`parent.kind=root/existing/proposed` 给包含依据；existing 必须引用当前候选精确定义且关系为 narrower，proposed 给完整上位概念边界。仅本次新建且未绑定的新子候选可自动挂父；既有节点、正式定义和旧绑定不自动改写。父规则首次 INSERT 冻结 `topic-map.core.parent.v1`，避免触发独立成员维护。`hierarchy` 保存实际父身份及精确定义，定义变更/撤回使相关决定未确定，并隐藏提议与父包含说明。
+
+`topics[].core` 新增 `inductionMethod/conceptRole/qualityState`。旧机器候选明确 `legacy_candidate`，保留可读历史入口；旧现象边界不强制成为新稳定概念的归属方向。新模型仍须比较其差异，不自行删除或正式归并旧身份。讨论详情展示领域相关性、主题抽象与父级包含依据；不输出隐藏推理链。
+
+`initialWindowCount/completedInitialWindowCount` 按方法/配置参与的输入身份去重；重新分组或旧方法可能重叠，不是全历史原文字数覆盖率。`coveredWorkCount` 是至少处理过一个初始窗的唯一作品数，不是全文覆盖。`initialQueuedCount` 与 `reassessmentQueuedCount/reassessmentCompletedCount` 分开，原任务账本完整保留。作品阅读器的来源范围并集继续提供实际字符覆盖；新 summary 不据此生成伪百分比。
+
 ### 来源窗口、覆盖与复用
 
-正文、合格 OCR/ASR 与全部已取得且合格的评论进入主题专用读取，未取得部分仍未知。新一轮评论采集的 30 个身份上限不限制既有评论研究或保存引用重开。来源按至多 1200 个 Unicode scalar 的片段、至多 3000 个输入字符的窗口处理；每个窗口只含一个主来源及必要父评论上下文。输入还须通过实际模型配置的 token 估算上限和独立字节安全上限，超限明确失败，不以截掉尾部伪装完成。
+正文、合格 OCR/ASR 与全部已取得且合格的评论进入主题专用读取，未取得部分仍未知。新一轮评论采集的 30 个身份上限不限制既有评论研究或保存引用重开。来源按至多 1200 个 Unicode scalar 的片段、至多 3000 个输入字符的窗口处理；标题与正文/媒体按同作分组；短评论每组最多 6 条，主证据至多 1500 字符，必要作者上下文至多 600 字符，父评论仍保留完整分页。不同评论原声及精确引用独立保存。`work_context:*` 与 `parent_comment_context` 只供理解，不单独计证据或作者讨论；引用父文必须属于同一讨论已引用的主评论。输入还须通过实际模型配置的 token 估算上限和独立字节安全上限，超限明确失败，不以截掉尾部伪装完成。
 
 `coverage` 记录当前来源分母、实际片段和窗口范围、已覆盖字符及限制；重叠区间去重；不同配置或同文重新观察不会增加讨论、覆盖字符或完成窗口。窗口去重包含父评论上下文范围，不因重复子评论而把未处理的父文分页算作完成。每个窗口的文本范围参与语义身份，物理 observation/job/derivative 仍冻结在审计 manifest。同一作品字段、同一评论逻辑身份或同一媒体资产位置取得相同文本，不因观察时间或处理版本变化自动重跑。重绑定必须重新核验资格、逻辑归属、绝对范围及文本 hash，不能跨作品、评论或媒体位置借用相似文本。原文、域/方法/配置、角色或实际 Signal 语义改变才构成相关输入变化。
 
 同一个语义来源窗口只投影最新已接纳的研究版本，包括已接纳的部分结果。换模型后对同一段话的不同表述不会和旧版本一起增加讨论量；新版本仅完成一部分时如实显示部分，不借旧版本填成完成。旧结果与已保存条目仍保留各自的不可变历史引用。
 
-主题定义变化与原文提炼分责：不因无关主题新增使全部正文重新提炼。定义事件对已接受讨论做有界召回，优先重新检查旧定义的实际依赖，并复用持久化讨论。每次记录 240 个讨论、12 个来源窗口的扫描上限及 partial 状态；后续归属仍经过同样的来源、模型、预算和显式研究授权守门。历史判断保持原 definitionRef，不转填新定义。自动关闭后，过去已完成的手动 run 不获得持续重评权限；新的显式 Start 冻结至多 10 篇作品和当时精确定义集合，最多授权 12 个原 run，继续消耗原预算并复用已有提炼。后续新定义不继承这份授权。原 run 的获准重评及比较尚未排空时，不提前标记完成。
+主题定义变化与原文提炼分责：不因无关主题新增使全部正文重新提炼。定义事件对已接受讨论做有界召回，优先重新检查旧定义的实际依赖，并复用持久化讨论。每次记录 240 个讨论、12 个来源窗口的扫描上限及 partial 状态；每 tick 至多扫描 6 个定义；同来源重评至多合并 6 个定义和 24 个讨论，每领域至多 2 个可执行维护任务。首次材料与维护按 3:1 分配派发机会；有首次队列时，新主题召回积累 6 事件或等待最长 15 分钟，首次队列排空后立即维护；定义修订和明确授权重评可立即进入。后续归属仍经过同样的来源、模型、预算和显式研究授权守门。历史判断保持原 definitionRef，不转填新定义。自动关闭后，过去已完成的手动 run 不获得持续重评权限；新的显式 Start 冻结至多 10 篇作品和当时精确定义集合，最多授权 12 个原 run，继续消耗原预算并复用已有提炼。后续新定义不继承这份授权。原 run 的获准重评及比较尚未排空时，不提前标记完成。
 
 ### 部分结果、比较与保存
 

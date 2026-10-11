@@ -826,7 +826,7 @@ async fn unsent_recovery_respects_one_attempt_and_platform_own_identity() {
 
 #[tokio::test]
 #[ignore = "disposable PostgreSQL and synthetic child, no provider"]
-async fn title_and_body_windows_finish_without_assuming_task_order() {
+async fn grouped_title_and_body_finish_without_replaying_either_source() {
     let (db, config, adapter) = setup("topic_map_research_windows").await;
     let w = work_with_title(
         &db,
@@ -847,7 +847,7 @@ async fn title_and_body_windows_finish_without_assuming_task_order() {
             .fetch_one(db.pool())
             .await
             .unwrap(),
-        2
+        1
     );
     finish_pending(&db, &adapter).await;
     assert_eq!(
@@ -855,21 +855,21 @@ async fn title_and_body_windows_finish_without_assuming_task_order() {
             .fetch_one(db.pool())
             .await
             .unwrap(),
-        2
+        1
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_topic_map_discussion_unit")
             .fetch_one(db.pool())
             .await
             .unwrap(),
-        2
+        1
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_topic_map_research_request")
             .fetch_one(db.pool())
             .await
             .unwrap(),
-        4
+        2
     );
     assert_eq!(
         apply_research_command(&db, &start(vec![w])).await.unwrap()["state"],

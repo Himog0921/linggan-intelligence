@@ -7,7 +7,7 @@ const blank={replaceChildren(){},addEventListener(){},querySelector(){return nul
 const ctx={document:{getElementById(){return blank},createElement(){return {...blank}},activeElement:null},sessionStorage:{getItem(){return null}},location:{search:'',href:'http://127.0.0.1:3109/topics',origin:'http://127.0.0.1:3109'},URL,URLSearchParams,crypto:require('node:crypto').webcrypto,FormData:class{constructor(f){this.f=f}get(k){return this.f.values?.[k]}getAll(k){return this.f.arrays?.[k]||[]}},fetch:null,console};
 const tail=/  load\(\);\n\}\)\(\);\s*$/;let src=fs.readFileSync(sourcePath,'utf8');assert(tail.test(src),'known topic-map initialization boundary');
 const initializationSource=src.replace(tail,'globalThis.initialState=state;})();');
-src=src.replace(tail,`globalThis.audit={dispatchClick,readSample,readWork,readerDialog,replaceSamplesDialog,submitDialog,topicBoundary,discussionUnits,discussionGroups,discussionsView,performancePair,curated,researchCoverage,researchPhases,researchDialog,citationText,citationSpans,bodyCitations,readerDiscussions,allCitations,sharesDiscussion,anglesFrom,opportunitiesFrom,anglesView,productContent,sceneList,commentFragmentCount,comparisonScopeNote,set(s,d,stack=[]){snapshot=s;dialogState=d;dialogStack=stack;state.domainRef='domain';state.topicRef='topic-A';},get(){return dialogState;}};drawDialog=()=>{};render=()=>{};load=async()=>{};openDialog=(type,data)=>{if(dialogState)dialogStack.push(dialogState);dialogState={type,...data};};})();`);vm.runInNewContext(src,ctx);
+src=src.replace(tail,`globalThis.audit={dispatchClick,readSample,readWork,readerDialog,replaceSamplesDialog,submitDialog,topicBoundary,discussionUnits,discussionGroups,conceptDecisionDetails,discussionsView,performancePair,curated,researchCoverage,researchPhases,researchCoverageCounts,tree,researchDialog,citationText,citationSpans,bodyCitations,readerDiscussions,allCitations,sharesDiscussion,anglesFrom,opportunitiesFrom,anglesView,productContent,sceneList,commentFragmentCount,comparisonScopeNote,set(s,d,stack=[]){snapshot=s;dialogState=d;dialogStack=stack;state.domainRef='domain';state.topicRef='topic-A';},get(){return dialogState;}};drawDialog=()=>{};render=()=>{};load=async()=>{};openDialog=(type,data)=>{if(dialogState)dialogStack.push(dialogState);dialogState={type,...data};};})();`);vm.runInNewContext(src,ctx);
 (async()=>{
  const restoredScope={domainRef:'domain-A',topicRef:'OLD_TOPIC',platform:'xhs',windowDays:'7',path:'family',overlay:'obstruction_recurrence',query:'OLD_QUERY',compare:['OLD_TOPIC']};
  const initialize=search=>{
@@ -150,7 +150,7 @@ src=src.replace(tail,`globalThis.audit={dispatchClick,readSample,readWork,reader
  const summary={totalRunCount:94,totalTaskCount:9400,queuedCount:9207,runningCount:1,succeededCount:0,noSignalCount:4,insufficientCount:29,failedCount:42,unknownDispatchCount:1,extractedWindowCount:18,staleCount:0,stoppedCount:0,phases:{extractQueued:9189,extracting:1,resolveQueued:18,resolving:0,compareQueued:0,comparing:0}};
  ctx.audit.set(snap,{type:'research',progress:{policy:{status:'paused'},summary,runListLimit:30,runs:[{...progressRun,state:'running',methodVersion:'topic-map.research.v1.1',lastReason:'method_superseded'}]}});
  const fullProgress=ctx.audit.researchDialog();
- for(const text of ['领域研究已暂停','恢复领域研究','全领域任务账本','累计 94 个批次 · 9,400 个任务','显示最近 30 批次中的 1 批 · 全领域共 94 批','无研究信号 4 · 材料不足 29 · 失败 42 · 派发未知 1','已保存提炼结果（累计） 18','保留进度 · 等待领域恢复','方法版本：topic-map.research.v1.1','历史账本不代表当前可用主题或研究质量'])assert(fullProgress.includes(text),text);
+ for(const text of ['领域研究已暂停','恢复领域研究','全领域任务账本','累计 94 个批次 · 9,400 个任务','显示最近 30 批次中的 1 批 · 全领域共 94 批','无研究信号 4 · 材料不足 29 · 失败 42 · 派发未知 1','初次材料已提炼窗口 18','保留进度 · 等待领域恢复','方法版本：topic-map.research.v1.1','历史账本不代表当前可用主题或研究质量'])assert(fullProgress.includes(text),text);
  assert(!fullProgress.includes('正在处理'),'domain pause does not present an old run state as active scheduling');
  assert(fullProgress.includes('data-action="research-domain-resume"'));
  for(const [reason,text] of [['output_json_invalid','不是有效 JSON'],['output_schema_invalid','严格研究格式'],['output_contract_mismatch','版本不匹配'],['response_too_large','受控响应大小限制'],['invalid_discussion_evidence','原文位置不符合规则'],['invalid_resolution_match','本次候选定义']])assert(renderProgress({...progressRun,taskIssues:[{phase:'extract',state:'failed',reason}]}).includes(text),reason);
@@ -265,4 +265,19 @@ src=src.replace(tail,`globalThis.audit={dispatchClick,readSample,readWork,reader
    assert.deepEqual(savedPayload.evidenceWorkRefs,['core-A','core-B'],'the original selected participant refs include the physical primary');
  }
  console.log('PASS: shared comparisons deduplicate, retain source ownership/scope, and save from either work with original zero indexes');
+ const progressCounts=ctx.audit.researchCoverageCounts({initialQueuedCount:12,completedInitialWindowCount:3,coveredWorkCount:2,reassessmentQueuedCount:4,reassessmentCompletedCount:90});
+ assert(progressCounts.includes('已处理 3 个独立窗口'));assert(progressCounts.includes('涉及 2 篇独立作品'));assert(progressCounts.includes('已完成 90 次'));assert(!progressCounts.includes('%'));
+ assert(ctx.audit.researchCoverageCounts({}).includes('—'),'missing coverage stays unknown');
+ ctx.audit.set({...coreSnapshot,scope:{totalWorkCount:3},topics:[{...definition,lifecycleState:'candidate',core:{...definition.core,qualityState:'legacy_candidate'}},{...other,displayName:'稳定支持方向',lifecycleState:'candidate',core:{conceptRole:'parent',qualityState:'current'}}]},null);
+ const tree=ctx.audit.tree();assert(tree.includes('旧方法候选 · 1'));assert(tree.includes('稳定支持方向'));assert(tree.includes('尚待稳定概念归纳'));assert(tree.includes('全部方向可选择'));
+ console.log('PASS: first coverage stays separate from reassessment; legacy candidates remain reachable with honest quality labels');
 })().catch(e=>{console.error(e);process.exitCode=1});
+
+const concept={status:'new',proposedTopic:{domainReason:'<script>scope</script>',abstractionReason:'<img src=x>',parent:{kind:'proposed'}},hierarchy:{parentTopicRef:'parent',parentDefinitionRef:'parent-v1',reason:'<script>contains</script>'}};
+const conceptSource={topics:[{topicRef:'parent',definitionRef:'parent-v1',displayName:'任务执行',core:{sourceState:'available'}}]};
+const conceptHtml=ctx.audit.conceptDecisionDetails(concept,conceptSource);
+assert(conceptHtml.includes('领域相关性')&&conceptHtml.includes('主题抽象依据')&&conceptHtml.includes('任务执行'));
+assert(!conceptHtml.includes('<script>')&&!conceptHtml.includes('<img src=x>'));
+assert(!ctx.audit.conceptDecisionDetails(concept,{topics:[{...conceptSource.topics[0],definitionRef:'parent-v2'}]}).includes('归入上位主题'));
+assert.equal(ctx.audit.conceptDecisionDetails({...concept,status:'uncertain'},conceptSource),'');
+console.log('PASS: concept abstraction, domain and exact parent reasons are escaped and only shown for qualified decisions');

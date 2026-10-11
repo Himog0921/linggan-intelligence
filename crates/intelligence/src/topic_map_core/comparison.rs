@@ -50,6 +50,7 @@ struct TaskEvidence {
 struct Span {
     work: Uuid,
     origin: String,
+    context_field: Option<String>,
     start: usize,
     end: usize,
 }
@@ -133,19 +134,19 @@ fn build_comparison(
     } = sources;
     let evidence_chars: usize = fragments
         .iter()
-        .filter(|f| f.field != "parent_comment_context")
+        .filter(|f| research::is_research_evidence(f))
         .map(|f| f.text.chars().count())
         .sum();
     let context_chars: usize = fragments
         .iter()
-        .filter(|f| f.field == "parent_comment_context")
+        .filter(|f| !research::is_research_evidence(f))
         .map(|f| f.text.chars().count())
         .sum();
     let source_chars: usize = inputs
         .iter()
         .filter(|i| available.contains(&i.work.work_ref))
         .flat_map(|i| &i.fragments)
-        .filter(|f| f.field != "parent_comment_context")
+        .filter(|f| research::is_research_evidence(f))
         .map(|f| f.text.chars().count())
         .sum();
     let mut input = full.clone();
@@ -160,12 +161,13 @@ fn build_comparison(
         "perWork":requested.iter().map(|work|json!({"workRef":work,
             "availableDiscussionCount":candidates.iter().filter(|c|c.work==*work).count(),
             "selectedDiscussionCount":selected.iter().filter(|c|c.work==*work).count(),
-            "selectedChars":fragments.iter().filter(|f|owners[&f.fragment_id]==json!(work) && f.field!="parent_comment_context").map(|f|f.text.chars().count()).sum::<usize>(),
+            "selectedChars":fragments.iter().filter(|f|owners[&f.fragment_id]==json!(work) && research::is_research_evidence(f)).map(|f|f.text.chars().count()).sum::<usize>(),
             "parentContextChars":fragments.iter().filter(|f|owners[&f.fragment_id]==json!(work) && f.field=="parent_comment_context").map(|f|f.text.chars().count()).sum::<usize>()
         })).collect::<Vec<_>>(),"countsArePeople":false,
         "boundary":"只比较所列作品的代表讨论与引用；未选入材料、缺少的作者或评论立场及因果关系仍未知。"});
     input.work.fragments = fragments
         .iter()
+        .filter(|f| research::is_research_evidence(f))
         .filter(|f| {
             primary
                 .work
@@ -206,14 +208,20 @@ fn comparison_fragments(
         if text.chars().count() != span.end - span.start {
             return Err("comparison_source_range_invalid");
         }
-        let id = format!("{}.chars.{}.{}", span.origin, span.start, span.end);
+        let field = span.context_field.as_deref().unwrap_or(&source.field);
+        let marker = if field.starts_with("work_context:") {
+            "context.chars"
+        } else {
+            "chars"
+        };
+        let id = format!("{}.{marker}.{}.{}", span.origin, span.start, span.end);
         origins.insert(id.clone(), json!(span.origin));
         owners.insert(id.clone(), json!(span.work));
         fragments.push(Fragment {
             fragment_id: id,
             source_ref: source.source_ref,
             source_version: source.source_version.clone(),
-            field: source.field.clone(),
+            field: field.into(),
             start: span.start,
             end: span.end,
             text,
@@ -242,6 +250,10 @@ fn selected_discussions(
                     .find(|f| {
                         sources.origins[&f.fragment_id] == span.origin
                             && sources.owners[&f.fragment_id] == json!(span.work)
+                            && match &span.context_field {
+                                Some(field) => f.field == *field,
+                                None => research::is_research_evidence(f),
+                            }
                             && f.start <= span.start
                             && f.end >= span.end
                     })
@@ -254,6 +266,7 @@ fn selected_discussions(
             "statementTruncated":candidate.unit["statement"].as_str().is_some_and(|s|s.chars().count()>300),
             "speakerRole":candidate.unit["speakerRole"],"evidenceRole":candidate.unit["evidenceRole"],
             "comparedDefinitionRefs":candidate.unit["comparedDefinitionRefs"],
+            "hierarchy":candidate.unit["hierarchy"].as_object().map(|h|json!({"parentTopicRef":h["parentTopicRef"],"parentDefinitionRef":h["parentDefinitionRef"]})),
             "reason":brief(&candidate.unit["reason"],160),
             "status":candidate.unit["status"],"assignments":candidate.unit["assignments"].as_array().into_iter().flatten().map(|a|
                 json!({"topicRef":a["topicRef"],"definitionRef":a["definitionRef"],"label":brief(&a["label"],120),"reason":brief(&a["reason"],160)})).collect::<Vec<_>>(),
