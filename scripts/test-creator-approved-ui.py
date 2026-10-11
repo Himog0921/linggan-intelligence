@@ -117,6 +117,14 @@ async def run(output: Path):
             assert abs(d['top']-max(0,d['shell']))<=1 and d['body']>=55 and d['bottom']<=height+1,d
             await page.keyboard.press('Escape');proof(f'geometry_{width}x{height}')
         await fresh()
+        # Pending search must finish before a new draft can be closed by its timer.
+        for apply in [False,True]:
+            await fresh();await page.locator('#creator-query').fill('待补筛选的搜索');await page.locator('#filter-open').click();await page.locator('#filter-form [name=minLikes]').fill('456');await page.wait_for_timeout(350)
+            assert await page.locator('#filter-dialog').is_visible();assert await page.locator('#filter-form [name=minLikes]').input_value()=='456'
+            await page.locator('#filter-form [type=submit]' if apply else '#filter-dialog [data-close]').first.click();await loaded();q=parse_qs(urlsplit(await page.evaluate('__mockURL')).query)
+            assert q['query']==['待补筛选的搜索'];assert (q.get('minLikes')==['456']) if apply else ('minLikes' not in q)
+            proof('pending_search_keeps_filter_'+('apply' if apply else 'cancel'))
+        await fresh()
         await page.locator('#filter-open').click();await page.locator('#filter-form [name=focus]').select_option('vertical_tendency');n=await page.evaluate('__requests.length');await page.locator('#filter-dialog [data-close]').first.click();assert await page.evaluate('__requests.length')==n;assert 'focus=' not in await page.evaluate('__mockURL');proof('draft_cancel_no_query')
         await page.locator('#filter-open').click();await page.locator('#filter-form [name=traits]').nth(0).check();await page.locator('#filter-form [name=traits]').nth(1).check();await page.locator('#filter-form [name=focus]').select_option('vertical_tendency');await page.locator('#filter-form [type=submit]').click();await loaded();url=await page.evaluate('__mockURL');assert 'traits=personal_experience%2Cprofessional_output' in url and 'focus=vertical_tendency' in url;proof('draft_apply_group_or_intersection_params')
         await page.locator('#active-conditions [data-remove=traits]').first.click();await loaded();url=await page.evaluate('__mockURL');assert 'personal_experience' not in url and 'professional_output' in url;proof('remove_individual_condition')
