@@ -77,6 +77,7 @@ async fn canonical_identity_uses_boundaries_and_preserves_low_frequency_countere
         2,
         "same name with a different boundary creates a separate identity"
     );
+    assert!(topics.iter().all(|t| t.core["qualityState"] == "current"), "compact-method concepts must not be mislabeled as legacy candidates");
     assert_eq!(topics[0].display_name, topics[1].display_name);
     assert_ne!(topics[0].definition_text, topics[1].definition_text);
     let start_topic = topics
@@ -504,7 +505,7 @@ async fn a_stale_parent_version_cannot_accept_a_new_child() {
         .unwrap();
     finish_pending(&db, &adapter).await;
     let run: Uuid = receipt["runRef"].as_str().unwrap().parse().unwrap();
-    assert_eq!(sqlx::query_scalar::<_, String>("SELECT last_reason FROM linggan_topic_map_research_task WHERE run_ref=$1 ORDER BY created_at DESC LIMIT 1").bind(run).fetch_one(db.pool()).await.unwrap(), "invalid_topic_parent");
+    assert_eq!(sqlx::query_scalar::<_, String>("SELECT last_reason FROM linggan_topic_map_research_task WHERE run_ref=$1 ORDER BY created_at DESC LIMIT 1").bind(run).fetch_one(db.pool()).await.unwrap(), "topic_parent_version_mismatch");
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_topic_map_concept_rule")
             .fetch_one(db.pool())

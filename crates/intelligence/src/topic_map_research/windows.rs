@@ -228,9 +228,9 @@ fn comment_groups(fragments: Vec<Fragment>, max_chars: usize) -> Vec<Vec<Fragmen
     let mut size = 0;
     for fragment in fragments {
         let next = fragment.text.chars().count();
-        // Six independent voices keep structured output within the current budget;
+        // Three independent voices bound structured output without discarding sources;
         // source count is a request bound, never a minimum admission threshold.
-        if !group.is_empty() && (size + next > max_chars || group.len() == 6) {
+        if !group.is_empty() && (size + next > max_chars || group.len() == 3) {
             groups.push(std::mem::take(&mut group));
             size = 0;
         }

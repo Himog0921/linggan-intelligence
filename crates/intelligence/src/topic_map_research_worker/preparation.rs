@@ -28,12 +28,14 @@ pub(super) async fn prepare(
             .unwrap_or_default(),
     };
     if phase == "extract" || phase == "compare" {
-        prepared.prompt=json!({"contract":analysis::EXTRACT_CONTRACT,"inputTokenLimit":input_limit,"outputTokenLimit":output_limit,
-            "input":{"domain":input.domain,"workRef":input.work.work_ref,"fragments":provider_fragments(input.fragments.iter()),
-                "definitions":[],"commentStudy":provider_comments(&input.comment_study),"roleMetadata":input.role_metadata,
-                "coverage":provider_coverage(&input.coverage),"comparisonWorkRefs":input.context_work_refs,
+        prepared.system.push_str("\n运输约定：上述字段名描述展开后的业务语义。实际只返回 topic-map.extract.compact.v1 的 outputSchema 短键JSON，不返回业务长键；outputFieldNames 给出映射。证据的 f 是 input.fragments 中的 fragmentIndex，s/e 仍为原来源Unicode字符坐标，不得改为窗口内坐标。评论 fragmentIndex 与 parentFragmentIndexes 对应同一冻结编号；父上下文必须和对应主评论共同引用。所有业务字段及低频讨论均保留，短键只减少运输重复。");
+        prepared.prompt=json!({"contract":analysis::COMPACT_EXTRACT_CONTRACT,"inputTokenLimit":input_limit,"outputTokenLimit":output_limit,
+            "input":{"domain":input.domain,"workRef":input.work.work_ref,"fragments":compact_provider_fragments(&input.fragments, input.work.work_ref, &input.coverage),
+                "definitions":[],"commentStudy":compact_provider_comments(&input.comment_study, &input.fragments),"roleMetadata":input.role_metadata,
+                "coverage":compact_provider_coverage(&input.coverage, &input.fragments),"comparisonWorkRefs":input.context_work_refs,
                 "comparisonBoundary":if phase=="compare" {"Only selected cited evidence from the listed works is supplied. Distinguish each work and author/commenter role. Compare only these observations; coverage is partial and is not audience prevalence."} else {"A source window is partial evidence. Other selected works are not supplied here; cross-work claims remain unknown."}},
-            "outputSchema":analysis::output_schema()}).to_string();
+            "outputFieldNames":analysis::compact_field_names(),
+            "outputSchema":analysis::compact_output_schema()}).to_string();
         return Ok(prepared);
     }
     let draft: ResearchOutput = serde_json::from_value(
@@ -116,6 +118,100 @@ fn provider_fragments<'a>(
         "start":f.start,"end":f.end,"text":f.text})
         })
         .collect()
+}
+
+fn compact_provider_fragments(
+    fragments: &[linggan_evidence::creator_discovery::Fragment],
+    primary_work: Uuid,
+    coverage: &Value,
+) -> Vec<Value> {
+    fragments.iter().enumerate().map(|(index, f)| {
+        let owner = coverage["fragmentWorkRefs"].get(&f.fragment_id).cloned()
+            .unwrap_or_else(|| if coverage["kind"] == "comparison" { Value::Null } else { json!(primary_work) });
+        json!({"fragmentIndex":index,"workRef":owner,"field":f.field,"start":f.start,"end":f.end,"text":f.text})
+    }).collect()
+}
+
+fn compact_provider_coverage(
+    coverage: &Value,
+    fragments: &[linggan_evidence::creator_discovery::Fragment],
+) -> Value {
+    fn reindex(
+        value: &Value,
+        fragments: &[linggan_evidence::creator_discovery::Fragment],
+    ) -> Value {
+        match value {
+            Value::Object(fields) => {
+                Value::Object(
+                    fields
+                        .iter()
+                        .map(|(key, child)| {
+                            if key == "fragmentId" {
+                                (
+                                    "fragmentIndex".into(),
+                                    json!(fragments.iter().position(
+                                        |f| child.as_str() == Some(f.fragment_id.as_str())
+                                    )),
+                                )
+                            } else {
+                                (key.clone(), reindex(child, fragments))
+                            }
+                        })
+                        .collect(),
+                )
+            }
+            Value::Array(values) => json!(
+                values
+                    .iter()
+                    .map(|value| reindex(value, fragments))
+                    .collect::<Vec<_>>()
+            ),
+            _ => value.clone(),
+        }
+    }
+    let mut projected = provider_coverage(coverage);
+    if let Some(fields) = projected.as_object_mut() {
+        fields.remove("fragmentWorkRefs");
+    }
+    reindex(&projected, fragments)
+}
+
+fn compact_provider_comments(
+    comments: &Value,
+    fragments: &[linggan_evidence::creator_discovery::Fragment],
+) -> Value {
+    let mut comments = provider_comments(comments);
+    for comment in comments.as_array_mut().into_iter().flatten() {
+        if let Some(fields) = comment.as_object_mut() {
+            if let Some(id) = fields.remove("fragmentId") {
+                fields.insert(
+                    "fragmentIndex".into(),
+                    json!(
+                        fragments
+                            .iter()
+                            .position(|f| Some(f.fragment_id.as_str()) == id.as_str())
+                    ),
+                );
+            }
+            if let Some(ids) = fields.remove("parentFragmentIds") {
+                fields.insert(
+                    "parentFragmentIndexes".into(),
+                    json!(
+                        ids.as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|id| {
+                                fragments
+                                    .iter()
+                                    .position(|f| Some(f.fragment_id.as_str()) == id.as_str())
+                            })
+                            .collect::<Vec<_>>()
+                    ),
+                );
+            }
+        }
+    }
+    comments
 }
 
 fn provider_comments(comments: &Value) -> Value {
@@ -256,4 +352,99 @@ fn include_parent_candidates(prepared: &mut Prepared, catalog: &Value) {
     }
     prepared.candidates = json!(selected);
     prepared.recall["parentSelection"] = json!({"method":"bounded_lexical_parent_candidates","maximumCandidates":8,"similarityIsNotMembership":true});
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use linggan_evidence::creator_discovery::Fragment;
+
+    fn fragment(id: &str, field: &str, start: usize, text: &str) -> Fragment {
+        Fragment {
+            fragment_id: id.into(),
+            source_ref: Uuid::from_u128(1),
+            field: field.into(),
+            source_version: "synthetic.v1".into(),
+            start,
+            end: start + text.chars().count(),
+            text: text.into(),
+        }
+    }
+
+    #[test]
+    fn compact_input_indexes_keep_comment_parent_links_and_absolute_positions() {
+        let fragments = vec![
+            fragment(
+                "synthetic.reply.chars.1200.1220",
+                "unresearched_comment",
+                1200,
+                "😀尾部的新障碍仍需保留",
+            ),
+            fragment(
+                "synthetic.parent.chars.8.20",
+                "parent_comment_context",
+                8,
+                "请说明什么地方卡住",
+            ),
+            fragment(
+                "synthetic.work.context",
+                "work_context:body",
+                5000,
+                "作者实践建议",
+            ),
+        ];
+        let projected = compact_provider_fragments(&fragments, Uuid::from_u128(1), &json!({}));
+        assert_eq!(projected.len(), fragments.len());
+        for (index, source) in fragments.iter().enumerate() {
+            assert_eq!(projected[index]["fragmentIndex"], index);
+            assert_eq!(projected[index]["start"], source.start);
+            assert_eq!(projected[index]["end"], source.end);
+            assert_eq!(projected[index]["text"], source.text);
+            assert_eq!(projected[index]["field"], source.field);
+            assert!(projected[index].get("fragmentId").is_none());
+        }
+        let comments = json!([{"fragmentId":fragments[0].fragment_id,
+            "sourceRef":"private-source","sourceFragmentId":"physical-original",
+            "parentFragmentId":"physical-parent", "parentFragmentIds":[fragments[1].fragment_id],
+            "parentSourceRef":"private-parent-source", "role":"eligible_user_comment", "contextOnly":false}]);
+        let projected = compact_provider_comments(&comments, &fragments);
+        assert_eq!(projected[0]["fragmentIndex"], 0);
+        assert_eq!(projected[0]["parentFragmentIndexes"], json!([1]));
+        assert_eq!(projected[0]["role"], "eligible_user_comment");
+        assert_eq!(projected[0]["contextOnly"], false);
+        assert!(!projected.to_string().contains("private-source"));
+        assert!(!projected.to_string().contains("physical-original"));
+        assert!(!projected.to_string().contains("synthetic.reply"));
+        assert_eq!(comments[0]["fragmentId"], fragments[0].fragment_id);
+    }
+
+    #[test]
+    fn compact_comparison_preserves_each_work_owner_and_selected_citation() {
+        let first = Uuid::from_u128(1);
+        let second = Uuid::from_u128(2);
+        let fragments = vec![
+            fragment("synthetic.work.a", "body", 900, "甲的建议"),
+            fragment("synthetic.work.b", "body", 1400, "乙的不同建议"),
+        ];
+        let coverage = json!({"kind":"comparison","fragmentWorkRefs":{
+            "synthetic.work.a":first,"synthetic.work.b":second},
+            "selectedDiscussions":[{"workRef":second,"evidence":[{"fragmentId":"synthetic.work.b","start":1400,"end":1406}]}]});
+        let projected = compact_provider_fragments(&fragments, first, &coverage);
+        assert_eq!(projected[0]["workRef"], json!(first));
+        assert_eq!(projected[1]["workRef"], json!(second));
+        let projected = compact_provider_coverage(&coverage, &fragments);
+        assert!(projected.get("fragmentWorkRefs").is_none());
+        assert_eq!(
+            projected["selectedDiscussions"][0]["evidence"][0]["fragmentIndex"],
+            1
+        );
+        assert_eq!(
+            projected["selectedDiscussions"][0]["evidence"][0]["start"],
+            1400
+        );
+        assert_eq!(
+            coverage["selectedDiscussions"][0]["evidence"][0]["fragmentId"],
+            "synthetic.work.b"
+        );
+    }
 }

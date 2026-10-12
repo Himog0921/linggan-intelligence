@@ -693,14 +693,101 @@
     const p=run.phases;
     return `<div class="lgi-tm-research-phases"><p><strong>提炼讨论</strong> · 进行中 ${number(p.extracting)} · 待处理 ${number(p.extractQueued)}</p><p><strong>判断归属</strong> · 进行中 ${number(p.resolving)} · 待处理 ${number(p.resolveQueued)}</p><p><strong>比较讨论</strong> · 进行中 ${number(p.comparing)} · 待处理 ${number(p.compareQueued)}</p></div>`;
   }
+  function validationDetails(diagnostic) {
+    if(!diagnostic||typeof diagnostic!=='object')return '';
+    const rules={required_property:'缺少必填字段',unknown_property:'含有合同外字段',type:'字段类型错误',type_or_format:'字段类型或格式错误',enum:'字段值不属于允许范围',min_length:'字段长度低于下限',max_length:'字段长度超过上限',min_items:'条目数量低于下限',max_items:'条目数量超过上限',fragment_index:'引用索引不在本次材料中',contract:'输出合同版本错误',json:'JSON 格式错误',minimum:'数值低于下限'};
+    const rule=typeof diagnostic.rule==='string'&&Object.hasOwn(rules,diagnostic.rule)?rules[diagnostic.rule]:null;
+    const fields=new Set(['contract','outcome','discussions','scenes','journey','responseMatches','angles','productOpportunities','limitations','label','statement','definition','inclusionCriteria','exclusionCriteria','speakerRole','evidenceRole','rationale','topicRef','evidence','fragmentId','start','end','mainStage','involvedStages','overlays','path','status','unanswered','title','answerTask','need','hypothesis','verificationQuestion','alternativeExplanation','decisions','unitId','matches','definitionRef','reason','proposedTopic','relations','relation','domainFit','domainReason','abstractionReason','parent','kind','proposal']);
+    const path=diagnostic.schemaPath;
+    const safePath=typeof path==='string'&&path.length<=300&&(path===''||(/^[A-Za-z][A-Za-z0-9]*(?:\[\d{1,6}\]|\.[A-Za-z][A-Za-z0-9]*)*$/.test(path)&&path.split(/[.\[\]]/).filter(Boolean).every(part=>/^\d{1,6}$/.test(part)||fields.has(part))));
+    const counts=[['candidateCount','召回候选'],['unitCount','本次讨论'],['decisionCount','归属决定']].filter(([key])=>Number.isSafeInteger(diagnostic[key])&&diagnostic[key]>=0&&diagnostic[key]<=64).map(([key,label])=>`${label} ${number(diagnostic[key])}`);
+    if(!rule&&!counts.length)return '';
+    return `<p class="lgi-tm-note">${rule?`格式规则：${esc(rule)}${safePath?` · 字段位置：${esc(path||'根对象')}`:''}`:''}${counts.length?`${rule?' · ':''}${counts.join(' · ')}`:''}</p>`;
+  }
   function researchTaskIssue(issue) {
     const phases={extract:'提炼讨论',resolve:'判断归属',compare:'比较讨论'};
     const phase=Object.hasOwn(phases,issue.phase)?phases[issue.phase]:'阶段未知';
     const status=issue.state==='unknown_dispatch'?'派发结果未知':issue.state==='failed'?'处理失败':'任务状态未知';
     const reason=typeof issue.reason==='string'&&issue.reason?issue.reason:null;
-    const reasons={model_input_limit:'输入超过模型配置上限，请检查输入范围与模型设置。',invalid_output:'模型返回内容未通过研究结果校验，历史记录未保留具体规则。',output_json_invalid:'模型返回内容不是有效 JSON。',output_schema_invalid:'模型返回字段不符合严格研究格式。',output_contract_mismatch:'模型返回的研究合同版本不匹配。',invalid_evidence:'研究引用未通过来源或原文位置校验。',output_validation_failed:'模型返回内容未通过研究接纳规则。',response_too_large:'模型流或最终文本超过受控响应大小限制。',invalid_response:'模型响应流不完整或格式不可用。',output_limit:'模型输出达到配置上限，结果未完整接纳。',output_text_missing:'模型没有返回可接纳的文本结果。',provider_response_rejected:'模型响应未通过受控传输校验。',provider_timeout:'模型请求超时。',provider_network_error:'模型请求发生网络错误。',provider_stream_interrupted:'模型响应流中断。',provider_terminal_missing:'模型响应缺少完整结束回执。',provider_content_filtered:'模型服务对响应执行了内容过滤。',unexpected_content:'模型返回了不允许的工具或非文本内容。',secret_echo_rejected:'模型输出触发了凭据回显保护。',authentication_failed:'模型连接认证失败。',provider_rate_limited:'模型服务限制了请求速率。',provider_unavailable:'模型服务暂时不可用。',provider_request_rejected:'模型服务拒绝了请求参数。',provider_endpoint_not_found:'模型连接地址不可用。',provider_redirect_rejected:'模型请求被不允许的重定向拒绝。',provider_failed:'模型服务未完成请求。',endpoint_rejected:'模型连接地址不符合受控连接要求。',invalid_request:'模型请求不符合传输合同。',invalid_research_phase:'研究任务阶段不符合合同。',invalid_output_structure:'研究输出的结构、状态或条目数量不符合合同。',invalid_unicode_fragment:'引用片段的 Unicode 位置不符合来源合同。',invalid_journey_evidence:'旅程判断的引用不符合来源或阶段规则。',invalid_discussion_evidence:'讨论的角色、引用或原文位置不符合规则。',invalid_response_evidence:'回应判断缺少合格引用或超出范围。',invalid_action_evidence:'角度或机会判断缺少合格引用或边界。',duplicate_angle_task:'模型重复返回同一角度任务。',duplicate_journey_stage:'模型重复返回同一旅程阶段。',invalid_resolution_candidates:'归属候选定义不符合本次检索范围。',duplicate_resolution_candidate:'归属候选重复。',invalid_resolution_structure:'归属输出的结构不符合合同。',invalid_resolution_units:'归属输出与本次讨论身份不匹配。',invalid_resolution_decision:'归属决定的理由或字段不符合规则。',invalid_resolution_match:'归属匹配不属于本次候选定义。',invalid_resolution_relation:'主题关系不符合候选范围或边界。',missing_proposed_topic:'新主题决定没有附带候选定义。',invalid_new_topic_boundary:'新主题的定义、纳入或排除条件不完整。',invalid_resolution_status:'归属状态不符合严格合同。',request_not_started:'请求未开始执行，当前任务已停止尝试。'};
+    const reasons={model_input_limit:'输入超过模型配置上限，请检查输入范围与模型设置。',invalid_output:'模型返回内容未通过研究结果校验，历史记录未保留具体规则。',output_json_invalid:'模型返回内容不是有效 JSON。',output_schema_invalid:'模型返回字段不符合严格研究格式。',output_contract_mismatch:'模型返回的研究合同版本不匹配。',invalid_evidence:'研究引用未通过来源或原文位置校验。',output_validation_failed:'模型返回内容未通过研究接纳规则。',response_too_large:'模型流或最终文本超过受控响应大小限制。',invalid_response:'模型响应流不完整或格式不可用。',output_limit:'模型输出达到配置上限，结果未完整接纳。',output_text_missing:'模型没有返回可接纳的文本结果。',provider_response_rejected:'模型响应未通过受控传输校验。',provider_timeout:'模型请求超时。',provider_network_error:'模型请求发生网络错误。',provider_stream_interrupted:'模型响应流中断。',provider_terminal_missing:'模型响应缺少完整结束回执。',provider_content_filtered:'模型服务对响应执行了内容过滤。',unexpected_content:'模型返回了不允许的工具或非文本内容。',secret_echo_rejected:'模型输出触发了凭据回显保护。',authentication_failed:'模型连接认证失败。',provider_rate_limited:'模型服务限制了请求速率。',provider_unavailable:'模型服务暂时不可用。',provider_request_rejected:'模型服务拒绝了请求参数。',provider_endpoint_not_found:'模型连接地址不可用。',provider_redirect_rejected:'模型请求被不允许的重定向拒绝。',provider_failed:'模型服务未完成请求。',endpoint_rejected:'模型连接地址不符合受控连接要求。',invalid_request:'模型请求不符合传输合同。',invalid_research_phase:'研究任务阶段不符合合同。',invalid_output_structure:'研究输出的结构、状态或条目数量不符合合同。',invalid_unicode_fragment:'引用片段的 Unicode 位置不符合来源合同。',invalid_journey_evidence:'旅程判断的引用不符合来源或阶段规则。',invalid_discussion_evidence:'讨论的角色、引用或原文位置不符合规则。',invalid_response_evidence:'回应判断缺少合格引用或超出范围。',invalid_action_evidence:'角度或机会判断缺少合格引用或边界。',duplicate_angle_task:'模型重复返回同一角度任务。',duplicate_journey_stage:'模型重复返回同一旅程阶段。',invalid_resolution_candidates:'归属候选定义不符合本次检索范围。',duplicate_resolution_candidate:'归属候选重复。',invalid_resolution_structure:'归属输出的结构不符合合同。',invalid_resolution_units:'归属输出与本次讨论身份不匹配。',invalid_resolution_decision:'归属决定的理由或字段不符合规则。',invalid_resolution_match:'归属匹配不属于本次候选定义。',invalid_resolution_relation:'主题关系不符合候选范围或边界。',missing_proposed_topic:'新主题决定没有附带候选定义。',invalid_new_topic_boundary:'新主题未通过边界校验；这是历史笼统原因，未保存具体违反规则。',invalid_resolution_status:'归属状态不符合严格合同。',request_not_started:'请求未开始执行，当前任务已停止尝试。'};
+    Object.assign(reasons,{
+      "resolution_candidates_not_array": "归属候选必须是数组。",
+      "resolution_candidate_count_exceeded": "本次归属候选超过 64 个。",
+      "resolution_candidate_topic_invalid": "候选缺少有效主题身份。",
+      "resolution_candidate_definition_invalid": "候选缺少有效定义版本。",
+      "resolution_contract_mismatch": "归属输出合同版本不匹配。",
+      "resolution_unit_coverage_mismatch": "归属决定未完整覆盖本次讨论。",
+      "resolution_unit_count_exceeded": "归属讨论数量超过合同上限。",
+      "resolution_unit_identity_duplicate": "请求内讨论身份重复。",
+      "resolution_unit_identity_invalid": "请求内讨论身份为空或过长。",
+      "resolution_unit_not_requested": "模型返回了本次未请求的讨论。",
+      "resolution_unit_decision_duplicate": "同一讨论被重复判断。",
+      "resolution_decision_reason_invalid": "归属理由为空或超过 500 字符。",
+      "resolution_match_count_exceeded": "单条讨论的匹配超过 4 项。",
+      "resolution_relation_count_exceeded": "主题关系超过 64 项。",
+      "resolution_match_not_candidate": "匹配主题不在本次候选中。",
+      "resolution_match_version_mismatch": "匹配的定义版本与本次候选不一致。",
+      "resolution_match_duplicate": "匹配主题重复。",
+      "resolution_match_reason_invalid": "匹配理由为空或超过 500 字符。",
+      "resolution_relation_not_candidate": "关系主题不在本次候选中。",
+      "resolution_relation_version_mismatch": "关系的定义版本与本次候选不一致。",
+      "resolution_relation_kind_invalid": "主题关系类型不属于允许的六种关系。",
+      "resolution_relation_reason_invalid": "主题关系理由为空或超过 500 字符。",
+      "resolution_relation_duplicate": "同一候选出现重复关系。",
+      "resolution_match_relation_conflict": "已匹配主题同时被判断为不同或不确定。",
+      "resolution_matched_without_match": "归属状态为已匹配，但没有匹配主题。",
+      "resolution_matched_has_proposal": "已匹配决定不能同时提出新主题。",
+      "resolution_new_has_match": "新主题决定不能同时含有匹配主题。",
+      "resolution_unassigned_has_match": "未确定或领域外决定不能同时匹配主题。",
+      "resolution_unassigned_has_proposal": "未确定或领域外决定不能同时提出新主题。",
+      "resolution_status_unknown": "归属状态不属于严格合同。",
+      "new_topic_candidate_coverage_missing": "新主题未逐一比较全部召回候选。",
+      "new_topic_equivalent_requires_match": "判断为同义主题时，必须明确匹配已有主题。",
+      "new_topic_definition_copies_statement": "新主题定义直接复述了一条具体讨论，缺少可复用边界。",
+      "new_topic_label_invalid": "新主题名称为空或超过 120 字符。",
+      "new_topic_definition_invalid": "新主题定义为空或超过 1,000 字符。",
+      "new_topic_domain_not_in_scope": "新主题没有被明确判断为当前领域内。",
+      "new_topic_domain_reason_invalid": "新主题领域依据为空或超过 500 字符。",
+      "new_topic_abstraction_reason_invalid": "新主题抽象依据为空或超过 500 字符。",
+      "parent_topic_label_invalid": "父主题名称为空或超过 120 字符。",
+      "parent_topic_definition_invalid": "父主题定义为空或超过 1,000 字符。",
+      "parent_topic_domain_not_in_scope": "父主题没有被明确判断为当前领域内。",
+      "parent_topic_domain_reason_invalid": "父主题领域依据为空或超过 500 字符。",
+      "parent_topic_abstraction_reason_invalid": "父主题抽象依据为空或超过 500 字符。",
+      "new_topic_criteria_duplicate": "新主题纳入或排除条件重复，包含跨组重复。",
+      "parent_topic_criteria_duplicate": "父主题纳入或排除条件重复，包含跨组重复。",
+      "topic_parent_reason_invalid": "父子关系依据为空或超过 500 字符。",
+      "topic_parent_root_has_reference": "根主题不能同时引用或提出父主题。",
+      "topic_parent_existing_reference_missing": "现有父主题缺少主题身份或定义版本。",
+      "topic_parent_existing_has_proposal": "现有父主题不能同时附带新父主题提案。",
+      "topic_parent_not_candidate": "父主题不在本次候选中。",
+      "topic_parent_version_mismatch": "父主题定义版本与本次候选不一致。",
+      "topic_parent_containment_missing": "现有父主题缺少明确的范围包含关系，相关或共现不能作为父子关系。",
+      "topic_parent_proposed_has_reference": "新父主题提案不能同时引用现有父主题。",
+      "topic_parent_proposal_missing": "提出父主题时没有附带完整父主题定义。",
+      "topic_parent_same_label": "父主题与子主题名称相同。",
+      "topic_parent_same_concept": "父主题与子主题定义边界归一化后相同。",
+      "topic_parent_proposal_matches_candidate": "父主题提案与已有候选边界相同，必须明确引用现有父主题版本并判断范围包含。",
+      "topic_parent_kind_unknown": "父主题类型必须是根、现有或新提案。",
+      "new_topic_inclusion_empty": "新主题缺少纳入条件。",
+      "new_topic_inclusion_count_exceeded": "新主题纳入条件超过 8 项。",
+      "new_topic_inclusion_item_empty": "新主题存在空白纳入条件。",
+      "new_topic_inclusion_item_too_long": "新主题单条纳入条件超过 300 字符。",
+      "new_topic_exclusion_empty": "新主题缺少排除条件。",
+      "new_topic_exclusion_count_exceeded": "新主题排除条件超过 8 项。",
+      "new_topic_exclusion_item_empty": "新主题存在空白排除条件。",
+      "new_topic_exclusion_item_too_long": "新主题单条排除条件超过 300 字符。",
+      "parent_topic_inclusion_empty": "父主题缺少纳入条件。",
+      "parent_topic_inclusion_count_exceeded": "父主题纳入条件超过 8 项。",
+      "parent_topic_inclusion_item_empty": "父主题存在空白纳入条件。",
+      "parent_topic_inclusion_item_too_long": "父主题单条纳入条件超过 300 字符。",
+      "parent_topic_exclusion_empty": "父主题缺少排除条件。",
+      "parent_topic_exclusion_count_exceeded": "父主题排除条件超过 8 项。",
+      "parent_topic_exclusion_item_empty": "父主题存在空白排除条件。",
+      "parent_topic_exclusion_item_too_long": "父主题单条排除条件超过 300 字符。"
+    });
     const explanation=issue.state==='unknown_dispatch'?'无法确认请求的执行结果，不会自动重发。':reason&&Object.hasOwn(reasons,reason)?reasons[reason]:reason?'原因尚未识别，请核对任务记录。':'未记录具体原因，请核对任务记录。';
-    return `<li><strong>${esc(phase)} · ${esc(status)}</strong><p>${esc(explanation)}${reason?` <span class="lgi-tm-num">原因码：${esc(reason)}</span>`:''}</p></li>`;
+    return `<li><strong>${esc(phase)} · ${esc(status)}</strong><p>${esc(explanation)}${reason?` <span class="lgi-tm-num">原因码：${esc(reason)}</span>`:''}</p>${validationDetails(issue.validationDiagnostic)}</li>`;
   }
   function researchRunDetails(run) {
     const issues=list(run.taskIssues).slice(0,20);
@@ -733,9 +820,14 @@
   }
   function researchRun(run, policy) {
     const waiting=policy?.status==='paused'&&['queued','running','daily_budget_paused'].includes(run.state);
-    const state=waiting?'保留进度 · 等待领域恢复':run.state==='daily_budget_paused'?'等待日额度':run.state==='run_budget_exhausted'?'本次研究额度已用尽':labelState(run.state);
+    const state=waiting?'保留进度 · 等待领域恢复':run.state==='daily_budget_paused'?'等待日额度':run.state==='run_budget_exhausted'?'本次研究额度已用尽':run.state==='completed'&&run.failedCount>0?'处理结束，含失败':run.state==='completed'&&run.unknownDispatchCount>0?'处理结束，含派发未知':labelState(run.state);
     const trigger=({historical:'历史回填',incremental:'新材料增量',on_demand:'按需研究'})[run.trigger]||run.trigger;
     return `<article class="lgi-tm-run"><div><h4>${esc(state)} ${badge(trigger)}</h4><p>方法版本：${esc(run.methodVersion || '未记录')}</p>${researchCoverageCounts(run)}${researchCounts(run)}${researchPhases(run)}${researchRunDetails(run)}<p>创建于 ${esc(run.createdAt)}</p><small class="lgi-tm-num">${esc(run.runRef)}</small></div>${researchRunActions(run,policy)}</article>`;
+  }
+  function currentResearchSummary(p) {
+    const counts=p?.currentMethodSummary,limits=p?.processingLimits;
+    const missing='<p class="lgi-tm-note">当前方法进展尚未读取，请刷新；历史账本不作为当前进展。</p>';
+    return `<section class="lgi-tm-section"><h3>当前方法有效进展</h3><p>方法版本：${esc(p?.methodVersion || '未读取')}</p>${counts?`${researchCoverageCounts(counts)}${researchCounts(counts)}${researchPhases({phases:counts.phases})}`:missing}<p class="lgi-tm-note">有效窗口处理只计已接纳、无研究信号或材料不足；失败、派发未知、旧方法退役均不计入。已接纳结果、主题归并和层级质量须分别复核。</p>${limits?`<p>自动研究每批最多 ${number(limits.automaticBatchWindows)} 个窗口 · 单窗最多 ${number(limits.windowChars)} 字符 · 每窗最多 ${number(limits.primaryCommentsPerWindow)} 条主要评论</p><p class="lgi-tm-note">批次是逐窗派发的排队范围，不是一次发送全部材料；当前队列不代表全部尚未研究材料。</p>`:''}</section>`;
   }
   function researchSummary(p) {
     return `<section class="lgi-tm-section"><h3>全领域任务账本</h3><p>累计 ${number(p?.summary?.totalRunCount)} 个批次 · ${number(p?.summary?.totalTaskCount)} 个任务</p>${researchCoverageCounts(p?.summary)}${researchCounts(p?.summary)}${researchPhases({phases:p?.summary?.phases})}<p class="lgi-tm-note">包含全部历史方法与已停止任务，不据累计分母计算当前覆盖率。初次窗口按方法、模型配置与输入身份去重，历史方法或重新分组可能覆盖同一原文；无信号、材料不足表示窗口已处理，不表示形成主题。定义重评复用已有讨论，不增加初次窗口；实际字符覆盖请核对作品阅读器。任务接纳、模型调用、讨论数量和主题质量分别判断。历史账本不代表当前可用主题或研究质量。</p></section>`;
@@ -743,7 +835,7 @@
   function researchDialog() {
     if (dialogState.loading) return '<p role="status">正在读取研究设置与真实进度回执。</p>';
     const p = dialogState.progress || progress, policy = p?.policy, models = list(p?.models), usage = p?.usage;
-    return `${researchPolicy(policy)}<div class="lgi-tm-callout">开启后，历史材料分批研究、新材料增量处理。只有明确保存开启配置才启动，不因普通开页调用模型。关闭弹窗不取消已发任务，明确停止阻止继续启动新请求。</div><div class="lgi-tm-metrics"><div><span>今日已记账</span><strong>${number(usage?.chargedTokens)}</strong><small>token · ${esc(usage?.timezone || 'Asia/Shanghai')}</small></div><div><span>当前预留</span><strong>${number(usage?.reservedTokens)}</strong><small>token · 不等于已消费</small></div><div><span>每日上限</span><strong>${number(policy?.dailyTokenLimit)}</strong><small>达到上限后延后待处理</small></div><div><span>每次研究上限</span><strong>${number(policy?.runTokenLimit)}</strong><small>token · 与精选10篇不同</small></div></div><form data-form="research-config" class="lgi-tm-form"><h3>研究设置</h3><label><span>已有模型配置</span><select name="modelConfigRef" required><option value="">请选择配置</option>${models.map(m => `<option value="${esc(m.configRef)}" ${policy?.modelConfigRef === m.configRef ? 'selected' : ''}>${esc(m.modelId)} · 输入 ${number(m.inputTokenLimit)} / 输出 ${number(m.outputTokenLimit)} token</option>`).join('')}</select></label><div class="lgi-tm-form-grid"><label><span>每日 token 上限</span><input type="number" name="dailyTokenLimit" min="1024" max="10000000" step="1" required value="${policy?.dailyTokenLimit ?? ''}" placeholder="明确预算后填写"></label><label><span>每次研究 token 上限</span><input type="number" name="runTokenLimit" min="1024" max="10000000" step="1" required value="${policy?.runTokenLimit ?? ''}" placeholder="明确预算后填写"></label></div><label class="lgi-tm-check-label"><input type="checkbox" name="automaticEnabled" ${policy?.automaticEnabled ? 'checked' : ''}><span>明确开启历史回填与新材料自动增量研究</span></label><label class="lgi-tm-check-label"><input type="checkbox" name="collectionEnabled" ${policy?.collectionEnabled ? 'checked' : ''}><span>在已授权范围内允许主题临时补采，每轮最多10篇详情</span></label><p>已有材料仍可用；研究配置不替代平台执行授权、工位范围与采集限制。</p><button type="submit" class="lgi-tm-button lgi-tm-primary" data-mutation>保存明确设置</button></form>${researchSummary(p)}<section class="lgi-tm-section"><div class="lgi-tm-section-head"><h3>最近批次</h3>${btn('刷新进度','research-refresh')}</div><p>显示最近 ${number(p?.runListLimit)} 批次中的 ${number(list(p?.runs).length)} 批 · 全领域共 ${number(p?.summary?.totalRunCount)} 批</p>${list(p?.runs).map(run=>researchRun(run,policy)).join('') || empty('当前没有研究运行','首次开启或明确按需启动后，真实回执会出现在这里。')}</section>`;
+    return `${researchPolicy(policy)}<div class="lgi-tm-callout">开启后，历史材料分批研究、新材料增量处理。只有明确保存开启配置才启动，不因普通开页调用模型。关闭弹窗不取消已发任务，明确停止阻止继续启动新请求。</div><div class="lgi-tm-metrics"><div><span>今日已记账</span><strong>${number(usage?.chargedTokens)}</strong><small>token · ${esc(usage?.timezone || 'Asia/Shanghai')}</small></div><div><span>当前预留</span><strong>${number(usage?.reservedTokens)}</strong><small>token · 不等于已消费</small></div><div><span>每日上限</span><strong>${number(policy?.dailyTokenLimit)}</strong><small>达到上限后延后待处理</small></div><div><span>每次研究上限</span><strong>${number(policy?.runTokenLimit)}</strong><small>token · 与精选10篇不同</small></div></div><form data-form="research-config" class="lgi-tm-form"><h3>研究设置</h3><label><span>已有模型配置</span><select name="modelConfigRef" required><option value="">请选择配置</option>${models.map(m => `<option value="${esc(m.configRef)}" ${policy?.modelConfigRef === m.configRef ? 'selected' : ''}>${esc(m.modelId)} · 输入 ${number(m.inputTokenLimit)} / 输出 ${number(m.outputTokenLimit)} token</option>`).join('')}</select></label><div class="lgi-tm-form-grid"><label><span>每日 token 上限</span><input type="number" name="dailyTokenLimit" min="1024" max="10000000" step="1" required value="${policy?.dailyTokenLimit ?? ''}" placeholder="明确预算后填写"></label><label><span>每次研究 token 上限</span><input type="number" name="runTokenLimit" min="1024" max="10000000" step="1" required value="${policy?.runTokenLimit ?? ''}" placeholder="明确预算后填写"></label></div><label class="lgi-tm-check-label"><input type="checkbox" name="automaticEnabled" ${policy?.automaticEnabled ? 'checked' : ''}><span>明确开启历史回填与新材料自动增量研究</span></label><label class="lgi-tm-check-label"><input type="checkbox" name="collectionEnabled" ${policy?.collectionEnabled ? 'checked' : ''}><span>在已授权范围内允许主题临时补采，每轮最多10篇详情</span></label><p>已有材料仍可用；研究配置不替代平台执行授权、工位范围与采集限制。</p><button type="submit" class="lgi-tm-button lgi-tm-primary" data-mutation>保存明确设置</button></form>${currentResearchSummary(p)}${researchSummary(p)}<section class="lgi-tm-section"><div class="lgi-tm-section-head"><h3>最近批次</h3>${btn('刷新进度','research-refresh')}</div><p>显示最近 ${number(p?.runListLimit)} 批次中的 ${number(list(p?.runs).length)} 批 · 全领域共 ${number(p?.summary?.totalRunCount)} 批</p>${list(p?.runs).map(run=>researchRun(run,policy)).join('') || empty('当前没有研究运行','首次开启或明确按需启动后，真实回执会出现在这里。')}</section>`;
   }
   async function researchCommand(payload) {
     if (pending) return null;

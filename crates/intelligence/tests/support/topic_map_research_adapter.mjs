@@ -4,7 +4,14 @@ for await (const part of process.stdin) source += part;
 const request = JSON.parse(source);
 const envelope = JSON.parse(request.prompt);
 const input = envelope.input;
-const fragments = input.fragments ?? [];
+const compact = envelope.contract === 'topic-map.extract.compact.v1';
+const fragments = (input.fragments ?? []).map((f) => compact ? {
+  ...f, fragmentId: `${f.workRef ?? input.workRef}.synthetic.${f.fragmentIndex}`,
+} : f);
+if (compact) input.commentStudy = (input.commentStudy ?? []).map((c) => ({
+  ...c, fragmentId: fragments[c.fragmentIndex]?.fragmentId,
+  parentFragmentIds: (c.parentFragmentIndexes ?? []).map(index => fragments[index]?.fragmentId),
+}));
 const sourceText = fragments.map((f) => f.text).join('\n');
 const slowUnknown = sourceText.includes('SYNTHETIC SLOW_UNKNOWN');
 if (sourceText.includes('SYNTHETIC SLOW')) await new Promise((resolve) => setTimeout(resolve, slowUnknown ? 2000 : 700));
@@ -144,8 +151,17 @@ function resolve() {
     }),
   };
 }
-if (!['topic-map.research.v2', 'topic-map.resolve.v1', 'topic-map.research.v3', 'topic-map.resolve.v2'].includes(envelope.contract)) throw new Error('unexpected synthetic contract');
-const output = envelope.contract.startsWith('topic-map.resolve.') ? resolve() : extract();
+if (!['topic-map.research.v2', 'topic-map.resolve.v1', 'topic-map.research.v3', 'topic-map.research.v4', 'topic-map.resolve.v2', 'topic-map.extract.compact.v1'].includes(envelope.contract)) throw new Error('unexpected synthetic contract');
+function compactOutput(value) {
+  if (Array.isArray(value)) return value.map(compactOutput);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value).map(([key, child]) => [
+    envelope.outputFieldNames[key] ?? key,
+    key === 'fragmentId' ? fragments.findIndex(f => f.fragmentId === child) : compactOutput(child),
+  ]));
+}
+const semantic = envelope.contract.startsWith('topic-map.resolve.') ? resolve() : extract();
+const output = compact ? compactOutput(semantic) : semantic;
 process.stdout.write(JSON.stringify({
   version: request.version, ok: true, text: JSON.stringify(output), failureCode: null, modelIds: null, modelListOrigin: null,
   usage: { inputTokens: 299, outputTokens: 100, costUsd: null }, elapsedMs: 1,

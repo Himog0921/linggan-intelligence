@@ -204,12 +204,60 @@ async fn legacy_cleanup_keeps_failure_unknown_charge_and_stops_only_unsent_work(
     .await
     .unwrap();
     assert_eq!(
-        reason, "invalid_journey_evidence",
+        reason, "invalid_citation_fragment_index",
         "specific safe business rejection is retained"
     );
     let ledger_reason: String = sqlx::query_scalar("SELECT i.failure_code FROM linggan_model_invocation i JOIN linggan_topic_map_research_request q USING(invocation_ref) JOIN linggan_topic_map_research_task t USING(task_ref) WHERE t.work_public_ref=$1")
         .bind(attacked).fetch_one(db.pool()).await.unwrap();
     assert_eq!(ledger_reason, reason);
+    let diagnostics = linggan_intelligence::topic_map_research::read_research_progress(&db, D)
+        .await
+        .unwrap();
+    let issue = diagnostics["runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|r| r["taskIssues"].as_array().unwrap())
+        .find(|i| i["reason"] == reason)
+        .unwrap();
+    assert_eq!(issue["validationDiagnostic"]["rule"], "fragment_index");
+    assert!(
+        issue["validationDiagnostic"]["schemaPath"]
+            .as_str()
+            .unwrap()
+            .ends_with("fragmentId")
+    );
+    let attacked_task = issue["taskRef"].as_str().unwrap().parse::<Uuid>().unwrap();
+    for (phase, latest_reason) in [
+        ("extract", "model_input_limit"),
+        ("compare", "invalid_citation_fragment_index"),
+    ] {
+        sqlx::query(
+            "UPDATE linggan_topic_map_research_task SET phase=$2,last_reason=$3 WHERE task_ref=$1",
+        )
+        .bind(attacked_task)
+        .bind(phase)
+        .bind(latest_reason)
+        .execute(db.pool())
+        .await
+        .unwrap();
+        let retry = linggan_intelligence::topic_map_research::read_research_progress(&db, D)
+            .await
+            .unwrap();
+        let issue = retry["runs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|r| r["taskIssues"].as_array().unwrap())
+            .find(|i| i["taskRef"] == serde_json::json!(attacked_task))
+            .unwrap();
+        assert!(
+            issue["validationDiagnostic"].is_null(),
+            "prior output rejection cannot explain a new preflight failure or a different phase"
+        );
+    }
+    sqlx::query("UPDATE linggan_topic_map_research_task SET phase='extract',last_reason=$2 WHERE task_ref=$1").bind(attacked_task).bind(&reason).execute(db.pool()).await.unwrap();
+
     let charge = count(&db, "SELECT sum(i.charged_tokens)::bigint FROM linggan_model_invocation i JOIN linggan_topic_map_research_request q USING(invocation_ref)").await;
     let unsent = work(&db, "old-unsent", "SYNTHETIC 尚未发送的练习。").await;
     apply_research_command(&db, &start(vec![unsent]))
@@ -262,7 +310,7 @@ async fn legacy_cleanup_keeps_failure_unknown_charge_and_stops_only_unsent_work(
     .unwrap();
     for (work, state, reason) in [
         (unknown, "unknown_dispatch", "unknown_dispatch"),
-        (attacked, "failed", "invalid_journey_evidence"),
+        (attacked, "failed", "invalid_citation_fragment_index"),
         (unsent, "stopped", "method_superseded"),
     ] {
         let row = rows
@@ -282,4 +330,77 @@ async fn legacy_cleanup_keeps_failure_unknown_charge_and_stops_only_unsent_work(
         2
     );
     assert_eq!(count(&db, "SELECT sum(i.charged_tokens)::bigint FROM linggan_model_invocation i JOIN linggan_topic_map_research_request q USING(invocation_ref)").await, charge);
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL; synthetic adapter only"]
+async fn bounded_admission_preserves_tail_and_counts_only_valid_current_progress() {
+    let (db, config, _) = setup("topic_core_reliability_progress").await;
+    work(
+        &db,
+        "long-admission-tail",
+        &"SYNTHETIC独立行动困难。".repeat(2000),
+    )
+    .await;
+    let receipt = apply_research_command(&db, &configure(config, 100000, true))
+        .await
+        .unwrap();
+    let run = receipt["runRef"].as_str().unwrap().parse::<Uuid>().unwrap();
+    assert_eq!(
+        count(&db, "SELECT count(*) FROM linggan_topic_map_research_task").await,
+        20
+    );
+    let reason: String = sqlx::query_scalar(
+        "SELECT last_reason FROM linggan_topic_map_research_run WHERE run_ref=$1",
+    )
+    .bind(run)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        reason, "additional_source_windows_pending",
+        "unadmitted tail remains pending rather than silently covered"
+    );
+    let refs: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT task_ref FROM linggan_topic_map_research_task ORDER BY task_ref",
+    )
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+    for (task, state) in refs.iter().zip([
+        "succeeded",
+        "no_signal",
+        "insufficient",
+        "failed",
+        "stopped",
+        "stale",
+        "unknown_dispatch",
+    ]) {
+        sqlx::query("UPDATE linggan_topic_map_research_task SET state=$2 WHERE task_ref=$1")
+            .bind(task)
+            .bind(state)
+            .execute(db.pool())
+            .await
+            .unwrap();
+    }
+    let progress = linggan_intelligence::topic_map_research::read_research_progress(&db, D)
+        .await
+        .unwrap();
+    assert_eq!(
+        progress["currentMethodSummary"]["completedInitialWindowCount"],
+        3
+    );
+    assert_eq!(progress["currentMethodSummary"]["failedCount"], 1);
+    assert_eq!(progress["currentMethodSummary"]["stoppedCount"], 1);
+    assert_eq!(progress["currentMethodSummary"]["queuedCount"], 13);
+    sqlx::query("UPDATE linggan_topic_map_research_run SET method_version='topic-map.research.v3' WHERE run_ref=$1").bind(run).execute(db.pool()).await.unwrap();
+    let historical = linggan_intelligence::topic_map_research::read_research_progress(&db, D)
+        .await
+        .unwrap();
+    assert_eq!(historical["summary"]["completedInitialWindowCount"], 3);
+    assert_eq!(
+        historical["currentMethodSummary"]["completedInitialWindowCount"], 0,
+        "historical success must not inflate new-method progress"
+    );
+    assert_eq!(historical["currentMethodSummary"]["stoppedCount"], 0);
 }
