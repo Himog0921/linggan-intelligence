@@ -13,6 +13,7 @@ use linggan_intelligence::comment_study_catalog::{
 use linggan_storage_postgres::Database;
 use research_fixture::detail_with_author;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
@@ -26,6 +27,27 @@ const DELTA: &str =
 const MIGRATION: &str = include_str!("../../../database/migrations/0122_comment_like_library.sql");
 const ADHD_DOMAIN_REF: Uuid = Uuid::from_u128(0x0000_0000_0000_4000_8000_0000_0000_0001);
 const OTHER_DOMAIN: Uuid = Uuid::from_u128(0x0000_0000_0000_4000_8000_0000_0000_0002);
+
+#[test]
+fn full_schema_fixtures_record_the_actual_like_migration_digest() {
+    let digest: String = Sha256::digest(MIGRATION.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    let ledger_entry = format!("('0122_comment_like_library', '{digest}')");
+    for (name, source) in [
+        ("material", fixture::MIGRATIONS),
+        (
+            "api",
+            include_str!("../../../apps/api/src/local_web/full_schema_fixture.rs"),
+        ),
+    ] {
+        assert!(
+            source.contains(&ledger_entry),
+            "{name} fixture migration ledger differs from the actual 0122 SQL"
+        );
+    }
+}
 
 async fn database(name: &str) -> Database {
     let db = proof_database(name).await;
@@ -449,4 +471,201 @@ async fn post_usage_marks_are_idempotent_domain_scoped_and_filterable() {
         .execute(db.pool())
         .await;
     assert!(tamper.is_err(), "marks are append-only");
+}
+
+async fn receipt_count(db: &Database) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM linggan_comment_post_usage_receipt")
+        .fetch_one(db.pool())
+        .await
+        .unwrap()
+}
+
+async fn usage_fixture(schema: &str) -> (Database, Uuid) {
+    let db = database(schema).await;
+    detail_with_author(
+        &db,
+        "review-usage",
+        "SYNTHETIC command replay",
+        Some("creator"),
+    )
+    .await;
+    for id in ["u1", "u2"] {
+        observe(
+            &db,
+            "review-usage",
+            id,
+            Some("10"),
+            Some(json!(10)),
+            "2026-10-01T08:00:00Z",
+        )
+        .await;
+    }
+    let work = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content WHERE content_external_id='review-usage'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    (db, work)
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn unchanged_requests_reserve_their_intent_and_never_overwrite_a_later_edit() {
+    let (db, work) = usage_fixture("usage_noop_retry").await;
+    let initial_unmark = command(work, "u1", PostUsageAction::Unmark, Uuid::new_v4());
+    let unused = record_comment_post_usage(&db, &initial_unmark)
+        .await
+        .unwrap();
+    assert_eq!(unused["outcome"], json!("unchanged"));
+    assert_eq!(event_count(&db).await, 0);
+    assert_eq!(receipt_count(&db).await, 1);
+    let mark = command(work, "u1", PostUsageAction::Mark, Uuid::new_v4());
+    record_comment_post_usage(&db, &mark).await.unwrap();
+    let noop = command(work, "u1", PostUsageAction::Mark, Uuid::new_v4());
+    let original = record_comment_post_usage(&db, &noop).await.unwrap();
+    assert_eq!(original["outcome"], json!("unchanged"));
+    let unmark = command(work, "u1", PostUsageAction::Unmark, Uuid::new_v4());
+    record_comment_post_usage(&db, &unmark).await.unwrap();
+    let replay = record_comment_post_usage(&db, &noop).await.unwrap();
+    assert_eq!(replay["outcome"], json!("replayed"));
+    assert_eq!(replay["postUsage"], original["postUsage"]);
+    assert_eq!(
+        event_count(&db).await,
+        2,
+        "retry must not re-mark the comment"
+    );
+    assert_eq!(
+        receipt_count(&db).await,
+        4,
+        "replay does not create a receipt"
+    );
+    let latest: String = sqlx::query_scalar(
+        "SELECT action FROM linggan_comment_post_usage_event ORDER BY recorded_at DESC LIMIT 1",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(latest, "unmarked");
+    let mut conflict = noop.clone();
+    conflict.action = PostUsageAction::Unmark;
+    assert!(matches!(
+        record_comment_post_usage(&db, &conflict).await,
+        Err(PostUsageError::IdempotencyConflict)
+    ));
+    let first_replay = record_comment_post_usage(&db, &initial_unmark)
+        .await
+        .unwrap();
+    assert_eq!(first_replay["postUsage"], unused["postUsage"]);
+    assert_eq!(event_count(&db).await, 2);
+    assert!(
+        sqlx::query("UPDATE linggan_comment_post_usage_receipt SET outcome='applied'")
+            .execute(db.pool())
+            .await
+            .is_err()
+    );
+    assert!(
+        sqlx::query("DELETE FROM linggan_comment_post_usage_receipt")
+            .execute(db.pool())
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn replay_returns_the_original_mark_and_unmark_receipts_after_later_changes() {
+    let (db, work) = usage_fixture("usage_original_receipt").await;
+    let mark = command(work, "u1", PostUsageAction::Mark, Uuid::new_v4());
+    let original_mark = record_comment_post_usage(&db, &mark).await.unwrap();
+    let unmark = command(work, "u1", PostUsageAction::Unmark, Uuid::new_v4());
+    let original_unmark = record_comment_post_usage(&db, &unmark).await.unwrap();
+    let replay_mark = record_comment_post_usage(&db, &mark).await.unwrap();
+    assert_eq!(replay_mark["outcome"], json!("replayed"));
+    assert_eq!(replay_mark["postUsage"], original_mark["postUsage"]);
+    assert!(replay_mark["postUsage"]["markedAt"].is_string());
+    record_comment_post_usage(
+        &db,
+        &command(work, "u1", PostUsageAction::Mark, Uuid::new_v4()),
+    )
+    .await
+    .unwrap();
+    let replay_unmark = record_comment_post_usage(&db, &unmark).await.unwrap();
+    assert_eq!(replay_unmark["outcome"], json!("replayed"));
+    assert_eq!(replay_unmark["postUsage"], original_unmark["postUsage"]);
+    assert_eq!(replay_unmark["postUsage"]["markedAt"], Value::Null);
+    assert_eq!(event_count(&db).await, 3);
+    assert_eq!(receipt_count(&db).await, 3);
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn concurrent_request_reuse_conflicts_across_comments_and_replays_one_intent() {
+    let (db, work) = usage_fixture("usage_concurrent_request").await;
+    let request = Uuid::new_v4();
+    let a = command(work, "u1", PostUsageAction::Mark, request);
+    let b = command(work, "u2", PostUsageAction::Mark, request);
+    let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(2));
+    let invoke = |command: PostUsageCommand, barrier: std::sync::Arc<tokio::sync::Barrier>| {
+        let db = db.clone();
+        async move {
+            barrier.wait().await;
+            record_comment_post_usage(&db, &command).await
+        }
+    };
+    let (left, right) = tokio::join!(
+        invoke(a.clone(), barrier.clone()),
+        invoke(b.clone(), barrier)
+    );
+    assert_eq!(usize::from(left.is_ok()) + usize::from(right.is_ok()), 1);
+    let (winner, loser) = if left.is_ok() { (a, right) } else { (b, left) };
+    assert!(
+        matches!(loser, Err(PostUsageError::IdempotencyConflict)),
+        "cross-comment reuse returns conflict, not a unique-key error"
+    );
+    assert_eq!(event_count(&db).await, 1);
+    assert_eq!(receipt_count(&db).await, 1);
+    let request = Uuid::new_v4();
+    let same = command(
+        work,
+        &winner.comment_external_id,
+        PostUsageAction::Unmark,
+        request,
+    );
+    let (one, two) = tokio::join!(
+        record_comment_post_usage(&db, &same),
+        record_comment_post_usage(&db, &same)
+    );
+    let one = one.unwrap();
+    let two = two.unwrap();
+    let outcomes = [
+        one["outcome"].as_str().unwrap(),
+        two["outcome"].as_str().unwrap(),
+    ]
+    .into_iter()
+    .collect::<BTreeSet<_>>();
+    assert_eq!(outcomes, BTreeSet::from(["applied", "replayed"]));
+    assert_eq!(one["postUsage"], two["postUsage"]);
+    assert_eq!(event_count(&db).await, 2);
+    assert_eq!(receipt_count(&db).await, 2);
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn receipt_failure_rolls_back_the_mark_event_in_the_same_transaction() {
+    let (db, work) = usage_fixture("usage_atomic_receipt").await;
+    sqlx::raw_sql("CREATE FUNCTION reject_test_receipt() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'synthetic receipt failure'; END $$; CREATE TRIGGER reject_test_receipt BEFORE INSERT ON linggan_comment_post_usage_receipt FOR EACH ROW EXECUTE FUNCTION reject_test_receipt();")
+        .execute(db.pool()).await.unwrap();
+    let failed = record_comment_post_usage(
+        &db,
+        &command(work, "u1", PostUsageAction::Mark, Uuid::new_v4()),
+    )
+    .await;
+    assert!(matches!(failed, Err(PostUsageError::Database(_))));
+    assert_eq!(
+        event_count(&db).await,
+        0,
+        "event must roll back when receipt cannot be stored"
+    );
+    assert_eq!(receipt_count(&db).await, 0);
 }

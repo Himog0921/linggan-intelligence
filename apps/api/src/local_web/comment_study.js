@@ -597,6 +597,7 @@ function renderTargetsPanel(targets) {
 }
 
 const commentCatalogState={q:'',studyState:'all',signalKind:null,voiceRole:'reader_and_unknown',sort:'received_desc',minLikes:null,postUsage:'all',workRef:null,workLabel:'',cursor:null,history:[],response:null,summary:null,workChoices:[]};
+let commentPostUsageFeedback='';
 const COMMENT_STATES=new Set(['all','never_studied','in_progress','studied','needs_context','failed']);
 const COMMENT_VOICES=new Set(['reader_and_unknown','reader','unknown','creator','all']);
 const COMMENT_SORTS=new Set(['received_desc','like_desc']);
@@ -672,7 +673,7 @@ async function renderCommentsTab(){
   const rows=data.items||[],stats=summary.summary||{},coverage=data.indexCoverage||{},pending=coverage.pendingCount==null?'未知':Number(coverage.pendingCount);
   const workOptions=commentCatalogState.workChoices.map(work=>`<option value="${esc(work.workRef)}"${work.workRef===commentCatalogState.workRef?' selected':''}>${esc(work.displayTitle||'未命名作品')}</option>`).join('');
   const body=rows.length?rows.map(item=>{const key=commentSelectionKey(item.commentKey),role=item.observationRole,eligible=item.studyEligibility?.eligible===true&&(role==='primary'||role==='reference'),checked=selectedCommentKeys.has(key),newWork=![...selectedCommentKeys.values()].some(selected=>selected.commentKey.workRef===item.commentKey.workRef),capped=!checked&&(selectedCommentKeys.size>=MAX_SELECTED_COMMENTS||(newWork&&selectedCommentWorkCount()>=MAX_SELECTED_WORKS));const kinds=(item.signalKinds||[]).filter(kind=>Object.hasOwn(signalKindLabel,kind));return`<tr><td><input type="checkbox" data-select-comment data-work-ref="${esc(item.commentKey.workRef)}" data-comment-id="${esc(item.commentKey.commentExternalId)}" data-eligible="${eligible}" aria-label="选择这条评论进入研究"${checked?' checked':''}${!eligible||capped?' disabled':''}></td><td><button type="button" class="study-comment-open" data-comment-work="${esc(item.commentKey.workRef)}" data-comment-id="${esc(item.commentKey.commentExternalId)}"><span class="study-comment-voice">${esc(item.commentText)}</span></button><small>${esc(commentEligibility(item))}</small></td><td>${likeCountCell(item)}</td><td><span class="study-work-title">${esc(item.workTitle||'未命名作品')}</span><small>${esc(workTitleSourceLabel[item.workTitleSource]||item.workTitleSource||'标题未记录')}</small></td><td>${esc(commentStatus(item))}</td><td><div class="study-comment-kinds">${kinds.length?kinds.map(kind=>`<span class="study-badge">${esc(signalKindLabel[kind])}</span>`).join(''):'<span class="study-detail-muted">无当前有效标签</span>'}</div></td><td>${esc(item.authorDisplayName||'作者未记录')}<small>${esc(String(item.observedAt||'').replace('T',' '))}</small></td><td data-post-usage-cell>${postUsageCell(item)}</td></tr>`}).join(''):'<tr><td colspan="8" class="study-table-empty">当前筛选没有可显示的用户评论。</td></tr>';
-  return`<section class="study-comments" aria-labelledby="comments-title"><header class="study-comments-head"><div><p class="study-label">评论证据库</p><h2 id="comments-title">用户评论</h2><p>当前筛选可显示 ${Number(stats.displayableCommentCount||0)} 条；可研究 ${Number(stats.eligibleCommentCount||0)} 条；已索引 ${Number(coverage.indexedCount||0)}，待索引 ${pending}。</p></div><div class="study-comment-selection"><span id="comment-selection-count" role="status"></span><button id="study-selected-comments" type="button" disabled>研究所选评论</button></div></header>
+  return`<section class="study-comments" aria-labelledby="comments-title">${commentPostUsageFeedback?`<p class="study-detail-muted" role="status">${esc(commentPostUsageFeedback)}</p>`:''}<header class="study-comments-head"><div><p class="study-label">评论证据库</p><h2 id="comments-title">用户评论</h2><p>当前筛选可显示 ${Number(stats.displayableCommentCount||0)} 条；可研究 ${Number(stats.eligibleCommentCount||0)} 条；已索引 ${Number(coverage.indexedCount||0)}，待索引 ${pending}。</p></div><div class="study-comment-selection"><span id="comment-selection-count" role="status"></span><button id="study-selected-comments" type="button" disabled>研究所选评论</button></div></header>
   <form id="comment-filter-form" class="study-comment-filters"><label>字面搜索<input id="comment-query" type="search" value="${esc(commentCatalogState.q)}" placeholder="搜索清洗后的评论文本"></label><label>研究状态<select id="comment-study-state">${[['all','全部'],['never_studied','从未研究'],['in_progress','处理中'],['studied','已有成功结果'],['needs_context','等待语境'],['failed','最近失败']].map(([v,t])=>`<option value="${v}"${commentCatalogState.studyState===v?' selected':''}>${t}</option>`).join('')}</select></label><label>研究标签<select id="comment-signal-kind"><option value="">全部标签</option>${Object.entries(signalKindLabel).map(([kind,title])=>`<option value="${kind}"${commentCatalogState.signalKind===kind?' selected':''}>${esc(title)}</option>`).join('')}</select></label><label>声音角色<select id="comment-voice-role">${[['reader_and_unknown','用户评论（默认）'],['reader','已知用户'],['unknown','身份未知'],['creator','作品作者'],['all','全部声音']].map(([v,t])=>`<option value="${v}"${commentCatalogState.voiceRole===v?' selected':''}>${t}</option>`).join('')}</select></label><label>排序<select id="comment-sort">${[['received_desc','最新收到'],['like_desc','点赞最多']].map(([v,t])=>`<option value="${v}"${commentCatalogState.sort===v?' selected':''}>${t}</option>`).join('')}</select></label><label>点赞<select id="comment-min-likes">${[['','不限'],['30','30 以上'],['100','100 以上'],['1000','1000 以上']].map(([v,t])=>`<option value="${v}"${(commentCatalogState.minLikes||'')===v?' selected':''}>${t}</option>`).join('')}</select></label><label>改帖<select id="comment-post-usage">${[['all','全部'],['unused','未改'],['used','已改']].map(([v,t])=>`<option value="${v}"${commentCatalogState.postUsage===v?' selected':''}>${t}</option>`).join('')}</select></label><button type="submit">应用筛选</button></form>
   <div class="study-comment-work-filter"><form id="comment-work-search-form"><label>所属作品<input id="comment-work-search" type="search" value="${esc(commentCatalogState.workLabel)}" placeholder="搜索作品标题"></label><button type="submit">查找作品</button></form><label>已匹配作品<select id="comment-work-select"><option value="">全部作品</option>${workOptions}</select></label></div>
   <div class="study-review-table-wrap"><table class="study-review-table study-comments-table"><thead><tr><th scope="col">选择</th><th scope="col">原声</th><th scope="col">点赞</th><th scope="col">所属作品</th><th scope="col">研究状态</th><th scope="col">研究标签</th><th scope="col">作者 / 观测</th><th scope="col">改帖</th></tr></thead><tbody>${body}</tbody></table></div>
@@ -708,19 +709,26 @@ function bindCommentsView(){
 async function recordPostUsage(button){
   const cell=button.closest('[data-post-usage-cell]'),status=cell?.querySelector('.study-post-usage-status');
   const workRef=button.dataset.postUsageWork,commentExternalId=button.dataset.postUsageId,action=button.dataset.postUsage;
+  const requestRef=button.dataset.postUsageRequest||(button.dataset.postUsageRequest=crypto.randomUUID());
+  let saved=false;
   cell?.querySelectorAll('[data-post-usage]').forEach(control=>{control.disabled=true;});
   if(status)status.textContent='正在保存…';
   try{
-    const response=await fetch(endpoint+'comments/post-usage',{method:'POST',headers:{Accept:'application/json','Content-Type':'application/json'},body:JSON.stringify({domainRef,workRef,commentExternalId,action,requestRef:crypto.randomUUID()})});
+    const response=await fetch(endpoint+'comments/post-usage',{method:'POST',headers:{Accept:'application/json','Content-Type':'application/json'},body:JSON.stringify({domainRef,workRef,commentExternalId,action,requestRef})});
     const data=await response.json().catch(()=>null);
     if(!response.ok)throw new Error(data?.error?.message||`请求失败（状态码 ${response.status}）`);
-    const item=(commentCatalogState.response?.items||[]).find(row=>row.commentKey.workRef===workRef&&row.commentKey.commentExternalId===commentExternalId);
-    if(item&&data?.postUsage){item.postUsage=data.postUsage;cell.innerHTML=postUsageCell(item);cell.querySelectorAll('[data-post-usage]').forEach(control=>control.addEventListener('click',()=>recordPostUsage(control)));}
-    const done=cell?.querySelector('.study-post-usage-status');
-    if(done)done.textContent=data?.outcome==='unchanged'?'状态已是最新，没有重复记录。':'已保存。';
+    if(data?.contract!=='comment-post-usage.v1'||data.requestRef!==requestRef||data.commentKey?.workRef!==workRef||data.commentKey?.commentExternalId!==commentExternalId||!['applied','unchanged','replayed'].includes(data.outcome)||!['used','unused'].includes(data.postUsage?.state))throw new Error('保存回执不符合约定，请重试确认。');
+    saved=true;
+    commentPostUsageFeedback=data.outcome==='unchanged'?'已确认原状态，没有新增标记事件。':data.outcome==='replayed'?'已确认原请求回执，没有重复记录。':'改帖标记已保存。';
+    resetCommentPage();
+    commentCatalogState.response=null;commentCatalogState.summary=null;
+    if(activeView==='comments'){syncStudyRoute();await renderActiveTab();}
   }catch(error){
     cell?.querySelectorAll('[data-post-usage]').forEach(control=>{control.disabled=false;});
-    if(status)status.textContent=`没有保存：${error.message}`;
+    if(saved){
+      commentPostUsageFeedback=`改帖标记已保存，列表刷新失败：${error.message}`;
+      if(activeView==='comments')document.querySelector('#study-tab-result').textContent=commentPostUsageFeedback;
+    }else if(status)status.textContent=`保存未获确认：${error.message}`;
   }
 }
 function detailSection(title,body){return`<section class="study-detail-section"><h3>${esc(title)}</h3>${body}</section>`;}
@@ -1164,7 +1172,7 @@ async function renderActiveTab() {
       const detail = (outcome ? outcome + ' ' : '运行列表读取失败：') + error.message;
       html = '<p id="study-run-control-feedback" class="study-run-control-feedback" role="status" aria-live="polite" tabindex="-1">' + esc(detail) + '</p>';
     } else {
-      html = `<p class="study-empty">读取失败：${esc(error.message)}</p>`;
+      html = `<p class="study-empty" role="status">${view==='comments'&&commentPostUsageFeedback?`${esc(commentPostUsageFeedback)} 列表刷新失败：`:'读取失败：'}${esc(error.message)}</p>`;
     }
   }
   if (token !== renderToken) return false;

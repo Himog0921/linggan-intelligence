@@ -77,8 +77,8 @@ impl PostUsageCommand {
 
 /// Record a mark or unmark for one stable comment visible in `domain_ref`.
 ///
-/// Outcomes: `applied` (state changed), `unchanged` (already in the requested state; nothing is
-/// stored), `replayed` (same request reference and same intent as an earlier applied change).
+/// Outcomes: `applied` (state changed), `unchanged` (only a command receipt is stored),
+/// `replayed` (same accepted request and intent; returns its original postUsage).
 pub async fn record_comment_post_usage(
     database: &Database,
     command: &PostUsageCommand,
@@ -105,7 +105,15 @@ async fn record(database: &Database, command: &PostUsageCommand) -> Result<Value
     sqlx::query("SET LOCAL lock_timeout = '3s'")
         .execute(&mut *tx)
         .await?;
-    // Marks for one comment are applied one at a time, so "latest event" is well defined.
+    // Request first, then comment: different comments cannot race on the same request reference,
+    // and no-op requests reserve their intent just as state-changing commands do.
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(format!(
+            "comment-post-usage-request:{}",
+            command.request_ref
+        ))
+        .execute(&mut *tx)
+        .await?;
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
         .bind(format!(
             "comment-post-usage:{}:{}",
@@ -114,9 +122,10 @@ async fn record(database: &Database, command: &PostUsageCommand) -> Result<Value
         .execute(&mut *tx)
         .await?;
 
-    let previous: Option<(String, Uuid, String)> = sqlx::query_as(
-        "SELECT request_digest, content_public_ref, comment_external_id \
-         FROM linggan_comment_post_usage_event WHERE request_ref = $1",
+    let previous: Option<(String, String, Option<String>)> = sqlx::query_as(
+        "SELECT request_digest, post_usage_state, \
+         to_char(marked_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') \
+         FROM linggan_comment_post_usage_receipt WHERE request_ref = $1",
     )
     .bind(command.request_ref)
     .fetch_optional(&mut *tx)
@@ -144,9 +153,12 @@ async fn record(database: &Database, command: &PostUsageCommand) -> Result<Value
         return Err(PostUsageError::CommentNotFound);
     }
 
-    let outcome = if previous.is_some() {
-        "replayed"
-    } else {
+    if let Some((_, state, marked_at)) = previous {
+        tx.commit().await?;
+        return Ok(receipt(command, "replayed", &state, marked_at));
+    }
+
+    let outcome = {
         let current = current_state(&mut tx, command).await?;
         let marked = current
             .as_ref()
@@ -174,18 +186,44 @@ async fn record(database: &Database, command: &PostUsageCommand) -> Result<Value
         }
     };
     let state = current_state(&mut tx, command).await?;
-    tx.commit().await?;
     let (state, marked_at) = match state {
         Some((action, recorded_at)) if action == "marked" => ("used", Some(recorded_at)),
         _ => ("unused", None),
     };
-    Ok(json!({
+    sqlx::query(
+        "INSERT INTO linggan_comment_post_usage_receipt \
+         (request_ref, request_digest, content_public_ref, comment_external_id, domain_ref, \
+          action, outcome, post_usage_state, marked_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::text::timestamptz)",
+    )
+    .bind(command.request_ref)
+    .bind(&digest)
+    .bind(command.work_ref)
+    .bind(&command.comment_external_id)
+    .bind(command.domain_ref)
+    .bind(command.event_action())
+    .bind(outcome)
+    .bind(state)
+    .bind(&marked_at)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(receipt(command, outcome, state, marked_at))
+}
+
+fn receipt(
+    command: &PostUsageCommand,
+    outcome: &str,
+    state: &str,
+    marked_at: Option<String>,
+) -> Value {
+    json!({
         "contract": "comment-post-usage.v1",
         "requestRef": command.request_ref,
         "outcome": outcome,
         "commentKey": {"workRef": command.work_ref, "commentExternalId": command.comment_external_id},
         "postUsage": {"state": state, "markedAt": marked_at}
-    }))
+    })
 }
 
 async fn current_state(

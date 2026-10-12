@@ -5,6 +5,9 @@ export LINGGAN_COLLECTION_UPGRADE_PHASE=governance
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$project_root"
 
+node scripts/test-comment-like-library-ui.cjs
+cargo test -p linggan-intelligence --test comment_like_library_postgres --locked \
+  full_schema_fixtures_record_the_actual_like_migration_digest -- --exact
 
 # Statement counters are database-wide. Keep all proof suites serial; a caller
 # cannot raise this and introduce races between reset/measurement windows.
@@ -63,8 +66,10 @@ docker volume create "$proof_volume" >/dev/null
 proof_volume_created=1
 docker run -d --name "$proof_container" --mount "type=volume,source=$proof_volume,target=/var/lib/postgresql/data" --env POSTGRES_DB=postgres --env POSTGRES_USER="$proof_user" --env POSTGRES_PASSWORD="$proof_password" --publish 127.0.0.1::5432 "$postgres_image" -c shared_preload_libraries=pg_stat_statements -c max_wal_size=128MB -c min_wal_size=32MB >/dev/null
 proof_container_created=1
-for _ in {1..30}; do docker exec "$proof_container" pg_isready -U "$proof_user" -d postgres >/dev/null 2>&1 && break; sleep 1; done
-docker exec "$proof_container" pg_isready -U "$proof_user" -d postgres >/dev/null
+# initdb temporarily accepts Unix-socket connections before restarting the final server.
+# Wait on TCP so that temporary readiness cannot make createdb race that restart.
+for _ in {1..30}; do docker exec "$proof_container" pg_isready -h 127.0.0.1 -U "$proof_user" -d postgres >/dev/null 2>&1 && break; sleep 1; done
+docker exec "$proof_container" pg_isready -h 127.0.0.1 -U "$proof_user" -d postgres >/dev/null
 proof_port="$(docker port "$proof_container" 5432/tcp | sed -n 's/^127\.0\.0\.1:\([0-9][0-9]*\)$/\1/p')"
 [[ "$proof_port" =~ ^[0-9]+$ ]] || { echo "isolated proof PostgreSQL did not expose a safe local port" >&2; exit 1; }
 docker exec "$proof_container" createdb -U "$proof_user" "$proof_database"

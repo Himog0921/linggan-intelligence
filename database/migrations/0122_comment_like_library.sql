@@ -87,3 +87,32 @@ CREATE TRIGGER linggan_comment_post_usage_event_is_append_only
 
 COMMENT ON TABLE linggan_comment_post_usage_event IS
   'Team marks that a comment was used to write a post; latest event is the current state.';
+
+-- Accepted commands retain their original receipt, even when they did not change the state.
+-- Otherwise retrying an old no-op after another person's edit would overwrite that later edit.
+CREATE TABLE linggan_comment_post_usage_receipt (
+  request_ref uuid PRIMARY KEY,
+  request_digest text NOT NULL CHECK (request_digest ~ '^[0-9a-f]{64}$'),
+  content_public_ref uuid NOT NULL REFERENCES linggan_material_content(public_ref),
+  comment_external_id text NOT NULL CHECK (length(comment_external_id) BETWEEN 1 AND 512),
+  domain_ref uuid NOT NULL REFERENCES observation_domain(domain_ref),
+  action text NOT NULL CHECK (action IN ('marked', 'unmarked')),
+  outcome text NOT NULL CHECK (outcome IN ('applied', 'unchanged')),
+  post_usage_state text NOT NULL CHECK (post_usage_state IN ('used', 'unused')),
+  marked_at timestamptz,
+  recorded_at timestamptz NOT NULL DEFAULT scope_001_now(),
+  CHECK ((post_usage_state = 'used') = (marked_at IS NOT NULL)),
+  CHECK ((action = 'marked') = (post_usage_state = 'used'))
+);
+
+CREATE TRIGGER linggan_comment_post_usage_receipt_is_append_only
+  BEFORE DELETE OR UPDATE ON linggan_comment_post_usage_receipt
+  FOR EACH ROW EXECUTE FUNCTION linggan_plugin_runtime_forbid_mutation();
+
+ALTER TABLE linggan_comment_post_usage_event
+  ADD CONSTRAINT linggan_comment_post_usage_event_receipt_fk
+  FOREIGN KEY (request_ref) REFERENCES linggan_comment_post_usage_receipt(request_ref)
+  DEFERRABLE INITIALLY DEFERRED;
+
+COMMENT ON TABLE linggan_comment_post_usage_receipt IS
+  'Original accepted command receipt, including no-ops; replay never overwrites a later mark.';

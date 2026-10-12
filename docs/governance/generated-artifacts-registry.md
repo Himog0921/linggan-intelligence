@@ -49,6 +49,12 @@
 - `PLUGIN-MIGRATION-001` 的 Browser Producer release 只包含 extension code、manifest 和由 Linggan runtime token source 打包的视觉 token；不得包含 Cookie、账号、真实页面材料、媒体字节、旧内容工作台运行依赖或运行日志。该发行物可被浏览器加载，不等于已经获得平台访问或实际采集授权。
 - `plugins/linggan-intelligence-browser/` 是当前 Linggan-owned 唯一可发布源。发行物不得包含 Cookie、账号、真实页面材料、媒体字节、旧工作台 host/endpoint/fallback 或运行日志；旧 `plugin-retrofit-*` 与历史副本只可只读对照，不得生成当前 release。
 
+## COMMENT-LIKE-LIBRARY-001 / PR #401 验证与本机发布
+
+- 维护的测试源：`scripts/test-comment-like-library-ui.cjs` 与 `crates/intelligence/tests/comment_like_library_postgres.rs`；不是生成代码。合成测试日志、临时 HTTP/浏览器脚本放系统临时目录 `pr401-*`，不入 Git。PG 容器和卷由现有随机名脚本创建并在退出时清理核验。
+- 经 Mog 本轮明确授权的共享库迁移前备份放根仓库既有忽略目录 `database/backups/comment-like-library-401-<UTC>/`；只保留加密 dump、校验和与不含正文/凭据的核验回执。密钥在独立用户私有位置，0600，不输出、不入 Git；不生成明文 dump。
+- 真实 3000 浏览器截图放本任务已授权 Codex visualizations，命名 `pr401-runtime-comments.png`。截图只证明页面读路径，改帖写入的合成反例与真实业务签收分开报告。
+
 ## CREATOR-DISCOVERY-001 隔离验证产物
 
 - 位置：系统临时目录中的 `creator-discovery-*.log`、`creator-discovery-http-check.py`、GitHub body Markdown、隔离 API ledger SQL 与 worker 屏障临时目录（用例自行清理）、本任务 `linggan-creator-discovery-proof-*` 一次性 Docker container（无宿主业务 volume），以及 Cargo 既有忽略目录。
