@@ -147,10 +147,17 @@ pub(super) async fn prepare_review(
     packet["domain"] = input.domain.clone();
     prepared.review_packet = packet.clone();
     prepared.system = verification::VERIFY_SYSTEM.into();
-    prepared.prompt = json!({"contract":verification::VERIFY_CONTRACT,
+    let mut prompt = json!({"contract":verification::VERIFY_CONTRACT,
         "inputTokenLimit":input_limit,"outputTokenLimit":output_limit,
-        "input":packet,"outputSchema":verification::verify_schema()})
-    .to_string();
+        "input":packet,"outputSchema":verification::verify_schema()});
+    match super::feedback::previous_review_feedback(db, row, input, &proposal).await? {
+        super::feedback::RuleFeedback::Available(feedback) => {
+            prompt["validationFeedback"] = feedback
+        }
+        super::feedback::RuleFeedback::Unavailable => prepared.rule_feedback_unavailable = true,
+        super::feedback::RuleFeedback::NotRequired => {}
+    }
+    prepared.prompt = prompt.to_string();
     prepared.review = Some(proposal);
     prepared.review_unavailable = false;
     Ok(true)

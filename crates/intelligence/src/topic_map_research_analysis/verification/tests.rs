@@ -8,6 +8,8 @@ use super::*;
 use linggan_evidence::creator_discovery::Fragment;
 use uuid::Uuid;
 
+mod calibration;
+
 fn source(text: &str) -> Fragment {
     Fragment {
         fragment_id: "synthetic.body".into(),
@@ -97,17 +99,15 @@ fn reject(packet: &Value, rule: &str, verdict: &str) -> VerificationOutput {
 }
 
 #[test]
-fn a_partial_quote_does_not_silently_gain_support_from_adjacent_context() {
+fn a_partial_quote_never_exposes_adjacent_text_to_complete_its_claim() {
     let f = source("我计划试做练习。后来尚未开始，是否有效还不知道。😀");
     let mut d = discussion(&f, "已经坚持练习并观察到有效");
     d.evidence[0].end = f.start + 8;
     let packet = extraction_review(&extraction(d), std::slice::from_ref(&f)).unwrap();
     assert_eq!(packet["evidence"][0]["text"], "我计划试做练习。");
-    assert_eq!(
-        packet["evidence"][0]["context"]["after"],
-        "后来尚未开始，是否有效还不知道。😀"
-    );
-    assert_eq!(packet["evidence"][0]["context"]["contextOnly"], true);
+    assert!(packet["evidence"][0].get("context").is_none());
+    assert!(!packet.to_string().contains("后来尚未开始"));
+    assert_eq!(packet["outcomeContext"], json!([]));
     assert_eq!(
         packet["proposal"]["discussions"][0]["evidenceIds"],
         json!(["e0"])
@@ -384,6 +384,22 @@ fn strict_contract_rejects_provider_edits_unknown_fields_and_invalid_reasons() {
     let mut extra = serde_json::to_value(&good).unwrap();
     extra["proposal"] = json!({"corrected":true});
     assert!(serde_json::from_value::<VerificationOutput>(extra).is_err());
+    for key in ["rule", "subject", "thoughts"] {
+        let mut copied = serde_json::to_value(&good).unwrap();
+        copied["checks"][0][key] = packet["checks"][0]["rule"].clone();
+        assert!(serde_json::from_value::<VerificationOutput>(copied).is_err());
+    }
+    assert_eq!(
+        verify_schema()["properties"]["checks"]["items"]["required"],
+        json!(["checkId", "verdict", "reason"])
+    );
+    assert_eq!(
+        verify_schema()["properties"]["checks"]["items"]["properties"]
+            .as_object()
+            .unwrap()
+            .len(),
+        3
+    );
     good.checks[0].verdict = "maybe".into();
     assert_eq!(
         validate_verification(&good, &packet["checks"]),

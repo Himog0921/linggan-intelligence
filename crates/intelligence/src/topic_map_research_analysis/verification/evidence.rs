@@ -43,14 +43,11 @@ impl<'a> EvidenceTable<'a> {
         let start = citation.start - f.start;
         let end = citation.end - f.start;
         let text: String = chars[start..end].iter().collect();
-        let before: String = chars[start.saturating_sub(48)..start].iter().collect();
-        let after: String = chars[end..(end + 48).min(chars.len())].iter().collect();
         let id = format!("e{}", self.entries.len());
         self.entries
             .push(json!({"evidenceId":id,"fragmentId":f.fragment_id,
             "field":f.field,"start":citation.start,"end":citation.end,"text":text,
-            "contextOnly":f.field=="parent_comment_context" || f.field.starts_with("work_context:"),
-            "context":{"before":before,"after":after,"contextOnly":true}}));
+            "contextOnly":f.field=="parent_comment_context" || f.field.starts_with("work_context:")}));
         self.ids.insert(key, id.clone());
         Ok(id)
     }

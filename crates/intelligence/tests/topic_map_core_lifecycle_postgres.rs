@@ -18,6 +18,8 @@ use uuid::Uuid;
 
 #[path = "topic_map_core_lifecycle/comparison_snapshot.rs"]
 mod comparison_snapshot;
+#[path = "topic_map_core_lifecycle/coverage_window.rs"]
+mod coverage_window;
 
 async fn run_state(db: &Database, run: Uuid) -> String {
     sqlx::query_scalar("SELECT state FROM linggan_topic_map_research_run WHERE run_ref=$1")

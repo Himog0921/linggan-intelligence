@@ -13,6 +13,9 @@ use sqlx::Row;
 use support::*;
 use uuid::Uuid;
 
+#[path = "topic_map_semantic_review/review_feedback.rs"]
+mod review_feedback;
+
 async fn session(name: &str, mode: &str) -> (Database, Uuid, PiAdapter, Uuid) {
     let (db, config, adapter) = setup(name).await;
     let config = model_config_mode(&db, config, &format!("synthetic-review-{mode}"), 2).await;

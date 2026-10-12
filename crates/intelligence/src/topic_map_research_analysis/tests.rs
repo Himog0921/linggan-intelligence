@@ -510,3 +510,5 @@ fn journey_missing_basis_is_distinct_from_an_invalid_source_and_unknown_remains_
     output.journey.main_stage = "unclear".into();
     assert_eq!(validate_output(&output, &fragments, &[]), Ok(()));
 }
+
+mod output_validation;

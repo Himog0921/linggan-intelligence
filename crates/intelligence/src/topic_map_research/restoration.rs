@@ -74,6 +74,7 @@ fn current_identity(input: &ResearchInput, manifest: &Value) -> Option<()> {
             crate::topic_map_research_analysis::METHOD_VERSION
                 | "topic-map.research.v3"
                 | "topic-map.research.v4"
+                | "topic-map.research.v5"
         ))
         || (contract == "topic-map.source-windows.v1" && method == "topic-map.research.v2"))
         || manifest["workRef"] != json!(input.work.work_ref)
@@ -367,6 +368,7 @@ pub(crate) async fn research_result_sources_current(
         Some("topic-map.research.v2")
         | Some("topic-map.research.v3")
         | Some("topic-map.research.v4")
+        | Some("topic-map.research.v5")
         | Some(crate::topic_map_research_analysis::EXTRACT_CONTRACT) => {
             manifest_source_work_refs(work, &manifest)
         }
@@ -381,6 +383,7 @@ pub(crate) async fn research_result_sources_current(
         Some("topic-map.research.v2")
         | Some("topic-map.research.v3")
         | Some("topic-map.research.v4")
+        | Some("topic-map.research.v5")
         | Some(crate::topic_map_research_analysis::EXTRACT_CONTRACT) => {
             restore_scoped_window(&all, work, &manifest).is_some()
         }
