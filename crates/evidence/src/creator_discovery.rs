@@ -75,6 +75,8 @@ pub struct DiscoveryData {
     pub domain: Value,
     pub policy: Value,
     pub observation_lookup_available: bool,
+    work_name_sources: HashMap<Uuid, Value>,
+    profile_name_candidates: HashMap<String, (String, Uuid)>,
 }
 
 pub fn hash(value: &str) -> String {
@@ -338,6 +340,8 @@ async fn load_topic_material_scope(
         let mut part = load_materials_in(&mut tx, &scope, None, work_refs).await?;
         if let Some(data) = data.as_mut() {
             data.works.append(&mut part.works);
+            data.work_name_sources.extend(part.work_name_sources);
+            data.profile_name_candidates.extend(part.profile_name_candidates);
             data.observation_lookup_available &= part.observation_lookup_available;
         } else {
             data = Some(part);
@@ -422,10 +426,16 @@ async fn load_materials_in(
         .into_iter()
         .map(|r| (r.get("author_external_id"), r.get("profile")))
         .collect();
+    let mut profile_name_candidates = HashMap::new();
+    let profile_names=sqlx::query("SELECT DISTINCT ON(author.author_external_id) author.author_external_id,author.display_name,author.material_ref FROM linggan_material_author_profile author JOIN linggan_runtime_capture_package package USING(package_ref) WHERE author.platform=$1 AND package.accepted_at<=$2::timestamptz AND NULLIF(btrim(author.display_name),'') IS NOT NULL AND EXISTS(SELECT 1 FROM collection_work_order_lease_task lt JOIN collection_work_order_lease lease USING(lease_ref) JOIN collection_work_order_domain_usage usage USING(work_order_ref) WHERE lt.task_id=package.task_id AND usage.domain_ref=$3) ORDER BY author.author_external_id,author.observed_at::timestamptz DESC,author.created_at DESC,author.material_ref DESC").bind(&q.platform).bind(&as_of).bind(q.domain).fetch_all(&mut **tx).await?;
+    for row in profile_names {
+        let author: String = row.get("author_external_id");
+        profile_name_candidates.insert(creator_key(&q.platform, &author), (row.get("display_name"), row.get("material_ref")));
+    }
     sqlx::query("SAVEPOINT creator_observation_lookup")
         .execute(&mut **tx)
         .await?;
-    let target_result=sqlx::query("SELECT target.identity_key,jsonb_build_object('targetRef',target.target_ref,'inCurrentDomain',relation.target_ref IS NOT NULL,'usageRole',relation.role,'lifecycleState',target.lifecycle_state,'monitoringState',CASE WHEN target.lifecycle_state IN ('paused','dismissed') THEN target.lifecycle_state WHEN target.monitoring_enabled AND EXISTS(SELECT 1 FROM collection_monitor_rule rule JOIN collection_monitor_rule_revision revision ON revision.rule_revision_ref=rule.active_revision_ref WHERE rule.target_ref=target.target_ref AND rule.retired_at IS NULL AND revision.automatic_enabled) THEN 'monitoring' ELSE 'not_enabled' END,'existsInOtherDomains',EXISTS(SELECT 1 FROM observation_domain_target other WHERE other.target_ref=target.target_ref AND other.domain_ref<>$1),'hasOtherPrimaryDomain',EXISTS(SELECT 1 FROM observation_domain_target other WHERE other.target_ref=target.target_ref AND other.domain_ref<>$1 AND other.role='primary')) AS observation FROM collection_observation_target target LEFT JOIN observation_domain_target relation ON relation.target_ref=target.target_ref AND relation.domain_ref=$1 WHERE target.target_kind='creator' AND target.platform=$2").bind(q.domain).bind(&q.platform).fetch_all(&mut **tx).await;
+    let target_result=sqlx::query("SELECT target.identity_key,jsonb_build_object('targetRef',target.target_ref,'displayName',target.display_name,'inCurrentDomain',relation.target_ref IS NOT NULL,'usageRole',relation.role,'lifecycleState',target.lifecycle_state,'monitoringState',CASE WHEN target.lifecycle_state IN ('paused','dismissed') THEN target.lifecycle_state WHEN target.monitoring_enabled AND EXISTS(SELECT 1 FROM collection_monitor_rule rule JOIN collection_monitor_rule_revision revision ON revision.rule_revision_ref=rule.active_revision_ref WHERE rule.target_ref=target.target_ref AND rule.retired_at IS NULL AND revision.automatic_enabled) THEN 'monitoring' ELSE 'not_enabled' END,'existsInOtherDomains',EXISTS(SELECT 1 FROM observation_domain_target other WHERE other.target_ref=target.target_ref AND other.domain_ref<>$1),'hasOtherPrimaryDomain',EXISTS(SELECT 1 FROM observation_domain_target other WHERE other.target_ref=target.target_ref AND other.domain_ref<>$1 AND other.role='primary')) AS observation FROM collection_observation_target target LEFT JOIN observation_domain_target relation ON relation.target_ref=target.target_ref AND relation.domain_ref=$1 WHERE target.target_kind='creator' AND target.platform=$2").bind(q.domain).bind(&q.platform).fetch_all(&mut **tx).await;
     let (targets, observation_lookup_available) = match target_result {
         Ok(rows) => {
             sqlx::query("RELEASE SAVEPOINT creator_observation_lookup")
@@ -483,6 +493,7 @@ async fn load_materials_in(
     let derived_refs: std::collections::HashSet<_> = derived_refs.into_iter().collect();
     let broad_refs:Vec<Uuid>=sqlx::query_scalar("SELECT DISTINCT finding.content_public_ref FROM linggan_material_discovery_finding finding JOIN linggan_runtime_capture_package package USING(package_ref) WHERE finding.content_public_ref=ANY($1) AND package.package_kind='profile_discovery' AND package.accepted_at<=$2::timestamptz AND EXISTS(SELECT 1 FROM collection_work_order_lease_task lt JOIN collection_work_order_lease lease USING(lease_ref) JOIN collection_work_order_domain_usage usage USING(work_order_ref) WHERE lt.task_id=package.task_id AND usage.domain_ref=$3)").bind(&refs).bind(&as_of).bind(q.domain).fetch_all(&mut **tx).await?;
     let mut works = Vec::new();
+    let mut work_name_sources = HashMap::new();
     let mut current_iter = currents.into_iter().filter(|c| c.platform == q.platform);
     loop {
         let batch: Vec<_> = current_iter.by_ref().take(100).collect();
@@ -655,6 +666,13 @@ async fn load_materials_in(
                 .and_then(|a| profiles.get(a))
                 .cloned()
                 .unwrap_or(Value::Null);
+            let current_name = c.creator_display_name.as_deref().filter(|name| !name.trim().is_empty());
+            let profile_name = profile["displayName"].as_str().filter(|name| !name.trim().is_empty());
+            if current_name.is_some() {
+                work_name_sources.insert(c.public_ref, json!({"kind":"accepted_work","workRef":c.public_ref,"sourceRef":c.creator_source.material_ref}));
+            } else if profile_name.is_some() {
+                work_name_sources.insert(c.public_ref, json!({"kind":"accepted_author_profile","sourceRef":profile["sourceRef"]}));
+            }
             let observation = if observation_lookup_available {
                 c.author_external_id.as_ref().and_then(|a|targets.get(a)).cloned().unwrap_or(json!({"inCurrentDomain":false,"monitoringState":"not_enabled","existsInOtherDomains":false,"hasOtherPrimaryDomain":false,"targetRef":null,"usageRole":null,"lookupState":"available"}))
             } else {
@@ -688,9 +706,7 @@ async fn load_materials_in(
                 .map(|a| creator_key(&c.platform, a)),
             platform: c.platform,
             author_external_id: c.author_external_id,
-            display_name: c
-                .creator_display_name
-                .or_else(|| profile["displayName"].as_str().map(str::to_owned)),
+            display_name: current_name.map(str::to_owned).or_else(|| profile_name.map(str::to_owned)),
             title: c.title,
             published_date: c.published_local_date,
             published_epoch: c.published_at_epoch_ms,
@@ -780,6 +796,8 @@ async fn load_materials_in(
         domain,
         policy,
         observation_lookup_available,
+        work_name_sources,
+        profile_name_candidates,
     })
 }
 pub fn in_base(w: &DiscoveryWork, q: &CreatorScope, now: i64) -> bool {
@@ -853,7 +871,30 @@ pub fn work_matches(w: &DiscoveryWork, q: &CreatorScope, threshold: Option<i64>)
     }
     true
 }
-fn author_matches(latest: &DiscoveryWork, works: &[&DiscoveryWork], q: &CreatorScope) -> bool {
+fn author_display(
+    data: &DiscoveryData,
+    latest: &DiscoveryWork,
+    works: &[&DiscoveryWork],
+) -> (Option<String>, Value) {
+    if let Some(named) = works
+        .iter()
+        .filter(|work| work.display_name.as_deref().is_some_and(|name| !name.trim().is_empty()))
+        .max_by_key(|work| (&work.first_added, work.work_ref))
+    {
+        return (named.display_name.clone(), data.work_name_sources.get(&named.work_ref).cloned().unwrap_or(Value::Null));
+    }
+    if let Some(candidate) = latest.creator_key.as_ref().and_then(|key| data.profile_name_candidates.get(key)) {
+        return (Some(candidate.0.clone()), json!({"kind":"accepted_author_profile","sourceRef":candidate.1}));
+    }
+    let name = latest.observation["displayName"].as_str().filter(|name| !name.trim().is_empty()).map(str::to_owned);
+    let source = if name.is_some() {
+        json!({"kind":"observation_target","targetRef":latest.observation["targetRef"]})
+    } else {
+        Value::Null
+    };
+    (name, source)
+}
+fn author_matches(data: &DiscoveryData, latest: &DiscoveryWork, works: &[&DiscoveryWork], q: &CreatorScope) -> bool {
     let outside = latest.observation["inCurrentDomain"] == false;
     if q.observation.as_deref().is_some_and(|s| match s {
         "outside" => !outside,
@@ -875,8 +916,9 @@ fn author_matches(latest: &DiscoveryWork, works: &[&DiscoveryWork], q: &CreatorS
     if q.search_mode == "author" {
         if let Some(text) = &q.query {
             let text = text.to_lowercase();
+            let display_name = author_display(data, latest, works).0;
             if ![
-                latest.display_name.as_deref(),
+                display_name.as_deref(),
                 latest.author_external_id.as_deref(),
                 latest.profile["biography"].as_str(),
             ]
@@ -915,7 +957,7 @@ pub fn matching_work_refs(data: &DiscoveryData, q: &CreatorScope) -> Vec<Uuid> {
             .iter()
             .max_by_key(|w| &w.first_added)
             .expect("nonempty author");
-        if author_matches(latest, works, q) {
+        if author_matches(data, latest, works, q) {
             refs.extend(
                 works
                     .iter()
@@ -971,7 +1013,7 @@ pub fn aggregate(data: &DiscoveryData, q: &CreatorScope) -> Value {
                 stats[field] = json!(stats[field].as_u64().unwrap_or(0) + 1);
             }
         }
-        if !author_matches(latest, &ws, q) {
+        if !author_matches(data, latest, &ws, q) {
             continue;
         }
         let mut candidates: Vec<_> = ws
@@ -1056,7 +1098,8 @@ pub fn aggregate(data: &DiscoveryData, q: &CreatorScope) -> Value {
             hints.insert(0, selected.clone());
         }
         hints.truncate(2);
-        items.push(json!({"creatorKey":key,"displayName":latest.display_name,"authorExternalId":latest.author_external_id,"platform":latest.platform,"profile":latest.profile,"focus":latest.focus,"authorAnalysis":latest.author_analysis,"traits":traits,"topicHints":hints,"observation":latest.observation,"collectedWorkCount":ws.len(),"relatedWorkCount":related.len(),"matchedRelatedWorkCount":matched_related,"matchedViralWorkCount":threshold.map(|_|matched_viral),"unrelatedWorkCount":ws.iter().filter(|w|w.relevance=="unrelated").count(),"unknownRelevanceWorkCount":ws.iter().filter(|w|w.relevance=="unknown").count(),"knownLikeWorkCount":related.iter().filter(|w|w.likes.is_some()).count(),"viralWorkCount":threshold.map(|_|viral),"maxRelatedLikeCount":max_related,"candidateHighLikeCount":high,"matchedWorkRefs":refs,"representatives":candidates.iter().take(3).collect::<Vec<_>>(),"firstAdded":latest.first_added,"firstAddedDisplay":latest.first_added_display}));
+        let (display_name, display_name_source) = author_display(data, latest, &ws);
+        items.push(json!({"creatorKey":key,"displayName":display_name,"displayNameSource":display_name_source,"authorExternalId":latest.author_external_id,"platform":latest.platform,"profile":latest.profile,"focus":latest.focus,"authorAnalysis":latest.author_analysis,"traits":traits,"topicHints":hints,"observation":latest.observation,"collectedWorkCount":ws.len(),"relatedWorkCount":related.len(),"matchedRelatedWorkCount":matched_related,"matchedViralWorkCount":threshold.map(|_|matched_viral),"unrelatedWorkCount":ws.iter().filter(|w|w.relevance=="unrelated").count(),"unknownRelevanceWorkCount":ws.iter().filter(|w|w.relevance=="unknown").count(),"knownLikeWorkCount":related.iter().filter(|w|w.likes.is_some()).count(),"viralWorkCount":threshold.map(|_|viral),"maxRelatedLikeCount":max_related,"candidateHighLikeCount":high,"matchedWorkRefs":refs,"representatives":candidates.iter().take(3).collect::<Vec<_>>(),"firstAdded":latest.first_added,"firstAddedDisplay":latest.first_added_display}));
     }
     items.sort_by(|a, b| {
         match q.sort.as_str() {

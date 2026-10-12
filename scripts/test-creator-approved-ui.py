@@ -39,6 +39,7 @@ def fixture():
         analysis=dict(automatic=dict(focus=focus,evidence=[bio,*works[0]['analysis']['evidence']]),institution_or_brand=dict(value='unknown',reason='未取得足够资料',evidenceFragmentIds=[]),supportFragments=[bio,*works[0]['analysis']['evidence'],*works[1]['analysis']['evidence']],identitySupportFragments=[bio],manual={},state='queued',resultAtDisplay=None)
         o=dict(inCurrentDomain=i%4==0,monitoringState='monitoring',lifecycleState='active',targetRef='target-'+str(i),usageRole='primary',existsInOtherDomains=False,hasOtherPrimaryDomain=False)
         items.append(dict(creatorKey='xhs:synthetic-'+str(i),displayName=names[i%4]+f' {i+1:02d}',authorExternalId='synthetic-'+str(i),profile=dict(followerCount=None if i==1 else 2026+i,biography=bio['text']),focus=focus,authorAnalysis=analysis,collectedWorkCount=35,relatedWorkCount=7,matchedRelatedWorkCount=2,unknownRelevanceWorkCount=28,unrelatedWorkCount=0,viralWorkCount=1,maxRelatedLikeCount=0 if i==1 else 1360+i,candidateHighLikeCount=2000+i,matchedWorkRefs=[w['workRef'] for w in works],topicHints=['任务拆解与日常练习','如何记录长周期的实践变化与支持方式'],traits=['personal_experience','professional_output'],representatives=works,observation=o))
+    items[0]['displayNameSource'] = dict(kind='observation_target',targetRef='target-0')
     return dict(domain=dict(domainRef=D,name='示例领域',status='active',description='',researchGoal=''),policy=dict(analysisEnabled=True,likeThreshold=1000,revision=3,configRef='synthetic-config',dailyTokenLimit=100000),stats=dict(authors=80,works=240,vertical=20,personal=40,outside=60,outsideViral=10,relatedAuthors=70,unknownAuthorWorks=2,unknownDateWorks=3),total=80,items=items,displayAsOf='示例读取时间')
 
 
@@ -103,6 +104,10 @@ async def run(output: Path):
         async def open_author(i=0):await page.locator('#rows .creator-name').nth(i).click();await page.locator('#drawer').wait_for(state='visible')
         def proof(name):proofs.append(name);print('PASS',name,flush=True)
         await fresh();assert await page.locator('#creator-results th').count()==8;assert await page.locator('#rows tr').count()==50;proof('eight_columns_server_response_page')
+        assert '观察目标名称' in await page.locator('#rows tr').first.locator('.creator-author-cell .creator-secondary').inner_text()
+        assert '观察目标名称' not in await page.locator('#rows tr').nth(1).locator('.creator-author-cell .creator-secondary').inner_text()
+        await open_author();assert '观察目标名称' in await page.locator('#drawer-subtitle').inner_text()
+        await page.keyboard.press('Escape');proof('target_name_display_provenance')
         for width,height in [(1440,900),(1280,720),(1920,1080),(900,720),(375,812),(640,360)]:
             await fresh();await page.set_viewport_size({'width':width,'height':height})
             geometry=await page.evaluate("""()=>({width:innerWidth,doc:document.documentElement.scrollWidth,rows:[...document.querySelectorAll('#rows tr')].slice(0,5).map(x=>x.getBoundingClientRect().height),head:document.querySelector('thead').getBoundingClientRect().height,pager:document.querySelector('[data-page-nav]').getBoundingClientRect().bottom,table:document.querySelector('#creator-results').getBoundingClientRect().height})""")
