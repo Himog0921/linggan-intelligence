@@ -376,3 +376,14 @@ pub async fn frozen_work_fragment_manifest_in_transaction(
     }
     Ok(fragments)
 }
+
+/// Overview projection for a finite domain-qualified work set. Statistics callers must
+/// iterate their complete scope; this function imposes only a per-batch bound.
+pub async fn read_work_resource_overviews(
+    database: &Database,
+    domain: Uuid,
+    public_refs: &[Uuid],
+    as_of: &str,
+) -> Result<Vec<WorkResource>, WorkResourceReadError> {
+    crate::material_projection::read_work_overviews(database, domain, public_refs, as_of).await
+}

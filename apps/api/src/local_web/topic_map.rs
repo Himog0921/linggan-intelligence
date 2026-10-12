@@ -64,15 +64,30 @@ async fn page(
             .ok(),
         None => None,
     };
+    let default_domain_ref = match state.database.database() {
+        Some(db) => sqlx::query_scalar::<_, Uuid>(
+            "SELECT domain_ref FROM observation_domain ORDER BY name LIMIT 1",
+        )
+        .fetch_optional(db.pool())
+        .await
+        .ok()
+        .flatten(),
+        None => None,
+    };
     Html(page_markup(
         domains.as_deref().unwrap_or_default(),
         domain_ref,
+        default_domain_ref,
     ))
 }
 fn page_markup(
     domains: &[linggan_evidence::observation_domain::ObservationDomain],
     domain_ref: Option<Uuid>,
+    default_domain_ref: Option<Uuid>,
 ) -> String {
+    let default_domain = default_domain_ref
+        .map(|id| id.to_string())
+        .unwrap_or_default();
     let selected = domain_ref.and_then(|id| domains.iter().find(|d| d.domain_ref == id));
     let picker = super::corpus_domain_picker(domains, selected, "/topics", None);
     let domain = if picker.is_empty() {
@@ -95,7 +110,7 @@ fn page_markup(
         None,
     );
     format!(
-        r#"<!doctype html><html lang="zh-CN" data-theme="linggan-intelligence"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>主题图谱 · Linggan Intelligence</title><link rel="stylesheet" href="/assets/topic-map.css"><script defer src="/assets/topic-map.js"></script></head><body class="topic-map-page"><div class="v7-app topic-map-app">{header}<div id="topic-map-root" aria-label="主题图谱"><p role="status">正在读取领域与主题图谱…</p></div><noscript>主题图谱需要启用 JavaScript。已有作品可以在语料入口查看。</noscript></div></body></html>"#
+        r#"<!doctype html><html lang="zh-CN" data-theme="linggan-intelligence"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>主题图谱 · Linggan Intelligence</title><link rel="stylesheet" href="/assets/topic-map.css"><script defer src="/assets/topic-map.js"></script></head><body class="topic-map-page"><div class="v7-app topic-map-app">{header}<div id="topic-map-root" data-default-domain-ref="{default_domain}" aria-label="主题图谱"><p role="status">正在读取领域与主题图谱…</p></div><noscript>主题图谱需要启用 JavaScript。已有作品可以在语料入口查看。</noscript></div></body></html>"#
     )
 }
 async fn stylesheet() -> Response {
@@ -359,6 +374,33 @@ mod tests {
             "synthetic-http-own"
         );
         assert_eq!(snapshot["statistics"]["workCount"], 0);
+        // Creation order differs from the existing Topic API name order.
+        // The HTML bootstrap must preserve that API default without a full map read.
+        let early_b = Uuid::new_v4();
+        let late_a = Uuid::new_v4();
+        sqlx::query("INSERT INTO observation_domain (domain_ref,name,created_at) VALUES ($1,'BBB default proof','2020-01-01T00:00:00Z'),($2,'AAA default proof','2021-01-01T00:00:00Z')")
+            .bind(early_b).bind(late_a).execute(db.pool()).await.unwrap();
+        let response = application
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/topics")
+                    .header(header::HOST, "localhost:3000")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let html = String::from_utf8(
+            to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap()
+                .to_vec(),
+        )
+        .unwrap();
+        assert!(html.contains(&format!("data-default-domain-ref=\"{late_a}\"")));
+        assert!(!html.contains(&format!("data-default-domain-ref=\"{early_b}\"")));
         let calls: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_model_invocation")
             .fetch_one(db.pool())
             .await

@@ -256,8 +256,8 @@ pub use work_resource_read::{
     WorkResource, WorkResourceCollectionContext, WorkResourceDisplay, WorkResourceEngagement,
     WorkResourceIdentity, WorkResourceLaneSummary, WorkResourcePage, WorkResourcePreview,
     WorkResourceReadError, WorkResourceSummary, read_work_resource,
-    read_work_resource_in_transaction, read_work_resources, validate_work_resource_query,
-    work_resource_schema_is_ready,
+    read_work_resource_in_transaction, read_work_resource_overviews, read_work_resources,
+    validate_work_resource_query, work_resource_schema_is_ready,
 };
 
 pub mod collection_repair;

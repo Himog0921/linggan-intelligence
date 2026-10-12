@@ -38,8 +38,7 @@ pub(super) async fn load_windows(
     q: &TopicMapQuery,
     works: &[TopicMapWork],
     topics: &[TopicMapTopic],
-    unavailable: &HashSet<Uuid>,
-) -> Result<HashMap<Uuid, Vec<Window>>, TopicMapError> {
+) -> Result<(HashSet<Uuid>, HashMap<Uuid, Vec<Window>>), TopicMapError> {
     let mut rows = sqlx::query(RESULTS)
         .bind(q.domain_ref)
         .fetch_all(db.pool())
@@ -52,8 +51,26 @@ pub(super) async fn load_windows(
     );
     // A work may have qualified comments while the author's original is unavailable.
     let visible: HashSet<_> = works.iter().map(|w| w.work_ref).collect();
-    let mut inputs = HashMap::<(Uuid, Uuid), Vec<ResearchInput>>::new();
+    rows.retain(|row| {
+        !projection_targets(row.get("work_public_ref"), &row.get("input_refs"), &visible).is_empty()
+    });
+    let mut scopes = HashMap::<(Uuid, Uuid), BTreeSet<Uuid>>::new();
+    for row in &rows {
+        // Visibility limits projection, never the frozen participants used for qualification.
+        scopes
+            .entry((row.get("domain_ref"), row.get("config_ref")))
+            .or_default()
+            .extend(topic_map_research::manifest_source_work_refs(
+                row.get("work_public_ref"),
+                &row.get("input_refs"),
+            ));
+    }
+    let (unavailable, inputs) =
+        crate::topic_map_core::qualify_definitions_and_inputs(db, q.domain_ref, &scopes)
+            .await
+            .map_err(|e| TopicMapError::Source(e.to_string()))?;
     let mut windows = HashMap::<Uuid, Vec<Window>>::new();
+    let mut window_counts = HashMap::<(Uuid, Uuid, Uuid), usize>::new();
     let allowed: Vec<_> = topics.iter().map(|t| t.topic_ref).collect();
     for row in rows {
         let work: Uuid = row.get("work_public_ref");
@@ -63,14 +80,13 @@ pub(super) async fn load_windows(
         }
         let domain: Uuid = row.get("domain_ref");
         let config: Uuid = row.get("config_ref");
-        if let std::collections::hash_map::Entry::Vacant(entry) = inputs.entry((domain, config)) {
-            entry.insert(
-                topic_map_research::load_inputs(db, domain, config)
-                    .await
-                    .map_err(|e| TopicMapError::Source(e.to_string()))?,
-            );
-        }
-        if let Some(window) = restore_row(&row, &inputs[&(domain, config)], &allowed, unavailable) {
+        if let Some(window) = restore_row(
+            &row,
+            &inputs[&(domain, config)],
+            &allowed,
+            &unavailable,
+            &mut window_counts,
+        ) {
             // Reconstruct once using the original primary and complete frozen scope.
             // Visibility selects readers, never the evidence used to qualify a result.
             for target in targets {
@@ -78,7 +94,7 @@ pub(super) async fn load_windows(
             }
         }
     }
-    Ok(windows)
+    Ok((unavailable, windows))
 }
 
 pub(super) fn projection_targets(
@@ -105,6 +121,7 @@ fn restore_row(
     all: &[ResearchInput],
     allowed: &[Uuid],
     unavailable: &HashSet<Uuid>,
+    window_counts: &mut HashMap<(Uuid, Uuid, Uuid), usize>,
 ) -> Option<Window> {
     let work: Uuid = row.get("work_public_ref");
     let source = all.iter().find(|i| i.work.work_ref == work)?;
@@ -126,8 +143,11 @@ fn restore_row(
     if manifest["coverage"]["kind"] != "comparison" {
         // Current qualified inventory is the denominator, including newly added sources.
         current.coverage["sourceChars"] = source.coverage["sourceChars"].clone();
-        current.coverage["windowCount"] =
-            json!(topic_map_research::research_windows(source, 3000).len());
+        current.coverage["windowCount"] = json!(
+            *window_counts
+                .entry((row.get("domain_ref"), row.get("config_ref"), work))
+                .or_insert_with(|| topic_map_research::research_windows(source, 3000).len())
+        );
     }
     let typed: ResearchOutput = serde_json::from_value(output.clone()).ok()?;
     analysis::validate_output(&typed, &current.fragments, allowed).ok()?;

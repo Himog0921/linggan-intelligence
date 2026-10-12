@@ -2,9 +2,11 @@
 mod fixture;
 
 use fixture::{proof_database, submit_package, submit_package_at};
+use linggan_contracts::EvidenceQuery;
 use linggan_evidence::{
     CreatorLifecycleAssociation, CreatorLifecycleMetric, CreatorLifecycleQuery,
     CreatorLifecycleStatus, CreatorLifecycleWindow, read_creator_lifecycle, read_work_resource,
+    read_work_resources,
 };
 
 #[tokio::test]
@@ -403,6 +405,20 @@ async fn lifecycle_and_work_resource_share_one_field_wise_current_owner() {
     assert_eq!(
         work.collection_context.author_identity_match_state,
         "MATCHED"
+    );
+    let query: EvidenceQuery = serde_json::from_value(serde_json::json!({
+        "scope":"all_accepted_material","window":"latest_accepted_discovery","sort":"latest_discovery"
+    }))
+    .unwrap();
+    let listed = read_work_resources(&database, &query).await.unwrap();
+    let listed_work = listed
+        .items
+        .iter()
+        .find(|item| item.identity.public_ref == work_ref)
+        .expect("the complete library list includes the same work");
+    assert_eq!(
+        listed_work.collection_context.author_identity_match_state, "MATCHED",
+        "batch library enrichment must use content_detail attribution, not the author ID"
     );
     assert_eq!(point.title, work.display.title);
     assert_eq!(point.title_state, work.display.title_state);

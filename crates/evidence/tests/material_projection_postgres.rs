@@ -125,6 +125,7 @@ async fn blank_platform_title_falls_back_only_to_an_accepted_front_cover_headlin
         Some(&serde_json::json!("cover_ocr")),
         "the fallback is disclosed instead of being presented as a platform field"
     );
+    assert_topic_overview_matches_detail(&database, content_ref).await;
 }
 
 #[tokio::test]
@@ -777,6 +778,18 @@ async fn work_resource_uses_one_media_contract_and_selects_a_local_cover_fallbac
             .and_then(serde_json::Value::as_str),
         Some("NOT_OBSERVED")
     );
+    let reference = page.items[0].identity.public_ref;
+    assert_topic_overview_matches_detail(&database, reference).await;
+    for state in ["BYTES_CLEANED", "WITHDRAWN_OR_RESTRICTED"] {
+        sqlx::query("INSERT INTO linggan_material_media_disposition_event(event_ref,slot_key,materialization_ref,state,authority_ref,reason,effective_at)VALUES($1,CASE WHEN $2='BYTES_CLEANED' THEN NULL ELSE 'xhs:note-media-resource:image:1' END,CASE WHEN $2='BYTES_CLEANED' THEN (SELECT materialization_ref FROM linggan_media_materialization WHERE blob_sha256='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' ORDER BY verified_at DESC LIMIT 1) ELSE NULL END,$2,'synthetic-overview-proof','synthetic media gate',clock_timestamp())")
+            .bind(Uuid::new_v4()).bind(state).execute(database.pool()).await.unwrap();
+        assert_topic_overview_matches_detail(&database, reference).await;
+        let compact = read_work_resource(&database, reference)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(compact.media["cover"]["localAssetUrl"].is_null());
+    }
 }
 
 #[tokio::test]
@@ -1244,4 +1257,53 @@ async fn coverage_selects_the_exact_capability_and_reconciles_producer_acquired(
     assert_eq!(row.get::<Option<i32>, _>("observed"), Some(2));
     assert_eq!(row.get::<Option<i32>, _>("producer_acquired"), Some(2));
     assert_eq!(row.get::<Option<i32>, _>("retained"), Some(1));
+}
+
+async fn assert_topic_overview_matches_detail(
+    database: &linggan_storage_postgres::Database,
+    reference: Uuid,
+) {
+    let domain: Uuid = "00000000-0000-4000-8000-000000000001".parse().unwrap();
+    sqlx::query("INSERT INTO linggan_material_domain_usage(usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref)SELECT gen_random_uuid(),public_ref,$2,'primary','legacy_domain_migration',first_package_ref FROM linggan_material_content WHERE public_ref=$1 AND NOT EXISTS(SELECT 1 FROM linggan_material_domain_usage WHERE content_public_ref=$1 AND domain_ref=$2)")
+        .bind(reference).bind(domain).execute(database.pool()).await.unwrap();
+    let cutoff: String = sqlx::query_scalar("SELECT scope_001_now()::text")
+        .fetch_one(database.pool())
+        .await
+        .unwrap();
+    let full = read_work_resource(database, reference)
+        .await
+        .unwrap()
+        .unwrap();
+    let compact =
+        linggan_evidence::read_work_resource_overviews(database, domain, &[reference], &cutoff)
+            .await
+            .unwrap()
+            .pop()
+            .unwrap();
+    assert_eq!(
+        serde_json::to_value(&compact.display).unwrap(),
+        serde_json::to_value(&full.display).unwrap()
+    );
+    assert_eq!(
+        serde_json::to_value(&compact.preview).unwrap(),
+        serde_json::to_value(&full.preview).unwrap()
+    );
+    assert_eq!(compact.media["cover"], full.media["cover"]);
+    assert_eq!(
+        compact.inspector["derivatives"],
+        full.inspector["derivatives"]
+    );
+    assert_eq!(
+        compact.inspector.pointer("/overview/fields"),
+        full.inspector.pointer("/overview/fields")
+    );
+    assert_eq!(
+        serde_json::to_value(&compact.evidence_fragment).unwrap(),
+        serde_json::to_value(&full.evidence_fragment).unwrap()
+    );
+    assert_eq!(
+        compact.summary.restriction_state,
+        full.summary.restriction_state
+    );
+    assert_eq!(compact.media["detailState"], "NOT_LOADED");
 }

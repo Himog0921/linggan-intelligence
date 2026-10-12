@@ -25,6 +25,16 @@ src=src.replace(tail,`globalThis.audit={dispatchClick,readSample,readWork,reader
  assert.equal(deep.topicRef,'DEEP_TOPIC');assert.equal(deep.platform,'douyin');assert.equal(deep.path,'family');assert.equal(deep.query,'OLD_QUERY');assert.deepEqual(deep.compare,['OLD_TOPIC']);
  const explicit=initialize('?domainRef=domain-B&topicRef=NEW_TOPIC&platform=douyin&windowDays=30');
  assert.equal(explicit.topicRef,'NEW_TOPIC');assert.equal(explicit.platform,'douyin');assert.equal(explicit.windowDays,'30');assert.equal(explicit.path,'');assert.deepEqual(explicit.compare,[]);
+ const freshEntry={...ctx,document:{...ctx.document,getElementById(){return {...blank,dataset:{defaultDomainRef:'server-default'}}}},sessionStorage:{getItem(){return null}}};
+ vm.runInNewContext(initializationSource,freshEntry);
+ assert.equal(freshEntry.initialState.domainRef,'server-default','fresh entry selects the server registry domain before its first request');
+ const entryRequests=[];
+ const entryContext={...freshEntry,history:{replaceState(){}},fetch:async url=>{entryRequests.push(url);return {ok:true,json:async()=>({domains:[{domainRef:'server-default'}],scope:{domainRef:'server-default'},topics:[],works:[],statistics:{}})};}};
+ vm.runInNewContext(fs.readFileSync(sourcePath,'utf8').replace(tail,'render=()=>{};globalThis.entryLoad=load();})();'),entryContext);
+ await entryContext.entryLoad;
+ assert.equal(entryRequests.length,1,'first entry performs exactly one map read');
+ assert(entryRequests[0].includes('domainRef=server-default'));
+ console.log('PASS: fresh initialization performs one domain-qualified map request');
  console.log('PASS: both domain aliases clear former scope; same-domain deep links preserve session and explicit URL selection');
  const stale={workRef:'A',title:'Synthetic A',readable:true,platform:'xhs',topicRefs:['topic-A'],research:{fragments:[{fragmentId:'old-comment',field:'studied_comment',text:'RESTRICTED_OLD_COMMENT'}],output:{journey:{rationale:'RESTRICTED_OLD_INTERPRETATION'}},core:{coverage:{state:'partial',sourceChars:80,coveredChars:20,totalWindows:4,completedWindows:1},units:[{unitId:'old-unit',statement:'RESTRICTED_OLD_CORE_STATEMENT',label:'RESTRICTED_OLD_CORE_LABEL',rationale:'RESTRICTED_OLD_CORE_RATIONALE',speakerRole:'commenter',evidenceRole:'challenge',status:'matched',assignments:[{topicRef:'topic-A',label:'RESTRICTED_OLD_ASSIGNMENT',reason:'RESTRICTED_OLD_ASSIGNMENT_REASON'}],evidence:[{fragmentId:'old-comment',start:0,end:10}]}]}},annotation:{rationale:'RESTRICTED_OLD_ANNOTATION'},evidenceFragment:{text:'RESTRICTED_OLD_FALLBACK'}};
  const b={...stale,workRef:'B',title:'UNRELATED_B',topicRefs:['topic-B']};

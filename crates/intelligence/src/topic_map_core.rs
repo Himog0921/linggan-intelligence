@@ -9,7 +9,9 @@ pub(crate) use recall::{
 };
 #[path = "topic_map_core/source_qualification.rs"]
 mod source_qualification;
-pub(crate) use source_qualification::{definition_dependencies, unavailable_definitions};
+pub(crate) use source_qualification::{
+    definition_dependencies, qualify_definitions_and_inputs, unavailable_definitions,
+};
 #[path = "topic_map_core/backfill.rs"]
 pub(crate) mod backfill;
 #[path = "topic_map_core/comparison.rs"]

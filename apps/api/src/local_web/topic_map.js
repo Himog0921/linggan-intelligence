@@ -24,6 +24,8 @@
   const incomingDomain = params.get('domain') ?? params.get('domainRef');
   if (params.has('domain') || (incomingDomain !== null && incomingDomain !== state.domainRef)) Object.assign(state, defaults, {domainRef:incomingDomain});
   ['domainRef','topicRef','platform','windowDays','referenceWindowDays'].forEach(key => { if (params.has(key)) state[key] = params.get(key); });
+  // The page supplies the Topic API's name-ordered default before an expensive map read.
+  if (!state.domainRef && root.dataset?.defaultDomainRef) state.domainRef = root.dataset.defaultDomainRef;
   const extraWorks = new Map();
   let snapshot = null, progress = null, loading = false, readError = '', notice = '', pending = false;
   let dialog = null, dialogState = null, dialogStack = [], triggerElement = null, fetchEpoch = 0;
