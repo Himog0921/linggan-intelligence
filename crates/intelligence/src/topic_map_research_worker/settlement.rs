@@ -67,7 +67,7 @@ pub(super) async fn settle(db: &Database, mut c: Completion<'_>) -> Result<(), M
     if let Some(output) = &accepted.output {
         append_result(&mut tx, &c, output, &accepted.units).await?;
     }
-    let mut invocation_result = json!({"accepted":accepted.reason.is_none(),"dispatchUnknown":accepted.state=="unknown_dispatch","phaseComplete":accepted.state!="failed" && accepted.state!="unknown_dispatch"});
+    let mut invocation_result = json!({"accepted":accepted.reason.is_none(),"dispatchUnknown":accepted.state=="unknown_dispatch","phaseComplete":accepted.reason.is_none() && accepted.state!="failed" && accepted.state!="unknown_dispatch"});
     // Attach only the validator that actually rejected this acceptance. A source
     // change or late result must never inherit an unrelated model diagnosis.
     if accepted.reason.is_some()
@@ -132,6 +132,30 @@ async fn accept_phase(
             .bind(c.task).fetch_one(&mut **tx).await?;
         accepted.state = if remains { "queued" } else { "failed" };
         accepted.reason = Some("request_not_started");
+    }
+    if accepted.state == "failed"
+        && c.source_current
+        && c.candidate_sources_current
+        && c.response.is_some_and(|r| r.ok)
+        && c.rejection
+            .zip(c.rejection_diagnostic.as_ref())
+            .is_some_and(|(code, diagnostic)| {
+                super::feedback::safe_feedback(code, diagnostic).is_some()
+            })
+    {
+        let limits = sqlx::query("SELECT t.phase_attempt_count,t.recall_manifest,config.max_attempts FROM linggan_topic_map_research_task t JOIN linggan_topic_map_research_run r USING(run_ref) JOIN linggan_model_config config ON config.config_ref=r.config_ref WHERE task_ref=$1")
+            .bind(c.task).fetch_one(&mut **tx).await?;
+        if limits
+            .get::<Value, _>("recall_manifest")
+            .get("backfill")
+            .is_none()
+            && super::feedback::correction_allowed(
+                limits.get("phase_attempt_count"),
+                limits.get("max_attempts"),
+            )
+        {
+            accepted.state = "queued";
+        }
     }
     Ok(accepted)
 }

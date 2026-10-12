@@ -20,6 +20,7 @@ pub(super) async fn prepare(
         cursor: row.get::<i32, _>("resolution_cursor") as usize,
         total_units: 0,
         definition_unavailable: false,
+        rule_feedback_unavailable: false,
         eligible_definitions: vec![],
         previous: row
             .get::<Value, _>("resolutions_json")
@@ -36,6 +37,7 @@ pub(super) async fn prepare(
                 "comparisonBoundary":if phase=="compare" {"Only selected cited evidence from the listed works is supplied. Distinguish each work and author/commenter role. Compare only these observations; coverage is partial and is not audience prevalence."} else {"A source window is partial evidence. Other selected works are not supplied here; cross-work claims remain unknown."}},
             "outputFieldNames":analysis::compact_field_names(),
             "outputSchema":analysis::compact_output_schema()}).to_string();
+        add_rule_guidance(db, row, input, &mut prepared).await?;
         return Ok(prepared);
     }
     let draft: ResearchOutput = serde_json::from_value(
@@ -105,8 +107,40 @@ pub(super) async fn prepare(
             "batchBoundary":"Only input.units may be assigned. batchContext supplies related and contrasting discussions for concept abstraction; its other units are not extra independent people or additional assignments.",
             "fragments":provider_fragments(fragments.into_iter()),"definitions":prepared.candidates,"recall":prepared.recall},
         "outputSchema":analysis::resolution_schema()}).to_string();
+    add_rule_guidance(db, row, input, &mut prepared).await?;
     prepared.draft = Some(draft);
     Ok(prepared)
+}
+
+async fn add_rule_guidance(
+    db: &Database,
+    row: &sqlx::postgres::PgRow,
+    input: &ResearchInput,
+    prepared: &mut Prepared,
+) -> Result<(), ModelError> {
+    let mut prompt: Value =
+        serde_json::from_str(&prepared.prompt).map_err(|_| ModelError::InvalidOutput)?;
+    let phase: String = row.get("phase");
+    if phase == "resolve" {
+        prompt["candidateComparisonChecklist"] = json!(prepared.candidates.as_array().into_iter().flatten()
+            .map(|candidate| json!({"topicRef":candidate["topicRef"],"definitionRef":candidate["definitionRef"]})).collect::<Vec<_>>());
+        prompt["strictFieldGuidance"] = json!(
+            "new 的 relations 必须逐一覆盖 candidateComparisonChecklist 每一个精确候选。matched 使用明确已有主题匹配；equivalent 不能创建新主题。所有纳入与排除条件数组各至少一条非空标准。"
+        );
+    } else {
+        prompt["strictFieldGuidance"] = json!(
+            "所有字段必须满足 outputSchema 类型：讨论纳入 i 和排除 x 各至少一条非空条件；angles 的 t 标题为非空字符串，不能是 null。journey 的 m 不是 unclear 时必须在 e 给实际有效引用；没有旅程依据保持 unclear。空数组只用于 schema 允许 minItems=0 的字段。不补造引用，不因反馈改变原声身份。"
+        );
+    }
+    match super::feedback::previous_feedback(db, row, input).await? {
+        super::feedback::RuleFeedback::Available(feedback) => {
+            prompt["validationFeedback"] = feedback
+        }
+        super::feedback::RuleFeedback::Unavailable => prepared.rule_feedback_unavailable = true,
+        super::feedback::RuleFeedback::NotRequired => {}
+    }
+    prepared.prompt = prompt.to_string();
+    Ok(())
 }
 
 fn provider_fragments<'a>(

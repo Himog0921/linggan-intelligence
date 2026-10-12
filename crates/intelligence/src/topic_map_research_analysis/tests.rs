@@ -489,3 +489,24 @@ fn token_estimation_vectors_match_adapter_contract() {
     }
     assert_eq!(estimate_input_tokens("", &"甲".repeat(12000)), 12128);
 }
+
+#[test]
+fn journey_missing_basis_is_distinct_from_an_invalid_source_and_unknown_remains_valid() {
+    let (mut output, fragments) = sample();
+    assert_eq!(validate_output(&output, &fragments, &[]), Ok(()));
+    output.journey.main_stage = "begin_practice".into();
+    assert_eq!(
+        validate_output(&output, &fragments, &[]),
+        Err("journey_evidence_missing")
+    );
+    output.journey.evidence = vec![citation(&fragments[0])];
+    assert_eq!(validate_output(&output, &fragments, &[]), Ok(()));
+    output.journey.evidence[0].fragment_id = "foreign-private-source".into();
+    assert_eq!(
+        validate_output(&output, &fragments, &[]),
+        Err("journey_evidence_invalid")
+    );
+    output.journey.evidence.clear();
+    output.journey.main_stage = "unclear".into();
+    assert_eq!(validate_output(&output, &fragments, &[]), Ok(()));
+}

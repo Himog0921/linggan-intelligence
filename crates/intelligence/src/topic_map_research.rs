@@ -310,6 +310,8 @@ macro_rules! task_progress_query {
     'totalTaskCount',count(*),
     'queuedCount',count(*) FILTER(WHERE state='queued'),
     'runningCount',count(*) FILTER(WHERE state='running'),
+    'correctiveQueuedCount',count(*) FILTER(WHERE state='queued' AND phase_attempt_count=1 AND last_reason IN('output_schema_invalid','new_topic_candidate_coverage_missing','journey_evidence_missing')),
+    'correctiveRunningCount',count(*) FILTER(WHERE state='running' AND phase_attempt_count=2 AND last_reason IN('output_schema_invalid','new_topic_candidate_coverage_missing','journey_evidence_missing')),
     'succeededCount',count(*) FILTER(WHERE state='succeeded'),
     'noSignalCount',count(*) FILTER(WHERE state='no_signal'),
     'insufficientCount',count(*) FILTER(WHERE state='insufficient'),

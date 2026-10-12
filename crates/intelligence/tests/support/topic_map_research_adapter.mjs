@@ -161,6 +161,22 @@ function compactOutput(value) {
   ]));
 }
 const semantic = envelope.contract.startsWith('topic-map.resolve.') ? resolve() : extract();
+const feedbackMode = request.modelId.startsWith('synthetic-feedback-');
+const hasFeedback = !!envelope.validationFeedback;
+if (feedbackMode && hasFeedback) {
+  if (request.prompt.includes('PRIVATE_PROVIDER_DIAGNOSTIC')) throw new Error('old response leaked into correction');
+  if (!envelope.validationFeedback.instruction || !envelope.validationFeedback.rule) throw new Error('missing safe static feedback');
+}
+if (feedbackMode && !attack && (!hasFeedback || request.modelId === 'synthetic-feedback-persistent')) {
+  if (compact) {
+    semantic.limitations = ['PRIVATE_PROVIDER_DIAGNOSTIC'];
+    if (request.modelId === 'synthetic-feedback-title') semantic.angles[0].title = null;
+    else if (request.modelId === 'synthetic-feedback-journey') semantic.journey.evidence = [];
+    else if (request.modelId !== 'synthetic-feedback-relations') semantic.discussions[0].exclusionCriteria = [];
+  } else if (request.modelId === 'synthetic-feedback-relations') {
+    for (const decision of semantic.decisions) if (decision.status === 'new') decision.relations = [];
+  }
+}
 const output = compact ? compactOutput(semantic) : semantic;
 process.stdout.write(JSON.stringify({
   version: request.version, ok: true, text: JSON.stringify(output), failureCode: null, modelIds: null, modelListOrigin: null,
