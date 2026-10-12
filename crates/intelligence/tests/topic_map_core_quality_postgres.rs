@@ -77,7 +77,7 @@ async fn several_definitions_share_one_reassessment_and_never_inflate_initial_co
     run_once(&db, &SyntheticModelSecrets, &adapter)
         .await
         .unwrap();
-    let maintenance = sqlx::query("SELECT task_ref,recall_manifest,state FROM linggan_topic_map_research_task WHERE recall_manifest ? 'backfill'").fetch_all(db.pool()).await.unwrap();
+    let maintenance = sqlx::query("SELECT task_ref,recall_manifest,state,last_reason FROM linggan_topic_map_research_task WHERE recall_manifest ? 'backfill'").fetch_all(db.pool()).await.unwrap();
     assert_eq!(
         maintenance.len(),
         1,
@@ -90,12 +90,44 @@ async fn several_definitions_share_one_reassessment_and_never_inflate_initial_co
         .unwrap();
     assert_eq!(refs.len(), definitions.len());
     assert!(definitions.iter().all(|id| refs.contains(&json!(id))));
-    assert_eq!(maintenance[0].get::<String, _>("state"), "succeeded");
+    assert_eq!(maintenance[0].get::<String, _>("state"), "queued");
+    assert_eq!(
+        maintenance[0].get::<String, _>("last_reason"),
+        "semantic_review_pending"
+    );
+    let task: Uuid = maintenance[0].get("task_ref");
+    for _ in 0..8 {
+        let accepted: bool = sqlx::query_scalar(
+            "SELECT state='succeeded' FROM linggan_topic_map_research_task WHERE task_ref=$1",
+        )
+        .bind(task)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        if accepted {
+            break;
+        }
+        assert!(
+            run_once(&db, &SyntheticModelSecrets, &adapter)
+                .await
+                .unwrap()
+        );
+    }
+    assert_eq!(
+        sqlx::query_scalar::<_, String>(
+            "SELECT state FROM linggan_topic_map_research_task WHERE task_ref=$1"
+        )
+        .bind(task)
+        .fetch_one(db.pool())
+        .await
+        .unwrap(),
+        "succeeded"
+    );
     run_once(&db, &SyntheticModelSecrets, &adapter)
         .await
         .unwrap();
     assert_eq!(count(&db,"SELECT count(DISTINCT queued_task_ref) FROM linggan_topic_map_backfill_queue WHERE state='completed'").await, 1);
-    assert_eq!(count(&db,"SELECT count(*) FROM linggan_topic_map_research_request request JOIN linggan_topic_map_research_task task USING(task_ref) WHERE task.recall_manifest ? 'backfill'").await, 1);
+    assert_eq!(count(&db,"SELECT count(*) FROM linggan_topic_map_research_request request JOIN linggan_topic_map_research_task task USING(task_ref) WHERE task.recall_manifest ? 'backfill'").await, 2);
     let after = read_research_progress(&db, D).await.unwrap()["summary"].clone();
     for field in [
         "initialWindowCount",
@@ -171,11 +203,11 @@ async fn coalesced_maintenance_cannot_bypass_the_original_run_budget() {
         "SELECT count(*) FROM linggan_topic_map_research_request",
     )
     .await;
-    // Keep the original known fees. The 0117 minimum of 1,024 tokens leaves only 226
-    // tokens left, insufficient for another bounded resolve reservation.
-    assert_eq!(charges, 798);
-    sqlx::query("UPDATE linggan_topic_map_research_run SET token_limit=1024 WHERE run_ref=(SELECT run_ref FROM linggan_topic_map_research_task WHERE task_ref=$1)")
-        .bind(source).execute(db.pool()).await.unwrap();
+    // Keep both original proposal fees and their independent review fees. Leave
+    // exactly 226 tokens, insufficient for another bounded resolve reservation.
+    assert_eq!(charges, 1296);
+    sqlx::query("UPDATE linggan_topic_map_research_run SET token_limit=$2 WHERE run_ref=(SELECT run_ref FROM linggan_topic_map_research_task WHERE task_ref=$1)")
+        .bind(source).bind(charges+226).execute(db.pool()).await.unwrap();
     apply_research_command(&db, &configure(config, 100000, true))
         .await
         .unwrap();

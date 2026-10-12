@@ -25,7 +25,7 @@ use linggan_evidence::creator_discovery::hash;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-pub const METHOD_VERSION: &str = "topic-map.core.v1";
+pub const METHOD_VERSION: &str = "topic-map.core.v2";
 
 /// Source coordinates, roles and statement identify a discussion, not its batch or display name.
 pub(crate) fn units(input: &ResearchInput, output: &ResearchOutput) -> Vec<(String, Discussion)> {

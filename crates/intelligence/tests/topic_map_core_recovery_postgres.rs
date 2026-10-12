@@ -34,6 +34,11 @@ async fn automatic_backpressure_and_phase_priority_produce_a_completed_topic() {
             .await
             .unwrap()
     );
+    assert!(
+        run_once(&db, &SyntheticModelSecrets, &adapter)
+            .await
+            .unwrap()
+    );
     let older: Uuid = sqlx::query_scalar("SELECT run_ref FROM linggan_topic_map_research_run")
         .fetch_one(db.pool())
         .await
@@ -55,6 +60,11 @@ async fn automatic_backpressure_and_phase_priority_produce_a_completed_topic() {
     apply_research_command(&db, &start(vec![fresh]))
         .await
         .unwrap();
+    assert!(
+        run_once(&db, &SyntheticModelSecrets, &adapter)
+            .await
+            .unwrap()
+    );
     assert!(
         run_once(&db, &SyntheticModelSecrets, &adapter)
             .await
@@ -172,7 +182,7 @@ async fn simultaneous_automatic_ticks_admit_one_batch_and_send_one_snapshot() {
         .await,
         1
     );
-    assert_eq!(count(&db, "SELECT count(*) FROM linggan_topic_map_research_task WHERE phase='resolve' AND state='queued'").await, 1);
+    assert_eq!(count(&db, "SELECT count(*) FROM linggan_topic_map_research_task WHERE phase='extract' AND state='queued' AND recall_manifest ? 'semanticReview'").await, 1);
 }
 
 #[tokio::test]

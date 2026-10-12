@@ -9,6 +9,18 @@ use linggan_storage_postgres::Database;
 use serde_json::json;
 use uuid::Uuid;
 pub const D: Uuid = Uuid::from_u128(0x00000000000040008000000000000001);
+/// Models and configs are immutable; a test mode is a new qualified identity.
+pub async fn model_config_mode(db: &Database, original: Uuid, mode: &str, attempts: i32) -> Uuid {
+    let model = Uuid::new_v4();
+    let config = Uuid::new_v4();
+    sqlx::query("INSERT INTO linggan_model_entry(model_ref,connection_version_ref,model_id,origin) SELECT $1,m.connection_version_ref,$3,'manual' FROM linggan_model_entry m JOIN linggan_model_config c USING(model_ref) WHERE c.config_ref=$2")
+        .bind(model).bind(original).bind(mode).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_model_config(config_ref,model_ref,input_token_limit,output_token_limit,timeout_seconds,max_attempts) SELECT $1,$2,input_token_limit,output_token_limit,timeout_seconds,$4 FROM linggan_model_config WHERE config_ref=$3")
+        .bind(config).bind(model).bind(original).bind(attempts).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,operation,request_hash,state,reserved_tokens,charged_tokens,result) SELECT $1,connection_version_ref,model_ref,'probe','synthetic-semantic-review','succeeded',0,0,$3 FROM linggan_model_entry WHERE model_ref=$2")
+        .bind(Uuid::new_v4()).bind(model).bind(json!({"ok":true,"modelCallable":true,"semanticQualified":true})).execute(db.pool()).await.unwrap();
+    config
+}
 pub async fn setup(name: &str) -> (Database, Uuid, PiAdapter) {
     let db = fixture::proof_database(name).await;
     let conn = Uuid::new_v4();

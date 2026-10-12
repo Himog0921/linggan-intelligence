@@ -13,6 +13,7 @@ pub(crate) struct Acceptance<'a> {
     pub resolution: &'a ResolutionOutput,
     pub candidates: &'a Value,
     pub recall: &'a Value,
+    pub semantic_verification: &'a Value,
     pub eligible_definitions: &'a [Uuid],
 }
 
@@ -20,6 +21,12 @@ pub(crate) async fn accept_in(
     tx: &mut Transaction<'_, Postgres>,
     batch: Acceptance<'_>,
 ) -> Result<Vec<Value>, ModelError> {
+    if batch.semantic_verification["contract"]
+        != crate::topic_map_research_analysis::verification::VERIFY_CONTRACT
+        || batch.semantic_verification["passed"] != true
+    {
+        return Err(ModelError::InvalidOutput);
+    }
     let domain = batch.input.domain["domainRef"]
         .as_str()
         .and_then(|s| s.parse::<Uuid>().ok())
@@ -74,7 +81,7 @@ async fn accept_unit(
     let resolution_ref = Uuid::new_v4();
     sqlx::query("INSERT INTO linggan_topic_map_unit_resolution(resolution_ref,unit_ref,invocation_ref,task_ref,status,reason,candidate_manifest)VALUES($1,$2,$3,$4,$5,$6,$7)")
             .bind(resolution_ref).bind(unit_ref).bind(batch.invocation).bind(batch.task).bind(&decision.status).bind(&decision.reason)
-            .bind(json!({"topics":candidates.as_array().into_iter().flatten().map(|c|json!({"topicRef":c["topicRef"],"definitionRef":c["definitionRef"],"recallScore":c["recallScore"]})).collect::<Vec<_>>(),"recall":batch.recall})).execute(&mut **tx).await?;
+            .bind(json!({"topics":candidates.as_array().into_iter().flatten().map(|c|json!({"topicRef":c["topicRef"],"definitionRef":c["definitionRef"],"recallScore":c["recallScore"]})).collect::<Vec<_>>(),"recall":batch.recall,"semanticVerification":batch.semantic_verification})).execute(&mut **tx).await?;
     let assignments = assignments_for(tx, batch, domain, decision, discussion).await?;
     for (topic, definition, _, reason, _) in &assignments {
         sqlx::query("INSERT INTO linggan_topic_map_unit_assignment(resolution_ref,topic_ref,definition_ref,reason)VALUES($1,$2,$3,$4)")
@@ -88,7 +95,7 @@ async fn accept_unit(
             "evidenceRole":discussion.evidence_role,"rationale":discussion.rationale,"evidence":discussion.evidence,
             "status":decision.status,"reason":decision.reason,"hierarchy":hierarchy,"proposedTopic":decision.proposed_topic,"relations":decision.relations,"comparedDefinitionRefs":candidates.as_array().into_iter().flatten().map(|c|c["definitionRef"].clone()).collect::<Vec<_>>(),
             "assignments":assignments.iter().map(|(topic,definition,label,reason,_)|json!({"topicRef":topic,"definitionRef":definition,"label":label,"reason":reason})).collect::<Vec<_>>(),
-            "recall":batch.recall}),
+            "recall":batch.recall,"semanticVerification":batch.semantic_verification}),
     )
 }
 

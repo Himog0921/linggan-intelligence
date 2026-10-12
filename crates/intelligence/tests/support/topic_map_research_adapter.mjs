@@ -4,7 +4,42 @@ for await (const part of process.stdin) source += part;
 const request = JSON.parse(source);
 const envelope = JSON.parse(request.prompt);
 const input = envelope.input;
-const compact = envelope.contract === 'topic-map.extract.compact.v1';
+if (envelope.contract === 'topic-map.verify.v1') {
+  const checks = input.checks;
+  if (!Array.isArray(checks) || checks.length === 0) throw new Error('missing semantic checks');
+  const mode = request.modelId.replace(/^synthetic-review-/, '');
+  if (mode === 'unknown') {
+    process.stdout.write(JSON.stringify({
+      version: request.version, ok: false, text: null, failureCode: 'provider_transport', modelIds: null, modelListOrigin: null,
+      usage: { inputTokens: null, outputTokens: null, costUsd: null }, elapsedMs: 1,
+      diagnostic: { schemaVersion: 1, stage: 'failed', httpStatus: null, responseStarted: null, terminalReceived: null,
+        receivedBytes: null, limitKind: null, finishReason: null, elapsedMs: 1, usageKnown: false, sdkErrorType: 'network', retryClass: 'unknown' },
+    }));
+    process.exit(0);
+  }
+  const rejectRule = {
+    citation: 'semantic_discussion_unsupported', atomic: 'semantic_discussion_non_atomic',
+    boundary: 'semantic_assignment_boundary', identity: 'semantic_identity_relation',
+    concept: 'semantic_concept_boundary', parent: 'semantic_parent_containment',
+  }[mode];
+  const output = { contract: envelope.contract, checks: checks.map(c => ({
+    checkId: c.checkId, verdict: c.rule === rejectRule ? 'fail' : 'pass',
+    reason: c.rule === rejectRule ? '合成反例不满足既定语义规则' : '合成检查通过',
+  })) };
+  if (mode === 'uncertain') output.checks[0].verdict = 'uncertain';
+  if (mode === 'missing') output.checks.pop();
+  if (mode === 'duplicate') output.checks[output.checks.length - 1] = {...output.checks[0]};
+  if (mode === 'foreign') output.checks[0].checkId = 'foreign0';
+  process.stdout.write(JSON.stringify({
+    version: request.version, ok: true, text: JSON.stringify(output), failureCode: null, modelIds: null, modelListOrigin: null,
+    usage: { inputTokens: 199, outputTokens: 50, costUsd: null }, elapsedMs: 1,
+    diagnostic: { schemaVersion: 1, stage: 'terminal', httpStatus: 200, responseStarted: true, terminalReceived: true,
+      receivedBytes: 100, limitKind: null, finishReason: 'stop', elapsedMs: 1, usageKnown: true, sdkErrorType: null, retryClass: 'never' },
+  }));
+  process.exit(0);
+}
+const quotes = envelope.contract === 'topic-map.extract.quotes.v1';
+const compact = quotes || envelope.contract === 'topic-map.extract.compact.v1';
 const fragments = (input.fragments ?? []).map((f) => compact ? {
   ...f, fragmentId: `${f.workRef ?? input.workRef}.synthetic.${f.fragmentIndex}`,
 } : f);
@@ -151,10 +186,15 @@ function resolve() {
     }),
   };
 }
-if (!['topic-map.research.v2', 'topic-map.resolve.v1', 'topic-map.research.v3', 'topic-map.research.v4', 'topic-map.resolve.v2', 'topic-map.extract.compact.v1'].includes(envelope.contract)) throw new Error('unexpected synthetic contract');
+if (!['topic-map.research.v2', 'topic-map.resolve.v1', 'topic-map.research.v3', 'topic-map.research.v4', 'topic-map.research.v5', 'topic-map.resolve.v2', 'topic-map.extract.compact.v1', 'topic-map.extract.quotes.v1'].includes(envelope.contract)) throw new Error('unexpected synthetic contract');
 function compactOutput(value) {
   if (Array.isArray(value)) return value.map(compactOutput);
   if (!value || typeof value !== 'object') return value;
+  if (quotes && Object.hasOwn(value, 'fragmentId')) {
+    const index = fragments.findIndex(f => f.fragmentId === value.fragmentId);
+    const fragment = fragments[index];
+    return {f:index, q:fragment ? Array.from(fragment.text).slice(value.start - fragment.start, value.end - fragment.start).join('') : 'foreign synthetic quotation'};
+  }
   return Object.fromEntries(Object.entries(value).map(([key, child]) => [
     envelope.outputFieldNames[key] ?? key,
     key === 'fragmentId' ? fragments.findIndex(f => f.fragmentId === child) : compactOutput(child),

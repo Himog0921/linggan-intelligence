@@ -51,7 +51,7 @@ async fn finish_source_task(db: &Database, adapter: &PiAdapter, task: Uuid) {
     // untouched, so a 257-media regression need not invoke 257 synthetic analyses.
     sqlx::query("UPDATE linggan_topic_map_research_task SET created_at=scope_001_now()-interval '1 hour' WHERE task_ref=$1")
         .bind(task).execute(db.pool()).await.unwrap();
-    for _ in 0..8 {
+    for _ in 0..24 {
         let row = sqlx::query(
             "SELECT state,phase,last_reason,attempt_count FROM linggan_topic_map_research_task WHERE task_ref=$1",
         )

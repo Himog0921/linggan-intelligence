@@ -40,6 +40,11 @@ async fn exact_input_pipeline_idempotency_budget_and_stop() {
             .await
             .unwrap()
     );
+    assert!(
+        run_once(&db, &SyntheticModelSecrets, &adapter)
+            .await
+            .unwrap()
+    );
     assert_eq!(
         sqlx::query_scalar::<_, String>("SELECT phase FROM linggan_topic_map_research_task")
             .fetch_one(db.pool())
@@ -75,7 +80,7 @@ async fn exact_input_pipeline_idempotency_budget_and_stop() {
             .unwrap(),
         1
     );
-    assert_eq!(sqlx::query_scalar::<_,i64>("SELECT sum(charged_tokens)::bigint FROM linggan_model_invocation WHERE operation='analyze'").fetch_one(db.pool()).await.unwrap(),798);
+    assert_eq!(sqlx::query_scalar::<_,i64>("SELECT sum(charged_tokens)::bigint FROM linggan_model_invocation WHERE operation='analyze'").fetch_one(db.pool()).await.unwrap(),1296);
     assert_eq!(
         apply_research_command(&db, &start(vec![w])).await.unwrap()["state"],
         "no_new_input"
@@ -148,7 +153,7 @@ async fn exact_input_pipeline_idempotency_budget_and_stop() {
         .fetch_one(db.pool())
         .await
         .unwrap(),
-        2
+        4
     );
 }
 #[tokio::test]
@@ -761,8 +766,8 @@ async fn comparison_and_comment_citations_are_visible_then_restriction_invalidat
     let dispatches: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_topic_map_research_request WHERE run_ref=$1 AND phase='compare' AND dispatch_started_at IS NOT NULL")
         .bind(run).fetch_one(db.pool()).await.unwrap();
     assert_eq!(
-        dispatches, 1,
-        "reading/saving from both views does not dispatch twice"
+        dispatches, 2,
+        "one comparison proposal and one review; reading/saving dispatches neither"
     );
     let default_query = TopicMapQuery {
         domain_ref: Some(D),
@@ -924,7 +929,7 @@ async fn grouped_title_and_body_finish_without_replaying_either_source() {
             .fetch_one(db.pool())
             .await
             .unwrap(),
-        2
+        4
     );
     assert_eq!(
         apply_research_command(&db, &start(vec![w])).await.unwrap()["state"],

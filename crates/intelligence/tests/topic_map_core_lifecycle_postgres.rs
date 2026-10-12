@@ -32,6 +32,20 @@ async fn request_counts(db: &Database, run: Uuid) -> (i64, i64, i64) {
         .bind(run).fetch_one(db.pool()).await.unwrap()
 }
 
+async fn advance_to_source_acceptance(db: &Database, adapter: &PiAdapter, run: Uuid) {
+    // Stop at the business checkpoint, before the next tick closes the owner run.
+    // Each proposal now needs its own review, but no fixed scheduling count is assumed.
+    for _ in 0..8 {
+        let accepted: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_topic_map_research_task WHERE run_ref=$1 AND state='succeeded' AND phase='resolve' AND jsonb_array_length(resolutions_json)>0)")
+            .bind(run).fetch_one(db.pool()).await.unwrap();
+        if accepted {
+            return;
+        }
+        assert!(run_once(db, &SyntheticModelSecrets, adapter).await.unwrap());
+    }
+    panic!("source did not reach independently reviewed resolution within eight ticks");
+}
+
 async fn initial_definition(db: &Database) -> Uuid {
     sqlx::query_scalar("SELECT definition_ref FROM linggan_topic_map_concept_rule ORDER BY created_at,definition_ref LIMIT 1")
         .fetch_one(db.pool()).await.unwrap()
@@ -75,7 +89,7 @@ async fn explicit_definition_reassignment_reuses_original_run_budget_without_per
     let run: Uuid = receipt["runRef"].as_str().unwrap().parse().unwrap();
     finish_pending(&db, &adapter).await;
     assert_eq!(run_state(&db, run).await, "completed");
-    assert_eq!(request_counts(&db, run).await, (1, 1, 0));
+    assert_eq!(request_counts(&db, run).await, (2, 2, 0));
     let original = sqlx::query(
         "SELECT task_ref,distilled_json FROM linggan_topic_map_research_task WHERE run_ref=$1",
     )
@@ -96,7 +110,7 @@ async fn explicit_definition_reassignment_reuses_original_run_budget_without_per
     finish_pending(&db, &adapter).await;
     assert_eq!(
         request_counts(&db, run).await,
-        (1, 1, 0),
+        (2, 2, 0),
         "a completed on-demand run is not permanent automatic permission"
     );
     assert_eq!(run_state(&db, run).await, "completed");
@@ -131,7 +145,7 @@ async fn explicit_definition_reassignment_reuses_original_run_budget_without_per
     finish_pending(&db, &adapter).await;
     assert_eq!(
         request_counts(&db, run).await,
-        (1, 2, 0),
+        (2, 4, 0),
         "definition changes never re-extract unchanged source text"
     );
     assert_eq!(run_state(&db, run).await, "completed");
@@ -167,7 +181,7 @@ async fn explicit_definition_reassignment_reuses_original_run_budget_without_per
     finish_pending(&db, &adapter).await;
     assert_eq!(
         request_counts(&db, run).await,
-        (1, 2, 0),
+        (2, 4, 0),
         "an earlier explicit scope cannot authorize a later definition version"
     );
     assert_ne!(future, current);
@@ -234,16 +248,7 @@ async fn busy_maintenance_gate_cannot_complete_a_run_before_its_new_resolution_c
         .await
         .unwrap();
     let run: Uuid = receipt["runRef"].as_str().unwrap().parse().unwrap();
-    assert!(
-        run_once(&db, &SyntheticModelSecrets, &adapter)
-            .await
-            .unwrap()
-    );
-    assert!(
-        run_once(&db, &SyntheticModelSecrets, &adapter)
-            .await
-            .unwrap()
-    );
+    advance_to_source_acceptance(&db, &adapter, run).await;
     let source: Uuid = sqlx::query_scalar("SELECT task_ref FROM linggan_topic_map_research_task WHERE run_ref=$1 AND state='succeeded'")
         .bind(run).fetch_one(db.pool()).await.unwrap();
     let original = initial_definition(&db).await;
@@ -264,7 +269,7 @@ async fn busy_maintenance_gate_cannot_complete_a_run_before_its_new_resolution_c
         run_state(&db, run).await.as_str(),
         "queued" | "running"
     ));
-    assert_eq!(request_counts(&db, run).await, (1, 1, 0));
+    assert_eq!(request_counts(&db, run).await, (2, 2, 0));
     let changed = revision_in(&mut owner, original).await;
     let followup = append_resolution_in(&mut owner, run, source, changed).await;
     owner.commit().await.unwrap();
@@ -279,7 +284,7 @@ async fn busy_maintenance_gate_cannot_complete_a_run_before_its_new_resolution_c
         .unwrap(),
         "succeeded"
     );
-    assert_eq!(request_counts(&db, run).await, (1, 2, 0));
+    assert_eq!(request_counts(&db, run).await, (2, 4, 0));
     assert_eq!(run_state(&db, run).await, "completed");
 }
 

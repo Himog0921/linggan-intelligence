@@ -83,8 +83,8 @@ async fn comparison_wait_cannot_attach_an_old_grant_or_checkpoint_to_changed_dep
     finish_pending(&db, &adapter).await;
     let counts = request_counts(&db, run).await;
     assert_eq!(
-        counts.2, 1,
-        "the unchanged source produced its initial comparison"
+        counts.2, 2,
+        "the unchanged source produced and independently reviewed its initial comparison"
     );
     assert_eq!(run_state(&db, run).await, "completed");
     let definition = initial_definition(&db).await;

@@ -405,6 +405,9 @@ impl PiAdapter {
                         | "topic-map.research.v3"
                         | "topic-map.resolve.v1"
                         | "topic-map.resolve.v2"
+                        | "topic-map.extract.compact.v1"
+                        | "topic-map.extract.quotes.v1"
+                        | "topic-map.verify.v1"
                 )
             });
         if input.len() > if topic_contract { 1024 * 1024 } else { 131072 } {
@@ -577,4 +580,24 @@ mod diagnostic_tests {
         assert!(!receipt.to_string().contains("SYNTHETIC-SENSITIVE-TEXT"));
         assert_eq!(safe_text_shape(None)["presence"], "absent");
     }
+    #[tokio::test]
+    async fn topic_map_quote_and_review_packets_reach_the_topic_byte_gate() {
+        // An unavailable executable proves the byte gate was passed without any provider call.
+        let adapter = PiAdapter::configured_with_test_command(
+            PathBuf::from("/nonexistent-topic-map-synthetic-executable"), PathBuf::from("/unused"));
+        let mut request = PiRequest { version: "linggan.pi.v1", operation: "analyze".into(), api: "openai-responses".into(),
+            base_url: "http://127.0.0.1:1".into(), local_endpoint: true, api_key: "synthetic".into(),
+            model_id: "synthetic".into(), timeout_ms: 1000, max_output_tokens: 2000,
+            system: "x".repeat(140000), prompt: String::new() };
+        for contract in ["topic-map.extract.compact.v1", "topic-map.extract.quotes.v1", "topic-map.verify.v1"] {
+            request.prompt = serde_json::json!({"contract":contract}).to_string();
+            assert!(matches!(adapter.call(&request).await, Err(ModelError::AdapterUnavailable)));
+        }
+        request.prompt = serde_json::json!({"contract":"other","input":{"contract":"topic-map.verify.v1"}}).to_string();
+        assert!(matches!(adapter.call(&request).await, Err(ModelError::InputLimit)));
+        request.prompt = serde_json::json!({"contract":"topic-map.verify.v1"}).to_string();
+        request.system = "x".repeat(1048576);
+        assert!(matches!(adapter.call(&request).await, Err(ModelError::InputLimit)));
+    }
+
 }
