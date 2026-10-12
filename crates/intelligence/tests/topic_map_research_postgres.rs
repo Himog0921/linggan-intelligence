@@ -304,10 +304,30 @@ struct ComparisonProof {
 }
 
 async fn comparison_proof(db: &Database) -> ComparisonProof {
+    comparison_proof_in_scope(db, false).await
+}
+
+async fn comparison_work(db: &Database, id: &str, body: &str, unscoped: bool) -> Uuid {
+    if !unscoped {
+        return work(db, id, body).await;
+    }
+    fixture::submit_package_at(db,"content_detail",json!({"contentExternalId":id}),
+        json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":id},"payload":{"title":"","bodyText":body,"authorId":"synthetic-creator","likes":10}}),
+        "2026-08-28T10:00:00Z").await;
+    sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content WHERE content_external_id=$1",
+    )
+    .bind(id)
+    .fetch_one(db.pool())
+    .await
+    .unwrap()
+}
+
+async fn comparison_proof_in_scope(db: &Database, hidden_reference: bool) -> ComparisonProof {
     let first_body = "SYNTHETIC COMPARE 家庭练习每次只做一步。";
     let second_body = "SYNTHETIC COMPARE 外部作者讨论练习先观察反馈。";
-    let first = work(db, "comparison-first", first_body).await;
-    let second = work(db, "comparison-second", second_body).await;
+    let first = comparison_work(db, "comparison-first", first_body, hidden_reference).await;
+    let second = comparison_work(db, "comparison-second", second_body, hidden_reference).await;
     // Always inspect the non-primary participant first. The author is the lower
     // UUID and the commenter belongs to the other work, so both sides are real.
     let (a, b, comment_work, author_body) = if first > second {
@@ -319,6 +339,12 @@ async fn comparison_proof(db: &Database) -> ComparisonProof {
         a > b,
         "this regression must not depend on a random primary UUID"
     );
+    if hidden_reference {
+        for (reference, role) in [(a, "reference"), (b, "primary")] {
+            sqlx::query("INSERT INTO linggan_material_domain_usage(usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref)SELECT gen_random_uuid(),public_ref,$2,$3,'legacy_domain_migration',first_package_ref FROM linggan_material_content WHERE public_ref=$1")
+                .bind(reference).bind(D).bind(role).execute(db.pool()).await.unwrap();
+        }
+    }
     let raw_comment = "孩子每天练习都要催，不催就不开始。";
     // Research and saved citations use the qualified, cleaned comment text.
     // Keep this oracle handwritten and distinct from the submitted raw text.
@@ -674,7 +700,9 @@ async fn comparison_runtime_state(db: &Database, run: Uuid) -> Value {
 #[ignore = "disposable PostgreSQL and synthetic child, no provider"]
 async fn comparison_and_comment_citations_are_visible_then_restriction_invalidates() {
     let (db, config, adapter) = setup("topic_map_research_comparison").await;
-    let proof = comparison_proof(&db).await;
+    // The commenting participant is a reference from the start, hidden by the
+    // default overview; its immutable role is frozen in the comparison manifest.
+    let proof = comparison_proof_in_scope(&db, true).await;
     apply_research_command(&db, &configure(config, 100000, false))
         .await
         .unwrap();
@@ -718,6 +746,7 @@ async fn comparison_and_comment_citations_are_visible_then_restriction_invalidat
     let query = TopicMapQuery {
         domain_ref: Some(D),
         reference_window_days: Some(0),
+        include_reference: true,
         ..Default::default()
     };
     let snapshot = topic_map::read_topic_map(&db, &query).await.unwrap();
@@ -735,10 +764,36 @@ async fn comparison_and_comment_citations_are_visible_then_restriction_invalidat
         dispatches, 1,
         "reading/saving from both views does not dispatch twice"
     );
+    let default_query = TopicMapQuery {
+        domain_ref: Some(D),
+        ..Default::default()
+    };
+    let visible = topic_map::read_topic_map(&db, &default_query)
+        .await
+        .unwrap();
+    assert_eq!(visible.works.len(), 1);
+    assert_eq!(visible.works[0].work_ref, proof.works[1]);
+    assert!(
+        visible.works[0].research.as_ref().unwrap()["resultRefs"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(result)),
+        "filtered participants must remain in the qualification scope"
+    );
     sqlx::query("INSERT INTO linggan_material_comment_restriction(content_public_ref,comment_external_id,reason)SELECT content_public_ref,comment_external_id,'synthetic restriction'FROM linggan_material_comment WHERE material_ref=$1")
         .bind(proof.comment).execute(db.pool()).await.unwrap();
     let snapshot = topic_map::read_topic_map(&db, &query).await.unwrap();
     assert_comparison_withdrawn(&db, &snapshot, &proof, result, &independent, &saved).await;
+    let visible = topic_map::read_topic_map(&db, &default_query)
+        .await
+        .unwrap();
+    assert!(
+        !visible.works[0].research.as_ref().unwrap()["resultRefs"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(result)),
+        "withdrawal outside the visible scope must invalidate comparison"
+    );
 }
 
 #[tokio::test]

@@ -47,7 +47,8 @@ export LOCAL_001_PROOF_DATABASE_URL="postgresql://${proof_user}:${proof_password
 # Attempt every selected target, preserving failure so later proofs are not hidden.
 proof_exit=0
 cargo test -p linggan-intelligence --test topic_map_postgres --test topic_map_research_postgres --test topic_map_core_postgres --test topic_map_core_lifecycle_postgres --test topic_map_core_unknown_postgres --test topic_map_core_legacy_postgres --test topic_map_core_recovery_postgres --test topic_map_core_quality_postgres --test topic_map_core_grouped_postgres --test topic_map_saved_sources_postgres --test topic_map_search_postgres --locked --no-fail-fast -- --ignored --test-threads=1 || proof_exit=$?
-cargo test -p linggan-evidence --test topic_map_comment_budget_postgres --locked --no-fail-fast -- --ignored --test-threads=1 || proof_exit=$?
+cargo test -p linggan-evidence --test topic_map_comment_budget_postgres --test material_projection_postgres --locked --no-fail-fast -- --ignored --test-threads=1 || proof_exit=$?
+cargo test -p linggan-evidence --test creator_lifecycle_postgres --locked lifecycle_and_work_resource_share_one_field_wise_current_owner -- --ignored --test-threads=1 || proof_exit=$?
 cargo test -p linggan-api --locked --no-fail-fast topic_map -- --ignored --test-threads=1 || proof_exit=$?
 if [[ "$proof_exit" -ne 0 ]]; then
   echo "Topic Map proof failed; all selected targets were attempted" >&2

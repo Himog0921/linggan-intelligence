@@ -1,7 +1,7 @@
 # Topic Map HTTP 合同
 
 > 状态: 代码事实优先
-> 最后核对: 2026-10-11
+> 最后核对: 2026-10-12
 > 适用范围: TOPIC-MAP-V41-001 既有接口及 TOPIC-MAP-CORE-001 研究内核候选
 > 事实来源: 手册 v1.1、当前 TopicMap DTO、0120 migration、Rust HTTP composition 与定向验证
 > 冲突时以谁为准: 用户最新确认、当前代码和来源资格；本合同不授权运行库迁移/外发
@@ -11,6 +11,12 @@
 `/topics` 为完整概览；`/topics/{canonical_key}` 旧暂定工作区保留。`/api/local/topic-map` 查询采用 camelCase：domainRef/topicRef/platform/windowDays/referenceWindowDays/overlay/path/includeReference。referenceWindowDays=0表示全部历史；概览windowDays缺省全时间。我方发布历史始终独立于这两个窗口。includeReference必须显式为true才把reference用途纳入概览统计。没有领域选择时先返回领域入口；领域材料集合来自 material_domain_usage，不由前端昵称推断我方或用户诊断。
 
 读取包含 domains/scope/topics/works/statistics/journey/sources/candidates/changes/alternatives/ownCreators/methodVersion/sourceBoundary。Topic附bindingVersion用于导航归属版本竞争；definitionVersion用于内容定义引用。Topic identity/definition 与成员引用复用 TopicWorkspace；作品display/media由共享WorkResource Current读取。statistics由后端基于完整明确范围计算，各平台分列，样本rule未设为null；未知互动不进入中位/P90/规则分母。父主题作品是子集union去重。scope说明总量/读取覆盖/时间口径；作品分页不得替代完整统计。
+
+主题页面首次进入时，在第一次昂贵请求之前从服务端领域登记确定默认领域；显式URL与已有会话选择优先。API未传domainRef时仍可读取完整跨领域范围。
+
+主题概览的media采用`linggan.media-overview.v1`，返回canonical选中的cover，`detailState=NOT_LOADED`表示图片、视频、OCR/ASR详情尚未载入，不以空数组表示没有材料。媒体限制、清理与派生版本指纹仍走现有共享资格门；标题、默认证据片段、preview和sourceManifest保持同源。原文阅读器继续通过Work Resource详情接口读取完整`linggan.media-resource.v1`。概览按250篇分批读取全部作品，不设统计截断；不组装主题DTO未返回的采集轨迹和评论线程。
+
+注释只复核实际引用作品，保留旧注释4000字符/xhs口径；定义和结果按领域/配置合并来源后读取一次，比较仍包含全部冻结参与作品，即使它们未进入可见集合。窗口数量按领域/配置/作品在单次请求内复用，冻结结果逐条重新资格化；没有跨请求许可缓存。概览事务局部关闭JIT并强制参数计划，提交/回滚后恢复连接默认设置，不改数据库全局配置。
 
 旅程五主阶段固定 discover_understand/seek_assessment/choose_support/begin_practice/long_term_manage；其他保留跨阶段综合/背景/不明/待分析。主阶段分布每作品单值，涉及率允许跨阶段，matrix以本行主题去重作品为分母。格子引用精确workRefs；零不表示市场空缺。
 

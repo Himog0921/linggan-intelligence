@@ -594,3 +594,176 @@ async fn saved_alternative_freezes_source_version_and_concurrent_saves_do_not_st
                 && a["evidenceWorkRefs"].as_array().unwrap().len() == 2)
     );
 }
+
+#[tokio::test]
+#[ignore = "requires disposable PostgreSQL pgvector proof harness"]
+async fn overview_batches_preserve_complete_statistics_and_canonical_work_fields() {
+    let db = fixture_database("topic_map_overview_perf").await;
+    let mut refs = Vec::new();
+    for i in 0..501 {
+        refs.push(
+            work(
+                &db,
+                i,
+                if i % 2 == 0 { "xhs" } else { "douyin" },
+                if i % 3 == 0 { None } else { Some(i as i64) },
+                1,
+            )
+            .await,
+        );
+    }
+    let (parent, _) = topic(&db, "overview-parent", "合成父主题", None, &refs[..3]).await;
+    let (child, _) = topic(
+        &db,
+        "overview-child",
+        "合成子主题",
+        Some(parent),
+        &refs[..3],
+    )
+    .await;
+    let q: TopicMapQuery = serde_json::from_value(json!({"domainRef":domain()})).unwrap();
+    let map = read_topic_map(&db, &q).await.unwrap();
+    assert_eq!(
+        map.works.len(),
+        501,
+        "must cross the 500-work batch boundary without truncation"
+    );
+    assert_eq!(map.statistics["workCount"], 501);
+    let platforms = map.statistics["platforms"].as_array().unwrap();
+    assert_eq!(
+        platforms
+            .iter()
+            .map(|p| p["unknownLikeCount"].as_u64().unwrap())
+            .sum::<u64>(),
+        167
+    );
+    for batch in refs.chunks(100) {
+        let full_q = serde_json::from_value(json!({"scope":"all_accepted_material","window":"latest_accepted_discovery","sort":"latest_discovery","domainRef":domain(),"publicRefs":batch})).unwrap();
+        let full = linggan_evidence::read_work_resources(&db, &full_q)
+            .await
+            .unwrap();
+        let compact = linggan_evidence::read_work_resource_overviews(
+            &db,
+            domain(),
+            batch,
+            map.scope["asOf"].as_str().unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(compact.len(), full.items.len());
+        for item in compact {
+            let original = full
+                .items
+                .iter()
+                .find(|f| f.identity.public_ref == item.identity.public_ref)
+                .unwrap();
+            assert_eq!(
+                serde_json::to_value(&item.display).unwrap(),
+                serde_json::to_value(&original.display).unwrap()
+            );
+            assert_eq!(
+                serde_json::to_value(&item.preview).unwrap(),
+                serde_json::to_value(&original.preview).unwrap()
+            );
+            assert_eq!(
+                serde_json::to_value(&item.evidence_fragment).unwrap(),
+                serde_json::to_value(&original.evidence_fragment).unwrap()
+            );
+            assert_eq!(
+                item.inspector["derivatives"],
+                original.inspector["derivatives"]
+            );
+            assert_eq!(
+                item.summary.restriction_state,
+                original.summary.restriction_state
+            );
+            assert_eq!(item.media["cover"], original.media["cover"]);
+        }
+    }
+    // Pin the pool to one free backend so both the read and checks use it.
+    let mut held = Vec::new();
+    for _ in 0..3 {
+        held.push(db.pool().acquire().await.unwrap());
+    }
+    let mut connection = db.pool().acquire().await.unwrap();
+    sqlx::raw_sql("SET jit=on; SET jit_above_cost=0; SET plan_cache_mode=force_generic_plan")
+        .execute(&mut *connection)
+        .await
+        .unwrap();
+    drop(connection);
+    for _ in 0..8 {
+        let compact = linggan_evidence::read_work_resource_overviews(
+            &db,
+            domain(),
+            &refs[..3],
+            map.scope["asOf"].as_str().unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(compact.len(), 3);
+        let mut connection = db.pool().acquire().await.unwrap();
+        let (jit, plan): (String, String) =
+            sqlx::query_as("SELECT current_setting('jit'),current_setting('plan_cache_mode')")
+                .fetch_one(&mut *connection)
+                .await
+                .unwrap();
+        assert_eq!(jit, "on", "local read setting must not leak to the pool");
+        assert_eq!(
+            plan, "force_generic_plan",
+            "local plan selection must restore the caller setting"
+        );
+    }
+    let mut connection = db.pool().acquire().await.unwrap();
+    sqlx::raw_sql("RESET jit; RESET jit_above_cost; RESET plan_cache_mode")
+        .execute(&mut *connection)
+        .await
+        .unwrap();
+    drop(connection);
+    drop(held);
+    let parent_topic = map.topics.iter().find(|t| t.topic_ref == parent).unwrap();
+    assert_eq!(
+        parent_topic.work_refs.len(),
+        3,
+        "parent union is deduplicated"
+    );
+    assert_eq!(parent_topic.statistics["workCount"], 3);
+    let selected: TopicMapQuery =
+        serde_json::from_value(json!({"domainRef":domain(),"topicRef":child})).unwrap();
+    let selected = read_topic_map(&db, &selected).await.unwrap();
+    assert_eq!(selected.works.len(), 3);
+    assert_eq!(
+        selected
+            .topics
+            .iter()
+            .find(|t| t.topic_ref == parent)
+            .unwrap()
+            .statistics,
+        parent_topic.statistics
+    );
+    let scope = serde_json::from_value(json!({"domain":domain()})).unwrap();
+    let full = linggan_evidence::creator_discovery::load(&db, &scope)
+        .await
+        .unwrap();
+    let bounded = linggan_evidence::creator_discovery::load_for_works(&db, &scope, &refs[..5])
+        .await
+        .unwrap();
+    assert_eq!(bounded.works.len(), 3); // same xhs-only annotation scope
+    for work in bounded.works {
+        let original = full
+            .works
+            .iter()
+            .find(|w| w.work_ref == work.work_ref)
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(work.fragments).unwrap(),
+            serde_json::to_value(&original.fragments).unwrap()
+        );
+    }
+    assert!(
+        linggan_evidence::creator_discovery::load_for_works(&db, &scope, &[])
+            .await
+            .unwrap()
+            .works
+            .is_empty()
+    );
+}

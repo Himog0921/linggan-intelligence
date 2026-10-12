@@ -1,6 +1,5 @@
 use super::*;
-use linggan_contracts::EvidenceQuery;
-use linggan_evidence::read_work_resources;
+use linggan_evidence::read_work_resource_overviews;
 use linggan_storage_postgres::Database;
 use serde_json::json;
 use sqlx::Row;
@@ -75,12 +74,11 @@ pub async fn read_topic_map(
     let mut works = Vec::new();
     let mut seen = HashSet::new();
     for (domain_ref, references) in domain_batches {
-        for batch in references.chunks(100) {
-            let query:EvidenceQuery=serde_json::from_value(json!({"scope":"all_accepted_material","window":"latest_accepted_discovery","sort":"latest_discovery","domainRef":domain_ref,"publicRefs":batch})).map_err(|e|TopicMapError::Source(e.to_string()))?;
-            let page = read_work_resources(database, &query)
+        for batch in references.chunks(250) {
+            let resources = read_work_resource_overviews(database, domain_ref, batch, &as_of)
                 .await
                 .map_err(|e| TopicMapError::Source(e.to_string()))?;
-            for resource in page.items {
+            for resource in resources {
                 let source_manifest = canonical_source_manifest(&resource);
                 let reference = resource.identity.public_ref;
                 if !seen.insert(reference) {
@@ -519,15 +517,31 @@ async fn attach_research(
     .bind(q.domain_ref)
     .fetch_all(database.pool())
     .await?;
+    let memberships=sqlx::query("SELECT topic_ref,definition_ref,work_public_ref,evidence_citations FROM linggan_topic_map_membership WHERE method_version<>'topic-map.research.v2' AND ($1::uuid IS NULL OR domain_ref=$1)").bind(q.domain_ref).fetch_all(database.pool()).await?;
+    let referenced: Vec<_> = works
+        .iter()
+        .filter(|w| w.annotation.is_some())
+        .map(|w| w.work_ref)
+        .chain(
+            memberships
+                .iter()
+                .map(|r| r.get::<Uuid, _>("work_public_ref")),
+        )
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
     let mut canonical = HashMap::new();
-    for d in domains {
-        let scope = serde_json::from_value(json!({"domain":d}))
-            .map_err(|e| TopicMapError::Source(e.to_string()))?;
-        let data = linggan_evidence::creator_discovery::load(database, &scope)
-            .await
-            .map_err(|e| TopicMapError::Source(e.to_string()))?;
-        for w in data.works {
-            canonical.insert(w.work_ref, w.fragments);
+    if !referenced.is_empty() {
+        for d in domains {
+            let scope = serde_json::from_value(json!({"domain":d}))
+                .map_err(|e| TopicMapError::Source(e.to_string()))?;
+            let data =
+                linggan_evidence::creator_discovery::load_for_works(database, &scope, &referenced)
+                    .await
+                    .map_err(|e| TopicMapError::Source(e.to_string()))?;
+            for w in data.works {
+                canonical.insert(w.work_ref, w.fragments);
+            }
         }
     }
     for w in works.iter_mut() {
@@ -558,7 +572,6 @@ async fn attach_research(
             }
         }
     }
-    let memberships=sqlx::query("SELECT topic_ref,definition_ref,work_public_ref,evidence_citations FROM linggan_topic_map_membership WHERE method_version<>'topic-map.research.v2' AND ($1::uuid IS NULL OR domain_ref=$1)").bind(q.domain_ref).fetch_all(database.pool()).await?;
     for row in memberships {
         let reference: Uuid = row.get("work_public_ref");
         let def: Uuid = row.get("definition_ref");
@@ -591,5 +604,5 @@ async fn attach_research(
     if !installed {
         return Ok(candidates);
     }
-    super::core_read::attach_windows(database,q,works,topics).await
+    super::core_read::attach_windows(database, q, works, topics).await
 }

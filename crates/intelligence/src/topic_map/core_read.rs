@@ -92,11 +92,8 @@ pub(super) async fn attach_windows(
     if !ready {
         return Ok(vec![]);
     }
-    let unavailable = crate::topic_map_core::unavailable_definitions(db, q.domain_ref)
-        .await
-        .map_err(|e| TopicMapError::Source(e.to_string()))?;
+    let (unavailable, mut windows) = load::load_windows(db, q, works, topics).await?;
     units::attach_rules(db, q, topics, &unavailable).await?;
-    let mut windows = load::load_windows(db, q, works, topics, &unavailable).await?;
     let mut candidates = Vec::new();
     for work in works {
         units::invalidate_annotation(work, &unavailable);

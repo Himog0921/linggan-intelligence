@@ -292,6 +292,22 @@ pub async fn load(database: &Database, q: &CreatorScope) -> Result<DiscoveryData
     Ok(data)
 }
 
+/// Bounded creator-style fragments for referenced works; current gates remain unchanged.
+pub async fn load_for_works(
+    database: &Database,
+    q: &CreatorScope,
+    work_refs: &[Uuid],
+) -> Result<DiscoveryData, DiscoveryError> {
+    q.validate().map_err(DiscoveryError::Invalid)?;
+    let mut tx = database.pool().begin().await?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        .execute(&mut *tx)
+        .await?;
+    let data = load_materials_in(&mut tx, q, Some(4000), Some(work_refs)).await?;
+    tx.commit().await?;
+    Ok(data)
+}
+
 /// Topic research reads the complete qualified material, including comment-only works.
 /// The creator screen keeps its own bounded preview and xhs-only public scope contract.
 /// Platforms here are discovered only from this domain's canonical material usage.

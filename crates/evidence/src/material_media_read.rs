@@ -48,6 +48,24 @@ pub(crate) async fn read_batch(
     refs: &[Uuid],
     as_of: &str,
 ) -> Result<HashMap<Uuid, MediaReadProjection>, sqlx::Error> {
+    read_media_batch(tx, refs, as_of, false).await
+}
+
+/// Keep the canonical preview and disposition checks without materializing reader payloads.
+pub(crate) async fn read_overview_batch(
+    tx: &mut Transaction<'_, Postgres>,
+    refs: &[Uuid],
+    as_of: &str,
+) -> Result<HashMap<Uuid, MediaReadProjection>, sqlx::Error> {
+    read_media_batch(tx, refs, as_of, true).await
+}
+
+async fn read_media_batch(
+    tx: &mut Transaction<'_, Postgres>,
+    refs: &[Uuid],
+    as_of: &str,
+    overview: bool,
+) -> Result<HashMap<Uuid, MediaReadProjection>, sqlx::Error> {
     if refs.is_empty() {
         return Ok(HashMap::new());
     }
@@ -62,12 +80,15 @@ pub(crate) async fn read_batch(
             let derivatives = derivatives
                 .remove(content_ref)
                 .unwrap_or_else(|| project_derivative_rows(Vec::new()));
-            (*content_ref, project_media(slots, derivatives))
+            (
+                *content_ref,
+                project_media_for_read(slots, derivatives, overview),
+            )
         })
         .collect())
 }
 
-fn project_media(
+fn project_media_for_read(
     slots: SlotReadProjection,
     (derivatives, derivative_receipt, ocr_state, asr_state, derivative_restricted): (
         Vec<Value>,
@@ -76,9 +97,13 @@ fn project_media(
         &'static str,
         bool,
     ),
+    overview: bool,
 ) -> MediaReadProjection {
-    let (resource, preview_url, preview_purpose) =
-        build_media_resource(&slots.slots, &derivatives, ocr_state, asr_state);
+    let (resource, preview_url, preview_purpose) = if overview {
+        build_media_overview(&slots.slots, &derivatives)
+    } else {
+        build_media_resource(&slots.slots, &derivatives, ocr_state, asr_state)
+    };
     MediaReadProjection {
         slots: slots.slots,
         derivatives,
@@ -99,6 +124,29 @@ fn project_media(
     }
 }
 
+fn cover_resource(cover: &CoverSelection) -> Value {
+    serde_json::json!({
+        "state":cover.state,"relationship":"content.cover",
+        "sourceRelationship":cover.source_relationship,"selectedBy":cover.selected_by,
+        "fallbackUsed":cover.selected_by != "explicit_cover" && cover.selected_by != "none",
+        "localAssetUrl":cover.url,"intrinsicDimensions":cover.dimensions
+    })
+}
+
+fn build_media_overview(
+    slots: &[Value],
+    derivatives: &[Value],
+) -> (Value, Option<String>, Option<String>) {
+    let (_, covers, images, videos, _) = partition_resource_slots(slots);
+    let cover = select_cover(&covers, &images, &videos, derivatives);
+    let resource = serde_json::json!({
+        "contractVersion":"linggan.media-overview.v1",
+        "state":if slots.is_empty() && derivatives.is_empty(){"NOT_OBSERVED"}else{"OBSERVED"},
+        "detailState":"NOT_LOADED","cover":cover_resource(&cover)
+    });
+    (resource, cover.url, cover.purpose)
+}
+
 fn build_media_resource(
     slots: &[Value],
     derivatives: &[Value],
@@ -113,15 +161,7 @@ fn build_media_resource(
         "contractVersion":"linggan.media-resource.v1",
         "state":if slots.is_empty() && derivatives.is_empty(){"NOT_OBSERVED"}else{"OBSERVED"},
         "avatar":avatar,
-        "cover":{
-            "state":cover.state,
-            "relationship":"content.cover",
-            "sourceRelationship":cover.source_relationship,
-            "selectedBy":cover.selected_by,
-            "fallbackUsed":cover.selected_by != "explicit_cover" && cover.selected_by != "none",
-            "localAssetUrl":cover.url.clone(),
-            "intrinsicDimensions":cover.dimensions
-        },
+        "cover":cover_resource(&cover),
         "coverCandidates":covers,
         "images":images,
         "video":{
@@ -933,5 +973,39 @@ fn aggregate_bytes_state(
         "UNKNOWN"
     } else {
         "NOT_OBSERVED"
+    }
+}
+
+#[cfg(test)]
+mod overview_tests {
+    use super::*;
+    use serde_json::json;
+    #[test]
+    fn overview_preserves_canonical_cover_selection_and_never_claims_empty_details() {
+        let image = json!({"purpose":"body_image","slotKey":"image", "localAssetUrl":"/media/synthetic-image", "blob":{"deliveryState":"INLINE_SAFE"}});
+        let cover = json!({"purpose":"cover","slotKey":"cover", "localAssetUrl":"/media/synthetic-cover", "blob":{"deliveryState":"INLINE_SAFE","intrinsicDimensions":{"state":"KNOWN","width":640,"height":480}}});
+        let video = json!({"purpose":"video","slotKey":"video"});
+        let poster = json!({"kind":"thumbnail","slotKey":"video","sourceLocation":{"localAssetUrl":"/media/synthetic-poster"}});
+        let mut restricted = cover.clone();
+        restricted["blob"]["deliveryState"] = json!("WITHDRAWN_OR_RESTRICTED");
+        for (slots, derivatives) in [
+            (vec![cover.clone(), image.clone()], vec![]),
+            (vec![restricted.clone(), image.clone()], vec![]),
+            (vec![restricted], vec![]),
+            (vec![video], vec![poster]),
+            (vec![], vec![]),
+        ] {
+            let (full, url, purpose) =
+                build_media_resource(&slots, &derivatives, "UNKNOWN", "UNKNOWN");
+            let (overview, overview_url, overview_purpose) =
+                build_media_overview(&slots, &derivatives);
+            assert_eq!(overview["cover"], full["cover"]);
+            assert_eq!(overview["state"], full["state"]);
+            assert_eq!(overview_url, url);
+            assert_eq!(overview_purpose, purpose);
+            assert_eq!(overview["detailState"], "NOT_LOADED");
+            assert!(overview.get("images").is_none());
+            assert!(overview.get("ocr").is_none());
+        }
     }
 }

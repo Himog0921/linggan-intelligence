@@ -15,9 +15,23 @@ pub(crate) async fn unavailable_definitions(
     db: &Database,
     domain: Option<Uuid>,
 ) -> Result<HashSet<Uuid>, ModelError> {
+    qualify_definitions_and_inputs(db, domain, &HashMap::new())
+        .await
+        .map(|(unavailable, _)| unavailable)
+}
+
+pub(crate) type QualifiedInputs = HashMap<(Uuid, Uuid), Vec<ResearchInput>>;
+
+/// Merge definition creation sources and projected result sources before qualification.
+/// Only request-local inputs are reused; every request rechecks current authority.
+pub(crate) async fn qualify_definitions_and_inputs(
+    db: &Database,
+    domain: Option<Uuid>,
+    additional_scopes: &HashMap<(Uuid, Uuid), BTreeSet<Uuid>>,
+) -> Result<(HashSet<Uuid>, QualifiedInputs), ModelError> {
     let rows = sqlx::query("SELECT rule.definition_ref,rule.domain_ref,task.work_public_ref,run.config_ref,request.request_manifest FROM linggan_topic_map_concept_rule rule LEFT JOIN linggan_topic_map_research_request request ON request.invocation_ref=rule.invocation_ref LEFT JOIN linggan_topic_map_research_task task USING(task_ref) LEFT JOIN linggan_topic_map_research_run run ON run.run_ref=task.run_ref WHERE ($1::uuid IS NULL OR rule.domain_ref=$1)")
         .bind(domain).fetch_all(db.pool()).await?;
-    let mut scopes = HashMap::<(Uuid, Uuid), BTreeSet<Uuid>>::new();
+    let mut scopes = additional_scopes.clone();
     for row in &rows {
         let (Some(config), Some(work), Some(manifest)) = (
             row.get::<Option<Uuid>, _>("config_ref"),
@@ -67,7 +81,7 @@ pub(crate) async fn unavailable_definitions(
         }
     }
     propagate_unavailable(&mut unavailable, &dependencies);
-    Ok(unavailable)
+    Ok((unavailable, inputs))
 }
 
 async fn legacy_unverifiable_definitions(
