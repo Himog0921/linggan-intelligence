@@ -6,6 +6,14 @@
 > 事实来源: 手册 v1.1、当前 TopicMap DTO、0120 migration、Rust HTTP composition 与定向验证
 > 冲突时以谁为准: 用户最新确认、当前代码和来源资格；本合同不授权运行库迁移/外发
 
+## TOPIC-MAP-WORKFLOW-382 候选增量
+
+`/topics` 默认材料与讨论，双视图共用单侧栏。URL `tm=1` 明确携带完整浏览状态：domainRef/topicRef/platform/windowDays/referenceWindowDays/view/tab/path/overlay/stage/metric/materialMode/query；浏览器返回恢复该范围，旧会话不补入被清空的条件。关键词在已返回的标题、作者、preview.text、证据片段、讨论与场景中匹配，方向名称另列。服务端全范围统计保持原口径；阶段作品按 journey 的精确 workRefs 交集，其他分类始终取 main，即使五主阶段切为 involved。
+
+`SaveAlternative.topicRef/definitionRef` 改为可空但必须成对；同时为空仅限 `methodVersion=topic-map.manual.v1`、无 researchResultRef/researchAngleIndex/researchOpportunityIndex。至少 1、至多 10 个同领域唯一作品；人工来源必须有可冻结作者片段，空来源事务回滚。`0121_topic_map_manual_alternative.sql` 只放宽该外键对的非空性并追加约束，旧记录不变。读取 DTO 可返回 null 引用和 originalDefinition；重开/导出仍复核当前来源，原片段不以最新文本补位，限制后隐藏保存内容。迁移未在正式库执行。
+
+研究状态 GET 与地图读取独立，不阻塞已有材料；三个状态读取入口共用递增序号、地图 epoch 和领域资格，旧响应不能覆盖新状态。失败、暂停、当前方法接纳/失败/派发未知独立呈现，读取及人工保存均不启动研究。
+
 ## 页面与读取
 
 `/topics` 为完整概览；`/topics/{canonical_key}` 旧暂定工作区保留。`/api/local/topic-map` 查询采用 camelCase：domainRef/topicRef/platform/windowDays/referenceWindowDays/overlay/path/includeReference。referenceWindowDays=0表示全部历史；概览windowDays缺省全时间。我方发布历史始终独立于这两个窗口。includeReference必须显式为true才把reference用途纳入概览统计。没有领域选择时先返回领域入口；领域材料集合来自 material_domain_usage，不由前端昵称推断我方或用户诊断。

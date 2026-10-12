@@ -63,3 +63,7 @@ ENV-001 的 proof 数据库只用于环境验证，验证后必须删除；它�
 `0078`–`0083` 继续为 V1 的 execution history、累计读取与输入指纹补充约束。`0084_comment_research_problem_resolution_v2.sql` 冻结 ADHD scope、Problem Frame、closed-world disposition、稳定定义边界和 catalog revision guard；`0085_comment_research_problem_pair_evaluation.sql` 只增加内部、可恢复的双信号比较 checkpoint。二者不改写历史 Atom、membership、定义或原始评论；Stable Problem 只能在两个独立 deferred signal 的原子事务中建立。当前独立性守卫拒绝同一来源、同一作者和**原文精确相同**的评论；语义 repost group 尚无受验证实现，不能被表述为已拦截。
 
 `scripts/test-comment-research-postgres.sh` 从完整历史 migration fixture 应用到 `0085`，在随机隔离 PostgreSQL 中执行 V1/V2 proof 并清理资源。共享开发库只可在用户授权、worker drain、exact-head merge 后由 `local-runtime.sh migrate` 显式执行；服务永远不自行迁移，也不会因 migration 自动发送真实评论给模型。
+
+## 0121 · 无方向人工备选候选
+
+`0121_topic_map_manual_alternative.sql` 允许备选 topic_ref/definition_ref 成对为空；无方向只限人工方法且不携带模型结果或索引。旧记录与外键保留，未添加主题、研究或材料表。调用侧对领域、非空冻结来源、幂等和重开资格继续守门。2026-10-12 Mog 仅批准一次性隔离库执行和验证，正式迁移需再次明确授权。具体回执见 [工作区计划](../docs/plans/active/topic-map-workflow-382.md)。

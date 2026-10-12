@@ -4,10 +4,10 @@
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
 const sourcePath=process.argv[2] || require('node:path').join(__dirname,'../apps/api/src/local_web/topic_map.js');
 const blank={replaceChildren(){},addEventListener(){},querySelector(){return null},querySelectorAll(){return []},contains(){return false}};
-const ctx={document:{getElementById(){return blank},createElement(){return {...blank}},activeElement:null},sessionStorage:{getItem(){return null}},location:{search:'',href:'http://127.0.0.1:3109/topics',origin:'http://127.0.0.1:3109'},URL,URLSearchParams,crypto:require('node:crypto').webcrypto,FormData:class{constructor(f){this.f=f}get(k){return this.f.values?.[k]}getAll(k){return this.f.arrays?.[k]||[]}},fetch:null,console};
+const ctx={document:{getElementById(){return blank},createElement(){return {...blank}},activeElement:null},sessionStorage:{getItem(){return null}},location:{search:'',href:'http://127.0.0.1:3109/topics',origin:'http://127.0.0.1:3109'},URL,URLSearchParams,crypto:require('node:crypto').webcrypto,FormData:class{constructor(f){this.f=f}get(k){return this.f.values?.[k]}getAll(k){return this.f.arrays?.[k]||[]}},fetch:null,console,window:{addEventListener(){}},history:{pushState(){},replaceState(){}}};
 const tail=/  load\(\);\n\}\)\(\);\s*$/;let src=fs.readFileSync(sourcePath,'utf8');assert(tail.test(src),'known topic-map initialization boundary');
 const initializationSource=src.replace(tail,'globalThis.initialState=state;})();');
-src=src.replace(tail,`globalThis.audit={dispatchClick,readSample,readWork,readerDialog,replaceSamplesDialog,submitDialog,topicBoundary,discussionUnits,discussionGroups,conceptDecisionDetails,discussionsView,performancePair,curated,researchCoverage,researchPhases,researchCoverageCounts,tree,researchDialog,citationText,citationSpans,bodyCitations,readerDiscussions,allCitations,sharesDiscussion,anglesFrom,opportunitiesFrom,anglesView,productContent,sceneList,commentFragmentCount,comparisonScopeNote,set(s,d,stack=[]){snapshot=s;dialogState=d;dialogStack=stack;state.domainRef='domain';state.topicRef='topic-A';},get(){return dialogState;}};drawDialog=()=>{};render=()=>{};load=async()=>{};openDialog=(type,data)=>{if(dialogState)dialogStack.push(dialogState);dialogState={type,...data};};})();`);vm.runInNewContext(src,ctx);
+src=src.replace(tail,`globalThis.audit={refreshReadiness,openResearch,refreshResearch,readiness,setProgressError(value){progressError=value;},matchesWork,workspaceWorks,emptyWorkspace,overview,journey,sidebar,publishedTime,scope(values){Object.assign(state,values);},dispatchClick,readSample,readWork,readerDialog,replaceSamplesDialog,submitDialog,topicBoundary,discussionUnits,discussionGroups,conceptDecisionDetails,discussionsView,performancePair,curated,researchCoverage,researchPhases,researchCoverageCounts,tree,researchDialog,citationText,citationSpans,bodyCitations,readerDiscussions,allCitations,sharesDiscussion,anglesFrom,opportunitiesFrom,anglesView,productContent,sceneList,commentFragmentCount,comparisonScopeNote,set(s,d,stack=[]){snapshot=s;dialogState=d;dialogStack=stack;state.domainRef='domain';state.topicRef='topic-A';},get(){return dialogState;}};drawDialog=()=>{};render=()=>{};load=async()=>{};openDialog=(type,data)=>{if(dialogState)dialogStack.push(dialogState);dialogState={type,...data};};})();`);vm.runInNewContext(src,ctx);
 (async()=>{
  const restoredScope={domainRef:'domain-A',topicRef:'OLD_TOPIC',platform:'xhs',windowDays:'7',path:'family',overlay:'obstruction_recurrence',query:'OLD_QUERY',compare:['OLD_TOPIC']};
  const initialize=search=>{
@@ -32,7 +32,7 @@ src=src.replace(tail,`globalThis.audit={dispatchClick,readSample,readWork,reader
  const entryContext={...freshEntry,history:{replaceState(){}},fetch:async url=>{entryRequests.push(url);return {ok:true,json:async()=>({domains:[{domainRef:'server-default'}],scope:{domainRef:'server-default'},topics:[],works:[],statistics:{}})};}};
  vm.runInNewContext(fs.readFileSync(sourcePath,'utf8').replace(tail,'render=()=>{};globalThis.entryLoad=load();})();'),entryContext);
  await entryContext.entryLoad;
- assert.equal(entryRequests.length,1,'first entry performs exactly one map read');
+ assert.equal(entryRequests.filter(url=>url.includes('/topic-map?')).length,1,'first entry performs exactly one map read');
  assert(entryRequests[0].includes('domainRef=server-default'));
  console.log('PASS: fresh initialization performs one domain-qualified map request');
  console.log('PASS: both domain aliases clear former scope; same-domain deep links preserve session and explicit URL selection');
@@ -301,6 +301,64 @@ src=src.replace(tail,`globalThis.audit={dispatchClick,readSample,readWork,reader
  ctx.audit.set({...coreSnapshot,scope:{totalWorkCount:3},topics:[{...definition,lifecycleState:'candidate',core:{...definition.core,qualityState:'legacy_candidate'}},{...other,displayName:'稳定支持方向',lifecycleState:'candidate',core:{conceptRole:'parent',qualityState:'current'}}]},null);
  const tree=ctx.audit.tree();assert(tree.includes('旧方法候选 · 1'));assert(tree.includes('稳定支持方向'));assert(tree.includes('尚待稳定概念归纳'));assert(tree.includes('全部方向可选择'));
  console.log('PASS: first coverage stays separate from reassessment; legacy candidates remain reachable with honest quality labels');
+ // Workflow regressions use the actual selection, rendering and command functions.
+ const workflowWorks=[
+  {workRef:'P',title:'无关标题',creatorDisplayName:'甲',readable:true,preview:{text:'正文片段提到对立违抗'},mainStage:'pending',involvedStages:[],topicRefs:[],publishedAt:'1789742392000',likes:0},
+  {workRef:'S',title:'ADHD 练习',creatorDisplayName:'乙',readable:true,preview:{text:'练习说明'},mainStage:'begin_practice',involvedStages:['begin_practice','long_term_manage'],topicRefs:['topic-A'],likes:null},
+  {workRef:'D',title:'讨论材料',readable:true,mainStage:'pending',topicRefs:[],research:{core:{units:[{unitId:'unit-D',label:'对立违抗',statement:'不同经历',assignments:[],evidence:[]}]}}}
+ ];
+ const workflowSnapshot={scope:{totalWorkCount:3,readableWorkCount:3,unclassifiedWorkCount:2},topics:[],works:workflowWorks,statistics:{workCount:3,platforms:[]},journey:{denominator:3,main:[{stage:'pending',count:2,workRefs:['P','D']},{stage:'begin_practice',count:1,workRefs:['S']},{stage:'seek_assessment',count:0,workRefs:[]}],involved:[{stage:'long_term_manage',count:1,workRefs:['S']} ]}};
+ ctx.audit.set(workflowSnapshot,null);ctx.audit.scope({topicRef:'',view:'overview',tab:'content',query:'对立违抗',stage:'',materialMode:'latest'});
+ assert.deepEqual(Array.from(ctx.audit.workspaceWorks(),w=>w.workRef).sort(),['D','P']);
+ const overview=ctx.audit.overview();assert(overview.includes('2 篇当前匹配'));assert(overview.includes('方向名称另有 0 个命中'));assert(!overview.includes('当前子方向没有对应的未读变化'));
+ ctx.audit.scope({view:'journey'});assert(ctx.audit.journey().includes('2 篇当前匹配'));
+ ctx.audit.scope({stage:'seek_assessment'});assert.equal(ctx.audit.workspaceWorks().length,0);assert(ctx.audit.emptyWorkspace().includes('清除关键词'));assert(ctx.audit.emptyWorkspace().includes('查看全部阶段'));assert(ctx.audit.emptyWorkspace().includes('查看待分析材料'));
+ ctx.audit.scope({stage:'pending'});assert.equal(ctx.audit.workspaceWorks().length,2);
+ ctx.audit.scope({stage:'long_term_manage',query:'adhd',metric:'involved'});assert.deepEqual(Array.from(ctx.audit.workspaceWorks(),w=>w.workRef),['S']);
+ ctx.audit.scope({metric:'main'});assert.equal(ctx.audit.workspaceWorks().length,0);
+ ctx.audit.scope({stage:'',query:'',materialMode:'high'});assert.equal(ctx.audit.workspaceWorks().length,0,'unconfigured rule cannot classify low/high');
+ assert(ctx.audit.emptyWorkspace().includes('规则未知'));
+ assert(!ctx.audit.publishedTime(workflowWorks[0]).includes('1789742392000'));assert.equal(ctx.audit.publishedTime({publishedAt:'1789742392000',publishedAtSourceText:'昨天'}),'昨天');
+ assert(ctx.audit.sidebar().includes('aria-label="主题图谱视图"'));assert(ctx.audit.sidebar().includes('内容回应的阶段'));
+ console.log('PASS: shared keyword/stage intersection, object preview and discussion matches, unknown rule, empty recovery and source-time display');
+ const manual={type:'save',manual:true,topicRef:'',kind:'angle',angle:{workRef:'P',evidenceWorkRefs:['P'],title:'人工题目',label:'',answerTask:'',researchMethodVersion:'topic-map.manual.v1'}};
+ ctx.audit.set(workflowSnapshot,manual);await ctx.audit.submitDialog({preventDefault(){},target:{dataset:{form:'save'},values:{title:'人工题目',angle:'人工判断',rationale:'来自原作'}}});
+ assert.equal(savedPayload.topicRef,null);assert.equal(savedPayload.definitionRef,null);assert.equal(savedPayload.methodVersion,'topic-map.manual.v1');assert.equal(savedPayload.researchResultRef,null);assert.deepEqual(savedPayload.evidenceWorkRefs,['P']);
+ assert.equal(ctx.audit.get().savedAlternativeRef,'saved');
+ console.log('PASS: unclassified manual idea persists exact source identity without fabricated topic or model result');
+ const urlInit=initialize('?tm=1&domainRef=domain-A&view=journey&stage=pending&query=对立违抗');
+ assert.equal(urlInit.view,'journey');assert.equal(urlInit.stage,'pending');assert.equal(urlInit.query,'对立违抗');assert.equal(urlInit.topicRef,'');assert.equal(urlInit.platform,'');assert.equal(urlInit.path,'');
+ assert.equal(initialize('?tm=1&view=bogus&stage=bogus&metric=bogus').view,'overview');
+ console.log('PASS: full workspace URL restores selection independent of old session and rejects invalid enums');
+ ctx.audit.set({...workflowSnapshot,works:[...workflowWorks,{workRef:'unreadable',readable:false,mainStage:'pending'}]},null);
+ ctx.audit.scope({view:'journey',stage:'pending',query:'',metric:'involved',materialMode:'latest',topicRef:''});
+ assert.deepEqual(Array.from(ctx.audit.workspaceWorks(),w=>w.workRef).sort(),['D','P']);
+ assert(ctx.audit.sidebar().includes('data-id="pending"'));
+ assert(!ctx.audit.publishedTime({publishedAtSourceText:'1789742392000'}).includes('1789742392000'));
+ ctx.audit.setProgressError('synthetic failure');
+ ctx.fetch=async()=>({ok:true,json:async()=>({policy:{status:'active'}})});
+ await ctx.audit.openResearch();assert(ctx.audit.readiness().includes('研究允许调度'));assert(!ctx.audit.readiness().includes('读取失败'));
+ ctx.fetch=async()=>({ok:true,json:async()=>({policy:{status:'paused'}})});
+ await ctx.audit.refreshResearch();assert(ctx.audit.readiness().includes('研究已暂停'));
+ let releaseOldProgress;
+ ctx.fetch=()=>new Promise(resolve=>{releaseOldProgress=resolve;});
+ const oldProgress=ctx.audit.refreshReadiness(0,'domain');
+ ctx.fetch=async()=>({ok:true,json:async()=>({policy:{status:'paused'}})});
+ await ctx.audit.refreshResearch();
+ releaseOldProgress({ok:true,json:async()=>({policy:{status:'active'}})});await oldProgress;
+ assert(ctx.audit.readiness().includes('研究已暂停'),'late older status must not replace a newer read');
+ let releaseOldDialog;
+ ctx.fetch=()=>new Promise(resolve=>{releaseOldDialog=resolve;});
+ const oldDialogRead=ctx.audit.refreshResearch();
+ ctx.fetch=async()=>({ok:true,json:async()=>({policy:{status:'paused'}})});
+ await ctx.audit.refreshResearch();
+ releaseOldDialog({ok:true,json:async()=>({policy:{status:'active'}})});await oldDialogRead;
+ assert.equal(ctx.audit.get().progress.policy.status,'paused','late older read must not redraw current dialog');
+
+ ctx.audit.set(commentSnapshot,null);await ctx.audit.dispatchClick({target:{closest(){return{dataset:{action:'manual-save',id:commentOnly.workRef}}}}});assert.equal(ctx.audit.get(),null,'comment-only sources remain readable but cannot freeze absent author text');
+ console.log('PASS: research retry and pause synchronize main status; other stages retain qualified refs in involved mode; manual requires author source');
+
+
 })().catch(e=>{console.error(e);process.exitCode=1});
 
 const concept={status:'new',proposedTopic:{domainReason:'<script>scope</script>',abstractionReason:'<img src=x>',parent:{kind:'proposed'}},hierarchy:{parentTopicRef:'parent',parentDefinitionRef:'parent-v1',reason:'<script>contains</script>'}};

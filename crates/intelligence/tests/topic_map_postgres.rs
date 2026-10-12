@@ -39,6 +39,16 @@ async fn work(
     likes: Option<i64>,
     days: i32,
 ) -> Uuid {
+    work_with_text(database, index, platform, likes, days, true).await
+}
+async fn work_with_text(
+    database: &Database,
+    index: usize,
+    platform: &str,
+    likes: Option<i64>,
+    days: i32,
+    has_text: bool,
+) -> Uuid {
     let task = Uuid::new_v4();
     let attempt = Uuid::new_v4();
     let package = Uuid::new_v4();
@@ -59,7 +69,7 @@ async fn work(
         "合成样本·阶段不明",
         "合成样本·成人环境转换",
     ];
-    sqlx::query("INSERT INTO linggan_material_content_detail(material_ref,content_public_ref,package_ref,record_ordinal,observed_at,title,title_state,body_text,body_state,creator_display_name,creator_display_name_state,published_at_source_text,published_at_source_text_state,searchable_text,author_external_id,like_count,like_count_state,published_at,published_at_source_kind,published_at_source_field,published_at_precision,published_at_parser_version)VALUES($1,$2,$3,0,scope_001_now()::text,$4,'KNOWN',$5,'KNOWN',$6,'KNOWN','合成明确发布记录','KNOWN',$5,$7,$8,$9,scope_001_now()-($10*interval '1 day'),'platform_epoch','publishedAt','second','synthetic-proof.v1')").bind(Uuid::new_v4()).bind(reference).bind(package).bind(titles[index%titles.len()]).bind(format!("SYNTHETIC ONLY 合成边界测试，第{index}篇：记录明确行动、尝试与限制，不表示真实研究。" )).bind(if index==0{"合成我方账号"}else{"合成外部作者"}).bind(if index==0{"synthetic-own"}else{"synthetic-peer"}).bind(likes).bind(if likes.is_some(){"KNOWN"}else{"UNKNOWN"}).bind(days).execute(database.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_material_content_detail(material_ref,content_public_ref,package_ref,record_ordinal,observed_at,title,title_state,body_text,body_state,creator_display_name,creator_display_name_state,published_at_source_text,published_at_source_text_state,searchable_text,author_external_id,like_count,like_count_state,published_at,published_at_source_kind,published_at_source_field,published_at_precision,published_at_parser_version)VALUES($1,$2,$3,0,scope_001_now()::text,$4,'KNOWN',$5,'KNOWN',$6,'KNOWN','合成明确发布记录','KNOWN',$5,$7,$8,$9,scope_001_now()-($10*interval '1 day'),'platform_epoch','publishedAt','second','synthetic-proof.v1')").bind(Uuid::new_v4()).bind(reference).bind(package).bind(if has_text{titles[index%titles.len()]}else{""}).bind(if has_text{format!("SYNTHETIC ONLY 合成边界测试，第{index}篇：记录明确行动、尝试与限制，不表示真实研究。")}else{String::new()}).bind(if index==0{"合成我方账号"}else{"合成外部作者"}).bind(if index==0{"synthetic-own"}else{"synthetic-peer"}).bind(likes).bind(if likes.is_some(){"KNOWN"}else{"UNKNOWN"}).bind(days).execute(database.pool()).await.unwrap();
     sqlx::query("INSERT INTO linggan_material_domain_usage(usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref)VALUES($1,$2,$3,'primary','legacy_domain_migration',$4)").bind(Uuid::new_v4()).bind(reference).bind(domain()).bind(package).execute(database.pool()).await.unwrap();
     reference
 }
@@ -275,8 +285,8 @@ async fn complete_canonical_map_dedup_unknown_history_and_idempotent_alternative
     let alternative = TopicMapCommand::SaveAlternative {
         idempotency_key: "alternative-proof:0001".into(),
         domain_ref: domain(),
-        topic_ref: child,
-        definition_ref: definition,
+        topic_ref: Some(child),
+        definition_ref: Some(definition),
         title: "合成备选：第一步怎样更容易".into(),
         angle: "回答具体实践困难".into(),
         rationale: "仅合成范围内引用，不发起监控".into(),
@@ -510,8 +520,8 @@ async fn saved_alternative_freezes_source_version_and_concurrent_saves_do_not_st
                 &TopicMapCommand::SaveAlternative {
                     idempotency_key: format!("backup-concurrent:{i}"),
                     domain_ref: domain(),
-                    topic_ref,
-                    definition_ref,
+                    topic_ref: Some(topic_ref),
+                    definition_ref: Some(definition_ref),
                     title: "合成保存的角度".into(),
                     angle: "原来源版本支持的合成推论".into(),
                     rationale: "合成验证".into(),
@@ -765,5 +775,123 @@ async fn overview_batches_preserve_complete_statistics_and_canonical_work_fields
             .unwrap()
             .works
             .is_empty()
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires disposable PostgreSQL pgvector proof harness"]
+async fn manual_alternative_without_classification_keeps_sources_and_rejects_false_lineage() {
+    let db = fixture_database("topic_map_manual_alternative_proof").await;
+    let source = work(&db, 0, "xhs", Some(0), 1).await;
+    let command = TopicMapCommand::SaveAlternative {
+        idempotency_key: "manual-without-topic".into(),
+        domain_ref: domain(),
+        topic_ref: None,
+        definition_ref: None,
+        title: "人工选题草案".into(),
+        angle: "由操作者提出的具体问题".into(),
+        rationale: "仅保留材料，不声称已有主题或模型结论".into(),
+        evidence_work_refs: vec![source],
+        method_version: "topic-map.manual.v1".into(),
+        research_result_ref: None,
+        research_angle_index: None,
+        research_opportunity_index: None,
+    };
+    let first = save_topic_map_command(&db, &command).await.unwrap();
+    let repeated = save_topic_map_command(&db, &command).await.unwrap();
+    assert_eq!(first.receipt_ref, repeated.receipt_ref);
+    let saved = read_saved_alternative(&db, domain(), first.subject_ref.unwrap())
+        .await
+        .unwrap();
+    assert_eq!(saved.source_state, "available");
+    assert!(
+        saved.topic_ref.is_none()
+            && saved.definition_ref.is_none()
+            && saved.original_definition.is_none()
+    );
+    assert!(!saved.fragments.is_empty());
+    assert!(saved.fragments.iter().all(|f| f.work_ref == source));
+    let map = read_topic_map(
+        &db,
+        &TopicMapQuery {
+            domain_ref: Some(domain()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(map.alternatives.len(), 1);
+    assert!(
+        map.works[0].topic_refs.is_empty(),
+        "saving a human idea must not classify its source"
+    );
+    let tasks: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_topic_map_research_task")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(tasks, 0, "saving does not start research");
+    for change in [
+        json!({"definitionRef":Uuid::new_v4()}),
+        json!({"methodVersion":"topic-map.research.v6"}),
+        json!({"researchAngleIndex":0}),
+        json!({"evidenceWorkRefs":[]}),
+        json!({"evidenceWorkRefs":[source,source]}),
+        json!({"domainRef":Uuid::new_v4()}),
+    ] {
+        let mut value = serde_json::to_value(&command).unwrap();
+        value["idempotencyKey"] = json!(Uuid::new_v4().to_string());
+        for (key, value_change) in change.as_object().unwrap() {
+            value[key] = value_change.clone();
+        }
+        let invalid: TopicMapCommand = serde_json::from_value(value).unwrap();
+        assert!(
+            save_topic_map_command(&db, &invalid).await.is_err(),
+            "must reject {change}"
+        );
+    }
+    let blank_source = work_with_text(&db, 1, "xhs", Some(0), 1, false).await;
+    let mut blank_command = serde_json::to_value(&command).unwrap();
+    blank_command["idempotencyKey"] = json!("manual-empty-fragments");
+    blank_command["evidenceWorkRefs"] = json!([blank_source]);
+    assert!(
+        save_topic_map_command(&db, &serde_json::from_value(blank_command).unwrap())
+            .await
+            .is_err(),
+        "empty author fragments cannot create an immediately unreadable manual alternative"
+    );
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_topic_map_alternative")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        count, 1,
+        "invalid save rolls back its alternative and receipt"
+    );
+    // Restriction uses the append-only media origin and disposition contract.
+    let package: Uuid = sqlx::query_scalar(
+        "SELECT first_package_ref FROM linggan_material_content WHERE public_ref=$1",
+    )
+    .bind(source)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    let slot = "synthetic-manual-source";
+    let observation = Uuid::new_v4();
+    sqlx::query("INSERT INTO linggan_runtime_record_disposition(package_ref,record_ordinal,disposition,reason) VALUES($1,1,'accepted_for_media_identity','SYNTHETIC')").bind(package).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_media_slot(slot_key,platform,content_external_id,role,ordinal,first_package_ref) SELECT $1,platform,content_external_id,'cover',1,first_package_ref FROM linggan_material_content WHERE public_ref=$2").bind(slot).bind(source).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_media_observation(observation_ref,slot_key,package_ref,observed_external_uri,observed_at) VALUES($1,$2,$3,'https://example.invalid/synthetic.jpg',scope_001_now()::text)").bind(observation).bind(slot).bind(package).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_material_media_origin(observation_ref,content_public_ref,slot_key,package_ref,record_ordinal,source_generation,purpose,producer_ordinal,display_order_state,display_order_basis,candidate_set_state,composite_state) VALUES($1,$2,$3,$4,1,1,'cover',1,'UNKNOWN','unknown','UNKNOWN','NOT_APPLICABLE')").bind(observation).bind(source).bind(slot).bind(package).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_material_media_disposition_event(event_ref,slot_key,state,authority_ref,reason,effective_at) VALUES($1,$2,'WITHDRAWN_OR_RESTRICTED','synthetic-proof','manual source withdrawal',clock_timestamp())").bind(Uuid::new_v4()).bind(slot).execute(db.pool()).await.unwrap();
+    let withdrawn = read_saved_alternative(&db, domain(), first.subject_ref.unwrap())
+        .await
+        .unwrap();
+    assert_eq!(withdrawn.source_state, "source_unavailable");
+    assert!(withdrawn.title.is_none() && withdrawn.fragments.is_empty());
+    let mut again = serde_json::to_value(&command).unwrap();
+    again["idempotencyKey"] = json!("withdrawn-manual");
+    assert!(
+        save_topic_map_command(&db, &serde_json::from_value(again).unwrap())
+            .await
+            .is_err()
     );
 }

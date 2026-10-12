@@ -356,6 +356,7 @@ migrate() {
   apply_migration_once "0118_topic_map_structure" "$project_root/database/migrations/0118_topic_map_structure.sql"
   apply_migration_once "0119_topic_map_collection_search" "$project_root/database/migrations/0119_topic_map_collection_search.sql"
   apply_migration_once "0120_topic_map_core" "$project_root/database/migrations/0120_topic_map_core.sql"
+  apply_migration_once "0121_topic_map_manual_alternative" "$project_root/database/migrations/0121_topic_map_manual_alternative.sql"
 }
 
 case "$command_name" in

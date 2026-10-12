@@ -8,11 +8,11 @@ use uuid::Uuid;
 pub(crate) async fn available(
     tx: &mut Transaction<'_, Postgres>,
     domain: Uuid,
-    definition: Uuid,
+    definition: Option<Uuid>,
     manifest: &Value,
     unavailable: &HashSet<Uuid>,
 ) -> Result<bool, TopicMapError> {
-    let mut used = HashSet::from([definition]);
+    let mut used: HashSet<Uuid> = definition.into_iter().collect();
     used.extend(crate::topic_map_core::definition_dependencies(manifest));
     if used.iter().any(|id| unavailable.contains(id)) {
         return Ok(false);

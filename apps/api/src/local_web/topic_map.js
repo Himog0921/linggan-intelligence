@@ -12,23 +12,39 @@
   const stageNames = {discover_understand:'发现与理解',seek_assessment:'求助与评估',choose_support:'选择支持',begin_practice:'开始实践',long_term_manage:'长期管理'};
   const fallbackStages = Object.entries(stageNames).map(([stage, label]) => ({stage, label}));
   const otherNames = {cross_stage:'跨阶段综合',general_background:'通用背景',unclear:'已分析但阶段不明',pending:'待分析 / 材料不足'};
-  const views = [['structure','结构与表现'],['patterns','内容格局'],['sources','来源分布'],['candidates','新方向'],['action','我方对照与再做']];
-  const defaults = {domainRef:'',topicRef:'',platform:'',windowDays:'',referenceWindowDays:'30',view:'overview',tab:'structure',path:'',overlay:'',stage:'',metric:'main',mapMode:'map',materialMode:'latest',summaryChart:'table',plotPlatform:'',changesOnly:false,query:'',collapsed:[],compare:[]};
+  const views = [['content','材料与讨论'],['structure','结构与表现'],['patterns','内容格局'],['sources','来源分布'],['candidates','新方向'],['action','我方对照与再做']];
+  const defaults = {domainRef:'',topicRef:'',platform:'',windowDays:'',referenceWindowDays:'30',view:'overview',tab:'content',path:'',overlay:'',stage:'',metric:'main',mapMode:'list',materialMode:'latest',summaryChart:'table',plotPlatform:'',changesOnly:false,query:'',collapsed:[],compare:[],navigationOpen:false,journeyAnalysis:false,layoutVersion:2};
   let restored = {};
   try { restored = JSON.parse(sessionStorage.getItem('linggan.topic-map.view') || '{}'); } catch (_) {}
   const state = {...defaults, ...restored};
-  if (!views.some(([id]) => id === state.tab)) state.tab = 'structure';
+  if (restored.layoutVersion !== 2) Object.assign(state,{tab:'content',mapMode:'list',layoutVersion:2});
+  if (!views.some(([id]) => id === state.tab)) state.tab = 'content';
   if (!['overview','journey'].includes(state.view)) state.view = 'overview';
   const params = new URLSearchParams(location.search);
   // The shared picker links only the new domain; former scope must not follow it.
   const incomingDomain = params.get('domain') ?? params.get('domainRef');
   if (params.has('domain') || (incomingDomain !== null && incomingDomain !== state.domainRef)) Object.assign(state, defaults, {domainRef:incomingDomain});
-  ['domainRef','topicRef','platform','windowDays','referenceWindowDays'].forEach(key => { if (params.has(key)) state[key] = params.get(key); });
+  const urlKeys = ['domainRef','topicRef','platform','windowDays','referenceWindowDays','view','tab','path','overlay','stage','metric','materialMode','query'];
+  if (params.has('tm')) Object.assign(state,defaults);
+  urlKeys.forEach(key => { if (params.has(key)) state[key] = params.get(key); });
+  function normalizeState() {
+    if (!['overview','journey'].includes(state.view)) state.view='overview';
+    if (!views.some(([key])=>key===state.tab)) state.tab='content';
+    if (![...Object.keys(stageNames),...Object.keys(otherNames)].includes(state.stage)) state.stage='';
+    if (!['main','involved'].includes(state.metric)) state.metric='main';
+    if (!['latest','high','ordinary'].includes(state.materialMode)) state.materialMode='latest';
+    if (!['','xhs','douyin'].includes(state.platform)) state.platform='';
+    if (!['','7','30','90'].includes(state.windowDays)) state.windowDays='';
+    if (!['','family','adult'].includes(state.path)) state.path='';
+    if (!['','obstruction_recurrence','transition_handoff'].includes(state.overlay)) state.overlay='';
+  }
+  normalizeState();
   // The page supplies the Topic API's name-ordered default before an expensive map read.
   if (!state.domainRef && root.dataset?.defaultDomainRef) state.domainRef = root.dataset.defaultDomainRef;
   const extraWorks = new Map();
+  let progressError = '', progressLoading = false, progressEpoch = 0;
   let snapshot = null, progress = null, loading = false, readError = '', notice = '', pending = false;
-  let dialog = null, dialogState = null, dialogStack = [], triggerElement = null, fetchEpoch = 0;
+  let dialog = null, dialogState = null, dialogStack = [], triggerElement = null, triggerAction = null, fetchEpoch = 0;
   const title = work => work.title || '标题尚未取得';
   const readableMaterial = w => Boolean(w?.readable || w?.research?.readable);
   const commentOnlyResearch = w => w?.research?.readable === true && w.research.authorSourceState === 'source_unavailable' && w.research.commentSourceState === 'available';
@@ -44,12 +60,12 @@
   const badge = (text, signal = false) => `<span class="lgi-tm-badge ${signal ? 'is-signal' : ''}">${esc(text)}</span>`;
   const empty = (text, detail = '') => `<div class="lgi-tm-empty"><strong>${esc(text)}</strong>${detail ? `<p>${esc(detail)}</p>` : ''}</div>`;
   const select = (key, label, options) => `<label class="lgi-tm-control"><span>${esc(label)}</span><select data-filter="${key}">${options.map(([value,text]) => `<option value="${esc(value)}" ${String(state[key]) === String(value) ? 'selected' : ''}>${esc(text)}</option>`).join('')}</select></label>`;
-  function persist() {
+  function persist(replace = false) {
     try { sessionStorage.setItem('linggan.topic-map.view', JSON.stringify(state)); } catch (_) {}
     const url = new URL(location.href);
-    url.searchParams.delete('domain');
-    ['domainRef','topicRef','platform','windowDays','referenceWindowDays'].forEach(key => state[key] ? url.searchParams.set(key,state[key]) : url.searchParams.delete(key));
-    history.replaceState(null, '', url);
+    url.searchParams.delete('domain'); url.searchParams.set('tm','1');
+    urlKeys.forEach(key => state[key] ? url.searchParams.set(key,state[key]) : url.searchParams.delete(key));
+    if (url.href !== location.href) history[replace ? 'replaceState' : 'pushState'](null, '', url);
   }
   function query(overrides = {}) {
     const values = {...state,...overrides};
@@ -77,7 +93,8 @@
       if (!state.domainRef && result.scope.domainRef) state.domainRef = result.scope.domainRef;
       if (!state.domainRef && result.domains.length) { state.domainRef=result.domains[0].domainRef; loading=false; persist(); return await load(); }
       if (state.topicRef && !topic(state.topicRef)) state.topicRef = '';
-      persist();
+      persist(true);
+      refreshReadiness(epoch, state.domainRef);
     } catch (error) { if (epoch === fetchEpoch && error.status===404 && state.topicRef) { state.topicRef='';notice='原主题引用当前不可用，已返回该领域概览；旧备选的定义引用仍保留。';persist();return await load(); } if (epoch === fetchEpoch) readError = error.message; }
     finally { if (epoch === fetchEpoch) { loading = false; render(); } }
   }
@@ -91,6 +108,79 @@
     finally { pending = false; renderNotice(); }
   }
   function selectedWorks() { return list(snapshot?.works); }
+  async function readResearchProgress(domainRef, scopeEpoch=fetchEpoch) {
+    const epoch=++progressEpoch;
+    const current=()=>epoch===progressEpoch && scopeEpoch===fetchEpoch && domainRef===state.domainRef;
+    progressLoading=true;renderReadiness();
+    try {
+      const value=await request(`/api/local/topic-map/research?domainRef=${encodeURIComponent(domainRef)}`);
+      if(current()){progress=value;progressError='';}
+      return current()?value:null;
+    } catch(error) { if(current()){progressError=error.message;throw error;}return null; }
+    finally { if(current()){progressLoading=false;renderReadiness();} }
+  }
+  async function refreshReadiness(epoch, domainRef) {
+    progress=null;progressError='';
+    try { await readResearchProgress(domainRef,epoch); } catch { /* Shared reader records the visible failure. */ }
+  }
+  function renderReadiness() {
+    const node=root.querySelector('[data-readiness]');
+    if(node) node.innerHTML=readiness();
+  }
+  function readiness() {
+    const scope=snapshot?.scope, counts=progress?.currentMethodSummary;
+    const operation=progressLoading?'研究状态读取中':progressError?'研究状态读取失败':progress?.policy?.status==='paused'?'研究已暂停':progress?.policy?.status==='active'?'研究允许调度':progress?.policy?.status==='stopped'?'研究已停止':progress?.policy?'研究状态未知':'研究未设置';
+    return `<span>可读 ${number(scope?.readableWorkCount)} 篇 · 待归方向 ${number(scope?.unclassifiedWorkCount)} 篇</span><span>${operation}${counts?` · 当前方法接纳 ${number(counts.succeededCount)} · 失败 ${number(counts.failedCount)} · 派发未知 ${number(counts.unknownDispatchCount)}`:''}</span>${btn(progressError?'重读研究状态':'研究进度','research','','lgi-tm-quiet')}<span class="lgi-tm-note">已有材料可直接阅读和人工保留。</span>`;
+  }
+  function matchesWork(w, queryText = state.query) {
+    const q=String(queryText || '').normalize('NFKC').toLocaleLowerCase().trim();
+    if(!q)return true;
+    const text=[title(w),w.creatorDisplayName,typeof w.preview==='string'?w.preview:w.preview?.text,w.evidenceFragment?.text,
+      ...discussionUnits(w).flatMap(d=>[d.label,d.statement]),...list(w.research?.output?.scenes).map(v=>v.label)].filter(v=>typeof v==='string').join(' ').normalize('NFKC').toLocaleLowerCase();
+    return text.includes(q);
+  }
+  function stageWorks(ns = selectedWorks()) {
+    if(!state.stage)return ns;
+    const journey=topic(state.topicRef)?.journey || snapshot?.journey;
+    const entry=journeyEntries(journey,stageNames[state.stage]?state.metric:'main').find(e=>e.stage===state.stage);
+    if(Array.isArray(entry?.workRefs)){const refs=new Set(entry.workRefs);return ns.filter(w=>refs.has(w.workRef));}
+    return ns.filter(w=>readableMaterial(w)).filter(w=>state.metric==='involved'&&stageNames[state.stage]?list(w.involvedStages).includes(state.stage):w.mainStage===state.stage);
+  }
+  function workspaceWorks() { return sortedMaterials(stageWorks()); }
+  function scopeChips() {
+    const chips=[];
+    if(state.topicRef)chips.push(btn(`方向：${esc(topicName(state.topicRef))} · 清除`,'clear-filter','topicRef','lgi-tm-quiet'));
+    if(state.stage)chips.push(btn(`阶段：${esc(stageNames[state.stage]||otherNames[state.stage])} · 清除`,'clear-filter','stage','lgi-tm-quiet'));
+    if(state.path)chips.push(btn(`经历：${state.path==='family'?'家庭支持':'成年自我管理'} · 清除`,'clear-filter','path','lgi-tm-quiet'));
+    if(state.overlay)chips.push(btn(`状态：${state.overlay==='transition_handoff'?'环境转换与交接':'受阻与反复'} · 清除`,'clear-filter','overlay','lgi-tm-quiet'));
+    if(state.query)chips.push(btn(`关键词：${esc(state.query)} · 清除`,'clear-filter','query','lgi-tm-quiet'));
+    return `<div class="lgi-tm-row lgi-tm-scope-chips">${chips.join('')}${chips.length?btn('清除全部浏览条件','reset-scope','','lgi-tm-quiet'):''}</div>`;
+  }
+  function emptyWorkspace() {
+    const stage=stageNames[state.stage]||otherNames[state.stage];
+    return `${empty(state.query?'当前条件没有关键词命中':stage?`当前没有合格归入「${stage}」的材料`:'当前条件没有对应作品',state.query?'查找范围是标题、作者、已返回正文片段与讨论，不代表全文和全部评论。':state.materialMode!=='latest'?'高表现与常规作品按已保存平台规则区分；规则未知不计为低表现。':'分类未覆盖或来源不足，不代表现实需求不存在。')}<div class="lgi-tm-row">${state.query?btn('清除关键词','clear-filter','query'):''}${state.stage?btn('查看全部阶段','clear-filter','stage'):''}${btn('查看待分析材料','browse-pending')}${btn('返回全部材料','reset-scope')}</div>`;
+  }
+  function materialRows(ns) {
+    return `<div class="lgi-tm-evidence-list">${ns.map(w=>`<article class="lgi-tm-evidence-row"><button type="button" class="lgi-tm-evidence-cover" data-action="reader" data-id="${esc(w.workRef)}" aria-label="打开${esc(title(w))}">${coverUrl(w)?`<img src="${esc(coverUrl(w))}" alt="已取得封面" loading="lazy">`:'<span>封面尚未采集</span>'}</button><div class="lgi-tm-evidence-copy"><div class="lgi-tm-row"><span class="lgi-tm-note">${esc(platformName(w.platform))} · ${esc(w.creatorDisplayName || '作者未知')} · ${esc(publishedTime(w))}</span>${w.own?badge('我方作品'):''}${badge(list(w.topicRefs).length?'已有方向依据':'待归方向')}</div><h3>${btn(esc(title(w)),'reader',w.workRef,'lgi-tm-title-link')}</h3><p class="lgi-tm-excerpt">${esc((typeof w.preview==='string'?w.preview:w.preview?.text)||w.evidenceFragment?.text||'正文片段尚未取得，可打开核对当前来源。')}</p><div class="lgi-tm-row"><span class="lgi-tm-note">赞 ${number(w.likes)} · 收藏 ${number(w.collects)} · 评论 ${number(w.comments)}</span>${btn('阅读原文与讨论','reader',w.workRef,'lgi-tm-quiet')}${btn('人工保留备选','manual-save',w.workRef,'lgi-tm-quiet',w.readable?'':'disabled title="当前作者来源不可读，不能冻结人工备选依据"')}</div></div></article>`).join('')}</div>`;
+  }
+  function publicationOrder(w) { const value=String(w.publishedAt || '');const stamp=/^\d{13}$/.test(value)?Number(value):Date.parse(value);return Number.isFinite(stamp)?stamp:0; }
+  function publishedTime(w) {
+    if(w.publishedAtSourceText && !/^\d{13}$/.test(w.publishedAtSourceText))return w.publishedAtSourceText;
+    if(!w.publishedAt && !w.publishedAtSourceText)return '发布时间未知';
+    const raw=String(w.publishedAtSourceText || w.publishedAt),date=new Date(/^\d{13}$/.test(raw)?Number(raw):raw);
+    if(Number.isNaN(date.getTime()))return raw;
+    return `${date.toLocaleDateString('zh-CN')} · ${w.publishedAtPrecision==='exact'?'发布时间':'时间精度见来源'}`;
+  }
+  function materialWorkspace() {
+    const ns=workspaceWorks(),limit=12;
+    const q=state.query.normalize('NFKC').toLocaleLowerCase();
+    const matchedTopics=q?list(snapshot.topics).filter(t=>t.lifecycleState!=='superseded' && t.displayName.normalize('NFKC').toLocaleLowerCase().includes(q)):[];
+    return `<section class="lgi-tm-workspace-content"><div class="lgi-tm-section-head"><div><h3>${state.query?`「${esc(state.query)}」的材料命中`:'可直接使用的材料'}</h3><p>${ns.length} 篇当前匹配 · ${number(snapshot.scope.totalWorkCount)} 篇服务端范围${state.stage?' · '+esc(stageNames[state.stage]||otherNames[state.stage]):''}</p></div><div class="lgi-tm-row">${[['latest','最新作品'],['high','高表现'],['ordinary','常规作品']].map(([id,name])=>tab(name,'material-mode',id,state.materialMode===id)).join('')}</div></div>${state.query?`<p class="lgi-tm-note">检索标题、作者、已返回的正文片段与讨论。方向名称另有 ${matchedTopics.length} 个命中，未搜索的概览统计不作为命中统计。</p>${matchedTopics.length?`<details class="lgi-tm-core-details"><summary>查看匹配方向</summary><div class="lgi-tm-row">${matchedTopics.map(t=>btn(esc(t.displayName),'topic',t.topicRef,'lgi-tm-quiet')).join('')}</div></details>`:''}`:''}${state.materialMode!=='latest'?`<p class="lgi-tm-analysis-note">样本统计规则：${platformStats(snapshot.statistics).map(p=>`${esc(platformName(p.platform))} ${p.highPerformanceThreshold==null?'未设置':`点赞 ≥${number(p.highPerformanceThreshold)}`}`).join('；') || '未设置'}。小红书运营参考的点赞 ≥200 标准独立使用，不静默改写历史统计。${btn('查看样本规则','rules','','lgi-tm-quiet')}</p>`:''}${ns.length?materialRows(ns.slice(0,limit)):emptyWorkspace()}${ns.length>limit?btn(`查看全部 ${ns.length} 篇匹配材料`,'subset',ns.map(w=>w.workRef).join(',')):''}<details class="lgi-tm-core-details"><summary>已形成的讨论与场景 · ${new Set(ns.flatMap(w=>discussionUnits(w).map(d=>`${w.workRef}:${d.unitId||d.label}`))).size} 条讨论</summary>${discussionsView(ns)}${sceneList(ns)}</details></section>`;
+  }
+  function sidebar() {
+    const j=topic(state.topicRef)?.journey || snapshot?.journey;
+    return `<aside class="lgi-tm-sidebar" aria-label="主题图谱导航"><nav class="lgi-tm-view-nav" aria-label="主题图谱视图">${tab('主题概览','view','overview',state.view==='overview')}${tab('用户生命旅程','view','journey',state.view==='journey')}</nav>${btn(state.navigationOpen?'收起导航条件':'展开导航条件','toggle-navigation','','lgi-tm-navigation-toggle',`aria-expanded="${state.navigationOpen}"`)}<div class="lgi-tm-navigation-body ${state.navigationOpen?'is-open':''}">${state.view==='overview'?tree():`<div class="lgi-tm-stage-nav"><h3>内容回应的阶段</h3><p class="lgi-tm-note">当前方向与平台时间范围；计数不应用关键词。</p>${tab('全部阶段','stage','',!state.stage)}${[...stages(j),...journeyEntries(j,'main').filter(e=>!stageNames[e.stage])].map(e=>tab(`${stageNames[e.stage]||otherNames[e.stage]} · ${number(e.count)}`,'stage',e.stage,state.stage===e.stage)).join('')}<div class="lgi-tm-row">${tab('主阶段','metric','main',state.metric==='main')}${tab('涉及阶段','metric','involved',state.metric==='involved')}</div>${select('path','经历',[['','全部经历'],['family','家庭支持'],['adult','成年自我管理']])}${select('overlay','内容状态',[['','全部状态'],['obstruction_recurrence','受阻与反复'],['transition_handoff','环境转换与支持交接']])}<p class="lgi-tm-note">${state.metric==='main'?'每篇一个主阶段；未知与待分析单列。':'同篇可涉及多个阶段，不是人数或流转率。'}</p></div>`}</div><div class="lgi-tm-sidebar-tools">${btn('我的备选与交接','saved','','lgi-tm-quiet')}${btn('主题 × 旅程','matrix','','lgi-tm-quiet')}${btn('研究进度与设置','research','','lgi-tm-quiet')}${btn('我方矩阵','identity','','lgi-tm-quiet')}</div></aside>`;
+  }
   function scopeText() {
     return `${list(snapshot?.domains).find(d => (d.domainRef || d.id) === state.domainRef)?.displayName || list(snapshot?.domains).find(d => (d.domainRef || d.id) === state.domainRef)?.name || '当前领域'} · ${state.platform || '全部平台'} · ${state.windowDays ? `近${state.windowDays}天发布` : '全部发布时间'}`;
   }
@@ -100,10 +190,10 @@
     root.querySelectorAll('[data-mutation]').forEach(node => { node.disabled = pending; });
   }
   function header() {
-    return `<div class="lgi-tm-pagehead"><div class="lgi-tm-head-title"><h1>主题图谱</h1><p>从领域结构查看内容，再用具体材料判断下一次切入。</p></div><div class="lgi-tm-row">${btn('我的备选','saved')}${btn('研究进度与设置','research')}${btn('我方矩阵','identity')}</div></div><div class="lgi-tm-main-tabs" aria-label="主题图谱视图">${tab('主题概览','view','overview',state.view === 'overview')}${tab('用户生命旅程','view','journey',state.view === 'journey')}</div>`;
+    return `<div class="lgi-tm-pagehead"><div class="lgi-tm-head-title"><h1>主题图谱</h1><p>从材料和讨论找到值得继续的方向。</p></div>${btn('刷新已有结果','refresh')}</div>`;
   }
   function controls() {
-    return `<div class="lgi-tm-toolbar">${select('platform','平台',[['','全部平台'],['xhs','小红书'],['douyin','抖音']])}${select('windowDays','概览统计窗口',[['','全部发布时间'],['7','近7天'],['30','近30天'],['90','近90天']])}${state.view === 'journey' ? select('path','明确经历',[['','全部经历'],['family','家庭支持'],['adult','成年自我管理']]) : ''}<form class="lgi-tm-search" data-form="search"><label class="v7-sr-only" for="topic-map-search">查找当前范围的作品 / 主题</label><div class="lgi-tm-row"><input id="topic-map-search" name="query" value="${esc(state.query)}" placeholder="输入关键词"><button class="lgi-tm-button" type="submit">查找</button></div></form>${btn('刷新已有结果','refresh')}</div>`;
+    return `<div class="lgi-tm-toolbar">${select('platform','平台',[['','全部平台'],['xhs','小红书'],['douyin','抖音']])}${select('windowDays','发布时间',[['','全部时间'],['7','近7天'],['30','近30天'],['90','近90天']])}<form class="lgi-tm-search" data-form="search"><label class="v7-sr-only" for="topic-map-search">查找材料与方向</label><div class="lgi-tm-row"><input id="topic-map-search" name="query" value="${esc(state.query)}" placeholder="查找材料与方向"><button class="lgi-tm-button" type="submit">查找</button></div></form></div>${scopeChips()}`;
   }
   function legacyConcept(t) { return t?.lifecycleState === 'candidate' && t?.core?.qualityState === 'legacy_candidate'; }
   function tree() {
@@ -115,7 +205,7 @@
       return `<li><div class="lgi-tm-tree-row ${state.topicRef === t.topicRef ? 'is-active' : ''}">${children.length ? btn(expanded ? '−' : '+','collapse',t.topicRef,'lgi-tm-tree-toggle',`aria-label="${expanded ? '收起' : '展开'}${esc(t.displayName)}" aria-expanded="${expanded}"`) : '<span class="lgi-tm-tree-spacer"></span>'}${btn(esc(t.displayName),'topic',t.topicRef,'lgi-tm-tree-name')}${t.lifecycleState === 'candidate' ? '<span class="lgi-tm-candidate-dot" title="候选方向">候选</span>' : ''}<span class="lgi-tm-num">${number(t.statistics?.workCount)}</span></div>${children.length && expanded ? `<ul>${children.map(c => branch(c,next)).join('')}</ul>` : ''}</li>`;
     }
     const pickerOptions=[];function optionBranch(t,path=[]){if(path.includes(t.topicRef))return;const next=[...path,t.topicRef];pickerOptions.push(`<option value="${esc(t.topicRef)}" ${state.topicRef===t.topicRef?'selected':''}>${'　'.repeat(path.length)}${esc(t.displayName)}</option>`);topics.filter(c=>c.parentTopicRef===t.topicRef).forEach(c=>optionBranch(c,next));}roots.forEach(t=>optionBranch(t));
-    return `<label class="lgi-tm-mobile-tree-picker lgi-tm-control"><span>主题层级 · 全部方向可选择</span><select data-filter="topicRef"><option value="" ${!state.topicRef?'selected':''}>全部方向</option>${pickerOptions.join('')}</select></label><aside class="lgi-tm-tree" aria-label="稳定主题结构"><div class="lgi-tm-section-head"><h2>领域结构</h2>${btn('调整归属','move-topic','','lgi-tm-quiet')}</div><div class="lgi-tm-tree-row ${!state.topicRef ? 'is-active' : ''}">${btn('全部方向','topic','','lgi-tm-tree-name')}<span class="lgi-tm-num">${number(snapshot?.scope?.totalWorkCount)}</span></div><ul>${roots.filter(t=>!legacyConcept(t)).map(t => branch(t)).join('')}</ul>${roots.some(legacyConcept)?`<details class="lgi-tm-core-details" ${roots.some(t=>legacyConcept(t)&&t.topicRef===state.topicRef)?'open':''}><summary>旧方法候选 · ${roots.filter(legacyConcept).length}</summary><p class="lgi-tm-note">保留原声与历史归属，尚待稳定概念归纳；这些节点不代表已形成专业主题树。</p><ul>${roots.filter(legacyConcept).map(t=>branch(t)).join('')}</ul></details>`:''}${topics.length ? '' : '<p class="lgi-tm-note">当前领域尚未建立主题定义，已入库材料仍然可读。</p>'}<p class="lgi-tm-note">每个数字为去重作品，子主题之间可以重叠。</p></aside>`;
+    return `<label class="lgi-tm-mobile-tree-picker lgi-tm-control"><span>主题层级 · 全部方向可选择</span><select data-filter="topicRef"><option value="" ${!state.topicRef?'selected':''}>全部方向</option>${pickerOptions.join('')}</select></label><div class="lgi-tm-tree" aria-label="稳定主题结构"><div class="lgi-tm-section-head"><h2>领域结构</h2>${btn('调整归属','move-topic','','lgi-tm-quiet')}</div><div class="lgi-tm-tree-row ${!state.topicRef ? 'is-active' : ''}">${btn('全部方向','topic','','lgi-tm-tree-name')}<span class="lgi-tm-num">${number(snapshot?.scope?.totalWorkCount)}</span></div><ul>${roots.filter(t=>!legacyConcept(t)).map(t => branch(t)).join('')}</ul>${roots.some(legacyConcept)?`<details class="lgi-tm-core-details" ${roots.some(t=>legacyConcept(t)&&t.topicRef===state.topicRef)?'open':''}><summary>旧方法候选 · ${roots.filter(legacyConcept).length}</summary><p class="lgi-tm-note">保留原声与历史归属，尚待稳定概念归纳；这些节点不代表已形成专业主题树。</p><ul>${roots.filter(legacyConcept).map(t=>branch(t)).join('')}</ul></details>`:''}${topics.length ? '' : '<p class="lgi-tm-note">当前领域尚未建立主题定义，已入库材料仍然可读。</p>'}<p class="lgi-tm-note">每个数字为去重作品，子主题之间可以重叠。</p></div>`;
   }
   function identity() {
     const t = topic(state.topicRef);
@@ -132,8 +222,8 @@
     return `<div class="lgi-tm-boundary"><span>${esc(snapshot?.sourceBoundary || '统计引用后端读模型；来源缺口与研究判断分别表达。')}</span>${snapshot?.scope?.readLimit ? `<span>读取上限 ${number(snapshot.scope.readLimit)} · 当前返回 ${list(snapshot.works).length} 篇</span>` : ''}${s && s.totalWorkCount > list(snapshot.works).length ? '<span>作品列表为部分读取；基础总量采用服务端统计。</span>' : ''}</div>`;
   }
   function overview() {
-    const stats = topic(state.topicRef)?.statistics || snapshot.statistics;
-    return `<div class="lgi-tm-atlas">${tree()}<main class="lgi-tm-main">${identity()}${topicBoundary(topic(state.topicRef))}${metrics(stats)}${coverage()}<div class="lgi-tm-work-tabs" aria-label="概览工作视角">${views.map(([id,name]) => tab(name,'tab',id,state.tab === id)).join('')}</div>${state.tab === 'structure' ? structure() : state.tab === 'patterns' ? patterns() : state.tab === 'sources' ? sources() : state.tab === 'candidates' ? candidates() : actionView()}${state.tab !== 'sources' && state.tab !== 'candidates' ? materialsSection() : ''}</main></div>`;
+    const stats=topic(state.topicRef)?.statistics || snapshot.statistics;
+    return `<div class="lgi-tm-work-tabs" aria-label="概览工作视角">${views.map(([id,name])=>tab(name,'tab',id,state.tab===id)).join('')}</div>${state.tab==='content'?materialWorkspace():`<p class="lgi-tm-boundary">以下分析使用服务端平台、时间与方向范围；关键词、阶段和材料排序仅用于“材料与讨论”。${btn('返回匹配材料','tab','content','lgi-tm-quiet')}</p>${metrics(stats)}${coverage()}${changesBar()}${state.tab==='structure'?structure():state.tab==='patterns'?patterns():state.tab==='sources'?sources():state.tab==='candidates'?candidates():actionView()}`}`;
   }
   function children() { return list(snapshot?.topics).filter(t=>t.lifecycleState!=='superseded').filter(t => state.topicRef ? t.parentTopicRef === state.topicRef : !t.parentTopicRef); }
   function plotPlatform(stats = topic(state.topicRef)?.statistics || snapshot.statistics) {
@@ -151,7 +241,7 @@
   }
   function structure() {
     const allRows = children(), changed = new Set(changeRows().map(c => c.topicRef));
-    const rows = allRows.filter(t => (!state.query || t.displayName.includes(state.query)) && (!state.changesOnly || changed.has(t.topicRef)));
+    const rows = allRows.filter(t => !state.changesOnly || changed.has(t.topicRef));
     return `${allRows.length ? `<div class="lgi-tm-section-head"><div><h3>主题供给分布</h3><p>点名称下钻，勾选最多三个方向并排比较。</p></div><div class="lgi-tm-overview-tools">${tab('表格','summary-chart','table',state.summaryChart!=='scatter')}${tab('分布图','summary-chart','scatter',state.summaryChart==='scatter')}${btn('并排比较','compare','','',list(state.compare).length ? '' : 'disabled title="先勾选方向"')}</div></div>${rows.length ? state.summaryChart==='scatter' ? topicScatter(rows) : structureTable(rows) : empty('当前子方向没有对应的未读变化','已有统计与材料继续可看，可切回全部方向。')}<p class="lgi-tm-note">子主题可以重叠，父主题按作品去重；比例描述已观察样本，不是市场份额。</p>` : '<div class="lgi-tm-section-head"><div><h3>当前方向的内容与表现</h3><p>叶主题继续展示完整统计与作品，不要求先启动研究。</p></div></div>'}${distribution()}`;
   }
   function structureTable(rows) {
@@ -290,10 +380,10 @@
     return `<div class="lgi-tm-section-head"><div><h3>从熟悉的方向，找到下一次切入</h3><p>我方发布历史不随概览或外部近期窗口清空。</p></div>${select('referenceWindowDays','外部参考窗口',[['7','近7天'],['30','近30天'],['90','近90天'],['0','全部历史']])}</div><div class="lgi-tm-callout">${snapshot.scope.ownIdentityState === 'unknown' ? '我方矩阵尚未设置，不能据此判断整个账号矩阵没做过。' : `${number(snapshot.scope.ownHistoryPublishedCount)} 篇我方已确认发布 · ${number(stats.ownBreakoutCount)} 篇手动爆款 · ${number(snapshot.scope.ownHistoryPublicationUnknownCount)} 篇发布事实未知`}</div><div class="lgi-tm-table-scroll"><table><thead><tr><th>主题与具体讨论</th><th>我方发布覆盖 / 全部历史</th><th>近期外部低粉高赞</th><th>为什么打开</th></tr></thead><tbody>${rows.map(t => `<tr><td>${btn(esc(t.displayName),'topic',t.topicRef,'lgi-tm-title-link')}<p>${esc(t.definitionText)}</p></td><td>${snapshot.scope.ownIdentityState === 'unknown' ? '我方范围未设置' : `${number(t.statistics?.ownHistoryPublishedCount)} 篇已发布<br>${number(t.statistics?.ownHistoryBreakoutCount)} 篇手动爆款`}</td><td>${number(t.statistics?.recentLowFollowerHighLikeCount)} 篇独立外部作品<p class="lgi-tm-note">粉丝 ≤1,000 且点赞 ≥500，粉丝未知不计入</p></td><td><p>先查看我方原作、外部参考与具体讨论，不把做过当作做完。</p>${btn('判断这个方向','judge',t.topicRef,'lgi-tm-quiet')}</td></tr>`).join('')}</tbody></table></div>`;
   }
   function sortedMaterials(ns) {
-    const filtered = ns.filter(w => !state.query || [title(w),w.creatorDisplayName,w.preview].join(' ').includes(state.query));
+    const filtered = ns.filter(w => matchesWork(w));
     if (state.materialMode === 'high') return filtered.filter(w => {const p = platformStats(snapshot?.statistics).find(p => p.platform === w.platform); return known(p?.highPerformanceThreshold) && known(w.likes) && w.likes >= p.highPerformanceThreshold;}).sort((a,b) => a.platform.localeCompare(b.platform) || (b.likes ?? -1) - (a.likes ?? -1));
     if (state.materialMode === 'ordinary') return filtered.filter(w => {const p = platformStats(snapshot?.statistics).find(p => p.platform === w.platform); return known(p?.highPerformanceThreshold) && known(w.likes) && w.likes < p.highPerformanceThreshold;}).sort((a,b) => a.platform.localeCompare(b.platform) || (b.likes ?? -1) - (a.likes ?? -1));
-    return filtered.sort((a,b) => String(b.publishedAt || '').localeCompare(String(a.publishedAt || '')));
+    return filtered.sort((a,b) => publicationOrder(b)-publicationOrder(a));
   }
   function coverUrl(w) {
     const value = w.media?.cover?.localAssetUrl;
@@ -304,7 +394,7 @@
   function avatar(name) { const initials=Array.from(typeof name==='string'?name.trim():'').slice(0,2).join('');return `<span class="lgi-tm-avatar" aria-hidden="true">${esc(initials || '·')}</span>`; }
   function card(w) {
     const cover = coverUrl(w);
-    return `<article class="lgi-tm-material"><button type="button" class="lgi-tm-cover" data-action="reader" data-id="${esc(w.workRef)}" aria-label="打开${esc(title(w))}">${cover ? `<img src="${esc(cover)}" loading="lazy" alt="${esc(title(w))}的已取得封面">` : '<span>▧<br>封面尚未采集</span>'}</button><div class="lgi-tm-row lgi-tm-card-meta"><span>${esc(platformName(w.platform))}</span>${w.own ? badge(w.ownBreakout ? '我方手动爆款' : '我方作品',w.ownBreakout) : ''}</div><h4>${btn(esc(title(w)),'reader',w.workRef,'lgi-tm-title-link')}</h4>${materialSourceNote(w)}<p class="lgi-tm-author" title="${esc(w.creatorDisplayName || '作者未知')}">${avatar(w.creatorDisplayName)}${esc(w.creatorDisplayName || '作者未知')}</p><p class="lgi-tm-note">${esc(w.publishedAtSourceText || w.publishedAt || '发布时间未知')}</p><div class="lgi-tm-interactions"><span title="点赞精确值 ${number(w.likes)}">赞 <b>${number(w.likes)}</b></span><span title="收藏精确值 ${number(w.collects)}">藏 <b>${number(w.collects)}</b></span><span title="评论精确值 ${number(w.comments)}">评 <b>${number(w.comments)}</b></span><span title="分享精确值 ${number(w.shares)}">分享 <b>${number(w.shares)}</b></span></div></article>`;
+    return `<article class="lgi-tm-material"><button type="button" class="lgi-tm-cover" data-action="reader" data-id="${esc(w.workRef)}" aria-label="打开${esc(title(w))}">${cover ? `<img src="${esc(cover)}" loading="lazy" alt="${esc(title(w))}的已取得封面">` : '<span>▧<br>封面尚未采集</span>'}</button><div class="lgi-tm-row lgi-tm-card-meta"><span>${esc(platformName(w.platform))}</span>${w.own ? badge(w.ownBreakout ? '我方手动爆款' : '我方作品',w.ownBreakout) : ''}</div><h4>${btn(esc(title(w)),'reader',w.workRef,'lgi-tm-title-link')}</h4>${materialSourceNote(w)}<p class="lgi-tm-author" title="${esc(w.creatorDisplayName || '作者未知')}">${avatar(w.creatorDisplayName)}${esc(w.creatorDisplayName || '作者未知')}</p><p class="lgi-tm-note">${esc(publishedTime(w))}</p><div class="lgi-tm-interactions"><span title="点赞精确值 ${number(w.likes)}">赞 <b>${number(w.likes)}</b></span><span title="收藏精确值 ${number(w.collects)}">藏 <b>${number(w.collects)}</b></span><span title="评论精确值 ${number(w.comments)}">评 <b>${number(w.comments)}</b></span><span title="分享精确值 ${number(w.shares)}">分享 <b>${number(w.shares)}</b></span></div></article>`;
   }
   function materialsSection() {
     const ns = sortedMaterials(selectedWorks());
@@ -318,9 +408,9 @@
     const questions = ['发生了什么？怎样理解？','何时求助？如何评估？','哪些支持适合当前处境？','先试什么？怎样开始？','如何调整并持续支持？'];
     const glyphs = ['M4 4h6v14H4zm10 0h6v14h-6M10 5l4-1m-4 14 4-1','M12 3v18M3 12h18M5 5l14 14M19 5 5 19','M4 6h16v13H4zM8 3v6m8-6v6M8 13h8','M4 18l5-8 4 3 7-9M15 4h5v5','M19 7a8 8 0 1 0 1 9M19 3v5h-5'];
     const map = `<div class="lgi-tm-map-shell"><div class="lgi-tm-map-inscription">五个稳定站点 · 内容所回应的经历</div><svg class="lgi-tm-journey-map" viewBox="0 0 1080 462" role="group" aria-label="五主阶段旅程地图，路线为概念关系，不表示人数或转化"><path class="lgi-tm-route-bed" d="M150 108H885C1020 108 1020 319 885 319H340"/><path class="lgi-tm-route" d="M150 108H885C1020 108 1020 319 885 319H340"/><path class="lgi-tm-route-dashes" d="M150 108H885C1020 108 1020 319 885 319H340"/><path class="lgi-tm-route-return" d="M685 289C650 234 592 235 565 267"/><text x="638" y="238" text-anchor="middle" class="lgi-tm-route-note">允许返回、跳过与并行</text>${stations.map((station,i) => {const [x,y]=coordinates[i];return `<g role="button" tabindex="0" class="lgi-tm-station ${state.stage===station.stage?'is-active':''}" data-action="stage" data-id="${station.stage}" aria-label="${esc(station.label)}，${number(station.count)}篇，占${pct(station.count,j?.denominator)}，点击查看相关场景"><rect class="lgi-tm-station-focus" x="${x-120}" y="${y-75}" width="240" height="198" rx="5"/><path class="lgi-tm-station-base-side" d="m${x-65} ${y+1} 65 32 65-32v11l-65 34-65-34Z"/><path class="lgi-tm-station-base-top" d="m${x-65} ${y+1} 65-33 65 33-65 32Z"/><g transform="translate(${x-27},${y-62})" class="lgi-tm-station-art"><path class="lgi-tm-station-art-top" d="m0 17 31-16 24 13-31 16Z"/><path class="lgi-tm-station-art-side" d="M0 17v32l24 14V30Z"/><path class="lgi-tm-station-art-front" d="m24 30 31-16v32L24 63Z"/><path class="lgi-tm-station-art-detail" d="m5 25 12 6m-12 1 12 6m22-30v-11"/><circle class="lgi-tm-station-art-pin" cx="39" cy="-4" r="2.5"/><svg x="29" y="27" width="18" height="22" viewBox="0 0 24 24" class="lgi-tm-station-glyph"><path d="${glyphs[i]}"/></svg></g><text x="${x-89}" y="${y-35}" class="lgi-tm-station-index">0${i+1}</text><text x="${x}" y="${y+62}" text-anchor="middle" class="lgi-tm-station-label">${esc(station.label)}</text><text x="${x}" y="${y+81}" text-anchor="middle" class="lgi-tm-station-question">${questions[i]}</text><text x="${x-8}" y="${y+111}" text-anchor="end" class="lgi-tm-station-count">${number(station.count)}</text><text x="${x+2}" y="${y+109}" class="lgi-tm-station-share">篇 · ${pct(station.count,j?.denominator)}</text>${state.overlay ? `<circle class="lgi-tm-station-overlay" cx="${x+64}" cy="${y-23}" r="5"/>` : ''}</g>`;}).join('')}<text x="22" y="444" class="lgi-tm-route-note">内容覆盖，不是个人分布或真实流转率。受阻与转换不增加主阶段。</text></svg></div>`;
-    const ns = selectedWorks().filter(w => !state.stage || (state.metric === 'involved' ? list(w.involvedStages).includes(state.stage) : w.mainStage === state.stage));
-    return `<main class="lgi-tm-journey"><div class="lgi-tm-object-head"><div><span class="lgi-tm-eyebrow">内容回应的经历</span><h2>这些作品，覆盖了哪一段经历？</h2><p>${number(j?.denominator)} 篇可读作品 · 主阶段描述内容，不给作者贴人生标签。</p></div>${btn('阶段与统计依据','method')}</div><div class="lgi-tm-toolbar">${[['','全部状态'],['obstruction_recurrence','受阻与反复'],['transition_handoff','环境转换与支持交接']].map(([id,name]) => tab(name,'overlay',id,state.overlay === id)).join('')}<span class="lgi-tm-grow"></span>${tab('主阶段占比','metric','main',state.metric === 'main')}${tab('涉及率','metric','involved',state.metric === 'involved')}${tab('地图','map-mode','map',state.mapMode === 'map')}${tab('列表','map-mode','list',state.mapMode === 'list')}</div>${state.mapMode === 'map' ? map : `<div class="lgi-tm-stage-list">${stations.map((s,i) => `<button class="lgi-tm-panel ${state.stage === s.stage ? 'is-active' : ''}" data-action="stage" data-id="${s.stage}"><span class="lgi-tm-eyebrow">0${i+1}</span><h3>${esc(s.label)}</h3><p>${questions[i]}</p><strong class="lgi-tm-value">${number(s.count)}</strong><p>${pct(s.count,j?.denominator)} · 当前范围作品</p></button>`).join('')}</div>`}<div class="lgi-tm-row lgi-tm-other-stages">${journeyEntries(j).filter(s => !stageNames[s.stage]).map(s => btn(`${esc(otherNames[s.stage] || '其他 / 未归主阶段')} ${number(s.count)} · ${pct(s.count,j.denominator)}`,'stage',s.stage,'lgi-tm-quiet')).join('')}${btn('主题 × 旅程','matrix')}</div><p class="lgi-tm-note">${state.metric === 'main' ? '五主阶段加其他类别以全部可读作品为分母；保留未分析，不舍弃未知。' : '同篇可以实质涉及多个阶段，涉及率合计可以超过100%。'}${state.overlay ? ' 已应用跨阶段覆盖筛选，分母为当前筛选后的作品。' : ''}</p><div class="lgi-tm-section-head"><div><h3>${state.stage ? `${stageNames[state.stage] || otherNames[state.stage] || '当前阶段'}：具体讨论与场景` : '从具体场景，进入关联主题'}</h3><p>阶段不明确时，已有原作和场景仍可查看。</p></div>${state.stage ? btn('回到全部阶段','stage','') : ''}</div>${sceneList(ns)}<div class="lgi-tm-material-grid">${ns.slice(0,6).map(card).join('')}</div>${btn('查看对应全部材料','subset',ns.map(w => w.workRef).join(','),'lgi-tm-quiet')}</main>`;
+    return `${materialWorkspace()}<section class="lgi-tm-section"><div class="lgi-tm-section-head"><h3>完整旅程概览</h3>${btn(state.journeyAnalysis?'收起地图与统计':'展开地图与统计','journey-analysis','','lgi-tm-quiet',`aria-expanded="${state.journeyAnalysis}"`)}</div>${state.journeyAnalysis?`<p>下图分母 ${number(j?.denominator)} 篇可读作品，统计不应用关键词或单阶段选择；内容回应的阶段不等于作者的人生阶段。</p><div class="lgi-tm-row">${tab('地图','map-mode','map',state.mapMode==='map')}${tab('列表','map-mode','list',state.mapMode==='list')}${btn('阶段与统计依据','method')}</div>${state.mapMode==='map'?map:`<div class="lgi-tm-stage-list">${stations.map((e,i)=>`<button class="lgi-tm-panel" data-action="stage" data-id="${e.stage}"><h3>${esc(e.label)}</h3><p>${questions[i]}</p><strong>${number(e.count)} 篇</strong><p>${pct(e.count,j?.denominator)}</p></button>`).join('')}</div>`}${btn('主题 × 旅程','matrix')}`:''}</section>`;
   }
+
   function syncContext() {
     const current = document.getElementById('topic-map-crumb-current');
     if (current) current.textContent = (!loading && !readError && state.topicRef ? topicName(state.topicRef) : state.view === 'journey' ? '用户生命旅程' : '主题概览');
@@ -339,16 +429,20 @@
   }
   function render() {
     const focused = document.activeElement;
+    const navigationScroll=root.querySelector('.lgi-tm-sidebar')?.scrollTop || 0;
+    const focusAction = focused?.dataset?.action, focusId = focused?.dataset?.id;
     const keepFocus = focused?.id && root.contains(focused) ? focused.id : null;
-    content.innerHTML = `${header()}${controls()}<div data-notice class="lgi-tm-feedback" role="status" ${notice ? '' : 'hidden'}>${esc(notice)}</div>${readError ? `<div class="lgi-tm-read-error" role="alert"><strong>当前读取未成功</strong><p>${esc(readError)}</p>${btn('重新读取','refresh')}${snapshot ? '<p>上一次结果保留在本次会话中，当前范围读取未成功，暂不混用旧结果展示。</p>' : ''}</div>` : ''}${loading ? '<div class="lgi-tm-loading" role="status">正在读取已有材料与统计…</div>' : ''}${loading || readError ? '' : snapshot ? changesBar() + (state.view === 'overview' ? overview() : journey()) : empty('当前图谱尚未读取','页面读取不启动模型研究或平台采集。')}<footer class="lgi-tm-footer"><span>${esc(snapshot?.methodVersion || '方法尚未读取')}</span><span>样本统计、来源材料与研究判断分别保留边界</span></footer>${list(state.compare).length ? `<div class="lgi-tm-compare-dock"><span>已选 ${state.compare.length} 个方向 · ${state.compare.map(topicName).map(esc).join(' / ')}</span>${btn('并排比较','compare','','lgi-tm-primary')}${btn('清空','compare-clear','','lgi-tm-quiet')}</div>` : ''}`;
+    content.innerHTML = `${header()}<div data-notice class="lgi-tm-feedback" role="status" ${notice ? '' : 'hidden'}>${esc(notice)}</div>${readError ? `<div class="lgi-tm-read-error" role="alert"><strong>当前读取未成功</strong><p>${esc(readError)}</p>${btn('重新读取','refresh')}${snapshot ? '<p>上一次结果保留在本次会话中，当前范围读取未成功，暂不混用旧结果展示。</p>' : ''}</div>` : ''}${loading ? '<div class="lgi-tm-loading" role="status">正在读取已有材料与统计…</div>' : ''}${loading || readError ? '' : snapshot ? `<div class="lgi-tm-workbench">${sidebar()}<main class="lgi-tm-main"><div class="lgi-tm-workspace-heading"><h2>${esc(state.topicRef?topicName(state.topicRef):state.view==='journey'?'按内容回应的阶段找材料':'探索当前领域的材料')}</h2>${state.topicRef?btn('判断这个方向','judge',state.topicRef):''}</div><div class="lgi-tm-readiness" data-readiness role="status">${readiness()}</div>${controls()}${state.topicRef?`<details class="lgi-tm-core-details"><summary>方向定义与证据边界</summary>${topicBoundary(topic(state.topicRef))}</details>`:''}${state.view === 'overview' ? overview() : journey()}</main></div>` : empty('当前图谱尚未读取','页面读取不启动模型研究或平台采集。')}<footer class="lgi-tm-footer"><span>${esc(snapshot?.methodVersion || '方法尚未读取')}</span><span>样本统计、来源材料与研究判断分别保留边界</span></footer>${list(state.compare).length ? `<div class="lgi-tm-compare-dock"><span>已选 ${state.compare.length} 个方向 · ${state.compare.map(topicName).map(esc).join(' / ')}</span>${btn('并排比较','compare','','lgi-tm-primary')}${btn('清空','compare-clear','','lgi-tm-quiet')}</div>` : ''}`;
+    const navigation=root.querySelector('.lgi-tm-sidebar');if(navigation)navigation.scrollTop=navigationScroll;
     if (keepFocus) document.getElementById(keepFocus)?.focus({preventScroll:true});
+    if(!keepFocus && focusAction) Array.from(root.querySelectorAll('[data-action]')).find(node=>node.dataset.action===focusAction && node.dataset.id===focusId)?.focus({preventScroll:true});
     renderNotice();
     syncContext();
   }
   function openDialog(type, data = {}, push = true) {
     if (dialog && push && dialogState) dialogStack.push({...dialogState,scroll:dialog.querySelector('.lgi-tm-dialog-body')?.scrollTop || 0});
     if (!dialog) {
-      triggerElement = document.activeElement;
+      triggerElement = document.activeElement; triggerAction=triggerElement?.dataset?.action?{action:triggerElement.dataset.action,id:triggerElement.dataset.id}:null;
       dialog = document.createElement('dialog'); dialog.className = 'lgi-tm-dialog'; dialog.setAttribute('aria-labelledby','topic-map-dialog-title'); root.appendChild(dialog);
       dialog.addEventListener('click', event => { if (event.target === dialog) closeDialog(); else { event.stopPropagation(); dispatchClick(event); } });
       dialog.addEventListener('cancel', event => { event.preventDefault(); closeDialog(); });
@@ -360,12 +454,13 @@
   function drawDialog() {
     if (!dialog || !dialogState) return;
     const {type} = dialogState;
+    dialog.dataset.kind=type;
     const names = {capture:'有界补充材料',alternative:'保存的原版本与依据',move:'调整主题归属',structure:'主题结构调整',matrix:'主题 × 旅程',compare:'并排比较',materials:'全部材料',reader:'原作与讨论',judge:'选题判断',identity:'我方矩阵与观察范围',saved:'我的备选',save:'保留角度与依据',research:'研究进度与设置',rules:'样本表现规则',method:'方法与统计边界',changes:'结构与依据变化',product:'产品机会：需求与支持假设',replace:'替换本次判断样本'};
     dialog.innerHTML = `<div class="lgi-tm-dialog-head"><div><span class="lgi-tm-eyebrow">${esc(scopeText())}</span><h2 id="topic-map-dialog-title">${esc(names[type] || '查看材料')}</h2></div><div class="lgi-tm-row">${dialogStack.length ? btn('返回上一层','dialog-back') : ''}${btn('关闭','dialog-close','','', 'aria-label="关闭对话框，保留研究任务"')}</div></div><div class="lgi-tm-dialog-body">${dialogBody()}</div><div class="lgi-tm-dialog-feedback" role="status" data-dialog-feedback></div>`;
     dialog.querySelector('.lgi-tm-dialog-body').scrollTop = dialogState.scroll || 0;
   }
   function closeDialog() {
-    if (!dialog) return; dialog.close(); dialog.remove(); dialog = null; dialogState = null; dialogStack = []; triggerElement?.focus({preventScroll:true});
+    if (!dialog) return; dialog.close(); dialog.remove(); dialog = null; dialogState = null; dialogStack = []; (triggerElement?.isConnected?triggerElement:Array.from(root.querySelectorAll('[data-action]')).find(node=>node.dataset.action===triggerAction?.action && node.dataset.id===triggerAction?.id))?.focus({preventScroll:true});
   }
   function dialogBack() {
     if (!dialogStack.length) return closeDialog(); dialogState = dialogStack.pop(); drawDialog();
@@ -399,11 +494,11 @@
     if (Array.isArray(dialogState.refs)) ns = ns.filter(w => dialogState.refs.includes(w.workRef));
     if (dialogState.unassigned) ns = ns.filter(w => !list(w.topicRefs).length);
     const q = dialogState.query || '', sort = dialogState.sort || 'latest';
-    ns = ns.filter(w => !q || [title(w),w.creatorDisplayName,w.preview?.text].join(' ').includes(q));
+    ns = ns.filter(w => matchesWork(w,q));
     if (sort !== 'latest') ns.sort((a,b) => a.platform.localeCompare(b.platform) || (b[sort] ?? -1) - (a[sort] ?? -1));
-    else ns.sort((a,b) => String(b.publishedAt || '').localeCompare(String(a.publishedAt || '')));
+    else ns.sort((a,b) => publicationOrder(b)-publicationOrder(a));
     const limit = dialogState.limit || 60;
-    return `<p>${esc(dialogState.label || '当前范围的全部作品')} · ${ns.length} 篇已读取作品。原始材料不受精选10篇上限限制。</p><div class="lgi-tm-toolbar"><label class="lgi-tm-control"><span>材料排序 / 同平台分组</span><select data-dialog-filter="sort">${[['latest','最新发布时间'],['likes','点赞'],['collects','收藏'],['comments','评论'],['shares','分享']].map(([v,t]) => `<option value="${v}" ${sort === v ? 'selected' : ''}>${t}</option>`).join('')}</select></label><form data-form="material-search" class="lgi-tm-row"><input name="query" value="${esc(q)}" placeholder="查找标题 / 作者" aria-label="查找材料"><button type="submit" class="lgi-tm-button">查找</button></form></div><div class="lgi-tm-material-grid">${ns.slice(0,limit).map(card).join('')}</div>${ns.length > limit ? btn(`展开其余 ${ns.length-limit} 篇`,'materials-more') : ''}${ns.length ? '' : empty('当前条件没有匹配的已读取作品')}<p class="lgi-tm-note">未知数字显示—；跨平台互动不混合作统一排名。</p>`;
+    return `<p>${esc(dialogState.label || '当前范围的全部作品')} · ${ns.length} 篇已读取作品。原始材料不受精选10篇上限限制。</p><div class="lgi-tm-toolbar"><label class="lgi-tm-control"><span>材料排序 / 同平台分组</span><select data-dialog-filter="sort">${[['latest','最新发布时间'],['likes','点赞'],['collects','收藏'],['comments','评论'],['shares','分享']].map(([v,t]) => `<option value="${v}" ${sort === v ? 'selected' : ''}>${t}</option>`).join('')}</select></label><form data-form="material-search" class="lgi-tm-row"><input name="query" value="${esc(q)}" placeholder="查找标题 / 作者 / 片段 / 讨论" aria-label="查找材料"><button type="submit" class="lgi-tm-button">查找</button></form></div><div class="lgi-tm-material-grid">${ns.slice(0,limit).map(card).join('')}</div>${ns.length > limit ? btn(`展开其余 ${ns.length-limit} 篇`,'materials-more') : ''}${ns.length ? '' : empty('当前条件没有匹配的已读取作品')}<p class="lgi-tm-note">未知数字显示—；跨平台互动不混合作统一排名。</p>`;
   }
   function unreadResearchWork(w) { return {...w,research:null,annotation:null,evidenceFragment:null,mainStage:null,involvedStages:[],overlays:[]}; }
   function researchQualificationUrl(w,domainRef,preferredTopicRef) {
@@ -472,7 +567,7 @@
     const comments = list(reader.commentResource?.items);
     const source = '';
     const analysis=research?.output || {}, qualifiedWork={...w,research};
-    return `<div class="lgi-tm-reader-head"><div><h3 id="lgi-tm-source-title-${esc(w.workRef)}">${esc(title(w))}</h3>${materialSourceNote(w)}<p>${avatar(w.creatorDisplayName)}${esc(w.creatorDisplayName || '作者未知')} · ${esc(platformName(w.platform))} · ${esc(w.publishedAtSourceText || w.publishedAt || '发布时间未知')}</p><div class="lgi-tm-row">${badge(w.titleSource === 'cover_ocr' ? '标题来自封面OCR' : '作品标题')}${w.own ? btn(w.ownBreakout ? '取消我方爆款标记' : '标记我方爆款','breakout',w.workRef,'', 'data-mutation') : ''}${source ? `<a class="lgi-tm-button" href="${esc(source)}" target="_blank" rel="noopener noreferrer">打开来源页面</a>` : ''}</div></div><div class="lgi-tm-interactions">赞 ${number(w.likes)} · 藏 ${number(w.collects)} · 评 ${number(w.comments)} · 分享 ${number(w.shares)}</div></div><div class="lgi-tm-reader-layout"><section><h4>原文与可定位片段</h4>${reader.loading ? '<p role="status">正在复核原文、评论与研究来源资格；旧研究片段和解释暂不展示。</p>' : ''}${reader.resourceError ? `<p class="lgi-tm-read-error">原文读取未成功：${esc(reader.resourceError)}</p>` : ''}${raw ? `<div class="lgi-tm-original" id="lgi-tm-source-body-${esc(w.workRef)}">${highlighted(raw,bodyCitations(qualifiedWork,raw))}</div>${!body ? '<p class="lgi-tm-note">当前为有界来源片段；完整原文读取与来源资格以材料检查器为准。</p>' : ''}` : empty('当前没有可读取的正文片段','缺少正文不等于原作没有回应。')}${fragments.map(f => `<article class="lgi-tm-fragment" id="lgi-tm-source-fragment-${esc(f.fragmentId)}"><span>${esc(fragmentSourceLabel(w,f))}</span><blockquote>${highlighted(fragmentText(f),citationSpans(qualifiedWork,f.fragmentId))}</blockquote></article>`).join('')}<a class="lgi-tm-button" href="/corpus/evidence?work=${encodeURIComponent(w.workRef)}&domain=${encodeURIComponent(state.domainRef)}">在材料检查器定位</a></section><aside class="lgi-tm-analysis">${readerDiscussions(qualifiedWork,raw)}<h4>模型解释 / 已保存版本</h4>${reader.qualificationError ? `<p class="lgi-tm-read-error">研究来源资格复核未完成：${esc(reader.qualificationError)}</p>` : ''}${analysis.journey?.rationale ? `<p>${esc(analysis.journey.rationale)}</p>` : '<p>当前没有通过来源资格检查的可引用研究解释，不用旧摘要代替原声。</p>'}<p>${esc(stageNames[analysis.journey?.mainStage] || otherNames[analysis.journey?.mainStage] || '阶段解释未取得')} · ${esc(list(analysis.journey?.overlays).map(v => v === 'obstruction_recurrence' ? '受阻与反复' : '环境转换与交接').join('、'))}</p>${list(analysis.limitations).map(t => `<p class="lgi-tm-note">${esc(t)}</p>`).join('')}<h4>已有回应关系</h4>${list(analysis.responseMatches).map(m => `<p>${esc(({direct:'有直接回应依据',partial:'部分回应',unmatched:'未找到匹配回应',unknown:'回应未知',not_applicable:'当前不适用'})[m.status] || m.status)}</p>${comparisonScopeNote(m)}`).join('') || '<p>回应尚未研究，不能把评论问题自动当原作回答。</p>'}</aside></div><section class="lgi-tm-section"><div class="lgi-tm-section-head"><div><h3>已有评论原声</h3><p>评论条数不等于人数，作者观点与评论分别保留来源。</p></div>${btn('深入看这篇的讨论','deep-comments',w.workRef,'', 'data-mutation')}</div>${reader.commentError ? `<p class="lgi-tm-read-error">评论读取未成功：${esc(reader.commentError)}</p>` : ''}<p class="lgi-tm-note">当前展示 ${comments.length} / ${number(reader.commentResource?.total)} 条当前可读评论。</p>${comments.length ? comments.map(c => `<article class="lgi-tm-comment"><blockquote>${esc(c.body || '正文未知')}</blockquote><p>${esc('评论作者身份已隐去')} · ${esc(c.sourceRef || '')}</p>${c.parentText ? `<details><summary>父评论上下文</summary><blockquote>${esc(c.parentText)}</blockquote></details>` : ''}</article>`).join('') : empty(reader.loading ? '评论正在读取' : '当前没有可展示的已有评论','不会为了填满原声区域发起采集。')}${reader.commentResource?.nextCursor ? btn('读取下一页已有评论','comments-more') : ''}</section>`;
+    return `<div class="lgi-tm-reader-head"><div><h3 id="lgi-tm-source-title-${esc(w.workRef)}">${esc(title(w))}</h3>${materialSourceNote(w)}<p>${avatar(w.creatorDisplayName)}${esc(w.creatorDisplayName || '作者未知')} · ${esc(platformName(w.platform))} · ${esc(publishedTime(w))}</p><div class="lgi-tm-row">${badge(w.titleSource === 'cover_ocr' ? '标题来自封面OCR' : '作品标题')}${!reader.loading && !reader.resourceError && w.readable?btn('人工保留备选','manual-save',w.workRef):''}${w.own ? btn(w.ownBreakout ? '取消我方爆款标记' : '标记我方爆款','breakout',w.workRef,'', 'data-mutation') : ''}${source ? `<a class="lgi-tm-button" href="${esc(source)}" target="_blank" rel="noopener noreferrer">打开来源页面</a>` : ''}</div></div><div class="lgi-tm-interactions">赞 ${number(w.likes)} · 藏 ${number(w.collects)} · 评 ${number(w.comments)} · 分享 ${number(w.shares)}</div></div><div class="lgi-tm-reader-layout"><section><h4>原文与可定位片段</h4>${reader.loading ? '<p role="status">正在复核原文、评论与研究来源资格；旧研究片段和解释暂不展示。</p>' : ''}${reader.resourceError ? `<p class="lgi-tm-read-error">原文读取未成功：${esc(reader.resourceError)}</p>` : ''}${raw ? `<div class="lgi-tm-original" id="lgi-tm-source-body-${esc(w.workRef)}">${highlighted(raw,bodyCitations(qualifiedWork,raw))}</div>${!body ? '<p class="lgi-tm-note">当前为有界来源片段；完整原文读取与来源资格以材料检查器为准。</p>' : ''}` : empty('当前没有可读取的正文片段','缺少正文不等于原作没有回应。')}${fragments.map(f => `<article class="lgi-tm-fragment" id="lgi-tm-source-fragment-${esc(f.fragmentId)}"><span>${esc(fragmentSourceLabel(w,f))}</span><blockquote>${highlighted(fragmentText(f),citationSpans(qualifiedWork,f.fragmentId))}</blockquote></article>`).join('')}<a class="lgi-tm-button" href="/corpus/evidence?work=${encodeURIComponent(w.workRef)}&domain=${encodeURIComponent(state.domainRef)}">在材料检查器定位</a></section><aside class="lgi-tm-analysis">${readerDiscussions(qualifiedWork,raw)}<h4>模型解释 / 已保存版本</h4>${reader.qualificationError ? `<p class="lgi-tm-read-error">研究来源资格复核未完成：${esc(reader.qualificationError)}</p>` : ''}${analysis.journey?.rationale ? `<p>${esc(analysis.journey.rationale)}</p>` : '<p>当前没有通过来源资格检查的可引用研究解释，不用旧摘要代替原声。</p>'}<p>${esc(stageNames[analysis.journey?.mainStage] || otherNames[analysis.journey?.mainStage] || '阶段解释未取得')} · ${esc(list(analysis.journey?.overlays).map(v => v === 'obstruction_recurrence' ? '受阻与反复' : '环境转换与交接').join('、'))}</p>${list(analysis.limitations).map(t => `<p class="lgi-tm-note">${esc(t)}</p>`).join('')}<h4>已有回应关系</h4>${list(analysis.responseMatches).map(m => `<p>${esc(({direct:'有直接回应依据',partial:'部分回应',unmatched:'未找到匹配回应',unknown:'回应未知',not_applicable:'当前不适用'})[m.status] || m.status)}</p>${comparisonScopeNote(m)}`).join('') || '<p>回应尚未研究，不能把评论问题自动当原作回答。</p>'}</aside></div><section class="lgi-tm-section"><div class="lgi-tm-section-head"><div><h3>已有评论原声</h3><p>评论条数不等于人数，作者观点与评论分别保留来源。</p></div>${btn('深入看这篇的讨论','deep-comments',w.workRef,'', 'data-mutation')}</div>${reader.commentError ? `<p class="lgi-tm-read-error">评论读取未成功：${esc(reader.commentError)}</p>` : ''}<p class="lgi-tm-note">当前展示 ${comments.length} / ${number(reader.commentResource?.total)} 条当前可读评论。</p>${comments.length ? comments.map(c => `<article class="lgi-tm-comment"><blockquote>${esc(c.body || '正文未知')}</blockquote><p>${esc('评论作者身份已隐去')} · ${esc(c.sourceRef || '')}</p>${c.parentText ? `<details><summary>父评论上下文</summary><blockquote>${esc(c.parentText)}</blockquote></details>` : ''}</article>`).join('') : empty(reader.loading ? '评论正在读取' : '当前没有可展示的已有评论','不会为了填满原声区域发起采集。')}${reader.commentResource?.nextCursor ? btn('读取下一页已有评论','comments-more') : ''}</section>`;
   }
   function curated(ref, source = snapshot) {
     const t = list(source.topics).find(t => t.topicRef === ref);
@@ -483,7 +578,7 @@
     high.sort((a,b) => Number(b.ownBreakout)-Number(a.ownBreakout) || a.platform.localeCompare(b.platform) || (b.likes ?? -1)-(a.likes ?? -1));
     const picked = high.slice(0,10);
     const contrasts = eligible.filter(w => !picked.some(p => p.workRef === w.workRef) && picked.some(p=>p.platform===w.platform&&sharesDiscussion(p,w)));
-    if (!picked.length) return eligible.slice().sort((a,b) => String(b.publishedAt || '').localeCompare(String(a.publishedAt || ''))).slice(0,3);
+    if (!picked.length) return eligible.slice().sort((a,b) => publicationOrder(b)-publicationOrder(a)).slice(0,3);
     const result = [], chosen = new Set();
     const add = w => { if (result.length < 10 && !chosen.has(w.workRef)) { result.push(w); chosen.add(w.workRef); } };
     for (const sample of picked) {
@@ -515,7 +610,7 @@
     const low=high&&ns.find(w=>!w.own&&w.workRef!==high.workRef&&w.platform===high.platform&&known(w.likes)&&w.likes<=20&&sharesDiscussion(high,w));
     if(!high||!low)return empty('当前同讨论、同平台的高低对照尚不充分','先看已有材料，不强凑避坑结论。低互动不等于失败。');
     const common=new Set([...discussionKeys(high)].filter(key=>discussionKeys(low).has(key)));
-    return `<div class="lgi-tm-performance-pair">${[high,low].map((w,i)=>{const d=discussionUnits(w).find(d=>d.assignments.some(a=>common.has(assignmentKey(a)))),quote=citationText(w,d?.evidence);return `<article class="lgi-tm-panel">${badge(i?'低互动对照 · 非失败判定':'低粉高赞参考',!i)}<h4>${esc(title(w))}</h4><p>${esc(platformName(w.platform))} · ${number(w.likes)}赞 · 粉丝${number(w.followerCount)} · ${esc(w.publishedAtSourceText || w.publishedAt || '发布时间未知')}</p>${quote?`<blockquote>${esc(quote)}</blockquote>`:'<p>当前没有可展示的精确引用，请核对原作。</p>'}${btn(readLabel(w,'打开原文与已有评论'),'reader',w.workRef,'lgi-tm-quiet')}</article>`;}).join('')}</div>`;
+    return `<div class="lgi-tm-performance-pair">${[high,low].map((w,i)=>{const d=discussionUnits(w).find(d=>d.assignments.some(a=>common.has(assignmentKey(a)))),quote=citationText(w,d?.evidence);return `<article class="lgi-tm-panel">${badge(i?'低互动对照 · 非失败判定':'低粉高赞参考',!i)}<h4>${esc(title(w))}</h4><p>${esc(platformName(w.platform))} · ${number(w.likes)}赞 · 粉丝${number(w.followerCount)} · ${esc(publishedTime(w))}</p>${quote?`<blockquote>${esc(quote)}</blockquote>`:'<p>当前没有可展示的精确引用，请核对原作。</p>'}${btn(readLabel(w,'打开原文与已有评论'),'reader',w.workRef,'lgi-tm-quiet')}</article>`;}).join('')}</div>`;
   }
   function evidenceWorks(item,workRef) {
     return Array.isArray(item.evidenceWorkRefs)?[...new Set(item.evidenceWorkRefs.filter(ref=>typeof ref==='string'&&ref))]:[workRef];
@@ -550,7 +645,7 @@
   }
   function sampleView(ns) {
     const selected=ns.find(w=>w.workRef===dialogState.sampleRef) || ns[0], reader=dialogState.inlineReader;
-    return `<div class="lgi-tm-section-head"><div><h3>最多10篇，先读有用的对照</h3><p>我方原作也计入精选上限。不为凑数加入无关内容，替换只改变本次阅读集合。</p></div>${btn('替换当前精选','replace-samples','', '',dialogState.loading?'disabled':'')}</div>${ns.length ? `<div class="lgi-tm-sample-grid"><aside class="lgi-tm-sample-list" aria-label="精选判断样本">${ns.map((w,i)=>`<button type="button" class="lgi-tm-sample-item ${w.workRef===selected?.workRef?'is-active':''}" data-action="sample" data-id="${esc(w.workRef)}" aria-pressed="${w.workRef===selected?.workRef}"><span class="lgi-tm-sample-num">${String(i+1).padStart(2,'0')}</span><div><h4>${esc(title(w))}</h4><small>${esc(platformName(w.platform))} · ${number(w.likes)}赞 · ${esc(w.publishedAtSourceText || w.publishedAt || '发布时间未知')}</small>${badge(sampleReason(w))}${materialSourceNote(w)}</div></button>`).join('')}</aside><article class="lgi-tm-inline-reader">${reader?.work?.workRef===selected?.workRef ? readerDialog(reader) : empty('选择左侧作品，读取当前可用材料','来源资格通过读取接口复核，不用模型摘要冒充正文。')}${selected&&!reader ? btn(readLabel(selected,'读取这篇原文'),'sample',selected.workRef) : ''}</article></div>` : empty('当前没有精选材料','可以查看已入库材料，或显式选择当前有界材料集合。')}`;
+    return `<div class="lgi-tm-section-head"><div><h3>最多10篇，先读有用的对照</h3><p>我方原作也计入精选上限。不为凑数加入无关内容，替换只改变本次阅读集合。</p></div>${btn('替换当前精选','replace-samples','', '',dialogState.loading?'disabled':'')}</div>${ns.length ? `<div class="lgi-tm-sample-grid"><aside class="lgi-tm-sample-list" aria-label="精选判断样本">${ns.map((w,i)=>`<button type="button" class="lgi-tm-sample-item ${w.workRef===selected?.workRef?'is-active':''}" data-action="sample" data-id="${esc(w.workRef)}" aria-pressed="${w.workRef===selected?.workRef}"><span class="lgi-tm-sample-num">${String(i+1).padStart(2,'0')}</span><div><h4>${esc(title(w))}</h4><small>${esc(platformName(w.platform))} · ${number(w.likes)}赞 · ${esc(publishedTime(w))}</small>${badge(sampleReason(w))}${materialSourceNote(w)}</div></button>`).join('')}</aside><article class="lgi-tm-inline-reader">${reader?.work?.workRef===selected?.workRef ? readerDialog(reader) : empty('选择左侧作品，读取当前可用材料','来源资格通过读取接口复核，不用模型摘要冒充正文。')}${selected&&!reader ? btn(readLabel(selected,'读取这篇原文'),'sample',selected.workRef) : ''}</article></div>` : empty('当前没有精选材料','可以查看已入库材料，或显式选择当前有界材料集合。')}`;
   }
   function replacementCandidates(parent) {
     const source=parent.snapshot || snapshot, recent=new Set(list(source.scope.recentReferenceWorkRefs)), t=list(source.topics).find(t=>t.topicRef===parent.topicRef), members=new Set(list(t?.workRefs));
@@ -623,12 +718,12 @@
   function savedDialog() {
     if (dialogState.loading) return '<p role="status">正在取回后端已保存的备选与来源资格。</p>';
     const rows = list(dialogState.snapshot?.alternatives).filter(a => !dialogState.query || [a.title,a.angle,a.rationale].join(' ').includes(dialogState.query));
-    return `<p>保存的角度与产品研究说明保留原定义和引用版本，默认不跟踪、不启动研究或采集。</p><form data-form="saved-search" class="lgi-tm-row"><input name="query" value="${esc(dialogState.query || '')}" placeholder="查找已保存标题 / 角度 / 研究说明" aria-label="查找备选"><button type="submit" class="lgi-tm-button">查找</button></form>${rows.length ? rows.map(a => `<article class="lgi-tm-saved"><div class="lgi-tm-row">${badge(a.kind === 'product_research' ? '产品研究说明' : '内容角度')}${badge(a.sourceState === 'available' ? '来源当前可用' : '读取原版本时复核来源资格')}${badge('不持续跟踪')}</div><h3>${esc(a.title || '保存记录的来源资格已变化')}</h3><p>${esc(a.angle || '原保存文本需经来源资格复核后读取。')}</p><p>${esc(a.rationale)}</p><p class="lgi-tm-note">${esc(a.createdAt)} · ${esc(a.methodVersion)} · ${list(a.evidenceWorkRefs).length} 篇冻结作品引用</p>${btn('取回保存的原版本','saved-materials',a.alternativeRef)}${btn('导出引用与说明','export-alternative',a.alternativeRef,'lgi-tm-quiet')}</article>`).join('') : empty('当前没有匹配的已保存备选','选择角度或编辑产品研究说明并保存后，可在这里取回原版本。')}`;
+    return `<p>人工备选与历史研究说明保留引用版本，默认不跟踪。运营选题池尚未接通；可复核来源并导出交接，保存不代表已采纳或发布。</p><form data-form="saved-search" class="lgi-tm-row"><input name="query" value="${esc(dialogState.query || '')}" placeholder="查找已保存标题 / 角度 / 研究说明" aria-label="查找备选"><button type="submit" class="lgi-tm-button">查找</button></form>${rows.length ? rows.map(a => `<article class="lgi-tm-saved"><div class="lgi-tm-row">${badge(a.methodVersion==='topic-map.manual.v1'?(a.topicRef?'人工备选':'人工备选 · 待归方向'):a.kind === 'product_research' ? '产品研究说明' : '内容角度')}${badge(a.sourceState === 'available' ? '来源当前可用' : '读取原版本时复核来源资格')}${badge('不持续跟踪')}</div><h3>${esc(a.title || '保存记录的来源资格已变化')}</h3><p>${esc(a.angle || '原保存文本需经来源资格复核后读取。')}</p><p>${esc(a.rationale)}</p><p class="lgi-tm-note">${esc(a.createdAt)} · ${esc(a.methodVersion)} · ${list(a.evidenceWorkRefs).length} 篇冻结作品引用</p>${btn('取回保存的原版本','saved-materials',a.alternativeRef)}${btn('导出引用与说明','export-alternative',a.alternativeRef,'lgi-tm-quiet')}</article>`).join('') : empty('当前没有匹配的已保存备选','从材料列表选择“人工保留备选”，或保存已有研究角度；保存后可在这里取回依据。')}`;
   }
   function saveDialog() {
-    const a=dialogState.angle, product=dialogState.kind==='product_research';
+    const a=dialogState.angle, product=dialogState.kind==='product_research', manual=dialogState.manual===true;
     if(dialogState.savedAlternativeRef)return `<div class="lgi-tm-callout">${product?'产品研究说明':'内容角度'}已获得后端保存回执。保存不启动监控、采集或业务实验。</div><div class="lgi-tm-row">${btn('取回刚保存的原版本','saved-materials',dialogState.savedAlternativeRef)}${btn('复核来源并导出','export-alternative',dialogState.savedAlternativeRef)}</div>`;
-    return `<h3>${product?'保留需求、支持假设与最先验证的问题':'这个方向，先收下来'}</h3><p>${product?'修改是人工研究说明，不改变模型原研究结果。':'内容备选不是已发布作品，不计入我方发布覆盖。'}保存保留当前主题定义、研究版本与引用，不自动持续跟踪。</p><form data-form="save" class="lgi-tm-form"><label><span>${product?'研究说明标题':'备选标题 · 可继续打磨'}</span><input name="title" value="${esc(a.title)}" maxlength="120" required></label><label><span>${product?'具体需求与支持假设':'切入角度'}</span><textarea name="angle" maxlength="2000" required>${esc(a.label)}</textarea></label><label><span>${product?'可编辑研究说明 / 最先验证什么':'这篇要回答的问题'}</span><textarea name="rationale" maxlength="2000" required>${esc(a.answerTask)}</textarea></label>${product?'':`<fieldset class="lgi-tm-reuse-options"><legend>复用意图 · 可组合</legend>${['沿用标题','保留核心观点','调整封面','切换场景','重新组织内容'].map(value=>`<label class="lgi-tm-check-label"><input type="checkbox" name="reuse" value="${value}"><span>${value}</span></label>`).join('')}</fieldset><label><span>回答边界 · 没有依据时保留未知</span><textarea name="boundary" maxlength="800" placeholder="明确这篇不回答什么、适用条件以及还缺少哪些材料">${esc(list(a.limitations).join('；'))}</textarea></label><label><span>备注（可不填）</span><textarea name="note" maxlength="400" placeholder="以后打开时，帮助自己想起为什么保留。"></textarea></label>`}<div class="lgi-tm-callout"><strong>原始依据与人工说明一起保存</strong><p>${esc(title(work(a.workRef) || {}))} · ${list(a.evidence).length} 条定位引用</p>${comparisonScopeNote(a)}<p>复用意图、回答边界与备注以明确字段标题保存在现有角度和说明中；不改变原始作品或原模型结论。</p></div><button type="submit" class="lgi-tm-button lgi-tm-primary" data-mutation>${product?'保存研究说明与引用':'保存到我的备选'}</button></form>`;
+    return `<h3>${manual?'人工保留材料与选题想法':product?'保留需求、支持假设与最先验证的问题':'这个方向，先收下来'}</h3>${manual?'<p class="lgi-tm-analysis-note">人工提出 · 待归方向。保存不改变作品归属，不依赖模型研究；这里保留交接材料，尚未进入运营选题池。</p>':''}<p>${product?'修改是人工研究说明，不改变模型原研究结果。':'内容备选不是已发布作品，不计入我方发布覆盖。'}${manual?'保存人工说明与冻结的作者来源；无主题定义和模型结果引用。':'保存保留当前主题定义、研究版本与引用。'}不自动持续跟踪。</p><form data-form="save" class="lgi-tm-form"><label><span>${product?'研究说明标题':'备选标题 · 可继续打磨'}</span><input name="title" value="${esc(a.title)}" maxlength="120" required></label><label><span>${product?'具体需求与支持假设':'切入角度'}</span><textarea name="angle" maxlength="2000" required>${esc(a.label)}</textarea></label><label><span>${product?'可编辑研究说明 / 最先验证什么':'这篇要回答的问题'}</span><textarea name="rationale" maxlength="2000" required>${esc(a.answerTask)}</textarea></label>${product?'':`<fieldset class="lgi-tm-reuse-options"><legend>复用意图 · 可组合</legend>${['沿用标题','保留核心观点','调整封面','切换场景','重新组织内容'].map(value=>`<label class="lgi-tm-check-label"><input type="checkbox" name="reuse" value="${value}"><span>${value}</span></label>`).join('')}</fieldset><label><span>回答边界 · 没有依据时保留未知</span><textarea name="boundary" maxlength="800" placeholder="明确这篇不回答什么、适用条件以及还缺少哪些材料">${esc(list(a.limitations).join('；'))}</textarea></label><label><span>备注（可不填）</span><textarea name="note" maxlength="400" placeholder="以后打开时，帮助自己想起为什么保留。"></textarea></label>`}<div class="lgi-tm-callout"><strong>原始依据与人工说明一起保存</strong><p>${esc(title(work(a.workRef) || {}))} · ${manual?'保留已取得的标题、正文和媒体文本版本（每个字段最多前4,000字）；评论不会自动作为人工备选依据':`${list(a.evidence).length} 条定位引用`}</p>${comparisonScopeNote(a)}<p>复用意图、回答边界与备注以明确字段标题保存在现有角度和说明中；不改变原始作品或原模型结论。</p></div><button type="submit" class="lgi-tm-button lgi-tm-primary" data-mutation>${product?'保存研究说明与引用':'保存到我的备选'}</button></form>`;
   }
   function opportunitiesFrom(outputs) {
     return researchItems(outputs,'productOpportunities','researchOpportunityIndex');
@@ -652,7 +747,7 @@
     const a=dialogState.alternative;
     if(!alternativeAvailable(a))return empty('保存记录的来源当前不可用','原文本与引用片段不继续展示。历史引用记录保留，不能用当前作品替代原依据。') + `<p class="lgi-tm-note">记录 ${esc(a?.alternativeRef || dialogState.alternativeRef)} · 方法 ${esc(a?.methodVersion || '未知')}</p>`;
     const d=a.originalDefinition, product=a.kind==='product_research';
-    return `${a.sourceState==='version_changed_available' ? '<div class="lgi-tm-callout">来源或研究版本后来有变化。下方展示保存时的原定义、说明和已接纳原版本片段；当前来源限制已重新复核。原版本不代表当前判断。</div>' : '<div class="lgi-tm-callout">下方为保存时的版本，当前来源资格已复核。查看与导出不启动研究、监控或采集。</div>'}<div class="lgi-tm-object-head"><div><div class="lgi-tm-row">${badge(product ? '产品研究说明' : '内容角度')}${badge('保存的原版本')}</div><h3>${esc(a.title)}</h3><p>${esc(a.methodVersion)}</p></div>${btn('复核来源并导出Markdown','export-alternative',a.alternativeRef)}</div><section class="lgi-tm-section"><h4>${product ? '具体需求与支持假设' : '保存的角度'}</h4><div class="lgi-tm-original">${esc(a.angle)}</div><h4>${product ? '人工编辑的研究说明' : '回答任务与保留理由'}</h4><div class="lgi-tm-original">${esc(a.rationale)}</div></section><section class="lgi-tm-section"><h3>保存时的主题定义</h3>${d ? `<h4>${esc(d.displayName)} · 定义 v${number(d.version)}</h4><p>${esc(d.definitionText)}</p><small class="lgi-tm-num">${esc(d.definitionRef)}</small>` : empty('原定义尚未返回','不以当前主题定义代替原版本。')}</section><section class="lgi-tm-section"><h3>保存时的正文与原声依据</h3><p>原文和机器读图 / 转写分别保留来源；高亮来自保存时的精确引用范围。</p>${list(a.fragments).map(f => `<article class="lgi-tm-frozen-fragment"><div class="lgi-tm-row">${badge(sourceKind(f.field))}<span class="lgi-tm-num">${esc(f.workRef)}</span></div><blockquote>${highlighted(f.text,list(f.citedRanges))}</blockquote><p class="lgi-tm-note">来源 ${esc(f.sourceRef)} · ${esc(f.sourceVersion || '来源版本未记录')} · 字符 ${number(f.start)}–${number(f.end)}</p></article>`).join('') || empty('本记录没有可展示的冻结来源片段','保留记录不补造来源内容。')}</section><p class="lgi-tm-note">记录 ${esc(a.alternativeRef)} · 原定义 ${esc(a.definitionRef)}</p>`;
+    return `${a.sourceState==='version_changed_available' ? '<div class="lgi-tm-callout">来源或研究版本后来有变化。下方展示保存时的原定义、说明和已接纳原版本片段；当前来源限制已重新复核。原版本不代表当前判断。</div>' : '<div class="lgi-tm-callout">下方为保存时的版本，当前来源资格已复核。查看与导出不启动研究、监控或采集。</div>'}<div class="lgi-tm-object-head"><div><div class="lgi-tm-row">${badge(product ? '产品研究说明' : '内容角度')}${badge('保存的原版本')}</div><h3>${esc(a.title)}</h3><p>${esc(a.methodVersion)}</p></div>${btn('复核来源并导出Markdown','export-alternative',a.alternativeRef)}</div><section class="lgi-tm-section"><h4>${product ? '具体需求与支持假设' : '保存的角度'}</h4><div class="lgi-tm-original">${esc(a.angle)}</div><h4>${product ? '人工编辑的研究说明' : '回答任务与保留理由'}</h4><div class="lgi-tm-original">${esc(a.rationale)}</div></section><section class="lgi-tm-section"><h3>保存时的主题定义</h3>${d ? `<h4>${esc(d.displayName)} · 定义 v${number(d.version)}</h4><p>${esc(d.definitionText)}</p><small class="lgi-tm-num">${esc(d.definitionRef)}</small>` : a.topicRef==null?'<p>人工备选，保存时未归方向；未生成主题定义或材料归属。</p>':empty('原定义尚未返回','不以当前主题定义代替原版本。')}</section><section class="lgi-tm-section"><h3>保存时的正文与原声依据</h3><p>原文和机器读图 / 转写分别保留来源；高亮来自保存时的精确引用范围。</p>${list(a.fragments).map(f => `<article class="lgi-tm-frozen-fragment"><div class="lgi-tm-row">${badge(sourceKind(f.field))}<span class="lgi-tm-num">${esc(f.workRef)}</span></div><blockquote>${highlighted(f.text,list(f.citedRanges))}</blockquote><p class="lgi-tm-note">来源 ${esc(f.sourceRef)} · ${esc(f.sourceVersion || '来源版本未记录')} · 字符 ${number(f.start)}–${number(f.end)}</p></article>`).join('') || empty('本记录没有可展示的冻结来源片段','保留记录不补造来源内容。')}</section><p class="lgi-tm-note">记录 ${esc(a.alternativeRef)} · 原定义 ${esc(a.definitionRef)}</p>`;
   }
   function markdownFence(text) {
     const longest=Math.max(2,...(String(text).match(/`+/g)||[]).map(value=>value.length));
@@ -660,8 +755,8 @@
   }
   function alternativeMarkdown(a) {
     const d=a.originalDefinition, product=a.kind==='product_research';
-    const lines=[`# ${a.title}`,'',`类型：${product?'产品研究说明':'内容角度'}`,`保存记录：${a.alternativeRef}`,`领域：${a.domainRef}`,`主题：${a.topicRef}`,`原定义：${a.definitionRef}`,`研究方法：${a.methodVersion}`,`来源复核：${a.sourceState === 'version_changed_available' ? '原版本当前仍可读，后来版本已有变化' : '原版本当前可读'}`,'','保存不开启监控、采集或业务实验。此说明及依据保留当时版本，不代表当前事实、市场趋势或产品价值已得到验证。','',`## ${product?'具体需求与支持假设':'保存的角度'}`,'',a.angle,'',`## ${product?'人工编辑的研究说明':'回答任务与保留理由'}`,'',a.rationale,'','## 保存时的主题定义',''];
-    if(d)lines.push(`${d.displayName} · v${d.version}`,d.definitionText,`定义引用：${d.definitionRef}`);else lines.push('原定义未取得，未以当前定义替代。');
+    const lines=[`# ${a.title}`,'',`类型：${product?'产品研究说明':'内容角度'}`,`保存记录：${a.alternativeRef}`,`领域：${a.domainRef}`,`主题：${a.topicRef || '人工备选，待归方向'}`,`原定义：${a.definitionRef || '保存时未绑定定义'}`,`研究方法：${a.methodVersion}`,`来源复核：${a.sourceState === 'version_changed_available' ? '原版本当前仍可读，后来版本已有变化' : '原版本当前可读'}`,'','保存不开启监控、采集或业务实验。此说明及依据保留当时版本，不代表当前事实、市场趋势或产品价值已得到验证。','',`## ${product?'具体需求与支持假设':'保存的角度'}`,'',a.angle,'',`## ${product?'人工编辑的研究说明':'回答任务与保留理由'}`,'',a.rationale,'','## 保存时的主题定义',''];
+    if(d)lines.push(`${d.displayName} · v${d.version}`,d.definitionText,`定义引用：${d.definitionRef}`);else lines.push(a.topicRef==null?'人工备选，保存时未归方向；没有生成主题或材料归属。':'原定义未取得，未以当前定义替代。');
     lines.push('','## 保存时的原文引用','');
     list(a.fragments).forEach((f,index)=>{lines.push(`### 引用 ${index+1} · ${sourceKind(f.field)}`,'',`作品：${f.workRef}`,`来源：${f.sourceRef}`,`来源版本：${f.sourceVersion || '未知'}`,`片段身份：${f.fragmentId}`,`字符范围：${f.start}–${f.end}`,`高亮引用范围：${list(f.citedRanges).map(r=>`${r.start}–${r.end}`).join('、') || '无额外高亮范围'}`,'',markdownFence(f.text),'');});
     return lines.join('\n');
@@ -683,10 +778,10 @@
   }
   async function openResearch() {
     if (!state.domainRef) { notice = '先选择实际领域，再读取研究设置。'; renderNotice(); return; }
-    openDialog('research',{loading:true}); const current = dialogState;
-    try { progress = await request(`/api/local/topic-map/research?domainRef=${encodeURIComponent(state.domainRef)}`); current.progress = progress; }
-    catch (error) { current.error = error.message; }
-    if (dialogState === current) { current.loading = false; drawDialog(); }
+    openDialog('research',{loading:true}); const current=dialogState;
+    try { const value=await readResearchProgress(state.domainRef);if(!value)return;current.progress=value; }
+    catch (error) { current.error=error.message; }
+    if (dialogState===current) {current.loading=false;drawDialog();}
   }
   function researchPhases(run) {
     if(!run.phases)return '';
@@ -890,7 +985,7 @@
   function researchDialog() {
     if (dialogState.loading) return '<p role="status">正在读取研究设置与真实进度回执。</p>';
     const p = dialogState.progress || progress, policy = p?.policy, models = list(p?.models), usage = p?.usage;
-    return `${researchPolicy(policy)}<div class="lgi-tm-callout">开启后，历史材料分批研究、新材料增量处理。只有明确保存开启配置才启动，不因普通开页调用模型。关闭弹窗不取消已发任务，明确停止阻止继续启动新请求。</div><div class="lgi-tm-metrics"><div><span>今日已记账</span><strong>${number(usage?.chargedTokens)}</strong><small>token · ${esc(usage?.timezone || 'Asia/Shanghai')}</small></div><div><span>当前预留</span><strong>${number(usage?.reservedTokens)}</strong><small>token · 不等于已消费</small></div><div><span>每日上限</span><strong>${number(policy?.dailyTokenLimit)}</strong><small>达到上限后延后待处理</small></div><div><span>每次研究上限</span><strong>${number(policy?.runTokenLimit)}</strong><small>token · 与精选10篇不同</small></div></div><form data-form="research-config" class="lgi-tm-form"><h3>研究设置</h3><label><span>已有模型配置</span><select name="modelConfigRef" required><option value="">请选择配置</option>${models.map(m => `<option value="${esc(m.configRef)}" ${policy?.modelConfigRef === m.configRef ? 'selected' : ''}>${esc(m.modelId)} · 输入 ${number(m.inputTokenLimit)} / 输出 ${number(m.outputTokenLimit)} token</option>`).join('')}</select></label><div class="lgi-tm-form-grid"><label><span>每日 token 上限</span><input type="number" name="dailyTokenLimit" min="1024" max="10000000" step="1" required value="${policy?.dailyTokenLimit ?? ''}" placeholder="明确预算后填写"></label><label><span>每次研究 token 上限</span><input type="number" name="runTokenLimit" min="1024" max="10000000" step="1" required value="${policy?.runTokenLimit ?? ''}" placeholder="明确预算后填写"></label></div><label class="lgi-tm-check-label"><input type="checkbox" name="automaticEnabled" ${policy?.automaticEnabled ? 'checked' : ''}><span>明确开启历史回填与新材料自动增量研究</span></label><label class="lgi-tm-check-label"><input type="checkbox" name="collectionEnabled" ${policy?.collectionEnabled ? 'checked' : ''}><span>在已授权范围内允许主题临时补采，每轮最多10篇详情</span></label><p>已有材料仍可用；研究配置不替代平台执行授权、工位范围与采集限制。</p><button type="submit" class="lgi-tm-button lgi-tm-primary" data-mutation>保存明确设置</button></form>${currentResearchSummary(p)}${researchSummary(p)}<section class="lgi-tm-section"><div class="lgi-tm-section-head"><h3>最近批次</h3>${btn('刷新进度','research-refresh')}</div><p>显示最近 ${number(p?.runListLimit)} 批次中的 ${number(list(p?.runs).length)} 批 · 全领域共 ${number(p?.summary?.totalRunCount)} 批</p>${list(p?.runs).map(run=>researchRun(run,policy)).join('') || empty('当前没有研究运行','首次开启或明确按需启动后，真实回执会出现在这里。')}</section>`;
+    return `${researchPolicy(policy)}${currentResearchSummary(p)}<details class="lgi-tm-core-details"><summary>模型、预算与自动研究设置</summary><div class="lgi-tm-callout">开启后，历史材料分批研究、新材料增量处理。只有明确保存开启配置才启动，不因普通开页调用模型。关闭弹窗不取消已发任务，明确停止阻止继续启动新请求。</div><div class="lgi-tm-metrics"><div><span>今日已记账</span><strong>${number(usage?.chargedTokens)}</strong><small>token · ${esc(usage?.timezone || 'Asia/Shanghai')}</small></div><div><span>当前预留</span><strong>${number(usage?.reservedTokens)}</strong><small>token · 不等于已消费</small></div><div><span>每日上限</span><strong>${number(policy?.dailyTokenLimit)}</strong><small>达到上限后延后待处理</small></div><div><span>每次研究上限</span><strong>${number(policy?.runTokenLimit)}</strong><small>token · 与精选10篇不同</small></div></div><form data-form="research-config" class="lgi-tm-form"><h3>研究设置</h3><label><span>已有模型配置</span><select name="modelConfigRef" required><option value="">请选择配置</option>${models.map(m => `<option value="${esc(m.configRef)}" ${policy?.modelConfigRef === m.configRef ? 'selected' : ''}>${esc(m.modelId)} · 输入 ${number(m.inputTokenLimit)} / 输出 ${number(m.outputTokenLimit)} token</option>`).join('')}</select></label><div class="lgi-tm-form-grid"><label><span>每日 token 上限</span><input type="number" name="dailyTokenLimit" min="1024" max="10000000" step="1" required value="${policy?.dailyTokenLimit ?? ''}" placeholder="明确预算后填写"></label><label><span>每次研究 token 上限</span><input type="number" name="runTokenLimit" min="1024" max="10000000" step="1" required value="${policy?.runTokenLimit ?? ''}" placeholder="明确预算后填写"></label></div><label class="lgi-tm-check-label"><input type="checkbox" name="automaticEnabled" ${policy?.automaticEnabled ? 'checked' : ''}><span>明确开启历史回填与新材料自动增量研究</span></label><label class="lgi-tm-check-label"><input type="checkbox" name="collectionEnabled" ${policy?.collectionEnabled ? 'checked' : ''}><span>在已授权范围内允许主题临时补采，每轮最多10篇详情</span></label><p>已有材料仍可用；研究配置不替代平台执行授权、工位范围与采集限制。</p><button type="submit" class="lgi-tm-button lgi-tm-primary" data-mutation>保存明确设置</button></form></details><details class="lgi-tm-core-details"><summary>历史任务账本</summary>${researchSummary(p)}</details><section class="lgi-tm-section"><div class="lgi-tm-section-head"><h3>最近批次</h3>${btn('刷新进度','research-refresh')}</div><p>显示最近 ${number(p?.runListLimit)} 批次中的 ${number(list(p?.runs).length)} 批 · 全领域共 ${number(p?.summary?.totalRunCount)} 批</p>${list(p?.runs).map(run=>researchRun(run,policy)).join('') || empty('当前没有研究运行','首次开启或明确按需启动后，真实回执会出现在这里。')}</section>`;
   }
   async function researchCommand(payload) {
     if (pending) return null;
@@ -966,12 +1061,12 @@
     }
     if (name === 'save') {
       const current=dialogState,a = current.angle, t = topic(current.topicRef);
-      if (!t) return dialogFeedback('原主题定义尚未读取，当前不能保存。');
+      if (!t && !current.manual) return dialogFeedback('原主题定义尚未读取，当前不能保存。');
       const product=dialogState.kind==='product_research';
       const savedAngle=product?String(data.get('angle')).trim():`切入角度：${String(data.get('angle')).trim()}\n\n复用意图：${data.getAll('reuse').join('、') || '未指定'}`;
       const savedRationale=product?String(data.get('rationale')).trim():`这篇要回答的问题：\n${String(data.get('rationale')).trim()}\n\n回答边界：\n${String(data.get('boundary') || '').trim() || '尚未明确，需要核对原作与适用条件'}\n\n备注：\n${String(data.get('note') || '').trim() || '未填写'}`;
       if(Array.from(savedAngle).length>2000||Array.from(savedRationale).length>2000)return dialogFeedback('完整角度或研究说明超过保存上限，请缩短问题、边界或备注后再保存。');
-      const result = await command({action:'saveAlternative',topicRef:t.topicRef,definitionRef:t.definitionRef,title:String(data.get('title')).trim(),angle:savedAngle,rationale:savedRationale,evidenceWorkRefs:evidenceWorks(a,a.workRef),methodVersion:a.researchMethodVersion || snapshot.methodVersion,researchResultRef:a.researchResultRef || null,researchAngleIndex:a.researchResultRef && dialogState.kind!=='product_research' ? a.researchAngleIndex : null,researchOpportunityIndex:a.researchResultRef && dialogState.kind==='product_research' ? a.researchOpportunityIndex : null},'备选已保存到后端，不启用跟踪');
+      const result = await command({action:'saveAlternative',idempotencyKey:current.saveRequestKey || (current.saveRequestKey=uuid()),topicRef:t?.topicRef || null,definitionRef:t?.definitionRef || null,title:String(data.get('title')).trim(),angle:savedAngle,rationale:savedRationale,evidenceWorkRefs:evidenceWorks(a,a.workRef),methodVersion:a.researchMethodVersion || snapshot.methodVersion,researchResultRef:a.researchResultRef || null,researchAngleIndex:a.researchResultRef && dialogState.kind!=='product_research' ? a.researchAngleIndex : null,researchOpportunityIndex:a.researchResultRef && dialogState.kind==='product_research' ? a.researchOpportunityIndex : null},'备选已保存到后端，不启用跟踪');
       if (result) { current.savedAlternativeRef=result.subjectRef;if(dialogState===current){drawDialog();dialogFeedback(`已保存 · 回执 ${result.receiptRef}`);} } else dialogFeedback(notice); return;
     }
     if (name === 'research-config') {
@@ -985,8 +1080,9 @@
   }
   async function refreshResearch() {
     if (!dialogState) return;
-    try { progress = await request(`/api/local/topic-map/research?domainRef=${encodeURIComponent(state.domainRef)}`); dialogState.progress = progress; drawDialog(); }
-    catch (error) { dialogFeedback(`进度读取未成功：${error.message}`); }
+    const current=dialogState;
+    try { const value=await readResearchProgress(state.domainRef);if(value && dialogState===current){current.progress=value;delete current.error;drawDialog();} }
+    catch (error) { if(dialogState===current)dialogFeedback(`进度读取未成功：${error.message}`); }
   }
   async function startTopicResearch(ref) {
     const evidence = dialogState?.type === 'judge' && dialogState.topicRef === ref ? list(dialogState.works) : curated(ref, dialogState?.snapshot || snapshot);
@@ -1023,14 +1119,19 @@
     const action = target.dataset.action, id = target.dataset.id || '';
     if (target.disabled) return;
     if (action === 'refresh') { await load(); return; }
+    if (action === 'toggle-navigation') { state.navigationOpen=!state.navigationOpen;persist();render();return; }
+    if (action === 'journey-analysis') {state.journeyAnalysis=!state.journeyAnalysis;persist();render();return;}
+    if (action === 'clear-filter') { if(!['topicRef','stage','path','overlay','query'].includes(id))return;state[id]='';state.tab='content';persist();if(['topicRef','path','overlay'].includes(id))await load();else render();return; }
+    if (action === 'reset-scope' || action === 'browse-pending') { Object.assign(state,{topicRef:'',platform:'',windowDays:'',path:'',overlay:'',query:'',stage:action==='browse-pending'?'pending':'',materialMode:'latest',tab:'content'});if(action==='browse-pending')state.view='journey';persist();await load();return; }
+    if (action === 'manual-save') { const w=work(id);if(!w?.readable)return;openDialog('save',{manual:true,topicRef:'',kind:'angle',angle:{workRef:id,evidenceWorkRefs:[id],title:title(w),label:'',answerTask:'',researchMethodVersion:'topic-map.manual.v1'}});return; }
     if (action === 'view') { state.view = id; persist(); render(); return; }
     if (action === 'summary-chart') { state.summaryChart=id;persist();render();return; }
     if (action === 'changes-mode') { state.changesOnly=id==='changes';if(state.changesOnly){state.view='overview';state.tab='structure';}persist();render();return; }
     if (action === 'tab') { state.tab = id; persist(); render(); return; }
-    if (action === 'topic') { state.topicRef = id; state.query = ''; persist(); if (dialog) closeDialog(); await load(); return; }
+    if (action === 'topic') { state.topicRef = id; state.tab='content'; persist(); if (dialog) closeDialog(); await load(); return; }
     if (action === 'collapse') { const values = new Set(list(state.collapsed)); values.has(id) ? values.delete(id) : values.add(id); state.collapsed = [...values]; persist(); render(); return; }
     if (action === 'material-mode') { state.materialMode = id; persist(); render(); return; }
-    if (action === 'stage') { state.stage = id; persist(); render(); return; }
+    if (action === 'stage') { state.stage = id; state.tab='content';persist(); render(); return; }
     if (action === 'overlay') { state.overlay = id; state.stage = ''; persist(); await load(); return; }
     if (action === 'metric') { state.metric = id; persist(); render(); return; }
     if (action === 'map-mode') { state.mapMode = id; persist(); render(); return; }
@@ -1039,7 +1140,7 @@
     if (action === 'compare-clear') { state.compare = []; persist(); render(); return; }
     if (action === 'dialog-close') { closeDialog(); return; }
     if (action === 'dialog-back') { dialogBack(); return; }
-    if (action === 'materials') { openDialog('materials',{snapshot:dialogState?.snapshot}); return; }
+    if (action === 'materials') { openDialog('materials',{snapshot:dialogState?.snapshot,query:state.query}); return; }
     if (action === 'subset') { openDialog('materials',{refs:id ? id.split(',') : []}); return; }
     if (action === 'unassigned') { openDialog('materials',{unassigned:true}); return; }
     if (action === 'materials-more') { dialogState.limit = (dialogState.limit || 60) + 60; drawDialog(); return; }
@@ -1117,8 +1218,13 @@
   });
   root.addEventListener('submit', event => {
     if (event.target.dataset.form !== 'search') return;
-    event.preventDefault(); state.query = String(new FormData(event.target).get('query') || '').trim(); persist(); render();
+    event.preventDefault(); state.query = String(new FormData(event.target).get('query') || '').trim(); state.tab='content'; persist(); render();
   });
   root.addEventListener('keydown', event => { const target = event.target.closest('g[data-action]'); if (target && ['Enter',' '].includes(event.key)) { event.preventDefault(); target.dispatchEvent(new MouseEvent('click',{bubbles:true})); } });
+  window.addEventListener('popstate', () => {
+    const params=new URLSearchParams(location.search); Object.assign(state,defaults);
+    urlKeys.forEach(key=>{if(params.has(key))state[key]=params.get(key);});normalizeState();
+    if(dialog)closeDialog();load();
+  });
   load();
 })();
