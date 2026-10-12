@@ -2022,8 +2022,8 @@ fn collection_v4_uses_the_lids_reclaimed_title_and_context_readout_contract() {
         }
     }
 
-    // Target facts live beside the target ledger. The breadcrumb band stays quiet instead
-    // of repeating patrol/archive/runtime/timezone above the working surface.
+    // Target facts live beside the ledger. The breadcrumb band only hosts the approved
+    // station-management entry; it does not repeat patrol/archive/runtime/timezone readouts.
     let targets = collection::render(
         collection::Section::Targets,
         collection::OperationsMode::Now,
@@ -2038,7 +2038,9 @@ fn collection_v4_uses_the_lids_reclaimed_title_and_context_readout_contract() {
         .split_once("</div>")
         .expect("context meta closes")
         .0;
-    assert!(context_row.is_empty());
+    assert!(context_row.starts_with("<a "));
+    assert!(context_row.contains("data-collection-management"));
+    assert_eq!(context_row.split_once('>').unwrap().1, "工位管理</a>");
 }
 
 #[test]
@@ -3305,6 +3307,11 @@ async fn collection_domain_save_failure_keeps_draft_and_original_return_location
         "name=\"return_to\" value=\"/collection/targets?domain=all&amp;filter=creator\""
     ));
     assert!(html.contains("domain-feedback-error"));
+    assert!(
+        html.find("class=\"domain-draft\"").unwrap()
+            < html.find("<!-- collection-body:end -->").unwrap()
+    );
+    assert!(html.contains("<section class=\"domain-management\"><form class=\"domain-draft\""));
     assert_eq!(
         html.matches("data-collection-management-context").count(),
         1

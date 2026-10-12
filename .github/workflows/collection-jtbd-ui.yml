@@ -43,6 +43,7 @@ jobs:
           rustup toolchain install 1.95.0 --profile minimal --component rustfmt
           rustup default 1.95.0
       - name: Compile API
+        id: compile_api
         run: cargo build -p linggan-api --locked
       - name: Collection, station and navigation regression
         run: |
@@ -52,12 +53,16 @@ jobs:
           node --check apps/api/src/local_web/collection_workspace.js
           node --check scripts/test-collection-jtbd-ui.cjs
       - name: Exact target and receipt PostgreSQL projection proof
+        if: ${{ !cancelled() && steps.compile_api.outcome == 'success' }}
         run: bash scripts/test-collection-jtbd-postgres.sh
       - name: Install isolated browser
+        id: install_browser
+        if: ${{ !cancelled() && steps.compile_api.outcome == 'success' }}
         run: |
           npm --prefix "$RUNNER_TEMP/collection-browser" install --no-package-lock --ignore-scripts playwright@1.57.0
           node "$RUNNER_TEMP/collection-browser/node_modules/playwright/cli.js" install --with-deps chromium
       - name: Real server browser smoke without a database
+        if: ${{ !cancelled() && steps.install_browser.outcome == 'success' }}
         env:
           NODE_PATH: ${{ runner.temp }}/collection-browser/node_modules
           COLLECTION_PROOF_DIR: ${{ runner.temp }}/collection-jtbd-proof
@@ -68,6 +73,7 @@ jobs:
           trap 'kill "$COLLECTION_SERVER_PID" 2>/dev/null || true' EXIT
           node scripts/test-collection-jtbd-ui.cjs
       - name: Governance and whitespace
+        if: ${{ !cancelled() }}
         run: |
           bash scripts/check-project-governance.sh origin/main
           bash scripts/verify-ui-design-handbook.sh

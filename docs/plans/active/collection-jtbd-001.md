@@ -99,3 +99,13 @@
 - 应用该 CI 导出的 Rust 格式补丁；固定错误说明原样拆为小模块，使格式化后的新增生产文件仍少于 500 行。新增 2 个 PostgreSQL 投影证明及独占临时资源 harness 已通过独立静态审查，等待新提交实际执行。
 
 修复/格式化/投影证明提交前独立增量审查通过；root 重算 11 个代码/配置文件聚合 SHA-256 与 reviewer 一致：`bea53edf4e7860e2d96abcd65379f9610fcc601e8a26b188bda87240d1fe993f`。此项只批准进入新提交 CI，未把旧 head 的构建或未执行的 PG/浏览器记为本次通过。
+
+### 第二轮回归发现与修复
+
+- [CI 38239986950](https://github.com/Himog0921/linggan-intelligence/actions/runs/38239986950) 在 `6847df4090a69c21facc6e61b96291d99b650358` 构建通过，Collection 118 通过/1 ignored，Station 49 通过。API/local_web 组 63 通过/3 失败/12 ignored；PG 与浏览器因前置失败未执行。
+- 接受真实错误恢复缺陷：无数据库时原新建领域失败页没有 `domain-create` 表单，草稿替换分支无落点。现在在原工作区内以既有 `domain-management` 样式保留草稿与错误，仍携带返回上下文；正常新建/编辑替换路径不变。
+- 接受样式所有权问题：新增领域管理链接只由自己的 class/data 属性选中，不以 shell 类起头定义，保留同样的局部间距并使用既有线宽 Token。公共 shell CSS 仍未修改。
+- 更新过时的“context meta 必须全空”断言为只允许已获批准的工位管理链接，继续禁止重复目标读数；草稿测试增加正文位置与原样式容器验证。
+- 该提交 CI 的 rustfmt 补丁为 0 字节（下载 ZIP SHA-256 `76f3ec37339a5bd2f1f7944276313d256f5264c77884a538f46d7b435c6759bc`）。后续 workflow 让编译成功后的 PG/浏览器/治理检查独立执行，任一失败仍使 job 失败，不用 continue-on-error 掩盖失败。
+
+第二轮失败修复经独立增量审查通过，root 重算 4 文件代码/配置 SHA-256 与 reviewer 一致：`85b620bf472311581251c456544e19d7fa7662135b3edd48c71aa88b781a2425`。待下一提交实际 CI 验证。

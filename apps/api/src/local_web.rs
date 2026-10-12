@@ -2997,28 +2997,34 @@ async fn collection_domain_save_failure(
             let feedback = format!(
                 "<p role=\"alert\" class=\"domain-feedback domain-feedback-error\">{message}</p>"
             );
-            if let Some(at) = page.find("</body>") {
+            if let Some(at) = page
+                .find("<!-- collection-body:end -->")
+                .or_else(|| page.find("</body>"))
+            {
                 page.insert_str(at, &feedback);
             }
         }
     }
     let draft = collection_domain_draft_form(form);
-    if form.domain_ref.is_none() {
-        if let (Some(start), Some(relative_end)) = (
-            page.find("<form class=\"domain-create\""),
-            page.find("<form class=\"domain-create\"")
-                .and_then(|start| {
-                    page[start..]
-                        .find("</form>")
-                        .map(|end| start + end + "</form>".len())
-                }),
-        ) {
-            page.replace_range(start..relative_end, &draft);
+    let create_form = page.find("<form class=\"domain-create\"").and_then(|start| {
+        page[start..]
+            .find("</form>")
+            .map(|end| start..start + end + "</form>".len())
+    });
+    match (form.domain_ref, create_form) {
+        (None, Some(range)) => page.replace_range(range, &draft),
+        (Some(_), Some(range)) => page.insert_str(range.start, &draft),
+        (_, None) => {
+            if let Some(at) = page
+                .find("<!-- collection-body:end -->")
+                .or_else(|| page.find("</body>"))
+            {
+                page.insert_str(
+                    at,
+                    &format!(r#"<section class="domain-management">{draft}</section>"#),
+                );
+            }
         }
-    } else if let Some(at) = page.find("<form class=\"domain-create\"") {
-        page.insert_str(at, &draft);
-    } else if let Some(at) = page.find("</body>") {
-        page.insert_str(at, &draft);
     }
     Html(collection_management::decorate(
         &page,
