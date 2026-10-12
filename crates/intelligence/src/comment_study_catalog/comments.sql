@@ -1,17 +1,59 @@
 -- Appended to facts.sql. $6 literal query; $7 voice; $8 study filter;
--- $9 received-before; $10 work-after; $11 external-id-after; $12 page size plus one; $13 signal kind.
+-- $9 received-before; $10 work-after; $11 external-id-after; $12 page size plus one; $13 signal kind;
+-- $14 sort (received_desc | like_desc); $15 minimum known likes; $16 post usage (all | used | unused);
+-- $17 like-count-after (NULL with a cursor means the page continues inside the unknown-likes tail).
 , signal_kinds AS MATERIALIZED (
     SELECT content_public_ref, comment_external_id,
            array_agg(DISTINCT kind::text ORDER BY kind::text) AS kinds
     FROM linggan_comment_study_effective_signal
     WHERE domain_ref = $1
     GROUP BY content_public_ref, comment_external_id
+), like_heads AS MATERIALIZED (
+    -- The comment's own latest KNOWN count before asOf; an UNKNOWN newer observation does not hide
+    -- an older known one, and nothing is ever inferred from the work's likes.
+    SELECT DISTINCT ON (comment.content_public_ref, comment.comment_external_id)
+           comment.content_public_ref, comment.comment_external_id,
+           engagement.like_count, comment.observed_at AS like_observed_at
+    FROM linggan_material_comment comment
+    JOIN linggan_material_comment_engagement engagement
+      ON engagement.material_ref = comment.material_ref AND engagement.like_count_state = 'KNOWN'
+    JOIN linggan_runtime_capture_package package ON package.package_ref = comment.package_ref
+    WHERE EXISTS (
+        SELECT 1 FROM linggan_material_domain_usage usage
+        WHERE usage.content_public_ref = comment.content_public_ref AND usage.domain_ref = $1
+    )
+      AND ($4::uuid IS NULL OR comment.content_public_ref = $4)
+      AND ($5::text IS NULL OR comment.comment_external_id = $5)
+      AND package.accepted_at <= $2::timestamptz AND comment.created_at <= $2::timestamptz
+    ORDER BY comment.content_public_ref, comment.comment_external_id,
+             comment.observed_at::timestamptz DESC, comment.created_at DESC, comment.material_ref DESC
+), usage_heads AS MATERIALIZED (
+    SELECT DISTINCT ON (event.content_public_ref, event.comment_external_id)
+           event.content_public_ref, event.comment_external_id,
+           event.action AS usage_action, event.recorded_at AS usage_recorded_at
+    FROM linggan_comment_post_usage_event event
+    WHERE event.recorded_at <= $2::timestamptz
+      AND ($4::uuid IS NULL OR event.content_public_ref = $4)
+      AND ($5::text IS NULL OR event.comment_external_id = $5)
+    ORDER BY event.content_public_ref, event.comment_external_id,
+             event.recorded_at DESC, event.event_ref DESC
 ), scoped AS MATERIALIZED (
-    SELECT qualified.*, COALESCE(signal_kinds.kinds, ARRAY[]::text[]) AS signal_kinds
+    SELECT qualified.*, COALESCE(signal_kinds.kinds, ARRAY[]::text[]) AS signal_kinds,
+           like_heads.like_count, like_heads.like_observed_at,
+           usage_heads.usage_action, usage_heads.usage_recorded_at
     FROM qualified
     LEFT JOIN signal_kinds USING (content_public_ref, comment_external_id)
+    LEFT JOIN like_heads USING (content_public_ref, comment_external_id)
+    LEFT JOIN usage_heads USING (content_public_ref, comment_external_id)
     WHERE ($7 = 'all' OR voice_role = $7 OR ($7 = 'reader_and_unknown' AND voice_role <> 'creator'))
       AND ($13::text IS NULL OR $13::text = ANY(COALESCE(signal_kinds.kinds, ARRAY[]::text[])))
+      AND ($15::bigint IS NULL OR like_heads.like_count >= $15::bigint)
+      AND CASE $16::text
+          WHEN 'all' THEN true
+          WHEN 'used' THEN usage_heads.usage_action = 'marked'
+          WHEN 'unused' THEN usage_heads.usage_action IS DISTINCT FROM 'marked'
+          ELSE false
+      END
       AND CASE $8
           WHEN 'all' THEN true
           WHEN 'never_studied' THEN latest_target_ref IS NULL
@@ -28,13 +70,27 @@
 ), visible AS MATERIALIZED (
     SELECT * FROM matching WHERE readable AND clean_state IN ('direct', 'context')
 ), page AS MATERIALIZED (
-    SELECT * FROM visible
-    WHERE $9::timestamptz IS NULL OR created_at < $9::timestamptz
-       OR (created_at = $9::timestamptz AND (
-           content_public_ref > $10::uuid OR (content_public_ref = $10::uuid
-               AND comment_external_id COLLATE "C" > $11::text COLLATE "C")
-       ))
-    ORDER BY created_at DESC, content_public_ref, comment_external_id COLLATE "C"
+    -- received_desc keeps the original order. like_desc orders by the known count with unknown
+    -- counts last, then by the same received/work/comment tie-break; the keyset mirrors that order.
+    SELECT * FROM (
+        SELECT visible.*,
+               (created_at < $9::timestamptz
+                OR (created_at = $9::timestamptz
+                    AND (content_public_ref > $10::uuid
+                         OR (content_public_ref = $10::uuid
+                             AND comment_external_id COLLATE "C" > $11::text COLLATE "C"))))
+                 AS after_received_key
+        FROM visible
+    ) positioned
+    WHERE $9::timestamptz IS NULL
+       OR ($14::text = 'received_desc' AND after_received_key)
+       OR ($14::text = 'like_desc' AND $17::bigint IS NOT NULL
+           AND (like_count IS NULL OR like_count < $17::bigint
+                OR (like_count = $17::bigint AND after_received_key)))
+       OR ($14::text = 'like_desc' AND $17::bigint IS NULL
+           AND like_count IS NULL AND after_received_key)
+    ORDER BY CASE WHEN $14::text = 'like_desc' THEN like_count END DESC NULLS LAST,
+             created_at DESC, content_public_ref, comment_external_id COLLATE "C"
     LIMIT $12
 ), coverage AS (
     SELECT (SELECT count(*) FROM matching WHERE readable AND cached_source_ref IS NOT NULL) AS indexed,
@@ -78,7 +134,8 @@ SELECT jsonb_build_object(
     'rows', COALESCE((SELECT jsonb_agg(jsonb_build_object(
         'position', jsonb_build_object(
             'receivedAt', to_char(page.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
-            'workRef', page.content_public_ref, 'commentExternalId', page.comment_external_id
+            'workRef', page.content_public_ref, 'commentExternalId', page.comment_external_id,
+            'likeCount', page.like_count
         ),
         'item', jsonb_build_object(
             'commentKey', jsonb_build_object('workRef', page.content_public_ref, 'commentExternalId', page.comment_external_id),
@@ -114,8 +171,17 @@ SELECT jsonb_build_object(
             'authorDisplayName', page.author_display_name, 'authorExternalId', page.author_external_id,
             'parentCommentKey', CASE WHEN page.parent_comment_external_id IS NULL THEN NULL
                 ELSE jsonb_build_object('workRef', page.content_public_ref, 'commentExternalId', page.parent_comment_external_id) END,
-            'likeCount', NULL, 'likeCountAsOf', NULL, 'publishedAt', NULL
+            'likeCount', page.like_count,
+            'likeCountAsOf', CASE WHEN page.like_count IS NULL THEN NULL
+                ELSE to_char(page.like_observed_at::timestamptz AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') END,
+            'publishedAt', NULL,
+            'postUsage', jsonb_build_object(
+                'state', CASE WHEN page.usage_action = 'marked' THEN 'used' ELSE 'unused' END,
+                'markedAt', CASE WHEN page.usage_action = 'marked'
+                    THEN to_char(page.usage_recorded_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') END
+            )
         )
-    ) ORDER BY page.created_at DESC, page.content_public_ref, page.comment_external_id COLLATE "C")
+    ) ORDER BY CASE WHEN $14::text = 'like_desc' THEN page.like_count END DESC NULLS LAST,
+               page.created_at DESC, page.content_public_ref, page.comment_external_id COLLATE "C")
       FROM page JOIN linggan_material_comment raw ON raw.material_ref = page.material_ref), '[]'::jsonb)
 );

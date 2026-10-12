@@ -14,6 +14,10 @@ pub(crate) struct CommentPosition {
     pub received_at: String,
     pub work_ref: Uuid,
     pub comment_external_id: String,
+    /// Only the like-sorted keyset reads it; `None` there means the page is inside the
+    /// unknown-likes tail. Cursors issued before this field existed decode as `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub like_count: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,6 +41,7 @@ impl CursorPosition for CommentPosition {
             && !self.comment_external_id.is_empty()
             && self.comment_external_id.len() <= 512
             && !self.comment_external_id.contains('\0')
+            && self.like_count.is_none_or(|count| count >= 0)
     }
 }
 
@@ -215,6 +220,7 @@ mod tests {
             received_at: "2026-09-22T01:02:03.000001Z".to_owned(),
             work_ref: Uuid::from_u128(1),
             comment_external_id: "评论_1".to_owned(),
+            like_count: None,
         }
     }
 

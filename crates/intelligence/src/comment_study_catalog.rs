@@ -13,19 +13,24 @@ use uuid::Uuid;
 pub(crate) mod cursor;
 #[path = "comment_study_catalog/detail.rs"]
 mod detail;
+#[path = "comment_study_catalog/post_usage.rs"]
+mod post_usage;
 #[path = "comment_study_catalog/read.rs"]
 mod read;
 #[path = "comment_study_catalog/works.rs"]
 mod works;
 
 pub use read::{
-    CatalogStudyState, CatalogSummaryQuery, CatalogVoiceRole, CommentCatalogQuery,
-    read_catalog_summary, read_comment_catalog,
+    CatalogPostUsage, CatalogSort, CatalogStudyState, CatalogSummaryQuery, CatalogVoiceRole,
+    CommentCatalogQuery, read_catalog_summary, read_comment_catalog,
 };
 
 pub use detail::{
     CommentDetailQuery, CommentHistoryQuery, read_comment_detail, read_comment_history,
     read_comment_versions,
+};
+pub use post_usage::{
+    PostUsageAction, PostUsageCommand, PostUsageError, record_comment_post_usage,
 };
 pub use works::{WorkCatalogQuery, read_work_catalog};
 

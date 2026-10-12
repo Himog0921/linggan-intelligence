@@ -125,6 +125,18 @@ struct CommentStudyPageQuery {
     _detail: Option<String>,
     #[serde(rename = "panel")]
     _panel: Option<String>,
+    // The comments view writes these filters into its own URL; without them a reload or a saved
+    // link to a filtered list fails before the page loads.
+    #[serde(rename = "signalKind")]
+    _signal_kind: Option<String>,
+    #[serde(rename = "voiceRole")]
+    _voice_role: Option<String>,
+    #[serde(rename = "sort")]
+    _sort: Option<String>,
+    #[serde(rename = "minLikes")]
+    _min_likes: Option<String>,
+    #[serde(rename = "postUsage")]
+    _post_usage: Option<String>,
 }
 
 async fn read_setup(
@@ -572,6 +584,35 @@ fn error(status: StatusCode, code: &str) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every comment filter the view writes into its URL must be accepted by the page route, or a
+    /// reload/saved link fails before the page loads (signalKind/voiceRole once did exactly that).
+    #[test]
+    fn page_route_accepts_every_comment_filter_the_view_writes_into_its_url() {
+        let script = include_str!("comment_study.js");
+        let marker = "for (const key of ['q'";
+        let start =
+            script.find(marker).expect("comment route key list") + "for (const key of [".len();
+        let end = start + script[start..].find(']').expect("key list closes");
+        let keys: Vec<&str> = script[start..end]
+            .split(',')
+            .map(|key| key.trim().trim_matches('\''))
+            .collect();
+        assert!(keys.contains(&"sort") && keys.contains(&"signalKind"));
+        let query = keys
+            .iter()
+            .map(|key| format!("{key}=x"))
+            .collect::<Vec<_>>()
+            .join("&");
+        let uri: axum::http::Uri = format!(
+            "/corpus/comments?domain=00000000-0000-4000-8000-000000000001&view=comments&{query}"
+        )
+        .parse()
+        .unwrap();
+        assert!(axum::extract::Query::<CommentStudyPageQuery>::try_from_uri(&uri).is_ok());
+        let unknown: axum::http::Uri = "/corpus/comments?origin=scheduled".parse().unwrap();
+        assert!(axum::extract::Query::<CommentStudyPageQuery>::try_from_uri(&unknown).is_err());
+    }
 
     #[test]
     fn local_read_routes_reject_cross_site_requests() {

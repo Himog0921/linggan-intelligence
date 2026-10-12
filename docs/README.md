@@ -32,6 +32,7 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发，并于 2026-10-02 
 | [plans/active/topic-map-workflow-382.md](plans/active/topic-map-workflow-382.md) | 活跃计划 | 左侧双入口、内容优先、统一检索、状态与人工备选闭环；迁移/部署另确认 |
 | [plans/active/topic-map-read-performance-382.md](plans/active/topic-map-read-performance-382.md) | 候选实现/实测通过；当前对话授权；Issue #382后续 | 主题首次进入、概览媒体轻量读取及来源复核性能；完整统计和资格不放宽 |
 | [plans/active/comment-study-read-performance-358.md](plans/active/comment-study-read-performance-358.md) | 活跃计划；Issue #358；独立工作树 | 评论读取性能及概览进入的加载依赖；PR #380 已发布，整页进入修复为后续候选 |
+| [plans/active/comment-like-library-001.md](plans/active/comment-like-library-001.md) | 活跃计划；Issue #397；候选完成，待 Mog 授权合并/迁移/部署 | 高赞原话库：评论点赞观测、按赞排序/筛选、改帖标记命令与界面 |
 | [plans/active/corpus-performance-089.md](plans/active/corpus-performance-089.md) | 活跃计划；Issue #89；受保护工作树 | 共享作品读取提前收窄、批次 enrichment、语义等价和数据库查询次数性能防护 |
 | [design/changes/collection-runtime-state-20260929-ui-change-manifest.md](design/changes/collection-runtime-state-20260929-ui-change-manifest.md) | 候选实现；待集成与页面验收 | recovery 全局暂停、当前排队读数和派发回答的状态纠偏 |
 | [design/changes/collection-keyword-sampling-recovery-001-ui-change-manifest.md](design/changes/collection-keyword-sampling-recovery-001-ui-change-manifest.md) | Issue #362 交付分支实施中 | 关键词 3 次下拉／200 候选／20 样本、失败有界恢复、部分巡查和容量等待的状态词义 |

@@ -189,12 +189,17 @@
 .study-run-confirm .study-workspace-footer{padding:var(--lgi-space-4) 0 0}
 .study-comments-table,.study-runs-table{min-width:calc(var(--lgi-page-max-workbench) - var(--lgi-space-24) - var(--lgi-space-24) - var(--lgi-space-24));table-layout:fixed}
 .study-runs-table{min-width:calc(var(--lgi-page-max-workbench) - var(--lgi-space-24) - var(--lgi-space-24) - var(--lgi-space-24) - var(--lgi-space-24) - var(--lgi-space-24))}
-.study-comments-table th:first-child{width:6%}
-.study-comments-table th:nth-child(2){width:35%}
-.study-comments-table th:nth-child(3){width:19%}
-.study-comments-table th:nth-child(4){width:14%}
-.study-comments-table th:nth-child(5){width:14%}
+.study-comments-table th:first-child{width:5%}
+.study-comments-table th:nth-child(2){width:28%}
+.study-comments-table th:nth-child(3){width:7%}
+.study-comments-table th:nth-child(4){width:15%}
+.study-comments-table th:nth-child(5){width:11%}
 .study-comments-table th:nth-child(6){width:12%}
+.study-comments-table th:nth-child(7){width:10%}
+.study-comments-table th:nth-child(8){width:12%}
+.study-like-count{font-variant-numeric:tabular-nums;white-space:nowrap}
+.study-post-usage{display:grid;justify-items:start;gap:var(--lgi-space-1)}
+.study-post-usage-status:empty{display:none}
 .study-comment-kinds{display:flex;align-items:flex-start;flex-wrap:wrap;gap:var(--lgi-space-1)}
 .study-comment-kinds .study-badge{display:inline-block;font-size:var(--lgi-text-label);white-space:nowrap}
 .study-runs-table th:first-child{width:19%}
