@@ -1825,6 +1825,50 @@ async fn opted_in_creator_follow_materializes_its_grant_and_never_reopens_the_ro
         "SELECT monitor_rule_revision_ref FROM collection_work_order WHERE work_order_ref=$1",
     ).bind(follow_work_order).fetch_one(database.pool()).await.unwrap();
     assert!(frozen_revision.is_some(), "rule opt-out must invalidate an unclaimed automatic follow-up");
+
+    let mut first_opt_out = command.clone();
+    first_opt_out.expected_revision = saved.current_revision;
+    first_opt_out.idempotency_key = Uuid::new_v4();
+    first_opt_out.draft.as_mut().unwrap().creator_follow_details = false;
+    let first_off = linggan_evidence::apply_monitor_rule_command(&database, &first_opt_out)
+        .await
+        .unwrap();
+    assert_eq!(first_off.reason_code, "rule_saved");
+    run_progressive_archives(&database).await.unwrap();
+    let old_queue_state: String = sqlx::query_scalar(
+        "SELECT queue_state FROM collection_work_order WHERE work_order_ref=$1",
+    )
+    .bind(follow_work_order)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(old_queue_state, "cancelled", "the old frozen rule cannot keep an unclaimable order queued");
+
+    let mut opt_back_in = command.clone();
+    opt_back_in.expected_revision = first_off.current_revision;
+    opt_back_in.idempotency_key = Uuid::new_v4();
+    let reopened = linggan_evidence::apply_monitor_rule_command(&database, &opt_back_in)
+        .await
+        .unwrap();
+    assert_eq!(reopened.reason_code, "rule_saved");
+    let resumed = run_progressive_archives(&database).await.unwrap();
+    assert!(resumed.queued.contains(&target_ref), "{resumed:?}");
+    let replacement_order: (Uuid, Uuid) = sqlx::query_as(
+        "SELECT work_order.work_order_ref,work_order.monitor_rule_revision_ref \
+         FROM collection_work_order work_order \
+         JOIN collection_admission_decision decision USING(decision_ref) \
+         JOIN collection_acquisition_request request USING(request_ref) \
+         WHERE work_order.target_ref=$1 AND request.purpose='巡查新增作品自动详情补采' \
+           AND work_order.queue_state='queued' \
+         ORDER BY work_order.created_at DESC LIMIT 1",
+    )
+    .bind(target_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_ne!(replacement_order.0, follow_work_order);
+    assert_eq!(Some(replacement_order.1), reopened.applied_rule_revision_ref);
+
     let dispatch = decide_dispatch(&database, &installation.install_key, &installation.secret)
         .await
         .unwrap();
@@ -1885,7 +1929,7 @@ async fn opted_in_creator_follow_materializes_its_grant_and_never_reopens_the_ro
     );
 
     let mut opt_out = command.clone();
-    opt_out.expected_revision = saved.current_revision;
+    opt_out.expected_revision = reopened.current_revision;
     opt_out.idempotency_key = Uuid::new_v4();
     opt_out.draft.as_mut().unwrap().creator_follow_details = false;
     let opted_out = linggan_evidence::apply_monitor_rule_command(&database, &opt_out)

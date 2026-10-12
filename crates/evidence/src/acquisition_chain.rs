@@ -3115,6 +3115,34 @@ pub async fn run_progressive_archives(
             break;
         }
     }
+    // A changed rule makes its previously queued follow-up orders impossible to lease.
+    // Retire those orders before checking gaps or per-target capacity, otherwise a stale
+    // queued order can hide the missing detail from the newly saved rule until expiry.
+    // Live leases are left alone; their frozen rule is rechecked by dispatch.
+    sqlx::query(
+        "UPDATE collection_work_order work_order \
+         SET queue_state='cancelled',station_ref=NULL,installation_ref=NULL, \
+             account_ref=NULL,eligibility_ref=NULL \
+         FROM collection_admission_decision decision, \
+              collection_acquisition_request request, \
+              collection_monitor_rule_revision frozen,collection_monitor_rule rule \
+         WHERE work_order.decision_ref=decision.decision_ref \
+           AND decision.request_ref=request.request_ref \
+           AND request.requested_by='agent' AND request.purpose=$1 \
+           AND work_order.monitor_rule_revision_ref=frozen.rule_revision_ref \
+           AND rule.rule_ref=frozen.rule_ref \
+           AND work_order.queue_state='queued' \
+           AND (rule.retired_at IS NOT NULL \
+                OR rule.active_revision_ref IS DISTINCT FROM frozen.rule_revision_ref) \
+           AND NOT EXISTS (SELECT 1 FROM collection_work_order_lease lease \
+                           WHERE lease.work_order_ref=work_order.work_order_ref \
+                             AND lease.released_at IS NULL \
+                             AND lease.expires_at>scope_001_now())",
+    )
+    .bind(CREATOR_PATROL_DETAIL_FOLLOW_PURPOSE)
+    .execute(database.pool())
+    .await
+    .map_err(AcquisitionChainError::from)?;
     // A completed root stays completed. A person's saved follow-up rule authorizes bounded
     // material WorkOrders for accepted patrol discoveries. The grant is an internal audit
     // projection of that opt-in, never a second action requested from the person.
