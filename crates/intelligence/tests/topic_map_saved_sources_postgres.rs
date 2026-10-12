@@ -83,12 +83,14 @@ async fn task_angle_command(db: &Database, task: Uuid, work: Uuid, key: &str) ->
     TopicMapCommand::SaveAlternative {
         idempotency_key: key.into(),
         domain_ref: D,
-        topic_ref: assignment["topicRef"].as_str().unwrap().parse().unwrap(),
-        definition_ref: assignment["definitionRef"]
-            .as_str()
-            .unwrap()
-            .parse()
-            .unwrap(),
+        topic_ref: Some(assignment["topicRef"].as_str().unwrap().parse().unwrap()),
+        definition_ref: Some(
+            assignment["definitionRef"]
+                .as_str()
+                .unwrap()
+                .parse()
+                .unwrap(),
+        ),
         title: "合成完整来源角度".into(),
         angle: "引用已有合格原文的合成测试".into(),
         rationale: "SYNTHETIC / NOT EVIDENCE".into(),
@@ -582,7 +584,7 @@ async fn assert_definition_withdrawal_hides_saved(indirect: bool) {
         unreachable!()
     };
     assert_eq!(
-        *definition_ref == original_definition,
+        *definition_ref == Some(original_definition),
         !indirect,
         "the second rule must actually depend on the first by assignment or compared candidate"
     );

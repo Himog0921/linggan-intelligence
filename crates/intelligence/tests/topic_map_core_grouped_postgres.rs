@@ -260,12 +260,14 @@ async fn saved_author_context_restores_exact_ranges_and_withdrawal_keeps_indepen
     let command = TopicMapCommand::SaveAlternative {
         idempotency_key: "synthetic-grouped-saved".into(),
         domain_ref: D,
-        topic_ref: assignment["topicRef"].as_str().unwrap().parse().unwrap(),
-        definition_ref: assignment["definitionRef"]
-            .as_str()
-            .unwrap()
-            .parse()
-            .unwrap(),
+        topic_ref: Some(assignment["topicRef"].as_str().unwrap().parse().unwrap()),
+        definition_ref: Some(
+            assignment["definitionRef"]
+                .as_str()
+                .unwrap()
+                .parse()
+                .unwrap(),
+        ),
         title: "合成分步练习角度".into(),
         angle: "保留评论和同篇作者语境".into(),
         rationale: "SYNTHETIC / NOT EVIDENCE".into(),

@@ -159,8 +159,8 @@ pub enum TopicMapCommand {
     SaveAlternative {
         idempotency_key: String,
         domain_ref: Uuid,
-        topic_ref: Uuid,
-        definition_ref: Uuid,
+        topic_ref: Option<Uuid>,
+        definition_ref: Option<Uuid>,
         title: String,
         angle: String,
         rationale: String,

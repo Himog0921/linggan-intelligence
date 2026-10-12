@@ -37,8 +37,8 @@ pub struct TopicMapSavedFragment {
 pub struct TopicMapSavedAlternative {
     pub alternative_ref: Uuid,
     pub domain_ref: Uuid,
-    pub topic_ref: Uuid,
-    pub definition_ref: Uuid,
+    pub topic_ref: Option<Uuid>,
+    pub definition_ref: Option<Uuid>,
     pub kind: String,
     pub source_state: String,
     pub title: Option<String>,
@@ -104,8 +104,8 @@ pub async fn read_saved_alternative(
     };
     available &= fragments.is_some();
     let fragments = fragments.unwrap_or_default();
-    let definition_ref: Uuid = row.get("definition_ref");
-    let original_definition: Option<Value> = if available {
+    let definition_ref: Option<Uuid> = row.get("definition_ref");
+    let original_definition: Option<Value> = if available && definition_ref.is_some() {
         sqlx::query_scalar("SELECT jsonb_build_object('definitionRef',definition_ref,'version',version,'displayName',display_name,'definitionText',definition_text) FROM linggan_topic_definition WHERE definition_ref=$1").bind(definition_ref).fetch_optional(&mut *tx).await?
     } else {
         None

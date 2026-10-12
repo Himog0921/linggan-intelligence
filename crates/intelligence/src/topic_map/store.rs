@@ -255,12 +255,26 @@ pub async fn save_topic_map_command(
             research_opportunity_index,
             ..
         } => {
-            topic_scope(&mut tx, domain_ref, *topic_ref).await?;
+            match (topic_ref, definition_ref) {
+                (Some(topic), Some(def)) => {
+                    topic_scope(&mut tx, domain_ref, *topic).await?;
+                    definition(&mut tx, *topic, *def).await?;
+                }
+                (None, None)
+                    if method_version == "topic-map.manual.v1"
+                        && research_result_ref.is_none()
+                        && research_angle_index.is_none()
+                        && research_opportunity_index.is_none() => {}
+                _ => {
+                    return Err(TopicMapError::Invalid(
+                        "alternative definition lineage mismatch",
+                    ));
+                }
+            }
             text(title, 120)?;
             text(angle, 2000)?;
             text(rationale, 2000)?;
             text(method_version, 120)?;
-            definition(&mut tx, *topic_ref, *definition_ref).await?;
             let refs: BTreeSet<_> = evidence_work_refs.iter().copied().collect();
             if refs.is_empty() || refs.len() > 10 || refs.len() != evidence_work_refs.len() {
                 return Err(TopicMapError::Invalid(
@@ -352,6 +366,15 @@ pub async fn save_topic_map_command(
                     .map_err(|e| TopicMapError::Source(e.to_string()))?,
                 )
                 .map_err(|e| TopicMapError::Source(e.to_string()))?;
+                if method_version == "topic-map.manual.v1"
+                    && manifest["frozenFragments"]
+                        .as_array()
+                        .is_none_or(Vec::is_empty)
+                {
+                    return Err(TopicMapError::Invalid(
+                        "manual alternative requires readable author fragments",
+                    ));
+                }
                 sqlx::query("INSERT INTO linggan_topic_map_alternative_evidence(alternative_ref,work_public_ref,source_manifest) VALUES($1,$2,$3)").bind(alternative).bind(reference).bind(manifest).execute(&mut *tx).await?;
             }
             r
