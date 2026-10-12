@@ -8,6 +8,8 @@
 
 > 语义更新：本文关于“跨行业独立来源范围”及其旧 Corpus 分支是 2026-09-06 草案快照。Domain 平权与统一材料链已由 [DEC-0008](../decisions/0008-peer-domains-and-unified-material-pipeline.md) 和 [DOMAIN-UNIFICATION-001](../plans/active/domain-unification-001.md) 取代；原型仍是合成设计证据，不约束当前数据合同。
 
+> 范围更新：本文"移出选题生产"及四个工作区的范围，已由 [DEC-0009](../decisions/0009-stage-one-job-topic-pool.md) 修订：选题池与运营管理纳入第一阶段，选题池位于运营管理之下。本稿其余页面提案的去留待设计阶段裁定。
+
 首页专项见[首页与 Three.js](intelligence-home-threejs.md)。[可点击原型](../design/pages/intelligence-product-prototype.html)使用合成数据，点击产生本地演示状态。读取回执、验证矩阵和再生方式在文末。
 
 ## 1. 产品任务与范围
