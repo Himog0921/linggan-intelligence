@@ -56,7 +56,7 @@
 ## 5. 依赖与文件所有权
 
 - `/root`: `local_web.rs`、`collection.rs`、必要管理导航模块及治理文档；负责集成。
-- `frontend_inventory`: `collection_task_actions.rs` 及专属 `collection_task_actions_tests.rs`、`crates/evidence/src/collection_task_action_read.rs` 及 `lib.rs` 的精确导出；只读目标用途/命令回执放 evidence 层，原任务表/目标表/抽屉/schema 不改。
+- `frontend_inventory`: `collection_task_actions.rs` 及专属 `collection_task_actions_tests.rs`、`crates/evidence/src/collection_task_action_read.rs`、专属投影集成测试及 `lib.rs` 的精确导出；只读目标用途/命令回执放 evidence 层，原任务表/目标表/抽屉/schema 不改。
 - `backend_flow`: 工位能力与八条 POST 核对；`collection_management.rs`、专属 `collection_management_tests.rs`、collection JS/CSS 的管理导航增量。
 - `jtbd_challenge`: 只读验证准备与独立 commit-reviewer，不承担实现。
 - 必要依赖: collection 局部 JS/CSS、既有路由/渲染测试、限定本分支 GitHub Actions 验证；共享 shell/其它模块只读。
@@ -84,6 +84,8 @@
 - 本机已通过 JS 语法、diff 空白、项目治理与设计手册检查。Rust/浏览器将在只针对本分支的 CI 中运行；页面 smoke 使用无数据库的真实服务，不访问平台、不执行 POST。
 
 最终命令结果、独立审查结论与 PR 链接完成后追加。合成/隔离验证不等于生产采集或用户业务验收；合并按 AGENTS 的 exact-head 要求单独授权。
+
+验证补充：调查并复用现有临时 PostgreSQL 测试夹具，为新增两项只读投影验证 primary 用途边界和精确命令回执。只允许隔离测试数据库与合成 fixture，不触碰生产或外部平台；若可复用则纳入本分支 CI，实际运行前仍标记为未证明。
 
 
 提交前独立只读审查通过（仅静态范围），无未修复确定阻断项；原 replay 矛盾已接受修正。根重算 12 源码/浏览器脚本文件聚合 SHA-256 与 reviewer 一致：`eddbbe068d9d53b6bb079d643b3a9c15de7ba4fdcc51b51e17afa8719b249234`；workflow SHA-256 `a7c9812cde9bccc015fa9fc5b45d3f51eb16ebbf983ac06c38ace769304aa300`。允许提交 Draft PR 进入 CI，不等于编译、SQL、浏览器或合并通过。专用 `~/.claude/agents/commit-reviewer.md` 在本环境缺失，已由独立只读代理按当前合同审查，未假称运行不存在的定义。
