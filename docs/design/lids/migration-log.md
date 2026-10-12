@@ -1,10 +1,14 @@
 # LIDS-LOG-001 · LIDS 迁移与变更记录
 
 > 状态: 权威当前
-> 最后核对: 2026-10-11
+> 最后核对: 2026-10-12
 > 适用范围: Linggan Intelligence LIDS Token、Primitive、Component、Pattern、Page、Motion、Scene 和 Data Truth 规则的实际变更、替代、例外与验证边界
 > 事实来源: [system.md](system.md)、[README.md](README.md)、DESIGN-002 Issue #7、项目 progress 记录和实际验证输出
 > 冲突时以谁为准: 真实代码/合同/测试、用户最新确认、当前 SCOPE 和 ACCEPTED 决策；本日志不把计划写成已实现事实
+
+## 2026-10-12 · TOPIC-MAP-WORKFLOW-382 单侧栏材料工作区
+
+本次用户直接确认主题概览/用户生命旅程左置、主区材料优先，替代 V4.1 对应布局。沿用本页运行时 Token、控件和原文阅读器；232px 单侧栏组织树/阶段/工具，主区共用检索、条件筹码、内容列表与当前方法研究状态，旧图表和概览保留。原文阅读器为侧向大面板；760px 以下折叠导航，搜索与内容自然换行，不改全站 shell/token。空态给出清词、全部阶段、待分析与全部材料路径。变更范围、实测和待验收层见[工作区计划](../../plans/active/topic-map-workflow-382.md)。
 
 ## 2026-10-11 · TOPIC-MAP-CORE-001 候选质量与研究口径
 

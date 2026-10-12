@@ -320,8 +320,8 @@ fn legacy_save(manual: (Uuid, Uuid), source: (Uuid, Uuid)) -> TopicMapCommand {
     TopicMapCommand::SaveAlternative {
         idempotency_key: format!("legacy-proof:save:{}", source.1),
         domain_ref: D,
-        topic_ref: manual.0,
-        definition_ref: manual.1,
+        topic_ref: Some(manual.0),
+        definition_ref: Some(manual.1),
         title: "保存合成旧版角度".into(),
         angle: "沿用旧版精确引用的合成练习角度".into(),
         rationale: "SYNTHETIC 旧版兼容资格测试".into(),

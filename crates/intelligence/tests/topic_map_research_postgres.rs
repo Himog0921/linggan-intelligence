@@ -505,8 +505,8 @@ fn comparison_save_command(
             }
             .into(),
             domain_ref: D,
-            topic_ref: proof.topic,
-            definition_ref: proof.definition,
+            topic_ref: Some(proof.topic),
+            definition_ref: Some(proof.definition),
             title: if product {
                 "修改后的合成产品研究说明"
             } else {

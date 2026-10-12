@@ -79,3 +79,11 @@
 - 不入Git，不含凭据或数据库dump；真实GET截图为UI运行证明，不是模型语义或写动作验收。测试源为人工维护代码，非生成运行资料。
 - 再生：离线脚本 + 只读候选HTTP浏览器 + 合并后的canonical installer与实际PID/cwd/health/浏览器核验。临时代理拒绝全部非GET且不启动worker。
 - 清理：测试结束关闭本任务浏览器/代理，发布后移除干净且已远端持久化的proof worktree；不清共享runtime、其它任务容器/依赖。责任Issue #367 / root当前授权发布。
+
+
+## TOPIC-MAP-WORKFLOW-382 验证与预览
+
+- 来源：专属分支前端、现有本机 GET 读模型、JS/Rust 回归与一次性 PostgreSQL 测试。
+- 位置：`/tmp/topic-map-workflow-*` 临时脚本/日志、`/tmp/linggan-topic-map-workflow-target` 构建缓存；截图在当前任务 Codex visualizations 的 `topic-map-workflow/`，不入 Git。真实材料只读截图与合成保存证明分别标明。
+- 3112 为只读预览，使用候选 JS/CSS 与现有 token/shell；拒绝全部 POST，不代理外网，不保存真实 API 响应或凭据。预览不是候选 Rust API 部署或正式库保存证明。
+- 隔离 PG 使用既有 test-topic-map-postgres.sh 随机容器和卷，退出时删除核验。3112 仅保留到 Mog 页面审阅，后续关闭该任务的 Python 进程；不触碰共享 3000 服务。
