@@ -215,6 +215,7 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     include_str!("../../../../database/migrations/0119_topic_map_collection_search.sql"),
     include_str!("../../../../database/migrations/0120_topic_map_core.sql"),
     include_str!("../../../../database/migrations/0121_topic_map_manual_alternative.sql"),
+    include_str!("../../../../database/migrations/0122_comment_like_library.sql"),
     "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES\n",
     "('0001_scope_001_capture_evidence', 'a0deb8d5bf6cbd3bc0b8343691167fe02170abe7469f7ba270017dada442cd98'),\n",
@@ -289,5 +290,6 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "('0118_topic_map_structure', 'cb769810af69e7d6b70b79579379514bc371e64400e2b2fbe75cf3f6bb98e0b1'),\n",
     "('0119_topic_map_collection_search', 'f205b6a644cdf46296aadb4d73a68b639d34ee00e4764fbefc765ef2e7c57e74'),\n",
     "('0120_topic_map_core', '2675fc250e5b496b48ba89360e542dc0946021faefd059d2ff21da9d9a722fdf'),\n",
-    "('0121_topic_map_manual_alternative', 'a3d2141098cdf3fbab9cd67e405e8ad27c99c5eb071564814e4012f5f06b5102');\n",
+    "('0121_topic_map_manual_alternative', 'a3d2141098cdf3fbab9cd67e405e8ad27c99c5eb071564814e4012f5f06b5102'),\n",
+    "('0122_comment_like_library', 'd67ec43bade58bde639fc3f0545ac53daa25268856fe3d27d0bc1d56364b5eae');\n",
 );

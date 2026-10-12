@@ -1,7 +1,7 @@
 # 评论研究产品化：接口、事务与执行合同
 
 > 状态: 权威当前
-> 最后核对: 2026-10-02
+> 最后核对: 2026-10-12
 > 适用范围: COMMENT-STUDY-PRODUCTIZATION-001 HTTP、事务、预算与执行合同
 > 事实来源: GREENFIELD v1.0 手册与其 HTTP/执行规格
 > 冲突时以谁为准: 用户最新授权、AGENTS.md、当前 API 源码和真实回执
@@ -50,10 +50,10 @@ costSummary 恰含 recordingState(`full/legacy_partial/unavailable`)、tokenLimi
 
 | 方法／路径 | 请求 | 响应职责 |
 |---|---|---|
-| GET `/comments` | domain、q、workRef、voiceRole、studyState、signalKind、cursor、limit | 有效文本原声目录，不依赖 runRef；每行 `signalKinds` 来自当前有效 Signal |
+| GET `/comments` | domain、q、workRef、voiceRole、studyState、signalKind、sort、minLikes、postUsage、cursor、limit | 有效文本原声目录，不依赖 runRef；每行 `signalKinds` 来自当前有效 Signal；`sort`/`minLikes`/`postUsage` 见下方高赞原话库补充 |
 | GET `/comments/detail` | domain、workRef、commentExternalId | 当前原声＋历史版本＋作品与父评论＋研究历史入口 |
 | GET `/works` | domain、q、studyState、cursor、limit | 可浏览全部作品与研究覆盖；不截断前 100 |
-| GET `/catalog-summary` | 同目录筛选，但无 cursor/limit | 当前原声、可研究、身份未知、作者声音、无效、待清洗数量及 asOf |
+| GET `/catalog-summary` | 同目录筛选（含 minLikes、postUsage；不含 sort），但无 cursor/limit | 当前原声、可研究、身份未知、作者声音、无效、待清洗数量及 asOf |
 | POST `/selection-preview` | 与启动命令相同的 domainRef/policyRef/scope/mode/limits，不含 requestRef | 不持久化样本、不占位、不外发；返回可预估的选择数量和限制 |
 
 q 是 1–200 字的**字面子串**，Unicode 正常文本可查；空字符串等于不筛选。对 `\`、`%`、`_` 做 LIKE 转义，使用显式 ESCAPE。不能把 `simple` FTS 当成中文分词，也不以点赞提高词义相关性。1–2 个中文字允许搜索；若触发执行时间上限返回明确查询错误，不返回假空结果。
@@ -315,3 +315,19 @@ no_work/index_pending 是明确开始回执 outcome，不伪装为网络错误�
 ## 评论目录统计读取补充（COMMENT-STUDY-READ-PERFORMANCE-358）
 
 `GET /api/local/comment-study/comments` 在既有 `items`、`page`、`indexCoverage` 外附加 `summary`，字段与同筛选的 `catalog-summary.summary` 相同，计数覆盖该筛选的完整目录而非当前页。其 `asOf` 为 `page.asOf`，翻页延续该快照；来源限制仍在每次读取动态检查。页面直接消费同一次目录查询的统计，不另外重复发起统计请求。独立 `catalog-summary` API 保留，用于单独统计当前目录。此变更不启动清洗缓存、Run、模型或改变研究权限。
+
+## 高赞原话库补充（COMMENT-LIKE-LIBRARY-001 / Issue #397）
+
+本节在不改变既有字段含义的前提下，填充 CommentItem 早已定义的可空 `likeCount`／`likeCountAsOf`，并增加目录排序、筛选与一条人工标记命令。依据：[DEC-0009](../decisions/0009-stage-one-job-topic-pool.md)。
+
+**评论点赞观测**：每条已接纳的评论观测在 append-only 表 `linggan_material_comment_engagement` 中记录一次点赞，规则 `comment-like.v1`（迁移 0122 回填与入库代码同一口径）：`likeText` 为「赞」记为已知 0；数值 `likes` 为正整数记为该值；其余（插件缺省的 `"0"`、空、缺失、非整数）为未知，不写 0。`likeCount` 取该评论在 asOf 之前**最近一次已知**的观测，`likeCountAsOf` 为该次观测时间；没有已知观测时二者皆为 NULL。仍不得从作品点赞推评论点赞。
+
+**目录参数**：
+- `sort` 闭集 `received_desc`（默认，原顺序）/`like_desc`。`like_desc` 按 `likeCount` 降序，未知排最后，再按原收到时间/作品/评论键稳定排序；游标位置携带 `likeCount`。
+- `minLikes` 可空，1–1,000,000,000 的整数；只保留已知点赞不少于该值的评论（未知不进入）。
+- `postUsage` 闭集 `all`（默认）/`used`/`unused`，按改帖标记当前状态筛选。
+- 三者均先于分页生效，`catalog-summary` 用同一口径统计；非默认取值进入游标 scopeHash，默认取值保持既有 scopeHash 不变，旧游标继续有效。
+
+**CommentItem 新增** `postUsage:{state:'used'|'unused', markedAt:string|null}`：最后一条标记事件为 marked 时为 used，markedAt 为该事件时间。
+
+**改帖标记命令** POST `/comments/post-usage`，经与其他命令相同的本机 Host/Origin 守卫；body 恰为 `{domainRef, workRef, commentExternalId, action:'mark'|'unmark', requestRef}`。评论须在该 Domain 可见，否则 404 `resource_not_found`。只有状态变化写入 append-only 表 `linggan_comment_post_usage_event`；回执 `{contract:'comment-post-usage.v1', requestRef, outcome:'applied'|'unchanged'|'replayed', commentKey, postUsage}`。同 requestRef 同意图回放原结果（replayed），同 requestRef 不同意图 409 `idempotency_conflict`；参数不符 400 `invalid_request`；缺 schema 503 `study_schema_unavailable`。标记是人对材料使用的记录，不是研究结果，也不证明内容已发布；页面只按回执更新状态。

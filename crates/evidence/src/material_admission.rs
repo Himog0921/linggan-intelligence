@@ -622,12 +622,18 @@ async fn insert_comment_records(
             (comment_id, None, None)
         };
         let body = exact_string(payload, "text");
+        let material_ref = Uuid::new_v4();
         sqlx::query("INSERT INTO linggan_material_comment (material_ref,content_public_ref,package_ref,record_ordinal,comment_external_id,root_comment_external_id,parent_comment_external_id,parent_identity_source_field,is_reply,body_text,body_state,author_external_id,author_display_name,observed_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)")
-            .bind(Uuid::new_v4()).bind(content_public_ref).bind(package.package_ref())
+            .bind(material_ref).bind(content_public_ref).bind(package.package_ref())
             .bind(i32::try_from(ordinal).expect("package record count is bounded"))
             .bind(comment_id).bind(root_id).bind(parent_id).bind(parent_source).bind(replies)
             .bind(body).bind(known_state(body)).bind(exact_string(payload, "authorId"))
             .bind(exact_string(payload, "authorName")).bind(package.observed_at())
+            .execute(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;
+        let like_count = comment_like_count(payload);
+        sqlx::query("INSERT INTO linggan_material_comment_engagement (material_ref,like_count,like_count_state,like_source_text,parser_version) VALUES ($1,$2,$3,$4,'comment-like.v1')")
+            .bind(material_ref).bind(like_count).bind(known_state(like_count))
+            .bind(exact_string(payload, "likeText").map(|text| text.chars().take(32).collect::<String>()))
             .execute(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;
         retained += 1;
     }
@@ -974,6 +980,21 @@ pub(crate) fn exact_nonnegative_count(
     })
 }
 
+/// 一条评论在这次观测里的点赞数（规则 `comment-like.v1`，与迁移 0122 的回填 SQL 同一口径）。
+///
+/// 平台把零赞渲染成「赞」；插件找不到点赞元素时会把 `likeText` 缺省成 `"0"`、`likes` 记 0。
+/// 所以「0」本身不可信：只有「赞」证明是零，只有正数 `likes` 证明是那个数，其余一律未知，
+/// 不写成 0。
+pub(crate) fn comment_like_count(payload: &serde_json::Map<String, Value>) -> Option<i64> {
+    if exact_string(payload, "likeText") == Some("赞") {
+        return Some(0);
+    }
+    payload
+        .get("likes")
+        .and_then(Value::as_i64)
+        .filter(|value| (1..=999_999_999_999_999).contains(value))
+}
+
 /// 把平台卡片上的计数文本解析成整数。
 ///
 /// 只认已经在真实回传里见过的写法：纯数字与「万」。`亿` 是同一套中文计数写法里
@@ -1160,5 +1181,31 @@ mod platform_count_tests {
             ),
             Some(29_000)
         );
+    }
+
+    /// 「0」不能证明零赞：插件找不到点赞元素时也会写 `likeText:"0", likes:0`。只有「赞」
+    /// 与正数才是已知值，其余保持未知——把缺省值写成 0 会让高赞排序把「没看到」当成「没人赞」。
+    #[test]
+    fn comment_like_count_only_trusts_zan_and_positive_counts() {
+        let cases = [
+            (json!({"likeText": "赞", "likes": 0}), Some(0)),
+            (json!({"likeText": " 赞 ", "likes": 0}), Some(0)),
+            (json!({"likeText": "3", "likes": 3}), Some(3)),
+            (json!({"likeText": "3.5万", "likes": 35_000}), Some(35_000)),
+            (json!({"likes": 74}), Some(74)),
+            (json!({"likeText": "0", "likes": 0}), None),
+            (json!({"likeText": "", "likes": 0}), None),
+            (json!({"likes": 12.5}), None),
+            (json!({"likes": -3}), None),
+            (json!({"likes": "12"}), None),
+            (json!({}), None),
+        ];
+        for (payload, expected) in cases {
+            assert_eq!(
+                comment_like_count(payload.as_object().expect("object")),
+                expected,
+                "{payload}"
+            );
+        }
     }
 }

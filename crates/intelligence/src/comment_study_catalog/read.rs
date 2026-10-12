@@ -36,6 +36,28 @@ pub enum CatalogStudyState {
     InputChanged,
 }
 
+/// Directory order. `LikeDesc` sorts by the comment's own latest known like count, unknown last.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CatalogSort {
+    #[default]
+    ReceivedDesc,
+    LikeDesc,
+}
+
+/// The team's "post written from this comment" mark, read as the latest event.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CatalogPostUsage {
+    #[default]
+    All,
+    Used,
+    Unused,
+}
+
+/// A minimum below 1 would silently keep unknown counts out without meaning anything.
+const MAX_MIN_LIKES: i64 = 1_000_000_000;
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CommentCatalogQuery {
@@ -47,6 +69,11 @@ pub struct CommentCatalogQuery {
     #[serde(default)]
     pub study_state: CatalogStudyState,
     pub signal_kind: Option<String>,
+    #[serde(default)]
+    pub sort: CatalogSort,
+    pub min_likes: Option<i64>,
+    #[serde(default)]
+    pub post_usage: CatalogPostUsage,
     pub cursor: Option<String>,
     pub limit: Option<i64>,
 }
@@ -62,6 +89,9 @@ pub struct CatalogSummaryQuery {
     #[serde(default)]
     pub study_state: CatalogStudyState,
     pub signal_kind: Option<String>,
+    pub min_likes: Option<i64>,
+    #[serde(default)]
+    pub post_usage: CatalogPostUsage,
 }
 
 struct Scope {
@@ -70,7 +100,29 @@ struct Scope {
     voice: String,
     study: String,
     signal_kind: Option<String>,
+    sort: &'static str,
+    min_likes: Option<i64>,
+    post_usage: &'static str,
     limit: i64,
+}
+
+impl CatalogSort {
+    fn as_sql(self) -> &'static str {
+        match self {
+            Self::ReceivedDesc => "received_desc",
+            Self::LikeDesc => "like_desc",
+        }
+    }
+}
+
+impl CatalogPostUsage {
+    fn as_sql(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Used => "used",
+            Self::Unused => "unused",
+        }
+    }
 }
 
 impl CommentCatalogQuery {
@@ -98,6 +150,9 @@ impl CommentCatalogQuery {
                         | "question"
                 )
             })
+            || self
+                .min_likes
+                .is_some_and(|value| !(1..=MAX_MIN_LIKES).contains(&value))
         {
             return Err(StudyCatalogError::InvalidQuery);
         }
@@ -111,12 +166,24 @@ impl CommentCatalogQuery {
             serde_json::to_value(self.voice_role).map_err(|_| StudyCatalogError::InvalidQuery)?;
         let study =
             serde_json::to_value(self.study_state).map_err(|_| StudyCatalogError::InvalidQuery)?;
-        let hash = cursor::scope_hash(&json!({
+        let mut scope = json!({
             "domain": self.domain, "q": query, "workRef": self.work_ref,
             "voiceRole": voice, "studyState": study, "cleanerVersion": CLEANER_VERSION,
             "signalKind": self.signal_kind,
             "sort": "received_desc_work_asc_comment_C_asc.v1"
-        }))?;
+        });
+        // Defaults leave the scope exactly as before, so cursors issued earlier stay valid; any
+        // other order or filter yields a different scope and cannot reuse those cursors.
+        if self.sort == CatalogSort::LikeDesc {
+            scope["sort"] = json!("like_desc_nulls_last_received_desc_work_asc_comment_C_asc.v1");
+        }
+        if let Some(min_likes) = self.min_likes {
+            scope["minLikes"] = json!(min_likes);
+        }
+        if self.post_usage != CatalogPostUsage::All {
+            scope["postUsage"] = json!(self.post_usage.as_sql());
+        }
+        let hash = cursor::scope_hash(&scope)?;
         Ok(Scope {
             pattern: literal_substring_pattern(query)?,
             hash,
@@ -129,6 +196,9 @@ impl CommentCatalogQuery {
                 .ok_or(StudyCatalogError::InvalidQuery)?
                 .to_owned(),
             signal_kind: self.signal_kind.clone(),
+            sort: self.sort.as_sql(),
+            min_likes: self.min_likes,
+            post_usage: self.post_usage.as_sql(),
             limit,
         })
     }
@@ -154,6 +224,9 @@ pub async fn read_catalog_summary(
         voice_role: query.voice_role,
         study_state: query.study_state,
         signal_kind: query.signal_kind.clone(),
+        sort: CatalogSort::default(),
+        min_likes: query.min_likes,
+        post_usage: query.post_usage,
         cursor: None,
         limit: Some(50),
     };
@@ -201,6 +274,10 @@ async fn read_catalog(
         .bind(last.map(|value| value.comment_external_id.as_str()))
         .bind(if summary_only { 0 } else { scope.limit + 1 })
         .bind(scope.signal_kind.as_deref())
+        .bind(scope.sort)
+        .bind(scope.min_likes)
+        .bind(scope.post_usage)
+        .bind(last.and_then(|value| value.like_count))
         .fetch_one(&mut *tx)
         .await?;
     if !summary_only {
@@ -279,6 +356,10 @@ pub(super) async fn read_one_projection(
         .bind(Option::<&str>::None)
         .bind(1_i64)
         .bind(Option::<&str>::None)
+        .bind(CatalogSort::default().as_sql())
+        .bind(Option::<i64>::None)
+        .bind(CatalogPostUsage::default().as_sql())
+        .bind(Option::<i64>::None)
         .fetch_one(&mut **tx)
         .await?;
     if projection.get("currentSource").is_none_or(Value::is_null) {
@@ -427,5 +508,69 @@ mod tests {
             query.validate(),
             Err(StudyCatalogError::InvalidQuery)
         ));
+    }
+
+    /// Cursors handed out before the like library existed must keep decoding: the default scope
+    /// has to hash exactly as it did, while every non-default order or filter gets its own scope.
+    #[test]
+    fn like_order_and_filters_get_their_own_scope_while_defaults_keep_old_cursors() {
+        let mut query = query();
+        let legacy = cursor::scope_hash(&json!({
+            "domain": query.domain, "q": "", "workRef": null,
+            "voiceRole": "reader_and_unknown", "studyState": "all",
+            "cleanerVersion": CLEANER_VERSION, "signalKind": null,
+            "sort": "received_desc_work_asc_comment_C_asc.v1"
+        }))
+        .unwrap();
+        let default_scope = query.validate().unwrap();
+        assert_eq!(default_scope.hash, legacy);
+        assert_eq!(default_scope.sort, "received_desc");
+        assert_eq!(default_scope.post_usage, "all");
+
+        let mut seen = std::collections::BTreeSet::from([legacy]);
+        query.sort = CatalogSort::LikeDesc;
+        assert!(seen.insert(query.validate().unwrap().hash));
+        query.min_likes = Some(100);
+        assert!(seen.insert(query.validate().unwrap().hash));
+        query.post_usage = CatalogPostUsage::Unused;
+        assert!(seen.insert(query.validate().unwrap().hash));
+        query.post_usage = CatalogPostUsage::Used;
+        assert!(seen.insert(query.validate().unwrap().hash));
+    }
+
+    #[test]
+    fn like_query_parameters_are_closed_and_bounded() {
+        let parsed: CommentCatalogQuery = serde_json::from_value(json!({
+            "domain": crate::comment_study_source::ADHD_DOMAIN_REF,
+            "sort": "like_desc", "minLikes": 100, "postUsage": "unused"
+        }))
+        .unwrap();
+        let scope = parsed.validate().unwrap();
+        assert_eq!(
+            (scope.sort, scope.min_likes, scope.post_usage),
+            ("like_desc", Some(100), "unused")
+        );
+        for bad in [
+            json!({"sort": "likes"}),
+            json!({"postUsage": "draft"}),
+            json!({"minLikes": "many"}),
+        ] {
+            let mut value = json!({"domain": crate::comment_study_source::ADHD_DOMAIN_REF});
+            value
+                .as_object_mut()
+                .unwrap()
+                .extend(bad.as_object().unwrap().clone());
+            assert!(serde_json::from_value::<CommentCatalogQuery>(value).is_err());
+        }
+        let mut query = query();
+        for min_likes in [0, -1, MAX_MIN_LIKES + 1] {
+            query.min_likes = Some(min_likes);
+            assert!(matches!(
+                query.validate(),
+                Err(StudyCatalogError::InvalidQuery)
+            ));
+        }
+        query.min_likes = Some(MAX_MIN_LIKES);
+        assert!(query.validate().is_ok());
     }
 }

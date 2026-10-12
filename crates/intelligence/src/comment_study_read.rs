@@ -255,6 +255,8 @@ pub async fn read_overview(
                 voice_role: CatalogVoiceRole::ReaderAndUnknown,
                 study_state: CatalogStudyState::All,
                 signal_kind: None,
+                min_likes: None,
+                post_usage: Default::default(),
             },
         )
         .await
@@ -2053,6 +2055,7 @@ pub async fn read_problem_evidence(
                         received_at: row.get("added_at"),
                         work_ref: row.get("content_public_ref"),
                         comment_external_id: row.get("comment_external_id"),
+                        like_count: None,
                     },
                 )
                 .map_err(map_cursor_error)
