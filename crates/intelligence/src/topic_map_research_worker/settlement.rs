@@ -75,6 +75,20 @@ pub(super) async fn settle(db: &Database, mut c: Completion<'_>) -> Result<(), M
     }
     if let Some(review) = &c.prepared.review {
         invocation_result["semanticReview"] = json!({"contract":analysis::verification::VERIFY_CONTRACT,"sourceInvocationRef":review.source_invocation_ref,"proposalHash":review.fingerprint()?,"passed":accepted.reason.is_none()});
+        if accepted.state == "queued"
+            && accepted.reason == c.rejection
+            && c.rejection
+                .zip(c.rejection_diagnostic.as_ref())
+                .is_some_and(|(code, diagnostic)| {
+                    super::feedback::safe_review_feedback(code, diagnostic).is_some()
+                })
+            && super::feedback::review_response_eligible(
+                c.response,
+                &c.prepared.review_packet["checks"],
+            )
+        {
+            invocation_result["reviewCorrectionEligible"] = json!(true);
+        }
     }
     // Attach only the validator that actually rejected this acceptance. A source
     // change or late result must never inherit an unrelated model diagnosis.
@@ -172,6 +186,34 @@ async fn accept_phase(
             .is_some_and(|(code, diagnostic)| {
                 super::feedback::safe_feedback(code, diagnostic).is_some()
             })
+    {
+        let limits = sqlx::query("SELECT t.phase_attempt_count,t.recall_manifest,config.max_attempts FROM linggan_topic_map_research_task t JOIN linggan_topic_map_research_run r USING(run_ref) JOIN linggan_model_config config ON config.config_ref=r.config_ref WHERE task_ref=$1")
+            .bind(c.task).fetch_one(&mut **tx).await?;
+        if limits
+            .get::<Value, _>("recall_manifest")
+            .get("backfill")
+            .is_none()
+            && super::feedback::correction_allowed(
+                limits.get("phase_attempt_count"),
+                limits.get("max_attempts"),
+            )
+        {
+            accepted.state = "queued";
+        }
+    }
+    if accepted.state == "failed"
+        && c.prepared.review.is_some()
+        && c.source_current
+        && c.candidate_sources_current
+        && c.rejection
+            .zip(c.rejection_diagnostic.as_ref())
+            .is_some_and(|(code, diagnostic)| {
+                super::feedback::safe_review_feedback(code, diagnostic).is_some()
+            })
+        && super::feedback::review_response_eligible(
+            c.response,
+            &c.prepared.review_packet["checks"],
+        )
     {
         let limits = sqlx::query("SELECT t.phase_attempt_count,t.recall_manifest,config.max_attempts FROM linggan_topic_map_research_task t JOIN linggan_topic_map_research_run r USING(run_ref) JOIN linggan_model_config config ON config.config_ref=r.config_ref WHERE task_ref=$1")
             .bind(c.task).fetch_one(&mut **tx).await?;

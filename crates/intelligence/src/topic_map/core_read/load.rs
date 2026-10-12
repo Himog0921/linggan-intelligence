@@ -24,7 +24,7 @@ const PARTIALS: &str = r#"
     FROM linggan_topic_map_research_task t
     JOIN linggan_topic_map_research_run run USING(run_ref)
     WHERE ($1::uuid IS NULL OR t.domain_ref=$1) AND t.phase='resolve'
-        AND run.method_version IN ('topic-map.research.v2','topic-map.research.v3','topic-map.research.v4','topic-map.research.v5')
+        AND run.method_version IN ('topic-map.research.v2','topic-map.research.v3','topic-map.research.v4','topic-map.research.v5','topic-map.research.v6')
         AND jsonb_typeof(t.resolutions_json)='array' AND jsonb_array_length(t.resolutions_json)>0
         AND COALESCE(t.input_refs#>>'{source,coverage,kind}',t.input_refs#>>'{coverage,kind}','source')<>'comparison'
         AND NOT EXISTS(SELECT 1 FROM linggan_topic_map_research_request request
@@ -70,7 +70,7 @@ pub(super) async fn load_windows(
             .await
             .map_err(|e| TopicMapError::Source(e.to_string()))?;
     let mut windows = HashMap::<Uuid, Vec<Window>>::new();
-    let mut window_counts = HashMap::<(Uuid, Uuid, Uuid), usize>::new();
+    let mut window_counts = HashMap::<(Uuid, Uuid, Uuid, usize), usize>::new();
     let allowed: Vec<_> = topics.iter().map(|t| t.topic_ref).collect();
     for row in rows {
         let work: Uuid = row.get("work_public_ref");
@@ -121,7 +121,7 @@ fn restore_row(
     all: &[ResearchInput],
     allowed: &[Uuid],
     unavailable: &HashSet<Uuid>,
-    window_counts: &mut HashMap<(Uuid, Uuid, Uuid), usize>,
+    window_counts: &mut HashMap<(Uuid, Uuid, Uuid, usize), usize>,
 ) -> Option<Window> {
     let work: Uuid = row.get("work_public_ref");
     let source = all.iter().find(|i| i.work.work_ref == work)?;
@@ -143,10 +143,22 @@ fn restore_row(
     if manifest["coverage"]["kind"] != "comparison" {
         // Current qualified inventory is the denominator, including newly added sources.
         current.coverage["sourceChars"] = source.coverage["sourceChars"].clone();
+        // Reuse this qualified window's frozen partition, including historical sizes.
+        // The absence of maxChars belongs to the legacy 3000-character contract.
+        let max_chars = manifest["coverage"]["maxChars"]
+            .as_u64()
+            .and_then(|size| usize::try_from(size).ok())
+            .filter(|size| *size > 0)
+            .unwrap_or(3000);
         current.coverage["windowCount"] = json!(
             *window_counts
-                .entry((row.get("domain_ref"), row.get("config_ref"), work))
-                .or_insert_with(|| topic_map_research::research_windows(source, 3000).len())
+                .entry((
+                    row.get("domain_ref"),
+                    row.get("config_ref"),
+                    work,
+                    max_chars
+                ))
+                .or_insert_with(|| topic_map_research::research_windows(source, max_chars).len())
         );
     }
     let typed: ResearchOutput = serde_json::from_value(output.clone()).ok()?;

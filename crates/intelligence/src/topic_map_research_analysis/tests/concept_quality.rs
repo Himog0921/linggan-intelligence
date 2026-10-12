@@ -173,7 +173,7 @@ fn work_context_is_not_an_independent_author_or_response_witness() {
     }];
     assert_eq!(
         validate_output(&output, &fragments, &[]),
-        Err("invalid_response_evidence")
+        Err("response_author_evidence_missing")
     );
 }
 

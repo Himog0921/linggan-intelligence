@@ -35,6 +35,21 @@ fn bounded(checks: &[Value]) -> Result<(), &'static str> {
     }
 }
 
+// Whole-window text is only needed to assess an absence/insufficiency verdict.
+// Never expose it beside factual claims, where it could fill a missing citation.
+fn outcome_needs_context(output: &ResearchOutput) -> bool {
+    output.outcome != "analyzed"
+        && output.discussions.is_empty()
+        && output.scenes.is_empty()
+        && output.response_matches.is_empty()
+        && output.angles.is_empty()
+        && output.product_opportunities.is_empty()
+        && output.journey.main_stage == "unclear"
+        && output.journey.path == "unknown"
+        && output.journey.involved_stages.is_empty()
+        && output.journey.overlays.is_empty()
+}
+
 pub fn extraction_review(
     output: &ResearchOutput,
     fragments: &[Fragment],
@@ -100,7 +115,7 @@ pub fn extraction_review(
         "evidence":evidence.entries,"proposal":{"outcome":output.outcome,"discussions":discussions,
             "scenes":scenes,"journey":journey,"responseMatches":responses,"angles":angles,
             "productOpportunities":opportunities,"limitations":output.limitations},
-        "outcomeContext":if output.outcome!="analyzed" || output.discussions.is_empty() {
+        "outcomeContext":if outcome_needs_context(output) {
             outcome_context(fragments)
         } else {json!([])}}),
     )

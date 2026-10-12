@@ -1,5 +1,8 @@
 //! One bounded corrective attempt carries rules, never a previous model response.
 use super::*;
+#[path = "feedback/review.rs"]
+mod review;
+pub(super) use review::{previous_review_feedback, review_response_eligible, safe_review_feedback};
 
 pub(super) fn safe_feedback(code: &str, diagnostic: &Value) -> Option<Value> {
     let (rule, path, instruction) = match code {

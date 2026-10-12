@@ -8,7 +8,7 @@ if (envelope.contract === 'topic-map.verify.v1') {
   const checks = input.checks;
   if (!Array.isArray(checks) || checks.length === 0) throw new Error('missing semantic checks');
   const mode = request.modelId.replace(/^synthetic-review-/, '');
-  if (mode === 'unknown') {
+  if (mode === 'unknown' || (mode === 'schema-unknown' && envelope.validationFeedback)) {
     process.stdout.write(JSON.stringify({
       version: request.version, ok: false, text: null, failureCode: 'provider_transport', modelIds: null, modelListOrigin: null,
       usage: { inputTokens: null, outputTokens: null, costUsd: null }, elapsedMs: 1,
@@ -30,6 +30,24 @@ if (envelope.contract === 'topic-map.verify.v1') {
   if (mode === 'missing') output.checks.pop();
   if (mode === 'duplicate') output.checks[output.checks.length - 1] = {...output.checks[0]};
   if (mode === 'foreign') output.checks[0].checkId = 'foreign0';
+  if (mode === 'schema' || mode.startsWith('schema-')) {
+    const feedback = envelope.validationFeedback;
+    if (feedback) {
+      if (request.prompt.includes('PRIVATE_REVIEW_KEY') || request.prompt.includes('PRIVATE_REVIEW_VALUE')) throw new Error('old malformed review leaked');
+      if (feedback.contract !== 'topic-map.verify.v1' || feedback.rule !== 'unknown_property'
+        || !feedback.sourceInvocationRef || !feedback.failedReviewInvocationRef || !feedback.proposalHash) throw new Error('unbound review feedback');
+    }
+    if (!feedback || mode === 'schema-persistent') {
+      output.checks[0].PRIVATE_REVIEW_KEY = 'PRIVATE_REVIEW_VALUE';
+      if (mode === 'schema-foreign') output.checks[0].checkId = 'foreign0';
+      if (mode === 'schema-duplicate') output.checks[output.checks.length - 1].checkId = output.checks[0].checkId;
+      if (mode === 'schema-missing') output.checks.pop();
+      if (mode === 'schema-fail') output.checks[0].verdict = 'fail';
+      if (mode === 'schema-uncertain') output.checks[0].verdict = 'uncertain';
+      if (mode === 'schema-reason') output.checks[0].reason = null;
+      if (mode === 'schema-long-reason') output.checks[0].reason = '字'.repeat(61);
+    }
+  }
   process.stdout.write(JSON.stringify({
     version: request.version, ok: true, text: JSON.stringify(output), failureCode: null, modelIds: null, modelListOrigin: null,
     usage: { inputTokens: 199, outputTokens: 50, costUsd: null }, elapsedMs: 1,

@@ -130,7 +130,7 @@ fn comment_only_comparison_keeps_work_context_without_manufacturing_author_evide
                 &comparison.fragments,
                 &[]
             ),
-            Err("invalid_response_evidence")
+            Err("response_author_evidence_missing")
         );
     }
     let mut changed = inputs.clone();

@@ -267,3 +267,23 @@ Mog 已认可完整主张引用、纳排边界、不同障碍及父子真包含�
 最终新树原生回执：`topic-map-v41-semantic-postgres-final2.log` 完整87项通过/0失败，退出0，独占容器与卷清理已核验；旧不可用定义/撤回来源目录反例及新9项语义复核均实际通过。前序失败日志保留。145 Rust、22组JS、41 Pi、API/core编译、治理与diff通过；这些为合成/代码层证据，本轮真实来源仍未模型试跑，研究暂停。独立最终复审与exact-head提交/发布另行绑定。
 
 提交前独立 `reliability_commit_review` PASS：实际汇总最终87原生/0失败及清理回执，独立复跑145 Rust、22 UI、18实际SDK structured-output及diff检查；冻结38个非文档文件SHA256 `845fc72e7df205a2c876655da48f06293ff554b33e798fcc6e5ba218498e1710`。其P1目录混用循环提案、P2目录变化停止及新合同byte gate遗漏均已修，无待修发现。Sonnet定义不可用，继承当前模型完成只读审核；此PASS不代替部署或真实语义验收。
+
+### 2026-10-12 真实复核校准（同一 Issue #382）
+
+Mog已批准PR394/f3ccf34a，CI38218668561成功，合并050ff3dd；canonical runtime三进程36247/36253/36260的cwd/txt已核实，3000已刷新，schema0120无需迁移。本机launchd首次bootstrap失败按既有流程恢复，未把构建当部署。三作品五窗口真实小批已运行：5调用23754token，0接纳，3失败/2未尝试，研究再次暂停、自动扩批补采false、预留0；这些不计有效进展。实际拒绝包括复核checks额外字段、回应证据笼统拒绝、同一方法观察/未来计划被判非原子；另逐条原文复核发现陪读时长未进入该项引用，独立复核没有指出该漏引。真实同义/障碍/父包含仍未通过，不公布真实原文或model output到Git。
+
+继续原已授权集中修复，不新增Issue。Claim topic-map-semantic-calibration-382；base050ff3dd；branch/worktree codex/topic-map-semantic-calibration-382。研究保持暂停，模型/16000/2000/每日每轮300万不变。设计：复核事实包只给精确引文，附近文不进入支持判断，防止context补主张；明确一个方法的观察与计划可同一讨论并保留不同事实状态，不按句子或时间语态机械拆分；严格检查输出禁复制输入rule/subject。只对明确复核输出形态错误，在现有maxAttempts内允许一次重新生成，原提案与费用不改、事实/语义fail与unknown不获重试。回应拒绝细化到具体角色/引用/枚举规则并保持双角色守门。
+
+沿既有并行许可，语义协作者独占verification.rs/evidence.rs/packet.rs及verification/tests.rs、新手写verification/tests/calibration.rs；原文协作者独占analysis.rs中prompt/response规则及analysis/tests，并在同一模块生命周期新增手写analysis/validation.rs、analysis/tests/output_validation.rs，将原citation/discussion/journey校验逐值保持地拆出以遵守500行边界；诊断协作者独占worker semantic.rs/feedback.rs/settlement.rs、同生命周期新增手写worker/feedback/review.rs及对应单元测试、tests/topic_map_semantic_review_postgres.rs、同生命周期新增手写tests/topic_map_semantic_review/review_feedback.rs及tests/support/topic_map_research_adapter.mjs合成fixture；根持有method/history集成、UI及验证整合、文档。提交前独立review。生成物沿登记/tmp/topic-map-v41-*，没有迁移、扩大授权或改写运行源码。前端保持原页头/布局，仅具体失败规则和待纠偏状态；验收包括无context补引用、同一方法不机械拆分、额外检查字段有界重生成、语义失败不能纠偏、引用角色具体规则、来源暂停预算unknown守门及最终小批原文业务案例。新head发布需具体授权。
+
+独立复审补充确认读侧仍按旧3000重算分母，使900窗口首半处理显示1/1（字符守门仍partial）。根在本包core_read/load.rs按已资格恢复的冻结coverage.maxChars重算当前合格来源并把缓存key加入该规格，旧无maxChars历史保持3000兼容，不按新900替换旧方法或质量。原生证明为同生命周期新增手写tests/topic_map_core_lifecycle/coverage_window.rs（根所有、父lifecycle原生目标注册），1800字符首窗1/2与完整2/2实际投影及旧失败/新方法进展分责。
+
+校准验证中间回执：最终静态提示SYSTEM预算估算1131（旧v5为1498、未压缩v6为1766），删除重复及Schema已列枚举，完整事实/角色/纳排约束保留；这只是估算，不等于实际provider账单。首轮完整隔离PG回执保留，比较在8192输入上限前拒绝、无调用无费用；混合错误夹具因schema名称含连字符被拒，未执行组合业务断言。已精简提示而不提高实际/测试配置，并仅将夹具schema名称转下划线、真实model模式与断言保持。首轮退出101、独占容器与卷清理已核验；修复后重新冻结整套执行，不拼接首轮通过总数冒充新树全绿。
+
+新增同包跨项引用映射反例明确：讨论自己的evidenceIds没有时长，journey另项有时长，两项映射分离，但同包全局表仍可见其他项引文。因此删除旁文关闭附近文本补事实通道，跨项借证仍须依精确evidenceIds约束并以真实输出核验，不能称全部物理隔离。机器pass不代表原文人工验收。私人原文对照回执保留在已登记/tmp/topic-map-v41-*本机文件，不入Git。
+
+根独占整合路径明确为core_read/load.rs、topic_map_research/restoration.rs、topic_map_core/comparison/tests/context.rs（仅原回应精确错误码断言同步）、apps/api/src/local_web/topic_map.js、scripts/test-topic-map-ui.cjs、topic_map_core_lifecycle_postgres.rs与其coverage_window.rs以及docs/current-state.md、本计划、docs/progress/2026-10.md。协作者冻结后，根仅在review_feedback.rs规范合成schema名称，全部mode与业务断言保持；该必要整合补丁由原独立审查复读。
+
+最终冻结树回执：topic-map-v41-semantic-calibration-postgres-final2.log 整套94通过/0失败、18条目标summary、退出0且独占容器/卷清理核验；新增6组严格复核反馈、实际旧8192比较及1800来源分窗投影全部通过，非拼接首轮回执。159主题Rust、22UI、41Pi、API/core编译、治理/diff通过。24个非文档文件SHA256为85057aff0b0ee49491cc0d8b1d9eff1d846c2f4d4b91ecbd15368e4e84fd02f0。独立最终复审结论与确切提交另行绑定；真实v6未部署/调用，小批专业主题业务案例未完成，研究保持暂停。
+
+独立reliability_commit_review最终PASS：独立159Rust/22UI/语法/diff，逐项核验final2的94原生及清理、root41SDK/API编译；冻结24非文档hash85057aff0b0ee49491cc0d8b1d9eff1d846c2f4d4b91ecbd15368e4e84fd02f0，根独立重算相同。P2分窗分母/理由60及静态输入容量问题均已修，无待修发现。复核含义、逐调用费用、拒绝/暂停边界为合成已证；v6真实语义及Mog业务验收仍未证。Sonnet定义不可用，继承当前模型只读审查，未修改或触模型/运行库。
