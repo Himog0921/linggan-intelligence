@@ -42,7 +42,7 @@ async fn source_task(
     source: Option<Uuid>,
     start: usize,
 ) -> Uuid {
-    sqlx::query_scalar("SELECT t.task_ref FROM linggan_topic_map_research_task t JOIN linggan_topic_map_research_run run USING(run_ref) WHERE t.work_public_ref=$1 AND run.config_ref=$2 AND EXISTS(SELECT 1 FROM jsonb_array_elements(t.input_refs->'fragments') f WHERE f->>'field'=$3 AND ($4::uuid IS NULL OR f->>'sourceRef'=$4::text) AND (f->>'start')::bigint>=$5) ORDER BY t.created_at,t.task_ref LIMIT 1")
+    sqlx::query_scalar("SELECT t.task_ref FROM linggan_topic_map_research_task t JOIN linggan_topic_map_research_run run USING(run_ref) WHERE t.work_public_ref=$1 AND run.config_ref=$2 AND EXISTS(SELECT 1 FROM jsonb_array_elements(t.input_refs->'fragments') f WHERE f->>'field'=$3 AND ($4::uuid IS NULL OR f->>'sourceRef'=$4::text) AND (f->>'start')::bigint<=$5 AND (f->>'end')::bigint>$5) ORDER BY t.created_at,t.task_ref LIMIT 1")
         .bind(work).bind(config).bind(field).bind(source).bind(start as i64).fetch_one(db.pool()).await.unwrap()
 }
 
@@ -124,20 +124,29 @@ async fn assert_tail_angle_citation(
         .as_array()
         .unwrap()
         .iter()
-        .find(|fragment| fragment["field"] == field && fragment["start"] == 12000)
+        .find(|fragment| {
+            fragment["field"] == field
+                && fragment["start"].as_u64().unwrap() <= 12000
+                && fragment["end"].as_u64().unwrap() > 12000
+        })
         .expect("requested tail fragment must be frozen in the accepted input");
     let end = source.chars().count();
     assert_eq!(tail["end"], json!(end));
     let citations = output["angles"][0]["evidence"].as_array().unwrap();
     assert_eq!(citations.len(), 1, "fixture must explicitly cite its tail");
     assert_eq!(citations[0]["fragmentId"], tail["fragmentId"]);
-    assert_eq!(citations[0]["start"], json!(12000));
+    let window_start = tail["start"].as_u64().unwrap() as usize;
+    assert_eq!(citations[0]["start"], json!(window_start));
     assert_eq!(citations[0]["end"], json!(end));
     let emoji_byte = source.find(emoji).expect("fixture tail contains its emoji");
     let emoji_start = source[..emoji_byte].chars().count();
     let emoji_end = emoji_start + emoji.chars().count();
-    assert!(12000 <= emoji_start && emoji_end <= end);
-    let quoted: String = source.chars().skip(12000).take(end - 12000).collect();
+    assert!(window_start <= emoji_start && emoji_end <= end);
+    let quoted: String = source
+        .chars()
+        .skip(window_start)
+        .take(end - window_start)
+        .collect();
     assert!(
         quoted.contains(emoji),
         "actual cited scalar range covers the emoji"
@@ -171,7 +180,7 @@ async fn unicode_tail_survives_save_and_same_text_refresh_across_model_configs()
     let tail = original
         .fragments
         .iter()
-        .find(|f| f.start >= 12000)
+        .find(|f| f.start <= 12000 && f.end > 12000)
         .unwrap();
     assert!(tail.text.contains("尾部👩‍👧"));
     assert!(tail.end > 10000 && !tail.cited_ranges.is_empty());
@@ -190,7 +199,7 @@ async fn unicode_tail_survives_save_and_same_text_refresh_across_model_configs()
         refreshed
             .fragments
             .iter()
-            .find(|f| f.start >= 12000)
+            .find(|f| f.start <= 12000 && f.end > 12000)
             .unwrap()
             .source_ref,
         source
@@ -289,8 +298,8 @@ async fn thirty_first_comment_and_real_creator_parent_reopen_then_restrict_toget
         .fetch_one(db.pool())
         .await
         .unwrap(),
-        6,
-        "36 primary comments pack into six groups, without independent creator-parent task"
+        12,
+        "36 primary comments pack into twelve groups, without independent creator-parent task"
     );
     let mut selected_comments: Vec<Uuid> = sqlx::query_scalar("SELECT DISTINCT (f->>'sourceRef')::uuid FROM linggan_topic_map_research_task t CROSS JOIN LATERAL jsonb_array_elements(t.input_refs->'fragments') f WHERE t.work_public_ref=$1 AND f->>'field' IN('studied_comment','unresearched_comment')")
         .bind(work).fetch_all(db.pool()).await.unwrap();

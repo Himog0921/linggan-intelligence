@@ -268,7 +268,7 @@ fn signal_dependency_is_limited_to_comments_in_this_group() {
         comment_metadata(c,None,json!([{ "signalRef":Uuid::from_u128(40+index as u128),"kind":"need","proposition":"需要明确第一步"}]))
     ).collect::<Vec<_>>());
     let window = research_windows(&original, 3000).remove(0);
-    assert_eq!(window.comment_study.as_array().unwrap().len(), 6);
+    assert_eq!(window.comment_study.as_array().unwrap().len(), 3);
     let manifest = reference_manifest(&window);
     let mut changed = original.clone();
     changed.comment_study[6]["signals"][0]["proposition"] = json!("未选中评论自己的研究变化");

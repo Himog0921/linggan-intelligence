@@ -990,7 +990,7 @@ async fn completed_comparison_progress_keeps_failure_and_allows_explicit_new_sta
         assert_eq!(
             progress["taskIssues"],
             json!([{
-                "taskRef":task,"phase":"compare","state":"failed","reason":"model_input_limit"
+                "taskRef":task,"phase":"compare","state":"failed","reason":"model_input_limit","validationDiagnostic":null
             }])
         );
         let calls: i64 = sqlx::query_scalar(

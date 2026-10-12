@@ -172,9 +172,9 @@ async fn accept_response(
         pending.input,
         prepared,
     );
-    let (extracted, resolved, rejection) = match validated {
-        Ok((extracted, resolved)) => (extracted, resolved, None),
-        Err(reason) => (None, None, Some(reason)),
+    let (extracted, resolved, rejection, rejection_diagnostic) = match validated {
+        Ok((extracted, resolved)) => (extracted, resolved, None, None),
+        Err(rejected) => (None, None, Some(rejected.code), Some(rejected.diagnostic)),
     };
     let eligible_definitions = prepared
         .eligible_definitions
@@ -194,6 +194,7 @@ async fn accept_response(
             extracted,
             resolved,
             rejection,
+            rejection_diagnostic,
             prepared,
             source_current: current,
             candidate_sources_current: candidate_sources_current(prepared, &unavailable),
@@ -396,47 +397,152 @@ fn unknown_dispatch_scope(input: &ResearchInput) -> Vec<Uuid> {
     requested.unwrap_or_else(|| vec![input.work.work_ref])
 }
 
+#[derive(Debug)]
+struct ValidationRejection {
+    code: &'static str,
+    diagnostic: Value,
+}
+impl From<&'static str> for ValidationRejection {
+    fn from(code: &'static str) -> Self {
+        Self {
+            code,
+            diagnostic: json!({"rule":code}),
+        }
+    }
+}
+fn schema_rejection(code: &'static str, path: &str, rule: &'static str) -> ValidationRejection {
+    ValidationRejection {
+        code,
+        diagnostic: json!({"rule":rule,"schemaPath":path}),
+    }
+}
+
 fn validated_response(
     response: Option<&PiResponse>,
     phase: &str,
     input: &ResearchInput,
     prepared: &Prepared,
-) -> Result<(Option<ResearchOutput>, Option<ResolutionOutput>), &'static str> {
+) -> Result<(Option<ResearchOutput>, Option<ResolutionOutput>), ValidationRejection> {
     let response = response.ok_or("unknown_dispatch")?;
     if !response.ok {
-        // Never copy provider prose or an arbitrary child-process code into the
-        // business ledger. Known transport failures retain their precise cause.
-        return Err(safe_transport_reason(response.failure_code.as_deref()));
+        return Err(safe_transport_reason(response.failure_code.as_deref()).into());
     }
     let text = response.text.as_deref().ok_or("output_text_missing")?;
     if text.len() > 65536 {
-        return Err("response_too_large");
+        return Err("response_too_large".into());
     }
     if phase == "extract" || phase == "compare" {
-        let output: ResearchOutput = decode_output(text)?;
+        let output = analysis::decode_compact_output(text, &input.fragments)
+            .map_err(|error| schema_rejection(error.code, &error.path, error.rule))?;
         if output.contract != analysis::EXTRACT_CONTRACT {
-            return Err("output_contract_mismatch");
+            return Err("output_contract_mismatch".into());
         }
         analysis::validate_output(&output, &input.fragments, &[])?;
         analysis::validate_context_links(&output, &input.fragments, &input.comment_study)?;
         Ok((Some(output), None))
     } else if phase == "resolve" {
-        let output: ResolutionOutput = decode_output(text)?;
+        let output: ResolutionOutput = decode_output(text, &analysis::resolution_schema())?;
         if output.contract != analysis::RESOLVE_CONTRACT {
-            return Err("output_contract_mismatch");
+            return Err("output_contract_mismatch".into());
         }
-        analysis::validate_resolution(&output, &prepared.units, &prepared.candidates)?;
+        analysis::validate_resolution(&output, &prepared.units, &prepared.candidates)
+            .map_err(|rule| ValidationRejection { code:rule, diagnostic:json!({
+                "rule":rule, "candidateCount":prepared.candidates.as_array().map(Vec::len),
+                "decisionCount":output.decisions.len(), "unitCount":prepared.units.len(),
+                "relationCounts":output.decisions.iter().map(|d|d.relations.len()).collect::<Vec<_>>(),
+                "matchCounts":output.decisions.iter().map(|d|d.matches.len()).collect::<Vec<_>>()
+            }) })?;
         Ok((None, Some(output)))
     } else {
-        Err("invalid_research_phase")
+        Err("invalid_research_phase".into())
     }
 }
 
-fn decode_output<T: serde::de::DeserializeOwned>(text: &str) -> Result<T, &'static str> {
-    serde_json::from_str(text).map_err(|error| match error.classify() {
-        serde_json::error::Category::Data => "output_schema_invalid",
-        _ => "output_json_invalid",
+/// Paths contain only schema-owned properties and indexes. Error Display is never stored.
+fn decode_output<T: serde::de::DeserializeOwned>(
+    text: &str,
+    schema: &Value,
+) -> Result<T, ValidationRejection> {
+    let value: Value = serde_json::from_str(text)
+        .map_err(|_| schema_rejection("output_json_invalid", "", "json"))?;
+    schema_presence(&value, schema, "")?;
+    serde_path_to_error::deserialize(value).map_err(|error| {
+        let path = safe_schema_path(error.path(), schema);
+        schema_rejection("output_schema_invalid", &path, "type_or_format")
     })
+}
+
+fn schema_presence(value: &Value, schema: &Value, path: &str) -> Result<(), ValidationRejection> {
+    if let Some(choices) = schema["anyOf"].as_array() {
+        if value.is_null() && choices.iter().any(|c| c["type"] == "null") {
+            return Ok(());
+        }
+        if let Some(schema) = choices.iter().find(|c| c["type"] != "null") {
+            return schema_presence(value, schema, path);
+        }
+    }
+    if let Some(properties) = schema["properties"].as_object() {
+        let object = value
+            .as_object()
+            .ok_or_else(|| schema_rejection("output_schema_invalid", path, "type"))?;
+        if object.keys().any(|key| !properties.contains_key(key)) {
+            return Err(schema_rejection(
+                "output_schema_invalid",
+                path,
+                "unknown_property",
+            ));
+        }
+        for (key, child) in properties {
+            let next = if path.is_empty() {
+                key.clone()
+            } else {
+                format!("{path}.{key}")
+            };
+            let value = object.get(key).ok_or_else(|| {
+                schema_rejection("output_schema_invalid", &next, "required_property")
+            })?;
+            schema_presence(value, child, &next)?;
+        }
+    } else if schema["type"] == "array" {
+        let array = value
+            .as_array()
+            .ok_or_else(|| schema_rejection("output_schema_invalid", path, "type"))?;
+        for (index, value) in array.iter().enumerate() {
+            schema_presence(value, &schema["items"], &format!("{path}[{index}]"))?;
+        }
+    }
+    Ok(())
+}
+
+fn safe_schema_path(path: &serde_path_to_error::Path, schema: &Value) -> String {
+    fn keys(schema: &Value, known: &mut std::collections::HashSet<String>) {
+        for (key, child) in schema["properties"].as_object().into_iter().flatten() {
+            known.insert(key.clone());
+            keys(child, known);
+        }
+        if let Some(items) = schema.get("items") {
+            keys(items, known);
+        }
+        for child in schema["anyOf"].as_array().into_iter().flatten() {
+            keys(child, known);
+        }
+    }
+    let mut known = std::collections::HashSet::new();
+    keys(schema, &mut known);
+    let mut result = String::new();
+    for segment in path.iter() {
+        match segment {
+            serde_path_to_error::Segment::Seq { index } => result.push_str(&format!("[{index}]")),
+            serde_path_to_error::Segment::Map { key } if known.contains(key) => {
+                if !result.is_empty() {
+                    result.push('.');
+                }
+                result.push_str(key);
+            }
+            _ => result.push_str("[unknown]"),
+        }
+    }
+    result
 }
 
 fn safe_transport_reason(code: Option<&str>) -> &'static str {
@@ -469,14 +575,18 @@ mod response_tests {
     use super::*;
     #[test]
     fn rejection_codes_distinguish_json_schema_and_never_contain_source_text() {
+        let schema = analysis::resolution_schema();
         assert_eq!(
-            decode_output::<ResearchOutput>("private source").unwrap_err(),
+            decode_output::<ResolutionOutput>("private source", &schema)
+                .unwrap_err()
+                .code,
             "output_json_invalid"
         );
-        assert_eq!(
-            decode_output::<ResearchOutput>(r#"{"private":"source"}"#).unwrap_err(),
-            "output_schema_invalid"
-        );
+        let rejected =
+            decode_output::<ResolutionOutput>(r#"{"private":"source"}"#, &schema).unwrap_err();
+        assert_eq!(rejected.code, "output_schema_invalid");
+        assert_eq!(rejected.diagnostic["rule"], "unknown_property");
+        assert!(!rejected.diagnostic.to_string().contains("private"));
         assert_eq!(
             safe_transport_reason(Some("response_too_large")),
             "response_too_large"
@@ -485,6 +595,36 @@ mod response_tests {
             safe_transport_reason(Some("private provider prose")),
             "provider_response_rejected"
         );
+    }
+
+    #[test]
+    fn nested_required_fields_and_uuid_types_have_safe_schema_paths() {
+        let schema = analysis::resolution_schema();
+        let mut value = json!({"contract":analysis::RESOLVE_CONTRACT,"decisions":[{
+            "unitId":"synthetic", "status":"matched", "matches":[{"topicRef":"secret-source-not-uuid","definitionRef":Uuid::nil(),"reason":"合成理由"}],
+            "proposedTopic":null,"relations":[],"reason":"合成归属"
+        }]});
+        let rejected = decode_output::<ResolutionOutput>(&value.to_string(), &schema).unwrap_err();
+        assert_eq!(
+            rejected.diagnostic["schemaPath"],
+            "decisions[0].matches[0].topicRef"
+        );
+        assert!(!rejected.diagnostic.to_string().contains("secret-source"));
+        value["decisions"][0]["matches"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("definitionRef");
+        let missing = decode_output::<ResolutionOutput>(&value.to_string(), &schema).unwrap_err();
+        assert_eq!(
+            missing.diagnostic["schemaPath"],
+            "decisions[0].matches[0].definitionRef"
+        );
+        assert_eq!(missing.diagnostic["rule"], "required_property");
+        value["decisions"][0]["matches"][0]["private-user-field"] = json!("private-value");
+        let unknown = decode_output::<ResolutionOutput>(&value.to_string(), &schema).unwrap_err();
+        assert_eq!(unknown.diagnostic["schemaPath"], "decisions[0].matches[0]");
+        assert_eq!(unknown.diagnostic["rule"], "unknown_property");
+        assert!(!unknown.diagnostic.to_string().contains("private"));
     }
 }
 

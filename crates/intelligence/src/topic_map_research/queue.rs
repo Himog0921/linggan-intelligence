@@ -398,7 +398,7 @@ async fn select_windows(
             .find(|full| full.work.work_ref == window.work.work_ref)
             .is_some_and(|full| overlaps_unknown_dispatch(&window, full, &unknown_refs))
         {
-            if trigger != "on_demand" && selected.len() == 100 {
+            if trigger != "on_demand" && selected.len() == 20 {
                 remaining = true;
                 break;
             }

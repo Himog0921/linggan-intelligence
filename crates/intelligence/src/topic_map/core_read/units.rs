@@ -32,9 +32,10 @@ pub(super) async fn attach_rules(
                 "topic"
             });
             topic.core["qualityState"] = json!(if topic.lifecycle_state == "candidate"
-                && rule.get::<Option<String>, _>("induction_method").as_deref()
-                    != Some("topic-map.research.v3")
-            {
+                && !matches!(
+                    rule.get::<Option<String>, _>("induction_method").as_deref(),
+                    Some("topic-map.research.v3" | "topic-map.research.v4")
+                ) {
                 "legacy_candidate"
             } else {
                 "current"

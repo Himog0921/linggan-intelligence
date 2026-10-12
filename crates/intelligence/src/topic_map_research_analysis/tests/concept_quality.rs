@@ -35,7 +35,7 @@ fn new_concept_requires_domain_fit_and_cannot_copy_a_specific_statement() {
         .domain_fit = "uncertain".into();
     assert_eq!(
         validate_resolution(&output, &units, &json!([])),
-        Err("invalid_new_topic_boundary")
+        Err("new_topic_domain_not_in_scope")
     );
     output.decisions[0]
         .proposed_topic
@@ -49,7 +49,7 @@ fn new_concept_requires_domain_fit_and_cannot_copy_a_specific_statement() {
         .definition = units[0].1.statement.clone();
     assert_eq!(
         validate_resolution(&output, &units, &json!([])),
-        Err("invalid_new_topic_boundary")
+        Err("new_topic_definition_copies_statement")
     );
 }
 
@@ -77,7 +77,7 @@ fn existing_parent_requires_exact_version_and_scope_containment() {
     output.decisions[0].relations[0].relation = "related".into();
     assert_eq!(
         validate_resolution(&output, &units, &topics),
-        Err("invalid_topic_parent")
+        Err("topic_parent_containment_missing")
     );
     output.decisions[0].relations[0].relation = "narrower".into();
     output.decisions[0]
@@ -88,7 +88,7 @@ fn existing_parent_requires_exact_version_and_scope_containment() {
         .definition_ref = Some(Uuid::new_v4());
     assert_eq!(
         validate_resolution(&output, &units, &topics),
-        Err("invalid_topic_parent")
+        Err("topic_parent_version_mismatch")
     );
 }
 
@@ -140,7 +140,7 @@ fn inferred_parent_keeps_boundaries_and_no_recursive_tree_or_count_gate() {
         .label = label;
     assert_eq!(
         validate_resolution(&output, &units, &json!([])),
-        Err("invalid_topic_parent")
+        Err("topic_parent_same_label")
     );
 }
 
@@ -214,7 +214,7 @@ fn a_normalized_self_parent_is_rejected_before_acceptance() {
     output.decisions[0].proposed_topic = Some(child);
     assert_eq!(
         validate_resolution(&output, &units, &json!([])),
-        Err("invalid_topic_parent")
+        Err("topic_parent_same_concept")
     );
 }
 
@@ -352,4 +352,188 @@ fn all_explicit_parent_ranges_remain_valid_but_unrelated_analysis_is_rejected() 
         validate_context_links(&output, &fragments, &mapping),
         Err("invalid_comment_parent_context")
     );
+}
+
+#[test]
+fn concept_rejections_identify_the_failed_boundary_without_relaxing_it() {
+    let (units, _, mut base) = resolution_case();
+    base.decisions[0].status = "new".into();
+    base.decisions[0].matches.clear();
+    base.decisions[0].proposed_topic = Some(new_proposal());
+    for (inclusion, exclusion, expected) in [
+        (vec![], vec!["排除".into()], "new_topic_inclusion_empty"),
+        (vec!["纳入".into()], vec![], "new_topic_exclusion_empty"),
+        (
+            vec!["纳入".into(); 9],
+            vec!["排除".into()],
+            "new_topic_inclusion_count_exceeded",
+        ),
+        (
+            vec!["   ".into()],
+            vec!["排除".into()],
+            "new_topic_inclusion_item_empty",
+        ),
+        (
+            vec!["界".repeat(301)],
+            vec!["排除".into()],
+            "new_topic_inclusion_item_too_long",
+        ),
+        (
+            vec![" Synthetic ".into()],
+            vec!["synthetic".into()],
+            "new_topic_criteria_duplicate",
+        ),
+    ] {
+        let mut output = base.clone();
+        let proposal = output.decisions[0].proposed_topic.as_mut().unwrap();
+        proposal.inclusion_criteria = inclusion;
+        proposal.exclusion_criteria = exclusion;
+        assert_eq!(
+            validate_resolution(&output, &units, &json!([])),
+            Err(expected)
+        );
+    }
+}
+
+#[test]
+fn every_new_candidate_requires_comparison_and_equivalence_requires_a_real_match() {
+    let (units, candidates, mut output) = resolution_case();
+    let existing = output.decisions[0].matches.pop().unwrap();
+    output.decisions[0].status = "new".into();
+    output.decisions[0].proposed_topic = Some(new_proposal());
+    assert_eq!(
+        validate_resolution(&output, &units, &candidates),
+        Err("new_topic_candidate_coverage_missing")
+    );
+    output.decisions[0].relations.push(TopicRelation {
+        topic_ref: existing.topic_ref,
+        definition_ref: existing.definition_ref,
+        relation: "equivalent".into(),
+        reason: "换一种说法但边界相同".into(),
+    });
+    assert_eq!(
+        validate_resolution(&output, &units, &candidates),
+        Err("new_topic_equivalent_requires_match")
+    );
+    output.decisions[0].status = "uncertain".into();
+    output.decisions[0].proposed_topic = None;
+    assert_eq!(
+        validate_resolution(&output, &units, &candidates),
+        Err("new_topic_equivalent_requires_match")
+    );
+    output.decisions[0].status = "matched".into();
+    output.decisions[0].matches.push(existing);
+    assert!(validate_resolution(&output, &units, &candidates).is_ok());
+    // Acceptance requires an explicit matched decision, never a silent new-to-match rewrite.
+}
+
+#[test]
+fn parent_variants_report_the_precise_shape_rule() {
+    let (units, _, mut output) = resolution_case();
+    output.decisions[0].status = "new".into();
+    output.decisions[0].matches.clear();
+    output.decisions[0].proposed_topic = Some(new_proposal());
+    for (kind, topic, expected) in [
+        (
+            "root",
+            Some(Uuid::new_v4()),
+            "topic_parent_root_has_reference",
+        ),
+        ("existing", None, "topic_parent_existing_reference_missing"),
+        ("proposed", None, "topic_parent_proposal_missing"),
+        ("unknown", None, "topic_parent_kind_unknown"),
+    ] {
+        let parent = &mut output.decisions[0].proposed_topic.as_mut().unwrap().parent;
+        parent.kind = kind.into();
+        parent.topic_ref = topic;
+        assert_eq!(
+            validate_resolution(&output, &units, &json!([])),
+            Err(expected)
+        );
+    }
+}
+
+#[test]
+fn candidate_and_definition_failures_do_not_collapse_into_one_reason() {
+    let (units, candidates, mut output) = resolution_case();
+    output.decisions[0].matches[0].definition_ref = Uuid::new_v4();
+    assert_eq!(
+        validate_resolution(&output, &units, &candidates),
+        Err("resolution_match_version_mismatch")
+    );
+    output.decisions[0].matches[0].topic_ref = Uuid::new_v4();
+    assert_eq!(
+        validate_resolution(&output, &units, &candidates),
+        Err("resolution_match_not_candidate")
+    );
+    output.decisions.clear();
+    assert_eq!(
+        validate_resolution(&output, &units, &candidates),
+        Err("resolution_unit_coverage_mismatch")
+    );
+}
+
+#[test]
+fn proposed_parent_cannot_reuse_an_existing_candidate_without_explicit_containment() {
+    let (units, mut candidates, mut output) = resolution_case();
+    let matched = output.decisions[0].matches.pop().unwrap();
+    output.decisions[0].status = "new".into();
+    let parent = ConceptDefinition {
+        label: "任务执行支持".into(),
+        definition: "帮助开始并维持已选定任务的支持过程".into(),
+        inclusion_criteria: vec!["任务开始或执行中的障碍与支持".into()],
+        exclusion_criteria: vec!["仅讨论选择哪些任务".into()],
+        domain_fit: "in_scope".into(),
+        domain_reason: "领域内执行支持".into(),
+        abstraction_reason: "持续注意只是执行过程的一个阶段".into(),
+    };
+    candidates[0]["definition"] = json!(parent.definition);
+    candidates[0]["inclusionCriteria"] = json!(parent.inclusion_criteria);
+    candidates[0]["exclusionCriteria"] = json!(parent.exclusion_criteria);
+    let mut child = new_proposal();
+    child.parent = ProposedParent {
+        kind: "proposed".into(),
+        topic_ref: None,
+        definition_ref: None,
+        proposal: Some(parent),
+        reason: "子级属于执行过程".into(),
+    };
+    output.decisions[0].proposed_topic = Some(child);
+    output.decisions[0].relations.push(TopicRelation {
+        topic_ref: matched.topic_ref,
+        definition_ref: matched.definition_ref,
+        relation: "distinct".into(),
+        reason: "合成的冲突关系".into(),
+    });
+    assert_eq!(
+        validate_resolution(&output, &units, &candidates),
+        Err("topic_parent_proposal_matches_candidate")
+    );
+    // A new label cannot bypass reuse of the exact existing boundary.
+    output.decisions[0]
+        .proposed_topic
+        .as_mut()
+        .unwrap()
+        .parent
+        .proposal
+        .as_mut()
+        .unwrap()
+        .label = "换名父级".into();
+    assert_eq!(
+        validate_resolution(&output, &units, &candidates),
+        Err("topic_parent_proposal_matches_candidate")
+    );
+    output.decisions[0].proposed_topic.as_mut().unwrap().parent = ProposedParent {
+        kind: "existing".into(),
+        topic_ref: Some(matched.topic_ref),
+        definition_ref: Some(matched.definition_ref),
+        proposal: None,
+        reason: "子级属于现有执行过程范围".into(),
+    };
+    assert_eq!(
+        validate_resolution(&output, &units, &candidates),
+        Err("topic_parent_containment_missing")
+    );
+    output.decisions[0].relations[0].relation = "narrower".into();
+    assert!(validate_resolution(&output, &units, &candidates).is_ok());
 }

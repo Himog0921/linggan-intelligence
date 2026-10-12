@@ -80,8 +80,8 @@ async fn grouped_admission_reuses_old_voices_but_reassesses_changed_required_aut
     let manifests = source_manifests(&db, first).await;
     assert_eq!(
         manifests.len(),
-        3,
-        "one title/body group and two bounded comment groups"
+        4,
+        "one title/body group and three bounded comment groups"
     );
     let mut sources = comment_sources(&manifests);
     sources.sort();
@@ -134,7 +134,7 @@ async fn grouped_admission_reuses_old_voices_but_reassesses_changed_required_aut
         reassessed, old,
         "changed required context invalidates old child-window reuse"
     );
-    assert_eq!(manifests.len(), 3);
+    assert_eq!(manifests.len(), 4);
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
             "SELECT count(*) FROM linggan_topic_map_research_request WHERE run_ref=$1"

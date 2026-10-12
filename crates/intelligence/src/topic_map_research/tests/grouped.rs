@@ -27,13 +27,27 @@ fn one_hundred_short_comments_pack_independent_voices_and_restore_precise_source
             .collect::<Vec<_>>()
     );
     update_source_coverage(&mut original);
-    let windows = research_windows(&original, 3000);
+    let windows = research_windows(&original, super::super::RESEARCH_WINDOW_CHARS);
+    assert!(windows.iter().all(|w| {
+        w.fragments
+            .iter()
+            .map(|f| f.text.chars().count())
+            .sum::<usize>()
+            <= 900
+    }));
+    let author_body: String = windows
+        .iter()
+        .flat_map(|w| &w.fragments)
+        .filter(|f| f.field == "body")
+        .map(|f| f.text.as_str())
+        .collect();
+    assert_eq!(author_body, body.text);
     let groups: Vec<_> = windows
         .iter()
         .filter(|w| w.role_metadata["commentOnly"] == true)
         .collect();
-    assert_eq!(groups.len(), 17);
-    assert_eq!(windows.len(), 18); // author title and body share one request
+    assert_eq!(groups.len(), 34);
+    assert_eq!(windows.len(), 37); // title, two body windows, all 100 primary voices
     assert_eq!(
         windows[0]
             .work
@@ -41,12 +55,12 @@ fn one_hundred_short_comments_pack_independent_voices_and_restore_precise_source
             .iter()
             .map(|f| f.field.as_str())
             .collect::<Vec<_>>(),
-        vec!["title", "body"]
+        vec!["title"]
     );
     let mut seen = std::collections::BTreeSet::new();
     for window in groups {
-        assert!(window.comment_study.as_array().unwrap().len() <= 6);
-        assert!(window.coverage["inputChars"].as_u64().unwrap() <= 3000);
+        assert!(window.comment_study.as_array().unwrap().len() <= 3);
+        assert!(window.coverage["inputChars"].as_u64().unwrap() <= 900);
         assert!(window.coverage["workContextPartial"].as_bool().unwrap());
         assert!(window.work.fragments.is_empty());
         let manifest = reference_manifest(window);
@@ -178,7 +192,25 @@ fn grouped_children_share_parent_context_and_keep_the_parent_tail() {
         .filter(|f| f.field == PARENT_CONTEXT_FIELD)
         .map(|f| f.text.as_str())
         .collect();
-    assert_eq!(text, parent.text);
+    // Parent pages are repeated for each distinct primary group, but every
+    // group must see the full parent and none may create a primary witness.
+    assert_eq!(text, parent.text.repeat(2));
+    for group in [&children[..3], &children[3..]] {
+        let group_text: String = windows
+            .iter()
+            .filter(|w| {
+                w.comment_study
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|c| c["sourceRef"] == json!(group[0].source_ref))
+            })
+            .flat_map(|w| &w.fragments)
+            .filter(|f| f.field == PARENT_CONTEXT_FIELD)
+            .map(|f| f.text.as_str())
+            .collect();
+        assert_eq!(group_text, parent.text);
+    }
     assert_eq!(
         windows
             .iter()
@@ -190,7 +222,7 @@ fn grouped_children_share_parent_context_and_keep_the_parent_tail() {
             .sum::<u64>()
     );
     for window in &windows {
-        assert_eq!(window.comment_study.as_array().unwrap().len(), 4);
+        assert!(window.comment_study.as_array().unwrap().len() <= 3);
         assert!(
             window
                 .comment_study
@@ -264,7 +296,30 @@ fn missing_parent_pages_never_reopen_unknown_child_when_short_voices_are_packed(
             .any(|f| f.fragment_id == child.fragment_id)
     );
     let windows = research_windows(&pending, 3000);
-    assert_eq!(windows.len(), 1);
-    assert_eq!(windows[0].comment_study.as_array().unwrap().len(), 5);
-    assert!(!overlaps_unknown_dispatch(&windows[0], &expanded, &refs));
+    assert_eq!(windows.len(), 2);
+    assert_eq!(
+        windows
+            .iter()
+            .map(|w| w.comment_study.as_array().unwrap().len())
+            .sum::<usize>(),
+        5
+    );
+    for window in &windows {
+        assert!(!overlaps_unknown_dispatch(window, &expanded, &refs));
+        assert!(window.comment_study.as_array().unwrap().len() <= 3);
+    }
+}
+
+#[test]
+fn historical_v3_frozen_window_keeps_source_qualification_after_compact_upgrade() {
+    let original = input(vec![source("body", "历史方法保存的完整合格原声。", 10)]);
+    let mut old = research_windows(&original, 3000).remove(0);
+    old.hash = super::super::identity::input_identity_for(&old, super::super::INPUT_CONTRACT, "topic-map.research.v3");
+    let mut manifest = reference_manifest(&old);
+    manifest["methodVersion"] = json!("topic-map.research.v3");
+    assert_eq!(restore_window(&original, &manifest).unwrap().hash, old.hash);
+    assert_ne!(research_windows(&original, 900)[0].hash, old.hash);
+    let mut withdrawn = original.clone();
+    withdrawn.fragments.clear();
+    assert!(restore_window(&withdrawn, &manifest).is_none());
 }

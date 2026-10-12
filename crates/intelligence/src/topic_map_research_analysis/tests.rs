@@ -282,7 +282,7 @@ fn resolution_requires_exact_candidate_and_definition_versions() {
     o.decisions[0].matches[0].definition_ref = Uuid::new_v4();
     assert_eq!(
         validate_resolution(&o, &units, &topics),
-        Err("invalid_resolution_match")
+        Err("resolution_match_version_mismatch")
     );
     o.decisions[0].matches[0].topic_ref = Uuid::new_v4();
     assert!(validate_resolution(&o, &units, &topics).is_err());

@@ -13,6 +13,7 @@ pub(super) struct Completion<'a> {
     pub extracted: Option<ResearchOutput>,
     pub resolved: Option<ResolutionOutput>,
     pub rejection: Option<&'static str>,
+    pub rejection_diagnostic: Option<Value>,
     pub prepared: &'a Prepared,
     pub source_current: bool,
     pub candidate_sources_current: bool,
@@ -66,8 +67,24 @@ pub(super) async fn settle(db: &Database, mut c: Completion<'_>) -> Result<(), M
     if let Some(output) = &accepted.output {
         append_result(&mut tx, &c, output, &accepted.units).await?;
     }
-    finish_invocation_in(&mut tx,c.invocation,c.response,accepted.reason.is_none(),accepted.reason,
-        &json!({"accepted":accepted.reason.is_none(),"dispatchUnknown":accepted.state=="unknown_dispatch","phaseComplete":accepted.state!="failed" && accepted.state!="unknown_dispatch"})).await?;
+    let mut invocation_result = json!({"accepted":accepted.reason.is_none(),"dispatchUnknown":accepted.state=="unknown_dispatch","phaseComplete":accepted.state!="failed" && accepted.state!="unknown_dispatch"});
+    // Attach only the validator that actually rejected this acceptance. A source
+    // change or late result must never inherit an unrelated model diagnosis.
+    if accepted.reason.is_some()
+        && accepted.reason == c.rejection
+        && let Some(diagnostic) = &c.rejection_diagnostic
+    {
+        invocation_result["validationDiagnostic"] = diagnostic.clone();
+    }
+    finish_invocation_in(
+        &mut tx,
+        c.invocation,
+        c.response,
+        accepted.reason.is_none(),
+        accepted.reason,
+        &invocation_result,
+    )
+    .await?;
     sqlx::query("UPDATE linggan_topic_map_research_task SET state=$3,last_reason=$4,lease_token=NULL,lease_expires_at=NULL,updated_at=scope_001_now()WHERE task_ref=$1 AND lease_token=$2")
         .bind(c.task).bind(c.lease).bind(accepted.state).bind(accepted.reason).execute(&mut *tx).await?;
     tx.commit().await?;
