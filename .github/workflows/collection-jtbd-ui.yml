@@ -1,0 +1,95 @@
+name: Collection JTBD UI proof
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/collection-jtbd-ui.yml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - 'apps/api/**'
+      - 'crates/evidence/src/collection_task_action_read.rs'
+      - 'crates/evidence/src/lib.rs'
+      - 'crates/evidence/tests/collection_task_action_read_postgres.rs'
+      - 'scripts/test-collection-jtbd-ui.cjs'
+      - 'scripts/test-collection-jtbd-postgres.sh'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: collection-jtbd-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  collection-proof:
+    if: github.head_ref == 'codex/collection-jtbd-20261012'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_PROFILE_TEST_DEBUG: '0'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Use isolated build output
+        run: echo "CARGO_TARGET_DIR=$RUNNER_TEMP/collection-jtbd-target" >> "$GITHUB_ENV"
+      - name: Install matching Rust toolchain
+        run: |
+          rustup toolchain install 1.95.0 --profile minimal --component rustfmt
+          rustup default 1.95.0
+      - name: Compile API
+        id: compile_api
+        run: cargo build -p linggan-api --locked
+      - name: Collection, station and navigation regression
+        run: |
+          cargo test -p linggan-api --bin linggan-api --locked local_web::collection
+          cargo test -p linggan-api --bin linggan-api --locked local_web::station_view
+          cargo test -p linggan-api --bin linggan-api --locked local_web::tests
+          node --check apps/api/src/local_web/collection_workspace.js
+          node --check scripts/test-collection-jtbd-ui.cjs
+      - name: Exact target and receipt PostgreSQL projection proof
+        if: ${{ !cancelled() && steps.compile_api.outcome == 'success' }}
+        run: bash scripts/test-collection-jtbd-postgres.sh
+      - name: Install isolated browser
+        id: install_browser
+        if: ${{ !cancelled() && steps.compile_api.outcome == 'success' }}
+        run: |
+          npm --prefix "$RUNNER_TEMP/collection-browser" install --no-package-lock --ignore-scripts playwright@1.57.0
+          node "$RUNNER_TEMP/collection-browser/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Real server browser smoke without a database
+        if: ${{ !cancelled() && steps.install_browser.outcome == 'success' }}
+        env:
+          NODE_PATH: ${{ runner.temp }}/collection-browser/node_modules
+          COLLECTION_PROOF_DIR: ${{ runner.temp }}/collection-jtbd-proof
+        run: |
+          mkdir -p "$COLLECTION_PROOF_DIR"
+          env -u LINGGAN_LOCAL_DATABASE_URL LINGGAN_LOCAL_PORT=18731 "$CARGO_TARGET_DIR/debug/linggan-api" > "$COLLECTION_PROOF_DIR/server.log" 2>&1 &
+          COLLECTION_SERVER_PID=$!
+          trap 'kill "$COLLECTION_SERVER_PID" 2>/dev/null || true' EXIT
+          node scripts/test-collection-jtbd-ui.cjs
+      - name: Governance and whitespace
+        if: ${{ !cancelled() }}
+        run: |
+          bash scripts/check-project-governance.sh origin/main
+          bash scripts/verify-ui-design-handbook.sh
+          git diff --check
+      - name: Check formatting and retain any patch
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/collection-jtbd-proof"
+          rustfmt --edition 2024 --config skip_children=true apps/api/src/local_web.rs apps/api/src/local_web/collection.rs apps/api/src/local_web/tests.rs apps/api/src/local_web/collection_management.rs apps/api/src/local_web/collection_management_tests.rs apps/api/src/local_web/collection_task_actions.rs apps/api/src/local_web/collection_task_action_feedback.rs apps/api/src/local_web/collection_task_actions_tests.rs crates/evidence/src/collection_task_action_read.rs crates/evidence/src/lib.rs crates/evidence/tests/collection_task_action_read_postgres.rs
+          git diff --binary > "$RUNNER_TEMP/collection-jtbd-proof/rustfmt.patch"
+          test ! -s "$RUNNER_TEMP/collection-jtbd-proof/rustfmt.patch"
+      - name: Retain bounded browser proof
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: collection-jtbd-ui-proof
+          path: ${{ runner.temp }}/collection-jtbd-proof
+          if-no-files-found: ignore
+          retention-days: 7

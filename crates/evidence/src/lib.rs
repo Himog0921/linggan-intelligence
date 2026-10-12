@@ -7,6 +7,7 @@ mod archive_ledger;
 mod collection_control;
 mod collection_target;
 pub use collection_target::register_discovered_creator;
+mod collection_task_action_read;
 mod collection_task_read;
 mod content_reobservation;
 pub mod creator_discovery;
@@ -115,6 +116,10 @@ pub use collection_target::{
     count_targets, delete_observation_target, list_targets, list_targets_in_state, read_target,
     read_target_avatars, read_target_deletion_preview, remove_target_domain,
     set_target_domain_role, store_pending_target, transition_target,
+};
+pub use collection_task_action_read::{
+    ManualObservationReceipt, read_manual_observation_primary_domains,
+    read_manual_observation_receipt,
 };
 pub use collection_task_read::{
     CollectionTaskExecution, CollectionTaskTimeline, DeliveryConclusion,

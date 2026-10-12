@@ -1,8 +1,8 @@
 //! Collection Workspace — the continuous observation execution layer.
 //!
-//! Six sub-surfaces. DESIGN-006 ordered the original five by urgency:
-//! 待处理 / 观察目标 / 生产流 / 采集任务 / 执行工位.
-//! DOMAIN-UNIFICATION-001 appended 领域管理 without changing the original URL slugs.
+//! Two daily pages: 观察目标 / 采集任务. Domain and station management stay complete
+//! auxiliary surfaces, reached from the context bar rather than the daily rail.
+//! Legacy Attention/Operations URLs redirect to the task ledger.
 //!
 //! Every surface here is structurally complete and remains honest about the projection it
 //! can read. Collection domain objects now exist, but a route can still be unavailable or
@@ -74,16 +74,8 @@ struct SectionMeta {
     title: &'static str,
 }
 
-/// DESIGN-006 · order follows urgency, not the pipeline's own stages. Attention is the only
-/// surface whose contents expire: the other four read the same today and next week. The
-/// Collection Control pattern already required `NEEDS ATTENTION` first; the pipeline order
-/// this list used to carry was tidy but never the order anyone reads it in.
-///
-/// The names avoid sharing a word stem. The three that used to (运行态 / 执行任务 /
-/// 执行运行时) were page labels, not domain terms — `domain-language.md` defines none of
-/// them, so they were free to change. It does define 工位, which is why 执行工位 keeps it.
-///
-/// Slugs are untouched: they are the URL contract the browser plugin and bookmarks hold.
+/// Surface metadata is separate from daily navigation. Auxiliary management pages
+/// retain their existing renderer, while the rail exposes only Targets and Tasks.
 const SECTIONS: [(Section, SectionMeta); 6] = [
     (
         Section::Attention,
@@ -98,7 +90,7 @@ const SECTIONS: [(Section, SectionMeta); 6] = [
         Section::Targets,
         SectionMeta {
             slug: "targets",
-            index: "02",
+            index: "01",
             zh: "观察目标",
             title: "观察目标",
         },
@@ -116,7 +108,7 @@ const SECTIONS: [(Section, SectionMeta); 6] = [
         Section::Tasks,
         SectionMeta {
             slug: "tasks",
-            index: "04",
+            index: "02",
             zh: "采集任务",
             title: "采集任务",
         },
@@ -126,8 +118,8 @@ const SECTIONS: [(Section, SectionMeta); 6] = [
         SectionMeta {
             slug: "runtime",
             index: "05",
-            zh: "执行工位",
-            title: "执行工位",
+            zh: "工位管理",
+            title: "工位管理",
         },
     ),
     (
@@ -173,7 +165,10 @@ fn rail(active: Section, state: Option<&SurfaceState>, nav_domain: Option<&str>)
         }
     };
     let mut items = String::new();
-    for (section, entry) in SECTIONS.iter() {
+    for (section, entry) in SECTIONS
+        .iter()
+        .filter(|(section, _)| matches!(section, Section::Targets | Section::Tasks))
+    {
         let current = if *section == active {
             " aria-current=\"page\""
         } else {
@@ -621,7 +616,7 @@ fn runtime_body(state: Option<&SurfaceState>) -> String {
             ),
             (
                 "这一页给谁看",
-                "排查故障时使用。日常判断「哪里出了问题、影响了哪些观察对象」应该看待处理。",
+                "排查故障时使用。日常在采集任务核对执行与回执，再回到观察目标调整观察范围。",
             ),
             ("不代表", "不代表执行工位全部离线，也不代表队列为空。"),
         ],
@@ -1039,13 +1034,52 @@ pub fn render_in_domain(
         Some(_) => "无观察目标",
         None => "状态未知",
     }));
+    let source = match section {
+        Section::Tasks => "/collection/tasks",
+        _ => "/collection/targets",
+    };
+    let source = match domain.nav_domain {
+        Some(value) => format!("{source}?domain={}", super::encode_query_value(value)),
+        None => source.to_owned(),
+    };
+    let management = if section != Section::Runtime {
+        format!(
+            r#"<a class="c-btn-quiet c-management-entry" href="{}" data-collection-management aria-label="工位管理，全局执行资源">工位管理</a>"#,
+            escape(&super::collection_management::redirect_path(
+                "/collection/runtime",
+                None,
+                Some(&source),
+            )),
+        )
+    } else {
+        String::new()
+    };
+    // The shared shell localizes closed technical words with string replacement. Keep
+    // user-owned URL/name values out of that pass so a domain called UNKNOWN stays data.
+    const MANAGEMENT_SLOT: &str = "<!-- collection-management-entry -->";
+    const PICKER_SLOT: &str = "<!-- collection-domain-picker -->";
+    let meta_row = format!("{meta_row}{MANAGEMENT_SLOT}");
+    // Management must remain reachable when there are zero or only one domain.
+    let fallback_picker;
+    let picker = if section == Section::Targets && domain.picker.is_empty() {
+        fallback_picker = super::collection_domain_picker(domain.domains, None, domain.nav_domain);
+        fallback_picker.as_str()
+    } else {
+        domain.picker
+    };
     let header = global_header(
         PrimarySurface::Collection,
         boundary,
-        &crumb(section, mode, domain.picker),
+        &crumb(
+            section,
+            mode,
+            if picker.is_empty() { "" } else { PICKER_SLOT },
+        ),
         &meta_row,
         collection_state,
-    );
+    )
+    .replace(MANAGEMENT_SLOT, &management)
+    .replace(PICKER_SLOT, picker);
     format!(
         r#"<!doctype html>
 <html lang="zh-CN" data-theme="linggan-intelligence">
@@ -1104,7 +1138,7 @@ mod domain_bar_tests {
     /// 子页大多还不按领域过滤内容，但它们必须把领域原样带走——否则从观察目标去一趟
     /// 采集任务再回来，当前领域就没了。
     #[test]
-    fn every_collection_link_carries_the_domain_even_where_the_page_ignores_it() {
+    fn daily_navigation_preserves_domain_without_claiming_to_filter_the_global_ledger() {
         let html = render_in_domain(
             Section::Tasks,
             OperationsMode::Now,
@@ -1117,7 +1151,7 @@ mod domain_bar_tests {
                 nav_domain: Some("all"),
             },
         );
-        for slug in ["attention", "targets", "operations", "tasks", "runtime"] {
+        for slug in ["targets", "tasks"] {
             assert!(
                 html.contains(&format!(r#"href="/collection/{slug}?domain=all""#)),
                 "{slug} 丢掉了当前领域"
@@ -1136,12 +1170,23 @@ mod domain_bar_tests {
         assert!(html.contains("data-target-kind"));
     }
 
-    /// 没有领域上下文时链接保持裸路径：带一个空参数会让地址假装有得选。
+    /// 没有领域上下文时日常导航保持裸路径；领域菜单仍可提供全部领域与管理入口。
     #[test]
     fn without_a_domain_the_links_stay_bare() {
         let html = render(Section::Targets, OperationsMode::Now, None, None, None);
-        assert!(html.contains(r#"href="/collection/targets""#));
-        assert!(!html.contains("?domain="));
+        let rail = html
+            .split_once(r#"aria-label="采集导航""#)
+            .expect("daily navigation exists")
+            .1
+            .split_once("</aside>")
+            .expect("daily navigation has a boundary")
+            .0;
+        for slug in ["targets", "tasks"] {
+            assert!(rail.contains(&format!(r#"href="/collection/{slug}""#)));
+            assert!(!rail.contains(&format!(r#"href="/collection/{slug}?domain="#)));
+        }
+        assert!(html.contains("v7-domain-picker"));
+        assert!(html.contains("管理领域"));
     }
 
     /// 选择器坐在「采集」与子页名之间，管的是整个模块的观察对象，不是本页的筛选条件。

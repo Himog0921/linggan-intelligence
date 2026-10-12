@@ -817,3 +817,48 @@
     if (edit) edit.focus();
   });
 })();
+
+/* collection-management-context
+ * Management keeps the original SSR page. Only its return location follows the current
+ * daily page's filter, drawer and fragment; this does not scope stations or issue commands.
+ */
+(function () {
+  "use strict";
+
+  function currentReturnLocation() {
+    if (window.location.pathname !== "/collection/targets" && window.location.pathname !== "/collection/tasks") return null;
+    var value = window.location.pathname + window.location.search + window.location.hash;
+    if (new TextEncoder().encode(value).length > 2048 || /[\s\u0000-\u001f\u007f-\u009f\\]/.test(value)) return null;
+    for (var index = 0; index < value.length; index += 1) {
+      if (value[index] !== "%") continue;
+      var encoded = value.slice(index + 1, index + 3);
+      if (!/^[0-9a-f]{2}$/i.test(encoded)) return null;
+      var byte = parseInt(encoded, 16);
+      if (byte < 32 || byte === 127 || byte === 92) return null;
+      index += 2;
+    }
+    try {
+      if (/[\u0000-\u001f\u007f-\u009f\\]/.test(decodeURIComponent(value))) return null;
+    } catch (_) { return null; }
+    return value;
+  }
+
+  function update(link) {
+    var returnTo = currentReturnLocation();
+    if (!returnTo) return;
+    var destination;
+    try { destination = new URL(link.getAttribute("href"), window.location.href); } catch (_) { return; }
+    if (destination.origin !== window.location.origin || (destination.pathname !== "/collection/runtime" && destination.pathname !== "/collection/domains")) return;
+    destination.searchParams.set("return_to", returnTo);
+    link.setAttribute("href", destination.pathname + destination.search + destination.hash);
+  }
+
+  Array.prototype.forEach.call(document.querySelectorAll("a[data-collection-management]"), update);
+  function beforeNavigation(event) {
+    var link = event.target && event.target.closest && event.target.closest("a[data-collection-management]");
+    if (link) update(link);
+  }
+  document.addEventListener("click", beforeNavigation, true);
+  document.addEventListener("auxclick", beforeNavigation, true);
+  document.addEventListener("contextmenu", beforeNavigation, true);
+})();

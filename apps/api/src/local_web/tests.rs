@@ -49,9 +49,17 @@ async fn legacy_evidence_route_cannot_bypass_domain_scoped_work_resources() {
 #[tokio::test]
 async fn evidence_library_rejects_unknown_url_filters_before_reading() {
     let domain = "00000000-0000-4000-8000-000000000001";
-    let invalid = app().oneshot(Request::builder()
-        .uri(format!("/api/local/work-resources?domain={domain}&creatorKye=typo"))
-        .body(Body::empty()).unwrap()).await.unwrap();
+    let invalid = app()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/local/work-resources?domain={domain}&creatorKye=typo"
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
     let valid = app().oneshot(Request::builder()
         .uri(format!("/api/local/work-resources?domain={domain}&creatorKey=xhs%3A41&creatorFilter=%7B%22domain%22%3A%22{domain}%22%7D&returnTo=%2Fcorpus%2Fcreators%3Fdomain%3D{domain}"))
@@ -62,7 +70,8 @@ async fn evidence_library_rejects_unknown_url_filters_before_reading() {
         "creatorKey": "xhs:41",
         "creatorFilter": format!(r#"{{"domain":"{domain}"}}"#),
         "returnTo": format!("/corpus/creators?domain={domain}"),
-    })).unwrap();
+    }))
+    .unwrap();
     assert!(material_projection::local_query(&parsed).is_ok());
 }
 
@@ -1882,13 +1891,12 @@ fn local_submission(observed_at: &str) -> String {
 }
 
 #[test]
-fn collection_serves_all_five_sub_surfaces_from_the_shared_shell() {
+fn collection_preserves_both_daily_pages_and_complete_management_surfaces() {
     for (section, name) in [
         (collection::Section::Targets, "观察目标"),
-        (collection::Section::Operations, "生产流"),
-        (collection::Section::Attention, "待处理"),
         (collection::Section::Tasks, "采集任务"),
-        (collection::Section::Runtime, "执行工位"),
+        (collection::Section::Runtime, "工位管理"),
+        (collection::Section::Domains, "领域管理"),
     ] {
         let html = collection::render(section, collection::OperationsMode::Now, None, None, None);
         // The breadcrumb, not a title block, is where a surface states which page this is.
@@ -2014,8 +2022,8 @@ fn collection_v4_uses_the_lids_reclaimed_title_and_context_readout_contract() {
         }
     }
 
-    // Target facts live beside the target ledger. The breadcrumb band stays quiet instead
-    // of repeating patrol/archive/runtime/timezone above the working surface.
+    // Target facts live beside the ledger. The breadcrumb band only hosts the approved
+    // station-management entry; it does not repeat patrol/archive/runtime/timezone readouts.
     let targets = collection::render(
         collection::Section::Targets,
         collection::OperationsMode::Now,
@@ -2030,7 +2038,9 @@ fn collection_v4_uses_the_lids_reclaimed_title_and_context_readout_contract() {
         .split_once("</div>")
         .expect("context meta closes")
         .0;
-    assert!(context_row.is_empty());
+    assert!(context_row.starts_with("<a "));
+    assert!(context_row.contains("data-collection-management"));
+    assert_eq!(context_row.split_once('>').unwrap().1, "工位管理</a>");
 }
 
 #[test]
@@ -3053,50 +3063,258 @@ fn the_larger_hard_shadow_only_marks_hover_displacement() {
 }
 
 #[test]
-fn collection_orders_its_surfaces_by_urgency_and_opens_on_the_one_that_expires() {
-    // DESIGN-006 Q7. Attention is the only surface whose contents go stale; the other four
-    // read the same next week. The Collection Control pattern already required NEEDS
-    // ATTENTION first — the pipeline order this page shipped with never matched it.
-    let html = collection::render(
-        collection::Section::Attention,
+fn collection_daily_navigation_has_only_the_two_preserved_pages() {
+    for section in [
+        collection::Section::Targets,
+        collection::Section::Tasks,
+        collection::Section::Runtime,
+        collection::Section::Domains,
+    ] {
+        let html = collection::render(section, collection::OperationsMode::Now, None, None, None);
+        let rail = html
+            .split_once("aria-label=\"采集导航\"")
+            .unwrap()
+            .1
+            .split_once("</aside>")
+            .unwrap()
+            .0;
+        assert_eq!(rail.matches("class=\"v7-side-nav\"").count(), 2);
+        assert!(rail.contains("href=\"/collection/targets\""));
+        assert!(rail.contains("<i>01</i><span>观察目标</span>"));
+        assert!(rail.contains("href=\"/collection/tasks\""));
+        assert!(rail.contains("<i>02</i><span>采集任务</span>"));
+        for removed in ["attention", "operations", "runtime", "domains"] {
+            assert!(
+                !rail.contains(&format!("/collection/{removed}")),
+                "management/retired page {removed} must not occupy the daily rail"
+            );
+        }
+    }
+}
+
+#[test]
+fn collection_header_preserves_domain_values_that_resemble_status_codes() {
+    let picker = r#"<details class="v7-domain-picker"><summary>UNKNOWN</summary><a href="/collection/targets?domain=UNKNOWN">UNKNOWN</a></details>"#;
+    let html = collection::render_in_domain(
+        collection::Section::Tasks,
         collection::OperationsMode::Now,
         None,
         None,
         None,
+        collection::DomainBar {
+            picker,
+            nav_domain: Some("UNKNOWN"),
+            domains: &[],
+        },
     );
-
-    // Search inside the rail only: the global header's Collection entry is also a
-    // /collection/* link and it renders before the rail.
-    let rail = html
-        .split_once("aria-label=\"采集导航\"")
-        .expect("collection renders its rail")
-        .1
-        .split_once("</aside>")
-        .expect("the rail closes")
-        .0;
-
-    let mut positions = Vec::new();
-    for (index, slug) in [
-        ("01", "attention"),
-        ("02", "targets"),
-        ("03", "operations"),
-        ("04", "tasks"),
-        ("05", "runtime"),
-        ("06", "domains"),
-    ] {
-        let entry = format!("href=\"/collection/{slug}\"");
-        let at = rail
-            .find(&entry)
-            .unwrap_or_else(|| panic!("rail is missing {slug}"));
-        assert!(
-            rail[at..].contains(&format!("<i>{index}</i>")),
-            "{slug} must be numbered {index}"
-        );
-        positions.push(at);
-    }
     assert!(
-        positions.windows(2).all(|pair| pair[0] < pair[1]),
-        "rail order must follow urgency, not pipeline stage"
+        html.contains(picker),
+        "domain labels are user data, not closed technical codes"
+    );
+    assert!(html.contains("return_to=%2Fcollection%2Ftasks%3Fdomain%3DUNKNOWN"));
+}
+
+#[tokio::test]
+async fn collection_default_and_retired_addresses_resolve_to_daily_pages() {
+    for (uri, location) in [
+        ("/collection", "/collection/targets"),
+        ("/collection/attention", "/collection/tasks"),
+        (
+            "/collection/operations?mode=trace&domain=all",
+            "/collection/tasks?domain=all",
+        ),
+        (
+            "/collection/attention?domain=00000000-0000-4000-8000-000000000001",
+            "/collection/tasks?domain=00000000-0000-4000-8000-000000000001",
+        ),
+    ] {
+        let response = app()
+            .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
+        assert_eq!(response.headers().get(header::LOCATION).unwrap(), location);
+    }
+}
+
+#[tokio::test]
+async fn collection_management_entries_and_single_collection_have_distinct_locations() {
+    let targets = get_successful_utf8_response(app(), "/collection/targets?domain=all").await;
+    let picker = targets
+        .split_once("<details class=\"v7-domain-picker\"")
+        .unwrap()
+        .1
+        .split_once("</details>")
+        .unwrap()
+        .0;
+    assert!(picker.contains("管理领域"));
+    assert!(picker.contains("/collection/domains?return_to="));
+    assert!(!targets.contains("id=\"monitor-rule-single-collection\""));
+    for uri in [
+        "/collection/targets?domain=all",
+        "/collection/tasks?domain=all",
+    ] {
+        let page = get_successful_utf8_response(app(), uri).await;
+        let meta = page
+            .split_once("class=\"v7-context-meta\"")
+            .unwrap()
+            .1
+            .split_once("</div>")
+            .unwrap()
+            .0;
+        assert!(meta.contains("data-collection-management"));
+        assert!(meta.contains("/collection/runtime?return_to="));
+    }
+    let tasks = get_successful_utf8_response(app(), "/collection/tasks?domain=all").await;
+    assert_eq!(
+        tasks
+            .matches("id=\"monitor-rule-single-collection\"")
+            .count(),
+        1
+    );
+    let once = get_successful_utf8_response(app(), "/collection/tasks?domain=all&once=1").await;
+    assert!(once.contains("data-monitor-rule-initial-focus"));
+    assert!(
+        !once.contains("name=\"command_kind\" value=\"manual_observe\""),
+        "unreadable target/rule data cannot enable submission"
+    );
+}
+
+#[tokio::test]
+async fn collection_station_actions_preserve_the_return_context_on_failure() {
+    let target = "00000000-0000-4000-8000-000000000001";
+    let encoded_return = "%2Fcollection%2Ftasks%3Fdomain%3Dall";
+    for (route, fields) in [
+        ("stations", "display_name=fixture".to_owned()),
+        (
+            "stations/name",
+            format!("station_ref={target}&display_name=fixture"),
+        ),
+        (
+            "claim-window",
+            format!("station_ref={target}&valid_for_hours=1"),
+        ),
+        ("close-window", format!("station_ref={target}")),
+        ("retire", format!("station_ref={target}")),
+        (
+            "claims",
+            format!("station_ref={target}&installation_ref={target}"),
+        ),
+        ("accepting", format!("station_ref={target}&accepting=false")),
+        (
+            "account-bindings",
+            format!("installation_ref={target}&account_ref={target}"),
+        ),
+    ] {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/collection/runtime/{route}"))
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from(format!("{fields}&return_to={encoded_return}")))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SEE_OTHER, "{route}");
+        let location = response
+            .headers()
+            .get(header::LOCATION)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(location.starts_with("/collection/runtime?"));
+        assert!(location.contains("error=read_model_not_connected"));
+        assert!(
+            location.contains(&format!("return_to={encoded_return}")),
+            "{route} lost return context"
+        );
+    }
+}
+
+#[tokio::test]
+async fn collection_management_keeps_domain_in_its_daily_navigation() {
+    for page in ["runtime", "domains"] {
+        let html = get_successful_utf8_response(
+            app(),
+            &format!("/collection/{page}?return_to=%2Fcollection%2Ftasks%3Fdomain%3Dall"),
+        )
+        .await;
+        let rail = html
+            .split_once("aria-label=\"采集导航\"")
+            .unwrap()
+            .1
+            .split_once("</aside>")
+            .unwrap()
+            .0;
+        assert!(rail.contains("href=\"/collection/tasks?domain=all\""));
+        assert!(html.contains("data-collection-management-return"));
+    }
+    assert_eq!(
+        management_nav_domain(Some("https://example.invalid/collection/tasks?domain=all")),
+        None
+    );
+    assert_eq!(
+        management_nav_domain(Some(
+            "/collection/tasks?domain=all#monitor-rule-single-collection"
+        )),
+        Some("all".to_owned())
+    );
+}
+
+#[tokio::test]
+async fn collection_task_return_scope_only_applies_to_manual_observation() {
+    for (command, expected_page) in [
+        ("manual_observe", "/collection/tasks?"),
+        ("save_rule", "/collection/targets?"),
+    ] {
+        let response = app().oneshot(Request::builder().method("POST").uri("/collection/targets/rules")
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .body(Body::from(format!("target_ref=00000000-0000-4000-8000-000000000001&expected_revision=0&idempotency_key=00000000-0000-4000-8000-000000000002&command_kind={command}&return_scope=tasks&return_domain=all"))).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        let location = response
+            .headers()
+            .get(header::LOCATION)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(location.starts_with(expected_page));
+        assert!(location.contains("error=read_model_not_connected"));
+        if command == "manual_observe" {
+            assert!(location.contains("domain=all"));
+        }
+    }
+}
+
+#[tokio::test]
+async fn collection_domain_save_failure_keeps_draft_and_original_return_location() {
+    let response = app().oneshot(Request::builder().method("POST").uri("/collection/domains/save")
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .body(Body::from("name=Fixture%20domain&research_goal=Unchanged%20draft&return_to=%2Fcollection%2Ftargets%3Fdomain%3Dall%26filter%3Dcreator")).unwrap()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = String::from_utf8(
+        to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(html.contains("class=\"domain-draft\""));
+    assert!(html.contains("value=\"Fixture domain\""));
+    assert!(html.contains("value=\"Unchanged draft\""));
+    assert!(html.contains(
+        "name=\"return_to\" value=\"/collection/targets?domain=all&amp;filter=creator\""
+    ));
+    assert!(html.contains("domain-feedback-error"));
+    assert!(
+        html.find("class=\"domain-draft\"").unwrap()
+            < html.find("<!-- collection-body:end -->").unwrap()
+    );
+    assert!(html.contains("<section class=\"domain-management\"><form class=\"domain-draft\""));
+    assert_eq!(
+        html.matches("data-collection-management-context").count(),
+        1
     );
 }
 
