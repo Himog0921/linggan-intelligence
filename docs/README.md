@@ -41,6 +41,7 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发，并于 2026-10-02 
 | [plans/active/ocr-content-layering-001.md](plans/active/ocr-content-layering-001.md) | 活跃计划；Issue #296；受保护工作树 | PaddleOCR 替换、逐行版面/内容分层、封面标题补位与 Tesseract OCR 可审计退役 |
 | [decisions/0007-ocr-content-layering.md](decisions/0007-ocr-content-layering.md) | 权威当前 | OCR 原始事实、内容分层、视觉选择边界和展示标题来源的长期决定 |
 | [decisions/0008-peer-domains-and-unified-material-pipeline.md](decisions/0008-peer-domains-and-unified-material-pipeline.md) | 权威当前 | 平级 Domain、共享真实 Target、primary/reference 用途、统一材料链与 Domain pause 的长期决定 |
+| [decisions/0009-stage-one-job-topic-pool.md](decisions/0009-stage-one-job-topic-pool.md) | 权威当前 | 第一阶段主 Job：小红书选题池经营（复用与试新、爆款标准、成功指标、升级条件）、运营模块整体迁入与先后顺序；所取代的旧条款与待裁定事项 |
 | [data-contracts/ocr-content-layering.md](data-contracts/ocr-content-layering.md) | 权威当前 | OCR raw/layout/行引用、分层状态、标题回退与视觉模型输出闭集 |
 | [runbooks/paddle-ocr-runtime.md](runbooks/paddle-ocr-runtime.md) | 权威当前 | 本机 Paddle runtime 准备、无 Tesseract 回退、迁移后受控重排步骤 |
 | [decisions/0006-comment-research-clean-rebuild.md](decisions/0006-comment-research-clean-rebuild.md) | 权威当前 | Issue #295：开发期销毁旧评论研究派生层，保留原始 Evidence 与资格事实；唯一的新评论研究合同与本机 reset 边界 |
@@ -226,7 +227,7 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发，并于 2026-10-02 
 | [`architecture/data-consistency.md`](architecture/data-consistency.md) | 草案 | 数据架构第三层；定义事务、重放、并发、隐私传播和 PostgreSQL 16 可证伪验收，不是 SQL 或 migration |
 | [`architecture/current-v2-architecture.md`](architecture/current-v2-architecture.md) | 代码事实优先 | 现役 V2 固定点的参考架构 |
 | [`architecture/rust-porting-map.md`](architecture/rust-porting-map.md) | 草案 | Rust 移植候选参考；只有正式 SCOPE 内明确列出的部分可以实施 |
-| [`pages/intelligence-product-blueprint.md`](pages/intelligence-product-blueprint.md) | 草案；DES-INTELLIGENCE-20260906 | 独立首页与四工作区、16 个二级页、功能/状态/跳转、事实归属与落地依赖；按用户最新选择移出选题生产 |
+| [`pages/intelligence-product-blueprint.md`](pages/intelligence-product-blueprint.md) | 草案；DES-INTELLIGENCE-20260906 | 独立首页与四工作区、16 个二级页、功能/状态/跳转、事实归属与落地依赖；"移出选题生产"已由 DEC-0009 修订 |
 | [`plans/active/intelligence-product-001-implementation-plan.md`](plans/active/intelligence-product-001-implementation-plan.md) | 活跃计划；仅计划编制，实施待派定 | 已确认决定、main/PR 事实核对、P00–P08 交付顺序、全页面覆盖、单包任务模板、模型引用与反例验收；语料资产归评论研究页内 |
 | [`pages/intelligence-home-threejs.md`](pages/intelligence-home-threejs.md) | 草案；DES-INTELLIGENCE-20260906 | 三栏首页、稳定地形、语义映射、安静/中断/空态、Three.js 与 HTML 等价入口及验证边界 |
 | [`design/pages/intelligence-product-prototype.html`](design/pages/intelligence-product-prototype.html) | 合成设计演示 | 自包含可点击原型，实际 Three.js；预置分析与本地状态，不接真实系统 |
