@@ -35,6 +35,15 @@ pub(super) async fn execute(
         model.get("output_token_limit"),
     )
     .await?;
+    if prepared.review_catalog_changed {
+        sqlx::query("UPDATE linggan_topic_map_research_task SET recall_manifest=recall_manifest-'semanticReview',phase_attempt_count=0,last_reason='definition_changed_recalling' WHERE task_ref=$1 AND state='queued' AND attempt_count=$2")
+            .bind(task).bind(row.get::<i32,_>("attempt_count")).execute(db.pool()).await?;
+        return Ok(true);
+    }
+    if prepared.review_unavailable {
+        sqlx::query("UPDATE linggan_topic_map_research_task SET state='failed',last_reason='semantic_review_unavailable' WHERE task_ref=$1 AND state='queued' AND attempt_count=$2").bind(task).bind(row.get::<i32,_>("attempt_count")).execute(db.pool()).await?;
+        return Ok(true);
+    }
     if prepared.rule_feedback_unavailable {
         sqlx::query("UPDATE linggan_topic_map_research_task SET state='failed',last_reason='rule_feedback_unavailable' WHERE task_ref=$1 AND state='queued' AND phase=$2 AND attempt_count=$3")
             .bind(task).bind(row.get::<String,_>("phase")).bind(row.get::<i32,_>("attempt_count")).execute(db.pool()).await?;
@@ -290,7 +299,7 @@ async fn reserve(
     let ordinal = task_row.get::<i32, _>("attempt_count") + 1;
     let request_hash=linggan_evidence::creator_discovery::hash(&json!({"input":hash,"model":config,"method":analysis::METHOD_VERSION,"phase":phase,"system":provider.system,"prompt":provider.prompt}).to_string());
     sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,config_ref,operation,request_hash,state,reserved_tokens,charged_tokens,result) VALUES($1,$2,$3,$4,'analyze',$5,'running',$6,$6,$7)").bind(invocation).bind(model.get::<Uuid,_>("connection_version_ref")).bind(model.get::<Uuid,_>("model_ref")).bind(config).bind(&request_hash).bind(reserved).bind(json!({"purpose":"topic_map","domainRef":domain,"runRef":run,"taskRef":task,"methodVersion":analysis::METHOD_VERSION})).execute(&mut *tx).await?;
-    sqlx::query("INSERT INTO linggan_topic_map_research_request(invocation_ref,task_ref,run_ref,attempt_ordinal,request_hash,request_manifest,budget_day,deadline_at,phase)VALUES($1,$2,$3,$4,$5,$6,(scope_001_now()AT TIME ZONE 'Asia/Shanghai')::date,scope_001_now()+make_interval(secs=>$7),$8)").bind(invocation).bind(task).bind(run).bind(ordinal).bind(&request_hash).bind(json!({"source":topic_map_research::reference_manifest(&input),"phase":phase,"unitIds":prepared.units.iter().map(|(id,_)|id).collect::<Vec<_>>(),"topics":prepared.candidates,"recall":prepared.recall,"validationFeedback":serde_json::from_str::<Value>(&provider.prompt).ok().and_then(|v|v.get("validationFeedback").cloned())})).bind(model.get::<i32,_>("timeout_seconds")+30).bind(&phase).execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO linggan_topic_map_research_request(invocation_ref,task_ref,run_ref,attempt_ordinal,request_hash,request_manifest,budget_day,deadline_at,phase)VALUES($1,$2,$3,$4,$5,$6,(scope_001_now()AT TIME ZONE 'Asia/Shanghai')::date,scope_001_now()+make_interval(secs=>$7),$8)").bind(invocation).bind(task).bind(run).bind(ordinal).bind(&request_hash).bind(json!({"source":topic_map_research::reference_manifest(&input),"phase":phase,"unitIds":prepared.units.iter().map(|(id,_)|id).collect::<Vec<_>>(),"topics":prepared.candidates,"recall":prepared.recall,"semanticStage":if prepared.review.is_some(){"review"}else{"proposal"},"proposalHash":prepared.review.as_ref().map(|p|p.fingerprint()).transpose()?,"sourceInvocationRef":prepared.review.as_ref().map(|p|p.source_invocation_ref),"validationFeedback":serde_json::from_str::<Value>(&provider.prompt).ok().and_then(|v|v.get("validationFeedback").cloned())})).bind(model.get::<i32,_>("timeout_seconds")+30).bind(&phase).execute(&mut *tx).await?;
     sqlx::query("UPDATE linggan_topic_map_research_task SET state='running',attempt_count=$2,phase_attempt_count=phase_attempt_count+1,lease_token=$3,lease_expires_at=scope_001_now()+make_interval(secs=>$4)WHERE task_ref=$1").bind(task).bind(ordinal).bind(lease).bind(model.get::<i32,_>("timeout_seconds")+30).execute(&mut *tx).await?;
     sqlx::query("UPDATE linggan_topic_map_research_run SET state='running',updated_at=scope_001_now()WHERE run_ref=$1").bind(run).execute(&mut *tx).await?;
     tx.commit().await?;
@@ -435,6 +444,25 @@ fn validated_response(
     let text = response.text.as_deref().ok_or("output_text_missing")?;
     if text.len() > 65536 {
         return Err("response_too_large".into());
+    }
+    if let Some(review) = &prepared.review {
+        let output: analysis::verification::VerificationOutput =
+            decode_output(text, &analysis::verification::verify_schema())?;
+        analysis::verification::validate_verification(&output, &prepared.review_packet["checks"])
+            .map_err(|code| ValidationRejection {code,diagnostic:json!({"rule":code,
+                "semanticChecks":output.checks.iter().filter(|c|c.verdict!="pass").filter_map(|c|
+                    prepared.review_packet["checks"].as_array()?.iter().find(|expected|expected["checkId"]==c.check_id)
+                    .map(|expected|json!({"checkId":expected["checkId"],"rule":expected["rule"],"verdict":if c.verdict=="fail"{"fail"}else{"uncertain"}})))
+                    .take(96).collect::<Vec<_>>()})})?;
+        return if phase == "resolve" {
+            let proposal = serde_json::from_value(review.proposal.clone())
+                .map_err(|_| ValidationRejection::from("semantic_review_unavailable"))?;
+            Ok((None, Some(proposal)))
+        } else {
+            let proposal = serde_json::from_value(review.proposal.clone())
+                .map_err(|_| ValidationRejection::from("semantic_review_unavailable"))?;
+            Ok((Some(proposal), None))
+        };
     }
     if phase == "extract" || phase == "compare" {
         let output = analysis::decode_compact_output(text, &input.fragments)

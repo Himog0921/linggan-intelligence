@@ -20,6 +20,10 @@ pub(super) fn safe_feedback(code: &str, diagnostic: &Value) -> Option<Value> {
             if !safe_path(path)
                 || path.split(['.', '[', ']']).any(|field| {
                     [
+                        "quote",
+                        "checks",
+                        "checkId",
+                        "verdict",
                         "fragmentId",
                         "start",
                         "end",
@@ -144,7 +148,7 @@ fn correctable_code(code: Option<&str>) -> bool {
 
 /// Only the live restoration map is derived metadata. Hashes, ranges, roles,
 /// context participants and exact definition dependencies retain full equality.
-fn source_stamp_equal(left: &Value, right: &Value) -> bool {
+pub(super) fn source_stamp_equal(left: &Value, right: &Value) -> bool {
     fn stamp(value: &Value) -> Option<Value> {
         let object = value.as_object()?;
         let mut source = if let Some(source) = object.get("source") {

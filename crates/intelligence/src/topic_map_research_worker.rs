@@ -12,14 +12,16 @@ use linggan_storage_postgres::Database;
 use serde_json::{Value, json};
 use sqlx::Row;
 use uuid::Uuid;
-#[path = "topic_map_research_worker/feedback.rs"]
-mod feedback;
 #[path = "topic_map_research_worker/dispatch.rs"]
 mod dispatch;
+#[path = "topic_map_research_worker/feedback.rs"]
+mod feedback;
 #[path = "topic_map_research_worker/lifecycle.rs"]
 mod lifecycle;
 #[path = "topic_map_research_worker/preparation.rs"]
 mod preparation;
+#[path = "topic_map_research_worker/semantic.rs"]
+mod semantic;
 #[path = "topic_map_research_worker/settlement.rs"]
 mod settlement;
 use preparation::prepare;
@@ -128,7 +130,7 @@ async fn next_task(db: &Database) -> Result<Option<sqlx::postgres::PgRow>, Model
             AND request.dispatch_started_at IS NOT NULL
           ORDER BY request.created_at DESC,request.invocation_ref DESC LIMIT 3
         ) recent) THEN 0 ELSE 2 END ELSE 1 END,
-        CASE t.phase WHEN 'resolve' THEN 0 WHEN 'compare' THEN 1 ELSE 2 END,
+        CASE WHEN t.recall_manifest ? 'semanticReview' THEN 0 WHEN t.phase='resolve' THEN 1 WHEN t.phase='compare' THEN 2 ELSE 3 END,
         (SELECT max(q.created_at) FROM linggan_topic_map_research_request q WHERE q.run_ref=r.run_ref) ASC NULLS FIRST,
         r.created_at,r.run_ref,t.created_at,t.task_ref
       LIMIT 1
@@ -148,4 +150,8 @@ struct Prepared {
     rule_feedback_unavailable: bool,
     eligible_definitions: Vec<Uuid>,
     previous: Vec<Value>,
+    review: Option<semantic::ReviewProposal>,
+    review_packet: Value,
+    review_unavailable: bool,
+    review_catalog_changed: bool,
 }

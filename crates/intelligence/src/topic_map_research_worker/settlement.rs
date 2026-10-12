@@ -24,6 +24,7 @@ struct AcceptedPhase {
     reason: Option<&'static str>,
     output: Option<ResearchOutput>,
     units: Vec<Value>,
+    proposal: Option<super::semantic::ReviewProposal>,
 }
 
 pub(super) async fn settle(db: &Database, mut c: Completion<'_>) -> Result<(), ModelError> {
@@ -67,7 +68,14 @@ pub(super) async fn settle(db: &Database, mut c: Completion<'_>) -> Result<(), M
     if let Some(output) = &accepted.output {
         append_result(&mut tx, &c, output, &accepted.units).await?;
     }
-    let mut invocation_result = json!({"accepted":accepted.reason.is_none(),"dispatchUnknown":accepted.state=="unknown_dispatch","phaseComplete":accepted.reason.is_none() && accepted.state!="failed" && accepted.state!="unknown_dispatch"});
+    let mut invocation_result = json!({"accepted":accepted.reason.is_none() && accepted.proposal.is_none(),"dispatchUnknown":accepted.state=="unknown_dispatch","phaseComplete":accepted.reason.is_none() && accepted.proposal.is_none() && accepted.state!="failed" && accepted.state!="unknown_dispatch"});
+    if let Some(proposal) = &accepted.proposal {
+        invocation_result["proposalReady"] = json!(true);
+        invocation_result["proposalHash"] = json!(proposal.fingerprint()?);
+    }
+    if let Some(review) = &c.prepared.review {
+        invocation_result["semanticReview"] = json!({"contract":analysis::verification::VERIFY_CONTRACT,"sourceInvocationRef":review.source_invocation_ref,"proposalHash":review.fingerprint()?,"passed":accepted.reason.is_none()});
+    }
     // Attach only the validator that actually rejected this acceptance. A source
     // change or late result must never inherit an unrelated model diagnosis.
     if accepted.reason.is_some()
@@ -86,7 +94,7 @@ pub(super) async fn settle(db: &Database, mut c: Completion<'_>) -> Result<(), M
     )
     .await?;
     sqlx::query("UPDATE linggan_topic_map_research_task SET state=$3,last_reason=$4,lease_token=NULL,lease_expires_at=NULL,updated_at=scope_001_now()WHERE task_ref=$1 AND lease_token=$2")
-        .bind(c.task).bind(c.lease).bind(accepted.state).bind(accepted.reason).execute(&mut *tx).await?;
+        .bind(c.task).bind(c.lease).bind(accepted.state).bind(if accepted.proposal.is_some(){Some("semantic_review_pending")}else{accepted.reason}).execute(&mut *tx).await?;
     tx.commit().await?;
     Ok(())
 }
@@ -100,11 +108,32 @@ async fn accept_phase(
         reason: Some(c.rejection.unwrap_or("invalid_output")),
         output: None,
         units: c.prepared.previous.clone(),
+        proposal: None,
     };
     if let Some((state, reason)) = pre_acceptance_failure(c.response, c.source_current) {
         accepted.state = state;
         accepted.reason = Some(reason);
         return Ok(accepted);
+    }
+    if c.prepared.review.is_none() && (c.extracted.is_some() || c.resolved.is_some()) {
+        if !c.candidate_sources_current {
+            accepted.reason = Some("definition_source_unavailable");
+            return Ok(accepted);
+        }
+        let proposal = if let Some(output) = &c.extracted {
+            serde_json::to_value(output)
+        } else {
+            serde_json::to_value(c.resolved.as_ref().ok_or(ModelError::InvalidOutput)?)
+        }
+        .map_err(|_| ModelError::InvalidOutput)?;
+        accepted.proposal = Some(super::semantic::stage_proposal(tx, c, proposal).await?);
+        accepted.state = "queued";
+        accepted.reason = None;
+        return Ok(accepted);
+    }
+    if c.prepared.review.is_some() && c.rejection.is_none() {
+        sqlx::query("UPDATE linggan_topic_map_research_task SET recall_manifest=recall_manifest-'semanticReview' WHERE task_ref=$1")
+            .bind(c.task).execute(&mut **tx).await?;
     }
     if let Some(output) = c.extracted.take() {
         accepted.reason = None;
@@ -134,6 +163,7 @@ async fn accept_phase(
         accepted.reason = Some("request_not_started");
     }
     if accepted.state == "failed"
+        && c.prepared.review.is_none()
         && c.source_current
         && c.candidate_sources_current
         && c.response.is_some_and(|r| r.ok)
@@ -243,6 +273,7 @@ async fn accept_resolution(
             reason: Some("definition_changed_recalling"),
             output: None,
             units: c.prepared.previous.clone(),
+            proposal: None,
         });
     }
     let mut units = c.prepared.previous.clone();
@@ -258,6 +289,10 @@ async fn accept_resolution(
                 candidates: &c.prepared.candidates,
                 recall: &c.prepared.recall,
                 eligible_definitions: &c.eligible_definitions,
+                semantic_verification: &json!({"contract":analysis::verification::VERIFY_CONTRACT,"passed":true,
+                    "reviewInvocationRef":c.invocation,"sourceInvocationRef":c.prepared.review.as_ref().ok_or(ModelError::InvalidOutput)?.source_invocation_ref,
+                    "proposalHash":c.prepared.review.as_ref().ok_or(ModelError::InvalidOutput)?.fingerprint()?,
+                    "checkCount":c.prepared.review_packet["checks"].as_array().map(Vec::len)}),
             },
         )
         .await?,
@@ -272,6 +307,7 @@ async fn accept_resolution(
         reason: None,
         output: complete.then(|| draft.clone()),
         units,
+        proposal: None,
     })
 }
 

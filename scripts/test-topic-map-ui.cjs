@@ -178,6 +178,14 @@ src=src.replace(tail,`globalThis.audit={dispatchClick,readSample,readWork,reader
  assert(currentSection.includes('失败、派发未知、旧方法退役均不计入'));
  assert(fullProgress.includes('当前方法进展尚未读取'),'absence must never fall back to the historical summary');
  console.log('PASS: current method progress excludes legacy identity and terminal failures remain visible');
+ for(const [reason,text] of [['citation_quote_not_found','逐字找到'],['citation_quote_ambiguous','出现多次'],['discussion_source_role_mismatch','引用来源不符'],['semantic_discussion_unsupported','完整主张'],['semantic_discussion_non_atomic','不同问题或障碍'],['semantic_assignment_boundary','纳入条件和排除边界'],['semantic_identity_relation','不同障碍'],['semantic_parent_containment','完全包含']])assert(renderProgress({...progressRun,taskIssues:[{phase:'resolve',state:'failed',reason}]}).includes(text),reason);
+ const semanticIssue=renderProgress({...progressRun,taskIssues:[{phase:'resolve',state:'failed',reason:'semantic_parent_containment',validationDiagnostic:{rule:'semantic_parent_containment',semanticChecks:[{checkId:'u0.p',rule:'semantic_parent_containment',verdict:'fail',reason:'PRIVATE_MODEL_TEXT'},{checkId:'<script>PRIVATE_ID</script>',rule:'semantic_unknown',verdict:'fail'}]}}]});
+ assert(semanticIssue.includes('u0.p'));assert(!semanticIssue.includes('PRIVATE_MODEL_TEXT'));assert(!semanticIssue.includes('PRIVATE_ID'));
+ console.log('PASS: quote, atomic discussion, boundary and parent failure rules stay specific without model text disclosure');
+ ctx.audit.set(snap,{type:'research',progress:{policy:{status:'paused'},methodVersion:'topic-map.research.v5',currentMethodSummary:{completedInitialWindowCount:0,succeededCount:0,reviewQueuedCount:2,reviewRunningCount:1},runs:[]}});
+ const reviewing=ctx.audit.researchDialog();assert(reviewing.includes('等待语义复核 2 · 语义复核中 1'));assert(reviewing.includes('已处理 0 个独立窗口'));assert(reviewing.includes('已接纳结果 0'));assert(reviewing.includes('旧方法结果不自动取得新质量标识'));
+ console.log('PASS: pending semantic reviews remain separate from accepted results and coverage');
+
  const domainCommands=[];
  ctx.fetch=async(url,options)=>{if(options?.method==='POST')domainCommands.push(JSON.parse(options.body));return{ok:true,json:async()=>options?.method==='POST'?{state:'queued'}:{policy:{status:'active'},summary,runs:[],runListLimit:30}};};
  blank.contains=()=>true;

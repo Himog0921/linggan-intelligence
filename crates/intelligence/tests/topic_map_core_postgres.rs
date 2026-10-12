@@ -77,7 +77,10 @@ async fn canonical_identity_uses_boundaries_and_preserves_low_frequency_countere
         2,
         "same name with a different boundary creates a separate identity"
     );
-    assert!(topics.iter().all(|t| t.core["qualityState"] == "current"), "compact-method concepts must not be mislabeled as legacy candidates");
+    assert!(
+        topics.iter().all(|t| t.core["qualityState"] == "current"),
+        "compact-method concepts must not be mislabeled as legacy candidates"
+    );
     assert_eq!(topics[0].display_name, topics[1].display_name);
     assert_ne!(topics[0].definition_text, topics[1].definition_text);
     let start_topic = topics
@@ -130,6 +133,11 @@ async fn accepted_partial_unit_survives_budget_pause_without_publishing_draft_an
     run_once(&db, &SyntheticModelSecrets, &adapter)
         .await
         .unwrap();
+    for _ in 0..2 {
+        run_once(&db, &SyntheticModelSecrets, &adapter)
+            .await
+            .unwrap();
+    }
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_topic_map_unit_resolution")
             .fetch_one(db.pool())
@@ -240,7 +248,16 @@ async fn concurrent_workers_recheck_the_prepared_phase_after_waiting_for_the_mod
             .fetch_one(db.pool())
             .await
             .unwrap(),
-        "resolve"
+        "extract"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, bool>(
+            "SELECT recall_manifest ? 'semanticReview' FROM linggan_topic_map_research_task"
+        )
+        .fetch_one(db.pool())
+        .await
+        .unwrap(),
+        true
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_topic_map_research_result")

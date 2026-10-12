@@ -22,14 +22,23 @@ pub(super) async fn prepare(
         definition_unavailable: false,
         rule_feedback_unavailable: false,
         eligible_definitions: vec![],
+        review: None,
+        review_packet: Value::Null,
+        review_unavailable: false,
+        review_catalog_changed: false,
         previous: row
             .get::<Value, _>("resolutions_json")
             .as_array()
             .cloned()
             .unwrap_or_default(),
     };
+    if super::semantic::prepare_review(db, input, row, &mut prepared, input_limit, output_limit)
+        .await?
+    {
+        return Ok(prepared);
+    }
     if phase == "extract" || phase == "compare" {
-        prepared.system.push_str("\n运输约定：上述字段名描述展开后的业务语义。实际只返回 topic-map.extract.compact.v1 的 outputSchema 短键JSON，不返回业务长键；outputFieldNames 给出映射。证据的 f 是 input.fragments 中的 fragmentIndex，s/e 仍为原来源Unicode字符坐标，不得改为窗口内坐标。评论 fragmentIndex 与 parentFragmentIndexes 对应同一冻结编号；父上下文必须和对应主评论共同引用。所有业务字段及低频讨论均保留，短键只减少运输重复。");
+        prepared.system.push_str("\n运输约定：上述字段名描述展开后的业务语义。实际只返回 topic-map.extract.quotes.v1 的 outputSchema 短键JSON，不返回业务长键；outputFieldNames 给出映射。证据只包含 f（冻结 fragmentIndex）与 q（逐字短引句），绝不返回s/e或长键；短引句须在指定片段中完整且唯一出现，多个不连续句可分别引用，不能拼接成不存在的引句。评论 fragmentIndex 与 parentFragmentIndexes 对应同一冻结编号；父上下文必须和对应主评论共同引用。所有业务字段及低频讨论均保留，短键只减少运输重复。");
         prepared.prompt=json!({"contract":analysis::COMPACT_EXTRACT_CONTRACT,"inputTokenLimit":input_limit,"outputTokenLimit":output_limit,
             "input":{"domain":input.domain,"workRef":input.work.work_ref,"fragments":compact_provider_fragments(&input.fragments, input.work.work_ref, &input.coverage),
                 "definitions":[],"commentStudy":compact_provider_comments(&input.comment_study, &input.fragments),"roleMetadata":input.role_metadata,

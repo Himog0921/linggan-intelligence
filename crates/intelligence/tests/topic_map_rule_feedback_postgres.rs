@@ -141,6 +141,20 @@ async fn schema_and_missing_journey_correct_once_then_require_valid_source_resul
         assert_eq!(feedback["sourceInvocationRef"], json!(original_invocation));
         assert_eq!(feedback["code"], reason);
         assert!(!feedback.to_string().contains("PRIVATE_PROVIDER_DIAGNOSTIC"));
+        assert_eq!(
+            sqlx::query_scalar::<_, bool>(
+                "SELECT recall_manifest ? 'semanticReview' FROM linggan_topic_map_research_task"
+            )
+            .fetch_one(db.pool())
+            .await
+            .unwrap(),
+            true
+        );
+        assert!(
+            run_once(&db, &SyntheticModelSecrets, &adapter)
+                .await
+                .unwrap()
+        );
         let phase: String = sqlx::query_scalar("SELECT phase FROM linggan_topic_map_research_task")
             .fetch_one(db.pool())
             .await
@@ -158,7 +172,7 @@ async fn schema_and_missing_journey_correct_once_then_require_valid_source_resul
             1
         );
         assert_eq!(sqlx::query_scalar::<_,i64>("SELECT count(*) FROM linggan_model_invocation WHERE operation='analyze' AND state='failed'").fetch_one(db.pool()).await.unwrap(),1);
-        assert_eq!(call_count(&db).await, 3);
+        assert_eq!(call_count(&db).await, 5);
     }
 }
 
@@ -235,6 +249,11 @@ async fn complete_candidate_comparison_is_regenerated_not_filled_with_defaults()
     apply_research_command(&db, &start(vec![second]))
         .await
         .unwrap();
+    assert!(
+        run_once(&db, &SyntheticModelSecrets, &adapter)
+            .await
+            .unwrap()
+    );
     assert!(
         run_once(&db, &SyntheticModelSecrets, &adapter)
             .await

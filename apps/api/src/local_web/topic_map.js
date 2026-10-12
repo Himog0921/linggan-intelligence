@@ -697,10 +697,12 @@
     if(!diagnostic||typeof diagnostic!=='object')return '';
     const rules={required_property:'缺少必填字段',unknown_property:'含有合同外字段',type:'字段类型错误',type_or_format:'字段类型或格式错误',enum:'字段值不属于允许范围',min_length:'字段长度低于下限',max_length:'字段长度超过上限',min_items:'条目数量低于下限',max_items:'条目数量超过上限',fragment_index:'引用索引不在本次材料中',contract:'输出合同版本错误',json:'JSON 格式错误',minimum:'数值低于下限'};
     const rule=typeof diagnostic.rule==='string'&&Object.hasOwn(rules,diagnostic.rule)?rules[diagnostic.rule]:null;
-    const fields=new Set(['contract','outcome','discussions','scenes','journey','responseMatches','angles','productOpportunities','limitations','label','statement','definition','inclusionCriteria','exclusionCriteria','speakerRole','evidenceRole','rationale','topicRef','evidence','fragmentId','start','end','mainStage','involvedStages','overlays','path','status','unanswered','title','answerTask','need','hypothesis','verificationQuestion','alternativeExplanation','decisions','unitId','matches','definitionRef','reason','proposedTopic','relations','relation','domainFit','domainReason','abstractionReason','parent','kind','proposal']);
+    const fields=new Set(['contract','outcome','discussions','scenes','journey','responseMatches','angles','productOpportunities','limitations','label','statement','definition','inclusionCriteria','exclusionCriteria','speakerRole','evidenceRole','rationale','topicRef','evidence','fragmentId','quote','checks','checkId','verdict','start','end','mainStage','involvedStages','overlays','path','status','unanswered','title','answerTask','need','hypothesis','verificationQuestion','alternativeExplanation','decisions','unitId','matches','definitionRef','reason','proposedTopic','relations','relation','domainFit','domainReason','abstractionReason','parent','kind','proposal']);
     const path=diagnostic.schemaPath;
     const safePath=typeof path==='string'&&path.length<=300&&(path===''||(/^[A-Za-z][A-Za-z0-9]*(?:\[\d{1,6}\]|\.[A-Za-z][A-Za-z0-9]*)*$/.test(path)&&path.split(/[.\[\]]/).filter(Boolean).every(part=>/^\d{1,6}$/.test(part)||fields.has(part))));
     const counts=[['candidateCount','召回候选'],['unitCount','本次讨论'],['decisionCount','归属决定']].filter(([key])=>Number.isSafeInteger(diagnostic[key])&&diagnostic[key]>=0&&diagnostic[key]<=64).map(([key,label])=>`${label} ${number(diagnostic[key])}`);
+    const semantic=list(diagnostic.semanticChecks).filter(c=>typeof c?.checkId==='string'&&/^[a-z][a-z0-9.]{0,31}$/.test(c.checkId)&&['fail','uncertain'].includes(c.verdict)&&typeof c.rule==='string'&&/^semantic_[a-z_]{1,50}$/.test(c.rule)).slice(0,96).map(c=>`${esc(c.checkId)} · ${c.verdict==='fail'?'未通过':'未确定'} · ${esc(c.rule)}`);
+    if(semantic.length)return `<p class="lgi-tm-note">语义检查：${semantic.join('；')}</p>`;
     if(!rule&&!counts.length)return '';
     return `<p class="lgi-tm-note">${rule?`格式规则：${esc(rule)}${safePath?` · 字段位置：${esc(path||'根对象')}`:''}`:''}${counts.length?`${rule?' · ':''}${counts.join(' · ')}`:''}</p>`;
   }
@@ -711,6 +713,46 @@
     const reason=typeof issue.reason==='string'&&issue.reason?issue.reason:null;
     const reasons={rule_feedback_unavailable:'未取得与当前冻结输入及阶段一致的规则反馈，未发送纠偏请求。',journey_stage_invalid:'旅程主阶段不在允许范围。',journey_path_invalid:'旅程路径不在允许范围。',journey_involved_stage_count:'涉及旅程阶段数量超过上限。',journey_involved_stage_invalid:'涉及阶段不在允许范围。',journey_overlay_count:'旅程覆盖事件数量超过上限。',journey_overlay_invalid:'旅程覆盖事件不在允许范围。',journey_rationale_invalid:'旅程依据说明必须是有效非空短文本。',journey_evidence_missing:'已给出明确旅程阶段，但没有原文引用依据。',journey_evidence_invalid:'旅程引用未通过来源或原文位置校验。',model_input_limit:'输入超过模型配置上限，请检查输入范围与模型设置。',invalid_output:'模型返回内容未通过研究结果校验，历史记录未保留具体规则。',output_json_invalid:'模型返回内容不是有效 JSON。',output_schema_invalid:'模型返回字段不符合严格研究格式。',output_contract_mismatch:'模型返回的研究合同版本不匹配。',invalid_evidence:'研究引用未通过来源或原文位置校验。',output_validation_failed:'模型返回内容未通过研究接纳规则。',response_too_large:'模型流或最终文本超过受控响应大小限制。',invalid_response:'模型响应流不完整或格式不可用。',output_limit:'模型输出达到配置上限，结果未完整接纳。',output_text_missing:'模型没有返回可接纳的文本结果。',provider_response_rejected:'模型响应未通过受控传输校验。',provider_timeout:'模型请求超时。',provider_network_error:'模型请求发生网络错误。',provider_stream_interrupted:'模型响应流中断。',provider_terminal_missing:'模型响应缺少完整结束回执。',provider_content_filtered:'模型服务对响应执行了内容过滤。',unexpected_content:'模型返回了不允许的工具或非文本内容。',secret_echo_rejected:'模型输出触发了凭据回显保护。',authentication_failed:'模型连接认证失败。',provider_rate_limited:'模型服务限制了请求速率。',provider_unavailable:'模型服务暂时不可用。',provider_request_rejected:'模型服务拒绝了请求参数。',provider_endpoint_not_found:'模型连接地址不可用。',provider_redirect_rejected:'模型请求被不允许的重定向拒绝。',provider_failed:'模型服务未完成请求。',endpoint_rejected:'模型连接地址不符合受控连接要求。',invalid_request:'模型请求不符合传输合同。',invalid_research_phase:'研究任务阶段不符合合同。',invalid_output_structure:'研究输出的结构、状态或条目数量不符合合同。',invalid_unicode_fragment:'引用片段的 Unicode 位置不符合来源合同。',invalid_journey_evidence:'旅程判断的引用不符合来源或阶段规则。',invalid_discussion_evidence:'讨论的角色、引用或原文位置不符合规则。',invalid_response_evidence:'回应判断缺少合格引用或超出范围。',invalid_action_evidence:'角度或机会判断缺少合格引用或边界。',duplicate_angle_task:'模型重复返回同一角度任务。',duplicate_journey_stage:'模型重复返回同一旅程阶段。',invalid_resolution_candidates:'归属候选定义不符合本次检索范围。',duplicate_resolution_candidate:'归属候选重复。',invalid_resolution_structure:'归属输出的结构不符合合同。',invalid_resolution_units:'归属输出与本次讨论身份不匹配。',invalid_resolution_decision:'归属决定的理由或字段不符合规则。',invalid_resolution_match:'归属匹配不属于本次候选定义。',invalid_resolution_relation:'主题关系不符合候选范围或边界。',missing_proposed_topic:'新主题决定没有附带候选定义。',invalid_new_topic_boundary:'新主题未通过边界校验；这是历史笼统原因，未保存具体违反规则。',invalid_resolution_status:'归属状态不符合严格合同。',request_not_started:'请求未开始执行，当前任务已停止尝试。'};
     Object.assign(reasons,{
+      "semantic_review_pending":"提案等待独立语义复核，尚未接纳或计入有效覆盖。",
+      "semantic_review_unavailable":"待复核提案与原调用、来源或定义版本不一致，未发送复核请求。",
+      "semantic_review_uncertain":"独立复核仍无法确定，未接纳主题或计入有效覆盖。",
+      "semantic_review_contract_invalid":"独立复核返回的合同版本不正确。",
+      "semantic_review_coverage_invalid":"独立复核漏项、重复或返回了未请求的检查。",
+      "semantic_review_check_invalid":"独立复核判断或短理由不符合合同。",
+      "semantic_outcome_unsupported":"分析、无信号或材料不足的结论与原文不符。",
+      "semantic_discussion_unsupported":"引用未支持讨论的完整主张、表达者身份或计划与实际效果边界。",
+      "semantic_discussion_non_atomic":"讨论混合了可独立研究的不同问题或障碍。",
+      "semantic_scene_unsupported":"场景描述缺少完整原文支持。",
+      "semantic_journey_unsupported":"旅程阶段、路径或经历判断缺少原文支持。",
+      "semantic_response_unsupported":"回应匹配判断缺少双方材料支持。",
+      "semantic_angle_unsupported":"内容角度缺少证据依据或与其他角度重复。",
+      "semantic_opportunity_unsupported":"机会假设的需求或推论超过材料支持范围。",
+      "semantic_assignment_boundary":"归属未同时满足主题纳入条件和排除边界。",
+      "semantic_identity_relation":"同义主题未复用或不同障碍被混为同一主题。",
+      "semantic_concept_boundary":"概念定义拼接现象、扩大断言或把偶然属性固定成边界。",
+      "semantic_parent_containment":"子主题范围并非完全包含于父主题，相关或共现不足以建立父子关系。",
+      "invalid_citation_quote":"原文短引句为空、只有空白或超过长度限制。",
+      "citation_quote_not_found":"短引句未在指定冻结片段中逐字找到。",
+      "citation_quote_ambiguous":"短引句在指定冻结片段中出现多次，无法唯一定位。",
+      "invalid_citation_fragment_index":"引用片段编号不在当前冻结输入范围。",
+      "citation_missing":"缺少必需的原文引用。",
+      "citation_count_exceeded":"单项引用数量超过上限。",
+      "citation_fragment_not_found":"引用片段不属于冻结材料。",
+      "citation_range_invalid":"引用起止位置不在冻结片段有效范围。",
+      "citation_length_exceeded":"单条引用长度超过上限。",
+      "discussion_label_invalid":"讨论名称为空或超过长度限制。",
+      "discussion_topic_not_allowed":"提炼阶段不能自行指定主题归属。",
+      "discussion_statement_invalid":"讨论陈述为空或超过长度限制。",
+      "discussion_definition_invalid":"讨论定义为空或超过长度限制。",
+      "discussion_inclusion_invalid":"讨论纳入条件缺失、为空或超过数量长度限制。",
+      "discussion_exclusion_invalid":"讨论排除条件缺失、为空或超过数量长度限制。",
+      "discussion_criteria_duplicate":"讨论纳入和排除条件存在重复。",
+      "discussion_rationale_invalid":"讨论依据为空或超过长度限制。",
+      "discussion_speaker_role_invalid":"表达者角色不在允许范围。",
+      "discussion_evidence_role_invalid":"证据角色不在允许范围。",
+      "discussion_source_role_mismatch":"表达者身份或证据角色与引用来源不符。",
+      "scene_label_invalid":"场景名称为空或超过长度限制。",
+
       "resolution_candidates_not_array": "归属候选必须是数组。",
       "resolution_candidate_count_exceeded": "本次归属候选超过 64 个。",
       "resolution_candidate_topic_invalid": "候选缺少有效主题身份。",
@@ -827,7 +869,7 @@
   function currentResearchSummary(p) {
     const counts=p?.currentMethodSummary,limits=p?.processingLimits;
     const missing='<p class="lgi-tm-note">当前方法进展尚未读取，请刷新；历史账本不作为当前进展。</p>';
-    return `<section class="lgi-tm-section"><h3>当前方法有效进展</h3><p>方法版本：${esc(p?.methodVersion || '未读取')}</p>${counts?`${researchCoverageCounts(counts)}${researchCounts(counts)}<p>等待规则纠偏 ${number(counts.correctiveQueuedCount)} · 纠偏调用中 ${number(counts.correctiveRunningCount)}</p>${researchPhases({phases:counts.phases})}`:missing}<p class="lgi-tm-note">有效窗口处理只计已接纳、无研究信号或材料不足；失败、派发未知、旧方法退役均不计入。已接纳结果、主题归并和层级质量须分别复核。</p>${limits?`<p>自动研究每批最多 ${number(limits.automaticBatchWindows)} 个窗口 · 单窗最多 ${number(limits.windowChars)} 字符 · 每窗最多 ${number(limits.primaryCommentsPerWindow)} 条主要评论</p><p class="lgi-tm-note">批次是逐窗派发的排队范围，不是一次发送全部材料；当前队列不代表全部尚未研究材料。</p>`:''}</section>`;
+    return `<section class="lgi-tm-section"><h3>当前方法有效进展</h3><p>方法版本：${esc(p?.methodVersion || '未读取')}</p>${counts?`${researchCoverageCounts(counts)}${researchCounts(counts)}<p>等待规则纠偏 ${number(counts.correctiveQueuedCount)} · 纠偏调用中 ${number(counts.correctiveRunningCount)}</p><p>等待语义复核 ${number(counts.reviewQueuedCount)} · 语义复核中 ${number(counts.reviewRunningCount)}</p>${researchPhases({phases:counts.phases})}`:missing}<p class="lgi-tm-note">有效窗口处理只计已接纳、无研究信号或材料不足；失败、派发未知、旧方法退役均不计入。当前方法须完成引用与归属的独立语义复核后接纳；机器复核通过仍是候选，旧方法结果不自动取得新质量标识。</p>${limits?`<p>自动研究每批最多 ${number(limits.automaticBatchWindows)} 个窗口 · 单窗最多 ${number(limits.windowChars)} 字符 · 每窗最多 ${number(limits.primaryCommentsPerWindow)} 条主要评论</p><p class="lgi-tm-note">批次是逐窗派发的排队范围，不是一次发送全部材料；当前队列不代表全部尚未研究材料。</p>`:''}</section>`;
   }
   function researchSummary(p) {
     return `<section class="lgi-tm-section"><h3>全领域任务账本</h3><p>累计 ${number(p?.summary?.totalRunCount)} 个批次 · ${number(p?.summary?.totalTaskCount)} 个任务</p>${researchCoverageCounts(p?.summary)}${researchCounts(p?.summary)}${researchPhases({phases:p?.summary?.phases})}<p class="lgi-tm-note">包含全部历史方法与已停止任务，不据累计分母计算当前覆盖率。初次窗口按方法、模型配置与输入身份去重，历史方法或重新分组可能覆盖同一原文；无信号、材料不足表示窗口已处理，不表示形成主题。定义重评复用已有讨论，不增加初次窗口；实际字符覆盖请核对作品阅读器。任务接纳、模型调用、讨论数量和主题质量分别判断。历史账本不代表当前可用主题或研究质量。</p></section>`;

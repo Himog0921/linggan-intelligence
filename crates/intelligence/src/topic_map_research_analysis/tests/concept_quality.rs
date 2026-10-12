@@ -185,7 +185,7 @@ fn historical_v2_output_retains_strict_source_checks_after_v3_upgrade() {
     output.discussions[0].statement.clear();
     assert_eq!(
         validate_output(&output, &fragments, &[]),
-        Err("invalid_discussion_evidence")
+        Err("discussion_statement_invalid")
     );
 }
 
@@ -536,4 +536,32 @@ fn proposed_parent_cannot_reuse_an_existing_candidate_without_explicit_containme
     );
     output.decisions[0].relations[0].relation = "narrower".into();
     assert!(validate_resolution(&output, &units, &candidates).is_ok());
+}
+
+#[test]
+fn discussion_rejection_names_the_actual_rule() {
+    let (baseline, fragments) = sample();
+    for (rule, change) in [
+        ("discussion_speaker_role_invalid", 0),
+        ("discussion_evidence_role_invalid", 1),
+        ("discussion_source_role_mismatch", 2),
+        ("citation_fragment_not_found", 3),
+        ("citation_range_invalid", 4),
+        ("discussion_exclusion_invalid", 5),
+        ("discussion_criteria_duplicate", 6),
+    ] {
+        let mut output = baseline.clone();
+        let d = &mut output.discussions[0];
+        match change {
+            0 => d.speaker_role = "private-invalid-role".into(),
+            1 => d.evidence_role = "private-invalid-role".into(),
+            2 => d.speaker_role = "commenter".into(),
+            3 => d.evidence[0].fragment_id = "private-unavailable-source".into(),
+            4 => d.evidence[0].end = usize::MAX,
+            5 => d.exclusion_criteria.clear(),
+            6 => d.exclusion_criteria = d.inclusion_criteria.clone(),
+            _ => unreachable!(),
+        }
+        assert_eq!(validate_output(&output, &fragments, &[]), Err(rule));
+    }
 }

@@ -27,7 +27,7 @@ fn semantic(fragments: &[Fragment]) -> Value {
         "scenes":[{"label":"家庭任务场景","evidence":evidence}],
         "journey":{"mainStage":"begin_practice","involvedStages":["begin_practice"],"overlays":[],
             "path":"unknown","rationale":"有执行任务依据，身份未知","evidence":evidence},
-        "responseMatches":[{"status":"unknown","unanswered":["缺少双方材料"],"evidence":[]}],
+        "responseMatches":[{"status":"unknown","unanswered":["缺少双方材料"],"evidence":evidence}],
         "angles":[{"label":"启动支持","title":"如何开始第一步","answerTask":"解释如何降低启动难度","evidence":evidence}],
         "productOpportunities":[{"need":"开始任务的支持","hypothesis":"较小的第一步可能有帮助",
             "verificationQuestion":"是否更容易开始","alternativeExplanation":"可能是任务本身较容易","evidence":evidence}],
@@ -36,22 +36,28 @@ fn semantic(fragments: &[Fragment]) -> Value {
 
 fn wire(value: &Value, fragments: &[Fragment]) -> Value {
     match value {
+        Value::Object(fields) if fields.contains_key("fragmentId") => {
+            let index = fragments
+                .iter()
+                .position(|fragment| {
+                    value["fragmentId"].as_str() == Some(fragment.fragment_id.as_str())
+                })
+                .unwrap();
+            let fragment = &fragments[index];
+            let start = value["start"].as_u64().unwrap() as usize;
+            let end = value["end"].as_u64().unwrap() as usize;
+            let quote: String = fragment
+                .text
+                .chars()
+                .skip(start - fragment.start)
+                .take(end - start)
+                .collect();
+            json!({"f":index,"q":quote})
+        }
         Value::Object(fields) => Value::Object(
             fields
                 .iter()
-                .map(|(key, child)| {
-                    let child = if key == "fragmentId" {
-                        json!(
-                            fragments
-                                .iter()
-                                .position(|f| child.as_str() == Some(f.fragment_id.as_str()))
-                                .unwrap()
-                        )
-                    } else {
-                        wire(child, fragments)
-                    };
-                    (wire_key(key).to_owned(), child)
-                })
+                .map(|(key, child)| (wire_key(key).to_owned(), wire(child, fragments)))
                 .collect(),
         ),
         Value::Array(values) => json!(
@@ -71,7 +77,7 @@ fn packet(value: &Value, fragments: &[Fragment]) -> Value {
 }
 
 #[test]
-fn compact_roundtrip_preserves_every_field_and_absolute_unicode_tail() {
+fn quote_roundtrip_preserves_every_field_and_absolute_unicode_tail() {
     let fragments = vec![
         fragment(
             "00000000-0000-4000-8000-000000000001.body.chars.4200.4230",
@@ -95,7 +101,7 @@ fn compact_roundtrip_preserves_every_field_and_absolute_unicode_tail() {
         validate_context_links(&restored, &fragments, &json!([])),
         Ok(())
     );
-    assert!(compact.to_string().len() < original.to_string().len() * 3 / 4);
+    assert!(compact.to_string().len() < original.to_string().len());
     eprintln!(
         "synthetic output bytes: canonical={}, compact={} (not provider tokens)",
         original.to_string().len(),
@@ -154,8 +160,11 @@ fn compact_citation_index_never_guesses_or_admits_outside_frozen_input() {
     }
     let mut invalid = valid;
     invalid["d"][0]["e"][0]["s"] = json!(0);
-    let restored = decode_compact_output(&invalid.to_string(), &fragments).unwrap();
-    assert!(validate_output(&restored, &fragments, &[]).is_err());
+    let error = decode_compact_output(&invalid.to_string(), &fragments).unwrap_err();
+    assert_eq!(
+        (error.code, error.rule),
+        ("output_schema_invalid", "unknown_property")
+    );
 }
 
 #[test]
@@ -233,4 +242,203 @@ fn compact_schema_has_no_collisions_and_preserves_complete_required_objects() {
             .len(),
         10
     );
+}
+
+#[test]
+fn short_quote_offsets_are_computed_from_absolute_unicode_scalar_boundaries() {
+    let fragments = vec![fragment(
+        "synthetic.body",
+        "body",
+        4200,
+        "前文😀e\u{301}B后文；尾段",
+    )];
+    let mut valid = packet(&semantic(&fragments), &fragments);
+    valid["d"][0]["e"] = json!([{"f":0,"q":"😀e\u{301}B"},{"f":0,"q":"尾段"}]);
+    let restored = decode_compact_output(&valid.to_string(), &fragments).unwrap();
+    let quotes = &restored.discussions[0].evidence;
+    assert_eq!((quotes[0].start, quotes[0].end), (4202, 4206));
+    assert_eq!((quotes[1].start, quotes[1].end), (4209, 4211));
+    assert_eq!(validate_output(&restored, &fragments, &[]), Ok(()));
+}
+
+#[test]
+fn one_claim_can_keep_multiple_complete_verbatim_quotes_from_the_same_source() {
+    let fragments = vec![fragment(
+        "synthetic.comment",
+        "unresearched_comment",
+        91,
+        "已决定执行，中间还有其他背景，但第一步无法开始。",
+    )];
+    let mut valid = packet(&semantic(&fragments), &fragments);
+    valid["d"][0]["sp"] = json!("commenter");
+    valid["d"][0]["e"] = json!([{"f":0,"q":"已决定执行"},{"f":0,"q":"第一步无法开始"}]);
+    let restored = decode_compact_output(&valid.to_string(), &fragments).unwrap();
+    let quotes: Vec<String> = restored.discussions[0]
+        .evidence
+        .iter()
+        .map(|citation| {
+            fragments[0]
+                .text
+                .chars()
+                .skip(citation.start - fragments[0].start)
+                .take(citation.end - citation.start)
+                .collect()
+        })
+        .collect();
+    assert_eq!(quotes, ["已决定执行", "第一步无法开始"]);
+    assert_eq!(validate_output(&restored, &fragments, &[]), Ok(()));
+}
+
+#[test]
+fn ambiguous_missing_blank_or_normalized_quotes_never_guess_an_occurrence() {
+    for (text, quote, code, rule) in [
+        (
+            "开始后再开始",
+            "开始",
+            "citation_quote_ambiguous",
+            "unique_quote",
+        ),
+        ("哈哈哈", "哈哈", "citation_quote_ambiguous", "unique_quote"),
+        (
+            "真实原文",
+            "PRIVATE-CLAIM-NOT-IN-SOURCE",
+            "citation_quote_not_found",
+            "verbatim_quote",
+        ),
+        (
+            "真实原文",
+            "",
+            "invalid_citation_quote",
+            "quote_nonblank_bounded",
+        ),
+        (
+            "真实原文",
+            " \t\n",
+            "invalid_citation_quote",
+            "quote_nonblank_bounded",
+        ),
+        (
+            "开始",
+            " 开始",
+            "citation_quote_not_found",
+            "verbatim_quote",
+        ),
+        (
+            "e\u{301}",
+            "é",
+            "citation_quote_not_found",
+            "verbatim_quote",
+        ),
+    ] {
+        let fragments = vec![fragment("synthetic.body", "body", 90, text)];
+        let mut invalid = packet(&semantic(&fragments), &fragments);
+        invalid["d"][0]["e"][0]["q"] = json!(quote);
+        let error = decode_compact_output(&invalid.to_string(), &fragments).unwrap_err();
+        assert_eq!((error.code, error.rule), (code, rule));
+        assert_eq!(error.path, "discussions[0].evidence[0].quote");
+        assert!(!format!("{error:?}").contains("PRIVATE"));
+    }
+}
+
+#[test]
+fn quote_bounds_and_field_types_are_strict_without_legacy_offset_fallback() {
+    let fragments = vec![fragment("synthetic.body", "body", 5, "原文支持")];
+    let valid = packet(&semantic(&fragments), &fragments);
+    for quote in [json!(null), json!(0), json!(["原文"])] {
+        let mut invalid = valid.clone();
+        invalid["d"][0]["e"][0]["q"] = quote;
+        let error = decode_compact_output(&invalid.to_string(), &fragments).unwrap_err();
+        assert_eq!((error.code, error.rule), ("output_schema_invalid", "type"));
+    }
+    let mut missing = valid.clone();
+    missing["d"][0]["e"][0].as_object_mut().unwrap().remove("q");
+    let error = decode_compact_output(&missing.to_string(), &fragments).unwrap_err();
+    assert_eq!(
+        (error.path.as_str(), error.rule),
+        ("discussions[0].evidence[0].quote", "required_property")
+    );
+    let mut huge = valid.clone();
+    huge["d"][0]["e"][0]["q"] = json!("字".repeat(1001));
+    assert_eq!(
+        decode_compact_output(&huge.to_string(), &fragments)
+            .unwrap_err()
+            .code,
+        "invalid_citation_quote"
+    );
+    for old_offsets in [
+        json!({"f":0,"s":5,"e":9}),
+        json!({"f":0,"q":"原文","s":5}),
+        json!({"f":0,"q":"原文","e":9}),
+    ] {
+        let mut invalid = valid.clone();
+        invalid["d"][0]["e"][0] = old_offsets;
+        assert_eq!(
+            decode_compact_output(&invalid.to_string(), &fragments)
+                .unwrap_err()
+                .rule,
+            "unknown_property"
+        );
+    }
+    let mut historical = valid;
+    historical["contract"] = json!("topic-map.extract.compact.v1");
+    assert_eq!(
+        decode_compact_output(&historical.to_string(), &fragments)
+            .unwrap_err()
+            .code,
+        "output_contract_mismatch"
+    );
+}
+
+#[test]
+fn quotes_are_scoped_to_one_frozen_fragment_and_invalid_fragment_bounds_are_rejected() {
+    let fragments = vec![
+        fragment("synthetic.a", "body", 20, "共有原文"),
+        fragment("synthetic.b", "ocr", 3000, "共有原文"),
+    ];
+    let valid = packet(&semantic(&fragments), &fragments);
+    let restored = decode_compact_output(&valid.to_string(), &fragments).unwrap();
+    assert_eq!(
+        restored.discussions[0].evidence[1].fragment_id,
+        "synthetic.b"
+    );
+    assert_eq!(
+        (
+            restored.discussions[0].evidence[1].start,
+            restored.discussions[0].evidence[1].end
+        ),
+        (3000, 3004)
+    );
+    let mut corrupt = fragments.clone();
+    corrupt[0].end += 1;
+    assert_eq!(
+        decode_compact_output(&valid.to_string(), &corrupt)
+            .unwrap_err()
+            .code,
+        "invalid_unicode_fragment"
+    );
+}
+
+#[test]
+fn every_evidence_category_uses_only_required_index_and_quote_fields() {
+    let schema = compact_output_schema();
+    let categories = [
+        &schema["properties"]["d"]["items"]["properties"]["e"],
+        &schema["properties"]["s"]["items"]["properties"]["e"],
+        &schema["properties"]["j"]["properties"]["e"],
+        &schema["properties"]["rm"]["items"]["properties"]["e"],
+        &schema["properties"]["a"]["items"]["properties"]["e"],
+        &schema["properties"]["p"]["items"]["properties"]["e"],
+    ];
+    for category in categories {
+        let citation = &category["items"];
+        assert_eq!(citation["properties"].as_object().unwrap().len(), 2);
+        assert_eq!(citation["required"], json!(["f", "q"]));
+        assert_eq!(citation["additionalProperties"], false);
+        assert_eq!(citation["properties"]["q"]["maxLength"], 1000);
+    }
+    let fields = compact_field_names();
+    assert!(fields.get("start").is_none());
+    assert!(fields.get("end").is_none());
+    assert_eq!(fields["fragmentId"], "f");
+    assert_eq!(fields["quote"], "q");
 }

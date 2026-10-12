@@ -3,7 +3,7 @@ use super::{EXTRACT_CONTRACT, ResearchOutput, output_schema};
 use linggan_evidence::creator_discovery::Fragment;
 use serde_json::{Value, json};
 
-pub const COMPACT_EXTRACT_CONTRACT: &str = "topic-map.extract.compact.v1";
+pub const COMPACT_EXTRACT_CONTRACT: &str = "topic-map.extract.quotes.v1";
 
 #[derive(Debug)]
 pub struct CompactDecodeError {
@@ -24,7 +24,7 @@ fn wire_key(key: &str) -> &str {
     match key {
         "outcome" | "overlays" => "o",
         "discussions" | "definition" => "d",
-        "scenes" | "statement" | "involvedStages" | "start" => "s",
+        "scenes" | "statement" | "involvedStages" => "s",
         "journey" => "j",
         "responseMatches" => "rm",
         "angles" => "a",
@@ -36,12 +36,12 @@ fn wire_key(key: &str) -> &str {
         "evidenceRole" => "er",
         "rationale" => "r",
         "topicRef" | "title" => "t",
-        "evidence" | "end" => "e",
+        "evidence" => "e",
         "fragmentId" => "f",
         "mainStage" => "m",
         "status" => "st",
         "unanswered" => "u",
-        "answerTask" => "q",
+        "answerTask" | "quote" => "q",
         "need" => "n",
         "hypothesis" => "h",
         "verificationQuestion" => "q",
@@ -50,19 +50,27 @@ fn wire_key(key: &str) -> &str {
     }
 }
 
+fn citation_schema(schema: &Value) -> bool {
+    schema["properties"].as_object().is_some_and(|fields| {
+        fields.len() == 3
+            && ["fragmentId", "start", "end"]
+                .iter()
+                .all(|key| fields.contains_key(*key))
+    })
+}
+
 fn compact_schema(schema: &Value) -> Value {
+    if citation_schema(schema) {
+        return json!({"type":"object","properties":{
+            "f":{"type":"integer","minimum":0},
+            "q":{"type":"string","minLength":1,"maxLength":1000}},
+            "required":["f","q"],"additionalProperties":false});
+    }
     let mut projected = schema.clone();
     if let Some(properties) = schema["properties"].as_object() {
         let fields: serde_json::Map<_, _> = properties
             .iter()
-            .map(|(key, child)| {
-                let child = if key == "fragmentId" {
-                    json!({"type":"integer","minimum":0})
-                } else {
-                    compact_schema(child)
-                };
-                (wire_key(key).to_owned(), child)
-            })
+            .map(|(key, child)| (wire_key(key).to_owned(), compact_schema(child)))
             .collect();
         projected["required"] = json!(fields.keys().collect::<Vec<_>>());
         projected["properties"] = json!(fields);
@@ -73,7 +81,7 @@ fn compact_schema(schema: &Value) -> Value {
     projected
 }
 
-/// Only wire keys and local citation indexes change; every business field remains required.
+/// Every business field remains required; evidence quotes replace model-produced offsets.
 pub fn compact_output_schema() -> Value {
     let mut schema = compact_schema(&output_schema());
     schema["properties"]["contract"]["enum"] = json!([COMPACT_EXTRACT_CONTRACT]);
@@ -82,6 +90,11 @@ pub fn compact_output_schema() -> Value {
 
 pub fn compact_field_names() -> Value {
     fn collect(schema: &Value, fields: &mut serde_json::Map<String, Value>) {
+        if citation_schema(schema) {
+            fields.insert("fragmentId".into(), json!("f"));
+            fields.insert("quote".into(), json!("q"));
+            return;
+        }
         for (key, child) in schema["properties"].as_object().into_iter().flatten() {
             fields.insert(key.clone(), json!(wire_key(key)));
             collect(child, fields);
@@ -95,12 +108,94 @@ pub fn compact_field_names() -> Value {
     Value::Object(fields)
 }
 
+fn expand_citation(
+    value: &Value,
+    fragments: &[Fragment],
+    path: &str,
+) -> Result<Value, CompactDecodeError> {
+    let values = value
+        .as_object()
+        .ok_or_else(|| rejection("output_schema_invalid", path, "type"))?;
+    if values.keys().any(|key| !["f", "q"].contains(&key.as_str())) {
+        return Err(rejection("output_schema_invalid", path, "unknown_property"));
+    }
+    let fragment_path = format!("{path}.fragmentId");
+    let index = values
+        .get("f")
+        .ok_or_else(|| rejection("output_schema_invalid", &fragment_path, "required_property"))?
+        .as_u64()
+        .and_then(|index| usize::try_from(index).ok())
+        .ok_or_else(|| {
+            rejection(
+                "invalid_citation_fragment_index",
+                &fragment_path,
+                "fragment_index",
+            )
+        })?;
+    let fragment = fragments.get(index).ok_or_else(|| {
+        rejection(
+            "invalid_citation_fragment_index",
+            &fragment_path,
+            "fragment_index",
+        )
+    })?;
+    let quote_path = format!("{path}.quote");
+    let quote = values
+        .get("q")
+        .ok_or_else(|| rejection("output_schema_invalid", &quote_path, "required_property"))?
+        .as_str()
+        .ok_or_else(|| rejection("output_schema_invalid", &quote_path, "type"))?;
+    let length = quote.chars().count();
+    if quote.trim().is_empty() || length > 1000 {
+        return Err(rejection(
+            "invalid_citation_quote",
+            &quote_path,
+            "quote_nonblank_bounded",
+        ));
+    }
+    if fragment.end.checked_sub(fragment.start) != Some(fragment.text.chars().count()) {
+        return Err(rejection(
+            "invalid_unicode_fragment",
+            path,
+            "fragment_range",
+        ));
+    }
+    // Scan scalar boundaries, including overlapping matches. Normalizing or
+    // choosing one repeated occurrence would invent a position the model did not cite.
+    let mut matches = fragment
+        .text
+        .char_indices()
+        .filter_map(|(byte, _)| fragment.text[byte..].starts_with(quote).then_some(byte));
+    let byte = matches
+        .next()
+        .ok_or_else(|| rejection("citation_quote_not_found", &quote_path, "verbatim_quote"))?;
+    if matches.next().is_some() {
+        return Err(rejection(
+            "citation_quote_ambiguous",
+            &quote_path,
+            "unique_quote",
+        ));
+    }
+    let start = fragment
+        .start
+        .checked_add(fragment.text[..byte].chars().count())
+        .ok_or_else(|| rejection("invalid_unicode_fragment", path, "fragment_range"))?;
+    let end = start
+        .checked_add(length)
+        .filter(|end| *end <= fragment.end)
+        .ok_or_else(|| rejection("invalid_unicode_fragment", path, "fragment_range"))?;
+    Ok(json!({"fragmentId":fragment.fragment_id,"start":start,"end":end}))
+}
+
 fn expand(
     value: &Value,
     schema: &Value,
     fragments: &[Fragment],
     path: &str,
 ) -> Result<Value, CompactDecodeError> {
+    if citation_schema(schema) {
+        return expand_citation(value, fragments, path);
+    }
     if let Some(properties) = schema["properties"].as_object() {
         let values = value
             .as_object()
@@ -121,28 +216,7 @@ fn expand(
             let field = values.get(wire_key(key)).ok_or_else(|| {
                 rejection("output_schema_invalid", &field_path, "required_property")
             })?;
-            let field = if key == "fragmentId" {
-                let index = field.as_u64().ok_or_else(|| {
-                    rejection(
-                        "invalid_citation_fragment_index",
-                        &field_path,
-                        "fragment_index",
-                    )
-                })?;
-                let fragment = usize::try_from(index)
-                    .ok()
-                    .and_then(|index| fragments.get(index))
-                    .ok_or_else(|| {
-                        rejection(
-                            "invalid_citation_fragment_index",
-                            &field_path,
-                            "fragment_index",
-                        )
-                    })?;
-                json!(fragment.fragment_id)
-            } else {
-                expand(field, child, fragments, &field_path)?
-            };
+            let field = expand(field, child, fragments, &field_path)?;
             restored.insert(key.clone(), field);
         }
         return Ok(Value::Object(restored));
@@ -217,7 +291,7 @@ fn expand(
     Ok(value.clone())
 }
 
-/// Strict transport decoding; no JSON repair, missing-field defaults, or citation guessing.
+/// Strict quote transport decoding; no JSON repair, normalization, defaults, or position guessing.
 /// Callers must then run the ordinary semantic/source/context validators on the restored output.
 pub fn decode_compact_output(
     text: &str,

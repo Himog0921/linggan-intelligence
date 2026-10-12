@@ -34,7 +34,7 @@ pub(super) async fn attach_rules(
             topic.core["qualityState"] = json!(if topic.lifecycle_state == "candidate"
                 && !matches!(
                     rule.get::<Option<String>, _>("induction_method").as_deref(),
-                    Some("topic-map.research.v3" | "topic-map.research.v4")
+                    Some(crate::topic_map_research_analysis::METHOD_VERSION)
                 ) {
                 "legacy_candidate"
             } else {
