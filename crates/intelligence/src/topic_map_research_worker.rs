@@ -12,6 +12,8 @@ use linggan_storage_postgres::Database;
 use serde_json::{Value, json};
 use sqlx::Row;
 use uuid::Uuid;
+#[path = "topic_map_research_worker/feedback.rs"]
+mod feedback;
 #[path = "topic_map_research_worker/dispatch.rs"]
 mod dispatch;
 #[path = "topic_map_research_worker/lifecycle.rs"]
@@ -143,6 +145,7 @@ struct Prepared {
     cursor: usize,
     total_units: usize,
     definition_unavailable: bool,
+    rule_feedback_unavailable: bool,
     eligible_definitions: Vec<Uuid>,
     previous: Vec<Value>,
 }

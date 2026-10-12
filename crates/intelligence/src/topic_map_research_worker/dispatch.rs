@@ -35,6 +35,11 @@ pub(super) async fn execute(
         model.get("output_token_limit"),
     )
     .await?;
+    if prepared.rule_feedback_unavailable {
+        sqlx::query("UPDATE linggan_topic_map_research_task SET state='failed',last_reason='rule_feedback_unavailable' WHERE task_ref=$1 AND state='queued' AND phase=$2 AND attempt_count=$3")
+            .bind(task).bind(row.get::<String,_>("phase")).bind(row.get::<i32,_>("attempt_count")).execute(db.pool()).await?;
+        return Ok(true);
+    }
     if prepared.definition_unavailable {
         sqlx::query("UPDATE linggan_topic_map_research_task SET state='stale',last_reason='definition_source_unavailable' WHERE task_ref=$1 AND state='queued'").bind(task).execute(db.pool()).await?;
         return Ok(true);
@@ -285,7 +290,7 @@ async fn reserve(
     let ordinal = task_row.get::<i32, _>("attempt_count") + 1;
     let request_hash=linggan_evidence::creator_discovery::hash(&json!({"input":hash,"model":config,"method":analysis::METHOD_VERSION,"phase":phase,"system":provider.system,"prompt":provider.prompt}).to_string());
     sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,config_ref,operation,request_hash,state,reserved_tokens,charged_tokens,result) VALUES($1,$2,$3,$4,'analyze',$5,'running',$6,$6,$7)").bind(invocation).bind(model.get::<Uuid,_>("connection_version_ref")).bind(model.get::<Uuid,_>("model_ref")).bind(config).bind(&request_hash).bind(reserved).bind(json!({"purpose":"topic_map","domainRef":domain,"runRef":run,"taskRef":task,"methodVersion":analysis::METHOD_VERSION})).execute(&mut *tx).await?;
-    sqlx::query("INSERT INTO linggan_topic_map_research_request(invocation_ref,task_ref,run_ref,attempt_ordinal,request_hash,request_manifest,budget_day,deadline_at,phase)VALUES($1,$2,$3,$4,$5,$6,(scope_001_now()AT TIME ZONE 'Asia/Shanghai')::date,scope_001_now()+make_interval(secs=>$7),$8)").bind(invocation).bind(task).bind(run).bind(ordinal).bind(&request_hash).bind(json!({"source":topic_map_research::reference_manifest(&input),"phase":phase,"unitIds":prepared.units.iter().map(|(id,_)|id).collect::<Vec<_>>(),"topics":prepared.candidates,"recall":prepared.recall})).bind(model.get::<i32,_>("timeout_seconds")+30).bind(&phase).execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO linggan_topic_map_research_request(invocation_ref,task_ref,run_ref,attempt_ordinal,request_hash,request_manifest,budget_day,deadline_at,phase)VALUES($1,$2,$3,$4,$5,$6,(scope_001_now()AT TIME ZONE 'Asia/Shanghai')::date,scope_001_now()+make_interval(secs=>$7),$8)").bind(invocation).bind(task).bind(run).bind(ordinal).bind(&request_hash).bind(json!({"source":topic_map_research::reference_manifest(&input),"phase":phase,"unitIds":prepared.units.iter().map(|(id,_)|id).collect::<Vec<_>>(),"topics":prepared.candidates,"recall":prepared.recall,"validationFeedback":serde_json::from_str::<Value>(&provider.prompt).ok().and_then(|v|v.get("validationFeedback").cloned())})).bind(model.get::<i32,_>("timeout_seconds")+30).bind(&phase).execute(&mut *tx).await?;
     sqlx::query("UPDATE linggan_topic_map_research_task SET state='running',attempt_count=$2,phase_attempt_count=phase_attempt_count+1,lease_token=$3,lease_expires_at=scope_001_now()+make_interval(secs=>$4)WHERE task_ref=$1").bind(task).bind(ordinal).bind(lease).bind(model.get::<i32,_>("timeout_seconds")+30).execute(&mut *tx).await?;
     sqlx::query("UPDATE linggan_topic_map_research_run SET state='running',updated_at=scope_001_now()WHERE run_ref=$1").bind(run).execute(&mut *tx).await?;
     tx.commit().await?;
