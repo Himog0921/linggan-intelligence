@@ -15,6 +15,118 @@ const OTHER: Uuid = Uuid::from_u128(0x00000000000040008000000000000002);
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof only"]
+async fn author_name_projection_keeps_sourced_names_and_unknowns() {
+    let db = fixture::proof_database("creator_name_projection").await;
+    let mut refs = Vec::new();
+    for (index, author, name) in [
+        (1, "named-a", Some("同名作者")),
+        (2, "named-a", None),
+        (3, "named-b", Some("同名作者")),
+        (4, "target-only", None),
+        (5, "unknown", None),
+        (6, "profile-only", None),
+        (7, "", Some("无稳定身份")),
+        (8, "renamed", Some("旧称")),
+        (9, "renamed", Some("新称")),
+    ] {
+        let id = format!("creator-name-{index}");
+        let mut payload = json!({"title":format!("作品 {index}")});
+        if !author.is_empty() { payload["authorId"] = json!(author); }
+        if let Some(name) = name { payload["authorName"] = json!(name); }
+        let package = fixture::submit_package(&db, "content_detail", json!({"contentExternalId":id}), json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":id},"payload":payload})).await;
+        let work: Uuid = sqlx::query_scalar("SELECT public_ref FROM linggan_material_content WHERE content_external_id=$1")
+            .bind(&id).fetch_one(db.pool()).await.unwrap();
+        sqlx::query("INSERT INTO linggan_material_domain_usage(usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref,created_at) VALUES($1,$2,$3,'primary','legacy_domain_migration',$4,$5::timestamptz)")
+            .bind(Uuid::new_v4()).bind(work).bind(D).bind(package).bind(format!("2026-10-{index:02}T00:00:00Z"))
+            .execute(db.pool()).await.unwrap();
+        refs.push(work);
+    }
+    let target = Uuid::new_v4();
+    sqlx::query("INSERT INTO collection_observation_target(target_ref,platform,target_kind,identity_key,display_name,source,lifecycle_state) VALUES($1,'xhs','creator','target-only','目标档案名','manual','paused')")
+        .bind(target).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO observation_domain_target(domain_ref,target_ref,role) VALUES($1,$2,'primary')")
+        .bind(D).bind(target).execute(db.pool()).await.unwrap();
+
+    let older_profile = fixture::submit_package_at(&db, "author_profile", json!({"authorExternalId":"profile-only"}),
+        json!({"kind":"author_profile","sourceObject":{"platform":"xhs","type":"author","externalId":"profile-only"},"payload":{"userId":"profile-only","nickname":"档案旧名"}}),
+        "2026-10-01T00:00:00Z").await;
+    let newer_profile = fixture::submit_package_at(&db, "author_profile", json!({"authorExternalId":"profile-only"}),
+        json!({"kind":"author_profile","sourceObject":{"platform":"xhs","type":"author","externalId":"profile-only"},"payload":{"userId":"profile-only","fans":12}}),
+        "2026-10-02T00:00:00Z").await;
+    let profile_target = Uuid::new_v4();
+    let request = Uuid::new_v4();
+    let decision = Uuid::new_v4();
+    let authorization = Uuid::new_v4();
+    let order = Uuid::new_v4();
+    let station = Uuid::new_v4();
+    let lease = Uuid::new_v4();
+    sqlx::query("INSERT INTO collection_observation_target(target_ref,platform,target_kind,identity_key,source) VALUES($1,'xhs','creator','profile-only','manual')")
+        .bind(profile_target).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO collection_acquisition_authorization(authorization_ref,platform,target_kind,lane,max_targets,max_works_per_target,allowed_task_templates,allowed_dispatch_lanes,max_work_units,purpose,granted_by,expires_at) VALUES($1,'xhs','creator','deep_archive',1,10,ARRAY['creator_archive'],ARRAY['batch'],10,'name projection fixture','person',scope_001_now()+interval '1 day')")
+        .bind(authorization).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO collection_acquisition_request(request_ref,target_ref,domain_ref,observation_role,lane,purpose,requested_by) VALUES($1,$2,$3,'primary','deep_archive','name projection fixture','person')")
+        .bind(request).bind(profile_target).bind(D).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO collection_admission_decision(decision_ref,request_ref,outcome,reason_code,authorization_ref,target_ref) VALUES($1,$2,'admitted','fixture',$3,$4)")
+        .bind(decision).bind(request).bind(authorization).bind(profile_target).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO execution_station(station_ref,display_name,daily_work_quota) VALUES($1,'name projection fixture',10)")
+        .bind(station).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO collection_work_order(work_order_ref,decision_ref,target_ref,lane,max_works,stop_conditions,dispatch_lane,queue_state,scheduled_for,estimated_work_units,station_ref) VALUES($1,$2,$3,'deep_archive',10,'{\"progressiveArchive\":{\"version\":1}}'::jsonb,'batch','queued',scope_001_now(),1,$4)")
+        .bind(order).bind(decision).bind(profile_target).bind(station).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO collection_work_order_domain_usage(work_order_ref,request_ref,domain_ref,role,basis_kind) VALUES($1,$2,$3,'primary','legacy_migration')")
+        .bind(order).bind(request).bind(D).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO collection_work_order_lease(lease_ref,work_order_ref,station_ref,capture_identity,expires_at) VALUES($1,$2,$3,'{}'::jsonb,scope_001_now()+interval '1 day')")
+        .bind(lease).bind(order).bind(station).execute(db.pool()).await.unwrap();
+    for (sequence, package) in [(1, older_profile), (2, newer_profile)] {
+        let task: Uuid = sqlx::query_scalar("SELECT task_id FROM linggan_runtime_capture_package WHERE package_ref=$1")
+            .bind(package).fetch_one(db.pool()).await.unwrap();
+        sqlx::query("INSERT INTO collection_work_order_lease_task(lease_ref,task_id,sequence_no) VALUES($1,$2,$3)")
+            .bind(lease).bind(task).bind(sequence).execute(db.pool()).await.unwrap();
+    }
+
+    let mut q: CreatorScope = serde_json::from_value(json!({"domain":D})).unwrap();
+    let data = load(&db, &q).await.unwrap();
+    assert_eq!(data.works.iter().find(|work| work.work_ref == refs[1]).unwrap().display_name, None,
+        "an older work name must not be copied into a newer unnamed work");
+    assert_eq!(data.works.iter().find(|work| work.work_ref == refs[3]).unwrap().display_name, None,
+        "a Target display name must not become a work author fact");
+    let rows = aggregate(&data, &q);
+    let items = rows["items"].as_array().unwrap();
+    assert_eq!(items.len(), 6, "stable IDs, rather than matching nicknames, define authors");
+    let row = |id: &str| items.iter().find(|item| item["authorExternalId"] == id).unwrap();
+    assert_eq!(row("named-a")["displayName"], "同名作者");
+    assert_eq!(row("named-a")["displayNameSource"]["kind"], "accepted_work");
+    assert_eq!(row("named-a")["displayNameSource"]["workRef"], refs[0].to_string());
+    assert_eq!(row("named-b")["displayName"], "同名作者");
+    assert_ne!(row("named-a")["creatorKey"], row("named-b")["creatorKey"]);
+    assert_eq!(row("target-only")["displayName"], "目标档案名");
+    assert_eq!(row("target-only")["displayNameSource"]["kind"], "observation_target");
+    assert_eq!(row("target-only")["displayNameSource"]["targetRef"], target.to_string());
+    assert!(row("unknown")["displayName"].is_null());
+    assert!(row("unknown")["displayNameSource"].is_null());
+    assert_eq!(row("profile-only")["displayName"], "档案旧名");
+    assert_eq!(row("profile-only")["displayNameSource"]["kind"], "accepted_author_profile");
+    let older_material: Uuid = sqlx::query_scalar("SELECT material_ref FROM linggan_material_author_profile WHERE package_ref=$1")
+        .bind(older_profile).fetch_one(db.pool()).await.unwrap();
+    assert_eq!(row("profile-only")["displayNameSource"]["sourceRef"], older_material.to_string());
+    assert_eq!(data.works.iter().find(|work| work.work_ref == refs[5]).unwrap().display_name, None);
+    assert_eq!(row("renamed")["displayName"], "新称");
+    assert_eq!(row("renamed")["displayNameSource"]["workRef"], refs[8].to_string());
+    assert!(!items.iter().any(|item| item["displayName"] == "无稳定身份"));
+    assert_eq!(rows["stats"]["unknownAuthorWorks"], 1);
+
+    q.search_mode = "author".into();
+    q.query = Some("目标档案名".into());
+    assert_eq!(aggregate(&data, &q)["items"][0]["authorExternalId"], "target-only");
+    assert_eq!(linggan_evidence::creator_discovery::matching_work_refs(&data, &q), vec![refs[3]]);
+    q.query = Some("同名作者".into());
+    assert_eq!(aggregate(&data, &q)["total"], 2);
+    q.query = None;
+    q.observation = Some("paused".into());
+    assert_eq!(aggregate(&data, &q)["items"][0]["displayName"], "目标档案名");
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof only"]
 async fn batched_media_read_keeps_accepted_ocr_and_current_withdrawal() {
     let db = fixture::proof_database("creator_discovery_batch_media").await;
     let mut refs = Vec::new();
