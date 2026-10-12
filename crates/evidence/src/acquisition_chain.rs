@@ -115,6 +115,68 @@ const PROGRESSIVE_ARCHIVE_MAX_GENERATION_PER_TICK: usize = 100;
 const CREATOR_FOLLOW_RESERVED_GENERATION_PER_TICK: usize = 20;
 const CREATOR_PATROL_DETAIL_FOLLOW_PURPOSE: &str = "巡查新增作品自动详情补采";
 
+/// The person's saved opt-in is the authority for ongoing patrol follow-up.  Materialize
+/// a bounded grant from that durable choice so the ordinary Request -> Admission -> Work
+/// Order chain keeps its audit record.  An active rule is rechecked before every batch;
+/// an expired ledger grant can be renewed only while a person-authored opt-in remains active.
+async fn ensure_creator_follow_rule_authorization(
+    database: &Database,
+) -> Result<(), AcquisitionChainError> {
+    let mut transaction = database.pool().begin().await?;
+    sqlx::query("SELECT pg_advisory_xact_lock(20261012, 113)")
+        .execute(&mut *transaction)
+        .await?;
+    let opted_in: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM collection_observation_target target \
+         JOIN collection_monitor_rule rule ON rule.target_ref=target.target_ref \
+         JOIN collection_monitor_rule_revision revision \
+           ON revision.rule_revision_ref=rule.active_revision_ref \
+         WHERE target.platform='xhs' AND target.target_kind='creator' \
+           AND target.lifecycle_state='monitoring' AND target.monitoring_enabled \
+           AND rule.retired_at IS NULL AND revision.automatic_enabled \
+           AND revision.creator_follow_details \
+           AND (SELECT person_choice.creator_follow_details \
+                FROM collection_monitor_rule_revision person_choice \
+                WHERE person_choice.rule_ref=rule.rule_ref \
+                  AND person_choice.created_by='person' \
+                ORDER BY person_choice.revision DESC LIMIT 1) IS TRUE)",
+    )
+    .fetch_one(&mut *transaction)
+    .await?;
+    if opted_in {
+        let has_sufficient_grant: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM collection_acquisition_authorization auth \
+             WHERE auth.platform='xhs' AND auth.target_kind='creator' \
+               AND auth.lane='deep_archive' AND auth.purpose=$1 \
+               AND auth.revoked_at IS NULL AND auth.expires_at>scope_001_now() \
+               AND 'material_deepening'=ANY(auth.allowed_task_templates) \
+               AND 'batch'=ANY(auth.allowed_dispatch_lanes) \
+               AND (auth.max_works_per_target IS NULL OR auth.max_works_per_target>=3) \
+               AND auth.max_work_units>=3)",
+        )
+        .bind(CREATOR_PATROL_DETAIL_FOLLOW_PURPOSE)
+        .fetch_one(&mut *transaction)
+        .await?;
+        if !has_sufficient_grant {
+            sqlx::query(
+                "INSERT INTO collection_acquisition_authorization \
+                 (authorization_ref,platform,target_kind,lane,purpose,max_targets, \
+                  max_works_per_target,allowed_task_templates,allowed_dispatch_lanes, \
+                  max_work_units,granted_by,expires_at) \
+                 VALUES ($1,'xhs','creator','deep_archive',$2,NULL,3, \
+                         ARRAY['material_deepening'],ARRAY['batch'],3,'person', \
+                         scope_001_now()+interval '365 days')",
+            )
+            .bind(Uuid::new_v4())
+            .bind(CREATOR_PATROL_DETAIL_FOLLOW_PURPOSE)
+            .execute(&mut *transaction)
+            .await?;
+        }
+    }
+    transaction.commit().await?;
+    Ok(())
+}
+
 /// One already-admitted material identity that a person has explicitly selected for deepening.
 ///
 /// This is deliberately not a discovery remainder.  Supplying the identities here is the act
@@ -759,6 +821,11 @@ async fn request_creator_directory_gaps_inner(
              WHERE target.target_ref=$1 AND target.lifecycle_state='monitoring' \
                AND target.monitoring_enabled AND rule.retired_at IS NULL \
                AND revision.automatic_enabled AND revision.creator_follow_details \
+               AND (SELECT person_choice.creator_follow_details \
+                    FROM collection_monitor_rule_revision person_choice \
+                    WHERE person_choice.rule_ref=rule.rule_ref \
+                      AND person_choice.created_by='person' \
+                    ORDER BY person_choice.revision DESC LIMIT 1) IS TRUE \
              ORDER BY rule.created_at,rule.rule_ref LIMIT 1",
             )
             .bind(target_ref)
@@ -1697,13 +1764,27 @@ async fn gather_facts(
     let task_template = task_template_for(target_kind, lane, !scope.is_empty());
     let estimated_work_units = estimated_work_units_for(task_template, scope.len());
     let authorization: Option<(Uuid, Option<i32>)> = sqlx::query_as(
-        "SELECT authorization_ref,max_targets FROM collection_acquisition_authorization \
+        "SELECT auth.authorization_ref,auth.max_targets FROM collection_acquisition_authorization auth \
          WHERE platform = $1 AND target_kind = $2 AND lane = $3 \
            AND revoked_at IS NULL AND expires_at > scope_001_now() \
            AND $4=ANY(allowed_task_templates) AND $5=ANY(allowed_dispatch_lanes) \
            AND ($6::uuid IS NULL OR authorization_ref=$6) \
            AND ($7::integer=0 OR max_works_per_target IS NULL OR max_works_per_target >= $7) \
            AND max_work_units >= $8 \
+           AND (auth.purpose<>$9 OR ($10=$9 AND $11='agent' AND EXISTS ( \
+             SELECT 1 FROM collection_observation_target target \
+             JOIN collection_monitor_rule rule ON rule.target_ref=target.target_ref \
+             JOIN collection_monitor_rule_revision revision \
+               ON revision.rule_revision_ref=rule.active_revision_ref \
+             WHERE target.target_ref=$12 AND target.lifecycle_state='monitoring' \
+               AND target.monitoring_enabled AND rule.retired_at IS NULL \
+               AND revision.rule_revision_ref=$13 AND revision.automatic_enabled \
+               AND revision.creator_follow_details \
+               AND (SELECT person_choice.creator_follow_details \
+                    FROM collection_monitor_rule_revision person_choice \
+                    WHERE person_choice.rule_ref=rule.rule_ref \
+                      AND person_choice.created_by='person' \
+                    ORDER BY person_choice.revision DESC LIMIT 1) IS TRUE))) \
          ORDER BY expires_at DESC LIMIT 1 FOR UPDATE",
     )
     .bind(platform)
@@ -1714,6 +1795,11 @@ async fn gather_facts(
     .bind(required_authorization_ref)
     .bind(i32::try_from(scope.len()).unwrap_or(i32::MAX))
     .bind(estimated_work_units)
+    .bind(CREATOR_PATROL_DETAIL_FOLLOW_PURPOSE)
+    .bind(purpose)
+    .bind(requested_by)
+    .bind(target_ref)
+    .bind(frozen_rule_revision_ref)
     .fetch_optional(&mut **transaction)
     .await?;
 
@@ -3029,10 +3115,40 @@ pub async fn run_progressive_archives(
             break;
         }
     }
-    // A completed root stays completed. Opted-in creator patrols may request an ordinary,
-    // bounded material WorkOrder for accepted discoveries that still lack detail.
-    // A separate person grant with this exact purpose prevents a page-initiated archive grant
-    // from silently becoming permission for ongoing automatic collection.
+    // A changed rule makes its previously queued follow-up orders impossible to lease.
+    // Retire those orders before checking gaps or per-target capacity, otherwise a stale
+    // queued order can hide the missing detail from the newly saved rule until expiry.
+    // Live leases are left alone; their frozen rule is rechecked by dispatch.
+    sqlx::query(
+        "UPDATE collection_work_order work_order \
+         SET queue_state='cancelled',station_ref=NULL,installation_ref=NULL, \
+             account_ref=NULL,eligibility_ref=NULL \
+         FROM collection_admission_decision decision, \
+              collection_acquisition_request request, \
+              collection_monitor_rule_revision frozen,collection_monitor_rule rule \
+         WHERE work_order.decision_ref=decision.decision_ref \
+           AND decision.request_ref=request.request_ref \
+           AND request.requested_by='agent' AND request.purpose=$1 \
+           AND work_order.monitor_rule_revision_ref=frozen.rule_revision_ref \
+           AND rule.rule_ref=frozen.rule_ref \
+           AND work_order.queue_state='queued' \
+           AND (rule.retired_at IS NOT NULL \
+                OR rule.active_revision_ref IS DISTINCT FROM frozen.rule_revision_ref) \
+           AND NOT EXISTS (SELECT 1 FROM collection_work_order_lease lease \
+                           WHERE lease.work_order_ref=work_order.work_order_ref \
+                             AND lease.released_at IS NULL \
+                             AND lease.expires_at>scope_001_now())",
+    )
+    .bind(CREATOR_PATROL_DETAIL_FOLLOW_PURPOSE)
+    .execute(database.pool())
+    .await
+    .map_err(AcquisitionChainError::from)?;
+    // A completed root stays completed. A person's saved follow-up rule authorizes bounded
+    // material WorkOrders for accepted patrol discoveries. The grant is an internal audit
+    // projection of that opt-in, never a second action requested from the person.
+    ensure_creator_follow_rule_authorization(database)
+        .await
+        .map_err(RequestLeaseError::from)?;
     let follow_targets: Vec<(Uuid, Option<Uuid>)> = sqlx::query_as(
         "SELECT target.target_ref, ( \
            SELECT auth.authorization_ref FROM collection_acquisition_authorization auth \
@@ -3050,6 +3166,11 @@ pub async fn run_progressive_archives(
            AND target.lifecycle_state='monitoring' AND target.monitoring_enabled \
            AND rule.retired_at IS NULL AND revision.automatic_enabled \
            AND revision.creator_follow_details \
+           AND (SELECT person_choice.creator_follow_details \
+                FROM collection_monitor_rule_revision person_choice \
+                WHERE person_choice.rule_ref=rule.rule_ref \
+                  AND person_choice.created_by='person' \
+                ORDER BY person_choice.revision DESC LIMIT 1) IS TRUE \
          ORDER BY target.last_scheduler_considered_at NULLS FIRST,target.target_ref LIMIT $2",
     )
     .bind(CREATOR_PATROL_DETAIL_FOLLOW_PURPOSE)

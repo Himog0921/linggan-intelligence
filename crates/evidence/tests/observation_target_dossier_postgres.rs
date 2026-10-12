@@ -23,6 +23,7 @@ use linggan_evidence::{
     run_progressive_archives, set_station_accepting, start_producer_attempt,
     submit_producer_package,
 };
+use linggan_evidence::{request_and_admit_material_targets, MaterialDeepeningTarget};
 use linggan_storage_postgres::Database;
 use std::time::Duration;
 use uuid::Uuid;
@@ -1680,11 +1681,11 @@ async fn completed_progressive_archive_never_turns_a_patrol_addition_into_deepen
 
 #[tokio::test]
 #[ignore = "requires a disposable PostgreSQL 16 proof database"]
-async fn opted_in_creator_follow_uses_its_own_grant_and_never_reopens_the_root() {
+async fn opted_in_creator_follow_materializes_its_grant_and_never_reopens_the_root() {
     let database = proof_database("dossier_opted_in_patrol_follow").await;
     let installation = ready_installation(&database, "dossier-opted-in-patrol-follow").await;
     let target_ref = seed_creator_target(&database, "creator-opted-in-patrol-follow").await;
-    grant_deep_archive(&database, "从观察目标页发起深度建档", 200).await;
+    let root_grant = grant_deep_archive(&database, "从观察目标页发起深度建档", 200).await;
     let root = request_progressive_archive_and_lease(
         &database, target_ref, "从观察目标页发起深度建档", "person", 30,
     )
@@ -1746,15 +1747,10 @@ async fn opted_in_creator_follow_uses_its_own_grant_and_never_reopens_the_root()
     )
     .await;
 
-    let missing_grant = run_progressive_archives(&database).await.unwrap();
-    assert!(missing_grant.skipped.iter().any(|(target, reason)| {
-        *target == target_ref && reason == "auto_detail_authorization_missing"
-    }));
     submit_patrol_round(
         &database, &installation, target_ref, "巡查建档创作者", PatrolRound::OneUnlinkedWork,
     )
     .await;
-    let sufficient_grant = grant_deep_archive(&database, "巡查新增作品自动详情补采", 3).await;
     let smaller_later_grant = grant_authorization(
         &database,
         &AuthorizationGrant {
@@ -1771,6 +1767,14 @@ async fn opted_in_creator_follow_uses_its_own_grant_and_never_reopens_the_root()
     .unwrap();
     let queued = run_progressive_archives(&database).await.unwrap();
     assert!(queued.queued.contains(&target_ref), "{queued:?}");
+    let sufficient_grant: Uuid = sqlx::query_scalar(
+        "SELECT authorization_ref FROM collection_acquisition_authorization \
+         WHERE purpose='巡查新增作品自动详情补采' AND max_works_per_target=3 \
+           AND max_work_units=3 ORDER BY granted_at DESC LIMIT 1",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
     let scope: Vec<(Uuid, i32, bool, Uuid)> = sqlx::query_as(
         "SELECT scope.content_public_ref,scope.comment_limit,scope.acquire_media,decision.authorization_ref \
          FROM collection_work_order_material_target scope \
@@ -1821,6 +1825,50 @@ async fn opted_in_creator_follow_uses_its_own_grant_and_never_reopens_the_root()
         "SELECT monitor_rule_revision_ref FROM collection_work_order WHERE work_order_ref=$1",
     ).bind(follow_work_order).fetch_one(database.pool()).await.unwrap();
     assert!(frozen_revision.is_some(), "rule opt-out must invalidate an unclaimed automatic follow-up");
+
+    let mut first_opt_out = command.clone();
+    first_opt_out.expected_revision = saved.current_revision;
+    first_opt_out.idempotency_key = Uuid::new_v4();
+    first_opt_out.draft.as_mut().unwrap().creator_follow_details = false;
+    let first_off = linggan_evidence::apply_monitor_rule_command(&database, &first_opt_out)
+        .await
+        .unwrap();
+    assert_eq!(first_off.reason_code, "rule_saved");
+    run_progressive_archives(&database).await.unwrap();
+    let old_queue_state: String = sqlx::query_scalar(
+        "SELECT queue_state FROM collection_work_order WHERE work_order_ref=$1",
+    )
+    .bind(follow_work_order)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(old_queue_state, "cancelled", "the old frozen rule cannot keep an unclaimable order queued");
+
+    let mut opt_back_in = command.clone();
+    opt_back_in.expected_revision = first_off.current_revision;
+    opt_back_in.idempotency_key = Uuid::new_v4();
+    let reopened = linggan_evidence::apply_monitor_rule_command(&database, &opt_back_in)
+        .await
+        .unwrap();
+    assert_eq!(reopened.reason_code, "rule_saved");
+    let resumed = run_progressive_archives(&database).await.unwrap();
+    assert!(resumed.queued.contains(&target_ref), "{resumed:?}");
+    let replacement_order: (Uuid, Uuid) = sqlx::query_as(
+        "SELECT work_order.work_order_ref,work_order.monitor_rule_revision_ref \
+         FROM collection_work_order work_order \
+         JOIN collection_admission_decision decision USING(decision_ref) \
+         JOIN collection_acquisition_request request USING(request_ref) \
+         WHERE work_order.target_ref=$1 AND request.purpose='巡查新增作品自动详情补采' \
+           AND work_order.queue_state='queued' \
+         ORDER BY work_order.created_at DESC LIMIT 1",
+    )
+    .bind(target_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_ne!(replacement_order.0, follow_work_order);
+    assert_eq!(Some(replacement_order.1), reopened.applied_rule_revision_ref);
+
     let dispatch = decide_dispatch(&database, &installation.install_key, &installation.secret)
         .await
         .unwrap();
@@ -1851,11 +1899,87 @@ async fn opted_in_creator_follow_uses_its_own_grant_and_never_reopens_the_root()
     .await
     .unwrap();
     assert_eq!(root_status, "completed");
+
+    let manual = request_and_admit_material_targets(
+        &database,
+        target_ref,
+        "手动复采已知作品",
+        "person",
+        &[MaterialDeepeningTarget {
+            content_public_ref: initial_work,
+            comment_limit: 30,
+            reply_expand_limit: 2,
+            acquire_media: true,
+            allow_ocr: true,
+            allow_asr: true,
+        }],
+    )
+    .await
+    .unwrap();
+    let manual_authorization: Uuid = sqlx::query_scalar(
+        "SELECT authorization_ref FROM collection_admission_decision WHERE decision_ref=$1",
+    )
+    .bind(manual.decision_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        manual_authorization, root_grant,
+        "the derived follow grant cannot authorize a person's separate request"
+    );
+
+    let mut opt_out = command.clone();
+    opt_out.expected_revision = reopened.current_revision;
+    opt_out.idempotency_key = Uuid::new_v4();
+    opt_out.draft.as_mut().unwrap().creator_follow_details = false;
+    let opted_out = linggan_evidence::apply_monitor_rule_command(&database, &opt_out)
+        .await
+        .unwrap();
+    assert_eq!(opted_out.reason_code, "rule_saved");
+    sqlx::query(
+        "UPDATE collection_acquisition_authorization \
+         SET revoked_at=scope_001_now(),revoke_reason='opt_out_test' \
+         WHERE purpose='巡查新增作品自动详情补采'",
+    )
+    .execute(database.pool())
+    .await
+    .unwrap();
+    run_progressive_archives(&database).await.unwrap();
+    let active_follow_grants: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_acquisition_authorization \
+         WHERE purpose='巡查新增作品自动详情补采' \
+           AND revoked_at IS NULL AND expires_at>scope_001_now()",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(active_follow_grants, 0, "an opt-out cannot renew the derived grant");
+
+    // A later system revision cannot revive an older person's consent.
+    let mut system_refresh = command.clone();
+    system_refresh.expected_revision = opted_out.current_revision;
+    system_refresh.idempotency_key = Uuid::new_v4();
+    system_refresh.actor = linggan_evidence::MonitorCommandActor::System;
+    system_refresh.source = "scheduler";
+    let refreshed = linggan_evidence::apply_monitor_rule_command(&database, &system_refresh)
+        .await
+        .unwrap();
+    assert_eq!(refreshed.reason_code, "rule_saved");
+    run_progressive_archives(&database).await.unwrap();
+    let active_follow_grants: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_acquisition_authorization \
+         WHERE purpose='巡查新增作品自动详情补采' \
+           AND revoked_at IS NULL AND expires_at>scope_001_now()",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(active_follow_grants, 0, "historical consent cannot be reused");
 }
 
 #[tokio::test]
 #[ignore = "requires a disposable PostgreSQL 16 proof database"]
-async fn opted_in_creator_follow_rotates_past_a_full_page_without_grants() {
+async fn opted_in_creator_follow_rotates_past_a_full_page_without_gaps() {
     let database = proof_database("dossier_follow_scheduler_fairness").await;
     let mut targets = Vec::new();
     for ordinal in 0..101 {
@@ -1903,7 +2027,7 @@ async fn opted_in_creator_follow_rotates_past_a_full_page_without_grants() {
         targets.push(target_ref);
     }
     let first = run_progressive_archives(&database).await.unwrap();
-    assert_eq!(first.skipped.len(), 100, "one tick inspects only its bounded page");
+    assert!(first.skipped.is_empty(), "empty opted-in targets need no second grant");
     let considered_after_first: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM collection_observation_target \
          WHERE target_ref=ANY($1) AND last_scheduler_considered_at IS NOT NULL",

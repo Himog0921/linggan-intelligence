@@ -503,7 +503,7 @@ pub fn render_monitor_rule_modal(
         creator_follow_option = if panel.target_kind == "creator" {
             format!(r#"<label class="c-rule-switch">
                     <input type="checkbox" name="creator_follow_details" value="true"{}{disabled_attr}>
-                    <span><b>巡查新增后补采详情</b><small>只跟进已接纳、尚无详情的作品；每篇一次详情、媒体及最多 30 条评论。需另有覆盖自动深化的有效授权。</small></span>
+                    <span><b>巡查新增后补采详情</b><small>勾选并保存后自动跟进已接纳、尚无详情的巡查新作品；每篇一次详情、媒体及最多 30 条评论。关闭后不再派新单。</small></span>
                   </label>"#, checked(form.creator_follow_details), disabled_attr=if disabled { " disabled" } else { "" })
         } else {
             String::new()
