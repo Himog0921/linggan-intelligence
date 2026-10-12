@@ -56,10 +56,10 @@
 ## 5. 依赖与文件所有权
 
 - `/root`: `local_web.rs`、`collection.rs`、必要管理导航模块及治理文档；负责集成。
-- `frontend_inventory`: `collection_task_actions.rs` 及专属 `collection_task_actions_tests.rs`、`crates/evidence/src/collection_task_action_read.rs`、专属投影集成测试及 `lib.rs` 的精确导出；只读目标用途/命令回执放 evidence 层，原任务表/目标表/抽屉/schema 不改。
+- `frontend_inventory`: `collection_task_actions.rs` 及专属 `collection_task_actions_tests.rs`、`crates/evidence/src/collection_task_action_read.rs`、专属投影集成测试及 `lib.rs` 的精确导出；root 在格式化后将固定错误说明原样拆入 `collection_task_action_feedback.rs`，使新增生产文件保持 500 行以内。只读目标用途/命令回执放 evidence 层，原任务表/目标表/抽屉/schema 不改。
 - `backend_flow`: 工位能力与八条 POST 核对；`collection_management.rs`、专属 `collection_management_tests.rs`、collection JS/CSS 的管理导航增量。
 - `jtbd_challenge`: 只读验证准备与独立 commit-reviewer，不承担实现。
-- 必要依赖: collection 局部 JS/CSS、既有路由/渲染测试、限定本分支 GitHub Actions 验证；共享 shell/其它模块只读。
+- 必要依赖: collection 局部 JS/CSS、既有路由/渲染测试、限定本分支 GitHub Actions 验证；新增 `scripts/test-collection-jtbd-postgres.sh` 复用已锁定的测试镜像，创建并清理专属临时库/容器/卷，只运行本包两项投影证明。共享 shell/其它模块只读。
 - 禁改: 目标正文/列定义、工位业务控制真源、插件、迁移、运行凭据、其它并行 PR 功能。
 - 停止条件: 新平台权限、扩大临时目标语义、删除保留字段、覆盖他人分支或生产变更时停止该部分并说明；不影响已授权入口收敛。
 
@@ -89,3 +89,13 @@
 
 
 提交前独立只读审查通过（仅静态范围），无未修复确定阻断项；原 replay 矛盾已接受修正。根重算 12 源码/浏览器脚本文件聚合 SHA-256 与 reviewer 一致：`eddbbe068d9d53b6bb079d643b3a9c15de7ba4fdcc51b51e17afa8719b249234`；workflow SHA-256 `a7c9812cde9bccc015fa9fc5b45d3f51eb16ebbf983ac06c38ace769304aa300`。允许提交 Draft PR 进入 CI，不等于编译、SQL、浏览器或合并通过。专用 `~/.claude/agents/commit-reviewer.md` 在本环境缺失，已由独立只读代理按当前合同审查，未假称运行不存在的定义。
+
+### 首轮 CI 与最新主线对齐
+
+- 候选 PR: [#400](https://github.com/Himog0921/linggan-intelligence/pull/400)。验证 workflow 的 runner 临时目录初始化已移至 runner step，避免 job env 使用不可用 context。
+- 同步主线 `be4b485d`（#399）；独立审查逐字节核对双方代码保真，只将三份共同文档的新增记录并存，没有改写主题图谱功能。
+- [CI 38239219017](https://github.com/Himog0921/linggan-intelligence/actions/runs/38239219017) 在 `d6cfeffcb32a5f6b9af3a97bdb9af84bfe0d10c8` 的 API 构建通过。首个 collection 测试组 117 通过、1 失败、1 ignored；后续工位/导航与浏览器步骤未运行，不记通过。
+- 失败来自旧测试对整页禁止 `targets?domain=`，包含了新增领域菜单明确的 `domain=all` 项。修复为检查实际侧栏两条导航的裸路径，同时正向保护领域菜单与管理入口，不改变运行代码或删除断言保护目标。
+- 应用该 CI 导出的 Rust 格式补丁；固定错误说明原样拆为小模块，使格式化后的新增生产文件仍少于 500 行。新增 2 个 PostgreSQL 投影证明及独占临时资源 harness 已通过独立静态审查，等待新提交实际执行。
+
+修复/格式化/投影证明提交前独立增量审查通过；root 重算 11 个代码/配置文件聚合 SHA-256 与 reviewer 一致：`bea53edf4e7860e2d96abcd65379f9610fcc601e8a26b188bda87240d1fe993f`。此项只批准进入新提交 CI，未把旧 head 的构建或未执行的 PG/浏览器记为本次通过。

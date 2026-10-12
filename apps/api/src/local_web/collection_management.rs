@@ -53,7 +53,10 @@ fn path_only(value: &str) -> &str {
 fn valid_return_to(value: Option<&str>) -> Option<&str> {
     let value = value?;
     if value.len() > MAX_RETURN_BYTES
-        || !matches!(path_only(value), "/collection/targets" | "/collection/tasks")
+        || !matches!(
+            path_only(value),
+            "/collection/targets" | "/collection/tasks"
+        )
         || value
             .chars()
             .any(|c| c.is_control() || c.is_whitespace() || c == '\\')
@@ -91,7 +94,10 @@ fn valid_return_to(value: Option<&str>) -> Option<&str> {
 }
 
 fn management_path(value: &str) -> bool {
-    matches!(path_only(value), "/collection/runtime" | "/collection/domains")
+    matches!(
+        path_only(value),
+        "/collection/runtime" | "/collection/domains"
+    )
 }
 
 fn management_action(value: &str) -> bool {

@@ -91,10 +91,19 @@ fn every_existing_management_action_keeps_its_fields_and_gets_one_return_value()
         "/collection/domains/target",
     ];
     let forms = actions.iter().map(|action| format!("<form method=\"post\" action=\"{action}\"><input name=\"station_ref\" value=\"station-1\"><button>保存</button></form>")).collect::<String>();
-    let rendered = decorate(&document(&forms), Some("/collection/tasks?domain=all#r1"), None);
-    assert_eq!(rendered.matches("name=\"return_to\"").count(), actions.len());
+    let rendered = decorate(
+        &document(&forms),
+        Some("/collection/tasks?domain=all#r1"),
+        None,
+    );
     assert_eq!(
-        rendered.matches("name=\"station_ref\" value=\"station-1\"").count(),
+        rendered.matches("name=\"return_to\"").count(),
+        actions.len()
+    );
+    assert_eq!(
+        rendered
+            .matches("name=\"station_ref\" value=\"station-1\"")
+            .count(),
         actions.len()
     );
     for action in actions {
@@ -105,9 +114,8 @@ fn every_existing_management_action_keeps_its_fields_and_gets_one_return_value()
 
 #[test]
 fn decoration_is_idempotent_and_a_replaced_error_draft_gets_context() {
-    let source = document(
-        "<form action='/collection/domains/save'><input name='name' value='草稿'></form>",
-    );
+    let source =
+        document("<form action='/collection/domains/save'><input name='name' value='草稿'></form>");
     let first = decorate(&source, Some("/collection/tasks#r1"), None);
     assert_eq!(decorate(&first, Some("/collection/tasks#r1"), None), first);
     let with_draft = first.replace("<!-- collection-body:end -->", "<form action=\"/collection/domains/save\"><input name=\"name\" value=\"失败草稿\"></form><!-- collection-body:end -->");
@@ -119,8 +127,14 @@ fn decoration_is_idempotent_and_a_replaced_error_draft_gets_context() {
 
 #[test]
 fn only_management_navigation_is_rewritten_and_markup_is_escaped_once() {
-    let source = document(r#"<a href="/collection/runtime?domain=all&amp;return_to=old">工位</a><a href='/collection/domains#settings'>领域</a><a href="/collection/targets?domain=other">该领域目标</a><a href="https://example.com">外部</a><form action="/collection/targets/new"><input name="name" value="目标"></form>"#);
-    let rendered = decorate(&source, Some("/collection/tasks?domain=family&limit=20#r1"), None);
+    let source = document(
+        r#"<a href="/collection/runtime?domain=all&amp;return_to=old">工位</a><a href='/collection/domains#settings'>领域</a><a href="/collection/targets?domain=other">该领域目标</a><a href="https://example.com">外部</a><form action="/collection/targets/new"><input name="name" value="目标"></form>"#,
+    );
+    let rendered = decorate(
+        &source,
+        Some("/collection/tasks?domain=family&limit=20#r1"),
+        None,
+    );
     assert!(rendered.contains("/collection/runtime?domain=all&amp;return_to=%2Fcollection%2Ftasks%3Fdomain%3Dfamily%26limit%3D20%23r1"));
     assert!(rendered.contains("/collection/domains?return_to=%2Fcollection%2Ftasks%3Fdomain%3Dfamily%26limit%3D20%23r1#settings"));
     assert!(rendered.contains("href=\"/collection/targets?domain=other\""));

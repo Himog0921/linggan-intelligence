@@ -165,9 +165,10 @@ fn rail(active: Section, state: Option<&SurfaceState>, nav_domain: Option<&str>)
         }
     };
     let mut items = String::new();
-    for (section, entry) in SECTIONS.iter().filter(|(section, _)| {
-        matches!(section, Section::Targets | Section::Tasks)
-    }) {
+    for (section, entry) in SECTIONS
+        .iter()
+        .filter(|(section, _)| matches!(section, Section::Targets | Section::Tasks))
+    {
         let current = if *section == active {
             " aria-current=\"page\""
         } else {
@@ -1045,7 +1046,9 @@ pub fn render_in_domain(
         format!(
             r#"<a class="c-btn-quiet c-management-entry" href="{}" data-collection-management aria-label="工位管理，全局执行资源">工位管理</a>"#,
             escape(&super::collection_management::redirect_path(
-                "/collection/runtime", None, Some(&source),
+                "/collection/runtime",
+                None,
+                Some(&source),
             )),
         )
     } else {
@@ -1067,7 +1070,11 @@ pub fn render_in_domain(
     let header = global_header(
         PrimarySurface::Collection,
         boundary,
-        &crumb(section, mode, if picker.is_empty() { "" } else { PICKER_SLOT }),
+        &crumb(
+            section,
+            mode,
+            if picker.is_empty() { "" } else { PICKER_SLOT },
+        ),
         &meta_row,
         collection_state,
     )
@@ -1163,13 +1170,23 @@ mod domain_bar_tests {
         assert!(html.contains("data-target-kind"));
     }
 
-    /// 没有领域上下文时链接保持裸路径：带一个空参数会让地址假装有得选。
+    /// 没有领域上下文时日常导航保持裸路径；领域菜单仍可提供全部领域与管理入口。
     #[test]
     fn without_a_domain_the_links_stay_bare() {
         let html = render(Section::Targets, OperationsMode::Now, None, None, None);
-        assert!(html.contains(r#"href="/collection/targets""#));
-        assert!(!html.contains("href=\"/collection/targets?domain="));
-        assert!(!html.contains("href=\"/collection/tasks?domain="));
+        let rail = html
+            .split_once(r#"aria-label="采集导航""#)
+            .expect("daily navigation exists")
+            .1
+            .split_once("</aside>")
+            .expect("daily navigation has a boundary")
+            .0;
+        for slug in ["targets", "tasks"] {
+            assert!(rail.contains(&format!(r#"href="/collection/{slug}""#)));
+            assert!(!rail.contains(&format!(r#"href="/collection/{slug}?domain="#)));
+        }
+        assert!(html.contains("v7-domain-picker"));
+        assert!(html.contains("管理领域"));
     }
 
     /// 选择器坐在「采集」与子页名之间，管的是整个模块的观察对象，不是本页的筛选条件。

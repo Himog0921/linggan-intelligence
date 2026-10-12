@@ -2,8 +2,8 @@ mod collection;
 mod collection_dispatch;
 mod collection_intake;
 mod collection_management;
-mod collection_task_actions;
 mod collection_targets_view;
+mod collection_task_actions;
 mod collection_tasks_view;
 mod comment_study;
 mod creator_lifecycle_api;
@@ -3020,7 +3020,11 @@ async fn collection_domain_save_failure(
     } else if let Some(at) = page.find("</body>") {
         page.insert_str(at, &draft);
     }
-    Html(collection_management::decorate(&page, form.return_to.as_deref(), None))
+    Html(collection_management::decorate(
+        &page,
+        form.return_to.as_deref(),
+        None,
+    ))
 }
 
 fn collection_domain_error_message(error: Option<&str>) -> Option<&'static str> {
@@ -3165,7 +3169,12 @@ fn render_collection_domain_lanes(
 
 fn management_nav_domain(return_to: Option<&str>) -> Option<String> {
     let context = collection_management::ManagementContext::new(return_to, None);
-    let uri = context.return_to().split('#').next()?.parse::<axum::http::Uri>().ok()?;
+    let uri = context
+        .return_to()
+        .split('#')
+        .next()?
+        .parse::<axum::http::Uri>()
+        .ok()?;
     let Query(params) = Query::<CollectionDomainParam>::try_from_uri(&uri).ok()?;
     params.domain
 }
@@ -3180,7 +3189,11 @@ async fn collection_domains(
     let return_to = params.return_to.clone();
     let domain = params.domain.clone();
     let Html(page) = collection_domains_page(State(state), Query(params)).await;
-    Html(collection_management::decorate(&page, return_to.as_deref(), domain.as_deref()))
+    Html(collection_management::decorate(
+        &page,
+        return_to.as_deref(),
+        domain.as_deref(),
+    ))
 }
 
 async fn collection_domains_page(
@@ -3203,7 +3216,8 @@ async fn collection_domains_page(
         &domains,
         params.domain.as_deref(),
     );
-    let nav_domain = collection_nav_domain(&domains, current_domain).or_else(|| params.domain.clone());
+    let nav_domain =
+        collection_nav_domain(&domains, current_domain).or_else(|| params.domain.clone());
     let base = collection::render_in_domain(
         collection::Section::Domains,
         collection::OperationsMode::Now,
@@ -3555,13 +3569,12 @@ async fn collection_domain_save(
         .map(|domain| domain.domain_ref)
     };
     match result {
-        Ok(domain_ref) => {
-            Redirect::to(&collection_management::redirect_path(
-                &format!("/collection/domains?domain={domain_ref}"),
-                None,
-                form.return_to.as_deref(),
-            )).into_response()
-        }
+        Ok(domain_ref) => Redirect::to(&collection_management::redirect_path(
+            &format!("/collection/domains?domain={domain_ref}"),
+            None,
+            form.return_to.as_deref(),
+        ))
+        .into_response(),
         Err(linggan_evidence::observation_domain::ObservationDomainError::DuplicateName) => {
             collection_domain_save_failure(state, &form, "name_taken")
                 .await
@@ -3639,7 +3652,9 @@ async fn collection_tasks(
     State(state): State<LocalWebState>,
     Query(params): Query<collection_task_actions::TaskActionParams>,
 ) -> Html<String> {
-    let domain = CollectionDomainParam { domain: params.nav().map(str::to_owned) };
+    let domain = CollectionDomainParam {
+        domain: params.nav().map(str::to_owned),
+    };
     let Html(base) = collection_tasks_page(State(state.clone()), Query(domain)).await;
     Html(collection_task_actions::decorate(state.database.database(), &base, &params).await)
 }
@@ -3652,8 +3667,14 @@ async fn collection_tasks_page(
         return Html(collection::render_in_domain(
             collection::Section::Tasks,
             collection::OperationsMode::Now,
-            None, None, None,
-            collection::DomainBar { picker: "", nav_domain: domain.nav(), domains: &[] },
+            None,
+            None,
+            None,
+            collection::DomainBar {
+                picker: "",
+                nav_domain: domain.nav(),
+                domains: &[],
+            },
         ));
     };
     let (reads, timeline, delivery) = tokio::join!(
@@ -3738,7 +3759,11 @@ async fn collection_runtime(
     let return_to = params.return_to.clone();
     let domain = params.domain.clone();
     let Html(page) = collection_runtime_page(State(state), Query(params)).await;
-    Html(collection_management::decorate(&page, return_to.as_deref(), domain.as_deref()))
+    Html(collection_management::decorate(
+        &page,
+        return_to.as_deref(),
+        domain.as_deref(),
+    ))
 }
 
 async fn collection_runtime_page(
@@ -3935,7 +3960,10 @@ async fn collection_runtime_register_station(
     axum::extract::Form(form): axum::extract::Form<StationForm>,
 ) -> Redirect {
     let Some(database) = state.database.database() else {
-        return Redirect::to(&runtime_surface_with_error("read_model_not_connected", form.return_to.as_deref()));
+        return Redirect::to(&runtime_surface_with_error(
+            "read_model_not_connected",
+            form.return_to.as_deref(),
+        ));
     };
     // 200 notes per station per day (Mog's decision), held on the station so a plugin
     // reinstall never resets it.
@@ -3943,9 +3971,16 @@ async fn collection_runtime_register_station(
         .await
         .is_err()
     {
-        return Redirect::to(&runtime_surface_with_error("station_rejected", form.return_to.as_deref()));
+        return Redirect::to(&runtime_surface_with_error(
+            "station_rejected",
+            form.return_to.as_deref(),
+        ));
     }
-    Redirect::to(&collection_management::redirect_path(RUNTIME_SURFACE, None, form.return_to.as_deref()))
+    Redirect::to(&collection_management::redirect_path(
+        RUNTIME_SURFACE,
+        None,
+        form.return_to.as_deref(),
+    ))
 }
 
 #[derive(serde::Deserialize)]
@@ -3963,15 +3998,25 @@ async fn collection_runtime_rename_station(
     axum::extract::Form(form): axum::extract::Form<StationNameForm>,
 ) -> Redirect {
     let Some(database) = state.database.database() else {
-        return Redirect::to(&runtime_surface_with_error("read_model_not_connected", form.return_to.as_deref()));
+        return Redirect::to(&runtime_surface_with_error(
+            "read_model_not_connected",
+            form.return_to.as_deref(),
+        ));
     };
     if rename_station(database, form.station_ref, &form.display_name)
         .await
         .is_err()
     {
-        return Redirect::to(&runtime_surface_with_error("station_name_rejected", form.return_to.as_deref()));
+        return Redirect::to(&runtime_surface_with_error(
+            "station_name_rejected",
+            form.return_to.as_deref(),
+        ));
     }
-    Redirect::to(&collection_management::redirect_path(RUNTIME_SURFACE, None, form.return_to.as_deref()))
+    Redirect::to(&collection_management::redirect_path(
+        RUNTIME_SURFACE,
+        None,
+        form.return_to.as_deref(),
+    ))
 }
 
 #[derive(serde::Deserialize)]
@@ -3986,15 +4031,25 @@ async fn collection_runtime_open_window(
     axum::extract::Form(form): axum::extract::Form<ClaimWindowForm>,
 ) -> Redirect {
     let Some(database) = state.database.database() else {
-        return Redirect::to(&runtime_surface_with_error("read_model_not_connected", form.return_to.as_deref()));
+        return Redirect::to(&runtime_surface_with_error(
+            "read_model_not_connected",
+            form.return_to.as_deref(),
+        ));
     };
     if open_claim_window(database, form.station_ref, form.valid_for_hours)
         .await
         .is_err()
     {
-        return Redirect::to(&runtime_surface_with_error("claim_window_rejected", form.return_to.as_deref()));
+        return Redirect::to(&runtime_surface_with_error(
+            "claim_window_rejected",
+            form.return_to.as_deref(),
+        ));
     }
-    Redirect::to(&collection_management::redirect_path(RUNTIME_SURFACE, None, form.return_to.as_deref()))
+    Redirect::to(&collection_management::redirect_path(
+        RUNTIME_SURFACE,
+        None,
+        form.return_to.as_deref(),
+    ))
 }
 
 #[derive(serde::Deserialize)]
@@ -4008,15 +4063,25 @@ async fn collection_runtime_close_window(
     axum::extract::Form(form): axum::extract::Form<CloseWindowForm>,
 ) -> Redirect {
     let Some(database) = state.database.database() else {
-        return Redirect::to(&runtime_surface_with_error("read_model_not_connected", form.return_to.as_deref()));
+        return Redirect::to(&runtime_surface_with_error(
+            "read_model_not_connected",
+            form.return_to.as_deref(),
+        ));
     };
     if close_claim_window(database, form.station_ref)
         .await
         .is_err()
     {
-        return Redirect::to(&runtime_surface_with_error("close_window_rejected", form.return_to.as_deref()));
+        return Redirect::to(&runtime_surface_with_error(
+            "close_window_rejected",
+            form.return_to.as_deref(),
+        ));
     }
-    Redirect::to(&collection_management::redirect_path(RUNTIME_SURFACE, None, form.return_to.as_deref()))
+    Redirect::to(&collection_management::redirect_path(
+        RUNTIME_SURFACE,
+        None,
+        form.return_to.as_deref(),
+    ))
 }
 
 #[derive(serde::Deserialize)]
@@ -4030,15 +4095,25 @@ async fn collection_runtime_retire_station(
     axum::extract::Form(form): axum::extract::Form<RetireForm>,
 ) -> Redirect {
     let Some(database) = state.database.database() else {
-        return Redirect::to(&runtime_surface_with_error("read_model_not_connected", form.return_to.as_deref()));
+        return Redirect::to(&runtime_surface_with_error(
+            "read_model_not_connected",
+            form.return_to.as_deref(),
+        ));
     };
     if retire_station(database, form.station_ref, "在执行工位页停用")
         .await
         .is_err()
     {
-        return Redirect::to(&runtime_surface_with_error("retire_rejected", form.return_to.as_deref()));
+        return Redirect::to(&runtime_surface_with_error(
+            "retire_rejected",
+            form.return_to.as_deref(),
+        ));
     }
-    Redirect::to(&collection_management::redirect_path(RUNTIME_SURFACE, None, form.return_to.as_deref()))
+    Redirect::to(&collection_management::redirect_path(
+        RUNTIME_SURFACE,
+        None,
+        form.return_to.as_deref(),
+    ))
 }
 
 #[derive(serde::Deserialize)]
@@ -4053,15 +4128,25 @@ async fn collection_runtime_claim(
     axum::extract::Form(form): axum::extract::Form<ClaimForm>,
 ) -> Redirect {
     let Some(database) = state.database.database() else {
-        return Redirect::to(&runtime_surface_with_error("read_model_not_connected", form.return_to.as_deref()));
+        return Redirect::to(&runtime_surface_with_error(
+            "read_model_not_connected",
+            form.return_to.as_deref(),
+        ));
     };
     if claim_installation(database, form.installation_ref, form.station_ref)
         .await
         .is_err()
     {
-        return Redirect::to(&runtime_surface_with_error("claim_rejected", form.return_to.as_deref()));
+        return Redirect::to(&runtime_surface_with_error(
+            "claim_rejected",
+            form.return_to.as_deref(),
+        ));
     }
-    Redirect::to(&collection_management::redirect_path(RUNTIME_SURFACE, None, form.return_to.as_deref()))
+    Redirect::to(&collection_management::redirect_path(
+        RUNTIME_SURFACE,
+        None,
+        form.return_to.as_deref(),
+    ))
 }
 
 #[derive(serde::Deserialize)]
@@ -4076,11 +4161,21 @@ async fn collection_runtime_set_accepting(
     axum::extract::Form(form): axum::extract::Form<AcceptingForm>,
 ) -> Redirect {
     let Some(database) = state.database.database() else {
-        return Redirect::to(&runtime_surface_with_error("read_model_not_connected", form.return_to.as_deref()));
+        return Redirect::to(&runtime_surface_with_error(
+            "read_model_not_connected",
+            form.return_to.as_deref(),
+        ));
     };
     match set_station_accepting(database, form.station_ref, form.accepting, "person").await {
-        Ok(()) => Redirect::to(&collection_management::redirect_path(RUNTIME_SURFACE, None, form.return_to.as_deref())),
-        Err(_) => Redirect::to(&runtime_surface_with_error("station_acceptance_rejected", form.return_to.as_deref())),
+        Ok(()) => Redirect::to(&collection_management::redirect_path(
+            RUNTIME_SURFACE,
+            None,
+            form.return_to.as_deref(),
+        )),
+        Err(_) => Redirect::to(&runtime_surface_with_error(
+            "station_acceptance_rejected",
+            form.return_to.as_deref(),
+        )),
     }
 }
 
@@ -4096,13 +4191,23 @@ async fn collection_runtime_bind_account(
     axum::extract::Form(form): axum::extract::Form<AccountBindingForm>,
 ) -> Redirect {
     let Some(database) = state.database.database() else {
-        return Redirect::to(&runtime_surface_with_error("read_model_not_connected", form.return_to.as_deref()));
+        return Redirect::to(&runtime_surface_with_error(
+            "read_model_not_connected",
+            form.return_to.as_deref(),
+        ));
     };
     match bind_observation_account(database, form.account_ref, form.installation_ref, "person")
         .await
     {
-        Ok(_) => Redirect::to(&collection_management::redirect_path(RUNTIME_SURFACE, None, form.return_to.as_deref())),
-        Err(_) => Redirect::to(&runtime_surface_with_error("account_binding_rejected", form.return_to.as_deref())),
+        Ok(_) => Redirect::to(&collection_management::redirect_path(
+            RUNTIME_SURFACE,
+            None,
+            form.return_to.as_deref(),
+        )),
+        Err(_) => Redirect::to(&runtime_surface_with_error(
+            "account_binding_rejected",
+            form.return_to.as_deref(),
+        )),
     }
 }
 
@@ -4394,7 +4499,10 @@ fn monitor_rule_redirect(
 ) -> Redirect {
     if form.return_scope.as_deref() == Some("tasks") && form.command_kind == "manual_observe" {
         return Redirect::to(&collection_task_actions::return_path(
-            form.target_ref, form.return_domain.as_deref(), receipt_ref, error,
+            form.target_ref,
+            form.return_domain.as_deref(),
+            receipt_ref,
+            error,
         ));
     }
     // 从规则台点来的，回规则台。
@@ -5772,8 +5880,15 @@ fn collection_domain_picker(
         || "/collection/targets".to_owned(),
         |domain| format!("/collection/targets?domain={}", encode_query_value(domain)),
     );
-    let management = collection_management::redirect_path("/collection/domains", None, Some(&source));
-    render_domain_picker(domains, current, "/collection/targets", Some("全部领域"), Some(&management))
+    let management =
+        collection_management::redirect_path("/collection/domains", None, Some(&source));
+    render_domain_picker(
+        domains,
+        current,
+        "/collection/targets",
+        Some("全部领域"),
+        Some(&management),
+    )
 }
 
 fn render_domain_picker(
@@ -5783,7 +5898,8 @@ fn render_domain_picker(
     all_domains_label: Option<&str>,
     management_href: Option<&str>,
 ) -> String {
-    if management_href.is_none() && (domains.is_empty() || (domains.len() < 2 && current.is_some())) {
+    if management_href.is_none() && (domains.is_empty() || (domains.len() < 2 && current.is_some()))
+    {
         return String::new();
     }
     let mut options = String::new();

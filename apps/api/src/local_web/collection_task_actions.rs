@@ -3,6 +3,10 @@
 //! GET only reads existing targets, the current rule and a selected durable command receipt.
 //! POST remains the existing target monitoring command; this view cannot issue a Task or Lease.
 
+#[path = "collection_task_action_feedback.rs"]
+mod feedback;
+
+use feedback::command_problem;
 use linggan_evidence::{
     ManualObservationReceipt, ObservationTarget, list_targets,
     read_manual_observation_primary_domains, read_manual_observation_receipt,
@@ -63,7 +67,10 @@ pub(super) async fn decorate(
     let overlay = if params.once.as_deref() == Some("1") {
         let content = match database {
             Some(database) => read_content(database, params).await,
-            None => unavailable_content(params, "当前读不到观察目标与规则，请恢复本机数据库连接后重试。"),
+            None => unavailable_content(
+                params,
+                "当前读不到观察目标与规则，请恢复本机数据库连接后重试。",
+            ),
         };
         modal(params, &content)
     } else {
@@ -116,7 +123,12 @@ fn modal(params: &TaskActionParams, content: &str) -> String {
 async fn read_content(database: &Database, params: &TaskActionParams) -> String {
     let targets = match list_targets(database, None, None, 200).await {
         Ok(targets) => targets,
-        Err(_) => return unavailable_content(params, "观察目标列表本次读取失败；这不表示没有目标。请稍后重试。"),
+        Err(_) => {
+            return unavailable_content(
+                params,
+                "观察目标列表本次读取失败；这不表示没有目标。请稍后重试。",
+            );
+        }
     };
     let selected = match params.target.as_deref() {
         None => None,
@@ -185,21 +197,29 @@ fn selection_form(
     panel: Option<&MonitorRulePanel>,
     params: &TaskActionParams,
 ) -> String {
-    let selected = panel
-        .map(|panel| panel.target_ref)
-        .or_else(|| params.target.as_deref().and_then(|value| Uuid::parse_str(value).ok()));
+    let selected = panel.map(|panel| panel.target_ref).or_else(|| {
+        params
+            .target
+            .as_deref()
+            .and_then(|value| Uuid::parse_str(value).ok())
+    });
     let mut options = String::from(r#"<option value="">请选择观察目标</option>"#);
     for target in targets {
         options.push_str(&target_option(
             target.target_ref,
-            target.display_name.as_deref().unwrap_or(&target.identity_key),
+            target
+                .display_name
+                .as_deref()
+                .unwrap_or(&target.identity_key),
             &target.target_kind,
             selected,
         ));
     }
     // A selected target is read independently; the bounded chooser must not erase it.
     if let Some(panel) = panel.filter(|panel| {
-        !targets.iter().any(|target| target.target_ref == panel.target_ref)
+        !targets
+            .iter()
+            .any(|target| target.target_ref == panel.target_ref)
     }) {
         options.push_str(&target_option(
             panel.target_ref,
@@ -207,11 +227,12 @@ fn selection_form(
             &panel.target_kind,
             selected,
         ));
-    } else if let Some(target_ref) = selected
-        .filter(|target_ref| {
-            panel.is_none() && !targets.iter().any(|target| target.target_ref == *target_ref)
-        })
-    {
+    } else if let Some(target_ref) = selected.filter(|target_ref| {
+        panel.is_none()
+            && !targets
+                .iter()
+                .any(|target| target.target_ref == *target_ref)
+    }) {
         options.push_str(&format!(r#"<option value="{target_ref}" selected>所选目标 · {target_ref}（当前读不到）</option>"#));
     }
     let empty = if targets.is_empty() && panel.is_none() {
@@ -234,7 +255,11 @@ fn target_option(target_ref: Uuid, name: &str, kind: &str, selected: Option<Uuid
             ""
         },
         name = escape(name),
-        kind = if kind == "creator" { "创作者" } else { "关键词" },
+        kind = if kind == "creator" {
+            "创作者"
+        } else {
+            "关键词"
+        },
     )
 }
 
@@ -249,8 +274,14 @@ fn command_gate(
     match domains {
         None => return Some("当前读不到目标的领域用途，暂不能提交。"),
         Some([_]) => {}
-        Some([]) => return Some("目标没有唯一有效的主用途领域，请先在领域管理中检查归属与暂停状态。"),
-        Some(_) => return Some("目标关联了多个有效主用途领域；现有人工观察命令无法选择其中一个，请先明确用途。"),
+        Some([]) => {
+            return Some("目标没有唯一有效的主用途领域，请先在领域管理中检查归属与暂停状态。");
+        }
+        Some(_) => {
+            return Some(
+                "目标关联了多个有效主用途领域；现有人工观察命令无法选择其中一个，请先明确用途。",
+            );
+        }
     }
     if panel.target_kind == "keyword" {
         return match archive {
@@ -354,19 +385,35 @@ fn receipt_markup(receipt: &ManualObservationReceipt) -> String {
         );
     let (title, meaning) = if recorded_work {
         match (receipt.outcome.as_str(), receipt.reason.as_str()) {
-            ("replay", _) => ("已返回原申请结果", "相同申请已处理过。以下是原有工单引用，不代表已经执行或采回材料。"),
-            (_, "manual_observe_reused") => ("已有工单覆盖这次申请", "已关联现有工单，没有重复创建。执行与材料结果仍以任务回执为准。"),
-            _ => ("人工观察工单已建立", "工单进入统一队列后由可用工位领取；这里只确认申请结果，尚不能证明已经执行。"),
+            ("replay", _) => (
+                "已返回原申请结果",
+                "相同申请已处理过。以下是原有工单引用，不代表已经执行或采回材料。",
+            ),
+            (_, "manual_observe_reused") => (
+                "已有工单覆盖这次申请",
+                "已关联现有工单，没有重复创建。执行与材料结果仍以任务回执为准。",
+            ),
+            _ => (
+                "人工观察工单已建立",
+                "工单进入统一队列后由可用工位领取；这里只确认申请结果，尚不能证明已经执行。",
+            ),
         }
     } else {
-        ("本次申请尚未形成可确认的工单", command_problem(&receipt.reason))
+        (
+            "本次申请尚未形成可确认的工单",
+            command_problem(&receipt.reason),
+        )
     };
     let work = receipt
         .work_order_ref
         .map_or_else(|| "未记录工单".to_owned(), |value| value.to_string());
     format!(
         r#"<section class="c-rule-feedback{tone}" data-single-collection-receipt data-outcome="{outcome}"><div><b>{title}</b></div><p>{meaning}</p><dl><div><dt>命令回执</dt><dd>{receipt_ref}</dd></div><div><dt>工单引用</dt><dd>{work}</dd></div><div><dt>记录时间</dt><dd>{recorded_at}</dd></div></dl><p>原因：<code>{reason}</code></p></section>"#,
-        tone = if recorded_work { " c-rule-feedback-ok" } else { "" },
+        tone = if recorded_work {
+            " c-rule-feedback-ok"
+        } else {
+            ""
+        },
         outcome = escape(&receipt.outcome),
         receipt_ref = receipt.receipt_ref,
         work = escape(&work),
@@ -375,37 +422,23 @@ fn receipt_markup(receipt: &ManualObservationReceipt) -> String {
     )
 }
 
-fn command_problem(code: &str) -> &'static str {
-    match code {
-        "stale_revision" | "monitor_rule_command_stale" => "规则版本已经变化。已保留所选目标，请核对当前规则后重新提交。",
-        "identity_conflict" => "命令标识对应了不同内容，未覆盖原申请。请核对后重新提交。",
-        "baseline_not_ready" | "keyword_archive_incomplete" => "关键词建档尚未完成，请先完成搜索面和待补详情。",
-        "target_domain_unassigned" => "目标当前没有唯一有效的主用途领域，请检查领域归属。",
-        "target_not_requestable" => "这个目标当前不允许新增观察工作。",
-        "authorization_missing" | "authorization_expired_or_revoked" => "当前没有适用的有效授权，未创建新的采集工单。",
-        "authorization_scope_mismatch" | "authorization_purpose_mismatch" => "当前授权没有覆盖这次观察的范围或用途。",
-        "authorization_target_limit_reached" | "authorization_work_unit_limit_reached" => "本次观察超出授权额度，未创建新的采集工单。",
-        "station_unavailable" | "station_not_accepting" | "installation_credential_missing" | "plugin_version_unsupported" | "installation_stale" | "capability_missing" => "工位当前未具备接活条件，请在工位管理中核对。",
-        "account_unbound" | "account_binding_changed" | "account_binding_expired" | "account_eligibility_stale" | "account_needs_login" | "account_restricted" | "account_unknown" => "当前账号身份或资格未通过准入，请在工位管理中核对账号。",
-        "risk_paused" | "installation_risk_cooldown" | "account_cooling" => "当前处于风险暂停或冷却中，请核对工位状态后再申请。",
-        "account_busy" | "station_busy" | "station_daily_budget_reached" | "platform_concurrency_reached" | "capacity_unknown" => "当前执行容量未通过准入，请在工位管理中核对可用状态。",
-        "need_already_satisfied" | "in_flight_work_covers_it" => "已有结果或在途工作覆盖了这次申请，请核对已有任务。",
-        "read_model_not_connected" | "database_unavailable" | "schema_unavailable" => "当前无法读取或提交采集命令，请恢复本机服务后核对。",
-        _ => "本次申请没有可确认的新工单。请核对回执原因与目标、工位状态。",
-    }
-}
-
 fn form_feedback(params: &TaskActionParams) -> String {
     // A durable receipt is stronger than a redirect hint. In particular, replay may have
     // succeeded; its query hint must not introduce a contradictory "no work" message.
     if params.receipt.is_some() {
         return String::new();
     }
-    params.error.as_deref().map_or_else(String::new, |error| notice(command_problem(error)))
+    params
+        .error
+        .as_deref()
+        .map_or_else(String::new, |error| notice(command_problem(error)))
 }
 
 fn unavailable_content(params: &TaskActionParams, message: &str) -> String {
-    let selected = params.target.as_deref().and_then(|value| Uuid::parse_str(value).ok());
+    let selected = params
+        .target
+        .as_deref()
+        .and_then(|value| Uuid::parse_str(value).ok());
     let retained = selected.map_or_else(String::new, |target_ref| {
         format!(r#"<p class="c-rule-hint">已保留目标引用：<code>{target_ref}</code></p>"#)
     });

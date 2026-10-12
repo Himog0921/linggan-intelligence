@@ -71,7 +71,12 @@ fn keyword_unknown_and_incomplete_archives_never_offer_an_enabled_submission() {
         assert!(html.contains("value=\"manual_observe\" disabled"));
     }
     assert!(
-        command_gate(&panel("keyword"), Some(&domains), KeywordArchiveRead::Complete).is_none()
+        command_gate(
+            &panel("keyword"),
+            Some(&domains),
+            KeywordArchiveRead::Complete
+        )
+        .is_none()
     );
     assert!(command_gate(&panel("creator"), None, KeywordArchiveRead::Complete).is_some());
     assert!(command_gate(&panel("creator"), Some(&[]), KeywordArchiveRead::Complete).is_some());
