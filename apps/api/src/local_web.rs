@@ -3006,11 +3006,13 @@ async fn collection_domain_save_failure(
         }
     }
     let draft = collection_domain_draft_form(form);
-    let create_form = page.find("<form class=\"domain-create\"").and_then(|start| {
-        page[start..]
-            .find("</form>")
-            .map(|end| start..start + end + "</form>".len())
-    });
+    let create_form = page
+        .find("<form class=\"domain-create\"")
+        .and_then(|start| {
+            page[start..]
+                .find("</form>")
+                .map(|end| start..start + end + "</form>".len())
+        });
     match (form.domain_ref, create_form) {
         (None, Some(range)) => page.replace_range(range, &draft),
         (Some(_), Some(range)) => page.insert_str(range.start, &draft),

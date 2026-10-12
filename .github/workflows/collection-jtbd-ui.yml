@@ -78,12 +78,13 @@ jobs:
           bash scripts/check-project-governance.sh origin/main
           bash scripts/verify-ui-design-handbook.sh
           git diff --check
-      - name: Export formatting-only patch after validation
+      - name: Check formatting and retain any patch
         if: always()
         run: |
           mkdir -p "$RUNNER_TEMP/collection-jtbd-proof"
           rustfmt --edition 2024 --config skip_children=true apps/api/src/local_web.rs apps/api/src/local_web/collection.rs apps/api/src/local_web/tests.rs apps/api/src/local_web/collection_management.rs apps/api/src/local_web/collection_management_tests.rs apps/api/src/local_web/collection_task_actions.rs apps/api/src/local_web/collection_task_action_feedback.rs apps/api/src/local_web/collection_task_actions_tests.rs crates/evidence/src/collection_task_action_read.rs crates/evidence/src/lib.rs crates/evidence/tests/collection_task_action_read_postgres.rs
           git diff --binary > "$RUNNER_TEMP/collection-jtbd-proof/rustfmt.patch"
+          test ! -s "$RUNNER_TEMP/collection-jtbd-proof/rustfmt.patch"
       - name: Retain bounded browser proof
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

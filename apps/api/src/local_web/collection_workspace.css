@@ -1467,6 +1467,7 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 .c-domain-management-link[data-collection-management]{margin-top:var(--lgi-space-2);padding-top:var(--lgi-space-3);border-top:var(--c-line-hair) solid var(--lgi-border)}
 .c-management-return{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--lgi-space-3);padding:var(--lgi-space-3) 0;border-bottom:var(--c-line-hair) solid var(--lgi-border)}
 .c-management-return>span{color:var(--lgi-muted);font-size:var(--lgi-text-label);line-height:var(--lgi-lh-body)}
+[data-task-actions] a.c-btn-primary{display:inline-flex;align-items:center;justify-content:center;text-decoration:none}
 @media(max-width:1180px){
   .domain-create,.domain-draft{grid-template-columns:repeat(2,minmax(0,1fr))}
   .domain-create button,.domain-draft button{justify-self:start}
