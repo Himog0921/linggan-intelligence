@@ -1,0 +1,31 @@
+name: Topic Map compact source transfer
+on:
+  push:
+    branches: ['codex/topic-map-compact-382']
+    paths: ['.github/workflows/topic-map-compact-transfer.yml']
+permissions:
+  contents: read
+jobs:
+  source:
+    if: github.ref == 'refs/heads/codex/topic-map-compact-382'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Export exact source and baseline receipt
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = 527b426e061c00c270bc9efbc6e916052ef12b4b
+          mkdir -p "$RUNNER_TEMP/topic-map-source"
+          git bundle create "$RUNNER_TEMP/topic-map-source/repo.bundle" HEAD
+          git rev-parse HEAD > "$RUNNER_TEMP/topic-map-source/head.txt"
+          node scripts/test-topic-map-ui.cjs > "$RUNNER_TEMP/topic-map-source/baseline.log"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: topic-map-readability-source
+          path: ${{ runner.temp }}/topic-map-source
+          retention-days: 1
