@@ -1,0 +1,26 @@
+<section class="ops-readouts" aria-label="读数（随业务选择变化）">
+<div class="ops-readout" title="使用中与养号中的账号数 / 在台账的账号数"><span>运营中账号</span><b data-readout="accounts">—</b></div>
+<div class="ops-readout" title="本月（北京时间）发布的登记条数，重复登记只算一次"><span>本月发布</span><b data-readout="published">—</b></div>
+<div class="ops-readout" title="要等系统能自动发现我方帖子后才接入，不是 0"><span>有效发布</span><b data-readout="effective" data-state="unknown">未接入</b></div>
+<div class="ops-readout" title="本月每日数据的加微数之和；每日数据不分业务"><span>本月加微</span><b data-readout="followers">—</b></div>
+<div class="ops-readout" title="本月发布的小红书帖子中，最新阅读量不少于 5000 的篇数"><span>本月爆款</span><b data-readout="hits">—</b></div>
+</section>
+<div class="ops-toolbar ops-toolbar-stacked">
+<nav class="ops-tabs" id="ops-operators" aria-label="运营人"></nav>
+<div class="ops-tools">
+<nav class="ops-tabs ops-platforms" aria-label="平台"><button type="button" data-platform="" aria-pressed="true">总数据</button><button type="button" data-platform="douyin" aria-pressed="false">抖音</button><button type="button" data-platform="xhs" aria-pressed="false">小红书</button></nav>
+<form id="ops-account-search" class="ops-search" role="search"><label class="v7-sr-only" for="ops-account">搜索账号</label><input id="ops-account" name="account" type="search" placeholder="搜索账号..." maxlength="200" autocomplete="off"><button type="submit">搜索</button></form>
+<button type="button" id="ops-date-open">日期范围</button>
+<button type="button" id="ops-pending" aria-pressed="false">待补阅读量</button>
+<small class="ops-note">切换前只读</small>
+<button type="button" disabled title="切换前只读：录入仍在内容工作台">新增发布</button>
+<button type="button" disabled title="自动发现我方帖子上线后可用">同步数据</button>
+</div>
+</div>
+<p id="ops-status" role="status" aria-live="polite"></p>
+<div class="ops-table-wrap" tabindex="0" aria-label="发布记录表格，可横向滚动" aria-busy="true"><table class="ops-table ops-publications">
+<colgroup><col class="ops-col-date"><col class="ops-col-platform"><col class="ops-col-title"><col class="ops-col-state"><col class="ops-col-link"><col class="ops-col-media"><col class="ops-col-body"><col class="ops-col-account"><col class="ops-col-person"><col class="ops-col-actions"><col class="ops-col-number"><col class="ops-col-number"><col class="ops-col-number"><col class="ops-col-number"><col class="ops-col-number"><col class="ops-col-review"></colgroup>
+<thead><tr><th scope="col">日期</th><th scope="col">平台</th><th scope="col">标题</th><th scope="col">数据状态</th><th scope="col">发布链接</th><th scope="col">媒体</th><th scope="col">正文</th><th scope="col">账号</th><th scope="col">运营人</th><th scope="col">操作</th><th scope="col" class="ops-number">阅读量</th><th scope="col" class="ops-number">点赞</th><th scope="col" class="ops-number">收藏</th><th scope="col" class="ops-number">评论</th><th scope="col" class="ops-number">封面点击率</th><th scope="col">复盘</th></tr></thead>
+<tbody id="ops-rows"></tbody></table></div>
+<nav class="ops-pagination" aria-label="发布记录分页"><span id="ops-page-summary" aria-live="polite"></span><button type="button" id="ops-prev" disabled>上一页</button><button type="button" id="ops-next" disabled>下一页</button></nav>
+<dialog id="ops-date-dialog" class="ops-dialog" aria-labelledby="ops-date-title"><form id="ops-date-form" method="dialog"><header><h2 id="ops-date-title">日期范围</h2><small>按北京时间的发布日，含首尾两天</small></header><div class="ops-dialog-body"><label>开始日期<input type="date" name="from"></label><label>结束日期<input type="date" name="to"></label></div><footer><button type="button" id="ops-date-clear">清空日期</button><button type="button" id="ops-date-cancel">取消</button><button type="submit" class="ops-primary">确认</button></footer></form></dialog>

@@ -1,0 +1,18 @@
+<div class="ops-io">
+<section class="ops-panel" aria-labelledby="ops-export-title">
+<h2 id="ops-export-title">导出</h2>
+<p class="ops-note">导出 Linggan 里当前业务的全部记录（每日数据不分业务），列与页面一致，附来源记录号和数据截至时间。</p>
+<ul class="ops-export-list">
+<li><span>账号</span><a href="/api/local/ops/export?kind=accounts&amp;format=csv&amp;domain={{BUSINESS}}">CSV</a><a href="/api/local/ops/export?kind=accounts&amp;format=json&amp;domain={{BUSINESS}}">JSON</a></li>
+<li><span>发布记录</span><a href="/api/local/ops/export?kind=publications&amp;format=csv&amp;domain={{BUSINESS}}">CSV</a><a href="/api/local/ops/export?kind=publications&amp;format=json&amp;domain={{BUSINESS}}">JSON</a></li>
+<li><span>每日数据</span><a href="/api/local/ops/export?kind=daily&amp;format=csv&amp;domain={{BUSINESS}}">CSV</a><a href="/api/local/ops/export?kind=daily&amp;format=json&amp;domain={{BUSINESS}}">JSON</a></li>
+</ul>
+</section>
+<section class="ops-panel" aria-labelledby="ops-import-title" aria-disabled="true">
+<h2 id="ops-import-title">导入</h2>
+<p class="ops-note">导入随录入功能在登录上线后开放；切换前请在内容工作台导入。</p>
+<label>导入类型<select disabled><option>发布记录</option></select></label>
+<label>导入内容<textarea disabled rows="6"></textarea></label>
+<button type="button" disabled>导入 CSV</button>
+</section>
+</div>

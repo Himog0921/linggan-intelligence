@@ -2253,7 +2253,8 @@ fn the_primary_nav_readouts_all_share_one_type_scale_and_one_colour() {
         "one readout scale means exactly one rule owns it"
     );
 
-    // Both surfaces render the same five entries from the one shared header.
+    // Both surfaces render the same six entries from the one shared header (运营 joined in
+    // OPS-MIGRATION-001 D2).
     let mut pages = vec![evidence_library_html(None, &[], None)];
     pages.push(collection::render(
         collection::Section::Targets,
@@ -2265,8 +2266,8 @@ fn the_primary_nav_readouts_all_share_one_type_scale_and_one_colour() {
     for html in &pages {
         assert_eq!(
             html.matches("class=\"v7-nav-readout\"").count(),
-            5,
-            "every page renders the same five primary entries"
+            6,
+            "every page renders the same six primary entries"
         );
     }
 }
@@ -2992,13 +2993,13 @@ fn both_surfaces_render_the_header_at_one_type_scale() {
     for (page, html) in [("corpus", &corpus), ("collection", &collection)] {
         assert_eq!(
             html.matches("class=\"v7-nav-zh\"").count(),
-            5,
-            "{page} renders five primary entries"
+            6,
+            "{page} renders six primary entries"
         );
         assert_eq!(
             html.matches("class=\"v7-nav-readout\"").count(),
-            5,
-            "{page} renders five primary readouts"
+            6,
+            "{page} renders six primary readouts"
         );
     }
 }
@@ -3036,6 +3037,31 @@ fn narrow_primary_navigation_wraps_instead_of_hiding_a_responsibility_offscreen(
     assert!(
         !SHELL_CSS.contains(".v7-primary-nav{grid-column:1/-1;overflow-x:auto"),
         "a hidden horizontal swipe must not be required to reach a first-level responsibility"
+    );
+}
+
+#[test]
+fn six_primary_entries_keep_the_personal_menu_on_screen_at_laptop_widths() {
+    // 运营 made six first-level entries (OPS-MIGRATION-001 D2). At the old 1500/1180 steps the
+    // header needed 1362px all the way down to 1181px, so a 1280px laptop clipped 个人菜单. The
+    // header now narrows in its own steps; the browser sweep over 901–1600px is recorded in the
+    // D2 acceptance record, this guard only keeps the steps from being dropped.
+    for step in [
+        "@media(max-width:1560px){.v7-global-brand{width:285px",
+        "@media(max-width:1380px){.v7-global-brand{width:230px;flex-basis:230px}.v7-global-brand-sub,.v7-global-flex{display:none}",
+        "@media(max-width:1240px){.v7-primary-nav .v7-tech-key{display:none}}",
+        "@media(max-width:960px){.v7-primary-nav button,.v7-primary-nav a{min-width:80px;padding:0 var(--lgi-space-2)}}",
+    ] {
+        assert!(SHELL_CSS.contains(step), "missing header step: {step}");
+    }
+    let laptop_step = SHELL_CSS
+        .split("@media(max-width:1380px){")
+        .nth(1)
+        .and_then(|rest| rest.split("}\n").next())
+        .unwrap_or_default();
+    assert!(
+        !laptop_step.contains("v7-system-boundary"),
+        "the laptop step must keep the service-status capsule"
     );
 }
 

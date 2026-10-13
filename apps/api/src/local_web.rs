@@ -30,6 +30,9 @@ mod material_projection_tests;
 #[cfg(test)]
 mod material_replica_fallback_tests;
 mod model_settings;
+mod ops;
+mod ops_api;
+mod ops_export;
 mod shell;
 mod station_view;
 mod target_drawer;
@@ -333,6 +336,7 @@ fn router(state: LocalWebState) -> Router {
         .merge(topic_map::routes())
         .merge(comment_study::routes())
         .merge(model_settings::routes())
+        .merge(ops::routes())
         .route("/corpus", get(corpus_entry))
         .route("/corpus/evidence", get(evidence_library))
         .route("/collection", get(collection_entry))

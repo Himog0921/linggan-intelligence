@@ -17,6 +17,10 @@ pub(super) enum QualifiedAssetRequest {
     Derivative {
         derivative_ref: uuid::Uuid,
     },
+    /// OPS-MIGRATION-001 D2: a historical cover registered to one publication registration.
+    OpsCover {
+        publication_ref: uuid::Uuid,
+    },
 }
 
 pub(super) async fn deliver(state: LocalWebState, request: QualifiedAssetRequest) -> Response {
@@ -34,6 +38,9 @@ pub(super) async fn deliver(state: LocalWebState, request: QualifiedAssetRequest
         QualifiedAssetRequest::Derivative { derivative_ref } => {
             read_local_derivative(database, derivative_ref).await
         }
+        QualifiedAssetRequest::OpsCover { publication_ref } => {
+            ops_cover(database, publication_ref).await
+        }
     };
     match asset {
         Ok(Some(asset)) => stream(asset).await,
@@ -45,6 +52,28 @@ pub(super) async fn deliver(state: LocalWebState, request: QualifiedAssetRequest
             );
             unavailable("local_media_metadata_unavailable")
         }
+    }
+}
+
+/// Only files registered in `linggan_ops_publication_cover` are served; the same root
+/// confinement and size check as Evidence assets apply.
+async fn ops_cover(
+    database: &Database,
+    publication_ref: uuid::Uuid,
+) -> Result<Option<LocalMaterialAsset>, sqlx::Error> {
+    use linggan_intelligence::ops_ledger::read::{OpsReadError, read_ops_cover};
+    match read_ops_cover(database, publication_ref).await {
+        Ok(cover) => Ok(cover.map(|cover| LocalMaterialAsset {
+            mime_type: cover.mime_type.clone(),
+            storage_key: cover.storage_key,
+            expected_sha256: cover.sha256,
+            expected_byte_size: Some(cover.byte_size),
+            maximum_byte_size: 20 * 1024 * 1024,
+            delivery_mime_type: cover.mime_type,
+            inline_safe: true,
+        })),
+        Err(OpsReadError::Database(error)) => Err(error),
+        Err(_) => Ok(None),
     }
 }
 

@@ -359,6 +359,7 @@ migrate() {
   apply_migration_once "0121_topic_map_manual_alternative" "$project_root/database/migrations/0121_topic_map_manual_alternative.sql"
   apply_migration_once "0122_comment_like_library" "$project_root/database/migrations/0122_comment_like_library.sql"
   apply_migration_once "0123_ops_ledger" "$project_root/database/migrations/0123_ops_ledger.sql"
+  apply_migration_once "0124_ops_publication_cover" "$project_root/database/migrations/0124_ops_publication_cover.sql"
 }
 
 case "$command_name" in
