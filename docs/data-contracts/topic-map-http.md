@@ -1,7 +1,7 @@
 # Topic Map HTTP 合同
 
 > 状态: 代码事实优先
-> 最后核对: 2026-10-12
+> 最后核对: 2026-10-13
 > 适用范围: TOPIC-MAP-V41-001 既有接口及 TOPIC-MAP-CORE-001 研究内核候选
 > 事实来源: 手册 v1.1、当前 TopicMap DTO、0120 migration、Rust HTTP composition 与定向验证
 > 冲突时以谁为准: 用户最新确认、当前代码和来源资格；本合同不授权运行库迁移/外发
@@ -25,7 +25,7 @@
 
 主题页面首次进入时，在第一次昂贵请求之前从服务端领域登记确定默认领域；显式URL与已有会话选择优先。API未传domainRef时仍可读取完整跨领域范围。
 
-主题概览的media采用`linggan.media-overview.v1`，返回canonical选中的cover，`detailState=NOT_LOADED`表示图片、视频、OCR/ASR详情尚未载入，不以空数组表示没有材料。媒体限制、清理与派生版本指纹仍走现有共享资格门；标题、默认证据片段、preview和sourceManifest保持同源。原文阅读器继续通过Work Resource详情接口读取完整`linggan.media-resource.v1`。概览按250篇分批读取全部作品，不设统计截断；不组装主题DTO未返回的采集轨迹和评论线程。
+主题概览的media采用`linggan.media-overview.v1`，返回canonical选中的cover，`detailState=NOT_LOADED`表示图片、视频、OCR/ASR详情尚未载入，不以空数组表示没有材料。媒体限制、清理与派生版本指纹仍走现有共享资格门；标题、默认证据片段、preview和sourceManifest保持同源。原文阅读器继续通过Work Resource详情接口读取完整`linggan.media-resource.v1`。概览按每批最多500篇读取全部作品，每次最多并行两批并按原范围顺序合并，不设统计截断；不组装主题DTO未返回的采集轨迹和评论线程。
 
 注释只复核实际引用作品，保留旧注释4000字符/xhs口径；定义和结果按领域/配置合并来源后读取一次，比较仍包含全部冻结参与作品，即使它们未进入可见集合。窗口数量按领域/配置/作品在单次请求内复用，冻结结果逐条重新资格化；没有跨请求许可缓存。概览事务局部关闭JIT并强制参数计划，提交/回滚后恢复连接默认设置，不改数据库全局配置。
 
@@ -114,3 +114,20 @@
 ## 验证边界
 
 隔离PostgreSQL fixture证明写入/幂等/引用/统计/预算；fake provider证明执行状态，不证明真实模型语义质量。源码与HTTP/browser可用、main合并、运行库迁移/3000部署、付费外发、真实采集和Mog业务验收分别证明。
+
+
+2026-10-13后续读取候选：共享媒体槽位查询以集合方式选择当前下载、合格历史副本和被处置的较新副本，保持accepted/started/verified截止、slot/materialization/blob处置和旧副本回退。研究窗口分母与实际窗口共用分组遍历，计数不再组装提示输入。主题专用评论分页仅在同一个READ ONLY/REPEATABLE READ事务内复用作品/父评论上下文；新请求重新检查当前来源，不共享许可缓存；备选保存等调用方自有事务仍逐页读取当前上下文。主题材料和评论事务的jit/plan_cache_mode设置仅LOCAL，结束恢复连接原值；评论来源页128条及其完整遍历、研究准备/模型合同不变。本次是候选实现，不代表3000已发布。
+
+## 2026-10-13 首屏读取候选（未部署）
+
+新增三个只读接口，保留原 `GET /api/local/topic-map` 完整 canonical 合同：
+
+- `/api/local/topic-map/summary` 接受原 TopicMapQuery，返回全范围统计、主题/旅程/来源等原字段与首批至多12篇作品。`scope.totalWorkCount` 保留全量，`scope.loadedWorkCount` 是本次返回数；`materialPage.limit/returned/complete` 明示材料传输边界，不能作为统计分母。
+- `/api/local/topic-map/overview` 接受同一查询，返回完整匹配作品及全部统计。只省略作品的 sourceManifest 和 media 的非封面字段；搜索片段、讨论/研究、unknown 与来源状态均保留。它仍是完整索引传输，不是游标分页。
+- `/api/local/topic-map/evidence?domainRef={uuid}&workRef={uuid}` 严格拒绝未知字段，返回经过完整范围资格核验的目标作品及原 asOf；不存在404。冻结的跨作品比较和精确定义依赖继续参与核验，不能只复核被展示作品。原文与评论仍由 work-resources 及 comments 独立实时读取。
+
+API子路由拥有进程内可重建完整投影，最多4个范围，60秒后禁止复用并在下一次读取或成功构建时清除过期条目。默认领域在API启动时只读预构建，其后每次完成后等待20秒再全量刷新；未实现持久化或按作品增量维护。其他范围首次读取及任何来源变更仍须完整构建。投影原 asOf 不伪装成请求时刻；时间窗口统计按该 asOf 解释。
+
+每次复用先在只读REPEATABLE READ事务核对当前schema中表的xmin/ctid/行数、relation身份及DDL/权限描述。仅排除不参与主题材料/研究资格的四个调度心跳、运行及公平控制账本。model_workspace 的 worker_last_seen_at/worker_state/worker_last_error、creator_discovery_policy 的 scan_after/updated_at 不参与主题canonical投影，分别从两表完整业务行摘要中移除；其余字段及将来新增列全部覆盖，不能把整张配置表忽略。模型调用账本只影响独立实时费用/研究进度，不是Snapshot来源，行变化不使本投影失效。目标 last_scheduler_considered_at 和作者分析 job_state/attempt_count/next_attempt_at/lease_token/lease_expires_at/last_error_code/updated_at 为已核对的巡检/生产控制字段，也从各表完整业务行摘要移除；目标生命周期/身份及作者结果、指纹、手工裁定继续覆盖。不以异步pg_stat计数代替资格版本。构建前后版本一致才发布，变化最多重试一次，再变化返回409；版本校验超时或数据库失败按既有503错误处理，不返回旧许可投影。时钟刷新时，旧投影只有在版本相同且未过期时才能复用。来源版本检查和正文/评论读取仍为各自请求的读取时刻，不承诺跨三个HTTP请求的全局原子快照。
+
+页面先展示完整统计和首批材料，明确其余材料正在载入；第二阶段成功后整份替换，不混合两次权威版本。材料阶段失败独立提示并保留已取得统计，不能当作空库。请求epoch约束两个阶段，旧范围响应不能覆盖当前范围。刷新沿同一版本核验；打开证据仍隐藏旧研究直到三项读取完成。Host/Origin防护、no-store、所有写命令及授权边界不变。

@@ -335,7 +335,7 @@ fn router(state: LocalWebState) -> Router {
         .merge(creator_lifecycle_api::routes())
         .merge(creators::routes())
         .merge(topic_workspace::routes())
-        .merge(topic_map::routes())
+        .merge(topic_map::routes(state.database.database().cloned()))
         .merge(comment_study::routes())
         .merge(model_settings::routes())
         .merge(ops::routes())

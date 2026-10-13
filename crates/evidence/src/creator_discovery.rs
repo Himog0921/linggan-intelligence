@@ -337,6 +337,14 @@ async fn load_topic_material_scope(
     sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
         .execute(&mut *tx)
         .await?;
+    // Qualification reconstructs finite source windows, not an analytical scan.
+    // Keep planner settings local so returning a pooled connection changes no caller.
+    sqlx::query("SET LOCAL jit=off")
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("SET LOCAL plan_cache_mode=force_custom_plan")
+        .execute(&mut *tx)
+        .await?;
     let mut platforms: Vec<String> = sqlx::query_scalar(
         "SELECT DISTINCT content.platform FROM linggan_material_domain_usage usage JOIN linggan_material_content content ON content.public_ref=usage.content_public_ref WHERE usage.domain_ref=$1 AND ($2::uuid[] IS NULL OR usage.content_public_ref=ANY($2)) ORDER BY content.platform",
     )

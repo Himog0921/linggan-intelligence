@@ -16,9 +16,11 @@ pub(crate) async fn eligible_sources_for_topic_research(
     sqlx::query("SET LOCAL statement_timeout='15s'")
         .execute(&mut *tx)
         .await?;
-    let sources =
-        eligible_sources_for_topic_research_in_transaction(&mut tx, domain, as_of, selections)
-            .await?;
+    sqlx::query("SET LOCAL jit=off").execute(&mut *tx).await?;
+    sqlx::query("SET LOCAL plan_cache_mode=force_custom_plan")
+        .execute(&mut *tx)
+        .await?;
+    let sources = read_topic_sources(&mut tx, domain, as_of, selections, true).await?;
     tx.commit().await?;
     Ok(sources)
 }
@@ -28,6 +30,18 @@ pub(crate) async fn eligible_sources_for_topic_research_in_transaction(
     domain: Uuid,
     as_of: &str,
     selections: &[(Uuid, StudySourceRole)],
+) -> Result<Vec<StudySource>, StudySourceError> {
+    // Caller-owned transactions may use READ COMMITTED. Keep their per-page
+    // context qualification; only the wrapper's frozen read snapshot can reuse it.
+    read_topic_sources(tx, domain, as_of, selections, false).await
+}
+
+async fn read_topic_sources(
+    tx: &mut Transaction<'_, Postgres>,
+    domain: Uuid,
+    as_of: &str,
+    selections: &[(Uuid, StudySourceRole)],
+    cache_context: bool,
 ) -> Result<Vec<StudySource>, StudySourceError> {
     let mut selected_roles = BTreeMap::new();
     for &(work, role) in selections {
@@ -41,6 +55,7 @@ pub(crate) async fn eligible_sources_for_topic_research_in_transaction(
         return Ok(Vec::new());
     }
     let mut sources = Vec::new();
+    let mut context_cache = SourceContextCache::default();
     for selections in selections.chunks(100) {
         let mut after = (0, Uuid::nil());
         loop {
@@ -52,7 +67,12 @@ pub(crate) async fn eligible_sources_for_topic_research_in_transaction(
                     candidates.push(candidate);
                 }
             }
-            sources.extend(attach_context(tx, domain, as_of, candidates).await?);
+            let page_sources = if cache_context {
+                attach_context_cached(tx, domain, as_of, candidates, &mut context_cache).await?
+            } else {
+                attach_context(tx, domain, as_of, candidates).await?
+            };
+            sources.extend(page_sources);
             if page.len() < SOURCE_PAGE_SIZE as usize {
                 break;
             }

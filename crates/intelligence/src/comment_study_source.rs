@@ -299,21 +299,47 @@ async fn fetch_eligible_sources(
     attach_context(tx, domain, as_of, selected).await
 }
 
+/// Used only inside one read-only repeatable-read transaction, never across reads.
+#[derive(Default)]
+struct SourceContextCache {
+    works: BTreeMap<Uuid, Value>,
+    parents: BTreeMap<(Uuid, String), Value>,
+}
+
 async fn attach_context(
     tx: &mut Transaction<'_, Postgres>,
     domain: Uuid,
     as_of: &str,
     candidates: Vec<Candidate>,
 ) -> Result<Vec<StudySource>, StudySourceError> {
+    attach_context_cached(
+        tx,
+        domain,
+        as_of,
+        candidates,
+        &mut SourceContextCache::default(),
+    )
+    .await
+}
+
+async fn attach_context_cached(
+    tx: &mut Transaction<'_, Postgres>,
+    domain: Uuid,
+    as_of: &str,
+    candidates: Vec<Candidate>,
+    cache: &mut SourceContextCache,
+) -> Result<Vec<StudySource>, StudySourceError> {
     let works: Vec<_> = candidates
         .iter()
         .map(|c| c.source.content_public_ref)
+        .filter(|work| !cache.works.contains_key(work))
         .collect::<std::collections::BTreeSet<_>>()
         .into_iter()
         .collect();
-    let mut contexts = BTreeMap::new();
     for chunk in works.chunks(100) {
-        contexts.extend(context::read_work_contexts(tx, domain, chunk, as_of).await?);
+        cache
+            .works
+            .extend(context::read_work_contexts(tx, domain, chunk, as_of).await?);
     }
     let keys: Vec<_> = candidates
         .iter()
@@ -322,15 +348,20 @@ async fn attach_context(
                 .clone()
                 .map(|id| (c.source.content_public_ref, id))
         })
+        .filter(|key| !cache.parents.contains_key(key))
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
         .collect();
-    let mut parents = BTreeMap::new();
     for chunk in keys.chunks(128) {
-        parents.extend(context::read_parents(tx, chunk, as_of).await?);
+        cache
+            .parents
+            .extend(context::read_parents(tx, chunk, as_of).await?);
     }
     candidates
         .into_iter()
         .map(|mut c| {
-            let work = contexts
+            let work = cache
+                .works
                 .get(&c.source.content_public_ref)
                 .ok_or_else(|| sqlx::Error::Protocol("qualified work context is missing".into()))?;
             c.source.work_title = work["displayTitle"]
@@ -339,7 +370,7 @@ async fn attach_context(
                 .to_owned();
             c.source.context_manifest = work["contextManifest"].clone();
             if let Some(id) = c.parent_id
-                && let Some(parent) = parents.get(&(c.source.content_public_ref, id))
+                && let Some(parent) = cache.parents.get(&(c.source.content_public_ref, id))
             {
                 c.source.parent_source_ref = parent["sourceRef"]
                     .as_str()
