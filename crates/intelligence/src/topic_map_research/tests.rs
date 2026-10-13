@@ -471,3 +471,59 @@ fn comparison_ignores_physical_task_relinks_and_checks_unassigned_compared_defin
 
 #[path = "tests/grouped.rs"]
 mod grouped;
+
+#[test]
+fn overview_window_denominator_matches_lossless_partition_with_parent_context() {
+    let author = source("body", &"甲乙丙。".repeat(401), 10);
+    let parent = source(PARENT_CONTEXT_FIELD, &"父评论上下文。".repeat(510), 11);
+    let comments: Vec<_> = (12..17)
+        .map(|id| {
+            source(
+                "unresearched_comment",
+                &"孩子原声。".repeat(id as usize),
+                id,
+            )
+        })
+        .collect();
+    for author_present in [false, true] {
+        let mut fragments = comments.clone();
+        fragments.push(parent.clone());
+        if author_present {
+            fragments.insert(0, author.clone());
+        }
+        let mut original = input(fragments);
+        original.comment_study = json!(
+            comments
+                .iter()
+                .map(|c| comment_metadata(c, Some(&parent), json!([])))
+                .collect::<Vec<_>>()
+        );
+        update_source_coverage(&mut original);
+        for size in [899, 900, 1200, 3000] {
+            let windows = research_windows(&original, size);
+            let count = research_window_count(&original, size);
+            assert_eq!(count, windows.len(), "author={author_present} size={size}");
+            assert!(
+                windows
+                    .iter()
+                    .all(|w| w.coverage["windowCount"] == json!(count))
+            );
+        }
+    }
+    let child = source("unresearched_comment", "用户原声", 20);
+    let parent = source(PARENT_CONTEXT_FIELD, "父评论上下文", 21);
+    let mut tiny = input(vec![
+        source("body", "作者说明", 10),
+        child.clone(),
+        parent.clone(),
+    ]);
+    tiny.comment_study = json!([comment_metadata(&child, Some(&parent), json!([]))]);
+    update_source_coverage(&mut tiny);
+    for size in [0, 1, 2, 7] {
+        assert_eq!(
+            research_window_count(&tiny, size),
+            research_windows(&tiny, size).len()
+        );
+    }
+    assert_eq!(research_window_count(&input(vec![]), 3000), 0);
+}

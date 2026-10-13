@@ -711,6 +711,14 @@ async fn overview_batches_preserve_complete_statistics_and_canonical_work_fields
         .await
         .unwrap();
         assert_eq!(compact.len(), 3);
+        let qualified = linggan_evidence::creator_discovery::load_topic_materials_for_works(
+            &db,
+            domain(),
+            &refs[..3],
+        )
+        .await
+        .unwrap();
+        assert_eq!(qualified.works.len(), 3);
         let mut connection = db.pool().acquire().await.unwrap();
         let (jit, plan): (String, String) =
             sqlx::query_as("SELECT current_setting('jit'),current_setting('plan_cache_mode')")
@@ -881,7 +889,27 @@ async fn manual_alternative_without_classification_keeps_sources_and_rejects_fal
     sqlx::query("INSERT INTO linggan_media_slot(slot_key,platform,content_external_id,role,ordinal,first_package_ref) SELECT $1,platform,content_external_id,'cover',1,first_package_ref FROM linggan_material_content WHERE public_ref=$2").bind(slot).bind(source).execute(db.pool()).await.unwrap();
     sqlx::query("INSERT INTO linggan_media_observation(observation_ref,slot_key,package_ref,observed_external_uri,observed_at) VALUES($1,$2,$3,'https://example.invalid/synthetic.jpg',scope_001_now()::text)").bind(observation).bind(slot).bind(package).execute(db.pool()).await.unwrap();
     sqlx::query("INSERT INTO linggan_material_media_origin(observation_ref,content_public_ref,slot_key,package_ref,record_ordinal,source_generation,purpose,producer_ordinal,display_order_state,display_order_basis,candidate_set_state,composite_state) VALUES($1,$2,$3,$4,1,1,'cover',1,'UNKNOWN','unknown','UNKNOWN','NOT_APPLICABLE')").bind(observation).bind(source).bind(slot).bind(package).execute(db.pool()).await.unwrap();
+    let projection = linggan_intelligence::topic_map::read_model::TopicMapReadModel::default();
+    let projection_query = TopicMapQuery {
+        domain_ref: Some(domain()),
+        ..Default::default()
+    };
+    let before_restriction = projection.read(&db, &projection_query).await.unwrap();
+    assert!(
+        before_restriction
+            .works
+            .iter()
+            .any(|w| w.work_ref == source && w.readable)
+    );
     sqlx::query("INSERT INTO linggan_material_media_disposition_event(event_ref,slot_key,state,authority_ref,reason,effective_at) VALUES($1,$2,'WITHDRAWN_OR_RESTRICTED','synthetic-proof','manual source withdrawal',clock_timestamp())").bind(Uuid::new_v4()).bind(slot).execute(db.pool()).await.unwrap();
+    let after_restriction = projection.read(&db, &projection_query).await.unwrap();
+    assert!(
+        !after_restriction
+            .works
+            .iter()
+            .any(|w| w.work_ref == source && w.readable),
+        "withdrawal cannot reuse a qualified page snapshot"
+    );
     let withdrawn = read_saved_alternative(&db, domain(), first.subject_ref.unwrap())
         .await
         .unwrap();
@@ -893,5 +921,195 @@ async fn manual_alternative_without_classification_keeps_sources_and_rejects_fal
         save_topic_map_command(&db, &serde_json::from_value(again).unwrap())
             .await
             .is_err()
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires disposable PostgreSQL pgvector proof harness"]
+async fn page_read_model_reuses_complete_results_and_invalidates_update_delete_and_ddl() {
+    use linggan_intelligence::topic_map::read_model::{
+        TopicMapReadModel, first_page, overview, source_revision,
+    };
+    use std::sync::Arc;
+    let db = fixture_database("topic_map_page_read_model").await;
+    let mut refs = Vec::new();
+    for index in 0..13 {
+        refs.push(work(&db, index, "xhs", Some(index as i64), 0).await);
+    }
+    let (topic_ref, _) = topic(&db, "read-model", "合成读取投影", None, &refs).await;
+    let query = TopicMapQuery {
+        domain_ref: Some(domain()),
+        ..Default::default()
+    };
+    let model = TopicMapReadModel::default();
+    let first = model.read(&db, &query).await.unwrap();
+    let same = model.read(&db, &query).await.unwrap();
+    assert!(
+        Arc::ptr_eq(&first, &same),
+        "unchanged authoritative rows reuse the complete projection"
+    );
+    assert_eq!(first.scope["totalWorkCount"], 13);
+    let page = first_page(&first).unwrap();
+    assert_eq!(page["works"].as_array().unwrap().len(), 12);
+    assert_eq!(page["scope"]["totalWorkCount"], 13);
+    assert_eq!(page["statistics"], first.statistics);
+    let compact = overview(&first).unwrap();
+    assert_eq!(compact["works"].as_array().unwrap().len(), 13);
+    assert_eq!(compact["statistics"], first.statistics);
+    assert!(compact["works"][0].get("sourceManifest").is_none());
+    // Producer state and patrol fairness are separate from material permissions.
+    sqlx::query("INSERT INTO linggan_creator_discovery_author_analysis(domain_ref,platform,author_external_id,requested_fingerprint)VALUES($1,'xhs','synthetic-cache-author','synthetic')")
+        .bind(domain()).execute(db.pool()).await.unwrap();
+    let target = Uuid::new_v4();
+    sqlx::query("INSERT INTO collection_observation_target(target_ref,platform,target_kind,identity_key,source)VALUES($1,'xhs','creator','synthetic-cache-target','manual')")
+        .bind(target).execute(db.pool()).await.unwrap();
+    let controlled = model.read(&db, &query).await.unwrap();
+    let control_revision = source_revision(&db).await.unwrap();
+    sqlx::query("UPDATE linggan_creator_discovery_author_analysis SET job_state='running',attempt_count=1,lease_token=$1,lease_expires_at=scope_001_now()+interval '5 minutes',next_attempt_at=scope_001_now()+interval '1 minute',last_error_code='synthetic',updated_at=scope_001_now()")
+        .bind(Uuid::new_v4()).execute(db.pool()).await.unwrap();
+    sqlx::query("UPDATE collection_observation_target SET last_scheduler_considered_at=scope_001_now() WHERE target_ref=$1")
+        .bind(target).execute(db.pool()).await.unwrap();
+    assert_eq!(control_revision, source_revision(&db).await.unwrap());
+    assert!(Arc::ptr_eq(
+        &controlled,
+        &model.read(&db, &query).await.unwrap()
+    ));
+    sqlx::query("UPDATE linggan_creator_discovery_author_analysis SET result_json='{\"syntheticProbe\":true}'")
+        .execute(db.pool()).await.unwrap();
+    let result_revision = source_revision(&db).await.unwrap();
+    assert_ne!(
+        control_revision, result_revision,
+        "author result fields are never discarded with lease state"
+    );
+    sqlx::query(
+        "UPDATE collection_observation_target SET lifecycle_state='dismissed' WHERE target_ref=$1",
+    )
+    .bind(target)
+    .execute(db.pool())
+    .await
+    .unwrap();
+    assert_ne!(
+        result_revision,
+        source_revision(&db).await.unwrap(),
+        "target lifecycle remains a source dependency"
+    );
+
+    // Accepted definitions are append-only; create the next version through its owner.
+    let revised = import_topic_workspace(
+        &db,
+        &TopicWorkspaceImport {
+            idempotency_key: "read-model-next-definition".into(),
+            domain_key: "adhd-family".into(),
+            canonical_key: "read-model".into(),
+            display_name: "合成更新后的定义".into(),
+            definition_text: "合成定义：读取投影修订".into(),
+            expected_version: Some(1),
+            adjudication_note: "合成当前资格反例".into(),
+            source_boundary: "合成验证".into(),
+            members: refs
+                .iter()
+                .enumerate()
+                .map(|(index, r)| TopicMaterialMemberImport {
+                    work_public_ref: *r,
+                    role: if index == 0 {
+                        TopicMaterialRole::Support
+                    } else {
+                        TopicMaterialRole::Boundary
+                    },
+                    rationale: "合成来源".into(),
+                })
+                .collect(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(revised.topic_ref, topic_ref);
+    let changed = model.read(&db, &query).await.unwrap();
+    assert!(!Arc::ptr_eq(&first, &changed));
+    assert_eq!(
+        changed
+            .topics
+            .iter()
+            .find(|t| t.topic_ref == topic_ref)
+            .unwrap()
+            .display_name,
+        "合成更新后的定义"
+    );
+    // A new relation is automatically covered; same-count replacement and DELETE are distinct.
+    let before = source_revision(&db).await.unwrap();
+    sqlx::query("CREATE TABLE topic_map_revision_probe(value integer)")
+        .execute(db.pool())
+        .await
+        .unwrap();
+    let created = source_revision(&db).await.unwrap();
+    assert_ne!(before, created);
+    sqlx::query("INSERT INTO topic_map_revision_probe VALUES(1)")
+        .execute(db.pool())
+        .await
+        .unwrap();
+    let inserted = source_revision(&db).await.unwrap();
+    assert_ne!(created, inserted);
+    sqlx::query("UPDATE topic_map_revision_probe SET value=2")
+        .execute(db.pool())
+        .await
+        .unwrap();
+    let updated = source_revision(&db).await.unwrap();
+    assert_ne!(inserted, updated);
+    sqlx::query("DELETE FROM topic_map_revision_probe")
+        .execute(db.pool())
+        .await
+        .unwrap();
+    assert_ne!(updated, source_revision(&db).await.unwrap());
+    // New accepted material invalidates full statistics and crosses the first-page boundary.
+    let added = work(&db, 13, "xhs", None, 0).await;
+    let updated = model.read(&db, &query).await.unwrap();
+    assert_eq!(updated.scope["totalWorkCount"], 14);
+    assert!(updated.works.iter().any(|w| w.work_ref == added));
+    sqlx::query("INSERT INTO linggan_creator_discovery_policy(domain_ref,platform,like_threshold) VALUES($1,'xhs',10)")
+        .bind(domain()).execute(db.pool()).await.unwrap();
+    let settings = model.read(&db, &query).await.unwrap();
+    let before_tick = source_revision(&db).await.unwrap();
+    sqlx::query(
+        "UPDATE linggan_creator_discovery_policy SET scan_after=$1,updated_at=scope_001_now()",
+    )
+    .bind(added)
+    .execute(db.pool())
+    .await
+    .unwrap();
+    sqlx::query("UPDATE linggan_model_workspace SET worker_last_seen_at=scope_001_now(),worker_state='running',worker_last_error='synthetic heartbeat'")
+        .execute(db.pool()).await.unwrap();
+    assert_eq!(
+        before_tick,
+        source_revision(&db).await.unwrap(),
+        "pure worker ticks cannot invalidate source qualification"
+    );
+    assert!(Arc::ptr_eq(
+        &settings,
+        &model.read(&db, &query).await.unwrap()
+    ));
+    sqlx::query(
+        "UPDATE linggan_creator_discovery_policy SET like_threshold=11,revision=revision+1",
+    )
+    .execute(db.pool())
+    .await
+    .unwrap();
+    let changed_policy = source_revision(&db).await.unwrap();
+    assert_ne!(
+        before_tick, changed_policy,
+        "business settings remain qualification dependencies"
+    );
+    assert!(!Arc::ptr_eq(
+        &settings,
+        &model.read(&db, &query).await.unwrap()
+    ));
+    sqlx::query("UPDATE linggan_model_workspace SET workspace_ref=$1")
+        .bind(Uuid::new_v4())
+        .execute(db.pool())
+        .await
+        .unwrap();
+    assert_ne!(
+        changed_policy,
+        source_revision(&db).await.unwrap(),
+        "workspace identity is never discarded with its heartbeat"
     );
 }

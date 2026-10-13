@@ -157,8 +157,31 @@ pub(crate) fn selected_comment_study(
 /// replay prior groups. Author context is a bounded prefix, not extra evidence;
 /// complete author text has its own lossless windows. Long parent context is paged.
 pub(crate) fn research_windows(input: &ResearchInput, max_chars: usize) -> Vec<ResearchInput> {
-    let max_chars = max_chars.max(1);
     let mut windows = Vec::new();
+    visit_source_windows(input, max_chars, |evidence, context, index, size| {
+        windows.push(source_window(input, evidence, context, index, size));
+    });
+    let count = windows.len();
+    for (index, window) in windows.iter_mut().enumerate() {
+        window.coverage["windowIndex"] = json!(index);
+        window.coverage["windowCount"] = json!(count);
+    }
+    windows
+}
+
+/// Count the exact canonical partition without cloning inputs or hashing prompts.
+pub(crate) fn research_window_count(input: &ResearchInput, max_chars: usize) -> usize {
+    let mut count = 0;
+    visit_source_windows(input, max_chars, |_, _, _, _| count += 1);
+    count
+}
+
+fn visit_source_windows(
+    input: &ResearchInput,
+    max_chars: usize,
+    mut visit: impl FnMut(Vec<Fragment>, Vec<Fragment>, usize, usize),
+) {
+    let max_chars = max_chars.max(1);
     let author: Vec<_> = input
         .fragments
         .iter()
@@ -167,7 +190,7 @@ pub(crate) fn research_windows(input: &ResearchInput, max_chars: usize) -> Vec<R
         .flat_map(|f| split_fragment(f, max_chars.min(1200)))
         .collect();
     for evidence in pack_fragments(author, max_chars) {
-        windows.push(source_window(input, evidence, Vec::new(), 0, max_chars));
+        visit(evidence, Vec::new(), 0, max_chars);
     }
     let evidence_limit = if max_chars > 1 {
         max_chars.div_ceil(2)
@@ -190,25 +213,13 @@ pub(crate) fn research_windows(input: &ResearchInput, max_chars: usize) -> Vec<R
             Vec::new()
         };
         if groups.is_empty() {
-            windows.push(source_window(input, evidence, Vec::new(), 0, max_chars));
+            visit(evidence, Vec::new(), 0, max_chars);
         } else {
             for (index, context) in groups.into_iter().enumerate() {
-                windows.push(source_window(
-                    input,
-                    evidence.clone(),
-                    context,
-                    index,
-                    max_chars,
-                ));
+                visit(evidence.clone(), context, index, max_chars);
             }
         }
     }
-    let count = windows.len();
-    for (index, window) in windows.iter_mut().enumerate() {
-        window.coverage["windowIndex"] = json!(index);
-        window.coverage["windowCount"] = json!(count);
-    }
-    windows
 }
 
 fn chars(fragments: &[Fragment]) -> usize {

@@ -32,9 +32,49 @@ src=src.replace(tail,`globalThis.audit={metrics,readoutNumber,rulesDialog,summar
  const entryContext={...freshEntry,history:{replaceState(){}},fetch:async url=>{entryRequests.push(url);return {ok:true,json:async()=>({domains:[{domainRef:'server-default'}],scope:{domainRef:'server-default'},topics:[],works:[],statistics:{}})};}};
  vm.runInNewContext(fs.readFileSync(sourcePath,'utf8').replace(tail,'render=()=>{};globalThis.entryLoad=load();})();'),entryContext);
  await entryContext.entryLoad;
- assert.equal(entryRequests.filter(url=>url.includes('/topic-map?')).length,1,'first entry performs exactly one map read');
+ assert.equal(entryRequests.filter(url=>url.includes('/topic-map/summary?')).length,1,'first entry performs one complete-statistics read');
  assert(entryRequests[0].includes('domainRef=server-default'));
  console.log('PASS: fresh initialization performs one domain-qualified map request');
+ // Actual load: complete statistics + bounded first page become available before
+ // the second response, without presenting incomplete material-derived views.
+ for(const outcome of ['success','failure']){
+   const phases=[];let releaseMaterials;
+   const page={domains:[{domainRef:'server-default'}],scope:{domainRef:'server-default',totalWorkCount:13,loadedWorkCount:12},topics:[],works:Array.from({length:12},(_,i)=>({workRef:String(i)})),statistics:{workCount:13}};
+   const staged={...freshEntry,history:{replaceState(){}},phaseSnapshots:phases,fetch:async url=>url.includes('/summary?')?{ok:true,json:async()=>page}:new Promise(resolve=>{releaseMaterials=resolve;})};
+   const program=fs.readFileSync(sourcePath,'utf8').replace(tail,'render=()=>{globalThis.phaseSnapshots.push({loading,materialsLoading,materialsError,readError,scope:snapshot?.scope,works:snapshot?.works?.length});};refreshReadiness=async()=>{};globalThis.entryLoad=load();})();');
+   vm.runInNewContext(program,staged);
+   for(let i=0;i<8&&!releaseMaterials;i++)await Promise.resolve();
+   assert(releaseMaterials,'second material response is pending');
+   const early=phases.find(p=>!p.loading&&p.materialsLoading);assert(early,'statistics rendered before material response');
+   assert.equal(early.scope.totalWorkCount,13);assert.equal(early.works,12);
+   releaseMaterials(outcome==='success'?{ok:true,json:async()=>({...page,works:[...page.works,{workRef:'12'}]})}:{ok:false,status:503,json:async()=>({code:'topic_map_read_unavailable'})});
+   await staged.entryLoad;
+   const end=phases.at(-1);assert.equal(end.materialsLoading,false);assert.equal(end.readError,'');
+   if(outcome==='success')assert.equal(end.works,13);else{assert(end.materialsError);assert.equal(end.works,12);}
+ }
+ console.log('PASS: complete statistics and first 12 materials precede hydration; material failure remains distinct from an empty scope');
+
+ // A former domain's delayed material phase cannot overwrite a later domain.
+ {
+   const phases=[],waiting=[];
+   const page=domain=>({domains:[{domainRef:domain}],scope:{domainRef:domain,totalWorkCount:13,loadedWorkCount:12},topics:[],works:Array.from({length:12},(_,i)=>({workRef:domain+i})),statistics:{workCount:13}});
+   const staged={...freshEntry,history:{replaceState(){}},phaseSnapshots:phases,fetch:async url=>{const domain=new URL(url,ctx.location.origin).searchParams.get('domainRef');return url.includes('/summary?')?{ok:true,json:async()=>page(domain)}:new Promise(resolve=>waiting.push({domain,resolve}));}};
+   const program=fs.readFileSync(sourcePath,'utf8').replace(tail,'render=()=>{globalThis.phaseSnapshots.push({domain:snapshot?.scope?.domainRef,works:snapshot?.works?.length});};refreshReadiness=async()=>{};globalThis.switchDomain=domain=>{state.domainRef=domain;return load();};globalThis.entryLoad=load();})();');
+   vm.runInNewContext(program,staged);
+   for(let i=0;i<8&&waiting.length<1;i++)await Promise.resolve();
+   assert.equal(waiting.length,1);
+   const next=staged.switchDomain('next-domain');
+   for(let i=0;i<8&&waiting.length<2;i++)await Promise.resolve();
+   assert.equal(waiting.length,2);
+   const finish=slot=>slot.resolve({ok:true,json:async()=>({...page(slot.domain),works:[...page(slot.domain).works,{workRef:slot.domain+'12'}]})});
+   finish(waiting[1]);await next;
+   const count=phases.length;finish(waiting[0]);await staged.entryLoad;
+   assert.equal(phases.length,count,'obsolete hydration cannot render over the new scope');
+   assert.equal(phases.at(-1).domain,'next-domain');assert.equal(phases.at(-1).works,13);
+ }
+ console.log('PASS: delayed old material hydration cannot overwrite the latest domain');
+
+
  console.log('PASS: both domain aliases clear former scope; same-domain deep links preserve session and explicit URL selection');
  const stale={workRef:'A',title:'Synthetic A',readable:true,platform:'xhs',topicRefs:['topic-A'],research:{fragments:[{fragmentId:'old-comment',field:'studied_comment',text:'RESTRICTED_OLD_COMMENT'}],output:{journey:{rationale:'RESTRICTED_OLD_INTERPRETATION'}},core:{coverage:{state:'partial',sourceChars:80,coveredChars:20,totalWindows:4,completedWindows:1},units:[{unitId:'old-unit',statement:'RESTRICTED_OLD_CORE_STATEMENT',label:'RESTRICTED_OLD_CORE_LABEL',rationale:'RESTRICTED_OLD_CORE_RATIONALE',speakerRole:'commenter',evidenceRole:'challenge',status:'matched',assignments:[{topicRef:'topic-A',label:'RESTRICTED_OLD_ASSIGNMENT',reason:'RESTRICTED_OLD_ASSIGNMENT_REASON'}],evidence:[{fragmentId:'old-comment',start:0,end:10}]}]}},annotation:{rationale:'RESTRICTED_OLD_ANNOTATION'},evidenceFragment:{text:'RESTRICTED_OLD_FALLBACK'}};
  const b={...stale,workRef:'B',title:'UNRELATED_B',topicRefs:['topic-B']};
@@ -43,7 +83,7 @@ src=src.replace(tail,`globalThis.audit={metrics,readoutNumber,rulesDialog,summar
  for(const mode of ['no-research','missing-work','failed','qualified'])for(const entry of ['sample','standalone']){
    let qualificationRequests=0;
    ctx.fetch=async url=>{
-     if(url.includes('/topic-map?')){qualificationRequests++;const q=new URL(url,'http://127.0.0.1').searchParams;assert.equal(q.get('domainRef'),'domain');assert.equal(q.get('referenceWindowDays'),'0');assert.equal(q.get('topicRef'),'topic-A');
+     if(url.includes('/topic-map/evidence?')){qualificationRequests++;const q=new URL(url,'http://127.0.0.1').searchParams;assert.equal(q.get('domainRef'),'domain');assert.equal(q.get('workRef'),'A');assert.equal(q.get('topicRef'),null);
        if(mode==='failed')return {ok:false,status:503,json:async()=>({error:'qualification unavailable'})};
        return {ok:true,json:async()=>({works:mode==='missing-work'?[]:[mode==='qualified'?fresh:{...stale,research:null,annotation:null}]})};
      }
@@ -67,7 +107,7 @@ src=src.replace(tail,`globalThis.audit={metrics,readoutNumber,rulesDialog,summar
  const slots=[];ctx.fetch=url=>new Promise(resolve=>slots.push({url,resolve}));const sameTopicB={...b,topicRefs:['topic-A']},judge={type:'judge',topicRef:'topic-A',works:[stale,sameTopicB]};ctx.audit.set(snap,judge);
  const pa=ctx.audit.readSample('A'),pb=ctx.audit.readSample('B');
  assert(!ctx.audit.readerDialog(judge.inlineReader).includes('RESTRICTED_OLD_'),'pending qualification hides old discussion statements, reasons and quotations');
- function release(batch,ref){batch.forEach(({url,resolve})=>resolve({ok:true,json:async()=>url.includes('/topic-map?')?{works:[{...fresh,workRef:ref}]}:url.includes('/comments')?{items:[],total:0}:{item:{}}}));}
+ function release(batch,ref){batch.forEach(({url,resolve})=>resolve({ok:true,json:async()=>url.includes('/topic-map/evidence?')?{works:[{...fresh,workRef:ref}]}:url.includes('/comments')?{items:[],total:0}:{item:{}}}));}
  release(slots.slice(3),'B');await pb;release(slots.slice(0,3),'A');await pa;assert.equal(judge.inlineReader.work.workRef,'B');
  console.log('PASS: reverse completion order cannot overwrite the latest selected identity');
  slots.length=0;const pc=ctx.audit.readSample('A');ctx.audit.set(snap,null);release(slots,'A');await pc;assert.equal(ctx.audit.get(),null);
@@ -232,7 +272,7 @@ src=src.replace(tail,`globalThis.audit={metrics,readoutNumber,rulesDialog,summar
  assert.equal(ctx.audit.curated('topic-A',commentSnapshot).length,1,'qualified comment research enters curation without author text');
  for(const entry of ['sample','standalone']) {
    const judge={type:'judge',topicRef:'topic-A',works:[commentOnly],snapshot:commentSnapshot};ctx.audit.set(commentSnapshot,judge);
-   ctx.fetch=async url=>url.includes('/topic-map?')?{ok:true,json:async()=>commentSnapshot}:url.includes('/comments')?{ok:true,json:async()=>({items:[{body:'当前合格评论'}],total:1})}:{ok:false,status:404,json:async()=>({code:'material_not_found'})};
+   ctx.fetch=async url=>url.includes('/topic-map/evidence?')?{ok:true,json:async()=>commentSnapshot}:url.includes('/comments')?{ok:true,json:async()=>({items:[{body:'当前合格评论'}],total:1})}:{ok:false,status:404,json:async()=>({code:'material_not_found'})};
    await(entry==='sample'?ctx.audit.readSample(commentOnly.workRef):ctx.audit.readWork(commentOnly.workRef));
    const currentReader=entry==='sample'?judge.inlineReader:ctx.audit.get(),html=ctx.audit.readerDialog(currentReader);
    assert(html.includes('评论者描述自己的不同经历'),'independently qualified comments survive unavailable author resource');

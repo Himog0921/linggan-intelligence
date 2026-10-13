@@ -30,7 +30,7 @@ pub(crate) use restoration::{
 };
 pub(crate) use source::{load_inputs, load_inputs_for_works, manifest_source_work_refs};
 pub(crate) use windows::{
-    input_identity, is_research_evidence, reference_manifest, research_windows,
+    input_identity, is_research_evidence, reference_manifest, research_window_count, research_windows,
     selected_comment_study, with_comparison_context,
 };
 #[cfg(test)]

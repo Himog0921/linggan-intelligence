@@ -1,7 +1,7 @@
 //! Topic Map HTTP composition. Canonical reads and durable commands remain in intelligence.
 use super::{LocalWebState, shell};
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     extract::{
         Query, State,
         rejection::{JsonRejection, QueryRejection},
@@ -11,18 +11,48 @@ use axum::{
     response::{Html, IntoResponse, Response},
     routing::{get, post},
 };
+use linggan_intelligence::topic_map::read_model::TopicMapReadModel;
 use linggan_intelligence::topic_map::{TopicMapCommand, TopicMapQuery};
 use linggan_intelligence::topic_map_research::{ResearchCommand, ResearchError};
 use serde::Deserialize;
 use serde_json::json;
+use std::sync::Arc;
 use uuid::Uuid;
 
-pub(super) fn routes() -> Router<LocalWebState> {
+pub(super) fn routes(
+    _database: Option<linggan_storage_postgres::Database>,
+) -> Router<LocalWebState> {
+    let model = Arc::new(TopicMapReadModel::default());
+    #[cfg(not(test))]
+    if let Some(db) = _database {
+        let model = Arc::clone(&model);
+        tokio::spawn(async move {
+            if let Ok(Some(domain)) = sqlx::query_scalar::<_, Uuid>(
+                "SELECT domain_ref FROM observation_domain ORDER BY name LIMIT 1",
+            )
+            .fetch_optional(db.pool())
+            .await
+            {
+                let query = TopicMapQuery {
+                    domain_ref: Some(domain),
+                    ..Default::default()
+                };
+                let _ = model.read(&db, &query).await;
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(20)).await;
+                    let _ = model.refresh(&db, &query).await;
+                }
+            }
+        });
+    }
     Router::new()
         .route("/topics", get(page))
         .route("/assets/topic-map.css", get(stylesheet))
         .route("/assets/topic-map.js", get(script))
         .route("/api/local/topic-map", get(snapshot))
+        .route("/api/local/topic-map/overview", get(overview))
+        .route("/api/local/topic-map/summary", get(summary))
+        .route("/api/local/topic-map/evidence", get(evidence))
         .route("/api/local/topic-map/alternative", get(saved_alternative))
         .route("/api/local/topic-map/commands", post(command))
         .route(
@@ -44,6 +74,7 @@ pub(super) fn routes() -> Router<LocalWebState> {
         )
         .route("/api/local/topic-map/search", get(search_progress))
         .route("/api/local/topic-map/search/commands", post(search_command))
+        .layer(Extension(model))
         .layer(middleware::from_fn(
             super::comment_study::local_comment_study_guard,
         ))
@@ -154,6 +185,88 @@ async fn snapshot(
     };
     match linggan_intelligence::topic_map::read_topic_map(db, &query).await {
         Ok(value) => Json(value).into_response(),
+        Err(err) => map_error(err),
+    }
+}
+// Both transports use the same fully qualified projection; pagination cannot
+// alter the complete statistical denominator or frozen comparison participants.
+async fn summary(
+    State(state): State<LocalWebState>,
+    Extension(model): Extension<Arc<TopicMapReadModel>>,
+    query: Result<Query<TopicMapQuery>, QueryRejection>,
+) -> Response {
+    let Ok(Query(query)) = query else {
+        return error(StatusCode::BAD_REQUEST, "invalid_topic_map_query");
+    };
+    let db = match database(&state) {
+        Ok(db) => db,
+        Err(response) => return response,
+    };
+    match model.read(db, &query).await {
+        Ok(snapshot) => match linggan_intelligence::topic_map::read_model::first_page(&snapshot) {
+            Ok(value) => Json(value).into_response(),
+            Err(_) => error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "topic_map_read_unavailable",
+            ),
+        },
+        Err(err) => map_error(err),
+    }
+}
+async fn overview(
+    State(state): State<LocalWebState>,
+    Extension(model): Extension<Arc<TopicMapReadModel>>,
+    query: Result<Query<TopicMapQuery>, QueryRejection>,
+) -> Response {
+    let Ok(Query(query)) = query else {
+        return error(StatusCode::BAD_REQUEST, "invalid_topic_map_query");
+    };
+    let db = match database(&state) {
+        Ok(db) => db,
+        Err(response) => return response,
+    };
+    match model.read(db, &query).await {
+        Ok(value) => match linggan_intelligence::topic_map::read_model::overview(&value) {
+            Ok(value) => Json(value).into_response(),
+            Err(_) => error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "topic_map_read_unavailable",
+            ),
+        },
+        Err(err) => map_error(err),
+    }
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct EvidenceQuery {
+    domain_ref: Uuid,
+    work_ref: Uuid,
+}
+async fn evidence(
+    State(state): State<LocalWebState>,
+    Extension(model): Extension<Arc<TopicMapReadModel>>,
+    query: Result<Query<EvidenceQuery>, QueryRejection>,
+) -> Response {
+    let Ok(Query(query)) = query else {
+        return error(StatusCode::BAD_REQUEST, "invalid_topic_map_query");
+    };
+    let db = match database(&state) {
+        Ok(db) => db,
+        Err(response) => return response,
+    };
+    // Qualification still includes all frozen cross-work dependencies, not just
+    // the displayed work; only transport is narrowed after canonical validation.
+    let scope = TopicMapQuery {
+        domain_ref: Some(query.domain_ref),
+        ..Default::default()
+    };
+    match model.read(db, &scope).await {
+        Ok(snapshot) => match snapshot.works.iter().find(|w| w.work_ref == query.work_ref) {
+            Some(work) => {
+                Json(json!({"works":[work],"asOf":snapshot.scope["asOf"]})).into_response()
+            }
+            None => error(StatusCode::NOT_FOUND, "topic_map_resource_not_found"),
+        },
         Err(err) => map_error(err),
     }
 }
@@ -312,6 +425,49 @@ mod tests {
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
     #[tokio::test]
+    async fn topic_map_fast_reads_preserve_local_guard_and_strict_queries() {
+        for path in [
+            "/api/local/topic-map/summary?domainRef=00000000-0000-4000-8000-000000000001",
+            "/api/local/topic-map/overview?domainRef=00000000-0000-4000-8000-000000000001",
+            "/api/local/topic-map/evidence?domainRef=00000000-0000-4000-8000-000000000001&workRef=00000000-0000-4000-8000-000000000002",
+        ] {
+            let response = super::super::app()
+                .oneshot(
+                    Request::builder()
+                        .uri(path)
+                        .header(header::HOST, "localhost:3000")
+                        .header(header::ORIGIN, "https://evil.example")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            let response = super::super::app()
+                .oneshot(
+                    Request::builder()
+                        .uri(path)
+                        .header(header::HOST, "localhost:3000")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        }
+        let response = super::super::app()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/local/topic-map/evidence?domainRef=bad&workRef=bad")
+                    .header(header::HOST, "localhost:3000")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+    #[tokio::test]
     #[ignore = "requires disposable synthetic PostgreSQL proof"]
     async fn topic_map_http_persists_receipt_replays_and_rejects_foreign_origin() {
         let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").expect("disposable proof URL");
@@ -324,6 +480,27 @@ mod tests {
         .unwrap();
         let application = super::super::app_with_database(db.clone());
         let domain = "00000000-0000-4000-8000-000000000001";
+        for path in ["summary", "overview"] {
+            let response = application
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(format!("/api/local/topic-map/{path}?domainRef={domain}"))
+                        .header(header::HOST, "localhost:3000")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(value["scope"]["totalWorkCount"], 0);
+            assert!(value["works"].as_array().unwrap().is_empty());
+        }
+        let response=application.clone().oneshot(Request::builder().uri(format!("/api/local/topic-map/evidence?domainRef={domain}&workRef=00000000-0000-4000-8000-000000000002")).header(header::HOST,"localhost:3000").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
         let value = json!({"action":"ownCreator","idempotencyKey":"http-own-proof","domainRef":domain,"platform":"xhs","authorExternalId":"synthetic-http-own","active":true});
         let mut receipts = Vec::new();
         for origin in [

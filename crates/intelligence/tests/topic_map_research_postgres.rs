@@ -1167,3 +1167,163 @@ async fn research_progress_summary_covers_all_runs_and_keeps_method_pause_and_dr
     // Even though the oldest method lies outside the recent list, the full ledger retains it.
     assert_eq!(sqlx::query_scalar::<_,i64>("SELECT count(*) FROM linggan_topic_map_research_run WHERE domain_ref=$1 AND method_version='topic-map.research.v1.1'").bind(D).fetch_one(db.pool()).await.unwrap(), 2);
 }
+
+#[tokio::test]
+#[ignore = "disposable PostgreSQL and synthetic sources, no provider"]
+async fn paginated_topic_comments_reuse_context_only_within_the_current_read() {
+    let (db, config, _) = setup("topic_map_paged_context").await;
+    let invocation_count: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_model_invocation")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    let note = "synthetic-paged-context";
+    let w = work(&db, note, "合成作者说明：每天做一步，并记录反馈。").await;
+    let parent = research_fixture::comment_with_author(
+        &db,
+        note,
+        "parent",
+        "合成父评论：请问从哪一个步骤开始？",
+        Some("synthetic-reader-parent"),
+        "2026-09-20T10:00:00Z",
+    )
+    .await;
+    let mut children = std::collections::BTreeSet::new();
+    for n in 0..132 {
+        children.insert(
+            research_fixture::reply_with_author(
+                &db,
+                note,
+                &format!("child-{n}"),
+                "parent",
+                &format!("合成用户{n}：我需要启动练习的帮助。"),
+                Some("synthetic-reader"),
+                "2026-09-20T10:01:00Z",
+            )
+            .await,
+        );
+    }
+    apply_research_command(&db, &configure(config, 100000, false))
+        .await
+        .unwrap();
+    let receipt = apply_research_command(&db, &start(vec![w])).await.unwrap();
+    let first: Uuid = receipt["runRef"].as_str().unwrap().parse().unwrap();
+    let manifests: Vec<Value> = sqlx::query_scalar(
+        "SELECT input_refs FROM linggan_topic_map_research_task WHERE run_ref=$1",
+    )
+    .bind(first)
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+    let source_refs: std::collections::BTreeSet<Uuid> = manifests
+        .iter()
+        .flat_map(|m| m["fragments"].as_array().into_iter().flatten())
+        .filter(|f| f["field"] == "unresearched_comment")
+        .filter_map(|f| f["sourceRef"].as_str()?.parse().ok())
+        .collect();
+    assert!(
+        children.is_subset(&source_refs),
+        "every reply beyond the 128-row page remains present"
+    );
+    assert!(
+        manifests
+            .iter()
+            .flat_map(|m| m["fragments"].as_array().into_iter().flatten())
+            .filter(|f| f["field"] == "parent_comment_context")
+            .all(|f| f["sourceRef"] == json!(parent))
+    );
+    apply_research_command(
+        &db,
+        &ResearchCommand::Stop {
+            request_ref: Uuid::new_v4(),
+            domain_ref: D,
+            run_ref: Some(first),
+        },
+    )
+    .await
+    .unwrap();
+    let next_parent = research_fixture::comment_with_author(
+        &db,
+        note,
+        "parent",
+        "合成父评论更新：已经开始了，现在想了解如何记录反馈。",
+        Some("synthetic-reader-parent"),
+        "2026-09-21T10:00:00Z",
+    )
+    .await;
+    sqlx::query("INSERT INTO linggan_material_comment_restriction(content_public_ref,comment_external_id,reason) VALUES($1,'child-131','synthetic page-tail withdrawal')").bind(w).execute(db.pool()).await.unwrap();
+    let receipt = apply_research_command(&db, &start(vec![w])).await.unwrap();
+    let next: Uuid = receipt["runRef"].as_str().unwrap().parse().unwrap();
+    let manifests: Vec<Value> = sqlx::query_scalar(
+        "SELECT input_refs FROM linggan_topic_map_research_task WHERE run_ref=$1",
+    )
+    .bind(next)
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+    let fragments: Vec<_> = manifests
+        .iter()
+        .flat_map(|m| m["fragments"].as_array().into_iter().flatten())
+        .collect();
+    let parents: Vec<_> = fragments
+        .iter()
+        .filter(|f| f["field"] == "parent_comment_context")
+        .collect();
+    assert!(!parents.is_empty());
+    assert!(
+        parents.iter().all(|f| f["sourceRef"] == json!(next_parent)),
+        "a new request cannot reuse an earlier parent"
+    );
+    let excluded: Uuid = sqlx::query_scalar("SELECT material_ref FROM linggan_material_comment WHERE content_public_ref=$1 AND comment_external_id='child-131'").bind(w).fetch_one(db.pool()).await.unwrap();
+    assert!(
+        fragments.iter().all(|f| f["sourceRef"] != json!(excluded)),
+        "page-tail withdrawal must be requalified"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_model_invocation")
+            .fetch_one(db.pool())
+            .await
+            .unwrap(),
+        invocation_count
+    );
+}
+
+#[tokio::test]
+#[ignore = "disposable PostgreSQL and synthetic adapter, no provider"]
+async fn page_projection_ignores_unrelated_provider_dispatch_but_keeps_current_sources() {
+    use linggan_intelligence::topic_map::read_model::{TopicMapReadModel, source_revision};
+    use std::sync::Arc;
+    let (db, config, _adapter) = setup("topic_map_projection_dispatch").await;
+    let w = work(
+        &db,
+        "projection-dispatch",
+        "SYNTHETIC 独立调用账本不改变这篇原文。",
+    )
+    .await;
+    let model = TopicMapReadModel::default();
+    let query = TopicMapQuery {
+        domain_ref: Some(D),
+        ..Default::default()
+    };
+    let before = model.read(&db, &query).await.unwrap();
+    let revision = source_revision(&db).await.unwrap();
+    let invocation = Uuid::new_v4();
+    sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,config_ref,operation,request_hash,state,reserved_tokens,charged_tokens)SELECT $1,m.connection_version_ref,c.model_ref,c.config_ref,'probe',$3,'running',2048,0 FROM linggan_model_config c JOIN linggan_model_entry m USING(model_ref)WHERE config_ref=$2")
+        .bind(invocation).bind(config).bind("0".repeat(64)).execute(db.pool()).await.unwrap();
+    assert_eq!(revision, source_revision(&db).await.unwrap());
+    sqlx::query("UPDATE linggan_model_invocation SET state='failed',reserved_tokens=0,failure_code='synthetic_probe',finished_at=scope_001_now() WHERE invocation_ref=$1")
+        .bind(invocation).execute(db.pool()).await.unwrap();
+    assert_eq!(revision, source_revision(&db).await.unwrap());
+    assert!(Arc::ptr_eq(
+        &before,
+        &model.read(&db, &query).await.unwrap()
+    ));
+    let canonical = topic_map::read_topic_map(&db, &query).await.unwrap();
+    assert_eq!(before.statistics, canonical.statistics);
+    assert_eq!(before.works.len(), canonical.works.len());
+    let old = before.works.iter().find(|x| x.work_ref == w).unwrap();
+    let current = canonical.works.iter().find(|x| x.work_ref == w).unwrap();
+    assert_eq!(
+        serde_json::to_value(old).unwrap(),
+        serde_json::to_value(current).unwrap()
+    );
+}

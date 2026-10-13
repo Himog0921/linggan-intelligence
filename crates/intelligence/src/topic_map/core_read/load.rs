@@ -158,7 +158,7 @@ fn restore_row(
                     work,
                     max_chars
                 ))
-                .or_insert_with(|| topic_map_research::research_windows(source, max_chars).len())
+                .or_insert_with(|| topic_map_research::research_window_count(source, max_chars))
         );
     }
     let typed: ResearchOutput = serde_json::from_value(output.clone()).ok()?;

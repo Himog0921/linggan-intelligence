@@ -51,7 +51,7 @@
   if (!state.domainRef && root.dataset?.defaultDomainRef) state.domainRef = root.dataset.defaultDomainRef;
   const extraWorks = new Map();
   let progressError = '', progressLoading = false, progressEpoch = 0;
-  let snapshot = null, progress = null, loading = false, readError = '', notice = '', pending = false;
+  let snapshot = null, progress = null, loading = false, materialsLoading = false, materialsError = '', readError = '', notice = '', pending = false;
   let dialog = null, dialogState = null, dialogStack = [], triggerElement = null, triggerAction = null, fetchEpoch = 0;
   const title = work => work.title || '标题尚未取得';
   const readableMaterial = w => Boolean(w?.readable || w?.research?.readable);
@@ -100,9 +100,9 @@
     return data;
   }
   async function load() {
-    const epoch = ++fetchEpoch; loading = true; readError = ''; render();
+    const epoch = ++fetchEpoch; loading = true; materialsLoading = false; materialsError = ''; readError = ''; render();
     try {
-      const result = await request(`/api/local/topic-map?${query()}`);
+      const result = await request(`/api/local/topic-map/summary?${query()}`);
       if (epoch !== fetchEpoch) return;
       if (!result || !Array.isArray(result.topics) || !Array.isArray(result.works) || !result.scope || !result.statistics) throw new Error('主题图谱读取合同不完整，原有结果继续保留');
       snapshot = result;
@@ -110,8 +110,15 @@
       if (!state.domainRef && result.domains.length) { state.domainRef=result.domains[0].domainRef; loading=false; persist(); return await load(); }
       if (state.topicRef && !topic(state.topicRef)) state.topicRef = '';
       persist(true);
+      loading = false; materialsLoading = true; render();
       refreshReadiness(epoch, state.domainRef);
-    } catch (error) { if (epoch === fetchEpoch && error.status===404 && state.topicRef) { state.topicRef='';notice='原主题引用当前不可用，已返回该领域概览；旧备选的定义引用仍保留。';persist();return await load(); } if (epoch === fetchEpoch) readError = error.message; }
+      const materials = await request(`/api/local/topic-map/overview?${query()}`);
+      if (epoch !== fetchEpoch) return;
+      if (!materials || !Array.isArray(materials.works) || !materials.scope || !materials.statistics) throw new Error('材料读取合同不完整');
+      // Replace the whole version if authority changed between the two reads.
+      snapshot = materials;
+      materialsLoading = false;
+    } catch (error) { if (epoch === fetchEpoch && error.status===404 && state.topicRef) { state.topicRef='';notice='原主题引用当前不可用，已返回该领域概览；旧备选的定义引用仍保留。';persist();return await load(); } if (epoch === fetchEpoch) { if (materialsLoading) materialsError = error.message; else readError = error.message; materialsLoading = false; } }
     finally { if (epoch === fetchEpoch) { loading = false; render(); } }
   }
   async function command(payload, successText) {
@@ -482,7 +489,7 @@
     const focusAction=focused?.dataset?.action,focusId=focused?.dataset?.id;
     const keepFocus=focused?.id && inWorkspace(focused)?focused.id:null;
     const busy=loading || Boolean(readError) || !snapshot;
-    const body=readError?`<div class="lgi-tm-read-error" role="alert"><strong>当前读取未成功</strong><p>${esc(readError)}</p>${btn('重新读取','refresh')}${snapshot?'<p>旧结果保留在会话中，不混入当前未成功读取的范围。</p>':''}</div>`:loading?'<div class="lgi-tm-summary-loading" role="status">正在读取当前范围的已有材料与统计…</div>':snapshot?`${summary()}${state.view==='overview'?overview():journey()}<footer class="lgi-tm-footer"><span>${esc(snapshot.methodVersion || '方法尚未读取')}</span><details><summary>数据范围与来源边界</summary>${coverage()}</details></footer>`:empty('当前图谱尚未读取','读取页面不启动模型研究或平台采集。');
+    const body=readError?`<div class="lgi-tm-read-error" role="alert"><strong>当前读取未成功</strong><p>${esc(readError)}</p>${btn('重新读取','refresh')}${snapshot?'<p>旧结果保留在会话中，不混入当前未成功读取的范围。</p>':''}</div>`:loading?'<div class="lgi-tm-summary-loading" role="status">正在读取当前范围的已有材料与统计…</div>':snapshot?`${summary()}${materialsLoading?`<section aria-label="首批材料"><p role="status">完整统计已读取，已载入 ${list(snapshot.works).length} 篇首批材料；正在载入其余材料与讨论…</p>${materialRows(workspaceWorks().slice(0,12))}</section>`:materialsError?`<div role="alert"><p>材料读取未成功：${esc(materialsError)}</p>${btn('重新读取','refresh')}</div>`:state.view==='overview'?overview():journey()}<footer class="lgi-tm-footer"><span>${esc(snapshot.methodVersion || '方法尚未读取')}</span><details><summary>数据范围与来源边界</summary>${coverage()}</details></footer>`:empty('当前图谱尚未读取','读取页面不启动模型研究或平台采集。');
     content.innerHTML=`${header()}<div data-notice class="lgi-tm-feedback" role="status" ${notice?'':'hidden'}>${esc(notice)}</div><div class="lgi-tm-workbench">${sidebar()}<main class="lgi-tm-main" aria-label="主题内容" data-loaded="${!busy}" aria-busy="${loading}">${body}</main></div>${list(state.compare).length?`<div class="lgi-tm-compare-dock"><span>已选 ${state.compare.length} 个方向 · ${state.compare.map(topicName).map(esc).join(' / ')}</span>${btn('并排比较','compare','','lgi-tm-primary')}${btn('清空','compare-clear','','lgi-tm-quiet')}</div>`:''}`;
     if(viewTabs)viewTabs.innerHTML=`${tab('主题概览','view','overview',state.view==='overview')}${tab('用户生命旅程','view','journey',state.view==='journey')}`;
     if(contextActions)contextActions.innerHTML=`${btn('我的备选','saved','','lgi-tm-quiet',!snapshot?'disabled':'')}<div data-readiness class="lgi-tm-readiness" role="status">${loading?btn('研究进度','research','','lgi-tm-quiet'):readiness()}</div>${btn('刷新已有结果','refresh','','',loading?'disabled':'')}`;
@@ -556,10 +563,8 @@
     return `<p>${esc(dialogState.label || '当前范围的全部作品')} · ${ns.length} 篇已读取作品。原始材料不受精选10篇上限限制。</p><div class="lgi-tm-toolbar"><label class="lgi-tm-control"><span>材料排序 / 同平台分组</span><select data-dialog-filter="sort">${[['latest','最新发布时间'],['likes','点赞'],['collects','收藏'],['comments','评论'],['shares','分享']].map(([v,t]) => `<option value="${v}" ${sort === v ? 'selected' : ''}>${t}</option>`).join('')}</select></label><form data-form="material-search" class="lgi-tm-row"><input name="query" value="${esc(q)}" placeholder="查找标题 / 作者 / 片段 / 讨论" aria-label="查找材料"><button type="submit" class="lgi-tm-button">查找</button></form></div><div class="lgi-tm-material-grid">${ns.slice(0,limit).map(card).join('')}</div>${ns.length > limit ? btn(`展开其余 ${ns.length-limit} 篇`,'materials-more') : ''}${ns.length ? '' : empty('当前条件没有匹配的已读取作品')}<p class="lgi-tm-note">未知数字显示—；跨平台互动不混合作统一排名。</p>`;
   }
   function unreadResearchWork(w) { return {...w,research:null,annotation:null,evidenceFragment:null,mainStage:null,involvedStages:[],overlays:[]}; }
-  function researchQualificationUrl(w,domainRef,preferredTopicRef) {
-    const q=new URLSearchParams({domainRef,referenceWindowDays:'0'}), refs=list(w.topicRefs), topicRef=refs.includes(preferredTopicRef)?preferredTopicRef:refs[0];
-    if(topicRef)q.set('topicRef',topicRef);
-    return `/api/local/topic-map?${q}`;
+  function researchQualificationUrl(w,domainRef) {
+    return `/api/local/topic-map/evidence?${new URLSearchParams({domainRef,workRef:w.workRef})}`;
   }
   function applyQualifiedReader(reader,values) {
     reader.resource=values[0].status==='fulfilled'?values[0].value:null;
@@ -575,9 +580,9 @@
   async function readWork(ref) {
     const w=work(ref) || dialogState?.snapshot?.works?.find(w=>w.workRef===ref);
     if(!w)return;
-    const domainRef=state.domainRef, preferredTopicRef=dialogState?.topicRef || state.topicRef;
+    const domainRef=state.domainRef;
     openDialog('reader',{work:unreadResearchWork(w),domainRef,loading:true});const current=dialogState;
-    const domain=encodeURIComponent(domainRef),values=await Promise.allSettled([request(`/api/local/work-resources/${encodeURIComponent(ref)}?domain=${domain}`),request(`/api/local/work-resources/${encodeURIComponent(ref)}/comments?domain=${domain}`),request(researchQualificationUrl(w,domainRef,preferredTopicRef))]);
+    const domain=encodeURIComponent(domainRef),values=await Promise.allSettled([request(`/api/local/work-resources/${encodeURIComponent(ref)}?domain=${domain}`),request(`/api/local/work-resources/${encodeURIComponent(ref)}/comments?domain=${domain}`),request(researchQualificationUrl(w,domainRef))]);
     applyQualifiedReader(current,values);
     if(dialogState===current)drawDialog();
   }
@@ -713,7 +718,7 @@
   async function readSample(ref) {
     const current=dialogState;if(current?.type!=='judge'||!list(current.works).some(w=>w.workRef===ref))return;
     const selected=list(current.works).find(w=>w.workRef===ref),domainRef=state.domainRef,reader={work:unreadResearchWork(selected),domainRef,loading:true};current.sampleRef=ref;current.inlineReader=reader;drawDialog();
-    const domain=encodeURIComponent(domainRef),values=await Promise.allSettled([request(`/api/local/work-resources/${encodeURIComponent(ref)}?domain=${domain}`),request(`/api/local/work-resources/${encodeURIComponent(ref)}/comments?domain=${domain}`),request(researchQualificationUrl(selected,domainRef,current.topicRef))]);
+    const domain=encodeURIComponent(domainRef),values=await Promise.allSettled([request(`/api/local/work-resources/${encodeURIComponent(ref)}?domain=${domain}`),request(`/api/local/work-resources/${encodeURIComponent(ref)}/comments?domain=${domain}`),request(researchQualificationUrl(selected,domainRef))]);
     if(current.inlineReader!==reader)return;
     applyQualifiedReader(reader,values);
     if(dialogState?.type==='judge'&&dialogState.inlineReader===reader)drawDialog();
