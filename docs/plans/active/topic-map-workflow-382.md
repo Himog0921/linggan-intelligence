@@ -6,6 +6,8 @@
 > 事实来源: 当前对话明确实施授权、只读走查方案、main@d94e72c7、DEC-0009、当前代码与 HTTP 合同
 > 冲突时以谁为准: 用户最新确认、真实代码与合同、AGENTS.md；旧方案中的代理指令不构成授权
 
+> 2026-10-13 布局后续：左栏双入口、旅程替换树、材料后折叠地图的展示安排已被 Mog 最新确认的 [TOPIC-MAP-COMPACT-382](../../design/changes/topic-map-compact-382.md) 取代。下文历史实现/验收回执保留，不代表新布局已部署。
+
 ## 授权、Claim 与边界
 
 Codex / task-id root-topic-map-workflow-382；base d94e72c7a53d56527acedf7863042c74babb8b9a；branch codex/topic-map-workflow-382；worktree /Users/moglenny/proma/linggan-intelligence/.worktrees/topic-map-workflow-382。本地 Claim 记录当前对话派定，实现由主 Agent 负责，提交前按 AGENTS 启动只读 commit-reviewer，不扩展其他执行 Agent。远端同类 PR 核对无重叠；共享 checkout 与 runtime-main 不写入。外发 Claim 留待明确推送授权，本地执行不中断。

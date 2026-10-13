@@ -99,3 +99,10 @@
 - 维护的测试源：`scripts/test-ops-ledger-postgres.sh`、`crates/intelligence/tests/ops_ledger_import_postgres.rs` 与 `tests/support/ops_export_fixture.rs`（全部是合成数据）；不是生成代码。PG 容器和卷由脚本随机命名，退出时删除并核验。
 - 真实导出：只在 Mog 本机「下载」目录原地读取，不复制、不入 Git、不进测试。演练用一次性容器（无宿主 volume），只输出不含账号名、标题、链接和运营人名的聚合 JSON，放执行会话的临时目录，不入 Git；容器结束即删除。
 - 正式导入（须 Mog 另行授权）的输出同样只含聚合数，回执写入 `linggan_ops_import_batch`；导入前按既有做法备份共享库，备份不入 Git。
+
+
+## TOPIC-MAP-COMPACT-382 隔离 UI 验证
+
+- 权威测试源：`scripts/test-topic-map-ui.cjs`、`scripts/test-topic-map-compact-ui.py`，维护源码，不是生成文件。只运行合成 HTTP fixture 与候选 JS/CSS。
+- 源码传递包、补丁、截图与日志：本任务系统临时目录和 Actions artifact（源码包 1 日、验证结果 7 日）；不入 Git、不含真实原文/凭据、不访问模型/平台/正式库。
+- `.github/workflows/topic-map-compact-transfer.yml` 仅用于专属候选分支的版本校验与传递，交付前删除；持续回归另用只读验证 workflow。临时传递仅影响此分支，不强推、不合并或部署。
