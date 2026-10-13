@@ -1,7 +1,7 @@
 # 生成型文件登记表
 
 > 状态: 权威当前
-> 最后核对: 2026-09-30
+> 最后核对: 2026-10-13
 > 适用范围: 构建、代码生成、导出、日志、测试证据、备份与临时文件
 > 事实来源: 当前工具配置、`.gitignore` 与来源校验清单
 > 冲突时以谁为准: 生成源、工具配置和安全规则；生成结果不得反向覆盖来源
@@ -93,3 +93,9 @@
 - 位置：`/tmp/topic-map-workflow-*` 临时脚本/日志、`/tmp/linggan-topic-map-workflow-target` 构建缓存；截图在当前任务 Codex visualizations 的 `topic-map-workflow/`，不入 Git。真实材料只读截图与合成保存证明分别标明。
 - 3112 为只读预览，使用候选 JS/CSS 与现有 token/shell；拒绝全部 POST，不代理外网，不保存真实 API 响应或凭据。预览不是候选 Rust API 部署或正式库保存证明。
 - 隔离 PG 使用既有 test-topic-map-postgres.sh 随机容器和卷，退出时删除核验。3112 仅保留到 Mog 页面审阅，后续关闭该任务的 Python 进程；不触碰共享 3000 服务。
+
+## OPS-MIGRATION-001 D1 / Issue #402 验证与导入
+
+- 维护的测试源：`scripts/test-ops-ledger-postgres.sh`、`crates/intelligence/tests/ops_ledger_import_postgres.rs` 与 `tests/support/ops_export_fixture.rs`（全部是合成数据）；不是生成代码。PG 容器和卷由脚本随机命名，退出时删除并核验。
+- 真实导出：只在 Mog 本机「下载」目录原地读取，不复制、不入 Git、不进测试。演练用一次性容器（无宿主 volume），只输出不含账号名、标题、链接和运营人名的聚合 JSON，放执行会话的临时目录，不入 Git；容器结束即删除。
+- 正式导入（须 Mog 另行授权）的输出同样只含聚合数，回执写入 `linggan_ops_import_batch`；导入前按既有做法备份共享库，备份不入 Git。
