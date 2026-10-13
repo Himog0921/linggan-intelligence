@@ -1,7 +1,7 @@
 # 目标架构
 
 > 状态: 草案
-> 最后核对: 2026-08-20
+> 最后核对: 2026-10-13
 > 适用范围: Linggan Intelligence 目标模块与数据边界
 > 事实来源: ACCEPTED ADR 与已确认架构原则
 > 冲突时以谁为准: ACCEPTED ADR；实现状态以真实代码和运行结果为准
@@ -244,7 +244,7 @@ Decision → Action
 
 历史 `OperationPublication`、`ContentMetricSnapshot/Latest` 和 `leadCount` 等字段不构成新项目来源合同；V2 指标仍缺已证明的 metric Raw Record/同源链。公开指标、深度评论、私信、咨询、销售、访谈与产品行为分别需要 Gate 4–5 的真实 producer/输入来源和行动身份审计，不能从旧 schema 直接生成数据库模型。
 
-这是长期学习闭环的最低架构约束，不要求首个切片实现完整反馈自动化，也不授权当前创建 Outcome 服务、统一渠道枚举、人工补录模块、归因引擎或指标同步 worker。
+这是长期学习闭环的最低架构约束，不要求首个切片实现完整反馈自动化，也不授权当前创建 Outcome 服务、统一渠道枚举、人工补录模块、归因引擎或指标同步 worker。（2026-10-13 起部分取代：我方运营的发布登记与阅读量人工填报按 [DEC-0009](../decisions/0009-stage-one-job-topic-pool.md) 纳入第一阶段，见 [OPS-MIGRATION-001](../plans/active/ops-module-migration-001.md)。人工填报仍只证明有人这样报告，未填仍是未知；统一 Outcome 表、渠道枚举与指标同步任务仍不建。）
 
 ## Topic 探索与市场投影边界
 

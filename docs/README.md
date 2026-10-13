@@ -49,6 +49,8 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发，并于 2026-10-02 
 | [decisions/0007-ocr-content-layering.md](decisions/0007-ocr-content-layering.md) | 权威当前 | OCR 原始事实、内容分层、视觉选择边界和展示标题来源的长期决定 |
 | [decisions/0008-peer-domains-and-unified-material-pipeline.md](decisions/0008-peer-domains-and-unified-material-pipeline.md) | 权威当前 | 平级 Domain、共享真实 Target、primary/reference 用途、统一材料链与 Domain pause 的长期决定 |
 | [decisions/0009-stage-one-job-topic-pool.md](decisions/0009-stage-one-job-topic-pool.md) | 权威当前 | 第一阶段主 Job：小红书选题池经营（复用与试新、爆款标准、成功指标、升级条件）、运营模块整体迁入与先后顺序；所取代的旧条款与待裁定事项 |
+| [plans/active/ops-module-migration-001.md](plans/active/ops-module-migration-001.md) | 活跃计划；D1（Issue #402）已开 PR，待审查与合并；D2–D6 未派定 | 内容工作台运营管理迁入：已确认范围、六步交付与先后、切换时不两边同时录、各步验收、做到时再问的事项与 D1 对账回执 |
+| [data-contracts/ops-ledger-001.md](data-contracts/ops-ledger-001.md) | 权威当前；分支候选，未合并 | 运营台账五张表的含义、内容工作台导出的导入规则 `ops-import.v1`（校验、重复登记合并、阅读量填报、消失记录标记、预览指纹）、新旧对账口径与 D2/D3 读取约定 |
 | [data-contracts/ocr-content-layering.md](data-contracts/ocr-content-layering.md) | 权威当前 | OCR raw/layout/行引用、分层状态、标题回退与视觉模型输出闭集 |
 | [runbooks/paddle-ocr-runtime.md](runbooks/paddle-ocr-runtime.md) | 权威当前 | 本机 Paddle runtime 准备、无 Tesseract 回退、迁移后受控重排步骤 |
 | [decisions/0006-comment-research-clean-rebuild.md](decisions/0006-comment-research-clean-rebuild.md) | 权威当前 | Issue #295：开发期销毁旧评论研究派生层，保留原始 Evidence 与资格事实；唯一的新评论研究合同与本机 reset 边界 |
@@ -257,6 +259,7 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发，并于 2026-10-02 
 | [`audits/intelligence-system-review-2026-09-05.md`](audits/intelligence-system-review-2026-09-05.md) | 一次性报告 | `AUD-INTELLIGENCE-20260905`：固定主线 `4864edd` 的产品、领域、Rust/API/worker、PostgreSQL、Browser Producer、媒体、UI/UX、Topic/Agent 与运行协作全项目梳理；含已具备能力与尚未闭环范围的分别结论，不授予修复、采集、部署或合并权限 |
 | [`audits/intelligence-system-review-2026-09-05-evidence.md`](audits/intelligence-system-review-2026-09-05-evidence.md) | 一次性报告 | 上述主报告的 E01–E16 证据、检查范围与复核方法；197 项常规 Rust / 118 项隔离 PostgreSQL / 252 项插件测试、只读数据库与浏览器观察、明确未证明边界；不含账号原始身份、评论原文或凭据 |
 | [`audits/code-quality-review-2026-09-14.md`](audits/code-quality-review-2026-09-14.md) | 一次性报告 | `AUD-CODE-QUALITY-20260914`：固定主线 `431e79b` 的第七层代码质量核实包——逐条给出定位、判据原文、复现命令、预期输出与反证条件，附已排除项与未覆盖范围；供独立复核，不授予修复、采集、部署或合并权限 |
+| [`audits/ops-module-inheritance-audit-2026-10-13.md`](audits/ops-module-inheritance-audit-2026-10-13.md) | 一次性报告 | `OPS-MIGRATION-001`：内容工作台运营管理按 ARC-001 四类口径的能力继承审计——页面与依赖、真实用量与填写率（只含聚合数）、Mog 六项去留裁定、不变量与未证明边界；不授予实现、迁移或部署权限 |
 | [`runbooks/development-environment.md`](runbooks/development-environment.md) | 权威当前 | Rust 与 Docker PostgreSQL 16 的统一运行入口 |
 | [`runbooks/local-evidence-library.md`](runbooks/local-evidence-library.md) | 权威当前 | Rust loopback host、health、受控 discovery ingress 与 Evidence Library 本地启动/验证；明确不含真实插件、平台或媒体链路 |
 | [`runbooks/local-runtime-deployment.md`](runbooks/local-runtime-deployment.md) | 权威当前 | 三个 launchd 常驻服务的运行来源、跟随 origin/main 的更新方式、迁移闸门与故障处置；§7 为运行诊断（一个 tick 号串一条链的查询、事件与选择器快照的字段白名单，样例为手工构造的脱敏样例）；取代已废弃的冻结快照模型 |
