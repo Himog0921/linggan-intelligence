@@ -602,6 +602,56 @@ async fn creator_lease_claims_and_completes_two_scheduled_tasks_in_order() {
 
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL proof database"]
+async fn task_read_projection_keeps_each_latest_attempt_and_activity_order() {
+    let database = proof_database_for("collection_task_latest_attempts").await;
+    let oldest_task = manual_task();
+    let other_task = manual_task();
+    let unattempted_task = manual_task();
+    for task in [&oldest_task, &other_task, &unattempted_task] {
+        create_producer_task(&database, task)
+            .await
+            .expect("manual fixture Task is created through the producer contract");
+    }
+    let mut latest_oldest = None;
+    let mut latest_other = None;
+    for task in [&oldest_task, &other_task, &other_task, &oldest_task] {
+        let retry = attempt(task.task_id(), Uuid::new_v4());
+        start_producer_attempt(&database, &retry)
+            .await
+            .expect("a distinct manual retry creates its own Attempt");
+        if task.task_id() == oldest_task.task_id() {
+            latest_oldest = Some(retry.attempt_id());
+        } else {
+            latest_other = Some(retry.attempt_id());
+        }
+    }
+    let timeline = read_collection_task_timeline(&database, 100)
+        .await
+        .expect("multiple Task histories remain readable");
+    assert_eq!(timeline.tasks.len(), 3, "retries do not duplicate a Task");
+    assert_eq!(timeline.active_count, 2);
+    assert_eq!(timeline.accepted_count, 0);
+    assert_eq!(timeline.tasks[0].task_id, oldest_task.task_id());
+    for (id, expected) in [
+        (oldest_task.task_id(), latest_oldest),
+        (other_task.task_id(), latest_other),
+        (unattempted_task.task_id(), None),
+    ] {
+        let row = timeline.tasks.iter().find(|r| r.task_id == id).unwrap();
+        assert_eq!(row.attempt_id, expected, "Attempt selection stays per Task");
+        assert!(row.package_ref.is_none());
+        assert!(row.receipt_ref.is_none());
+    }
+    let bounded = read_collection_task_timeline(&database, 1)
+        .await
+        .expect("the activity boundary is applied after selecting execution facts");
+    assert_eq!(bounded.tasks.len(), 1);
+    assert_eq!(bounded.tasks[0].task_id, oldest_task.task_id());
+    assert_eq!(bounded.tasks[0].attempt_id, latest_oldest);
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
 async fn task_read_projection_keeps_queue_attempt_package_and_receipt_distinct() {
     let database = proof_database_for("collection_task_read_projection").await;
     let fixture = seed_creator_work_order(&database).await;
@@ -969,7 +1019,10 @@ async fn repeated_author_profile_start_failures_stop_releasing_new_leases() {
             .await
             .expect("the bounded failure count is readable");
             assert_eq!(state.1, 5);
-            assert_ne!(state.0, "queued", "the failed profile cannot requeue forever");
+            assert_ne!(
+                state.0, "queued",
+                "the failed profile cannot requeue forever"
+            );
             let sibling: (Uuid, String) = sqlx::query_as(
                 "SELECT task.task_id,task.execution_state FROM collection_work_order_lease_task task JOIN collection_work_order_lease lease ON lease.lease_ref=task.lease_ref JOIN linggan_runtime_task runtime ON runtime.task_id=task.task_id WHERE lease.work_order_ref=$1 AND lease.released_at IS NULL AND runtime.task_spec #>> '{capabilitiesRequested,0}'='profile_discovery'",
             )
@@ -993,7 +1046,10 @@ async fn repeated_author_profile_start_failures_stop_releasing_new_leases() {
             .fetch_one(database.pool())
             .await
             .expect("the bounded lease history is readable");
-            assert_eq!(lease_count, 5, "a sixth Lease was not minted for the failed profile");
+            assert_eq!(
+                lease_count, 5,
+                "a sixth Lease was not minted for the failed profile"
+            );
         }
     }
 }

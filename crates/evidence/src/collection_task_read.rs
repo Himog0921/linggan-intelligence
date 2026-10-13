@@ -253,6 +253,11 @@ LIMIT $1
 "#;
 
 const TASK_TIMELINE_SQL: &str = r#"
+WITH latest_attempt AS MATERIALIZED (
+    SELECT DISTINCT ON (task_id) task_id, attempt_id, started_at
+    FROM linggan_runtime_attempt
+    ORDER BY task_id, started_at DESC
+)
 SELECT
     task.task_id,
     task.source,
@@ -326,13 +331,7 @@ LEFT JOIN LATERAL (
     ORDER BY target.first_stored_at DESC
     LIMIT 1
 ) fallback_target ON true
-LEFT JOIN LATERAL (
-    SELECT candidate.attempt_id, candidate.started_at
-    FROM linggan_runtime_attempt candidate
-    WHERE candidate.task_id = task.task_id
-    ORDER BY candidate.started_at DESC
-    LIMIT 1
-) attempt ON true
+LEFT JOIN latest_attempt attempt ON attempt.task_id = task.task_id
 LEFT JOIN linggan_runtime_capture_package package ON package.attempt_id = attempt.attempt_id
 LEFT JOIN linggan_runtime_submission_receipt receipt ON receipt.attempt_id = attempt.attempt_id
 LEFT JOIN LATERAL (

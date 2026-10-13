@@ -83,3 +83,12 @@
 31 张最终合成截图以及 `visual-measurements.json`、`browser-results.json`、`audit-color-contrast.json` 在本任务 Codex visualizations 的 `collection-398/`，不入 Git；CI 同源合成截图 artifact 保留 7 日。用户参考图保持在原交接路径，没有上传 CI。关键帧：`oneoff-1440/1920/390`、`oneoff-existing/selected/save-failure-1440`、`tasks-results-1440`、`progress-drawer-1440`、`results-drawer-1440/390`、`paused-long-drawer-390`、`domain-list/editor-1440/390`、`targets/keyword-targets/target-drawer/target-works/target-patrol-1440`、`station-name-edit/station-claim-1440`。
 
 功能矩阵与实际运行数量另见 [交付记录](../../plans/active/collection-single-run-398.md)；字段/能力保留见 [正式 UI 变更清单](collection-single-run-398.md)。截图是可检查的候选证据，不表示已合并、已部署或已加载插件。
+
+
+## 2026-10-14 同一性能修正的首屏诊断复核
+
+#413已通过完整CI并合并为eae898e5，仅API/recovery发布。真实成果API585ms、全部API121ms，正式HTML仍约11.8–16.9秒；不能把API测量当成完整页面导航通过。追踪显示原诊断在26891个Task上各全扫Attempt，旧查询默认JIT执行约10.365秒。当前最小候选一次按Task分组取得最新Attempt，只读EXPLAIN约383ms；同一repeatable-read快照100条完整诊断及顺序与原查询相同。字段、原最后活动排序、冻结用途、Package/Receipt/失败保持，无CSS或视觉参数改动。新的完整页面/导航像素复核须在最终CI、合并、API-only发布后执行，本段不预先宣称通过。
+
+追加隔离测试核对多个Task、各自最新重试、无Attempt、活动排序及limit；第一次dispatch整组因专用数据库URL未传入而未执行业务断言，已补齐同一临时数据库环境变量后重跑，不把失败或未运行计为通过。已列入本包的原dispatch整组将真实运行，保留原任务/租约/工单与交付对账诊断。
+
+追加候选本机149项PG＋正式有数据browser1项分层实际通过；32张合成状态截图生成，资源清理验证通过，原布局/CSS无变化。最新Attempt排序与原100条诊断有序结果一致。正式合并版本的真实数据全页面导航、像素与上下文回查仍待发布后复核；候选截图不冒充正式运行。
