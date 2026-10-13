@@ -75,6 +75,7 @@
 | [pages/evidence-library-multi-material-reference.html](pages/evidence-library-multi-material-reference.html) | EVIDENCE-PAGE-002：多材料 Evidence Library 合成静态高保真参考；不连接运行时或真实材料 | 权威当前；静态参考 |
 | [pages/collection-workspace-page.md](pages/collection-workspace-page.md) | PAGE-COLLECTION-001：Collection 两个日常页面与领域/工位管理的职责、状态和事实边界 | 权威当前 |
 | [../plans/active/collection-jtbd-001.md](../plans/active/collection-jtbd-001.md) | COLLECTION-JTBD-001：保留真实 UI 的两页收敛、完整管理能力、单次入口及 UI 变更清单 | 活跃计划；Issue #398 |
+| [pages/ops-page.md](pages/ops-page.md) | PAGE-OPS-001：一级页面「运营」（OPS-MIGRATION-001 D2）的只读页面规格、状态词典与验收矩阵 | 草案；Issue #405，待 Mog 确认待决项 |
 | [pages/domain-management-page.md](pages/domain-management-page.md) | PAGE-DOMAIN-MANAGEMENT-001：Domain、Target 用途、状态后果和材料 lane | 权威当前；隔离交互与本机部署后浏览器 smoke 已验证，业务验收待办 |
 | [pages/collection-operations-html-prototype-brief.md](pages/collection-operations-html-prototype-brief.md) | COLLECTION-HTML-BRIEF-001：外部模型可直接使用的自包含静态原型委托书 | 权威当前；不是运行实现 |
 | [changes/evidence-page-002-multi-material-ui-change-manifest.md](changes/evidence-page-002-multi-material-ui-change-manifest.md) | EVIDENCE-PAGE-002：本次产品与静态参考变更清单及越权边界 | 权威当前 |
