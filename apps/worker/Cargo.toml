@@ -37,5 +37,9 @@ path = "src/bin/collection_repair.rs"
 name = "linggan-material-reproject"
 path = "src/bin/material_reproject.rs"
 
+[[bin]]
+name = "linggan-ops-history-import"
+path = "src/bin/ops_history_import.rs"
+
 [lints]
 workspace = true

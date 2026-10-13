@@ -22,6 +22,8 @@ pub use topic_workspace::{
 
 pub const INTELLIGENCE_IMPLEMENTED: bool = true;
 
+pub mod ops_ledger;
+
 pub mod model_secrets;
 pub mod model_settings;
 pub mod pi_adapter;
