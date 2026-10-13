@@ -136,3 +136,10 @@ bundle 不包含旧工作台 host/endpoint/运行时模块（lease、heartbeat�
 主题图谱专用 TaskSpec 可携带 `incrementalSearchBudget`（最多 3 轮、180 秒、200 张候选卡）和 `incrementalCommentBudget`（冻结已有 stable comment ID，根评论与回复合计最多 30 个新增 ID、20 轮、180 秒）。页面采集器执行服务器冻结的较小限额，重复页、已知 ID、重复回复不消耗新增名额；局部评论 Receipt 使用 `incremental_new`，不将这 30 条当作平台评论总数。普通归档未携带该可选契约时继续原路径。
 
 这项源码与合成测试证明不表示已安装或重载插件，不表示已访问平台、真实补采成功或服务端已部署；WorkOrder、授权、停止状态和材料接纳仍由 Linggan 服务端裁定。
+
+## 0.8.61 / COLLECTION-JTBD-001 候选
+
+新单次工单复用原后台领取、同页 lane preparation、outbox、Task/Attempt/Package/Receipt。
+新增显式评论模式、稳定ID分段、页级扩展缓存检查点及持久控制探针；保留旧入口样本边界。
+有效同任务／作品／已确认账号会话可继续，许可仍逐段取得；旧安装不支持的新深采留在服务端
+等待，不按旧样本模式执行。无平台实采或正式插件加载证明。详见 README 对应候选说明。

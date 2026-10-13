@@ -778,6 +778,7 @@ pub fn render_with_catalog_view_with_chart(
                    </div>
                  </div>
                  <div class="c-dw-actions">
+                   {single_run_link}
                    {source_link}
                    <a class="c-btn-secondary c-dw-close" href="{return_href}">{close_icon}<span>关闭</span></a>
                  </div>
@@ -798,6 +799,25 @@ pub fn render_with_catalog_view_with_chart(
             .map(|handle| format!(" · {}", escape(handle)))
             .unwrap_or_default(),
         return_url = list_context.list_href(None),
+        single_run_link = if target.lifecycle_state != "dismissed" {
+            format!(
+                r#"<a class="c-btn-secondary" href="/collection/tasks?once=1&amp;target={}&amp;domain={}&amp;returnTo={}">立即采一次</a>"#,
+                target.target_ref,
+                percent_encode_component(list_context.domain.unwrap_or("all")),
+                percent_encode_component(&format!(
+                    "/collection/targets?drawer={}&{}",
+                    target.target_ref,
+                    list_context
+                        .pairs()
+                        .iter()
+                        .map(|(k, v)| format!("{k}={}", percent_encode_component(v)))
+                        .collect::<Vec<_>>()
+                        .join("&")
+                ))
+            )
+        } else {
+            String::new()
+        },
         source_link = source_link(target, is_creator),
         close_icon = close_icon(),
         watch_badge = drawer_watch_badge(target),
@@ -1276,8 +1296,14 @@ fn works_list(
         .iter()
         .filter(|work| work.source == CatalogSource::PatrolDiscovery)
         .count();
-    let recorded_videos = works.iter().filter(|work| work.recorded_kind == Some("视频")).count();
-    let recorded_images = works.iter().filter(|work| work.recorded_kind == Some("图文")).count();
+    let recorded_videos = works
+        .iter()
+        .filter(|work| work.recorded_kind == Some("视频"))
+        .count();
+    let recorded_images = works
+        .iter()
+        .filter(|work| work.recorded_kind == Some("图文"))
+        .count();
     let recorded_unknown = works.len() - recorded_videos - recorded_images;
     let is_creator = target.target_kind == "creator";
     let heading = if is_creator {
@@ -1415,7 +1441,9 @@ fn works_list(
         pending = pending,
         patrol_new = patrol_new,
         kind_summary = if is_creator {
-            format!(r#"<p class="c-dw-note">采集卡类型标记：视频 {recorded_videos}、图文 {recorded_images}、未标记 {recorded_unknown}。历史图文标记可能由插件缺省生成，仅供核对作品分布。</p>"#)
+            format!(
+                r#"<p class="c-dw-note">采集卡类型标记：视频 {recorded_videos}、图文 {recorded_images}、未标记 {recorded_unknown}。历史图文标记可能由插件缺省生成，仅供核对作品分布。</p>"#
+            )
         } else {
             String::new()
         },
@@ -1525,15 +1553,22 @@ fn overview_tab(
     let directory = match archive {
         TargetArchiveRead::Unavailable => "当前读不到".to_owned(),
         TargetArchiveRead::Known(Some(value)) if value.works_listed > 0 => {
-            if value.has_displayable_directory() { value.works_listed.to_string() }
-            else { format!("{}（已见）", value.works_listed) }
+            if value.has_displayable_directory() {
+                value.works_listed.to_string()
+            } else {
+                format!("{}（已见）", value.works_listed)
+            }
         }
         TargetArchiveRead::Known(_) => "尚未建立".to_owned(),
     };
     let detail = match archive {
         TargetArchiveRead::Known(Some(value)) if value.works_listed > 0 => {
             let count = format!("{}/{}", value.details_captured, value.works_listed);
-            if value.has_displayable_directory() { count } else { format!("{count}（已见）") }
+            if value.has_displayable_directory() {
+                count
+            } else {
+                format!("{count}（已见）")
+            }
         }
         TargetArchiveRead::Unavailable => "当前读不到".to_owned(),
         TargetArchiveRead::Known(_) => "尚未取得".to_owned(),
@@ -1983,7 +2018,8 @@ fn current_system_copy(archive: TargetArchiveRead<'_>) -> (&'static str, &'stati
         TargetArchiveRead::Unavailable => ("档案状态未知", "执行状态未知"),
         TargetArchiveRead::Known(None) => ("尚未建立", "当前无建档任务"),
         TargetArchiveRead::Known(Some(value))
-            if value.directory_baseline == linggan_evidence::ArchiveDirectoryBaseline::NotStarted =>
+            if value.directory_baseline
+                == linggan_evidence::ArchiveDirectoryBaseline::NotStarted =>
         {
             ("尚未建立", "已见作品与待处理项见下方")
         }
@@ -3160,14 +3196,26 @@ fn archive_gap_overview(
         TargetArchiveRead::Unavailable => "当前读不到".to_owned(),
         TargetArchiveRead::Known(value) => value
             .filter(|value| value.works_listed > 0)
-            .map(|value| if value.has_displayable_directory() { value.works_listed.to_string() } else { format!("{}（已见）", value.works_listed) })
+            .map(|value| {
+                if value.has_displayable_directory() {
+                    value.works_listed.to_string()
+                } else {
+                    format!("{}（已见）", value.works_listed)
+                }
+            })
             .unwrap_or_else(|| "—".to_owned()),
     };
     let detail = match archive {
         TargetArchiveRead::Unavailable => "当前读不到".to_owned(),
         TargetArchiveRead::Known(value) => value
             .filter(|value| value.works_listed > 0)
-            .map(|value| if value.has_displayable_directory() { format!("{}/{}", value.details_captured, value.works_listed) } else { format!("{}/{}（已见）", value.details_captured, value.works_listed) })
+            .map(|value| {
+                if value.has_displayable_directory() {
+                    format!("{}/{}", value.details_captured, value.works_listed)
+                } else {
+                    format!("{}/{}（已见）", value.details_captured, value.works_listed)
+                }
+            })
             .unwrap_or_else(|| "—".to_owned()),
     };
     let analyzable = match lifecycle {
@@ -3236,14 +3284,26 @@ fn archive_tab(
         TargetArchiveRead::Unavailable => "当前读不到".to_owned(),
         TargetArchiveRead::Known(value) => value
             .filter(|value| value.works_listed > 0)
-            .map(|value| if value.has_displayable_directory() { value.works_listed.to_string() } else { format!("{}（已见）", value.works_listed) })
+            .map(|value| {
+                if value.has_displayable_directory() {
+                    value.works_listed.to_string()
+                } else {
+                    format!("{}（已见）", value.works_listed)
+                }
+            })
             .unwrap_or_else(|| "—".to_owned()),
     };
     let detail = match archive {
         TargetArchiveRead::Unavailable => "当前读不到".to_owned(),
         TargetArchiveRead::Known(value) => value
             .filter(|value| value.works_listed > 0)
-            .map(|value| if value.has_displayable_directory() { format!("{}/{}", value.details_captured, value.works_listed) } else { format!("{}/{}（已见）", value.details_captured, value.works_listed) })
+            .map(|value| {
+                if value.has_displayable_directory() {
+                    format!("{}/{}", value.details_captured, value.works_listed)
+                } else {
+                    format!("{}/{}（已见）", value.details_captured, value.works_listed)
+                }
+            })
             .unwrap_or_else(|| "—".to_owned()),
     };
     let analyzable = match lifecycle {
@@ -3351,8 +3411,10 @@ fn content_gap_action(
     primary_action: TargetPrimaryAction,
     list_context: TargetListContext<'_>,
 ) -> String {
-    if matches!(primary_action, TargetPrimaryAction::ContinueArchive | TargetPrimaryAction::AssignDomain)
-        || target.lifecycle_state == "dismissed"
+    if matches!(
+        primary_action,
+        TargetPrimaryAction::ContinueArchive | TargetPrimaryAction::AssignDomain
+    ) || target.lifecycle_state == "dismissed"
         || !archive.value().is_some_and(|value| value.works_listed > 0)
     {
         return String::new();
@@ -3748,13 +3810,27 @@ mod tests {
             last_captured_at: None,
         };
         let target = keyword_target();
-        let catalog = linggan_evidence::KeywordHitProjection { works: vec![work.clone()] };
-        let html = works_list(&target, TargetCatalogView::Keyword(Some(&catalog)), None, None, TargetListContext::default());
+        let catalog = linggan_evidence::KeywordHitProjection {
+            works: vec![work.clone()],
+        };
+        let html = works_list(
+            &target,
+            TargetCatalogView::Keyword(Some(&catalog)),
+            None,
+            None,
+            TargetListContext::default(),
+        );
         assert!(html.contains("https://www.xiaohongshu.com/user/profile/author%2F43"));
         assert!(html.contains(">作者 &lt;一&gt;</a>"));
         work.creator_external_id = None;
         let unknown = linggan_evidence::KeywordHitProjection { works: vec![work] };
-        let html = works_list(&target, TargetCatalogView::Keyword(Some(&unknown)), None, None, TargetListContext::default());
+        let html = works_list(
+            &target,
+            TargetCatalogView::Keyword(Some(&unknown)),
+            None,
+            None,
+            TargetListContext::default(),
+        );
         assert!(!html.contains("www.xiaohongshu.com/user/profile/"));
     }
 
@@ -3832,8 +3908,14 @@ mod tests {
             TargetListContext::default(),
         );
         assert!(html.contains("核查并补采内容缺口"), "{html}");
-        assert!(html.contains(r#"name="archive_action" value="gaps""#), "{html}");
-        assert!(html.contains(r#"action="/collection/targets/archive""#), "{html}");
+        assert!(
+            html.contains(r#"name="archive_action" value="gaps""#),
+            "{html}"
+        );
+        assert!(
+            html.contains(r#"action="/collection/targets/archive""#),
+            "{html}"
+        );
 
         let mut unassigned = creator.clone();
         unassigned.domain_name = None;
@@ -3862,9 +3944,11 @@ mod tests {
             ..ArchiveCompleteness::default()
         };
         let archive = TargetArchiveRead::Known(Some(&completeness));
-        let primary = target_primary_action(&creator, true, archive, KeywordArchiveRead::Unavailable);
+        let primary =
+            target_primary_action(&creator, true, archive, KeywordArchiveRead::Unavailable);
         assert_eq!(primary, TargetPrimaryAction::EstablishArchive);
-        let secondary = content_gap_action(&creator, archive, primary, TargetListContext::default());
+        let secondary =
+            content_gap_action(&creator, archive, primary, TargetListContext::default());
         assert!(secondary.contains("核查并补采内容缺口"));
     }
 

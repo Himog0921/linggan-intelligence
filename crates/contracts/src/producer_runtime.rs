@@ -76,6 +76,8 @@ struct TaskSpecWire {
     /// 记成完成（宁可漏记一次，不可误记一次）。
     expected_count: Option<u32>,
     comment_limit: Value,
+    comment_mode: Option<String>,
+    collection_run_ref: Option<String>,
     /// Instructions are separate from the source-object identity in `target`.
     reply_expand_limit: Option<u32>,
     ranking: Option<String>,
@@ -95,6 +97,8 @@ struct TaskSpecWire {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct IncrementalCommentBudget {
+    #[serde(default)]
+    known_reply_counts: std::collections::BTreeMap<String, u32>,
     known_comment_ids: Vec<String>,
     new_unique_limit: u32,
     max_scroll_rounds: u32,
@@ -512,7 +516,22 @@ fn validate_comment_collection_receipt(
     let expected = receipt.get("expectedCount").and_then(Value::as_u64);
     let page_count = receipt.get("pageCommentCount").and_then(Value::as_u64);
     let acquired = count("uniqueCollectedCount");
+    let traversal = receipt.get("traversal");
+    let traversal_valid = traversal.is_none_or(|value| {
+        value.as_object().is_some_and(|v| {
+            v.len() == 3
+                && ["mainExhausted", "repliesExhausted", "identityReliable"]
+                    .iter()
+                    .all(|k| v.get(*k).is_some_and(Value::is_boolean))
+        })
+    });
+    let traversal_complete = traversal.is_some_and(|value| {
+        ["mainExhausted", "repliesExhausted", "identityReliable"]
+            .iter()
+            .all(|key| value.get(*key).and_then(Value::as_bool) == Some(true))
+    });
     let complete_matches_expected = state != Some("complete")
+        || (scope == Some("all_public_comments") && traversal.is_some() && traversal_complete)
         || match (scope, expected, acquired) {
             (Some("all_public_comments"), Some(expected), Some(acquired)) => acquired >= expected,
             (Some("detail_window" | "incremental_new"), Some(expected), Some(acquired)) => {
@@ -522,6 +541,7 @@ fn validate_comment_collection_receipt(
         };
     let complete_all_public_matches_page = state != Some("complete")
         || scope != Some("all_public_comments")
+        || (traversal.is_some() && traversal_complete)
         || match (page_count, expected, acquired) {
             (Some(page_count), Some(expected), Some(acquired)) => {
                 page_count == expected && acquired >= expected
@@ -568,6 +588,11 @@ fn validate_comment_collection_receipt(
             )
         );
     if version != Some(1)
+        || !traversal_valid
+        || (state == Some("complete")
+            && scope == Some("all_public_comments")
+            && traversal.is_some()
+            && !traversal_complete)
         || !matches!(
             scope,
             Some("detail_window") | Some("all_public_comments") | Some("incremental_new")
@@ -656,6 +681,22 @@ fn valid_target_for_capability(target: &Value, capability: &str) -> bool {
 
 fn valid_execution_for_capability(wire: &TaskSpecWire) -> bool {
     let capability = wire.capabilities_requested[0].as_str();
+    if wire
+        .collection_run_ref
+        .as_deref()
+        .is_some_and(|id| Uuid::parse_str(id).is_err())
+        || (wire.collection_run_ref.is_some() && wire.source != "scheduled")
+    {
+        return false;
+    }
+    if wire
+        .comment_mode
+        .as_deref()
+        .is_some_and(|mode| !matches!(mode, "sample_30" | "all_public"))
+        || (wire.comment_mode.is_some() && !matches!(capability, "comments" | "replies"))
+    {
+        return false;
+    }
     if let Some(b) = &wire.incremental_search_budget {
         if capability != "discovery_search"
             || wire.source != "scheduled"
@@ -677,6 +718,13 @@ fn valid_execution_for_capability(wire: &TaskSpecWire) -> bool {
         if !matches!(capability, "comments" | "replies")
             || wire.source != "scheduled"
             || wire.platform != "xhs"
+            || (!b.known_reply_counts.is_empty()
+                && (wire.comment_mode.as_deref() != Some("sample_30")
+                    || wire.collection_run_ref.is_none()))
+            || b.known_reply_counts.len() > 30
+            || b.known_reply_counts
+                .iter()
+                .any(|(id, n)| id.trim().is_empty() || id.len() > 256 || *n > 2)
             || b.new_unique_limit == 0
             || b.new_unique_limit > 30
             || wire.comment_limit.as_u64() != Some(u64::from(b.new_unique_limit))
@@ -684,7 +732,8 @@ fn valid_execution_for_capability(wire: &TaskSpecWire) -> bool {
             || b.max_scroll_rounds > 50
             || b.max_duration_seconds == 0
             || b.max_duration_seconds > 600
-            || b.known_comment_ids.len() > 5000
+            || (b.known_comment_ids.len() > 5000
+                && wire.comment_mode.as_deref() != Some("all_public"))
             || unique.len() != b.known_comment_ids.len()
             || b.known_comment_ids
                 .iter()
@@ -709,6 +758,7 @@ fn valid_execution_for_capability(wire: &TaskSpecWire) -> bool {
     }
     if capability == "replies"
         && wire.source == "scheduled"
+        && wire.comment_mode.as_deref() != Some("all_public")
         && !wire.reply_expand_limit.is_some_and(|limit| limit > 0)
     {
         return false;

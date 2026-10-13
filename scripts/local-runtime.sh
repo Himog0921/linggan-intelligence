@@ -360,6 +360,7 @@ migrate() {
   apply_migration_once "0122_comment_like_library" "$project_root/database/migrations/0122_comment_like_library.sql"
   apply_migration_once "0123_ops_ledger" "$project_root/database/migrations/0123_ops_ledger.sql"
   apply_migration_once "0124_ops_publication_cover" "$project_root/database/migrations/0124_ops_publication_cover.sql"
+  apply_migration_once "0125_collection_single_run" "$project_root/database/migrations/0125_collection_single_run.sql"
 }
 
 case "$command_name" in

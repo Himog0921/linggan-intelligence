@@ -14,6 +14,9 @@ pub(crate) async fn advance_keyword_details(
     database: &Database,
     ledger: &TickLedger,
 ) -> StepReport {
+    if let Err(error) = linggan_evidence::collection_run_progress::advance_runs(database).await {
+        eprintln!("linggan worker: collection run advancement failed: {error}");
+    }
     let (report, result) = ledger
         .run_step(
             STEP_KEYWORD_DETAILS,

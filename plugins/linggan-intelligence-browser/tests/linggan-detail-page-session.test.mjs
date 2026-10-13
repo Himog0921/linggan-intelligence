@@ -61,6 +61,7 @@ function navigationGrantTable() {
   const rows = new Map();
   return {
     async get(key) { return rows.get(key) ? structuredClone(rows.get(key)) : undefined; },
+    async toArray() {return [...rows.values()].map(r=>structuredClone(r));},
     async add(row) {
       if (rows.has(row.grantKey)) {
         const error = new Error('duplicate'); error.name = 'ConstraintError'; throw error;
@@ -481,4 +482,31 @@ test('lane delivery uses the server-minted identity and stops without one', asyn
   assert.match(background, /detailPageLanePreparationStore\.get\(key\)/);
   assert.match(background, /state: 'detail_page_session_lane_preparation_unavailable'/);
   assert.match(background, /'detail_page_session_lane_preparation_unavailable',/);
+});
+
+test('page checkpoint survives a fresh store and freezes after discussion delivery', async () => {
+  const table=memoryTable(); const store=createDetailPageSessionStore(table,()=>100);
+  const note={noteId:'note-checkpoint',title:'合成先交付详情'};
+  const options={leaseRef:'lease-checkpoint',plan:{...plan,contentExternalId:note.noteId,commentMode:'all_public'},note,collecting:true};
+  await store.put({...options,commentResult:{total:1,comments:[{commentId:'c1',text:'合成有效评论'}]}});
+  const restarted=createDetailPageSessionStore(table,()=>200);
+  const spec={...task('comments'),target:{contentExternalId:note.noteId}};
+  const restored=await restarted.getForTask({leaseRef:options.leaseRef,taskSpec:spec});assert.equal(restored.commentResult.total,1);
+  await restarted.put({...options,commentResult:{total:2,comments:[{commentId:'c1',text:'合成有效评论'},{commentId:'c2',text:'第二条有效评论'}]}});
+  await restarted.markTaskQueued(restored.cacheKey,'comments',spec.taskId);
+  await assert.rejects(restarted.put({...options,collecting:false,commentResult:{total:2,comments:[{commentId:'c1'},{commentId:'c2'}]}}),/checkpoint_conflict/);
+});
+
+test('deep page retention is restricted to the same run and work and expires', async()=>{
+ let time=1000;const store=createDetailPageNavigationGrantStore({table:navigationGrantTable(),transaction:work=>work(),now:()=>time,createRequestId:()=> 'request'});
+ const spec={...task('content_detail'),collectionRunRef:'run-one'};
+ const row=await store.prepare({leaseRef:'lease-one',taskSpec:spec});
+ await store.attachServerGrant({grantKey:row.grantKey,sessionRef:'session-one',plan});
+ await store.consume({grantKey:row.grantKey,sessionRef:'session-one'});
+ await store.recordWindow({grantKey:row.grantKey,windowId:2,tabId:3});await store.markActionDispatched({grantKey:row.grantKey});
+ assert.equal(await store.retain({grantKey:row.grantKey,accountRef:'account-one'}),true);
+ assert.equal((await store.reusable({taskSpec:spec})).tabId,3);
+ assert.equal(await store.reusable({taskSpec:{...spec,collectionRunRef:'other-run'}}),null);
+ assert.equal(await store.reusable({taskSpec:{...spec,target:{contentExternalId:'other-work'}}}),null);
+ time+=600001;assert.equal(await store.reusable({taskSpec:spec}),null);assert.equal((await store.expiredRetained()).length,1);
 });

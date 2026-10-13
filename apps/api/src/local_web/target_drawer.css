@@ -415,6 +415,9 @@
  * 只作用于第 8 列——第 7 列（作品目录／最近命中）与第 9 列的间距本来就是对的。 */
 .c-tg-cell-end{text-align:right}
 .c-tg-cell-end,.c-tg-head-end{padding-right:var(--lgi-space-10)}
+/* The existing 40px optical inset fits a full-width column. At the 1440px shell the
+ * track shrinks; retain the complete progress heading and align its values with it. */
+@media(max-width:1560px){.c-tg-cell-end,.c-tg-head-end{padding-right:var(--lgi-space-3)}}
 
 /* 成功回执：右下角角标，3 秒后自行退场。
  *

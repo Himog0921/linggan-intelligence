@@ -101,6 +101,7 @@ export function validateDetailPageSessionPlan(plan = {}, expectedContentExternal
   if (!lanes.includes('content_detail') || lanes.some((lane) => !ALLOWED_LANES.has(lane))) {
     throw new Error('detail_page_session_lanes_invalid');
   }
+  if (plan.commentMode !== undefined && !['sample_30','all_public'].includes(plan.commentMode)) throw new Error('detail_page_session_comment_mode_invalid');
   const commentLimit = Number(plan.commentLimit);
   const replyExpandLimit = Number(plan.replyExpandLimit);
   const cacheTtlSeconds = Number(plan.cacheTtlSeconds);
@@ -119,6 +120,7 @@ export function validateDetailPageSessionPlan(plan = {}, expectedContentExternal
     lanes,
     commentLimit,
     replyExpandLimit,
+    ...(plan.commentMode ? { commentMode: plan.commentMode } : {}),
     ...(plan.incrementalCommentBudget ? { incrementalCommentBudget: plan.incrementalCommentBudget } : {}),
     cacheTtlSeconds: Math.min(MAX_CACHE_TTL_SECONDS, Math.floor(cacheTtlSeconds)),
   };
@@ -192,7 +194,7 @@ export function createDetailPageSessionStore(table = database.sessions, now = ()
   }
 
   return {
-    async put({ leaseRef, plan, note, commentResult, receipt, detailTaskId, detailPackage } = {}) {
+    async put({ leaseRef, plan, note, commentResult, receipt, detailTaskId, detailPackage, collecting = false } = {}) {
       await pruneReliablyQueued();
       const contentExternalId = text(note?.noteId || note?.platformContentId || note?.contentId);
       const normalizedPlan = validateDetailPageSessionPlan(plan, contentExternalId);
@@ -201,6 +203,21 @@ export function createDetailPageSessionStore(table = database.sessions, now = ()
       const persist = async () => {
         const existing = await table.get(cacheKey);
         if (existing) {
+          if (existing.collecting === true) {
+            const identity = c => text(c.platformCommentId || c.commentId);
+            const nextIds = new Set((commentResult?.comments || []).map(identity));
+            const retained = (existing.commentResult?.comments || []).every(c => nextIds.has(identity(c)));
+            const discussionFrozen = Object.values(existing.queuedTasks || {}).some(lane => lane === 'comments' || lane === 'replies')
+              || Object.values(existing.packages || {}).some(p => p.packageKind === 'comments' || p.packageKind === 'replies');
+            if (discussionFrozen || !retained || JSON.stringify(existing.plan) !== JSON.stringify(normalizedPlan)
+                || existing.note.noteId !== note?.noteId || (detailPackage && JSON.stringify(existing.packages?.[detailTaskId]) !== JSON.stringify(detailPackage))) {
+              throw new Error('detail_page_session_checkpoint_conflict');
+            }
+            const updated = { ...existing, note: plain(note), commentResult: plain(commentResult), receipt: plain(receipt || {}), collecting, updatedAt: timestamp };
+            if (JSON.stringify(updated).length > MAX_SESSION_JSON_CHARS) throw new Error('detail_page_session_too_large');
+            await table.put(updated);
+            return updated;
+          }
           if (JSON.stringify([existing.note, existing.plan, existing.commentResult])
               !== JSON.stringify([plain(note), normalizedPlan,
                 plain(commentResult || { total: 0, comments: [], stopReason: 'not_observed' })])) {
@@ -215,6 +232,7 @@ export function createDetailPageSessionStore(table = database.sessions, now = ()
           plan: normalizedPlan,
           note: plain(note),
           commentResult: plain(commentResult || { total: 0, comments: [], stopReason: 'not_observed' }),
+          collecting,
           receipt: plain(receipt || {}),
           packages: detailTaskId && detailPackage ? { [detailTaskId]: plain(detailPackage) } : {},
           observedAt: canonicalCaptureTimestamp(note?.observedAt)
@@ -253,7 +271,7 @@ export function createDetailPageSessionStore(table = database.sessions, now = ()
         const existing = row.packages?.[taskSpec.taskId];
         if (existing) return existing;
         const capturePackage = packageDetailPageSessionLane(row, taskSpec);
-        await table.update(cacheKey, { packages: { ...row.packages, [taskSpec.taskId]: capturePackage } });
+        await table.update(cacheKey, { collecting: false, packages: { ...row.packages, [taskSpec.taskId]: capturePackage } });
         return capturePackage;
       });
     },
@@ -411,6 +429,7 @@ export function createDetailPageNavigationGrantStore({
           taskId: text(taskSpec.taskId),
           leaseRef: text(leaseRef),
           contentExternalId: contentIdFromTask(taskSpec),
+          runRef: text(taskSpec.collectionRunRef),
           grantRequestId: createRequestId(),
           state: 'prepared',
           createdAt: timestamp,
@@ -486,6 +505,23 @@ export function createDetailPageNavigationGrantStore({
       });
     },
 
+    async retain({ grantKey, accountRef, ttlMs = 600000 } = {}) {
+      return transaction(async () => {
+        const row=await table.get(text(grantKey));
+        if (!row?.runRef || row.state !== 'action_dispatched' || !text(accountRef)) return false;
+        await table.update(row.grantKey,{state:'retained',accountRef:text(accountRef),retainedUntil:now()+Math.min(600000,ttlMs),updatedAt:now()});
+        return true;
+      });
+    },
+    async reusable({ taskSpec } = {}) {
+      const runRef=text(taskSpec?.collectionRunRef),contentExternalId=contentIdFromTask(taskSpec);
+      if (!runRef || !contentExternalId) return null;
+      const rows=await table.toArray();
+      return rows.filter(r=>r.runRef===runRef && r.contentExternalId===contentExternalId && r.state==='retained' && r.retainedUntil>now() && r.accountRef && r.tabId)
+        .sort((a,b)=>b.updatedAt-a.updatedAt)[0] || null;
+    },
+    async expiredRetained() {return (await table.toArray()).filter(r=>r.state==='retained' && r.retainedUntil<=now());},
+    async closeRetained(grantKey) {await table.update(text(grantKey),{state:'closed',updatedAt:now()});},
     async get({ leaseRef, taskSpec } = {}) {
       return table.get(detailPageNavigationGrantKey(leaseRef, taskSpec));
     },

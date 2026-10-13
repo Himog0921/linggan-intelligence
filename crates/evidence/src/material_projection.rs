@@ -134,7 +134,7 @@ async fn read_latest_material_page(
     let mut scan_content_external_id = cursor
         .as_ref()
         .map(|cursor| cursor.last_content_external_id.clone());
-    let creator_refs = if let Some(scope) = query.creator_scope() {
+    let mut creator_refs = if let Some(scope) = query.creator_scope() {
         if Some(scope.domain) != query.domain_ref() || scope.validate().is_err() {
             return Err(MaterialReadError::InvalidCursor);
         }
@@ -150,6 +150,18 @@ async fn read_latest_material_page(
     } else {
         None
     };
+    if let Some(run) = query.collection_run_ref() {
+        let Some(domain) = query.domain_ref() else {
+            return Err(MaterialReadError::InvalidCursor);
+        };
+        let refs =
+            crate::collection_run_material_read::matching_refs_in(&mut tx, run, domain, text)
+                .await?;
+        creator_refs = Some(match creator_refs {
+            Some(other) => refs.into_iter().filter(|id| other.contains(id)).collect(),
+            None => refs,
+        });
+    }
     let mut items = Vec::with_capacity(MATERIAL_PAGE_SIZE + 1);
     let mut scanned_count = 0;
     let mut scan_limited = false;
@@ -157,7 +169,11 @@ async fn read_latest_material_page(
         let rows = read_work_resource_current_page(
             &mut tx,
             WorkResourceCurrentPageQuery {
-                text,
+                text: if query.collection_run_ref().is_some() {
+                    None
+                } else {
+                    text
+                },
                 as_of: &as_of,
                 observed_before: scan_observed_at.as_deref(),
                 platform_after: scan_platform.as_deref(),
@@ -177,7 +193,21 @@ async fn read_latest_material_page(
         let remaining = MATERIAL_SCAN_BUDGET - scanned_count;
         let reached_budget = rows.len() > remaining;
         let rows: Vec<_> = rows.into_iter().take(remaining).collect();
-        let mut batch = enrich_current_batch(&mut tx, &rows, text, &as_of).await?;
+        let mut batch = enrich_current_batch(
+            &mut tx,
+            &rows,
+            if query.collection_run_ref().is_some() {
+                None
+            } else {
+                text
+            },
+            &as_of,
+        )
+        .await?;
+        if let (Some(run), Some(domain)) = (query.collection_run_ref(), query.domain_ref()) {
+            crate::collection_run_material_read::scope_items_in(&mut tx, run, domain, &mut batch)
+                .await?;
+        }
         for (row, item) in rows.iter().zip(batch.drain(..)) {
             scan_observed_at = Some(row.observed_at.clone());
             scan_platform = Some(row.platform.clone());

@@ -1,5 +1,7 @@
 # 前端设计手册
 
+采集当前候选：[COLLECTION-JTBD-001 单次采集与管理交互](changes/collection-single-run-398.md)；[单独 UI 审美审查](changes/collection-single-run-398-visual-audit.md) 记录实际像素、排版、容器、字体和未验证类别；业务合同与实测边界以该文引用的原 PR 交付记录为准。
+
 > 状态: 权威当前
 > 最后核对: 2026-09-06
 > 适用范围: Linggan Intelligence 未来用户可见 Web UI 的设计规则、页面/组件规格、协作入口与验收追踪

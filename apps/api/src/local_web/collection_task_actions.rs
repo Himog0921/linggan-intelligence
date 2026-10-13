@@ -30,6 +30,10 @@ pub(super) struct TaskActionParams {
     pub target: Option<String>,
     pub receipt: Option<String>,
     pub error: Option<String>,
+    pub filter: Option<String>,
+    pub q: Option<String>,
+    pub page: Option<i64>,
+    pub run: Option<String>,
 }
 
 impl TaskActionParams {

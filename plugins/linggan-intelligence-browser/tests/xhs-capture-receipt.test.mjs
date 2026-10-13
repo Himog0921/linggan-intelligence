@@ -87,10 +87,11 @@ test('detail receipt reports a short nonempty collection without fabricating com
   assert.equal(receipt.comments.stopReason, 'collector_stopped_without_target');
 });
 
-test('a full deep collection is complete when this Attempt reaches or exceeds the observed page count', () => {
+test('deep completion requires main and reply exhaustion, regardless of displayed count', () => {
   const complete = buildXhsCommentCollectionReceipt({
     noteId: 'note_300', maxTotal: 0, publicCommentCount: 300, actual: 300,
     stopReason: 'comment_area_end',
+    traversal: { mainExhausted: true, repliesExhausted: true, identityReliable: true },
   });
   assert.equal(complete.scope, XHS_COMMENT_COLLECTION_SCOPE.ALL_PUBLIC_COMMENTS);
   assert.equal(complete.state, XHS_COMMENT_COLLECTION_STATE.COMPLETE);
@@ -100,7 +101,7 @@ test('a full deep collection is complete when this Attempt reaches or exceeds th
     noteId: '6a93c543000000002600287a', maxTotal: 0, publicCommentCount: 594, actual: 596,
     stopReason: 'no_progress',
   });
-  assert.equal(overObservedCount.state, XHS_COMMENT_COLLECTION_STATE.COMPLETE);
+  assert.equal(overObservedCount.state, XHS_COMMENT_COLLECTION_STATE.PARTIAL);
   assert.equal(overObservedCount.expectedCount, 594);
   assert.equal(overObservedCount.uniqueCollectedCount, 596);
 
@@ -167,3 +168,14 @@ test('bounded incremental comments preserve new-identity scope and do not infer 
   assert.equal(receipt.pageCommentCount, 594);
   assert.equal(receipt.state, 'partial');
 });
+
+ test('main end with unfinished replies is partial even above the page count', () => {
+  const receipt = buildXhsCommentCollectionReceipt({ noteId: 'fixture', commentMode: 'all_public', maxTotal: 30, actual: 500, publicCommentCount: 500, stopReason: 'comment_area_end', traversal: { mainExhausted: true, repliesExhausted: false, identityReliable: true } });
+  assert.equal(receipt.scope, 'all_public_comments');
+  assert.equal(receipt.state, 'partial');
+ });
+ test('unknown public total can finish only with explicit traversal evidence', () => {
+  const receipt = buildXhsCommentCollectionReceipt({ noteId: 'fixture', commentMode: 'all_public', maxTotal: 30, actual: 500, publicCommentCount: null, stopReason: 'comment_area_end', traversal: { mainExhausted: true, repliesExhausted: true, identityReliable: true } });
+  assert.equal(receipt.expectedCount, null);
+  assert.equal(receipt.state, 'complete');
+ });

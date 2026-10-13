@@ -845,12 +845,18 @@ fn keyword_search_execution(subject: &LeaseSubject) -> Value {
 /// **不设取前 N 是有意的**：截断只会把第 N+1 名之后的永久扔掉，而「点赞最高的前 100」
 /// 是读取时按点赞排序就能得到的事，不必在采集时先砍一刀。
 fn keyword_archive_target(subject: &LeaseSubject) -> Value {
+    if let Some(scope) = subject.stop_conditions.get("collectionRun") {
+        return json!({"query":scope["searchQuery"]});
+    }
     json!({ "query": search_term(&subject.identity_key, Some(ARCHIVE_RANKING)) })
 }
 
 /// The temporary research search freezes its finite browser budget in the WorkOrder.
 /// Ordinary long-term archive tasks retain their original execution policy.
 fn keyword_archive_execution(subject: &LeaseSubject) -> Value {
+    if let Some(scope) = subject.stop_conditions.get("collectionRun") {
+        return json!({"ranking":scope["ranking"],"scrollRounds":ARCHIVE_SCROLL_ROUNDS});
+    }
     if let Some(scope) = subject.stop_conditions.get("topicMapSearch") {
         return json!({"ranking": ARCHIVE_RANKING, "scrollRounds": 3,
             "incrementalSearchBudget": {"maxScrollRounds": 3,"maxDurationSeconds": 180,
@@ -870,7 +876,7 @@ const ARCHIVE_SCROLL_ROUNDS: i32 = 10;
 /// 身份键由 `TargetIdentity::keyword` 拼成 `{词}::{排序}`。优先按规则里的排序去掉后缀——
 /// 两处对得上才剥，对不上就用 `rsplit_once` 兜底（排序不含 `::`，所以从右边切是对的）。
 /// 两者都不成立时原样返回：宁可搜一个怪词，也不要凭空猜出半截。
-fn search_term(identity_key: &str, ranking: Option<&str>) -> String {
+pub(crate) fn search_term(identity_key: &str, ranking: Option<&str>) -> String {
     if let Some(ranking) = ranking.map(str::trim).filter(|value| !value.is_empty()) {
         if let Some(term) = identity_key.strip_suffix(&format!("::{ranking}")) {
             return term.to_owned();
@@ -1301,6 +1307,18 @@ fn build_task_spec(
     comment_limit: Value,
     acquire_media: Value,
 ) -> Result<ProducerTaskSpec, LeaseError> {
+    let mut target = target;
+    let mut quota = quota;
+    let mut expected_count = expected_count;
+    if let Some(scope) = subject.stop_conditions.get("collectionRun") {
+        if matches!(capability, "profile_discovery" | "author_profile") {
+            target = json!({"authorExternalId":scope["searchQuery"]});
+        }
+        if scope["stage"] == "discovery" && capability == "profile_discovery" {
+            quota = scope["workLimit"].as_i64().unwrap_or(i64::from(quota)) as i32;
+            expected_count = quota;
+        }
+    }
     let page_type = match capability {
         "author_profile" | "profile_discovery" => "profile",
         "discovery_search" => "search_results",
@@ -1334,6 +1352,20 @@ fn build_task_spec(
         raw.as_object_mut()
             .expect("task spec is an object")
             .insert(key.clone(), value.clone());
+    }
+    if let Some(scope) = subject.stop_conditions.get("collectionRun") {
+        raw["collectionRunRef"] = scope["runRef"].clone();
+        if matches!(capability, "comments" | "replies") {
+            raw["commentMode"] = scope["commentMode"].clone();
+            if scope["commentMode"] == "all_public" {
+                raw.as_object_mut().unwrap().remove("replyExpandLimit");
+            }
+            if let Some(budget) = scope.get("commentBudget") {
+                raw["incrementalCommentBudget"] = budget.clone();
+                raw["commentLimit"] = budget["newUniqueLimit"].clone();
+                raw["expectedCount"] = budget["newUniqueLimit"].clone();
+            }
+        }
     }
     parse_producer_task_spec(&raw.to_string())
         .map_err(|error| LeaseError::TaskSpecInvalid(error.to_string()))

@@ -1,7 +1,12 @@
 mod collection;
 mod collection_dispatch;
+mod collection_domain_modal;
 mod collection_intake;
 mod collection_management;
+mod collection_run_api;
+mod collection_run_workspace;
+#[cfg(test)]
+mod collection_single_run_tests;
 mod collection_targets_view;
 mod collection_task_actions;
 mod collection_tasks_view;
@@ -333,6 +338,8 @@ fn router(state: LocalWebState) -> Router {
         .merge(material_api_routes())
         .merge(collection_api_routes())
         .merge(creator_lifecycle_api::routes())
+        .merge(collection_run_api::routes())
+        .merge(collection_domain_modal::routes())
         .merge(creators::routes())
         .merge(topic_workspace::routes())
         .merge(topic_map::routes(state.database.database().cloned()))
@@ -3266,7 +3273,7 @@ async fn collection_domains_page(
     let (targets, targets_readable): (Vec<(uuid::Uuid, String, String)>, bool) = match sqlx::query_as(
         "SELECT target.target_ref,COALESCE(NULLIF(btrim(target.display_name),''),target.identity_key),target.target_kind \
          FROM collection_observation_target target \
-         ORDER BY target.first_stored_at DESC,target.target_ref",
+         WHERE COALESCE(to_jsonb(target)->>'purpose_kind','long_term')='long_term' ORDER BY target.first_stored_at DESC,target.target_ref",
     )
     .fetch_all(database.pool())
     .await
@@ -3283,7 +3290,7 @@ async fn collection_domains_page(
                 target.target_kind,relation.role,target.lifecycle_state \
          FROM observation_domain_target relation \
          JOIN collection_observation_target target USING(target_ref) \
-         ORDER BY relation.domain_ref,target.first_stored_at DESC,target.target_ref",
+         WHERE COALESCE(to_jsonb(target)->>'purpose_kind','long_term')='long_term' ORDER BY relation.domain_ref,target.first_stored_at DESC,target.target_ref",
     )
     .fetch_all(database.pool())
     .await
@@ -3521,7 +3528,7 @@ async fn collection_domains_page(
             .map(|count| count.to_string())
             .unwrap_or_else(|| "未知".to_owned());
         cards.push_str(&format!(
-            r#"<article class="domain-card"><header><div><h2>{name}</h2><span>{status_label}</span></div><p>{description}</p></header><form class="domain-fields" method="post" action="/collection/domains/save"><input type="hidden" name="domain_ref" value="{domain_ref}"><label>名称<input name="name" required maxlength="120" value="{name}"></label><label>说明<input name="description" maxlength="1000" value="{description}"></label><label>研究目标<input name="research_goal" maxlength="1000" value="{research_goal}"></label><label>状态<select name="status"><option value="active"{active}>运行中</option><option value="paused"{paused}>已暂停</option></select></label><button class="c-btn-secondary" type="submit">保存领域设置</button></form><div class="domain-counts"><span>{targets} 个观察目标：博主 {creators} · 关键词 {keywords}</span><span>主研究 {primary} · 参照 {reference}</span><span>{works} 篇作品 · {comments} 条评论</span><span>最近接纳：{last}</span></div><div class="domain-lanes">{lanes}</div><table><thead><tr><th>观察目标</th><th>研究角色</th><th>关联</th></tr></thead><tbody>{assigned}</tbody></table><form class="domain-target-add" method="post" action="/collection/domains/target"><input type="hidden" name="domain_ref" value="{domain_ref}"><input type="hidden" name="action" value="assign"><label>关联现有目标<select name="target_ref" required>{available_targets}</select></label><label>角色<select name="role"><option value="primary">主研究</option><option value="reference">参照</option></select></label><button class="c-btn-secondary" type="submit"{disabled}>关联目标</button></form><footer><a href="/collection/targets?domain={domain_ref}">查看该领域目标</a> · <a href="/corpus/evidence?domain={domain_ref}">查看该领域材料</a></footer></article>"#,
+            r#"<article class="domain-card" data-domain-ref="{domain_ref}"><header><div><h2>{name}</h2><span>{status_label}</span></div><p>{description}</p></header><form class="domain-fields" method="post" action="/collection/domains/save"><input type="hidden" name="domain_ref" value="{domain_ref}"><label>名称<input name="name" required maxlength="120" value="{name}"></label><label>说明<input name="description" maxlength="1000" value="{description}"></label><label>研究目标<input name="research_goal" maxlength="1000" value="{research_goal}"></label><label>状态<select name="status"><option value="active"{active}>运行中</option><option value="paused"{paused}>已暂停</option></select></label><button class="c-btn-secondary" type="submit">保存领域设置</button></form><div class="domain-counts"><span>{targets} 个观察目标：博主 {creators} · 关键词 {keywords}</span><span>主研究 {primary} · 参照 {reference}</span><span>{works} 篇作品 · {comments} 条评论</span><span>最近接纳：{last}</span></div><div class="domain-lanes">{lanes}</div><table><thead><tr><th>观察目标</th><th>研究角色</th><th>关联</th></tr></thead><tbody>{assigned}</tbody></table><form class="domain-target-add" method="post" action="/collection/domains/target"><input type="hidden" name="domain_ref" value="{domain_ref}"><input type="hidden" name="action" value="assign"><label>关联现有目标<select name="target_ref" required>{available_targets}</select></label><label>角色<select name="role"><option value="primary">主研究</option><option value="reference">参照</option></select></label><button class="c-btn-secondary" type="submit"{disabled}>关联目标</button></form><footer><a href="/collection/targets?domain={domain_ref}">查看该领域目标</a> · <a href="/corpus/evidence?domain={domain_ref}">查看该领域材料</a></footer></article>"#,
             name=html_escape(&domain.name),status_label=status_label,
             description=html_escape(domain.description.as_deref().unwrap_or("暂无领域说明")),
             domain_ref=ref_text,
@@ -3670,7 +3677,7 @@ async fn collection_tasks(
         domain: params.nav().map(str::to_owned),
     };
     let Html(base) = collection_tasks_page(State(state.clone()), Query(domain)).await;
-    Html(collection_task_actions::decorate(state.database.database(), &base, &params).await)
+    Html(collection_run_workspace::render(state.database.database(), &base, &params).await)
 }
 
 async fn collection_tasks_page(
@@ -3691,6 +3698,7 @@ async fn collection_tasks_page(
             },
         ));
     };
+    let domains = read_observation_domains(database).await.unwrap_or_default();
     let (reads, timeline, delivery) = tokio::join!(
         read_collection_surface(database),
         read_collection_task_timeline(database, 100),
@@ -3705,7 +3713,7 @@ async fn collection_tasks_page(
         None,
         Some(&reads.surface_state),
         collection::DomainBar {
-            domains: &[],
+            domains: &domains,
             picker: "",
             nav_domain: domain.nav(),
         },
@@ -3761,6 +3769,8 @@ struct RuntimeSurfaceParams {
     error: Option<String>,
     #[serde(default)]
     domain: Option<String>,
+    #[serde(default)]
+    station: Option<uuid::Uuid>,
 }
 
 async fn collection_runtime(
@@ -3772,12 +3782,14 @@ async fn collection_runtime(
     }
     let return_to = params.return_to.clone();
     let domain = params.domain.clone();
+    let focus_station = params.station;
     let Html(page) = collection_runtime_page(State(state), Query(params)).await;
-    Html(collection_management::decorate(
-        &page,
-        return_to.as_deref(),
-        domain.as_deref(),
-    ))
+    let mut rendered =
+        collection_management::decorate(&page, return_to.as_deref(), domain.as_deref());
+    if let Some(station) = focus_station {
+        rendered=rendered.replace("</body>",&format!(r#"<script>const row=document.querySelector('[data-station-entry="{station}"]');if(row){{row.tabIndex=-1;row.scrollIntoView({{block:'center'}});row.focus();}}</script></body>"#));
+    }
+    Html(rendered)
 }
 
 async fn collection_runtime_page(
@@ -5807,7 +5819,10 @@ async fn collection_stylesheet() -> Response {
             header::CONTENT_TYPE,
             HeaderValue::from_static("text/css; charset=utf-8"),
         )],
-        format!("{LIDS_TOKENS}\n{SHELL_CSS}\n{COLLECTION_WORKSPACE_CSS}\n{TARGET_DRAWER_CSS}"),
+        format!(
+            "{LIDS_TOKENS}\n{SHELL_CSS}\n{COLLECTION_WORKSPACE_CSS}\n{TARGET_DRAWER_CSS}\n{}",
+            include_str!("local_web/collection_run_workspace.css")
+        ),
     )
         .into_response()
 }
@@ -5818,7 +5833,11 @@ async fn collection_script() -> Response {
             header::CONTENT_TYPE,
             HeaderValue::from_static("text/javascript; charset=utf-8"),
         )],
-        COLLECTION_WORKSPACE_JS,
+        format!(
+            "{COLLECTION_WORKSPACE_JS}\n{}\n{}",
+            include_str!("local_web/collection_run_workspace.js"),
+            include_str!("local_web/collection_domain_modal.js")
+        ),
     )
         .into_response()
 }

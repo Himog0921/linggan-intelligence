@@ -10,7 +10,13 @@
     const destination = creatorBacklink.get('returnTo');
     back.href = destination && destination.startsWith('/corpus/creators?') ? destination : '/corpus/creators?domain=' + encodeURIComponent(creatorBacklink.get('domain') || '');
     back.textContent = '返回创作者'; banner.append(back);
-    document.querySelector('main')?.prepend(banner);
+    document.querySelector('.ev-command')?.prepend(banner);
+  }
+  if (creatorBacklink.has('collectionRunRef')) {
+    const banner=document.createElement('p'); banner.textContent='当前为本次采集的固定作品；详情与评论按本次取得／明确复用版本回查；媒体为共享当前资源。 ';
+    const back=document.createElement('a'); const destination=creatorBacklink.get('returnTo');
+    back.href=destination && destination.startsWith('/collection/tasks?') ? destination : '/collection/tasks?domain='+encodeURIComponent(creatorBacklink.get('domain')||'')+'&run='+encodeURIComponent(creatorBacklink.get('collectionRunRef'));
+    back.textContent='返回采集任务'; back.className='ev-collection-return'; banner.append(back); document.querySelector('.ev-command')?.prepend(banner);
   }
   // 当前领域由服务端随页面下发。地址里的 domain 可能无效，有效性判定服务端已经做过一次，
   // 前端再判一次就会出现两处规则，早晚不一致。
@@ -109,6 +115,21 @@
     retiredStateList.append(retiredOption);
   }
 
+  const collectionSelectionKey='collection-selected:'+CORPUS_DOMAIN.ref;
+  let collectionSelection=new Set();
+  try {collectionSelection=new Set(JSON.parse(sessionStorage.getItem(collectionSelectionKey)||'[]'));} catch (_) {}
+  const collectionSelectionCount=document.createElement('span');
+  const collectionSelectionButton=document.createElement('button'); collectionSelectionButton.type='button'; collectionSelectionButton.className='ev-selection-action'; collectionSelectionButton.textContent='评论深采';
+  const collectionSelectPage=document.createElement('button'); collectionSelectPage.type='button'; collectionSelectPage.className='ev-selection-action'; collectionSelectPage.textContent='勾选本页';
+  function updateCollectionSelection() {
+    collectionSelectionCount.textContent='已勾选 '+collectionSelection.size+' 篇作品';
+    collectionSelectionButton.disabled=!CORPUS_DOMAIN.hasDomain || !collectionSelection.size || collectionSelection.size>200;
+    sessionStorage.setItem(collectionSelectionKey,JSON.stringify([...collectionSelection]));
+  }
+  collectionSelectionButton.addEventListener('click',()=>{location.assign('/collection/tasks?domain='+encodeURIComponent(CORPUS_DOMAIN.ref)+'&selected=1&returnTo='+encodeURIComponent(location.pathname+location.search));});
+  collectionSelectPage.addEventListener('click',()=>{document.querySelectorAll('input[data-collection-work-select]').forEach(input=>{input.checked=true;collectionSelection.add(input.value);});updateCollectionSelection();});
+  const selectionToolbar=document.createElement('div'); selectionToolbar.className='ev-selection-toolbar';selectionToolbar.append(collectionSelectPage,collectionSelectionCount,collectionSelectionButton);
+  document.querySelector('.ev-command')?.append(selectionToolbar); updateCollectionSelection();
   const SORT_OPTIONS = [
     { value: 'latest_discovery', label: '最近观察' },
     { value: 'relevance', label: '相关度' },
@@ -355,7 +376,7 @@
       const value = selectByName.get(name).value;
       if (value) params.set(name, value);
     });
-    ['creatorKey', 'creatorFilter', 'returnTo'].forEach(name => { const value = new URLSearchParams(window.location.search).get(name); if (value) params.set(name, value); });
+    ['creatorKey', 'creatorFilter', 'returnTo', 'collectionRunRef'].forEach(name => { const value = new URLSearchParams(window.location.search).get(name); if (value) params.set(name, value); });
     if (cursor) params.set('cursor', cursor);
     return params;
   }
@@ -1080,6 +1101,11 @@
     } else {
       row.append(previewBlock(item), identity, side);
     }
+    if (ref && CORPUS_DOMAIN.hasDomain) {
+      const label=document.createElement('label'); label.className='ev-collection-check';
+      const input=document.createElement('input'); input.type='checkbox';input.value=ref; input.checked=collectionSelection.has(ref);input.dataset.collectionWorkSelect='';input.setAttribute('aria-label','勾选作品用于评论深采');
+      label.append(input);label.addEventListener('click',event=>event.stopPropagation()); input.addEventListener('change',()=>{if(input.checked)collectionSelection.add(ref);else collectionSelection.delete(ref);updateCollectionSelection();});row.append(label);
+    }
     row.addEventListener('click', () => selectItem(item, 'user'));
     row.addEventListener('keydown', (event) => onRowKeydown(event, item));
     return row;
@@ -1196,7 +1222,7 @@
       identity: { publicRef },
       // Off-page deep links have no list row to supply a scoped detailUrl. The detail API
       // requires Domain even when the Work is absent from it, so keep the selected scope.
-      detailUrl: `${API_ROOT}/${encodeURIComponent(publicRef)}?domain=${encodeURIComponent(CORPUS_DOMAIN.ref)}`,
+      detailUrl: `${API_ROOT}/${encodeURIComponent(publicRef)}?domain=${encodeURIComponent(CORPUS_DOMAIN.ref)}${creatorBacklink.has('collectionRunRef') ? '&collectionRunRef='+encodeURIComponent(creatorBacklink.get('collectionRunRef')) : ''}`,
       display: { title: null, titleState: 'UNKNOWN' },
     };
   }
@@ -1737,8 +1763,8 @@
 
     panel.append(observation.engagementTimeline(inspector, observationUi()));
 
-    const author = section('作者上下文');
-    const context = inspector.authorContext;
+    const author = section(inspector.sharedCurrentAuthorContext ? '共享作者上下文（当前）' : '作者上下文');
+    const context = inspector.authorContext || inspector.sharedCurrentAuthorContext;
     if (!context || typeof context !== 'object') {
       author.append(sourceIncompleteBlock('当前详情没有合格作者上下文；这不表示作者不存在。'));
     } else {

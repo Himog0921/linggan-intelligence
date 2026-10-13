@@ -29,7 +29,7 @@
 | 历史来源校验表 | `references/SOURCE-MANIFEST.sha256` | Bootstrap 来源固定流程 | 提交并受保护 | 禁止随意修改 | 与历史快照一起长期保留 |
 | 架构、业务流程与项目全景图 | `docs/architecture/system-overview-diagram.html`、`docs/architecture/business-process-diagram.html`、`docs/architecture/project-architecture-atlas.html` | `diagram-design` Skill 根据当前代码、migration、测试、`/health`/本地页面运行快照、`docs/current-state.md`、最新 progress、技术基线及目标/模块/采集/数据/Agent/运行/界面架构生成；用 Skill `self_check.py`、几何检查和浏览器渲染复核 | 提交 | 仅在同步复核来源、状态说明和图内边界后允许修改 | 稳定保留；架构状态、技术基线或获准范围变化时重新生成并复核；图不替代长期运行、真实采集或生产证明 |
 | Linggan Browser Producer release | `plugins/linggan-browser-producer/releases/linggan-browser-producer-<version>.zip`、`plugins/linggan-browser-producer/releases/release-manifest.json` | `cd plugins/linggan-browser-producer && npm run build`；唯一源为该包的 `src/` 和 Linggan runtime token source `apps/api/src/local_web/lids_tokens.css`，build script 同时生成 ZIP/manifest | 提交 | 禁止手工修改 ZIP 或 release manifest；修改源后重新 build | 当前只保留当前发行版；替代/删除必须经单独发布卡和 hash 核对 |
-| Linggan Intelligence Browser release | `plugins/linggan-intelligence-browser/releases/linggan-intelligence-browser-v<version>.zip`、`plugins/linggan-intelligence-browser/releases/release-manifest.json` | `cd plugins/linggan-intelligence-browser && npm run build && npm run package:release && npm run release:manifest && npm run release:verify && npm run release:reproducibility`；唯一源是该包的当前 source；打包器固定 ZIP 时间与文件顺序 | 提交 | 禁止手工修改 ZIP 或 release manifest；修改 source 后重新 build/package 并核验 | `release-manifest.json` 指向唯一当前候选发行包；历史 ZIP 作为已发布工件保留，不覆盖或删除。`0.8.60` 候选 ZIP SHA-256 = `195326340afe9aeadeb06d3e51142ffbb3cab9535f9fd67773cad7afd0f3f253`；不含真实材料、账号、凭据或运行日志，未加载到浏览器 |
+| Linggan Intelligence Browser release | `plugins/linggan-intelligence-browser/releases/linggan-intelligence-browser-v<version>.zip`、`plugins/linggan-intelligence-browser/releases/release-manifest.json` | `cd plugins/linggan-intelligence-browser && npm run build && npm run package:release && npm run release:manifest && npm run release:verify && npm run release:reproducibility`；唯一源是该包的当前 source；打包器固定 ZIP 时间与文件顺序 | 提交 | 禁止手工修改 ZIP 或 release manifest；修改 source 后重新 build/package 并核验 | `release-manifest.json` 指向唯一当前候选发行包；历史 ZIP 作为已发布工件保留，不覆盖或删除。`0.8.61` 候选 ZIP SHA-256 = `2aba8db3d2edad87b6b4c5436e751efa5f89b322763c789828b65295a9def2f4`；不含真实材料、账号、凭据或运行日志，未加载到浏览器 |
 
 ## COMMENT-STUDY-PRODUCTIZATION-001 · 2026-09-23 局部登记
 
@@ -114,6 +114,14 @@
 - 权威测试源：`scripts/test-topic-map-ui.cjs`、`scripts/test-topic-map-compact-ui.py`，维护源码，不是生成文件。只运行合成 HTTP fixture 与候选 JS/CSS。
 - 源码传递包、补丁、截图与日志：本任务系统临时目录和 Actions artifact（源码包 1 日、验证结果 7 日）；不入 Git、不含真实原文/凭据、不访问模型/平台/正式库。
 - `.github/workflows/topic-map-compact-transfer.yml` 仅用于专属候选分支的版本校验与传递，交付前删除；持续回归另用只读验证 workflow。临时传递仅影响此分支，不强推、不合并或部署。
+
+## COLLECTION-JTBD-001 / #398 隔离验证
+
+- 来源：`scripts/test-collection-single-run-postgres.sh`、正式 API router 与合成 PostgreSQL、`scripts/test-collection-single-run-ui.cjs`；正式插件 fixture。
+- 位置：`/tmp/collection-398-*` 日志、浏览器依赖与合成截图；本任务随机 `linggan-collection-single-run-proof-*` 容器和同名 `-data` 卷；Cargo/npm 现有忽略缓存。审阅截图复制到本任务授权的 Codex visualizations 目录，不入 Git。
+- 无真实材料、账号、DSN、Cookie 或凭据；交接包六张用户截图只读，不复制进仓库或 CI。
+- 再生：上述脚本加 `COLLECTION_RUN_BROWSER_PROOF=1` 与明确临时证据目录；发布候选按正式插件现有脚本生成，不加载插件。
+- 清理：脚本退出核验删除本次随机容器/卷；浏览器上下文及测试服务器退出关闭，不清理其他任务或业务资源。责任 #398 当前执行者。
 
 ## LOGIN-ANATOMY-001
 

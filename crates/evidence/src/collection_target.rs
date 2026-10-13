@@ -506,7 +506,7 @@ const LIST_TARGETS_WITH_DOMAIN: &str = concat!(
                         FROM observation_domain_target relation \
                         JOIN observation_domain domain USING(domain_ref) \
                         WHERE relation.target_ref=target.target_ref) domain ON true \
-     WHERE to_jsonb(target)->>'purpose_kind' IS DISTINCT FROM 'research_round' AND ($1::text IS NULL OR target.target_kind = $1) \
+     WHERE COALESCE(to_jsonb(target)->>'purpose_kind','long_term')='long_term' AND ($1::text IS NULL OR target.target_kind = $1) \
        AND ($2::text IS NULL OR target.lifecycle_state = $2) \
        AND ($4::uuid IS NULL OR EXISTS (SELECT 1 FROM observation_domain_target relation \
                                          WHERE relation.target_ref=target.target_ref \
@@ -527,7 +527,7 @@ const LIST_TARGETS_WITHOUT_DOMAIN: &str = concat!(
        LEFT JOIN collection_monitor_rule_revision revision \
               ON revision.rule_revision_ref=rule.active_revision_ref \
        WHERE rule.target_ref=target.target_ref AND rule.retired_at IS NULL) rules ON true \
-     WHERE to_jsonb(target)->>'purpose_kind' IS DISTINCT FROM 'research_round' AND ($1::text IS NULL OR target.target_kind = $1) \
+     WHERE COALESCE(to_jsonb(target)->>'purpose_kind','long_term')='long_term' AND ($1::text IS NULL OR target.target_kind = $1) \
        AND ($2::text IS NULL OR target.lifecycle_state = $2) \
        AND $4::uuid IS NULL \
      ORDER BY target.first_stored_at DESC LIMIT $3"
@@ -576,19 +576,19 @@ pub async fn count_targets(
     const COUNT_HEAD: &str = "SELECT count(*), \
                 count(*) FILTER (WHERE target.target_kind = 'creator'), \
                 count(*) FILTER (WHERE target.target_kind = 'keyword'), \
-                count(*) FILTER (WHERE to_jsonb(target)->>'purpose_kind' IS DISTINCT FROM 'research_round' AND target.lifecycle_state = 'archiving'), \
+                count(*) FILTER (WHERE COALESCE(to_jsonb(target)->>'purpose_kind','long_term')='long_term' AND target.lifecycle_state = 'archiving'), \
                 count(*) FILTER (WHERE target.monitoring_enabled AND EXISTS ( \
                     SELECT 1 FROM collection_monitor_rule rule \
                     JOIN collection_monitor_rule_revision revision \
                       ON revision.rule_revision_ref=rule.active_revision_ref \
                     WHERE rule.target_ref=target.target_ref AND rule.retired_at IS NULL \
                       AND revision.automatic_enabled)) \
-         FROM collection_observation_target target WHERE to_jsonb(target)->>'purpose_kind' IS DISTINCT FROM 'research_round'";
+         FROM collection_observation_target target WHERE COALESCE(to_jsonb(target)->>'purpose_kind','long_term')='long_term'";
     const COUNT_IN_DOMAIN: &str = concat!(
         "SELECT count(*), \
                 count(*) FILTER (WHERE target.target_kind = 'creator'), \
                 count(*) FILTER (WHERE target.target_kind = 'keyword'), \
-                count(*) FILTER (WHERE to_jsonb(target)->>'purpose_kind' IS DISTINCT FROM 'research_round' AND target.lifecycle_state = 'archiving'), \
+                count(*) FILTER (WHERE COALESCE(to_jsonb(target)->>'purpose_kind','long_term')='long_term' AND target.lifecycle_state = 'archiving'), \
                 count(*) FILTER (WHERE target.monitoring_enabled AND EXISTS ( \
                     SELECT 1 FROM collection_monitor_rule rule \
                     JOIN collection_monitor_rule_revision revision \
@@ -596,7 +596,7 @@ pub async fn count_targets(
                     WHERE rule.target_ref=target.target_ref AND rule.retired_at IS NULL \
                       AND revision.automatic_enabled)) \
          FROM collection_observation_target target \
-         WHERE to_jsonb(target)->>'purpose_kind' IS DISTINCT FROM 'research_round' AND ($1::uuid IS NULL OR EXISTS (SELECT 1 FROM observation_domain_target relation \
+         WHERE COALESCE(to_jsonb(target)->>'purpose_kind','long_term')='long_term' AND ($1::uuid IS NULL OR EXISTS (SELECT 1 FROM observation_domain_target relation \
                                             WHERE relation.target_ref=target.target_ref \
                                               AND relation.domain_ref=$1))"
     );
@@ -709,7 +709,7 @@ pub async fn list_targets_in_state(
         "SELECT target_ref, platform, target_kind, identity_key, display_name, identity_facts, \
                 source, lifecycle_state, to_char(first_stored_at, 'YYYY-MM-DD\"T\"HH24:MI:SSOF') \
          FROM collection_observation_target \
-         WHERE lifecycle_state = $1 AND to_jsonb(collection_observation_target)->>'purpose_kind' IS DISTINCT FROM 'research_round' \
+         WHERE lifecycle_state = $1 AND COALESCE(to_jsonb(collection_observation_target)->>'purpose_kind','long_term')='long_term' \
          ORDER BY first_stored_at DESC \
          LIMIT $2",
     )

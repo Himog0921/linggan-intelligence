@@ -560,3 +560,11 @@
 .ev-coverage-history-group{display:grid;gap:8px;padding:9px;border-left:3px solid var(--v7-info);background:var(--v7-gray)}
 .ev-coverage-history-group>strong{font-size:10px}
 .ev-history-item{margin:0}
+
+/* Collection exact selection is independent from the reading inspector selection. */
+.ev-selection-toolbar{display:flex;gap:var(--lgi-space-4);align-items:center;padding:var(--lgi-space-4) 0;color:var(--lgi-muted)}
+.ev-selection-action{padding:var(--lgi-space-3) var(--lgi-space-4);border:thin solid var(--lgi-border);font:inherit;background:var(--lgi-canvas);color:var(--lgi-ink)}
+.ev-selection-action:last-child{margin-left:auto;background:var(--lgi-ink);color:var(--lgi-on-dark)}
+.ev-work-row{position:relative}.ev-collection-check{position:absolute;right:var(--lgi-space-3);top:var(--lgi-space-3);display:flex;background:var(--lgi-canvas);padding:var(--lgi-space-1);z-index:var(--lgi-z-stage)}
+
+.ev-collection-return{color:var(--lgi-ink);text-decoration:underline;text-underline-offset:var(--lgi-space-1)}

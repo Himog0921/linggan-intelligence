@@ -249,6 +249,11 @@ function normalizedCommentCollectionReceipt(result = {}, noteId = '') {
     version: 1,
     noteId: String(source.noteId || noteId || result?.noteId || '').trim(),
     scope,
+    ...(source.traversal && scope === 'all_public_comments' ? { traversal: {
+      mainExhausted: source.traversal.mainExhausted === true,
+      repliesExhausted: source.traversal.repliesExhausted === true,
+      identityReliable: source.traversal.identityReliable === true,
+    } } : {}),
     ...(numeric(source.requestedLimit) === null ? {} : { requestedLimit: numeric(source.requestedLimit) }),
     pageCommentCount,
     expectedCount,

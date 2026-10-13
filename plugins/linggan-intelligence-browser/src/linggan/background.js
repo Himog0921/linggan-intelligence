@@ -444,6 +444,8 @@ async function reportStationStatus() {
  * `chrome.permissions.contains` 直接查，不需要新增任何权限。
  */
 const IMPLEMENTED_CAPABILITIES = [
+  'collection.single_run.v1',
+  'collection.all_public.v1',
   'discovery_search',
   'profile_discovery',
   'author_profile',
@@ -829,7 +831,7 @@ async function verifyClaimedTaskAccount(tabId, claim) {
   const observation = page?.success === true ? page.observation : null;
   if (!observation) return { mayExecute: true, state: 'account_observation_inconclusive' };
   const report = await reportAccountObservationFromPage(observation, { taskId: claim?.taskId });
-  return claimedTaskAccountDecision(report);
+  return { ...claimedTaskAccountDecision(report), accountRef: report?.reported === true ? report.accountRef : null };
 }
 
 async function reportClaimedTaskRisk(tabId, claim, installKey, installationCredential) {
@@ -874,6 +876,10 @@ export async function recoverCachedDetailPageSessions({
   for (const entry of await sessions.pending({ limit: 20 })) {
     try {
       const lanes = await preparations.forSession(entry.leaseRef, entry.contentExternalId);
+      // A live page is still advancing its mutable checkpoint. Its frozen outbox envelopes
+      // may flush now; unclaimed comment lanes freeze only after page loss/lease expiry or
+      // when the server explicitly claims a cached lane.
+      if (entry.collecting === true && lanes.some(lane => Date.parse(lane.leaseExpiresAt) > Date.now())) continue;
       for (const capability of entry.plan.lanes) {
         if (Object.values(entry.queuedTasks || {}).includes(capability)) continue;
         try {
@@ -969,6 +975,7 @@ async function storeDetailPageSessionFromPage(message = {}) {
     receipt: message.receipt,
     detailTaskId: message.detailTaskId,
     detailPackage: message.detailPackage,
+    collecting: message.collecting === true,
   });
   void flushLocalOutbox();
   return { success: true, cacheKey: entry.cacheKey };
@@ -995,7 +1002,7 @@ function isDetailPageSessionCapability(capability) {
  */
 async function prepareDetailPageNavigation({ claim, taskSpec, installKey, installationCredential }) {
   const existing = await detailPageNavigationGrantStore.get({ leaseRef: claim.leaseRef, taskSpec });
-  if (existing && ['page_opened', 'action_dispatched'].includes(existing.state)) {
+  if (existing && ['page_opened', 'action_dispatched', 'retained'].includes(existing.state)) {
     const tabId = Number(existing.tabId || 0);
     const contentExternalId = String(taskSpec?.target?.contentExternalId || '').trim();
     if (tabId) {
@@ -1051,10 +1058,15 @@ async function prepareDetailPageNavigation({ claim, taskSpec, installKey, instal
     grantKey: prepared.grantKey,
     sessionRef: grant.sessionRef,
     pageSessionPlan: grant.pageSessionPlan,
+    reuseCandidate: grant.pageSessionPlan.commentMode==='all_public' ? await detailPageNavigationGrantStore.reusable({taskSpec}) : null,
   };
 }
 
 async function runDispatchedTask() {
+  for (const expired of await detailPageNavigationGrantStore.expiredRetained().catch(()=>[])) {
+    await closeCollectionWindow(expired.windowId);
+    await detailPageNavigationGrantStore.closeRetained(expired.grantKey);
+  }
   const readiness = await readLingganLocalReadiness();
   if (!readiness.reachable) {
     return { success: false, state: 'unreachable', message: readiness.message };
@@ -1212,7 +1224,11 @@ async function runDispatchedTask() {
   }
   let opened;
   try {
-    opened = await openTaskWindow(capability, targetValue, claim.executionSourceUrl);
+    const prior=navigationGrant?.reuseCandidate;
+    const tab=prior?.tabId ? await chrome.tabs.get(prior.tabId).catch(()=>null) : null;
+    const samePage=tab && new URL(tab.url || 'about:blank').pathname.split('/').includes(contentExternalId) && /^https:\/\/([^.]+\.)?xiaohongshu\.com\//i.test(tab.url || '');
+    opened=samePage ? {windowId:prior.windowId,tabId:prior.tabId} : await openTaskWindow(capability, targetValue, claim.executionSourceUrl);
+    if (!samePage && prior) await detailPageNavigationGrantStore.closeRetained(prior.grantKey);
   } catch {
     if (navigationGrant?.sessionRef) {
       await reportLingganDetailPageSessionNavigation({
@@ -1274,6 +1290,7 @@ async function runDispatchedTask() {
     }
   }
 
+  let keepWindow=false;
   const action = capability === 'author_profile'
     ? LINGGAN_RUNTIME_ACTION.COLLECT_CURRENT_AUTHOR
     : (['profile_discovery', 'discovery_search'].includes(capability)
@@ -1367,6 +1384,9 @@ async function runDispatchedTask() {
       taskSpec: spec,
       leaseRef: claim.leaseRef,
       pageSessionPlan: navigationGrant?.pageSessionPlan || claim.pageSessionPlan,
+      resumeCommentSessionKey: navigationGrant?.reuseCandidate?.accountRef && accountVerification.accountRef===navigationGrant.reuseCandidate.accountRef
+        ? `${spec.collectionRunRef}:${accountVerification.accountRef}` : '',
+      commentSessionKey: accountVerification.accountRef && spec.collectionRunRef ? `${spec.collectionRunRef}:${accountVerification.accountRef}` : '',
       triggerSource: 'linggan_dispatched_task',
     });
     const receipt = decodePageExecutionReceipt(response, {
@@ -1389,6 +1409,13 @@ async function runDispatchedTask() {
         health: readiness.health,
       });
     }
+    if (navigationGrant?.grantKey && claim.pageSessionPlan?.commentMode==='all_public' && accountVerification.accountRef) {
+      const entry=await detailPageSessionStore.getForTask({leaseRef:claim.leaseRef,taskSpec:spec});
+      if (entry && (!entry.plan.lanes.includes('comments') || (entry.commentResult?.collectionReceipt?.state==='partial' && !['risk_control','manual_stop'].includes(entry.commentResult?.stopReason)))) {
+        keepWindow=await detailPageNavigationGrantStore.retain({grantKey:navigationGrant.grantKey,accountRef:accountVerification.accountRef});
+      }
+    }
+    if (navigationGrant?.reuseCandidate) await detailPageNavigationGrantStore.closeRetained(navigationGrant.reuseCandidate.grantKey);
     return {
       success: true,
       state: 'executed',
@@ -1413,8 +1440,9 @@ async function runDispatchedTask() {
       message: '观察页面未能响应，本次未采集。',
     });
   } finally {
-    // 无论成败都关窗。留下的僵尸窗口会一直吃内存——1000 篇/天会开上百次窗。
-    await closeCollectionWindow(windowId);
+    // A bounded deep segment may keep its verified same-run/account page for ten minutes.
+    // Failed, stopped, complete and legacy sessions close normally; the next poll closes expiry.
+    if (!keepWindow) await closeCollectionWindow(windowId);
   }
 }
 
@@ -1503,6 +1531,14 @@ chrome.runtime.onMessage.addListener((message = {}, sender, sendResponse) => {
         return { reported: false, reasonCode: 'account_observation_source_invalid' };
       }
       return reportAccountObservationFromPage(message.observation);
+    }
+    if (action === LINGGAN_RUNTIME_ACTION.CHECK_RUN_CONTROL) {
+      if (!/^https:\/\/([^.]+\.)?xiaohongshu\.com\//i.test(String(sender?.tab?.url || sender?.url || ''))) return { mayAct: false, reasonCode: 'collection_run_source_invalid' };
+      const installKey = await producerInstanceId();
+      const installationCredential = await installationCredentialFor(installKey);
+      const response = await fetch(`${LINGGAN_LOCAL_ORIGIN}/api/local/collection/run-control`, { method: 'POST', credentials: 'omit', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ installKey, installationCredential, taskId: message.taskId }) });
+      if (!response.ok) return { mayAct: false, reasonCode: 'collection_run_control_unavailable' };
+      return response.json();
     }
     if ([
       LINGGAN_RUNTIME_ACTION.STORE_DETAIL_PAGE_SESSION,

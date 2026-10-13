@@ -6,6 +6,8 @@
 > 事实来源: Mog 2026-10-12 对 Demo 的确认和真实 UI 保留要求、main d94e72c7、当前 SSR/采集控制合同
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实代码/测试与既有数据/行动合同；Demo 不取代生产字段或扩大采集权限
 
+本文件仅保留 #400 的导航历史范围；当前完整交付由 [collection-single-run-398.md](collection-single-run-398.md) 替代，不再执行旧限制。
+
 ## 1. 事项、Claim 与代码前 UI 变更清单
 
 - Issue: [#398](https://github.com/Himog0921/linggan-intelligence/issues/398)。用户直接授权真实项目实施，2026-10-12 已登记 Claim。

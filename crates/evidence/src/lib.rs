@@ -5,6 +5,11 @@ mod acquisition_chain;
 mod archive_completeness;
 mod archive_ledger;
 mod collection_control;
+pub mod collection_run;
+mod collection_run_dispatch;
+pub use collection_run_dispatch::probe as probe_collection_run_control;
+pub mod collection_run_material_read;
+pub mod collection_run_progress;
 mod collection_target;
 pub use collection_target::register_discovered_creator;
 mod collection_task_action_read;
@@ -271,3 +276,5 @@ pub use work_resource_read::{
     frozen_work_fragment_manifest_in_transaction, read_frozen_work_text_in_transaction,
     read_frozen_work_texts_in_transaction,
 };
+
+pub use collection_run_material_read::scope_items_in as scope_run_material_items;

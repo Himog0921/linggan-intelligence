@@ -284,7 +284,9 @@ async function collectApprovedDetailPageSession(message = {}) {
   let contentDelivery = null;
   let contentDeliveryFailure = null;
   let contentPackage = null;
+  let observedNote = null;
   const queueDetailBeforeComments = async (note) => {
+    observedNote = note;
     if (contentDelivery || contentDeliveryFailure) return;
     try {
       contentPackage ||= packageContentDetail({ platform: 'xhs', note });
@@ -307,12 +309,25 @@ async function collectApprovedDetailPageSession(message = {}) {
     targetNoteId: contentExternalId,
     includeComments: plan.lanes.includes('comments') || plan.lanes.includes('replies'),
     commentLimit: plan.commentLimit,
-    commentDepthMode: plan.incrementalCommentBudget ? COMMENT_DEPTH_MODE.ALL_REPLIES : COMMENT_DEPTH_MODE.TWO_LEVEL,
+    commentDepthMode: plan.commentMode==='sample_30' ? COMMENT_DEPTH_MODE.TWO_LEVEL : plan.incrementalCommentBudget ? COMMENT_DEPTH_MODE.ALL_REPLIES : COMMENT_DEPTH_MODE.TWO_LEVEL,
     incrementalCommentBudget: plan.incrementalCommentBudget,
-    maxSubComments: plan.replyExpandLimit,
-    taskSpec,
+    commentSessionKey: message.commentSessionKey || '',
+    resumeCommentSessionKey: message.resumeCommentSessionKey || '',
+    maxSubComments: plan.commentMode === 'all_public' ? 0 : plan.replyExpandLimit,
+    taskSpec: plan.commentMode ? { ...taskSpec, commentMode: plan.commentMode, incrementalCommentBudget: plan.incrementalCommentBudget } : taskSpec,
     deferLingganDelivery: true,
     onDetailReady: queueDetailBeforeComments,
+    onCommentSnapshot: async (snapshot) => {
+      if (!observedNote || !taskSpec.collectionRunRef) return;
+      // Each bounded page persists to the extension-owned cache. Recovery packages these
+      // already obtained facts before another platform action, using prepared lane IDs.
+      const stored = await sendToBackground(LINGGAN_RUNTIME_ACTION.STORE_DETAIL_PAGE_SESSION, {
+        leaseRef, plan, note: observedNote, commentResult: snapshot,
+        receipt: snapshot.collectionReceipt, detailTaskId: taskSpec.taskId,
+        detailPackage: contentPackage, collecting: true,
+      });
+      if (stored?.success !== true) throw new Error('comment_checkpoint_not_persisted');
+    },
     triggerSource: 'linggan_detail_page_session',
   });
 

@@ -1,7 +1,8 @@
 import { parseCount, toHighQualityImageUrl, getHighQualityImageCandidates } from '../../shared/utils.js';
 import { commentStore } from '../../db/commentStore.js';
 import { BATCH_CONFIG, COMMENT_DEPTH_MODE } from '../../shared/constants.js';
-import { reportProgress } from '../../shared/messaging.js';
+import { reportProgress, sendToBackground } from '../../shared/messaging.js';
+import { LINGGAN_RUNTIME_ACTION } from '../../linggan/runtimeActions.js';
 import { detectCaptcha, waitForPageSettle } from './antiDetect.js';
 import { getActiveCommentsContext, isRiskControlPage } from './batchShared.js';
 import { createCollectorEvidence, createCollectorQualityMeta, joinRawDomText } from '../../shared/collectorMetadata.js';
@@ -226,13 +227,14 @@ export async function rewindCommentSurface(container, {
  * @param {string} options.commentDepthMode - 评论深度：twoLevel / allReplies
  * @param {string} options.collectionRunId - 采集批次 ID
  */
-export function normalizeIncrementalCommentBudget(value) {
+export function normalizeIncrementalCommentBudget(value, commentMode = '') {
   if (value == null) return null;
   const ids = value.knownCommentIds;
-  if (!Array.isArray(ids) || ids.length > 5000 || ids.some((id) => typeof id !== 'string' || !id.trim() || id.length > 256)
+  if (!Array.isArray(ids) || (ids.length > 5000 && commentMode !== 'all_public') || ids.some((id) => typeof id !== 'string' || !id.trim() || id.length > 256)
     || new Set(ids).size !== ids.length || !Number.isInteger(value.newUniqueLimit) || value.newUniqueLimit < 1 || value.newUniqueLimit > 30
     || !Number.isInteger(value.maxScrollRounds) || value.maxScrollRounds < 1 || value.maxScrollRounds > 50
     || !Number.isInteger(value.maxDurationSeconds) || value.maxDurationSeconds < 1 || value.maxDurationSeconds > 600) throw new Error('incremental_comment_budget_invalid');
+  if (value.knownReplyCounts && (commentMode!=='sample_30' || Object.entries(value.knownReplyCounts).some(([id,n])=>!id.trim() || id.length>256 || !Number.isInteger(n) || n<0 || n>2))) throw new Error('incremental_comment_budget_invalid');
   return { ...value, knownCommentIds: [...ids] };
 }
 
@@ -250,9 +252,25 @@ export function boundedNewCommentSelection(comments, budget) {
   return selected;
 }
 
+// Completion concerns every observed root, including known identities skipped from delivery.
+export function apiReplyTraversalExhausted(snapshot = {}) {
+  const roots=(snapshot.pages||[]).flatMap(p=>p.comments||[]);
+  return roots.every(root=>{
+    const id=String(root.id||root.comment_id||root.commentId||'');
+    if(!id)return false;
+    const last=(snapshot.subPages||[]).filter(p=>String(p.rootCommentId||'')===id).at(-1);
+    return last?.hasMore===false || root.sub_comment_has_more===false || root.has_more_sub_comment===false
+      || (root.sub_comment_count===0 && root.sub_comment_has_more!==true);
+  });
+}
+
+const reusableApiSessions=new Map();
+
 export async function collectComments({
   noteId = '',
   noteUrl = '',
+  commentSessionKey = '',
+  resumeCommentSessionKey = '',
   maxTotal = 0,
   maxSubComments = BATCH_CONFIG.maxSubComments,
   onProgress = null,
@@ -268,7 +286,28 @@ export async function collectComments({
   observedNoteId = '',
   executionPolicy = {},
 } = {}) {
-  const incrementalBudget = normalizeIncrementalCommentBudget(taskSpec?.incrementalCommentBudget);
+  const commentMode = taskSpec?.commentMode;
+  if (taskSpec?.collectionRunRef) {
+    const localPause=waitIfPaused,localStop=shouldStop;
+    let controlBlocked=false;
+    shouldStop=()=>controlBlocked || localStop();
+    waitIfPaused=async()=>{
+      await localPause();
+      if (controlBlocked) return;
+      const control=await sendToBackground(LINGGAN_RUNTIME_ACTION.CHECK_RUN_CONTROL,{ taskId:taskSpec.taskId }).catch(()=>null);
+      if (control?.mayAct!==true) controlBlocked=true;
+    };
+  }
+  if (commentMode !== undefined && !['sample_30', 'all_public'].includes(commentMode)) throw new Error('comment_mode_invalid');
+  if (commentMode === 'all_public') {
+    maxSubComments = 0;
+    commentDepthMode = COMMENT_DEPTH_MODE.ALL_REPLIES;
+  }
+  const incrementalBudget = normalizeIncrementalCommentBudget(taskSpec?.incrementalCommentBudget, commentMode);
+  if (onSnapshot && commentMode) {
+    const persistSnapshot=onSnapshot;
+    onSnapshot=snapshot=>persistSnapshot(withCommentCollectionReceipt({...snapshot,commentMode}, {noteId,maxTotal,publicCommentCount,observedNoteId,incrementalBudget,commentMode}));
+  }
   const budgetState = incrementalBudget ? { remainingRounds: incrementalBudget.maxScrollRounds, deadline: Date.now() + incrementalBudget.maxDurationSeconds * 1000, exhausted: false } : null;
   if (incrementalBudget) maxTotal = incrementalBudget.newUniqueLimit;
   const budgetShouldStop = () => shouldStop() || Boolean(budgetState && Date.now() >= budgetState.deadline);
@@ -279,6 +318,8 @@ export async function collectComments({
   });
   const apiResult = await collectCommentsViaApi({
     noteId,
+    commentSessionKey,
+    resumeCommentSessionKey,
     noteUrl,
     maxTotal,
     incrementalBudget,
@@ -299,6 +340,8 @@ export async function collectComments({
       total: apiResult.total,
       comments: apiResult.comments,
       stopReason: apiResult.stopReason,
+      traversal: apiResult.traversal,
+      commentMode,
     }, { noteId, maxTotal, publicCommentCount, observedNoteId, incrementalBudget });
     if (emitReceipt) {
       result.lingganDelivery = await emitCollectorReceipt('comments', result, { platform: 'xhs', noteId, options: { maxTotal, maxSubComments, commentDepthMode, taskSpec } });
@@ -319,6 +362,7 @@ export async function collectComments({
     noteUrl,
     maxTotal,
     incrementalBudget,
+    commentMode,
     budgetState,
     maxSubComments,
     onProgress,
@@ -328,6 +372,7 @@ export async function collectComments({
     commentDepthMode,
     collectionRunId,
     initialComments: apiResult.comments,
+    initialIdentityReliable: apiResult.traversal?.identityReliable !== false,
     persist,
     actionGate,
   });
@@ -337,6 +382,7 @@ export async function collectComments({
     publicCommentCount,
     observedNoteId,
     incrementalBudget,
+    commentMode,
   });
   if (emitReceipt) {
     normalizedResult.lingganDelivery = await emitCollectorReceipt('comments', normalizedResult, { platform: 'xhs', noteId, options: { maxTotal, maxSubComments, commentDepthMode, taskSpec } });
@@ -362,6 +408,7 @@ export function resolveXhsCommentTargetIdentity({
 }
 
 function withCommentCollectionReceipt(result = {}, {
+  commentMode = result.commentMode,
   incrementalBudget = null,
   noteId = '',
   maxTotal = 0,
@@ -379,6 +426,8 @@ function withCommentCollectionReceipt(result = {}, {
     currentUrl: window.location?.href,
   });
   const receipt = buildXhsCommentCollectionReceipt({
+    commentMode,
+    traversal: result.traversal,
     incrementalBudget,
     noteId,
     maxTotal,
@@ -467,6 +516,7 @@ export function resolveCommentContinuationHint(pageCommentCount = 0, publicComme
 }
 
 async function collectCommentsViaApi({
+  commentSessionKey = '', resumeCommentSessionKey = '',
   incrementalBudget = null, budgetState = null,
   noteId = '',
   noteUrl = '',
@@ -491,6 +541,7 @@ async function collectCommentsViaApi({
 
   const allComments = [];
   const seenIds = new Set(incrementalBudget?.knownCommentIds || []);
+  const replyCounts=new Map(Object.entries(incrementalBudget?.knownReplyCounts || {}));
   const depthMode = String(commentDepthMode || COMMENT_DEPTH_MODE.TWO_LEVEL).trim() || COMMENT_DEPTH_MODE.TWO_LEVEL;
   let noNewCount = 0;
   const maxNoNew = depthMode === COMMENT_DEPTH_MODE.ALL_REPLIES ? 8 : 4;
@@ -498,11 +549,17 @@ async function collectCommentsViaApi({
   const stalledReplyControls = new WeakSet();
   let apiObserved = false;
   let hydrationDegradedEver = false;
+  let unreliableIdentitySeen = false;
   let consecutiveHydrationFailures = 0;
   let riskStopped = false;
   let retainedSnapshot = null;
   let freshAttemptStarted = false;
   let freshAttemptReady = false;
+  const savedSession=reusableApiSessions.get(noteId);
+  if (incrementalBudget && resumeCommentSessionKey && savedSession?.key===resumeCommentSessionKey && savedSession.page===window && savedSession.expiresAt>Date.now()) {
+    retainedSnapshot=savedSession.snapshot;
+    freshAttemptStarted=true;freshAttemptReady=true;
+  } else reusableApiSessions.delete(noteId);
   let observedPublicCommentCount = publicCommentCount !== null
     && publicCommentCount !== undefined
     && (typeof publicCommentCount === 'number' || typeof publicCommentCount === 'string')
@@ -601,6 +658,8 @@ async function collectCommentsViaApi({
         });
       hydrationActionsPerformed = Number(hydratedSnapshot?.hydrationMeta?.actionsPerformed || 0);
       retainedSnapshot = mergeXhsCommentSnapshots(retainedSnapshot, hydratedSnapshot);
+      retainedSnapshot.hydrationMeta = hydratedSnapshot.hydrationMeta;
+      if (commentSessionKey) reusableApiSessions.set(noteId,{key:commentSessionKey,page:window,snapshot:retainedSnapshot,expiresAt:Date.now()+600000});
       apiObserved = apiObserved
         || hydratedSnapshot.pages.length > 0
         || hydratedSnapshot.subPages.length > 0;
@@ -622,19 +681,24 @@ async function collectCommentsViaApi({
           : {},
       });
 
+      unreliableIdentitySeen ||= apiComments.some(c=>c.qualityReason==='synthetic_comment_id');
       for (const comment of apiComments) {
         await waitIfPaused();
         if (shouldStop()) break;
         if (maxTotal > 0 && allComments.length >= maxTotal) break;
         const key = incrementalBudget ? String(comment.platformCommentId || comment.commentId || '') : `${comment.commentId}|${comment.parentCommentId || ''}|${comment.level || 1}`;
         if (!comment.commentId || seenIds.has(key) || (incrementalBudget && comment.qualityReason === 'synthetic_comment_id')) continue;
+        const root=String(comment.rootCommentId || comment.parentCommentId || '');
+        if (comment.parentCommentId && incrementalBudget?.knownReplyCounts && (replyCounts.get(root)||0)>=2) continue;
+        if (comment.parentCommentId && incrementalBudget?.knownReplyCounts) replyCounts.set(root,(replyCounts.get(root)||0)+1);
         seenIds.add(key);
         allComments.push(comment);
         foundNew = true;
       }
       if (foundNew) {
         const context = getActiveCommentsContext();
-        onSnapshot?.(withCommentCollectionReceipt({
+        if (persist) await commentStore.bulkUpsert(allComments);
+        await onSnapshot?.(withCommentCollectionReceipt({
           total: allComments.length,
           comments: [...allComments],
           stopReason: 'in_progress',
@@ -756,12 +820,18 @@ async function collectCommentsViaApi({
 
   const finalContainer = resolveContainer() || container;
   const finalSignals = readCommentSignalsSafe(finalContainer);
+  if (riskStopped || shouldStop()) reusableApiSessions.delete(noteId);
   const finalContext = getActiveCommentsContext();
   const hasDomComments = Boolean(finalContainer?.querySelector?.('.parent-comment, .comment-item'));
   return {
     total: allComments.length,
     comments: allComments,
     apiObserved,
+    traversal: {
+      mainExhausted: retainedSnapshot?.pages?.at(-1)?.hasMore === false && !(maxTotal > 0 && allComments.length >= maxTotal),
+      repliesExhausted: retainedSnapshot?.hydrationMeta?.pending === false && apiReplyTraversalExhausted(retainedSnapshot) && !finalSignals.hasExpandableReplies,
+      identityReliable: !unreliableIdentitySeen && allComments.every(c => c.qualityReason !== 'synthetic_comment_id'),
+    },
     needsDomContinuation: shouldContinueDomAfterApi({
       depthMode,
       hydrationDegraded: hydrationDegradedEver,
@@ -797,6 +867,7 @@ async function collectCommentsFromDom({
   commentDepthMode = COMMENT_DEPTH_MODE.TWO_LEVEL,
   collectionRunId = '',
   initialComments = [],
+  initialIdentityReliable = true,
   persist = true,
   actionGate = createCommentActionGate({ shouldStop, waitIfPaused }),
 } = {}) {
@@ -815,12 +886,15 @@ async function collectCommentsFromDom({
   const seeded = initializeCollectedComments(initialComments);
   const allComments = seeded.allComments;
   const seenIds = seeded.seenIds;
+  const replyCounts=new Map(Object.entries(incrementalBudget?.knownReplyCounts || {}));
+  for(const c of allComments) if(c.parentCommentId) replyCounts.set(c.rootCommentId,(replyCounts.get(c.rootCommentId)||0)+1);
   for (const id of incrementalBudget?.knownCommentIds || []) seenIds.add(id);
   const depthMode = String(commentDepthMode || COMMENT_DEPTH_MODE.TWO_LEVEL).trim() || COMMENT_DEPTH_MODE.TWO_LEVEL;
   let noNewCount = 0;
   const maxNoNew = depthMode === COMMENT_DEPTH_MODE.ALL_REPLIES ? 8 : DEFAULT_DOM_TOP_UP_MAX_NO_NEW;
   const shouldExpandReplies = depthMode === COMMENT_DEPTH_MODE.ALL_REPLIES;
   const stalledReplyControls = new WeakSet();
+  let unreliableIdentitySeen = !initialIdentityReliable;
   let bottomNudgeCount = 0;
   let riskStopped = false;
 
@@ -862,6 +936,7 @@ async function collectCommentsFromDom({
       const mainItemEl = parentEl.querySelector(':scope > .comment-item:not(.comment-item-sub)')
         || parentEl.querySelector('.comment-item:not(.comment-item-sub)');
       const mainComment = parseCommentNode(mainItemEl);
+      unreliableIdentitySeen ||= Boolean(mainItemEl && (!mainComment || mainComment.qualityReason==='synthetic_comment_id'));
       const mainIsNew = Boolean(mainComment?.commentId && (!incrementalBudget || mainComment.qualityReason !== 'synthetic_comment_id') && !seenIds.has(mainComment.commentId));
 
       if (mainComment) {
@@ -898,8 +973,12 @@ async function collectCommentsFromDom({
         if (maxTotal > 0 && allComments.length >= maxTotal) break;
 
         const subComment = parseCommentNode(subEl);
+        unreliableIdentitySeen ||= !subComment || subComment.qualityReason==='synthetic_comment_id';
         if (!subComment || (incrementalBudget && (subComment.qualityReason === 'synthetic_comment_id' || mainComment?.qualityReason === 'synthetic_comment_id')) || seenIds.has(subComment.commentId)) continue;
 
+        const root=mainComment?.commentId || '';
+        if (incrementalBudget?.knownReplyCounts && (replyCounts.get(root)||0)>=2) continue;
+        if (incrementalBudget?.knownReplyCounts) replyCounts.set(root,(replyCounts.get(root)||0)+1);
         seenIds.add(subComment.commentId);
         foundNew = true;
         subComment.noteId = noteId;
@@ -935,7 +1014,8 @@ async function collectCommentsFromDom({
     if (foundNew) {
       bottomNudgeCount = 0;
       const context = getActiveCommentsContext();
-      onSnapshot?.(withCommentCollectionReceipt({
+      if (persist) await commentStore.bulkUpsert(allComments);
+      await onSnapshot?.(withCommentCollectionReceipt({
         total: allComments.length,
         comments: [...allComments],
         stopReason: 'in_progress',
@@ -1055,6 +1135,11 @@ async function collectCommentsFromDom({
   return {
     total: allComments.length,
     comments: allComments,
+    traversal: {
+      mainExhausted: finalSignals.hasEndMarker && !(maxTotal > 0 && allComments.length >= maxTotal),
+      repliesExhausted: finalSignals.hasEndMarker && !finalSignals.hasExpandableReplies,
+      identityReliable: !unreliableIdentitySeen && allComments.every(c => c.qualityReason !== 'synthetic_comment_id'),
+    },
     stopReason: riskStopped
       ? 'risk_control'
       : (shouldStop()

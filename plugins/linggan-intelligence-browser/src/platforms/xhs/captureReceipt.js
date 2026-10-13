@@ -65,6 +65,8 @@ function terminalCollectionStop(stopReason = '') {
 // question the operator needs answered: for the requested comment scope, how many did the
 // page show and how many unique comments did this Attempt actually bring back?
 export function buildXhsCommentCollectionReceipt({
+  commentMode,
+  traversal,
   incrementalBudget = null,
   noteId = '',
   maxTotal = 0,
@@ -75,7 +77,8 @@ export function buildXhsCommentCollectionReceipt({
   stopReason = '',
   targetIdentity = 'matched',
 } = {}) {
-  const scope = incrementalBudget ? XHS_COMMENT_COLLECTION_SCOPE.INCREMENTAL_NEW : collectionScope(maxTotal);
+  const scope = commentMode === 'all_public' ? XHS_COMMENT_COLLECTION_SCOPE.ALL_PUBLIC_COMMENTS
+    : incrementalBudget ? XHS_COMMENT_COLLECTION_SCOPE.INCREMENTAL_NEW : collectionScope(maxTotal);
   const received = nonNegative(actual) ?? 0;
   const observedPageCount = nonNegative(publicCommentCount);
   const pageCount = observedPageCount === null && explicitEmptyState ? 0 : observedPageCount;
@@ -89,17 +92,16 @@ export function buildXhsCommentCollectionReceipt({
     || (explicitEmptyState ? 'explicit_empty_state' : 'unknown');
   const identityMatched = targetIdentity === 'matched';
   const identityMismatched = targetIdentity === 'mismatched';
-  // The public count is a page observation, not a quota that forbids returning more facts.
-  // During a long Attempt the page may remain at 594 while 596 stable comment identities are
-  // enumerated.  Reaching or exceeding that observed count completes the all-public target;
-  // the bounded detail window still has to match its requested window exactly.
+  // Displayed public counts describe the page; traversal evidence determines deep completion.
   const receivedSatisfiesExpected = expected !== null
     && (scope === XHS_COMMENT_COLLECTION_SCOPE.ALL_PUBLIC_COMMENTS
       ? received >= expected
       : received === expected);
   const complete = identityMatched
     && !terminalCollectionStop(reason)
-    && receivedSatisfiesExpected;
+    && (scope === XHS_COMMENT_COLLECTION_SCOPE.ALL_PUBLIC_COMMENTS
+      ? (explicitEmptyState || (traversal?.mainExhausted === true && traversal?.repliesExhausted === true && traversal?.identityReliable === true))
+      : receivedSatisfiesExpected);
   const state = identityMismatched
     ? XHS_COMMENT_COLLECTION_STATE.INVALID_TARGET
     : (complete ? XHS_COMMENT_COLLECTION_STATE.COMPLETE : XHS_COMMENT_COLLECTION_STATE.PARTIAL);
@@ -111,6 +113,11 @@ export function buildXhsCommentCollectionReceipt({
     version: 1,
     noteId: text(noteId),
     scope,
+    ...(scope === XHS_COMMENT_COLLECTION_SCOPE.ALL_PUBLIC_COMMENTS ? { traversal: {
+      mainExhausted: traversal?.mainExhausted === true || explicitEmptyState,
+      repliesExhausted: traversal?.repliesExhausted === true || explicitEmptyState,
+      identityReliable: traversal?.identityReliable === true || explicitEmptyState,
+    } } : {}),
     ...(requested === null ? {} : { requestedLimit: requested }),
     pageCommentCount: pageCount,
     expectedCount: expected,

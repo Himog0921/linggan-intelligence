@@ -429,6 +429,8 @@ export class BatchNoteController extends BaseBatchController {
       ? Math.max(0, Math.floor(configuredCommentLimit))
       : 0;
     this._incrementalCommentBudget = settings.incrementalCommentBudget || null;
+    this._commentSessionKey=settings.commentSessionKey || '';
+    this._resumeCommentSessionKey=settings.resumeCommentSessionKey || '';
     this._commentDepthMode = String(settings.commentDepthMode || COMMENT_DEPTH_MODE.TWO_LEVEL).trim() === COMMENT_DEPTH_MODE.ALL_REPLIES
       ? COMMENT_DEPTH_MODE.ALL_REPLIES
       : COMMENT_DEPTH_MODE.TWO_LEVEL;
@@ -441,6 +443,7 @@ export class BatchNoteController extends BaseBatchController {
     this._onDetailReady = typeof settings.onDetailReady === 'function'
       ? settings.onDetailReady
       : null;
+    this._onCommentSnapshot = typeof settings.onCommentSnapshot === 'function' ? settings.onCommentSnapshot : null;
     this._searchFilters = normalizeXhsSearchFilters(settings.searchFilters || {});
     this._searchFilterSnapshot = mode === COLLECT_MODE.SEARCH
       ? readCurrentXhsSearchFilterSnapshot(window)
@@ -906,6 +909,9 @@ export class BatchNoteController extends BaseBatchController {
       taskSpec: this.taskSpec,
       deferLingganDelivery: this._deferLingganDelivery,
       onDetailReady: this._onDetailReady,
+      onCommentSnapshot: this._onCommentSnapshot,
+      commentSessionKey:this._commentSessionKey,
+      resumeCommentSessionKey:this._resumeCommentSessionKey,
       shouldStop: () => !this.isRunning,
       waitIfPaused: () => this._waitIfPaused(),
       onCommentProgress: (progress) => {

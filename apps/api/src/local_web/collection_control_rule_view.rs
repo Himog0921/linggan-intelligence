@@ -250,9 +250,11 @@ pub async fn read_monitor_rule_panel(
     // `read_receipt(None)` 会为普通打开的面板读取最近一条回执，供反馈区展示；这条历史回执
     // 不能覆盖 URL 的 `rule_slot=new`，否则「加一条规则」会退回到旧规则的只读编辑表单。
     // 命令提交后的跳转会显式带 `rule_receipt`，此时才用刚应用的版本定位刚保存的那条规则。
-    let receipt_slot = match receipt_ref
-        .and_then(|_| receipt.as_ref().and_then(|receipt| receipt.applied_rule_revision_ref))
-    {
+    let receipt_slot = match receipt_ref.and_then(|_| {
+        receipt
+            .as_ref()
+            .and_then(|receipt| receipt.applied_rule_revision_ref)
+    }) {
         Some(revision_ref) => {
             sqlx::query_scalar::<_, String>(
                 "SELECT rule.slot_key FROM collection_monitor_rule rule \
@@ -461,7 +463,7 @@ pub fn render_monitor_rule_modal(
               </div>
               <footer class="c-rule-actions">
                 <div class="c-rule-secondary-actions">
-                  <button class="c-btn-quiet" type="submit" name="command_kind" value="manual_observe"{disabled_attr}>人工观察一次</button>
+                  <a class="c-btn-quiet" href="/collection/tasks?once=1&amp;target={target_ref}">立即采一次</a>
                   {pause_or_resume}
                 </div>
                 <button class="c-btn-primary" type="submit" name="command_kind" value="save_rule"{disabled_attr}>保存新版本</button>
@@ -501,10 +503,14 @@ pub fn render_monitor_rule_modal(
         errors = errors_markup(error),
         automatic_checked = checked(form.automatic_enabled),
         creator_follow_option = if panel.target_kind == "creator" {
-            format!(r#"<label class="c-rule-switch">
+            format!(
+                r#"<label class="c-rule-switch">
                     <input type="checkbox" name="creator_follow_details" value="true"{}{disabled_attr}>
                     <span><b>巡查新增后补采详情</b><small>勾选并保存后自动跟进已接纳、尚无详情的巡查新作品；每篇一次详情、媒体及最多 30 条评论。关闭后不再派新单。</small></span>
-                  </label>"#, checked(form.creator_follow_details), disabled_attr=if disabled { " disabled" } else { "" })
+                  </label>"#,
+                checked(form.creator_follow_details),
+                disabled_attr = if disabled { " disabled" } else { "" }
+            )
         } else {
             String::new()
         },
