@@ -156,9 +156,19 @@ def handler(state: ProofState):
             elif path=='/assets/topic-map.css':body='\n'.join((ASSETS/f).read_text() for f in ['lids_tokens.css','shell.css','topic_map.css']);mime='text/css'
             elif path=='/api/local/media/synthetic-cover.svg':
                 body='<svg xmlns="http://www.w3.org/2000/svg" width="84" height="112"><rect width="84" height="112" fill="#f7f8f8"/><path d="M12 12h60v88H12zM20 28h44M20 36h35" fill="none" stroke="#111315"/><text x="18" y="75" font-size="12">合成封面</text></svg>';mime='image/svg+xml'
-            elif path=='/api/local/topic-map':
+            elif path in ('/api/local/topic-map','/api/local/topic-map/summary','/api/local/topic-map/overview'):
                 code=503 if state.mode=='error' else 200
-                body=json.dumps(dict(code='topic_map_not_connected') if code==503 else state.snapshot(parse_qs(url.query)),ensure_ascii=False)
+                result=dict(code='topic_map_not_connected') if code==503 else state.snapshot(parse_qs(url.query))
+                if code==200 and path.endswith('/summary'):
+                    complete=len(result['works'])<=12
+                    result['works']=result['works'][:12]
+                    result['scope']['loadedWorkCount']=len(result['works'])
+                    result['materialPage']=dict(limit=12,returned=len(result['works']),complete=complete)
+                body=json.dumps(result,ensure_ascii=False)
+            elif path=='/api/local/topic-map/evidence':
+                q=parse_qs(url.query);result=state.snapshot(q)
+                result=dict(works=[w for w in result['works'] if w['workRef']==q.get('workRef',[''])[0]],asOf=result['scope']['asOf'])
+                body=json.dumps(result,ensure_ascii=False)
             elif path=='/api/local/topic-map/research':body=json.dumps(dict(policy=dict(status='paused'),currentMethodSummary=dict(succeededCount=0,failedCount=2,unknownDispatchCount=0),runs=[],models=[]))
             elif path.startswith('/api/local/work-resources/'):
                 body=json.dumps(dict(items=[],total=0) if path.endswith('/comments') else dict(item={}))
@@ -179,10 +189,13 @@ def run(out: Path) -> None:
         page=browser.new_page(viewport=dict(width=1440,height=1000))
         page.set_default_timeout(12000)
         page.on('pageerror',lambda e:errors.append(str(e)))
+        def ready():
+            page.locator('.lgi-tm-main[data-loaded="true"]').wait_for()
+            page.locator('section[aria-label="首批材料"]').wait_for(state='detached')
         def fresh(view='overview',mode='normal',extra=''):
             state.mode=mode
             page.goto(origin+f'/topics?tm=1&view={view}'+extra)
-            if mode!='error':page.locator('.lgi-tm-main[data-loaded="true"]').wait_for()
+            if mode!='error':ready()
         def click(action,id=None,base=None):
             selector=f'[data-action="{action}"]'+(f'[data-id="{id}"]' if id is not None else '')
             (base or page).locator(selector).first.click()
@@ -221,7 +234,7 @@ def run(out: Path) -> None:
             click('tab',tab);no_overflow()
             assert page.locator('.lgi-tm-summary .lgi-tm-metrics').count()==1
         passed('all overview views retain statistics and actual content / empty states')
-        click('view','journey');page.locator('.lgi-tm-main[data-loaded="true"]').wait_for()
+        click('view','journey');ready()
         assert page.locator('.lgi-tm-journey-node').count()==5
         assert page.locator('.lgi-tm-sidebar .lgi-tm-tree').count()==1
         baseline=metric_text();basis=page.locator('.lgi-tm-journey-basis').inner_text()
@@ -243,26 +256,26 @@ def run(out: Path) -> None:
         assert page.locator('.lgi-tm-other-stages [data-action="stage"]').count()==4
         passed('scene query never changes summary/map/materials; every actual non-main category remains reachable')
         click('clear-scene-query')
-        page.locator('[data-filter="windowDays"]').select_option('7');page.locator('.lgi-tm-main[data-loaded="true"]').wait_for()
-        page.locator('[data-filter="path"]').select_option('family');page.locator('.lgi-tm-main[data-loaded="true"]').wait_for()
-        click('view','overview');page.locator('.lgi-tm-main[data-loaded="true"]').wait_for()
+        page.locator('[data-filter="windowDays"]').select_option('7');ready()
+        page.locator('[data-filter="path"]').select_option('family');ready()
+        click('view','overview');ready()
         assert page.locator('[data-filter="windowDays"]').input_value()==''
-        last=next(url for method,url in reversed(state.requests) if url.startswith('/api/local/topic-map?'))
+        last=next(url for method,url in reversed(state.requests) if url.startswith('/api/local/topic-map/overview?'))
         assert 'path=' not in last and 'overlay=' not in last
-        click('view','journey');page.locator('.lgi-tm-main[data-loaded="true"]').wait_for()
+        click('view','journey');ready()
         assert page.locator('[data-filter="windowDays"]').input_value()=='7'
         assert page.locator('[data-filter="path"]').input_value()=='family'
         passed('view-specific time windows restore; journey-only constraints cannot silently affect overview')
         fresh('overview',extra='&topicRef=topic-A&windowDays=30&overviewWindowDays=30&journeyWindowDays=7')
         click('judge','topic-A');page.locator('dialog').wait_for(state='visible')
         click('judge-to-journey','topic-A',page.locator('dialog'))
-        page.locator('.lgi-tm-main[data-loaded="true"]').wait_for()
+        ready()
         assert page.locator('[data-filter="windowDays"]').input_value()=='7'
-        last=next(url for method,url in reversed(state.requests) if url.startswith('/api/local/topic-map?'))
+        last=next(url for method,url in reversed(state.requests) if url.startswith('/api/local/topic-map/overview?'))
         assert parse_qs(urlparse(last).query)['windowDays']==['7'],last
-        click('view','overview');page.locator('.lgi-tm-main[data-loaded="true"]').wait_for()
+        click('view','overview');ready()
         assert page.locator('[data-filter="windowDays"]').input_value()=='30'
-        last=next(url for method,url in reversed(state.requests) if url.startswith('/api/local/topic-map?'))
+        last=next(url for method,url in reversed(state.requests) if url.startswith('/api/local/topic-map/overview?'))
         assert parse_qs(urlparse(last).query)['windowDays']==['30'],last
         passed('judgment-to-journey shortcut loads the remembered 7-day window and preserves the 30-day overview window')
         page.locator('#topic-map-view-tabs [data-id="overview"]').press('Tab')
@@ -281,7 +294,7 @@ def run(out: Path) -> None:
         fresh('journey')
         sidebar=page.locator('.lgi-tm-sidebar');sidebar.evaluate('(el)=>el.scrollTop=el.scrollHeight')
         before=sidebar.evaluate('(el)=>el.scrollTop')
-        click('topic','topic-42',sidebar);page.locator('.lgi-tm-main[data-loaded="true"]').wait_for()
+        click('topic','topic-42',sidebar);ready()
         assert sidebar.evaluate('(el)=>el.scrollTop')>=before-30
         assert page.locator('.lgi-tm-main').evaluate('(el)=>el.scrollTop')==0
         passed('topic selection preserves tree scroll, clears local stage and returns to data top')
@@ -313,7 +326,7 @@ def run(out: Path) -> None:
             fresh('journey',mode)
             if mode=='error':
                 page.locator('.lgi-tm-read-error').wait_for();assert page.locator('.lgi-tm-metrics').count()==0
-                state.mode='normal';click('refresh',base=page.locator('.lgi-tm-read-error'));page.locator('.lgi-tm-main[data-loaded="true"]').wait_for()
+                state.mode='normal';click('refresh',base=page.locator('.lgi-tm-read-error'));ready()
             elif mode=='unknown':assert '未设置' in metric_text() and '—' in metric_text()
             elif mode=='partial':assert '3 / 28' in page.locator('.lgi-tm-partial').inner_text()
             elif mode=='no-scenes':assert page.locator('.lgi-tm-evidence-row').count()>0

@@ -341,7 +341,7 @@ async fn health_readiness_separates_an_unreachable_database_from_a_missing_confi
 }
 
 #[tokio::test]
-async fn local_entry_redirects_to_the_evidence_library() {
+async fn local_entry_redirects_to_the_login_page() {
     let response = app()
         .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
         .await
@@ -350,7 +350,7 @@ async fn local_entry_redirects_to_the_evidence_library() {
     assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
     assert_eq!(
         response.headers().get(header::LOCATION).unwrap(),
-        "/corpus/evidence"
+        "/login"
     );
 }
 

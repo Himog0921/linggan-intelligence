@@ -75,6 +75,7 @@
 - 固定位置：Cargo缓存在worktree已忽略target；测试输出与临时浏览器证据放 `/tmp/topic-map-v41-*`；供 Mog 审阅的合成截图保存到 Codex 当前任务授权的 visualizations 目录，文件名 `topic-map-demo-corrected-*.jpg`。Docker容器/volume使用上述脚本唯一随机名。
 - 不入Git，不包含真实原文/运行库dump/凭据；脚本退出清理容器与volume并验证成功。
 - 再生：上述脚本 + API focused tests + 隔离合成数据浏览器走查。责任 TOPIC-MAP-V41-001 root。
+- 首屏后续候选：`/tmp/topic-map-v41-first-screen-api` 为当前worktree最终build的冻结二进制副本，防止共享Cargo缓存被其他构建覆盖；不入Git，不含运行凭据或正文。由本分支 `cargo build -p linggan-api --bin linggan-api --locked` 再生，记录sha256/PID/cwd后仅用于只读3001验证，进程停止后删除副本。
 - 本机发布追加：经 Mog 单独授权的运行库加密备份、校验和与不含正文/凭据的发布回执保存在既有忽略目录 `database/backups/topic-map-v41-<UTC>/`；密钥继续独立保管。真实3000的浏览器截图归本任务 Codex visualizations，文件名 `topic-map-demo-corrected-runtime-*.jpg`，不入Git。合成截图与运行页截图不得互相替代。
 
 
@@ -113,6 +114,7 @@
 - 权威测试源：`scripts/test-topic-map-ui.cjs`、`scripts/test-topic-map-compact-ui.py`，维护源码，不是生成文件。只运行合成 HTTP fixture 与候选 JS/CSS。
 - 源码传递包、补丁、截图与日志：本任务系统临时目录和 Actions artifact（源码包 1 日、验证结果 7 日）；不入 Git、不含真实原文/凭据、不访问模型/平台/正式库。
 - `.github/workflows/topic-map-compact-transfer.yml` 仅用于专属候选分支的版本校验与传递，交付前删除；持续回归另用只读验证 workflow。临时传递仅影响此分支，不强推、不合并或部署。
+
 ## COLLECTION-JTBD-001 / #398 隔离验证
 
 - 来源：`scripts/test-collection-single-run-postgres.sh`、正式 API router 与合成 PostgreSQL、`scripts/test-collection-single-run-ui.cjs`；正式插件 fixture。
@@ -120,3 +122,11 @@
 - 无真实材料、账号、DSN、Cookie 或凭据；交接包六张用户截图只读，不复制进仓库或 CI。
 - 再生：上述脚本加 `COLLECTION_RUN_BROWSER_PROOF=1` 与明确临时证据目录；发布候选按正式插件现有脚本生成，不加载插件。
 - 清理：脚本退出核验删除本次随机容器/卷；浏览器上下文及测试服务器退出关闭，不清理其他任务或业务资源。责任 #398 当前执行者。
+
+## LOGIN-ANATOMY-001
+
+- 固定生成位置：`apps/api/src/local_web/login.html`，允许提交为 Rust include_str 页面资产；禁止手工修改。
+- 唯一源：`scripts/login-anatomy/{page.html,model.mjs,parts.mjs,order.mjs,station.css,live.mjs,build.mjs}`；Anatomy 技能的 MIT kit 仅在生成时使用，许可随源保留。
+- 再生：`node scripts/login-anatomy/build.mjs --audit`，Node 20.10+ 和已安装 Anatomy；`ANATOMY_SKILL_ROOT` 可指定安装位置。页面运行不依赖技能、网络或前端库。
+- 责任：本对话 root / LOGIN-ANATOMY-001；批准来源与局部例外见 [登录规格](../design/changes/login-anatomy-001.md)。生成一致性及模型/遮挡检查由相邻 verify-scene.mjs 执行。
+- 证据：构建审计/姿态 JSON、截图与浏览器步骤输出只放系统临时目录或本任务 Codex visualizations，不进 Git、不含密码/真实材料；正式源码长期保留，替换须随来源重建。

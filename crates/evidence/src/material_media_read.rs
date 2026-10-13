@@ -391,6 +391,8 @@ async fn read_slots_batch(
     content_refs: &[Uuid],
     as_of: &str,
 ) -> Result<HashMap<Uuid, SlotReadProjection>, sqlx::Error> {
+    // Select download/replica heads once for the batch. Per-slot lateral scans
+    // repeatedly traversed every scoped historical replica as the corpus grew.
     let rows = sqlx::query(
         "WITH current_origin AS MATERIALIZED ( \
            SELECT DISTINCT ON (origin.content_public_ref,origin.slot_key) origin.* FROM linggan_material_media_origin origin \
@@ -410,6 +412,27 @@ async fn read_slots_batch(
            WHERE historical_origin.slot_key IN (SELECT slot_key FROM current_origin) \
          ), current_disposition AS MATERIALIZED ( \
            SELECT * FROM linggan_current_material_media_disposition \
+         ), current_download AS ( \
+           SELECT DISTINCT ON(media_observation_ref) * FROM scoped_download \
+           WHERE started_at <= $2::timestamptz ORDER BY media_observation_ref,started_at DESC \
+         ), available_replica AS ( \
+           SELECT DISTINCT ON(materialization.slot_key) materialization.* \
+           FROM historical_materialization materialization \
+           JOIN linggan_media_blob candidate_blob ON candidate_blob.sha256=materialization.blob_sha256 \
+           WHERE materialization.accepted_at <= $2::timestamptz \
+             AND materialization.started_at <= $2::timestamptz AND materialization.verified_at <= $2::timestamptz \
+             AND NOT EXISTS (SELECT 1 FROM current_disposition event \
+               WHERE event.slot_key=materialization.slot_key \
+                 OR event.materialization_ref=materialization.materialization_ref OR event.blob_sha256=candidate_blob.sha256) \
+           ORDER BY materialization.slot_key,materialization.verified_at DESC \
+         ), excluded_replica AS ( \
+           SELECT materialization.slot_key,max(materialization.verified_at) AS verified_at \
+           FROM historical_materialization materialization \
+           WHERE materialization.verified_at <= $2::timestamptz \
+             AND EXISTS (SELECT 1 FROM current_disposition event \
+               WHERE event.slot_key=materialization.slot_key \
+                 OR event.materialization_ref=materialization.materialization_ref OR event.blob_sha256=materialization.blob_sha256) \
+           GROUP BY materialization.slot_key \
          ), slot_rows AS (SELECT origin.content_public_ref,origin.observation_ref,origin.slot_key,origin.purpose,origin.producer_ordinal,origin.display_ordinal, \
              origin.display_order_state,origin.display_order_basis,origin.source_generation,origin.candidate_set_state, \
              origin.composite_state,origin.live_photo_still_state,origin.live_photo_motion_state,observation.observed_at, \
@@ -417,19 +440,11 @@ async fn read_slots_batch(
              replica.materialization_ref,replica.verified_at,replica.materialization_observation_ref, \
              blob.sha256,blob.mime_type,blob.byte_size,blob.pixel_width,blob.pixel_height,blob.duration_ms,relation.subject_kind,relation.subject_external_id,relation.relationship_kind,relation.relationship_ordinal,current_download.download_attempt_ref,current_download.terminal_reason, \
              disposition.restricted AS disposition_restricted,disposition.cleaned AS disposition_cleaned,disposition.slot_restricted, \
-             excluded.newer_disposed AS newer_disposed,count(*) OVER(PARTITION BY origin.content_public_ref) AS total_count, \
+             (excluded.verified_at IS NOT NULL AND (replica.verified_at IS NULL OR excluded.verified_at > replica.verified_at)) AS newer_disposed,count(*) OVER(PARTITION BY origin.content_public_ref) AS total_count, \
              row_number() OVER(PARTITION BY origin.content_public_ref ORDER BY origin.producer_ordinal,origin.slot_key) AS row_ordinal \
          FROM current_origin origin JOIN linggan_media_observation observation USING (observation_ref) \
-         LEFT JOIN LATERAL (SELECT attempt.* FROM scoped_download attempt WHERE attempt.media_observation_ref=origin.observation_ref AND attempt.started_at <= $2::timestamptz ORDER BY attempt.started_at DESC LIMIT 1) current_download ON true \
-         LEFT JOIN LATERAL (SELECT materialization.* \
-             FROM historical_materialization materialization \
-             JOIN linggan_media_blob candidate_blob ON candidate_blob.sha256=materialization.blob_sha256 \
-             WHERE materialization.slot_key=origin.slot_key AND materialization.accepted_at <= $2::timestamptz \
-               AND materialization.started_at <= $2::timestamptz AND materialization.verified_at <= $2::timestamptz \
-               AND NOT EXISTS (SELECT 1 FROM current_disposition event \
-                 WHERE (event.slot_key=origin.slot_key \
-                   OR event.materialization_ref=materialization.materialization_ref OR event.blob_sha256=candidate_blob.sha256)) \
-             ORDER BY materialization.verified_at DESC LIMIT 1) replica ON true \
+         LEFT JOIN current_download ON current_download.media_observation_ref=origin.observation_ref \
+         LEFT JOIN available_replica replica ON replica.slot_key=origin.slot_key \
          LEFT JOIN linggan_media_blob blob ON blob.sha256=replica.blob_sha256 \
          LEFT JOIN linggan_media_resource_relation relation ON relation.slot_key=origin.slot_key \
          LEFT JOIN LATERAL (SELECT bool_or(event.state='WITHDRAWN_OR_RESTRICTED') AS restricted, \
@@ -440,15 +455,7 @@ async fn read_slots_batch(
                OR event.materialization_ref IN (SELECT scoped_materialization.materialization_ref FROM historical_materialization scoped_materialization WHERE scoped_materialization.slot_key=origin.slot_key) \
                OR event.blob_sha256 IN (SELECT scoped_materialization.blob_sha256 FROM historical_materialization scoped_materialization WHERE scoped_materialization.slot_key=origin.slot_key)) \
          ) disposition ON true \
-         LEFT JOIN LATERAL (SELECT EXISTS (SELECT 1 \
-             FROM historical_materialization excluded_materialization \
-             WHERE excluded_materialization.slot_key=origin.slot_key AND excluded_materialization.verified_at <= $2::timestamptz \
-               AND (replica.verified_at IS NULL OR excluded_materialization.verified_at > replica.verified_at) \
-               AND EXISTS (SELECT 1 FROM current_disposition excluded_event \
-                 WHERE (excluded_event.slot_key=origin.slot_key \
-                   OR excluded_event.materialization_ref=excluded_materialization.materialization_ref \
-                   OR excluded_event.blob_sha256=excluded_materialization.blob_sha256))) AS newer_disposed \
-         ) excluded ON true \
+         LEFT JOIN excluded_replica excluded ON excluded.slot_key=origin.slot_key \
           ) SELECT * FROM slot_rows WHERE row_ordinal <= $3 ORDER BY content_public_ref,row_ordinal",
     )
     .bind(content_refs)

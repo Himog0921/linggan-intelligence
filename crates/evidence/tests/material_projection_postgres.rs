@@ -1307,3 +1307,116 @@ async fn assert_topic_overview_matches_detail(
     );
     assert_eq!(compact.media["detailState"], "NOT_LOADED");
 }
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn batched_media_replicas_preserve_cutoff_fallback_and_global_dispositions() {
+    let db = proof_database("material_batched_replicas").await;
+    let domain: Uuid = "00000000-0000-4000-8000-000000000001".parse().unwrap();
+    let mut refs = Vec::new();
+    let mut latest = Vec::new();
+    for work in 0..2 {
+        let id = format!("synthetic-batch-{work}");
+        submit_package(&db, "content_detail", serde_json::json!({"contentExternalId":id}),
+            serde_json::json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":id},"payload":{"title":"合成批次媒体"}})).await;
+        for slot in 1..=2 {
+            let observation = Uuid::new_v4();
+            submit_package(&db, "media_slots", serde_json::json!({"contentExternalId":id}),
+                serde_json::json!({"kind":"media_slot","slotKey":format!("xhs:{id}:image:{slot}"),"slot":{"role":"image","ordinal":slot},"sourceObject":{"platform":"xhs","type":"content","externalId":id},"observation":{"externalUri":"https://media.example/synthetic.jpg","candidateUris":["https://media.example/synthetic.jpg"]},"observationRef":observation})).await;
+            let old = format!("{:064x}", 10 + work * 2 + slot);
+            admit_media_blob(
+                &db,
+                observation,
+                &old,
+                "image/jpeg",
+                4,
+                &format!("blobs/synthetic/{old}"),
+            )
+            .await
+            .unwrap();
+            latest.push((observation, format!("{:064x}", 20 + work * 2 + slot)));
+        }
+        let reference: Uuid = sqlx::query_scalar(
+            "SELECT public_ref FROM linggan_material_content WHERE content_external_id=$1",
+        )
+        .bind(id)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        refs.push(reference);
+        sqlx::query("INSERT INTO linggan_material_domain_usage(usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref)SELECT gen_random_uuid(),public_ref,$2,'primary','legacy_domain_migration',first_package_ref FROM linggan_material_content WHERE public_ref=$1")
+            .bind(reference).bind(domain).execute(db.pool()).await.unwrap();
+    }
+    let cutoff: String = sqlx::query_scalar("SELECT scope_001_now()::text")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    for (observation, sha) in &latest {
+        admit_media_blob(
+            &db,
+            *observation,
+            sha,
+            "image/jpeg",
+            4,
+            &format!("blobs/synthetic/{sha}"),
+        )
+        .await
+        .unwrap();
+    }
+    let frozen = linggan_evidence::read_work_resource_overviews(&db, domain, &refs, &cutoff)
+        .await
+        .unwrap();
+    for (index, reference) in refs.iter().enumerate() {
+        let item = frozen
+            .iter()
+            .find(|w| w.identity.public_ref == *reference)
+            .unwrap();
+        assert!(
+            item.media["cover"]["localAssetUrl"]
+                .as_str()
+                .unwrap()
+                .ends_with(&format!("{:064x}", 11 + index * 2))
+        );
+    }
+    // A cleaned newer replica falls back to the older qualified bytes; the other
+    // work's slot restriction applies to every generation and cannot bleed across slots.
+    sqlx::query("INSERT INTO linggan_material_media_disposition_event(event_ref,materialization_ref,state,authority_ref,reason,effective_at)SELECT gen_random_uuid(),materialization_ref,'BYTES_CLEANED','synthetic-batch','synthetic cleanup',clock_timestamp() FROM linggan_media_materialization WHERE blob_sha256=$1")
+        .bind(&latest[0].1).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_material_media_disposition_event(event_ref,slot_key,state,authority_ref,reason,effective_at)VALUES(gen_random_uuid(),'xhs:synthetic-batch-1:image:1','WITHDRAWN_OR_RESTRICTED','synthetic-batch','synthetic restriction',clock_timestamp())")
+        .execute(db.pool()).await.unwrap();
+    let now: String = sqlx::query_scalar("SELECT scope_001_now()::text")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    let batch = linggan_evidence::read_work_resource_overviews(&db, domain, &refs, &now)
+        .await
+        .unwrap();
+    for (index, reference) in refs.iter().enumerate() {
+        let compact = batch
+            .iter()
+            .find(|w| w.identity.public_ref == *reference)
+            .unwrap();
+        let full = read_work_resource(&db, *reference).await.unwrap().unwrap();
+        assert_eq!(compact.media["cover"], full.media["cover"]);
+        let expected = if index == 0 {
+            format!("{:064x}", 11)
+        } else {
+            latest[3].1.clone()
+        };
+        assert!(
+            compact.media["cover"]["localAssetUrl"]
+                .as_str()
+                .unwrap()
+                .ends_with(&expected)
+        );
+        if index == 0 {
+            assert!(
+                full.inspector["limitations"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|v| v == "NEWER_MATERIALIZATION_DISPOSED")
+            );
+        }
+    }
+}

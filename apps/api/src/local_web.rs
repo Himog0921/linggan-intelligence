@@ -21,6 +21,7 @@ mod evidence_page;
 mod full_schema_fixture;
 mod local_asset_delivery;
 mod local_media_routes;
+mod login;
 #[cfg(test)]
 mod material_asset_route_fixture;
 #[cfg(test)]
@@ -287,6 +288,7 @@ fn collection_api_routes() -> Router<LocalWebState> {
 fn router(state: LocalWebState) -> Router {
     Router::new()
         .route("/", get(local_entry))
+        .route("/login", get(login::page))
         .route("/health", get(health))
         .route("/api/local/discovery-packages", post(discovery_ingress))
         .route(
@@ -340,7 +342,7 @@ fn router(state: LocalWebState) -> Router {
         .merge(collection_domain_modal::routes())
         .merge(creators::routes())
         .merge(topic_workspace::routes())
-        .merge(topic_map::routes())
+        .merge(topic_map::routes(state.database.database().cloned()))
         .merge(comment_study::routes())
         .merge(model_settings::routes())
         .merge(ops::routes())
@@ -466,7 +468,7 @@ fn material_api_routes() -> Router<LocalWebState> {
 }
 
 async fn local_entry() -> Redirect {
-    Redirect::temporary("/corpus/evidence")
+    Redirect::temporary("/login")
 }
 
 /// Each primary responsibility owns an entry route, and that route is the single place its

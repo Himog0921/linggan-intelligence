@@ -8,6 +8,7 @@ mod saved;
 #[path = "topic_map/store.rs"]
 mod store;
 pub use read::read_topic_map;
+pub mod read_model;
 pub use saved::{
     TopicMapSavedAlternative, TopicMapSavedFragment, TopicMapSavedRange, read_saved_alternative,
 };
@@ -29,7 +30,7 @@ pub const MAIN_STAGES: [&str; 5] = [
 ];
 pub const OTHER_STAGES: [&str; 4] = ["cross_stage", "general_background", "unclear", "pending"];
 pub const OVERLAYS: [&str; 2] = ["obstruction_recurrence", "transition_handoff"];
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TopicMapQuery {
     pub domain_ref: Option<Uuid>,
