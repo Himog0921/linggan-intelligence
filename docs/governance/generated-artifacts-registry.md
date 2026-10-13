@@ -99,3 +99,17 @@
 - 维护的测试源：`scripts/test-ops-ledger-postgres.sh`、`crates/intelligence/tests/ops_ledger_import_postgres.rs` 与 `tests/support/ops_export_fixture.rs`（全部是合成数据）；不是生成代码。PG 容器和卷由脚本随机命名，退出时删除并核验。
 - 真实导出：只在 Mog 本机「下载」目录原地读取，不复制、不入 Git、不进测试。演练用一次性容器（无宿主 volume），只输出不含账号名、标题、链接和运营人名的聚合 JSON，放执行会话的临时目录，不入 Git；容器结束即删除。
 - 正式导入（须 Mog 另行授权）的输出同样只含聚合数，回执写入 `linggan_ops_import_batch`；导入前按既有做法备份共享库，备份不入 Git。
+
+
+## OPS-MIGRATION-001 D2 / Issue #405 页面走查与封面迁入
+
+- 维护的测试源：`crates/intelligence/tests/ops_ledger_read_postgres.rs`（合成数据）与 `apps/api/src/local_web/ops.test.mjs`，由 `scripts/test-ops-ledger-postgres.sh` 统一运行；不是生成代码。
+- 页面走查：共享库的一次性完整副本放在随机命名的 Docker 容器里，执行 0124 后由候选服务在 `127.0.0.1:3100` 读取；走查结束删除容器。截图、页面计量结果、导出样本和走查脚本都放执行会话的临时目录，含真实账号名与运营人名，不入 Git，会话结束删除。
+- 走查用的封面是程序生成的色块图，只写入副本和临时媒体目录。
+- 正式封面迁入（须 Mog 拷来文件并另行授权）：`linggan-ops-history-import cover-preview|cover-apply`，文件按内容哈希放在运行时媒体目录的 `ops-covers/`，命令只输出聚合数；Mog 拷来的原始文件和命令输出都不入 Git。
+
+## TOPIC-MAP-COMPACT-382 隔离 UI 验证
+
+- 权威测试源：`scripts/test-topic-map-ui.cjs`、`scripts/test-topic-map-compact-ui.py`，维护源码，不是生成文件。只运行合成 HTTP fixture 与候选 JS/CSS。
+- 源码传递包、补丁、截图与日志：本任务系统临时目录和 Actions artifact（源码包 1 日、验证结果 7 日）；不入 Git、不含真实原文/凭据、不访问模型/平台/正式库。
+- `.github/workflows/topic-map-compact-transfer.yml` 仅用于专属候选分支的版本校验与传递，交付前删除；持续回归另用只读验证 workflow。临时传递仅影响此分支，不强推、不合并或部署。

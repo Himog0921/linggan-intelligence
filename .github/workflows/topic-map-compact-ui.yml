@@ -1,0 +1,29 @@
+name: Topic Map compact UI
+on:
+  pull_request:
+    paths:
+      - 'apps/api/src/local_web/topic_map.*'
+      - 'apps/api/src/local_web/shell.*'
+      - 'apps/api/src/local_web/lids_tokens.css'
+      - 'scripts/test-topic-map-ui.cjs'
+      - 'scripts/test-topic-map-compact-ui.py'
+      - '.github/workflows/topic-map-compact-ui.yml'
+permissions:
+  contents: read
+jobs:
+  ui:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - run: node --check apps/api/src/local_web/topic_map.js && node scripts/test-topic-map-ui.cjs
+      - run: python -m pip install playwright==1.57.0 && python -m playwright install --with-deps chromium
+      - run: python scripts/test-topic-map-compact-ui.py --output "$RUNNER_TEMP/topic-map-compact-proof"
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: topic-map-compact-ui
+          path: ${{ runner.temp }}/topic-map-compact-proof
+          retention-days: 7

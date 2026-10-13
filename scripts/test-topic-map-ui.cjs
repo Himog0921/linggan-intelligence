@@ -7,7 +7,7 @@ const blank={replaceChildren(){},addEventListener(){},querySelector(){return nul
 const ctx={document:{getElementById(){return blank},createElement(){return {...blank}},activeElement:null},sessionStorage:{getItem(){return null}},location:{search:'',href:'http://127.0.0.1:3109/topics',origin:'http://127.0.0.1:3109'},URL,URLSearchParams,crypto:require('node:crypto').webcrypto,FormData:class{constructor(f){this.f=f}get(k){return this.f.values?.[k]}getAll(k){return this.f.arrays?.[k]||[]}},fetch:null,console,window:{addEventListener(){}},history:{pushState(){},replaceState(){}}};
 const tail=/  load\(\);\n\}\)\(\);\s*$/;let src=fs.readFileSync(sourcePath,'utf8');assert(tail.test(src),'known topic-map initialization boundary');
 const initializationSource=src.replace(tail,'globalThis.initialState=state;})();');
-src=src.replace(tail,`globalThis.audit={refreshReadiness,openResearch,refreshResearch,readiness,setProgressError(value){progressError=value;},matchesWork,workspaceWorks,emptyWorkspace,overview,journey,sidebar,publishedTime,scope(values){Object.assign(state,values);},dispatchClick,readSample,readWork,readerDialog,replaceSamplesDialog,submitDialog,topicBoundary,discussionUnits,discussionGroups,conceptDecisionDetails,discussionsView,performancePair,curated,researchCoverage,researchPhases,researchCoverageCounts,tree,researchDialog,citationText,citationSpans,bodyCitations,readerDiscussions,allCitations,sharesDiscussion,anglesFrom,opportunitiesFrom,anglesView,productContent,sceneList,commentFragmentCount,comparisonScopeNote,set(s,d,stack=[]){snapshot=s;dialogState=d;dialogStack=stack;state.domainRef='domain';state.topicRef='topic-A';},get(){return dialogState;}};drawDialog=()=>{};render=()=>{};load=async()=>{};openDialog=(type,data)=>{if(dialogState)dialogStack.push(dialogState);dialogState={type,...data};};})();`);vm.runInNewContext(src,ctx);
+src=src.replace(tail,`globalThis.audit={metrics,readoutNumber,rulesDialog,summary,controls,query,sceneGroups,dialogBody,materialRows,getScope(){return {...state};},refreshReadiness,openResearch,refreshResearch,readiness,setProgressError(value){progressError=value;},matchesWork,workspaceWorks,emptyWorkspace,overview,journey,sidebar,publishedTime,scope(values){Object.assign(state,values);},dispatchClick,readSample,readWork,readerDialog,replaceSamplesDialog,submitDialog,topicBoundary,discussionUnits,discussionGroups,conceptDecisionDetails,discussionsView,performancePair,curated,researchCoverage,researchPhases,researchCoverageCounts,tree,researchDialog,citationText,citationSpans,bodyCitations,readerDiscussions,allCitations,sharesDiscussion,anglesFrom,opportunitiesFrom,anglesView,productContent,sceneList,commentFragmentCount,comparisonScopeNote,set(s,d,stack=[]){snapshot=s;dialogState=d;dialogStack=stack;state.domainRef='domain';state.topicRef='topic-A';},get(){return dialogState;}};drawDialog=()=>{};render=()=>{};load=async()=>{};openDialog=(type,data)=>{if(dialogState)dialogStack.push(dialogState);dialogState={type,...data};};})();`);vm.runInNewContext(src,ctx);
 (async()=>{
  const restoredScope={domainRef:'domain-A',topicRef:'OLD_TOPIC',platform:'xhs',windowDays:'7',path:'family',overlay:'obstruction_recurrence',query:'OLD_QUERY',compare:['OLD_TOPIC']};
  const initialize=search=>{
@@ -319,7 +319,7 @@ src=src.replace(tail,`globalThis.audit={refreshReadiness,openResearch,refreshRes
  ctx.audit.scope({stage:'',query:'',materialMode:'high'});assert.equal(ctx.audit.workspaceWorks().length,0,'unconfigured rule cannot classify low/high');
  assert(ctx.audit.emptyWorkspace().includes('规则未知'));
  assert(!ctx.audit.publishedTime(workflowWorks[0]).includes('1789742392000'));assert.equal(ctx.audit.publishedTime({publishedAt:'1789742392000',publishedAtSourceText:'昨天'}),'昨天');
- assert(ctx.audit.sidebar().includes('aria-label="主题图谱视图"'));assert(ctx.audit.sidebar().includes('内容回应的阶段'));
+ assert(ctx.audit.sidebar().includes('稳定主题结构'));assert(!ctx.audit.sidebar().includes('aria-label="主题图谱视图"'));assert(ctx.audit.journey().includes('aria-label="旅程呈现方式"'));
  console.log('PASS: shared keyword/stage intersection, object preview and discussion matches, unknown rule, empty recovery and source-time display');
  const manual={type:'save',manual:true,topicRef:'',kind:'angle',angle:{workRef:'P',evidenceWorkRefs:['P'],title:'人工题目',label:'',answerTask:'',researchMethodVersion:'topic-map.manual.v1'}};
  ctx.audit.set(workflowSnapshot,manual);await ctx.audit.submitDialog({preventDefault(){},target:{dataset:{form:'save'},values:{title:'人工题目',angle:'人工判断',rationale:'来自原作'}}});
@@ -333,7 +333,7 @@ src=src.replace(tail,`globalThis.audit={refreshReadiness,openResearch,refreshRes
  ctx.audit.set({...workflowSnapshot,works:[...workflowWorks,{workRef:'unreadable',readable:false,mainStage:'pending'}]},null);
  ctx.audit.scope({view:'journey',stage:'pending',query:'',metric:'involved',materialMode:'latest',topicRef:''});
  assert.deepEqual(Array.from(ctx.audit.workspaceWorks(),w=>w.workRef).sort(),['D','P']);
- assert(ctx.audit.sidebar().includes('data-id="pending"'));
+ assert(ctx.audit.journey().includes('data-id="pending"'));
  assert(!ctx.audit.publishedTime({publishedAtSourceText:'1789742392000'}).includes('1789742392000'));
  ctx.audit.setProgressError('synthetic failure');
  ctx.fetch=async()=>({ok:true,json:async()=>({policy:{status:'active'}})});
@@ -357,6 +357,87 @@ src=src.replace(tail,`globalThis.audit={refreshReadiness,openResearch,refreshRes
 
  ctx.audit.set(commentSnapshot,null);await ctx.audit.dispatchClick({target:{closest(){return{dataset:{action:'manual-save',id:commentOnly.workRef}}}}});assert.equal(ctx.audit.get(),null,'comment-only sources remain readable but cannot freeze absent author text');
  console.log('PASS: research retry and pause synchronize main status; other stages retain qualified refs in involved mode; manual requires author source');
+
+
+ ctx.audit.set(workflowSnapshot,null);ctx.audit.scope({topicRef:'',view:'journey',tab:'content',query:'',sceneQuery:'',stage:'',metric:'main',mapMode:'map',materialMode:'latest',path:'family',overlay:'obstruction_recurrence',windowDays:'7'});
+ const summaryBefore=ctx.audit.summary();
+ assert.equal((summaryBefore.match(/aria-label="基础概览指标"/g)||[]).length,1);
+ const mapHtml=ctx.audit.journey();assert(mapHtml.indexOf('lgi-tm-map-shell')<mapHtml.indexOf('aria-label="匹配材料"'));
+ for(const name of ['主阶段分布','阶段涉及率','地图','列表','跨阶段综合','通用背景','已分析但阶段不明','待分析 / 材料不足'])assert(mapHtml.includes(name),name);
+ ctx.audit.scope({stage:'begin_practice',metric:'involved',mapMode:'list',sceneQuery:'unmatched'});
+ assert.equal(ctx.audit.summary(),summaryBefore,'stage, metric, view and scene query cannot change E');
+ const listHtml=ctx.audit.journey();assert(listHtml.includes('lgi-tm-journey-table'));assert(!listHtml.includes('lgi-tm-map-shell'));
+ assert(listHtml.includes('当前阶段材料'));assert(listHtml.includes('没有匹配的已研究场景'));
+ assert(ctx.audit.query().includes('path=family')&&ctx.audit.query().includes('overlay=obstruction_recurrence'));
+ ctx.audit.scope({view:'overview',stage:'begin_practice',query:'does-not-match',tab:'sources'});
+ assert(!ctx.audit.query().includes('path=')&&!ctx.audit.query().includes('overlay='));
+ assert(!ctx.audit.controls().includes('data-filter="path"'));
+ assert.equal(ctx.audit.workspaceWorks().length,3,'overview analysis never inherits hidden journey stage or content-only query');
+ assert.equal(ctx.audit.sceneGroups(workflowWorks,'unmatched').length,0);
+ ctx.audit.set({...workflowSnapshot,topics:[{topicRef:'restricted',displayName:'SECRET_TITLE',definitionText:'SECRET_TEXT',aliases:['SECRET_ALIAS'],core:{sourceState:'source_unavailable'}}]},{type:'definition',topicRef:'restricted'});
+ const def=ctx.audit.dialogBody();assert(!def.includes('SECRET'));assert(def.includes('来源当前受限'));
+ const urlMap=initialize('?tm=1&view=journey&mapMode=map&metric=involved&windowDays=7&overviewWindowDays=30&journeyWindowDays=7&sceneQuery=场景');
+ assert.equal(urlMap.mapMode,'map');assert.equal(urlMap.overviewWindowDays,'30');assert.equal(urlMap.journeyWindowDays,'7');assert.equal(urlMap.sceneQuery,'场景');
+ assert.equal(initialize('?tm=1&mapMode=invalid').mapMode,'map');
+ console.log('PASS: compact E, permanent dual journey controls, all actual categories, view-local query boundaries and restricted definitions');
+ const priorWindowScope=ctx.audit.getScope();
+ blank.contains=()=>true;
+ const clickWindow=async(action,id='')=>ctx.audit.dispatchClick({target:{closest(){return{dataset:{action,id}}}}});
+ try {
+   ctx.audit.set(workflowSnapshot,null);
+   ctx.audit.scope({view:'overview',windowDays:'30',overviewWindowDays:'30',journeyWindowDays:'7',stage:'begin_practice'});
+   await clickWindow('judge-to-journey','topic-A');
+   assert.equal(ctx.audit.getScope().view,'journey');
+   assert.equal(ctx.audit.getScope().windowDays,'7','judgment shortcut must use the remembered journey window');
+   assert.equal(ctx.audit.getScope().overviewWindowDays,'30');
+   assert.equal(ctx.audit.getScope().stage,'');
+   assert.equal(new URLSearchParams(ctx.audit.query()).get('windowDays'),'7');
+   await clickWindow('view','overview');
+   assert.equal(ctx.audit.getScope().windowDays,'30','normal return must preserve the original overview window');
+   await clickWindow('view','journey');
+   await clickWindow('changes-mode','changes');
+   assert.equal(ctx.audit.getScope().view,'overview');
+   assert.equal(ctx.audit.getScope().windowDays,'30','structure shortcut must restore the overview window');
+   assert.equal(ctx.audit.getScope().journeyWindowDays,'7');
+   await clickWindow('browse-pending');
+   assert.equal(ctx.audit.getScope().view,'journey');
+   assert.equal(ctx.audit.getScope().stage,'pending');
+   assert.equal(ctx.audit.getScope().windowDays,'','pending recovery explicitly resets its scope to all time');
+   assert.equal(ctx.audit.getScope().journeyWindowDays,'');
+   await clickWindow('view','overview');
+   assert.equal(ctx.audit.getScope().windowDays,'30','pending recovery must not clear the overview memory');
+   await clickWindow('view','journey');
+   assert.equal(ctx.audit.getScope().windowDays,'','journey must remember the explicit all-time reset');
+   await clickWindow('view','overview');
+   await clickWindow('reset-scope');
+   assert.equal(ctx.audit.getScope().overviewWindowDays,'');
+   await clickWindow('view','journey');
+   await clickWindow('view','overview');
+   assert.equal(ctx.audit.getScope().windowDays,'','cleared overview conditions must not reappear after a round trip');
+ } finally { blank.contains=()=>false;ctx.audit.scope(priorWindowScope); }
+ console.log('PASS: judgment, structure and ordinary view transitions restore independent windows; explicit resets stay all-time');
+ const xhsOnly={...workflowSnapshot,statistics:{workCount:3,authorCount:2,unknownAuthorCount:0,platforms:[{platform:'xhs',workCount:3,knownLikeCount:2,unknownLikeCount:1,highPerformanceThreshold:1000,highPerformanceCount:1,medianLikes:85,p90Likes:1700},{platform:'douyin',workCount:0,knownLikeCount:0,highPerformanceThreshold:null}]}};
+ ctx.audit.set(xhsOnly,null);ctx.audit.scope({topicRef:'',view:'overview',tab:'content',platform:'',stage:'',query:''});
+ assert(!ctx.audit.controls().includes('data-filter="platform"'));
+ assert(!ctx.audit.controls().includes('data-form="search"'));
+ const readout=ctx.audit.summary();
+ assert(readout.includes('lgi-tm-totals')&&readout.includes('lgi-tm-performance-table'));
+ assert(readout.includes('50.0%')&&readout.includes('点赞中位数')&&readout.includes('P90 点赞'));
+ assert(!readout.includes('抖音'));
+ assert(!ctx.audit.rulesDialog().includes('抖音'));
+ assert(ctx.audit.overview().includes('data-form="search"'));
+ ctx.audit.scope({platform:'douyin'});
+ assert(ctx.audit.controls().includes('value="douyin" selected'),'an explicit old filter cannot be hidden or silently changed');
+ ctx.audit.scope({platform:''});
+ assert(ctx.audit.readoutNumber(0).includes('>0</span>'));
+ assert(ctx.audit.readoutNumber(null).includes('>—</span>'));
+ assert(ctx.audit.readoutNumber(123456789).includes('title="123,456,789"'));
+ const mixed={...xhsOnly,statistics:{...xhsOnly.statistics,platforms:[...xhsOnly.statistics.platforms.filter(p=>p.platform==='xhs'),{platform:'douyin',workCount:1,knownLikeCount:1,highPerformanceThreshold:1000,highPerformanceCount:0}]}};
+ ctx.audit.set(mixed,null);ctx.audit.scope({topicRef:''});
+ assert(ctx.audit.summary().includes('抖音'),'actual returned other-platform data must not be relabeled or discarded');
+ assert(ctx.audit.controls().includes('value="douyin"'));
+ console.log('PASS: no future platform positions, visible old filters, single-platform rule form, stable readout semantics and exact large values');
+
 
 
 })().catch(e=>{console.error(e);process.exitCode=1});

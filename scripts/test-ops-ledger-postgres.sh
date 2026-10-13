@@ -8,6 +8,8 @@ cd "$project_root"
 cargo test -p linggan-intelligence --lib --locked ops_ledger
 cargo test -p linggan-intelligence --test ops_ledger_import_postgres --locked \
   full_schema_fixtures_record_the_actual_ops_ledger_migration_digest -- --exact
+cargo test -p linggan-api --locked -- ops shell
+node --test apps/api/src/local_web/ops.test.mjs
 
 # Statement counters are database-wide. Keep all proof suites serial; a caller
 # cannot raise this and introduce races between reset/measurement windows.
@@ -30,12 +32,12 @@ postgres_image="linggan-intelligence-postgres-pgvector:16.14-v0.8.0-r1"
 # Fail before creating resources rather than relying on a sparse Docker disk to grow.
 proof_free_kib="$(df -Pk "$project_root" | awk 'NR == 2 {print $4}')"
 if [[ ! "$proof_free_kib" =~ ^[0-9]+$ || "$proof_free_kib" -lt 2097152 ]]; then
-  echo "OPS-MIGRATION-001 D1 proof requires at least 2 GiB free on the host; no resources were created" >&2
+  echo "OPS-MIGRATION-001 proof requires at least 2 GiB free on the host; no resources were created" >&2
   exit 1
 fi
 
 if ! docker info >/dev/null 2>&1; then
-  echo "OPS-MIGRATION-001 D1 PostgreSQL proof was not started: the Docker daemon is unavailable. No proof database, container, or volume was created." >&2
+  echo "OPS-MIGRATION-001 PostgreSQL proof was not started: the Docker daemon is unavailable. No proof database, container, or volume was created." >&2
   exit 1
 fi
 "$project_root/scripts/runtime/build-pgvector-image.sh" --ensure
@@ -45,7 +47,7 @@ cleanup() {
   trap - EXIT
   cleanup_failed=0
   if [[ "${proof_database_created:-0}" -eq 0 && "${proof_container_created:-0}" -eq 0 && "${proof_volume_created:-0}" -eq 0 ]]; then
-    echo "OPS-MIGRATION-001 D1 PostgreSQL proof created no resources; cleanup was not required"
+    echo "OPS-MIGRATION-001 PostgreSQL proof created no resources; cleanup was not required"
     exit "$task_exit"
   fi
   if [[ "${proof_database_created:-0}" -eq 1 ]]; then
@@ -55,12 +57,12 @@ cleanup() {
   fi
   [[ "${proof_container_created:-0}" -eq 0 ]] || docker rm -f "$proof_container" >/dev/null || cleanup_failed=1
   [[ "${proof_volume_created:-0}" -eq 0 ]] || docker volume rm "$proof_volume" >/dev/null || cleanup_failed=1
-  [[ "$cleanup_failed" -eq 0 ]] || { echo "OPS-MIGRATION-001 D1 PostgreSQL proof cleanup failed" >&2; exit 1; }
-  echo "OPS-MIGRATION-001 D1 PostgreSQL proof cleanup verified; isolated database, container, and volume were removed"
+  [[ "$cleanup_failed" -eq 0 ]] || { echo "OPS-MIGRATION-001 PostgreSQL proof cleanup failed" >&2; exit 1; }
+  echo "OPS-MIGRATION-001 PostgreSQL proof cleanup verified; isolated database, container, and volume were removed"
   exit "$task_exit"
 }
 trap cleanup EXIT
-printf 'OPS-MIGRATION-001 D1 proof resources: database=%s container=%s volume=%s\n' "$proof_database" "$proof_container" "$proof_volume"
+printf 'OPS-MIGRATION-001 proof resources: database=%s container=%s volume=%s\n' "$proof_database" "$proof_container" "$proof_volume"
 
 docker volume create "$proof_volume" >/dev/null
 proof_volume_created=1
@@ -78,4 +80,5 @@ docker exec "$proof_container" psql -X -v ON_ERROR_STOP=1 -U "$proof_user" -d "$
 export LOCAL_001_PROOF_DATABASE_URL="postgresql://${proof_user}:${proof_password}@127.0.0.1:${proof_port}/${proof_database}"
 # Synthetic exports only; real operation exports never enter this proof.
 cargo test -p linggan-intelligence --test ops_ledger_import_postgres --locked -- --ignored --nocapture --test-threads=1
-echo "OPS-MIGRATION-001 D1 PostgreSQL proof passed"
+cargo test -p linggan-intelligence --test ops_ledger_read_postgres --locked -- --ignored --nocapture --test-threads=1
+echo "OPS-MIGRATION-001 PostgreSQL proof passed"
