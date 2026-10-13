@@ -46,7 +46,7 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发，并于 2026-10-02 
 | [decisions/0007-ocr-content-layering.md](decisions/0007-ocr-content-layering.md) | 权威当前 | OCR 原始事实、内容分层、视觉选择边界和展示标题来源的长期决定 |
 | [decisions/0008-peer-domains-and-unified-material-pipeline.md](decisions/0008-peer-domains-and-unified-material-pipeline.md) | 权威当前 | 平级 Domain、共享真实 Target、primary/reference 用途、统一材料链与 Domain pause 的长期决定 |
 | [decisions/0009-stage-one-job-topic-pool.md](decisions/0009-stage-one-job-topic-pool.md) | 权威当前 | 第一阶段主 Job：小红书选题池经营（复用与试新、爆款标准、成功指标、升级条件）、运营模块整体迁入与先后顺序；所取代的旧条款与待裁定事项 |
-| [plans/active/ops-module-migration-001.md](plans/active/ops-module-migration-001.md) | 活跃计划；D1（Issue #402）候选完成、待 Mog 授权审核与合并；D2–D6 未派定 | 内容工作台运营管理迁入：已确认范围、六步交付与先后、切换时不两边同时录、各步验收、做到时再问的事项与 D1 对账回执 |
+| [plans/active/ops-module-migration-001.md](plans/active/ops-module-migration-001.md) | 活跃计划；D1（Issue #402）已开 PR，待审查与合并；D2–D6 未派定 | 内容工作台运营管理迁入：已确认范围、六步交付与先后、切换时不两边同时录、各步验收、做到时再问的事项与 D1 对账回执 |
 | [data-contracts/ops-ledger-001.md](data-contracts/ops-ledger-001.md) | 权威当前；分支候选，未合并 | 运营台账五张表的含义、内容工作台导出的导入规则 `ops-import.v1`（校验、重复登记合并、阅读量填报、消失记录标记、预览指纹）、新旧对账口径与 D2/D3 读取约定 |
 | [data-contracts/ocr-content-layering.md](data-contracts/ocr-content-layering.md) | 权威当前 | OCR raw/layout/行引用、分层状态、标题回退与视觉模型输出闭集 |
 | [runbooks/paddle-ocr-runtime.md](runbooks/paddle-ocr-runtime.md) | 权威当前 | 本机 Paddle runtime 准备、无 Tesseract 回退、迁移后受控重排步骤 |

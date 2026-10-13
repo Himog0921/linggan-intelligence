@@ -8,7 +8,7 @@
 
 ## 当前状态
 
-迁移范围已经确认。D1 已于 2026-10-13 派定（Issue #402），在分支 `feat/ops-migration-d1` 实现完成，隔离证明和真实导出演练通过（见 D1 回执）；独立审核、合并、共享库执行迁移与导入、新建卢叔数学领域都还等 Mog 授权。D2–D6 没有派定。
+迁移范围已经确认。D1 已于 2026-10-13 派定（Issue #402），在分支 `feat/ops-migration-d1` 实现完成，隔离证明和真实导出演练通过（见 D1 回执）。经 Mog 授权已推送分支并开 PR（关联 Issue #402），由 Mog 另派 agent 审查；合并、部署、共享库执行迁移与导入、新建卢叔数学领域都等 Mog 在审查后决定。D2–D6 没有派定。
 
 每一步都是受保护交付，要由 Mog 单独派定（Issue、专属 worktree、PR），独立审核的时机也由 Mog 决定。本计划本身不授权任何实现，包括 migration、共享库写入、部署、真实采集和对内容工作台的改动。
 
@@ -63,7 +63,7 @@ D5 建议在切换前完成，这样运营只需要改一次习惯（只补阅�
 ### D1 · 运营数据底座与历史迁入
 
 - **用户结果**：工作台的账号、发布记录、每日数据进入 Linggan，逐项和工作台对得上。
-- **状态**：已派定（Issue #402），实现完成，待 Mog 授权（见文末「D1 回执」）。
+- **状态**：已派定（Issue #402），实现完成，已开 PR 等待审查；合并与上线由 Mog 在审查后决定（见文末「D1 回执」）。
 - **范围**：
   - **新建表**：账号（含业务领域归属）、发布记录、阅读量填报记录（只追加，记录谁、何时、填了多少）、每日数据（链接打开、加微），外加导入批次（来源标记）。数据含义与导入规则见 [OPS-LEDGER-001](../../data-contracts/ops-ledger-001.md)。
   - **来源标记**：每条迁入记录保存原记录号、导出时间和导入批次。
@@ -171,7 +171,7 @@ D5 建议在切换前完成，这样运营只需要改一次习惯（只补阅�
 
 | 时机 | 问题 |
 |---|---|
-| D1 | 独立审核的时机；合并后在共享库执行迁移 0123 和历史导入、新建卢叔数学领域的授权；数学内容过半那个账号的归属（推荐留在 ADHD）。目标与分组已查明不能导出，按原定由 Mog 在对应页面上线后手动录入 |
+| D1 | 合并后在共享库执行迁移 0123 和历史导入、新建卢叔数学领域的授权；数学内容过半那个账号的归属（推荐留在 ADHD）。审查由 Mog 另派 agent 对 PR 进行（2026-10-13 定）。目标与分组已查明不能导出，按原定由 Mog 在对应页面上线后手动录入 |
 | D2 开工前 | 历史封面图怎么显示：510 条有封面，但都存在工作台本机，导出里只有工作台内部地址，迁不过来。抖音播放量是否必填已于 2026-10-13 定为只对小红书执行 |
 | D3 开工前 | 没设目标时显示什么：工作台会用历史数据估算一个目标；Linggan 显示「未设定」，还是显示估算值并标明是估算 |
 | D4 | 权限表（见 D4）；运营人与账号的对照；对外使用的网址；上线前的安全检查 |
@@ -187,7 +187,22 @@ D5 建议在切换前完成，这样运营只需要改一次习惯（只补阅�
 ## 进度
 
 - 2026-10-13：能力继承审计和本计划写成，只是文档，本地提交、未推送；D1–D6 等 Mog 排期。
-- 2026-10-13：Mog 派定 D1，并确认爆款规则只管小红书。D1 实现完成并通过隔离证明与真实导出演练；本地提交、未推送、未部署，共享库未写入。
+- 2026-10-13：Mog 派定 D1，并确认爆款规则只管小红书。D1 实现完成并通过隔离证明与真实导出演练。
+- 2026-10-13：Mog 授权推送并开 PR，审查由 Mog 另派 agent 进行；未合并、未部署，共享库未写入。
+
+## D1 认领（2026-10-13）
+
+在 Issue #402 上发认领评论时被自动模式的权限检查拦下，没有绕过，认领信息记在这里：
+
+- 执行者：Claude Code，task-id `ops-migration-d1`；
+- 基线：`origin/main@c935f7e0`，加本迁移的文档提交 `3c9aeac0`（审计与计划，随本交付一起推送）；
+- 分支 / worktree：`feat/ops-migration-d1` / `.worktrees/ops-migration-d1`；
+- 独占文件：`database/migrations/0123_ops_ledger.sql`；`crates/intelligence/src/ops_ledger.rs` 与 `ops_ledger/`；`crates/intelligence/tests/ops_ledger_import_postgres.rs` 与 `tests/support/ops_export_fixture.rs`；`apps/worker/src/bin/ops_history_import.rs`；`scripts/test-ops-ledger-postgres.sh`；`docs/data-contracts/ops-ledger-001.md`；本计划；能力继承审计；
+- 共享文件：`scripts/local-runtime.sh`；`apps/api/src/local_web/full_schema_fixture.rs`；`crates/evidence/tests/support/material_fixture.rs`；`crates/intelligence/src/lib.rs`；`apps/worker/Cargo.toml`；`docs/README.md`；`docs/current-state.md`；`docs/progress/2026-10.md`；`docs/decisions/0009-stage-one-job-topic-pool.md`；`docs/context/domain-language.md`；`docs/architecture/target-architecture.md`；`docs/governance/generated-artifacts-registry.md`；
+- 禁止：其余文件；内容工作台仓库（只读）；
+- 停止条件：需要连接工作台生产库；需要改变已确认的产品语义；迁移编号冲突无法按规则解决；导出文件结构与工作台 `main@489b9cb8` 不符。
+
+建 Issue 时拟的认领清单漏列了合成数据夹具 `tests/support/ops_export_fixture.rs` 与生成物登记表，二者都属于本交付，已补在上面。
 
 ## D1 回执（2026-10-13）
 
@@ -213,4 +228,4 @@ D5 建议在切换前完成，这样运营只需要改一次习惯（只补阅�
 - **每日数据里的空行**：工作台在导出时会为当月还没有行的运营人自动补建空行，这次有 3 行，照样迁入，按「没填」理解。
 - **不迁的字段**：选题关键词 12 条、选题 1 条、关联选题 1 条有值，按 Mog 的裁定不迁；510 条封面在工作台本机，迁不过来。
 - **数学账号**：数学内容过半的是 1 个小红书账号，15 条发布记录中 8 条有文字、4 条含数学词（恰好一半），推荐留在 ADHD；账号名在对话中列给 Mog，不写入仓库。
-- **未证明**：共享库执行迁移与导入、本机 3000 部署、独立审核、Mog 业务验收都还没有发生。
+- **未证明**：独立审查（Mog 另派 agent，对 PR 进行）、合并、共享库执行迁移与导入、本机 3000 部署、Mog 业务验收都还没有发生。
