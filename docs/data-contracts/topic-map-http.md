@@ -8,6 +8,9 @@
 
 ## TOPIC-MAP-WORKFLOW-382 候选增量
 
+> 2026-10-13 UI 后续：工作区切换移至领域右侧，两种视图共用主题树，基础统计前置，旅程地图/列表默认展开。URL 追加 mapMode、sceneQuery、overviewWindowDays、journeyWindowDays；sceneQuery 只筛场景，path/overlay 只在旅程读请求生效。接口 DTO、主阶段/涉及率分母、其他分类、来源核验及写命令不变。详见 [紧凑工作区清单](../design/changes/topic-map-compact-382.md)。
+
+
 `/topics` 默认材料与讨论，双视图共用单侧栏。URL `tm=1` 明确携带完整浏览状态：domainRef/topicRef/platform/windowDays/referenceWindowDays/view/tab/path/overlay/stage/metric/materialMode/query；浏览器返回恢复该范围，旧会话不补入被清空的条件。关键词在已返回的标题、作者、preview.text、证据片段、讨论与场景中匹配，方向名称另列。服务端全范围统计保持原口径；阶段作品按 journey 的精确 workRefs 交集，其他分类始终取 main，即使五主阶段切为 involved。
 
 `SaveAlternative.topicRef/definitionRef` 改为可空但必须成对；同时为空仅限 `methodVersion=topic-map.manual.v1`、无 researchResultRef/researchAngleIndex/researchOpportunityIndex。至少 1、至多 10 个同领域唯一作品；人工来源必须有可冻结作者片段，空来源事务回滚。`0121_topic_map_manual_alternative.sql` 只放宽该外键对的非空性并追加约束，旧记录不变。读取 DTO 可返回 null 引用和 originalDefinition；重开/导出仍复核当前来源，原片段不以最新文本补位，限制后隐藏保存内容。迁移未在正式库执行。

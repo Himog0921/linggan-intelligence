@@ -14,6 +14,9 @@
 
 **v7.0 升级只改治理文档。** 运行时 token、样式表、页面模板与文案仍停在 v2.0 口径，逐项欠账登记在 [lids/decisions.md](lids/decisions.md)、[lids/tokens.md](lids/tokens.md) 第 4 节与 [lids/language-policy.md](lids/language-policy.md) 第 6 节。读本手册时，「已采纳」= 新工作必须这样做，不等于现有代码已经这样。
 
+
+当前 #382 页面布局补充：[主题树、基础数据与旅程工作区](changes/topic-map-compact-382.md)。仅替代旧布局，原统计/来源/写入合同保留。
+
 ## 固定读取路径
 
 每次 UI 事项按以下顺序读取，且只进入与本次事项直接相关的下一层：

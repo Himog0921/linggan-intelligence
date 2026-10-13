@@ -267,6 +267,11 @@ Mog 曾指定 `comment-intelligence-v1` 完整实施包；基线 `origin/main@61
 
 Mog 批准“评论语料与每日研究 V1”并要求原声参考证据库紧凑表格。单代理在 codex/comment-daily-v1、基线 73f5996 实现四视图、异步保守清洗、按作品分包、23:00 日批、预算与显式失败重试，承接下方 #167/#169 历史条目。新 0043 仅在隔离数据库验证，未应用共享库；3000、真实评论外发、merge 和 Mog 业务验收未发生。本次合同及实际证明见 [COMMENT-DAILY-001](plans/active/comment-daily-001.md) 和 [评论验收](design/acceptance/comment-research-001-acceptance.md)。
 
+
+## 2026-10-13 主题图谱紧凑工作区候选
+
+TOPIC-MAP-COMPACT-382 根据 Mog 最新确认重排 `/topics`：领域旁切换、左树固定、四组真实统计前置、旅程地图/列表与统计口径独立、场景检索局部化。代码在专属分支修改，使用既有 HTTP 与来源资格，不变更研究内核、数据库或全站 token。当前 JS 回归通过，浏览器和远端验证尚待回执；未合并、部署或启动研究。详见[变更清单](design/changes/topic-map-compact-382.md)。
+
 ## 当前阶段
 
 ### ACCOUNT-OBSERVATION-BOOTSTRAP-002 / Issue #218（源码候选；尚未进入共享运行）

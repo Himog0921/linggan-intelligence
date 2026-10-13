@@ -31,7 +31,7 @@
 
 ## 依赖、读取与文件边界
 
-已查阅 AGENTS、docs/README、current-state、UI execution contract、governance/agent-collaboration、design/README、LIDS README、正式 topic_map.js/rs 和既有工作区计划；设计表达继续读取 LIDS token/primitive/shell/data/language 及当前 CSS，代码修改前补齐。只消费唯一 lids_tokens.css，不改全站 shell 和 token。
+已查阅 AGENTS、docs/README、current-state、UI execution contract、governance/agent-collaboration、design/README、LIDS README、正式 topic_map.js/rs 和既有工作区计划；设计表达继续读取 LIDS token/primitive/shell/data/language 及当前 CSS，已在源码修改前补齐当前 HTTP 合同、LIDS token/primitive/pattern/shell/data/language/materials、生成物登记和全部本页 CSS。只消费唯一 lids_tokens.css，不改全站 shell 和 token。
 
 独占实现：apps/api/src/local_web/topic_map.js、topic_map.css、topic_map.rs（仅页面模板）；既有 scripts/test-topic-map-ui.cjs 与本事项的浏览器回归。必要文档接缝：工作区计划、设计索引、docs/README、current-state、progress/2026-10、LIDS migration log、生成物登记。数据库/研究内核/插件/其他页面禁止修改。
 
@@ -48,6 +48,10 @@
 | 副作用 | 浏览和视图切换仅 GET；不调用模型/采集、不写正式库；修改不改变现有真实写命令 |
 | 工程 | 语法、原有回归、定向 API 页面测试、治理、设计手册、diff 检查；实际结果分别记录 |
 
+## 局部表达例外
+
+Mog 明确要求领域选择旁切工作区并在右端放本页动作，因此仅 `/topics` 对 LIDS-SHELL-001 的路径区/锚点区采用已确认的页面布局；不改全站 shell 定义或其他路由。窄屏允许上下文内容换行以保持所有入口，不隐藏地图/列表、研究错误或领域选择。切换继续使用现有文字 tab。几何均组合现有 spacing/layout token，SVG 固定坐标仅用于原有站台线稿。
+
 ## 当前回执
 
-设计已确认；生产源码修改、自动检查、浏览器检查均待执行。本文件不是实现成功回执。当前运行服务、真实业务验收、独立审查、合并和部署均 NOT VERIFIED。
+正式前端源码与模板已在隔离工作树修改；实际 JS 回归（含新增紧凑布局/范围负例）及设计手册检查通过。本地浏览器 loopback 被执行环境限制，未通过该项；转到隔离 Actions 运行合成页面验证，结果待记录。当前运行服务、真实业务验收、独立审查、合并和部署均 NOT VERIFIED。

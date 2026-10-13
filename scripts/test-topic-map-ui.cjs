@@ -7,7 +7,7 @@ const blank={replaceChildren(){},addEventListener(){},querySelector(){return nul
 const ctx={document:{getElementById(){return blank},createElement(){return {...blank}},activeElement:null},sessionStorage:{getItem(){return null}},location:{search:'',href:'http://127.0.0.1:3109/topics',origin:'http://127.0.0.1:3109'},URL,URLSearchParams,crypto:require('node:crypto').webcrypto,FormData:class{constructor(f){this.f=f}get(k){return this.f.values?.[k]}getAll(k){return this.f.arrays?.[k]||[]}},fetch:null,console,window:{addEventListener(){}},history:{pushState(){},replaceState(){}}};
 const tail=/  load\(\);\n\}\)\(\);\s*$/;let src=fs.readFileSync(sourcePath,'utf8');assert(tail.test(src),'known topic-map initialization boundary');
 const initializationSource=src.replace(tail,'globalThis.initialState=state;})();');
-src=src.replace(tail,`globalThis.audit={refreshReadiness,openResearch,refreshResearch,readiness,setProgressError(value){progressError=value;},matchesWork,workspaceWorks,emptyWorkspace,overview,journey,sidebar,publishedTime,scope(values){Object.assign(state,values);},dispatchClick,readSample,readWork,readerDialog,replaceSamplesDialog,submitDialog,topicBoundary,discussionUnits,discussionGroups,conceptDecisionDetails,discussionsView,performancePair,curated,researchCoverage,researchPhases,researchCoverageCounts,tree,researchDialog,citationText,citationSpans,bodyCitations,readerDiscussions,allCitations,sharesDiscussion,anglesFrom,opportunitiesFrom,anglesView,productContent,sceneList,commentFragmentCount,comparisonScopeNote,set(s,d,stack=[]){snapshot=s;dialogState=d;dialogStack=stack;state.domainRef='domain';state.topicRef='topic-A';},get(){return dialogState;}};drawDialog=()=>{};render=()=>{};load=async()=>{};openDialog=(type,data)=>{if(dialogState)dialogStack.push(dialogState);dialogState={type,...data};};})();`);vm.runInNewContext(src,ctx);
+src=src.replace(tail,`globalThis.audit={summary,controls,query,sceneGroups,dialogBody,materialRows,getScope(){return {...state};},refreshReadiness,openResearch,refreshResearch,readiness,setProgressError(value){progressError=value;},matchesWork,workspaceWorks,emptyWorkspace,overview,journey,sidebar,publishedTime,scope(values){Object.assign(state,values);},dispatchClick,readSample,readWork,readerDialog,replaceSamplesDialog,submitDialog,topicBoundary,discussionUnits,discussionGroups,conceptDecisionDetails,discussionsView,performancePair,curated,researchCoverage,researchPhases,researchCoverageCounts,tree,researchDialog,citationText,citationSpans,bodyCitations,readerDiscussions,allCitations,sharesDiscussion,anglesFrom,opportunitiesFrom,anglesView,productContent,sceneList,commentFragmentCount,comparisonScopeNote,set(s,d,stack=[]){snapshot=s;dialogState=d;dialogStack=stack;state.domainRef='domain';state.topicRef='topic-A';},get(){return dialogState;}};drawDialog=()=>{};render=()=>{};load=async()=>{};openDialog=(type,data)=>{if(dialogState)dialogStack.push(dialogState);dialogState={type,...data};};})();`);vm.runInNewContext(src,ctx);
 (async()=>{
  const restoredScope={domainRef:'domain-A',topicRef:'OLD_TOPIC',platform:'xhs',windowDays:'7',path:'family',overlay:'obstruction_recurrence',query:'OLD_QUERY',compare:['OLD_TOPIC']};
  const initialize=search=>{
@@ -319,7 +319,7 @@ src=src.replace(tail,`globalThis.audit={refreshReadiness,openResearch,refreshRes
  ctx.audit.scope({stage:'',query:'',materialMode:'high'});assert.equal(ctx.audit.workspaceWorks().length,0,'unconfigured rule cannot classify low/high');
  assert(ctx.audit.emptyWorkspace().includes('规则未知'));
  assert(!ctx.audit.publishedTime(workflowWorks[0]).includes('1789742392000'));assert.equal(ctx.audit.publishedTime({publishedAt:'1789742392000',publishedAtSourceText:'昨天'}),'昨天');
- assert(ctx.audit.sidebar().includes('aria-label="主题图谱视图"'));assert(ctx.audit.sidebar().includes('内容回应的阶段'));
+ assert(ctx.audit.sidebar().includes('稳定主题结构'));assert(!ctx.audit.sidebar().includes('aria-label="主题图谱视图"'));assert(ctx.audit.journey().includes('aria-label="旅程呈现方式"'));
  console.log('PASS: shared keyword/stage intersection, object preview and discussion matches, unknown rule, empty recovery and source-time display');
  const manual={type:'save',manual:true,topicRef:'',kind:'angle',angle:{workRef:'P',evidenceWorkRefs:['P'],title:'人工题目',label:'',answerTask:'',researchMethodVersion:'topic-map.manual.v1'}};
  ctx.audit.set(workflowSnapshot,manual);await ctx.audit.submitDialog({preventDefault(){},target:{dataset:{form:'save'},values:{title:'人工题目',angle:'人工判断',rationale:'来自原作'}}});
@@ -333,7 +333,7 @@ src=src.replace(tail,`globalThis.audit={refreshReadiness,openResearch,refreshRes
  ctx.audit.set({...workflowSnapshot,works:[...workflowWorks,{workRef:'unreadable',readable:false,mainStage:'pending'}]},null);
  ctx.audit.scope({view:'journey',stage:'pending',query:'',metric:'involved',materialMode:'latest',topicRef:''});
  assert.deepEqual(Array.from(ctx.audit.workspaceWorks(),w=>w.workRef).sort(),['D','P']);
- assert(ctx.audit.sidebar().includes('data-id="pending"'));
+ assert(ctx.audit.journey().includes('data-id="pending"'));
  assert(!ctx.audit.publishedTime({publishedAtSourceText:'1789742392000'}).includes('1789742392000'));
  ctx.audit.setProgressError('synthetic failure');
  ctx.fetch=async()=>({ok:true,json:async()=>({policy:{status:'active'}})});
@@ -357,6 +357,29 @@ src=src.replace(tail,`globalThis.audit={refreshReadiness,openResearch,refreshRes
 
  ctx.audit.set(commentSnapshot,null);await ctx.audit.dispatchClick({target:{closest(){return{dataset:{action:'manual-save',id:commentOnly.workRef}}}}});assert.equal(ctx.audit.get(),null,'comment-only sources remain readable but cannot freeze absent author text');
  console.log('PASS: research retry and pause synchronize main status; other stages retain qualified refs in involved mode; manual requires author source');
+
+
+ ctx.audit.set(workflowSnapshot,null);ctx.audit.scope({topicRef:'',view:'journey',tab:'content',query:'',sceneQuery:'',stage:'',metric:'main',mapMode:'map',materialMode:'latest',path:'family',overlay:'obstruction_recurrence',windowDays:'7'});
+ const summaryBefore=ctx.audit.summary();
+ assert.equal((summaryBefore.match(/aria-label="基础概览指标"/g)||[]).length,1);
+ const mapHtml=ctx.audit.journey();assert(mapHtml.indexOf('lgi-tm-map-shell')<mapHtml.indexOf('aria-label="匹配材料"'));
+ for(const name of ['主阶段分布','阶段涉及率','地图','列表','跨阶段综合','通用背景','已分析但阶段不明','待分析 / 材料不足'])assert(mapHtml.includes(name),name);
+ ctx.audit.scope({stage:'begin_practice',metric:'involved',mapMode:'list',sceneQuery:'unmatched'});
+ assert.equal(ctx.audit.summary(),summaryBefore,'stage, metric, view and scene query cannot change E');
+ const listHtml=ctx.audit.journey();assert(listHtml.includes('lgi-tm-journey-table'));assert(!listHtml.includes('lgi-tm-map-shell'));
+ assert(listHtml.includes('当前阶段材料'));assert(listHtml.includes('没有匹配的已研究场景'));
+ assert(ctx.audit.query().includes('path=family')&&ctx.audit.query().includes('overlay=obstruction_recurrence'));
+ ctx.audit.scope({view:'overview',stage:'begin_practice',query:'does-not-match',tab:'sources'});
+ assert(!ctx.audit.query().includes('path=')&&!ctx.audit.query().includes('overlay='));
+ assert(!ctx.audit.controls().includes('data-filter="path"'));
+ assert.equal(ctx.audit.workspaceWorks().length,3,'overview analysis never inherits hidden journey stage or content-only query');
+ assert.equal(ctx.audit.sceneGroups(workflowWorks,'unmatched').length,0);
+ ctx.audit.set({...workflowSnapshot,topics:[{topicRef:'restricted',displayName:'SECRET_TITLE',definitionText:'SECRET_TEXT',aliases:['SECRET_ALIAS'],core:{sourceState:'source_unavailable'}}]},{type:'definition',topicRef:'restricted'});
+ const def=ctx.audit.dialogBody();assert(!def.includes('SECRET'));assert(def.includes('来源当前受限'));
+ const urlMap=initialize('?tm=1&view=journey&mapMode=map&metric=involved&windowDays=7&overviewWindowDays=30&journeyWindowDays=7&sceneQuery=场景');
+ assert.equal(urlMap.mapMode,'map');assert.equal(urlMap.overviewWindowDays,'30');assert.equal(urlMap.journeyWindowDays,'7');assert.equal(urlMap.sceneQuery,'场景');
+ assert.equal(initialize('?tm=1&mapMode=invalid').mapMode,'map');
+ console.log('PASS: compact E, permanent dual journey controls, all actual categories, view-local query boundaries and restricted definitions');
 
 
 })().catch(e=>{console.error(e);process.exitCode=1});

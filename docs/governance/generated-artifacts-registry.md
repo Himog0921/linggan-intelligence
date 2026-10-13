@@ -93,3 +93,10 @@
 - 位置：`/tmp/topic-map-workflow-*` 临时脚本/日志、`/tmp/linggan-topic-map-workflow-target` 构建缓存；截图在当前任务 Codex visualizations 的 `topic-map-workflow/`，不入 Git。真实材料只读截图与合成保存证明分别标明。
 - 3112 为只读预览，使用候选 JS/CSS 与现有 token/shell；拒绝全部 POST，不代理外网，不保存真实 API 响应或凭据。预览不是候选 Rust API 部署或正式库保存证明。
 - 隔离 PG 使用既有 test-topic-map-postgres.sh 随机容器和卷，退出时删除核验。3112 仅保留到 Mog 页面审阅，后续关闭该任务的 Python 进程；不触碰共享 3000 服务。
+
+
+## TOPIC-MAP-COMPACT-382 隔离 UI 验证
+
+- 权威测试源：`scripts/test-topic-map-ui.cjs`、`scripts/test-topic-map-compact-ui.py`，维护源码，不是生成文件。只运行合成 HTTP fixture 与候选 JS/CSS。
+- 源码传递包、补丁、截图与日志：本任务系统临时目录和 Actions artifact（源码包 1 日、验证结果 7 日）；不入 Git、不含真实原文/凭据、不访问模型/平台/正式库。
+- `.github/workflows/topic-map-compact-transfer.yml` 仅用于专属候选分支的版本校验与传递，交付前删除；持续回归另用只读验证 workflow。临时传递仅影响此分支，不强推、不合并或部署。

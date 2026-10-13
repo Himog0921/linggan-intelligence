@@ -104,9 +104,9 @@ fn page_markup(
         shell::PrimarySurface::Topic,
         "LOCAL HOST / NO PLATFORM ACCESS",
         &format!(
-            "主题图谱{domain} <span class=\"v7-slash\">/</span> <b id=\"topic-map-crumb-current\">主题概览</b>"
+            "主题图谱{domain} <nav id=\"topic-map-view-tabs\" aria-label=\"主题图谱视图\"></nav><b id=\"topic-map-crumb-current\" class=\"v7-sr-only\">主题概览</b>"
         ),
-        "",
+        r#"<div id="topic-map-context-actions" aria-label="图谱操作"></div>"#,
         None,
     );
     format!(
