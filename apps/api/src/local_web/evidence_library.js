@@ -16,7 +16,7 @@
     const banner=document.createElement('p'); banner.textContent='当前为本次采集的固定作品；详情与评论按本次取得／明确复用版本回查；媒体为共享当前资源。 ';
     const back=document.createElement('a'); const destination=creatorBacklink.get('returnTo');
     back.href=destination && destination.startsWith('/collection/tasks?') ? destination : '/collection/tasks?domain='+encodeURIComponent(creatorBacklink.get('domain')||'')+'&run='+encodeURIComponent(creatorBacklink.get('collectionRunRef'));
-    back.textContent='返回采集任务'; banner.append(back); document.querySelector('.ev-command')?.prepend(banner);
+    back.textContent='返回采集任务'; back.className='ev-collection-return'; banner.append(back); document.querySelector('.ev-command')?.prepend(banner);
   }
   // 当前领域由服务端随页面下发。地址里的 domain 可能无效，有效性判定服务端已经做过一次，
   // 前端再判一次就会出现两处规则，早晚不一致。
