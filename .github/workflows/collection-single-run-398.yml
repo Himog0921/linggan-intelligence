@@ -8,7 +8,7 @@ concurrency:
   group: collection-single-run-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 jobs:
-  source-checkout:
+  postgres-tooling:
     if: github.head_ref == 'codex/collection-single-run-398'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -18,23 +18,31 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
           persist-credentials: false
-      - name: Prepare exact toolchain and locked dependencies
+      - name: Prepare database binaries without business data
         run: |
-          rustup toolchain install 1.95.0 --profile minimal --component rustfmt
-          cargo +1.95.0 fetch --locked
-      - name: Export public tracked source and offline build inputs
-        run: |
-          mkdir -p "$RUNNER_TEMP/collection-source"
-          git archive --format=tar HEAD | gzip -n > "$RUNNER_TEMP/collection-source/source.tar.gz"
-          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/collection-source/revision.txt"
-          TOOLCHAIN=$(dirname "$(dirname "$(rustup which --toolchain 1.95.0 rustc)")")
-          tar -C "$TOOLCHAIN" -czf "$RUNNER_TEMP/collection-source/rust-toolchain.tar.gz" bin lib
-          tar -C "$HOME/.cargo" -czf "$RUNNER_TEMP/collection-source/cargo-registry.tar.gz" registry
-          cd "$RUNNER_TEMP/collection-source"
-          sha256sum *.tar.gz > checksums.sha256
+          sudo apt-get update -qq
+          sudo apt-get install -y postgresql-16 postgresql-server-dev-16
+          git clone --depth 1 --branch v0.8.0 https://github.com/pgvector/pgvector.git "$RUNNER_TEMP/pgvector"
+          test "$(git -C "$RUNNER_TEMP/pgvector" rev-parse HEAD)" = 2627c5ff775ae6d7aef0c430121ccf857842d2f2
+          make -C "$RUNNER_TEMP/pgvector" PG_CONFIG=/usr/lib/postgresql/16/bin/pg_config
+          sudo make -C "$RUNNER_TEMP/pgvector" PG_CONFIG=/usr/lib/postgresql/16/bin/pg_config install
+          mkdir -p "$RUNNER_TEMP/pg-tooling/lib" "$RUNNER_TEMP/pg-tooling/share"
+          cp -a /usr/lib/postgresql/16/bin "$RUNNER_TEMP/pg-tooling/"
+          cp -a /usr/lib/postgresql/16/lib/. "$RUNNER_TEMP/pg-tooling/lib/"
+          cp -a /usr/share/postgresql/16/. "$RUNNER_TEMP/pg-tooling/share/"
+          for f in "$RUNNER_TEMP/pg-tooling/bin/"* "$RUNNER_TEMP/pg-tooling/lib/"*.so; do
+            ldd "$f" 2>/dev/null | awk '/=> \/.* /{print $3}' || true
+          done | sort -u | while read -r lib; do
+            case "$(basename "$lib")" in libc.so.*|libm.so.*|libpthread.so.*|libdl.so.*|librt.so.*) continue ;; esac
+            cp -L "$lib" "$RUNNER_TEMP/pg-tooling/lib/"
+          done
+          tar -C "$RUNNER_TEMP/pg-tooling" -czf "$RUNNER_TEMP/postgres-tooling.tar.gz" .
+          sha256sum "$RUNNER_TEMP/postgres-tooling.tar.gz" > "$RUNNER_TEMP/postgres-tooling.sha256"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: collection-offline-inputs-398
-          path: ${{ runner.temp }}/collection-source
+          name: collection-postgres-tooling-398
+          path: |
+            ${{ runner.temp }}/postgres-tooling.tar.gz
+            ${{ runner.temp }}/postgres-tooling.sha256
           retention-days: 1
           if-no-files-found: error
