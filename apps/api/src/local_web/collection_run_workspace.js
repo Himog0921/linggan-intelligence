@@ -13,7 +13,7 @@
   if (originalUrl.searchParams.get('selected')==='1') {
     try {exactWorks=JSON.parse(sessionStorage.getItem('collection-selected:'+(originalUrl.searchParams.get('domain')||''))||'[]');}catch(_){exactWorks=[];}
   }
-  let targetPage = 1, selecting = 0, requestKey = null, currentRun = null;
+  let targetPage = 1, selecting = 0, requestKey = null, requestIntent = null, currentRun = null;
   const known=value=>value==null?'未知':escape(value);
   const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
   function dialogOpen(dialog) { dialog.showModal(); document.documentElement.classList.add('c-run-dialog-open'); }
@@ -57,11 +57,11 @@
   }
   const field = name => form.elements.namedItem(name);
   function saveDraft() {
-    try { sessionStorage.setItem(draftKey, JSON.stringify({ data: Object.fromEntries(new FormData(form)), requestKey })); } catch (_) {}
+    try { sessionStorage.setItem(draftKey, JSON.stringify({ data: Object.fromEntries(new FormData(form)), requestKey, requestIntent })); } catch (_) {}
   }
   try {
     const draft = JSON.parse(sessionStorage.getItem(draftKey) || 'null');
-    if (draft) { for (const [name, value] of Object.entries(draft.data)) if (field(name)) field(name).value = value; requestKey = draft.requestKey; }
+    if (draft) { for (const [name, value] of Object.entries(draft.data)) if (field(name)) field(name).value = value; requestKey = draft.requestKey; requestIntent = draft.requestIntent; }
   } catch (_) {}
   function sourceFields() {
     if (exactWorks!==null) {
@@ -131,10 +131,13 @@
     event.preventDefault();
     const submit = form.querySelector('[type=submit]');
     if (submit.disabled || !form.reportValidity()) return;
-    requestKey ||= crypto.randomUUID(); saveDraft();
     const existing = field('source').value === 'observation_target';
     const creator = existing && field('target').selectedOptions[0]?.dataset.kind === 'creator';
-    const body = { idempotencyKey: requestKey, domainRef: field('domain').value, source: exactWorks!==null ? {kind:'selected_works',workRefs:exactWorks} : existing ? { kind: 'observation_target', targetRef: field('target').value } : { kind: 'temporary_keyword', query: field('query').value }, ranking: creator || exactWorks!==null ? null : field('ranking').value, workLimit: Number(field('work_limit').value), commentMode: field('comment_mode').value };
+    const intent = { domainRef: field('domain').value, source: exactWorks!==null ? {kind:'selected_works',workRefs:exactWorks} : existing ? { kind: 'observation_target', targetRef: field('target').value } : { kind: 'temporary_keyword', query: field('query').value }, ranking: creator || exactWorks!==null ? null : field('ranking').value, workLimit: Number(field('work_limit').value), commentMode: field('comment_mode').value };
+    const fingerprint = JSON.stringify(intent);
+    if (requestIntent !== fingerprint) { requestKey = null; requestIntent = fingerprint; }
+    requestKey ||= crypto.randomUUID(); saveDraft();
+    const body = { idempotencyKey: requestKey, ...intent };
     submit.disabled = true; feedback.textContent = '正在建立这次请求…';
     try {
       let receipt;

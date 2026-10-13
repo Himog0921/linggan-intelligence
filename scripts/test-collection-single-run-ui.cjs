@@ -74,8 +74,10 @@ const { chromium } = require('playwright');
     await page.locator('[data-run-form-feedback]').filter({hasText:'草稿'}).waitFor();
     assert((await page.locator('[data-run-form-feedback]').innerText()).includes('服务暂时不可用'));await page.screenshot({path:path.join(directory,'oneoff-save-failure-1440.png')});
     assert.equal(await page.locator('[name=query]').inputValue(), '浏览器真实申请');
+    const failedDraft=await page.evaluate(domain => JSON.parse(sessionStorage.getItem('collection-run-draft:'+domain)),fixture.otherDomainRef);assert(failedDraft.requestKey);
     await page.unroute('**/api/collection/runs');
-    await page.locator('#collection-run-form [type=submit]').click();
+    const retriedRequest=page.waitForRequest(r=>r.method()==='POST'&&r.url().endsWith('/api/collection/runs'));
+    await page.locator('#collection-run-form [type=submit]').click();assert.equal((await retriedRequest).postDataJSON().idempotencyKey,failedDraft.requestKey);
     await page.waitForURL(/run=/); await page.locator('#collection-run-drawer').waitFor({state:'visible'});
     await page.locator('#collection-run-title').filter({hasText:'浏览器真实申请'}).waitFor();
     await page.screenshot({path:path.join(directory,'run-drawer.png')});
@@ -111,12 +113,18 @@ const { chromium } = require('playwright');
     await page.getByRole('button',{name:'勾选本页',exact:true}).click();
     await page.screenshot({path:path.join(directory,'corpus-selection-1440.png')});
     await page.reload();await page.locator('input[data-collection-work-select]:checked').first().waitFor();assert.equal(await page.locator('input[data-collection-work-select]:checked').count(),50);
+    // A previous accepted request can remain unconfirmed in the browser draft.
+    // Entering a different exact scope must never resolve that old receipt as the new request.
+    await page.evaluate(({domainRef,existingRequestKey}) => {
+      const oldIntent={domainRef,source:{kind:'temporary_keyword',query:'合成有成果任务'},ranking:'comprehensive',workLimit:5,commentMode:'sample_30'};
+      sessionStorage.setItem('collection-run-draft:'+domainRef,JSON.stringify({data:{source:'temporary_keyword',query:'合成有成果任务',domain:domainRef,ranking:'comprehensive',work_limit:'5',comment_mode:'sample_30'},requestKey:existingRequestKey,requestIntent:JSON.stringify(oldIntent)}));
+    },fixture);
     await page.getByRole('button',{name:'评论深采',exact:true}).click();
     await page.locator('#collection-run-form').waitFor({state:'visible'});assert.equal(await page.locator('[name=work_limit]').inputValue(),'51');assert.equal(await page.locator('[name=comment_mode]').inputValue(),'all_public');
     assert.equal(await page.locator('[data-keyword-field]').isVisible(),false);assert.equal(await page.locator('[data-ranking-field]').isVisible(),false);
     const selectionBody=page.waitForRequest(r=>r.method()==='POST'&&r.url().endsWith('/api/collection/runs'));
     await page.screenshot({path:path.join(directory,'oneoff-selected-1440.png')});
-    await page.locator('#collection-run-form [type=submit]').click();const body=(await selectionBody).postDataJSON();assert.equal(body.source.kind,'selected_works');assert.equal(new Set(body.source.workRefs).size,51);assert.equal(body.ranking,null);
+    await page.locator('#collection-run-form [type=submit]').click();const body=(await selectionBody).postDataJSON();assert.equal(body.source.kind,'selected_works');assert.equal(new Set(body.source.workRefs).size,51);assert.equal(body.ranking,null);assert.notEqual(body.idempotencyKey,fixture.existingRequestKey);
     await page.waitForURL(/run=/);
     await page.goto(`${fixture.origin}/collection/targets?domain=${fixture.domainRef}`);
     await page.screenshot({path:path.join(directory,'targets-1440.png'),fullPage:true});

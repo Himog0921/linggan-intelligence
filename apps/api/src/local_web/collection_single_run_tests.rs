@@ -186,6 +186,12 @@ async fn collection_single_run_browser_with_persisted_data() {
         .fetch_one(db.pool())
         .await
         .unwrap();
+    let existing_request_key: uuid::Uuid =
+        sqlx::query_scalar("SELECT idempotency_key FROM collection_run WHERE run_ref=$1")
+            .bind(serde_json::from_value::<uuid::Uuid>(result["runRef"].clone()).unwrap())
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
     let application = router(LocalWebState {
         database: LocalDatabaseState::Ready(Arc::new(db)),
         active_media_sessions: Arc::new(tokio::sync::Mutex::new(BTreeSet::new())),
@@ -198,7 +204,7 @@ async fn collection_single_run_browser_with_persisted_data() {
     let server = tokio::spawn(async move { axum::serve(listener, application).await.unwrap() });
     let directory = std::env::var("COLLECTION_PROOF_DIR").unwrap();
     std::fs::create_dir_all(&directory).unwrap();
-    std::fs::write(std::path::Path::new(&directory).join("fixture.json"),json!({"origin":origin,"domainRef":domain,"otherDomainRef":other,"runRef":first,"selectionRunRef":selection_ref,"domainCount":domain_count,"activeStationRef":active_station,"changedAccountRef":changed.account_ref,"unclaimedRef":unclaimed}).to_string()).unwrap();
+    std::fs::write(std::path::Path::new(&directory).join("fixture.json"),json!({"origin":origin,"domainRef":domain,"otherDomainRef":other,"runRef":first,"selectionRunRef":selection_ref,"domainCount":domain_count,"activeStationRef":active_station,"changedAccountRef":changed.account_ref,"unclaimedRef":unclaimed,"existingRequestKey":existing_request_key}).to_string()).unwrap();
     let node = std::env::var("COLLECTION_PROOF_NODE").unwrap();
     let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../scripts/test-collection-single-run-ui.cjs");
