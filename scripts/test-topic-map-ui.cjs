@@ -7,7 +7,7 @@ const blank={replaceChildren(){},addEventListener(){},querySelector(){return nul
 const ctx={document:{getElementById(){return blank},createElement(){return {...blank}},activeElement:null},sessionStorage:{getItem(){return null}},location:{search:'',href:'http://127.0.0.1:3109/topics',origin:'http://127.0.0.1:3109'},URL,URLSearchParams,crypto:require('node:crypto').webcrypto,FormData:class{constructor(f){this.f=f}get(k){return this.f.values?.[k]}getAll(k){return this.f.arrays?.[k]||[]}},fetch:null,console,window:{addEventListener(){}},history:{pushState(){},replaceState(){}}};
 const tail=/  load\(\);\n\}\)\(\);\s*$/;let src=fs.readFileSync(sourcePath,'utf8');assert(tail.test(src),'known topic-map initialization boundary');
 const initializationSource=src.replace(tail,'globalThis.initialState=state;})();');
-src=src.replace(tail,`globalThis.audit={summary,controls,query,sceneGroups,dialogBody,materialRows,getScope(){return {...state};},refreshReadiness,openResearch,refreshResearch,readiness,setProgressError(value){progressError=value;},matchesWork,workspaceWorks,emptyWorkspace,overview,journey,sidebar,publishedTime,scope(values){Object.assign(state,values);},dispatchClick,readSample,readWork,readerDialog,replaceSamplesDialog,submitDialog,topicBoundary,discussionUnits,discussionGroups,conceptDecisionDetails,discussionsView,performancePair,curated,researchCoverage,researchPhases,researchCoverageCounts,tree,researchDialog,citationText,citationSpans,bodyCitations,readerDiscussions,allCitations,sharesDiscussion,anglesFrom,opportunitiesFrom,anglesView,productContent,sceneList,commentFragmentCount,comparisonScopeNote,set(s,d,stack=[]){snapshot=s;dialogState=d;dialogStack=stack;state.domainRef='domain';state.topicRef='topic-A';},get(){return dialogState;}};drawDialog=()=>{};render=()=>{};load=async()=>{};openDialog=(type,data)=>{if(dialogState)dialogStack.push(dialogState);dialogState={type,...data};};})();`);vm.runInNewContext(src,ctx);
+src=src.replace(tail,`globalThis.audit={metrics,readoutNumber,rulesDialog,summary,controls,query,sceneGroups,dialogBody,materialRows,getScope(){return {...state};},refreshReadiness,openResearch,refreshResearch,readiness,setProgressError(value){progressError=value;},matchesWork,workspaceWorks,emptyWorkspace,overview,journey,sidebar,publishedTime,scope(values){Object.assign(state,values);},dispatchClick,readSample,readWork,readerDialog,replaceSamplesDialog,submitDialog,topicBoundary,discussionUnits,discussionGroups,conceptDecisionDetails,discussionsView,performancePair,curated,researchCoverage,researchPhases,researchCoverageCounts,tree,researchDialog,citationText,citationSpans,bodyCitations,readerDiscussions,allCitations,sharesDiscussion,anglesFrom,opportunitiesFrom,anglesView,productContent,sceneList,commentFragmentCount,comparisonScopeNote,set(s,d,stack=[]){snapshot=s;dialogState=d;dialogStack=stack;state.domainRef='domain';state.topicRef='topic-A';},get(){return dialogState;}};drawDialog=()=>{};render=()=>{};load=async()=>{};openDialog=(type,data)=>{if(dialogState)dialogStack.push(dialogState);dialogState={type,...data};};})();`);vm.runInNewContext(src,ctx);
 (async()=>{
  const restoredScope={domainRef:'domain-A',topicRef:'OLD_TOPIC',platform:'xhs',windowDays:'7',path:'family',overlay:'obstruction_recurrence',query:'OLD_QUERY',compare:['OLD_TOPIC']};
  const initialize=search=>{
@@ -380,6 +380,28 @@ src=src.replace(tail,`globalThis.audit={summary,controls,query,sceneGroups,dialo
  assert.equal(urlMap.mapMode,'map');assert.equal(urlMap.overviewWindowDays,'30');assert.equal(urlMap.journeyWindowDays,'7');assert.equal(urlMap.sceneQuery,'场景');
  assert.equal(initialize('?tm=1&mapMode=invalid').mapMode,'map');
  console.log('PASS: compact E, permanent dual journey controls, all actual categories, view-local query boundaries and restricted definitions');
+ const xhsOnly={...workflowSnapshot,statistics:{workCount:3,authorCount:2,unknownAuthorCount:0,platforms:[{platform:'xhs',workCount:3,knownLikeCount:2,unknownLikeCount:1,highPerformanceThreshold:1000,highPerformanceCount:1,medianLikes:85,p90Likes:1700},{platform:'douyin',workCount:0,knownLikeCount:0,highPerformanceThreshold:null}]}};
+ ctx.audit.set(xhsOnly,null);ctx.audit.scope({topicRef:'',view:'overview',tab:'content',platform:'',stage:'',query:''});
+ assert(!ctx.audit.controls().includes('data-filter="platform"'));
+ assert(!ctx.audit.controls().includes('data-form="search"'));
+ const readout=ctx.audit.summary();
+ assert(readout.includes('lgi-tm-totals')&&readout.includes('lgi-tm-performance-table'));
+ assert(readout.includes('50.0%')&&readout.includes('点赞中位数')&&readout.includes('P90 点赞'));
+ assert(!readout.includes('抖音'));
+ assert(!ctx.audit.rulesDialog().includes('抖音'));
+ assert(ctx.audit.overview().includes('data-form="search"'));
+ ctx.audit.scope({platform:'douyin'});
+ assert(ctx.audit.controls().includes('value="douyin" selected'),'an explicit old filter cannot be hidden or silently changed');
+ ctx.audit.scope({platform:''});
+ assert(ctx.audit.readoutNumber(0).includes('>0</span>'));
+ assert(ctx.audit.readoutNumber(null).includes('>—</span>'));
+ assert(ctx.audit.readoutNumber(123456789).includes('title="123,456,789"'));
+ const mixed={...xhsOnly,statistics:{...xhsOnly.statistics,platforms:[...xhsOnly.statistics.platforms.filter(p=>p.platform==='xhs'),{platform:'douyin',workCount:1,knownLikeCount:1,highPerformanceThreshold:1000,highPerformanceCount:0}]}};
+ ctx.audit.set(mixed,null);ctx.audit.scope({topicRef:''});
+ assert(ctx.audit.summary().includes('抖音'),'actual returned other-platform data must not be relabeled or discarded');
+ assert(ctx.audit.controls().includes('value="douyin"'));
+ console.log('PASS: no future platform positions, visible old filters, single-platform rule form, stable readout semantics and exact large values');
+
 
 
 })().catch(e=>{console.error(e);process.exitCode=1});

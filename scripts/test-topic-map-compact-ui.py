@@ -32,6 +32,10 @@ DOMAIN = '00000000-0000-0000-0000-000000000001'
 
 def works_fixture() -> list[dict]:
     works = []
+    titles = ['任务还没开始，准备东西就花掉了半小时', '不是不愿意做，是不知道第一步先拿什么',
+              '步骤写得很清楚，晚上的时间却排不进去', '换了照护者，原来的安排为什么接不上',
+              '把准备环节单独列出来，这一次终于开始了', '先问今天有多少时间，再决定做哪几个步骤',
+              '任务中断以后，我们重新检查了准备条件', '写了清单还是没开始，问题可能在任务量']
     for i in range(28):
         ref = f'work-{i}'
         stage = (STAGES[i % 5][0] if i < 24 else OTHER[i-24])
@@ -39,8 +43,8 @@ def works_fixture() -> list[dict]:
         fragment = dict(fragmentId=f'{ref}.body', field='body', sourceKind='detail_body',
                         text=text, start=0, end=len(text), workRef=ref)
         scene = dict(label=f'晚间准备场景 {i % 8}', evidence=[dict(fragmentId=fragment['fragmentId'],start=0,end=len(text))])
-        works.append(dict(workRef=ref, title=('很长的中文标题用于检查两行截断和封面不变形。'*9 if i == 0 else f'合成材料 {i} · 任务开始前的准备'),
-            readable=True, platform='xhs' if i % 3 else 'douyin', creatorDisplayName=('很长的作者名称'*8 if i == 0 else f'合成作者 {i % 6}'),
+        works.append(dict(workRef=ref, title=titles[i % len(titles)],
+            readable=True, platform='xhs', creatorDisplayName=f'合成作者 {i % 6}',
             topicRefs=['topic-A', 'topic-B' if i % 2 else 'topic-C'], preview=dict(text=text*4),
             mainStage=stage, involvedStages=[stage, 'long_term_manage'] if stage not in OTHER else [],
             overlays=['obstruction_recurrence'] if i % 2 else ['transition_handoff'],
@@ -58,7 +62,7 @@ def stats(ns: list[dict]) -> dict:
                 unknownLikeCount=sum(w['likes'] is None for w in part),highPerformanceThreshold=1000,
                 highPerformanceCount=sum(w['likes'] is not None and w['likes']>=1000 for w in part),
                 medianLikes=85 if part else None,p90Likes=1700 if part else None)
-                for p in ['xhs','douyin'] if (part:=[w for w in ns if w['platform']==p])])
+                for p in sorted({w['platform'] for w in ns}) if (part:=[w for w in ns if w['platform']==p])])
 
 
 def journey(ns: list[dict]) -> dict:
@@ -77,6 +81,11 @@ class ProofState:
 
     def snapshot(self, q: dict[str,list[str]]) -> dict:
         allworks=copy.deepcopy(self.works) if self.mode not in ('empty','error') else []
+        if self.mode=='mixed':
+            for i,w in enumerate(allworks):
+                if i % 3 == 0: w['platform']='douyin'
+        if self.mode=='long-text' and allworks:
+            allworks[0].update(title='很长的中文标题用于检查两行截断和封面不变形。'*9,creatorDisplayName='很长的作者名称'*8)
         val=lambda key:q.get(key,[''])[0]
         if val('platform'): allworks=[w for w in allworks if w['platform']==val('platform')]
         if val('windowDays')=='7': allworks=allworks[:16]
@@ -101,6 +110,15 @@ class ProofState:
               ownHistoryPublicationUnknownCount=0,recentReferenceWorkRefs=[w['workRef'] for w in ns]),
           sources=[], candidates=[], changes=[],alternatives=[],ownCreators=[],methodVersion='synthetic-browser-proof',
           sourceBoundary='合成测试数据；不是生产资料或研究结果。')
+        if self.mode=='placeholders':
+            for platform in ['douyin','channels']:
+                result['statistics']['platforms'].append(dict(platform=platform,workCount=0,knownLikeCount=0,unknownLikeCount=0,highPerformanceThreshold=None,highPerformanceCount=None,medianLikes=None,p90Likes=None))
+        if self.mode=='large':
+            result['statistics'].update(workCount=123456789,authorCount=123456)
+            result['statistics']['platforms'][0].update(medianLikes=1234567,p90Likes=98765432)
+        if self.mode=='zero':
+            for p in result['statistics']['platforms']:
+                p.update(highPerformanceCount=0,medianLikes=0,p90Likes=0,unknownLikeCount=0)
         if self.mode=='partial':result['works']=result['works'][:3]
         if self.mode=='no-scenes':
             for w in result['works']:w.pop('research',None)
@@ -175,12 +193,30 @@ def run(out: Path) -> None:
         fresh()
         assert page.locator('#topic-map-view-tabs [data-action="view"]').count()==2
         assert page.locator('.lgi-tm-sidebar [data-action="view"]').count()==0
-        assert page.locator('.lgi-tm-summary .lgi-tm-metrics > div').count()==4
+        assert page.locator('.lgi-tm-summary .lgi-tm-total').count()==2
+        assert page.locator('.lgi-tm-performance-table thead th').count()==5
+        assert page.locator('.lgi-tm-performance-table tbody tr').count()==1
+        assert page.locator('.lgi-tm-summary [data-form="search"]').count()==0
+        assert page.locator('.lgi-tm-workspace-content [data-form="search"]').count()==1
+        assert page.locator('[data-filter="platform"]').count()==0
+        assert '抖音' not in page.locator('.lgi-tm-summary').inner_text()
+        assert '视频号' not in page.locator('.lgi-tm-summary').inner_text()
+        labels=page.locator('.lgi-tm-metric-label').evaluate_all('(els)=>els.map(e=>e.getBoundingClientRect().top)')
+        values=page.locator('.lgi-tm-total-value').evaluate_all('(els)=>els.map(e=>e.getBoundingClientRect().top)')
+        assert max(labels)-min(labels)<1 and max(values)-min(values)<1,(labels,values)
+        assert page.locator('.lgi-tm-summary-heading .lgi-tm-asof').count()==1
+        first_title=page.locator('.lgi-tm-evidence-copy h3 .lgi-tm-title-link').first
+        assert first_title.bounding_box()['width']<=768
+        assert first_title.evaluate('(e)=>getComputedStyle(e).webkitLineClamp')=='2'
+        click('rules',base=page.locator('.lgi-tm-summary'))
+        assert page.locator('dialog [data-form="rule"]').count()==1
+        assert page.locator('dialog [data-form="rule"]').get_attribute('data-platform')=='xhs'
+        click('dialog-close')
         tree=page.locator('.lgi-tm-sidebar').bounding_box();summary=page.locator('.lgi-tm-summary').bounding_box()
         assert tree['x']==0 and 236<=tree['width']<=248 and abs(tree['y']-summary['y'])<=16,(tree,summary)
         assert page.locator('.lgi-tm-work-tabs [data-action="tab"]').count()==6
         page.screenshot(path=str(out/'overview-1440.png'))
-        passed('domain-adjacent tabs, flush left tree, top-aligned four metrics and six overview views')
+        passed('domain-adjacent tabs, flush left tree, aligned totals, single XHS performance row, local material search and six overview views')
         for tab in ['structure','patterns','sources','candidates','action','content']:
             click('tab',tab);no_overflow()
             assert page.locator('.lgi-tm-summary .lgi-tm-metrics').count()==1
@@ -238,6 +274,7 @@ def run(out: Path) -> None:
             no_overflow()
             assert page.locator('[data-action="map-mode"][data-id="map"]').is_visible()
             assert page.locator('[data-action="map-mode"][data-id="list"]').is_visible()
+            assert page.locator('.lgi-tm-node-name').first.evaluate('(e)=>parseFloat(getComputedStyle(e).fontSize)')>=18
             if width>760:
                 height=page.locator('.lgi-tm-map-shell').bounding_box()['height'];assert 290<=height<=390,height
             else:
@@ -257,6 +294,41 @@ def run(out: Path) -> None:
             elif mode=='no-scenes':assert page.locator('.lgi-tm-evidence-row').count()>0
             no_overflow()
         passed('empty, unknown, partial, no-scenes, read-error and explicit retry preserve honest boundaries')
+        for mode in ['placeholders','mixed','large','zero','long-text']:
+            fresh('overview',mode)
+            no_overflow()
+            table=page.locator('.lgi-tm-performance-table')
+            if mode=='placeholders':
+                assert table.locator('tbody tr').count()==1
+                assert page.locator('[data-filter="platform"]').count()==0
+                assert '抖音' not in metric_text() and 'channels' not in metric_text()
+            elif mode=='mixed':
+                assert table.locator('tbody tr').count()==2
+                assert table.locator('thead th').count()==6
+                assert '抖音' in metric_text()
+                assert page.locator('[data-filter="platform"] option').count()==3
+            elif mode=='large':
+                assert '1.2亿' in metric_text()
+                assert page.locator('.lgi-tm-totals [title="123,456,789"]').count()==1
+                assert page.locator('.lgi-tm-performance [title="98,765,432"]').count()==1
+                page.screenshot(path=str(out/'large-1440.png'))
+            elif mode=='long-text':
+                text=page.locator('.lgi-tm-evidence-copy h3 .lgi-tm-title-link').first
+                assert text.bounding_box()['width']<=768
+                assert text.evaluate('(e)=>e.scrollHeight>e.clientHeight')
+                assert text.evaluate('(e)=>e.clientHeight<=parseFloat(getComputedStyle(e).lineHeight)*2+1')
+                page.screenshot(path=str(out/'long-text-1440.png'))
+            elif mode=='zero':
+                assert '0.0%' in table.inner_text()
+                assert table.locator('tbody td').nth(2).inner_text()=='0'
+        passed('no inactive platform slots/forms; real mixed records retained; compact huge numbers keep exact values and zeros stay zeros')
+        fresh('overview')
+        baseline=metric_text()
+        page.locator('#topic-map-search').fill('不存在的材料')
+        page.locator('[data-form="search"]').evaluate('(form)=>form.requestSubmit()')
+        assert metric_text()==baseline and page.locator('.lgi-tm-evidence-row').count()==0
+        assert '0 篇当前匹配' in page.locator('.lgi-tm-workspace-content').inner_text()
+        passed('material search lives with results and never changes statistical context')
         assert not errors,errors
         assert not [r for r in state.requests if r[0]!='GET'],state.requests
         assert not [r for r in state.requests if not r[1].startswith(('/topics','/assets/','/api/local/','/favicon'))]
