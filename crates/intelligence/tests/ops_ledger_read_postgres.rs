@@ -191,16 +191,43 @@ async fn business_selection_only_offers_domains_with_accounts() {
         (ADHD_DOMAIN, 3),
         "the deleted account is not counted, the same as 账号管理"
     );
-    let empty_domain = Uuid::new_v4();
+    let (empty_domain, deleted_only) = (Uuid::new_v4(), Uuid::new_v4());
+    for (domain, name) in [
+        (empty_domain, "SYNTHETIC 空业务"),
+        (deleted_only, "SYNTHETIC 账号都已删除"),
+    ] {
+        sqlx::query("INSERT INTO observation_domain (domain_ref, name) VALUES ($1, $2)")
+            .bind(domain)
+            .bind(name)
+            .execute(db.pool())
+            .await
+            .unwrap();
+    }
+    let batch: Uuid = sqlx::query_scalar("SELECT batch_ref FROM linggan_ops_import_batch LIMIT 1")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
     sqlx::query(
-        "INSERT INTO observation_domain (domain_ref, name) VALUES ($1, 'SYNTHETIC 空业务')",
+        "INSERT INTO linggan_ops_account (account_ref, source_system, source_record_id, domain_ref, \
+           ledger_state, platform, account_name, profile_link_state, first_batch_ref, \
+           last_changed_batch_ref) \
+         VALUES ($1, 'content_workbench', 'acc-deleted-only', $2, 'absent_from_export', 'xhs', \
+           '已删账号', 'missing', $3, $3)",
     )
-    .bind(empty_domain)
+    .bind(Uuid::new_v4())
+    .bind(deleted_only)
+    .bind(batch)
     .execute(db.pool())
     .await
     .unwrap();
+    assert_eq!(
+        read_ops_businesses(&db).await.unwrap().len(),
+        1,
+        "a domain whose accounts were all deleted is not offered"
+    );
     for business in [
         OpsBusiness::Domain(empty_domain),
+        OpsBusiness::Domain(deleted_only),
         OpsBusiness::Domain(Uuid::new_v4()),
     ] {
         assert!(matches!(
@@ -430,7 +457,7 @@ async fn historical_covers_register_only_real_images_named_by_the_export() {
     let figures = serde_json::to_value(&preview.figures).unwrap();
     assert_eq!(
         figures,
-        json!({"coversInExport": 5, "notInLedger": 1, "missingFiles": 1, "notAnImage": 1,
+        json!({"coversInExport": 5, "notInLedger": 1, "missingFiles": 1, "refusedFiles": 0, "notAnImage": 1,
                "alreadyRegistered": 0, "conflicting": 0, "toRegister": 2, "webp": 1, "jpeg": 1, "png": 0})
     );
     assert!(matches!(

@@ -74,7 +74,8 @@ pub struct OpsAsOf {
     pub batch_ref: Uuid,
 }
 
-/// A business that has at least one own account and can therefore be selected.
+/// A business with at least one account still in the ledger; only those can be selected. A domain
+/// whose accounts were all deleted in the workbench is history, not a current business.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpsBusinessOption {
@@ -87,10 +88,10 @@ pub async fn read_ops_businesses(
     database: &Database,
 ) -> Result<Vec<OpsBusinessOption>, OpsReadError> {
     let rows = sqlx::query(
-        "SELECT d.domain_ref, d.name, \
-                count(a.account_ref) FILTER (WHERE a.ledger_state = 'in_ledger') AS account_count \
+        "SELECT d.domain_ref, d.name, count(*) AS account_count \
            FROM observation_domain d \
-           JOIN linggan_ops_account a ON a.domain_ref = d.domain_ref \
+           JOIN linggan_ops_account a \
+             ON a.domain_ref = d.domain_ref AND a.ledger_state = 'in_ledger' \
           GROUP BY d.domain_ref, d.name, d.created_at \
           ORDER BY d.created_at, d.domain_ref",
     )
@@ -166,7 +167,8 @@ pub(super) async fn ensure_business(
         return Ok(());
     };
     let known: bool = sqlx::query_scalar(
-        "SELECT EXISTS (SELECT 1 FROM linggan_ops_account WHERE domain_ref = $1)",
+        "SELECT EXISTS (SELECT 1 FROM linggan_ops_account \
+                         WHERE domain_ref = $1 AND ledger_state = 'in_ledger')",
     )
     .bind(domain_ref)
     .fetch_one(database.pool())
