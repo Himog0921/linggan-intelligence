@@ -54,6 +54,17 @@ const { chromium } = require('playwright');
     }
     assert.equal(writes.length,0,'browsing and opening/closing the form must not issue a collection write');
     await page.setViewportSize({width:1440,height:1000});
+    await page.goto(`${fixture.origin}/collection/tasks?domain=${fixture.domainRef}`);
+    let releaseRead;const readGate=new Promise(resolve=>{releaseRead=resolve;});
+    let readStarted;const started=new Promise(resolve=>{readStarted=resolve;});
+    await page.route('**/api/collection/runs/*?domainRef=*',async route=>{const response=await route.fetch();readStarted();await readGate;await route.fulfill({response});});
+    await page.locator('[data-open-run]').first().click();await started;
+    await page.keyboard.press('Escape');assert.equal(await page.locator('#collection-run-drawer').isVisible(),false);
+    const readFinished=page.waitForResponse(r=>r.url().includes('/api/collection/runs/')&&r.url().includes('domainRef='));releaseRead();await readFinished;
+    await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+    assert.equal(new URL(page.url()).searchParams.has('run'),false,'a late read must not restore a closed drawer into the page context');
+    await page.unroute('**/api/collection/runs/*?domainRef=*');
+    await page.setViewportSize({width:1440,height:1000});
     await page.goto(`${fixture.origin}/collection/tasks?domain=${fixture.domainRef}&page=2`);
     assert.equal(await page.locator('.c-run-table tbody tr').count(), 7);
     for(const [filter,total] of [['all',27],['active',24],['attention',1],['results',1],['ended',3]]) {

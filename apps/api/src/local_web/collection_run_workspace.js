@@ -13,7 +13,7 @@
   if (originalUrl.searchParams.get('selected')==='1') {
     try {exactWorks=JSON.parse(sessionStorage.getItem('collection-selected:'+(originalUrl.searchParams.get('domain')||''))||'[]');}catch(_){exactWorks=[];}
   }
-  let targetPage = 1, selecting = 0, requestKey = null, requestIntent = null, currentRun = null;
+  let targetPage = 1, selecting = 0, requestKey = null, requestIntent = null, currentRun = null, runGeneration = 0;
   const known=value=>value==null?'未知':escape(value);
   const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
   function dialogOpen(dialog) { dialog.showModal(); document.documentElement.classList.add('c-run-dialog-open'); }
@@ -27,7 +27,7 @@
     const destination=returnContext();if(destination){location.assign(destination.href);return;}
     const url=new URL(location.href);for(const key of ['once','selected','target']) url.searchParams.delete(key);history.replaceState(null,'',url);
   });
-  drawer.addEventListener('close',()=>{const url=new URL(location.href);url.searchParams.delete('run');history.replaceState(null,'',url);});
+  drawer.addEventListener('close',()=>{runGeneration++;const url=new URL(location.href);url.searchParams.delete('run');history.replaceState(null,'',url);});
   for (const dialog of [modal, drawer]) dialog.addEventListener('close', () => {
     if (!modal.open && !drawer.open) document.documentElement.classList.remove('c-run-dialog-open');
   });
@@ -151,11 +151,14 @@
     finally { submit.disabled = false; }
   });
   async function openRun(id, domain) {
+    const generation = ++runGeneration;
     const body = drawer.querySelector('[data-run-detail]');
     body.textContent = '正在读取持久进展…';
     if (!drawer.open) dialogOpen(drawer);
     try {
-      currentRun = await json(`/api/collection/runs/${id}?domainRef=${encodeURIComponent(domain)}`);
+      const loaded = await json(`/api/collection/runs/${id}?domainRef=${encodeURIComponent(domain)}`);
+      if (generation !== runGeneration || !drawer.open) return;
+      currentRun = loaded;
       const r = currentRun;
       document.getElementById('collection-run-title').textContent = r.name;
       document.getElementById('collection-run-title').title = r.name;
@@ -181,8 +184,9 @@
         } catch(error) {results.querySelector('[data-run-works]').textContent='作品范围读取失败：'+error.message;}
       }
       await loadWorks();
+      if (generation !== runGeneration || !drawer.open) return;
       const url = new URL(location.href); url.searchParams.set('run', id); history.replaceState(null, '', url);
-    } catch (error) { body.textContent = `进展读取失败：${error.message}。当前不能据此确认成果或完成。`; }
+    } catch (error) { if (generation === runGeneration && drawer.open) body.textContent = `进展读取失败：${error.message}。当前不能据此确认成果或完成。`; }
   }
   document.querySelectorAll('[data-open-run]').forEach(b => b.addEventListener('click', () => openRun(b.dataset.openRun, b.dataset.runDomain)));
   function setRunView(view) {
@@ -199,7 +203,7 @@
     button.disabled = true;
     try {
       await json(`/api/collection/runs/${r.run_ref}/commands`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ commandRef: crypto.randomUUID(), domainRef: r.domain_ref, expectedRevision: r.revision, action: button.dataset.runCommand }) });
-      await openRun(r.run_ref, r.domain_ref);
+      if (drawer.open && currentRun?.run_ref === r.run_ref) await openRun(r.run_ref, r.domain_ref);
     } catch (error) { notice.textContent = `控制命令未确认：${error.message}`; button.disabled = false; }
   });
   for (const time of document.querySelectorAll('time[datetime]')) {
