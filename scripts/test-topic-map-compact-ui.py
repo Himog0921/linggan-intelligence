@@ -269,7 +269,7 @@ def run(out: Path) -> None:
         fresh('overview',extra='&topicRef=topic-A&windowDays=30&overviewWindowDays=30&journeyWindowDays=7')
         click('judge','topic-A');page.locator('dialog').wait_for(state='visible')
         click('judge-to-journey','topic-A',page.locator('dialog'))
-        page.locator('.lgi-tm-main[data-loaded="true"]').wait_for()
+        ready()
         assert page.locator('[data-filter="windowDays"]').input_value()=='7'
         last=next(url for method,url in reversed(state.requests) if url.startswith('/api/local/topic-map/overview?'))
         assert parse_qs(urlparse(last).query)['windowDays']==['7'],last
