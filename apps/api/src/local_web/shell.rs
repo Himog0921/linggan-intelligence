@@ -9,6 +9,7 @@ pub enum PrimarySurface {
     Collection,
     Topic,
     Settings,
+    Ops,
 }
 
 struct PrimaryEntry {
@@ -21,10 +22,10 @@ struct PrimaryEntry {
     href: Option<&'static str>,
 }
 
-/// The five names are product responsibilities, not five authorised runtime instances.
+/// The six names are product responsibilities, not six authorised runtime instances.
 /// An entry only becomes navigable once `href` names a route this binary actually serves;
 /// every other one stays disabled.
-const PRIMARY_ENTRIES: [PrimaryEntry; 5] = [
+const PRIMARY_ENTRIES: [PrimaryEntry; 6] = [
     PrimaryEntry {
         zh: "雷达",
         technical_key: "RADAR",
@@ -62,6 +63,15 @@ const PRIMARY_ENTRIES: [PrimaryEntry; 5] = [
         surface: Some(PrimarySurface::Collection),
         href: Some("/collection"),
     },
+    // OPS-MIGRATION-001 D2：Mog 2026-10-13 定为最后一个一级入口。新入口按 LANG-05 不再带英文
+    // 代号；辅助行只有一个状态词：切换（D6）之前这里只能看。
+    PrimaryEntry {
+        zh: "运营",
+        technical_key: "",
+        state: "只读",
+        surface: Some(PrimarySurface::Ops),
+        href: Some("/ops"),
+    },
 ];
 
 /// Renders one primary entry. A connected route becomes a real link so an operator can move
@@ -83,10 +93,17 @@ fn primary_entry_markup(
         (Some(PrimarySurface::Collection), Some(state)) => state,
         _ => entry.state,
     };
+    let technical_key = if entry.technical_key.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "<small class=\"v7-tech-key\">{}</small>",
+            entry.technical_key
+        )
+    };
     let label = format!(
-        "<b class=\"v7-nav-zh\">{zh}</b><span class=\"v7-nav-readout\"><small class=\"v7-tech-key\">{technical_key}</small><span class=\"v7-nav-state\">{state}</span></span>",
+        "<b class=\"v7-nav-zh\">{zh}</b><span class=\"v7-nav-readout\">{technical_key}<span class=\"v7-nav-state\">{state}</span></span>",
         zh = entry.zh,
-        technical_key = entry.technical_key,
     );
 
     match entry.href {
@@ -282,6 +299,73 @@ pub fn corpus_side_nav(active: CorpusPage, domain_ref: Option<&str>, foot: &str)
     }
     format!(
         r#"<aside class="v7-side" aria-label="语料导航">
+{items}
+<div class="v7-side-foot">{foot}</div></aside>"#
+    )
+}
+
+/// 运营模块的二级导航（OPS-MIGRATION-001 D2）。写法与语料侧栏一致；业务选择由这里统一带上，
+/// 切页时不丢。总览要到 D3 才开放，在那之前保持禁用而不是死链。
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum OpsPage {
+    Publications,
+    Accounts,
+    Daily,
+    ImportExport,
+}
+
+const OPS_ENTRIES: [(&str, &str, Option<&str>, Option<OpsPage>); 5] = [
+    ("01", "总览（未开放）", None, None),
+    (
+        "02",
+        "发布记录",
+        Some("/ops/publications"),
+        Some(OpsPage::Publications),
+    ),
+    (
+        "03",
+        "账号管理",
+        Some("/ops/accounts"),
+        Some(OpsPage::Accounts),
+    ),
+    ("04", "每日数据", Some("/ops/daily"), Some(OpsPage::Daily)),
+    (
+        "05",
+        "导入导出",
+        Some("/ops/io"),
+        Some(OpsPage::ImportExport),
+    ),
+];
+
+/// `business` 是已校验的业务选择（`all` 或领域编号）；`foot` 是调用方已转义的 markup。
+pub fn ops_side_nav(active: OpsPage, business: Option<&str>, foot: &str) -> String {
+    let mut items = String::new();
+    for (ordinal, label, href, page) in OPS_ENTRIES {
+        if !items.is_empty() {
+            items.push('\n');
+        }
+        match href {
+            None => items.push_str(&format!(
+                r#"<span class="v7-side-nav" aria-disabled="true"><i>{ordinal}</i><span>{label}</span></span>"#,
+            )),
+            Some(href) => {
+                let href = match business {
+                    Some(business) => format!("{href}?domain={business}"),
+                    None => href.to_owned(),
+                };
+                let current = if page == Some(active) {
+                    r#" aria-current="page""#
+                } else {
+                    ""
+                };
+                items.push_str(&format!(
+                    r#"<a class="v7-side-nav" href="{href}"{current}><i>{ordinal}</i><span>{label}</span></a>"#,
+                ));
+            }
+        }
+    }
+    format!(
+        r#"<aside class="v7-side" aria-label="运营导航">
 {items}
 <div class="v7-side-foot">{foot}</div></aside>"#
     )

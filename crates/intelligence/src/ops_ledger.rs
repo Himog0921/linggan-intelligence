@@ -6,6 +6,7 @@
 //! values state what the workbench recorded at export time; they are not Linggan observations.
 
 mod business_time;
+pub mod covers;
 mod dedupe;
 mod export_rows;
 mod import_batch;
@@ -16,6 +17,7 @@ mod ledger_read;
 mod ledger_totals;
 mod links;
 mod plan_rows;
+pub mod read;
 mod reconciliation;
 
 use linggan_storage_postgres::Database;
@@ -32,6 +34,11 @@ pub use reconciliation::Reconciliation;
 pub const OPS_IMPORT_RULE_VERSION: &str = "ops-import.v1";
 /// DEC-0009: an own Xiaohongshu post with at least this many views is a hit. Douyin is not judged.
 pub const XHS_HIT_VIEW_THRESHOLD: i64 = 5000;
+
+/// True for a valid `YYYY-MM-DD` calendar date (Beijing business days use this shape).
+pub(crate) fn is_business_date(text: &str) -> bool {
+    business_time::CivilDate::parse(text).is_some()
+}
 
 /// The three export files exactly as downloaded.
 pub struct ExportFiles {
@@ -67,6 +74,12 @@ pub enum OpsImportError {
     PreviewHashMismatch,
     #[error("台账里出现了规则之外的取值，未写入")]
     UnexpectedStoredValue,
+    #[error("拷来的封面文件读不出来，未写入")]
+    CoverFileUnreadable,
+    #[error("本机媒体目录里已有同名但内容不同的封面文件，未写入")]
+    CoverStorageConflict,
+    #[error("本机媒体目录写不进去，未登记")]
+    CoverStorageUnavailable,
     #[error(transparent)]
     Database(#[from] sqlx::Error),
 }

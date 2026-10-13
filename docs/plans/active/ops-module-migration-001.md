@@ -8,7 +8,7 @@
 
 ## 当前状态
 
-迁移范围已经确认。D1 已完成并上线：PR #403 经 Mog 另派 agent 审查后合并为 `main@3029efff` 并部署，共享库已执行迁移 0123；2026-10-13 经 Mog 授权完成历史导入（先加密备份，40 项新旧核对一致），并新建空的卢叔数学领域（见 D1 回执）。D2 已派定（Issue #405），页面规格草案待 Mog 确认后实施。D3–D6 没有派定。
+迁移范围已经确认。D1 已完成并上线：PR #403 经 Mog 另派 agent 审查后合并为 `main@3029efff` 并部署，共享库已执行迁移 0123；2026-10-13 经 Mog 授权完成历史导入（先加密备份，40 项新旧核对一致），并新建空的卢叔数学领域（见 D1 回执）。D2 已派定（Issue #405），实现与走查完成，待 Mog 决定是否推送开 PR（见 D2 回执）。D3–D6 没有派定。
 
 每一步都是受保护交付，要由 Mog 单独派定（Issue、专属 worktree、PR），独立审核的时机也由 Mog 决定。本计划本身不授权任何实现，包括 migration、共享库写入、部署、真实采集和对内容工作台的改动。
 
@@ -199,6 +199,7 @@ Mog 2026-10-13 派定（Issue #405）并确认：
 - 2026-10-13：Mog 授权推送并开 PR，审查由 Mog 另派 agent 进行。
 - 2026-10-13：PR #403 合并上线（`main@3029efff`，共享库执行 0123）；经 Mog 授权完成共享库历史导入与卢叔数学领域创建。
 - 2026-10-13：Mog 派定 D2（Issue #405），确认一级页面「运营」、先只读、历史封面由他拷来；页面规格草案写成。
+- 2026-10-13：Mog 确认规格第 11 节三项；D2 实现完成，在共享库副本上走查并修正 13 处，本地提交、未推送。
 
 ## D1 认领（2026-10-13）
 
@@ -247,3 +248,31 @@ Mog 2026-10-13 派定（Issue #405）并确认：
   - 导入过程中三个服务照常运行。
 - **卢叔数学领域**：经领域管理的同一接口新建，空领域（0 个观察目标、0 个我方账号）。数学账号按推荐留在 ADHD。
 - **未证明**：Mog 对运营数据的业务验收（随 D2 页面）。
+
+## D2 认领（2026-10-13）
+
+与 D1 一样，认领记在这里：
+
+- 执行者：Claude Code，task-id `ops-migration-d2`；
+- 基线：`main@3029efff`（D1 合并），收尾前变基到 `main@ce9bfb20`（只多了主题图谱 #404，与本交付只在文档索引上相邻）；
+- 分支 / worktree：`feat/ops-migration-d2` / `.worktrees/ops-migration-d2`；
+- 独占文件：`database/migrations/0124_ops_publication_cover.sql`；`crates/intelligence/src/ops_ledger/read.rs`、`read/`、`covers.rs`；`crates/intelligence/tests/ops_ledger_read_postgres.rs`；`apps/api/src/local_web/ops*`；`docs/design/pages/ops-page.md`；`docs/data-contracts/ops-http-001.md`；`docs/design/acceptance/ops-page-001-visual-acceptance.md`；
+- 共享文件：`apps/api/src/local_web/{shell.rs,shell.css,tests.rs,local_asset_delivery.rs,full_schema_fixture.rs}`；`apps/api/src/local_web.rs`；`crates/intelligence/src/ops_ledger.rs`；`apps/worker/src/bin/ops_history_import.rs`；`crates/evidence/tests/support/material_fixture.rs`；`scripts/{local-runtime.sh,test-ops-ledger-postgres.sh}`；`docs/README.md`；`docs/design/README.md`；`docs/current-state.md`；`docs/progress/2026-10.md`；`docs/design/lids/migration-log.md`；`docs/governance/generated-artifacts-registry.md`；本计划；
+- 禁止：其他页面的内容、领域管理、采集与语料的读写；任何写接口；共享库写入；
+- 停止条件：需要写接口或改变已确认的产品语义；迁移编号冲突无法按规则解决；共享页头的改动超出放下第 6 项所需。
+
+## D2 回执（2026-10-13）
+
+- **实现**：
+  - 迁移 `0124_ops_publication_cover`（封面登记表，只追加，存放位置由内容哈希决定）；
+  - 只读读取 `ops_ledger::read`：读数条、发布记录、账号、每日数据、导出；
+  - 历史封面迁入 `ops_ledger::covers` 与命令 `linggan-ops-history-import cover-preview|cover-apply`；
+  - 页面 `/ops/publications`、`/ops/accounts`、`/ops/daily`、`/ops/io` 与只读接口（[OPS-HTTP-001](../../data-contracts/ops-http-001.md)），封面只能按记录号读取已登记的文件。
+- **隔离证明**（合成数据，一次性 PostgreSQL，退出时删除并核验）：
+  - 单元 15 项、迁移摘要 1 项、页面与接口 10 项、页面脚本 3 项；
+  - PostgreSQL 13 项（D1 6 + D2 7）：发布记录只显示保留的记录且新的在前；各筛选与 `%` 按字面匹配；业务选择只列有账号的领域、账号数只数在台账的；读数按北京时间的本月、导入前为未知；账号与每日数据的口径；封面只登记真图片、重复执行不多写、文件变了算冲突、登记不能改删、路径不能出文件夹。
+- **共享库副本走查**：在一次性完整副本上执行 0124，候选服务只开 `127.0.0.1:3100`。数字与 D1 对账一致：运营中账号 93/95、本月发布 110、本月加微 48、本月爆款 2；发布记录 2,298 条；待补阅读量 850 条。三种视口、四类数据边界、失败、空结果和快速切换都看过，修正 13 处，见 [ACC-OPS-PAGE-001](../../design/acceptance/ops-page-001-visual-acceptance.md)。副本走查完删除。
+- **共享页头**：加第 6 项后原有台阶放不下，`shell.css` 增加页头自己的收紧台阶。这是共享改动，需要 Mog 决定是否随本 PR 合入。
+- **封面**：用 4 张程序生成的图片在副本上走通了迁入和显示。真实封面等 Mog 拷来，在合并部署后对共享库执行。
+- **未证明**：未合并、未部署；共享库没有执行 0124；真实封面未迁；Mog 在 3000 上的业务验收。
+
