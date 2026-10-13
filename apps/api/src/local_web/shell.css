@@ -90,10 +90,10 @@ a.v7-side-nav { text-decoration:none; }
  * 1362px at the first step, so the header compacts earlier than the rail and context row do.
  * The steps only narrow the header; the service-status capsule stays until the existing 1180 step. */
 @media(max-width:1560px){.v7-global-brand{width:285px;flex-basis:285px;padding-left:18px}.v7-primary-nav button,.v7-primary-nav a{min-width:104px;padding:0 15px}.v7-global-command{width:130px}.v7-context-meta{gap:14px}.v7-global-system{padding:0 14px}}
-@media(max-width:1380px){.v7-global-brand{width:230px;flex-basis:230px}.v7-global-brand-sub,.v7-global-flex{display:none}.v7-primary-nav button,.v7-primary-nav a{min-width:90px;padding:0 10px}}
+@media(max-width:1380px){.v7-global-brand{width:230px;flex-basis:230px}.v7-global-brand-sub,.v7-global-flex{display:none}.v7-primary-nav button,.v7-primary-nav a{min-width:90px;padding:0 calc(var(--lgi-space-2) + var(--lgi-space-1)/2)}}
 @media(max-width:1240px){.v7-primary-nav .v7-tech-key{display:none}}
 @media(max-width:1180px){:root{--v7-side-width:190px}.v7-global-brand{width:230px;flex-basis:230px}.v7-global-brand-sub,.v7-global-flex,.v7-system-boundary,.v7-context-meta span:nth-child(2){display:none}.v7-primary-nav button,.v7-primary-nav a{min-width:90px;padding:0 10px}}
-@media(max-width:960px){.v7-primary-nav button,.v7-primary-nav a{min-width:80px;padding:0 8px}}
+@media(max-width:960px){.v7-primary-nav button,.v7-primary-nav a{min-width:80px;padding:0 var(--lgi-space-2)}}
 @media(max-width:900px){html,body{height:auto;min-height:100%;overflow:auto}.v7-app{height:auto;min-height:100vh;grid-template-rows:auto minmax(0,1fr);overflow:visible}.v7-global-header{height:auto}.v7-global-row{min-height:78px;height:auto;overflow-x:auto}.v7-global-brand{min-width:230px}.v7-primary-nav button,.v7-primary-nav a{min-width:86px}.v7-shell{grid-template-columns:1fr}.v7-side{border-right:0;border-bottom:2px solid var(--v7-black)}}
 /* A primary responsibility must never require a hidden horizontal swipe to be reached.
  * Five entries fit across a 390px viewport; narrower screens and future entries grow a

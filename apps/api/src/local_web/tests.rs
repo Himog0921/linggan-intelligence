@@ -3050,7 +3050,7 @@ fn six_primary_entries_keep_the_personal_menu_on_screen_at_laptop_widths() {
         "@media(max-width:1560px){.v7-global-brand{width:285px",
         "@media(max-width:1380px){.v7-global-brand{width:230px;flex-basis:230px}.v7-global-brand-sub,.v7-global-flex{display:none}",
         "@media(max-width:1240px){.v7-primary-nav .v7-tech-key{display:none}}",
-        "@media(max-width:960px){.v7-primary-nav button,.v7-primary-nav a{min-width:80px;padding:0 8px}}",
+        "@media(max-width:960px){.v7-primary-nav button,.v7-primary-nav a{min-width:80px;padding:0 var(--lgi-space-2)}}",
     ] {
         assert!(SHELL_CSS.contains(step), "missing header step: {step}");
     }

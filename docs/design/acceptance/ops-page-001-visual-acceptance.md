@@ -7,6 +7,12 @@
 > 冲突时以谁为准: Mog 最新确认、[PAGE-OPS-001](../pages/ops-page.md)、[OPS-HTTP-001](../../data-contracts/ops-http-001.md)、[OPS-LEDGER-001](../../data-contracts/ops-ledger-001.md)、真实代码与运行证据；本记录不替代合并、部署或 Mog 的业务验收
 > 验收状态: 自动证明与浏览器走查完成；未合并、未部署；Mog 的业务验收待部署后在本机 3000 上进行
 
+## PR #407 合并前 Token 修正范围（2026-10-13）
+
+本机发布复核发现运营页焦点描边/偏移和状态强调阴影、共享页头新增收紧规则的 padding 仍写死像素。按 AGENTS.md 修正为现有 `--lgi-space-*` 的等值表达；运营限定的 themed selector 与共享焦点规则同等优先级，随本页 CSS 后加载生效。保持 2px 描边/偏移/强调线及 10px、8px 页头内边距，不改共享 Token、断点、导航宽度、业务语义、数据或权限。验证沿用本包既有页面/页头回归与隔离 PostgreSQL 证明，提交前独立复核；合并部署与 0124 迁移仍等待 Mog 对最终提交及迁移的确认。
+
+修正前已实跑完整运营隔离入口：15领域单元、1迁移摘要、10页面/接口、3脚本及13PostgreSQL通过，临时容器和卷清理核验通过。修正后3运营脚本、29主题脚本、治理、手册和diff检查通过；独立复核实跑当前工作树10个ops/shell Rust测试及最新CSS重编后的页头精确guard1个通过，四个断点删除与旧960px内边距的内存负控均能使既有guard失败。复核指出共享themed焦点覆盖局部规则，已通过上述运营限定selector修正，不扩大共享focus。真实Chromium合成页面核对：默认focus描边/offset为2px、1305px页头padding为10px；将主题spacing1/2改为6/12后，focus描边/offset为3px、padding为15px。旧代码负控offset仍为2px，未达到3px预期。上述是无真实数据、无后端请求的CSS样本，不替代本机3000或Mog验收。
+
 ## 1. 验收对象
 
 - **事项**：Issue #405；页面规格 PAGE-OPS-001；接口合同 OPS-HTTP-001。

@@ -9,7 +9,7 @@
 .ops-main .ops-primary,.ops-dialog .ops-primary{background:var(--lgi-ink);border-color:var(--lgi-ink);color:var(--lgi-canvas)}
 .ops-main :is(input,select,textarea),.ops-dialog input{border:1px solid var(--lgi-border-strong);background:var(--lgi-canvas);padding:0 var(--lgi-space-3);min-width:0;height:var(--ops-control)}
 .ops-main :is(input,select,textarea):disabled{color:var(--lgi-ghost);background:var(--lgi-canvas-low);border-color:var(--lgi-border);cursor:not-allowed}
-.ops-main :focus-visible,.ops-dialog :focus-visible{outline:2px solid var(--lgi-focus);outline-offset:2px}
+.ops-main :focus-visible,.ops-dialog :focus-visible,[data-theme="linggan-intelligence"] :is(.ops-main,.ops-dialog) :focus-visible{outline:calc(var(--lgi-space-1)/2) solid var(--lgi-focus);outline-offset:calc(var(--lgi-space-1)/2)}
 .ops-main a,.ops-dialog a{color:var(--lgi-focus);text-decoration:none}.ops-main a:hover{text-decoration:underline}
 /* 读数条：工作台页头的 5 个数字。 */
 .ops-readouts{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));border-top:1px solid var(--lgi-ink);border-bottom:1px solid var(--lgi-border);flex:none}
@@ -50,7 +50,7 @@
 .ops-tag{display:inline-flex;align-items:center;gap:var(--lgi-space-1);max-width:100%;padding:0 var(--lgi-space-1);font-size:var(--lgi-text-label);line-height:calc(var(--lgi-space-4) + var(--lgi-space-1)/2);font-weight:var(--lgi-weight-medium);white-space:nowrap;background:var(--lgi-unknown-soft);color:var(--lgi-unknown)}
 .ops-tag[data-tone=success]{background:var(--lgi-success-soft);color:var(--lgi-success)}
 .ops-tag[data-tone=warning]{background:var(--lgi-warning-soft);color:var(--lgi-warning)}
-.ops-tag[data-tone=strong]{background:var(--lgi-warning-soft);color:var(--lgi-ink);box-shadow:inset 2px 0 var(--lgi-warning-dot)}
+.ops-tag[data-tone=strong]{background:var(--lgi-warning-soft);color:var(--lgi-ink);box-shadow:inset calc(var(--lgi-space-1)/2) 0 var(--lgi-warning-dot)}
 .ops-main .ops-row-actions{display:flex;gap:var(--lgi-space-1)}.ops-main .ops-row-actions button{height:var(--lgi-space-6);padding:0 var(--lgi-space-2)}
 /* 媒体：封面缩略图或明说的缺失占位。 */
 .ops-main .ops-cover{display:flex;align-items:center;justify-content:center;width:calc(var(--lgi-space-12) - var(--lgi-space-2));height:calc(var(--lgi-space-12) + var(--lgi-space-1));padding:0;border:1px solid var(--lgi-hairline);background:var(--lgi-canvas-low);overflow:hidden}

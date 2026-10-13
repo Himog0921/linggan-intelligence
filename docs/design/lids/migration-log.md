@@ -1,5 +1,7 @@
 # LIDS-LOG-001 · LIDS 迁移与变更记录
 
+PR #407 合并前修正（2026-10-13）：运营页焦点/强调线与新增共享页头 padding 改为现有间距 Token 的等值表达，保持 Mog 已确认的外观、断点和导航尺寸。未新增共享 Token 或扩大页面/权限范围。范围及验证见 [D2 验收记录](../acceptance/ops-page-001-visual-acceptance.md)。
+
 > 状态: 权威当前
 > 最后核对: 2026-10-13
 > 适用范围: Linggan Intelligence LIDS Token、Primitive、Component、Pattern、Page、Motion、Scene 和 Data Truth 规则的实际变更、替代、例外与验证边界
