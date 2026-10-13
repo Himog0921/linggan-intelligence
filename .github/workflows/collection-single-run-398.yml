@@ -1,0 +1,32 @@
+name: Collection single run 398
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: collection-single-run-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  source-checkout:
+    if: github.head_ref == 'codex/collection-single-run-398'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Export tracked source for isolated implementation
+        run: |
+          mkdir -p "$RUNNER_TEMP/collection-source"
+          git archive --format=tar HEAD | gzip -n > "$RUNNER_TEMP/collection-source/source.tar.gz"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/collection-source/revision.txt"
+          sha256sum "$RUNNER_TEMP/collection-source/source.tar.gz" > "$RUNNER_TEMP/collection-source/source.sha256"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: collection-source-398
+          path: ${{ runner.temp }}/collection-source
+          retention-days: 1
+          if-no-files-found: error
