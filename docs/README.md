@@ -356,3 +356,5 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发，并于 2026-10-02 
 | 文档 | 状态 | 用途 |
 |---|---|---|
 | [plans/active/topic-map-core-001.md](plans/active/topic-map-core-001.md) | 活跃计划 | Issue #382 研究内核、来源与定义身份、完整闭环；上线后研究阻塞、主题质量与规模修复验证 |
+
+- [登录页与 Anatomy 动画](design/changes/login-anatomy-001.md)：LOGIN-ANATOMY-001，已确认 Login V2 的开发入口、源码再生与发布边界。

@@ -165,3 +165,7 @@ LIDS 现在统一约束全项目的设计表达，但其成熟度仍为 Proposed
 
 [单一交付包与 UI 变更清单](../plans/active/topic-map-v41-001.md)；用户指定 V4.1 Demo 布局，LIDS 表达，既有静态参考只约束其旧范围。
 [实施验收](acceptance/topic-map-v41-001-acceptance.md)记录自动证明、隔离浏览器和未发布/业务边界。
+
+## LOGIN-ANATOMY-001
+
+[登录页变更规格](changes/login-anatomy-001.md)：按 Mog 确认的 Login V2 与 Anatomy 装置实现，开发模式仅导航进入现有工作台；本页局部视觉例外不扩展全站 Token。
