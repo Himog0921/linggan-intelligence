@@ -1,0 +1,82 @@
+name: Topic Map compact final integration
+on:
+  push:
+    branches: ['codex/topic-map-compact-382']
+    paths: ['.github/workflows/topic-map-compact-transfer.yml']
+permissions:
+  contents: read
+jobs:
+  sync:
+    if: github.ref == 'refs/heads/codex/topic-map-compact-382'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Integrate fixed main without overwriting either task
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/topic-map-final"
+          git worktree add --detach .worktrees/topic-map-compact-382 HEAD
+          cd .worktrees/topic-map-compact-382
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git merge --no-commit --no-ff 3029efffcd4e1798e2db0b4ad678927091cab21e || test -n "$(git diff --name-only --diff-filter=U)"
+          python - <<'PY'
+          import difflib, os, pathlib, subprocess
+          def git(*args):return subprocess.check_output(['git',*args]).decode()
+          base='c935f7e08e5d4a6192d41a7fe60f76d95eaaebba'; main='3029efffcd4e1798e2db0b4ad678927091cab21e'
+          allowed={'docs/README.md','docs/current-state.md','docs/progress/2026-10.md','docs/governance/generated-artifacts-registry.md'}
+          conflicts=git('diff','--name-only','--diff-filter=U').splitlines()
+          assert set(conflicts)<=allowed,conflicts
+          for name in conflicts:
+              before=git('show',base+':'+name).splitlines(keepends=True)
+              ours=git('show',os.environ['GITHUB_SHA']+':'+name).splitlines(keepends=True)
+              theirs=git('show',main+':'+name)
+              changes=difflib.SequenceMatcher(a=before,b=ours,autojunk=False).get_opcodes()
+              for kind,a,b,c,d in reversed(changes):
+                  if kind=='equal':continue
+                  assert kind=='insert' and a==b,(name,kind)
+                  extra=''.join(ours[c:d])
+                  if a==len(before):theirs+=extra
+                  else:
+                      anchor=''.join(before[a:min(len(before),a+8)])
+                      assert anchor and theirs.count(anchor)==1,(name,'ambiguous insertion')
+                      theirs=theirs.replace(anchor,extra+anchor,1)
+              assert not any(x in theirs for x in ['<<<<<<<','=======\n>>>>>>>'])
+              pathlib.Path(name).write_text(theirs)
+              subprocess.run(['git','add','--',name],check=True)
+          print('Resolved additive documentation only:',conflicts)
+          for name in ['apps/api/src/local_web/topic_map.js','apps/api/src/local_web/topic_map.css','apps/api/src/local_web/topic_map.rs','scripts/test-topic-map-ui.cjs','scripts/test-topic-map-compact-ui.py']:
+              assert git('hash-object',name).strip()==git('rev-parse','cc7f47b132a37f1b1193c957193dcf918939513b:'+name).strip(),name
+          receipt='候选 cc7f47b132a37f1b1193c957193dcf918939513b：27 组实际 JS 回归、全 checkout 文件治理、设计手册和 Chromium 10 组交互/布局场景全部通过。浏览器检查覆盖 1920/1440/720/390、六概览视图、地图/列表与统计口径独立、局部场景检索、范围恢复、树滚动、详情焦点、空/未知/部分/失败重试；0 页面异常，85 次合成 GET，无写请求。运行 https://github.com/Himog0921/linggan-intelligence/actions/runs/38339650109 ，artifact topic-map-compact-candidate 含截图与 receipt.json。原 loopback 环境限制不作为通过证据，以上来自实际隔离 Chromium。'
+          p=pathlib.Path('docs/design/changes/topic-map-compact-382.md');text=p.read_text();head,sep,old=text.partition('## 当前回执\n');assert sep
+          p.write_text(head+sep+'\n'+receipt+'\n\n开发期间 main 更新到 3029efff，已合入专属分支，冲突仅按本任务相对旧基线的纯新增段落重放，完整保留运营账本任务代码和记录。已验前端及测试源逐文件 blob 校验不变。一次性传递/对齐工作流交付前删除，持续只读回归保留。PR #404；Rust 编译/原生测试以 PR CI 实际结果为准。\n\n真实用户数据与运行服务、独立审查、业务验收、合并、部署均未执行。合成页面证明不代表模型语义、实际保存或生产效果。\n')
+          p=pathlib.Path('docs/current-state.md');text=p.read_text();old='当前 JS 回归通过，浏览器和远端验证尚待回执；未合并、部署或启动研究。';new='27 组 JS、10 组多尺寸 Chromium、治理及设计检查通过（合成数据，0 页面异常）；PR #404，未合并、部署或启动研究。';assert text.count(old)==1;p.write_text(text.replace(old,new))
+          p=pathlib.Path('docs/progress/2026-10.md');text=p.read_text();text+='\n\nTOPIC-MAP-COMPACT-382 / PR #404 最终前端回执：'+receipt+' 同步最新 main 仅处理纯新增文档冲突，已验前端与测试源码 hash 不变。Rust/API CI 单列，未合并、部署或执行真实模型/数据写入；未伪称独立复审。\n';p.write_text(text)
+          subprocess.run(['git','add','--','docs/design/changes/topic-map-compact-382.md','docs/current-state.md','docs/progress/2026-10.md'],check=True)
+          for name in sorted(allowed|{'docs/design/changes/topic-map-compact-382.md'}):
+              out=pathlib.Path(os.environ['RUNNER_TEMP'])/'topic-map-final'/name;out.parent.mkdir(parents=True,exist_ok=True);out.write_bytes(pathlib.Path(name).read_bytes())
+          PY
+          git diff --cached --check
+          node --check apps/api/src/local_web/topic_map.js
+          node scripts/test-topic-map-ui.cjs | tee "$RUNNER_TEMP/topic-map-final/ui.log"
+          bash scripts/check-project-governance.sh | tee "$RUNNER_TEMP/topic-map-final/governance.log"
+          bash scripts/verify-ui-design-handbook.sh | tee "$RUNNER_TEMP/topic-map-final/design.log"
+          test "$(git ls-remote origin refs/heads/codex/topic-map-compact-382 | cut -f1)" = "$GITHUB_SHA"
+          git commit -m 'chore(topic-map): reconcile additive main documentation and record tested UI candidate, Refs #382'
+          git push origin HEAD:refs/heads/codex/topic-map-compact-382
+          git rev-parse HEAD > "$RUNNER_TEMP/topic-map-final/head.txt"
+          git diff --stat 3029efffcd4e1798e2db0b4ad678927091cab21e HEAD > "$RUNNER_TEMP/topic-map-final/diff-stat.txt"
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: topic-map-final-receipts
+          path: ${{ runner.temp }}/topic-map-final
+          retention-days: 7
+          if-no-files-found: error
