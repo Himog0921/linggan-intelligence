@@ -13,7 +13,7 @@ jobs:
     permissions:
       contents: write
     env:
-      PROOF: ${{ runner.temp }}/topic-map-readability-proof
+      PROOF: /tmp/topic-map-readability-proof-${{ github.run_id }}
       WORK: .worktrees/topic-map-compact-382
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -26,7 +26,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD^)" = d68442c7193a3e807238fd909e49e586d5efb9b8
+          test "$(git rev-parse HEAD^)" = d858cc10ceadf9d20bfba0d895ff91888db3fba2
           mkdir -p "$PROOF"
           git worktree add --detach "$WORK" "$GITHUB_SHA"
           python - <<'PY'
@@ -85,7 +85,7 @@ jobs:
           proof=Path(os.environ['PROOF'])
           receipt=json.loads((proof/'browser/receipt.json').read_text())
           assert not receipt['pageErrors']
-          summary='\n\n可阅读性修订自动回执：实际 JS VM 28 组回归通过；隔离 Chromium '+str(len(receipt['checks']))+' 组检查通过，含四宽度、小红书单平台、空平台不占位、真实混合记录保留、零/未知/极大数值、长标题和搜索统计分离；0 页面异常。文件治理和设计手册检查通过。代码与测试在本次推送前实际运行；合成 HTTP 不代表用户数据、Rust 运行服务、独立审查或业务验收。未合并或部署。运行记录：https://github.com/'+os.environ['GITHUB_REPOSITORY']+'/actions/runs/'+os.environ['GITHUB_RUN_ID']+' 。\n'
+          summary='\n\n可阅读性修订自动回执：实际 JS VM 28 组回归通过；隔离 Chromium '+str(len(receipt['checks']))+' 组检查通过，含四宽度、小红书单平台、空平台不占位、真实混合记录保留、零/未知/极大数值、长标题和搜索统计分离；0 页面异常。文件治理和设计手册检查通过。代码与测试在本次推送前实际运行；合成 HTTP 不代表用户数据、Rust 运行服务、独立审查或业务验收。未合并或部署。运行记录：https://github.com/'+os.environ['GITHUB_REPOSITORY']+'/actions/runs/'+os.environ['GITHUB_RUN_ID']+' 。前序临时工作流在解析阶段失败（未运行测试/发布），上下文修正后本轮重验；历史失败保留。\n'
           for name in ['docs/design/changes/topic-map-compact-382.md','docs/progress/2026-10.md']:
               with Path(name).open('a') as f:f.write(summary)
           Path('.github/workflows/topic-map-compact-transfer.yml').unlink()
@@ -110,6 +110,6 @@ jobs:
         if: always()
         with:
           name: topic-map-readability-proof
-          path: ${{ runner.temp }}/topic-map-readability-proof
+          path: /tmp/topic-map-readability-proof-${{ github.run_id }}
           retention-days: 7
           if-no-files-found: error
