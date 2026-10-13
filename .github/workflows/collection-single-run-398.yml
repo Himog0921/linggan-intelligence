@@ -11,22 +11,30 @@ jobs:
   source-checkout:
     if: github.head_ref == 'codex/collection-single-run-398'
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
           persist-credentials: false
-      - name: Export tracked source for isolated implementation
+      - name: Prepare exact toolchain and locked dependencies
+        run: |
+          rustup toolchain install 1.95.0 --profile minimal --component rustfmt
+          cargo +1.95.0 fetch --locked
+      - name: Export public tracked source and offline build inputs
         run: |
           mkdir -p "$RUNNER_TEMP/collection-source"
           git archive --format=tar HEAD | gzip -n > "$RUNNER_TEMP/collection-source/source.tar.gz"
           git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/collection-source/revision.txt"
-          sha256sum "$RUNNER_TEMP/collection-source/source.tar.gz" > "$RUNNER_TEMP/collection-source/source.sha256"
+          TOOLCHAIN=$(dirname "$(dirname "$(rustup which --toolchain 1.95.0 rustc)")")
+          tar -C "$TOOLCHAIN" -czf "$RUNNER_TEMP/collection-source/rust-toolchain.tar.gz" bin lib
+          tar -C "$HOME/.cargo" -czf "$RUNNER_TEMP/collection-source/cargo-registry.tar.gz" registry
+          cd "$RUNNER_TEMP/collection-source"
+          sha256sum *.tar.gz > checksums.sha256
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: collection-source-398
+          name: collection-offline-inputs-398
           path: ${{ runner.temp }}/collection-source
           retention-days: 1
           if-no-files-found: error
