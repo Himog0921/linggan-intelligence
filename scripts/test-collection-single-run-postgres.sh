@@ -49,11 +49,12 @@ docker exec "$proof_container" createdb -U "$proof_user" "$proof_database"
 proof_database_created=1
 export LOCAL_001_PROOF_DATABASE_URL="postgresql://${proof_user}:${proof_password}@127.0.0.1:${proof_port}/${proof_database}"
 export COLLECTION_CONTROL_PROOF_DATABASE_URL="$LOCAL_001_PROOF_DATABASE_URL"
+export COLLECTION_DISPATCH_PROOF_DATABASE_URL="$LOCAL_001_PROOF_DATABASE_URL"
 if [[ "${COLLECTION_RUN_CORE_PROOF:-1}" == "1" ]]; then
   cargo test -p linggan-evidence --test collection_single_run_postgres --locked -- --ignored --test-threads=1
 fi
 if [[ "${COLLECTION_RUN_REGRESSION_PROOF:-0}" == "1" ]]; then
-  for proof_target in collection_control_postgres collection_control_runtime_postgres keyword_archive_postgres material_social_postgres material_projection_postgres creator_lifecycle_postgres local_producer_postgres scheduler_tick_postgres; do
+  for proof_target in collection_control_postgres collection_control_runtime_postgres collection_dispatch_sequence_postgres keyword_archive_postgres material_social_postgres material_projection_postgres creator_lifecycle_postgres local_producer_postgres scheduler_tick_postgres; do
     cargo test -p linggan-evidence --test "$proof_target" --locked -- --ignored --test-threads=1
   done
 fi
