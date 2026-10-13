@@ -1,6 +1,9 @@
 //! Formal router + disposable PostgreSQL + fresh browser. No worker or platform is started.
 use super::*;
 #[allow(dead_code)]
+#[path = "../../../../crates/evidence/tests/support/domain_fixture.rs"]
+mod legacy_fixture;
+#[allow(dead_code)]
 #[path = "../../../../crates/evidence/tests/collection_single_run_postgres.rs"]
 mod run_fixture;
 use linggan_evidence::collection_run::{CommentMode, CreateRun, RunSource, create_run};
@@ -182,16 +185,59 @@ async fn collection_single_run_browser_with_persisted_data() {
             .fetch_one(db.pool())
             .await
             .unwrap();
-    let domain_count: i64 = sqlx::query_scalar("SELECT count(*) FROM observation_domain")
-        .fetch_one(db.pool())
-        .await
-        .unwrap();
     let existing_request_key: uuid::Uuid =
         sqlx::query_scalar("SELECT idempotency_key FROM collection_run WHERE run_ref=$1")
             .bind(serde_json::from_value::<uuid::Uuid>(result["runRef"].clone()).unwrap())
             .fetch_one(db.pool())
             .await
             .unwrap();
+    // Historical accepted deliveries have no collection_run_work checkpoint. Keep the actual
+    // old WorkOrder/Lease/Task/Attempt/Package/Receipt path in this formal UI regression.
+    let legacy_domain = uuid::Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO observation_domain(domain_ref,name,status) VALUES($1,'合成历史领域','active')",
+    )
+    .bind(legacy_domain)
+    .execute(db.pool())
+    .await
+    .unwrap();
+    let legacy_package = legacy_fixture::submit_package_for_domain(
+        &db,
+        &legacy_domain.to_string(),
+        "合成历史有材料",
+        "deep_archive",
+        json!({"query":"合成历史有材料"}),
+        1,
+        "discovery_search",
+        legacy_fixture::search_coverage("合成历史有材料", 1),
+        json!({"surfaceReceipt":{"stopReason":"bottom_confirmed"}}),
+        vec![legacy_fixture::discovery_card(
+            "uilegacywork",
+            "合成历史作品",
+            "1",
+            "https://www.xiaohongshu.com/explore/uilegacywork?xsec_token=SYNTHETIC_FIXTURE",
+        )],
+    )
+    .await;
+    let (legacy_run, legacy_target): (uuid::Uuid, uuid::Uuid) = sqlx::query_as("SELECT l.work_order_ref,w.target_ref FROM linggan_runtime_capture_package p JOIN collection_work_order_lease_task t USING(task_id) JOIN collection_work_order_lease l USING(lease_ref) JOIN collection_work_order w USING(work_order_ref) WHERE p.package_ref=$1").bind(legacy_package).fetch_one(db.pool()).await.unwrap();
+    let detail_package = legacy_fixture::submit_package_for_target(
+        &db, legacy_target, "合成历史详情", "deep_archive", json!({"contentExternalId":"uilegacywork"}), 1, "content_detail",
+        json!({"target":{"basis":"known_set","contentExternalId":"uilegacywork"},"layers":[{"capability":"content_detail","observed":1,"attempted":1,"acquired":1,"verified":0,"failed":0,"notAttempted":0,"unknown":0,"stoppedReason":"surface_ended"}]}),
+        json!({}), vec![json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":"uilegacywork"},"payload":{"noteId":"uilegacywork","title":"合成历史已取得详情","bodyText":"旧执行已有材料，遍历证明未知。","authorName":"合成历史作者"}})],
+    ).await;
+    let legacy_child: uuid::Uuid = sqlx::query_scalar("SELECT l.work_order_ref FROM linggan_runtime_capture_package p JOIN collection_work_order_lease_task t USING(task_id) JOIN collection_work_order_lease l USING(lease_ref) WHERE p.package_ref=$1").bind(detail_package).fetch_one(db.pool()).await.unwrap();
+    sqlx::query("UPDATE collection_work_order SET queue_state='completed',stop_conditions=jsonb_build_object('progressiveArchive',jsonb_build_object('rootWorkOrderRef',$1::text)) WHERE work_order_ref IN($1,$2)").bind(legacy_run).bind(legacy_child).execute(db.pool()).await.unwrap();
+    let legacy_read = linggan_evidence::collection_run::read_run(&db, legacy_run, legacy_domain)
+        .await
+        .unwrap();
+    assert_eq!(legacy_read["legacy"], true);
+    assert_eq!(legacy_read["available_details"], 1);
+    assert_eq!(legacy_read["ended"], true);
+    // Count is frozen after all fixture domains have been inserted.
+    let domain_count: i64 = sqlx::query_scalar("SELECT count(*) FROM observation_domain")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
     let application = router(LocalWebState {
         database: LocalDatabaseState::Ready(Arc::new(db)),
         active_media_sessions: Arc::new(tokio::sync::Mutex::new(BTreeSet::new())),
@@ -204,7 +250,7 @@ async fn collection_single_run_browser_with_persisted_data() {
     let server = tokio::spawn(async move { axum::serve(listener, application).await.unwrap() });
     let directory = std::env::var("COLLECTION_PROOF_DIR").unwrap();
     std::fs::create_dir_all(&directory).unwrap();
-    std::fs::write(std::path::Path::new(&directory).join("fixture.json"),json!({"origin":origin,"domainRef":domain,"otherDomainRef":other,"runRef":first,"selectionRunRef":selection_ref,"domainCount":domain_count,"activeStationRef":active_station,"changedAccountRef":changed.account_ref,"unclaimedRef":unclaimed,"existingRequestKey":existing_request_key}).to_string()).unwrap();
+    std::fs::write(std::path::Path::new(&directory).join("fixture.json"),json!({"origin":origin,"domainRef":domain,"otherDomainRef":other,"runRef":first,"selectionRunRef":selection_ref,"domainCount":domain_count,"activeStationRef":active_station,"changedAccountRef":changed.account_ref,"unclaimedRef":unclaimed,"existingRequestKey":existing_request_key,"legacyDomainRef":legacy_domain,"legacyRunRef":legacy_run}).to_string()).unwrap();
     let node = std::env::var("COLLECTION_PROOF_NODE").unwrap();
     let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../scripts/test-collection-single-run-ui.cjs");

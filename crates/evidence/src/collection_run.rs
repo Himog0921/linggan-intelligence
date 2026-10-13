@@ -389,6 +389,9 @@ pub async fn list_runs(db: &Database, q: &RunQuery) -> Result<Value, RunError> {
     sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
         .execute(&mut *tx)
         .await?;
+    // The small page uses many expanded legacy views; compilation dominates its bounded read.
+    // Keep this setting local to this read transaction, without changing database defaults.
+    sqlx::query("SET LOCAL jit = off").execute(&mut *tx).await?;
     let rows: Vec<Value> = sqlx::query_scalar(RUN_LIST_SQL)
         .bind(q.domain_ref)
         .bind(term)
@@ -405,7 +408,14 @@ pub async fn list_runs(db: &Database, q: &RunQuery) -> Result<Value, RunError> {
     tx.commit().await?;
     Ok(json!({"items":rows,"total":count,"page":page,"pageSize":20}))
 }
-const RUN_LIST_SQL: &str = r#"SELECT body FROM collection_user_summary v WHERE ($1::uuid IS NULL OR domain_ref=$1) AND ($2='' OR strpos(lower(name||' '||run_ref::text),lower($2))>0) AND ($3='all' OR ($3='active' AND NOT ended) OR ($3='attention' AND needs_attention) OR ($3='results' AND has_results) OR ($3='ended' AND ended)) ORDER BY created_at DESC,run_ref LIMIT 20 OFFSET $4"#;
+// Select the page identities before projecting per-run details/comments. Otherwise PostgreSQL
+// builds every matching legacy JSON body before the top-N sort (560 bodies for a 20-row page).
+const RUN_LIST_SQL: &str = r#"WITH page AS MATERIALIZED (
+ SELECT run_ref,domain_ref,created_at FROM collection_user_summary WHERE ($1::uuid IS NULL OR domain_ref=$1) AND ($2='' OR strpos(lower(name||' '||run_ref::text),lower($2))>0) AND ($3='all' OR ($3='active' AND NOT ended) OR ($3='attention' AND needs_attention) OR ($3='results' AND has_results) OR ($3='ended' AND ended)) ORDER BY created_at DESC,run_ref LIMIT 20 OFFSET $4
+)
+SELECT summary.body FROM page JOIN LATERAL (
+ SELECT body FROM collection_user_summary v WHERE v.run_ref=page.run_ref AND v.domain_ref=page.domain_ref OFFSET 0
+) summary ON true ORDER BY page.created_at DESC,page.run_ref"#;
 const RUN_COUNT_SQL: &str = r#"SELECT count(*) FROM collection_user_summary WHERE ($1::uuid IS NULL OR domain_ref=$1) AND ($2='' OR strpos(lower(name||' '||run_ref::text),lower($2))>0) AND ($3='all' OR ($3='active' AND NOT ended) OR ($3='attention' AND needs_attention) OR ($3='results' AND has_results) OR ($3='ended' AND ended))"#;
 
 pub async fn read_run(db: &Database, run: Uuid, domain: Uuid) -> Result<Value, RunError> {
