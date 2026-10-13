@@ -75,6 +75,14 @@
     urlKeys.forEach(key => state[key] ? url.searchParams.set(key,state[key]) : url.searchParams.delete(key));
     if (url.href !== location.href) history[replace ? 'replaceState' : 'pushState'](null, '', url);
   }
+  function switchView(view) {
+    if (!['overview','journey'].includes(view) || state.view === view) return false;
+    state[state.view === 'journey' ? 'journeyWindowDays' : 'overviewWindowDays'] = state.windowDays;
+    state.view = view;
+    state.windowDays = state[view === 'journey' ? 'journeyWindowDays' : 'overviewWindowDays'];
+    resetMainScroll = true;
+    return true;
+  }
   function query(overrides = {}) {
     const values = {...state,...(state.view === 'overview' ? {path:'',overlay:''} : {}),...overrides};
     const q = new URLSearchParams();
@@ -1168,11 +1176,11 @@
     if (action === 'refresh') { await load(); return; }
     if (action === 'toggle-navigation') { state.navigationOpen=!state.navigationOpen;persist();render();return; }
         if (action === 'clear-filter') { if(!['topicRef','stage','path','overlay','query'].includes(id))return;state[id]='';state.tab='content';persist();if(['topicRef','path','overlay'].includes(id))await load();else render();return; }
-    if (action === 'reset-scope' || action === 'browse-pending') { Object.assign(state,{topicRef:'',platform:'',windowDays:'',path:'',overlay:'',query:'',stage:action==='browse-pending'?'pending':'',materialMode:'latest',tab:'content'});if(action==='browse-pending')state.view='journey';persist();await load();return; }
+    if (action === 'reset-scope' || action === 'browse-pending') { if(action==='browse-pending')switchView('journey');Object.assign(state,{topicRef:'',platform:'',windowDays:'',path:'',overlay:'',query:'',stage:action==='browse-pending'?'pending':'',materialMode:'latest',tab:'content'});state[state.view==='journey'?'journeyWindowDays':'overviewWindowDays']='';persist();await load();return; }
     if (action === 'manual-save') { const w=work(id);if(!w?.readable)return;openDialog('save',{manual:true,topicRef:'',kind:'angle',angle:{workRef:id,evidenceWorkRefs:[id],title:title(w),label:'',answerTask:'',researchMethodVersion:'topic-map.manual.v1'}});return; }
-    if (action === 'view') { if(!['overview','journey'].includes(id)||state.view===id)return;state[state.view==='journey'?'journeyWindowDays':'overviewWindowDays']=state.windowDays;state.view=id;state.windowDays=state[id==='journey'?'journeyWindowDays':'overviewWindowDays'];resetMainScroll=true;persist();await load();return; }
+    if (action === 'view') { if(!switchView(id))return;persist();await load();return; }
     if (action === 'summary-chart') { state.summaryChart=id;persist();render();return; }
-    if (action === 'changes-mode') { state.changesOnly=id==='changes';if(state.changesOnly){state.view='overview';state.tab='structure';}persist();render();return; }
+    if (action === 'changes-mode') { state.changesOnly=id==='changes';const viewChanged=state.changesOnly&&switchView('overview');if(state.changesOnly)state.tab='structure';persist();if(viewChanged)await load();else render();return; }
     if (action === 'tab') { state.tab = id; persist(); render(); return; }
     if (action === 'topic') { state.topicRef=id;state.stage='';resetMainScroll=true;persist();if(dialog)closeDialog();await load();return; }
     if (action === 'collapse') { const values = new Set(list(state.collapsed)); values.has(id) ? values.delete(id) : values.add(id); state.collapsed = [...values]; persist(); render(); return; }
@@ -1204,7 +1212,7 @@
     if (action === 'replace-samples') { openDialog('replace',{judgeState:dialogState});dialogState.judgeState=dialogStack[dialogStack.length-1];drawDialog();return; }
     if (action === 'judge-product') { openDialog('product',{topicRef:dialogState.topicRef,works:dialogState.works});return; }
     if (action === 'judge-sources') { openDialog('materials',{snapshot:dialogState.snapshot || snapshot,refs:list(dialogState.works).filter(w=>!w.own).map(w=>w.workRef),label:'当前精选外部参考来源'});return; }
-    if (action === 'judge-to-journey') { state.topicRef=id;state.view='journey';state.stage='';closeDialog();persist();await load();return; }
+    if (action === 'judge-to-journey') { state.topicRef=id;switchView('journey');state.stage='';closeDialog();persist();await load();return; }
     if (action === 'own-reuse') { const w=work(id);if(!w)return;if(!readableMaterial(w))return dialogFeedback('当前没有可引用的来源，暂不能保留这篇作品的复用依据。');openDialog('save',{topicRef:dialogState.topicRef,kind:'angle',angle:{workRef:w.workRef,title:title(w),label:`复用我方已发布作品：${title(w)}`,answerTask:'',researchMethodVersion:snapshot.methodVersion}});return; }
     if (action === 'judge-own-all') { const source=dialogState.snapshot || snapshot, refs=ownTopicWorks(dialogState.topicRef,source).map(w=>w.workRef);openDialog('materials',{snapshot:source,refs,label:'本主题全部已确认我方发布原作'});return; }
     if (action === 'identity') { await openIdentity(); return; }

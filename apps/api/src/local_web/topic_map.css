@@ -397,7 +397,7 @@ body.topic-map-page { height: 100%; min-height: 0; overflow: hidden; }
 #topic-map-context-actions .lgi-tm-button { white-space: nowrap; min-height: var(--lgi-space-8); padding: var(--lgi-space-1) var(--lgi-space-2); }
 #topic-map-context-actions .lgi-tm-research-status { flex-direction: column; align-items: flex-start; gap: 0; font-weight: var(--lgi-weight-regular); text-align: left; }
 #topic-map-context-actions .lgi-tm-operation-counts { display: block; font-size: var(--lgi-text-label); color: var(--lgi-muted); }
-:is(#topic-map-view-tabs, #topic-map-context-actions) :focus-visible { outline: 2px solid var(--lgi-focus); outline-offset: var(--lgi-space-1); }
+:is(#topic-map-view-tabs, #topic-map-context-actions) :focus-visible { outline: calc(var(--lgi-space-1) / 2) solid var(--lgi-focus); outline-offset: var(--lgi-space-1); }
 #topic-map-crumb-current { display: none; }
 #topic-map-root .lgi-tm-content { height: 100%; min-height: 0; max-width: none; margin: 0; display: flex; flex-direction: column; }
 #topic-map-root .lgi-tm-workbench { display: grid; grid-template-columns: calc(var(--lgi-space-24) * 2 + var(--lgi-space-10) + var(--lgi-space-4)) minmax(0,1fr); gap: 0; flex: 1; min-height: 0; overflow: hidden; }

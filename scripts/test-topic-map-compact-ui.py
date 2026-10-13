@@ -253,6 +253,31 @@ def run(out: Path) -> None:
         assert page.locator('[data-filter="windowDays"]').input_value()=='7'
         assert page.locator('[data-filter="path"]').input_value()=='family'
         passed('view-specific time windows restore; journey-only constraints cannot silently affect overview')
+        fresh('overview',extra='&topicRef=topic-A&windowDays=30&overviewWindowDays=30&journeyWindowDays=7')
+        click('judge','topic-A');page.locator('dialog').wait_for(state='visible')
+        click('judge-to-journey','topic-A',page.locator('dialog'))
+        page.locator('.lgi-tm-main[data-loaded="true"]').wait_for()
+        assert page.locator('[data-filter="windowDays"]').input_value()=='7'
+        last=next(url for method,url in reversed(state.requests) if url.startswith('/api/local/topic-map?'))
+        assert parse_qs(urlparse(last).query)['windowDays']==['7'],last
+        click('view','overview');page.locator('.lgi-tm-main[data-loaded="true"]').wait_for()
+        assert page.locator('[data-filter="windowDays"]').input_value()=='30'
+        last=next(url for method,url in reversed(state.requests) if url.startswith('/api/local/topic-map?'))
+        assert parse_qs(urlparse(last).query)['windowDays']==['30'],last
+        passed('judgment-to-journey shortcut loads the remembered 7-day window and preserves the 30-day overview window')
+        page.locator('#topic-map-view-tabs [data-id="overview"]').press('Tab')
+        focus=page.evaluate('''() => {
+          const el=document.activeElement, css=getComputedStyle(el);
+          return {id:el.dataset.id,visible:el.matches(':focus-visible'),width:css.outlineWidth,style:css.outlineStyle};
+        }''')
+        assert focus==dict(id='journey',visible=True,width='2px',style='solid'),focus
+        theme=page.locator('[data-theme="linggan-intelligence"]')
+        theme.evaluate('(el)=>el.style.setProperty("--lgi-space-1","6px")')
+        assert page.evaluate('getComputedStyle(document.activeElement).outlineWidth')=='3px'
+        theme.evaluate('(el)=>el.style.removeProperty("--lgi-space-1")')
+        assert page.evaluate('getComputedStyle(document.activeElement).outlineWidth')=='2px'
+        page.screenshot(path=str(out/'window-return-focus-1440.png'))
+        passed('keyboard context focus stays visible and its outline width follows the existing geometry token')
         fresh('journey')
         sidebar=page.locator('.lgi-tm-sidebar');sidebar.evaluate('(el)=>el.scrollTop=el.scrollHeight')
         before=sidebar.evaluate('(el)=>el.scrollTop')
