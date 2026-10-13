@@ -348,10 +348,7 @@ async fn local_entry_redirects_to_the_login_page() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
-    assert_eq!(
-        response.headers().get(header::LOCATION).unwrap(),
-        "/login"
-    );
+    assert_eq!(response.headers().get(header::LOCATION).unwrap(), "/login");
 }
 
 #[tokio::test]
