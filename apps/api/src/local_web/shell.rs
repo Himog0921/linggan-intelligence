@@ -305,9 +305,10 @@ pub fn corpus_side_nav(active: CorpusPage, domain_ref: Option<&str>, foot: &str)
 }
 
 /// 运营模块的二级导航（OPS-MIGRATION-001 D2）。写法与语料侧栏一致；业务选择由这里统一带上，
-/// 切页时不丢。总览要到 D3 才开放，在那之前保持禁用而不是死链。
+/// 切页时不丢。总览自 D3 起开放。
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum OpsPage {
+    Overview,
     Publications,
     Accounts,
     Daily,
@@ -315,7 +316,7 @@ pub enum OpsPage {
 }
 
 const OPS_ENTRIES: [(&str, &str, Option<&str>, Option<OpsPage>); 5] = [
-    ("01", "总览（未开放）", None, None),
+    ("01", "总览", Some("/ops/overview"), Some(OpsPage::Overview)),
     (
         "02",
         "发布记录",

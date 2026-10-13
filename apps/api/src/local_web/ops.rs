@@ -10,13 +10,16 @@ use shell::OpsPage;
 pub(super) fn routes() -> Router<LocalWebState> {
     Router::new()
         .route("/ops", get(entry))
+        .route("/ops/overview", get(overview_page))
         .route("/ops/publications", get(publications_page))
         .route("/ops/accounts", get(accounts_page))
         .route("/ops/daily", get(daily_page))
         .route("/ops/io", get(io_page))
         .route("/assets/ops.css", get(css))
         .route("/assets/ops.js", get(js))
+        .route("/assets/ops-overview.js", get(overview_js))
         .merge(super::ops_api::routes())
+        .merge(super::ops_overview_api::routes())
         .layer(axum::middleware::from_fn(
             super::comment_study::local_comment_study_guard,
         ))
@@ -33,6 +36,9 @@ async fn entry(Query(query): Query<BusinessQuery>) -> Response {
     Redirect::to(&page_href(OpsPage::Publications, business)).into_response()
 }
 
+async fn overview_page(state: State<LocalWebState>, query: Query<BusinessQuery>) -> Response {
+    page(state, query, OpsPage::Overview).await
+}
 async fn publications_page(state: State<LocalWebState>, query: Query<BusinessQuery>) -> Response {
     page(state, query, OpsPage::Publications).await
 }
@@ -48,6 +54,7 @@ async fn io_page(state: State<LocalWebState>, query: Query<BusinessQuery>) -> Re
 
 fn page_meta(page: OpsPage) -> (&'static str, &'static str, &'static str) {
     match page {
+        OpsPage::Overview => ("/ops/overview", "总览", include_str!("ops_overview.html")),
         OpsPage::Publications => (
             "/ops/publications",
             "发布记录",
@@ -141,6 +148,7 @@ pub(super) fn page_markup(
         .replace("{{SIDE_NAV}}", &nav)
         .replace("{{MAIN}}", main)
         .replace("{{PAGE}}", path.trim_start_matches("/ops/"))
+        .replace("{{SCRIPTS}}", scripts(page))
         .replace("{{BUSINESS}}", &business)
 }
 
@@ -183,14 +191,25 @@ fn business_picker(businesses: &[OpsBusinessOption], current: OpsBusiness, actio
     )
 }
 
+/// Every page loads the shared script; the overview adds its own charts and target dialog.
+fn scripts(page: OpsPage) -> &'static str {
+    match page {
+        OpsPage::Overview => {
+            r#"<script src="/assets/ops.js" defer></script><script src="/assets/ops-overview.js" defer></script>"#
+        }
+        _ => r#"<script src="/assets/ops.js" defer></script>"#,
+    }
+}
+
 async fn css() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
         format!(
-            "{}\n{}\n{}",
+            "{}\n{}\n{}\n{}",
             super::LIDS_TOKENS,
             super::SHELL_CSS,
-            include_str!("ops.css")
+            include_str!("ops.css"),
+            include_str!("ops_overview.css")
         ),
     )
 }
@@ -199,6 +218,13 @@ async fn js() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
         include_str!("ops.js"),
+    )
+}
+
+async fn overview_js() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+        include_str!("ops_overview.js"),
     )
 }
 
@@ -224,6 +250,7 @@ mod tests {
             batch_ref: Uuid::from_u128(9),
         };
         for (page, label, path) in [
+            (OpsPage::Overview, "总览", "overview"),
             (OpsPage::Publications, "发布记录", "publications"),
             (OpsPage::Accounts, "账号管理", "accounts"),
             (OpsPage::Daily, "每日数据", "daily"),
@@ -243,9 +270,15 @@ mod tests {
                 "business picker in the crumb"
             );
             assert!(
-                html.contains("总览（未开放）"),
-                "overview stays disabled until D3"
+                html.contains("href=\"/ops/overview?domain=all\"") && !html.contains("未开放"),
+                "the overview is a link since D3"
             );
+            assert_eq!(
+                html.contains("/assets/ops-overview.js"),
+                page == OpsPage::Overview,
+                "only the overview loads its charts"
+            );
+            assert!(html.contains("/assets/ops.js"));
             assert!(
                 html.contains("数据截至 10-12 22:43"),
                 "side foot names the export time"

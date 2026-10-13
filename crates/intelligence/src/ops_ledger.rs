@@ -19,6 +19,7 @@ mod links;
 mod plan_rows;
 pub mod read;
 mod reconciliation;
+pub mod targets;
 
 use linggan_storage_postgres::Database;
 use serde::Serialize;

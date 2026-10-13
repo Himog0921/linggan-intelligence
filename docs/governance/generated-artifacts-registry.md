@@ -109,6 +109,12 @@
 - 走查用的封面是程序生成的色块图，只写入副本和临时媒体目录。
 - 正式封面迁入（2026-10-13 已执行，批次 `dc5ce2e0`）：`linggan-ops-history-import cover-preview|cover-apply`，文件按内容哈希放在运行时媒体目录的 `ops-covers/`，命令只输出聚合数。原件留在 Mog 的工作台硬盘上。导入前的本机暂存目录 `~/Library/Application Support/Linggan Intelligence/ops-cover-import-20261013/` 带逐文件哈希清单，核验后已删除。以上都不入 Git。
 
+## OPS-MIGRATION-001 D3 / Issue #409 总览走查与规则反证
+
+- 维护的测试源：`crates/intelligence/tests/ops_overview_postgres.rs` 及其 `ops_overview_postgres/` 子文件（合成导出）与 `apps/api/src/local_web/ops_overview.test.mjs`，由 `scripts/test-ops-ledger-postgres.sh` 统一运行；不是生成代码。
+- 页面走查：沿用 D2 的做法，共享库的一次性完整副本放在随机命名的 Docker 容器里，执行 D3 的目标迁移（现编号 0126）后由候选服务在 `127.0.0.1:3100` 读取；走查中在副本上设过的周、月目标只在副本里。截图、计量结果和走查脚本放执行会话的临时目录，含真实账号名与运营人名，不入 Git；走查结束删除容器，会话结束删除临时目录。
+- 规则反证：临时改坏 6 处规则（同样天数、未知不当 0、只算已迁入日子、防覆盖、重复请求、按周期加锁），逐一确认证明变红后按备份逐字节还原并核对哈希；用的隔离 PG 容器和卷随机命名，结束即删除。脚本与日志在临时目录，不入 Git。
+
 ## TOPIC-MAP-COMPACT-382 隔离 UI 验证
 
 - 权威测试源：`scripts/test-topic-map-ui.cjs`、`scripts/test-topic-map-compact-ui.py`，维护源码，不是生成文件。只运行合成 HTTP fixture 与候选 JS/CSS。

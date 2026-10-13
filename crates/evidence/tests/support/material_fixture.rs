@@ -240,6 +240,7 @@ pub const MIGRATIONS: &str = concat!(
     include_str!("../../../../database/migrations/0123_ops_ledger.sql"),
     include_str!("../../../../database/migrations/0124_ops_publication_cover.sql"),
     include_str!("../../../../database/migrations/0125_collection_single_run.sql"),
+    include_str!("../../../../database/migrations/0126_ops_target.sql"),
     "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ",
     "('0025_comment_current_projection', '64fd9474647834358f8d2d4f1c25e4345e26a3ff79dbfc53a7846915576b0885'), ",
@@ -292,7 +293,8 @@ pub const MIGRATIONS: &str = concat!(
     "('0122_comment_like_library', '34be42c8c56fd4ee621a592ffeb7f72f8e4ea2a10589ae6a26bf943b1c30157b'),\n",
     "('0123_ops_ledger', '0b7269401ea713c939db2669e29834c84a7a9a34ae66e9933f0395b4201af361'),\n",
     "('0124_ops_publication_cover', 'd879223368b2a1f2023384c40b6cc6c94ca4a959ee3ec9a09712c2c96fac5b3c'),\n",
-    "('0125_collection_single_run', '0413aa2357eadb2ba382509f16f37220adb01b4a2e358eb794b14c85466a73b5');\n",
+    "('0125_collection_single_run', '0413aa2357eadb2ba382509f16f37220adb01b4a2e358eb794b14c85466a73b5'),\n",
+    "('0126_ops_target', '92ce85c849d586be51bcc07781e0dc384f9c2df8ae91fc6ed85c589e874fdaaa');\n",
 );
 
 pub fn coverage_layer(capability: &str, acquired: i64) -> serde_json::Value {

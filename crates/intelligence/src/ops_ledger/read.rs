@@ -4,6 +4,7 @@
 
 mod accounts;
 mod daily;
+mod overview;
 mod publications;
 mod summary;
 
@@ -14,6 +15,10 @@ use uuid::Uuid;
 
 pub use accounts::{OpsAccountItem, OpsAccountPage, read_ops_accounts};
 pub use daily::{OpsDailyItem, OpsDailyPage, read_ops_daily};
+pub use overview::{
+    OpsOverview, OpsOverviewQuery, OpsOverviewTrend, OverviewSlice, read_ops_overview,
+    read_ops_overview_trend,
+};
 pub use publications::{
     OpsPublicationFilter, OpsPublicationItem, OpsPublicationPage, OpsViews,
     read_ops_publication_export, read_ops_publications,

@@ -420,6 +420,7 @@ if (typeof module !== 'undefined') module.exports = { OpsFormat };
       el('td', { text: item.businessDate }),
       el('td', { text: item.weekday }),
       textCell(item.operator),
+      el('td', {}, [executionTag(item.execution)]),
       numberCell(item.published),
       numberCell(item.linksOpened),
       numberCell(item.followersGained),
@@ -430,6 +431,17 @@ if (typeof module !== 'undefined') module.exports = { OpsFormat };
       el('td', {}, [el('button', { type: 'button', disabled: true, title: readonly, text: '编辑' })]),
     ]);
   }
+  // 执行状态（PAGE-OPS-002 §4）：先去掉「需复盘」，加微 0 和没填分不开。
+  const executionLabels = {
+    not_published: ['未完成', 'warning', '当天没有这个运营人的发布登记'],
+    praise: ['可表扬', 'success', '当天有爆款或有加微'],
+    pending_views: ['待补阅读量', 'warning', '当天发的小红书帖子满 7 天还没填阅读量'],
+    done: ['已完成', null, '当天有发布登记，没有待处理项'],
+  };
+  function executionTag(execution) {
+    const [label, tone, title] = executionLabels[execution] || [OpsFormat.missing, null, '未知'];
+    return tag(label, tone, title);
+  }
   async function loadDaily() {
     const request = ++latestTableRequest;
     setBusy(true);
@@ -438,7 +450,7 @@ if (typeof module !== 'undefined') module.exports = { OpsFormat };
       if (request !== latestTableRequest) return;
       renderTabs(data.operators, params.get('operator'), selectOperator(loadDaily));
       if (data.items.length) rows.replaceChildren(...data.items.map(dailyRow));
-      else emptyRow(11, data.asOf ? '当前筛选下没有每日数据。' : '还没有迁入数据。');
+      else emptyRow(12, data.asOf ? '当前筛选下没有每日数据。' : '还没有迁入数据。');
       succeeded(loadDaily);
     } catch (error) {
       if (request === latestTableRequest) failed(loadDaily, '每日数据', error);

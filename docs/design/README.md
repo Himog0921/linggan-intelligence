@@ -78,12 +78,14 @@
 | [pages/collection-workspace-page.md](pages/collection-workspace-page.md) | PAGE-COLLECTION-001：Collection 两个日常页面与领域/工位管理的职责、状态和事实边界 | 权威当前 |
 | [../plans/active/collection-jtbd-001.md](../plans/active/collection-jtbd-001.md) | COLLECTION-JTBD-001：保留真实 UI 的两页收敛、完整管理能力、单次入口及 UI 变更清单 | 活跃计划；Issue #398 |
 | [pages/ops-page.md](pages/ops-page.md) | PAGE-OPS-001：一级页面「运营」（OPS-MIGRATION-001 D2）的只读页面规格、状态词典与验收矩阵 | 权威当前；Issue #405，随 PR #407 上线 |
+| [pages/ops-overview-page.md](pages/ops-overview-page.md) | PAGE-OPS-002：运营「总览」（OPS-MIGRATION-001 D3）的五块驾驶舱、目标设定、执行状态新口径与验收矩阵 | 权威当前；Issue #409，分支已实现、待合并 |
 | [pages/domain-management-page.md](pages/domain-management-page.md) | PAGE-DOMAIN-MANAGEMENT-001：Domain、Target 用途、状态后果和材料 lane | 权威当前；隔离交互与本机部署后浏览器 smoke 已验证，业务验收待办 |
 | [pages/collection-operations-html-prototype-brief.md](pages/collection-operations-html-prototype-brief.md) | COLLECTION-HTML-BRIEF-001：外部模型可直接使用的自包含静态原型委托书 | 权威当前；不是运行实现 |
 | [changes/evidence-page-002-multi-material-ui-change-manifest.md](changes/evidence-page-002-multi-material-ui-change-manifest.md) | EVIDENCE-PAGE-002：本次产品与静态参考变更清单及越权边界 | 权威当前 |
 | [acceptance/evidence-page-002-multi-material-reference-acceptance.md](acceptance/evidence-page-002-multi-material-reference-acceptance.md) | ACC-EVIDENCE-PAGE-002：桌面/窄屏、状态、互动与证明边界验收 | 一次性报告 |
 | [changes/evidence-runtime-001-ui-change-manifest.md](changes/evidence-runtime-001-ui-change-manifest.md) | EVIDENCE-RUNTIME-001：Issue #90 运行页的数据、状态、交互、媒体安全与范围清单 | 权威当前 |
 | [acceptance/ops-page-001-visual-acceptance.md](acceptance/ops-page-001-visual-acceptance.md) | ACC-OPS-PAGE-001：运营页面（D2）在共享库副本上的走查、数据边界、失败与快速切换、共享页头放下第 6 项，以及上线后封面迁入核验 | 一次性报告；已上线 |
+| [acceptance/ops-page-002-visual-acceptance.md](acceptance/ops-page-002-visual-acceptance.md) | ACC-OPS-PAGE-002：运营总览（D3）在共享库副本上的走查、目标对话框各状态、读取失败、规则反证与三件待 Mog 决定的事 | 一次性报告；未合并 |
 | [acceptance/evidence-runtime-001-visual-acceptance.md](acceptance/evidence-runtime-001-visual-acceptance.md) | ACC-EVIDENCE-RUNTIME-001：运行页自动与桌面/375px 浏览器分层验收 | 一次性报告 |
 | [acceptance/dev-05-xhs-content-observation-001-visual-acceptance.md](acceptance/dev-05-xhs-content-observation-001-visual-acceptance.md) | ACC-DEV-05-XHS-CONTENT-OBSERVATION-001：Issue #133 的当前/历史事实、Coverage 历史与有界复观测分层验收 | 一次性报告；未重载运行时或进行真实 XHS 验收 |
 | [pages/topic-intelligence-reference-page.md](pages/topic-intelligence-reference-page.md) | PAGE-TOPIC-001：Topic Reference Page 的获准组合、状态与验收 | 权威当前 |
