@@ -8,7 +8,7 @@ concurrency:
   group: collection-single-run-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 jobs:
-  postgres-tooling:
+  test-tooling:
     if: github.head_ref == 'codex/collection-single-run-398'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -18,15 +18,15 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
           persist-credentials: false
-      - name: Prepare database binaries without business data
+      - name: Prepare isolated PostgreSQL binaries, no database contents
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y postgresql-16 postgresql-server-dev-16
           git clone --depth 1 --branch v0.8.0 https://github.com/pgvector/pgvector.git "$RUNNER_TEMP/pgvector"
           test "$(git -C "$RUNNER_TEMP/pgvector" rev-parse HEAD)" = 2627c5ff775ae6d7aef0c430121ccf857842d2f2
-          make -C "$RUNNER_TEMP/pgvector" PG_CONFIG=/usr/lib/postgresql/16/bin/pg_config
-          sudo make -C "$RUNNER_TEMP/pgvector" PG_CONFIG=/usr/lib/postgresql/16/bin/pg_config install
-          mkdir -p "$RUNNER_TEMP/pg-tooling/lib" "$RUNNER_TEMP/pg-tooling/share"
+          make -C "$RUNNER_TEMP/pgvector" PG_CONFIG=/usr/lib/postgresql/16/bin/pg_config with_llvm=no OPTFLAGS=''
+          sudo make -C "$RUNNER_TEMP/pgvector" PG_CONFIG=/usr/lib/postgresql/16/bin/pg_config with_llvm=no install
+          mkdir -p "$RUNNER_TEMP/pg-tooling/lib" "$RUNNER_TEMP/pg-tooling/share" "$RUNNER_TEMP/test-tooling"
           cp -a /usr/lib/postgresql/16/bin "$RUNNER_TEMP/pg-tooling/"
           cp -a /usr/lib/postgresql/16/lib/. "$RUNNER_TEMP/pg-tooling/lib/"
           cp -a /usr/share/postgresql/16/. "$RUNNER_TEMP/pg-tooling/share/"
@@ -36,13 +36,19 @@ jobs:
             case "$(basename "$lib")" in libc.so.*|libm.so.*|libpthread.so.*|libdl.so.*|librt.so.*) continue ;; esac
             cp -L "$lib" "$RUNNER_TEMP/pg-tooling/lib/"
           done
-          tar -C "$RUNNER_TEMP/pg-tooling" -czf "$RUNNER_TEMP/postgres-tooling.tar.gz" .
-          sha256sum "$RUNNER_TEMP/postgres-tooling.tar.gz" > "$RUNNER_TEMP/postgres-tooling.sha256"
+          tar -C "$RUNNER_TEMP/pg-tooling" -czf "$RUNNER_TEMP/test-tooling/postgres-tooling.tar.gz" .
+      - name: Prepare locked plugin and isolated browser test dependencies
+        run: |
+          npm ci --prefix plugins/linggan-intelligence-browser --ignore-scripts
+          tar -C plugins/linggan-intelligence-browser -czf "$RUNNER_TEMP/test-tooling/plugin-dependencies.tar.gz" node_modules
+          npm install --prefix "$RUNNER_TEMP/ui-tooling" --no-package-lock --ignore-scripts playwright@1.57.0
+          PLAYWRIGHT_BROWSERS_PATH="$RUNNER_TEMP/ui-tooling/browsers" node "$RUNNER_TEMP/ui-tooling/node_modules/playwright/cli.js" install chromium
+          tar -C "$RUNNER_TEMP/ui-tooling" -czf "$RUNNER_TEMP/test-tooling/ui-tooling.tar.gz" node_modules browsers
+          cd "$RUNNER_TEMP/test-tooling"
+          sha256sum *.tar.gz > checksums.sha256
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: collection-postgres-tooling-398
-          path: |
-            ${{ runner.temp }}/postgres-tooling.tar.gz
-            ${{ runner.temp }}/postgres-tooling.sha256
+          name: collection-test-tooling-398
+          path: ${{ runner.temp }}/test-tooling
           retention-days: 1
           if-no-files-found: error
