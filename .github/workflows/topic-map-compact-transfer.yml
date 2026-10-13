@@ -1,0 +1,39 @@
+name: Topic Map compact isolated transfer
+
+on:
+  push:
+    branches: ['codex/topic-map-compact-382']
+    paths: ['.github/workflows/topic-map-compact-transfer.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  source:
+    if: github.ref == 'refs/heads/codex/topic-map-compact-382'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify original frontend identity and export bounded review sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD:apps/api/src/local_web/topic_map.js)" = '1ca4bd097f5013154aed2cb3414d814892632046'
+          test "$(git rev-parse HEAD:apps/api/src/local_web/topic_map.css)" = 'c4f53f872b71ca72a431420479f6a3dafd436fa8'
+          mkdir -p "$RUNNER_TEMP/topic-map-compact"
+          git rev-parse HEAD > "$RUNNER_TEMP/topic-map-compact/source-head.txt"
+          git archive HEAD AGENTS.md README.md docs apps/api/src/local_web/topic_map.js apps/api/src/local_web/topic_map.css apps/api/src/local_web/topic_map.rs apps/api/src/local_web/shell.rs apps/api/src/local_web/shell.css apps/api/src/local_web/lids_tokens.css scripts/test-topic-map-ui.cjs scripts/check-project-governance.sh scripts/verify-ui-design-handbook.sh > "$RUNNER_TEMP/topic-map-compact/source.tar"
+          node --check apps/api/src/local_web/topic_map.js
+          node scripts/test-topic-map-ui.cjs | tee "$RUNNER_TEMP/topic-map-compact/baseline-ui.log"
+      - name: Preserve exact sources and baseline receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: topic-map-compact-source
+          path: ${{ runner.temp }}/topic-map-compact
+          retention-days: 1
+          if-no-files-found: error
