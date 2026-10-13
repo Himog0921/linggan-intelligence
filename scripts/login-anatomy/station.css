@@ -1,0 +1,56 @@
+/* These rules only style the replacement illustration. The supplied page rules are intact. */
+.station-art { mix-blend-mode:normal; pointer-events:none; }
+.station-art[data-theme="light"] {
+ --anatomy-paper:#fff; --anatomy-top:#fff; --anatomy-face:#fff;
+ --anatomy-shade-0:#d6dadb; --anatomy-shade-1:#e4e7e7; --anatomy-shade-2:#eef0f0; --anatomy-shade-3:#f7f8f8;
+ --anatomy-hi:#444c4f; --anatomy-mid:#727d80; --anatomy-lo:#b0b9bc; --anatomy-faint:#d5dcde;
+ --anatomy-weight:.55px; --anatomy-halo:#7c8587; --anatomy-halo-opacity:.12;
+}
+.station-art .station-fallback {position:absolute;inset:0;mix-blend-mode:multiply;}
+.station-art .station-live {position:absolute;inset:0;width:100%;height:100%;overflow:visible;}
+.station-art .iso-halo {filter:blur(3px);transform:translateY(1px);}
+.station-art .dark-metal {--anatomy-paper:#242b2d;--anatomy-top:#252c2e;--anatomy-shade-0:#161c1e;--anatomy-shade-1:#22292b;--anatomy-shade-2:#30383a;--anatomy-shade-3:#3b4446;--anatomy-mid:#6d777a;--anatomy-faint:#555e61;}
+.station-art .rubber {--anatomy-paper:#788184;--anatomy-top:#798286;--anatomy-shade-0:#677074;--anatomy-shade-1:#707b7f;--anatomy-shade-2:#828b8e;--anatomy-shade-3:#909a9d;}
+.station-art .track-segment {--anatomy-paper:#646f73;--anatomy-top:#656f73;--anatomy-shade-0:#364145;--anatomy-faint:#7d878a;--anatomy-mid:#4d585b;}
+.station-art .orange-mark {--anatomy-paper:var(--signal);--anatomy-top:var(--signal);--anatomy-shade-0:#c63e19;--anatomy-shade-1:#d7431c;--anatomy-shade-2:#eb4a20;--anatomy-shade-3:#fa6e46;--anatomy-mid:#d65c39;--anatomy-faint:#ffb298;}
+.station-art .scanner-status {opacity:.28;}
+.station-art .screen-glass,.station-art .console-screen {--anatomy-paper:#141b1d;--anatomy-top:#172023;--anatomy-shade-0:#151c1e;--anatomy-shade-1:#182023;--anatomy-shade-2:#192226;--anatomy-shade-3:#1c262a;--anatomy-faint:#566267;--anatomy-mid:#535f63;}
+.station-art .archive-window {--anatomy-paper:#434d51;--anatomy-top:#343d41;--anatomy-mid:#7f898d;--anatomy-faint:#657276;}
+.station-art .archive-paper {fill:#f2f4f4;stroke:#b6c0c2;stroke-width:.35;}
+.station-art .archive-text {fill:none;stroke:#9ca8ad;stroke-width:.65;}
+.station-art .archive-selection {fill:var(--signal);fill-opacity:.04;stroke:var(--signal);stroke-width:.65;opacity:0;}
+.station-art .screen-title {fill:#f2f4f5;font:600 7px var(--mono);letter-spacing:.05em;}
+.station-art .screen-subtitle {fill:#aebbbf;font:4px var(--mono);letter-spacing:.025em;}
+.station-art .screen-tiny {fill:#8e9ba0;font:3.2px var(--mono);}
+.station-art .screen-rule {fill:none;stroke:#607074;stroke-width:.4;}
+.station-art .screen-card {fill:#202c30;stroke:#4b5c62;stroke-width:.35;}
+.station-art .screen-ink {fill:none;stroke:#a5b4b9;stroke-width:.6;}
+.station-art .evidence-selection {fill:var(--signal);fill-opacity:.05;stroke:var(--signal);stroke-width:.7;opacity:0;}
+.station-art .evidence-mark {stroke:var(--signal);stroke-width:1.5;opacity:0;}
+.station-art .signal-grid {fill:none;stroke:#405155;stroke-width:.4;opacity:.65;}
+.station-art .signal-curve {fill:none;stroke:#99a8ad;stroke-width:.65;stroke-linejoin:round;opacity:.75;}
+.station-art .signal-highlight {fill:none;stroke:var(--signal);stroke-width:1;stroke-linecap:round;stroke-linejoin:round;opacity:0;}
+.station-art .signal-point {fill:var(--signal);opacity:0;}
+.station-art .signal-target {fill:none;stroke:var(--signal);stroke-width:.5;opacity:0;}
+.station-art .core-glass {--anatomy-paper:#f74d20;--anatomy-top:#ffb399;--anatomy-shade-0:#e5451d;--anatomy-shade-1:#f05b35;--anatomy-shade-2:#ff865e;--anatomy-shade-3:#ffad8e;--anatomy-mid:#f47751;--anatomy-faint:#ffb99d;opacity:.25;}
+.station-art .core-inner {--anatomy-paper:#f74d20;--anatomy-top:#ffe2d6;--anatomy-shade-0:#d3421a;--anatomy-shade-1:#f66b39;--anatomy-shade-2:#f68c63;--anatomy-shade-3:#ffc1a8;--anatomy-mid:#f17b51;--anatomy-faint:#ffc3ad;}
+.station-art .core-slice {--anatomy-paper:#f74d20;--anatomy-top:#ffb492;--anatomy-shade-0:#f46630;--anatomy-mid:#f97a48;--anatomy-faint:#ffd0b3;opacity:.5;}
+.station-art .core-glass>.iso-edge {stroke-width:.75;}
+.station-art .console-rule {stroke:#8f9fa4;stroke-width:.65;fill:none;}
+.station-art .console-ready {fill:var(--signal);opacity:.2;}
+.station-art .paper-tab {fill:var(--signal);stroke:none;}
+.station-art .paper-image {fill:#c1cbce;stroke:none;}
+.station-art .side-label {fill:#677278;font:4.3px var(--mono);letter-spacing:.02em;}
+.station-art .side-panel-rule {fill:none;stroke:#afbabe;stroke-width:.55;}
+.station-art .side-panel-mark {fill:var(--signal);}
+.station-art .vent-slot {fill:#c0c9cc;stroke:none;}
+.station-art .panel-inset {fill:#edf0f1;stroke:#b4bfc3;stroke-width:.45;}
+.station-art .rotor-disc {fill:#dde3e5;fill-opacity:.26;stroke:#b4bfc3;stroke-width:.35;}
+.station-art .rotor-blade {fill:#425158;stroke:none;opacity:.7;}
+.station-art .signal-channel {fill:none;stroke:#c9d0d2;stroke-width:.8;stroke-linecap:round;stroke-linejoin:round;}
+.station-art .signal-travel {fill:var(--signal);stroke:#fff;stroke-width:.5;opacity:0;}
+.station-art .read-scan {fill:none;stroke:var(--signal);stroke-width:1;opacity:0;}
+.station-art .core-scan {fill:var(--signal);fill-opacity:.12;stroke:var(--signal);stroke-width:.6;opacity:0;}
+.station-art .drone-ray {fill:none;stroke:#8e9ba1;stroke-width:.5;stroke-dasharray:2 3;opacity:0;}
+.station-art .observation-target {fill:none;stroke:var(--signal);stroke-width:.6;opacity:0;}
+@media(max-width:800px){.station-art .station-live{display:none}}
