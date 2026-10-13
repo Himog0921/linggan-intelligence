@@ -415,3 +415,46 @@ test('incremental actual DOM fallback excludes synthetic root and reply IDs', as
  const result = await collectComments({ noteId:'dom-bounded',persist:false,emitReceipt:false,taskSpec:{incrementalCommentBudget:{knownCommentIds:[],newUniqueLimit:30,maxScrollRounds:3,maxDurationSeconds:180}},executionPolicy:{minimumCooldownMs:0} });
  assert.deepEqual(result.comments.map((c)=>c.commentId),['stable-root']); assert.equal(result.total,1);
 });
+
+// A real API collector traverses one root with 64 replies over bounded segments.
+test('all_public progresses beyond 30 and two replies with traversal evidence', async (t) => {
+  const saved={window:globalThis.window,document:globalThis.document,chrome:globalThis.chrome};
+  const listeners=new Set();let resets=0;
+  const root={id:'deep-root',content:'合成有意义主评论',sub_comment_has_more:false,sub_comment_count:64,sub_comments:Array.from({length:64},(_,n)=>({id:`deep-reply-${n}`,content:`合成有意义回复 ${n}`}))};
+  globalThis.window={location:{href:'https://www.xiaohongshu.com/explore/deep-api-fixture',pathname:'/explore/deep-api-fixture'},innerHeight:800,setTimeout,clearTimeout,
+    addEventListener(type,l){if(type==='message')listeners.add(l);},removeEventListener(type,l){if(type==='message')listeners.delete(l);},
+    getComputedStyle:()=>({display:'block',visibility:'visible',opacity:'1',overflow:'visible',overflowY:'visible'}),
+    postMessage(message){
+      if(message.type==='__lgboom_xhs_comment_api_reset_request__')resets++;
+      const type=message.type==='__lgboom_xhs_comment_api_reset_request__'?'__lgboom_xhs_comment_api_reset_response__':message.type==='__lgboom_xhs_page_fetch_request__'?'__lgboom_xhs_page_fetch_response__':message.type==='__lgboom_xhs_comment_api_request__'?'__lgboom_xhs_comment_api_response__':null;
+      if(!type)return;
+      setTimeout(()=>listeners.forEach(l=>l({source:globalThis.window,data:{source:'lgboom-xhs-api-capture',type,payload:{requestId:message.payload.requestId,ok:true,noteId:'deep-api-fixture',reset:true,pages:[{noteId:'deep-api-fixture',comments:[root],hasMore:false,cursor:''}],subPages:[],json:{data:{comments:[root],has_more:false,cursor:''}}}}})),0);
+    }};
+  const empty={innerText:'',querySelectorAll:()=>[],querySelector:()=>null};
+  globalThis.document={readyState:'complete',body:empty,documentElement:{scrollBy(){},getBoundingClientRect:()=>({top:0,bottom:800})},querySelector:()=>null,querySelectorAll:()=>[]};
+  globalThis.chrome={runtime:{getURL:()=>''}};t.after(()=>Object.assign(globalThis,saved));
+  const known=[];
+  for(const expected of [30,30,5]) {
+    let snapshots=0;
+    const result=await collectComments({noteId:'deep-api-fixture',observedNoteId:'deep-api-fixture',commentSessionKey:'run:account',resumeCommentSessionKey:known.length?'run:account':'',persist:false,emitReceipt:false,executionPolicy:{minimumCooldownMs:0},onSnapshot:async(snapshot)=>{snapshots++;assert.equal(snapshot.collectionReceipt.scope,'all_public_comments');},taskSpec:{commentMode:'all_public',incrementalCommentBudget:{knownCommentIds:[...known],newUniqueLimit:30,maxScrollRounds:50,maxDurationSeconds:180}}});
+    assert.equal(result.total,expected);assert(snapshots>0);known.push(...result.comments.map(c=>c.commentId));
+    if(known.length<65)assert.equal(result.collectionReceipt.state,'partial');
+    else {assert.equal(result.collectionReceipt.state,'complete');assert.equal(result.traversal.mainExhausted,true);assert.equal(result.traversal.repliesExhausted,true);}
+  }
+  assert.equal(new Set(known).size,65);assert.equal(resets,1,'valid same-run/account cursor resumes without resetting the API');
+  const sample=await collectComments({noteId:'deep-api-fixture',observedNoteId:'deep-api-fixture',persist:false,emitReceipt:false,maxTotal:30,maxSubComments:2,executionPolicy:{minimumCooldownMs:0},taskSpec:{commentMode:'sample_30'}});
+  assert.equal(sample.total,3,'sample keeps one root and at most two replies');
+  const resumed=await collectComments({noteId:'deep-api-fixture',observedNoteId:'deep-api-fixture',persist:false,emitReceipt:false,maxTotal:20,maxSubComments:2,executionPolicy:{minimumCooldownMs:0},taskSpec:{commentMode:'sample_30',incrementalCommentBudget:{knownCommentIds:['deep-root','deep-reply-0'],knownReplyCounts:{'deep-root':1},newUniqueLimit:20,maxScrollRounds:50,maxDurationSeconds:180}}});
+  assert.deepEqual(resumed.comments.map(c=>c.commentId),['deep-reply-1'],'a resumed sample preserves the total per-root two reply cap');
+  const exhausted=await collectComments({noteId:'deep-api-fixture',observedNoteId:'deep-api-fixture',persist:false,emitReceipt:false,maxTotal:20,maxSubComments:2,executionPolicy:{minimumCooldownMs:0},taskSpec:{commentMode:'sample_30',incrementalCommentBudget:{knownCommentIds:['deep-root','deep-reply-0','deep-reply-1'],knownReplyCounts:{'deep-root':2},newUniqueLimit:20,maxScrollRounds:50,maxDurationSeconds:180}}});
+  assert.equal(exhausted.total,0,'no third reply enters a standard sample after restart');
+});
+
+
+test('reply exhaustion needs per-root evidence and missing identities prevent a complete proof', async()=>{
+ const {apiReplyTraversalExhausted}=await import('../src/platforms/xhs/commentCollector.js');
+ assert.equal(apiReplyTraversalExhausted({pages:[{comments:[{id:'r',sub_comment_has_more:true}]}]}),false);
+ assert.equal(apiReplyTraversalExhausted({pages:[{comments:[{id:'r'}]}]}),false);
+ assert.equal(apiReplyTraversalExhausted({pages:[{comments:[{sub_comment_has_more:false}]}]}),false);
+ assert.equal(apiReplyTraversalExhausted({pages:[{comments:[{id:'r',sub_comment_has_more:true}]}],subPages:[{rootCommentId:'r',hasMore:false}]}),true);
+});

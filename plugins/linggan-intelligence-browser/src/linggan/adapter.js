@@ -871,6 +871,9 @@ const STOP_CONDITIONS = new Set([
 // is intentionally closed rather than a "reasonable defaults" parser: a producer may execute
 // mechanics, but may not infer what Linggan meant to collect.
 export function validateTaskSpec(spec = {}) {
+  if (spec.collectionRunRef !== undefined && (spec.source !== 'scheduled' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(spec.collectionRunRef)))) throw new Error('task_spec_collection_run_invalid');
+  if (spec.commentMode !== undefined && (!['sample_30', 'all_public'].includes(spec.commentMode)
+    || !['comments', 'replies'].includes(spec.capabilitiesRequested?.[0]))) throw new Error('task_spec_comment_mode_invalid');
   if (spec?.contractVersion !== TASK_SPEC_VERSION) throw new Error('task_spec_contract_version_invalid');
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(spec?.taskId || ''))) throw new Error('task_spec_task_id_invalid');
   if (!String(spec?.pageType || '').trim()) throw new Error('task_spec_page_type_invalid');
@@ -907,8 +910,9 @@ export function validateTaskSpec(spec = {}) {
   }
   if (spec.incrementalCommentBudget !== undefined) {
     const b = spec.incrementalCommentBudget;
+    if (b?.knownReplyCounts && (spec.commentMode!=='sample_30' || !spec.collectionRunRef || Object.entries(b.knownReplyCounts).length>30 || Object.entries(b.knownReplyCounts).some(([id,n])=>!id.trim() || id.length>256 || !Number.isInteger(n) || n<0 || n>2))) throw new Error('incremental_comment_budget_invalid');
     if (!['comments','replies'].includes(capability) || spec.source !== 'scheduled' || spec.platform !== 'xhs'
-      || !b || !Array.isArray(b.knownCommentIds) || b.knownCommentIds.length > 5000 || b.knownCommentIds.some((id) => typeof id !== 'string' || !id.trim() || id.length > 256)
+      || !b || !Array.isArray(b.knownCommentIds) || (b.knownCommentIds.length > 5000 && spec.commentMode !== 'all_public') || b.knownCommentIds.some((id) => typeof id !== 'string' || !id.trim() || id.length > 256)
       || new Set(b.knownCommentIds).size !== b.knownCommentIds.length || !Number.isInteger(b.newUniqueLimit) || b.newUniqueLimit < 1 || b.newUniqueLimit > 30 || b.newUniqueLimit !== spec.commentLimit
       || !Number.isInteger(b.maxScrollRounds) || b.maxScrollRounds < 1 || b.maxScrollRounds > 50 || !Number.isInteger(b.maxDurationSeconds) || b.maxDurationSeconds < 1 || b.maxDurationSeconds > 600) throw new Error('incremental_comment_budget_invalid');
   }
@@ -920,7 +924,7 @@ export function validateTaskSpec(spec = {}) {
     || (spec.surface !== undefined && !['discovery_search', 'profile_discovery'].includes(capability))) {
     throw new Error('task_spec_execution_capability_mismatch');
   }
-  if ((capability === 'replies' && spec.source === 'scheduled' && spec.replyExpandLimit === undefined)
+  if ((capability === 'replies' && spec.source === 'scheduled' && spec.commentMode !== 'all_public' && spec.replyExpandLimit === undefined)
     || (spec.replyExpandLimit !== undefined && (!Number.isInteger(spec.replyExpandLimit)
       || spec.replyExpandLimit <= 0 || spec.replyExpandLimit > 0xffffffff))) {
     throw new Error('task_spec_reply_expand_limit_invalid');

@@ -26,7 +26,7 @@ pub(super) struct EvidenceLibraryParams {
     // It is navigation state, not a material filter, but must remain a known query key.
     #[serde(rename = "returnTo")]
     pub(super) _return_to: Option<String>,
-    #[serde(rename="publicRefs")]
+    #[serde(rename = "publicRefs")]
     pub(super) public_refs: Option<String>,
     pub(super) q: Option<String>,
     pub(super) window: Option<String>,
@@ -39,6 +39,8 @@ pub(super) struct EvidenceLibraryParams {
     pub(super) restriction: Option<String>,
     pub(super) cursor: Option<String>,
     pub(super) domain: Option<uuid::Uuid>,
+    #[serde(rename = "collectionRunRef")]
+    pub(super) collection_run_ref: Option<uuid::Uuid>,
 }
 
 #[derive(Deserialize)]
@@ -46,19 +48,23 @@ pub(super) struct MaterialChannelParams {
     cursor: Option<String>,
     q: Option<String>,
     domain: Option<uuid::Uuid>,
+    #[serde(rename = "collectionRunRef")]
+    collection_run_ref: Option<uuid::Uuid>,
 }
 
 async fn material_is_in_domain(
     database: &Database,
     public_ref: uuid::Uuid,
     domain_ref: uuid::Uuid,
+    run_ref: Option<uuid::Uuid>,
 ) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM linggan_material_domain_usage \
-         WHERE content_public_ref=$1 AND domain_ref=$2)",
+         WHERE content_public_ref=$1 AND domain_ref=$2) AND ($3::uuid IS NULL OR EXISTS(SELECT 1 FROM collection_user_member m WHERE m.run_ref=$3 AND m.domain_ref=$2 AND m.content_public_ref=$1))",
     )
     .bind(public_ref)
     .bind(domain_ref)
+    .bind(run_ref)
     .fetch_one(database.pool())
     .await
 }
@@ -80,7 +86,7 @@ pub(super) async fn research_comments_json(
     let Some(domain_ref) = params.domain else {
         return local_read_json_error(axum::http::StatusCode::BAD_REQUEST, "domain_required");
     };
-    match material_is_in_domain(database, public_ref, domain_ref).await {
+    match material_is_in_domain(database, public_ref, domain_ref, params.collection_run_ref).await {
         Ok(true) => {}
         Ok(false) => {
             return local_read_json_error(axum::http::StatusCode::NOT_FOUND, "material_not_found");
@@ -111,7 +117,16 @@ pub(super) async fn research_comments_json(
             "material_comment_query_too_long",
         );
     }
-    match read_authorized_research_comments(database, public_ref, after, text).await {
+    let read = match params.collection_run_ref {
+        Some(run) => {
+            linggan_evidence::collection_run_material_read::comments(
+                database, run, domain_ref, public_ref, after, text,
+            )
+            .await
+        }
+        None => read_authorized_research_comments(database, public_ref, after, text).await,
+    };
+    match read {
         Ok(value) => Json(value).into_response(),
         Err(error) => {
             eprintln!("authorized research comment read unavailable: {error}");
@@ -140,7 +155,7 @@ pub(super) async fn detail_json(
     let Some(domain_ref) = params.domain else {
         return local_read_json_error(axum::http::StatusCode::BAD_REQUEST, "domain_required");
     };
-    match material_is_in_domain(database, public_ref, domain_ref).await {
+    match material_is_in_domain(database, public_ref, domain_ref, params.collection_run_ref).await {
         Ok(true) => {}
         Ok(false) => {
             return local_read_json_error(axum::http::StatusCode::NOT_FOUND, "material_not_found");
@@ -153,9 +168,42 @@ pub(super) async fn detail_json(
         }
     }
     match read_work_resource(database, public_ref).await {
-        Ok(Some(item)) => {
-            let comments_url =
-                format!("/api/local/work-resources/{public_ref}/comments?domain={domain_ref}");
+        Ok(Some(mut item)) => {
+            if let Some(run) = params.collection_run_ref {
+                let Ok(mut tx) = database.pool().begin().await else {
+                    return local_read_json_error(
+                        axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                        "run_material_read_unavailable",
+                    );
+                };
+                if linggan_evidence::scope_run_material_items(
+                    &mut tx,
+                    run,
+                    domain_ref,
+                    std::slice::from_mut(&mut item),
+                )
+                .await
+                .is_err()
+                {
+                    return local_read_json_error(
+                        axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                        "run_material_read_unavailable",
+                    );
+                }
+                if tx.commit().await.is_err() {
+                    return local_read_json_error(
+                        axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                        "run_material_read_unavailable",
+                    );
+                }
+            }
+            let comments_url = format!(
+                "/api/local/work-resources/{public_ref}/comments?domain={domain_ref}{}",
+                params
+                    .collection_run_ref
+                    .map(|r| format!("&collectionRunRef={r}"))
+                    .unwrap_or_default()
+            );
             let reobservation_url =
                 format!("/api/local/work-resources/{public_ref}/reobserve?domain={domain_ref}");
             let eligibility = match read_content_reobservation_eligibility_in_domain(
@@ -225,7 +273,7 @@ pub(super) async fn reobserve_json(
     let Some(domain_ref) = params.domain else {
         return local_read_json_error(axum::http::StatusCode::BAD_REQUEST, "domain_required");
     };
-    match material_is_in_domain(database, public_ref, domain_ref).await {
+    match material_is_in_domain(database, public_ref, domain_ref, params.collection_run_ref).await {
         Ok(true) => {}
         Ok(false) => {
             return local_read_json_error(axum::http::StatusCode::NOT_FOUND, "material_not_found");
@@ -302,7 +350,7 @@ pub(super) async fn reobservation_status_json(
     let Some(domain_ref) = params.domain else {
         return local_read_json_error(axum::http::StatusCode::BAD_REQUEST, "domain_required");
     };
-    match material_is_in_domain(database, public_ref, domain_ref).await {
+    match material_is_in_domain(database, public_ref, domain_ref, params.collection_run_ref).await {
         Ok(true) => {}
         Ok(false) => {
             return local_read_json_error(axum::http::StatusCode::NOT_FOUND, "material_not_found");
@@ -330,7 +378,31 @@ pub(super) async fn reobservation_status_json(
 }
 
 pub(super) fn local_query(params: &EvidenceLibraryParams) -> Result<EvidenceQuery, ()> {
-    let public_refs=match &params.public_refs {Some(raw)=>{let ids=raw.split(',').map(uuid::Uuid::parse_str).collect::<Result<Vec<_>,_>>().map_err(|_|())?;if ids.is_empty()||ids.len()>100||params.cursor.is_some()||params.creator_filter.is_some()||params.creator_key.is_some()||params.domain.is_none(){return Err(());}Some(ids)},None=>None};
+    if params.collection_run_ref.is_some()
+        && (params.domain.is_none() || params.public_refs.is_some())
+    {
+        return Err(());
+    }
+    let public_refs = match &params.public_refs {
+        Some(raw) => {
+            let ids = raw
+                .split(',')
+                .map(uuid::Uuid::parse_str)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| ())?;
+            if ids.is_empty()
+                || ids.len() > 100
+                || params.cursor.is_some()
+                || params.creator_filter.is_some()
+                || params.creator_key.is_some()
+                || params.domain.is_none()
+            {
+                return Err(());
+            }
+            Some(ids)
+        }
+        None => None,
+    };
     let creator_scope = match &params.creator_filter {
         Some(value) => {
             let mut scope: linggan_contracts::creator_discovery::CreatorScope =
@@ -379,7 +451,8 @@ pub(super) fn local_query(params: &EvidenceLibraryParams) -> Result<EvidenceQuer
         "mediaKind": params.media_kind,
         "restriction": params.restriction,
         "cursor": params.cursor,
-        "domainRef": params.domain
+        "domainRef": params.domain,
+        "collectionRunRef": params.collection_run_ref
     }))
     .map_err(|_| ())
 }
@@ -411,10 +484,14 @@ pub(super) async fn compose_json(
                     "detailUrl".to_owned(),
                     public_ref.map_or(Value::Null, |public_ref| {
                         Value::String(format!(
-                            "/api/local/work-resources/{public_ref}?domain={}",
+                            "/api/local/work-resources/{public_ref}?domain={}{}",
                             query
                                 .domain_ref()
                                 .map(|value| value.to_string())
+                                .unwrap_or_default(),
+                            query
+                                .collection_run_ref()
+                                .map(|r| format!("&collectionRunRef={r}"))
                                 .unwrap_or_default()
                         ))
                     }),

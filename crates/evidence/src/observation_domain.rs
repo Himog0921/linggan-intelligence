@@ -59,7 +59,7 @@ pub async fn read_observation_domains(
                 count(relation.target_ref) FILTER (WHERE relation.role='primary'), \
                 count(relation.target_ref) FILTER (WHERE relation.role='reference') \
          FROM observation_domain domain \
-         LEFT JOIN observation_domain_target relation USING(domain_ref) \
+         LEFT JOIN observation_domain_target relation ON relation.domain_ref=domain.domain_ref AND EXISTS(SELECT 1 FROM collection_observation_target target WHERE target.target_ref=relation.target_ref AND COALESCE(to_jsonb(target)->>'purpose_kind','long_term')='long_term') \
          GROUP BY domain.domain_ref \
          ORDER BY domain.created_at, domain.domain_ref",
     )

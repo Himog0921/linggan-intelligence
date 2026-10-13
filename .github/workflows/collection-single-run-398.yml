@@ -8,47 +8,56 @@ concurrency:
   group: collection-single-run-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 jobs:
-  test-tooling:
+  collection-proof:
     if: github.head_ref == 'codex/collection-single-run-398'
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 60
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_PROFILE_TEST_DEBUG: '0'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 1
+          fetch-depth: 0
           persist-credentials: false
-      - name: Prepare isolated PostgreSQL binaries, no database contents
+      - name: Matching Rust toolchain
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y postgresql-16 postgresql-server-dev-16
-          git clone --depth 1 --branch v0.8.0 https://github.com/pgvector/pgvector.git "$RUNNER_TEMP/pgvector"
-          test "$(git -C "$RUNNER_TEMP/pgvector" rev-parse HEAD)" = 2627c5ff775ae6d7aef0c430121ccf857842d2f2
-          make -C "$RUNNER_TEMP/pgvector" PG_CONFIG=/usr/lib/postgresql/16/bin/pg_config with_llvm=no OPTFLAGS=''
-          sudo make -C "$RUNNER_TEMP/pgvector" PG_CONFIG=/usr/lib/postgresql/16/bin/pg_config with_llvm=no install
-          mkdir -p "$RUNNER_TEMP/pg-tooling/lib" "$RUNNER_TEMP/pg-tooling/share" "$RUNNER_TEMP/test-tooling"
-          cp -a /usr/lib/postgresql/16/bin "$RUNNER_TEMP/pg-tooling/"
-          cp -a /usr/lib/postgresql/16/lib/. "$RUNNER_TEMP/pg-tooling/lib/"
-          cp -a /usr/share/postgresql/16/. "$RUNNER_TEMP/pg-tooling/share/"
-          for f in "$RUNNER_TEMP/pg-tooling/bin/"* "$RUNNER_TEMP/pg-tooling/lib/"*.so; do
-            ldd "$f" 2>/dev/null | awk '/=> \/.* /{print $3}' || true
-          done | sort -u | while read -r lib; do
-            case "$(basename "$lib")" in libc.so.*|libm.so.*|libpthread.so.*|libdl.so.*|librt.so.*) continue ;; esac
-            cp -L "$lib" "$RUNNER_TEMP/pg-tooling/lib/"
-          done
-          tar -C "$RUNNER_TEMP/pg-tooling" -czf "$RUNNER_TEMP/test-tooling/postgres-tooling.tar.gz" .
-      - name: Prepare locked plugin and isolated browser test dependencies
+          rustup toolchain install 1.95.0 --profile minimal --component rustfmt
+          rustup default 1.95.0
+          echo "CARGO_TARGET_DIR=$RUNNER_TEMP/collection-target" >> "$GITHUB_ENV"
+      - name: Locked workspace regression
+        run: cargo test --workspace --locked
+      - name: Plugin fixtures, contracts and candidate reproducibility
         run: |
           npm ci --prefix plugins/linggan-intelligence-browser --ignore-scripts
-          tar -C plugins/linggan-intelligence-browser -czf "$RUNNER_TEMP/test-tooling/plugin-dependencies.tar.gz" node_modules
-          npm install --prefix "$RUNNER_TEMP/ui-tooling" --no-package-lock --ignore-scripts playwright@1.57.0
-          PLAYWRIGHT_BROWSERS_PATH="$RUNNER_TEMP/ui-tooling/browsers" node "$RUNNER_TEMP/ui-tooling/node_modules/playwright/cli.js" install chromium
-          tar -C "$RUNNER_TEMP/ui-tooling" -czf "$RUNNER_TEMP/test-tooling/ui-tooling.tar.gz" node_modules browsers
-          cd "$RUNNER_TEMP/test-tooling"
-          sha256sum *.tar.gz > checksums.sha256
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+          npm --prefix plugins/linggan-intelligence-browser run verify
+          npm --prefix plugins/linggan-intelligence-browser run test:douyin
+      - name: Isolated populated formal browser and PostgreSQL
+        env:
+          NODE_PATH: ${{ runner.temp }}/collection-browser/node_modules
+          COLLECTION_PROOF_DIR: ${{ runner.temp }}/collection-proof
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/collection-browser/browsers
+        run: |
+          npm --prefix "$RUNNER_TEMP/collection-browser" install --no-package-lock --ignore-scripts playwright@1.57.0
+          node "$RUNNER_TEMP/collection-browser/node_modules/playwright/cli.js" install --with-deps chromium
+          export COLLECTION_RUN_BROWSER_PROOF=1
+          export COLLECTION_RUN_REGRESSION_PROOF=1
+          export COLLECTION_PROOF_NODE="$(command -v node)"
+          bash scripts/test-collection-single-run-postgres.sh
+      - name: Governance and changed source format
+        run: |
+          bash scripts/check-project-governance.sh origin/main
+          bash scripts/verify-ui-design-handbook.sh
+          git diff --check
+          git diff --name-only origin/main -- '*.rs' | xargs -r rustfmt --edition 2024 --config skip_children=true --check
+          node --check scripts/test-collection-single-run-ui.cjs
+      - name: Retain synthetic populated UI evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: collection-test-tooling-398
-          path: ${{ runner.temp }}/test-tooling
-          retention-days: 1
-          if-no-files-found: error
+          name: collection-398-populated-proof
+          path: ${{ runner.temp }}/collection-proof
+          retention-days: 7
+          if-no-files-found: warn

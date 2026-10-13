@@ -74,14 +74,16 @@ fn fingerprint(query: &EvidenceQuery) -> String {
         EvidenceQuerySort::Relevance => "relevance",
     };
     digest(&format!(
-        "q={:?}|time={time_view}|sort={sort}|lane={:?}|state={:?}|media={:?}|restriction={:?}|domain={:?}|creator={:?}",
+        "q={:?}|time={time_view}|sort={sort}|lane={:?}|state={:?}|media={:?}|restriction={:?}|domain={:?}|creator={:?}|run={:?}|refs={:?}",
         query.text(),
         query.lane(),
         query.lane_state(),
         query.media_kind(),
         query.restriction(),
         query.domain_ref(),
-        query.creator_scope()
+        query.creator_scope(),
+        query.collection_run_ref(),
+        query.public_refs()
     ))
 }
 

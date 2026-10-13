@@ -108,7 +108,7 @@ async fn advance_keyword_archive_detail_inner(
     if !schema_ready {
         return Err(AcquisitionChainError::SchemaUnavailable);
     }
-    let temporary:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM collection_observation_target t WHERE t.target_ref=$1 AND to_jsonb(t)->>'purpose_kind'='research_round')").bind(target_ref).fetch_one(database.pool()).await?;
+    let temporary:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM collection_observation_target t WHERE t.target_ref=$1 AND to_jsonb(t)->>'purpose_kind' IN('research_round','single_run'))").bind(target_ref).fetch_one(database.pool()).await?;
     if temporary {
         return Ok(KeywordDetailAdvance::Skipped(
             "topic_map_round_owns_detail_scope",
@@ -184,6 +184,21 @@ async fn advance_keyword_archive_detail_inner(
         }));
     }
 
+    // Preserve the accepted search round that introduced each exact work. Automatic
+    // batches stay within one such round; a person's supplement remains its own record.
+    let origins:Vec<(Uuid,Uuid,Uuid)>=sqlx::query_as("SELECT DISTINCT ON(f.content_public_ref) f.content_public_ref,w.work_order_ref,p.package_ref FROM linggan_material_discovery_finding f JOIN linggan_runtime_capture_package p USING(package_ref) JOIN linggan_runtime_submission_receipt r USING(package_ref) JOIN collection_work_order_lease_task task ON task.task_id=p.task_id JOIN collection_work_order_lease l USING(lease_ref) JOIN collection_work_order w USING(work_order_ref) WHERE f.content_public_ref=ANY($1) AND w.target_ref=$2 AND r.material_admission='ACCEPTED' AND EXISTS(SELECT 1 FROM collection_work_order_domain_usage u WHERE u.work_order_ref=w.work_order_ref AND u.domain_ref=$3) ORDER BY f.content_public_ref,p.accepted_at DESC,p.package_ref")
+      .bind(&works_in_evidence).bind(target_ref).bind(domain_ref).fetch_all(&mut *transaction).await?;
+    let parent = if requested_by == "agent" {
+        origins.first().map(|o| o.1)
+    } else {
+        None
+    };
+    let works_in_evidence: Vec<Uuid> = works_in_evidence
+        .into_iter()
+        .filter(|id| {
+            parent.is_none_or(|parent| origins.iter().any(|o| o.0 == *id && o.1 == parent))
+        })
+        .collect();
     let works = works_in_evidence.len();
     // 一次打开笔记详情页，顺手读回详情 + 最多 30 条评论（含回复）；每条主评论最多 2 条回复——与创作者观察
     // 同口径（`DETAIL_WINDOW_*`，ADR-0002 的固定窗口）。评论在这里不是「另一次采集」：
@@ -224,6 +239,13 @@ async fn advance_keyword_archive_detail_inner(
         transaction.rollback().await?;
         return Ok(KeywordDetailAdvance::Skipped(request.outcome.code()));
     };
+    if matches!(
+        request.outcome,
+        linggan_contracts::AdmissionOutcome::Admitted { .. }
+    ) {
+        let origins:Vec<serde_json::Value>=origins.iter().filter(|o|material_targets.iter().any(|m|m.content_public_ref==o.0)).map(|o|serde_json::json!({"contentPublicRef":o.0,"workOrderRef":o.1,"discoveryPackageRef":o.2})).collect();
+        sqlx::query("UPDATE collection_work_order SET stop_conditions=stop_conditions||jsonb_build_object('collectionUserOrigins',$2::jsonb,'collectionUserParentRef',$3::uuid) WHERE work_order_ref=$1 AND queue_state='queued' AND NOT EXISTS(SELECT 1 FROM collection_work_order_lease WHERE work_order_ref=$1)").bind(work_order_ref).bind(serde_json::json!(origins)).bind(parent).execute(&mut *transaction).await?;
+    }
     transaction.commit().await?;
     Ok(KeywordDetailAdvance::Queued {
         work_order_ref,
@@ -313,7 +335,7 @@ pub async fn keyword_targets_pending_detail(
          JOIN observation_domain_target relation \
            ON relation.target_ref=requested.target_ref AND relation.role='primary' \
          JOIN observation_domain domain ON domain.domain_ref=relation.domain_ref \
-         WHERE domain.status='active' AND NOT EXISTS(SELECT 1 FROM collection_observation_target temporary WHERE temporary.target_ref=requested.target_ref AND to_jsonb(temporary)->>'purpose_kind'='research_round') AND EXISTS ( \
+         WHERE domain.status='active' AND NOT EXISTS(SELECT 1 FROM collection_observation_target temporary WHERE temporary.target_ref=requested.target_ref AND to_jsonb(temporary)->>'purpose_kind' IN('research_round','single_run')) AND EXISTS ( \
            SELECT 1 FROM collection_work_order work_order \
            JOIN collection_work_order_lease lease USING(work_order_ref) \
            JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
@@ -467,7 +489,7 @@ pub async fn run_keyword_archive_details(
          FROM collection_observation_target target \
          JOIN observation_domain_target relation ON relation.target_ref=target.target_ref \
          JOIN observation_domain domain ON domain.domain_ref=relation.domain_ref \
-         WHERE target.target_kind='keyword' AND target.lifecycle_state <> 'dismissed' AND to_jsonb(target)->>'purpose_kind' IS DISTINCT FROM 'research_round' \
+         WHERE target.target_kind='keyword' AND target.lifecycle_state <> 'dismissed' AND COALESCE(to_jsonb(target)->>'purpose_kind','long_term')='long_term' \
            AND relation.role='primary' AND domain.status='active' \
          ORDER BY target.last_scheduler_considered_at NULLS FIRST,target.target_ref,relation.domain_ref",
     )

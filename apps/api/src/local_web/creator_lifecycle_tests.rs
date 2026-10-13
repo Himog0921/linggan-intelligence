@@ -635,7 +635,10 @@ fn invalid_lifecycle_query_is_visible_and_never_claims_defaults() {
 #[test]
 fn corpus_work_deep_link_does_not_fall_back_when_the_work_is_off_page() {
     assert!(EVIDENCE_LIBRARY_JS.contains("function directWorkItem(publicRef)"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("detailUrl: `${API_ROOT}/${encodeURIComponent(publicRef)}?domain=${encodeURIComponent(CORPUS_DOMAIN.ref)}`"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("detailUrl: `${API_ROOT}/${encodeURIComponent(publicRef)}?domain=${encodeURIComponent(CORPUS_DOMAIN.ref)}"));
+    assert!(EVIDENCE_LIBRARY_JS.contains(
+        "'&collectionRunRef='+encodeURIComponent(creatorBacklink.get('collectionRunRef'))"
+    ));
     assert!(EVIDENCE_LIBRARY_JS.contains("revealUrlSelection = false"));
     assert!(
         EVIDENCE_LIBRARY_JS.contains(
@@ -1024,7 +1027,15 @@ fn overview_archive_action_explains_the_two_hundred_boundary_without_a_fake_scor
     assert!(html.contains("最多 200 篇"));
     assert!(html.contains(r#"id="archive-problems""#));
     assert!(html.contains(">建立档案</button>"));
-    assert!(!html.contains('%'));
+    let visible_text: String = html
+        .split('>')
+        .skip(1)
+        .filter_map(|part| part.split('<').next())
+        .collect();
+    assert!(
+        !visible_text.contains('%'),
+        "URL escaping is allowed; a visible archive percentage is not"
+    );
     assert!(!html.contains("ARCHIVE HEALTH"));
     assert!(!html.contains("持久回执"));
 }

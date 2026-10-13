@@ -2004,6 +2004,16 @@ async fn claim_next_queued_work_order(
             dispatch_group_key,
         ) in candidates
         {
+            if let Some(reason) = crate::collection_run_dispatch::guard_order(
+                transaction,
+                work_order_ref,
+                installation_ref,
+            )
+            .await?
+            {
+                deferred_control_block.get_or_insert(reason);
+                continue;
+            }
             // A bounded locked probe may contain several ready batches from
             // one source. Consider only its oldest here; next claim starts at
             // the least-recently leased group, yielding durable round-robin
@@ -2210,6 +2220,12 @@ async fn revalidate_dispatch_task(
     lease_ref: Uuid,
     task_spec: &Value,
 ) -> Result<Option<String>, sqlx::Error> {
+    if let Some(reason) =
+        crate::collection_run_dispatch::guard_lease(transaction, lease_ref, caller_installation_ref)
+            .await?
+    {
+        return Ok(Some(reason));
+    }
     type DispatchControlRow = (
         String,
         String,
@@ -2388,6 +2404,13 @@ async fn page_session_plan_for_task(
         "replyExpandLimit": reply_expand_limit,
         "cacheTtlSeconds": ttl_seconds,
     });
+    let run_directive:Option<Value>=sqlx::query_scalar("SELECT w.stop_conditions->'collectionRun' FROM collection_work_order_lease l JOIN collection_work_order w USING(work_order_ref) WHERE l.lease_ref=$1").bind(lease_ref).fetch_optional(&mut **transaction).await?.flatten();
+    if let Some(directive) = run_directive {
+        plan["commentMode"] = directive["commentMode"].clone();
+        if let Some(budget) = directive.get("commentBudget") {
+            plan["incrementalCommentBudget"] = budget.clone();
+        }
+    }
     let budget_ready: bool =
         sqlx::query_scalar("SELECT to_regclass('linggan_topic_map_comment_budget')IS NOT NULL")
             .fetch_one(&mut **transaction)

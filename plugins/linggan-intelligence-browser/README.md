@@ -1,7 +1,7 @@
 # Linggan Intelligence Browser
 
 > 状态: 自动观察与固定材料深化 Producer
-> 版本: `0.8.60`（关键词详情作者主页观察候选；未加载到 Chrome）
+> 版本: `0.8.61`（统一单次采集与评论分段候选；未加载到 Chrome）
 > 适用范围: `OBSERVATION-RUNTIME-001`、`MEDIA-ACQUISITION-001` 与 `MATERIAL-DEEPENING-001`（GitHub Issue #103）
 > 事实来源: 当前 package source、`MIGRATION-MAP.md`、构建与隔离检查输出
 > 冲突时以谁为准: 用户最新确认、仓库 `AGENTS.md`、当前代码和实际运行证明
@@ -328,3 +328,20 @@ OCR/ASR/研究链已运行。封面是否已本地化以 Evidence 返回的本�
 主题图谱专用 TaskSpec 可携带 `incrementalSearchBudget`（最多 3 轮、180 秒、200 张候选卡）和 `incrementalCommentBudget`（冻结已有 stable comment ID，根评论与回复合计最多 30 个新增 ID、20 轮、180 秒）。页面采集器执行服务器冻结的较小限额，重复页、已知 ID、重复回复不消耗新增名额；局部评论 Receipt 使用 `incremental_new`，不将这 30 条当作平台评论总数。普通归档未携带该可选契约时继续原路径。
 
 这项源码与合成测试证明不表示已安装或重载插件，不表示已访问平台、真实补采成功或服务端已部署；WorkOrder、授权、停止状态和材料接纳仍由 Linggan 服务端裁定。
+
+## COLLECTION-JTBD-001 / #398 · 0.8.61 候选
+
+服务端在新单次工单中显式传 `collectionRunRef` 和讨论通道的 `commentMode`；本包通告
+`collection.single_run.v1`、`collection.all_public.v1`。旧服务／旧在途 TaskSpec 沿原合同执行，
+不因安装新包自动扩大范围。新服务不把深采派给缺少 all-public 标记的旧安装。
+
+`sample_30` 每篇最多30条总样本，含回复、每主评论最多2回复；`all_public` 以30个新稳定
+ID为一段的资源预算，不是整篇目标上限，不继承2回复限制。正文和基本作者先入 outbox；
+每个评论页结果持久写入扩展缓存，已取得材料由原准备的通道身份重投。禁止覆盖已冻结包。
+仍有效的同 run／作品／已确认账号页面最多保留10分钟；新段先取得新的服务端准入和交付身份，
+然后复用有效页面和游标。过期、重启后无法确认的游标或账号变化不盲续；重新进入时按已交付
+稳定ID排除重复。暂停／停止探针在下一次外部动作前关闭；待交付包保持可投。
+
+采全需要主评论与全部所需回复遍历结束、稳定身份的实际证据；显示数量、连续无新增不能
+单独判采全。风险信号继续停止采集，不切号、不绕过。候选 ZIP 构建和 fixture 通过不代表
+正式插件已加载，也不代表真实平台采全证明；加载需独立发布授权。

@@ -843,6 +843,7 @@ fn default_local_query_is_latest_accepted_discovery_and_explicit_windows_remain_
         media_kind: None,
         restriction: None,
         domain: None,
+        collection_run_ref: None,
     })
     .expect("an omitted URL window selects the explicit default discovery view");
     assert_eq!(
@@ -865,6 +866,7 @@ fn default_local_query_is_latest_accepted_discovery_and_explicit_windows_remain_
         media_kind: None,
         restriction: None,
         domain: None,
+        collection_run_ref: None,
     })
     .expect("an explicit published window remains valid");
     assert_eq!(
@@ -3175,7 +3177,7 @@ async fn collection_management_entries_and_single_collection_have_distinct_locat
         .0;
     assert!(picker.contains("管理领域"));
     assert!(picker.contains("/collection/domains?return_to="));
-    assert!(!targets.contains("id=\"monitor-rule-single-collection\""));
+    assert!(!targets.contains("id=\"new-collection-run\""));
     for uri in [
         "/collection/targets?domain=all",
         "/collection/tasks?domain=all",
@@ -3192,14 +3194,11 @@ async fn collection_management_entries_and_single_collection_have_distinct_locat
         assert!(meta.contains("/collection/runtime?return_to="));
     }
     let tasks = get_successful_utf8_response(app(), "/collection/tasks?domain=all").await;
-    assert_eq!(
-        tasks
-            .matches("id=\"monitor-rule-single-collection\"")
-            .count(),
-        1
-    );
+    assert_eq!(tasks.matches("id=\"new-collection-run\"").count(), 1);
     let once = get_successful_utf8_response(app(), "/collection/tasks?domain=all&once=1").await;
-    assert!(once.contains("data-monitor-rule-initial-focus"));
+    assert!(once.contains("id=\"collection-run-form\""));
+    assert!(once.contains("临时关键词"));
+    assert!(once.contains("尽量采全，含回复"));
     assert!(
         !once.contains("name=\"command_kind\" value=\"manual_observe\""),
         "unreadable target/rule data cannot enable submission"

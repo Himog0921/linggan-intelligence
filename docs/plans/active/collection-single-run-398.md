@@ -1,9 +1,9 @@
 # COLLECTION-JTBD-001 · 单次采集完整闭环
 
-> 状态: 活跃计划；Mog 已确认完整交付包，实施中，非完成声明
+> 状态: 活跃计划
 > 最后核对: 2026-10-13
 > 适用范围: Issue #398 的单次采集、任务工作区、领域/工位管理与语料联动
-> 事实来源: Mog 当前对话确认、main 3029efff、正式源码与原 JTBD Demo
+> 事实来源: Mog 当前对话确认、main 9e45e01c（包含 #404/#407）、正式源码与原 JTBD Demo
 > 冲突时以谁为准: 用户最新确认、真实代码/运行结果；本文件替代旧计划对本次交付的排除项，不改写 #400 历史
 
 ## 授权和顺序
@@ -63,6 +63,45 @@ E. 隔离有数据端到端、视觉与回归、Draft PR交接；未证明项原
 
 ## 当前状态与生成物
 
-本地容器不能解析github.com且没有Rust。通过只读GitHub Actions导出git archive的tracked source，不包含.git配置、凭据或工作区未跟踪文件，artifact保留1日，仅用于本次工作容器的编辑；最终交接前移除该导出步骤。编译/数据库/浏览器在Actions隔离环境执行。CI源码快照与日志放runner临时目录，不提交生成产物。本地工作树置于仓库/.worktrees/collection-single-run-398。最终注册到现有generated-artifacts-registry及总索引。
+2026-10-13 本机重新核验：远端 head fd848410，正常 Git checkout、Rust、Cargo、Node、Docker 与现成 pgvector 镜像可用。工作树为 `<repo>/.worktrees/collection-single-run-398`，主工作树未提交改动保留。撤销旧环境不可用的假设。隔离 fixture、日志、截图写系统临时目录，不含真实材料，不提交用户截图。
 
-当前只建立启动计划和源码读取通道；不代表业务实现、测试、独立复审或部署通过。
+交接包 01 提示词与 00 README 已读；六张 KEEP/APPROVED/WRONG 截图逐张查看。原 Demo 作为只读输入，浏览器 file URL 被安全策略拦截，不绕过；实际交互体验未验证。新执行依据为用户本次完整授权与交接提示词；原 Demo 的模拟推进、恢复登录、旧建档门槛不纳入正式代码。
+
+首个代码落点：0125 增量 migration 与 evidence collection_run，单次用途与长期目标分离，事务内冻结领域、来源、模式、精确作品及请求/工单关系；后续连接既有租约、TaskSpec、插件/outbox 和真实材料读取。新增源文件置各业务模块、合成测试置现有 tests/scripts，所有必要共享依赖均已在本包授权范围内。
+
+候选业务代码已实现：原请求/准入/队列上的单次执行、固定顺位与用途隔离、两种评论模式、分段/控制/回执、共享语料版本查询、正式 UI 和可靠既有工单归组。运行合同见 [COLLECTION-SINGLE-RUN-001](../../data-contracts/collection-single-run-001.md)，UI 保留核对见 [变更清单](../../design/changes/collection-single-run-398.md)。0125 接在最新主线 0124 后；没有回退新增主线提交。自己的代码自审不冒充独立复审。
+
+## 完整用户场景核对
+
+| # | 用户场景 | 实现和实际验证层 |
+| --- | --- | --- |
+| 1 | 临时词 5 篇，名单/周期不变，详情/作者/评论在指定领域 | create_run 用途隔离；temporary_run/configured_periodic_rule PG；正式 router 5 作品/150 评论浏览器 |
+| 2 | 同目标多领域，本次 A，不改长期关系 | existing_keyword PG 比较原 target/关系/rule，选 reference 领域执行；错误领域查询为空 |
+| 3 | 50 上限只发现 37 | actual_search_...37 PG，精确顺序、37、真实原因和原工单；未填 50 |
+| 4 | 已有作品占前 50，恢复不补 51 | existing_work_occupies_its_rank PG，复用包、固定 50/原顺位、暂停继续后逐 ID 比较、数据库拒绝 ordinal 51 |
+| 5 | 标准总 30/每主评论 2 回复 | real collector fixture 保留 1 主/2 回复；部分 PG 10→20，续段 knownReplyCounts=2；清洗前原始 ID 扣额 |
+| 6 | 深采 50，超过 30 和 2 回复 | fifty_fixed_works PG 50 篇，其中一篇 500、其余 49×31，共 2019；真实 Task/Attempt/Package/Receipt/typed shared Comment；插件真实 API fixture 65 条分 30/30/5 |
+| 7 | 主评论到底、回复未完不完整 | unfinished_replies PG 与 per-root API fixture；all_public 只认完整 traversal，不认计数/no_progress |
+| 8 | 明确无评论与失败/不可读/错身份分开 | 原合同/collector/接纳回归；风险缺口 PG 保留合格详情及其他作品，未将失败变 0 条成功 |
+| 9 | 暂停/重启/继续、过期游标、待交付、账号变化 | 持久 run/control/raw IDs；detail-page-session/outbox fixture、同账号缓存 1 次 reset、TTL/跨 run拒用；未运行真实已安装扩展进程重启 |
+| 10 | 停止/派发竞争、迟到/重放不重启不加数 | stop_and_real_dispatch PG tokio::join，迟到实际提交/重复 submission/命令重放 PG，held lease probe fail closed |
+| 11 | 30→500→30 | PG shared cumulative 500，第一轮仍 30，深采新增 470，末轮新增 0；未来正文/评论不匹配旧 run |
+| 12 | 语料跨页精确勾选，复用与新增分开 | 正式 browser 50＋1 跨页/刷新仍 51，POST 精确 51，无 ranking/不重搜；selected_works PG 复用包 |
+| 13 | 领域＋run 查询/统计/分页/返回 | Repeatable Read、游标指纹含 run、真实评论 20＋10 页、错误领域为空；任务来源词不补进正文 |
+| 14 | emoji/@/混合/图片/过滤父下回复 | 复用已有清洗/typed material/图片/上下文回归；已采回原始 ID 计额，不补有效数；未另跑真实平台材料清洗样本 |
+| 15 | 单篇失败独立、分段公平、预算等待 | PG 一篇风控有缺口，另一篇正常结束；每 tick 最多 3 作品，原队列与预算；旧插件保持等待不降采样 |
+| 16 | 建档/每轮/补采/历史可读 | 原 progressive root、creator/keyword 自动批次 source package/parent 元数据；legacy_grouping PG，分日期/轮次、补采独立、跨域不合并、未知历史不伪造参数 |
+| 17 | 旧插件/在途/回执 | old_plugin PG 新深采不派；原 dispatch/producer/runtime 合同回归；旧包/outbox 不改身份，不迁移重发历史 |
+| 18 | 表单失败/去重/领域/焦点/只浏览 | 正式浏览器 503 草稿→真实 POST、1440/1920/390 footer/focus、初始 GET/开关弹窗无 POST；PG 幂等异意图 409 |
+| 19 | 领域和完整工位 | 正式列表→一个编辑器；创建/保存/暂停/关系/草稿/返回、原八工位动作及定位返回；最终回执以下方为准 |
+| 20 | 原观察目标全字段/操作/抽屉与诊断 | 原 renderer 未删字段；完整原能力清单和有数据截图；21 底层 Tasks、全 Attempt/Package/Receipt 与冻结资源/交付对账可展开 |
+
+## 当前验证回执
+
+本机实际运行：Rust 全 workspace 非 ignored 测试 822 通过、563 ignored；隔离 PostgreSQL 本包核心 14/14、原八组原生采集回归 96/96、既有派发/关键词边界 38/38、既有 JTBD 2/2（旧 PG 合计 136）；有数据正式浏览器整条测试通过，覆盖 27 条用户记录、5 作品/150 评论、51 作品跨页勾选、领域真实写入和原八类工位管理写入，退出时核验删除隔离容器/卷。插件最终候选 0.8.61 的 314/314 fixture、69/69 既有回归、合同检查、构建、隔离、ZIP/manifest 和可复现性已实际通过；ZIP hash 2aba8db3d2edad87b6b4c5436e751efa5f89b322763c789828b65295a9def2f4。以上是本机层，不将 ignored 项、旧准备 CI 或未运行的安装扩展链写成通过。
+
+前序失败没有冒充成功：修正过 sample_30 序列化、正式弹窗 footer、语料 selection 被 inspector 遮挡、领域组件样式继承等真实问题；旧断言修正 URL 的 run 参数与 `%2F` 返回链接。媒体 fixture 原先错误地把正式 TaskSpec 的 acquireMedia="slots" 当 bool，按现行合同修正并检查冻结媒体/OCR/ASR作用域。本轮继续修复工位更名布局、状态筛选搜索保持、观察目标表头、来源隐藏、内部原因文案及长名称/诊断绑定；真实浏览器复跑通过。复跑时两次因遗漏临时环境变量/浏览器路径未启动成功，恢复明确的证据目录和现成浏览器路径后实际运行，未当作功能失败或成功证据。最终提交 SHA 和远端 CI 结果以原 PR 更新回执为准。
+
+用户明确要求的审美审查另见 [单独 UI 审美审查](../../design/changes/collection-single-run-398-visual-audit.md)。实际查看像素、computed styles、容器宽度、字体、对比度和 390px 滚动；31 张合成截图与测量文件供复核。该报告为自己的审查，不冒充独立 reviewer/Mog 验收。
+
+未合并、业务库未应用 0125、未部署、未加载正式插件、未访问真实平台或调用模型。原 Demo 交互/同屏比较被当前浏览器安全策略阻断；正式合成截图人工检查不等于 Mog 已验收。没有发现而故意留给以后的必要业务依赖；真实安装扩展恢复、真实平台深采、所有产品状态的逐像素视觉接受程度仍未验证。

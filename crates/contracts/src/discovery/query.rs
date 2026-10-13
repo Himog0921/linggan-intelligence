@@ -62,10 +62,18 @@ pub struct EvidenceQuery {
     /// callers that operate over an already-scoped material set.
     #[serde(default)]
     domain_ref: Option<Uuid>,
+    #[serde(default)]
+    collection_run_ref: Option<Uuid>,
 }
 
 impl EvidenceQuery {
-    pub fn public_refs(&self)->Option<&[Uuid]>{self.public_refs.as_deref()}
+    pub fn collection_run_ref(&self) -> Option<Uuid> {
+        self.collection_run_ref
+    }
+
+    pub fn public_refs(&self) -> Option<&[Uuid]> {
+        self.public_refs.as_deref()
+    }
     pub fn creator_scope(&self) -> Option<&crate::creator_discovery::CreatorScope> {
         self.creator_scope.as_ref()
     }

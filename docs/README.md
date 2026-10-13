@@ -1,6 +1,6 @@
 # 文档总索引
 
-采集两页收敛实施入口：[COLLECTION-JTBD-001](plans/active/collection-jtbd-001.md)（Issue #398；含 UI 变更清单与验收矩阵）。
+采集完整交付入口：[COLLECTION-JTBD-001 单次采集](plans/active/collection-single-run-398.md)（Issue #398 / Draft PR #406；替代 #400 的限制，含 UI 与验收矩阵）。[运行与数据合同](data-contracts/collection-single-run-001.md)、[正式 UI 核对](design/changes/collection-single-run-398.md)、[单独 UI 审美审查](design/changes/collection-single-run-398-visual-audit.md)。旧[两页导航](plans/active/collection-jtbd-001.md)保留历史范围。
 
 > 状态: 权威当前
 > 最后核对: 2026-09-30

@@ -982,7 +982,7 @@ async fn request_creator_directory_gaps_inner(
             },
         });
     }
-    let materials: Vec<MaterialDeepeningTarget> = gaps
+    let mut materials: Vec<MaterialDeepeningTarget> = gaps
         .iter()
         .filter(|(_, _, _, in_flight, schedulable)| !in_flight && *schedulable)
         .take(if requested_by == "agent" { 3 } else { 200 })
@@ -1014,6 +1014,29 @@ async fn request_creator_directory_gaps_inner(
             } else {
                 "detail_gap_not_schedulable"
             },
+        });
+    }
+    // Freeze the actual accepted discovery package that introduced each selected work.
+    // Automatic follow-up batches stay within one patrol round, so their detail tasks belong
+    // to that readable user record. Explicit supplements retain their distinct request.
+    let refs: Vec<Uuid> = materials.iter().map(|m| m.content_public_ref).collect();
+    let origins:Vec<(Uuid,Uuid,Uuid)>=sqlx::query_as("SELECT DISTINCT ON(f.content_public_ref) f.content_public_ref,w.work_order_ref,p.package_ref FROM linggan_material_discovery_finding f JOIN linggan_runtime_capture_package p USING(package_ref) JOIN linggan_runtime_submission_receipt receipt USING(package_ref) JOIN collection_work_order_lease_task task ON task.task_id=p.task_id JOIN collection_work_order_lease lease USING(lease_ref) JOIN collection_work_order w USING(work_order_ref) WHERE f.content_public_ref=ANY($1) AND w.target_ref=$2 AND receipt.material_admission='ACCEPTED' AND ($4<>'agent' OR w.lane='patrol') AND EXISTS(SELECT 1 FROM collection_work_order_domain_usage u WHERE u.work_order_ref=w.work_order_ref AND u.domain_ref=$3) ORDER BY f.content_public_ref,p.accepted_at DESC,p.package_ref")
+      .bind(&refs).bind(target_ref).bind(domain_ref).bind(requested_by).fetch_all(&mut *transaction).await?;
+    let parent = if requested_by == "agent" && purpose == CREATOR_PATROL_DETAIL_FOLLOW_PURPOSE {
+        origins.first().map(|o| o.1)
+    } else {
+        None
+    };
+    if let Some(parent) = parent {
+        materials.retain(|m| {
+            origins
+                .iter()
+                .any(|o| o.0 == m.content_public_ref && o.1 == parent)
+        });
+    }
+    if materials.is_empty() {
+        return Err(AcquisitionChainError::ProgressiveArchiveNotReady {
+            reason: "no_eligible_follow_work",
         });
     }
     if follow_rule_revision_ref.is_some() {
@@ -1075,6 +1098,12 @@ async fn request_creator_directory_gaps_inner(
         false,
     )
     .await?;
+    if let Some(order) = outcome.work_order_ref {
+        if matches!(outcome.outcome, AdmissionOutcome::Admitted { .. }) {
+            let origins:Vec<serde_json::Value>=origins.iter().filter(|o|materials.iter().any(|m|m.content_public_ref==o.0)).map(|o|serde_json::json!({"contentPublicRef":o.0,"workOrderRef":o.1,"discoveryPackageRef":o.2})).collect();
+            sqlx::query("UPDATE collection_work_order SET stop_conditions=stop_conditions||jsonb_build_object('collectionUserOrigins',$2::jsonb,'collectionUserParentRef',$3::uuid) WHERE work_order_ref=$1 AND queue_state='queued' AND NOT EXISTS(SELECT 1 FROM collection_work_order_lease WHERE work_order_ref=$1)").bind(order).bind(serde_json::json!(origins)).bind(parent).execute(&mut *transaction).await?;
+        }
+    }
     transaction.commit().await?;
     Ok(outcome)
 }
