@@ -30,6 +30,9 @@ jobs:
       - name: Locked workspace regression
         run: cargo test --workspace --locked
       - name: Plugin fixtures, contracts and candidate reproducibility
+        env:
+          # Existing calendar-text fixtures exercise the workstation's Beijing timezone.
+          TZ: Asia/Shanghai
         run: |
           npm ci --prefix plugins/linggan-intelligence-browser --ignore-scripts
           npm --prefix plugins/linggan-intelligence-browser run verify
