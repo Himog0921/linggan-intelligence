@@ -6103,7 +6103,7 @@ fn evidence_library_header(
         shell::PrimarySurface::Corpus,
         "本机材料投影 <span class=\"v7-tech-key\">LOCAL MATERIAL PROJECTION</span>",
         &crumb,
-        "<span class=\"v7-kpi\"><em>事实层</em><b>只读</b></span><span class=\"v7-kpi\"><em>材料入口</em><b>默认投影</b></span><i class=\"v7-vr\" aria-hidden=\"true\"></i><span class=\"v7-query-meta\">不混读旧发现卡片 <span class=\"v7-tech-key\">NO LEGACY FALLBACK</span></span><span>本机时区 <span class=\"v7-tech-key\">UTC+08</span></span>",
+        "<span class=\"v7-kpi\"><em>事实层</em><b>只读</b></span><span class=\"v7-kpi\"><em>材料入口</em><b>默认投影</b></span><i class=\"v7-vr\" aria-hidden=\"true\"></i><span>本机时区 <span class=\"v7-tech-key\">UTC+08</span></span>",
         collection_state,
     )
 }
@@ -6167,7 +6167,7 @@ fn evidence_library_html(
 
             <div class="ev-deck-foot">
               <div class="ev-quickviews" role="group" aria-label="按材料状态快速筛选">
-                <span class="ev-deck-label">系统视图 <span class="v7-tech-key">SYSTEM VIEWS</span></span>
+                <span class="ev-deck-label">系统视图</span>
                 <button type="button" data-ev-view="all" aria-pressed="true">全部材料</button>
                 <button type="button" data-ev-view="partial" aria-pressed="false">部分取得</button>
                 <button type="button" data-ev-view="risk" aria-pressed="false">风险停止</button>
@@ -6175,7 +6175,7 @@ fn evidence_library_html(
                 <button type="button" data-ev-view="restricted" aria-pressed="false">撤回或受限</button>
               </div>
               <div class="ev-layout-control">
-                <span class="ev-deck-label ev-saved-views" aria-disabled="true">我的视图 <span class="v7-tech-key">MY VIEWS</span> · 暂无已保存视图 <span class="v7-tech-key">SAVED VIEWS NOT CONNECTED</span></span>
+                <span class="ev-deck-label ev-saved-views" aria-disabled="true">我的视图 · 暂无已保存视图</span>
                 <div class="ev-layout-switch" role="group" aria-label="结果排版">
                   <button type="button" data-ev-layout="research" aria-pressed="true">研读</button>
                   <button type="button" data-ev-layout="table" aria-pressed="false">表格</button>

@@ -8,6 +8,10 @@ PR #407 合并前修正（2026-10-13）：运营页焦点/强调线与新增共�
 > 事实来源: [system.md](system.md)、[README.md](README.md)、DESIGN-002 Issue #7、项目 progress 记录和实际验证输出
 > 冲突时以谁为准: 真实代码/合同/测试、用户最新确认、当前 SCOPE 和 ACCEPTED 决策；本日志不把计划写成已实现事实
 
+## 2026-10-14 · CORPUS-COPY-001 语料两页文案快修（Issue #421）
+
+Page 层文案修订，依据 LANG-01 / LANG-05 与 Mog 2026-10-14 的审查决定：评论研究删去读数带上方的领域编号与汇总时间行，时间统一为北京时间 `YYYY-MM-DD HH:MM`，可见描述性英文改为中文，用户评论默认按点赞排序并只在例外时显示资格与标题来源；证据库删去「系统视图」「我的视图」的英文对照和页头 `NO LEGACY FALLBACK`。不改 Token、Primitive、CMP、Pattern、Motion、版式或数据合同。规格见 [PAGE-COMMENT-STUDY-REBUILD-001 §4.8](../pages/comment-study-rebuild-page.md) 与 [PAGE-EVIDENCE-001](../pages/evidence-library-page.md)；候选尚未合并、部署或经 Mog 验收。
+
 ## 2026-10-14 · OPS-MIGRATION-001 D3 合并后状态修复（Issue #417）
 
 #418 已合并上线为 14ee80b1，真实运行/浏览器证明见 ACC-OPS-PAGE-002 §11。后审查读屏意见的候选仅将已有部分截止日纳入趋势图可访问名，不改 Token、视觉、字段或权限；JS、原生 AX 与负控通过，候选尚未合并/部署，见 §12。

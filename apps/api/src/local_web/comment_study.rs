@@ -269,9 +269,12 @@ async fn page(
     let selected_name = selected
         .map(|domain| domain.name.as_str())
         .unwrap_or("选择领域");
-    let selected_status = selected
-        .map(|domain| domain.status.as_str())
-        .unwrap_or("unknown");
+    let selected_status = match selected.map(|domain| domain.status.as_str()) {
+        Some("active") => "运行中",
+        Some("paused") => "已暂停",
+        Some(other) => other,
+        None => "状态未知",
+    };
     let picker = super::corpus_domain_picker(&domains, selected, "/corpus/comments", None);
     let crumb = if picker.is_empty() {
         "语料 <span class=\"v7-slash\">/</span> <b>评论研究</b>".to_owned()
@@ -284,7 +287,7 @@ async fn page(
         shell::PrimarySurface::Corpus,
         "本机研究",
         &crumb,
-        &format!("{selected_name} · 状态 {selected_status}"),
+        &format!("{selected_name} · {selected_status}"),
         None,
     );
     let domain_nav = domain_value.as_deref();

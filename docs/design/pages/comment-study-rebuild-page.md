@@ -1,9 +1,9 @@
 # PAGE-COMMENT-STUDY-REBUILD-001 · 评论研究
 
 > 状态: 权威当前
-> 最后核对: 2026-09-22
+> 最后核对: 2026-10-14
 > 适用范围: `/corpus/comments` 的 Domain-scoped Comment Study 页面、只读投影和显式研究写入
-> 事实来源: DEC-0006、DEC-0008、COMMENT-RESEARCH-REBUILD-001、COMMENT-STUDY-INTELLIGENCE-OVERVIEW-001、LIDS
+> 事实来源: DEC-0006、DEC-0008、COMMENT-RESEARCH-REBUILD-001、COMMENT-STUDY-INTELLIGENCE-OVERVIEW-001、LIDS、Mog 2026-10-14 文案修订确认（CORPUS-COPY-001 / Issue #421）
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、DEC-0008、真实运行/数据合同和当前代码
 
 ## 1. 身份与授权
@@ -106,6 +106,16 @@
 - 只显示真实 target/resolution 状态：等待语境、独立新证据、多个候选、目录未完整、预算停止、协议拒绝、失败和来源受限。
 - 这是信息边界，不是人工审核待办。
 - Unknown、Known(0)、Partial 必须分别表达。
+
+### 4.8 文案与时间（CORPUS-COPY-001，2026-10-14）
+
+Mog 2026-10-14 确认，只改文字与默认值，不改版式：
+
+- 读数带之上不再放「领域 评论研究 · 最近一次研究 · 时间」与「领域编号 · 截至 时间」一行，领域编号不在页面正文出现。数据新鲜度由观察量图表下方「序列截至」表达；最近一次研究的状态与时间仍在「研究与归并进度」。
+- 给人看的时间一律为北京时间 `YYYY-MM-DD HH:MM`，不显示秒、微秒、`Z` 或 `+08:00`。
+- 界面文案不用描述性英文：Signal 写作「研究信号」或「信号」，Run 写作「研究」或「本次研究」。冻结语境的材料类型显示中文名，未知类型保留原标识；运行编号只显示前 8 位。「技术诊断」折叠区为工程排查保留机器字段。
+- 用户评论目录默认按点赞最多排序（见 [COMMENT-LIKE-LIBRARY-001](../../plans/active/comment-like-library-001.md)）；「可研究」与「平台标题」只在例外时显示；没有当前有效标签时显示「—」。
+- 已建档用户问题为 Known(0) 时，说明按 [DEC-0004](../../decisions/0004-comment-research-problem-resolution-v2.md) 需要两条来自不同评论者、含义相同的信号才能建档，并指向下方「尚未建档的表达」，不使用万能空态。
 
 ## 5. 状态与行动
 

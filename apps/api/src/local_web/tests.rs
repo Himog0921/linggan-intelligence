@@ -3660,12 +3660,22 @@ fn evidence_runtime_restores_system_and_personal_view_strategy_without_faking_sa
     let html = evidence_library_html(None, &[], None);
 
     assert!(html.contains("aria-label=\"按材料状态快速筛选\""));
-    assert!(html.contains("SYSTEM VIEWS"));
     assert!(html.contains("系统视图"));
-    assert!(html.contains("MY VIEWS"));
     assert!(html.contains("我的视图"));
     assert!(html.contains("暂无已保存视图"));
-    assert!(html.contains("SAVED VIEWS NOT CONNECTED"));
+    // LANG-05 (CORPUS-COPY-001): descriptive English labels and the legacy-fallback policy line
+    // must not come back next to the Chinese ones.
+    for english in [
+        "SYSTEM VIEWS",
+        "MY VIEWS",
+        "SAVED VIEWS NOT CONNECTED",
+        "NO LEGACY FALLBACK",
+    ] {
+        assert!(
+            !html.contains(english),
+            "descriptive English label returned: {english}"
+        );
+    }
     assert!(html.contains("data-ev-view=\"partial\""));
     assert!(html.contains("data-ev-view=\"risk\""));
     assert!(html.contains("data-ev-view=\"cleaned\""));
