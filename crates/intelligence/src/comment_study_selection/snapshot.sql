@@ -80,12 +80,11 @@ WITH requested_roles AS MATERIALIZED (
     LEFT JOIN active ON active.content_public_ref=l.content_public_ref AND active.comment_external_id=l.comment_external_id
 ), qualified AS MATERIALIZED (
     SELECT facts.*,/*SOURCE_ELIGIBILITY_CASE*/ AS exclusion_reason FROM facts
-), contexts AS MATERIALIZED (
-    /*SHARED_WORK_CONTEXT_QUERY*/
+
 ), output AS (
     SELECT 0 AS kind,0::bigint AS rank,w.public_ref AS work_ref,''::text AS comment_id,
-        jsonb_build_object('workRef',w.public_ref,'fragments',c.fragments) AS payload
-    FROM requested_works w JOIN contexts c ON c.work_ref=w.public_ref
+        jsonb_build_object('workRef',w.public_ref) AS payload
+    FROM requested_works w
     UNION ALL
     SELECT 1,q.source_rank,q.content_public_ref,q.comment_external_id,
         jsonb_build_object('commentKey',jsonb_build_object('workRef',q.content_public_ref,'commentExternalId',q.comment_external_id),

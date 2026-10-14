@@ -16,7 +16,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 // UTF-8 bytes conservatively bound the adapter's input tokens, including CJK text.
-const INPUT_ENVELOPE_BYTES: usize = 128;
+const INPUT_ENVELOPE_BYTES: usize = crate::creator_discovery_input::ENVELOPE_BYTES;
 
 fn read_error(e: discovery::DiscoveryError) -> ModelError {
     match e {
@@ -208,22 +208,7 @@ async fn execute(
     .bind(config)
     .fetch_one(db.pool())
     .await?;
-    let mut fragments = w.fragments.clone();
-    let input = loop {
-        let input = json!({"domain":data.domain,"workRef":work,"sourceFingerprint":fingerprint,"fragments":fragments,"acquisitionContext":{"kind":w.acquisition_kind,"selectionBiased":true}});
-        if input.to_string().len() + SYSTEM.len() + INPUT_ENVELOPE_BYTES <= input_budget as usize {
-            break input;
-        }
-        let Some(longest) = fragments.iter_mut().max_by_key(|f| f.text.chars().count()) else {
-            return Err(ModelError::InputLimit);
-        };
-        let len = longest.text.chars().count();
-        if len <= 1 {
-            return Err(ModelError::InputLimit);
-        }
-        longest.text = longest.text.chars().take((len / 2).max(1)).collect();
-        longest.end = longest.start + longest.text.chars().count();
-    };
+    let (input, fragments) = crate::creator_discovery_input::prepare(&data.domain,w,input_budget as usize)?;
     let (raw, invocation) = call(
         db,
         secrets,

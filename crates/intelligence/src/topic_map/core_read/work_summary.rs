@@ -102,7 +102,7 @@ pub(super) fn author_journey(part: &Window) -> Option<&Value> {
             && refs.iter().all(|c| {
                 part.input.fragments.iter().any(|f| {
                     c["fragmentId"].as_str() == Some(&f.fragment_id)
-                        && ["title", "body", "ocr", "transcript"].contains(&f.field.as_str())
+                        && ["title", "body", "cover_headline", "ocr", "transcript"].contains(&f.field.as_str())
                 })
             })
     });

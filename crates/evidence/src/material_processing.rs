@@ -55,6 +55,8 @@ pub struct OcrExcludedLineInput {
 
 #[derive(Debug, Clone)]
 pub struct OcrLayeringInput {
+    pub layer_version: String,
+    pub substantive_ordinals: Vec<usize>,
     pub state: String,
     pub cover_headline: Option<String>,
     pub image_substantive_text: Option<String>,
@@ -580,6 +582,8 @@ fn valid_ocr_completion_input(claim: &MediaProcessingClaim, input: &OcrCompletio
             "ACCEPTED" | "PARTIAL" | "NEEDS_REVIEW" | "FAILED"
         )
         && valid_ocr_layering_input(&input.layering, input.lines.len())
+        && (input.layering.layer_version != crate::ocr_layering::VERSION
+            || crate::ocr_layering::has_exact_provenance(&input.lines, &input.layering))
         && input.lines.iter().all(valid_ocr_line)
 }
 
@@ -626,7 +630,9 @@ fn valid_ocr_layering_input(input: &OcrLayeringInput, line_count: usize) -> bool
             .image_substantive_text
             .as_ref()
             .is_some_and(|value| !value.trim().is_empty());
-    retained.len() == input.retained_ordinals.len()
+    matches!(input.layer_version.as_str(), "rules-v1" | "rules-v2")
+        && input.substantive_ordinals.iter().all(|o| retained.contains(o) && !headline.contains(o))
+        && retained.len() == input.retained_ordinals.len()
         && headline.len() == input.headline_ordinals.len()
         && excluded.len() == input.excluded_lines.len()
         && retained.iter().all(|ordinal| *ordinal < line_count)
@@ -694,12 +700,12 @@ async fn insert_ocr_lines(
     Ok(line_refs)
 }
 
-async fn insert_ocr_layering(
+pub(crate) async fn insert_ocr_layering(
     tx: &mut Transaction<'_, Postgres>,
     layout_ref: Uuid,
     line_refs: &[Uuid],
     input: &OcrLayeringInput,
-) -> Result<(), ProducerRuntimeError> {
+) -> Result<u64, ProducerRuntimeError> {
     let retained_line_refs = input
         .retained_ordinals
         .iter()
@@ -708,10 +714,10 @@ async fn insert_ocr_layering(
                 "lineRef": line_refs[*ordinal].to_string(),
                 "classification": if input.headline_ordinals.contains(ordinal) {
                     "primary_copy"
-                } else if input.state == "PARTIAL" {
-                    "uncertain"
-                } else {
+                } else if input.substantive_ordinals.contains(ordinal) {
                     "substantive_text"
+                } else {
+                    "uncertain"
                 },
             })
         })
@@ -727,10 +733,10 @@ async fn insert_ocr_layering(
             })
         })
         .collect::<Vec<_>>();
-    sqlx::query(
+    let inserted = sqlx::query(
         "INSERT INTO linggan_media_ocr_layering_result \
          (layering_ref,layout_ref,layer_version,state,decision_source,cover_headline,image_substantive_text,retained_line_refs,excluded_lines) \
-         VALUES($1,$2,'rules-v1',$3,'rules',$4,$5,$6,$7)",
+         VALUES($1,$2,$8,$3,'rules',$4,$5,$6,$7) ON CONFLICT(layout_ref,layer_version) DO NOTHING",
     )
     .bind(Uuid::new_v4())
     .bind(layout_ref)
@@ -739,10 +745,11 @@ async fn insert_ocr_layering(
     .bind(&input.image_substantive_text)
     .bind(json!(retained_line_refs))
     .bind(json!(excluded_lines))
+    .bind(&input.layer_version)
     .execute(&mut **tx)
     .await
     .map_err(ProducerRuntimeError::Internal)?;
-    Ok(())
+    Ok(inserted.rows_affected())
 }
 
 async fn finish_processing_claim(

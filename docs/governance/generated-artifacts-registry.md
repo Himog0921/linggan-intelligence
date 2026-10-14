@@ -1,7 +1,7 @@
 # 生成型文件登记表
 
 > 状态: 权威当前
-> 最后核对: 2026-10-13
+> 最后核对: 2026-10-14
 > 适用范围: 构建、代码生成、导出、日志、测试证据、备份与临时文件
 > 事实来源: 当前工具配置、`.gitignore` 与来源校验清单
 > 冲突时以谁为准: 生成源、工具配置和安全规则；生成结果不得反向覆盖来源
@@ -136,3 +136,10 @@
 - 再生：`node scripts/login-anatomy/build.mjs --audit`，Node 20.10+ 和已安装 Anatomy；`ANATOMY_SKILL_ROOT` 可指定安装位置。页面运行不依赖技能、网络或前端库。
 - 责任：本对话 root / LOGIN-ANATOMY-001；批准来源与局部例外见 [登录规格](../design/changes/login-anatomy-001.md)。生成一致性及模型/遮挡检查由相邻 verify-scene.mjs 执行。
 - 证据：构建审计/姿态 JSON、截图与浏览器步骤输出只放系统临时目录或本任务 Codex visualizations，不进 Git、不含密码/真实材料；正式源码长期保留，替换须随来源重建。
+
+## RESEARCH-DOSSIER-001 · 第一阶段隔离验证
+
+- 来源：`scripts/test-research-dossier-postgres.sh`，合成 fixture 与 API 手动预览测试；不连接共享运行库或外部模型。
+- 位置：随机 `linggan-intelligence-research-dossier-proof-*` Docker container/volume，`/tmp/linggan-dossier-*` 构建、日志与合成媒体；浏览器审阅截图放当前任务授权的 Codex visualizations 目录，稳定名 `research-dossier-phase1-*.jpg`。
+- Git：只提交脚本、fixture 和汇总验证记录；不提交二进制、截图、原文、DSN 或凭据。
+- 再生与清理：上述脚本运行必要集成回归；`--http` 只验证接口，`--preview` 只运行合成页面服务直到中断。脚本 EXIT 核实清理自己的 DB/container/volume；页面验证后停止候选服务。临时构建缓存可复用，媒体与截图仅用于本任务审阅。

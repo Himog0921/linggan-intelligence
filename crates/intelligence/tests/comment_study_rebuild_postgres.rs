@@ -439,6 +439,8 @@ async fn source_gate_excludes_withdrawn_ocr_but_keeps_the_comment_target() {
                 bbox_norm: [0.0, 0.0, 1.0, 1.0],
             }],
             layering: OcrLayeringInput {
+            layer_version: "rules-v1".into(),
+            substantive_ordinals: vec![],
                 state: "ACCEPTED".to_owned(),
                 cover_headline: None,
                 image_substantive_text: Some("图片中的作业计划".to_owned()),
@@ -668,6 +670,8 @@ async fn complete_study_context_ocr(
                 bbox_norm: [0.0, 0.0, 1.0, 1.0],
             }],
             layering: OcrLayeringInput {
+            layer_version: "rules-v1".into(),
+            substantive_ordinals: vec![],
                 state: layering_state.to_owned(),
                 cover_headline: None,
                 image_substantive_text: Some(image_substantive_text.to_owned()),
@@ -767,6 +771,8 @@ async fn a_reobserved_media_slot_contributes_one_context_fragment_per_derived_te
                 bbox_norm: [0.0, 0.0, 1.0, 1.0],
             }],
             layering: OcrLayeringInput {
+            layer_version: "rules-v1".into(),
+            substantive_ordinals: vec![],
                 state: "ACCEPTED".to_owned(),
                 cover_headline: None,
                 image_substantive_text: Some("图片中的作业计划".to_owned()),

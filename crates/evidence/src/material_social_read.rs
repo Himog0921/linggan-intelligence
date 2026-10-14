@@ -492,9 +492,27 @@ pub async fn read_authorized_research_comments(
     after: Option<Uuid>,
     text: Option<&str>,
 ) -> Result<Value, sqlx::Error> {
+    read_comment_page(database, content_ref, after, text, 20, Some(4000)).await
+}
+
+pub async fn read_dossier_comments(database:&Database, content_ref:Uuid, after:Option<Uuid>) -> Result<Value,sqlx::Error> {
+    let mut page=read_comment_page(database,content_ref,after,None,30,None).await?;
+    let refs:Vec<Uuid>=page["items"].as_array().into_iter().flatten().filter_map(|i|i["sourceRef"].as_str()?.parse().ok()).collect();
+    let rows=sqlx::query("SELECT comment.material_ref,engagement.like_count,engagement.like_count_state,parent.material_ref AS parent_ref FROM linggan_material_comment comment LEFT JOIN linggan_material_comment_engagement engagement USING(material_ref) LEFT JOIN linggan_material_comment_current parent ON parent.content_public_ref=comment.content_public_ref AND parent.comment_external_id=comment.parent_comment_external_id AND NOT EXISTS(SELECT 1 FROM linggan_material_comment_restriction restricted WHERE restricted.content_public_ref=parent.content_public_ref AND restricted.comment_external_id=parent.comment_external_id) WHERE comment.material_ref=ANY($1)").bind(&refs).fetch_all(database.pool()).await?;
+    for item in page["items"].as_array_mut().into_iter().flatten(){
+        if let Some(row)=rows.iter().find(|r|item["sourceRef"]==serde_json::json!(r.get::<Uuid,_>("material_ref"))){
+            item["likeCount"]=serde_json::json!(row.get::<Option<i64>,_>("like_count"));
+            item["likeState"]=serde_json::json!(row.get::<Option<String>,_>("like_count_state"));
+            item["parentSourceRef"]=serde_json::json!(row.get::<Option<Uuid>,_>("parent_ref"));
+        }
+    }
+    Ok(page)
+}
+
+async fn read_comment_page(database:&Database,content_ref:Uuid,after:Option<Uuid>,text:Option<&str>,limit:usize,body_limit:Option<i32>)->Result<Value,sqlx::Error>{
     let mut rows = sqlx::query(
-        "SELECT comment.material_ref,comment.is_reply,left(comment.body_text,4000) AS body_text, \
-             char_length(comment.body_text)>4000 AS body_truncated,comment.body_state,comment.observed_at, \
+        "SELECT comment.material_ref,comment.is_reply,left(comment.body_text,COALESCE($5,char_length(comment.body_text))) AS body_text, \
+             COALESCE(char_length(comment.body_text)>$5,false) AS body_truncated,comment.body_state,comment.observed_at, \
              count(*) OVER() AS total_count \
          FROM linggan_material_comment_current comment \
          JOIN linggan_runtime_capture_package package ON package.package_ref=comment.package_ref \
@@ -504,11 +522,13 @@ pub async fn read_authorized_research_comments(
                              AND restriction.comment_external_id=comment.comment_external_id) \
            AND ($2::uuid IS NULL OR comment.material_ref > $2) \
            AND ($3::text IS NULL OR lower(COALESCE(comment.body_text,'')) LIKE '%' || lower($3) || '%') \
-         ORDER BY comment.material_ref LIMIT 21",
+         ORDER BY comment.material_ref LIMIT $4",
     )
     .bind(content_ref)
     .bind(after)
     .bind(text)
+    .bind((limit+1) as i64)
+    .bind(body_limit)
     .fetch_all(database.pool())
     .await?;
     let total = sqlx::query_scalar::<_, i64>(
@@ -524,9 +544,9 @@ pub async fn read_authorized_research_comments(
     .bind(text)
     .fetch_one(database.pool())
     .await?;
-    let truncated = rows.len() > 20;
+    let truncated = rows.len() > limit;
     if truncated {
-        rows.truncate(20);
+        rows.truncate(limit);
     }
     let next_cursor = truncated
         .then(|| {
@@ -553,7 +573,7 @@ pub async fn read_authorized_research_comments(
         "searchableOriginalText":true,"externalAuthorIdentityReturned":false,
         "query":text,
         "total":total,"returned":items.len(),"truncated":truncated,"nextCursor":next_cursor,
-        "limit":20,"items":items
+        "limit":limit,"orderBasis":"stable_source_ref_not_platform_order","items":items
     }))
 }
 

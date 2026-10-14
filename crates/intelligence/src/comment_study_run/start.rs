@@ -609,7 +609,7 @@ pub async fn preview_study_selection(
 ) -> Result<Value, StudyStartError> {
     let command = command.normalize()?;
     let mut tx = begin(database).await?;
-    sqlx::query("SET TRANSACTION READ ONLY")
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
         .execute(&mut *tx)
         .await?;
     ensure_start_schema(&mut tx).await?;
@@ -810,6 +810,10 @@ async fn start_once(
     source_run_ref: Option<Uuid>,
 ) -> Result<StudyStartReceipt, StudyStartError> {
     let mut tx = begin(database).await?;
+    // Dossier and comment cursor must see one snapshot. The existing bounded
+    // serialization retry also refreshes a snapshot taken while waiting on the lock.
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+        .execute(&mut *tx).await?;
     sqlx::query("SELECT pg_advisory_xact_lock($1)")
         .bind(study_domain_lock_key(command.domain_ref)?)
         .execute(&mut *tx)
