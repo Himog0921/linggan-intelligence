@@ -155,3 +155,52 @@ async fn dossier_empty_body_and_missing_media_do_not_turn_unknown_into_zero() {
         0
     );
 }
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn numeric_discovery_count_is_not_a_platform_title_but_numeric_detail_is() {
+    let db = fixture::proof_database("dossier_numeric_title").await;
+    for (id, title, likes, detail_title, expected) in [
+        ("suspected-count", "53", 53, None, None),
+        ("numeric-detail", "53", 53, Some("53"), Some("53")),
+        ("numeric-card", "1984", 12, None, Some("1984")),
+    ] {
+        fixture::submit_package(&db,"profile_discovery",json!({"authorExternalId":"synthetic-author"}),
+            json!({"kind":"profile_discovery_card","resultPosition":1,"sourceObject":{"platform":"xhs","type":"content","externalId":id},"payload":{"title":title,"likeCount":likes}})).await;
+        fixture::submit_package(&db,"content_detail",json!({"contentExternalId":id}),
+            json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":id},"payload":{"title":detail_title,"bodyText":"合成正文","likedCount":999}})).await;
+        let work: Uuid = sqlx::query_scalar(
+            "SELECT public_ref FROM linggan_material_content WHERE content_external_id=$1",
+        )
+        .bind(id)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        let dossier = dossier::read(&db, work).await.unwrap().unwrap();
+        assert_eq!(
+            dossier
+                .fragments
+                .iter()
+                .find(|f| f.field == "title")
+                .map(|f| f.text.as_str()),
+            expected
+        );
+        assert_eq!(
+            dossier.coverage["title"],
+            if expected.is_some() {
+                "KNOWN"
+            } else {
+                "UNKNOWN"
+            }
+        );
+        assert_eq!(dossier.metadata["likes"]["value"], 999);
+        let raw: Option<String> = sqlx::query_scalar(
+            "SELECT title FROM linggan_material_discovery_finding WHERE content_public_ref=$1",
+        )
+        .bind(work)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        assert_eq!(raw.as_deref(), Some(title), "source record stays unchanged");
+    }
+}

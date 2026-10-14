@@ -90,6 +90,52 @@ pub(crate) fn select_media(media: Vec<Value>) -> Vec<Value> {
     values
 }
 
+fn research_media(media: &[Value]) -> Vec<&Value> {
+    let mut selected: Vec<&Value> = vec![];
+    let mut positions = BTreeMap::new();
+    for item in media.iter().filter(|m| {
+        m["state"] == "ACQUIRED"
+            && m["contextOnly"] != true
+            && !matches!(
+                m["dispositionState"].as_str(),
+                Some("OCR_RETIRED" | "WITHDRAWN_OR_RESTRICTED")
+            )
+    }) {
+        let source = &item["semanticMediaSource"];
+        let Some(blob) = source["blobSha256"].as_str().filter(|s| !s.is_empty()) else {
+            selected.push(item);
+            continue;
+        };
+        let key = json!([
+            blob,
+            source["inputScope"],
+            source["position"],
+            item["processorKind"],
+            item["sourceScope"]
+        ])
+        .to_string();
+        let rank = |m: &Value| {
+            let layer = &m["ocrLayering"];
+            (
+                layer["layerVersion"] == crate::ocr_layering::VERSION,
+                ["coverHeadline", "imageSubstantiveText"]
+                    .iter()
+                    .map(|k| layer[k].as_str().map_or(0, str::len))
+                    .sum::<usize>(),
+            )
+        };
+        if let Some(&index) = positions.get(&key) {
+            if rank(item) > rank(selected[index]) {
+                selected[index] = item;
+            }
+        } else {
+            positions.insert(key, selected.len());
+            selected.push(item);
+        }
+    }
+    selected
+}
+
 fn media_time_rank(v: &Value) -> (String, String, String) {
     (
         v["jobCreatedAt"].as_str().unwrap_or("").to_owned(),
@@ -176,16 +222,7 @@ pub(crate) fn assemble(
     .into_iter()
     .flatten()
     .collect();
-    for item in &media {
-        if item["contextOnly"] == true
-            || item["state"] != "ACQUIRED"
-            || matches!(
-                item["dispositionState"].as_str(),
-                Some("OCR_RETIRED" | "WITHDRAWN_OR_RESTRICTED")
-            )
-        {
-            continue;
-        }
+    for item in research_media(&media) {
         let layer = &item["ocrLayering"];
         let fields = [
             (
@@ -218,7 +255,7 @@ pub(crate) fn assemble(
         "publishedAt":work.published_at,"publishedPrecision":work.published_at_precision,"observedAt":work.observed_at,"likes":{"value":work.like_count,"state":work.like_count_state,"observedAt":work.like_source.observed_at},
         "comments":{"value":work.comment_count,"state":work.comment_count_state,"observedAt":work.comment_source.observed_at},
         "collects":{"value":work.collect_count,"state":work.collect_count_state,"observedAt":work.collect_source.observed_at},"shares":{"value":work.share_count,"state":work.share_count_state,"observedAt":work.share_source.observed_at}});
-    let coverage = json!({"title":work.title_state,"body":work.body_state,"mediaCount":media.len(),
+    let coverage = json!({"title":work.title_state,"titleQualification":work.title_qualification,"body":work.body_state,"mediaCount":media.len(),
         "mediaAvailable":media.iter().filter(|m| m["state"]=="ACQUIRED").count(),
         "uncertainImages":media.iter().filter(|m| matches!(m["ocrLayering"]["state"].as_str(),Some("PARTIAL"|"NEEDS_REVIEW"))).count(),
         "comments":"separate_authorized_research_channel","sampling":"collected_material_only"});
@@ -395,15 +432,16 @@ pub fn render_materials(fragments: &[Fragment]) -> String {
         ("transcript", "视频转写"),
     ] {
         out.push_str(&format!("## {label}\n\n"));
-        let selected: Vec<_> = fragments.iter().filter(|f| f.field == field).collect();
+        let selected: Vec<_> = fragments
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| f.field == field)
+            .collect();
         if selected.is_empty() {
             out.push_str("未选入，来源是否存在未知。\n\n");
         }
-        for f in selected {
-            out.push_str(&format!(
-                "[{}] 字符 {}–{}\n{}\n\n",
-                f.fragment_id, f.start, f.end, f.text
-            ));
+        for (index, f) in selected {
+            out.push_str(&format!("[S{}]\n{}\n\n", index + 1, f.text));
         }
     }
     out
@@ -421,10 +459,15 @@ pub fn markdown(dossier: &ResearchDossier) -> String {
         dossier.metadata, dossier.coverage
     ));
     out.push_str("## 来源与版本\n\n");
-    for f in &dossier.fragments {
+    for (index, f) in dossier.fragments.iter().enumerate() {
         out.push_str(&format!(
-            "- [{}] 来源 {}，版本 {}\n",
-            f.fragment_id, f.source_ref, f.source_version
+            "- [S{}] {}，来源 {}，版本 {}，字符 {}–{}\n",
+            index + 1,
+            f.fragment_id,
+            f.source_ref,
+            f.source_version,
+            f.start,
+            f.end
         ));
     }
     out
@@ -525,9 +568,25 @@ mod tests {
         assert_eq!(short[0].text, "中🙂");
         assert_eq!(short[0].end, 2);
         assert_eq!(full.text, "中🙂文正文");
-        assert!(
-            render_materials(&short)
-                .contains(&format!("[{}] 字符 0–2\n中🙂", short[0].fragment_id))
+        assert!(render_materials(&short).contains("[S1]\n中🙂"));
+    }
+    #[test]
+    fn duplicate_blobs_select_one_complete_layout_without_text_deduping() {
+        let base = json!({"state":"ACQUIRED","processorKind":"image_ocr","sourceScope":"full_blob",
+            "semanticMediaSource":{"blobSha256":"same","inputScope":"full_blob","position":{}},
+            "ocrLayering":{"layerVersion":crate::ocr_layering::VERSION,"coverHeadline":"相同标题"}});
+        let mut richer = base.clone();
+        richer["ocrLayering"]["imageSubstantiveText"] = json!("有完整正文");
+        let mut different = base.clone();
+        different["semanticMediaSource"]["blobSha256"] = json!("different");
+        let mut crop = base.clone();
+        crop["semanticMediaSource"]["position"] = json!({"frame":1});
+        let items = vec![base, richer, different, crop];
+        let selected = research_media(&items);
+        assert_eq!(selected.len(), 3);
+        assert_eq!(
+            selected[0]["ocrLayering"]["imageSubstantiveText"],
+            "有完整正文"
         );
     }
 }

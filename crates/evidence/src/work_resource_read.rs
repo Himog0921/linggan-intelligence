@@ -167,7 +167,8 @@ mod title_tests {
                 "JOIN linggan_media_processing_job job ON job.slot_key = origin.slot_key"
             )
         );
-        assert!(!COVER_HEADLINE_SQL.contains("JOIN LATERAL"));
+        // Version selection is bounded to an already scoped layout, never all jobs.
+        assert!(COVER_HEADLINE_SQL.contains("layer.layout_ref=layout.layout_ref"));
     }
 }
 

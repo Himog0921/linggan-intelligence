@@ -191,6 +191,7 @@ async fn prepare_creator_preview(
         Ok((input, fragments)) => Ok(
             json!({"available":true,"stage":"prepared_request","configRef":config.get::<uuid::Uuid,_>("config_ref"),"inputTokenLimit":limit,
             "system":linggan_intelligence::creator_discovery_analysis::SYSTEM,"input":input,"fragments":fragments,
+            "citationMap":linggan_intelligence::creator_discovery_input::citation_map(&fragments),
             "estimatedInputTokensUpperBound":input.to_string().len()+linggan_intelligence::creator_discovery_analysis::SYSTEM.len()+128,
             "asOf":data.as_of,"sourceFingerprint":work.fingerprint}),
         ),
