@@ -1,9 +1,9 @@
 # PAGE-EVIDENCE-001 · 多材料证据库
 
 > 状态: 权威当前
-> 最后核对: 2026-09-24
+> 最后核对: 2026-10-14
 > 适用范围: `语料 → 证据库` 的产品任务、页面信息架构、技术呈现要求、状态与验收；运行时入口仍为 `http://localhost:3000/corpus/evidence`
-> 事实来源: Mog 批准的五卡 Evidence Library 垂直交付、Issue #85/#86/#90、MEDIA-RECON-001、MATERIAL-PROJECTION-001、LIDS、UI execution contract 与当前 Rust/HTML/CSS/JS
+> 事实来源: Mog 批准的五卡 Evidence Library 垂直交付、Issue #85/#86/#90、MEDIA-RECON-001、MATERIAL-PROJECTION-001、LIDS（含 LANG-05 文案修订 CORPUS-COPY-001 / Issue #421）、UI execution contract 与当前 Rust/HTML/CSS/JS
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实运行/代码/合同、ACCEPTED 决定；本页规格不让静态原型冒充已接通运行时
 
 本页所有读取均显式属于一个正式 Domain。所有 Domain 共用同一 Work Resource 和 Material Inspector；primary/reference 不再决定另一套 API 或材料身份。
@@ -99,7 +99,7 @@ Issue #85 沿用已确认项目方向，不重新向用户提出视觉选择。
 |---|---|---|---|---|
 | `EV-S01` | 共享页头与上下文行 | 产品方位、当前职责、关键数量/读取状态 | Shell + read envelope | 页面内再重复标题、显示假实时状态 |
 | `EV-S02` | 语料二级 rail | 当前位于证据库；其他未接通入口保持禁用 | Route capability | 承担材料筛选或对象状态 |
-| `EV-S03` | 查询与视图工作台 | 本地材料检索、时间视角、lane/状态/媒体/受限筛选；`SYSTEM VIEWS / 系统视图` 承载真实 `view` 预设；`MY VIEWS / 我的视图` 只显示保存能力未接通的诚实空态 | Query scope / asOf / cursor | 触发平台采集；把状态预设做成第三栏导航；伪造已保存视图或可保存能力 |
+| `EV-S03` | 查询与视图工作台 | 本地材料检索、时间视角、lane/状态/媒体/受限筛选；「系统视图」承载真实 `view` 预设；「我的视图」只显示保存能力未接通的诚实空态 | Query scope / asOf / cursor | 触发平台采集；把状态预设做成第三栏导航；伪造已保存视图或可保存能力 |
 | `EV-S04` | 结果上下文 | 结果数、匹配字段、排除/限制、读取水位 | Query receipt | 用总数证明平台总量或完整性 |
 | `EV-S05` | 作品材料集合列表 | 以研读/表格/封面三种排版比较同一批作品身份、作者/目标、时间、lane 和限制 | Work Resource Read | 以 Package/Blob/Slot 作顶层行；布局各走一套数据逻辑 |
 | `EV-S06` | 当前作品 Inspector | 概览、评论/回复、媒体、派生、来源/血缘、限制 | Selected work envelope | 第二搜索器、AI 结论、无来源补值 |
@@ -160,7 +160,7 @@ Inspector 默认停在“概览”，但页面不得只在隐藏 Tab 中提供�
 | 访问/处置 | restricted/withdrawn/bytes cleaned 等 | 当前 display policy | 让筛选绕过权限 |
 | 排序 | 默认最近观察降序；后续可明确切换来源发布时间 | sort key、asOf | 把“最近观察”写成“最新发布” |
 
-排版使用独立 URL 参数 `layout=research|table|cover`；状态筛选继续使用 `view`。`view` 是查询预设，必须与其他筛选一起放在主结果上方的 `SYSTEM VIEWS / 系统视图` 横向工作台，不作为左侧导航或独立状态面板；结果数、读取回执和当前选择分别由工作台底栏、inline receipt、选中行/Inspector 承担，不重复做统计栏。`MY VIEWS / 我的视图` 可以保留参考稿的结构位置，但在保存合同缺失时只能显示不可交互的“暂无已保存视图 / SAVED VIEWS NOT CONNECTED”，不得展示假视图或假保存动作。切换排版只重排已读取的同一 Work Resource 集合，不重新请求、不改字段资格、不改变当前选择。保存视图、批量选择、发起研究和泛化“补采”继续禁用，直到各自有独立产品/权限/回执合同。唯一已接通的例外是当前选中作品的受限 `立即复观测`：它只面对小红书、稳定 public ref 和已存在的 target-linked active deep-archive authorization，不能从作者、标题、URL 或采集来源名称推断授权；请求与状态均来自受控 API，不能显示本地伪造成功。
+排版使用独立 URL 参数 `layout=research|table|cover`；状态筛选继续使用 `view`。`view` 是查询预设，必须与其他筛选一起放在主结果上方的「系统视图」横向工作台，不作为左侧导航或独立状态面板；结果数、读取回执和当前选择分别由工作台底栏、inline receipt、选中行/Inspector 承担，不重复做统计栏。「我的视图」可以保留参考稿的结构位置，但在保存合同缺失时只能显示不可交互的“暂无已保存视图”，不得展示假视图或假保存动作。按 LANG-05，这两处不再配英文对照；页头的「不混读旧发现卡片 NO LEGACY FALLBACK」属于系统策略，已移出界面（CORPUS-COPY-001，2026-10-14），查询与视图的结构和行为不变。切换排版只重排已读取的同一 Work Resource 集合，不重新请求、不改字段资格、不改变当前选择。保存视图、批量选择、发起研究和泛化“补采”继续禁用，直到各自有独立产品/权限/回执合同。唯一已接通的例外是当前选中作品的受限 `立即复观测`：它只面对小红书、稳定 public ref 和已存在的 target-linked active deep-archive authorization，不能从作者、标题、URL 或采集来源名称推断授权；请求与状态均来自受控 API，不能显示本地伪造成功。
 
 ### 5.4 Domain 范围与材料用途
 

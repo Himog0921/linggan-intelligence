@@ -72,7 +72,7 @@ fn run_controls_use_cas_receipts_and_confirmation_for_irreversible_stop() {
     assert!(script.contains("run.pendingCount == null ? '未知' : Number(run.pendingCount)"));
     assert!(script.contains("data-pending-count=\"${pendingCount}\""));
     assert!(!script.contains("run.pendingCount || 0"));
-    assert!(script.contains("Run ${stopDialogRunRef} · 当前未终态"));
+    assert!(script.contains("研究批次 ${stopDialogRunRef} · 当前未终态"));
     assert!(script.contains("data-run-control=\"pause\""));
     assert!(script.contains("data-run-control=\"resume\""));
     assert!(script.contains("runs/${encodeURIComponent(runRef)}/${action}"));
