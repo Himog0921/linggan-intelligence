@@ -165,6 +165,24 @@ pub async fn read_collection_control_surface(
     ))
 }
 
+pub enum CollectionTaskControlRead {
+    Ready(Vec<FrozenWorkView>),
+    SchemaUnavailable,
+}
+
+/// Tasks consume only frozen Work facts. Runtime's live admission/capacity reads remain separate.
+pub async fn read_task_control_surface(
+    database: &Database,
+    limit: i64,
+) -> Result<CollectionTaskControlRead, sqlx::Error> {
+    if !collection_control_schema_is_ready(database).await? {
+        return Ok(CollectionTaskControlRead::SchemaUnavailable);
+    }
+    Ok(CollectionTaskControlRead::Ready(
+        read_frozen_works(database, limit.clamp(1, 100)).await?,
+    ))
+}
+
 async fn read_latest_run(database: &Database) -> Result<Option<SchedulerRunView>, sqlx::Error> {
     let row = sqlx::query(
         "SELECT scheduler_run_ref,outcome,considered_count,dispatched_count, \
@@ -507,12 +525,12 @@ pub fn render_attention(base: &str, projection: &CollectionControlSurfaceProject
     )
 }
 
-pub fn render_tasks_control(base: &str, projection: &CollectionControlSurfaceProjection) -> String {
-    let templates = frozen_work_templates(&projection.works);
+pub fn render_tasks_control(base: &str, works: &[FrozenWorkView]) -> String {
+    let templates = frozen_work_templates(works);
     let rendered = selected_task_id(base).map_or_else(
         || base.to_owned(),
         |task_id| {
-            let works = works_for_task(&projection.works, task_id);
+            let works = works_for_task(works, task_id);
             replace_bounded_slot(
                 base,
                 "<!-- frozen-work:start -->",
@@ -1253,7 +1271,7 @@ mod tests {
         let operations = render_operations(&empty, &projection, OperationsMode::Now);
         let attention = render_attention(&empty, &projection);
         let body = format!("{BODY_OPEN}old</div>");
-        let tasks = render_tasks_control(&body, &projection);
+        let tasks = render_tasks_control(&body, &projection.works);
 
         assert!(operations.contains("data-control-reason=\"account_needs_login\""));
         assert!(operations.contains("data-rule-revision-ref"));
@@ -1557,6 +1575,32 @@ mod tests {
         assert_eq!(works[0].task_id, Some(first_task));
         assert_eq!(works[1].task_id, Some(second_task));
 
+        let CollectionTaskControlRead::Ready(task_projection) =
+            read_task_control_surface(&database, 100).await.unwrap()
+        else {
+            panic!("task schema must be ready");
+        };
+        assert_eq!(
+            frozen_work_templates(&task_projection),
+            frozen_work_templates(&projection.works)
+        );
+        // An unrelated Runtime credential read cannot erase Tasks' frozen Work facts.
+        sqlx::raw_sql("ALTER TABLE installation_credential RENAME COLUMN activated_at TO runtime_only_unavailable")
+            .execute(database.pool()).await.unwrap();
+        assert!(
+            read_collection_control_surface(&database, 100)
+                .await
+                .is_err()
+        );
+        let CollectionTaskControlRead::Ready(task_projection) =
+            read_task_control_surface(&database, 100).await.unwrap()
+        else {
+            panic!("the bounded task read remains ready");
+        };
+        assert_eq!(
+            frozen_work_templates(&task_projection),
+            frozen_work_templates(&projection.works)
+        );
         let templates = frozen_work_templates(&projection.works);
         assert!(templates.contains(&format!("data-task-frozen-template=\"{first_task}\"")));
         assert!(templates.contains(&format!("data-task-frozen-template=\"{second_task}\"")));
@@ -1578,7 +1622,7 @@ mod tests {
             },
             None,
         );
-        let rendered = render_tasks_control(&tasks, &projection());
+        let rendered = render_tasks_control(&tasks, &projection().works);
 
         assert!(rendered.contains("当前没有任务，因此没有可核对的冻结 Work 引用"));
         assert!(!rendered.contains("冻结资源正在读取"));

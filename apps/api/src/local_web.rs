@@ -3,6 +3,8 @@ mod collection_dispatch;
 mod collection_domain_modal;
 mod collection_intake;
 mod collection_management;
+#[cfg(test)]
+mod collection_read_performance_tests;
 mod collection_run_api;
 mod collection_run_workspace;
 #[cfg(test)]
@@ -2415,6 +2417,8 @@ async fn stylesheet() -> Response {
 /// is a query parameter, so every view is a real, shareable, refresh-safe address.
 #[derive(Deserialize, Default)]
 struct CollectionParams {
+    #[serde(default)]
+    drawer_fragment: bool,
     return_to: Option<String>,
     mode: Option<String>,
     drawer: Option<String>,
@@ -2514,17 +2518,26 @@ async fn collection_targets(
 ) -> Html<String> {
     // 计数不受当前筛选影响：tab 上的数字要回答「切过去有多少」。
     let database = state.database.database();
-    let reads = match database {
-        Some(database) => Some(read_collection_surface(database).await),
-        None => None,
-    };
-    // 领域读不出来时列表仍按全部领域读取；管理入口保持可达，不补造领域。
-    let (domains, _domains_readable) = match database {
-        Some(database) => match read_observation_domains(database).await {
-            Ok(domains) => (domains, true),
-            Err(_) => (Vec::new(), false),
-        },
-        None => (Vec::new(), false),
+    let fragment = params.drawer_fragment
+        && params.drawer.is_some()
+        && params.rule.is_none()
+        && params.delete.is_none()
+        && params.assign_domain.is_none();
+    let (reads, domains) = match database {
+        Some(database) => {
+            let (reads, domains) = tokio::join!(
+                async {
+                    if fragment {
+                        None
+                    } else {
+                        Some(read_collection_surface(database).await)
+                    }
+                },
+                read_observation_domains(database),
+            );
+            (reads, domains.unwrap_or_default())
+        }
+        None => (None, Vec::new()),
     };
     let current_domain = linggan_evidence::observation_domain::resolve_collection_domain(
         &domains,
@@ -2536,10 +2549,12 @@ async fn collection_targets(
     // 站在考研自习下会看到「创作者 2」而列表里只有 1 个，那个 2 说的是别的世界的事。
     // 左栏底部的总数仍是全局的：那是模块级事实，不随当前领域变。
     let domain_counts = match database {
-        Some(database) => count_targets(database, current_domain.map(|domain| domain.domain_ref))
-            .await
-            .ok(),
-        None => None,
+        Some(database) if !fragment => {
+            count_targets(database, current_domain.map(|domain| domain.domain_ref))
+                .await
+                .ok()
+        }
+        _ => None,
     };
     let counts = domain_counts
         .as_ref()
@@ -2579,42 +2594,53 @@ async fn collection_targets(
                 )
             })
             .unwrap_or_default();
+        if fragment {
+            return Html(drawer);
+        }
         return Html(target_drawer::attach_to_collection_document(
             &base,
             &format!("{drawer}{rule_overlay}"),
         ));
     };
-    // 一次查完所有目标的档案完整度：列表最多两百行，逐行发查询会让页面打开一次跑
-    // 两百次数据库。
-    let completeness = read_archive_completeness(database, linggan_contracts::OPEN_PLATFORM)
-        .await
-        .ok();
-    // 抽屉独立查目标，不从筛过的列表里找——被筛掉的目标不该显示成「未找到」。
     let drawer_target_ref = params
         .drawer
         .as_deref()
         .and_then(|value| uuid::Uuid::parse_str(value).ok());
-    let drawer_target = match drawer_target_ref {
-        Some(target_ref) => read_target(database, target_ref).await.map_err(|_| ()),
-        None => Ok(None),
-    };
-    let drawer_inspector = match drawer_target_ref {
-        Some(target_ref) => read_target_inspector(database, target_ref)
-            .await
-            .map_err(|_| ()),
-        None => Ok(None),
-    };
-    let drawer_avatar = match drawer_target.as_ref() {
-        Ok(Some(target)) if target.target_kind == "creator" => {
-            match read_target_avatars(database, std::slice::from_ref(target)).await {
-                Ok(mut avatars) => avatars
-                    .remove(&target.target_ref)
-                    .or(Some(ObservationTargetAvatar::NotObserved)),
-                Err(_) => Some(ObservationTargetAvatar::Unavailable),
+    let (completeness, targets_read, drawer_target, drawer_inspector) = tokio::join!(
+        async {
+            read_archive_completeness(database, linggan_contracts::OPEN_PLATFORM)
+                .await
+                .ok()
+        },
+        async {
+            if fragment {
+                Ok(Vec::new())
+            } else {
+                list_targets(
+                    database,
+                    params.filter.as_deref(),
+                    current_domain.map(|domain| domain.domain_ref),
+                    200,
+                )
+                .await
             }
-        }
-        Ok(Some(_)) | Ok(None) | Err(()) => None,
-    };
+        },
+        async {
+            match drawer_target_ref {
+                Some(target_ref) => read_target(database, target_ref).await.map_err(|_| ()),
+                None => Ok(None),
+            }
+        },
+        async {
+            match drawer_target_ref {
+                Some(target_ref) => read_target_inspector(database, target_ref)
+                    .await
+                    .map_err(|_| ()),
+                None => Ok(None),
+            }
+        },
+    );
+
     let has_legacy_lifecycle_query = params.life_window.is_some()
         || params.life_metric.is_some()
         || params.life_chart.is_some()
@@ -2644,40 +2670,100 @@ async fn collection_targets(
         .as_deref()
         .and_then(|value| uuid::Uuid::parse_str(value).ok())
         .map(|value| value.to_string());
-    let lifecycle = if should_read_target_lifecycle(
-        drawer_target.as_ref().ok().and_then(Option::as_ref),
-        drawer_tab,
-        works_view,
-    ) {
-        match (drawer_target_ref, lifecycle_query.as_ref()) {
-            (Some(target_ref), Ok(query)) => {
-                read_creator_lifecycle(database, target_ref, query).await
+
+    let (
+        drawer_avatar,
+        lifecycle,
+        creator_catalog,
+        keyword_catalog,
+        monitor_rules,
+        retirable,
+        drawer_keyword_archive,
+    ) = tokio::join!(
+        async {
+            match drawer_target.as_ref() {
+                Ok(Some(target)) if target.target_kind == "creator" => {
+                    match read_target_avatars(database, std::slice::from_ref(target)).await {
+                        Ok(mut avatars) => avatars
+                            .remove(&target.target_ref)
+                            .or(Some(ObservationTargetAvatar::NotObserved)),
+                        Err(_) => Some(ObservationTargetAvatar::Unavailable),
+                    }
+                }
+                Ok(Some(_)) | Ok(None) | Err(()) => None,
             }
-            (None, _) | (_, Err(_)) => Ok(None),
+        },
+        async {
+            if should_read_target_lifecycle(
+                drawer_target.as_ref().ok().and_then(Option::as_ref),
+                drawer_tab,
+                works_view,
+            ) {
+                match (drawer_target_ref, lifecycle_query.as_ref()) {
+                    (Some(target_ref), Ok(query)) => {
+                        read_creator_lifecycle(database, target_ref, query).await
+                    }
+                    (None, _) | (_, Err(_)) => Ok(None),
+                }
+            } else {
+                Ok(None)
+            }
+        },
+        async {
+            match drawer_target.as_ref().ok().and_then(Option::as_ref) {
+                Some(target) if target.target_kind == "creator" => read_creator_directory(
+                    database,
+                    target.target_ref,
+                    current_domain.map(|domain| domain.domain_ref),
+                )
+                .await
+                .ok(),
+                _ => None,
+            }
+        },
+        async {
+            match drawer_target.as_ref().ok().and_then(Option::as_ref) {
+                Some(target) if target.target_kind == "keyword" => read_keyword_hits(
+                    database,
+                    target.target_ref,
+                    current_domain.map(|domain| domain.domain_ref),
+                )
+                .await
+                .ok(),
+                _ => None,
+            }
+        },
+        async {
+            match drawer_target.as_ref().ok().and_then(Option::as_ref) {
+                Some(target) => {
+                    linggan_evidence::read_target_monitor_rules(database, target.target_ref)
+                        .await
+                        .ok()
+                        .flatten()
+                }
+                None => None,
+            }
+        },
+        async {
+            match drawer_target.as_ref() {
+                Ok(Some(target)) if target.target_kind == "creator" => {
+                    read_blocked_materials(database, target.target_ref)
+                        .await
+                        .unwrap_or_default()
+                }
+                _ => Vec::new(),
+            }
+        },
+        async {
+            match drawer_target.as_ref().ok().and_then(Option::as_ref) {
+                Some(target) if target.target_kind == "keyword" => {
+                    read_keyword_archive(database, target.target_ref).await
+                }
+                // 创作者的主操作不看这一项；`Unavailable` 在这里是「不适用」，不是读失败。
+                _ => target_drawer::KeywordArchiveRead::Unavailable,
+            }
         }
-    } else {
-        Ok(None)
-    };
-    let creator_catalog = match drawer_target.as_ref().ok().and_then(Option::as_ref) {
-        Some(target) if target.target_kind == "creator" => read_creator_directory(
-            database,
-            target.target_ref,
-            current_domain.map(|domain| domain.domain_ref),
-        )
-        .await
-        .ok(),
-        _ => None,
-    };
-    let keyword_catalog = match drawer_target.as_ref().ok().and_then(Option::as_ref) {
-        Some(target) if target.target_kind == "keyword" => read_keyword_hits(
-            database,
-            target.target_ref,
-            current_domain.map(|domain| domain.domain_ref),
-        )
-        .await
-        .ok(),
-        _ => None,
-    };
+    );
     // 只有真的点了删除才去读预览：列表每次渲染都读一遍，等于为一个多数时候不显示的
     // 面板付一次查询。
     let deletion_target = params
@@ -2709,109 +2795,94 @@ async fn collection_targets(
                 Err(_) => (None, Some("target_domain_assignment_failed")),
             },
         };
-    let list = match list_targets(
-        database,
-        params.filter.as_deref(),
-        current_domain.map(|domain| domain.domain_ref),
-        200,
-    )
-    .await
-    {
-        Ok(targets) => {
-            let avatars = match read_target_avatars(database, &targets).await {
-                Ok(avatars) => avatars,
-                // A failed avatar read is not evidence that no avatar was observed. Render the
-                // conservative unavailable state instead of quietly falling back to either a
-                // remote URL or an untrue “not observed” label.
-                Err(_) => targets
+    let list = if fragment {
+        base
+    } else {
+        match targets_read {
+            Ok(targets) => {
+                let keyword_refs = targets
                     .iter()
-                    .filter(|target| target.target_kind == "creator")
-                    .map(|target| (target.target_ref, ObservationTargetAvatar::Unavailable))
-                    .collect::<HashMap<_, _>>(),
-            };
-            let observation = read_target_observation_summaries(database, &targets)
-                .await
-                .ok();
-            // 关键词「建过档没有」是查出来的（它不能存成生命周期状态），所以这里批量问
-            // 一次，而不是每行查一次。查不到时传 None——页面据此显示「读不到」而不是
-            // 催人去做一件可能已经做过的事。
-            let keyword_refs = targets
-                .iter()
-                .filter(|target| target.target_kind == "keyword")
-                .map(|target| target.target_ref)
-                .collect::<Vec<_>>();
-            let keyword_archives = keyword_baselines_qualified(database, &keyword_refs)
-                .await
-                .ok();
-            // 建档分两段：先拿链接，再补详情。第二段是不是还欠着，同样批量问一次。
-            let keyword_details_pending =
-                linggan_evidence::keyword_targets_pending_detail(database, &keyword_refs)
-                    .await
-                    .ok();
-            // 命中多少篇、补到多少篇详情均从标准材料链读取；全部领域汇总时按作品去重。
-            let keyword_counts = linggan_evidence::read_keyword_catalog_counts(
-                database,
-                &keyword_refs,
-                current_domain.map(|domain| domain.domain_ref),
-            )
-            .await
-            .ok();
-            collection_targets_view::render_stored_targets_with_observation(
-                &base,
-                &targets,
-                &avatars,
-                completeness.as_ref(),
-                observation.as_ref(),
-                params.error.as_deref(),
-                params.ahead,
-                deletion_preview.as_ref(),
-                deletion_target,
-                collection_targets_view::TargetListFacts {
-                    keyword_archives: keyword_archives.as_ref(),
-                    keyword_details_pending: keyword_details_pending.as_ref(),
-                    keyword_counts: keyword_counts.as_ref(),
-                },
-                list_context,
-                &domains,
-                assignment_target.as_ref(),
-                assignment_error,
-            )
+                    .filter(|target| target.target_kind == "keyword")
+                    .map(|target| target.target_ref)
+                    .collect::<Vec<_>>();
+                let (
+                    avatars_read,
+                    observation,
+                    keyword_archives,
+                    keyword_details_pending,
+                    keyword_counts,
+                ) = tokio::join!(
+                    read_target_avatars(database, &targets),
+                    async {
+                        read_target_observation_summaries(database, &targets)
+                            .await
+                            .ok()
+                    },
+                    async {
+                        keyword_baselines_qualified(database, &keyword_refs)
+                            .await
+                            .ok()
+                    },
+                    async {
+                        linggan_evidence::keyword_targets_pending_detail(database, &keyword_refs)
+                            .await
+                            .ok()
+                    },
+                    async {
+                        linggan_evidence::read_keyword_catalog_counts(
+                            database,
+                            &keyword_refs,
+                            current_domain.map(|domain| domain.domain_ref),
+                        )
+                        .await
+                        .ok()
+                    },
+                );
+                let avatars = avatars_read.unwrap_or_else(|_| {
+                    targets
+                        .iter()
+                        .filter(|target| target.target_kind == "creator")
+                        .map(|target| (target.target_ref, ObservationTargetAvatar::Unavailable))
+                        .collect::<HashMap<_, _>>()
+                });
+                collection_targets_view::render_stored_targets_with_observation(
+                    &base,
+                    &targets,
+                    &avatars,
+                    completeness.as_ref(),
+                    observation.as_ref(),
+                    params.error.as_deref(),
+                    params.ahead,
+                    deletion_preview.as_ref(),
+                    deletion_target,
+                    collection_targets_view::TargetListFacts {
+                        keyword_archives: keyword_archives.as_ref(),
+                        keyword_details_pending: keyword_details_pending.as_ref(),
+                        keyword_counts: keyword_counts.as_ref(),
+                    },
+                    list_context,
+                    &domains,
+                    assignment_target.as_ref(),
+                    assignment_error,
+                )
+            }
+            Err(_) => base,
         }
-        Err(_) => base,
     };
     // The selected target lookup is independent from the list lookup. A filtered or failed
     // list must not erase a target that was read successfully, and an unreadable target must
     // not be flattened into "not found".
     // 打开了某个目标才读它的巡检规则：一个关键词可以有好几条，看不见就管不了。
     // 读不到时传 `None`，界面说读不到——不把读不到显示成「一条都没有」。
-    let monitor_rules = match drawer_target.as_ref().ok().and_then(Option::as_ref) {
-        Some(target) => linggan_evidence::read_target_monitor_rules(database, target.target_ref)
-            .await
-            .ok()
-            .flatten(),
-        None => None,
-    };
+
     // 只有真的打开了某个目标才去读它的待判断作品：列表页每次渲染都读一遍，等于为一个
     // 多数时候不显示的区块付一次查询。读不到就当作没有待判断项——那时不渲染确认入口，
     // 而不是把「读不到」渲染成「没问题」。
-    let retirable = match drawer_target.as_ref() {
-        Ok(Some(target)) if target.target_kind == "creator" => {
-            read_blocked_materials(database, target.target_ref)
-                .await
-                .unwrap_or_default()
-        }
-        _ => Vec::new(),
-    };
+
     // 关键词「建过档没有」是主操作的输入之一，抽屉现在与列表行用同一个判断，就必须拿到
     // 同一份事实。抽屉目标可能被列表筛掉（列表最多两百行），所以在这里单独问一次，而不是
     // 从列表那一批里找——找不到会把「这一屏没有它」说成「它没建过档」。
-    let drawer_keyword_archive = match drawer_target.as_ref().ok().and_then(Option::as_ref) {
-        Some(target) if target.target_kind == "keyword" => {
-            read_keyword_archive(database, target.target_ref).await
-        }
-        // 创作者的主操作不看这一项；`Unavailable` 在这里是「不适用」，不是读失败。
-        _ => target_drawer::KeywordArchiveRead::Unavailable,
-    };
+
     let drawer = match drawer_target.as_ref() {
         Ok(target) => target_drawer::render_with_catalog_view_with_chart(
             target.as_ref(),
@@ -2869,6 +2940,9 @@ async fn collection_targets(
             collection::render_unreadable_target_drawer(params.drawer.as_deref(), list_context)
         }
     };
+    if fragment {
+        return Html(drawer);
+    }
     let rule_overlay = match params
         .rule
         .as_deref()
@@ -3698,12 +3772,14 @@ async fn collection_tasks_page(
             },
         ));
     };
-    let domains = read_observation_domains(database).await.unwrap_or_default();
-    let (reads, timeline, delivery) = tokio::join!(
+    let (domains, reads, timeline, delivery, control) = tokio::join!(
+        read_observation_domains(database),
         read_collection_surface(database),
         read_collection_task_timeline(database, 100),
         read_detail_delivery_reconciliation(database, 100),
+        collection::collection_control_surface_view::read_task_control_surface(database, 100),
     );
+    let domains = domains.unwrap_or_default();
     // 交付对账读失败时留 None：页面上写「读不到」，不写 0。缺失与零是两件事。
     let delivery = delivery.ok();
     let base = collection::render_in_domain(
@@ -3721,10 +3797,10 @@ async fn collection_tasks_page(
     match timeline {
         Ok(timeline) => {
             let tasks = collection_tasks_view::render_tasks(&base, &timeline, delivery.as_deref());
-            match collection::collection_control_surface_view::read_collection_control_surface(database, 100).await {
-                Ok(collection::collection_control_surface_view::CollectionControlSurfaceRead::Ready(projection)) =>
+            match control {
+                Ok(collection::collection_control_surface_view::CollectionTaskControlRead::Ready(projection)) =>
                     Html(collection::collection_control_surface_view::render_tasks_control(&tasks, &projection)),
-                Ok(collection::collection_control_surface_view::CollectionControlSurfaceRead::SchemaUnavailable) =>
+                Ok(collection::collection_control_surface_view::CollectionTaskControlRead::SchemaUnavailable) =>
                     Html(collection::collection_control_surface_view::render_tasks_control_unavailable(
                         &tasks,
                         collection::collection_control_surface_view::TaskControlUnavailable::SchemaUnavailable,

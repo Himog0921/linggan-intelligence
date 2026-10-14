@@ -21,6 +21,9 @@
   }
 
   function returnFromOverlay(overlay) {
+    if (overlay.id === "c-drawer" && !overlay.dispatchEvent(new CustomEvent(
+      "collection-drawer-dismiss", { bubbles: true, cancelable: true }
+    ))) return;
     var returnUrl = overlay.dataset.returnUrl || "/collection/targets";
     // Keep the drawer's focus-return contract explicit for both the browser and the
     // server-rendered Collection tests. The rule modal remains a sibling overlay.
@@ -344,7 +347,9 @@
   }
   if (domainClose) domainClose.addEventListener("click", closeDomainModal);
 
-  var drawer = document.getElementById("c-drawer");
+  var drawer;
+  function bindDrawer() {
+    drawer = document.getElementById("c-drawer");
   if (!drawer) {
     if (!ruleModal) {
       restoreTriggerFocus();
@@ -411,11 +416,6 @@
     });
   }
 
-  document.addEventListener("keydown", function (event) {
-    if (event.key === "Escape" && !ruleModal) {
-      returnFromOverlay(drawer);
-    }
-  });
 
   var initial = new URL(window.location.href).searchParams;
   if (initial.get("wide") === "1") {
@@ -428,6 +428,14 @@
   if (requestedTab && tabs.some(function (tab) { return tab.dataset.panel === requestedTab; })) {
     selectPanel(requestedTab);
   }
+  }
+  bindDrawer();
+  document.addEventListener("collection-drawer-mounted", bindDrawer);
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape" && !ruleModal && drawer && drawer.isConnected) {
+      returnFromOverlay(drawer);
+    }
+  });
 })();
 
 /* 单行工位表把低频真实动作收进原生弹窗：不恢复详情侧栏，也不让这些动作失去入口。 */
@@ -473,9 +481,6 @@
   "use strict";
   // 用标记属性而不是写死某一条工具条：抽屉里的「筛选作品」也是原生 select，
   // 同样需要这层自绘，否则一点开又是系统菜单。
-  var fields = document.querySelectorAll("[data-drawn-select]");
-  if (!fields.length) return;
-
   var openOne = null;
   function closeOpen() {
     if (!openOne) return;
@@ -488,7 +493,9 @@
     if (event.key === "Escape") closeOpen();
   });
 
-  Array.prototype.forEach.call(fields, function (field) {
+  function enhanceSelects(root) {
+    Array.prototype.forEach.call(root.querySelectorAll("[data-drawn-select]"), function (field) {
+    if (field.classList.contains("c-tg-drawn")) return;
     var select = field.querySelector("select");
     if (!select) return;
 
@@ -555,6 +562,13 @@
     field.appendChild(toggle);
     field.appendChild(list);
     paint();
+    });
+  }
+  enhanceSelects(document);
+  document.addEventListener("collection-drawer-mounted", function () {
+    closeOpen();
+    var drawer = document.getElementById("c-drawer");
+    if (drawer) enhanceSelects(drawer);
   });
 })();
 
@@ -861,4 +875,102 @@
   document.addEventListener("click", beforeNavigation, true);
   document.addEventListener("auxclick", beforeNavigation, true);
   document.addEventListener("contextmenu", beforeNavigation, true);
+})();
+
+
+/* Target drawers reuse the displayed list, but read their facts afresh on every navigation. */
+(function () {
+  "use strict";
+  if (window.location.pathname !== "/collection/targets" || !window.fetch || !window.AbortController) return;
+  var allowed = ["domain", "filter", "sort", "drawer", "dtab", "wview", "tab", "wide",
+    "life_window", "life_metric", "life_chart", "life_grain", "life_work", "catalog_query", "catalog_filter"];
+  var opener = document.querySelector("[data-row-opener]");
+  var listUrl = new URL(opener ? opener.href : window.location.href);
+  function viewKey(url) {
+    return [url.pathname, url.searchParams.get("domain") || "all",
+      url.searchParams.get("filter") || "", url.searchParams.get("sort") || ""].join("|");
+  }
+  var listKey = viewKey(listUrl);
+  var sequence = 0;
+  var pending = null;
+  function eligible(url) {
+    return url.origin === window.location.origin && viewKey(url) === listKey &&
+      Array.from(url.searchParams.keys()).every(function (key) { return allowed.indexOf(key) >= 0; });
+  }
+  function cancel() {
+    sequence += 1;
+    if (pending) pending.abort();
+    pending = null;
+    document.body.removeAttribute("aria-busy");
+  }
+  function closeDrawer(url, push) {
+    cancel();
+    var drawer = document.getElementById("c-drawer");
+    if (drawer) drawer.remove();
+    if (push) window.history.pushState(null, "", url);
+    var trigger = document.getElementById(url.hash.slice(1));
+    if (trigger) trigger.focus();
+  }
+  async function openDrawer(url, push) {
+    cancel();
+    var current = sequence;
+    pending = new AbortController();
+    var controller = pending;
+    var request = new URL(url.href);
+    request.hash = "";
+    request.searchParams.set("drawer_fragment", "true");
+    document.body.setAttribute("aria-busy", "true");
+    var timer = window.setTimeout(function () { controller.abort(); }, 10000);
+    try {
+      var response = await window.fetch(request.href, { signal: controller.signal, cache: "no-store", credentials: "same-origin" });
+      if (!response.ok) throw new Error("drawer unavailable");
+      var parsed = new DOMParser().parseFromString(await response.text(), "text/html");
+      var next = parsed.getElementById("c-drawer");
+      if (!next) throw new Error("drawer unavailable");
+      if (current !== sequence) return;
+      Array.from(next.querySelectorAll("script")).forEach(function (script) { script.remove(); });
+      var previous = document.getElementById("c-drawer");
+      if (previous) previous.replaceWith(next); else document.body.appendChild(next);
+      if (push) window.history.pushState(null, "", url);
+      document.dispatchEvent(new CustomEvent("collection-drawer-mounted"));
+      var anchor = url.hash && document.getElementById(url.hash.slice(1));
+      if (anchor) { anchor.scrollIntoView(); anchor.focus(); }
+    } catch (_error) {
+      // Only the current request can fall back; a superseded response must not navigate.
+      if (current === sequence) window.location.assign(url.href);
+    } finally {
+      window.clearTimeout(timer);
+      if (current === sequence) {
+        pending = null;
+        document.body.removeAttribute("aria-busy");
+      }
+    }
+  }
+  document.addEventListener("click", function (event) {
+    if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    var link = event.target.closest && event.target.closest("a[href]");
+    if (!link || link.target || link.hasAttribute("download")) return;
+    var url = new URL(link.href);
+    if (!eligible(url)) return;
+    if (url.searchParams.has("drawer")) {
+      event.preventDefault();
+      openDrawer(url, true);
+    } else if (link.classList.contains("c-dw-close")) {
+      event.preventDefault();
+      closeDrawer(url, true);
+    }
+  });
+  document.addEventListener("collection-drawer-dismiss", function (event) {
+    var link = event.target.querySelector(".c-dw-close");
+    if (!link) return;
+    var url = new URL(link.href);
+    if (!eligible(url)) return;
+    event.preventDefault();
+    closeDrawer(url, true);
+  });
+  window.addEventListener("popstate", function () {
+    var url = new URL(window.location.href);
+    if (!eligible(url)) { window.location.reload(); return; }
+    if (url.searchParams.has("drawer")) openDrawer(url, false); else closeDrawer(url, false);
+  });
 })();
