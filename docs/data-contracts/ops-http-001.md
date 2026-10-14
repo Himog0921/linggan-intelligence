@@ -124,7 +124,7 @@
 | `funnel` | 发布 → 打开、打开 → 加微的转化率，本期与上期；选了业务时 `publishToOpenAvailable` 为 `false`（链接打开不分业务） |
 | `target` | `state`：`set`（周期起止、目标值、按已迁入天数算的本期已完成、完成率、时间进度、每日还需、预计周期末、节奏 `achieved` / `on_track` / `behind`、最新修改记录）、`not_set`、`not_applicable`（自定义时段）；本期一天都没迁入时完成情况为 `null` |
 | `insights` | 自动结论的材料（类别 `pace` / `drag` / `review` 与相应数字、名单），最多 3 条 |
-| `attention` | 今日必须处理：`items`（类别 `drop` / `pending_views` / `owner_mismatch`、程度、运营人、账号、指标、本期与上期值、降幅、篇数、最早日期）、`hiddenCount`、`totalCount` |
+| `attention` | 今日必须处理：`items`（类别 `drop` / `zero_report` / `pending_views` / `owner_mismatch`、程度、运营人、账号、指标、本期与上期值、降幅、`count`、最早日期、`zeroMetrics`），只含排在前面的 5 项；`rest` 是其余各项（同样排序，页面折叠、点开在原处显示）；`hiddenCount` 等于 `rest` 的条数；`totalCount`。`count` 对待补阅读量是篇数，对负责人不一致是登记条数，对 `zero_report` 是本期有每日数据的天数；`zeroMetrics` 只在 `zero_report` 里有内容：本期每天都记 0 的指标及其上期值 |
 | `ranking` | 运营人排行各列；近 7 天加微为 7 个值（没有每日数据的那天为 `null`）；`risk`、`riskKind`、`riskMetric` 取自这个运营人在 `attention` 里最严重的一项 |
 | `dailyOutput` | `days`（本期每一天）、`coveredTo`、`operators`、每天每人按平台的发布数、每天每人的加微 |
 | `platformShare` | 按登记平台统计的发布数 |

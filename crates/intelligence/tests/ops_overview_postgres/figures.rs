@@ -366,6 +366,82 @@ async fn days_from_the_export_day_on_are_unknown_not_zero() {
     );
 }
 
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn a_period_recorded_all_zero_asks_for_a_check_instead_of_claiming_a_fall() {
+    let db = imported("ops_overview_zero").await;
+    // 09-03..09-06: 运营甲's two daily reports are 0 and 0; 08-30..09-02 had 10 links and 4.
+    let window = overview(
+        &db,
+        OpsBusiness::All,
+        OverviewSlice::Custom {
+            from: "2026-09-03".into(),
+            to: "2026-09-06".into(),
+        },
+        "2026-10-02",
+    )
+    .await;
+    let mine: Vec<_> = window
+        .attention
+        .items
+        .iter()
+        .filter(|item| item.operator.as_deref() == Some("运营甲"))
+        .collect();
+    assert!(
+        mine.iter()
+            .all(|item| item.kind != "drop" || item.metric == Some("published")),
+        "zeros in the daily form are never a fall in 链接打开 or 加微"
+    );
+    let check = mine
+        .iter()
+        .find(|item| item.kind == "zero_report")
+        .expect("a check for the period recorded as 0");
+    assert_eq!((check.severity, check.count), ("medium", Some(2)));
+    let attention = &window.attention;
+    assert_eq!(
+        (
+            attention.rest.len(),
+            attention.items.len() + attention.rest.len()
+        ),
+        (attention.hidden_count, attention.total_count),
+        "the folded items come with the page, not only their number"
+    );
+    assert_eq!(
+        check
+            .zero_metrics
+            .iter()
+            .map(|zero| (zero.metric, zero.previous_value))
+            .collect::<Vec<_>>(),
+        [("links_opened", 10), ("followers_gained", 4)]
+    );
+    let row = window
+        .ranking
+        .iter()
+        .find(|row| row.operator == "运营甲")
+        .unwrap();
+    assert_eq!(
+        (row.links_opened, row.followers_gained),
+        (Some(0), Some(0)),
+        "the ranking still shows what was recorded"
+    );
+    let dropped: Vec<&str> = window
+        .attention
+        .items
+        .iter()
+        .filter(|item| item.kind == "drop")
+        .filter_map(|item| item.operator.as_deref())
+        .collect();
+    assert!(
+        window
+            .insights
+            .iter()
+            .filter(|insight| insight.kind == "review")
+            .flat_map(|insight| insight.names.iter())
+            .all(|name| dropped.contains(&name.as_str())),
+        "only a real drop names someone for review; a possibly unfilled period does not"
+    );
+}
+
 /// Selecting a business filters registrations only: 加微 is recorded per operator, never per
 /// business, and 发布 → 打开 is not computed across the two.
 async fn a_business_keeps_daily_figures_whole(db: &Database) {

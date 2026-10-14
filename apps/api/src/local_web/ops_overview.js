@@ -10,6 +10,7 @@ const OverviewText = (() => {
   const riskLabel = { high: '待复盘', medium: '待确认' };
   const nextStep = {
     drop: '查看排行并复盘下降原因',
+    zero_report: '确认是否漏填（切换前在工作台补）',
     pending_views: '补阅读量（切换前在工作台填）',
     owner_mismatch: '确认账号负责人和发布负责人',
   };
@@ -31,10 +32,12 @@ const OverviewText = (() => {
   function insight(item) {
     if (item.kind === 'pace') {
       if (item.pace === 'achieved') return { tone: 'ok', text: `目标已达成（完成 ${pct(item.achievedPct)}）` };
-      const projected = item.projectedPct === null || item.projectedPct === undefined ? missing : `${item.projectedPct}%`;
-      return item.pace === 'behind'
-        ? { tone: 'risk', text: `目标有缺口：按当前节奏预计完成 ${projected}` }
-        : { tone: 'ok', text: `节奏正常：按当前节奏预计完成 ${projected}` };
+      const known = typeof item.projectedPct === 'number';
+      const projected = known ? `${item.projectedPct}%` : missing;
+      if (item.pace === 'behind') return { tone: 'risk', text: `目标有缺口：按当前节奏预计完成 ${projected}` };
+      // 预计完不成时不说「节奏正常」（Mog 2026-10-14），只陈述预计完成多少。
+      if (known && item.projectedPct >= 100) return { tone: 'ok', text: `节奏正常：按当前节奏预计完成 ${projected}` };
+      return { tone: '', text: `按当前节奏预计完成 ${projected}` };
     }
     if (item.kind === 'drag') {
       return { tone: 'watch', text: `${metricLabel[item.metric] || item.metric}下滑是主因（环比 −${pct(Math.abs(item.deltaPct))}）` };
@@ -48,6 +51,11 @@ const OverviewText = (() => {
         action: nextStep.drop,
       };
     }
+    if (item.kind === 'zero_report') {
+      const metrics = item.zeroMetrics.map((zero) => metricLabel[zero.metric] || zero.metric).join('、');
+      const previous = item.zeroMetrics.map((zero) => number(zero.previousValue)).join('、');
+      return { text: `${item.operator} · ${metrics}本期 ${number(item.count)} 天都记的是 0（上期 ${previous}）`, action: nextStep.zero_report };
+    }
     if (item.kind === 'pending_views') {
       const oldest = item.oldestDate ? `，最早 ${item.oldestDate}` : '';
       return { text: `${item.operator} · 待补阅读量 ${number(item.count)} 篇${oldest}`, action: nextStep.pending_views };
@@ -57,9 +65,14 @@ const OverviewText = (() => {
       action: nextStep.owner_mismatch,
     };
   }
+  /** 今日必须处理折叠部分的开关文字。 */
+  function moreLabel(count, open) {
+    return open ? '收起' : `另有 ${count} 项，展开`;
+  }
   /** 排行里的「下一步」：下降写明是哪一项，其余用短句（完整建议在今日必须处理里）。 */
   function rankingStep(row) {
     if (row.riskKind === 'drop') return `复盘${metricLabel[row.riskMetric] || ''}下降`;
+    if (row.riskKind === 'zero_report') return '确认是否漏填';
     if (row.riskKind === 'pending_views') return '补阅读量';
     if (row.riskKind === 'owner_mismatch') return '确认负责人';
     return '';
@@ -81,7 +94,7 @@ const OverviewText = (() => {
     const counted = win.covered.to === win.current.to ? `${win.current.days} 天` : `按已迁入的 ${span(win.covered)}（${win.covered.days} 天）计算`;
     return `${range}（${counted}）· 比上期 ${span(win.previous)}`;
   }
-  return { missing, metricLabel, platformLabel, sliceTitle, riskLabel, nextStep, number, pct, delta, insight, attention, rankingStep, scale, span, windowLine };
+  return { missing, metricLabel, platformLabel, sliceTitle, riskLabel, nextStep, number, pct, delta, insight, attention, moreLabel, rankingStep, scale, span, windowLine };
 })();
 
 if (typeof module !== 'undefined') module.exports = { OverviewText };
@@ -394,16 +407,28 @@ if (typeof module !== 'undefined') module.exports = { OverviewText };
   }
   function renderAttention(data) {
     const list = document.getElementById('ops-attention');
+    const more = document.getElementById('ops-attention-more');
     const { attention } = data;
+    more.replaceChildren();
     if (!attention.items.length) {
       list.replaceChildren(el('li', { className: 'ops-attention-empty', text: '各项指标在正常波动范围内' }));
-    } else {
-      list.replaceChildren(...attention.items.map((item) => {
-        const sentence = T.attention(item);
-        return el('li', { dataset: { severity: item.severity } }, [el('i', { 'aria-hidden': 'true' }), el('b', { text: sentence.text }), el('small', { text: sentence.action })]);
-      }));
+      return;
     }
-    document.getElementById('ops-attention-more').textContent = attention.hiddenCount ? `另有 ${attention.hiddenCount} 项` : '';
+    // 前 5 项直接显示，其余折叠在同一个列表里，点开在原处显示（Mog 2026-10-14）。
+    const row = (item, folded) => {
+      const sentence = T.attention(item);
+      return el('li', { hidden: folded, dataset: folded ? { severity: item.severity, folded: 'true' } : { severity: item.severity } }, [el('i', { 'aria-hidden': 'true' }), el('b', { text: sentence.text }), el('small', { text: sentence.action })]);
+    };
+    list.replaceChildren(...attention.items.map((item) => row(item, false)), ...attention.rest.map((item) => row(item, true)));
+    if (!attention.rest.length) return;
+    const toggle = el('button', { type: 'button', 'aria-expanded': 'false', 'aria-controls': 'ops-attention', text: T.moreLabel(attention.rest.length, false) });
+    toggle.addEventListener('click', () => {
+      const open = toggle.getAttribute('aria-expanded') !== 'true';
+      list.querySelectorAll('li[data-folded]').forEach((li) => { li.hidden = !open; });
+      toggle.setAttribute('aria-expanded', String(open));
+      toggle.textContent = T.moreLabel(attention.rest.length, open);
+    });
+    more.append(toggle);
   }
 
   // ---------- ④ 排行 ----------

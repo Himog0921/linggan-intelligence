@@ -1,6 +1,7 @@
-//! 今日必须处理 (PAGE-OPS-002 §3.3): drops of 30% or more against the previous window, overdue
-//! Xiaohongshu views per operator, and registrations whose publisher is not the account's
-//! operator. The page shows five; the rest are counted. Sync checks wait for D5.
+//! 今日必须处理 (PAGE-OPS-002 §3.3): drops of 30% or more against the previous window, daily
+//! figures recorded as 0 all period while the previous period had some, overdue Xiaohongshu views
+//! per operator, and registrations whose publisher is not the account's operator. The page shows
+//! five; the rest are counted. Sync checks wait for D5.
 
 use linggan_storage_postgres::Database;
 use serde::Serialize;
@@ -14,10 +15,18 @@ use super::{OverviewWindow, change_pct};
 const DROP_PCT: f64 = -30.0;
 const SHOWN: usize = 5;
 
+/// A daily figure recorded as 0 on every day of the window, with what the previous window had.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ZeroMetric {
+    pub metric: &'static str,
+    pub previous_value: i64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OverviewAttentionItem {
-    /// `drop`, `pending_views` or `owner_mismatch`.
+    /// `drop`, `zero_report`, `pending_views` or `owner_mismatch`.
     pub kind: &'static str,
     /// `high` or `medium`.
     pub severity: &'static str,
@@ -32,12 +41,17 @@ pub struct OverviewAttentionItem {
     pub oldest_date: Option<String>,
     /// For owner mismatches: the account's operator.
     pub account_operator: Option<String>,
+    /// For `zero_report`: the figures recorded as 0 all period; empty for other kinds.
+    pub zero_metrics: Vec<ZeroMetric>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OverviewAttention {
     pub items: Vec<OverviewAttentionItem>,
+    /// Everything after the first five, in the same order: folded on the page until opened
+    /// (Mog 2026-10-14), so a check is never only a number.
+    pub rest: Vec<OverviewAttentionItem>,
     pub hidden_count: usize,
     pub total_count: usize,
     #[serde(skip)]
@@ -67,6 +81,7 @@ fn item(kind: &'static str, severity: &'static str) -> OverviewAttentionItem {
         count: None,
         oldest_date: None,
         account_operator: None,
+        zero_metrics: Vec::new(),
     }
 }
 
@@ -79,6 +94,7 @@ pub(super) async fn attention(
     let mut all = Vec::new();
     for figures in operators {
         all.extend(drops(figures));
+        all.extend(zero_report(figures));
         if figures.pending_views > 0 {
             all.push(OverviewAttentionItem {
                 operator: Some(figures.name.clone()),
@@ -91,8 +107,12 @@ pub(super) async fn attention(
     all.extend(owner_mismatches(database, business, window).await?);
     all.sort_by(|a, b| {
         let rank = |severity: &str| if severity == "high" { 0 } else { 1 };
+        // Among checks, a period that may not be filled in comes first: it changes how every
+        // figure of that operator reads.
+        let check = |kind: &str| if kind == "zero_report" { 0 } else { 1 };
         rank(a.severity)
             .cmp(&rank(b.severity))
+            .then(check(a.kind).cmp(&check(b.kind)))
             .then(
                 a.drop_pct
                     .unwrap_or(0.0)
@@ -104,6 +124,7 @@ pub(super) async fn attention(
     });
     Ok(OverviewAttention {
         items: all.iter().take(SHOWN).cloned().collect(),
+        rest: all.iter().skip(SHOWN).cloned().collect(),
         hidden_count: all.len().saturating_sub(SHOWN),
         total_count: all.len(),
         all,
@@ -111,10 +132,12 @@ pub(super) async fn attention(
 }
 
 /// Registration counts are facts of the mirror, so a fall to 0 is a drop. Opened links and new
-/// followers are compared only when the window has daily reports: a missing report is unknown,
-/// not a fall to 0.
+/// followers are compared only when the window has daily reports (a missing report is unknown, not
+/// a fall to 0) and something was recorded: the workbench fills 0 by default, so a period of zeros
+/// is a `zero_report`, not a fall.
 fn drops(figures: &OperatorFigures) -> Vec<OverviewAttentionItem> {
     let has_daily = figures.current_daily_rows > 0;
+    let recorded = |value: &i64| has_daily && *value > 0;
     [
         (
             "published",
@@ -123,12 +146,12 @@ fn drops(figures: &OperatorFigures) -> Vec<OverviewAttentionItem> {
         ),
         (
             "links_opened",
-            figures.current_links.filter(|_| has_daily),
+            figures.current_links.filter(recorded),
             figures.previous_links,
         ),
         (
             "followers_gained",
-            figures.current_followers.filter(|_| has_daily),
+            figures.current_followers.filter(recorded),
             figures.previous_followers,
         ),
     ]
@@ -145,6 +168,41 @@ fn drops(figures: &OperatorFigures) -> Vec<OverviewAttentionItem> {
         })
     })
     .collect()
+}
+
+/// Daily reports exist for the window but a figure is 0 on all of them, while the previous window
+/// had some: 0 is the workbench default, so this may be an entry nobody made (Mog 2026-10-14).
+fn zero_report(figures: &OperatorFigures) -> Option<OverviewAttentionItem> {
+    if figures.current_daily_rows == 0 {
+        return None;
+    }
+    let zero_metrics: Vec<ZeroMetric> = [
+        (
+            "links_opened",
+            figures.current_links,
+            figures.previous_links,
+        ),
+        (
+            "followers_gained",
+            figures.current_followers,
+            figures.previous_followers,
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(metric, current, previous)| {
+        let previous_value = previous.filter(|value| *value > 0)?;
+        (current == Some(0)).then_some(ZeroMetric {
+            metric,
+            previous_value,
+        })
+    })
+    .collect();
+    (!zero_metrics.is_empty()).then(|| OverviewAttentionItem {
+        operator: Some(figures.name.clone()),
+        count: Some(figures.current_daily_rows),
+        zero_metrics,
+        ..item("zero_report", "medium")
+    })
 }
 
 async fn owner_mismatches(
@@ -187,7 +245,7 @@ async fn owner_mismatches(
 #[cfg(test)]
 mod tests {
     use super::super::people::{OperatorFigures, ranking};
-    use super::{OverviewAttention, drops};
+    use super::{OverviewAttention, drops, zero_report};
 
     #[test]
     fn a_missing_daily_report_is_not_a_drop_but_fewer_registrations_are() {
@@ -236,6 +294,7 @@ mod tests {
         let all = drops(&figures);
         let attention = OverviewAttention {
             items: all.clone(),
+            rest: Vec::new(),
             hidden_count: 0,
             total_count: all.len(),
             all,
@@ -244,6 +303,55 @@ mod tests {
         assert_eq!(
             (rows[0].risk, rows[0].risk_kind, rows[0].risk_metric),
             (Some("high"), Some("drop"), Some("published"))
+        );
+    }
+
+    #[test]
+    fn a_period_recorded_all_zero_is_a_check_not_a_fall() {
+        let figures = OperatorFigures {
+            name: "运营甲".into(),
+            current_published: 0,
+            previous_published: 36,
+            current_daily_rows: 11,
+            current_links: Some(0),
+            previous_links: Some(34),
+            current_followers: Some(0),
+            previous_followers: Some(20),
+            ..OperatorFigures::default()
+        };
+        let found = drops(&figures);
+        assert_eq!(
+            found.iter().map(|item| item.metric).collect::<Vec<_>>(),
+            [Some("published")],
+            "registrations are facts; zeros in the daily form may be unfilled"
+        );
+        let check = zero_report(&figures).expect("both figures were 0 all period");
+        assert_eq!((check.kind, check.severity), ("zero_report", "medium"));
+        assert_eq!(
+            check
+                .zero_metrics
+                .iter()
+                .map(|zero| (zero.metric, zero.previous_value))
+                .collect::<Vec<_>>(),
+            [("links_opened", 34), ("followers_gained", 20)]
+        );
+        let partly = OperatorFigures {
+            current_followers: Some(3),
+            ..figures.clone()
+        };
+        assert_eq!(
+            zero_report(&partly).unwrap().zero_metrics.len(),
+            1,
+            "only the figure that stayed 0"
+        );
+        let never = OperatorFigures {
+            previous_links: Some(0),
+            previous_followers: None,
+            ..figures
+        };
+        assert!(
+            zero_report(&never).is_none(),
+            "nothing to compare with: neither a fall nor a check"
         );
     }
 }

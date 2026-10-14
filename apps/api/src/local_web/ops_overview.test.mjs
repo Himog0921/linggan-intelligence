@@ -29,6 +29,16 @@ test('conclusions are sentences over the figures the page already shows', () => 
     text: '目标有缺口：按当前节奏预计完成 35%',
   });
   assert.equal(insight({ kind: 'pace', pace: 'achieved', achievedPct: 120 }).text, '目标已达成（完成 120%）');
+  assert.deepEqual(plain(insight({ kind: 'pace', pace: 'on_track', achievedPct: 40, projectedPct: 104 })), {
+    tone: 'ok',
+    text: '节奏正常：按当前节奏预计完成 104%',
+  });
+  assert.deepEqual(
+    plain(insight({ kind: 'pace', pace: 'on_track', achievedPct: 17.1, projectedPct: 48 })),
+    { tone: '', text: '按当前节奏预计完成 48%' },
+    'a projection short of the target is never called on pace',
+  );
+  assert.equal(insight({ kind: 'pace', pace: 'on_track', projectedPct: null }).text, '按当前节奏预计完成 —');
   assert.equal(insight({ kind: 'drag', metric: 'links_opened', deltaPct: -70 }).text, '链接打开下滑是主因（环比 −70%）');
   assert.equal(insight({ kind: 'review', names: ['运营甲', '运营乙'] }).text, '运营甲、运营乙需今天复盘');
 });
@@ -37,6 +47,11 @@ test('each attention item says who, what and the next step', () => {
   const { attention } = loadText();
   const drop = attention({ kind: 'drop', operator: '运营甲', metric: 'published', dropPct: -100, previousValue: 1, currentValue: 0 });
   assert.deepEqual(plain(drop), { text: '运营甲 · 发布比上期下降 100%（1 → 0）', action: '查看排行并复盘下降原因' });
+  assert.deepEqual(
+    plain(attention({ kind: 'zero_report', operator: '运营乙', count: 11, zeroMetrics: [{ metric: 'links_opened', previousValue: 51 }, { metric: 'followers_gained', previousValue: 32 }] })),
+    { text: '运营乙 · 链接打开、加微本期 11 天都记的是 0（上期 51、32）', action: '确认是否漏填（切换前在工作台补）' },
+    'zeros that may be unfilled are a check, never a fall',
+  );
   assert.equal(
     attention({ kind: 'pending_views', operator: '运营甲', count: 2, oldestDate: '2024-03-05' }).text,
     '运营甲 · 待补阅读量 2 篇，最早 2024-03-05',
@@ -51,9 +66,16 @@ test('the ranking says which figure fell, in a few words', () => {
   const { rankingStep } = loadText();
   assert.equal(rankingStep({ riskKind: 'drop', riskMetric: 'published' }), '复盘发布下降');
   assert.equal(rankingStep({ riskKind: 'drop', riskMetric: 'followers_gained' }), '复盘加微下降');
+  assert.equal(rankingStep({ riskKind: 'zero_report', riskMetric: null }), '确认是否漏填');
   assert.equal(rankingStep({ riskKind: 'pending_views', riskMetric: null }), '补阅读量');
   assert.equal(rankingStep({ riskKind: 'owner_mismatch', riskMetric: null }), '确认负责人');
   assert.equal(rankingStep({ riskKind: null, riskMetric: null }), '');
+});
+
+test('the folded part of today\'s list says how many and opens in place', () => {
+  const { moreLabel } = loadText();
+  assert.equal(moreLabel(11, false), '另有 11 项，展开');
+  assert.equal(moreLabel(11, true), '收起');
 });
 
 test('bar heights scale to the largest known value and draw nothing for unknown', () => {
