@@ -208,7 +208,7 @@ pub(super) fn funnel(kpi: &OverviewKpi, business: OpsBusiness) -> OverviewFunnel
     }
 }
 
-/// The week (昨日、本周) or month (本月) holding the window's first day; a custom window has none.
+/// Today's week (昨日、本周) or month (本月), matching the target dialog; custom has none.
 pub(super) async fn target(
     database: &Database,
     window: &OverviewWindow,
@@ -233,7 +233,7 @@ pub(super) async fn target(
                     AND d.business_date BETWEEN e.period_from AND e.upto) AS period_followers \
            FROM e",
     )
-    .bind(&window.current.from)
+    .bind(&window.today)
     .bind(period_type)
     .bind(&window.today)
     .bind(window.complete_through.as_deref().unwrap_or("0001-01-01"))

@@ -94,7 +94,14 @@ const OverviewText = (() => {
     const counted = win.covered.to === win.current.to ? `${win.current.days} 天` : `按已迁入的 ${span(win.covered)}（${win.covered.days} 天）计算`;
     return `${range}（${counted}）· 比上期 ${span(win.previous)}`;
   }
-  return { missing, metricLabel, platformLabel, sliceTitle, riskLabel, nextStep, number, pct, delta, insight, attention, moreLabel, rankingStep, scale, span, windowLine };
+  function blockEmptyText(win, emptyText) {
+    return win.covered === null ? '这段时间还没有迁入的数据' : emptyText;
+  }
+  function trendPointNote(point) {
+    if (point.coverage === 'not_migrated') return '还没迁入';
+    return point.coverage === 'partial' ? `按 ${point.coveredTo} 及以前计算` : '';
+  }
+  return { missing, metricLabel, platformLabel, sliceTitle, riskLabel, nextStep, number, pct, delta, insight, attention, moreLabel, rankingStep, scale, span, windowLine, blockEmptyText, trendPointNote };
 })();
 
 if (typeof module !== 'undefined') module.exports = { OverviewText };
@@ -193,7 +200,7 @@ if (typeof module !== 'undefined') module.exports = { OverviewText };
     renderTarget(data);
   }
   function renderTarget(data) {
-    const { target, window: win } = data;
+    const { target } = data;
     const box = document.getElementById('ops-target');
     if (target.state === 'not_applicable') {
       box.replaceChildren(
@@ -203,12 +210,11 @@ if (typeof module !== 'undefined') module.exports = { OverviewText };
       return;
     }
     const period = target.periodType === 'month' ? '本月目标' : '本周目标';
-    const periodName = win.slice === 'yesterday' && target.periodKey !== win.thisWeek ? `${target.periodKey} 目标` : period;
     const open = el('button', { type: 'button', text: target.state === 'set' ? '修改目标' : '设定目标' });
     open.addEventListener('click', () => openTargetDialog(target.periodType));
     if (target.state === 'not_set') {
       box.replaceChildren(
-        el('div', { className: 'ops-target-head' }, [el('span', { text: `${periodName}（${target.periodKey}）` }), el('b', { text: '未设定', dataset: { state: 'unknown' } })]),
+        el('div', { className: 'ops-target-head' }, [el('span', { text: `${period}（${target.periodKey}）` }), el('b', { text: '未设定', dataset: { state: 'unknown' } })]),
         el('p', { className: 'ops-note-line', text: '没设目标时不估算、不判断节奏。' }),
         el('div', { className: 'ops-target-foot' }, [el('span', { text: '只能在本机设定' }), open]),
       );
@@ -221,7 +227,7 @@ if (typeof module !== 'undefined') module.exports = { OverviewText };
     const pair = (label, value) => el('div', {}, [el('dt', { text: label }), el('dd', { text: value })]);
     const known = target.periodFollowers !== null && target.elapsedDays !== null;
     box.replaceChildren(
-      el('div', { className: 'ops-target-head' }, [el('span', { text: `${periodName}（${target.periodKey}）` }), el('b', { text: T.number(revision.targetValue) })]),
+      el('div', { className: 'ops-target-head' }, [el('span', { text: `${period}（${target.periodKey}）` }), el('b', { text: T.number(revision.targetValue) })]),
       bar,
       el('dl', { className: 'ops-target-grid' }, [
         pair('本期已完成', known ? `${T.number(target.periodFollowers)}（${T.pct(target.achievedPct)}）` : '还没有迁入的数据'),
@@ -315,21 +321,25 @@ if (typeof module !== 'undefined') module.exports = { OverviewText };
       svg('line', { x1: 0, x2: width, y1: hitTop + hitHeight, y2: hitTop + hitHeight, class: 'ops-grid' }),
     );
     points.forEach((point, index) => {
+      const suffix = point.coverage === 'partial' ? ` · ${T.trendPointNote(point)}` : '';
       const x = index * slot + slot * 0.15;
       const w = slot * 0.7;
       const f = follow(point.followersGained);
       if (point.followersGained === null) {
-        chart.append(titled(svg('rect', { x, y: followTop + followHeight - 2, width: w, height: 2, class: 'ops-gap' }), `${point.label} 没有迁入的每日数据`));
+        chart.append(titled(svg('rect', { x, y: followTop + followHeight - 2, width: w, height: 2, class: 'ops-gap' }), `${point.label} 没有迁入的每日数据${suffix}`));
       } else if (f > 0) {
-        chart.append(titled(svg('rect', { x, y: followTop + followHeight - f, width: w, height: f, class: 'ops-followers' }), `${point.label} 加微 ${T.number(point.followersGained)}`));
+        chart.append(titled(svg('rect', { x, y: followTop + followHeight - f, width: w, height: f, class: 'ops-followers' }), `${point.label} 加微 ${T.number(point.followersGained)}${suffix}`));
       }
-      if (point.hits > 0) {
+      if (point.hits === null) {
+        chart.append(titled(svg('rect', { x, y: hitTop + hitHeight - 2, width: w, height: 2, class: 'ops-gap' }), `${point.label} 爆款：还没迁入`));
+      } else if (point.hits > 0) {
         const h = Math.max(hit(point.hits), 3);
-        chart.append(titled(svg('rect', { x, y: hitTop + hitHeight - h, width: w, height: h, class: 'ops-hits' }), `${point.label} 爆款 ${point.hits} 篇`));
+        chart.append(titled(svg('rect', { x, y: hitTop + hitHeight - h, width: w, height: h, class: 'ops-hits' }), `${point.label} 爆款 ${point.hits} 篇${suffix}`));
       }
       if (index % every === 0) chart.append(axisLabel(x + w / 2, hitTop + hitHeight + 14, point.label, width));
     });
-    box.replaceChildren(chart);
+    const partialNotes = points.filter((point) => point.coverage === 'partial').map((point) => el('p', { className: 'ops-note-line', text: `${point.label} · ${T.trendPointNote(point)}` }));
+    box.replaceChildren(chart, ...partialNotes);
   }
   let latestTrend = 0;
   async function loadTrend() {
@@ -452,7 +462,7 @@ if (typeof module !== 'undefined') module.exports = { OverviewText };
   function renderRanking(data) {
     const body = document.getElementById('ops-ranking');
     if (!data.ranking.length) {
-      body.replaceChildren(el('tr', {}, [el('td', { className: 'ops-empty', colspan: '13', text: '当期没有运营数据' })]));
+      body.replaceChildren(el('tr', {}, [el('td', { className: 'ops-empty', colspan: '13', text: T.blockEmptyText(data.window, '当期没有运营数据') })]));
       return;
     }
     const cell = (text, className, title) => el('td', { className, text, title });
@@ -475,8 +485,12 @@ if (typeof module !== 'undefined') module.exports = { OverviewText };
 
   // ---------- ⑤ 平台占比、矩阵 ----------
   function renderShare(data) {
-    const { xhs, douyin } = data.platformShare;
     const box = document.getElementById('ops-platform-share');
+    if (data.window.covered === null) {
+      box.replaceChildren(el('p', { className: 'ops-chart-empty', text: T.blockEmptyText(data.window, '当期无发布') }));
+      return;
+    }
+    const { xhs, douyin } = data.platformShare;
     const total = xhs + douyin;
     if (!total) {
       box.replaceChildren(el('p', { className: 'ops-chart-empty', text: '当期无发布' }));
@@ -497,7 +511,7 @@ if (typeof module !== 'undefined') module.exports = { OverviewText };
     const { matrix } = data;
     const box = document.getElementById('ops-matrix');
     if (!matrix.cells.length) {
-      box.replaceChildren(el('p', { className: 'ops-chart-empty', text: '当期无矩阵数据' }));
+      box.replaceChildren(el('p', { className: 'ops-chart-empty', text: T.blockEmptyText(data.window, '当期无矩阵数据') }));
       return;
     }
     const max = Math.max(...matrix.cells.map((cell) => cell.published));

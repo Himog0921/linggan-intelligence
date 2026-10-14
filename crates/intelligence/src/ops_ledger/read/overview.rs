@@ -126,8 +126,9 @@ pub struct OpsOverview {
     pub insights: Vec<OverviewInsight>,
     pub attention: OverviewAttention,
     pub ranking: Vec<OverviewRankingRow>,
+    pub ranking_covered: bool,
     pub daily_output: OverviewDailyOutput,
-    pub platform_share: OverviewPlatformShare,
+    pub platform_share: Option<OverviewPlatformShare>,
     pub matrix: OverviewMatrix,
 }
 
@@ -148,6 +149,7 @@ pub async fn read_ops_overview(
         as_of: read_ops_as_of(database).await?,
         business_selected: business.domain_ref().is_some(),
         ranking: people::ranking(&operators, &attention),
+        ranking_covered: window.covered.is_some(),
         daily_output: output::daily_output(database, business, &window).await?,
         platform_share: output::platform_share(database, business, &window).await?,
         matrix: output::matrix(database, business, &window).await?,
@@ -183,8 +185,9 @@ async fn resolve_window(
                         ELSE $3::date END AS cur_from, \
                 CASE $2 WHEN 'yesterday' THEN today - 1 WHEN 'custom' THEN $4::date ELSE today END AS cur_to \
                  FROM t), \
-         c AS (SELECT *, cur_to - cur_from + 1 AS days, least(cur_to, complete_through) AS covered_to, \
-                      least(cur_to, complete_through) - cur_from + 1 AS covered_days FROM w), \
+         c AS (SELECT *, cur_to - cur_from + 1 AS days, \
+                      CASE WHEN complete_through IS NOT NULL THEN least(cur_to, complete_through) END AS covered_to, \
+                      CASE WHEN complete_through IS NOT NULL THEN least(cur_to, complete_through) - cur_from + 1 END AS covered_days FROM w), \
          d AS (SELECT *, CASE $2 WHEN 'week' THEN cur_from - 7 \
                                  WHEN 'month' THEN (cur_from - interval '1 month')::date \
                                  ELSE cur_from - covered_days END AS prev_from FROM c) \

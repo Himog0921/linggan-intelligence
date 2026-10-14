@@ -11,6 +11,45 @@ use super::ops::ADHD_DOMAIN;
 
 #[tokio::test]
 #[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn uncovered_blocks_are_unknown_and_covered_empty_blocks_are_zero() {
+    let empty = super::fixture::proof_database("ops_overview_never_imported").await;
+    let db = imported("ops_overview_uncovered_blocks").await;
+    for database in [&empty, &db] {
+        let page = overview(
+            database,
+            OpsBusiness::All,
+            OverviewSlice::Week,
+            "2026-10-14",
+        )
+        .await;
+        let data = serde_json::to_value(&page).unwrap();
+        assert!(data["window"]["covered"].is_null());
+        assert!(data["platformShare"].is_null(), "unknown is not 0/0");
+        assert_eq!(data["rankingCovered"], false);
+        assert_eq!(data["matrix"]["covered"], false);
+        assert!(page.ranking.is_empty() && page.matrix.cells.is_empty());
+    }
+    let covered = overview(
+        &db,
+        OpsBusiness::All,
+        OverviewSlice::Custom {
+            from: "2026-10-10".into(),
+            to: "2026-10-11".into(),
+        },
+        "2026-10-14",
+    )
+    .await;
+    let data = serde_json::to_value(covered).unwrap();
+    assert_eq!(
+        data["platformShare"],
+        serde_json::json!({"xhs": 0, "douyin": 0})
+    );
+    assert_eq!(data["rankingCovered"], true);
+    assert_eq!(data["matrix"]["covered"], true);
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
 async fn a_week_so_far_is_read_with_unknowns_and_every_block_filled() {
     let db = imported("ops_overview_week").await;
     let week = overview(&db, OpsBusiness::All, OverviewSlice::Week, "2026-09-05").await;
@@ -126,7 +165,10 @@ fn week_ranking_share_and_matrix(week: &OpsOverview) {
     );
 
     assert_eq!(
-        (week.platform_share.xhs, week.platform_share.douyin),
+        (
+            week.platform_share.unwrap().xhs,
+            week.platform_share.unwrap().douyin
+        ),
         (3, 2)
     );
     assert_eq!(week.daily_output.days.len(), 6);

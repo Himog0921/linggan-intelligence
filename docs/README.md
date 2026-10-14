@@ -51,13 +51,13 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发，并于 2026-10-02 
 | [decisions/0007-ocr-content-layering.md](decisions/0007-ocr-content-layering.md) | 权威当前 | OCR 原始事实、内容分层、视觉选择边界和展示标题来源的长期决定 |
 | [decisions/0008-peer-domains-and-unified-material-pipeline.md](decisions/0008-peer-domains-and-unified-material-pipeline.md) | 权威当前 | 平级 Domain、共享真实 Target、primary/reference 用途、统一材料链与 Domain pause 的长期决定 |
 | [decisions/0009-stage-one-job-topic-pool.md](decisions/0009-stage-one-job-topic-pool.md) | 权威当前 | 第一阶段主 Job：小红书选题池经营（复用与试新、爆款标准、成功指标、升级条件）、运营模块整体迁入与先后顺序；所取代的旧条款与待裁定事项 |
-| [plans/active/ops-module-migration-001.md](plans/active/ops-module-migration-001.md) | 活跃计划；D1、D2 已上线（D2 历史封面已迁入，待 Mog 业务验收）；D3 下一步；D4–D6 未派定 | 内容工作台运营管理迁入：已确认范围、六步交付与先后、切换时不两边同时录、各步验收、做到时再问的事项与 D1 对账回执 |
+| [plans/active/ops-module-migration-001.md](plans/active/ops-module-migration-001.md) | 活跃计划；D1–D3 已上线，D2/D3 业务验收待 Mog；Issue #417 小修待合并；D4、D4b、D5、D6 未派定 | 内容工作台运营管理迁入：已确认范围、交付顺序、各步回执与签收、每天 9 点检查新导出且逐次授权导入 |
 | [design/pages/ops-page.md](design/pages/ops-page.md) | 权威当前；Issue #405，Mog 2026-10-13 确认，随 PR #407 上线（`main@9e45e01c`） | PAGE-OPS-001：一级页面「运营」的壳层与左侧二级页面，发布记录、账号管理、每日数据、导入导出的只读呈现、状态词典、与工作台的预期差异和验收矩阵 |
-| [design/pages/ops-overview-page.md](design/pages/ops-overview-page.md) | 权威当前；Issue #409，Mog 2026-10-13 确认，分支已实现、待合并 | PAGE-OPS-002：运营「总览」五块驾驶舱、周与月加微目标的设定与修改记录、每日数据执行状态的新口径、与工作台的差异和验收矩阵 |
+| [design/pages/ops-overview-page.md](design/pages/ops-overview-page.md) | 权威当前；Issue #409，Mog 2026-10-13 确认，随 PR #415 已上线，业务验收待 Mog；Issue #417 小修待合并 | PAGE-OPS-002：运营「总览」五块驾驶舱、周与月加微目标的设定与修改记录、每日数据执行状态的新口径、与工作台的差异和验收矩阵 |
 | [data-contracts/ops-ledger-001.md](data-contracts/ops-ledger-001.md) | 权威当前；随 PR #403 上线（`main@3029efff`） | 运营台账五张表的含义、内容工作台导出的导入规则 `ops-import.v1`（校验、重复登记合并、阅读量填报、消失记录标记、预览指纹）、新旧对账口径与 D2/D3 读取约定 |
-| [data-contracts/ops-http-001.md](data-contracts/ops-http-001.md) | 权威当前；Issue #405，随 PR #407 上线 | 运营页面的只读接口：业务选择、读数条、发布记录筛选与分页、账号、每日数据、导出与封面读取，失败代码与未知值的表达 |
+| [data-contracts/ops-http-001.md](data-contracts/ops-http-001.md) | 权威当前；D2/D3 随 PR #407/#415 上线；Issue #417 修复待合并 | 运营读取与本机目标设定接口：业务选择、记录/账号/每日数据/导出/封面、总览覆盖与趋势未知、目标周期及回执 |
 | [design/acceptance/ops-page-001-visual-acceptance.md](design/acceptance/ops-page-001-visual-acceptance.md) | 一次性报告；已上线，Mog 业务验收待做 | ACC-OPS-PAGE-001：运营页面在共享库副本上的走查、四类数据边界、失败与快速切换、共享页头放下第 6 项及 13 处修正 |
-| [design/acceptance/ops-page-002-visual-acceptance.md](design/acceptance/ops-page-002-visual-acceptance.md) | 一次性报告；未合并、未部署 | ACC-OPS-PAGE-002：运营总览在共享库副本上的走查、只算已迁入的日子、目标对话框各状态、读取失败、6 处规则反证及 12 处修正，另列三件待 Mog 决定的事 |
+| [design/acceptance/ops-page-002-visual-acceptance.md](design/acceptance/ops-page-002-visual-acceptance.md) | 一次性报告；D3 已上线，业务验收待 Mog | ACC-OPS-PAGE-002：运营总览隔离走查、D3 上线回执与分层证明、Issue #417 合并后修复验证 |
 | [data-contracts/ocr-content-layering.md](data-contracts/ocr-content-layering.md) | 权威当前 | OCR raw/layout/行引用、分层状态、标题回退与视觉模型输出闭集 |
 | [runbooks/paddle-ocr-runtime.md](runbooks/paddle-ocr-runtime.md) | 权威当前 | 本机 Paddle runtime 准备、无 Tesseract 回退、迁移后受控重排步骤 |
 | [decisions/0006-comment-research-clean-rebuild.md](decisions/0006-comment-research-clean-rebuild.md) | 权威当前 | Issue #295：开发期销毁旧评论研究派生层，保留原始 Evidence 与资格事实；唯一的新评论研究合同与本机 reset 边界 |

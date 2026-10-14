@@ -14,6 +14,21 @@ function loadText() {
 
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
+test('uncovered blocks say not migrated; covered empty blocks keep their own empty state', () => {
+  const { blockEmptyText } = loadText();
+  for (const label of ['当期无发布', '当期无矩阵数据', '当期没有运营数据']) {
+    assert.equal(blockEmptyText({ covered: null }, label), '这段时间还没有迁入的数据');
+    assert.equal(blockEmptyText({ covered: { from: '2026-10-10', to: '2026-10-11', days: 2 } }, label), label);
+  }
+});
+
+test('trend labels keep partial counts separate from complete buckets and missing imports', () => {
+  const { trendPointNote } = loadText();
+  assert.equal(trendPointNote({ coverage: 'not_migrated', coveredTo: null }), '还没迁入');
+  assert.equal(trendPointNote({ coverage: 'partial', coveredTo: '2026-10-11' }), '按 2026-10-11 及以前计算');
+  assert.equal(trendPointNote({ coverage: 'full', coveredTo: '2026-10-11' }), '');
+});
+
 test('changes read as arrows; a missing or zero previous value is never a fall', () => {
   const { delta } = loadText();
   assert.deepEqual(plain(delta(null)), { text: '环比 —', tone: '' });
