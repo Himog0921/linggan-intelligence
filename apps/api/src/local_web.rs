@@ -41,6 +41,7 @@ mod model_settings;
 mod ops;
 mod ops_api;
 mod ops_export;
+mod ops_overview_api;
 mod shell;
 mod station_view;
 mod target_drawer;

@@ -9,7 +9,7 @@ cargo test -p linggan-intelligence --lib --locked ops_ledger
 cargo test -p linggan-intelligence --test ops_ledger_import_postgres --locked \
   full_schema_fixtures_record_the_actual_ops_ledger_migration_digest -- --exact
 cargo test -p linggan-api --locked -- ops shell
-node --test apps/api/src/local_web/ops.test.mjs
+node --test apps/api/src/local_web/ops.test.mjs apps/api/src/local_web/ops_overview.test.mjs
 
 # Statement counters are database-wide. Keep all proof suites serial; a caller
 # cannot raise this and introduce races between reset/measurement windows.
@@ -81,4 +81,5 @@ export LOCAL_001_PROOF_DATABASE_URL="postgresql://${proof_user}:${proof_password
 # Synthetic exports only; real operation exports never enter this proof.
 cargo test -p linggan-intelligence --test ops_ledger_import_postgres --locked -- --ignored --nocapture --test-threads=1
 cargo test -p linggan-intelligence --test ops_ledger_read_postgres --locked -- --ignored --nocapture --test-threads=1
+cargo test -p linggan-intelligence --test ops_overview_postgres --locked -- --ignored --nocapture --test-threads=1
 echo "OPS-MIGRATION-001 PostgreSQL proof passed"

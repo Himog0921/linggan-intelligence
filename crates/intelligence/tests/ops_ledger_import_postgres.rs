@@ -31,28 +31,42 @@ const TABLES: [&str; 5] = [
 
 #[test]
 fn full_schema_fixtures_record_the_actual_ops_ledger_migration_digest() {
-    let digest: String = Sha256::digest(MIGRATION.as_bytes())
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect();
-    let ledger_entry = format!("('0123_ops_ledger', '{digest}')");
-    for (name, source) in [
-        ("material", fixture::MIGRATIONS),
+    // Every operations migration, not only D1's: a fixture that names an old digest would build a
+    // schema the runtime never runs.
+    for (migration, text) in [
+        ("0123_ops_ledger", MIGRATION),
         (
-            "api",
-            include_str!("../../../apps/api/src/local_web/full_schema_fixture.rs"),
+            "0124_ops_publication_cover",
+            include_str!("../../../database/migrations/0124_ops_publication_cover.sql"),
         ),
-        ("runtime", include_str!("../../../scripts/local-runtime.sh")),
+        (
+            "0126_ops_target",
+            include_str!("../../../database/migrations/0126_ops_target.sql"),
+        ),
     ] {
-        let registered = if name == "runtime" {
-            source.contains("apply_migration_once \"0123_ops_ledger\"")
-        } else {
-            source.contains(&ledger_entry)
-        };
-        assert!(
-            registered,
-            "{name} does not register the actual 0123 migration"
-        );
+        let digest: String = Sha256::digest(text.as_bytes())
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        let ledger_entry = format!("('{migration}', '{digest}')");
+        for (name, source) in [
+            ("material", fixture::MIGRATIONS),
+            (
+                "api",
+                include_str!("../../../apps/api/src/local_web/full_schema_fixture.rs"),
+            ),
+            ("runtime", include_str!("../../../scripts/local-runtime.sh")),
+        ] {
+            let registered = if name == "runtime" {
+                source.contains(&format!("apply_migration_once \"{migration}\""))
+            } else {
+                source.contains(&ledger_entry)
+            };
+            assert!(
+                registered,
+                "{name} does not register the actual {migration} migration"
+            );
+        }
     }
 }
 

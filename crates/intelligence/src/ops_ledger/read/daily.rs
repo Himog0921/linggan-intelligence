@@ -28,6 +28,8 @@ pub struct OpsDailyItem {
     pub hits: i64,
     pub month_followers_gained: i64,
     pub month_published: i64,
+    /// 执行状态 (PAGE-OPS-002 §4): `not_published`, `praise`, `pending_views` or `done`.
+    pub execution: &'static str,
 }
 
 #[derive(Debug, Serialize)]
@@ -44,19 +46,22 @@ pub struct OpsDailyPage {
 /// running month totals are per operator. `$1` operator, `$2` hit threshold, `$3` row limit.
 const DAILY_SQL: &str = "per_day AS ( \
     SELECT p.publisher_name, p.published_business_date AS business_date, count(*) AS published, \
-           count(*) FILTER (WHERE p.platform = 'xhs' AND lv.view_count >= $2) AS hits \
+           count(*) FILTER (WHERE p.platform = 'xhs' AND lv.view_count >= $2) AS hits, \
+           count(*) FILTER (WHERE p.platform = 'xhs' AND lv.view_count IS NULL \
+                              AND (now() AT TIME ZONE 'Asia/Shanghai')::date - p.published_business_date >= 7) AS pending_overdue \
       FROM linggan_ops_publication p \
       LEFT JOIN latest_views lv ON lv.publication_ref = p.publication_ref \
      WHERE p.merged_into_ref IS NULL AND p.missing_since_batch_ref IS NULL AND p.publisher_name IS NOT NULL \
      GROUP BY 1, 2), \
   days AS ( \
     SELECT d.daily_ref, d.source_record_id, d.business_date, d.operator_name, d.links_opened_count, d.followers_gained, \
-           coalesce(pd.published, 0) AS published, coalesce(pd.hits, 0) AS hits \
+           coalesce(pd.published, 0) AS published, coalesce(pd.hits, 0) AS hits, \
+           coalesce(pd.pending_overdue, 0) AS pending_overdue \
       FROM linggan_ops_daily_report d \
       LEFT JOIN per_day pd ON pd.publisher_name = d.operator_name AND pd.business_date = d.business_date \
      WHERE d.missing_since_batch_ref IS NULL AND ($1::text IS NULL OR d.operator_name = $1)) \
   SELECT daily_ref, source_record_id, business_date::text AS business_date, extract(isodow FROM business_date)::int AS isodow, \
-         operator_name, links_opened_count, followers_gained, published, hits, \
+         operator_name, links_opened_count, followers_gained, published, hits, pending_overdue, \
          (sum(followers_gained) OVER month_window)::bigint AS month_followers, \
          (sum(published) OVER month_window)::bigint AS month_published \
     FROM days \
@@ -116,7 +121,32 @@ fn item(row: &sqlx::postgres::PgRow) -> Result<OpsDailyItem, OpsReadError> {
         hits: row.try_get("hits")?,
         month_followers_gained: row.try_get("month_followers")?,
         month_published: row.try_get("month_published")?,
+        execution: execution(
+            row.try_get("published")?,
+            row.try_get("hits")?,
+            i64::from(followers),
+            row.try_get("pending_overdue")?,
+        ),
     })
+}
+
+/// 未完成, then 可表扬, then 待补阅读量, else 已完成. 「需复盘」 waits until 加微 0 and 没填 can be told
+/// apart (D4b).
+pub(crate) fn execution(
+    published: i64,
+    hits: i64,
+    followers: i64,
+    pending_overdue: i64,
+) -> &'static str {
+    if published == 0 {
+        "not_published"
+    } else if hits > 0 || followers > 0 {
+        "praise"
+    } else if pending_overdue > 0 {
+        "pending_views"
+    } else {
+        "done"
+    }
 }
 
 /// 添加率 = 加微 ÷ 打开; with no opened links the rate is undefined, not 0.
@@ -138,7 +168,28 @@ fn weekday(isodow: i32) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::add_rate;
+    use super::{add_rate, execution};
+
+    #[test]
+    fn execution_status_follows_the_new_rules_in_order() {
+        assert_eq!(
+            execution(0, 0, 3, 0),
+            "not_published",
+            "no registration that day"
+        );
+        assert_eq!(
+            execution(2, 1, 0, 1),
+            "praise",
+            "a hit outranks a missing view"
+        );
+        assert_eq!(execution(2, 0, 4, 0), "praise");
+        assert_eq!(execution(3, 0, 0, 1), "pending_views");
+        assert_eq!(
+            execution(3, 0, 0, 0),
+            "done",
+            "0 followers is not 需复盘 any more"
+        );
+    }
 
     #[test]
     fn add_rate_is_unknown_without_opened_links() {

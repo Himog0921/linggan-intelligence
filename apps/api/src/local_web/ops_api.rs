@@ -38,7 +38,7 @@ struct ExportQuery {
     format: Option<String>,
 }
 
-fn read_error(error: OpsReadError) -> Response {
+pub(super) fn read_error(error: OpsReadError) -> Response {
     match error {
         OpsReadError::InvalidParameter(_) => {
             local_read_json_error(axum::http::StatusCode::BAD_REQUEST, "ops_parameter_invalid")
@@ -59,14 +59,14 @@ fn read_error(error: OpsReadError) -> Response {
     }
 }
 
-fn not_connected() -> Response {
+pub(super) fn not_connected() -> Response {
     local_read_json_error(
         axum::http::StatusCode::SERVICE_UNAVAILABLE,
         "read_model_not_connected",
     )
 }
 
-fn json<T: serde::Serialize>(result: Result<T, OpsReadError>) -> Response {
+pub(super) fn json<T: serde::Serialize>(result: Result<T, OpsReadError>) -> Response {
     match result {
         Ok(value) => Json(value).into_response(),
         Err(error) => read_error(error),

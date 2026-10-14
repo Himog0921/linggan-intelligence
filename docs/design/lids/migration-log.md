@@ -8,6 +8,14 @@ PR #407 合并前修正（2026-10-13）：运营页焦点/强调线与新增共�
 > 事实来源: [system.md](system.md)、[README.md](README.md)、DESIGN-002 Issue #7、项目 progress 记录和实际验证输出
 > 冲突时以谁为准: 真实代码/合同/测试、用户最新确认、当前 SCOPE 和 ACCEPTED 决策；本日志不把计划写成已实现事实
 
+## 2026-10-13 · OPS-MIGRATION-001 D3 · 运营「总览」
+
+Mog 派定（Issue #409）：迁入工作台的运营总览。按 [PAGE-OPS-002](../pages/ops-overview-page.md) 在运营壳层里加第五个二级页，沿用 D2 的页头、面包屑、左侧栏、文字页签与表格；正文是五块从上到下的连续工作面。只用 `--lgi-*` Token，没有新增 Token、CMP、Scene 或 Motion。
+
+**图表配色**：LIDS 没有分类色板，所以不为每个运营人造颜色（工作台是每人一色叠柱），改为运营人页签切换；颜色只表达语义：小红书 `--lgi-signal`、抖音 `--lgi-ink`、加微 `--lgi-info`、未迁入的日子 `--lgi-unknown-soft`，结论圆点用状态点 Token。图按容器实际宽度绘制，手机上坐标文字保持 Token 字号。
+
+**验证**：在共享库的一次性副本上，总览在 1440×900、1280×800、390×844 下无页面级横向溢出；走查发现并修正了矩阵账号名压到相邻列、手机上图表文字被缩到约 5px、时间段一行被截断、读取失败时新页签下留着上一个时间段的数字等问题。详见 [ACC-OPS-PAGE-002](../acceptance/ops-page-002-visual-acceptance.md)。未合并、未部署，Mog 未验收。
+
 ## 2026-10-13 · OPS-MIGRATION-001 D2 · 一级页面「运营」与页头六项收紧
 
 Mog 派定（Issue #405）：「运营」做成一级页面，页头和面包屑与其他一级页面同一套逻辑，左侧栏放二级页面，先只读。新页面按 [PAGE-OPS-001](../pages/ops-page.md) 复用共享页头、面包屑领域选择器和语料侧栏写法；正文是 Corpus Explorer 的表格组合（读数条、筛选、连续表格、分页），运营人与平台用文字页签加 3px 信号下划线（ADR-11），只用 `--lgi-*` Token，没有新增 Token、CMP、Scene 或 Motion。
