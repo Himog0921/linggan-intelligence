@@ -18,4 +18,6 @@
 
 ## 语料与读取资格
 
-`ocr_raw` 是原始机器观察，可用于审计和原文检索，但不是清洗后的语料。只有 `state='ACCEPTED'` 且非空的 `image_substantive_text` 才进入资料库的受控图片有效文本读取与检索；返回的证据片段标为 `image_substantive_text`，并携带对应派生物与媒体槽位。`PARTIAL` 在媒体 Inspector 的 `ocrLayering` 中返回状态、布局引用和候选 headline，但不返回 `imageSubstantiveText`、不进入 clean corpus；其中已逐行证明的 `cover_headline` 仍可按标题回退规则使用。
+`ocr_raw` 是原始机器观察，不等于清洗语料。RESEARCH-DOSSIER-001 rules-v2 允许 `ACCEPTED` 或 `PARTIAL` 中有明确行来源的 `SUBSTANTIVE_TEXT` 进入受控读取；未定用途的 `UNCERTAIN` 仍排除。主文案独立按 `PRIMARY_COPY` 回查。旧 rules-v1 结果保持原有整张 ACCEPTED 的资格，不能借新规则把历史未知行全部升级。派生正文与标题必须由各自选定行精确重建。
+
+规则升级仅追加分层结果，不需要重新识字。详见[研究底稿合同](research-dossier.md)及[第一阶段计划](../plans/active/research-dossier-001.md)。

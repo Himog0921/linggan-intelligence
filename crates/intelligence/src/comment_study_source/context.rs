@@ -61,21 +61,28 @@ pub(crate) async fn read_work_contexts(
         return Err(StudySourceError::InvalidDomain);
     }
     let titles = read_titles(tx, works, as_of).await?;
-    let rows = sqlx::query(include_str!("context.sql"))
-        .bind(works)
-        .bind(as_of)
-        .fetch_all(&mut **tx)
-        .await?;
-    rows.into_iter().map(|row| {
-        let work: Uuid = row.try_get("work_ref")?;
-        let fragments: Value = row.try_get("fragments")?;
-        let manifest=json!({"contract":"comment-study.context.v1","workRef":work,
-            "cleanerVersion":CLEANER_VERSION,"sources":fragments});
-        let bounded=crate::comment_study_run::bounded_context_manifest(&manifest,20000);
-        Ok((work,json!({"workRef":work,"displayTitle":titles.get(&work).and_then(|t|t.get("displayTitle")),
+    let dossiers = linggan_evidence::research_dossier::read_in(tx, works, as_of).await?;
+    Ok(dossiers.into_iter().map(|(work,dossier)| {
+        let bounded=dossier_manifest(&dossier,20000);
+        (work,json!({"workRef":work,"displayTitle":titles.get(&work).and_then(|t|t.get("displayTitle")),
             "displayTitleSource":titles.get(&work).and_then(|t|t.get("displayTitleSource")),
-            "contextManifest":bounded})))
-    }).collect()
+            "contextManifest":bounded}))
+    }).collect())
+}
+
+pub(crate) fn dossier_manifest(
+    dossier: &linggan_evidence::research_dossier::ResearchDossier,
+    budget: usize,
+) -> Value {
+    crate::comment_study_run::bounded_context_manifest(
+        &json!({
+            "contract":"comment-study.context.v1","workRef":dossier.work_ref,
+            "dossierRevision":dossier.material_revision,"dossierContract":dossier.contract,
+            "cleanerVersion":CLEANER_VERSION,
+            "sources":linggan_evidence::research_dossier::context_sources(dossier)
+        }),
+        budget,
+    )
 }
 
 pub(crate) async fn read_parents(

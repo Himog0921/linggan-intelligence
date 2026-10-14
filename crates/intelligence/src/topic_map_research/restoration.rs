@@ -138,7 +138,7 @@ fn current_identity(input: &ResearchInput, manifest: &Value) -> Option<()> {
 fn qualified_author_context(input: &ResearchInput, source: &Fragment) -> bool {
     matches!(
         source.field.as_str(),
-        "title" | "body" | "ocr" | "transcript"
+        "title" | "body" | "cover_headline" | "ocr" | "transcript"
     ) && (input
         .work
         .fragments

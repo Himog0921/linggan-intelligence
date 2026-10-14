@@ -5,7 +5,7 @@
 
 use linggan_evidence::{
     ClaimGateReadiness, MediaProcessingClaim, MediaProcessingClaimOutcome, OcrCompletionInput,
-    OcrExcludedLineInput, OcrLayeringInput, OcrLineInput, READINESS_RETRY_START,
+    OcrLayeringInput, OcrLineInput, READINESS_RETRY_START,
     claim_media_processing_work, complete_media_processing_derivative,
     complete_media_processing_ocr, complete_media_processing_text,
     complete_media_processing_without_output, ensure_media_processing_work,
@@ -441,148 +441,10 @@ fn run_paddle_ocr_staged(input: &Path) -> Result<PaddleOcrOutput, String> {
     Ok(parsed)
 }
 
-/// The first local pass only removes narrowly-identifiable platform chrome.  It deliberately
-/// does not try to decide whether a photographed page, a logo, or a quote card is substantive;
-/// those ambiguous lines remain raw evidence and put the item in `PARTIAL` for the later vision
-/// selector.  This avoids silently treating a visual guess as a fact.
 fn layer_paddle_lines(lines: &[PaddleOcrLine]) -> OcrLayeringInput {
-    let mut retained = Vec::new();
-    let mut excluded = Vec::new();
-    for (ordinal, line) in lines.iter().enumerate() {
-        let compact = line
-            .text
-            .chars()
-            .filter(|character| !character.is_whitespace())
-            .collect::<String>();
-        let at_edge = line.bbox_norm[1] <= 0.14
-            || line.bbox_norm[3] >= 0.86
-            || line.bbox_norm[0] <= 0.08
-            || line.bbox_norm[2] >= 0.92;
-        let classification =
-            if (compact == "小红书" || compact.eq_ignore_ascii_case("xiaohongshu")) && at_edge {
-                Some(("platform_watermark", "edge_platform_watermark"))
-            } else if is_platform_ui_line(&compact) {
-                Some(("platform_ui", "platform_ui_metadata"))
-            } else if line.confidence < 0.35 {
-                Some(("low_confidence", "below_local_confidence_floor"))
-            } else {
-                None
-            };
-        if let Some((classification, reason)) = classification {
-            excluded.push(OcrExcludedLineInput {
-                ordinal,
-                classification: classification.to_owned(),
-                reason: reason.to_owned(),
-            });
-        } else {
-            retained.push(ordinal);
-        }
-    }
-
-    let headline_ordinals = select_local_headline(lines, &retained);
-    let cover_headline = (!headline_ordinals.is_empty()).then(|| {
-        headline_ordinals
-            .iter()
-            .map(|ordinal| lines[*ordinal].text.trim())
-            .collect::<Vec<_>>()
-            .join(" ")
-    });
-    let non_headline_count = retained
-        .iter()
-        .filter(|ordinal| !headline_ordinals.contains(ordinal))
-        .count();
-    let single_unambiguous_line = headline_ordinals.is_empty()
-        && retained.len() == 1
-        && lines[retained[0]]
-            .text
-            .chars()
-            .filter(|character| !character.is_whitespace())
-            .count()
-            >= 6
-        && lines[retained[0]].confidence >= 0.75
-        && lines[retained[0]].bbox_norm[1] >= 0.08
-        && lines[retained[0]].bbox_norm[3] <= 0.92;
-    let image_substantive_text = if single_unambiguous_line {
-        Some(
-            retained
-                .iter()
-                .map(|ordinal| lines[*ordinal].text.trim())
-                .collect::<Vec<_>>()
-                .join("\n"),
-        )
-    } else {
-        None
-    };
-    let state = if retained.is_empty() {
-        "NEEDS_REVIEW"
-    } else if single_unambiguous_line || (!headline_ordinals.is_empty() && non_headline_count <= 2)
-    {
-        "ACCEPTED"
-    } else {
-        "PARTIAL"
-    };
-    OcrLayeringInput {
-        state: state.to_owned(),
-        cover_headline,
-        image_substantive_text,
-        retained_ordinals: retained,
-        headline_ordinals,
-        excluded_lines: excluded,
-    }
-}
-
-fn is_platform_ui_line(compact: &str) -> bool {
-    matches!(
-        compact,
-        "作者赞过" | "回复" | "展开更多回复" | "发布于" | "编辑于"
-    ) || (compact.ends_with("分钟前") || compact.ends_with("小时前") || compact.ends_with("天前"))
-        || (compact.starts_with("回复") && compact.chars().count() <= 12)
-}
-
-fn select_local_headline(lines: &[PaddleOcrLine], retained: &[usize]) -> Vec<usize> {
-    let candidate = retained
-        .iter()
-        .copied()
-        .filter(|ordinal| {
-            let line = &lines[*ordinal];
-            let width = line.bbox_norm[2] - line.bbox_norm[0];
-            let height = line.bbox_norm[3] - line.bbox_norm[1];
-            line.confidence >= 0.50 && width >= 0.24 && height >= 0.045
-        })
-        .max_by(|left, right| {
-            headline_score(&lines[*left]).total_cmp(&headline_score(&lines[*right]))
-        });
-    let Some(anchor) = candidate else {
-        return Vec::new();
-    };
-    let anchor_line = &lines[anchor];
-    let anchor_height = anchor_line.bbox_norm[3] - anchor_line.bbox_norm[1];
-    let mut selected = retained
-        .iter()
-        .copied()
-        .filter(|ordinal| {
-            let line = &lines[*ordinal];
-            let height = line.bbox_norm[3] - line.bbox_norm[1];
-            let close_vertically = line.bbox_norm[1] >= anchor_line.bbox_norm[1] - 0.09
-                && line.bbox_norm[3] <= anchor_line.bbox_norm[3] + 0.13;
-            let similar_scale = height >= anchor_height * 0.60 && height <= anchor_height * 1.55;
-            let broad_enough = line.bbox_norm[2] - line.bbox_norm[0] >= 0.20;
-            close_vertically && similar_scale && broad_enough
-        })
-        .collect::<Vec<_>>();
-    selected.sort_by(|left, right| {
-        lines[*left].bbox_norm[1]
-            .total_cmp(&lines[*right].bbox_norm[1])
-            .then_with(|| lines[*left].bbox_norm[0].total_cmp(&lines[*right].bbox_norm[0]))
-    });
-    selected.truncate(4);
-    selected
-}
-
-fn headline_score(line: &PaddleOcrLine) -> f64 {
-    let width = line.bbox_norm[2] - line.bbox_norm[0];
-    let height = line.bbox_norm[3] - line.bbox_norm[1];
-    height * 0.75 + width * 0.20 + line.confidence * 0.05
+    linggan_evidence::ocr_layering::layer_lines(&lines.iter().map(|line| OcrLineInput {
+        text: line.text.clone(), confidence: line.confidence, bbox_norm: line.bbox_norm,
+    }).collect::<Vec<_>>())
 }
 
 async fn execute_thumbnail(

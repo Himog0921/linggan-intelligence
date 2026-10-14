@@ -63,7 +63,7 @@ fn retained_context(key: &CommentKey, manifest: &Value) -> Result<Value, StudySe
         let kind = text(&source["kind"])?;
         if !matches!(
             kind,
-            "native_title" | "body" | "image_substantive_text" | "asr_text" | "frame_ocr_text"
+            "native_title" | "cover_headline" | "body" | "image_substantive_text" | "asr_text" | "frame_ocr_text"
         ) {
             return Err(StudySelectionError::InvalidSnapshot);
         }

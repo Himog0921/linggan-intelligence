@@ -156,7 +156,7 @@ fn valid_fragments(fragments: &[Fragment]) -> bool {
 }
 fn fragment_role(fragment: &Fragment) -> &'static str {
     match fragment.field.as_str() {
-        "title" | "body" | "ocr" | "transcript" => "author",
+        "title" | "body" | "cover_headline" | "ocr" | "transcript" => "author",
         "studied_comment" | "unresearched_comment" => "commenter",
         "parent_comment_context" => "context",
         field if field.starts_with("work_context:") => "context",

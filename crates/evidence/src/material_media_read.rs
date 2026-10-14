@@ -779,7 +779,7 @@ pub(crate) async fn read_topic_derivatives_batch(
                     .map(|(mut derivative, (reference, text, semantic))| {
                         derivative["derivativeRef"] = serde_json::json!(reference);
                         derivative["semanticMediaSource"] = semantic;
-                        if derivative["state"] == "ACQUIRED" && derivative["kind"] == "asr_text" {
+                        if derivative["state"] == "ACQUIRED" && matches!(derivative["kind"].as_str(), Some("asr_text" | "ocr_text")) {
                             derivative["researchText"] = serde_json::json!(text);
                         }
                         derivative
@@ -812,9 +812,9 @@ async fn read_derivative_rows(
         "LEFT JOIN LATERAL (SELECT NULL::uuid AS retired_job_ref) retired ON true"
     };
     let layering_join = if ocr_retirement_schema_ready {
-        "LEFT JOIN LATERAL (SELECT layer.layout_ref,layer.state,layer.decision_source,layer.cover_headline,layer.image_substantive_text FROM linggan_media_ocr_layout layout JOIN linggan_media_ocr_layering_result layer USING(layout_ref) WHERE layout.ocr_derivative_ref=derivative.derivative_ref ORDER BY layer.created_at DESC LIMIT 1) layering ON true"
+        "LEFT JOIN LATERAL (SELECT layout.image_width,layout.image_height,layout.engine_version,layer.layout_ref,layer.layering_ref,layer.layer_version,layer.state,layer.decision_source,layer.cover_headline,layer.image_substantive_text,layer.retained_line_refs,layer.excluded_lines FROM linggan_media_ocr_layout layout JOIN linggan_media_ocr_layering_result layer USING(layout_ref) WHERE layout.ocr_derivative_ref=derivative.derivative_ref AND layout.created_at<=$2::timestamptz AND layer.created_at<=$2::timestamptz AND layer.layer_version IN ('rules-v1','rules-v2') ORDER BY CASE layer.layer_version WHEN 'rules-v2' THEN 0 ELSE 1 END,layer.created_at DESC,layer.layering_ref DESC LIMIT 1) layering ON true"
     } else {
-        "LEFT JOIN LATERAL (SELECT NULL::uuid AS layout_ref,NULL::text AS state,NULL::text AS decision_source,NULL::text AS cover_headline,NULL::text AS image_substantive_text) layering ON true"
+        "LEFT JOIN LATERAL (SELECT NULL::integer AS image_width,NULL::integer AS image_height,NULL::text AS engine_version,NULL::uuid AS layout_ref,NULL::uuid AS layering_ref,NULL::text AS layer_version,NULL::jsonb AS retained_line_refs,NULL::jsonb AS excluded_lines,NULL::text AS state,NULL::text AS decision_source,NULL::text AS cover_headline,NULL::text AS image_substantive_text) layering ON true"
     };
     let derivative_rows = sqlx::query(AssertSqlSafe(format!(
         "WITH restricted_disposition AS MATERIALIZED ( \
@@ -825,14 +825,16 @@ async fn read_derivative_rows(
          restricted_blobs AS (SELECT DISTINCT blob_sha256 FROM restricted_disposition WHERE blob_sha256 IS NOT NULL), \
          restricted_derivatives AS (SELECT DISTINCT derivative_ref FROM restricted_disposition WHERE derivative_ref IS NOT NULL), \
          requested_slots AS ( \
-             SELECT DISTINCT origin.content_public_ref,origin.slot_key \
+             SELECT origin.content_public_ref,origin.slot_key,bool_or(origin.purpose IN ('author_avatar','comment_image')) AS context_only \
              FROM linggan_material_media_origin origin \
-             WHERE origin.content_public_ref=ANY($1::uuid[]) \
+             WHERE origin.content_public_ref=ANY($1::uuid[]) AND origin.created_at<=$2::timestamptz \
+             AND EXISTS(SELECT 1 FROM linggan_runtime_capture_package package WHERE package.package_ref=origin.package_ref AND package.accepted_at<=$2::timestamptz) \
+             GROUP BY origin.content_public_ref,origin.slot_key \
          ), derivative_rows AS ( \
-         SELECT requested_slots.content_public_ref,job.job_ref,job.slot_key,job.processor_kind,job.processor_version,job.input_scope,job.blob_sha256 AS input_blob_sha256, \
+         SELECT requested_slots.content_public_ref,requested_slots.context_only,job.job_ref,job.slot_key,job.processor_kind,job.processor_version,job.input_scope,job.blob_sha256 AS input_blob_sha256,slot.ordinal AS slot_ordinal,job.created_at::text AS job_created_at, \
              event.state,event.reason,derivative.derivative_ref,derivative.derivative_kind,derivative.storage_key, \
              derived.display_text,derived.text_content AS research_text,derived.source_location AS derived_source_location,derived.language_state,derived.language_tag, \
-             layering.layout_ref AS ocr_layout_ref,layering.state AS ocr_layering_state,layering.decision_source AS ocr_decision_source,layering.cover_headline,layering.image_substantive_text, \
+             layering.image_width,layering.image_height,layering.engine_version,layering.layering_ref,layering.layer_version,layering.retained_line_refs,layering.excluded_lines,layering.layout_ref AS ocr_layout_ref,layering.state AS ocr_layering_state,layering.decision_source AS ocr_decision_source,layering.cover_headline,layering.image_substantive_text, \
              (restricted_slot.slot_key IS NOT NULL OR restricted_blob.blob_sha256 IS NOT NULL OR restricted_derivative.derivative_ref IS NOT NULL) AS disposition_restricted, \
              (retired.retired_job_ref IS NOT NULL) AS retired, \
              count(*) OVER(PARTITION BY requested_slots.content_public_ref) AS total_count, \
@@ -941,11 +943,16 @@ fn project_derivative_rows(
         } else {
             Value::Null
         };
-        let clean_corpus_eligible = layering_state.as_deref() == Some("ACCEPTED")
+        let clean_corpus_eligible = !restricted && !retired && state == "ACQUIRED"
+            && (layering_state.as_deref() == Some("ACCEPTED")
+                || (row.get::<Option<String>,_>("layer_version").as_deref() == Some("rules-v2")
+                    && layering_state.as_deref() == Some("PARTIAL")))
+            && (row.get::<Option<String>,_>("layer_version").as_deref() != Some("rules-v2")
+                || row.get::<Option<Value>,_>("retained_line_refs").and_then(|v|v.as_array().cloned()).is_some_and(|refs| refs.iter().any(|r|r["classification"]=="substantive_text")))
             && row
                 .get::<Option<String>, _>("image_substantive_text")
                 .is_some_and(|text| !text.trim().is_empty());
-        derivatives.push(serde_json::json!({"jobRef":row.get::<Uuid,_>("job_ref"),"slotKey":row.get::<Option<String>,_>("slot_key"),"kind":row.get::<Option<String>,_>("derivative_kind"),"state":state,"displayText":if restricted || retired {None}else{row.get::<Option<String>,_>("display_text")},"languageState":row.get::<Option<String>,_>("language_state"),"languageTag":if restricted || retired {None}else{row.get::<Option<String>,_>("language_tag")},"dispositionState":if retired{"OCR_RETIRED"}else if restricted{"WITHDRAWN_OR_RESTRICTED"}else{"UNKNOWN"},"processorVersion":row.get::<String,_>("processor_version"),"sourceScope":row.get::<String,_>("input_scope"),"sourceLocation":source_location,"reason":reason,"ocrLayering":if retired {Value::Null}else if let Some(layering_state)=layering_state {serde_json::json!({"layoutRef":row.get::<Option<Uuid>,_>("ocr_layout_ref"),"state":layering_state,"decisionSource":row.get::<Option<String>,_>("ocr_decision_source"),"coverHeadline":row.get::<Option<String>,_>("cover_headline"),"imageSubstantiveText":if clean_corpus_eligible {row.get::<Option<String>,_>("image_substantive_text")} else {None::<String>},"cleanCorpusEligible":clean_corpus_eligible})}else{Value::Null}}));
+        derivatives.push(serde_json::json!({"jobRef":row.get::<Uuid,_>("job_ref"),"slotKey":row.get::<Option<String>,_>("slot_key"),"slotOrdinal":row.get::<Option<i32>,_>("slot_ordinal"),"jobCreatedAt":row.get::<String,_>("job_created_at"),"processorKind":row.get::<String,_>("processor_kind"),"contextOnly":row.get::<bool,_>("context_only"),"kind":row.get::<Option<String>,_>("derivative_kind"),"state":state,"displayText":if restricted || retired {None}else{row.get::<Option<String>,_>("display_text")},"languageState":row.get::<Option<String>,_>("language_state"),"languageTag":if restricted || retired {None}else{row.get::<Option<String>,_>("language_tag")},"dispositionState":if retired{"OCR_RETIRED"}else if restricted{"WITHDRAWN_OR_RESTRICTED"}else{"UNKNOWN"},"processorVersion":row.get::<String,_>("processor_version"),"sourceScope":row.get::<String,_>("input_scope"),"sourceLocation":source_location,"reason":reason,"ocrLayering":if retired || restricted {Value::Null}else if let Some(layering_state)=layering_state {serde_json::json!({"layoutRef":row.get::<Option<Uuid>,_>("ocr_layout_ref"),"layeringRef":row.get::<Option<Uuid>,_>("layering_ref"),"imageWidth":row.get::<Option<i32>,_>("image_width"),"imageHeight":row.get::<Option<i32>,_>("image_height"),"engineVersion":row.get::<Option<String>,_>("engine_version"),"layerVersion":row.get::<Option<String>,_>("layer_version"),"retainedLines":row.get::<Option<Value>,_>("retained_line_refs"),"excludedLines":row.get::<Option<Value>,_>("excluded_lines"),"state":layering_state,"decisionSource":row.get::<Option<String>,_>("ocr_decision_source"),"coverHeadline":row.get::<Option<String>,_>("cover_headline"),"imageSubstantiveText":if clean_corpus_eligible {row.get::<Option<String>,_>("image_substantive_text")} else {None::<String>},"cleanCorpusEligible":clean_corpus_eligible})}else{Value::Null}}));
     }
     (
         derivatives,

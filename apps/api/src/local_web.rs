@@ -31,6 +31,9 @@ mod material_cursor_tests;
 #[cfg(test)]
 mod material_media_delivery_tests;
 mod material_projection;
+mod research_dossier;
+#[cfg(test)]
+mod research_dossier_tests;
 #[cfg(test)]
 mod material_projection_media_fixture;
 #[cfg(test)]
@@ -441,6 +444,12 @@ fn router(state: LocalWebState) -> Router {
 
 fn material_api_routes() -> Router<LocalWebState> {
     Router::new()
+        .route("/assets/research-dossier.js", get(research_dossier::script))
+        .route("/api/local/work-resources/{public_ref}/research-dossier", get(research_dossier::read).layer(axum::middleware::from_fn(comment_study::local_comment_study_guard)))
+        .route("/api/local/work-resources/{public_ref}/research-dossier/creator-preview", get(research_dossier::creator_preview).layer(axum::middleware::from_fn(comment_study::local_comment_study_guard)))
+        .route("/api/local/work-resources/{public_ref}/research-dossier/comments", get(research_dossier::comments).layer(axum::middleware::from_fn(comment_study::local_comment_study_guard)))
+        .route("/api/local/work-resources/{public_ref}/research-dossier/relayer-plan", get(research_dossier::plan).layer(axum::middleware::from_fn(comment_study::local_comment_study_guard)))
+        .route("/api/local/work-resources/{public_ref}/research-dossier/relayer", post(research_dossier::relayer).layer(axum::middleware::from_fn(comment_study::local_comment_study_guard)))
         .route(
             "/api/local/media/{materialization_ref}/{sha256}",
             get(local_media_routes::materialization),
@@ -6122,6 +6131,7 @@ fn evidence_library_html(
     <title>证据库 · Linggan Intelligence</title>
     <link rel="stylesheet" href="/assets/evidence-library.css">
     <script src="/assets/evidence-observation.js" defer></script>
+    <script src="/assets/research-dossier.js" defer></script>
     <script src="/assets/evidence-library.js" defer></script>
   </head>
   <body data-corpus-domain="__CORPUS_DOMAIN_REF__" data-corpus-domain-selected="__CORPUS_DOMAIN_SELECTED__" data-corpus-domain-name="__CORPUS_DOMAIN_NAME__">
@@ -6218,6 +6228,7 @@ fn evidence_library_html(
                 <div class="ev-tabs" role="tablist" aria-label="作品证据详情">
                   <button type="button" role="tab" id="ev-tab-overview" data-ev-tab="overview" aria-controls="ev-panel-overview" aria-selected="true">概览</button>
                   <button type="button" role="tab" id="ev-tab-evidence" data-ev-tab="evidence" aria-controls="ev-panel-evidence" aria-selected="false" tabindex="-1">证据</button>
+                  <button type="button" role="tab" id="ev-tab-dossier" data-ev-tab="dossier" aria-controls="ev-panel-dossier" aria-selected="false" tabindex="-1">研究底稿</button>
                   <button type="button" role="tab" id="ev-tab-materials" data-ev-tab="materials" aria-controls="ev-panel-materials" aria-selected="false" tabindex="-1">材料</button>
                   <button type="button" role="tab" id="ev-tab-trace" data-ev-tab="trace" aria-controls="ev-panel-trace" aria-selected="false" tabindex="-1">来源轨迹</button>
                 </div>
@@ -6225,6 +6236,7 @@ fn evidence_library_html(
               <div class="ev-inspector-body">
                 <div role="tabpanel" id="ev-panel-overview" data-ev-panel="overview" aria-labelledby="ev-tab-overview"></div>
                 <div role="tabpanel" id="ev-panel-evidence" data-ev-panel="evidence" aria-labelledby="ev-tab-evidence" hidden></div>
+                <div role="tabpanel" id="ev-panel-dossier" data-ev-panel="dossier" aria-labelledby="ev-tab-dossier" hidden></div>
                 <div role="tabpanel" id="ev-panel-materials" data-ev-panel="materials" aria-labelledby="ev-tab-materials" hidden></div>
                 <div role="tabpanel" id="ev-panel-trace" data-ev-panel="trace" aria-labelledby="ev-tab-trace" hidden></div>
               </div>

@@ -3,6 +3,7 @@
 
 pub mod creator_discovery_analysis;
 pub mod creator_discovery_worker;
+pub mod creator_discovery_input;
 pub mod research_text;
 pub mod topic_map;
 pub mod topic_map_core;
