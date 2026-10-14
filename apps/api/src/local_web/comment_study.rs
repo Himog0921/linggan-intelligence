@@ -269,12 +269,7 @@ async fn page(
     let selected_name = selected
         .map(|domain| domain.name.as_str())
         .unwrap_or("选择领域");
-    let selected_status = match selected.map(|domain| domain.status.as_str()) {
-        Some("active") => "运行中",
-        Some("paused") => "已暂停",
-        Some(other) => other,
-        None => "状态未知",
-    };
+    let selected_status = domain_status_label(selected.map(|domain| domain.status.as_str()));
     let picker = super::corpus_domain_picker(&domains, selected, "/corpus/comments", None);
     let crumb = if picker.is_empty() {
         "语料 <span class=\"v7-slash\">/</span> <b>评论研究</b>".to_owned()
@@ -287,7 +282,7 @@ async fn page(
         shell::PrimarySurface::Corpus,
         "本机研究",
         &crumb,
-        &format!("{selected_name} · {selected_status}"),
+        &format!("{selected_name} · 状态 {selected_status}"),
         None,
     );
     let domain_nav = domain_value.as_deref();
@@ -580,6 +575,17 @@ fn read_response(result: Result<serde_json::Value, CommentStudyReadError>) -> Re
     }
 }
 
+/// Header copy for the domain lifecycle. Values outside the current CHECK set stay verbatim so a
+/// new state is never silently relabelled (LIDS LANG-03).
+fn domain_status_label(status: Option<&str>) -> &str {
+    match status {
+        Some("active") => "运行中",
+        Some("paused") => "已暂停",
+        Some(other) => other,
+        None => "未知",
+    }
+}
+
 fn error(status: StatusCode, code: &str) -> Response {
     (status, Json(json!({"error":code}))).into_response()
 }
@@ -587,6 +593,51 @@ fn error(status: StatusCode, code: &str) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn domain_status_label_speaks_chinese_and_keeps_unknown_values() {
+        assert_eq!(domain_status_label(Some("active")), "运行中");
+        assert_eq!(domain_status_label(Some("paused")), "已暂停");
+        assert_eq!(domain_status_label(Some("archived")), "archived");
+        assert_eq!(domain_status_label(None), "未知");
+    }
+
+    /// CORPUS-COPY-001: the user-comment catalog opens on the most-liked comments, and the page
+    /// never prints raw ISO times or descriptive English again.
+    #[test]
+    fn copy_contract_and_like_first_catalog_stay_in_place() {
+        let script = include_str!("comment_study.js");
+        let html = include_str!("comment_study.html");
+        for required in [
+            "sort:'like_desc',minLikes:null",
+            "COMMENT_SORTS.has(sort)?sort:'like_desc'",
+            "commentCatalogState.sort==='like_desc'?null:commentCatalogState.sort",
+            "sort:commentCatalogState.sort,minLikes",
+            "hourCycle:'h23'",
+            "${part.year}-${part.month}-${part.day} ${part.hour}:${part.minute}",
+            "native_title: '作品标题'",
+            "asr_text: '视频转写'",
+            "frame_ocr_text: '视频画面文字'",
+            "item.studyEligibility?.eligible?'':",
+            "item.workTitleSource==='platform_title'?'':",
+            "尚未形成长期用户问题",
+        ] {
+            assert!(script.contains(required), "missing: {required}");
+        }
+        for forbidden in [
+            ".replace('T'",
+            "Run 冻结",
+            "最近 Run",
+            "Signal ${",
+            "Target source",
+            "comments / replies",
+            "'primary · 本领域'",
+            "study-overview-scope",
+        ] {
+            assert!(!script.contains(forbidden), "returned: {forbidden}");
+        }
+        assert!(!html.contains("原 Run"));
+    }
 
     /// Every comment filter the view writes into its URL must be accepted by the page route, or a
     /// reload/saved link fails before the page loads (signalKind/voiceRole once did exactly that).

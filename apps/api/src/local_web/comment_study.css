@@ -196,6 +196,7 @@
 .study-comments-table th:nth-child(7){width:10%}
 .study-comments-table th:nth-child(8){width:12%}
 .study-like-count{font-variant-numeric:tabular-nums;white-space:nowrap}
+.study-like-date{white-space:nowrap}
 .study-post-usage{display:grid;justify-items:start;gap:var(--lgi-space-1)}
 .study-post-usage-status:empty{display:none}
 .study-comment-kinds{display:flex;align-items:flex-start;flex-wrap:wrap;gap:var(--lgi-space-1)}
