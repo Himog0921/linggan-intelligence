@@ -189,7 +189,7 @@ async fn worker_admission_budget_fingerprints_and_bounded_recovery() {
             .unwrap();
     }
     let clipped:(String,serde_json::Value)=sqlx::query_as("SELECT job_state,result_json FROM linggan_creator_discovery_work_analysis WHERE work_public_ref=$1").bind(refs[0]).fetch_one(db.pool()).await.unwrap();
-    assert_eq!(clipped.0, "idle");
+    assert_eq!(clipped.0, "idle", "{:?}", sqlx::query_scalar::<_,Option<String>>("SELECT last_error_code FROM linggan_creator_discovery_work_analysis WHERE work_public_ref=$1").bind(refs[0]).fetch_one(db.pool()).await.unwrap());
     assert_eq!(clipped.1["relevance"]["value"], "related");
     let focus_state:String=sqlx::query_scalar("SELECT job_state FROM linggan_creator_discovery_author_analysis WHERE domain_ref=$1 AND author_external_id='worker-author'").bind(D).fetch_one(db.pool()).await.unwrap();
     assert_eq!(

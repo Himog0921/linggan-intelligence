@@ -120,15 +120,22 @@
   try {collectionSelection=new Set(JSON.parse(sessionStorage.getItem(collectionSelectionKey)||'[]'));} catch (_) {}
   const collectionSelectionCount=document.createElement('span');
   const collectionSelectionButton=document.createElement('button'); collectionSelectionButton.type='button'; collectionSelectionButton.className='ev-selection-action'; collectionSelectionButton.textContent='评论深采';
+  const dossierBatchButton=document.createElement('button'); dossierBatchButton.type='button'; dossierBatchButton.className='ev-selection-action'; dossierBatchButton.textContent='整理图片文字';
+  const dossierResumeButton=document.createElement('button'); dossierResumeButton.type='button'; dossierResumeButton.className='ev-selection-action'; dossierResumeButton.textContent='继续上次整理';
+  dossierResumeButton.hidden=!window.LingganDossierBatch?.hasPending();
+  window.addEventListener('dossier-batch-changed',()=>{dossierResumeButton.hidden=!window.LingganDossierBatch?.hasPending();});
+  dossierBatchButton.addEventListener('click',()=>window.LingganDossierBatch?.open([...collectionSelection],CORPUS_DOMAIN.ref));
+  dossierResumeButton.addEventListener('click',()=>window.LingganDossierBatch?.open([],CORPUS_DOMAIN.ref,true));
   const collectionSelectPage=document.createElement('button'); collectionSelectPage.type='button'; collectionSelectPage.className='ev-selection-action'; collectionSelectPage.textContent='勾选本页';
   function updateCollectionSelection() {
     collectionSelectionCount.textContent='已勾选 '+collectionSelection.size+' 篇作品';
     collectionSelectionButton.disabled=!CORPUS_DOMAIN.hasDomain || !collectionSelection.size || collectionSelection.size>200;
-    sessionStorage.setItem(collectionSelectionKey,JSON.stringify([...collectionSelection]));
+    dossierBatchButton.disabled=!CORPUS_DOMAIN.hasDomain || !collectionSelection.size || collectionSelection.size>200;
+    try {sessionStorage.setItem(collectionSelectionKey,JSON.stringify([...collectionSelection]));} catch (_) {}
   }
   collectionSelectionButton.addEventListener('click',()=>{location.assign('/collection/tasks?domain='+encodeURIComponent(CORPUS_DOMAIN.ref)+'&selected=1&returnTo='+encodeURIComponent(location.pathname+location.search));});
   collectionSelectPage.addEventListener('click',()=>{document.querySelectorAll('input[data-collection-work-select]').forEach(input=>{input.checked=true;collectionSelection.add(input.value);});updateCollectionSelection();});
-  const selectionToolbar=document.createElement('div'); selectionToolbar.className='ev-selection-toolbar';selectionToolbar.append(collectionSelectPage,collectionSelectionCount,collectionSelectionButton);
+  const selectionToolbar=document.createElement('div'); selectionToolbar.className='ev-selection-toolbar';selectionToolbar.append(collectionSelectPage,collectionSelectionCount,collectionSelectionButton,dossierBatchButton,dossierResumeButton);
   document.querySelector('.ev-command')?.append(selectionToolbar); updateCollectionSelection();
   const SORT_OPTIONS = [
     { value: 'latest_discovery', label: '最近观察' },
@@ -1103,7 +1110,7 @@
     }
     if (ref && CORPUS_DOMAIN.hasDomain) {
       const label=document.createElement('label'); label.className='ev-collection-check';
-      const input=document.createElement('input'); input.type='checkbox';input.value=ref; input.checked=collectionSelection.has(ref);input.dataset.collectionWorkSelect='';input.setAttribute('aria-label','勾选作品用于评论深采');
+      const input=document.createElement('input'); input.type='checkbox';input.value=ref; input.checked=collectionSelection.has(ref);input.dataset.collectionWorkSelect='';input.setAttribute('aria-label','勾选作品用于批量操作');
       label.append(input);label.addEventListener('click',event=>event.stopPropagation()); input.addEventListener('change',()=>{if(input.checked)collectionSelection.add(ref);else collectionSelection.delete(ref);updateCollectionSelection();});row.append(label);
     }
     row.addEventListener('click', () => selectItem(item, 'user'));
@@ -1384,6 +1391,7 @@
 
   function clearInspector() {
     model.detailController?.abort();
+    window.LingganResearchDossier?.reset();
     reobservation.reset();
     commentResearch.reset();
     model.detailItem = null;
@@ -1409,6 +1417,7 @@
       return;
     }
     if (model.selectedRef !== publicRef) {
+      window.LingganResearchDossier?.reset();
       reobservation.reset();
       commentResearch.reset();
     }
@@ -1639,6 +1648,13 @@
     refs.requestMedia.title = '补采需要采集授权，本页只读，不触发平台访问。';
     renderOverview(item, inspector, channels.reobservation || {});
     renderEvidence(listItem, item, inspector, channels.comments || {});
+    window.LingganResearchDossier?.mount(panels.get('dossier'), {
+      work: item.identity.publicRef,
+      domain: new URL(window.location.href).searchParams.get('domain'),
+      media: mediaObjectsFrom(inspector, null),
+      openImage: media => { const url=sameOriginPath(media.originalAssetUrl,['/api/local/media/']); if(url)openLightbox(0,null,{index:0,purpose:'body_image',ordinal:media.slotOrdinal,objectRef:media.originalMaterializationRef,assetUrl:url,bytesState:'ACQUIRED',derivedState:media.state}); },
+      onUpdated: () => selectItem(item, 'auto'),
+    });
     renderMaterials(item, inspector, channels);
     renderTrace(inspector, channels.provenance || {});
   }
@@ -2212,8 +2228,9 @@
 
   /* -------------------------------------------------------------- lightbox */
 
-  function openLightbox(index, opener) {
-    if (!model.mediaObjects.length) return;
+  function openLightbox(index, opener, exactObject = null) {
+    if (!exactObject && !model.mediaObjects.length) return;
+    model.lightboxOverride = exactObject;
     model.lightboxIndex = Math.min(model.mediaObjects.length - 1, Math.max(0, index));
     model.lightboxOpener = opener || null;
     refs.lightbox.hidden = false;
@@ -2223,10 +2240,10 @@
   }
 
   function paintLightbox() {
-    const object = model.mediaObjects[model.lightboxIndex];
+    const object = model.lightboxOverride || model.mediaObjects[model.lightboxIndex];
     if (!object) return;
     resetZoom();
-    refs.lightboxTitle.textContent = `${purposeLabel(object.purpose)} · 第 ${String(object.index + 1).padStart(2, '0')} / ${String(model.mediaObjects.length).padStart(2, '0')} 个`;
+    refs.lightboxTitle.textContent = `${purposeLabel(object.purpose)} · 第 ${String(object.index + 1).padStart(2, '0')} / ${String(model.lightboxOverride ? 1 : model.mediaObjects.length).padStart(2, '0')} 个`;
     refs.lightboxRef.textContent = object.objectRef
       ? `MED-${String(object.objectRef).slice(0, 8).toUpperCase()} · 采集序号 ${object.ordinal} · 平台排列顺序未经验证`
       : `本地对象 ID 未表达 · 采集序号 ${object.ordinal}`;
@@ -2241,8 +2258,8 @@
     refs.lightboxCaption.textContent = object.assetUrl
       ? `字节 ${stateMeta(object.bytesState)[0]} · 文字 ${object.derivedState ? stateMeta(object.derivedState)[0] : '未处理'}`
       : `这个对象没有可内联的本地副本：${stateMeta(object.bytesState)[0]}`;
-    refs.lightboxPrev.disabled = model.lightboxIndex <= 0;
-    refs.lightboxNext.disabled = model.lightboxIndex >= model.mediaObjects.length - 1;
+    refs.lightboxPrev.disabled = Boolean(model.lightboxOverride) || model.lightboxIndex <= 0;
+    refs.lightboxNext.disabled = Boolean(model.lightboxOverride) || model.lightboxIndex >= model.mediaObjects.length - 1;
   }
 
   /* Zoom lives on the image inside the frame; the frame clips. Panning is only meaningful once
@@ -2304,6 +2321,7 @@
   }
 
   function closeLightbox() {
+    model.lightboxOverride = null;
     refs.lightbox.hidden = true;
     document.body.style.overflow = '';
     resetZoom();
@@ -2384,6 +2402,7 @@
       panels.get(candidate.dataset.evTab)?.toggleAttribute('hidden', !selected);
     });
     model.activeTab = tab.dataset.evTab;
+    if (model.activeTab === 'dossier') window.LingganResearchDossier?.show();
     if (focus) tab.focus();
     syncUrl();
   }

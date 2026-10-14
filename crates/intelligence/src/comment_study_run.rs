@@ -453,7 +453,9 @@ fn context_state(manifest: &Value) -> &'static str {
 /// Makes the configured context-character cap part of the frozen work contract.  Fragments are
 /// retained whole (never mid-quote) in a stable relevance order, while omitted material is
 /// explicitly recorded so a model cannot mistake partial context for a complete work record.
-pub(crate) fn bounded_context_manifest(manifest: &Value, budget: usize) -> Value {
+pub fn context_cleaner_version() -> &'static str { crate::comment_cleaning::CLEANER_VERSION }
+
+pub fn bounded_context_manifest(manifest: &Value, budget: usize) -> Value {
     let mut fragments: Vec<Value> = manifest["sources"].as_array().cloned().unwrap_or_default();
     fragments.sort_by_key(sort_key);
     let mut used = 0_usize;
@@ -488,6 +490,8 @@ pub(crate) fn bounded_context_manifest(manifest: &Value, budget: usize) -> Value
         "contract":"comment-study.context.v1",
         "workRef":manifest["workRef"],
         "cleanerVersion":manifest["cleanerVersion"],
+        "dossierRevision":manifest["dossierRevision"],
+        "dossierContract":manifest["dossierContract"],
         "characterBudget":budget,
         "includedCharacterCount":used,
         "orderBasis":ORDER_BASIS,

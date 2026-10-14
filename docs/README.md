@@ -13,6 +13,12 @@
 
 - [主题图谱紧凑工作区变更](design/changes/topic-map-compact-382.md)：#382 当前 UI 后续，取代旧工作区布局，不改研究与来源合同。
 
+## 研究底稿与图片分层第一阶段
+
+- [实施计划](plans/active/research-dossier-001.md)：Issue #420，完整模块实施中。
+- [底稿与任务材料合同](data-contracts/research-dossier.md)：本期数据、分层和输入范围。
+- [UI 变更清单](design/changes/research-dossier-001-ui-change-manifest.md)：详情、对照和预览。
+
 ## 评论研究产品化 · 当前交付入口
 
 Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发，并于 2026-10-02 将当前目标明确为手册 P0–P5 的完整可用页面和真实接口端到端验收；旧 P6–P8 快照及逐 T 形式测试不再阻塞功能开发，自动每日计划仍是下阶段。先读[完整手册入口](runbooks/comment-study-productization-package.md)，再按职责读取其中的八个分册、机器合同与验收台账。当前事实与未验证项以[当前项目账本](audits/comment-study-productization-001/README.md)及实际运行回执为准，不将文档入库视为代码、数据库或 UI 已交付；页面合同见[评论研究产品化 UI 规格](design/pages/comment-study-productization-001.md)。

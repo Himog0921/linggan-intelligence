@@ -8,7 +8,7 @@ use sqlx::{Postgres, Row, Transaction};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use uuid::Uuid;
 
-pub const RULE_VERSION: &str = "creator-discovery.v1";
+pub const RULE_VERSION: &str = "creator-discovery.v2-dossier";
 #[derive(Debug, thiserror::Error)]
 pub enum DiscoveryError {
     #[error("{0}")]
@@ -126,41 +126,6 @@ fn material_fragment(
         end: text.chars().count(),
         text,
     })
-}
-
-fn topic_media_fragment(work: Uuid, derivative: &Value) -> Option<Fragment> {
-    if derivative["state"] != "ACQUIRED"
-        || matches!(
-            derivative["dispositionState"].as_str(),
-            Some("WITHDRAWN_OR_RESTRICTED" | "OCR_RETIRED")
-        )
-    {
-        return None;
-    }
-    let clean = (derivative["ocrLayering"]["cleanCorpusEligible"] == true)
-        .then(|| derivative["ocrLayering"]["imageSubstantiveText"].as_str())
-        .flatten();
-    let (field, text) = if let Some(text) = clean {
-        ("ocr", text)
-    } else if derivative["kind"] == "asr_text" {
-        ("transcript", derivative["researchText"].as_str()?)
-    } else {
-        return None;
-    };
-    let mut fragment = material_fragment(
-        work,
-        field,
-        Some(text),
-        derivative["jobRef"].as_str()?.parse().ok(),
-        None,
-        None,
-    )?;
-    let semantic = derivative.get("semanticMediaSource")?;
-    fragment.fragment_id = format!("{work}.{field}.{}", hash(&semantic.to_string()));
-    fragment.source_version = hash(&json!({"derivativeRef":derivative["derivativeRef"],
-        "processorVersion":derivative["processorVersion"],"layoutRef":derivative["ocrLayering"]["layoutRef"],
-        "textHash":hash(text)}).to_string());
-    Some(fragment)
 }
 
 /// Stable media ownership excludes processor/layout revisions while retaining
@@ -377,6 +342,14 @@ async fn load_topic_material_scope(
     Ok(data)
 }
 
+/// Read one creator work with the same bounded projection as the worker, without scheduling.
+pub async fn load_creator_material_for_work(database:&Database,scope:&CreatorScope,work:Uuid)->Result<DiscoveryData,DiscoveryError>{
+    let mut tx=database.pool().begin().await?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY").execute(&mut *tx).await?;
+    let result=load_materials_in(&mut tx,scope,Some(4000),Some(&[work])).await?;
+    tx.commit().await?;Ok(result)
+}
+
 pub(crate) async fn load_in(
     tx: &mut Transaction<'_, Postgres>,
     q: &CreatorScope,
@@ -529,105 +502,17 @@ async fn load_materials_in(
             .filter(|c| derived_refs.contains(&c.public_ref))
             .map(|c| c.public_ref)
             .collect();
-        let mut derivatives_by_work = if char_limit.is_none() {
-            crate::material_media_read::read_topic_derivatives_batch(
-                tx,
-                &derivative_candidates,
-                &as_of,
-            )
-            .await?
-        } else {
-            crate::material_media_read::read_derivatives_batch(tx, &derivative_candidates, &as_of)
-                .await?
-                .into_iter()
-                .map(|(work, (derivatives, _, _, _, _))| (work, derivatives))
-                .collect()
-        };
+        let mut derivatives_by_work = crate::material_media_read::read_topic_derivatives_batch(
+            tx, &derivative_candidates, &as_of,
+        ).await?;
         for c in batch {
-            let mut fragments: Vec<_> = [
-                material_fragment(
-                    c.public_ref,
-                    "title",
-                    c.title.as_deref(),
-                    c.title_source.material_ref,
-                    c.title_source.recorded_at.as_deref(),
-                    char_limit,
-                ),
-                material_fragment(
-                    c.public_ref,
-                    "body",
-                    c.body_text.as_deref(),
-                    c.body_source.material_ref,
-                    c.body_source.recorded_at.as_deref(),
-                    char_limit,
-                ),
-            ]
-            .into_iter()
-            .flatten()
-            .collect();
-            let mut search_text = format!(
-                "{}\n{}",
-                c.title.as_deref().unwrap_or(""),
-                c.body_text.as_deref().unwrap_or("")
-            );
-            if let Some(derivatives) = derivatives_by_work.remove(&c.public_ref) {
-                let mut topic_sources = BTreeMap::new();
-                for d in derivatives {
-                    if char_limit.is_none() {
-                        if let Some(f) = topic_media_fragment(c.public_ref, &d) {
-                            // Reprocessing replaces this asset/slot/position's text; a
-                            // later observation never creates another logical source.
-                            topic_sources.insert(f.fragment_id.clone(), f);
-                        }
-                        continue;
-                    }
-                    if d["dispositionState"] == "WITHDRAWN_OR_RESTRICTED"
-                        || d["dispositionState"] == "OCR_RETIRED"
-                    {
-                        continue;
-                    }
-                    let clean = d
-                        .pointer("/ocrLayering/imageSubstantiveText")
-                        .and_then(Value::as_str);
-                    let text = clean.or_else(|| {
-                        if d["kind"] == "asr_text" {
-                            d["displayText"].as_str()
-                        } else {
-                            None
-                        }
-                    });
-                    if let Some(text) = text {
-                        search_text.push('\n');
-                        search_text.push_str(text);
-                        if let Some(f) = material_fragment(
-                            c.public_ref,
-                            if clean.is_some() { "ocr" } else { "transcript" },
-                            Some(text),
-                            d["jobRef"].as_str().and_then(|x| Uuid::parse_str(x).ok()),
-                            d["processorVersion"].as_str(),
-                            char_limit,
-                        ) {
-                            fragments.push(f);
-                        }
-                    }
-                }
-                for f in topic_sources.into_values() {
-                    search_text.push('\n');
-                    search_text.push_str(&f.text);
-                    fragments.push(f);
-                }
-            }
-            if let Some(mut remaining) = char_limit {
-                for f in &mut fragments {
-                    f.text = f.text.chars().take(remaining).collect();
-                    f.end = f.text.chars().count();
-                    f.fragment_id =
-                        format!("{}.{}.{}", c.public_ref, f.field, &hash(&f.text)[..12]);
-                    remaining -= f.end;
-                }
-            }
-            fragments.retain(|f| !f.text.is_empty());
-            let fingerprint=hash(&json!({"domain":{ "id":domain["domainRef"],"name":domain["name"],"description":domain["description"],"researchGoal":domain["researchGoal"]},"fragments":fragments.iter().map(|f|(&f.field,&f.text)).collect::<Vec<_>>(),"rule":RULE_VERSION,"config":policy["configRef"]}).to_string());
+            let dossier = crate::research_dossier::assemble(&c, derivatives_by_work.remove(&c.public_ref).unwrap_or_default(), &as_of);
+            let search_text = dossier.fragments.iter().map(|f| f.text.as_str()).collect::<Vec<_>>().join("\n");
+            let fragments = match char_limit {
+                Some(budget) => crate::research_dossier::bounded_fragments(&dossier.fragments, budget),
+                None => dossier.fragments,
+            };
+            let fingerprint=hash(&json!({"domain":{ "id":domain["domainRef"],"name":domain["name"],"description":domain["description"],"researchGoal":domain["researchGoal"]},"fragments":fragments.iter().map(|f|(&f.fragment_id,&f.field,&f.text)).collect::<Vec<_>>(),"rule":RULE_VERSION,"config":policy["configRef"]}).to_string());
             let mut result = json!({});
             let mut manual = json!({});
             let mut state = "not_analyzed".to_string();
@@ -1201,17 +1086,17 @@ mod topic_material_tests {
         assert_ne!(full.source_ref, later.source_ref);
         let mut derivative = json!({"jobRef":source,"derivativeRef":Uuid::from_u128(4),"kind":"asr_text",
             "state":"ACQUIRED","researchText":"相同文字","semanticMediaSource":{"blobSha256":"a","slotKey":"slot-a","inputScope":"all","position":{}}});
-        let first = topic_media_fragment(work, &derivative).unwrap();
+        let first = crate::research_dossier::media_fragment(work, &derivative, "transcript", "相同文字").unwrap();
         derivative["jobRef"] = json!(Uuid::from_u128(5));
         derivative["derivativeRef"] = json!(Uuid::from_u128(6));
         assert_eq!(
             first.fragment_id,
-            topic_media_fragment(work, &derivative).unwrap().fragment_id
+            crate::research_dossier::media_fragment(work, &derivative, "transcript", "相同文字").unwrap().fragment_id
         );
         derivative["semanticMediaSource"]["slotKey"] = json!("slot-b");
         assert_ne!(
             first.fragment_id,
-            topic_media_fragment(work, &derivative).unwrap().fragment_id
+            crate::research_dossier::media_fragment(work, &derivative, "transcript", "相同文字").unwrap().fragment_id
         );
     }
 }

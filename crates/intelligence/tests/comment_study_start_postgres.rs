@@ -1,6 +1,7 @@
 //! P2 start/dispatch proofs: disposable PostgreSQL and synthetic materials only. No model I/O.
-#[path = "../../evidence/tests/support/material_fixture.rs"]
-mod fixture;
+#[path = "../../evidence/tests/support/research_dossier_fixture.rs"]
+mod dossier_fixture;
+use dossier_fixture::fixture;
 #[path = "support/comment_research_fixture.rs"]
 mod research_fixture;
 use linggan_intelligence::{
@@ -5189,4 +5190,32 @@ async fn exhausted_problem_stage_budget_closes_all_pending_siblings() {
         1,
         "budget exhaustion records no new provider request"
     );
+}
+
+
+
+#[tokio::test]
+#[ignore = "isolated synthetic PostgreSQL; no shared database or model"]
+async fn dossier_partial_image_body_reaches_v2_frozen_context() {
+    let (db,mut command,_)=setup("dossier_comment_start",0).await;
+    let work=dossier_fixture::work(&db).await;
+    dossier_fixture::legacy_ocr(&db).await;
+    comment_with_author(&db,"dossier-note","reader-one","这些做法里，如何把每个步骤落实到每天的安排？",Some("reader"),"2026-10-14T00:00:00Z").await;
+    refresh_clean_cache(&db,domain(),128).await.unwrap();
+    let dossier=linggan_evidence::research_dossier::read(&db,work).await.unwrap().unwrap();
+    linggan_evidence::research_dossier::relayer_work(&db,work,&dossier.revision).await.unwrap();
+    command.scope=StudyScope::Works{work_refs:vec![work]};
+    command.work_roles.clear();
+    command.limits.context_character_budget=20000;
+    let preview=preview_study_selection(&db,command.preview()).await.unwrap();
+    assert_eq!(preview["targetCount"],1);
+    let receipt=start_study_run(&db,command,TrustedStudyOrigin::Manual).await.unwrap();
+    let context:Value=sqlx::query_scalar("SELECT context_manifest FROM linggan_comment_study_work WHERE run_ref=$1").bind(receipt.run_ref.unwrap()).fetch_one(db.pool()).await.unwrap();
+    assert_eq!(context["dossierContract"],"research-dossier.v1");
+    assert!(context.to_string().contains("第3行连续"));
+    assert!(context.to_string().contains("封面大字独立保留"));
+    assert!(!context.to_string().contains("用途不清"));
+    // No model invocation was made: the existing batch's frozen work context is
+    // the same context exposed to the real model request builder.
+    assert_eq!(effects(&db).await[3],0);
 }

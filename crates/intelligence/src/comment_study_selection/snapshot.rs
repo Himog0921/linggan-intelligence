@@ -1,7 +1,7 @@
-//! One SELECT snapshot, consumed in bounded FETCH windows. No provider calls or writes.
+//! Transaction snapshot: shared dossiers plus a bounded comment cursor. No provider calls or writes.
 use super::*;
 use crate::comment_cleaning::CLEANER_VERSION;
-use crate::comment_study_run::{StudyStartError, bounded_context_manifest};
+use crate::comment_study_run::StudyStartError;
 use serde_json::Value;
 use sqlx::{Postgres, Row, Transaction};
 use std::time::Duration;
@@ -56,20 +56,12 @@ pub(crate) fn requested_works(scope: &StudyScope) -> Vec<Uuid> {
 }
 
 pub(crate) fn freeze_sql() -> String {
-    // The very same work-context SQL used by P1; no second SQL/Rust context builder.
-    let context = include_str!("../comment_study_source/context.sql")
-        .trim_end()
-        .trim_end_matches(';')
-        .replace("$1", "$4")
-        .replace("$2::timestamptz", "$2::text::timestamptz");
     format!(
         "DECLARE cs_study_freeze INSENSITIVE NO SCROLL CURSOR WITHOUT HOLD FOR {}",
-        include_str!("snapshot.sql")
-            .replace("/*SHARED_WORK_CONTEXT_QUERY*/", &context)
-            .replace(
-                "/*SOURCE_ELIGIBILITY_CASE*/",
-                &crate::comment_study_source::gate::sql_case()
-            )
+        include_str!("snapshot.sql").replace(
+            "/*SOURCE_ELIGIBILITY_CASE*/",
+            &crate::comment_study_source::gate::sql_case()
+        )
     )
 }
 
@@ -95,6 +87,21 @@ async fn scan(
     };
     let roles = serde_json::to_value(&command.work_roles)
         .map_err(|_| StudySelectionError::InvalidSnapshot)?;
+    // Callers use a stable transaction snapshot, so all material reads share the
+    // same source visibility as this cursor. Do not reconstruct an OCR rule in SQL.
+    let dossiers = linggan_evidence::research_dossier::read_in(tx, &works, &as_of).await?;
+    let mut contexts: BTreeMap<Uuid, Value> = dossiers
+        .into_iter()
+        .map(|(work, dossier)| {
+            (
+                work,
+                crate::comment_study_source::context::dossier_manifest(
+                    &dossier,
+                    command.limits.context_character_budget as usize,
+                ),
+            )
+        })
+        .collect();
     sqlx::query(sqlx::AssertSqlSafe(freeze_sql()))
         .bind(command.domain_ref)
         .bind(&as_of)
@@ -123,7 +130,14 @@ async fn scan(
         for row in page {
             let payload: Value = row.try_get("payload")?;
             match row.try_get::<i32, _>("kind")? {
-                0 => scan.context(payload, command.limits.context_character_budget as usize)?,
+                0 => {
+                    let work: Uuid = serde_json::from_value(payload["workRef"].clone())
+                        .map_err(|_| StudySelectionError::InvalidSnapshot)?;
+                    let context = contexts
+                        .remove(&work)
+                        .ok_or(StudySelectionError::InvalidSnapshot)?;
+                    scan.contexts.insert(work, context);
+                }
                 1 => scan.comment(payload, command)?,
                 _ => return Err(StudySelectionError::InvalidSnapshot.into()),
             }
@@ -163,19 +177,6 @@ async fn scan(
 }
 
 impl Scan {
-    fn context(&mut self, payload: Value, budget: usize) -> Result<(), StudyStartError> {
-        let work: Uuid = serde_json::from_value(payload["workRef"].clone())
-            .map_err(|_| StudySelectionError::InvalidSnapshot)?;
-        if !payload["fragments"].is_array() || self.contexts.contains_key(&work) {
-            return Err(StudySelectionError::InvalidSnapshot.into());
-        }
-        let manifest = json!({"contract":"comment-study.context.v1","workRef":work,
-            "cleanerVersion":CLEANER_VERSION,"sources":payload["fragments"]});
-        self.contexts
-            .insert(work, bounded_context_manifest(&manifest, budget));
-        Ok(())
-    }
-
     fn comment(
         &mut self,
         payload: Value,
