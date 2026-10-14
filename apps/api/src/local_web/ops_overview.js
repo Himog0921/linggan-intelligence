@@ -101,7 +101,12 @@ const OverviewText = (() => {
     if (point.coverage === 'not_migrated') return '还没迁入';
     return point.coverage === 'partial' ? `按 ${point.coveredTo} 及以前计算` : '';
   }
-  return { missing, metricLabel, platformLabel, sliceTitle, riskLabel, nextStep, number, pct, delta, insight, attention, moreLabel, rankingStep, scale, span, windowLine, blockEmptyText, trendPointNote };
+  function trendAccessibleLabel(points, granularity) {
+    const title = `加微与爆款长趋势，${points.length} 个${{ day: '日', week: '周', month: '月' }[granularity]}`;
+    const partial = points.filter((point) => point.coverage === 'partial').map((point) => `${point.label} · ${trendPointNote(point)}`);
+    return [title, ...partial].join('；');
+  }
+  return { missing, metricLabel, platformLabel, sliceTitle, riskLabel, nextStep, number, pct, delta, insight, attention, moreLabel, rankingStep, scale, span, windowLine, blockEmptyText, trendPointNote, trendAccessibleLabel };
 })();
 
 if (typeof module !== 'undefined') module.exports = { OverviewText };
@@ -354,7 +359,7 @@ if (typeof module !== 'undefined') module.exports = { OverviewText };
         return;
       }
       trendChart(box, data.points);
-      box.setAttribute('aria-label', `加微与爆款长趋势，${data.points.length} 个${{ day: '日', week: '周', month: '月' }[state.granularity]}`);
+      box.setAttribute('aria-label', T.trendAccessibleLabel(data.points, state.granularity));
     } catch (error) {
       if (requestNo !== latestTrend) return;
       state.trend = null;

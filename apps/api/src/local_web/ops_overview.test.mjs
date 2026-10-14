@@ -29,6 +29,15 @@ test('trend labels keep partial counts separate from complete buckets and missin
   assert.equal(trendPointNote({ coverage: 'full', coveredTo: '2026-10-11' }), '');
 });
 
+test('the trend image name includes partial bucket cutoffs for assistive reading', () => {
+  const { trendAccessibleLabel } = loadText();
+  assert.equal(trendAccessibleLabel([{ coverage: 'full' }], 'day'), '加微与爆款长趋势，1 个日');
+  assert.equal(trendAccessibleLabel([
+    { label: '2026-09', coverage: 'full' },
+    { label: '2026-10', coverage: 'partial', coveredTo: '2026-10-11' },
+  ], 'month'), '加微与爆款长趋势，2 个月；2026-10 · 按 2026-10-11 及以前计算');
+});
+
 test('changes read as arrows; a missing or zero previous value is never a fall', () => {
   const { delta } = loadText();
   assert.deepEqual(plain(delta(null)), { text: '环比 —', tone: '' });
