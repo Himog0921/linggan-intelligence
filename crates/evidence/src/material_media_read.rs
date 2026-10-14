@@ -779,7 +779,9 @@ pub(crate) async fn read_topic_derivatives_batch(
                     .map(|(mut derivative, (reference, text, semantic))| {
                         derivative["derivativeRef"] = serde_json::json!(reference);
                         derivative["semanticMediaSource"] = semantic;
-                        if derivative["state"] == "ACQUIRED" && matches!(derivative["kind"].as_str(), Some("asr_text" | "ocr_text")) {
+                        if derivative["state"] == "ACQUIRED"
+                            && matches!(derivative["kind"].as_str(), Some("asr_text" | "ocr_text"))
+                        {
                             derivative["researchText"] = serde_json::json!(text);
                         }
                         derivative
@@ -812,7 +814,7 @@ async fn read_derivative_rows(
         "LEFT JOIN LATERAL (SELECT NULL::uuid AS retired_job_ref) retired ON true"
     };
     let layering_join = if ocr_retirement_schema_ready {
-        "LEFT JOIN LATERAL (SELECT layout.image_width,layout.image_height,layout.engine_version,layer.layout_ref,layer.layering_ref,layer.layer_version,layer.state,layer.decision_source,layer.cover_headline,layer.image_substantive_text,layer.retained_line_refs,layer.excluded_lines FROM linggan_media_ocr_layout layout JOIN linggan_media_ocr_layering_result layer USING(layout_ref) WHERE layout.ocr_derivative_ref=derivative.derivative_ref AND layout.created_at<=$2::timestamptz AND layer.created_at<=$2::timestamptz AND layer.layer_version IN ('rules-v1','rules-v2') ORDER BY CASE layer.layer_version WHEN 'rules-v2' THEN 0 ELSE 1 END,layer.created_at DESC,layer.layering_ref DESC LIMIT 1) layering ON true"
+        "LEFT JOIN LATERAL (SELECT layout.image_width,layout.image_height,layout.engine_version,layer.layout_ref,layer.layering_ref,layer.layer_version,layer.state,layer.decision_source,layer.cover_headline,layer.image_substantive_text,layer.retained_line_refs,layer.excluded_lines FROM linggan_media_ocr_layout layout JOIN linggan_media_ocr_layering_result layer USING(layout_ref) WHERE layout.ocr_derivative_ref=derivative.derivative_ref AND layout.created_at<=$2::timestamptz AND layer.created_at<=$2::timestamptz AND layer.layer_version IN ('rules-v1','rules-v2','rules-v3') ORDER BY CASE layer.layer_version WHEN 'rules-v3' THEN 0 WHEN 'rules-v2' THEN 1 ELSE 2 END,layer.created_at DESC,layer.layering_ref DESC LIMIT 1) layering ON true"
     } else {
         "LEFT JOIN LATERAL (SELECT NULL::integer AS image_width,NULL::integer AS image_height,NULL::text AS engine_version,NULL::uuid AS layout_ref,NULL::uuid AS layering_ref,NULL::text AS layer_version,NULL::jsonb AS retained_line_refs,NULL::jsonb AS excluded_lines,NULL::text AS state,NULL::text AS decision_source,NULL::text AS cover_headline,NULL::text AS image_substantive_text) layering ON true"
     };
@@ -943,12 +945,24 @@ fn project_derivative_rows(
         } else {
             Value::Null
         };
-        let clean_corpus_eligible = !restricted && !retired && state == "ACQUIRED"
+        let clean_corpus_eligible = !restricted
+            && !retired
+            && state == "ACQUIRED"
             && (layering_state.as_deref() == Some("ACCEPTED")
-                || (row.get::<Option<String>,_>("layer_version").as_deref() == Some("rules-v2")
-                    && layering_state.as_deref() == Some("PARTIAL")))
-            && (row.get::<Option<String>,_>("layer_version").as_deref() != Some("rules-v2")
-                || row.get::<Option<Value>,_>("retained_line_refs").and_then(|v|v.as_array().cloned()).is_some_and(|refs| refs.iter().any(|r|r["classification"]=="substantive_text")))
+                || (matches!(
+                    row.get::<Option<String>, _>("layer_version").as_deref(),
+                    Some("rules-v2" | "rules-v3")
+                ) && layering_state.as_deref() == Some("PARTIAL")))
+            && (!matches!(
+                row.get::<Option<String>, _>("layer_version").as_deref(),
+                Some("rules-v2" | "rules-v3")
+            ) || row
+                .get::<Option<Value>, _>("retained_line_refs")
+                .and_then(|v| v.as_array().cloned())
+                .is_some_and(|refs| {
+                    refs.iter()
+                        .any(|r| r["classification"] == "substantive_text")
+                }))
             && row
                 .get::<Option<String>, _>("image_substantive_text")
                 .is_some_and(|text| !text.trim().is_empty());

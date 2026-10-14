@@ -110,7 +110,7 @@
     try {
       const result = await json(`${state.base}/relayer`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expectedRevision: state.payload.dossier.revision, domain: state.options.domain || null }) });
       if (!live(state)) return;
-      state.notice = `本次 ${result.scopeCount} 张：更新 ${result.updated} 张，已是当前版本 ${result.alreadyCurrent} 张，跳过 ${result.skipped} 张。`;
+      state.notice = `本次 ${result.scopeCount} 个版面：更新 ${result.updated} 个，已是当前版本 ${result.alreadyCurrent} 个，跳过 ${result.skipped} 个。`;
       await load(state);
     } catch (error) { if (live(state)) { state.status.textContent = errorText(error); trigger.disabled = false; } }
   }
@@ -128,13 +128,14 @@
     const plan=state.payload.relayerPlan;
     const count = plan.layoutCount;
     head.append(el('p',`本篇可用布局 ${count} 个 · 待分层 ${plan.pendingLayouts} 个 · 已是当前版本 ${plan.alreadyCurrent} 个 · 需先识字 ${plan.needsOcr} 个`,'rd-note'));
-    const action = button(`重新分层（${count} 张）`, event => relayer(state, event.currentTarget));
+    const action = button(`重新分层（${count} 个版面）`, event => relayer(state, event.currentTarget));
     action.disabled = !count || count > 100; toolbar.append(action); head.append(toolbar);
-    head.append(el('p', '重新分层只处理本篇已有的识别行，不重新识图，也不启动 AI 研究。', 'rd-note'));
+    head.append(el('p', '重新分层处理已有版面；封面与首图可能是同一图片，送给 AI 时会去重。不重新识图，也不启动 AI 研究。', 'rd-note'));
     state.status = el('p', state.notice || '', 'rd-status'); state.status.setAttribute('role', 'status'); head.append(state.status);
     const coverage = section('完整度与下一步');
     const labels = { KNOWN: '已取得', KNOWN_EMPTY: '已确认没有', UNKNOWN: '未知', UNAVAILABLE: '暂不可用' };
     coverage.append(el('p', `原标题：${labels[dossier.coverage.title] || dossier.coverage.title}；正文：${labels[dossier.coverage.body] || dossier.coverage.body}；媒体处理结果：${dossier.coverage.mediaAvailable}/${dossier.coverage.mediaCount} 可读取。`));
+    if (dossier.coverage.titleQualification === 'suspected_count') coverage.append(el('p', '发现记录中的数字与同次点赞数相同，且未取得详情标题，已排除出平台标题；列表可使用封面大字作为展示标题。', 'rd-note'));
     coverage.append(el('p', '缺少原文或原图：先在“材料”查看获取状态，再通过现有采集任务补齐。识别已取得但分层不理想：使用上方“重新分层”。这份底稿只代表已经采到的材料。', 'rd-note'));
     const content = section('完整文字');
     if (!dossier.fragments.length) content.append(el('p', '暂未取得可用文字；这不等于原作品没有内容。'));

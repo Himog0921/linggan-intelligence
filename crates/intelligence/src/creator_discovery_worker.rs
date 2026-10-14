@@ -208,7 +208,8 @@ async fn execute(
     .bind(config)
     .fetch_one(db.pool())
     .await?;
-    let (input, fragments) = crate::creator_discovery_input::prepare(&data.domain,w,input_budget as usize)?;
+    let (input, fragments) =
+        crate::creator_discovery_input::prepare(&data.domain, w, input_budget as usize)?;
     let (raw, invocation) = call(
         db,
         secrets,
@@ -221,9 +222,10 @@ async fn execute(
         work.to_string(),
         lease,
         fingerprint,
+        &crate::creator_discovery_input::citation_map(&fragments),
     )
     .await?;
-    let output = validate_work(&raw, &fragments);
+    let output = crate::creator_discovery_input::validate_response(&raw, &fragments);
     // Author focus uses already available summaries; limited samples remain explicitly limited.
     if let Some(author) = &w.author_external_id {
         let related: Vec<_> = data
@@ -260,6 +262,7 @@ async fn call(
     job_key: String,
     lease: Uuid,
     fingerprint: &str,
+    citation_map: &Value,
 ) -> Result<(Value, Uuid), ModelError> {
     let mut permit = reserve_research_model_semantic_dispatch_permit(db, config).await?;
     let row=sqlx::query("SELECT c.*,m.connection_version_ref,m.model_id FROM linggan_model_config c JOIN linggan_model_entry m USING(model_ref) WHERE c.config_ref=$1").bind(config).fetch_one(db.pool()).await?;
@@ -291,7 +294,7 @@ async fn call(
     if charged + reserved > daily_limit {
         return Err(ModelError::Budget);
     }
-    sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,config_ref,operation,request_hash,state,reserved_tokens,charged_tokens,result) VALUES($1,$2,$3,$4,'analyze',$5,'running',$6,$6,jsonb_build_object('purpose','creator_discovery','domainRef',$7::text,'jobKind',$8::text,'jobKey',$9::text,'jobLease',$10::text,'inputFingerprint',$11::text))").bind(invocation).bind(row.get::<Uuid,_>("connection_version_ref")).bind(row.get::<Uuid,_>("model_ref")).bind(config).bind(discovery::hash(&input.to_string())).bind(reserved).bind(domain.to_string()).bind(job_kind).bind(&job_key).bind(lease.to_string()).bind(fingerprint).execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,config_ref,operation,request_hash,state,reserved_tokens,charged_tokens,result) VALUES($1,$2,$3,$4,'analyze',$5,'running',$6,$6,jsonb_build_object('purpose','creator_discovery','domainRef',$7::text,'jobKind',$8::text,'jobKey',$9::text,'jobLease',$10::text,'inputFingerprint',$11::text,'citationMap',$12::jsonb))").bind(invocation).bind(row.get::<Uuid,_>("connection_version_ref")).bind(row.get::<Uuid,_>("model_ref")).bind(config).bind(discovery::hash(&input.to_string())).bind(reserved).bind(domain.to_string()).bind(job_kind).bind(&job_key).bind(lease.to_string()).bind(fingerprint).bind(citation_map).execute(&mut *tx).await?;
     tx.commit().await?;
     let mut dispatch = permit.begin().await?;
     let ready = research_model_semantically_ready_in_transaction(&mut dispatch, config).await;
@@ -399,7 +402,7 @@ async fn run_focus(
   }
   let input=json!({"domain":data.domain,"works":summaries,"fragments":fragments,"sampleBasis":if broad.len()>=2{"profile_discovery_sample"}else{"limited_domain_sample"}});
   if fragments.is_empty() {return Ok::<_,ModelError>((validate_focus(&json!({}),&fragments,&related,&broad),None));}
-  let (raw,invocation)=call(db,secrets,adapter,domain,config,FOCUS_SYSTEM,&input,"focus",author.clone(),lease,&fingerprint).await?;
+  let (raw,invocation)=call(db,secrets,adapter,domain,config,FOCUS_SYSTEM,&input,"focus",author.clone(),lease,&fingerprint,&Value::Null).await?;
   Ok::<_,ModelError>((validate_focus(&raw,&fragments,&related,&broad),Some(invocation)))
  }.await;
     match result {

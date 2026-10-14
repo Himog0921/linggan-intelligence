@@ -1,7 +1,7 @@
 //! Local, reproducible OCR selection. No model call and no rewritten source text.
 use crate::{OcrExcludedLineInput, OcrLayeringInput, OcrLineInput};
 
-pub const VERSION: &str = "rules-v2";
+pub const VERSION: &str = "rules-v3";
 
 fn height(line: &OcrLineInput) -> f64 {
     line.bbox_norm[3] - line.bbox_norm[1]
@@ -31,13 +31,34 @@ fn exclusion(line: &OcrLineInput) -> Option<(&'static str, &'static str)> {
     }
 }
 
-fn ordered(lines: &[OcrLineInput], mut selected: Vec<usize>) -> Vec<usize> {
-    selected.sort_by(|a, b| {
-        lines[*a].bbox_norm[1]
-            .total_cmp(&lines[*b].bbox_norm[1])
-            .then_with(|| lines[*a].bbox_norm[0].total_cmp(&lines[*b].bbox_norm[0]))
-    });
-    selected
+fn same_row(a: &OcrLineInput, b: &OcrLineInput) -> bool {
+    let overlap = a.bbox_norm[3].min(b.bbox_norm[3]) - a.bbox_norm[1].max(b.bbox_norm[1]);
+    overlap >= height(a).min(height(b)) * 0.5
+        && (a.bbox_norm[2] <= b.bbox_norm[0] + 0.01 || b.bbox_norm[2] <= a.bbox_norm[0] + 0.01)
+}
+
+// Group first, then sort within each row. A fuzzy pairwise comparator is not transitive.
+fn rows(lines: &[OcrLineInput], mut selected: Vec<usize>) -> Vec<Vec<usize>> {
+    selected.sort_by(|a, b| lines[*a].bbox_norm[1].total_cmp(&lines[*b].bbox_norm[1]));
+    let mut rows: Vec<Vec<usize>> = vec![];
+    for i in selected {
+        if let Some(row) = rows
+            .last_mut()
+            .filter(|r| same_row(&lines[r[0]], &lines[i]))
+        {
+            row.push(i);
+        } else {
+            rows.push(vec![i]);
+        }
+    }
+    for row in &mut rows {
+        row.sort_by(|a, b| lines[*a].bbox_norm[0].total_cmp(&lines[*b].bbox_norm[0]));
+    }
+    rows
+}
+
+fn ordered(lines: &[OcrLineInput], selected: Vec<usize>) -> Vec<usize> {
+    rows(lines, selected).into_iter().flatten().collect()
 }
 
 fn join(lines: &[OcrLineInput], ordinals: &[usize], separator: &str) -> Option<String> {
@@ -89,7 +110,11 @@ fn headline(lines: &[OcrLineInput], retained: &[usize]) -> Vec<usize> {
                         let a = lines[*i].bbox_norm;
                         let b = lines[*j].bbox_norm;
                         let gap = (a[1] - b[3]).max(b[1] - a[3]);
-                        gap >= -scale * 0.3 && gap <= scale * 1.2 && a[0].max(b[0]) < a[2].min(b[2])
+                        (same_row(&lines[*i], &lines[*j])
+                            && (a[0] - b[2]).max(b[0] - a[2]) <= scale * 1.2)
+                            || (gap >= -scale * 0.3
+                                && gap <= scale * 1.2
+                                && a[0].max(b[0]) < a[2].min(b[2]))
                     })
             })
             .collect();
@@ -115,55 +140,68 @@ fn body(
     if screenshot {
         return vec![];
     }
-    let candidates = ordered(
-        lines,
-        retained
-            .iter()
-            .copied()
-            .filter(|i| {
-                let l = &lines[*i];
-                !headings.contains(i)
-                    && l.confidence >= 0.75
-                    && width(l) >= 0.25
-                    && l.text.trim().chars().count() >= 6
-                    && l.bbox_norm[1] >= 0.08
-                    && l.bbox_norm[3] <= 0.92
-            })
-            .collect(),
-    );
+    let candidates: Vec<_> = retained
+        .iter()
+        .copied()
+        .filter(|i| {
+            let l = &lines[*i];
+            !headings.contains(i)
+                && l.confidence >= 0.75
+                && width(l) >= 0.08
+                && l.text.trim().chars().count() >= 2
+                && l.bbox_norm[1] >= 0.08
+                && l.bbox_norm[3] <= 0.92
+        })
+        .collect();
     if headings.is_empty() && retained.len() == 1 {
-        return candidates;
+        return candidates
+            .into_iter()
+            .filter(|i| width(&lines[*i]) >= 0.25 && lines[*i].text.chars().count() >= 6)
+            .collect();
     }
-    // A continuous text-card block must be below its heading. Detached photographed text
-    // above a large caption remains uncertain; OCR geometry cannot establish its purpose.
     let heading_bottom = headings
         .iter()
         .map(|i| lines[*i].bbox_norm[3])
         .fold(0.0, f64::max);
-    let mut groups: Vec<Vec<usize>> = vec![];
-    for i in candidates
+    let mut groups: Vec<Vec<Vec<usize>>> = vec![];
+    for row in rows(lines, candidates)
         .into_iter()
-        .filter(|i| lines[*i].bbox_norm[1] >= heading_bottom)
+        .filter(|r| lines[r[0]].bbox_norm[1] >= heading_bottom)
     {
-        let joins = groups.last().and_then(|g| g.last()).is_some_and(|j| {
-            let a = &lines[*j];
-            let b = &lines[i];
-            let gap = b.bbox_norm[1] - a.bbox_norm[3];
-            (b.bbox_norm[0] - a.bbox_norm[0]).abs() <= 0.08
-                && gap >= -0.005
-                && gap <= height(a) * 2.0
-                && height(b) >= height(a) * 0.65
-                && height(b) <= height(a) * 1.5
-        });
+        let joins = groups
+            .last()
+            .and_then(|g| g.last())
+            .is_some_and(|previous| {
+                let a = &lines[previous[0]];
+                let b = &lines[row[0]];
+                let bottom = previous
+                    .iter()
+                    .map(|i| lines[*i].bbox_norm[3])
+                    .fold(0.0, f64::max);
+                let gap = b.bbox_norm[1] - bottom;
+                (b.bbox_norm[0] - a.bbox_norm[0]).abs() <= 0.08
+                    && gap >= -0.005
+                    && gap <= height(a) * 2.0
+                    && height(b) >= height(a) * 0.60
+                    && height(b) <= height(a) * 1.6
+            });
         if joins {
-            groups.last_mut().expect("existing group").push(i);
+            groups.last_mut().expect("existing group").push(row);
         } else {
-            groups.push(vec![i]);
+            groups.push(vec![row]);
         }
     }
+    // Short continuations belong to an established paragraph; isolated labels do not.
     let selected: Vec<_> = groups
         .into_iter()
-        .filter(|g| g.len() >= 3)
+        .filter(|g| {
+            g.len() >= 3
+                && g.iter()
+                    .filter(|row| row.iter().map(|i| width(&lines[*i])).sum::<f64>() >= 0.25)
+                    .count()
+                    >= 2
+        })
+        .flatten()
         .flatten()
         .collect();
     if join(lines, &selected, "\n").is_some_and(|s| s.len() <= 20_000) {
@@ -187,12 +225,24 @@ pub fn layer_lines(lines: &[OcrLineInput]) -> OcrLayeringInput {
             retained.push(ordinal);
         }
     }
-    let headings = headline(lines, &retained);
+    let mut headings = headline(lines, &retained);
+    // Multiple detached large-text blocks cannot be assigned a caption/body role from
+    // geometry alone (for example photographed packaging). Keep their OCR for review.
+    let detached = !headings.is_empty()
+        && retained.iter().any(|i| {
+            !headings.contains(i)
+                && lines[*i].confidence >= 0.75
+                && height(&lines[*i]) >= 0.045
+                && width(&lines[*i]) >= 0.24
+        });
+    if detached {
+        headings.clear();
+    }
     let substantive = body(
         lines,
         &retained,
         &headings,
-        excluded.iter().any(|l| l.classification == "platform_ui"),
+        detached || excluded.iter().any(|l| l.classification == "platform_ui"),
     );
     let state = if retained.is_empty() {
         "NEEDS_REVIEW"
@@ -318,5 +368,97 @@ mod tests {
         assert_eq!(result.state, "ACCEPTED");
         assert_eq!(result.substantive_ordinals.len(), 3);
         assert!(result.cover_headline.is_none());
+    }
+    #[test]
+    fn visual_rows_keep_split_heading_and_paragraph_short_tail() {
+        let mut a = line("研究", 0.14, 0.055);
+        a.bbox_norm[2] = 0.43;
+        let mut b = line("独居：", 0.13, 0.078);
+        b.bbox_norm[0] = 0.46;
+        let lines = vec![
+            b,
+            a,
+            line("自由怎么", 0.23, 0.08),
+            line("变成了失控？", 0.33, 0.085),
+        ];
+        let layered = layer_lines(&lines);
+        assert_eq!(
+            layered.cover_headline.as_deref(),
+            Some("研究 独居： 自由怎么 变成了失控？")
+        );
+        let mut first = line("对一些人", 0.15, 0.028);
+        first.bbox_norm[2] = 0.37;
+        let mut second = line("来说，生活会减少很多提醒", 0.152, 0.026);
+        second.bbox_norm[0] = 0.38;
+        let mut tail = line("的方法。", 0.33, 0.028);
+        tail.bbox_norm[2] = 0.31;
+        let lines = vec![
+            line("独居的日常提醒", 0.095, 0.031),
+            first,
+            second,
+            line("每天的出门时间和吃饭时间。", 0.195, 0.028),
+            line("可以逐步寻找适合自己的安排", 0.24, 0.028),
+            line("并记录其中确实有效", 0.285, 0.028),
+            tail,
+        ];
+        let layered = layer_lines(&lines);
+        assert_eq!(layered.substantive_ordinals, vec![0, 1, 2, 3, 4, 5, 6]);
+        assert!(has_exact_provenance(&lines, &layered));
+    }
+
+    #[test]
+    fn detached_packaging_blocks_are_not_promoted_to_author_caption() {
+        let lines = vec![
+            line("第一件包装上的商品名", 0.06, 0.049),
+            line("第一件包装的说明文字", 0.17, 0.027),
+            line("第二件包装上的商品名", 0.51, 0.074),
+            line("第二件包装的说明文字", 0.60, 0.027),
+        ];
+        let layered = layer_lines(&lines);
+        assert!(layered.cover_headline.is_none());
+        assert!(layered.image_substantive_text.is_none());
+        assert_eq!(layered.retained_ordinals.len(), 4);
+    }
+
+    #[test]
+    #[ignore = "explicit private local sample replay; no network or database"]
+    fn replay_private_layouts() {
+        let path = std::env::var("DOSSIER_PRIVATE_LAYOUTS").expect("private file path");
+        let samples: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        for sample in samples.as_array().unwrap() {
+            let lines: Vec<OcrLineInput> = sample["lines"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|l| OcrLineInput {
+                    text: l["text"].as_str().unwrap().into(),
+                    confidence: l["confidence"].as_f64().unwrap(),
+                    bbox_norm: serde_json::from_value(l["bbox"].clone()).unwrap(),
+                })
+                .collect();
+            let result = layer_lines(&lines);
+            assert!(has_exact_provenance(&lines, &result));
+            assert_eq!(
+                serde_json::to_value(&result.headline_ordinals).unwrap(),
+                sample["headline"]
+            );
+            assert_eq!(
+                serde_json::to_value(&result.substantive_ordinals).unwrap(),
+                sample["body"]
+            );
+        }
+    }
+
+    #[test]
+    fn a_single_heading_row_can_have_two_separate_ocr_blocks() {
+        let mut left = line("测试", 0.15, 0.07);
+        left.bbox_norm[2] = 0.45;
+        let mut right = line("标题", 0.15, 0.07);
+        right.bbox_norm[0] = 0.50;
+        let result = layer_lines(&[right, left]);
+        assert_eq!(result.cover_headline.as_deref(), Some("测试 标题"));
+        assert_eq!(result.headline_ordinals, vec![1, 0]);
+        assert_eq!(result.state, "ACCEPTED");
     }
 }

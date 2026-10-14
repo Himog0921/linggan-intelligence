@@ -136,8 +136,15 @@ latest_detail AS (
     COALESCE(detail.package_ref,discovery.package_ref) AS package_ref,
     COALESCE(detail.record_ordinal,discovery.record_ordinal) AS record_ordinal,
     linggan_human_moment(COALESCE(detail.observed_at,discovery.observed_at,lane_latest.observed_at)) AS observed_at,
-    COALESCE(detail_title.title,discovery.title) AS title,
-    COALESCE(detail_title.title_state,discovery.title_state,'UNKNOWN') AS title_state,
+    CASE WHEN detail_title.title IS NULL AND discovery.title ~ '^[0-9]+$'
+      AND discovery.title=discovery.like_count::text THEN NULL
+      ELSE COALESCE(detail_title.title,discovery.title) END AS title,
+    CASE WHEN detail_title.title IS NULL AND discovery.title ~ '^[0-9]+$'
+      AND discovery.title=discovery.like_count::text THEN 'UNKNOWN'
+      ELSE COALESCE(detail_title.title_state,discovery.title_state,'UNKNOWN') END AS title_state,
+    CASE WHEN detail_title.title IS NULL AND discovery.title ~ '^[0-9]+$'
+      AND discovery.title=discovery.like_count::text THEN 'suspected_count'
+      ELSE 'source_value' END AS title_qualification,
     COALESCE(detail_title.material_ref,discovery.material_ref) AS title_source_material_ref,
     COALESCE(detail_title.package_ref,discovery.package_ref) AS title_source_package_ref,
     COALESCE(detail_title.record_ordinal,discovery.record_ordinal) AS title_source_record_ordinal,
