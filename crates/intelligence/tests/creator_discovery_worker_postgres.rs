@@ -64,6 +64,15 @@ async fn worker_admission_budget_fingerprints_and_bounded_recovery() {
     }
     let count=sqlx::query_scalar::<_,i64>("SELECT count(*) FROM linggan_model_invocation WHERE operation='analyze' AND state='succeeded'").fetch_one(db.pool()).await.unwrap();
     assert_eq!(count, 3, "2 work analyses and 1 author analysis");
+    let maps:Vec<serde_json::Value>=sqlx::query_scalar("SELECT result->'citationMap' FROM linggan_model_invocation WHERE result->>'jobKind'='work' AND state='succeeded'").fetch_all(db.pool()).await.unwrap();
+    assert_eq!(maps.len(),2);
+    for map in maps {
+        assert_eq!(map[0]["citation"],"S1");
+        assert!(map[0]["fragmentId"].as_str().unwrap().contains(".title."));
+        assert!(map[0]["sourceRef"].as_str().is_some());
+        assert!(map[0]["sourceVersion"].as_str().is_some());
+        assert!(map[0].get("text").is_none(),"no duplicate original text in audit map");
+    }
     let q = serde_json::from_value(json!({"domain":D})).unwrap();
     let data = load(&db, &q).await.unwrap();
     assert!(data.works.iter().all(|w| w.relevance == "related"));

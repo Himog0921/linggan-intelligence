@@ -14,7 +14,13 @@ FROM current_origin origin
 JOIN linggan_media_processing_job job ON job.slot_key = origin.slot_key
 JOIN linggan_media_derivative derivative ON derivative.job_ref = job.job_ref
 JOIN linggan_media_ocr_layout layout ON layout.ocr_derivative_ref = derivative.derivative_ref
-JOIN linggan_media_ocr_layering_result result USING (layout_ref)
+JOIN LATERAL (
+  SELECT layer.* FROM linggan_media_ocr_layering_result layer
+  WHERE layer.layout_ref=layout.layout_ref AND layer.created_at <= $2::timestamptz
+    AND layer.layer_version IN ('rules-v1','rules-v2','rules-v3')
+  ORDER BY CASE layer.layer_version WHEN 'rules-v3' THEN 0 WHEN 'rules-v2' THEN 1 ELSE 2 END,
+    layer.created_at DESC,layer.layering_ref DESC LIMIT 1
+) result ON true
 WHERE result.state IN ('ACCEPTED', 'PARTIAL')
   AND NULLIF(btrim(result.cover_headline), '') IS NOT NULL
   AND job.processor_kind = 'image_ocr'

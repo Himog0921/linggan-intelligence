@@ -143,3 +143,7 @@
 - 位置：随机 `linggan-intelligence-research-dossier-proof-*` Docker container/volume，`/tmp/linggan-dossier-*` 构建、日志与合成媒体；浏览器审阅截图放当前任务授权的 Codex visualizations 目录，稳定名 `research-dossier-phase1-*.jpg`。
 - Git：只提交脚本、fixture 和汇总验证记录；不提交二进制、截图、原文、DSN 或凭据。
 - 再生与清理：上述脚本运行必要集成回归；`--http` 只验证接口，`--preview` 只运行合成页面服务直到中断。脚本 EXIT 核实清理自己的 DB/container/volume；页面验证后停止候选服务。临时构建缓存可复用，媒体与截图仅用于本任务审阅。
+
+### 第一阶段真实验收续修（#420）
+
+Mog 授权三篇指定作品在本机核对与重新分层。私有材料快照、几何回放输入、运行日志放 `/tmp/linggan-dossier-acceptance/`（0700），不入 Git、不发送模型；结束后删除原始材料快照。截图保留在本任务 Codex visualizations，命名 `research-dossier-acceptance-*.png`，用于 Mog 验收。候选 API 仅监听本机独立端口，读取同一共享材料并只执行这三篇已授权的追加分层；不替换 3000、不启动 worker。验收结束停止该进程。
