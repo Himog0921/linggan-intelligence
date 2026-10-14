@@ -87,6 +87,76 @@ mod targets;
 
 #[tokio::test]
 #[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn trend_coverage_distinguishes_missing_partial_and_known_zero_buckets() {
+    let empty = proof_database("ops_trend_never_imported").await;
+    let db = imported("ops_trend_coverage").await;
+    for granularity in ["day", "week", "month"] {
+        let unknown = read_ops_overview_trend(
+            &empty,
+            OpsBusiness::All,
+            Some(granularity),
+            Some("2026-10-14"),
+        )
+        .await
+        .unwrap();
+        let data = serde_json::to_value(unknown).unwrap();
+        for point in data["points"].as_array().unwrap() {
+            assert!(
+                point["hits"].is_null(),
+                "no import: every bucket is unknown"
+            );
+            assert!(point["followersGained"].is_null());
+            assert_eq!(point["coverage"], "not_migrated");
+            assert!(point["coveredTo"].is_null());
+        }
+        let trend =
+            read_ops_overview_trend(&db, OpsBusiness::All, Some(granularity), Some("2026-10-14"))
+                .await
+                .unwrap();
+        let data = serde_json::to_value(trend).unwrap();
+        let points = data["points"].as_array().unwrap();
+        let last = points.last().unwrap();
+        if granularity == "month" {
+            assert_eq!(last["hits"], 1);
+            assert_eq!(last["followersGained"], 1);
+            assert_eq!(last["coverage"], "partial");
+            assert_eq!(last["coveredTo"], "2026-10-11");
+        } else {
+            assert!(last["hits"].is_null());
+            assert_eq!(last["coverage"], "not_migrated");
+            assert!(last["coveredTo"].is_null());
+            let known_zero = &points[points.len() - if granularity == "day" { 4 } else { 2 }];
+            assert_eq!(known_zero["hits"], 0);
+            assert_eq!(known_zero["coverage"], "full");
+        }
+    }
+    let partial_db = proof_database("ops_trend_partial_week").await;
+    let mut export = overview_export();
+    export
+        .daily
+        .retain(|row| row["dateKey"].as_str().unwrap() <= "2026-10-08");
+    let request = export.request("2026-10-09T22:43:00+08:00");
+    let preview = preview_ops_import(&partial_db, &request).await.unwrap();
+    apply_ops_import(&partial_db, &request, &preview.preview_hash)
+        .await
+        .unwrap();
+    let trend = read_ops_overview_trend(
+        &partial_db,
+        OpsBusiness::All,
+        Some("week"),
+        Some("2026-10-10"),
+    )
+    .await
+    .unwrap();
+    let data = serde_json::to_value(trend).unwrap();
+    let last = data["points"].as_array().unwrap().last().unwrap();
+    assert_eq!(last["coverage"], "partial");
+    assert_eq!(last["coveredTo"], "2026-10-08");
+    assert_eq!(last["hits"], 0, "known zero only within the covered part");
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
 async fn trend_buckets_end_today_and_keep_unknown_weeks_apart_from_zero() {
     let db = imported("ops_overview_trend").await;
     let month = read_ops_overview_trend(&db, OpsBusiness::All, Some("month"), Some("2026-10-02"))
@@ -102,7 +172,7 @@ async fn trend_buckets_end_today_and_keep_unknown_weeks_apart_from_zero() {
     let september = &month.points[4];
     assert_eq!(
         (september.followers_gained, september.hits),
-        (Some(24), 1),
+        (Some(24), Some(1)),
         "4 + 0 + 20 + 0 + 0; only the Xiaohongshu 6000 is a hit"
     );
     assert_eq!(
@@ -111,7 +181,7 @@ async fn trend_buckets_end_today_and_keep_unknown_weeks_apart_from_zero() {
     );
     assert_eq!(
         (month.points[5].followers_gained, month.points[5].hits),
-        (Some(1), 1)
+        (Some(1), Some(1))
     );
     let adhd = read_ops_overview_trend(
         &db,
@@ -123,7 +193,7 @@ async fn trend_buckets_end_today_and_keep_unknown_weeks_apart_from_zero() {
     .unwrap();
     assert_eq!(
         (adhd.points[5].followers_gained, adhd.points[5].hits),
-        (Some(1), 0),
+        (Some(1), Some(0)),
         "the October hit has no account, so no business; 加微 is not split by business"
     );
     let weeks = read_ops_overview_trend(&db, OpsBusiness::All, Some("week"), Some("2026-10-02"))

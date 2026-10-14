@@ -69,6 +69,7 @@ pub struct MatrixCell {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OverviewMatrix {
+    pub covered: bool,
     pub operators: Vec<String>,
     pub accounts: Vec<MatrixAccount>,
     pub cells: Vec<MatrixCell>,
@@ -162,9 +163,9 @@ pub(super) async fn platform_share(
     database: &Database,
     business: OpsBusiness,
     window: &OverviewWindow,
-) -> Result<OverviewPlatformShare, OpsReadError> {
+) -> Result<Option<OverviewPlatformShare>, OpsReadError> {
     let Some(covered) = &window.covered else {
-        return Ok(OverviewPlatformShare { xhs: 0, douyin: 0 });
+        return Ok(None);
     };
     let row = sqlx::query(
         "SELECT count(*) FILTER (WHERE p.platform = 'xhs') AS xhs, \
@@ -180,10 +181,10 @@ pub(super) async fn platform_share(
     .bind(&covered.to)
     .fetch_one(database.pool())
     .await?;
-    Ok(OverviewPlatformShare {
+    Ok(Some(OverviewPlatformShare {
         xhs: row.try_get("xhs")?,
         douyin: row.try_get("douyin")?,
-    })
+    }))
 }
 
 /// Rows are publishers, columns the accounts that published in the window.
@@ -193,6 +194,7 @@ pub(super) async fn matrix(
     window: &OverviewWindow,
 ) -> Result<OverviewMatrix, OpsReadError> {
     let mut matrix = OverviewMatrix {
+        covered: window.covered.is_some(),
         operators: Vec::new(),
         accounts: Vec::new(),
         cells: Vec::new(),

@@ -7,6 +7,80 @@ use linggan_intelligence::ops_ledger::targets::{
 use linggan_storage_postgres::Database;
 use uuid::Uuid;
 
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn monday_yesterday_reads_and_changes_todays_week_target() {
+    let db = super::imported("ops_monday_yesterday_target").await;
+    for (today, yesterday, previous_key, current_key) in [
+        ("2026-10-12", "2026-10-11", "2026-W41", "2026-W42"),
+        ("2026-11-02", "2026-11-01", "2026-W44", "2026-W45"),
+        ("2027-01-04", "2027-01-03", "2026-W53", "2027-W01"),
+    ] {
+        let previous = TargetPeriod::parse("week", previous_key).unwrap();
+        let current = TargetPeriod::parse("week", current_key).unwrap();
+        for (period, value) in [(previous.clone(), 100), (current.clone(), 200)] {
+            set_ops_target(
+                &db,
+                &SetTargetRequest {
+                    period,
+                    target_value: value,
+                    expected_revision: None,
+                    request_ref: Uuid::new_v4(),
+                },
+            )
+            .await
+            .unwrap();
+        }
+        let page = super::overview(
+            &db,
+            super::OpsBusiness::All,
+            super::OverviewSlice::Yesterday,
+            today,
+        )
+        .await;
+        assert_eq!(page.window.current.from, yesterday);
+        assert_eq!(page.target.period_key.as_deref(), Some(current_key));
+        assert_eq!(
+            page.target.period_key.as_deref(),
+            Some(page.window.this_week.as_str())
+        );
+        let revision = page.target.revision.unwrap();
+        assert_eq!(
+            revision.target_value, 200,
+            "display the current week, never last week"
+        );
+        let changed = set_ops_target(
+            &db,
+            &SetTargetRequest {
+                period: current,
+                target_value: 300,
+                expected_revision: Some(revision.revision_ref),
+                request_ref: Uuid::new_v4(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(changed.outcome, "accepted");
+        let refreshed = super::overview(
+            &db,
+            super::OpsBusiness::All,
+            super::OverviewSlice::Yesterday,
+            today,
+        )
+        .await;
+        assert_eq!(refreshed.target.revision.unwrap().target_value, 300);
+        assert_eq!(
+            read_ops_target_history(&db, &previous)
+                .await
+                .unwrap()
+                .current
+                .unwrap()
+                .target_value,
+            100
+        );
+    }
+}
+
 fn save(value: i32, expected: Option<Uuid>, request: Uuid) -> SetTargetRequest {
     SetTargetRequest {
         period: TargetPeriod::parse("week", "2026-W36").unwrap(),

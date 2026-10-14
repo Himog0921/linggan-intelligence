@@ -1,13 +1,13 @@
 # 运营页面接口合同（OPS-HTTP-001）
 
 > 状态: 权威当前
-> 最后核对: 2026-10-13
+> 最后核对: 2026-10-14
 > 适用范围: OPS-MIGRATION-001 第 D2 步（Issue #405）：一级页面「运营」四个二级页面读取的 JSON 接口、导出、历史封面图，以及业务选择的作用范围；第 D3 步（Issue #409）：总览读取与周、月加微目标的设定（本合同唯一的写接口）
 > 事实来源: [PAGE-OPS-001](../design/pages/ops-page.md)、[PAGE-OPS-002](../design/pages/ops-overview-page.md)、[OPS-LEDGER-001](ops-ledger-001.md)、Mog 2026-10-13 的确认
 > 冲突时以谁为准: Mog 最新确认、AGENTS.md、OPS-LEDGER-001、真实 API/schema/代码
-> 当前实现状态: 分支 `feat/ops-migration-d2`；未合并
+> 当前实现状态: D2、D3 已随 PR #407 / #415 上线；D3 合并后修复由 Issue #417 交付，未合并、未部署
 
-全部接口只读（GET），沿用本机读取守卫：只接受本机访问，响应 `no-store`、`nosniff`。D2 不新增任何写接口；写入随 D4b。
+除 §4 设定目标外，接口只读（GET），沿用本机读取守卫：只接受本机访问，响应 `no-store`、`nosniff`。D2 不新增写接口；发布记录、账号与每日数据写入随 D4b。
 
 ## 1. 业务选择
 
@@ -122,17 +122,23 @@
 | `window` | `slice`、`today`、本周与本月的周期写法（`thisWeek`、`thisMonth`，供设定目标用）、`completeThrough`、`current`（日历上的本期）、`covered`（本期中已迁入的部分）、`previous`（与 `covered` 同样天数的上期）；后三者都是 `{from, to, days}` |
 | `kpi` | 本期、上期：发布、链接打开、加微、转化率、爆款；有效发布为 `{"state": "not_connected"}`；各项环比（任一边未知或上期为 0 时为 `null`）；`dailyScope` |
 | `funnel` | 发布 → 打开、打开 → 加微的转化率，本期与上期；选了业务时 `publishToOpenAvailable` 为 `false`（链接打开不分业务） |
-| `target` | `state`：`set`（周期起止、目标值、按已迁入天数算的本期已完成、完成率、时间进度、每日还需、预计周期末、节奏 `achieved` / `on_track` / `behind`、最新修改记录）、`not_set`、`not_applicable`（自定义时段）；本期一天都没迁入时完成情况为 `null` |
+| `target` | `state`：`set`（周期起止、目标值、按已迁入天数算的本期已完成、完成率、时间进度、每日还需、预计周期末、节奏 `achieved` / `on_track` / `behind`、最新修改记录）、`not_set`、`not_applicable`（自定义时段）；昨日与本周都按 `window.today` 所在 ISO 周读取，本月按今天所在月份，与对话框的 `thisWeek` / `thisMonth` 一致；目标周期没有已迁入完整日时完成情况为 `null` |
 | `insights` | 自动结论的材料（类别 `pace` / `drag` / `review` 与相应数字、名单），最多 3 条 |
 | `attention` | 今日必须处理：`items`（类别 `drop` / `zero_report` / `pending_views` / `owner_mismatch`、程度、运营人、账号、指标、本期与上期值、降幅、`count`、最早日期、`zeroMetrics`），只含排在前面的 5 项；`rest` 是其余各项（同样排序，页面折叠、点开在原处显示）；`hiddenCount` 等于 `rest` 的条数；`totalCount`。`count` 对待补阅读量是篇数，对负责人不一致是登记条数，对 `zero_report` 是本期有每日数据的天数；`zeroMetrics` 只在 `zero_report` 里有内容：本期每天都记 0 的指标及其上期值 |
-| `ranking` | 运营人排行各列；近 7 天加微为 7 个值（没有每日数据的那天为 `null`）；`risk`、`riskKind`、`riskMetric` 取自这个运营人在 `attention` 里最严重的一项 |
+| `ranking` / `rankingCovered` | 运营人排行各列；`rankingCovered` 表示本期是否有已迁入完整日，与 `window.covered !== null` 一致。未覆盖时排行为空但表示未知，页面写「这段时间还没有迁入的数据」；已覆盖且无人时才写「当期没有运营数据」。近 7 天加微为 7 个值（没有每日数据的那天为 `null`）；`risk`、`riskKind`、`riskMetric` 取自这个运营人在 `attention` 里最严重的一项 |
 | `dailyOutput` | `days`（本期每一天）、`coveredTo`、`operators`、每天每人按平台的发布数、每天每人的加微 |
-| `platformShare` | 按登记平台统计的发布数 |
-| `matrix` | 运营人 × 账号的发布数与爆款数；账号带平台与是否已在工作台删除 |
+| `platformShare` | 按登记平台统计的发布数 `{xhs, douyin}`；本期未覆盖时整个字段为 `null`，不写 0/0 |
+| `matrix` | `covered` 表示本期是否有已迁入完整日；运营人 × 账号的发布数与爆款数；账号带平台与是否已在工作台删除。未覆盖时数组为空、`covered: false`，页面写「这段时间还没有迁入的数据」；已覆盖且无登记时才写「当期无矩阵数据」 |
 
 ### `GET /api/local/ops/overview/trend?domain=&granularity=day|week|month`
 
-长趋势：按日近 90 天、按周近 12 周（ISO 周）、按月近 6 月，截止到今天与 `completeThrough` 中较早的一天。每点给出加微（不分业务；这段时间没有每日数据时为 `null`）与爆款（按发布日）。回包另带 `asOf`、`completeThrough`、`dailyScope`。
+长趋势：按日近 90 天、按周近 12 周（ISO 周）、按月近 6 月，保留排到今天的时间桶；数字只累计到今天与 `completeThrough` 中较早的一天。回包另带 `asOf`、`completeThrough`、`dailyScope`。每点包括：
+
+- `start` / `label`：桶起始业务日与日期标签。
+- `coverage`：`full`（截至今天应有的桶内日子均已迁入）、`partial`（只迁入部分）、`not_migrated`（桶内一天都没迁入，包括从未导入）。
+- `coveredTo`：实际计算截至日；未覆盖为 `null`。周/月部分覆盖的数值只说明这一部分，页面可见说明「按 YYYY-MM-DD 及以前计算」，不外推整周/整月；今天之后的日期不参与覆盖判断。
+- `followersGained`：不分业务；未覆盖或这一部分没有每日数据时为 `null`。
+- `hits`：按发布日；未覆盖为 `null`，已覆盖且没有爆款才为 0。页面把未覆盖桶画成「还没迁入」，不画成 0。
 
 ### `GET /api/local/ops/targets?periodType=week|month&periodKey=`
 

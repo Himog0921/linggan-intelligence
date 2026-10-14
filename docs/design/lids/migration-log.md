@@ -8,6 +8,10 @@ PR #407 合并前修正（2026-10-13）：运营页焦点/强调线与新增共�
 > 事实来源: [system.md](system.md)、[README.md](README.md)、DESIGN-002 Issue #7、项目 progress 记录和实际验证输出
 > 冲突时以谁为准: 真实代码/合同/测试、用户最新确认、当前 SCOPE 和 ACCEPTED 决策；本日志不把计划写成已实现事实
 
+## 2026-10-14 · OPS-MIGRATION-001 D3 合并后状态修复（Issue #417）
+
+依据 PAGE-OPS-002 §2.1 / §3.1 和 OPS-HTTP-001 §4：未覆盖排行、平台占比、矩阵显示「这段时间还没有迁入的数据」；趋势未迁入爆款复用 `ops-gap` 未知色，部分周/月累计在图旁及悬停说明截至日；昨日目标始终为本周。沿用 L1 页面、空态、SVG 和 `--lgi-*` Token，不新增样式、Token、CMP、Motion 或页面结构。D3 原交付已上线，回执见 ACC-OPS-PAGE-002 §9；本次修复的验证随 PR 回执记录，尚未合并/部署或 Mog 签收。
+
 ## 2026-10-13 · OPS-MIGRATION-001 D3 · 运营「总览」
 
 Mog 派定（Issue #409）：迁入工作台的运营总览。按 [PAGE-OPS-002](../pages/ops-overview-page.md) 在运营壳层里加第五个二级页，沿用 D2 的页头、面包屑、左侧栏、文字页签与表格；正文是五块从上到下的连续工作面。只用 `--lgi-*` Token，没有新增 Token、CMP、Scene 或 Motion。
