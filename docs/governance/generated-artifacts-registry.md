@@ -107,7 +107,7 @@
 - 维护的测试源：`crates/intelligence/tests/ops_ledger_read_postgres.rs`（合成数据）与 `apps/api/src/local_web/ops.test.mjs`，由 `scripts/test-ops-ledger-postgres.sh` 统一运行；不是生成代码。
 - 页面走查：共享库的一次性完整副本放在随机命名的 Docker 容器里，执行 0124 后由候选服务在 `127.0.0.1:3100` 读取；走查结束删除容器。截图、页面计量结果、导出样本和走查脚本都放执行会话的临时目录，含真实账号名与运营人名，不入 Git，会话结束删除。
 - 走查用的封面是程序生成的色块图，只写入副本和临时媒体目录。
-- 正式封面迁入（须 Mog 拷来文件并另行授权）：`linggan-ops-history-import cover-preview|cover-apply`，文件按内容哈希放在运行时媒体目录的 `ops-covers/`，命令只输出聚合数；Mog 拷来的原始文件和命令输出都不入 Git。
+- 正式封面迁入（2026-10-13 已执行，批次 `dc5ce2e0`）：`linggan-ops-history-import cover-preview|cover-apply`，文件按内容哈希放在运行时媒体目录的 `ops-covers/`，命令只输出聚合数。原件留在 Mog 的工作台硬盘上。导入前的本机暂存目录 `~/Library/Application Support/Linggan Intelligence/ops-cover-import-20261013/` 带逐文件哈希清单，核验后已删除。以上都不入 Git。
 
 ## TOPIC-MAP-COMPACT-382 隔离 UI 验证
 

@@ -15,7 +15,9 @@ use uuid::Uuid;
 use super::OpsImportError;
 use super::export_rows::{ExportFile, PUBLICATION_KEYS, PublicationExportRow, parse_rows};
 
-pub const OPS_COVER_RULE_VERSION: &str = "ops-cover.v1";
+/// v2: a link anywhere on the way to a file is refused, and every file is re-checked against the
+/// preview right before it is stored.
+pub const OPS_COVER_RULE_VERSION: &str = "ops-cover.v2";
 const LOCAL_MEDIA_PREFIX: &str = "/api/local-media/";
 const MAX_COVER_BYTES: u64 = 20 * 1024 * 1024;
 
@@ -50,6 +52,8 @@ pub struct CoverFigures {
     pub covers_in_export: usize,
     pub not_in_ledger: usize,
     pub missing_files: usize,
+    /// A link anywhere on the path, not a regular file, empty, or over 20 MiB.
+    pub refused_files: usize,
     pub not_an_image: usize,
     pub already_registered: usize,
     pub conflicting: usize,
@@ -180,18 +184,22 @@ async fn plan_covers(
             figures.not_in_ledger += 1;
             continue;
         };
-        let Some(file) = read_cover(&request.covers_dir, &source_path)? else {
-            figures.missing_files += 1;
-            continue;
+        let file = match read_cover(&request.covers_dir, &source_path)? {
+            CoverSource::Bytes(file) => file,
+            CoverSource::Missing => {
+                figures.missing_files += 1;
+                continue;
+            }
+            CoverSource::Refused => {
+                figures.refused_files += 1;
+                continue;
+            }
         };
         let Some(mime_type) = image_type(&file) else {
             figures.not_an_image += 1;
             continue;
         };
-        let sha256 = Sha256::digest(&file)
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>();
+        let sha256 = sha256_hex(&file);
         match existing {
             Some(stored) if *stored == sha256 => figures.already_registered += 1,
             Some(_) => figures.conflicting += 1,
@@ -272,20 +280,49 @@ fn percent_decode(text: &str) -> Option<String> {
     String::from_utf8(output).ok()
 }
 
-/// Reads a regular file under `covers_dir`. Symbolic links and oversize files are refused.
-fn read_cover(covers_dir: &Path, relative: &str) -> Result<Option<Vec<u8>>, OpsImportError> {
-    let path = covers_dir.join(relative);
-    let metadata = match std::fs::symlink_metadata(&path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(_) => return Err(OpsImportError::CoverFileUnreadable),
+#[derive(Debug, PartialEq, Eq)]
+enum CoverSource {
+    Missing,
+    Refused,
+    Bytes(Vec<u8>),
+}
+
+/// Reads a regular file under `covers_dir`. A link on any step of the way — a folder or the file
+/// itself — is refused, so a copied tree cannot reach outside the folder the operator chose; so
+/// are empty and oversize files.
+fn read_cover(covers_dir: &Path, relative: &str) -> Result<CoverSource, OpsImportError> {
+    let mut path = covers_dir.to_path_buf();
+    let mut metadata = None;
+    for segment in relative.split('/') {
+        path.push(segment);
+        let step = match std::fs::symlink_metadata(&path) {
+            Ok(step) => step,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(CoverSource::Missing);
+            }
+            Err(_) => return Err(OpsImportError::CoverFileUnreadable),
+        };
+        if step.file_type().is_symlink() {
+            return Ok(CoverSource::Refused);
+        }
+        metadata = Some(step);
+    }
+    let Some(metadata) = metadata else {
+        return Ok(CoverSource::Missing);
     };
     if !metadata.file_type().is_file() || metadata.len() == 0 || metadata.len() > MAX_COVER_BYTES {
-        return Ok(None);
+        return Ok(CoverSource::Refused);
     }
     std::fs::read(&path)
-        .map(Some)
+        .map(CoverSource::Bytes)
         .map_err(|_| OpsImportError::CoverFileUnreadable)
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 /// The file's own bytes decide its type; the extension in the path does not.
@@ -341,19 +378,23 @@ fn plan_hash(plan: &[PlannedCover]) -> String {
 fn store_file(request: &CoverImportRequest, cover: &PlannedCover) -> Result<bool, OpsImportError> {
     let target = request.media_root.join(cover.storage_key());
     if let Ok(existing) = std::fs::read(&target) {
-        let same = Sha256::digest(&existing)
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>()
-            == cover.sha256;
-        return if same {
+        return if sha256_hex(&existing) == cover.sha256 {
             Ok(false)
         } else {
             Err(OpsImportError::CoverStorageConflict)
         };
     }
-    let bytes = read_cover(&request.covers_dir, &cover.source_path)?
-        .ok_or(OpsImportError::CoverFileUnreadable)?;
+    // The file was hashed while planning and is read again here; only the same bytes may be
+    // stored under the planned name and registered with the planned size and type.
+    let CoverSource::Bytes(bytes) = read_cover(&request.covers_dir, &cover.source_path)? else {
+        return Err(OpsImportError::CoverFileChanged);
+    };
+    if i64::try_from(bytes.len()).ok() != Some(cover.byte_size)
+        || image_type(&bytes) != Some(cover.mime_type)
+        || sha256_hex(&bytes) != cover.sha256
+    {
+        return Err(OpsImportError::CoverFileChanged);
+    }
     let directory = target
         .parent()
         .ok_or(OpsImportError::CoverStorageConflict)?;
@@ -368,39 +409,4 @@ fn store_file(request: &CoverImportRequest, cover: &PlannedCover) -> Result<bool
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{image_type, relative_media_path};
-
-    #[test]
-    fn only_workbench_media_paths_inside_the_folder_are_accepted() {
-        assert_eq!(
-            relative_media_path("/api/local-media/workspaces/w1/media/covers/a%20b.webp")
-                .as_deref(),
-            Some("workspaces/w1/media/covers/a b.webp")
-        );
-        for refused in [
-            "/api/local-media/../etc/passwd",
-            "/api/local-media/workspaces/../../x.webp",
-            "/api/local-media/workspaces//x.webp",
-            "/api/local-media/%2E%2E/x.webp",
-            "/api/local-media/a%5Cb.webp",
-            "https://example.com/x.webp",
-            "/api/local-media/",
-            "/api/local-media/%ZZ.webp",
-        ] {
-            assert!(relative_media_path(refused).is_none(), "{refused}");
-        }
-    }
-
-    #[test]
-    fn the_bytes_decide_the_image_type() {
-        assert_eq!(image_type(b"RIFF\0\0\0\0WEBPVP8 "), Some("image/webp"));
-        assert_eq!(image_type(&[0xFF, 0xD8, 0xFF, 0xE0]), Some("image/jpeg"));
-        assert_eq!(
-            image_type(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0]),
-            Some("image/png")
-        );
-        assert_eq!(image_type(b"<svg onload=alert(1)>"), None);
-        assert_eq!(image_type(b"RIFF\0\0\0\0WAVE"), None);
-    }
-}
+mod tests;

@@ -80,6 +80,8 @@ pub enum OpsImportError {
     CoverStorageConflict,
     #[error("本机媒体目录写不进去，未登记")]
     CoverStorageUnavailable,
+    #[error("拷来的封面文件在预览之后被改动过，未登记；请重新预览")]
+    CoverFileChanged,
     #[error(transparent)]
     Database(#[from] sqlx::Error),
 }
