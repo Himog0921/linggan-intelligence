@@ -9,7 +9,9 @@
 //! `authorExternalId` 反查，渐进补齐的详情会全部丢失归属。
 
 use crate::archive_ledger::directory_works_sql;
-use crate::directory_boundary::{directory_proven_sql, historical_directory_scan_qualified_sql, surface_scan_complete_sql};
+use crate::directory_boundary::{
+    directory_proven_sql, historical_directory_scan_qualified_sql, surface_scan_complete_sql,
+};
 use crate::qualified_detail::qualified_detail_missing_sql;
 use linggan_storage_postgres::Database;
 use std::collections::HashMap;
@@ -104,7 +106,9 @@ pub async fn read_archive_completeness(
     database: &Database,
     platform: &str,
 ) -> Result<HashMap<String, ArchiveCompleteness>, sqlx::Error> {
-    let rows: Vec<(String, bool, bool, bool, i64, i64, i64, i64, i64, i64, i64, bool)> = sqlx::query_as(
+    let (rows, historical_rows, pending_rows) = tokio::try_join!(
+        async {
+            let rows: Vec<(String, bool, bool, bool, i64, i64, i64, i64, i64, i64, i64, bool)> = sqlx::query_as(
         concat!(
             "WITH ranked_roots AS ( \
              SELECT target.target_ref,target.identity_key AS author_external_id, \
@@ -337,6 +341,77 @@ pub async fn read_archive_completeness(
     .bind(platform)
     .fetch_all(database.pool())
     .await?;
+            Ok::<_, sqlx::Error>(rows)
+        },
+        async {
+            let historical_rows: Vec<(String, i64, i64, bool, bool)> = sqlx::query_as(concat!(
+        "SELECT target.identity_key, \
+                count(DISTINCT finding.content_public_ref) FILTER ( \
+                    WHERE package.package_kind='profile_discovery' \
+                      AND disposition.disposition <> 'quarantined' \
+                ) AS works_listed, \
+                count(DISTINCT detail.content_public_ref) FILTER ( \
+                    WHERE package.package_kind='content_detail' \
+                      AND disposition.disposition <> 'quarantined' \
+                ) AS details_captured, \
+                coalesce(bool_or(", historical_directory_scan_qualified_sql!(), " \
+                  AND (task.task_spec->>'maximumQuota')::integer BETWEEN 1 AND 199 \
+                  AND work_order.work_order_ref=( \
+                    SELECT current_root.work_order_ref FROM collection_work_order current_root \
+                    WHERE current_root.target_ref=target.target_ref \
+                      AND current_root.lane='deep_archive' \
+                      AND current_root.stop_conditions #>> '{progressiveArchive,version}'='1' \
+                      AND current_root.stop_conditions #>> '{progressiveArchive,rootWorkOrderRef}' \
+                          =current_root.work_order_ref::text \
+                    ORDER BY current_root.created_at DESC,current_root.work_order_ref DESC LIMIT 1 \
+                  )),false) \
+                  AS legacy_smaller_quota, \
+                coalesce(bool_or(", historical_directory_scan_qualified_sql!(), "),false) \
+                  AS historical_scan_eligible \
+         FROM collection_observation_target target \
+         JOIN collection_work_order work_order USING(target_ref) \
+         JOIN collection_work_order_lease lease USING(work_order_ref) \
+         JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
+         JOIN linggan_runtime_capture_package package ON package.task_id=lease_task.task_id \
+         JOIN linggan_runtime_task task ON task.task_id=package.task_id \
+         CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(package.coverage->'layers')='array' \
+           THEN package.coverage->'layers' ELSE '[]'::jsonb END) layer \
+         JOIN linggan_runtime_record_disposition disposition ON disposition.package_ref=package.package_ref \
+         LEFT JOIN linggan_material_discovery_finding finding \
+           ON finding.package_ref=package.package_ref AND finding.record_ordinal=disposition.record_ordinal \
+         LEFT JOIN linggan_material_content_detail detail \
+           ON detail.package_ref=package.package_ref AND detail.record_ordinal=disposition.record_ordinal \
+         WHERE target.platform=$1 AND target.target_kind='creator' \
+           AND work_order.lane='deep_archive' AND package.platform=$1 \
+           AND disposition.disposition <> 'retained_uninterpreted' \
+         GROUP BY target.identity_key"),
+    )
+    .bind(platform)
+    .fetch_all(database.pool())
+    .await?;
+            Ok::<_, sqlx::Error>(historical_rows)
+        },
+        async {
+            let pending_rows: Vec<String> = sqlx::query_scalar(
+                "SELECT DISTINCT target.identity_key \
+         FROM collection_observation_target target \
+         JOIN collection_work_order work_order USING(target_ref) \
+         LEFT JOIN collection_work_order_lease lease USING(work_order_ref) \
+         LEFT JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
+         WHERE target.platform=$1 AND target.target_kind='creator' \
+           AND work_order.lane='deep_archive' \
+           AND NOT EXISTS (SELECT 1 FROM collection_work_order_material_target material_scope \
+                           WHERE material_scope.work_order_ref=work_order.work_order_ref) \
+           AND (work_order.queue_state='queued' \
+                OR (lease_task.execution_state IN ('pending','in_progress') \
+                    AND lease.released_at IS NULL AND lease.expires_at>scope_001_now()))",
+            )
+            .bind(platform)
+            .fetch_all(database.pool())
+            .await?;
+            Ok::<_, sqlx::Error>(pending_rows)
+        }
+    )?;
 
     let mut totals: HashMap<String, ArchiveCompleteness> = HashMap::new();
     for (
@@ -384,52 +459,15 @@ pub async fn read_archive_completeness(
     // erase an older target-scoped directory that has already been accepted.  Keep those
     // historical works visible when their details are complete; the UI can then say exactly
     // what is known instead of converting a real 41/41 archive into an empty “rebuild” row.
-    let historical_rows: Vec<(String, i64, i64, bool, bool)> = sqlx::query_as(concat!(
-        "SELECT target.identity_key, \
-                count(DISTINCT finding.content_public_ref) FILTER ( \
-                    WHERE package.package_kind='profile_discovery' \
-                      AND disposition.disposition <> 'quarantined' \
-                ) AS works_listed, \
-                count(DISTINCT detail.content_public_ref) FILTER ( \
-                    WHERE package.package_kind='content_detail' \
-                      AND disposition.disposition <> 'quarantined' \
-                ) AS details_captured, \
-                coalesce(bool_or(", historical_directory_scan_qualified_sql!(), " \
-                  AND (task.task_spec->>'maximumQuota')::integer BETWEEN 1 AND 199 \
-                  AND work_order.work_order_ref=( \
-                    SELECT current_root.work_order_ref FROM collection_work_order current_root \
-                    WHERE current_root.target_ref=target.target_ref \
-                      AND current_root.lane='deep_archive' \
-                      AND current_root.stop_conditions #>> '{progressiveArchive,version}'='1' \
-                      AND current_root.stop_conditions #>> '{progressiveArchive,rootWorkOrderRef}' \
-                          =current_root.work_order_ref::text \
-                    ORDER BY current_root.created_at DESC,current_root.work_order_ref DESC LIMIT 1 \
-                  )),false) \
-                  AS legacy_smaller_quota, \
-                coalesce(bool_or(", historical_directory_scan_qualified_sql!(), "),false) \
-                  AS historical_scan_eligible \
-         FROM collection_observation_target target \
-         JOIN collection_work_order work_order USING(target_ref) \
-         JOIN collection_work_order_lease lease USING(work_order_ref) \
-         JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
-         JOIN linggan_runtime_capture_package package ON package.task_id=lease_task.task_id \
-         JOIN linggan_runtime_task task ON task.task_id=package.task_id \
-         CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(package.coverage->'layers')='array' \
-           THEN package.coverage->'layers' ELSE '[]'::jsonb END) layer \
-         JOIN linggan_runtime_record_disposition disposition ON disposition.package_ref=package.package_ref \
-         LEFT JOIN linggan_material_discovery_finding finding \
-           ON finding.package_ref=package.package_ref AND finding.record_ordinal=disposition.record_ordinal \
-         LEFT JOIN linggan_material_content_detail detail \
-           ON detail.package_ref=package.package_ref AND detail.record_ordinal=disposition.record_ordinal \
-         WHERE target.platform=$1 AND target.target_kind='creator' \
-           AND work_order.lane='deep_archive' AND package.platform=$1 \
-           AND disposition.disposition <> 'retained_uninterpreted' \
-         GROUP BY target.identity_key"),
-    )
-    .bind(platform)
-    .fetch_all(database.pool())
-    .await?;
-    for (author_external_id, works_listed, details_captured, legacy_smaller_quota, historical_scan_eligible) in historical_rows {
+
+    for (
+        author_external_id,
+        works_listed,
+        details_captured,
+        legacy_smaller_quota,
+        historical_scan_eligible,
+    ) in historical_rows
+    {
         if !historical_scan_eligible {
             continue;
         }
@@ -454,23 +492,7 @@ pub async fn read_archive_completeness(
     // A pending material-scoped follow-up is not a homepage baseline in progress. Progressive
     // root children are already covered by `archive_progress`; this fallback recognizes legacy
     // root WorkOrders without a progressive marker.
-    let pending_rows: Vec<String> = sqlx::query_scalar(
-        "SELECT DISTINCT target.identity_key \
-         FROM collection_observation_target target \
-         JOIN collection_work_order work_order USING(target_ref) \
-         LEFT JOIN collection_work_order_lease lease USING(work_order_ref) \
-         LEFT JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
-         WHERE target.platform=$1 AND target.target_kind='creator' \
-           AND work_order.lane='deep_archive' \
-           AND NOT EXISTS (SELECT 1 FROM collection_work_order_material_target material_scope \
-                           WHERE material_scope.work_order_ref=work_order.work_order_ref) \
-           AND (work_order.queue_state='queued' \
-                OR (lease_task.execution_state IN ('pending','in_progress') \
-                    AND lease.released_at IS NULL AND lease.expires_at>scope_001_now()))",
-    )
-    .bind(platform)
-    .fetch_all(database.pool())
-    .await?;
+
     for author_external_id in pending_rows {
         let archive = totals.entry(author_external_id).or_default();
         archive.started = true;

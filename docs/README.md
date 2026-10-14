@@ -28,6 +28,8 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发，并于 2026-10-02 
 3. 本页对应分类中的权威文档。
 4. 只有当前任务明确需要来源核对时，才进入 [`references/README.md`](../references/README.md)。
 
+- [采集读取性能](plans/active/collection-read-performance-001.md)：当前授权的性能候选；保留统计、来源资格和 Lease，不代表正式部署。
+
 ## 当前权威与状态
 
 | 文档 | 状态 | 用途 |
