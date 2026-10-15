@@ -44,12 +44,14 @@ pub async fn run_model_work_once(
     run_model_work_once_with_fairness(database, store, adapter, &mut fairness).await
 }
 
-/// Process-local scheduling state for model lanes and StudyRun selection. Restarting the worker
-/// resets only the next-item order; it does not change persisted work or its authorization.
+/// Process-local scheduling state for model lanes, StudyRun selection and the creator-discovery
+/// work/author turn. Restarting the worker resets only the next-item order; it does not change
+/// persisted work or its authorization.
 #[derive(Default)]
 pub struct ModelWorkerFairness {
     next_lane_index: usize,
     last_run_ref: Option<Uuid>,
+    creator_schedule: crate::creator_discovery_worker::CreatorDiscoverySchedule,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -247,17 +249,20 @@ pub async fn run_model_work_once_with_fairness(
                         }
                     })
             }
-            ModelWorkLane::CreatorDiscovery => {
-                crate::creator_discovery_worker::run_once(database, store, adapter)
-                    .await
-                    .map(|worked| {
-                        if worked {
-                            LaneProgress::ProviderAttempt
-                        } else {
-                            LaneProgress::Idle
-                        }
-                    })
-            }
+            ModelWorkLane::CreatorDiscovery => crate::creator_discovery_worker::run_once(
+                database,
+                store,
+                adapter,
+                &mut fairness.creator_schedule,
+            )
+            .await
+            .map(|worked| {
+                if worked {
+                    LaneProgress::ProviderAttempt
+                } else {
+                    LaneProgress::Idle
+                }
+            }),
             ModelWorkLane::Semantic => {
                 run_semantic_lane_once(database, store, adapter, fairness).await
             }

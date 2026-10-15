@@ -2,8 +2,11 @@
 mod fixture;
 use linggan_evidence::creator_discovery::load;
 use linggan_intelligence::{
-    creator_discovery_worker::run_once, model_secrets::SyntheticModelSecrets, pi_adapter::PiAdapter,
+    creator_discovery_worker::{CreatorDiscoverySchedule, run_once},
+    model_secrets::SyntheticModelSecrets,
+    pi_adapter::PiAdapter,
 };
+use linggan_storage_postgres::Database;
 use serde_json::json;
 use uuid::Uuid;
 const D: Uuid = Uuid::from_u128(0x00000000000040008000000000000001);
@@ -11,6 +14,8 @@ const D: Uuid = Uuid::from_u128(0x00000000000040008000000000000001);
 #[tokio::test]
 #[ignore = "isolated PostgreSQL and synthetic local process; no provider"]
 async fn worker_admission_budget_fingerprints_and_bounded_recovery() {
+    // One schedule for the whole scenario, as the long-running worker holds one for its lifetime.
+    let mut schedule = CreatorDiscoverySchedule::default();
     let db = fixture::proof_database("creator_discovery_worker").await;
     let connection = Uuid::new_v4();
     let version = Uuid::new_v4();
@@ -49,7 +54,7 @@ async fn worker_admission_budget_fingerprints_and_bounded_recovery() {
             .join("tests/support/creator_discovery_adapter.mjs"),
     );
     assert!(
-        !run_once(&db, &SyntheticModelSecrets, &adapter)
+        !run_once(&db, &SyntheticModelSecrets, &adapter, &mut schedule)
             .await
             .unwrap()
     );
@@ -58,12 +63,17 @@ async fn worker_admission_budget_fingerprints_and_bounded_recovery() {
         .await
         .unwrap();
     for _ in 0..5 {
-        run_once(&db, &SyntheticModelSecrets, &adapter)
+        run_once(&db, &SyntheticModelSecrets, &adapter, &mut schedule)
             .await
             .unwrap();
     }
-    let count=sqlx::query_scalar::<_,i64>("SELECT count(*) FROM linggan_model_invocation WHERE operation='analyze' AND state='succeeded'").fetch_one(db.pool()).await.unwrap();
-    assert_eq!(count, 3, "2 work analyses and 1 author analysis");
+    // The author gets the turn after each completed work, so it is analysed on the intermediate
+    // input (one work related) and again on the final one: 2 work + 2 author calls, one per visit.
+    let calls:Vec<(String,i64)>=sqlx::query_as("SELECT result->>'jobKind',count(*) FROM linggan_model_invocation WHERE operation='analyze' AND state='succeeded' GROUP BY 1 ORDER BY 1").fetch_all(db.pool()).await.unwrap();
+    assert_eq!(
+        calls,
+        vec![("focus".to_string(), 2), ("work".to_string(), 2)]
+    );
     let maps:Vec<serde_json::Value>=sqlx::query_scalar("SELECT result->'citationMap' FROM linggan_model_invocation WHERE result->>'jobKind'='work' AND state='succeeded'").fetch_all(db.pool()).await.unwrap();
     assert_eq!(maps.len(),2);
     for map in maps {
@@ -76,16 +86,16 @@ async fn worker_admission_budget_fingerprints_and_bounded_recovery() {
     let q = serde_json::from_value(json!({"domain":D})).unwrap();
     let data = load(&db, &q).await.unwrap();
     assert!(data.works.iter().all(|w| w.relevance == "related"));
-    assert_eq!(sqlx::query_scalar::<_,i64>("SELECT sum(charged_tokens)::bigint FROM linggan_model_invocation WHERE operation='analyze'").fetch_one(db.pool()).await.unwrap(),399);
+    assert_eq!(sqlx::query_scalar::<_,i64>("SELECT sum(charged_tokens)::bigint FROM linggan_model_invocation WHERE operation='analyze'").fetch_one(db.pool()).await.unwrap(),532);
     assert!(
-        !run_once(&db, &SyntheticModelSecrets, &adapter)
+        !run_once(&db, &SyntheticModelSecrets, &adapter, &mut schedule)
             .await
             .unwrap()
     );
     // Same semantic text with fresher metric/source records must not requeue.
     fixture::submit_package_at(&db,"content_detail",json!({"contentExternalId":"creator-one"}),json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":"creator-one"},"payload":{"title":"实践","bodyText":"家庭实践过程。".repeat(300),"authorId":"worker-author","likes":9999}}),"2026-09-28T10:00:00Z").await;
     assert!(
-        !run_once(&db, &SyntheticModelSecrets, &adapter)
+        !run_once(&db, &SyntheticModelSecrets, &adapter, &mut schedule)
             .await
             .unwrap()
     );
@@ -103,8 +113,9 @@ async fn worker_admission_budget_fingerprints_and_bounded_recovery() {
     // New text queues once. A saved manual correction survives every automatic attempt.
     sqlx::query("UPDATE linggan_creator_discovery_work_analysis SET manual_overrides=$2 WHERE work_public_ref=$1").bind(refs[0]).bind(json!({"personal_experience":{"value":{"value":"no"},"actor":"fixture"}})).execute(db.pool()).await.unwrap();
     fixture::submit_package_at(&db,"content_detail",json!({"contentExternalId":"creator-one"}),json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":"creator-one"},"payload":{"title":"新实践","bodyText":"SYNTHETIC_INVALID","authorId":"worker-author","likes":9999}}),"2026-09-29T10:00:00Z").await;
-    for _ in 0..3 {
-        run_once(&db, &SyntheticModelSecrets, &adapter)
+    // Three work attempts, with one author turn interleaved by the schedule.
+    for _ in 0..6 {
+        run_once(&db, &SyntheticModelSecrets, &adapter, &mut schedule)
             .await
             .unwrap();
         sqlx::query(
@@ -132,7 +143,7 @@ async fn worker_admission_budget_fingerprints_and_bounded_recovery() {
     .fetch_one(db.pool())
     .await
     .unwrap();
-    run_once(&db, &SyntheticModelSecrets, &adapter)
+    run_once(&db, &SyntheticModelSecrets, &adapter, &mut schedule)
         .await
         .unwrap();
     let paused:(String,i32)=sqlx::query_as("SELECT job_state,attempt_count FROM linggan_creator_discovery_work_analysis WHERE work_public_ref=$1").bind(refs[0]).fetch_one(db.pool()).await.unwrap();
@@ -158,7 +169,7 @@ async fn worker_admission_budget_fingerprints_and_bounded_recovery() {
         .unwrap();
     let expired_lease = Uuid::new_v4();
     sqlx::query("UPDATE linggan_creator_discovery_work_analysis SET job_state='running',attempt_count=1,lease_token=$2,lease_expires_at=scope_001_now()-interval '1 minute',next_attempt_at=scope_001_now() WHERE work_public_ref=$1").bind(refs[0]).bind(expired_lease).execute(db.pool()).await.unwrap();
-    run_once(&db, &SyntheticModelSecrets, &adapter)
+    run_once(&db, &SyntheticModelSecrets, &adapter, &mut schedule)
         .await
         .unwrap();
     let code:String=sqlx::query_scalar("SELECT last_error_code FROM linggan_creator_discovery_work_analysis WHERE work_public_ref=$1").bind(refs[0]).fetch_one(db.pool()).await.unwrap();
@@ -192,10 +203,14 @@ async fn worker_admission_budget_fingerprints_and_bounded_recovery() {
         .await
         .unwrap();
     fixture::submit_package_at(&db,"content_detail",json!({"contentExternalId":"creator-one"}),json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":"creator-one"},"payload":{"title":"预算内实践","bodyText":"家庭实践过程。".repeat(900),"authorId":"worker-author","likes":9999}}),"2026-09-30T10:00:00Z").await;
-    for _ in 0..3 {
-        run_once(&db, &SyntheticModelSecrets, &adapter)
+    // Work and author queues both have something due; drain them one visit at a time.
+    for _ in 0..8 {
+        if !run_once(&db, &SyntheticModelSecrets, &adapter, &mut schedule)
             .await
-            .unwrap();
+            .unwrap()
+        {
+            break;
+        }
     }
     let clipped:(String,serde_json::Value)=sqlx::query_as("SELECT job_state,result_json FROM linggan_creator_discovery_work_analysis WHERE work_public_ref=$1").bind(refs[0]).fetch_one(db.pool()).await.unwrap();
     assert_eq!(clipped.0, "idle", "{:?}", sqlx::query_scalar::<_,Option<String>>("SELECT last_error_code FROM linggan_creator_discovery_work_analysis WHERE work_public_ref=$1").bind(refs[0]).fetch_one(db.pool()).await.unwrap());
@@ -210,14 +225,14 @@ async fn worker_admission_budget_fingerprints_and_bounded_recovery() {
     sqlx::query("UPDATE linggan_creator_discovery_work_analysis SET job_state='running',attempt_count=1,lease_token=$2,lease_expires_at=scope_001_now()-interval '1 minute' WHERE work_public_ref=$1").bind(refs[0]).bind(expired_lease).execute(db.pool()).await.unwrap();
     let orphan = Uuid::new_v4();
     sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,config_ref,operation,request_hash,state,reserved_tokens,charged_tokens,result) VALUES($1,$2,$3,$4,'analyze','orphan','running',400,400,$5)").bind(orphan).bind(version).bind(model).bind(config).bind(json!({"purpose":"creator_discovery","domainRef":D,"jobKind":"work","jobKey":refs[0],"jobLease":expired_lease})).execute(db.pool()).await.unwrap();
-    run_once(&db, &SyntheticModelSecrets, &adapter)
+    run_once(&db, &SyntheticModelSecrets, &adapter, &mut schedule)
         .await
         .unwrap();
     let recovered:(String,i64,String)=sqlx::query_as("SELECT state,charged_tokens,failure_code FROM linggan_model_invocation WHERE invocation_ref=$1").bind(orphan).fetch_one(db.pool()).await.unwrap();
     assert_eq!(recovered, ("failed".into(), 400, "lease_expired".into()));
     let superseded = Uuid::new_v4();
     sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,config_ref,operation,request_hash,state,reserved_tokens,charged_tokens,result,created_at) VALUES($1,$2,$3,$4,'analyze','superseded','running',500,500,$5,scope_001_now()-interval '6 minutes')").bind(superseded).bind(version).bind(model).bind(config).bind(json!({"purpose":"creator_discovery","domainRef":D,"jobKind":"work","jobKey":refs[0],"jobLease":Uuid::new_v4()})).execute(db.pool()).await.unwrap();
-    run_once(&db, &SyntheticModelSecrets, &adapter)
+    run_once(&db, &SyntheticModelSecrets, &adapter, &mut schedule)
         .await
         .unwrap();
     let swept:(String,i64,String)=sqlx::query_as("SELECT state,charged_tokens,failure_code FROM linggan_model_invocation WHERE invocation_ref=$1").bind(superseded).fetch_one(db.pool()).await.unwrap();
@@ -250,7 +265,10 @@ async fn worker_admission_budget_fingerprints_and_bounded_recovery() {
     );
     sqlx::query("UPDATE linggan_creator_discovery_work_analysis SET requested_fingerprint=$2,job_state='queued',attempt_count=0,next_attempt_at=scope_001_now()-interval '1 hour',lease_token=NULL,lease_expires_at=NULL WHERE work_public_ref=$1").bind(refs[0]).bind(&current.fingerprint).execute(db.pool()).await.unwrap();
     let secrets = SyntheticModelSecrets;
-    let work_future = run_once(&db, &secrets, &adapter);
+    // This segment proves work-lease supersession, so it starts from a neutral schedule rather
+    // than whatever turn the scenario above left behind.
+    let mut barrier_schedule = CreatorDiscoverySchedule::default();
+    let work_future = run_once(&db, &secrets, &adapter, &mut barrier_schedule);
     let replace_future = async {
         for _ in 0..500 {
             if barrier_dir.join("ready").is_file() {
@@ -290,4 +308,307 @@ async fn worker_admission_budget_fingerprints_and_bounded_recovery() {
     assert_eq!(stale.0, "queued");
     assert_eq!(stale.1, "superseded-by-new-source");
     assert_ne!(stale.2.as_deref(), Some(stale.1.as_str()));
+}
+
+/// Synthetic model entry already qualified by a successful probe; the input budget is the only
+/// knob the scenarios below need.
+async fn model_config(db: &Database, input_token_limit: i32) -> Uuid {
+    let connection = Uuid::new_v4();
+    let version = Uuid::new_v4();
+    let model = Uuid::new_v4();
+    let config = Uuid::new_v4();
+    sqlx::query("INSERT INTO linggan_model_connection(connection_ref,revision) VALUES($1,1)")
+        .bind(connection)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO linggan_model_connection_version(version_ref,connection_ref,revision,name,api,base_url,local_endpoint,secret_ref) VALUES($1,$2,1,'Synthetic','openai-completions','http://127.0.0.1:18080',true,$3)").bind(version).bind(connection).bind(Uuid::new_v4()).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_model_entry(model_ref,connection_version_ref,model_id,origin) VALUES($1,$2,'synthetic-creator','manual')").bind(model).bind(version).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_model_config(config_ref,model_ref,input_token_limit,output_token_limit,timeout_seconds,max_attempts) VALUES($1,$2,$3,1000,30,3)").bind(config).bind(model).bind(input_token_limit).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,operation,request_hash,state,reserved_tokens,charged_tokens,result) VALUES($1,$2,$3,'probe','synthetic','succeeded',0,0,$4)").bind(Uuid::new_v4()).bind(version).bind(model).bind(json!({"ok":true,"modelCallable":true,"semanticQualified":true})).execute(db.pool()).await.unwrap();
+    config
+}
+
+async fn add_policy(db: &Database, config: Uuid, analysis_enabled: bool) {
+    sqlx::query("INSERT INTO linggan_creator_discovery_policy(domain_ref,platform,config_ref,daily_token_limit,analysis_enabled) VALUES($1,'xhs',$2,100000,$3)").bind(D).bind(config).bind(analysis_enabled).execute(db.pool()).await.unwrap();
+}
+
+/// A detail-only work linked to the proof domain; `author` is its attributed author, if any.
+async fn add_work(db: &Database, external_id: &str, author: Option<&str>) -> Uuid {
+    let mut payload = json!({"title":"实践","bodyText":"家庭实践过程。".repeat(300),"likes":10});
+    if let Some(author) = author {
+        payload["authorId"] = json!(author);
+    }
+    let package = fixture::submit_package(
+        db,
+        "content_detail",
+        json!({"contentExternalId":external_id}),
+        json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":external_id},"payload":payload}),
+    )
+    .await;
+    let work: Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content WHERE content_external_id=$1",
+    )
+    .bind(external_id)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO linggan_material_domain_usage(usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref) VALUES($1,$2,$3,'primary','legacy_domain_migration',$4)").bind(Uuid::new_v4()).bind(work).bind(D).bind(package).execute(db.pool()).await.unwrap();
+    work
+}
+
+fn synthetic_adapter() -> PiAdapter {
+    let node = std::env::var_os("CREATOR_PROOF_NODE")
+        .map(std::path::PathBuf::from)
+        .expect("CREATOR_PROOF_NODE required");
+    PiAdapter::configured_with_test_command(
+        node,
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/support/creator_discovery_adapter.mjs"),
+    )
+}
+
+async fn analyze_calls(db: &Database) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM linggan_model_invocation WHERE operation='analyze'")
+        .fetch_one(db.pool())
+        .await
+        .unwrap()
+}
+
+/// Marks every current work as analysed for its present input, so only authors can be due.
+async fn settle_works(db: &Database) {
+    let scope = serde_json::from_value(json!({"domain":D})).unwrap();
+    for work in load(db, &scope).await.unwrap().works {
+        sqlx::query("INSERT INTO linggan_creator_discovery_work_analysis(domain_ref,work_public_ref,requested_fingerprint,job_state) VALUES($1,$2,$3,'idle')").bind(D).bind(work.work_ref).bind(&work.fingerprint).execute(db.pool()).await.unwrap();
+    }
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL and synthetic local process; no provider"]
+async fn author_analysis_progresses_with_work_backlog_and_one_call_per_visit() {
+    let mut schedule = CreatorDiscoverySchedule::default();
+    let db = fixture::proof_database("creator_discovery_fairness").await;
+    let config = model_config(&db, 8192).await;
+    for id in [
+        "fair-one",
+        "fair-two",
+        "fair-three",
+        "fair-four",
+        "fair-five",
+        "fair-six",
+    ] {
+        add_work(&db, id, Some("worker-author")).await;
+    }
+    add_policy(&db, config, false).await;
+    let adapter = synthetic_adapter();
+    assert!(
+        !run_once(&db, &SyntheticModelSecrets, &adapter, &mut schedule)
+            .await
+            .unwrap(),
+        "analysis is off until it is enabled"
+    );
+    sqlx::query("UPDATE linggan_creator_discovery_policy SET analysis_enabled=true")
+        .execute(db.pool())
+        .await
+        .unwrap();
+
+    // Six works are queued. Each visit takes one lease and makes one model call, and the author
+    // gets the turn right after a work instead of waiting for the work queue to drain.
+    let mut turns = Vec::new();
+    for visit in 0..4 {
+        let before = analyze_calls(&db).await;
+        assert!(
+            run_once(&db, &SyntheticModelSecrets, &adapter, &mut schedule)
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            analyze_calls(&db).await - before,
+            1,
+            "one model call per creator visit"
+        );
+        turns.push(sqlx::query_scalar::<_, String>("SELECT result->>'jobKind' FROM linggan_model_invocation WHERE operation='analyze' ORDER BY created_at DESC LIMIT 1").fetch_one(db.pool()).await.unwrap());
+        if visit == 1 {
+            let author_result: bool = sqlx::query_scalar("SELECT result_at IS NOT NULL FROM linggan_creator_discovery_author_analysis WHERE author_external_id='worker-author'").fetch_one(db.pool()).await.unwrap();
+            assert!(
+                author_result,
+                "author must run before the six-note work queue drains"
+            );
+        }
+    }
+    assert_eq!(turns, ["work", "focus", "work", "focus"]);
+    let queued = |state: &'static str| {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM linggan_creator_discovery_work_analysis WHERE job_state=$1",
+        )
+        .bind(state)
+        .fetch_one(db.pool())
+    };
+    assert_eq!(
+        queued("idle").await.unwrap(),
+        2,
+        "work lane must continue after author progress"
+    );
+    assert_eq!(
+        queued("queued").await.unwrap(),
+        4,
+        "proof retains a real executable work backlog"
+    );
+
+    // The author's result says how many works actually reached the model out of how many existed.
+    let sample: serde_json::Value = sqlx::query_scalar("SELECT result_json FROM linggan_creator_discovery_author_analysis WHERE author_external_id='worker-author'").fetch_one(db.pool()).await.unwrap();
+    assert_eq!(sample["availableWorkCount"], 6);
+    assert!(
+        sample["sampleWorkCount"]
+            .as_u64()
+            .is_some_and(|n| n > 0 && n < 6),
+        "the 8192-token budget clips the sixth work out of the model input: {sample}"
+    );
+    // Reading the result back keeps the work title on each supporting fragment, grouped by work.
+    let scope = serde_json::from_value(json!({"domain":D})).unwrap();
+    let data = load(&db, &scope).await.unwrap();
+    let support = data.works[0].author_analysis["supportFragments"]
+        .as_array()
+        .unwrap();
+    assert!(!support.is_empty());
+    assert!(support.iter().all(|f| f["workTitle"] == "实践"));
+
+    // Draining the rest keeps one call per visit and never lets the author outnumber work.
+    let mut visits = 4;
+    loop {
+        let before = analyze_calls(&db).await;
+        let worked = run_once(&db, &SyntheticModelSecrets, &adapter, &mut schedule)
+            .await
+            .unwrap();
+        let made = analyze_calls(&db).await - before;
+        if !worked {
+            assert_eq!(made, 0, "an idle visit makes no call");
+            break;
+        }
+        assert_eq!(made, 1, "one model call per creator visit");
+        visits += 1;
+        assert!(visits <= 20, "both queues must drain");
+    }
+    let by_kind: Vec<(String, i64)> = sqlx::query_as("SELECT result->>'jobKind',count(*) FROM linggan_model_invocation WHERE operation='analyze' AND state='succeeded' GROUP BY 1 ORDER BY 1").fetch_all(db.pool()).await.unwrap();
+    assert_eq!(by_kind.len(), 2);
+    assert_eq!(
+        by_kind[1],
+        ("work".to_string(), 6),
+        "every work was analysed"
+    );
+    assert!(
+        by_kind[0].1 <= by_kind[1].1,
+        "alternation caps the author at one call per work call: {by_kind:?}"
+    );
+    assert_eq!(queued("idle").await.unwrap(), 6);
+    let author: (String, Option<String>, String) = sqlx::query_as("SELECT job_state,result_fingerprint,requested_fingerprint FROM linggan_creator_discovery_author_analysis WHERE author_external_id='worker-author'").fetch_one(db.pool()).await.unwrap();
+    assert_eq!(author.0, "idle");
+    assert_eq!(
+        author.1.as_deref(),
+        Some(author.2.as_str()),
+        "the author result matches the final work input"
+    );
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL and synthetic local process; no provider"]
+async fn a_changed_author_input_is_not_held_back_by_the_old_retry_wait() {
+    let mut schedule = CreatorDiscoverySchedule::default();
+    let db = fixture::proof_database("creator_discovery_requeue").await;
+    let config = model_config(&db, 8192).await;
+    add_work(&db, "retry-one", Some("retry-author")).await;
+    add_work(&db, "retry-two", Some("retry-author")).await;
+    add_policy(&db, config, true).await;
+    settle_works(&db).await;
+    // The author failed twice on older input and is waiting an hour for its next attempt.
+    sqlx::query("INSERT INTO linggan_creator_discovery_author_analysis(domain_ref,platform,author_external_id,requested_fingerprint,job_state,attempt_count,next_attempt_at,last_error_code,updated_at) VALUES($1,'xhs','retry-author','older-input','queued',2,scope_001_now()+interval '1 hour','creator_analysis_invalid_output',scope_001_now()-interval '2 days')").bind(D).execute(db.pool()).await.unwrap();
+    let adapter = synthetic_adapter();
+
+    // The works' present input differs from 'older-input': that is new input, so it runs now.
+    assert!(
+        run_once(&db, &SyntheticModelSecrets, &adapter, &mut schedule)
+            .await
+            .unwrap(),
+        "new input must not inherit the old retry wait"
+    );
+    let author: (String, i32, bool, bool, bool, Option<String>) = sqlx::query_as("SELECT job_state,attempt_count,result_at IS NOT NULL,next_attempt_at<=scope_001_now(),updated_at>scope_001_now()-interval '1 minute',last_error_code FROM linggan_creator_discovery_author_analysis WHERE author_external_id='retry-author'").fetch_one(db.pool()).await.unwrap();
+    assert_eq!(
+        author,
+        ("idle".to_string(), 1, true, true, true, None),
+        "retry count restarts, the wait and update time are renewed, and the old error is cleared"
+    );
+    assert_eq!(analyze_calls(&db).await, 1);
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL and synthetic local process; no provider"]
+async fn author_result_records_zero_sampled_works_when_no_input_fits_and_makes_no_call() {
+    let mut schedule = CreatorDiscoverySchedule::default();
+    let db = fixture::proof_database("creator_discovery_sampling").await;
+    // 1024 is the smallest configurable input budget: the fixed instructions plus any fragment
+    // already exceed it, so no work or author input can be sent.
+    let config = model_config(&db, 1024).await;
+    add_work(&db, "narrow-one", Some("narrow-author")).await;
+    add_work(&db, "narrow-two", Some("narrow-author")).await;
+    add_policy(&db, config, true).await;
+    let adapter = synthetic_adapter();
+
+    // Visit one is the work turn and stops at the input limit; visit two is the author's turn.
+    for _ in 0..2 {
+        assert!(
+            run_once(&db, &SyntheticModelSecrets, &adapter, &mut schedule)
+                .await
+                .unwrap()
+        );
+    }
+    let author: (String, serde_json::Value, bool) = sqlx::query_as("SELECT job_state,result_json,result_invocation_ref IS NULL FROM linggan_creator_discovery_author_analysis WHERE author_external_id='narrow-author'").fetch_one(db.pool()).await.unwrap();
+    assert_eq!(author.0, "idle");
+    assert_eq!(author.1["sampleWorkCount"], 0, "no work reached the model");
+    assert_eq!(author.1["availableWorkCount"], 2, "both works existed");
+    assert_eq!(author.1["focus"]["value"], "unknown");
+    assert!(author.2, "no model call means no invocation receipt");
+    assert_eq!(analyze_calls(&db).await, 0, "nothing was sent or charged");
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL and synthetic local process; no provider"]
+async fn works_without_an_author_are_never_held_back_by_author_priority() {
+    let mut schedule = CreatorDiscoverySchedule::default();
+    let db = fixture::proof_database("creator_discovery_no_author").await;
+    let config = model_config(&db, 8192).await;
+    for id in ["solo-one", "solo-two", "solo-three"] {
+        add_work(&db, id, None).await;
+    }
+    add_policy(&db, config, true).await;
+    let adapter = synthetic_adapter();
+
+    // After the first work the author queue is offered every turn, but it is empty: each visit
+    // must still advance the work queue by exactly one call.
+    for _ in 0..3 {
+        let before = analyze_calls(&db).await;
+        assert!(
+            run_once(&db, &SyntheticModelSecrets, &adapter, &mut schedule)
+                .await
+                .unwrap()
+        );
+        assert_eq!(analyze_calls(&db).await - before, 1);
+    }
+    assert!(
+        !run_once(&db, &SyntheticModelSecrets, &adapter, &mut schedule)
+            .await
+            .unwrap(),
+        "nothing is left to do"
+    );
+    let idle: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_creator_discovery_work_analysis WHERE job_state='idle'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    let authors: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM linggan_creator_discovery_author_analysis")
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    assert_eq!((idle, authors), (3, 0));
 }
