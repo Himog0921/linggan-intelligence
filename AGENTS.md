@@ -88,6 +88,15 @@ Mog 负责定义**想得到的用户结果**、**明确不能接受的结果**�
 
 LIDS 是全项目唯一设计表达标准：Token → Primitive → Component → Pattern → Page，Motion / Scene / Data Truth 为横向约束。设计手册只规定已获批准的界面表达与协作流程，不替代用户确认、运行时事实、产品语义、权限边界、API/数据合同或当前 SCOPE。LIDS 的建议技术路径、原型、模拟数值和历史状态不是实现授权；没有状态为“权威当前”的明确依据时，Agent 必须停止受影响部分并标记 DECISION_REQUIRED，不得借助参考图、旧系统、截图、通用设计习惯或模型推断自行补全。
 
+### Web 前端技术（DEC-0010）
+
+所有正式网页统一为一个 React + TypeScript 应用（`apps/web`），由 Axum 同源提供；长期决定见 [`docs/decisions/0010-web-frontend-react.md`](docs/decisions/0010-web-frontend-react.md)，唯一实施计划见 [`docs/plans/active/web-react-001.md`](docs/plans/active/web-react-001.md)。
+
+- 新页面只用 React；不得新增原生页面脚本、页面 `.html/.css`，也不得新增由 Rust 拼接的页面 HTML。
+- 尚未迁移的旧页面冻结，只修阻断使用的缺陷；页面迁移时，同一 PR 删除它的旧实现，不设新旧切换开关。
+- 业务判断、资格、授权、幂等与操作回执仍由 Rust/PostgreSQL 负责；前端不重算业务结论，只在服务器回执后显示成功。
+- `apps/web` 的页面样式由 `apps/web/src/test/tokenDiscipline.test.ts` 自动检查：不得写死颜色、字号、行高与间距（下文「没有自动检查兜底」只对尚未迁移的旧页面成立）。
+
 ## Design System (LIDS) Constraints
 
 手册入口 `docs/design/lids/README.md`；Token 基线 `docs/design/lids/tokens.md`，运行时镜像 `apps/api/src/local_web/lids_tokens.css`。

@@ -272,6 +272,7 @@ Blob store ── only when proven ───── Evidence implementation
 | 主数据库 | ADR-0001 接受全新 PostgreSQL；F01 有本地未提交 migration/proof | 一个 PostgreSQL 16 权威主库；旧库完全隔离 | `ACCEPTED` |
 | 进程 | `apps/api`、`apps/worker` 当前只打印 Bootstrap 信息 | API 与 worker 两个组合进程，共用模块 Interface，不共享进程内真相 | `ACCEPTED` |
 | 浏览器执行 | 新系统尚未接入插件 | TypeScript/MV3 轻执行器，只执行受控 Work Order | `ACCEPTED` |
+| Web 前端 | 原生 JS + Rust 拼接页面（2026-10-15 核对），立项时漏定 | 一个 React + TypeScript 应用（`apps/web`），Vite 构建，Axum 同源托管；不留双轨，按 WEB-REACT-001 逐页迁移 | `ACCEPTED`（[DEC-0010](../decisions/0010-web-frontend-react.md)） |
 | Agent | 无 Agent Runtime 实现 | 受控 Linggan Kernel + 可替换模型循环 Adapter | 方向 `ACCEPTED`；Pi 方案 `PROVISIONAL` |
 | 物理主机/容器 | 尚未部署 | API/worker 可先同主机不同进程/容器；包装由部署 SCOPE 决定 | `PROVISIONAL` |
 
@@ -889,6 +890,7 @@ mock、类型、编译、HTTP 200、worker `succeeded`、页面卡片、模型�
 | `ARCH-A03` | 深模块按责任和事务组织，不按页面/表/名词建 crate；接口/文件设门禁 | `USER-DEC-05` 与模块架构 | 具体 crate 映射仍渐进 |
 | `ARCH-A04` | 第一阶段入口以产品任务组织；CLI 不绕过产品合同直连数据库 | `USER-DEC-06` | 精确命令/UI 由原型/SCOPE 冻结 |
 | `ARCH-A05` | 单主库中权威历史与可重建投影分开；PostgreSQL 约束承担核心一致性 | `USER-DEC-03/05` | 具体表/索引仍按 SCOPE |
+| `ARCH-A06` | 网页前端统一为一个 React + TypeScript 应用，Axum 同源托管；业务权威仍在 Rust；不留新旧双轨 | [`DEC-0010`](../decisions/0010-web-frontend-react.md) | 2026-10-15 补上立项时漏定的前端条目；实施见 WEB-REACT-001 |
 
 ### 22.3 `PROVISIONAL`
 

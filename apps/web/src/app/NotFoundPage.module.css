@@ -1,0 +1,22 @@
+.shell {
+  grid-template-columns: minmax(0, 1fr);
+  overflow: auto;
+}
+
+.main {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: var(--lgi-page-max-workbench);
+  margin: 0 auto;
+  padding: var(--lgi-space-8);
+  color: var(--lgi-body);
+  font: var(--lgi-text-body) / var(--lgi-lh-body) var(--lgi-font-sans);
+}
+
+.main h1 {
+  margin: 0 0 var(--lgi-space-3);
+  color: var(--lgi-ink);
+  font-size: var(--lgi-text-page-title);
+  font-weight: var(--lgi-weight-bold);
+  line-height: var(--lgi-lh-title);
+}

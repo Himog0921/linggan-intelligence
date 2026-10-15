@@ -67,9 +67,27 @@ git -C ~/Library/Application\ Support/Linggan\ Intelligence/runtime-main log -1 
 2. `git fetch origin main`；需要改变 revision 时核对并消费匹配的 worker 更新许可，之后才切换；
 3. 检查迁移台账，有未应用的迁移就**拒绝启动**（见下）；
 4. 在锁内构建三个二进制；
-5. 释放锁，各服务 `exec` 自己的二进制。
+5. 在锁内准备网页前端（`scripts/runtime/prepare-web.sh --build <revision>`，WEB-REACT-001 起）；
+6. 释放锁，各服务 `exec` 自己的二进制。
 
 拿不到网络时不会让服务起不来：fetch 失败会记录一行并继续用当前 revision。
+
+### 3.1 网页前端（WEB-REACT-001 / DEC-0010 起）
+
+迁到 React 的页面（当前只有 `/settings/models`）由 API 读取**同一个运行目录**里的 `apps/web/dist` 提供。`prepare-web.sh`：
+
+- 用与 Pi Adapter 相同的固定 Node（按 `.nvmrc` 解析绝对路径，不依赖 launchd 的 PATH；可用 `LINGGAN_WEB_NODE` 覆盖）；
+- 该 revision 已构建过（`dist/build-info.json` 的 revision 相同）就直接复用——**离线重启不需要网络**；
+- 只有 `package-lock.json` 变化时才 `npm ci --prefer-offline`；本机 npm 缓存里有对应的包时断网也能装上，否则需要网络（与 cargo 首次拉取新依赖同理）；
+- 构建失败与 cargo 失败一样**拒绝启动**，完整输出在 `runtime-build/sync-build.log`。
+
+运行中的 API 还有第二道闸：`dist/build-info.json` 的 revision 与身份文件里的 revision 都已知却对不上时，React 页面返回 503（`web_revision_mismatch`），JSON 接口照常工作；产物不存在时返回 `web_dist_missing`。核对方式：
+
+```bash
+curl -s http://127.0.0.1:3000/health | python3 -c 'import json,sys; print(json.load(sys.stdin)["webApp"])'
+```
+
+`state` 应为 `ready`，`revision` 与 `runtimeRevision` 相同。回退仍以整个 revision 为单位：切回旧 revision 后 `sync.sh` 会为它重新准备前端（或复用已有构建）；不保留旧页面作为单页回退手段。
 
 ## 4. 迁移仍然不由服务执行
 

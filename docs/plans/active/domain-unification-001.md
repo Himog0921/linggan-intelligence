@@ -7,6 +7,8 @@
 > 冲突时以谁为准: Mog 最新明确决定；其次是真实运行、数据库副作用和可复现测试；再其次是当前代码、migration、ACCEPTED ADR 和权威当前文档
 > 当前阶段: WP0–WP5 已实施并经完整隔离 PostgreSQL 套件与双轴独立复审；PR #343 已合并为 `main@46e10837`。共享开发库已应用 0103→0104，本机 `runtime-main` 与三个服务已切换到该版本，API 与领域/任务浏览器 smoke 通过。旧 cross 派生的 24 条考研样本与 245 条评论未伪造重投影或重采，迁移前快照保留；考研正式领域当前为 0 篇/0 评论。#338 须基于新 main 调整候选 migration 与 Comment Study 重叠代码；Mog 业务验收、真实平台重采及其数据能力证明尚未发生。原始开发基线=`origin/main@a42315e`；发布代码基线=`main@46e10837`
 
+**替代说明（2026-10-15）**：本文「保持当前 local_web SSR + POST/Redirect，不引入 SPA 或通用后台框架」已由 [DEC-0010](../../decisions/0010-web-frontend-react.md) 取代——网页前端统一为 React + TypeScript，推进见 [WEB-REACT-001](web-react-001.md)。本文其余内容不受影响。
+
 ## 0. 下一位 Agent 从这里开始
 
 本文件是本交付包唯一的开发推进文件。下一位 Agent 必须按以下顺序读取：

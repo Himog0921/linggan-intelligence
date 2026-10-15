@@ -3,10 +3,18 @@
 PR #407 合并前修正（2026-10-13）：运营页焦点/强调线与新增共享页头 padding 改为现有间距 Token 的等值表达，保持 Mog 已确认的外观、断点和导航尺寸。未新增共享 Token 或扩大页面/权限范围。范围及验证见 [D2 验收记录](../acceptance/ops-page-001-visual-acceptance.md)。
 
 > 状态: 权威当前
-> 最后核对: 2026-10-13
+> 最后核对: 2026-10-15
 > 适用范围: Linggan Intelligence LIDS Token、Primitive、Component、Pattern、Page、Motion、Scene 和 Data Truth 规则的实际变更、替代、例外与验证边界
 > 事实来源: [system.md](system.md)、[README.md](README.md)、DESIGN-002 Issue #7、项目 progress 记录和实际验证输出
 > 冲突时以谁为准: 真实代码/合同/测试、用户最新确认、当前 SCOPE 和 ACCEPTED 决策；本日志不把计划写成已实现事实
+
+## 2026-10-15 · WEB-REACT-001 阶段 B：模型设置页迁到 React（Issue #430 / Draft PR #431）
+
+- **实现载体变化**：`/settings/models` 改由 `apps/web` 的 React 应用提供（DEC-0010），旧 `model_settings.html/.css/.js` 删除。页面样式为 CSS Module，只消费 `lids_tokens.css` 的 `--lgi-*`；外壳仍用同一份 `shell.css`，React 页头与 `shell.rs` 结构一致（前端测试逐项对照导航登记表）。
+- **未新增全局资产**：没有新 Token、Primitive、CMP、Scene、Motion 或第二套外壳样式；Token 文件直接被前端构建引用，不复制第二份。
+- **新增自动检查**：`apps/web/src/test/tokenDiscipline.test.ts` 扫描 React 页面样式，拒绝写死颜色、字号、行高与间距（边框线宽除外）。它只覆盖 `apps/web`，旧页面仍靠自觉与审查。
+- **页面局部变化**：回执分「已完成 / 未完成 / 未确认」三种语气，用文字标签 + 左侧色条（success/danger/warning 三轴）表达，不只靠颜色；内容区可滚动；与面包屑重复的小标题删除；时间统一为 `YYYY-MM-DD HH:MM`。
+- **验证边界**：视觉与行为证据见 [ACC-WEB-REACT-001-B](../acceptance/web-react-001-b-acceptance.md)；未经 Mog 审美验收，未部署。
 
 ## 2026-10-14 · CORPUS-COPY-001 语料两页文案快修（Issue #421）
 

@@ -4,6 +4,8 @@
 > 事实来源: Mog 当前对话实施请求及附带执行手册；main 5f31b858
 > 冲突时以谁为准: 用户当前请求、实际代码与测试；附件不授权共享迁移、部署或真实外发
 
+**替代说明（2026-10-15）**：本文「不全局换 UI 框架」已由 [DEC-0010](../../decisions/0010-web-frontend-react.md) 取代——网页前端统一为 React + TypeScript，推进见 [WEB-REACT-001](web-react-001.md)。本文其余内容不受影响。
+
 # Intelligence｜创作者发现模块开发执行手册 V1
 
 **交付代号：CREATOR-DISCOVERY-001**

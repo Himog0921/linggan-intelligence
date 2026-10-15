@@ -1,0 +1,96 @@
+name: Web app (WEB-REACT-001)
+# 网页前端（DEC-0010）：任何改动 React 应用、其服务器接缝或共享外壳样式的 PR 都要通过。
+# 不按分支名放行，避免「换了分支名，检查就整套跳过」。
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/web/**'
+      - 'apps/api/src/local_web/web_app*.rs'
+      - 'apps/api/src/local_web/model_settings.rs'
+      - 'apps/api/src/local_web/shell.rs'
+      - 'apps/api/src/local_web/shell.css'
+      - 'apps/api/src/local_web/lids_tokens.css'
+      - 'apps/api/src/local_web.rs'
+      - 'scripts/runtime/prepare-web.sh'
+      - 'scripts/test-web-app-postgres.sh'
+      - '.nvmrc'
+      - '.github/workflows/web-app.yml'
+permissions:
+  contents: read
+concurrency:
+  group: web-app-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  web-checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - name: Locked install
+        run: npm ci --prefix apps/web --ignore-scripts --no-audit --no-fund
+      - name: Typecheck, lint, unit and component tests, production build
+        run: npm --prefix apps/web run verify
+      - name: Runtime preparation script reuses a matching build
+        run: |
+          export LINGGAN_WEB_NODE="$(command -v node)"
+          revision="$(git rev-parse --short HEAD)"
+          bash scripts/runtime/prepare-web.sh --build "$revision"
+          bash scripts/runtime/prepare-web.sh --check "$revision"
+
+  real-chain-browser-proof:
+    needs: web-checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_PROFILE_TEST_DEBUG: '0'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - name: Matching Rust toolchain
+        run: |
+          rustup toolchain install 1.95.0 --profile minimal --component rustfmt
+          rustup default 1.95.0
+          echo "CARGO_TARGET_DIR=$RUNNER_TEMP/web-app-target" >> "$GITHUB_ENV"
+      - name: Locked install and browser
+        run: |
+          npm ci --prefix apps/web --ignore-scripts --no-audit --no-fund
+          npx --prefix apps/web playwright install --with-deps chromium
+      - name: API route regression
+        run: cargo test -p linggan-api --bins --locked local_web::web_app_tests
+      - name: Isolated PostgreSQL + Axum + React browser proof (synthetic credential only)
+        env:
+          WEB_APP_PROOF_DIR: ${{ runner.temp }}/web-app-proof
+        run: |
+          export WEB_APP_PROOF_NODE="$(command -v node)"
+          bash scripts/test-web-app-postgres.sh
+      - name: Governance and format
+        run: |
+          bash scripts/check-project-governance.sh origin/main
+          bash scripts/verify-ui-design-handbook.sh
+          git diff --check
+          # 只查本模块自己的 Rust 文件：local_web.rs 在主线上已有与本模块无关的格式偏差。
+          rustfmt --edition 2024 --config skip_children=true --check \
+            apps/api/src/local_web/web_app.rs apps/api/src/local_web/web_app_tests.rs apps/api/src/local_web/model_settings.rs
+      - name: Retain browser evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: web-app-real-chain-proof
+          path: ${{ runner.temp }}/web-app-proof
+          retention-days: 7
+          if-no-files-found: warn

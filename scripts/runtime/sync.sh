@@ -124,6 +124,16 @@ for binary in linggan-api linggan-worker linggan-media-worker; do
   [[ -x "target/debug/${binary}" ]] || { log "构建后仍找不到 target/debug/${binary}"; exit 1; }
 done
 
+# 网页前端（WEB-REACT-001 / DEC-0010）与三个二进制同一个 revision：同一把锁内、同一个 checkout
+# 里构建，API 读这个 checkout 的 apps/web/dist。已为该 revision 构建过就直接复用，离线重启不需要
+# 网络；构建失败与 cargo 失败同样拒绝启动，不让新后台配旧界面半新半旧地运行。
+log "准备网页前端 revision ${current}"
+if ! ./scripts/runtime/prepare-web.sh --build "$current" >>"$build_log" 2>&1; then
+  log "网页前端构建失败；最近 20 行如下，完整输出见 ${build_log}"
+  tail -n 20 "$build_log" | while IFS= read -r line; do log "  ${line}"; done
+  exit 1
+fi
+
 # The independent comment loop runs inside linggan-worker. It needs the real SDK even
 # when launchd has no nvm shell initialization. This installs only fixed local packages.
 ./scripts/runtime/prepare-pi-adapter.sh --install

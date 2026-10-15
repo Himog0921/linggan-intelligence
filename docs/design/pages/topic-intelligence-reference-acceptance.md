@@ -6,6 +6,8 @@
 > 事实来源: PAGE-TOPIC-001、DS-REF-TOPIC-001、LIDS-SYS-001 / LIDS-PAT-001 / LIDS-AGENT-001、Issue #7、实际脚本输出与本地 Chrome 走查
 > 冲突时以谁为准: 真实运行/代码/合同、用户最新确认与当前 SCOPE；截图、演示或本记录不覆盖这些来源
 
+**替代说明（2026-10-15）**：本文把「运行时前端技术」列为待决定已由 [DEC-0010](../../decisions/0010-web-frontend-react.md) 取代——网页前端统一为 React + TypeScript，推进见 [WEB-REACT-001](../../plans/active/web-react-001.md)。本文其余内容不受影响。
+
 ## 1. 验收对象
 
 - Issue / 计划：Issue #7 / DESIGN-002（LIDS v2.0 scope correction 后的最新工作树）。
