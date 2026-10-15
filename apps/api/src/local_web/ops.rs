@@ -30,10 +30,15 @@ pub(super) struct BusinessQuery {
     pub(super) domain: Option<String>,
 }
 
-/// 点「运营」进入发布记录（选题池上线前的默认页）。
+/// WEB-REACT-001 C: 运营默认进入正式创作工作区；旧台账页仍按原路由访问。
 async fn entry(Query(query): Query<BusinessQuery>) -> Response {
-    let business = OpsBusiness::parse(query.domain.as_deref()).unwrap_or(OpsBusiness::All);
-    Redirect::to(&page_href(OpsPage::Publications, business)).into_response()
+    match OpsBusiness::parse(query.domain.as_deref()) {
+        Ok(OpsBusiness::All) => Redirect::to("/ops/creation").into_response(),
+        Ok(OpsBusiness::Domain(domain)) => {
+            Redirect::to(&format!("/ops/creation?domain={domain}")).into_response()
+        }
+        Err(error) => super::ops_api::read_error(error),
+    }
 }
 
 async fn overview_page(state: State<LocalWebState>, query: Query<BusinessQuery>) -> Response {

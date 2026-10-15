@@ -3,6 +3,7 @@
 //! their kept record. Unknown stays `None`, never 0.
 
 mod accounts;
+mod creation_read;
 mod daily;
 mod overview;
 mod publications;
@@ -13,6 +14,7 @@ use serde::Serialize;
 use sqlx::Row;
 use uuid::Uuid;
 
+pub use creation_read::{CreationPublication, read_creation_publications, creation_publication_directory_in};
 pub use accounts::{OpsAccountItem, OpsAccountPage, read_ops_accounts};
 pub use daily::{OpsDailyItem, OpsDailyPage, read_ops_daily};
 pub use overview::{

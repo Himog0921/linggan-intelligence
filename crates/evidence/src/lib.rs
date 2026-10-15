@@ -191,7 +191,7 @@ pub use material_processing::{
     fail_media_processing_work, processor_version_for_kind, read_claim_gate_readiness,
     record_media_derivative_completion, requeue_outdated_processor_jobs,
 };
-pub use material_social_read::{read_authorized_research_comments,read_dossier_comments};
+pub use material_social_read::{read_authorized_research_comments, read_dossier_comments, read_creation_comment_in, creation_comment_directory_in};
 pub use media_acquisition::{
     MediaAcquisitionDecision, MediaAcquisitionError, MediaAcquisitionFailureOutcome,
     claim_media_acquisition, ensure_discovery_cover_media_work, media_acquisition_schema_is_ready,

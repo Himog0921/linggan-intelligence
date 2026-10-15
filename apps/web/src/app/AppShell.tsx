@@ -6,19 +6,21 @@ interface AppShellProps {
   active: PrimarySurface | null;
   /** 系统区服务状态胶囊的中文文字。 */
   boundaryLabel: string;
+  /** 当前页可明确提供的状态；省略时沿用迁移期导航基线。 */
+  activeState?: string;
   crumb: ReactNode;
   meta: ReactNode;
   children: ReactNode;
 }
 
-function PrimaryEntryLink({ entry, active }: { entry: PrimaryEntry; active: PrimarySurface | null }) {
+function PrimaryEntryLink({ entry, active, activeState }: { entry: PrimaryEntry; active: PrimarySurface | null; activeState?: string }) {
   const current = entry.surface !== null && entry.surface === active ? 'page' : undefined;
   const label = (
     <>
       <b className="v7-nav-zh">{entry.zh}</b>
       <span className="v7-nav-readout">
         {entry.technicalKey ? <small className="v7-tech-key">{entry.technicalKey}</small> : null}
-        <span className="v7-nav-state">{entry.state}</span>
+        <span className="v7-nav-state">{current ? activeState ?? entry.state : entry.state}</span>
       </span>
     </>
   );
@@ -41,7 +43,7 @@ function PrimaryEntryLink({ entry, active }: { entry: PrimaryEntry; active: Prim
  * 全站唯一继续演进的页头（WEB-REACT-001 R4）。结构与样式类名与 shell.rs 的 `global_header`
  * 保持一致，样式只来自 `shell.css`，迁移期两种页头看起来是同一个。
  */
-export function AppShell({ active, boundaryLabel, crumb, meta, children }: AppShellProps) {
+export function AppShell({ active, activeState, boundaryLabel, crumb, meta, children }: AppShellProps) {
   return (
     <div className="v7-app">
       <header className="v7-global-header">
@@ -58,7 +60,7 @@ export function AppShell({ active, boundaryLabel, crumb, meta, children }: AppSh
           </div>
           <nav className="v7-primary-nav" aria-label="一级导航">
             {PRIMARY_ENTRIES.map(entry => (
-              <PrimaryEntryLink key={entry.zh} entry={entry} active={active} />
+              <PrimaryEntryLink key={entry.zh} entry={entry} active={active} {...(activeState === undefined ? {} : { activeState })} />
             ))}
           </nav>
           <div className="v7-global-flex" aria-hidden="true" />

@@ -1,0 +1,734 @@
+/** Closed HTTP projection of CONTENT-WORKBENCH-001. Unicode ranges are scalar offsets. */
+export type SourceKind = 'note' | 'comment' | 'ocr' | 'ops_publication';
+export type SourceField = 'title' | 'body' | 'ocr' | 'cover_headline' | 'comment_body';
+export type CanvasGroup = 'inbox' | 'opening' | 'argument' | 'example' | 'ending';
+export type PageKind = 'cover' | 'opinion' | 'voice' | 'steps';
+export type Palette = 'cream' | 'sage' | 'ink';
+export interface OcrLineSpan {
+  lineRef: string;
+  start: number;
+  end: number;
+  bbox: [number, number, number, number];
+}
+export interface OcrLocation {
+  derivativeRef: string;
+  layoutRef: string;
+  layeringRef: string;
+  blobSha256: string;
+  slotKey: string;
+  lineSpans: OcrLineSpan[];
+}
+export interface Citation {
+  sourceKind: SourceKind;
+  sourceRef: string;
+  workRef: string | null;
+  field: SourceField;
+  sourceVersion: string;
+  start: number;
+  end: number;
+  textHash: string;
+  location: OcrLocation | null;
+}
+export interface Paragraph {
+  id: string;
+  text: string;
+}
+export interface Excerpt {
+  id: string;
+  citation: Citation;
+  selectedText: string | null;
+  textHash: string;
+}
+export interface CanvasBlock {
+  id: string;
+  excerptId: string | null;
+  group: CanvasGroup;
+  note: string;
+  expression: string;
+  expressionRevision: number;
+}
+export interface PageBlock {
+  id: string;
+  text: string;
+}
+export interface Crop {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+export interface PageStyle {
+  palette: Palette;
+  fontFamily: string;
+  width: number;
+  height: number;
+  alignment: 'start' | 'center' | 'end';
+}
+export interface ImagePage {
+  id: string;
+  kind: PageKind;
+  templateVersion: string;
+  title: string;
+  subtitle: string;
+  blocks: PageBlock[];
+  assetId: string | null;
+  crop: Crop;
+  style: PageStyle;
+}
+export type UseTarget = {
+  kind: 'paragraph';
+  paragraphId: string;
+} | {
+  kind: 'pageBlock';
+  pageId: string;
+  blockId: string;
+} | {
+  kind: 'title' | 'angle';
+} | {
+  kind: 'outline' | 'tag';
+  index: number;
+} | {
+  kind: 'canvasNote' | 'canvasExpression';
+  canvasId: string;
+} | {
+  kind: 'pageTitle' | 'pageSubtitle';
+  pageId: string;
+};
+export interface MaterialUse {
+  id: string;
+  canvasId: string;
+  expressionRevision: number;
+  excerptId: string | null;
+  target: UseTarget;
+  placedTextHash: string;
+  state: 'current' | 'modified' | 'needs_review';
+  contentOrigin: 'excerpt' | 'expression';
+  sourceSpan: {
+    start: number;
+    end: number;
+    textHash: string;
+  } | null;
+}
+export interface WorkDocument {
+  contract: string;
+  title: string;
+  accountRef: string | null;
+  topicRef: string | null;
+  angle: string;
+  outline: string[];
+  tags: string[];
+  paragraphs: Paragraph[];
+  excerpts: Excerpt[];
+  canvas: CanvasBlock[];
+  pages: ImagePage[];
+  uses: MaterialUse[];
+}
+export interface Revision {
+  id: string;
+  number: number;
+  savedAt: string;
+  document: WorkDocument;
+}
+export interface SaveReceipt {
+  requestId: string;
+  workId: string;
+  outcome: string;
+  replayed: boolean;
+  revision: Revision;
+}
+export interface SourceStatus {
+  excerptId: string;
+  state: string;
+  code: string;
+}
+export interface ExportPage {
+  pageId: string;
+  ordinal: number;
+  sha256: string | null;
+  byteSize: number | null;
+}
+export interface ExportRecord {
+  id: string;
+  workId: string;
+  revisionId: string;
+  state: string;
+  failureCode: string | null;
+  rendererVersion: string;
+  fontVersion: string;
+  pages: ExportPage[];
+  packageSha256: string | null;
+  packageByteSize: number | null;
+}
+export interface WorkEnvelope {
+  workId: string;
+  domainRef: string;
+  savedBy: string;
+  revision: Revision;
+  sourceStatuses: SourceStatus[];
+  exports: ExportRecord[];
+}
+export interface WorkSummary {
+  workId: string;
+  domainRef: string;
+  title: string;
+  revisionId: string;
+  savedAt: string;
+}
+export interface AssetRecord {
+  id: string;
+  workId: string;
+  sha256: string;
+  byteSize: number;
+  mimeType: string;
+  width: number;
+  height: number;
+}
+export interface SourceItem {
+  fragmentId: string;
+  sourceKind: SourceKind;
+  sourceRef: string;
+  workRef: string | null;
+  field: SourceField;
+  sourceVersion: string;
+  title: string;
+  text: string;
+  bodyState: string;
+  authorLabel: string;
+  qualification: string;
+  location: OcrLocation | null;
+}
+export interface SourceList {
+  contract: string;
+  asOf: string;
+  items: SourceItem[];
+  distribution: {
+    sourceKind: SourceKind;
+    count: number;
+    basis: string;
+  }[];
+  total: number;
+  totalBasis: string;
+  returnedSourceCount: number;
+  returnedFragmentCount: number;
+  nextCursor: number | null;
+  searchScope: string;
+  scope: string;
+}
+export interface ValidatedAnchor {
+  citation: Citation;
+  selectedText: string;
+  textHash: string;
+}
+export interface SourceContext {
+  item: SourceItem;
+  context: unknown;
+}
+export type WritingAction = 'draft' | 'rewrite_selection' | 'page_copy';
+export interface WritingSelection {
+  paragraphId: string;
+  start: number;
+  end: number;
+  textHash: string;
+}
+export interface AiReadiness {
+  configured: boolean;
+  transportCallable: boolean | null;
+  writingQualified: boolean | null;
+  configRef: string | null;
+  methodVersion: string;
+  modelRef?: string;
+  connectionVersionRef?: string;
+  qualificationScope?: string;
+}
+export interface AiPreview {
+  previewRef: string;
+  inputRevision: string;
+  inputHash: string;
+  action: WritingAction;
+  methodVersion: string;
+  configRef: string;
+  modelRef: string;
+  connectionVersionRef: string;
+  sourceCount: number;
+  inputCharacterCount: number;
+  estimatedInputTokensUpperBound: number;
+  reservedTokens: number;
+  maxCalls: number;
+  outboundInput: unknown;
+  confirmationRequired: boolean;
+}
+export interface WritingSuggestion {
+  title: string | null;
+  paragraphs: {
+    paragraphId: string | null;
+    text: string;
+  }[];
+  pages: {
+    pageId: string | null;
+    heading: string;
+    body: string;
+  }[];
+}
+export interface AiStatus {
+  requestId: string;
+  workRef: string;
+  invocationRef: string;
+  state: string;
+  inputRevision: string;
+  action: WritingAction;
+  methodVersion: string;
+  suggestion: WritingSuggestion | null;
+  sourceQualification: string;
+  failureCode: string | null;
+  staleBase: boolean;
+  usage: {
+    inputTokens: number | null;
+    outputTokens: number | null;
+    chargedTokens: number;
+    costUsd: number | null;
+  };
+}
+type Parser<T> = (value: unknown) => T;
+export class WorkbenchContractError extends Error {
+  constructor() {
+    super('创作接口返回不符合合同，未采用返回内容。');
+    this.name = 'WorkbenchContractError';
+  }
+}
+function bad(): never {
+  throw new WorkbenchContractError();
+}
+export function object(value: unknown): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return bad();
+  return value as Record<string, unknown>;
+}
+const str: Parser<string> = v => typeof v === 'string' ? v : bad();
+const num: Parser<number> = v => typeof v === 'number' && Number.isFinite(v) ? v : bad();
+const integer: Parser<number> = v => {
+  const n = num(v);
+  return Number.isSafeInteger(n) && n >= 0 ? n : bad();
+};
+const bool: Parser<boolean> = v => typeof v === 'boolean' ? v : bad();
+export const uuid: Parser<string> = v => {
+  const s = str(v);
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s) ? s : bad();
+};
+const nullable = <T,>(p: Parser<T>): Parser<T | null> => v => v === null ? null : p(v);
+const array = <T,>(p: Parser<T>): Parser<T[]> => v => Array.isArray(v) ? v.map(p) : bad();
+const choice = <T extends string,>(...values: T[]): Parser<T> => v => {
+  for (const x of values) if (v === x) return x;
+  return bad();
+};
+function shape<T>(fields: { [K in keyof T]: Parser<T[K]> }): Parser<T> {
+  return value => {
+    const v = object(value);
+    const keys = Object.keys(fields);
+    if (Object.keys(v).some(k => !keys.includes(k))) return bad();
+    const result: Record<string, unknown> = {};
+    for (const k of keys) {
+      const parser = Reflect.get(fields, k) as Parser<unknown>;
+      result[k] = parser(v[k]);
+    }
+    return result as T;
+  };
+}
+const sourceKind = choice('note', 'comment', 'ocr', 'ops_publication');
+const field = choice('title', 'body', 'ocr', 'cover_headline', 'comment_body');
+const bbox: Parser<[number, number, number, number]> = v => {
+  if (!Array.isArray(v) || v.length !== 4) return bad();
+  return [num(v[0]), num(v[1]), num(v[2]), num(v[3])];
+};
+const lineSpan = shape<OcrLineSpan>({
+  lineRef: uuid,
+  start: integer,
+  end: integer,
+  bbox
+});
+const location = shape<OcrLocation>({
+  derivativeRef: uuid,
+  layoutRef: uuid,
+  layeringRef: uuid,
+  blobSha256: str,
+  slotKey: str,
+  lineSpans: array(lineSpan)
+});
+export const parseCitation = shape<Citation>({
+  sourceKind,
+  sourceRef: uuid,
+  workRef: nullable(uuid),
+  field,
+  sourceVersion: str,
+  start: integer,
+  end: integer,
+  textHash: str,
+  location: nullable(location)
+});
+const paragraph = shape<Paragraph>({
+  id: uuid,
+  text: str
+});
+const excerpt = shape<Excerpt>({
+  id: uuid,
+  citation: parseCitation,
+  selectedText: nullable(str),
+  textHash: str
+});
+const canvas = shape<CanvasBlock>({
+  id: uuid,
+  excerptId: nullable(uuid),
+  group: choice('inbox', 'opening', 'argument', 'example', 'ending'),
+  note: str,
+  expression: str,
+  expressionRevision: integer
+});
+const pageBlock = shape<PageBlock>({
+  id: uuid,
+  text: str
+});
+export const parseImagePage = shape<ImagePage>({
+  id: uuid,
+  kind: choice('cover', 'opinion', 'voice', 'steps'),
+  templateVersion: str,
+  title: str,
+  subtitle: str,
+  blocks: array(pageBlock),
+  assetId: nullable(uuid),
+  crop: shape<Crop>({
+    x: num,
+    y: num,
+    width: num,
+    height: num
+  }),
+  style: shape<PageStyle>({
+    palette: choice('cream', 'sage', 'ink'),
+    fontFamily: str,
+    width: integer,
+    height: integer,
+    alignment: choice('start', 'center', 'end')
+  })
+});
+export const parseUseTarget: Parser<UseTarget> = v => {
+  switch (object(v).kind) {
+    case 'paragraph':
+      return shape<{
+        kind: 'paragraph';
+        paragraphId: string;
+      }>({
+        kind: choice('paragraph'),
+        paragraphId: uuid
+      })(v);
+    case 'pageBlock':
+      return shape<{
+        kind: 'pageBlock';
+        pageId: string;
+        blockId: string;
+      }>({
+        kind: choice('pageBlock'),
+        pageId: uuid,
+        blockId: uuid
+      })(v);
+    case 'title':
+    case 'angle':
+      return shape<{
+        kind: 'title' | 'angle';
+      }>({
+        kind: choice('title', 'angle')
+      })(v);
+    case 'outline':
+    case 'tag':
+      return shape<{
+        kind: 'outline' | 'tag';
+        index: number;
+      }>({
+        kind: choice('outline', 'tag'),
+        index: integer
+      })(v);
+    case 'canvasNote':
+    case 'canvasExpression':
+      return shape<{
+        kind: 'canvasNote' | 'canvasExpression';
+        canvasId: string;
+      }>({
+        kind: choice('canvasNote', 'canvasExpression'),
+        canvasId: uuid
+      })(v);
+    case 'pageTitle':
+    case 'pageSubtitle':
+      return shape<{
+        kind: 'pageTitle' | 'pageSubtitle';
+        pageId: string;
+      }>({
+        kind: choice('pageTitle', 'pageSubtitle'),
+        pageId: uuid
+      })(v);
+    default:
+      return bad();
+  }
+};
+const materialUse = shape<MaterialUse>({
+  id: uuid,
+  canvasId: uuid,
+  expressionRevision: integer,
+  excerptId: nullable(uuid),
+  target: parseUseTarget,
+  placedTextHash: str,
+  state: choice('current', 'modified', 'needs_review'),
+  contentOrigin: choice('excerpt', 'expression'),
+  sourceSpan: nullable(shape({
+    start: integer,
+    end: integer,
+    textHash: str
+  }))
+});
+export const parseWorkDocument = shape<WorkDocument>({
+  contract: v => v === 'content-workbench.v1' ? v : bad(),
+  title: str,
+  accountRef: nullable(uuid),
+  topicRef: nullable(uuid),
+  angle: str,
+  outline: array(str),
+  tags: array(str),
+  paragraphs: array(paragraph),
+  excerpts: array(excerpt),
+  canvas: array(canvas),
+  pages: array(parseImagePage),
+  uses: array(materialUse)
+});
+export const parseRevision = shape<Revision>({
+  id: uuid,
+  number: integer,
+  savedAt: str,
+  document: parseWorkDocument
+});
+export const parseSaveReceipt = shape<SaveReceipt>({
+  requestId: uuid,
+  workId: uuid,
+  outcome: str,
+  replayed: bool,
+  revision: parseRevision
+});
+export const parseExportRecord = shape<ExportRecord>({
+  id: uuid,
+  workId: uuid,
+  revisionId: uuid,
+  state: str,
+  failureCode: nullable(str),
+  rendererVersion: str,
+  fontVersion: str,
+  pages: array(shape<ExportPage>({
+    pageId: uuid,
+    ordinal: integer,
+    sha256: nullable(str),
+    byteSize: nullable(integer)
+  })),
+  packageSha256: nullable(str),
+  packageByteSize: nullable(integer)
+});
+export const parseEnvelope = shape<WorkEnvelope>({
+  workId: uuid,
+  domainRef: uuid,
+  savedBy: str,
+  revision: parseRevision,
+  sourceStatuses: array(shape<SourceStatus>({
+    excerptId: uuid,
+    state: str,
+    code: str
+  })),
+  exports: array(parseExportRecord)
+});
+export const parseWorkList = shape<{
+  items: WorkSummary[];
+}>({
+  items: array(shape<WorkSummary>({
+    workId: uuid,
+    domainRef: uuid,
+    title: str,
+    revisionId: uuid,
+    savedAt: str
+  }))
+});
+export const parseHistory = shape<{
+  items: Revision[];
+}>({
+  items: array(parseRevision)
+});
+export const parseAsset = shape<AssetRecord>({
+  id: uuid,
+  workId: uuid,
+  sha256: str,
+  byteSize: integer,
+  mimeType: str,
+  width: integer,
+  height: integer
+});
+export const parseSourceItem = shape<SourceItem>({
+  fragmentId: str,
+  sourceKind,
+  sourceRef: uuid,
+  workRef: nullable(uuid),
+  field,
+  sourceVersion: str,
+  title: str,
+  text: str,
+  bodyState: str,
+  authorLabel: str,
+  qualification: str,
+  location: nullable(location)
+});
+export const parseSourceList = shape<SourceList>({
+  contract: v => v === 'content-workbench-sources.v1' ? v : bad(),
+  asOf: str,
+  items: array(parseSourceItem),
+  distribution: array(shape({
+    sourceKind,
+    count: integer,
+    basis: str
+  })),
+  total: integer,
+  totalBasis: str,
+  returnedSourceCount: integer,
+  returnedFragmentCount: integer,
+  nextCursor: nullable(integer),
+  searchScope: str,
+  scope: str
+});
+export const parseAnchor = shape<ValidatedAnchor>({
+  citation: parseCitation,
+  selectedText: str,
+  textHash: str
+});
+export const parseContext = shape<SourceContext>({
+  item: parseSourceItem,
+  context: v => v
+});
+export const parseFrozen = shape<{
+  export: ExportRecord;
+  revision: Revision;
+}>({
+  export: parseExportRecord,
+  revision: parseRevision
+});
+const optional = <T,>(p: Parser<T>): Parser<T | undefined> => v => v === undefined ? undefined : p(v);
+export const parseReadiness = shape<AiReadiness>({
+  configured: bool,
+  transportCallable: nullable(bool),
+  writingQualified: nullable(bool),
+  configRef: nullable(uuid),
+  methodVersion: str,
+  modelRef: optional(uuid),
+  connectionVersionRef: optional(uuid),
+  qualificationScope: optional(str)
+});
+const action = choice('draft', 'rewrite_selection', 'page_copy');
+export const parsePreview = shape<AiPreview>({
+  previewRef: uuid,
+  inputRevision: uuid,
+  inputHash: str,
+  action,
+  methodVersion: str,
+  configRef: uuid,
+  modelRef: uuid,
+  connectionVersionRef: uuid,
+  sourceCount: integer,
+  inputCharacterCount: integer,
+  estimatedInputTokensUpperBound: integer,
+  reservedTokens: integer,
+  maxCalls: integer,
+  outboundInput: v => v,
+  confirmationRequired: bool
+});
+const suggestion = shape<WritingSuggestion>({
+  title: nullable(str),
+  paragraphs: array(shape({
+    paragraphId: nullable(uuid),
+    text: str
+  })),
+  pages: array(shape({
+    pageId: nullable(uuid),
+    heading: str,
+    body: str
+  }))
+});
+export const parseAiStatus = shape<AiStatus>({
+  requestId: uuid,
+  workRef: uuid,
+  invocationRef: uuid,
+  state: str,
+  inputRevision: uuid,
+  action,
+  methodVersion: str,
+  suggestion: nullable(suggestion),
+  sourceQualification: str,
+  failureCode: nullable(str),
+  staleBase: bool,
+  usage: shape({
+    inputTokens: nullable(integer),
+    outputTokens: nullable(integer),
+    chargedTokens: integer,
+    costUsd: nullable(num)
+  })
+});
+export function newDocument(title = ''): WorkDocument {
+  return {
+    contract: 'content-workbench.v1',
+    title,
+    accountRef: null,
+    topicRef: null,
+    angle: '',
+    outline: [],
+    tags: [],
+    paragraphs: [],
+    excerpts: [],
+    canvas: [],
+    pages: [],
+    uses: []
+  };
+}
+export function scalarRange(text: string, start: number, end: number): {
+  start: number;
+  end: number;
+  text: string;
+} {
+  return {
+    start: Array.from(text.slice(0, start)).length,
+    end: Array.from(text.slice(0, end)).length,
+    text: text.slice(start, end)
+  };
+}
+export const GROUPS: readonly {
+  id: CanvasGroup;
+  label: string;
+}[] = [{
+  id: 'inbox',
+  label: '待整理'
+}, {
+  id: 'opening',
+  label: '开头'
+}, {
+  id: 'argument',
+  label: '论点'
+}, {
+  id: 'example',
+  label: '例子'
+}, {
+  id: 'ending',
+  label: '结尾'
+}];
+export const SOURCE_LABELS: Record<SourceKind, string> = {
+  note: '原笔记',
+  comment: '匿名原声',
+  ocr: '图片文字',
+  ops_publication: '我方作品'
+};
+
+/** New authorship starts at revision one, matching Rust canvas validation. */
+export function newCanvasBlock(group: CanvasGroup = 'inbox', excerptId: string | null = null): CanvasBlock {
+  return {
+    id: crypto.randomUUID(),
+    excerptId,
+    group,
+    note: '',
+    expression: '',
+    expressionRevision: 1
+  };
+}

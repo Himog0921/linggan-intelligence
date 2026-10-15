@@ -1,3 +1,5 @@
+#![cfg_attr(test, recursion_limit = "256")]
+
 mod local_web;
 
 #[tokio::main]

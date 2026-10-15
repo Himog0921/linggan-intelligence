@@ -6,6 +6,8 @@ on:
     branches: [main]
     paths:
       - 'apps/web/**'
+      - 'apps/api/Cargo.toml'
+      - 'apps/api/src/main.rs'
       - 'apps/api/src/local_web/web_app*.rs'
       - 'apps/api/src/local_web/model_settings.rs'
       - 'apps/api/src/local_web/shell.rs'
@@ -14,6 +16,21 @@ on:
       - 'apps/api/src/local_web.rs'
       - 'scripts/runtime/prepare-web.sh'
       - 'scripts/test-web-app-postgres.sh'
+      - 'scripts/test-content-workbench-postgres.sh'
+      - 'apps/api/src/local_web/content_workbench*'
+      - 'apps/api/src/local_web/full_schema_fixture.rs'
+      - 'apps/api/src/local_web/ops.rs'
+      - 'crates/evidence/src/material_social_read.rs'
+      - 'crates/evidence/src/research_dossier.rs'
+      - 'crates/intelligence/src/ops_ledger/read/creation_read.rs'
+      - 'Cargo.lock'
+      - 'crates/intelligence/Cargo.toml'
+      - 'crates/intelligence/src/content_workbench*'
+      - 'crates/intelligence/src/content_workbench/**'
+      - 'crates/intelligence/tests/content_workbench*'
+      - 'crates/intelligence/tests/support/content_workbench_fixture.rs'
+      - 'database/migrations/0127_content_workbench.sql'
+      - 'database/migrations/0128_content_workbench_ai.sql'
       - '.nvmrc'
       - '.github/workflows/web-app.yml'
 permissions:
@@ -86,11 +103,23 @@ jobs:
           # 只查本模块自己的 Rust 文件：local_web.rs 在主线上已有与本模块无关的格式偏差。
           rustfmt --edition 2024 --config skip_children=true --check \
             apps/api/src/local_web/web_app.rs apps/api/src/local_web/web_app_tests.rs apps/api/src/local_web/model_settings.rs
+      - name: Content workbench PostgreSQL contracts
+        run: |
+          cargo test -p linggan-intelligence --lib exact_spans_keep_overlaps_codepoints_and_long_repeated_patterns --locked
+          bash scripts/test-content-workbench-postgres.sh
+      - name: Content workbench React browser and actual export proof
+        env:
+          CW_BROWSER_PROOF_DIR: ${{ runner.temp }}/workbench-proof
+        run: |
+          export CW_BROWSER_PROOF_NODE="$(command -v node)"
+          bash scripts/test-content-workbench-postgres.sh --browser
       - name: Retain browser evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: web-app-real-chain-proof
-          path: ${{ runner.temp }}/web-app-proof
+          path: |
+            ${{ runner.temp }}/web-app-proof
+            ${{ runner.temp }}/workbench-proof
           retention-days: 7
           if-no-files-found: warn

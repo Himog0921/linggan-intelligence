@@ -32,6 +32,9 @@ set +a
 
 export LINGGAN_LOCAL_DATABASE_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:${POSTGRES_PORT}/${POSTGRES_DB}"
 export LINGGAN_LOCAL_MEDIA_ROOT="${LINGGAN_SUPPORT_DIR}/media"
+# Creation assets survive checkout replacement and stay outside source control.
+: "${LINGGAN_CREATION_ASSET_ROOT:=$LINGGAN_SUPPORT_DIR/creation}"
+export LINGGAN_CREATION_ASSET_ROOT
 
 # 这次部署的身份文件（sync.sh 写、进程只读）。读不到时进程报 `unknown`，不拿别的东西冒充。
 : "${LINGGAN_RUNTIME_IDENTITY_PATH:=$LINGGAN_SUPPORT_DIR/runtime-identity.json}"

@@ -1,0 +1,40 @@
+.root { min-width: 0; color: var(--lgi-body); }
+.toolbar, .actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--lgi-space-3); }
+.toolbar { justify-content: space-between; margin-bottom: var(--lgi-space-4); }
+.root button, .root input, .root select, .root textarea { box-sizing: border-box; font: var(--lgi-text-data) / var(--lgi-lh-data) var(--lgi-font-sans); color: var(--lgi-ink); }
+.root button, .root input, .root select { min-height: var(--lgi-space-10); }
+.root button { padding: var(--lgi-space-2) var(--lgi-space-3); border: 1px solid var(--lgi-border-strong); background: var(--lgi-canvas); cursor: pointer; }
+.root button:disabled { color: var(--lgi-muted); border-color: var(--lgi-border); cursor: default; }
+.root :is(button, input, textarea, select, a):focus-visible { outline: 2px solid var(--lgi-focus); outline-offset: var(--lgi-space-1); }
+.pageTabs { display: flex; flex-wrap: wrap; gap: var(--lgi-space-3); margin-bottom: var(--lgi-space-4); }
+.pageTabs button { border: 0; border-bottom: 3px solid transparent; max-width: 100%; overflow-wrap: anywhere; }
+.pageTabs button[aria-current='page'] { border-bottom-color: var(--lgi-signal); font-weight: var(--lgi-weight-bold); }
+.editorLayout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: var(--lgi-space-6); align-items: start; }
+.controls { min-width: 0; }
+.root fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.root legend { font-size: var(--lgi-text-section); font-weight: var(--lgi-weight-bold); margin-bottom: var(--lgi-space-3); }
+.root label { display: grid; gap: var(--lgi-space-2); margin: var(--lgi-space-3) 0; font-weight: var(--lgi-weight-semibold); }
+.root :is(input, textarea, select) { width: 100%; min-width: 0; padding: var(--lgi-space-2); border: 1px solid var(--lgi-border-strong); background: var(--lgi-canvas-hi); }
+.root textarea { resize: vertical; }
+.twoFields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--lgi-space-3); }
+.preview { margin: 0; min-width: 0; }
+.preview canvas { display: block; width: 100%; height: auto; aspect-ratio: 3 / 4; background: var(--lgi-canvas-low); }
+.preview figcaption { padding: var(--lgi-space-3) 0; }
+.editPreview { min-width: 0; position: sticky; top: var(--lgi-space-4); }
+/* Page geometry: show the entire 3:4 artwork while controls retain their normal scroll flow.
+   The existing shell/toolbar budget is four space-24 units; no theme token is introduced. */
+.editPreview > .preview canvas { width: auto; max-width: 100%; max-height: min(55vh, max(var(--lgi-space-24), calc(100vh - var(--lgi-space-24) * 4))); object-fit: contain; margin: 0 auto; }
+.previewGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--lgi-space-4); }
+.notice { background: var(--lgi-canvas-low); padding: var(--lgi-space-4); margin: var(--lgi-space-4) 0; overflow-wrap: anywhere; }
+.notice p { white-space: pre-wrap; }
+.note { color: var(--lgi-muted); font-size: var(--lgi-text-label); line-height: var(--lgi-lh-data); }
+.error { color: var(--lgi-danger); border-left: 3px solid var(--lgi-danger-dot); padding-left: var(--lgi-space-3); overflow-wrap: anywhere; }
+.exportArea { margin-top: var(--lgi-space-6); }
+.exportArea details { margin-top: var(--lgi-space-4); }
+.root .primary { background: var(--lgi-signal-ink); border: 2px solid var(--lgi-ink); color: var(--lgi-on-dark); font-weight: var(--lgi-weight-bold); box-shadow: var(--lgi-shadow-brutal); }
+.root button.primary:hover:not(:disabled) { background: var(--lgi-signal-hover); }
+.root .primary:disabled { background: var(--lgi-signal-soft); border-color: var(--lgi-border); box-shadow: none; color: var(--lgi-muted); }
+.exportRecord { padding: var(--lgi-space-4) 0; }
+.exportRecord a { color: var(--lgi-info); display: inline-block; padding: var(--lgi-space-2) 0; }
+@media (max-width: 900px) { .editorLayout { grid-template-columns: minmax(0, 1fr); } .editPreview { position: static; } }
+@media (max-width: 640px) { .previewGrid { grid-template-columns: minmax(0, 1fr); } .toolbar { align-items: flex-start; } }

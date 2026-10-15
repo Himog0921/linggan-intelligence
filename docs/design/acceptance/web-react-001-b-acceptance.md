@@ -3,12 +3,12 @@
 > 状态: 权威当前
 > 最后核对: 2026-10-15
 > 适用范围: WEB-REACT-001 阶段 B：`apps/web` 首个页面 `/settings/models`、React 共享外壳、Axum 页面入口与静态资源、本机运行链前端构建
-> 事实来源: Draft PR #431 工作树源码；`npm --prefix apps/web run verify`；`cargo test -p linggan-api --bins`；`scripts/test-web-app-postgres.sh` 在隔离 PostgreSQL 上的真实浏览器证明；`scripts/runtime/prepare-web.sh` 本机演练
+> 事实来源: PR #431（已合并 main@0a90fd4a）、#430 合并上线回执；候选工作树源码；`npm --prefix apps/web run verify`；`cargo test -p linggan-api --bins`；`scripts/test-web-app-postgres.sh` 在隔离 PostgreSQL 上的真实浏览器证明；`scripts/runtime/prepare-web.sh` 本机演练
 > 冲突时以谁为准: 真实运行/代码/合同、Mog 最新确认、DEC-0010 与 [WEB-REACT-001](../../plans/active/web-react-001.md)；截图与自动检查不单独证明业务结果
 
 ## 1. 验收对象
 
-- Issue / 计划：[#430](https://github.com/Himog0921/linggan-intelligence/issues/430)、[WEB-REACT-001](../../plans/active/web-react-001.md) 阶段 B；Draft PR #431
+- Issue / 计划：[#430](https://github.com/Himog0921/linggan-intelligence/issues/430)、[WEB-REACT-001](../../plans/active/web-react-001.md) 阶段 B；PR #431 已合并
 - 页面：`/settings/models`（[页面规格](../pages/model-ai-settings-page.md)），`/settings` 入口跳转；共享外壳 `AppShell`
 - 环境：本机 macOS，Node 24.13.0，Rust 1.95.0；一次性隔离 PostgreSQL（pgvector 16.14 镜像）；Chromium（Playwright 1.57.0）
 - 数据与权限前提：合成模型凭据（`LINGGAN_MODEL_SYNTHETIC_PREVIEW`），连接地址固定为 `http://127.0.0.1:9/v1`，模型调用组件被指向不存在的路径；未连接开发库、未访问本机 3000 服务做任何写入
@@ -49,7 +49,7 @@
 | 前端/组件实现 | VERIFIED | `apps/web` 源码；类型检查、lint 通过 | — |
 | 自动检查 | VERIFIED | 前端 8 个测试文件 47 项；API 测试 355 项通过（含新增 9 项）；治理与 UI 手册检查 | 云端 CI 以 PR 实跑为准 |
 | 真实链路/回执 | VERIFIED（隔离环境） | 隔离 PostgreSQL + 本机 Axum 路由 + 构建产物 + Chromium，15 个步骤全部通过 | 未连真实模型；未在 3000 端口的运行实例上验证 |
-| 部署 | NOT VERIFIED | — | 合并与部署须 Mog 授权；冷启动、离线重启、整版回退只在工作树演练了构建环节 |
+| 部署 | VERIFIED（依据接手方上线回执） | [#430 上线回执](https://github.com/Himog0921/linggan-intelligence/issues/430#issuecomment-6187237105)：main/runtime 0a90fd4a、webApp ready、React页可读、旧资源404、无迁移 | 线上写操作、launchd 断网重启和整版回退仍 NOT VERIFIED |
 | Mog / 业务验收 | NOT VERIFIED | — | 待 Mog 在部署后打开 `/settings/models` 验收 |
 
 ## 5. 发现与后续
@@ -57,3 +57,10 @@
 - 迁移中发现并修正的旧页面缺陷：①内容超过一屏时整页无法滚动，下方调用记录看不到；②编辑已有连接且模型 ID 不变时，旧页面沿用旧版本的模型编号，必然得到「设置已变化」；③测试请求的重放回执把结论放在 `result` 里，旧页面一律显示「未通过」；④由其他入口建立的连接（如本机 WeMM）编辑时，协议会被悄悄改成列表第一项；⑤重试一律换新请求编号，网络中断后重试可能重复发起测试。
 - 是否需要 DECISION_REQUIRED：共享外壳是否改用 V3 紧凑外壳，留到后续阶段由 Mog 决定（迁移期两种页头必须一致）。
 - 不得因此推断：隔离环境通过不等于本机运行实例已部署；合成凭据下的测试失败不代表真实模型连接有问题。
+
+
+## 6. 合并与本机发布补充（2026-10-15）
+
+PR #431 的合并状态与提交已在阶段 C 开工时重新查询 GitHub 核实。运行状态依据 #430 上线回执：接手方复跑 API 360 项、前端47项及15步隔离浏览器证明，随后按 Mog 授权更新本机API；第一次启动缺 Web 产物，第二次重启后 ready。这里保留其实际副作用与限制，不将回执中的合并、部署扩大为线上写操作、离线/回退演练或 Mog 业务验收。上述第2/3节仍是原隔离验证现场，不改写为正式数据。
+
+补充来源：[#430 合并后只读核验](https://github.com/Himog0921/linggan-intelligence/issues/430#issuecomment-6187465728)确认 launchd 冷启动构建成功、设置页读出真实连接和调用记录、没有页面自动写请求。此事实来自接手方运行回执，本阶段 C 没有重新部署或代做线上写入验收。

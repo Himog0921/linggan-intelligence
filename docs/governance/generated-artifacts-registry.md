@@ -150,3 +150,60 @@
 ### 第一阶段真实验收续修（#420）
 
 Mog 授权三篇指定作品在本机核对与重新分层。私有材料快照、几何回放输入、运行日志放 `/tmp/linggan-dossier-acceptance/`（0700），不入 Git、不发送模型；结束后删除原始材料快照。截图保留在本任务 Codex visualizations，命名 `research-dossier-acceptance-*.png`，用于 Mog 验收。候选 API 仅监听本机独立端口，读取同一共享材料并只执行这三篇已授权的追加分层；不替换 3000、不启动 worker。验收结束停止该进程。
+
+## UIUX-CONTENT-WORKBENCH-001 阶段一真实页面走查
+
+- 固定位置：当前专属 worktree 的 `artifacts/private/uiux-content-workbench-001/2026-10-14/`，已受 `/artifacts/private/` 忽略。
+- 来源：Codex in-app browser 当前页面截图、只读 DOM 摘要、页面操作和运行/源码核对元数据；只保存完成现场检查的证据，不用历史截图替代。
+- Git：原始截图、DOM 和逐文件哈希清单不入库；仓库仅存脱敏问题说明、证据编号、源码定位与复现步骤。平台来源 URL 仅随本机私有证据保留；不读取或保存登录凭据、API 密钥、数据库连接信息。
+- 再生：按本专项阶段一审计中的路由和只读操作，重新浏览当前真实页面；新回执必须注明新的 revision 与时间。
+- 保留：供 Mog 本地验收与后续设计使用；未经明确清理授权不删除，不上传到外部服务。图片禁止手工改造后冒充原始现场。
+
+## UIUX-CONTENT-WORKBENCH-001 · 阶段二原型
+
+- 维护源：`docs/design/pages/content-workbench-prototype/{index.html,prototype.css,prototype.js,fixture.js}`。维护者为本事项 Codex；唯一输入为用户目标、LIDS 与本地合成演示数据；可入 Git，但不进入运行 assets。
+- 再现：进入该目录运行 `python3 -m http.server 4177 --bind 127.0.0.1`，浏览器打开 localhost:4177；无真实 API、生产库或模型依赖。
+- 生成截图 / 导出 ZIP / PNG / 校验值进入 `artifacts/private/uiux-content-workbench-001/phase-2/`，不入 Git。验收文档记录路径和结果。
+- 浏览器仅使用 `linggan-workbench-prototype-v1` 本地键保存演示草稿，页面提供清除入口，不写真实应用的存储键。
+- 检查：JS 语法、文档治理、三页真实点击、窄屏、图片尺寸和导出文件内容核对。用户审美签收单独记录；静态原型不代表产品已实现。
+
+### 阶段二 V2 · 材料片段与改稿画布
+
+- 用户本轮提供本地 15 秒操作视频与改稿对照截图，授权分析并构建独立交互原型。原附件保留原位，不入 Git；提取关键帧与核验截图放 `artifacts/private/uiux-content-workbench-001/phase-2-v2/`，本地 ffmpeg scene 变化检测再生，不上传到外部服务。
+- 新原型维护源放 `docs/design/pages/content-workbench-prototype/v2/`，沿用 V1 设计源并以新浏览器存储键隔离；允许源入 Git，不能进入运行 assets。V1 供 Mog 当前体验，保持原样。
+- V2 验证用合成多篇笔记、原声与片段；不从私有视频复制内容到公开资产，不把合成类似选题数量说成真实系统统计。截图、导出、视频关键帧与 hash 均留在私有忽略目录，结论进入同一专项提案与验收记录。
+
+
+### 阶段二 V3 · 空间材料浏览与作品关联
+
+- 维护源：`docs/design/pages/content-workbench-prototype/v3/`，维护者为本事项 Codex；用户本轮明确派定。复用 V1 基础 CSS/fixture 与 V2 研读样本/样式，V3 的脚本与局部 CSS 独立；不进入运行 assets。
+- 输入：Mog 的视频、新片段截图、合成来源和 LIDS。参考媒体留在原位，不复制进公开资产。新增书页与纸条以原生 HTML/CSS 呈现。
+- 存储：仅 `linggan-workbench-prototype-v3`，不读取或覆盖 V1/V2 草稿。静态服务继续为 loopback 4177，入口 `/v3/`。
+- 截图、实际 ZIP/PNG、导出清单、走查回执放 `artifacts/private/uiux-content-workbench-001/phase-2-v3/`，不入 Git。可按同一合成选题与 UI 路径再生，不上传外部服务。
+- 验收：筛选 / 纸条 / 分布 / 翻页联动，画布到正文与稳定内页关联，排序 / 撤销 / 恢复，桌面和窄屏，实际导出；业务接入和 Mog 审美签收另行记录。
+
+## UIUX-CONTENT-WORKBENCH-001 · 首包候选验证
+
+脚本、合成fixture与汇总报告入Git；构建缓存使用既有target或任务临时目录，隔离PostgreSQL容器/卷以content-workbench-proof前缀登记清理；截图、实际PNG/ZIP、运行回执与测试日志放本工作树 artifacts/private/uiux-content-workbench-001/implementation/，不入Git。临时Issue/Claim正文可放/tmp，完成后可清理；来源用户原文不提交。候选作品资产/导出放独立测试媒体根，仅本包运行使用。再生由本包测试脚本与验收步骤负责，原始证据不改造。
+
+## CONTENT-WORKBENCH-001 正式资产存储约定（候选，尚未部署）
+
+- 运行文件：`$LINGGAN_CREATION_ASSET_ROOT/works/<UUID>/` 下的自有图片、图页 PNG、ZIP 与内部 manifest；launch 候选配置指向 `~/Library/Application Support/Linggan Intelligence/creation`，不随 checkout 更新删除，不进 Git。
+- 文件读取通过作品与导出所有者校验；完成成品不可覆盖。当前只新增候选配置，未创建正式目录、未迁移共享库。
+- 隔离测试采用 `/tmp/linggan-content-workbench-assets.*`，由 proof 脚本生成并在退出时清理自己的精确目录；验收截图与已验证样例按前述私有 implementation 目录留存。
+
+## 2026-10-15 · WEB-REACT-001 下的原生候选暂停快照
+
+- 路径：`artifacts/private/uiux-content-workbench-001/implementation/paused-native-ui-2026-10-15/`，已忽略，不提交。
+- 来源：本包7个未提交原生前端文件、撤接前集成diff与合成preview fixture；`manifest.json` 记录逐文件SHA256。用途是可逆暂停及阶段C算法核对，不得作为正式页面或另一个设计标准。
+- 原生源码从业务目录撤出；V1/V2/V3设计原型保持原位。阶段C确认可复用规则并形成正式实现后，由包负责人按证据保留需要清理快照。
+- 上次中断遗留的本包 `content-workbench-proof-20261014172930_90983_e6f5041c` 容器与同名data volume已精确删除；共享PostgreSQL未动。
+
+
+## WEB-REACT-001-C · 本地中文字体与浏览器证明
+
+- 字体维护源：`apps/web/src/assets/fonts/noto-sans-sc.woff2` 与同目录 `OFL.txt`；由 root 从 Google Fonts 官方 `ofl/notosanssc/NotoSansSC[wght].ttf` 核对许可后无子集转换为 WOFF2，保留全部字形与可变字重，随代码提交；上游 revision、源/产物 SHA256 随本节补录。字体只由本机 Axum `/ui-assets/` 分发，页面不请求外网字体；修改字体后同时更新渲染版本，禁止后台自动下载。
+- 本阶段浏览器脚本：`apps/web/test/e2e/workbench-real-chain.mjs`；Rust 启动夹具 `apps/api/src/local_web/content_workbench_browser_tests.rs`，必须 multi_thread，运行一次性隔离 PostgreSQL + Axum + React。截图、报告、实际PNG/ZIP保存在既有私有 implementation 目录；CI仅保留合成证明产物7天。
+- 统一入口：`scripts/test-content-workbench-postgres.sh --browser`，默认后端证明继续可独立运行，CI执行后端与浏览器两种模式。合成来源/凭据不代表真实选题或真实模型验收。
+
+字体核对：上游 `2894aab31764f10f29c421bdfd2340d3b382d384`；源 TTF SHA256 `a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da`；WOFF2 SHA256 `ed05125987c35ee57be16be7242568f1d516fbf497bc0ef4161499ca9e8d8fce`；产物 7782120 字节。转换工具 fontTools 4.62.1，`TTFont(source).flavor="woff2"`，不裁掉字形；OFL 1.1 文本随文件保留，仅移除上游一处行尾空格以通过仓库空白检查。
