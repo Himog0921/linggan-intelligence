@@ -10,6 +10,8 @@ on:
       - 'apps/api/src/main.rs'
       - 'apps/api/src/local_web/web_app*.rs'
       - 'apps/api/src/local_web/model_settings.rs'
+      - 'apps/api/src/local_web/corpus_shell_api.rs'
+      - 'apps/api/src/local_web/creators*.rs'
       - 'apps/api/src/local_web/shell.rs'
       - 'apps/api/src/local_web/shell.css'
       - 'apps/api/src/local_web/lids_tokens.css'
@@ -88,7 +90,7 @@ jobs:
           npm ci --prefix apps/web --ignore-scripts --no-audit --no-fund
           npx --prefix apps/web playwright install --with-deps chromium
       - name: API route regression
-        run: cargo test -p linggan-api --bins --locked local_web::web_app_tests
+        run: cargo test -p linggan-api --bins --locked -- local_web::web_app_tests local_web::corpus_shell_api
       - name: Isolated PostgreSQL + Axum + React browser proof (synthetic credential only)
         env:
           WEB_APP_PROOF_DIR: ${{ runner.temp }}/web-app-proof
@@ -102,7 +104,8 @@ jobs:
           git diff --check
           # 只查本模块自己的 Rust 文件：local_web.rs 在主线上已有与本模块无关的格式偏差。
           rustfmt --edition 2024 --config skip_children=true --check \
-            apps/api/src/local_web/web_app.rs apps/api/src/local_web/web_app_tests.rs apps/api/src/local_web/model_settings.rs
+            apps/api/src/local_web/web_app.rs apps/api/src/local_web/web_app_tests.rs apps/api/src/local_web/model_settings.rs \
+            apps/api/src/local_web/corpus_shell_api.rs apps/api/src/local_web/creators_browser_tests.rs
       - name: Content workbench PostgreSQL contracts
         run: |
           cargo test -p linggan-intelligence --lib exact_spans_keep_overlaps_codepoints_and_long_repeated_patterns --locked

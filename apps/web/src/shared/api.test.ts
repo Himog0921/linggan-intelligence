@@ -32,6 +32,17 @@ describe('requestJson', () => {
     expect(init.body).toBe('{"a":1}');
   });
 
+  it('PUT 同样带 JSON 正文，且不自动重试', async () => {
+    const fetchMock = respond(200, '{"saved":true}');
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(requestJson('/api/x', { method: 'PUT', body: { revision: 3 } })).resolves.toEqual({ saved: true });
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(init.method).toBe('PUT');
+    expect(init.body).toBe('{"revision":3}');
+    expect(new Headers(init.headers as HeadersInit).get('Content-Type')).toBe('application/json');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('拒绝跨源或协议相对地址', async () => {
     await expect(requestJson('https://example.com/api')).rejects.toThrow('只允许同源相对路径');
     await expect(requestJson('//example.com/api')).rejects.toThrow('只允许同源相对路径');

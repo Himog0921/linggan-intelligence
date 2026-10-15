@@ -1,0 +1,840 @@
+/* 创作者页（语料）的页面样式：搜索与快捷视图、结果条、条件芯片、八列表格、分页。
+ * 只消费 LIDS --lgi-* Token；页头、侧栏与领域选择器的样式在 shell.css，内容区框架在 CorpusFrame。
+ * 抽屉与对话框的样式在各自的模块里。 */
+
+.page {
+  --creator-text: calc((var(--lgi-text-body) + var(--lgi-text-data)) / 2);
+  --creator-control: calc(var(--lgi-space-10) + var(--lgi-space-1));
+  --creator-row: calc(var(--lgi-space-10) * 2);
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--lgi-space-5) var(--lgi-space-6) 0;
+  color: var(--lgi-ink);
+  font: var(--lgi-text-body) / var(--lgi-lh-body) var(--lgi-font-sans);
+}
+
+.page :is(button, input, select) {
+  box-sizing: border-box;
+  border-radius: var(--lgi-radius-none);
+  color: inherit;
+  font: inherit;
+}
+
+.page :is(button, select) {
+  cursor: pointer;
+}
+
+.page :is(input, select) {
+  min-width: 0;
+  border: 1px solid var(--lgi-border-strong);
+  padding: var(--lgi-space-2) var(--lgi-space-3);
+  background: var(--lgi-canvas);
+}
+
+.page button {
+  border: 1px solid var(--lgi-border-strong);
+  padding: var(--lgi-space-2) var(--lgi-space-3);
+  background: var(--lgi-canvas);
+  font-size: var(--lgi-text-data);
+  font-weight: var(--lgi-weight-medium);
+}
+
+.page button:hover:not(:disabled) {
+  background: var(--lgi-canvas-low);
+}
+
+.page button:disabled {
+  background: var(--lgi-canvas-low);
+  color: var(--lgi-ghost);
+  cursor: not-allowed;
+}
+
+.page a {
+  color: var(--lgi-focus);
+  text-decoration: none;
+}
+
+.page a:hover {
+  text-decoration: underline;
+}
+
+.page :focus-visible {
+  outline: 2px solid var(--lgi-focus);
+  outline-offset: 2px;
+}
+
+.page .primary {
+  border-color: var(--lgi-ink);
+  background: var(--lgi-ink);
+  color: var(--lgi-on-dark);
+}
+
+.page .primary:hover:not(:disabled) {
+  border-color: var(--lgi-signal-ink);
+  background: var(--lgi-signal-ink);
+}
+
+.page .textButton {
+  border: 0;
+  background: transparent;
+  padding: var(--lgi-space-1) 0;
+  color: var(--lgi-muted);
+  font-weight: var(--lgi-weight-regular);
+  white-space: nowrap;
+}
+
+.page .textButton:hover:not(:disabled) {
+  background: transparent;
+  color: var(--lgi-signal-ink);
+}
+
+/* 页头右侧读数：命中时间，不放数字之外的状态。 */
+.readout {
+  color: var(--lgi-muted);
+  font: var(--lgi-text-data) / var(--lgi-lh-data) var(--lgi-font-sans);
+  white-space: nowrap;
+}
+
+/* ── 搜索与排序 ─────────────────────────────── */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--lgi-space-3);
+  min-width: 0;
+}
+
+.toolbar > button,
+.toolbar > select {
+  flex: none;
+  height: var(--creator-control);
+}
+
+.toolbar > select {
+  max-width: calc(var(--lgi-space-24) * 2);
+  font-size: var(--lgi-text-data);
+}
+
+.search {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--lgi-space-2);
+  box-sizing: border-box;
+  min-width: 0;
+  height: var(--creator-control);
+  border: 2px solid var(--lgi-ink);
+  padding: 0 var(--lgi-space-3);
+  background: var(--lgi-canvas);
+}
+
+.search:focus-within {
+  outline: 2px solid var(--lgi-focus);
+  outline-offset: 2px;
+}
+
+.findMark {
+  color: var(--lgi-signal-ink);
+  font: var(--lgi-weight-bold) var(--lgi-text-label) / 1 var(--lgi-font-mono);
+  letter-spacing: var(--lgi-ls-caps);
+}
+
+.page .search select {
+  flex: none;
+  height: var(--lgi-space-6);
+  max-width: calc(var(--lgi-space-24) + var(--lgi-space-10));
+  border: 0;
+  border-right: 1px solid var(--lgi-border);
+  padding: 0 var(--lgi-space-2) 0 0;
+  font-size: var(--lgi-text-data);
+}
+
+.page .search input {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  padding: 0;
+  font-size: var(--lgi-text-body);
+}
+
+.page .search input:focus-visible {
+  outline: 0;
+}
+
+.search input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.shortcut {
+  border: 1px solid var(--lgi-border);
+  padding: 0 var(--lgi-space-1);
+  color: var(--lgi-ghost);
+  font: var(--lgi-text-data) var(--lgi-font-mono);
+}
+
+.count {
+  margin-left: var(--lgi-space-1);
+  background: var(--lgi-canvas-sunken);
+  padding: 0 var(--lgi-space-1);
+  color: var(--lgi-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 快捷视图与分析状态 ──────────────────────── */
+.viewBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--lgi-space-3);
+  height: var(--lgi-space-12);
+  margin-top: var(--lgi-space-2);
+  border-bottom: 1px solid var(--lgi-border);
+}
+
+.quick {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  height: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.page .quick button {
+  position: relative;
+  flex: none;
+  border: 0;
+  background: transparent;
+  padding: 0 var(--lgi-space-4);
+  color: var(--lgi-muted);
+  font-size: var(--creator-text);
+  white-space: nowrap;
+}
+
+.page .quick button:first-child {
+  padding-left: var(--lgi-space-2);
+}
+
+.page .quick button[aria-pressed='true'] {
+  color: var(--lgi-ink);
+  font-weight: var(--lgi-weight-semibold);
+}
+
+.page .quick button[aria-pressed='true']::after {
+  content: '';
+  position: absolute;
+  inset: auto var(--lgi-space-3) 0;
+  height: calc(var(--lgi-space-1) / 2);
+  background: var(--lgi-signal);
+}
+
+.analysisButton {
+  flex: none;
+}
+
+.analysisDot::before {
+  content: '';
+  display: inline-block;
+  width: calc(var(--lgi-space-1) * 1.5);
+  height: calc(var(--lgi-space-1) * 1.5);
+  margin-right: var(--lgi-space-2);
+  border-radius: 50%;
+  background: var(--lgi-unknown-dot);
+}
+
+.analysisOn::before {
+  background: var(--lgi-success-dot);
+}
+
+/* ── 结果条：筛选命中数与范围说明分开 ───────────── */
+.resultBar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--lgi-space-3);
+  height: var(--creator-control);
+  font-size: var(--lgi-text-data);
+}
+
+.resultCount {
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--lgi-weight-semibold);
+}
+
+.scopeTools {
+  display: flex;
+  align-items: center;
+  gap: var(--lgi-space-3);
+  min-width: 0;
+}
+
+.scopeSummary {
+  max-width: calc(var(--lgi-space-24) * 3);
+  overflow: hidden;
+  color: var(--lgi-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conditions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--lgi-space-2);
+  min-height: var(--lgi-space-8);
+  padding: 0 0 var(--lgi-space-2);
+  overflow-x: auto;
+}
+
+.page .conditions button {
+  max-width: calc(var(--lgi-space-24) * 2 + var(--lgi-space-12));
+  overflow: hidden;
+  border: 1px solid var(--lgi-border);
+  background: var(--lgi-canvas-low);
+  padding: var(--lgi-space-1) var(--lgi-space-2);
+  font-size: var(--lgi-text-data);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status {
+  flex: none;
+  margin: 0;
+  color: var(--lgi-muted);
+  font-size: var(--lgi-text-data);
+  line-height: var(--lgi-lh-body);
+}
+
+.status:not(:empty) {
+  padding: var(--lgi-space-2) 0;
+}
+
+.status:empty {
+  display: none;
+}
+
+.status[data-error='true'] {
+  color: var(--lgi-danger);
+}
+
+.statusActions {
+  display: inline-flex;
+  gap: var(--lgi-space-3);
+  margin-left: var(--lgi-space-3);
+}
+
+/* ── 八列表格：局部横向滚动，固定首列与表头 ─────── */
+.tableWrap {
+  position: relative;
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border-top: 1px solid var(--lgi-ink);
+  scrollbar-width: thin;
+}
+
+.table {
+  width: 100%;
+  min-width: calc(var(--lgi-space-24) * 12 + var(--lgi-space-6));
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+}
+
+.colAuthor {
+  width: calc(var(--lgi-space-24) * 2);
+}
+
+.colDirection {
+  width: calc(var(--lgi-space-16) * 2 + var(--lgi-space-12));
+}
+
+.colFocus {
+  width: calc(var(--lgi-space-16) + var(--lgi-space-12) + var(--lgi-space-3));
+}
+
+.colExpression {
+  width: calc(var(--lgi-space-16) + var(--lgi-space-12));
+}
+
+.colCount {
+  width: calc(var(--lgi-space-16) + var(--lgi-space-6));
+}
+
+.colLikes {
+  width: calc(var(--lgi-space-24) + var(--lgi-space-1));
+}
+
+.colObservation {
+  width: calc(var(--lgi-space-16) * 2 + var(--lgi-space-2));
+}
+
+.table th {
+  position: sticky;
+  top: 0;
+  z-index: var(--lgi-z-stage);
+  height: var(--lgi-space-10);
+  border-bottom: 1px solid var(--lgi-border);
+  padding: 0 var(--lgi-space-3);
+  background: var(--lgi-canvas-low);
+  color: var(--lgi-muted);
+  font-size: var(--lgi-text-data);
+  font-weight: var(--lgi-weight-medium);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.page .table th button {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  white-space: nowrap;
+}
+
+.table th[aria-sort='descending'] button::after {
+  content: ' ↓';
+  color: var(--lgi-signal-ink);
+}
+
+.table td {
+  height: var(--creator-row);
+  overflow: hidden;
+  border-bottom: 1px solid var(--lgi-hairline);
+  padding: calc(var(--lgi-space-5) / 2) var(--lgi-space-3);
+  background: var(--lgi-canvas);
+  font-size: var(--creator-text);
+  vertical-align: middle;
+}
+
+.table th:nth-child(n + 7),
+.table td:nth-child(n + 7) {
+  padding-left: var(--lgi-space-5);
+}
+
+.table :is(th, td):first-child {
+  position: sticky;
+  left: 0;
+  z-index: var(--lgi-z-stage);
+}
+
+.table th:first-child {
+  z-index: var(--lgi-z-sticky);
+}
+
+.table tr:hover td {
+  background: var(--lgi-canvas-low);
+}
+
+.table tr[data-selected='true'] td {
+  background: var(--lgi-signal-faint);
+}
+
+.table tr[data-selected='true'] td:first-child {
+  box-shadow: inset 2px 0 var(--lgi-signal);
+}
+
+.number {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.cell {
+  min-width: 0;
+  max-height: calc(var(--lgi-space-16) - var(--lgi-space-1));
+  overflow: hidden;
+}
+
+.cellCopy {
+  flex: 1;
+  min-width: 0;
+}
+
+.authorCell,
+.workCell {
+  display: flex;
+  align-items: center;
+  gap: var(--lgi-space-2);
+  min-width: 0;
+}
+
+.avatar {
+  display: inline-flex;
+  position: relative;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--lgi-space-8);
+  height: var(--lgi-space-8);
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--lgi-canvas-sunken);
+  color: var(--lgi-muted);
+}
+
+.avatarLarge {
+  width: var(--creator-control);
+  height: var(--creator-control);
+}
+
+/* 封面按 3:4 完整显示（contain），不裁切；放不下的部分留白而不是切掉。 */
+.cover {
+  display: flex;
+  position: relative;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: calc(var(--creator-control) * 0.75);
+  height: var(--creator-control);
+  aspect-ratio: 3 / 4;
+  overflow: hidden;
+  background: var(--lgi-canvas-low);
+  color: var(--lgi-ghost);
+  font-size: var(--lgi-text-label);
+}
+
+.coverLarge {
+  width: var(--lgi-space-12);
+  height: var(--lgi-space-16);
+}
+
+.mediaImage {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.avatar .mediaImage {
+  object-fit: cover;
+}
+
+.cover .mediaImage {
+  object-fit: contain;
+}
+
+.mediaFallback {
+  pointer-events: none;
+}
+
+.page .link {
+  display: block;
+  max-width: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--lgi-ink);
+  font-size: var(--creator-text);
+  font-weight: var(--lgi-weight-regular);
+  line-height: var(--lgi-space-5);
+  text-align: left;
+}
+
+.page .name {
+  font-size: var(--lgi-text-body);
+  font-weight: var(--lgi-weight-semibold);
+}
+
+.ellipsis {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  line-height: var(--lgi-space-5);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clamp {
+  display: -webkit-box;
+  max-height: var(--lgi-space-10);
+  overflow: hidden;
+  line-height: var(--lgi-space-5);
+  overflow-wrap: anywhere;
+  word-break: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.secondary {
+  display: block;
+  max-width: 100%;
+  margin-top: calc(var(--lgi-space-1) / 4);
+  overflow: hidden;
+  color: var(--lgi-muted);
+  font-size: var(--lgi-text-data);
+  line-height: calc(var(--lgi-space-4) + var(--lgi-space-1) / 2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metric {
+  font-size: var(--lgi-text-body);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--lgi-weight-semibold);
+  line-height: var(--lgi-space-5);
+}
+
+.expression {
+  display: flex;
+  align-items: center;
+  gap: var(--lgi-space-1);
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.expression > span:first-child {
+  overflow: hidden;
+  background: var(--lgi-canvas-sunken);
+  padding: 0 var(--lgi-space-1);
+  font-size: var(--lgi-text-data);
+  text-overflow: ellipsis;
+}
+
+.expression > small {
+  flex: none;
+  color: var(--lgi-muted);
+  font-size: var(--lgi-text-label);
+}
+
+.rowAction {
+  margin-top: var(--lgi-space-1);
+  overflow: hidden;
+  line-height: calc(var(--lgi-space-4) + var(--lgi-space-1) / 2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.page .rowAction button {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--lgi-focus);
+  font-size: var(--lgi-text-data);
+  font-weight: var(--lgi-weight-regular);
+}
+
+/* 分析状态：文字之外加一个小色点，在路上 / 需要处理 / 依据不足各有各的颜色，但颜色不是唯一的载体。 */
+.analysis::before {
+  content: '';
+  display: inline-block;
+  width: var(--lgi-space-2);
+  height: var(--lgi-space-2);
+  margin-right: var(--lgi-space-1);
+  border-radius: 50%;
+  background: var(--lgi-unknown-dot);
+}
+
+.analysis[data-kind='running']::before,
+.analysis[data-kind='queued']::before {
+  background: var(--lgi-info-dot);
+}
+
+.analysis[data-kind='done']::before {
+  background: var(--lgi-success-dot);
+}
+
+.analysis[data-kind='insufficient']::before,
+.analysis[data-kind='paused']::before {
+  background: var(--lgi-warning-dot);
+}
+
+.analysis[data-kind='failed']::before {
+  background: var(--lgi-danger-dot);
+}
+
+.analysis[data-kind='failed'] {
+  color: var(--lgi-danger);
+}
+
+.empty {
+  padding: var(--lgi-space-16) var(--lgi-space-4);
+  color: var(--lgi-muted);
+  font-size: var(--lgi-text-body);
+  text-align: center;
+}
+
+.empty button {
+  display: block;
+  margin: var(--lgi-space-3) auto 0;
+}
+
+.emptyBlock {
+  margin: var(--lgi-space-6) 0;
+  color: var(--lgi-muted);
+}
+
+/* ── 分页 ─────────────────────────────────── */
+.pagination {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--lgi-space-2);
+  min-height: calc(var(--lgi-space-12) + var(--lgi-space-1));
+  border-top: 1px solid var(--lgi-ink);
+  background: var(--lgi-canvas);
+  font-size: var(--lgi-text-data);
+}
+
+.pageSummary {
+  margin-right: var(--lgi-space-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.pagination :is(button, input, select) {
+  height: var(--lgi-space-8);
+  padding: var(--lgi-space-1) var(--lgi-space-2);
+  font-size: var(--lgi-text-data);
+}
+
+.jump {
+  display: flex;
+  align-items: center;
+  gap: var(--lgi-space-1);
+  margin-left: auto;
+}
+
+.jump input {
+  width: var(--lgi-space-12);
+  text-align: center;
+}
+
+.jumpError {
+  max-width: calc(var(--lgi-space-24) * 2);
+  color: var(--lgi-danger);
+}
+
+.pagination > label {
+  display: flex;
+  align-items: center;
+  gap: var(--lgi-space-2);
+  white-space: nowrap;
+}
+
+/* ── 窄屏与低矮屏 ──────────────────────────── */
+@media (max-width: 900px) {
+  .page {
+    padding: var(--lgi-space-3) var(--lgi-space-3) 0;
+  }
+
+  .toolbar {
+    gap: var(--lgi-space-2);
+  }
+}
+
+@media (max-width: 640px) {
+  .toolbar {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .search {
+    grid-column: 1 / -1;
+  }
+
+  .toolbar > select {
+    width: 100%;
+    max-width: none;
+  }
+
+  .viewBar {
+    gap: var(--lgi-space-1);
+  }
+
+  .page .quick button {
+    padding: 0 var(--lgi-space-2);
+    font-size: var(--lgi-text-data);
+  }
+
+  /* 与旧页面一致：窄屏只留「设置」，让出位置给快捷视图。 */
+  .analysisDot,
+  .analysisSep {
+    display: none;
+  }
+
+  .resultBar,
+  .scopeTools {
+    gap: var(--lgi-space-2);
+  }
+
+  .scopeSummary {
+    max-width: calc(var(--lgi-space-24) + var(--lgi-space-6));
+  }
+
+  .pagination {
+    gap: var(--lgi-space-1);
+  }
+
+  .pageSummary {
+    margin-right: auto;
+  }
+
+  .jump {
+    display: none;
+  }
+
+  .pagination > label {
+    margin-left: auto;
+  }
+
+  .pagination :is(button, select) {
+    padding: var(--lgi-space-1);
+  }
+}
+
+@media (max-height: 540px) {
+  .page {
+    --creator-control: calc(var(--lgi-space-8) + var(--lgi-space-1));
+    padding-top: var(--lgi-space-2);
+  }
+
+  .toolbar {
+    display: flex;
+  }
+
+  .findMark,
+  .shortcut {
+    display: none;
+  }
+
+  .page .search select {
+    max-width: var(--lgi-space-24);
+  }
+
+  .toolbar > select {
+    width: var(--lgi-space-24);
+  }
+
+  .toolbar > button {
+    padding: var(--lgi-space-1) var(--lgi-space-2);
+  }
+
+  .viewBar {
+    height: var(--lgi-space-8);
+    margin-top: 0;
+  }
+
+  .resultBar {
+    height: var(--lgi-space-8);
+  }
+
+  .pagination {
+    min-height: var(--lgi-space-10);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page * {
+    scroll-behavior: auto;
+    transition: none;
+    animation: none;
+  }
+}

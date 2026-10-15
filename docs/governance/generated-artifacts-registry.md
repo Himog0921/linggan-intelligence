@@ -1,7 +1,7 @@
 # 生成型文件登记表
 
 > 状态: 权威当前
-> 最后核对: 2026-10-15
+> 最后核对: 2026-10-16
 > 适用范围: 构建、代码生成、导出、日志、测试证据、备份与临时文件
 > 事实来源: 当前工具配置、`.gitignore` 与来源校验清单
 > 冲突时以谁为准: 生成源、工具配置和安全规则；生成结果不得反向覆盖来源
@@ -13,7 +13,7 @@
 | Pi Node 固定依赖 | `apps/pi-adapter/node_modules/`（含 `.linggan-lock-sha256`）、`package-lock.json` | 精确 package.json、npm ci、`prepare-pi-adapter.sh` | node_modules 忽略；lock 提交 | 禁止手工改 lock/安装产物 | 只清理当前 checkout 依赖，不处理其它项目 |
 | 网页前端固定依赖（WEB-REACT-001） | `apps/web/node_modules/`（含 `.linggan-lock-sha256`）、`apps/web/package-lock.json` | 精确版本的 `apps/web/package.json`、`npm ci --ignore-scripts`、`scripts/runtime/prepare-web.sh` | node_modules 忽略；lock 提交 | 禁止手工改 lock/安装产物 | 只清理当前 checkout 依赖；可随时 `npm ci` 重建 |
 | 网页前端构建产物（WEB-REACT-001） | `apps/web/dist/`（`index.html`、带内容指纹的 JS/CSS、`build-info.json`） | `npm --prefix apps/web run build`；本机运行链由 `prepare-web.sh --build <revision>` 生成，revision 写入 `build-info.json` | 忽略，不提交 | 禁止手工改 | 每个 checkout 一份，按 revision 覆盖重建；可安全删除后重建 |
-| WEB-REACT-001 隔离浏览器证明 | 随机 `linggan-web-app-proof-*` Docker container/volume；证据目录 `${TMPDIR}/linggan-web-app-proof-*`（或 `WEB_APP_PROOF_DIR`）；随机 `linggan-web-app-support.*` 临时目录 | `scripts/test-web-app-postgres.sh`：合成模型凭据、隔离 schema、本机 Axum 路由与 Chromium | 不进 Git；截图只含合成数据 | 禁止伪造 | 容器、数据卷与临时目录在脚本退出时删除；证据目录保留供审阅，可手工删除；CI 作为 `web-app-real-chain-proof` 产物保留 7 天 |
+| WEB-REACT-001 隔离浏览器证明 | 随机 `linggan-web-app-proof-*` Docker container/volume；证据目录 `${TMPDIR}/linggan-web-app-proof-*`（或 `WEB_APP_PROOF_DIR`；阶段 D1 的创作者页证明放在其 `creators/` 子目录：`fixture.json`、`report.json`、截图；该库内随机 schema `creators_*`、`corpus_shell_*` 随容器一并删除）；随机 `linggan-web-app-support.*` 临时目录 | `scripts/test-web-app-postgres.sh`：合成模型凭据、隔离 schema、本机 Axum 路由与 Chromium | 不进 Git；截图只含合成数据 | 禁止伪造 | 容器、数据卷与临时目录在脚本退出时删除；证据目录保留供审阅，可手工删除；CI 作为 `web-app-real-chain-proof` 产物保留 7 天 |
 | COMMENT-RESEARCH-RESET-001 V1 隔离证明 | 随机 `linggan-comment-proof-*` Docker container/volume；系统临时目录下的 test log | `scripts/test-comment-research-postgres.sh`、`apps/pi-adapter` 的 Node fixture；历史 migration 后显式应用 0068–0070 | 不进入 Git | 禁止伪造 | 脚本 trap 删除它拥有的 container/volume；日志只含合成资料/失败码，不含评论正文或凭据 |
 | 模型后端秘密及合成文件验证 | `~/Library/Application Support/Linggan Intelligence/model-secrets/<workspace UUID>/<secret UUID>`；测试仅在随机系统临时目录 | API 的唯一 LocalFileModelSecrets；旧 Keychain 条目仅作一次性迁移来源 | 目录 0700、文件 0600；不进 Git/数据库/前端存储 | 只经配置命令更换 | 正式凭据随引用版本保留；迁移校验后清理旧 Keychain 条目；测试结束删除自己创建的合成目录 |
 | CI-20260907-V1 历史隔离证明 | 已清理的临时 Docker/log 位置 | 历史交付记录；对应旧评论研究源码与再生脚本已由 V1 terminal cutover 删除 | 不进 Git | 禁止伪造或重新生成旧结果 | 仅保留文档中的历史事实；不再是可运行验证入口 |
@@ -84,7 +84,7 @@
 
 ## CREATOR-DISCOVERY-001 · PR #386 发布验证
 
-- 来源：维护的 `scripts/test-creator-approved-ui.py`、官方Playwright Python v1.57.0源码/既有Node驱动、candidate/current runtime只读GET与受控installer。
+- 来源：维护的 `scripts/test-creator-approved-ui.py`（2026-10-16 随 WEB-REACT-001 D1 删除：旧创作者页已被 React 页取代，其职责由 `scripts/test-web-app-postgres.sh` 的创作者页浏览器证明承接，历史证据不受影响）、官方Playwright Python v1.57.0源码/既有Node驱动、candidate/current runtime只读GET与受控installer。
 - 位置：系统临时目录 `/tmp/creator-ui-386-*` 的证明日志/截图/代理脚本，`/tmp/creator-386-*` 测试依赖及编译日志；Cargo缓存复用 `/tmp/linggan-creator-ui-target`。审阅截图只放本任务已授权Codex visualizations。
 - 不入Git，不含凭据或数据库dump；真实GET截图为UI运行证明，不是模型语义或写动作验收。测试源为人工维护代码，非生成运行资料。
 - 再生：离线脚本 + 只读候选HTTP浏览器 + 合并后的canonical installer与实际PID/cwd/health/浏览器核验。临时代理拒绝全部非GET且不启动worker。
@@ -207,3 +207,10 @@ Mog 授权三篇指定作品在本机核对与重新分层。私有材料快照�
 - 统一入口：`scripts/test-content-workbench-postgres.sh --browser`，默认后端证明继续可独立运行，CI执行后端与浏览器两种模式。合成来源/凭据不代表真实选题或真实模型验收。
 
 字体核对：上游 `2894aab31764f10f29c421bdfd2340d3b382d384`；源 TTF SHA256 `a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da`；WOFF2 SHA256 `ed05125987c35ee57be16be7242568f1d516fbf497bc0ef4161499ca9e8d8fce`；产物 7782120 字节。转换工具 fontTools 4.62.1，`TTFont(source).flavor="woff2"`，不裁掉字形；OFL 1.1 文本随文件保留，仅移除上游一处行尾空格以通过仓库空白检查。
+
+## WEB-REACT-001-D1 · 创作者页真实链路证明
+
+- 来源：`apps/web/test/e2e/creators-real-chain.mjs`（人工维护的 Node/Playwright 脚本）与 `apps/api/src/local_web/creators_browser_tests.rs`（Rust 启动夹具，必须 multi_thread），由既有 `scripts/test-web-app-postgres.sh` 在一次性隔离 PostgreSQL（随机 `linggan-web-app-proof-*` 容器与数据卷）上依次运行；播种只用合成作者与作品（`合成领域一/二`、`合成作者 NN`），不调用模型、不访问平台、不连开发库或本机常驻服务。
+- 固定位置：证据放在 `WEB_APP_PROOF_DIR`（缺省 `${TMPDIR}/linggan-web-app-proof-*`）下的 `creators/` 子目录：`fixture.json`（本次播种的领域与作者编号）、`report.json`（逐步结果、写请求、失败请求、存储键）、各视口截图 PNG；CI 作为 `web-app-real-chain-proof` 产物保留 7 天。
+- 不入 Git；不含凭据、真实作者或真实原文。截图是合成数据的界面证据，不代表真实数据量下的表现。
+- 再生：`WEB_APP_PROOF_DIR=<目录> ./scripts/test-web-app-postgres.sh`。容器、数据卷与支持目录由脚本 trap 删除并核验；证据目录可手工删除。责任 Issue #433。

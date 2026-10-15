@@ -44,7 +44,7 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 interface RequestOptions {
-  method?: 'GET' | 'POST';
+  method?: 'GET' | 'POST' | 'PUT';
   body?: unknown;
   signal?: AbortSignal;
 }

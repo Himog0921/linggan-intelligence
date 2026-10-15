@@ -1,0 +1,115 @@
+/* 语料三页共用的页面框架样式。页头、侧栏和领域选择器的样式在 shell.css（与旧页面同一份）；
+ * 这里只负责内容区的布局和窄屏下侧栏的排布。只消费 LIDS --lgi-* Token。 */
+
+.frame {
+  min-height: 0;
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--lgi-canvas);
+  color: var(--lgi-ink);
+  font: var(--lgi-text-body) / var(--lgi-lh-body) var(--lgi-font-sans);
+}
+
+/* 窄屏：整页固定在视口内，侧栏变成一条横向的导航带，内容区自己滚动。
+ * 通过 :has 只作用于带有本框架的页面，shell.css 对其他页面的规则保持不变。 */
+@media (max-width: 900px) {
+  :global(body):has(.main) {
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  :global(.v7-app):has(.main) {
+    height: 100dvh;
+    min-height: 0;
+    grid-template-rows: auto minmax(0, 1fr);
+    overflow: hidden;
+  }
+
+  .frame {
+    min-height: 0;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .frame > :global(.v7-side) {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: var(--lgi-space-2);
+    padding: var(--lgi-space-2);
+    overflow: auto;
+    border-bottom: 1px solid var(--lgi-border);
+  }
+
+  .frame :global(.v7-side-nav) {
+    width: auto;
+    flex: none;
+    white-space: nowrap;
+    padding: var(--lgi-space-2) var(--lgi-space-3);
+  }
+
+  .frame :is(:global(.v7-side-foot), :global(.v7-nav-label)) {
+    display: none;
+  }
+}
+
+/* 低矮的窄屏（横屏手机）：压缩页头和导航带，让内容区至少露出一行。 */
+@media (max-width: 900px) and (max-height: 540px) {
+  :global(.v7-app):has(.main) :global(.v7-global-row) {
+    display: flex;
+    min-height: var(--lgi-space-10);
+    height: var(--lgi-space-10);
+    overflow-x: auto;
+  }
+
+  :global(.v7-app):has(.main) :global(.v7-global-brand) {
+    min-width: var(--lgi-space-12);
+    width: var(--lgi-space-12);
+    flex-basis: var(--lgi-space-12);
+    padding: 0 var(--lgi-space-2);
+  }
+
+  :global(.v7-app):has(.main) :global(.v7-global-brand) > div,
+  :global(.v7-app):has(.main) :is(:global(.v7-global-system), :global(.v7-global-flex), :global(.v7-nav-readout)) {
+    display: none;
+  }
+
+  :global(.v7-app):has(.main) :global(.v7-li-mark) {
+    width: var(--lgi-space-6);
+    height: var(--lgi-space-6);
+  }
+
+  :global(.v7-app):has(.main) :global(.v7-primary-nav) {
+    display: flex;
+    flex: 1;
+    border: 0;
+  }
+
+  :global(.v7-app):has(.main) :global(.v7-primary-nav) :is(a, button) {
+    min-width: 0;
+    min-height: var(--lgi-space-10);
+    flex: 1;
+    padding: var(--lgi-space-1);
+  }
+
+  :global(.v7-app):has(.main) :global(.v7-context-row),
+  :global(.v7-app):has(.main) :global(.v7-context-main) {
+    height: var(--lgi-space-8);
+    min-height: var(--lgi-space-8);
+  }
+
+  .frame > :global(.v7-side) {
+    padding: var(--lgi-space-1) var(--lgi-space-2);
+  }
+
+  .frame :global(.v7-side-nav) {
+    padding: var(--lgi-space-1) var(--lgi-space-2);
+  }
+}

@@ -8,19 +8,36 @@ interface AppShellProps {
   boundaryLabel: string;
   /** 当前页可明确提供的状态；省略时沿用迁移期导航基线。 */
   activeState?: string;
+  /**
+   * 一级导航「采集」项的真实状态词（与 shell.rs 的 `collection_state` 等价）。读得到时用真的，
+   * 省略时保持「状态未知」——读不到就是未知，绝不因此宣布已接通或为空。
+   */
+  collectionState?: string | undefined;
   crumb: ReactNode;
   meta: ReactNode;
   children: ReactNode;
 }
 
-function PrimaryEntryLink({ entry, active, activeState }: { entry: PrimaryEntry; active: PrimarySurface | null; activeState?: string }) {
+interface EntryStates {
+  activeState: string | undefined;
+  collectionState: string | undefined;
+}
+
+/** 采集项的真实状态词只作用于采集项（不论当前在哪一页）；当前页状态只作用于当前项。 */
+function stateOf(entry: PrimaryEntry, current: boolean, { activeState, collectionState }: EntryStates): string {
+  if (entry.surface === 'collection' && collectionState !== undefined) return collectionState;
+  if (current && activeState !== undefined) return activeState;
+  return entry.state;
+}
+
+function PrimaryEntryLink({ entry, active, states }: { entry: PrimaryEntry; active: PrimarySurface | null; states: EntryStates }) {
   const current = entry.surface !== null && entry.surface === active ? 'page' : undefined;
   const label = (
     <>
       <b className="v7-nav-zh">{entry.zh}</b>
       <span className="v7-nav-readout">
         {entry.technicalKey ? <small className="v7-tech-key">{entry.technicalKey}</small> : null}
-        <span className="v7-nav-state">{current ? activeState ?? entry.state : entry.state}</span>
+        <span className="v7-nav-state">{stateOf(entry, current !== undefined, states)}</span>
       </span>
     </>
   );
@@ -43,7 +60,8 @@ function PrimaryEntryLink({ entry, active, activeState }: { entry: PrimaryEntry;
  * 全站唯一继续演进的页头（WEB-REACT-001 R4）。结构与样式类名与 shell.rs 的 `global_header`
  * 保持一致，样式只来自 `shell.css`，迁移期两种页头看起来是同一个。
  */
-export function AppShell({ active, activeState, boundaryLabel, crumb, meta, children }: AppShellProps) {
+export function AppShell({ active, activeState, collectionState, boundaryLabel, crumb, meta, children }: AppShellProps) {
+  const states: EntryStates = { activeState, collectionState };
   return (
     <div className="v7-app">
       <header className="v7-global-header">
@@ -60,7 +78,7 @@ export function AppShell({ active, activeState, boundaryLabel, crumb, meta, chil
           </div>
           <nav className="v7-primary-nav" aria-label="一级导航">
             {PRIMARY_ENTRIES.map(entry => (
-              <PrimaryEntryLink key={entry.zh} entry={entry} active={active} {...(activeState === undefined ? {} : { activeState })} />
+              <PrimaryEntryLink key={entry.zh} entry={entry} active={active} states={states} />
             ))}
           </nav>
           <div className="v7-global-flex" aria-hidden="true" />
