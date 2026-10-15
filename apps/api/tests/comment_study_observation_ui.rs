@@ -88,6 +88,10 @@ fn observation_coverage_is_attached_to_signal_axis_not_separate_row() {
     let script = include_str!("../src/local_web/comment_study.js");
     assert!(script.contains("covY=signalBase+8"));
     assert!(script.contains("class=\"study-series-coverage-tick\""));
-    assert!(script.contains("无观察记录不等于用户没有表达"));
+    assert!(script.contains("没有观察记录不等于用户没有表达"));
+    assert!(
+        script.contains("filter(Number.isInteger)"),
+        "纵轴刻度步长必须是整数：评论数不能出现 2.5 之类的刻度，也不能在最大值为 0/1 时重复标 1"
+    );
     assert!(script.contains("id=\"study-observation-title\" class=\"v7-sr-only\""));
 }

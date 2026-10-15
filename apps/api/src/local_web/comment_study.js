@@ -1738,7 +1738,7 @@ document.querySelector('#comment-detail-body').addEventListener('click',async ev
   const w=1000,l=51,rr=10,top=24,topH=190,signalBase=329,signalH=70,covY=signalBase+8,covH=6,dateY=covY+covH+20,h=dateY+16;
   const band=(w-l-rr)/points.length,bw=points.length<=7?Math.min(42,band*.34):Math.max(4,Math.min(19,band*.54)),cx=i=>l+band*(i+.5);
   const obs=points.map(p=>Math.max(0,Number(p.newObservedCommentCount)||0)),sig=points.map(p=>Math.max(0,Number(p.acceptedSignalCount)||0));
-  const scale=(max,n)=>{const raw=Math.max(1,max)/n,pow=10**Math.floor(Math.log10(raw)),step=[1,2,2.5,5,10].map(k=>k*pow).find(k=>k>=raw)||10*pow;return{max:Math.ceil(Math.max(1,max)/step)*step,step}};
+  const scale=(max,n)=>{const raw=Math.max(1,max)/n,pow=10**Math.floor(Math.log10(raw)),step=[1,2,2.5,5,10].map(k=>k*pow).filter(Number.isInteger).find(k=>k>=raw)||Math.max(1,10*pow);return{max:Math.ceil(Math.max(1,max)/step)*step,step}};
   const oc=scale(Math.max(...obs),3),sc=scale(Math.max(...sig),2),oy=v=>top+topH-v/oc.max*topH,sy=v=>signalBase-v/sc.max*signalH,parts=[];
   parts.push(`<title>首次观察评论与研究信号写入，底部短刻度表示采集覆盖</title>`);
   for(let value=0;value<=oc.max+oc.step/2;value+=oc.step){const y=oy(value);parts.push(`<line class="study-series-grid-line" x1="${l}" x2="${w-rr}" y1="${y}" y2="${y}"/><text x="${l-8}" y="${y+4}" text-anchor="end">${overviewNum(Math.round(value))}</text>`)}
