@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ImagePage } from './workbenchModel';
-import { previewSplit, renderPage, resolveFont, wrapText } from './renderer';
+import { previewSplit, renderPage, resolveFont, wrapText, wrapV3Text } from './renderer';
 
 const page = (kind: ImagePage['kind'] = 'cover'): ImagePage => ({id: crypto.randomUUID(), kind, templateVersion:'creation-v1', title:'作业启动', subtitle:'先迈出第一步',
   blocks:[{id:crypto.randomUUID(),text:'把任务分成小步。'}],assetId:null,crop:{x:0,y:0,width:1,height:1},style:{palette:'cream',fontFamily:'system-cjk',width:1080,height:1440,alignment:'start'}});
@@ -60,5 +60,60 @@ describe('creation renderer target-pixel rules', () => {
     expect(faceLoad).toHaveBeenCalledTimes(1);expect(add).toHaveBeenCalledTimes(1);
     expect(constructor).toHaveBeenCalledWith('Linggan Creation Sans',expect.stringContaining('noto-sans-sc.woff2'));
     expect(fontLoad).toHaveBeenCalled();
+  });
+});
+
+describe('V3 artwork layouts',()=>{
+  it.each(['creation-v3-type','creation-v3-split','creation-v3-list'])('%s renders a full text-only cover and four inner structures without requiring a picture',async templateVersion=>{
+    for (const kind of ['cover','opinion','voice','steps'] as const) {
+      vi.mocked(context.fillText).mockClear();
+      const input=page(kind); input.templateVersion=templateVersion; input.blocks=kind==='cover'?[]:input.blocks;
+      const result=await renderPage(input,{fontFamily:'Test CJK'});
+      expect(result.issues).toEqual([]);expect(result.canvas.width).toBe(1080);expect(result.canvas.height).toBe(1440);
+      const drawn=vi.mocked(context.fillText).mock.calls.map(call=>call[0]);
+      expect(drawn.some(text=>['图文创作','COVER','OPINION','VOICE','STEPS','观点','原声','步骤'].includes(text))).toBe(false);
+    }
+  });
+  it('keeps v1 typography unchanged while V3 uses its own large cover title geometry',async()=>{
+    const legacy=page();await renderPage(legacy,{fontFamily:'Test CJK'});
+    expect(context.fillText).toHaveBeenCalledWith('作业启动',98,192);
+    vi.mocked(context.fillText).mockClear();const next={...legacy,templateVersion:'creation-v3-type',blocks:[]};
+    await renderPage(next,{fontFamily:'Test CJK'});expect(context.fillText).toHaveBeenCalledWith('作业启动',80,300);
+  });
+  it('splits V3 measured inner text without losing text or changing the first page identity',async()=>{
+    const input=page('opinion');input.templateVersion='creation-v3-type';input.blocks[0]!.text='把第一步说得更小一点。'.repeat(32);
+    const result=await previewSplit(input,{fontFamily:'Test CJK'});
+    expect(result.length).toBeGreaterThan(1);expect(result[0]?.id).toBe(input.id);
+    expect(result.flatMap(item=>item.blocks).map(item=>item.text).join('')).toBe(input.blocks[0]?.text);
+    for (const output of result) expect((await renderPage(output,{fontFamily:'Test CJK'})).issues).toEqual([]);
+  });
+});
+
+describe('V3 Chinese line boundaries and list backing',()=>{
+  const measure={measureText:(value:string)=>({width:Array.from(new Intl.Segmenter('zh',{granularity:'grapheme'}).segment(value)).length}) as TextMetrics};
+  it.each([
+    '甲'.repeat(19)+'’。乙',
+    '甲'.repeat(18)+'‘乙’。',
+    '甲'.repeat(18)+'（乙）。',
+    '甲'.repeat(18)+'👨‍👩‍👧‍👦’。乙\n\n末尾🙂',
+  ])('moves automatic punctuation boundaries without changing any text: %s',text=>{
+    const lines=wrapV3Text(measure,text,19);
+    expect(lines.join('')).toBe(text.replaceAll('\n',''));
+    expect(lines.some(line=>/^[’”。。，、；：！？）】》]/u.test(line))).toBe(false);
+    expect(lines.some(line=>/[‘“（【《]$/u.test(line))).toBe(false);
+    expect(lines.every(line=>measure.measureText(line).width<=19)).toBe(true);
+    if(text.includes('\n\n'))expect(lines).toContain('');
+    if(text.includes('👨‍👩‍👧‍👦'))expect(lines.join('')).toContain('👨‍👩‍👧‍👦');
+  });
+  it('retains legacy wrapping and exposes an impossible V3 punctuation run as overflow instead of deleting or shrinking it',()=>{
+    const text='甲'.repeat(19)+'’。乙';expect(wrapText(measure,text,19)[1]).toBe('’。乙');
+    expect(wrapV3Text(measure,'甲’。',1)).toEqual(['甲’。']);
+  });
+  it.each(['cover','steps'] as const)('extends the V3 list backing to 1264 while keeping the footer at 1300: %s',async kind=>{
+    const input=page(kind);input.templateVersion='creation-v3-list';
+    await renderPage(input,{fontFamily:'Test CJK'});
+    const panel=vi.mocked(context.fillRect).mock.calls.find(call=>call[0]===(kind==='cover'?80:64)&&call[2]===(kind==='cover'?920:952)&&call[3]>100);
+    expect(panel).toBeDefined();expect(panel![1]+panel![3]).toBe(1264);
+    expect(context.fillRect).toHaveBeenCalledWith(80,1300,920,2);
   });
 });

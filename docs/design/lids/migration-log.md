@@ -617,3 +617,22 @@ root 目检真实隔离浏览器的 390×844 正文、图组和材料截图发�
 ### 2026-10-15 · 阶段 C 创作失败反馈中文化（实施前登记）
 
 按 Mog 对工作台主文案不展示后端术语的要求，本页将 AI 失败原因、取消中与未知状态映射为中文，并给出保留输入、刷新结果、核对材料或模型设置等下一步。接口错误的未知错误码不再拼进主文案；来源状态附带的技术码移入按需诊断详情。原始 `ApiError.failure`、AI 状态与 `failureCode`、来源状态 DTO 继续原样保留，诊断与用户文案分责。本次只改创作页及其错误说明，不改变接口、操作、重试权限、收费边界、样式或全站规则；验证由页面与 API 的针对性回归承担。
+
+
+## 2026-10-15 · WEB-REACT-001-C-V3-FIDELITY 再实施前登记
+
+Mog 退回 #432 的真实创作页面，要求按已认可 V3 重新落地。本轮沿用 CSS Modules 与唯一 LIDS Token，不再把功能清单作为设计验收。页面规格增加选题相关材料预备、检索加入本篇、完整原文与真实评论上下文；恢复 V3 纸条语义筛选/矩阵、连续正文/并排改稿和四步图文创作。唯一 React AppShell 可增加局部 compact/immersive 模式，此项覆盖阶段 B/C 先前不采用紧凑外壳的限制；不改旧页面外观或旧 shell。新增局部几何变量由实际实现清单追加，颜色/字体/间距仍引用 Token。当前仅已派定，尚无新候选视觉或链路通过证明。
+
+本轮局部实现补记（实施前）：新增 `--cw-rail-width:13rem` 为V3工作区局部导航宽度，不新增全站布局；AppShell.module.css沿已有58px紧凑页头Token，只有显式workbenchMode消费，默认设置页不变。成品模板新增creation-v3-type/split/list与creation-renderer.v3，保留v1算法与已冻结历史成品的身份，配色仍沿cream/sage/ink。后端材料集合需要的窄类型/验证/来源传播修改由材料代理负责；root负责exports版本白名单，避免文件并行写冲突。
+
+### 2026-10-15 · WEB-REACT-001-C · V8 动作按钮局部纠偏（实施前登记）
+
+Mog 最新明确要求创作工作台动作按钮沿其提供的 `linggan-design-system-v8 (1).html` 动作层级（原件 CSS 第 536–589 行）实现，覆盖本轮临时采用旧 `signal-ink` 棕色主按钮与既有通用“禁止 hover lift”的限制，仅作用于工作台显式消费的共享 React `ActionButton`。导航页签、材料纸条、图页缩略图、模板及配色选择保持安静；设置页、旧原生页面和现有 Token 值保持原状。
+
+共享组件放在 `apps/web/src/shared/ActionButton.tsx` 与同名 CSS Module，支持 primary/ink/outline/soft/danger/quiet 与 loading 状态。唯一 Token 真源 `apps/api/src/local_web/lids_tokens.css` 新增专用 `--lgi-action-*`，逐值映射 V8：主承字色 flame-600 `#c63214`、直角黑边、4px 硬投影、右缘点阵 idle 16px 一列 / hover 40% / active 满面及阶梯遮罩、离散四格 busy、虚线休眠 disabled、包住投影的双层键盘焦点环与减少动态效果。新增值只被该组件引用，不调整任何旧 Token。V8 明定 primary/ink 悬停 -1px、按下 4px；该局部显式授权不推广为全站动效例外。
+
+请求语义保持：disabled 或 busy 均禁止原生激活，busy 用 aria-busy 并保留动作原有文案；四格为装饰，不能被辅助技术误报为四条状态。普通动作默认 type=button，表单提交显式 type=submit。实施后由组件聚焦/禁用/busy 回归、Token 检查、工作台真实浏览器逐态与既有冻结导出回归验证；本条不提前宣称已通过或已部署。
+
+### 同轮 V3 材料纸面值回填
+
+Mog 要求完整保留 V3 的书页与纸条体验；此前把暖纸统一替成结构灰会改变已经确认的构图。将原型 `v3/material-browser.css` 的 paper/edge/ink/selected/book-cover 原值分别登记为唯一运行时源的 `--lgi-reading-paper/edge/ink/selected/cover`，只供工作台材料阅读与摘录纸条消费。它们不构成全站第二主题；页面布局/文字字号仍沿现有 Token，旧 Token 不换值。回退仅撤掉本页引用和本次新增声明。需核对真实原文高亮和对比度；新值不证明材料资格或语义分类。

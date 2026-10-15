@@ -3,6 +3,9 @@ use super::*;
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
+#[path = "source_metadata.rs"]
+mod metadata;
+
 pub(super) fn target_mut<'a>(
     doc: &'a mut WorkDocument,
     target: &UseTarget,
@@ -151,6 +154,36 @@ pub(crate) async fn prepare(
     old: Option<&WorkDocument>,
     doc: &mut WorkDocument,
 ) -> Result<(), WorkbenchError> {
+    if doc.materials.len() > 60 {
+        return Err(WorkbenchError::Invalid("materials"));
+    }
+    for material in &mut doc.materials {
+        let unchanged = old.is_some_and(|d| {
+            d.materials.iter().any(|previous| {
+                previous.document_id == material.document_id
+                    && previous.source_kind == material.source_kind
+                    && previous.source_ref == material.source_ref
+                    && previous.work_ref == material.work_ref
+                    && previous.source_version == material.source_version
+            })
+        });
+        if !unchanged {
+            crate::content_workbench_sources::materials::validate_selection_in(
+                tx, domain, material,
+            )
+            .await
+            .map_err(|_| WorkbenchError::Source)?;
+        }
+        // Collection metadata stores no caller-provided source prose. The full source is always re-read.
+        material.match_reasons = vec![
+            if material.added_by == "manual" {
+                "作者手动加入"
+            } else {
+                "规则检索准备，读取时重新核对"
+            }
+            .into(),
+        ];
+    }
     // A client cannot erase already adopted source lineage while retaining its exact quote.
     // Identity comes from the old immutable revision; edited placement coordinates are recomputed.
     if let Some(old) = old {
@@ -163,9 +196,10 @@ pub(crate) async fn prepare(
         }
         for excerpt in &old.excerpts {
             let raw = excerpt.selected_text.as_deref().unwrap_or("");
-            if authored_targets(doc).iter().any(|target| {
+            if (authored_targets(doc).iter().any(|target| {
                 validation::target_text(doc, target).is_some_and(|text| raw_present(text, raw))
-            }) && !doc.excerpts.iter().any(|e| e.id == excerpt.id)
+            }) || metadata::contains_quote(doc, raw))
+                && !doc.excerpts.iter().any(|e| e.id == excerpt.id)
             {
                 doc.excerpts.push(excerpt.clone());
             }
@@ -213,6 +247,9 @@ pub(crate) async fn prepare(
     repair_known_uses(doc, old);
     for (e, q) in doc.excerpts.clone().iter().zip(&qualifications) {
         if q.state != "readable" {
+            if metadata::adds_quote(doc, old, e.selected_text.as_deref().unwrap_or("")) {
+                return Err(WorkbenchError::Source);
+            }
             for u in doc
                 .uses
                 .clone()
@@ -383,6 +420,7 @@ pub(crate) async fn redact(
             }
         }
     }
+    metadata::redact(doc, &hidden_quotes);
     Ok(statuses)
 }
 

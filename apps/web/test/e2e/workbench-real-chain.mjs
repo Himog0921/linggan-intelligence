@@ -35,7 +35,10 @@ let exportedRecord;
 let packageBytes;
 const imageSection = () => page.getByRole('region', { name: '封面与内页' });
 const stage = async (name, surface = page) => {
-  const button=surface.getByRole('navigation', {name:'创作步骤'}).getByRole('button',{name,exact:true});
+  const reading = ['材料','画布'].includes(name);
+  await surface.getByRole('navigation',{name:'运营导航'}).getByRole('button',{name:reading?'研读取材':'图文创作',exact:true}).click();
+  const label = ({材料:'材料浏览',画布:'创作画布'})[name] ?? name;
+  const button=surface.getByRole('navigation',{name:'创作步骤'}).getByRole('button').filter({hasText:label});
   await button.click();
   await until(async()=>await button.getAttribute('aria-current')==='step',`${name} view has committed`);
 };
@@ -48,7 +51,7 @@ const envelope = async () => {
   assert.equal(response.status(),200); return response.json();
 };
 async function step(name, run) {
-  try { await run(); report.steps.push({name,result:'PASS'}); }
+  try { await run(); report.steps.push({name,result:'PASS'}); console.log(`PASS ${name}`); }
   catch(error) { report.steps.push({name,result:'FAIL',error:String(error?.stack ?? error)}); throw error; }
 }
 async function screenshot(name, surface = page) {
@@ -82,19 +85,26 @@ async function selectExact(locator, selectedText) {
   },selectedText);
   await until(async()=>await locator.locator('mark').textContent()===selectedText,'exact Unicode selection highlight');
 }
-async function collectFromPaper(text, selectedText, readingLabel) {
-  const paper=page.getByRole('region',{name:'分组摘录纸条'}).getByRole('button').filter({hasText:text}).first();
-  const sourceFragment=(await paper.getAttribute('data-fragment-id')).split(':').slice(0,-2).join(':');
-  await paper.click();
-  const leaf=page.getByLabel(readingLabel);
-  await leaf.waitFor();
-  await until(async()=>((await leaf.getAttribute('data-fragment-id'))??'').split(':').slice(0,-2).join(':')===sourceFragment,'reading leaf belongs to the selected source fragment');
+async function openSourceDetails() {
+  const summary=page.getByRole('region',{name:'原文阅读'}).locator('summary').filter({hasText:'来源详情'});
+  if(await summary.locator('..').getAttribute('open')===null)await summary.click();
+}
+async function closeSourceDetails() {
+  const summary=page.getByRole('region',{name:'原文阅读'}).locator('summary').filter({hasText:'来源详情'});
+  if(await summary.count()&&await summary.locator('..').getAttribute('open')!==null)await summary.click();
+}
+async function collectFromPaper(text, selectedText, documentAnchor) {
+  const wall=page.getByRole('region',{name:'分组摘录纸条'});
+  if(documentAnchor)await wall.locator('button[data-fragment-id]').filter({hasText:documentAnchor}).first().click();
+  const paper=documentAnchor ? wall.locator(`button[data-fragment-id="${await page.getByRole('region',{name:'原文阅读'}).locator('[aria-label="可选择原文"]').filter({hasText:text}).first().getAttribute('data-fragment-id')}"]`) : wall.locator('button[data-fragment-id]').filter({hasText:text}).first();
+  const fragment=await paper.getAttribute('data-fragment-id');await paper.click();
+  const leaf=page.getByRole('region',{name:'原文阅读'}).locator(`[aria-label="可选择原文"][data-fragment-id="${fragment}"]`);
+  await leaf.waitFor();assert.equal(await leaf.getAttribute('data-fragment-id'),fragment);
   if(selectedText)await selectExact(leaf,selectedText);
-  const fragment=await leaf.getAttribute('data-fragment-id');
-  assert.equal(await page.locator('button[aria-pressed="true"][data-fragment-id]').getAttribute('data-fragment-id'),fragment);
+  assert.equal(await wall.locator('button[aria-pressed="true"][data-fragment-id]').getAttribute('data-fragment-id'),fragment);
   assert.equal(await page.getByRole('navigation',{name:'材料分布索引'}).locator('[aria-current="location"]').count(),1);
   await page.getByRole('button',{name:'摘入画布',exact:true}).click();
-  await until(async()=>!(await page.getByRole('button',{name:'摘入画布',exact:true}).isDisabled()),'excerpt validation receipt');
+  await until(async()=>!(await page.getByRole('button',{name:'摘入画布',exact:true}).isDisabled()),'excerpt validation receipt');return leaf;
 }
 function crc32(bytes) {
   let crc=0xffffffff;
@@ -131,9 +141,9 @@ async function download(locator, filename) {
   await result.saveAs(target);assert.equal(await result.failure(),null);return readFile(target);
 }
 async function assertWholeEditPreview() {
-  const canvas=imageSection().locator('canvas').first();await canvas.scrollIntoViewIfNeeded();
+  const canvas=imageSection().locator('figure canvas').last();await canvas.scrollIntoViewIfNeeded();
   const bounds=await canvas.boundingBox(),viewport=page.viewportSize();assert.ok(bounds&&viewport);
-  assert.ok(bounds.height<=viewport.height*0.55+1,'single editor preview is bounded by available viewport');
+  assert.ok(bounds.height<=viewport.height*0.65+1,'single editor preview is bounded by available viewport');
   assert.ok(Math.abs(bounds.width/bounds.height-0.75)<0.01,'preview preserves full 3:4 artwork ratio');
   assert.ok(bounds.y>=0&&bounds.y+bounds.height<=viewport.height+1,'entire edit preview fits within visible viewport');
 }
@@ -156,6 +166,66 @@ async function assertPrimaryContrast(locator, width, phase='default') {
   report.primaryContrast??=[];report.primaryContrast.push({width,phase,...colors,contrast});
 }
 
+async function v8Style(locator) {
+  return locator.evaluate(node=>{
+    const style=getComputedStyle(node),before=getComputedStyle(node,'::before'),matrix=new DOMMatrixReadOnly(style.transform);
+    return {family:node.getAttribute('data-action-button'),variant:node.getAttribute('data-variant'),disabled:node.matches(':disabled'),busy:node.getAttribute('aria-busy'),focusVisible:node.matches(':focus-visible'),active:node.matches(':active'),clientWidth:node.clientWidth,
+      background:style.backgroundColor,backgroundImage:style.backgroundImage,color:style.color,borderWidth:style.borderTopWidth,borderStyle:style.borderTopStyle,borderColor:style.borderTopColor,radius:style.borderRadius,shadow:style.boxShadow,shift:[matrix.m41,matrix.m42],transition:style.transitionDuration,
+      before:{display:before.display,width:parseFloat(before.width),image:before.backgroundImage,mask:before.maskImage,transition:before.transitionDuration,timing:before.transitionTimingFunction},
+      cells:[...node.querySelectorAll('[aria-hidden="true"] > i')].map(cell=>{const s=getComputedStyle(cell);return {width:s.width,height:s.height,animation:s.animationName,duration:s.animationDuration,timing:s.animationTimingFunction,delay:s.animationDelay,opacity:s.opacity};})};
+  });
+}
+async function recordV8(state,locator) {
+  const style=await v8Style(locator);report.v8Actions??=[];report.v8Actions.push({state,...style});await screenshot(`v8-action-${state}`);return style;
+}
+function shadowHas(style,value) { assert.ok(style.shadow.includes(value),`expected shadow ${value}, got ${style.shadow}`); }
+async function assertV8DisabledAction(locator) {
+  await locator.scrollIntoViewIfNeeded();const style=await recordV8('disabled-missing-content',locator);
+  assert.equal(style.family,'v8');assert.equal(style.disabled,true);assert.equal(style.borderStyle,'dashed');assert.equal(style.shadow,'none');assert.equal(style.before.display,'none');assert.match(style.backgroundImage,/conic-gradient/);assert.deepEqual(style.shift,[0,0]);
+  const before=report.requests.filter(item=>item.method==='POST'&&item.path.endsWith('/exports')).length,box=await locator.boundingBox();assert.ok(box);
+  await page.mouse.click(box.x+box.width/2,box.y+box.height/2);
+  await remains(()=>report.requests.filter(item=>item.method==='POST'&&item.path.endsWith('/exports')).length===before,'disabled missing-content action cannot issue a freeze',200);
+}
+async function tabTo(locator) {
+  for(let index=0;index<100;index++){await page.keyboard.press('Tab');if(await locator.evaluate(node=>document.activeElement===node))return;}
+  throw new Error('Keyboard could not reach the actual V8 action');
+}
+async function assertV8EnabledActionStates(locator) {
+  await page.emulateMedia({reducedMotion:'no-preference'});await locator.scrollIntoViewIfNeeded();await page.mouse.move(0,0);
+  let style=await recordV8('default',locator);assert.equal(style.family,'v8');assert.equal(style.variant,'primary');assert.equal(style.background,'rgb(198, 50, 20)');assert.equal(style.radius,'0px');assert.equal(style.borderWidth,'2px');assert.equal(style.borderColor,'rgb(11, 15, 18)');shadowHas(style,'4px 4px 0px 0px');assert.equal(style.before.width,16);assert.match(style.before.image,/conic-gradient/);assert.match(style.before.mask,/linear-gradient/);
+  await locator.hover();await until(async()=>{const s=await v8Style(locator);return Math.abs(s.before.width-s.clientWidth*.4)<1&&s.shift[0]===-1&&s.shadow.includes('5px 5px 0px 0px');},'V8 quantised hover settles at 40%');style=await recordV8('hover',locator);assert.deepEqual(style.shift,[-1,-1]);shadowHas(style,'5px 5px 0px 0px');assert.match(style.before.timing,/steps\(3\)/);
+  const freezes=()=>report.requests.filter(item=>item.method==='POST'&&item.path.endsWith('/exports')).length,before=freezes();
+  try {
+    await page.mouse.down();await until(async()=>{const s=await v8Style(locator);return Math.abs(s.before.width-s.clientWidth)<1&&s.shift[0]===4&&s.shadow==='none';},'held mouse press fills the button');style=await recordV8('held-mouse-press',locator);assert.equal(style.active,true);assert.deepEqual(style.shift,[4,4]);assert.equal(style.shadow,'none');
+  } finally {await page.mouse.move(0,0);await page.mouse.up();}
+  assert.equal(freezes(),before,'moving off before release cancels the real export action');
+  await tabTo(locator);await until(async()=>{const s=await v8Style(locator);return s.focusVisible&&s.shadow.includes('2px 2px 0px 5px')&&s.shadow.includes('2px 2px 0px 7px');},'native keyboard focus ring transition settles');style=await recordV8('keyboard-focus',locator);shadowHas(style,'2px 2px 0px 5px');shadowHas(style,'2px 2px 0px 7px');
+  await locator.hover();await until(async()=>{const s=await v8Style(locator);return s.shift[0]===-1&&s.shadow.includes('3px 3px 0px 6px')&&s.shadow.includes('3px 3px 0px 8px');},'focused hover ring transition settles');style=await recordV8('focus-hover',locator);assert.equal(style.focusVisible,true);shadowHas(style,'3px 3px 0px 6px');shadowHas(style,'3px 3px 0px 8px');
+  await page.mouse.move(0,0);
+  try {
+    await page.keyboard.down('Space');await until(async()=>{const s=await v8Style(locator);return s.shift[0]===4&&s.shadow.includes('0px 0px 0px 3px')&&s.shadow.includes('0px 0px 0px 5px');},'held keyboard press ring transition settles');style=await recordV8('focus-held-keyboard-press',locator);assert.equal(style.focusVisible,true);assert.equal(style.active,true);shadowHas(style,'0px 0px 0px 3px');shadowHas(style,'0px 0px 0px 5px');
+    await page.keyboard.press('Tab');
+  } finally {await page.keyboard.up('Space');}
+  assert.equal(freezes(),before,'moving keyboard focus before release cancels the real export action');
+  await page.emulateMedia({reducedMotion:'reduce'});await locator.hover();style=await recordV8('reduced-motion',locator);assert.equal(style.transition,'0s');assert.equal(style.before.transition,'0s');await page.mouse.move(0,0);
+}
+async function generateWithV8BusyProof(locator) {
+  const pattern='**/ops/api/creation/works/*/exports';let release,freezeEntered=false,handlerFinished=false,routeError,actionError;
+  const gate=new Promise(resolve=>{release=resolve;});
+  const handler=async route=>{try{const response=await route.fetch();freezeEntered=true;await gate;await route.fulfill({response});}catch(error){routeError=error;}finally{handlerFinished=true;}};
+  await page.route(pattern,handler);
+  try {
+    const count=()=>report.requests.filter(item=>item.method==='POST'&&item.path.endsWith('/exports')).length,before=count();
+    await locator.click();await until(()=>freezeEntered,'actual export freeze request reaches the isolated server');await until(async()=>{const s=await v8Style(locator);return s.busy==='true'&&s.cells.length===4;},'busy is backed by the actual held freeze response');
+    let style=await recordV8('busy-reduced-motion',locator);assert.equal(style.disabled,true);assert.equal(style.before.display,'block');assert.equal(style.before.width,16);assert.match(style.before.image,/11, 15, 18/);assert.equal(style.cells.length,4);assert.ok(style.cells.every(cell=>cell.animation==='none'&&cell.opacity==='1'));
+    await page.emulateMedia({reducedMotion:'no-preference'});style=await recordV8('busy-four-discrete-cells',locator);assert.ok(style.cells.every(cell=>cell.animation!=='none'&&cell.duration==='0.8s'&&/steps\(1\)|step-end/.test(cell.timing)));assert.deepEqual(style.cells.map(cell=>cell.delay),['0s','0.2s','0.4s','0.6s']);
+    await locator.hover();assert.equal((await v8Style(locator)).before.width,16,'busy retains one idle lattice column instead of expanding on hover');const box=await locator.boundingBox();assert.ok(box);await page.mouse.click(box.x+box.width/2,box.y+box.height/2);await page.keyboard.press('Enter');await remains(()=>count()===before+1,'busy native-disabled action cannot send a duplicate freeze',200);
+  } catch(error) {actionError=error;} finally {await page.emulateMedia({reducedMotion:'reduce'});release();if(freezeEntered)await until(()=>handlerFinished,'held freeze response is fulfilled before removing its route');await page.unroute(pattern,handler);}
+  if(routeError)report.v8RouteError=String(routeError);
+  if(actionError)throw actionError;
+  if(routeError)throw routeError;
+}
+
 try {
   await step('设置页不加载创作模块或本地图页字体',async()=>{
     await page.goto(`${origin}/settings/models`);await page.getByRole('heading',{name:'评论研究的模型设置'}).waitFor();
@@ -166,7 +236,7 @@ try {
   await step('运营入口建立真实服务器作品并保存角度提纲账号',async()=>{
     await page.goto(`${origin}/ops`);assert.equal(new URL(page.url()).pathname,'/ops/creation');
     await page.getByLabel('创作领域').selectOption(domainRef);await page.getByLabel('新选题标题').fill('作业启动');
-    await page.getByRole('button',{name:'建立选题',exact:true}).click();await page.getByLabel('切入角度').waitFor();
+    await page.getByRole('button',{name:'建立选题',exact:true}).click();await page.getByRole('button',{name:'编辑方案',exact:true}).click();await page.getByLabel('切入角度').waitFor();
     workId=new URL(page.url()).searchParams.get('work');assert.ok(workId);workUrl=page.url();report.workId=workId;
     await page.getByLabel('切入角度').fill('把作业启动缩小成可执行的第一步；仅作隔离合成验收。');
     await page.getByLabel('创作提纲').fill('先理解启动困难\n只做两分钟\n留出家庭缓冲');
@@ -174,18 +244,20 @@ try {
     const saved=await envelope();assert.equal(saved.revision.document.accountRef,accountRef);assert.equal(saved.revision.document.outline.length,3);
     await screenshot('workbench-1440-topic');
   });
+  await step('V8 缺正文与图页时的真实禁用态与请求边界',async()=>{await stage('预览与导出');await assertV8DisabledAction(imageSection().getByRole('button',{name:'保存并生成图文包',exact:true}));});
   await step('封面和四张内页：模板配色对齐、自有图片裁切、稳定排序与撤销',async()=>{
-    await stage('图组 / 导出');const area=imageSection();await area.getByRole('button',{name:'添加封面',exact:true}).click();
+    await stage('封面');const area=imageSection();assert.equal(await area.getAttribute('data-step'),'cover');await area.getByRole('button',{name:'添加封面',exact:true}).click();
     await area.getByRole('button',{name:'预览带入正文标题'}).click();assert.equal(await area.getByLabel('图页标题').inputValue(),'');
     await area.getByRole('button',{name:'确认带入标题'}).click();await until(async()=>await area.getByLabel('图页标题').inputValue()==='作业启动','confirmed title imported');assert.equal(await area.getByLabel('图页标题').inputValue(),'作业启动');
     await area.getByRole('button',{name:'撤销标题带入'}).click();await until(async()=>await area.getByLabel('图页标题').inputValue()==='','title import undone');assert.equal(await area.getByLabel('图页标题').inputValue(),'');
     await area.getByRole('button',{name:'预览带入正文标题'}).click();await area.getByRole('button',{name:'确认带入标题'}).click();
-    await area.getByLabel('副标题').fill('先开始两分钟');await area.getByRole('combobox',{name:'图页模板',exact:true}).selectOption('creation-v1-editorial');
-    await area.getByRole('combobox',{name:'图页配色',exact:true}).selectOption('sage');await area.getByRole('combobox',{name:'图页文字对齐',exact:true}).selectOption('center');
+    await area.getByLabel('副标题').fill('先开始两分钟');await area.getByRole('button',{name:/留白大字/}).click();
+    await area.getByRole('button',{name:'配色：鼠尾草绿',exact:true}).click();await area.getByRole('combobox',{name:'图页文字对齐',exact:true}).selectOption('center');
+    await assertWholeEditPreview();await screenshot('workbench-1440-cover');await stage('内页');assert.equal(await area.getAttribute('data-step'),'inner');await area.getByRole('navigation',{name:'图页顺序'}).getByRole('button',{name:/添加内页/}).click();
     const definitions=[['观点','把开始缩小','先把练习本放到桌上。'],['原声','听见真实困难','困难常常在第一步。'],['步骤','今天可以这样做','放好练习本。'],['观点','给家庭留出缓冲','允许短暂停顿。']];
-    for(const [kind,title,body] of definitions){await area.getByRole('button',{name:`添加${kind}页`,exact:true}).click();await area.getByLabel('图页标题').fill(title);await area.getByLabel(kind==='步骤'?'步骤 1':'文案 1',{exact:true}).fill(body);}
+    for(const [index,[kind,title,body]] of definitions.entries()){if(index)await area.getByRole('button',{name:`添加${kind}页`,exact:true}).click();await area.getByLabel('图页标题').fill(title);await area.getByLabel(kind==='步骤'?'步骤 1':'文案 1',{exact:true}).fill(body);}
     const dataUrl=await page.evaluate(()=>{const canvas=document.createElement('canvas');canvas.width=640;canvas.height=400;const ctx=canvas.getContext('2d');ctx.fillStyle='#d8e6ca';ctx.fillRect(0,0,640,400);ctx.fillStyle='#42683f';ctx.fillRect(80,50,220,300);ctx.fillStyle='#e4b24b';ctx.beginPath();ctx.arc(450,200,100,0,Math.PI*2);ctx.fill();return canvas.toDataURL('image/png');});
-    await area.getByLabel('自有图片').setInputFiles({name:'synthetic-own-image.png',mimeType:'image/png',buffer:Buffer.from(dataUrl.split(',')[1],'base64')});
+    await area.getByText('自有图片与裁切',{exact:false}).click();await area.getByLabel('自有图片').setInputFiles({name:'synthetic-own-image.png',mimeType:'image/png',buffer:Buffer.from(dataUrl.split(',')[1],'base64')});
     await area.getByText('自有图片已上传；保存作品后保留图片关联').waitFor();
     await area.getByLabel('裁切宽度').fill('80');await area.getByLabel('横向位置').fill('10');await save();
     const before=(await envelope()).revision.document.pages;const ids=before.map(item=>item.id);
@@ -195,22 +267,52 @@ try {
     await area.getByRole('button',{name:'删除此页'}).click();await area.getByRole('button',{name:'恢复删除页'}).click();await save();
     assert.deepEqual((await envelope()).revision.document.pages.map(item=>item.id),ids);
     await assertWholeEditPreview();
+    const previewAction=area.getByRole('button',{name:/整组预览/}),previewStyle=await recordV8('inner-preview-upper-style-precedence',previewAction);
+    assert.equal(previewStyle.family,'v8');assert.equal(previewStyle.variant,'primary');assert.equal(previewStyle.background,'rgb(198, 50, 20)');assert.equal(previewStyle.color,'rgb(255, 255, 255)');assert.equal(previewStyle.borderWidth,'2px');assert.equal(previewStyle.borderColor,'rgb(11, 15, 18)','Workbench parent rules cannot turn the V8 action into a white one-pixel form button');
     await screenshot('workbench-1440-image-edit');
   });
+  await step('相关材料准备与搜索手工加入独立于摘入画布',async()=>{
+    await stage('材料');
+    const status=page.locator('summary').filter({hasText:/材料已准备|材料不足/});await status.waitFor();await status.click();
+    await page.getByLabel('本篇检索词',{exact:true}).fill('能开始的动作 真正困难 先做两分钟 同样的困惑');await page.getByRole('button',{name:'按这些词重新准备',exact:true}).click();
+    await until(async()=>!(await page.getByRole('button',{name:'按这些词重新准备',exact:true}).isDisabled()),'material preparation receipt');await save();
+    const prepared=(await envelope()).revision.document;
+    assert.ok(prepared.materialPreparation);report.preparation={state:prepared.materialPreparation.state,terms:prepared.materialPreparation.terms,noteCount:prepared.materials.filter(item=>item.sourceKind==='note').length,commentCount:prepared.materials.filter(item=>item.sourceKind==='comment').length};assert.ok(prepared.materials.filter(item=>item.sourceKind==='note').length>=2);assert.ok(prepared.materials.filter(item=>item.sourceKind==='comment').length>=2);
+    assert.equal(prepared.excerpts.length,0);assert.equal(prepared.canvas.length,0,'prepared reading materials do not imply excerpts');await status.click();
+    const paper=page.getByRole('region',{name:'分组摘录纸条'}).locator('button[data-fragment-id]').filter({hasText:'浏览器原文锚点二'}).first();await paper.click();
+    await openSourceDetails();await page.getByRole('button',{name:'从本篇移除材料',exact:true}).click();await closeSourceDetails();await save();
+    const removed=(await envelope()).revision.document;assert.equal(removed.materials.length,prepared.materials.length-1);
+    await page.getByRole('navigation',{name:'材料范围'}).getByRole('button',{name:'搜寻更多',exact:true}).click();await page.getByLabel('检索已取得材料',{exact:true}).fill('浏览器原文锚点二');await page.getByRole('button',{name:'检索',exact:true}).click();
+    await page.getByRole('region',{name:'分组摘录纸条'}).locator('button[data-fragment-id]').filter({hasText:'浏览器原文锚点二'}).first().click();
+    assert.ok(await page.getByRole('button',{name:'摘入画布',exact:true}).isDisabled(),'search results must be added to this work before excerpting');
+    await page.getByRole('button',{name:'加入本篇材料',exact:true}).click();await save();
+    const added=(await envelope()).revision.document;assert.equal(added.materials.length,prepared.materials.length);assert.ok(added.materials.some(item=>item.addedBy==='manual'));assert.equal(added.excerpts.length,0);
+    await screenshot('workbench-1440-search-add');await page.getByRole('navigation',{name:'材料范围'}).getByRole('button').filter({hasText:'本篇材料'}).click();
+  });
   await step('两篇笔记、两条匿名原声和回复语境；纸条索引书页精确联动',async()=>{
-    await stage('材料');await collectFromPaper('浏览器原文锚点一','合成长文😀','可选择原文第 2 段');
-    assert.equal(await page.getByLabel('可选择原文第 2 段').getAttribute('data-work-ref'),fixture.noteRefs[0]);
-    const second=page.getByRole('region',{name:'分组摘录纸条'}).getByRole('button').filter({hasText:'浏览器原文锚点二'}).first();await second.click();
+    const first=await collectFromPaper('这是浏览器隔离验收使用的合成长文😀','合成长文😀','浏览器原文锚点一');
+    assert.equal(await first.getAttribute('data-work-ref'),fixture.noteRefs[0]);
+    const second=page.getByRole('region',{name:'分组摘录纸条'}).locator('button[data-fragment-id]').filter({hasText:'浏览器原文锚点二'}).first();await second.click();
     await until(async()=>await page.getByRole('region',{name:'原文阅读'}).locator('[data-work-ref]').first().getAttribute('data-work-ref')===fixture.noteRefs[1],'second note source work identity');
-    await page.getByRole('group',{name:'材料类型'}).getByRole('button',{name:'匿名原声',exact:true}).click();
-    await collectFromPaper('浏览器匿名原声一😀','原声一😀','可选择原文第 1 段');
-    assert.equal(await page.getByLabel('可选择原文第 1 段').getAttribute('data-source-ref'),fixture.voiceRefs[0]);
-    const wall=page.getByRole('region',{name:'分组摘录纸条'});await wall.getByRole('button').filter({hasText:'浏览器匿名原声二🙂'}).first().click();
-    await until(async()=>await page.locator('[data-source-ref]').first().getAttribute('data-source-ref')===fixture.voiceRefs[1],'second voice read');
-    await wall.getByRole('button').filter({hasText:'浏览器回复原声😀'}).first().click();await page.getByText('原文上下文 / 来源详情',{exact:true}).click();
+    await page.getByRole('group',{name:'材料类型'}).getByRole('button').filter({hasText:'用户原声'}).click();
+    const voice=await collectFromPaper('浏览器匿名原声一😀','原声一😀');assert.equal(await voice.getAttribute('data-source-ref'),fixture.voiceRefs[0]);
+    const wall=page.getByRole('region',{name:'分组摘录纸条'});await wall.locator('button[data-fragment-id]').filter({hasText:'浏览器匿名原声二🙂'}).first().click();
+    await until(async()=>await page.getByRole('region',{name:'原文阅读'}).locator('[data-source-ref]').first().getAttribute('data-source-ref')===fixture.voiceRefs[1],'second voice read');
+    await wall.locator('button[data-fragment-id]').filter({hasText:'浏览器回复原声😀'}).first().click();await openSourceDetails();
     await page.getByRole('heading',{name:'回复语境',exact:true}).first().waitFor();await page.getByRole('region',{name:'原文阅读'}).getByText('浏览器匿名原声一😀',{exact:false}).last().waitFor();
     await save();const doc=(await envelope()).revision.document;assert.equal(doc.excerpts.length,2);assert.ok(doc.excerpts.some(item=>item.selectedText==='合成长文😀'));assert.ok(doc.excerpts.some(item=>item.selectedText==='原声一😀'));
     await screenshot('workbench-1440-materials');
+  });
+  await step('密集材料分布整格可达，展开列表仍精确定位最后片段',async()=>{
+    await closeSourceDetails();await page.getByRole('group',{name:'材料类型'}).getByRole('button').filter({hasText:'全部材料'}).click();
+    const index=page.getByRole('navigation',{name:'材料分布索引'}),cell=index.getByRole('button',{name:/^展开.*片段/}).first();await cell.waitFor();
+    const expected=await cell.locator('..').locator('span[data-piece-id]').last().getAttribute('data-piece-id');assert.ok(expected);await assertHorizontalReachability(cell,'密集片段整格点击区');
+    await cell.click();const chooser=page.getByRole('dialog',{name:'选择分布片段'});await chooser.waitFor();const target=chooser.getByRole('button',{name:/^定位：/}).last();const text=await target.innerText();await target.click();await chooser.waitFor({state:'detached'});
+    assert.equal(await index.locator('span[data-piece-id][data-selected="true"]').getAttribute('data-piece-id'),expected);assert.equal(await page.getByRole('region',{name:'分组摘录纸条'}).locator('button[aria-pressed="true"][data-fragment-id]').getAttribute('data-fragment-id'),expected);
+    assert.equal(await page.getByRole('region',{name:'原文阅读'}).locator(`[data-fragment-id="${expected}"]`).innerText(),text);
+    const selectedPaper=page.getByRole('region',{name:'分组摘录纸条'}).locator('button[aria-pressed="true"][data-fragment-id]');
+    await until(async()=>selectedPaper.evaluate(element=>{const host=element.closest('[class*="snippetGroups"]');if(!host)return false;const box=element.getBoundingClientRect(),clip=host.getBoundingClientRect();return box.top>=clip.top-1&&box.bottom<=clip.bottom+1;}),'matrix selection is visible inside the actual paper scroll container without test scrolling');
+    report.matrixSelectedPaperVisibility=await selectedPaper.evaluate(element=>{const host=element.closest('[class*="snippetGroups"]'),box=element.getBoundingClientRect(),clip=host.getBoundingClientRect();return {fragmentId:element.getAttribute('data-fragment-id'),top:box.top,bottom:box.bottom,containerTop:clip.top,containerBottom:clip.bottom,containerScrollTop:host.scrollTop};});await screenshot('workbench-dense-distribution-selected');
   });
   await step('画布自己的表达一次放入正文和指定图页，稳定引用可回查',async()=>{
     await stage('画布');const cards=page.locator('article').filter({has:page.getByRole('button',{name:'回到出处 ↗',exact:true})});
@@ -223,8 +325,20 @@ try {
       await dialog.getByLabel('放入图页位置').selectOption(options[index]);await dialog.getByRole('button',{name:'确认放入',exact:true}).click();await dialog.waitFor({state:'detached'});
     }
     await save();const doc=(await envelope()).revision.document;assert.equal(doc.paragraphs.length,2);assert.equal(doc.uses.filter(item=>item.target.kind==='paragraph').length,2);assert.equal(doc.uses.filter(item=>item.target.kind==='pageBlock').length,2);
-    await cards.first().getByRole('button',{name:'回到出处 ↗',exact:true}).click();await page.getByRole('region',{name:'原文阅读'}).locator('mark').waitFor();
+    await cards.first().getByRole('button',{name:'回到出处 ↗',exact:true}).click();await page.getByRole('region',{name:'原文阅读'}).getByText('合成长文😀',{exact:true}).waitFor();
     await screenshot('workbench-source-backlink');
+  });
+  await step('出处回链定位后仍可翻页、切换篇目并再次回链',async()=>{
+    const reading=page.getByRole('region',{name:'原文阅读'}),firstLeaf=reading.locator('article footer').first();
+    const initial=Number((await firstLeaf.innerText()).split('/')[0].trim());assert.ok(initial>=1);
+    const next=reading.getByRole('button',{name:'下一展开页 →',exact:true});assert.equal(await next.isDisabled(),false);await next.click();
+    await until(async()=>Number((await firstLeaf.innerText()).split('/')[0].trim())===initial+2,'manual spread survives prior citation focus');
+    await reading.getByRole('navigation',{name:'材料分布索引'}).getByTitle('合成选题：给家庭留出缓冲',{exact:true}).click();
+    await until(async()=>await reading.locator('[data-work-ref]').first().getAttribute('data-work-ref')===fixture.noteRefs[1],'manual document selection survives prior citation focus');
+    await stage('画布');await page.locator('article').filter({has:page.getByRole('button',{name:'回到出处 ↗',exact:true})}).first().getByRole('button',{name:'回到出处 ↗',exact:true}).click();
+    await reading.getByText('合成长文😀',{exact:true}).waitFor();
+    assert.equal(await reading.locator('[data-work-ref]').first().getAttribute('data-work-ref'),fixture.noteRefs[0]);
+    report.citationNavigation={initialLeaf:initial,nextLeaf:initial+2,switchedWorkRef:fixture.noteRefs[1],reopenedWorkRef:fixture.noteRefs[0]};await screenshot('workbench-source-backlink-navigation');
   });
   await step('正文标签保存后重开，图组和引用完整恢复',async()=>{
     await stage('正文');await page.getByLabel('确认发布标签').fill('家庭养育 作业启动');await page.getByLabel('确认发布标签').blur();await save();
@@ -235,7 +349,7 @@ try {
   await step('正文修改后刷新仍定位关联图页，采用一页保留其他手改',async()=>{
     const doc=(await envelope()).revision.document;const linked=doc.uses.find(item=>item.target.kind==='pageBlock'&&item.canvasId===doc.uses.find(use=>use.target.kind==='paragraph'&&use.target.paragraphId===doc.paragraphs[0].id).canvasId);
     const targetPage=doc.pages.find(item=>item.id===linked.target.pageId),other=doc.pages.find(item=>item.kind==='steps');
-    await page.getByLabel('正文第 1 段').fill('先把练习本放好，只做眼前这一小步。');await save();await page.reload();await stage('图组 / 导出');
+    await page.getByLabel('正文第 1 段').fill('先把练习本放好，只做眼前这一小步。');await save();await page.reload();await stage('内页');
     await imageSection().getByRole('navigation',{name:'图页顺序'}).getByRole('button').filter({hasText:targetPage.title}).click();
     await imageSection().getByRole('button',{name:'带入这一段',exact:true}).waitFor();await imageSection().getByRole('button',{name:'带入这一段',exact:true}).click();await save();
     const after=(await envelope()).revision.document;assert.equal(after.pages.find(item=>item.id===targetPage.id).blocks.find(item=>item.id===linked.target.blockId).text,'先把练习本放好，只做眼前这一小步。');assert.deepEqual(after.pages.find(item=>item.id===other.id),other);
@@ -255,13 +369,13 @@ try {
     await page.unroute(pattern);report.saveReconciledRequestId=originalId;await screenshot('workbench-after-unknown-save-recovery');
   });
   await step('实际冻结版本、完整五页 PNG 和发布 ZIP 校验',async()=>{
-    await stage('图组 / 导出');const area=imageSection();await area.getByRole('button',{name:'整组预览',exact:true}).click();
-    await until(async()=>await area.getByText('画幅检查通过',{exact:true}).count()===5,'all five target-pixel previews ready',45_000);
-    await screenshot('workbench-1440-complete-preview');await area.getByRole('button',{name:'保存并生成图文包',exact:true}).click();
-    await area.getByText('图文包已生成，可下载',{exact:true}).waitFor({timeout:60_000});const history=area.locator('details').filter({has:page.getByText(/已生成与中断的图文包/)});await history.locator('summary').click();
+    await stage('预览与导出');const area=imageSection();assert.equal(await area.getAttribute('data-step'),'export');
+    await until(async()=>await area.getByRole('button',{name:'保存并生成图文包',exact:true}).isEnabled(),'all five target-pixel previews and export checks ready',45_000);
+    const exportAction=area.getByRole('button',{name:'保存并生成图文包',exact:true});await assertV8EnabledActionStates(exportAction);await screenshot('workbench-1440-complete-preview');await generateWithV8BusyProof(exportAction);
+    await area.getByText('图文包已生成，可下载',{exact:true}).waitFor({timeout:60_000});assert.equal(await area.getByText('作品有新编辑。生成新版图文包后下载；历史包保留生成时的内容。',{exact:true}).count(),0,'save receipt alone must not be reported as a new edit after export');const history=area.locator('details').filter({has:page.getByText(/已生成与中断的图文包/)});assert.ok(await history.getAttribute('open')!==null);
     packageBytes=await download(area.getByRole('link',{name:'重新下载图文包',exact:true}).first(),'creation-package.zip');
     const entries=inspectZip(packageBytes);assert.deepEqual(entries.map(entry=>entry.name),['正文.txt','01-封面.png','02-内页.png','03-内页.png','04-内页.png','05-内页.png']);
-    const current=await envelope();exportedRecord=current.exports.find(record=>record.state==='complete');assert.ok(exportedRecord);
+    const current=await envelope();exportedRecord=current.exports.find(record=>record.state==='complete');assert.ok(exportedRecord);assert.equal(exportedRecord.rendererVersion,'creation-renderer.v3');
     assert.ok(exportedRecord.fontVersion.includes('ed05125987c35ee57be16be7242568f1d516fbf497bc0ef4161499ca9e8d8fce'));
     const body=entries[0].content.toString('utf8');assert.ok(body.startsWith('作业启动'));assert.ok(body.includes('家庭养育'));assert.ok(body.includes('作业启动'));
     for(const paragraph of current.revision.document.paragraphs)assert.ok(body.includes(paragraph.text));
@@ -272,11 +386,11 @@ try {
     const single=await download(area.getByRole('link',{name:'下载第 1 张 PNG',exact:true}).first(),'single-cover.png');assert.ok(single.equals(entries[1].content));inspectPng(single);
   });
   await step('单页独立冻结生成，不借用可变编辑器内容',async()=>{
-    const area=imageSection();await area.getByRole('button',{name:'返回编辑',exact:true}).click();await area.getByRole('button',{name:'保存并生成此页 PNG',exact:true}).click();
-    await area.getByText('单页 PNG 已生成，可在下方下载；其余图页可继续生成图文包',{exact:true}).waitFor({timeout:60_000});
+    const area=imageSection();await area.getByRole('button',{name:/放大封面：/}).click();const inspection=area.getByRole('dialog');await inspection.getByRole('button',{name:'保存并生成此页 PNG',exact:true}).click();
+    await area.getByText('单页 PNG 已生成，可在下方下载；其余图页可继续生成图文包',{exact:true}).first().waitFor({timeout:60_000});
     const current=await envelope(),partial=current.exports.find(record=>record.state==='rendering'&&record.pages.filter(item=>item.sha256).length===1);assert.ok(partial);
     const ready=partial.pages.find(item=>item.sha256);const link=area.locator(`a[href="/ops/api/creation/exports/${partial.id}/pages/${ready.pageId}"]`);
-    const bytes=await download(link,'independent-single-page.png');inspectPng(bytes);report.singlePageExportId=partial.id;
+    await inspection.getByRole('button',{name:'关闭图片预览',exact:true}).click();const bytes=await download(link,'independent-single-page.png');inspectPng(bytes);report.singlePageExportId=partial.id;
   });
   await step('双标签版本冲突保留双方文字，历史图文包保持不可变',async()=>{
     await stage('正文');await save();const second=await context.newPage();second.setDefaultTimeout(20_000);await second.goto(page.url());await second.getByLabel('正文第 2 段').waitFor();
@@ -296,15 +410,19 @@ try {
       await page.setViewportSize({width,height});await stage('正文');
       for(const name of ['正文标题','正文第 1 段','确认发布标签'])await assertHorizontalReachability(page.getByLabel(name,{exact:true}),name);
       let layout=await screenshot(`workbench-${width}x${height}-body`);assert.ok(layout.documentWidth<=layout.viewport);
-      await stage('图组 / 导出');
-      for(const name of ['图页模板','图页标题','副标题','图页配色','图页文字对齐','自有图片'])await assertHorizontalReachability(imageSection().getByLabel(name,{exact:true}),name);
-      for(const name of ['保存并生成图文包','保存并生成此页 PNG'])await assertHorizontalReachability(imageSection().getByRole('button',{name,exact:true}),name);
-      await assertPrimaryContrast(imageSection().getByRole('button',{name:'保存并生成图文包',exact:true}),width);
-      await imageSection().getByRole('button',{name:'保存并生成图文包',exact:true}).hover();await assertPrimaryContrast(imageSection().getByRole('button',{name:'保存并生成图文包',exact:true}),width,'hover');await page.mouse.move(0,0);
-      await assertWholeEditPreview();await assertHorizontalReachability(imageSection().locator('canvas').first(),'完整图页画布');layout=await screenshot(`workbench-${width}x${height}-images`);assert.ok(layout.documentWidth<=layout.viewport);
-      await stage('材料');await page.getByRole('region',{name:'原文阅读'}).waitFor();
-      await assertHorizontalReachability(page.getByLabel('检索已取得材料',{exact:true}),'材料检索');await assertHorizontalReachability(page.getByRole('region',{name:'原文阅读'}),'原文阅读区');await assertHorizontalReachability(page.getByRole('button',{name:'摘入画布',exact:true}),'摘入画布');
-      const indexBounds=await page.getByRole('navigation',{name:'材料分布索引'}).locator('button, i').evaluateAll(nodes=>nodes.map(node=>{const box=node.getBoundingClientRect();return {left:box.left,right:box.right};}));
+      await stage('封面');
+      for(const name of ['图页标题','副标题','图页文字对齐'])await assertHorizontalReachability(imageSection().getByLabel(name,{exact:true}),name);
+      for(const name of ['留白大字','双色分栏','清单笔记'])await assertHorizontalReachability(imageSection().getByRole('button',{name:new RegExp(name)}),name);
+      await assertWholeEditPreview();await assertHorizontalReachability(imageSection().locator('canvas').first(),'完整图页画布');layout=await screenshot(`workbench-${width}x${height}-cover`);assert.ok(layout.documentWidth<=layout.viewport);
+      await stage('内页');await assertHorizontalReachability(imageSection().getByRole('navigation',{name:'图页顺序'}),'内页缩略导航');await assertWholeEditPreview();await screenshot(`workbench-${width}x${height}-inner`);
+      await stage('预览与导出');const action=imageSection().getByRole('button',{name:'保存并生成图文包',exact:true});
+      await until(async()=>await action.isEnabled(),'export validation ready',45_000);await assertHorizontalReachability(action,'保存并生成图文包');await assertPrimaryContrast(action,width);await action.hover();await assertPrimaryContrast(action,width,'hover');await page.mouse.move(0,0);
+      await screenshot(`workbench-${width}x${height}-export`);
+      await stage('材料');await page.getByRole('group',{name:'材料类型'}).getByRole('button').filter({hasText:'全部材料'}).click();await page.getByRole('region',{name:'原文阅读'}).waitFor();await until(async()=>await page.getByRole('navigation',{name:'材料分布索引'}).locator('span[data-piece-id]').count()>100,'resolved long material collection has rendered');
+      const markerIds=await page.getByRole('navigation',{name:'材料分布索引'}).locator('span[data-piece-id]').evaluateAll(nodes=>nodes.map(node=>node.getAttribute('data-piece-id')).sort()),paperIds=await page.getByRole('region',{name:'分组摘录纸条'}).locator('button[data-fragment-id]').evaluateAll(nodes=>nodes.map(node=>node.getAttribute('data-fragment-id')).sort());
+      assert.ok(markerIds.length>100);assert.equal(new Set(markerIds).size,markerIds.length,'distribution retains each fragment once');assert.deepEqual(markerIds,paperIds,'matrix and paper wall preserve the exact complete visible fragment identities');report.matrixFragmentSetChecks??=[];report.matrixFragmentSetChecks.push({width,count:markerIds.length,sha256:createHash('sha256').update(markerIds.join('\n')).digest('hex')});
+      await assertHorizontalReachability(page.getByLabel('搜索材料中的片段',{exact:true}),'片段检索');await assertHorizontalReachability(page.getByRole('region',{name:'原文阅读'}),'原文阅读区');await assertHorizontalReachability(page.getByRole('button',{name:'摘入画布',exact:true}),'摘入画布');
+      const indexBounds=await page.getByRole('navigation',{name:'材料分布索引'}).locator('span[data-piece-id], i').evaluateAll(nodes=>nodes.map(node=>{const box=node.getBoundingClientRect();return {left:box.left,right:box.right};}));
       assert.ok(indexBounds.length>100,'long synthetic source retains all fragment index segments');assert.ok(indexBounds.every(box=>box.left>=0&&box.right<=width+0.5),'every index segment and marker stays within the viewport');
       layout=await screenshot(`workbench-${width}x${height}-materials`);assert.ok(layout.documentWidth<=layout.viewport);
     });

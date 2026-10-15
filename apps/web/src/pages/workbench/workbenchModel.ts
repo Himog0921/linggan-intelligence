@@ -109,8 +109,47 @@ export interface MaterialUse {
     textHash: string;
   } | null;
 }
+export type MaterialKind = 'note' | 'comment' | 'ops_publication';
+export interface MaterialSelection {
+  documentId: string;
+  sourceKind: MaterialKind;
+  sourceRef: string;
+  workRef: string | null;
+  sourceVersion: string;
+  addedBy: 'prepared' | 'manual';
+  matchReasons: string[];
+}
+export interface MaterialPreparation {
+  methodVersion: string;
+  query: string;
+  terms: string[];
+  state: 'ready' | 'insufficient';
+  gaps: string[];
+}
+export interface MaterialDocument {
+  documentId: string;
+  sourceKind: MaterialKind;
+  sourceRef: string;
+  workRef: string | null;
+  sourceVersion: string;
+  title: string;
+  authorLabel: string;
+  qualification: 'readable' | 'changed' | 'restricted' | 'unavailable';
+  fragments: SourceItem[];
+  context: unknown;
+  matchReasons: string[];
+}
+export interface MaterialCollection extends MaterialPreparation {
+  contract: 'content-workbench-materials.v1';
+  asOf: string;
+  documents: MaterialDocument[];
+  nextCursor: number | null;
+  searchScope: string;
+}
 export interface WorkDocument {
   contract: string;
+  materials: MaterialSelection[];
+  materialPreparation: MaterialPreparation | null;
   title: string;
   accountRef: string | null;
   topicRef: string | null;
@@ -480,8 +519,18 @@ const materialUse = shape<MaterialUse>({
     textHash: str
   }))
 });
+const materialKind = choice('note', 'comment', 'ops_publication');
+export const parseMaterialSelection = shape<MaterialSelection>({
+  documentId: str, sourceKind: materialKind, sourceRef: uuid, workRef: nullable(uuid),
+  sourceVersion: str, addedBy: choice('prepared', 'manual'), matchReasons: array(str)
+});
+const parseMaterialPreparation = shape<MaterialPreparation>({
+  methodVersion: str, query: str, terms: array(str), state: choice('ready', 'insufficient'), gaps: array(str)
+});
 export const parseWorkDocument = shape<WorkDocument>({
   contract: v => v === 'content-workbench.v1' ? v : bad(),
+  materials: v => v === undefined ? [] : array(parseMaterialSelection)(v),
+  materialPreparation: v => v === undefined ? null : nullable(parseMaterialPreparation)(v),
   title: str,
   accountRef: nullable(uuid),
   topicRef: nullable(uuid),
@@ -575,6 +624,25 @@ export const parseSourceItem = shape<SourceItem>({
   qualification: str,
   location: nullable(location)
 });
+export const parseMaterialDocument = shape<MaterialDocument>({
+  documentId: str, sourceKind: materialKind, sourceRef: uuid, workRef: nullable(uuid),
+  sourceVersion: str, title: str, authorLabel: str,
+  qualification: choice('readable', 'changed', 'restricted', 'unavailable'),
+  fragments: array(parseSourceItem), context: v => v, matchReasons: array(str)
+});
+export const parseMaterialCollection = shape<MaterialCollection>({
+  contract: v => v === 'content-workbench-materials.v1' ? v : bad(),
+  asOf: str, methodVersion: str, query: str, terms: array(str), state: choice('ready', 'insufficient'),
+  gaps: array(str), documents: array(parseMaterialDocument), nextCursor: nullable(integer), searchScope: str
+});
+export function selectMaterial(document: MaterialDocument, addedBy: MaterialSelection['addedBy']): MaterialSelection {
+  return { documentId: document.documentId, sourceKind: document.sourceKind, sourceRef: document.sourceRef,
+    workRef: document.workRef, sourceVersion: document.sourceVersion, addedBy, matchReasons: document.matchReasons };
+}
+export function addMaterials(current: MaterialSelection[], incoming: MaterialSelection[]): MaterialSelection[] {
+  const seen = new Set(current.map(m => m.documentId));
+  return [...current, ...incoming.filter(m => { if (seen.has(m.documentId)) return false; seen.add(m.documentId); return true; })];
+}
 export const parseSourceList = shape<SourceList>({
   contract: v => v === 'content-workbench-sources.v1' ? v : bad(),
   asOf: str,
@@ -671,6 +739,8 @@ export const parseAiStatus = shape<AiStatus>({
 export function newDocument(title = ''): WorkDocument {
   return {
     contract: 'content-workbench.v1',
+    materials: [],
+    materialPreparation: null,
     title,
     accountRef: null,
     topicRef: null,

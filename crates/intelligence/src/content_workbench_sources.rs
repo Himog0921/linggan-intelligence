@@ -8,6 +8,9 @@ use serde_json::{Value, json};
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
+#[path = "content_workbench_sources/materials.rs"]
+pub mod materials;
+
 #[derive(Debug, thiserror::Error)]
 pub enum SourceError {
     #[error("source_invalid")]

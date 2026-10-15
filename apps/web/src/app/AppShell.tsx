@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { PERSONAL_MENU_LINKS, PRIMARY_ENTRIES, type PrimaryEntry, type PrimarySurface } from './navigation';
+import styles from './AppShell.module.css';
 
 interface AppShellProps {
   /** 当前页面所属的一级责任；设置页不属于任何一级入口，传 null。 */
@@ -11,6 +12,8 @@ interface AppShellProps {
   crumb: ReactNode;
   meta: ReactNode;
   children: ReactNode;
+  /** V3 创作专用空间；其他页面继续使用迁移期标准页头。 */
+  workbenchMode?: 'compact' | 'immersive';
 }
 
 function PrimaryEntryLink({ entry, active, activeState }: { entry: PrimaryEntry; active: PrimarySurface | null; activeState?: string }) {
@@ -43,7 +46,26 @@ function PrimaryEntryLink({ entry, active, activeState }: { entry: PrimaryEntry;
  * 全站唯一继续演进的页头（WEB-REACT-001 R4）。结构与样式类名与 shell.rs 的 `global_header`
  * 保持一致，样式只来自 `shell.css`，迁移期两种页头看起来是同一个。
  */
-export function AppShell({ active, activeState, boundaryLabel, crumb, meta, children }: AppShellProps) {
+export function AppShell({ active, activeState, boundaryLabel, crumb, meta, children, workbenchMode }: AppShellProps) {
+  if (workbenchMode) {
+    return <div className={`${styles.workbench} ${workbenchMode === 'immersive' ? styles.immersive : ''}`}>
+      {workbenchMode === 'compact' ? <header className={styles.header}>
+        <div className={styles.crumb}>{crumb}</div>
+        <div className={styles.menus}>
+          <details className={styles.menu} onKeyDown={event => {
+            if (event.key === 'Escape') { event.currentTarget.open = false; event.currentTarget.querySelector('summary')?.focus(); }
+          }}>
+            <summary>intelligence <span aria-hidden="true">⌄</span></summary>
+            <nav aria-label="一级导航">
+              {PRIMARY_ENTRIES.map(entry => entry.href ? <a key={entry.zh} href={entry.href} aria-current={entry.surface === active ? 'page' : undefined}>{entry.zh}</a> : <span key={entry.zh} aria-disabled="true">{entry.zh} · 未开放</span>)}
+              {PERSONAL_MENU_LINKS.map(link => <a key={link.href} href={link.href}>{link.label}</a>)}
+            </nav>
+          </details>
+        </div>
+      </header> : null}
+      {children}
+    </div>;
+  }
   return (
     <div className="v7-app">
       <header className="v7-global-header">

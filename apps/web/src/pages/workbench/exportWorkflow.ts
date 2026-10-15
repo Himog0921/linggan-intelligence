@@ -62,6 +62,9 @@ export class ExportWorkflow {
     if (this.running) throw new Error('正在生成，请等待当前任务');
     if (this.hasUnconfirmed) throw new Error('原生成请求结果尚未确认，请先核实原请求');
     if (record.state === 'complete') return record;
+    if (record.rendererVersion !== RENDERER_VERSION || record.fontVersion !== FONT_PROFILE) {
+      throw new Error('此冻结版本使用的字体或绘图版本与当前页面不同，请生成新版图文包');
+    }
     const session = this.newSession(record.workId);
     this.session = session;
     // retry returns the old frozen revision, never the mutable editor state.

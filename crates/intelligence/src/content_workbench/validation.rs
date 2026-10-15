@@ -11,8 +11,32 @@ pub(crate) fn document(doc: &WorkDocument) -> Result<(), WorkbenchError> {
         || doc.canvas.len() > 500
         || doc.pages.len() > 30
         || doc.uses.len() > 1000
+        || doc.materials.len() > 60
     {
         return Err(WorkbenchError::Invalid("document"));
+    }
+    let mut material_ids = HashSet::new();
+    for material in &doc.materials {
+        crate::content_workbench_sources::materials::validate_selection_shape(material)
+            .map_err(|_| WorkbenchError::Invalid("material_identity"))?;
+        if !material_ids.insert(&material.document_id) {
+            return Err(WorkbenchError::Invalid("material_duplicate"));
+        }
+    }
+    if let Some(preparation) = &doc.material_preparation {
+        if preparation.method_version != crate::content_workbench_sources::materials::METHOD
+            || !matches!(preparation.state.as_str(), "ready" | "insufficient")
+            || preparation.query.chars().count() > 500
+            || preparation.terms.len() > 12
+            || preparation
+                .terms
+                .iter()
+                .any(|s| !(2..=40).contains(&s.chars().count()))
+            || preparation.gaps.len() > 12
+            || preparation.gaps.iter().any(|s| s.chars().count() > 200)
+        {
+            return Err(WorkbenchError::Invalid("material_preparation"));
+        }
     }
     if doc.outline.iter().any(|s| s.chars().count() > 4000) {
         return Err(WorkbenchError::Invalid("outline"));
@@ -74,7 +98,11 @@ pub(crate) fn document(doc: &WorkDocument) -> Result<(), WorkbenchError> {
         if p.blocks.len() > 30
             || !matches!(
                 p.template_version.as_str(),
-                "creation-v1" | "creation-v1-editorial"
+                "creation-v1"
+                    | "creation-v1-editorial"
+                    | "creation-v3-type"
+                    | "creation-v3-split"
+                    | "creation-v3-list"
             )
             || p.style.font_family != "system-cjk"
             || p.style.width != 1080
