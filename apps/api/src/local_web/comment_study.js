@@ -1800,6 +1800,34 @@ document.querySelector('#comment-detail-body').addEventListener('click',async ev
     }catch(error){if(domainRef===domain&&overviewState.method===kind)state.error=`完整列表读取失败：${error.message}`;}
     finally{state.loading=false;rerenderIntelligenceOverview();}
   }
+  function overviewDelta(value,label,detail){
+  const valid=value!=null&&Number.isFinite(Number(value)),amount=valid?Number(value):null,kind=!valid?'unknown':amount>0?'up':amount<0?'down':'flat';
+  const icon=kind==='up'?'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 13L13 3M5.4 3H13v7.6"/></svg>':kind==='down'?'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l10 10M13 5.4V13H5.4"/></svg>':'<span aria-hidden="true">—</span>';
+  const shown=!valid?'—':`${amount>0?'+':''}${overviewNum(amount)}`;
+  return `<span class="study-metric-delta" data-change="${kind}" title="${esc(detail)}" aria-label="${esc(label)} ${esc(shown)}">${icon}<b>${esc(shown)}</b><small>${esc(label)}</small></span>`;
+}
+  function overviewMetricSurface(overview,corpus,research,knowledge,coverageNote){
+  const points=Array.isArray(overview.observationSeries?.points)?overview.observationSeries.points:[];
+  const y=points.length>=2?points.at(-2):null, yDate=y?.date||'上一完整自然日';
+  const displayable=corpus?.displayableCommentCount,eligible=corpus?.eligibleCommentCount,studied=research?.studiedCommentCount,succeeded=research?.succeededCommentCount,signals=research?.currentSignalCount,problems=knowledge?.problemCount,pending=knowledge?.deferredNovelCount;
+  const eligiblePct=Number(displayable)>0&&eligible!=null?`${(100*Number(eligible)/Number(displayable)).toFixed(1)}%`:'—';
+  const studiedRate=eligible!=null&&studied!=null&&Number(eligible)>0?100*Number(studied)/Number(eligible):null;
+  const rateText=studiedRate==null?'—':`${studiedRate.toFixed(1)}%`,fill=studiedRate==null?0:Math.min(100,Math.max(0,studiedRate));
+  const timestamp=new Date(overview.asOf||'');
+  const timeLabel=Number.isFinite(timestamp.getTime())?new Intl.DateTimeFormat('zh-CN',{timeZone:overview.observationSeries?.timezone||'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(timestamp):'统计时间未知';
+  return `<div class="study-overview-metrics" aria-label="研究累计读数与昨日活动">
+      <div class="study-metrics-asof"><span>数据截至</span><time>${esc(timeLabel)}</time><span class="study-metrics-help" tabindex="0" title="${esc(coverageNote)}。昨日角标表示上一完整自然日的事件量，不是累计指标净增。">ⓘ</span></div>
+      <div class="study-metric study-metric-hero"><p class="study-metric-label">可研究评论</p><div class="study-metric-value"><strong>${overviewNum(eligible)}</strong><small>条</small></div><div class="study-metric-foot"><span>可显示 ${overviewNum(displayable)} · 可研究占 ${eligiblePct}</span>${overviewDelta(y?.newObservedCommentCount,'昨日首次观察',`${yDate} 首次被观察的稳定评论身份，可能包含不可研究评论；不是昨日新增可研究评论。`)}</div></div>
+      <div class="study-metric-separator" aria-hidden="true"></div>
+      <div class="study-metric study-metric-progress"><p class="study-metric-label">已进入研究</p><div class="study-metric-value"><strong>${overviewNum(studied)}</strong><small>条</small><span class="study-metric-rate">${esc(rateText)}<small>覆盖</small></span></div><div class="study-metric-rail" role="progressbar" aria-label="可研究评论当前已进入研究比例" aria-valuemin="0" aria-valuemax="100" ${studiedRate==null?'':`aria-valuenow="${fill.toFixed(1)}"`}><i style="width:${fill.toFixed(2)}%"></i></div><div class="study-metric-foot"><span>其中 ${overviewNum(succeeded)} 条已出结果</span>${overviewDelta(y?.studiedCommentCount,'昨日进入',`${yDate} 研究目标来源去重的当日事件数，重研也可能计入；非当前累计净增。`)}</div></div>
+      <div class="study-metric-separator" aria-hidden="true"></div>
+      <div class="study-metric-pair">
+        <div class="study-metric study-metric-small"><p class="study-metric-label">当前研究信号</p><div class="study-metric-value"><strong>${overviewNum(signals)}</strong><small>个</small></div>${overviewDelta(y?.acceptedSignalCount,'昨日写入',`${yDate} 研究信号写入量，不等于当前有效信号的净增。`)}</div>
+        <div class="study-metric study-metric-small"><p class="study-metric-label">长期用户问题</p><div class="study-metric-value"><strong>${overviewNum(problems)}</strong><small>个</small></div>${overviewDelta(overview.yesterdayNewProblemCount,'昨日建档',`${yDate} 建档且当前仍可读取的长期问题档案；受来源资格影响可能少于历史建档数。`)}</div>
+      </div>
+      <button type="button" class="study-metric-pending" data-overview-pending-state="deferred_novel"><i aria-hidden="true"></i><span>${overviewNum(pending)} 条新表达待建档</span><span class="study-metric-pending-arrow" aria-hidden="true">→</span></button>
+  </div>`;
+}
   function renderIntelligenceOverview(data){
     const overview=data.overview;
     if(!overview)return '<p class="study-restricted">总览读取失败；其他页签可单独查看已有研究结果。</p>';
@@ -1825,14 +1853,10 @@ document.querySelector('#comment-detail-body').addEventListener('click',async ev
     const coverage=overview.indexCoverage;
     const coverageNote=coverage?`已索引 ${overviewNum(coverage.indexedCount)} 条；待索引 ${overviewNum(coverage.pendingCount)} 条`:'索引覆盖暂不可读';
     return `<div class="study-overview">
-      <section class="study-readout-strip" aria-label="评论研究观察基础">
-        ${overviewReadout('可显示评论',overviewNum(corpus?.displayableCommentCount),'条',corpus?coverageNote:'评论库存汇总暂不可读')}
-        ${overviewReadout('可研究评论',overviewNum(corpus?.eligibleCommentCount),'条',corpus?'按当前来源资格':'来源资格暂不可读',true)}
-        ${overviewReadout('已进入研究',overviewNum(research?.studiedCommentCount),'条','当前有效评论身份去重')}
-        ${overviewReadout('当前研究信号',overviewNum(research?.currentSignalCount),'条','当前有效研究结果')}
-        ${overviewReadout('长期用户问题',overviewNum(knowledge?.problemCount),'个','当前问题档案')}
+      <section class="study-overview-hero" aria-label="评论研究概览">
+        ${overviewMetricSurface(overview,corpus,research,knowledge,coverageNote)}
+        ${renderObservationSeries(overview.observationSeries)}
       </section>
-      ${renderObservationSeries(overview.observationSeries)}
       <div class="study-overview-grid">
         <section class="study-overview-section" aria-labelledby="study-problem-title"><div class="study-section-head"><h2 id="study-problem-title">近期获得新依据的问题</h2><button class="study-link" type="button" data-study-view="problems">查看用户问题</button></div><p class="study-section-note">近 ${overviewNum(knowledge?.supportWindowDays)} 天新增不同评论依据；展示当前可读的最多 3 个问题，不按需求强度排序。</p>${problems.length?`<ol class="study-problem-list">${problems.map((item,index)=>`<li class="study-problem-item"><div class="study-problem-top"><span class="study-problem-index">0${index+1}</span><h3 class="study-problem-title">${esc(item.title||'问题标题未记录')}</h3></div><p class="study-problem-meta">近 28 天新增 ${overviewNum(item.addedSupportCommentCount)} 条不同评论依据 · 当前支持 ${overviewNum(item.supportCommentCount)} 条</p>${item.voice?.sourceState==='known'?`<blockquote class="study-problem-quote">“${esc(item.voice.commentText||'')}”</blockquote>`:'<p class="study-restricted">原声当前不可读。</p>'}<div class="study-link-actions"><button class="study-link" type="button" data-overview-problem="${esc(item.problemRef)}">查看问题定义与依据</button>${item.voice?.commentKey?.workRef&&item.voice?.commentKey?.commentExternalId?`<button class="study-link" type="button" data-overview-comment-work="${esc(item.voice.commentKey.workRef)}" data-overview-comment-id="${esc(item.voice.commentKey.commentExternalId)}">查看原声</button>`:''}</div></li>`).join('')}</ol>`:'<p class="study-empty">近 28 天没有新增可读的不同评论依据；全部问题仍可在用户问题页查看。</p>'}</section>
         <section class="study-overview-section" aria-labelledby="study-run-title"><div class="study-section-head"><h2 id="study-run-title">研究与归并进度</h2><button class="study-link" type="button" data-study-view="runs">查看运行记录</button></div><p>当前有 ${overviewNum(research?.succeededCommentCount)} 条评论形成研究信号，${overviewNum(research?.noSignalCommentCount)} 条评论在当前有效研究中未提取到信号。</p><p>已归入问题 ${overviewNum(knowledge?.assignedSignalCount)} 条信号；活跃问题 ${overviewNum(knowledge?.activeProblemCount)} 个，支持不足 ${overviewNum(knowledge?.supportInsufficientProblemCount)} 个。</p>${overview.latestRun?`<p>最近一次研究：${esc(label(runStateLabel,overview.latestRun.state)||'状态未记录')} · ${esc(studyTime(overview.latestRun.createdAt))}</p><button class="study-link" type="button" data-overview-run="${esc(overview.latestRun.runRef)}">查看本次方法、目标和调用记录</button>`:'<p class="study-empty">尚无研究批次；可从评论列表选择评论发起研究。</p>'}</section>
