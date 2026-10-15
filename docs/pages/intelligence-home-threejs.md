@@ -6,6 +6,8 @@
 > 事实来源: Mog 当前对首页和 Three.js 的请求；HOME-01–17 中仍适用的决定；新产品范围；LIDS v7；Three.js 官方文档
 > 冲突时以谁为准: 用户最新决定、真实领域/数据/权限合同优先；本稿是设计提案与合成原型，不是已部署首页
 
+**替代说明（2026-10-15）**：本文「原生 JS 可以与 Rust 输出的 HTML 共存，不要求全站换 React」已由 [DEC-0010](../decisions/0010-web-frontend-react.md) 取代——网页前端统一为 React + TypeScript，推进见 [WEB-REACT-001](../plans/active/web-react-001.md)。本文其余内容不受影响。
+
 全站边界见[产品页面蓝图](intelligence-product-blueprint.md)，[打开设计原型](../design/pages/intelligence-product-prototype.html)。
 
 ## 1. 首页的任务

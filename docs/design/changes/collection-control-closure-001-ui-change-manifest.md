@@ -6,6 +6,8 @@
 > 事实来源: Issue #149、PAGE-COLLECTION-001、COLLECTION-CONTROL-CLOSURE-001 active plan、LIDS v7 与当前 Rust/server-rendered UI
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实服务端合同/数据库回执、PAGE-COLLECTION-001 与 LIDS；本清单不增加权限
 
+**替代说明（2026-10-15）**：本文「硬约束：Rust SSR + page-local vanilla CSS/JS」已由 [DEC-0010](../../decisions/0010-web-frontend-react.md) 取代——网页前端统一为 React + TypeScript，推进见 [WEB-REACT-001](../../plans/active/web-react-001.md)。本文其余内容不受影响。
+
 ## 读取回执
 
 已核对 UI execution contract、design governance、LIDS README/tokens/materials/data-boundaries/language/primitives/patterns/decisions/agent guide、PAGE-COLLECTION-001、collection-monitoring-rules、Issue #149 和 exact-base 代码。历史内容工作台只提供“按钮+弹窗、暂停未来调度、人工重观察、失败分层”的行为对标，不提供实现或视觉权威。

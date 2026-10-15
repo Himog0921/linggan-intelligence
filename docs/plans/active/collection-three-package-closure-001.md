@@ -6,6 +6,8 @@
 > 事实来源: Mog 2026-09-03 最新决定、Issue #148 正文与 Claim、当前 `origin/main@d5b7886`、现有 PostgreSQL migration / Rust read model / Collection 与 Corpus 运行代码、LIDS v7
 > 冲突时以谁为准: 用户最新确认、`AGENTS.md`、真实代码/数据库/测试、ACCEPTED 决定、权威当前产品与设计合同；历史内容工作台只作行为证据，不作实现指令
 
+**替代说明（2026-10-15）**：本文「硬约束：Rust server-rendered HTML + page-local vanilla CSS/JS」已由 [DEC-0010](../../decisions/0010-web-frontend-react.md) 取代——网页前端统一为 React + TypeScript，推进见 [WEB-REACT-001](web-react-001.md)。本文其余内容不受影响。
+
 ## 1. 交付包与串行关系
 
 Mog 要得到的不是三个互相独立的技术补丁，而是一条按事实层级收口的 Collection 用户结果：先让观察目标拥有可信的只读决策面，再收口采集控制，最后才建立 Creator Dossier。三个宏包必须串行：

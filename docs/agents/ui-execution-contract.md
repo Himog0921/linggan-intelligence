@@ -1,9 +1,9 @@
 # UI 协作 Agent 执行合同
 
 > 状态: 权威当前
-> 最后核对: 2026-09-02
+> 最后核对: 2026-10-15
 > 适用范围: 所有创建、修改、审查或验收 Linggan 用户可见 UI、前端组件、页面交互、状态文案、视觉资产和 UI 自动验证的 Agent
-> 事实来源: AGENTS.md、docs/governance/、docs/design/、LIDS v7.0、当前 SCOPE、产品/数据合同和用户对 DESIGN-001/DESIGN-002/DESIGN-010 的授权
+> 事实来源: AGENTS.md、docs/governance/、docs/design/、LIDS v7.0、当前 SCOPE、产品/数据合同、用户对 DESIGN-001/DESIGN-002/DESIGN-010 的授权，以及 DEC-0010（网页前端统一为 React）
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实运行/代码/合同、ACCEPTED 决策和当前 SCOPE；本合同不自行扩大任何授权
 
 本合同让 UI Agent 成为已批准设计的执行者和问题发现者，而不是新的产品负责人、视觉总监、权限裁定者或事实来源。
@@ -44,6 +44,16 @@ UI Agent 面向的用户结果是一个交付包，不是一串文件修改。Mo
 6. 在 Issue、计划或 PR 中填写 [../design/templates/ui-change-manifest-form.md](../design/templates/ui-change-manifest-form.md) 所要求的读取回执、范围、非目标、分类、文件边界、停止条件和验证计划，并附本交付包的表面、状态、依赖和验收矩阵。
 
 没有完成上述任何一项时，Agent 只能做只读调查，不能开始修改。
+
+## 前端技术与旧页面冻结（DEC-0010）
+
+前端技术已由 [DEC-0010](../decisions/0010-web-frontend-react.md) 决定：所有正式网页统一为 `apps/web` 下的一个 React + TypeScript 应用，由 Axum 同源提供。推进顺序、目标架构与不留双轨的 R1–R7 规则见 [WEB-REACT-001](../plans/active/web-react-001.md)。
+
+- 新页面与迁移中的页面只在 `apps/web` 实现；不得新增原生页面脚本、页面 `.html/.css` 或由 Rust 拼接的页面 HTML。
+- 尚未迁移的旧页面冻结，只修阻断使用的缺陷；功能与改版排进 WEB-REACT-001 对应阶段。
+- 页面迁移的同一 PR 删除它的旧实现与只服务旧 DOM 的测试，不设新旧切换开关。
+- 视觉值只消费 `lids_tokens.css` 的 `--lgi-*`；页面样式用 CSS Modules。迁移期共享外壳的样式仍以 `shell.css` 为唯一来源，React 外壳与旧外壳使用同一份。
+- 下文「不得将 LIDS 来源包的 React/Three/Blender 线路直接当作已获准实现」仍然有效：DEC-0010 决定的是前端技术本身，来源包的代码、目录、模拟数据与资产路线依旧不继承。
 
 ## 闭集执行规则
 

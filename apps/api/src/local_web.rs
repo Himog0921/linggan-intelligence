@@ -54,6 +54,9 @@ mod topic_map;
 mod topic_workspace;
 #[cfg(test)]
 mod topic_workspace_tests;
+mod web_app;
+#[cfg(test)]
+mod web_app_tests;
 
 use axum::{
     Json, Router,
@@ -351,6 +354,7 @@ fn router(state: LocalWebState) -> Router {
         .merge(topic_map::routes(state.database.database().cloned()))
         .merge(comment_study::routes())
         .merge(model_settings::routes())
+        .merge(web_app::routes())
         .merge(ops::routes())
         .route("/corpus", get(corpus_entry))
         .route("/corpus/evidence", get(evidence_library))
@@ -645,6 +649,7 @@ async fn health(State(state): State<LocalWebState>) -> Json<Value> {
             "checkedAt": readiness.checked_at
         },
         "scheduler": scheduler,
+        "webApp": web_app::health(),
         "routes": {
             "evidenceLibrary": "/corpus/evidence",
             "workResources": "/api/local/work-resources",

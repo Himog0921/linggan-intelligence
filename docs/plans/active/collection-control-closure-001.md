@@ -6,6 +6,8 @@
 > 事实来源: Issue #149 Claim、`origin/main@c5158b14f5fc2313dbd3dc94670083500e767ced` 的 migration/Rust/Collection/Browser Producer、PAGE-COLLECTION-001 与 LIDS v7
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实代码/数据库/测试、ACCEPTED 决定与 Issue #149 冻结合同
 
+**替代说明（2026-10-15）**：本文「CSS 策略：复用现有 page-local vanilla CSS」已由 [DEC-0010](../../decisions/0010-web-frontend-react.md) 取代——网页前端统一为 React + TypeScript，推进见 [WEB-REACT-001](web-react-001.md)。本文其余内容不受影响。
+
 ## 0. 2026-09-04 范围修正 · 认领即自动接活、工位名是服务端真相
 
 本段按 Mog 最新产品决定，修正本计划旧 Package 2 中“新工位默认关闭”的交付语义。实施任务为 `collection-control-closure-001-p2-auto-acceptance-station-name`，exact base 为 `origin/main@e5c5ec5f9bab62f25bea9798fd9abb127df03956`，专属分支为 `codex/collection-station-auto-acceptance-name`；详细授权留在 [Issue #149 comment](https://github.com/Himog0921/linggan-intelligence/issues/149#issuecomment-5541694126)。

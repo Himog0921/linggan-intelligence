@@ -6,6 +6,8 @@
 > 事实来源: 用户最新 course correction、当前开发跟踪表、产品/页面草案、采集与媒体历史经验、`ADV-AUDIT-001` 最终处置
 > 冲突时以谁为准: 用户最新确认、`AGENTS.md`、ACCEPTED ADR、当前活跃 SCOPE 与可复现代码/数据库事实；本图不自动授权真实访问或实现
 
+**替代说明（2026-10-15）**：本文要求本图收口的「前端框架/路由/状态边界」中的前端框架一项已由 [DEC-0010](../../decisions/0010-web-frontend-react.md) 取代——网页前端统一为 React + TypeScript，推进见 [WEB-REACT-001](web-react-001.md)。本文其余内容不受影响。
+
 ## 当前执行护栏
 
 F01 可以继续且只可以继续到：

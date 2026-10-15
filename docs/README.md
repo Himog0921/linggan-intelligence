@@ -15,7 +15,7 @@
 
 ## 网页前端统一为 React · 当前交付入口
 
-Mog 2026-10-15 决定所有正式网页统一为一个 React + TypeScript 应用，不留新旧双轨（[DEC-0010](decisions/0010-web-frontend-react.md)）。唯一推进入口是 [WEB-REACT-001 计划](plans/active/web-react-001.md)（Issue #430），它合并了 UI 改版专项 UIUX-CONTENT-WORKBENCH-001（Issue #425，前端已暂停、后端继续）。迁移期间旧页面冻结，只修阻断使用的缺陷；新页面一律用 React。
+Mog 2026-10-15 决定所有正式网页统一为一个 React + TypeScript 应用，不留新旧双轨（[DEC-0010](decisions/0010-web-frontend-react.md)）。唯一推进入口是 [WEB-REACT-001 计划](plans/active/web-react-001.md)（Issue #430），它合并了 UI 改版专项 UIUX-CONTENT-WORKBENCH-001（Issue #425，前端已暂停、后端继续）。迁移期间旧页面冻结，只修阻断使用的缺陷；新页面一律用 React。阶段 B（React 底座、共享外壳、本机构建链与 `/settings/models`）为候选实现，验收记录见 [ACC-WEB-REACT-001-B](design/acceptance/web-react-001-b-acceptance.md)。
 
 ## 研究底稿与图片分层第一阶段
 
@@ -44,8 +44,9 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发，并于 2026-10-02 
 
 | 文档 | 状态 | 用途 |
 |---|---|---|
+| [design/acceptance/web-react-001-b-acceptance.md](design/acceptance/web-react-001-b-acceptance.md) | 权威当前；候选，未部署 | WEB-REACT-001 阶段 B 的场景矩阵、隔离真实链路浏览器证明结果与分层结论；迁移中修正的旧设置页缺陷 |
 | [decisions/0010-web-frontend-react.md](decisions/0010-web-frontend-react.md) | 权威当前 | 网页前端统一为 React + TypeScript、不留双轨、开发期数据不构成迁移约束；所取代的「原生 JS / 不引入框架」条款 |
-| [plans/active/web-react-001.md](plans/active/web-react-001.md) | 活跃计划；Issue #430；阶段 A 已写入，阶段 B 起未派定 | 全站 React 迁移与 UI 改版的唯一推进入口：目标架构、R1–R7 不留双轨规则、阶段 A–H、内容工作台首包规格 |
+| [plans/active/web-react-001.md](plans/active/web-react-001.md) | 活跃计划；Issue #430；阶段 A 已写入，阶段 B 候选实现（Draft PR #431，未合并、未部署） | 全站 React 迁移与 UI 改版的唯一推进入口：目标架构、R1–R7 不留双轨规则、阶段 A–H、内容工作台首包规格 |
 | [plans/active/topic-map-workflow-382.md](plans/active/topic-map-workflow-382.md) | 活跃计划 | 左侧双入口、内容优先、统一检索、状态与人工备选闭环；迁移/部署另确认 |
 | [plans/active/topic-map-read-performance-382.md](plans/active/topic-map-read-performance-382.md) | PR #389历史已发布；10月13日首屏候选实现/实测通过，冷重建仍慢，未提交/发布；Issue #382 | 进入首屏542ms/完整1268ms，冷重建约5–8秒；完整统计和来源资格不放宽 |
 | [plans/active/comment-study-read-performance-358.md](plans/active/comment-study-read-performance-358.md) | 活跃计划；Issue #358；独立工作树 | 评论读取性能及概览进入的加载依赖；PR #380 已发布，整页进入修复为后续候选 |

@@ -2,7 +2,7 @@
 
 > 状态: 活跃计划
 > 最后核对: 2026-10-15
-> 适用范围: Intelligence 全部正式网页迁移到 React 的唯一实施计划，包括目标架构、不留双轨规则、阶段顺序与验收；合并 UIUX-CONTENT-WORKBENCH-001 的用户结果与推进安排。阶段 A（本文与 DEC-0010）已写入，阶段 B 起均未派定
+> 适用范围: Intelligence 全部正式网页迁移到 React 的唯一实施计划，包括目标架构、不留双轨规则、阶段顺序与验收；合并 UIUX-CONTENT-WORKBENCH-001 的用户结果与推进安排。阶段 A 已写入；阶段 B 候选实现（Draft PR #431，未合并、未部署）；阶段 C 起未派定
 > 事实来源: Mog 2026-10-15 的决定（[Issue #430](https://github.com/Himog0921/linggan-intelligence/issues/430)、[DEC-0010](../../decisions/0010-web-frontend-react.md)）；Mog 提供的《Linggan Intelligence 全站 React 迁移架构与执行手册》（2026-10-15，基于 `main@473980cb`，未入库，有效内容已吸收进本文）；UIUX-CONTENT-WORKBENCH-001 计划（[Issue #425](https://github.com/Himog0921/linggan-intelligence/issues/425)，2026-10-15 工作树未提交版本）；`origin/main@473980cb` 代码只读核对
 > 冲突时以谁为准: Mog 最新确认、DEC-0010、AGENTS.md、真实代码与运行证据
 
@@ -185,6 +185,29 @@ apps/web/
 7. **`/settings/models` 整页迁移**：连接与配置的读写、探针、错误与回执；同一 PR 删除旧 `model_settings` 页面代码，第一次完整走一遍 R2。
 
 退出：在本机 3000 端口的真实运行链上打开设置页，刷新、前进后退、写入回执和错误状态都正常；冷启动、离线重启、整版回退各演练一次；旧设置页代码已删除；其他旧页面不受影响。
+
+#### 阶段 B 回执（2026-10-15 · Draft PR #431 · 未合并、未部署）
+
+**变更清单**（UI 执行合同要求的四项）
+
+- 分类：混合（展示、交互、状态语义、动作回执）；最高风险是动作——「测试」会发起真实模型调用。依据：[页面规格](../../design/pages/model-ai-settings-page.md)、`apps/api/src/local_web/model_settings.rs` 与 `crates/intelligence/src/model_settings*.rs`、`model_invocation.rs` 的接口合同、DEC-0010。L1 设置页；不触及 Token、Primitive、CMP、Scene、Motion。
+- 读取回执：AGENTS.md、current-state、UI 执行合同、设计 README 与治理、LIDS README / tokens / shell-zones / data-boundaries / LANG-05、页面规格、旧页面 `model_settings.html/.css/.js`、`shell.rs` / `shell.css`、上述接口源码。
+- 表面地图：页头（`AppShell`，与 `shell.rs` 同构）→ 标题与刷新 → 动作回执 → 读取失败提示 → 供应商连接表（编辑、停用/启用、测试）→ 默认配置表单 → 执行器与调用记录 → 连接对话框（保存、保存并测试、关闭）。
+- 状态词典：见[页面规格](../../design/pages/model-ai-settings-page.md)「状态词典」。
+- 依赖地图：读写接口 `/api/local/model-settings*` 未改；`shell.css` 与 `lids_tokens.css` 只读引用；导航登记表与 `shell.rs` 由前端测试逐项对照（R4）；页面登记表与 `web_app.rs` 由前端测试对照；`sync.sh` 为集成接缝。无跨交付包依赖。
+- 验收矩阵与结论：[ACC-WEB-REACT-001-B](../../design/acceptance/web-react-001-b-acceptance.md)。
+
+**逐项完成情况**
+
+1. 规则同步：完成。AGENTS.md / CLAUDE.md、UI 执行合同、技术架构基线 `ARCH-A06`，以及 DEC-0010 所列 12 份文件的替代说明。
+2. Web 工程：完成。依赖精确锁定：React 19.3.1、React Router 8.4.0、TanStack Query 5.104.2、Vite 8.3.4、TypeScript 6.0.3（typescript-eslint 8.71 要求低于 6.1）、Vitest 5.0.4、ESLint 10.12、Playwright 1.57.0（与仓库现有浏览器测试同版本，复用已缓存的浏览器）。
+3. Axum 接缝：完成。`web_app.rs` 的页面登记表、`/ui-assets/` 白名单与长期缓存、前后端版本闸门、`/health` 的 `webApp`；未知路径与接口不被页面入口吞掉均有回归测试。
+4. 运行链：源码完成，并在工作树演练了首次构建、同版本复用、断网复用、断网重装与版本不符报错。真实 launchd 运行实例上的冷启动、离线重启与整版回退未演练（需要部署授权）。
+5. CI：完成 `.github/workflows/web-app.yml`，按路径触发，不按分支名；云端实跑以 PR 为准。
+6. AppShell：完成全局页头与上下文行。语料、运营的二级导航随阶段 D、E 实现（设置页用不到）。V3 紧凑外壳本阶段未采用：迁移期两种页头必须一致（R4），建议旧页面基本迁完后再由 Mog 统一决定。
+7. 设置页：完成并删除旧代码。迁移中发现并修正旧页面 5 处缺陷，见验收记录 §5。
+
+**尚未满足的退出条件**：本机 3000 端口运行实例上的验收，以及 launchd 环境的冷启动、离线重启、整版回退演练——都要在 Mog 授权合并与部署之后进行。
 
 ### 阶段 C · 内容工作台
 

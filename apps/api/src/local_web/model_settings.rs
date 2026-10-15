@@ -1,12 +1,14 @@
-//! Model settings composition. The only secret input is decoded here without echoing errors.
-use super::{LocalWebState, shell};
+//! Model settings JSON API. The only secret input is decoded here without echoing errors.
+//!
+//! 页面已迁到 React 应用（`apps/web`，WEB-REACT-001 阶段 B），由 `web_app.rs` 提供；这里只剩读写接口。
+use super::LocalWebState;
 use axum::{
     Json, Router,
     body::Bytes,
     extract::State,
-    http::{StatusCode, header},
+    http::StatusCode,
     middleware,
-    response::{Html, IntoResponse, Response},
+    response::{IntoResponse, Response},
     routing::{get, post},
 };
 use linggan_intelligence::{
@@ -15,13 +17,6 @@ use linggan_intelligence::{
 use serde_json::{Value, json};
 pub(super) fn routes() -> Router<LocalWebState> {
     Router::new()
-        .route(
-            "/settings",
-            get(|| async { axum::response::Redirect::temporary("/settings/models") }),
-        )
-        .route("/settings/models", get(page))
-        .route("/assets/model-settings.css", get(styles))
-        .route("/assets/model-settings.js", get(script))
         .route("/api/local/model-settings", get(read))
         .route(
             "/api/local/model-settings/connections",
@@ -114,33 +109,4 @@ fn unavailable() -> Response {
         Json(json!({"error":"model_database_unavailable"})),
     )
         .into_response()
-}
-async fn page() -> Html<String> {
-    Html(include_str!("model_settings.html").replace(
-        "{{HEADER}}",
-        &shell::global_header(
-            shell::PrimarySurface::Settings,
-            "模型设置",
-            "设置 <span class=\"v7-slash\">/</span> <b>模型与 AI</b>",
-            "<span>本机工作空间</span>",
-            None,
-        ),
-    ))
-}
-async fn styles() -> impl IntoResponse {
-    (
-        [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
-        format!(
-            "{}\n{}\n{}",
-            super::LIDS_TOKENS,
-            super::SHELL_CSS,
-            include_str!("model_settings.css")
-        ),
-    )
-}
-async fn script() -> impl IntoResponse {
-    (
-        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-        include_str!("model_settings.js"),
-    )
 }
