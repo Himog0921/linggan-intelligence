@@ -11,7 +11,7 @@ fn comment_study_overview_exposes_observation_chart_table_and_ranges() {
         .filter(|character| !character.is_whitespace())
         .collect();
 
-    assert!(script.contains("id=\\\"study-observation-title\\\" class=\\\"v7-sr-only\\\""));
+    assert!(script.contains("id=\"study-observation-title\" class=\"v7-sr-only\""));
     assert!(
         compact.contains("data-series-days=\"${days}\""),
         "观察量必须提供 7 / 28 / 56 三个尾窗范围按钮"
