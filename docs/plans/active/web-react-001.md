@@ -222,7 +222,7 @@ Mog 在当前 Codex 对话明确要求“重新让 subagent 来修正，然后�
 - GPT-6.1-Sol 前端代理：`apps/web/src/pages/workbench/` 中今日选题、材料浏览、画布、正文、保存恢复及其组件测试；排除下述图页模块。
 - GPT-6.1-Sol 图页代理：同目录 `renderer.ts`、`renderer.test.ts`、`ImagePages.tsx`、`ImagePages.module.css`、`ImagePages.test.tsx`、`exportWorkflow.ts` 及其测试。负责同一绘图模块服务预览和导出、封面/内页编辑、图片裁切、溢出、冻结成品。
 - GPT-6.1-Sol 后端代理：#425 的 `content_workbench*` Rust/API/测试和迁移0127/0128，补 AI 来源传播、标签及导出命名。不得改变其他领域语义或执行共享库迁移。
-- root 审核与集成：唯一共享接缝负责人；前端 Token 纪律测试（补未知引用定义校验）、`apps/web/src/app/*`、`apps/web/src/shared/api.ts` 及测试、`apps/api/src/local_web.rs`、`web_app.rs` 及测试、`ops.rs` 仅 `/ops` 入口跳转、`full_schema_fixture.rs`、lib/Cargo 注册（API 测试夹具需要固定 png dev-dependency 与 test-only recursion limit）、既有设置组件测试的 JSON MIME fixture、隔离证明脚本与本阶段 e2e、现有相关文档。现有运行脚本中 #425 资产配置候选保留，`sync.sh` 不改。
+- root 审核与集成：唯一共享接缝负责人；前端 Token 纪律测试（补未知引用定义校验）、`apps/web/src/app/*`、`apps/web/src/shared/api.ts` 及测试、`apps/api/src/local_web.rs`、`web_app.rs` 及测试、`ops.rs` 仅 `/ops` 入口跳转、`full_schema_fixture.rs`、lib/Cargo 注册（API 测试夹具需要固定 png dev-dependency 与 test-only recursion limit）、既有设置组件测试的 JSON MIME fixture、隔离证明脚本与本阶段 e2e、既有设置页 e2e 的导航读取竞态修正、现有相关文档。现有运行脚本中 #425 资产配置候选保留，`sync.sh` 不改。
 - 禁止：`shell.rs` / `shell.css`、LIDS Token 源、其他页面、插件/worker、其他工作树、V1/V2/V3 原型和用户草稿、真实运行服务。新页面直接在 React 实现，暂停的原生 DOM 与浏览器持久保存逻辑不迁入。
 - 变更清单：展示/交互/状态/动作混合；仍以本节表面状态矩阵和 A01–A13 验收。材料筛选、分布和原文共用身份；保存失败与版本冲突不报成功；账号可暂空而导出前必须选择；正文与图页修改传递保留手工文字。
 - 推进：先恢复后端与底座基线 → 三代理有界并行修正 → root 接口/路由集成 → 编译/组件/隔离PG/实际浏览器与导出验证 → 独立提交前审核 → Draft PR供审阅。没有另获授权前不迁移共享库、不调用真实模型、不合并、不部署。

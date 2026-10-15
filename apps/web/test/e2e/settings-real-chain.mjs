@@ -197,6 +197,9 @@ try {
   await step('从新页头进入旧页面：语料仍由旧服务提供', async () => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`${origin}/settings/models`);
+    // Wait for the real settings read before leaving; the header alone can render
+    // while GET /api/local/model-settings is still in flight and would be aborted.
+    await page.getByRole('table').first().getByText('合成连接（改）').waitFor();
     await page.getByRole('navigation', { name: '一级导航' }).getByRole('link', { name: /语料/ }).click();
     await page.waitForURL(url => url.pathname === '/corpus/evidence');
     await page.getByRole('navigation', { name: '一级导航' }).waitFor();
