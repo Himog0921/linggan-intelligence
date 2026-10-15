@@ -97,7 +97,7 @@ beforeEach(() => {
       if (!handler) throw new Error(`no handler for ${method} ${input}`);
       const result = handler(body);
       if (result === 'network') throw new TypeError('Failed to fetch');
-      return new Response(JSON.stringify(result.body), { status: result.status });
+      return new Response(JSON.stringify(result.body), { status: result.status, headers: { 'Content-Type': 'application/json' } });
     }),
   );
 });

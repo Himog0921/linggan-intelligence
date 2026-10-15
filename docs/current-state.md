@@ -6,13 +6,44 @@
 > 事实来源: 用户要求、2026-10-08 GitHub 主线、本机运行身份、真实模型请求账本与只读数据库，以及此前的现场检查
 > 冲突时以谁为准: 真实运行结果、ACCEPTED ADR 与用户最新确认
 
-### 2026-10-15 · 网页前端统一为 React（WEB-REACT-001 / #430）
+### 2026-10-15 · WEB-REACT-001 阶段 C 已派定（#430 / #425）
 
-Mog 决定所有正式网页统一为一个 React + TypeScript 应用、不留新旧双轨（[DEC-0010](decisions/0010-web-frontend-react.md)），UI 改版专项并入[唯一计划](plans/active/web-react-001.md)；内容工作台（#425）前端暂停、后端继续。阶段 B（底座、共享外壳、本机构建链、`/settings/models`）候选实现在 Draft PR #431，隔离真实链路证明通过，未合并、未部署。迁移期间旧页面冻结，只修阻断使用的缺陷。
+Mog 明确要求恢复 V3 正式实现，并按 React 技术栈重新分派 GPT-6.1-Sol 子代理，由 root 审核。已核实 #430 为总 Issue、PR #431 于 2026-10-15 15:47 CST 合并，主线为 `0a90fd4a`；[#430 合并后只读回执](https://github.com/Himog0921/linggan-intelligence/issues/430#issuecomment-6187465728)确认 3000 同版本、Web ready、launchd 冷启动构建和线上设置读取通过；线上写操作、断网重启与回退未验收。本轮未重启服务。专属工作树前移至同一主线并恢复 #425 后端和 V3 文档。唯一实施入口为 [WEB-REACT-001 阶段 C](plans/active/web-react-001.md)，原专项 [§10](archive/plans/uiux-content-workbench-001.md#10-首个落地包一篇真实选题到成品导出) 保留为设计与验收来源。
+
+本轮实施：React 今日选题/研读取材/创作画布/正文、独立 TypeScript 图页渲染与导出、#425 后端缺口修复，以及统一客户端和路由集成。原生候选仍暂停且不合入。首篇选题为作业启动，账号稍后选；A01–A13 沿用。当前候选已完成121项前端测试、17项隔离PostgreSQL/HTTP、10项Axum路由、1项精确范围匹配，以及正式React浏览器17场景与真实五页PNG/ZIP。浏览器仅用合成资料；真实账号/材料/模型及Mog成品签收仍未证明。详情见[阶段C验收](design/acceptance/web-react-001-c-acceptance.md)。阶段 B 线上写入、离线重启与整版回退仍按其回执留待验证，不冒称已完成；本轮授权阶段 C 实施不包含共享库迁移、真实模型外发、合并或部署。
+
 
 ### 2026-10-14 · 研究底稿与图片分层第一阶段实施中（#420）
 
 Mog 已派定[完整模块计划](plans/active/research-dossier-001.md)。PR #423（32780fae）已合并为 93dc826e 并更新本机 API/3000；研究暂停、两个 worker 停用。真实前端验收发现的分层漏行、重复图片、计数标题及引用冗长问题在同一交付包续修，候选位于独立 3108，尚未合并替换 3000。
+
+### 2026-10-14 · UI/UX 首个真实创作落地包：实施计划待 Mog 确认
+
+Mog 要求先拆计划，确认后再开始业务代码。详细实施入口为[专项计划 §10](archive/plans/uiux-content-workbench-001.md#10-首个落地包一篇真实选题到成品导出)：真实选题→材料/原声精确摘录→画布→正文→封面和内页→保存恢复→成品导出；包含复用/适配/新增清单、S0–S6 顺序、数据责任、状态/表面/共享依赖及 A01–A13 验收。建议首包纳入受控文本 AI、可编辑模板与自有图片，AI 图片生成和每日十方案留在后续范围。
+
+本次代码依据是专属工作树及本机 `origin/main@5511d75e`，未 fetch、未查询运行库；前轮所读主目录 `edca6dee` 为较早的其他分支，已在提案补充适用边界。仅更新专项文档，原型与业务代码保持；无任务派发、模型/采集、提交推送、迁移或部署。下一步由 Mog 评审首包范围、账号/样稿及成品规格；目前实施尚未开始。
+
+### 2026-10-14 · UI/UX 专项 V3：方向获认可，精简说明与工具栏
+
+新增 [V3 独立原型](design/pages/content-workbench-prototype/v3/index.html)：分组纸条放大、筛选 / 原文 / 分布联动、书页翻阅与精确摘录，画布片段可一次放入正文及指定内页。实际从一篇选题走到 5 张 PNG 与正文 ZIP 导出，4 段素材 / 8 处关联，内页排序、撤销及源文回查已走通。[验收记录 §7](design/acceptance/uiux-content-workbench-001-prototype-acceptance.md)说明证据与限制。全部为本地合成原型，未改业务、未接入真实语料/AI，V1/V2 及草稿保留。Mog 已明确认可 V3 方向；本轮按截图删除重复说明、收紧工具栏，工作区得到更多高度，见[验收记录 §8](design/acceptance/uiux-content-workbench-001-prototype-acceptance.md)。落地挑战和建议顺序已按当前主仓库源码核对并写入设计提案 §13；业务实施未派定。
+
+### 2026-10-14 · UI/UX 专项 V2：研读取材、创作画布与改稿对照
+
+根据 Mog 的截图、视频及研读反馈，新增 [V2 独立原型](design/pages/content-workbench-prototype/v2/index.html)。多篇原笔记 / 原声 / 相似选题 → 精确片段 → 来源回查 → 结构画布 → 正文与真实差异对照 → 图文导出已完成本机交互验证。18 份材料全为合成，正式数据、模型和业务代码未接入。入口本机 :4177/v2/，V1 与其草稿保留；[验收记录 §6](design/acceptance/uiux-content-workbench-001-prototype-acceptance.md)区分实际证明与能力缺口。仍待 Mog 审美和写作体验验收。
+
+### 2026-10-14 · UI/UX 专项阶段二：独立原型已交付，待 Mog 验收
+
+Mog 已明确派定今日选题、材料研读、图文创作三页可交互原型，并串起正文、封面、内页到导出。交付位于同一专属文档工作树的 `docs/design/pages/content-workbench-prototype/`，预览使用独立 loopback 静态服务。三种今日布局、素材摘录入稿、本地保存恢复、图文编辑、排序与 PNG/ZIP 导出已做真实浏览器核对；[提案](design/changes/uiux-content-workbench-001-prototype.md)与[验收记录](design/acceptance/uiux-content-workbench-001-prototype-acceptance.md)分开记录实现边界。
+
+这是合成数据原型，等待 Mog 验收整体审美与使用体验；正式产品能力缺口仍在。没有修改业务代码、生产 token 或真实数据，没有模型 / 采集 / 部署 / 提交推送。
+
+### 2026-10-14 · UI/UX 内容工作台专项：计划与第一阶段只读基线已形成
+
+Mog 明确要求先整理专项文档，再走查当前真实页面与代码，不修改业务代码。目标为个人每日 ≥10 个含角度/依据/提纲/素材的完整方案，并在 Intelligence 内完成正文、封面、内页与成品导出，重点看阅读量。范围及七阶段顺序见 [UIUX-CONTENT-WORKBENCH-001](archive/plans/uiux-content-workbench-001.md)。
+
+本次运行基线为 `5511d75e`，监听 PID 67489 的 cwd/txt 与 runtime-main 一致；在同 revision 的 `codex/uiux-content-workbench-001` 专属工作树只写文档。覆盖当前主要页面及代表性交互，交付[审计报告](audits/uiux-content-workbench-baseline-2026-10-14.md)及[证据附录](audits/uiux-content-workbench-evidence-2026-10-14.md)：11 项能力现状、21 个问题、51 组有效截图状态。发现主题读取冲突、建档统计与行状态口径不一、缺数据仍给稳定漏斗结论等具体问题；完整选题供给与图文创作导出仍是产品缺口。
+
+下一步为今日选题、材料研读、图文创作的完整原型与统一 LIDS 提案。本轮未改业务代码、数据或配置，未发起采集/模型调用，未提交、推送、合并或部署；原有后台继续运行，不能据此声称系统零调用。阶段一基线不等于修复或 Mog 业务验收。
 
 ### 2026-10-14 · 运营模块迁入 D3：总览已上线，三处小修已上线，业务验收与读屏跟进待办（Issue #409 / #417）
 

@@ -41,6 +41,13 @@ mod material_projection_tests;
 #[cfg(test)]
 mod material_replica_fallback_tests;
 mod model_settings;
+mod content_workbench_api;
+#[cfg(test)]
+mod content_workbench_api_tests;
+#[cfg(test)]
+mod content_workbench_browser_tests;
+mod content_workbench_sources_api;
+mod content_workbench_ai_api;
 mod ops;
 mod ops_api;
 mod ops_export;
@@ -356,6 +363,9 @@ fn router(state: LocalWebState) -> Router {
         .merge(model_settings::routes())
         .merge(web_app::routes())
         .merge(ops::routes())
+        .merge(content_workbench_api::routes())
+        .merge(content_workbench_sources_api::routes())
+        .merge(content_workbench_ai_api::routes())
         .route("/corpus", get(corpus_entry))
         .route("/corpus/evidence", get(evidence_library))
         .route("/collection", get(collection_entry))

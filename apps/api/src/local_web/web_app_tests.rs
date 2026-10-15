@@ -194,7 +194,40 @@ async fn health_reports_the_frontend_build() {
         health["webApp"]["state"].as_str(),
         Some("ready" | "missing" | "revision_mismatch")
     ));
-    assert_eq!(health["webApp"]["pages"], json!(["/settings/models"]));
+    assert_eq!(
+        health["webApp"]["pages"],
+        json!(["/settings/models", "/ops/creation"])
+    );
+}
+
+#[tokio::test]
+async fn workbench_entry_is_registered_and_ops_preserves_explicit_domain() {
+    let domain = "00000000-0000-4000-8000-000000000001";
+    let (status, headers, _) =
+        send(app(), &format!("/ops?domain={domain}"), "127.0.0.1:3000").await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert_eq!(
+        headers[header::LOCATION],
+        format!("/ops/creation?domain={domain}")
+    );
+    let (status, headers, _) = send(app(), "/ops", "127.0.0.1:3000").await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert_eq!(headers[header::LOCATION], "/ops/creation");
+    let (status, _, _) = send(app(), "/ops/creation", "127.0.0.1:3000").await;
+    assert!(matches!(
+        status,
+        StatusCode::OK | StatusCode::SERVICE_UNAVAILABLE
+    ));
+    let (status, _, _) = send(app(), "/ops/creation/unknown", "127.0.0.1:3000").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, headers, _) = send(app(), "/ops/api/creation/works", "127.0.0.1:3000").await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(
+        headers[header::CONTENT_TYPE]
+            .to_str()
+            .unwrap()
+            .starts_with("application/json")
+    );
 }
 
 /// 真实链路：隔离 PostgreSQL + 本机 Axum 路由 + 已构建的前端 + 无界面浏览器走完设置页。

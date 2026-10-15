@@ -25,6 +25,10 @@ pub const INTELLIGENCE_IMPLEMENTED: bool = true;
 
 pub mod ops_ledger;
 
+pub mod content_workbench;
+pub mod content_workbench_sources;
+pub mod content_workbench_ai;
+
 pub mod model_secrets;
 pub mod model_settings;
 pub mod pi_adapter;

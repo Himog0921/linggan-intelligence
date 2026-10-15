@@ -3,5 +3,6 @@
  * `apps/api/src/local_web/web_app.rs` 的 `REACT_PAGES` 里；`pageRegistry.test.ts` 逐项对照。
  */
 export const MODEL_SETTINGS_PATH = '/settings/models';
+export const WORKBENCH_PATH = '/ops/creation';
 
-export const REACT_PAGE_PATHS: readonly string[] = [MODEL_SETTINGS_PATH];
+export const REACT_PAGE_PATHS: readonly string[] = [MODEL_SETTINGS_PATH, WORKBENCH_PATH];

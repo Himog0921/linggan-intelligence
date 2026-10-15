@@ -318,6 +318,39 @@ pub async fn read_in(
     Ok(output)
 }
 
+/// Work identities within a creation reading scope; this is collected inventory, not coverage
+/// of the external platform. Callers paginate the selected fragment set, not these identities.
+pub async fn creation_work_directory_in(
+    tx: &mut Transaction<'_, Postgres>,
+    domain: Uuid,
+    query: Option<&str>,
+    offset: i64,
+) -> Result<(Vec<Uuid>, i64), sqlx::Error> {
+    let filter = "FROM linggan_material_content material WHERE EXISTS(SELECT 1 FROM linggan_material_domain_usage usage WHERE usage.content_public_ref=material.public_ref AND usage.domain_ref=$1) AND ($2::text IS NULL OR EXISTS(SELECT 1 FROM linggan_material_content_detail detail JOIN linggan_runtime_capture_package package USING(package_ref) WHERE detail.content_public_ref=material.public_ref AND package.accepted_at<=scope_001_now() AND (lower(COALESCE(detail.title,'')) LIKE '%'||lower($2)||'%' OR lower(COALESCE(detail.body_text,'')) LIKE '%'||lower($2)||'%')))";
+    let total = sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT count(*) {filter}")))
+        .bind(domain)
+        .bind(query)
+        .fetch_one(&mut **tx)
+        .await?;
+    let refs = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "SELECT material.public_ref {filter} ORDER BY material.public_ref LIMIT 31 OFFSET $3"
+    )))
+    .bind(domain)
+    .bind(query)
+    .bind(offset)
+    .fetch_all(&mut **tx)
+    .await?;
+    Ok((refs, total))
+}
+
+pub async fn creation_work_in_domain(
+    tx: &mut Transaction<'_, Postgres>,
+    work: Uuid,
+    domain: Uuid,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_material_domain_usage WHERE content_public_ref=$1 AND domain_ref=$2)").bind(work).bind(domain).fetch_one(&mut **tx).await
+}
+
 pub async fn read(
     database: &linggan_storage_postgres::Database,
     work: Uuid,
@@ -356,7 +389,7 @@ async fn read_base(
     Ok(dossier)
 }
 
-async fn enrich_layout(
+pub async fn enrich_layout(
     tx: &mut Transaction<'_, Postgres>,
     media: &mut Value,
 ) -> Result<(), sqlx::Error> {

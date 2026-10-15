@@ -19,6 +19,10 @@
 
 当前 #382 页面布局补充：[主题树、基础数据与旅程工作区](changes/topic-map-compact-382.md)。仅替代旧布局，原统计/来源/写入合同保留。
 
+## 内容工作台专项 · 阶段二
+
+[V3 空间材料浏览 / 作品关联](pages/content-workbench-prototype/v3/index.html) · [V2 研读 / 画布 / 对照原型](pages/content-workbench-prototype/v2/index.html) · [V1 三页原型](pages/content-workbench-prototype/index.html) · [设计提案](changes/uiux-content-workbench-001-prototype.md) · [验收记录](acceptance/uiux-content-workbench-001-prototype-acceptance.md)。V3 方向已获 Mog 认可，已精简常驻说明并收紧工作区工具栏。仅合成原型；LIDS 与正式运行页未改。 首个真实创作落地包的复用清单、实施步骤及验收统一见[专项计划 §10](../archive/plans/uiux-content-workbench-001.md#10-首个落地包一篇真实选题到成品导出)，后端已派定；原生前端暂停，界面实施并入 [WEB-REACT-001 阶段 C](../plans/active/web-react-001.md)。
+
 ## 固定读取路径
 
 每次 UI 事项按以下顺序读取，且只进入与本次事项直接相关的下一层：
@@ -173,3 +177,7 @@ LIDS 现在统一约束全项目的设计表达，但其成熟度仍为 Proposed
 ## LOGIN-ANATOMY-001
 
 [登录页变更规格](changes/login-anatomy-001.md)：按 Mog 确认的 Login V2 与 Anatomy 装置实现，开发模式仅导航进入现有工作台；本页局部视觉例外不扩展全站 Token。
+
+- [正式创作页面](pages/content-workbench-page.md)：WEB-REACT-001 阶段 C 的 V3 规则，#425 供给后端。
+
+阶段 C 正式 React 候选验证见 [ACC-WEB-REACT-001-C](acceptance/web-react-001-c-acceptance.md)，与原型认可、共享运行和 Mog 成品验收分别记录。

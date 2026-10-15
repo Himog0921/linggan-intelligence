@@ -495,6 +495,77 @@ pub async fn read_authorized_research_comments(
     read_comment_page(database, content_ref, after, text, 20, Some(4000)).await
 }
 
+/// Fixed-version anonymous source read. A restricted current comment never falls back to an
+/// older material row; parent absence is explicitly unknown, not an invented root relation.
+pub async fn read_creation_comment_in(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    source: Uuid,
+) -> Result<Option<Value>, sqlx::Error> {
+    let row=sqlx::query("SELECT c.material_ref,c.content_public_ref,c.comment_external_id,c.parent_comment_external_id,c.is_reply,c.body_text,c.body_state,c.observed_at,c.package_ref, EXISTS(SELECT 1 FROM linggan_material_comment_restriction r WHERE r.content_public_ref=c.content_public_ref AND r.comment_external_id=c.comment_external_id) AS restricted FROM linggan_material_comment_current c JOIN linggan_runtime_capture_package package USING(package_ref) WHERE c.material_ref=$1 AND package.accepted_at<=scope_001_now()")
+        .bind(source).fetch_optional(&mut **tx).await?;
+    let Some(row) = row else { return Ok(None) };
+    if row.get::<bool, _>("restricted") {
+        return Ok(Some(
+            serde_json::json!({"sourceRef":source,"qualification":"restricted"}),
+        ));
+    }
+    let work: Uuid = row.get("content_public_ref");
+    let parent_id: Option<String> = row.get("parent_comment_external_id");
+    let reply: bool = row.get("is_reply");
+    let parent = if !reply {
+        serde_json::json!({"state":"not_applicable"})
+    } else if let Some(parent_id) = parent_id {
+        let parent=sqlx::query("SELECT c.material_ref,c.body_text,c.body_state,EXISTS(SELECT 1 FROM linggan_material_comment_restriction r WHERE r.content_public_ref=c.content_public_ref AND r.comment_external_id=c.comment_external_id) AS restricted FROM linggan_material_comment_current c JOIN linggan_runtime_capture_package package USING(package_ref) WHERE c.content_public_ref=$1 AND c.comment_external_id=$2 AND package.accepted_at<=scope_001_now()")
+            .bind(work).bind(parent_id).fetch_optional(&mut **tx).await?;
+        match parent {
+            Some(p) if p.get::<bool, _>("restricted") => serde_json::json!({"state":"restricted"}),
+            Some(p) => {
+                serde_json::json!({"state":"known","sourceRef":p.get::<Uuid,_>("material_ref"),"body":p.get::<Option<String>,_>("body_text"),"bodyState":p.get::<String,_>("body_state")})
+            }
+            None => serde_json::json!({"state":"unknown"}),
+        }
+    } else {
+        serde_json::json!({"state":"unknown"})
+    };
+    let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text")
+        .fetch_one(&mut **tx)
+        .await?;
+    let parent_dossier = crate::research_dossier::read_in(tx, &[work], &as_of)
+        .await?
+        .remove(&work);
+    let parent_work = if let Some(dossier) = parent_dossier {
+        serde_json::json!({"state":"known","workRef":work,"materialRevision":dossier.material_revision,"fragments":dossier.fragments,"coverage":dossier.coverage})
+    } else {
+        serde_json::json!({"state":"unavailable","workRef":work})
+    };
+    Ok(Some(
+        serde_json::json!({"sourceRef":source,"workRef":work,"body":row.get::<Option<String>,_>("body_text"),"bodyState":row.get::<String,_>("body_state"),"observedAt":row.get::<String,_>("observed_at"),"packageRef":row.get::<Uuid,_>("package_ref"),"qualification":"readable","parentWork":parent_work,"parentComment":parent,"anonymousAuthorContext":{"identity":"WITHHELD","platformUserIdReturned":false}}),
+    ))
+}
+
+pub async fn creation_comment_directory_in(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    domain: Uuid,
+    query: Option<&str>,
+    offset: i64,
+) -> Result<(Vec<Uuid>, i64), sqlx::Error> {
+    let filter = "FROM linggan_material_comment_current c JOIN linggan_runtime_capture_package package USING(package_ref) WHERE package.accepted_at<=scope_001_now() AND EXISTS(SELECT 1 FROM linggan_material_domain_usage usage WHERE usage.content_public_ref=c.content_public_ref AND usage.domain_ref=$1) AND NOT EXISTS(SELECT 1 FROM linggan_material_comment_restriction r WHERE r.content_public_ref=c.content_public_ref AND r.comment_external_id=c.comment_external_id) AND c.body_state='KNOWN' AND ($2::text IS NULL OR lower(c.body_text) LIKE '%'||lower($2)||'%')";
+    let total = sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT count(*) {filter}")))
+        .bind(domain)
+        .bind(query)
+        .fetch_one(&mut **tx)
+        .await?;
+    let refs = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "SELECT c.material_ref {filter} ORDER BY c.material_ref LIMIT 31 OFFSET $3"
+    )))
+    .bind(domain)
+    .bind(query)
+    .bind(offset)
+    .fetch_all(&mut **tx)
+    .await?;
+    Ok((refs, total))
+}
+
 pub async fn read_dossier_comments(database:&Database, content_ref:Uuid, after:Option<Uuid>) -> Result<Value,sqlx::Error> {
     let mut page=read_comment_page(database,content_ref,after,None,30,None).await?;
     let refs:Vec<Uuid>=page["items"].as_array().into_iter().flatten().filter_map(|i|i["sourceRef"].as_str()?.parse().ok()).collect();

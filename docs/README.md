@@ -15,7 +15,7 @@
 
 ## 网页前端统一为 React · 当前交付入口
 
-Mog 2026-10-15 决定所有正式网页统一为一个 React + TypeScript 应用，不留新旧双轨（[DEC-0010](decisions/0010-web-frontend-react.md)）。唯一推进入口是 [WEB-REACT-001 计划](plans/active/web-react-001.md)（Issue #430），它合并了 UI 改版专项 UIUX-CONTENT-WORKBENCH-001（Issue #425，前端已暂停、后端继续）。迁移期间旧页面冻结，只修阻断使用的缺陷；新页面一律用 React。阶段 B（React 底座、共享外壳、本机构建链与 `/settings/models`）为候选实现，验收记录见 [ACC-WEB-REACT-001-B](design/acceptance/web-react-001-b-acceptance.md)。
+Mog 2026-10-15 决定所有正式网页统一为一个 React + TypeScript 应用，不留新旧双轨（[DEC-0010](decisions/0010-web-frontend-react.md)）。唯一推进入口是 [WEB-REACT-001 计划](plans/active/web-react-001.md)（Issue #430），它合并了 UI 改版专项 UIUX-CONTENT-WORKBENCH-001（Issue #425，原生前端停止、后端继续，React 归阶段 C）。迁移期间旧页面冻结，只修阻断使用的缺陷；新页面一律用 React。阶段 A+B 已随 PR #431 合并至 main@0a90fd4a，3000 同版本部署和线上只读链路经 #430 核验；阶段 C 已由 Mog 派定并在专属工作树实施，验收记录见 [ACC-WEB-REACT-001-B](design/acceptance/web-react-001-b-acceptance.md)。
 
 ## 研究底稿与图片分层第一阶段
 
@@ -40,13 +40,25 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发，并于 2026-10-02 
 
 - [采集读取性能](plans/active/collection-read-performance-001.md)：当前授权的性能候选；保留统计、来源资格和 Lease，不代表正式部署。
 
+## UI/UX 内容工作台专项
+
+- [V3 空间材料浏览与作品关联原型](design/pages/content-workbench-prototype/v3/index.html)：纸条筛选、翻页定位、分布索引，片段一次用于正文和指定内页；独立演示。
+- [V2 材料片段与改稿画布原型](design/pages/content-workbench-prototype/v2/index.html)：本篇密集研读、多来源片段、创作编排与改稿对照；独立演示。
+
+- [阶段二三页原型](design/pages/content-workbench-prototype/index.html) · [设计提案](design/changes/uiux-content-workbench-001-prototype.md) · [原型验收](design/acceptance/uiux-content-workbench-001-prototype-acceptance.md)：独立演示；V3 方向已获 Mog 认可，说明精简已回填，业务未接入。
+
+- [UI/UX 原专项与衔接记录](archive/plans/uiux-content-workbench-001.md)：用户结果、V3、S0–S6 与 A01–A13 的历史来源；推进已并入 [WEB-REACT-001](plans/active/web-react-001.md)。#425 后端继续，原生前端暂停且不合入，React 归阶段 C。
+- [第一阶段真实页面与代码审计](audits/uiux-content-workbench-baseline-2026-10-14.md)：11 项能力现状、21 个问题及优先级，下一阶段的模块顺序。
+- [页面覆盖与证据附录](audits/uiux-content-workbench-evidence-2026-10-14.md)：51 组有效状态证据、源码定位、可复现路径及未验证项。
+
 ## 当前权威与状态
 
 | 文档 | 状态 | 用途 |
 |---|---|---|
-| [design/acceptance/web-react-001-b-acceptance.md](design/acceptance/web-react-001-b-acceptance.md) | 权威当前；候选，未部署 | WEB-REACT-001 阶段 B 的场景矩阵、隔离真实链路浏览器证明结果与分层结论；迁移中修正的旧设置页缺陷 |
+| [design/acceptance/web-react-001-b-acceptance.md](design/acceptance/web-react-001-b-acceptance.md) | 权威当前；已合并部署，Mog 待验收 | WEB-REACT-001 阶段 B 的场景矩阵、隔离真实链路浏览器证明结果与分层结论；迁移中修正的旧设置页缺陷 |
+| [design/acceptance/web-react-001-c-acceptance.md](design/acceptance/web-react-001-c-acceptance.md) | 一次性报告；候选验证中 | 阶段 C React V3 工作台、材料到成品、独立审核与未证明边界 |
 | [decisions/0010-web-frontend-react.md](decisions/0010-web-frontend-react.md) | 权威当前 | 网页前端统一为 React + TypeScript、不留双轨、开发期数据不构成迁移约束；所取代的「原生 JS / 不引入框架」条款 |
-| [plans/active/web-react-001.md](plans/active/web-react-001.md) | 活跃计划；Issue #430；阶段 A 已写入，阶段 B 候选实现（Draft PR #431，未合并、未部署） | 全站 React 迁移与 UI 改版的唯一推进入口：目标架构、R1–R7 不留双轨规则、阶段 A–H、内容工作台首包规格 |
+| [plans/active/web-react-001.md](plans/active/web-react-001.md) | 活跃计划；Issue #430；阶段 A+B 随 PR #431 合并并按 #430 回执部署；阶段 C 已派定 | 全站 React 迁移与 UI 改版的唯一推进入口：目标架构、R1–R7 不留双轨规则、阶段 A–H、内容工作台首包规格 |
 | [plans/active/topic-map-workflow-382.md](plans/active/topic-map-workflow-382.md) | 活跃计划 | 左侧双入口、内容优先、统一检索、状态与人工备选闭环；迁移/部署另确认 |
 | [plans/active/topic-map-read-performance-382.md](plans/active/topic-map-read-performance-382.md) | PR #389历史已发布；10月13日首屏候选实现/实测通过，冷重建仍慢，未提交/发布；Issue #382 | 进入首屏542ms/完整1268ms，冷重建约5–8秒；完整统计和来源资格不放宽 |
 | [plans/active/comment-study-read-performance-358.md](plans/active/comment-study-read-performance-358.md) | 活跃计划；Issue #358；独立工作树 | 评论读取性能及概览进入的加载依赖；PR #380 已发布，整页进入修复为后续候选 |
@@ -375,3 +387,6 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发，并于 2026-10-02 
 | [plans/active/topic-map-core-001.md](plans/active/topic-map-core-001.md) | 活跃计划 | Issue #382 研究内核、来源与定义身份、完整闭环；上线后研究阻塞、主题质量与规模修复验证 |
 
 - [登录页与 Anatomy 动画](design/changes/login-anatomy-001.md)：LOGIN-ANATOMY-001，已确认 Login V2 的开发入口、源码再生与发布边界。
+
+- [正式创作页面](design/pages/content-workbench-page.md)：WEB-REACT-001 阶段 C 的 V3 规则，#425 供给后端。
+- [作品与材料使用合同](data-contracts/content-workbench-001.md)：首包typed文档、保存/引用/AI/导出边界。
