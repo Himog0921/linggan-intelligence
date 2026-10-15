@@ -47,7 +47,7 @@
 |---|---|---|---|
 | 设计规格一致 | VERIFIED | 页面规格已按 React 实现更新；与旧页对照截图 | 未经 Mog 审美验收 |
 | 前端/组件实现 | VERIFIED | `apps/web` 源码；类型检查、lint 通过 | — |
-| 自动检查 | VERIFIED | 前端 8 个测试文件 46 项；API 测试 355 项通过（含新增 9 项）；治理与 UI 手册检查 | 云端 CI 以 PR 实跑为准 |
+| 自动检查 | VERIFIED | 前端 8 个测试文件 47 项；API 测试 355 项通过（含新增 9 项）；治理与 UI 手册检查 | 云端 CI 以 PR 实跑为准 |
 | 真实链路/回执 | VERIFIED（隔离环境） | 隔离 PostgreSQL + 本机 Axum 路由 + 构建产物 + Chromium，15 个步骤全部通过 | 未连真实模型；未在 3000 端口的运行实例上验证 |
 | 部署 | NOT VERIFIED | — | 合并与部署须 Mog 授权；冷启动、离线重启、整版回退只在工作树演练了构建环节 |
 | Mog / 业务验收 | NOT VERIFIED | — | 待 Mog 在部署后打开 `/settings/models` 验收 |

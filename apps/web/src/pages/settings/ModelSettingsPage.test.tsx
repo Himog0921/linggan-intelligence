@@ -293,3 +293,21 @@ describe('不在列表里的接口协议', () => {
     expect(posts('/api/local/model-settings/connections')[0]?.body).toMatchObject({ api: 'local-wemm-runtime' });
   });
 });
+
+describe('默认配置数字输入', () => {
+  it('清空数字框不会提交，也不会把非数字写进请求', async () => {
+    route('GET', '/api/local/model-settings', ok(settings()));
+    route('POST', '/api/local/model-settings/config', ok({ configRef: 'new', state: 'SAVED_NO_ANALYSIS_STARTED' }));
+    const user = userEvent.setup();
+    renderPage();
+    await user.selectOptions(await screen.findByRole('combobox', { name: '研究模型' }), 'm1');
+    const timeout = screen.getByLabelText('单次等待（秒）');
+    await user.clear(timeout);
+    await user.click(screen.getByRole('button', { name: '保存默认配置' }));
+    expect(posts('/api/local/model-settings/config')).toHaveLength(0);
+    await user.type(timeout, '45');
+    await user.click(screen.getByRole('button', { name: '保存默认配置' }));
+    expect(await screen.findByText('默认研究模型已保存；没有启动评论研究。')).toBeInTheDocument();
+    expect(posts('/api/local/model-settings/config')[0]?.body).toMatchObject({ timeoutSeconds: 45, inputTokenLimit: 16000 });
+  });
+});

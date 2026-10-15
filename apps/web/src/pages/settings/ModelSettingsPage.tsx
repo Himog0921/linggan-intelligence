@@ -279,6 +279,10 @@ function ConnectionsSection({ data, busyAction, onAdd, onEdit, onToggle, onTest 
 }
 
 type ConfigValues = Omit<ModelConfig, 'configRef'>;
+type NumericField = Exclude<keyof ConfigValues, 'modelRef'>;
+/** 输入框里是文字：清空时保持空字符串交给表单校验，不把 NaN 写进状态。提交时才换算成数字。 */
+type ConfigForm = { modelRef: string } & Record<NumericField, string>;
+const NUMERIC_FIELDS: readonly NumericField[] = ['inputTokenLimit', 'outputTokenLimit', 'timeoutSeconds', 'maxAttempts'];
 
 interface DefaultConfigSectionProps {
   data: ModelSettings;
@@ -289,13 +293,13 @@ interface DefaultConfigSectionProps {
 
 function DefaultConfigSection({ data, busy, onSave }: DefaultConfigSectionProps) {
   const config = data.config;
-  const [values, setValues] = useState<ConfigValues>({
+  const [form, setForm] = useState<ConfigForm>(() => ({
     modelRef: config?.modelRef ?? '',
-    inputTokenLimit: config?.inputTokenLimit ?? CONFIG_DEFAULTS.inputTokenLimit,
-    outputTokenLimit: config?.outputTokenLimit ?? CONFIG_DEFAULTS.outputTokenLimit,
-    timeoutSeconds: config?.timeoutSeconds ?? CONFIG_DEFAULTS.timeoutSeconds,
-    maxAttempts: config?.maxAttempts ?? CONFIG_DEFAULTS.maxAttempts,
-  });
+    inputTokenLimit: String(config?.inputTokenLimit ?? CONFIG_DEFAULTS.inputTokenLimit),
+    outputTokenLimit: String(config?.outputTokenLimit ?? CONFIG_DEFAULTS.outputTokenLimit),
+    timeoutSeconds: String(config?.timeoutSeconds ?? CONFIG_DEFAULTS.timeoutSeconds),
+    maxAttempts: String(config?.maxAttempts ?? CONFIG_DEFAULTS.maxAttempts),
+  }));
   const [localError, setLocalError] = useState<Feedback | null>(null);
   const savedModel = config ? data.models.find(model => model.modelRef === config.modelRef) : undefined;
   const guidance = config
@@ -305,16 +309,17 @@ function DefaultConfigSection({ data, busy, onSave }: DefaultConfigSectionProps)
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!event.currentTarget.reportValidity()) return;
-    const model = data.models.find(item => item.modelRef === values.modelRef);
+    const model = data.models.find(item => item.modelRef === form.modelRef);
     if (!isCallable(model)) {
       setLocalError({ tone: 'error', text: '请选择已通过 V1 JSON 测试的模型。', code: null });
       return;
     }
     setLocalError(null);
-    onSave(values);
+    const numbers = Object.fromEntries(NUMERIC_FIELDS.map(name => [name, Number(form[name])])) as Record<NumericField, number>;
+    onSave({ modelRef: form.modelRef, ...numbers });
   }
 
-  const numberField = (name: Exclude<keyof ConfigValues, 'modelRef'>, label: string) => (
+  const numberField = (name: NumericField, label: string) => (
     <label>
       {label}
       <input
@@ -323,8 +328,8 @@ function DefaultConfigSection({ data, busy, onSave }: DefaultConfigSectionProps)
         required
         min={CONFIG_LIMITS[name].min}
         max={CONFIG_LIMITS[name].max}
-        value={values[name]}
-        onChange={event => setValues(current => ({ ...current, [name]: event.target.valueAsNumber }))}
+        value={form[name]}
+        onChange={event => setForm(current => ({ ...current, [name]: event.target.value }))}
       />
     </label>
   );
@@ -341,8 +346,8 @@ function DefaultConfigSection({ data, busy, onSave }: DefaultConfigSectionProps)
           <select
             name="modelRef"
             required
-            value={values.modelRef}
-            onChange={event => setValues(current => ({ ...current, modelRef: event.target.value }))}
+            value={form.modelRef}
+            onChange={event => setForm(current => ({ ...current, modelRef: event.target.value }))}
           >
             <option value="">选择已测试的研究模型</option>
             {data.models.map(model => (
