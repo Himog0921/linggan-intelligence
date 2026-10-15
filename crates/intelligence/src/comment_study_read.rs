@@ -250,10 +250,10 @@ pub async fn read_overview(
         "SELECT count(*) FROM linggan_comment_study_current_problem problem \
          WHERE problem.domain_ref=$1 \
            AND problem.created_at >= ( \
-             (($2::timestamptz AT TIME ZONE 'Asia/Shanghai')::date - 1)::timestamp \
+             (($2::text::timestamptz AT TIME ZONE 'Asia/Shanghai')::date - 1)::timestamp \
                AT TIME ZONE 'Asia/Shanghai') \
            AND problem.created_at < ( \
-             ($2::timestamptz AT TIME ZONE 'Asia/Shanghai')::date::timestamp \
+             ($2::text::timestamptz AT TIME ZONE 'Asia/Shanghai')::date::timestamp \
                AT TIME ZONE 'Asia/Shanghai')",
     )
     .bind(domain)
