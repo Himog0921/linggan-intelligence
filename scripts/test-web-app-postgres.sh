@@ -32,29 +32,52 @@ postgres_image="linggan-intelligence-postgres-pgvector:16.14-v0.8.0-r1"
 [[ "$proof_container" =~ ^linggan-web-app-proof-[a-zA-Z0-9-]+$ ]] || exit 1
 proof_dir="${WEB_APP_PROOF_DIR:-${TMPDIR:-/tmp}/linggan-web-app-proof-${suffix}}"
 support_dir="$(mktemp -d "${TMPDIR:-/tmp}/linggan-web-app-support.XXXXXX")"
-"$project_root/scripts/runtime/build-pgvector-image.sh" --ensure
 
 cleanup() {
   local result=$?
   trap - EXIT
-  docker rm -f "$proof_container" >/dev/null 2>&1 || true
-  docker volume rm "$proof_volume" >/dev/null 2>&1 || true
-  rm -rf "$support_dir"
+  local cleanup_failed=0
+  if [[ "${proof_container_attempted:-0}" -eq 1 ]]; then
+    local remaining_container
+    if remaining_container="$(docker ps -a --filter "name=^/${proof_container}$" --format '{{.Names}}')"; then
+      if [[ "$remaining_container" == "$proof_container" ]]; then docker rm -f "$proof_container" >/dev/null 2>&1 || cleanup_failed=1;
+      elif [[ -n "$remaining_container" ]]; then cleanup_failed=1; fi
+    else cleanup_failed=1; fi
+  fi
+  if [[ "${proof_volume_created:-0}" -eq 1 ]]; then docker volume rm "$proof_volume" >/dev/null 2>&1 || cleanup_failed=1; fi
+  rm -rf "$support_dir" || cleanup_failed=1
+  if [[ "$cleanup_failed" -ne 0 ]]; then
+    echo "WEB-REACT-001 isolated PostgreSQL proof cleanup failed" >&2
+    [[ "$result" -ne 0 ]] || result=1
+  else
+    echo "WEB-REACT-001 isolated PostgreSQL proof cleanup verified; controlled container, volume and support directory absent"
+  fi
   echo "evidence directory (screenshots and report.json): $proof_dir"
   exit "$result"
 }
 trap cleanup EXIT
+"$project_root/scripts/runtime/build-pgvector-image.sh" --ensure
 docker volume create "$proof_volume" >/dev/null
+proof_volume_created=1
+proof_container_attempted=1
 docker run -d --name "$proof_container" \
   --mount "type=volume,source=$proof_volume,target=/var/lib/postgresql/data" \
   --env POSTGRES_DB="$proof_database" --env POSTGRES_USER="$proof_user" \
   --env POSTGRES_PASSWORD="$proof_password" --publish 127.0.0.1::5432 \
   "$postgres_image" >/dev/null
 for _ in {1..30}; do
-  docker exec "$proof_container" pg_isready -U "$proof_user" -d "$proof_database" >/dev/null 2>&1 && break
+  # The image's init server accepts Unix sockets before it is stopped; only the
+  # final server listens on TCP, which is the connection path used by the proof.
+  docker exec "$proof_container" pg_isready -h 127.0.0.1 -p 5432 -U "$proof_user" -d "$proof_database" >/dev/null 2>&1 && break
   sleep 1
 done
-docker exec "$proof_container" pg_isready -U "$proof_user" -d "$proof_database" >/dev/null
+if ! docker exec "$proof_container" pg_isready -h 127.0.0.1 -p 5432 -U "$proof_user" -d "$proof_database" >/dev/null 2>&1; then
+  echo "WEB-REACT-001 isolated PostgreSQL did not become TCP-ready within 30 seconds" >&2
+  # Diagnostic failure must not hide the original readiness failure. Never print Env/DSN.
+  docker inspect --format 'container state={{.State.Status}} exit={{.State.ExitCode}}' "$proof_container" >&2 || echo 'container state unavailable' >&2
+  docker logs --tail 80 "$proof_container" >&2 || echo 'container startup logs unavailable' >&2
+  exit 1
+fi
 proof_port="$(docker inspect --format '{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostPort}}' "$proof_container")"
 mkdir -p "$proof_dir"
 

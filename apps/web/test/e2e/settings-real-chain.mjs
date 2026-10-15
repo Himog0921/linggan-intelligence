@@ -11,8 +11,10 @@ assert.ok(directory, 'WEB_APP_PROOF_DIR is required');
 const { origin } = JSON.parse(await readFile(path.join(directory, 'fixture.json'), 'utf8'));
 await mkdir(directory, { recursive: true });
 
-const report = { origin, steps: [], screenshots: [], pageErrors: [], consoleErrors: [], failedRequests: [], probeBodies: [] };
+const report = { origin, steps: [], screenshots: [], pageErrors: [], consoleErrors: [], failedRequests: [], probeBodies: [], settingsReads: [] };
+let currentStep = 'setup';
 const step = async (name, run) => {
+  currentStep = name;
   try {
     await run();
     report.steps.push({ name, result: 'PASS' });
@@ -30,8 +32,22 @@ page.on('pageerror', error => report.pageErrors.push(error.message));
 page.on('console', message => {
   if (message.type() === 'error') report.consoleErrors.push(message.text());
 });
-page.on('requestfailed', request => report.failedRequests.push(`${request.method()} ${new URL(request.url()).pathname} ${request.failure()?.errorText ?? ''}`));
+const settingsReads = new Map();
+page.on('requestfailed', request => {
+  report.failedRequests.push(`${request.method()} ${new URL(request.url()).pathname} ${request.failure()?.errorText ?? ''}`);
+  const read = settingsReads.get(request);
+  if (read) Object.assign(read, { failedStep: currentStep, error: request.failure()?.errorText, endedAt: Date.now() });
+});
+page.on('requestfinished', request => {
+  const read = settingsReads.get(request);
+  if (read) Object.assign(read, { finishedStep: currentStep, endedAt: Date.now() });
+});
 page.on('request', request => {
+  if (request.method() === 'GET' && new URL(request.url()).pathname === '/api/local/model-settings') {
+    const read = { number: report.settingsReads.length + 1, startedStep: currentStep, startedAt: Date.now() };
+    settingsReads.set(request, read);
+    report.settingsReads.push(read);
+  }
   if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/local/model-settings/probes') {
     report.probeBodies.push(JSON.parse(request.postData() ?? '{}'));
   }
@@ -47,10 +63,23 @@ const shot = async name => {
 const status = () => page.locator('#settings-feedback');
 const dialog = () => page.getByRole('dialog');
 
+// A write receipt can precede its invalidation GET. Await that actual new read,
+// its body, and the rendered ready control before another write or navigation.
+const afterSettingsRead = async action => {
+  const [response] = await Promise.all([
+    page.waitForResponse(response => response.request().method() === 'GET' && new URL(response.url()).pathname === '/api/local/model-settings'),
+    action(),
+  ]);
+  assert.equal(response.status(), 200);
+  assert.equal(await response.finished(), null);
+  await page.getByRole('button', { name: '刷新', exact: true }).waitFor();
+};
+
 let finished = false;
 try {
   await step('入口跳转与页面加载', async () => {
-    const response = await page.goto(`${origin}/settings`);
+    let response;
+    await afterSettingsRead(async () => { response = await page.goto(`${origin}/settings`); });
     assert.equal(response?.status(), 200);
     assert.equal(new URL(page.url()).pathname, '/settings/models');
     await page.getByRole('heading', { name: '评论研究的模型设置' }).waitFor();
@@ -90,7 +119,7 @@ try {
     await form.getByLabel('模型 ID').fill('synthetic-model');
     await form.getByLabel('本机回环服务（允许 HTTP）').check();
     await shot('settings-1440-dialog');
-    await form.getByRole('button', { name: '保存', exact: true }).click();
+    await afterSettingsRead(() => form.getByRole('button', { name: '保存', exact: true }).click());
     await status().getByText('供应商连接已保存；尚未发送测试请求。').waitFor();
     await dialog().waitFor({ state: 'detached' });
     const table = page.getByRole('table').first();
@@ -99,7 +128,7 @@ try {
   });
 
   await step('测试模型：结果按真实回执显示，失败原因保留错误码', async () => {
-    await page.getByRole('button', { name: '测试', exact: true }).click();
+    await afterSettingsRead(() => page.getByRole('button', { name: '测试', exact: true }).click());
     await status().getByText('模型测试未通过', { exact: false }).waitFor();
     const code = await status().locator('code').textContent();
     assert.ok(code && code.length > 0, '失败回执应带错误码');
@@ -123,7 +152,7 @@ try {
     const before = report.probeBodies.length;
     await page.getByRole('button', { name: '测试', exact: true }).click();
     await status().getByText('结果未确认', { exact: false }).waitFor();
-    await page.getByRole('button', { name: '测试', exact: true }).click();
+    await afterSettingsRead(() => page.getByRole('button', { name: '测试', exact: true }).click());
     await status().getByText('模型测试未通过', { exact: false }).waitFor();
     await page.unroute('**/api/local/model-settings/probes');
     const attempts = report.probeBodies.slice(before);
@@ -132,16 +161,16 @@ try {
   });
 
   await step('刷新页面后数据仍在（服务器为准）', async () => {
-    await page.reload();
+    await afterSettingsRead(() => page.reload());
     await page.getByRole('table').first().getByText('合成连接').waitFor();
     await page.getByRole('table').nth(1).getByText('能力测试 · synthetic-model').first().waitFor();
   });
 
   await step('停用与启用：带修订号提交，回执后更新', async () => {
-    await page.getByRole('button', { name: '停用' }).click();
+    await afterSettingsRead(() => page.getByRole('button', { name: '停用' }).click());
     await status().getByText('连接已停用。').waitFor();
     await page.getByRole('table').first().getByText('已停用', { exact: true }).waitFor();
-    await page.getByRole('button', { name: '启用' }).click();
+    await afterSettingsRead(() => page.getByRole('button', { name: '启用' }).click());
     await status().getByText('连接已启用。').waitFor();
   });
 
@@ -163,7 +192,7 @@ try {
     await page.getByRole('button', { name: '编辑' }).click();
     const form = dialog();
     await form.getByLabel('连接名称').fill('合成连接（改）');
-    await form.getByRole('button', { name: '保存', exact: true }).click();
+    await afterSettingsRead(() => form.getByRole('button', { name: '保存', exact: true }).click());
     await status().getByText('供应商连接已保存；尚未发送测试请求。').waitFor();
     const table = page.getByRole('table').first();
     await table.getByText('合成连接（改）').waitFor();
@@ -184,7 +213,7 @@ try {
   ]) {
     await step(`${width} 宽度无横向溢出`, async () => {
       await page.setViewportSize({ width, height });
-      await page.goto(`${origin}/settings/models`);
+      await afterSettingsRead(() => page.goto(`${origin}/settings/models`));
       await page.getByRole('heading', { name: '评论研究的模型设置' }).waitFor();
       // 等数据读完再量：连接表、默认配置与调用记录都在页面上时才算真实布局。
       await page.getByRole('table').first().getByText('合成连接（改）').waitFor();
@@ -196,7 +225,7 @@ try {
 
   await step('从新页头进入旧页面：语料仍由旧服务提供', async () => {
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto(`${origin}/settings/models`);
+    await afterSettingsRead(() => page.goto(`${origin}/settings/models`));
     // Wait for the real settings read before leaving; the header alone can render
     // while GET /api/local/model-settings is still in flight and would be aborted.
     await page.getByRole('table').first().getByText('合成连接（改）').waitFor();

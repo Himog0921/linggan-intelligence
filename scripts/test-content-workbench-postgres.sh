@@ -64,7 +64,7 @@ cleanup() {
   if [[ -n "${proof_asset_root:-}" && "$proof_asset_root" == /tmp/linggan-content-workbench-assets.* ]]; then
     rm -rf -- "$proof_asset_root" || cleanup_failed=1
   fi
-  if [[ "${proof_database_created:-0}" -eq 0 && "${proof_container_created:-0}" -eq 0 && "${proof_volume_created:-0}" -eq 0 ]]; then
+  if [[ "${proof_database_created:-0}" -eq 0 && "${proof_container_attempted:-0}" -eq 0 && "${proof_volume_created:-0}" -eq 0 && "$cleanup_failed" -eq 0 ]]; then
     echo "UIUX-CONTENT-WORKBENCH-001 PostgreSQL proof created no resources; cleanup was not required"
     exit "$task_exit"
   fi
@@ -73,10 +73,19 @@ cleanup() {
     remaining="$(docker exec "$proof_container" psql -X -v ON_ERROR_STOP=1 -U "$proof_user" -d postgres -Atc "SELECT datname FROM pg_database WHERE datname = '$proof_database';")" || cleanup_failed=1
     [[ -z "$remaining" ]] || cleanup_failed=1
   fi
-  [[ "${proof_container_created:-0}" -eq 0 ]] || docker rm -f "$proof_container" >/dev/null || cleanup_failed=1
+  if [[ "${proof_container_attempted:-0}" -eq 1 ]]; then
+    if remaining_container="$(docker ps -a --filter "name=^/${proof_container}$" --format '{{.Names}}')"; then
+      if [[ "$remaining_container" == "$proof_container" ]]; then docker rm -f "$proof_container" >/dev/null || cleanup_failed=1;
+      elif [[ -n "$remaining_container" ]]; then cleanup_failed=1; fi
+    else cleanup_failed=1; fi
+  fi
   [[ "${proof_volume_created:-0}" -eq 0 ]] || docker volume rm "$proof_volume" >/dev/null || cleanup_failed=1
-  [[ "$cleanup_failed" -eq 0 ]] || { echo "UIUX-CONTENT-WORKBENCH-001 PostgreSQL proof cleanup failed" >&2; exit 1; }
-  echo "UIUX-CONTENT-WORKBENCH-001 PostgreSQL proof cleanup verified; isolated database, container, and volume were removed"
+  if [[ "$cleanup_failed" -ne 0 ]]; then
+    echo "UIUX-CONTENT-WORKBENCH-001 PostgreSQL proof cleanup failed" >&2
+    [[ "$task_exit" -ne 0 ]] || task_exit=1
+    exit "$task_exit"
+  fi
+  echo "UIUX-CONTENT-WORKBENCH-001 PostgreSQL proof cleanup verified; controlled database, container, and volume absent"
   exit "$task_exit"
 }
 trap cleanup EXIT
@@ -95,10 +104,18 @@ printf 'UIUX-CONTENT-WORKBENCH-001 proof resources: database=%s container=%s vol
 
 docker volume create "$proof_volume" >/dev/null
 proof_volume_created=1
+proof_container_attempted=1
 docker run -d --name "$proof_container" --mount "type=volume,source=$proof_volume,target=/var/lib/postgresql/data" --env POSTGRES_DB=postgres --env POSTGRES_USER="$proof_user" --env POSTGRES_PASSWORD="$proof_password" --publish 127.0.0.1::5432 "$postgres_image" -c shared_preload_libraries=pg_stat_statements -c max_wal_size=128MB -c min_wal_size=32MB >/dev/null
-proof_container_created=1
-for _ in {1..30}; do docker exec "$proof_container" pg_isready -U "$proof_user" -d postgres >/dev/null 2>&1 && break; sleep 1; done
-docker exec "$proof_container" pg_isready -U "$proof_user" -d postgres >/dev/null
+# The temporary init server is Unix-only and is stopped before normal startup.
+# Wait for the final TCP listener used by the proof, not the temporary socket.
+for _ in {1..30}; do docker exec "$proof_container" pg_isready -h 127.0.0.1 -p 5432 -U "$proof_user" -d postgres >/dev/null 2>&1 && break; sleep 1; done
+if ! docker exec "$proof_container" pg_isready -h 127.0.0.1 -p 5432 -U "$proof_user" -d postgres >/dev/null 2>&1; then
+  echo "UIUX-CONTENT-WORKBENCH-001 isolated PostgreSQL did not become TCP-ready within 30 seconds" >&2
+  # Best-effort diagnostics do not change the mandatory failure exit or reveal Env/DSN.
+  docker inspect --format 'container state={{.State.Status}} exit={{.State.ExitCode}}' "$proof_container" >&2 || echo 'container state unavailable' >&2
+  docker logs --tail 80 "$proof_container" >&2 || echo 'container startup logs unavailable' >&2
+  exit 1
+fi
 proof_port="$(docker port "$proof_container" 5432/tcp | sed -n 's/^127\.0\.0\.1:\([0-9][0-9]*\)$/\1/p')"
 [[ "$proof_port" =~ ^[0-9]+$ ]] || { echo "isolated proof PostgreSQL did not expose a safe local port" >&2; exit 1; }
 docker exec "$proof_container" createdb -U "$proof_user" "$proof_database"
