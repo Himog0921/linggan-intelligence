@@ -245,6 +245,21 @@ pub async fn read_overview(
     )
     .fetch_one(database.pool())
     .await?;
+    // Yesterday's newly created current Problem identities; not a revision count.
+    let yesterday_new_problem_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_comment_study_current_problem problem \
+         WHERE problem.domain_ref=$1 \
+           AND problem.created_at >= ( \
+             (($2::text::timestamptz AT TIME ZONE 'Asia/Shanghai')::date - 1)::timestamp \
+               AT TIME ZONE 'Asia/Shanghai') \
+           AND problem.created_at < ( \
+             ($2::text::timestamptz AT TIME ZONE 'Asia/Shanghai')::date::timestamp \
+               AT TIME ZONE 'Asia/Shanghai')",
+    )
+    .bind(domain)
+    .bind(&as_of)
+    .fetch_one(database.pool())
+    .await?;
     let corpus = if let Some(domain) = domain_ref {
         read_catalog_summary(
             database,
@@ -357,6 +372,7 @@ pub async fn read_overview(
     Ok(json!({
         "contract":"comment-study.read.v2",
         "domainRef":domain_ref,
+        "yesterdayNewProblemCount":yesterday_new_problem_count,
         "asOf":as_of,
         "corpusSummary":corpus_summary,
         "corpusSummaryState":if corpus.is_some() { "known" } else { "unavailable" },

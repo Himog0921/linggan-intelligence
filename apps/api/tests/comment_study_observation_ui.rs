@@ -11,7 +11,7 @@ fn comment_study_overview_exposes_observation_chart_table_and_ranges() {
         .filter(|character| !character.is_whitespace())
         .collect();
 
-    assert!(script.contains("id=\"study-observation-title\">评论观察量"));
+    assert!(script.contains("id=\"study-observation-title\" class=\"v7-sr-only\""));
     assert!(
         compact.contains("data-series-days=\"${days}\""),
         "观察量必须提供 7 / 28 / 56 三个尾窗范围按钮"
@@ -55,4 +55,43 @@ fn observation_range_switches_are_read_only_and_do_not_fake_date_drilldown() {
     assert!(script.contains("data-series-view"));
     assert!(!script.contains("data-observation-date"));
     assert!(!script.contains("post('observation"));
+}
+
+#[test]
+fn borderless_overview_reuses_real_observation_series_and_keeps_lower_sections() {
+    let script = include_str!("../src/local_web/comment_study.js");
+    let css = include_str!("../src/local_web/comment_study.css");
+    let read = include_str!("../../../crates/intelligence/src/comment_study_read.rs");
+    assert!(script.contains("study-overview-hero"));
+    assert!(script.contains("study-metric-pair"));
+    assert!(script.contains("study-metric-delta"));
+    assert!(script.contains("昨日首次观察"));
+    assert!(script.contains("昨日进入"));
+    assert!(script.contains("昨日写入"));
+    assert!(script.contains("昨日建档"));
+    assert!(script.contains("yesterdayNewProblemCount"));
+    assert!(script.contains("newObservedCommentCount"));
+    assert!(script.contains("studiedCommentCount"));
+    assert!(script.contains("acceptedSignalCount"));
+    assert!(css.contains("COMMENT-OVERVIEW-V2-428"));
+    assert!(css.contains(".study-series-coverage-tick"));
+    assert!(css.contains(".study-series-signal-bar"));
+    assert!(read.contains("\"yesterdayNewProblemCount\":yesterday_new_problem_count"));
+    assert!(read.contains("AT TIME ZONE 'Asia/Shanghai'"));
+    for heading in ["近期获得新依据的问题","研究与归并进度","用户提到的办法与经历","原声预览","尚未看清的部分"] {
+        assert!(script.contains(heading));
+    }
+}
+
+#[test]
+fn observation_coverage_is_attached_to_signal_axis_not_separate_row() {
+    let script = include_str!("../src/local_web/comment_study.js");
+    assert!(script.contains("covY=signalBase+8"));
+    assert!(script.contains("class=\"study-series-coverage-tick\""));
+    assert!(script.contains("没有观察记录不等于用户没有表达"));
+    assert!(
+        script.contains("filter(Number.isInteger)"),
+        "纵轴刻度步长必须是整数：评论数不能出现 2.5 之类的刻度，也不能在最大值为 0/1 时重复标 1"
+    );
+    assert!(script.contains("id=\"study-observation-title\" class=\"v7-sr-only\""));
 }
