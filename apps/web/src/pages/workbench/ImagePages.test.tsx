@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ImagePages } from './ImagePages';
 import { newDocument } from './workbenchModel';
 import type { ImagePage, WorkDocument } from './workbenchModel';
+import { renderPage } from './renderer';
 import { ApiError } from '../../shared/api';
 
 vi.mock('./renderer',async importOriginal=>({...await importOriginal<typeof import('./renderer')>(),renderPage:vi.fn(async()=>({canvas:document.createElement('canvas'),issues:[],fontFamily:'Test'}))}));
@@ -72,5 +73,40 @@ describe('image editing author control',()=>{
     fireEvent.click(screen.getByRole('button',{name:'核实并重试原图片上传'}));
     await waitFor(()=>expect(screen.getByText('自有图片已上传；保存作品后保留图片关联')).toBeVisible());
     expect(onUpload).toHaveBeenCalledTimes(2);expect(onUpload.mock.calls[0]?.[0]).toBe(file);expect(onUpload.mock.calls[1]?.[0]).toBe(file);
+  });
+});
+
+describe('V3 controlled image steps',()=>{
+  it('keeps cover, inner pages, and export in separate surfaces while preserving stable page selection',async()=>{
+    const doc=initial(),onStepChange=vi.fn();
+    const view=render(<ImagePages step="cover" document={doc} workId="work" onChange={vi.fn()} onUploadAsset={vi.fn()} onStepChange={onStepChange}/>);
+    expect(screen.queryByRole('navigation',{name:'图页顺序'})).not.toBeInTheDocument();
+    expect(screen.queryByRole('button',{name:'保存并生成图文包'})).not.toBeInTheDocument();
+    expect(screen.getByLabelText('图页标题')).toHaveValue('手改封面');
+    fireEvent.click(screen.getByRole('button',{name:'编辑内页 →'}));expect(onStepChange).toHaveBeenCalledWith('inner');
+    view.rerender(<ImagePages step="inner" document={doc} workId="work" onChange={vi.fn()} onUploadAsset={vi.fn()} onStepChange={onStepChange}/>);
+    expect(screen.getByLabelText('图页标题')).toHaveValue('观点一');
+    expect(screen.getByRole('navigation',{name:'图页顺序'})).not.toHaveTextContent('手改封面');
+    fireEvent.click(screen.getByRole('button',{name:/03 步骤/}));expect(screen.getByLabelText('图页标题')).toHaveValue('步骤二');
+    view.rerender(<ImagePages step="export" document={doc} workId="work" onChange={vi.fn()} onUploadAsset={vi.fn()} onStepChange={onStepChange}/>);
+    expect(screen.queryByLabelText('图页标题')).not.toBeInTheDocument();expect(screen.getByRole('heading',{name:'笔记正文'})).toBeVisible();
+    expect(screen.getAllByRole('button',{name:/放大(封面|观点|步骤)/})).toHaveLength(3);
+    await act(async()=>{});
+  });
+  it('applies explicitly selected cover style to the group without changing page and block identities',async()=>{
+    const doc=initial(),onChange=vi.fn();
+    render(<ImagePages step="cover" document={doc} workId="work" onChange={onChange} onUploadAsset={vi.fn()}/>);
+    fireEvent.click(screen.getByRole('button',{name:'Aa双色分栏'}));
+    const changed=onChange.mock.calls.at(-1)?.[0] as WorkDocument;
+    expect(changed.pages.every(item=>item.templateVersion==='creation-v3-split')).toBe(true);
+    expect(changed.pages.map(item=>[item.id,item.blocks])).toEqual(doc.pages.map(item=>[item.id,item.blocks]));
+    await act(async()=>{});
+  });
+  it('blocks whole-package export while a target-pixel preview reports overflow',async()=>{
+    const doc=initial();doc.accountRef=crypto.randomUUID();doc.paragraphs=[{id:crypto.randomUUID(),text:'正文'}];
+    vi.mocked(renderPage).mockResolvedValue({canvas:document.createElement('canvas'),issues:[{field:'title',message:'文字超出画幅，请缩短文案或预览拆页'}],fontFamily:'Test'});
+    render(<ImagePages step="export" document={doc} workId="work" onChange={vi.fn()} onUploadAsset={vi.fn()} onSave={vi.fn()} exportTransport={{} as never}/>);
+    await waitFor(()=>expect(screen.getAllByText(/文字超出画幅/).length).toBeGreaterThan(0));
+    expect(screen.getByRole('button',{name:'保存并生成图文包'})).toBeDisabled();await act(async()=>{});
   });
 });

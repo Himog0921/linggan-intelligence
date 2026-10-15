@@ -1,5 +1,5 @@
 import { ApiError, requestJson, requestBinaryJson } from '../../shared/api';
-import { object, parseAiStatus, parseAnchor, parseAsset, parseContext, parseEnvelope, parseExportRecord, parseFrozen, parseHistory, parsePreview, parseReadiness, parseSaveReceipt, parseSourceList, parseWorkList, uuid, WorkbenchContractError, type Citation, type UseTarget, type WorkDocument, type WritingAction, type WritingSelection } from './workbenchModel';
+import { parseMaterialDocument, parseMaterialCollection, type MaterialSelection, type MaterialKind, object, parseAiStatus, parseAnchor, parseAsset, parseContext, parseEnvelope, parseExportRecord, parseFrozen, parseHistory, parsePreview, parseReadiness, parseSaveReceipt, parseSourceList, parseWorkList, uuid, WorkbenchContractError, type Citation, type UseTarget, type WorkDocument, type WritingAction, type WritingSelection } from './workbenchModel';
 const base = '/ops/api/creation';
 const post = (path: string, body: unknown) => requestJson(path, {
   method: 'POST',
@@ -63,6 +63,30 @@ function receipt(value: unknown, requestId: string, workId?: string) {
 }
 export async function history(id: string) {
   return parseHistory(await requestJson(`${base}/works/${uuid(id)}/revisions`)).items;
+}
+export async function materialFromCitation(domainRef: string, citation: Citation, signal?: AbortSignal) {
+  const sourceKind = citation.sourceKind === 'ocr' ? 'note' : citation.sourceKind;
+  const sourceRef = sourceKind === 'note' ? citation.workRef : citation.sourceRef;
+  if (!sourceRef) throw new WorkbenchContractError();
+  const params = new URLSearchParams({domainRef, sourceKind, sourceRef});
+  if (citation.workRef) params.set('workRef', citation.workRef);
+  const document = parseMaterialDocument(await requestJson(`${base}/sources/document?${params}`, {signal}));
+  if (document.sourceRef !== sourceRef || document.sourceKind !== sourceKind) throw new WorkbenchContractError();
+  return document;
+}
+export async function prepareMaterials(body: {
+  domainRef: string; title: string; angle: string; topicRef?: string | null; terms?: string[]; outline?: string[];
+}, signal?: AbortSignal) {
+  return parseMaterialCollection(await requestJson(`${base}/sources/prepare`, {method: 'POST', body, signal}));
+}
+export async function searchMaterials(query: {domainRef: string; query: string; kind?: MaterialKind; cursor?: number}, signal?: AbortSignal) {
+  const params = new URLSearchParams({domainRef: query.domainRef, query: query.query});
+  if (query.cursor !== undefined) params.set('cursor', String(query.cursor));
+  if (query.kind !== undefined) params.set('kind', query.kind);
+  return parseMaterialCollection(await requestJson(`${base}/sources/documents?${params}`, {signal}));
+}
+export async function resolveMaterials(body: {domainRef: string; selections: MaterialSelection[]; terms?: string[]}, signal?: AbortSignal) {
+  return parseMaterialCollection(await requestJson(`${base}/sources/resolve`, {method: 'POST', body, signal}));
 }
 export async function sources(query: {
   domainRef: string;

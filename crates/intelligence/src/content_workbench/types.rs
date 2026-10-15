@@ -218,7 +218,31 @@ pub struct MaterialUse {
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MaterialSelection {
+    pub document_id: String,
+    pub source_kind: SourceKind,
+    pub source_ref: Uuid,
+    pub work_ref: Option<Uuid>,
+    pub source_version: String,
+    pub added_by: String,
+    pub match_reasons: Vec<String>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MaterialPreparation {
+    pub method_version: String,
+    pub query: String,
+    pub terms: Vec<String>,
+    pub state: String,
+    pub gaps: Vec<String>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkDocument {
+    #[serde(default)]
+    pub materials: Vec<MaterialSelection>,
+    #[serde(default)]
+    pub material_preparation: Option<MaterialPreparation>,
     #[serde(default)]
     pub tags: Vec<String>,
     pub contract: String,
@@ -237,6 +261,8 @@ impl Default for WorkDocument {
     fn default() -> Self {
         Self {
             contract: "content-workbench.v1".into(),
+            materials: vec![],
+            material_preparation: None,
             tags: vec![],
             title: String::new(),
             account_ref: None,

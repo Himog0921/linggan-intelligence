@@ -68,6 +68,64 @@
   --lgi-stream-red: #e06a55;
   --lgi-stream-line: rgba(99, 217, 165, 0.2);
 
+  /* V8 action family: opt-in only; existing page tokens retain their values. */
+  --lgi-action-fill: #c63214;
+  --lgi-action-ink: #0b0f12;
+  --lgi-action-ink-shadow: #151b1f;
+  --lgi-action-paper: #ffffff;
+  --lgi-action-sunken: #f5f7f8;
+  --lgi-action-secondary: #5f6a71;
+  --lgi-action-disabled: #8c959b;
+  --lgi-action-border: #c6ced3;
+  --lgi-action-focus: #335e72;
+  --lgi-action-danger: #b52b20;
+  --lgi-action-danger-soft: #fff0ed;
+  --lgi-action-mark: #f24a23;
+  --lgi-action-lattice-light: repeating-conic-gradient(rgba(255,255,255,.36) 0% 25%,transparent 0% 50%);
+  --lgi-action-lattice-ink: repeating-conic-gradient(rgba(11,15,18,.16) 0% 25%,transparent 0% 50%);
+  --lgi-action-lattice-danger: repeating-conic-gradient(rgba(181,43,32,.2) 0% 25%,transparent 0% 50%);
+  --lgi-action-lattice-dim: repeating-conic-gradient(rgba(11,15,18,.07) 0% 25%,transparent 0% 50%);
+  --lgi-action-mask: linear-gradient(90deg,#0000 0 8%,#00000026 8% 22%,#0000004d 22% 36%,#00000073 36% 50%,#0000009e 50% 64%,#000000c4 64% 78%,#000000e8 78% 90%,#000 90% 100%);
+  --lgi-action-quiet-ruler: repeating-linear-gradient(90deg,var(--lgi-action-mark) 0 8px,transparent 8px 10px);
+  --lgi-action-font-size: 13px;
+  --lgi-action-line-height: 1.6;
+  --lgi-action-height: 40px;
+  --lgi-action-quiet-height: 28px;
+  --lgi-action-gap: 4px;
+  --lgi-action-padding: 16px;
+  --lgi-action-quiet-padding: 2px;
+  --lgi-action-border-width: 1px;
+  --lgi-action-rail-width: 2px;
+  --lgi-action-lattice-cell: 16px;
+  --lgi-action-lattice-hover: 40%;
+  --lgi-action-lattice-active: 100%;
+  --lgi-action-shadow-idle: 4px;
+  --lgi-action-shadow-hover: 5px;
+  --lgi-action-hover-shift: -1px;
+  --lgi-action-press-shift: 1px;
+  --lgi-action-focus-offset: 2px;
+  --lgi-action-focus-gap-width: 3px;
+  --lgi-action-focus-idle-gap: 5px;
+  --lgi-action-focus-idle-ring: 7px;
+  --lgi-action-focus-hover-offset: 3px;
+  --lgi-action-focus-hover-gap: 6px;
+  --lgi-action-focus-hover-ring: 8px;
+  --lgi-action-cell-size: 6px;
+  --lgi-action-cell-gap: 2px;
+  --lgi-action-cell-dim: .25;
+  --lgi-action-motion-instant: 90ms;
+  --lgi-action-motion-fast: 140ms;
+  --lgi-action-motion-cycle: 800ms;
+  --lgi-action-motion-step: 200ms;
+  --lgi-action-ease: cubic-bezier(.2,.78,.2,1);
+
+  /* Approved V3 reading material surfaces, scoped to the content workbench. */
+  --lgi-reading-paper: #faf7ee;
+  --lgi-reading-edge: #e6ddca;
+  --lgi-reading-ink: #37352e;
+  --lgi-reading-selected: #f5e3a0;
+  --lgi-reading-cover: #7c5042;
+
   /* Typography */
   --lgi-font-sans: "PingFang SC", "Noto Sans SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
   --lgi-font-mono: "SFMono-Regular", "JetBrains Mono", "Roboto Mono", "Noto Sans Mono CJK SC", ui-monospace, monospace;

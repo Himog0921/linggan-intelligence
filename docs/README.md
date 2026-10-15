@@ -15,7 +15,7 @@
 
 ## 网页前端统一为 React · 当前交付入口
 
-Mog 2026-10-15 决定所有正式网页统一为一个 React + TypeScript 应用，不留新旧双轨（[DEC-0010](decisions/0010-web-frontend-react.md)）。唯一推进入口是 [WEB-REACT-001 计划](plans/active/web-react-001.md)（Issue #430），它合并了 UI 改版专项 UIUX-CONTENT-WORKBENCH-001（Issue #425，原生前端停止、后端继续，React 归阶段 C）。迁移期间旧页面冻结，只修阻断使用的缺陷；新页面一律用 React。阶段 A+B 已随 PR #431 合并至 main@0a90fd4a，3000 同版本部署和线上只读链路经 #430 核验；阶段 C 已由 Mog 派定并在专属工作树实施，验收记录见 [ACC-WEB-REACT-001-B](design/acceptance/web-react-001-b-acceptance.md)。
+Mog 2026-10-15 决定所有正式网页统一为一个 React + TypeScript 应用，不留新旧双轨（[DEC-0010](decisions/0010-web-frontend-react.md)）。唯一推进入口是 [WEB-REACT-001 计划](plans/active/web-react-001.md)（Issue #430），它合并了 UI 改版专项 UIUX-CONTENT-WORKBENCH-001（Issue #425，原生前端停止、后端继续，React 归阶段 C）。迁移期间旧页面冻结，只修阻断使用的缺陷；新页面一律用 React。阶段 A+B 已随 PR #431 合并至 main@0a90fd4a，3000 同版本部署和线上只读链路经 #430 核验；阶段 C 首版已随 PR #432 合并；Mog 对其 V3 还原不予验收，当前在独立候选重新落地并补齐本篇材料准备，验收前不合并部署。基础验收记录见 [ACC-WEB-REACT-001-B](design/acceptance/web-react-001-b-acceptance.md)。
 
 ## 研究底稿与图片分层第一阶段
 

@@ -207,3 +207,10 @@ Mog 授权三篇指定作品在本机核对与重新分层。私有材料快照�
 - 统一入口：`scripts/test-content-workbench-postgres.sh --browser`，默认后端证明继续可独立运行，CI执行后端与浏览器两种模式。合成来源/凭据不代表真实选题或真实模型验收。
 
 字体核对：上游 `2894aab31764f10f29c421bdfd2340d3b382d384`；源 TTF SHA256 `a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da`；WOFF2 SHA256 `ed05125987c35ee57be16be7242568f1d516fbf497bc0ef4161499ca9e8d8fce`；产物 7782120 字节。转换工具 fontTools 4.62.1，`TTFont(source).flavor="woff2"`，不裁掉字形；OFL 1.1 文本随文件保留，仅移除上游一处行尾空格以通过仓库空白检查。
+
+## 2026-10-15 · V3 还原的私有真实文本验收副本
+
+- 仍使用 `implementation/v3-fidelity/` 私有目录；真实笔记/原声、账号身份、来源映射、作品回执、截图与成品包均忽略，不进 Git、不上传 CI。源副本只来自既有本机读取，不代表重新采集或全库覆盖。
+- 维护源为 `content_workbench_private_review.rs` 测试夹具；只有显式 `CW_BROWSER_MANUAL_REVIEW=1` 才接受 `CW_BROWSER_REAL_SAMPLES`，复制到一次性库并保留原笔记与父评论映射。缺失作者/互动信息不补造。
+- 再生入口：设置上述变量和 `CW_BROWSER_PROOF_DIR` 后执行 `scripts/test-content-workbench-postgres.sh --browser`；不携带私有样本时仍为 CI 的合成证明。人工模式保留候选最多八小时，在证据目录写入 `review-complete` 后退出并清理隔离资源。人工模式不会冒充自动浏览器证明。
+- 保留本包必要的真实样本、来源映射、最终作品及成品证据直至 Mog 验收；不必要的目录抓取和重复截图按本包精确路径清理。正式库、常驻 runtime 与来源原件均不在清理范围内。

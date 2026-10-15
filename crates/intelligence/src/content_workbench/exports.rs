@@ -220,8 +220,10 @@ pub async fn freeze_export(
     work: Uuid,
     r: &FreezeRequest,
 ) -> Result<(ExportRecord, Revision), WorkbenchError> {
-    if r.renderer_version != "creation-renderer.v1"
-        || r.font_version.is_empty()
+    if !matches!(
+        r.renderer_version.as_str(),
+        "creation-renderer.v1" | "creation-renderer.v3"
+    ) || r.font_version.is_empty()
         || r.font_version.len() > 200
     {
         return Err(WorkbenchError::Invalid("renderer"));
