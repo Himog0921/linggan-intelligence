@@ -1,3 +1,3 @@
 .fields { display: contents; }
-/* Only names already clipped in the legacy layout yield to edit/manage controls. */
-.stationName:global(.c-stn-name-label)[data-name-overflow] { flex-shrink: 1; }
+/* Keep the label inside its own grid cell so the state cell cannot cover the edit control. */
+.stationName:global(.c-stn-name-label) { min-width: 0; flex-shrink: 1; }

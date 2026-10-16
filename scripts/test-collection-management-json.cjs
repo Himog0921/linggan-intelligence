@@ -112,7 +112,10 @@ async function main() {
 
     await page.goto(endpoint(`/collection/runtime?return_to=${encodeURIComponent(`/collection/tasks?domain=${fixture.domainRef}&run=${fixture.runRef}`)}`));
     await page.locator('.c-runtime').waitFor(); await page.getByRole('button', { name: '新增工位', exact: true }).click();
-    const initialStation = `合成管理工位-${randomUUID().slice(0, 8)}`;
+    // Seven Chinese characters plus this legal eight-hex suffix is the observed
+    // boundary: legacy width detection did not mark it truncated, yet its edit
+    // control crossed into the adjacent connection-state cell.
+    const initialStation = '合成管理工位复-a1b2c3d4';
     await page.locator('#station-register [name=display_name]').fill(initialStation);
     await submit('runtime-register', () => page.locator('#station-register').getByRole('button', { name: '登记', exact: true }).click());
     const registered = await eventually(() => get('runtime'), value => value.projection.stations.some(station => station.name === initialStation));
@@ -121,7 +124,10 @@ async function main() {
     assert.equal(duplicateStation.code, 'station_rejected');
     assert.equal((await get('runtime')).projection.stations.filter(item => item.name === initialStation).length, 1);
     let row = stationRow(station.stationRef); await row.waitFor();
-    await row.getByRole('button', { name: `编辑 ${initialStation} 工位名称`, exact: true }).click();
+    const editName = row.getByRole('button', { name: `编辑 ${initialStation} 工位名称`, exact: true });
+    const [editBox, stateBox] = await Promise.all([editName.boundingBox(), row.locator('.c-tg-cell').first().boundingBox()]);
+    assert(editBox && stateBox && editBox.x + editBox.width <= stateBox.x, 'station name controls stay inside their own grid cell');
+    await editName.click();
     const finalStation = `${initialStation}-已更名`; await row.locator('[name=display_name]').fill(finalStation);
     await submit('runtime-rename', () => row.getByRole('button', { name: '保存', exact: true }).click());
     await eventually(() => get('runtime'), value => value.projection.stations.find(item => item.stationRef === station.stationRef)?.name === finalStation);

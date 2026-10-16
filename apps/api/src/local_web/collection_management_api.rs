@@ -3,6 +3,10 @@ use super::*;
 
 pub(super) fn routes() -> Router<LocalWebState> {
     Router::new()
+        .route(
+            "/api/collection/management/domains",
+            get(content_workbench_domains),
+        )
         .route("/api/collection/workspace/domains", get(domains))
         .route("/api/collection/workspace/runtime", get(runtime))
 }
@@ -11,6 +15,36 @@ pub(super) fn routes() -> Router<LocalWebState> {
 struct ManagementParams {
     domain: Option<String>,
     return_to: Option<String>,
+}
+
+/// Read-only selection data for the React content workbench.
+///
+/// The route name predates the collection React migration, but its sole remaining consumer is a
+/// separate React page. Keep this projection intentionally small rather than coupling that page to
+/// the management workspace's much larger domain read model.
+async fn content_workbench_domains(State(state): State<LocalWebState>) -> Response {
+    let Some(database) = state.database.database() else {
+        return local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "domain_read_unavailable",
+        );
+    };
+    match read_observation_domains(database).await {
+        Ok(domains) => Json(content_workbench_domain_options(&domains)).into_response(),
+        Err(_) => local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "domain_read_unavailable",
+        ),
+    }
+}
+
+fn content_workbench_domain_options(domains: &[ObservationDomain]) -> serde_json::Value {
+    json!({
+        "items": domains
+            .iter()
+            .map(|domain| json!({"domainRef": domain.domain_ref, "name": domain.name}))
+            .collect::<Vec<_>>()
+    })
 }
 
 async fn domains(
@@ -536,6 +570,10 @@ fn control_command_error(
         _ => rejection.to_owned(),
     }
 }
+
+#[cfg(test)]
+#[path = "collection_management_api_tests.rs"]
+mod tests;
 
 #[cfg(test)]
 mod command_error_tests {
