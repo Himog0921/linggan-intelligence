@@ -395,3 +395,7 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发，并于 2026-10-02 
 
 - [正式创作页面](design/pages/content-workbench-page.md)：WEB-REACT-001 阶段 C 的 V3 规则，#425 供给后端。
 - [作品与材料使用合同](data-contracts/content-workbench-001.md)：首包typed文档、保存/引用/AI/导出边界。
+
+阶段 E 实施入口：[运营台账五页 React 迁移](plans/active/web-react-001-e-ops.md)（Issue #438，已派定；保留当前实际 UI，候选验证不等于部署）。
+
+阶段 E 证明：[运营台账五页验收记录](design/acceptance/web-react-001-e-acceptance.md)（候选、隔离链路与实际 UI 对照；部署及 Mog 验收独立）。

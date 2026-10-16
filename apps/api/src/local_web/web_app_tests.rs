@@ -267,7 +267,12 @@ async fn health_reports_the_frontend_build() {
             "/collection/targets",
             "/collection/tasks",
             "/collection/domains",
-            "/collection/runtime"
+            "/collection/runtime",
+            "/ops/overview",
+            "/ops/publications",
+            "/ops/accounts",
+            "/ops/daily",
+            "/ops/io"
         ])
     );
 }
@@ -351,4 +356,24 @@ async fn settings_page_real_chain_browser_proof() {
         result.success(),
         "React settings browser proof failed; see the evidence directory"
     );
+}
+
+#[tokio::test]
+async fn operations_five_pages_are_react_and_native_assets_are_retired() {
+    for page in ["overview", "publications", "accounts", "daily", "io"] {
+        let (status, _, body) = send(app(), &format!("/ops/{page}"), "127.0.0.1:3000").await;
+        assert!(matches!(
+            status,
+            StatusCode::OK | StatusCode::SERVICE_UNAVAILABLE
+        ));
+        assert!(!body.contains("data-ops-page"));
+    }
+    for asset in ["ops.css", "ops.js", "ops-overview.js"] {
+        let (status, _, _) = send(app(), &format!("/assets/{asset}"), "127.0.0.1:3000").await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+    for uri in ["/ops/unknown", "/api/local/ops/unknown"] {
+        let (status, _, _) = send(app(), uri, "127.0.0.1:3000").await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
 }
