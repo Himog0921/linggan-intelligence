@@ -94,6 +94,7 @@ run_proof() {
     LINGGAN_WEB_DIST="$project_root/apps/web/dist" \
     LINGGAN_MODEL_SYNTHETIC_PREVIEW=SYNTHETIC-NOT-EVIDENCE \
     LINGGAN_SUPPORT_DIR="$support_dir" \
+    LINGGAN_LOCAL_MEDIA_ROOT="$support_dir/media" \
     LINGGAN_PI_NODE="$support_dir/no-model-process" \
     RUST_TEST_THREADS=1 \
     "$@"
@@ -113,3 +114,11 @@ run_proof "$proof_dir/creators" \
   local_web::creators_browser_tests \
   -- --ignored --nocapture --test-threads=1
 printf '%s\n' 'WEB-REACT-001 D1 corpus shell API and creators page real-chain proofs passed (isolated database; synthetic data only)'
+
+# 阶段 E：运营台账五页、目标写入与六种导出；全部使用独立合成数据。
+mkdir -p "$proof_dir/ops"
+run_proof "$proof_dir/ops" \
+  cargo test -p linggan-api --bins --locked \
+  local_web::ops_browser_tests \
+  -- --ignored --nocapture --test-threads=1
+printf '%s\n' 'WEB-REACT-001 E operations five-page real-chain proof passed (isolated database only)'

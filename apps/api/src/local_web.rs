@@ -58,6 +58,8 @@ mod ops;
 mod ops_api;
 mod ops_export;
 mod ops_overview_api;
+#[cfg(test)]
+mod ops_browser_tests;
 mod shell;
 mod station_view;
 mod target_drawer;
