@@ -231,7 +231,12 @@ try {
     await page.getByRole('combobox', { name: '通道状态' }).selectOption('');
     await page.waitForFunction(size => document.querySelectorAll('li[data-work-ref]').length === size, pageSize);
     await page.getByRole('combobox', { name: '媒体类型' }).selectOption('video');
-    await page.waitForFunction(() => document.querySelectorAll('li[data-work-ref]').length >= 1);
+    // 等筛选后的列表真的到了：地址带上媒体类型，且列表不再是未筛选时的整页（只等「至少一行」会被旧列表满足）。
+    await page.waitForURL(url => url.searchParams.get('mediaKind') === 'video');
+    await page.waitForFunction(size => {
+      const count = document.querySelectorAll('li[data-work-ref]').length;
+      return count >= 1 && count < size;
+    }, pageSize);
     assert.equal(await rowOf(TITLE.video).count(), 1);
     await page.keyboard.press('Escape');
     // 系统视图：部分取得／风险停止／媒体已清理／撤回或受限；地址只写 view，接口收到展开后的条件。
