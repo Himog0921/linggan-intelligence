@@ -98,6 +98,18 @@ export async function fetchReobservationStatus(statusPath: string, signal?: Abor
   return parseReobservationStatus(await requestJson(statusPath, signal ? { signal } : {}));
 }
 
+/**
+ * 把状态读取的结果并进请求回执：状态响应里没有的字段（准入、工单等）保持请求时的值，不被解码出来的 null 盖掉。
+ * 任务列表以状态响应为准。
+ */
+export function mergeOperation(previous: ReobservationOperation, status: ReobservationOperation): ReobservationOperation {
+  const merged: Record<string, unknown> = { ...previous };
+  for (const [key, value] of Object.entries(status)) {
+    if (key !== 'tasks' && value !== null) merged[key] = value;
+  }
+  return { ...(merged as unknown as ReobservationOperation), tasks: status.tasks };
+}
+
 /** 终态：已接纳回执、租约结束未见回执、任务结束未见回执、输入不可执行（已停止）。 */
 export const TERMINAL_TASK_STATES: ReadonlySet<string> = new Set([
   'ACCEPTED',
