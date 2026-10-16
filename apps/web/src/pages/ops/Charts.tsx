@@ -42,6 +42,38 @@ function Axis({
     </text>
   );
 }
+type CurvePoint = { x: number; y: number };
+
+/** Smooth measured values without bridging missing data or overshooting adjacent values. */
+export function smoothSeriesPath(points: Array<CurvePoint | null>): string {
+  const segments: CurvePoint[][] = [];
+  let segment: CurvePoint[] = [];
+  const flush = () => { if (segment.length) segments.push(segment); segment = []; };
+  for (const point of points) {
+    if (point === null) flush();
+    else segment.push(point);
+  }
+  flush();
+  const fmt = (value: number) => value.toFixed(2);
+  return segments.map((line) => {
+    if (!line.length) return "";
+    let d = "M" + fmt(line[0].x) + "," + fmt(line[0].y);
+    for (let i = 0; i < line.length - 1; i++) {
+      const a = line[i], b = line[i + 1];
+      const before = line[Math.max(0, i - 1)];
+      const after = line[Math.min(line.length - 1, i + 2)];
+      const dx = (b.x - a.x) / 3;
+      const min = Math.min(a.y, b.y), max = Math.max(a.y, b.y);
+      const clamp = (value: number) => Math.max(min, Math.min(max, value));
+      const firstY = clamp(a.y + (b.y - before.y) / 6);
+      const secondY = clamp(b.y - (after.y - a.y) / 6);
+      d += " C" + fmt(a.x + dx) + "," + fmt(firstY) + " " +
+        fmt(b.x - dx) + "," + fmt(secondY) + " " + fmt(b.x) + "," + fmt(b.y);
+    }
+    return d;
+  }).filter(Boolean).join(" ");
+}
+
 export function TrendChart({
   points,
   granularity,
@@ -50,132 +82,102 @@ export function TrendChart({
   granularity: string;
 }) {
   const { ref, width } = useWidth();
-  const followTop = 18,
-    followHeight = 92,
-    hitTop = 132,
-    hitHeight = 22;
-  const slot = width / Math.max(points.length, 1);
-  const follow = f.scale(
-      points.map((p) => p.followersGained),
-      followHeight,
-    ),
-    hit = f.scale(
-      points.map((p) => p.hits),
-      hitHeight,
-    );
-  const every = Math.max(1, Math.ceil(points.length / 8));
+  const left = 42, right = 12;
+  const plotWidth = Math.max(1, width - left - right);
+  const top = 25, followerHeight = 142, followerBaseline = top + followerHeight;
+  const hitsTop = 193, hitHeight = 62, hitBaseline = hitsTop + hitHeight;
+  const coverageTop = hitBaseline + 9, coverageHeight = 6;
+  const labelY = coverageTop + coverageHeight + 20, height = labelY + 12;
+  const slot = plotWidth / Math.max(points.length, 1);
+  const x = (i: number) => left + (i + 0.5) * slot;
+  const knownMax = (selector: (p: TrendPoint) => number | null) =>
+    Math.max(1, ...points.map(selector).filter((v): v is number => v !== null && Number.isFinite(v)));
+  const followMax = knownMax((p) => p.followersGained);
+  const hitMax = knownMax((p) => p.hits);
+  const fy = (value: number) => followerBaseline - (Math.max(0, value) / followMax) * followerHeight;
+  const hy = (value: number) => hitBaseline - (Math.max(0, value) / hitMax) * hitHeight;
+  const followersPath = smoothSeriesPath(points.map((p, i) =>
+    p.followersGained === null ? null : { x: x(i), y: fy(p.followersGained) },
+  ));
+  const hitsPath = smoothSeriesPath(points.map((p, i) =>
+    p.hits === null ? null : { x: x(i), y: hy(p.hits) },
+  ));
+  const showEvery = Math.max(1, Math.ceil(points.length / 7));
+  const partial = points.filter((p) => p.coverage === "partial");
   return (
     <div
       ref={ref}
-      className={c("ops-chart")}
+      className={c("ops-chart", "ops-trend-chart-v2")}
       id="ops-trend"
       role="img"
       aria-label={f.trendAccessibleLabel(points, granularity)}
     >
       {points.length ? (
         <>
-          <svg viewBox={`0 0 ${width} ${hitTop + hitHeight + 18}`}>
-            <text x={0} y={10} textAnchor="start" className={c("ops-axis")}>
-              加微
-            </text>
-            <text
-              x={0}
-              y={hitTop - 6}
-              textAnchor="start"
-              className={c("ops-axis")}
-            >
-              爆款
-            </text>
-            <line
-              x1={0}
-              x2={width}
-              y1={followTop + followHeight}
-              y2={followTop + followHeight}
-              className={c("ops-grid")}
-            />
-            <line
-              x1={0}
-              x2={width}
-              y1={hitTop + hitHeight}
-              y2={hitTop + hitHeight}
-              className={c("ops-grid")}
-            />
+          <svg viewBox={[0, 0, width, height].join(" ")}>
+            <text x={0} y={13} textAnchor="start" className={c("ops-axis")}>加微</text>
+            <text x={0} y={hitsTop - 7} textAnchor="start" className={c("ops-axis")}>爆款</text>
+            {[0.25, 0.5, 0.75, 1].map((step) => (
+              <line
+                key={step}
+                x1={left} x2={width - right}
+                y1={followerBaseline - step * followerHeight}
+                y2={followerBaseline - step * followerHeight}
+                className={c("ops-grid")}
+              />
+            ))}
+            <line x1={left} x2={width - right} y1={followerBaseline} y2={followerBaseline}
+                  className={c("ops-trend-baseline-v2")} />
+            <line x1={left} x2={width - right} y1={hitBaseline} y2={hitBaseline}
+                  className={c("ops-trend-baseline-v2")} />
+            {followersPath ? <path d={followersPath} className={c("ops-trend-followers-v2")} /> : null}
+            {hitsPath ? <path d={hitsPath} className={c("ops-trend-hits-v2")} /> : null}
             {points.map((p, i) => {
-              const x = i * slot + slot * 0.15,
-                w = slot * 0.7,
-                fh = follow(p.followersGained);
-              const suffix =
-                p.coverage === "partial" ? ` · ${f.trendPointNote(p)}` : "";
+              const summary = p.label + " · 加微 " + f.number(p.followersGained) +
+                " · 爆款 " + f.number(p.hits) + " · " + f.trendPointNote(p);
+              const dayFocus = i === 0 || i === points.length - 1 || i % showEvery === 0;
               return (
                 <g key={p.start}>
-                  {p.followersGained === null ? (
-                    <rect
-                      x={x}
-                      y={followTop + followHeight - 2}
-                      width={w}
-                      height={2}
-                      className={c("ops-gap")}
-                    >
-                      <title>
-                        {p.label} 没有迁入的每日数据{suffix}
-                      </title>
-                    </rect>
-                  ) : fh > 0 ? (
-                    <rect
-                      x={x}
-                      y={followTop + followHeight - fh}
-                      width={w}
-                      height={fh}
-                      className={c("ops-followers")}
-                    >
-                      <title>
-                        {p.label} 加微 {f.number(p.followersGained)}
-                        {suffix}
-                      </title>
-                    </rect>
+                  {p.followersGained !== null ? (
+                    <circle cx={x(i)} cy={fy(p.followersGained)} r={points.length > 28 ? 1.5 : 2.5}
+                            className={c("ops-trend-dot-v2")} />
                   ) : null}
-                  {p.hits === null ? (
-                    <rect
-                      x={x}
-                      y={hitTop + hitHeight - 2}
-                      width={w}
-                      height={2}
-                      className={c("ops-gap")}
-                    >
-                      <title>{p.label} 爆款：还没迁入</title>
-                    </rect>
-                  ) : p.hits > 0 ? (
-                    <rect
-                      x={x}
-                      y={hitTop + hitHeight - Math.max(hit(p.hits), 3)}
-                      width={w}
-                      height={Math.max(hit(p.hits), 3)}
-                      className={c("ops-hits")}
-                    >
-                      <title>
-                        {p.label} 爆款 {p.hits} 篇{suffix}
-                      </title>
-                    </rect>
+                  {p.hits !== null && p.hits > 0 ? (
+                    <circle cx={x(i)} cy={hy(p.hits)} r={points.length > 28 ? 1.5 : 2.5}
+                            className={c("ops-trend-hit-dot-v2")} />
                   ) : null}
-                  {i % every === 0 ? (
-                    <Axis
-                      center={x + w / 2}
-                      y={hitTop + hitHeight + 14}
-                      value={p.label}
-                      width={width}
-                    />
+                  <rect
+                    x={left + slot * i + 0.5}
+                    y={coverageTop}
+                    width={Math.max(1, slot - 1)}
+                    height={coverageHeight}
+                    className={c("ops-trend-coverage-v2")}
+                    data-coverage={p.coverage}
+                  />
+                  {(i === 0 || i === points.length - 1 || i % showEvery === 0) ? (
+                    <Axis center={x(i)} y={labelY} value={p.label} width={width} />
                   ) : null}
+                  <rect
+                    className={c("ops-trend-hit-area-v2")}
+                    x={left + slot * i}
+                    y={top}
+                    width={slot}
+                    height={coverageTop + coverageHeight - top}
+                    tabIndex={dayFocus ? 0 : -1}
+                    role="img"
+                    aria-label={summary}
+                  >
+                    <title>{summary}</title>
+                  </rect>
                 </g>
               );
             })}
           </svg>
-          {points
-            .filter((p) => p.coverage === "partial")
-            .map((p) => (
-              <p key={p.start} className={c("ops-note-line")}>
-                {p.label} · {f.trendPointNote(p)}
-              </p>
-            ))}
+          {partial.length ? (
+            <p className={c("ops-trend-footnote-v2")}>
+              部分周期仅统计已迁入的完整日；悬停或聚焦日期查看实际截止时间。
+            </p>
+          ) : null}
         </>
       ) : (
         <p className={c("ops-chart-empty")}>暂无趋势数据</p>
@@ -183,6 +185,7 @@ export function TrendChart({
     </div>
   );
 }
+
 interface Column {
   label: string;
   unknown: string;
@@ -375,35 +378,20 @@ export function OutputChart({
   );
 }
 export function Sparkline({ values }: { values: (number | null)[] }) {
-  const width = 84,
-    height = 20,
-    max = Math.max(1, ...values.filter((v): v is number => v !== null));
-  const segments: string[] = [];
-  let segment: string[] = [];
-  const flush = () => {
-    if (segment.length > 1) segments.push(segment.join(" "));
-    segment = [];
-  };
-  values.forEach((v, i) => {
-    if (v === null) {
-      flush();
-      return;
-    }
-    segment.push(
-      `${(i / 6) * (width - 2) + 1},${height - 1 - (v / max) * (height - 2)}`,
-    );
-  });
-  flush();
+  const width = 84, height = 20;
+  const max = Math.max(1, ...values.filter((v): v is number => v !== null));
+  const path = smoothSeriesPath(values.map((value, i) => value === null ? null : ({
+    x: values.length > 1 ? 1 + (i / (values.length - 1)) * (width - 2) : width / 2,
+    y: height - 1 - (value / max) * (height - 2),
+  })));
   return (
     <svg
-      viewBox={`0 0 ${width} ${height}`}
+      viewBox={[0, 0, width, height].join(" ")}
       className={c("ops-spark")}
       role="img"
-      aria-label={`近 7 天加微 ${values.map(f.number).join("、")}`}
+      aria-label={"近 7 天加微 " + values.map(f.number).join("、")}
     >
-      {segments.map((points, i) => (
-        <polyline key={i} points={points} />
-      ))}
+      {path ? <path d={path} /> : null}
     </svg>
   );
 }
