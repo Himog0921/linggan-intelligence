@@ -61,9 +61,12 @@ async fn finish_without_dispatch(
 
 /// Process-local turn-taking between the work and author queues inside the existing model worker.
 /// After a work visit the author queue is offered the next visit first; an author queue with
-/// nothing due falls back to work, and work with nothing due falls back to authors. It only
-/// decides which queue is tried first: leases, fingerprints, retry limits, budget and admission
-/// still gate every call, and nothing here is persisted (a restart only resets who goes first).
+/// nothing claimable falls back to work, and work with nothing due falls back to authors. An
+/// author is claimable only once none of its own works in the domain is unfinished (see
+/// `run_focus`), so a turn never judges an author mid-backlog and other authors' backlogs do not
+/// hold it back. The schedule only decides which queue is tried first: leases, fingerprints,
+/// retry limits, budget and admission still gate every call, and nothing here is persisted (a
+/// restart only resets who goes first).
 #[derive(Default)]
 pub struct CreatorDiscoverySchedule {
     prefer_author: bool,
@@ -146,8 +149,8 @@ pub async fn run_once(
             }
         }
     }
-    // After a work visit the author queue takes this visit if it has anything due. At most one
-    // lease is taken per visit; an idle author queue falls through to work below.
+    // After a work visit the author queue takes this visit if it has a claimable author. At most
+    // one lease is taken per visit; when no author is claimable it falls through to work below.
     if schedule.prefer_author && run_focus(db, secrets, adapter).await? {
         schedule.prefer_author = false;
         return Ok(true);
@@ -376,7 +379,18 @@ async fn run_focus(
     adapter: &PiAdapter,
 ) -> Result<bool, ModelError> {
     let mut tx = db.pool().begin().await?;
-    let row=sqlx::query("SELECT a.domain_ref,a.platform,a.author_external_id,a.requested_fingerprint,p.config_ref FROM linggan_creator_discovery_author_analysis a JOIN linggan_creator_discovery_policy p USING(domain_ref,platform) JOIN observation_domain d USING(domain_ref) WHERE a.job_state='queued' AND a.attempt_count<3 AND a.next_attempt_at<=scope_001_now() AND p.analysis_enabled AND d.status='active' ORDER BY a.next_attempt_at,a.domain_ref,a.platform,a.author_external_id FOR UPDATE OF a SKIP LOCKED LIMIT 1").fetch_optional(&mut *tx).await?;
+    // An author is claimable only when none of its own works in this domain is unfinished, so it
+    // is judged once on the final work results instead of after every work, and one author's
+    // backlog never holds another author back (the guard is per author, evaluated in the claim).
+    // Unfinished work analysis = `running` (including an expired lease: recovery above turns it
+    // back into `queued`, or `failed` at three attempts) or `queued` with attempts left, which
+    // covers both due and waiting-for-retry rows. `failed` (three attempts used), `paused`
+    // (waits for re-enable, next-day budget or manual retry; the author hits the same admission
+    // gate) and `idle` do not block. A work's author is resolved with the same as-of function
+    // the creator read model uses. The unfinished set is built once per claim (MATERIALIZED), so
+    // the cost follows the backlog rather than the number of waiting authors, and an author that
+    // is not claimable is filtered out in the query, letting the next one through.
+    let row=sqlx::query("WITH unfinished AS MATERIALIZED (SELECT w.domain_ref,c.platform,attribution.author_external_id FROM linggan_creator_discovery_work_analysis w JOIN linggan_material_content c ON c.public_ref=w.work_public_ref CROSS JOIN LATERAL linggan_material_content_author_at(w.work_public_ref,scope_001_now()) attribution WHERE w.job_state='running' OR (w.job_state='queued' AND w.attempt_count<3)) SELECT a.domain_ref,a.platform,a.author_external_id,a.requested_fingerprint,p.config_ref FROM linggan_creator_discovery_author_analysis a JOIN linggan_creator_discovery_policy p USING(domain_ref,platform) JOIN observation_domain d USING(domain_ref) WHERE a.job_state='queued' AND a.attempt_count<3 AND a.next_attempt_at<=scope_001_now() AND p.analysis_enabled AND d.status='active' AND NOT EXISTS (SELECT 1 FROM unfinished u WHERE u.domain_ref=a.domain_ref AND u.platform=a.platform AND u.author_external_id=a.author_external_id) ORDER BY a.next_attempt_at,a.domain_ref,a.platform,a.author_external_id FOR UPDATE OF a SKIP LOCKED LIMIT 1").fetch_optional(&mut *tx).await?;
     let Some(row) = row else {
         tx.commit().await?;
         return Ok(false);
