@@ -59,6 +59,16 @@ if [[ "${COLLECTION_RUN_REGRESSION_PROOF:-0}" == "1" ]]; then
   done
 fi
 if [[ "${COLLECTION_RUN_BROWSER_PROOF:-0}" == "1" ]]; then
+  # 浏览器证明会从采集页点进证据库，证据库是 React 页（WEB-REACT-001 阶段 D2）：需要已构建的前端产物。
+  node_bin="${WEB_APP_PROOF_NODE:-$HOME/.nvm/versions/node/v$(cat .nvmrc)/bin/node}"
+  [[ -x "$node_bin" ]] || node_bin="$(command -v node || true)"
+  [[ -x "$node_bin" ]] || { echo "Node is unavailable; the React evidence page needs apps/web/dist" >&2; exit 1; }
+  npm_bin="$(dirname "$node_bin")/npm"
+  [[ -x "$npm_bin" ]] || npm_bin="$(command -v npm)"
+  export PATH="$(dirname "$node_bin"):$PATH"
+  [[ -d apps/web/node_modules ]] || "$npm_bin" ci --prefix apps/web --ignore-scripts --no-audit --no-fund
+  "$npm_bin" --prefix apps/web run build >/dev/null
+  export LINGGAN_WEB_DIST="$project_root/apps/web/dist"
   cargo test -p linggan-api --locked collection_single_run_browser_with_persisted_data -- --ignored --test-threads=1
 fi
 echo "focused collection single run PostgreSQL proof passed"

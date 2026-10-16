@@ -27,8 +27,6 @@ mod evidence_fixture;
 #[cfg(test)]
 mod evidence_guard_tests;
 #[cfg(test)]
-mod evidence_page;
-#[cfg(test)]
 mod evidence_seed;
 #[cfg(test)]
 mod full_schema_fixture;
@@ -89,9 +87,7 @@ use linggan_contracts::{
     parse_local_task_spec, parse_producer_attempt, parse_producer_submission,
     parse_producer_task_spec,
 };
-use linggan_evidence::observation_domain::{
-    ObservationDomain, read_observation_domains, resolve_current_domain,
-};
+use linggan_evidence::observation_domain::{ObservationDomain, read_observation_domains};
 use linggan_evidence::{
     AcquisitionChainError, AuthorizationGrant, COLLECTION_RUNTIME_REQUIREMENTS, CheckInOutcome,
     CreatorLifecycleQuery, DiscoveryIngressError, InstallationCheckIn, LeaseError,
@@ -153,9 +149,6 @@ const SHELL_CSS: &str = include_str!("local_web/shell.css");
 const COLLECTION_WORKSPACE_CSS: &str = include_str!("local_web/collection_workspace.css");
 const TARGET_DRAWER_CSS: &str = include_str!("local_web/target_drawer.css");
 const COLLECTION_WORKSPACE_JS: &str = include_str!("local_web/collection_workspace.js");
-const EVIDENCE_LIBRARY_CSS: &str = include_str!("local_web/evidence_library.css");
-const EVIDENCE_OBSERVATION_JS: &str = include_str!("local_web/evidence_observation.js");
-const EVIDENCE_LIBRARY_JS: &str = include_str!("local_web/evidence_library.js");
 #[cfg(test)]
 const LIDS_TOKEN_DOCUMENT: &str = include_str!("../../../docs/design/lids/tokens.md");
 
@@ -379,7 +372,6 @@ fn router(state: LocalWebState) -> Router {
         .merge(content_workbench_sources_api::routes())
         .merge(content_workbench_ai_api::routes())
         .route("/corpus", get(corpus_entry))
-        .route("/corpus/evidence", get(evidence_library))
         .route("/collection", get(collection_entry))
         .route("/collection/targets", get(collection_targets))
         .route("/collection/domains", get(collection_domains))
@@ -449,12 +441,6 @@ fn router(state: LocalWebState) -> Router {
             "/collection/runtime/account-bindings",
             post(collection_runtime_bind_account),
         )
-        .route("/assets/evidence-library.css", get(stylesheet))
-        .route(
-            "/assets/evidence-observation.js",
-            get(evidence_observation_script),
-        )
-        .route("/assets/evidence-library.js", get(evidence_library_script))
         .route(
             "/assets/topic-workspace.css",
             get(topic_workspace::stylesheet),
@@ -470,7 +456,6 @@ fn router(state: LocalWebState) -> Router {
 
 fn material_api_routes() -> Router<LocalWebState> {
     Router::new()
-        .route("/assets/research-dossier.js", get(research_dossier::script))
         .route("/api/local/work-resources/{public_ref}/research-dossier", get(research_dossier::read).layer(axum::middleware::from_fn(comment_study::local_comment_study_guard)))
         .route("/api/local/work-resources/{public_ref}/research-dossier/creator-preview", get(research_dossier::creator_preview).layer(axum::middleware::from_fn(comment_study::local_comment_study_guard)))
         .route("/api/local/work-resources/{public_ref}/research-dossier/comments", get(research_dossier::comments).layer(axum::middleware::from_fn(comment_study::local_comment_study_guard)))
@@ -692,81 +677,6 @@ async fn health(State(state): State<LocalWebState>) -> Json<Value> {
             "dispatch": dispatch_routes
         }
     }))
-}
-
-#[derive(serde::Deserialize)]
-struct CorpusSurfaceParams {
-    /// 当前观察领域。语料页每个子页共用这一个参数——换领域是换观察对象，不是换页面。
-    #[serde(default)]
-    domain: Option<String>,
-}
-
-async fn evidence_library(
-    State(state): State<LocalWebState>,
-    Query(params): Query<CorpusSurfaceParams>,
-) -> Html<String> {
-    let Some(database) = state.database.database() else {
-        return Html(corpus_message_html(
-            "Corpus 当前不可读",
-            "本机数据库连接不可用；页面没有回退到其他领域。",
-        ));
-    };
-    let collection_state = match count_targets(database, None).await {
-        Ok(counts) if counts.total > 0 => Some("观察中"),
-        Ok(_) => Some("无观察目标"),
-        Err(_) => Some("状态未知"),
-    };
-    let domains = match read_observation_domains(database).await {
-        Ok(domains) => domains,
-        Err(_) => {
-            return Html(corpus_message_html(
-                "领域范围当前不可读",
-                "领域配置读取失败；页面未把未知结果显示成空列表。",
-            ));
-        }
-    };
-    let current = resolve_current_domain(&domains, params.domain.as_deref());
-    Html(evidence_library_html(collection_state, &domains, current))
-}
-
-fn corpus_message_html(title: &str, message: &str) -> String {
-    format!(
-        "<!doctype html><html lang=\"zh-CN\"><meta charset=\"utf-8\"><title>{}</title><main><h1>{}</h1><p>{}</p></main></html>",
-        html_escape(title),
-        html_escape(title),
-        html_escape(message),
-    )
-}
-
-fn corpus_domain_choice_dialog(domains: &[ObservationDomain]) -> String {
-    let options = domains
-        .iter()
-        .map(|domain| {
-            let status = if domain.status == "paused" {
-                "已暂停 · 历史材料可读".to_owned()
-            } else {
-                let works = domain.sample_count.map_or_else(
-                    || "作品数未知".to_owned(),
-                    |count| format!("{count} 篇作品"),
-                );
-                format!("运行中 · {} 个目标 · {works}", domain.target_count)
-            };
-            format!(
-                "<a class=\"ev-domain-choice\" href=\"/corpus/evidence?domain={}\"><span class=\"ev-domain-choice-name\">{}</span><span class=\"ev-domain-choice-meta\">{}</span><span class=\"ev-domain-choice-arrow\" aria-hidden=\"true\">→</span></a>",
-                domain.domain_ref,
-                html_escape(&domain.name),
-                html_escape(&status),
-            )
-        })
-        .collect::<String>();
-    let choices = if domains.is_empty() {
-        "<p class=\"ev-domain-choice-empty\">还没有可选择的研究领域。</p><a class=\"ev-domain-manage\" href=\"/collection/domains\">前往领域管理 →</a>".to_owned()
-    } else {
-        format!("<nav class=\"ev-domain-choices\" aria-label=\"选择语料领域\">{options}</nav>")
-    };
-    format!(
-        "<dialog class=\"ev-domain-dialog\" id=\"ev-domain-dialog\" aria-labelledby=\"ev-domain-dialog-title\" aria-describedby=\"ev-domain-dialog-copy\"><div class=\"ev-domain-dialog-head\"><div><p class=\"ev-domain-dialog-key\">语料范围 <span class=\"v7-tech-key\">CORPUS SCOPE</span></p><h2 id=\"ev-domain-dialog-title\">选择研究领域</h2></div><button class=\"ev-domain-dialog-close\" id=\"ev-domain-dialog-close\" type=\"button\" aria-label=\"关闭领域选择\">×</button></div><p class=\"ev-domain-dialog-copy\" id=\"ev-domain-dialog-copy\">选择后读取该领域的作品材料；也可随后在页头切换。</p>{choices}</dialog>"
-    )
 }
 
 async fn evidence_library_json(
@@ -2435,28 +2345,6 @@ fn local_read_json_error(status: axum::http::StatusCode, code: &'static str) -> 
     (
         status,
         Json(json!({ "operation": "local_read", "outcome": "unavailable", "code": code })),
-    )
-        .into_response()
-}
-
-#[cfg(test)]
-fn evidence_read_unavailable_html() -> String {
-    // 读不到领域时页面仍以本领域呈现，选择器不渲染——这两个错误页正是那个状态。
-    evidence_page::render_read_unavailable(&evidence_library_html(None, &[], None))
-}
-
-#[cfg(test)]
-fn evidence_query_invalid_html() -> String {
-    evidence_page::render_query_invalid(&evidence_library_html(None, &[], None))
-}
-
-async fn stylesheet() -> Response {
-    (
-        [(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("text/css; charset=utf-8"),
-        )],
-        format!("{LIDS_TOKENS}\n{SHELL_CSS}\n{EVIDENCE_LIBRARY_CSS}"),
     )
         .into_response()
 }
@@ -5966,39 +5854,6 @@ async fn collection_script() -> Response {
         .into_response()
 }
 
-async fn evidence_library_script() -> Response {
-    (
-        [(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("text/javascript; charset=utf-8"),
-        )],
-        EVIDENCE_LIBRARY_JS,
-    )
-        .into_response()
-}
-
-async fn evidence_observation_script() -> Response {
-    (
-        [(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("text/javascript; charset=utf-8"),
-        )],
-        EVIDENCE_OBSERVATION_JS,
-    )
-        .into_response()
-}
-
-/// 面包屑里的领域选择器。
-///
-/// 它站在面包屑那一层，而不是内容区里，因为领域是**当前观察对象**而非页面内的一个筛选项：
-/// 选中它，语料下的每个子页都跟着换数据源，页面结构一律不变。
-///
-/// 只有一个领域（或读不出来）时整个控件不渲染——一个永远只有一项的下拉是噪音。
-/// 子页导航始终保留已选领域；即使只剩一个领域，评论研究也不能失去读取范围。
-fn corpus_nav_domain(current: Option<&ObservationDomain>) -> Option<String> {
-    current.map(|domain| domain.domain_ref.to_string())
-}
-
 /// 采集侧的导航领域参数。与语料侧的差别只有一处：全部领域也要显式带上，否则从
 /// 「全部领域」点进另一个子页会悄悄变回默认，与本次修的那类缺陷同源。
 fn collection_nav_domain(
@@ -6131,229 +5986,6 @@ fn html_escape(value: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
-}
-
-fn evidence_library_header(
-    collection_state: Option<&str>,
-    domains: &[ObservationDomain],
-    current: Option<&ObservationDomain>,
-) -> String {
-    let picker = corpus_domain_picker(domains, current, "/corpus/evidence", None);
-    let crumb = if picker.is_empty() {
-        "语料 <span class=\"v7-slash\">/</span> <b>证据库</b> <span class=\"v7-slash\">/</span> <span class=\"v7-context-current\">作品材料集合</span>".to_owned()
-    } else {
-        format!(
-            "语料 <span class=\"v7-slash\">/</span> {picker} <span class=\"v7-slash\">/</span> <b>证据库</b>"
-        )
-    };
-    shell::global_header(
-        shell::PrimarySurface::Corpus,
-        "本机材料投影 <span class=\"v7-tech-key\">LOCAL MATERIAL PROJECTION</span>",
-        &crumb,
-        "<span class=\"v7-kpi\"><em>事实层</em><b>只读</b></span><span class=\"v7-kpi\"><em>材料入口</em><b>默认投影</b></span><i class=\"v7-vr\" aria-hidden=\"true\"></i><span>本机时区 <span class=\"v7-tech-key\">UTC+08</span></span>",
-        collection_state,
-    )
-}
-
-fn evidence_library_html(
-    collection_state: Option<&str>,
-    domains: &[ObservationDomain],
-    current: Option<&ObservationDomain>,
-) -> String {
-    let base = r#"<!doctype html>
-<html lang="zh-CN" data-theme="linggan-intelligence">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="color-scheme" content="light">
-    <title>证据库 · Linggan Intelligence</title>
-    <link rel="stylesheet" href="/assets/evidence-library.css">
-    <script src="/assets/evidence-observation.js" defer></script>
-    <script src="/assets/research-dossier.js" defer></script>
-    <script src="/assets/evidence-library.js" defer></script>
-  </head>
-  <body data-corpus-domain="__CORPUS_DOMAIN_REF__" data-corpus-domain-selected="__CORPUS_DOMAIN_SELECTED__" data-corpus-domain-name="__CORPUS_DOMAIN_NAME__">
-    <div class="v7-app">
-      <!-- GLOBAL_HEADER_START --><!-- GLOBAL_HEADER_END -->
-      <div class="v7-shell">
-        <!-- CORPUS_SIDE_NAV_START --><!-- CORPUS_SIDE_NAV_END -->
-
-        <main class="v7-main ev-main" aria-labelledby="page-title">
-          <h1 class="v7-sr-only" id="page-title">证据库</h1>
-
-          <section class="ev-command" aria-label="材料检索与筛选">
-            <form id="ev-query-form" class="ev-query-form">
-              <div class="ev-find">
-                <span class="ev-find-mark" aria-hidden="true">FIND</span>
-                <input id="ev-search" name="q" type="search" autocomplete="off" aria-label="检索作品与证据" placeholder="标题、作者或原声片段……">
-              </div>
-              <div class="ev-query-tools">
-                <div class="ev-popover-anchor">
-                  <button class="ev-button ev-filter-toggle" id="ev-filter-toggle" type="button" aria-expanded="false" aria-controls="ev-filter-panel">
-                    <span>筛选</span><b id="ev-filter-count">0</b>
-                  </button>
-                  <div class="ev-popover ev-filter-panel" id="ev-filter-panel" hidden>
-                    <div class="ev-field" data-ev-select="ev-window" data-ev-name="window"><span class="ev-field-label" id="ev-window-label">读取窗口</span><div class="ev-popover-anchor"><button class="ev-select-toggle" id="ev-window" type="button" aria-expanded="false" aria-haspopup="listbox" aria-labelledby="ev-window-label ev-window-value" aria-controls="ev-window-list"><span class="ev-select-value" id="ev-window-value">最新已接纳发现</span><i class="ev-caret" aria-hidden="true"></i></button><div class="ev-popover ev-select-list" id="ev-window-list" role="listbox" aria-labelledby="ev-window-label" hidden><button type="button" role="option" data-ev-option="latest_accepted_discovery" aria-selected="true">最新已接纳发现</button><button type="button" role="option" data-ev-option="last_7_days" aria-selected="false">近 7 天来源发布时间</button><button type="button" role="option" data-ev-option="last_30_days" aria-selected="false">近 30 天来源发布时间</button></div></div></div>
-                    <div class="ev-field" data-ev-select="ev-lane" data-ev-name="lane"><span class="ev-field-label" id="ev-lane-label">材料通道</span><div class="ev-popover-anchor"><button class="ev-select-toggle" id="ev-lane" type="button" aria-expanded="false" aria-haspopup="listbox" aria-labelledby="ev-lane-label ev-lane-value" aria-controls="ev-lane-list"><span class="ev-select-value" id="ev-lane-value">全部材料通道</span><i class="ev-caret" aria-hidden="true"></i></button><div class="ev-popover ev-select-list" id="ev-lane-list" role="listbox" aria-labelledby="ev-lane-label" hidden><button type="button" role="option" data-ev-option="" aria-selected="true">全部材料通道</button><button type="button" role="option" data-ev-option="discovery" aria-selected="false">发现</button><button type="button" role="option" data-ev-option="detail" aria-selected="false">详情</button><button type="button" role="option" data-ev-option="comments" aria-selected="false">评论</button><button type="button" role="option" data-ev-option="replies" aria-selected="false">回复</button><button type="button" role="option" data-ev-option="author" aria-selected="false">作者</button><button type="button" role="option" data-ev-option="media_slots" aria-selected="false">媒体槽位</button><button type="button" role="option" data-ev-option="media_bytes" aria-selected="false">媒体字节</button><button type="button" role="option" data-ev-option="ocr" aria-selected="false">图片文字</button><button type="button" role="option" data-ev-option="asr" aria-selected="false">视频转录</button></div></div></div>
-                    <div class="ev-field" data-ev-select="ev-lane-state" data-ev-name="laneState"><span class="ev-field-label" id="ev-lane-state-label">通道状态</span><div class="ev-popover-anchor"><button class="ev-select-toggle" id="ev-lane-state" type="button" aria-expanded="false" aria-haspopup="listbox" aria-labelledby="ev-lane-state-label ev-lane-state-value" aria-controls="ev-lane-state-list"><span class="ev-select-value" id="ev-lane-state-value">全部状态</span><i class="ev-caret" aria-hidden="true"></i></button><div class="ev-popover ev-select-list" id="ev-lane-state-list" role="listbox" aria-labelledby="ev-lane-state-label" hidden><button type="button" role="option" data-ev-option="" aria-selected="true">全部状态</button><button type="button" role="option" data-ev-option="UNKNOWN" aria-selected="false">当前未知</button><button type="button" role="option" data-ev-option="NOT_REQUESTED" aria-selected="false">尚未请求</button><button type="button" role="option" data-ev-option="QUEUED" aria-selected="false">已排队</button><button type="button" role="option" data-ev-option="NOT_OBSERVED" aria-selected="false">尚未观察</button><button type="button" role="option" data-ev-option="OBSERVED" aria-selected="false">已观察</button><button type="button" role="option" data-ev-option="PARTIAL" aria-selected="false">部分取得</button><button type="button" role="option" data-ev-option="ACQUIRED" aria-selected="false">已取得</button><button type="button" role="option" data-ev-option="PROCESSING" aria-selected="false">处理中</button><button type="button" role="option" data-ev-option="NOT_ENABLED" aria-selected="false">处理器未启用</button><button type="button" role="option" data-ev-option="SEARCHABLE" aria-selected="false">可检索</button><button type="button" role="option" data-ev-option="FAILED" aria-selected="false">执行失败</button><button type="button" role="option" data-ev-option="RISK_CONTROL" aria-selected="false">风险控制停止</button><button type="button" role="option" data-ev-option="BYTES_CLEANED" aria-selected="false">字节已清理</button><button type="button" role="option" data-ev-option="WITHDRAWN_OR_RESTRICTED" aria-selected="false">撤回或受限</button></div></div></div>
-                    <div class="ev-field" data-ev-select="ev-media-kind" data-ev-name="mediaKind"><span class="ev-field-label" id="ev-media-kind-label">媒体类型</span><div class="ev-popover-anchor"><button class="ev-select-toggle" id="ev-media-kind" type="button" aria-expanded="false" aria-haspopup="listbox" aria-labelledby="ev-media-kind-label ev-media-kind-value" aria-controls="ev-media-kind-list"><span class="ev-select-value" id="ev-media-kind-value">全部类型</span><i class="ev-caret" aria-hidden="true"></i></button><div class="ev-popover ev-select-list" id="ev-media-kind-list" role="listbox" aria-labelledby="ev-media-kind-label" hidden><button type="button" role="option" data-ev-option="" aria-selected="true">全部类型</button><button type="button" role="option" data-ev-option="cover" aria-selected="false">封面</button><button type="button" role="option" data-ev-option="image" aria-selected="false">正文图片</button><button type="button" role="option" data-ev-option="video" aria-selected="false">视频</button><button type="button" role="option" data-ev-option="live_photo" aria-selected="false">实况图片</button></div></div></div>
-                    <div class="ev-filter-foot"><button class="ev-button ev-button--ghost" id="ev-reset" type="button">清空筛选</button></div>
-                  </div>
-                </div>
-                <div class="ev-popover-anchor">
-                  <button class="ev-button ev-sort-toggle" id="ev-sort-toggle" type="button" aria-expanded="false" aria-haspopup="listbox" aria-controls="ev-sort-list">
-                    <span class="ev-sort-value" id="ev-sort-value">最近观察</span><i class="ev-caret" aria-hidden="true"></i>
-                  </button>
-                  <div class="ev-popover ev-sort-list" id="ev-sort-list" role="listbox" aria-label="结果排序" hidden>
-                    <button type="button" role="option" data-ev-sort="latest_discovery" aria-selected="true">最近观察 <span class="v7-tech-key">LATEST DISCOVERY</span></button>
-                    <button type="button" role="option" data-ev-sort="relevance" aria-selected="false">相关度 <span class="v7-tech-key">RELEVANCE</span></button>
-                  </div>
-                </div>
-                <button class="ev-button ev-button--primary" type="submit"><span>读取材料</span></button>
-              </div>
-            </form>
-
-            <div class="ev-deck-foot">
-              <div class="ev-quickviews" role="group" aria-label="按材料状态快速筛选">
-                <span class="ev-deck-label">系统视图</span>
-                <button type="button" data-ev-view="all" aria-pressed="true">全部材料</button>
-                <button type="button" data-ev-view="partial" aria-pressed="false">部分取得</button>
-                <button type="button" data-ev-view="risk" aria-pressed="false">风险停止</button>
-                <button type="button" data-ev-view="cleaned" aria-pressed="false">媒体已清理</button>
-                <button type="button" data-ev-view="restricted" aria-pressed="false">撤回或受限</button>
-              </div>
-              <div class="ev-layout-control">
-                <span class="ev-deck-label ev-saved-views" aria-disabled="true">我的视图 · 暂无已保存视图</span>
-                <div class="ev-layout-switch" role="group" aria-label="结果排版">
-                  <button type="button" data-ev-layout="research" aria-pressed="true">研读</button>
-                  <button type="button" data-ev-layout="table" aria-pressed="false">表格</button>
-                  <button type="button" data-ev-layout="cover" aria-pressed="false">封面</button>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <div class="ev-read-receipt" id="ev-read-receipt" role="status" aria-live="polite" hidden></div>
-
-          <section class="ev-bench" id="ev-bench" data-inspector="normal" aria-label="证据审查工作台">
-            <section class="ev-results" aria-labelledby="results-title">
-              <h2 class="v7-sr-only" id="results-title">作品材料结果</h2>
-              <div class="ev-feedback" id="ev-feedback" role="status" aria-live="polite"></div>
-              <!-- CORPUS_EMPTY_DOMAIN_LINK_START --><!-- CORPUS_EMPTY_DOMAIN_LINK_END -->
-              <div class="ev-table-head" id="ev-table-head" aria-hidden="true" hidden><span>作品</span><span>作者</span><span>材料</span><span class="ev-head-metrics" id="ev-head-metrics" aria-label="互动数据"></span><span>发布时间</span><span>最近观察</span></div>
-              <div class="ev-work-list" id="ev-work-list" role="listbox" aria-label="作品材料集合"></div>
-              <div class="ev-list-footer"><button class="ev-button ev-button--secondary" id="ev-next-list" type="button" hidden>继续读取作品</button></div>
-            </section>
-
-            <aside class="ev-inspector" id="ev-inspector" aria-labelledby="ev-inspector-title">
-              <header class="ev-inspector-head">
-                <button class="ev-back" id="ev-back-to-list" type="button">← 返回当前作品</button>
-                <h2 class="v7-sr-only" id="ev-inspector-title">请选择一个作品材料集合</h2>
-                <div class="ev-action-row">
-                  <button class="ev-button ev-button--primary" id="ev-open-source" type="button" disabled><span>打开原文</span></button>
-                  <button class="ev-button" id="ev-request-media" type="button" disabled>补采</button>
-                  <span class="ev-inspector-ref" id="ev-inspector-ref"></span>
-                  <div class="ev-panel-tools">
-                    <div class="ev-width-switch" role="group" aria-label="检查器宽度">
-                      <button type="button" data-ev-width="normal" aria-pressed="true" title="标准宽度"><i class="ev-width-glyph ev-width-glyph--normal" aria-hidden="true"></i><span class="v7-sr-only">标准</span></button>
-                      <button type="button" data-ev-width="wide" aria-pressed="false" title="加宽"><i class="ev-width-glyph ev-width-glyph--wide" aria-hidden="true"></i><span class="v7-sr-only">加宽</span></button>
-                      <button type="button" data-ev-width="focus" aria-pressed="false" title="专注"><i class="ev-width-glyph ev-width-glyph--focus" aria-hidden="true"></i><span class="v7-sr-only">专注</span></button>
-                    </div>
-                    <button class="ev-panel-close" id="ev-close-inspector" type="button" title="关闭检查器"><span aria-hidden="true">×</span><span class="v7-sr-only">关闭检查器</span></button>
-                  </div>
-                </div>
-                <div class="ev-inspector-feedback" id="ev-inspector-feedback" role="status"></div>
-                <div class="ev-tabs" role="tablist" aria-label="作品证据详情">
-                  <button type="button" role="tab" id="ev-tab-overview" data-ev-tab="overview" aria-controls="ev-panel-overview" aria-selected="true">概览</button>
-                  <button type="button" role="tab" id="ev-tab-evidence" data-ev-tab="evidence" aria-controls="ev-panel-evidence" aria-selected="false" tabindex="-1">证据</button>
-                  <button type="button" role="tab" id="ev-tab-dossier" data-ev-tab="dossier" aria-controls="ev-panel-dossier" aria-selected="false" tabindex="-1">研究底稿</button>
-                  <button type="button" role="tab" id="ev-tab-materials" data-ev-tab="materials" aria-controls="ev-panel-materials" aria-selected="false" tabindex="-1">材料</button>
-                  <button type="button" role="tab" id="ev-tab-trace" data-ev-tab="trace" aria-controls="ev-panel-trace" aria-selected="false" tabindex="-1">来源轨迹</button>
-                </div>
-              </header>
-              <div class="ev-inspector-body">
-                <div role="tabpanel" id="ev-panel-overview" data-ev-panel="overview" aria-labelledby="ev-tab-overview"></div>
-                <div role="tabpanel" id="ev-panel-evidence" data-ev-panel="evidence" aria-labelledby="ev-tab-evidence" hidden></div>
-                <div role="tabpanel" id="ev-panel-dossier" data-ev-panel="dossier" aria-labelledby="ev-tab-dossier" hidden></div>
-                <div role="tabpanel" id="ev-panel-materials" data-ev-panel="materials" aria-labelledby="ev-tab-materials" hidden></div>
-                <div role="tabpanel" id="ev-panel-trace" data-ev-panel="trace" aria-labelledby="ev-tab-trace" hidden></div>
-              </div>
-            </aside>
-          </section>
-
-          <div class="ev-lightbox" id="ev-lightbox" role="dialog" aria-modal="true" aria-labelledby="ev-lightbox-title" hidden>
-            <div class="ev-lightbox-head">
-              <div><strong id="ev-lightbox-title">本地媒体对象</strong><span class="ev-lightbox-ref" id="ev-lightbox-ref"></span></div>
-              <div class="ev-lightbox-tools">
-                <div class="ev-zoom" role="group" aria-label="缩放">
-                  <button type="button" id="ev-zoom-out" aria-label="缩小"><span aria-hidden="true">−</span></button>
-                  <button type="button" id="ev-zoom-reset" class="ev-zoom-value">100%</button>
-                  <button type="button" id="ev-zoom-in" aria-label="放大"><span aria-hidden="true">+</span></button>
-                </div>
-                <button class="ev-lightbox-close" id="ev-lightbox-close" type="button"><span aria-hidden="true">×</span><span class="v7-sr-only">关闭查看器 Esc</span></button>
-              </div>
-            </div>
-            <div class="ev-lightbox-stage">
-              <button class="ev-lightbox-step" id="ev-lightbox-prev" type="button" aria-label="上一张"><span aria-hidden="true">←</span></button>
-              <figure class="ev-lightbox-figure">
-                <div class="ev-lightbox-frame" id="ev-lightbox-frame"><img id="ev-lightbox-image" alt=""></div>
-                <figcaption id="ev-lightbox-caption"></figcaption>
-              </figure>
-              <button class="ev-lightbox-step" id="ev-lightbox-next" type="button" aria-label="下一张"><span aria-hidden="true">→</span></button>
-            </div>
-          </div>
-        </main>
-      </div>
-    </div>
-    <!-- CORPUS_DOMAIN_DIALOG_START --><!-- CORPUS_DOMAIN_DIALOG_END -->
-  </body>
-</html>"#;
-    let header = evidence_library_header(collection_state, domains, current);
-    let side_nav = shell::corpus_side_nav(
-        shell::CorpusPage::Evidence,
-        corpus_nav_domain(current).as_deref(),
-        r#"<span class="v7-side-dot"></span><span class="v7-zh-status">只读本机材料投影</span><br><span class="v7-zh-status">列表与详情不触发采集</span>"#,
-    );
-    // 当前领域随页面一起下发，前端据此决定读哪条查询路径。放在 body 属性上而不是
-    // 让前端自己解析地址：地址里的 domain 可能是无效值，有效性判定由服务端做过一次了，
-    // 前端再判一次就会出现两处规则，早晚不一致。
-    base.replace(
-        "<!-- GLOBAL_HEADER_START --><!-- GLOBAL_HEADER_END -->",
-        &header,
-    )
-    .replace(
-        "<!-- CORPUS_SIDE_NAV_START --><!-- CORPUS_SIDE_NAV_END -->",
-        &side_nav,
-    )
-    .replace(
-        "<!-- CORPUS_DOMAIN_DIALOG_START --><!-- CORPUS_DOMAIN_DIALOG_END -->",
-        &current
-            .is_none()
-            .then(|| corpus_domain_choice_dialog(domains))
-            .unwrap_or_default(),
-    )
-    .replace(
-        "<!-- CORPUS_EMPTY_DOMAIN_LINK_START --><!-- CORPUS_EMPTY_DOMAIN_LINK_END -->",
-        if current.is_none() && domains.is_empty() {
-            "<a class=\"ev-domain-manage ev-domain-manage--inline\" href=\"/collection/domains\">前往领域管理 →</a>"
-        } else {
-            ""
-        },
-    )
-    .replace(
-        "__CORPUS_DOMAIN_REF__",
-        &current
-            .map(|d| d.domain_ref.to_string())
-            .unwrap_or_default(),
-    )
-    .replace(
-        "__CORPUS_DOMAIN_SELECTED__",
-        if current.is_some() { "true" } else { "false" },
-    )
-    .replace(
-        "__CORPUS_DOMAIN_NAME__",
-        &current.map(|d| html_escape(&d.name)).unwrap_or_default(),
-    )
 }
 
 #[cfg(test)]

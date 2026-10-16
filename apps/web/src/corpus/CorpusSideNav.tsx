@@ -21,7 +21,7 @@ interface CorpusSideNavProps {
  * 语料模块的二级导航。结构、类名与 shell.rs 的 `corpus_side_nav` 一致，样式只来自 shell.css。
  *
  * 当前领域由这里统一带上：领域由整个语料模块承载，任何一个子页都无权在自己的链接里把它丢掉
- * （F09）。三项指向的页面多数仍由旧服务提供，所以用普通链接整页跳转，不交给前端路由。
+ * （F09）。评论研究仍由旧服务提供，所以三项一律用普通链接整页跳转，不交给前端路由。
  */
 export function CorpusSideNav({ active, domain, foot, evidenceCount = null }: CorpusSideNavProps) {
   return (

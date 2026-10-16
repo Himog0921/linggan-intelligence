@@ -49,7 +49,7 @@
 | 证据 | 代码与位置 | 核对内容 |
 |---|---|---|
 | S01 | [local_web.rs](../../apps/api/src/local_web.rs) 293–294、473–482；[shell.rs](../../apps/api/src/local_web/shell.rs)；[login.html](../../apps/api/src/local_web/login.html) 555 附近 | 根/语料路由、一级导航、开发登录跳转 |
-| S02 | [local_web.rs](../../apps/api/src/local_web.rs) 6106、6139–6178；[evidence_library.js](../../apps/api/src/local_web/evidence_library.js) 5–29、379；[evidence_library.css](../../apps/api/src/local_web/evidence_library.css) | 技术说明/占位、领域与work参数、作者/任务返回、阅读模式 |
+| S02 | [local_web.rs](../../apps/api/src/local_web.rs) 6106、6139–6178；`evidence_library.js` 5–29、379；`evidence_library.css`（这两个文件已随 WEB-REACT-001 阶段 D2 删除，证据库现为 React 页；行号为审计当日的旧页） | 技术说明/占位、领域与work参数、作者/任务返回、阅读模式 |
 | S03 | [creators.rs](../../apps/api/src/local_web/creators.rs) 12–25；`creators.js` 65–85、131；`creators.css`（后两个文件已随 WEB-REACT-001 D1 删除，当次基线见 `origin/main@36f3fdf9`；创作者页现为 `apps/web/src/pages/corpus/creators/`） | 作者读取/写边界、证据跳转、图片及可访问名称 |
 | S04 | [comment_study.html](../../apps/api/src/local_web/comment_study.html) 19–104；[comment_study.js](../../apps/api/src/local_web/comment_study.js) 166–187、283、737、855–903、1539；[comment_study.css](../../apps/api/src/local_web/comment_study.css) 42–72 | 列表/研究/方法入口、加载依赖、版本显示、弹窗与表格 |
 | S05 | [topic_map.rs](../../apps/api/src/local_web/topic_map.rs) 49–76、110、320–330；[topic_map.js](../../apps/api/src/local_web/topic_map.js) 92–126、155–157、185、464、781–786；[topic_map.css](../../apps/api/src/local_web/topic_map.css) | 读取/命令边界、错误码映射、覆盖读数、旅程、人工备选及引用导出 |

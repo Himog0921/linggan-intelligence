@@ -196,8 +196,11 @@ describe('检查器外壳', () => {
 
     await view.user.click(rowButton(2));
     expect(view.location()).toBe(`/corpus/evidence?domain=${DOMAIN}&work=${workRef(2)}`);
-    expect(view.router.state.historyAction).toBe('PUSH');
     expect(bench()).toHaveAttribute('data-inspector', 'normal');
+    // 点选是新增历史：后退回到「已关闭」的那一步。
+    await act(() => view.router.navigate(-1));
+    expect(view.location()).toContain('panel=closed');
+    expect(bench()).toHaveAttribute('data-inspector', 'closed');
   });
 
   it('重开时回到关闭前的宽度', async () => {

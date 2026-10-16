@@ -3,14 +3,25 @@ use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode, header},
 };
-#[cfg(any())]
-use linggan_evidence::{DiscoveryLibraryCard, DiscoveryLibraryProjection};
 use linggan_storage_postgres::testing::isolated_proof_schema;
 use sqlx::Row;
 use std::collections::BTreeMap;
 use tower::ServiceExt;
 
 const LOCAL_001_MIGRATIONS: &str = full_schema_fixture::FULL_MIGRATIONS;
+
+/// 语料页页头的对照样本。证据库页已迁到 React（WEB-REACT-001 阶段 D2），但评论研究、采集、主题图谱等
+/// 仍由服务器经 `shell::global_header` 输出页头，它们必须与语料页头保持一致。迁移前这些断言以旧证据库页
+/// 作样本；现在直接渲染语料页头，参数与旧页传给 `global_header` 的完全相同，断言文字不变。
+fn corpus_header_sample(collection_state: Option<&str>) -> String {
+    shell::global_header(
+        shell::PrimarySurface::Corpus,
+        "本机材料投影 <span class=\"v7-tech-key\">LOCAL MATERIAL PROJECTION</span>",
+        "语料 <span class=\"v7-slash\">/</span> <b>证据库</b> <span class=\"v7-slash\">/</span> <span class=\"v7-context-current\">作品材料集合</span>",
+        "<span class=\"v7-kpi\"><em>事实层</em><b>只读</b></span><span class=\"v7-kpi\"><em>材料入口</em><b>默认投影</b></span><i class=\"v7-vr\" aria-hidden=\"true\"></i><span>本机时区 <span class=\"v7-tech-key\">UTC+08</span></span>",
+        collection_state,
+    )
+}
 
 #[test]
 fn recovery_control_read_failure_still_blocks_the_runtime_page() {
@@ -353,325 +364,6 @@ async fn local_entry_redirects_to_the_login_page() {
     assert_eq!(response.headers().get(header::LOCATION).unwrap(), "/login");
 }
 
-#[tokio::test]
-#[cfg(any())] // superseded server-rendered discovery page
-async fn evidence_route_returns_the_honest_empty_state() {
-    let response = app()
-        .oneshot(
-            Request::builder()
-                .uri("/corpus/evidence")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    assert!(evidence_library_html(None, &[], None).contains("来源材料尚未完整接通"));
-    assert!(evidence_library_html(None, &[], None).contains("SOURCE INCOMPLETE"));
-    assert!(evidence_library_html(None, &[], None).contains("没有可展示的本地材料"));
-    assert!(!evidence_library_html(None, &[], None).contains(&["SYSTEM", "LIVE"].join(" ")));
-}
-
-#[test]
-#[cfg(any())] // superseded server-rendered discovery page
-fn evidence_page_does_not_replace_unknown_with_zero() {
-    assert!(evidence_library_html(None, &[], None).contains("覆盖情况 <strong>未知"));
-    assert!(!evidence_library_html(None, &[], None).contains("评论 0"));
-}
-
-#[test]
-#[cfg(any())] // superseded server-rendered discovery page
-fn evidence_library_uses_chinese_for_user_meaning_and_english_only_as_technical_keys() {
-    let base = evidence_library_html(None, &[], None);
-
-    for required in [
-        "事实层 / 证据",
-        "本机服务 / 读投影未接通 <span class=\"v7-tech-key\">LOCAL HOST / NO READ MODEL</span>",
-        "本机时区 <span class=\"v7-tech-key\">UTC+08</span>",
-        "当前没有已接纳材料 <span class=\"v7-tech-key\">NO ACCEPTED MATERIAL AVAILABLE</span>",
-        "来源材料尚未完整接通",
-        "固定面板 <span class=\"v7-tech-key\">PIN</span>",
-        "加宽面板 <span class=\"v7-tech-key\">WIDE</span>",
-        "平台点赞 <span class=\"v7-tech-key\">PLATFORM LIKES</span>",
-        "状态矩阵 <em>STATE MATRIX</em>",
-        "仅展示本机页面结构</span><span class=\"v7-tech-key\">LOCAL PRESENTATION</span>",
-        "当前尚未读取任何材料</span><span class=\"v7-tech-key\">NO MATERIAL READ</span>",
-    ] {
-        assert!(
-            base.contains(required),
-            "missing Chinese-first copy: {required}"
-        );
-    }
-
-    let projection = DiscoveryLibraryProjection {
-        cards: vec![DiscoveryLibraryCard {
-            platform: "xhs".to_owned(),
-            platform_content_id: "local-language-card".to_owned(),
-            title: Some("原始标题保持不翻译".to_owned()),
-            creator_display_name: None,
-            published_at_source_text: None,
-            published_at: None,
-            published_at_state: "UNKNOWN",
-            first_discovered_at: "2026-08-26 00:00:00+00".to_owned(),
-            observed_at: "2026-08-26 00:00:00+00".to_owned(),
-            result_position: 17,
-            coverage_visible_cards: 20,
-            coverage_maximum_quota: 20,
-            coverage_stopped_reason: "surface_read_complete".to_owned(),
-            cover_presentation_state: "MEDIA_NOT_ACQUIRED",
-            cover_local_asset_url: None,
-        }],
-        excluded_unknown_published_at: 0,
-        time_view: "latest_accepted_discovery",
-    };
-    let html = evidence_page::render_read_projection(&base, &projection, None);
-
-    for required in [
-        "创作者未知",
-        "发布时间未知 <span class=\"v7-tech-key\">PUBLISHED_AT UNKNOWN</span>",
-        "媒体<br>尚未采集<span class=\"v7-tech-key\">MEDIA NOT ACQUIRED</span>",
-        "搜索位置 #17</span><span class=\"v7-tech-key\">POSITION #17</span>",
-        "已接纳的本机发现材料 <span class=\"v7-tech-key\">ACCEPTED RUNTIME MATERIAL</span>",
-        "观察到 / 配额 <span class=\"v7-tech-key\">OBSERVED / QUOTA</span>",
-        "停止原因：当前页面读取完成 <span class=\"v7-tech-key\">surface_read_complete</span>",
-        "已接纳的发现卡片 <span class=\"v7-tech-key\">ACCEPTED DISCOVERY</span>",
-        "当前显示最新已接纳的发现卡片；其中部分卡片的发布时间仍可能未知。",
-        "<span class=\"v7-tech-key\">LATEST ACCEPTED DISCOVERY · PUBLISHED_AT UNKNOWN</span>",
-        "只读取 Linggan 已接纳的发现卡片；不触发平台采集 <span class=\"v7-tech-key\">DISCOVERY ONLY</span>",
-        "本机服务 / 已接纳发现材料 <span class=\"v7-tech-key\">LOCAL HOST / ACCEPTED DISCOVERY</span>",
-        "<span class=\"v7-kpi\"><em>内容</em><b>1</b></span>",
-    ] {
-        assert!(
-            html.contains(required),
-            "missing Chinese-first dynamic copy: {required}"
-        );
-    }
-
-    for prohibited in [
-        "本机服务 / 读投影未接通（LOCAL HOST / NO READ MODEL）",
-        "本机服务 / 读投影未接通",
-        "本地读投影未接通",
-        "READ MODEL NOT CONNECTED",
-        "aria-label=\"MEDIA NOT ACQUIRED\"",
-        "<span class=\"v7-published-unknown\">PUBLISHED",
-        "<span>POSITION #17</span>",
-        "<b>ACCEPTED RUNTIME MATERIAL</b>",
-        "<span>OBSERVED / QUOTA</span>",
-        "LOCAL PRESENTATION ONLY / NO MATERIAL READ",
-        ">ACCEPTED DISCOVERY CARDS<",
-        "VIEW = LATEST ACCEPTED DISCOVERY / PUBLISHED_AT MAY BE UNKNOWN",
-        "只读取 Linggan 已接纳的 discovery 卡片",
-        "本机服务 / 已接纳发现材料（LOCAL HOST / ACCEPTED DISCOVERY）",
-        "<span>UTC+08</span>",
-    ] {
-        assert!(
-            !html.contains(prohibited),
-            "English technical key must not carry this user meaning alone: {prohibited}"
-        );
-    }
-
-    let stylesheet = evidence_page_stylesheet();
-    assert!(
-        stylesheet.contains(".v7-tech-key{display:inline;color:var(--v7-ghost);font:500 .82em/1.2"),
-        "technical annotations must be visually smaller than their Chinese primary expression"
-    );
-    assert!(
-        stylesheet.contains(".v7-media-pending .v7-tech-key{display:block;max-width:54px;margin-top:4px;font-size:.82em"),
-        "the media-state technical annotation must also remain subordinate on discovery cards"
-    );
-}
-
-#[test]
-#[cfg(any())] // superseded server-rendered discovery page
-fn base_no_db_header_and_nested_technical_keys_remain_chinese_first() {
-    let base = evidence_library_html(None, &[], None);
-    assert!(base.contains("<!-- EVIDENCE_HEADER_BOUNDARY_START -->"));
-    assert!(base.contains("<!-- EVIDENCE_HEADER_META_STATE_START -->"));
-    assert!(base.contains(
-        "本机服务 / 读投影未接通 <span class=\"v7-tech-key\">LOCAL HOST / NO READ MODEL</span>"
-    ));
-    assert!(
-        base.contains(
-            "本地读投影未接通 <span class=\"v7-tech-key\">READ MODEL NOT CONNECTED</span>"
-        )
-    );
-    assert!(
-        !base.contains("本机服务 / 读投影未接通（LOCAL HOST / NO READ MODEL）"),
-        "the English no-read-model sentence must not become the header state"
-    );
-
-    let stylesheet = evidence_page_stylesheet();
-    for selector in [
-        ".v7-fact-strap span .v7-tech-key",
-        ".v7-empty-metric span .v7-tech-key",
-        ".v7-readout span .v7-tech-key",
-    ] {
-        assert!(
-            stylesheet.contains(selector),
-            "a nested technical key needs a selector stronger than its label: {selector}"
-        );
-    }
-    for rule in [
-        ".v7-view-label em,\n.v7-filter-lead em { margin-left:7px; color:var(--v7-ghost); font:500 .82em/1.2 var(--lgi-font-mono); font-style:normal; letter-spacing:.06em; }",
-        ".v7-section h3 em { margin-right:auto; margin-left:8px; color:var(--v7-ghost); font:500 .82em/1.2 var(--lgi-font-mono); font-style:normal; letter-spacing:.06em; }",
-    ] {
-        assert!(
-            stylesheet.contains(rule),
-            "English annotation must not outweigh its Chinese label: {rule}"
-        );
-    }
-}
-
-#[test]
-#[cfg(any())] // superseded server-rendered discovery page
-fn invalid_and_unavailable_reads_render_the_actual_chinese_state_without_source_incomplete() {
-    for (html, primary, code, detail) in [
-        (
-            evidence_query_invalid_html(),
-            "当前查询参数无效",
-            "LOCAL_QUERY_INVALID",
-            "当前未读取任何材料，也未触发平台搜索或补采。",
-        ),
-        (
-            evidence_read_unavailable_html(),
-            "本机发现材料读取暂时不可用",
-            "READ_PROJECTION_UNAVAILABLE",
-            "当前未读取任何材料；没有显示旧系统或远程数据。",
-        ),
-    ] {
-        assert!(
-            html.contains(primary),
-            "missing Chinese primary state: {primary}"
-        );
-        assert!(
-            html.contains(&format!("<span class=\"v7-tech-key\">{code}</span>")),
-            "the raw code must remain an adjacent technical key: {code}"
-        );
-        assert!(
-            html.contains(detail),
-            "missing exact state boundary: {detail}"
-        );
-        assert!(html.contains("当前未读取材料"));
-        assert!(html.contains("当前未读取材料，来源状态未知"));
-        assert!(
-            !html.contains("来源信息尚未完整接通"),
-            "a query/read failure must not be misdescribed as source incompleteness"
-        );
-        assert!(
-            !html.contains("SOURCE INCOMPLETE"),
-            "a query/read failure must not inherit the base SOURCE_INCOMPLETE code"
-        );
-        assert!(
-            !html.contains("读投影未接通"),
-            "a query/read failure must not be misdescribed as a disconnected read model"
-        );
-        assert!(
-            !html.contains("当前没有已接纳材料"),
-            "a failed read must not be misdescribed as an empty accepted-material set"
-        );
-        assert!(
-            !html.contains("当前没有可用查询"),
-            "the old generic query copy must not survive a state-specific failure"
-        );
-    }
-}
-
-#[test]
-fn discovery_stop_reasons_keep_raw_codes_but_lead_with_truthful_chinese_meaning() {
-    for (raw_reason, expected_meaning) in [
-        ("quota_reached", "已达到本次配额"),
-        ("surface_ended", "当前页面内容已结束"),
-        ("risk_control", "平台风险控制导致停止"),
-        ("manual_stop", "用户手动停止"),
-        ("unknown", "停止原因未知"),
-        ("future_reason", "停止原因未归类"),
-    ] {
-        let markup = evidence_page::stopped_reason_markup(raw_reason);
-        assert!(
-            markup.contains(expected_meaning),
-            "missing meaning for {raw_reason}"
-        );
-        assert!(
-            markup.contains(&format!("<span class=\"v7-tech-key\">{raw_reason}</span>")),
-            "the stored code must remain an adjacent technical annotation for {raw_reason}"
-        );
-    }
-}
-
-#[test]
-#[cfg(any())] // superseded server-rendered discovery page
-fn evidence_page_keeps_the_v7_shell_and_three_column_geometry() {
-    let html = evidence_library_html(None, &[], None);
-
-    for required in [
-        "v7-global-header",
-        "v7-context-row",
-        "v7-side",
-        "v7-page-header",
-        "v7-workspace",
-        "v7-results",
-        "v7-inspect",
-        "FACT LAYER / EVIDENCE",
-    ] {
-        assert!(html.contains(required), "missing V7 structure: {required}");
-    }
-
-    assert!(
-        !evidence_page_stylesheet().contains("#e8003f"),
-        "the second signature colour must stay retired: DESIGN-003 collapsed the palette onto --lgi-signal"
-    );
-    assert!(
-        !evidence_page_stylesheet().contains('#'),
-        "page CSS must not author raw colour: every value resolves through a LIDS token"
-    );
-
-    for required_css in [
-        "html,body { height:100%; overflow:hidden; }",
-        ".v7-app { height:100vh; min-height:0;",
-        "--v7-header-height:128px",
-        "--v7-side-width:216px",
-        "--v7-inspector-width:440px",
-        "--v7-red:var(--lgi-signal)",
-        "--v7-black:var(--lgi-ink)",
-        "@media(max-width:900px){html,body{height:auto;min-height:100%;overflow:auto}.v7-app{height:auto;min-height:100vh;grid-template-rows:auto minmax(0,1fr);overflow:visible}",
-    ] {
-        assert!(
-            evidence_page_stylesheet().contains(required_css),
-            "missing V7 page-local visual constant: {required_css}"
-        );
-    }
-}
-
-#[test]
-#[cfg(any())] // superseded server-rendered discovery page
-fn evidence_page_has_no_fabricated_v7_runtime_material_or_actions() {
-    let html = evidence_library_html(None, &[], None);
-
-    let prohibited = [
-        ["SYSTEM", "LIVE"].join(" "),
-        ["INDEX", "FRESH"].join(" "),
-        ["12", "482"].join(","),
-        ["327", "9K"].join("."),
-        ["XHS", "78F2A"].join("-"),
-        ["为什么 ADHD 孩子", "每天写作业都像打仗？"].concat(),
-        ["已创建", "补采任务"].concat(),
-        ["已保存为", "个人视图"].concat(),
-    ];
-
-    for prohibited in &prohibited {
-        assert!(
-            !html.contains(prohibited),
-            "fabricated V7 value: {prohibited}"
-        );
-    }
-
-    assert!(html.contains("disabled aria-disabled=\"true\""));
-    assert!(html.contains(
-        "当前没有已接纳材料 <span class=\"v7-tech-key\">NO ACCEPTED MATERIAL AVAILABLE</span>"
-    ));
-}
-
 #[test]
 fn runtime_token_source_matches_the_full_lids_baseline() {
     let runtime = declared_token_values(LIDS_TOKENS);
@@ -681,149 +373,6 @@ fn runtime_token_source_matches_the_full_lids_baseline() {
     assert_eq!(documented.len(), 132);
     assert_eq!(runtime, documented);
     assert!(declared_token_values(SHELL_CSS).is_empty());
-    assert!(declared_token_values(EVIDENCE_LIBRARY_CSS).is_empty());
-}
-
-#[test]
-#[cfg(any())] // superseded server-rendered discovery page
-fn read_projection_escapes_source_text_and_never_emits_a_remote_cover_url() {
-    let projection = DiscoveryLibraryProjection {
-        cards: vec![DiscoveryLibraryCard {
-            platform: "xhs".to_owned(),
-            platform_content_id: "note-a".to_owned(),
-            title: Some("<script>not a cover</script>".to_owned()),
-            creator_display_name: Some("A娃 & 家长".to_owned()),
-            published_at_source_text: Some("2026-08-25T00:00:00Z".to_owned()),
-            published_at: Some("2026-08-25 00:00:00+00".to_owned()),
-            published_at_state: "KNOWN",
-            first_discovered_at: "2026-08-25 00:00:00+00".to_owned(),
-            observed_at: "2026-08-25 00:00:00+00".to_owned(),
-            result_position: 1,
-            coverage_visible_cards: 1,
-            coverage_maximum_quota: 20,
-            coverage_stopped_reason: "risk_control".to_owned(),
-            cover_presentation_state: "MEDIA_NOT_ACQUIRED",
-            cover_local_asset_url: None,
-        }],
-        excluded_unknown_published_at: 0,
-        time_view: "last_30_days",
-    };
-    let html = evidence_page::render_read_projection(
-        &evidence_library_html(None, &[], None),
-        &projection,
-        Some("A娃"),
-    );
-
-    assert!(html.contains("&lt;script&gt;not a cover&lt;/script&gt;"));
-    assert!(html.contains("媒体<br>尚未采集"));
-    assert!(html.contains("MEDIA NOT ACQUIRED"));
-    assert!(!html.contains("<script>not a cover</script>"));
-    assert!(!html.contains("https://"));
-    assert!(!html.contains("xhscdn"));
-}
-
-#[test]
-#[cfg(any())] // superseded server-rendered discovery page
-fn default_read_view_surfaces_unknown_published_time_without_a_surrogate_date() {
-    let projection = DiscoveryLibraryProjection {
-        cards: vec![DiscoveryLibraryCard {
-            platform: "xhs".to_owned(),
-            platform_content_id: "synthetic-unknown-publication".to_owned(),
-            title: Some("synthetic accepted discovery".to_owned()),
-            creator_display_name: Some("synthetic creator".to_owned()),
-            published_at_source_text: None,
-            published_at: None,
-            published_at_state: "UNKNOWN",
-            first_discovered_at: "2026-08-26 00:00:00+00".to_owned(),
-            observed_at: "2026-08-26 00:00:00+00".to_owned(),
-            result_position: 1,
-            coverage_visible_cards: 1,
-            coverage_maximum_quota: 20,
-            coverage_stopped_reason: "surface_read_complete".to_owned(),
-            cover_presentation_state: "MEDIA_NOT_ACQUIRED",
-            cover_local_asset_url: None,
-        }],
-        excluded_unknown_published_at: 0,
-        time_view: "latest_accepted_discovery",
-    };
-
-    let html = evidence_page::render_read_projection(
-        &evidence_library_html(None, &[], None),
-        &projection,
-        None,
-    );
-
-    assert!(html.contains("PUBLISHED_AT UNKNOWN"));
-    assert!(html.contains("未用首次发现、观察或接收时间替代"));
-    assert!(html.contains("当前显示最新已接纳的发现卡片；其中部分卡片的发布时间仍可能未知。"));
-    assert!(html.contains("LATEST ACCEPTED DISCOVERY · PUBLISHED_AT UNKNOWN"));
-    assert!(!html.contains("VIEW = LATEST ACCEPTED DISCOVERY / PUBLISHED_AT MAY BE UNKNOWN"));
-    assert!(html.contains("<em>视角</em> <span class=\"v7-zh-value\">最新已接纳</span>"));
-    assert!(!html.contains("2026-08-26 00:00:00+00"));
-}
-
-#[test]
-#[cfg(any())] // superseded server-rendered discovery page
-fn strict_published_window_reports_unknown_exclusions_even_with_visible_cards() {
-    let known_card = || DiscoveryLibraryCard {
-        platform: "xhs".to_owned(),
-        platform_content_id: "synthetic-known-publication".to_owned(),
-        title: Some("synthetic known discovery".to_owned()),
-        creator_display_name: Some("synthetic creator".to_owned()),
-        published_at_source_text: Some("2026-08-26T00:00:00Z".to_owned()),
-        published_at: Some("2026-08-26 00:00:00+00".to_owned()),
-        published_at_state: "KNOWN",
-        first_discovered_at: "2026-08-26 00:00:00+00".to_owned(),
-        observed_at: "2026-08-26 00:00:00+00".to_owned(),
-        result_position: 1,
-        coverage_visible_cards: 1,
-        coverage_maximum_quota: 20,
-        coverage_stopped_reason: "surface_read_complete".to_owned(),
-        cover_presentation_state: "MEDIA_NOT_ACQUIRED",
-        cover_local_asset_url: None,
-    };
-    let strict_html = evidence_page::render_read_projection(
-        &evidence_library_html(None, &[], None),
-        &DiscoveryLibraryProjection {
-            cards: vec![known_card()],
-            excluded_unknown_published_at: 1,
-            time_view: "last_30_days",
-        },
-        None,
-    );
-    assert!(strict_html.contains("当前查询有 1 个对象因来源发布时间未知而未进入此发布时间窗口"));
-    assert!(strict_html.contains("synthetic known discovery"));
-
-    let default_html = evidence_page::render_read_projection(
-        &evidence_library_html(None, &[], None),
-        &DiscoveryLibraryProjection {
-            cards: vec![known_card()],
-            excluded_unknown_published_at: 0,
-            time_view: "latest_accepted_discovery",
-        },
-        None,
-    );
-    assert!(!default_html.contains("未进入此发布时间窗口"));
-}
-
-#[test]
-#[cfg(any())] // superseded server-rendered discovery page
-fn default_empty_read_view_is_not_misdescribed_as_an_empty_published_window() {
-    let projection = DiscoveryLibraryProjection {
-        cards: vec![],
-        excluded_unknown_published_at: 0,
-        time_view: "latest_accepted_discovery",
-    };
-
-    let html = evidence_page::render_read_projection(
-        &evidence_library_html(None, &[], None),
-        &projection,
-        None,
-    );
-
-    assert!(html.contains("当前视角没有可展示卡片"));
-    assert!(html.contains("最新已接纳不是发布时间窗口"));
-    assert!(!html.contains("当前窗口没有可展示卡片"));
 }
 
 #[test]
@@ -902,180 +451,6 @@ fn resumable_media_temp_bytes_are_never_published_until_the_final_promotion() {
         b"abcd"
     );
     std::fs::remove_dir_all(root).expect("synthetic media root cleans up");
-}
-
-#[tokio::test]
-#[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
-#[cfg(any())] // superseded server-rendered discovery page
-async fn loopback_ingress_then_library_page_only_returns_locally_accepted_discovery_cards() {
-    let database = proof_database("local_api_ingress").await;
-    let observed_at = producer_fixture_observed_at(&database).await;
-    let application = app_with_database(database);
-
-    assert_discovery_package_is_accepted(application.clone(), discovery_package(&observed_at))
-        .await;
-
-    let body = get_successful_utf8_response(
-        application.clone(),
-        "/api/local/evidence-library/legacy?q=ADHD&window=last_30_days",
-    )
-    .await;
-    assert!(body.contains("note-api-known"));
-    assert!(!body.contains("note-api-unknown"));
-    assert!(body.contains("\"timeView\":\"last_30_days\""));
-    assert!(body.contains("\"excludedUnknownPublishedAt\":1"));
-    assert!(!body.contains("https://"));
-    assert!(!body.contains("xhscdn"));
-
-    let body = get_successful_utf8_response(
-        application.clone(),
-        "/api/local/evidence-library/legacy?q=ADHD",
-    )
-    .await;
-    assert!(body.contains("note-api-known"));
-    assert!(body.contains("note-api-unknown"));
-    assert!(body.contains("\"timeView\":\"latest_accepted_discovery\""));
-    assert!(body.contains("\"excludedUnknownPublishedAt\":0"));
-
-    let html = get_successful_utf8_response(
-        application.clone(),
-        "/corpus/evidence?q=ADHD&window=last_30_days",
-    )
-    .await;
-    assert!(html.contains("API 接纳卡片"));
-    assert!(html.contains("媒体<br>尚未采集"));
-    assert!(html.contains("MEDIA NOT ACQUIRED"));
-    assert!(!html.contains("https://"));
-    assert!(!html.contains("xhscdn"));
-
-    let html = get_successful_utf8_response(application, "/corpus/evidence?q=ADHD").await;
-    assert!(html.contains("PUBLISHED_AT UNKNOWN"));
-    assert!(html.contains("未用首次发现、观察或接收时间替代"));
-}
-
-#[tokio::test]
-#[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
-#[cfg(any())] // superseded server-rendered discovery page
-async fn loopback_projection_counts_unknown_published_time_by_content_item_identity() {
-    let database = proof_database("local_api_identity_unknown").await;
-    let observed_at = producer_fixture_observed_at(&database).await;
-    let application = app_with_database(database);
-
-    let response =
-        post_discovery_package(application.clone(), discovery_package(&observed_at)).await;
-    assert_eq!(response.status(), StatusCode::OK);
-    let response = post_discovery_package(
-        application.clone(),
-        shared_api_content_unknown_package(&observed_at),
-    )
-    .await;
-    assert_eq!(response.status(), StatusCode::OK);
-
-    let response = application
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/api/local/evidence-library/legacy?q=API&window=last_30_days")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = String::from_utf8(
-        to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap()
-            .to_vec(),
-    )
-    .unwrap();
-    assert!(body.contains("note-api-known"));
-    assert!(body.contains("\"excludedUnknownPublishedAt\":0"));
-
-    let response = application
-        .oneshot(
-            Request::builder()
-                .uri("/corpus/evidence?q=API&window=last_30_days")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let html = String::from_utf8(
-        to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap()
-            .to_vec(),
-    )
-    .unwrap();
-    assert!(html.contains("API 接纳卡片"));
-    assert!(!html.contains("当前查询候选中 1 个对象因发布时间未知而未进入窗口"));
-}
-
-#[tokio::test]
-#[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
-#[cfg(any())] // superseded server-rendered discovery page
-async fn loopback_7_day_query_keeps_api_and_page_window_metadata_in_sync() {
-    let database = proof_database("local_api_window_metadata").await;
-    let observed_at = producer_fixture_observed_at(&database).await;
-    let application = app_with_database(database);
-
-    let response = application
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/local/discovery-packages")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(discovery_package(&observed_at)))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-
-    let response = application
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/api/local/evidence-library/legacy?q=ADHD&window=last_7_days")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = String::from_utf8(
-        to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap()
-            .to_vec(),
-    )
-    .unwrap();
-    assert!(body.contains("\"timeView\":\"last_7_days\""));
-    assert!(!body.contains("\"timeView\":\"last_30_days\""));
-
-    let response = application
-        .oneshot(
-            Request::builder()
-                .uri("/corpus/evidence?q=ADHD&window=last_7_days")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let html = String::from_utf8(
-        to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap()
-            .to_vec(),
-    )
-    .unwrap();
-    assert!(html.contains("<em>窗口</em> <span class=\"v7-zh-value\">近 7 天</span>"));
-    assert!(html.contains("<span class=\"v7-tech-key\">PUBLISHED_AT / 7D</span>"));
-    assert!(!html.contains("PUBLISHED_AT / 30D"));
 }
 
 #[tokio::test]
@@ -1917,9 +1292,8 @@ fn collection_v4_uses_the_lids_reclaimed_title_and_context_readout_contract() {
     // COLLECTION-FIVE-PAGE-V4-UI-001: the V4 reference supplies the desktop work-area
     // hierarchy, but LIDS owns the shell. Page identity remains a single reader-only h1 and
     // the only page readings stay in the shared context row.
-    let corpus = evidence_library_html(None, &[], None);
-    assert!(corpus.contains("<h1 class=\"v7-sr-only\" id=\"page-title\">"));
-
+    // The Corpus pages that moved to React keep their single reader-only h1 in `CorpusFrame`
+    // (CorpusFrame.test.tsx); this test keeps guarding the server-rendered Collection shells.
     let mut pages = Vec::new();
     for section in [
         collection::Section::Targets,
@@ -2142,7 +1516,7 @@ fn scheduler_stale_and_unreadable_remain_distinct_facts() {
 
 #[test]
 fn corpus_header_can_reflect_the_connected_collection_read_model() {
-    let html = evidence_library_html(Some("观察中"), &[], None);
+    let html = corpus_header_sample(Some("观察中"));
     let collection_entry = html
         .split_once("v7-tech-key\">COLLECTION")
         .expect("the collection primary entry exists")
@@ -2152,7 +1526,7 @@ fn corpus_header_can_reflect_the_connected_collection_read_model() {
 
 #[test]
 fn corpus_header_can_preserve_an_unreadable_collection_state() {
-    let html = evidence_library_html(Some("状态未知"), &[], None);
+    let html = corpus_header_sample(Some("状态未知"));
     let collection_entry = html
         .split_once("v7-tech-key\">COLLECTION")
         .expect("the collection primary entry exists")
@@ -2256,7 +1630,7 @@ fn the_primary_nav_readouts_all_share_one_type_scale_and_one_colour() {
 
     // Both surfaces render the same six entries from the one shared header (运营 joined in
     // OPS-MIGRATION-001 D2).
-    let mut pages = vec![evidence_library_html(None, &[], None)];
+    let mut pages = vec![corpus_header_sample(None)];
     pages.push(collection::render(
         collection::Section::Targets,
         collection::OperationsMode::Now,
@@ -2729,13 +2103,6 @@ fn collection_stylesheet_authors_no_colour_of_its_own() {
     assert!(COLLECTION_WORKSPACE_CSS.contains("var(--lgi-stream-bg)"));
 }
 
-/// The stylesheet the Evidence Library route actually serves: shared shell first, then the
-/// page layer. Assertions run against this so moving a rule between the two files cannot
-/// silently drop it from the page.
-fn evidence_page_stylesheet() -> String {
-    format!("{SHELL_CSS}\n{EVIDENCE_LIBRARY_CSS}")
-}
-
 fn runtime_producer_task_spec() -> String {
     r#"{"contractVersion":"linggan.producer.task-spec.v2","taskId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","source":"manual","platform":"xhs","pageType":"note_detail","target":{"contentExternalId":"note-a"},"capabilitiesRequested":["media_slots"],"maximumQuota":1,"commentLimit":"not_requested","acquireMedia":"slots","riskPolicy":"local_trusted_user_initiated","stopConditions":["manual_stop","maximum_quota"]}"#.to_owned()
 }
@@ -2775,7 +2142,7 @@ fn declared_token_values(stylesheet: &str) -> BTreeMap<&str, &str> {
 fn served_primary_surfaces_link_to_each_other_and_unserved_ones_stay_disabled() {
     // A responsibility whose route this binary actually serves must be reachable from every
     // other served surface. An operator standing on either page can always leave it.
-    let evidence = evidence_library_html(None, &[], None);
+    let evidence = corpus_header_sample(None);
     let collection = collection::render(
         collection::Section::Targets,
         collection::OperationsMode::Now,
@@ -2931,10 +2298,7 @@ fn no_page_stylesheet_restyles_a_component_the_shell_owns() {
     // stylesheet may style its own components; the shell's are not its to restyle.
     let shell_classes = shell_owned_classes();
 
-    for (page, stylesheet) in [
-        ("evidence_library.css", EVIDENCE_LIBRARY_CSS),
-        ("collection_workspace.css", COLLECTION_WORKSPACE_CSS),
-    ] {
+    for (page, stylesheet) in [("collection_workspace.css", COLLECTION_WORKSPACE_CSS)] {
         let mut violations = Vec::new();
         for selector in declared_selectors(stylesheet) {
             // Only the parts that redefine the component itself count. A page may position a
@@ -2968,7 +2332,7 @@ fn no_page_stylesheet_restyles_a_component_the_shell_owns() {
 #[test]
 fn both_surfaces_render_the_header_at_one_type_scale() {
     // The regression this locks: same markup, same stylesheet layer, same declarations.
-    let corpus = evidence_library_html(None, &[], None);
+    let corpus = corpus_header_sample(None);
     let collection = collection::render(
         collection::Section::Targets,
         collection::OperationsMode::Now,
@@ -2978,10 +2342,7 @@ fn both_surfaces_render_the_header_at_one_type_scale() {
     );
 
     // Neither page may carry its own copy of the nav typography.
-    for (page, stylesheet) in [
-        ("evidence_library.css", EVIDENCE_LIBRARY_CSS),
-        ("collection_workspace.css", COLLECTION_WORKSPACE_CSS),
-    ] {
+    for (page, stylesheet) in [("collection_workspace.css", COLLECTION_WORKSPACE_CSS)] {
         for owned in [".v7-nav-readout", ".v7-nav-zh", ".v7-primary-nav"] {
             assert!(
                 !stylesheet.contains(owned),
@@ -3072,7 +2433,6 @@ fn the_larger_hard_shadow_only_marks_hover_displacement() {
     // displacement that DESIGN-003 permits; anything that sits still wears --v7-brutal.
     for (name, stylesheet) in [
         ("shell.css", SHELL_CSS),
-        ("evidence_library.css", EVIDENCE_LIBRARY_CSS),
         ("collection_workspace.css", COLLECTION_WORKSPACE_CSS),
     ] {
         for (index, _) in stylesheet.match_indices("var(--v7-brutal-lg)") {
@@ -3479,7 +2839,7 @@ fn the_primary_nav_links_to_entry_routes_never_to_a_sub_surface() {
     // decision, and the two drift the first time the default moves — which is exactly what
     // happened when Collection's default became /collection/attention while the header
     // still pointed at /collection/targets.
-    let html = evidence_library_html(None, &[], None);
+    let html = corpus_header_sample(None);
     let nav = html
         .split_once("v7-primary-nav")
         .expect("every page renders the primary nav")
@@ -3508,56 +2868,6 @@ fn the_primary_nav_links_to_entry_routes_never_to_a_sub_surface() {
 }
 
 #[test]
-fn evidence_runtime_uses_material_projection_as_its_only_default_read_source() {
-    let html = evidence_library_html(None, &[], None);
-
-    assert!(html.contains("/assets/evidence-observation.js"));
-    assert!(html.contains("/assets/evidence-library.js"));
-    assert!(html.contains("id=\"ev-work-list\""));
-    assert!(html.contains("data-ev-panel=\"trace\""));
-    for layout in ["research", "table", "cover"] {
-        assert!(html.contains(&format!("data-ev-layout=\"{layout}\"")));
-    }
-    assert!(EVIDENCE_LIBRARY_JS.contains("const API_ROOT = '/api/local/work-resources'"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("params.set('layout', model.activeLayout)"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("params.set('view', model.activeView)"));
-    assert!(EVIDENCE_OBSERVATION_JS.contains("createController"));
-    assert!(EVIDENCE_OBSERVATION_JS.contains("立即复观测"));
-    // The authorization requirement is stated where it is actionable information: when the
-    // action cannot run. Once it can, saying what it needed is history.
-    assert!(EVIDENCE_OBSERVATION_JS.contains("尚未具备监控目标关联的有效深度归档授权"));
-    assert!(EVIDENCE_OBSERVATION_JS.contains("commentsCoverageHistory"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("当前互动状态与变化"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("refreshSelectedDetailAfterReobservation"));
-    assert!(EVIDENCE_OBSERVATION_JS.contains("await onTerminal?.()"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("readJson(detailUrl, model.detailController.signal)"));
-    assert!(EVIDENCE_OBSERVATION_JS.contains("已合并到覆盖当前作品的在途工作"));
-    // V9 owns the reading surface, media rail, lightbox and filter mechanics; Issue #133 must
-    // keep its operation state in the dedicated module instead of growing that shared shell.
-    assert!(EVIDENCE_OBSERVATION_JS.contains("function reobservationOperationBlock"));
-    assert!(!EVIDENCE_LIBRARY_JS.contains("reobservationOperation"));
-    assert!(EVIDENCE_LIBRARY_CSS.contains(".ev-work-list[data-layout=\"cover\"]"));
-    assert!(EVIDENCE_LIBRARY_CSS.contains(".ev-work-list[data-layout=\"table\"]"));
-    assert!(!EVIDENCE_LIBRARY_JS.contains("/api/local/evidence-library/legacy"));
-    assert!(!EVIDENCE_LIBRARY_JS.contains("fetch('http"));
-}
-
-#[test]
-fn evidence_library_requires_a_domain_and_uses_work_resources_only() {
-    assert!(EVIDENCE_LIBRARY_JS.contains("const API_ROOT = '/api/local/work-resources'"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("return item?.identity?.publicRef || null;"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("if (!CORPUS_DOMAIN.hasDomain) {"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("setFeedback('empty', '请选择研究领域'"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("item.domainUsage?.role === 'reference'"));
-    assert!(!EVIDENCE_LIBRARY_JS.contains("/api/local/cross-industry/samples"));
-    assert!(!EVIDENCE_LIBRARY_JS.contains("crossIndustryListItem"));
-    assert!(!EVIDENCE_LIBRARY_JS.contains("selectCrossIndustrySample"));
-    assert!(!EVIDENCE_LIBRARY_JS.contains("LIST LEVEL ONLY"));
-    assert!(!EVIDENCE_LIBRARY_JS.contains("CORPUS_DOMAIN.isOwn"));
-    assert!(!EVIDENCE_LIBRARY_JS.contains("[data-public-ref]"));
-}
-
-#[test]
 fn corpus_domain_picker_is_a_lids_owned_link_menu_not_a_native_select() {
     let domains = vec![
         ObservationDomain {
@@ -3583,7 +2893,7 @@ fn corpus_domain_picker_is_a_lids_owned_link_menu_not_a_native_select() {
             reference_target_count: 0,
         },
     ];
-    let html = evidence_library_html(None, &domains, Some(&domains[1]));
+    let html = corpus_domain_picker(&domains, Some(&domains[1]), "/corpus/evidence", None);
 
     assert!(html.contains("<details class=\"v7-domain-picker\">"));
     assert!(html.contains("<nav aria-label=\"可选观察领域\">"));
@@ -3598,646 +2908,25 @@ fn corpus_domain_picker_is_a_lids_owned_link_menu_not_a_native_select() {
         SHELL_CSS.contains(".v7-domain-picker[open] summary{box-shadow:var(--lgi-shadow-brutal)}")
     );
     assert!(!SHELL_CSS.contains(".v7-domain-picker select"));
-    assert!(!html.contains("id=\"ev-domain-dialog\""));
 }
 
 #[test]
-fn corpus_without_a_selected_domain_keeps_the_shell_and_offers_a_modal_choice() {
-    let domains = vec![
-        ObservationDomain {
-            domain_ref: uuid::Uuid::new_v4(),
-            name: "考研自习".to_owned(),
-            description: None,
-            research_goal: None,
-            status: "active".to_owned(),
-            sample_count: None,
-            target_count: 2,
-            primary_target_count: 2,
-            reference_target_count: 0,
-        },
-        ObservationDomain {
-            domain_ref: uuid::Uuid::new_v4(),
-            name: "已暂停领域".to_owned(),
-            description: None,
-            research_goal: None,
-            status: "paused".to_owned(),
-            sample_count: Some(5),
-            target_count: 1,
-            primary_target_count: 1,
-            reference_target_count: 0,
-        },
-    ];
-    let html = evidence_library_html(None, &domains, None);
-    assert!(html.contains("data-theme=\"linggan-intelligence\""));
-    assert!(html.contains("class=\"v7-app\""));
-    assert!(html.contains("data-corpus-domain-selected=\"false\""));
-    assert!(html.contains("<dialog class=\"ev-domain-dialog\""));
-    assert!(html.contains("id=\"ev-domain-dialog-title\">选择研究领域"));
-    assert!(html.contains("2 个目标 · 作品数未知"));
-    assert!(html.contains("已暂停 · 历史材料可读"));
-    assert!(html.contains(&format!(
-        "href=\"/corpus/evidence?domain={}\"",
-        domains[0].domain_ref
-    )));
-    assert!(!html.contains("<h1>先选择一个领域</h1>"));
-
-    let empty = evidence_library_html(None, &[], None);
-    assert!(empty.contains("还没有可选择的研究领域"));
-    assert!(empty.contains("href=\"/collection/domains\""));
-    assert!(empty.contains("class=\"ev-domain-manage ev-domain-manage--inline\""));
-    assert!(!empty.contains("class=\"v7-domain-picker\""));
-    assert!(EVIDENCE_LIBRARY_JS.contains("dialog.showModal()"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("if (!CORPUS_DOMAIN.hasDomain)"));
+fn corpus_side_nav_carries_the_selected_domain_on_every_corpus_link() {
+    // The Evidence Library page itself is React now: its domain-choice dialog, the "no domain" state and
+    // the shell-owns-the-frame behaviour are covered by EvidencePage.test.tsx and CorpusFrame.test.tsx.
+    // The server-rendered side nav (used by 评论研究) still has to carry the selected domain, so that
+    // moving between the three Corpus pages never silently drops the reading scope.
+    let domain = uuid::Uuid::new_v4();
+    let nav = shell::corpus_side_nav(
+        shell::CorpusPage::Evidence,
+        Some(&domain.to_string()),
+        "",
+    );
+    for page in ["evidence", "comments", "creators"] {
+        assert!(
+            nav.contains(&format!("href=\"/corpus/{page}?domain={domain}\"")),
+            "the {page} link must carry the selected domain"
+        );
+    }
     assert!(SHELL_CSS.contains("z-index:var(--lgi-z-header)"));
-
-    let only_one = evidence_library_html(None, &domains[..1], Some(&domains[0]));
-    assert!(only_one.contains(&format!(
-        "href=\"/corpus/comments?domain={}\"",
-        domains[0].domain_ref
-    )));
-}
-
-#[test]
-fn evidence_runtime_restores_system_and_personal_view_strategy_without_faking_saved_views() {
-    let html = evidence_library_html(None, &[], None);
-
-    assert!(html.contains("aria-label=\"按材料状态快速筛选\""));
-    assert!(html.contains("系统视图"));
-    assert!(html.contains("我的视图"));
-    assert!(html.contains("暂无已保存视图"));
-    // LANG-05 (CORPUS-COPY-001): descriptive English labels and the legacy-fallback policy line
-    // must not come back next to the Chinese ones.
-    for english in [
-        "SYSTEM VIEWS",
-        "MY VIEWS",
-        "SAVED VIEWS NOT CONNECTED",
-        "NO LEGACY FALLBACK",
-    ] {
-        assert!(
-            !html.contains(english),
-            "descriptive English label returned: {english}"
-        );
-    }
-    assert!(html.contains("data-ev-view=\"partial\""));
-    assert!(html.contains("data-ev-view=\"risk\""));
-    assert!(html.contains("data-ev-view=\"cleaned\""));
-    assert!(html.contains("data-ev-view=\"restricted\""));
-    assert!(!html.contains("data-ev-saved-view"));
-    assert!(!html.contains("保存当前视图"));
-    assert!(!html.contains("状态视图"));
-    assert!(!html.contains("以作品为顶层的多材料证据库"));
-    assert!(!html.contains("作品级材料集合"));
-    assert!(!html.contains("多通道真实状态"));
-    assert!(!html.contains("ev-context-count"));
-
-    assert!(EVIDENCE_LIBRARY_JS.contains("partial: { laneState: 'PARTIAL' }"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("risk: { laneState: 'RISK_CONTROL' }"));
-    assert!(
-        EVIDENCE_LIBRARY_JS
-            .contains("cleaned: { lane: 'media_bytes', laneState: 'BYTES_CLEANED' }")
-    );
-    assert!(EVIDENCE_LIBRARY_JS.contains("params.set('layout', model.activeLayout)"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("params.set('view', model.activeView)"));
-    // The table layout drops the cover and reads as fixed high-density columns. EVIDENCE-V9-001
-    // replaced the per-column classes with one cell primitive; what must survive is that the
-    // table row is denser than the research row and still names its work and its context.
-    assert!(EVIDENCE_LIBRARY_CSS.contains(".ev-table-cell"));
-    assert!(EVIDENCE_LIBRARY_CSS.contains(".ev-work-list[data-layout=\"table\"] .ev-preview"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("function tableCell(primary, secondary)"));
-
-    // The layout switch marks the current view with a Signal underline. It must never become a
-    // filled black button: solid Ink is reserved for the one primary action on the surface, and
-    // a black tab would read as the page's main control rather than as a view toggle.
-    assert!(
-        EVIDENCE_LIBRARY_CSS
-            .contains(".ev-layout-switch button[aria-pressed=\"true\"]{border-bottom-color:var(--v7-red)")
-            || EVIDENCE_LIBRARY_CSS.contains(
-                ".ev-quickviews button[aria-pressed=\"true\"],.ev-layout-switch button[aria-pressed=\"true\"]{border-bottom-color:var(--v7-red)"
-            )
-    );
-    assert!(
-        !EVIDENCE_LIBRARY_CSS
-            .contains(".ev-layout-switch button[aria-pressed=\"true\"]{background:var(--v7-black)")
-    );
-    assert!(EVIDENCE_LIBRARY_CSS.contains(".ev-layout-switch button:focus-visible"));
-}
-
-#[test]
-fn evidence_runtime_renders_only_controlled_media_handles() {
-    assert!(!EVIDENCE_LIBRARY_JS.contains("function observedCoverUrl"));
-    assert!(!EVIDENCE_LIBRARY_JS.contains("observedSourceUrl"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("sameOriginPath(cover.localAssetUrl"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("renderMaterials(item, inspector, channels)"));
-    assert!(!EVIDENCE_LIBRARY_JS.contains("item.preview?.localAssetUrl"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("node('img')"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("本地副本"));
-    assert!(EVIDENCE_LIBRARY_CSS.contains(".ev-preview img"));
-    assert!(EVIDENCE_LIBRARY_CSS.contains("aspect-ratio:3/4"));
-}
-
-/* DEC-作者合并 (2026-09-04): one author field on every surface, the Inspector included. */
-#[test]
-fn evidence_runtime_shows_one_author_field_and_renders_avatar_from_media() {
-    assert!(EVIDENCE_LIBRARY_JS.contains("ev-author-fact"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("function effectiveAuthor"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("media.avatar"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("sameOriginPath(avatar.localAssetUrl"));
-    assert!(EVIDENCE_LIBRARY_CSS.contains(".ev-author-avatar"));
-    assert!(!EVIDENCE_LIBRARY_JS.contains("identity_facts.avatar"));
-    assert!(!EVIDENCE_LIBRARY_JS.contains("ev-target-fact"));
-    assert!(!EVIDENCE_LIBRARY_JS.contains("作品作者"));
-    assert!(!EVIDENCE_LIBRARY_CSS.contains(".ev-target-fact"));
-    assert!(!EVIDENCE_LIBRARY_CSS.contains(".ev-identity-fact"));
-}
-
-/* A creator target only fills the author when the detail has not delivered one, a reported
- * MISMATCH still blocks that fallback, and a keyword target never fills it. The lineage the row
- * no longer shows lives in the Inspector as a single 来源监控 row. */
-#[test]
-fn evidence_runtime_keeps_collection_lineage_in_the_inspector_only() {
-    assert!(EVIDENCE_LIBRARY_JS.contains("来源与溯源"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("来源监控"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("keyword: '关键词监控'"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("context.authorIdentityMatchState !== 'MISMATCH'"));
-    assert!(!EVIDENCE_LIBRARY_JS.contains("作者与监控目标"));
-    assert!(!EVIDENCE_LIBRARY_JS.contains("identityRelationLabels"));
-}
-
-#[test]
-fn evidence_runtime_uses_the_xhs_portrait_cover_ratio_in_visual_layouts() {
-    assert!(EVIDENCE_LIBRARY_JS.contains(
-        "row.dataset.platform = String(item.identity?.platform || 'unknown').toLowerCase()"
-    ));
-    assert!(
-        EVIDENCE_LIBRARY_CSS.contains(
-            ".ev-work-row[data-platform=\"xhs\"] .ev-preview{height:auto;aspect-ratio:3/4}"
-        )
-    );
-}
-
-#[test]
-fn evidence_cover_layout_keeps_a_stationary_data_plate_and_one_shared_flip_stage() {
-    // Cover mode is a presentation of the existing Work Resource row, not another card model:
-    // the row retains its selection handler, while only `.ev-cover-visual` becomes interactive.
-    for marker in [
-        "function coverVisualBlock(item, ordinal)",
-        "function coverMetaBlock(item, material, detailState, observedAt)",
-        "function coverGeometryKind(item)",
-        "coverCard.append(",
-        "visual.addEventListener('click'",
-        "window.matchMedia('(hover: none)').matches",
-        "event.stopPropagation()",
-        "sameOriginPath(cover.localAssetUrl",
-    ] {
-        assert!(
-            EVIDENCE_LIBRARY_JS.contains(marker),
-            "missing cover-card contract: {marker}"
-        );
-    }
-    for marker in [
-        ".ev-cover-visual",
-        ".ev-cover-meta",
-        ".ev-cover-stage-frame",
-        "aspect-ratio:3/4",
-        ".ev-cover-face--back",
-        "backface-visibility:hidden",
-        ".ev-cover-visual[data-flipped=\"true\"] .ev-cover-flip",
-        "@media(hover:hover){.ev-cover-visual:hover .ev-cover-flip",
-        ".ev-cover-status-tooltip",
-        "column-gap:var(--lgi-space-2);row-gap:var(--lgi-space-8)",
-        "aspect-ratio:7/2",
-        "inline-size:100%;max-inline-size:100%;box-sizing:border-box",
-        "grid-template-rows:var(--lgi-space-6) var(--lgi-space-6) minmax(var(--lgi-space-6),1fr)",
-        "min-height:calc(var(--lgi-space-16) + var(--lgi-space-6) + var(--lgi-space-4) + var(--lgi-space-2))",
-        "grid-template-columns:minmax(0,1fr) minmax(0,1fr)",
-        "grid-template-columns:minmax(0,1fr) minmax(0,10ch)",
-    ] {
-        assert!(
-            EVIDENCE_LIBRARY_CSS.contains(marker),
-            "missing cover-card visual contract: {marker}"
-        );
-    }
-    assert!(!EVIDENCE_LIBRARY_CSS.contains(".ev-cover-cross-boundary"));
-    assert!(
-        !EVIDENCE_LIBRARY_JS.contains("facts.append(material.rail, status)"),
-        "the cover data plate must not reintroduce the large multi-colour material rail"
-    );
-    for marker in [
-        "['grid', 'cone', 'frame'][index]",
-        "kind === 'stack'",
-        "kind === 'cluster'",
-    ] {
-        assert!(
-            EVIDENCE_LIBRARY_JS.contains(marker),
-            "the generic catalogue mark family must remain stable and visually differentiated: {marker}"
-        );
-    }
-    assert!(
-        EVIDENCE_LIBRARY_JS.contains("function coverObservationMoment(value)"),
-        "the cover plate must use a compact, non-overflowing observation timestamp"
-    );
-    assert!(
-        EVIDENCE_LIBRARY_JS.contains("function coverPublishedCopy(item)"),
-        "the cover plate must reserve a stable, legible date slot beside the author"
-    );
-    assert!(
-        EVIDENCE_LIBRARY_JS.contains("function coverStateLine(state)"),
-        "the cover plate must keep technical state codes out of its compact reading line"
-    );
-    assert!(
-        EVIDENCE_LIBRARY_JS.contains("line.querySelector('.v7-tech-key')?.remove()"),
-        "the cover state line must retain the real state label while omitting its technical enum"
-    );
-    assert!(
-        EVIDENCE_LIBRARY_JS.contains(
-            "if (item.display?.publishedAtState === 'SOURCE_TEXT_ONLY') return '来源时间';"
-        ),
-        "a source-text-only publish time must not overrun the compact cover date slot"
-    );
-}
-
-/* Surface hierarchy, card material, the measuring field and the title step are one contract: the
- * four levels of the cover card must stay distinguishable without a frame around each of them,
- * the grain must stay off every text layer, must stay a state of the shared 8px lattice that
- * `LIDS-MAT-001` builds its materials on *without lining up into a rule*, and the stage lattice
- * must be a different pattern
- * from the grain and must actually cover the whole 3:4 stage. The title step is part of it: a
- * 277px card is a caption surface over its 3:4 stage, so it takes the card step and never the
- * page-title step that made six cards shout over their own material. */
-#[test]
-fn evidence_cover_card_layers_by_surface_and_keeps_its_materials_apart() {
-    for marker in [
-        // Four levels, all existing tokens: page / card / stage / plate.
-        "--ev-cover-title-size:var(--lgi-text-longform)",
-        "border:1px solid var(--lgi-border-strong);background:var(--lgi-canvas-sunken)",
-        ".ev-cover-stage-frame{position:relative;display:grid;max-width:100%;height:100%;aspect-ratio:3/4;overflow:hidden;border:1px solid var(--lgi-border-strong);background:var(--lgi-canvas-hi)",
-        "padding:var(--lgi-space-3);aspect-ratio:7/2;border-top:1px solid var(--lgi-border-strong);border-bottom:1px solid var(--lgi-hairline);background:var(--lgi-canvas-low)",
-        // The card's own material, and the layer that keeps it out of the text.
-        ".ev-cover-face::after{content:\"\";position:absolute;inset:0;z-index:1;pointer-events:none;background-image:radial-gradient",
-        ".ev-cover-face-inner{position:relative;z-index:2;",
-        "background-size:24px 24px",
-        // The selected card keeps the same material on orange, denser.
-        ".ev-work-row[aria-selected=\"true\"] .ev-cover-face::after{background-image:radial-gradient",
-        // The measuring field: a real 8px / 1px lattice, painted by CSS over the whole stage.
-        ".ev-cover-stage-frame--diagram::before{content:\"\";position:absolute;inset:0;z-index:0;pointer-events:none;background-image:radial-gradient(circle,var(--lgi-ink) 1px,transparent 1.2px);background-size:8px 8px",
-        ".ev-cover-geometry{position:relative;z-index:1;width:100%;height:100%;color:var(--v7-black)}",
-        // The original cover fills the very same stage box as the diagram. The frame's height
-        // comes from the shared sizer, so a percentage height on the cover resolved only
-        // sometimes and an off-ratio cover hung below the frame instead of being cropped.
-        ".ev-cover-stage-frame--cover img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}",
-    ] {
-        assert!(
-            EVIDENCE_LIBRARY_CSS.contains(marker),
-            "missing cover-card surface contract: {marker}"
-        );
-    }
-    // The card grain is registered as `LIDS-MAT-001` `M-06`, and what keeps it in that family is
-    // that it is a *state of the same 8px lattice* rather than a second texture system: every node
-    // it draws, and the tile it repeats on, must be a whole number of lattice steps. That is
-    // checked as a property, because a pinned pixel string can be re-pinned to a number that has
-    // left the lattice and stay green.
-    //
-    // Lattice membership alone is not enough, and the first version of this material is the proof:
-    // it kept three of the nine nodes of a 24px cell that formed a *subgroup* of the lattice
-    // (y = 2x mod 3), and a subgroup makes every dot the first of an endless run — the field was
-    // a 45 degree ruling at 11.31px, which is the "texture you can see" that this material must
-    // never be. So the residue is also checked for what makes it a residue: no three of its dots
-    // may be evenly spaced along one line at a spacing under 17px — the tile holds no three-term
-    // arithmetic progression shorter than that. *Evenly* is the whole of the condition, not a
-    // softening of it: on a 24px cell any three nodes either put two of them in one row or column
-    // — which the repeat turns into a chain of alternating 8px and 16px gaps, two gaps of
-    // different length and so no single rhythm to read as a line — or they are one per column,
-    // and every such arrangement is y = ax + b, a coset of a subgroup, i.e. the ruled version
-    // again. No three-node residue can be perfectly isotropic; this is the strongest condition
-    // the density admits.
-    //
-    // Density is capped the same way, and it is the criterion most likely to be edited by hand
-    // ("make it a little stronger"), so it is asserted rather than left to taste: the family's own
-    // ink, the alpha carrying the density, and the dot under a sub-perceptible radius.
-    const LATTICE_STEP: usize = 8;
-    const MIN_RUN_SPACING: f64 = 17.0;
-    const MAX_DENSITY: f64 = 0.20;
-    const MAX_DOT_RADIUS: f64 = 0.6;
-    assert_eq!(
-        EVIDENCE_LIBRARY_CSS
-            .matches(".ev-cover-face::after{")
-            .count(),
-        2,
-        "the card grain is one material with one selected state; a third rule would override it \
-         outside every check below"
-    );
-    for (rule, expected_nodes, tile) in [
-        (".ev-cover-face::after{content:", 3usize, 24usize),
-        (
-            ".ev-work-row[aria-selected=\"true\"] .ev-cover-face::after{background-image:",
-            4usize,
-            24usize,
-        ),
-    ] {
-        let start = EVIDENCE_LIBRARY_CSS
-            .find(rule)
-            .unwrap_or_else(|| panic!("the M-06 grain rule is missing: {rule}"));
-        let rule_body = &EVIDENCE_LIBRARY_CSS[start..];
-        let rule_body = &rule_body[..rule_body.find('}').expect("the M-06 rule must be closed")];
-        assert_eq!(
-            rule_body.matches("circle at ").count(),
-            expected_nodes,
-            "M-06 {rule} must draw {expected_nodes} nodes of the lattice"
-        );
-        let mut drawn: Vec<(usize, usize)> = Vec::new();
-        for node in rule_body.split("circle at ").skip(1) {
-            let (coordinates, ink_and_radius) = node
-                .split_once(',')
-                .expect("an M-06 node declares its coordinates, then its ink");
-            let ink_end = ink_and_radius
-                .find(')')
-                .expect("an M-06 node declares its ink as a colour function");
-            let ink = &ink_and_radius[..=ink_end];
-            let alpha: f64 = ink
-                .strip_prefix("rgba(17,19,21,")
-                .and_then(|rest| rest.strip_suffix(')'))
-                .unwrap_or_else(|| {
-                    panic!("an M-06 node draws in the family ink (17,19,21), never a second colour: {ink}")
-                })
-                .parse()
-                .unwrap_or_else(|_| panic!("an M-06 density is a number: {ink}"));
-            assert!(
-                (0.0..=MAX_DENSITY).contains(&alpha),
-                "M-06 {rule} paints at alpha {alpha}, past the sub-perceptible cap {MAX_DENSITY}"
-            );
-            let radius: f64 = ink_and_radius[ink_end + 1..]
-                .split(',')
-                .next()
-                .expect("an M-06 node declares the radius of its dot")
-                .trim()
-                .strip_suffix("px")
-                .and_then(|number| number.parse().ok())
-                .unwrap_or_else(|| panic!("an M-06 dot radius is a px length: {node}"));
-            assert!(
-                (0.0..=MAX_DOT_RADIUS).contains(&radius),
-                "M-06 {rule} paints a {radius}px dot, past the sub-perceptible cap \
-                 {MAX_DOT_RADIUS}px"
-            );
-            let parts: Vec<&str> = coordinates.split_whitespace().collect();
-            assert_eq!(
-                parts.len(),
-                2,
-                "an M-06 node is two coordinates, x then y, in space-separated px: {coordinates}"
-            );
-            let mut pair = (0usize, 0usize);
-            for (axis, part) in parts.iter().enumerate() {
-                let part = part.to_ascii_lowercase();
-                let length: f64 = match part.strip_suffix("px") {
-                    Some(number) => number.parse().unwrap_or_else(|_| {
-                        panic!("an M-06 node coordinate is not a length: {node}")
-                    }),
-                    // CSS lets a bare zero stand for a length. Any other unitless number makes
-                    // the whole declaration invalid and the layer would vanish without a word,
-                    // so it has to fail here instead of quietly painting nothing.
-                    None => {
-                        let bare: f64 = part.parse().unwrap_or_else(|_| {
-                            panic!("an M-06 node coordinate must carry its px unit: {node}")
-                        });
-                        assert_eq!(
-                            bare, 0.0,
-                            "an M-06 node coordinate must carry its px unit: {node}"
-                        );
-                        bare
-                    }
-                };
-                assert!(
-                    (0.0..tile as f64).contains(&length),
-                    "M-06 {rule} draws a node outside its own tile, where the repeat hides it: \
-                     {coordinates}"
-                );
-                assert_eq!(
-                    length % LATTICE_STEP as f64,
-                    0.0,
-                    "M-06 {rule} draws off the {LATTICE_STEP}px lattice: {coordinates}"
-                );
-                let step = (length / LATTICE_STEP as f64) as usize;
-                if axis == 0 {
-                    pair.0 = step;
-                } else {
-                    pair.1 = step;
-                }
-            }
-            drawn.push(pair);
-        }
-        assert_eq!(
-            rule_body.matches("background-size:").count(),
-            1,
-            "M-06 {rule} must declare the tile it repeats on exactly once"
-        );
-        let size = rule_body
-            .split("background-size:")
-            .nth(1)
-            .expect("M-06 must declare the tile it repeats on");
-        assert_eq!(
-            size.split(';')
-                .next()
-                .expect("the tile ends the declaration")
-                .trim(),
-            format!("{tile}px {tile}px"),
-            "M-06 {rule} must repeat on a whole number of lattice steps"
-        );
-        // A dot that has a companion one step away and another two steps away is the head of a
-        // run; at this spacing that run is what a ruled pattern is made of. One probe per step
-        // vector is enough *because the tile is three lattice steps wide*: a shorter run than that
-        // would have to close at a smaller multiple of the same vector and is caught by the same
-        // probe. A material on a wider tile would need the general test — any three collinear
-        // nodes, not only evenly spaced ones — so this loop must not be carried over unchanged.
-        let span = tile / LATTICE_STEP;
-        let reach = (MIN_RUN_SPACING / LATTICE_STEP as f64).floor() as i32;
-        for dx in -reach..=reach {
-            for dy in -reach..=reach {
-                if (dx, dy) == (0, 0) {
-                    continue;
-                }
-                let spacing = LATTICE_STEP as f64 * ((dx * dx + dy * dy) as f64).sqrt();
-                if spacing >= MIN_RUN_SPACING {
-                    continue;
-                }
-                for &(x, y) in &drawn {
-                    let on_line = |multiple: i32| {
-                        let px = (x as i32 + multiple * dx).rem_euclid(span as i32) as usize;
-                        let py = (y as i32 + multiple * dy).rem_euclid(span as i32) as usize;
-                        drawn.contains(&(px, py))
-                    };
-                    assert!(
-                        !(on_line(1) && on_line(2)),
-                        "M-06 {rule} draws three dots on one line {spacing:.2}px apart, which \
-                         reads as ruled paper instead of a residue: {drawn:?}"
-                    );
-                }
-            }
-        }
-    }
-    // One type step for every card, and a plate that is exactly two lines of it.
-    assert!(
-        EVIDENCE_LIBRARY_CSS.contains(
-            "--ev-cover-title-height:calc(var(--ev-cover-title-size) * var(--lgi-lh-title) * 2)"
-        ),
-        "the title plate must be exactly two lines of the card's own title step"
-    );
-    assert!(
-        !EVIDENCE_LIBRARY_CSS.contains("data-two-line"),
-        "a per-card title downgrade would put two different type sizes on one row of cards"
-    );
-    assert!(
-        !EVIDENCE_LIBRARY_CSS.contains(".ev-cover-dot-field")
-            && !EVIDENCE_LIBRARY_CSS.contains(".ev-cover-corner"),
-        "the stage field is a CSS tile and the stage frame carries no corner ticks"
-    );
-    assert!(
-        !EVIDENCE_LIBRARY_JS.contains("ev-cover-dot-field")
-            && !EVIDENCE_LIBRARY_JS.contains("coverCorners"),
-        "a ratio-derived inline SVG cannot measure the whole 3:4 stage, so the field must not go back to one"
-    );
-    // Every template is drawn inside the one safe area of the 300x400 viewBox — x 48..252
-    // (68%) and y 80..320 (60%). The band is only as good as the coordinates that draw it, so
-    // every literal the six templates use is pinned: pinning a subset leaves the rest free to
-    // drift out of the band unnoticed (raising the stack's rect from 160x170 to 260x260 puts it
-    // at x 70..330 / y 150..410 and a subset pin stays green).
-    for marker in [
-        "[24, 48, 72, 96].forEach((radius) => append('circle', { cx: 150, cy: 200, r: radius }))",
-        "append('path', { d: 'M54 200h192M150 104v192' })",
-        "[[50, 90], [60, 120], [70, 150]].forEach(([x, y]) => append('rect', {",
-        "x, y, width: 160, height: 170,",
-        "append('path', { d: 'M80 140h100M80 180h100M80 220h100' })",
-        "[[110, 180, 60], [190, 180, 60], [150, 240, 60]].forEach(([cx, cy, r]) => append('circle', { cx, cy, r }))",
-        "append('path', { d: 'M125 260 175 300M140 222l60 56' })",
-        "append('rect', { x: 48, y: 80, width: 204, height: 240 })",
-        "[99, 150, 201].forEach((position) => append('path', { d: `M${position} 80v240` }))",
-        "[140, 200, 260].forEach((position) => append('path', { d: `M48 ${position}h204` }))",
-        "append('path', { d: 'M48 80 150 200 252 80M48 320 150 200 252 320' })",
-        "append('rect', { x: 85, y: 123, width: 130, height: 154 })",
-        "append('path', { d: 'M85 174h130M85 226h130M150 123v154' })",
-        "append('path', { d: 'M110 148 150 180 190 148M110 252 150 220 190 252' })",
-        "append('path', { d: 'M150 80 48 320h204Z' })",
-        "[96, 144, 192].forEach((position) => append('path', { d: `M150 80 ${position} 320` }))",
-        "append('path', { d: 'M78 246h144' })",
-    ] {
-        assert!(
-            EVIDENCE_LIBRARY_JS.contains(marker),
-            "every catalogue mark must share one safe area so visual weight does not jump: {marker}"
-        );
-    }
-    // The comment is the only place the 68% / 60% claim itself is written down.
-    assert!(
-        EVIDENCE_LIBRARY_JS.contains("x 48..252 (68% of the")
-            && EVIDENCE_LIBRARY_JS.contains("y 80..320 (60% of its height)"),
-        "the geometry comment must keep naming the safe area the templates above are drawn in"
-    );
-}
-
-/* The results band that carried the layout legend and the inspector reopen button is gone; the
- * read timestamp it used to hold hangs on the work list instead of losing its checkable home. */
-#[test]
-fn evidence_results_band_stays_removed() {
-    let html = evidence_library_html(None, &[], None);
-    for gone in [
-        "ev-results-head",
-        "ev-results-legend",
-        "ev-reopen-inspector",
-    ] {
-        assert!(
-            !html.contains(gone),
-            "the results band was removed on request and must not return: {gone}"
-        );
-    }
-    // The CSS ships as its own asset, so an HTML-only check would let a stylesheet rule for the
-    // removed band come back as dead code under a passing test.
-    for gone in [
-        "ev-inspector-reopen",
-        "ev-results-head",
-        "ev-results-legend",
-    ] {
-        assert!(
-            !EVIDENCE_LIBRARY_CSS.contains(gone),
-            "a stylesheet rule for the removed results band is dead code: {gone}"
-        );
-    }
-    assert!(!EVIDENCE_LIBRARY_JS.contains("reopenInspector"));
-    assert!(
-        EVIDENCE_LIBRARY_JS.contains("refs.list.title = `读取时间"),
-        "the read timestamp must stay checkable after its header row was removed"
-    );
-}
-
-#[test]
-fn evidence_runtime_preserves_unknown_partial_and_restricted_states() {
-    for state in [
-        "UNKNOWN",
-        "SOURCE_TEXT_ONLY",
-        "PARTIAL",
-        "RETIRED",
-        "RISK_CONTROL",
-        "BYTES_CLEANED",
-        "WITHDRAWN_OR_RESTRICTED",
-    ] {
-        assert!(
-            EVIDENCE_LIBRARY_JS.contains(state),
-            "runtime must render honest state {state}"
-        );
-    }
-    assert!(EVIDENCE_LIBRARY_JS.contains("数量未知"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("SOURCE INCOMPLETE"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("这不表示作品没有媒体"));
-    assert!(!EVIDENCE_LIBRARY_JS.contains("ACK 完整"));
-}
-
-#[test]
-fn evidence_runtime_exposes_ocr_layering_without_reintroducing_invalid_tokens() {
-    for marker in [
-        "function appendOcrLayering",
-        "image_substantive_text: '图片实质文字'",
-        "cleanCorpusEligible",
-        "dataset.evOption = 'RETIRED'",
-    ] {
-        assert!(
-            EVIDENCE_LIBRARY_JS.contains(marker),
-            "OCR-layering runtime contract marker missing: {marker}"
-        );
-    }
-    for invalid_token in ["lgi-ink-muted", "lgi-text-micro", "lgi-ls-label"] {
-        assert!(
-            !EVIDENCE_LIBRARY_CSS.contains(invalid_token),
-            "OCR-layering CSS must not refer to the removed token {invalid_token}"
-        );
-    }
-}
-
-#[test]
-fn evidence_runtime_keeps_sensitive_text_and_media_inside_controlled_detail_reads() {
-    assert!(EVIDENCE_OBSERVATION_JS.contains("本机授权评论研究"));
-    assert!(EVIDENCE_OBSERVATION_JS.contains("作者只显示匿名上下文"));
-    assert!(EVIDENCE_OBSERVATION_JS.contains("comment.body"));
-    assert!(!EVIDENCE_LIBRARY_JS.contains("authorExternalId"));
-    assert!(!EVIDENCE_OBSERVATION_JS.contains("authorExternalId"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("blob?.deliveryState === 'INLINE_SAFE'"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("'/api/local/media/'"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("'/api/local/derivative/'"));
-    assert!(!EVIDENCE_LIBRARY_JS.contains("innerHTML"));
-}
-
-#[test]
-fn evidence_runtime_has_bounded_continuation_keyboard_and_mobile_contracts() {
-    for marker in [
-        "payload.nextCursor",
-        "payload.truncated",
-        "ArrowDown",
-        "ArrowRight",
-        "prefers-reduced-motion",
-        "max-width:900px",
-        "max-width:640px",
-        "min-height:40px",
-    ] {
-        assert!(
-            EVIDENCE_LIBRARY_JS.contains(marker)
-                || EVIDENCE_OBSERVATION_JS.contains(marker)
-                || EVIDENCE_LIBRARY_CSS.contains(marker),
-            "runtime contract marker missing: {marker}"
-        );
-    }
 }

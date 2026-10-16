@@ -1,5 +1,5 @@
 /**
- * 语料二级导航登记表。迁移期间证据库、评论研究仍由旧服务提供，它们的侧栏由
+ * 语料二级导航登记表。迁移期间评论研究仍由旧服务提供，它的侧栏由
  * `apps/api/src/local_web/shell.rs` 的 `corpus_side_nav` 输出，两边必须一致（WEB-REACT-001 规则 R4）：
  * `corpusPages.test.ts` 逐项对照 shell.rs 的 `CORPUS_ENTRIES`。
  * 三页全部迁完、shell.rs 删除之后，这里成为唯一来源。

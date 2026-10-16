@@ -242,6 +242,89 @@ async fn creators_page_is_a_registered_react_entry_and_its_native_assets_are_ret
     assert!(body.contains("read_model_not_connected"));
 }
 
+/// 阶段 D2：证据库迁到 React。登记路径返回前端入口（经本机来源闸门，插件与书签的直接打开仍可用）；
+/// 旧页面的样式、脚本与底稿脚本全部退役（不留双轨）；`/corpus` 仍跳转过来；接口不被页面入口吞掉。
+#[tokio::test]
+async fn evidence_page_is_a_registered_react_entry_and_its_native_assets_are_retired() {
+    let domain = "00000000-0000-4000-8000-000000000001";
+    let work = "10000000-0000-4000-8000-000000000001";
+    let uri = format!("/corpus/evidence?domain={domain}&work={work}&tab=dossier");
+    let router = web(synthetic_dist(Some("284cd3a9"), true), "284cd3a9");
+    let (status, headers, body) = send(router.clone(), &uri, "127.0.0.1:3000").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        headers[header::CONTENT_TYPE]
+            .to_str()
+            .unwrap()
+            .starts_with("text/html")
+    );
+    assert_eq!(headers[header::CACHE_CONTROL], "no-store");
+    assert!(body.contains("<div id=\"root\">"));
+    // 没有任何参数的入口（插件、登录页、书签）同样返回入口，不改写地址。
+    let (status, _, _) = send(router, "/corpus/evidence", "localhost:3000").await;
+    assert_eq!(status, StatusCode::OK);
+
+    // 来源闸门：其他主机名、跨站发起的导航被拒；用户直接打开（插件 chrome.tabs.create、书签、地址栏）
+    // 的 Sec-Fetch-Site 是 none，同源跳转是 same-origin，都放行。
+    let foreign = web(synthetic_dist(None, true), "unknown");
+    let (status, _, _) = send(foreign, "/corpus/evidence", "evil.example:3000").await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    for (fetch_site, expected) in [
+        ("cross-site", StatusCode::FORBIDDEN),
+        ("same-site", StatusCode::FORBIDDEN),
+        ("none", StatusCode::OK),
+        ("same-origin", StatusCode::OK),
+    ] {
+        let response = web(synthetic_dist(Some("284cd3a9"), true), "284cd3a9")
+            .oneshot(
+                Request::builder()
+                    .uri("/corpus/evidence")
+                    .header(header::HOST, "127.0.0.1:3000")
+                    .header("Sec-Fetch-Site", fetch_site)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), expected, "Sec-Fetch-Site: {fetch_site}");
+    }
+
+    // 真实路由表里同样登记了该路径（没有构建产物时是 503 说明，而不是 404）；`/corpus` 仍跳转到它。
+    let (status, _, _) = send(app(), "/corpus/evidence", "127.0.0.1:3000").await;
+    assert!(matches!(
+        status,
+        StatusCode::OK | StatusCode::SERVICE_UNAVAILABLE
+    ));
+    let (status, headers, _) = send(app(), "/corpus", "127.0.0.1:3000").await;
+    assert_eq!(status, StatusCode::TEMPORARY_REDIRECT);
+    assert_eq!(headers[header::LOCATION], "/corpus/evidence");
+    for retired in [
+        "/assets/evidence-library.css",
+        "/assets/evidence-library.js",
+        "/assets/evidence-observation.js",
+        "/assets/research-dossier.js",
+        "/corpus/evidence/unknown",
+    ] {
+        let (status, _, _) = send(app(), retired, "127.0.0.1:3000").await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{retired}");
+    }
+    // 接口没有被页面入口吞掉：仍是接口自己的 JSON 回答。
+    for api in [
+        format!("/api/local/work-resources?domain={domain}"),
+        format!("/api/local/work-resources/{work}?domain={domain}"),
+    ] {
+        let (status, headers, body) = send(app(), &api, "127.0.0.1:3000").await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{api}");
+        assert!(
+            headers[header::CONTENT_TYPE]
+                .to_str()
+                .unwrap()
+                .starts_with("application/json")
+        );
+        assert!(body.contains("read_model_not_connected"), "{api}");
+    }
+}
+
 #[tokio::test]
 async fn health_reports_the_frontend_build() {
     let (status, _, body) = send(app(), "/health", "127.0.0.1:3000").await;
@@ -253,7 +336,12 @@ async fn health_reports_the_frontend_build() {
     ));
     assert_eq!(
         health["webApp"]["pages"],
-        json!(["/settings/models", "/ops/creation", "/corpus/creators"])
+        json!([
+            "/settings/models",
+            "/ops/creation",
+            "/corpus/creators",
+            "/corpus/evidence"
+        ])
     );
 }
 

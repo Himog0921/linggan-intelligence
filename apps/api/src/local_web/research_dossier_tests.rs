@@ -107,29 +107,6 @@ async fn dossier_http_preview_relayer_comments_and_scope_are_real_routes() {
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
 
-#[tokio::test]
-async fn dossier_assets_and_page_tab_are_served_without_a_database() {
-    let app = router(LocalWebState {
-        database: LocalDatabaseState::NotConfigured,
-        active_media_sessions: Arc::new(tokio::sync::Mutex::new(BTreeSet::new())),
-        account_digest_key: None,
-    });
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri("/assets/research-dossier.js")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let script = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let script = String::from_utf8(script.to_vec()).unwrap();
-    assert!(script.contains("LingganResearchDossier"));
-    assert!(script.contains("LingganDossierBatch"));
-}
-
 async fn seed_comments(db: &Database, count: usize) {
     for index in 0..count {
         let reply = index == 1;

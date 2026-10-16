@@ -41,7 +41,6 @@ describe('选中与历史', () => {
     const view = await opened();
     await view.user.click(rowButton(2));
     expect(view.location()).toBe(withWork(2));
-    expect(view.router.state.historyAction).toBe('PUSH');
     await waitFor(() => expect(kit.of('GET', detailPathOf(2))).toHaveLength(1));
     await waitFor(() => expect(within(aside()).getByRole('heading', { level: 2, hidden: true, name: '合成作品 2' })).toBeInTheDocument());
     expect(rowButton(2)).toHaveAttribute('aria-current', 'true');
@@ -148,7 +147,6 @@ describe('检索与筛选', () => {
     await view.user.selectOptions(screen.getByRole('combobox', { name: '材料通道' }), 'comments');
     await waitFor(() => expect(lastList().search.get('lane')).toBe('comments'));
     expect(view.location()).toContain('lane=comments');
-    expect(view.router.state.historyAction).toBe('REPLACE'); // 先 PUSH 清掉作品，再由自动选中替换
     expect(screen.getByLabelText('已选 1 项筛选')).toBeInTheDocument();
 
     await view.user.selectOptions(screen.getByRole('combobox', { name: '通道状态' }), 'PARTIAL');
@@ -159,6 +157,19 @@ describe('检索与筛选', () => {
     await waitFor(() => expect(lastList().search.has('lane')).toBe(false));
     expect(lastList().search.has('laneState')).toBe(false);
     expect(screen.getByLabelText('已选 0 项筛选')).toBeInTheDocument();
+  });
+
+  it('改一个下拉新增一条历史：后退回到筛选之前的结果', async () => {
+    pageRoutes(kit);
+    const view = await opened();
+    await view.user.click(screen.getByRole('button', { name: /^筛选/ }));
+    await view.user.selectOptions(screen.getByRole('combobox', { name: '材料通道' }), 'comments');
+    await waitFor(() => expect(lastList().search.get('lane')).toBe('comments'));
+    await screen.findByRole('button', { name: '合成作品 1' });
+    await waitFor(() => expect(view.location()).toBe(withWork(1, `domain=${DOMAIN}&lane=comments`)));
+    await act(() => view.router.navigate(-1));
+    await waitFor(() => expect(lastList().search.has('lane')).toBe(false));
+    expect(view.location()).toBe(withWork(1));
   });
 
   it('筛选浮层：Esc 关闭并把焦点还给筛选按钮；点外部也关闭', async () => {
@@ -197,13 +208,18 @@ describe('检索与筛选', () => {
     const before = listCalls().length;
     await view.user.click(screen.getByRole('button', { name: '表格' }));
     expect(await screen.findByRole('table')).toBeInTheDocument();
-    expect(view.location()).toBe(withWork(1, `domain=${DOMAIN}&layout=table`));
-    expect(view.router.state.historyAction).toBe('PUSH');
+    await waitFor(() => expect(view.location()).toBe(withWork(1, `domain=${DOMAIN}&layout=table`)));
     expect(listCalls()).toHaveLength(before);
     expect(screen.getByRole('button', { name: '合成作品 1' })).toHaveAttribute('aria-current', 'true');
     await view.user.click(screen.getByRole('button', { name: '封面' }));
     expect(view.location()).toContain('layout=cover');
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    // 新增历史：后退一步回到表格，再一步回到研读。
+    await act(() => view.router.navigate(-1));
+    expect(await screen.findByRole('table')).toBeInTheDocument();
+    await act(() => view.router.navigate(-1));
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    expect(view.location()).toBe(withWork(1));
   });
 });
 

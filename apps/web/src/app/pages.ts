@@ -5,5 +5,6 @@
 export const MODEL_SETTINGS_PATH = '/settings/models';
 export const WORKBENCH_PATH = '/ops/creation';
 export const CREATORS_PATH = '/corpus/creators';
+export const EVIDENCE_PATH = '/corpus/evidence';
 
-export const REACT_PAGE_PATHS: readonly string[] = [MODEL_SETTINGS_PATH, WORKBENCH_PATH, CREATORS_PATH];
+export const REACT_PAGE_PATHS: readonly string[] = [MODEL_SETTINGS_PATH, WORKBENCH_PATH, CREATORS_PATH, EVIDENCE_PATH];
