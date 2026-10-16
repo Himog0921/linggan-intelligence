@@ -807,7 +807,7 @@
 | `cargo test -p linggan-api --bins --locked` | 156 通过 / 0 失败 / 71 忽略（主线基线 169 / 1 / 68；本包删除 18、新增 7；主线那 1 项失败与本包无关，见验收记录 §5） |
 | `scripts/test-web-app-postgres.sh` | 全部通过：设置页 15 步、创作者页 17 步、证据库接口证明、证据库页 19 步、插件入口、运营五页；证据库部分另行连续两次独立重跑通过；容器与数据卷已清理 |
 | `scripts/test-collection-single-run-postgres.sh`（浏览器模式，与 CI 相同） | 通过（React 采集运行详情 → 证据库 → 勾选、续读、刷新） |
-| `scripts/test-local-001-discovery-postgres.sh`、`scripts/test-research-dossier-postgres.sh` | 研究底稿脚本通过。发现脚本首跑：API／库内证明 61 项通过（含 D2 为来源闸门改过的 material_projection／cursor／media／replica 各组），7 个浏览器证明因缺少各自专用环境被拒——脚本跳过清单漏登记了这 7 项（其中 6 项在主线上已漏，含协调方自己在阶段 B、D1 加的两项），已补登记；补登记后整脚本重跑：运行中，结果随下一次提交补记 |
+| `scripts/test-local-001-discovery-postgres.sh`、`scripts/test-research-dossier-postgres.sh` | 研究底稿脚本通过。发现脚本首跑：API／库内证明 61 项通过（含 D2 为来源闸门改过的 material_projection／cursor／media／replica 各组），7 个浏览器证明因缺少各自专用环境被拒——脚本跳过清单漏登记了这 7 项（其中 6 项在主线上已漏，含协调方自己在阶段 B、D1 加的两项），已补登记；补登记后整脚本重跑通过（「LOCAL-001 discovery PostgreSQL proof passed」，API 被忽略组 61 / 0，容器已清理）；另预先登记阶段 F（#441）新增的 `topics_and_workspace_real_chain_browser_proof`，两个 PR 谁先合并都不再打断本脚本 |
 | 本模块 rustfmt、`./scripts/check-project-governance.sh origin/main`、`./scripts/verify-ui-design-handbook.sh`、`git diff --check` | 通过 |
 
 **待 Mog**：DR-9；复观测三个新状态词的措辞；合并与部署授权；独立代码审查的时机。
