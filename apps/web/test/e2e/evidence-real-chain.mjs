@@ -264,6 +264,8 @@ try {
     await open(`&work=${rich}`);
     await waitInspector(TITLE.rich);
     const reading = panel('概览');
+    // 标题来自列表，作者、互动与正文来自随后的详情读取：等正文到了再读（只等标题会读到空白的分区）。
+    await reading.locator('p[data-collapsed]').waitFor();
     const text = await reading.innerText();
     assert.match(text, /合成作者 林/);
     for (const figure of ['12,345', '321', '4,567', '89']) assert.ok(text.includes(figure), figure);
@@ -304,6 +306,8 @@ try {
     const cards = panel('材料').locator('button[data-index]');
     // 图片都是受控本机句柄，且真的加载出来。
     const images = panel('材料').locator('img[alt$="本地媒体对象"]');
+    // 材料分区随详情读取到达：等第四张出现再数（标题先到时分区还是空的）。
+    await images.nth(3).waitFor();
     assert.equal(await images.count(), 4);
     await page.waitForFunction(() => [...document.querySelectorAll('[role="tabpanel"]:not([hidden]) img')].every(image => image.complete && image.naturalWidth > 0));
     for (const source of await images.evaluateAll(list => list.map(image => image.getAttribute('src')))) assert.match(source, /^\/api\/local\/media\//);
@@ -328,8 +332,9 @@ try {
     // 视频：不内联播放，也不当图片渲染——卡片只写字节状态词；封面等其余对象不受影响。
     await open(`&work=${video}&tab=materials`);
     await waitInspector(TITLE.video);
-    assert.equal(await page.locator('video').count(), 0);
     const videoCard = panel('材料').locator('button[data-index]').filter({ hasText: '视频' });
+    await videoCard.first().waitFor();
+    assert.equal(await page.locator('video').count(), 0);
     assert.equal(await videoCard.count(), 1);
     assert.equal(await videoCard.locator('img').count(), 0, '视频不当图片渲染');
     assert.match(await videoCard.innerText(), /已取得/);
@@ -456,8 +461,8 @@ try {
     // 不可用：没有关联授权的作品只说原因，不提供按钮。
     await open(`&work=${plain}`);
     await waitInspector(TITLE.plain);
+    await panel('概览').getByText(/尚未具备监控目标关联的有效深度归档授权/).first().waitFor();
     assert.equal(await panel('概览').getByRole('button', { name: '立即复观测' }).count(), 0);
-    assert.match(await panel('概览').innerText(), /尚未具备监控目标关联的有效深度归档授权/);
   });
 
   // ⑩ 入站
