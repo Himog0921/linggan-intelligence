@@ -3,6 +3,47 @@ import type { Overview, PeriodType } from "./api";
 import * as f from "./format";
 import { c } from "./styles";
 import { Sparkline } from "./Charts";
+type OpsGlyphName =
+  | "lead"
+  | "open"
+  | "ratio"
+  | "publish"
+  | "accounts"
+  | "yield"
+  | "hits"
+  | "platform"
+  | "trend"
+  | "matrix";
+
+/** Lightweight LIDS-style geometric glyphs; decorative only, never encode status alone. */
+export function OpsGlyph({ name }: { name: OpsGlyphName }) {
+  const paths: Record<OpsGlyphName, readonly [string, string]> = {
+    lead: ["M3 17V5h5M21 7v12h-5M5 15l5-5 4 3 6-7", "M16 6h4v4"],
+    open: ["M5 3h6M5 3v18h14v-6M9 9h3M9 13h3", "M12 12l8-8m-5 0h5v5"],
+    ratio: ["M4 5h6v6H4zM14 13h6v6h-6zM9 15l6-6", "M14 5h6v6h-6z"],
+    publish: ["M3 5h8v8H3zM14 5h7M14 9h7M3 17h18M3 21h13", "M16 21h5"],
+    accounts: ["M4 5h6v6H4zM14 5h6v6h-6zM4 15h6v6H4z", "M14 15h6v6h-6z"],
+    yield: ["M4 20V14h4v6M10 20v-9h4v9M16 20V4h4v16", "M3 6h7m-3-3 3 3-3 3"],
+    hits: ["M12 2l2.8 6.6L22 12l-7.2 3.4L12 22l-2.8-6.6L2 12l7.2-3.4z", "M9 12h6"],
+    platform: ["M3 5h18M3 10h18M3 15h18M3 20h18", "M3 10h12"],
+    trend: ["M3 19V4M3 19h18M5 15c3-6 5-6 8-3s4 1 7-7", "M16 5h4v4"],
+    matrix: ["M3 3h18v18H3zM9 3v18M15 3v18M3 9h18M3 15h18", "M9 9h6v6H9z"],
+  };
+  const [frame, signal] = paths[name];
+  return (
+    <svg
+      className={c("ops-glyph-v2")}
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path className={c("ops-glyph-frame-v2")} d={frame} />
+      <path className={c("ops-glyph-signal-v2")} d={signal} />
+    </svg>
+  );
+}
+
 export function Delta({ value }: { value: number | null }) {
   const delta = f.delta(value);
   return (
@@ -220,95 +261,44 @@ export function Attention({ data }: { data: Overview }) {
   );
 }
 export function Ranking({ data }: { data: Overview }) {
-  const headers = [
-    "运营人",
-    "平台",
-    "近 7 天加微",
-    "负责账号",
-    "发布",
-    "有效发布",
-    "链接打开",
-    "加微",
-    "转化率",
-    "爆款",
-    "待补阅读量",
-    "风险",
-    "下一步",
-  ];
+  const headers = ["运营人", "负责账号", "发布", "爆款", "链接打开", "加微", "加微 / 打开", "近 7 日"];
   return (
-    <section className={c("ops-block")} aria-labelledby="ops-ranking-title">
-      <h2 id="ops-ranking-title" className={c("ops-block-title")}>
-        运营人排行
-      </h2>
-      <div
-        className={c("ops-table-wrap", "ops-inline-table")}
-        tabIndex={0}
-        aria-label="运营人排行，可横向滚动"
-      >
-        <table className={c("ops-table", "ops-ranking")}>
+    <section className={c("ops-ranking-v2")} aria-labelledby="ops-ranking-title">
+      <div className={c("ops-section-head-v2")}>
+        <h2 id="ops-ranking-title">运营人表现</h2>
+        <span className={c("ops-section-aside-v2")}>按加微排序 · 每日数据不分业务</span>
+      </div>
+      <div className={c("ops-table-wrap", "ops-ranking-scroll-v2")} tabIndex={0}
+           aria-label="运营人表现排行，可横向滚动">
+        <table className={c("ops-table", "ops-ranking", "ops-ranking-table-v2")}>
           <thead>
-            <tr>
-              {headers.map((title, i) => (
-                <th
-                  key={title}
-                  scope="col"
-                  className={i >= 3 && i <= 10 ? c("ops-number") : undefined}
-                  title={
-                    title === "待补阅读量"
-                      ? "发出满 7 天还没填阅读量的小红书帖子，不随时间段变化"
-                      : undefined
-                  }
-                >
-                  {title}
-                </th>
-              ))}
-            </tr>
+            <tr>{headers.map((title, i) => (
+              <th key={title} scope="col"
+                  className={i > 0 && i < 7 ? c("ops-number") : undefined}
+                  title={title === "加微 / 打开" ? "按运营人同周期记账数计算，不表示逐篇作品归因" : undefined}>
+                {title}
+              </th>
+            ))}</tr>
           </thead>
           <tbody>
-            {data.ranking.length ? (
-              data.ranking.map((row) => (
-                <tr key={row.operator}>
-                  <td>{row.operator}</td>
-                  <td>{row.platform ? f.platformLabel[row.platform] : "—"}</td>
-                  <td>
-                    <Sparkline values={row.sparkline} />
-                  </td>
-                  <td className={c("ops-number")}>
-                    {f.number(row.responsibleAccounts)}
-                  </td>
-                  <td className={c("ops-number")}>{f.number(row.published)}</td>
-                  <td
-                    className={c("ops-number", "ops-missing")}
-                    title="自动发现我方帖子上线后接入"
-                  >
-                    未接入
-                  </td>
-                  <td className={c("ops-number")}>
-                    {f.number(row.linksOpened)}
-                  </td>
-                  <td className={c("ops-number")}>
-                    {f.number(row.followersGained)}
-                  </td>
-                  <td className={c("ops-number")}>
-                    {f.percent(row.conversionRate)}
-                  </td>
-                  <td className={c("ops-number")}>{f.number(row.hits)}</td>
-                  <td
-                    className={c("ops-number")}
-                    title="发出满 7 天还没填阅读量的小红书帖子"
-                  >
-                    {f.number(row.pendingViews)}
-                  </td>
-                  <td>{row.risk ? f.riskLabel[row.risk] : ""}</td>
-                  <td>{f.rankingStep(row)}</td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan={13} className={c("ops-empty")}>
-                  {f.blockEmptyText(data.window, "当期没有运营数据")}
-                </td>
+            {data.ranking.length ? data.ranking.map((row) => (
+              <tr key={row.operator}>
+                <th scope="row" className={c("ops-ranking-person-v2")}>
+                  <b title={row.operator}>{row.operator}</b>
+                  <small>{row.platform ? f.platformLabel[row.platform] : "平台未知"}</small>
+                </th>
+                <td className={c("ops-number")}>{f.number(row.responsibleAccounts)}</td>
+                <td className={c("ops-number")}>{f.number(row.published)}</td>
+                <td className={c("ops-number")}>{f.number(row.hits)}</td>
+                <td className={c("ops-number")}>{f.number(row.linksOpened)}</td>
+                <td className={c("ops-number", "ops-ranking-leads-v2")}>{f.number(row.followersGained)}</td>
+                <td className={c("ops-number")}>{f.percent(row.conversionRate)}</td>
+                <td><Sparkline values={row.sparkline} /></td>
               </tr>
+            )) : (
+              <tr><td colSpan={headers.length} className={c("ops-empty")}>
+                {f.blockEmptyText(data.window, "当期没有运营数据")}
+              </td></tr>
             )}
           </tbody>
         </table>
@@ -316,6 +306,7 @@ export function Ranking({ data }: { data: Overview }) {
     </section>
   );
 }
+
 export function Share({ data }: { data: Overview }) {
   const share = data.platformShare;
   const total = share ? share.xhs + share.douyin : 0;
