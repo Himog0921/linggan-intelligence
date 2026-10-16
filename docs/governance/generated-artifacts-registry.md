@@ -207,3 +207,11 @@ Mog 授权三篇指定作品在本机核对与重新分层。私有材料快照�
 - 统一入口：`scripts/test-content-workbench-postgres.sh --browser`，默认后端证明继续可独立运行，CI执行后端与浏览器两种模式。合成来源/凭据不代表真实选题或真实模型验收。
 
 字体核对：上游 `2894aab31764f10f29c421bdfd2340d3b382d384`；源 TTF SHA256 `a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da`；WOFF2 SHA256 `ed05125987c35ee57be16be7242568f1d516fbf497bc0ef4161499ca9e8d8fce`；产物 7782120 字节。转换工具 fontTools 4.62.1，`TTFont(source).flavor="woff2"`，不裁掉字形；OFL 1.1 文本随文件保留，仅移除上游一处行尾空格以通过仓库空白检查。
+
+## CREATOR-DISCOVERY-001 · 作者分析调度修复（自 PR #384 拆出）隔离验证
+
+- 来源：维护的 `scripts/test-creator-discovery-postgres.sh`（创作者 worker 用例 + 创作者读模型用例）与 `crates/intelligence/tests/creator_discovery_worker_postgres.rs`；测试源码与脚本是人工维护代码，不是生成产物。输入全部合成，模型适配器是本机 Node 子进程，不外连、不发起真实模型调用。
+- 位置：每次运行唯一随机命名的 Docker container 与 volume `linggan-creator-proof-<UTC>_<pid>_<hex>`、`…-data`，及其中的一次性数据库；运行日志放系统临时目录。这是新的容器类别，与本文件前述手工运行的 `linggan-creator-discovery-proof-*` 容器分开，不能互相替代。
+- Git：只提交脚本与测试源码；日志、数据库、容器、volume、编译产物不入 Git。
+- 再生：运行上述脚本；可追加测试名只重跑指定的 worker 用例。
+- 清理：脚本 EXIT 时先 `dropdb` 并核实，再删除本次容器与 volume，任一步失败则非零退出并报告；不得清理其他容器、业务库、工作树或共享 runtime。责任：CREATOR-DISCOVERY-001 / Issue #367。

@@ -59,10 +59,24 @@ async fn finish_without_dispatch(
     Ok(())
 }
 
+/// Process-local turn-taking between the work and author queues inside the existing model worker.
+/// After a work visit the author queue is offered the next visit first; an author queue with
+/// nothing claimable falls back to work, and work with nothing due falls back to authors. An
+/// author is claimable only once none of its own works in the domain is unfinished (see
+/// `run_focus`), so a turn never judges an author mid-backlog and other authors' backlogs do not
+/// hold it back. The schedule only decides which queue is tried first: leases, fingerprints,
+/// retry limits, budget and admission still gate every call, and nothing here is persisted (a
+/// restart only resets who goes first).
+#[derive(Default)]
+pub struct CreatorDiscoverySchedule {
+    prefer_author: bool,
+}
+
 pub async fn run_once(
     db: &Database,
     secrets: &dyn ModelSecretStore,
     adapter: &PiAdapter,
+    schedule: &mut CreatorDiscoverySchedule,
 ) -> Result<bool, ModelError> {
     let ready: bool =
         sqlx::query_scalar("SELECT to_regclass('linggan_creator_discovery_policy') IS NOT NULL")
@@ -135,12 +149,24 @@ pub async fn run_once(
             }
         }
     }
+    // After a work visit the author queue takes this visit if it has a claimable author. At most
+    // one lease is taken per visit; when no author is claimable it falls through to work below.
+    if schedule.prefer_author && run_focus(db, secrets, adapter).await? {
+        schedule.prefer_author = false;
+        return Ok(true);
+    }
     let lease = Uuid::new_v4();
     let mut tx = db.pool().begin().await?;
     let row=sqlx::query("SELECT a.domain_ref,a.work_public_ref,a.requested_fingerprint,p.config_ref FROM linggan_creator_discovery_work_analysis a JOIN linggan_creator_discovery_policy p ON p.domain_ref=a.domain_ref AND p.platform='xhs' JOIN observation_domain d ON d.domain_ref=a.domain_ref WHERE a.job_state='queued' AND a.attempt_count<3 AND a.next_attempt_at<=scope_001_now() AND p.analysis_enabled AND d.status='active' ORDER BY a.next_attempt_at,a.domain_ref,a.work_public_ref FOR UPDATE OF a SKIP LOCKED LIMIT 1").fetch_optional(&mut *tx).await?;
     let Some(row) = row else {
         tx.commit().await?;
-        return run_focus(db, secrets, adapter).await;
+        // Without author priority, authors run whenever no work is due. With it, they were
+        // already offered this visit above, so asking the same queue again would only repeat it.
+        return if schedule.prefer_author {
+            Ok(false)
+        } else {
+            run_focus(db, secrets, adapter).await
+        };
     };
     let domain: Uuid = row.get("domain_ref");
     let work: Uuid = row.get("work_public_ref");
@@ -148,6 +174,7 @@ pub async fn run_once(
     let fingerprint: String = row.get("requested_fingerprint");
     sqlx::query("UPDATE linggan_creator_discovery_work_analysis SET job_state='running',attempt_count=attempt_count+1,lease_token=$3,lease_expires_at=scope_001_now()+interval '5 minutes' WHERE domain_ref=$1 AND work_public_ref=$2").bind(domain).bind(work).bind(lease).execute(&mut *tx).await?;
     tx.commit().await?;
+    schedule.prefer_author = true;
     let result = execute(
         db,
         secrets,
@@ -247,7 +274,7 @@ async fn queue_focus(
     config: Uuid,
 ) -> Result<(), ModelError> {
     let fp = discovery::focus_fingerprint(&w.profile, works, &json!(config));
-    sqlx::query("INSERT INTO linggan_creator_discovery_author_analysis(domain_ref,platform,author_external_id,requested_fingerprint) VALUES($1,$2,$3,$4) ON CONFLICT(domain_ref,platform,author_external_id) DO UPDATE SET requested_fingerprint=$4,job_state='queued',attempt_count=0,lease_token=NULL,lease_expires_at=NULL,last_error_code=NULL WHERE linggan_creator_discovery_author_analysis.requested_fingerprint<>$4").bind(domain).bind(&w.platform).bind(&w.author_external_id).bind(fp).execute(db.pool()).await?;
+    sqlx::query("INSERT INTO linggan_creator_discovery_author_analysis(domain_ref,platform,author_external_id,requested_fingerprint) VALUES($1,$2,$3,$4) ON CONFLICT(domain_ref,platform,author_external_id) DO UPDATE SET requested_fingerprint=$4,job_state='queued',attempt_count=0,lease_token=NULL,lease_expires_at=NULL,last_error_code=NULL,next_attempt_at=scope_001_now(),updated_at=scope_001_now() WHERE linggan_creator_discovery_author_analysis.requested_fingerprint<>$4").bind(domain).bind(&w.platform).bind(&w.author_external_id).bind(fp).execute(db.pool()).await?;
     Ok(())
 }
 async fn call(
@@ -352,7 +379,18 @@ async fn run_focus(
     adapter: &PiAdapter,
 ) -> Result<bool, ModelError> {
     let mut tx = db.pool().begin().await?;
-    let row=sqlx::query("SELECT a.domain_ref,a.platform,a.author_external_id,a.requested_fingerprint,p.config_ref FROM linggan_creator_discovery_author_analysis a JOIN linggan_creator_discovery_policy p USING(domain_ref,platform) JOIN observation_domain d USING(domain_ref) WHERE a.job_state='queued' AND a.attempt_count<3 AND a.next_attempt_at<=scope_001_now() AND p.analysis_enabled AND d.status='active' ORDER BY a.next_attempt_at,a.domain_ref FOR UPDATE OF a SKIP LOCKED LIMIT 1").fetch_optional(&mut *tx).await?;
+    // An author is claimable only when none of its own works in this domain is unfinished, so it
+    // is judged once on the final work results instead of after every work, and one author's
+    // backlog never holds another author back (the guard is per author, evaluated in the claim).
+    // Unfinished work analysis = `running` (including an expired lease: recovery above turns it
+    // back into `queued`, or `failed` at three attempts) or `queued` with attempts left, which
+    // covers both due and waiting-for-retry rows. `failed` (three attempts used), `paused`
+    // (waits for re-enable, next-day budget or manual retry; the author hits the same admission
+    // gate) and `idle` do not block. A work's author is resolved with the same as-of function
+    // the creator read model uses. The unfinished set is built once per claim (MATERIALIZED), so
+    // the cost follows the backlog rather than the number of waiting authors, and an author that
+    // is not claimable is filtered out in the query, letting the next one through.
+    let row=sqlx::query("WITH unfinished AS MATERIALIZED (SELECT w.domain_ref,c.platform,attribution.author_external_id FROM linggan_creator_discovery_work_analysis w JOIN linggan_material_content c ON c.public_ref=w.work_public_ref CROSS JOIN LATERAL linggan_material_content_author_at(w.work_public_ref,scope_001_now()) attribution WHERE w.job_state='running' OR (w.job_state='queued' AND w.attempt_count<3)) SELECT a.domain_ref,a.platform,a.author_external_id,a.requested_fingerprint,p.config_ref FROM linggan_creator_discovery_author_analysis a JOIN linggan_creator_discovery_policy p USING(domain_ref,platform) JOIN observation_domain d USING(domain_ref) WHERE a.job_state='queued' AND a.attempt_count<3 AND a.next_attempt_at<=scope_001_now() AND p.analysis_enabled AND d.status='active' AND NOT EXISTS (SELECT 1 FROM unfinished u WHERE u.domain_ref=a.domain_ref AND u.platform=a.platform AND u.author_external_id=a.author_external_id) ORDER BY a.next_attempt_at,a.domain_ref,a.platform,a.author_external_id FOR UPDATE OF a SKIP LOCKED LIMIT 1").fetch_optional(&mut *tx).await?;
     let Some(row) = row else {
         tx.commit().await?;
         return Ok(false);
@@ -401,9 +439,9 @@ async fn run_focus(
     fragments.extend(chosen);summaries.push(summary);
   }
   let input=json!({"domain":data.domain,"works":summaries,"fragments":fragments,"sampleBasis":if broad.len()>=2{"profile_discovery_sample"}else{"limited_domain_sample"}});
-  if fragments.is_empty() {return Ok::<_,ModelError>((validate_focus(&json!({}),&fragments,&related,&broad),None));}
+  if fragments.is_empty() {return Ok::<_,ModelError>((with_sample_counts(validate_focus(&json!({}),&fragments,&related,&broad),0,works.len()),None));}
   let (raw,invocation)=call(db,secrets,adapter,domain,config,FOCUS_SYSTEM,&input,"focus",author.clone(),lease,&fingerprint,&Value::Null).await?;
-  Ok::<_,ModelError>((validate_focus(&raw,&fragments,&related,&broad),Some(invocation)))
+  Ok::<_,ModelError>((with_sample_counts(validate_focus(&raw,&fragments,&related,&broad),summaries.len(),works.len()),Some(invocation)))
  }.await;
     match result {
         Ok((result, invocation)) => {
@@ -414,6 +452,14 @@ async fn run_focus(
         }
     }
     Ok(true)
+}
+
+/// Records how many works actually reached the model input and how many the author had at that
+/// moment, so a budget-limited sample is never read as the whole account (0 when no input fit).
+fn with_sample_counts(mut output: Value, sampled: usize, available: usize) -> Value {
+    output["sampleWorkCount"] = json!(sampled);
+    output["availableWorkCount"] = json!(available);
+    output
 }
 
 fn is_paused(e: &ModelError) -> bool {
