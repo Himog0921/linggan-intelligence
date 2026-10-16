@@ -6,4 +6,6 @@ export const MODEL_SETTINGS_PATH = '/settings/models';
 export const WORKBENCH_PATH = '/ops/creation';
 export const CREATORS_PATH = '/corpus/creators';
 
-export const REACT_PAGE_PATHS: readonly string[] = [MODEL_SETTINGS_PATH, WORKBENCH_PATH, CREATORS_PATH];
+export const COLLECTION_PATHS = ['/collection/targets', '/collection/tasks', '/collection/domains', '/collection/runtime'] as const;
+
+export const REACT_PAGE_PATHS: readonly string[] = [MODEL_SETTINGS_PATH, WORKBENCH_PATH, CREATORS_PATH, ...COLLECTION_PATHS];

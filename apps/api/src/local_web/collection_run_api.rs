@@ -22,6 +22,10 @@ pub(super) fn routes() -> Router<LocalWebState> {
         .route("/api/collection/runs/{run}", get(read))
         .route("/api/collection/runs/{run}/works", get(works))
         .route("/api/collection/runs/{run}/commands", post(command))
+        .route(
+            "/api/collection/runs/{run}/commands/{identity}",
+            get(command_receipt),
+        )
 }
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -79,7 +83,17 @@ async fn create(State(state): State<LocalWebState>, Json(input): Json<CreateRun>
     let Some(db) = state.database.database() else {
         return disconnected();
     };
-    result(collection_run::create_run(db, &input).await)
+    let domain = input.domain_ref;
+    // The owner validates the domain and includes it in the durable request hash, including
+    // replay. Return the confirmed scope alongside the identity for the React receipt parser.
+    result(
+        collection_run::create_run(db, &input)
+            .await
+            .map(|mut receipt| {
+                receipt["domainRef"] = serde_json::json!(domain);
+                receipt
+            }),
+    )
 }
 async fn list(State(state): State<LocalWebState>, Query(q): Query<RunQuery>) -> Response {
     let Some(db) = state.database.database() else {
@@ -197,4 +211,23 @@ async fn executions(
         return disconnected();
     };
     result(collection_run::executions(db, q.domain_ref, q.run_ref, q.page.unwrap_or(1)).await)
+}
+
+// Reads the existing durable command receipt. Absence is unconfirmed, never a replay instruction.
+async fn command_receipt(
+    State(state): State<LocalWebState>,
+    Path((run, identity)): Path<(Uuid, Uuid)>,
+    Query(q): Query<Domain>,
+) -> Response {
+    let Some(db) = state.database.database() else {
+        return disconnected();
+    };
+    let found: Result<Option<serde_json::Value>, sqlx::Error> = sqlx::query_scalar(
+        "SELECT c.receipt FROM collection_run_command c JOIN collection_run r USING(run_ref) WHERE c.command_ref=$1 AND c.run_ref=$2 AND r.domain_ref=$3"
+    ).bind(identity).bind(run).bind(q.domain_ref).fetch_optional(db.pool()).await;
+    result(
+        found
+            .map_err(RunError::Database)
+            .and_then(|r| r.ok_or(RunError::NotFound)),
+    )
 }

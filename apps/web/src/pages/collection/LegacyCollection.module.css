@@ -1488,3 +1488,707 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
   .domain-counts,.domain-lanes ul{grid-template-columns:minmax(0,1fr)}
   .domain-card table{display:block;overflow-x:auto}
 }
+
+/* OBSERVATION-TARGET-DOSSIER-UI-001 · creator directory + dossier workspace.
+ * One desktop-only field surface: continuous tables outside, lifecycle distribution inside. */
+
+/* Target directory. The page-wide stylesheet still owns the Collection shell; these selectors
+ * only replace the target table's former eight-column, stacked-cell layout. */
+.c-tg-directory{display:grid;gap:var(--lgi-space-6)}
+.c-tg-kind{min-width:0}
+.c-tg-kind-head{min-height:40px;display:flex;align-items:center;justify-content:space-between;gap:var(--lgi-space-4);padding:0 var(--lgi-space-3);border-bottom:1px solid var(--lgi-border-solid)}
+.c-tg-kind-head h2{margin:0;color:var(--lgi-ink);font-size:var(--lgi-text-body);font-weight:700}
+.c-tg-kind-head span{color:var(--lgi-muted);font:600 var(--lgi-text-label)/var(--lgi-lh-data) var(--lgi-font-mono);font-variant-numeric:tabular-nums}
+.c-tg-table-scroll{min-width:0;max-width:100%;overflow-x:auto;overscroll-behavior-inline:contain}
+/* 十三列一次排满，不再靠横向滚动。定宽列写成 minmax(0,N)：窗口窄时它们按比例收窄并
+ * 省略文字，而不是把整张表推出屏幕——一张需要左右拖动才能看全的目录，等于要求人
+ * 记住左边看过什么。选择框、编号与操作三列保持定宽：它们是可点区域，收窄会让人点不中。 */
+.c-tg-table-head.c-tg-creator-grid,.c-tg-item.c-tg-creator-grid,.c-tg-table-head.c-tg-keyword-grid,.c-tg-item.c-tg-keyword-grid{display:grid;grid-template-columns:40px 48px minmax(192px,1fr) minmax(0,52px) minmax(0,72px) minmax(0,92px) minmax(0,92px) minmax(0,124px) minmax(0,84px) minmax(0,100px) minmax(0,104px) minmax(0,104px) 200px;gap:var(--lgi-space-2)}
+.c-tg-table-head{width:100%;min-height:40px;box-sizing:border-box;padding:0 var(--lgi-space-3);background:var(--lgi-canvas-low);color:var(--lgi-muted);font:600 var(--lgi-text-label)/var(--lgi-lh-data) var(--lgi-font-sans);letter-spacing:var(--lgi-ls-normal)}
+.c-tg-table-head>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.c-tg-item{position:relative;width:100%;min-height:64px;box-sizing:border-box;padding:var(--lgi-space-3);border-bottom:1px solid var(--lgi-hairline)}
+.c-tg-item{cursor:pointer}
+.c-tg-item:has(.c-tg-object-link:focus-visible){background:var(--lgi-canvas-sunken)}
+.c-tg-number{display:flex;align-items:center;gap:var(--lgi-space-2);min-width:0}
+.c-tg-select,.c-tg-select-all{display:grid;place-items:center;inline-size:40px;block-size:40px;min-width:40px;min-height:40px;cursor:pointer}
+.c-tg-select input,.c-tg-select-all input[data-target-select-all]{appearance:auto;inline-size:18px;block-size:18px;min-width:18px;min-height:18px;margin:0;accent-color:var(--lgi-signal-ink);cursor:pointer}
+.c-tg-actions{pointer-events:auto}
+.c-tg-index{color:var(--lgi-signal-ink);font:700 var(--lgi-text-label)/var(--lgi-lh-data) var(--lgi-font-mono);font-variant-numeric:tabular-nums}
+.c-tg-object{display:flex;align-items:center;gap:var(--lgi-space-3);min-width:0}
+.c-tg-object-text{display:flex;align-items:baseline;gap:var(--lgi-space-2);min-width:0;overflow:hidden}
+.c-tg-title,.c-tg-meta,.c-tg-group{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.c-tg-object-link{color:inherit;text-decoration:none}
+.c-tg-title{flex:0 0 auto;max-width:calc(var(--lgi-space-24) + var(--lgi-space-12));color:var(--lgi-ink);font-size:var(--lgi-text-body);font-weight:700}
+.c-tg-meta{flex:1 1 auto;color:var(--lgi-muted);font:400 var(--lgi-text-label)/var(--lgi-lh-data) var(--lgi-font-mono)}
+.c-tg-avatar{width:40px;height:40px;flex:0 0 auto;border-radius:50%;object-fit:cover;background:var(--lgi-canvas-sunken)}
+.c-tg-avatar-state{display:grid;place-items:center;border:1px solid var(--lgi-border);color:var(--lgi-muted);font:700 var(--lgi-text-body)/1 var(--lgi-font-sans);text-align:center;white-space:nowrap;overflow:hidden}
+.c-tg-cell{min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--lgi-body);font-size:var(--lgi-text-label);line-height:var(--lgi-lh-data);white-space:nowrap}
+.c-tg-platform{color:var(--lgi-ink);font-weight:600}
+.c-tg-number-value,.c-tg-time{font-family:var(--lgi-font-mono);font-variant-numeric:tabular-nums}
+.c-tg-number-value{color:var(--lgi-ink);font-weight:700;text-align:right}
+/* 数字列右对齐是为了让位数对齐着比。表头必须跟着一起右对齐——否则表头贴左、
+ * 数字贴右，同一列的两端各站一边，读的人会以为是错位。 */
+.c-tg-head-num{text-align:right}
+/* 右对齐的值贴在列的右边缘，紧邻的左对齐列又贴在自己的左边缘，两者只隔一个 8px 的
+ * 栅格间距——「43 / 43」和「巡查中」就这样黏成一团。给数字列一个右内边距，把值从
+ * 边缘推开，视觉间距变成 8+12。表头同处理，否则表头与数值又会各站一边。 */
+.c-tg-number-value,.c-tg-head-num{padding-right:var(--lgi-space-3)}
+.c-tg-time{color:var(--lgi-body)}
+.c-tg-unknown{color:var(--lgi-muted)}
+.c-tg-truth{display:inline-flex;align-items:center;max-width:100%;min-height:24px;overflow:hidden;text-overflow:ellipsis;font-size:var(--lgi-text-label);font-weight:600;white-space:nowrap}
+.c-tg-truth::before{content:"";width:var(--lgi-space-2);height:var(--lgi-space-2);margin-right:var(--lgi-space-2);background:var(--lgi-unknown-dot)}
+.c-tg-ok{color:var(--lgi-success)}
+.c-tg-ok::before{background:var(--lgi-success-dot)}
+.c-tg-warn{color:var(--lgi-warning)}
+.c-tg-warn::before{background:var(--lgi-warning-dot)}
+.c-tg-info{color:var(--lgi-info)}
+.c-tg-info::before{background:var(--lgi-info-dot)}
+.c-tg-neutral{color:var(--lgi-muted)}
+.c-tg-actions{display:flex;align-items:center;justify-content:flex-end;min-width:0;cursor:default}
+.c-tg-actions form{width:auto;min-width:0;margin:0}
+.c-tg-btn{display:inline-flex;align-items:center;width:auto;max-width:100%;min-height:40px;height:40px;box-sizing:border-box;padding:0 var(--lgi-space-4);justify-content:center;line-height:1;white-space:nowrap;font-size:var(--lgi-text-label)}
+.c-tg-list-head{display:flex;align-items:center;justify-content:space-between;gap:var(--lgi-space-4)}
+.c-tg-list-tools{display:flex;align-items:center;justify-content:flex-end;gap:var(--lgi-space-3)}
+.c-tg-list-hint{color:var(--lgi-muted);font-size:var(--lgi-text-label)}
+.c-tg-batch{margin:0}
+.c-target-add .c-tg-batch-open{display:inline-flex;align-items:center;justify-content:center;min-height:36px;height:36px;box-sizing:border-box;line-height:1;white-space:nowrap}
+.c-tg-batch-overlay{position:fixed;z-index:var(--lgi-z-overlay);inset:0;display:grid;place-items:center;padding:var(--lgi-space-6);background:var(--lgi-canvas-overlay)}
+.c-tg-batch-overlay[hidden]{display:none}
+.c-tg-batch-dialog{width:min(100%,calc(var(--lgi-space-24) * 15));display:grid;gap:var(--lgi-space-4);padding:var(--lgi-space-6);background:var(--lgi-canvas);border:1px solid var(--lgi-border-solid);box-shadow:var(--lgi-shadow-overlay)}
+.c-tg-batch-dialog h2,.c-tg-batch-dialog p{margin:0}
+.c-tg-batch-dialog h2{color:var(--lgi-ink);font-size:var(--lgi-text-section)}
+.c-tg-batch-dialog p{color:var(--lgi-body);font-size:var(--lgi-text-data);line-height:var(--lgi-lh-body)}
+.c-tg-batch-dialog label:not([hidden]){display:grid;gap:var(--lgi-space-2);color:var(--lgi-ink);font-size:var(--lgi-text-label);font-weight:700}
+/* 上面那条规则**只挑没被隐藏的 label**。
+ *
+ * `hidden` 自带的 `display:none` 只是 UA 样式，任何类选择器都比它强。原来写的是
+ * `.c-tg-batch-dialog label{display:grid}`，于是「新领域名称」那一栏无论选了哪个领域都
+ * 露在外面：字段看着能填，填了却不会被当成新建领域——真正的判据是下拉选没选 `__new__`。
+ *
+ * 修法是**不制造那个覆盖**，而不是再写一条更强的规则去赢它：`:not([hidden])` 让隐藏的
+ * label 压根不匹配这条排版规则，UA 的 `display:none` 因此无人竞争。靠特异性赢只能赢过
+ * 当前这一种写法——给这个弹窗自己的 id 加一条 `#target-domain-modal label{display:flex}`，
+ * (1,0,1) 就重新压过 (0,2,0)，同一个 bug 换条路回来。
+ *
+ * 下面这条留着兜底：它挡得住类选择器一级的新规则，挡不住带 id 的。一劳永逸的写法是给
+ * `[hidden]` 加上优先级强制标记，但这张表的 LIDS 断言禁止那个标记（见
+ * `creator_lifecycle_tests.rs`：那条禁令是为了防止有人用它盖掉焦点轮廓）。要不要为
+ * `[hidden]` 破例，是设计系统的决定，不在本次修复的范围里。 */
+.c-tg-batch-dialog [hidden]{display:none}
+.c-tg-batch-dialog input{min-height:40px;box-sizing:border-box;padding:0 var(--lgi-space-3);border:1px solid var(--lgi-border-solid);background:var(--lgi-canvas);color:var(--lgi-ink);font:var(--lgi-text-data)/var(--lgi-lh-data) var(--lgi-font-sans)}
+.c-tg-batch-dialog-actions{display:flex;justify-content:flex-end;gap:var(--lgi-space-3)}
+
+/* 领域弹窗只有一个下拉和一个可选输入框，用批量编辑那张表的宽度（1440px）会横跨整屏，
+ * 一行说明文字被拉成一条细线，读的人要横扫一整屏才看得完一句话。按内容定宽。 */
+#target-domain-modal{width:min(100%,calc(var(--lgi-space-24) * 6))}
+.c-src-feedback{margin:var(--lgi-space-3) 0 0;max-width:calc(var(--lgi-space-24) * 6);padding:var(--lgi-space-2) var(--lgi-space-3);font:600 var(--lgi-text-data)/var(--lgi-lh-body) var(--lgi-font-sans)}
+.c-src-feedback b{margin-right:var(--lgi-space-2);padding:var(--lgi-space-2);font:700 var(--lgi-text-label)/1 var(--lgi-font-mono)}
+.c-src-feedback-ok{background:var(--lgi-success-soft);color:var(--lgi-success)}
+.c-src-feedback-ok b{background:var(--lgi-success);color:var(--lgi-on-dark)}
+.c-src-feedback-warn{background:var(--lgi-warning-soft);color:var(--lgi-warning)}
+.c-src-feedback-warn b{background:var(--lgi-warning);color:var(--lgi-ink)}
+
+/* Dossier workspace. */
+.c-dw{z-index:var(--lgi-z-drawer);max-width:100%;background:var(--lgi-canvas);border-left-color:var(--lgi-border-solid)}
+.c-dw-head,.c-dw-tabs{border-color:var(--lgi-hairline)}
+.c-dw-title{margin:0}
+.c-dw-title-row{align-items:flex-start}
+.c-dw-actions :is(.c-dw-source,.c-dw-close){display:inline-flex;align-items:center;justify-content:center;gap:var(--lgi-space-2);min-height:40px;height:40px;box-sizing:border-box;padding:0 var(--lgi-space-3);color:var(--lgi-ink);white-space:nowrap;text-decoration:none}
+.c-dw-action-icon{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:square;stroke-linejoin:miter}
+.c-dw-identity{display:flex;align-items:flex-start;gap:var(--lgi-space-3);min-width:0}
+.c-dw-identity-copy{min-width:0}
+.c-dw-avatar{width:48px;height:48px;flex:0 0 auto;border-radius:50%;object-fit:cover;background:var(--lgi-canvas-sunken)}
+.c-dw-avatar-placeholder{display:grid;place-items:center;border:1px solid var(--lgi-border);color:var(--lgi-muted);font:700 var(--lgi-text-section)/1 var(--lgi-font-sans);white-space:nowrap;overflow:hidden}
+.c-dw-kicker,.c-dw-section-head span,.c-dw-readouts span{font-size:var(--lgi-text-label);font-weight:600}
+.c-dw-kicker{font-family:var(--lgi-font-sans);letter-spacing:var(--lgi-ls-normal)}
+.c-dw-tab{min-height:40px;font-size:var(--lgi-text-data)}
+.c-dw-tab-on::after{height:3px;background:var(--lgi-signal)}
+.c-dw-view-tabs{display:flex;align-items:flex-end;gap:var(--lgi-space-5);min-height:44px;margin:0 0 var(--lgi-space-5);border-bottom:1px solid var(--lgi-hairline)}
+.c-dw-view-tab{position:relative;display:inline-flex;align-items:center;min-height:40px;color:var(--lgi-muted);font-size:var(--lgi-text-data);font-weight:600;text-decoration:none}
+.c-dw-view-tab:hover{color:var(--lgi-ink)}
+.c-dw-view-tab[aria-current="page"]{color:var(--lgi-ink);font-weight:700}
+.c-dw-view-tab[aria-current="page"]::after{content:"";position:absolute;right:0;bottom:0;left:0;height:3px;background:var(--lgi-signal)}
+.c-dw-view-body{min-width:0}
+.c-dw-archive-readouts{grid-template-columns:repeat(3,minmax(0,1fr))}
+.c-dw-archive-readouts>div{min-width:0}
+.c-dw-archive-readouts b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.c-dw-primary-form{margin-top:var(--lgi-space-4)}
+.c-dw-primary-form .c-btn-primary,.c-dw-section>.c-btn-secondary{min-height:40px}
+.c-dw-action-note{display:block;margin-top:var(--lgi-space-4);color:var(--lgi-warning);font-size:var(--lgi-text-data);line-height:var(--lgi-lh-body)}
+.c-dw-material-boundary{margin-top:var(--lgi-space-4);padding-top:var(--lgi-space-3);border-top:1px solid var(--lgi-hairline)}
+.c-dw-material-boundary b,.c-dw-problem b{color:var(--lgi-ink);font-size:var(--lgi-text-data);font-weight:700}
+.c-dw-material-boundary p,.c-dw-problem p{margin:var(--lgi-space-2) 0 0;color:var(--lgi-body);font-size:var(--lgi-text-data);line-height:var(--lgi-lh-body)}
+.c-dw-problem{margin-top:var(--lgi-space-4);padding:var(--lgi-space-4);background:var(--lgi-warning-soft)}
+.c-dw-state-list{margin:0;border-top:1px solid var(--lgi-hairline)}
+.c-dw-state-list>div{display:grid;grid-template-columns:minmax(var(--lgi-space-24),.36fr) 1fr;align-items:baseline;gap:var(--lgi-space-4);min-height:40px;padding:var(--lgi-space-2) 0;border-bottom:1px solid var(--lgi-hairline)}
+.c-dw-state-list dt{color:var(--lgi-muted);font-size:var(--lgi-text-label);font-weight:600}
+.c-dw-state-list dd{margin:0;color:var(--lgi-ink);font-size:var(--lgi-text-data);font-weight:600}
+.c-dw-overview-readouts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;border-top:1px solid var(--lgi-hairline);border-bottom:1px solid var(--lgi-hairline)}
+.c-dw-overview-readouts>div{min-width:0;padding:var(--lgi-space-3) var(--lgi-space-4);border-right:1px solid var(--lgi-hairline)}
+.c-dw-overview-readouts>div:nth-child(3n+1){padding-left:0}
+.c-dw-overview-readouts>div:nth-child(3n){border-right:0}
+.c-dw-overview-readouts>div:nth-child(n+4){border-top:1px solid var(--lgi-hairline)}
+.c-dw-overview-readouts b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--lgi-text-body)}
+.c-dw-decision{display:flex;align-items:center;justify-content:space-between;gap:var(--lgi-space-6);padding:var(--lgi-space-5);background:var(--lgi-canvas-low);box-shadow:inset 0 3px 0 var(--lgi-signal)}
+.c-dw-decision-copy{min-width:0}
+.c-dw-decision-copy>span{display:block;color:var(--lgi-muted);font-size:var(--lgi-text-label);font-weight:600}
+.c-dw-decision-copy>strong{display:block;margin-top:var(--lgi-space-1);color:var(--lgi-ink);font-size:var(--lgi-text-section);line-height:var(--lgi-lh-heading)}
+.c-dw-decision-copy>p{margin:var(--lgi-space-2) 0 0;max-width:60ch;color:var(--lgi-body);font-size:var(--lgi-text-data);line-height:var(--lgi-lh-body)}
+.c-dw-decision :is(a,button){min-height:40px;white-space:nowrap}
+.c-dw-timeline{margin:0;padding:0;list-style:none;border-top:1px solid var(--lgi-hairline)}
+.c-dw-timeline li{display:grid;grid-template-columns:minmax(calc(var(--lgi-space-24) * 2),.45fr) 1fr;gap:var(--lgi-space-5);padding:var(--lgi-space-4) 0;border-bottom:1px solid var(--lgi-hairline)}
+.c-dw-timeline time{color:var(--lgi-muted);font:600 var(--lgi-text-label)/var(--lgi-lh-data) var(--lgi-font-mono);font-variant-numeric:tabular-nums}
+.c-dw-timeline b{color:var(--lgi-ink);font-size:var(--lgi-text-data);font-weight:700}
+.c-dw-timeline p{margin:var(--lgi-space-1) 0 0;color:var(--lgi-body);font-size:var(--lgi-text-data);line-height:var(--lgi-lh-body)}
+
+/* The checkable catalogue is deliberately a table, not a lifecycle visualization. */
+.c-dw-catalog-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--lgi-space-3);margin-bottom:var(--lgi-space-5)}
+.c-dw-catalog-summary div{padding:var(--lgi-space-3);background:var(--lgi-canvas-low)}
+.c-dw-catalog-summary b{display:block;color:var(--lgi-ink);font:700 var(--lgi-text-section)/var(--lgi-lh-heading) var(--lgi-font-mono);font-variant-numeric:tabular-nums}
+.c-dw-catalog-summary span{display:block;margin-top:var(--lgi-space-1);color:var(--lgi-muted);font-size:var(--lgi-text-label)}
+.c-dw-catalog-filter{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:var(--lgi-space-3);margin-bottom:var(--lgi-space-4)}
+.c-dw-catalog-filter input,.c-dw-catalog-filter select{min-width:0;min-height:40px;box-sizing:border-box;border:1px solid var(--lgi-border);border-radius:0;background:var(--lgi-canvas);color:var(--lgi-ink);font:var(--lgi-text-data)/var(--lgi-lh-data) var(--lgi-font-sans)}
+.c-dw-catalog-filter input{padding:0 var(--lgi-space-3)}
+.c-dw-catalog-filter select{padding:0 var(--lgi-space-2)}
+.c-dw-catalog-table-wrap{overflow-x:auto;border-top:1px solid var(--lgi-border-solid)}
+.c-dw-catalog-table{width:100%;min-width:840px;border-collapse:collapse;color:var(--lgi-body);font-size:var(--lgi-text-label)}
+.c-dw-catalog-table th,.c-dw-catalog-table td{padding:var(--lgi-space-3);border-bottom:1px solid var(--lgi-hairline);text-align:left;vertical-align:top}
+.c-dw-catalog-table th{color:var(--lgi-muted);font-weight:600;white-space:nowrap}
+/* 巡检规则表：复用上面那张只读目录表的排版，只补两处差异。
+ * 一是它比目录窄得多（七列），840px 的下限会让抽屉里无谓地横向滚动；
+ * 二是操作列里是三个并排的按钮/表单，各自是独立的 POST，必须横排且不被挤成换行。 */
+.c-dw-rule-table{min-width:640px}
+.c-dw-rule-table th[scope="row"]{color:var(--lgi-body);white-space:nowrap}
+.c-dw-rule-actions{white-space:nowrap}
+.c-dw-rule-actions>*{display:inline-block;vertical-align:middle;margin-right:var(--lgi-space-2)}
+.c-dw-rule-actions>*:last-child{margin-right:0}
+.c-dw-rule-actions form{display:inline-block;margin:0}
+.c-dw-catalog-work{display:grid;gap:var(--lgi-space-1);min-width:var(--lgi-space-24)}
+.c-dw-catalog-work b{color:var(--lgi-ink);font-weight:700}.c-dw-catalog-work span{color:var(--lgi-muted);font-family:var(--lgi-font-mono);overflow-wrap:anywhere}
+.c-dw-author-link{color:var(--lgi-info);text-decoration:underline;text-underline-offset:var(--lgi-space-1)}
+.c-dw-catalog-state{font-weight:600;white-space:nowrap}.c-dw-catalog-state[data-state="pending"],.c-dw-catalog-state[data-state="retry_pending"],.c-dw-catalog-state[data-state="input_blocked"],.c-dw-catalog-state[data-state="budget_exhausted"]{color:var(--lgi-warning)}.c-dw-catalog-state[data-state="complete"]{color:var(--lgi-success)}
+@media (max-width:900px){.c-dw-catalog-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.c-dw-catalog-filter{grid-template-columns:1fr}.c-dw-catalog-filter :is(select,button){width:100%}}
+
+.life-panel{display:grid;min-width:0;gap:var(--lgi-space-4);color:var(--lgi-ink)}
+.life-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:var(--lgi-space-4)}
+.life-heading h2{margin:0;font-size:var(--lgi-text-section);line-height:var(--lgi-lh-heading);font-weight:700}
+.life-heading p{margin:0;color:var(--lgi-muted);font-size:var(--lgi-text-label);line-height:var(--lgi-lh-data)}
+.life-controls{display:grid;min-width:0;gap:var(--lgi-space-2)}
+.life-control-row{min-width:0;display:flex;align-items:center;gap:var(--lgi-space-4);flex-wrap:wrap}
+.life-control-label{min-width:var(--lgi-space-12);color:var(--lgi-muted);font-size:var(--lgi-text-label);font-weight:600}
+.life-chip{position:relative;display:inline-flex;align-items:center;min-height:40px;padding:0;border:0;color:var(--lgi-muted);font-size:var(--lgi-text-data);font-weight:600;text-decoration:none;transition:color var(--lgi-duration-state) var(--lgi-ease-ui),transform var(--lgi-duration-press) var(--lgi-ease-ui)}
+.life-chip[aria-current="true"]{color:var(--lgi-ink)}
+.life-chip[aria-current="true"]::after{content:"";position:absolute;right:0;bottom:0;left:0;height:var(--lgi-space-1);background:var(--lgi-signal)}
+.life-chip:active{transform:scale(.96)}
+.life-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-top:1px solid var(--lgi-hairline);border-bottom:1px solid var(--lgi-hairline)}
+.life-summary div{padding:var(--lgi-space-3) var(--lgi-space-4);border-right:1px solid var(--lgi-hairline)}
+.life-summary div:last-child{border-right:0}
+.life-summary b{display:block;font:700 var(--lgi-text-section)/var(--lgi-lh-heading) var(--lgi-font-mono);font-variant-numeric:tabular-nums}
+.life-summary span{display:block;margin-top:var(--lgi-space-1);color:var(--lgi-muted);font-size:var(--lgi-text-label)}
+.life-legend{display:flex;align-items:center;gap:var(--lgi-space-5);color:var(--lgi-body);font-size:var(--lgi-text-label)}
+.life-legend span{display:inline-flex;align-items:center;gap:var(--lgi-space-2);white-space:nowrap}
+.life-legend-dot{position:relative;width:var(--lgi-space-3);height:var(--lgi-space-3);display:inline-block;border-radius:50%;background:var(--lgi-ink)}
+.life-legend-new{width:var(--lgi-space-2);height:var(--lgi-space-2);background:var(--lgi-signal-soft);border:1px solid var(--lgi-signal-ink)}
+.life-figure{min-width:0;margin:0;border:1px solid var(--lgi-border);border-radius:var(--lgi-radius-md);background:var(--lgi-canvas);overflow:hidden}
+.life-chart{display:block;width:100%;max-width:100%;height:auto;min-height:320px;background:var(--lgi-canvas)}
+.life-axis{stroke:var(--lgi-border-strong);stroke-width:1;vector-effect:non-scaling-stroke}
+.life-point-hit{fill:transparent;stroke:transparent;stroke-width:24;vector-effect:non-scaling-stroke;pointer-events:all}
+.life-point-visible{fill:var(--lgi-ink);stroke:var(--lgi-canvas);stroke-width:2;vector-effect:non-scaling-stroke;pointer-events:none;transition:transform var(--lgi-duration-press) var(--lgi-ease-ui),fill var(--lgi-duration-state) var(--lgi-ease-ui),stroke var(--lgi-duration-state) var(--lgi-ease-ui);transform-box:fill-box;transform-origin:center}
+.life-point-high-discussion-ring{fill:var(--lgi-canvas);stroke:var(--lgi-signal);stroke-width:2;vector-effect:non-scaling-stroke;pointer-events:none}
+.life-point-new-mark{fill:var(--lgi-signal-soft);stroke:var(--lgi-signal-ink);stroke-width:1;vector-effect:non-scaling-stroke;pointer-events:none}
+.life-point:hover .life-point-visible,.life-point:focus-visible .life-point-visible{fill:var(--lgi-signal);transform:scale(1.35)}
+.life-point:focus-visible .life-point-visible{stroke:var(--lgi-focus);stroke-width:4}
+.life-point-selected .life-point-visible{stroke:var(--lgi-ink);stroke-width:3}
+.life-axis-copy{fill:var(--lgi-muted);font:400 var(--lgi-text-label) var(--lgi-font-mono)}
+.life-caption{display:flex;justify-content:space-between;gap:var(--lgi-space-3);padding:var(--lgi-space-3) var(--lgi-space-4);border-top:1px solid var(--lgi-hairline);color:var(--lgi-muted);font-size:var(--lgi-text-label);line-height:var(--lgi-lh-data)}
+.life-exclusions{display:flex;flex-wrap:wrap;gap:var(--lgi-space-2);margin:var(--lgi-space-3) 0 0;padding:0;list-style:none}
+.life-exclusions li{display:inline-flex;align-items:center;padding:var(--lgi-space-2) var(--lgi-space-3);background:var(--lgi-warning-soft);color:var(--lgi-body);font-size:var(--lgi-text-data)}
+.life-exclusions li::before{content:"";width:var(--lgi-space-2);height:var(--lgi-space-2);margin-right:var(--lgi-space-2);background:var(--lgi-warning-dot)}
+.life-selected{padding:var(--lgi-space-4);border:1px solid var(--lgi-border-strong);border-radius:var(--lgi-radius-sm)}
+.life-selected h3{margin:0;font-size:var(--lgi-text-body);font-weight:700}
+.life-selected dl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--lgi-space-3);margin:var(--lgi-space-3) 0}
+.life-selected dt{color:var(--lgi-muted);font-size:var(--lgi-text-label)}
+.life-selected dd{margin:var(--lgi-space-1) 0 0;font-family:var(--lgi-font-mono);font-size:var(--lgi-text-data);font-variant-numeric:tabular-nums}
+.life-corpus-link{display:inline-flex;align-items:center;min-height:40px;color:var(--lgi-signal-ink);font-size:var(--lgi-text-data);font-weight:600;text-underline-offset:var(--lgi-space-1)}
+.life-state{padding:var(--lgi-space-5);background:var(--lgi-canvas-low)}
+.life-state b{display:block;font-size:var(--lgi-text-body);font-weight:700}
+.life-state p{margin:var(--lgi-space-2) 0 0;color:var(--lgi-muted);font-size:var(--lgi-text-data);line-height:var(--lgi-lh-body)}
+.life-boundary{margin:0;padding-top:var(--lgi-space-3);border-top:1px solid var(--lgi-hairline);color:var(--lgi-muted);font-size:var(--lgi-text-label);line-height:var(--lgi-lh-body)}
+
+@media (prefers-reduced-motion:reduce){
+  .life-chip,.life-point-visible{transition:none}
+  .life-chip:active{transform:none}
+}
+
+/* 「确认这些作品已失效」：一次判断，列出对象再确认。它不是一个可以顺手点掉的按钮——
+ * 每一项都带标题与平台 id，人是照着这些去平台上核对的。 */
+.c-dw-retire{margin-top:var(--lgi-space-4);padding:var(--lgi-space-4);border:1px solid var(--lgi-border);background:var(--lgi-canvas-low)}
+.c-dw-retire>b{display:block;color:var(--lgi-ink);font-size:var(--lgi-text-body);font-weight:700}
+.c-dw-retire>p{margin:var(--lgi-space-2) 0 0;color:var(--lgi-body);font-size:var(--lgi-text-label);line-height:var(--lgi-lh-body)}
+.c-dw-retire ul{margin:var(--lgi-space-3) 0;padding:0;list-style:none;display:grid;gap:var(--lgi-space-2)}
+.c-dw-retire label:not([hidden]){display:flex;align-items:baseline;gap:var(--lgi-space-2);min-width:0;cursor:pointer}
+.c-dw-retire label input{flex:0 0 auto;inline-size:16px;block-size:16px;margin:0;accent-color:var(--lgi-signal-ink);cursor:pointer}
+.c-dw-retire label b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--lgi-ink);font-size:var(--lgi-text-label);font-weight:600}
+.c-dw-retire label span{flex:0 0 auto;color:var(--lgi-muted);font:400 var(--lgi-text-label)/var(--lgi-lh-data) var(--lgi-font-mono)}
+
+/* 行内动作：查看档案、观察开关、删除。
+ *
+ * 三者**必须同高同边框重量**。此前它们是 40px 描边按钮 / 28px 浅色按钮 / 一行下划线
+ * 文字，三种尺寸三种形状挤在一格里，读的人先要分辨「这三个是不是一类东西」。
+ * 现在统一到 34px + 1px 墨线，沿用证据库 `.ev-button` 那套已被认可的控件语言。
+ *
+ * 区分不靠尺寸，靠颜色与形状：删除是墨线里唯一的红，开关是唯一带滑轨的。 */
+.c-tg-actions{flex-wrap:nowrap;gap:var(--lgi-space-2);justify-content:flex-end}
+.c-tg-toggle{margin:0;display:flex;align-items:center}
+
+.c-tg-act{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;
+  height:34px;min-height:34px;padding:0 var(--lgi-space-3);
+  border:1px solid var(--lgi-border-solid);background:var(--lgi-canvas);
+  color:var(--lgi-ink);font:650 var(--lgi-text-label)/1 var(--lgi-font-sans);
+  white-space:nowrap;text-decoration:none;cursor:pointer;
+  transition:background var(--lgi-duration-press) var(--lgi-ease-ui),color var(--lgi-duration-press) var(--lgi-ease-ui)}
+.c-tg-act:hover{background:var(--lgi-ink);color:var(--lgi-canvas)}
+
+/* 删除是这一行里唯一的红。不可逆的动作不该和「查看」长得一样。 */
+.c-tg-act-danger{border-color:var(--lgi-danger);color:var(--lgi-danger)}
+.c-tg-act-danger:hover{background:var(--lgi-danger);color:var(--lgi-canvas)}
+
+/* 观察开关：与两侧按钮同高，靠滑轨形状把自己和按钮区分开。
+ *
+ * 此前是 38×21 的细线小方块，夹在两个 28~40px 的按钮之间显得单薄。现在与按钮同高，
+ * 2px 外框给足分量；轨道用点阵纹理（v7 的采样点阵材料），滑块是实心方块。 */
+.c-tg-switch{position:relative;overflow:hidden;box-sizing:border-box;flex:0 0 auto;
+  width:60px;height:34px;padding:0;border:2px solid var(--lgi-border-solid);
+  /* 轨道用下沉面而不是花纹：60×34 这么小的控件上，点阵会读成噪点而不是材料。
+   * 深度靠明暗——凹下去的槽 + 压在上面的实心滑块，这才是「有分量」。 */
+  background:var(--lgi-canvas-sunken);
+  cursor:pointer;transition:background-color var(--lgi-duration-press) var(--lgi-ease-ui)}
+.c-tg-switch::before{content:"";position:absolute;z-index:1;top:3px;left:3px;width:24px;height:24px;
+  background:var(--lgi-ink);
+  transition:left var(--lgi-duration-state) var(--lgi-ease-ui),background var(--lgi-duration-press) var(--lgi-ease-ui)}
+.c-tg-switch[aria-pressed="true"]::before{left:29px;background:var(--lgi-signal)}
+.c-tg-switch:hover{background-color:var(--lgi-canvas-low)}
+/* 观察中时整条槽透一点信号色，隔着一米也能看出哪些目标是活的 */
+.c-tg-switch[aria-pressed="true"]{background-color:var(--lgi-signal-soft)}
+.c-tg-switch:focus-visible{outline:2px solid var(--lgi-ink);outline-offset:2px}
+.c-tg-delete{max-width:640px}
+.c-tg-delete-cols{display:grid;grid-template-columns:1fr 1fr;gap:var(--lgi-space-4);margin:var(--lgi-space-4) 0}
+.c-tg-delete-cols b{display:block;margin-bottom:var(--lgi-space-2);color:var(--lgi-ink);font-size:var(--lgi-text-label)}
+.c-tg-delete-cols ul{margin:0;padding-left:var(--lgi-space-4);color:var(--lgi-body);font-size:var(--lgi-text-label);line-height:var(--lgi-lh-body)}
+.c-tg-delete-blocked{margin:var(--lgi-space-2) 0;color:var(--lgi-danger,#b3261e);font-size:var(--lgi-text-label);line-height:var(--lgi-lh-body)}
+.c-tg-delete label:not([hidden]){display:block;margin:var(--lgi-space-3) 0;color:var(--lgi-body);font-size:var(--lgi-text-label)}
+.c-tg-delete label input{display:block;width:100%;margin-top:var(--lgi-space-2);min-height:40px;box-sizing:border-box;padding:0 var(--lgi-space-3);border:1px solid var(--lgi-border)}
+
+/* ── 顶部工具条：统一到证据库那套已被认可的控件语言 ──────────────────────────
+ *
+ * 此前这一条上并存三种控件：一个浅色描边的排序链接（箭头是文字 ↓）、两个**原生
+ * select**（浏览器自带箭头，各系统长得都不一样）、一个输入框、两个不同粗细的按钮。
+ * 同一条工具条上四种边框、三种高度、两种箭头。
+ *
+ * 现在全部 44px 高、1px 墨线、650/12px，与 `.ev-button` 对齐；箭头一律自绘。 */
+.c-tg-toolbar .c-tg-ctl,
+.c-tg-toolbar .c-tg-field select,
+.c-tg-toolbar .c-tg-field input,
+.c-tg-toolbar .c-tg-batch-open,
+.c-tg-toolbar .c-btn-primary{
+  box-sizing:border-box;height:44px;min-height:44px;padding:0 var(--lgi-space-4);
+  border:1px solid var(--lgi-border-solid);border-radius:0;background:var(--lgi-canvas);
+  color:var(--lgi-ink);font:650 12px/1 var(--lgi-font-sans);
+  transition:background var(--lgi-duration-press) var(--lgi-ease-ui),color var(--lgi-duration-press) var(--lgi-ease-ui)}
+
+.c-tg-toolbar .c-tg-ctl{display:inline-flex;align-items:center;gap:var(--lgi-space-2);
+  text-decoration:none;cursor:pointer}
+.c-tg-toolbar .c-tg-ctl:hover,
+.c-tg-toolbar .c-tg-batch-open:not([disabled]):hover{background:var(--lgi-ink);color:var(--lgi-canvas)}
+
+/* 原生 select 的箭头去掉，换成和别处同一个自绘折角——否则同一条工具条上会同时出现
+ * 系统箭头和我们的折角，两种粗细两种角度。 */
+/* 折角用描边画在包裹的 label 上。本文件禁止一切渐变写法（见 target_inspector 的样式
+ * 检查）——那条规矩防的是把纹理做成廉价图案皮肤，折角同样该用描边而不是色彩过渡。
+ * select 是替换元素，自己挂不了伪元素，所以挂在 label 上并让它不吃指针事件。 */
+.c-tg-toolbar .c-tg-field{position:relative;display:inline-flex}
+.c-tg-toolbar .c-tg-field select{appearance:none;-webkit-appearance:none;
+  padding-right:var(--lgi-space-8);cursor:pointer}
+.c-tg-toolbar .c-tg-field::after{content:"";position:absolute;right:var(--lgi-space-4);top:50%;
+  width:8px;height:8px;margin-top:-6px;
+  border-right:2px solid var(--lgi-ink);border-bottom:2px solid var(--lgi-ink);
+  transform:rotate(45deg);pointer-events:none}
+.c-tg-toolbar .c-tg-field select:hover{background-color:var(--lgi-canvas-low)}
+.c-tg-toolbar .c-tg-field input::placeholder{color:var(--lgi-muted)}
+.c-tg-toolbar .c-tg-field input:focus{outline:0;box-shadow:inset 0 0 0 1px var(--lgi-border-solid)}
+
+/* 主按钮：黑底白字 + 右侧点阵纹理，与证据库的「读取材料」同一个做法。
+ * 不用硬阴影——工具条是常驻控件，天天在眼前，投影会一直在喊。 */
+.c-tg-toolbar .c-btn-primary{position:relative;overflow:hidden;border-width:2px;
+  padding-right:var(--lgi-space-10);background:var(--lgi-ink);color:var(--lgi-canvas);cursor:pointer}
+/* 点阵引用 token，不在本文件里写任何渐变字面量；淡出用整体透明度而不是遮罩，
+ * 同样是为了守住上面那条规矩。 */
+.c-tg-toolbar .c-btn-primary::after{content:"";position:absolute;top:0;right:0;bottom:0;width:34%;
+  background-image:var(--lgi-mosaic-on-dark);background-size:9px 9px;
+  opacity:.5;pointer-events:none}
+.c-tg-toolbar .c-btn-primary:hover{background:var(--lgi-signal)}
+
+.c-tg-toolbar .c-tg-batch-open[disabled]{border-color:var(--lgi-border);color:var(--lgi-muted);cursor:not-allowed}
+
+/* 自绘折角，与证据库 .ev-caret 同一形状 */
+.c-tg-caret{width:8px;height:8px;flex:0 0 auto;
+  border-right:2px solid currentColor;border-bottom:2px solid currentColor;
+  transform:translateY(-2px) rotate(45deg);
+  transition:transform var(--lgi-duration-state) var(--lgi-ease-ui)}
+.c-tg-ctl:hover .c-tg-caret{transform:translateY(0) rotate(45deg)}
+
+/* ── 工具条与第一张表之间只留一条线 ────────────────────────────────────────
+ *
+ * 此前这里叠了两条：工具条自己的底线，和「创作者档案」那一行的底线，中间还夹着一段
+ * 空白。两条平行的线离得越近，越像是排版事故而不是分区。
+ *
+ * 现在工具条不再自带线，由「创作者档案」那条线兼任分隔——少一条线，少一段留白。 */
+/* 工具条与内容之间只留**一条**线，且是这条粗线。tab 的选中下划线要落在它上面——
+ * 一条线同时承担「分区」和「你在哪个分类」两件事，比两条各说一半更省。 */
+.c-page .c-toolbar{border-bottom:0}
+.c-body .c-tg-kind:first-child{margin-top:0}
+
+/* tab 与右侧控件在同一行里垂直居中。
+ * tab 是 46px、控件是 44px，行高由高者决定；此前 tab 贴着行底（上留 7px、下留 1px），
+ * 因为它的选中下划线要贴住工具条的底线。那条线已经去掉，下划线就没有必须贴底的理由了。 */
+/* V4 那段把 .c-toolbar 设成 align-items:flex-end，原意是让 tab 的选中下划线压住工具条
+ * 自己的底线。那条底线已经去掉（由「创作者档案」那条兼任），压底就没有理由了，改回居中。 */
+/* 控件在粗线上方的带里垂直居中：工具条 align-items:center，控件 44px、带 48px，
+ * 上下各 2px。
+ *
+ * 但 tab 不能一起居中——它的下划线必须贴住那条粗线。所以 tab 单独 stretch 撑满整带，
+ * 文字在自己内部居中，下划线落在带底，也就是线上。 */
+.c-page .c-toolbar{align-items:center}
+/* align-items:center 会把 tab 容器整体居中，它的底边就够不到那条粗线。
+ * 让容器自己 stretch 撑满整带（align-self），文字仍在其内部居中——
+ * 于是下划线落在带底，也就是落在粗线上。 */
+.c-toolbar .c-tabs{align-self:stretch;align-items:stretch}
+.c-toolbar .c-tabs a,.c-toolbar .c-tabs button{height:auto;align-items:center}
+
+/* 主按钮收窄：黑底加纹理本身就够重，再撑宽就成了页面上最吵的东西。
+ * 点阵带同步收窄，否则纹理会占掉按钮一半。 */
+.c-tg-toolbar .c-btn-primary{padding-right:var(--lgi-space-8)}
+.c-tg-toolbar .c-btn-primary::after{width:26%}
+
+/* 自绘下拉的外观。只有在 JS 真的画出来之后才生效（靠 .c-tg-drawn 这个类），
+ * 没有 JS 时原生 select 照旧可见可用。 */
+/* 给 .c-tg-field 设了 display 就会盖掉浏览器自带的 [hidden]{display:none}——
+ * 关键词排序只在建关键词目标时才该出现，盖掉之后它在创作者模式下也会露出来。 */
+[data-drawn-select][hidden]{display:none}
+.c-tg-drawn{position:relative}
+.c-tg-drawn>select{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.c-tg-drawn::after{display:none}
+[data-drawn-select] .c-tg-drawn-toggle{display:inline-flex;align-items:center;justify-content:space-between;
+  gap:var(--lgi-space-3);min-width:110px;cursor:pointer}
+/* 展开时按钮反白，和证据库那套一致：一个不变样的触发器，等于让人自己记住开没开。 */
+[data-drawn-select] .c-tg-drawn-toggle[aria-expanded="true"]{background:var(--lgi-ink);color:var(--lgi-canvas)}
+.c-tg-drawn-toggle[aria-expanded="true"] .c-tg-caret{transform:translateY(2px) rotate(-135deg)}
+.c-tg-drawn-list{position:absolute;z-index:40;top:calc(100% + 4px);left:0;min-width:100%;
+  display:grid;padding:var(--lgi-space-1);
+  border:1px solid var(--lgi-border-solid);background:var(--lgi-canvas)}
+.c-tg-drawn-list[hidden]{display:none}
+.c-tg-drawn-list button{display:block;width:100%;padding:var(--lgi-space-2) var(--lgi-space-3);
+  border:0;background:transparent;color:var(--lgi-ink);
+  font:650 12px/1 var(--lgi-font-sans);text-align:left;white-space:nowrap;cursor:pointer;
+  transition:background var(--lgi-duration-press) var(--lgi-ease-ui)}
+.c-tg-drawn-list button:hover{background:var(--lgi-canvas-sunken)}
+.c-tg-drawn-list button[aria-selected="true"]{background:var(--lgi-ink);color:var(--lgi-canvas)}
+
+/* 那条分区粗线离工具条更近一些：它属于下面的表，不该在中间悬着一段空白。 */
+.c-page .c-tg-workspace{margin-top:var(--lgi-space-2)}
+
+/* 关键词表的「数据更新」与创作者表的「详情进度」在同一列位上。前者左对齐、后者
+ * 右对齐时，两张表的同一列各站一端，纵向看就是错开的。让它跟着右对齐。 */
+/* 第 8 列（详情进度／数据更新）单独多留一段右内边距。
+ *
+ * 这一列 124px 宽而内容只有 40~60px，右对齐把内容全顶到右缘：实测左侧空 86px、
+ * 右侧只剩 20px，看着就是贴着「巡查状态」。让两侧均衡需要约 45px，取 40px 档。
+ * 只作用于第 8 列——第 7 列（作品目录／最近命中）与第 9 列的间距本来就是对的。 */
+.c-tg-cell-end{text-align:right}
+.c-tg-cell-end,.c-tg-head-end{padding-right:var(--lgi-space-10)}
+/* The existing 40px optical inset fits a full-width column. At the 1440px shell the
+ * track shrinks; retain the complete progress heading and align its values with it. */
+@media(max-width:1560px){.c-tg-cell-end,.c-tg-head-end{padding-right:var(--lgi-space-3)}}
+
+/* 成功回执：右下角角标，3 秒后自行退场。
+ *
+ * 退场用 CSS 动画而不是 JS——脚本没跑起来时，一个永不消失的浮层比常驻横幅更糟。
+ * `forwards` 让它停在终态，`visibility:hidden` 保证它不再挡住底下的东西。
+ *
+ * 层级取 `--lgi-z-toast`（180），**不写数字**：回执要盖过抽屉（80）。此前这里写死 80、
+ * 与抽屉同层，而抽屉在 DOM 里靠后——同一个 z-index 由 DOM 顺序裁决，抽屉打开时这条
+ * 回执就落在它后面。点「建立档案」拿到的那句回执因此在最需要看到它的时候不可见。 */
+.c-tg-toast{position:fixed;right:var(--lgi-space-6);bottom:var(--lgi-space-6);z-index:var(--lgi-z-toast);
+  max-width:min(420px,calc(100vw - var(--lgi-space-12)));margin:0;
+  padding:var(--lgi-space-4) var(--lgi-space-5);
+  border:2px solid var(--lgi-border-solid);background:var(--lgi-canvas);
+  color:var(--lgi-ink);font-size:var(--lgi-text-body);line-height:var(--lgi-lh-body,1.5);
+  box-shadow:var(--lgi-space-2) var(--lgi-space-2) 0 var(--lgi-border-solid);
+  animation:c-tg-toast-in var(--lgi-duration-overlay) var(--lgi-ease-enter),
+            c-tg-toast-out var(--lgi-duration-panel) var(--lgi-ease-ui) 3s forwards}
+.c-tg-toast b{display:block;margin-bottom:var(--lgi-space-1);font-weight:700}
+@keyframes c-tg-toast-in{from{opacity:0;transform:translateY(var(--lgi-space-3))}to{opacity:1;transform:none}}
+@keyframes c-tg-toast-out{to{opacity:0;visibility:hidden}}
+
+@media (prefers-reduced-motion:reduce){
+  /* 关掉位移，但**保留定时退场**：它仍然该在 3 秒后让开，只是不再滑动。 */
+  .c-tg-toast{animation:c-tg-toast-out 1ms linear 3s forwards}
+}
+
+/* ── 检查器抽屉：与列表用同一套控件语言 ─────────────────────────────────────
+ *
+ * 抽屉此前自成一套：筛选是原生 select（弹出层由系统绘制）、「打开主页」与「关闭」
+ * 是两段带图标的文字。同一个页面里因此并存两种控件外观。 */
+.c-dw-field{position:relative;display:inline-flex}
+[data-drawn-select] .c-tg-drawn-toggle{min-height:34px;height:34px;padding:0 var(--lgi-space-3);
+  border:1px solid var(--lgi-border-solid);background:var(--lgi-canvas);color:var(--lgi-ink);
+  font:650 var(--lgi-text-label)/1 var(--lgi-font-sans)}
+.c-tg-toolbar [data-drawn-select] .c-tg-drawn-toggle{min-height:44px;height:44px;
+  padding:0 var(--lgi-space-4);font-size:12px}
+
+/* 抽屉头部两个动作沿用行内动作的形状：同高、同墨线，关闭是唯一带叉号的。 */
+.c-dw-source,.c-dw-close{display:inline-flex;align-items:center;justify-content:center;
+  box-sizing:border-box;gap:var(--lgi-space-2);height:34px;min-height:34px;
+  padding:0 var(--lgi-space-3);border:1px solid var(--lgi-border-solid);
+  background:var(--lgi-canvas);color:var(--lgi-ink);
+  font:650 var(--lgi-text-label)/1 var(--lgi-font-sans);text-decoration:none;cursor:pointer;
+  transition:background var(--lgi-duration-press) var(--lgi-ease-ui),
+             color var(--lgi-duration-press) var(--lgi-ease-ui)}
+.c-dw-source:hover,.c-dw-close:hover{background:var(--lgi-ink);color:var(--lgi-canvas)}
+.c-dw-source svg,.c-dw-close svg{width:12px;height:12px;flex:0 0 auto}
+
+/* TARGET-INSPECTOR-REVIEW-001 · the target dossier adopts the supplied performance-review
+ * composition.  This is deliberately a visual rework of the same read-only target projection:
+ * its archive, patrol and evidence truth remains owned by the Rust renderer above. */
+.c-dw{width:min(calc(var(--lgi-grid-major) * 6 + var(--lgi-space-10)),72vw);background:var(--lgi-canvas);border-left:1px solid var(--lgi-border);box-shadow:var(--lgi-shadow-overlay)}
+.c-dw-head{position:relative;min-height:calc(var(--lgi-header-height) + var(--lgi-header-height-compact));padding:var(--lgi-space-6) var(--lgi-space-8) var(--lgi-space-5);border-bottom:1px solid var(--lgi-hairline)}
+.c-dw-kicker{position:absolute;inline-size:1px;block-size:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.c-dw-title-row{align-items:center;gap:var(--lgi-space-5);margin-top:0}
+.c-dw-identity{align-items:center;gap:var(--lgi-space-3)}
+.c-dw-avatar{width:calc(var(--lgi-space-12) + var(--lgi-space-2));height:calc(var(--lgi-space-12) + var(--lgi-space-2));background:var(--lgi-canvas-sunken);border:1px solid var(--lgi-hairline)}
+.c-dw-identity-copy{overflow:hidden}
+.c-dw-name-row{display:flex;align-items:center;gap:var(--lgi-space-2);min-width:0}
+.c-dw-title{min-width:0;overflow:hidden;color:var(--lgi-ink);font-size:var(--lgi-text-section);font-weight:var(--lgi-weight-bold);line-height:var(--lgi-lh-title);letter-spacing:var(--lgi-ls-normal);text-overflow:ellipsis;white-space:nowrap}
+.c-dw-watch-badge{display:inline-flex;align-items:center;flex:0 0 auto;gap:var(--lgi-space-1);padding:var(--lgi-space-1) var(--lgi-space-2);border:1px solid var(--lgi-border);border-radius:var(--lgi-radius-sm);background:var(--lgi-canvas-low);color:var(--lgi-body);font-size:var(--lgi-text-label);font-weight:var(--lgi-weight-bold);letter-spacing:var(--lgi-ls-data)}
+.c-dw-watch-badge i{display:block;width:var(--lgi-space-1);height:var(--lgi-space-1);border-radius:50%;background:var(--lgi-success-dot)}
+.c-dw-watch-badge:not([data-state="active"]) i{background:var(--lgi-unknown-dot)}
+.c-dw-meta{display:flex;align-items:center;gap:var(--lgi-space-2);margin-top:var(--lgi-space-1);min-width:0;overflow:hidden;color:var(--lgi-muted);font:var(--lgi-weight-regular) var(--lgi-text-data)/var(--lgi-lh-data) var(--lgi-font-sans);white-space:nowrap}
+.c-dw-meta>span{overflow:hidden;text-overflow:ellipsis}
+.c-dw-meta-dot{width:var(--lgi-space-1);height:var(--lgi-space-1);flex:0 0 auto;border-radius:50%;background:var(--lgi-unknown-dot)}
+.c-dw-actions{gap:var(--lgi-space-2)}
+.c-dw-actions :is(.c-dw-source,.c-dw-close){height:calc(var(--lgi-space-8) + var(--lgi-space-2));min-height:calc(var(--lgi-space-8) + var(--lgi-space-2));padding:0 var(--lgi-space-4);border:1px solid var(--lgi-border);background:var(--lgi-canvas);font:var(--lgi-weight-semibold) var(--lgi-text-data)/var(--lgi-lh-data) var(--lgi-font-sans);transition:transform var(--lgi-duration-press) var(--lgi-ease-ui),border-color var(--lgi-duration-state) var(--lgi-ease-ui),background-color var(--lgi-duration-state) var(--lgi-ease-ui),color var(--lgi-duration-state) var(--lgi-ease-ui)}
+.c-dw-actions .c-dw-source{border-color:var(--lgi-border-solid);box-shadow:inset 0 calc(var(--lgi-space-1) / -2) 0 var(--lgi-signal)}
+.c-dw-actions .c-dw-close{border-color:transparent;color:var(--lgi-body)}
+.c-dw-actions :is(.c-dw-source,.c-dw-close):active{transform:scale(.96)}
+@media (hover:hover){.c-dw-actions .c-dw-source:hover{border-color:var(--lgi-ink);background:var(--lgi-canvas);color:var(--lgi-ink)}.c-dw-actions .c-dw-close:hover{border-color:transparent;background:var(--lgi-canvas-low);color:var(--lgi-ink)}}
+.c-dw-tabs{height:var(--lgi-header-height-compact);padding:0 var(--lgi-space-8);gap:var(--lgi-space-6);border-bottom:1px solid var(--lgi-hairline)}
+.c-dw-tab{height:var(--lgi-header-height-compact);min-height:var(--lgi-header-height-compact);padding:0 var(--lgi-space-1);color:var(--lgi-muted);font-size:var(--lgi-text-body);font-weight:var(--lgi-weight-semibold)}
+.c-dw-tab-on{color:var(--lgi-ink)}
+.c-dw-tab-on::after{height:var(--lgi-space-1);background:var(--lgi-signal)}
+.c-dw-body{padding:0 var(--lgi-space-8) var(--lgi-space-10);background:var(--lgi-canvas)}
+.c-dw-view-tabs{justify-content:flex-end;gap:0;min-height:var(--lgi-space-12);height:var(--lgi-space-12);margin:0;border-bottom:1px solid var(--lgi-hairline)}
+.c-dw-view-tab{min-height:var(--lgi-space-8);height:var(--lgi-space-8);padding:0 var(--lgi-space-3);border:1px solid transparent;color:var(--lgi-muted);font-size:var(--lgi-text-label)}
+.c-dw-view-tab[aria-current="page"]{background:var(--lgi-ink);color:var(--lgi-on-dark)}
+.c-dw-view-tab[aria-current="page"]::after{display:none}
+.c-dw-view-tab:active{transform:scale(.96)}
+@media (hover:hover){.c-dw-view-tab:hover{background:var(--lgi-canvas-low);color:var(--lgi-ink)}.c-dw-view-tab[aria-current="page"]:hover{background:var(--lgi-ink);color:var(--lgi-on-dark)}}
+.c-dw-view-body{min-width:0}
+.life-panel{gap:0;padding:0;border:0}
+.life-performance-controls{display:flex;align-items:center;justify-content:space-between;gap:var(--lgi-space-4);min-height:var(--lgi-command-height);border-bottom:1px solid var(--lgi-hairline)}
+.life-performance-controls>p{margin:0;color:var(--lgi-ghost);font-size:var(--lgi-text-label);white-space:nowrap}
+.life-performance-controls time{color:var(--lgi-body);font-family:var(--lgi-font-mono);font-variant-numeric:tabular-nums}
+.life-controls{display:flex;align-items:center;gap:var(--lgi-space-6)}
+.life-control-row{gap:var(--lgi-space-2);flex-wrap:nowrap}
+.life-control-label{min-width:0;margin-right:var(--lgi-space-1);color:var(--lgi-ghost);font-size:var(--lgi-text-label);font-weight:var(--lgi-weight-bold);letter-spacing:var(--lgi-ls-caps)}
+.life-chip{min-height:var(--lgi-space-10);padding:0 var(--lgi-space-2);border-radius:var(--lgi-radius-sm);color:var(--lgi-muted);font-size:var(--lgi-text-body);font-weight:var(--lgi-weight-regular)}
+.life-chip[aria-current="true"]{font-weight:var(--lgi-weight-bold);color:var(--lgi-ink)}
+.life-chip[aria-current="true"]::after{right:var(--lgi-space-2);bottom:calc(var(--lgi-space-1) / 2);left:var(--lgi-space-2);height:calc(var(--lgi-space-1) / 2);background:var(--lgi-signal)}
+@media (hover:hover){.life-chip:hover{background:var(--lgi-canvas-low);color:var(--lgi-ink)}}
+.life-performance-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-bottom:1px solid var(--lgi-hairline)}
+.life-performance-stat{min-width:0;min-height:calc(var(--lgi-space-16) + var(--lgi-space-10));padding:var(--lgi-space-5) var(--lgi-space-5) var(--lgi-space-4) 0}
+.life-performance-stat+.life-performance-stat{padding-left:var(--lgi-space-6);border-left:1px solid var(--lgi-hairline)}
+.life-performance-stat b{display:inline-block;color:var(--lgi-ink);font:var(--lgi-weight-bold) var(--lgi-text-page-title)/var(--lgi-lh-title) var(--lgi-font-mono);font-variant-numeric:tabular-nums;letter-spacing:var(--lgi-ls-normal)}
+.life-performance-stat span:not(.life-stat-progress){display:block;margin-top:var(--lgi-space-2);color:var(--lgi-muted);font-size:var(--lgi-text-data)}
+.life-stat-progress{display:block;width:calc(var(--lgi-grid-mobile) + var(--lgi-space-6));height:calc(var(--lgi-space-1) / 2);margin-top:var(--lgi-space-3);overflow:hidden;background:var(--lgi-canvas-sunken)}
+.life-stat-progress i{display:block;width:var(--life-progress);height:100%;background:var(--lgi-ink)}
+.life-stat-progress-signal i{background:var(--lgi-signal)}
+.life-performance-grid{display:grid;grid-template-columns:minmax(0,1fr) calc(var(--lgi-space-24) * 3);gap:var(--lgi-space-4);padding-top:var(--lgi-space-5)}
+.life-performance-grid-empty{grid-template-columns:minmax(0,1fr)}
+.life-trend-panel{min-width:0;border:1px solid var(--lgi-hairline);background:var(--lgi-canvas);box-shadow:var(--lgi-shadow-stage)}
+.life-trend-head{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--lgi-space-5);padding:var(--lgi-space-5) var(--lgi-space-5) var(--lgi-space-3)}
+.life-trend-eyebrow{margin-bottom:var(--lgi-space-2);color:var(--lgi-signal);font-size:var(--lgi-text-label);font-weight:var(--lgi-weight-bold);letter-spacing:var(--lgi-ls-caps)}
+.life-trend-head h2{margin:0;color:var(--lgi-ink);font-size:var(--lgi-text-section);line-height:var(--lgi-lh-heading);font-weight:var(--lgi-weight-bold);letter-spacing:var(--lgi-ls-normal)}
+.life-trend-head p{margin:var(--lgi-space-1) 0 0;color:var(--lgi-ghost);font-size:var(--lgi-text-label);line-height:var(--lgi-lh-data)}
+.life-trend-grain{flex:0 0 auto;min-height:var(--lgi-space-8);padding:var(--lgi-space-2) var(--lgi-space-3);border:1px solid var(--lgi-hairline);background:var(--lgi-canvas-low);color:var(--lgi-muted);font-size:var(--lgi-text-label);line-height:var(--lgi-lh-data)}
+.life-chart-head-actions{display:flex;align-items:flex-start;justify-content:flex-end;flex-wrap:wrap;gap:var(--lgi-space-2)}
+.life-chart-switch,.life-grain-switch{display:flex;align-items:center;min-height:var(--lgi-space-8);border:1px solid var(--lgi-hairline);background:var(--lgi-canvas)}
+.life-chart-switch-tab,.life-grain-switch a,.life-grain-switch span{display:inline-flex;align-items:center;justify-content:center;min-height:var(--lgi-space-8);padding:0 var(--lgi-space-3);color:var(--lgi-muted);font-size:var(--lgi-text-label);text-decoration:none}
+.life-chart-switch-tab[aria-current="page"]{background:var(--lgi-ink);color:var(--lgi-on-dark);font-weight:var(--lgi-weight-bold)}
+.life-grain-switch{background:var(--lgi-canvas-low)}
+.life-grain-switch span{color:var(--lgi-ghost);font-weight:var(--lgi-weight-bold);letter-spacing:var(--lgi-ls-caps)}
+.life-grain-switch a[aria-current="page"]{color:var(--lgi-ink);font-weight:var(--lgi-weight-bold);box-shadow:inset 0 calc(var(--lgi-space-1) / -2) 0 var(--lgi-signal)}
+@media (hover:hover){.life-chart-switch-tab:not([aria-current="page"]):hover,.life-grain-switch a:hover{background:var(--lgi-canvas-low);color:var(--lgi-ink)}}
+.life-trend-legend{display:flex;align-items:center;flex-wrap:wrap;gap:var(--lgi-space-3);min-height:var(--lgi-space-8);padding:0 var(--lgi-space-5) var(--lgi-space-1);color:var(--lgi-muted);font-size:var(--lgi-text-label)}
+.life-trend-legend span{display:inline-flex;align-items:center;gap:var(--lgi-space-2);white-space:nowrap}
+.life-trend-legend i{display:inline-block;flex:0 0 auto}
+.life-legend-bar{width:var(--lgi-space-3);height:var(--lgi-space-2);background:var(--lgi-canvas-sunken)}
+.life-legend-line{position:relative;width:var(--lgi-space-4);height:calc(var(--lgi-space-1) / 2);background:var(--lgi-ink)}
+.life-legend-dash{width:var(--lgi-space-4);border-top:1px dashed var(--lgi-unknown-dot)}
+.life-legend-ring{width:var(--lgi-space-2);height:var(--lgi-space-2);border:1px solid var(--lgi-signal);border-radius:50%}
+.life-legend-dot{width:var(--lgi-space-2);height:var(--lgi-space-2);background:var(--lgi-ink)}
+.life-trend-figure{height:calc(var(--lgi-grid-major) * 3 - var(--lgi-space-16));margin:0 var(--lgi-space-2) var(--lgi-space-2);overflow:hidden}
+.life-trend-chart{display:block;width:100%;height:100%}
+.life-trend-grid{stroke:var(--lgi-canvas-sunken);stroke-width:1}
+.life-trend-axis{fill:var(--lgi-ghost);font:var(--lgi-weight-regular) var(--lgi-text-label)/var(--lgi-lh-data) var(--lgi-font-sans)}
+.life-trend-bar{fill:var(--lgi-canvas-sunken);opacity:.92}
+.life-trend-benchmark{stroke:var(--lgi-unknown-dot);stroke-width:1;stroke-dasharray:5 6}
+.life-trend-benchmark-copy{fill:var(--lgi-muted);font:var(--lgi-weight-regular) var(--lgi-text-label)/var(--lgi-lh-data) var(--lgi-font-sans)}
+.life-trend-area{fill:url(#life-trend-area-gradient);pointer-events:none}
+.life-trend-line{fill:none;stroke:var(--lgi-ink);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.life-trend-dot{fill:var(--lgi-ink);stroke:var(--lgi-canvas);stroke-width:2}
+.life-trend-dot-new{fill:var(--lgi-signal)}
+.life-trend-new-ring{fill:var(--lgi-canvas);stroke:var(--lgi-signal);stroke-width:2}
+.life-review{min-height:calc(var(--lgi-grid-major) * 3 - var(--lgi-space-2));border:1px solid var(--lgi-hairline);background:var(--lgi-canvas-low)}
+.life-review-head{padding:var(--lgi-space-5) var(--lgi-space-4) var(--lgi-space-3);border-bottom:1px solid var(--lgi-hairline)}
+.life-review-head b{display:block;color:var(--lgi-ink);font-size:var(--lgi-text-body);font-weight:var(--lgi-weight-bold)}
+.life-review-head span{display:block;margin-top:var(--lgi-space-1);color:var(--lgi-ghost);font-size:var(--lgi-text-label);line-height:var(--lgi-lh-data)}
+.life-review-item{padding:var(--lgi-space-4);border-bottom:1px solid var(--lgi-hairline)}
+.life-review-item>div:first-child{display:flex;align-items:center;justify-content:space-between;gap:var(--lgi-space-2)}
+.life-review-item span{color:var(--lgi-muted);font-size:var(--lgi-text-label)}
+.life-review-item em{padding:var(--lgi-space-1) var(--lgi-space-2);border:1px solid var(--lgi-signal-soft);background:var(--lgi-canvas);color:var(--lgi-signal-ink);font-size:var(--lgi-text-label);font-style:normal}
+.life-review-item strong{display:block;margin-top:var(--lgi-space-2);color:var(--lgi-ink);font:var(--lgi-weight-bold) var(--lgi-text-section)/var(--lgi-lh-title) var(--lgi-font-mono);font-variant-numeric:tabular-nums;letter-spacing:var(--lgi-ls-normal)}
+.life-review-item p{margin:var(--lgi-space-1) 0 0;color:var(--lgi-muted);font-size:var(--lgi-text-label);line-height:var(--lgi-lh-data)}
+.life-mini-strip{display:flex;align-items:flex-end;gap:var(--lgi-space-1);height:var(--lgi-space-8);margin-top:var(--lgi-space-2)}
+.life-mini-strip i{display:block;width:var(--lgi-space-1);height:calc(var(--lgi-space-1) * var(--life-strip-size));background:var(--lgi-border)}
+.life-mini-strip i.life-mini-hot{background:var(--lgi-signal)}
+.life-review-boundary{margin:var(--lgi-space-3);padding:var(--lgi-space-3);border:1px solid var(--lgi-hairline);background:var(--lgi-canvas)}
+.life-review-boundary b{display:block;color:var(--lgi-signal);font-size:var(--lgi-text-label);font-weight:var(--lgi-weight-bold);letter-spacing:var(--lgi-ls-caps)}
+.life-review-boundary p{margin:var(--lgi-space-2) 0 0;color:var(--lgi-body);font-size:var(--lgi-text-label);line-height:var(--lgi-lh-body)}
+.life-evidence{margin-top:var(--lgi-space-8)}
+.life-evidence-head{display:flex;align-items:baseline;justify-content:space-between;gap:var(--lgi-space-4);margin-bottom:var(--lgi-space-3)}
+.life-evidence-head h2{margin:0;color:var(--lgi-ink);font-size:var(--lgi-text-body);font-weight:var(--lgi-weight-bold)}
+.life-evidence-head p{margin:0;color:var(--lgi-ghost);font-size:var(--lgi-text-label);line-height:var(--lgi-lh-data);text-align:right}
+.life-evidence-table-wrap{border-top:1px solid var(--lgi-border)}
+.life-evidence-table{width:100%;border-collapse:collapse;color:var(--lgi-body);font-size:var(--lgi-text-label)}
+.life-evidence-table th,.life-evidence-table td{padding:var(--lgi-space-3) var(--lgi-space-2);border-bottom:1px solid var(--lgi-hairline);text-align:left;vertical-align:middle}
+.life-evidence-table th:first-child,.life-evidence-table td:first-child{padding-left:0}
+.life-evidence-table th{color:var(--lgi-ghost);font-size:var(--lgi-text-label);font-weight:var(--lgi-weight-semibold)}
+.life-evidence-title{color:var(--lgi-ink);font-size:var(--lgi-text-data);font-weight:var(--lgi-weight-semibold);text-decoration:none}
+.life-evidence-number{text-align:right;color:var(--lgi-ink);font-family:var(--lgi-font-mono);font-variant-numeric:tabular-nums}
+.life-evidence-empty{margin:0;padding:var(--lgi-space-4);background:var(--lgi-canvas-low);color:var(--lgi-muted);font-size:var(--lgi-text-data);line-height:var(--lgi-lh-body)}
+@media (hover:hover){.life-evidence-title:hover{color:var(--lgi-signal-ink);text-decoration:underline;text-underline-offset:var(--lgi-space-1)}}
+.life-boundary{margin:var(--lgi-space-5) 0 0;max-width:72ch;color:var(--lgi-muted);font-size:var(--lgi-text-label);line-height:var(--lgi-lh-body)}
+@media (max-width:900px){.c-dw{width:100vw}.c-dw-head{padding-right:var(--lgi-space-5);padding-left:var(--lgi-space-5)}.c-dw-tabs,.c-dw-body{padding-right:var(--lgi-space-5);padding-left:var(--lgi-space-5)}.c-dw-title-row{align-items:flex-start}.c-dw-actions{flex-direction:column}.life-performance-controls{align-items:flex-start;flex-direction:column;padding:var(--lgi-space-3) 0}.life-controls{align-items:flex-start;flex-direction:column;gap:0}.life-control-row{flex-wrap:wrap}.life-performance-summary{grid-template-columns:1fr}.life-performance-stat+.life-performance-stat{padding-left:0;border-top:1px solid var(--lgi-hairline);border-left:0}.life-performance-grid{grid-template-columns:1fr}.life-review{min-height:0}.life-evidence-head{align-items:flex-start;flex-direction:column}.life-evidence-head p{text-align:left}.life-evidence-table-wrap{overflow-x:auto}.life-evidence-table{min-width:calc(var(--lgi-grid-major) * 3 + var(--lgi-space-2))}}
+@media (max-width:900px){.life-trend-head{align-items:stretch;flex-direction:column}.life-chart-head-actions{justify-content:flex-start}}
+@media (prefers-reduced-motion:reduce){.c-dw-actions :is(.c-dw-source,.c-dw-close),.c-dw-view-tab{transition:none}}
+
+/* RUNTIME-STATION-TABLE-001 · 执行工位两张表的栅格变体。
+ * 与上面两条同住一处：栅格列宽这个决定只允许有一个住处，散开写就会分叉。
+ * 工位表十列：编号 / 工位 / 连接 / 工位版本 / 心跳时间 / 今日额度 / 接活 / 账号 /
+ * 能力 / 最近动作。首层不再展开工位详情，因此没有「明细」列。 */
+.c-tg-table-head.c-tg-station-grid,.c-tg-item.c-tg-station-grid{display:grid;grid-template-columns:48px minmax(176px,1.1fr) minmax(0,72px) minmax(0,84px) minmax(0,104px) minmax(0,118px) minmax(0,116px) minmax(0,96px) minmax(0,152px) minmax(0,176px);gap:var(--lgi-space-2);align-items:center}
+.c-tg-table-head.c-tg-plan-grid,.c-tg-item.c-tg-plan-grid{display:grid;grid-template-columns:minmax(176px,1fr) minmax(0,96px) minmax(0,104px) minmax(0,120px) minmax(0,120px) minmax(0,120px);gap:var(--lgi-space-2);align-items:center}
+@media (max-width:900px){
+  .c-tg-table-head.c-tg-station-grid,.c-tg-item.c-tg-station-grid{grid-template-columns:40px minmax(140px,1fr) minmax(0,64px) minmax(0,72px) minmax(0,88px) minmax(0,104px) minmax(0,104px) minmax(0,84px) minmax(0,128px) minmax(0,140px)}
+}
+
+/* Local Collection composition; existing LIDS tokens remain the only visual values. */
+.c-page:has([data-collection-runs]){min-width:0}
+.c-run-toolbar,.c-run-tools,.c-run-filters,.c-run-pagination,.c-run-controls{display:flex;align-items:center;gap:var(--lgi-space-3);flex-wrap:wrap}
+.c-run-toolbar{justify-content:space-between;margin-bottom:var(--lgi-space-6)}
+.c-run-tools{flex:1;min-width:0}.c-run-tools label{flex:1;min-width:var(--lgi-grid-major)}
+.c-run-tools input{width:100%;padding:var(--lgi-space-3);border:var(--c-line-hair) solid var(--lgi-border);font:inherit}
+.c-run-primary.c-btn-primary{background:var(--lgi-ink);color:var(--lgi-on-dark);box-shadow:none;transform:none}
+.c-run-primary.c-btn-primary:hover{background:var(--lgi-body);transform:none;box-shadow:none}
+.c-run-filter{border:none;background:none;padding:var(--lgi-space-3) var(--lgi-space-2);color:var(--lgi-muted);font:inherit;white-space:nowrap}
+.c-run-filter[aria-current=page]{color:var(--lgi-ink);box-shadow:inset 0 calc(-1 * var(--c-line-rail)) var(--lgi-signal)}
+.c-run-filters{border-bottom:var(--c-line-hair) solid var(--lgi-hairline);margin-bottom:var(--lgi-space-4)}
+.c-run-scroll{overflow:auto}.c-run-table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:var(--lgi-text-body)}
+.c-run-table th{text-align:left;color:var(--lgi-muted);font-weight:var(--lgi-weight-semibold);background:var(--lgi-canvas-low)}
+.c-run-table td,.c-run-table th{padding:var(--lgi-space-4);vertical-align:top;border-bottom:var(--c-line-hair) solid var(--lgi-hairline);overflow-wrap:anywhere}
+.c-run-table th:first-child{width:25%}.c-run-table th:last-child{width:calc(var(--lgi-space-16) * 2)}
+.c-run-table small{display:block;color:var(--lgi-muted);margin-top:var(--lgi-space-2)}
+.c-run-title{border:none;background:none;padding:0;color:var(--lgi-ink);text-align:left;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:var(--lgi-weight-semibold)}
+.c-run-empty{padding:var(--lgi-space-16);text-align:center;color:var(--lgi-muted)}
+.c-run-pagination{justify-content:flex-end;padding:var(--lgi-space-4) 0}.c-run-pagination>span{margin-right:auto}
+.c-run-diagnostics{margin-top:var(--lgi-space-8)}.c-run-diagnostics>summary{cursor:pointer;color:var(--lgi-muted);padding:var(--lgi-space-4) 0}
+.c-run-dialog{padding:0;border:var(--c-line-rail) solid var(--lgi-ink);width:min(calc(var(--lgi-grid-major) * 3 + var(--lgi-space-5)),calc(100vw - var(--lgi-space-8)));max-height:calc(100dvh - var(--lgi-space-12));background:var(--lgi-canvas);color:var(--lgi-ink);box-shadow:var(--lgi-shadow-overlay);font-size:var(--c-fs-300);line-height:var(--lgi-lh-body)}
+.c-run-dialog::backdrop{background:var(--lgi-border-strong)}
+.c-run-dialog[open]{display:flex;flex-direction:column;min-height:0}
+.c-run-dialog [hidden]{display:none!important}
+.c-run-dialog>form{display:flex;flex-direction:column;min-height:0;max-height:calc(100dvh - var(--lgi-space-12))}
+.c-run-dialog header,.c-run-dialog footer{flex:none;padding:var(--lgi-space-5) var(--lgi-space-6);display:flex;align-items:center;justify-content:space-between;gap:var(--lgi-space-4)}
+.c-run-dialog header{border-bottom:var(--c-line-hair) solid var(--lgi-hairline)}
+.c-run-dialog header h2{font-size:var(--c-fs-500);margin:0}.c-run-dialog header p{color:var(--lgi-muted);margin:var(--lgi-space-2) 0 0}
+.c-run-dialog footer{justify-content:flex-end;background:var(--lgi-canvas-low);border-top:var(--c-line-hair) solid var(--lgi-hairline)}
+.c-run-dialog footer,.c-run-status-note,.c-run-table th{color:var(--lgi-body)}
+.c-run-dialog footer span,.c-run-status-note b,.c-run-status-note p{color:var(--lgi-body)}
+.c-run-dialog footer button{white-space:nowrap;flex:none}
+.c-run-dialog footer .c-run-primary{width:auto}
+.c-run-dialog-body{flex:1 1 auto;min-height:0;overflow:auto;padding:var(--lgi-space-6);display:flex;flex-direction:column;gap:var(--lgi-space-5)}
+.c-run-dialog-body label{display:flex;flex-direction:column;gap:var(--lgi-space-3);font-weight:var(--lgi-weight-semibold)}
+.c-run-dialog-body input:not([type=radio]),.c-run-dialog-body select{min-height:calc(var(--lgi-space-10) + var(--c-line-rail));padding:var(--lgi-space-2) var(--lgi-space-3);border:var(--c-line-hair) solid var(--lgi-border);background:var(--lgi-canvas);font:inherit;width:100%}
+.c-run-dialog-body input:not([type=radio]),.c-run-dialog-body select,.c-run-dialog-body textarea{font-weight:var(--lgi-weight-regular)}
+.c-run-dialog-body fieldset{border:none;padding:0;margin:0}.c-run-dialog-body legend{margin-bottom:var(--lgi-space-4);font-weight:var(--lgi-weight-semibold)}
+.c-run-source{display:flex;background:var(--lgi-canvas-low);border:var(--c-line-hair) solid var(--lgi-border);padding:var(--lgi-space-2);gap:var(--lgi-space-2)}
+.c-run-source label{flex:1;display:flex;flex-direction:row;align-items:center;justify-content:center;padding:var(--lgi-space-2);border:var(--c-line-hair) solid transparent;font-weight:var(--lgi-weight-regular);color:var(--lgi-body)}
+.c-run-source label:has(:checked){background:var(--lgi-canvas);border-color:var(--lgi-border);font-weight:var(--lgi-weight-medium);color:var(--lgi-ink)}
+.c-run-dialog-body [role=alert]:empty{display:none}
+.c-run-dialog-body small,.c-run-dialog-body p{font-size:var(--c-fs-200);color:var(--lgi-muted);font-weight:var(--lgi-weight-regular)}
+.c-run-dialog-body [role=alert]{color:var(--lgi-danger)}
+.c-run-dialog-open{overflow:hidden}
+.c-domain-manager{width:min(calc(var(--lgi-grid-major) * 5),calc(100vw - var(--lgi-space-12)))}
+.c-domain-list-row{display:flex;align-items:center;justify-content:space-between;gap:var(--lgi-space-6);padding:var(--lgi-space-6) 0;border-top:var(--c-line-hair) solid var(--lgi-hairline)}
+.c-domain-list-row>div:first-child{flex:1}.c-domain-list-row p{margin-bottom:0}.c-domain-manager .domain-card{border:none;padding:0}
+.c-domain-manager .domain-fields,.c-domain-manager .domain-create{display:flex;flex-direction:column;align-items:stretch}
+.c-domain-manager .c-run-dialog-body{display:block}
+.c-domain-current{display:inline-block;background:var(--lgi-canvas-low);padding:var(--lgi-space-1) var(--lgi-space-2)}
+.c-run-dialog-body .c-domain-current{color:var(--lgi-body)}
+.c-domain-status[data-active=true]{color:var(--lgi-success)}
+.c-domain-note{padding-top:var(--lgi-space-6);border-top:var(--c-line-hair) solid var(--lgi-hairline)}
+.c-domain-manager header [data-close-domain]{font-size:var(--lgi-text-section)}
+@media(max-width:720px){.c-domain-list-row{flex-wrap:wrap}.c-domain-list-row>div:first-child{flex-basis:100%}.c-domain-list-row .c-run-controls{width:100%}.c-domain-manager table{display:block;overflow:auto}}
+.c-run-drawer{margin-right:0;margin-top:0;max-height:100dvh;height:100dvh;width:min(calc(var(--lgi-header-height) * 10),100vw)}
+.c-run-sr{position:absolute;width:var(--c-line-hair);height:var(--c-line-hair);overflow:hidden;clip-path:inset(50%)}
+.c-run-dialog :focus-visible,.c-run-toolbar :focus-visible{outline:var(--c-line-rail) solid var(--lgi-focus);outline-offset:var(--c-line-rail)}
+@media(max-width:720px){.c-run-toolbar{align-items:stretch}.c-run-primary{width:100%}.c-run-table{min-width:calc(var(--lgi-header-height) * 15)}.c-run-dialog-body,.c-run-dialog header,.c-run-dialog footer{padding:var(--lgi-space-4)}}
+@media(max-width:720px){.c-run-tools{flex-basis:100%}.c-run-tools label{min-width:0;flex-basis:calc(100% - var(--lgi-space-24))}.c-run-filters{width:100%;flex-wrap:nowrap;overflow:auto}.c-run-filter{flex:none}.c-run-dialog header h2{font-size:var(--c-fs-500)}}
+
+.c-run-source input[type=radio]{position:absolute;opacity:0;inline-size:var(--c-line-hair);block-size:var(--c-line-hair)}
+.c-run-source label:has(:focus-visible){outline:var(--c-line-rail) solid var(--lgi-focus)}
+.c-run-dialog header [data-close-run-dialog],.c-run-dialog header [data-close-domain]{border:none;background:none;font-size:var(--lgi-text-section);flex:none;min-width:var(--lgi-space-10);min-height:var(--lgi-space-10)}
+
+.c-run-diagnostics pre,.c-run-drawer pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:var(--lgi-text-data)}
+
+/* Progress and results use the accepted task drawer's separate views and fixed footer. */
+.c-run-drawer{width:min(calc(var(--lgi-grid-major) * 6 + var(--lgi-space-10)),74vw)}
+.c-run-drawer{max-width:none}
+.c-run-drawer header h2{flex:1;min-width:0}
+.c-run-drawer header .c-run-controls{flex:none;flex-wrap:nowrap}
+.c-run-drawer header button{white-space:nowrap}
+.c-run-drawer header [data-close-run-dialog]{font-size:var(--lgi-text-body)}
+.c-run-drawer.c-run-expanded{width:calc(100vw - var(--lgi-space-8))}
+.c-run-drawer header h2{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;overflow-wrap:anywhere}
+.c-run-drawer .c-run-dialog-body{display:block}
+.c-run-drawer .c-run-dialog-body p{margin:0 0 var(--lgi-space-4)}
+.c-run-dialog-body a{color:var(--lgi-ink);text-underline-offset:var(--lgi-space-1)}
+.c-run-dialog-body a:hover{color:var(--lgi-signal)}
+.c-run-results [data-run-works]>p{padding:var(--lgi-space-4) 0;border-bottom:var(--c-line-hair) solid var(--lgi-hairline)}
+.c-run-results [data-run-works]>p b{color:var(--lgi-ink)}
+.c-run-results [data-run-works]>button+button{margin-left:var(--lgi-space-3)}
+.c-run-drawer .c-run-dialog-body dl{display:grid;grid-template-columns:var(--lgi-grid-major) minmax(0,1fr);gap:var(--lgi-space-3);padding:var(--lgi-space-4) 0;border-top:var(--c-line-hair) solid var(--lgi-hairline)}
+.c-run-drawer dd{margin:0;overflow-wrap:anywhere}.c-run-drawer dt{color:var(--lgi-muted)}
+.c-run-complete-name{margin:0 0 var(--lgi-space-4);overflow-wrap:anywhere}
+.c-run-tabs{display:flex;flex:none;border-bottom:var(--c-line-hair) solid var(--lgi-hairline);padding:0 var(--lgi-space-8);gap:var(--lgi-space-6)}
+.c-run-tabs button{border:none;background:none;padding:var(--lgi-space-4) 0;font:inherit;color:var(--lgi-muted)}
+.c-run-tabs [aria-current=page]{color:var(--lgi-ink);box-shadow:inset 0 calc(-1 * var(--c-line-rail)) var(--lgi-signal)}
+.c-run-readouts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--lgi-space-6);border:var(--c-line-hair) solid var(--lgi-hairline);padding:var(--lgi-space-6);margin-bottom:var(--lgi-space-6)}
+.c-run-readouts span,.c-run-readouts small{display:block;color:var(--lgi-muted)}.c-run-readouts b{display:block;font:var(--lgi-weight-medium) var(--c-fs-700) var(--lgi-font-mono);margin:var(--lgi-space-3) 0}
+.c-run-status-note{padding:var(--lgi-space-4);background:var(--lgi-canvas-low);border-left:var(--c-line-rail) solid var(--lgi-signal)}
+.c-run-dialog-body .c-run-status-note{color:var(--lgi-body)}
+.c-run-phases{list-style:decimal-leading-zero;margin:var(--lgi-space-6) 0;padding-left:var(--lgi-space-8)}
+.c-run-phases li{padding:var(--lgi-space-4) 0;border-top:var(--c-line-hair) solid var(--lgi-hairline)}
+.c-run-phases li span+span{float:right;color:var(--lgi-muted)}
+.c-run-drawer footer{justify-content:space-between}.c-run-drawer footer span{color:var(--lgi-body);font-size:var(--lgi-text-data)}
+.c-run-drawer [hidden]{display:none!important}
+@media(max-width:720px){.c-run-drawer{width:100vw}.c-run-readouts{gap:var(--lgi-space-3);padding:var(--lgi-space-3)}.c-run-drawer .c-run-dialog-body dl{grid-template-columns:minmax(0,1fr)}.c-run-phases li span{display:block;float:none!important}.c-run-drawer footer{flex-wrap:wrap}.c-run-tabs{padding:0 var(--lgi-space-4)}}

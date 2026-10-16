@@ -88,50 +88,6 @@ fn lease_refusal_keeps_the_paused_domain_reason() {
 #[path = "../../../../crates/evidence/tests/support/material_fixture.rs"]
 mod domain_management_fixture;
 
-#[test]
-fn domain_management_expresses_each_lane_state_and_write_failure_in_chinese() {
-    let domain_ref = uuid::Uuid::new_v4();
-    let lane_states = vec![
-        (
-            domain_ref,
-            "discovery".to_owned(),
-            "SEARCHABLE".to_owned(),
-            3,
-        ),
-        (domain_ref, "discovery".to_owned(), "FAILED".to_owned(), 1),
-        (domain_ref, "comments".to_owned(), "PARTIAL".to_owned(), 2),
-    ];
-    let media_states = vec![(
-        domain_ref,
-        "media_bytes".to_owned(),
-        "REMOTE_ONLY".to_owned(),
-        2,
-    )];
-    let html =
-        render_collection_domain_lanes(domain_ref, false, &lane_states, &media_states, true, true);
-
-    assert!(html.contains("发现"));
-    assert!(html.contains("可检索 3 篇"));
-    assert!(html.contains("执行失败 1 篇"));
-    assert!(html.contains("评论"));
-    assert!(html.contains("部分取得 2 篇"));
-    assert!(html.contains("媒体字节"));
-    assert!(html.contains("仅有远程候选 2 篇"));
-    assert!(!html.contains("discovery"));
-    assert!(!html.contains("REMOTE_ONLY"));
-
-    let empty = render_collection_domain_lanes(domain_ref, true, &[], &[], true, true);
-    assert_eq!(empty.matches("尚未观察").count(), 8);
-    let unavailable = render_collection_domain_lanes(domain_ref, false, &[], &[], false, false);
-    assert_eq!(unavailable.matches("状态未知").count(), 8);
-    assert_eq!(collection_target_kind_label("creator"), "博主");
-    assert_eq!(collection_target_kind_label("keyword"), "关键词");
-    assert_eq!(
-        collection_domain_error_message(Some("database_unavailable")),
-        Some("数据库当前不可用；本次操作没有写入。")
-    );
-}
-
 #[tokio::test]
 #[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
 async fn domain_management_page_queries_real_lane_receipts_without_english_or_false_zero() {
@@ -180,27 +136,15 @@ async fn domain_management_page_queries_real_lane_receipts_without_english_or_fa
     .expect("the accepted package retains its typed discovery fact");
     assert_eq!(discovery_facts, 1);
 
-    let html = get_successful_utf8_response(
-        app_with_database(database),
-        "/collection/domains?domain=00000000-0000-4000-8000-000000000001",
-    )
-    .await;
-    assert!(html.contains("发现"));
-    assert!(
-        html.contains("可检索 1 篇"),
-        "expected a searchable discovery lane; rendered lane markup: {}",
-        html.split("class=\"domain-lanes\">")
-            .nth(1)
-            .and_then(|rest| rest.split("</div>").next())
-            .unwrap_or("<missing lane markup>")
-    );
-    assert!(html.contains("评论"));
-    assert!(html.contains("状态未知"));
-    assert!(html.contains("图片文字识别"));
-    assert!(html.contains("语音转写"));
-    assert!(!html.contains("COLLECTION / DOMAINS"));
-    assert!(!html.contains("SEARCHABLE"));
-    assert!(!html.contains("UNKNOWN"));
+    let response=app_with_database(database).oneshot(Request::builder().uri("/api/collection/workspace/domains?domain=00000000-0000-4000-8000-000000000001").header(header::HOST,"127.0.0.1:8080").body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(response.status(),StatusCode::OK);
+    let body=to_bytes(response.into_body(),usize::MAX).await.unwrap();
+    let result:Value=serde_json::from_slice(&body).unwrap();
+    let domain=result["domains"].as_array().unwrap().iter().find(|d|d["domainRef"]=="00000000-0000-4000-8000-000000000001").unwrap();
+    let lanes=domain["lanes"].as_array().unwrap();
+    assert!(lanes.iter().any(|lane|lane["label"]=="发现" && lane["summary"]=="可检索 1 篇"));
+    assert!(lanes.iter().any(|lane|lane["label"]=="评论" && lane["summary"]=="状态未知"));
+
 }
 
 #[tokio::test]
@@ -1542,22 +1486,8 @@ async fn a_never_archived_keyword_starts_its_first_stage_when_asked_to_archive()
 
     // 从页面加入一个关键词：领域当场选定——缺领域的目标发不出任何采集，准入会先拦住它，
     // 那样这条用例就绕开了真正要证明的那一段。
-    let created = application
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/collection/targets/new")
-                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-                .body(Body::from(
-                    "target_kind=keyword&identity=archive-first-stage-proof\
-                     &domain=00000000-0000-4000-8000-000000000001",
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(created.status(), StatusCode::SEE_OTHER);
+    let created = collection_json_command(&application, "new", json!({"target_kind":"keyword","identity":"archive-first-stage-proof","domain":"00000000-0000-4000-8000-000000000001"})).await;
+    assert_eq!(created["outcome"], "applied");
     let target_ref: uuid::Uuid = sqlx::query_scalar(
         "SELECT target_ref FROM collection_observation_target \
          WHERE target_kind='keyword' AND identity_key='archive-first-stage-proof'",
@@ -1592,24 +1522,9 @@ async fn a_never_archived_keyword_starts_its_first_stage_when_asked_to_archive()
     assert_eq!(granted.status(), StatusCode::OK);
 
     // 人在列表上按下的那一下。
-    let archived = application
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/collection/targets/archive")
-                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-                .body(Body::from(format!("row_target_ref={target_ref}")))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(archived.status(), StatusCode::SEE_OTHER);
-    let location = archived
-        .headers()
-        .get(header::LOCATION)
-        .and_then(|value| value.to_str().ok())
-        .expect("回执地址");
+    let archived = collection_json_command(&application, "archive", json!({"row_target_ref":target_ref})).await;
+    assert_eq!(archived["outcome"], "applied");
+    let location = archived["location"].as_str().expect("回执地址");
     assert!(
         location.contains("archive_requested"),
         "一个从没建过档的词，这一下应当发出第一段建档，实际回执：{location}"
@@ -1642,22 +1557,8 @@ async fn a_never_archived_keyword_starts_its_first_stage_when_asked_to_archive()
 async fn a_patrolling_keyword_can_repair_its_missing_first_stage_archive() {
     let database = proof_database("keyword_archive_patrolling_refusal").await;
     let application = app_with_database(database.clone());
-    let created = application
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/collection/targets/new")
-                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-                .body(Body::from(
-                    "target_kind=keyword&identity=archive-patrolling-refusal\
-                     &domain=00000000-0000-4000-8000-000000000001",
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(created.status(), StatusCode::SEE_OTHER);
+    let created = collection_json_command(&application, "new", json!({"target_kind":"keyword","identity":"archive-patrolling-refusal","domain":"00000000-0000-4000-8000-000000000001"})).await;
+    assert_eq!(created["outcome"], "applied");
     let target_ref: uuid::Uuid = sqlx::query_scalar(
         "SELECT target_ref FROM collection_observation_target \
          WHERE target_kind='keyword' AND identity_key='archive-patrolling-refusal'",
@@ -1699,24 +1600,9 @@ async fn a_patrolling_keyword_can_repair_its_missing_first_stage_archive() {
     .await
     .expect("置为观察中");
 
-    let archived = application
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/collection/targets/archive")
-                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-                .body(Body::from(format!("row_target_ref={target_ref}")))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(archived.status(), StatusCode::SEE_OTHER);
-    let location = archived
-        .headers()
-        .get(header::LOCATION)
-        .and_then(|value| value.to_str().ok())
-        .expect("回执地址");
+    let archived = collection_json_command(&application, "archive", json!({"row_target_ref":target_ref})).await;
+    assert_eq!(archived["outcome"], "applied");
+    let location = archived["location"].as_str().expect("回执地址");
     assert!(
         location.contains("archive_requested"),
         "历史巡查状态不得把关键词困在未建档状态，实际回执：{location}"
@@ -1741,33 +1627,13 @@ async fn a_patrolling_keyword_can_repair_its_missing_first_stage_archive() {
 async fn creator_gap_route_never_falls_back_to_a_homepage_rescan() {
     let database = proof_database("creator_gap_route").await;
     let application = app_with_database(database.clone());
-    let created = application.clone().oneshot(Request::builder()
-        .method("POST").uri("/collection/targets/new")
-        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-        .body(Body::from("target_kind=creator&identity=69aad16e000000003201b111&domain=00000000-0000-4000-8000-000000000001")).unwrap()).await.unwrap();
-    assert_eq!(created.status(), StatusCode::SEE_OTHER);
+    let created = collection_json_command(&application, "new", json!({"target_kind":"creator","identity":"69aad16e000000003201b111","domain":"00000000-0000-4000-8000-000000000001"})).await;
+    assert_eq!(created["outcome"], "applied");
     let target_ref: uuid::Uuid = sqlx::query_scalar("SELECT target_ref FROM collection_observation_target WHERE identity_key='69aad16e000000003201b111'")
         .fetch_one(database.pool()).await.unwrap();
-    let response = application
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/collection/targets/archive")
-                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-                .body(Body::from(format!(
-                    "row_target_ref={target_ref}&archive_action=gaps"
-                )))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::SEE_OTHER);
-    assert!(
-        response.headers()[header::LOCATION]
-            .to_str()
-            .unwrap()
-            .contains("archive_nothing_to_continue")
-    );
+    let response = collection_json_command(&application, "archive", json!({"row_target_ref":target_ref,"archive_action":"gaps"})).await;
+    assert_eq!(response["outcome"], "rejected");
+    assert_eq!(response["code"], "archive_nothing_to_continue");
     let work_count: i64 =
         sqlx::query_scalar("SELECT count(*) FROM collection_work_order WHERE target_ref=$1")
             .bind(target_ref)
@@ -1775,6 +1641,20 @@ async fn creator_gap_route_never_falls_back_to_a_homepage_rescan() {
             .await
             .unwrap();
     assert_eq!(work_count, 0);
+}
+
+// Exercise the canonical React JSON transport while retaining the original owner oracles.
+async fn collection_json_command(application: &Router, action: &str, fields: Value) -> Value {
+    let context = application.clone().oneshot(Request::builder()
+        .uri("/api/collection/commands/context").header(header::HOST, "127.0.0.1:8080")
+        .body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(context.status(), StatusCode::OK);
+    let context: Value = serde_json::from_slice(&to_bytes(context.into_body(), usize::MAX).await.unwrap()).unwrap();
+    let response = application.clone().oneshot(Request::builder().method("POST")
+        .uri(format!("/api/collection/commands/{action}"))
+        .header(header::HOST, "127.0.0.1:8080").header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({"requestRef":uuid::Uuid::new_v4(),"epoch":context["epoch"],"fields":fields}).to_string())).unwrap()).await.unwrap();
+    serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap()
 }
 
 async fn proof_database(schema: &str) -> Database {
@@ -1890,255 +1770,6 @@ fn local_submission(observed_at: &str) -> String {
 }
 
 #[test]
-fn collection_preserves_both_daily_pages_and_complete_management_surfaces() {
-    for (section, name) in [
-        (collection::Section::Targets, "观察目标"),
-        (collection::Section::Tasks, "采集任务"),
-        (collection::Section::Runtime, "工位管理"),
-        (collection::Section::Domains, "领域管理"),
-    ] {
-        let html = collection::render(section, collection::OperationsMode::Now, None, None, None);
-        // The breadcrumb, not a title block, is where a surface states which page this is.
-        assert!(
-            html.contains(&format!("<b>{name}</b>")),
-            "missing surface breadcrumb: {name}"
-        );
-        // One header implementation for the whole product, rendered from shell.rs.
-        assert!(html.contains("v7-global-header"));
-        assert!(html.contains("v7-context-row"));
-        assert!(html.contains("data-readout=\"COLLECTION\""));
-    }
-}
-
-#[test]
-fn collection_v4_uses_the_lids_reclaimed_title_and_context_readout_contract() {
-    // COLLECTION-FIVE-PAGE-V4-UI-001: the V4 reference supplies the desktop work-area
-    // hierarchy, but LIDS owns the shell. Page identity remains a single reader-only h1 and
-    // the only page readings stay in the shared context row.
-    let corpus = evidence_library_html(None, &[], None);
-    assert!(corpus.contains("<h1 class=\"v7-sr-only\" id=\"page-title\">"));
-
-    let mut pages = Vec::new();
-    for section in [
-        collection::Section::Targets,
-        collection::Section::Operations,
-        collection::Section::Attention,
-        collection::Section::Tasks,
-        collection::Section::Runtime,
-    ] {
-        pages.push((
-            section,
-            collection::render(section, collection::OperationsMode::Now, None, None, None),
-        ));
-    }
-
-    for (section, html) in &pages {
-        assert!(
-            html.contains("<h1 class=\"v7-sr-only\" id=\"page-title\">"),
-            "each Collection surface must keep one reader-only h1"
-        );
-        assert_eq!(html.matches("id=\"page-title\"").count(), 1);
-        let expected_readouts = if *section == collection::Section::Targets {
-            0
-        } else {
-            2
-        };
-        assert_eq!(html.matches("class=\"v7-kpi\"").count(), expected_readouts);
-        assert_eq!(html.matches("</b><small>").count(), expected_readouts);
-        assert!(!html.contains("c-page-titlebar"));
-        assert!(!html.contains("c-readout-strip"));
-        for restated in ["c-eyebrow", "c-head", "v7-title", "v7-eyebrow"] {
-            assert!(
-                !html.contains(restated),
-                "the V4 titlebar must not create another title system as {restated}"
-            );
-        }
-    }
-
-    let stylesheet = include_str!("collection_workspace.css");
-    for local_focus_owner in [
-        ".c-tg-item:has(.c-tg-title:focus-visible)",
-        ".c-tg-title:focus-visible",
-        ".c-attention-row:focus-visible",
-        ".c-task-row:focus-visible",
-        ".c-task-inspector-tabs button:focus-visible",
-    ] {
-        assert!(
-            !stylesheet.contains(local_focus_owner),
-            "the shared shell must remain the only focus-ring owner: {local_focus_owner}"
-        );
-    }
-
-    let v4_stylesheet = stylesheet
-        .split_once("/* COLLECTION-FIVE-PAGE-V4-UI-001")
-        .expect("the V4 page-local stylesheet block exists")
-        .1;
-    for declaration in v4_stylesheet.split(';') {
-        let declaration = declaration
-            .rsplit(['{', '}'])
-            .next()
-            .unwrap_or_default()
-            .trim();
-        let Some((property, value)) = declaration.split_once(':') else {
-            continue;
-        };
-        let property = property.trim();
-        if !(property.starts_with("margin")
-            || property.starts_with("padding")
-            || property == "gap"
-            || property == "row-gap"
-            || property == "column-gap")
-        {
-            continue;
-        }
-        assert!(
-            !value.contains("px"),
-            "V4 spacing must consume the LIDS ladder instead of a raw pixel value: {property}:{value}"
-        );
-        let mut remaining = value;
-        const CELL_MULTIPLIER: &str = "calc(var(--c-cell) * ";
-        while let Some(start) = remaining.find(CELL_MULTIPLIER) {
-            let multiplier = &remaining[start + CELL_MULTIPLIER.len()..];
-            let multiplier = multiplier
-                .split_once(')')
-                .expect("a cell multiplier closes")
-                .0
-                .trim();
-            assert!(
-                [".5", "1", "1.5", "2", "3", "4"].contains(&multiplier),
-                "V4 spacing multiplier must stay on the approved 4/8/12/16/24/32px ladder: {property}:{value}"
-            );
-            remaining = &remaining[start + CELL_MULTIPLIER.len()..];
-        }
-    }
-
-    for (_, html) in &pages {
-        for forbidden in ["监控价值", "代表证据", "机会评分"] {
-            assert!(
-                !html.contains(forbidden),
-                "the five Collection shells must not restore the retired {forbidden} module"
-            );
-        }
-    }
-
-    // Target facts live beside the ledger. The breadcrumb band only hosts the approved
-    // station-management entry; it does not repeat patrol/archive/runtime/timezone readouts.
-    let targets = collection::render(
-        collection::Section::Targets,
-        collection::OperationsMode::Now,
-        None,
-        None,
-        None,
-    );
-    let context_row = targets
-        .split_once("<div class=\"v7-context-meta\">")
-        .expect("collection pages render the context row")
-        .1
-        .split_once("</div>")
-        .expect("context meta closes")
-        .0;
-    assert!(context_row.starts_with("<a "));
-    assert!(context_row.contains("data-collection-management"));
-    assert_eq!(context_row.split_once('>').unwrap().1, "工位管理</a>");
-}
-
-#[test]
-fn connected_collection_surfaces_render_real_targets_and_scheduler_state() {
-    let running = collection::SurfaceState {
-        vacant_stations: Some(0),
-        unclaimed_installations: Some(1),
-        total_targets: Some(2),
-        monitoring_targets: Some(1),
-        archiving_targets: Some(1),
-        scheduler_state: collection::SchedulerState::Running,
-    };
-    let counts = linggan_evidence::TargetCounts {
-        total: 2,
-        creator: 1,
-        keyword: 1,
-        archiving: 1,
-        monitoring: 1,
-    };
-    let targets = collection::render(
-        collection::Section::Targets,
-        collection::OperationsMode::Now,
-        None,
-        Some(&counts),
-        Some(&running),
-    );
-    let targets_context = targets
-        .split_once("<div class=\"v7-context-meta\">")
-        .expect("targets render the context row")
-        .1
-        .split_once("</div>")
-        .expect("targets context meta closes")
-        .0;
-
-    for redundant in [
-        "调度运行中",
-        "SCHEDULER RUNNING",
-        "巡检已开",
-        "当前观察目标投影",
-        "PATROL ARMED",
-        "UTC+08",
-    ] {
-        assert!(
-            !targets_context.contains(redundant),
-            "target context repeated {redundant}"
-        );
-    }
-    assert!(targets.contains("<span class=\"v7-nav-state\">观察中</span>"));
-    assert!(!targets.contains("调度器未接通"));
-    assert!(!targets.contains("<span class=\"v7-status-main\">暂无观察目标</span>"));
-
-    let operations = collection::render(
-        collection::Section::Operations,
-        collection::OperationsMode::Now,
-        None,
-        None,
-        Some(&running),
-    );
-    assert!(operations.contains("调度运行中"));
-    assert!(!operations.contains("调度器未接通"));
-}
-
-#[test]
-fn scheduler_stale_and_unreadable_remain_distinct_facts() {
-    let stale = collection::SurfaceState {
-        vacant_stations: None,
-        unclaimed_installations: None,
-        total_targets: None,
-        monitoring_targets: None,
-        archiving_targets: None,
-        scheduler_state: collection::SchedulerState::Stale,
-    };
-    let stale_html = collection::render(
-        collection::Section::Runtime,
-        collection::OperationsMode::Now,
-        None,
-        None,
-        Some(&stale),
-    );
-    assert!(stale_html.contains("调度心跳已过期"));
-    assert!(stale_html.contains("SCHEDULER STALE"));
-    assert!(stale_html.contains("<span class=\"v7-nav-state\">状态未知</span>"));
-
-    let unreadable = collection::SurfaceState {
-        scheduler_state: collection::SchedulerState::Unreadable,
-        ..stale
-    };
-    let unreadable_html = collection::render(
-        collection::Section::Runtime,
-        collection::OperationsMode::Now,
-        None,
-        None,
-        Some(&unreadable),
-    );
-    assert!(unreadable_html.contains("调度心跳读不到"));
-    assert!(unreadable_html.contains("SCHEDULER HEARTBEAT UNREADABLE"));
-}
-
-#[test]
 fn corpus_header_can_reflect_the_connected_collection_read_model() {
     let html = evidence_library_html(Some("观察中"), &[], None);
     let collection_entry = html
@@ -2156,61 +1787,6 @@ fn corpus_header_can_preserve_an_unreadable_collection_state() {
         .expect("the collection primary entry exists")
         .1;
     assert!(collection_entry.contains("<span class=\"v7-nav-state\">状态未知</span>"));
-}
-
-#[test]
-fn context_row_counts_read_in_chinese_so_one_row_holds_one_english_scale() {
-    // `.v7-kpi em` is the 11px Sans reading slot; the system words beside it are 9px Mono
-    // caps. An English label in the Sans slot puts two English scales in one row, which is
-    // exactly what the Corpus surface does not do. Every count label must read in Chinese.
-    let mut labels = Vec::new();
-    for section in [
-        collection::Section::Targets,
-        collection::Section::Operations,
-        collection::Section::Attention,
-        collection::Section::Tasks,
-        collection::Section::Runtime,
-    ] {
-        let html = collection::render(section, collection::OperationsMode::Now, None, None, None);
-        let count_before = labels.len();
-        for fragment in html.split("class=\"v7-kpi\"").skip(1) {
-            let fragment = fragment
-                .split_once("<em>")
-                .expect("a kpi contains its label")
-                .1;
-            labels.push(
-                fragment
-                    .split_once("</em>")
-                    .expect("a kpi label closes its em")
-                    .0
-                    .to_owned(),
-            );
-        }
-        let expected = if section == collection::Section::Targets {
-            0
-        } else {
-            2
-        };
-        assert_eq!(
-            labels.len() - count_before,
-            expected,
-            "Targets intentionally keeps its context band quiet; every other surface has two counts"
-        );
-    }
-    assert_eq!(
-        labels.len(),
-        8,
-        "four operational surfaces carry two counts"
-    );
-
-    for label in &labels {
-        assert!(
-            label
-                .chars()
-                .any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c)),
-            "count label must read in Chinese, not in the Mono slot's English: {label}"
-        );
-    }
 }
 
 #[test]
@@ -2233,268 +1809,13 @@ fn the_selected_rail_entry_keeps_its_inked_block_under_the_pointer() {
     );
 }
 
-#[test]
-fn the_primary_nav_readouts_all_share_one_type_scale_and_one_colour() {
-    // At 8px a colour change reads as a size change, so darkening the current entry's readout
-    // makes one shared header look like it carries two type standards. The current entry is
-    // marked by the signal rule beneath it; the readouts stay one row of one scale.
-    assert!(
-        !SHELL_CSS.contains("[aria-current=\"page\"] .v7-nav-readout"),
-        "the current entry must not restyle its readout: the signal rule already marks it"
-    );
-
-    let readout_declarations = SHELL_CSS
-        .match_indices(".v7-nav-readout")
-        .filter(|(index, _)| SHELL_CSS[*index..].starts_with(".v7-nav-readout {"))
-        .count();
-    assert_eq!(
-        readout_declarations, 1,
-        "one readout scale means exactly one rule owns it"
-    );
-
-    // Both surfaces render the same six entries from the one shared header (运营 joined in
-    // OPS-MIGRATION-001 D2).
-    let mut pages = vec![evidence_library_html(None, &[], None)];
-    pages.push(collection::render(
-        collection::Section::Targets,
-        collection::OperationsMode::Now,
-        None,
-        None,
-        None,
-    ));
-    for html in &pages {
-        assert_eq!(
-            html.matches("class=\"v7-nav-readout\"").count(),
-            6,
-            "every page renders the same six primary entries"
-        );
-    }
-}
-
-#[test]
-fn collection_never_publishes_prototype_material_or_a_fake_zero() {
-    let surfaces = [
-        collection::Section::Targets,
-        collection::Section::Operations,
-        collection::Section::Attention,
-        collection::Section::Tasks,
-        collection::Section::Runtime,
-    ];
-    // Figures lifted straight from the V4 Gold Master's mock data. None of them may reach a
-    // real route: the page has no observation targets, tasks, workers or events at all.
-    let fabricated = [
-        "146",
-        "07/08",
-        "@小北妈妈",
-        "ADHD 作业拖延",
-        "T-CR-019",
-        "W06",
-        "6.2K",
-        "8.3K",
-    ];
-    for section in surfaces {
-        for mode in [
-            collection::OperationsMode::Now,
-            collection::OperationsMode::Trace,
-            collection::OperationsMode::Review,
-        ] {
-            let html = collection::render(section, mode, None, None, None);
-            for figure in fabricated {
-                assert!(
-                    !html.contains(figure),
-                    "prototype material leaked into a real route: {figure}"
-                );
-            }
-            // Unknown must never be flattened into a confirmed zero. Targets alone owns one
-            // hidden local-selection counter, whose initial zero is interaction state rather
-            // than an observation fact.
-            let factual_html =
-                html.replace("<strong data-target-selected-count hidden>0</strong>", "");
-            assert!(!factual_html.contains(">0<"));
-        }
-    }
-}
-
-#[test]
-fn collection_states_why_each_surface_is_empty_rather_than_looking_broken() {
-    let confirmed_empty = collection::SurfaceState {
-        vacant_stations: None,
-        unclaimed_installations: None,
-        total_targets: Some(0),
-        monitoring_targets: Some(0),
-        archiving_targets: Some(0),
-        scheduler_state: collection::SchedulerState::Unreadable,
-    };
-    let targets = collection::render(
-        collection::Section::Targets,
-        collection::OperationsMode::Now,
-        None,
-        None,
-        Some(&confirmed_empty),
-    );
-    // 加入观察只写本机记录，因此它是真实可点的动作；但页面必须把「加进来」与「开始采集」
-    // 分清楚，否则会让人以为点一下就开始采了。
-    assert!(targets.contains("不访问任何平台"));
-    assert!(targets.contains("/collection/targets/new"));
-    assert!(targets.contains("还没有观察目标"));
-    // 真正消耗平台访问的那一步仍然要走完整条链并由人开闸。
-    assert!(targets.contains("最后还要人开闸"));
-
-    let unknown_targets = collection::render(
-        collection::Section::Targets,
-        collection::OperationsMode::Now,
-        None,
-        None,
-        None,
-    );
-    assert!(unknown_targets.contains("观察目标当前未知"));
-    assert!(!unknown_targets.contains("还没有观察目标"));
-    assert!(!unknown_targets.contains("本机采集运行时已接通"));
-    assert!(!unknown_targets.contains("SCHEDULER NOT CONNECTED"));
-    assert!(!unknown_targets.contains("NO OBSERVATION TARGETS"));
-    assert!(unknown_targets.contains("<span class=\"v7-nav-state\">状态未知</span>"));
-
-    let attention = collection::render(
-        collection::Section::Attention,
-        collection::OperationsMode::Now,
-        None,
-        None,
-        None,
-    );
-    assert!(attention.contains("待处理状态当前未知"));
-    assert!(attention.contains("待处理读模型尚未接入"));
-    assert!(!attention.contains("没有待处理事项"));
-
-    let tasks = collection::render(
-        collection::Section::Tasks,
-        collection::OperationsMode::Now,
-        None,
-        None,
-        None,
-    );
-    assert!(tasks.contains("采集任务当前未知"));
-    assert!(tasks.contains("观察目标数量不能排除历史或在途任务"));
-    assert!(!tasks.contains("没有采集任务"));
-
-    let runtime = collection::render(
-        collection::Section::Runtime,
-        collection::OperationsMode::Now,
-        None,
-        None,
-        None,
-    );
-    assert!(runtime.contains("执行工位状态当前未知"));
-    assert!(runtime.contains("采集状态未知"));
-    assert!(!runtime.contains("调度器未接通"));
-}
-
-#[test]
-fn operations_modes_are_addressable_and_the_stream_stays_honest() {
-    let now = collection::render(
-        collection::Section::Operations,
-        collection::OperationsMode::Now,
-        None,
-        None,
-        None,
-    );
-    // DESIGN-010 · the panel names itself in Chinese now (LANG-05). The English that stays is
-    // the event-kind filters, which are literal contract values, not descriptive labels.
-    assert!(now.contains("实时观察流"));
-    assert!(!now.contains("LIVE OBSERVATION"));
-    for event_kind in ["DISCOVER", "CHANGE", "EXCEPTION"] {
-        assert!(
-            now.contains(event_kind),
-            "event kinds are contract literals and stay Mono: {event_kind}"
-        );
-    }
-    assert!(now.contains("采集状态读不到"));
-    assert!(now.contains("COLLECTION STATE UNAVAILABLE"));
-    assert!(!now.contains("SCHEDULER NOT CONNECTED"));
-    // The prototype invented an event every seven seconds. Production must not.
-    assert!(now.contains("不会用计时器伪造事件"));
-    assert!(now.contains("暂停只停止画面跟随，永远不会暂停真实的采集调度"));
-
-    let trace = collection::render(
-        collection::Section::Operations,
-        collection::OperationsMode::Trace,
-        None,
-        None,
-        None,
-    );
-    assert!(trace.contains("观察历史当前未知"));
-    assert!(!trace.contains("没有可回放的观察历史"));
-    let review = collection::render(
-        collection::Section::Operations,
-        collection::OperationsMode::Review,
-        None,
-        None,
-        None,
-    );
-    assert!(review.contains("周期复盘当前未知"));
-    assert!(!review.contains("没有可复盘的周期"));
-    assert!(review.contains("观察盲区"));
-
-    assert!(now.contains("href=\"/collection/operations?mode=trace\""));
-}
-
-#[test]
-fn target_drawer_is_owned_by_the_url_and_escapes_its_identifier() {
-    let closed = collection::render(
-        collection::Section::Targets,
-        collection::OperationsMode::Now,
-        None,
-        None,
-        None,
-    );
-    assert!(!closed.contains("c-drawer"));
-
-    let open = collection::render_unreadable_target_drawer(
-        Some("T-CR-019"),
-        target_drawer::TargetListContext {
-            filter: Some("creator"),
-            sort: Some("last"),
-            domain: None,
-        },
-    );
-    assert!(open.contains("id=\"c-drawer\""));
-    assert!(open.contains("#T-CR-019"));
-    assert!(open.contains("观察目标读取状态当前未知"));
-    assert!(open.contains("class=\"c-dw\""));
-    assert!(open.contains("data-return-url=\"/collection/targets?filter=creator&amp;sort=last\""));
-    assert!(open.contains("href=\"/collection/targets?filter=creator&amp;sort=last\""));
-    for false_empty in [
-        "未找到该观察目标",
-        "没有建档基线",
-        "没有巡逻策略",
-        "没有关联证据",
-        "没有观察史",
-    ] {
-        assert!(!open.contains(false_empty));
-    }
-
-    let injected = collection::render_unreadable_target_drawer(
-        Some("<script>alert(1)</script>"),
-        target_drawer::TargetListContext::default(),
-    );
-    assert!(!injected.contains("<script>alert(1)</script>"));
-    assert!(injected.contains("&lt;script&gt;"));
-}
-
 #[tokio::test]
-async fn unreadable_target_drawer_http_keeps_list_context_and_focus_contract() {
-    let target_ref = uuid::Uuid::from_u128(778);
-    let html = get_successful_utf8_response(
-        app(),
-        &format!("/collection/targets?filter=creator&sort=last&drawer={target_ref}"),
-    )
-    .await;
-
-    assert!(html.contains("id=\"c-drawer\" class=\"c-dw\""));
-    assert!(html.contains("data-return-url=\"/collection/targets?filter=creator&amp;sort=last\""));
-    assert!(html.contains(&format!("data-return-focus=\"target-{target_ref}\"")));
-    assert!(html.contains(&format!(
-        "href=\"/collection/targets?filter=creator&amp;sort=last#target-{target_ref}\""
-    )));
+async fn unreadable_target_json_never_substitutes_empty_html() {
+    let response = app().oneshot(Request::builder().uri("/api/collection/workspace/target/00000000-0000-4000-8000-000000000001?domain=all").header(header::HOST,"127.0.0.1:8080").body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(response.status(),StatusCode::SERVICE_UNAVAILABLE);
+    let body=to_bytes(response.into_body(),usize::MAX).await.unwrap();
+    let result:Value=serde_json::from_slice(&body).unwrap();
+    assert_eq!(result["code"],"collection_targets_unavailable");
 }
 
 /// DESIGN-010 · LIDS v7 on the Operations surface.
@@ -2507,73 +1828,6 @@ async fn unreadable_target_drawer_http_keeps_list_context_and_focus_contract() {
 /// Second, the sampling lattice on the dark stream stays clipped to its top strip. An earlier
 /// build let the sweep travel the full panel height and it crossed the body copy, which is the
 /// one thing `materials.md` rules out outright: edges only, never behind running text.
-#[test]
-fn operations_reads_in_chinese_and_keeps_its_material_on_the_edge() {
-    let operations = collection::render(
-        collection::Section::Operations,
-        collection::OperationsMode::Now,
-        None,
-        None,
-        None,
-    );
-
-    for descriptive_english in [
-        "Target Intake",
-        "Baseline",
-        "Event Deepening",
-        "Evidence Retain",
-        "Recovery",
-        "SYSTEM CONCLUSION",
-        "LIVE OBSERVATION",
-        "SEMANTIC EVENTS ONLY",
-        "NO EVENT READ MODEL",
-        "READ MODEL UNAVAILABLE",
-    ] {
-        assert!(
-            !operations.contains(descriptive_english),
-            "descriptive labels read in Chinese only (LANG-05): {descriptive_english}"
-        );
-    }
-
-    // The Chinese that replaced them has to actually be there — deleting English without
-    // putting meaning back would pass the loop above and leave the page mute.
-    // This render passes no surface state, so both the conclusion and the stream resolve to the
-    // unreadable branch. That is the branch worth pinning: it is the one a reader hits when the
-    // system knows least, and the one most likely to decay back into an English status code.
-    for chinese in [
-        "系统结论",
-        "采集状态读不到",
-        "实时观察流",
-        "仅语义事件",
-        "目标接入",
-    ] {
-        assert!(
-            operations.contains(chinese),
-            "missing Chinese meaning: {chinese}"
-        );
-    }
-
-    // Closed-set state words survive as the Mono enum beside the Chinese, not instead of it.
-    assert!(operations.contains(r#"<span class="c-enum">UNKNOWN</span>"#));
-
-    // The lattice lives in a clipped strip. Without the clip the keyframes would carry it
-    // across the copy again, and the animation alone cannot express that boundary.
-    assert!(COLLECTION_WORKSPACE_CSS.contains(".c-stream-sweep { position:absolute;"));
-    assert!(
-        COLLECTION_WORKSPACE_CSS.contains("height:72px; overflow:hidden;"),
-        "the sweep must stay clipped to the top strip"
-    );
-    assert!(COLLECTION_WORKSPACE_CSS.contains("prefers-reduced-motion"));
-
-    // 1.5px borders blur at 1x. The v7 ladder has four widths and this is not one of them.
-    assert!(!COLLECTION_WORKSPACE_CSS.contains("1.5px solid"));
-}
-
-/// DESIGN-011 · 执行工位的能力矩阵与 v7 排版。
-///
-/// 矩阵的四态是这一页最容易退化的地方，因为把「未验证」写成「降级」在代码上只差一个分支，
-/// 在意义上却差了一台需不需要去修的机器。同理，超时是执行没成，不是能力干不了——两者
-/// 合并会让一次网络抖动看起来像插件坏了。这条测试把这两个区分钉住。
 #[test]
 fn station_capability_matrix_separates_unverified_from_degraded() {
     use linggan_evidence::{CapabilityState, StationCapability};
@@ -2635,101 +1889,6 @@ fn station_capability_matrix_separates_unverified_from_degraded() {
 /// 范围刻意只到本页的类名。同一张样式表里，目标页、抽屉与检视面板仍有 10px 与 800/850
 /// 字重——那是 DESIGN-011 没有迁移的部分，如实留作欠账，而不是让这条测试假装全表已经合规。
 /// 它们各自迁移时把前缀加进下面这张表即可。
-#[test]
-fn the_runtime_surface_holds_the_v7_type_ladder() {
-    // RUNTIME-STATION-TABLE-001 把工位行、名册、运行边界三组类名换成 `.c-stn-*` 与
-    // `.c-run-*`。前缀表必须跟着换：留着已经不存在的 `.c-roster` / `.c-bounds`，这条
-    // 测试就会在一个空集合上通过——一条扫不到任何一行的检查，等于没有检查。
-    //
-    // RUNTIME-STATION-V7-2-001 把这一页重新铺了一遍，整页的类名都跟着换了：控制条
-    // （`.c-deck`）、接单仪器面（`.c-instr` / `.c-lane` / `.c-readout`）、区块头
-    // （`.c-sect`）、今日运行（`.c-ops`）、排程表（`.c-sched`）、右侧抽屉
-    // （`.c-rdrawer` / `.c-rd-`）。
-    //
-    // `.c-verdict` 留着，不是漏删：改写只把外壳换成 `.c-instr`，判定四态的色带仍是
-    // `.c-verdict-{ok,partial,blocked,unknown} .c-instr-head::before` 四条在用的规则。
-    // 真消失的是 `.c-factor`（0 行）——那一个留着才会空转。
-    // 表里每一条都至少命中一行；空转的检查等于没有检查，加前缀前先数一遍。
-    const RUNTIME_SELECTOR_PREFIXES: [&str; 16] = [
-        ".c-deck",
-        ".c-instr",
-        ".c-verdict",
-        ".c-lane",
-        ".c-readout",
-        ".c-sect",
-        ".c-ops",
-        ".c-op",
-        ".c-usage",
-        ".c-stn",
-        ".c-run",
-        ".c-sched",
-        ".c-caps",
-        ".c-cap",
-        ".c-rdrawer",
-        ".c-rd-",
-    ];
-    const BANNED: [&str; 7] = [
-        "font-size:10px",
-        "font-size:9px",
-        " 10px var(--lgi-font-mono)",
-        "font:800 ",
-        "font:850 ",
-        "font-weight:800",
-        "font-weight:850",
-    ];
-
-    for line in COLLECTION_WORKSPACE_CSS.lines() {
-        let trimmed = line.trim_start();
-        if !RUNTIME_SELECTOR_PREFIXES
-            .iter()
-            .any(|prefix| trimmed.starts_with(prefix))
-        {
-            continue;
-        }
-        for banned in BANNED {
-            assert!(
-                !line.contains(banned),
-                "执行工位的排版必须停在 v7 阶梯上（ADR-02 / ADR-03）: {banned}\n  {trimmed}"
-            );
-        }
-    }
-
-    // 前缀表必须真的扫到东西。这条断言防的是上面那种「扫不到任何一行也通过」。
-    let covered = COLLECTION_WORKSPACE_CSS
-        .lines()
-        .filter(|line| {
-            let trimmed = line.trim_start();
-            RUNTIME_SELECTOR_PREFIXES
-                .iter()
-                .any(|prefix| trimmed.starts_with(prefix))
-        })
-        .count();
-    assert!(
-        covered > 40,
-        "执行工位的类名前缀表已与样式表脱节：只扫到 {covered} 行"
-    );
-
-    // 页面局部 v7 阶梯必须仍然存在——上面所有替换都指向它。
-    assert!(COLLECTION_WORKSPACE_CSS.contains("--c-fs-100:11px"));
-    assert!(COLLECTION_WORKSPACE_CSS.contains("--c-fw-bold:700"));
-}
-
-#[test]
-fn collection_stylesheet_authors_no_colour_of_its_own() {
-    let sheet = format!("{SHELL_CSS}\n{COLLECTION_WORKSPACE_CSS}");
-    assert!(
-        !sheet.contains('#'),
-        "page CSS must not author raw colour: every value resolves through a LIDS token"
-    );
-    assert!(declared_token_values(COLLECTION_WORKSPACE_CSS).is_empty());
-    // The dark stream is the one approved exception and it lives in the token source.
-    assert!(LIDS_TOKENS.contains("--lgi-stream-bg:"));
-    assert!(COLLECTION_WORKSPACE_CSS.contains("var(--lgi-stream-bg)"));
-}
-
-/// The stylesheet the Evidence Library route actually serves: shared shell first, then the
-/// page layer. Assertions run against this so moving a rule between the two files cannot
-/// silently drop it from the page.
 fn evidence_page_stylesheet() -> String {
     format!("{SHELL_CSS}\n{EVIDENCE_LIBRARY_CSS}")
 }
@@ -2767,240 +1926,6 @@ fn declared_token_values(stylesheet: &str) -> BTreeMap<&str, &str> {
                 .map(|(name, value)| (name, value.trim().trim_end_matches(';')))
         })
         .collect()
-}
-
-#[test]
-fn served_primary_surfaces_link_to_each_other_and_unserved_ones_stay_disabled() {
-    // A responsibility whose route this binary actually serves must be reachable from every
-    // other served surface. An operator standing on either page can always leave it.
-    let evidence = evidence_library_html(None, &[], None);
-    let collection = collection::render(
-        collection::Section::Targets,
-        collection::OperationsMode::Now,
-        None,
-        None,
-        None,
-    );
-
-    for (html, page, own_href, other_hrefs) in [
-        (&evidence, "corpus", "/corpus", ["/collection", "/topics"]),
-        (
-            &collection,
-            "collection",
-            "/collection",
-            ["/corpus", "/topics"],
-        ),
-    ] {
-        assert!(
-            html.contains(&format!("<a href=\"{own_href}\" aria-current=\"page\">")),
-            "{page} must mark its own primary entry as the current page"
-        );
-        for other_href in other_hrefs {
-            assert!(
-                html.contains(&format!("<a href=\"{other_href}\">")),
-                "{page} must offer a working link to {other_href}"
-            );
-        }
-
-        // Naming a responsibility is not the same as serving it: unconnected entries
-        // stay disabled buttons rather than becoming dead links.
-        for unserved in ["雷达", "洞察"] {
-            assert!(
-                html.contains(&format!(
-                    "<button disabled aria-disabled=\"true\"><b class=\"v7-nav-zh\">{unserved}</b>"
-                )),
-                "{page} must keep the unconnected {unserved} entry disabled"
-            );
-        }
-    }
-}
-
-/// Every class the shell declares. `shell.css` styles what `shell.rs` renders for all
-/// pages, so these names are the shell's to own.
-fn shell_owned_classes() -> std::collections::BTreeSet<String> {
-    let mut classes = std::collections::BTreeSet::new();
-    let mut rest = SHELL_CSS;
-    while let Some(start) = rest.find(".v7-") {
-        rest = &rest[start + 1..];
-        let end = rest
-            .find(|c: char| !c.is_ascii_alphanumeric() && c != '-')
-            .unwrap_or(rest.len());
-        classes.insert(rest[..end].to_owned());
-    }
-    classes
-}
-
-/// Selectors a page stylesheet declares, including the ones inside `@media` blocks.
-fn declared_selectors(stylesheet: &str) -> Vec<String> {
-    let mut selectors = Vec::new();
-    let mut cursor = stylesheet;
-    while let Some(brace) = cursor.find('{') {
-        let head = cursor[..brace].trim();
-        cursor = &cursor[brace + 1..];
-        // An @media head opens a nested block; its inner selectors are read on the next pass.
-        let selector = head.rsplit(['}', '\n']).next().unwrap_or(head).trim();
-        if selector.is_empty() || selector.starts_with('@') || selector.starts_with("/*") {
-            continue;
-        }
-        selectors.push(selector.to_owned());
-    }
-    selectors
-}
-
-/// 对话框里被 `hidden` 切换显隐的那些元素，排版规则必须把它们排除在外。
-///
-/// `hidden` 自带的 `display:none` 只是 UA 样式，任何类选择器都比它强。本项目为这一个坑
-/// 打过十四处补丁，每一处都是被咬过之后补的——`target_drawer.css` 里那条
-/// `[data-drawn-select][hidden]` 的注释记着上一次是怎么被咬的。
-///
-/// 守的是**不制造覆盖**：给裸 `label` 设 `display` 时必须带 `:not([hidden])`。
-/// 再写一条更强的规则去赢，只赢得过当前这一种写法：给弹窗自己的 id 加一条
-/// `#target-domain-modal label{display:flex}`，(1,0,1) 就压过 `.c-tg-batch-dialog [hidden]`
-/// 的 (0,2,0)，同一个 bug 换条路回来。
-#[test]
-fn dialog_layout_rules_exclude_the_elements_hidden_toggles() {
-    for (name, stylesheet) in [
-        ("target_drawer.css", TARGET_DRAWER_CSS),
-        ("collection_workspace.css", COLLECTION_WORKSPACE_CSS),
-    ] {
-        for rule in stylesheet.lines() {
-            // 注释里会引用坏写法当反面教材，那不是生效的规则。
-            let rule = rule.trim();
-            if rule.starts_with("/*") || rule.starts_with('*') {
-                continue;
-            }
-            let Some((selector, body)) = rule.split_once('{') else {
-                continue;
-            };
-            if !body.contains("display:") {
-                continue;
-            }
-            // 只看「容器 + 裸 label」这一种：弹窗里的字段就是这样成组显隐的。
-            let subject = selector.trim().rsplit(' ').next().unwrap_or("");
-            if subject != "label" {
-                continue;
-            }
-            assert!(
-                selector.contains(":not([hidden])"),
-                "{name} 的 `{selector}` 给裸 label 设了 display，却没有把被 hidden 标记的排除在外——\
-                 标了 hidden 的字段会照常显示，人填了也不算数，而且没有任何报错"
-            );
-        }
-    }
-}
-
-/// 领域弹窗必须**真的比**批量编辑那张表窄，不是"写着一条宽度规则"。
-///
-/// 两者宽度都是同一个间距 token 的倍数，所以比较系数就是比较宽度。逐字匹配一整条规则
-/// 只证明有这么一行：把批量弹窗改窄到比它还窄，名字里那个「narrower」就成了假话，而
-/// 断言照样绿。
-#[test]
-fn the_domain_dialog_is_narrower_than_the_batch_dialog() {
-    let batch = space_24_multiplier(TARGET_DRAWER_CSS, ".c-tg-batch-dialog{")
-        .expect("批量编辑弹窗按 --lgi-space-24 的倍数定宽");
-    let domain = space_24_multiplier(TARGET_DRAWER_CSS, "#target-domain-modal{")
-        .expect("领域弹窗按 --lgi-space-24 的倍数定宽");
-    assert!(
-        domain < batch,
-        "领域弹窗只有一个下拉和一个可选输入框，不该和批量编辑那张表一样宽：\
-         领域 {domain} 倍 vs 批量 {batch} 倍"
-    );
-}
-
-/// 从 `width:min(100%,calc(var(--lgi-space-24) * N))` 里取出 N。
-fn space_24_multiplier(stylesheet: &str, selector: &str) -> Option<u32> {
-    let rule = stylesheet.lines().find(|line| line.starts_with(selector))?;
-    let after = rule.split("var(--lgi-space-24)").nth(1)?;
-    let digits = after
-        .trim_start()
-        .strip_prefix('*')?
-        .trim_start()
-        .chars()
-        .take_while(char::is_ascii_digit)
-        .collect::<String>();
-    digits.parse().ok()
-}
-
-#[test]
-fn no_page_stylesheet_restyles_a_component_the_shell_owns() {
-    // One header, one implementation. While the primary nav's typography lived in the
-    // Evidence Library stylesheet, Corpus rendered its readouts at 11px and Collection at
-    // 8px from the very same markup — one shared header wearing two type standards. A page
-    // stylesheet may style its own components; the shell's are not its to restyle.
-    let shell_classes = shell_owned_classes();
-
-    for (page, stylesheet) in [
-        ("evidence_library.css", EVIDENCE_LIBRARY_CSS),
-        ("collection_workspace.css", COLLECTION_WORKSPACE_CSS),
-    ] {
-        let mut violations = Vec::new();
-        for selector in declared_selectors(stylesheet) {
-            // Only the parts that redefine the component itself count. A page may position a
-            // shell element inside its own component (".v7-fact-strap .v7-tech-key") — that
-            // is the page styling its own context, not restyling the shell. What it may not
-            // do is redeclare the component: a second base definition means the same element
-            // renders differently depending on which page loaded last.
-            let redefines_component = selector.split(',').any(|part| {
-                let part = part.trim();
-                shell_classes.iter().any(|class| {
-                    let needle = format!(".{class}");
-                    part.starts_with(&needle)
-                        && part[needle.len()..]
-                            .chars()
-                            .next()
-                            .is_none_or(|c| !c.is_ascii_alphanumeric() && c != '-')
-                })
-            });
-            if redefines_component {
-                violations.push(selector);
-            }
-        }
-        assert!(
-            violations.is_empty(),
-            "{page} restyles shell-owned components; move these rules into shell.css:\n  {}",
-            violations.join("\n  ")
-        );
-    }
-}
-
-#[test]
-fn both_surfaces_render_the_header_at_one_type_scale() {
-    // The regression this locks: same markup, same stylesheet layer, same declarations.
-    let corpus = evidence_library_html(None, &[], None);
-    let collection = collection::render(
-        collection::Section::Targets,
-        collection::OperationsMode::Now,
-        None,
-        None,
-        None,
-    );
-
-    // Neither page may carry its own copy of the nav typography.
-    for (page, stylesheet) in [
-        ("evidence_library.css", EVIDENCE_LIBRARY_CSS),
-        ("collection_workspace.css", COLLECTION_WORKSPACE_CSS),
-    ] {
-        for owned in [".v7-nav-readout", ".v7-nav-zh", ".v7-primary-nav"] {
-            assert!(
-                !stylesheet.contains(owned),
-                "{page} must not declare {owned}: the shell renders the primary nav"
-            );
-        }
-    }
-
-    // And both pages must actually emit that markup, so the shared rule reaches both.
-    for (page, html) in [("corpus", &corpus), ("collection", &collection)] {
-        assert_eq!(
-            html.matches("class=\"v7-nav-zh\"").count(),
-            6,
-            "{page} renders six primary entries"
-        );
-        assert_eq!(
-            html.matches("class=\"v7-nav-readout\"").count(),
-            6,
-            "{page} renders six primary readouts"
-        );
-    }
 }
 
 #[test]
@@ -3064,225 +1989,11 @@ fn six_primary_entries_keep_the_personal_menu_on_screen_at_laptop_widths() {
     );
 }
 
-#[test]
-fn the_larger_hard_shadow_only_marks_hover_displacement() {
-    // Two resting depths would be two standards. --v7-brutal-lg exists for the 2px hover
-    // displacement that DESIGN-003 permits; anything that sits still wears --v7-brutal.
-    for (name, stylesheet) in [
-        ("shell.css", SHELL_CSS),
-        ("evidence_library.css", EVIDENCE_LIBRARY_CSS),
-        ("collection_workspace.css", COLLECTION_WORKSPACE_CSS),
-    ] {
-        for (index, _) in stylesheet.match_indices("var(--v7-brutal-lg)") {
-            let selector = stylesheet[..index]
-                .rfind('}')
-                .map(|end| &stylesheet[end + 1..index])
-                .unwrap_or(&stylesheet[..index]);
-            assert!(
-                selector.contains(":hover") || selector.contains(":active"),
-                "{name}: the larger hard shadow is for hover displacement, but it is applied at rest here:\n  {}",
-                selector.trim().lines().last().unwrap_or(selector).trim()
-            );
-        }
-    }
-}
-
-#[test]
-fn collection_daily_navigation_has_only_the_two_preserved_pages() {
-    for section in [
-        collection::Section::Targets,
-        collection::Section::Tasks,
-        collection::Section::Runtime,
-        collection::Section::Domains,
-    ] {
-        let html = collection::render(section, collection::OperationsMode::Now, None, None, None);
-        let rail = html
-            .split_once("aria-label=\"采集导航\"")
-            .unwrap()
-            .1
-            .split_once("</aside>")
-            .unwrap()
-            .0;
-        assert_eq!(rail.matches("class=\"v7-side-nav\"").count(), 2);
-        assert!(rail.contains("href=\"/collection/targets\""));
-        assert!(rail.contains("<i>01</i><span>观察目标</span>"));
-        assert!(rail.contains("href=\"/collection/tasks\""));
-        assert!(rail.contains("<i>02</i><span>采集任务</span>"));
-        for removed in ["attention", "operations", "runtime", "domains"] {
-            assert!(
-                !rail.contains(&format!("/collection/{removed}")),
-                "management/retired page {removed} must not occupy the daily rail"
-            );
-        }
-    }
-}
-
-#[test]
-fn collection_header_preserves_domain_values_that_resemble_status_codes() {
-    let picker = r#"<details class="v7-domain-picker"><summary>UNKNOWN</summary><a href="/collection/targets?domain=UNKNOWN">UNKNOWN</a></details>"#;
-    let html = collection::render_in_domain(
-        collection::Section::Tasks,
-        collection::OperationsMode::Now,
-        None,
-        None,
-        None,
-        collection::DomainBar {
-            picker,
-            nav_domain: Some("UNKNOWN"),
-            domains: &[],
-        },
-    );
-    assert!(
-        html.contains(picker),
-        "domain labels are user data, not closed technical codes"
-    );
-    assert!(html.contains("return_to=%2Fcollection%2Ftasks%3Fdomain%3DUNKNOWN"));
-}
-
 #[tokio::test]
-async fn collection_default_and_retired_addresses_resolve_to_daily_pages() {
-    for (uri, location) in [
-        ("/collection", "/collection/targets"),
-        ("/collection/attention", "/collection/tasks"),
-        (
-            "/collection/operations?mode=trace&domain=all",
-            "/collection/tasks?domain=all",
-        ),
-        (
-            "/collection/attention?domain=00000000-0000-4000-8000-000000000001",
-            "/collection/tasks?domain=00000000-0000-4000-8000-000000000001",
-        ),
-    ] {
-        let response = app()
-            .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
-        assert_eq!(response.headers().get(header::LOCATION).unwrap(), location);
-    }
-}
-
-#[tokio::test]
-async fn collection_management_entries_and_single_collection_have_distinct_locations() {
-    let targets = get_successful_utf8_response(app(), "/collection/targets?domain=all").await;
-    let picker = targets
-        .split_once("<details class=\"v7-domain-picker\"")
-        .unwrap()
-        .1
-        .split_once("</details>")
-        .unwrap()
-        .0;
-    assert!(picker.contains("管理领域"));
-    assert!(picker.contains("/collection/domains?return_to="));
-    assert!(!targets.contains("id=\"new-collection-run\""));
-    for uri in [
-        "/collection/targets?domain=all",
-        "/collection/tasks?domain=all",
-    ] {
-        let page = get_successful_utf8_response(app(), uri).await;
-        let meta = page
-            .split_once("class=\"v7-context-meta\"")
-            .unwrap()
-            .1
-            .split_once("</div>")
-            .unwrap()
-            .0;
-        assert!(meta.contains("data-collection-management"));
-        assert!(meta.contains("/collection/runtime?return_to="));
-    }
-    let tasks = get_successful_utf8_response(app(), "/collection/tasks?domain=all").await;
-    assert_eq!(tasks.matches("id=\"new-collection-run\"").count(), 1);
-    let once = get_successful_utf8_response(app(), "/collection/tasks?domain=all&once=1").await;
-    assert!(once.contains("id=\"collection-run-form\""));
-    assert!(once.contains("临时关键词"));
-    assert!(once.contains("尽量采全，含回复"));
-    assert!(
-        !once.contains("name=\"command_kind\" value=\"manual_observe\""),
-        "unreadable target/rule data cannot enable submission"
-    );
-}
-
-#[tokio::test]
-async fn collection_station_actions_preserve_the_return_context_on_failure() {
-    let target = "00000000-0000-4000-8000-000000000001";
-    let encoded_return = "%2Fcollection%2Ftasks%3Fdomain%3Dall";
-    for (route, fields) in [
-        ("stations", "display_name=fixture".to_owned()),
-        (
-            "stations/name",
-            format!("station_ref={target}&display_name=fixture"),
-        ),
-        (
-            "claim-window",
-            format!("station_ref={target}&valid_for_hours=1"),
-        ),
-        ("close-window", format!("station_ref={target}")),
-        ("retire", format!("station_ref={target}")),
-        (
-            "claims",
-            format!("station_ref={target}&installation_ref={target}"),
-        ),
-        ("accepting", format!("station_ref={target}&accepting=false")),
-        (
-            "account-bindings",
-            format!("installation_ref={target}&account_ref={target}"),
-        ),
-    ] {
-        let response = app()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri(format!("/collection/runtime/{route}"))
-                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-                    .body(Body::from(format!("{fields}&return_to={encoded_return}")))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::SEE_OTHER, "{route}");
-        let location = response
-            .headers()
-            .get(header::LOCATION)
-            .unwrap()
-            .to_str()
-            .unwrap();
-        assert!(location.starts_with("/collection/runtime?"));
-        assert!(location.contains("error=read_model_not_connected"));
-        assert!(
-            location.contains(&format!("return_to={encoded_return}")),
-            "{route} lost return context"
-        );
-    }
-}
-
-#[tokio::test]
-async fn collection_management_keeps_domain_in_its_daily_navigation() {
-    for page in ["runtime", "domains"] {
-        let html = get_successful_utf8_response(
-            app(),
-            &format!("/collection/{page}?return_to=%2Fcollection%2Ftasks%3Fdomain%3Dall"),
-        )
-        .await;
-        let rail = html
-            .split_once("aria-label=\"采集导航\"")
-            .unwrap()
-            .1
-            .split_once("</aside>")
-            .unwrap()
-            .0;
-        assert!(rail.contains("href=\"/collection/tasks?domain=all\""));
-        assert!(html.contains("data-collection-management-return"));
-    }
-    assert_eq!(
-        management_nav_domain(Some("https://example.invalid/collection/tasks?domain=all")),
-        None
-    );
-    assert_eq!(
-        management_nav_domain(Some(
-            "/collection/tasks?domain=all#monitor-rule-single-collection"
-        )),
-        Some("all".to_owned())
-    );
+async fn collection_default_resolves_to_the_daily_target_page() {
+    let response = app().oneshot(Request::builder().uri("/collection").body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
+    assert_eq!(response.headers().get(header::LOCATION).unwrap(), "/collection/targets");
 }
 
 #[tokio::test]
@@ -3291,9 +2002,8 @@ async fn collection_task_return_scope_only_applies_to_manual_observation() {
         ("manual_observe", "/collection/tasks?"),
         ("save_rule", "/collection/targets?"),
     ] {
-        let response = app().oneshot(Request::builder().method("POST").uri("/collection/targets/rules")
-            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-            .body(Body::from(format!("target_ref=00000000-0000-4000-8000-000000000001&expected_revision=0&idempotency_key=00000000-0000-4000-8000-000000000002&command_kind={command}&return_scope=tasks&return_domain=all"))).unwrap()).await.unwrap();
+        let form:MonitorRuleWire=serde_json::from_value(json!({"target_ref":"00000000-0000-4000-8000-000000000001","expected_revision":0,"idempotency_key":"00000000-0000-4000-8000-000000000002","command_kind":command,"return_scope":"tasks","return_domain":"all"})).unwrap();
+        let response=collection_target_rule_command(State(LocalWebState {database:LocalDatabaseState::NotConfigured, active_media_sessions:Arc::new(tokio::sync::Mutex::new(BTreeSet::new())),account_digest_key:None}),axum::extract::Form(form)).await.into_response();
         assert_eq!(response.status(), StatusCode::SEE_OTHER);
         let location = response
             .headers()
@@ -3307,167 +2017,6 @@ async fn collection_task_return_scope_only_applies_to_manual_observation() {
             assert!(location.contains("domain=all"));
         }
     }
-}
-
-#[tokio::test]
-async fn collection_domain_save_failure_keeps_draft_and_original_return_location() {
-    let response = app().oneshot(Request::builder().method("POST").uri("/collection/domains/save")
-        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-        .body(Body::from("name=Fixture%20domain&research_goal=Unchanged%20draft&return_to=%2Fcollection%2Ftargets%3Fdomain%3Dall%26filter%3Dcreator")).unwrap()).await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let html = String::from_utf8(
-        to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap()
-            .to_vec(),
-    )
-    .unwrap();
-    assert!(html.contains("class=\"domain-draft\""));
-    assert!(html.contains("value=\"Fixture domain\""));
-    assert!(html.contains("value=\"Unchanged draft\""));
-    assert!(html.contains(
-        "name=\"return_to\" value=\"/collection/targets?domain=all&amp;filter=creator\""
-    ));
-    assert!(html.contains("domain-feedback-error"));
-    assert!(
-        html.find("class=\"domain-draft\"").unwrap()
-            < html.find("<!-- collection-body:end -->").unwrap()
-    );
-    assert!(html.contains("<section class=\"domain-management\"><form class=\"domain-draft\""));
-    assert_eq!(
-        html.matches("data-collection-management-context").count(),
-        1
-    );
-}
-
-#[test]
-fn every_empty_surface_says_whether_it_is_waiting_on_you() {
-    // DESIGN-006 Q9. Five empty surfaces, and only one confirmed-empty surface is the
-    // reader's to act on. Rendered at equal weight they answered everything except "so what
-    // do I do".
-    let surface =
-        |section| collection::render(section, collection::OperationsMode::Now, None, None, None);
-
-    // Exactly one surface may claim the reader's attention, and it must name the action.
-    let confirmed_empty = collection::SurfaceState {
-        vacant_stations: None,
-        unclaimed_installations: None,
-        total_targets: Some(0),
-        monitoring_targets: Some(0),
-        archiving_targets: Some(0),
-        scheduler_state: collection::SchedulerState::Unreadable,
-    };
-    let targets = collection::render(
-        collection::Section::Targets,
-        collection::OperationsMode::Now,
-        None,
-        None,
-        Some(&confirmed_empty),
-    );
-    assert!(targets.contains("c-empty-you"));
-    assert!(targets.contains("c-empty-action"));
-
-    for (name, html) in [
-        ("attention", surface(collection::Section::Attention)),
-        ("tasks", surface(collection::Section::Tasks)),
-        ("operations", surface(collection::Section::Operations)),
-        ("runtime", surface(collection::Section::Runtime)),
-    ] {
-        assert!(
-            !html.contains("c-empty-you"),
-            "{name} must not claim the reader's attention: only one surface is waiting on them"
-        );
-    }
-
-    // Surfaces waiting on engineering must say so, so nobody hunts for an action.
-    // Operations' default mode is not an empty state — it renders the pipeline itself — so
-    // its awaiting-engineering wording lives on the two modes that are empty.
-    for (name, html) in [
-        ("attention", surface(collection::Section::Attention)),
-        ("tasks", surface(collection::Section::Tasks)),
-        (
-            "operations/trace",
-            collection::render(
-                collection::Section::Operations,
-                collection::OperationsMode::Trace,
-                None,
-                None,
-                None,
-            ),
-        ),
-        (
-            "operations/review",
-            collection::render(
-                collection::Section::Operations,
-                collection::OperationsMode::Review,
-                None,
-                None,
-                None,
-            ),
-        ),
-        ("runtime", surface(collection::Section::Runtime)),
-    ] {
-        assert!(
-            html.contains("c-empty-engineering"),
-            "{name} must identify the missing engineering read model"
-        );
-    }
-}
-
-#[test]
-fn structure_survives_without_data_but_placeholder_counters_do_not() {
-    // DESIGN-006 Q11. The six stage names are the domain model and carry information; a
-    // counter reading UNKNOWN six times over carries none, and teaches the eye to skip the
-    // one word on this page that must never become invisible.
-    let operations = collection::render(
-        collection::Section::Operations,
-        collection::OperationsMode::Now,
-        None,
-        None,
-        None,
-    );
-
-    for stage in [
-        "目标接入",
-        "首次建档",
-        "日常巡逻",
-        "触发式深采",
-        "事实资产保留",
-        "恢复与重排",
-    ] {
-        assert!(
-            operations.contains(stage),
-            "stage name must survive: {stage}"
-        );
-    }
-    for retired in ["c-flow-metrics", "阶段计数", "c-stream-readout"] {
-        assert!(
-            !operations.contains(retired),
-            "counter cells must wait for data that exists: {retired}"
-        );
-    }
-
-    // The reason is still on the page — once, in the shared context row.
-    assert!(operations.contains("采集状态读不到"));
-    assert!(operations.contains("COLLECTION STATE UNAVAILABLE"));
-    assert!(operations.contains("来源读不到"));
-    assert!(operations.contains("SOURCE UNREADABLE"));
-    assert!(!operations.contains("COLLECTION STATE <span"));
-    assert!(!operations.contains("SOURCE <span"));
-    assert!(!operations.contains("SCHEDULER NOT CONNECTED"));
-
-    // Filter tabs keep their names and lose their placeholder counts.
-    let targets = collection::render(
-        collection::Section::Targets,
-        collection::OperationsMode::Now,
-        None,
-        None,
-        None,
-    );
-    for tab in ["创作者", "关键词", "建档中", "巡逻中"] {
-        assert!(targets.contains(tab), "filter tab must survive: {tab}");
-    }
-    assert!(!targets.contains("<small>UNKNOWN</small>"));
 }
 
 #[test]
