@@ -24,6 +24,15 @@ const REACT_PAGES: &[&str] = &[
     "/ops/creation",
     "/corpus/creators",
     "/corpus/evidence",
+    "/collection/targets",
+    "/collection/tasks",
+    "/collection/domains",
+    "/collection/runtime",
+    "/ops/overview",
+    "/ops/publications",
+    "/ops/accounts",
+    "/ops/daily",
+    "/ops/io",
 ];
 
 /// 静态资源只允许这些类型：Vite 产物的脚本、样式、图片和字体。入口 HTML 与构建信息不经这里。

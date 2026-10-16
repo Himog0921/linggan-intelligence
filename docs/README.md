@@ -56,12 +56,14 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发，并于 2026-10-02 
 | 文档 | 状态 | 用途 |
 |---|---|---|
 | [design/acceptance/web-react-001-b-acceptance.md](design/acceptance/web-react-001-b-acceptance.md) | 权威当前；已合并部署，Mog 待验收 | WEB-REACT-001 阶段 B 的场景矩阵、隔离真实链路浏览器证明结果与分层结论；迁移中修正的旧设置页缺陷 |
+| [design/acceptance/web-react-001-g-acceptance.md](design/acceptance/web-react-001-g-acceptance.md) | 一次性报告；实施/验收中 | 采集四页、全部抽屉/弹窗迁移，JSON 回执边界、实际截图与隔离证明；未部署 |
 | [design/acceptance/web-react-001-c-acceptance.md](design/acceptance/web-react-001-c-acceptance.md) | 一次性报告；候选验证中 | 阶段 C React V3 工作台、材料到成品、独立审核与未证明边界 |
 | [design/acceptance/web-react-001-d1-acceptance.md](design/acceptance/web-react-001-d1-acceptance.md) | 一次性报告；Draft PR 待合并，未部署 | 阶段 D1 创作者页与语料共享外壳：场景矩阵、隔离真实链路 17 步浏览器证明、分层结论与未证明边界 |
 | [design/pages/creators-page.md](design/pages/creators-page.md) | 权威当前；React 候选实现，未合并 | `/corpus/creators` 的页面责任、状态词典、动作与真实后果、LIDS 采用清单 |
 | [decisions/0010-web-frontend-react.md](decisions/0010-web-frontend-react.md) | 权威当前 | 网页前端统一为 React + TypeScript、不留双轨、开发期数据不构成迁移约束；所取代的「原生 JS / 不引入框架」条款 |
 | [plans/active/web-react-001.md](plans/active/web-react-001.md) | 活跃计划；Issue #430；阶段 A+B 随 PR #431 合并并按 #430 回执部署；阶段 C 已派定 | 全站 React 迁移与 UI 改版的唯一推进入口：目标架构、R1–R7 不留双轨规则、阶段 A–H、内容工作台首包规格 |
 | [plans/active/web-react-001-d-corpus.md](plans/active/web-react-001-d-corpus.md) | 活跃计划；Issue #433（#430 阶段 D 分册）；D1 已复核、Draft PR 待合并，D2/D3 未开始 | 语料三页迁 React：拆分与顺序、已定设计改动、D1 能力清单（旧页能力逐项落点）、回执与语料外壳接口合同 |
+| [plans/active/web-react-001-g-collection.md](plans/active/web-react-001-g-collection.md) | 活跃计划；#430 阶段 G；Mog 2026-10-16 派定 | 整个采集模块 React 迁移；能力盘点、实际页面截图基线、逐表面对照与隔离回执验证 |
 | [plans/active/topic-map-workflow-382.md](plans/active/topic-map-workflow-382.md) | 活跃计划 | 左侧双入口、内容优先、统一检索、状态与人工备选闭环；迁移/部署另确认 |
 | [plans/active/topic-map-read-performance-382.md](plans/active/topic-map-read-performance-382.md) | PR #389历史已发布；10月13日首屏候选实现/实测通过，冷重建仍慢，未提交/发布；Issue #382 | 进入首屏542ms/完整1268ms，冷重建约5–8秒；完整统计和来源资格不放宽 |
 | [plans/active/comment-study-read-performance-358.md](plans/active/comment-study-read-performance-358.md) | 活跃计划；Issue #358；独立工作树 | 评论读取性能及概览进入的加载依赖；PR #380 已发布，整页进入修复为后续候选 |
@@ -393,3 +395,7 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发，并于 2026-10-02 
 
 - [正式创作页面](design/pages/content-workbench-page.md)：WEB-REACT-001 阶段 C 的 V3 规则，#425 供给后端。
 - [作品与材料使用合同](data-contracts/content-workbench-001.md)：首包typed文档、保存/引用/AI/导出边界。
+
+阶段 E 实施入口：[运营台账五页 React 迁移](plans/active/web-react-001-e-ops.md)（Issue #438，已派定；保留当前实际 UI，候选验证不等于部署）。
+
+阶段 E 证明：[运营台账五页验收记录](design/acceptance/web-react-001-e-acceptance.md)（候选、隔离链路与实际 UI 对照；部署及 Mog 验收独立）。

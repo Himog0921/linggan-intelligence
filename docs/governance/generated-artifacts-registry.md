@@ -214,3 +214,15 @@ Mog 授权三篇指定作品在本机核对与重新分层。私有材料快照�
 - 固定位置：证据放在 `WEB_APP_PROOF_DIR`（缺省 `${TMPDIR}/linggan-web-app-proof-*`）下的 `creators/` 子目录：`fixture.json`（本次播种的领域与作者编号）、`report.json`（逐步结果、写请求、失败请求、存储键）、各视口截图 PNG；CI 作为 `web-app-real-chain-proof` 产物保留 7 天。
 - 不入 Git；不含凭据、真实作者或真实原文。截图是合成数据的界面证据，不代表真实数据量下的表现。
 - 再生：`WEB_APP_PROOF_DIR=<目录> ./scripts/test-web-app-postgres.sh`。容器、数据卷与支持目录由脚本 trap 删除并核验；证据目录可手工删除。责任 Issue #433。
+
+## WEB-REACT-001-G · 实际采集页面与 React 迁移对照
+
+- 固定位置：本工作树 `artifacts/private/web-react-001-g/`，含 `baseline/`（3000 实际页面截图及最小读取快照）、`candidate/`、`*-full*` 最终完整滚动及视口快照、`comparison-final/` 和本机验证日志。受既有 artifacts/private 忽略，不提交。
+- 来源：Mog 2026-10-16 明确要求的实际页面截图核对；3000 只允许同源 GET，禁止写入与平台/模型请求；同数据候选 GET 可连接强制 read-only 池且外层拒绝非 GET/HEAD；候选写入只在隔离 PostgreSQL。
+- 生成：本阶段维护的 Playwright 基线/候选/对照流程，记录 revision、视口、URL、滚动与展开状态；合成证明可在 CI 运行，真实快照/截图不得上传 CI 或 Git。
+- 清理：候选服务/容器/卷仅清理本任务精确名称；本机视觉证据留至 Mog 验收后按事项清理，不改造原图。
+
+## WEB-REACT-001-E · 运营五页迁移证据
+
+- 固定位置：本工作树 `artifacts/private/web-react-001-e/`，baseline/candidate/comparison 与日志不入 Git。由本包 Playwright 及隔离 Axum/PG proof 再生。3000 及真实数据候选只允许同源 GET/HEAD，目标写入仅隔离 PG。
+- 截图覆盖实际页面全滚动、表格滚动、对话框与多视口；不修改原图冒充现场，不上传真实业务截图/快照。CI 只用合成 fixture；证明产物保留七天。容器、卷和候选服务按本任务精确名称清理。Mog 验收前保留本地证据。

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -47,6 +48,12 @@ describe('页面样式只用 LIDS Token', () => {
   });
 
   it.each(files)('%s', file => {
+    if (path.basename(file) === 'LegacyCollection.module.css') {
+      // Mog 2026-10-16: preserve the approved Collection UI exactly during migration.
+      // Only the moved, frozen legacy sheet carries its existing geometry; new styles use tokens.
+      expect(createHash('sha256').update(readFileSync(file)).digest('hex')).toBe('a8c6407f8741ad615e1f8ed235d544393d243a4164ee35c27661e6a3ff9ce1d6');
+      return;
+    }
     expect(violations(file)).toEqual([]);
   });
 

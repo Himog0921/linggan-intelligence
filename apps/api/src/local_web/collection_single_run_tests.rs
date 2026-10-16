@@ -250,18 +250,25 @@ async fn collection_single_run_browser_with_persisted_data() {
     let server = tokio::spawn(async move { axum::serve(listener, application).await.unwrap() });
     let directory = std::env::var("COLLECTION_PROOF_DIR").unwrap();
     std::fs::create_dir_all(&directory).unwrap();
-    std::fs::write(std::path::Path::new(&directory).join("fixture.json"),json!({"origin":origin,"domainRef":domain,"otherDomainRef":other,"runRef":first,"selectionRunRef":selection_ref,"domainCount":domain_count,"activeStationRef":active_station,"changedAccountRef":changed.account_ref,"unclaimedRef":unclaimed,"existingRequestKey":existing_request_key,"legacyDomainRef":legacy_domain,"legacyRunRef":legacy_run}).to_string()).unwrap();
+    std::fs::write(std::path::Path::new(&directory).join("fixture.json"),json!({"origin":origin,"domainRef":domain,"otherDomainRef":other,"runRef":first,"selectionRunRef":selection_ref,"domainCount":domain_count,"activeStationRef":active_station,"changedAccountRef":changed.account_ref,"unclaimedRef":unclaimed,"existingRequestKey":existing_request_key,"legacyDomainRef":legacy_domain,"legacyRunRef":legacy_run,"legacyTargetRef":legacy_target}).to_string()).unwrap();
     let node = std::env::var("COLLECTION_PROOF_NODE").unwrap();
-    let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../scripts/test-collection-single-run-ui.cjs");
-    let result = std::process::Command::new(node)
-        .arg(script)
-        .env("COLLECTION_PROOF_DIR", &directory)
-        .status()
-        .unwrap();
+    for name in [
+        "test-collection-single-run-ui.cjs",
+        "test-collection-targets-json.cjs",
+        "test-collection-management-json.cjs",
+    ] {
+        let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scripts")
+            .join(name);
+        let result = std::process::Command::new(&node)
+            .arg(script)
+            .env("COLLECTION_PROOF_DIR", &directory)
+            .status()
+            .unwrap();
+        assert!(
+            result.success(),
+            "{name} failed; see isolated evidence directory"
+        );
+    }
     server.abort();
-    assert!(
-        result.success(),
-        "formal populated browser proof failed; see isolated evidence directory"
-    );
 }

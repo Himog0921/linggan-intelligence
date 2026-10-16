@@ -300,6 +300,8 @@ Mog 在当前 Codex 对话明确要求“重新让 subagent 来修正，然后�
 
 ### 阶段 E · 运营台账五页
 
+**2026-10-16 派定**：Mog 明确要求开始五页迁移；G 后先 E 再 F，C/D 遗留验收独立保留。能力盘点、UI 保真与证明见[阶段 E 分册](web-react-001-e-ops.md)，Issue #438。
+
 - **范围**：`/ops/overview`、`/ops/publications`、`/ops/accounts`、`/ops/daily`、`/ops/io`。
 - **必须保住**：周/月目标的保存与版本冲突（409）；业务线范围（含「全部」，与领域 ID 是两回事）；导出文件的字节与时点；人工填报与平台数据的区分；小红书与抖音的规则差异；未填写不等于 0。
 - DEC-0009 选题池、运营登录（D4）与运营写入（D4b）等新能力不属于迁移范围，确定后直接在 React 上实现。
@@ -313,6 +315,8 @@ Mog 在当前 Codex 对话明确要求“重新让 subagent 来修正，然后�
 - **退出**：旧 `topic_map`、`topic_workspace` 页面代码删除；与旧版同场景的性能对照没有明显退化；Mog 验收。
 
 ### 阶段 G · 采集与工位
+
+**2026-10-16 派定**：Mog 指定当前 Codex 主代理接手整个采集模块，UI 与当前实际页面一致，每次完成必须截图对照；顺序据此调整。能力盘点、文件/状态与证明见[阶段 G 分册](web-react-001-g-collection.md)，关联总 Issue #430。
 
 - **范围**：`/collection/targets`、`/collection/tasks`、`/collection/domains`、`/collection/runtime`。
 - **做法**：把 Rust 拼接的页面和表单提交（§3.2 所列六条）改为 JSON 读接口与命令接口，保留幂等键、控制版本与回执语义；删除旧兼容跳转。

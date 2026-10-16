@@ -183,3 +183,9 @@ LIDS 现在统一约束全项目的设计表达，但其成熟度仍为 Proposed
 阶段 C 正式 React 候选验证见 [ACC-WEB-REACT-001-C](acceptance/web-react-001-c-acceptance.md)，与原型认可、共享运行和 Mog 成品验收分别记录。
 
 - [创作者页（语料）](pages/creators-page.md)：WEB-REACT-001 阶段 D1 的页面责任、状态词典与动作后果；候选验证见 [ACC-WEB-REACT-001-D1](acceptance/web-react-001-d1-acceptance.md)。
+
+阶段 G 整个采集页族沿用当前实际 UI，实施范围见[分册](../plans/active/web-react-001-g-collection.md)，实际截图、回执和分层结果见[ACC-WEB-REACT-001-G](acceptance/web-react-001-g-acceptance.md)。
+
+阶段 E UI 迁移：[运营台账五页](../plans/active/web-react-001-e-ops.md)，沿用 PAGE-OPS-001/002 与当前 3000 对照，不扩展产品。
+
+阶段 E 验收：[ACC-WEB-REACT-001-E](acceptance/web-react-001-e-acceptance.md)，256 组当前页面截图对照及隔离 PG 回执证明。

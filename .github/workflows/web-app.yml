@@ -10,6 +10,9 @@ on:
       - 'apps/api/src/main.rs'
       - 'apps/api/src/local_web/web_app*.rs'
       - 'apps/api/src/local_web/model_settings.rs'
+      - 'apps/api/src/local_web/collection*'
+      - 'apps/api/src/local_web/station_view.rs'
+      - 'apps/api/src/local_web/target_drawer.rs'
       - 'apps/api/src/local_web/corpus_shell_api.rs'
       - 'apps/api/src/local_web/creators*.rs'
       - 'apps/api/src/local_web/evidence*.rs'
@@ -24,6 +27,8 @@ on:
       - 'scripts/runtime/prepare-web.sh'
       - 'scripts/test-web-app-postgres.sh'
       - 'scripts/test-content-workbench-postgres.sh'
+      - 'scripts/test-collection-*.cjs'
+      - 'scripts/test-collection-single-run-postgres.sh'
       - 'apps/api/src/local_web/content_workbench*'
       - 'apps/api/src/local_web/full_schema_fixture.rs'
       - 'apps/api/src/local_web/ops.rs'
@@ -128,6 +133,16 @@ jobs:
         run: |
           export CW_BROWSER_PROOF_NODE="$(command -v node)"
           bash scripts/test-content-workbench-postgres.sh --browser
+      - name: Collection React module on disposable PostgreSQL
+        env:
+          COLLECTION_PROOF_DIR: ${{ runner.temp }}/collection-react-proof
+          COLLECTION_RUN_BROWSER_PROOF: '1'
+          COLLECTION_RUN_CORE_PROOF: '1'
+        run: |
+          npm --prefix apps/web run build
+          export COLLECTION_PROOF_NODE="$(command -v node)"
+          export NODE_PATH="$GITHUB_WORKSPACE/apps/web/node_modules"
+          bash scripts/test-collection-single-run-postgres.sh
       - name: Retain browser evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -136,5 +151,6 @@ jobs:
           path: |
             ${{ runner.temp }}/web-app-proof
             ${{ runner.temp }}/workbench-proof
+            ${{ runner.temp }}/collection-react-proof
           retention-days: 7
           if-no-files-found: warn

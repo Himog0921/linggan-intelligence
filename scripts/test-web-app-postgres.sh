@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # WEB-REACT-001 真实链路证明：一次性隔离 PostgreSQL + 本机 Axum 路由 + 已构建的 React 前端
 # + 无界面浏览器。依次运行：阶段 B 的设置页证明；阶段 D1 的语料外壳接口读库证明与创作者页证明；
-# 阶段 D2 的证据库接口证明（DR-1 失效控件、两条写路径的库内后果）与证据库页证明
+# 阶段 D2 的证据库接口证明（DR-1 失效控件、两条写路径的库内后果）与证据库页证明；阶段 E 的运营台账五页证明
 # （合成作者与作品，真实写入只落在隔离库）。不连接开发库或本机常驻服务；只用合成模型凭据，
 # 模型连接指向本机回环端口，模型调用组件被指到不存在的路径，因此不会启动任何模型进程或外发请求。
 set -euo pipefail
@@ -129,3 +129,11 @@ run_proof "$proof_dir/evidence" \
   local_web::evidence_browser_tests \
   -- --ignored --nocapture --test-threads=1
 printf '%s\n' 'WEB-REACT-001 D2 evidence API proofs and evidence page real-chain proof passed (isolated database; synthetic data only)'
+
+# 阶段 E：运营台账五页、目标写入与六种导出；全部使用独立合成数据。
+mkdir -p "$proof_dir/ops"
+run_proof "$proof_dir/ops" \
+  cargo test -p linggan-api --bins --locked \
+  local_web::ops_browser_tests \
+  -- --ignored --nocapture --test-threads=1
+printf '%s\n' 'WEB-REACT-001 E operations five-page real-chain proof passed (isolated database only)'

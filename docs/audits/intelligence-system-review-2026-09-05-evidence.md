@@ -126,7 +126,7 @@ WorkOrder 共 44：deep_archive 7、patrol 37，dispatch_lane 与 queue_state �
 
 历史标准评论样本（省略外部作品身份）：`scope=detail_window`、`state=complete`、`uniqueCollectedCount=30`、`requestedLimit=30`、`pageCommentCount=233`。详情 Coverage 同时为 acquired 1、unknown 3。未把 30/30 当作 233 条全部完成。
 
-关键实现：[producer_runtime.rs](../../crates/evidence/src/producer_runtime.rs) 第 864 行的 `submit_producer_package` 及事务提交；[work_order_lease.rs](../../crates/evidence/src/work_order_lease.rs)；[collection_tasks_view.rs](../../apps/api/src/local_web/collection_tasks_view.rs) 第 275–298 行的租约失效展示。
+关键实现：[producer_runtime.rs](../../crates/evidence/src/producer_runtime.rs) 第 864 行的 `submit_producer_package` 及事务提交；[work_order_lease.rs](../../crates/evidence/src/work_order_lease.rs)；[当时的 collection_tasks_view.rs](https://github.com/Himog0921/linggan-intelligence/blob/baaf5a51b4a26f6ab54bb4b9eac38ce67b714520/apps/api/src/local_web/collection_tasks_view.rs) 第 275–298 行的租约失效展示。
 
 ## E06：本轮自动与隔离 PostgreSQL 验证
 

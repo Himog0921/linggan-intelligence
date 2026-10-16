@@ -1,0 +1,3 @@
+.pendingOverlay {
+  z-index: var(--lgi-z-toast);
+}

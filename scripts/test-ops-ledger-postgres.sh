@@ -9,7 +9,7 @@ cargo test -p linggan-intelligence --lib --locked ops_ledger
 cargo test -p linggan-intelligence --test ops_ledger_import_postgres --locked \
   full_schema_fixtures_record_the_actual_ops_ledger_migration_digest -- --exact
 cargo test -p linggan-api --locked -- ops shell
-node --test apps/api/src/local_web/ops.test.mjs apps/api/src/local_web/ops_overview.test.mjs
+npm --prefix apps/web test -- src/pages/ops
 
 # Statement counters are database-wide. Keep all proof suites serial; a caller
 # cannot raise this and introduce races between reset/measurement windows.
