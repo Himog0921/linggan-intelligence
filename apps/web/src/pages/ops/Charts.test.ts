@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { smoothSeriesPath } from "./Charts";
+import { smoothSeriesPath } from "./curve";
 
 describe("Ops trend curves", () => {
   it("uses smooth cubic segments instead of straight polylines", () => {
