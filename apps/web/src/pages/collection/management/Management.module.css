@@ -1,0 +1,3 @@
+.fields { display: contents; }
+/* Only names already clipped in the legacy layout yield to edit/manage controls. */
+.stationName:global(.c-stn-name-label)[data-name-overflow] { flex-shrink: 1; }

@@ -43,6 +43,8 @@ const devApiOrigin = process.env.LINGGAN_WEB_DEV_API_ORIGIN?.trim();
 export default defineConfig({
   plugins: [react(), buildInfo()],
   base: '/ui-assets/',
+  // Frozen legacy Collection geometry keeps the existing DOM classes during the React port.
+  css: { modules: { globalModulePaths: [/LegacyCollection\.module\.css$/] } },
   build: {
     outDir: 'dist',
     assetsDir: '',

@@ -168,6 +168,13 @@ async fn legacy_settings_page_assets_are_retired_and_unknown_paths_stay_404() {
     for retired in [
         "/assets/model-settings.js",
         "/assets/model-settings.css",
+        "/assets/collection-workspace.css",
+        "/assets/collection-workspace.js",
+        "/collection/operations",
+        "/collection/attention?domain=all",
+        "/collection/targets/new",
+        "/collection/domains/save",
+        "/collection/runtime/stations",
         "/settings/unknown",
     ] {
         let (status, _, _) = send(app(), retired, "127.0.0.1:3000").await;
@@ -253,7 +260,15 @@ async fn health_reports_the_frontend_build() {
     ));
     assert_eq!(
         health["webApp"]["pages"],
-        json!(["/settings/models", "/ops/creation", "/corpus/creators"])
+        json!([
+            "/settings/models",
+            "/ops/creation",
+            "/corpus/creators",
+            "/collection/targets",
+            "/collection/tasks",
+            "/collection/domains",
+            "/collection/runtime"
+        ])
     );
 }
 

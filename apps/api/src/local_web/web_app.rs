@@ -19,7 +19,15 @@ use serde_json::{Value, json};
 use std::{path::PathBuf, sync::Arc};
 
 /// 由 React 应用提供的正式页面。必须与 `apps/web/src/app/pages.ts` 逐项相同（前端测试对照）。
-const REACT_PAGES: &[&str] = &["/settings/models", "/ops/creation", "/corpus/creators"];
+const REACT_PAGES: &[&str] = &[
+    "/settings/models",
+    "/ops/creation",
+    "/corpus/creators",
+    "/collection/targets",
+    "/collection/tasks",
+    "/collection/domains",
+    "/collection/runtime",
+];
 
 /// 静态资源只允许这些类型：Vite 产物的脚本、样式、图片和字体。入口 HTML 与构建信息不经这里。
 const ASSET_TYPES: &[(&str, &str)] = &[
