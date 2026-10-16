@@ -5,7 +5,8 @@ interface AppShellProps {
   /** 当前页面所属的一级责任；设置页不属于任何一级入口，传 null。 */
   active: PrimarySurface | null;
   /** 系统区服务状态胶囊的中文文字。 */
-  boundaryLabel: string;
+  boundaryLabel: ReactNode;
+  className?: string;
   /** 当前页可明确提供的状态；省略时沿用迁移期导航基线。 */
   activeState?: string;
   /**
@@ -60,10 +61,10 @@ function PrimaryEntryLink({ entry, active, states }: { entry: PrimaryEntry; acti
  * 全站唯一继续演进的页头（WEB-REACT-001 R4）。结构与样式类名与 shell.rs 的 `global_header`
  * 保持一致，样式只来自 `shell.css`，迁移期两种页头看起来是同一个。
  */
-export function AppShell({ active, activeState, collectionState, boundaryLabel, crumb, meta, children }: AppShellProps) {
+export function AppShell({ className, active, activeState, collectionState, boundaryLabel, crumb, meta, children }: AppShellProps) {
   const states: EntryStates = { activeState, collectionState };
   return (
-    <div className="v7-app">
+    <div className={["v7-app", className].filter(Boolean).join(" ")}>
       <header className="v7-global-header">
         <div className="v7-global-row">
           <div className="v7-global-brand" aria-label="Linggan Intelligence">

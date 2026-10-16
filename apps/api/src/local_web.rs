@@ -1,21 +1,28 @@
 mod collection;
-mod collection_shell_api;
-mod collection_target_presentation;
-mod collection_task_diagnostics_api;
-#[cfg(test)]
-mod collection_readonly_preview_tests;
 mod collection_command_api;
-mod collection_targets_api;
-mod collection_management_api;
 mod collection_dispatch;
 mod collection_intake;
 mod collection_management;
+mod collection_management_api;
+#[cfg(test)]
+mod collection_readonly_preview_tests;
 mod collection_run_api;
+mod collection_shell_api;
 #[cfg(test)]
 mod collection_single_run_tests;
+mod collection_target_presentation;
+mod collection_targets_api;
 mod collection_targets_view;
 mod collection_task_actions;
+mod collection_task_diagnostics_api;
 mod comment_study;
+mod content_workbench_ai_api;
+mod content_workbench_api;
+#[cfg(test)]
+mod content_workbench_api_tests;
+#[cfg(test)]
+mod content_workbench_browser_tests;
+mod content_workbench_sources_api;
 mod corpus_shell_api;
 mod creator_lifecycle_api;
 #[cfg(test)]
@@ -37,9 +44,6 @@ mod material_cursor_tests;
 #[cfg(test)]
 mod material_media_delivery_tests;
 mod material_projection;
-mod research_dossier;
-#[cfg(test)]
-mod research_dossier_tests;
 #[cfg(test)]
 mod material_projection_media_fixture;
 #[cfg(test)]
@@ -47,22 +51,20 @@ mod material_projection_tests;
 #[cfg(test)]
 mod material_replica_fallback_tests;
 mod model_settings;
-mod content_workbench_api;
-#[cfg(test)]
-mod content_workbench_api_tests;
-#[cfg(test)]
-mod content_workbench_browser_tests;
-mod content_workbench_sources_api;
-mod content_workbench_ai_api;
 mod ops;
 mod ops_api;
-mod ops_export;
-mod ops_overview_api;
 #[cfg(test)]
 mod ops_browser_tests;
+mod ops_export;
+mod ops_overview_api;
+mod research_dossier;
+#[cfg(test)]
+mod research_dossier_tests;
 mod shell;
 mod station_view;
 mod target_drawer;
+#[cfg(test)]
+mod topic_browser_tests;
 mod topic_map;
 mod topic_workspace;
 #[cfg(test)]
@@ -89,30 +91,28 @@ use linggan_evidence::observation_domain::{
 };
 use linggan_evidence::{
     AcquisitionChainError, AuthorizationGrant, COLLECTION_RUNTIME_REQUIREMENTS, CheckInOutcome,
-    DiscoveryIngressError, InstallationCheckIn, LeaseError,
-    LocalAttemptOutcome, LocalProducerError, LocalSubmissionOutcome, LocalTaskOutcome,
-    MaterialDeepeningTarget, MediaUploadFinalizeClaim, MonitorCommandActor, MonitorCommandKind,
-    MonitorRuleCommand, MonitorRuleCommandError, MonitorRuleDraft, MonitorRuleMode,
-    ProducerRuntimeError, RequestLeaseError,
-    RuntimeAttemptOutcome, RuntimeReadiness, RuntimeSubmissionOutcome,
-    RuntimeTaskOutcome, StoreOutcome, TargetDeletionOutcome, WorkResourceReadError, admit_media_blob,
-    apply_monitor_rule_command, assign_target_domain, begin_media_upload, bind_observation_account,
-    check_in_installation, claim_installation, claim_media_acquisition,
+    DiscoveryIngressError, InstallationCheckIn, LeaseError, LocalAttemptOutcome,
+    LocalProducerError, LocalSubmissionOutcome, LocalTaskOutcome, MaterialDeepeningTarget,
+    MediaUploadFinalizeClaim, MonitorCommandActor, MonitorCommandKind, MonitorRuleCommand,
+    MonitorRuleCommandError, MonitorRuleDraft, MonitorRuleMode, ProducerRuntimeError,
+    RequestLeaseError, RuntimeAttemptOutcome, RuntimeReadiness, RuntimeSubmissionOutcome,
+    RuntimeTaskOutcome, StoreOutcome, TargetDeletionOutcome, WorkResourceReadError,
+    admit_media_blob, apply_monitor_rule_command, assign_target_domain, begin_media_upload,
+    bind_observation_account, check_in_installation, claim_installation, claim_media_acquisition,
     claim_media_upload_finalize, close_claim_window, complete_media_upload, count_targets,
     create_manual_task, create_producer_task, delete_observation_target, dispatch_schema_is_ready,
     grant_authorization, ingest_discovery_package, issue_work_order_lease,
-    keyword_baselines_qualified, list_targets_in_state,
-    local_discovery_schema_is_ready, local_producer_schema_is_ready,
-    media_acquisition_schema_is_ready, open_claim_window, probe_runtime_readiness,
-    producer_runtime_schema_is_ready, read_media_upload_session,
+    keyword_baselines_qualified, list_targets_in_state, local_discovery_schema_is_ready,
+    local_producer_schema_is_ready, media_acquisition_schema_is_ready, open_claim_window,
+    probe_runtime_readiness, producer_runtime_schema_is_ready, read_media_upload_session,
     read_runtime_capacity, read_scheduler_heartbeat, read_station_capabilities,
-    read_station_overview, record_media_acquisition_failure,
-    record_media_download_failure, record_media_upload_chunk, register_station,
-    release_media_upload_finalize, rename_station, request_and_admit_for_domain,
-    request_and_admit_material_targets_for_domain, request_progressive_archive, retire_materials,
-    retire_station, set_group_for_many, set_station_accepting, start_local_attempt,
-    start_producer_attempt, station_schema_is_ready, store_pending_target, submit_local_package,
-    submit_producer_package, sync_target_from_author_profile, toggle_target_patrol,
+    read_station_overview, record_media_acquisition_failure, record_media_download_failure,
+    record_media_upload_chunk, register_station, release_media_upload_finalize, rename_station,
+    request_and_admit_for_domain, request_and_admit_material_targets_for_domain,
+    request_progressive_archive, retire_materials, retire_station, set_group_for_many,
+    set_station_accepting, start_local_attempt, start_producer_attempt, station_schema_is_ready,
+    store_pending_target, submit_local_package, submit_producer_package,
+    sync_target_from_author_profile, toggle_target_patrol,
 };
 use linggan_storage_postgres::Database;
 use serde::Deserialize;
@@ -352,13 +352,17 @@ fn router(state: LocalWebState) -> Router {
         )
         .merge(material_api_routes())
         .merge(collection_api_routes())
-        .merge(Router::new()
-            .merge(collection_shell_api::routes())
-            .merge(collection_task_diagnostics_api::routes())
-            .merge(collection_command_api::routes())
-            .merge(collection_targets_api::routes())
-            .merge(collection_management_api::routes())
-            .layer(axum::middleware::from_fn(comment_study::local_comment_study_guard)))
+        .merge(
+            Router::new()
+                .merge(collection_shell_api::routes())
+                .merge(collection_task_diagnostics_api::routes())
+                .merge(collection_command_api::routes())
+                .merge(collection_targets_api::routes())
+                .merge(collection_management_api::routes())
+                .layer(axum::middleware::from_fn(
+                    comment_study::local_comment_study_guard,
+                )),
+        )
         .merge(creator_lifecycle_api::routes())
         .merge(collection_run_api::routes())
         .merge(creators::routes())
@@ -381,22 +385,42 @@ fn router(state: LocalWebState) -> Router {
             get(evidence_observation_script),
         )
         .route("/assets/evidence-library.js", get(evidence_library_script))
-        .route(
-            "/assets/topic-workspace.css",
-            get(topic_workspace::stylesheet),
-        )
-        .route("/assets/topic-workspace.js", get(topic_workspace::script))
         .with_state(state)
 }
 
 fn material_api_routes() -> Router<LocalWebState> {
     Router::new()
         .route("/assets/research-dossier.js", get(research_dossier::script))
-        .route("/api/local/work-resources/{public_ref}/research-dossier", get(research_dossier::read).layer(axum::middleware::from_fn(comment_study::local_comment_study_guard)))
-        .route("/api/local/work-resources/{public_ref}/research-dossier/creator-preview", get(research_dossier::creator_preview).layer(axum::middleware::from_fn(comment_study::local_comment_study_guard)))
-        .route("/api/local/work-resources/{public_ref}/research-dossier/comments", get(research_dossier::comments).layer(axum::middleware::from_fn(comment_study::local_comment_study_guard)))
-        .route("/api/local/work-resources/{public_ref}/research-dossier/relayer-plan", get(research_dossier::plan).layer(axum::middleware::from_fn(comment_study::local_comment_study_guard)))
-        .route("/api/local/work-resources/{public_ref}/research-dossier/relayer", post(research_dossier::relayer).layer(axum::middleware::from_fn(comment_study::local_comment_study_guard)))
+        .route(
+            "/api/local/work-resources/{public_ref}/research-dossier",
+            get(research_dossier::read).layer(axum::middleware::from_fn(
+                comment_study::local_comment_study_guard,
+            )),
+        )
+        .route(
+            "/api/local/work-resources/{public_ref}/research-dossier/creator-preview",
+            get(research_dossier::creator_preview).layer(axum::middleware::from_fn(
+                comment_study::local_comment_study_guard,
+            )),
+        )
+        .route(
+            "/api/local/work-resources/{public_ref}/research-dossier/comments",
+            get(research_dossier::comments).layer(axum::middleware::from_fn(
+                comment_study::local_comment_study_guard,
+            )),
+        )
+        .route(
+            "/api/local/work-resources/{public_ref}/research-dossier/relayer-plan",
+            get(research_dossier::plan).layer(axum::middleware::from_fn(
+                comment_study::local_comment_study_guard,
+            )),
+        )
+        .route(
+            "/api/local/work-resources/{public_ref}/research-dossier/relayer",
+            post(research_dossier::relayer).layer(axum::middleware::from_fn(
+                comment_study::local_comment_study_guard,
+            )),
+        )
         .route(
             "/api/local/media/{materialization_ref}/{sha256}",
             get(local_media_routes::materialization),
@@ -2393,9 +2417,7 @@ async fn read_collection_surface(database: &Database) -> CollectionSurfaceReads 
         archiving_targets: counts.as_ref().map(|counts| counts.archiving),
         scheduler_state,
     };
-    CollectionSurfaceReads {
-        surface_state,
-    }
+    CollectionSurfaceReads { surface_state }
 }
 
 /// Daily collection work begins with the preserved observation-target workspace.

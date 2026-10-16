@@ -27,6 +27,7 @@ on:
       - 'apps/api/src/local_web/content_workbench*'
       - 'apps/api/src/local_web/full_schema_fixture.rs'
       - 'apps/api/src/local_web/ops.rs'
+      - 'apps/api/src/local_web/topic*.rs'
       - 'crates/evidence/src/material_social_read.rs'
       - 'crates/evidence/src/research_dossier.rs'
       - 'crates/intelligence/src/ops_ledger/read/creation_read.rs'
@@ -110,7 +111,9 @@ jobs:
           # 只查本模块自己的 Rust 文件：local_web.rs 在主线上已有与本模块无关的格式偏差。
           rustfmt --edition 2024 --config skip_children=true --check \
             apps/api/src/local_web/web_app.rs apps/api/src/local_web/web_app_tests.rs apps/api/src/local_web/model_settings.rs \
-            apps/api/src/local_web/corpus_shell_api.rs apps/api/src/local_web/creators_browser_tests.rs
+            apps/api/src/local_web/corpus_shell_api.rs apps/api/src/local_web/creators_browser_tests.rs \
+            apps/api/src/local_web/topic_map.rs apps/api/src/local_web/topic_workspace.rs \
+            apps/api/src/local_web/topic_workspace_tests.rs apps/api/src/local_web/topic_browser_tests.rs
       - name: Content workbench PostgreSQL contracts
         run: |
           cargo test -p linggan-intelligence --lib exact_spans_keep_overlaps_codepoints_and_long_repeated_patterns --locked

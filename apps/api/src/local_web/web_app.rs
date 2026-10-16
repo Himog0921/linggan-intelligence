@@ -32,6 +32,8 @@ const REACT_PAGES: &[&str] = &[
     "/ops/accounts",
     "/ops/daily",
     "/ops/io",
+    "/topics",
+    "/topics/{canonical_key}",
 ];
 
 /// 静态资源只允许这些类型：Vite 产物的脚本、样式、图片和字体。入口 HTML 与构建信息不经这里。
@@ -79,7 +81,11 @@ pub(super) fn routes_for<S: Clone + Send + Sync + 'static>(config: WebAppConfig)
         get(|| async { Redirect::temporary("/settings/models") }),
     );
     for page in REACT_PAGES {
-        pages = pages.route(page, get(entry));
+        pages = if *page == "/topics/{canonical_key}" {
+            pages.route(page, get(topic_workspace_entry))
+        } else {
+            pages.route(page, get(entry))
+        };
     }
     pages
         .layer(middleware::from_fn(local_comment_study_guard))
@@ -135,6 +141,28 @@ async fn entry(State(config): State<WebAppConfig>) -> Response {
             "新版网页的前端文件与后台服务不是同一个版本，已停止提供页面。请重新运行本机同步构建。",
         ),
     }
+}
+
+// Keep the previous Workspace key boundary before handing the route to React.
+async fn topic_workspace_entry(
+    State(config): State<WebAppConfig>,
+    Path(canonical_key): Path<String>,
+) -> Response {
+    if !safe_topic_key(&canonical_key) {
+        return (StatusCode::BAD_REQUEST, "invalid Topic key").into_response();
+    }
+    entry(State(config)).await
+}
+
+fn safe_topic_key(value: &str) -> bool {
+    (2..=96).contains(&value.len())
+        && value.starts_with(|character: char| character.is_ascii_lowercase())
+        && value.chars().all(|character| {
+            character.is_ascii_lowercase()
+                || character.is_ascii_digit()
+                || character == '-'
+                || character == '_'
+        })
 }
 
 /// 基础设施故障的纯文本说明，不是业务页面。

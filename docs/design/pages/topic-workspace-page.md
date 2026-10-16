@@ -1,8 +1,8 @@
 # PAGE-TOPIC-WORKSPACE-001 · 真实 Topic 工作区
 
 > 状态: 权威当前
-> 运行时状态: L2 本机真实读模型；Topic 仍为 `PROVISIONAL`
-> 最后核对: 2026-08-31
+> 运行时状态: L2 本机真实读模型；Topic 为 `provisional` 或既有 `candidate`，非正式发布
+> 最后核对: 2026-10-16
 > 适用范围: Issue #112 `/topics/{canonical_key}` 的产品任务、状态、布局、交互与验收边界
 > 事实来源: TOPIC-WORKSPACE-REAL-001、Work Resource Read、LIDS、用户确认的视觉方向与当前实现
 > 冲突时以谁为准: 用户最新确认、真实 API/数据库状态、Topic 合同、LIDS 与安全边界
@@ -54,7 +54,7 @@ Source Boundary                        Explicit non-claims
 - 材料行使用 `role=option + aria-selected`；当前实现支持点击/Tab/Enter 原生按钮语义。
 - Focus 使用共享 2px signal outline；所有可达目标保持可见。
 - 页面不自动播放、不用 hover 承载必要信息；≤1080px Inspector 下移，≤720px 转连续单栏。
-- Source 文本进入 DOM 一律通过 `textContent`，不拼进 `innerHTML`。
+- Source 文本进入 DOM 一律通过 `React 文本节点`，不拼进 `innerHTML`。
 
 ## 6. 数据与动作
 
@@ -74,3 +74,11 @@ Source Boundary                        Explicit non-claims
 3. 可读时 Definition/Run/Pack IDs 和材料引用一一对应，角色筛选不重新查询或改变包。
 4. 任一材料的显示字段都可回到同源 Work Resource；Topic API 不返回 raw body/comment copy。
 5. CSS 只消费现有 LIDS token；桌面与窄屏无横向溢出，Reduced Motion 有效。
+
+## 9. WEB-REACT-001-F 候选实现与既有缺口
+
+页面载体迁至 `apps/web/src/pages/topics/WorkspacePage.tsx`、`workspaceApi.ts` 和 CSS Modules；仍以原 Topic/Work Resource API 为权威，不变更暂定定义、冻结包或材料资格。原生 handler/JS/CSS 同包退役；四视口实际 UI 保真、真实角色/404/503/未知值证明见 [F 验收](../acceptance/web-react-001-f-acceptance.md)。这是候选实现，不代表 3000 或 Mog 签收。
+
+当前 `detailUrl` 未带 Work Resource 所需的 ObservationDomain UUID，旧页面真实返回 `domain_required`；domainKey 不能被当成这个 UUID。迁移保持此链接事实，未假造上下文。404 Inspector 的无 href 空按钮也保留原现场；修复这些行为需要另定合同，不混进 UI 保真完成声明。
+
+独立审查核对当前 producer：`crates/intelligence/src/topic_map/structure/store.rs` 同样会保存 `candidate` / `machine_proposed` / `completed` 冻结工作区，migration 0116 已扩展该 run kind。原页面固定显示“人工裁定 / HUMAN ADJUDICATED”，因此本手册上文的人工描述只对应最初导入工作区，不能覆盖现有机器候选事实。F 解码器同时接受这两种现有 completed run，未知 kind、未完成 run、错位或不完整冻结包仍拒绝；保留旧 UI 固定标签作为已登记的展示缺口，不将它当成人工身份事实，也不在本迁移中新增裁定/自动分类能力。后续标签语义修正由独立事项决定。

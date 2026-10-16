@@ -10,7 +10,7 @@ proof_container="linggan-topic-proof-${proof_suffix}"
 proof_volume="linggan-topic-proof-${proof_suffix}-data"
 proof_user="topic_proof_admin"
 proof_password="$(openssl rand -hex 24)"
-postgres_image="postgres:16.14-bookworm@sha256:64154d0babcb1741988719e703419af0382b19953706149f9872fbd0f438efa8"
+postgres_image="linggan-intelligence-postgres-pgvector:16.14-v0.8.0-r1"
 
 [[ "$proof_database" =~ ^linggan_topic_proof_[a-zA-Z0-9_]+$ ]] || { echo "unsafe proof database name" >&2; exit 1; }
 [[ "$proof_container" =~ ^linggan-topic-proof-[a-zA-Z0-9_-]+$ ]] || { echo "unsafe proof container name" >&2; exit 1; }
@@ -33,6 +33,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
+"$project_root/scripts/runtime/build-pgvector-image.sh" --ensure
 docker volume create "$proof_volume" >/dev/null
 proof_volume_created=1
 docker run -d --name "$proof_container" \
@@ -43,10 +44,10 @@ docker run -d --name "$proof_container" \
   --publish 127.0.0.1::5432 "$postgres_image" >/dev/null
 proof_container_created=1
 for _ in {1..30}; do
-  docker exec "$proof_container" pg_isready -U "$proof_user" -d "$proof_database" >/dev/null 2>&1 && break
+  docker exec "$proof_container" pg_isready -h 127.0.0.1 -p 5432 -U "$proof_user" -d "$proof_database" >/dev/null 2>&1 && break
   sleep 1
 done
-docker exec "$proof_container" pg_isready -U "$proof_user" -d "$proof_database" >/dev/null
+docker exec "$proof_container" pg_isready -h 127.0.0.1 -p 5432 -U "$proof_user" -d "$proof_database" >/dev/null
 proof_port="$(docker port "$proof_container" 5432/tcp | sed -n 's/^127\.0\.0\.1:\([0-9][0-9]*\)$/\1/p')"
 [[ "$proof_port" =~ ^[0-9]+$ ]] || { echo "isolated proof PostgreSQL did not expose a safe port" >&2; exit 1; }
 export LOCAL_001_PROOF_DATABASE_URL="postgresql://${proof_user}:${proof_password}@127.0.0.1:${proof_port}/${proof_database}"

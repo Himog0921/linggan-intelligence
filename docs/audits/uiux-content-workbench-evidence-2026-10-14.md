@@ -32,6 +32,8 @@
 
 旧 `/collection/operations` 与 `/collection/attention` 在当前源码重定向到任务入口，未作为独立新页重复计数。页面路由和按钮检查不代替后端真实执行证明。
 
+> 链接维护（2026-10-16）：WEB-REACT-001-F 退役原生 Topic 资产后，S05/S09 的相应源码链接固定至迁移前 82d48a72；本报告的事实时点与审计结论不变。
+
 ## 3. 可复现路径
 
 1. F01：主题图谱 ADHD 概览→用户生命旅程→出现版本冲突→重新读取→恢复；这是当次一次观察，不能保证每次复现。服务端冲突成因需要后续追踪。
@@ -52,11 +54,11 @@
 | S02 | [local_web.rs](../../apps/api/src/local_web.rs) 6106、6139–6178；[evidence_library.js](../../apps/api/src/local_web/evidence_library.js) 5–29、379；[evidence_library.css](../../apps/api/src/local_web/evidence_library.css) | 技术说明/占位、领域与work参数、作者/任务返回、阅读模式 |
 | S03 | [creators.rs](../../apps/api/src/local_web/creators.rs) 12–25；`creators.js` 65–85、131；`creators.css`（后两个文件已随 WEB-REACT-001 D1 删除，当次基线见 `origin/main@36f3fdf9`；创作者页现为 `apps/web/src/pages/corpus/creators/`） | 作者读取/写边界、证据跳转、图片及可访问名称 |
 | S04 | [comment_study.html](../../apps/api/src/local_web/comment_study.html) 19–104；[comment_study.js](../../apps/api/src/local_web/comment_study.js) 166–187、283、737、855–903、1539；[comment_study.css](../../apps/api/src/local_web/comment_study.css) 42–72 | 列表/研究/方法入口、加载依赖、版本显示、弹窗与表格 |
-| S05 | [topic_map.rs](../../apps/api/src/local_web/topic_map.rs) 49–76、110、320–330；[topic_map.js](../../apps/api/src/local_web/topic_map.js) 92–126、155–157、185、464、781–786；[topic_map.css](../../apps/api/src/local_web/topic_map.css) | 读取/命令边界、错误码映射、覆盖读数、旅程、人工备选及引用导出 |
+| S05 | [topic_map.rs](../../apps/api/src/local_web/topic_map.rs) 49–76、110、320–330；[topic_map.js](https://github.com/Himog0921/linggan-intelligence/blob/82d48a72b95d905bffd0def9314fdee004893ddb/apps/api/src/local_web/topic_map.js) 92–126、155–157、185、464、781–786；[topic_map.css](https://github.com/Himog0921/linggan-intelligence/blob/82d48a72b95d905bffd0def9314fdee004893ddb/apps/api/src/local_web/topic_map.css) | 读取/命令边界、错误码映射、覆盖读数、旅程、人工备选及引用导出 |
 | S06 | [collection_targets_view.rs](../../apps/api/src/local_web/collection_targets_view.rs) 636–750、784–835；[collection_target.rs](../../crates/evidence/src/collection_target.rs) 560–608；[target_drawer.rs](../../apps/api/src/local_web/target_drawer.rs) 1380–1402、1702–1721、3160；[local_web.rs](../../apps/api/src/local_web.rs) 354–393、3606–3632、3731–3739；[collection.rs](../../apps/api/src/local_web/collection.rs) 792–793 | 目标状态计数/行语义、作品跳转、失效默认选择、领域与任务路由 |
 | S07 | [ops.rs](https://github.com/Himog0921/linggan-intelligence/blob/712286c39bd0fc57ca71097a3abba1d5aca3aa90/apps/api/src/local_web/ops.rs) 12–33；[ops_publications.html](https://github.com/Himog0921/linggan-intelligence/blob/712286c39bd0fc57ca71097a3abba1d5aca3aa90/apps/api/src/local_web/ops_publications.html) 15–22；[ops.js](https://github.com/Himog0921/linggan-intelligence/blob/712286c39bd0fc57ca71097a3abba1d5aca3aa90/apps/api/src/local_web/ops.js) 247；[ops_overview.js](https://github.com/Himog0921/linggan-intelligence/blob/712286c39bd0fc57ca71097a3abba1d5aca3aa90/apps/api/src/local_web/ops_overview.js) 249–271；[ops_io.html](https://github.com/Himog0921/linggan-intelligence/blob/712286c39bd0fc57ca71097a3abba1d5aca3aa90/apps/api/src/local_web/ops_io.html) | 运营只读、选题池占位、发布表列、漏斗结论、台账导出 |
 | S08 | [model_settings.rs](../../apps/api/src/local_web/model_settings.rs) 18–36；[model_settings.html](https://github.com/Himog0921/linggan-intelligence/blob/f1ec98f385ed0760c822e0d20427a087015a8bbf/apps/api/src/local_web/model_settings.html)；[model_settings.js](https://github.com/Himog0921/linggan-intelligence/blob/f1ec98f385ed0760c822e0d20427a087015a8bbf/apps/api/src/local_web/model_settings.js) | 设置作用域、模型测试/保存边界与记录 |
-| S09 | [topic_workspace.rs](../../apps/api/src/local_web/topic_workspace.rs) 21–27、123–154；[topic_workspace.js](../../apps/api/src/local_web/topic_workspace.js) | 旧工作区为定义和冻结材料读取；没有正文/图片编辑闭环 |
+| S09 | [topic_workspace.rs](../../apps/api/src/local_web/topic_workspace.rs) 21–27、123–154；[topic_workspace.js](https://github.com/Himog0921/linggan-intelligence/blob/82d48a72b95d905bffd0def9314fdee004893ddb/apps/api/src/local_web/topic_workspace.js) | 旧工作区为定义和冻结材料读取；没有正文/图片编辑闭环 |
 | S10 | [LIDS tokens](../design/lids/tokens.md) §0–1；[语言规则](../design/lids/language-policy.md) LANG-05；[primitives](../design/lids/primitives.md)；[patterns](../design/lids/patterns.md)；[lids_tokens.css](../../apps/api/src/local_web/lids_tokens.css) | 已有规则、目标/运行 Token 分层、中文规则和组件模式；本轮未改规范数值 |
 
 能力缺口依据是：本轮主路由盘点、模块实现和真实入口均不能完成该用户结果，不是仅靠搜索某个关键词没命中。没有逐行审查整个仓库；本报告不是安全审计或全量代码质量审查。

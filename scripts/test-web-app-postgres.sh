@@ -100,6 +100,14 @@ run_proof() {
     "$@"
 }
 
+# Focused local reruns use the same disposable environment; CI defaults to every stage.
+if [[ "${WEB_APP_PROOF_SCOPE:-all}" == topics ]]; then
+  mkdir -p "$proof_dir/topics"
+  run_proof "$proof_dir/topics" cargo test -p linggan-api --bins --locked local_web::topic_browser_tests -- --ignored --nocapture --test-threads=1
+  exit 0
+fi
+[[ "${WEB_APP_PROOF_SCOPE:-all}" == all ]] || { echo 'Unknown proof scope' >&2; exit 1; }
+
 # 阶段 B：设置页。
 run_proof "$proof_dir" \
   cargo test -p linggan-api --bins --locked \
@@ -122,3 +130,11 @@ run_proof "$proof_dir/ops" \
   local_web::ops_browser_tests \
   -- --ignored --nocapture --test-threads=1
 printf '%s\n' 'WEB-REACT-001 E operations five-page real-chain proof passed (isolated database only)'
+
+# 阶段 F：完整主题图谱 + 独立 Workspace；本机真实 UI 对照另存 private，不上传 CI。
+mkdir -p "$proof_dir/topics"
+run_proof "$proof_dir/topics" \
+  cargo test -p linggan-api --bins --locked \
+  local_web::topic_browser_tests \
+  -- --ignored --nocapture --test-threads=1
+printf '%s\n' 'WEB-REACT-001 F Topics and Workspace real-chain proof passed (isolated database only)'

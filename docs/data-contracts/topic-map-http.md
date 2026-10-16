@@ -1,10 +1,16 @@
 # Topic Map HTTP 合同
 
 > 状态: 代码事实优先
-> 最后核对: 2026-10-13
+> 最后核对: 2026-10-16
 > 适用范围: TOPIC-MAP-V41-001 既有接口及 TOPIC-MAP-CORE-001 研究内核候选
 > 事实来源: 手册 v1.1、当前 TopicMap DTO、0120 migration、Rust HTTP composition 与定向验证
 > 冲突时以谁为准: 用户最新确认、当前代码和来源资格；本合同不授权运行库迁移/外发
+
+## WEB-REACT-001-F 页面载体迁移候选
+
+`/topics` 与 `/topics/{canonical_key}` 改为同一 React Root 的懒加载路由；Axum 保留原 API/命令、同源 guard 和资源资格。新增只读 `GET /api/local/topic-map/context` 返回 `{defaultDomainRef: UUID|null, domains: [{domainRef,name,status,targetCount,sampleCount}]}`，复用旧 HTML 的领域事实及 `ORDER BY name LIMIT 1` 默认规则；失败为真实 503，不伪造空列表。显式 URL/会话优先、统计与分批材料口径不变。
+
+客户端强解码消费字段，缺字段与合法 null/0 分开；研究状态读取独立于材料，递增序号/地图 epoch/领域共同限定响应资格。显式写动作冻结完整 body/幂等身份/endpoint/回执 parser，仅保留于内存；网络、5xx、异常 200 不释放未知请求，用户显式重试仍发原 payload；明确 4xx 拒绝后才允许新请求。确认回调只刷新原领域和原弹窗；没有自动重试或扩大授权。原生 JS/CSS 与 HTML 页面 handler 同包退役，不留业务双轨。候选验证、预览 context 适配和原 Workspace JSON 链接缺口见 [F 验收](../design/acceptance/web-react-001-f-acceptance.md)，不据此宣称已部署。
 
 ## TOPIC-MAP-WORKFLOW-382 候选增量
 

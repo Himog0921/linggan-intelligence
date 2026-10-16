@@ -1,14 +1,14 @@
 //! Topic Map HTTP composition. Canonical reads and durable commands remain in intelligence.
-use super::{LocalWebState, shell};
+use super::LocalWebState;
 use axum::{
     Extension, Json, Router,
     extract::{
         Query, State,
         rejection::{JsonRejection, QueryRejection},
     },
-    http::{StatusCode, header},
+    http::StatusCode,
     middleware,
-    response::{Html, IntoResponse, Response},
+    response::{IntoResponse, Response},
     routing::{get, post},
 };
 use linggan_intelligence::topic_map::read_model::TopicMapReadModel;
@@ -46,10 +46,8 @@ pub(super) fn routes(
         });
     }
     Router::new()
-        .route("/topics", get(page))
-        .route("/assets/topic-map.css", get(stylesheet))
-        .route("/assets/topic-map.js", get(script))
         .route("/api/local/topic-map", get(snapshot))
+        .route("/api/local/topic-map/context", get(page_context))
         .route("/api/local/topic-map/overview", get(overview))
         .route("/api/local/topic-map/summary", get(summary))
         .route("/api/local/topic-map/evidence", get(evidence))
@@ -79,89 +77,36 @@ pub(super) fn routes(
             super::comment_study::local_comment_study_guard,
         ))
 }
-#[derive(Default, Deserialize)]
-struct PageQuery {
-    #[serde(alias = "domainRef")]
-    domain: Option<Uuid>,
-}
-async fn page(
-    State(state): State<LocalWebState>,
-    query: Result<Query<PageQuery>, QueryRejection>,
-) -> Html<String> {
-    let domain_ref = query.ok().and_then(|Query(q)| q.domain);
-    let domains = match state.database.database() {
-        Some(db) => linggan_evidence::observation_domain::read_observation_domains(db)
-            .await
-            .ok(),
-        None => None,
+// Facts previously embedded in the native HTML, including its name-ordered default.
+async fn page_context(State(state): State<LocalWebState>) -> Response {
+    let db = match database(&state) {
+        Ok(db) => db,
+        Err(response) => return response,
     };
-    let default_domain_ref = match state.database.database() {
-        Some(db) => sqlx::query_scalar::<_, Uuid>(
-            "SELECT domain_ref FROM observation_domain ORDER BY name LIMIT 1",
-        )
-        .fetch_optional(db.pool())
-        .await
-        .ok()
-        .flatten(),
-        None => None,
+    let domains = match linggan_evidence::observation_domain::read_observation_domains(db).await {
+        Ok(domains) => domains,
+        Err(_) => {
+            return error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "topic_map_read_unavailable",
+            );
+        }
     };
-    Html(page_markup(
-        domains.as_deref().unwrap_or_default(),
-        domain_ref,
-        default_domain_ref,
-    ))
-}
-fn page_markup(
-    domains: &[linggan_evidence::observation_domain::ObservationDomain],
-    domain_ref: Option<Uuid>,
-    default_domain_ref: Option<Uuid>,
-) -> String {
-    let default_domain = default_domain_ref
-        .map(|id| id.to_string())
-        .unwrap_or_default();
-    let selected = domain_ref.and_then(|id| domains.iter().find(|d| d.domain_ref == id));
-    let picker = super::corpus_domain_picker(domains, selected, "/topics", None);
-    let domain = if picker.is_empty() {
-        selected.map_or_else(String::new, |d| {
-            format!(
-                " <span class=\"v7-slash\">/</span> {}",
-                super::html_escape(&d.name)
-            )
-        })
-    } else {
-        format!(" <span class=\"v7-slash\">/</span> {picker}")
+    let default_domain = match sqlx::query_scalar::<_, Uuid>(
+        "SELECT domain_ref FROM observation_domain ORDER BY name LIMIT 1",
+    )
+    .fetch_optional(db.pool())
+    .await
+    {
+        Ok(reference) => reference,
+        Err(_) => {
+            return error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "topic_map_read_unavailable",
+            );
+        }
     };
-    let header = shell::global_header(
-        shell::PrimarySurface::Topic,
-        "LOCAL HOST / NO PLATFORM ACCESS",
-        &format!(
-            "主题图谱{domain} <nav id=\"topic-map-view-tabs\" aria-label=\"主题图谱视图\"></nav><b id=\"topic-map-crumb-current\" class=\"v7-sr-only\">主题概览</b>"
-        ),
-        r#"<div id="topic-map-context-actions" aria-label="图谱操作"></div>"#,
-        None,
-    );
-    format!(
-        r#"<!doctype html><html lang="zh-CN" data-theme="linggan-intelligence"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>主题图谱 · Linggan Intelligence</title><link rel="stylesheet" href="/assets/topic-map.css"><script defer src="/assets/topic-map.js"></script></head><body class="topic-map-page"><div class="v7-app topic-map-app">{header}<div id="topic-map-root" data-default-domain-ref="{default_domain}" aria-label="主题图谱"><p role="status">正在读取领域与主题图谱…</p></div><noscript>主题图谱需要启用 JavaScript。已有作品可以在语料入口查看。</noscript></div></body></html>"#
-    )
-}
-async fn stylesheet() -> Response {
-    (
-        [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
-        format!(
-            "{}\n{}\n{}",
-            super::LIDS_TOKENS,
-            super::SHELL_CSS,
-            include_str!("topic_map.css")
-        ),
-    )
-        .into_response()
-}
-async fn script() -> Response {
-    (
-        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-        include_str!("topic_map.js"),
-    )
-        .into_response()
+    Json(json!({"defaultDomainRef":default_domain,"domains":domains.iter().map(|domain|json!({"domainRef":domain.domain_ref,"name":domain.name,"status":domain.status,"targetCount":domain.target_count,"sampleCount":domain.sample_count})).collect::<Vec<_>>()})).into_response()
 }
 fn database(state: &LocalWebState) -> Result<&linggan_storage_postgres::Database, Response> {
     state
@@ -390,27 +335,12 @@ mod tests {
     use super::*;
     use axum::{
         body::{Body, to_bytes},
-        http::Request,
+        http::{Request, header},
     };
     use serde_json::Value;
     use tower::ServiceExt;
     #[tokio::test]
-    async fn topic_map_entry_is_a_real_page_and_rejects_cross_site_access() {
-        let response = super::super::app()
-            .oneshot(
-                Request::builder()
-                    .uri("/topics")
-                    .header(header::HOST, "localhost:3000")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        let html = String::from_utf8(bytes.to_vec()).unwrap();
-        assert!(html.contains("topic-map-root"));
-        assert!(!html.contains("模拟新一轮资料"));
+    async fn topic_map_api_rejects_cross_site_access() {
         let response = super::super::app()
             .oneshot(
                 Request::builder()
@@ -427,6 +357,7 @@ mod tests {
     #[tokio::test]
     async fn topic_map_fast_reads_preserve_local_guard_and_strict_queries() {
         for path in [
+            "/api/local/topic-map/context",
             "/api/local/topic-map/summary?domainRef=00000000-0000-4000-8000-000000000001",
             "/api/local/topic-map/overview?domainRef=00000000-0000-4000-8000-000000000001",
             "/api/local/topic-map/evidence?domainRef=00000000-0000-4000-8000-000000000001&workRef=00000000-0000-4000-8000-000000000002",
@@ -551,33 +482,6 @@ mod tests {
             "synthetic-http-own"
         );
         assert_eq!(snapshot["statistics"]["workCount"], 0);
-        // Creation order differs from the existing Topic API name order.
-        // The HTML bootstrap must preserve that API default without a full map read.
-        let early_b = Uuid::new_v4();
-        let late_a = Uuid::new_v4();
-        sqlx::query("INSERT INTO observation_domain (domain_ref,name,created_at) VALUES ($1,'BBB default proof','2020-01-01T00:00:00Z'),($2,'AAA default proof','2021-01-01T00:00:00Z')")
-            .bind(early_b).bind(late_a).execute(db.pool()).await.unwrap();
-        let response = application
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .uri("/topics")
-                    .header(header::HOST, "localhost:3000")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let html = String::from_utf8(
-            to_bytes(response.into_body(), usize::MAX)
-                .await
-                .unwrap()
-                .to_vec(),
-        )
-        .unwrap();
-        assert!(html.contains(&format!("data-default-domain-ref=\"{late_a}\"")));
-        assert!(!html.contains(&format!("data-default-domain-ref=\"{early_b}\"")));
         let calls: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_model_invocation")
             .fetch_one(db.pool())
             .await

@@ -189,3 +189,7 @@ LIDS 现在统一约束全项目的设计表达，但其成熟度仍为 Proposed
 阶段 E UI 迁移：[运营台账五页](../plans/active/web-react-001-e-ops.md)，沿用 PAGE-OPS-001/002 与当前 3000 对照，不扩展产品。
 
 阶段 E 验收：[ACC-WEB-REACT-001-E](acceptance/web-react-001-e-acceptance.md)，256 组当前页面截图对照及隔离 PG 回执证明。
+
+阶段 F UI 迁移：[主题图谱与 Topic 工作区](../plans/active/web-react-001-f-topics.md)，沿用当前已确认紧凑工作区；React候选与当前3000实际基线2,905组完整滚动截图一致，独立审查/部署/Mog签收分列。
+
+阶段 F 验收：[ACC-WEB-REACT-001-F](acceptance/web-react-001-f-acceptance.md)，完整实际 UI 截图与隔离 PostgreSQL 回执证明。

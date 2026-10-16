@@ -8,6 +8,10 @@ PR #407 合并前修正（2026-10-13）：运营页焦点/强调线与新增共�
 > 事实来源: [system.md](system.md)、[README.md](README.md)、DESIGN-002 Issue #7、项目 progress 记录和实际验证输出
 > 冲突时以谁为准: 真实代码/合同/测试、用户最新确认、当前 SCOPE 和 ACCEPTED 决策；本日志不把计划写成已实现事实
 
+## 2026-10-16 · WEB-REACT-001-F 主题图谱与 Topic Workspace
+
+迁移已确认的当前 UI：六页签、双视图/单侧栏、阅读与研究/来源/结构弹窗及独立 Workspace。复用唯一 LIDS token 与 shared shell，局部 CSS Modules，原几何用等值 token/calc 表达；不改 token 值、颜色或算法语义。React JSX/生命周期取代原生 HTML renderer，保持滚动与重建行为。新增的异常写入恢复只显示真实未知回执与显式原请求重试，不自动外发。四视口整页/滚动 2,905 组逐像素一致；已知旧 Workspace JSON 缺 domain 与空按钮行为保留。候选、真实隔离链路、性能/审查和未部署边界见 [F 验收](../acceptance/web-react-001-f-acceptance.md)；不宣称全站 LIDS 欠账或 Mog 签收完成。
+
 ## 2026-10-16 · WEB-REACT-001 阶段 D1：语料共享外壳与创作者页迁到 React（Issue #433 / #430）
 
 - **实现载体变化**：`/corpus/creators` 改由 `apps/web` 的 React 应用提供，旧 `creators.html/.js/.css` 删除；语料三页共用的左侧二级导航、面包屑领域选择器与一级导航「采集」状态词在 React 里有了共享实现（`apps/web/src/corpus/`），数据来自只读接口 `GET /api/local/corpus/shell`。旧证据库、评论研究页仍由 `shell.rs` 渲染，页头与侧栏位置、样式与它们同源（`shell.css`），前端测试逐项对照 `shell.rs` 的侧栏登记表与标记。
@@ -629,3 +633,8 @@ root 目检真实隔离浏览器的 390×844 正文、图组和材料截图发�
 ## 2026-10-16 · WEB-REACT-001-E 运营台账五页 React 保真迁移（#438）
 
 沿用 PAGE-OPS-001/002 的五页面、列、图表、状态和交互，样式改为 CSS Modules，Token/shell.css 不改；同包删除旧 Rust 输出、HTML/JS/CSS 与纯 DOM 测试。新增 JSON 解码、可取消的 query、目标冻结请求与真实回执边界。256/256 组当前 3000/最终同数据只读候选 RGB 像素一致（含显式周/月目标）；GPT 独立审查两项发现已修正并 PASS，必有 DTO 字段缺失不冒充未知/未迁入；真实写入和导出证明另在一次性 PG + 正式 Router + React 完成。见[阶段 E 验收](../acceptance/web-react-001-e-acceptance.md)。仍为候选，未部署/未 Mog 验收；保真不等于清除旧版全部 LIDS 欠账。
+
+
+## 2026-10-16 · WEB-REACT-001-F 主题图谱与独立工作区 React 保真迁移（#440）
+
+主图谱双视图、六页签、既有弹窗/绘图和独立 Workspace 改为 React/TypeScript/CSS Modules，保留当前页面布局与原绘图/聚合语义；原生 HTML/4资产及纯 DOM runner 同包退役。只消费当前 token/shell，未新增全站视觉方向。保真对照、正式隔离 Axum/PG/React 回执、性能及明确未覆盖边界见 [F 验收](../acceptance/web-react-001-f-acceptance.md)。独立审查的表现图平台状态、合法失效文本 null、已有机器候选工作区三项兼容问题已修正并复测；既有 Workspace 的固定人工标签/JSON 缺域链接/404空按钮明确登记，不将保真说成语义欠账已清除。候选未部署，Mog 签收仍待完成。
