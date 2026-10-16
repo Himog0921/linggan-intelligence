@@ -23,6 +23,8 @@ mod creators_browser_tests;
 #[cfg(test)]
 mod evidence_api_proof_tests;
 #[cfg(test)]
+mod evidence_browser_tests;
+#[cfg(test)]
 mod evidence_fixture;
 #[cfg(test)]
 mod evidence_guard_tests;

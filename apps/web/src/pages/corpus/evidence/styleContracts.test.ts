@@ -61,6 +61,13 @@ describe('样式契约', () => {
     expect(ratios[1]).toBeGreaterThanOrEqual(2);
   });
 
+  it('封面排版是多列栅格：列宽不小于 248px 自适应列数；≤640px 两列、≤420px 一列（缺了它封面卡会退化成一列通栏）', () => {
+    const list = styles.get('WorkList.module.css') ?? '';
+    expect(list).toMatch(/\.list\[data-layout='cover'\] \.items\s*\{[^}]*display:\s*grid[^}]*repeat\(auto-fill, minmax\(calc\(var\(--lgi-space-24\) \* 2 \+ var\(--lgi-space-12\) \+ var\(--lgi-space-2\)\), 1fr\)\)/);
+    expect(list).toMatch(/@media \(max-width: 640px\)\s*\{\s*\.list\[data-layout='cover'\] \.items\s*\{\s*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/);
+    expect(list).toMatch(/@media \(max-width: 420px\)\s*\{\s*\.list\[data-layout='cover'\] \.items\s*\{\s*grid-template-columns:\s*1fr/);
+  });
+
   it('关闭检查器是让这一栏塌缩，不是隐藏元素：栏宽是一个变量，三档加关闭', () => {
     const page = styles.get('EvidencePage.module.css') ?? '';
     expect(page).toMatch(/--ev-inspector-w/);
