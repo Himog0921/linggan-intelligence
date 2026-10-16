@@ -218,7 +218,7 @@ Mog 授权三篇指定作品在本机核对与重新分层。私有材料快照�
 ## WEB-REACT-001-D2 · 证据库真实链路证明
 
 - 来源：`apps/web/test/e2e/evidence-real-chain.mjs` 与 `apps/web/test/e2e/evidence-plugin-entry.mjs`（人工维护的 Node/Playwright 脚本）、`apps/api/src/local_web/evidence_browser_tests.rs`（Rust 启动夹具，必须 multi_thread）、`apps/api/src/local_web/evidence_api_proof_tests.rs`（接口证明）与播种模块 `evidence_seed.rs`／`evidence_fixture.rs`，由既有 `scripts/test-web-app-postgres.sh` 在一次性隔离 PostgreSQL 上依次运行；播种只用合成作品、评论与媒体，不调用模型、不访问平台、不连开发库或本机常驻服务。
-- 固定位置：证据放在 `WEB_APP_PROOF_DIR` 下的 `evidence/` 子目录：`fixture.json`、`report.json`（逐步结果、请求、写请求、失败请求、存储键）、`dr1-dead-controls.json`（失效控件的真实调用记录）、`plugin-entry.json`（插件入口的请求头与 HTTP 状态）、各视口与各分区截图 PNG；CI 作为 `web-app-real-chain-proof` 产物保留 7 天。合成媒体字节写在支持目录的 `media/` 下，只经本机媒体句柄读取。插件入口证明的最小测试扩展与浏览器配置写在系统临时目录（`linggan-entry-extension-*`、`linggan-entry-profile-*`），脚本结束时删除；它自起的记录服务器只监听 `127.0.0.1` 随机端口。
+- 固定位置：证据放在 `WEB_APP_PROOF_DIR` 下的 `evidence/` 子目录：`fixture.json`、`report.json`（逐步结果、请求、写请求、失败请求、存储键）、`dr1-dead-controls.json`（失效控件的真实调用记录）、`plugin-entry.json`（插件入口的请求头与 HTTP 状态）、各视口与各分区截图 PNG；某一步失败时另有 `failure-step-N.png`（失败现场截图），`report.json` 同时记下当时打开着的对话框文字；CI 作为 `web-app-real-chain-proof` 产物保留 7 天。合成媒体字节写在支持目录的 `media/` 下，只经本机媒体句柄读取。插件入口证明的最小测试扩展与浏览器配置写在系统临时目录（`linggan-entry-extension-*`、`linggan-entry-profile-*`），脚本结束时删除；它自起的记录服务器只监听 `127.0.0.1` 随机端口。
 - 不入 Git；不含凭据、真实作品或真实原文。截图是合成数据的界面证据，不代表真实数据量下的表现。
 - 再生：`WEB_APP_PROOF_DIR=<目录> ./scripts/test-web-app-postgres.sh`。容器、数据卷与支持目录由脚本 trap 删除；证据目录可手工删除。责任 Issue #433。
 

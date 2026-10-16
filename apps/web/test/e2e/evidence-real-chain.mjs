@@ -33,7 +33,17 @@ const step = async (name, run) => {
     await run();
     report.steps.push({ name, result: 'PASS' });
   } catch (error) {
-    report.steps.push({ name, result: 'FAIL', error: String(error?.stack ?? error) });
+    // 失败现场：截图＋当时打开着的对话框文字（合成数据），供本机与 CI 产物直接查看，不必重跑猜原因。
+    const failure = { name, result: 'FAIL', error: String(error?.stack ?? error) };
+    try {
+      await page.screenshot({ path: path.join(directory, `failure-step-${report.steps.length + 1}.png`) });
+      failure.openDialogs = await page.evaluate(() =>
+        [...document.querySelectorAll('dialog[open], [role="dialog"]')].map(node => (node.textContent ?? '').replace(/\s+/g, ' ').slice(0, 800)),
+      );
+    } catch {
+      // 页面已经关闭时只记录错误本身。
+    }
+    report.steps.push(failure);
     throw error;
   }
 };
