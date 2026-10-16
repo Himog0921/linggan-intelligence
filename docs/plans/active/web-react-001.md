@@ -1,7 +1,7 @@
 # WEB-REACT-001 · 网页前端全站统一为 React（合并 UI 改版专项）
 
 > 状态: 活跃计划
-> 最后核对: 2026-10-15
+> 最后核对: 2026-10-16
 > 适用范围: Intelligence 全部正式网页迁移到 React 的唯一实施计划，包括目标架构、不留双轨规则、阶段顺序与验收；合并 UIUX-CONTENT-WORKBENCH-001 的用户结果与推进安排。阶段 A+B 已随 PR #431 合并至 main@0a90fd4a；部署依据见 #430 上线回执；阶段 C 已由 Mog 2026-10-15 派定，D–H 未派定
 > 事实来源: Mog 2026-10-15 的决定（[Issue #430](https://github.com/Himog0921/linggan-intelligence/issues/430)、[DEC-0010](../../decisions/0010-web-frontend-react.md)）；Mog 提供的《Linggan Intelligence 全站 React 迁移架构与执行手册》（2026-10-15，基于 `main@473980cb`，未入库，有效内容已吸收进本文）；UIUX-CONTENT-WORKBENCH-001 计划（[Issue #425](https://github.com/Himog0921/linggan-intelligence/issues/425)，2026-10-15 工作树未提交版本）；`origin/main@473980cb` 代码只读核对
 > 冲突时以谁为准: Mog 最新确认、DEC-0010、AGENTS.md、真实代码与运行证据
@@ -333,7 +333,7 @@ Mog 在当前 Codex 对话明确要求“重新让 subagent 来修正，然后�
 | 事项 | 现状（2026-10-15） | 处理 |
 |---|---|---|
 | #425 内容工作台 | 原生前端已撤下并保存私有快照，V3 原型保留；后端与正式 React 工作台随阶段 C 交付 | 唯一实现为阶段 C；合并、迁移、真实模型与 Mog 验收分别留证 |
-| PR #384 创作者界面 | 开放，修改旧创作者页面 | Mog 决定：作为最后一次旧改动合入，或关闭并入阶段 D |
+| PR #384 创作者界面 | 已关闭（2026-10-15，未合并） | Mog 决定：界面部分作废，调查发现由 D1 落实（[分册](web-react-001-d-corpus.md) §3.1「#384 发现」）；后台修复拆为 PR #435（Draft，Refs #367） |
 | `codex/account-observation-bootstrap-002` | 未合并，改 5 个旧界面文件，最后提交 09-10 | 同上，由 Mog 决定 |
 | `codex/comment-research-reset-001` | 未合并，改 4 个旧界面文件，最后提交 09-10 | 同上 |
 | `codex/comment-study-p3-quality-gate-010`、`feat/comment-study-p3-vectors` | 未合并，各改 2 个旧界面文件，最后提交 09-20 | 同上 |

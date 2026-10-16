@@ -185,6 +185,63 @@ async fn legacy_settings_page_assets_are_retired_and_unknown_paths_stay_404() {
     assert!(body.contains("model_database_unavailable"));
 }
 
+/// 阶段 D1：创作者页迁到 React。登记路径返回前端入口；旧页面的样式、脚本已删除（不留双轨）；
+/// 接口仍由 Rust 精确提供，不被页面入口吞掉。
+#[tokio::test]
+async fn creators_page_is_a_registered_react_entry_and_its_native_assets_are_retired() {
+    let domain = "00000000-0000-4000-8000-000000000001";
+    let router = web(synthetic_dist(Some("284cd3a9"), true), "284cd3a9");
+    let (status, headers, body) = send(
+        router,
+        &format!("/corpus/creators?domain={domain}&page=1"),
+        "127.0.0.1:3000",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        headers[header::CONTENT_TYPE]
+            .to_str()
+            .unwrap()
+            .starts_with("text/html")
+    );
+    assert_eq!(headers[header::CACHE_CONTROL], "no-store");
+    assert!(body.contains("<div id=\"root\">"));
+
+    let foreign = web(synthetic_dist(None, true), "unknown");
+    let (status, _, _) = send(foreign, "/corpus/creators", "evil.example:3000").await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // 真实路由表里同样登记了该路径（没有构建产物时是 503 说明，而不是 404）。
+    let (status, _, _) = send(app(), "/corpus/creators", "127.0.0.1:3000").await;
+    assert!(matches!(
+        status,
+        StatusCode::OK | StatusCode::SERVICE_UNAVAILABLE
+    ));
+    for retired in [
+        "/assets/creators.css",
+        "/assets/creators.js",
+        "/corpus/creators/unknown",
+    ] {
+        let (status, _, _) = send(app(), retired, "127.0.0.1:3000").await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{retired}");
+    }
+    // 接口没有被页面入口吞掉：仍是接口自己的 JSON 回答。
+    let (status, headers, body) = send(
+        app(),
+        &format!("/api/local/creators?domain={domain}"),
+        "127.0.0.1:3000",
+    )
+    .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(
+        headers[header::CONTENT_TYPE]
+            .to_str()
+            .unwrap()
+            .starts_with("application/json")
+    );
+    assert!(body.contains("read_model_not_connected"));
+}
+
 #[tokio::test]
 async fn health_reports_the_frontend_build() {
     let (status, _, body) = send(app(), "/health", "127.0.0.1:3000").await;
@@ -196,7 +253,7 @@ async fn health_reports_the_frontend_build() {
     ));
     assert_eq!(
         health["webApp"]["pages"],
-        json!(["/settings/models", "/ops/creation"])
+        json!(["/settings/models", "/ops/creation", "/corpus/creators"])
     );
 }
 

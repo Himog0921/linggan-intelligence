@@ -1,4 +1,6 @@
-//! Corpus creator discovery composition. All reads remain free of provider/collection effects.
+//! Corpus creator discovery JSON API. All reads remain free of provider/collection effects.
+//!
+//! 页面已迁到 React 应用（`apps/web`，WEB-REACT-001 阶段 D1），由 `web_app.rs` 提供；这里只剩读写接口。
 use super::*;
 use axum::routing::put;
 use linggan_contracts::creator_discovery::CreatorScope;
@@ -9,9 +11,6 @@ use uuid::Uuid;
 
 pub(super) fn routes() -> Router<LocalWebState> {
     Router::new()
-        .route("/corpus/creators", get(page))
-        .route("/assets/creators.css", get(css))
-        .route("/assets/creators.js", get(js))
         .route("/api/local/creators", get(list))
         .route(
             "/api/local/creators/{key}/observation-target",
@@ -46,91 +45,6 @@ fn error(e: DiscoveryError) -> Response {
         ),
     };
     local_read_json_error(status, code)
-}
-#[derive(Deserialize)]
-struct PageQuery {
-    domain: Option<Uuid>,
-}
-async fn page(State(state): State<LocalWebState>, Query(q): Query<PageQuery>) -> Response {
-    let Some(db) = state.database.database() else {
-        return local_read_json_error(
-            axum::http::StatusCode::SERVICE_UNAVAILABLE,
-            "read_model_not_connected",
-        );
-    };
-    let domains = match linggan_evidence::observation_domain::read_observation_domains(db).await {
-        Ok(v) => v,
-        Err(_) => return error(DiscoveryError::Invalid("domain_read_unavailable")),
-    };
-    let selected = q
-        .domain
-        .and_then(|id| domains.iter().find(|d| d.domain_ref == id));
-    let picker = super::corpus_domain_picker(&domains, selected, "/corpus/creators", None);
-    let header = shell::global_header(
-        shell::PrimarySurface::Corpus,
-        "库内作品的作者",
-        &format!("语料 / {picker} / <b>创作者</b>"),
-        "<span id=\"creator-header-readout\" class=\"creator-header-readout\" aria-live=\"polite\">读取中…</span>",
-        None,
-    );
-    let nav = shell::corpus_side_nav(
-        shell::CorpusPage::Creators,
-        q.domain.map(|x| x.to_string()).as_deref(),
-        "作者来自当前领域已有作品",
-    );
-    let domain_value = selected.map(|d| d.domain_ref.to_string()).unwrap_or_default();
-    Html(page_markup(&header, &nav, &domain_value)).into_response()
-}
-fn page_markup(header: &str, nav: &str, domain_value: &str) -> String {
-    include_str!("creators.html")
-        .replace("{{HEADER}}", header)
-        .replace("{{SIDE_NAV}}", nav)
-        .replace("{{DOMAIN_VALUE}}", domain_value)
-}
-
-#[cfg(test)]
-mod page_tests {
-    use super::page_markup;
-
-    #[test]
-    fn creator_page_keeps_one_server_selected_domain_and_one_complete_pager() {
-        let domain = uuid::Uuid::new_v4().to_string();
-        let html = page_markup(
-            "<header id=\"creator-header-readout\"></header>",
-            "<nav></nav>",
-            &domain,
-        );
-        assert!(html.contains(&format!("name=\"domain\" value=\"{domain}\"")));
-        assert!(page_markup("", "", "").contains("name=\"domain\" value=\"\""));
-        assert!(!html.contains("<select name=\"domain\""));
-        assert_eq!(html.matches("data-page-nav").count(), 1);
-        for control in [
-            "data-page-prev",
-            "data-page-next",
-            "data-page-jump",
-            "id=\"page-size\"",
-        ] {
-            assert!(html.contains(control), "missing pager control: {control}");
-        }
-        assert!(html.contains("id=\"creator-results\""));
-    }
-}
-async fn css() -> impl IntoResponse {
-    (
-        [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
-        format!(
-            "{}\n{}\n{}",
-            super::LIDS_TOKENS,
-            super::SHELL_CSS,
-            include_str!("creators.css")
-        ),
-    )
-}
-async fn js() -> impl IntoResponse {
-    (
-        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-        include_str!("creators.js"),
-    )
 }
 async fn list(State(state): State<LocalWebState>, Query(q): Query<CreatorScope>) -> Response {
     let Some(db) = state.database.database() else {

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# WEB-REACT-001 阶段 B 真实链路证明：一次性隔离 PostgreSQL + 本机 Axum 路由 + 已构建的 React 前端
-# + 无界面浏览器。不连接开发库或本机常驻服务；只用合成模型凭据，模型连接指向本机回环端口，
-# 模型调用组件被指到不存在的路径，因此不会启动任何模型进程或外发请求。
+# WEB-REACT-001 真实链路证明：一次性隔离 PostgreSQL + 本机 Axum 路由 + 已构建的 React 前端
+# + 无界面浏览器。依次运行：阶段 B 的设置页证明；阶段 D1 的语料外壳接口读库证明与创作者页证明
+# （合成作者与作品，真实写入只落在隔离库）。不连接开发库或本机常驻服务；只用合成模型凭据，
+# 模型连接指向本机回环端口，模型调用组件被指到不存在的路径，因此不会启动任何模型进程或外发请求。
 set -euo pipefail
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$project_root"
@@ -81,16 +82,34 @@ fi
 proof_port="$(docker inspect --format '{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostPort}}' "$proof_container")"
 mkdir -p "$proof_dir"
 
-LOCAL_001_PROOF_DATABASE_URL="postgresql://${proof_user}:${proof_password}@127.0.0.1:${proof_port}/${proof_database}" \
-WEB_APP_BROWSER_PROOF=1 \
-WEB_APP_PROOF_DIR="$proof_dir" \
-WEB_APP_PROOF_NODE="$node_bin" \
-LINGGAN_WEB_DIST="$project_root/apps/web/dist" \
-LINGGAN_MODEL_SYNTHETIC_PREVIEW=SYNTHETIC-NOT-EVIDENCE \
-LINGGAN_SUPPORT_DIR="$support_dir" \
-LINGGAN_PI_NODE="$support_dir/no-model-process" \
-RUST_TEST_THREADS=1 \
+# 在隔离库上运行一个被忽略的证明测试。第一个参数是证据目录，其余是 cargo 的参数。
+run_proof() {
+  local evidence_dir="$1"
+  shift
+  env \
+    LOCAL_001_PROOF_DATABASE_URL="postgresql://${proof_user}:${proof_password}@127.0.0.1:${proof_port}/${proof_database}" \
+    WEB_APP_BROWSER_PROOF=1 \
+    WEB_APP_PROOF_DIR="$evidence_dir" \
+    WEB_APP_PROOF_NODE="$node_bin" \
+    LINGGAN_WEB_DIST="$project_root/apps/web/dist" \
+    LINGGAN_MODEL_SYNTHETIC_PREVIEW=SYNTHETIC-NOT-EVIDENCE \
+    LINGGAN_SUPPORT_DIR="$support_dir" \
+    LINGGAN_PI_NODE="$support_dir/no-model-process" \
+    RUST_TEST_THREADS=1 \
+    "$@"
+}
+
+# 阶段 B：设置页。
+run_proof "$proof_dir" \
   cargo test -p linggan-api --bins --locked \
   local_web::web_app_tests::settings_page_real_chain_browser_proof \
   -- --ignored --nocapture --test-threads=1
 printf '%s\n' 'WEB-REACT-001 settings page real-chain proof passed (isolated database; synthetic credential only)'
+
+# 阶段 D1：语料外壳接口读真实库 + 创作者页（证据放在 creators/ 子目录）。
+mkdir -p "$proof_dir/creators"
+run_proof "$proof_dir/creators" \
+  cargo test -p linggan-api --bins --locked \
+  local_web::creators_browser_tests \
+  -- --ignored --nocapture --test-threads=1
+printf '%s\n' 'WEB-REACT-001 D1 corpus shell API and creators page real-chain proofs passed (isolated database; synthetic data only)'

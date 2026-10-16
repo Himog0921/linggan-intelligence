@@ -13,10 +13,13 @@ mod collection_targets_view;
 mod collection_task_actions;
 mod collection_tasks_view;
 mod comment_study;
+mod corpus_shell_api;
 mod creator_lifecycle_api;
 #[cfg(test)]
 mod creator_lifecycle_tests;
 mod creators;
+#[cfg(test)]
+mod creators_browser_tests;
 #[cfg(test)]
 mod evidence_page;
 #[cfg(test)]
@@ -357,6 +360,7 @@ fn router(state: LocalWebState) -> Router {
         .merge(collection_run_api::routes())
         .merge(collection_domain_modal::routes())
         .merge(creators::routes())
+        .merge(corpus_shell_api::routes())
         .merge(topic_workspace::routes())
         .merge(topic_map::routes(state.database.database().cloned()))
         .merge(comment_study::routes())
