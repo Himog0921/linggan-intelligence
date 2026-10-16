@@ -3,7 +3,7 @@
  * 与旧页 `evidence_library.js` 同一套判断（有意改动在行内标明），页面不重算任何业务结论。
  */
 import { humanMoment } from '../../../shared/formatting';
-import type { Engagement, Fragment, LaneSummary, ListMedia, Metric, WorkDisplay, WorkItem } from './evidenceTypes';
+import type { CurrentMetric, DetailField, Engagement, Fragment, LaneSummary, ListMedia, Metric, Receipt, TimelinePoint, WorkDisplay, WorkItem } from './evidenceTypes';
 
 export type Tone = 'info' | 'success' | 'warning' | 'danger' | 'unknown';
 
@@ -395,4 +395,79 @@ export function quoteParts(fragment: Pick<Fragment, 'text' | 'matchOffset' | 'ma
     match: characters.slice(offset, offset + length).join(''),
     after: characters.slice(offset + length).join(''),
   };
+}
+
+// ───────────────────────── 检查器事实 ─────────────────────────
+
+export type FactRowData = readonly [label: string, value: string | number, code?: string | null];
+
+/**
+ * 互动当前值与变化：状态已知且有当前值才写数字；没有前值写「无可比较前值」，变化未知写「变化未知」——
+ * 不把缺失写成 0，也不自己算差。
+ */
+export function currentMetricRow(label: string, metric: CurrentMetric | null): FactRowData {
+  if (metric === null || metric.state !== 'KNOWN' || metric.value === null) return [label, '当前未知', 'UNKNOWN'];
+  const when = metric.observedAt ? `（${momentText(metric.observedAt)}）` : '';
+  const previous = metric.previous !== null ? `；前值 ${formatNumber(metric.previous)}` : '；无可比较前值';
+  const delta = metric.deltaState === 'KNOWN' && metric.delta !== null ? `；变化 ${metric.delta > 0 ? '+' : ''}${formatNumber(metric.delta)}` : '；变化未知';
+  return [label, `${formatNumber(metric.value)}${when}${previous}${delta}`, 'KNOWN'];
+}
+
+/**
+ * 详情字段的来源事实：状态、值与来源引用。正文已在阅读区完整给出，这里只写字数与来源，不再把整段正文
+ * 塞进一行事实里。
+ */
+export function detailFieldRow(label: string, field: DetailField | null, kind: 'text' | 'body' = 'text'): FactRowData {
+  if (field === null || field.state === 'UNKNOWN') return [label, '当前未知', 'UNKNOWN'];
+  const source = field.sourceRef ?? '来源引用未返回';
+  if (field.state === 'SOURCE_TEXT_ONLY') return [label, `仅有来源文本：${field.sourceText ?? '当前未知'}；${source}`, field.state];
+  const value = kind === 'body' ? `已知（${Array.from(field.value ?? '').length} 字符）` : (field.value ?? '已知');
+  return [label, `${value}；${source}`, field.state];
+}
+
+/** 互动时间线某个时点的数字行：只列已知的，写「赞／评／藏／转」。 */
+export function timelineCopy(point: TimelinePoint): string {
+  const parts = ([['赞', point.like], ['评', point.comment], ['藏', point.collect], ['转', point.share]] as const)
+    .filter(([, metric]) => metric.state === 'KNOWN' && metric.value !== null)
+    .map(([label, metric]) => `${label} ${formatNumber(metric.value ?? 0)}`);
+  return parts.length > 0 ? parts.join(' · ') : '本时点互动字段均为当前未知';
+}
+
+export interface TimelineRun {
+  copy: string;
+  lane: string;
+  first: string;
+  last: string;
+  count: number;
+}
+
+/**
+ * 这是变化的时间线，所以连续读起来完全相同的观察是同一个事实被观察了几次，而不是几个事实。每一段保留首末两个观察时间，
+ * 没有一次观察被丢掉。
+ */
+export function timelineRuns(points: readonly TimelinePoint[]): TimelineRun[] {
+  const runs: TimelineRun[] = [];
+  for (const point of points) {
+    const copy = timelineCopy(point);
+    const lane = (point.sourceLane ?? 'source').toUpperCase();
+    const observed = momentText(point.observedAt, '观察时间当前未知');
+    const previous = runs[runs.length - 1];
+    if (previous && previous.copy === copy && previous.lane === lane) {
+      previous.last = observed;
+      previous.count += 1;
+    } else {
+      runs.push({ copy, lane, first: observed, last: observed, count: 1 });
+    }
+  }
+  return runs;
+}
+
+/** 通道回执的三行：总数、本次返回、是否截断。 */
+export function receiptRows(receipt: Receipt | null): FactRowData[] {
+  const number = (value: number | null) => (value === null ? '当前未知' : value);
+  return [
+    ['总数', number(receipt?.total ?? null), receipt?.total === null || receipt === null ? 'UNKNOWN' : null],
+    ['本次返回', number(receipt?.returned ?? null), receipt?.returned === null || receipt === null ? 'UNKNOWN' : null],
+    ['是否截断', receipt?.truncated === true ? '是，可继续读取' : receipt?.truncated === false ? '否' : '当前未知'],
+  ];
 }

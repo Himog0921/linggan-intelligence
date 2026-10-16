@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import type { Feedback } from './evidenceFeedback';
-import { stateMeta } from './evidencePresent';
+import { stateMeta, type FactRowData } from './evidencePresent';
 import styles from './Primitives.module.css';
 
 /** 状态线：圆点＋中文状态词。原始状态码只放在 `data-state`，不进普通层的文字（F06）。 */
@@ -21,7 +21,7 @@ export function Tech({ children }: { children: ReactNode }) {
   return <code className={styles.tech}>{children}</code>;
 }
 
-export type FactRow = readonly [label: string, value: string | number, code?: string | null];
+export type FactRow = FactRowData;
 
 const UNKNOWN_COLLAPSE_THRESHOLD = 3;
 
