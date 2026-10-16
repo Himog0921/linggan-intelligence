@@ -6,13 +6,23 @@ interface View {
   pan: Pan;
 }
 
+const FIT: View = { zoom: ZOOM_MIN, pan: { x: 0, y: 0 } };
+
 /**
  * 查看器的缩放与平移：按钮、键盘、滚轮（以指针为锚）、双击、拖动。几何算法在 zoomMath（纯函数，有测试）。
  * 框和图片的 ref 由调用方持有并传入：这样返回值里只有状态与处理函数，渲染期间读它不算读 ref。
+ * `resetKey` 一变（换了一张图）就回到「适合」：在渲染期间重置状态，而不是靠重建整个查看器——重建会把
+ * 键盘用户刚按下的「下一张」按钮换成新节点，焦点就丢了。
  */
-export function useZoomPan(frame: RefObject<HTMLDivElement | null>, image: RefObject<HTMLImageElement | null>) {
-  const [view, setView] = useState<View>({ zoom: ZOOM_MIN, pan: { x: 0, y: 0 } });
+export function useZoomPan(frame: RefObject<HTMLDivElement | null>, image: RefObject<HTMLImageElement | null>, resetKey: string | number) {
+  const [view, setView] = useState<View>(FIT);
   const [grabbing, setGrabbing] = useState(false);
+  const [seenKey, setSeenKey] = useState(resetKey);
+  if (seenKey !== resetKey) {
+    setSeenKey(resetKey);
+    setView(FIT);
+    setGrabbing(false);
+  }
   const drag = useRef<{ origin: Pan } | null>(null);
 
   function apply(zoom: number, pan: Pan) {

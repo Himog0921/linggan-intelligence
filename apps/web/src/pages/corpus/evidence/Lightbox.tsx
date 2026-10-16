@@ -19,22 +19,12 @@ function caption(object: ViewerObject): string {
     : `这个对象没有可内联的本地副本：${stateMeta(object.bytesState)[0]}`;
 }
 
-function Viewer({ object, total, onIndex, onClose }: { object: ViewerObject; total: number; onIndex: (index: number) => void; onClose: () => void }) {
-  const titleId = useId();
+function Viewer({ object, total, titleId, onIndex, onClose }: { object: ViewerObject; total: number; titleId: string; onIndex: (index: number) => void; onClose: () => void }) {
   const frame = useRef<HTMLDivElement>(null);
   const image = useRef<HTMLImageElement>(null);
-  const zoom = useZoomPan(frame, image);
+  const zoom = useZoomPan(frame, image, object.index);
   const previous = object.index > 0 && total > 1;
   const next = object.index < total - 1;
-
-  // 打开期间页面不滚动。
-  useEffect(() => {
-    const before = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = before;
-    };
-  }, []);
 
   function onKeyDown(event: KeyboardEvent) {
     const actions: Record<string, () => void> = {
@@ -54,67 +44,79 @@ function Viewer({ object, total, onIndex, onClose }: { object: ViewerObject; tot
 
   const subtitle = `${object.objectRef ? `MED-${object.objectRef.slice(0, 8).toUpperCase()} · ` : '本地对象编号未表达 · '}采集序号 ${object.ordinal} · 平台排列顺序未经验证`;
   return (
-    <ModalDialog labelledBy={titleId} className={styles.lightbox} onClose={onClose}>
-      <div className={styles.viewer} onKeyDown={onKeyDown}>
-        <header className={styles.head}>
-          <div>
-            <strong id={titleId}>{`${purposeLabel(object.purpose)} · 第 ${positionText(object.index, total).replace(' / ', ' / ')} 个`}</strong>
-            <span className={styles.subtitle}>{subtitle}</span>
-          </div>
-          <div className={styles.tools}>
-            <div className={styles.zoom} role="group" aria-label="缩放">
-              <button type="button" aria-label="缩小" disabled={!zoom.canZoomOut} onClick={zoom.zoomOut}>
-                <span aria-hidden="true">−</span>
-              </button>
-              <button type="button" className={styles.zoomValue} onClick={zoom.reset}>
-                {`${Math.round(zoom.zoom * 100)}%`}
-              </button>
-              <button type="button" aria-label="放大" disabled={!zoom.canZoomIn} onClick={zoom.zoomIn}>
-                <span aria-hidden="true">+</span>
-              </button>
-            </div>
-            <button type="button" className={styles.close} aria-label="关闭查看器" onClick={onClose}>
-              <span aria-hidden="true">×</span>
+    <div className={styles.viewer} onKeyDown={onKeyDown}>
+      <header className={styles.head}>
+        <div>
+          <strong id={titleId}>{`${purposeLabel(object.purpose)} · 第 ${positionText(object.index, total).replace(' / ', ' / ')} 个`}</strong>
+          <span className={styles.subtitle}>{subtitle}</span>
+        </div>
+        <div className={styles.tools}>
+          <div className={styles.zoom} role="group" aria-label="缩放">
+            <button type="button" aria-label="缩小" disabled={!zoom.canZoomOut} onClick={zoom.zoomOut}>
+              <span aria-hidden="true">−</span>
+            </button>
+            <button type="button" className={styles.zoomValue} onClick={zoom.reset}>
+              {`${Math.round(zoom.zoom * 100)}%`}
+            </button>
+            <button type="button" aria-label="放大" disabled={!zoom.canZoomIn} onClick={zoom.zoomIn}>
+              <span aria-hidden="true">+</span>
             </button>
           </div>
-        </header>
-        <div className={styles.stage} onClick={event => event.target === event.currentTarget && onClose()}>
-          <button type="button" className={styles.step} aria-label="上一张" disabled={!previous} onClick={() => onIndex(object.index - 1)}>
-            <span aria-hidden="true">←</span>
-          </button>
-          <figure className={styles.figure}>
-            <div
-              ref={frame}
-              className={styles.frame}
-              data-zoomed={zoom.zoom > 1}
-              data-grabbing={zoom.grabbing}
-              onDoubleClick={zoom.onDoubleClick}
-              onPointerDown={zoom.onPointerDown}
-              onPointerMove={zoom.onPointerMove}
-              onPointerUp={zoom.onPointerEnd}
-              onPointerCancel={zoom.onPointerEnd}
-            >
-              {object.assetUrl ? (
-                <img ref={image} src={object.assetUrl} alt={`${purposeLabel(object.purpose)} 原尺寸本地副本`} style={{ transform: `translate(${zoom.pan.x}px, ${zoom.pan.y}px) scale(${zoom.zoom})` }} />
-              ) : null}
-            </div>
-            <figcaption>{caption(object)}</figcaption>
-          </figure>
-          <button type="button" className={styles.step} aria-label="下一张" disabled={!next} onClick={() => onIndex(object.index + 1)}>
-            <span aria-hidden="true">→</span>
+          <button type="button" className={styles.close} aria-label="关闭查看器" onClick={onClose}>
+            <span aria-hidden="true">×</span>
           </button>
         </div>
+      </header>
+      <div className={styles.stage} onClick={event => event.target === event.currentTarget && onClose()}>
+        <button type="button" className={styles.step} aria-label="上一张" disabled={!previous} onClick={() => onIndex(object.index - 1)}>
+          <span aria-hidden="true">←</span>
+        </button>
+        <figure className={styles.figure}>
+          <div
+            ref={frame}
+            className={styles.frame}
+            data-zoomed={zoom.zoom > 1}
+            data-grabbing={zoom.grabbing}
+            onDoubleClick={zoom.onDoubleClick}
+            onPointerDown={zoom.onPointerDown}
+            onPointerMove={zoom.onPointerMove}
+            onPointerUp={zoom.onPointerEnd}
+            onPointerCancel={zoom.onPointerEnd}
+          >
+            {object.assetUrl ? (
+              <img key={object.index} ref={image} src={object.assetUrl} alt={`${purposeLabel(object.purpose)} 原尺寸本地副本`} style={{ transform: `translate(${zoom.pan.x}px, ${zoom.pan.y}px) scale(${zoom.zoom})` }} />
+            ) : null}
+          </div>
+          <figcaption>{caption(object)}</figcaption>
+        </figure>
+        <button type="button" className={styles.step} aria-label="下一张" disabled={!next} onClick={() => onIndex(object.index + 1)}>
+          <span aria-hidden="true">→</span>
+        </button>
       </div>
-    </ModalDialog>
+    </div>
   );
 }
 
 /**
  * 原尺寸查看器：模态原生 `<dialog>`，Tab 只在它自己的控件间循环，Esc 关闭，关闭后焦点回到打开它的卡片。
- * 图片 `contain` 不裁切；缩放 1×–6×，平移被夹在溢出范围内。换一张图就重建内部状态（缩放归位）。
+ * 图片 `contain` 不裁切；缩放 1×–6×，平移被夹在溢出范围内。换一张图缩放归位，但对话框与按钮是同一批节点——
+ * 键盘用户按下「下一张」之后焦点仍在那个按钮上，最后关闭时才能回到打开它的卡片。
  */
 export function Lightbox({ objects, index, onIndex, onClose }: LightboxProps) {
+  const titleId = useId();
   const object = objects[Math.min(objects.length - 1, Math.max(0, index))];
+  // 打开期间页面不滚动。
+  useEffect(() => {
+    const before = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = before;
+    };
+  }, []);
   if (!object) return null;
-  return <Viewer key={object.index} object={object} total={objects.length} onIndex={onIndex} onClose={onClose} />;
+  return (
+    <ModalDialog labelledBy={titleId} className={styles.lightbox} onClose={onClose}>
+      <Viewer object={object} total={objects.length} titleId={titleId} onIndex={onIndex} onClose={onClose} />
+    </ModalDialog>
+  );
 }

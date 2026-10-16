@@ -292,3 +292,24 @@
     padding-left: 0;
   }
 }
+
+/* 封面排版的栅格：与旧页同一个算法——列宽不小于 248px，自适应列数；窄屏两列，更窄一列。
+ * 列表容器本身不带内边距：卡片贴着结果区的边，行间距靠 row-gap。 */
+.list[data-layout='cover'] .items {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(calc(var(--lgi-space-24) * 2 + var(--lgi-space-12) + var(--lgi-space-2)), 1fr));
+  column-gap: var(--lgi-space-2);
+  row-gap: var(--lgi-space-8);
+}
+
+@media (max-width: 640px) {
+  .list[data-layout='cover'] .items {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 420px) {
+  .list[data-layout='cover'] .items {
+    grid-template-columns: 1fr;
+  }
+}

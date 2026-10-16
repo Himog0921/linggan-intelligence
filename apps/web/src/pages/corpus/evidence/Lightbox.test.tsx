@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
+import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { parseWorkDetail } from './evidenceDecode';
 import { detailJson, mediaHandle, slotJson, workRef } from './evidenceFixtures';
@@ -94,6 +95,36 @@ describe('原尺寸查看器', () => {
     expect(zoomText()).toBe('150%');
     rerender(<Lightbox objects={list} index={1} onIndex={onIndex} onClose={onClose} />);
     expect(zoomText()).toBe('100%');
+  });
+
+  it('换图之后焦点仍在刚按下的按钮上，且对话框是同一个节点；最后关闭时焦点回到打开它的卡片', () => {
+    const list = objects();
+    function Host() {
+      const [index, setIndex] = useState(0);
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>
+            打开查看器
+          </button>
+          {open ? <Lightbox objects={list} index={index} onIndex={setIndex} onClose={() => setOpen(false)} /> : null}
+        </>
+      );
+    }
+    render(<Host />);
+    const opener = screen.getByRole('button', { name: '打开查看器' });
+    opener.focus();
+    fireEvent.click(opener);
+    const dialog = screen.getByRole('dialog');
+    const next = screen.getByRole('button', { name: '下一张' });
+    next.focus();
+    fireEvent.click(next);
+    expect(screen.getByRole('dialog', { name: /第 02 \/ 03 个/ })).toBe(dialog);
+    expect(screen.getByRole('button', { name: '下一张' })).toBe(next);
+    expect(next).toHaveFocus();
+    fireEvent.click(screen.getByRole('button', { name: '关闭查看器' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(opener).toHaveFocus();
   });
 
   it('关闭：Esc（对话框取消事件）、关闭按钮、点舞台空白；点图片本身不关闭', () => {
