@@ -70,7 +70,8 @@ try {
   await page.getByRole('heading', { level: 1, name: '证据库' }).waitFor();
   result.title = await page.title();
   result.rendered = true;
-  result.dialog = await page.getByRole('dialog', { name: '选择研究领域' }).isVisible();
+  // 对话框在外壳接口回来之后才打开：等它出现，不在渲染前抢先判定。
+  result.dialog = await page.getByRole('dialog', { name: '选择研究领域' }).waitFor({ state: 'visible', timeout: 10_000 }).then(() => true, () => false);
   await page.screenshot({ path: path.join(directory, 'evidence-plugin-entry.png') });
   await writeFile(path.join(directory, 'plugin-entry.json'), JSON.stringify(result, null, 2));
   assert.equal(result.status, 200, `插件入口被拒绝：HTTP ${result.status}`);

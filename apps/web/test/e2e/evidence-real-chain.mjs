@@ -346,7 +346,11 @@ try {
     const text = await evidence.innerText();
     assert.doesNotMatch(text, /reader-\d|replier-\d/);
     assert.ok(text.includes('匿名评论'));
-    assert.ok(text.includes('合成评论 0'));
+    // 评论与回复按稳定来源编号排序（orderBasis: stable_source_ref_not_platform_order），编号每次播种都不同，
+    // 所以不断言哪一条在前两页；断言两页恰好是 40 条不同的评论或回复正文：续读不重复、不遗漏。
+    const shown = [...text.matchAll(/合成(评论|回复) (\d+)：/g)].map(match => `${match[1]}${match[2]}`);
+    assert.equal(shown.length, 40, '两页共 40 条评论或回复正文');
+    assert.equal(new Set(shown).size, 40, '续读没有重复的条目');
     await shot('evidence-1440-comments');
   });
 
