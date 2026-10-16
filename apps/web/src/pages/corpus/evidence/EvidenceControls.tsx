@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import {
   LANES,
   LANE_STATES,
@@ -24,6 +24,10 @@ interface EvidenceControlsProps {
   /** 提交检索（Enter 或「读取材料」）：条件没变也要重新读取，所以交给页面处理。 */
   onSubmit: (text: string) => void;
   onClearFilters: () => void;
+  /** 查询区顶部的返回横幅。 */
+  banners?: ReactNode;
+  /** 查询区底部的勾选与批量动作。 */
+  children?: ReactNode;
 }
 
 const NO_DOMAIN = '请先选择研究领域，再读取统一作品材料。';
@@ -41,7 +45,7 @@ const FILTERS: readonly { name: FilterName; label: string; allLabel: string; opt
  * 只检索本机已接纳的材料，不触发平台搜索。下拉是原生 `<select>`：键盘与读屏由浏览器承担，变更即重新读取。
  * 浮层一次只开一个：Esc 或点击外部关闭，关闭后焦点回到筛选按钮。
  */
-export function EvidenceControls({ query, hasDomain, onChange, onSubmit, onClearFilters }: EvidenceControlsProps) {
+export function EvidenceControls({ query, hasDomain, onChange, onSubmit, onClearFilters, banners, children }: EvidenceControlsProps) {
   const panelId = useId();
   const [text, setText] = useState(query.q);
   const [seen, setSeen] = useState(query.q);
@@ -74,6 +78,7 @@ export function EvidenceControls({ query, hasDomain, onChange, onSubmit, onClear
   const count = activeFilterCount(query);
   return (
     <section aria-label="材料检索与筛选" className={styles.deck}>
+      {banners}
       <form className={styles.form} onSubmit={submit}>
         <div className={styles.find}>
           <span className={styles.findMark} aria-hidden="true">
@@ -177,6 +182,7 @@ export function EvidenceControls({ query, hasDomain, onChange, onSubmit, onClear
           ))}
         </div>
       </div>
+      {children}
     </section>
   );
 }

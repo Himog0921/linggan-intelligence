@@ -16,25 +16,27 @@
   font: var(--lgi-text-body) / var(--lgi-lh-body) var(--lgi-font-sans);
 }
 
-.page :is(button, input, select) {
+/* 页面级的原生控件基线。全部写在 :where() 里，特异性几乎为零：各部件自己的模块里任何一个单类规则都能盖过它，
+ * 不依赖样式表的先后顺序（jsdom 不算层叠，所以这一点要靠静止态截图核对）。 */
+:where(.page) :is(button, input, select) {
   box-sizing: border-box;
   border-radius: var(--lgi-radius-none);
   color: inherit;
   font: inherit;
 }
 
-.page :is(button, select) {
+:where(.page) :is(button, select) {
   cursor: pointer;
 }
 
-.page :is(input:not([type='checkbox']), select) {
+:where(.page) :where(input:not([type='checkbox']), select) {
   min-width: 0;
   border: 1px solid var(--lgi-border-strong);
   padding: var(--lgi-space-2) var(--lgi-space-3);
   background: var(--lgi-canvas);
 }
 
-.page button {
+:where(.page) :where(button) {
   min-height: calc(var(--lgi-space-10) + var(--lgi-space-1));
   border: 1px solid var(--lgi-ink);
   padding: 0 var(--lgi-space-4);
@@ -42,49 +44,49 @@
   font: var(--lgi-weight-semibold) var(--lgi-text-data) / 1 var(--lgi-font-sans);
 }
 
-.page button:hover:not(:disabled) {
+:where(.page) :where(button):hover:not(:disabled) {
   background: var(--lgi-canvas-low);
 }
 
-.page button:disabled {
+:where(.page) :where(button):disabled {
   background: var(--lgi-canvas-low);
   color: var(--lgi-ghost);
   cursor: not-allowed;
 }
 
-.page a {
+:where(.page) :where(a) {
   color: var(--lgi-focus);
   text-decoration: none;
 }
 
-.page a:hover {
+:where(.page) :where(a):hover {
   text-decoration: underline;
 }
 
-.page :focus-visible {
+:where(.page) :focus-visible {
   outline: 2px solid var(--lgi-focus);
   outline-offset: 2px;
 }
 
-/* 一个界面一个实心墨色动作；悬停改色，不上浮。写成 .page .primary 是为了压过 .page button（jsdom 不算层叠）。 */
-.page .primary {
+/* 一个界面一个实心墨色动作；悬停改色，不上浮。 */
+.primary {
   border: 2px solid var(--lgi-ink);
   background: var(--lgi-ink);
   color: var(--lgi-on-dark);
 }
 
-.page .primary:hover:not(:disabled) {
+.primary:hover:not(:disabled) {
   border-color: var(--lgi-signal-ink);
   background: var(--lgi-signal-ink);
 }
 
-.page .primary:disabled {
+.primary:disabled {
   border-color: var(--lgi-border-strong);
   background: var(--lgi-canvas-low);
   color: var(--lgi-ghost);
 }
 
-.page .textButton {
+.textButton {
   min-height: 0;
   border: 0;
   padding: var(--lgi-space-1) 0;
@@ -94,9 +96,16 @@
   white-space: nowrap;
 }
 
-.page .textButton:hover:not(:disabled) {
+.textButton:hover:not(:disabled) {
   background: transparent;
   color: var(--lgi-signal-ink);
+}
+
+/* 页头右侧读数：读取时间，不放数字之外的状态。 */
+.readout {
+  color: var(--lgi-muted);
+  font: var(--lgi-text-data) / var(--lgi-lh-data) var(--lgi-font-sans);
+  white-space: nowrap;
 }
 
 /* ── 查询区 ─────────────────────────────────── */
@@ -107,12 +116,11 @@
 }
 
 .banner {
-  margin: 0;
-  padding: var(--lgi-space-3) var(--lgi-space-5) 0;
+  margin: 0 0 var(--lgi-space-2);
   font-size: var(--lgi-text-data);
 }
 
-.page .banner a {
+.banner a {
   color: var(--lgi-ink);
   text-decoration: underline;
   text-underline-offset: var(--lgi-space-1);

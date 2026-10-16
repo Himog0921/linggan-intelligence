@@ -93,13 +93,13 @@
   color: var(--lgi-on-dark);
 }
 
-.deck .filterToggle[aria-expanded='true'] {
+.filterToggle[aria-expanded='true'] {
   border-color: var(--lgi-ink);
   background: var(--lgi-ink);
   color: var(--lgi-on-dark);
 }
 
-.deck .filterToggle[aria-expanded='true'] b {
+.filterToggle[aria-expanded='true'] b {
   background: var(--lgi-canvas);
   color: var(--lgi-ink);
 }
