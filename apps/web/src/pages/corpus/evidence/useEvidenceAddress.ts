@@ -35,25 +35,20 @@ export function useEvidenceAddress() {
 }
 
 /**
- * 抽屉（≤1180px）里展开的是哪一件作品；`null` 为收起。
+ * 抽屉（≤1180px）里展开的是哪一件作品；`null` 为收起。抽屉是否可见＝它记着的作品正是当前选中的那一件
+ * （选中要等领域和列表读到之后才有，所以直达链接先「记着」，读到之后自然展开）。
  *
- * 只有两类动作展开它：用户点选一行；从地址还原一个作品（首次进入、直达链接选好领域之后、后退前进）。
- * 列表加载后自动选中第一项不展开——否则手机上一打开页面就被抽屉盖住列表。
+ * 只有两类动作展开它：用户点选一行；从地址还原一个作品（首次进入、后退前进）。列表加载后自动选中第一项
+ * 不展开——否则手机上一打开页面就被抽屉盖住列表。
  */
-export function useDrawerWork(domain: string | null, workInAddress: string | null) {
+export function useDrawerWork(workInAddress: string | null) {
   const location = useLocation();
   const navigationType = useNavigationType();
   const [work, setWork] = useState<string | null>(null);
   const [seenLocation, setSeenLocation] = useState<string | null>(null);
-  const [seenDomain, setSeenDomain] = useState<string | null>(null);
   if (seenLocation !== location.key) {
     setSeenLocation(location.key);
     if (navigationType === 'POP' && workInAddress !== null) setWork(workInAddress);
-  }
-  // 地址直达一个作品、领域是读到外壳之后才确定的：领域一确定就还原它（旧页由服务器一次渲染好，没有这个间隙）。
-  if (seenDomain !== domain) {
-    setSeenDomain(domain);
-    if (domain !== null && workInAddress !== null) setWork(workInAddress);
   }
   return [work, setWork] as const;
 }

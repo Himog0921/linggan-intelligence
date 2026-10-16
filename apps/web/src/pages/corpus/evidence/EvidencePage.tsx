@@ -54,7 +54,7 @@ export function EvidencePage() {
 
   // ── 检查器：桌面是一栏（可关、三档宽度），≤1180px 是盖在列表上的抽屉 ───────────────────
   const drawer = useMediaQuery(DRAWER_QUERY);
-  const [drawerWork, setDrawerWork] = useDrawerWork(domain, query.work);
+  const [drawerWork, setDrawerWork] = useDrawerWork(query.work);
   const drawerOpen = drawerWork !== null && drawerWork === selected;
   const [preferred, rememberWidth] = usePanelWidthPreference();
   const width: PanelWidth = query.panel !== null && query.panel !== 'closed' ? query.panel : preferred;

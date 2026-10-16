@@ -1,0 +1,334 @@
+import { act, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { BATCH_KEY } from './batchStore';
+import { DOMAIN, OTHER_DOMAIN, dossierJson, shellJson, workRef } from './evidenceFixtures';
+import { assignLocation } from './navigation';
+import { LIST_PATH, detailPathOf, pageRoutes, pageUrl, renderEvidencePage, stubViewport } from './pageKit';
+import { createFetchMock, ok, type FetchKit } from './testKit';
+
+vi.mock('./navigation', () => ({ assignLocation: vi.fn() }));
+
+let kit: FetchKit;
+beforeEach(() => {
+  kit = createFetchMock();
+  kit.install();
+  sessionStorage.clear();
+  localStorage.clear();
+  stubViewport();
+});
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+const aside = () => screen.getByRole('complementary', { name: /^(合成作品 \d+|请选择)/ });
+const rowButton = (n: number) => screen.getByRole('button', { name: `合成作品 ${n}` });
+const selectionKey = `collection-selected:${DOMAIN}`;
+const bench = () => document.querySelector<HTMLElement>('[data-inspector]')!;
+
+async function opened(url?: string) {
+  const view = renderEvidencePage(url);
+  await screen.findByRole('button', { name: '合成作品 1' });
+  await waitFor(() => expect(view.location()).toContain('work='));
+  return view;
+}
+
+describe('勾选与批量动作', () => {
+  it('「勾选本页」勾选已读到的全部作品，只存稳定引用；重新打开页面仍在（F06）', async () => {
+    pageRoutes(kit);
+    const view = await opened();
+    await view.user.click(screen.getByRole('button', { name: '勾选本页' }));
+    expect(screen.getByText('已勾选 3 篇作品')).toBeInTheDocument();
+    expect(JSON.parse(sessionStorage.getItem(selectionKey) ?? 'null')).toEqual([workRef(1), workRef(2), workRef(3)]);
+    expect(screen.getAllByRole('checkbox', { name: '勾选作品用于批量操作' }).every(box => (box as HTMLInputElement).checked)).toBe(true);
+
+    view.unmount();
+    pageRoutes(kit);
+    renderEvidencePage();
+    await screen.findByRole('button', { name: '合成作品 1' });
+    expect(screen.getByText('已勾选 3 篇作品')).toBeInTheDocument();
+  });
+
+  it('取消勾选同步到存储；不同领域是另一份集合', async () => {
+    pageRoutes(kit);
+    const view = await opened();
+    const boxes = screen.getAllByRole('checkbox', { name: '勾选作品用于批量操作' });
+    await view.user.click(boxes[0]!);
+    await view.user.click(boxes[1]!);
+    await view.user.click(boxes[0]!);
+    expect(JSON.parse(sessionStorage.getItem(selectionKey) ?? 'null')).toEqual([workRef(2)]);
+
+    view.unmount();
+    pageRoutes(kit, { shell: ok(shellJson({ selectedDomain: OTHER_DOMAIN })) });
+    renderEvidencePage(pageUrl(`domain=${OTHER_DOMAIN}`));
+    await screen.findByRole('button', { name: '合成作品 1' });
+    expect(screen.getByText('已勾选 0 篇作品')).toBeInTheDocument();
+  });
+
+  it('「评论深采」把集合交给采集页：键名、数组格式与跳转形状保持（DR-6）', async () => {
+    pageRoutes(kit);
+    const view = await opened();
+    expect(screen.getByRole('button', { name: '评论深采' })).toBeDisabled();
+    await view.user.click(screen.getByRole('button', { name: '勾选本页' }));
+    await view.user.click(screen.getByRole('button', { name: '评论深采' }));
+    const here = `/corpus/evidence?domain=${DOMAIN}&work=${workRef(1)}`;
+    expect(assignLocation).toHaveBeenCalledTimes(1);
+    expect(assignLocation).toHaveBeenCalledWith(`/collection/tasks?domain=${DOMAIN}&selected=1&returnTo=${encodeURIComponent(here)}`);
+    expect(JSON.parse(sessionStorage.getItem(selectionKey) ?? 'null')).toHaveLength(3);
+  });
+
+  it('超过 200 篇就地说明，两个批量按钮都不可用', async () => {
+    sessionStorage.setItem(selectionKey, JSON.stringify(Array.from({ length: 201 }, (_, index) => workRef(1000 + index))));
+    pageRoutes(kit);
+    await opened();
+    expect(screen.getByText('已勾选 201 篇作品')).toBeInTheDocument();
+    expect(screen.getByText('最多 200 篇，请减少勾选')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '评论深采' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '整理图片文字' })).toBeDisabled();
+  });
+
+  it('「整理图片文字」打开批量弹窗并登记断点（只有作品引用与状态）；关闭后可「继续上次整理」', async () => {
+    pageRoutes(kit);
+    const view = await opened();
+    expect(screen.queryByRole('button', { name: '继续上次整理' })).not.toBeInTheDocument();
+    await view.user.click(screen.getByRole('button', { name: '勾选本页' }));
+    await view.user.click(screen.getByRole('button', { name: '整理图片文字' }));
+    const dialog = await screen.findByRole('dialog', { name: '重新整理选定作品的图片文字' });
+    expect(within(dialog).getByText('3 篇固定作品 · 已处理 0 篇 · 失败 0 篇 · 尚未处理 3 篇')).toBeInTheDocument();
+    const saved = JSON.parse(sessionStorage.getItem(BATCH_KEY) ?? 'null') as { domain: string; items: { work: string; state: string }[] };
+    expect(saved.domain).toBe(DOMAIN);
+    expect(saved.items.map(item => item.work)).toEqual([workRef(1), workRef(2), workRef(3)]);
+    expect(JSON.stringify(saved)).not.toMatch(/合成/);
+
+    await view.user.click(within(dialog).getByRole('button', { name: '关闭' }));
+    expect(screen.queryByRole('dialog', { name: '重新整理选定作品的图片文字' })).not.toBeInTheDocument();
+    await view.user.click(await screen.findByRole('button', { name: '继续上次整理' }));
+    expect(await screen.findByRole('dialog', { name: '重新整理选定作品的图片文字' })).toBeInTheDocument();
+  });
+
+  it('刷新之后（重新打开页面）也能「继续上次整理」', async () => {
+    sessionStorage.setItem(BATCH_KEY, JSON.stringify({ domain: DOMAIN, items: [{ work: workRef(1), state: 'pending' }] }));
+    pageRoutes(kit);
+    const view = await opened();
+    await view.user.click(screen.getByRole('button', { name: '继续上次整理' }));
+    const dialog = await screen.findByRole('dialog', { name: '重新整理选定作品的图片文字' });
+    expect(within(dialog).getByText('1 篇固定作品 · 已处理 0 篇 · 失败 0 篇 · 尚未处理 1 篇')).toBeInTheDocument();
+  });
+});
+
+describe('检查器外壳', () => {
+  it('五个标签，默认「概览」；点「证据」替换历史并写入地址', async () => {
+    pageRoutes(kit);
+    const view = await opened();
+    expect(screen.getAllByRole('tab').map(tab => tab.textContent)).toEqual(['概览', '证据', '研究底稿', '材料', '来源轨迹']);
+    expect(screen.getByRole('tab', { name: '概览' })).toHaveAttribute('aria-selected', 'true');
+    await view.user.click(screen.getByRole('tab', { name: '证据' }));
+    expect(view.location()).toBe(`/corpus/evidence?domain=${DOMAIN}&work=${workRef(1)}&tab=evidence`);
+    expect(view.router.state.historyAction).toBe('REPLACE');
+    expect(screen.getByRole('tab', { name: '证据' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: '概览' })).toHaveAttribute('tabindex', '-1');
+  });
+
+  it('← → Home End 在标签间移动并聚焦', async () => {
+    pageRoutes(kit);
+    const view = await opened();
+    screen.getByRole('tab', { name: '概览' }).focus();
+    await view.user.keyboard('{ArrowRight}');
+    expect(screen.getByRole('tab', { name: '证据' })).toHaveFocus();
+    await view.user.keyboard('{End}');
+    expect(screen.getByRole('tab', { name: '来源轨迹' })).toHaveFocus();
+    await view.user.keyboard('{ArrowRight}');
+    expect(screen.getByRole('tab', { name: '概览' })).toHaveFocus();
+    await view.user.keyboard('{ArrowLeft}');
+    expect(screen.getByRole('tab', { name: '来源轨迹' })).toHaveFocus();
+    await view.user.keyboard('{Home}');
+    expect(screen.getByRole('tab', { name: '概览' })).toHaveFocus();
+    expect(view.location()).toBe(`/corpus/evidence?domain=${DOMAIN}&work=${workRef(1)}`);
+  });
+
+  it('研究底稿标签激活时才读取底稿（G10）', async () => {
+    pageRoutes(kit);
+    kit.route('GET', `${detailPathOf(1)}/research-dossier`, ok(dossierJson(1)));
+    const view = await opened();
+    expect(kit.of('GET', `${detailPathOf(1)}/research-dossier`)).toHaveLength(0);
+    await view.user.click(screen.getByRole('tab', { name: '研究底稿' }));
+    await waitFor(() => expect(kit.of('GET', `${detailPathOf(1)}/research-dossier`)).toHaveLength(1));
+    expect(kit.of('GET', `${detailPathOf(1)}/research-dossier`)[0]?.search.get('domain')).toBe(DOMAIN);
+  });
+
+  it('`tab=dossier` 的深链直接读取底稿', async () => {
+    pageRoutes(kit);
+    kit.route('GET', `${detailPathOf(1)}/research-dossier`, ok(dossierJson(1)));
+    renderEvidencePage(pageUrl(`domain=${DOMAIN}&tab=dossier&work=${workRef(1)}`));
+    await waitFor(() => expect(kit.of('GET', `${detailPathOf(1)}/research-dossier`)).toHaveLength(1));
+    expect(screen.getByRole('tab', { name: '研究底稿' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('宽度：选了就记入本机偏好并写入地址（替换历史）；没有 panel 参数时取偏好，地址优先', async () => {
+    pageRoutes(kit);
+    const view = await opened();
+    expect(screen.getByRole('button', { name: '标准' })).toHaveAttribute('aria-pressed', 'true');
+    await view.user.click(screen.getByRole('button', { name: '加宽' }));
+    expect(localStorage.getItem('linggan.evidence.inspectorWidth')).toBe('wide');
+    expect(view.location()).toContain('panel=wide');
+    expect(view.router.state.historyAction).toBe('REPLACE');
+    expect(bench()).toHaveAttribute('data-inspector', 'wide');
+
+    view.unmount();
+    pageRoutes(kit);
+    const again = await opened();
+    expect(bench()).toHaveAttribute('data-inspector', 'wide');
+    again.unmount();
+    pageRoutes(kit);
+    renderEvidencePage(pageUrl(`domain=${DOMAIN}&panel=focus&work=${workRef(1)}`));
+    await screen.findByRole('button', { name: '合成作品 1' });
+    expect(bench()).toHaveAttribute('data-inspector', 'focus');
+    expect(localStorage.getItem('linggan.evidence.inspectorWidth')).toBe('wide');
+  });
+
+  it('关闭检查器：结果区占满、焦点回到所选行；再点选作品自动重开', async () => {
+    pageRoutes(kit);
+    const view = await opened();
+    await view.user.click(screen.getByRole('button', { name: '关闭检查器' }));
+    expect(view.location()).toContain('panel=closed');
+    expect(view.router.state.historyAction).toBe('REPLACE');
+    expect(bench()).toHaveAttribute('data-inspector', 'closed');
+    expect(rowButton(1)).toHaveFocus();
+
+    await view.user.click(rowButton(2));
+    expect(view.location()).toBe(`/corpus/evidence?domain=${DOMAIN}&work=${workRef(2)}`);
+    expect(view.router.state.historyAction).toBe('PUSH');
+    expect(bench()).toHaveAttribute('data-inspector', 'normal');
+  });
+
+  it('重开时回到关闭前的宽度', async () => {
+    pageRoutes(kit);
+    const view = await opened(pageUrl(`domain=${DOMAIN}&panel=wide`));
+    await view.user.click(screen.getByRole('button', { name: '关闭检查器' }));
+    await view.user.click(rowButton(2));
+    expect(bench()).toHaveAttribute('data-inspector', 'wide');
+    expect(view.location()).toBe(`/corpus/evidence?domain=${DOMAIN}&work=${workRef(2)}&panel=wide`);
+  });
+});
+
+describe('抽屉模式（≤1180px）', () => {
+  beforeEach(() => {
+    stubViewport({ drawer: true });
+    Element.prototype.scrollIntoView = vi.fn();
+  });
+  afterEach(() => {
+    // @ts-expect-error jsdom 本来就没有它；还原成没有
+    delete Element.prototype.scrollIntoView;
+  });
+
+  it('列表加载后自动选中不展开抽屉；点选才展开；宽度控件与「×」不存在', async () => {
+    pageRoutes(kit);
+    const view = await opened();
+    expect(aside()).toHaveAttribute('inert');
+    expect(screen.queryByRole('button', { name: '关闭检查器' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: '检查器宽度' })).not.toBeInTheDocument();
+    await view.user.click(rowButton(2));
+    expect(aside()).not.toHaveAttribute('inert');
+  });
+
+  it('Esc 关闭抽屉并把焦点还给所选行', async () => {
+    pageRoutes(kit);
+    const view = await opened();
+    await view.user.click(rowButton(2));
+    expect(aside()).not.toHaveAttribute('inert');
+    await view.user.keyboard('{Escape}');
+    expect(aside()).toHaveAttribute('inert');
+    expect(rowButton(2)).toHaveFocus();
+  });
+
+  it('「← 返回当前作品」收起抽屉，把所选行滚入视野并聚焦', async () => {
+    pageRoutes(kit);
+    const view = await opened();
+    await view.user.click(rowButton(3));
+    await view.user.click(screen.getByRole('button', { name: '← 返回当前作品' }));
+    expect(aside()).toHaveAttribute('inert');
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(rowButton(3)).toHaveFocus());
+  });
+
+  it('地址直达一件作品：抽屉展开（旧页的「从地址还原」）', async () => {
+    pageRoutes(kit);
+    renderEvidencePage(pageUrl(`domain=${DOMAIN}&work=${workRef(2)}`));
+    await screen.findByRole('button', { name: '合成作品 1' });
+    await waitFor(() => expect(aside()).not.toHaveAttribute('inert'));
+  });
+
+  it('没有领域时带着作品进来，在对话框里选定领域之后，抽屉展开并定位那件作品（A12）', async () => {
+    pageRoutes(kit, { shell: call => ({ status: 200, body: shellJson({ selectedDomain: call.search.get('domain') }) }) });
+    const view = renderEvidencePage(pageUrl(`work=${workRef(2)}`));
+    const dialog = await screen.findByRole('dialog', { name: '选择研究领域' });
+    expect(screen.getByRole('complementary', { name: /^请选择/ })).toHaveAttribute('inert');
+    await view.user.click(within(dialog).getByRole('link', { name: /合成领域一/ }));
+    expect(view.location()).toBe(pageUrl(`domain=${DOMAIN}&work=${workRef(2)}`));
+    await screen.findByRole('button', { name: '合成作品 1' });
+    await waitFor(() => expect(aside()).not.toHaveAttribute('inert'));
+    expect(within(aside()).getByRole('heading', { level: 2, hidden: true, name: '合成作品 2' })).toBeInTheDocument();
+  });
+
+  it('后退到一件作品：抽屉展开', async () => {
+    pageRoutes(kit);
+    const view = await opened();
+    await view.user.click(rowButton(2));
+    await view.user.keyboard('{Escape}');
+    await view.user.click(rowButton(3));
+    await view.user.keyboard('{Escape}');
+    expect(aside()).toHaveAttribute('inert');
+    await act(() => view.router.navigate(-1));
+    await waitFor(() => expect(aside()).not.toHaveAttribute('inert'));
+    expect(view.location()).toContain(workRef(2));
+  });
+});
+
+describe('敏感面', () => {
+  const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+  const activePanel = () => aside().querySelector<HTMLElement>('[role="tabpanel"]:not([hidden])')!;
+
+  /** 普通层的文字：去掉折叠着的「技术事实」；`withoutCode` 再去掉技术旁注（<code>）。 */
+  function ordinaryText(root: HTMLElement, withoutCode = false): string {
+    const copy = root.cloneNode(true) as HTMLElement;
+    copy.querySelectorAll(withoutCode ? 'details:not([open]), code' : 'details:not([open])').forEach(node => node.remove());
+    return copy.textContent ?? '';
+  }
+
+  it('概览的普通层不出现 UUID、外部编号；英文状态码只作为技术旁注（<code>）出现', async () => {
+    pageRoutes(kit);
+    await opened();
+    expect(ordinaryText(activePanel())).not.toMatch(UUID);
+    expect(ordinaryText(activePanel())).not.toMatch(/ext-\d|authorExternalId|contentExternalId|externalId/);
+    expect(ordinaryText(activePanel(), true)).not.toMatch(/\b[A-Z]{2,}(?:_[A-Z]+)+\b|\b(?:UNKNOWN|SEARCHABLE|NOT_REQUESTED)\b/);
+  });
+
+  it('引用与执行血缘只在「来源轨迹」这一技术层里', async () => {
+    pageRoutes(kit);
+    const view = await opened();
+    await view.user.click(screen.getByRole('tab', { name: '来源轨迹' }));
+    expect(ordinaryText(activePanel())).toMatch(UUID);
+    expect(screen.getByRole('tab', { name: '来源轨迹' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('只写三类存储键，且值里没有作品内容', async () => {
+    pageRoutes(kit);
+    const view = await opened();
+    await view.user.click(screen.getByRole('button', { name: '加宽' }));
+    await view.user.click(screen.getByRole('button', { name: '勾选本页' }));
+    await view.user.click(screen.getByRole('button', { name: '整理图片文字' }));
+    await screen.findByRole('dialog', { name: '重新整理选定作品的图片文字' });
+    expect(Object.keys(localStorage)).toEqual(['linggan.evidence.inspectorWidth']);
+    expect(Object.keys(sessionStorage).sort()).toEqual([BATCH_KEY, selectionKey].sort());
+    for (const store of [localStorage, sessionStorage]) {
+      for (const key of Object.keys(store)) expect(store.getItem(key) ?? '').not.toMatch(/合成|先做两分钟/);
+    }
+  });
+
+  it('页面打开时的请求只有外壳、列表与选中作品的详情', async () => {
+    pageRoutes(kit);
+    await opened();
+    await screen.findByRole('tab', { name: '概览' });
+    const paths = [...new Set(kit.calls.map(call => call.path))].sort();
+    expect(paths).toEqual(['/api/local/corpus/shell', LIST_PATH, detailPathOf(1)].sort());
+  });
+});
