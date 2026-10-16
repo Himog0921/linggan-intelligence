@@ -47,6 +47,7 @@ async fn legacy_schema_validates_cursor_before_refusing_an_unfulfillable_page() 
     let response = app_with_database(legacy)
         .oneshot(
             Request::builder()
+                .header("Host", "127.0.0.1:3000")
                 .uri(format!(
                     "/api/local/work-resources?cursor={cursor}&domain={ADHD_DOMAIN}"
                 ))
@@ -405,6 +406,7 @@ async fn get_json(database: &Database, uri: &str) -> Value {
     let response = app_with_database(database.clone())
         .oneshot(
             Request::builder()
+                .header("Host", "127.0.0.1:3000")
                 .uri(with_default_domain(uri))
                 .body(Body::empty())
                 .unwrap(),
@@ -419,6 +421,7 @@ async fn get_status(database: &Database, uri: &str) -> StatusCode {
     app_with_database(database.clone())
         .oneshot(
             Request::builder()
+                .header("Host", "127.0.0.1:3000")
                 .uri(with_default_domain(uri))
                 .body(Body::empty())
                 .unwrap(),

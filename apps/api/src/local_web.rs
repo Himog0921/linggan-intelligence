@@ -21,7 +21,15 @@ mod creators;
 #[cfg(test)]
 mod creators_browser_tests;
 #[cfg(test)]
+mod evidence_api_proof_tests;
+#[cfg(test)]
+mod evidence_fixture;
+#[cfg(test)]
+mod evidence_guard_tests;
+#[cfg(test)]
 mod evidence_page;
+#[cfg(test)]
+mod evidence_seed;
 #[cfg(test)]
 mod full_schema_fixture;
 mod local_asset_delivery;
@@ -476,7 +484,12 @@ fn material_api_routes() -> Router<LocalWebState> {
             "/api/local/derivative/{derivative_ref}",
             get(local_media_routes::derivative),
         )
-        .route("/api/local/work-resources", get(evidence_library_json))
+        .route(
+            "/api/local/work-resources",
+            get(evidence_library_json).layer(axum::middleware::from_fn(
+                comment_study::local_comment_study_guard,
+            )),
+        )
         .route(
             "/api/local/work-resources/{public_ref}/comments",
             get(material_projection::research_comments_json).layer(axum::middleware::from_fn(
@@ -485,15 +498,21 @@ fn material_api_routes() -> Router<LocalWebState> {
         )
         .route(
             "/api/local/work-resources/{public_ref}/reobserve",
-            post(material_projection::reobserve_json),
+            post(material_projection::reobserve_json).layer(axum::middleware::from_fn(
+                comment_study::local_comment_study_guard,
+            )),
         )
         .route(
             "/api/local/work-resources/{public_ref}/reobserve/{lease_ref}",
-            get(material_projection::reobservation_status_json),
+            get(material_projection::reobservation_status_json).layer(axum::middleware::from_fn(
+                comment_study::local_comment_study_guard,
+            )),
         )
         .route(
             "/api/local/work-resources/{public_ref}",
-            get(material_projection::detail_json),
+            get(material_projection::detail_json).layer(axum::middleware::from_fn(
+                comment_study::local_comment_study_guard,
+            )),
         )
 }
 

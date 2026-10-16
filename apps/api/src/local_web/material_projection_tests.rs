@@ -17,6 +17,7 @@ async fn loopback_material_query_applies_lane_filter_instead_of_returning_unrela
     let response = app_with_database(database.clone())
         .oneshot(
             Request::builder()
+                .header("Host", "127.0.0.1:3000")
                 .uri(format!(
                     "/api/local/work-resources?q=可检索&lane=comments&domain={ADHD_DOMAIN}"
                 ))
@@ -42,6 +43,7 @@ async fn loopback_material_query_applies_lane_filter_instead_of_returning_unrela
     let unfiltered = app_with_database(database)
         .oneshot(
             Request::builder()
+                .header("Host", "127.0.0.1:3000")
                 .uri(format!("/api/local/work-resources?domain={ADHD_DOMAIN}"))
                 .body(Body::empty())
                 .unwrap(),
@@ -79,6 +81,7 @@ async fn loopback_comment_lane_hides_sensitive_body_and_external_identity() {
     let response = app_with_database(database.clone())
         .oneshot(
             Request::builder()
+                .header("Host", "127.0.0.1:3000")
                 .uri(format!(
                     "/api/local/work-resources?lane=comments&domain={ADHD_DOMAIN}"
                 ))
@@ -314,6 +317,7 @@ async fn detail_exposes_the_bounded_reobservation_action_and_refuses_targetless_
     let response = app_with_database(database)
         .oneshot(
             Request::builder()
+                .header("Host", "127.0.0.1:3000")
                 .method("POST")
                 .uri(format!(
                     "/api/local/work-resources/{public_ref}/reobserve?domain={ADHD_DOMAIN}"

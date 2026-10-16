@@ -206,6 +206,7 @@ async fn library(database: &Database) -> Value {
     let response = app_with_database(database.clone())
         .oneshot(
             Request::builder()
+                .header("Host", "127.0.0.1:3000")
                 .uri(format!(
                     "/api/local/work-resources?lane=media_slots&domain={}",
                     super::material_projection_media_fixture::ADHD_DOMAIN_REF
@@ -225,6 +226,7 @@ async fn library(database: &Database) -> Value {
     let response = app_with_database(database.clone())
         .oneshot(
             Request::builder()
+                .header("Host", "127.0.0.1:3000")
                 .uri(detail_url)
                 .body(Body::empty())
                 .unwrap(),

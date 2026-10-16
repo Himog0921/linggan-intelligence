@@ -55,6 +55,7 @@ async fn evidence_library_rejects_unknown_url_filters_before_reading() {
                 .uri(format!(
                     "/api/local/work-resources?domain={domain}&creatorKye=typo"
                 ))
+                .header(header::HOST, "127.0.0.1:3000")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -63,6 +64,7 @@ async fn evidence_library_rejects_unknown_url_filters_before_reading() {
     assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
     let valid = app().oneshot(Request::builder()
         .uri(format!("/api/local/work-resources?domain={domain}&creatorKey=xhs%3A41&creatorFilter=%7B%22domain%22%3A%22{domain}%22%7D&returnTo=%2Fcorpus%2Fcreators%3Fdomain%3D{domain}"))
+        .header(header::HOST, "127.0.0.1:3000")
         .body(Body::empty()).unwrap()).await.unwrap();
     assert_ne!(valid.status(), StatusCode::BAD_REQUEST);
     let parsed: material_projection::EvidenceLibraryParams = serde_json::from_value(json!({
