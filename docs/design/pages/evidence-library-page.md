@@ -1,9 +1,9 @@
 # PAGE-EVIDENCE-001 · 多材料证据库
 
 > 状态: 权威当前
-> 最后核对: 2026-10-14
+> 最后核对: 2026-10-16
 > 适用范围: `语料 → 证据库` 的产品任务、页面信息架构、技术呈现要求、状态与验收；运行时入口仍为 `http://localhost:3000/corpus/evidence`
-> 事实来源: Mog 批准的五卡 Evidence Library 垂直交付、Issue #85/#86/#90、MEDIA-RECON-001、MATERIAL-PROJECTION-001、LIDS（含 LANG-05 文案修订 CORPUS-COPY-001 / Issue #421）、UI execution contract 与当前 Rust/HTML/CSS/JS
+> 事实来源: Mog 批准的五卡 Evidence Library 垂直交付、Issue #85/#86/#90、MEDIA-RECON-001、MATERIAL-PROJECTION-001、LIDS（含 LANG-05 文案修订 CORPUS-COPY-001 / Issue #421）、UI execution contract；运行页自 WEB-REACT-001 阶段 D2 起为 React 实现，修订见 §14
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实运行/代码/合同、ACCEPTED 决定；本页规格不让静态原型冒充已接通运行时
 
 本页所有读取均显式属于一个正式 Domain。所有 Domain 共用同一 Work Resource 和 Material Inspector；primary/reference 不再决定另一套 API 或材料身份。
@@ -153,14 +153,14 @@ Inspector 默认停在“概览”，但页面不得只在隐藏 Tab 中提供�
 | 控件 | 获准语义 | 必需回执 | 禁止退化 |
 |---|---|---|---|
 | 文本搜索 | 检索获准字段；首批至少标题、作者，后续可含已进入检索投影的脱敏正文/OCR/ASR | `matchedFields`、query scope、asOf、结果数 | 平台搜索、未接纳 Package/raw payload 搜索 |
-| 时间视角 | 缺省为最新已接纳视角；显式 7/30 天只按来源可验证发布时间 | time view、unknown published exclusion | 用观察/接收时间替代发布时间 |
+| 时间视角 | 缺省为最新已接纳视角；显式 7/30 天只按来源可验证发布时间（D2 起界面不提供，见 §14） | time view、unknown published exclusion | 用观察/接收时间替代发布时间 |
 | Lane | discovery/detail/comments/replies/author/media/derivative | 当前 lane 与结果数 | 总“完整/不完整”筛选 |
 | Lane 状态 | 本规格状态词典闭集 | 状态来源与数量 | 把未请求混入失败 |
 | 媒体类型 | image/cover/video/live photo；只依据合格槽位 | 来源与槽位 Coverage | 从扩展名或 URL 猜类型 |
 | 访问/处置 | restricted/withdrawn/bytes cleaned 等 | 当前 display policy | 让筛选绕过权限 |
 | 排序 | 默认最近观察降序；后续可明确切换来源发布时间 | sort key、asOf | 把“最近观察”写成“最新发布” |
 
-排版使用独立 URL 参数 `layout=research|table|cover`；状态筛选继续使用 `view`。`view` 是查询预设，必须与其他筛选一起放在主结果上方的「系统视图」横向工作台，不作为左侧导航或独立状态面板；结果数、读取回执和当前选择分别由工作台底栏、inline receipt、选中行/Inspector 承担，不重复做统计栏。「我的视图」可以保留参考稿的结构位置，但在保存合同缺失时只能显示不可交互的“暂无已保存视图”，不得展示假视图或假保存动作。按 LANG-05，这两处不再配英文对照；页头的「不混读旧发现卡片 NO LEGACY FALLBACK」属于系统策略，已移出界面（CORPUS-COPY-001，2026-10-14），查询与视图的结构和行为不变。切换排版只重排已读取的同一 Work Resource 集合，不重新请求、不改字段资格、不改变当前选择。保存视图、批量选择、发起研究和泛化“补采”继续禁用，直到各自有独立产品/权限/回执合同。唯一已接通的例外是当前选中作品的受限 `立即复观测`：它只面对小红书、稳定 public ref 和已存在的 target-linked active deep-archive authorization，不能从作者、标题、URL 或采集来源名称推断授权；请求与状态均来自受控 API，不能显示本地伪造成功。
+排版使用独立 URL 参数 `layout=research|table|cover`；状态筛选继续使用 `view`。`view` 是查询预设，必须与其他筛选一起放在主结果上方的「系统视图」横向工作台，不作为左侧导航或独立状态面板；结果数、读取回执和当前选择分别由工作台底栏、inline receipt、选中行/Inspector 承担，不重复做统计栏。「我的视图」可以保留参考稿的结构位置，但在保存合同缺失时只能显示不可交互的“暂无已保存视图”，不得展示假视图或假保存动作（D2 起删除，见 §14）。按 LANG-05，这两处不再配英文对照；页头的「不混读旧发现卡片 NO LEGACY FALLBACK」属于系统策略，已移出界面（CORPUS-COPY-001，2026-10-14），查询与视图的结构和行为不变。切换排版只重排已读取的同一 Work Resource 集合，不重新请求、不改字段资格、不改变当前选择。保存视图、批量选择、发起研究和泛化“补采”继续禁用，直到各自有独立产品/权限/回执合同。唯一已接通的例外是当前选中作品的受限 `立即复观测`：它只面对小红书、稳定 public ref 和已存在的 target-linked active deep-archive authorization，不能从作者、标题、URL 或采集来源名称推断授权；请求与状态均来自受控 API，不能显示本地伪造成功。
 
 ### 5.4 Domain 范围与材料用途
 
@@ -402,3 +402,15 @@ action:
 - 真实媒体字节、OCR、ASR、抽帧、embedding、清理或撤回传播；
 - 真实平台、浏览器、账号、部署、性能、长期稳定性；
 - Mog 已完成最终视觉/业务验收。
+
+## 14. WEB-REACT-001 阶段 D2 修订（2026-10-16）
+
+运行页由 React 实现（`apps/web/src/pages/corpus/evidence/`，经 D1 的 `CorpusFrame`）；旧 `evidence_library.js/.css`、`evidence_observation.js`、`research_dossier*.js` 与 Rust 页面拼接已在同一交付删除（R2）。下列各项取代本规格前文的对应描述，未列出的部分仍按前文。依据与真实调用记录见[阶段 D 分册](../../plans/active/web-react-001-d-corpus.md) §4.8 与 [ACC-WEB-REACT-001-D2](../acceptance/web-react-001-d2-acceptance.md)。
+
+- **时间视角与排序**（取代 §5.3 中显式 7/30 天时间视角与「相关度」排序）：读模型对时间窗直接返回空集，「相关度」排序与「旧 OCR 已停用」状态值返回 400，三者都不可能给出结果，界面不提供；地址里残留的这些旧值按默认处理。读模型支持后再恢复；恢复时空结果必须说明「发布时间未知的作品不计入」，不得写成「没有匹配」。
+- **未接通占位**（取代 §5.3「我的视图」空态与 §8「保存视图/批量选择/研究/泛化补采 → disabled + 开放条件」中的占位按钮）：「我的视图」「打开原文」「补采」「补采媒体」删除（F16）。
+- **立即复观测**（补充 §7.3、§8）：发起前先确认，说明会让工位再访问一次平台；回执分四种——已提交（形成工单）、未受理（HTTP 200 但准入为 REFUSED／DEFERRED／DECISION_REQUIRED／UNKNOWN，写明原因，不是成功）、未完成（明确的非 2xx）、未确认（没有答复或答复无法解读）；未确认时不自动重发，先刷新或去采集任务核对。新增三个状态词：`PAGE_UNAVAILABLE`「平台页面已不存在（生产方确认）」、`DETAIL_READ_BLOCKED`「详情页已打开但没有读成」、`NOT_STARTED`「尚未开始」（措辞待产品确认）。
+- **来源闸门**（补充 §8）：作品列表、作品详情、立即复观测及其状态查询四条接口加与其他本机接口相同的来源闸门；页面入口同样经闸门——从外部网页点开本机链接（跨站导航）得到 403，地址栏、书签与插件 `chrome.tabs.create` 打开不受影响。
+- **阅读主序**（落实 §5.2，F08）：检查器先给标题、作者、发布时间、互动、正文、图组与讨论，技术事实默认折叠。
+- **封面**：3:4 完整显示，不裁切。
+- **侧栏**：「证据库」项的计数徽标由页面填写，其余与 D1 共享外壳一致。

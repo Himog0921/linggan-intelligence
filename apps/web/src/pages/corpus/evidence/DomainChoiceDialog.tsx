@@ -80,4 +80,3 @@ export function DomainChoiceDialog({ domains, pendingWork, onClose }: DomainChoi
     </ModalDialog>
   );
 }
-

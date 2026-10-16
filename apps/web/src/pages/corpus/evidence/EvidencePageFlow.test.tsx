@@ -389,4 +389,3 @@ describe('失败的写入口不存在', () => {
     expect(within(aside()).queryByRole('heading', { level: 2, hidden: true, name: '合成作品 2' })).not.toBeInTheDocument();
   });
 });
-

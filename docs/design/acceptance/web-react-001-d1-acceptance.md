@@ -3,7 +3,7 @@
 > 状态: 一次性报告
 > 最后核对: 2026-10-16
 > 适用范围: WEB-REACT-001 阶段 D1：`/corpus/creators` 迁到 React、语料三页共用的 React 外壳（侧栏、领域选择器、采集状态词）、只读接口 `GET /api/local/corpus/shell`、旧创作者页实现的删除
-> 事实来源: 实施工作树 `.worktrees/web-react-001-d1`（分支 `feat/web-react-001-d1`，基线 `origin/main@36f3fdf9`；协调方复核后提交推送，以 Draft PR 呈交）；`npm --prefix apps/web run verify`；`cargo test -p linggan-api --bins --locked`；`scripts/test-web-app-postgres.sh` 在一次性隔离 PostgreSQL 上的真实浏览器证明；[阶段 D 分册](../../plans/active/web-react-001-d-corpus.md) §3.1 能力清单；PR #384（未合并）的只读调查结论
+> 事实来源: 实施工作树 `.worktrees/web-react-001-d1`（分支 `feat/web-react-001-d1`，基线 `origin/main@36f3fdf9`；协调方复核后提交推送，以 Draft PR #436 呈交，2026-10-16 由 Mog 合并为 `main@baaf5a51` 并随运行实例更新）；`npm --prefix apps/web run verify`；`cargo test -p linggan-api --bins --locked`；`scripts/test-web-app-postgres.sh` 在一次性隔离 PostgreSQL 上的真实浏览器证明；[阶段 D 分册](../../plans/active/web-react-001-d-corpus.md) §3.1 能力清单；PR #384（未合并）的只读调查结论
 > 冲突时以谁为准: 真实运行/代码/合同、Mog 最新确认、DEC-0010 与 [WEB-REACT-001](../../plans/active/web-react-001.md)；截图与自动检查不单独证明业务结果
 
 ## 1. 验收对象
@@ -56,7 +56,7 @@
 | 前端/组件实现 | VERIFIED | `npm --prefix apps/web run verify`：类型检查、lint、构建通过，30 个测试文件 328 项通过（基线 129 + 新增 199，其中创作者页与外壳相关的新测试文件 15 个） | — |
 | 自动检查 | VERIFIED | `cargo test -p linggan-api --bins --locked`：362 通过 / 0 失败 / 67 忽略（基线 356 / 0 / 65；新增 7、删除 1、忽略项新增 2 个隔离证明）；编译警告 53 条与基线相同；本模块 Rust 文件 rustfmt 检查通过；`./scripts/check-project-governance.sh origin/main` 通过；`./scripts/verify-ui-design-handbook.sh` 通过；`git diff --check` 通过（含新增文档的行尾空白另行 grep 核对） | 云端 CI 以 PR 实跑为准；`local_web.rs` 的既有格式偏差未动 |
 | 真实链路/回执 | VERIFIED（隔离环境） | 隔离 PostgreSQL + 本机 Axum 路由 + 构建产物 + Chromium：设置页 15 步、外壳接口读库 1 项、创作者页 17 步全部通过；浏览器之后回数据库核对：观察目标与关系各恰好一条、采集请求 / 工单 / 模型调用均为 0；容器、数据卷与临时目录已删除 | 合成数据；没有自动分析结果；未连真实模型；未在 3000 端口的运行实例上验证 |
-| 部署 | NOT VERIFIED | 已提交推送为 Draft PR；未合并、未部署 | 合并与部署由 Mog 授权；部署后核验运行身份与线上只读链路 |
+| 部署 | VERIFIED（上线后只读核验） | 2026-10-16 Mog 合并 PR #436 为 `baaf5a51`；3000 的 `/health.webApp` ready、前后端同版本、登记页面含 `/corpus/creators`；该地址返回 React 入口（no-store、nosniff），旧 `/assets/creators.js`、`/assets/creators.css` 均 404；外壳接口读到 4 个领域，「采集」状态词为「观察中」；无界面浏览器（1440／390）打开最大领域：1,516 位创作者、31 页，打开依据抽屉，零写请求、零脚本错误、无横向溢出，浏览器存储为空。回执见 [#433](https://github.com/Himog0921/linggan-intelligence/issues/433#issuecomment-6208211042) | 首屏约 8–13 秒，瓶颈是列表接口（50 条单次 7.5–9 秒、约 1.1 MB；旧页调用同一接口，非迁移引入）；页面上作者判断全为「待判断」是真实数据状态——#423 把创作者分析规则升为 `creator-discovery.v2-dossier`，v1 判断按设计不再算当前，worker 自 10-14 停用，尚无 v2 结果 |
 | Mog / 业务验收 | NOT VERIFIED | — | 待 Mog 在部署后打开 `/corpus/creators` 验收 |
 
 ## 5. 发现与后续

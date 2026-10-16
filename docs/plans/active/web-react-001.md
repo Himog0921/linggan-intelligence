@@ -2,7 +2,7 @@
 
 > 状态: 活跃计划
 > 最后核对: 2026-10-16
-> 适用范围: Intelligence 全部正式网页迁移到 React 的唯一实施计划，包括目标架构、不留双轨规则、阶段顺序与验收；合并 UIUX-CONTENT-WORKBENCH-001 的用户结果与推进安排。阶段 A+B 已随 PR #431 合并至 main@0a90fd4a；部署依据见 #430 上线回执；阶段 C 已由 Mog 2026-10-15 派定，D–H 未派定
+> 适用范围: Intelligence 全部正式网页迁移到 React 的唯一实施计划，包括目标架构、不留双轨规则、阶段顺序与验收；合并 UIUX-CONTENT-WORKBENCH-001 的用户结果与推进安排。阶段 A+B 已随 PR #431 合并至 main@0a90fd4a；部署依据见 #430 上线回执；阶段 C 已随 PR #432 合并；阶段 D 已派定：D1 已随 PR #436 合并上线，D2 以 Draft PR 呈交、未合并，D3 未开始（[分册](web-react-001-d-corpus.md)）；阶段 G、E 已随 PR #437、#439 合入主线（见各自分册）
 > 事实来源: Mog 2026-10-15 的决定（[Issue #430](https://github.com/Himog0921/linggan-intelligence/issues/430)、[DEC-0010](../../decisions/0010-web-frontend-react.md)）；Mog 提供的《Linggan Intelligence 全站 React 迁移架构与执行手册》（2026-10-15，基于 `main@473980cb`，未入库，有效内容已吸收进本文）；UIUX-CONTENT-WORKBENCH-001 计划（[Issue #425](https://github.com/Himog0921/linggan-intelligence/issues/425)，2026-10-15 工作树未提交版本）；`origin/main@473980cb` 代码只读核对
 > 冲突时以谁为准: Mog 最新确认、DEC-0010、AGENTS.md、真实代码与运行证据
 

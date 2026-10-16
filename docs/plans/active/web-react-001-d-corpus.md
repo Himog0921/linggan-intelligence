@@ -2,7 +2,7 @@
 
 > 状态: 活跃计划
 > 最后核对: 2026-10-16
-> 适用范围: WEB-REACT-001 阶段 D 的拆分、各页能力清单（迁移前盘点）、已定的设计改动与验收；D1 已合并（PR #436，`baaf5a51`）；D2 能力清单已盘点（§4，阶段 1），实现待放行；D3 未开始
+> 适用范围: WEB-REACT-001 阶段 D 的拆分、各页能力清单（迁移前盘点）、已定的设计改动与验收；D1 已合并上线（PR #436，`baaf5a51`，上线后只读核验见 #433）；D2 已实施并复核，以 Draft PR 呈交（§4.10）；D3 未开始
 > 事实来源: Mog 2026-10-15「接下来重点推进 D，语料三页」与「实际代码部分交给 Sonnet 5.5 子代理执行」；[WEB-REACT-001](web-react-001.md) 阶段 D；Issue #433；`origin/main@36f3fdf9` 旧页面源码
 > 冲突时以谁为准: Mog 最新确认、DEC-0010、WEB-REACT-001 主计划、真实代码与运行证据
 
@@ -269,6 +269,7 @@
 - 第 7 项已同步：Mog 2026-10-15 决定 #384 界面部分作废、调查发现由本阶段落实，后台修复拆为 PR #435（Draft，Refs #367），#384 已关闭；主计划 §7 已改。
 - 未执行独立代码审查：审查时机由 Mog 决定。
 - 提交状态：提交推送至 `feat/web-react-001-d1`，以 Draft PR 呈交（Refs #433、#430）；未合并、未部署，合并与部署由 Mog 授权。
+- 后续（2026-10-16）：Mog 合并 PR #436 为 `baaf5a51`，3000 运行实例随主线更新；协调方上线后只读核验（零写请求、旧资源 404、外壳接口与「采集」状态词、真实数据 1,516 位创作者可读）见 [#433 回执](https://github.com/Himog0921/linggan-intelligence/issues/433)。
 
 ### 3.3 接口合同 · 语料外壳只读接口
 
@@ -761,6 +762,17 @@
 
 **接缝（对共享文件的改动，逐项报告）**：`A/pages.ts`、`A/App.tsx`、`L/web_app.rs`（登记）；`L/local_web.rs`（路由与页面删除）；`K/CorpusSideNav.tsx`、`K/CorpusFrame.tsx`、`K/CorpusFrame.module.css`（DR-5）；`shared/*` 预计**零改动**（`requestJson` 已支持无体 `POST`）；`apps/web/test/e2e/{creators,settings}-real-chain.mjs`；`scripts/test-web-app-postgres.sh`、`scripts/test-local-001-discovery-postgres.sh`、`scripts/test-research-dossier-postgres.sh`、`scripts/test-collection-single-run-ui.cjs`、`.github/workflows/web-app.yml`。`shell.rs`、`shell.css`、`lids_tokens.css` 不动。
 
+**协调方裁定（2026-10-16，阶段 2 放行时）**
+
+- DR-1：先用真实调用证明再移除。结果：「相关度」排序带不带检索词都 400；近 7／30 天时间窗由读模型直接返回空集（`crates/evidence/src/material_projection.rs` 对时间窗不读任何数据）；「旧 OCR 已停用」400——三者都不可能给出结果，移除；12 次调用记录见验收记录。读模型支持时间窗后再恢复，空结果须说明「发布时间未知的作品不计入」。
+- DR-2：按 §2（F16）删除。
+- DR-3：发起前确认；回执分已提交／未受理（HTTP 200 但准入拒绝）／未完成／未确认，未确认不自动重发；三个状态词按建议补齐，措辞待产品确认。
+- DR-4：批准。协调方核对过调用方：只有同源页面与测试脚本；浏览器插件只用 `chrome.tabs.create` 打开页面、不调这些接口。插件入口须实测过闸门（已证明：`Sec-Fetch-Site: none`，HTTP 200）。
+- DR-5：批准，最小接缝。
+- DR-6：D2 改采集脚本里驱动旧证据库 DOM 的一段，跨页链接与交接键形状不变；跨页合同已贴 #430 供阶段 G 对照。
+- DR-7、DR-8：按建议。
+- DR-9：保持原样，不扩大暴露；是否收紧交 Mog。
+
 ### 4.9 阶段 2 计划（放行后执行）
 
 **文件**：`E/` 下新建约 45 个源文件（EvidencePage、evidenceQuery／evidenceApi／evidenceTypes／evidencePresent、EvidenceControls／FilterPanel／SelectionBar、WorkList／WorkRow／CoverCard／CoverGeometry／MaterialRail／QuoteBlock／Engagement／Media、DomainChoiceDialog／ReturnBanners、Inspector 与 Reading／Evidence／Materials／Trace／TechnicalFacts 五个面板、FactGrid／StateLine、MediaRail／Lightbox／useZoomPan、`dossier/*`（面板、片段、图片对照、任务材料、评论、批量弹窗、导出、批量存储）、`reobservation/*`、useCollectionSelection／usePanelWidthPreference）及对应的 CSS Modules；登记 `pages.ts`、`App.tsx`（lazy）、`REACT_PAGES`；同一 PR 删除 §4.4 所列旧实现。样式只用 LIDS Token（CSS Modules，无写死值、无悬停上浮）。
@@ -772,6 +784,33 @@
 **文档**：`docs/design/acceptance/web-react-001-d2-acceptance.md`（新建）；修订 `docs/design/pages/evidence-library-page.md`（D12、DR-1、DR-2、E02 的 contain、阅读主序）；`docs/README.md`、`docs/design/README.md` 索引；`docs/progress/2026-10.md`；`docs/design/lids/migration-log.md`；`docs/governance/generated-artifacts-registry.md`（证明证据目录）；`docs/runbooks/local-evidence-library.md`（页面描述）；§4.4 所列 3 处断链；本节追加「4.10 回执」。
 
 **验证**：`npm --prefix apps/web run verify`；`cargo test -p linggan-api --bins --locked`；`scripts/test-web-app-postgres.sh`；`scripts/test-local-001-discovery-postgres.sh` 与 `scripts/test-research-dossier-postgres.sh --http`；治理与 UI 手册检查；本模块 rustfmt；`git diff --check`。一次性容器与数据卷用完即删。
+
+### 4.10 回执（D2 实施与协调方复核，2026-10-16）
+
+> 本回执记实施方与协调方各自做了什么、验证了什么；验收详情见 [ACC-WEB-REACT-001-D2](../../design/acceptance/web-react-001-d2-acceptance.md)，页面规格修订见 [PAGE-EVIDENCE-001](../../design/pages/evidence-library-page.md) §14。
+
+**状态**：已实施并复核，以 Draft PR 呈交（分支 `feat/web-react-001-d2`，分支点 `main@baaf5a51`，已并入 `main@82d48a72`）；未合并、未部署。
+
+**实施**：子代理（Sonnet 5.5）按 §4.9 在专属工作树分步本地提交：接口闸门与库内证明、纯函数、列表与控件、侧栏徽标接缝、媒体与评论、立即复观测、研究底稿、检查器与页面编排、整页测试、源码敏感面扫描与样式契约、登记入口并在同一提交删除旧实现、真实浏览器发现的两处缺陷（封面缺多列栅格、查看器换图后焦点丢失）。收尾阶段子代理撞上模型周用量上限，按项目约定改由协调方顺序接手。
+
+**协调方接手后**
+
+- 证明脚本：插件入口证明改为由记录服务器取请求头、页面自读 HTTP 状态（Playwright 不为扩展新开的标签页报网络事件），并等领域对话框出现再判定；评论续读断言改为两页 40 条互不重复（评论按稳定来源编号排序，编号每次播种不同）；两处 lint。
+- 并入主线：阶段 G（`712286c3`）与 E（`82d48a72`）已于同日合入主线，以一次合并提交并入。10 个冲突文件逐个裁定：页面登记两边并存且顺序与前端一致；两边各删的旧页面代码都不保留；G 已删的旧采集页测试照删；D2 已删的旧证据库字符串断言照删（离页作品深链由真实浏览器证明覆盖）；测试脚本两边的新增都保留；进度条目都保留。合并后核对阶段 G 的 React 采集页：运行详情、观察目标作品、领域管理三处链接与「评论深采」交接键的读取都与 §4.1 C 组一致。
+- 其余：清理合并残留（孤立注释与右括号、重复的 `#[test]`）、合并后不再使用的导入、两个文件末尾空行；在 §4.8 记下裁定。
+
+**验证**（合并后在工作树实跑）
+
+| 项目 | 结果 |
+|---|---|
+| `npm --prefix apps/web run verify` | 类型检查、lint、构建通过；71 个测试文件 749 项（主线基线 40／410，本包 +31／+339） |
+| `cargo test -p linggan-api --bins --locked` | 156 通过 / 0 失败 / 71 忽略（主线基线 169 / 1 / 68；本包删除 18、新增 7；主线那 1 项失败与本包无关，见验收记录 §5） |
+| `scripts/test-web-app-postgres.sh` | 全部通过：设置页 15 步、创作者页 17 步、证据库接口证明、证据库页 19 步、插件入口、运营五页；证据库部分另行连续两次独立重跑通过；容器与数据卷已清理 |
+| `scripts/test-collection-single-run-postgres.sh`（浏览器模式，与 CI 相同） | 通过（React 采集运行详情 → 证据库 → 勾选、续读、刷新） |
+| `scripts/test-local-001-discovery-postgres.sh`、`scripts/test-research-dossier-postgres.sh` | 研究底稿脚本通过。发现脚本首跑：API／库内证明 61 项通过（含 D2 为来源闸门改过的 material_projection／cursor／media／replica 各组），7 个浏览器证明因缺少各自专用环境被拒——脚本跳过清单漏登记了这 7 项（其中 6 项在主线上已漏，含协调方自己在阶段 B、D1 加的两项），已补登记；补登记后整脚本重跑：运行中，结果随下一次提交补记 |
+| 本模块 rustfmt、`./scripts/check-project-governance.sh origin/main`、`./scripts/verify-ui-design-handbook.sh`、`git diff --check` | 通过 |
+
+**待 Mog**：DR-9；复观测三个新状态词的措辞；合并与部署授权；独立代码审查的时机。
 
 ## 5. D3 · 评论研究
 
