@@ -51,12 +51,18 @@ const step = async (name, run) => {
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'zh-CN', timezoneId: 'Asia/Shanghai', acceptDownloads: true });
 // 只放行本机源；其余一律拦截并记账（本页不得有任何外域请求，包括平台图片地址）。
-await context.route('**/*', route => {
-  if (new URL(route.request().url()).origin === origin) return route.continue();
-  report.blockedRequests.push(route.request().url());
+await context.route('**/*', async route => {
+  const url = new URL(route.request().url());
+  if (url.origin === origin) {
+    // 在可控的慢链路下运行，防止只等旧列表或检查器标题就读取后续详情分区。
+    if (url.pathname.startsWith('/api/local/')) await new Promise(resolve => setTimeout(resolve, 500));
+    return route.continue();
+  }
+  report.blockedRequests.push(url.href);
   return route.abort();
 });
 const page = await context.newPage();
+await (await context.newCDPSession(page)).send('Emulation.setCPUThrottlingRate', { rate: 6 });
 page.on('pageerror', error => report.pageErrors.push(error.message));
 page.on('console', message => {
   if (message.type() === 'error') report.consoleErrors.push(message.text());
