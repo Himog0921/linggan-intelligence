@@ -1399,7 +1399,7 @@
 .ops-overview-v2 .ops-progress {
   border: 0;
   background: var(--lgi-canvas-sunken);
-  height: calc(var(--lgi-space-1) + 1px);
+  height: var(--lgi-space-1);
 }
 .ops-overview-v2 .ops-progress i { background: var(--lgi-ink); }
 .ops-overview-v2 .ops-progress b { background: var(--lgi-signal); }
@@ -1625,7 +1625,7 @@
   stroke-linejoin: round;
 }
 .ops-platform-v2 .ops-share {
-  height: calc(var(--lgi-space-2) - 2px);
+  height: var(--lgi-space-2);
   border: 0;
   background: var(--lgi-canvas-sunken);
 }
