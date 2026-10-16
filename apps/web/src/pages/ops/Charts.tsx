@@ -57,11 +57,11 @@ export function smoothSeriesPath(points: Array<CurvePoint | null>): string {
   const fmt = (value: number) => value.toFixed(2);
   return segments.map((line) => {
     if (!line.length) return "";
-    let d = "M" + fmt(line[0].x) + "," + fmt(line[0].y);
+    let d = "M" + fmt(line[0]!.x) + "," + fmt(line[0]!.y);
     for (let i = 0; i < line.length - 1; i++) {
-      const a = line[i], b = line[i + 1];
-      const before = line[Math.max(0, i - 1)];
-      const after = line[Math.min(line.length - 1, i + 2)];
+      const a = line[i]!, b = line[i + 1]!;
+      const before = line[Math.max(0, i - 1)]!;
+      const after = line[Math.min(line.length - 1, i + 2)]!;
       const dx = (b.x - a.x) / 3;
       const min = Math.min(a.y, b.y), max = Math.max(a.y, b.y);
       const clamp = (value: number) => Math.max(min, Math.min(max, value));
