@@ -1,0 +1,281 @@
+/* 证据库页面框架：查询区、读取回执、工作台（结果列表＋检查器）。只消费 LIDS --lgi-* Token。
+ * 页头、侧栏与领域选择器的样式在 shell.css；内容区框架在 CorpusFrame。其余部件各有自己的模块。 */
+
+.page {
+  /* 检查器宽度是一个变量，工作台、媒体轨道与响应式规则都读同一个数。关闭是让这一栏塌缩，而不是隐藏元素。 */
+  --ev-inspector-w: calc(var(--lgi-space-24) * 4 + var(--lgi-space-4) + var(--lgi-space-2));
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--lgi-canvas);
+  color: var(--lgi-ink);
+  font: var(--lgi-text-body) / var(--lgi-lh-body) var(--lgi-font-sans);
+}
+
+.page :is(button, input, select) {
+  box-sizing: border-box;
+  border-radius: var(--lgi-radius-none);
+  color: inherit;
+  font: inherit;
+}
+
+.page :is(button, select) {
+  cursor: pointer;
+}
+
+.page :is(input:not([type='checkbox']), select) {
+  min-width: 0;
+  border: 1px solid var(--lgi-border-strong);
+  padding: var(--lgi-space-2) var(--lgi-space-3);
+  background: var(--lgi-canvas);
+}
+
+.page button {
+  min-height: calc(var(--lgi-space-10) + var(--lgi-space-1));
+  border: 1px solid var(--lgi-ink);
+  padding: 0 var(--lgi-space-4);
+  background: var(--lgi-canvas);
+  font: var(--lgi-weight-semibold) var(--lgi-text-data) / 1 var(--lgi-font-sans);
+}
+
+.page button:hover:not(:disabled) {
+  background: var(--lgi-canvas-low);
+}
+
+.page button:disabled {
+  background: var(--lgi-canvas-low);
+  color: var(--lgi-ghost);
+  cursor: not-allowed;
+}
+
+.page a {
+  color: var(--lgi-focus);
+  text-decoration: none;
+}
+
+.page a:hover {
+  text-decoration: underline;
+}
+
+.page :focus-visible {
+  outline: 2px solid var(--lgi-focus);
+  outline-offset: 2px;
+}
+
+/* 一个界面一个实心墨色动作；悬停改色，不上浮。写成 .page .primary 是为了压过 .page button（jsdom 不算层叠）。 */
+.page .primary {
+  border: 2px solid var(--lgi-ink);
+  background: var(--lgi-ink);
+  color: var(--lgi-on-dark);
+}
+
+.page .primary:hover:not(:disabled) {
+  border-color: var(--lgi-signal-ink);
+  background: var(--lgi-signal-ink);
+}
+
+.page .primary:disabled {
+  border-color: var(--lgi-border-strong);
+  background: var(--lgi-canvas-low);
+  color: var(--lgi-ghost);
+}
+
+.page .textButton {
+  min-height: 0;
+  border: 0;
+  padding: var(--lgi-space-1) 0;
+  background: transparent;
+  color: var(--lgi-muted);
+  font-weight: var(--lgi-weight-regular);
+  white-space: nowrap;
+}
+
+.page .textButton:hover:not(:disabled) {
+  background: transparent;
+  color: var(--lgi-signal-ink);
+}
+
+/* ── 查询区 ─────────────────────────────────── */
+.command {
+  flex: none;
+  border-bottom: 1px solid var(--lgi-ink);
+  background: var(--lgi-canvas-low);
+}
+
+.banner {
+  margin: 0;
+  padding: var(--lgi-space-3) var(--lgi-space-5) 0;
+  font-size: var(--lgi-text-data);
+}
+
+.page .banner a {
+  color: var(--lgi-ink);
+  text-decoration: underline;
+  text-underline-offset: var(--lgi-space-1);
+}
+
+.receipt {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--lgi-space-4);
+  min-height: calc(var(--lgi-space-8) + var(--lgi-space-1) / 2);
+  border-bottom: 1px solid var(--lgi-hairline);
+  padding: calc(var(--lgi-space-1) * 1.75) var(--lgi-space-5);
+  background: var(--lgi-warning-soft);
+  font-size: var(--lgi-text-data);
+}
+
+.receiptMeta {
+  color: var(--lgi-ghost);
+  text-align: right;
+}
+
+/* ── 工作台 ─────────────────────────────────── */
+.bench {
+  position: relative;
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr) var(--ev-inspector-w);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.bench[data-inspector='wide'] {
+  --ev-inspector-w: calc(var(--lgi-space-24) * 6 + var(--lgi-space-16));
+}
+
+.bench[data-inspector='focus'] {
+  --ev-inspector-w: min(calc(var(--lgi-space-24) * 9 + var(--lgi-space-12) + var(--lgi-space-2)), 72vw);
+}
+
+.bench[data-inspector='closed'] {
+  --ev-inspector-w: 0px;
+}
+
+.results {
+  min-width: 0;
+  overflow: auto;
+  border-right: 2px solid var(--lgi-ink);
+  background: var(--lgi-canvas);
+}
+
+.bench[data-inspector='closed'] .results {
+  border-right: 0;
+}
+
+.bench[data-inspector='closed'] .inspectorSlot {
+  display: none;
+}
+
+.feedback {
+  margin: var(--lgi-space-3) var(--lgi-space-4);
+  border: 1px solid var(--lgi-border-strong);
+  padding: calc(var(--lgi-space-3) + var(--lgi-space-1) / 2);
+  background: var(--lgi-canvas-low);
+}
+
+.feedback h2 {
+  margin: 0 0 calc(var(--lgi-space-1) * 1.5);
+  font-size: var(--lgi-text-longform);
+}
+
+.feedback p {
+  margin: 0 0 calc(var(--lgi-space-1) * 1.75);
+  color: var(--lgi-muted);
+  font-size: var(--lgi-text-data);
+  line-height: var(--lgi-lh-longform);
+}
+
+.feedback[data-kind='error'] {
+  border-color: var(--lgi-signal);
+  background: var(--lgi-signal-soft);
+}
+
+.feedback[data-kind='empty'] {
+  border-style: dashed;
+}
+
+.feedbackActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--lgi-space-3);
+}
+
+.footer {
+  display: grid;
+  place-items: center;
+  gap: var(--lgi-space-2);
+  min-height: var(--lgi-space-16);
+  padding: calc(var(--lgi-space-3) + var(--lgi-space-1) / 2);
+}
+
+.footerError {
+  margin: 0;
+  color: var(--lgi-danger);
+  font-size: var(--lgi-text-data);
+}
+
+.inspectorSlot {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.manage {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--lgi-space-10);
+  margin: 0 var(--lgi-space-4);
+  color: var(--lgi-ink);
+  font-weight: var(--lgi-weight-bold);
+}
+
+/* ── 响应式 ─────────────────────────────────── */
+@media (max-width: 1500px) {
+  .page {
+    --ev-inspector-w: calc(var(--lgi-space-24) * 4 + var(--lgi-space-2));
+  }
+
+  .bench[data-inspector='wide'] {
+    --ev-inspector-w: calc(var(--lgi-space-24) * 6 + var(--lgi-space-16));
+  }
+}
+
+/* 1180px 以下检查器不再是一栏，而是盖在列表上的抽屉：把两栏硬挤进手机，两栏都没法用。 */
+@media (max-width: 1180px) {
+  .bench,
+  .bench[data-inspector] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .results {
+    border-right: 0;
+  }
+
+  .bench[data-inspector='closed'] .inspectorSlot {
+    display: flex;
+  }
+}
+
+@media (max-width: 900px) {
+  .page {
+    display: block;
+    overflow: auto;
+  }
+
+  .bench {
+    display: block;
+    overflow: visible;
+  }
+
+  .results {
+    overflow: visible;
+  }
+}

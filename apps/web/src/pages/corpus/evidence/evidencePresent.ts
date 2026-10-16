@@ -131,6 +131,11 @@ export function stoppedReasonMeaning(raw: string): string {
 
 // ───────────────────────── 文本与数量 ─────────────────────────
 
+/** 作品标题：状态已知才显示，否则写「标题当前未知」，不拿别的字段顶替。 */
+export function workTitle(item: Pick<WorkItem, 'display'>): string {
+  return knownText(item.display.title, item.display.titleState, '标题当前未知');
+}
+
 /** 状态为 KNOWN 且有值才显示值；否则显示「未知」文案，不补成 0 或空串。 */
 export function knownText(value: string | number | null | undefined, state: string, unknownCopy = '当前未知'): string {
   return state === 'KNOWN' && value !== null && value !== undefined && value !== '' ? String(value) : unknownCopy;
@@ -332,8 +337,13 @@ export function materialSummary(item: Pick<WorkItem, 'media' | 'lanes'>): Materi
   };
 }
 
+/** 单个维度的状态读数；不适用的维度明说不计入分母。 */
+export function segmentReading(segment: MaterialSegment): string {
+  return segment.applicable ? stateMeta(segment.state)[0] : '本作品不适用，不计入分母';
+}
+
 export function segmentTitle(segment: MaterialSegment): string {
-  return segment.applicable ? `${segment.label}：${stateMeta(segment.state)[0]}` : `${segment.label}：本作品不适用，不计入分母`;
+  return `${segment.label}：${segmentReading(segment)}`;
 }
 
 /** 侧栏徽标：本次读取 N 个作品，及三个读数（作品总数不是库里的总数——读模型不给总数）。 */
