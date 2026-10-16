@@ -84,6 +84,19 @@ describe('语料页面框架（三页共用）', () => {
     }
   });
 
+  it('证据库页的侧栏计数经框架传到徽标；其他页不传时隐藏', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <CorpusFrame page="evidence" pageLabel="证据库" action="/corpus/evidence" shell={shell(A)} meta={null} foot="" evidenceCount={{ count: 3, title: '本次读取 3 个作品' }}>
+          <p>页面内容</p>
+        </CorpusFrame>
+      </MemoryRouter>,
+    );
+    expect(container.querySelector('#ev-rail-count')).toHaveTextContent('3');
+    renderFrame(shell(A));
+    expect(document.querySelectorAll('#ev-rail-count[hidden]')).toHaveLength(1);
+  });
+
   it('语料是当前一级入口', () => {
     renderFrame(shell(A));
     expect(screen.getByRole('link', { name: /语料/ })).toHaveAttribute('aria-current', 'page');

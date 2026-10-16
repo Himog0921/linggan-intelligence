@@ -5,6 +5,21 @@
   min-height: 0;
 }
 
+/* 侧栏「证据库」项的计数徽标。标记由 shell.rs 与 CorpusSideNav 输出（无计数时隐藏），样式原先只在
+ * 旧证据库页的样式表里；旧页删除后搬到这里，三页共用。 */
+.frame :global(.ev-rail-count) {
+  margin-left: auto;
+  padding: calc(var(--lgi-space-1) / 4) calc(var(--lgi-space-1) * 1.5);
+  background: var(--lgi-signal);
+  color: var(--lgi-on-dark);
+  font: var(--lgi-weight-bold) var(--lgi-text-label) / var(--lgi-lh-data) var(--lgi-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.frame :global(.ev-rail-count[hidden]) {
+  display: none;
+}
+
 .main {
   display: flex;
   flex-direction: column;
