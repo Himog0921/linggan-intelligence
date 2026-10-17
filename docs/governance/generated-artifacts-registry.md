@@ -243,3 +243,7 @@ Mog 授权三篇指定作品在本机核对与重新分层。私有材料快照�
 ### WEB-REACT-001-F · 概览 B 修订证据
 
 位置为同工作树 `artifacts/private/web-react-001-f/overview-b/`，忽略、不提交。来源为正式源码构建、现有隔离 PG 链路及同源 GET 实际候选；保存改版前/后截图、最小 JSON、差异说明和验证日志。原迁移截图不覆盖。截图含真实材料，只在本机使用；复现与清理继承 F 证据规则。供用户查看的选定设计及最终截图可另复制至当前 Codex visualization 任务目录，不入 Git。
+
+### WEB-REACT-001-F · #441 内核修复与本机发布
+
+固定于本工作树 `artifacts/private/web-react-001-f/kernel-release/`：合成PG复现/完整回归/独立审查/CI日志、无秘密发布前后身份/策略/调用计数与实际3000截图。忽略、不入Git，真实原文/凭据不得交模型或CI。一次性runner只调用已有隔离脚本前置并按同一清理规则销毁受控资源。合并后先复制到canonical同名private证据路径，再移除交付worktree。

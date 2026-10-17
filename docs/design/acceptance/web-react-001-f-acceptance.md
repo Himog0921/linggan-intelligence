@@ -145,3 +145,12 @@ Design（当前 UI 保真）、Code（候选）、Automated、隔离 Real-chain 
 最终 source whitespace检查、TypeScript/lint/build、78文件834测、最终正式F10步和受控资源清理再次通过；API155/72ignored及全阶段B/D1/D2/E/F已在本轮实跑。第一次全量采集焦点断言失败保留原日志，不通过隐藏/删除测试消除；最后限制2worker完整复核通过。独立复审的修正与最终源码指纹对应。
 
 运行层：2026-10-17收尾main为24e3ec23，runtime-main干净且/health仍82d48a72；3000没有本轮部署。PR仍Draft，原Topic内核PG两项失败/旧head红CI继续如实保留，新head以Checks为准。未启动真实模型/采集，未启用worker或恢复研究，未合并部署；Mog体验签收独立。
+
+
+## 2026-10-17 · PR #441 内核修复与条件发布验收
+
+Mog 本轮授权修复原两项回归，通过后合并部署并核对实际3000的B方案；本节取代上文“本包不修改内核/不部署”的当前适用限制，历史结果保留。同步main07d6c6ca，仅progress冲突保留双方记录。
+
+修前相同两个隔离target共9项中2项失败；修后9项全通过并清理容器/卷。冻结恢复现同时识别dossier derivativeRef和旧保存jobRef，逐衍生物通过当前处置/退役/分层资格，使用权威完整分页读取的当前全文，不再补查所有历史ACCEPTED层。封面标题沿用dossier的ACCEPTED/PARTIAL资格。OCR合成fixture改用rules-v3和实质行引用，研究task精确选当前producer的derivativeRef，原长文/Unicode尾部/保存重开/同job撤回断言保留；增加新旧身份、未知版本、无实质行和旧层不能借资格的负例。没有放宽生产资格、删除断言或跳过失败。
+
+最新主线集成后前端79文件/838测试、TS/lint/build通过。完整原Topic内核proof、正式topics Web隔离链路和独立只读复核正在运行；当前head CI、合并、部署和实际3000截图仍待后续回执，不能以focused或历史B证明替代。证据位于private/web-react-001-f/kernel-release/。

@@ -294,6 +294,11 @@ try {
           (await page.locator("#ops-hero-title").innerText()) === "本月加微",
         "month",
       );
+      // Visual reorganization is data-only: no action list, but all analysis sections remain.
+      assert.equal(await page.getByRole("heading", { name: "今日必须处理" }).count(), 0);
+      assert.match(await page.locator("[data-ops-overview]").innerText(), /有发布账号/);
+      assert.match(await page.locator("[data-ops-overview]").innerText(), /运营人表现/);
+      assert.match(await page.locator("[data-ops-overview]").innerText(), /账号矩阵/);
       for (const name of ["按周", "按月", "按日"]) {
         await page.getByRole("button", { name, exact: true }).click();
         await wait(
