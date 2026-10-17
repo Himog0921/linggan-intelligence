@@ -120,7 +120,7 @@
 
 ## TOPIC-MAP-COMPACT-382 隔离 UI 验证
 
-- 权威测试源：`scripts/test-topic-map-ui.cjs`、`scripts/test-topic-map-compact-ui.py`，维护源码，不是生成文件。只运行合成 HTTP fixture 与候选 JS/CSS。
+- 历史测试源：`scripts/test-topic-map-ui.cjs`、`scripts/test-topic-map-compact-ui.py` 当时为维护源码、只运行合成 HTTP fixture 与候选 JS/CSS；WEB-REACT-001-F 同包退役，当前替代为 `apps/web/src/pages/topics/*.test.ts*`、`apps/web/test/e2e/topics-real-chain.mjs` 与 `scripts/test-web-app-postgres.sh` 的正式 React/Axum/PG 证明。历史截图仍只证明当时版本。
 - 源码传递包、补丁、截图与日志：本任务系统临时目录和 Actions artifact（源码包 1 日、验证结果 7 日）；不入 Git、不含真实原文/凭据、不访问模型/平台/正式库。
 - `.github/workflows/topic-map-compact-transfer.yml` 仅用于专属候选分支的版本校验与传递，交付前删除；持续回归另用只读验证 workflow。临时传递仅影响此分支，不强推、不合并或部署。
 
@@ -233,3 +233,17 @@ Mog 授权三篇指定作品在本机核对与重新分层。私有材料快照�
 
 - 固定位置：本工作树 `artifacts/private/web-react-001-e/`，baseline/candidate/comparison 与日志不入 Git。由本包 Playwright 及隔离 Axum/PG proof 再生。3000 及真实数据候选只允许同源 GET/HEAD，目标写入仅隔离 PG。
 - 截图覆盖实际页面全滚动、表格滚动、对话框与多视口；不修改原图冒充现场，不上传真实业务截图/快照。CI 只用合成 fixture；证明产物保留七天。容器、卷和候选服务按本任务精确名称清理。Mog 验收前保留本地证据。
+
+## WEB-REACT-001-F · 主题图谱迁移证据
+
+- 固定位置：本工作树`artifacts/private/web-react-001-f/`，含实际3000基线、只读候选、完整滚动/四视口截图、最小JSON快照、差异/性能/验证日志；忽略、不提交，禁止上传真实材料。
+- 来源：本包Playwright、真实Axum+隔离PG的合成proof及同源GET/HEAD视觉桥接；真实写命令只在一次性隔离PG。自动viewed回执若由当前页面触发在视觉捕获中阻断并如实记录，不伪造回执。
+- 原图保留不改；候选只读桥接不作正式链路证明，原始API快照最小必要本机保存。合并后按既有私有运行证据规则先保存在canonical相同artifacts/private路径，再移除交付worktree。
+
+### WEB-REACT-001-F · 概览 B 修订证据
+
+位置为同工作树 `artifacts/private/web-react-001-f/overview-b/`，忽略、不提交。来源为正式源码构建、现有隔离 PG 链路及同源 GET 实际候选；保存改版前/后截图、最小 JSON、差异说明和验证日志。原迁移截图不覆盖。截图含真实材料，只在本机使用；复现与清理继承 F 证据规则。供用户查看的选定设计及最终截图可另复制至当前 Codex visualization 任务目录，不入 Git。
+
+### WEB-REACT-001-F · #441 内核修复与本机发布
+
+固定于本工作树 `artifacts/private/web-react-001-f/kernel-release/`：合成PG复现/完整回归/独立审查/CI日志、无秘密发布前后身份/策略/调用计数与实际3000截图。忽略、不入Git，真实原文/凭据不得交模型或CI。一次性runner只调用已有隔离脚本前置并按同一清理规则销毁受控资源。合并后先复制到canonical同名private证据路径，再移除交付worktree。

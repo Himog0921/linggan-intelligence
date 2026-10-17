@@ -356,7 +356,9 @@ async fn health_reports_the_frontend_build() {
             "/ops/publications",
             "/ops/accounts",
             "/ops/daily",
-            "/ops/io"
+            "/ops/io",
+            "/topics",
+            "/topics/{canonical_key}"
         ])
     );
 }
@@ -460,4 +462,56 @@ async fn operations_five_pages_are_react_and_native_assets_are_retired() {
         let (status, _, _) = send(app(), uri, "127.0.0.1:3000").await;
         assert_eq!(status, StatusCode::NOT_FOUND);
     }
+}
+
+#[tokio::test]
+async fn topic_pages_use_react_keep_safe_keys_and_retire_native_assets() {
+    let dist = synthetic_dist(Some("82d48a72"), true);
+    for path in [
+        "/topics",
+        "/topics?domainRef=00000000-0000-4000-8000-000000000001",
+        "/topics/task-initiation-difficulty",
+    ] {
+        let (status, headers, body) =
+            send(web(dist.clone(), "82d48a72"), path, "127.0.0.1:3000").await;
+        assert_eq!(status, StatusCode::OK, "{path}");
+        assert!(body.contains("<div id=\"root\">"));
+        assert_eq!(headers[header::CACHE_CONTROL], "no-store");
+    }
+    for key in ["a", "Bad", "a.b", "中文", "a%2Fb"] {
+        let (status, _, _) = send(
+            web(dist.clone(), "unknown"),
+            &format!("/topics/{key}"),
+            "localhost:3000",
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{key}");
+    }
+    for retired in [
+        "/assets/topic-map.css",
+        "/assets/topic-map.js",
+        "/assets/topic-workspace.css",
+        "/assets/topic-workspace.js",
+        "/topics/key/unregistered",
+        "/api/local/topic-map/unknown",
+    ] {
+        let (status, _, _) = send(app(), retired, "localhost:3000").await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{retired}");
+    }
+    let (status, _, _) = send(web(dist, "unknown"), "/topics", "evil.example:3000").await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, headers, body) = send(
+        app(),
+        "/api/local/topic-workspaces/task-initiation-difficulty",
+        "localhost:3000",
+    )
+    .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(
+        headers[header::CONTENT_TYPE]
+            .to_str()
+            .unwrap()
+            .starts_with("application/json")
+    );
+    assert!(body.contains("topic_read_model_not_connected"));
 }

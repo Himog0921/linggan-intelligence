@@ -32,6 +32,7 @@ on:
       - 'apps/api/src/local_web/content_workbench*'
       - 'apps/api/src/local_web/full_schema_fixture.rs'
       - 'apps/api/src/local_web/ops.rs'
+      - 'apps/api/src/local_web/topic*.rs'
       - 'crates/evidence/src/material_social_read.rs'
       - 'crates/evidence/src/research_dossier.rs'
       - 'crates/evidence/src/research_dossier/**'
@@ -121,6 +122,8 @@ jobs:
           rustfmt --edition 2024 --config skip_children=true --check \
             apps/api/src/local_web/web_app.rs apps/api/src/local_web/web_app_tests.rs apps/api/src/local_web/model_settings.rs \
             apps/api/src/local_web/corpus_shell_api.rs apps/api/src/local_web/creators_browser_tests.rs \
+            apps/api/src/local_web/topic_map.rs apps/api/src/local_web/topic_workspace.rs \
+            apps/api/src/local_web/topic_workspace_tests.rs apps/api/src/local_web/topic_browser_tests.rs \
             apps/api/src/local_web/evidence_browser_tests.rs apps/api/src/local_web/evidence_fixture.rs apps/api/src/local_web/evidence_seed.rs \
             apps/api/src/local_web/evidence_api_proof_tests.rs apps/api/src/local_web/evidence_guard_tests.rs
       - name: Content workbench PostgreSQL contracts

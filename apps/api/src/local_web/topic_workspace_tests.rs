@@ -9,65 +9,6 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 #[tokio::test]
-async fn topic_page_names_its_provisional_and_not_connected_boundaries() {
-    let response = app()
-        .oneshot(
-            Request::builder()
-                .uri("/topics/task-initiation-difficulty")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let html = String::from_utf8(body.to_vec()).unwrap();
-    for required in [
-        "暂定主题",
-        "PROVISIONAL TOPIC",
-        "人工裁定",
-        "来源边界",
-        "当前未读取 Topic",
-        "data-topic-workspace",
-    ] {
-        assert!(
-            html.contains(required),
-            "missing Topic boundary: {required}"
-        );
-    }
-    assert!(!html.contains("已验证趋势"));
-    assert!(!html.contains("正式主题"));
-}
-
-#[tokio::test]
-async fn topic_assets_are_served_as_dedicated_lids_consumers() {
-    for (path, content_type, required) in [
-        (
-            "/assets/topic-workspace.css",
-            "text/css; charset=utf-8",
-            ".topic-workspace",
-        ),
-        (
-            "/assets/topic-workspace.js",
-            "text/javascript; charset=utf-8",
-            "data-topic-workspace",
-        ),
-    ] {
-        let response = app()
-            .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            response.headers().get(header::CONTENT_TYPE).unwrap(),
-            content_type
-        );
-        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        assert!(String::from_utf8(body.to_vec()).unwrap().contains(required));
-    }
-}
-
-#[tokio::test]
 async fn topic_import_rejects_malformed_json_with_the_topic_error_contract() {
     let response = app()
         .oneshot(

@@ -400,3 +400,9 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发，并于 2026-10-02 
 阶段 E 实施入口：[运营台账五页 React 迁移](plans/active/web-react-001-e-ops.md)（Issue #438，已派定；保留当前实际 UI，候选验证不等于部署）。
 
 阶段 E 证明：[运营台账五页验收记录](design/acceptance/web-react-001-e-acceptance.md)（候选、隔离链路与实际 UI 对照；部署及 Mog 验收独立）。
+
+阶段 F 实施入口：[主题图谱与 Topic 工作区 React 迁移](plans/active/web-react-001-f-topics.md)（Issue #440；React迁移及已选B材料优先概览修订，截图与隔离链路证明，未部署）。
+
+阶段 F 证明：[主题图谱与 Topic Workspace 迁移验收](design/acceptance/web-react-001-f-acceptance.md)（旧迁移保真及当前B改版实际截图、正式隔离链路，部署与 Mog 签收独立）。
+
+主题概览 B「材料优先」正式改版：[阶段 F 计划 §7](plans/active/web-react-001-f-topics.md#7-2026-10-17--mog-选定-b材料优先正式改版)，Mog 已选定并授权；保留全部功能/口径，候选实施与验收中。

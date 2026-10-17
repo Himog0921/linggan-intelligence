@@ -209,7 +209,7 @@ pub async fn read_frozen_work_texts_in_transaction(
     }
     if requested
         .iter()
-        .any(|(_, field)| matches!(field.as_str(), "ocr" | "transcript"))
+        .any(|(_, field)| matches!(field.as_str(), "ocr" | "transcript" | "cover_headline"))
     {
         texts.extend(read_frozen_media_texts(tx, work_ref, &requested).await?);
     }
@@ -239,7 +239,6 @@ async fn read_frozen_media_texts(
     work: Uuid,
     requested: &std::collections::HashSet<(Uuid, String)>,
 ) -> Result<std::collections::HashMap<(Uuid, String), Vec<String>>, WorkResourceReadError> {
-    use sqlx::Row;
     use std::collections::HashMap;
     let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text")
         .fetch_one(&mut **tx)
@@ -249,7 +248,6 @@ async fn read_frozen_media_texts(
         .remove(&work)
         .unwrap_or_default();
     let mut texts = HashMap::<(Uuid, String), Vec<String>>::new();
-    let mut qualified_ocr = HashMap::new();
     for derivative in items {
         if derivative["state"] != "ACQUIRED"
             || matches!(
@@ -259,46 +257,40 @@ async fn read_frozen_media_texts(
         {
             continue;
         }
-        let Some(source) = derivative["jobRef"].as_str().and_then(|s| s.parse().ok()) else {
-            continue;
-        };
-        if requested.contains(&(source, "transcript".into()))
-            && derivative["kind"] == "asr_text"
-            && let Some(text) = derivative["researchText"].as_str()
-        {
-            texts
-                .entry((source, "transcript".into()))
-                .or_default()
-                .push(text.into());
-        }
-        if requested.contains(&(source, "ocr".into()))
-            && derivative["ocrLayering"]["cleanCorpusEligible"] == true
-        {
-            if let Some(text) = derivative["ocrLayering"]["imageSubstantiveText"].as_str() {
-                texts
-                    .entry((source, "ocr".into()))
-                    .or_default()
-                    .push(text.into());
-            }
-            if let Some(reference) = derivative["derivativeRef"]
-                .as_str()
-                .and_then(|s| s.parse::<Uuid>().ok())
-            {
-                qualified_ocr.insert(reference, source);
-            }
-        }
-    }
-    let refs: Vec<_> = qualified_ocr.keys().copied().collect();
-    for refs in refs.chunks(256) {
-        // A qualified sibling in the same job cannot authorize another derivative.
-        let rows = sqlx::query("SELECT layout.ocr_derivative_ref,layer.image_substantive_text FROM linggan_media_ocr_layout layout JOIN linggan_media_ocr_layering_result layer USING(layout_ref) WHERE layout.ocr_derivative_ref=ANY($1) AND layout.content_public_ref=$2 AND layer.state='ACCEPTED' AND layer.image_substantive_text IS NOT NULL")
-            .bind(refs).bind(work).fetch_all(&mut **tx).await?;
-        for row in rows {
-            if let Some(source) = qualified_ocr.get(&row.get::<Uuid, _>("ocr_derivative_ref")) {
-                texts
-                    .entry((*source, "ocr".into()))
-                    .or_default()
-                    .push(row.get("image_substantive_text"));
+        // Current dossiers freeze derivative IDs; older saved decisions freeze job IDs.
+        // Both resolve only this qualified derivative, never a sibling or another layer.
+        let sources: std::collections::HashSet<Uuid> = ["derivativeRef", "jobRef"]
+            .into_iter()
+            .filter_map(|key| derivative[key].as_str()?.parse().ok())
+            .collect();
+        let layer = &derivative["ocrLayering"];
+        for (field, text) in [
+            (
+                "transcript",
+                derivative["researchText"]
+                    .as_str()
+                    .filter(|_| derivative["kind"] == "asr_text"),
+            ),
+            (
+                "ocr",
+                layer["imageSubstantiveText"]
+                    .as_str()
+                    .filter(|_| layer["cleanCorpusEligible"] == true),
+            ),
+            (
+                "cover_headline",
+                layer["coverHeadline"]
+                    .as_str()
+                    .filter(|_| matches!(layer["state"].as_str(), Some("ACCEPTED" | "PARTIAL"))),
+            ),
+        ] {
+            if let Some(text) = text {
+                for source in &sources {
+                    let key = (*source, field.to_owned());
+                    if requested.contains(&key) {
+                        texts.entry(key).or_default().push(text.to_owned());
+                    }
+                }
             }
         }
     }

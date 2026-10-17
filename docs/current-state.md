@@ -336,6 +336,11 @@ Mog 曾指定 `comment-intelligence-v1` 完整实施包；基线 `origin/main@61
 Mog 批准“评论语料与每日研究 V1”并要求原声参考证据库紧凑表格。单代理在 codex/comment-daily-v1、基线 73f5996 实现四视图、异步保守清洗、按作品分包、23:00 日批、预算与显式失败重试，承接下方 #167/#169 历史条目。新 0043 仅在隔离数据库验证，未应用共享库；3000、真实评论外发、merge 和 Mog 业务验收未发生。本次合同及实际证明见 [COMMENT-DAILY-001](plans/active/comment-daily-001.md) 和 [评论验收](design/acceptance/comment-research-001-acceptance.md)。
 
 
+
+## 2026-10-17 · 主题概览 B「材料优先」正式候选（#440 / Draft #441）
+
+Mog 选定 B，正式 React 候选保留全部功能/数据口径并调整为左材料右分布，双视图导航回左侧；以 [阶段F计划 §7](plans/active/web-react-001-f-topics.md#7-2026-10-17--mog-选定-b材料优先正式改版) 与 [F修订验收](design/acceptance/web-react-001-f-acceptance.md) 为准。已同步证据库主线24e3ec23，834项前端回归及正式隔离全阶段、最终F10步通过；实际四宽度212张最终截图已核对、源码59项指纹已独立复核。历史5,184像素一致不覆盖B改版；3000仍82d48a72，未合并部署、未恢复研究或真实模型/平台动作。
+
 ## 2026-10-13 主题图谱紧凑工作区候选
 
 TOPIC-MAP-COMPACT-382 根据 Mog 最新确认重排 `/topics`：领域旁切换、左树固定、四组真实统计前置、旅程地图/列表与统计口径独立、场景检索局部化。代码在专属分支修改，使用既有 HTTP 与来源资格，不变更研究内核、数据库或全站 token。27 组 JS、10 组多尺寸 Chromium、治理及设计检查通过（合成数据，0 页面异常）；PR #404，未合并、部署或启动研究。详见[变更清单](design/changes/topic-map-compact-382.md)。
