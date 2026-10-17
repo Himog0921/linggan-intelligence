@@ -1431,7 +1431,7 @@
 }
 .ops-overview-v2 .ops-target-foot button:focus-visible {
   outline: 2px solid var(--lgi-focus);
-  outline-offset: 2px;
+  outline-offset: calc(var(--lgi-space-1) / 2);
 }
 .ops-section-kicker-v2 {
   display: flex;
