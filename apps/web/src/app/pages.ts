@@ -5,9 +5,10 @@
 export const MODEL_SETTINGS_PATH = '/settings/models';
 export const WORKBENCH_PATH = '/ops/creation';
 export const CREATORS_PATH = '/corpus/creators';
+export const EVIDENCE_PATH = '/corpus/evidence';
 
 export const COLLECTION_PATHS = ['/collection/targets', '/collection/tasks', '/collection/domains', '/collection/runtime'] as const;
 
 export const OPS_PATHS = ['/ops/overview', '/ops/publications', '/ops/accounts', '/ops/daily', '/ops/io'] as const;
 
-export const REACT_PAGE_PATHS: readonly string[] = [MODEL_SETTINGS_PATH, WORKBENCH_PATH, CREATORS_PATH, ...COLLECTION_PATHS, ...OPS_PATHS];
+export const REACT_PAGE_PATHS: readonly string[] = [MODEL_SETTINGS_PATH, WORKBENCH_PATH, CREATORS_PATH, EVIDENCE_PATH, ...COLLECTION_PATHS, ...OPS_PATHS];

@@ -1,0 +1,170 @@
+/* 研究底稿：与证据检查器共用原生控件与字体。只消费 LIDS --lgi-* Token。 */
+
+.panel {
+  min-width: 0;
+}
+
+.anchor {
+  scroll-margin-top: calc(var(--lgi-space-24) + var(--lgi-space-12) + var(--lgi-space-5));
+}
+
+.note {
+  margin: var(--lgi-space-2) 0;
+  color: var(--lgi-muted);
+  font-size: var(--lgi-text-data);
+  line-height: var(--lgi-lh-longform);
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--lgi-space-2);
+  margin: var(--lgi-space-3) 0;
+}
+
+.toolbar button {
+  min-height: var(--lgi-space-8);
+}
+
+.disclosure {
+  margin: calc(var(--lgi-space-2) + var(--lgi-space-1) / 2) 0;
+}
+
+.disclosure summary {
+  cursor: pointer;
+  font-size: var(--lgi-text-data);
+  line-height: var(--lgi-lh-longform);
+}
+
+.pre,
+.text {
+  margin: var(--lgi-space-2) 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: var(--lgi-lh-longform);
+}
+
+.pre {
+  max-height: calc(var(--lgi-space-24) * 4 + var(--lgi-space-5));
+  overflow: auto;
+  font: var(--lgi-text-data) / var(--lgi-lh-longform) var(--lgi-font-mono);
+}
+
+.text {
+  font: var(--lgi-text-body) / var(--lgi-lh-longform) var(--lgi-font-evidence);
+}
+
+.task {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--lgi-space-2);
+  font-size: var(--lgi-text-data);
+}
+
+.task select {
+  max-width: 100%;
+}
+
+.busy {
+  color: var(--lgi-muted);
+}
+
+/* ── 原图与识别对照 ───────────────────────── */
+.image {
+  container-type: inline-size;
+  margin: var(--lgi-space-2) 0;
+  scroll-margin-top: calc(var(--lgi-space-24) + var(--lgi-space-12) + var(--lgi-space-5));
+}
+
+.image > summary {
+  cursor: pointer;
+  font-size: var(--lgi-text-data);
+}
+
+.compare {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--lgi-space-3);
+  align-items: start;
+  margin-top: var(--lgi-space-3);
+}
+
+.visual {
+  position: relative;
+  min-width: 0;
+  line-height: 0;
+}
+
+.visual img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.visual p {
+  line-height: var(--lgi-lh-longform);
+}
+
+.highlight {
+  position: absolute;
+  outline: 2px solid var(--lgi-focus);
+  background: transparent;
+  pointer-events: none;
+}
+
+.lines {
+  max-height: calc(var(--lgi-space-24) * 5 + var(--lgi-space-5));
+  overflow: auto;
+}
+
+.line {
+  display: block;
+  width: 100%;
+  min-height: 0;
+  border: 0;
+  border-bottom: 1px solid var(--lgi-hairline);
+  padding: var(--lgi-space-2);
+  background: transparent;
+  color: inherit;
+  font: var(--lgi-text-data) / var(--lgi-lh-body) var(--lgi-font-sans);
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.line[data-role='uncertain'],
+.line[data-role='low_confidence'] {
+  color: var(--lgi-muted);
+}
+
+@container (max-width: 560px) {
+  .compare {
+    grid-template-columns: 1fr;
+  }
+
+  .lines {
+    max-height: calc(var(--lgi-space-24) * 3);
+  }
+}
+
+@media (max-width: 700px) {
+  .compare {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── 已采评论 ─────────────────────────────── */
+.commentRow {
+  margin: var(--lgi-space-2) 0;
+}
+
+.replies {
+  margin-left: var(--lgi-space-4);
+  border-left: 2px solid var(--lgi-border);
+  padding-left: var(--lgi-space-3);
+}
+
+.metrics {
+  margin: var(--lgi-space-2) 0;
+}

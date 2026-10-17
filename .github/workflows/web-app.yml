@@ -15,6 +15,11 @@ on:
       - 'apps/api/src/local_web/target_drawer.rs'
       - 'apps/api/src/local_web/corpus_shell_api.rs'
       - 'apps/api/src/local_web/creators*.rs'
+      - 'apps/api/src/local_web/evidence*.rs'
+      - 'apps/api/src/local_web/research_dossier*.rs'
+      - 'apps/api/src/local_web/material_*.rs'
+      - 'apps/api/src/local_web/local_media_routes.rs'
+      - 'apps/api/src/local_web/local_asset_delivery.rs'
       - 'apps/api/src/local_web/shell.rs'
       - 'apps/api/src/local_web/shell.css'
       - 'apps/api/src/local_web/lids_tokens.css'
@@ -29,6 +34,11 @@ on:
       - 'apps/api/src/local_web/ops.rs'
       - 'crates/evidence/src/material_social_read.rs'
       - 'crates/evidence/src/research_dossier.rs'
+      - 'crates/evidence/src/research_dossier/**'
+      - 'crates/evidence/src/work_resource_*.rs'
+      - 'crates/evidence/src/material_*.rs'
+      - 'crates/evidence/src/content_reobservation.rs'
+      - 'scripts/test-research-dossier-postgres.sh'
       - 'crates/intelligence/src/ops_ledger/read/creation_read.rs'
       - 'Cargo.lock'
       - 'crates/intelligence/Cargo.toml'
@@ -95,7 +105,7 @@ jobs:
           npm ci --prefix apps/web --ignore-scripts --no-audit --no-fund
           npx --prefix apps/web playwright install --with-deps chromium
       - name: API route regression
-        run: cargo test -p linggan-api --bins --locked -- local_web::web_app_tests local_web::corpus_shell_api
+        run: cargo test -p linggan-api --bins --locked -- local_web::web_app_tests local_web::corpus_shell_api local_web::evidence_
       - name: Isolated PostgreSQL + Axum + React browser proof (synthetic credential only)
         env:
           WEB_APP_PROOF_DIR: ${{ runner.temp }}/web-app-proof
@@ -110,7 +120,9 @@ jobs:
           # 只查本模块自己的 Rust 文件：local_web.rs 在主线上已有与本模块无关的格式偏差。
           rustfmt --edition 2024 --config skip_children=true --check \
             apps/api/src/local_web/web_app.rs apps/api/src/local_web/web_app_tests.rs apps/api/src/local_web/model_settings.rs \
-            apps/api/src/local_web/corpus_shell_api.rs apps/api/src/local_web/creators_browser_tests.rs
+            apps/api/src/local_web/corpus_shell_api.rs apps/api/src/local_web/creators_browser_tests.rs \
+            apps/api/src/local_web/evidence_browser_tests.rs apps/api/src/local_web/evidence_fixture.rs apps/api/src/local_web/evidence_seed.rs \
+            apps/api/src/local_web/evidence_api_proof_tests.rs apps/api/src/local_web/evidence_guard_tests.rs
       - name: Content workbench PostgreSQL contracts
         run: |
           cargo test -p linggan-intelligence --lib exact_spans_keep_overlaps_codepoints_and_long_repeated_patterns --locked

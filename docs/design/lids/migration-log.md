@@ -8,13 +8,21 @@ PR #407 合并前修正（2026-10-13）：运营页焦点/强调线与新增共�
 > 事实来源: [system.md](system.md)、[README.md](README.md)、DESIGN-002 Issue #7、项目 progress 记录和实际验证输出
 > 冲突时以谁为准: 真实代码/合同/测试、用户最新确认、当前 SCOPE 和 ACCEPTED 决策；本日志不把计划写成已实现事实
 
+## 2026-10-16 · WEB-REACT-001 阶段 D2：证据库迁到 React（Issue #433 / #430）
+
+- **实现载体变化**：`/corpus/evidence` 改由 `apps/web` 的 React 应用提供（`apps/web/src/pages/corpus/evidence/`，经 D1 的 `CorpusFrame`）；旧 `evidence_library.js/.css`、`evidence_observation.js`、`research_dossier.js`、`research_dossier_batch.js` 与 Rust 页面拼接删除。语料三页里只剩评论研究仍由 `shell.rs` 渲染。
+- **未新增全局资产**：没有新 Token、Primitive、CMP、Scene、Motion 或第二套外壳样式；页面样式为 CSS Module，只消费 `--lgi-*`，`tokenDiscipline.test.ts` 自动检查；样式契约测试另守封面多列栅格、3:4 完整显示与检查器栏宽（三档加关闭）。组合沿用 L1 Corpus Explorer + 右侧 Split Evidence Inspector；1024px 及以下检查器为抽屉。
+- **共享外壳接缝**：侧栏「证据库」项的计数徽标改由页面填写（DR-5）；D1 的 `CorpusSideNav`／`CorpusFrame` 只多一个可选值，与 `shell.rs` 的对照测试照旧通过。
+- **页面局部变化**（均记在[阶段 D 分册 §4](../../plans/active/web-react-001-d-corpus.md)，规格修订见 [PAGE-EVIDENCE-001](../pages/evidence-library-page.md) §14）：移除读模型给不出结果的三个控件（「相关度」排序、近 7／30 天时间窗、「旧 OCR 已停用」状态）与未接通占位（「我的视图」「打开原文」「补采」「补采媒体」）；立即复观测先确认、回执分已提交／未受理／未完成／未确认；阅读主序在前、技术事实默认折叠；评论原文点击后才读取。
+- **验证边界**：视觉与行为证据见 [ACC-WEB-REACT-001-D2](../acceptance/web-react-001-d2-acceptance.md)；合成数据，未经 Mog 审美验收，未合并、未部署。
+
 ## 2026-10-16 · WEB-REACT-001 阶段 D1：语料共享外壳与创作者页迁到 React（Issue #433 / #430）
 
 - **实现载体变化**：`/corpus/creators` 改由 `apps/web` 的 React 应用提供，旧 `creators.html/.js/.css` 删除；语料三页共用的左侧二级导航、面包屑领域选择器与一级导航「采集」状态词在 React 里有了共享实现（`apps/web/src/corpus/`），数据来自只读接口 `GET /api/local/corpus/shell`。旧证据库、评论研究页仍由 `shell.rs` 渲染，页头与侧栏位置、样式与它们同源（`shell.css`），前端测试逐项对照 `shell.rs` 的侧栏登记表与标记。
 - **未新增全局资产**：没有新 Token、Primitive、CMP、Scene、Motion、按钮或第二套外壳样式；页面样式为 CSS Module，只消费 `--lgi-*`，页面里的 `--creator-*` 局部变量是现有 Token 的 `calc` 组合（沿用旧页做法）；`tokenDiscipline.test.ts` 自动检查不写死颜色、字号、行高与间距。组合沿用 `LIDS-PAT-001` 的 L1 Corpus Explorer + 右侧 Split Evidence Inspector（依据抽屉）。
 - **页面局部变化**（均记在[阶段 D 分册 §3.1](../../plans/active/web-react-001-d-corpus.md)）：回执分「已完成 / 未完成 / 未确认」，用文字标签 + 左侧色条表达，不只靠颜色；「加入观察」先弹确认；头像、封面的可访问名称与实际加载状态一致；封面按 3:4 完整显示；窄屏（≤640px）分析状态入口只留「设置」，与旧页一致；未知显示「—」，≥1 万缩写并在悬停给精确值（LIDS BOUND-001）；时间统一 `YYYY-MM-DD HH:MM`。
 - **语义呈现**（来自 PR #384 调查，只读）：作品表达与作者倾向分列分层并写明各自的判定门槛与可并存关系；分析状态「排队 / 失败 / 已分析但依据不足 / 尚未取得结果 / 未开启」分别显示；筛选条件可组合、逐项可移除，「重置」只清列表条件，范围统计与筛选结果分开。
-- **验证边界**：视觉与行为证据见 [ACC-WEB-REACT-001-D1](../acceptance/web-react-001-d1-acceptance.md)；合成数据，未经 Mog 审美验收，未合并、未部署。
+- **验证边界**：视觉与行为证据见 [ACC-WEB-REACT-001-D1](../acceptance/web-react-001-d1-acceptance.md)；合成数据；2026-10-16 已合并上线（`baaf5a51`），未经 Mog 审美验收。
 
 ## 2026-10-15 · WEB-REACT-001 阶段 B：模型设置页迁到 React（Issue #430 / Draft PR #431）
 

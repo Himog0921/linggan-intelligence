@@ -85,7 +85,7 @@ D01–D11 是当前对话已确认的产品范围及约束。它们不预先确�
 
 代码定位：
 
-- [Corpus 导航](../../../apps/api/src/local_web.rs)、[单作品评论读取](../../../apps/api/src/local_web/evidence_observation.js)。
+- [Corpus 导航](../../../apps/api/src/local_web.rs)、单作品评论读取（`evidence_observation.js`，已随 WEB-REACT-001 阶段 D2 删除，现为 `apps/web/src/pages/corpus/evidence/useCommentChannel.ts` 与 `DiscussionBlock.tsx`）。
 - [共享 Work Resource](../../../crates/evidence/src/work_resource_read.rs)、[Current 裁定](../../../crates/evidence/src/work_resource_current.rs)。
 - [暂定 Topic](../../../crates/intelligence/src/topic_workspace.rs)、[Topic 当前合同](../../architecture/topic-workspace-contract.md)。
 - [PR #165](https://github.com/Himog0921/linggan-intelligence/pull/165)、[PR #162](https://github.com/Himog0921/linggan-intelligence/pull/162)、[PR #116](https://github.com/Himog0921/linggan-intelligence/pull/116)。

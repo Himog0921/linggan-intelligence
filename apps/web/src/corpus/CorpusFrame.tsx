@@ -1,6 +1,6 @@
 import { useId, type ReactNode } from 'react';
 import { AppShell } from '../app/AppShell';
-import { CorpusSideNav } from './CorpusSideNav';
+import { CorpusSideNav, type EvidenceCount } from './CorpusSideNav';
 import type { CorpusPageKey } from './corpusPages';
 import type { CorpusShell } from './corpusShellApi';
 import { DomainPicker } from './DomainPicker';
@@ -19,6 +19,8 @@ interface CorpusFrameProps {
   meta: ReactNode;
   /** 侧栏底部说明本页的数据范围。 */
   foot: ReactNode;
+  /** 证据库页的侧栏计数徽标；其他页不传。 */
+  evidenceCount?: EvidenceCount | null;
   children: ReactNode;
 }
 
@@ -27,7 +29,7 @@ interface CorpusFrameProps {
  * 页头、侧栏、领域选择器的位置和样式与旧页面同源（shell.css）；领域在三页之间切换不丢（F09）。
  * 一级导航「采集」项的状态词与领域列表同源（语料外壳接口），三页一致；外壳没读到时保持「状态未知」。
  */
-export function CorpusFrame({ page, pageLabel, action, shell, meta, foot, children }: CorpusFrameProps) {
+export function CorpusFrame({ page, pageLabel, action, shell, meta, foot, evidenceCount = null, children }: CorpusFrameProps) {
   const titleId = useId();
   const picker = shell ? <DomainPicker domains={shell.domains} selected={shell.selectedDomain} action={action} /> : null;
   const crumb = picker ? (
@@ -49,7 +51,7 @@ export function CorpusFrame({ page, pageLabel, action, shell, meta, foot, childr
     >
       <title>{`${pageLabel} · 语料`}</title>
       <div className={`v7-shell ${styles.frame}`}>
-        <CorpusSideNav active={page} domain={shell?.selectedDomain ?? null} foot={foot} />
+        <CorpusSideNav active={page} domain={shell?.selectedDomain ?? null} foot={foot} evidenceCount={evidenceCount} />
         <main className={styles.main} aria-labelledby={titleId}>
           <h1 id={titleId} className="v7-sr-only">
             {pageLabel}

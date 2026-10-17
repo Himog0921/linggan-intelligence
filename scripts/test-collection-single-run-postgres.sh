@@ -59,6 +59,16 @@ if [[ "${COLLECTION_RUN_REGRESSION_PROOF:-0}" == "1" ]]; then
   done
 fi
 if [[ "${COLLECTION_RUN_BROWSER_PROOF:-0}" == "1" ]]; then
+  # 浏览器证明会从采集页点进证据库，证据库是 React 页（WEB-REACT-001 阶段 D2）：需要已构建的前端产物。
+  node_bin="${WEB_APP_PROOF_NODE:-$HOME/.nvm/versions/node/v$(cat .nvmrc)/bin/node}"
+  [[ -x "$node_bin" ]] || node_bin="$(command -v node || true)"
+  [[ -x "$node_bin" ]] || { echo "Node is unavailable; the React evidence page needs apps/web/dist" >&2; exit 1; }
+  npm_bin="$(dirname "$node_bin")/npm"
+  [[ -x "$npm_bin" ]] || npm_bin="$(command -v npm)"
+  export PATH="$(dirname "$node_bin"):$PATH"
+  [[ -d apps/web/node_modules ]] || "$npm_bin" ci --prefix apps/web --ignore-scripts --no-audit --no-fund
+  "$npm_bin" --prefix apps/web run build >/dev/null
+  export LINGGAN_WEB_DIST="$project_root/apps/web/dist"
   # These existing owner contracts now exercise the canonical JSON command routes.
   for route_contract in a_never_archived_keyword_starts_its_first_stage_when_asked_to_archive a_patrolling_keyword_can_repair_its_missing_first_stage_archive creator_gap_route_never_falls_back_to_a_homepage_rescan postgres_frozen_projection_expands_one_latest_lease_to_both_tasks domain_management_page_queries_real_lane_receipts_without_english_or_false_zero; do
     cargo test -p linggan-api --locked "$route_contract" -- --ignored --test-threads=1

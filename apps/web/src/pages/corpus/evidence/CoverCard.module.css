@@ -1,0 +1,448 @@
+/* 封面排版：同一份作品列表、同一个选择约定，只是把一张卡分成「翻转的视觉板」与「静止的铭牌」。
+ * 两个面共用一个 3:4 舞台：翻转之后图片不会缩小、跳动，也不会换一种边缘关系。
+ * 只消费 LIDS --lgi-* Token；翻转是旋转，不是上浮（LIDS 禁止悬停上浮）。 */
+
+.item {
+  position: relative;
+  min-width: 0;
+  list-style: none;
+  cursor: pointer;
+}
+
+.card {
+  position: relative;
+  display: grid;
+  gap: var(--lgi-space-3);
+  min-width: 0;
+}
+
+/* 卡片标题在窄的六列卡上是图注而不是页面标题：两行上限，所有卡的舞台落在同一像素上。 */
+.visual {
+  --cover-title-size: var(--lgi-text-longform);
+  --cover-title-height: calc(var(--cover-title-size) * var(--lgi-lh-title) * 2);
+  --cover-chamfer: var(--lgi-space-2);
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--lgi-border-strong);
+  background: var(--lgi-canvas-sunken);
+  clip-path: polygon(
+    var(--cover-chamfer) 0,
+    calc(100% - var(--cover-chamfer)) 0,
+    100% var(--cover-chamfer),
+    100% calc(100% - var(--cover-chamfer)),
+    calc(100% - var(--cover-chamfer)) 100%,
+    var(--cover-chamfer) 100%,
+    0 calc(100% - var(--cover-chamfer)),
+    0 var(--cover-chamfer)
+  );
+  cursor: pointer;
+  perspective: 1400px;
+}
+
+.visual:focus-visible {
+  outline: 3px solid var(--lgi-focus);
+  outline-offset: 3px;
+}
+
+.flip {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  transition: transform calc(var(--lgi-duration-panel) + var(--lgi-duration-state)) var(--lgi-ease-ui);
+}
+
+.visual[data-flipped='true'] .flip {
+  transform: rotateY(180deg);
+}
+
+@media (hover: hover) {
+  .visual:hover .flip {
+    transform: rotateY(180deg);
+  }
+}
+
+.sizer {
+  display: grid;
+  visibility: hidden;
+  padding: var(--lgi-space-4);
+  grid-template-rows: var(--cover-title-height) auto min-content;
+  gap: var(--lgi-space-2);
+  pointer-events: none;
+}
+
+.sizerTitle {
+  height: var(--cover-title-height);
+}
+
+.sizerStage {
+  display: block;
+}
+
+.sizerFrame {
+  display: block;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+}
+
+.sizerFoot {
+  min-height: var(--lgi-text-label);
+}
+
+/* 卡面只承载一种材质：干纸残迹——与 LIDS-MAT-001 的 8px 采样格同一套，不是第二套纹理。
+ * 墨色取 --lgi-ink；透明度就是密度，不是第二种颜色；文字层永远在它上面。 */
+.face {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.face::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background-image:
+    radial-gradient(circle at 0 0, color-mix(in srgb, var(--lgi-ink) 15%, transparent) 0.6px, transparent 0.85px),
+    radial-gradient(circle at 0 8px, color-mix(in srgb, var(--lgi-ink) 11%, transparent) 0.6px, transparent 0.85px),
+    radial-gradient(circle at 8px 16px, color-mix(in srgb, var(--lgi-ink) 13%, transparent) 0.6px, transparent 0.85px);
+  background-size: 24px 24px;
+}
+
+.front,
+.back {
+  background: var(--lgi-canvas-sunken);
+  color: var(--lgi-ink);
+}
+
+.back {
+  transform: rotateY(180deg);
+}
+
+/* 选中的卡是一张整块的印刷卡，不是一块平的信号色矩形：状态是同一格上的密度。 */
+.item[data-selected='true'] .front,
+.item[data-selected='true'] .back,
+.item[data-selected='true'] .plate {
+  background: var(--lgi-signal);
+}
+
+.item[data-selected='true'] .face::after {
+  background-image:
+    radial-gradient(circle at 0 0, color-mix(in srgb, var(--lgi-ink) 20%, transparent) 0.6px, transparent 0.85px),
+    radial-gradient(circle at 0 8px, color-mix(in srgb, var(--lgi-ink) 14%, transparent) 0.6px, transparent 0.85px),
+    radial-gradient(circle at 8px 8px, color-mix(in srgb, var(--lgi-ink) 20%, transparent) 0.6px, transparent 0.85px),
+    radial-gradient(circle at 8px 16px, color-mix(in srgb, var(--lgi-ink) 14%, transparent) 0.6px, transparent 0.85px);
+}
+
+.item[data-selected='true'] .micro,
+.item[data-selected='true'] .cue {
+  color: var(--lgi-ink);
+}
+
+.faceInner {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  height: 100%;
+  padding: var(--lgi-space-4);
+  grid-template-rows: var(--cover-title-height) minmax(0, 1fr) min-content;
+  gap: var(--lgi-space-2);
+}
+
+.faceHead {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--lgi-space-2);
+  min-height: 0;
+}
+
+.coverTitle {
+  display: -webkit-box;
+  height: var(--cover-title-height);
+  margin: 0;
+  overflow: hidden;
+  color: var(--lgi-ink);
+  font: var(--lgi-weight-bold) var(--cover-title-size) / var(--lgi-lh-title) var(--lgi-font-sans);
+  letter-spacing: var(--lgi-ls-tight);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.backLabel,
+.index,
+.micro,
+.cue {
+  font: var(--lgi-weight-semibold) var(--lgi-text-label) / var(--lgi-lh-data) var(--lgi-font-mono);
+  letter-spacing: var(--lgi-ls-data);
+  font-variant-numeric: tabular-nums;
+}
+
+.backLabel {
+  color: var(--lgi-muted);
+}
+
+.index {
+  color: var(--lgi-ghost);
+}
+
+.stage {
+  display: grid;
+  min-height: 0;
+  place-items: center;
+}
+
+.stageFrame {
+  position: relative;
+  display: grid;
+  max-width: 100%;
+  height: 100%;
+  aspect-ratio: 3 / 4;
+  overflow: hidden;
+  border: 1px solid var(--lgi-border-strong);
+  background: var(--lgi-canvas-hi);
+  color: var(--lgi-ink);
+}
+
+.diagram {
+  place-items: center;
+}
+
+.photo {
+  background: var(--lgi-ink);
+}
+
+/* 舞台的高度由共用占位推出，百分比高度不可靠：封面脱离文档流、铺满同一个 3:4 盒子，
+ * 比例不对的封面也从中心裁，而不是从顶边裁、悬在舞台下面。`contain` 与研读行一致：封面完整显示。 */
+.photo img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.stageFrame[data-unavailable='true'] {
+  place-items: center;
+  background: var(--lgi-canvas-sunken);
+  color: var(--lgi-muted);
+  text-align: center;
+}
+
+.unavailable {
+  padding: var(--lgi-space-3);
+  font: var(--lgi-weight-semibold) var(--lgi-text-data) / var(--lgi-lh-data) var(--lgi-font-sans);
+}
+
+/* 测量场：覆盖整个 3:4 舞台的真实 8px 点阵。用 CSS 渐变而不是内联 SVG：渐变平铺没有固有比例，
+ * 不会像按比例推出的 SVG 盒那样把舞台底部漏测。 */
+.diagram::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image: radial-gradient(circle, var(--lgi-ink) 1px, transparent 1.2px);
+  background-size: 8px 8px;
+  opacity: 0.13;
+}
+
+.geometry {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  color: var(--lgi-ink);
+}
+
+.geometry * {
+  vector-effect: non-scaling-stroke;
+}
+
+.faceFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--lgi-space-2);
+  min-height: var(--lgi-text-label);
+}
+
+.micro {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--lgi-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cue {
+  flex: 0 0 auto;
+  color: var(--lgi-signal-ink);
+}
+
+/* ── 常驻铭牌：不随翻转移动 ─────────────────── */
+.plate {
+  position: relative;
+  display: grid;
+  grid-template-rows: var(--lgi-space-6) var(--lgi-space-6) minmax(var(--lgi-space-6), 1fr);
+  align-content: stretch;
+  inline-size: 100%;
+  max-inline-size: 100%;
+  box-sizing: border-box;
+  gap: var(--lgi-space-1);
+  min-width: 0;
+  min-height: calc(var(--lgi-space-16) + var(--lgi-space-6) + var(--lgi-space-4) + var(--lgi-space-2));
+  padding: var(--lgi-space-3);
+  aspect-ratio: 7 / 2;
+  border-top: 1px solid var(--lgi-border-strong);
+  border-bottom: 1px solid var(--lgi-hairline);
+  background: var(--lgi-canvas-low);
+  clip-path: polygon(
+    var(--lgi-space-2) 0,
+    calc(100% - var(--lgi-space-2)) 0,
+    100% var(--lgi-space-2),
+    100% calc(100% - var(--lgi-space-2)),
+    calc(100% - var(--lgi-space-2)) 100%,
+    var(--lgi-space-2) 100%,
+    0 calc(100% - var(--lgi-space-2)),
+    0 var(--lgi-space-2)
+  );
+}
+
+.item[data-selected='true'] .plate {
+  border-top-color: var(--lgi-ink);
+  border-bottom-color: var(--lgi-border-strong);
+}
+
+.item[data-selected='true'] .plate :is(.date, .observed, svg) {
+  color: var(--lgi-ink);
+}
+
+/* 隐形的选择按钮：给键盘与读屏用；鼠标点整张卡都选中。焦点环画在整块铭牌上。 */
+.select {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.select:focus-visible {
+  outline: 3px solid var(--lgi-focus);
+  outline-offset: calc(var(--lgi-space-1) * -1);
+}
+
+.plateTop {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 10ch);
+  align-items: center;
+  gap: var(--lgi-space-2);
+  min-width: 0;
+}
+
+.plate :is(.date, .observed) {
+  overflow: hidden;
+  color: var(--lgi-muted);
+  font: var(--lgi-weight-semibold) var(--lgi-text-label) / var(--lgi-lh-data) var(--lgi-font-mono);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.date {
+  min-width: 0;
+  max-width: 100%;
+  text-align: right;
+}
+
+.plate > :nth-child(3) {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: center;
+  gap: var(--lgi-space-1);
+  margin: 0;
+  font-size: var(--lgi-text-data);
+}
+
+.plate > :nth-child(3) > span {
+  min-width: 0;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+.plate > :nth-child(3) svg {
+  width: var(--lgi-space-3);
+  height: var(--lgi-space-3);
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--lgi-space-2);
+  padding-top: var(--lgi-space-1);
+  border-top: 1px solid var(--lgi-hairline);
+}
+
+.observed {
+  min-width: 0;
+  text-align: right;
+}
+
+.status {
+  position: relative;
+  min-width: 0;
+}
+
+.item[data-selected='true'] .status :first-child {
+  color: var(--lgi-ink);
+}
+
+.tooltip {
+  position: absolute;
+  z-index: var(--lgi-z-popover);
+  bottom: calc(100% + var(--lgi-space-2));
+  left: 0;
+  display: grid;
+  width: max-content;
+  max-width: calc(var(--lgi-space-24) * 2 + var(--lgi-space-6));
+  gap: var(--lgi-space-1);
+  padding: var(--lgi-space-2);
+  border: 1px solid var(--lgi-ink);
+  background: var(--lgi-ink);
+  color: var(--lgi-on-dark);
+  font: var(--lgi-weight-semibold) var(--lgi-text-label) / var(--lgi-lh-data) var(--lgi-font-sans);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(var(--lgi-space-1));
+  transition:
+    opacity var(--lgi-duration-state) var(--lgi-ease-ui),
+    transform var(--lgi-duration-state) var(--lgi-ease-ui);
+}
+
+.status:hover .tooltip {
+  opacity: 1;
+  transform: none;
+}
+
+.tooltip span {
+  white-space: nowrap;
+}
+
+@media (max-width: 420px) {
+  .plate {
+    aspect-ratio: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flip,
+  .tooltip {
+    transition: none;
+  }
+}

@@ -4,11 +4,12 @@ import { createBrowserRouter } from 'react-router';
 import { RouterProvider } from 'react-router/dom';
 import { ModelSettingsPage } from '../pages/settings/ModelSettingsPage';
 import { NotFoundPage } from './NotFoundPage';
-import { OPS_PATHS, COLLECTION_PATHS, CREATORS_PATH, MODEL_SETTINGS_PATH, WORKBENCH_PATH } from './pages';
+import { OPS_PATHS, COLLECTION_PATHS, CREATORS_PATH, EVIDENCE_PATH, MODEL_SETTINGS_PATH, WORKBENCH_PATH } from './pages';
 
 const WorkbenchPage = lazy(() => import('../pages/workbench/WorkbenchPage').then(module => ({ default: module.WorkbenchPage })));
 // 语料页按需加载：打开设置页或工作台时不下载创作者页的代码。
 const CreatorsPage = lazy(() => import('../pages/corpus/creators/CreatorsPage').then(module => ({ default: module.CreatorsPage })));
+const EvidencePage = lazy(() => import('../pages/corpus/evidence/EvidencePage').then(module => ({ default: module.EvidencePage })));
 
 const OpsPage = lazy(() => import('../pages/ops/OpsPage').then(m => ({ default: m.OpsPage })));
 
@@ -30,6 +31,7 @@ const router = createBrowserRouter([
   { path: MODEL_SETTINGS_PATH, element: <ModelSettingsPage /> },
   { path: WORKBENCH_PATH, element: <Suspense fallback={<p role="status">正在打开工作台…</p>}><WorkbenchPage /></Suspense> },
   { path: CREATORS_PATH, element: <Suspense fallback={<p role="status">正在打开创作者…</p>}><CreatorsPage /></Suspense> },
+  { path: EVIDENCE_PATH, element: <Suspense fallback={<p role="status">正在打开证据库…</p>}><EvidencePage /></Suspense> },
   ...[TargetsPage, TasksPage, DomainsPage, RuntimePage].map((Page, i) => ({ path: COLLECTION_PATHS[i], element: <Suspense fallback={<p role="status">正在打开采集页面…</p>}><Page key={collectionPages[i]} /></Suspense> })),
   ...OPS_PATHS.map(path => ({ path, element: <Suspense fallback={<p role="status">正在打开运营页面…</p>}><OpsPage /></Suspense> })),
   { path: '*', element: <NotFoundPage /> },

@@ -1,0 +1,58 @@
+/* 受控本地图片：头像与封面。图片只来自同源受控句柄；没有或加载失败时显示状态词，不回退到平台地址。 */
+
+.frame {
+  position: relative;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  box-sizing: border-box;
+  color: var(--lgi-ghost);
+  text-align: center;
+}
+
+.image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: var(--lgi-canvas-low);
+}
+
+.fallback {
+  position: relative;
+  max-width: 100%;
+  padding: calc(var(--lgi-space-1) * 1.25);
+  font: var(--lgi-weight-semibold) var(--lgi-text-label) / var(--lgi-lh-data) var(--lgi-font-mono);
+  letter-spacing: var(--lgi-ls-data);
+}
+
+/* 研读行预览：3:4，完整显示不裁切（K04）。 */
+.preview {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  border: 1px solid var(--lgi-border-strong);
+  background: var(--lgi-canvas-low);
+}
+
+.preview .image {
+  object-fit: contain;
+}
+
+.avatar {
+  width: calc(var(--lgi-space-6) + var(--lgi-space-1));
+  height: calc(var(--lgi-space-6) + var(--lgi-space-1));
+  flex: none;
+  border: 1px solid var(--lgi-ink);
+  border-radius: 50%;
+  background: var(--lgi-canvas-low);
+}
+
+.avatar[data-media-state='loaded'] {
+  border-color: var(--lgi-info);
+}
+
+.avatar .fallback {
+  padding: 0;
+  font-size: var(--lgi-text-calibration);
+}
