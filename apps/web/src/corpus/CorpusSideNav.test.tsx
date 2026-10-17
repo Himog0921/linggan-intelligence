@@ -28,6 +28,19 @@ describe('语料侧栏', () => {
     ]);
   });
 
+  it('证据库页填写计数：徽标显示本次读取的作品数，悬停说明三个读数；零作品仍隐藏', () => {
+    const { container, rerender } = render(<CorpusSideNav active="evidence" domain={D} foot="" evidenceCount={{ count: 57, title: '本次读取 57 个作品 · 已留存评论 1.5K · 本地材料 12 · 部分或缺口 3' }} />);
+    const badge = container.querySelector('#ev-rail-count');
+    expect(badge).not.toHaveAttribute('hidden');
+    expect(badge).toHaveTextContent('57');
+    expect(badge).toHaveAttribute('title', '本次读取 57 个作品 · 已留存评论 1.5K · 本地材料 12 · 部分或缺口 3');
+    expect(badge?.closest('a')).toHaveAttribute('href', `/corpus/evidence?domain=${D}`);
+    rerender(<CorpusSideNav active="evidence" domain={D} foot="" evidenceCount={{ count: 0, title: '本次读取 0 个作品' }} />);
+    expect(container.querySelector('#ev-rail-count')).toHaveAttribute('hidden');
+    rerender(<CorpusSideNav active="evidence" domain={D} foot="" />);
+    expect(container.querySelector('#ev-rail-count')).toHaveAttribute('hidden');
+  });
+
   it('证据库计数徽标位在，且保持隐藏（由证据库页填写）', () => {
     const { container } = render(<CorpusSideNav active="creators" domain={null} foot="" />);
     const badge = container.querySelector('#ev-rail-count');

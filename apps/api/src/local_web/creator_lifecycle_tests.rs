@@ -211,41 +211,6 @@ fn assert_no_json_key(value: &Value, forbidden: &str) {
     }
 }
 
-#[test]
-fn corpus_work_deep_link_does_not_fall_back_when_the_work_is_off_page() {
-    assert!(EVIDENCE_LIBRARY_JS.contains("function directWorkItem(publicRef)"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("detailUrl: `${API_ROOT}/${encodeURIComponent(publicRef)}?domain=${encodeURIComponent(CORPUS_DOMAIN.ref)}"));
-    assert!(EVIDENCE_LIBRARY_JS.contains(
-        "'&collectionRunRef='+encodeURIComponent(creatorBacklink.get('collectionRunRef'))"
-    ));
-    assert!(EVIDENCE_LIBRARY_JS.contains("revealUrlSelection = false"));
-    assert!(
-        EVIDENCE_LIBRARY_JS.contains(
-            "const selectionSource = revealUrlSelection && requestedRef ? 'url' : 'auto'"
-        )
-    );
-    assert!(
-        EVIDENCE_LIBRARY_JS
-            .contains("await selectItem(directWorkItem(requestedRef), selectionSource)")
-    );
-    assert!(
-        EVIDENCE_LIBRARY_JS.contains(
-            "if (selectionSource === 'user' || selectionSource === 'url') openInspector()"
-        )
-    );
-    assert_eq!(
-        EVIDENCE_LIBRARY_JS
-            .matches("loadList({ keepSelection: true, revealUrlSelection: true })")
-            .count(),
-        2,
-        "initial URL restoration and popstate must reveal the addressed Work without adding history"
-    );
-    assert!(EVIDENCE_LIBRARY_JS.contains("const requestedRef = restoreRef || model.selectedRef"));
-    assert!(!EVIDENCE_LIBRARY_JS.contains(
-        "model.items.find((item) => item.identity?.publicRef === (restoreRef || model.selectedRef))\n          || model.items[0]"
-    ));
-}
-
 #[tokio::test]
 async fn target_route_never_reflects_an_invalid_selected_work() {
     let response = app()

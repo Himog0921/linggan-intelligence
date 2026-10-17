@@ -1,0 +1,207 @@
+/* 证据库内多处共用的小部件：状态线、事实表、行内状态、分节、来源说明、动作回执。
+ * 只消费 LIDS --lgi-* Token。色调同时用文字、圆点和颜色表达，不只靠颜色。 */
+
+.stateLine {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--lgi-space-2);
+  color: var(--lgi-muted);
+  font: var(--lgi-weight-semibold) var(--lgi-text-label) / var(--lgi-lh-data) var(--lgi-font-sans);
+}
+
+.dot {
+  width: calc(var(--lgi-space-1) * 1.5);
+  height: calc(var(--lgi-space-1) * 1.5);
+  flex: none;
+  border-radius: 50%;
+  background: var(--lgi-unknown-dot);
+}
+
+.dot[data-tone='success'] {
+  background: var(--lgi-success-dot);
+}
+
+.dot[data-tone='warning'] {
+  background: var(--lgi-warning-dot);
+}
+
+.dot[data-tone='info'] {
+  background: var(--lgi-info-dot);
+}
+
+.dot[data-tone='danger'] {
+  background: var(--lgi-danger-dot);
+}
+
+.tech {
+  color: var(--lgi-ghost);
+  font: var(--lgi-weight-semibold) var(--lgi-text-label) / var(--lgi-lh-data) var(--lgi-font-mono);
+  letter-spacing: var(--lgi-ls-data);
+  overflow-wrap: anywhere;
+}
+
+/* ── 事实表 ─────────────────────────────────── */
+.facts {
+  display: grid;
+  grid-template-columns: minmax(calc(var(--lgi-space-24) + var(--lgi-space-1)), 0.66fr) minmax(0, 1.34fr);
+  margin: 0;
+  border-top: 1px solid var(--lgi-hairline);
+}
+
+.pair {
+  display: contents;
+}
+
+.facts dt,
+.facts dd {
+  min-height: calc(var(--lgi-space-8) + var(--lgi-space-1) / 2);
+  margin: 0;
+  border-bottom: 1px solid var(--lgi-hairline);
+  padding: var(--lgi-space-2) calc(var(--lgi-space-1) * 1.75);
+  font-size: var(--lgi-text-data);
+  line-height: var(--lgi-lh-body);
+  overflow-wrap: anywhere;
+}
+
+.facts dt {
+  color: var(--lgi-ghost);
+}
+
+.facts dd {
+  color: var(--lgi-ink);
+  font-weight: var(--lgi-weight-semibold);
+}
+
+.facts dd .tech {
+  margin-left: var(--lgi-space-2);
+}
+
+.collapsed {
+  margin: calc(var(--lgi-space-1) / 2) 0 var(--lgi-space-2);
+}
+
+.collapsed summary {
+  cursor: pointer;
+  padding: calc(var(--lgi-space-1) * 1.5) 0;
+  color: var(--lgi-muted);
+  font-size: var(--lgi-text-data);
+}
+
+.collapsed summary:hover {
+  color: var(--lgi-ink);
+}
+
+/* ── 分节 ───────────────────────────────────── */
+.section {
+  margin-bottom: var(--lgi-space-5);
+}
+
+.section > h3 {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--lgi-space-3);
+  margin: 0 0 calc(var(--lgi-space-2) + var(--lgi-space-1) / 2);
+  border-bottom: 1px solid var(--lgi-ink);
+  padding-bottom: calc(var(--lgi-space-1) * 1.75);
+  font-size: var(--lgi-text-data);
+  font-weight: var(--lgi-weight-bold);
+}
+
+/* ── 行内状态：失败、警示、访问边界三者分色，不共用一个视觉 ── */
+.inline {
+  margin: calc(var(--lgi-space-2) + var(--lgi-space-1) / 2) 0;
+  border-left: 3px solid var(--lgi-border-strong);
+  padding: var(--lgi-space-3);
+  background: var(--lgi-canvas-low);
+  font-size: var(--lgi-text-data);
+}
+
+.inline strong {
+  display: block;
+  margin-bottom: var(--lgi-space-1);
+}
+
+.inline p {
+  margin: 0 0 calc(var(--lgi-space-1) * 1.5);
+  color: var(--lgi-muted);
+  line-height: var(--lgi-lh-longform);
+}
+
+.inline[data-tone='warning'] {
+  border-color: var(--lgi-warning);
+  background: var(--lgi-warning-soft);
+}
+
+.inline[data-tone='danger'] {
+  border-color: var(--lgi-signal);
+  background: var(--lgi-signal-soft);
+}
+
+.inline[data-tone='restricted'] {
+  border-color: var(--lgi-border-strong);
+  background: var(--lgi-canvas-low);
+}
+
+.note {
+  margin: var(--lgi-space-2) 0;
+  color: var(--lgi-ghost);
+  font-size: var(--lgi-text-data);
+  line-height: var(--lgi-lh-longform);
+}
+
+.note .tech {
+  margin-left: calc(var(--lgi-space-1) * 1.5);
+}
+
+.hint {
+  margin: calc(var(--lgi-space-1) * 1.5) 0 calc(var(--lgi-space-2) + var(--lgi-space-1) / 2);
+  color: var(--lgi-ghost);
+  font-size: var(--lgi-text-label);
+  line-height: var(--lgi-lh-longform);
+}
+
+/* ── 动作回执 ───────────────────────────────── */
+.feedback {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--lgi-space-2);
+  margin: var(--lgi-space-2) 0;
+  border-left: 3px solid var(--lgi-border-strong);
+  padding: var(--lgi-space-2) var(--lgi-space-3);
+  background: var(--lgi-canvas-low);
+  font-size: var(--lgi-text-data);
+  line-height: var(--lgi-lh-body);
+}
+
+.feedback[data-tone='success'] {
+  border-color: var(--lgi-success);
+  background: var(--lgi-success-soft);
+}
+
+.feedback[data-tone='refused'],
+.feedback[data-tone='unknown'] {
+  border-color: var(--lgi-warning);
+  background: var(--lgi-warning-soft);
+}
+
+.feedback[data-tone='error'] {
+  border-color: var(--lgi-signal);
+  background: var(--lgi-signal-soft);
+}
+
+.feedbackLabel {
+  font-weight: var(--lgi-weight-bold);
+}
+
+.feedbackEmpty {
+  display: none;
+}
+
+.feedbackActions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--lgi-space-3);
+}

@@ -1,0 +1,211 @@
+/* 「本机媒体材料」轨道。每个对象各自独立、各自有状态；图片 contain，不裁切——这是证据，裁切就是悄悄的编辑。
+ * 只消费 LIDS --lgi-* Token。 */
+
+.module {
+  margin-bottom: calc(var(--lgi-space-4) + var(--lgi-space-1) / 2);
+  border-top: 2px solid var(--lgi-ink);
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--lgi-space-3);
+  min-height: calc(var(--lgi-space-10) + var(--lgi-space-1));
+  padding: calc(var(--lgi-space-1) * 1.75) 0;
+}
+
+.summary b {
+  display: block;
+  font: var(--lgi-weight-bold) var(--lgi-text-data) / var(--lgi-lh-data) var(--lgi-font-sans);
+}
+
+.summary span {
+  display: block;
+  margin-top: var(--lgi-space-1);
+  color: var(--lgi-ghost);
+  font: var(--lgi-text-label) / var(--lgi-lh-data) var(--lgi-font-sans);
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--lgi-space-1) * 1.5);
+}
+
+.nav button {
+  display: grid;
+  place-items: center;
+  width: calc(var(--lgi-space-6) + var(--lgi-space-1) * 1.25);
+  min-width: 0;
+  height: calc(var(--lgi-space-6) + var(--lgi-space-1) * 1.25);
+  min-height: 0;
+  padding: 0;
+  font: var(--lgi-weight-bold) var(--lgi-text-data) / 1 var(--lgi-font-mono);
+}
+
+.nav button:disabled {
+  opacity: 0.28;
+}
+
+.nav .jump {
+  width: auto;
+  padding: 0 calc(var(--lgi-space-2) + var(--lgi-space-1) / 4);
+  border-color: var(--lgi-signal);
+  color: var(--lgi-signal-ink);
+  font-size: var(--lgi-text-label);
+  letter-spacing: var(--lgi-ls-data);
+}
+
+.nav .jump:hover:not(:disabled) {
+  background: var(--lgi-signal);
+  color: var(--lgi-on-dark);
+}
+
+.position {
+  min-width: calc(var(--lgi-space-12) + var(--lgi-space-2));
+  color: var(--lgi-muted);
+  font: var(--lgi-weight-bold) var(--lgi-text-label) / var(--lgi-lh-data) var(--lgi-font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.viewport {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: calc(var(--lgi-space-1) / 4) 0 var(--lgi-space-1);
+  overscroll-behavior-x: contain;
+  scroll-behavior: smooth;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  cursor: grab;
+}
+
+.viewport::-webkit-scrollbar {
+  display: none;
+}
+
+.viewport[data-grabbing='true'] {
+  scroll-behavior: auto;
+  scroll-snap-type: none;
+  cursor: grabbing;
+  user-select: none;
+}
+
+.strip {
+  display: flex;
+  gap: calc(var(--lgi-space-2) + var(--lgi-space-1) / 2);
+  min-width: max-content;
+  padding: calc(var(--lgi-space-1) / 2) calc(var(--lgi-space-1) / 4) calc(var(--lgi-space-1) * 1.5);
+}
+
+/* 检查器变宽是让一眼看到更多对象，而不是把一张图放大。 */
+.card {
+  position: relative;
+  flex: 0 0 clamp(calc(var(--lgi-space-24) - var(--lgi-space-1) * 1.5), 37%, calc(var(--lgi-space-24) + var(--lgi-space-12) + var(--lgi-space-1) * 1.5));
+  min-height: 0;
+  scroll-snap-align: start;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  text-align: left;
+  cursor: zoom-in;
+}
+
+.frame {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 4 / 5;
+  overflow: hidden;
+  border: 1px solid var(--lgi-border-strong);
+  background: var(--lgi-canvas-low);
+}
+
+.card:hover .frame {
+  border-color: var(--lgi-ink);
+}
+
+.card[data-match='true'] .frame {
+  box-shadow: inset 0 var(--lgi-space-1) 0 var(--lgi-signal);
+}
+
+.frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: var(--lgi-canvas);
+}
+
+.index {
+  position: absolute;
+  top: calc(var(--lgi-space-1) * 1.25);
+  left: calc(var(--lgi-space-1) * 1.25);
+  padding: calc(var(--lgi-space-1) / 2) var(--lgi-space-1);
+  background: var(--lgi-ink);
+  color: var(--lgi-on-dark);
+  font: var(--lgi-weight-bold) var(--lgi-text-calibration) / 1 var(--lgi-font-mono);
+  letter-spacing: var(--lgi-ls-data);
+}
+
+.absent {
+  padding: var(--lgi-space-3);
+  color: var(--lgi-muted);
+  font-size: var(--lgi-text-label);
+  line-height: var(--lgi-lh-longform);
+  text-align: center;
+}
+
+.meta {
+  display: grid;
+  gap: calc(var(--lgi-space-1) / 2);
+  margin-top: calc(var(--lgi-space-1) * 1.5);
+  color: var(--lgi-ghost);
+  font: var(--lgi-weight-semibold) var(--lgi-text-calibration) / var(--lgi-lh-data) var(--lgi-font-sans);
+}
+
+.meta b {
+  overflow: hidden;
+  color: var(--lgi-muted);
+  font-weight: var(--lgi-weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.progress {
+  height: calc(var(--lgi-space-1) * 0.75);
+  margin-top: calc(var(--lgi-space-1) / 2);
+  background: var(--lgi-canvas-sunken);
+}
+
+.progress i {
+  display: block;
+  height: 100%;
+  background: var(--lgi-ink);
+  transform-origin: left center;
+  transition: transform var(--lgi-duration-state) var(--lgi-ease-ui);
+}
+
+.hint {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--lgi-space-3);
+  padding: var(--lgi-space-2) 0 0;
+  color: var(--lgi-ghost);
+  font: var(--lgi-text-label) / var(--lgi-lh-data) var(--lgi-font-sans);
+}
+
+.hint em {
+  color: var(--lgi-signal-ink);
+  font-style: normal;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .viewport {
+    scroll-behavior: auto;
+  }
+
+  .progress i {
+    transition: none;
+  }
+}

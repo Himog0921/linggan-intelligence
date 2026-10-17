@@ -58,6 +58,7 @@ pub(super) async fn assert_disposition_precedence(
     let response = app_with_database(database.clone())
         .oneshot(
             Request::builder()
+                .header("Host", "127.0.0.1:3000")
                 .uri(format!(
                     "/api/local/work-resources?restriction=BYTES_CLEANED&domain={ADHD_DOMAIN_REF}"
                 ))
@@ -109,6 +110,7 @@ pub(super) async fn assert_disposition_precedence(
     let response = app_with_database(database.clone())
         .oneshot(
             Request::builder()
+                .header("Host", "127.0.0.1:3000")
                 .uri(format!("/api/local/work-resources?restriction=WITHDRAWN_OR_RESTRICTED&domain={ADHD_DOMAIN_REF}"))
                 .body(Body::empty())
                 .unwrap(),
@@ -164,6 +166,7 @@ async fn assert_derivative_disposition(
     let response = app_with_database(database.clone())
         .oneshot(
             Request::builder()
+                .header("Host", "127.0.0.1:3000")
                 .uri(format!("/api/local/work-resources?lane=ocr&restriction=WITHDRAWN_OR_RESTRICTED&domain={ADHD_DOMAIN_REF}"))
                 .body(Body::empty())
                 .unwrap(),
@@ -203,7 +206,7 @@ async fn detail_for_list(database: &Database, list: &Value) -> Value {
         .and_then(Value::as_str)
         .unwrap();
     let response = app_with_database(database.clone())
-        .oneshot(Request::builder().uri(url).body(Body::empty()).unwrap())
+        .oneshot(Request::builder().uri(url).header("Host", "127.0.0.1:3000").body(Body::empty()).unwrap())
         .await
         .unwrap();
     serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap()

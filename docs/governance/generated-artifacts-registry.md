@@ -13,7 +13,7 @@
 | Pi Node 固定依赖 | `apps/pi-adapter/node_modules/`（含 `.linggan-lock-sha256`）、`package-lock.json` | 精确 package.json、npm ci、`prepare-pi-adapter.sh` | node_modules 忽略；lock 提交 | 禁止手工改 lock/安装产物 | 只清理当前 checkout 依赖，不处理其它项目 |
 | 网页前端固定依赖（WEB-REACT-001） | `apps/web/node_modules/`（含 `.linggan-lock-sha256`）、`apps/web/package-lock.json` | 精确版本的 `apps/web/package.json`、`npm ci --ignore-scripts`、`scripts/runtime/prepare-web.sh` | node_modules 忽略；lock 提交 | 禁止手工改 lock/安装产物 | 只清理当前 checkout 依赖；可随时 `npm ci` 重建 |
 | 网页前端构建产物（WEB-REACT-001） | `apps/web/dist/`（`index.html`、带内容指纹的 JS/CSS、`build-info.json`） | `npm --prefix apps/web run build`；本机运行链由 `prepare-web.sh --build <revision>` 生成，revision 写入 `build-info.json` | 忽略，不提交 | 禁止手工改 | 每个 checkout 一份，按 revision 覆盖重建；可安全删除后重建 |
-| WEB-REACT-001 隔离浏览器证明 | 随机 `linggan-web-app-proof-*` Docker container/volume；证据目录 `${TMPDIR}/linggan-web-app-proof-*`（或 `WEB_APP_PROOF_DIR`；阶段 D1 的创作者页证明放在其 `creators/` 子目录：`fixture.json`、`report.json`、截图；该库内随机 schema `creators_*`、`corpus_shell_*` 随容器一并删除）；随机 `linggan-web-app-support.*` 临时目录 | `scripts/test-web-app-postgres.sh`：合成模型凭据、隔离 schema、本机 Axum 路由与 Chromium | 不进 Git；截图只含合成数据 | 禁止伪造 | 容器、数据卷与临时目录在脚本退出时删除；证据目录保留供审阅，可手工删除；CI 作为 `web-app-real-chain-proof` 产物保留 7 天 |
+| WEB-REACT-001 隔离浏览器证明 | 随机 `linggan-web-app-proof-*` Docker container/volume；证据目录 `${TMPDIR}/linggan-web-app-proof-*`（或 `WEB_APP_PROOF_DIR`；阶段 D1 的创作者页证明放在其 `creators/` 子目录：`fixture.json`、`report.json`、截图；阶段 D2 的证据库证明放在 `evidence/` 子目录；该库内随机 schema `creators_*`、`corpus_shell_*` 随容器一并删除）；随机 `linggan-web-app-support.*` 临时目录（D2 另在其下 `media/` 写合成媒体字节）；D2 插件入口证明的 `linggan-entry-extension-*`、`linggan-entry-profile-*` 临时目录 | `scripts/test-web-app-postgres.sh`：合成模型凭据、隔离 schema、本机 Axum 路由与 Chromium | 不进 Git；截图只含合成数据 | 禁止伪造 | 容器、数据卷与临时目录在脚本退出时删除；证据目录保留供审阅，可手工删除；CI 作为 `web-app-real-chain-proof` 产物保留 7 天 |
 | COMMENT-RESEARCH-RESET-001 V1 隔离证明 | 随机 `linggan-comment-proof-*` Docker container/volume；系统临时目录下的 test log | `scripts/test-comment-research-postgres.sh`、`apps/pi-adapter` 的 Node fixture；历史 migration 后显式应用 0068–0070 | 不进入 Git | 禁止伪造 | 脚本 trap 删除它拥有的 container/volume；日志只含合成资料/失败码，不含评论正文或凭据 |
 | 模型后端秘密及合成文件验证 | `~/Library/Application Support/Linggan Intelligence/model-secrets/<workspace UUID>/<secret UUID>`；测试仅在随机系统临时目录 | API 的唯一 LocalFileModelSecrets；旧 Keychain 条目仅作一次性迁移来源 | 目录 0700、文件 0600；不进 Git/数据库/前端存储 | 只经配置命令更换 | 正式凭据随引用版本保留；迁移校验后清理旧 Keychain 条目；测试结束删除自己创建的合成目录 |
 | CI-20260907-V1 历史隔离证明 | 已清理的临时 Docker/log 位置 | 历史交付记录；对应旧评论研究源码与再生脚本已由 V1 terminal cutover 删除 | 不进 Git | 禁止伪造或重新生成旧结果 | 仅保留文档中的历史事实；不再是可运行验证入口 |
@@ -215,6 +215,13 @@ Mog 授权三篇指定作品在本机核对与重新分层。私有材料快照�
 - 不入 Git；不含凭据、真实作者或真实原文。截图是合成数据的界面证据，不代表真实数据量下的表现。
 - 再生：`WEB_APP_PROOF_DIR=<目录> ./scripts/test-web-app-postgres.sh`。容器、数据卷与支持目录由脚本 trap 删除并核验；证据目录可手工删除。责任 Issue #433。
 
+## WEB-REACT-001-D2 · 证据库真实链路证明
+
+- 来源：`apps/web/test/e2e/evidence-real-chain.mjs` 与 `apps/web/test/e2e/evidence-plugin-entry.mjs`（人工维护的 Node/Playwright 脚本）、`apps/api/src/local_web/evidence_browser_tests.rs`（Rust 启动夹具，必须 multi_thread）、`apps/api/src/local_web/evidence_api_proof_tests.rs`（接口证明）与播种模块 `evidence_seed.rs`／`evidence_fixture.rs`，由既有 `scripts/test-web-app-postgres.sh` 在一次性隔离 PostgreSQL 上依次运行；播种只用合成作品、评论与媒体，不调用模型、不访问平台、不连开发库或本机常驻服务。
+- 固定位置：证据放在 `WEB_APP_PROOF_DIR` 下的 `evidence/` 子目录：`fixture.json`、`report.json`（逐步结果、请求、写请求、失败请求、存储键）、`dr1-dead-controls.json`（失效控件的真实调用记录）、`plugin-entry.json`（插件入口的请求头与 HTTP 状态）、各视口与各分区截图 PNG；某一步失败时另有 `failure-step-N.png`（失败现场截图），`report.json` 同时记下当时打开着的对话框文字；CI 作为 `web-app-real-chain-proof` 产物保留 7 天。合成媒体字节写在支持目录的 `media/` 下，只经本机媒体句柄读取。插件入口证明的最小测试扩展与浏览器配置写在系统临时目录（`linggan-entry-extension-*`、`linggan-entry-profile-*`），脚本结束时删除；它自起的记录服务器只监听 `127.0.0.1` 随机端口。
+- 不入 Git；不含凭据、真实作品或真实原文。截图是合成数据的界面证据，不代表真实数据量下的表现。
+- 再生：`WEB_APP_PROOF_DIR=<目录> ./scripts/test-web-app-postgres.sh`。容器、数据卷与支持目录由脚本 trap 删除；证据目录可手工删除。责任 Issue #433。
+
 ## WEB-REACT-001-G · 实际采集页面与 React 迁移对照
 
 - 固定位置：本工作树 `artifacts/private/web-react-001-g/`，含 `baseline/`（3000 实际页面截图及最小读取快照）、`candidate/`、`*-full*` 最终完整滚动及视口快照、`comparison-final/` 和本机验证日志。受既有 artifacts/private 忽略，不提交。
@@ -232,3 +239,7 @@ Mog 授权三篇指定作品在本机核对与重新分层。私有材料快照�
 - 固定位置：本工作树`artifacts/private/web-react-001-f/`，含实际3000基线、只读候选、完整滚动/四视口截图、最小JSON快照、差异/性能/验证日志；忽略、不提交，禁止上传真实材料。
 - 来源：本包Playwright、真实Axum+隔离PG的合成proof及同源GET/HEAD视觉桥接；真实写命令只在一次性隔离PG。自动viewed回执若由当前页面触发在视觉捕获中阻断并如实记录，不伪造回执。
 - 原图保留不改；候选只读桥接不作正式链路证明，原始API快照最小必要本机保存。合并后按既有私有运行证据规则先保存在canonical相同artifacts/private路径，再移除交付worktree。
+
+### WEB-REACT-001-F · 概览 B 修订证据
+
+位置为同工作树 `artifacts/private/web-react-001-f/overview-b/`，忽略、不提交。来源为正式源码构建、现有隔离 PG 链路及同源 GET 实际候选；保存改版前/后截图、最小 JSON、差异说明和验证日志。原迁移截图不覆盖。截图含真实材料，只在本机使用；复现与清理继承 F 证据规则。供用户查看的选定设计及最终截图可另复制至当前 Codex visualization 任务目录，不入 Git。

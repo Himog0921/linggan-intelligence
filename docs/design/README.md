@@ -76,7 +76,7 @@
 | [foundation/topic-intelligence-visual-language.md](foundation/topic-intelligence-visual-language.md) | DS-REF-TOPIC-001：Topic 合成参考页怎样采用 LIDS，并加固合成/非 Evidence 边界 | 权威当前 |
 | [patterns/evidence-candidate-and-boundary-patterns.md](patterns/evidence-candidate-and-boundary-patterns.md) | PAT-001–PAT-004：观察、候选、来源限制与无副作用意图的表达模式 | 权威当前 |
 | [components/component-promotion.md](components/component-promotion.md) | Reference Page 局部块如何经第二页面验证后才可晋升为 CMP | 权威当前 |
-| [pages/evidence-library-page.md](pages/evidence-library-page.md) | PAGE-EVIDENCE-001：Evidence Library 多材料产品手册、技术呈现要求、表面地图、状态与回执合同 | 权威当前；运行页已按现行 Material Projection 落地，真实垂直证明未完成 |
+| [pages/evidence-library-page.md](pages/evidence-library-page.md) | PAGE-EVIDENCE-001：Evidence Library 多材料产品手册、技术呈现要求、表面地图、状态与回执合同 | 权威当前；运行页已按现行 Material Projection 落地，真实垂直证明未完成；D2 起为 React 实现，修订见其 §14 |
 | [changes/ocr-content-layering-001-ui-change-manifest.md](changes/ocr-content-layering-001-ui-change-manifest.md) | Evidence Library 平台标题为空时的封面 OCR 补位、来源徽章与 Inspector 读取边界 | 活跃计划；Issue #296 |
 | [pages/evidence-library-multi-material-reference.html](pages/evidence-library-multi-material-reference.html) | EVIDENCE-PAGE-002：多材料 Evidence Library 合成静态高保真参考；不连接运行时或真实材料 | 权威当前；静态参考 |
 | [pages/collection-workspace-page.md](pages/collection-workspace-page.md) | PAGE-COLLECTION-001：Collection 两个日常页面与领域/工位管理的职责、状态和事实边界 | 权威当前 |
@@ -182,7 +182,8 @@ LIDS 现在统一约束全项目的设计表达，但其成熟度仍为 Proposed
 
 阶段 C 正式 React 候选验证见 [ACC-WEB-REACT-001-C](acceptance/web-react-001-c-acceptance.md)，与原型认可、共享运行和 Mog 成品验收分别记录。
 
-- [创作者页（语料）](pages/creators-page.md)：WEB-REACT-001 阶段 D1 的页面责任、状态词典与动作后果；候选验证见 [ACC-WEB-REACT-001-D1](acceptance/web-react-001-d1-acceptance.md)。
+- [创作者页（语料）](pages/creators-page.md)：WEB-REACT-001 阶段 D1 的页面责任、状态词典与动作后果；验收见 [ACC-WEB-REACT-001-D1](acceptance/web-react-001-d1-acceptance.md)（已上线）。
+- [证据库（语料）](pages/evidence-library-page.md) §14：WEB-REACT-001 阶段 D2 的 React 修订；验收见 [ACC-WEB-REACT-001-D2](acceptance/web-react-001-d2-acceptance.md)（Draft PR，未部署）。
 
 阶段 G 整个采集页族沿用当前实际 UI，实施范围见[分册](../plans/active/web-react-001-g-collection.md)，实际截图、回执和分层结果见[ACC-WEB-REACT-001-G](acceptance/web-react-001-g-acceptance.md)。
 
@@ -193,3 +194,5 @@ LIDS 现在统一约束全项目的设计表达，但其成熟度仍为 Proposed
 阶段 F UI 迁移：[主题图谱与 Topic 工作区](../plans/active/web-react-001-f-topics.md)，沿用当前已确认紧凑工作区；React候选与当前3000实际基线2,905组完整滚动截图一致，独立审查/部署/Mog签收分列。
 
 阶段 F 验收：[ACC-WEB-REACT-001-F](acceptance/web-react-001-f-acceptance.md)，完整实际 UI 截图与隔离 PostgreSQL 回执证明。
+
+主题概览 B「材料优先」正式改版：[阶段 F 计划 §7](../plans/active/web-react-001-f-topics.md#7-2026-10-17--mog-选定-b材料优先正式改版)，Mog 已选定并授权；保留全部功能/口径，候选实施与验收中。

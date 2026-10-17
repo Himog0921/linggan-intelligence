@@ -357,12 +357,12 @@ try {
     await resultCount(`${authorTotal} 位创作者`);
   });
 
-  await step('侧栏进入证据库（仍是旧页面）再回创作者页；从作者数量链接去证据库再返回，位置恢复', async () => {
+  await step('侧栏进入证据库再回创作者页；从作者数量链接去证据库再返回，位置恢复', async () => {
     const side = page.getByRole('complementary', { name: '语料导航' });
     await side.getByRole('link', { name: /证据库/ }).click();
     await page.waitForURL(url => url.pathname === '/corpus/evidence' && url.searchParams.get('domain') === domainOne);
-    await page.locator('.ev-main').waitFor();
-    await shot('legacy-evidence-from-react-side-nav');
+    await page.getByRole('searchbox', { name: '检索作品与证据' }).waitFor();
+    await shot('evidence-from-react-side-nav');
     await page.getByRole('complementary', { name: '语料导航' }).getByRole('link', { name: /创作者/ }).click();
     await page.waitForURL(url => url.pathname === '/corpus/creators' && url.searchParams.get('domain') === domainOne);
     await page.getByRole('table').waitFor();
@@ -387,7 +387,7 @@ try {
       returnValue: sessionStorage.getItem('linggan.creatorDiscovery.return'),
     }));
     assert.deepEqual(report.storage.local, []);
-    // 上一步去过旧证据库页，它自己会留下一条 collection-selected:<领域> 的选择记录，不属于本页；
+    // 上一步去过证据库页，它自己可能留下一条 collection-selected:<领域> 的选择记录，不属于本页；
     // 属于创作者页的只有 linggan.creatorDiscovery.return，而且里面只能是位置，不能有作者名或作品内容。
     for (const key of report.storage.session) assert.match(key, /^(linggan\.creatorDiscovery\.return|collection-selected:[0-9a-f-]{36})$/);
     if (report.storage.returnValue !== null) assert.doesNotMatch(report.storage.returnValue, /合成/);

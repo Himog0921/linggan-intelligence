@@ -1,0 +1,212 @@
+/* 原尺寸查看器：整屏的模态原生 <dialog>。只消费 LIDS --lgi-* Token。 */
+
+.lightbox {
+  box-sizing: border-box;
+  width: 100vw;
+  max-width: none;
+  height: 100dvh;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  padding: 0;
+  overflow: hidden;
+  background: var(--lgi-canvas);
+  color: var(--lgi-ink);
+  font: var(--lgi-text-body) / var(--lgi-lh-body) var(--lgi-font-sans);
+}
+
+.lightbox[open] {
+  display: block;
+}
+
+.lightbox::backdrop {
+  background: var(--lgi-canvas);
+}
+
+.viewer {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: 100%;
+  height: 100%;
+}
+
+.lightbox :is(button) {
+  box-sizing: border-box;
+  border: 1px solid var(--lgi-ink);
+  border-radius: var(--lgi-radius-none);
+  background: var(--lgi-canvas);
+  color: var(--lgi-ink);
+  font: var(--lgi-weight-bold) var(--lgi-text-body) / 1 var(--lgi-font-mono);
+  cursor: pointer;
+}
+
+.lightbox button:hover:not(:disabled) {
+  background: var(--lgi-ink);
+  color: var(--lgi-on-dark);
+}
+
+.lightbox button:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+
+.lightbox :focus-visible {
+  outline: 3px solid var(--lgi-signal);
+  outline-offset: 2px;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--lgi-space-4);
+  padding: var(--lgi-space-3) calc(var(--lgi-space-4) + var(--lgi-space-1) / 2);
+  border-bottom: 1px solid var(--lgi-ink);
+  background: var(--lgi-canvas);
+}
+
+.head strong {
+  font-size: var(--lgi-text-body);
+}
+
+.subtitle {
+  display: block;
+  margin-top: calc(var(--lgi-space-1) * 0.75);
+  color: var(--lgi-ghost);
+  font: var(--lgi-weight-semibold) var(--lgi-text-calibration) / var(--lgi-lh-data) var(--lgi-font-mono);
+  letter-spacing: var(--lgi-ls-data);
+}
+
+.tools {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--lgi-space-2) + var(--lgi-space-1) / 2);
+}
+
+.zoom {
+  display: flex;
+  height: calc(var(--lgi-space-8) + var(--lgi-space-1) / 2);
+  border: 1px solid var(--lgi-ink);
+}
+
+.zoom button {
+  min-width: calc(var(--lgi-space-8) + var(--lgi-space-1) / 2);
+  border: 0;
+  border-right: 1px solid var(--lgi-ink);
+  padding: 0 var(--lgi-space-2);
+}
+
+.zoom button:last-child {
+  border-right: 0;
+}
+
+.zoom .zoomValue {
+  min-width: calc(var(--lgi-space-16) - var(--lgi-space-1) / 2);
+  font-size: var(--lgi-text-data);
+  font-variant-numeric: tabular-nums;
+}
+
+.close {
+  display: grid;
+  place-items: center;
+  width: var(--lgi-space-8);
+  height: var(--lgi-space-8);
+  padding: 0;
+  font-size: var(--lgi-text-section);
+}
+
+.lightbox .close:hover:not(:disabled) {
+  border-color: var(--lgi-signal);
+  background: var(--lgi-signal);
+  color: var(--lgi-on-dark);
+}
+
+/* 舞台居中一块固定尺寸的板，而不是让图片长到每一个可用像素：满高时一张文字卡片会变成要转头扫读的墙；
+ * 这个查看器是为了完整看清一个对象，细节需要时再缩放。 */
+.stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--lgi-space-5);
+  min-height: 0;
+  padding: var(--lgi-space-5);
+}
+
+.step {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: calc(var(--lgi-space-12) + var(--lgi-space-1));
+  height: calc(var(--lgi-space-16) + var(--lgi-space-2));
+  padding: 0;
+  font-size: var(--lgi-text-section);
+}
+
+.figure {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--lgi-space-3);
+  min-height: 0;
+  max-height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+/* 板承载边框而不是图片：图片可缩放、可拖动之后，否则会从自己的边框下滑出去。板裁切，图片在里面动。
+ * `contain` 是铁律——裁切会悄悄编辑证据。 */
+.frame {
+  position: relative;
+  display: grid;
+  place-items: center;
+  max-width: min(56vw, calc(var(--lgi-space-24) * 8 - var(--lgi-space-4)));
+  min-height: 0;
+  max-height: min(76vh, calc(var(--lgi-space-24) * 9 + var(--lgi-space-8)));
+  overflow: hidden;
+  border: 2px solid var(--lgi-ink);
+  background: var(--lgi-canvas);
+  box-shadow: var(--lgi-shadow-brutal);
+}
+
+.frame img {
+  display: block;
+  max-width: min(56vw, calc(var(--lgi-space-24) * 8 - var(--lgi-space-4)));
+  max-height: min(76vh, calc(var(--lgi-space-24) * 9 + var(--lgi-space-8)));
+  object-fit: contain;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+.frame[data-zoomed='true'] {
+  cursor: grab;
+}
+
+.frame[data-grabbing='true'] {
+  cursor: grabbing;
+}
+
+.figure figcaption {
+  color: var(--lgi-muted);
+  font: var(--lgi-weight-semibold) var(--lgi-text-calibration) / var(--lgi-lh-data) var(--lgi-font-mono);
+  letter-spacing: var(--lgi-ls-data);
+  text-align: center;
+}
+
+@media (max-width: 640px) {
+  .stage {
+    gap: var(--lgi-space-2);
+    padding: var(--lgi-space-3);
+  }
+
+  .step {
+    width: calc(var(--lgi-space-8) + var(--lgi-space-1) * 1.5);
+    height: var(--lgi-space-12);
+  }
+
+  .frame,
+  .frame img {
+    max-width: min(74vw, calc(var(--lgi-space-24) * 5 + var(--lgi-space-3)));
+    max-height: min(64vh, calc(var(--lgi-space-24) * 6 + var(--lgi-space-3)));
+  }
+}

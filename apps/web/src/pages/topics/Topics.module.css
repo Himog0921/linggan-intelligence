@@ -2876,3 +2876,137 @@ body.topic-map-page {
   font-weight: var(--lgi-weight-semibold);
   line-height: var(--lgi-lh-heading);
 }
+
+
+/* WEB-REACT-001-F / Mog-approved B: scope the redesign to the overview work surface. */
+:global(#topic-map-root) .lgi-tm-side-views {
+  display: flex;
+  flex-direction: column;
+  gap: var(--lgi-space-2);
+  margin: 0 0 var(--lgi-space-6);
+  align-items: stretch;
+}
+:global(#topic-map-root) .lgi-tm-side-views .lgi-tm-tab {
+  justify-content: flex-start;
+  min-height: var(--lgi-space-12);
+  padding: var(--lgi-space-3);
+  border: 0;
+  border-radius: 0;
+  font-size: var(--lgi-text-data);
+}
+:global(#topic-map-root) .lgi-tm-side-views .lgi-tm-tab.is-active {
+  background: var(--lgi-ink);
+  color: var(--lgi-on-dark);
+  box-shadow: var(--lgi-shadow-none);
+}
+:global(#topic-map-root) .lgi-tm-summary-identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--lgi-space-4);
+  min-width: 0;
+}
+:global(#topic-map-root) .lgi-tm-summary-identity h2 {
+  font-size: var(--lgi-text-section);
+  white-space: nowrap;
+}
+:global(#topic-map-root)[data-view="overview"] .lgi-tm-workbench {
+  grid-template-columns: calc(var(--lgi-space-24) * 2 + var(--lgi-space-8)) minmax(0, 1fr);
+}
+:global(#topic-map-root)[data-view="overview"] .lgi-tm-main {
+  padding: var(--lgi-space-6) var(--lgi-space-8);
+}
+:global(#topic-map-root)[data-view="overview"] .lgi-tm-summary-heading {
+  padding-bottom: var(--lgi-space-3);
+  border-bottom: 2px solid var(--lgi-ink);
+}
+:global(#topic-map-root)[data-view="overview"] .lgi-tm-summary-bottom {
+  border: 0;
+  padding-block: 0 var(--lgi-space-2);
+}
+:global(#topic-map-root)[data-view="overview"] .lgi-tm-view-toolbar {
+  border-bottom: 2px solid var(--lgi-ink);
+  padding-block: var(--lgi-space-4) 0;
+  margin-bottom: var(--lgi-space-6);
+  top: calc(var(--lgi-space-6) * -1);
+}
+:global(#topic-map-root) .lgi-tm-material-first {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr);
+  gap: var(--lgi-space-10);
+  align-items: start;
+}
+:global(#topic-map-root) .lgi-tm-material-first > *,
+:global(#topic-map-root) .lgi-tm-material-insights { min-width: 0; }
+:global(#topic-map-root) .lgi-tm-material-first .lgi-tm-workspace-content > .lgi-tm-section-head {
+  flex-wrap: wrap;
+  gap: var(--lgi-space-3);
+  align-items: flex-start;
+  margin-bottom: var(--lgi-space-3);
+}
+:global(#topic-map-root) .lgi-tm-material-first .lgi-tm-workspace-content > .lgi-tm-section-head > .lgi-tm-row {
+  width: 100%;
+  gap: var(--lgi-space-2);
+}
+:global(#topic-map-root) .lgi-tm-material-first .lgi-tm-search {
+  flex: 1;
+  min-width: calc(var(--lgi-space-24) * 2);
+}
+:global(#topic-map-root) .lgi-tm-material-first .lgi-tm-search input {
+  flex: 1;
+  width: 0;
+  border: 0;
+  background: var(--lgi-canvas-low);
+  padding: var(--lgi-space-3);
+}
+:global(#topic-map-root) .lgi-tm-material-first .lgi-tm-evidence-row {
+  grid-template-columns: var(--lgi-space-16) minmax(0, 1fr);
+  gap: var(--lgi-space-4);
+  border: 0;
+  padding-block: var(--lgi-space-4) var(--lgi-space-6);
+}
+:global(#topic-map-root) .lgi-tm-material-first .lgi-tm-evidence-cover { border: 0; border-radius: 0; }
+:global(#topic-map-root) .lgi-tm-material-first .lgi-tm-evidence-row:hover { background: transparent; }
+:global(#topic-map-root) .lgi-tm-material-first .lgi-tm-material-meta { gap: var(--lgi-space-1) var(--lgi-space-2); }
+:global(#topic-map-root) .lgi-tm-material-first .lgi-tm-material-footer { gap: var(--lgi-space-2); }
+:global(#topic-map-root) .lgi-tm-material-first .lgi-tm-material-footer > .lgi-tm-row { gap: 0; }
+:global(#topic-map-root) .lgi-tm-material-insights > .lgi-tm-platform-context { display: block; margin-bottom: var(--lgi-space-3); }
+@media (max-width: 1100px) {
+  :global(#topic-map-root)[data-view="overview"] .lgi-tm-workbench { grid-template-columns: calc(var(--lgi-space-24) * 2) minmax(0, 1fr); }
+  :global(#topic-map-root)[data-view="overview"] .lgi-tm-main { padding-inline: var(--lgi-space-5); }
+  :global(#topic-map-root) .lgi-tm-material-first { grid-template-columns: minmax(0, 1fr); gap: var(--lgi-space-8); }
+}
+@media (max-width: 700px) {
+  :global(#topic-map-root)[data-view="overview"] .lgi-tm-workbench { grid-template-columns: minmax(0, 1fr); }
+  :global(#topic-map-root) .lgi-tm-sidebar { grid-template-columns: auto minmax(0, 1fr); }
+  :global(#topic-map-root) .lgi-tm-side-views { grid-column: 1 / -1; flex-direction: row; margin-bottom: var(--lgi-space-2); }
+  :global(#topic-map-root) .lgi-tm-side-views .lgi-tm-tab { min-height: var(--lgi-space-10); flex: 1; }
+  :global(#topic-map-root) .lgi-tm-navigation-toggle, :global(#topic-map-root) .lgi-tm-sidebar-tools { grid-row: 2; }
+  :global(#topic-map-root) .lgi-tm-navigation-body { grid-row: 3; }
+  :global(#topic-map-root)[data-view="overview"] .lgi-tm-main { padding: var(--lgi-space-4); }
+  :global(#topic-map-root)[data-view="overview"] .lgi-tm-summary-heading { align-items: flex-start; gap: var(--lgi-space-3); }
+  :global(#topic-map-root)[data-view="overview"] .lgi-tm-summary-heading > .lgi-tm-row { flex-wrap: wrap; }
+  :global(#topic-map-root)[data-view="overview"] .lgi-tm-view-toolbar { top: 0; position: static; }
+  :global(#topic-map-root) .lgi-tm-material-first .lgi-tm-evidence-row { grid-template-columns: var(--lgi-space-12) minmax(0, 1fr); gap: var(--lgi-space-3); }
+}
+
+:global(#topic-map-root) .lgi-tm-material-first .lgi-tm-workspace-content > .lgi-tm-section-head > div:first-child {
+  display: flex;
+  align-items: baseline;
+  gap: var(--lgi-space-4);
+}
+:global(#topic-map-root) .lgi-tm-material-first .lgi-tm-workspace-content > .lgi-tm-section-head > div:first-child p {
+  font-size: var(--lgi-text-data);
+  color: var(--lgi-muted);
+}
+:global(#topic-map-root)[data-view="overview"] .lgi-tm-summary [aria-label="当前统计范围"] { padding: 0; }
+:global(#topic-map-root)[data-view="journey"] .lgi-tm-summary-identity { display: contents; }
+
+:global(#topic-map-root)[data-view="overview"] .lgi-tm-view-toolbar .lgi-tm-tab {
+  border-bottom: 3px solid transparent;
+}
+:global(#topic-map-root)[data-view="overview"] .lgi-tm-view-toolbar .lgi-tm-tab.is-active {
+  border-bottom-color: var(--lgi-signal);
+  background: transparent;
+  box-shadow: var(--lgi-shadow-none);
+}

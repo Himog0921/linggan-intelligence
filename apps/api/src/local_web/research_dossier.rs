@@ -100,18 +100,6 @@ pub(super) async fn relayer(
     }
 }
 
-pub(super) async fn script() -> Response {
-    (
-        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-        concat!(
-            include_str!("research_dossier.js"),
-            "\n",
-            include_str!("research_dossier_batch.js")
-        ),
-    )
-        .into_response()
-}
-
 pub(super) async fn comments(
     State(state): State<LocalWebState>,
     Path(work): Path<uuid::Uuid>,

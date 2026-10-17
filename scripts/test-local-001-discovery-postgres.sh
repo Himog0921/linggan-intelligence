@@ -5,8 +5,6 @@ export LINGGAN_COLLECTION_UPGRADE_PHASE=governance
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$project_root"
 
-node --test apps/api/src/local_web/evidence_observation.test.mjs
-
 # API media proofs intentionally use the same controlled local-media root as the delivery
 # contract. Keep this isolated proof serial so one test's fixture cleanup cannot race another
 # test's file assertion; callers may still request an even smaller explicit thread count.
@@ -98,7 +96,12 @@ cargo test -p linggan-intelligence --test topic_workspace_postgres --locked -- -
 # synthetic browser fixtures. Collection's populated proof runs via
 # COLLECTION_RUN_BROWSER_PROOF=1 scripts/test-collection-single-run-postgres.sh.
 # Keep this LOCAL-001 pass focused on its API/DB proof; skipped browser cases are not passes.
-cargo test -p linggan-api --bin linggan-api --locked -- --ignored --skip browser_real_axum_postgres_previews_starts_and_stops_without_provider_dispatch --skip browser_real_axum_postgres_traces_comment_run_signal_problem_evidence --skip collection_single_run_browser_with_persisted_data
+# The WEB-REACT-001 browser proofs (settings, creators, evidence, operations) run in
+# scripts/test-web-app-postgres.sh, the workbench proof in scripts/test-content-workbench-postgres.sh
+# --browser; the two frontend previews are manual. Each refuses to run without its harness flag.
+# topics_and_workspace_real_chain_browser_proof arrives with WEB-REACT-001 F (PR #441); skipping a
+# name that is not present yet is a no-op, so either merge order keeps this pass green.
+cargo test -p linggan-api --bin linggan-api --locked -- --ignored --skip browser_real_axum_postgres_previews_starts_and_stops_without_provider_dispatch --skip browser_real_axum_postgres_traces_comment_run_signal_problem_evidence --skip collection_single_run_browser_with_persisted_data --skip settings_page_real_chain_browser_proof --skip creators_page_real_chain_browser_proof --skip evidence_page_real_chain_browser_proof --skip operations_five_pages_real_chain_browser_proof --skip content_workbench_real_chain_browser_proof --skip readonly_collection_frontend_preview --skip manual_dossier_frontend_preview --skip topics_and_workspace_real_chain_browser_proof
 # worker 的启动/退出语义分两层：不需要数据库的那两条（缺地址必须失败、连不上不许装成空闲）
 # 默认就跑；第三条要一个没有迁移台账的真实库，跟着 `--ignored` 走。
 cargo test -p linggan-worker --test startup_contract --locked

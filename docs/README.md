@@ -15,7 +15,7 @@
 
 ## 网页前端统一为 React · 当前交付入口
 
-Mog 2026-10-15 决定所有正式网页统一为一个 React + TypeScript 应用，不留新旧双轨（[DEC-0010](decisions/0010-web-frontend-react.md)）。唯一推进入口是 [WEB-REACT-001 计划](plans/active/web-react-001.md)（Issue #430），它合并了 UI 改版专项 UIUX-CONTENT-WORKBENCH-001（Issue #425，原生前端停止、后端继续，React 归阶段 C）。迁移期间旧页面冻结，只修阻断使用的缺陷；新页面一律用 React。阶段 A+B 已随 PR #431 合并至 main@0a90fd4a，3000 同版本部署和线上只读链路经 #430 核验；阶段 C 已由 Mog 派定并在专属工作树实施，验收记录见 [ACC-WEB-REACT-001-B](design/acceptance/web-react-001-b-acceptance.md)。阶段 D（语料三页）按[分册](plans/active/web-react-001-d-corpus.md)拆为 D1 创作者页与共享外壳、D2 证据库、D3 评论研究（Issue #433）；D1 候选实现与验证见 [ACC-WEB-REACT-001-D1](design/acceptance/web-react-001-d1-acceptance.md)，页面规格见 [PAGE-CORPUS-CREATORS-V1-001](design/pages/creators-page.md)，未合并、未部署。
+Mog 2026-10-15 决定所有正式网页统一为一个 React + TypeScript 应用，不留新旧双轨（[DEC-0010](decisions/0010-web-frontend-react.md)）。唯一推进入口是 [WEB-REACT-001 计划](plans/active/web-react-001.md)（Issue #430），它合并了 UI 改版专项 UIUX-CONTENT-WORKBENCH-001（Issue #425，原生前端停止、后端继续，React 归阶段 C）。迁移期间旧页面冻结，只修阻断使用的缺陷；新页面一律用 React。阶段 A+B 已随 PR #431 合并至 main@0a90fd4a，3000 同版本部署和线上只读链路经 #430 核验；阶段 C 已由 Mog 派定并在专属工作树实施，验收记录见 [ACC-WEB-REACT-001-B](design/acceptance/web-react-001-b-acceptance.md)。阶段 D（语料三页）按[分册](plans/active/web-react-001-d-corpus.md)拆为 D1 创作者页与共享外壳、D2 证据库、D3 评论研究（Issue #433）；D1 已随 PR #436 合并至 main@baaf5a51 并上线（验收见 [ACC-WEB-REACT-001-D1](design/acceptance/web-react-001-d1-acceptance.md)，页面规格见 [PAGE-CORPUS-CREATORS-V1-001](design/pages/creators-page.md)）；D2 证据库已实施并以 Draft PR 呈交，验收见 [ACC-WEB-REACT-001-D2](design/acceptance/web-react-001-d2-acceptance.md)，未合并、未部署；D3 未开始。
 
 ## 研究底稿与图片分层第一阶段
 
@@ -58,11 +58,12 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发，并于 2026-10-02 
 | [design/acceptance/web-react-001-b-acceptance.md](design/acceptance/web-react-001-b-acceptance.md) | 权威当前；已合并部署，Mog 待验收 | WEB-REACT-001 阶段 B 的场景矩阵、隔离真实链路浏览器证明结果与分层结论；迁移中修正的旧设置页缺陷 |
 | [design/acceptance/web-react-001-g-acceptance.md](design/acceptance/web-react-001-g-acceptance.md) | 一次性报告；实施/验收中 | 采集四页、全部抽屉/弹窗迁移，JSON 回执边界、实际截图与隔离证明；未部署 |
 | [design/acceptance/web-react-001-c-acceptance.md](design/acceptance/web-react-001-c-acceptance.md) | 一次性报告；候选验证中 | 阶段 C React V3 工作台、材料到成品、独立审核与未证明边界 |
-| [design/acceptance/web-react-001-d1-acceptance.md](design/acceptance/web-react-001-d1-acceptance.md) | 一次性报告；Draft PR 待合并，未部署 | 阶段 D1 创作者页与语料共享外壳：场景矩阵、隔离真实链路 17 步浏览器证明、分层结论与未证明边界 |
-| [design/pages/creators-page.md](design/pages/creators-page.md) | 权威当前；React 候选实现，未合并 | `/corpus/creators` 的页面责任、状态词典、动作与真实后果、LIDS 采用清单 |
+| [design/acceptance/web-react-001-d1-acceptance.md](design/acceptance/web-react-001-d1-acceptance.md) | 一次性报告；已合并上线（PR #436，`baaf5a51`），Mog 待验收 | 阶段 D1 创作者页与语料共享外壳：场景矩阵、隔离真实链路 17 步浏览器证明、分层结论与未证明边界 |
+| [design/acceptance/web-react-001-d2-acceptance.md](design/acceptance/web-react-001-d2-acceptance.md) | 一次性报告；Draft PR 待合并，未部署 | 阶段 D2 证据库：场景矩阵、隔离真实链路 19 步浏览器证明与插件入口证明、失效控件实测、分层结论与未证明边界 |
+| [design/pages/creators-page.md](design/pages/creators-page.md) | 权威当前；React 实现已上线（`baaf5a51`） | `/corpus/creators` 的页面责任、状态词典、动作与真实后果、LIDS 采用清单 |
 | [decisions/0010-web-frontend-react.md](decisions/0010-web-frontend-react.md) | 权威当前 | 网页前端统一为 React + TypeScript、不留双轨、开发期数据不构成迁移约束；所取代的「原生 JS / 不引入框架」条款 |
 | [plans/active/web-react-001.md](plans/active/web-react-001.md) | 活跃计划；Issue #430；阶段 A+B 随 PR #431 合并并按 #430 回执部署；阶段 C 已派定 | 全站 React 迁移与 UI 改版的唯一推进入口：目标架构、R1–R7 不留双轨规则、阶段 A–H、内容工作台首包规格 |
-| [plans/active/web-react-001-d-corpus.md](plans/active/web-react-001-d-corpus.md) | 活跃计划；Issue #433（#430 阶段 D 分册）；D1 已复核、Draft PR 待合并，D2/D3 未开始 | 语料三页迁 React：拆分与顺序、已定设计改动、D1 能力清单（旧页能力逐项落点）、回执与语料外壳接口合同 |
+| [plans/active/web-react-001-d-corpus.md](plans/active/web-react-001-d-corpus.md) | 活跃计划；Issue #433（#430 阶段 D 分册）；D1 已上线；D2 Draft PR 待合并；D3 未开始 | 语料三页迁 React：拆分与顺序、已定设计改动、D1 与 D2 能力清单（旧页能力逐项落点）、D2 裁定、回执与语料外壳接口合同 |
 | [plans/active/web-react-001-g-collection.md](plans/active/web-react-001-g-collection.md) | 活跃计划；#430 阶段 G；Mog 2026-10-16 派定 | 整个采集模块 React 迁移；能力盘点、实际页面截图基线、逐表面对照与隔离回执验证 |
 | [plans/active/topic-map-workflow-382.md](plans/active/topic-map-workflow-382.md) | 活跃计划 | 左侧双入口、内容优先、统一检索、状态与人工备选闭环；迁移/部署另确认 |
 | [plans/active/topic-map-read-performance-382.md](plans/active/topic-map-read-performance-382.md) | PR #389历史已发布；10月13日首屏候选实现/实测通过，冷重建仍慢，未提交/发布；Issue #382 | 进入首屏542ms/完整1268ms，冷重建约5–8秒；完整统计和来源资格不放宽 |
@@ -189,7 +190,7 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发，并于 2026-10-02 
 | [design/templates/component-spec-form.md](design/templates/component-spec-form.md) | 权威当前 | 可复用组件规格表单 |
 | [design/templates/ui-change-manifest-form.md](design/templates/ui-change-manifest-form.md) | 权威当前 | 每次 UI 变更的来源、范围、影响与证明清单表单 |
 | [design/templates/visual-acceptance-form.md](design/templates/visual-acceptance-form.md) | 权威当前 | 视觉、任务、状态和真实后果四层验收记录表单 |
-| [design/pages/evidence-library-page.md](design/pages/evidence-library-page.md) | 权威当前 | `PAGE-EVIDENCE-001`：多材料 Evidence Library 产品手册与技术呈现要求；运行页已按现行 Material Projection 落地作品 lane 与 Inspector，真实垂直证明仍未完成 |
+| [design/pages/evidence-library-page.md](design/pages/evidence-library-page.md) | 权威当前 | `PAGE-EVIDENCE-001`：多材料 Evidence Library 产品手册与技术呈现要求；运行页已按现行 Material Projection 落地作品 lane 与 Inspector，真实垂直证明仍未完成；WEB-REACT-001 D2 起为 React 实现，修订见其 §14 |
 | [design/changes/evidence-cover-flip-card-001-ui-change-manifest.md](design/changes/evidence-cover-flip-card-001-ui-change-manifest.md) | 交付分支实现；未合并、未部署 | `EVIDENCE-COVER-FLIP-CARD-001`：封面排版作品卡的局部翻面主视觉与固定元数据板；不改变读取、详情或状态语义 |
 | [design/acceptance/evidence-cover-flip-card-001-acceptance.md](design/acceptance/evidence-cover-flip-card-001-acceptance.md) | 一次性报告；未部署 | `ACC-EVIDENCE-COVER-FLIP-CARD-001`：自动合同、桌面真实数据预览与未切换 runtime 边界 |
 | [design/changes/evidence-cover-card-proportion-002-ui-change-manifest.md](design/changes/evidence-cover-card-proportion-002-ui-change-manifest.md) | 权威当前；main 已合并、本机 runtime 已刷新 | `EVIDENCE-COVER-CARD-PROPORTION-002`：保留六列封面扫描密度，将卡片校准为高档案主视觉与低横向数据铭牌的成组比例，不改变读取、详情或状态语义 |
@@ -400,6 +401,8 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发，并于 2026-10-02 
 
 阶段 E 证明：[运营台账五页验收记录](design/acceptance/web-react-001-e-acceptance.md)（候选、隔离链路与实际 UI 对照；部署及 Mog 验收独立）。
 
-阶段 F 实施入口：[主题图谱与 Topic 工作区 React 迁移](plans/active/web-react-001-f-topics.md)（Issue #440；当前实际UI保真，截图与隔离链路证明，未部署）。
+阶段 F 实施入口：[主题图谱与 Topic 工作区 React 迁移](plans/active/web-react-001-f-topics.md)（Issue #440；React迁移及已选B材料优先概览修订，截图与隔离链路证明，未部署）。
 
-阶段 F 证明：[主题图谱与 Topic Workspace 迁移验收](design/acceptance/web-react-001-f-acceptance.md)（当前实际 UI 完整滚动对照、正式隔离链路，部署与 Mog 签收独立）。
+阶段 F 证明：[主题图谱与 Topic Workspace 迁移验收](design/acceptance/web-react-001-f-acceptance.md)（旧迁移保真及当前B改版实际截图、正式隔离链路，部署与 Mog 签收独立）。
+
+主题概览 B「材料优先」正式改版：[阶段 F 计划 §7](plans/active/web-react-001-f-topics.md#7-2026-10-17--mog-选定-b材料优先正式改版)，Mog 已选定并授权；保留全部功能/口径，候选实施与验收中。

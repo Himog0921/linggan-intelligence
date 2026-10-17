@@ -72,6 +72,13 @@ proof_database_created=1
 docker exec "$proof_container" psql -X -v ON_ERROR_STOP=1 -U "$proof_user" -d "$proof_database" -c "CREATE EXTENSION pg_stat_statements" >/dev/null
 export LOCAL_001_PROOF_DATABASE_URL="postgresql://${proof_user}:${proof_password}@127.0.0.1:${proof_port}/${proof_database}"
 if [[ "${1:-}" == "--preview" ]]; then
+  # 预览服务的是 React 证据库页（WEB-REACT-001 阶段 D2），需要已构建的前端产物；没有就先构建，
+  # 缺少 Node 时明确报错，而不是让页面返回「前端文件没有就绪」。
+  if [[ ! -f apps/web/dist/index.html ]]; then
+    command -v npm >/dev/null || { echo "预览需要已构建的前端（apps/web/dist），但没有找到 npm，无法构建" >&2; exit 1; }
+    [[ -d apps/web/node_modules ]] || npm ci --prefix apps/web --ignore-scripts --no-audit --no-fund
+    npm --prefix apps/web run build >/dev/null
+  fi
   export DOSSIER_FRONTEND_PREVIEW=1
   cargo test -p linggan-api --bin linggan-api manual_dossier_frontend_preview --locked -- --ignored --nocapture
   exit 0

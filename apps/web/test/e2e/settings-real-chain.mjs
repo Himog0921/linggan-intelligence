@@ -223,7 +223,7 @@ try {
     });
   }
 
-  await step('从新页头进入旧页面：语料仍由旧服务提供', async () => {
+  await step('从新页头进入语料：/corpus 跳转到证据库（React 页）', async () => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await afterSettingsRead(() => page.goto(`${origin}/settings/models`));
     // Wait for the real settings read before leaving; the header alone can render
@@ -232,7 +232,7 @@ try {
     await page.getByRole('navigation', { name: '一级导航' }).getByRole('link', { name: /语料/ }).click();
     await page.waitForURL(url => url.pathname === '/corpus/evidence');
     await page.getByRole('navigation', { name: '一级导航' }).waitFor();
-    await shot('legacy-corpus-from-react-header');
+    await shot('corpus-from-react-header');
   });
 
   await step('页面没有脚本错误；失败请求只有有意拦截的一次', async () => {

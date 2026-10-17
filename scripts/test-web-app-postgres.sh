@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # WEB-REACT-001 真实链路证明：一次性隔离 PostgreSQL + 本机 Axum 路由 + 已构建的 React 前端
-# + 无界面浏览器。依次运行：阶段 B 的设置页证明；阶段 D1 的语料外壳接口读库证明与创作者页证明
+# + 无界面浏览器。依次运行：阶段 B 的设置页证明；阶段 D1 的语料外壳接口读库证明与创作者页证明；
+# 阶段 D2 的证据库接口证明（DR-1 失效控件、两条写路径的库内后果）与证据库页证明；阶段 E 的运营台账五页证明
 # （合成作者与作品，真实写入只落在隔离库）。不连接开发库或本机常驻服务；只用合成模型凭据，
 # 模型连接指向本机回环端口，模型调用组件被指到不存在的路径，因此不会启动任何模型进程或外发请求。
 set -euo pipefail
@@ -122,6 +123,20 @@ run_proof "$proof_dir/creators" \
   local_web::creators_browser_tests \
   -- --ignored --nocapture --test-threads=1
 printf '%s\n' 'WEB-REACT-001 D1 corpus shell API and creators page real-chain proofs passed (isolated database; synthetic data only)'
+
+# 阶段 D2：证据库。先是接口证明（失效控件的真实调用记录、两条写路径在库里留下的后果），再是页面证明
+# （合成作品含长文＋多图＋评论＋图片文字、视频、风险停止、部分取得、字节已清理、撤回或受限、可复观测；
+# 受控媒体字节写在支持目录的 media/ 下，只经本机媒体句柄读取）。证据放在 evidence/ 子目录。
+mkdir -p "$proof_dir/evidence" "$support_dir/media"
+run_proof "$proof_dir/evidence" \
+  cargo test -p linggan-api --bins --locked \
+  local_web::evidence_api_proof_tests \
+  -- --ignored --nocapture --test-threads=1
+run_proof "$proof_dir/evidence" \
+  cargo test -p linggan-api --bins --locked \
+  local_web::evidence_browser_tests \
+  -- --ignored --nocapture --test-threads=1
+printf '%s\n' 'WEB-REACT-001 D2 evidence API proofs and evidence page real-chain proof passed (isolated database; synthetic data only)'
 
 # 阶段 E：运营台账五页、目标写入与六种导出；全部使用独立合成数据。
 mkdir -p "$proof_dir/ops"

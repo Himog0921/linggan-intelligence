@@ -234,7 +234,7 @@ Domain 使用资格落到一张窄的、append-only 的读取投影；它记录�
 | Admission | 历史 `material_admission.rs` 曾对 External 早退到独立 `cross_industry_admission.rs`；WP5 已移除该运行时代码 | 外部 Domain 不进入统一 Material/Media |
 | Deepening scope | 通用 scope 已有媒体/OCR/ASR；cross scope 没有完整媒体权限 | 外部 Domain 没有 media_slots 任务 |
 | Work Resource | canonical API 没有完整 Domain scope，外部领域走第二套 sample/comment API | 不能直接删除前端分支，否则会串域 |
-| Evidence UI | [evidence_library.js](../../../apps/api/src/local_web/evidence_library.js) 按 isOwn 切 API，外部对象固定 LIST LEVEL ONLY | 已有详情和评论也不展示 |
+| Evidence UI | `evidence_library.js`（已随 WEB-REACT-001 阶段 D2 删除，证据库现为 `apps/web/src/pages/corpus/evidence/` 的 React 页）按 isOwn 切 API，外部对象固定 LIST LEVEL ONLY | 已有详情和评论也不展示 |
 | Comment Study | [comment_study_source.rs](../../../crates/intelligence/src/comment_study_source.rs) 与 API 固定 ADHD | 其他 Domain 无法完整运行研究 |
 | Pause | Domain read 过滤 active，但 scheduler/dispatch 不检查 Domain status | UI 暂停会与后台事实冲突 |
 | Collection IA | [collection.rs](../../../apps/api/src/local_web/collection.rs) 固定五个子面 | 新增第六页必须先更新页面合同 |

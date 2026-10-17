@@ -1,0 +1,315 @@
+/* 作品列表：研读行与表格行。封面排版见 CoverCard.module.css。只消费 LIDS --lgi-* Token。
+ * 一个连续的工作面而不是一叠卡片：行与行之间一条发丝线，当前行左侧一道信号色竖条。
+ * 行里的一切都回答「值不值得打开」——完整的材料矩阵与来源轨迹留在检查器里。 */
+
+.list {
+  min-width: 0;
+}
+
+.items {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  position: relative;
+  border-bottom: 1px solid var(--lgi-hairline);
+  background: var(--lgi-canvas);
+  cursor: pointer;
+}
+
+.article {
+  position: relative;
+  display: grid;
+  grid-template-columns: calc(var(--lgi-space-16) + var(--lgi-space-3)) minmax(0, 1fr) calc(var(--lgi-space-24) * 2 - var(--lgi-space-2));
+  gap: calc(var(--lgi-space-3) + var(--lgi-space-1) / 2);
+  min-height: calc(var(--lgi-space-24) + var(--lgi-space-6) + var(--lgi-space-1));
+  padding: calc(var(--lgi-space-4) - var(--lgi-space-1) / 4) calc(var(--lgi-space-4) + var(--lgi-space-1) / 2);
+}
+
+.row[data-selected='true'] {
+  background: var(--lgi-signal-soft);
+}
+
+.row[data-selected='true']::before,
+.tableRow[data-selected='true'] td:first-child::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: var(--lgi-space-1);
+  background: var(--lgi-signal);
+}
+
+.row:focus-within {
+  outline: 3px solid var(--lgi-signal);
+  outline-offset: -3px;
+}
+
+@media (hover: hover) {
+  .row:hover {
+    background: var(--lgi-canvas-low);
+  }
+
+  .row[data-selected='true']:hover {
+    background: var(--lgi-signal-soft);
+  }
+}
+
+/* 版面的宽屏护栏：宽屏得到的是外侧留白，不是更宽的行文；材料导轨固定在右侧，扫读时各行对齐。 */
+.identity {
+  min-width: 0;
+  max-width: calc(var(--lgi-space-24) * 8 - var(--lgi-space-4));
+}
+
+.eyebrow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--lgi-space-1) var(--lgi-space-3);
+  color: var(--lgi-ghost);
+  font: var(--lgi-weight-semibold) var(--lgi-text-calibration) / var(--lgi-lh-data) var(--lgi-font-mono);
+  letter-spacing: var(--lgi-ls-data);
+}
+
+.tag {
+  border: 1px solid var(--lgi-border);
+  padding: 0 var(--lgi-space-1);
+  color: var(--lgi-muted);
+}
+
+.title {
+  margin: calc(var(--lgi-space-1) * 1.25) 0 0;
+  overflow: hidden;
+  font-size: var(--lgi-text-section);
+  line-height: var(--lgi-lh-heading);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.titleButton {
+  max-width: 100%;
+  overflow: hidden;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--lgi-ink);
+  font: var(--lgi-weight-bold) var(--lgi-text-section) / var(--lgi-lh-heading) var(--lgi-font-sans);
+  letter-spacing: var(--lgi-ls-normal);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.titleButton:focus-visible {
+  outline: 2px solid var(--lgi-signal);
+  outline-offset: calc(var(--lgi-space-1) / 2);
+}
+
+.meta {
+  display: grid;
+  gap: calc(var(--lgi-space-1) * 1.5);
+  margin-top: calc(var(--lgi-space-1) * 1.75);
+  color: var(--lgi-muted);
+  font: var(--lgi-text-data) / var(--lgi-lh-body) var(--lgi-font-sans);
+}
+
+.time {
+  color: var(--lgi-muted);
+}
+
+.side {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: var(--lgi-space-2);
+  border-left: 1px solid var(--lgi-hairline);
+  padding-left: var(--lgi-space-3);
+}
+
+.observed {
+  color: var(--lgi-ghost);
+  font: var(--lgi-weight-semibold) var(--lgi-text-label) / var(--lgi-lh-data) var(--lgi-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.check {
+  position: absolute;
+  top: var(--lgi-space-3);
+  right: var(--lgi-space-3);
+  z-index: var(--lgi-z-stage);
+  display: flex;
+  padding: var(--lgi-space-1);
+  background: var(--lgi-canvas);
+}
+
+/* 命中区不小于 40×40：勾选框用整个标签作为命中区。 */
+.check input {
+  width: var(--lgi-space-5);
+  height: var(--lgi-space-5);
+  margin: calc(var(--lgi-space-1) * 1.25);
+  accent-color: var(--lgi-ink);
+  cursor: pointer;
+}
+
+/* ── 表格排版 ───────────────────────────────── */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: auto;
+}
+
+.table th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  padding: calc(var(--lgi-space-1) * 1.75) var(--lgi-space-4);
+  border-bottom: 1px solid var(--lgi-ink);
+  background: var(--lgi-canvas-low);
+  color: var(--lgi-muted);
+  font: var(--lgi-weight-semibold) var(--lgi-text-label) / var(--lgi-lh-data) var(--lgi-font-sans);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.metricHead {
+  display: inline-grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: calc(var(--lgi-space-1) * 1.5);
+  align-items: center;
+  justify-items: center;
+}
+
+.metricHead svg {
+  color: var(--lgi-muted);
+}
+
+.tableRow {
+  position: relative;
+  border-bottom: 1px solid var(--lgi-hairline);
+  cursor: pointer;
+}
+
+.tableRow td {
+  position: relative;
+  padding: calc(var(--lgi-space-1) * 1.75) var(--lgi-space-4);
+  vertical-align: middle;
+}
+
+.tableRow[data-selected='true'] {
+  background: var(--lgi-signal-soft);
+}
+
+@media (hover: hover) {
+  .tableRow:hover {
+    background: var(--lgi-canvas-low);
+  }
+
+  .tableRow[data-selected='true']:hover {
+    background: var(--lgi-signal-soft);
+  }
+}
+
+.tableRow:focus-within {
+  outline: 3px solid var(--lgi-signal);
+  outline-offset: -3px;
+}
+
+.workCell {
+  min-width: calc(var(--lgi-space-24) * 1.5);
+}
+
+.workCell .titleButton {
+  display: block;
+  font-size: var(--lgi-text-body);
+}
+
+.workCell .check {
+  position: static;
+  display: inline-flex;
+  margin-top: var(--lgi-space-1);
+}
+
+.cell {
+  color: var(--lgi-muted);
+  font: var(--lgi-text-data) / var(--lgi-lh-body) var(--lgi-font-sans);
+  font-variant-numeric: tabular-nums;
+}
+
+.materialCell {
+  display: flex;
+  align-items: center;
+  gap: var(--lgi-space-3);
+  min-width: 0;
+}
+
+.materialCell > :first-child {
+  flex: 1 1 auto;
+  min-width: calc(var(--lgi-space-16));
+}
+
+/* ── 响应式 ─────────────────────────────────── */
+@media (max-width: 1500px) {
+  .article {
+    grid-template-columns: calc(var(--lgi-space-16) + var(--lgi-space-2) / 4) minmax(0, 1fr) calc(var(--lgi-space-24) * 2 - var(--lgi-space-5));
+  }
+}
+
+@media (max-width: 900px) {
+  .table thead {
+    display: none;
+  }
+
+  .table,
+  .table tbody,
+  .tableRow,
+  .tableRow td {
+    display: block;
+  }
+
+  .tableRow {
+    padding: var(--lgi-space-3);
+  }
+
+  .tableRow td {
+    padding: calc(var(--lgi-space-1) * 1.75) 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .article {
+    grid-template-columns: calc(var(--lgi-space-12) + var(--lgi-space-2)) minmax(0, 1fr);
+    padding: var(--lgi-space-3) var(--lgi-space-4);
+  }
+
+  .side {
+    grid-column: 1 / -1;
+    border-top: 1px solid var(--lgi-hairline);
+    border-left: 0;
+    padding-top: var(--lgi-space-2);
+    padding-left: 0;
+  }
+}
+
+/* 封面排版的栅格：与旧页同一个算法——列宽不小于 248px，自适应列数；窄屏两列，更窄一列。
+ * 列表容器本身不带内边距：卡片贴着结果区的边，行间距靠 row-gap。 */
+.list[data-layout='cover'] .items {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(calc(var(--lgi-space-24) * 2 + var(--lgi-space-12) + var(--lgi-space-2)), 1fr));
+  column-gap: var(--lgi-space-2);
+  row-gap: var(--lgi-space-8);
+}
+
+@media (max-width: 640px) {
+  .list[data-layout='cover'] .items {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 420px) {
+  .list[data-layout='cover'] .items {
+    grid-template-columns: 1fr;
+  }
+}

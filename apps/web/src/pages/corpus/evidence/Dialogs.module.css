@@ -1,0 +1,225 @@
+/* 证据库的模态对话框：选择研究领域、复观测确认、批量整理。原生 <dialog>，焦点陷阱与背景惰性由浏览器承担。
+ * 标题和操作栏固定，中间内容区自己滚动。只消费 LIDS --lgi-* Token。 */
+
+.dialog {
+  box-sizing: border-box;
+  width: min(calc(var(--lgi-space-16) * 10), calc(100vw - var(--lgi-space-12)));
+  max-height: calc(100dvh - var(--lgi-space-12));
+  border: 2px solid var(--lgi-ink);
+  padding: 0;
+  overflow: hidden;
+  background: var(--lgi-canvas);
+  box-shadow: var(--lgi-shadow-brutal);
+  color: var(--lgi-ink);
+  font: var(--lgi-text-body) / var(--lgi-lh-body) var(--lgi-font-sans);
+}
+
+.dialog[open] {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.dialog::backdrop {
+  background: color-mix(in srgb, var(--lgi-ink) 22%, transparent);
+}
+
+.dialog :is(button, select) {
+  box-sizing: border-box;
+  border-radius: var(--lgi-radius-none);
+  color: inherit;
+  font: inherit;
+}
+
+.dialog button {
+  border: 1px solid var(--lgi-border-strong);
+  padding: var(--lgi-space-2) var(--lgi-space-3);
+  background: var(--lgi-canvas);
+  font-size: var(--lgi-text-data);
+  font-weight: var(--lgi-weight-medium);
+  cursor: pointer;
+}
+
+.dialog button:hover:not(:disabled) {
+  background: var(--lgi-canvas-low);
+}
+
+.dialog button:disabled {
+  background: var(--lgi-canvas-low);
+  color: var(--lgi-ghost);
+  cursor: not-allowed;
+}
+
+.dialog a {
+  color: var(--lgi-focus);
+  text-decoration: none;
+}
+
+.dialog a:hover {
+  text-decoration: underline;
+}
+
+.dialog :focus-visible {
+  outline: 2px solid var(--lgi-focus);
+  outline-offset: 2px;
+}
+
+.dialog .primary {
+  border-color: var(--lgi-ink);
+  background: var(--lgi-ink);
+  color: var(--lgi-on-dark);
+}
+
+.dialog .primary:hover:not(:disabled) {
+  border-color: var(--lgi-signal-ink);
+  background: var(--lgi-signal-ink);
+}
+
+.dialog .textButton {
+  border: 0;
+  background: transparent;
+  padding: var(--lgi-space-1) 0;
+  color: var(--lgi-muted);
+  font-weight: var(--lgi-weight-regular);
+  white-space: nowrap;
+}
+
+.dialog .textButton:hover:not(:disabled) {
+  background: transparent;
+  color: var(--lgi-signal-ink);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.head {
+  display: flex;
+  flex: none;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--lgi-space-4);
+  border-bottom: 2px solid var(--lgi-ink);
+  padding: var(--lgi-space-6);
+}
+
+.head small {
+  display: block;
+  color: var(--lgi-muted);
+  font: var(--lgi-weight-bold) var(--lgi-text-label) / var(--lgi-lh-heading) var(--lgi-font-sans);
+}
+
+.head h2 {
+  margin: var(--lgi-space-1) 0 0;
+  font: var(--lgi-weight-bold) var(--lgi-text-section) / var(--lgi-lh-heading) var(--lgi-font-sans);
+}
+
+.body {
+  min-height: 0;
+  padding: var(--lgi-space-6);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.body p {
+  margin: 0 0 var(--lgi-space-3);
+  overflow-wrap: anywhere;
+}
+
+.copy {
+  color: var(--lgi-muted);
+}
+
+.list {
+  margin: 0 0 var(--lgi-space-3);
+  padding-left: var(--lgi-space-5);
+}
+
+.notice {
+  border-left: 3px solid var(--lgi-warning);
+  padding: var(--lgi-space-2) var(--lgi-space-3);
+  background: var(--lgi-warning-soft);
+  font-size: var(--lgi-text-data);
+}
+
+.foot {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--lgi-space-3);
+  border-top: 1px solid var(--lgi-border);
+  padding: var(--lgi-space-4) var(--lgi-space-6);
+  background: var(--lgi-canvas-low);
+}
+
+.foot button {
+  min-height: var(--lgi-space-10);
+}
+
+.spacer {
+  flex: 1;
+}
+
+/* ── 领域选择 ─────────────────────────────────── */
+.choices {
+  display: grid;
+  gap: var(--lgi-space-2);
+}
+
+.choice {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: var(--lgi-space-4);
+  align-items: center;
+  min-height: var(--lgi-space-16);
+  padding: var(--lgi-space-3) var(--lgi-space-4);
+  color: var(--lgi-ink);
+  text-decoration: none;
+}
+
+.dialog .choice {
+  color: var(--lgi-ink);
+}
+
+.dialog .choice:hover,
+.dialog .choice:focus-visible {
+  background: var(--lgi-canvas-low);
+  text-decoration: none;
+}
+
+.choiceName {
+  min-width: 0;
+  font: var(--lgi-weight-bold) var(--lgi-text-body) / var(--lgi-lh-heading) var(--lgi-font-sans);
+}
+
+.choiceMeta {
+  grid-column: 1;
+  color: var(--lgi-muted);
+  font: var(--lgi-text-label) / var(--lgi-lh-data) var(--lgi-font-sans);
+}
+
+.choiceArrow {
+  grid-column: 2;
+  grid-row: 1 / 3;
+  color: var(--lgi-signal);
+  font-size: var(--lgi-text-section);
+}
+
+.manage {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--lgi-space-10);
+  font-weight: var(--lgi-weight-bold);
+}
+
+@media (max-width: 640px) {
+  .body,
+  .head {
+    padding: var(--lgi-space-4);
+  }
+}

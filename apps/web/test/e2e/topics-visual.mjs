@@ -327,10 +327,32 @@ try {
     .split(",")
     .map(Number);
   for (const width of widths) {
-    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await page.setViewportSize({ width, height: width <= 390 ? 844 : 900 });
     await open();
     await shot(`${width}-overview`);
     await scrollShots(`${width}-overview`, ".lgi-tm-main, [data-topic-main]");
+    // A targeted redesign pass retains complete default coverage; it explicitly
+    // limits this additional run to the changed overview surface, not all dialogs.
+    if (process.env.TOPICS_VISUAL_SCOPE === "overview") {
+      report.coverage = "overview main and navigation, complete scrolling, chart and table; no dialog coverage in this targeted run";
+      const toggle = page.locator('[data-action="toggle-navigation"]');
+      const narrowNavigation = await toggle.isVisible();
+      if (narrowNavigation && await toggle.getAttribute("aria-expanded") !== "true") await toggle.click();
+      const legacy = page.locator('details[data-tree-legacy]');
+      if (await legacy.count()) {
+        if (!await legacy.evaluate((el) => el.open)) await legacy.locator("summary").click();
+        if (!await legacy.evaluate((el) => el.open)) throw Error("Legacy candidates did not expand before navigation capture");
+      }
+      if (narrowNavigation && await toggle.getAttribute("aria-expanded") !== "true") throw Error("Narrow navigation did not expand before capture");
+      await shot(`${width}-overview-navigation`);
+      await scrollShots(`${width}-overview-navigation`, 'aside[aria-label="主题图谱导航"]');
+      if (narrowNavigation && await toggle.getAttribute("aria-expanded") === "true") await toggle.click();
+      await page.getByRole("group", { name: "材料表现视图" }).getByRole("button", { name: "表格", exact: true }).click();
+      await page.locator('[data-topic-main]').evaluate((el) => { el.scrollTop = 0; });
+      await shot(`${width}-overview-table`);
+      await scrollShots(`${width}-overview-table`, '[data-topic-main]');
+      continue;
+    }
     await page.locator(".v7-domain-picker > summary").click();
     await shot(`${width}-domain-picker`);
     await page.locator(".v7-domain-picker > summary").click();

@@ -184,6 +184,36 @@ try {
       assert.equal(new URL(page.url()).searchParams.get("metric"), "involved");
     },
   );
+  await step("material-first overview retains full statistics, local search, distribution drill-down and left navigation", async () => {
+    await go();
+    const navigation = page.getByRole("navigation", { name: "主题图谱视图" });
+    assert.equal(await page.locator('aside[aria-label="主题图谱导航"]').getByRole("navigation", { name: "主题图谱视图" }).count(), 1);
+    const totals = await page.getByLabel("基础概览指标").innerText();
+    const distribution = await page.getByLabel("已观察内容点赞分布").innerText();
+    await page.getByRole("textbox", { name: "查找材料与方向" }).fill("no-such-material-b-overview");
+    await page.getByRole("button", { name: "查找", exact: true }).click();
+    await page.getByText("当前条件没有关键词命中", { exact: true }).waitFor();
+    assert.equal(await page.getByLabel("基础概览指标").innerText(), totals);
+    assert.equal(await page.getByLabel("已观察内容点赞分布").innerText(), distribution);
+    await navigation.getByRole("button", { name: "用户生命旅程", exact: true }).click();
+    assert.equal(new URL(page.url()).searchParams.get("query"), "no-such-material-b-overview");
+    await navigation.getByRole("button", { name: "主题概览", exact: true }).click();
+    await action("clear-filter", "query");
+    const chart = page.getByLabel("已观察内容点赞分布");
+    await chart.getByRole("button", { name: "表格", exact: true }).click();
+    const drill = chart.getByRole("table").getByRole("button", { name: "查看", exact: true }).filter({ visible: true });
+    const enabled = await drill.evaluateAll((buttons) => buttons.findIndex((button) => !button.disabled));
+    assert.ok(enabled >= 0);
+    const refs = (await drill.nth(enabled).getAttribute("data-id")).split(",");
+    await drill.nth(enabled).click();
+    await page.locator("dialog[open]").waitFor();
+    const openedRefs = await page.locator('dialog [data-action="reader"]').evaluateAll((buttons) => [...new Set(buttons.map((button) => button.dataset.id))]);
+    assert.deepEqual(new Set(openedRefs), new Set(refs));
+    await page.keyboard.press("Escape");
+    await page.screenshot({ path: path.join(dir, "topic-overview-b-table.png"), fullPage: true });
+    await chart.getByRole("button", { name: "分布图", exact: true }).click();
+    await page.screenshot({ path: path.join(dir, "topic-overview-b-chart.png"), fullPage: true });
+  });
   await step(
     "identity POST receives persisted receipt; identical retry replays and changed payload conflicts",
     async () => {

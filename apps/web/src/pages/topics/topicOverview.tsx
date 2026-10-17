@@ -1,4 +1,6 @@
 import type { JSX, ReactNode } from "react";
+import { OverviewReadouts } from "./OverviewReadouts";
+import { OverviewDistribution } from "./OverviewDistribution";
 import { attributes, inlineStyle } from "./elementProps";
 import {
   comparisonScopeNote,
@@ -331,12 +333,15 @@ export function createTopicOverview(context: TopicOverviewContext) {
           aria-label={"匹配材料"}
         >
           <div className={cls("lgi-tm-section-head")}>
+            <div>
+              <h3>{"材料与讨论"}</h3>
             <p>
               <strong>{[ns.length, " 篇当前匹配"].join("")}</strong>
               {context.snapshot?.scope?.totalWorkCount !== ns.length
                 ? ` · ${number(context.snapshot?.scope?.totalWorkCount)} 篇服务端范围`
                 : ""}
             </p>
+            </div>
             <div className={cls("lgi-tm-row")}>
               {materialSearch()}
               {[
@@ -439,6 +444,10 @@ export function createTopicOverview(context: TopicOverviewContext) {
           data-loaded={!busy}
           aria-label={"主题图谱导航"}
         >
+          <nav id="topic-map-view-tabs" className={cls("lgi-tm-side-views")} aria-label="主题图谱视图">
+            {tab("主题概览", "view", "overview", context.state.view === "overview")}
+            {tab("用户生命旅程", "view", "journey", context.state.view === "journey")}
+          </nav>
           {btn(
             context.state.navigationOpen ? "收起主题树" : "展开主题树",
             "toggle-navigation",
@@ -596,6 +605,8 @@ export function createTopicOverview(context: TopicOverviewContext) {
           aria-label={"当前主题基础概览"}
         >
           <div className={cls("lgi-tm-summary-heading")}>
+            <div className={cls("lgi-tm-summary-identity")}>
+              {context.state.view === "overview" ? <h2>主题概览</h2> : null}
             <nav aria-label={"当前主题路径"}>
               {btn("全部方向", "topic", "", "lgi-tm-quiet")}
               {parents.map((t) => (
@@ -614,6 +625,7 @@ export function createTopicOverview(context: TopicOverviewContext) {
                 </>
               ))}
             </nav>
+            </div>
             <div className={cls("lgi-tm-row")}>
               {selected ? (
                 <>
@@ -644,8 +656,10 @@ export function createTopicOverview(context: TopicOverviewContext) {
               {btn("统计口径", "method", "", "lgi-tm-quiet")}
             </div>
           </div>
-          {metrics(selected?.statistics || activeSnapshot.statistics)}
-          <div className={cls("lgi-tm-summary-bottom")}>{controls()}</div>
+          {context.state.view === "overview" ? (
+            <OverviewReadouts statistics={selected?.statistics || activeSnapshot.statistics} scope={activeSnapshot.scope} controls={controls()} />
+          ) : metrics(selected?.statistics || activeSnapshot.statistics)}
+          {context.state.view === "journey" ? <div className={cls("lgi-tm-summary-bottom")}>{controls()}</div> : null}
           {known(context.snapshot?.scope?.totalWorkCount) &&
           activeSnapshot.scope.totalWorkCount >
             list(activeSnapshot.works).length ? (
@@ -1068,7 +1082,18 @@ export function createTopicOverview(context: TopicOverviewContext) {
           {btn("主题 × 旅程", "matrix", "", "lgi-tm-quiet")}
         </div>
         {context.state.tab === "content" ? (
-          materialWorkspace()
+          <div className={cls("lgi-tm-material-first")}>
+            {materialWorkspace()}
+            <div className={cls("lgi-tm-material-insights")}>
+              {observedPlatforms(context.topic(context.state.topicRef)?.statistics || context.requireSnapshot().statistics).length > 1 ? plotSelect() : null}
+              <OverviewDistribution
+                works={context.selectedWorks().filter((w) => w.platform === plotPlatform())}
+                platform={platformStats(context.topic(context.state.topicRef)?.statistics || context.requireSnapshot().statistics).find((p) => p.platform === plotPlatform())}
+                statistics={context.topic(context.state.topicRef)?.statistics || context.requireSnapshot().statistics}
+                scope={context.requireSnapshot().scope}
+              />
+            </div>
+          </div>
         ) : (
           <>
             {changesBar()}
