@@ -85,7 +85,7 @@ Issue #85 沿用已确认项目方向，不重新向用户提出视觉选择。
 - **Visual thesis**：高密度但克制的白色证据台面，以冷黑结构、橙红选中信号和琥珀/红/灰状态点，让材料差异像实验记录一样可扫描。
 - **Content plan**：方位与查询 → 作品集合列表和 lane 状态 → 当前作品材料 → 来源血缘与限制；没有营销 Hero。
 - **Interaction thesis**：行选择同步 Inspector；lane 筛选只改变本地合成视图；受限原文用 inline restricted state，不用 Modal 或 Tooltip 隐藏必读边界。
-- **CSS 策略**：原生 CSS only；静态原型直接消费 `apps/api/src/local_web/lids_tokens.css`，不声明 `--lgi-*`，不新增第二套 Token。
+- **CSS 策略**：原生 CSS only；静态原型直接消费 `apps/web/src/styles/lids_tokens.css`，不声明 `--lgi-*`，不新增第二套 Token。
 - **半径系统**：只使用 `none / xs / sm / md = 0 / 2 / 4 / 8px`；按钮和选择项以 0–2px 为主，不使用 Pill。
 
 ## 4. 页面强度、Pattern 与表面地图

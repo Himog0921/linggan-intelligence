@@ -12,7 +12,8 @@ const fixture = JSON.parse(await readFile(path.join(directory, 'fixture.json'), 
 const { origin, domainOne, domainTwo, authorTotal } = fixture;
 await mkdir(directory, { recursive: true });
 
-const report = { origin, steps: [], screenshots: [], pageErrors: [], consoleErrors: [], failedRequests: [], writes: [], storage: null };
+const report = { origin, steps: [], screenshots: [], pageErrors: [], consoleErrors: [], failedRequests: [], httpErrors: [], writes: [], storage: null };
+const responseReads = [];
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 const listUrl = `${origin}/corpus/creators?domain=${domainOne}&pageSize=25`;
 const step = async (name, run) => {
@@ -21,6 +22,8 @@ const step = async (name, run) => {
     report.steps.push({ name, result: 'PASS' });
   } catch (error) {
     report.steps.push({ name, result: 'FAIL', error: String(error?.stack ?? error) });
+    await page.screenshot({ path: path.join(directory, `failure-step-${report.steps.length}.png`), fullPage: true }).catch(() => {});
+    report.failureText = await page.locator('body').innerText().catch(() => 'Page unavailable');
     throw error;
   }
 };
@@ -34,6 +37,13 @@ page.on('console', message => {
   if (message.type() === 'error') report.consoleErrors.push(message.text());
 });
 page.on('requestfailed', request => report.failedRequests.push(`${request.method()} ${new URL(request.url()).pathname} ${request.failure()?.errorText ?? ''}`));
+page.on('response', response => {
+  if (response.status() < 400) return;
+  responseReads.push((async () => {
+    const request = response.request();
+    report.httpErrors.push({ method: request.method(), url: request.url(), status: response.status(), at: report.steps.length, body: (await response.text().catch(() => 'Body unavailable')).slice(0, 4096) });
+  })());
+});
 // 记录所有非 GET 请求：打开页面、筛选、翻页、打开抽屉都不应该产生写请求。
 page.on('request', request => {
   if (request.method() !== 'GET') {
@@ -416,6 +426,9 @@ try {
   }
 
   await step('页面没有脚本错误；失败请求只有有意拦截的一次', async () => {
+    await Promise.allSettled(responseReads);
+    const expectedMethodRejection = entry => entry.method === 'POST' && new URL(entry.url).pathname === '/api/local/corpus/shell' && entry.status === 405;
+    assert.deepEqual(report.httpErrors.filter(entry => !expectedMethodRejection(entry)), [], 'unexpected HTTP errors must not be hidden by later successful reads');
     assert.deepEqual(report.pageErrors, []);
     assert.deepEqual(report.consoleErrors.filter(text => !text.includes('Failed to load resource')), []);
     // 允许的两类：有意拦截的那一次「加入观察」；以及前端因范围变化主动取消的读取（net::ERR_ABORTED，这是设计行为）。
@@ -426,6 +439,7 @@ try {
   });
   finished = true;
 } finally {
+  await Promise.allSettled(responseReads);
   report.finished = finished;
   await writeFile(path.join(directory, 'report.json'), JSON.stringify(report, null, 2));
   await browser.close();

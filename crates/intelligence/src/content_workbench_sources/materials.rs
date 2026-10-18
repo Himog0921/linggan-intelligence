@@ -66,7 +66,7 @@ mod documents;
 mod matching;
 use collection::{begin, response};
 pub use collection::{prepare, search};
-use documents::read_document_in;
+use documents::{read_comment_documents_in, read_document_in, read_with_comments_in};
 use matching::*;
 
 pub async fn resolve(db: &Database, request: &ResolveRequest) -> Result<Value, SourceError> {
@@ -78,6 +78,13 @@ pub async fn resolve(db: &Database, request: &ResolveRequest) -> Result<Value, S
     let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text")
         .fetch_one(&mut *tx)
         .await?;
+    let refs: Vec<_> = request
+        .selections
+        .iter()
+        .filter(|s| s.source_kind == SourceKind::Comment)
+        .map(|s| s.source_ref)
+        .collect();
+    let comments = read_comment_documents_in(&mut tx, request.domain_ref, &refs).await?;
     let mut documents = Vec::new();
     let mut seen = HashSet::new();
     for selection in &request.selections {
@@ -85,41 +92,34 @@ pub async fn resolve(db: &Database, request: &ResolveRequest) -> Result<Value, S
         if !seen.insert(selection.document_id.clone()) {
             return Err(SourceError::Invalid);
         }
-        let mut d = match read_document_in(
-            &mut tx,
-            request.domain_ref,
-            &selection.source_kind,
-            selection.source_ref,
-            selection.work_ref,
-        )
-        .await
-        {
-            Ok(mut d) => {
-                if d.source_version != selection.source_version {
-                    d.qualification = "changed".into();
+        let mut d =
+            match read_with_comments_in(&mut tx, request.domain_ref, selection, &comments).await {
+                Ok(mut d) => {
+                    if d.source_version != selection.source_version {
+                        d.qualification = "changed".into();
+                    }
+                    d
                 }
-                d
-            }
-            Err(SourceError::Database(e)) => return Err(SourceError::Database(e)),
-            Err(e) => MaterialDocument {
-                document_id: selection.document_id.clone(),
-                source_kind: selection.source_kind.clone(),
-                source_ref: selection.source_ref,
-                work_ref: selection.work_ref,
-                source_version: selection.source_version.clone(),
-                title: String::new(),
-                author_label: String::new(),
-                qualification: if matches!(e, SourceError::Restricted) {
-                    "restricted"
-                } else {
-                    "unavailable"
-                }
-                .into(),
-                fragments: vec![],
-                context: Value::Null,
-                match_reasons: vec![],
-            },
-        };
+                Err(SourceError::Database(e)) => return Err(SourceError::Database(e)),
+                Err(e) => MaterialDocument {
+                    document_id: selection.document_id.clone(),
+                    source_kind: selection.source_kind.clone(),
+                    source_ref: selection.source_ref,
+                    work_ref: selection.work_ref,
+                    source_version: selection.source_version.clone(),
+                    title: String::new(),
+                    author_label: String::new(),
+                    qualification: if matches!(e, SourceError::Restricted) {
+                        "restricted"
+                    } else {
+                        "unavailable"
+                    }
+                    .into(),
+                    fragments: vec![],
+                    context: Value::Null,
+                    match_reasons: vec![],
+                },
+            };
         d.match_reasons = current_reasons(&d, selection, &terms);
         documents.push(d);
     }

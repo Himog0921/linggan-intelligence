@@ -138,7 +138,7 @@
 - WEB-REACT-001 H 后生成位置为 `apps/web/src/pages/login/assets/` 与 `sceneModel.ts`；旧Rust HTML已删除，可经PR #411历史恢复；禁止手改生成物。
 - 唯一源：`scripts/login-anatomy/{model.mjs,parts.mjs,order.mjs,build.mjs}及apps/web/src/pages/login/Login.module.css`；表单及生命周期由React/TypeScript维护；Anatomy 技能的 MIT kit 仅在生成时使用，许可随源保留。
 - 再生：`node scripts/login-anatomy/build.mjs --audit`，Node 20.10+ 和已安装 Anatomy；`ANATOMY_SKILL_ROOT` 可指定安装位置。页面运行不依赖技能、网络或前端库。
-- 责任：本对话 root / LOGIN-ANATOMY-001；批准来源与局部例外见 [登录规格](../design/changes/login-anatomy-001.md)。生成一致性及模型/遮挡检查由相邻 verify-scene.mjs 执行。
+- 责任：本对话 root / LOGIN-ANATOMY-001；批准来源与局部例外见 [登录规格](../design/changes/login-anatomy-001.md)。生成一致性及模型/遮挡检查由相邻 verify-scene.mjs 手动执行，依赖已安装 Anatomy 技能，不在CI中；正式前端构建与登录浏览器生命周期另由Web CI验证。
 - 证据：构建审计/姿态 JSON、截图与浏览器步骤输出只放系统临时目录或本任务 Codex visualizations，不进 Git、不含密码/真实材料；正式源码长期保留，替换须随来源重建。
 
 ## RESEARCH-DOSSIER-001 · 第一阶段隔离验证

@@ -307,6 +307,8 @@ function WorkEditor({
   const [instruction, setInstruction] = useState('');
   const [aiMaterials, setAiMaterials] = useState<string[]>([]);
   const [readiness, setReadiness] = useState<AiReadiness | null>(null);
+  const [readinessFailed, setReadinessFailed] = useState(false);
+  const readinessGeneration = useRef(0);
   const [preview, setPreview] = useState<AiPreview | null>(null);
   const [ai, setAi] = useState<AiStatus | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
@@ -626,6 +628,9 @@ function WorkEditor({
       setFeedback('上一项生成请求结果尚未确认。请核对保留的原始输入并核实原请求，之后再准备新的动作。');
       return;
     }
+    const generation = ++readinessGeneration.current;
+    setReadiness(null);
+    setReadinessFailed(false);
     setAiMaterials(live.current.excerpts.filter(e => e.selectedText !== null).map(e => e.id));
     setAiAction(action);
     setAiOpen(true);
@@ -633,9 +638,13 @@ function WorkEditor({
     setConfirmed(false);
     setFeedback('');
     try {
-      setReadiness(await api.readiness());
+      const nextReadiness = await api.readiness();
+      if (generation === readinessGeneration.current) setReadiness(nextReadiness);
     } catch (e) {
-      setFeedback(api.errorText(e));
+      if (generation === readinessGeneration.current) {
+        setReadinessFailed(true);
+        setFeedback(api.errorText(e));
+      }
     }
   }
   async function previewAi() {
@@ -950,7 +959,7 @@ function WorkEditor({
 </Modal> : null}
     {aiOpen ? <Modal title={aiAction === 'draft' ? '按所选材料起草' : aiAction === 'rewrite_selection' ? '改写选段' : '图组文案建议'} onClose={() => setAiOpen(false)}>
 <div className={styles.aiPanel}>
-<p>{!readiness ? '正在读取模型配置' : !readiness.configured ? '尚未配置创作模型' : readiness.transportCallable === true ? '模型可连接' : '连接情况尚未确认'} · {readiness?.writingQualified === true ? '创作能力已验证' : '创作能力尚未验证'}</p>{selection && aiAction === 'rewrite_selection' ? <p className={styles.ownQuote}>{selection.text}</p> : null}<details>
+<p>{!readiness ? readinessFailed ? '模型配置读取失败，请关闭后重新打开。' : '正在读取模型配置' : <>{!readiness.configured ? '尚未配置创作模型' : readiness.transportCallable === true ? '模型可连接' : readiness.transportCallable === false ? '模型连接测试尚未通过' : '连接情况尚未确认'} · {readiness.writingQualified === true ? '创作输出格式已验证' : readiness.writingQualified === false ? '创作输出格式未通过验证' : '创作输出格式尚未验证'}</>}</p>{selection && aiAction === 'rewrite_selection' ? <p className={styles.ownQuote}>{selection.text}</p> : null}<details>
 <summary>本次使用的材料（{aiMaterials.length}）</summary>{document.excerpts.map(e => <label key={e.id}>
 <input type="checkbox" disabled={e.selectedText === null || !!preview || aiBusy} checked={aiMaterials.includes(e.id)} onChange={event => setAiMaterials(old => event.target.checked ? [...old, e.id] : old.filter(id => id !== e.id))} />
 <span>{e.selectedText ?? '来源已受限或不可用'}</span>

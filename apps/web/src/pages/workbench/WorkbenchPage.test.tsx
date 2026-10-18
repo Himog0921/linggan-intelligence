@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -52,6 +52,7 @@ function show(view = 'body') {
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(api.readiness).mockReset().mockResolvedValue({ configured: false, transportCallable: null, writingQualified: null, configRef: null, methodVersion: 'content-workbench-writing.v1' });
   vi.mocked(api.domains).mockResolvedValue([{
     domainRef: domain,
     name: '合成领域'
@@ -675,4 +676,75 @@ it('retains both AI edits after partial adoption and keeps the unadopted draft a
  await screen.findByRole('button',{name:'复制未采用改稿'});expect(screen.getByLabelText('编辑改稿 第 2 段')).toHaveValue('作者未采用第二段😀');expect(screen.getAllByRole('button',{name:'采用这一段'})[1]).toBeDisabled();
  fireEvent.click(screen.getByRole('button',{name:'复制未采用改稿'}));expect(await screen.findByLabelText('未采用改稿，可手动复制')).toHaveValue('作者未采用第二段😀');
  fireEvent.click(screen.getByRole('button',{name:'返回正文'}));expect(screen.getByLabelText('正文第 1 段')).toHaveValue('作者采用第一段');fireEvent.click(screen.getByRole('button',{name:'按材料起草'}));fireEvent.click(await screen.findByRole('button',{name:'打开改稿对照'}));expect(screen.getByLabelText('编辑改稿 第 2 段')).toHaveValue('作者未采用第二段😀');expect(api.execute).toHaveBeenCalledTimes(1);expect(api.adopt).toHaveBeenCalledTimes(1);
+});
+
+it.each([
+  { writingQualified: true, transportCallable: true, writing: '创作输出格式已验证', connection: '模型可连接' },
+  { writingQualified: false, transportCallable: true, writing: '创作输出格式未通过验证', connection: '模型可连接' },
+  { writingQualified: null, transportCallable: true, writing: '创作输出格式尚未验证', connection: '模型可连接' },
+  { writingQualified: null, transportCallable: false, writing: '创作输出格式尚未验证', connection: '模型连接测试尚未通过' },
+  { writingQualified: null, transportCallable: null, writing: '创作输出格式尚未验证', connection: '连接情况尚未确认' },
+])('distinguishes resolved writing and transport qualification: $connection / $writing', async ({ writingQualified, transportCallable, writing, connection }) => {
+  vi.mocked(api.readiness).mockResolvedValue({ configured: true, transportCallable, writingQualified, configRef: domain, methodVersion: 'content-workbench-writing.v1' });
+  show(); await screen.findByLabelText('正文第 1 段'); fireEvent.click(screen.getByRole('button', { name: '按材料起草' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: '准备并核对输入' })).toBeEnabled());
+  expect(screen.getByText(`${connection} · ${writing}`)).toBeInTheDocument();
+  expect(screen.queryByText(/创作能力已验证/)).not.toBeInTheDocument(); expect(api.execute).not.toHaveBeenCalled(); expect(api.preview).not.toHaveBeenCalled();
+});
+
+it('clears cached AI configuration and ignores an older dialog read after reopening', async () => {
+  type Readiness = Awaited<ReturnType<typeof api.readiness>>;
+  let resolveOlder!: (value: Readiness) => void;
+  let resolveLatest!: (value: Readiness) => void;
+  const ready: Readiness = { configured: true, transportCallable: true, writingQualified: true, configRef: domain, methodVersion: 'content-workbench-writing.v1' };
+  vi.mocked(api.readiness).mockResolvedValueOnce(ready)
+    .mockImplementationOnce(() => new Promise(resolve => { resolveOlder = resolve; }))
+    .mockImplementationOnce(() => new Promise(resolve => { resolveLatest = resolve; }));
+  vi.mocked(api.preview).mockRejectedValue(new Error('SYNTHETIC stop after explicit preview'));
+  show(); await screen.findByLabelText('正文第 1 段');
+  fireEvent.click(screen.getByRole('button', { name: '按材料起草' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: '准备并核对输入' })).toBeEnabled());
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '关闭' }));
+  fireEvent.click(screen.getByRole('button', { name: '按材料起草' }));
+  expect(screen.getByText(/正在读取模型配置/)).toBeInTheDocument();
+  expect(screen.queryByText(/创作输出格式/)).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '准备并核对输入' })).toBeDisabled();
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '关闭' }));
+  fireEvent.click(screen.getByRole('button', { name: '按材料起草' }));
+  const latestConfig = crypto.randomUUID();
+  await act(async () => { resolveLatest({ ...ready, configRef: latestConfig }); });
+  await waitFor(() => expect(screen.getByRole('button', { name: '准备并核对输入' })).toBeEnabled());
+  await act(async () => { resolveOlder({ configured: false, transportCallable: false, writingQualified: false, configRef: null, methodVersion: ready.methodVersion }); });
+  await waitFor(() => expect(screen.queryByText(/尚未配置创作模型/)).not.toBeInTheDocument());
+  fireEvent.click(screen.getByRole('button', { name: '准备并核对输入' }));
+  await waitFor(() => expect(api.preview).toHaveBeenCalledTimes(1));
+  expect(vi.mocked(api.preview).mock.calls[0]?.[0].configRef).toBe(latestConfig);
+  expect(api.readiness).toHaveBeenCalledTimes(3); expect(api.execute).not.toHaveBeenCalled();
+});
+
+it('ignores a closed dialog configuration failure after a newer read has succeeded', async () => {
+  type Readiness = Awaited<ReturnType<typeof api.readiness>>;
+  let rejectOlder!: (reason: Error) => void;
+  vi.mocked(api.readiness).mockImplementationOnce(() => new Promise<Readiness>((_resolve, reject) => { rejectOlder = reject; }))
+    .mockResolvedValueOnce({ configured: true, transportCallable: true, writingQualified: true, configRef: domain, methodVersion: 'content-workbench-writing.v1' });
+  show(); await screen.findByLabelText('正文第 1 段');
+  fireEvent.click(screen.getByRole('button', { name: '按材料起草' }));
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '关闭' }));
+  fireEvent.click(screen.getByRole('button', { name: '按材料起草' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: '准备并核对输入' })).toBeEnabled());
+  await act(async () => { rejectOlder(new Error('SYNTHETIC old configuration failure')); });
+  expect(screen.queryByText('结果未确认')).not.toBeInTheDocument();
+  expect(screen.queryByText(/模型配置读取失败/)).not.toBeInTheDocument();
+  expect(screen.getByText('模型可连接 · 创作输出格式已验证')).toBeInTheDocument();
+  expect(api.preview).not.toHaveBeenCalled(); expect(api.execute).not.toHaveBeenCalled();
+});
+
+it('reports a current configuration read failure without asserting output qualification', async () => {
+  vi.mocked(api.readiness).mockRejectedValueOnce(new Error('SYNTHETIC current configuration failure'));
+  show(); await screen.findByLabelText('正文第 1 段'); fireEvent.click(screen.getByRole('button', { name: '按材料起草' }));
+  expect(await screen.findByText('模型配置读取失败，请关闭后重新打开。')).toBeInTheDocument();
+  expect(screen.queryByText(/正在读取模型配置/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/创作输出格式/)).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '准备并核对输入' })).toBeDisabled();
+  expect(api.preview).not.toHaveBeenCalled(); expect(api.execute).not.toHaveBeenCalled();
 });

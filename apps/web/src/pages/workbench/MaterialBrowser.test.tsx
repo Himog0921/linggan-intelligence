@@ -151,6 +151,11 @@ describe("V3 full documents and exact fragment linking", () => {
     ['（对孩子来说！）还有下一步。', ['（对孩子来说！）', '还有下一步。']],
     ['真的吗？！太好了！！！', ['真的吗？！', '太好了！！！']],
     ['甲😀乙。\n下一句。', ['甲😀乙。\n', '下一句。']],
+    ['他说"好。""不行。"', ['他说"好。"', '"不行。"']],
+    ["他说'好。''不行。'", ["他说'好。'", "'不行。'"]],
+    ['他很开心。"我们走吧。"他说。', ['他很开心。', '"我们走吧。"', '他说。']],
+    ['他说"好。很好。"然后出门。', ['他说"好。', '很好。"', '然后出门。']],
+    ["他说'好。很好。'然后出门。", ["他说'好。", "很好。'", '然后出门。']],
   ])('keeps closing marks with the sentence and exact scalar ranges: %s', (text, expected) => {
     const doc = {...material, fragments: [{...item, text}]};
     const pieces = materialPieces(doc);

@@ -116,6 +116,48 @@ fn item(
         location: None,
     }
 }
+fn comment_item(
+    source: Uuid,
+    work: Option<Uuid>,
+    field: &SourceField,
+    c: &Value,
+) -> Result<SourceItem, SourceError> {
+    if c["qualification"] == "restricted" {
+        return Err(SourceError::Restricted);
+    }
+    let work_id: Uuid =
+        serde_json::from_value(c["workRef"].clone()).map_err(|_| SourceError::Invalid)?;
+    if work.is_some_and(|w| w != work_id) {
+        return Err(SourceError::Invalid);
+    }
+    let text = c["body"]
+        .as_str()
+        .filter(|_| c["bodyState"] == "KNOWN")
+        .ok_or(SourceError::Unavailable)?
+        .to_owned();
+    let version =
+        text_hash(&json!([source, c["packageRef"], c["observedAt"], text_hash(&text)]).to_string());
+    let mut i = item(
+        SourceKind::Comment,
+        source,
+        Some(work_id),
+        field.clone(),
+        version,
+        "匿名原声".into(),
+        text,
+    );
+    i.author_label = "匿名评论来源".into();
+    i.title = c["parentWork"]["fragments"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|f| f["field"] == "title")
+        .and_then(|f| f["text"].as_str())
+        .map(|s| s.to_owned())
+        .unwrap_or_else(|| "匿名原声 · 父笔记未知".into());
+    Ok(i)
+}
+
 pub async fn read_source_in(
     tx: &mut Transaction<'_, Postgres>,
     kind: &SourceKind,
@@ -130,40 +172,7 @@ pub async fn read_source_in(
         let c = linggan_evidence::read_creation_comment_in(tx, source)
             .await?
             .ok_or(SourceError::Unavailable)?;
-        if c["qualification"] == "restricted" {
-            return Err(SourceError::Restricted);
-        }
-        let work_id: Uuid =
-            serde_json::from_value(c["workRef"].clone()).map_err(|_| SourceError::Invalid)?;
-        if work.is_some_and(|w| w != work_id) {
-            return Err(SourceError::Invalid);
-        }
-        let text = c["body"]
-            .as_str()
-            .filter(|_| c["bodyState"] == "KNOWN")
-            .ok_or(SourceError::Unavailable)?
-            .to_owned();
-        let version = text_hash(
-            &json!([source, c["packageRef"], c["observedAt"], text_hash(&text)]).to_string(),
-        );
-        let mut i = item(
-            kind.clone(),
-            source,
-            Some(work_id),
-            field.clone(),
-            version,
-            "匿名原声".into(),
-            text,
-        );
-        i.author_label = "匿名评论来源".into();
-        i.title = c["parentWork"]["fragments"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .find(|f| f["field"] == "title")
-            .and_then(|f| f["text"].as_str())
-            .map(|s| s.to_owned())
-            .unwrap_or_else(|| "匿名原声 · 父笔记未知".into());
+        let i = comment_item(source, work, field, &c)?;
         return Ok((i, c));
     }
     if *kind == SourceKind::OpsPublication {

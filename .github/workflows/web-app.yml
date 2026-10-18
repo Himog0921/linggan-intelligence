@@ -31,6 +31,7 @@ on:
       - 'crates/intelligence/src/content_workbench*'
       - 'crates/intelligence/src/content_workbench/**'
       - 'crates/intelligence/src/content_workbench_sources/**'
+      - 'crates/evidence/src/lib.rs'
       - 'crates/intelligence/tests/content_workbench*'
       - 'crates/intelligence/tests/support/content_workbench_fixture.rs'
       - 'database/migrations/0127_content_workbench.sql'
@@ -113,12 +114,17 @@ jobs:
             apps/api/src/local_web/topic_map.rs apps/api/src/local_web/topic_workspace.rs \
             apps/api/src/local_web/topic_workspace_tests.rs apps/api/src/local_web/topic_browser_tests.rs \
             apps/api/src/local_web/evidence_browser_tests.rs apps/api/src/local_web/evidence_fixture.rs apps/api/src/local_web/evidence_seed.rs \
-            apps/api/src/local_web/evidence_api_proof_tests.rs apps/api/src/local_web/evidence_guard_tests.rs
+            apps/api/src/local_web/evidence_api_proof_tests.rs apps/api/src/local_web/evidence_guard_tests.rs \
+            apps/api/src/local_web/creators.rs \
+            crates/evidence/src/material_creation_comments.rs \
+            crates/intelligence/src/content_workbench_sources.rs crates/intelligence/src/content_workbench_sources/materials.rs \
+            crates/intelligence/src/content_workbench_sources/material_collection.rs crates/intelligence/src/content_workbench_sources/material_documents.rs \
+            crates/intelligence/src/content_workbench/source_usage.rs crates/intelligence/tests/content_workbench_sources_postgres.rs
       - name: Comment study transaction and lifecycle regression (synthetic PostgreSQL)
         run: bash scripts/test-comment-study-productization-postgres.sh
       - name: Content workbench PostgreSQL contracts
         run: |
-          cargo test -p linggan-intelligence --lib --locked -- content_workbench:: content_workbench_sources:: exact_spans_keep_overlaps_codepoints_and_long_repeated_patterns
+          cargo test -p linggan-intelligence --lib --locked -- content_workbench:: content_workbench_sources:: content_workbench_ai:: exact_spans_keep_overlaps_codepoints_and_long_repeated_patterns
           bash scripts/test-content-workbench-postgres.sh
       - name: Content workbench React browser and actual export proof
         env:

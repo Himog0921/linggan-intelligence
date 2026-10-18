@@ -1,5 +1,5 @@
 //! Bounded candidate retrieval and explicit reading-collection preparation.
-use super::documents::note_document_in;
+use super::documents::{note_document_in, read_comment_documents_in};
 use super::*;
 use sqlx::Row;
 use std::collections::BTreeSet;
@@ -145,8 +145,12 @@ async fn collect(
         }
         refs.into_iter().take(CANDIDATE_LIMIT).collect()
     };
+    let mut comments = read_comment_documents_in(&mut tx, domain, &comment_refs).await?;
     for reference in comment_refs {
-        match read_document_in(&mut tx, domain, &SourceKind::Comment, reference, None).await {
+        match comments
+            .remove(&reference)
+            .unwrap_or(Err(SourceError::Unavailable))
+        {
             Ok(mut d) => {
                 let hits = matches(&d.fragments[0].text, terms);
                 let meaningful = if prepare && terms.first().is_some_and(|t| t == "作业") {

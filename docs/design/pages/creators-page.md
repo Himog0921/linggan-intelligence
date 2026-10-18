@@ -90,7 +90,7 @@
 
 ### LIDS 采用清单
 
-- Token 基线与唯一数值来源：`apps/api/src/local_web/lids_tokens.css`；页面样式为 CSS Module，只用 `--lgi-*`，页面内的 `--creator-*` 局部变量是现有 Token 的 `calc` 组合；`tokenDiscipline.test.ts` 自动拒绝写死颜色、字号、行高与间距
+- Token 基线与唯一数值来源：`apps/web/src/styles/lids_tokens.css`；页面样式为 CSS Module，只用 `--lgi-*`，页面内的 `--creator-*` 局部变量是现有 Token 的 `calc` 组合；`tokenDiscipline.test.ts` 自动拒绝写死颜色、字号、行高与间距
 - Primitive / 正式 CMP 查重结果：沿用 shell.css 的 `.v7-*` 外壳类；没有新增全局 Token、Primitive、CMP、Scene 或 Motion
 - 页面唯一视觉核心：作者表格与依据抽屉里的原话引文
 - 原声、来源、样本、窗口、Coverage/Validity/冲突/复核边界：引文用原声字体并标明字段来源（标题／正文／简介等）；作品引文带「回查原作品」；取样篇数与材料范围按 3.3 如实说明

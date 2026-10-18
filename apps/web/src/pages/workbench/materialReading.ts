@@ -43,11 +43,20 @@ export function fragmentType(source: SourceItem, text: string): FragmentType {
 export function materialPieces(document: MaterialDocument): ReadingPiece[] {
   return document.fragments.flatMap((source) => {
     const chars = Array.from(source.text);
+    const straightQuoteParity = { '"': new Uint8Array(chars.length + 1), "'": new Uint8Array(chars.length + 1) };
+    for (const quote of ['"', "'"] as const) {
+      const parity = straightQuoteParity[quote];
+      for (let i = 0; i < chars.length; i++) parity[i + 1] = parity[i]! ^ (chars[i] === quote ? 1 : 0);
+    }
     const pieces: ReadingPiece[] = [];
     let start = 0;
     for (let end = 1; end <= chars.length; end++) {
       if (!/[。！？\n]/u.test(chars[end - 1] ?? "") && end !== chars.length) continue;
-      while (end < chars.length && /[。！？”’」』）)\]】》〉〕｝}"']/u.test(chars[end] ?? "")) end++;
+      while (end < chars.length && /[。！？”’」』）)\]】》〉〕｝}"']/u.test(chars[end] ?? "")) {
+        const mark = chars[end]!;
+        if ((mark === '"' || mark === "'") && straightQuoteParity[mark][end] === 0) break;
+        end++;
+      }
       while (end < chars.length && /\s/u.test(chars[end] ?? "")) end++;
       const text = chars.slice(start, end).join("");
       if (text.trim())

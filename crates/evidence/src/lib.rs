@@ -47,6 +47,7 @@ mod material_projection;
 mod material_projection_types;
 mod material_query_sql;
 mod material_social_read;
+mod material_creation_comments;
 mod material_storage_key;
 mod media_acquisition;
 mod monitor_rule_read;
@@ -191,6 +192,7 @@ pub use material_processing::{
     fail_media_processing_work, processor_version_for_kind, read_claim_gate_readiness,
     record_media_derivative_completion, requeue_outdated_processor_jobs,
 };
+pub use material_creation_comments::read_creation_comments_in;
 pub use material_social_read::{read_authorized_research_comments, read_dossier_comments, read_creation_comment_in, creation_comment_directory_in};
 pub use media_acquisition::{
     MediaAcquisitionDecision, MediaAcquisitionError, MediaAcquisitionFailureOutcome,

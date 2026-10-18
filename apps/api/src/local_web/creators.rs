@@ -31,9 +31,10 @@ fn error(e: DiscoveryError) -> Response {
         DiscoveryError::Invalid("policy_revision_conflict") => {
             (axum::http::StatusCode::CONFLICT, "policy_revision_conflict")
         }
-        DiscoveryError::Invalid("active_primary_domain_conflict") => {
-            (axum::http::StatusCode::CONFLICT, "active_primary_domain_conflict")
-        }
+        DiscoveryError::Invalid("active_primary_domain_conflict") => (
+            axum::http::StatusCode::CONFLICT,
+            "active_primary_domain_conflict",
+        ),
         DiscoveryError::Invalid(code) => (axum::http::StatusCode::BAD_REQUEST, code),
         DiscoveryError::NotFound => (
             axum::http::StatusCode::NOT_FOUND,
@@ -55,17 +56,27 @@ async fn list(State(state): State<LocalWebState>, Query(q): Query<CreatorScope>)
     };
     match discovery::load(db, &q).await {
         Ok(data) => Json(discovery::aggregate(&data, &q)).into_response(),
-        Err(e) => error(e),
+        Err(e) => {
+            #[cfg(test)]
+            if std::env::var("LINGGAN_MODEL_SYNTHETIC_PREVIEW").as_deref()
+                == Ok("SYNTHETIC-NOT-EVIDENCE")
+            {
+                eprintln!("Synthetic creator read failed: {e:?}");
+            }
+            error(e)
+        }
     }
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Register {
     domain: Uuid,
-    #[serde(default="primary_role")]
+    #[serde(default = "primary_role")]
     usage_role: String,
 }
-fn primary_role()->String{"primary".into()}
+fn primary_role() -> String {
+    "primary".into()
+}
 async fn register(
     State(state): State<LocalWebState>,
     Path(key): Path<String>,
@@ -74,7 +85,9 @@ async fn register(
     let Some(db) = state.database.database() else {
         return error(DiscoveryError::Invalid("read_model_not_connected"));
     };
-    match linggan_evidence::register_discovered_creator(db, body.domain, &key, &body.usage_role).await {
+    match linggan_evidence::register_discovered_creator(db, body.domain, &key, &body.usage_role)
+        .await
+    {
         Ok(v) => Json(v).into_response(),
         Err(e) => error(e),
     }

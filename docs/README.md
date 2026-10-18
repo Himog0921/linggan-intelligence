@@ -70,11 +70,11 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发，并于 2026-10-02 
 | [design/acceptance/web-react-001-c-acceptance.md](design/acceptance/web-react-001-c-acceptance.md) | 一次性报告；候选验证中 | 阶段 C React V3 工作台、材料到成品、独立审核与未证明边界 |
 | [design/acceptance/web-react-001-d1-acceptance.md](design/acceptance/web-react-001-d1-acceptance.md) | 一次性报告；已合并上线（PR #436，`baaf5a51`），Mog 待验收 | 阶段 D1 创作者页与语料共享外壳：场景矩阵、隔离真实链路 17 步浏览器证明、分层结论与未证明边界 |
 | [design/acceptance/web-react-001-d2-acceptance.md](design/acceptance/web-react-001-d2-acceptance.md) | 一次性报告；已随 #443 合并部署，Mog 待验收 | 阶段 D2 证据库：场景矩阵、隔离真实链路 19 步浏览器证明与插件入口证明、失效控件实测、分层结论与未证明边界 |
-| [design/acceptance/web-react-001-d3-acceptance.md](design/acceptance/web-react-001-d3-acceptance.md) | 一次性报告；D3候选验收中 | 评论研究四视图、实际页面对照、隔离浏览器与队列/回执证明、未合并部署边界 |
+| [design/acceptance/web-react-001-d3-acceptance.md](design/acceptance/web-react-001-d3-acceptance.md) | 一次性报告；D3已随#445合并部署，业务验收待Mog | 评论研究四视图、实际页面对照、隔离浏览器与队列/回执证明、未合并部署边界 |
 | [design/pages/creators-page.md](design/pages/creators-page.md) | 权威当前；React 实现已上线（`baaf5a51`） | `/corpus/creators` 的页面责任、状态词典、动作与真实后果、LIDS 采用清单 |
 | [decisions/0010-web-frontend-react.md](decisions/0010-web-frontend-react.md) | 权威当前 | 网页前端统一为 React + TypeScript、不留双轨、开发期数据不构成迁移约束；所取代的「原生 JS / 不引入框架」条款 |
 | [plans/active/web-react-001.md](plans/active/web-react-001.md) | 活跃计划；Issue #430；阶段 A+B 随 PR #431 合并并按 #430 回执部署；阶段 C 已派定 | 全站 React 迁移与 UI 改版的唯一推进入口：目标架构、R1–R7 不留双轨规则、阶段 A–H、内容工作台首包规格 |
-| [plans/active/web-react-001-d-corpus.md](plans/active/web-react-001-d-corpus.md) | 活跃计划；Issue #433（#430 阶段 D 分册）；D1 已上线；D2 已部署；D3 实施中 | 语料三页迁 React：拆分与顺序、已定设计改动、D1 与 D2 能力清单（旧页能力逐项落点）、D2 裁定、回执与语料外壳接口合同 |
+| [plans/active/web-react-001-d-corpus.md](plans/active/web-react-001-d-corpus.md) | 活跃计划；Issue #433（#430 阶段 D 分册）；D1 已上线；D2/D3 已部署，业务验收待Mog | 语料三页迁 React：拆分与顺序、已定设计改动、D1 与 D2 能力清单（旧页能力逐项落点）、D2 裁定、回执与语料外壳接口合同 |
 | [plans/active/web-react-001-g-collection.md](plans/active/web-react-001-g-collection.md) | 活跃计划；#430 阶段 G；Mog 2026-10-16 派定 | 整个采集模块 React 迁移；能力盘点、实际页面截图基线、逐表面对照与隔离回执验证 |
 | [plans/active/topic-map-workflow-382.md](plans/active/topic-map-workflow-382.md) | 活跃计划 | 左侧双入口、内容优先、统一检索、状态与人工备选闭环；迁移/部署另确认 |
 | [plans/active/topic-map-read-performance-382.md](plans/active/topic-map-read-performance-382.md) | PR #389历史已发布；10月13日首屏候选实现/实测通过，冷重建仍慢，未提交/发布；Issue #382 | 进入首屏542ms/完整1268ms，冷重建约5–8秒；完整统计和来源资格不放宽 |

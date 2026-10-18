@@ -8,7 +8,7 @@
 
 ## Issue #53 · v0.4.2 启动失败补充
 
-`POPUP_STARTUP_FAILURE` 只表示 toolbar popup 的 React 渲染发生错误；它不是本机 host、Discovery、接纳、Evidence 或平台状态。它保持 `L1 / Settings / Governance`：使用既有 `InstrumentSurface` 的 canvas-hi、mono readout、文字状态和 LIDS 批准的 2px 结构线，不晋升 CMP、不新增 Scene 或 Motion。`popup.html` 从唯一值源 `apps/api/src/local_web/lids_tokens.css` 的构建副本加载 `themes/lids-tokens.css`；此局部失败 Surface 只消费 `--lgi-*` token，不创建第二套 token 值。
+`POPUP_STARTUP_FAILURE` 只表示 toolbar popup 的 React 渲染发生错误；它不是本机 host、Discovery、接纳、Evidence 或平台状态。它保持 `L1 / Settings / Governance`：使用既有 `InstrumentSurface` 的 canvas-hi、mono readout、文字状态和 LIDS 批准的 2px 结构线，不晋升 CMP、不新增 Scene 或 Motion。`popup.html` 从唯一值源 `apps/web/src/styles/lids_tokens.css` 的构建副本加载 `themes/lids-tokens.css`；此局部失败 Surface 只消费 `--lgi-*` token，不创建第二套 token 值。
 
 | 失败状态 | 触发与可见内容 | 可以诚实说明 | 明确不能说明 | 用户下一步 / receipt |
 |---|---|---|---|---|
@@ -43,7 +43,7 @@ Linggan-owned package / version
 ## LIDS 组合
 
 - 强度与 Pattern：`L1 / Settings / Governance`；不构成完整产品页面、导航或 Collection Control。
-- Token：构建时从 `apps/api/src/local_web/lids_tokens.css` 复制唯一运行时 `--lgi-*` 值源到安装包；popup CSS 只消费这些 token，不能独立定义第二套数值主题。
+- Token：构建时从 `apps/web/src/styles/lids_tokens.css` 复制唯一运行时 `--lgi-*` 值源到安装包；popup CSS 只消费这些 token，不能独立定义第二套数值主题。
 - Primitive：`InstrumentSurface` 的 canvas-hi 分组、Mono readout、带文字的 Operation/Validity 状态与单一用户动作按钮；没有通用 CMP 晋升。
 - 状态：`LOCAL_INGRESS_READY` 只表示 `/health` 报告已知 Discovery 接纳路径；`LOCAL_HOST_REACHABLE` 只表示 host 可达但不可提交；`LOOPBACK_UNREACHABLE` 表示本机不可达；`ACCEPTED` / `REPLAY` / `NOT_ACCEPTED` 只表示这一次提交的 receipt。它们都不能表示 Evidence 已入库或页面已更新。
 

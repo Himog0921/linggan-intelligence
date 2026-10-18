@@ -148,6 +148,79 @@ pub(super) async fn read_document_in(
     })
 }
 
+/// Only the comment read is batched; every member still passes the same domain and exact-source checks.
+pub(super) async fn read_comment_documents_in(
+    tx: &mut Transaction<'_, Postgres>,
+    domain: Uuid,
+    refs: &[Uuid],
+) -> Result<std::collections::BTreeMap<Uuid, Result<MaterialDocument, SourceError>>, SourceError> {
+    let contexts = linggan_evidence::read_creation_comments_in(tx, refs).await?;
+    let mut output = std::collections::BTreeMap::new();
+    for (source, context) in contexts {
+        let result = async {
+            if context["qualification"] == "restricted" {
+                return Err(SourceError::Restricted);
+            }
+            let work: Uuid = serde_json::from_value(context["workRef"].clone())
+                .map_err(|_| SourceError::Invalid)?;
+            if !research_dossier::creation_work_in_domain(tx, work, domain).await? {
+                return Err(SourceError::Unavailable);
+            }
+            let item = comment_item(source, None, &SourceField::CommentBody, &context)?;
+            Ok(MaterialDocument {
+                document_id: document_id(&SourceKind::Comment, source),
+                source_kind: SourceKind::Comment,
+                source_ref: source,
+                work_ref: item.work_ref,
+                source_version: comment_document_version(&item.source_version, &context),
+                title: item.title.clone(),
+                author_label: item.author_label.clone(),
+                qualification: "readable".into(),
+                fragments: vec![item],
+                context,
+                match_reasons: vec![],
+            })
+        }
+        .await;
+        match result {
+            Err(SourceError::Database(error)) => return Err(SourceError::Database(error)),
+            result => {
+                output.insert(source, result);
+            }
+        }
+    }
+    Ok(output)
+}
+
+/// Reuse only a successful read from this same frozen transaction. Exceptional sources use
+/// the single reader so the existing error/qualification precedence is unchanged.
+pub(super) async fn read_with_comments_in(
+    tx: &mut Transaction<'_, Postgres>,
+    domain: Uuid,
+    selection: &MaterialSelection,
+    comments: &std::collections::BTreeMap<Uuid, Result<MaterialDocument, SourceError>>,
+) -> Result<MaterialDocument, SourceError> {
+    if selection.source_kind == SourceKind::Comment {
+        if let Some(Ok(document)) = comments.get(&selection.source_ref) {
+            if selection
+                .work_ref
+                .is_some_and(|work| Some(work) != document.work_ref)
+            {
+                return Err(SourceError::Invalid);
+            }
+            return Ok(document.clone());
+        }
+    }
+    read_document_in(
+        tx,
+        domain,
+        &selection.source_kind,
+        selection.source_ref,
+        selection.work_ref,
+    )
+    .await
+}
+
 // Reading context has its own version. Exact comment anchors retain the underlying SourceItem version.
 fn comment_document_version(comment_version: &str, context: &Value) -> String {
     let parent_work = &context["parentWork"];

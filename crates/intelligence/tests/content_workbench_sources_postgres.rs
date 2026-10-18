@@ -800,3 +800,112 @@ async fn restricted_short_quote_at_metadata_limits_keeps_independent_edits_savea
         );
     }
 }
+
+async fn assert_comment_batch_matches_singles(
+    db: &linggan_storage_postgres::Database,
+    refs: &[Uuid],
+) -> std::collections::BTreeMap<Uuid, serde_json::Value> {
+    let mut tx = db.pool().begin().await.unwrap();
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    let batch = linggan_evidence::read_creation_comments_in(&mut tx, refs)
+        .await
+        .unwrap();
+    for reference in refs {
+        let single = linggan_evidence::read_creation_comment_in(&mut tx, *reference)
+            .await
+            .unwrap();
+        assert_eq!(
+            batch.get(reference).cloned(),
+            single,
+            "complete anonymous source/parent contract changed for {reference}"
+        );
+    }
+    tx.commit().await.unwrap();
+    batch
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn batched_comments_preserve_complete_single_reads_and_refresh_restrictions() {
+    let db = fixture::db("creation_comment_batch").await;
+    let document = fixture::comment_doc(&db).await;
+    let work = document.excerpts[0].citation.work_ref.unwrap();
+    for (kind, id, parent) in [
+        ("comments", "batch-parent", None),
+        ("replies", "batch-reply", Some("batch-parent")),
+        ("replies", "batch-unknown", Some("missing-parent")),
+    ] {
+        let mut payload =
+            json!({"commentId":id,"noteId":"dossier-note","text":format!("{id}原声😀\n完整文本")});
+        if let Some(parent) = parent {
+            payload["rootCommentId"] = json!(parent);
+            payload["parentCommentId"] = json!(parent);
+        }
+        dossier::fixture::submit_package(&db,kind,json!({"contentExternalId":"dossier-note"}),json!({"kind":if parent.is_some(){"reply"}else{"comment"},"sourceObject":{"platform":"xhs","type":"content","externalId":"dossier-note"},"payload":payload})).await;
+    }
+    let identities: std::collections::BTreeMap<String, Uuid> = sqlx::query_as(
+        "SELECT comment_external_id,material_ref FROM linggan_material_comment_current WHERE content_public_ref=$1",
+    ).bind(work).fetch_all(db.pool()).await.unwrap().into_iter().collect();
+    let mut refs:Vec<Uuid>=sqlx::query_scalar("SELECT material_ref FROM linggan_material_comment_current WHERE content_public_ref=$1 ORDER BY material_ref").bind(work).fetch_all(db.pool()).await.unwrap();
+    let other_package = dossier::fixture::submit_package(&db,"content_detail",json!({"contentExternalId":"batch-other-note"}),json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":"batch-other-note"},"payload":{"title":"另一篇合成底稿","bodyText":"另一篇独立正文，不能串入第一篇。","authorId":"synthetic-other-author","likedCount":0}})).await;
+    let other_work: Uuid = sqlx::query_scalar("SELECT public_ref FROM linggan_material_content WHERE content_external_id='batch-other-note'").fetch_one(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_material_domain_usage(usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref) VALUES($1,$2,$3,'primary','legacy_domain_migration',$4)").bind(Uuid::new_v4()).bind(other_work).bind(dossier::DOMAIN).bind(other_package).execute(db.pool()).await.unwrap();
+    dossier::fixture::submit_package(&db,"comments",json!({"contentExternalId":"batch-other-note"}),json!({"kind":"comment","sourceObject":{"platform":"xhs","type":"content","externalId":"batch-other-note"},"payload":{"commentId":"batch-other-comment","noteId":"batch-other-note","text":"另一篇的独立原声"}})).await;
+    let other_comment: Uuid = sqlx::query_scalar("SELECT material_ref FROM linggan_material_comment_current WHERE content_public_ref=$1 AND comment_external_id='batch-other-comment'").bind(other_work).fetch_one(db.pool()).await.unwrap();
+    refs.push(other_comment);
+    let missing = Uuid::new_v4();
+    refs.push(missing);
+    refs.push(refs[0]);
+    let initial = assert_comment_batch_matches_singles(&db, &refs).await;
+    let parent = identities["batch-parent"];
+    let reply = identities["batch-reply"];
+    let unknown = identities["batch-unknown"];
+    assert!(!initial.contains_key(&missing));
+    assert_eq!(
+        initial.len(),
+        identities.len() + 1,
+        "duplicates must not invent extra identities"
+    );
+    assert_ne!(work, other_work);
+    assert_eq!(
+        initial[&other_comment]["parentWork"]["workRef"],
+        json!(other_work)
+    );
+    assert_eq!(initial[&reply]["parentWork"]["workRef"], json!(work));
+    let other_fragments = initial[&other_comment]["parentWork"]["fragments"]
+        .as_array()
+        .unwrap();
+    assert!(
+        other_fragments
+            .iter()
+            .any(|fragment| fragment["text"] == "另一篇独立正文，不能串入第一篇。")
+    );
+    assert!(!other_fragments.iter().any(|fragment| {
+        fragment["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("结尾不能丢失"))
+    }));
+    assert_eq!(initial[&parent]["parentComment"]["state"], "not_applicable");
+    assert_eq!(initial[&reply]["parentComment"]["state"], "known");
+    assert_eq!(initial[&reply]["parentComment"]["sourceRef"], json!(parent));
+    assert_eq!(initial[&unknown]["parentComment"]["state"], "unknown");
+    sqlx::query("INSERT INTO linggan_material_comment_restriction(content_public_ref,comment_external_id,reason) VALUES($1,'batch-parent','synthetic parent restriction')").bind(work).execute(db.pool()).await.unwrap();
+    let parent_restricted = assert_comment_batch_matches_singles(&db, &refs).await;
+    assert_eq!(
+        parent_restricted[&reply]["parentComment"],
+        json!({"state":"restricted"})
+    );
+    assert_eq!(
+        parent_restricted[&parent],
+        json!({"sourceRef":parent,"qualification":"restricted"})
+    );
+    sqlx::query("INSERT INTO linggan_material_comment_restriction(content_public_ref,comment_external_id,reason) VALUES($1,'batch-reply','synthetic own restriction')").bind(work).execute(db.pool()).await.unwrap();
+    let own_restricted = assert_comment_batch_matches_singles(&db, &refs).await;
+    assert_eq!(
+        own_restricted[&reply],
+        json!({"sourceRef":reply,"qualification":"restricted"})
+    );
+}
