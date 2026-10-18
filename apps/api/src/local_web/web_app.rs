@@ -24,6 +24,7 @@ const REACT_PAGES: &[&str] = &[
     "/ops/creation",
     "/corpus/creators",
     "/corpus/evidence",
+    "/corpus/comments",
     "/collection/targets",
     "/collection/tasks",
     "/collection/domains",

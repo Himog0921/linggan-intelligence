@@ -348,6 +348,7 @@ async fn health_reports_the_frontend_build() {
             "/ops/creation",
             "/corpus/creators",
             "/corpus/evidence",
+            "/corpus/comments",
             "/collection/targets",
             "/collection/tasks",
             "/collection/domains",
@@ -514,4 +515,41 @@ async fn topic_pages_use_react_keep_safe_keys_and_retire_native_assets() {
             .starts_with("application/json")
     );
     assert!(body.contains("topic_read_model_not_connected"));
+}
+
+#[tokio::test]
+async fn comments_entry_preserves_json_routes_and_retires_legacy_assets() {
+    let (status, _, _) = send(app(), "/corpus/comments?view=problems", "127.0.0.1:3000").await;
+    assert!(matches!(
+        status,
+        StatusCode::OK | StatusCode::SERVICE_UNAVAILABLE
+    ));
+    for path in [
+        "/assets/comment-study.css",
+        "/assets/comment-study.js",
+        "/assets/comment-study-results.css",
+        "/assets/comment-study-results.js",
+    ] {
+        let (status, _, _) = send(app(), path, "127.0.0.1:3000").await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{path}");
+    }
+    let domain = "00000000-0000-4000-8000-000000000001";
+    for path in [
+        "overview",
+        "comments",
+        "runs",
+        "problem-cards",
+        "problem-candidates",
+    ] {
+        let url = format!("/api/local/comment-study/{path}?domain={domain}");
+        let (status, headers, body) = send(app(), &url, "127.0.0.1:3000").await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{path}");
+        assert!(
+            headers[header::CONTENT_TYPE]
+                .to_str()
+                .unwrap()
+                .starts_with("application/json")
+        );
+        assert!(!body.contains("<div id=\"root\">"), "{path}");
+    }
 }

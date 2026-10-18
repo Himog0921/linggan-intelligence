@@ -4,7 +4,7 @@ import { createBrowserRouter } from 'react-router';
 import { RouterProvider } from 'react-router/dom';
 import { ModelSettingsPage } from '../pages/settings/ModelSettingsPage';
 import { NotFoundPage } from './NotFoundPage';
-import { OPS_PATHS, COLLECTION_PATHS, CREATORS_PATH, EVIDENCE_PATH, MODEL_SETTINGS_PATH, WORKBENCH_PATH, TOPICS_PATH } from './pages';
+import { OPS_PATHS, COLLECTION_PATHS, CREATORS_PATH, EVIDENCE_PATH, COMMENTS_PATH, MODEL_SETTINGS_PATH, WORKBENCH_PATH, TOPICS_PATH } from './pages';
 
 const WorkbenchPage = lazy(() => import('../pages/workbench/WorkbenchPage').then(module => ({ default: module.WorkbenchPage })));
 // 语料页按需加载：打开设置页或工作台时不下载创作者页的代码。
@@ -33,6 +33,7 @@ const router = createBrowserRouter([
   { path: WORKBENCH_PATH, element: <Suspense fallback={<p role="status">正在打开工作台…</p>}><WorkbenchPage /></Suspense> },
   { path: CREATORS_PATH, element: <Suspense fallback={<p role="status">正在打开创作者…</p>}><CreatorsPage /></Suspense> },
   { path: EVIDENCE_PATH, element: <Suspense fallback={<p role="status">正在打开证据库…</p>}><EvidencePage /></Suspense> },
+  { path: COMMENTS_PATH, HydrateFallback: () => <p role="status">正在打开评论研究…</p>, lazy: async () => ({ Component: (await import('../pages/corpus/comments/CommentsPage')).CommentsPage }) },
   ...[TargetsPage, TasksPage, DomainsPage, RuntimePage].map((Page, i) => ({ path: COLLECTION_PATHS[i], element: <Suspense fallback={<p role="status">正在打开采集页面…</p>}><Page key={collectionPages[i]} /></Suspense> })),
   ...OPS_PATHS.map(path => ({ path, element: <Suspense fallback={<p role="status">正在打开运营页面…</p>}><OpsPage /></Suspense> })),
   { path: TOPICS_PATH, HydrateFallback: () => <p role="status">正在打开主题图谱…</p>, lazy: async () => ({ Component: (await import('../pages/topics/TopicsPage')).TopicsPage }) },

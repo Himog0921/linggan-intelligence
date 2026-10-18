@@ -157,7 +157,7 @@ PK `(source_ref,cleaner_version)`。不保存 offsets：需要证据偏移时对
 | `result_manifest` | jsonb | NOT NULL object；冻结目标数／排除数／索引覆盖等无正文回执 |
 | `created_at` | timestamptz | NOT NULL default scope_001_now() |
 
-该表只保存已经提交的完整结果，不写“processing”临时行。开始事务持有 domain advisory lock，完成 Run 后一起插入回执；崩溃全部回滚。跨 domain 恶意复用 request_ref 时 PK 阻断，事务回滚并返回 409，不报告另一个领域内容。
+该表只保存已经提交的完整结果，不写“processing”临时行。2026-10-18 PR #445起，先在独立会话取得domain advisory lock，再建立SERIALIZABLE事务快照（详见[HTTP §5](comment-study-http-001.md#5-启动事务与并发)）；完成Run后一起插入回执，结束或取消时关闭会话释放锁；崩溃全部回滚。跨 domain 恶意复用 request_ref 时 PK 阻断，事务回滚并返回 409，不报告另一个领域内容。
 
 新增索引 `cs_start_domain_created_idx(domain_ref,created_at DESC,request_ref)`；scheduled 防重索引 `cs_start_schedule_slot_uq(origin_ref,scheduled_for)` WHERE origin='scheduled'。本轮没有真实 schedule 表，因此 origin_ref 仅 UUID，不伪造 FK；下阶段新增 schedule 时再添加 FK 和符合性验证。origin 的配套 NULL 规则用 CHECK 固定。
 

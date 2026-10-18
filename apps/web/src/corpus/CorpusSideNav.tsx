@@ -13,15 +13,15 @@ interface CorpusSideNavProps {
   domain: string | null;
   /** 侧栏底部的一句话，由所在页面说明自己的数据范围。 */
   foot: ReactNode;
-  /** 只有证据库页会填；没有或零作品时徽标保持隐藏，标记与 shell.rs 逐字相同。 */
+  /** 只有证据库页会填；没有或零作品时徽标保持隐藏，沿用已确认的徽标标记。 */
   evidenceCount?: EvidenceCount | null;
 }
 
 /**
- * 语料模块的二级导航。结构、类名与 shell.rs 的 `corpus_side_nav` 一致，样式只来自 shell.css。
+ * 语料模块的二级导航。三页共用同一 React 导航与类名，样式只来自 shell.css。
  *
  * 当前领域由这里统一带上：领域由整个语料模块承载，任何一个子页都无权在自己的链接里把它丢掉
- * （F09）。评论研究仍由旧服务提供，所以三项一律用普通链接整页跳转，不交给前端路由。
+ * （F09）。语料三页现均由 React 提供；普通链接保留明确领域范围和独立页面入口。
  */
 export function CorpusSideNav({ active, domain, foot, evidenceCount = null }: CorpusSideNavProps) {
   return (

@@ -52,47 +52,6 @@ fn assert_headers(headers: &HeaderMap) {
 }
 
 #[test]
-fn exhausted_pair_requests_have_a_truthful_ui_state_label() {
-    let script = include_str!("comment_study.js");
-    assert!(script.contains("failed: '比较未完成，请查看原因'"));
-    assert!(script.contains("attempts_exhausted: '请求尝试次数已用尽，未收到可接纳结果'"));
-    assert!(script.contains("budget_exhausted: '运行预算已用尽，比较未完成'"));
-    assert!(script.contains("input_limit_exceeded: '请求超过模型输入上限，未发送'"));
-}
-
-#[test]
-fn run_controls_use_cas_receipts_and_confirmation_for_irreversible_stop() {
-    let html = include_str!("comment_study.html");
-    let script = include_str!("comment_study.js");
-    assert!(html.contains("id=\"study-stop-dialog\""));
-    assert!(html.contains("id=\"study-stop-run-identity\""));
-    assert!(html.contains("aria-describedby=\"study-stop-run-identity study-stop-description\""));
-    assert!(html.contains("已经开始的调用无法保证中断，可能仍产生费用"));
-    assert!(script.contains("dialog.showModal()"));
-    assert!(script.contains("run.pendingCount == null ? '未知' : Number(run.pendingCount)"));
-    assert!(script.contains("data-pending-count=\"${pendingCount}\""));
-    assert!(!script.contains("run.pendingCount || 0"));
-    assert!(script.contains("研究批次 ${stopDialogRunRef} · 当前未终态"));
-    assert!(script.contains("data-run-control=\"pause\""));
-    assert!(script.contains("data-run-control=\"resume\""));
-    assert!(script.contains("runs/${encodeURIComponent(runRef)}/${action}"));
-    assert!(script.contains("JSON.stringify({ expectedControlVersion })"));
-    assert!(script.contains("receipt.data?.runRef !== runRef"));
-    assert!(script.contains("receipt.data?.controlVersion) !== expectedControlVersion + 1"));
-    assert!(script.contains("pause: 'user_paused', resume: null, stop: 'user_stopped'"));
-    assert!(script.contains("await renderActiveTab()"));
-    assert!(script.contains("runControlOutcomeNeedsRefresh"));
-    assert!(script.contains("运行列表刷新失败"));
-    assert!(script.contains("命令结果未获确认，最新运行状态未重新读取"));
-    assert!(script.contains("if (nextControl) nextControl.focus()"));
-    assert!(script.contains("else document.querySelector('#study-run-control-feedback')?.focus()"));
-    assert!(script.contains("请核对后再操作。"));
-    assert!(!script.contains("/cancel"));
-    assert!(!script.contains("window.confirm("));
-    assert!(!script.contains("run.dispatchState = 'stopped'"));
-}
-
-#[test]
 fn run_control_request_is_closed_and_requires_a_nonnegative_version() {
     assert!(serde_json::from_value::<StudyRunControlCommand>(json!({})).is_err());
     assert!(

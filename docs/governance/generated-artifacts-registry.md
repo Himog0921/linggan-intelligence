@@ -1,7 +1,7 @@
 # 生成型文件登记表
 
 > 状态: 权威当前
-> 最后核对: 2026-10-16
+> 最后核对: 2026-10-18
 > 适用范围: 构建、代码生成、导出、日志、测试证据、备份与临时文件
 > 事实来源: 当前工具配置、`.gitignore` 与来源校验清单
 > 冲突时以谁为准: 生成源、工具配置和安全规则；生成结果不得反向覆盖来源
@@ -10,6 +10,7 @@
 
 | 类别 | 固定位置 | 来源/生成方式 | Git 策略 | 手工修改 | 保留与清理 |
 |---|---|---|---|---|---|
+| WEB-REACT-001 D3 私有证据 | 当前 D3 工作树 `artifacts/private/web-react-001-d3/`：只读实际基线、GET 回执、候选截图／逐像素差异、盘点辅助及验证日志 | root 的 GET/HEAD 限制浏览器采集、同输入重放、隔离库脚本；无共享库写入、无外发 | 忽略，不提交；真实评论／材料不进入代理或 CI | 不得伪造回执或修改原始像素；分析摘要可更新 | 保留至本包审阅；交付后移交主 checkout 同名私有目录再清理本工作树 |
 | Pi Node 固定依赖 | `apps/pi-adapter/node_modules/`（含 `.linggan-lock-sha256`）、`package-lock.json` | 精确 package.json、npm ci、`prepare-pi-adapter.sh` | node_modules 忽略；lock 提交 | 禁止手工改 lock/安装产物 | 只清理当前 checkout 依赖，不处理其它项目 |
 | 网页前端固定依赖（WEB-REACT-001） | `apps/web/node_modules/`（含 `.linggan-lock-sha256`）、`apps/web/package-lock.json` | 精确版本的 `apps/web/package.json`、`npm ci --ignore-scripts`、`scripts/runtime/prepare-web.sh` | node_modules 忽略；lock 提交 | 禁止手工改 lock/安装产物 | 只清理当前 checkout 依赖；可随时 `npm ci` 重建 |
 | 网页前端构建产物（WEB-REACT-001） | `apps/web/dist/`（`index.html`、带内容指纹的 JS/CSS、`build-info.json`） | `npm --prefix apps/web run build`；本机运行链由 `prepare-web.sh --build <revision>` 生成，revision 写入 `build-info.json` | 忽略，不提交 | 禁止手工改 | 每个 checkout 一份，按 revision 覆盖重建；可安全删除后重建 |
@@ -54,7 +55,7 @@
 
 ## COMMENT-LIKE-LIBRARY-001 / PR #401 验证与本机发布
 
-- 维护的测试源：`scripts/test-comment-like-library-ui.cjs` 与 `crates/intelligence/tests/comment_like_library_postgres.rs`；不是生成代码。合成测试日志、临时 HTTP/浏览器脚本放系统临时目录 `pr401-*`，不入 Git。PG 容器和卷由现有随机名脚本创建并在退出时清理核验。
+- 维护的测试源：React 评论页测试 `apps/web/src/pages/corpus/comments/*.test.tsx` 与 `crates/intelligence/tests/comment_like_library_postgres.rs`；旧 `scripts/test-comment-like-library-ui.cjs` 随 D3 删除；不是生成代码。合成测试日志、临时 HTTP/浏览器脚本放系统临时目录 `pr401-*`，不入 Git。PG 容器和卷由现有随机名脚本创建并在退出时清理核验。
 - 经 Mog 本轮明确授权的共享库迁移前备份放根仓库既有忽略目录 `database/backups/comment-like-library-401-<UTC>/`；只保留加密 dump、校验和与不含正文/凭据的核验回执。密钥在独立用户私有位置，0600，不输出、不入 Git；不生成明文 dump。
 - 真实 3000 浏览器截图放本任务已授权 Codex visualizations，命名 `pr401-runtime-comments.png`。截图只证明页面读路径，改帖写入的合成反例与真实业务签收分开报告。
 

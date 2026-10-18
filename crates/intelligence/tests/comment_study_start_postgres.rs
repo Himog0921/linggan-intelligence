@@ -2371,16 +2371,16 @@ async fn start_acquires_lock_before_choosing_and_sees_the_post_wait_committed_ma
     let other = db.clone();
     let task =
         tokio::spawn(async move { start_study_run(&other, c, TrustedStudyOrigin::Manual).await });
-    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+    let backend_pid = tokio::time::timeout(std::time::Duration::from_secs(2), async {
         loop {
-            let waiting: bool = sqlx::query_scalar(
-                "SELECT EXISTS(SELECT 1 FROM pg_locks WHERE locktype='advisory' AND NOT granted)",
+            let waiting: Option<i32> = sqlx::query_scalar(
+                "SELECT pid FROM pg_locks WHERE locktype='advisory' AND NOT granted AND database=(SELECT oid FROM pg_database WHERE datname=current_database()) LIMIT 1",
             )
-            .fetch_one(db.pool())
+            .fetch_optional(db.pool())
             .await
             .unwrap();
-            if waiting {
-                break;
+            if let Some(pid) = waiting {
+                break pid;
             }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
@@ -2391,6 +2391,108 @@ async fn start_acquires_lock_before_choosing_and_sees_the_post_wait_committed_ma
     refresh_clean_cache(&db, domain(), 128).await.unwrap();
     holder.commit().await.unwrap();
     assert_eq!(task.await.unwrap().unwrap().target_count, 1);
+    assert_start_domain_unlocked(&db).await;
+    assert_start_session_closed(&db, backend_pid).await;
+}
+
+async fn assert_start_domain_unlocked(db: &Database) {
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            // Inspect the exact bigint key globally; a pool connection may
+            // otherwise reenter its own leaked advisory lock and falsely pass.
+            let available: bool = sqlx::query_scalar("SELECT NOT EXISTS(SELECT 1 FROM pg_locks WHERE locktype='advisory' AND granted AND objsubid=1 AND database=(SELECT oid FROM pg_database WHERE datname=current_database()) AND classid::bigint=(($1::bigint >> 32) & 4294967295) AND objid::bigint=($1::bigint & 4294967295))")
+                .bind(study_domain_lock_key(domain()).unwrap())
+                .fetch_one(db.pool())
+                .await.unwrap();
+            if available {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("start session must release its domain lock");
+}
+
+async fn assert_start_session_closed(db: &Database, pid: i32) {
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let closed: bool = sqlx::query_scalar(
+                "SELECT NOT EXISTS(SELECT 1 FROM pg_stat_activity WHERE pid=$1)",
+            )
+            .bind(pid)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+            if closed {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("dedicated start session and its lock_timeout must not return to the pool");
+}
+
+async fn cancelled_start_releases_domain_lock(holding: bool) {
+    let (db, c, _) = setup(
+        if holding {
+            "start_cancel_held"
+        } else {
+            "start_cancel_wait"
+        },
+        1,
+    )
+    .await;
+    let mut holder = db.pool().begin().await.unwrap();
+    if holding {
+        // Let start own its advisory lock, then block its first domain row read.
+        sqlx::query("SELECT domain_ref FROM observation_domain WHERE domain_ref=$1 FOR UPDATE")
+            .bind(domain())
+            .execute(&mut *holder)
+            .await
+            .unwrap();
+    } else {
+        sqlx::query("SELECT pg_advisory_xact_lock($1)")
+            .bind(study_domain_lock_key(domain()).unwrap())
+            .execute(&mut *holder)
+            .await
+            .unwrap();
+    }
+    let other = db.clone();
+    let task =
+        tokio::spawn(async move { start_study_run(&other, c, TrustedStudyOrigin::Manual).await });
+    let backend_pid = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let blocked: Option<i32> = if holding {
+                sqlx::query_scalar("SELECT pid FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE '%observation_domain%FOR SHARE%' LIMIT 1")
+                    .fetch_optional(db.pool()).await.unwrap()
+            } else {
+                sqlx::query_scalar("SELECT pid FROM pg_locks WHERE locktype='advisory' AND NOT granted AND database=(SELECT oid FROM pg_database WHERE datname=current_database()) LIMIT 1")
+                    .fetch_optional(db.pool()).await.unwrap()
+            };
+            if let Some(pid) = blocked { break pid; }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    }).await.expect("observe the actual blocked start before cancellation");
+    task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
+    holder.rollback().await.unwrap();
+    assert_start_domain_unlocked(&db).await;
+    assert_start_session_closed(&db, backend_pid).await;
+    assert_eq!(effects(&db).await, json!([0, 0, 0, 0]));
+}
+
+#[tokio::test]
+#[ignore = "isolated synthetic PostgreSQL; no shared database or model"]
+async fn cancelled_start_waiting_for_domain_lock_releases_its_session() {
+    cancelled_start_releases_domain_lock(false).await;
+}
+
+#[tokio::test]
+#[ignore = "isolated synthetic PostgreSQL; no shared database or model"]
+async fn cancelled_start_holding_domain_lock_releases_its_session() {
+    cancelled_start_releases_domain_lock(true).await;
 }
 
 #[tokio::test]
@@ -2403,6 +2505,7 @@ async fn missing_scope_or_incomplete_guards_never_create_partial_work() {
         Err(StudyStartError::NotFound)
     ));
     assert_eq!(effects(&db).await, json!([0, 0, 0, 0]));
+    assert_start_domain_unlocked(&db).await;
     sqlx::raw_sql("ALTER TABLE linggan_comment_study_target DISABLE TRIGGER cs_target_input_guard")
         .execute(db.pool())
         .await

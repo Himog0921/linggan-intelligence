@@ -42,7 +42,7 @@ export async function fetchCorpusShell(domain: string | null, signal?: AbortSign
   return parseCorpusShell(await requestJson(`/api/local/corpus/shell${query}`, signal ? { signal } : {}));
 }
 
-/** 与 `render_domain_picker` 的 meta 完全一致：暂停显示「已暂停」，否则「N 个目标 · M 篇作品」，作品数未知写「未知」。 */
+/** 沿用已确认的领域状态展示口径：暂停显示「已暂停」，否则「N 个目标 · M 篇作品」，作品数未知写「未知」。 */
 export function domainMeta(domain: ShellDomain): string {
   if (domain.status === 'paused') return '已暂停';
   const works = domain.sampleCount === null ? '未知' : String(domain.sampleCount);

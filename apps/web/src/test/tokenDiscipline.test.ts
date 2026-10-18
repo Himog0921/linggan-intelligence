@@ -28,10 +28,10 @@ function moduleStylesheets(): string[] {
     .map(file => path.join(sourceRoot, file));
 }
 
-function violations(file: string): string[] {
-  const css = readFileSync(file, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+function violationsIn(source: string): string[] {
+  const css = source.replace(/\/\*[\s\S]*?\*\//g, '');
   const found: string[] = [];
-  for (const declaration of css.matchAll(/([a-z-]+)\s*:\s*([^;{}]+);/g)) {
+  for (const declaration of css.matchAll(/([a-z-]+)\s*:\s*([^;{}]+)(?=[;}])/g)) {
     const property = declaration[1] ?? '';
     const value = declaration[2] ?? '';
     if (COLOR_LITERAL.test(value)) found.push(`${property}: ${value}`);
@@ -39,6 +39,8 @@ function violations(file: string): string[] {
   }
   return found;
 }
+
+const violations = (file: string) => violationsIn(readFileSync(file, 'utf8'));
 
 describe('页面样式只用 LIDS Token', () => {
   const files = moduleStylesheets();
@@ -66,6 +68,12 @@ describe('页面样式只用 LIDS Token', () => {
       .toEqual(['--lgi-unknown-reference-proof']);
     expect(unknownTokenReferences('/* var(--lgi-unknown-reference-proof) */ .action { color: var(--lgi-ink); }'))
       .toEqual([]);
+  });
+
+  it('末项无分号与有分号的硬编码都必须失败', () => {
+    expect(violationsIn('.a { height:248px }')).toEqual(['height: 248px ']);
+    expect(violationsIn('.a { height:248px; }')).toEqual(['height: 248px']);
+    expect(violationsIn('.a { height:calc(var(--lgi-space-1) * 62) }')).toEqual([]);
   });
 
   it('检查本身能识别违规写法', () => {

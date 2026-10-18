@@ -5,7 +5,6 @@ export LINGGAN_COLLECTION_UPGRADE_PHASE=governance
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$project_root"
 
-node scripts/test-comment-like-library-ui.cjs
 cargo test -p linggan-intelligence --test comment_like_library_postgres --locked \
   full_schema_fixtures_record_the_actual_like_migration_digest -- --exact
 

@@ -1,7 +1,7 @@
 # 评论研究产品化：接口、事务与执行合同
 
 > 状态: 权威当前
-> 最后核对: 2026-10-12
+> 最后核对: 2026-10-18
 > 适用范围: COMMENT-STUDY-PRODUCTIZATION-001 HTTP、事务、预算与执行合同
 > 事实来源: GREENFIELD v1.0 手册与其 HTTP/执行规格
 > 冲突时以谁为准: 用户最新授权、AGENTS.md、当前 API 源码和真实回执
@@ -159,20 +159,20 @@ POST `/runs/{runRef}/recover` 仅接受 `{domainRef,requestRef}`，要求源 Run
 
 ## 5. 启动事务与并发
 
-### 5.1 明确选择 READ COMMITTED
+### 5.1 先取得领域锁，再建立稳定冻结快照
 
-启动事务使用 READ COMMITTED。先取得 domain 事务级 advisory lock，再执行幂等检查和**一条冻结输入 SELECT**。该 SELECT 一次产出所选 raw head、合格父语境、每作品语境、历史及缓存结果。Rust 对已返回输入进行确定性处理后写入；不得再在另一条 SELECT 换一份当前语境拼进去。
+2026-10-18 PR #445 修正：原文的READ COMMITTED加单条SELECT方案已被实际的研究底稿读取与评论cursor多次读取取代。现在先在独立连接取得domain会话级advisory lock，再开始SERIALIZABLE事务；底稿、评论cursor、幂等检查与冻结写入共享同一稳定快照。锁等待必须发生在事务快照建立之前，不能依赖SSI一定会把旧快照中未见的新材料判为序列化冲突。
 
-这既保留同次冻结输入的一致性，又避免现有 Repeatable Read 中“等到锁以后仍看旧快照”的陷阱。网络请求／模型／OCR／Embedding 不得出现在此事务内。
+锁key仍为SHA-256(`"comment-study/domain/" + UUID小写字符串`)的前8字节，按有符号big-endian i64解读。会话锁`pg_advisory_lock($1)`与原事务锁使用同一bigint键空间，仍与其他持有同键事务锁的调用方互斥；后续仍验证真实domain_ref。SQLx取消安全guard与连接close_on_drop保证成功、错误或请求取消都释放锁；连接级lock_timeout不回到连接池。每次启动使用一条独立连接，保留有界3秒锁等待与原事务重试。
 
-锁 key 固定为 SHA-256(`"comment-study/domain/" + UUID小写字符串`) 的前 8 字节，按有符号 big-endian i64 解读，调用 `pg_advisory_xact_lock($1)`。这是并发互斥，不是实体身份；极小概率 hash 冲突只多串行，不合并数据。后续仍验证真实 domain_ref。
+网络请求／模型／OCR／Embedding不得出现在冻结事务内。不降低冻结一致性，不修改研究资格、预算、幂等或JSON合同。
 
 ### 5.2 事务步骤
 
-1. 纯参数校验与 request_hash 规范化；开始 READ COMMITTED。
-2. 获取 domain lock；检查 request_ref。若存在，同 hash 返回原回执；不同 hash 返回 409。不得重新挑选样本。
+1. 纯参数校验与 request_hash 规范化；在独立连接获取 domain lock。
+2. 开始 SERIALIZABLE 稳定快照；检查 request_ref。若存在，同 hash 返回原回执；不同 hash 返回 409。不得重新挑选样本。
 3. 读取明确 policy_ref，确认完整方法与当前 domain；读取不可变 model_config 和连接启用事实；不读活动 policy 代替参数。
-4. 获取服务端 asOf；执行单条冻结查询，按已定义模式、资格、输入和稳定评论历史选择。context 按作品仅组装一次，不在每评论 lateral 重复巨量 JSON。
+4. 获取服务端 asOf；在同一事务快照读取底稿和评论cursor，按已定义模式、资格、输入和稳定评论历史选择。context 按作品仅组装一次，不在每评论 lateral 重复巨量 JSON。
 5. 0 个结果：有待清洗则 index_pending，否则 no_work；写终态 request 回执，提交，不创建空 Run。
 6. >0：写入 queued Run、实际预算、选择／执行快照、Work 和 Target。缺父评论是冻结的依赖事实，不预先终结目标；由语义阶段判断该条回复是否真的需要父语境。写入稳定身份及 fingerprint，让数据库在途唯一约束兜底。
 7. 调用 close_run_if_settled；写入 request.created 回执。提交后 Worker 方可处理。

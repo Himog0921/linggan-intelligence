@@ -1,10 +1,14 @@
 # WEB-REACT-001-F · 主题图谱与 Topic 工作区迁移
 
 > 状态: 活跃计划
-> 最后核对: 2026-10-17
+> 最后核对: 2026-10-18
 > 适用范围: WEB-REACT-001 阶段F / Issue #440，parent #430
 > 事实来源: Mog当前会话派定、主计划、当前main与3000 `82d48a72`、Topic Map HTTP/产品手册及紧凑工作区规格
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实运行/代码/合同、DEC-0010
+
+## 2026-10-18 当前状态补记
+
+F 已随 [PR #441](https://github.com/Himog0921/linggan-intelligence/pull/441) 合入并部署为 `acdfbb87`；概览采用 Mog 已定 B「材料优先」。原两项 Topic 内核回归已修复：最终本机 18 个目标、99 项通过、0 失败，前端 79 文件／838 项通过；最终 head 的四项执行 CI SUCCESS，四项 SKIPPED 不计通过。正式 3000 与候选 31 个前端产物字节一致；实际 212 张页面截图已核验（概览 72 张含完整滚动，其他状态 140 张主要为首帧）。差异中包含滚动时点、时间文本和少量栅格边缘，原始差异保留，不声称每张像素全同。私有证明在 `artifacts/private/web-react-001-f/kernel-release/release-verification.json`（仓库主 checkout，未入 Git）。旧性能证据仍属于改版前候选；B 最终性能和 Mog 业务验收不据此关闭。
 
 ## 1. 授权与责任
 

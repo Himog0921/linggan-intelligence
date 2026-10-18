@@ -1,10 +1,16 @@
 # WEB-REACT-001 · 网页前端全站统一为 React（合并 UI 改版专项）
 
 > 状态: 活跃计划
-> 最后核对: 2026-10-16
-> 适用范围: Intelligence 全部正式网页迁移到 React 的唯一实施计划，包括目标架构、不留双轨规则、阶段顺序与验收；合并 UIUX-CONTENT-WORKBENCH-001 的用户结果与推进安排。阶段 A+B 已随 PR #431 合并至 main@0a90fd4a；部署依据见 #430 上线回执；阶段 C 已随 PR #432 合并；阶段 D 已派定：D1 已随 PR #436 合并上线，D2 以 Draft PR 呈交、未合并，D3 未开始（[分册](web-react-001-d-corpus.md)）；阶段 G、E 已随 PR #437、#439 合入主线（见各自分册）
+> 最后核对: 2026-10-18
+> 适用范围: Intelligence 全部正式网页迁移到 React 的唯一实施计划，包括目标架构、不留双轨规则、阶段顺序与验收；合并 UIUX-CONTENT-WORKBENCH-001 的用户结果与推进安排。阶段 A+B 已随 PR #431 合并至 main@0a90fd4a；部署依据见 #430 上线回执；阶段 C 已随 PR #432 合并；阶段 D 已派定：D1 已随 PR #436 合并上线，D2 已随 PR #443 合并并部署，D3 已按 Mog 2026-10-18 派定形成迁移候选（[分册](web-react-001-d-corpus.md)）；阶段 G、E 已随 PR #437、#439 合入并部署，F 已随 #441 合入并部署（见各自分册）
 > 事实来源: Mog 2026-10-15 的决定（[Issue #430](https://github.com/Himog0921/linggan-intelligence/issues/430)、[DEC-0010](../../decisions/0010-web-frontend-react.md)）；Mog 提供的《Linggan Intelligence 全站 React 迁移架构与执行手册》（2026-10-15，基于 `main@473980cb`，未入库，有效内容已吸收进本文）；UIUX-CONTENT-WORKBENCH-001 计划（[Issue #425](https://github.com/Himog0921/linggan-intelligence/issues/425)，2026-10-15 工作树未提交版本）；`origin/main@473980cb` 代码只读核对
 > 冲突时以谁为准: Mog 最新确认、DEC-0010、AGENTS.md、真实代码与运行证据
+
+## 2026-10-18 当前状态补记
+
+当前 `origin/main` 与正式本机 3000 均为 `acdfbb876bf3fcb5cb4aaf20ceea565562f0b428`（PR #441）。本次同步依据 GitHub 合并记录、运行进程及 `/health.webApp`，不把历史候选证明改写成新版本重跑结果。
+
+当前阶段：A+B、C 基线、D1、D2、E、F、G 已合入；C 后续 V3/V8 候选 #434 仍是 Draft、未合并；D3 评论研究四视图候选已实现并完成本机截图与隔离链路核对，既有内核验收缺口及未部署状态见[D3验收](../../design/acceptance/web-react-001-d3-acceptance.md)；H 登录与全站清理尚未开始。B 的断网重启／整版回退、C 的真实成品／模型质量和各模块 Mog 签收仍分别保留。旧 `feat/web-react-001@ba98ba26` 为历史计划快照，当前入口以本主线文档为准。
 
 ## 1. 目标与已定决定
 
@@ -309,7 +315,7 @@ Mog 在当前 Codex 对话明确要求“重新让 subagent 来修正，然后�
 
 ### 阶段 F · 主题图谱与 Topic 工作区
 
-**2026-10-16 派定**：Mog在E（PR439）上线后明确要求继续F，保持当前实际UI并截图对照。候选与分层证明见 [F 验收](../../design/acceptance/web-react-001-f-acceptance.md)（最终5,184组截图一致、源码独立审查PASS；正式隔离链路通过；原内核2失败/CI、部署与Mog仍独立）。[阶段F分册](web-react-001-f-topics.md)，Issue #440；不包含合并部署或真实研究/采集授权。
+**2026-10-16 派定**：Mog在E（PR439）上线后明确要求继续F，保持当前实际UI并截图对照。候选与分层证明见 [F 验收](../../design/acceptance/web-react-001-f-acceptance.md)（最终5,184组截图一致、源码独立审查PASS；正式隔离链路通过；原内核两项失败已修复，CI/正式部署与实际截图已另留证；Mog仍独立）。[阶段F分册](web-react-001-f-topics.md)，Issue #440；不包含合并部署或真实研究/采集授权。
 
 - **范围**：`/topics`（主题概览与用户生命旅程、地图与列表、左侧主题树、证据与候选、研究命令）、`/topics/{canonical_key}`。
 - **做法**：现有绘图与布局算法通过适配器纳入 React 生命周期（创建、销毁、切换都安全），不重写图形语义；主题定义与关系的业务规则不搬到 TypeScript。如果 JTBD 讨论中的主题改版届时已定，就直接按新设计实现；未定则按现行已确认的设计迁移，派定时由 Mog 确认。

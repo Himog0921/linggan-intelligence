@@ -5,6 +5,12 @@ project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$project_root"
 command -v cargo >/dev/null || { echo "Cargo is unavailable" >&2; exit 1; }
 docker info >/dev/null 2>&1 || { echo "Docker is unavailable" >&2; exit 1; }
+# The formal page is now React; both API browser proofs use the same built entry.
+npm --prefix apps/web ci --ignore-scripts --no-audit --no-fund
+npm --prefix apps/web run build >/dev/null
+export LINGGAN_WEB_DIST="$project_root/apps/web/dist"
+export WEB_APP_PROOF_NODE="$(command -v node)"
+
 suffix="$(date -u +%Y%m%d%H%M%S)_$$_$(openssl rand -hex 4)"
 proof_database="linggan_comment_study_proof_${suffix}"
 proof_container="linggan-comment-study-productization-${suffix}"
