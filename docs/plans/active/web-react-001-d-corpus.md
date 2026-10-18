@@ -1,12 +1,18 @@
 # WEB-REACT-001 阶段 D 分册 · 语料三页迁移到 React
 
 > 状态: 活跃计划
-> 最后核对: 2026-10-16
-> 适用范围: WEB-REACT-001 阶段 D 的拆分、各页能力清单（迁移前盘点）、已定的设计改动与验收；D1 已合并上线（PR #436，`baaf5a51`，上线后只读核验见 #433）；D2 已实施并复核，以 Draft PR 呈交（§4.10）；D3 未开始
+> 最后核对: 2026-10-18
+> 适用范围: WEB-REACT-001 阶段 D 的拆分、各页能力清单（迁移前盘点）、已定的设计改动与验收；D1 已合并上线（PR #436，`baaf5a51`，上线后只读核验见 #433）；D2 已随 #443 合并并部署（§4.10）；D3 已按 Mog 2026-10-18 派定形成迁移候选
 > 事实来源: Mog 2026-10-15「接下来重点推进 D，语料三页」与「实际代码部分交给 Sonnet 5.5 子代理执行」；[WEB-REACT-001](web-react-001.md) 阶段 D；Issue #433；`origin/main@36f3fdf9` 旧页面源码
 > 冲突时以谁为准: Mog 最新确认、DEC-0010、WEB-REACT-001 主计划、真实代码与运行证据
 
 本文是主计划阶段 D 的分册，不另立推进入口。规则 R1–R7、目标架构与安全约束以[主计划](web-react-001.md)为准。
+
+## 2026-10-18 当前状态补记
+
+D2 已随 [PR #443](https://github.com/Himog0921/linggan-intelligence/pull/443) 合入 `24e3ec23ea154f65e738444a73e5d5cdb2710594`，已包含在正式 3000 的 `acdfbb87` 中；下文“Draft／未合并／未部署”保留为当时的历史回执，不再代表当前状态。原候选的 749 项前端测试和隔离链路证据仍按原版本引用；Mog 业务验收独立保留。
+
+D3 本包 task-id `WEB-REACT-001-D3-20261018`，exact base `acdfbb876bf3fcb5cb4aaf20ceea565562f0b428`，分支 `codex/web-react-001-d3-comments`；Mog 最新要求保留全部功能、数据口径和当前 UI。旧 D 分册的 Sonnet 实施安排不自动代表当前 GPT 协作许可；本包新增代理另待 Mog 决定。
 
 ## 1. 拆分与顺序
 
@@ -815,10 +821,82 @@
 
 ## 5. D3 · 评论研究
 
-_未开始。_
+### 5.1 本包范围与验收合同（2026-10-18）
+
+三页壳层一致指复用同一AppShell/导航和既有尺寸；按Mog本包“当前UI不变”，D3旧页未接入的采集状态字段仍显示状态未知，不在技术迁移里改口径。此处是§2笼统“一致”在D3的具体范围，后续字段统一单独确认。
+
+- 四视图：概览、用户评论、研究批次、用户问题；同一 React 页面与状态边界、一个 PR 一次切换。
+- 保留现有 A「无边框 V2」概览和其全部读数口径；不得将 Topic 概览的 B 设计移植到评论研究。
+- 评论检索、点赞与改帖标记、跨页选择、原声与父语境／历史／关联；作品与评论两种研究输入；方法版本的查看／比较／复制编辑／设默认；预览与显式确认启动；批次面板／结果／请求诊断／暂停恢复停止／有界补跑；用户问题、候选、版本、证据与深链均须登记并保留。
+- UI 状态与命令资格从原 Rust 接口读取；未知、0、未研究、失败、部分结果区分；控制版本、请求编号、成本边界与在途结算语义不变。
+- 先采集当前正式 3000 的完整页面、内部滚动区域与弹窗基线，再在同输入、同视口、同滚动状态比较；实际数据仅私有留存，不提供给实施代理或 CI。
+- 正式隔离 PostgreSQL／Axum／React 浏览器验证覆盖四条真实交互旅程和失败／冲突／未确认／重试边界；共享库和正式 3000 只读。
+- 能力、接口、删除依赖已登记于§5.4–5.5；候选、截图、自动检查与未关闭的既有内核验收缺口见§5.6，不将候选证明写成部署或Mog签收。
+
+### 5.2 UI 变更清单与读取回执
+
+事项为 #433／WEB-REACT-001-D3-20261018；root 在专属工作树实施。分类为展示、交互与现有行动入口的混合迁移，最高风险仍是确认启动和批次控制的真实模型队列后果。依据 DEC-0010、R2、PAGE 评论研究产品化四视图规格、COMMENT-STUDY-HTTP-001、评论高赞／改帖合同以及当前 `main@acdfbb87` 源码。研究工作区为 L1，原声／问题／方法与批次面板为 L2；无新增 L3、主题或权限。
+
+读取已核对：AGENTS、当前状态／总索引、issue-tracker、协作治理、文件放置／生成物登记、UI execution contract、design-governance、LIDS 入口／材料／壳层／数据边界／语言，以及四视图页面规格、HTTP 目录／方法／启动合同和当前页面源码。Token 与视觉来自现有唯一运行时 LIDS。页面样式迁入 CSS Modules，局部保留原布局数值并在 Token 检查和截图中逐一复核；图表 viewBox 的坐标与比例为原算法几何，不新增主题 Token。历史规则与当前实际 UI 冲突时遵从 Mog 本包“当前 UI 一致”，不借本包改变全局外壳。
+
+| 层级 | 验收方法 | 当前结果 | 仍未证明 |
+|---|---|---|---|
+| 任务可用 | 能力清单与隔离浏览器四旅程 | 候选与两条合计19步隔离浏览器链路通过 | 原评论专项有一条未修改主线锁等待用例失败，见验收记录 |
+| 状态诚实 | 空／未知／失败／受限与冲突、未确认回执 | 98份不同actual回执兼容、34项组件行为/负例与SVG边界、隔离回执 | 未逐按钮穷举全部状态组合 |
+| 视觉一致 | 3000 只读基线与候选同输入、视口、完整滚动对照 | 173组实际输入完整滚动对照；56组零像素差异，其余微小文字像素差异记录 | 不声称全部逐像素一致；Mog视觉签收待验收 |
+| 真实后果 | 一次性 PG＋正式 Axum 命令回执，断言队列／幂等／控制版本 | 正式隔离PG/Axum/React与回库断言通过 | 无共享库写入／真实外发／Mog 验收 |
+
+现有外壳字段在旧评论页恒为“状态未知”的部分按当前页保留；不把 D1 的共享状态接缝改善偷偷计入 UI 等价。跨领域、切视图、关闭抽屉后旧读取必须取消或失效；页面内容与真实回执不落浏览器持久存储。若需改变业务规则、权限、数据或新产品布局，停止受影响部分报告 Mog。当前没有此类设计待决项。
+
+### 5.3 代码与副作用边界
+
+React 路由接管时删除 `comment_study.html/.js/.css`、`comment_study_results.js/.css`、`comment_research.css` 以及仅服务旧页面的 Rust 输出、资源路由和 DOM 测试；保留原 JSON 端点、SQL、业务判断和授权。共享外壳／页面登记／证明脚本仅由 root 修改。无共享库迁移、真实模型／平台调用、worker 开关、合并或部署授权。
+
+
+### 5.4 能力与依赖清单（D3 候选）
+
+下表对应迁移前 `acdfbb87` 实际代码；同一路由 `/corpus/comments`，React 模块均位于 `apps/web/src/pages/corpus/comments/`。R 表示只读，C 表示必须取得服务器回执的现有命令；不引入新业务判断。
+
+| 表面 / 能力 | React 落点 | 原 API 与边界 | 验证 |
+|---|---|---|---|
+| 领域选择、侧栏、四视图、URL 别名 targets/pending | CommentsPage / AppShell / DomainPicker | R corpus/shell；领域标识隔离、旧请求取消 | 单元跨领域负例、实际六宽度 |
+| 累计、昨日、覆盖率、长期问题与候选跳转 | OverviewMetrics / Overview | R overview；完整汇总不取预览行数代替 | 单元 100/70/0/未知；实际页面 |
+| 7/28/56 天、双轨图、表格、覆盖提示 | ObservationSeries / overviewState | R overview.observationSeries；日期、覆盖不是市场趋势 | 六宽度；离开再回保留阅读设置 |
+| 新依据问题、原声、研究批次跳转 | Overview / StudyNavigation | R overview；受限不展示原文/派生文本 | 隔离只读旅程、实际空问题集 |
+| 解决办法/使用经历、完整目录、续读、待办跳转 | Overview / CurrentSignals | R current-signals；每条信号分页、总数单列 | 隔离目录；实际经历长列表全滚动 |
+| 评论字面搜索、研究状态、九标签、声音角色、排序、点赞阈值、改帖筛选 | CommentsView / commentModel | R comments；筛选服务端执行，URL 保留 domain/workRef/cursor 等 | 单元完整过滤、库专项、实际列表 |
+| 评论分页、跨页选择/清空、上限与所选评论研究 | CommentsView / StartResearch | R catalog；服务器资格决定可选，不重算 eligible | 合成资格/XSS/未知点赞；命令旅程 |
+| 标记已改帖、撤销、未确认重试 | CommentsView / root usageRefs | C comments/post-usage；同一意图沿用 requestRef，不乐观更新 | 单元丢回执；隔离真实写入后原号重放 |
+| 原文、作品/父评论、清洗文本与原因 | CommentDetail | R comments/detail；每次来源资格、深链、关闭/返回焦点 | 隔离原声/父语境；实际弹窗/滚动 |
+| 历史研究续读、目标/信号/方法跳转 | CommentDetail.History | R comments/history；不是独立评论计数 | 隔离历史→批次→方法；PG inspection 专项 |
+| 关联信号续读、用户问题跳转、作品内筛选 | CommentDetail / CommentsView | R comments/related；来源当前受限不显示派生文本 | 隔离 signal→problem；实际关联空态 |
+| 作品目录检索、参考作品、分页、选择、来源资格 | WorkPicker / SourceSummary | R setup / works；保留 primary/reference，与所选评论分责 | 隔离命令旅程、实际目录 |
+| 完整方法、并排对比、固定规则与模型快照 | PolicySnapshot / PolicyControls | R policies / policies/{ref}；不可变历史不补当前默认 | 隔离对比和冻结方法；实际 viewer |
+| 复制/编辑新版本、保存、默认方法 CAS | PolicyControls / usePolicies | C policies / policies/{ref}/activate；保存无 requestRef，丢回执必须先核对目录 | 隔离保存/比较/激活、原版本与冻结 run 不变 |
+| 作品/评论范围、模式、原因、预算、预览与确认启动 | StartResearch | C selection-preview / runs；预览只读，启动冻结和最终资格在服务端 | 隔离真实预览→启动；丢回执原号重试、仅一个 run |
+| 批次选择、历史续读、冻结范围、提取/归并/用量 | RunsView / RunSummary | R runs / runs/{ref}；未知、旧账本、部分用量分别呈现 | 隔离批次；实际全部四面板 |
+| 目标上下文、信号、调用记录、完整合法请求与复制 | RunPanel / RunTargetTable / RunSignals / RunRequests | R targets / signals / runs/{ref}/requests / requests/{ref}；受限源不泄漏诊断 | 隔离调用/证据导航；actual DTO/页面 |
+| 暂停/恢复、显式停止、在途结算说明 | useRunControl / RunConfirm | C runs/{ref}/pause/resume/stop；expectedControlVersion CAS，失败先重新读取 | 隔离 pause/resume/stop + 真实 stale CAS 409 |
+| 有界补跑、原 run 血缘、无工作回执 | useRunControl / RunConfirm | C runs/{ref}/recover；同一 requestRef，source run 不覆盖 | 隔离新 run + selection_manifest 恢复来源核对 |
+| 问题全部/最近变化、查询、排序、分页、密度、研究范围 | ProblemsView / ProblemCards | R problem-cards；总数与当前页、近28天记录变化分责 | 隔离正问题、实际空态；六宽度 |
+| 未归并线索、处理状态、来源新核对、语境/批次 | ProblemClueDrawer | R problem-candidates / signals / targets；不是正式问题 | 隔离线索→批次→返回；实际线索抽屉 |
+| 问题定义、版本、来源分布、证据续读、上下文、复制/刷新 | ProblemDrawer / problemContext | R problems/{ref} / evidence / signals / targets；受限同步隐藏定义/原声/派生内容 | 隔离正问题/上下文/浏览器返回；PG 来源专项 |
+
+### 5.5 入口、删除与证明承接
+
+- 唯一正式入口是 App 的 lazy React `/corpus/comments`；Axum web_app 同源托管并在 health.pages 登记；原 comment-study JSON 路由保持原方法、来源闸门和业务实现。
+- 同包删除六个页面资源：comment_study.html/js/css、comment_study_results.js/css、comment_research.css；删除其 Rust HTML/资源输出与仅服务旧 DOM 的断言（含独立集成目标comment_study_observation_ui的5项源码字符串断言，由真实React行为与观察图边界测试承接）。共用外壳中最后一个旧 CorpusPage/side-nav renderer 与 picker helper 仅在全库无调用后删除；全局未迁移壳层清理由 H 阶段处理。
+- 删除旧 UI 字符串/原生 DOM 脚本 `test-comment-study-productization-ui.py`、`test-comment-like-library-ui.cjs`、`check-comment-study-results.mjs`，由 React 组件测试、`comments-real-chain.mjs` 和真实 PG 后果断言承接。原 like-library/inspection/policy/start 等内核与 SQL 专项不删减。
+- 正式证明入口：`scripts/test-web-app-postgres.sh` 默认全阶段或 `WEB_APP_PROOF_SCOPE=comments`；`scripts/test-comment-study-productization-postgres.sh` 仍跑原评论业务专项并通过正式 React 入口证明。浏览器须通过随机 proof 握手、仅访问隔离回环端口；不连接正式 3000，不发模型或平台请求，清理容器/卷/临时支持目录。
+- CI `web-app.yml` 覆盖所有 comment_study* 接缝；旧 comment-study-p1 工作流保留其原分支条件，D3 分支下 SKIPPED 不称通过。历史审计的源码链接固定到迁移前提交，避免删旧文件造成断链或改写历史。
+
+### 5.6 验收回执
+
+候选验证和限制统一见 [ACC-WEB-REACT-001-D3](../../design/acceptance/web-react-001-d3-acceptance.md)。正式 3000 仍是 acdfbb87 旧 D3；候选、隔离真实链路、合并/部署和 Mog 签收分层报告。
+
 
 ## 6. 执行方式
 
-- 代码由子代理（Sonnet 5.5）在专属工作树实施；协调方（Claude Code）负责拆分、任务说明、审查、验证、提交与 PR。子代理不提交、不推送、不碰其他工作树。
+- D1/D2 的历史协作安排：代码由 Sonnet 5.5 子代理实施，Claude Code 协调。D3 由 Mog 当前指派的 Codex root 在本包工作树顺序实施；新增实施代理的本包许可尚未收到，不沿用 F 的旧许可。提交前独立审查仍遵循 AGENTS。
 - 每个子项：先盘点能力清单，再实现；完成后协调方逐项核对清单、差异与测试，再提交。
 - 验证：`npm --prefix apps/web run verify`、`cargo test -p linggan-api --bins --locked`、隔离 PostgreSQL 真实浏览器证明、治理与 UI 手册检查、云端 `web-app.yml`。

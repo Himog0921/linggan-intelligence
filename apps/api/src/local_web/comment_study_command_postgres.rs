@@ -1017,6 +1017,8 @@ async fn browser_real_axum_postgres_previews_starts_and_stops_without_provider_d
     let proof_token = Uuid::new_v4().to_string();
     let route_proof_token = proof_token.clone();
     let application = crate::local_web::comment_study::routes()
+        .merge(crate::local_web::web_app::routes())
+        .merge(crate::local_web::corpus_shell_api::routes())
         .route(
             "/__comment-study-browser-proof",
             axum::routing::get(move || {
@@ -1031,7 +1033,7 @@ async fn browser_real_axum_postgres_previews_starts_and_stops_without_provider_d
 
     let script = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
-        .join("scripts/test-comment-study-productization-ui.py")
+        .join("apps/web/test/e2e/comments-real-chain.mjs")
         .canonicalize()
         .unwrap();
     let api_base_url = format!("http://{address}");
@@ -1040,9 +1042,9 @@ async fn browser_real_axum_postgres_previews_starts_and_stops_without_provider_d
     let target_policy_ref_arg = target_policy_ref.to_string();
     let initial_active_policy_ref_arg = initial_active_policy_ref.to_string();
     let proof_token_arg = proof_token;
-    let python = std::env::var("PYTHON").unwrap_or_else(|_| "python3".to_owned());
+    let node = std::env::var("WEB_APP_PROOF_NODE").unwrap_or_else(|_| "node".to_owned());
     let browser_result = tokio::task::spawn_blocking(move || {
-        Command::new(python)
+        Command::new(node)
             .arg(script)
             .arg("--api-base-url")
             .arg(api_base_url)
@@ -1070,16 +1072,16 @@ async fn browser_real_axum_postgres_previews_starts_and_stops_without_provider_d
         String::from_utf8_lossy(&browser_result.stderr)
     );
 
-    assert_eq!(effects(&p.db).await, json!([1, 2, 1, 0]));
+    assert_eq!(effects(&p.db).await, json!([2, 4, 2, 0]));
     let (dispatch_state, run_state, control_version): (String, String, i64) = sqlx::query_as(
-        "SELECT dispatch_state,state,control_version FROM linggan_comment_study_run LIMIT 1",
+        "SELECT dispatch_state,state,control_version FROM linggan_comment_study_run WHERE selection_manifest->>'recoverySourceRunRef' IS NULL LIMIT 1",
     )
     .fetch_one(p.db.pool())
     .await
     .unwrap();
     assert_eq!(dispatch_state, "stopped");
     assert_eq!(run_state, "cancelled");
-    assert_eq!(control_version, 1);
+    assert_eq!(control_version, 3);
 
     let (created_policy_ref, manifest): (Uuid, Value) = sqlx::query_as(
         "SELECT policy_ref,method_manifest FROM linggan_comment_study_policy \
@@ -1388,6 +1390,8 @@ async fn browser_real_axum_postgres_traces_comment_run_signal_problem_evidence()
     let proof_token = Uuid::new_v4().to_string();
     let route_proof_token = proof_token.clone();
     let application = crate::local_web::comment_study::routes()
+        .merge(crate::local_web::web_app::routes())
+        .merge(crate::local_web::corpus_shell_api::routes())
         .route(
             "/__comment-study-browser-proof",
             axum::routing::get(move || {
@@ -1399,12 +1403,12 @@ async fn browser_real_axum_postgres_traces_comment_run_signal_problem_evidence()
     let server = tokio::spawn(async move { axum::serve(listener, application).await.unwrap() });
     let script = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
-        .join("scripts/test-comment-study-productization-ui.py")
+        .join("apps/web/test/e2e/comments-real-chain.mjs")
         .canonicalize()
         .unwrap();
-    let python = std::env::var("PYTHON").unwrap_or_else(|_| "python3".to_owned());
+    let node = std::env::var("WEB_APP_PROOF_NODE").unwrap_or_else(|_| "node".to_owned());
     let browser_result = tokio::task::spawn_blocking(move || {
-        Command::new(python)
+        Command::new(node)
             .arg(script)
             .arg("--api-base-url")
             .arg(format!("http://{address}"))

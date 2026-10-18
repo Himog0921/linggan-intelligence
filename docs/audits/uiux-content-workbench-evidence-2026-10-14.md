@@ -6,6 +6,8 @@
 > 事实来源: 2026-10-14 当次真实浏览器、DOM、代码及运行身份核对
 > 冲突时以谁为准: 原始证据及当前代码；本表只描述当次基线，不证明后续状态
 
+2026-10-18 链接维护：D3 迁移删除旧评论页源码后，S04 三条链接固定到迁移前主线提交；保留当次审计证据，不将旧行号改指新 React 文件。
+
 主结论、能力缺口和优先级见[审计报告](uiux-content-workbench-baseline-2026-10-14.md)。专项目标见[活跃计划](../archive/plans/uiux-content-workbench-001.md)。
 
 ## 1. 证据保存与查看
@@ -53,7 +55,7 @@
 | S01 | [local_web.rs](../../apps/api/src/local_web.rs) 293–294、473–482；[shell.rs](../../apps/api/src/local_web/shell.rs)；[login.html](../../apps/api/src/local_web/login.html) 555 附近 | 根/语料路由、一级导航、开发登录跳转 |
 | S02 | [local_web.rs](../../apps/api/src/local_web.rs) 6106、6139–6178；`evidence_library.js` 5–29、379；`evidence_library.css`（这两个文件已随 WEB-REACT-001 阶段 D2 删除，证据库现为 React 页；行号为审计当日的旧页） | 技术说明/占位、领域与work参数、作者/任务返回、阅读模式 |
 | S03 | [creators.rs](../../apps/api/src/local_web/creators.rs) 12–25；`creators.js` 65–85、131；`creators.css`（后两个文件已随 WEB-REACT-001 D1 删除，当次基线见 `origin/main@36f3fdf9`；创作者页现为 `apps/web/src/pages/corpus/creators/`） | 作者读取/写边界、证据跳转、图片及可访问名称 |
-| S04 | [comment_study.html](../../apps/api/src/local_web/comment_study.html) 19–104；[comment_study.js](../../apps/api/src/local_web/comment_study.js) 166–187、283、737、855–903、1539；[comment_study.css](../../apps/api/src/local_web/comment_study.css) 42–72 | 列表/研究/方法入口、加载依赖、版本显示、弹窗与表格 |
+| S04 | [comment_study.html](https://github.com/Himog0921/linggan-intelligence/blob/acdfbb876bf3fcb5cb4aaf20ceea565562f0b428/apps/api/src/local_web/comment_study.html) 19–104；[comment_study.js](https://github.com/Himog0921/linggan-intelligence/blob/acdfbb876bf3fcb5cb4aaf20ceea565562f0b428/apps/api/src/local_web/comment_study.js) 166–187、283、737、855–903、1539；[comment_study.css](https://github.com/Himog0921/linggan-intelligence/blob/acdfbb876bf3fcb5cb4aaf20ceea565562f0b428/apps/api/src/local_web/comment_study.css) 42–72 | 列表/研究/方法入口、加载依赖、版本显示、弹窗与表格 |
 | S05 | [topic_map.rs](../../apps/api/src/local_web/topic_map.rs) 49–76、110、320–330；[topic_map.js](https://github.com/Himog0921/linggan-intelligence/blob/82d48a72b95d905bffd0def9314fdee004893ddb/apps/api/src/local_web/topic_map.js) 92–126、155–157、185、464、781–786；[topic_map.css](https://github.com/Himog0921/linggan-intelligence/blob/82d48a72b95d905bffd0def9314fdee004893ddb/apps/api/src/local_web/topic_map.css) | 读取/命令边界、错误码映射、覆盖读数、旅程、人工备选及引用导出 |
 | S06 | [collection_targets_view.rs](../../apps/api/src/local_web/collection_targets_view.rs) 636–750、784–835；[collection_target.rs](../../crates/evidence/src/collection_target.rs) 560–608；[target_drawer.rs](../../apps/api/src/local_web/target_drawer.rs) 1380–1402、1702–1721、3160；[local_web.rs](../../apps/api/src/local_web.rs) 354–393、3606–3632、3731–3739；[collection.rs](../../apps/api/src/local_web/collection.rs) 792–793 | 目标状态计数/行语义、作品跳转、失效默认选择、领域与任务路由 |
 | S07 | [ops.rs](https://github.com/Himog0921/linggan-intelligence/blob/712286c39bd0fc57ca71097a3abba1d5aca3aa90/apps/api/src/local_web/ops.rs) 12–33；[ops_publications.html](https://github.com/Himog0921/linggan-intelligence/blob/712286c39bd0fc57ca71097a3abba1d5aca3aa90/apps/api/src/local_web/ops_publications.html) 15–22；[ops.js](https://github.com/Himog0921/linggan-intelligence/blob/712286c39bd0fc57ca71097a3abba1d5aca3aa90/apps/api/src/local_web/ops.js) 247；[ops_overview.js](https://github.com/Himog0921/linggan-intelligence/blob/712286c39bd0fc57ca71097a3abba1d5aca3aa90/apps/api/src/local_web/ops_overview.js) 249–271；[ops_io.html](https://github.com/Himog0921/linggan-intelligence/blob/712286c39bd0fc57ca71097a3abba1d5aca3aa90/apps/api/src/local_web/ops_io.html) | 运营只读、选题池占位、发布表列、漏斗结论、台账导出 |

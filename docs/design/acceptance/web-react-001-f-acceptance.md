@@ -1,10 +1,16 @@
 # ACC-WEB-REACT-001-F · 主题图谱与 Topic Workspace 迁移证明
 
 > 状态: 一次性报告
-> 最后核对: 2026-10-17
+> 最后核对: 2026-10-18
 > 适用范围: WEB-REACT-001 阶段 F / Issue #440 的候选实现和验收证据
 > 事实来源: main/runtime 82d48a72 实际 UI、独立工作树、正式 Axum/一次性 PostgreSQL/React 浏览器证明
 > 冲突时以谁为准: Mog 最新确认、真实回执、当前代码和来源合同；候选不等于部署与业务签收
+
+## 2026-10-18 当前状态补记
+
+F 已随 [PR #441](https://github.com/Himog0921/linggan-intelligence/pull/441) 合入并部署为 `acdfbb87`；概览采用 Mog 已定 B「材料优先」。原两项 Topic 内核回归已修复：最终本机 18 个目标、99 项通过、0 失败，前端 79 文件／838 项通过；最终 head 的四项执行 CI SUCCESS，四项 SKIPPED 不计通过。正式 3000 与候选 31 个前端产物字节一致；实际 212 张页面截图已核验（概览 72 张含完整滚动，其他状态 140 张主要为首帧）。差异中包含滚动时点、时间文本和少量栅格边缘，原始差异保留，不声称每张像素全同。私有证明在 `artifacts/private/web-react-001-f/kernel-release/release-verification.json`（仓库主 checkout，未入 Git）。旧性能证据仍属于改版前候选；B 最终性能和 Mog 业务验收不据此关闭。
+
+当前 `origin/main` 与正式本机 3000 均为 `acdfbb876bf3fcb5cb4aaf20ceea565562f0b428`（PR #441）。本次同步依据 GitHub 合并记录、运行进程及 `/health.webApp`，不把历史候选证明改写成新版本重跑结果。
 
 ## 2026-10-17 适用范围更新
 

@@ -1,0 +1,81 @@
+/** D3: built React + actual Axum + disposable PostgreSQL. No provider or shared database. */
+import { chromium } from 'playwright';
+import assert from 'node:assert/strict';
+import { parseArgs } from 'node:util';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+const {values:v}=parseArgs({options:Object.fromEntries(['api-base-url','domain-ref','work-ref','existing-policy-ref','initial-active-policy-ref','proof-token','e2e-run-ref','e2e-problem-ref'].map(k=>[k,{type:'string'}]))});
+const origin=v['api-base-url'],domain=v['domain-ref'];
+const base=new URL(origin);
+assert.equal(base.protocol,'http:');assert.ok(['127.0.0.1','localhost','[::1]'].includes(base.hostname));assert.ok(base.port && base.port!=='3000');
+assert.ok(domain && v['proof-token']);
+const mode=v['e2e-run-ref']?'read':'commands',root=path.join(process.env.WEB_APP_PROOF_DIR||process.env.TMPDIR||'/tmp','comments-'+mode);
+await fs.mkdir(root,{recursive:true});
+const browser=await chromium.launch({headless:true});
+const context=await browser.newContext({viewport:{width:1440,height:1000},reducedMotion:'reduce'});
+const page=await context.newPage();page.setDefaultTimeout(30000);
+const report={mode,steps:[],errors:[],writes:[],responses:[],blocked:[],cancelled:[]};
+const pending=[];
+page.on('pageerror',e=>report.errors.push(e.message));
+page.on('request',r=>{if(r.method()!=='GET'&&r.url().includes('/api/'))report.writes.push({path:new URL(r.url()).pathname,body:r.postDataJSON()});});
+page.on('response',r=>{if(r.url().includes('/api/local/comment-study/')){const job=r.json().then(body=>report.responses.push({path:new URL(r.url()).pathname,method:r.request().method(),status:r.status(),body})).catch(()=>{});pending.push(job);}});
+page.on('requestfailed',r=>{if(r.failure()?.errorText.includes('ERR_ABORTED'))report.cancelled.push(new URL(r.url()).pathname);});
+const networkGuard=route=>{const r=route.request();if(new URL(r.url()).origin!==base.origin||(mode==='read'&&!['GET','HEAD'].includes(r.method()))){report.blocked.push({method:r.method(),path:new URL(r.url()).pathname});return route.abort('blockedbyclient');}return route.continue();};
+await context.route('**/*',networkGuard);
+async function step(name,fn){try{await fn();await page.screenshot({path:path.join(root,String(report.steps.length+1).padStart(2,'0')+'.png'),fullPage:true});report.steps.push({name,status:'PASS'});}catch(e){await page.screenshot({path:path.join(root,'failure.png'),fullPage:true}).catch(()=>{});report.steps.push({name,status:'FAIL',message:e.message});throw e;}}
+const button=name=>page.getByRole('button',{name,exact:true});
+async function waitText(selector,text){await page.locator(selector).filter({hasText:text}).waitFor();}
+try {
+ const proof=await page.request.get(origin+'/__comment-study-browser-proof');assert.equal(proof.status(),200);assert.equal(await proof.text(),v['proof-token']);
+ if(mode==='commands'){
+  await step('React entry and immutable method source',async()=>{await page.goto(`${origin}/corpus/comments?domain=${domain}`);await button('发起研究').click();await page.locator('#work-'+v['work-ref']).waitFor();assert.equal(await page.locator('#study-policy').inputValue(),v['existing-policy-ref']);await page.locator('#view-policy').click();await waitText('#policy-viewer-content',v['existing-policy-ref']);await page.locator('#close-policy-viewer').click();});
+  await step('Copy method, save actual new version and compare original',async()=>{await page.locator('#edit-policy').click();await waitText('#policy-status','编辑副本已载入');await page.locator('#method-name').fill('隔离浏览器方法');await page.locator('#stage-semantic').fill('仅用于真实 Axum 与隔离 PostgreSQL 浏览器回归');await page.locator('#save-policy').click();await waitText('#policy-status','已保存并选中新方法版本');const saved=await page.locator('#study-policy').inputValue();assert.notEqual(saved,v['existing-policy-ref']);await page.locator('#view-policy').click();await waitText('#policy-viewer-content','仅用于真实 Axum 与隔离 PostgreSQL 浏览器回归');await page.locator('#compare-policy').selectOption(v['existing-policy-ref']);await page.locator('[data-policy-comparison]').waitFor();assert.ok(!(await page.locator('[data-policy-comparison]').innerText()).includes('仅用于真实 Axum 与隔离 PostgreSQL 浏览器回归'));await page.locator('#close-policy-viewer').click();await page.locator('#activate-policy').click();await waitText('#policy-status','已将所选方法设为当前领域默认版本。');});
+  await step('Explicit scope and preview retain exact limits',async()=>{await page.locator('#work-'+v['work-ref']).check();await page.locator('#run-comment-budget').fill('2');await page.locator('#run-context-character-budget').fill('3500');await page.locator('#token-budget').fill('4096');await page.locator('#preview-run').click();await waitText('#selection-preview','预计冻结 2 条');});
+  let lost=null,drop=true;
+  await page.route('**/api/local/comment-study/runs',async route=>{if(route.request().method()==='POST'&&drop){drop=false;const r=await route.fetch();lost=await r.json();assert.equal(r.status(),201);await route.abort('failed');}else await route.continue();});
+  await step('Lost creation receipt stays unconfirmed',async()=>{await page.locator('#start-run').click();await waitText('#run-result','创建结果未获确认');assert.ok(lost?.runRef);assert.equal(await page.locator('#study-dialog').isVisible(),true);await page.locator('#study-dialog-close').click();await button('发起研究').click();await page.locator('#start-run').filter({hasText:'核对并重试原启动请求'}).waitFor();assert.equal(await page.locator('#selection-preview').innerText(),'');assert.equal(await page.locator('#start-run').isEnabled(),true);});
+  await step('Explicit retry replays original request identity',async()=>{await page.locator('#start-run').click();await page.locator('[data-run-control="pause"]').first().waitFor();const calls=report.writes.filter(r=>r.path.endsWith('/runs'));assert.equal(calls.length,2);assert.equal(calls[0].body.requestRef,calls[1].body.requestRef);assert.equal(new URL(page.url()).searchParams.get('runRef'),lost.runRef);});
+  await step('Reopening a successful research intent requires a new preview',async()=>{await button('发起研究').click();await page.locator('#study-dialog').waitFor();assert.equal(await page.locator('#start-run').isDisabled(),true);assert.equal(await page.locator('#selection-preview').innerText(),'');assert.equal(await page.locator('#run-result').innerText(),'');await page.locator('#study-dialog-close').click();});
+  await step('Pause and resume follow actual CAS receipts',async()=>{await page.locator('[aria-label="本次运行操作"] [data-run-control="pause"]').click();await waitText('#study-run-control-feedback','已按服务端回执暂停派发');await page.locator('[aria-label="本次运行操作"] [data-run-control="resume"]').click();await waitText('#study-run-control-feedback','已按服务端回执恢复派发');});
+  await step('Stale control version is rejected by real API',async()=>{const response=await page.request.post(`${origin}/api/local/comment-study/runs/${lost.runRef}/pause`,{data:{expectedControlVersion:0}});assert.equal(response.status(),409);});
+  await step('Stopping requires concrete identity and preserves server outcome',async()=>{await page.locator('[aria-label="本次运行操作"] [data-run-control="stop"]').click();await waitText('#study-stop-run-identity',lost.runRef);assert.ok((await page.locator('#study-stop-description').innerText()).includes('已经开始的调用无法保证中断'));await page.locator('#study-stop-confirm').click();await waitText('#study-run-control-feedback','已按服务端回执停止本次运行');});
+  await step('Explicit bounded recovery creates linked new run',async()=>{await page.locator('[aria-label="本次运行操作"] [data-run-recover]').click();await waitText('#study-recover-description',lost.runRef.slice(0,8).toUpperCase());await page.locator('#study-recover-confirm').click();await waitText('#study-run-control-feedback','已按服务端回执创建补跑批次');assert.notEqual(new URL(page.url()).searchParams.get('runRef'),lost.runRef);await page.locator('[aria-label="本次运行操作"] [data-run-control="stop"]').click();await page.locator('#study-stop-confirm').click();await waitText('#study-run-control-feedback','已按服务端回执停止本次运行');});
+  await step('Post usage lost receipt replays once and unmark restores actual state',async()=>{
+   await button('用户评论').click();await page.locator('[data-post-usage="mark"]').first().waitFor();let dropMark=true;
+   await page.route('**/api/local/comment-study/comments/post-usage',async route=>{if(dropMark){dropMark=false;const reply=await route.fetch();assert.equal(reply.status(),200);await route.abort('failed');}else await route.continue();});
+   await page.locator('[data-post-usage="mark"]').first().click();await page.getByText(/保存未获确认/).waitFor();assert.equal(await page.locator('[data-post-usage="unmark"]').count(),0);
+   await page.locator('[data-post-usage="mark"]').first().click();await page.locator('[data-post-usage="unmark"]').first().waitFor();
+   const writes=report.writes.filter(item=>item.path.endsWith('/comments/post-usage'));assert.equal(writes.length,2);assert.equal(writes[0].body.requestRef,writes[1].body.requestRef);
+   await page.locator('[data-post-usage="unmark"]').first().click();await page.locator('[data-post-usage="unmark"]').waitFor({state:'hidden'});
+  });
+  await step('Selected comments preview uses actual comment identities and roles',async()=>{
+   const choice=page.locator('[data-select-comment][data-eligible="true"]').first();await choice.waitFor();const work=await choice.getAttribute('data-work-ref'),commentId=await choice.getAttribute('data-comment-id');await choice.check();await button('研究所选评论').click();await page.locator('#preview-run').click();await page.locator('#selection-preview').filter({hasText:'预计冻结'}).waitFor();
+   const previews=report.writes.filter(item=>item.path.endsWith('/selection-preview'));const body=previews.at(-1).body;assert.deepEqual(body.scope,{kind:'comments',commentKeys:[{workRef:work,commentExternalId:commentId}]});assert.deepEqual(body.workRoles,[{contentPublicRef:work,observationRole:'primary'}]);await page.locator('#study-dialog-close').click();
+  });
+  await Promise.all(pending);
+  const activation=report.writes.find(r=>r.path.endsWith('/activate'));assert.equal(activation.body.expectedActivePolicyRef,v['initial-active-policy-ref']);
+  const preview=report.writes.find(r=>r.path.endsWith('/selection-preview'));assert.deepEqual(preview.body.limits,{commentBudget:2,contextCharacterBudget:3500,tokenLimit:4096});
+ }else{
+  const run=v['e2e-run-ref'],problem=v['e2e-problem-ref'];
+  const response=await page.request.get(`${origin}/api/local/comment-study/targets?${new URLSearchParams({domain,runRef:run,limit:'100'})}`);assert.equal(response.status(),200);const targets=await response.json(),target=targets.targets.find(row=>row.commentKey?.commentExternalId&&row.signalCount>0);assert.ok(target);const key=target.commentKey;
+  await step('Comment deep link shows distinct raw, parent, cleaning and history',async()=>{await page.goto(`${origin}/corpus/comments?${new URLSearchParams({domain,view:'comments',commentWorkRef:key.workRef,commentExternalId:key.commentExternalId})}`);await page.getByRole('heading',{name:'父评论语境',exact:true}).waitFor();assert.ok(await page.locator('#comment-detail-body [data-history-run="'+run+'"]').count()>=3);});
+  await step('History to immutable run method and real request snapshot',async()=>{await page.locator('#comment-detail-body [data-history-panel="method"]').first().click();await page.getByRole('heading',{name:'本次方法',exact:true}).waitFor();await page.getByRole('tab',{name:'调用记录',exact:true}).click();await page.locator('[data-request-detail]').first().click();await page.getByRole('heading',{name:'本次冻结请求快照',exact:true}).waitFor();assert.ok((await page.locator('[data-comment-study-content]').innerText()).includes('SYNTHETIC / NOT EVIDENCE'));});
+  await step('Signal links actual long-lived problem definition and evidence',async()=>{await page.getByRole('tab',{name:'研究信号',exact:true}).click();await page.locator('[data-signal-problem="'+problem+'"]').first().click();await page.locator('#sr3-drawer-title').waitFor();assert.equal(new URL(page.url()).searchParams.get('problemRef'),problem);await page.locator('[data-sr3="context"]').first().click();await page.getByText('父评论只用于理解这条表达，不计为它的独立支持依据。',{exact:true}).first().waitFor();await page.locator('[data-sr3="close"]').click();assert.equal(new URL(page.url()).searchParams.has('problemRef'),false);});
+  await step('Problem cards reopen and browser history restores scope',async()=>{await page.locator('[data-sr3="open"]').first().click();await page.locator('#sr3-drawer-title').waitFor();await page.goBack();await page.locator('#sr3-drawer-title').waitFor({state:'hidden'});await page.goForward();await page.locator('#sr3-drawer-title').waitFor();await page.locator('[data-sr3="close"]').click();});
+  await step('Deferred clues verify fresh source before showing comparisons',async()=>{await page.getByRole('button',{name:'未归并线索',exact:true}).click();await page.locator('[data-sr3-select="candidate"]').selectOption('deferred_novel');await page.locator('[data-sr3="clue"]').first().click();await page.getByRole('heading',{name:'当前候选比较记录',exact:true}).waitFor();await page.locator('[data-sr3="run"]').click();await page.getByRole('heading',{name:'研究结果',exact:true}).waitFor();await page.goBack();await page.locator('[data-sr3="clue"]').first().waitFor();});
+  await step('Four view navigation keeps domain and overview stays read-only',async()=>{await button('概览').click();await page.getByRole('heading',{name:'近期获得新依据的问题',exact:true}).waitFor();await page.locator('[data-series-days="7"]').click();await page.locator('[data-series-view="table"]').click();assert.equal(new URL(page.url()).searchParams.get('domain'),domain);});
+  await step('Responsive dialogs retain reachable close controls without page overflow',async()=>{
+   for(const [width,dpr] of [[1440,1],[1024,1],[390,1],[720,2]]){
+    const scoped=await browser.newContext({viewport:{width,height:1000},deviceScaleFactor:dpr,reducedMotion:'reduce'});await scoped.route('**/*',networkGuard);const check=await scoped.newPage();check.on('pageerror',e=>report.errors.push(e.message));
+    try{await check.goto(`${origin}/corpus/comments?${new URLSearchParams({domain,view:'overview'})}`);await check.locator('#study-problem-title').waitFor();await check.locator('#open-study-dialog').click();await check.locator('#work-filter-status').waitFor();
+     const geometry=await check.evaluate(()=>{const r=document.querySelector('#study-dialog-close').getBoundingClientRect();return {x:r.x,y:r.y,right:r.right,bottom:r.bottom,width:innerWidth,height:innerHeight,documentWidth:document.documentElement.scrollWidth};});
+     assert.ok(geometry.x>=0&&geometry.y>=0&&geometry.right<=geometry.width&&geometry.bottom<=geometry.height,JSON.stringify(geometry));assert.ok(geometry.documentWidth<=geometry.width,JSON.stringify(geometry));await check.screenshot({path:path.join(root,`viewport-${width}-${dpr}x.png`),fullPage:true});await check.locator('#study-dialog-close').click();assert.equal(await check.locator('#study-dialog').isVisible(),false);
+    }finally{await scoped.close();}
+   }
+  });
+  assert.deepEqual(report.writes,[]);
+ }
+ assert.deepEqual(report.errors,[]);assert.deepEqual(report.blocked,[]);
+ report.status='PASS';
+}catch(error){report.status='FAIL';report.failure=error.message;throw error;}finally{await Promise.allSettled(pending);await fs.writeFile(path.join(root,'report.json'),JSON.stringify(report,null,2));await browser.close();}
+console.log(`D3 ${mode}: ${report.steps.length} real browser scenarios passed`);

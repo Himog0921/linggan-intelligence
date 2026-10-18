@@ -4,7 +4,7 @@ use super::LocalWebState;
 use axum::{
     Json, Router,
     extract::{Query, State, rejection::QueryRejection},
-    http::{StatusCode, header},
+    http::StatusCode,
     response::{IntoResponse, Response},
     routing::get,
 };
@@ -95,24 +95,7 @@ impl CardsQuery {
 }
 
 pub(super) fn routes() -> Router<LocalWebState> {
-    Router::new()
-        .route("/assets/comment-study-results.css", get(styles))
-        .route("/assets/comment-study-results.js", get(script))
-        .route("/api/local/comment-study/problem-cards", get(cards))
-}
-
-async fn styles() -> impl IntoResponse {
-    (
-        [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
-        include_str!("comment_study_results.css"),
-    )
-}
-
-async fn script() -> impl IntoResponse {
-    (
-        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-        include_str!("comment_study_results.js"),
-    )
+    Router::new().route("/api/local/comment-study/problem-cards", get(cards))
 }
 
 async fn cards(

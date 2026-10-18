@@ -90,6 +90,7 @@ run_proof() {
   env \
     LOCAL_001_PROOF_DATABASE_URL="postgresql://${proof_user}:${proof_password}@127.0.0.1:${proof_port}/${proof_database}" \
     WEB_APP_BROWSER_PROOF=1 \
+    P1_BROWSER_PROOF=1 \
     WEB_APP_PROOF_DIR="$evidence_dir" \
     WEB_APP_PROOF_NODE="$node_bin" \
     LINGGAN_WEB_DIST="$project_root/apps/web/dist" \
@@ -105,6 +106,13 @@ run_proof() {
 if [[ "${WEB_APP_PROOF_SCOPE:-all}" == topics ]]; then
   mkdir -p "$proof_dir/topics"
   run_proof "$proof_dir/topics" cargo test -p linggan-api --bins --locked local_web::topic_browser_tests -- --ignored --nocapture --test-threads=1
+  exit 0
+fi
+if [[ "${WEB_APP_PROOF_SCOPE:-all}" == comments ]]; then
+  mkdir -p "$proof_dir/comments"
+  run_proof "$proof_dir/comments" cargo test -p linggan-api --bins --locked \
+    local_web::comment_study::catalog_api::command_api::postgres_tests::browser_real_axum_postgres_ \
+    -- --ignored --nocapture --test-threads=1
   exit 0
 fi
 [[ "${WEB_APP_PROOF_SCOPE:-all}" == all ]] || { echo 'Unknown proof scope' >&2; exit 1; }
@@ -153,3 +161,10 @@ run_proof "$proof_dir/topics" \
   local_web::topic_browser_tests \
   -- --ignored --nocapture --test-threads=1
 printf '%s\n' 'WEB-REACT-001 F Topics and Workspace real-chain proof passed (isolated database only)'
+
+# D3: immutable methods, preview/start replay, CAS stop/recovery and positive comment→run→problem flow.
+mkdir -p "$proof_dir/comments"
+run_proof "$proof_dir/comments" cargo test -p linggan-api --bins --locked \
+  local_web::comment_study::catalog_api::command_api::postgres_tests::browser_real_axum_postgres_ \
+  -- --ignored --nocapture --test-threads=1
+printf '%s\n' 'WEB-REACT-001 D3 comments four-view real-chain proof passed (isolated database; no provider)'

@@ -64,6 +64,9 @@ jobs:
           path: /tmp/comment-study-source.zip
           retention-days: 1
           if-no-files-found: error
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
       - name: Install stable Rust tools
         run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
       - name: Compile the exact candidate
@@ -78,5 +81,5 @@ jobs:
         env:
           P1_BROWSER_PROOF: '1'
         run: bash scripts/test-comment-study-productization-postgres.sh
-      - name: Frontend behavior tests when present
-        run: python3 scripts/test-comment-study-productization-ui.py
+      - name: React behavior tests
+        run: npm --prefix apps/web test -- src/pages/corpus/comments

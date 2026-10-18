@@ -3,11 +3,15 @@
 PR #407 合并前修正（2026-10-13）：运营页焦点/强调线与新增共享页头 padding 改为现有间距 Token 的等值表达，保持 Mog 已确认的外观、断点和导航尺寸。未新增共享 Token 或扩大页面/权限范围。范围及验证见 [D2 验收记录](../acceptance/ops-page-001-visual-acceptance.md)。
 
 > 状态: 权威当前
-> 最后核对: 2026-10-16
+> 最后核对: 2026-10-18
 > 适用范围: Linggan Intelligence LIDS Token、Primitive、Component、Pattern、Page、Motion、Scene 和 Data Truth 规则的实际变更、替代、例外与验证边界
 > 事实来源: [system.md](system.md)、[README.md](README.md)、DESIGN-002 Issue #7、项目 progress 记录和实际验证输出
 > 冲突时以谁为准: 真实代码/合同/测试、用户最新确认、当前 SCOPE 和 ACCEPTED 决策；本日志不把计划写成已实现事实
 
+
+## 2026-10-18 · WEB-REACT-001 D3 评论研究四视图
+
+保留正式3000的A无边框概览和现有全部表面；JSX与CSS Modules替代旧原生renderer，复用唯一AppShell/shell.css/LIDS，不改Token。两份原CSS同名类保持有效层叠；旧未定义token按实际computed fallback保留，尺寸改为既有Token等值calc，不借迁移修视觉债。原声/问题来源受限、未知与0、未确认命令/显式重试仍分开。实际六宽度与完整滚动对照、隔离PG/浏览器回执及未部署边界见 [D3验收](../acceptance/web-react-001-d3-acceptance.md)。F已于#441部署的当前补记见其验收记录；本日志旧“未部署”仍为历史候选时点。
 
 ## 2026-10-17 · WEB-REACT-001 F：Mog选定B材料优先概览
 

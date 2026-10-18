@@ -1,10 +1,16 @@
 # ACC-WEB-REACT-001-D2 · 证据库验收记录
 
 > 状态: 一次性报告
-> 最后核对: 2026-10-16
+> 最后核对: 2026-10-18
 > 适用范围: WEB-REACT-001 阶段 D2：`/corpus/evidence` 迁到 React（含观察记录、研究底稿、媒体）、证据库四条接口补本机来源闸门、旧证据库页实现的删除
 > 事实来源: 实施工作树 `.worktrees/web-react-001-d2`（分支 `feat/web-react-001-d2`，分支点 `main@baaf5a51`，已并入 `main@82d48a72`；协调方复核后提交推送，以 Draft PR 呈交）；`npm --prefix apps/web run verify`；`cargo test -p linggan-api --bins --locked`；`scripts/test-web-app-postgres.sh` 与 `scripts/test-collection-single-run-postgres.sh`（浏览器模式）在一次性隔离 PostgreSQL 上的真实浏览器证明；[阶段 D 分册](../../plans/active/web-react-001-d-corpus.md) §4 能力清单与裁定
 > 冲突时以谁为准: 真实运行/代码/合同、Mog 最新确认、DEC-0010 与 [WEB-REACT-001](../../plans/active/web-react-001.md)；截图与自动检查不单独证明业务结果
+
+## 2026-10-18 当前状态补记
+
+D2 已随 [PR #443](https://github.com/Himog0921/linggan-intelligence/pull/443) 合入 `24e3ec23ea154f65e738444a73e5d5cdb2710594`，已包含在正式 3000 的 `acdfbb87` 中；下文“Draft／未合并／未部署”保留为当时的历史回执，不再代表当前状态。原候选的 749 项前端测试和隔离链路证据仍按原版本引用；Mog 业务验收独立保留。
+
+当前 `origin/main` 与正式本机 3000 均为 `acdfbb876bf3fcb5cb4aaf20ceea565562f0b428`（PR #441）。本次同步依据 GitHub 合并记录、运行进程及 `/health.webApp`，不把历史候选证明改写成新版本重跑结果。
 
 ## 1. 验收对象
 

@@ -11,7 +11,7 @@ interface DomainPickerProps {
 }
 
 /**
- * 面包屑里的领域选择器（照搬 shell.rs 的 `render_domain_picker`，语料侧）。
+ * 面包屑里的领域选择器（D3 迁移后唯一的语料侧领域菜单）。
  *
  * 领域是当前观察对象，不是页面内的筛选项，所以用 disclosure + 链接而不是原生 select：菜单的打开态、
  * 焦点和当前项由 LIDS 接管（样式来自 shell.css 的 `.v7-domain-picker*`）。只有一个领域且已选中，

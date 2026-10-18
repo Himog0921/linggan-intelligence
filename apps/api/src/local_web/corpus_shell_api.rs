@@ -1,7 +1,7 @@
 //! 语料二级页面共享的只读外壳接口（WEB-REACT-001 阶段 D1）。
 //!
 //! 页头面包屑里的领域选择器，以及一级导航「采集」项的状态词，此前由各旧页面在服务器端拼进
-//! HTML（`corpus_domain_picker`、证据库页里的 `count_targets`）。页面迁到 React 之后，这两件事实
+//! HTML。语料三页统一迁到 React 之后，这两件事实
 //! 由本接口给出：用哪个领域、采集有没有观察目标都以服务器为准，前端不重算。
 //!
 //! 只读，不触发采集、模型或任何写入；与其他本机接口使用同一道来源校验和 no-store。
@@ -71,7 +71,7 @@ fn collection_state_word<E>(counts: Result<TargetCounts, E>) -> &'static str {
     }
 }
 
-/// 领域选择器用到的字段：与旧 `render_domain_picker` 读取的完全相同（名称、暂停与否、目标数、作品数）。
+/// 领域选择器用到的字段：沿用已确认的字段口径（名称、暂停与否、目标数、作品数）。
 fn shell_json(
     domains: &[ObservationDomain],
     requested_domain: Option<&str>,

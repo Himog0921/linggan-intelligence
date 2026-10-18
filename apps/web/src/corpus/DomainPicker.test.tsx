@@ -20,7 +20,7 @@ function renderPicker(list: ShellDomain[], selected: string | null) {
   );
 }
 
-describe('领域选择器（照搬 render_domain_picker 的规则）', () => {
+describe('领域选择器（既有领域状态与数量规则）', () => {
   it('一个领域也没有，或只有一个且已选中时整个控件不渲染', () => {
     const { container, unmount } = renderPicker([], null);
     expect(container).toBeEmptyDOMElement();

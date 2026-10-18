@@ -14,6 +14,7 @@ on:
       - 'apps/api/src/local_web/station_view.rs'
       - 'apps/api/src/local_web/target_drawer.rs'
       - 'apps/api/src/local_web/corpus_shell_api.rs'
+      - 'apps/api/src/local_web/comment_study*'
       - 'apps/api/src/local_web/creators*.rs'
       - 'apps/api/src/local_web/evidence*.rs'
       - 'apps/api/src/local_web/research_dossier*.rs'
