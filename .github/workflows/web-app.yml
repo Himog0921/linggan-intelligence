@@ -44,6 +44,9 @@ on:
       - 'crates/intelligence/src/ops_ledger/read/creation_read.rs'
       - 'Cargo.lock'
       - 'crates/intelligence/Cargo.toml'
+      - 'crates/intelligence/src/comment_study_run/**'
+      - 'crates/intelligence/tests/comment_study_start_postgres.rs'
+      - 'scripts/test-comment-study-productization-postgres.sh'
       - 'crates/intelligence/src/content_workbench*'
       - 'crates/intelligence/src/content_workbench/**'
       - 'crates/intelligence/tests/content_workbench*'
@@ -127,6 +130,8 @@ jobs:
             apps/api/src/local_web/topic_workspace_tests.rs apps/api/src/local_web/topic_browser_tests.rs \
             apps/api/src/local_web/evidence_browser_tests.rs apps/api/src/local_web/evidence_fixture.rs apps/api/src/local_web/evidence_seed.rs \
             apps/api/src/local_web/evidence_api_proof_tests.rs apps/api/src/local_web/evidence_guard_tests.rs
+      - name: Comment study transaction and lifecycle regression (synthetic PostgreSQL)
+        run: bash scripts/test-comment-study-productization-postgres.sh
       - name: Content workbench PostgreSQL contracts
         run: |
           cargo test -p linggan-intelligence --lib exact_spans_keep_overlaps_codepoints_and_long_repeated_patterns --locked

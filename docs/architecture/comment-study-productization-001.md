@@ -161,7 +161,7 @@ JS 采用原生 ES modules：`comment_study.js` 为入口；只拆 `comment_stud
 
 ### 外部技术依据，仅用于验证数据库机制
 
-- PostgreSQL 16 事务隔离文档：本包用 READ COMMITTED + 事务级锁 + 单条冻结查询，避免把锁等待误当新快照。https://www.postgresql.org/docs/16/transaction-iso.html
+- PostgreSQL 16 事务隔离文档：原设计使用READ COMMITTED与事务锁；研究底稿多次读取接入后的当前实现为先取同键会话锁、再开始SERIALIZABLE稳定冻结事务，2026-10-18 PR #445修复等锁旧快照。当前合同见[HTTP §5](../data-contracts/comment-study-http-001.md#5-启动事务与并发)，原单条查询方案不再作为实施依据。https://www.postgresql.org/docs/16/transaction-iso.html
 - PostgreSQL 16 锁文档：事务级 advisory lock 的释放、行锁与死锁要求。https://www.postgresql.org/docs/16/explicit-locking.html
 - PostgreSQL 16 部分索引：用于当前在途评论的唯一性约束。https://www.postgresql.org/docs/16/indexes-partial.html
 - PostgreSQL 16 pg_trgm：用于字面子串检索索引；短模式可能无法有效使用 trigram，不据此宣称中文语义检索。https://www.postgresql.org/docs/16/pgtrgm.html

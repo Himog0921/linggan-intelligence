@@ -11,7 +11,8 @@ use crate::comment_study_selection::{
 use linggan_storage_postgres::Database;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use sqlx::{Postgres, Row, Transaction};
+use sqlx::postgres::{PgAdvisoryLock, PgAdvisoryLockKey};
+use sqlx::{Connection, Postgres, Row, Transaction};
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 use uuid::Uuid;
@@ -809,13 +810,25 @@ async fn start_once(
     hash: &str,
     source_run_ref: Option<Uuid>,
 ) -> Result<StudyStartReceipt, StudyStartError> {
-    let mut tx = begin(database).await?;
-    // Dossier and comment cursor must see one snapshot. The existing bounded
-    // serialization retry also refreshes a snapshot taken while waiting on the lock.
+    // Acquire the domain lock before beginning the stable snapshot: waiting for
+    // an xact lock inside SERIALIZABLE can retain a pre-wait snapshot without SSI
+    // ever forcing a retry. Session and xact locks share the same key space.
+    let mut connection = database.pool().acquire().await?;
+    // This session changes lock_timeout and may be cancelled during acquisition.
+    // Never return it to the pool with session settings or a held lock.
+    connection.close_on_drop();
+    sqlx::query("SET lock_timeout='3s'")
+        .execute(&mut *connection)
+        .await?;
+    let lock = PgAdvisoryLock::with_key(PgAdvisoryLockKey::BigInt(study_domain_lock_key(
+        command.domain_ref,
+    )?));
+    let mut guard = lock.acquire(connection).await?;
+    let mut tx = guard.begin().await?;
     sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-        .execute(&mut *tx).await?;
-    sqlx::query("SELECT pg_advisory_xact_lock($1)")
-        .bind(study_domain_lock_key(command.domain_ref)?)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("SET LOCAL statement_timeout='15s'")
         .execute(&mut *tx)
         .await?;
     ensure_start_schema(&mut tx).await?;
