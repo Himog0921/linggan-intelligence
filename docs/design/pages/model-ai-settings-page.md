@@ -13,7 +13,7 @@
 ## 实现与组合
 
 - 由 `apps/web` 的 React 应用提供（DEC-0010）。服务器只为 `/settings/models` 返回前端入口，`/settings` 由服务器跳转到这里；读写仍走 `/api/local/model-settings*`。
-- 外壳为 React `AppShell`，与旧页面的 `shell.rs` 结构一致，样式来自同一份 `shell.css`；页面样式只消费 `--lgi-*` Token。
+- 外壳为 React `AppShell`，与旧页面的 `AppShell.tsx` 结构一致，样式来自同一份 `shell.css`；页面样式只消费 `--lgi-*` Token。
 - 分区顺序固定：供应商连接 → 研究模型与调用上限 → 后台执行器与调用记录。
 - 页头之下的内容区自己滚动，内容再长也能看到底部的调用记录。
 

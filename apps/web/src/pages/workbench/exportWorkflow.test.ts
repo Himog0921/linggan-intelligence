@@ -10,7 +10,7 @@ const frozenRevision = ():Revision => ({id:crypto.randomUUID(),number:3,savedAt:
   pages:[{id:crypto.randomUUID(),kind:'cover',templateVersion:'creation-v1',title:'冻结封面',subtitle:'',blocks:[],assetId:null,crop:{x:0,y:0,width:1,height:1},style:{palette:'cream',fontFamily:'system-cjk',width:1080,height:1440,alignment:'start'}}]}});
 function setup(){
   const revision=frozenRevision();
-  const record:ExportRecord={id:crypto.randomUUID(),workId:crypto.randomUUID(),revisionId:revision.id,state:'rendering',failureCode:null,rendererVersion:'creation-renderer.v1',fontVersion:FONT_PROFILE,
+  const record:ExportRecord={id:crypto.randomUUID(),workId:crypto.randomUUID(),revisionId:revision.id,state:'rendering',failureCode:null,rendererVersion:'creation-renderer.v3',fontVersion:FONT_PROFILE,
     pages:revision.document.pages.map((page,index)=>({pageId:page.id,ordinal:index+1,sha256:null,byteSize:null})),packageSha256:null,packageByteSize:null};
   const complete={...record,state:'complete',packageSha256:'hash',packageByteSize:100};
   const transport:ExportTransport={freeze:vi.fn().mockResolvedValue({export:record,revision}),upload:vi.fn().mockResolvedValue(record),finalize:vi.fn().mockResolvedValue(complete),retry:vi.fn().mockResolvedValue({export:record,revision}),fail:vi.fn().mockResolvedValue({...record,state:'failed'}),lookup:vi.fn().mockResolvedValue(null),read:vi.fn().mockResolvedValue(record)};
@@ -105,5 +105,16 @@ describe('immutable export workflow',()=>{
     await s.workflow.start(s.record.workId,async()=>s.revision,undefined,second.id);
     expect(s.render).toHaveBeenCalledTimes(1);expect(s.render.mock.calls[0]?.[0].id).toBe(second.id);
     expect(s.transport.finalize).not.toHaveBeenCalled();
+  });
+});
+
+describe('renderer version isolation',()=>{
+  it('freezes new exports with renderer.v3 and refuses to repaint incomplete v1 exports',async()=>{
+    const s=setup();await s.workflow.start(s.record.workId,async()=>s.revision);
+    expect(s.transport.freeze).toHaveBeenCalledWith(s.record.workId,expect.objectContaining({rendererVersion:'creation-renderer.v3'}));
+    const old=setup();old.record.rendererVersion='creation-renderer.v1';
+    await expect(old.workflow.resume(old.record)).rejects.toThrow('请生成新版图文包');
+    expect(old.render).not.toHaveBeenCalled();expect(old.transport.upload).not.toHaveBeenCalled();expect(old.transport.retry).not.toHaveBeenCalled();
+    old.complete.rendererVersion='creation-renderer.v1';expect(await old.workflow.resume(old.complete)).toBe(old.complete);
   });
 });

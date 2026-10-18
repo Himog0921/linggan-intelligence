@@ -6,6 +6,10 @@
 > 事实来源: 手册 v1.1、当前 TopicMap DTO、0120 migration、Rust HTTP composition 与定向验证
 > 冲突时以谁为准: 用户最新确认、当前代码和来源资格；本合同不授权运行库迁移/外发
 
+## WEB-REACT-001 全站收尾：工作区成员详情
+
+`GET /api/local/topic-workspaces/{canonical_key}/materials/{work_ref}` 只读当前冻结材料包中的精确成员，返回与该包 `workResource` 相同的当前Work Resource JSON。未找到工作区或成员返回404；成员当前不可读按既有资源读取合同返回409/503。它不把旧domainKey推断成ObservationDomain UUID，不使用domain=all绕过普通资源守门；普通`/api/local/work-resources/{ref}`仍要求显式领域。Workspace composition的detailUrl改为此链接，解码器严格校验canonicalKey和WorkRef；RunKind/lifecycleState由服务器原样提供，机器候选不再标成人工。
+
 ## WEB-REACT-001-F 页面载体迁移候选
 
 `/topics` 与 `/topics/{canonical_key}` 改为同一 React Root 的懒加载路由；Axum 保留原 API/命令、同源 guard 和资源资格。新增只读 `GET /api/local/topic-map/context` 返回 `{defaultDomainRef: UUID|null, domains: [{domainRef,name,status,targetCount,sampleCount}]}`，复用旧 HTML 的领域事实及 `ORDER BY name LIMIT 1` 默认规则；失败为真实 503，不伪造空列表。显式 URL/会话优先、统计与分批材料口径不变。

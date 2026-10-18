@@ -14,12 +14,12 @@ JSON 统一 camelCase、UUID 稳定身份；范围为 Unicode scalar / code-poin
 
 ## 文档与修订
 
-`WorkDocument` contract 为 `content-workbench.v1`，含 title/tags/accountRef/topicRef/angle/outline/paragraphs/excerpts/canvas/pages/uses。具体 Rust 类型唯一放 `content_workbench/types.rs`，对外所有写入 deny_unknown_fields 并验证类型、长度、数量、UUID唯一、引用完整及资产所属作品。文档 JSON 是有闭集类型的不可变修订，不是任意 JSON 兼容层。
+`WorkDocument` contract 为 `content-workbench.v1`，含 title/tags/accountRef/topicRef/angle/outline/paragraphs/excerpts/canvas/pages/uses/materials/materialPreparation。具体 Rust 类型唯一放 `content_workbench/types.rs`，对外所有写入 deny_unknown_fields 并验证类型、长度、数量、UUID唯一、引用完整及资产所属作品。文档 JSON 是有闭集类型的不可变修订，不是任意 JSON 兼容层。
 
 - paragraphs：id/text；作者分段保留身份，无法可靠还原定位的关联进入 needs_review。
 - excerpts：id/citation/selectedText/textHash；source 原文与自己的表达分开。
 - canvas：id/excerptId/group/note/expression/expressionRevision；group 限 inbox/opening/argument/example/ending。
-- pages：id/kind(cover/opinion/voice/steps)/templateVersion/title/subtitle/blocks{id,text}/assetId/crop/style。宽1080高1440；crop归一化且finite，模板版本 creation-v1 / creation-v1-editorial，palette cream/sage/ink；alignment start/center/end。自有图 PNG/JPEG/WebP 解码验真，禁止任意远程URL和SVG。
+- pages：id/kind(cover/opinion/voice/steps)/templateVersion/title/subtitle/blocks{id,text}/assetId/crop/style。宽1080高1440；crop归一化且finite，V3 模板版本 creation-v3-type（留白大字）/ creation-v3-split（双色分栏）/ creation-v3-list（清单笔记）；creation-v1 / creation-v1-editorial 保留旧版原始绘图含义，palette cream/sage/ink；alignment start/center/end。自有图 PNG/JPEG/WebP 解码验真，禁止任意远程URL和SVG。
 - uses：id/canvasId/expressionRevision/excerptId/target/placedTextHash/contentOrigin/state/sourceSpan；target 闭集为标题、角度、提纲项、标签项、画布笔记、画布表达、正文段落、图页标题、副题或文字块；提纲与标签按 index，画布、段落和图页按稳定 UUID 定位。sourceSpan 固定实际使用原文在目标中的 Unicode scalar 范围和 hash；state current/modified/needs_review 由服务端核定。contentOrigin(excerpt/expression) 由服务端核定，原文与自主表达不混同。手工文字不会被后续表达或模型自动覆盖。
 
 服务器保存为权威。React 客户端串行保存、内存中的未确认编辑与中文输入法 composition 保护；含原声的查询或文档不落 localStorage/IndexedDB/sessionStorage。持久恢复以服务器版本与回执为准；未发送编辑恢复策略在阶段 C 明确，不能沿用原生整篇浏览器快照。409 保留双方供选择。expectedRevision 使用 revision UUID；同 requestId+同命令重播返回原回执，异命令409。一次放入正文和内页同事务；重复目标不重复追加。恢复历史追加新修订。保存不触发模型/采集。
@@ -34,6 +34,20 @@ Citation 为 sourceKind(note/comment/ocr/ops_publication)、sourceRef、workRef�
 
 目录分页先限定每页最多30个来源对象；totalBasis=source_directory，returnedSourceCount/returnedFragmentCount 区分来源与片段。searchScope 如实标明原生标题正文历史目录、当前匿名评论或我方导出内容范围；不把它称为全库语义检索。
 
+## 本篇阅读材料集合（V3 重新落地候选）
+
+`materials` 与摘录、画布独立：保存 documentId/sourceKind/sourceRef/workRef/sourceVersion/addedBy/matchReasons，原文由现有来源所有者每次重读，不把整篇正文复制进作品 JSON。`materialPreparation` 保存 methodVersion/query/terms/state/gaps。进入研读会准备尚未准备的选题；作者可修改检索词重新准备，异步返回基于最新文档合并，保留手工加入材料。准备不调用模型、不生成摘录，移除阅读材料不删除已建立的引用。
+
+本轮 `workbench.lexical-context.v1` 是可见字词规则检索：对作业启动标题/角度/提纲识别场景与问题词，原笔记需同篇当前原文中“作业”与启动问题在邻近范围共同出现；评论需来自匹配父笔记且自身表达具体相关问题。每个检索词从原生标题/正文目录读取最多 30 个候选，笔记去重最多 120，再批量读取当前完整 dossier 核对；默认最多 12 篇笔记与 12 条原声。数量不足显式返回不足，不能用全域最新内容填满。此规则不等于通用语义检索或每日自动生成十个选题；topicRef 保留关联，不据此声称进行主题语义扩展。OCR 可随整篇读出，但未宣称全库 OCR 检索召回。
+
+准备先按当前标题/场景匹配固定最多 12 篇父笔记，再只从这些父篇读取评论候选；每父篇以轮转顺序共享 120 条有界窗口，最终最多 12 条原声保留父篇轮转顺序。未入选的第 13 篇及其大量评论不能挤占本篇父材料的评论窗口。已选合格笔记与相关原声均存在时，正常候选截断不单独造成 insufficient；实际缺少笔记或原声时仍标不足。该公平窗口仍是库内有界选择，ready 不代表平台总体或全面召回。
+
+`materialPreparation.query/terms/gaps` 及历史 `materials.matchReasons` 同样受已知 Citation 的来源限制约束：完整已知引文从标题/画布移入这些字段时仍保留引用身份；受限后不得新增复制，每次作品读取、历史和请求回执重播均精确遮断引文，并保留正常检索词、说明和周边作者文字。元数据删节使用不增长字段长度的单字省略号；删节后不足两字的单个检索词移出 terms，其余正常词与说明保留，500/40/200 字限制仍按原规则校验，不为客户端占位符提供豁免。元数据不成为正文/图页放置关系；保存的新材料理由由服务端规范化，读取理由只按当前合格原文重新计算。
+
+手工搜索支持 `query/kind/cursor`；kind 在分页前筛选，整篇页长 24。候选范围有界，前端说明搜索范围和不足；不把有界候选数量写成全库总量。选择结果先预览、再加入本篇，之后选片段进入画布。笔记包括完整标题/正文/现有 OCR；评论包括完整原声与其自身父语境，不拼接其他笔记作依据。
+
+完整阅读文档版本与精准引用版本分开。评论整篇版本包含评论版本、父笔记 revision、父评论状态及正文 hash；父语境变化使阅读材料标为 changed，需要核对后采用当前版本。精确 Citation 仍由实际引用片段的原版本和范围确定。受限/失效材料遮断原文，保留身份与解释；重新采用须经相同来源资格检查。
+
 ## HTTP 组合
 
 路径统一 `/ops/api/creation`；guard 沿现有 local/same-origin，所有写命令有限大小且无秘密回显。
@@ -42,7 +56,7 @@ Citation 为 sourceKind(note/comment/ocr/ops_publication)、sourceRef、workRef�
 - GET `/works/{id}/revisions`；POST `/works/{id}/restore` `{requestId,expectedRevision,restoreRevision}`；POST `/works/{id}/place` `{requestId,expectedRevision,canvasId,targets}`。
 - work envelope：workId/domainRef/savedBy/revision{id,number,savedAt,document}/exports；receipt 含 requestId/outcome/replayed/revision。stale/conflict 使用409，无假成功。
 - POST `/works/{id}/assets` raw 图片和 request ID；GET 注册资产路径。资产只允许作品owner生成storage key，不接受路径。
-- GET `/sources`；GET `/sources/{kind}/{ref}`；POST `/sources/validate`。query/返回 DTO 由sources模块统一，前端不得猜字段。
+- GET `/sources`；GET `/sources/{kind}/{ref}`；POST `/sources/validate`。GET `/sources/documents`、GET `/sources/document`、POST `/sources/prepare` 和 POST `/sources/resolve` 为只读材料集合接口；query/返回 DTO 由 sources 模块统一，前端不得猜字段。
 - AI readiness/preview/explicit request/status/cancel 独立路由；suggestion 只读，不自动采用。采用作为新作品修订，校验底稿、目标和建议版本，并记录 adopted linkage。
 - POST `/works/{id}/exports` 冻结expectedRevision；PUT `/exports/{exportId}/pages/{pageId}`上传实际PNG；POST `/exports/{id}/finalize`；GET状态、download及单页。所有资产/导出路径均由服务端固定。
 
@@ -54,7 +68,7 @@ Citation 为 sourceKind(note/comment/ocr/ops_publication)、sourceRef、workRef�
 
 ## 导出
 
-冻结已保存修订、账号、模板/渲染器/字体配置及资产hash；同一正式 renderer 产生预览和导出。字体/图片就绪后测量排版，溢出给出解决入口并阻止完整导出。正式 React 绘图按需加载仓库内的 NotoSansSC WOFF2，fontVersion 固定文件 SHA256，来源和 OFL 许可见生成物登记。后端冻结此标识，但不把客户端声明当成服务端绘制证明。
+冻结已保存修订、账号、模板/渲染器/字体配置及资产hash；同一正式 renderer 产生预览和导出。当前绘图版本为 creation-renderer.v3，按模板版本分派；旧模板仍按其原始算法绘制。已完成旧导出始终下载原文件，未完成导出若 renderer/font 与当前实现不一致，在任何续绘和重试变更前要求生成新版，不以 V3 重绘冒充旧版本。字体/图片就绪后测量排版，溢出给出解决入口并阻止完整导出。正式 React 绘图按需加载仓库内的 NotoSansSC WOFF2，fontVersion 固定文件 SHA256，来源和 OFL 许可见生成物登记。后端冻结此标识，但不把客户端声明当成服务端绘制证明。
 
 每张PNG须完整解码、CRC及1080×1440核对，页ID必须属于冻结清单；成功文件不可覆盖。数量/顺序/尺寸/sha256与冻结manifest一致才产出ZIP。ZIP用维护中的库，默认只包含正文.txt（含作者确认的 tags）、01-封面.png 与有序内页 PNG，不含内部原声/出处/模型数据。内部manifest独立保存。原子写文件后登记数据库，失败不会生成可下载完整包；重复finalize/download返回同一成功成品。后续编辑提示有新版，旧导出不可变。
 
@@ -68,7 +82,7 @@ Citation 为 sourceKind(note/comment/ocr/ops_publication)、sourceRef、workRef�
 
 ## WEB-REACT-001 阶段 C 候选接入
 
-基线为已合并的 main@0a90fd4a。以下实现位于阶段 C 专属工作树，尚未合并或部署：
+基线为已合并的 main@0a90fd4a。以下六项阶段 C 基础能力已随 PR #432 合并；本轮 V3 重新落地以 main@36f3fdf9 为基线。新增 V3 界面与阅读集合仍在独立候选中，等待 Mog 验收后再合并部署：
 
 1. 唯一 `shared/api.ts` 支持同源 JSON 与 raw POST/PUT 图片、JSON 内容类型、闭集 DTO、409 保存回执；不自动重试。
 2. 前端 pages.ts / Router 与 Axum REACT_PAGES 同时登记 `/ops/creation`；React.lazy 隔离工作台包，旧运营页继续按原路由提供。没有原生工作台或新旧切换开关。
@@ -88,3 +102,7 @@ AI 采用从冻结 Citation 建立摘录、画布和实际目标的使用关系�
 一键入口为 `scripts/test-content-workbench-postgres.sh`（隔离 PostgreSQL 合同）和同脚本 `--browser`（真实 Axum + 正式 React + 合成资料 + 实际成品）。两者接入 Web CI；浏览器 Rust 夹具使用 multi_thread，禁止真实凭据和真实模型出站。真实选题、模型质量与 Mog 审美验收仍需单独记录，测试通过不等于上线完成。
 
 最新通过数量与证据以阶段 C 验收记录为准；上文 2026-10-15 首轮历史结果不覆盖后续修复。候选仍须独立审核及最终主线迁移编号核对。
+
+## WEB-REACT-001 收尾：导出可读元数据
+
+导出记录新增可选createdAt，来自已有export.created_at实际时间，旧不可变回执缺失时保持未记录，不重写历史包/回执或生成新时间。UI按生成时间、页数和当前已保存版本/历史冻结版本区分，完整技术版本号放详情；作品修改后顶部明确当前版本尚未导出。资产、冻结快照、PNG/ZIP及来源资格合同不变，无schema迁移。

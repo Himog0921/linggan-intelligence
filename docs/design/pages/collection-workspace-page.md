@@ -52,7 +52,7 @@
 
 ## 4. 已批准的设计组合
 
-- 全局页头由 `apps/api/src/local_web/shell.rs` 统一生成，Corpus 与 Collection 共用同一实现；`shell.css` 承载页头、上下文行与 216px 导轨，两页共用。
+- 全局页头由 `apps/web/src/app/AppShell.tsx` 统一生成，Corpus 与 Collection 共用同一实现；`shell.css` 承载页头、上下文行与 216px 导轨，两页共用。
 - 页面局部样式在 `collection_workspace.css`；生命周期与抽屉增量隔离在 `target_drawer.css`，只消费 `--lgi-*`，不写字面色值。趋势图允许唯一的 SVG 面积渐变：现有 `signal-soft → canvas` 只辅助读取同一条 Ink 中位线，不能承载第二指标、时间方向、状态或营销装饰；分布图不输出渐变。review remediation 在唯一 Token 真源新增共享 `--lgi-focus`，由主题文档级交互元素 selector 统一提供 2px/2px focus；它同时覆盖 `.v7-app` 与作为 sibling 的固定 drawer，不使用 `!important`。后加载页面仍保留局部 focus 声明；已验证表面的 computed focus 正确，Mog 接受该声明为本包外技术债，原 reviewer FAIL 不改写为 PASS。
 - 深色实时观察流及其专用 token 为原生产流历史设计；该独立表面随 COLLECTION-JTBD-001 移除，本包不清理共享 token。
 - 目标工作区由服务端和 URL 状态渲染；“作品”Tab 是目标范围内已接纳记录的可核验表，支持标题或作品 ID 筛选，不用主表数字拼装空表。

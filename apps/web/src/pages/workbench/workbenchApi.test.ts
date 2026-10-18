@@ -123,3 +123,29 @@ describe('human failure copy preserves diagnostics', () => {
     expect(aiStateText('future_state')).toBe('结果暂未确认，请刷新查看');
   });
 });
+
+describe('bounded collection requests', () => {
+  const collection = {contract:'content-workbench-materials.v1',asOf:'now',methodVersion:'workbench.lexical-context.v1',query:'作业启动',terms:['作业','启动'],state:'insufficient',gaps:['暂无评论'],documents:[],nextCursor:null,searchScope:'local_only'};
+  it('prepares from explicit intent without issuing save, collection or model commands', async () => {
+    const {prepareMaterials} = await import('./workbenchApi');
+    vi.mocked(requestJson).mockResolvedValue(collection);
+    const body = {domainRef:id,title:'第一步变小',angle:'作业启动',outline:['降低启动门槛'],terms:['作业','启动']};
+    expect(await prepareMaterials(body)).toEqual(collection);
+    expect(requestJson).toHaveBeenCalledExactlyOnceWith('/ops/api/creation/sources/prepare',{method:'POST',body,signal:undefined});
+  });
+  it('passes the source kind to server pagination instead of filtering a returned page', async () => {
+    const {searchMaterials} = await import('./workbenchApi');
+    vi.mocked(requestJson).mockResolvedValue(collection);
+    await searchMaterials({domainRef:id,query:'作业',kind:'note',cursor:24});
+    const url = new URL(String(vi.mocked(requestJson).mock.calls[0]?.[0]), 'http://127.0.0.1');
+    expect(url.searchParams.get('kind')).toBe('note');
+    expect(url.searchParams.get('cursor')).toBe('24');
+    expect(requestJson).toHaveBeenCalledTimes(1);
+  });
+  it('does not mistake unconfirmed material lookup for a successful collection', async () => {
+    const {resolveMaterials} = await import('./workbenchApi');
+    vi.mocked(requestJson).mockRejectedValue(new ApiError({kind:'network'}));
+    await expect(resolveMaterials({domainRef:id,selections:[]})).rejects.toThrow(ApiError);
+    expect(requestJson).toHaveBeenCalledTimes(1);
+  });
+});

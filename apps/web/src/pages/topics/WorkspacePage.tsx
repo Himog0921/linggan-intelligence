@@ -15,16 +15,16 @@ const roles = { support: "支持", challenge: "挑战", boundary: "边界" };
 const filters = ["all", "support", "challenge", "boundary"] as const;
 type RoleFilter = (typeof filters)[number];
 const label = (role: WorkspaceRole) => roles[role];
-const initialRationale = "右侧只显示当前 Work Resource 读模型与人工裁定理由。";
+const initialRationale = "右侧显示当前材料读模型与分类依据。";
 function errorCode(error: Error) {
   return error instanceof ApiError && error.failure.kind === "http"
     ? error.failure.code || `HTTP_${error.failure.status}`
     : "返回内容无法解析";
 }
-function Inspector({ material }: { material: WorkspaceMaterial | undefined }) {
+function Inspector({ material, machine }: { material: WorkspaceMaterial | undefined; machine: boolean }) {
   const facts = material
     ? [
-        ["裁定角色", label(material.role)],
+        [machine ? "分类角色" : "裁定角色", label(material.role)],
         ["Work Resource", material.ref],
         ["平台身份", `${material.platform} / ${material.externalId}`],
         ["创作者", material.creator ?? "未知"],
@@ -67,8 +67,8 @@ function Inspector({ material }: { material: WorkspaceMaterial | undefined }) {
     </aside>
   );
 }
-function WorkspaceContents({ canonicalKey }: { canonicalKey: string }) {
-  const query = useQuery({
+function useWorkspace(canonicalKey: string) {
+  return useQuery({
     queryKey: ["topics", "workspace", canonicalKey],
     queryFn: ({ signal }) => readWorkspace(canonicalKey, signal),
     retry: false,
@@ -76,6 +76,8 @@ function WorkspaceContents({ canonicalKey }: { canonicalKey: string }) {
     gcTime: 0,
     refetchOnWindowFocus: false,
   });
+}
+function WorkspaceContents({ query, canonicalKey }: { query: ReturnType<typeof useWorkspace>; canonicalKey: string }) {
   const [filter, setFilter] = useState<RoleFilter>("all");
   const [selected, setSelected] = useState<string | null>(null);
   const data = query.isSuccess && !query.isFetching ? query.data : undefined;
@@ -83,6 +85,12 @@ function WorkspaceContents({ canonicalKey }: { canonicalKey: string }) {
     data?.materials.filter((m) => filter === "all" || m.role === filter) ?? [];
   const material = visible.find((m) => m.ref === selected) ?? visible[0];
   const topic = data?.topic;
+  const machine = topic?.runKind === "machine_proposed";
+  const lifecycle = !topic
+    ? { label: "主题未读取", key: "TOPIC NOT READ", read: "当前未读取 Topic" }
+    : topic.definition.lifecycleState === "candidate"
+      ? { label: "候选主题", key: "CANDIDATE TOPIC", read: "已读取当前候选版本" }
+      : { label: "暂定主题", key: "PROVISIONAL TOPIC", read: "已读取当前暂定版本" };
   function chooseFilter(next: RoleFilter) {
     setFilter(next);
     const nextVisible =
@@ -116,7 +124,7 @@ function WorkspaceContents({ canonicalKey }: { canonicalKey: string }) {
         </a>
         <a className="v7-side-nav" href="#materials">
           <i>02</i>
-          <span>材料裁定</span>
+          <span>{machine || !topic ? "材料分类" : "材料裁定"}</span>
         </a>
         <a className="v7-side-nav" href="#boundary">
           <i>03</i>
@@ -124,9 +132,9 @@ function WorkspaceContents({ canonicalKey }: { canonicalKey: string }) {
         </a>
         <div className="v7-side-foot">
           <span className="v7-side-dot" />
-          暂定主题
+          {lifecycle.label}
           <br />
-          <span className="v7-tech-key">PROVISIONAL TOPIC</span>
+          <span className="v7-tech-key">{lifecycle.key}</span>
           <br />
           不构成正式 Topic、趋势或市场事实。
         </div>
@@ -141,7 +149,7 @@ function WorkspaceContents({ canonicalKey }: { canonicalKey: string }) {
             <p className={c("topic-eyebrow")}>领域探索 / TOPIC WORKSPACE</p>
             <div className={c("topic-title-row")}>
               <span className={c("topic-state")}>
-                暂定主题 <small>PROVISIONAL TOPIC</small>
+                {lifecycle.label} <small>{lifecycle.key}</small>
               </span>
               <span id="topic-version">
                 {topic
@@ -162,10 +170,10 @@ function WorkspaceContents({ canonicalKey }: { canonicalKey: string }) {
               <dt>裁定方式</dt>
               <dd id="topic-run-kind">
                 {topic ? (
-                  "人工裁定 / HUMAN ADJUDICATED"
+                  topic.runKind === "machine_proposed" ? "机器候选 / MACHINE PROPOSED" : "人工裁定 / HUMAN ADJUDICATED"
                 ) : (
                   <>
-                    人工裁定 <small>HUMAN ADJUDICATED</small>
+                    裁定方式未读取
                   </>
                 )}
               </dd>
@@ -179,7 +187,7 @@ function WorkspaceContents({ canonicalKey }: { canonicalKey: string }) {
             <div>
               <dt>读取状态</dt>
               <dd id="topic-read-state">
-                {topic ? "已读取当前暂定版本" : "当前未读取 Topic"}
+                {lifecycle.read}
               </dd>
             </div>
           </dl>
@@ -201,7 +209,7 @@ function WorkspaceContents({ canonicalKey }: { canonicalKey: string }) {
                 aria-pressed={filter === role}
                 onClick={() => chooseFilter(role)}
               >
-                {[role === "all" ? "全部裁定" : `${label(role)}材料`, " "].join(
+                {[role === "all" ? (machine ? "全部分类" : "全部裁定") : `${label(role)}材料`, " "].join(
                   "",
                 )}
                 <b id={`topic-count-${role}`}>
@@ -214,7 +222,7 @@ function WorkspaceContents({ canonicalKey }: { canonicalKey: string }) {
               </button>
             ))}
             <div className={c("topic-adjudication")}>
-              <strong>人工裁定说明</strong>
+              <strong>{topic ? machine ? "机器分类说明" : "人工裁定说明" : "分类说明"}</strong>
               <p id="topic-adjudication-note">
                 {topic?.adjudicationNote ?? "尚未读取。"}
               </p>
@@ -284,12 +292,12 @@ function WorkspaceContents({ canonicalKey }: { canonicalKey: string }) {
               ))}
               {data && visible.length === 0 ? (
                 <p className={c("topic-feedback")}>
-                  当前裁定视角没有材料；这不代表来源世界中不存在相关内容。
+                  当前{machine ? "分类" : "裁定"}视角没有材料；这不代表来源世界中不存在相关内容。
                 </p>
               ) : null}
             </div>
           </section>
-          <Inspector material={material} />
+          <Inspector material={material} machine={machine} />
         </section>
         <section className={c("topic-boundary")} id="boundary">
           <div>
@@ -314,6 +322,8 @@ function WorkspaceContents({ canonicalKey }: { canonicalKey: string }) {
 }
 export function WorkspacePage() {
   const { canonical_key = "" } = useParams();
+  const query = useWorkspace(canonical_key);
+  const topic = query.isSuccess && !query.isFetching ? query.data.topic : undefined;
   useEffect(() => {
     document.title = "Topic 工作区 · Linggan Intelligence";
   }, []);
@@ -333,11 +343,11 @@ export function WorkspacePage() {
         <>
           <span className="v7-kpi">
             <em>生命周期</em>
-            <b>暂定</b>
+            <b>{topic ? topic.definition.lifecycleState === "candidate" ? "候选" : "暂定" : "未读取"}</b>
           </span>
           <span className="v7-kpi">
             <em>裁定方式</em>
-            <b>人工</b>
+            <b>{topic ? topic.runKind === "machine_proposed" ? "机器候选" : "人工" : "未读取"}</b>
           </span>
           <i className="v7-vr" aria-hidden="true" />
           <span>
@@ -347,7 +357,7 @@ export function WorkspacePage() {
         </>
       }
     >
-      <WorkspaceContents key={canonical_key} canonicalKey={canonical_key} />
+      <WorkspaceContents key={canonical_key} canonicalKey={canonical_key} query={query} />
     </AppShell>
   );
 }

@@ -1,0 +1,70 @@
+.action {
+  --_lattice: var(--lgi-action-lattice-ink);
+  --_shadow: var(--lgi-action-ink);
+  appearance: none;
+  box-sizing: border-box;
+  height: var(--lgi-action-height);
+  border: var(--lgi-action-border-width) solid var(--lgi-action-ink);
+  border-radius: var(--lgi-radius-none);
+  background: var(--lgi-action-paper);
+  padding: 0 var(--lgi-action-padding);
+  font-family: var(--lgi-font-sans);
+  font-size: var(--lgi-action-font-size);
+  font-weight: var(--lgi-weight-semibold);
+  line-height: var(--lgi-action-line-height);
+  color: var(--lgi-action-ink);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--lgi-action-gap);
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  cursor: pointer;
+  vertical-align: middle;
+  flex-shrink: 0;
+  transition: transform var(--lgi-action-motion-instant) var(--lgi-action-ease), box-shadow var(--lgi-action-motion-instant) var(--lgi-action-ease), background var(--lgi-action-motion-instant) steps(2);
+}
+.action::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: var(--lgi-action-lattice-cell);
+  z-index: -1;
+  pointer-events: none;
+  background: var(--_lattice) 0 0 / var(--lgi-action-lattice-cell) var(--lgi-action-lattice-cell);
+  mask-image: var(--lgi-action-mask);
+  transition: width var(--lgi-action-motion-fast) steps(3);
+}
+.action:not(:disabled):hover::before { width: var(--lgi-action-lattice-hover); }
+.action:not(:disabled):active::before { width: var(--lgi-action-lattice-active); }
+.action:focus-visible { outline: var(--lgi-action-rail-width) solid var(--lgi-action-focus); outline-offset: var(--lgi-action-focus-offset); }
+.label { display: inline-flex; align-items: center; gap: var(--lgi-action-gap); }
+.primary { --_lattice: var(--lgi-action-lattice-light); background: var(--lgi-action-fill); color: var(--lgi-action-paper); border: var(--lgi-action-rail-width) solid var(--lgi-action-ink); box-shadow: var(--lgi-action-shadow-idle) var(--lgi-action-shadow-idle) 0 var(--_shadow); }
+.ink { --_lattice: var(--lgi-action-lattice-light); --_shadow: var(--lgi-action-ink-shadow); background: var(--lgi-action-ink); color: var(--lgi-action-paper); box-shadow: var(--lgi-action-shadow-idle) var(--lgi-action-shadow-idle) 0 var(--_shadow); }
+.outline:not(:disabled):hover { --_lattice: var(--lgi-action-lattice-light); background: var(--lgi-action-ink); color: var(--lgi-action-paper); }
+.soft { border-color: var(--lgi-action-border); background: var(--lgi-action-sunken); }
+.danger { --_lattice: var(--lgi-action-lattice-danger); border: var(--lgi-action-rail-width) solid var(--lgi-action-danger); color: var(--lgi-action-danger); }
+.danger:not(:disabled):hover { background: var(--lgi-action-danger-soft); }
+.action:is(.primary,.ink):not(:disabled):hover { transform: translate(var(--lgi-action-hover-shift),var(--lgi-action-hover-shift)); box-shadow: var(--lgi-action-shadow-hover) var(--lgi-action-shadow-hover) 0 var(--_shadow); }
+.action:not(.primary):not(.ink):not(.quiet):not(:disabled):active { transform: translate(var(--lgi-action-press-shift),var(--lgi-action-press-shift)); }
+.action:is(.primary,.ink):not(:disabled):focus-visible { outline: none; box-shadow: var(--lgi-action-shadow-idle) var(--lgi-action-shadow-idle) 0 var(--_shadow),var(--lgi-action-focus-offset) var(--lgi-action-focus-offset) 0 var(--lgi-action-focus-idle-gap) var(--lgi-action-paper),var(--lgi-action-focus-offset) var(--lgi-action-focus-offset) 0 var(--lgi-action-focus-idle-ring) var(--lgi-action-focus); }
+.action:is(.primary,.ink):not(:disabled):active { transform: translate(var(--lgi-action-shadow-idle),var(--lgi-action-shadow-idle)); box-shadow: none; }
+.action:is(.primary,.ink):not(:disabled):active:focus-visible { box-shadow: 0 0 0 var(--lgi-action-focus-gap-width) var(--lgi-action-paper),0 0 0 var(--lgi-action-focus-idle-gap) var(--lgi-action-focus); }
+.action:is(.primary,.ink):not(:disabled):hover:focus-visible:not(:active) { transform: translate(var(--lgi-action-hover-shift),var(--lgi-action-hover-shift)); box-shadow: var(--lgi-action-shadow-hover) var(--lgi-action-shadow-hover) 0 var(--_shadow),var(--lgi-action-focus-hover-offset) var(--lgi-action-focus-hover-offset) 0 var(--lgi-action-focus-hover-gap) var(--lgi-action-paper),var(--lgi-action-focus-hover-offset) var(--lgi-action-focus-hover-offset) 0 var(--lgi-action-focus-hover-ring) var(--lgi-action-focus); }
+.quiet { border: 0; border-bottom: var(--lgi-action-rail-width) solid var(--lgi-action-ink); padding: 0 var(--lgi-action-quiet-padding); height: var(--lgi-action-quiet-height); overflow: visible; }
+.quiet::before { display: none; }
+.quiet:not(:disabled):hover { border-bottom-color: transparent; color: var(--lgi-action-fill); background: var(--lgi-action-quiet-ruler) left bottom / 100% var(--lgi-action-rail-width) no-repeat; }
+.action:disabled { color: var(--lgi-action-disabled); border-color: var(--lgi-action-border); border-style: dashed; background: var(--lgi-action-sunken) var(--lgi-action-lattice-dim) 0 0 / var(--lgi-action-lattice-cell) var(--lgi-action-lattice-cell); cursor: not-allowed; transform: none; box-shadow: none; }
+.action:disabled::before { display: none; }
+.action[data-loading] { --_lattice: var(--lgi-action-lattice-ink); color: var(--lgi-action-secondary); background: var(--lgi-action-paper); border-color: var(--lgi-action-ink); border-style: solid; cursor: progress; }
+.action[data-loading]::before { display: block; width: var(--lgi-action-lattice-cell); }
+.cells { display: inline-flex; gap: var(--lgi-action-cell-gap); }
+.cells i { width: var(--lgi-action-cell-size); height: var(--lgi-action-cell-size); background: currentColor; opacity: var(--lgi-action-cell-dim); animation: cellLit var(--lgi-action-motion-cycle) steps(1) infinite; }
+.cells i:nth-child(2) { animation-delay: var(--lgi-action-motion-step); }
+.cells i:nth-child(3) { animation-delay: calc(var(--lgi-action-motion-step)*2); }
+.cells i:nth-child(4) { animation-delay: calc(var(--lgi-action-motion-step)*3); }
+@keyframes cellLit { 0%,24% { opacity: 1; } 25%,100% { opacity: var(--lgi-action-cell-dim); } }
+@media (prefers-reduced-motion:reduce) { .action,.action::before { transition: none; } .cells i { animation: none; opacity: 1; } }

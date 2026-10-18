@@ -20,7 +20,7 @@ import { fileURLToPath } from "node:url";
 const packageDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const projectDirectory = resolve(packageDirectory, "../..");
 const sourceDirectory = join(packageDirectory, "src");
-const runtimeTokens = join(projectDirectory, "apps/api/src/local_web/lids_tokens.css");
+const runtimeTokens = join(projectDirectory, "apps/web/src/styles/lids_tokens.css");
 const releaseDirectory = join(packageDirectory, "releases");
 const releaseManifestPath = join(releaseDirectory, "release-manifest.json");
 const fixedBuildTime = new Date("2026-08-25T00:00:00.000Z");

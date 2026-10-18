@@ -44,6 +44,26 @@ afterEach(() => {
 });
 
 describe("independent Topic workspace", () => {
+  it("labels machine-produced candidates from runKind without claiming human adjudication", async () => {
+    const input = workspaceFixture();
+    input.topic.classificationRun.runKind = 'machine_proposed';
+    input.topic.definition.lifecycleState = 'candidate';
+    vi.stubGlobal('fetch',vi.fn(async () => response(input)));
+    page();
+    await screen.findByRole('heading',{name:'合成工作区 workspace-proof'});
+    expect(document.getElementById('topic-run-kind')).toHaveTextContent('机器候选 / MACHINE PROPOSED');
+    expect(screen.getByText('机器分类说明')).toBeVisible();
+    expect(screen.queryByText('人工裁定说明')).not.toBeInTheDocument();
+    expect(screen.queryByText('人工',{exact:true})).not.toBeInTheDocument();
+    expect(screen.getByText('候选主题')).toBeVisible();
+    expect(screen.getByRole('complementary', { name: 'Topic 研究导航' })).toHaveTextContent('候选主题');
+    expect(screen.getAllByText('CANDIDATE TOPIC')).toHaveLength(2);
+    expect(screen.getByText('已读取当前候选版本')).toBeVisible();
+    expect(screen.getByRole('button', { name: '全部分类 3' })).toBeVisible();
+    expect(screen.getByText('分类角色')).toBeVisible();
+    expect(screen.queryByText(/PROVISIONAL TOPIC|已读取当前暂定版本|裁定角色/)).not.toBeInTheDocument();
+  });
+
   it("renders definition, unknown sources, role filtering, Inspector and JSON identity", async () => {
     const fetcher = vi.fn(async () => response(workspaceFixture()));
     vi.stubGlobal("fetch", fetcher);
@@ -68,7 +88,7 @@ describe("independent Topic workspace", () => {
       screen.getByRole("link", { name: "打开 Work Resource JSON" }),
     ).toHaveAttribute(
       "href",
-      "/api/local/work-resources/10000000-0000-4000-8000-000000000001",
+      "/api/local/topic-workspaces/workspace-proof/materials/10000000-0000-4000-8000-000000000001",
     );
     await userEvent.click(screen.getByRole("button", { name: "挑战材料 1" }));
     expect(screen.getAllByRole("option")).toHaveLength(1);
@@ -86,7 +106,7 @@ describe("independent Topic workspace", () => {
       screen.getByRole("link", { name: "打开 Work Resource JSON" }),
     ).toHaveAttribute(
       "href",
-      "/api/local/work-resources/10000000-0000-4000-8000-000000000003",
+      "/api/local/topic-workspaces/workspace-proof/materials/10000000-0000-4000-8000-000000000003",
     );
     expect(fetcher).toHaveBeenCalledTimes(1);
   });

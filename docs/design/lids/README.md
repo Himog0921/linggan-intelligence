@@ -37,7 +37,7 @@ Token → Primitive → Component → Pattern → Page
 ## LIDS 的项目内权威边界
 
 1. [system.md](system.md) 是 LIDS 在 Linggan 的主标准：定义产品气质、五层架构、L1/L2/L3、状态表达、动效、响应式、可访问性与治理门。
-2. [tokens.md](tokens.md) 是 `LIDS-TOK-001` 的版本化规范与校验镜像；LOCAL-001A 的 `apps/api/src/local_web/lids_tokens.css` 已是唯一可编辑的运行时 Token 值源。两者的单向同步与 107 项名称→值校验规则由 `tokens.md` 明确规定；页面 CSS 只能消费 Token，不得另行声明主题。
+2. [tokens.md](tokens.md) 是 `LIDS-TOK-001` 的版本化规范与校验镜像；LOCAL-001A 的 `apps/web/src/styles/lids_tokens.css` 已是唯一可编辑的运行时 Token 值源。两者的单向同步与 107 项名称→值校验规则由 `tokens.md` 明确规定；页面 CSS 只能消费 Token，不得另行声明主题。
 3. [primitives.md](primitives.md) 和 [patterns.md](patterns.md) 是基础语法与页面组合的权威约束；它们不是现有代码实现的声明。
 4. [agent-execution-guide.md](agent-execution-guide.md) 是给协作 Agent 的简明强制清单；它从主标准派生，不能与主标准冲突。
 5. [prototype-audit.md](prototype-audit.md) 把下载包中的 Observatory V3 降级为 L3 视觉母题参考，防止旧单页原型、模拟数据、永久动画或假运行状态被误带入产品。

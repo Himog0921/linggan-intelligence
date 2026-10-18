@@ -6,6 +6,10 @@
 > 事实来源: 实施工作树 `.worktrees/web-react-001-d2`（分支 `feat/web-react-001-d2`，分支点 `main@baaf5a51`，已并入 `main@82d48a72`；协调方复核后提交推送，以 Draft PR 呈交）；`npm --prefix apps/web run verify`；`cargo test -p linggan-api --bins --locked`；`scripts/test-web-app-postgres.sh` 与 `scripts/test-collection-single-run-postgres.sh`（浏览器模式）在一次性隔离 PostgreSQL 上的真实浏览器证明；[阶段 D 分册](../../plans/active/web-react-001-d-corpus.md) §4 能力清单与裁定
 > 冲突时以谁为准: 真实运行/代码/合同、Mog 最新确认、DEC-0010 与 [WEB-REACT-001](../../plans/active/web-react-001.md)；截图与自动检查不单独证明业务结果
 
+## 全站收尾当前入口（2026-10-19）
+
+正式main/runtime/3000已为362dad3f，包含本阶段及D3 #445；下文acdfbb87和旧候选按各自日期保留。Mog已派定完整收尾，新增修正、复验与发布只由[收尾矩阵](web-react-001-closeout.md)及最终PR回执证明，不从旧截图/测试扩大结论。
+
 ## 2026-10-18 当前状态补记
 
 D2 已随 [PR #443](https://github.com/Himog0921/linggan-intelligence/pull/443) 合入 `24e3ec23ea154f65e738444a73e5d5cdb2710594`，已包含在正式 3000 的 `acdfbb87` 中；下文“Draft／未合并／未部署”保留为当时的历史回执，不再代表当前状态。原候选的 749 项前端测试和隔离链路证据仍按原版本引用；Mog 业务验收独立保留。

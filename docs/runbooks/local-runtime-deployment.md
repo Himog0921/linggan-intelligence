@@ -6,6 +6,18 @@
 > 事实来源: Mog 于 2026-09-03 的明确要求「本地以 `/Users/moglenny/proma/linggan-intelligence` 为准，跟远端同步，不要到处复制」、当前 launchd 配置与实际运行验证、2026-09-17 更新入口用旧副本失败的实测（见 §3）、2026-09-21 按 COLLECTION-UPGRADE-001 S4 的实现与隔离库用例写成 §7（**样例为手工构造**，不是运行抓取；其余各节未重新实测，最后核对的口径见各节标注的日期）
 > 冲突时以谁为准: 实际运行输出与 launchd 当前加载的配置；本手册不授予平台访问或迁移执行权限
 
+## 2026-10-19 · WEB-REACT-001 全站收尾运行验证
+
+本节是当前收尾包的执行合同，结果以[收尾矩阵](../design/acceptance/web-react-001-closeout.md)和实际发布回执为准。正式运行源码只在干净的 `runtime-main`，共享开发目录和其他工作树保持原样。本包不新增schema，不运行migration；巡检/媒体LaunchAgent当前禁用且未加载，部署不改变该边界。
+
+1. 从已审查PR的精确head取得实际CI结果，合并后记录完整main SHA。先记录3000 listener PID/cwd/executable、runtime/frontend revision、迁移账本、研究/预算策略哈希、running invocation与业务计数。
+2. 在canonical runtime使用受控 `zsh scripts/runtime/install.sh` 同步和同revision构建。保持现有`.env`。若launchd登记失败，先核对已写plist合法、服务是否加载及listener；只恢复确实缺失的现有API plist，不盲目重跑installer或启用禁用的worker。构建完成不等于运行完成。
+3. 新listener必须来自canonical runtime；`/health.webApp`的revision/runtimeRevision与main一致、数据库READY；17个登记路由与子视图实际打开。未知路由和旧资源404，API不能被SPA入口吞掉。
+4. 正式离线演练前确认无在途调用，备份API plist到登记private目录。临时只为API启动进程应用macOS网络沙箱：禁止站外出网，仅允许当前PostgreSQL loopback与Docker Unix socket，设置Cargo/npm离线复用。先以本地连接成功、站外连接被拒的正反例验证限制，再停止/重新加载唯一API服务；核对新PID、同revision、health与页面。此证据称“API进程对站外断网重启”，不宣称整机断网。
+5. 整版回退必须在没有新稿件/模型写入的窗口进行，确认前后schema兼容；停止API，将干净runtime切到已核实的上一完整revision，在同一出网限制下重新构建并启动，核对后台、前端和页面一起回退。不得用新后台配旧页面，不运行down migration，不恢复旧页面兼容路由。362dad3f不支持新版非空材料准备字段和V3图页模板：回退演练仅在升级前作品上进行，且必须在新版首次写入前完成；新能力写入后不得直接降到该旧版本，应使用能读取当前文档合同的整版修复revision。空集合/None不额外写新字段只保护未使用新能力的旧V1作品，不宣称任意新版稿件可由旧版读取。
+6. 演练后恢复原API plist，通过官方installer回到最新main，重新确认版本、服务边界、迁移账本及策略/计数，再执行正式业务验收。私有原日志、截图、回执保留，不把预检或隔离库结果写成正式重启/回退成功。
+
+
 ## 1. 唯一的两个目录
 
 ```

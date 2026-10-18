@@ -114,7 +114,7 @@ Issue #85 沿用已确认项目方向，不重新向用户提出视觉选择。
 | 多材料 read model/API | 卡 3 / Issue #86 | 冻结页面所需字段和查询语义 | 实现 Rust/SQL/API 或猜字段 |
 | 运行时页面 | 卡 4 / Issue #90 | 当前 HTML/CSS/JS 只消费卡 3 Material Projection，并提供有界 Inspector | 修改卡 3 字段、SQL、媒体资格或接纳语义 |
 | 真实垂直证明 | 卡 5 | 提供必须验证的页面场景 | 运行真实平台、媒体或 OCR/ASR |
-| Shell / LIDS Token | 共享 UI owner | 原型只消费现有规则 | 修改 `shell.rs`、`shell.css` 或全局 Token |
+| Shell / LIDS Token | 共享 UI owner | 原型只消费现有规则 | 修改 `AppShell.tsx`、`shell.css` 或全局 Token |
 
 ## 5. 信息架构
 

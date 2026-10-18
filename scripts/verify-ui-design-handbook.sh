@@ -151,18 +151,18 @@ fi
 
 # tokens.md now carries a target architecture AND the runtime mirror. Both must stay named,
 # or the next agent will write v7 token names straight into the runtime stylesheet.
-for needle in 'L1 PRIMITIVE' 'L2 SEMANTIC' 'L3 GEOMETRY' 'apps/api/src/local_web/lids_tokens.css'; do
+for needle in 'L1 PRIMITIVE' 'L2 SEMANTIC' 'L3 GEOMETRY' 'apps/web/src/styles/lids_tokens.css'; do
   if ! grep -Fq "$needle" docs/design/lids/tokens.md; then
     report_error "token baseline is missing a required layer or runtime source: $needle"
   fi
 done
 
 # The runtime mirror must stay byte-identical to the runtime source.
-if [[ -f apps/api/src/local_web/lids_tokens.css ]]; then
-  runtime_tokens="$(grep -o '^[[:space:]]*--lgi-[a-z0-9-]*:.*$' apps/api/src/local_web/lids_tokens.css | sed 's/^[[:space:]]*//' | sort)"
+if [[ -f apps/web/src/styles/lids_tokens.css ]]; then
+  runtime_tokens="$(grep -o '^[[:space:]]*--lgi-[a-z0-9-]*:.*$' apps/web/src/styles/lids_tokens.css | sed 's/^[[:space:]]*//' | sort)"
   documented_tokens="$(grep -o '^[[:space:]]*--lgi-[a-z0-9-]*:.*$' docs/design/lids/tokens.md | sed 's/^[[:space:]]*//' | sort)"
   if [[ "$runtime_tokens" != "$documented_tokens" ]]; then
-    report_error "docs/design/lids/tokens.md is no longer an exact mirror of apps/api/src/local_web/lids_tokens.css"
+    report_error "docs/design/lids/tokens.md is no longer an exact mirror of apps/web/src/styles/lids_tokens.css"
   fi
 fi
 

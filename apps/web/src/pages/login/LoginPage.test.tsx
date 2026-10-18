@@ -1,0 +1,50 @@
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { LoginPage } from './LoginPage';
+const cleanup = vi.fn();
+vi.mock('./sceneRuntime', () => ({ mountScene: vi.fn(async () => cleanup) }));
+beforeEach(() => { localStorage.clear(); vi.useFakeTimers(); });
+afterEach(() => { vi.useRealTimers(); });
+describe('React 开发入口', () => {
+  it('空提交和无效邮箱保留输入并聚焦错误；显示密码不会提交', () => {
+    const enter = vi.fn(); render(<LoginPage onEnter={enter}/>);
+    fireEvent.click(screen.getByRole('button',{name:'登录'}));
+    expect(screen.getByLabelText('邮箱')).toHaveFocus();
+    expect(screen.getByText('请输入邮箱。')).toBeVisible();
+    fireEvent.input(screen.getByLabelText('邮箱'),{target:{value:'not-an-email'}});
+    fireEvent.input(screen.getByLabelText('密码'),{target:{value:'demo-only'}});
+    fireEvent.click(screen.getByRole('button',{name:'显示密码'}));
+    expect(screen.getByLabelText('密码')).toHaveAttribute('type','text');
+    fireEvent.click(screen.getByRole('button',{name:'登录'}));
+    expect(screen.getByText('请输入有效的邮箱地址。')).toBeVisible();
+    expect(enter).not.toHaveBeenCalled(); expect(localStorage.length).toBe(0);
+  });
+  it('仅勾选后记住邮箱，进入后清空密码；重新打开可恢复邮箱且取消立即清除', async () => {
+    const enter = vi.fn(), view = render(<LoginPage onEnter={enter}/>);
+    fireEvent.input(screen.getByLabelText('邮箱'),{target:{value:'demo@example.com'}});
+    fireEvent.input(screen.getByLabelText('密码'),{target:{value:'never-persist'}});
+    fireEvent.click(screen.getByLabelText('记住邮箱'));
+    fireEvent.click(screen.getByRole('button',{name:'登录'}));
+    expect(screen.getByRole('button',{name:'正在进入'})).toBeDisabled();
+    await act(() => vi.advanceTimersByTimeAsync(600));
+    expect(enter).toHaveBeenCalledOnce(); expect(screen.getByLabelText('密码')).toHaveValue('');
+    expect(Object.entries(localStorage)).toEqual([['linggan.login.remembered-email','demo@example.com']]);
+    view.unmount(); render(<LoginPage/>);
+    expect(screen.getByLabelText('邮箱')).toHaveValue('demo@example.com');
+    expect(screen.getByLabelText('记住邮箱')).toBeChecked();
+    fireEvent.click(screen.getByLabelText('记住邮箱')); expect(localStorage.length).toBe(0);
+  });
+  it('导航失败提供解释，帮助可由Escape关闭并恢复焦点；卸载取消进入定时器', async () => {
+    const enter = vi.fn(() => { throw new Error('Navigation unavailable'); });
+    const view = render(<LoginPage onEnter={enter}/>);
+    const summary = screen.getByText('登录遇到问题？'); fireEvent.click(summary);
+    fireEvent.keyDown(document,{key:'Escape'}); expect(summary.closest('details')).not.toHaveAttribute('open'); expect(summary).toHaveFocus();
+    fireEvent.input(screen.getByLabelText('邮箱'),{target:{value:'demo@example.com'}});
+    fireEvent.input(screen.getByLabelText('密码'),{target:{value:'demo-only'}});
+    fireEvent.submit(document.getElementById('login-form')!);
+    await act(() => vi.advanceTimersByTimeAsync(600)); expect(screen.getByText('暂时无法进入工作台，请重试。')).toBeVisible();
+    fireEvent.input(screen.getByLabelText('密码'),{target:{value:'demo-only'}});
+    fireEvent.submit(document.getElementById('login-form')!); view.unmount();
+    await act(() => vi.advanceTimersByTimeAsync(600)); expect(enter).toHaveBeenCalledOnce();
+  });
+});

@@ -17,6 +17,10 @@ use serde_json::{Value, json};
 
 pub(super) fn routes() -> Router<LocalWebState> {
     Router::new()
+        .route(
+            "/api/local/topic-workspaces/{canonical_key}/materials/{work_ref}",
+            get(read_material_json),
+        )
         .route("/api/local/topic-workspaces", post(import_json))
         .route(
             "/api/local/topic-workspaces/{canonical_key}",
@@ -88,6 +92,59 @@ async fn read_json(
     }
 }
 
+/// A frozen workspace already exposes these exact members. This detail path preserves
+/// that membership boundary without inventing an ObservationDomain UUID mapping.
+async fn read_material_json(
+    State(state): State<LocalWebState>,
+    Path((canonical_key, work_ref)): Path<(String, uuid::Uuid)>,
+) -> Response {
+    let Some(database) = state.database.database() else {
+        return json_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            TopicWorkspaceApiOutcome::Unavailable,
+            "topic_read_model_not_connected",
+        );
+    };
+    let workspace = match read_topic_workspace(database, &canonical_key).await {
+        Ok(Some(workspace)) => workspace,
+        Ok(None) => {
+            return json_error(
+                StatusCode::NOT_FOUND,
+                TopicWorkspaceApiOutcome::NotFound,
+                "topic_workspace_not_found",
+            );
+        }
+        Err(error) => return topic_error(error),
+    };
+    if !workspace
+        .members
+        .iter()
+        .any(|member| member.work_public_ref == work_ref)
+    {
+        return json_error(
+            StatusCode::NOT_FOUND,
+            TopicWorkspaceApiOutcome::NotFound,
+            "topic_material_not_in_pack",
+        );
+    }
+    match read_work_resource(database, work_ref).await {
+        Ok(Some(work)) => Json(work).into_response(),
+        Ok(None) => json_error(
+            StatusCode::CONFLICT,
+            TopicWorkspaceApiOutcome::Unavailable,
+            "topic_material_pack_reference_unavailable",
+        ),
+        Err(error) => {
+            eprintln!("Topic member read unavailable: {error}");
+            json_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                TopicWorkspaceApiOutcome::Unavailable,
+                "work_resource_read_unavailable",
+            )
+        }
+    }
+}
+
 async fn compose_materials(
     database: &linggan_storage_postgres::Database,
     workspace: linggan_intelligence::TopicWorkspace,
@@ -113,7 +170,7 @@ async fn compose_materials(
             })?;
         materials.push(json!({
             "classification":member,
-            "detailUrl":format!("/api/local/work-resources/{}", member.work_public_ref),
+            "detailUrl":format!("/api/local/topic-workspaces/{}/materials/{}", workspace.canonical_key, member.work_public_ref),
             "workResource":work
         }));
     }

@@ -201,7 +201,7 @@ ASR 历史错误包含模型缓存 SHA 检查警告，音频提取记录 ffmpeg 
 
 ## E10：Agent 与后续情报能力
 
-主线 intelligence crate 只导出 Topic Workspace；没有 Agent runtime 模块或 migration。一级导航中雷达/洞察均为 disabled，来自 [shell.rs](../../apps/api/src/local_web/shell.rs) 第 26 行。
+主线 intelligence crate 只导出 Topic Workspace；没有 Agent runtime 模块或 migration。一级导航中雷达/洞察均为 disabled，来自 [shell.rs](https://github.com/Himog0921/linggan-intelligence/blob/362dad3f515788af0013ca98174df3f2ea1ff10a/apps/api/src/local_web/shell.rs) 第 26 行。
 
 [Draft PR #116](https://github.com/Himog0921/linggan-intelligence/pull/116)：head `a01e78c4d47bca0cb473f5ba733f1aa65fb0a39f`，base `codex/topic-workspace-real-001`，15 个变更文件、1 个提交。只读检查了该分支的 `agent_candidate.rs`、`agent_runtime.rs`、测试文件名与 migration 位置。
 

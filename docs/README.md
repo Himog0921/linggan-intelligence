@@ -13,11 +13,19 @@
 
 - [主题图谱紧凑工作区变更](design/changes/topic-map-compact-382.md)：#382 当前 UI 后续，取代旧工作区布局，不改研究与来源合同。
 
+## 2026-10-19 · WEB-REACT-001 完整收尾包（当前）
+
+起点已重新核实：GitHub main、runtime-main与3000均为362dad3f；D3 #445已合并发布，启动锁回归已修复，153项内核实现子集及正式页面另有发布回执。旧候选段落仅为历史，不能再将D3记为未部署。Mog已授权C后续候选、H登录/全站旧UI清理、全部遗留验证及按需合并部署刷新3000；root在#430留Claim，专属分支codex/web-react-001-closeout，保留#434原树未提交走查。当前候选已集成c1459357，全部17个正式路由模式归同一React应用；登录旧Rust HTML、旧外壳及原生验证已删除，Token/外壳迁入apps/web。尚未声称本收尾包已合并部署。逐项证据与未证明项见[完整收尾验收矩阵](design/acceptance/web-react-001-closeout.md)。
+
 ## 网页前端统一为 React · 当前交付入口
+
+- [全站收尾验收矩阵](design/acceptance/web-react-001-closeout.md)：当前 #430 完整收尾包，C/H、全路由/子视图、运行演练与发布。
 
 2026-10-18 核对：正式 3000 与 main 同为 `acdfbb87`；A+B、C 基线、D1/D2、E/F/G 已部署，C 后续 #434 仍为 Draft。当前实施 D3 评论研究四视图，H 待办；分层验收缺口见主计划最新补记。
 
 Mog 2026-10-15 决定所有正式网页统一为一个 React + TypeScript 应用，不留新旧双轨（[DEC-0010](decisions/0010-web-frontend-react.md)）。唯一推进入口是 [WEB-REACT-001 计划](plans/active/web-react-001.md)（Issue #430），它合并了 UI 改版专项 UIUX-CONTENT-WORKBENCH-001（Issue #425，原生前端停止、后端继续，React 归阶段 C）。迁移期间旧页面冻结，只修阻断使用的缺陷；新页面一律用 React。阶段 A+B 已随 PR #431 合并至 main@0a90fd4a，3000 同版本部署和线上只读链路经 #430 核验；阶段 C 已由 Mog 派定并在专属工作树实施，验收记录见 [ACC-WEB-REACT-001-B](design/acceptance/web-react-001-b-acceptance.md)。阶段 D（语料三页）按[分册](plans/active/web-react-001-d-corpus.md)拆为 D1 创作者页与共享外壳、D2 证据库、D3 评论研究（Issue #433）；D1 已随 PR #436 合并至 main@baaf5a51 并上线（验收见 [ACC-WEB-REACT-001-D1](design/acceptance/web-react-001-d1-acceptance.md)，页面规格见 [PAGE-CORPUS-CREATORS-V1-001](design/pages/creators-page.md)）；D2 证据库已随 PR #443 合并并部署，验收见 [ACC-WEB-REACT-001-D2](design/acceptance/web-react-001-d2-acceptance.md)，D3 已按 Mog 2026-10-18 派定开始（保持四视图全部功能、口径和 UI，实际截图核对）。
+
+Mog 2026-10-15 决定所有正式网页统一为一个 React + TypeScript 应用，不留新旧双轨（[DEC-0010](decisions/0010-web-frontend-react.md)）。唯一推进入口是 [WEB-REACT-001 计划](plans/active/web-react-001.md)（Issue #430），它合并了 UI 改版专项 UIUX-CONTENT-WORKBENCH-001（Issue #425，原生前端停止、后端继续，React 归阶段 C）。迁移期间旧页面冻结，只修阻断使用的缺陷；新页面一律用 React。阶段 A+B 已随 PR #431 合并至 main@0a90fd4a，3000 同版本部署和线上只读链路经 #430 核验；阶段 C 首版已随 PR #432 合并；Mog 对其 V3 还原不予验收，当前在独立候选重新落地并补齐本篇材料准备，验收前不合并部署。基础验收记录见 [ACC-WEB-REACT-001-B](design/acceptance/web-react-001-b-acceptance.md)。
 
 ## 研究底稿与图片分层第一阶段
 

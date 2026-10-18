@@ -7,8 +7,8 @@ import { defineConfig } from 'vitest/config';
 
 const webRoot = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(webRoot, '../..');
-// LIDS Token 与共享外壳样式的唯一来源仍在旧页面目录（DEC-0010 / WEB-REACT-001 §4.5）。
-const sharedStyleRoot = path.join(repoRoot, 'apps/api/src/local_web');
+// LIDS Token 与共享外壳样式的唯一来源已归前端 styles 目录（DEC-0010 / WEB-REACT-001 §4.5）。
+const sharedStyleRoot = path.join(repoRoot, 'apps/web/src/styles');
 
 /** 本次构建对应的源码版本。本机运行链由 sync.sh 显式传入，与后端写进身份文件的是同一个值。 */
 function buildRevision(): string {
@@ -44,7 +44,7 @@ export default defineConfig({
   plugins: [react(), buildInfo()],
   base: '/ui-assets/',
   // Frozen legacy Collection geometry keeps the existing DOM classes during the React port.
-  css: { modules: { globalModulePaths: [/LegacyCollection\.module\.css$/] } },
+  css: { modules: { globalModulePaths: [/CollectionSurface\.module\.css$/] } },
   build: {
     outDir: 'dist',
     assetsDir: '',

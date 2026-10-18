@@ -9,6 +9,10 @@ PR #407 合并前修正（2026-10-13）：运营页焦点/强调线与新增共�
 > 冲突时以谁为准: 真实代码/合同/测试、用户最新确认、当前 SCOPE 和 ACCEPTED 决策；本日志不把计划写成已实现事实
 
 
+## WEB-REACT-001 H · 全站唯一前端源（2026-10-19）
+
+Mog完整收尾授权：Token与共享shell从apps/api迁到apps/web/src/styles，不改变既有数值；#434新增V3/V8 Token及局部外壳依原批准源集成。Rust镜像校验、两个插件构建入口、React/Vite/CI同步引用最终唯一源。登录继承LOGIN-ANATOMY-001已批准局部值，不推广为全站主题；CSS Module冻结哈希和实际36对零差异共同约束其迁移，修复全局焦点/短屏滚动泄漏。历史路径保留在旧记录，仅作可追溯来源。
+
 ## 2026-10-18 · WEB-REACT-001 D3 评论研究四视图
 
 保留正式3000的A无边框概览和现有全部表面；JSX与CSS Modules替代旧原生renderer，复用唯一AppShell/shell.css/LIDS，不改Token。两份原CSS同名类保持有效层叠；旧未定义token按实际computed fallback保留，尺寸改为既有Token等值calc，不借迁移修视觉债。原声/问题来源受限、未知与0、未确认命令/显式重试仍分开。实际六宽度与完整滚动对照、隔离PG/浏览器回执及未部署边界见 [D3验收](../acceptance/web-react-001-d3-acceptance.md)。F已于#441部署的当前补记见其验收记录；本日志旧“未部署”仍为历史候选时点。
@@ -655,3 +659,22 @@ root 目检真实隔离浏览器的 390×844 正文、图组和材料截图发�
 ## 2026-10-16 · WEB-REACT-001-F 主题图谱与独立工作区 React 保真迁移（#440）
 
 主图谱双视图、六页签、既有弹窗/绘图和独立 Workspace 改为 React/TypeScript/CSS Modules，保留当前页面布局与原绘图/聚合语义；原生 HTML/4资产及纯 DOM runner 同包退役。只消费当前 token/shell，未新增全站视觉方向。保真对照、正式隔离 Axum/PG/React 回执、性能及明确未覆盖边界见 [F 验收](../acceptance/web-react-001-f-acceptance.md)。独立审查的表现图平台状态、合法失效文本 null、已有机器候选工作区三项兼容问题已修正并复测；既有 Workspace 的固定人工标签/JSON 缺域链接/404空按钮明确登记，不将保真说成语义欠账已清除。候选未部署，Mog 签收仍待完成。
+
+
+## 2026-10-15 · WEB-REACT-001-C-V3-FIDELITY 再实施前登记
+
+Mog 退回 #432 的真实创作页面，要求按已认可 V3 重新落地。本轮沿用 CSS Modules 与唯一 LIDS Token，不再把功能清单作为设计验收。页面规格增加选题相关材料预备、检索加入本篇、完整原文与真实评论上下文；恢复 V3 纸条语义筛选/矩阵、连续正文/并排改稿和四步图文创作。唯一 React AppShell 可增加局部 compact/immersive 模式，此项覆盖阶段 B/C 先前不采用紧凑外壳的限制；不改旧页面外观或旧 shell。新增局部几何变量由实际实现清单追加，颜色/字体/间距仍引用 Token。当前仅已派定，尚无新候选视觉或链路通过证明。
+
+本轮局部实现补记（实施前）：新增 `--cw-rail-width:13rem` 为V3工作区局部导航宽度，不新增全站布局；AppShell.module.css沿已有58px紧凑页头Token，只有显式workbenchMode消费，默认设置页不变。成品模板新增creation-v3-type/split/list与creation-renderer.v3，保留v1算法与已冻结历史成品的身份，配色仍沿cream/sage/ink。后端材料集合需要的窄类型/验证/来源传播修改由材料代理负责；root负责exports版本白名单，避免文件并行写冲突。
+
+### 2026-10-15 · WEB-REACT-001-C · V8 动作按钮局部纠偏（实施前登记）
+
+Mog 最新明确要求创作工作台动作按钮沿其提供的 `linggan-design-system-v8 (1).html` 动作层级（原件 CSS 第 536–589 行）实现，覆盖本轮临时采用旧 `signal-ink` 棕色主按钮与既有通用“禁止 hover lift”的限制，仅作用于工作台显式消费的共享 React `ActionButton`。导航页签、材料纸条、图页缩略图、模板及配色选择保持安静；设置页、旧原生页面和现有 Token 值保持原状。
+
+共享组件放在 `apps/web/src/shared/ActionButton.tsx` 与同名 CSS Module，支持 primary/ink/outline/soft/danger/quiet 与 loading 状态。唯一 Token 真源 `apps/api/src/local_web/lids_tokens.css` 新增专用 `--lgi-action-*`，逐值映射 V8：主承字色 flame-600 `#c63214`、直角黑边、4px 硬投影、右缘点阵 idle 16px 一列 / hover 40% / active 满面及阶梯遮罩、离散四格 busy、虚线休眠 disabled、包住投影的双层键盘焦点环与减少动态效果。新增值只被该组件引用，不调整任何旧 Token。V8 明定 primary/ink 悬停 -1px、按下 4px；该局部显式授权不推广为全站动效例外。
+
+请求语义保持：disabled 或 busy 均禁止原生激活，busy 用 aria-busy 并保留动作原有文案；四格为装饰，不能被辅助技术误报为四条状态。普通动作默认 type=button，表单提交显式 type=submit。实施后由组件聚焦/禁用/busy 回归、Token 检查、工作台真实浏览器逐态与既有冻结导出回归验证；本条不提前宣称已通过或已部署。
+
+### 同轮 V3 材料纸面值回填
+
+Mog 要求完整保留 V3 的书页与纸条体验；此前把暖纸统一替成结构灰会改变已经确认的构图。将原型 `v3/material-browser.css` 的 paper/edge/ink/selected/book-cover 原值分别登记为唯一运行时源的 `--lgi-reading-paper/edge/ink/selected/cover`，只供工作台材料阅读与摘录纸条消费。它们不构成全站第二主题；页面布局/文字字号仍沿现有 Token，旧 Token 不换值。回退仅撤掉本页引用和本次新增声明。需核对真实原文高亮和对比度；新值不证明材料资格或语义分类。

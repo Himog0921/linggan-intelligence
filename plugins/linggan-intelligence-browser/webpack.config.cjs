@@ -46,7 +46,7 @@ module.exports = {
         { from: 'src/popup/popup.html', to: 'popup.html' },
         { from: 'src/dashboard/dashboard.html', to: 'dashboard.html' },
         { from: 'src/linggan/media-worker.html', to: 'media-worker.html' },
-        { from: '../../apps/api/src/local_web/lids_tokens.css', to: 'themes/lids-tokens.css' },
+        { from: '../../apps/web/src/styles/lids_tokens.css', to: 'themes/lids-tokens.css' },
         { from: 'src/popup/popup.css', to: 'popup.css' },
         { from: 'src/dashboard/dashboard.css', to: 'dashboard.css' },
         { from: 'src/themes/ac-ui/popup.css', to: 'themes/ac-ui/popup.css' },

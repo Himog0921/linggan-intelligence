@@ -6,6 +6,7 @@ import { ModelSettingsPage } from '../pages/settings/ModelSettingsPage';
 import { NotFoundPage } from './NotFoundPage';
 import { OPS_PATHS, COLLECTION_PATHS, CREATORS_PATH, EVIDENCE_PATH, COMMENTS_PATH, MODEL_SETTINGS_PATH, WORKBENCH_PATH, TOPICS_PATH } from './pages';
 
+const LoginPage = lazy(() => import('../pages/login/LoginPage').then(module => ({ default: module.LoginPage })));
 const WorkbenchPage = lazy(() => import('../pages/workbench/WorkbenchPage').then(module => ({ default: module.WorkbenchPage })));
 // 语料页按需加载：打开设置页或工作台时不下载创作者页的代码。
 const CreatorsPage = lazy(() => import('../pages/corpus/creators/CreatorsPage').then(module => ({ default: module.CreatorsPage })));
@@ -29,6 +30,7 @@ const queryClient = new QueryClient({
 });
 
 const router = createBrowserRouter([
+  { path: '/login', element: <Suspense fallback={<p role="status">正在打开工作台入口…</p>}><LoginPage /></Suspense> },
   { path: MODEL_SETTINGS_PATH, element: <ModelSettingsPage /> },
   { path: WORKBENCH_PATH, element: <Suspense fallback={<p role="status">正在打开工作台…</p>}><WorkbenchPage /></Suspense> },
   { path: CREATORS_PATH, element: <Suspense fallback={<p role="status">正在打开创作者…</p>}><CreatorsPage /></Suspense> },

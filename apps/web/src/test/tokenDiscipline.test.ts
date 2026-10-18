@@ -13,7 +13,7 @@ const LITERAL_LENGTH = /(?<![\w-])\d*\.?\d+(px|rem|em)\b/;
 const COLOR_LITERAL = /#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(/;
 // main.tsx imports this canonical runtime source directly. A var() with an invented
 // name is not compliant: its declaration can disappear and leave invisible UI.
-const runtimeTokens = readFileSync(path.resolve(process.cwd(), '../api/src/local_web/lids_tokens.css'), 'utf8');
+const runtimeTokens = readFileSync(path.resolve(process.cwd(), 'src/styles/lids_tokens.css'), 'utf8');
 const definedTokens = new Set([...runtimeTokens.matchAll(/(--lgi-[\w-]+)\s*:/g)].map(match => match[1]));
 
 function unknownTokenReferences(css: string): string[] {
@@ -50,10 +50,15 @@ describe('页面样式只用 LIDS Token', () => {
   });
 
   it.each(files)('%s', file => {
-    if (path.basename(file) === 'LegacyCollection.module.css') {
+    if (path.basename(file) === 'CollectionSurface.module.css') {
       // Mog 2026-10-16: preserve the approved Collection UI exactly during migration.
       // Only the moved, frozen legacy sheet carries its existing geometry; new styles use tokens.
       expect(createHash('sha256').update(readFileSync(file)).digest('hex')).toBe('a8c6407f8741ad615e1f8ed235d544393d243a4164ee35c27661e6a3ff9ce1d6');
+      return;
+    }
+    if (path.basename(file) === 'Login.module.css') {
+      // LOGIN-ANATOMY-001 approved local palette/geometry, preserved by H actual screenshot proof.
+      expect(createHash('sha256').update(readFileSync(file)).digest('hex')).toBe('b6503ee8595bb62a766cd3033ad1ef8350d9e32924ddf1161d508d67722a7ebe');
       return;
     }
     expect(violations(file)).toEqual([]);

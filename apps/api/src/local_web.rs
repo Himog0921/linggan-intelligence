@@ -44,7 +44,6 @@ mod evidence_seed;
 mod full_schema_fixture;
 mod local_asset_delivery;
 mod local_media_routes;
-mod login;
 #[cfg(test)]
 mod material_asset_route_fixture;
 #[cfg(test)]
@@ -68,7 +67,6 @@ mod ops_overview_api;
 mod research_dossier;
 #[cfg(test)]
 mod research_dossier_tests;
-mod shell;
 mod station_view;
 mod target_drawer;
 #[cfg(test)]
@@ -145,8 +143,6 @@ const LOCAL_PRODUCER_TASK_CREATION_PATH: &str = "/api/local/producer/tasks";
 const LOCAL_PRODUCER_ATTEMPT_START_PATH: &str = "/api/local/producer/runtime-attempts";
 const LOCAL_PRODUCER_SUBMISSION_PATH: &str = "/api/local/producer/runtime-submissions";
 const MEDIA_ACQUISITION_CLAIM_PATH: &str = "/api/local/producer/media-acquisitions/claim";
-const LIDS_TOKENS: &str = include_str!("local_web/lids_tokens.css");
-const SHELL_CSS: &str = include_str!("local_web/shell.css");
 #[cfg(test)]
 const LIDS_TOKEN_DOCUMENT: &str = include_str!("../../../docs/design/lids/tokens.md");
 
@@ -306,7 +302,6 @@ fn collection_api_routes() -> Router<LocalWebState> {
 fn router(state: LocalWebState) -> Router {
     Router::new()
         .route("/", get(local_entry))
-        .route("/login", get(login::page))
         .route("/health", get(health))
         .route("/api/local/discovery-packages", post(discovery_ingress))
         .route(
@@ -3893,14 +3888,6 @@ async fn collection_targets_batch(State(state): State<LocalWebState>, body: Byte
         return Redirect::to("/collection/targets?error=batch_failed");
     }
     Redirect::to("/collection/targets")
-}
-
-fn html_escape(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
 }
 
 #[cfg(test)]

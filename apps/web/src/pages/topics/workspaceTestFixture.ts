@@ -30,7 +30,7 @@ export function workspaceFixture(key = "workspace-proof") {
     },
     materials: members.map((classification, index) => ({
       classification: { ...classification },
-      detailUrl: `/api/local/work-resources/${classification.workPublicRef}`,
+      detailUrl: `/api/local/topic-workspaces/${key}/materials/${classification.workPublicRef}`,
       workResource: {
         identity: {
           publicRef: classification.workPublicRef,

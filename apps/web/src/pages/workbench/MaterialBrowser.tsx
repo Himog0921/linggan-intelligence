@@ -1,372 +1,1251 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { isRecord } from '../../shared/api';
-import * as api from './workbenchApi';
-import { GROUPS, SOURCE_LABELS, type Citation, type CanvasGroup, type SourceItem, type SourceKind, type ValidatedAnchor, type WorkDocument } from './workbenchModel';
-import styles from './WorkbenchPage.module.css';
+import { MaterialDistribution } from "./MaterialDistribution";
+import { ActionButton } from "../../shared/ActionButton";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { isRecord } from "../../shared/api";
+import * as api from "./workbenchApi";
+import {
+  GROUPS,
+  SOURCE_LABELS,
+  addMaterials,
+  selectMaterial,
+  type Citation,
+  type CanvasGroup,
+  type ValidatedAnchor,
+  type WorkDocument,
+} from "./workbenchModel";
+import {
+  FRAGMENT_TYPES,
+  materialPieces,
+  readingLeaves,
+  type ReadingPiece,
+} from "./materialReading";
+import styles from "./WorkbenchPage.module.css";
 interface Props {
   contextKey?: string;
   active?: boolean;
   domain: string;
   document: WorkDocument;
+  onChange: (document: WorkDocument) => void;
   onCollect: (anchor: ValidatedAnchor, group: CanvasGroup) => void;
   focusCitation?: Citation | null;
-}
-interface Strip {
-  id: string;
-  source: SourceItem;
-  start: number;
-  end: number;
-  text: string;
-  index: number;
+  onCanvas?: () => void;
 }
 interface Selection {
+  piece: ReadingPiece;
   start: number;
   end: number;
   text: string;
 }
-function strips(source: SourceItem): Strip[] {
-  let offset = 0;
-  const result: Strip[] = [];
-  for (const part of source.text.split(/(?<=\n)/u)) {
-    const size = Array.from(part).length;
-    if (part.trim()) result.push({
-      id: `${source.fragmentId}:${offset}:${offset + size}`,
-      source,
-      start: offset,
-      end: offset + size,
-      text: part,
-      index: result.length
-    });
-    offset += size;
-  }
-  return result;
-}
-function SourceContextView({
-  value
-}: {
-  value: unknown;
-}) {
+function SourceContextView({ value }: { value: unknown }) {
   if (!isRecord(value)) return null;
   const parent = isRecord(value.parentWork) ? value.parentWork : null;
   const comment = isRecord(value.parentComment) ? value.parentComment : null;
   const dossier = isRecord(value.dossier) ? value.dossier : null;
   const fragments = parent?.fragments;
   const coverage = dossier?.coverage ?? parent?.coverage;
-  return <div className={styles.context}>
-    {comment && comment.state !== 'not_applicable' ? <section>
-<h3>回复语境</h3>{comment.state === 'known' && typeof comment.body === 'string' ? <blockquote>{comment.body}</blockquote> : <p>{comment.state === 'restricted' ? '父评论已受限' : comment.state === 'known' ? '父评论正文未知' : '父评论未知'}</p>}</section> : null}
-    {parent ? <section>
-<h3>父笔记</h3>{Array.isArray(fragments) ? fragments.map((f, i) => isRecord(f) && typeof f.text === 'string' ? <p className={styles.evidence} key={i}>{f.text}</p> : null) : <p>{parent.state === 'unavailable' ? '父笔记暂不可读' : '父笔记内容未知'}</p>}</section> : null}
-    {coverage !== undefined ? <details>
-<summary>取得范围</summary>
-<pre>{JSON.stringify(coverage, null, 2)}</pre>
-</details> : null}
-  </div>;
+  return (
+    <div className={styles.context}>
+      {comment && comment.state !== "not_applicable" ? (
+        <section>
+          <h3>回复语境</h3>
+          {comment.state === "known" && typeof comment.body === "string" ? (
+            <blockquote>{comment.body}</blockquote>
+          ) : (
+            <p>
+              {comment.state === "restricted"
+                ? "父评论已受限"
+                : comment.state === "known"
+                  ? "父评论正文未知"
+                  : "父评论未知"}
+            </p>
+          )}
+        </section>
+      ) : null}
+      {parent ? (
+        <section>
+          <h3>所在笔记</h3>
+          {Array.isArray(fragments) ? (
+            fragments.map((f, i) =>
+              isRecord(f) && typeof f.text === "string" ? (
+                <p className={styles.evidence} key={i}>
+                  {f.text}
+                </p>
+              ) : null,
+            )
+          ) : (
+            <p>
+              {parent.state === "unavailable"
+                ? "所在笔记暂不可读"
+                : "所在笔记内容未知"}
+            </p>
+          )}
+        </section>
+      ) : null}
+      {coverage !== undefined ? (
+        <details>
+          <summary>取得范围</summary>
+          <pre>{JSON.stringify(coverage, null, 2)}</pre>
+        </details>
+      ) : null}
+    </div>
+  );
 }
-function ReadingLeaf({
-  strip,
-  selection,
-  onSelection
+
+function OcrEvidence({
+  piece,
+  context,
+  start,
+  end,
 }: {
-  strip: Strip;
-  selection: Selection | null;
-  onSelection: (s: Selection) => void;
+  piece: ReadingPiece;
+  context: unknown;
+  start: number;
+  end: number;
 }) {
-  const host = useRef<HTMLDivElement>(null);
+  const location = piece.source.location;
+  if (!location) return null;
+  const dossier =
+    isRecord(context) && isRecord(context.dossier) ? context.dossier : null;
+  const media = dossier && Array.isArray(dossier.media) ? dossier.media : [];
+  const original = media.find(
+    (item) => isRecord(item) && item.derivativeRef === location.derivativeRef,
+  );
+  const url =
+    isRecord(original) &&
+    typeof original.originalAssetUrl === "string" &&
+    original.originalAssetUrl.startsWith("/api/local/media/")
+      ? original.originalAssetUrl
+      : null;
+  return (
+    <section>
+      <h3>图片文字位置</h3>
+      {url ? (
+        <div className={styles.ocrImage}>
+          <img src={url} alt="OCR 来源原图" />
+          {location.lineSpans
+            .filter((line) => line.end > start && line.start < end)
+            .map((line) => (
+              <span
+                key={line.lineRef}
+                style={{
+                  left: `${line.bbox[0] * 100}%`,
+                  top: `${line.bbox[1] * 100}%`,
+                  width: `${line.bbox[2] * 100}%`,
+                  height: `${line.bbox[3] * 100}%`,
+                }}
+              />
+            ))}
+        </div>
+      ) : (
+        <p>原图尚未取得；文字位置仍保留。</p>
+      )}
+    </section>
+  );
+}
+function BookPassage({
+  piece,
+  selected,
+  matching,
+  onSelect,
+}: {
+  piece: ReadingPiece;
+  selected: Selection | null;
+  matching: boolean;
+  onSelect: (selection: Selection) => void;
+}) {
+  const ref = useRef<HTMLParagraphElement>(null);
   function capture() {
-    const root = host.current,
-      selected = window.getSelection();
-    if (!root || !selected || selected.isCollapsed || !selected.rangeCount) return;
-    const range = selected.getRangeAt(0);
-    if (!root.contains(range.startContainer) || !root.contains(range.endContainer)) return;
+    const root = ref.current,
+      selection = window.getSelection();
+    if (!root || !selection || selection.isCollapsed || !selection.rangeCount)
+      return;
+    const range = selection.getRangeAt(0);
+    if (
+      !root.contains(range.startContainer) ||
+      !root.contains(range.endContainer)
+    )
+      return;
     const before = range.cloneRange();
     before.selectNodeContents(root);
     before.setEnd(range.startContainer, range.startOffset);
-    const start = strip.start + Array.from(before.toString()).length;
-    onSelection({
+    const start = piece.start + Array.from(before.toString()).length;
+    onSelect({
+      piece,
       start,
       end: start + Array.from(range.toString()).length,
-      text: range.toString()
+      text: range.toString(),
     });
   }
-  const local = selection && selection.end > strip.start && selection.start < strip.end ? {
-    start: Math.max(0, selection.start - strip.start),
-    end: Math.min(strip.end - strip.start, selection.end - strip.start)
-  } : null;
-  const text = Array.from(strip.text);
-  return <div ref={host} className={styles.sourceText} data-fragment-id={strip.id} data-source-ref={strip.source.sourceRef} data-work-ref={strip.source.workRef ?? undefined} tabIndex={0} aria-label={`可选择原文第 ${strip.index + 1} 段`} onMouseUp={capture} onKeyUp={capture}>
-    {local ? <>{text.slice(0, local.start).join('')}<mark>{text.slice(local.start, local.end).join('')}</mark>{text.slice(local.end).join('')}</> : strip.text}
-  </div>;
+  const local =
+    selected?.piece.source.fragmentId === piece.source.fragmentId &&
+    selected.end > piece.start &&
+    selected.start < piece.end
+      ? selected
+      : null;
+  const chars = Array.from(piece.text);
+  return (
+    <p
+      ref={ref}
+      tabIndex={0}
+      className={`${styles.sourceText} ${piece.source.field === "title" ? styles.bookHeading : ""}`}
+      data-fragment-id={piece.id}
+      data-source-ref={piece.source.sourceRef}
+      data-work-ref={piece.source.workRef ?? undefined}
+      aria-label="可选择原文"
+      onMouseUp={capture}
+      onKeyUp={capture}
+    >
+      {local ? (
+        <>
+          {chars.slice(0, Math.max(0, local.start - piece.start)).join("")}
+          <mark>
+            {chars
+              .slice(
+                Math.max(0, local.start - piece.start),
+                Math.min(chars.length, local.end - piece.start),
+              )
+              .join("")}
+          </mark>
+          {chars
+            .slice(Math.min(chars.length, local.end - piece.start))
+            .join("")}
+        </>
+      ) : matching ? (
+        <mark className={styles.matchingPassage}>{piece.text}</mark>
+      ) : (
+        piece.text
+      )}
+    </p>
+  );
 }
 export function MaterialBrowser({
-  contextKey = 'standalone',
-  active: visibleSurface = true,
+  contextKey = "standalone",
+  active = true,
   domain,
   document,
+  onChange,
   onCollect,
-  focusCitation
+  focusCitation,
+  onCanvas,
 }: Props) {
-  const queryClient = useQueryClient();
-  const [focused, setFocused] = useState(focusCitation);
-  const [kind, setKind] = useState<SourceKind>(focusCitation?.sourceKind ?? 'note');
-  const [search, setSearch] = useState(''),
-    [query, setQuery] = useState('');
-  const [cursor, setCursor] = useState(0),
-    [usage, setUsage] = useState('all');
-  const [active, setActive] = useState<Strip | null>(null),
-    [range, setRange] = useState<Selection | null>(null);
-  const [group, setGroup] = useState<CanvasGroup>('inbox');
-  const [busy, setBusy] = useState(false),
-    [error, setError] = useState('');
+  const paperScroller = useRef<HTMLDivElement>(null);
+  const paperButtons = useRef(new Map<string, HTMLButtonElement>());
+  const readingHost = useRef<HTMLElement>(null);
+  const [leafCapacity, setLeafCapacity] = useState(160);
   useEffect(() => {
-    if (!visibleSurface) {
-      void queryClient.cancelQueries({
-        queryKey: ['creation-sources', domain, contextKey]
-      });
-      void queryClient.cancelQueries({
-        queryKey: ['creation-source', domain, contextKey]
-      });
+    const host = readingHost.current;
+    if (!host) return;
+    function measure() {
+      if (!host) return;
+      const width = host.getBoundingClientRect().width;
+      if (width <= 0) return;
+      const leaf = host.querySelector("article");
+      const prose = host.querySelector("p");
+      const leafStyle = window.getComputedStyle(leaf ?? host),
+        textStyle = window.getComputedStyle(prose ?? host);
+      const font = parseFloat(textStyle.fontSize) || 15,
+        line = parseFloat(textStyle.lineHeight) || font * 1.9,
+        padding = parseFloat(leafStyle.paddingLeft) || 20;
+      const columns = Math.max(5, Math.floor((width / 2 - padding * 2) / font));
+      const rows = Math.max(
+        2,
+        Math.floor(
+          (Math.max(
+            80,
+            leaf?.getBoundingClientRect().height ?? window.innerHeight * 0.4,
+          ) -
+            100) /
+            line,
+        ),
+      );
+      setLeafCapacity(columns * rows);
     }
-  }, [visibleSurface, queryClient, domain, contextKey]);
-  const list = useQuery({
-    queryKey: ['creation-sources', domain, contextKey, kind, query, cursor],
-    queryFn: ({
-      signal
-    }) => api.sources({
-      domainRef: domain,
-      kind,
-      query,
-      cursor
-    }, signal),
-    enabled: visibleSurface,
-    staleTime: 0,
-    gcTime: 0
+    const frame = requestAnimationFrame(measure);
+    const observer =
+      typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(measure)
+        : null;
+    observer?.observe(host);
+    window.addEventListener("resize", measure);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, []);
+  const [scope, setScope] = useState<"prepared" | "search">("prepared");
+  const [kind, setKind] = useState("all"),
+    [type, setType] = useState("全部"),
+    [filter, setFilter] = useState("");
+  const [search, setSearch] = useState(""),
+    [query, setQuery] = useState(""),
+    [cursor, setCursor] = useState(0);
+  const [activeDocumentId, setActiveDocumentId] = useState<string | null>(null);
+  const [selection, setSelection] = useState<Selection | null>(null),
+    [spread, setSpread] = useState(0);
+  const [citationIntent, setCitationIntent] = useState({
+    citation: focusCitation,
+    consumed: false,
   });
-  const sourceQuery = useQuery({
-    queryKey: ['creation-source', domain, contextKey, active?.source.sourceRef ?? focused?.sourceRef, active?.source.field ?? focused?.field, active?.source.sourceVersion ?? focused?.sourceVersion],
-    queryFn: ({
-      signal
-    }) => {
-      const selected = active?.source ?? focused;
-      if (!selected) throw new Error('未选来源');
-      return api.source(domain, selected, signal);
+  // A new citation reference is a new positioning intent. Local navigation consumes it.
+  if (citationIntent.citation !== focusCitation) {
+    setCitationIntent({ citation: focusCitation, consumed: false });
+    setSelection(null);
+    setActiveDocumentId(null);
+    setSpread(0);
+  }
+  const citationFocusActive = !!focusCitation && !citationIntent.consumed;
+  function releaseCitationFocus() {
+    if (focusCitation)
+      setCitationIntent({ citation: focusCitation, consumed: true });
+  }
+  const [group, setGroup] = useState<CanvasGroup>("inbox"),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState("");
+  const [busyAction, setBusyAction] = useState<"prepare" | "collect" | null>(
+    null,
+  );
+  const preparationIntent =
+    document.materialPreparation || document.materials.length
+      ? null
+      : JSON.stringify([
+          document.title,
+          document.angle,
+          document.outline,
+          document.topicRef,
+        ]);
+  const prepared = useQuery({
+    queryKey: [
+      "creation-materials",
+      domain,
+      contextKey,
+      document.materials,
+      document.materialPreparation?.terms,
+      preparationIntent,
+    ],
+    queryFn: async ({ signal }) => {
+      const collection = await (document.materials.length ||
+      document.materialPreparation
+        ? api.resolveMaterials(
+            {
+              domainRef: domain,
+              selections: document.materials,
+              ...(document.materialPreparation
+                ? { terms: document.materialPreparation.terms }
+                : {}),
+            },
+            signal,
+          )
+        : api.prepareMaterials(
+            {
+              domainRef: domain,
+              title: document.title,
+              angle: document.angle,
+              outline: document.outline,
+              topicRef: document.topicRef,
+            },
+            signal,
+          ));
+      return { ...collection, requestedIntent: preparationIntent };
     },
-    enabled: visibleSurface && (active !== null || !!focused),
-    staleTime: 0,
-    gcTime: 0
+    enabled: active,
+    gcTime: 0,
+    retry: false,
   });
-  const all = useMemo(() => list.data?.items.flatMap(strips) ?? [], [list.data]);
-  function matchingExcerpts(strip: Strip) {
-    return document.excerpts.filter(excerpt => {
-      const c = excerpt.citation,
-        s = strip.source;
-      return c.sourceKind === s.sourceKind && c.sourceRef === s.sourceRef && c.sourceVersion === s.sourceVersion && c.field === s.field && c.start < strip.end && c.end > strip.start;
-    });
-  }
-  const visible = all.filter(strip => {
-    const matches = matchingExcerpts(strip);
-    if (usage === 'collected') return matches.length > 0;
-    if (usage === 'uncollected') return matches.length === 0;
-    if (usage !== 'all') return matches.some(excerpt => document.canvas.some(card => card.excerptId === excerpt.id && card.group === usage));
-    return true;
+  const found = useQuery({
+    queryKey: [
+      "creation-material-search",
+      domain,
+      contextKey,
+      query,
+      cursor,
+      kind,
+    ],
+    queryFn: ({ signal }) =>
+      api.searchMaterials(
+        {
+          domainRef: domain,
+          query,
+          cursor,
+          ...(kind === "all"
+            ? {}
+            : { kind: kind as "note" | "comment" | "ops_publication" }),
+        },
+        signal,
+      ),
+    enabled: active && scope === "search" && !!query.trim(),
+    gcTime: 0,
+    retry: false,
   });
-  const groups = new Map<string, Strip[]>();
-  for (const s of visible) {
-    const key = s.source.workRef ?? s.source.sourceRef;
-    groups.set(key, [...(groups.get(key) ?? []), s]);
-  }
-  const current = sourceQuery.isSuccess ? sourceQuery.data.item : undefined;
-  const requested = active?.source ?? focused;
-  const changed = !!current && !!requested && current.sourceVersion !== requested.sourceVersion;
-  const currentRange = !current || changed ? null : range ?? (focused && current.sourceRef === focused.sourceRef ? {
-    start: focused.start,
-    end: focused.end,
-    text: Array.from(current.text).slice(focused.start, focused.end).join('')
-  } : null);
-  const originalStrips = current ? strips(current) : [];
-  const selectedStrip = originalStrips.find(s => currentRange && s.start <= currentRange.start && s.end > currentRange.start);
-  const selectedParagraph = originalStrips.findIndex(s => currentRange && s.start <= currentRange.start && s.end > currentRange.start);
-  const spreadStart = Math.max(0, Math.floor(selectedParagraph / 2) * 2);
-  const spreads = new Map<string, Strip>();
-  for (const s of visible) {
-    const key = `${s.source.fragmentId}:${Math.floor(s.index / 2)}`;
-    if (!spreads.has(key)) spreads.set(key, s);
-  }
-  const spreadList = [...spreads.values()];
-  const activeSpread = spreadList.findIndex(s => s.source.fragmentId === current?.fragmentId && Math.floor(s.index / 2) === Math.floor((originalStrips[spreadStart]?.index ?? 0) / 2));
-  function clearSelection() {
-    setActive(null);
-    setFocused(null);
-    setRange(null);
-    setError('');
-  }
-  function choose(strip: Strip) {
-    setFocused(null);
-    setActive(strip);
-    setRange({
-      start: strip.start,
-      end: strip.end,
-      text: strip.text
+  const liveDocument = useRef(document),
+    requestEpoch = useRef(0);
+  useEffect(() => {
+    liveDocument.current = document;
+  }, [document]);
+  useEffect(
+    () => () => {
+      requestEpoch.current++;
+    },
+    [domain, contextKey],
+  );
+  const registered = useRef(false);
+  useEffect(() => {
+    if (
+      !active ||
+      !prepared.data ||
+      prepared.data.requestedIntent === null ||
+      prepared.data.requestedIntent !== preparationIntent ||
+      registered.current ||
+      document.materialPreparation
+    )
+      return;
+    registered.current = true;
+    const { methodVersion, query, terms, state, gaps, documents } =
+      prepared.data;
+    onChange({
+      ...document,
+      materials: addMaterials(
+        document.materials,
+        documents.map((item) => selectMaterial(item, "prepared")),
+      ),
+      materialPreparation: { methodVersion, query, terms, state, gaps },
     });
-    setError('');
-  }
-  async function collect() {
-    if (!current || !currentRange || currentRange.end <= currentRange.start) return;
-    setBusy(true);
-    setError('');
-    try {
-      const a = await api.anchor({
-        domainRef: domain,
-        sourceKind: current.sourceKind,
-        sourceRef: current.sourceRef,
-        workRef: current.workRef,
-        field: current.field,
-        sourceVersion: current.sourceVersion,
-        start: currentRange.start,
-        end: currentRange.end
+  }, [active, prepared.data, preparationIntent, document, onChange]);
+  const focused = useQuery({
+    queryKey: ["creation-material-focus", domain, contextKey, focusCitation],
+    queryFn: ({ signal }) =>
+      api.materialFromCitation(domain, focusCitation!, signal),
+    enabled: active && citationFocusActive,
+    gcTime: 0,
+    retry: false,
+  });
+  const collection = scope === "prepared" ? prepared : found;
+  const countsReady = collection.isSuccess;
+  const docs = useMemo(() => {
+    const items = collection.data?.documents ?? [];
+    return focused.data &&
+      !items.some((item) => item.documentId === focused.data.documentId)
+      ? [...items, focused.data]
+      : items;
+  }, [collection.data, focused.data]);
+  const pieces = useMemo(() => docs.flatMap(materialPieces), [docs]);
+  const visible = pieces.filter(
+    (piece) =>
+      (kind === "all" ||
+        piece.source.sourceKind === kind ||
+        (kind === "note" && piece.source.sourceKind === "ocr")) &&
+      (type === "全部" || piece.type === type) &&
+      `${piece.text} ${piece.source.authorLabel}`.includes(filter),
+  );
+  const focusedPiece =
+    citationFocusActive && focusCitation
+      ? pieces.find(
+          (piece) =>
+            piece.source.sourceRef === focusCitation.sourceRef &&
+            piece.source.field === focusCitation.field &&
+            piece.source.sourceVersion === focusCitation.sourceVersion &&
+            piece.start <= focusCitation.start &&
+            piece.end > focusCitation.start,
+        )
+      : undefined;
+  const changedFocus =
+    citationFocusActive &&
+    !!focusCitation &&
+    pieces.some(
+      (piece) =>
+        piece.source.sourceRef === focusCitation.sourceRef &&
+        piece.source.field === focusCitation.field &&
+        piece.source.sourceVersion !== focusCitation.sourceVersion,
+    );
+  const requestedSelection =
+    selection ??
+    (focusedPiece && focusCitation
+      ? {
+          piece: focusedPiece,
+          start: focusCitation.start,
+          end: focusCitation.end,
+          text: Array.from(focusedPiece.source.text)
+            .slice(focusCitation.start, focusCitation.end)
+            .join(""),
+        }
+      : null);
+  const selected =
+    requestedSelection &&
+    pieces.some(
+      (piece) =>
+        piece.id === requestedSelection.piece.id &&
+        piece.source.sourceVersion ===
+          requestedSelection.piece.source.sourceVersion,
+    )
+      ? requestedSelection
+      : null;
+  const selectedPaperId = selected?.piece.id ?? null;
+  useEffect(() => {
+    if (!active || !selectedPaperId) return;
+    const host = paperScroller.current,
+      paper = paperButtons.current.get(selectedPaperId);
+    if (
+      !host ||
+      !paper ||
+      !host.contains(paper) ||
+      !host.clientHeight ||
+      !host.clientWidth
+    )
+      return;
+    const viewport = host.getBoundingClientRect(),
+      target = paper.getBoundingClientRect();
+    const topEdge = viewport.top + host.clientTop,
+      leftEdge = viewport.left + host.clientLeft;
+    const bottomEdge = topEdge + host.clientHeight,
+      rightEdge = leftEdge + host.clientWidth;
+    const nearestTop =
+      target.top < topEdge
+        ? host.scrollTop + target.top - topEdge
+        : target.bottom > bottomEdge
+          ? host.scrollTop + target.bottom - bottomEdge
+          : host.scrollTop;
+    const nearestLeft =
+      target.left < leftEdge
+        ? host.scrollLeft + target.left - leftEdge
+        : target.right > rightEdge
+          ? host.scrollLeft + target.right - rightEdge
+          : host.scrollLeft;
+    // Only this scroll surface moves. Instant nearest scrolling also respects reduced motion.
+    if (nearestTop !== host.scrollTop || nearestLeft !== host.scrollLeft)
+      host.scrollTo({
+        top: nearestTop,
+        left: nearestLeft,
+        behavior: "instant",
       });
-      onCollect(a, group);
-    } catch (e) {
-      setError(api.errorText(e));
+  }, [active, selectedPaperId, selection]);
+  const current =
+    docs.find(
+      (item) =>
+        item.documentId === (selected?.piece.documentId ?? activeDocumentId),
+    ) ??
+    docs.find((item) =>
+      visible.some((piece) => piece.documentId === item.documentId),
+    ) ??
+    docs[0];
+  const leaves = current ? readingLeaves(current, leafCapacity) : [];
+  const selectedPage = selected
+    ? leaves.findIndex((leaf) =>
+        leaf.some((piece) => piece.id === selected.piece.id),
+      )
+    : -1;
+  const currentSpread =
+    selectedPage >= 0
+      ? Math.floor(selectedPage / 2) * 2
+      : Math.min(spread, Math.max(0, leaves.length - 1));
+  const groups = new Map<string, ReadingPiece[]>();
+  for (const piece of visible) {
+    const anonymous =
+      !piece.source.authorLabel.trim() ||
+      /未知|匿名|未取得|不详/u.test(piece.source.authorLabel);
+    const key =
+      piece.source.sourceKind === "comment"
+        ? `comment:${piece.documentId}`
+        : anonymous
+          ? `unknown:${piece.documentId}`
+          : piece.source.authorLabel;
+    groups.set(key, [...(groups.get(key) ?? []), piece]);
+  }
+  const commentGroups = [...groups.keys()].filter(key => key.startsWith("comment:"));
+  const added =
+    !!current &&
+    document.materials.some((item) => item.documentId === current.documentId);
+  function choose(piece: ReadingPiece) {
+    releaseCitationFocus();
+    setActiveDocumentId(piece.documentId);
+    setSelection({
+      piece,
+      start: piece.start,
+      end: piece.end,
+      text: piece.text,
+    });
+    setError("");
+  }
+  function collected(piece: ReadingPiece) {
+    return document.excerpts.some(
+      (excerpt) =>
+        excerpt.citation.sourceRef === piece.source.sourceRef &&
+        excerpt.citation.sourceVersion === piece.source.sourceVersion &&
+        excerpt.citation.field === piece.source.field &&
+        excerpt.citation.start < piece.end &&
+        excerpt.citation.end > piece.start,
+    );
+  }
+  const canCollect =
+    !!selected &&
+    !!current &&
+    selected.piece.documentId === current.documentId &&
+    document.materials.some(
+      (item) => item.documentId === selected.piece.documentId,
+    ) &&
+    current.qualification === "readable";
+  async function collect() {
+    if (!canCollect || !selected || !current) return;
+    setBusy(true);
+    setBusyAction("collect");
+    setError("");
+    try {
+      const source = selected.piece.source;
+      const anchor = await api.anchor({
+        domainRef: domain,
+        sourceKind: source.sourceKind,
+        sourceRef: source.sourceRef,
+        workRef: source.workRef,
+        field: source.field,
+        sourceVersion: source.sourceVersion,
+        start: selected.start,
+        end: selected.end,
+      });
+      onCollect(anchor, group);
+    } catch (cause) {
+      setError(api.errorText(cause));
     } finally {
       setBusy(false);
+      setBusyAction(null);
     }
   }
-  const context = current ? sourceQuery.data?.context : null;
-  const media = isRecord(context) && isRecord(context.dossier) && Array.isArray(context.dossier.media) ? context.dossier.media : [];
-  const original = media.find(m => isRecord(m) && m.derivativeRef === current?.location?.derivativeRef);
-  const imageUrl = isRecord(original) && typeof original.originalAssetUrl === 'string' && original.originalAssetUrl.startsWith('/api/local/media/') ? original.originalAssetUrl : null;
-  return <div className={styles.materialBrowser}>
-    <div className={styles.filterbar}>
-      <div role="group" aria-label="材料类型">{(Object.keys(SOURCE_LABELS) as SourceKind[]).map(k => <button type="button" key={k} aria-pressed={kind === k} onClick={() => {
-          setKind(k);
-          setCursor(0);
-          clearSelection();
-        }}>{SOURCE_LABELS[k]}</button>)}</div>
-      <form onSubmit={e => {
-        e.preventDefault();
-        setQuery(search);
-        setCursor(0);
-        clearSelection();
-      }}>
-<input aria-label="检索已取得材料" placeholder="检索已取得材料" value={search} onChange={e => setSearch(e.target.value)} />
-<button>检索</button>
-</form>
-    </div>
-    <div className={styles.filterbar}>
-      <div role="group" aria-label="材料用途">{[{
-          id: 'all',
-          label: '全部'
-        }, {
-          id: 'collected',
-          label: '已摘录'
-        }, {
-          id: 'uncollected',
-          label: '未摘录'
-        }, ...GROUPS.filter(g => g.id !== 'inbox')].map(g => <button type="button" key={g.id} aria-pressed={usage === g.id} onClick={() => {
-          setUsage(g.id);
-          clearSelection();
-        }}>{g.label}</button>)}</div>
-      <small>{list.data ? `本页 ${list.data.returnedSourceCount} 个来源 · ${visible.length} 个片段` : '读取中'}</small>
-    </div>
-    {list.error ? <p role="alert" className={styles.error}>{api.errorText(list.error)} <button onClick={() => void list.refetch()}>重新读取</button>
-</p> : null}
-    {changed ? <p className={styles.warning}>来源版本已变化。当前显示最新原文，请重新选取准确文字后摘录。</p> : null}
-    <div className={styles.materialStage}>
-      <section className={styles.readingSpace} aria-label="原文阅读">
-        <div className={styles.bookMeta}>
-<span>{current ? `${SOURCE_LABELS[current.sourceKind]} · ${current.authorLabel}` : '选择纸条，打开原文'}</span>
-<span>{current?.bodyState === 'KNOWN' ? '已取得原文' : current?.bodyState === 'PARTIAL' ? '部分取得' : current ? '正文状态未知' : ''}</span>
-</div>
-        <div className={styles.openBook} key={current ? `${current.fragmentId}:${spreadStart}` : 'empty'}>
-          {[0, 1].map(side => {
-            const paragraph = originalStrips[spreadStart + side];
-            return <article className={side === 0 ? styles.leftLeaf : styles.rightLeaf} key={side}>
-            <div className={styles.running}>{side === 0 ? current?.title ?? '材料书页' : current ? '原文上下文' : '研读取材'}</div>
-            {current && paragraph ? <>{side === 0 ? <h2>{current.title}</h2> : null}<ReadingLeaf strip={paragraph} selection={currentRange} onSelection={s => {
-                  setRange(s);
-                  setFocused(null);
-                  setActive({
-                    ...paragraph,
-                    source: current
-                  });
-                }} />
-<footer className={styles.leafFooter}>第 {paragraph.index + 1} 段</footer>
-</> : sourceQuery.isFetching ? <p>读取来源中…</p> : sourceQuery.error ? <p className={styles.error} role="alert">{api.errorText(sourceQuery.error)}</p> : current && side === 1 ? <>
-<SourceContextView value={context} />
-<p className={styles.empty}>这一篇读到这里。</p>
-</> : <p className={styles.empty}>从右侧选一条材料</p>}
-          </article>;
-          })}
+  async function prepareAgain(terms: string[]) {
+    setBusy(true);
+    setBusyAction("prepare");
+    setError("");
+    const epoch = ++requestEpoch.current;
+    const intent = JSON.stringify([
+      document.title,
+      document.angle,
+      document.outline,
+    ]);
+    try {
+      const result = await api.prepareMaterials({
+        domainRef: domain,
+        title: document.title,
+        angle: document.angle,
+        outline: document.outline,
+        topicRef: document.topicRef,
+        terms,
+      });
+      if (
+        epoch !== requestEpoch.current ||
+        intent !==
+          JSON.stringify([
+            liveDocument.current.title,
+            liveDocument.current.angle,
+            liveDocument.current.outline,
+          ])
+      ) {
+        setError("选题意图已有变化，请按当前方案重新准备。");
+        return;
+      }
+      const latest = liveDocument.current;
+      const { methodVersion, query, terms: chosen, state, gaps } = result;
+      onChange({
+        ...latest,
+        materials: addMaterials(
+          latest.materials.filter((item) => item.addedBy === "manual"),
+          result.documents.map((item) => selectMaterial(item, "prepared")),
+        ),
+        materialPreparation: {
+          methodVersion,
+          query,
+          terms: chosen,
+          state,
+          gaps,
+        },
+      });
+      setSelection(null);
+      setActiveDocumentId(null);
+    } catch (cause) {
+      setError(api.errorText(cause));
+    } finally {
+      setBusy(false);
+      setBusyAction(null);
+    }
+  }
+  function captureBookSelection() {
+    const chosen = window.getSelection();
+    if (!chosen || chosen.isCollapsed || !chosen.rangeCount) return;
+    const range = chosen.getRangeAt(0);
+    const first =
+      range.startContainer.parentElement?.closest("[data-fragment-id]");
+    const last =
+      range.endContainer.parentElement?.closest("[data-fragment-id]");
+    const from = pieces.find(
+        (piece) => piece.id === first?.getAttribute("data-fragment-id"),
+      ),
+      to = pieces.find(
+        (piece) => piece.id === last?.getAttribute("data-fragment-id"),
+      );
+    if (
+      !first ||
+      !last ||
+      !from ||
+      !to ||
+      from.source.fragmentId !== to.source.fragmentId
+    )
+      return;
+    const before = range.cloneRange();
+    before.selectNodeContents(first);
+    before.setEnd(range.startContainer, range.startOffset);
+    const start = from.start + Array.from(before.toString()).length,
+      text = range.toString();
+    if (
+      Array.from(from.source.text)
+        .slice(start, start + Array.from(text).length)
+        .join("") !== text
+    )
+      return;
+    setSelection({
+      piece: from,
+      start,
+      end: start + Array.from(text).length,
+      text,
+    });
+    setActiveDocumentId(from.documentId);
+  }
+  function addCurrent() {
+    if (!current) return;
+    onChange({
+      ...document,
+      materials: addMaterials(document.materials, [
+        selectMaterial(current, "manual"),
+      ]),
+    });
+  }
+  function switchScope(next: "prepared" | "search") {
+    releaseCitationFocus();
+    setScope(next);
+    setSelection(null);
+    setActiveDocumentId(null);
+    setSpread(0);
+  }
+  return (
+    <div className={styles.materialBrowser}>
+      <div className={styles.materialScope}>
+        <nav className={styles.steps} aria-label="材料范围">
+          <button
+            aria-pressed={scope === "prepared"}
+            onClick={() => switchScope("prepared")}
+          >
+            本篇材料{" "}
+            <small>
+              {prepared.isSuccess ? document.materials.length : "—"}
+            </small>
+          </button>
+          <button
+            aria-pressed={scope === "search"}
+            onClick={() => switchScope("search")}
+          >
+            搜寻更多
+          </button>
+        </nav>
+        {scope === "prepared" ? (
+          <details>
+            <summary>
+              {prepared.isPending
+                ? "材料准备中…"
+                : prepared.isError
+                  ? "材料准备失败"
+                  : document.materialPreparation?.state === "insufficient"
+                    ? "材料不足"
+                    : "材料已准备"}
+            </summary>
+            <p>{document.materialPreparation?.query}</p>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                const data = new FormData(event.currentTarget);
+                void prepareAgain(
+                  String(data.get("terms") ?? "")
+                    .split(/[、,，\s]+/u)
+                    .filter(Boolean),
+                );
+              }}
+            >
+              <label>
+                本篇检索词
+                <input
+                  key={document.materialPreparation?.terms.join(",")}
+                  aria-label="本篇检索词"
+                  name="terms"
+                  defaultValue={
+                    document.materialPreparation?.terms.join("、") ?? ""
+                  }
+                />
+              </label>
+              <ActionButton
+                type="submit"
+                variant="outline"
+                busy={busyAction === "prepare"}
+                disabled={busy}
+              >
+                {busy ? "准备中…" : "按这些词重新准备"}
+              </ActionButton>
+            </form>
+            {document.materialPreparation?.gaps.map((gap) => (
+              <p key={gap}>{gap}</p>
+            ))}
+            <p>按关键词匹配，相关程度请结合原文核对。</p>
+            <ActionButton
+              variant="outline"
+              onClick={() => void prepared.refetch()}
+            >
+              重新读取
+            </ActionButton>
+          </details>
+        ) : (
+          <form
+            className={styles.row}
+            onSubmit={(event) => {
+              event.preventDefault();
+              releaseCitationFocus();
+              setQuery(search);
+              setCursor(0);
+              setSelection(null);
+              setActiveDocumentId(null);
+            }}
+          >
+            <input
+              aria-label="检索已取得材料"
+              placeholder="检索其他笔记、原声或自有作品"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+            <ActionButton
+              type="submit"
+              variant="outline"
+              busy={found.isFetching}
+              disabled={found.isFetching}
+            >
+              检索
+            </ActionButton>
+          </form>
+        )}
+      </div>
+      <div className={styles.filterbar}>
+        <div role="group" aria-label="材料类型">
+          {[
+            { id: "all", label: "全部材料" },
+            { id: "note", label: "原笔记" },
+            { id: "comment", label: "用户原声" },
+            { id: "ops_publication", label: "我方作品" },
+          ].map((item) => (
+            <button
+              key={item.id}
+              aria-pressed={kind === item.id}
+              onClick={() => {
+                releaseCitationFocus();
+                setKind(item.id);
+                setCursor(0);
+                setSelection(null);
+                setActiveDocumentId(null);
+              }}
+            >
+              {item.label}
+              <small>
+                {countsReady
+                  ? docs.filter(
+                      (doc) => item.id === "all" || doc.sourceKind === item.id,
+                    ).length
+                  : "—"}
+              </small>
+            </button>
+          ))}
         </div>
-        <div className={styles.bookNav}>
-<button disabled={activeSpread <= 0} onClick={() => {
-            const s = spreadList[activeSpread - 1];
-            if (s) choose(s);
-          }}>← 上一展开页</button>
-<span>{current ? `${spreadStart + 1}–${Math.min(spreadStart + 2, originalStrips.length)} / ${originalStrips.length} 段` : '未选择'}</span>
-<button disabled={activeSpread < 0 || activeSpread >= spreadList.length - 1} onClick={() => {
-            const s = spreadList[activeSpread + 1];
-            if (s) choose(s);
-          }}>下一展开页 →</button>
-</div>
-        <nav className={styles.distribution} aria-label="材料分布索引">{[...groups.entries()].map(([id, items], i) => <div className={styles.indexRow} key={id}>
-<span>{String(i + 1).padStart(2, '0')}</span>{items.map(s => <button key={s.id} title={s.text} aria-label={`定位：${s.text}`} aria-current={selectedStrip?.id === s.id ? 'location' : undefined} data-current-source={current?.fragmentId === s.source.fragmentId} onClick={() => choose(s)}>
-<i />
-</button>)}</div>)}</nav>
-        {current ? <details className={styles.sourceDrawer}>
-<summary>原文上下文 / 来源详情</summary>
-<SourceContextView value={context} />{current.location ? <>
-<h3>图片文字位置</h3>{imageUrl ? <div className={styles.ocrImage}>
-<img src={imageUrl} alt="OCR 来源原图" />{current.location.lineSpans.filter(s => !currentRange || s.end > currentRange.start && s.start < currentRange.end).map(l => <span key={l.lineRef} style={{
-                left: `${l.bbox[0] * 100}%`,
-                top: `${l.bbox[1] * 100}%`,
-                width: `${l.bbox[2] * 100}%`,
-                height: `${l.bbox[3] * 100}%`
-              }} />)}</div> : <p>原图尚未取得；文字位置仍保留。</p>}</> : null}<dl>
-<dt>资格</dt>
-<dd>{current.qualification === 'readable' ? '可读' : current.qualification === 'restricted' ? '受限' : current.qualification === 'changed' ? '来源已变化' : '暂不可用'}</dd>
-<dt>版本</dt>
-<dd>{current.sourceVersion}</dd>
-<dt>原文位置</dt>
-<dd>{currentRange ? `${currentRange.start}–${currentRange.end}` : '未选取'}</dd>
-</dl>
-</details> : null}
-      </section>
-      <section className={styles.snippetWall} aria-label="分组摘录纸条">
-        <div className={styles.wallMeta}>
-<span>材料纸条</span>
-<small>{list.data?.searchScope === 'current_anonymous_comment_text' ? '当前匿名评论' : list.data?.searchScope === 'current_export_title_body' ? '我方导出内容' : '已接纳标题 / 正文 / 历史目录'}</small>
-</div>
-        <div className={styles.snippetGroups}>{[...groups.entries()].map(([id, items], i) => <section key={id} className={styles.snippetGroup} data-tone={i % 3}>
-<h3>{items[0]?.source.title || '未命名来源'} <small>{items.length}</small>
-</h3>
-<div>{items.map(s => <button type="button" key={s.id} className={styles.paper} aria-pressed={selectedStrip?.id === s.id} data-fragment-id={s.id} data-collected={matchingExcerpts(s).length > 0} data-focus={focusCitation?.sourceRef === s.source.sourceRef} onClick={() => choose(s)}>{s.text}</button>)}</div>
-</section>)}</div>
-        {list.data && !visible.length ? <p className={styles.empty}>当前范围没有可读材料。更换类型或关键词继续。</p> : null}
-        <div className={styles.row}>
-<button disabled={cursor === 0} onClick={() => {
-            setCursor(Math.max(0, cursor - 30));
-            clearSelection();
-          }}>上一页来源</button>
-<span>来源目录第 {Math.floor(cursor / 30) + 1} 页</span>
-<button disabled={list.data?.nextCursor == null} onClick={() => {
-            if (list.data?.nextCursor != null) {
-              setCursor(list.data.nextCursor);
-              clearSelection();
-            }
-          }}>更多来源</button>
-</div>
-      </section>
+        <input
+          aria-label="搜索材料中的片段"
+          placeholder="找一句话、一个细节…"
+          value={filter}
+          onChange={(event) => setFilter(event.target.value)}
+        />
+      </div>
+      <div className={styles.filterbar}>
+        <div role="group" aria-label="片段类型">
+          {["全部", ...FRAGMENT_TYPES].map((item) => (
+            <button
+              key={item}
+              aria-pressed={type === item}
+              onClick={() => {
+                releaseCitationFocus();
+                setType(item);
+                setSelection(null);
+              }}
+            >
+              {item}
+              <small>
+                {countsReady
+                  ? pieces.filter(
+                      (piece) => item === "全部" || piece.type === item,
+                    ).length
+                  : "—"}
+              </small>
+            </button>
+          ))}
+        </div>
+        <small>规则辅助 · 待核对</small>
+      </div>
+      {collection.error ? (
+        <p role="alert" className={styles.error}>
+          {api.errorText(collection.error)}{" "}
+          <ActionButton
+            variant="outline"
+            onClick={() => void collection.refetch()}
+          >
+            重试读取
+          </ActionButton>
+        </p>
+      ) : null}
+      {changedFocus ? (
+        <p className={styles.warning}>
+          旧摘录的来源版本已变化。当前显示最新原文，请重新选择准确片段后使用。
+        </p>
+      ) : null}
+      <div className={styles.materialStage}>
+        <section
+          ref={readingHost}
+          className={styles.readingSpace}
+          aria-label="原文阅读"
+        >
+          <div className={styles.bookMeta}>
+            <span>
+              {current
+                ? `${SOURCE_LABELS[current.sourceKind]} · ${current.authorLabel}`
+                : "选择一份材料"}
+            </span>
+            <span>
+              {current
+                ? current.qualification === "readable"
+                  ? "已取得原文"
+                  : current.qualification === "changed"
+                    ? "来源已变化，请重新核对"
+                    : current.qualification === "restricted"
+                      ? "来源已受限"
+                      : "来源暂不可用"
+                : ""}
+            </span>
+            {current ? (
+              <details className={styles.sourceDrawer}>
+                <summary>来源详情</summary>
+                <SourceContextView value={current.context} />
+                {selected ? (
+                  <OcrEvidence
+                    piece={selected.piece}
+                    context={current.context}
+                    start={selected.start}
+                    end={selected.end}
+                  />
+                ) : null}
+                {current.matchReasons.map((reason) => (
+                  <p key={reason}>{reason}</p>
+                ))}
+                <p>来源版本：{current.sourceVersion}</p>
+                {current.qualification === "changed" ? (
+                  <ActionButton
+                    variant="outline"
+                    onClick={() =>
+                      onChange({
+                        ...document,
+                        materials: document.materials.map((item) =>
+                          item.documentId === current.documentId
+                            ? { ...item, sourceVersion: current.sourceVersion }
+                            : item,
+                        ),
+                      })
+                    }
+                  >
+                    已核对，采用当前来源版本
+                  </ActionButton>
+                ) : null}
+                {scope === "prepared" ? (
+                  <ActionButton
+                    variant="outline"
+                    onClick={() => {
+                      onChange({
+                        ...document,
+                        materials: document.materials.filter(
+                          (item) => item.documentId !== current.documentId,
+                        ),
+                      });
+                      setSelection(null);
+                      setActiveDocumentId(null);
+                    }}
+                  >
+                    从本篇移除材料
+                  </ActionButton>
+                ) : null}
+              </details>
+            ) : null}
+          </div>
+          <div
+            className={styles.openBook}
+            onMouseUp={captureBookSelection}
+            onKeyUp={captureBookSelection}
+            key={`${current?.documentId}:${currentSpread}`}
+          >
+            {[0, 1].map((side) => (
+              <article
+                className={side ? styles.rightLeaf : styles.leftLeaf}
+                key={side}
+              >
+                <div className={styles.running}>
+                  {current?.title ?? "材料书页"}
+                </div>
+                {current && leaves[currentSpread + side]?.length ? (
+                  <>
+                    {currentSpread === 0 &&
+                    side === 0 &&
+                    !current.fragments.some(
+                      (fragment) => fragment.field === "title",
+                    ) ? (
+                      <h2>{current.title}</h2>
+                    ) : null}
+                    {leaves[currentSpread + side]?.map((piece) => (
+                      <BookPassage
+                        key={piece.id}
+                        piece={piece}
+                        selected={selected}
+                        matching={visible.some((item) => item.id === piece.id)}
+                        onSelect={(value) => {
+                          setSelection(value);
+                          setActiveDocumentId(value.piece.documentId);
+                        }}
+                      />
+                    ))}
+                  </>
+                ) : collection.isFetching ? (
+                  <p>读取来源中…</p>
+                ) : current && currentSpread + side >= leaves.length ? (
+                  <>
+                    <SourceContextView value={current.context} />
+                    <p className={styles.muted}>
+                      {current.qualification === "readable"
+                        ? "本篇已取得内容到此。"
+                        : "当前来源内容无法阅读。"}
+                    </p>
+                  </>
+                ) : (
+                  <p className={styles.empty}>
+                    {scope === "search" && !query
+                      ? "检索后先预览原文，再加入本篇。"
+                      : "本篇尚无可读材料，可搜寻更多。"}
+                  </p>
+                )}
+                <footer className={styles.leafFooter}>
+                  {current
+                    ? currentSpread + side < leaves.length
+                      ? `${currentSpread + side + 1} / ${leaves.length}`
+                      : ""
+                    : "—"}
+                </footer>
+              </article>
+            ))}
+          </div>
+          <div className={styles.bookNav}>
+            <button
+              disabled={currentSpread <= 0}
+              onClick={() => {
+                setSelection(null);
+                setSpread(Math.max(0, currentSpread - 2));
+                if (current) setActiveDocumentId(current.documentId);
+                releaseCitationFocus();
+              }}
+            >
+              ← 上一展开页
+            </button>
+            <span>
+              {current
+                ? `${currentSpread + 1}–${Math.min(currentSpread + 2, leaves.length)} / ${leaves.length} 页`
+                : "未选择"}
+            </span>
+            <button
+              disabled={currentSpread + 2 >= leaves.length}
+              onClick={() => {
+                setSelection(null);
+                setSpread(currentSpread + 2);
+                if (current) setActiveDocumentId(current.documentId);
+                releaseCitationFocus();
+              }}
+            >
+              下一展开页 →
+            </button>
+          </div>
+          <MaterialDistribution
+            documents={docs}
+            pieces={pieces}
+            visible={visible}
+            selectedId={selected?.piece.id ?? null}
+            currentDocumentId={current?.documentId ?? null}
+            countsReady={countsReady}
+            onChoose={choose}
+            onOpenDocument={(documentId) => {
+              releaseCitationFocus();
+              setActiveDocumentId(documentId);
+              setSelection(null);
+              setSpread(0);
+            }}
+          />
+        </section>
+        <section className={styles.snippetWall} aria-label="分组摘录纸条">
+          <div className={styles.wallMeta}>
+            <h2>片段</h2>
+            <small>
+              {countsReady ? visible.length : "—"} 个片段 ·{" "}
+              {countsReady
+                ? new Set(visible.map((piece) => piece.documentId)).size
+                : "—"}{" "}
+              份材料
+            </small>
+          </div>
+          <div
+            ref={paperScroller}
+            data-material-paper-scroll
+            className={styles.snippetGroups}
+          >
+            <div className={styles.snippetColumns}>
+              {[...groups.entries()].map(([label, items], index) => (
+                <section
+                  className={styles.snippetGroup}
+                  key={label}
+                  data-tone={index % 3}
+                >
+                  <h3>
+                    <button
+                      onClick={() => {
+                        if (label.startsWith("unknown:") || label.startsWith("comment:")) {
+                          const first = items[0];
+                          if (first) choose(first);
+                        } else setFilter(items[0]?.source.authorLabel ?? "");
+                      }}
+                    >
+                      {label.startsWith("unknown:") || label.startsWith("comment:")
+                        ? (docs.find(
+                            (doc) => doc.documentId === items[0]?.documentId,
+                          )?.title ?? "未命名原篇")
+                        : label}
+                      {label.startsWith("comment:") ? <small> · 原声 {commentGroups.indexOf(label) + 1}</small> : null}
+                    </button>{" "}
+                    <small>{items.length}</small>
+                  </h3>
+                  <div>
+                    {items.map((piece) => (
+                      <button
+                        type="button"
+                        key={piece.id}
+                        className={styles.paper}
+                        ref={(node) => {
+                          if (node) paperButtons.current.set(piece.id, node);
+                          else paperButtons.current.delete(piece.id);
+                        }}
+                        aria-pressed={selected?.piece.id === piece.id}
+                        data-fragment-id={piece.id}
+                        data-collected={collected(piece)}
+                        onClick={() => choose(piece)}
+                      >
+                        {piece.text}
+                        {collected(piece) ? <small> ✓</small> : null}
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </div>
+          </div>
+          {!visible.length && collection.isSuccess ? (
+            <p className={styles.empty}>
+              没有匹配片段。可更换筛选或搜寻更多材料。
+            </p>
+          ) : null}
+          {scope === "search" && found.data ? (
+            <div className={styles.row}>
+              <ActionButton
+                variant="outline"
+                disabled={!cursor}
+                onClick={() => {
+                  releaseCitationFocus();
+                  setSelection(null);
+                  setActiveDocumentId(null);
+                  setSpread(0);
+                  setCursor(Math.max(0, cursor - 24));
+                }}
+              >
+                上一页来源
+              </ActionButton>
+              <span>第 {Math.floor(cursor / 24) + 1} 页</span>
+              <ActionButton
+                variant="outline"
+                disabled={found.data.nextCursor === null}
+                onClick={() => {
+                  releaseCitationFocus();
+                  setSelection(null);
+                  setActiveDocumentId(null);
+                  setSpread(0);
+                  setCursor(found.data?.nextCursor ?? 0);
+                }}
+              >
+                更多来源
+              </ActionButton>
+            </div>
+          ) : null}
+        </section>
+      </div>
+      <div className={styles.selectedStrip}>
+        <div>
+          <small>
+            {selected
+              ? `${SOURCE_LABELS[selected.piece.source.sourceKind]} · ${selected.piece.source.authorLabel}`
+              : (current?.title ?? "未选择片段")}
+          </small>
+          {selected ? <blockquote>{selected.text}</blockquote> : null}
+          {error ? (
+            <p role="alert" className={styles.error}>
+              {error}
+            </p>
+          ) : null}
+        </div>
+        <div className={styles.selectedActions}>
+          {scope === "search" ? (
+            <ActionButton
+              variant="outline"
+              className={!added ? styles.primary : undefined}
+              disabled={
+                !current || added || current.qualification !== "readable"
+              }
+              onClick={addCurrent}
+            >
+              {added ? "已加入本篇" : "加入本篇材料"}
+            </ActionButton>
+          ) : null}
+          <div className={styles.row}>
+            <select
+              aria-label="摘录归组"
+              value={group}
+              onChange={(event) => setGroup(event.target.value as CanvasGroup)}
+            >
+              {GROUPS.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+            <ActionButton
+              variant="primary"
+              busy={busyAction === "collect"}
+              disabled={!canCollect || busy}
+              onClick={() => void collect()}
+            >
+              {busyAction === "collect" ? "核验中…" : "摘入画布"}
+            </ActionButton>
+          </div>
+          {onCanvas ? (
+            <ActionButton variant="quiet" onClick={onCanvas}>
+              查看画布 · {document.canvas.length}
+            </ActionButton>
+          ) : null}
+        </div>
+      </div>
     </div>
-    <div className={styles.selectedStrip}>
-<div>
-<small>{currentRange ? '已选原文' : '选择原文后摘录'}</small>{currentRange ? <blockquote>{currentRange.text}</blockquote> : null}{error ? <p className={styles.error} role="alert">{error}</p> : null}</div>
-<div className={styles.row}>
-<select aria-label="摘录归组" value={group} onChange={e => setGroup(e.target.value as CanvasGroup)}>{GROUPS.map(g => <option key={g.id} value={g.id}>{g.label}</option>)}</select>
-<button className={styles.primary} disabled={!currentRange || !current || busy || !!sourceQuery.error} onClick={() => void collect()}>{busy ? '核验中…' : '摘入画布'}</button>
-</div>
-</div>
-  </div>;
+  );
 }

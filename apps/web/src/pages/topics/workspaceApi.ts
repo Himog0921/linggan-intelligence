@@ -90,7 +90,7 @@ export function workspace(value: unknown, expectedKey?: string) {
       if (reference(identity, "publicRef") !== classification.ref)
         throw new d.ShapeError("workResource.identity.publicRef");
       const detailUrl = d.str(item, "detailUrl");
-      if (detailUrl !== `/api/local/work-resources/${classification.ref}`)
+      if (detailUrl !== `/api/local/topic-workspaces/${canonicalKey}/materials/${classification.ref}`)
         throw new d.ShapeError("detailUrl");
       return {
         ...classification,
@@ -110,10 +110,12 @@ export function workspace(value: unknown, expectedKey?: string) {
       topic: {
         canonicalKey,
         definition: {
+          lifecycleState: d.str(definition, "lifecycleState"),
           displayName: d.str(definition, "displayName"),
           definitionText: d.str(definition, "definitionText"),
           version: positiveInteger(definition, "version"),
         },
+        runKind: d.str(run, "runKind"),
         adjudicationNote: d.str(run, "adjudicationNote"),
         materialPackRef: reference(pack, "materialPackRef"),
         sourceBoundary: d.str(pack, "sourceBoundary"),

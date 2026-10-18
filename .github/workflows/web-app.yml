@@ -6,34 +6,15 @@ on:
     branches: [main]
     paths:
       - 'apps/web/**'
+      - 'apps/api/src/**'
+      - 'scripts/check-web-react-*'
+      - 'scripts/login-anatomy/**'
       - 'apps/api/Cargo.toml'
-      - 'apps/api/src/main.rs'
-      - 'apps/api/src/local_web/web_app*.rs'
-      - 'apps/api/src/local_web/model_settings.rs'
-      - 'apps/api/src/local_web/collection*'
-      - 'apps/api/src/local_web/station_view.rs'
-      - 'apps/api/src/local_web/target_drawer.rs'
-      - 'apps/api/src/local_web/corpus_shell_api.rs'
-      - 'apps/api/src/local_web/comment_study*'
-      - 'apps/api/src/local_web/creators*.rs'
-      - 'apps/api/src/local_web/evidence*.rs'
-      - 'apps/api/src/local_web/research_dossier*.rs'
-      - 'apps/api/src/local_web/material_*.rs'
-      - 'apps/api/src/local_web/local_media_routes.rs'
-      - 'apps/api/src/local_web/local_asset_delivery.rs'
-      - 'apps/api/src/local_web/shell.rs'
-      - 'apps/api/src/local_web/shell.css'
-      - 'apps/api/src/local_web/lids_tokens.css'
-      - 'apps/api/src/local_web.rs'
       - 'scripts/runtime/prepare-web.sh'
       - 'scripts/test-web-app-postgres.sh'
       - 'scripts/test-content-workbench-postgres.sh'
       - 'scripts/test-collection-*.cjs'
       - 'scripts/test-collection-single-run-postgres.sh'
-      - 'apps/api/src/local_web/content_workbench*'
-      - 'apps/api/src/local_web/full_schema_fixture.rs'
-      - 'apps/api/src/local_web/ops.rs'
-      - 'apps/api/src/local_web/topic*.rs'
       - 'crates/evidence/src/material_social_read.rs'
       - 'crates/evidence/src/research_dossier.rs'
       - 'crates/evidence/src/research_dossier/**'
@@ -49,6 +30,7 @@ on:
       - 'scripts/test-comment-study-productization-postgres.sh'
       - 'crates/intelligence/src/content_workbench*'
       - 'crates/intelligence/src/content_workbench/**'
+      - 'crates/intelligence/src/content_workbench_sources/**'
       - 'crates/intelligence/tests/content_workbench*'
       - 'crates/intelligence/tests/support/content_workbench_fixture.rs'
       - 'database/migrations/0127_content_workbench.sql'
@@ -74,6 +56,8 @@ jobs:
           node-version-file: .nvmrc
       - name: Locked install
         run: npm ci --prefix apps/web --ignore-scripts --no-audit --no-fund
+      - name: Reject legacy production UI and duplicate React roots
+        run: node scripts/check-web-react-boundary.mjs && node --test scripts/check-web-react-boundary.test.mjs
       - name: Typecheck, lint, unit and component tests, production build
         run: npm --prefix apps/web run verify
       - name: Runtime preparation script reuses a matching build
@@ -110,7 +94,7 @@ jobs:
           npm ci --prefix apps/web --ignore-scripts --no-audit --no-fund
           npx --prefix apps/web playwright install --with-deps chromium
       - name: API route regression
-        run: cargo test -p linggan-api --bins --locked -- local_web::web_app_tests local_web::corpus_shell_api local_web::evidence_
+        run: cargo test -p linggan-api --bins --locked -- local_web::web_app_tests local_web::corpus_shell_api local_web::evidence_ local_web::content_workbench_sources_api::tests
       - name: Isolated PostgreSQL + Axum + React browser proof (synthetic credential only)
         env:
           WEB_APP_PROOF_DIR: ${{ runner.temp }}/web-app-proof
@@ -134,7 +118,7 @@ jobs:
         run: bash scripts/test-comment-study-productization-postgres.sh
       - name: Content workbench PostgreSQL contracts
         run: |
-          cargo test -p linggan-intelligence --lib exact_spans_keep_overlaps_codepoints_and_long_repeated_patterns --locked
+          cargo test -p linggan-intelligence --lib --locked -- content_workbench:: content_workbench_sources:: exact_spans_keep_overlaps_codepoints_and_long_repeated_patterns
           bash scripts/test-content-workbench-postgres.sh
       - name: Content workbench React browser and actual export proof
         env:

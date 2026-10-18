@@ -36,7 +36,7 @@ export async function verifyTopicWorkspace({
   const feedback = page.locator("#topic-feedback");
   const list = page.locator('#topic-material-list [role="option"]');
   const inspector = page.locator("#topic-inspector-facts");
-  const materialUrl = (ref) => `/api/local/work-resources/${ref}`;
+  const materialUrl = (ref) => `/api/local/topic-workspaces/${fixture.workspaceKey}/materials/${ref}`;
   async function open() {
     const read = page.waitForResponse(
       (response) =>
@@ -125,14 +125,16 @@ export async function verifyTopicWorkspace({
       new URL(materialUrl(fixture.materials[0].ref), baseURL).href,
     );
     assert(detailResponse);
-    // The existing Workspace link has no ObservationDomain identity. Keep its exact
-    // behavior and verify the API rejects absent context; never invent a domain from domainKey.
-    assert.equal(detailResponse.status(), 400);
-    assert.equal((await detailResponse.json()).code, "domain_required");
-    steps.push("existing_detail_link_keeps_explicit_domain_required_boundary");
+    assert.equal(detailResponse.status(), 200);
+    assert.equal((await detailResponse.json()).identity.publicRef, fixture.materials[0].ref);
+    steps.push("workspace_member_detail_preserves_exact_identity_without_invented_domain");
+    const missingDomain = await page.request.get(new URL(`/api/local/work-resources/${fixture.materials[0].ref}`,baseURL).href);
+    assert.equal(missingDomain.status(),400);
+    assert.equal((await missingDomain.json()).code,"domain_required");
+    steps.push("ordinary_work_resource_still_requires_explicit_domain");
     const bounded = await page.request.get(
       new URL(
-        `${materialUrl(fixture.materials[0].ref)}?domain=${fixture.domain}`,
+        `/api/local/work-resources/${fixture.materials[0].ref}?domain=${fixture.domain}`,
         baseURL,
       ).href,
     );
@@ -174,6 +176,7 @@ export async function verifyTopicWorkspace({
     assert.match(await feedback.textContent(), /topic_workspace_not_found/);
     assert.equal(await list.count(), 0);
     assert.equal(await page.locator("#topic-count-all").textContent(), "—");
+    assert.equal(await page.locator("#topic-inspector-link").isVisible(), false);
     assert.equal(
       await page.locator("#topic-inspector-link").getAttribute("hidden"),
       "",

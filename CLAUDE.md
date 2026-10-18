@@ -99,7 +99,7 @@ LIDS 是全项目唯一设计表达标准：Token → Primitive → Component �
 
 ## Design System (LIDS) Constraints
 
-手册入口 `docs/design/lids/README.md`；Token 基线 `docs/design/lids/tokens.md`，运行时镜像 `apps/api/src/local_web/lids_tokens.css`。
+手册入口 `docs/design/lids/README.md`；Token 基线 `docs/design/lids/tokens.md`，运行时镜像 `apps/web/src/styles/lids_tokens.css`。
 
 - No hardcoded colors, font-sizes, or spacing values — use the defined tokens only.
 - No hover-lift transforms; primary buttons use the specified fill (see LIDS manual).

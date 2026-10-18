@@ -224,3 +224,9 @@ Primitive 是全站可复用的基础语法，不承载具体 Topic、真实请�
 所有交互元素命中区至少 24×24px，双层 Focus Ring 可见，不用 `tabindex > 0`。表头使用 11px Mono；行高 40–44px；数字右对齐；行内操作仅 hover/focus 出现；长文本可展开。
 
 禁止第二套按钮/状态/Surface、任意 Pill、硬编码视觉值、非交互 hover、普通卡浮起、动画掩盖加载、Tooltip 承载错误处置、Toast 承载必须处理的错误。
+
+## 2026-10-15 · 工作台 V8 ActionButton
+
+本轮 Mog 明确指定的 V8 动作风格通过唯一 React `shared/ActionButton` 实施，替代工作台各页重复的操作按钮样式；不是给导航、纸条、缩略图或普通卡片增加动作纹理。primary/ink/outline/soft/danger/quiet 六类按职责使用，loading 为原生禁用的进行中状态，保留可访问名称、四格反馈和右缘一列点阵。
+
+本控件遵守 [Token 增量](tokens.md#2026-10-15--创作工作台-v8-动作控件的受控增量) 的局部例外：primary/ink 悬停位移−1px，按压4px；点阵可在按下时铺满，标签始终位于纹理上方。键盘焦点覆盖阴影外沿，禁用显示休眠纹理；busy 不能二次触发动作，减少动态效果时仍保留明确的状态文字与静止四格。不把 busy 当后端成功，不改请求/确认语义。

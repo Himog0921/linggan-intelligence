@@ -70,6 +70,7 @@ export function MetaSection({ payload }: { payload: DossierPayload }) {
       {/* 折叠诊断：原样序列化（含平台作者编号），旧页如此；普通层不渲染（DR-9）。 */}
       <details className={styles.disclosure}>
         <summary>底稿版本与观察信息</summary>
+        <p className={styles.note}>本机诊断保留平台作者编号，用于核对来源身份。</p>
         <pre className={styles.pre}>{JSON.stringify({ contract: header.contract, revision: header.revision, asOf: header.asOf, metadata: header.metadata }, null, 2)}</pre>
       </details>
     </Section>

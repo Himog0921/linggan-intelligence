@@ -43,7 +43,7 @@
 
 ### `ADR-P02` · 运行时 Token 保持 `--lgi-*`，v7 三层架构为目标态
 
-**决定**：本次不改运行时 token。`apps/api/src/local_web/lids_tokens.css` 的 127 项 `--lgi-*` 仍是唯一运行时值源与 Rust 校验对象；v7 的 L1/L2/L3 三层架构写入 [tokens.md](tokens.md) 作为**目标态与新工作的选值依据**。
+**决定**：本次不改运行时 token。`apps/web/src/styles/lids_tokens.css` 的 127 项 `--lgi-*` 仍是唯一运行时值源与 Rust 校验对象；v7 的 L1/L2/L3 三层架构写入 [tokens.md](tokens.md) 作为**目标态与新工作的选值依据**。
 
 **理由**：Mog 于 2026-09-02 明确将本次范围限定为「只改治理文档 + 记录迁移欠账」。同时改动 token 会连带三个样式表与多个页面模板变色变字号，需要逐屏验收，且会与并行分支抢文件。
 

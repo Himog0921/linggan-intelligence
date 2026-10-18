@@ -1,8 +1,4 @@
-/**
- * 一级导航登记表。迁移期间旧页面仍由 `apps/api/src/local_web/shell.rs` 输出页头，两边必须一致
- * （WEB-REACT-001 规则 R4）：`shellParity.test.ts` 逐项对照 shell.rs 的 `PRIMARY_ENTRIES`。
- * 最后一个旧页面迁走后，shell.rs 删除，这里成为唯一来源。
- */
+/** 全站唯一一级导航登记；WEB-REACT-001 H 后不再维护 Rust 页头副本。 */
 export type PrimarySurface = 'corpus' | 'collection' | 'topic' | 'settings' | 'ops';
 
 export interface PrimaryEntry {
