@@ -1,4 +1,4 @@
-import { act, screen, waitFor } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { calls, comment, DOMAIN, installFetch, json, OTHER, POLICY, policy, renderPage, WORK } from './testKit';
@@ -15,8 +15,31 @@ function runReply(url: URL) {
 }
 afterEach(() => vi.unstubAllGlobals());
 describe('D3 review regression boundaries', () => {
+ it.each(['not-a-domain', '00000000-0000-4000-8000-000000000099'])('does not propagate the server-rejected domain %s into corpus navigation', async rejected => {
+  installFetch(url => url.pathname === '/api/local/corpus/shell' ? json({ domains: [{ domainRef: DOMAIN, name: '合成领域一', status: 'active', targetCount: 2, sampleCount: 3 }], selectedDomain: null, collectionState: '观察中' }) : undefined);
+  renderPage(`domain=${rejected}`); await screen.findByText('请先在页头选择观察领域，再查看评论研究。');
+  expect(document.querySelector('.v7-side a[href^="/corpus/evidence"]')).toHaveAttribute('href', '/corpus/evidence');
+  expect(document.querySelector('.v7-side a[href^="/corpus/creators"]')).toHaveAttribute('href', '/corpus/creators');
+  expect(calls.map(c => c.url.pathname)).toEqual(['/api/local/corpus/shell']);
+ });
+ it('uses the server-resolved domain for corpus navigation', async () => {
+  installFetch(url => url.pathname === '/api/local/corpus/shell' ? json({ domains: [{ domainRef: OTHER, name: '合成领域二', status: 'active', targetCount: 0, sampleCount: null }], selectedDomain: OTHER, collectionState: '观察中' }) : undefined);
+  renderPage(`domain=${DOMAIN}`); await screen.findByLabelText('研究累计读数与昨日活动');
+  expect(document.querySelector('.v7-side a[href^="/corpus/evidence"]')).toHaveAttribute('href', `/corpus/evidence?domain=${OTHER}`);
+  expect(calls.find(c => c.url.pathname.endsWith('/overview'))?.url.searchParams.get('domain')).toBe(OTHER);
+ });
+ it('retries a failed clue source read without dismissing its drawer', async () => {
+  const key = { workRef: WORK, commentExternalId: 'c1' }; let reads = 0;
+  installFetch(url => url.pathname.endsWith('/problem-candidates') ? json({ expressions: [{ signalRef: 'signal', commentKey: key, sourceState: 'known', commentText: 'SYNTHETIC 原声', proposition: 'SYNTHETIC 表达', kind: 'need', state: 'deferred_novel', pairOutcomes: [] }], page: { nextCursor: null } }) : url.pathname.endsWith('/comments/detail') ? ++reads === 1 ? json({ error: 'unavailable' }, 503) : json({ commentKey: key, source: { sourceState: 'known' }, comment: { commentText: 'SYNTHETIC 原声' } }) : undefined);
+  renderPage(`domain=${DOMAIN}&view=problems&state=clues`); await userEvent.click(await screen.findByRole('button', { name: '查看这条未归并表达' }));
+  await screen.findByRole('heading', { name: '线索暂时不可读取' }); await userEvent.click(screen.getByRole('button', { name: '重新读取' }));
+  const drawer = screen.getByRole('dialog'); expect(await within(drawer).findByRole('heading', { name: 'SYNTHETIC 表达' })).toBeInTheDocument(); expect(reads).toBe(2);
+  expect(drawer).toHaveAttribute('open');
+  expect(calls.filter(c => c.url.pathname.endsWith('/comments/detail')).every(c => c.method === 'GET' && c.url.searchParams.get('workRef') === WORK && c.url.searchParams.get('commentExternalId') === 'c1')).toBe(true);
+ });
  it('initial overview performs only shell and overview reads', async () => {
   installFetch(); renderPage(); await screen.findByLabelText('研究累计读数与昨日活动');
+  expect(screen.getByRole('link', { name: /采集/ })).toHaveTextContent('观察中');
   expect(calls.map(c => c.url.pathname)).toEqual(['/api/local/corpus/shell', '/api/local/comment-study/overview']); expect(calls.every(c => c.method === 'GET')).toBe(true);
  });
  it('reports shell failure distinctly and offers a working retry', async () => {

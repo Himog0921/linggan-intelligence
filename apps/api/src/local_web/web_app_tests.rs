@@ -344,6 +344,7 @@ async fn health_reports_the_frontend_build() {
     assert_eq!(
         health["webApp"]["pages"],
         json!([
+            "/login",
             "/settings/models",
             "/ops/creation",
             "/corpus/creators",
@@ -433,15 +434,33 @@ async fn settings_page_real_chain_browser_proof() {
     let node = std::env::var("WEB_APP_PROOF_NODE").expect("node binary is supplied");
     let script =
         FsPath::new(env!("CARGO_MANIFEST_DIR")).join("../web/test/e2e/settings-real-chain.mjs");
-    let result = std::process::Command::new(node)
+    let result = std::process::Command::new(&node)
         .arg(script)
         .env("WEB_APP_PROOF_DIR", &directory)
         .status()
         .unwrap();
+    let login = FsPath::new(env!("CARGO_MANIFEST_DIR")).join("../web/test/e2e/login-react.mjs");
+    let login_result = if result.success() {
+        Some(
+            std::process::Command::new(&node)
+                .arg(login)
+                .env("WEB_LOGIN_CANDIDATE", &origin)
+                .env("WEB_LOGIN_PROOF_DIR", FsPath::new(&directory).join("login"))
+                .env_remove("WEB_LOGIN_BASELINE")
+                .status()
+                .unwrap(),
+        )
+    } else {
+        None
+    };
     server.abort();
     assert!(
         result.success(),
         "React settings browser proof failed; see the evidence directory"
+    );
+    assert!(
+        login_result.is_some_and(|result| result.success()),
+        "React login browser proof failed; see the login evidence directory"
     );
 }
 
@@ -551,5 +570,57 @@ async fn comments_entry_preserves_json_routes_and_retires_legacy_assets() {
                 .starts_with("application/json")
         );
         assert!(!body.contains("<div id=\"root\">"), "{path}");
+    }
+}
+
+#[tokio::test]
+async fn login_is_the_same_react_entry_without_a_session_or_credential_post() {
+    let router = web(synthetic_dist(Some("284cd3a9"), true), "284cd3a9");
+    let (status, headers, body) = send(router.clone(), "/login", "127.0.0.1:3000").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, ENTRY);
+    assert!(!headers.contains_key(header::SET_COOKIE));
+    assert_eq!(headers[header::CACHE_CONTROL], "no-store");
+    assert_eq!(headers[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
+    let csp = headers[header::CONTENT_SECURITY_POLICY].to_str().unwrap();
+    assert!(csp.contains("form-action 'none'"));
+    assert!(csp.contains("script-src 'self'"));
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/login")
+                .header(header::HOST, "127.0.0.1:3000")
+                .body(Body::from("email=demo&password=demo"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+}
+
+#[tokio::test]
+async fn login_keeps_external_development_navigation_but_does_not_relax_business_pages() {
+    let router = web(synthetic_dist(Some("284cd3a9"), true), "284cd3a9");
+    for (path, expected) in [
+        ("/login", StatusCode::OK),
+        ("/corpus/evidence", StatusCode::FORBIDDEN),
+    ] {
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(path)
+                    .header(header::HOST, "localhost:3000")
+                    .header("Sec-Fetch-Site", "cross-site")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), expected);
+    }
+    for name in ["build-info.json", "Build-Info.json", "BUILD-INFO.JSON"] {
+        assert_eq!(super::web_app::test_support::content_type_of(name), None);
     }
 }

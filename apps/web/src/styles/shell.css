@@ -26,7 +26,7 @@
 /* ── DESIGN-003 · Chinese-first typography for the shell ────────────────────
  * Chinese carries the label; Latin and status codes drop to a mono annotation, and
  * Chinese never takes the mono face or the caps tracking that goes with it.
- * These rules style components shell.rs renders for every page — the primary nav and
+ * These rules style components React AppShell renders for every page — the primary nav and
  * the local rail — so they belong here. While they lived in one page's stylesheet the
  * two surfaces drifted: the same readout rendered 11px on Corpus and 8px on Collection,
  * which reads as one header with two type standards. */
@@ -46,7 +46,7 @@
  * assistive tech and document structure, so it goes visually hidden and the vertical
  * space returns to the content. The counts it used to sit beside move up into the
  * context row as .v7-kpi. These live in the shell rather than in one page's stylesheet
- * because the context row itself is rendered by shell.rs for every page. */
+ * because the context row itself is rendered by React AppShell for every page. */
 .v7-sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden;
   clip:rect(0 0 0 0); clip-path:inset(50%); white-space:nowrap; border:0; }
 .v7-kpi { display:inline-flex; align-items:baseline; gap:var(--lgi-space-2); }

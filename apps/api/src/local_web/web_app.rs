@@ -20,6 +20,7 @@ use std::{path::PathBuf, sync::Arc};
 
 /// 由 React 应用提供的正式页面。必须与 `apps/web/src/app/pages.ts` 逐项相同（前端测试对照）。
 const REACT_PAGES: &[&str] = &[
+    "/login",
     "/settings/models",
     "/ops/creation",
     "/corpus/creators",
@@ -43,6 +44,7 @@ const ASSET_TYPES: &[(&str, &str)] = &[
     ("js", "text/javascript; charset=utf-8"),
     ("css", "text/css; charset=utf-8"),
     ("svg", "image/svg+xml"),
+    ("json", "application/json"),
     ("png", "image/png"),
     ("webp", "image/webp"),
     ("woff2", "font/woff2"),
@@ -83,6 +85,9 @@ pub(super) fn routes_for<S: Clone + Send + Sync + 'static>(config: WebAppConfig)
         get(|| async { Redirect::temporary("/settings/models") }),
     );
     for page in REACT_PAGES {
+        if *page == "/login" {
+            continue;
+        }
         pages = if *page == "/topics/{canonical_key}" {
             pages.route(page, get(topic_workspace_entry))
         } else {
@@ -91,6 +96,7 @@ pub(super) fn routes_for<S: Clone + Send + Sync + 'static>(config: WebAppConfig)
     }
     pages
         .layer(middleware::from_fn(local_comment_study_guard))
+        .route("/login", get(login_entry))
         .route("/ui-assets/{file}", get(asset))
         .with_state(config)
 }
@@ -143,6 +149,22 @@ async fn entry(State(config): State<WebAppConfig>) -> Response {
             "新版网页的前端文件与后台服务不是同一个版本，已停止提供页面。请重新运行本机同步构建。",
         ),
     }
+}
+
+/// Login remains a local development entry: no credential submission or session.
+async fn login_entry(State(config): State<WebAppConfig>) -> Response {
+    let mut response = entry(State(config)).await;
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response.headers_mut().insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    response.headers_mut().insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static(
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    ));
+    response
 }
 
 // Keep the previous Workspace key boundary before handing the route to React.
@@ -210,7 +232,12 @@ fn asset_content_type(file: &str) -> Option<&'static str> {
                     .chars()
                     .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
         });
-    if !well_formed {
+    if !well_formed
+        || matches!(
+            file.to_ascii_lowercase().as_str(),
+            "build-info.json" | "package.json" | "package-lock.json"
+        )
+    {
         return None;
     }
     let extension = file.rsplit('.').next()?;

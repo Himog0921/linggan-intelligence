@@ -401,3 +401,5 @@
     transition: none !important;
   }
 }
+
+.topic-inspector a[hidden] { display:none; }

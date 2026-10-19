@@ -1,11 +1,11 @@
 # LIDS-TOK-001 · Token 基线与唯一数值来源
 
 > 状态: 权威当前
-> 运行时状态: 第 3 节的 132 项 `--lgi-*` 是当前**唯一运行时值源**；第 2 节的 v7 三层架构是**目标态与新工作的选值依据**，尚未进入运行时
-> 最后核对: 2026-09-04
+> 运行时状态: 第 3 节的 186 项 `--lgi-*` 是当前**唯一运行时值源**；第 2 节的 v7 三层架构是**目标态与新工作的选值依据**，尚未进入运行时
+> 最后核对: 2026-10-15
 > 适用范围: Linggan Intelligence 主题、Primitive、Component、Pattern、Page、动效和受控场景的颜色、排版、间距、边界、层级与性能数值
 > 事实来源: Mog 于 2026-09-02 指定的 `linggan-design-system-v7.html`（§01 Tokens、ADR-02/03/04）、Mog 指定的 LIDS v2.0 `tokens.md`（SHA-256: `97fac0fb590c7f349f5fe7bfc2e2e423c6c8145b03cec9ffdd80d4494f757e77`）、[system.md](system.md)、LOCAL-001A 运行时 Token 源与对应 Rust 校验
-> 冲突时以谁为准: 已获准运行时的唯一 Token 文件 `apps/api/src/local_web/lids_tokens.css` 优先于本文件第 3 节；第 2 节的 v7 架构优先于第 3 节**作为新工作的选值依据**，但不得被写进运行时而不走迁移治理。产品/数据/权限冲突不由 Token 解决
+> 冲突时以谁为准: 已获准运行时的唯一 Token 文件 `apps/web/src/styles/lids_tokens.css` 优先于本文件第 3 节；第 2 节的 v7 架构优先于第 3 节**作为新工作的选值依据**，但不得被写进运行时而不走迁移治理。产品/数据/权限冲突不由 Token 解决
 
 ## 0. 本文件现在有两层，必须分开读
 
@@ -14,7 +14,7 @@ DESIGN-010（2026-09-02）把 LIDS 的表达标准升级到 v7.0，但按 Mog �
 | 节 | 是什么 | 谁消费它 |
 |---|---|---|
 | **§2 v7 三层架构** | 目标态。新页面、新组件的**选值依据**与命名结构 | 设计规格、CMP、PAGE、评审 |
-| **§3 `--lgi-*` 基线** | 运行时现状。132 项精确值，受 Rust 逐项校验 | 现有运行页 CSS |
+| **§3 `--lgi-*` 基线** | 运行时现状。186 项精确值，受 Rust 逐项校验 | 现有运行页 CSS |
 
 **不要把 §2 的名字写进运行时 CSS，也不要把 §3 的值当成 v7 合规。** 两者的差异是已登记的欠账，不是可以随手抹平的漂移。迁移触发条件见 §4。
 
@@ -22,15 +22,15 @@ DESIGN-010（2026-09-02）把 LIDS 的表达标准升级到 v7.0，但按 Mog �
 
 ```text
 唯一值编辑源
-apps/api/src/local_web/lids_tokens.css
+apps/web/src/styles/lids_tokens.css
         ↓ 同一提交内同步为镜像
 docs/design/lids/tokens.md §3
-        ↓ Rust 逐项名称和值校验（132 项）
+        ↓ Rust 逐项名称和值校验（186 项）
 运行时页面与版本化规范
 ```
 
-- 后续 Agent 要改变某个运行时 token 值时，只能先修改 `apps/api/src/local_web/lids_tokens.css`；不得先在页面 CSS、组件 CSS 或本 Markdown 中创造不同值。
-- 同一提交必须把 §3 的基线清单同步为运行时源的精确镜像，并通过 Rust 的 132 项名称→值比对。校验失败即表示变更未完成，不能用"名称一致"掩盖值漂移。
+- 后续 Agent 要改变某个运行时 token 值时，只能先修改 `apps/web/src/styles/lids_tokens.css`；不得先在页面 CSS、组件 CSS 或本 Markdown 中创造不同值。
+- 同一提交必须把 §3 的基线清单同步为运行时源的精确镜像，并通过 Rust 的 186 项名称→值比对。校验失败即表示变更未完成，不能用"名称一致"掩盖值漂移。
 - 任何 token 值的改变仍是跨页面设计变更：必须按 UI Change Manifest、迁移记录、影响页面和回退规则完成治理。
 - 页面 CSS 只消费 `var(--lgi-*)`，不得声明 `--lgi-*`；页面局部例外必须按 PAGE/Manifest/LIDS migration log 另行登记，不能反向写入 Token 真源。
 
@@ -115,9 +115,9 @@ L3 GEOMETRY   间距 / 字号 / 线宽 / 圆角 / 动效 五套阶梯
 
 材料强度是密度的**附带效果**，不是它的目的。切换密度后如果一屏能看的条数没变，这个实现就是错的。
 
-## 3. 完整运行时基线（132 项 `--lgi-*`）
+## 3. 完整运行时基线（186 项 `--lgi-*`）
 
-本节是 `apps/api/src/local_web/lids_tokens.css` 的精确镜像，受 Rust 逐项校验。**它是运行时现状，不是 v7 合规基线。**
+本节是 `apps/web/src/styles/lids_tokens.css` 的精确镜像，受 Rust 逐项校验。**它是运行时现状，不是 v7 合规基线。**
 
 ```css
 [data-theme="linggan-intelligence"] {
@@ -190,11 +190,77 @@ L3 GEOMETRY   间距 / 字号 / 线宽 / 圆角 / 动效 五套阶梯
   --lgi-stream-red: #e06a55;
   --lgi-stream-line: rgba(99, 217, 165, 0.2);
 
+  /* V8 action family: opt-in only; existing page tokens retain their values. */
+  --lgi-action-fill: #c63214;
+  --lgi-action-ink: #0b0f12;
+  --lgi-action-ink-shadow: #151b1f;
+  --lgi-action-paper: #ffffff;
+  --lgi-action-sunken: #f5f7f8;
+  --lgi-action-secondary: #5f6a71;
+  --lgi-action-disabled: #8c959b;
+  --lgi-action-border: #c6ced3;
+  --lgi-action-focus: #335e72;
+  --lgi-action-danger: #b52b20;
+  --lgi-action-danger-soft: #fff0ed;
+  --lgi-action-mark: #f24a23;
+  --lgi-action-lattice-light: repeating-conic-gradient(rgba(255,255,255,.36) 0% 25%,transparent 0% 50%);
+  --lgi-action-lattice-ink: repeating-conic-gradient(rgba(11,15,18,.16) 0% 25%,transparent 0% 50%);
+  --lgi-action-lattice-danger: repeating-conic-gradient(rgba(181,43,32,.2) 0% 25%,transparent 0% 50%);
+  --lgi-action-lattice-dim: repeating-conic-gradient(rgba(11,15,18,.07) 0% 25%,transparent 0% 50%);
+  --lgi-action-mask: linear-gradient(90deg,#0000 0 8%,#00000026 8% 22%,#0000004d 22% 36%,#00000073 36% 50%,#0000009e 50% 64%,#000000c4 64% 78%,#000000e8 78% 90%,#000 90% 100%);
+  --lgi-action-quiet-ruler: repeating-linear-gradient(90deg,var(--lgi-action-mark) 0 8px,transparent 8px 10px);
+  --lgi-action-font-size: 13px;
+  --lgi-action-line-height: 1.6;
+  --lgi-action-height: 40px;
+  --lgi-action-quiet-height: 28px;
+  --lgi-action-gap: 4px;
+  --lgi-action-padding: 16px;
+  --lgi-action-quiet-padding: 2px;
+  --lgi-action-border-width: 1px;
+  --lgi-action-rail-width: 2px;
+  --lgi-action-lattice-cell: 16px;
+  --lgi-action-lattice-hover: 40%;
+  --lgi-action-lattice-active: 100%;
+  --lgi-action-shadow-idle: 4px;
+  --lgi-action-shadow-hover: 5px;
+  --lgi-action-hover-shift: -1px;
+  --lgi-action-press-shift: 1px;
+  --lgi-action-focus-offset: 2px;
+  --lgi-action-focus-gap-width: 3px;
+  --lgi-action-focus-idle-gap: 5px;
+  --lgi-action-focus-idle-ring: 7px;
+  --lgi-action-focus-hover-offset: 3px;
+  --lgi-action-focus-hover-gap: 6px;
+  --lgi-action-focus-hover-ring: 8px;
+  --lgi-action-cell-size: 6px;
+  --lgi-action-cell-gap: 2px;
+  --lgi-action-cell-dim: .25;
+  --lgi-action-motion-instant: 90ms;
+  --lgi-action-motion-fast: 140ms;
+  --lgi-action-motion-cycle: 800ms;
+  --lgi-action-motion-step: 200ms;
+  --lgi-action-ease: cubic-bezier(.2,.78,.2,1);
+
+  /* Approved V3 reading material surfaces, scoped to the content workbench. */
+  --lgi-reading-paper: #faf7ee;
+  --lgi-reading-edge: #e6ddca;
+  --lgi-reading-ink: #37352e;
+  --lgi-reading-selected: #f5e3a0;
+  --lgi-reading-cover: #7c5042;
+
   /* Typography */
   --lgi-font-sans: "PingFang SC", "Noto Sans SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
   --lgi-font-mono: "SFMono-Regular", "JetBrains Mono", "Roboto Mono", "Noto Sans Mono CJK SC", ui-monospace, monospace;
+  /* Three type roles, three jobs. Sans states what the system knows; mono carries the things a
+   * machine assigned — refs, counts, timestamps, state codes; serif is reserved for material
+   * quoted verbatim out of a source. A reader must be able to tell someone's own sentence from
+   * the system's description of it without reading either, so serif is never used for chrome. */
   --lgi-font-evidence: "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", "STSong", Georgia, serif;
   --lgi-font-display: "Arial Narrow", "DIN Condensed", "Roboto Condensed", "Helvetica Neue", var(--lgi-font-sans);
+
+  /* Applied to the right edge of a solid Ink action or an active plate, under a fade mask, so
+   * the mark reads as an instrument surface rather than as decoration. It must never sit under
+   * a label: mask the fade so the texture starts after the text ends. */
   --lgi-mosaic-on-dark: conic-gradient(from 90deg, rgba(255, 255, 255, 0.22) 25%, transparent 0 50%, rgba(255, 255, 255, 0.22) 0 75%, transparent 0);
   --lgi-mosaic-on-light: conic-gradient(from 90deg, rgba(17, 19, 21, 0.13) 25%, transparent 0 50%, rgba(17, 19, 21, 0.13) 0 75%, transparent 0);
   --lgi-text-display: clamp(3rem, 6vw, 5.5rem);
@@ -354,3 +420,20 @@ L3 GEOMETRY   间距 / 字号 / 线宽 / 圆角 / 动效 五套阶梯
 - 禁止边框使用 1.5px（1x 屏半像素模糊）；SVG 图标描边的 1.5 不受此限。
 - Token 值改变是跨页面设计变更：必须在 UI Change Manifest 中标为最高影响级，列出影响页面，更新预览/静态参考、迁移记录与回退办法。
 - 不得新建第二个运行时 Token 文件、页面级主题或值编辑入口。新增自动生成工具或改变单向关系，必须另开受控任务。
+
+## 2026-10-15 · 创作工作台 V8 动作控件的受控增量
+
+Mog 本轮明确要求按 V8 动作层级纠正工作台按钮。本条是局部增量，覆盖本控件与上文旧 Mosaic 面积/按压、hover 禁止、硬投影聚焦组合的冲突；不启动全站换值或旧页面迁移。运行时唯一声明仍为 `apps/web/src/styles/lids_tokens.css`，旧 Token 原值不改。
+
+| Token 家族 | 认可值与用途 |
+|---|---|
+| `--lgi-action-fill/ink/paper` | V8 承字主色 #c63214、墨色 #0b0f12、白色；主操作白字对比度约5.4:1 |
+| `--lgi-action-lattice-* / mask` | 光/墨/危险/休眠四种16px棋格与分档遮罩；右缘idle16px、hover40%、active100% |
+| `--lgi-action-shadow-* / *-shift` | 静止4px、hover阴影5px且位移−1px、primary/ink按下位移4px并收起阴影；只应用动作反馈 |
+| `--lgi-action-focus-*` | 外围白色隔离带加蓝灰聚焦环，包含硬投影，不被hover或按压覆盖 |
+| `--lgi-action-height/font-size/padding` | 常规动作40px高、13px字、水平16px；quiet28px高；不调整全站字号 |
+| `--lgi-action-motion-* / cell-*` | 90/140ms阶梯反馈；四格800ms循环、间隔200ms；减少动态效果时停过渡与格子闪动 |
+
+完整值由同一运行时源和共享 `ActionButton.module.css` 对照 V8 原附件维护，不另复制第二份可编辑主题。新增属性只在显式使用 ActionButton 的工作台操作生效；设置页和其他旧页面的动作继续原样，后续迁移另行确认。
+
+V3 暖纸增量：`--lgi-reading-paper/edge/ink/selected/cover` 精确复用已认可原型的纸面、纸边、阅读文字、高亮与书脊颜色，仅工作台阅读区消费。记录见 [迁移日志](migration-log.md)。

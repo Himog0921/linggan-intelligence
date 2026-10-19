@@ -1,3 +1,5 @@
+const LIDS_TOKENS: &str = include_str!("../../../web/src/styles/lids_tokens.css");
+const SHELL_CSS: &str = include_str!("../../../web/src/styles/shell.css");
 use super::*;
 use axum::{
     body::{Body, to_bytes},
@@ -9,19 +11,6 @@ use std::collections::BTreeMap;
 use tower::ServiceExt;
 
 const LOCAL_001_MIGRATIONS: &str = full_schema_fixture::FULL_MIGRATIONS;
-
-/// 语料页页头的对照样本。证据库页已迁到 React（WEB-REACT-001 阶段 D2），但评论研究、采集、主题图谱等
-/// 仍由服务器经 `shell::global_header` 输出页头，它们必须与语料页头保持一致。迁移前这些断言以旧证据库页
-/// 作样本；现在直接渲染语料页头，参数与旧页传给 `global_header` 的完全相同，断言文字不变。
-fn corpus_header_sample(collection_state: Option<&str>) -> String {
-    shell::global_header(
-        shell::PrimarySurface::Corpus,
-        "本机材料投影 <span class=\"v7-tech-key\">LOCAL MATERIAL PROJECTION</span>",
-        "语料 <span class=\"v7-slash\">/</span> <b>证据库</b> <span class=\"v7-slash\">/</span> <span class=\"v7-context-current\">作品材料集合</span>",
-        "<span class=\"v7-kpi\"><em>事实层</em><b>只读</b></span><span class=\"v7-kpi\"><em>材料入口</em><b>默认投影</b></span><i class=\"v7-vr\" aria-hidden=\"true\"></i><span>本机时区 <span class=\"v7-tech-key\">UTC+08</span></span>",
-        collection_state,
-    )
-}
 
 #[test]
 fn recovery_control_read_failure_still_blocks_the_runtime_page() {
@@ -149,15 +138,38 @@ async fn domain_management_page_queries_real_lane_receipts_without_english_or_fa
     .expect("the accepted package retains its typed discovery fact");
     assert_eq!(discovery_facts, 1);
 
-    let response=app_with_database(database).oneshot(Request::builder().uri("/api/collection/workspace/domains?domain=00000000-0000-4000-8000-000000000001").header(header::HOST,"127.0.0.1:8080").body(Body::empty()).unwrap()).await.unwrap();
-    assert_eq!(response.status(),StatusCode::OK);
-    let body=to_bytes(response.into_body(),usize::MAX).await.unwrap();
-    let result:Value=serde_json::from_slice(&body).unwrap();
-    let domain=result["domains"].as_array().unwrap().iter().find(|d|d["domainRef"]=="00000000-0000-4000-8000-000000000001").unwrap();
-    let lanes=domain["lanes"].as_array().unwrap();
-    assert!(lanes.iter().any(|lane|lane["label"]=="发现" && lane["summary"]=="可检索 1 篇"));
-    assert!(lanes.iter().any(|lane|lane["label"]=="评论" && lane["summary"]=="状态未知"));
-
+    let response = app_with_database(database)
+        .oneshot(
+            Request::builder()
+                .uri(
+                    "/api/collection/workspace/domains?domain=00000000-0000-4000-8000-000000000001",
+                )
+                .header(header::HOST, "127.0.0.1:8080")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let result: Value = serde_json::from_slice(&body).unwrap();
+    let domain = result["domains"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["domainRef"] == "00000000-0000-4000-8000-000000000001")
+        .unwrap();
+    let lanes = domain["lanes"].as_array().unwrap();
+    assert!(
+        lanes
+            .iter()
+            .any(|lane| lane["label"] == "发现" && lane["summary"] == "可检索 1 篇")
+    );
+    assert!(
+        lanes
+            .iter()
+            .any(|lane| lane["label"] == "评论" && lane["summary"] == "状态未知")
+    );
 }
 
 #[tokio::test]
@@ -313,8 +325,8 @@ fn runtime_token_source_matches_the_full_lids_baseline() {
     let runtime = declared_token_values(LIDS_TOKENS);
     let documented = declared_token_values(LIDS_TOKEN_DOCUMENT);
 
-    assert_eq!(runtime.len(), 132);
-    assert_eq!(documented.len(), 132);
+    assert_eq!(runtime.len(), 186);
+    assert_eq!(documented.len(), 186);
     assert_eq!(runtime, documented);
     assert!(declared_token_values(SHELL_CSS).is_empty());
 }
@@ -899,7 +911,12 @@ async fn a_never_archived_keyword_starts_its_first_stage_when_asked_to_archive()
     assert_eq!(granted.status(), StatusCode::OK);
 
     // 人在列表上按下的那一下。
-    let archived = collection_json_command(&application, "archive", json!({"row_target_ref":target_ref})).await;
+    let archived = collection_json_command(
+        &application,
+        "archive",
+        json!({"row_target_ref":target_ref}),
+    )
+    .await;
     assert_eq!(archived["outcome"], "applied");
     let location = archived["location"].as_str().expect("回执地址");
     assert!(
@@ -977,7 +994,12 @@ async fn a_patrolling_keyword_can_repair_its_missing_first_stage_archive() {
     .await
     .expect("置为观察中");
 
-    let archived = collection_json_command(&application, "archive", json!({"row_target_ref":target_ref})).await;
+    let archived = collection_json_command(
+        &application,
+        "archive",
+        json!({"row_target_ref":target_ref}),
+    )
+    .await;
     assert_eq!(archived["outcome"], "applied");
     let location = archived["location"].as_str().expect("回执地址");
     assert!(
@@ -1008,7 +1030,12 @@ async fn creator_gap_route_never_falls_back_to_a_homepage_rescan() {
     assert_eq!(created["outcome"], "applied");
     let target_ref: uuid::Uuid = sqlx::query_scalar("SELECT target_ref FROM collection_observation_target WHERE identity_key='69aad16e000000003201b111'")
         .fetch_one(database.pool()).await.unwrap();
-    let response = collection_json_command(&application, "archive", json!({"row_target_ref":target_ref,"archive_action":"gaps"})).await;
+    let response = collection_json_command(
+        &application,
+        "archive",
+        json!({"row_target_ref":target_ref,"archive_action":"gaps"}),
+    )
+    .await;
     assert_eq!(response["outcome"], "rejected");
     assert_eq!(response["code"], "archive_nothing_to_continue");
     let work_count: i64 =
@@ -1022,11 +1049,20 @@ async fn creator_gap_route_never_falls_back_to_a_homepage_rescan() {
 
 // Exercise the canonical React JSON transport while retaining the original owner oracles.
 async fn collection_json_command(application: &Router, action: &str, fields: Value) -> Value {
-    let context = application.clone().oneshot(Request::builder()
-        .uri("/api/collection/commands/context").header(header::HOST, "127.0.0.1:8080")
-        .body(Body::empty()).unwrap()).await.unwrap();
+    let context = application
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/collection/commands/context")
+                .header(header::HOST, "127.0.0.1:8080")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     assert_eq!(context.status(), StatusCode::OK);
-    let context: Value = serde_json::from_slice(&to_bytes(context.into_body(), usize::MAX).await.unwrap()).unwrap();
+    let context: Value =
+        serde_json::from_slice(&to_bytes(context.into_body(), usize::MAX).await.unwrap()).unwrap();
     let response = application.clone().oneshot(Request::builder().method("POST")
         .uri(format!("/api/collection/commands/{action}"))
         .header(header::HOST, "127.0.0.1:8080").header(header::CONTENT_TYPE, "application/json")
@@ -1146,53 +1182,13 @@ fn local_submission(observed_at: &str) -> String {
     )
 }
 
-#[test]
-fn corpus_header_can_reflect_the_connected_collection_read_model() {
-    let html = corpus_header_sample(Some("观察中"));
-    let collection_entry = html
-        .split_once("v7-tech-key\">COLLECTION")
-        .expect("the collection primary entry exists")
-        .1;
-    assert!(collection_entry.contains("<span class=\"v7-nav-state\">观察中</span>"));
-}
-
-#[test]
-fn corpus_header_can_preserve_an_unreadable_collection_state() {
-    let html = corpus_header_sample(Some("状态未知"));
-    let collection_entry = html
-        .split_once("v7-tech-key\">COLLECTION")
-        .expect("the collection primary entry exists")
-        .1;
-    assert!(collection_entry.contains("<span class=\"v7-nav-state\">状态未知</span>"));
-}
-
-#[test]
-fn the_selected_rail_entry_keeps_its_inked_block_under_the_pointer() {
-    // Hover invites you to leave the page you are on; it must never repaint the entry that
-    // marks where you already are. The selected block is only readable while it stays inked.
-    let shell = SHELL_CSS;
-    for rule in [
-        ".v7-side-nav:not([disabled]):not([aria-current=\"page\"]):hover",
-        ".v7-primary-nav a:not([aria-current=\"page\"]):hover",
-    ] {
-        assert!(
-            shell.contains(rule),
-            "hover state must exclude the current page: {rule}"
-        );
-    }
-    assert!(
-        !shell.contains(".v7-side-nav:not([disabled]):hover {"),
-        "the unqualified rail hover rule outranks the selected state and must not return"
-    );
-}
-
 #[tokio::test]
 async fn unreadable_target_json_never_substitutes_empty_html() {
     let response = app().oneshot(Request::builder().uri("/api/collection/workspace/target/00000000-0000-4000-8000-000000000001?domain=all").header(header::HOST,"127.0.0.1:8080").body(Body::empty()).unwrap()).await.unwrap();
-    assert_eq!(response.status(),StatusCode::SERVICE_UNAVAILABLE);
-    let body=to_bytes(response.into_body(),usize::MAX).await.unwrap();
-    let result:Value=serde_json::from_slice(&body).unwrap();
-    assert_eq!(result["code"],"collection_targets_unavailable");
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let result: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(result["code"], "collection_targets_unavailable");
 }
 
 /// DESIGN-010 · LIDS v7 on the Operations surface.
@@ -1295,72 +1291,22 @@ fn declared_token_values(stylesheet: &str) -> BTreeMap<&str, &str> {
         .collect()
 }
 
-#[test]
-fn narrow_primary_navigation_wraps_instead_of_hiding_a_responsibility_offscreen() {
-    // Topic made the fifth first-level responsibility reachable. The prior narrow-shell
-    // rule still kept every item at 86px inside a horizontally scrolling strip, so a 390px
-    // viewport clipped Collection. This regression guard keeps visibility a shell property:
-    // five entries share one row at 390px, while narrower widths or future entries wrap.
-    assert!(
-        SHELL_CSS.contains("grid-template-columns:repeat(auto-fit,minmax(72px,1fr))"),
-        "narrow primary navigation must distribute entries across the available width"
-    );
-    assert!(
-        SHELL_CSS.contains(".v7-primary-nav{grid-column:1/-1;height:auto;display:grid"),
-        "the narrow primary navigation must become a grid rather than stay a horizontal strip"
-    );
-    assert!(
-        SHELL_CSS.contains(
-            ".v7-global-row{display:grid;grid-template-columns:minmax(0,1fr) auto;overflow:visible}"
-        ),
-        "the narrow shared row must not retain the parent horizontal scroller"
-    );
-    assert!(
-        SHELL_CSS.contains(
-            ".v7-primary-nav button,.v7-primary-nav a{width:100%;min-width:0;min-height:58px"
-        ),
-        "each narrow navigation entry must shrink within its grid cell while keeping a usable target"
-    );
-    assert!(
-        SHELL_CSS.contains(".v7-primary-nav .v7-tech-key{display:none}"),
-        "narrow navigation may remove only the technical annotation, never the Chinese responsibility or state"
-    );
-    assert!(
-        !SHELL_CSS.contains(".v7-primary-nav{grid-column:1/-1;overflow-x:auto"),
-        "a hidden horizontal swipe must not be required to reach a first-level responsibility"
-    );
-}
-
-#[test]
-fn six_primary_entries_keep_the_personal_menu_on_screen_at_laptop_widths() {
-    // 运营 made six first-level entries (OPS-MIGRATION-001 D2). At the old 1500/1180 steps the
-    // header needed 1362px all the way down to 1181px, so a 1280px laptop clipped 个人菜单. The
-    // header now narrows in its own steps; the browser sweep over 901–1600px is recorded in the
-    // D2 acceptance record, this guard only keeps the steps from being dropped.
-    for step in [
-        "@media(max-width:1560px){.v7-global-brand{width:285px",
-        "@media(max-width:1380px){.v7-global-brand{width:230px;flex-basis:230px}.v7-global-brand-sub,.v7-global-flex{display:none}",
-        "@media(max-width:1240px){.v7-primary-nav .v7-tech-key{display:none}}",
-        "@media(max-width:960px){.v7-primary-nav button,.v7-primary-nav a{min-width:80px;padding:0 var(--lgi-space-2)}}",
-    ] {
-        assert!(SHELL_CSS.contains(step), "missing header step: {step}");
-    }
-    let laptop_step = SHELL_CSS
-        .split("@media(max-width:1380px){")
-        .nth(1)
-        .and_then(|rest| rest.split("}\n").next())
-        .unwrap_or_default();
-    assert!(
-        !laptop_step.contains("v7-system-boundary"),
-        "the laptop step must keep the service-status capsule"
-    );
-}
-
 #[tokio::test]
 async fn collection_default_resolves_to_the_daily_target_page() {
-    let response = app().oneshot(Request::builder().uri("/collection").body(Body::empty()).unwrap()).await.unwrap();
+    let response = app()
+        .oneshot(
+            Request::builder()
+                .uri("/collection")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
-    assert_eq!(response.headers().get(header::LOCATION).unwrap(), "/collection/targets");
+    assert_eq!(
+        response.headers().get(header::LOCATION).unwrap(),
+        "/collection/targets"
+    );
 }
 
 #[tokio::test]
@@ -1370,7 +1316,16 @@ async fn collection_task_return_scope_only_applies_to_manual_observation() {
         ("save_rule", "/collection/targets?"),
     ] {
         let form:MonitorRuleWire=serde_json::from_value(json!({"target_ref":"00000000-0000-4000-8000-000000000001","expected_revision":0,"idempotency_key":"00000000-0000-4000-8000-000000000002","command_kind":command,"return_scope":"tasks","return_domain":"all"})).unwrap();
-        let response=collection_target_rule_command(State(LocalWebState {database:LocalDatabaseState::NotConfigured, active_media_sessions:Arc::new(tokio::sync::Mutex::new(BTreeSet::new())),account_digest_key:None}),axum::extract::Form(form)).await.into_response();
+        let response = collection_target_rule_command(
+            State(LocalWebState {
+                database: LocalDatabaseState::NotConfigured,
+                active_media_sessions: Arc::new(tokio::sync::Mutex::new(BTreeSet::new())),
+                account_digest_key: None,
+            }),
+            axum::extract::Form(form),
+        )
+        .await
+        .into_response();
         assert_eq!(response.status(), StatusCode::SEE_OTHER);
         let location = response
             .headers()
@@ -1383,40 +1338,5 @@ async fn collection_task_return_scope_only_applies_to_manual_observation() {
         if command == "manual_observe" {
             assert!(location.contains("domain=all"));
         }
-    }
-}
-
-#[test]
-fn the_primary_nav_links_to_entry_routes_never_to_a_sub_surface() {
-    // The default surface of a responsibility is decided in exactly one place: its entry
-    // route. A header that links straight to a sub-surface is a second copy of that
-    // decision, and the two drift the first time the default moves — which is exactly what
-    // happened when Collection's default became /collection/attention while the header
-    // still pointed at /collection/targets.
-    let html = corpus_header_sample(None);
-    let nav = html
-        .split_once("v7-primary-nav")
-        .expect("every page renders the primary nav")
-        .1
-        .split_once("</nav>")
-        .expect("the nav closes")
-        .0;
-
-    for href in nav.split("href=\"").skip(1) {
-        let href = href.split('"').next().expect("href closes");
-        assert_eq!(
-            href.matches('/').count(),
-            1,
-            "primary nav must link to an entry route, not a sub-surface: {href}"
-        );
-    }
-
-    // And both served responsibilities must actually be reachable that way.
-    for entry in [
-        "href=\"/corpus\"",
-        "href=\"/collection\"",
-        "href=\"/topics\"",
-    ] {
-        assert!(nav.contains(entry), "primary nav is missing {entry}");
     }
 }

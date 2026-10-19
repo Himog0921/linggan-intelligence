@@ -35,7 +35,7 @@ LOCAL-001A 已获准使用的运行时主题名为：
 <html data-theme="linggan-intelligence">
 ```
 
-该主题名已由 loopback Rust host 的 Evidence Library 页面使用；其完整运行时 Token 值源是 `apps/api/src/local_web/lids_tokens.css`。这项受限实现不表示已有通用主题框架、组件库、真实数据/read model、L2/L3 页面、Agent、部署或完整产品 Web。
+该主题名由同源React应用使用；其完整运行时Token唯一值源是 `apps/web/src/styles/lids_tokens.css`。各层实现/发布与验收状态以WEB-REACT-001当前回执为准；Token治理本身不证明业务验收。
 
 ## 2. 五层架构和横向约束
 

@@ -12,6 +12,22 @@ Gate 6 的 Rust 模块接口、依赖方向、adapter seam、测试表面与文�
 
 下图表示 Gate 2-6A 已确认的责任关系，不是数据库表、Rust 模块或每份材料必须走完的线性流水线。持续观察和主动研究都可以从已有资产开始，也允许在证据不足、无需行动或不再值得时停止。
 
+## WEB-REACT-001 当前网页边界
+
+正式网页及子视图统一在apps/web的React/TypeScript strict应用，由唯一Root与统一路由承载；Axum仅提供精确入口、JSON、资源和下载。H收尾候选删除login/shell原生输出，Token唯一源归apps/web/src/styles/lids_tokens.css，插件构建与Rust镜像校验引用同源；CI阻止生产旧HTML/JS/CSS和第二Root回流。当前发布与候选边界见[全站收尾矩阵](../design/acceptance/web-react-001-closeout.md)，不将候选写成已部署。
+
+```mermaid
+flowchart LR
+  Browser[浏览器] --> React[唯一 React Root 与路由]
+  React --> Axum[Axum 同源 JSON / 资源 / 下载]
+  Axum --> Domain[Rust 业务与资格判断]
+  Domain --> PG[(PostgreSQL)]
+  Tokens[前端唯一 Token 源] --> React
+  Tokens --> Plugin[插件构建副本]
+```
+
+登录仍为开发入口，不创建认证会话；业务资格、幂等、预算和回执由Rust/PostgreSQL保持权威。
+
 ## 结构
 
 ```text

@@ -5,10 +5,12 @@ use uuid::Uuid;
 
 #[path = "../../../../crates/intelligence/tests/support/content_workbench_fixture.rs"]
 mod fixture;
+#[path = "content_workbench_private_review.rs"]
+mod private_review;
 
 async fn seed_note(db: &Database, external: &str, title: &str, anchor: &str) -> Uuid {
     let body = format!(
-        "{anchor}\n这是浏览器隔离验收使用的合成长文😀，不是现实研究结论。\n{}\n{anchor}尾段仍须可读🙂",
+        "{anchor}\n这是浏览器隔离验收使用的合成长文😀，不是现实研究结论。\n孩子写作业不愿开始，第一步可以先做两分钟。\n{}\n{anchor}尾段仍须可读🙂",
         "把一天的计划缩小到一个能开始的动作。换行、标点与原文身份都保留。\n".repeat(100)
     );
     let package = fixture::dossier::fixture::submit_package(db, "content_detail",
@@ -74,42 +76,53 @@ async fn content_workbench_real_chain_browser_proof() {
     )
     .await
     .expect("full migrations apply to isolated schema");
-    let first = seed_note(
-        &db,
-        "cw-browser-note-1",
-        "合成选题：把开始缩小",
-        "浏览器原文锚点一",
-    )
-    .await;
-    let second = seed_note(
-        &db,
-        "cw-browser-note-2",
-        "合成选题：给家庭留出缓冲",
-        "浏览器原文锚点二",
-    )
-    .await;
-    let voice_one = seed_comment(
-        &db,
-        "cw-browser-parent",
-        "浏览器匿名原声一😀\n每天列了很多计划，真正困难的是先开始。",
-        None,
-    )
-    .await;
-    let voice_two = seed_comment(
-        &db,
-        "cw-browser-voice-2",
-        "浏览器匿名原声二🙂\n我愿意先做两分钟，再决定要不要继续。",
-        None,
-    )
-    .await;
-    let reply = seed_comment(
-        &db,
-        "cw-browser-reply",
-        "浏览器回复原声😀\n上面说的先开始，我也有同样的困惑。",
-        Some("cw-browser-parent"),
-    )
-    .await;
-    let (account, publication) = fixture::ops_seed(&db).await;
+    let manual = std::env::var("CW_BROWSER_MANUAL_REVIEW").as_deref() == Ok("1");
+    let sample_path = std::env::var("CW_BROWSER_REAL_SAMPLES").ok();
+    assert!(
+        sample_path.is_none() || manual,
+        "private real samples require explicit manual review"
+    );
+    let seeded = if let Some(path) = sample_path {
+        private_review::seed(&db, &path).await
+    } else {
+        let first = seed_note(
+            &db,
+            "cw-browser-note-1",
+            "合成选题：把开始缩小",
+            "浏览器原文锚点一",
+        )
+        .await;
+        let second = seed_note(
+            &db,
+            "cw-browser-note-2",
+            "合成选题：给家庭留出缓冲",
+            "浏览器原文锚点二",
+        )
+        .await;
+        let voice_one = seed_comment(
+            &db,
+            "cw-browser-parent",
+            "浏览器匿名原声一😀\n每天列了很多计划，真正困难的是先开始。",
+            None,
+        )
+        .await;
+        let voice_two = seed_comment(
+            &db,
+            "cw-browser-voice-2",
+            "浏览器匿名原声二🙂\n我愿意先做两分钟，再决定要不要继续。",
+            None,
+        )
+        .await;
+        let reply = seed_comment(
+            &db,
+            "cw-browser-reply",
+            "浏览器回复原声😀\n上面说的先开始，我也有同样的困惑。",
+            Some("cw-browser-parent"),
+        )
+        .await;
+        let (account, publication) = fixture::ops_seed(&db).await;
+        json!({"noteRefs":[first,second],"voiceRefs":[voice_one,voice_two],"replyRef":reply,"accountRef":account,"publicationRef":publication})
+    };
     fixture::dossier::model_config(&db).await;
     let config: Uuid = sqlx::query_scalar("SELECT config_ref FROM linggan_model_config LIMIT 1")
         .fetch_one(db.pool())
@@ -139,29 +152,36 @@ async fn content_workbench_real_chain_browser_proof() {
         ProofPath::new(&directory).join("fixture.json"),
         json!({
             "origin":origin,"domainRef":fixture::dossier::DOMAIN,
-            "otherDomainRef":"00000000-0000-4000-8000-000000000002","accountRef":account,
-            "noteRefs":[first,second],"voiceRefs":[voice_one,voice_two],"replyRef":reply,
-            "publicationRef":publication,"configRef":config
+            "otherDomainRef":"00000000-0000-4000-8000-000000000002","accountRef":seeded["accountRef"],
+            "noteRefs":seeded["noteRefs"],"voiceRefs":seeded["voiceRefs"],"replyRef":seeded["replyRef"],
+            "publicationRef":seeded["publicationRef"],"configRef":config,"privateReview":manual,
+            "provenance":seeded
         })
         .to_string(),
     )
     .unwrap();
-    let node = std::env::var("CW_BROWSER_PROOF_NODE").expect("Node binary supplied");
-    let script =
-        ProofPath::new(env!("CARGO_MANIFEST_DIR")).join("../web/test/e2e/workbench-real-chain.mjs");
-    let result = std::process::Command::new(node)
-        .arg(script)
-        .env("CW_BROWSER_PROOF_DIR", &directory)
-        .status();
-    // Optional bounded inspection window is opt-in; CI and normal proofs close immediately.
-    let hold = std::env::var("CW_BROWSER_PROOF_REVIEW_HOLD_SECONDS")
-        .ok()
-        .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or(0)
-        .min(600);
-    if hold > 0 {
-        tokio::time::sleep(std::time::Duration::from_secs(hold)).await;
-    }
+    let result = if manual {
+        println!(
+            "Private candidate ready at {origin}; finish by creating review-complete in the proof directory"
+        );
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(8 * 60 * 60);
+        while !ProofPath::new(&directory).join("review-complete").exists()
+            && tokio::time::Instant::now() < deadline
+        {
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        }
+        None
+    } else {
+        let node = std::env::var("CW_BROWSER_PROOF_NODE").expect("Node binary supplied");
+        let script = ProofPath::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../web/test/e2e/workbench-real-chain.mjs");
+        Some(
+            std::process::Command::new(node)
+                .arg(script)
+                .env("CW_BROWSER_PROOF_DIR", &directory)
+                .status(),
+        )
+    };
     server.abort();
     let _ = server.await;
     let after = side_effect_counts(&db).await;
@@ -169,8 +189,10 @@ async fn content_workbench_real_chain_browser_proof() {
         before, after,
         "the browser authorship path must not call a model or create collection work orders"
     );
-    assert!(
-        result.expect("browser subprocess starts").success(),
-        "formal React workbench browser proof failed; inspect its evidence directory"
-    );
+    if let Some(result) = result {
+        assert!(
+            result.expect("browser subprocess starts").success(),
+            "formal React workbench browser proof failed; inspect its evidence directory"
+        );
+    }
 }

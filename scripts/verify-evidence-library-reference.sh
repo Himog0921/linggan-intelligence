@@ -48,7 +48,7 @@ for term in "${required_terms[@]}"; do
   rg -q --fixed-strings "$term" "$page_spec" "$reference"
 done
 
-rg -q --fixed-strings "../../../apps/api/src/local_web/lids_tokens.css" "$reference"
+rg -q --fixed-strings "../../../apps/web/src/styles/lids_tokens.css" "$reference"
 rg -q --fixed-strings "SYNTHETIC REFERENCE · NOT LIVE · NO SIDE EFFECTS" "$reference"
 rg -q --fixed-strings "prefers-reduced-motion: reduce" "$reference"
 rg -q --fixed-strings "aria-selected=\"true\"" "$reference"

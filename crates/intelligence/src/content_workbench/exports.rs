@@ -24,7 +24,7 @@ pub(super) async fn read_in(
     tx: &mut Transaction<'_, Postgres>,
     id: Uuid,
 ) -> Result<ExportRecord, WorkbenchError> {
-    let row = sqlx::query("SELECT * FROM linggan_creation_export WHERE export_ref=$1")
+    let row = sqlx::query(r#"SELECT *, to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS export_created_at FROM linggan_creation_export WHERE export_ref=$1"#)
         .bind(id)
         .fetch_optional(&mut **tx)
         .await?
@@ -32,6 +32,7 @@ pub(super) async fn read_in(
     let rows=sqlx::query("SELECT page_ref,ordinal,sha256,byte_size FROM linggan_creation_export_page WHERE export_ref=$1 ORDER BY ordinal").bind(id).fetch_all(&mut **tx).await?;
     Ok(ExportRecord {
         id,
+        created_at: Some(row.try_get("export_created_at")?),
         work_id: row.try_get("work_ref")?,
         revision_id: row.try_get("revision_ref")?,
         state: row.try_get("state")?,
@@ -220,8 +221,10 @@ pub async fn freeze_export(
     work: Uuid,
     r: &FreezeRequest,
 ) -> Result<(ExportRecord, Revision), WorkbenchError> {
-    if r.renderer_version != "creation-renderer.v1"
-        || r.font_version.is_empty()
+    if !matches!(
+        r.renderer_version.as_str(),
+        "creation-renderer.v1" | "creation-renderer.v3"
+    ) || r.font_version.is_empty()
         || r.font_version.len() > 200
     {
         return Err(WorkbenchError::Invalid("renderer"));

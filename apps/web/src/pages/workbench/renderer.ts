@@ -2,7 +2,7 @@ import type { ImagePage } from './workbenchModel';
 import creationFontUrl from '../../assets/fonts/noto-sans-sc.woff2?url';
 
 /** Target-pixel template geometry; the UI only scales this canvas, never its text. */
-export const RENDERER_VERSION = 'creation-renderer.v1';
+export const RENDERER_VERSION = 'creation-renderer.v3';
 export const FONT_PROFILE = 'noto-sans-sc.sha256:ed05125987c35ee57be16be7242568f1d516fbf497bc0ef4161499ca9e8d8fce';
 export const PAGE_WIDTH = 1080;
 export const PAGE_HEIGHT = 1440;
@@ -38,6 +38,41 @@ export function wrapText(context: Pick<CanvasRenderingContext2D, 'measureText'>,
   return lines;
 }
 
+/** V3 automatic line breaks obey Chinese opening/closing punctuation rules.
+ * Explicit paragraphs and every grapheme remain intact. An unbreakable run wider
+ * than the available width stays intact so the renderer exposes overflow. */
+export function wrapV3Text(context: Pick<CanvasRenderingContext2D, 'measureText'>, text: string, width: number): string[] {
+  const opening = /^[（(［[｛{〈《「『【〔〖〘〚‘“]/u;
+  const closing = /^[）)］\]｝}〉》」』】〕〗〙〛’”。，、；：！？!?.,;:%％‰…]/u;
+  const segmenter = new Intl.Segmenter('zh', {granularity:'grapheme'});
+  const lines: string[] = [];
+  for (const paragraph of text.split('\n')) {
+    const chars=Array.from(segmenter.segment(paragraph),part=>part.segment);
+    if (!chars.length) { lines.push(''); continue; }
+    const legal = (end: number) => {
+      if (end===chars.length) return true;
+      let before=end-1,after=end;
+      while (before>=0 && /^\s+$/u.test(chars[before]!)) before--;
+      while (after<chars.length && /^\s+$/u.test(chars[after]!)) after++;
+      return !opening.test(chars[before]??'') && !closing.test(chars[after]??'');
+    };
+    let start=0;
+    while (start<chars.length) {
+      let end=start;
+      while (end<chars.length && context.measureText(chars.slice(start,end+1).join('')).width<=width) end++;
+      end=Math.max(start+1,end);
+      if (end<chars.length && !legal(end)) {
+        let earlier=end-1;
+        while (earlier>start && !legal(earlier)) earlier--;
+        if (earlier>start) end=earlier;
+        else while (end<chars.length && !legal(end)) end++;
+      }
+      lines.push(chars.slice(start,end).join(''));start=end;
+    }
+  }
+  return lines;
+}
+
 export async function resolveFont(signal?: AbortSignal): Promise<string> {
   if (!document.fonts || typeof FontFace === 'undefined') throw new RenderError('font_unavailable', '中文字体尚未就绪，请稍后重试');
   fontLoading ??= (async () => {
@@ -59,7 +94,7 @@ export async function resolveFont(signal?: AbortSignal): Promise<string> {
   return family;
 }
 
-export async function renderPage(page: ImagePage, options: RenderOptions = {}): Promise<RenderResult> {
+async function renderLegacyPage(page: ImagePage, options: RenderOptions = {}): Promise<RenderResult> {
   const fontFamily = options.fontFamily ?? await resolveFont(options.signal);
   options.signal?.throwIfAborted();
   const canvas = options.canvas ?? document.createElement('canvas');
@@ -132,6 +167,96 @@ export async function renderPage(page: ImagePage, options: RenderOptions = {}): 
   }
   if (!page.title.trim() && !page.blocks.some(block => block.text.trim())) issues.push({ field: 'page', message: '图页尚未填写' });
   return { canvas, issues, fontFamily };
+}
+
+// Existing template IDs keep their original geometry. A saved page opts into V3 explicitly.
+export async function renderPage(page: ImagePage, options: RenderOptions = {}): Promise<RenderResult> {
+  if (page.templateVersion === 'creation-v1' || page.templateVersion === 'creation-v1-editorial') return renderLegacyPage(page, options);
+  if (!['creation-v3-type','creation-v3-split','creation-v3-list'].includes(page.templateVersion)) throw new RenderError('render_failure', '当前图页排版版本不可用，请重新选择排版');
+  return renderV3Page(page, options);
+}
+
+async function renderV3Page(page: ImagePage, options: RenderOptions): Promise<RenderResult> {
+  const fontFamily = options.fontFamily ?? await resolveFont(options.signal);
+  options.signal?.throwIfAborted();
+  const canvas = options.canvas ?? document.createElement('canvas');
+  canvas.width = PAGE_WIDTH; canvas.height = PAGE_HEIGHT;
+  const context = canvas.getContext('2d');
+  if (!context) throw new RenderError('render_failure', '无法建立图页画布，请重新打开预览');
+  const colors = {
+    cream: {paper:'#f4efe5', ink:'#0b0f12', accent:'#a64e30', muted:'#6b6961', panel:'#e7dfcf', onAccent:'#ffffff'},
+    sage: {paper:'#f4efe5', ink:'#0b0f12', accent:'#137557', muted:'#5f6a63', panel:'#dce6d8', onAccent:'#ffffff'},
+    ink: {paper:'#f4efe5', ink:'#0b0f12', accent:'#0b0f12', muted:'#5f6a71', panel:'#e5e4df', onAccent:'#ffffff'},
+  }[page.style.palette];
+  const {paper,ink,accent,muted,panel,onAccent} = colors;
+  const isSplit = page.templateVersion === 'creation-v3-split', isList = page.templateVersion === 'creation-v3-list';
+  const issues: RenderIssue[] = [];
+  const rect = (x:number,y:number,width:number,height:number,color:string) => { context.fillStyle=color; context.fillRect(x,y,width,height); };
+  const label = (value:string,x:number,y:number,size:number,color:string,weight=400) => {
+    context.font=`${weight} ${size}px "${fontFamily}"`; context.fillStyle=color; context.textAlign='left'; context.textBaseline='top'; context.fillText(value,x,y);
+  };
+  const block = (value:string,field:string,x:number,y:number,size:number,width:number,lineHeight:number,bottom:number,color=ink,weight=400) => {
+    context.font=`${weight} ${size}px "${fontFamily}"`;
+    const lines=wrapV3Text(context,value,width);
+    if (y + (lines.length-1)*lineHeight + size > bottom || lines.some(line => context.measureText(line).width > width)) issues.push({field,message:'文字超出画幅，请缩短文案或预览拆页'});
+    context.fillStyle=color; context.textBaseline='top';
+    context.textAlign=page.style.alignment === 'center' ? 'center' : page.style.alignment === 'end' ? 'right' : 'left';
+    const drawX=page.style.alignment === 'center' ? x+width/2 : page.style.alignment === 'end' ? x+width : x;
+    for (const [index,line] of lines.entries()) context.fillText(line,drawX,y+index*lineHeight);
+    return lines.length*lineHeight;
+  };
+  rect(0,0,PAGE_WIDTH,PAGE_HEIGHT,paper);
+  let image: HTMLImageElement | undefined;
+  if (page.assetId) {
+    if (!options.assetUrl) throw new RenderError('asset_unavailable','本页图片尚未取得，请重新选择图片');
+    image=new Image(); image.src=options.assetUrl;
+    try { await image.decode(); } catch { throw new RenderError('asset_unavailable','图片加载失败，请重试或替换图片'); }
+    options.signal?.throwIfAborted();
+    const {x,y,width,height}=page.crop;
+    if (![x,y,width,height].every(Number.isFinite) || width <= 0 || height <= 0 || x < 0 || y < 0 || x+width > 1.000001 || y+height > 1.000001) throw new RenderError('asset_unavailable','裁切区域无效，请重新调整');
+  }
+  const drawImage = (y:number) => {
+    if (!image) return;
+    let sx=page.crop.x*image.naturalWidth, sy=page.crop.y*image.naturalHeight;
+    let sw=page.crop.width*image.naturalWidth, sh=page.crop.height*image.naturalHeight;
+    const ratio=920/420;
+    if (sw/sh > ratio) { const next=sh*ratio; sx+=(sw-next)/2; sw=next; }
+    else { const next=sw/ratio; sy+=(sh-next)/2; sh=next; }
+    context.drawImage(image,sx,sy,sw,sh,80,y,920,420);
+  };
+  const hasBlocks=page.blocks.some(item => item.text.trim());
+  if (page.kind === 'cover') {
+    if (isSplit) { rect(0,0,1080,image ? 710 : 1000,accent); rect(80,192,72,8,onAccent); }
+    else if (isList) rect(0,0,1080,40,ink);
+    else rect(80,96,16,48,accent);
+    drawImage(250);
+    const titleTop=image ? 752 : 300, titleSize=image ? 82 : 104, titleLine=image ? 112 : 156;
+    const titleHeight=block(page.title,'title',80,titleTop,titleSize,920,titleLine,image ? 1090 : 944,isSplit && !image ? onAccent : ink,600);
+    let contentTop=image ? titleTop+titleHeight+34 : isSplit ? 1090 : hasBlocks ? Math.max(984,titleTop+titleHeight+40) : 1080;
+    if (isList && !image) { rect(80,984,920,280,panel); rect(80,984,12,280,accent); contentTop=1038; }
+    else if (!image && !isSplit) rect(80,hasBlocks ? 936 : 1016,100,8,accent);
+    if (page.subtitle) contentTop+=block(page.subtitle,'subtitle',isList && !image ? 128 : 80,contentTop,40,isList && !image ? 824 : 920,64,1240,ink)+24;
+    for (const item of page.blocks) if (item.text.trim()) contentTop+=block(item.text,item.id,80,contentTop,36,920,56,1256,ink)+20;
+  } else {
+    if (isSplit) rect(0,0,1080,192,accent);
+    rect(80,isSplit ? 88 : 104,72,8,isSplit ? onAccent : accent);
+    if (isList) rect(0,0,1080,32,ink);
+    let y=image ? 724 : 304;
+    drawImage(248);
+    y+=block(page.title,'title',80,y,76,920,112,1100,ink,600);
+    rect(80,y+40,100,6,accent); y+=120;
+    if (page.subtitle) { y+=block(page.subtitle,'subtitle',80,y,34,920,56,1240,muted)+28; }
+    if (isList) rect(64,y-20,952,Math.max(0,1264-(y-20)),panel);
+    for (const [index,item] of page.blocks.entries()) {
+      if (!item.text.trim()) continue;
+      if (page.kind === 'steps') { label(String(index+1).padStart(2,'0'),80,y+6,40,accent,700); y+=block(item.text,item.id,184,y,44,816,76,1240)+40; }
+      else if (page.kind === 'voice') { if (index===0) { label('“',80,y-10,100,accent,700); y+=80; } y+=block(item.text,item.id,104,y,48,872,84,1240)+32; }
+      else { y+=block(item.text,item.id,80,y,48,920,84,1240)+40; }
+    }
+  }
+  rect(80,1300,920,2,muted);
+  if (!page.title.trim() && !hasBlocks) issues.push({field:'page',message:'图页尚未填写'});
+  return {canvas,issues,fontFamily};
 }
 
 export function pngBlob(canvas: HTMLCanvasElement): Promise<Blob> {

@@ -218,7 +218,31 @@ pub struct MaterialUse {
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MaterialSelection {
+    pub document_id: String,
+    pub source_kind: SourceKind,
+    pub source_ref: Uuid,
+    pub work_ref: Option<Uuid>,
+    pub source_version: String,
+    pub added_by: String,
+    pub match_reasons: Vec<String>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MaterialPreparation {
+    pub method_version: String,
+    pub query: String,
+    pub terms: Vec<String>,
+    pub state: String,
+    pub gaps: Vec<String>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkDocument {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub materials: Vec<MaterialSelection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub material_preparation: Option<MaterialPreparation>,
     #[serde(default)]
     pub tags: Vec<String>,
     pub contract: String,
@@ -237,6 +261,8 @@ impl Default for WorkDocument {
     fn default() -> Self {
         Self {
             contract: "content-workbench.v1".into(),
+            materials: vec![],
+            material_preparation: None,
             tags: vec![],
             title: String::new(),
             account_ref: None,
@@ -354,6 +380,8 @@ pub struct ExportPage {
 #[serde(rename_all = "camelCase")]
 pub struct ExportRecord {
     pub id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
     pub work_id: Uuid,
     pub revision_id: Uuid,
     pub state: String,

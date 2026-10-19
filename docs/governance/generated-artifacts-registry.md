@@ -32,7 +32,7 @@
 | 数据库恢复工作区 | `database/restores/` | PostgreSQL 恢复工具 | 忽略 | 禁止 | 仅本地临时使用，不连接新项目运行时 |
 | 历史来源校验表 | `references/SOURCE-MANIFEST.sha256` | Bootstrap 来源固定流程 | 提交并受保护 | 禁止随意修改 | 与历史快照一起长期保留 |
 | 架构、业务流程与项目全景图 | `docs/architecture/system-overview-diagram.html`、`docs/architecture/business-process-diagram.html`、`docs/architecture/project-architecture-atlas.html` | `diagram-design` Skill 根据当前代码、migration、测试、`/health`/本地页面运行快照、`docs/current-state.md`、最新 progress、技术基线及目标/模块/采集/数据/Agent/运行/界面架构生成；用 Skill `self_check.py`、几何检查和浏览器渲染复核 | 提交 | 仅在同步复核来源、状态说明和图内边界后允许修改 | 稳定保留；架构状态、技术基线或获准范围变化时重新生成并复核；图不替代长期运行、真实采集或生产证明 |
-| Linggan Browser Producer release | `plugins/linggan-browser-producer/releases/linggan-browser-producer-<version>.zip`、`plugins/linggan-browser-producer/releases/release-manifest.json` | `cd plugins/linggan-browser-producer && npm run build`；唯一源为该包的 `src/` 和 Linggan runtime token source `apps/api/src/local_web/lids_tokens.css`，build script 同时生成 ZIP/manifest | 提交 | 禁止手工修改 ZIP 或 release manifest；修改源后重新 build | 当前只保留当前发行版；替代/删除必须经单独发布卡和 hash 核对 |
+| Linggan Browser Producer release | `plugins/linggan-browser-producer/releases/linggan-browser-producer-<version>.zip`、`plugins/linggan-browser-producer/releases/release-manifest.json` | `cd plugins/linggan-browser-producer && npm run build`；唯一源为该包的 `src/` 和 Linggan runtime token source `apps/web/src/styles/lids_tokens.css`，build script 同时生成 ZIP/manifest | 提交 | 禁止手工修改 ZIP 或 release manifest；修改源后重新 build | 当前只保留当前发行版；替代/删除必须经单独发布卡和 hash 核对 |
 | Linggan Intelligence Browser release | `plugins/linggan-intelligence-browser/releases/linggan-intelligence-browser-v<version>.zip`、`plugins/linggan-intelligence-browser/releases/release-manifest.json` | `cd plugins/linggan-intelligence-browser && npm run build && npm run package:release && npm run release:manifest && npm run release:verify && npm run release:reproducibility`；唯一源是该包的当前 source；打包器固定 ZIP 时间与文件顺序 | 提交 | 禁止手工修改 ZIP 或 release manifest；修改 source 后重新 build/package 并核验 | `release-manifest.json` 指向唯一当前候选发行包；历史 ZIP 作为已发布工件保留，不覆盖或删除。`0.8.61` 候选 ZIP SHA-256 = `2aba8db3d2edad87b6b4c5436e751efa5f89b322763c789828b65295a9def2f4`；不含真实材料、账号、凭据或运行日志，未加载到浏览器 |
 
 ## COMMENT-STUDY-PRODUCTIZATION-001 · 2026-09-23 局部登记
@@ -135,10 +135,10 @@
 
 ## LOGIN-ANATOMY-001
 
-- 固定生成位置：`apps/api/src/local_web/login.html`，允许提交为 Rust include_str 页面资产；禁止手工修改。
-- 唯一源：`scripts/login-anatomy/{page.html,model.mjs,parts.mjs,order.mjs,station.css,live.mjs,build.mjs}`；Anatomy 技能的 MIT kit 仅在生成时使用，许可随源保留。
+- WEB-REACT-001 H 后生成位置为 `apps/web/src/pages/login/assets/` 与 `sceneModel.ts`；旧Rust HTML已删除，可经PR #411历史恢复；禁止手改生成物。
+- 唯一源：`scripts/login-anatomy/{model.mjs,parts.mjs,order.mjs,build.mjs}及apps/web/src/pages/login/Login.module.css`；表单及生命周期由React/TypeScript维护；Anatomy 技能的 MIT kit 仅在生成时使用，许可随源保留。
 - 再生：`node scripts/login-anatomy/build.mjs --audit`，Node 20.10+ 和已安装 Anatomy；`ANATOMY_SKILL_ROOT` 可指定安装位置。页面运行不依赖技能、网络或前端库。
-- 责任：本对话 root / LOGIN-ANATOMY-001；批准来源与局部例外见 [登录规格](../design/changes/login-anatomy-001.md)。生成一致性及模型/遮挡检查由相邻 verify-scene.mjs 执行。
+- 责任：本对话 root / LOGIN-ANATOMY-001；批准来源与局部例外见 [登录规格](../design/changes/login-anatomy-001.md)。生成一致性及模型/遮挡检查由相邻 verify-scene.mjs 手动执行，依赖已安装 Anatomy 技能，不在CI中；正式前端构建与登录浏览器生命周期另由Web CI验证。
 - 证据：构建审计/姿态 JSON、截图与浏览器步骤输出只放系统临时目录或本任务 Codex visualizations，不进 Git、不含密码/真实材料；正式源码长期保留，替换须随来源重建。
 
 ## RESEARCH-DOSSIER-001 · 第一阶段隔离验证
@@ -248,3 +248,17 @@ Mog 授权三篇指定作品在本机核对与重新分层。私有材料快照�
 ### WEB-REACT-001-F · #441 内核修复与本机发布
 
 固定于本工作树 `artifacts/private/web-react-001-f/kernel-release/`：合成PG复现/完整回归/独立审查/CI日志、无秘密发布前后身份/策略/调用计数与实际3000截图。忽略、不入Git，真实原文/凭据不得交模型或CI。一次性runner只调用已有隔离脚本前置并按同一清理规则销毁受控资源。合并后先复制到canonical同名private证据路径，再移除交付worktree。
+
+## 2026-10-15 · V3 还原的私有真实文本验收副本
+
+- 仍使用 `implementation/v3-fidelity/` 私有目录；真实笔记/原声、账号身份、来源映射、作品回执、截图与成品包均忽略，不进 Git、不上传 CI。源副本只来自既有本机读取，不代表重新采集或全库覆盖。
+- 维护源为 `content_workbench_private_review.rs` 测试夹具；只有显式 `CW_BROWSER_MANUAL_REVIEW=1` 才接受 `CW_BROWSER_REAL_SAMPLES`，复制到一次性库并保留原笔记与父评论映射。缺失作者/互动信息不补造。
+- 再生入口：设置上述变量和 `CW_BROWSER_PROOF_DIR` 后执行 `scripts/test-content-workbench-postgres.sh --browser`；不携带私有样本时仍为 CI 的合成证明。人工模式保留候选最多八小时，在证据目录写入 `review-complete` 后退出并清理隔离资源。人工模式不会冒充自动浏览器证明。
+- 保留本包必要的真实样本、来源映射、最终作品及成品证据直至 Mog 验收；不必要的目录抓取和重复截图按本包精确路径清理。正式库、常驻 runtime 与来源原件均不在清理范围内。
+
+## WEB-REACT-001-CLOSEOUT · 全站收尾证据与登录静态素材
+
+- 责任：root，#430完整收尾授权；[验收矩阵](../design/acceptance/web-react-001-closeout.md)。
+- 私有证据固定于本工作树 `artifacts/private/web-react-001-closeout/`，包括旧实际GET基线/截图、新版同输入截图/差分、隔离PG/浏览器日志、真实首篇/最小AI回执和部署/离线/回退证据；忽略、不入Git、不交CI或模型。结束前移交主checkout同名目录；原始像素/回执不修改。
+- 登录生成素材：`apps/web/src/pages/login/assets/{station.svg,scene-data.json}` 与 `sceneModel.ts` 由 `scripts/login-anatomy/build.mjs` 和原模型/几何唯一源再生，允许入Git；不得手改生成物。`fallback.svg` 为已确认原静态图，从旧运行页面原样提取；旧页面可经历史Git恢复，不保留运行双轨。样式归入Login.module.css，继承LOGIN-ANATOMY-001局部例外。
+- 旧页面/动画基线仅存本机私有目录，生成审计使用原LOGIN登记临时目录；后续构建不再生成Rust HTML。

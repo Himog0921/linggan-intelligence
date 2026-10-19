@@ -83,14 +83,14 @@
 
 | 页面区域/场景 | PAGE / DS / PAT / CMP 来源 ID | 使用目的 | 明确不允许的替代 |
 |---|---|---|---|
-| 页头、一级导航、面包屑、侧栏 | 共享 `shell.css` / `shell.rs` 结构（与旧页面同源）；一级导航与侧栏登记表由前端测试逐项对照 | 三页外壳一致，领域不丢 | 页面自带第二套页头或侧栏样式 |
+| 页头、一级导航、面包屑、侧栏 | 共享 `shell.css` / `AppShell.tsx` 结构（与旧页面同源）；一级导航与侧栏登记表由前端测试逐项对照 | 三页外壳一致，领域不丢 | 页面自带第二套页头或侧栏样式 |
 | 搜索、筛选、快捷视图、结果条、分页、表格 | `LIDS-PAT-001` Corpus Explorer（L1） | 搜索与结果优先，范围统计与筛选结果分开 | 卡片墙、装饰性大标题 |
 | 依据抽屉 | Split Evidence Inspector（受限右侧；窄屏全宽） | 结论在先，按作品分组展示引文；提交栏固定 | 全屏弹层、嵌套抽屉 |
 | 调整判断、加入观察、发现设置、材料范围、筛选 | 原生模态对话框（Esc 关闭、焦点回到触发者） | 动作前说明对象与后果 | 页内就地直接提交 |
 
 ### LIDS 采用清单
 
-- Token 基线与唯一数值来源：`apps/api/src/local_web/lids_tokens.css`；页面样式为 CSS Module，只用 `--lgi-*`，页面内的 `--creator-*` 局部变量是现有 Token 的 `calc` 组合；`tokenDiscipline.test.ts` 自动拒绝写死颜色、字号、行高与间距
+- Token 基线与唯一数值来源：`apps/web/src/styles/lids_tokens.css`；页面样式为 CSS Module，只用 `--lgi-*`，页面内的 `--creator-*` 局部变量是现有 Token 的 `calc` 组合；`tokenDiscipline.test.ts` 自动拒绝写死颜色、字号、行高与间距
 - Primitive / 正式 CMP 查重结果：沿用 shell.css 的 `.v7-*` 外壳类；没有新增全局 Token、Primitive、CMP、Scene 或 Motion
 - 页面唯一视觉核心：作者表格与依据抽屉里的原话引文
 - 原声、来源、样本、窗口、Coverage/Validity/冲突/复核边界：引文用原声字体并标明字段来源（标题／正文／简介等）；作品引文带「回查原作品」；取样篇数与材料范围按 3.3 如实说明

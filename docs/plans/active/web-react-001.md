@@ -1,16 +1,18 @@
 # WEB-REACT-001 · 网页前端全站统一为 React（合并 UI 改版专项）
 
 > 状态: 活跃计划
-> 最后核对: 2026-10-18
-> 适用范围: Intelligence 全部正式网页迁移到 React 的唯一实施计划，包括目标架构、不留双轨规则、阶段顺序与验收；合并 UIUX-CONTENT-WORKBENCH-001 的用户结果与推进安排。阶段 A+B 已随 PR #431 合并至 main@0a90fd4a；部署依据见 #430 上线回执；阶段 C 已随 PR #432 合并；阶段 D 已派定：D1 已随 PR #436 合并上线，D2 已随 PR #443 合并并部署，D3 已按 Mog 2026-10-18 派定形成迁移候选（[分册](web-react-001-d-corpus.md)）；阶段 G、E 已随 PR #437、#439 合入并部署，F 已随 #441 合入并部署（见各自分册）
+> 最后核对: 2026-10-19
+> 适用范围: Intelligence 全部正式网页迁移到 React 的唯一实施计划，包括目标架构、不留双轨规则、阶段顺序与验收；合并 UIUX-CONTENT-WORKBENCH-001 的用户结果与推进安排。阶段 A+B 已随 PR #431 合并至 main@0a90fd4a；部署依据见 #430 上线回执；阶段 C 已随 PR #432 合并；阶段 D 已派定：D1 已随 PR #436 合并上线，D2 已随 PR #443 合并并部署，D3 已随 PR #445 合并部署（[分册](web-react-001-d-corpus.md)）；阶段 G、E 已随 PR #437、#439 合入并部署，F 已随 #441 合入并部署（见各自分册）
 > 事实来源: Mog 2026-10-15 的决定（[Issue #430](https://github.com/Himog0921/linggan-intelligence/issues/430)、[DEC-0010](../../decisions/0010-web-frontend-react.md)）；Mog 提供的《Linggan Intelligence 全站 React 迁移架构与执行手册》（2026-10-15，基于 `main@473980cb`，未入库，有效内容已吸收进本文）；UIUX-CONTENT-WORKBENCH-001 计划（[Issue #425](https://github.com/Himog0921/linggan-intelligence/issues/425)，2026-10-15 工作树未提交版本）；`origin/main@473980cb` 代码只读核对
 > 冲突时以谁为准: Mog 最新确认、DEC-0010、AGENTS.md、真实代码与运行证据
 
-## 2026-10-18 当前状态补记
+## 2026-10-19 当前状态与完整收尾授权
 
-当前 `origin/main` 与正式本机 3000 均为 `acdfbb876bf3fcb5cb4aaf20ceea565562f0b428`（PR #441）。本次同步依据 GitHub 合并记录、运行进程及 `/health.webApp`，不把历史候选证明改写成新版本重跑结果。
+开工实时核实：main、runtime-main、3000为362dad3f（#445）；A+B、C基线、D1/D2/D3、E/F/G均已合入并部署，F两项旧内核及D3启动锁回归已修复。#434@c1459357仍未独立合入；本包将其完整集成，并复核原树未提交的C-UX走查问题。Mog当前明确要求上述全部遗留收口、所有页面含子页面统一最新React栈、删除旧运行代码，并授权按需合并部署刷新3000；此授权替代旧阶段“不合并、不部署”的执行限制，不改写旧测试结果。
 
-当前阶段：A+B、C 基线、D1、D2、E、F、G 已合入；C 后续 V3/V8 候选 #434 仍是 Draft、未合并；D3 评论研究四视图候选已实现并完成本机截图与隔离链路核对，既有内核验收缺口及未部署状态见[D3验收](../../design/acceptance/web-react-001-d3-acceptance.md)；H 登录与全站清理尚未开始。B 的断网重启／整版回退、C 的真实成品／模型质量和各模块 Mog 签收仍分别保留。旧 `feat/web-react-001@ba98ba26` 为历史计划快照，当前入口以本主线文档为准。
+唯一工作包WEB-REACT-001-CLOSEOUT-20261018，root单执行，#430 Claim；分支codex/web-react-001-closeout。Draft [PR #446](https://github.com/Himog0921/linggan-intelligence/pull/446)已提交8ecc2e52，Mog授权的唯一GPT替代reviewer已完成该历史恢复P2增量与精确提交复核PASS，当前head CI的3项执行成功、4项条件跳过。最终合并核对新增类型搜索读取无关族、前端无标注语义猜分类两项P2，源码确认后同包修正，尚未提交/复核/新CI。当前前端978项、完整PG/HTTP23项与22步浏览器复验通过，五张PNG哈希保持；保留原阅读提示/筛选并明确未核对来源，不将8ecc绿色覆盖新代码。候选React/React DOM19.3.1、TypeScript strict、Vite、单Root/路由，17个正式模式及H旧UI清理已实施；正式3000仍362dad3f，尚未执行本包部署/运行演练/正式首篇。完整范围与分层证据见[收尾矩阵](../../design/acceptance/web-react-001-closeout.md)。
+
+旧feat/web-react-001@ba98ba26与下文按日期保留的候选均是历史来源。B正式离线/整版回退与C真实模型/成品/性能尚待正式验收；F最终B渲染性能已有本包同输入21轮证明（不含SQL/模型）；Mog全站签收仍必须独立关闭。§8后续产品（每日十方案等）继续另行派定，不通过迁移自动扩权。
 
 ## 1. 目标与已定决定
 
@@ -51,9 +53,11 @@ Mog 2026-10-15 的决定（长期部分见 DEC-0010）：
 
 ### 3.1 页面
 
+下表保留2026-10-15开工旧实现盘点。当前收尾候选所有正式页面和子视图均由apps/web提供，17个入口模式由前后端同一登记表逐项校验；表中旧运行界面已在各迁移包/H删除。Rust JSON/SQL、资源与下载不属于旧UI删除对象。
+
 旧文件均在 `apps/api/src/local_web/` 下；各阶段开工时以盘点结果为准。
 
-| 页面 | 当前实现 | 主要旧文件 | 阶段 |
+| 页面 | 开工旧实现（历史盘点） | 主要旧文件 | 阶段 |
 |---|---|---|---|
 | `/settings/models` | Rust 包装 + 原生 JS | `model_settings.rs/.html/.css/.js` | B |
 | 共享外壳（全局页头、语料/运营二级导航） | Rust | `shell.rs`、`shell.css` | B 起由 React 接管，H 删除 |
@@ -126,7 +130,7 @@ apps/web/
 
 ### 4.5 LIDS 与组件
 
-- **Token 唯一数值源**：迁移期仍是 `apps/api/src/local_web/lids_tokens.css`。React 构建时引用它的副本，CI 校验名称与数值一致。阶段 H 决定最终位置，并同步插件构建与 Rust Token 测试（插件的 `popup.html` 目前也加载它的构建副本）。
+- **Token 唯一数值源**：迁移期仍是 `apps/web/src/styles/lids_tokens.css`。React 构建时引用它的副本，CI 校验名称与数值一致。阶段 H 决定最终位置，并同步插件构建与 Rust Token 测试（插件的 `popup.html` 目前也加载它的构建副本）。
 - **两层组件**：基础组件（`Button`、`StatusText`、`Dialog`、`Drawer`、`FilterBar`、`DataTable`、`Pagination`、`SearchField`、`EmptyState`、`Readout`、`EvidenceQuote`、`Surface`、`ActionFeedback`）新增前至少要有两个真实使用处；业务组件（`ProblemCard`、`WorkCoverCard`、`CreatorRow`、`StudyRunRow`、`StationStatus` 等）放在所属页面目录，不抽象成万能卡片。
 - 每个组件连同交互状态、允许的 props、极端数据示例和测试一起交付。
 - **表达规则**：Sans 用于系统语义；Mono 只用于 ID、数字和技术状态；Serif 只用于真实原声，AI 摘要不能装成带引号的原话。作品封面按 3:4 完整显示（contain），不裁切。状态用文字、符号和颜色共同表达。遵守 `prefers-reduced-motion`，不做 hover 上浮。
@@ -411,4 +415,18 @@ R1 生效后，上述分支若要合入，界面部分只能是阻断缺陷修�
 - **UIUX-CONTENT-WORKBENCH-001**：吸收了 §1 用户结果、§2 范围、§4 验收维度、§5 与 DEC-0009 的关系、§10 首包规格（即阶段 C）。原 §3 中阶段 3 与阶段 5 并入本计划阶段 B–G，阶段 4、6、7 见本计划 §8；§10.6 的渲染建议与 §10.8 的页面文件位置由本计划取代。该计划及其审计、原型、验收文档随阶段 C 代码一起交付。
 
 
-2026-10-17 阶段 F 同包修订：Mog 已选定 B「材料优先」正式概览改版；以 [F 分册 §7](web-react-001-f-topics.md#7-2026-10-17--mog-选定-b材料优先正式改版) 和修订验收为准。仅概览旧像素保真要求被该确认替代，全部现有功能与后端口径保留；Draft #441 继续交付，未合并部署。
+2026-10-17 阶段 F 同包修订：Mog 已选定 B「材料优先」正式概览改版；以 [F 分册 §7](web-react-001-f-topics.md#7-2026-10-17--mog-选定-b材料优先正式改版) 和修订验收为准。仅概览旧像素保真要求被该确认替代，全部现有功能与后端口径保留；该句为当时Draft状态；#441现已合入发布，当前状态见本文顶部。
+
+### 2026-10-15 · 阶段 C 再实施：V3 还原与选题材料准备
+
+Mog 对 #432 合并后的真实页面拒绝验收，明确要求沿 V3 完整重新落地，保留 React 与现有后端；继续 GPT-6.1-Sol 子代理，root 逐页对照审核，真实材料走完后交 Mog 验收，验收前不合并、不部署。此次为同一阶段 C 交付包的修正，不新立产品路线。
+
+- task-id：`WEB-REACT-001-C-V3-FIDELITY-20261015`；基线 `36f3fdf9a61f2ff8cc9b4cad9fe7c3053c5b716a`；分支 `codex/workbench-v3-fidelity`；工作树沿用 `.worktrees/uiux-content-workbench-001`（原分支已合并且工作树干净）。
+- 新增必达：选题进入研读前已准备高相关的真实笔记和真实评论及父语境；准备集合、手工加入、摘入画布是三个不同阶段。可检索库内其他材料，先预览再加入本篇；删除本篇材料不删除原库。相关理由可解释，不把无结果伪装为空需求，不拿全领域最新内容凑数。
+- 表面合同：以已精简文案的 V3 实际源码为基准，逐项还原选题墙/方案详情、书页与纸条、语义类型筛选与紧凑分布矩阵、结构画布、连续正文、并排可编辑改稿、独立封面/内页/预览导出步骤。不得用同名普通表单替代。
+- 共享依赖裁定：Mog 本次明确要求整工作台还原，覆盖此前“本阶段不采用紧凑外壳”的限制，仅允许给唯一 React AppShell 增加本工作台的紧凑/沉浸模式；设置页和旧原生页面保持现有外观。不要复制第二 React Root 或修改旧 shell.rs/shell.css。
+- 文件责任：Sol 前端负责工作台除图页及 source API/DTO 以外的 TSX/CSS/测试；Sol 图页负责 ImagePages、renderer、exportWorkflow 及各自测试；Sol 材料后端负责 content_workbench_sources Rust/API/测试与新增窄材料准备模块、workbenchApi/Model 及测试（共享接口先通知前端）；root 独占 AppShell/路由/共享注册、隔离验证脚本、相关文档、浏览器对照与集成。不得互改负责文件。
+- 保留：版本与请求身份、断网未确认不自动重试、模型仅显式触发、来源限制传播、稳定段落/图页身份、手改保护、本地字体、单 renderer、冻结导出、React.lazy。
+- 验证顺序：先合同与真实数据只读探查 → 三代理实施 → 每页与 V3 同视口同状态对照并返修 → 隔离 PostgreSQL/浏览器正负例 → 隔离候选用最小真实材料从选题到正文+封面+4内页+ZIP → root 与独立审查 → Draft PR / Mog 验收。工程通过和审美通过分开。
+- 真实验证边界：只使用本机现有已取得且可访问的最小相关样本，在私有隔离环境读写候选作品；不写共享业务库，不触发采集或第三方模型，不将真实正文/评论/截图入 Git。保留验收所需私有预览与成品；临时复制数据验证后清理。首篇沿用作业启动，Mog 已指定“驭A低手裴妈”的小红书账号；在隔离库保留其真实账号身份的副本完成验证，不代表已在平台发布。
+- 未纳入：每日自动生成十篇、自动发布、平台新采集、全库向外部模型发送、常驻3000发布。高相关材料准备是本轮必达，不能因自动十篇尚未纳入而再次漏掉。

@@ -132,7 +132,7 @@ test('the startup boundary has a normal path and a truthful no-new-action recove
 test('the recovery surface uses the copied LIDS tokens without adding another visual token set', () => {
   const recoveryCss = popupCss.match(/\.popup-startup-failure\s*\{[\s\S]*?\n\}/)?.[0] || '';
   assert.match(popupHtml, /href="themes\/lids-tokens\.css"/);
-  assert.match(webpackConfig, /apps\/api\/src\/local_web\/lids_tokens\.css/);
+  assert.match(webpackConfig, /apps\/web\/src\/styles\/lids_tokens\.css/);
   assert.match(recoveryCss, /var\(--lgi-canvas-hi\)/);
   assert.match(recoveryCss, /var\(--lgi-font-sans\)/);
   assert.doesNotMatch(recoveryCss, /var\(--(?!lgi-)/);

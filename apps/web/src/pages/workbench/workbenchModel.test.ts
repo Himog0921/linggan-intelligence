@@ -130,3 +130,23 @@ describe('server-derived authored metadata provenance targets', () => {
     expect(() => parseUseTarget(target)).toThrow(WorkbenchContractError);
   });
 });
+
+describe('independent reading collection', () => {
+  it('persists source identities without requiring a quote or canvas block', async () => {
+    const { addMaterials, selectMaterial, parseMaterialCollection } = await import('./workbenchModel');
+    const source = { documentId: `note:${id}`, sourceKind: 'note' as const, sourceRef: id, workRef: id, sourceVersion: 'a'.repeat(64), title: '作业启动', authorLabel: '作者未知', qualification: 'readable' as const, fragments: [], context: null, matchReasons: ['作业、启动'] };
+    const selection = selectMaterial(source, 'prepared');
+    const doc = parseWorkDocument({...newDocument(), materials: addMaterials([selection], [selection])});
+    expect(doc.materials).toEqual([selection]);
+    expect(doc.excerpts).toEqual([]);
+    expect(doc.canvas).toEqual([]);
+    const collection = { contract: 'content-workbench-materials.v1', asOf: 'now', methodVersion: 'workbench.lexical-context.v1', query: '作业启动', terms: ['作业','启动'], state: 'insufficient', gaps: ['评论不足'], documents: [source], nextCursor: null, searchScope: 'local_only' };
+    expect(parseMaterialCollection(collection).gaps).toEqual(['评论不足']);
+    expect(() => parseMaterialCollection({...collection, documents: [{...source, qualification:'everything_allowed'}]})).toThrow(WorkbenchContractError);
+  });
+  it('reads an older document with an empty collection and rejects prose in identity metadata', () => {
+    const legacy = Object.fromEntries(Object.entries(newDocument()).filter(([key]) => !['materials', 'materialPreparation'].includes(key)));
+    expect(parseWorkDocument(legacy).materials).toEqual([]);
+    expect(() => parseWorkDocument({...newDocument(), materials:[{documentId:`note:${id}`,sourceKind:'note',sourceRef:id,workRef:id,sourceVersion:'a'.repeat(64),addedBy:'manual',matchReasons:[],text:'不可在集合复制原文'}]})).toThrow(WorkbenchContractError);
+  });
+});

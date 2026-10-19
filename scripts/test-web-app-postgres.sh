@@ -21,7 +21,7 @@ export PATH="$(dirname "$node_bin"):$PATH"
 if [[ ! -d apps/web/node_modules ]]; then
   "$npm_bin" ci --prefix apps/web --ignore-scripts --no-audit --no-fund
 fi
-"$npm_bin" --prefix apps/web run build >/dev/null
+"$npm_bin" --prefix apps/web run build
 
 suffix="$(date -u +%Y%m%d%H%M%S)_$$_$(openssl rand -hex 4)"
 proof_database="linggan_web_app_proof_${suffix}"
@@ -105,6 +105,7 @@ run_proof() {
 # Focused local reruns use the same disposable environment; CI defaults to every stage.
 if [[ "${WEB_APP_PROOF_SCOPE:-all}" == topics ]]; then
   mkdir -p "$proof_dir/topics"
+  run_proof "$proof_dir/topics" cargo test -p linggan-api --bins --locked local_web::topic_workspace_tests -- --ignored --nocapture --test-threads=1
   run_proof "$proof_dir/topics" cargo test -p linggan-api --bins --locked local_web::topic_browser_tests -- --ignored --nocapture --test-threads=1
   exit 0
 fi
@@ -156,6 +157,7 @@ printf '%s\n' 'WEB-REACT-001 E operations five-page real-chain proof passed (iso
 
 # 阶段 F：完整主题图谱 + 独立 Workspace；本机真实 UI 对照另存 private，不上传 CI。
 mkdir -p "$proof_dir/topics"
+run_proof "$proof_dir/topics" cargo test -p linggan-api --bins --locked local_web::topic_workspace_tests -- --ignored --nocapture --test-threads=1
 run_proof "$proof_dir/topics" \
   cargo test -p linggan-api --bins --locked \
   local_web::topic_browser_tests \

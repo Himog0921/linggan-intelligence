@@ -27,8 +27,8 @@ export function CommentsPage() {
   const picker = shell.data && (shell.data.domains.length >= 2 || !current) ? <DomainPicker domains={shell.data.domains} selected={domain} action="/corpus/comments" /> : null;
   const crumb = picker ? <>语料 <span className="v7-slash">/</span> {picker} <span className="v7-slash">/</span> <b>评论研究</b></> : <>语料 <span className="v7-slash">/</span> <b>评论研究</b></>;
   const status = current?.status === 'active' ? '运行中' : current?.status === 'paused' ? '已暂停' : current?.status || '未知';
-  return <AppShell active="corpus" boundaryLabel="本机服务状态" crumb={crumb} meta={`${current?.name || '选择领域'} · 状态 ${status}`}>
-    <title>评论研究</title><div className="v7-shell"><CorpusSideNav active="comments" domain={domainParam} foot={<>只读呈现新评论研究链路<br />自动排程保持关闭</>} />
+  return <AppShell active="corpus" collectionState={shell.data?.collectionState} boundaryLabel="本机服务状态" crumb={crumb} meta={`${current?.name || '选择领域'} · 状态 ${status}`}>
+    <title>评论研究</title><div className="v7-shell"><CorpusSideNav active="comments" domain={domain} foot={<>只读呈现新评论研究链路<br />自动排程保持关闭</>} />
       {shell.isError && !shell.data ? <main className={c('study-main')} aria-labelledby="comment-study-title"><h1 id="comment-study-title" className="v7-sr-only">评论研究</h1><p className={c('study-empty')} role="status">评论研究准备信息读取失败：{errorText(shell.error)} <button type="button" onClick={() => { void shell.refetch(); }}>重试读取</button></p></main> : <Workspace key={domain ?? 'unselected'} domain={domain} domainName={current?.name || '当前领域'} loading={shell.isPending} shellError={shell.isError ? errorText(shell.error) : ''} retryShell={() => { void shell.refetch(); }} />}
     </div>
   </AppShell>;

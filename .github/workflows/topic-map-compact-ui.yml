@@ -2,9 +2,7 @@ name: Topic Map compact UI
 on:
   pull_request:
     paths:
-      - 'apps/api/src/local_web/topic_map.*'
-      - 'apps/api/src/local_web/shell.*'
-      - 'apps/api/src/local_web/lids_tokens.css'
+      - 'apps/web/src/styles/**'
       - 'apps/web/src/pages/topics/**'
       - 'apps/web/test/e2e/topic*'
       - 'apps/web/package-lock.json'

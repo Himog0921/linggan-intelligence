@@ -327,6 +327,13 @@ async fn frozen_export_png_zip_replay_failure_and_immutable_package() {
         page(PageKind::Steps),
         page(PageKind::Opinion),
     ]);
+    let serialized = serde_json::to_value(&document).unwrap();
+    assert!(serialized.get("materials").is_none());
+    assert!(serialized.get("materialPreparation").is_none());
+    assert_eq!(
+        serde_json::from_value::<WorkDocument>(serialized).unwrap(),
+        document
+    );
     let first = create(&db, document).await;
     let r = FreezeRequest {
         request_id: Uuid::new_v4(),
@@ -336,6 +343,17 @@ async fn frozen_export_png_zip_replay_failure_and_immutable_package() {
     };
     let (export, revision) = freeze_export(&db, first.work_id, &r).await.unwrap();
     assert_eq!(export.pages.len(), 5);
+    assert!(
+        export
+            .created_at
+            .as_ref()
+            .is_some_and(|time| time.ends_with('Z'))
+    );
+    let mut historical = serde_json::to_value(&export).unwrap();
+    historical.as_object_mut().unwrap().remove("createdAt");
+    let old_receipt: ExportRecord = serde_json::from_value(historical.clone()).unwrap();
+    assert!(old_receipt.created_at.is_none());
+    assert_eq!(serde_json::to_value(old_receipt).unwrap(), historical);
     assert_eq!(
         freeze_export(&db, first.work_id, &r).await.unwrap().0.id,
         export.id

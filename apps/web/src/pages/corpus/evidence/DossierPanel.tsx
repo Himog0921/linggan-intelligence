@@ -37,6 +37,7 @@ function Head({ payload, relayer, busy, onRefresh, onPreview }: { payload: Dossi
   const unconfirmed = relayer.feedback?.tone === 'unknown' || relayer.feedback?.code === 'dossier_changed_or_scope_unavailable';
   return (
     <Section title="研究底稿">
+      <p className={styles.note}>导出保留平台作品和作者编号，用于来源追溯；分享文件前请检查其中的来源信息。</p>
       <p className={styles.note}>{`${dossier.metadata.platform} · ${author} · 发布时间 ${momentText(dossier.metadata.publishedAt, '未知')}`}</p>
       <p>{`已整理 ${dossier.fragments.length} 个文字片段 · ${characters} 字符 · ${dossier.coverage.uncertainImages} 张图片部分待确认`}</p>
       <p className={styles.note}>底稿使用当前可读取的共享材料。历史运行继续保留其冻结输入；待确认行不进入正文。</p>

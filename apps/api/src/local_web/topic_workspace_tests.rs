@@ -40,7 +40,7 @@ async fn topic_import_and_read_compose_exact_work_resources_without_copying_them
     let database = proof_database("topic_api_exact_pack").await;
     let support_ref = admit_work_identity(&database, "topic-api-support", 'a').await;
     let challenge_ref = admit_work_identity(&database, "topic-api-challenge", 'b').await;
-    let application = app_with_database(database);
+    let application = app_with_database(database.clone());
     let request = topic_request(support_ref, challenge_ref);
 
     let response = application
@@ -61,6 +61,7 @@ async fn topic_import_and_read_compose_exact_work_resources_without_copying_them
     assert_eq!(receipt.pointer("/definitionVersion"), Some(&json!(1)));
 
     let response = application
+        .clone()
         .oneshot(
             Request::builder()
                 .uri("/api/local/topic-workspaces/task-initiation-difficulty")
@@ -97,6 +98,33 @@ async fn topic_import_and_read_compose_exact_work_resources_without_copying_them
             .pointer("/materials/0/workResource/display/bodyText")
             .is_none()
     );
+    let detail = payload["materials"][0]["detailUrl"].as_str().unwrap();
+    assert_eq!(
+        detail,
+        format!("/api/local/topic-workspaces/task-initiation-difficulty/materials/{support_ref}")
+    );
+    let response = application
+        .clone()
+        .oneshot(Request::builder().uri(detail).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let detail: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(detail["identity"]["publicRef"], json!(support_ref));
+    let outsider = admit_work_identity(&database, "not-member", 'c').await;
+    let response = application
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/local/topic-workspaces/task-initiation-difficulty/materials/{outsider}"
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
 async fn proof_database(schema: &str) -> Database {
