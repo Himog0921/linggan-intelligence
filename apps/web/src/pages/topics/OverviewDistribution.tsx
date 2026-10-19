@@ -62,10 +62,12 @@ export function OverviewDistribution({ works, platform, statistics, scope, compa
               >
                 <span className={s.compactBarSpace}>
                   <b>{number(bin.refs.length)}</b>
-                  <span
-                    className={s.compactBar + (bin.high ? " " + s.signal : "")}
-                    style={{ height: (100 * bin.refs.length / max) + "%" }}
-                  />
+                  <span className={s.compactBarSlot}>
+                    <span
+                      className={s.compactBar + (bin.high ? " " + s.signal : "")}
+                      style={{ height: (100 * bin.refs.length / max) + "%" }}
+                    />
+                  </span>
                 </span>
                 <small className={s.compactBinName}>{bin.label}</small>
               </button>

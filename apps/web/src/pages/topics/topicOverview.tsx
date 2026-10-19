@@ -603,7 +603,7 @@ export function createTopicOverview(context: TopicOverviewContext) {
         >
           <div className={cls("lgi-tm-summary-heading")}>
             <div className={cls("lgi-tm-summary-identity")}>
-              
+
             <nav aria-label={"当前主题路径"}>
               {btn("全部方向", "topic", "", "lgi-tm-quiet")}
               {parents.map((t) => (
