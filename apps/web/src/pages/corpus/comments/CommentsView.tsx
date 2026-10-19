@@ -54,7 +54,7 @@ export function CommentsView({ domain, nav, selected, onSelected, onStudy, onSta
 
   const extraCount = Number(filter.voiceRole !== 'reader_and_unknown') + Number(!!filter.minLikes) + Number(filter.postUsage !== 'all') + Number(!!filter.workRef);
   return <div className={c('study-results-comments')}>
-    {query.isPending ? <p className={c('study-empty')}>正在读取评论研究…</p> : query.isError ? <p className={c('study-empty')}>评论目录读取失败：{errorText(query.error)} <button type="button" onClick={() => { void query.refetch(); }}>重试</button></p> :
+    {query.isPending ? <div className={c('study-comment-read-status')}><p className={c('study-empty')}>正在读取评论研究…</p><button type="button" id="open-study-dialog" className={c('study-primary-action')} onClick={onStart}>发起研究</button></div> : query.isError ? <div className={c('study-comment-read-status')}><p className={c('study-empty')}>评论目录读取失败：{errorText(query.error)} <button type="button" onClick={() => { void query.refetch(); }}>重试</button></p><button type="button" id="open-study-dialog" className={c('study-primary-action')} onClick={onStart}>发起研究</button></div> :
     <section className={c('study-comments')} aria-label="用户评论">
       {feedback ? <p className={c('study-detail-muted')} role="status">{feedback}</p> : null}
       {setupStatus.text ? <p id="setup-status" className={c('study-setup-status')} role="status" data-kind={setupStatus.kind}>{setupStatus.text}</p> : null}
