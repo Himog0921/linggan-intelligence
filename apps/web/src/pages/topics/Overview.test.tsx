@@ -45,7 +45,7 @@ describe("material-first overview preserves statistical boundaries", () => {
     expect(band).toHaveTextContent("较昨日");
     expect(band).not.toHaveTextContent("+86");
     expect(band).not.toHaveTextContent("+53");
-    expect(within(band).getByRole("button", { name: "查看或调整样本爆款规则" })).toBeInTheDocument();
+    expect(within(band).queryByRole("button", { name: "查看或调整样本爆款规则" })).toBeNull();
   });
   it("keeps the six loaded-bin drill-down actions in the compact top bar, including unknown in table mode", async () => {
     const snapshot = topicSnapshot();
@@ -53,7 +53,13 @@ describe("material-first overview preserves statistical boundaries", () => {
       statistics={snapshot.statistics} scope={snapshot.scope} />);
     const chart = screen.getByLabelText("已观察内容点赞分布");
     expect(within(chart).getAllByRole("button", { name: /赞，.*篇，查看作品/ })).toHaveLength(6);
+    const rules = within(chart).getByRole("button", { name: "查看或调整样本爆款规则" });
+    expect(rules).toHaveAttribute("data-action", "rules");
+    expect(within(chart).getByText("样本表现", { exact: true })).toBeInTheDocument();
+    expect(within(chart).queryByText(/橙色区间符合点赞/)).toBeNull();
+    expect(within(chart).queryByText(/点赞未知 .*单独保留/)).toBeNull();
     expect(within(chart).queryByRole("table")).toBeNull();
+    expect(within(chart).getAllByRole("button", { name: /赞，.*篇，查看作品/ }).some((button) => button.hasAttribute("data-high"))).toBe(true);
     await userEvent.click(within(chart).getByRole("button", { name: "表格" }));
     expect(within(chart).getByRole("table")).toBeInTheDocument();
     expect(within(chart).getByRole("row", { name: /点赞未知/ })).toBeInTheDocument();
