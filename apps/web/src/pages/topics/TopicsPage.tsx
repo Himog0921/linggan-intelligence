@@ -152,6 +152,14 @@ export function TopicsPage() {
                 </details>
               </>
             ) : null}
+            <nav
+              id="topic-map-view-tabs"
+              className={c("lgi-tm-context-views")}
+              aria-label="主题图谱视图"
+              onClick={engine.onClick}
+            >
+              {engine.getViewTabs()}
+            </nav>
             <b id="topic-map-crumb-current" className="v7-sr-only">
               {state.view === "journey" ? "用户生命旅程" : "主题概览"}
             </b>
