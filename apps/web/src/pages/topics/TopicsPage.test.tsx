@@ -65,6 +65,26 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe("Topic React interaction and lifetime", () => {
+  it("puts the overview/journey switch in the breadcrumb, starts navigation with topics, and keeps the evidence histogram above material", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (path: string) => jsonResponse(defaultRead(path))));
+    page();
+    await screen.findByRole("button", { name: "合成材料 0" });
+    const views = screen.getByRole("navigation", { name: "主题图谱视图" });
+    expect(views.closest("#topic-map-root")).toBeNull();
+    expect(within(views).getByRole("button", { name: "主题概览" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByText("领域结构")).not.toBeInTheDocument();
+    const band = screen.getByLabelText("主题概览与样本表现");
+    expect(within(band).getByLabelText("基础概览指标")).toBeInTheDocument();
+    expect(within(band).getByLabelText("已观察内容点赞分布")).toBeInTheDocument();
+    const region = document.querySelector("#topic-map-root");
+    expect(region?.querySelector(".lgi-tm-material-insights")).toBeNull();
+    await userEvent.click(within(views).getByRole("button", { name: "用户生命旅程" }));
+    await waitFor(() => expect(document.querySelector("#topic-map-root")).toHaveAttribute("data-view", "journey"));
+    expect(within(views).getByRole("button", { name: "用户生命旅程" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByLabelText("主题概览与样本表现")).toBeInTheDocument();
+    await userEvent.click(within(views).getByRole("button", { name: "主题概览" }));
+    await waitFor(() => expect(document.querySelector("#topic-map-root")).toHaveAttribute("data-view", "overview"));
+  });
   it("keeps complete statistics during staged material loading and edits search text", async () => {
     const full = pendingResponse();
     const summary = topicSnapshot();
