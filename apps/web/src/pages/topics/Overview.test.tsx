@@ -32,6 +32,33 @@ describe("material-first overview preserves statistical boundaries", () => {
     expect(region).toHaveTextContent("点赞 ≥ 750");
     expect(region).toHaveTextContent("可读 2");
   });
+  it("gives each official statistic one compact fact row and never invents yesterday increments", () => {
+    const snapshot = topicSnapshot();
+    render(<OverviewReadouts statistics={snapshot.statistics} scope={snapshot.scope} />);
+    const band = screen.getByLabelText("基础概览指标");
+    expect(within(band).getByRole("button", { name: /观察到的内容 .*查看材料/ })).toBeInTheDocument();
+    expect(band).toHaveTextContent("已观察创作者");
+    expect(band).toHaveTextContent("样本爆款率");
+    expect(band).toHaveTextContent("点赞中位数");
+    expect(band).toHaveTextContent("昨日新增");
+    expect(band).toHaveTextContent("昨日达标");
+    expect(band).toHaveTextContent("较昨日");
+    expect(band).not.toHaveTextContent("+86");
+    expect(band).not.toHaveTextContent("+53");
+    expect(within(band).getByRole("button", { name: "查看或调整样本爆款规则" })).toBeInTheDocument();
+  });
+  it("keeps the six loaded-bin drill-down actions in the compact top bar, including unknown in table mode", async () => {
+    const snapshot = topicSnapshot();
+    render(<OverviewDistribution compact works={snapshot.works} platform={snapshot.statistics.platforms[0]}
+      statistics={snapshot.statistics} scope={snapshot.scope} />);
+    const chart = screen.getByLabelText("已观察内容点赞分布");
+    expect(within(chart).getAllByRole("button", { name: /赞，.*篇，查看作品/ })).toHaveLength(6);
+    expect(within(chart).queryByRole("table")).toBeNull();
+    await userEvent.click(within(chart).getByRole("button", { name: "表格" }));
+    expect(within(chart).getByRole("table")).toBeInTheDocument();
+    expect(within(chart).getByRole("row", { name: /点赞未知/ })).toBeInTheDocument();
+    expect(within(chart).getByRole("button", { name: "分布图" })).toHaveAttribute("aria-pressed", "false");
+  });
   it("keeps the loaded histogram distinct from full server scope and preserves exact drill-down references in chart and table", async () => {
     const snapshot = topicSnapshot();
     const stats = topicStats(9000);
