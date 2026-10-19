@@ -497,9 +497,10 @@ describe("Topic React interaction and lifetime", () => {
     if (!selector) throw new Error("No plot platform selector");
     await userEvent.selectOptions(selector, "douyin");
     // Rebuild the chart so a merely changed native select cannot make this pass.
-    await userEvent.click(
-      screen.getByRole("button", { name: "分布图" }),
-    );
+    const plotTabs = screen.getAllByRole("button", { name: "分布图" });
+    const structurePlotTab = plotTabs[plotTabs.length - 1];
+    if (!structurePlotTab) throw new Error("No structure plot tab");
+    await userEvent.click(structurePlotTab);
     await waitFor(() => {
       for (const control of screen.getAllByLabelText("表现图平台"))
         expect(control).toHaveValue("douyin");
