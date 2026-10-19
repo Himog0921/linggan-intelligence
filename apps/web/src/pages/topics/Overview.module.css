@@ -140,6 +140,7 @@
 }
 .compactTitle strong { color: var(--lgi-ink); font-weight: var(--lgi-weight-bold); }
 .compactTitle span { color: var(--lgi-muted); font-size: var(--lgi-text-label); }
+.compactSettings { display: inline-flex; align-items: center; min-width: 0; flex-wrap: wrap; justify-content: flex-end; gap: var(--lgi-space-2); }
 .compactSwitcher { display: inline-flex; align-items: center; gap: var(--lgi-space-3); }
 .compactSwitcher button {
   background: none;
