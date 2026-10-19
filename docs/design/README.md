@@ -19,6 +19,10 @@
 
 当前 #382 页面布局补充：[主题树、基础数据与旅程工作区](changes/topic-map-compact-382.md)。仅替代旧布局，原统计/来源/写入合同保留。
 
+## 2026-10-19 · 评论研究 Context Bar 与数据工作台
+
+用户最新批准的评论研究三级导航位置、统计折叠与严格单行表格，见[评论研究产品化最新 UI 补充](pages/comment-study-productization-001.md)和 [LIDS Context Bar 局部例外](lids/shell-zones.md)。当前单一 React 应用使用 AppShell 的可选 contextNav 插槽，不为独立页面创建第二套 Header 或运行时 Token；业务状态、资格与数据合同不变，候选待审查，未将新增位置推广成未获批的全站读数塞入规则。
+
 ## 内容工作台专项 · 阶段二
 
 [V3 空间材料浏览 / 作品关联](pages/content-workbench-prototype/v3/index.html) · [V2 研读 / 画布 / 对照原型](pages/content-workbench-prototype/v2/index.html) · [V1 三页原型](pages/content-workbench-prototype/index.html) · [设计提案](changes/uiux-content-workbench-001-prototype.md) · [验收记录](acceptance/uiux-content-workbench-001-prototype-acceptance.md)。V3 方向已获 Mog 认可，已精简常驻说明并收紧工作区工具栏。仅合成原型；LIDS 与正式运行页未改。 首个真实创作落地包的复用清单、实施步骤及验收统一见[专项计划 §10](../archive/plans/uiux-content-workbench-001.md#10-首个落地包一篇真实选题到成品导出)，后端已派定；原生前端暂停，界面实施并入 [WEB-REACT-001 阶段 C](../plans/active/web-react-001.md)。
