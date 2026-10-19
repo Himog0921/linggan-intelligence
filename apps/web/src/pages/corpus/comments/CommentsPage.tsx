@@ -71,7 +71,7 @@ function Workspace({ domain, domainName, domainStatus, collectionState, crumb, l
     const next = new URLSearchParams(location.search); for (const key of ['commentWorkRef', 'commentExternalId', 'detail']) next.delete(key);
     void navigate(`/corpus/comments?${next}`, { replace: true, state: location.state as unknown });
   }
-  const contextNav = <nav className="v7-tertiary-nav" aria-label="评论研究视图">{views.map(([key, label]) => <button key={key} type="button" aria-current={view === key ? 'page' : undefined} onClick={() => nav.view(key)}>{label}</button>)}<select aria-label="切换评论研究视图" className="v7-tertiary-select" value={view} onChange={event => nav.view(event.target.value as View)}>{views.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></nav>;
+  const contextNav = <nav className="v7-tertiary-nav" data-comment-study-context aria-label="评论研究视图">{views.map(([key, label]) => <button key={key} type="button" aria-current={view === key ? 'page' : undefined} onClick={() => nav.view(key)}>{label}</button>)}<select aria-label="切换评论研究视图" className="v7-tertiary-select" value={view} onChange={event => nav.view(event.target.value as View)}>{views.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></nav>;
   const contextMeta = view === 'comments' && domain ? <details className="v7-context-count">
     <summary aria-label="查看当前筛选评论统计">当前筛选可研究 <b>{num(commentCounts?.eligibleCommentCount)}</b> 条 <span aria-hidden="true">⌄</span></summary>
     <div className="v7-context-count-detail" role="group" aria-label="当前筛选评论统计">
@@ -87,8 +87,6 @@ function Workspace({ domain, domainName, domainStatus, collectionState, crumb, l
     <title>评论研究</title><div className="v7-shell"><CorpusSideNav active="comments" domain={domain} foot={<>只读呈现新评论研究链路<br />自动排程保持关闭</>} />
     {fatalShellError ? <main className={c('study-main')} aria-labelledby="comment-study-title"><h1 id="comment-study-title" className="v7-sr-only">评论研究</h1><p className={c('study-empty')} role="status">评论研究准备信息读取失败：{shellError} <button type="button" onClick={retryShell}>重试读取</button></p></main> :
     <main className={c('study-main')} aria-labelledby="comment-study-title"><h1 id="comment-study-title" className="v7-sr-only">评论研究</h1>
-    {view !== 'comments' ? <header className={c('study-toolbar study-toolbar-actions-only')}><div className={c('study-toolbar-actions')}><span id="setup-status" className={c('study-setup-status')} role="status" data-kind={setupStatus.kind} hidden={!setupStatus.text}>{setupStatus.text}</span><button type="button" id="open-study-dialog" className={c('study-primary-action')} disabled={!domain} onClick={openResearch}>发起研究</button></div></header> : null}
-
     {shellError ? <p className={c('study-table-status')} role="status">领域信息刷新失败；当前显示上次读取结果。{shellError} <button type="button" onClick={retryShell}>重新读取领域信息</button></p> : null}
     {domain && view === 'runs' ? <RunPicker domain={domain} selected={params.get('runRef')} nav={nav} /> : <div id="study-run-picker" className={c('study-run-picker')} hidden />}
     <section id="study-tab-result" className={view === 'comments' ? c('study-tab-comments') : undefined} aria-live="polite" data-comment-study-content aria-busy={loading}>

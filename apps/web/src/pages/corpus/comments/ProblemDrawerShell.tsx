@@ -8,7 +8,7 @@ export function ProblemDrawerShell({ children, feedback, copy, copying, close, d
   useEffect(() => {
     const measure = () => {
       const header = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--lgi-header-height')) || 0;
-      const top = window.innerWidth > 680 ? Math.max(header, document.querySelector('[data-comment-study-toolbar]')?.getBoundingClientRect().bottom ?? document.querySelector('[class*="study-toolbar"]')?.getBoundingClientRect().bottom ?? 0) : 0;
+      const top = window.innerWidth > 680 ? Math.max(header, document.querySelector('[data-comment-study-context]')?.getBoundingClientRect().bottom ?? 0) : 0;
       ref.current?.style.setProperty('--sr3-dialog-top', `${top}px`);
     };
     measure(); window.addEventListener('resize', measure, { passive: true });
