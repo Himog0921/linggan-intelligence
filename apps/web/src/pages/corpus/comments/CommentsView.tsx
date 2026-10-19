@@ -105,7 +105,7 @@ export function CommentsView({ domain, nav, selected, onSelected, onStudy, onSta
               if (event.target.checked && eligible && !capped) onSelected([...selected, { commentKey: item.commentKey, observationRole: item.observationRole }]);
               else onSelected(selected.filter(row => commentIdentity(row.commentKey) !== key));
             }} /></td>
-            <td><button type="button" className={c('study-comment-open')} title={item.commentText || '评论原声不可用'} data-comment-work={item.commentKey.workRef} data-comment-id={item.commentKey.commentExternalId} onClick={() => nav.comment(item.commentKey)}>
+            <td><button type="button" className={c('study-comment-open')} aria-label={item.commentText || '评论原声不可用'} title={item.commentText || '评论原声不可用'} data-comment-work={item.commentKey.workRef} data-comment-id={item.commentKey.commentExternalId} onClick={() => nav.comment(item.commentKey)}>
               <span className={c('study-comment-voice')}>{item.commentText || '评论原声不可用'}</span>{!eligible ? <span className={c('study-row-limitation')} title={eligibilityText}>不可研</span> : null}
             </button></td>
             <td><LikeCount item={item} compact /></td>
