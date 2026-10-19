@@ -189,13 +189,13 @@ try {
     const navigation = page.getByRole("navigation", { name: "主题图谱视图" });
     assert.equal(await navigation.count(), 1);
     const sidebar = page.locator('aside[aria-label="主题图谱导航"]');
-    const tree = sidebar.locator('.lgi-tm-tree');
+    const tree = sidebar.getByLabel("稳定主题结构");
     assert.equal(await tree.getByRole("button", { name: "调整归属" }).count(), 0,
       "adjust-assignment control must not occupy the first row of the topic tree");
     assert.equal(await tree.locator('button[data-action="topic"]').first().innerText(), "全部方向");
     assert.equal(await sidebar.getByRole("button", { name: "调整归属" }).count(), 1,
       "existing move-topic capability must remain reachable below the tree");
-    const scopeFilter = page.locator("details.lgi-tm-scope-filter");
+    const scopeFilter = page.locator('summary[aria-label="选择统计平台与发布时间"]').locator("..");
     assert.equal(await scopeFilter.count(), 1, "scope filters must remain discoverable");
     assert.equal(await scopeFilter.evaluate((el) => el.open), false);
     await scopeFilter.locator("summary").click();
