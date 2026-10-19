@@ -32,7 +32,7 @@ function GlyphMark({ kind }: { kind: Glyph }) {
   );
 }
 function Readout({
-  glyph, label, value, unit, detail, deltaLabel, action,
+  glyph, label, value, unit, detail, deltaLabel, action, drill = false,
 }: {
   glyph: Glyph;
   label: string;
@@ -41,12 +41,20 @@ function Readout({
   detail: ReactNode;
   deltaLabel: string;
   action?: ReactNode;
+  drill?: boolean;
 }) {
   return (
     <div className={s.readout}>
       <div className={s.label}><GlyphMark kind={glyph} /><span>{label}</span>{action}</div>
       <div className={s.figure}>
-        <div className={s.value}><strong>{value}</strong>{unit ? <small>{unit}</small> : null}</div>
+        <div className={s.value}>{drill
+          ? btn(
+              <><strong>{value}</strong>{unit ? <small>{unit}</small> : null}</>,
+              "materials", "", s.valueAction,
+              { "aria-label": label + " " + value + " " + (unit || "") + "，查看材料" },
+            )
+          : <><strong>{value}</strong>{unit ? <small>{unit}</small> : null}</>
+        }</div>
         <UnavailableDelta label={deltaLabel} />
       </div>
       <div className={s.detail}>{detail}</div>
@@ -69,7 +77,7 @@ export function OverviewReadouts({
     <section className={s.readouts} aria-label="基础概览指标">
       <div className={s.metrics}>
         <Readout
-          glyph="papers" label="观察到的内容"
+          glyph="papers" label="观察到的内容" drill
           value={readoutNumber(stats.workCount)} unit="篇" deltaLabel="昨日新增"
           detail={<><span>可读 <b>{number(scope.readableWorkCount)}</b></span><span>待归主题 <b>{number(scope.unclassifiedWorkCount)}</b></span></>}
         />
