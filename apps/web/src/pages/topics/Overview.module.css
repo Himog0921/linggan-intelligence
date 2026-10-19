@@ -70,6 +70,17 @@
   cursor: pointer;
 }
 :global(#topic-map-root) .valueAction:hover strong { color: var(--lgi-signal-ink); }
+/* The original global .lgi-tm-button has a 32px minimum and padding.
+   Override that at the same or higher specificity, or only the first KPI
+   (the one with a drill-down button) will float above the other three. */
+:global(#topic-map-root) .lgi-tm-main > .lgi-tm-summary .readouts .valueAction {
+  min-height: 0;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  line-height: var(--lgi-lh-title);
+}
+
 
 .delta {
   display: inline-flex;
