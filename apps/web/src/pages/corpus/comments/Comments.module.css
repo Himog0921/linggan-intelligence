@@ -303,3 +303,58 @@
 @media(max-width:1360px){.study-overview-hero{grid-template-columns:minmax(248px,274px) minmax(0,1fr);gap:var(--lgi-space-8)}.study-observation-toolbar{flex-wrap:wrap}.study-overview-hero .study-observation-controls{margin-left:auto}}
 @media(max-width:1120px){.study-overview-hero{grid-template-columns:1fr;gap:var(--lgi-space-6)}.study-overview-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--lgi-space-3) var(--lgi-space-6)}.study-metrics-asof,.study-metric-pair,.study-metric-pending{grid-column:1/-1}.study-metric-hero{padding-top:0}.study-metric-separator{display:none}.study-metric-pair{grid-template-columns:repeat(2,minmax(0,1fr))}.study-metric-small{min-height:calc(var(--lgi-space-1) * 21)}.study-metric-pending{margin-top:0}.study-metric-progress .study-metric-value{margin-top:var(--lgi-space-3)}}
 @media(max-width:640px){.study-overview-metrics{display:flex;flex-direction:column;align-items:stretch;gap:0}.study-metric-hero{padding-top:var(--lgi-space-4)}.study-metric-progress{border-top:1px solid var(--lgi-hairline);padding-top:var(--lgi-space-4);margin-top:var(--lgi-space-4)}.study-metric-pair{border-top:1px solid var(--lgi-hairline);padding-top:var(--lgi-space-4);margin-top:var(--lgi-space-4)}.study-observation-toolbar{align-items:stretch;gap:var(--lgi-space-3)}.study-overview-hero .study-series-legend{row-gap:var(--lgi-space-2)}.study-overview-hero .study-observation-controls{justify-content:space-between;width:100%;margin-left:0}.study-overview-hero .study-text-switcher{gap:var(--lgi-space-3)}.study-overview-hero .study-series-svg-wrap{min-height:0}.study-metric-pending{margin-top:var(--lgi-space-3)}}
+
+/* Single-line comment research worktable: preserve existing evidence and server-owned actions. */
+.study-toolbar-actions-only{min-height:var(--lgi-space-12);border-bottom:0;justify-content:flex-end}
+.study-comment-filters{display:block;padding:0 0 var(--lgi-space-3);border-bottom:1px solid var(--lgi-hairline)}
+.study-comment-filter-row{display:grid;grid-template-columns:minmax(0,2.6fr) repeat(3,minmax(var(--lgi-space-24),1fr)) auto auto auto;gap:var(--lgi-space-2);align-items:end}
+.study-comment-filter-row label,.study-filter-advanced label{display:grid;min-width:0;gap:var(--lgi-space-1);font:var(--lgi-text-label)/var(--lgi-lh-body) var(--lgi-font-sans);color:var(--lgi-muted)}
+.study-comment-filter-row input,.study-comment-filter-row select,.study-filter-advanced select{width:100%;min-width:0;height:var(--lgi-space-10);padding:0 var(--lgi-space-3);border:1px solid var(--lgi-border-strong);background:var(--lgi-canvas);color:var(--lgi-ink);font:var(--lgi-text-data)/var(--lgi-lh-body) var(--lgi-font-sans)}
+.study-comment-filter-row>button{height:var(--lgi-space-10);white-space:nowrap}
+.study-comment-filters .study-primary-action{border:2px solid var(--lgi-ink);padding:0 var(--lgi-space-4);background:var(--lgi-signal-hover);color:var(--lgi-on-dark);box-shadow:var(--lgi-shadow-brutal)}
+.study-comment-filters .study-primary-action:hover{background:var(--lgi-signal-ink)}
+.study-comment-filters .study-filter-more{border:0;border-bottom:1px solid var(--lgi-hairline);background:transparent;color:var(--lgi-body);padding:0 var(--lgi-space-2)}
+.study-comment-filters .study-filter-more[aria-expanded="true"]{color:var(--lgi-signal-ink);border-color:var(--lgi-signal)}
+.study-comment-filters .study-filter-submit{border:1px solid var(--lgi-border-solid);background:var(--lgi-canvas);color:var(--lgi-ink);padding:0 var(--lgi-space-3)}
+.study-filter-advanced{display:flex;gap:var(--lgi-space-3);flex-wrap:wrap;padding-top:var(--lgi-space-3)}
+.study-filter-advanced[hidden],.study-comment-work-filter[hidden]{display:none}
+.study-filter-advanced label{min-width:calc(var(--lgi-space-24) * 1.5)}
+.study-comment-work-filter{padding:var(--lgi-space-3) 0;display:flex;align-items:end;gap:var(--lgi-space-3)}
+.study-comment-work-filter form{display:flex;align-items:end;flex-direction:row;gap:var(--lgi-space-2)}
+.study-comment-work-filter input,.study-comment-work-filter select{min-height:var(--lgi-space-10)}
+.study-comment-work-filter form button{min-height:var(--lgi-space-10)}
+.study-comment-selection{min-height:var(--lgi-space-12);display:flex;align-items:center;gap:var(--lgi-space-3);border-bottom:1px solid var(--lgi-hairline);font:var(--lgi-text-data)/var(--lgi-lh-body) var(--lgi-font-sans)}
+.study-selection-limit{color:var(--lgi-muted)}
+.study-comment-selection button{border-radius:var(--lgi-radius-none);padding:var(--lgi-space-2) var(--lgi-space-3)}
+.study-comment-selection .study-selection-clear{border:0;background:transparent;color:var(--lgi-muted);box-shadow:none}
+.study-comments-table{min-width:calc(var(--lgi-space-24) * 16);width:100%;table-layout:fixed}
+.study-comments-table th:nth-child(1){width:3%}
+.study-comments-table th:nth-child(2){width:26%}
+.study-comments-table th:nth-child(3){width:6%}
+.study-comments-table th:nth-child(4){width:14%}
+.study-comments-table th:nth-child(5){width:10%}
+.study-comments-table th:nth-child(6){width:10%}
+.study-comments-table th:nth-child(7){width:7%}
+.study-comments-table th:nth-child(8){width:8%}
+.study-comments-table th:nth-child(9){width:9%}
+.study-comments-table th:nth-child(10){width:7%}
+.study-comments-table thead th{height:var(--lgi-space-10);vertical-align:middle;padding:0 var(--lgi-space-2);white-space:nowrap;background:var(--lgi-canvas-low);font:var(--lgi-weight-semibold) var(--lgi-text-label)/var(--lgi-lh-data) var(--lgi-font-sans)}
+.study-comments-table tbody tr{height:var(--lgi-space-12)}
+.study-comments-table tbody tr:hover{background:var(--lgi-canvas-low)}
+.study-comments-table tbody tr[data-selected="true"]{background:var(--lgi-signal-faint)}
+.study-comments-table tbody td{height:var(--lgi-space-12);max-height:var(--lgi-space-12);padding:0 var(--lgi-space-2);vertical-align:middle;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.study-comments-table td input[type="checkbox"]{vertical-align:middle}
+.study-comments-table .study-comment-open{display:flex;align-items:center;gap:var(--lgi-space-2);height:var(--lgi-space-12);width:100%;overflow:hidden;white-space:nowrap}
+.study-comments-table .study-comment-voice{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:var(--lgi-text-data)/var(--lgi-lh-body) var(--lgi-font-evidence)}
+.study-row-limitation{flex:none;color:var(--lgi-muted);font:var(--lgi-text-label)/var(--lgi-lh-data) var(--lgi-font-sans)}
+.study-comments-table .study-work-title,.study-row-status,.study-row-author,.study-row-time{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.study-comments-table .study-work-title{font-weight:var(--lgi-weight-medium)}
+.study-comments-table .study-comment-kinds{display:flex;align-items:center;flex-wrap:nowrap;overflow:hidden;white-space:nowrap;gap:var(--lgi-space-1);width:100%}
+.study-comments-table .study-comment-kinds .study-badge{flex:none;max-width:100%;overflow:hidden;text-overflow:ellipsis;padding:0 var(--lgi-space-1)}
+.study-comments-table .study-post-usage{display:flex;align-items:center;gap:var(--lgi-space-1);width:100%;overflow:hidden;white-space:nowrap}
+.study-comments-table .study-post-usage button{flex:none;min-width:0;white-space:nowrap;font:var(--lgi-text-label)/var(--lgi-lh-data) var(--lgi-font-sans)}
+.study-comments-table .study-post-usage-status{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.study-comments-table .study-row-time,.study-comments-table .study-like-count{font-variant-numeric:tabular-nums}
+@media(max-width:1240px){.study-comment-filter-row{grid-template-columns:minmax(0,2fr) repeat(3,minmax(var(--lgi-space-24),1fr)) auto auto}.study-comment-filter-row .study-primary-action{grid-column:1/-1;justify-self:end}}
+@media(max-width:900px){.study-comment-filter-row{grid-template-columns:minmax(0,2fr) repeat(2,minmax(var(--lgi-space-24),1fr))}.study-comment-filter-row .study-primary-action{grid-column:auto}.study-comment-work-filter{flex-wrap:wrap}}
+@media(max-width:620px){.study-comment-filter-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.study-filter-query{grid-column:1/-1}.study-comment-filter-row .study-primary-action{grid-column:auto}}
