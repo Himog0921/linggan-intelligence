@@ -187,7 +187,7 @@ fi
 
 # The existing runtime may predate a retired binary. Run the target revision's synchronizer from
 # the source checkout, not the runtime copy that is about to be replaced.
-sync_copy="$(mktemp -t linggan-sync)"
+sync_copy="$(mktemp "${TMPDIR:-/tmp}/linggan-sync.XXXXXX")"
 cp "$repo_root/scripts/runtime/sync.sh" "$sync_copy"
 LINGGAN_RUNTIME_SOURCE_DIR="$repo_root" LINGGAN_RUNTIME_DIR="$runtime_dir" LINGGAN_SUPPORT_DIR="$support_dir" /bin/zsh "$sync_copy"
 rm -f "$sync_copy"

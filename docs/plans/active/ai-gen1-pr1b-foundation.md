@@ -8,6 +8,8 @@
 
 ## 2026-10-20 06:57 · #456 CI环境修正（同范围）
 
+Linux补充：自有Linux容器在补zsh后实际复现两条正向安装用例被GNU mktemp拒绝（旧BSD -t写法）。install.sh/launch.sh仅将临时脚本路径改为显式私有XXXXXX模板，保留原排空/许可/disabled逻辑。修后Mac与Linux均9+8+3共20项通过；容器仅用现有PG基础镜像作为Linux shell，不启动数据库，无宿主socket，结束后已确认无自有容器残留。Ubuntu镜像拉取未取得，精确客户端已终止，该尝试不计通过。实际Ubuntu CI仍由新head验证，不冒充本机Linux已覆盖其全部环境。
+
 0fbd905b的AI底座CI已实际通过contracts/library/SDK、48项底座/传输/写作升级及执行器并发/故障/进程组；安装替身阶段失败于Ubuntu没有`/bin/zsh`，8项InstallFlow发生14个子用例启动错误，后续历史只读/治理未运行，不计通过。失败日志为private/settings-ci-foundation-failure-0fbd.log。候选源码和Mac上的20项替身证明没有因此成为Linux证明。
 
 本次只为AI workflow显式安装zsh，不修改生产安装逻辑、不跳过用例；自有Linux容器仅挂只读源码与本包private输出、无DB/宿主socket或秘密，补跑同组验证。当前仍以新head实际CI结果为准；同范围环境修正不重开整轮独立审查。Web整链仍在运行。无合并部署、共享DB/服务或真实模型/媒体/采集。
