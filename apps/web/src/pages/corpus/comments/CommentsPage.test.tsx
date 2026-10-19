@@ -27,14 +27,36 @@ describe('D3 actual four-view React boundary', () => {
   expect(document.querySelector('script')).toBeNull();
   expect(screen.getByTitle('点赞数未知：采集时没有取得这条评论的点赞')).toHaveTextContent('—');
   const boxes=screen.getAllByRole('checkbox',{name:'选择这条评论进入研究'});expect(boxes[0]).toBeEnabled();expect(boxes[1]).toBeDisabled();
-  await userEvent.click(boxes[0]!);expect(screen.getByText('已选 1/3000 条评论，来自 1/100 篇作品；本页可继续选择。')).toBeInTheDocument();expect(screen.getByRole('button',{name:'研究所选评论'})).toBeEnabled();
+  await userEvent.click(boxes[0]!);expect(screen.getByText('已选 1 条 · 来自 1 篇作品')).toBeInTheDocument();expect(screen.getByRole('button',{name:'研究所选评论'})).toBeEnabled();
   expect(calls.every(call=>call.method==='GET')).toBe(true);
  });
  it('sends the complete submitted filter to the server and records it in the deep link',async()=>{
   installFetch();const {router}=renderPage(`domain=${DOMAIN}&view=comments`);await screen.findByRole('table');
-  await userEvent.type(screen.getByRole('searchbox',{name:'字面搜索'}),'两字');await userEvent.selectOptions(screen.getByRole('combobox',{name:'研究标签'}),'need');await userEvent.selectOptions(screen.getByRole('combobox',{name:'点赞'}),'100');await userEvent.click(screen.getByRole('button',{name:'应用筛选'}));
+  await userEvent.type(screen.getByRole('searchbox',{name:'字面搜索'}),'两字');await userEvent.selectOptions(screen.getByRole('combobox',{name:'研究标签'}),'need');await userEvent.click(screen.getByRole('button',{name:/更多筛选/}));await userEvent.selectOptions(screen.getByRole('combobox',{name:'点赞'}),'100');await userEvent.click(screen.getByRole('button',{name:'应用筛选'}));
   await waitFor(()=>expect(calls.filter(call=>call.url.pathname.endsWith('/comments')).at(-1)?.url.searchParams.get('q')).toBe('两字'));
   const call=calls.filter(call=>call.url.pathname.endsWith('/comments')).at(-1)!;expect(call.url.searchParams.get('signalKind')).toBe('need');expect(call.url.searchParams.get('minLikes')).toBe('100');expect(router.state.location.search).toContain('signalKind=need');expect(call.url.searchParams.get('domain')).toBe(DOMAIN);
+ });
+ it('moves tertiary navigation and verified counts into the shared context row, keeping the table flat', async()=> {
+  installFetch();renderPage(`domain=${DOMAIN}&view=comments`);await screen.findByRole('table');
+  const nav=screen.getByRole('navigation',{name:'评论研究视图'});
+  expect(within(nav).getByRole('button',{name:'用户评论'})).toHaveAttribute('aria-current','page');
+  expect(document.querySelector('.v7-context-section-nav')).toContainElement(nav);
+  expect(screen.queryByText('评论证据库')).not.toBeInTheDocument();
+  expect(screen.getByText('100',{selector:'.v7-context-count b'})).toBeInTheDocument();
+  expect(within(screen.getByRole('table')).getAllByRole('columnheader').map(cell=>cell.textContent)).toEqual(['选择','原声','点赞','所属作品','研究状态','研究标签','作者','点赞采集日','观测时间','改帖']);
+  expect(within(screen.getByRole('table')).getAllByRole('row')).toHaveLength(3);
+  expect(screen.queryByText(/已选 0/)).not.toBeInTheDocument();
+ });
+ it('retains comment selection across tertiary pages and exposes the compact batch bar only when selected',async()=>{
+  installFetch();renderPage(`domain=${DOMAIN}&view=comments`);await screen.findByRole('table');
+  await userEvent.click(screen.getAllByRole('checkbox',{name:'选择这条评论进入研究'})[0]!);
+  expect(screen.getByText('已选 1 条 · 来自 1 篇作品')).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button',{name:'概览'}));await screen.findByLabelText('研究累计读数与昨日活动');
+  expect(screen.queryByText('已选 1 条 · 来自 1 篇作品')).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button',{name:'用户评论'}));await screen.findByRole('table');
+  expect(screen.getAllByRole('checkbox',{name:'选择这条评论进入研究'})[0]).toBeChecked();
+  await userEvent.click(screen.getByRole('button',{name:'清空选择'}));
+  expect(screen.queryByText('已选 1 条 · 来自 1 篇作品')).not.toBeInTheDocument();
  });
  it('retains an uncertain post-usage request identity and never updates optimistically',async()=>{
   let attempts=0;installFetch((url,options)=>{
