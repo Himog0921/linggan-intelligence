@@ -15,7 +15,7 @@
 
 ## 2026-10-19 · 评论研究紧凑工作台与三级导航候选
 
-[评论研究 UI 最新规格](design/pages/comment-study-productization-001.md#2026-10-19--用户评论紧凑数据工作台与-context-bar-导航最新确认) 与 [LIDS Context Bar 已批准例外](design/lids/shell-zones.md#2026-10-19--已确认的三级导航与评论读数局部例外)：四视图导航移入面包屑同行、评论读数折叠、批量研究按需出现、筛选单行、评论表格 48px 单行，React 分支待 PR 复审。仅本次 UI 显示改造，不改变研究业务/API/库，未合并、未部署。
+[评论研究 UI 最新规格](design/pages/comment-study-productization-001.md) 与 [LIDS Context Bar 已批准例外](design/lids/shell-zones.md)：四视图导航移入面包屑同行、评论读数折叠、批量研究按需出现、筛选单行、评论表格 48px 单行，React 分支待 PR 复审。仅本次 UI 显示改造，不改变研究业务/API/库，未合并、未部署。
 
 ## 2026-10-19 · WEB-REACT-001 完整收尾包（当前）
 
