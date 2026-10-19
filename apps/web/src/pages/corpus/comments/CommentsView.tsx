@@ -64,7 +64,7 @@ export function CommentsView({ domain, nav, selected, onSelected, onStudy, onSta
         route({ q: String(form.get('q') || '').trim(), studyState: String(form.get('studyState')), signalKind: String(form.get('signalKind') || '') || null, voiceRole: String(form.get('voiceRole')), sort: String(form.get('sort')), minLikes: String(form.get('minLikes') || '') || null, postUsage: String(form.get('postUsage')), cursor: null, history: [] });
       }}>
         <div className={c('study-comment-filter-row')}>
-          <label className={c('study-filter-query')}>字面搜索<input id="comment-query" name="q" type="search" defaultValue={filter.q} placeholder="搜索评论、作品关键词" /></label>
+          <label className={c('study-filter-query')}>字面搜索<input id="comment-query" name="q" type="search" defaultValue={filter.q} placeholder="搜索评论文本" /></label>
           <label>研究状态<select id="comment-study-state" name="studyState" defaultValue={filter.studyState}>{[['all','全部'],['never_studied','从未研究'],['in_progress','处理中'],['studied','已有成功结果'],['needs_context','等待语境'],['failed','最近失败']].map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label>
           <label>研究标签<select id="comment-signal-kind" name="signalKind" defaultValue={filter.signalKind || ''}>{[['','全部标签'],...Object.entries(signalKindLabel)].map(([value,label])=><option value={value} key={value}>{label}</option>)}</select></label>
           <label>排序<select id="comment-sort" name="sort" defaultValue={filter.sort}><option value="like_desc">点赞最多</option><option value="received_desc">最新收到</option></select></label>
