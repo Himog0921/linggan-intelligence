@@ -32,11 +32,12 @@ function GlyphMark({ kind }: { kind: Glyph }) {
   );
 }
 function Readout({
-  glyph, label, value, unit, detail, deltaLabel, action, drill = false,
+  glyph, label, value, valueText, unit, detail, deltaLabel, action, drill = false,
 }: {
   glyph: Glyph;
   label: string;
-  value: string;
+  value: ReactNode;
+  valueText?: string;
   unit?: string;
   detail: ReactNode;
   deltaLabel: string;
@@ -51,7 +52,7 @@ function Readout({
           ? btn(
               <><strong>{value}</strong>{unit ? <small>{unit}</small> : null}</>,
               "materials", "", s.valueAction,
-              { "aria-label": label + " " + value + " " + (unit || "") + "，查看材料" },
+              { "aria-label": label + " " + (valueText || "") + " " + (unit || "") + "，查看材料" },
             )
           : <><strong>{value}</strong>{unit ? <small>{unit}</small> : null}</>
         }</div>
@@ -78,7 +79,7 @@ export function OverviewReadouts({
       <div className={s.metrics}>
         <Readout
           glyph="papers" label="观察到的内容" drill
-          value={readoutNumber(stats.workCount)} unit="篇" deltaLabel="昨日新增"
+          value={readoutNumber(stats.workCount)} valueText={number(stats.workCount)} unit="篇" deltaLabel="昨日新增"
           detail={<><span>可读 <b>{number(scope.readableWorkCount)}</b></span><span>待归主题 <b>{number(scope.unclassifiedWorkCount)}</b></span></>}
         />
         <Readout
