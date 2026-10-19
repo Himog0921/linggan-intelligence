@@ -89,7 +89,7 @@ export function CommentsView({ domain, nav, selected, onSelected, onStudy, onSta
       </div>
       {selected.length ? <div className={c('study-comment-selection')} aria-label="当前所选研究范围">
         <span id="comment-selection-count" role="status">已选 {selected.length} 条 · 来自 {selectedWorks.size} 篇作品</span>
-        <span className={c('study-selection-limit')} title="研究选择上限：3000 条评论，100 篇作品">最多 3000 条 / 100 作品</span>
+        {selected.length >= 2700 || selectedWorks.size >= 90 ? <span className={c('study-selection-limit')} title="研究选择上限：3000 条评论，100 篇作品">接近上限：最多 3000 条 / 100 作品</span> : null}
         <button id="study-selected-comments" type="button" onClick={onStudy}>研究所选评论</button>
         <button type="button" className={c('study-selection-clear')} onClick={() => onSelected([])}>清空选择</button>
       </div> : null}
