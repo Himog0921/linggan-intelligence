@@ -314,6 +314,7 @@ async fn missing_secret_is_a_visible_unattempted_wait_and_can_drain() {
 #[ignore = "owned PostgreSQL wire fault and actual Node/SDK only"]
 async fn service_reconciles_a_committed_receipt_after_network_ack_loss_without_resending_or_late_usage()
  {
+    let observed_started = std::time::Instant::now();
     let db = fixture::db("ai_service_commit_ack").await;
     let endpoint = endpoint::Endpoint::start().await;
     queued(&db, &endpoint.url, 1).await;
@@ -333,14 +334,27 @@ async fn service_reconciles_a_committed_receipt_after_network_ack_loss_without_r
         drain.clone(),
     ));
     observed_count(&endpoint, 1).await;
+    let wire_observed = observed_started.elapsed();
     drain.request();
     state(&db, "draining").await;
     endpoint.release();
-    let receipt = tokio::time::timeout(Duration::from_secs(20), task)
+    let released_at = observed_started.elapsed();
+    let result = tokio::time::timeout(Duration::from_secs(20), task)
         .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
+        .expect("bounded service join")
+        .expect("service task did not panic");
+    eprintln!(
+        "commit-ack timing: wire={wire_observed:?} released={released_at:?} total={:?} dropped={} result={:?}",
+        observed_started.elapsed(),
+        proxy.dropped.load(std::sync::atomic::Ordering::SeqCst),
+        result.as_ref().err()
+    );
+    let failure_state:serde_json::Value=sqlx::query_scalar("SELECT jsonb_build_object('instanceState',i.state,'heartbeatAgeSeconds',extract(epoch FROM clock_timestamp()-i.heartbeat_at),'ownerAlive',EXISTS(SELECT 1 FROM pg_stat_activity WHERE pid=i.owner_backend_pid),'items',(SELECT jsonb_agg(jsonb_build_object('state',state,'leaseSeconds',extract(epoch FROM lease_expires_at-clock_timestamp()),'attempts',attempt_count)) FROM linggan_ai_batch_item_control),'invocations',(SELECT jsonb_agg(jsonb_build_object('state',state,'dispatch',dispatch_state,'usage',usage_state,'hasReceipt',result ? 'executorReceipt')) FROM linggan_model_invocation)) FROM linggan_ai_executor_current c JOIN linggan_ai_executor_instance i USING(instance_ref,generation)")
+        .fetch_one(db.pool()).await.expect("owned failure diagnostics");
+    if let Err(error) = &result {
+        panic!("commit-ack service failed: {error}; owned state={failure_state}");
+    }
+    let receipt = result.unwrap();
     assert!(
         proxy.dropped.load(std::sync::atomic::Ordering::SeqCst),
         "the actual COMMIT acknowledgement must be discarded on the wire"

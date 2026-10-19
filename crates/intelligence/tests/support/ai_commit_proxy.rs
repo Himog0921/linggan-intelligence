@@ -67,7 +67,10 @@ async fn forward(
     upstream: &str,
     dropped: Arc<AtomicBool>,
 ) -> io::Result<()> {
+    // Split PG frame writes must not add delayed-ACK stalls to the injected fault.
+    client.set_nodelay(true)?;
     let mut server = TcpStream::connect(upstream).await?;
+    server.set_nodelay(true)?;
     let length = client.read_u32().await? as usize;
     if !(8..=16_384).contains(&length) {
         return Err(io::ErrorKind::InvalidData.into());
