@@ -71,7 +71,7 @@ function Workspace({ domain, domainName, domainStatus, collectionState, crumb, l
     const next = new URLSearchParams(location.search); for (const key of ['commentWorkRef', 'commentExternalId', 'detail']) next.delete(key);
     void navigate(`/corpus/comments?${next}`, { replace: true, state: location.state as unknown });
   }
-  const contextNav = <nav className="v7-tertiary-nav" aria-label="评论研究视图">{views.map(([key, label]) => <button key={key} type="button" aria-current={view === key ? 'page' : undefined} onClick={() => nav.view(key)}>{label}</button>)}</nav>;
+  const contextNav = <nav className="v7-tertiary-nav" aria-label="评论研究视图">{views.map(([key, label]) => <button key={key} type="button" aria-current={view === key ? 'page' : undefined} onClick={() => nav.view(key)}>{label}</button>)}<select aria-label="切换评论研究视图" className="v7-tertiary-select" value={view} onChange={event => nav.view(event.target.value as View)}>{views.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></nav>;
   const contextMeta = view === 'comments' && domain ? <details className="v7-context-count">
     <summary aria-label="查看当前筛选评论统计">当前筛选可研究 <b>{num(commentCounts?.eligibleCommentCount)}</b> 条 <span aria-hidden="true">⌄</span></summary>
     <div className="v7-context-count-detail" role="group" aria-label="当前筛选评论统计">
