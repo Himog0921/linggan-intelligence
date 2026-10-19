@@ -6,7 +6,12 @@
   gap: var(--lgi-space-3);
   align-items: start;
 }
-.readout { min-width: 0; display: flex; flex-direction: column; }
+.readout {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
 .label {
   display: flex;
   align-items: center;
@@ -16,6 +21,8 @@
   line-height: var(--lgi-lh-data);
   white-space: nowrap;
   min-width: 0;
+  height: var(--lgi-space-5);
+  flex: 0 0 var(--lgi-space-5);
 }
 .label > span { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .glyph {
@@ -33,7 +40,9 @@
   justify-content: space-between;
   gap: var(--lgi-space-1);
   min-width: 0;
-  margin-top: var(--lgi-space-2);
+  min-height: var(--lgi-space-12);
+  height: var(--lgi-space-12);
+  margin-top: 0;
 }
 .value {
   display: flex;
@@ -77,7 +86,7 @@
   flex-wrap: wrap;
   gap: var(--lgi-space-1) var(--lgi-space-2);
   align-items: baseline;
-  margin-top: var(--lgi-space-3);
+  margin-top: var(--lgi-space-2);
   font-size: var(--lgi-text-label);
   line-height: var(--lgi-lh-data);
   color: var(--lgi-muted);
@@ -88,17 +97,17 @@
   font-family: var(--lgi-font-mono);
   font-weight: var(--lgi-weight-bold);
 }
-.ruleAction {
-  margin-left: auto;
-  color: var(--lgi-signal-ink);
-  background: transparent;
+.compactRuleTitle {
   border: 0;
-  border-bottom: 1px solid var(--lgi-border);
   padding: 0;
-  font-size: var(--lgi-text-label);
-  white-space: nowrap;
+  background: transparent;
+  font: var(--lgi-weight-bold) var(--lgi-text-data)/var(--lgi-lh-data) var(--lgi-font-sans);
+  color: var(--lgi-ink);
   cursor: pointer;
+  white-space: nowrap;
 }
+.compactRuleTitle:hover { text-decoration: underline; text-underline-offset: var(--lgi-space-1); }
+.compactRuleTitle:focus-visible { outline: 2px solid var(--lgi-focus); outline-offset: var(--lgi-space-1); }
 .noPlatform { color: var(--lgi-muted); font-size: var(--lgi-text-label); }
 .controls {
   border-top: 1px solid var(--lgi-hairline);
@@ -138,7 +147,6 @@
   white-space: nowrap;
   font-size: var(--lgi-text-data);
 }
-.compactTitle strong { color: var(--lgi-ink); font-weight: var(--lgi-weight-bold); }
 .compactTitle span { color: var(--lgi-muted); font-size: var(--lgi-text-label); }
 .compactSettings { display: inline-flex; align-items: center; min-width: 0; flex-wrap: wrap; justify-content: flex-end; gap: var(--lgi-space-2); }
 .compactSwitcher { display: inline-flex; align-items: center; gap: var(--lgi-space-3); }
@@ -162,7 +170,22 @@
   font-weight: var(--lgi-weight-semibold);
   border-bottom-color: var(--lgi-signal);
 }
-.compactPlot { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--lgi-space-2); min-width: 0; }
+.compactPlot {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: var(--lgi-space-2);
+  min-width: 0;
+}
+.compactPlot::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(var(--lgi-space-12) + var(--lgi-space-3));
+  border-top: 1px solid var(--lgi-border);
+  pointer-events: none;
+}
 .compactColumn {
   display: flex;
   flex-direction: column;
@@ -178,8 +201,8 @@
 .compactColumn:disabled { cursor: default; }
 .compactColumn:focus-visible { outline: 2px solid var(--lgi-focus); outline-offset: calc(var(--lgi-space-1) / 2); }
 .compactBarSpace {
-  height: calc(var(--lgi-space-16) + var(--lgi-space-2));
-  border-bottom: 1px solid var(--lgi-border);
+  height: calc(var(--lgi-space-12) + var(--lgi-space-3));
+  border-bottom: 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   justify-items: center;
@@ -197,6 +220,7 @@
   justify-self: stretch;
   min-height: 0;
 }
+.compactColumn[data-high="true"] .compactBarSpace b { color: var(--lgi-signal-ink); }
 .compactBar { display: block; width: 65%; max-width: var(--lgi-space-8); flex: none; background: var(--lgi-ink); }
 .compactBar.signal { background: var(--lgi-signal); }
 .compactBinName {
