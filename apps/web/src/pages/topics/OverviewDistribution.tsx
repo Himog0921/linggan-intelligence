@@ -1,16 +1,17 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { btn } from "./topicElements";
 import { number, platformName } from "./topicModel";
 import type { PlatformStatistics, Snapshot, Statistics, Work } from "./types";
 import s from "./Overview.module.css";
 import { materialLikeBins } from "./materialLikeBins";
 
-export function OverviewDistribution({ works, platform, statistics, scope, compact = false }: {
+export function OverviewDistribution({ works, platform, statistics, scope, compact = false, headControls }: {
   works: readonly Work[];
   platform: PlatformStatistics | undefined;
   statistics: Statistics;
   scope: Snapshot["scope"];
   compact?: boolean;
+  headControls?: ReactNode;
 }) {
   const [table, setTable] = useState(false);
   const { bins, unknown } = materialLikeBins(works, platform?.highPerformanceThreshold ?? null);
@@ -24,10 +25,11 @@ export function OverviewDistribution({ works, platform, statistics, scope, compa
             <strong>样本表现</strong>
             <span>/ {platform ? platformName(platform.platform) : "暂无平台样本"}</span>
           </div>
+          <div className={s.compactSettings}>{headControls}
           <div className={s.compactSwitcher} role="group" aria-label="材料表现视图">
             <button type="button" aria-pressed={!table} onClick={() => setTable(false)}>分布图</button>
             <button type="button" aria-pressed={table} onClick={() => setTable(true)}>表格</button>
-          </div>
+          </div></div>
         </div>
         {table ? (
           <div className={s.compactTableWrap}>
