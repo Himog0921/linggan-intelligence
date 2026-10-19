@@ -444,6 +444,11 @@ try {
     }
     assert.equal(report.requests.filter(request=>request.method==='GET'&&request.path==='/ops/creation').length,documentReads,'history recovery must not reload the page');
   });
+  await step('恢复保留副本时一并保存未提交标签，不用历史标签覆盖',async()=>{
+    await stage('正文');const tags=page.getByLabel('确认发布标签',{exact:true});await tags.fill('本页标签 合成标签');await save();const retained=await envelope();
+    await tags.fill('未保存标签 合成标签 未保存标签');await page.getByRole('button',{name:'历史',exact:true}).click();let history=page.getByRole('dialog',{name:'历史与恢复'});await history.locator('section').filter({hasText:/版本 1 ·/}).getByRole('button',{name:'恢复为新版本',exact:true}).click();await history.waitFor({state:'detached'});assert.equal(await tags.inputValue(),'');
+    await page.getByRole('button',{name:'历史',exact:true}).click();history=page.getByRole('dialog',{name:'历史与恢复'});await history.locator('section').filter({hasText:/本页保留副本/}).last().getByRole('button',{name:'恢复到编辑区',exact:true}).click();await history.waitFor({state:'detached'});assert.equal(await tags.inputValue(),'未保存标签 合成标签');await save();const recovered=await envelope();assert.deepEqual(recovered.revision.document,{...retained.revision.document,tags:['未保存标签','合成标签']});report.retainedTagRecovery={beforeRevision:retained.revision.id,afterRevision:recovered.revision.id,tags:recovered.revision.document.tags};await screenshot('workbench-retained-copy-tags-recovered');
+  });
   await step('没有外部请求、模型执行或页面脚本错误',async()=>{
     assert.deepEqual(report.externalRequests,[]);assert.deepEqual(report.pageErrors,[]);
     assert.ok(report.requests.every(request=>!request.path.includes('/ai/requests')&&!request.path.includes('/probes')),'no model/provider command');

@@ -748,3 +748,31 @@ it('reports a current configuration read failure without asserting output qualif
   expect(screen.getByRole('button', { name: '准备并核对输入' })).toBeDisabled();
   expect(api.preview).not.toHaveBeenCalled(); expect(api.execute).not.toHaveBeenCalled();
 });
+
+
+describe('retained recovery copies preserve manuscript tags', () => {
+  it.each([false, true])('restores retained tags through a subsequent save (unsaved tag draft: %s)', async (unsaved) => {
+    vi.mocked(api.save).mockReset();
+    const initial = envelope();
+    initial.revision.document.tags = ['本页标签'];
+    const historical = { ...initial.revision, id: crypto.randomUUID(), number: 0, document: { ...initial.revision.document, tags: ['历史标签'], paragraphs: [{ id: paragraph, text: '历史正文' }] } };
+    const restored = { ...historical, id: crypto.randomUUID(), number: 2 };
+    vi.mocked(api.readWork).mockResolvedValue(initial);
+    vi.mocked(api.history).mockResolvedValue([historical]);
+    vi.mocked(api.restore).mockImplementation(async (_id, request) => ({ requestId: request.requestId, workId: work, outcome: 'accepted', replayed: false, revision: restored }));
+    vi.mocked(api.save).mockImplementation(async (_id, request) => ({ requestId: request.requestId, workId: work, outcome: 'accepted', replayed: false, revision: { ...restored, id: crypto.randomUUID(), number: 3, document: request.document } }));
+    show();
+    await screen.findByLabelText('确认发布标签');
+    if (unsaved) fireEvent.change(screen.getByLabelText('确认发布标签'), { target: { value: '未保存标签 共同标签 未保存标签' } });
+    fireEvent.click(screen.getByRole('button', { name: '历史' }));
+    fireEvent.click(await screen.findByRole('button', { name: '恢复为新版本' }));
+    await waitFor(() => expect(screen.getByLabelText('确认发布标签')).toHaveValue('历史标签'));
+    fireEvent.click(screen.getByRole('button', { name: '历史' }));
+    fireEvent.click(await screen.findByRole('button', { name: '恢复到编辑区' }));
+    const expected = unsaved ? ['未保存标签', '共同标签'] : ['本页标签'];
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(api.save).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(api.save).mock.calls[0]?.[1].document.tags).toEqual(expected);
+    expect(screen.getByLabelText('确认发布标签')).toHaveValue(expected.join(' '));
+  });
+});

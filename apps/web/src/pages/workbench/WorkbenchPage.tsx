@@ -591,9 +591,13 @@ function WorkEditor({
       setFeedback(api.errorText(e));
     }
   }
+  function retainCurrentCopy() {
+    const copy = { ...live.current, tags: [...new Set(tagsLive.current.split(/\s+/u).filter(Boolean))] };
+    setRecoveries(old => [...old, copy]);
+  }
   async function restoreVersion(id: string) {
     try {
-      setRecoveries(r => [...r, live.current]);
+      retainCurrentCopy();
       const body = {
         expectedRevision: server.current.id,
         restoreRevision: id
@@ -757,7 +761,7 @@ function WorkEditor({
         ...body
       });
       const requestId = identities.keyFor('adopt', fingerprint);
-      setRecoveries(r => [...r, live.current]);
+      retainCurrentCopy();
       await run({
         requestId, action:'adopt', fingerprint, snapshot:null,
         run:()=>api.adopt(ai.requestId,{...body,requestId}),
@@ -910,7 +914,7 @@ function WorkEditor({
 </div>
 <div className={styles.row}>
 <ActionButton variant="outline" onClick={() => {
-          setRecoveries(old => [...old, live.current]);
+          retainCurrentCopy();
           applyReceipt(conflict, null);
           setFeedback('已读取服务器版本，本页文字保留在恢复列表');
         }}>采用服务器版本，保留本页副本</ActionButton>
@@ -937,7 +941,10 @@ function WorkEditor({
 </section>)}{recoveries.map((d, i) => <section key={i}>
 <strong>本页保留副本 {i + 1}</strong>
 <pre>{d.paragraphs.map(p => p.text).join('\n\n')}</pre>
-<ActionButton variant="quiet" onClick={() => {
+<ActionButton variant="quiet" disabled={busy} onClick={() => {
+            if (pending.current && pending.current.action !== 'save') return;
+            tagsLive.current = d.tags.join(' ');
+            setTagsDraft(tagsLive.current);
             edit(d);
             setHistory(null);
           }}>恢复到编辑区</ActionButton>
