@@ -161,6 +161,7 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0103_domain_membership_and_usage.sql"),
     "\n",
     include_str!("../../../database/migrations/0113_creator_patrol_detail_follow.sql"),
+    include_str!("../../../database/migrations/0129_note_material_hashtags.sql"),
 );
 
 #[tokio::test]

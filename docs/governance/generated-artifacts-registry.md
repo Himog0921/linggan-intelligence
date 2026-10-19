@@ -262,3 +262,10 @@ Mog 授权三篇指定作品在本机核对与重新分层。私有材料快照�
 - 私有证据固定于本工作树 `artifacts/private/web-react-001-closeout/`，包括旧实际GET基线/截图、新版同输入截图/差分、隔离PG/浏览器日志、真实首篇/最小AI回执和部署/离线/回退证据；忽略、不入Git、不交CI或模型。结束前移交主checkout同名目录；原始像素/回执不修改。
 - 登录生成素材：`apps/web/src/pages/login/assets/{station.svg,scene-data.json}` 与 `sceneModel.ts` 由 `scripts/login-anatomy/build.mjs` 和原模型/几何唯一源再生，允许入Git；不得手改生成物。`fallback.svg` 为已确认原静态图，从旧运行页面原样提取；旧页面可经历史Git恢复，不保留运行双轨。样式归入Login.module.css，继承LOGIN-ANATOMY-001局部例外。
 - 旧页面/动画基线仅存本机私有目录，生成审计使用原LOGIN登记临时目录；后续构建不再生成Rust HTML。
+
+
+## AI-GEN1 / PR-1A 隔离证据
+
+- 固定证据目录：本工作树 `artifacts/private/ai-gen1-pr1a/`；从实际 Cargo/治理/隔离 runner 输出保存日志与最终收尾审查。忽略、不提交、不伪造；只含合成资料与无凭据元数据。系统临时目录中本次 `ai-gen1-pr1a-*.log` 是同一过程的临时输出，可核对后删除；最终保留到本包审阅结束，移除工作树前按需移交同名私有证据目录。
+- 重放入口：`scripts/test-research-dossier-postgres.sh --note-material` 与原完整兼容 runner。随机 Docker PG/卷/数据库只由该脚本创建并由其 trap 清理；不借用共享 DSN、不清理其他容器或 schema。CLI 的 plan/receipt 是操作者显式生成的本机 JSON，不自动写进 Git；无正文。真实范围的 plan/apply 尚未获派。
+- `Cargo.lock` 按既有登记由 Cargo 管理；本包加入已解析的 Unicode normalization 依赖，不手改生成锁。没有新前端生成物或发布包。

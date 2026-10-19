@@ -755,6 +755,7 @@ async fn insert_content_detail(
     detail: ContentDetailRecord<'_>,
     content_public_ref: Uuid,
 ) -> Result<(), ProducerRuntimeError> {
+    let material_ref = Uuid::new_v4();
     let title = exact_string(detail.payload, "title");
     let body = exact_string(detail.payload, "bodyText");
     let creator = exact_string(detail.payload, "authorName");
@@ -776,7 +777,7 @@ async fn insert_content_detail(
         .collect::<Vec<_>>()
         .join(" ");
     sqlx::query("INSERT INTO linggan_material_content_detail (material_ref,content_public_ref,package_ref,record_ordinal,observed_at,title,title_state,body_text,body_state,creator_display_name,creator_display_name_state,published_at_source_text,published_at_source_text_state,searchable_text,author_external_id,like_count,like_count_state,comment_count,comment_count_state,collect_count,collect_count_state,share_count,share_count_state,published_at,published_at_source_field,published_at_source_kind,published_at_precision,published_at_reference_observed_at,published_at_parser_version) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,CASE WHEN $24::bigint IS NULL THEN NULL ELSE to_timestamp($24::double precision / 1000.0) END,$25,$26,$27,$28::timestamptz,$29)")
-        .bind(Uuid::new_v4()).bind(content_public_ref).bind(package.package_ref())
+        .bind(material_ref).bind(content_public_ref).bind(package.package_ref())
         .bind(i32::try_from(ordinal).expect("package record count is bounded")).bind(package.observed_at())
         .bind(title).bind(known_state(title)).bind(body).bind(known_state(body))
         .bind(creator).bind(known_state(creator)).bind(published.source_text.as_deref())
@@ -789,6 +790,8 @@ async fn insert_content_detail(
         .bind(published.source_kind).bind(published.precision)
         .bind(published.reference_observed_at).bind(published.parser_version)
         .execute(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;
+    crate::material_hashtag::project(tx, material_ref, detail.payload)
+        .await.map_err(ProducerRuntimeError::Internal)?;
     Ok(())
 }
 

@@ -74,6 +74,7 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0026_work_resource_read.sql"),
     "\n",
     include_str!("../../../database/migrations/0027_unified_media_resource.sql"),
+    include_str!("../../../database/migrations/0129_note_material_hashtags.sql"),
 );
 
 #[tokio::test]

@@ -186,3 +186,80 @@ async fn manual_dossier_frontend_preview() {
     );
     axum::serve(listener, app_with_database(db)).await.unwrap();
 }
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn dossier_http_note_material_is_scoped_read_only_and_origin_guarded() {
+    let db = dossier_fixture::fixture::proof_database("note_material_http").await;
+    let work = dossier_fixture::work(&db).await;
+    let app = app_with_database(db.clone());
+    let base = format!("/api/local/work-resources/{work}/research-dossier/note-material");
+    let (status, value) = call(
+        app.clone(),
+        &format!("{base}?domain={}", dossier_fixture::DOMAIN),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{value}");
+    assert_eq!(value["contract"], "note-material-input.v1");
+    assert_eq!(value["ready"], true);
+    assert!(
+        value["fragments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["text"].as_str().unwrap().ends_with("结尾不能丢失🙂"))
+    );
+    let (status, _) = call(
+        app.clone(),
+        &format!("{base}?domain=00000000-0000-4000-8000-000000000002"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(&base)
+                .header("Host", "127.0.0.1:3000")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let (status, _) = call(
+        app.clone(),
+        &format!("{base}?domain={}&as_of=2099-01-01", dossier_fixture::DOMAIN),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("{base}?domain={}", dossier_fixture::DOMAIN))
+                .header("Host", "127.0.0.1:3000")
+                .header("Origin", "https://untrusted.example")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_note_material_snapshot")
+            .fetch_one(db.pool())
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_model_invocation")
+            .fetch_one(db.pool())
+            .await
+            .unwrap(),
+        0
+    );
+}

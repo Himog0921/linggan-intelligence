@@ -213,3 +213,37 @@ pub(super) async fn plan(
         }
     }
 }
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct NoteMaterialParams {
+    domain: uuid::Uuid,
+    as_of: Option<String>,
+}
+
+pub(super) async fn note_material(
+    State(state): State<LocalWebState>,
+    Path(work): Path<uuid::Uuid>,
+    Query(params): Query<NoteMaterialParams>,
+) -> Response {
+    use linggan_evidence::note_material_input::{self, Error};
+    let Some(database) = state.database.database() else {
+        return local_read_json_error(StatusCode::SERVICE_UNAVAILABLE, "read_model_not_connected");
+    };
+    match note_material_input::read_at(database, params.domain, &[work], params.as_of.as_deref())
+        .await
+    {
+        Ok(mut materials) => Json(materials.remove(0)).into_response(),
+        Err(Error::NotFound) => local_read_json_error(StatusCode::NOT_FOUND, "material_not_found"),
+        Err(Error::Invalid(reason)) => local_read_json_error(StatusCode::BAD_REQUEST, reason),
+        Err(Error::Storage(sqlx::Error::Database(error)))
+            if error.code().as_deref() == Some("22007")
+                || error.code().as_deref() == Some("22008") =>
+        {
+            local_read_json_error(StatusCode::BAD_REQUEST, "invalid_cutoff")
+        }
+        Err(_) => {
+            local_read_json_error(StatusCode::SERVICE_UNAVAILABLE, "note_material_unavailable")
+        }
+    }
+}

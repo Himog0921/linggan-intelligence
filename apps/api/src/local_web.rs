@@ -382,6 +382,7 @@ fn router(state: LocalWebState) -> Router {
 fn material_api_routes() -> Router<LocalWebState> {
     Router::new()
         .route("/api/local/work-resources/{public_ref}/research-dossier", get(research_dossier::read).layer(axum::middleware::from_fn(comment_study::local_comment_study_guard)))
+        .route("/api/local/work-resources/{public_ref}/research-dossier/note-material", get(research_dossier::note_material).layer(axum::middleware::from_fn(comment_study::local_comment_study_guard)))
         .route("/api/local/work-resources/{public_ref}/research-dossier/creator-preview", get(research_dossier::creator_preview).layer(axum::middleware::from_fn(comment_study::local_comment_study_guard)))
         .route("/api/local/work-resources/{public_ref}/research-dossier/comments", get(research_dossier::comments).layer(axum::middleware::from_fn(comment_study::local_comment_study_guard)))
         .route("/api/local/work-resources/{public_ref}/research-dossier/relayer-plan", get(research_dossier::plan).layer(axum::middleware::from_fn(comment_study::local_comment_study_guard)))

@@ -27,6 +27,8 @@ mod keyword_archive_detail;
 mod local_discovery;
 mod local_producer;
 mod material_admission;
+mod material_hashtag;
+pub mod note_material_input;
 pub use material_admission::{
     ReplyRequalification, TargetMaterialReprojection, reproject_accepted_target_materials,
     requalify_reply_contract_records,

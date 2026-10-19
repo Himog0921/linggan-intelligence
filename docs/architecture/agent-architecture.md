@@ -12,6 +12,11 @@
 
 用户补充的《统一Agent运行时架构》讨论强化了“系统驱动 Agent、同一 Runtime + 不同 Profile、领域工具优先、先业务价值后平台抽象”的方向。对抗归并后不新增万能 `Agent Task`：用户看到的研究工作继续由 `Research Question`、`Information Need`、`Analysis Run`、`Agent Invocation` 和必要时的 `Research Project` 分责；Profile 只是版本化调用模板，不是权限主体。首期只实现一个调用场景、一个 Linggan Agent Kernel Module、一个窄 `ModelToolLoopPort`、deterministic/Pi 两个 Adapter 和少量领域工具，不建设 Agent Control Plane 微服务、Profile 管理平台、Runtime Router 或多 Agent 编排。
 
+## 2026-10-19 当前实施入口
+
+本稿仍是历史架构草案。第一代 ADHD AI 的已确认产品决定见 [DEC-0011](../decisions/0011-ai-generation-one.md)，当前只实施 [#454 / PR-1A 底稿](../plans/active/ai-gen1-001.md)。旧文中平台/运行内核候选不作该包的技术前置；模型/工具循环、设置中心和 serving 在后续 PR 接续。权限、真实世界动作与来源限制仍生效。
+
+
 ## 一句话结论
 
 > **Linggan 的 Agent 是一次有调用者、有目的、有材料边界、有工具权限、有预算、有停止条件和结构化结果的受控研究运行；它不是拥有数据库、插件和正式知识写权限的永久自治角色。**

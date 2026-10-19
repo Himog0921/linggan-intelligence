@@ -222,6 +222,8 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     include_str!("../../../../database/migrations/0126_ops_target.sql"),
     include_str!("../../../../database/migrations/0127_content_workbench.sql"),
     include_str!("../../../../database/migrations/0128_content_workbench_ai.sql"),
+    include_str!("../../../../database/migrations/0129_note_material_hashtags.sql"),
+    include_str!("../../../../database/migrations/0130_note_material_snapshot.sql"),
     "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES\n",
     "('0001_scope_001_capture_evidence', 'a0deb8d5bf6cbd3bc0b8343691167fe02170abe7469f7ba270017dada442cd98'),\n",
@@ -303,5 +305,5 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "('0125_collection_single_run', '0413aa2357eadb2ba382509f16f37220adb01b4a2e358eb794b14c85466a73b5'),\n",
     "('0126_ops_target', '92ce85c849d586be51bcc07781e0dc384f9c2df8ae91fc6ed85c589e874fdaaa'),\n",
     "('0127_content_workbench', '2aaaa89d8251971e55734177c7816ab0e06a5d4935593d1c63eeab0114ea9dc6'),\n",
-    "('0128_content_workbench_ai', '52c0cb171926e8c46a077d2a52d3ba93ecf337c9022779b0caaa4c9fb110eafd');\n",
+    "('0128_content_workbench_ai', '52c0cb171926e8c46a077d2a52d3ba93ecf337c9022779b0caaa4c9fb110eafd'), ('0129_note_material_hashtags', '7d1cdc0786e217ef500b3a2b7b31e47971fd48da110b41c64c617f99117baa05'), ('0130_note_material_snapshot', 'eeed1797b3f748dfe2dd5e58fd3eba354ae957891ba37f8815f4301953418350');\n",
 );
