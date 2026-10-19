@@ -488,6 +488,13 @@ export function createTopicOverview(context: TopicOverviewContext) {
               "lgi-tm-quiet",
               busy ? "disabled" : "",
             )}
+            {btn(
+              "调整归属",
+              "move-topic",
+              "",
+              "lgi-tm-quiet",
+              busy ? "disabled" : "",
+            )}
           </div>
         </aside>
       </>
@@ -622,6 +629,11 @@ export function createTopicOverview(context: TopicOverviewContext) {
                 </>
               ))}
             </nav>
+            {context.state.view === "overview" ? (
+              <span className={cls("lgi-tm-scope-subtitle")}>
+                {selected ? "当前主题的已观察材料" : "当前领域的已观察材料"}
+              </span>
+            ) : null}
             </div>
             <div className={cls("lgi-tm-row")}>
               {selected ? (
@@ -650,8 +662,11 @@ export function createTopicOverview(context: TopicOverviewContext) {
                   ),
                 ].join("")}
               </span>
+              <details className={cls("lgi-tm-scope-filter")}>
+                <summary aria-label="选择统计平台与发布时间" title="调整统计平台与发布时间">筛选</summary>
+                <div className={cls("lgi-tm-scope-filter-panel")}>{controls()}</div>
+              </details>
               {btn("统计口径", "method", "", "lgi-tm-quiet")}
-              {controls()}
             </div>
           </div>
           <div className={cls("lgi-tm-overview-band")} aria-label="主题概览与样本表现">
@@ -808,10 +823,7 @@ export function createTopicOverview(context: TopicOverviewContext) {
           </select>
         </label>
         <div className={cls("lgi-tm-tree")} aria-label={"稳定主题结构"}>
-          <div className={cls("lgi-tm-section-head")}>
-            <h2 className={cls("v7-sr-only")}>{"主题列表"}</h2>
-            {btn("调整归属", "move-topic", "", "lgi-tm-quiet")}
-          </div>
+          <h2 className={cls("v7-sr-only")}>{"主题列表"}</h2>
           <div
             className={cls(
               "lgi-tm-tree-row " +

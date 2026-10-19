@@ -188,6 +188,21 @@ try {
     await go();
     const navigation = page.getByRole("navigation", { name: "主题图谱视图" });
     assert.equal(await navigation.count(), 1);
+    const sidebar = page.locator('aside[aria-label="主题图谱导航"]');
+    const tree = sidebar.getByLabel("稳定主题结构");
+    assert.equal(await tree.getByRole("button", { name: "调整归属" }).count(), 0,
+      "adjust-assignment control must not occupy the first row of the topic tree");
+    assert.equal(await tree.locator('button[data-action="topic"]').first().innerText(), "全部方向");
+    assert.equal(await sidebar.getByRole("button", { name: "调整归属" }).count(), 1,
+      "existing move-topic capability must remain reachable below the tree");
+    const scopeFilter = page.locator('summary[aria-label="选择统计平台与发布时间"]').locator("..");
+    assert.equal(await scopeFilter.count(), 1, "scope filters must remain discoverable");
+    assert.equal(await scopeFilter.evaluate((el) => el.open), false);
+    await scopeFilter.locator("summary").click();
+    assert.equal(await scopeFilter.evaluate((el) => el.open), true);
+    assert.ok(await scopeFilter.locator("select").first().isVisible(), "scope selector must remain usable");
+    await scopeFilter.locator("summary").click();
+    assert.equal(await scopeFilter.evaluate((el) => el.open), false);
     assert.equal(await page.locator('aside[aria-label="主题图谱导航"]').getByRole("navigation", { name: "主题图谱视图" }).count(), 0);
     const totals = await page.getByLabel("基础概览指标").innerText();
     const distribution = await page.getByLabel("已观察内容点赞分布").innerText();
@@ -201,6 +216,11 @@ try {
     await navigation.getByRole("button", { name: "主题概览", exact: true }).click();
     await action("clear-filter", "query");
     const chart = page.getByLabel("已观察内容点赞分布");
+    assert.equal(await page.getByLabel("基础概览指标").getByRole("button",
+      { name: "查看或调整样本爆款规则" }).count(), 0,
+      "the sample rule action must never shift a KPI label or the neighboring median");
+    const ruleLink = chart.getByRole("button", { name: "查看或调整样本爆款规则" });
+    assert.equal(await ruleLink.count(), 1, "rule action stays on the chart heading");
     const titleBox = await chart.getByText("样本表现", { exact: true }).boundingBox();
     const compactBars = await chart.locator('button[data-action="subset"]').evaluateAll((buttons) => buttons.map((button) => {
       const count = Number(button.querySelector("b")?.textContent);
@@ -218,6 +238,35 @@ try {
       return { width, height };
     }));
     assert.ok(compactControlSizes.every(({ width, height }) => width >= 24 && height >= 24), "compact view controls must have 24px targets");
+    // Visual-fidelity guard against the merged V3 regression reported in #448.
+    await page.setViewportSize({ width: 2048, height: 960 });
+    await page.evaluate(() => document.fonts.ready);
+    const visual = await page.getByLabel("基础概览指标").evaluate((region) => {
+      const cards = [...region.firstElementChild.children].slice(0, 4);
+      return cards.map((card) => {
+        const caption = card.children[0].getBoundingClientRect();
+        const value = card.children[1].querySelector("strong")?.getBoundingClientRect();
+        const foot = card.children[2].getBoundingClientRect();
+        return { captionTop: caption.top, valueBottom: value?.bottom ?? 0, footTop: foot.top };
+      });
+    });
+    await page.screenshot({ path: path.join(dir, "topic-overview-v3-alignment-2048.png") });
+    assert.equal(visual.length, 4, "single-platform baseline includes four aligned readings");
+    const spread = (values) => Math.max(...values) - Math.min(...values);
+    assert.ok(spread(visual.map((m) => m.captionTop)) <= 2,
+      "four KPI headings must share a precise top baseline: " + JSON.stringify(visual));
+    assert.ok(spread(visual.map((m) => m.valueBottom)) <= 2,
+      "all four KPI numbers must share the same bottom baseline: " + JSON.stringify(visual));
+    assert.ok(spread(visual.map((m) => m.footTop)) <= 2,
+      "secondary statistics must align on one row: " + JSON.stringify(visual));
+    const bandHeight = await page.getByLabel("主题概览与样本表现")
+      .evaluate((node) => node.getBoundingClientRect().height);
+    assert.ok(bandHeight < 165,
+      "the chart and metrics must fit the approved compact V3 band without a spare explanation row");
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await ruleLink.click();
+    await page.locator("dialog[open]").waitFor();
+    await page.keyboard.press("Escape");
     await chart.getByRole("button", { name: "表格", exact: true }).click();
     const drill = chart.getByRole("table").getByRole("button", { name: "查看", exact: true }).filter({ visible: true });
     const enabled = await drill.evaluateAll((buttons) => buttons.findIndex((button) => !button.disabled));

@@ -22,7 +22,9 @@ export function OverviewDistribution({ works, platform, statistics, scope, compa
       <aside className={s.compactPanel} aria-label="已观察内容点赞分布">
         <div className={s.compactHead}>
           <div className={s.compactTitle}>
-            <strong>样本表现</strong>
+            <button type="button" data-action="rules" className={s.compactRuleTitle}
+              aria-label="查看或调整样本爆款规则"
+              title="点击查看或调整样本爆款规则">样本表现</button>
             <span>/ {platform ? platformName(platform.platform) : "暂无平台样本"}</span>
           </div>
           <div className={s.compactSettings}>{headControls}
@@ -54,6 +56,7 @@ export function OverviewDistribution({ works, platform, statistics, scope, compa
                 type="button"
                 key={bin.label}
                 className={s.compactColumn}
+                data-high={bin.high ? "true" : undefined}
                 disabled={!bin.refs.length}
                 data-action="subset" data-id={bin.refs.join(",")}
                 aria-label={bin.label + "赞，" + number(bin.refs.length) + "篇，查看作品"}
