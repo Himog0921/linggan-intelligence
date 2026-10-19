@@ -360,3 +360,6 @@
 @media(max-width:620px){.study-comment-filter-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.study-filter-query{grid-column:1/-1}.study-comment-filter-row .study-primary-action{grid-column:auto}}
 
 :global(#study-tab-result).study-tab-comments{padding-top:var(--lgi-space-2)}
+.study-comment-read-status{display:flex;align-items:center;justify-content:space-between;gap:var(--lgi-space-3)}
+.study-comment-read-status .study-empty{flex:1;min-width:0}
+@media(max-width:620px){.study-comment-read-status{flex-direction:column;align-items:stretch}}
