@@ -103,9 +103,9 @@ function show(prepared = true) {
 }
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(api.resolveMaterials).mockResolvedValue(collection());
-  vi.mocked(api.prepareMaterials).mockResolvedValue(collection());
-  vi.mocked(api.searchMaterials).mockResolvedValue(
+  vi.mocked(api.resolveMaterials).mockReset().mockResolvedValue(collection());
+  vi.mocked(api.prepareMaterials).mockReset().mockResolvedValue(collection());
+  vi.mocked(api.searchMaterials).mockReset().mockResolvedValue(
     collection([{ ...material, documentId: `note:other`, sourceRef: "other" }]),
   );
   vi.mocked(api.errorText).mockReturnValue("来源已受限");
@@ -809,4 +809,25 @@ it('numbers voices independently of note groups', async () => {
   expect(await within(wall).findByRole('button',{name:/评论所在笔记1/})).toHaveTextContent(/原声\s*1/);
   expect(within(wall).getByRole('button',{name:/评论所在笔记2/})).toHaveTextContent(/原声\s*2/);
   expect(within(wall).queryByText(/原声 [34]/)).not.toBeInTheDocument();
+});
+
+it('prepares and registers materials again after the same browser restores an unprepared historical document', async () => {
+  function RestoredDocument() {
+    const [document, setDocument] = useState(() => newDocument('作业启动'));
+    return <>
+      <button onClick={() => setDocument(newDocument('作业启动'))}>恢复早期稿</button>
+      <output aria-label="材料登记状态">{document.materialPreparation ? '已登记' : '未登记'}</output>
+      <MaterialBrowser domain={id} document={document} onChange={setDocument} onCollect={vi.fn()} />
+    </>;
+  }
+  render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><RestoredDocument /></QueryClientProvider>);
+  await waitFor(() => expect(screen.getByLabelText('材料登记状态')).toHaveTextContent('已登记'));
+  expect(api.prepareMaterials).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole('button', {name:'恢复早期稿'}));
+  await waitFor(() => expect(api.prepareMaterials).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(screen.getByLabelText('材料登记状态')).toHaveTextContent('已登记'));
+  await waitFor(() => expect(api.resolveMaterials).toHaveBeenCalledTimes(2));
+  await screen.findByRole('button', {name:'本篇材料 1'});
+  fireEvent.click(await within(screen.getByRole('region', {name:'分组摘录纸条'})).findByRole('button', {name:'第一段😀'}));
+  await waitFor(() => expect(screen.getByRole('button', {name:'摘入画布'})).toBeEnabled());
 });

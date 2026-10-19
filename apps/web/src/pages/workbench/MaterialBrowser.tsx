@@ -390,7 +390,11 @@ export function MaterialBrowser({
     [domain, contextKey],
   );
   const registered = useRef(false);
+  const hadPreparation = useRef(!!document.materialPreparation || document.materials.length > 0);
   useEffect(() => {
+    const hasPreparation = !!document.materialPreparation || document.materials.length > 0;
+    if (hadPreparation.current && !hasPreparation) registered.current = false;
+    hadPreparation.current = hasPreparation;
     if (
       !active ||
       !prepared.data ||

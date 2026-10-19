@@ -10,7 +10,7 @@ mod private_review;
 
 async fn seed_note(db: &Database, external: &str, title: &str, anchor: &str) -> Uuid {
     let body = format!(
-        "{anchor}\n这是浏览器隔离验收使用的合成长文😀，不是现实研究结论。\n{}\n{anchor}尾段仍须可读🙂",
+        "{anchor}\n这是浏览器隔离验收使用的合成长文😀，不是现实研究结论。\n孩子写作业不愿开始，第一步可以先做两分钟。\n{}\n{anchor}尾段仍须可读🙂",
         "把一天的计划缩小到一个能开始的动作。换行、标点与原文身份都保留。\n".repeat(100)
     );
     let package = fixture::dossier::fixture::submit_package(db, "content_detail",

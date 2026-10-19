@@ -427,6 +427,23 @@ try {
       layout=await screenshot(`workbench-${width}x${height}-materials`);assert.ok(layout.documentWidth<=layout.viewport);
     });
   }
+  await step('恢复未准备材料的历史稿后无需刷新即可再次登记、摘录与保存',async()=>{
+    await stage('材料');await save();report.restoredPreparation=[];report.restoredPreparationResponses=[];
+    const documentReads=report.requests.filter(request=>request.method==='GET'&&request.path==='/ops/creation').length;
+    for(const attempt of [1,2]){
+      const preparedResponse=page.waitForResponse(response=>new URL(response.url()).pathname==='/ops/api/creation/sources/prepare'&&response.request().method()==='POST'&&response.status()===200);
+      await page.getByRole('button',{name:'历史',exact:true}).click();const history=page.getByRole('dialog',{name:'历史与恢复'});await history.waitFor();
+      const first=history.locator('section').filter({hasText:/版本 1 ·/});assert.equal(await first.count(),1);
+      await first.getByRole('button',{name:'恢复为新版本',exact:true}).click();await history.waitFor({state:'detached'});
+      const restored=await envelope();assert.equal(restored.revision.document.materialPreparation??null,null);assert.deepEqual(restored.revision.document.materials??[],[]);
+      const prepared=await(await preparedResponse).json();report.restoredPreparationResponses.push({attempt,documentCount:prepared.documents.length,state:prepared.state});assert.ok(prepared.documents.length>0,'synthetic fixture must provide readable matching materials before asserting registration');
+      await until(async()=>await page.getByRole('navigation',{name:'材料范围'}).getByRole('button').filter({hasText:/本篇材料\s*[1-9]/}).count()===1,'restored collection is registered without a page reload');
+      await page.getByRole('region',{name:'分组摘录纸条'}).locator('button[data-fragment-id]').first().click();const collect=page.getByRole('button',{name:'摘入画布',exact:true});assert.ok(await collect.isEnabled());
+      const anchor=page.waitForResponse(response=>new URL(response.url()).pathname==='/ops/api/creation/sources/validate'&&response.request().method()==='POST');await collect.click();assert.equal((await anchor).status(),200);await until(async()=>await collect.isEnabled(),'restored source selection validated');await save();
+      const saved=await envelope();assert.ok(saved.revision.document.materialPreparation);assert.ok(saved.revision.document.materials.length>0);assert.equal(saved.revision.document.excerpts.length,1);report.restoredPreparation.push({attempt,historicalRevision:1,restoredRevision:restored.revision.id,savedRevision:saved.revision.id,materialCount:saved.revision.document.materials.length,excerptCount:1});await screenshot(`workbench-restored-preparation-${attempt}-without-reload`);
+    }
+    assert.equal(report.requests.filter(request=>request.method==='GET'&&request.path==='/ops/creation').length,documentReads,'history recovery must not reload the page');
+  });
   await step('没有外部请求、模型执行或页面脚本错误',async()=>{
     assert.deepEqual(report.externalRequests,[]);assert.deepEqual(report.pageErrors,[]);
     assert.ok(report.requests.every(request=>!request.path.includes('/ai/requests')&&!request.path.includes('/probes')),'no model/provider command');
