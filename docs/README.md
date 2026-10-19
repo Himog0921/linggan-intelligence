@@ -13,6 +13,10 @@
 
 - [主题图谱紧凑工作区变更](design/changes/topic-map-compact-382.md)：#382 当前 UI 后续，取代旧工作区布局，不改研究与来源合同。
 
+## 2026-10-19 · 评论研究紧凑工作台与三级导航候选
+
+[评论研究 UI 最新规格](design/pages/comment-study-productization-001.md) 与 [LIDS Context Bar 已批准例外](design/lids/shell-zones.md)：四视图导航移入面包屑同行、评论读数折叠、批量研究按需出现、筛选单行、评论表格 48px 单行，React 分支待 PR 复审。仅本次 UI 显示改造，不改变研究业务/API/库，未合并、未部署。
+
 ## 2026-10-19 · WEB-REACT-001 完整收尾包（当前）
 
 #446已合并main@d635718e（c0ab精确head独立复核及全部执行CI通过）；本机3000仍362dad3f。root合并门控未在新发现断言失败后停止，新增的副本标签/双页缩放P2同包续修，发布暂缓；983项前端与67项定向通过，正式浏览器23步通过并清理，最终复核/新CI待完成。17个正式路由及全部子视图已在main归统一React，旧运行界面删除；上线、离线/回退和真实首篇仍须独立证明。入口为[完整收尾矩阵](design/acceptance/web-react-001-closeout.md)，同一#430完整授权持续执行，保留其他工作树未提交资料。

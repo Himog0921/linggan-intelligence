@@ -16,6 +16,8 @@ interface AppShellProps {
    */
   collectionState?: string | undefined;
   crumb: ReactNode;
+  /** 可选三级业务页导航，固定在 Context Bar 路径之后；展示模式开关仍留内容区。 */
+  contextNav?: ReactNode;
   meta: ReactNode;
   children: ReactNode;
   /** V3 创作专用空间；其他页面继续使用迁移期标准页头。 */
@@ -63,7 +65,7 @@ function PrimaryEntryLink({ entry, active, states }: { entry: PrimaryEntry; acti
 /**
  * 全站唯一 React 页头；样式由 apps/web/src/styles/shell.css 提供。
  */
-export function AppShell({ className, active, activeState, collectionState, boundaryLabel, crumb, meta, children, workbenchMode }: AppShellProps) {
+export function AppShell({ className, active, activeState, collectionState, boundaryLabel, crumb, contextNav, meta, children, workbenchMode }: AppShellProps) {
   const states: EntryStates = { activeState, collectionState };
   if (workbenchMode) {
     return <div className={`${styles.workbench} ${workbenchMode === 'immersive' ? styles.immersive : ''}`}>
@@ -122,6 +124,7 @@ export function AppShell({ className, active, activeState, collectionState, boun
           <div aria-hidden="true" />
           <div className="v7-context-main">
             <div className="v7-context-crumb">{crumb}</div>
+            {contextNav ? <div className="v7-context-section-nav">{contextNav}</div> : null}
             <div className="v7-context-meta">{meta}</div>
           </div>
         </div>
