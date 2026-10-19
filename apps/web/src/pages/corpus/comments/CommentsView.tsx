@@ -59,19 +59,23 @@ export function CommentsView({ domain, nav, selected, onSelected, onStudy, onSta
       {feedback ? <p className={c('study-detail-muted')} role="status">{feedback}</p> : null}
       {setupStatus.text ? <p id="setup-status" className={c('study-setup-status')} role="status" data-kind={setupStatus.kind}>{setupStatus.text}</p> : null}
       {postUsageFeedback ? <p className={c('study-table-status')} role="status">{postUsageFeedback}</p> : null}
-      <form key={queryParams.toString()} id="comment-filter-form" className={c('study-comment-filters')} onSubmit={event => {
+      <form key={queryParams.toString()} id="comment-filter-form" className={c('study-worktable-filters')} onSubmit={event => {
         event.preventDefault();
         const form = new FormData(event.currentTarget);
         route({ q: String(form.get('q') || '').trim(), studyState: String(form.get('studyState')), signalKind: String(form.get('signalKind') || '') || null, voiceRole: String(form.get('voiceRole')), sort: String(form.get('sort')), minLikes: String(form.get('minLikes') || '') || null, postUsage: String(form.get('postUsage')), cursor: null, history: [] });
       }}>
-        <div className={c('study-comment-filter-row')}>
-          <label className={c('study-filter-query')}>字面搜索<input id="comment-query" name="q" type="search" defaultValue={filter.q} placeholder="搜索评论文本" /></label>
-          <label>研究状态<select id="comment-study-state" name="studyState" defaultValue={filter.studyState}>{[['all','全部'],['never_studied','从未研究'],['in_progress','处理中'],['studied','已有成功结果'],['needs_context','等待语境'],['failed','最近失败']].map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label>
-          <label>研究标签<select id="comment-signal-kind" name="signalKind" defaultValue={filter.signalKind || ''}>{[['','全部标签'],...Object.entries(signalKindLabel)].map(([value,label])=><option value={value} key={value}>{label}</option>)}</select></label>
-          <label>排序<select id="comment-sort" name="sort" defaultValue={filter.sort}><option value="like_desc">点赞最多</option><option value="received_desc">最新收到</option></select></label>
+        <div className={c('study-worktable-filter-bar')}>
+          <div className={c('study-worktable-filter-fields')}>
+            <label className={c('study-filter-query')}>字面搜索<input id="comment-query" name="q" type="search" defaultValue={filter.q} placeholder="搜索评论文本" /></label>
+            <label>研究状态<select id="comment-study-state" name="studyState" defaultValue={filter.studyState}>{[['all','全部'],['never_studied','从未研究'],['in_progress','处理中'],['studied','已有成功结果'],['needs_context','等待语境'],['failed','最近失败']].map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label>
+            <label>研究标签<select id="comment-signal-kind" name="signalKind" defaultValue={filter.signalKind || ''}>{[['','全部标签'],...Object.entries(signalKindLabel)].map(([value,label])=><option value={value} key={value}>{label}</option>)}</select></label>
+            <label>排序<select id="comment-sort" name="sort" defaultValue={filter.sort}><option value="like_desc">点赞最多</option><option value="received_desc">最新收到</option></select></label>
+          </div>
+          <div className={c('study-worktable-filter-actions')}>
           <button type="button" className={c('study-filter-more')} aria-controls="comment-advanced-filters" aria-expanded={advanced} onClick={() => setAdvanced(old => !old)}>更多筛选{extraCount ? ' · ' + extraCount : ''} <span aria-hidden="true">{advanced ? '⌃' : '⌄'}</span></button>
           <button type="submit" className={c('study-filter-submit')}>应用筛选</button>
           <button type="button" id="open-study-dialog" className={c('study-primary-action')} onClick={onStart}>发起研究</button>
+          </div>
         </div>
         <div id="comment-advanced-filters" className={c('study-filter-advanced')} hidden={!advanced}>
           <label>声音角色<select id="comment-voice-role" name="voiceRole" defaultValue={filter.voiceRole}>{[['reader_and_unknown','用户评论（默认）'],['reader','已知用户'],['unknown','身份未知'],['creator','作品作者'],['all','全部声音']].map(([value,label])=><option value={value} key={value}>{label}</option>)}</select></label>
@@ -79,7 +83,7 @@ export function CommentsView({ domain, nav, selected, onSelected, onStudy, onSta
           <label>改帖<select id="comment-post-usage" name="postUsage" defaultValue={filter.postUsage}>{[['all','全部'],['unused','未改'],['used','已改']].map(([value,label])=><option value={value} key={value}>{label}</option>)}</select></label>
         </div>
       </form>
-      <div className={c('study-comment-work-filter')} hidden={!advanced}>
+      <div className={c('study-worktable-work-filter')} hidden={!advanced}>
         <form key={filter.workLabel} id="comment-work-search-form" onSubmit={event => { event.preventDefault(); void searchWorks(event.currentTarget); }}>
           <label>所属作品<input id="comment-work-search" name="workQuery" type="search" defaultValue={filter.workLabel} placeholder="搜索作品标题" /></label><button type="submit">查找作品</button>
         </form>

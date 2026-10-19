@@ -2,6 +2,14 @@ import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { calls, comment, DOMAIN, installFetch, json, OTHER, overview, policy, POLICY, renderPage, WORK } from './testKit';
+
+async function openResearchFromComments() {
+ if (!screen.queryByRole('button',{name:'发起研究'})) {
+  await userEvent.click(screen.getByRole('button',{name:'用户评论'}));
+ }
+ await userEvent.click(await screen.findByRole('button',{name:'发起研究'}));
+}
+
 afterEach(() => vi.unstubAllGlobals());
 describe('D3 actual four-view React boundary', () => {
  it('keeps backend totals distinct from the bounded preview and zero distinct from unknown', async () => {
@@ -46,6 +54,18 @@ describe('D3 actual four-view React boundary', () => {
   expect(within(screen.getByRole('table')).getAllByRole('columnheader').map(cell=>cell.textContent)).toEqual(['选择','原声','点赞','所属作品','研究状态','研究标签','作者','点赞采集日','观测时间','改帖']);
   expect(within(screen.getByRole('table')).getAllByRole('row')).toHaveLength(3);
   expect(screen.queryByText(/已选 0/)).not.toBeInTheDocument();
+ });
+ it('limits proactive research to the comment directory', async()=> {
+  installFetch();renderPage();await screen.findByLabelText('研究累计读数与昨日活动');
+  expect(screen.queryByRole('button',{name:'发起研究'})).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button',{name:'研究批次'}));
+  await waitFor(()=>expect(screen.getByRole('button',{name:'研究批次'})).toHaveAttribute('aria-current','page'));
+  expect(screen.queryByRole('button',{name:'发起研究'})).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button',{name:'用户问题'}));
+  await waitFor(()=>expect(screen.getByRole('button',{name:'用户问题'})).toHaveAttribute('aria-current','page'));
+  expect(screen.queryByRole('button',{name:'发起研究'})).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button',{name:'用户评论'}));await screen.findByRole('table');
+  expect(screen.getByRole('button',{name:'发起研究'})).toBeEnabled();
  });
  it('retains comment selection across tertiary pages and exposes the compact batch bar only when selected',async()=>{
   installFetch();renderPage(`domain=${DOMAIN}&view=comments`);await screen.findByRole('table');
@@ -101,21 +121,21 @@ describe('D3 actual four-view React boundary', () => {
  it('does not confirm an activation receipt for a different method',async()=>{
   const chosen='00000000-0000-4000-8000-000000000004';
   installFetch(url=>url.pathname.endsWith('/policies')?json({domainRef:DOMAIN,items:[policy(),{...policy(chosen),isActive:false}],page:{hasMore:false,nextCursor:null}}):url.pathname.endsWith('/activate')?json({domainRef:DOMAIN,policyRef:POLICY,isActive:true}):undefined);
-  renderPage();await screen.findByLabelText('研究累计读数与昨日活动');await userEvent.click(screen.getByRole('button',{name:'发起研究'}));
+  renderPage();await screen.findByLabelText('研究累计读数与昨日活动');await openResearchFromComments();
   await screen.findByRole('combobox',{name:'本次使用的方法版本'});await userEvent.selectOptions(screen.getByRole('combobox',{name:'本次使用的方法版本'}),chosen);await userEvent.click(screen.getByRole('button',{name:'设为默认方法'}));
   expect(await screen.findByText(/切换默认方法未获确认/)).toBeInTheDocument();expect(screen.queryByText('已将所选方法设为当前领域默认版本。')).not.toBeInTheDocument();
  });
  it('keeps a confirmed activation separate from a failed directory refresh',async()=>{
   let reads=0;const chosen='00000000-0000-4000-8000-000000000004';
   installFetch(url=>url.pathname.endsWith('/policies')?(++reads===1?json({domainRef:DOMAIN,items:[policy(),{...policy(chosen),isActive:false}],page:{hasMore:false,nextCursor:null}}):json({error:'unavailable'},503)):url.pathname.endsWith('/activate')?json({domainRef:DOMAIN,policyRef:chosen,isActive:true}):undefined);
-  renderPage();await screen.findByLabelText('研究累计读数与昨日活动');await userEvent.click(screen.getByRole('button',{name:'发起研究'}));
+  renderPage();await screen.findByLabelText('研究累计读数与昨日活动');await openResearchFromComments();
   await screen.findByRole('combobox',{name:'本次使用的方法版本'});await userEvent.selectOptions(screen.getByRole('combobox',{name:'本次使用的方法版本'}),chosen);await userEvent.click(screen.getByRole('button',{name:'设为默认方法'}));
   expect(await screen.findByText(/默认方法已按回执切换，但目录刷新失败/)).toBeInTheDocument();
  });
  it('does not navigate back to the old domain when its start receipt arrives late',async()=>{
   let finish:(value:Response)=>void=()=>{};
   installFetch((url,options)=>options.method==='POST'&&url.pathname.endsWith('/runs')?new Promise<Response>(resolve=>{finish=resolve;}):url.pathname.endsWith('/selection-preview')?json({targetCount:1,requestedWorkCount:1,coveredWorkCount:1,scopeCommentCount:1,exclusionCounts:{}}):undefined);
-  const {router}=renderPage();await screen.findByLabelText('研究累计读数与昨日活动');await userEvent.click(screen.getByRole('button',{name:'发起研究'}));
+  const {router}=renderPage();await screen.findByLabelText('研究累计读数与昨日活动');await openResearchFromComments();
   await userEvent.click(await screen.findByRole('checkbox',{name:'选择作品：合成作品'}));await userEvent.click(screen.getByRole('button',{name:'预览本次选择'}));await waitFor(()=>expect(screen.getByRole('button',{name:'确认并开始研究'})).toBeEnabled());await userEvent.click(screen.getByRole('button',{name:'确认并开始研究'}));
   const write=calls.find(call=>call.method==='POST'&&call.url.pathname.endsWith('/runs'))!;expect(write).toBeDefined();
   await act(()=>router.navigate(`/corpus/comments?domain=${OTHER}&view=overview`));await screen.findByLabelText('研究累计读数与昨日活动');
