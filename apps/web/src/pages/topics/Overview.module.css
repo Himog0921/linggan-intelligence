@@ -45,7 +45,7 @@
 .value strong {
   color: var(--lgi-ink);
   font: var(--lgi-weight-bold) var(--lgi-text-page-title)/var(--lgi-lh-title) var(--lgi-font-mono);
-  letter-spacing: -0.04em;
+  letter-spacing: var(--lgi-ls-tight);
   white-space: nowrap;
 }
 .value small { color: var(--lgi-muted); font-size: var(--lgi-text-label); }
@@ -107,8 +107,8 @@
 }
 .visuallyHidden {
   position: absolute;
-  width: 1px;
-  height: 1px;
+  width: var(--lgi-space-1);
+  height: var(--lgi-space-1);
   padding: 0;
   margin: -1px;
   overflow: hidden;
