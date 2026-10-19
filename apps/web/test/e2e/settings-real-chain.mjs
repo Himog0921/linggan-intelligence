@@ -8,6 +8,10 @@ const directory = process.env.WEB_APP_PROOF_DIR;
 assert.ok(directory, 'owned proof directory is required');
 const { origin } = JSON.parse(await readFile(path.join(directory, 'fixture.json'), 'utf8'));
 assert.equal(new URL(origin).hostname, '127.0.0.1');
+const longName = 'SYNTHETIC长名称' + '家庭养育'.repeat(20);
+const longUrl = 'http://127.0.0.1:9/v1/SYNTHETIC_' + 'a'.repeat(600);
+const modelId = 'synthetic-' + 'm'.repeat(180);
+const skillEnd = 'SYNTHETIC长文结束锚点';
 const report = { scope: 'synthetic isolated database; no model execution', steps: [], screenshots: [], errors: [], httpFailures: [], posts: [] };
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'zh-CN', timezoneId: 'Asia/Shanghai' });
@@ -25,13 +29,13 @@ async function receipt(text) { await page.getByRole('status').filter({ hasText: 
 try {
   await step('new connection save does not test or enqueue', async () => {
     await goto();
-    await page.getByLabel('连接名称', { exact: true }).fill('隔离浏览器合成连接');
-    await page.getByLabel('服务地址', { exact: true }).fill('http://127.0.0.1:9/v1');
+    await page.getByLabel('连接名称', { exact: true }).fill(longName);
+    await page.getByLabel('服务地址', { exact: true }).fill(longUrl);
     await page.getByLabel('API 密钥', { exact: true }).fill('SYNTHETIC-NOT-A-CREDENTIAL');
     await page.getByText('本机端点', { exact: true }).check();
     await page.getByRole('button', { name: '保存连接', exact: true }).click();
     await receipt('连接已保存');
-    await page.getByLabel('登记模型标识', { exact: true }).fill('synthetic-browser-model');
+    await page.getByLabel('登记模型标识', { exact: true }).fill(modelId);
     await page.getByRole('button', { name: '登记模型', exact: true }).click();
     await receipt('模型标识已保存');
   });
@@ -57,7 +61,7 @@ try {
   });
   const skillDirectory = path.join(directory, 'browser-example');
   await mkdir(skillDirectory, { recursive: true });
-  await writeFile(path.join(skillDirectory, 'SKILL.md'), '---\nname: browser-example\ndescription: Synthetic browser local import only\n---\nUse only the explicitly selected writing material.\n');
+  await writeFile(path.join(skillDirectory, 'SKILL.md'), `---\nname: browser-example\ndescription: ${'合成做法说明'.repeat(35)}\n---\nUse only the explicitly selected writing material.\n${Array.from({ length: 150 }, (_, i) => `第${i + 1}段：合成长文🙂。${'x'.repeat(180)}`).join('\n')}\n${skillEnd}\n`);
   await step('folder import creates a fixed local version', async () => {
     await goto('?section=skills&task=writing_legacy');
     await page.getByLabel('选择做法目录', { exact: true }).setInputFiles(skillDirectory);
@@ -65,7 +69,7 @@ try {
     await receipt('已导入做法');
   });
   const settings = await (await page.request.get(`${origin}/api/local/ai-settings`)).json();
-  const model = settings.models.find(m => m.modelId === 'synthetic-browser-model');
+  const model = settings.models.find(m => m.modelId === modelId);
   const version = settings.skills.find(s => s.name === 'browser-example').versions[0];
   assert.ok(model.capability); assert.equal(model.price.input, '0'); assert.equal(model.price.output, null);
   await step('writing candidate save and reasoned first-version activation', async () => {
@@ -89,10 +93,23 @@ try {
     for (const [width, height] of [[1280, 800], [1440, 900], [1920, 1080], [390, 844]]) {
       await page.setViewportSize({ width, height });
       for (const section of ['models', 'automation', 'skills', 'health']) {
-        await goto(`?section=${section}`);
+        const selection = section === 'models' ? `&connection=${model.connectionRef}&model=${model.identityRef}` : section === 'skills' ? `&task=writing_legacy&version=${version.versionRef}` : '';
+        await goto(`?section=${section}${selection}`);
         await page.getByRole('heading', { name: { models: '模型', automation: '自动化与额度', skills: '做法', health: '运行状况' }[section], exact: true, level: 2 }).waitFor();
-        const dimensions = await page.evaluate(() => ({ client: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth }));
+        if (section === 'skills') {
+          await page.getByText('只读做法内容', { exact: true }).click();
+          const body = page.locator('details[open] pre');
+          await body.waitFor();
+          assert.ok((await body.innerText()).endsWith(skillEnd));
+          await body.evaluate(element => { element.scrollTop = element.scrollHeight; });
+          assert.ok(await body.evaluate(element => element.scrollTop + element.clientHeight >= element.scrollHeight - 1));
+        }
+        const dimensions = await page.evaluate(() => {
+          const main = document.querySelector('main');
+          return { client: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth, mainClient: main.clientWidth, mainScroll: main.scrollWidth };
+        });
         assert.ok(dimensions.scroll <= dimensions.client, `${width} ${section} must not overflow document`);
+        assert.ok(dimensions.mainScroll <= dimensions.mainClient, `${width} ${section} long fields must not overflow main: ${JSON.stringify(dimensions)}`);
         const name = `settings-${section}-${width}.png`;
         await page.screenshot({ path: path.join(directory, name), fullPage: true }); report.screenshots.push(name);
       }

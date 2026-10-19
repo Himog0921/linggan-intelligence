@@ -13,10 +13,10 @@
 .index a, .selector a { color: var(--lgi-body); text-decoration: none; padding: var(--lgi-space-3) var(--lgi-space-4); }
 .index a[aria-current], .selector a[aria-current] { color: var(--lgi-ink); background: var(--lgi-canvas-sunken); font-weight: var(--lgi-weight-bold); }
 .surface { min-width: 0; padding: var(--lgi-space-6); border: 1px solid var(--lgi-border-strong); background: var(--lgi-canvas); }
-.section { display: grid; gap: var(--lgi-space-6); }
+.section { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: var(--lgi-space-6); overflow-wrap: anywhere; }
 .group, .form { display: grid; gap: var(--lgi-space-4); min-width: 0; }
 .selector { display: flex; flex-wrap: wrap; gap: var(--lgi-space-2); }
-.selector a { display: grid; gap: var(--lgi-space-1); border-bottom: 2px solid transparent; }
+.selector a { display: grid; min-width: 0; max-width: 100%; gap: var(--lgi-space-1); border-bottom: 2px solid transparent; }
 .selector a[aria-current] { border-bottom-color: var(--lgi-ink); }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--lgi-space-24) * 2)), 1fr)); gap: var(--lgi-space-4); }
 .field { display: grid; align-content: start; gap: var(--lgi-space-2); min-width: 0; }
