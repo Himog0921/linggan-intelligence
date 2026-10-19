@@ -358,3 +358,5 @@
 @media(max-width:1240px){.study-comment-filter-row{grid-template-columns:minmax(0,2fr) repeat(3,minmax(var(--lgi-space-24),1fr)) auto auto}.study-comment-filter-row .study-primary-action{grid-column:1/-1;justify-self:end}}
 @media(max-width:900px){.study-comment-filter-row{grid-template-columns:minmax(0,2fr) repeat(2,minmax(var(--lgi-space-24),1fr))}.study-comment-filter-row .study-primary-action{grid-column:auto}.study-comment-work-filter{flex-wrap:wrap}}
 @media(max-width:620px){.study-comment-filter-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.study-filter-query{grid-column:1/-1}.study-comment-filter-row .study-primary-action{grid-column:auto}}
+
+:global(#study-tab-result).study-tab-comments{padding-top:var(--lgi-space-2)}
