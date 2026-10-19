@@ -6,6 +6,10 @@
 > 事实来源: Mog 2026-10-15 的决定（[Issue #430](https://github.com/Himog0921/linggan-intelligence/issues/430)、[DEC-0010](../../decisions/0010-web-frontend-react.md)）；Mog 提供的《Linggan Intelligence 全站 React 迁移架构与执行手册》（2026-10-15，基于 `main@473980cb`，未入库，有效内容已吸收进本文）；UIUX-CONTENT-WORKBENCH-001 计划（[Issue #425](https://github.com/Himog0921/linggan-intelligence/issues/425)，2026-10-15 工作树未提交版本）；`origin/main@473980cb` 代码只读核对
 > 冲突时以谁为准: Mog 最新确认、DEC-0010、AGENTS.md、真实代码与运行证据
 
+## 2026-10-19 · #446已合并、部署前两项P2同包续修
+
+当前代码main@d635718e已包含全部17路由React及旧运行UI删除，#446精确c0ab独立复核、3项执行CI通过/4项条件跳过。正式3000仍362dad3f，不能计部署完成。合并门控在发现两条新thread后的断言失败未停止，root已如实说明并暂缓发布；同一收尾包codex/web-react-001-recovery修正保留副本标签状态/捕获和缩放双页起点。有效负控4失败/63通过，修后67定向与983全套前端通过；正式浏览器23步通过并清理，同一GPT复核/后续新CI及发布另补。未发生本包真实稿件或模型写入，断网/回退仍须在新能力首次写入前执行。详见[收尾矩阵§11](../../design/acceptance/web-react-001-closeout.md#11-446合并后部署前的恢复标签与书页缩放p22026-10-19)。
+
 ## 2026-10-19 当前状态与完整收尾授权
 
 开工实时核实：main、runtime-main、3000为362dad3f（#445）；A+B、C基线、D1/D2/D3、E/F/G均已合入并部署，F两项旧内核及D3启动锁回归已修复。#434@c1459357仍未独立合入；本包将其完整集成，并复核原树未提交的C-UX走查问题。Mog当前明确要求上述全部遗留收口、所有页面含子页面统一最新React栈、删除旧运行代码，并授权按需合并部署刷新3000；此授权替代旧阶段“不合并、不部署”的执行限制，不改写旧测试结果。

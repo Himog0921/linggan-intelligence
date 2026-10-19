@@ -868,3 +868,28 @@ it('prepares and registers materials again after the same browser restores an un
   fireEvent.click(await within(screen.getByRole('region', {name:'分组摘录纸条'})).findByRole('button', {name:'第一段😀'}));
   await waitFor(() => expect(screen.getByRole('button', {name:'摘入画布'})).toBeEnabled());
 });
+
+
+it.each([[2000, 2], [1000, 4], [1200, 3]])('keeps the last spread aligned after resizing to width %s (%s leaves)', async (wide, count) => {
+  let width = 400;
+  const bounds = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => new DOMRect(0, 0, width, 600));
+  const long = { ...material, fragments: [{ ...item, text: Array.from({ length: 120 }, (_, i) => `第${String(i).padStart(3, '0')}段：保留这段原声。`).join('') }] };
+  vi.mocked(api.resolveMaterials).mockResolvedValue(collection([long]));
+  try {
+    show();
+    const reader = await screen.findByRole('region', { name: '原文阅读' });
+    await within(reader).findByText(/第000段/);
+    fireEvent.resize(window);
+    const next = within(reader).getByRole('button', { name: '下一展开页 →' });
+    let turns = 0;
+    while (!next.hasAttribute('disabled') && turns++ < 20) fireEvent.click(next);
+    expect(next).toBeDisabled();
+    width = wide;
+    fireEvent.resize(window);
+    const first = Math.floor((count - 1) / 2) * 2;
+    await within(reader).findByText(`${first + 1}–${count} / ${count} 页`);
+    expect(within(reader).getByText(`${first + 1} / ${count}`, { exact: true })).toBeInTheDocument();
+    expect(within(reader).getByText(`${count} / ${count}`, { exact: true })).toBeInTheDocument();
+    if (count === 2) expect(within(reader).getByText(/第000段/)).toBeInTheDocument();
+  } finally { bounds.mockRestore(); }
+});

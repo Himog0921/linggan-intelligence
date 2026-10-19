@@ -542,7 +542,7 @@ export function MaterialBrowser({
   const currentSpread =
     selectedPage >= 0
       ? Math.floor(selectedPage / 2) * 2
-      : Math.min(spread, Math.max(0, leaves.length - 1));
+      : Math.min(spread, Math.max(0, Math.floor((leaves.length - 1) / 2) * 2));
   const groups = new Map<string, ReadingPiece[]>();
   for (const piece of visible) {
     const anonymous =
