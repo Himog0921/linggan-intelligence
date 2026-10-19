@@ -37,6 +37,25 @@
 
 主执行者自查的snapshot计划输入漂移也在同轮修正并获独立复核：事务内同时校验旧revision与计划materialFingerprint；不把work状态漂移当作同一冻结输入。审查最终未发现未处理P1/P2；它实际运行局部规则/CLI/格式/语法并读取主执行PG日志，未另建PG或连接共享服务。最终提交只在审查修正后冻结；exact head、Draft URL和远端CI另在PR/#454回执记录。
 
+## CI 跟进与合并条件（2026-10-19）
+
+Mog 追加授权跟进 #455 CI、处理失败与核对最终提交，同范围小修沿原收尾审查；继续禁止合并部署、共享数据库/服务、真实模型/媒体/采集和实施代理。本次没有失败项，无代码修正，也未启动任何代理或重新审查。
+
+[PR #455](https://github.com/Himog0921/linggan-intelligence/pull/455) 的代码提交 `93ab18c5238d0769b63f3a266ef7e76f2de2fa0b` 已通过 [GitHub Actions run 39254577283](https://github.com/Himog0921/linggan-intelligence/actions/runs/39254577283)：
+
+| job | 结果 | 完成时间（UTC） |
+|---|---|---|
+| [web-checks](https://github.com/Himog0921/linggan-intelligence/actions/runs/39254577283/job/118066502392) | SUCCESS | 2026-10-19 12:48:13 |
+| [real-chain-browser-proof](https://github.com/Himog0921/linggan-intelligence/actions/runs/39254577283/job/118067627033) | SUCCESS | 2026-10-19 13:09:01 |
+
+两项job的实际步骤均完成；新 AI-GEN1 专项日志确认规则36、CLI2、producer1/新PG6/旧底稿3/HTTP1真实执行并通过，隔离DB/container/volume清理成功。后续评论、工作台、采集模块的合成浏览器/PG证明及治理格式步骤同为SUCCESS。4项其他分支限定的 collection-proof、integration-source-export、两项 synthetic-proof 为 SKIPPED，不当作实际通过或补成覆盖。
+
+核对时远端 main/base 仍为 `612dcbea70c69bd96d3903340b10cf9ed56a0e7b`，GitHub显示MERGEABLE/CLEAN；reviews、reviewThreads和PR评论均为空，无未解决线程。main API报告protected=false、required_status_checks为空，分支rules接口返回空列表；没有额外GitHub强制审核/检查规则。既定独立只读审查已按上节完成，不因平台没有required规则而省略本包验证。
+
+本轮提交只同步本报告、统一计划、current-state和月度进度；代码/SQL/脚本/依赖/CI配置与上述已测代码提交逐文件一致。最终head以PR元数据及#454/#455回执为准；对纯文档更新执行治理与diff核对，不为同一代码重新跑整套产品CI。后续任何实现变化须重新取得对应检查证据。
+
+**工程判断：具备合并条件，没有已知工程阻塞。** PR继续保持Draft，尚未获得或执行合并/部署授权；真实材料覆盖、页面展示、#420/G4及实际迁移/处理窗口仍按原范围留待对应阶段，不能由CI通过代替。此判断不向PR-1C放行，也不自动启动PR-1B。
+
 ## 未证与后续
 
 只读 API 提供新合同，既有 React 页面与研究消费者不自动切换；没有新增 UI 因而无本次 G1 页面改版。新状态在页面的最终展示及 #420 Mog G4 仍待，真实库标签差异/材料覆盖/重分层质量没有重跑。共享迁移、历史补投影/relayer、备份恢复和发布窗口须另行明确后执行。PR-1B 开发不以 Mog G4 为前置；PR-1C 的原上线与 G4 依赖保留。
