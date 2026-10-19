@@ -73,7 +73,7 @@ describe('D3 actual four-view React boundary', () => {
    if(url.pathname.endsWith('/comments')&&attempts>1)return json({domainRef:DOMAIN,items:[{...comment(),postUsage:{state:'used',markedAt:null}}],summary:{displayableCommentCount:1,eligibleCommentCount:1},indexCoverage:{indexedCount:1,pendingCount:0},page:{nextCursor:null}});
    return undefined;
   });renderPage(`domain=${DOMAIN}&view=comments`);await screen.findByRole('table');
-  await userEvent.click(screen.getAllByRole('button',{name:'标记已改成帖子'})[0]!);await screen.findByText(/保存未获确认/);expect(screen.queryByText('已改成帖子',{exact:true})).not.toBeInTheDocument();await userEvent.click(screen.getAllByRole('button',{name:'标记已改成帖子'})[0]!);await screen.findByRole('button',{name:'撤销标记'});
+  await userEvent.click(screen.getAllByRole('button',{name:'标记已改成帖子'})[0]!);const receiptStatus=await screen.findByText(/保存未获确认/);expect(receiptStatus.tagName).toBe('P');expect(screen.queryByText('已改成帖子',{exact:true})).not.toBeInTheDocument();await userEvent.click(screen.getAllByRole('button',{name:'标记已改成帖子'})[0]!);await screen.findByRole('button',{name:'撤销标记'});
   const writes=calls.filter(call=>call.method==='POST');expect(writes).toHaveLength(2);expect(writes[0]!.body?.requestRef).toBe(writes[1]!.body?.requestRef);expect(writes[0]!.body?.workRef).toBe(WORK);
  });
  it('aborts the old domain read and excludes its late result from the new domain',async()=>{

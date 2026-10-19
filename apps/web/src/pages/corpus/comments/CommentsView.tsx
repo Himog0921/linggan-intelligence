@@ -17,7 +17,7 @@ export function CommentsView({ domain, nav, selected, onSelected, onStudy, onSta
   const location = useLocation(), navigate = useNavigate(), params = new URLSearchParams(location.search);
   const state = location.state as { commentFilter?: CommentFilters; commentDomain?: string } | null;
   const filter = commentFilters(params, state?.commentDomain === domain ? state.commentFilter : null);
-  const [feedback, setFeedback] = useState(''), [workError, setWorkError] = useState('');
+  const [feedback, setFeedback] = useState(''), [postUsageFeedback, setPostUsageFeedback] = useState(''), [workError, setWorkError] = useState('');
   const [advanced, setAdvanced] = useState(() => !!(filter.voiceRole !== 'reader_and_unknown' || filter.minLikes || filter.postUsage !== 'all' || filter.workRef));
   const alive = useRef(true), searchSerial = useRef(0), currentLocation = useRef(location.key);
   useLayoutEffect(() => { currentLocation.current = location.key; }, [location.key]);
@@ -58,6 +58,7 @@ export function CommentsView({ domain, nav, selected, onSelected, onStudy, onSta
     <section className={c('study-comments')} aria-label="用户评论">
       {feedback ? <p className={c('study-detail-muted')} role="status">{feedback}</p> : null}
       {setupStatus.text ? <p id="setup-status" className={c('study-setup-status')} role="status" data-kind={setupStatus.kind}>{setupStatus.text}</p> : null}
+      {postUsageFeedback ? <p className={c('study-table-status')} role="status">{postUsageFeedback}</p> : null}
       <form key={queryParams.toString()} id="comment-filter-form" className={c('study-comment-filters')} onSubmit={event => {
         event.preventDefault();
         const form = new FormData(event.currentTarget);
@@ -115,7 +116,7 @@ export function CommentsView({ domain, nav, selected, onSelected, onStudy, onSta
             <td><span className={c('study-row-author')} title={item.authorDisplayName || '作者未记录'}>{item.authorDisplayName || '作者未记录'}</span></td>
             <td><time className={c('study-row-time')} title={item.likeCountAsOf ? '点赞采集时间：' + studyTime(item.likeCountAsOf) : '点赞采集时间未记录'}>{shortBeijingDate(item.likeCountAsOf) || '—'}</time></td>
             <td><time className={c('study-row-time')} title={item.observedAt ? '评论观测时间' : '评论观测时间未记录'}>{item.observedAt ? studyTime(item.observedAt) : '—'}</time></td>
-            <td data-post-usage-cell><PostUsageControl item={item} domain={domain} requestRefs={requestRefs} onSaved={saved} compact /></td>
+            <td data-post-usage-cell><PostUsageControl item={item} domain={domain} requestRefs={requestRefs} onSaved={saved} onStatus={setPostUsageFeedback} compact /></td>
           </tr>;
         }) : <tr><td colSpan={10} className={c('study-table-empty')}>当前筛选没有可显示的用户评论。</td></tr>}</tbody>
       </table></div>

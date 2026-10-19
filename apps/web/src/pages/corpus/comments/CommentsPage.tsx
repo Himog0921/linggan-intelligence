@@ -85,7 +85,7 @@ function Workspace({ domain, domainName, domainStatus, collectionState, crumb, l
   const openResearch = () => setStudy(old => ({ open: true, kind: 'works', opening: old.opening + 1 }));
   return <AppShell active="corpus" collectionState={collectionState} boundaryLabel="本机服务状态" crumb={crumb} contextNav={contextNav} meta={contextMeta}>
     <title>评论研究</title><div className="v7-shell"><CorpusSideNav active="comments" domain={domain} foot={<>只读呈现新评论研究链路<br />自动排程保持关闭</>} />
-    {fatalShellError ? <main className={c('study-main')} aria-labelledby="comment-study-title"><h1 id="comment-study-title" className="v7-sr-only">评论研究</h1><p className={c('study-empty')} role="status">评论研究准备信息读取失败：{shellError} <button type="button" onClick={retryShell}>重试读取</button></p></main> : 
+    {fatalShellError ? <main className={c('study-main')} aria-labelledby="comment-study-title"><h1 id="comment-study-title" className="v7-sr-only">评论研究</h1><p className={c('study-empty')} role="status">评论研究准备信息读取失败：{shellError} <button type="button" onClick={retryShell}>重试读取</button></p></main> :
     <main className={c('study-main')} aria-labelledby="comment-study-title"><h1 id="comment-study-title" className="v7-sr-only">评论研究</h1>
     {view !== 'comments' ? <header className={c('study-toolbar study-toolbar-actions-only')}><div className={c('study-toolbar-actions')}><span id="setup-status" className={c('study-setup-status')} role="status" data-kind={setupStatus.kind} hidden={!setupStatus.text}>{setupStatus.text}</span><button type="button" id="open-study-dialog" className={c('study-primary-action')} disabled={!domain} onClick={openResearch}>发起研究</button></div></header> : null}
 
