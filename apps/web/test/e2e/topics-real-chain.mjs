@@ -250,19 +250,19 @@ try {
         return { captionTop: caption.top, valueBottom: value?.bottom ?? 0, footTop: foot.top };
       });
     });
+    await page.screenshot({ path: path.join(dir, "topic-overview-v3-alignment-2048.png") });
     assert.equal(visual.length, 4, "single-platform baseline includes four aligned readings");
     const spread = (values) => Math.max(...values) - Math.min(...values);
     assert.ok(spread(visual.map((m) => m.captionTop)) <= 2,
-      "four KPI headings must share a precise top baseline");
+      "four KPI headings must share a precise top baseline: " + JSON.stringify(visual));
     assert.ok(spread(visual.map((m) => m.valueBottom)) <= 2,
-      "all four KPI numbers must share the same bottom baseline");
+      "all four KPI numbers must share the same bottom baseline: " + JSON.stringify(visual));
     assert.ok(spread(visual.map((m) => m.footTop)) <= 2,
-      "secondary statistics must align on one row");
+      "secondary statistics must align on one row: " + JSON.stringify(visual));
     const bandHeight = await page.getByLabel("主题概览与样本表现")
       .evaluate((node) => node.getBoundingClientRect().height);
     assert.ok(bandHeight < 165,
       "the chart and metrics must fit the approved compact V3 band without a spare explanation row");
-    await page.screenshot({ path: path.join(dir, "topic-overview-v3-alignment-2048.png") });
     await page.setViewportSize({ width: 1440, height: 900 });
     await ruleLink.click();
     await page.locator("dialog[open]").waitFor();
