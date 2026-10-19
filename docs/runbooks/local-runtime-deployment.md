@@ -16,9 +16,9 @@ SIGTERM关闭新领取，保留已派发调用并只重试同次数据库结算�
 
 **安装候选已接，尚未部署**：`com.linggan-intelligence.ai-executor`配置、DB/文件/PID/full源码身份核验、sync更新许可和prepare-migration四服务停机已接。等待与plist ExitTimeOut取新/现有资源合同可覆盖的宽限；source入口须为干净目标main。先捕获print-disabled，再排空巡检/AI，确认四服务退出才写原子起止revision许可；sync锁内重核当前数据库/实例/无在途、无会话锁再换代码，四binary及前端共同构建，身份写full SHA。数据库身份含cluster system identifier、database oid/name和schema；凭据只经环境传递，不进docker argv或许可。
 
-安装保存原disabled：既有两个worker保持禁用，新AI label无先前意图时默认disabled且不bootstrap；不会执行enable或改数据库三层开关。旧flat permit不再被新sync接受。巡检已移除模型/embedding循环，仅保留10秒一次的确定性目录维护；其15秒有界事务完成后写自身原子收条，失败/收条不可写均非成功退出。旧业务API直调冻结和集中设置/旧字段删除仍待整包实现，不能只凭本节先发布。
+安装保存原disabled：既有两个worker保持禁用，新AI label无先前意图时默认disabled且不bootstrap；不会执行enable或改数据库三层开关。旧flat permit不再被新sync接受。巡检已移除模型/embedding循环，仅保留10秒一次的确定性目录维护；其15秒有界事务完成后写自身原子收条，失败/收条不可写均非成功退出。旧业务API直调冻结、集中设置及0141旧字段删除已在PR-1B候选实现并隔离证明；完整交付/CI状态见[PR-1B实施包](../plans/active/ai-gen1-pr1b-foundation.md)，不能只凭本节发布。
 
-开发`local-runtime.sh serve`源码已接第四进程。停止时核对两个自有子进程退出和数据库；开发态unknown身份的收条只产生local_drained，不能成为发布许可。失败保留其他自有进程与收条并以失败退出。证明覆盖精确cleanup函数的四个dummy子进程控制，未运行含migrate的完整serve，更未操作共享服务。旧patrol模型/强杀测试随旧owner退役；新AI信号/晚到/持续结算失败已证明，实际强杀→重启接管专项仍留B8。
+开发`local-runtime.sh serve`源码已接第四进程。停止时核对两个自有子进程退出和数据库；开发态unknown身份的收条只产生local_drained，不能成为发布许可。失败保留其他自有进程与收条并以失败退出。证明覆盖精确cleanup函数的四个dummy子进程控制，未运行含migrate的完整serve，更未操作共享服务。旧patrol模型/强杀测试随旧owner退役；新AI信号/晚到/持续结算失败已证明，实际强杀→重启接管专项已在owned PG/loopback证明；Mac常驻安装与共享迁移仍未执行。
 
 本轮通过替身命令安装演练与owned PostgreSQL/真实binary核验，不代表Mac launchd、共享数据库备份/迁移或部署已完成。此节不授予这些动作；下文三服务回执保留原适用版本。
 
