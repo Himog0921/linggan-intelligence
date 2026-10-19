@@ -444,20 +444,6 @@ export function createTopicOverview(context: TopicOverviewContext) {
           data-loaded={!busy}
           aria-label={"主题图谱导航"}
         >
-          <nav id="topic-map-view-tabs" className={cls("lgi-tm-side-views")} aria-label="主题图谱视图">
-            {tab("主题概览", "view", "overview", context.state.view === "overview")}
-            {tab("用户生命旅程", "view", "journey", context.state.view === "journey")}
-          </nav>
-          {btn(
-            context.state.navigationOpen ? "收起主题树" : "展开主题树",
-            "toggle-navigation",
-            "",
-            "lgi-tm-navigation-toggle",
-            {
-              "aria-expanded": context.state.navigationOpen,
-              "aria-controls": "topic-map-navigation",
-            },
-          )}
           <div
             id={"topic-map-navigation"}
             className={cls(
@@ -468,7 +454,7 @@ export function createTopicOverview(context: TopicOverviewContext) {
             {busy ? (
               <>
                 <div className={cls("lgi-tm-tree")}>
-                  <h2>{"领域结构"}</h2>
+                  <h2 className={cls("v7-sr-only")}>{"主题列表"}</h2>
                   <p className={cls("lgi-tm-note")}>{"当前范围待读取"}</p>
                 </div>
               </>
@@ -477,6 +463,17 @@ export function createTopicOverview(context: TopicOverviewContext) {
             )}
           </div>
           <div className={cls("lgi-tm-sidebar-tools")}>
+          {btn(
+            context.state.navigationOpen ? "收起主题树" : "展开主题树",
+            "toggle-navigation",
+            "",
+            "lgi-tm-navigation-toggle",
+            {
+              "aria-expanded": context.state.navigationOpen,
+              "aria-controls": "topic-map-navigation",
+            },
+          )}
+
             {btn(
               "我方矩阵",
               "identity",
@@ -606,7 +603,7 @@ export function createTopicOverview(context: TopicOverviewContext) {
         >
           <div className={cls("lgi-tm-summary-heading")}>
             <div className={cls("lgi-tm-summary-identity")}>
-              {context.state.view === "overview" ? <h2>主题概览</h2> : null}
+              
             <nav aria-label={"当前主题路径"}>
               {btn("全部方向", "topic", "", "lgi-tm-quiet")}
               {parents.map((t) => (
@@ -654,12 +651,23 @@ export function createTopicOverview(context: TopicOverviewContext) {
                 ].join("")}
               </span>
               {btn("统计口径", "method", "", "lgi-tm-quiet")}
+              {controls()}
             </div>
           </div>
-          {context.state.view === "overview" ? (
-            <OverviewReadouts statistics={selected?.statistics || activeSnapshot.statistics} scope={activeSnapshot.scope} controls={controls()} />
-          ) : metrics(selected?.statistics || activeSnapshot.statistics)}
-          {context.state.view === "journey" ? <div className={cls("lgi-tm-summary-bottom")}>{controls()}</div> : null}
+          <div className={cls("lgi-tm-overview-band")} aria-label="主题概览与样本表现">
+            <OverviewReadouts
+              statistics={selected?.statistics || activeSnapshot.statistics}
+              scope={activeSnapshot.scope}
+            />
+            <OverviewDistribution
+              compact
+              works={context.selectedWorks().filter((w) => w.platform === plotPlatform(selected?.statistics || activeSnapshot.statistics))}
+              platform={platformStats(selected?.statistics || activeSnapshot.statistics).find((p) => p.platform === plotPlatform(selected?.statistics || activeSnapshot.statistics))}
+              statistics={selected?.statistics || activeSnapshot.statistics}
+              scope={activeSnapshot.scope}
+              headControls={observedPlatforms(selected?.statistics || activeSnapshot.statistics).length > 1 ? plotSelect(selected?.statistics || activeSnapshot.statistics) : null}
+            />
+          </div>
           {known(context.snapshot?.scope?.totalWorkCount) &&
           activeSnapshot.scope.totalWorkCount >
             list(activeSnapshot.works).length ? (
@@ -801,7 +809,7 @@ export function createTopicOverview(context: TopicOverviewContext) {
         </label>
         <div className={cls("lgi-tm-tree")} aria-label={"稳定主题结构"}>
           <div className={cls("lgi-tm-section-head")}>
-            <h2>{"领域结构"}</h2>
+            <h2 className={cls("v7-sr-only")}>{"主题列表"}</h2>
             {btn("调整归属", "move-topic", "", "lgi-tm-quiet")}
           </div>
           <div
@@ -1082,18 +1090,7 @@ export function createTopicOverview(context: TopicOverviewContext) {
           {btn("主题 × 旅程", "matrix", "", "lgi-tm-quiet")}
         </div>
         {context.state.tab === "content" ? (
-          <div className={cls("lgi-tm-material-first")}>
-            {materialWorkspace()}
-            <div className={cls("lgi-tm-material-insights")}>
-              {observedPlatforms(context.topic(context.state.topicRef)?.statistics || context.requireSnapshot().statistics).length > 1 ? plotSelect() : null}
-              <OverviewDistribution
-                works={context.selectedWorks().filter((w) => w.platform === plotPlatform())}
-                platform={platformStats(context.topic(context.state.topicRef)?.statistics || context.requireSnapshot().statistics).find((p) => p.platform === plotPlatform())}
-                statistics={context.topic(context.state.topicRef)?.statistics || context.requireSnapshot().statistics}
-                scope={context.requireSnapshot().scope}
-              />
-            </div>
-          </div>
+          <div className={cls("lgi-tm-material-first")}>{materialWorkspace()}</div>
         ) : (
           <>
             {changesBar()}
@@ -1180,6 +1177,7 @@ export function createTopicOverview(context: TopicOverviewContext) {
   }
   function changesBar() {
     const changes = changeRows();
+    if (!changes.length && !context.state.changesOnly) return null;
     return (
       <>
         <div className={cls("lgi-tm-changes-bar")}>
@@ -1189,7 +1187,7 @@ export function createTopicOverview(context: TopicOverviewContext) {
                 ? `${changes.length} 个主题的结构或依据变化可查看`
                 : "当前没有尚未查看的结构或依据变化"}
             </strong>
-            <span>{" · 材料与分类变化，不直接解释为市场变化"}</span>
+            <span className={cls("v7-sr-only")}>{" · 材料与分类变化，不直接解释为市场变化"}</span>
           </div>
           <div className={cls("lgi-tm-row")}>
             {tab("全部方向", "changes-mode", "all", !context.state.changesOnly)}
