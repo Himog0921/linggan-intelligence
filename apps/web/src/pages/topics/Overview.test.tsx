@@ -59,11 +59,26 @@ describe("material-first overview preserves statistical boundaries", () => {
     expect(within(chart).queryByText(/橙色区间符合点赞/)).toBeNull();
     expect(within(chart).queryByText(/点赞未知 .*单独保留/)).toBeNull();
     expect(within(chart).queryByRole("table")).toBeNull();
-    expect(within(chart).getAllByRole("button", { name: /赞，.*篇，查看作品/ }).some((button) => button.hasAttribute("data-high"))).toBe(true);
+    // This fixture has no guaranteed high bucket: empty/high unknown must not become orange.
     await userEvent.click(within(chart).getByRole("button", { name: "表格" }));
     expect(within(chart).getByRole("table")).toBeInTheDocument();
     expect(within(chart).getByRole("row", { name: /点赞未知/ })).toBeInTheDocument();
     expect(within(chart).getByRole("button", { name: "分布图" })).toHaveAttribute("aria-pressed", "false");
+  });
+  it("uses the actual saved performance threshold to signal only wholly qualifying bins", () => {
+    const snap = topicSnapshot();
+    const platform = { ...snap.statistics.platforms[0]!, highPerformanceThreshold: 100 };
+    const qualifyingWorks = [
+      { ...topicWork(20), likes: 115 },
+      { ...topicWork(21), likes: 650 },
+      { ...topicWork(22), likes: 15 },
+    ];
+    render(<OverviewDistribution compact works={qualifyingWorks} platform={platform}
+      statistics={snap.statistics} scope={snap.scope} />);
+    const chart = screen.getByLabelText("已观察内容点赞分布");
+    expect(within(chart).getByRole("button", { name: "100–499赞，1篇，查看作品" })).toHaveAttribute("data-high", "true");
+    expect(within(chart).getByRole("button", { name: "500–999赞，1篇，查看作品" })).toHaveAttribute("data-high", "true");
+    expect(within(chart).getByRole("button", { name: "0–20赞，1篇，查看作品" })).not.toHaveAttribute("data-high");
   });
   it("keeps the loaded histogram distinct from full server scope and preserves exact drill-down references in chart and table", async () => {
     const snapshot = topicSnapshot();
