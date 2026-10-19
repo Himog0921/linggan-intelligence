@@ -42,7 +42,7 @@ describe('D3 actual four-view React boundary', () => {
   expect(within(nav).getByRole('button',{name:'用户评论'})).toHaveAttribute('aria-current','page');
   expect(document.querySelector('.v7-context-section-nav')).toContainElement(nav);
   expect(screen.queryByText('评论证据库')).not.toBeInTheDocument();
-  expect(screen.getByText('100',{selector:'.v7-context-count b'})).toBeInTheDocument();
+  await waitFor(()=>expect(document.querySelector('.v7-context-count summary b')).toHaveTextContent('100'));
   expect(within(screen.getByRole('table')).getAllByRole('columnheader').map(cell=>cell.textContent)).toEqual(['选择','原声','点赞','所属作品','研究状态','研究标签','作者','点赞采集日','观测时间','改帖']);
   expect(within(screen.getByRole('table')).getAllByRole('row')).toHaveLength(3);
   expect(screen.queryByText(/已选 0/)).not.toBeInTheDocument();
