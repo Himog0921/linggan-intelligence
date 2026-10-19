@@ -187,7 +187,8 @@ try {
   await step("material-first overview retains full statistics, local search, distribution drill-down and left navigation", async () => {
     await go();
     const navigation = page.getByRole("navigation", { name: "主题图谱视图" });
-    assert.equal(await page.locator('aside[aria-label="主题图谱导航"]').getByRole("navigation", { name: "主题图谱视图" }).count(), 1);
+    assert.equal(await navigation.count(), 1);
+    assert.equal(await page.locator('aside[aria-label="主题图谱导航"]').getByRole("navigation", { name: "主题图谱视图" }).count(), 0);
     const totals = await page.getByLabel("基础概览指标").innerText();
     const distribution = await page.getByLabel("已观察内容点赞分布").innerText();
     await page.getByRole("textbox", { name: "查找材料与方向" }).fill("no-such-material-b-overview");
@@ -200,6 +201,23 @@ try {
     await navigation.getByRole("button", { name: "主题概览", exact: true }).click();
     await action("clear-filter", "query");
     const chart = page.getByLabel("已观察内容点赞分布");
+    const titleBox = await chart.getByText("样本表现", { exact: true }).boundingBox();
+    const compactBars = await chart.locator('button[data-action="subset"]').evaluateAll((buttons) => buttons.map((button) => {
+      const count = Number(button.querySelector("b")?.textContent);
+      const { y } = button.querySelector("b").getBoundingClientRect();
+      const { height, width } = button.querySelector("b + span > span").getBoundingClientRect();
+      return { count, y, height, width };
+    }));
+    assert.ok(titleBox && compactBars.every(({ y }) => y >= titleBox.y + titleBox.height), "compact bar counts must remain below the chart heading");
+    const maxCount = Math.max(...compactBars.map(({ count }) => count));
+    const maxHeight = Math.max(...compactBars.map(({ height }) => height));
+    assert.ok(compactBars.every(({ count, height, width }) => count === 0 ? height === 0 : height > 0 && width > 0), "non-empty bins must keep visible bars");
+    assert.ok(compactBars.every(({ count, height }) => Math.abs(height * maxCount - maxHeight * count) <= 1), "compact bars must preserve the sample-count ratio");
+    const compactControlSizes = await chart.getByRole("group", { name: "材料表现视图" }).getByRole("button").evaluateAll((buttons) => buttons.map((button) => {
+      const { width, height } = button.getBoundingClientRect();
+      return { width, height };
+    }));
+    assert.ok(compactControlSizes.every(({ width, height }) => width >= 24 && height >= 24), "compact view controls must have 24px targets");
     await chart.getByRole("button", { name: "表格", exact: true }).click();
     const drill = chart.getByRole("table").getByRole("button", { name: "查看", exact: true }).filter({ visible: true });
     const enabled = await drill.evaluateAll((buttons) => buttons.findIndex((button) => !button.disabled));

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -65,6 +65,26 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe("Topic React interaction and lifetime", () => {
+  it("puts the overview/journey switch in the breadcrumb, starts navigation with topics, and keeps the evidence histogram above material", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (path: string) => jsonResponse(defaultRead(path))));
+    page();
+    await screen.findByRole("button", { name: "合成材料 0" });
+    const views = screen.getByRole("navigation", { name: "主题图谱视图" });
+    expect(views.closest("#topic-map-root")).toBeNull();
+    expect(within(views).getByRole("button", { name: "主题概览" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByText("领域结构")).not.toBeInTheDocument();
+    const band = screen.getByLabelText("主题概览与样本表现");
+    expect(within(band).getByLabelText("基础概览指标")).toBeInTheDocument();
+    expect(within(band).getByLabelText("已观察内容点赞分布")).toBeInTheDocument();
+    const region = document.querySelector("#topic-map-root");
+    expect(region?.querySelector(".lgi-tm-material-insights")).toBeNull();
+    await userEvent.click(within(views).getByRole("button", { name: "用户生命旅程" }));
+    await waitFor(() => expect(document.querySelector("#topic-map-root")).toHaveAttribute("data-view", "journey"));
+    expect(within(views).getByRole("button", { name: "用户生命旅程" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByLabelText("主题概览与样本表现")).toBeInTheDocument();
+    await userEvent.click(within(views).getByRole("button", { name: "主题概览" }));
+    await waitFor(() => expect(document.querySelector("#topic-map-root")).toHaveAttribute("data-view", "overview"));
+  });
   it("keeps complete statistics during staged material loading and edits search text", async () => {
     const full = pendingResponse();
     const summary = topicSnapshot();
@@ -477,9 +497,10 @@ describe("Topic React interaction and lifetime", () => {
     if (!selector) throw new Error("No plot platform selector");
     await userEvent.selectOptions(selector, "douyin");
     // Rebuild the chart so a merely changed native select cannot make this pass.
-    await userEvent.click(
-      screen.getByRole("button", { name: "分布图" }),
-    );
+    const plotTabs = screen.getAllByRole("button", { name: "分布图" });
+    const structurePlotTab = plotTabs[plotTabs.length - 1];
+    if (!structurePlotTab) throw new Error("No structure plot tab");
+    await userEvent.click(structurePlotTab);
     await waitFor(() => {
       for (const control of screen.getAllByLabelText("表现图平台"))
         expect(control).toHaveValue("douyin");
