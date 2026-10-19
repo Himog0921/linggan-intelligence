@@ -49,6 +49,19 @@
   white-space: nowrap;
 }
 .value small { color: var(--lgi-muted); font-size: var(--lgi-text-label); }
+:global(#topic-map-root) .valueAction {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--lgi-space-1);
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--lgi-ink);
+  cursor: pointer;
+}
+:global(#topic-map-root) .valueAction:hover strong { color: var(--lgi-signal-ink); }
+
 .delta {
   display: inline-flex;
   align-items: baseline;
