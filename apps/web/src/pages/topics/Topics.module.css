@@ -3063,6 +3063,39 @@ body.topic-map-page {
   font-size: var(--lgi-text-label);
 }
 :global(#topic-map-root) .lgi-tm-changes-bar .lgi-tm-row { margin-left: auto; }
+/* All six analysis views share the same quiet rule/divider language. */
+:global(#topic-map-root)[data-view="overview"] .lgi-tm-table-scroll th,
+:global(#topic-map-root)[data-view="overview"] .lgi-tm-table-scroll td {
+  padding-block: var(--lgi-space-3);
+}
+:global(#topic-map-root)[data-view="overview"] .lgi-tm-pattern-grid {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+:global(#topic-map-root)[data-view="overview"] .lgi-tm-pattern-grid > .lgi-tm-panel {
+  border: 0;
+  border-radius: 0;
+  border-bottom: 1px solid var(--lgi-hairline);
+  padding: var(--lgi-space-5) 0;
+  background: transparent;
+}
+:global(#topic-map-root)[data-view="overview"] .lgi-tm-candidate {
+  padding: var(--lgi-space-5) 0;
+  margin: 0;
+  border-bottom: 1px solid var(--lgi-hairline);
+  border-radius: 0;
+  background: transparent;
+}
+:global(#topic-map-root)[data-view="overview"] .lgi-tm-source-summary {
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--lgi-hairline);
+}
+:global(#topic-map-root) .lgi-tm-map-shell {
+  background: var(--lgi-canvas);
+  border-top: 1px solid var(--lgi-hairline);
+  border-bottom: 1px solid var(--lgi-hairline);
+}
 @media (max-width: 1350px) {
   :global(#topic-map-root) .lgi-tm-overview-band {
     grid-template-columns: minmax(0, 1fr);
