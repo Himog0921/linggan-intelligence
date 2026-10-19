@@ -99,6 +99,7 @@ jobs:
       - name: Locked install and browser
         run: |
           npm ci --prefix apps/web --ignore-scripts --no-audit --no-fund
+          npm ci --prefix apps/pi-adapter --ignore-scripts --no-audit --no-fund
           npx --prefix apps/web playwright install --with-deps chromium
       - name: API route regression
         run: cargo test -p linggan-api --bins --locked -- local_web::web_app_tests local_web::corpus_shell_api local_web::evidence_ local_web::content_workbench_sources_api::tests

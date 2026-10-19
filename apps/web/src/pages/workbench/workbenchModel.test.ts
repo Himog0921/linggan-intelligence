@@ -1,7 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { newDocument, parseWorkDocument, parseSaveReceipt, parseSourceList, scalarRange, WorkbenchContractError } from './workbenchModel';
+import { newDocument, parseWorkDocument, parseSaveReceipt, parseSourceList, parseAiStatus, scalarRange, WorkbenchContractError } from './workbenchModel';
 const id = '00000000-0000-4000-8000-000000000001';
 describe('closed workbench boundary', () => {
+  it('keeps queued writing without an invocation distinct from unknown and measured zero usage', () => {
+    const queued={requestId:id,workRef:id,invocationRef:null,batchRef:id,taskConfigRef:id,state:'queued',inputRevision:id,action:'draft',
+      methodVersion:'content-workbench-writing.v1',suggestion:null,sourceQualification:'readable',failureCode:null,staleBase:false,
+      usage:{state:'not_reserved',inputTokens:null,outputTokens:null,chargedTokens:null,costUsd:null,measuredTokens:null,
+        cachedInputTokens:null,cachedWriteTokens:null,reasoningTokens:null,costPicoUsd:null}};
+    expect(parseAiStatus(queued)).toMatchObject({invocationRef:null,state:'queued',usage:{state:'not_reserved',chargedTokens:null}});
+    const measured={...queued,invocationRef:id,state:'succeeded',usage:{...queued.usage,state:'measured',inputTokens:0,outputTokens:0,chargedTokens:0,measuredTokens:0,costPicoUsd:'0'}};
+    expect(parseAiStatus(measured).usage.measuredTokens).toBe(0);
+    expect(() => parseAiStatus({...queued,unexpected:true})).toThrow(WorkbenchContractError);
+  });
   it('keeps exact Chinese emoji/newline scalar offsets without normalization', () => {
     expect(scalarRange('甲😀\n乙  ', 1, 5)).toEqual({
       start: 1,

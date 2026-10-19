@@ -1,3 +1,4 @@
+import { AiBusinessStatus } from '../../settings/AiBusinessStatus';
 import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useSearchParams } from 'react-router';
@@ -366,6 +367,7 @@ export function CreatorsPage() {
             </span>
           ) : null}
         </p>
+        <AiBusinessStatus taskKey="legacy_creator_discovery" />
         <FeedbackLine feedback={notice} />
         {shown && link && domain ? (
           <CreatorTable

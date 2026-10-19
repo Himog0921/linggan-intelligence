@@ -3,10 +3,7 @@
 use super::{LocalDatabaseState, LocalWebState};
 use axum::{
     Json, Router,
-    extract::{
-        Path, Query, RawQuery, Request, State,
-        rejection::{JsonRejection, QueryRejection},
-    },
+    extract::{Path, RawQuery, Request, State, rejection::JsonRejection},
     http::{StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
@@ -14,18 +11,12 @@ use axum::{
 };
 use linggan_intelligence::{
     comment_study_catalog::{PostUsageCommand, PostUsageError, record_comment_post_usage},
-    comment_study_policy::{
-        ActivateStudyPolicyCommand, StudyPolicyContractError, StudyPolicyStoreError,
-        activate_study_policy,
-    },
+    comment_study_policy::{StudyPolicyContractError, StudyPolicyStoreError},
     comment_study_run::{
-        StudyRunControlAction, StudyRunControlCommand, StudyStartError, TrustedStudyOrigin,
-        cancel_study_run, control_study_run, preview_study_selection, recover_study_run,
-        start_study_run,
+        StudyRunControlAction, StudyRunControlCommand, StudyStartError, cancel_study_run,
+        control_study_run, preview_study_selection,
     },
-    comment_study_selection::{
-        SelectionPreviewCommand, StartStudyRunCommand, StudySelectionError, StudySelectionMode,
-    },
+    comment_study_selection::{SelectionPreviewCommand, StudySelectionError, StudySelectionMode},
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -110,39 +101,8 @@ async fn preview(
     }
 }
 
-pub(crate) async fn start(
-    State(state): State<LocalWebState>,
-    RawQuery(query): RawQuery,
-    body: Result<Json<StartStudyRunCommand>, JsonRejection>,
-) -> Response {
-    if query.is_some_and(|q| !q.is_empty()) {
-        return invalid(None);
-    }
-    let Ok(Json(command)) = body else {
-        return invalid(None);
-    };
-    let reference = (!command.request_ref.is_nil()).then_some(command.request_ref);
-    if command.mode == StudySelectionMode::ContinueReady {
-        return invalid(reference);
-    }
-    let command = match command.normalize() {
-        Ok(command) => command,
-        Err(e) => return failure(e.into(), reference),
-    };
-    let LocalDatabaseState::Ready(db) = &state.database else {
-        return database_unavailable(&state, reference);
-    };
-    match start_study_run(db, command, TrustedStudyOrigin::Manual).await {
-        Ok(receipt) => {
-            let status = if receipt.outcome == "created" && !receipt.idempotent_replay {
-                StatusCode::CREATED
-            } else {
-                StatusCode::OK
-            };
-            (status, Json(receipt)).into_response()
-        }
-        Err(e) => failure(e, reference),
-    }
+pub(crate) async fn start() -> Response {
+    crate::local_web::ai_settings::legacy_closed("comment_study")
 }
 
 async fn cancel(
@@ -180,43 +140,8 @@ async fn cancel(
     }
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct RecoverStudyRunRequest {
-    domain_ref: Uuid,
-    request_ref: Uuid,
-}
-
-async fn recover(
-    State(state): State<LocalWebState>,
-    Path(reference): Path<String>,
-    RawQuery(query): RawQuery,
-    body: Result<Json<RecoverStudyRunRequest>, JsonRejection>,
-) -> Response {
-    if query.is_some_and(|query| !query.is_empty()) {
-        return invalid(None);
-    }
-    let Ok(source_run_ref) = Uuid::parse_str(&reference) else {
-        return invalid(None);
-    };
-    let Ok(Json(command)) = body else {
-        return invalid(None);
-    };
-    let request_ref = Some(command.request_ref);
-    let LocalDatabaseState::Ready(db) = &state.database else {
-        return database_unavailable(&state, request_ref);
-    };
-    match recover_study_run(db, command.domain_ref, source_run_ref, command.request_ref).await {
-        Ok(receipt) => {
-            let status = if receipt.outcome == "created" && !receipt.idempotent_replay {
-                StatusCode::CREATED
-            } else {
-                StatusCode::OK
-            };
-            (status, Json(receipt)).into_response()
-        }
-        Err(error) => failure(error, request_ref),
-    }
+async fn recover() -> Response {
+    crate::local_web::ai_settings::legacy_closed("comment_study")
 }
 
 async fn pause(
@@ -228,13 +153,8 @@ async fn pause(
     run_control(state, reference, query, body, StudyRunControlAction::Pause).await
 }
 
-async fn resume(
-    State(state): State<LocalWebState>,
-    Path(reference): Path<String>,
-    RawQuery(query): RawQuery,
-    body: Result<Json<StudyRunControlCommand>, JsonRejection>,
-) -> Response {
-    run_control(state, reference, query, body, StudyRunControlAction::Resume).await
+async fn resume() -> Response {
+    crate::local_web::ai_settings::legacy_closed("comment_study")
 }
 
 async fn stop(
@@ -316,48 +236,12 @@ fn run_control_error(
         .into_response()
 }
 
-async fn activate(
-    State(state): State<LocalWebState>,
-    Path(reference): Path<String>,
-    query: Result<Query<ActivateQuery>, QueryRejection>,
-    body: Result<Json<ActivateStudyPolicyCommand>, JsonRejection>,
-) -> Response {
-    let Ok(Query(query)) = query else {
-        return invalid(None);
-    };
-    let Ok(reference) = Uuid::parse_str(&reference) else {
-        return invalid(None);
-    };
-    let Ok(Json(command)) = body else {
-        return invalid(None);
-    };
-    if reference.is_nil() || command.validate().is_err() {
-        return invalid(None);
-    }
-    let LocalDatabaseState::Ready(db) = &state.database else {
-        return database_unavailable(&state, None);
-    };
-    // Domain scope is explicit in the route; never infer it from an arbitrary policy UUID.
-    match activate_study_policy(db, query.domain, reference, command).await {
-        Ok(value) => Json(value).into_response(),
-        Err(e) => failure(e.into(), None),
-    }
+async fn activate() -> Response {
+    crate::local_web::ai_settings::legacy_closed("comment_study")
 }
 
 pub(crate) async fn retired() -> Response {
-    error(
-        StatusCode::GONE,
-        "policy_endpoint_retired",
-        "旧策略写入已退役，请保存方法版本。",
-        false,
-        None,
-    )
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ActivateQuery {
-    domain: Uuid,
+    crate::local_web::ai_settings::legacy_closed("comment_study")
 }
 
 #[derive(Deserialize)]

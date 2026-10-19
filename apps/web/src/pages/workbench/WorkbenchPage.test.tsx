@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../shared/api';
 import { WorkbenchPage } from './WorkbenchPage';
 import * as api from './workbenchApi';
-import { newDocument, type SaveReceipt, type WorkEnvelope } from './workbenchModel';
+import { newDocument, type AiStatus, type SaveReceipt, type WorkEnvelope } from './workbenchModel';
 vi.mock('./workbenchApi');
 vi.mock('./ImagePages', () => ({
   ImagePages: () => <div>图页组件</div>
@@ -433,7 +433,7 @@ it('retains the original AI input and action while an execution result is unknow
     connectionVersionRef: domain,
     sourceCount: 0,
     inputCharacterCount: 20,
-    estimatedInputTokensUpperBound: 20,
+    estimatedInputTokens: 20,
     reservedTokens: 200,
     maxCalls: 1,
     outboundInput: {
@@ -578,7 +578,7 @@ it('shows AI failure guidance while retaining the technical reason only in optio
     connectionVersionRef: domain,
     sourceCount: 0,
     inputCharacterCount: 20,
-    estimatedInputTokensUpperBound: 20,
+    estimatedInputTokens: 20,
     reservedTokens: 200,
     maxCalls: 1,
     outboundInput: {},
@@ -597,9 +597,10 @@ it('shows AI failure guidance while retaining the technical reason only in optio
     failureCode: 'writing_output_invalid',
     staleBase: false,
     usage: {
+      state: 'unknown_reserved',
       inputTokens: null,
       outputTokens: null,
-      chargedTokens: 0,
+      chargedTokens: 200,
       costUsd: null
     }
   }));
@@ -624,10 +625,33 @@ it('shows AI failure guidance while retaining the technical reason only in optio
   expect(screen.getByText(/"failureCode": "writing_output_invalid"/)).not.toBeVisible();
 });
 
+it('shows an unreserved queued request and lets the user cancel it without showing zero consumption', async () => {
+  const actual=await vi.importActual<typeof import('./workbenchApi')>('./workbenchApi');
+  vi.mocked(api.aiStateText).mockImplementation(actual.aiStateText);
+  vi.mocked(api.readiness).mockResolvedValue({configured:true,transportCallable:true,writingQualified:true,configRef:domain,methodVersion:'content-workbench-writing.v1'});
+  vi.mocked(api.preview).mockResolvedValue({previewRef:paragraph,inputRevision:revision,inputHash:'hash',action:'draft',methodVersion:'content-workbench-writing.v1',
+    configRef:domain,modelRef:domain,connectionVersionRef:domain,sourceCount:0,inputCharacterCount:20,estimatedInputTokens:20,reservedTokens:200,maxCalls:1,outboundInput:{},confirmationRequired:true});
+  const queued:AiStatus={requestId:paragraph,workRef:work,invocationRef:null,state:'queued',inputRevision:revision,action:'draft',methodVersion:'content-workbench-writing.v1',
+    suggestion:null,sourceQualification:'readable',failureCode:null,staleBase:false,usage:{state:'not_reserved',inputTokens:null,outputTokens:null,chargedTokens:null,costUsd:null}};
+  vi.mocked(api.execute).mockResolvedValue(queued);
+  vi.mocked(api.cancel).mockResolvedValue({...queued,state:'cancelled'});
+  show();await screen.findByLabelText('正文第 1 段');
+  fireEvent.click(screen.getByRole('button',{name:'按材料起草'}));
+  const prepare=await screen.findByRole('button',{name:'准备并核对输入'});await waitFor(()=>expect(prepare).toBeEnabled());fireEvent.click(prepare);
+  fireEvent.click(await screen.findByRole('checkbox',{name:'确认这次输入和额度，执行一次'}));
+  fireEvent.click(screen.getByRole('button',{name:'执行一次'}));
+  expect(await screen.findByText('等待处理')).toBeVisible();fireEvent.click(screen.getByText('调用记录'));
+  expect(screen.getByText('尚未派发，未建立调用账。')).toBeVisible();
+  expect(screen.queryByText(/输入 0 \/ 输出 0/)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'取消这次生成'}));
+  expect(await screen.findByText('已取消')).toBeVisible();expect(api.cancel).toHaveBeenCalledExactlyOnceWith(paragraph);
+  expect(api.execute).toHaveBeenCalledTimes(1);
+});
+
 it('retains right hand author edits when a lost AI adoption response is reconciled by the original receipt', async () => {
   vi.mocked(api.readiness).mockResolvedValue({configured:true,transportCallable:true,writingQualified:true,configRef:domain,methodVersion:'writing.v1'});
-  vi.mocked(api.preview).mockResolvedValue({previewRef:paragraph,inputRevision:revision,inputHash:'hash',action:'draft',methodVersion:'writing.v1',configRef:domain,modelRef:domain,connectionVersionRef:domain,sourceCount:0,inputCharacterCount:20,estimatedInputTokensUpperBound:20,reservedTokens:200,maxCalls:1,outboundInput:{},confirmationRequired:true});
-  vi.mocked(api.execute).mockImplementation(async request=>({requestId:request.requestId,workRef:work,invocationRef:paragraph,state:'completed',inputRevision:revision,action:'draft',methodVersion:'writing.v1',suggestion:{title:null,paragraphs:[{paragraphId:paragraph,text:'模型建议保留来源'}],pages:[]},sourceQualification:'readable',failureCode:null,staleBase:false,usage:{inputTokens:20,outputTokens:20,chargedTokens:40,costUsd:null}}));
+  vi.mocked(api.preview).mockResolvedValue({previewRef:paragraph,inputRevision:revision,inputHash:'hash',action:'draft',methodVersion:'writing.v1',configRef:domain,modelRef:domain,connectionVersionRef:domain,sourceCount:0,inputCharacterCount:20,estimatedInputTokens:20,reservedTokens:200,maxCalls:1,outboundInput:{},confirmationRequired:true});
+  vi.mocked(api.execute).mockImplementation(async request=>({requestId:request.requestId,workRef:work,invocationRef:paragraph,state:'completed',inputRevision:revision,action:'draft',methodVersion:'writing.v1',suggestion:{title:null,paragraphs:[{paragraphId:paragraph,text:'模型建议保留来源'}],pages:[]},sourceQualification:'readable',failureCode:null,staleBase:false,usage:{state:'measured',inputTokens:20,outputTokens:20,chargedTokens:40,costUsd:null}}));
   vi.mocked(api.adopt).mockRejectedValueOnce(new ApiError({kind:'network'}));
   vi.mocked(api.lookupWorkRequest).mockImplementation(async requestId=>({requestId,workId:work,outcome:'accepted',replayed:true,revision:{...envelope().revision,id:crypto.randomUUID(),number:2,document:{...envelope().revision.document,paragraphs:[{id:paragraph,text:'模型建议保留来源'}]}}}));
   show();await screen.findByLabelText('正文第 1 段');fireEvent.click(screen.getByRole('button',{name:'按材料起草'}));
@@ -668,8 +692,8 @@ it('creates an inner page in the placement dialog and flushes its stable identit
 it('retains both AI edits after partial adoption and keeps the unadopted draft available after returning and reopening',async()=>{
  const initial=envelope(),second=crypto.randomUUID();initial.revision.document.paragraphs=[{id:paragraph,text:'原一'},{id:second,text:'原二'}];vi.mocked(api.readWork).mockResolvedValue(initial);
  vi.mocked(api.readiness).mockResolvedValue({configured:true,transportCallable:true,writingQualified:true,configRef:domain,methodVersion:'writing.v1'});
- vi.mocked(api.preview).mockResolvedValue({previewRef:paragraph,inputRevision:revision,inputHash:'hash',action:'draft',methodVersion:'writing.v1',configRef:domain,modelRef:domain,connectionVersionRef:domain,sourceCount:0,inputCharacterCount:20,estimatedInputTokensUpperBound:20,reservedTokens:200,maxCalls:1,outboundInput:{},confirmationRequired:true});
- vi.mocked(api.execute).mockImplementation(async request=>({requestId:request.requestId,workRef:work,invocationRef:paragraph,state:'completed',inputRevision:revision,action:'draft',methodVersion:'writing.v1',suggestion:{title:null,paragraphs:[{paragraphId:paragraph,text:'建议一'},{paragraphId:second,text:'建议二'}],pages:[]},sourceQualification:'readable',failureCode:null,staleBase:false,usage:{inputTokens:20,outputTokens:20,chargedTokens:40,costUsd:null}}));
+ vi.mocked(api.preview).mockResolvedValue({previewRef:paragraph,inputRevision:revision,inputHash:'hash',action:'draft',methodVersion:'writing.v1',configRef:domain,modelRef:domain,connectionVersionRef:domain,sourceCount:0,inputCharacterCount:20,estimatedInputTokens:20,reservedTokens:200,maxCalls:1,outboundInput:{},confirmationRequired:true});
+ vi.mocked(api.execute).mockImplementation(async request=>({requestId:request.requestId,workRef:work,invocationRef:paragraph,state:'completed',inputRevision:revision,action:'draft',methodVersion:'writing.v1',suggestion:{title:null,paragraphs:[{paragraphId:paragraph,text:'建议一'},{paragraphId:second,text:'建议二'}],pages:[]},sourceQualification:'readable',failureCode:null,staleBase:false,usage:{state:'measured',inputTokens:20,outputTokens:20,chargedTokens:40,costUsd:null}}));
  vi.mocked(api.adopt).mockImplementation(async(_id,request)=>({requestId:request.requestId,workId:work,outcome:'accepted',replayed:false,revision:{...initial.revision,id:crypto.randomUUID(),number:2,document:{...initial.revision.document,paragraphs:[{id:paragraph,text:'建议一'},{id:second,text:'原二'}]}}}));
  show();await screen.findByLabelText('正文第 1 段');fireEvent.click(screen.getByRole('button',{name:'按材料起草'}));const prepare=await screen.findByRole('button',{name:'准备并核对输入'});await waitFor(()=>expect(prepare).toBeEnabled());fireEvent.click(prepare);fireEvent.click(await screen.findByRole('checkbox',{name:'确认这次输入和额度，执行一次'}));fireEvent.click(screen.getByRole('button',{name:'执行一次'}));
  fireEvent.change(await screen.findByLabelText('编辑改稿 第 1 段'),{target:{value:'作者采用第一段'}});fireEvent.change(screen.getByLabelText('编辑改稿 第 2 段'),{target:{value:'作者未采用第二段😀'}});fireEvent.click(screen.getAllByRole('button',{name:'采用这一段'})[0]!);

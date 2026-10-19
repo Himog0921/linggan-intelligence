@@ -1,3 +1,5 @@
+//! Nine live model/embedding/scheduler scenarios retired in PR-1B; original Git retains them.
+//! Current executor cutoff is proved by ai_foundation_postgres/retirement; historical core cases remain.
 #[path = "../../evidence/tests/support/material_fixture.rs"]
 mod fixture;
 #[path = "support/comment_research_fixture.rs"]
@@ -32,13 +34,7 @@ use linggan_intelligence::{
     comment_study_comparison_cache::{
         record_resolution_comparisons, serve_pending_resolutions_from_cache,
     },
-    comment_study_embedding::{
-        EmbeddingOutcome, ProbeOutcome, active_profile, embed_pending_signals,
-        probe_and_register_embedding_profile,
-    },
     comment_study_model_dispatch::reserve_study_batch_model_call,
-    comment_study_model_runner::{StudyModelRunnerError, call_study_batch_model},
-    comment_study_pair_worker::run_one_problem_pair,
     comment_study_problem_store::{
         PairSelection, PreparedProblemPair, ProblemStoreError, accept_problem_pair,
         accept_problem_resolution, prepare_problem_pair, prepare_problem_resolution,
@@ -51,13 +47,7 @@ use linggan_intelligence::{
     comment_study_recall::{
         RecallCompleteness, problem_representatives, recall_candidates, recall_pair_candidates,
     },
-    comment_study_resolution_worker::run_one_problem_resolution,
     comment_study_run::{PrepareStudyRunRequest, prepare_study_run},
-    model_runner::prepare_next_batch_across_runs,
-    model_runner::run_model_work_once,
-    model_secrets::{ModelSecretStore, SyntheticModelSecrets},
-    model_settings::ModelError,
-    pi_adapter::PiAdapter,
 };
 use research_fixture::{comment_with_author, detail_with_author, reply_with_author};
 use sqlx::Row;
@@ -85,22 +75,6 @@ fn domain_read_query(run_ref: Option<Uuid>) -> CommentStudyReadQuery {
         domain: Some(PROOF_DOMAIN_REF),
         run_ref,
         ..Default::default()
-    }
-}
-
-struct UnavailableModelSecrets;
-
-impl ModelSecretStore for UnavailableModelSecrets {
-    fn put(&self, _: Uuid, _: Uuid, _: &str) -> Result<(), ModelError> {
-        Err(ModelError::SecretUnavailable)
-    }
-
-    fn get(&self, _: Uuid, _: Uuid) -> Result<String, ModelError> {
-        Err(ModelError::SecretUnavailable)
-    }
-
-    fn delete(&self, _: Uuid, _: Uuid) -> Result<(), ModelError> {
-        Err(ModelError::SecretUnavailable)
     }
 }
 
@@ -439,8 +413,8 @@ async fn source_gate_excludes_withdrawn_ocr_but_keeps_the_comment_target() {
                 bbox_norm: [0.0, 0.0, 1.0, 1.0],
             }],
             layering: OcrLayeringInput {
-            layer_version: "rules-v1".into(),
-            substantive_ordinals: vec![],
+                layer_version: "rules-v1".into(),
+                substantive_ordinals: vec![],
                 state: "ACCEPTED".to_owned(),
                 cover_headline: None,
                 image_substantive_text: Some("图片中的作业计划".to_owned()),
@@ -670,8 +644,8 @@ async fn complete_study_context_ocr(
                 bbox_norm: [0.0, 0.0, 1.0, 1.0],
             }],
             layering: OcrLayeringInput {
-            layer_version: "rules-v1".into(),
-            substantive_ordinals: vec![],
+                layer_version: "rules-v1".into(),
+                substantive_ordinals: vec![],
                 state: layering_state.to_owned(),
                 cover_headline: None,
                 image_substantive_text: Some(image_substantive_text.to_owned()),
@@ -771,8 +745,8 @@ async fn a_reobserved_media_slot_contributes_one_context_fragment_per_derived_te
                 bbox_norm: [0.0, 0.0, 1.0, 1.0],
             }],
             layering: OcrLayeringInput {
-            layer_version: "rules-v1".into(),
-            substantive_ordinals: vec![],
+                layer_version: "rules-v1".into(),
+                substantive_ordinals: vec![],
                 state: "ACCEPTED".to_owned(),
                 cover_headline: None,
                 image_substantive_text: Some("图片中的作业计划".to_owned()),
@@ -2183,130 +2157,6 @@ async fn next_run_needing_batch_finds_a_freshly_created_runs_queued_targets_and_
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof"]
-async fn a_run_whose_target_never_fits_its_model_budget_does_not_starve_a_later_run() {
-    // A single comment can be longer than its own run's configured model input budget.
-    // fit_targets_to_model_budget then keeps every candidate out of the batch, so
-    // prepare_study_batch reports NoQueuedTargets even though a queued target still exists.
-    // next_run_needing_batch always picks the *oldest* run with a queued target, so without the
-    // exclusion list this older, permanently-unbatchable run would be picked again on every single
-    // tick forever, and a perfectly fine run created after it would never get a turn. This proves
-    // prepare_next_batch_across_runs — the actual function the worker calls every tick — walks
-    // past the stuck run within one call and lets the later run through.
-    let database = proof_database("comment_study_batch_dispatch_starvation").await;
-    sqlx::raw_sql(STUDY_SCHEMA_SQL)
-        .execute(database.pool())
-        .await
-        .unwrap();
-    detail_with_author(
-        &database,
-        "study-dispatch-stuck-note",
-        "ADHD 笔记（评论超长）",
-        Some("creator-1"),
-    )
-    .await;
-    detail_with_author(
-        &database,
-        "study-dispatch-fine-note",
-        "ADHD 笔记（正常）",
-        Some("creator-2"),
-    )
-    .await;
-    let oversized_text = "孩子每天写作业都要催不催就不开始".repeat(400);
-    let stuck_source = comment_with_author(
-        &database,
-        "study-dispatch-stuck-note",
-        "study-dispatch-stuck-comment",
-        &oversized_text,
-        Some("reader-1"),
-        "2026-09-16T08:00:00Z",
-    )
-    .await;
-    let fine_source = comment_with_author(
-        &database,
-        "study-dispatch-fine-note",
-        "study-dispatch-fine-comment",
-        "孩子写作业总是拖拉。",
-        Some("reader-2"),
-        "2026-09-16T08:01:00Z",
-    )
-    .await;
-    let stuck_work: Uuid = sqlx::query_scalar(
-        "SELECT content_public_ref FROM linggan_material_comment WHERE material_ref=$1",
-    )
-    .bind(stuck_source)
-    .fetch_one(database.pool())
-    .await
-    .unwrap();
-    let fine_work: Uuid = sqlx::query_scalar(
-        "SELECT content_public_ref FROM linggan_material_comment WHERE material_ref=$1",
-    )
-    .bind(fine_source)
-    .fetch_one(database.pool())
-    .await
-    .unwrap();
-
-    let policy_ref = seed_study_policy(&database).await;
-    // The lowest limit the schema allows (linggan_model_config_input_token_limit_check requires
-    // 1024..=32768): the oversized single comment's own manifest cannot fit even at this floor,
-    // while the ordinary-length comment in the second run fits comfortably. linggan_model_config
-    // rows are immutable (see linggan_model_config_immutable), so the limit must be set at insert
-    // time.
-    seed_study_model_config_with_input_limit(&database, policy_ref, 1024).await;
-
-    let stuck_run = prepare_study_run(
-        &database,
-        PrepareStudyRunRequest {
-            domain_ref: PROOF_DOMAIN_REF,
-            content_public_refs: vec![stuck_work],
-        },
-    )
-    .await
-    .unwrap();
-    // created_at has second precision here; make sure the stuck run really is the older one.
-    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
-    let fine_run = prepare_study_run(
-        &database,
-        PrepareStudyRunRequest {
-            domain_ref: PROOF_DOMAIN_REF,
-            content_public_refs: vec![fine_work],
-        },
-    )
-    .await
-    .unwrap();
-    assert_eq!(stuck_run.target_count, 1);
-    assert_eq!(fine_run.target_count, 1);
-
-    assert!(
-        prepare_next_batch_across_runs(&database).await.unwrap(),
-        "the fine run's target must still get packaged in this same tick"
-    );
-
-    assert_eq!(
-        sqlx::query_scalar::<_, String>(
-            "SELECT state FROM linggan_comment_study_target WHERE run_ref=$1"
-        )
-        .bind(fine_run.run_ref)
-        .fetch_one(database.pool())
-        .await
-        .unwrap(),
-        "running",
-        "the later, batchable run must not be starved by the earlier stuck one"
-    );
-    assert_eq!(
-        sqlx::query_scalar::<_, String>(
-            "SELECT state FROM linggan_comment_study_target WHERE run_ref=$1"
-        )
-        .bind(stuck_run.run_ref)
-        .fetch_one(database.pool())
-        .await
-        .unwrap(),
-        "queued",
-        "the stuck run's target is honestly left queued, not silently dropped or faked as failed"
-    );
-}
-
-#[tokio::test]
-#[ignore = "isolated PostgreSQL proof"]
 async fn batch_freezes_only_one_work_context_and_marks_only_its_targets_running() {
     let database = proof_database("comment_study_same_work_batch").await;
     sqlx::raw_sql(STUDY_SCHEMA_SQL)
@@ -2874,280 +2724,6 @@ async fn batch_admission_keeps_valid_target_when_a_sibling_is_missing() {
     assert_eq!(
         run_state(&database, run.run_ref).await,
         ("running".to_owned(), false)
-    );
-}
-
-/// Drives one real batch through `call_study_batch_model` against a checked-in local process, so
-/// the mapping from an actual provider response shape to a settled attempt is proven rather than
-/// argued. `PiAdapter::configured_with_test_command` exists for exactly this and keeps the test on
-/// the production adapter boundary.
-async fn dispatch_one_batch_through_the_test_adapter(
-    database: &linggan_storage_postgres::Database,
-    note: &str,
-    comment_id: &str,
-    body: &str,
-) -> (Uuid, Uuid, StudyModelRunnerError) {
-    detail_with_author(database, note, "ADHD 笔记", Some("creator-1")).await;
-    let source_ref = comment_with_author(
-        database,
-        note,
-        comment_id,
-        body,
-        Some("reader-1"),
-        "2026-09-16T08:00:00Z",
-    )
-    .await;
-    let work_ref: Uuid = sqlx::query_scalar(
-        "SELECT content_public_ref FROM linggan_material_comment WHERE material_ref=$1",
-    )
-    .bind(source_ref)
-    .fetch_one(database.pool())
-    .await
-    .unwrap();
-    let policy_ref = seed_study_policy(database).await;
-    seed_study_model_config(database, policy_ref).await;
-    let run = prepare_study_run(
-        database,
-        PrepareStudyRunRequest {
-            domain_ref: PROOF_DOMAIN_REF,
-            content_public_refs: vec![work_ref],
-        },
-    )
-    .await
-    .unwrap();
-    let has_dispatch_state: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM information_schema.columns \
-         WHERE table_schema=current_schema() AND table_name='linggan_comment_study_run' \
-           AND column_name='dispatch_state')",
-    )
-    .fetch_one(database.pool())
-    .await
-    .unwrap();
-    if has_dispatch_state {
-        sqlx::query(
-            "UPDATE linggan_comment_study_run SET dispatch_state='enabled',dispatch_reason=NULL \
-             WHERE run_ref=$1",
-        )
-        .bind(run.run_ref)
-        .execute(database.pool())
-        .await
-        .unwrap();
-    }
-    let batch = prepare_study_batch(
-        database,
-        PrepareStudyBatchRequest {
-            run_ref: run.run_ref,
-            maximum_targets: 1,
-        },
-    )
-    .await
-    .unwrap();
-    let claim = claim_next_study_batch(database, Uuid::new_v4(), DEFAULT_BATCH_LEASE_SECONDS)
-        .await
-        .unwrap()
-        .expect("the prepared batch is claimable");
-    let adapter = PiAdapter::configured_with_test_command(
-        std::path::PathBuf::from("/bin/sh"),
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/support/comment_study_settlement_adapter.sh"),
-    );
-    let error = call_study_batch_model(
-        database,
-        &SyntheticModelSecrets,
-        &adapter,
-        batch.batch_ref,
-        claim.lease_token,
-    )
-    .await
-    .expect_err("the synthetic child never returns a contract response");
-    (batch.batch_ref, batch.target_refs[0], error)
-}
-
-#[tokio::test]
-#[ignore = "isolated PostgreSQL proof"]
-async fn a_transport_failure_from_the_provider_settles_the_batch_it_dispatched() {
-    let database = proof_database("comment_study_dispatch_transport").await;
-    sqlx::raw_sql(STUDY_SCHEMA_SQL)
-        .execute(database.pool())
-        .await
-        .unwrap();
-    apply_productization_schema(&database).await;
-    let (batch_ref, target_ref, error) = dispatch_one_batch_through_the_test_adapter(
-        &database,
-        "study-transport-note",
-        "study-transport-comment",
-        "孩子每天写作业都要催，不催就不开始。SETTLEMENT_TRANSPORT_LIMIT",
-    )
-    .await;
-    assert!(matches!(error, StudyModelRunnerError::ProviderFailure));
-    // The provider's own code has to survive into the attempt, or a run of transport limits reads
-    // the same as a run of crashes.
-    assert_eq!(
-        sqlx::query_as::<_, (i32, String, Option<String>, Option<String>, Option<String>)>(
-            "SELECT attempt_ordinal,state,rejection_code,output_manifest->>'stage', \
-                    output_manifest->>'providerFailureCode' \
-             FROM linggan_comment_study_semantic_attempt WHERE target_ref=$1",
-        )
-        .bind(target_ref)
-        .fetch_all(database.pool())
-        .await
-        .unwrap(),
-        vec![(
-            1,
-            "rejected".to_owned(),
-            Some("provider_failure".to_owned()),
-            Some("provider_dispatch".to_owned()),
-            Some("response_too_large".to_owned())
-        )]
-    );
-    assert_eq!(
-        sqlx::query_scalar::<_, String>(
-            "SELECT state FROM linggan_comment_study_target WHERE target_ref=$1",
-        )
-        .bind(target_ref)
-        .fetch_one(database.pool())
-        .await
-        .unwrap(),
-        "failed"
-    );
-    let terminal_reason: String = sqlx::query_scalar(
-        "SELECT terminal_reason FROM linggan_comment_study_target WHERE target_ref=$1",
-    )
-    .bind(target_ref)
-    .fetch_one(database.pool())
-    .await
-    .unwrap();
-    assert_eq!(terminal_reason, "provider_failed");
-    assert_eq!(
-        sqlx::query_scalar::<_, String>(
-            "SELECT state FROM linggan_comment_study_batch WHERE batch_ref=$1",
-        )
-        .bind(batch_ref)
-        .fetch_one(database.pool())
-        .await
-        .unwrap(),
-        "failed"
-    );
-    assert_eq!(
-        sqlx::query_as::<_, (String, Option<String>)>(
-            "SELECT state,failure_code FROM linggan_model_invocation \
-             WHERE invocation_ref=(SELECT model_invocation_ref FROM linggan_comment_study_batch \
-                                   WHERE batch_ref=$1)",
-        )
-        .bind(batch_ref)
-        .fetch_one(database.pool())
-        .await
-        .unwrap(),
-        ("failed".to_owned(), Some("response_too_large".to_owned()))
-    );
-}
-
-#[tokio::test]
-#[ignore = "isolated PostgreSQL proof"]
-async fn missing_model_secret_fails_once_without_requeueing_the_same_target() {
-    let database = proof_database("comment_study_secret_missing").await;
-    sqlx::raw_sql(STUDY_SCHEMA_SQL)
-        .execute(database.pool())
-        .await
-        .unwrap();
-    apply_productization_schema(&database).await;
-    let (_batch_ref, target_ref, error) = dispatch_one_batch_through_the_test_adapter(
-        &database,
-        "study-secret-missing-note",
-        "study-secret-missing-comment",
-        "孩子每天写作业都要催。SETTLEMENT_SECRET_MISSING",
-    )
-    .await;
-    assert!(matches!(error, StudyModelRunnerError::ProviderFailure));
-    assert_eq!(
-        sqlx::query_as::<_, (String, i32, Option<String>)>(
-            "SELECT target.state,attempt.attempt_ordinal,attempt.output_manifest->>'providerFailureCode' \
-             FROM linggan_comment_study_target target \
-             JOIN linggan_comment_study_semantic_attempt attempt USING(target_ref) \
-             WHERE target.target_ref=$1",
-        )
-        .bind(target_ref)
-        .fetch_one(database.pool())
-        .await
-        .unwrap(),
-        ("failed".to_owned(), 1, Some("model_secret_unavailable".to_owned()))
-    );
-    assert_eq!(
-        claim_next_study_batch(&database, Uuid::new_v4(), DEFAULT_BATCH_LEASE_SECONDS)
-            .await
-            .unwrap()
-            .map(|claim| claim.batch_ref),
-        None
-    );
-}
-
-#[tokio::test]
-#[ignore = "isolated PostgreSQL proof"]
-async fn an_unparsable_response_banks_its_usage_before_it_settles() {
-    let database = proof_database("comment_study_dispatch_unparsable").await;
-    sqlx::raw_sql(STUDY_SCHEMA_SQL)
-        .execute(database.pool())
-        .await
-        .unwrap();
-    let (batch_ref, target_ref, error) = dispatch_one_batch_through_the_test_adapter(
-        &database,
-        "study-unparsable-note",
-        "study-unparsable-comment",
-        "孩子每天写作业都要催，不催就不开始。SETTLEMENT_UNPARSEABLE",
-    )
-    .await;
-    assert!(matches!(error, StudyModelRunnerError::OutputNotJson));
-    // The call was billed even though its text was useless, so the tokens must be on the ledger
-    // and the invocation must not be left `running`.
-    //
-    // `callStarted` is the discriminating assertion: only `checkpoint_invocation_usage` writes that
-    // key, and it has to run *before* the text is judged. Asserting the token counts alone proves
-    // nothing about that order, because the failure finisher records usage from the same response
-    // on its own — a mutation restoring the old order keeps the counts green and only loses this
-    // key. Without the checkpoint, a crash between the provider returning and the finisher running
-    // loses the usage entirely.
-    assert_eq!(
-        sqlx::query_as::<
-            _,
-            (
-                Option<i64>,
-                Option<i64>,
-                String,
-                Option<String>,
-                Option<String>
-            ),
-        >(
-            "SELECT input_tokens,output_tokens,state,failure_code,result->>'callStarted' \
-             FROM linggan_model_invocation \
-             WHERE invocation_ref=(SELECT model_invocation_ref FROM linggan_comment_study_batch \
-                                   WHERE batch_ref=$1)",
-        )
-        .bind(batch_ref)
-        .fetch_one(database.pool())
-        .await
-        .unwrap(),
-        (
-            Some(111),
-            Some(222),
-            "failed".to_owned(),
-            Some("model_invalid_output".to_owned()),
-            Some("true".to_owned())
-        )
-    );
-    assert_eq!(
-        sqlx::query_as::<_, (String, Option<String>, Option<String>)>(
-            "SELECT state,rejection_code,output_manifest->>'providerFailureCode' \
-             FROM linggan_comment_study_semantic_attempt WHERE target_ref=$1",
-        )
-        .bind(target_ref)
-        .fetch_all(database.pool())
-        .await
-        .unwrap(),
-        vec![(
-            "rejected".to_owned(),
-            Some("provider_failure".to_owned()),
-            Some("model_invalid_output".to_owned())
-        )]
     );
 }
 
@@ -6034,101 +5610,6 @@ async fn a_problem_reached_through_both_its_core_and_a_member_appears_once() {
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof"]
-async fn provider_workers_read_problem_revisions_and_release_pre_dispatch_claims() {
-    let database = proof_database("comment_study_provider_worker_claims").await;
-    sqlx::raw_sql(STUDY_SCHEMA_SQL)
-        .execute(database.pool())
-        .await
-        .unwrap();
-    let (first, second) = two_eligible_signals(&database, "study-provider-worker-note").await;
-    let problem = seed_existing_problem(
-        &database,
-        "需要外部催促才能开始家庭作业",
-        "1111111111111111111111111111111111111111111111111111111111111111",
-        &[first, second],
-    )
-    .await;
-    let resolution = prepare_problem_resolution(&database, first, vec![problem])
-        .await
-        .unwrap();
-    let adapter = PiAdapter::configured();
-    assert!(
-        !run_one_problem_resolution(&database, &UnavailableModelSecrets, &adapter)
-            .await
-            .expect("legacy v1 Run is stopped and does not claim model work")
-    );
-    assert_eq!(
-        sqlx::query_scalar::<_, Option<Uuid>>(
-            "SELECT model_invocation_ref FROM linggan_comment_study_resolution WHERE resolution_ref=$1",
-        )
-        .bind(resolution.resolution_ref)
-        .fetch_one(database.pool())
-        .await
-        .unwrap(),
-        None,
-        "a legacy Run remains unclaimed and its resolution stays untouched"
-    );
-    assert_eq!(
-        sqlx::query_scalar::<_, i64>(
-            "SELECT count(*) FROM linggan_model_invocation \
-             WHERE state='failed' AND result->>'failureCode'='model_secret_unavailable'",
-        )
-        .fetch_one(database.pool())
-        .await
-        .unwrap(),
-        0,
-        "no invocation is created for a legacy Run"
-    );
-
-    accept_problem_resolution(
-        &database,
-        resolution.resolution_ref,
-        serde_json::json!({
-            "contract":"comment-study.problem-resolution.v1",
-            "candidates":[{"problemRef":problem,"dimensions":{
-                "actor":"different","goalOrExpectedState":"different",
-                "barrierOrUnmetNeed":"different","context":"different"
-            }}]
-        }),
-    )
-    .await
-    .unwrap();
-    let novel = prepare_problem_resolution(&database, second, Vec::new())
-        .await
-        .unwrap();
-    accept_problem_resolution(
-        &database,
-        novel.resolution_ref,
-        serde_json::json!({
-            "contract":"comment-study.problem-resolution.v1",
-            "candidates":[]
-        }),
-    )
-    .await
-    .unwrap();
-    let pair = prepare_problem_pair(&database, first, second, test_pair_selection())
-        .await
-        .unwrap();
-    assert!(
-        !run_one_problem_pair(&database, &UnavailableModelSecrets, &adapter)
-            .await
-            .expect("legacy v1 Run is stopped and does not claim model work")
-    );
-    assert_eq!(
-        sqlx::query_scalar::<_, Option<Uuid>>(
-            "SELECT model_invocation_ref FROM linggan_comment_study_problem_pair WHERE pair_ref=$1",
-        )
-        .bind(pair.pair_ref)
-        .fetch_one(database.pool())
-        .await
-        .unwrap(),
-        None,
-        "a failed request build must release the Pair for a later configured worker"
-    );
-}
-
-#[tokio::test]
-#[ignore = "isolated PostgreSQL proof"]
 async fn no_existing_match_stays_deferred_until_two_independent_signals_create_one_problem() {
     let database = proof_database("comment_study_problem_pair").await;
     sqlx::raw_sql(STUDY_SCHEMA_SQL)
@@ -7097,210 +6578,4 @@ async fn one_primary_comparison_does_not_expand_after_a_valid_non_create_outcome
             .is_none(),
         "the read projection exposes only the selection facts a reviewer can interpret"
     );
-}
-
-#[tokio::test]
-#[ignore = "requires the local PostgreSQL proof database"]
-async fn a_tick_encodes_a_waiting_signal_before_it_tries_to_recall_against_it() {
-    let database = proof_database("comment_study_tick_encodes").await;
-    sqlx::raw_sql(STUDY_SCHEMA_SQL)
-        .execute(database.pool())
-        .await
-        .unwrap();
-    let (first, second) = two_eligible_signals(&database, "tick-encode-note").await;
-    seed_embedding_profile(&database).await;
-    let vectors = |database: &linggan_storage_postgres::Database| {
-        let pool = database.pool().clone();
-        async move {
-            sqlx::query_scalar::<_, i64>(
-                "SELECT count(*) FROM linggan_comment_study_embedding_cache",
-            )
-            .fetch_one(&pool)
-            .await
-            .unwrap()
-        }
-    };
-    assert_eq!(vectors(&database).await, 0, "nothing is encoded yet");
-
-    let adapter = PiAdapter::configured_with_test_embedding(
-        std::path::PathBuf::from("/bin/sh"),
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/support/comment_study_embedding_runtime.sh"),
-    );
-    assert!(
-        run_model_work_once(&database, &SyntheticModelSecrets, &adapter)
-            .await
-            .unwrap(),
-        "the tick has encoding to do"
-    );
-
-    assert!(
-        vectors(&database).await > 0,
-        "the waiting Signal was encoded through the real adapter boundary"
-    );
-    // This legacy fixture exercises the order of local maintenance only. The production tick
-    // deliberately does not create P3 Resolution/Pair stages for pre-v2 Runs.
-    for signal in [first, second] {
-        assert_eq!(
-            resolution_state_for(&database, signal).await,
-            None,
-            "the same tick returns after encoding; it does not judge an unsearchable Signal"
-        );
-    }
-}
-
-#[tokio::test]
-#[ignore = "isolated PostgreSQL proof"]
-async fn embedding_work_covers_an_active_problem_fixed_core() {
-    let database = proof_database("comment_study_encode_problem_core").await;
-    sqlx::raw_sql(STUDY_SCHEMA_SQL)
-        .execute(database.pool())
-        .await
-        .unwrap();
-    let (first, second) = two_eligible_signals(&database, "encode-problem-core-note").await;
-    let profile = seed_embedding_profile(&database).await;
-    let problem = seed_existing_problem(
-        &database,
-        "固定问题核心",
-        "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-        &[first, second],
-    )
-    .await;
-    let core_hash: String = sqlx::query_scalar(
-        "SELECT revision.canonical_hash FROM linggan_comment_study_problem problem \
-         JOIN linggan_comment_study_problem_revision revision \
-           ON revision.revision_ref=problem.current_revision_ref \
-         WHERE problem.problem_ref=$1",
-    )
-    .bind(problem)
-    .fetch_one(database.pool())
-    .await
-    .unwrap();
-    let adapter = PiAdapter::configured_with_test_embedding(
-        std::path::PathBuf::from("/bin/sh"),
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/support/comment_study_embedding_runtime.sh"),
-    );
-    assert!(matches!(
-        embed_pending_signals(&database, &adapter).await.unwrap(),
-        EmbeddingOutcome::Encoded { .. }
-    ));
-    assert!(
-        sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM linggan_comment_study_embedding_cache \
-             WHERE profile_ref=$1 AND canonical_hash=$2)",
-        )
-        .bind(profile)
-        .bind(core_hash)
-        .fetch_one(database.pool())
-        .await
-        .unwrap(),
-        "an active Problem core without an embedding would permanently make recall incomplete"
-    );
-}
-
-fn embedding_runtime(script: &str) -> PiAdapter {
-    PiAdapter::configured_with_test_embedding(
-        std::path::PathBuf::from("/bin/sh"),
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(script),
-    )
-}
-
-#[tokio::test]
-#[ignore = "requires the local PostgreSQL proof database"]
-async fn a_runtime_that_encodes_everything_onto_one_point_is_refused_qualification() {
-    let database = proof_database("comment_study_probe_collapsed").await;
-    sqlx::raw_sql(STUDY_SCHEMA_SQL)
-        .execute(database.pool())
-        .await
-        .unwrap();
-    let outcome = probe_and_register_embedding_profile(
-        &database,
-        &embedding_runtime("tests/support/comment_study_embedding_runtime_collapsed.sh"),
-    )
-    .await
-    .unwrap();
-
-    // Protocol-valid, deterministic, correctly shaped, unit norm — and worthless. Every structural
-    // check passes; only asking whether different texts land in different places catches it.
-    match outcome {
-        ProbeOutcome::Refused { failing_check, .. } => {
-            assert_eq!(failing_check, "different_texts_encoded_identically");
-        }
-        other => panic!("a collapsed runtime must not be qualified: {other:?}"),
-    }
-    assert_eq!(
-        sqlx::query_scalar::<_, i64>(
-            "SELECT count(*) FROM linggan_comment_study_embedding_profile"
-        )
-        .fetch_one(database.pool())
-        .await
-        .unwrap(),
-        0,
-        "a refused probe registers nothing: an unusable space must not become the one every \
-         Problem is compared in"
-    );
-    assert_eq!(
-        active_profile(&database).await.unwrap(),
-        None,
-        "and recall still has no catalogue to search"
-    );
-}
-
-#[tokio::test]
-#[ignore = "requires the local PostgreSQL proof database"]
-async fn a_probed_runtime_becomes_the_qualified_profile_with_its_own_evidence() {
-    let database = proof_database("comment_study_probe_qualified").await;
-    sqlx::raw_sql(STUDY_SCHEMA_SQL)
-        .execute(database.pool())
-        .await
-        .unwrap();
-    let adapter = embedding_runtime("tests/support/comment_study_embedding_runtime.sh");
-    let outcome = probe_and_register_embedding_profile(&database, &adapter)
-        .await
-        .unwrap();
-    let ProbeOutcome::Qualified {
-        profile_ref,
-        evidence,
-    } = outcome
-    else {
-        panic!("a runtime that encodes consistently and distinctly qualifies: {outcome:?}")
-    };
-    assert_eq!(active_profile(&database).await.unwrap(), Some(profile_ref));
-    // The record has to say what it ran on and what it cost, and has to name what it could not
-    // measure rather than leave the gap to be read as a zero.
-    for field in ["backend", "coldStartMs", "peakRssBytes", "repeatCosine"] {
-        assert!(
-            evidence.get(field).is_some_and(|value| !value.is_null()),
-            "the qualification evidence carries {field}: {evidence}"
-        );
-    }
-    assert_eq!(
-        evidence
-            .get("notCaptured")
-            .and_then(|value| value.as_array()),
-        Some(&vec![
-            serde_json::json!("systemMemoryPressure"),
-            serde_json::json!("swapActivity")
-        ]),
-        "what the runtime cannot measure is named, not omitted"
-    );
-
-    // Probing the same runtime again is the same profile, not a second one. A *fresh* adapter,
-    // because the handshake is read once per process: reprobing without a restart would compare
-    // a cached line with itself and could not tell a measurement in the identity from a fact.
-    // Measurements change across restarts; if they reached the identity, every probe would orphan
-    // the vectors already encoded under the profile before it.
-    let restarted = embedding_runtime("tests/support/comment_study_embedding_runtime.sh");
-    let repeated = probe_and_register_embedding_profile(&database, &restarted)
-        .await
-        .unwrap();
-    let ProbeOutcome::Qualified {
-        profile_ref: repeated_ref,
-        ..
-    } = repeated
-    else {
-        panic!("the second probe also qualifies")
-    };
-    assert_eq!(repeated_ref, profile_ref, "one runtime, one profile");
 }

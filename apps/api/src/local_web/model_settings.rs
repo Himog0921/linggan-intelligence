@@ -11,13 +11,11 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use linggan_intelligence::{
-    model_invocation::*, model_secrets::*, model_settings::*, model_settings_read::*, pi_adapter::*,
-};
+use linggan_intelligence::{model_secrets::*, model_settings::*};
 use serde_json::{Value, json};
 pub(super) fn routes() -> Router<LocalWebState> {
     Router::new()
-        .route("/api/local/model-settings", get(read))
+        .route("/api/local/model-settings", get(retired))
         .route(
             "/api/local/model-settings/connections",
             post(save_connection),
@@ -27,17 +25,19 @@ pub(super) fn routes() -> Router<LocalWebState> {
             post(connection_state),
         )
         .route("/api/local/model-settings/models", post(save_model))
-        .route("/api/local/model-settings/probes", post(probe))
-        .route("/api/local/model-settings/config", post(save_config))
+        .route("/api/local/model-settings/probes", post(retired))
+        .route("/api/local/model-settings/config", post(retired))
         .layer(middleware::from_fn(
             super::comment_study::local_comment_study_guard,
         ))
 }
-async fn read(State(state): State<LocalWebState>) -> Response {
-    let Some(db) = state.database.database() else {
-        return unavailable();
-    };
-    respond(read_model_settings(db, model_secret_store().is_synthetic()).await)
+async fn retired() -> Response {
+    (
+        StatusCode::GONE,
+        Json(json!({"error":"ai_legacy_endpoint_retired",
+        "settingsPath":"/settings/models","replacementApi":"/api/local/ai-settings"})),
+    )
+        .into_response()
 }
 async fn save_connection(State(state): State<LocalWebState>, body: Bytes) -> Response {
     let Some(db) = state.database.database() else {
@@ -62,29 +62,6 @@ async fn save_model(State(state): State<LocalWebState>, Json(r): Json<SaveModelE
         return unavailable();
     };
     respond(save_model_entry(db, &r).await)
-}
-async fn probe(State(state): State<LocalWebState>, Json(r): Json<ProbeModel>) -> Response {
-    let Some(db) = state.database.database() else {
-        return unavailable();
-    };
-    respond(
-        probe_model(
-            db,
-            model_secret_store().as_ref(),
-            &PiAdapter::configured(),
-            &r,
-        )
-        .await,
-    )
-}
-async fn save_config(
-    State(state): State<LocalWebState>,
-    Json(r): Json<SaveModelConfig>,
-) -> Response {
-    let Some(db) = state.database.database() else {
-        return unavailable();
-    };
-    respond(save_model_config(db, &r).await)
 }
 fn respond(result: Result<Value, ModelError>) -> Response {
     match result {

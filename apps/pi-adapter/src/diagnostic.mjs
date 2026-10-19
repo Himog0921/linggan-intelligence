@@ -14,6 +14,7 @@ export function createObservation() {
     diagnostic: {
       schemaVersion: 1,
       stage: 'request_not_started',
+      requestSent: false,
       httpStatus: null,
       responseStarted: null,
       terminalReceived: null,
@@ -30,6 +31,7 @@ export function createObservation() {
 
 export function requestSent(observation) {
   observation.requestSent = true;
+  observation.diagnostic.requestSent = true;
   observation.diagnostic.stage = 'request_sent';
 }
 

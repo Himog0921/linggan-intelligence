@@ -1,18 +1,16 @@
 # 当前状态与事项队列
 
 > 状态: 权威当前
-> 最后核对: 2026-10-19
+> 最后核对: 2026-10-20
 > 适用范围: 当前阶段、事项顺序、阻塞与下一步
-> 事实来源: 用户要求、2026-10-18 GitHub/main与本机运行身份核对、D3候选隔离证明及此前按日期保留的现场回执
+> 事实来源: 用户要求、2026-10-20 AI-GEN1候选源码/owned隔离证明与GitHub只读核对；其他模块及本机运行事实按各节原核对日保留
 > 冲突时以谁为准: 真实运行结果、ACCEPTED ADR 与用户最新确认
 
-## 2026-10-19 · AI-GEN1 / PR-1A（独立候选）
+## 2026-10-20 06:41 · PR-1B本地收尾完成，准备Draft/CI
 
-Mog 正式派定 PR-1A 底稿补齐、隔离证明和 Draft PR；统一主 Issue [#454](https://github.com/Himog0921/linggan-intelligence/issues/454) 已登记 Claim，并与原 [#420](https://github.com/Himog0921/linggan-intelligence/issues/420) 双向关联。基于 main `612dcbea`，专属树 `.worktrees/ai-gen1-pr1a-dossier`，不使用共享脏 checkout 或 runtime-main 实施。新增标签接纳/窄补投影、`note-material-input.v1`、真实 work 就绪判断、不可变引用快照及有界 plan/apply；旧底稿与三类消费者保持原合同。工程规格见[统一计划](plans/active/ai-gen1-001.md)、[输入合同](data-contracts/note-material-input.md)。
+G1 A实现已收齐；唯一独立审查PASS，1条P2文案已修正并回读关闭。完整Web86文件988项、contracts24/library349/Node59/API122非ignored（77 ignored不计通过）、底座/HTTP/传输/实际SDK写作48项、service6+9+7、安装20Python+7binary+8startup、历史只读6和工作台23项合同通过。评论当前有效57+57+7+2、默认Web全阶段及创作23步/真实PNG和ZIP均通过，自有资源回收核实。最终双版本UI5步再次通过：合成probe+2trial共3调用、正常写作0；来源换版/回读中隐藏正文，历史事实保留。
 
-代码/隔离证明与运行/真实材料/页面验收分别计；本包不合并部署，不动共享数据库/服务，不调用真实模型、不处理媒体积压或采集。只读 API 先交付；#420 页面 G4、真实覆盖及新显示规格尚未验证。PR-1B 在 1A 补齐实施完成后进入；PR-1C 仍等 1A/1B 上线与 G4。下方其他任务的运行数字保留其原记录日期，本轮没有刷新运行事实。
-
-PR-1A [Draft #455](https://github.com/Himog0921/linggan-intelligence/pull/455) 的代码head `93ab18c5` 已取得2项实际CI成功（web-checks、real-chain-browser-proof），4项分支限定检查SKIPPED；AI-GEN1专项与合成PG/浏览器证明实际执行。核对main仍612dcbea、无合并冲突或审查线程，工程上具备合并条件；本轮仅同步文档，代码与该已测提交一致。保持Draft、未合并部署，真实覆盖/页面G4及实际数据窗口不升级；详见[CI回执](audits/ai-gen1-pr1a-acceptance.md#ci-跟进与合并条件2026-10-19)。
+准备提交/push/依赖#455的Draft，远端CI尚未产生；审查后仅同范围测试lint/模块排序和CI失败传播修正，已核同源/反例，不重开整轮。失败日志与退役用例删除均如实保留、不计通过。原生200%缩放/完整故障长文人工复核、共享预检/备份迁移、Mac安装、真实供应商和Mog验收未证明。06:37只读#455仍38379f26/OPEN/Draft、main612dcbea/CLEAN；未修改A。PR-1C继续受原WP2/WP3上线及G4前置约束，不因B Draft自动开始。不合并部署、不动共享DB/服务、不真实模型/媒体/采集，无实施代理或新增待拍板；完整交接目标保持。详见[PR-1B实施包](plans/active/ai-gen1-pr1b-foundation.md)。
 
 ## 2026-10-19 · WEB-REACT-001 完整收尾包（当前）
 

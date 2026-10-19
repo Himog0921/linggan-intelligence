@@ -1310,7 +1310,7 @@ async fn page_projection_ignores_unrelated_provider_dispatch_but_keeps_current_s
     sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,config_ref,operation,request_hash,state,reserved_tokens,charged_tokens)SELECT $1,m.connection_version_ref,c.model_ref,c.config_ref,'probe',$3,'running',2048,0 FROM linggan_model_config c JOIN linggan_model_entry m USING(model_ref)WHERE config_ref=$2")
         .bind(invocation).bind(config).bind("0".repeat(64)).execute(db.pool()).await.unwrap();
     assert_eq!(revision, source_revision(&db).await.unwrap());
-    sqlx::query("UPDATE linggan_model_invocation SET state='failed',reserved_tokens=0,failure_code='synthetic_probe',finished_at=scope_001_now() WHERE invocation_ref=$1")
+    sqlx::query("UPDATE linggan_model_invocation SET state='failed',dispatch_state='not_dispatched',failure_code='synthetic_probe',finished_at=scope_001_now() WHERE invocation_ref=$1")
         .bind(invocation).execute(db.pool()).await.unwrap();
     assert_eq!(revision, source_revision(&db).await.unwrap());
     assert!(Arc::ptr_eq(

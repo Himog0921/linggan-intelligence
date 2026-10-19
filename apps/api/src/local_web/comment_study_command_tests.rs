@@ -1,7 +1,9 @@
-//! HTTP boundary tests run without a database; a storage fallback would produce 503, not 400.
+//! HTTP boundaries: immutable/retired execution returns 410; current reads and safe controls validate input.
 use super::*;
 use axum::body::{Body, to_bytes};
 use axum::http::{HeaderMap, Request};
+use linggan_intelligence::comment_study_policy::ActivateStudyPolicyCommand;
+use linggan_intelligence::comment_study_selection::StartStudyRunCommand;
 use linggan_intelligence::comment_study_source::ADHD_DOMAIN_REF;
 use serde_json::Value;
 use std::{collections::BTreeSet, sync::Arc};
@@ -182,7 +184,7 @@ async fn origin_guard_precedes_json_and_storage_on_every_command() {
 }
 
 #[tokio::test]
-async fn malformed_json_wrong_media_type_and_oversized_body_are_safe_400() {
+async fn retired_start_rejects_malformed_media_and_oversized_bodies_without_parsing() {
     for (media, body) in [
         ("text/plain", "{}".to_owned()),
         ("application/json", "{".to_owned()),
@@ -200,11 +202,11 @@ async fn malformed_json_wrong_media_type_and_oversized_body_are_safe_400() {
             )
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(response.status(), StatusCode::GONE);
         assert_headers(response.headers());
         let body: Value =
             serde_json::from_slice(&to_bytes(response.into_body(), 4096).await.unwrap()).unwrap();
-        assert_eq!(body["error"]["code"], "invalid_request");
+        assert_eq!(body["error"], "ai_legacy_execution_retired");
     }
 }
 
@@ -228,14 +230,14 @@ async fn closed_start_contract_rejects_legacy_and_forged_commands_before_storage
             value,
         )
         .await;
-        assert_eq!(status, StatusCode::BAD_REQUEST);
-        assert_eq!(body["error"]["code"], "invalid_request");
+        assert_eq!(status, StatusCode::GONE);
+        assert_eq!(body["error"], "ai_legacy_execution_retired");
     }
 }
 
 #[tokio::test]
-async fn domain_limits_and_query_are_not_silently_defaulted() {
-    for (field, value, code) in [
+async fn retired_start_cannot_be_reenabled_by_domain_limits_or_scheduled_query() {
+    for (field, value, _code) in [
         ("domainRef", json!(Uuid::nil()), "unsupported_domain"),
         (
             "limits",
@@ -245,16 +247,15 @@ async fn domain_limits_and_query_are_not_silently_defaulted() {
     ] {
         let mut input = command();
         input[field] = value;
-        let expected = input["requestRef"].clone();
         let (status, body) = send(
             app(LocalDatabaseState::NotConfigured),
             "/api/local/comment-study/runs",
             input,
         )
         .await;
-        assert_eq!(status, StatusCode::BAD_REQUEST);
-        assert_eq!(body["error"]["code"], code);
-        assert_eq!(body["requestRef"], expected);
+        assert_eq!(status, StatusCode::GONE);
+        assert_eq!(body["error"], "ai_legacy_execution_retired");
+        assert!(body.get("requestRef").is_none());
     }
     let (status, _) = send(
         app(LocalDatabaseState::NotConfigured),
@@ -262,11 +263,11 @@ async fn domain_limits_and_query_are_not_silently_defaulted() {
         command(),
     )
     .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(status, StatusCode::GONE);
 }
 
 #[tokio::test]
-async fn preview_has_no_request_identity_and_activation_validates_path_before_storage() {
+async fn preview_has_no_request_identity_and_activation_is_retired_before_storage() {
     let input: StartStudyRunCommand = serde_json::from_value(command()).unwrap();
     let (_, valid) = send(
         app(LocalDatabaseState::NotConfigured),
@@ -290,7 +291,7 @@ async fn preview_has_no_request_identity_and_activation_validates_path_before_st
         json!({"expectedActivePolicyRef":null}),
     )
     .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(status, StatusCode::GONE);
 }
 
 #[tokio::test]
@@ -401,7 +402,7 @@ async fn database_failure_codes_do_not_expose_sql_or_fabricate_empty_results() {
 }
 
 #[tokio::test]
-async fn live_router_uses_the_p2_command_surface_and_retires_the_old_policy_write() {
+async fn live_router_keeps_preview_but_retires_old_policy_and_start_writes() {
     let (status, body) = send(
         app(LocalDatabaseState::NotConfigured),
         "/api/local/comment-study/policy",
@@ -409,7 +410,7 @@ async fn live_router_uses_the_p2_command_surface_and_retires_the_old_policy_writ
     )
     .await;
     assert_eq!(status, StatusCode::GONE);
-    assert_eq!(body["error"]["code"], "policy_endpoint_retired");
+    assert_eq!(body["error"], "ai_legacy_execution_retired");
     let live = crate::local_web::comment_study::routes()
         .with_state(state(LocalDatabaseState::NotConfigured));
     let response = live
@@ -431,6 +432,6 @@ async fn live_router_uses_the_p2_command_surface_and_retires_the_old_policy_writ
         json!({"contentPublicRefs":[Uuid::new_v4()]}),
     )
     .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert_eq!(body["error"]["code"], "invalid_request");
+    assert_eq!(status, StatusCode::GONE);
+    assert_eq!(body["error"], "ai_legacy_execution_retired");
 }

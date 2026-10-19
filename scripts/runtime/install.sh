@@ -1,7 +1,7 @@
 #!/bin/zsh
 set -euo pipefail
 
-# 把本机三个常驻服务装好：建运行目录、写 launchd 配置、启动。
+# 更新四个服务的配置并保留禁用状态：建运行目录、写 launchd 配置、启动。
 #
 #   ./scripts/runtime/install.sh
 #
@@ -15,11 +15,21 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../.." && pwd)"
 support_dir="${LINGGAN_SUPPORT_DIR:-$HOME/Library/Application Support/Linggan Intelligence}"
 runtime_dir="${LINGGAN_RUNTIME_DIR:-$support_dir/runtime-main}"
 log_dir="$support_dir/runtime-logs"
-agents_dir="$HOME/Library/LaunchAgents"
+agents_dir="${LINGGAN_LAUNCH_AGENTS_DIR:-$HOME/Library/LaunchAgents}"
 drain_dir="$support_dir/runtime-drain"
 worker_drain_ack="$drain_dir/worker-drain-ack"
 worker_update_permit="$drain_dir/worker-update-permit"
 worker_label="com.linggan-intelligence.patrol-worker"
+ai_drain_ack="$drain_dir/ai-drain-ack"
+ai_drain_proof="$drain_dir/ai-drain-proof.json"
+disabled_snapshot="$drain_dir/disabled-before.json"
+patrol_drain_state=""
+guard_source_root="$repo_root"
+runtime_env="$repo_root/.env"
+[[ ! -f "$runtime_dir/.env" ]] || runtime_env="$runtime_dir/.env"
+source "$repo_root/scripts/runtime/drain.zsh"
+source "$repo_root/scripts/runtime/plist.zsh"
+drain_grace_seconds="$(python3 "$ai_guard" grace "$repo_root/crates/contracts/src/ai_limits.json" "$runtime_dir/crates/contracts/src/ai_limits.json")"
 allow_legacy_bootstrap=0
 prepare_migration=0
 
@@ -37,38 +47,27 @@ if (( $# == 1 )); then
   fi
 fi
 
-write_worker_update_permit() {
-  local state="$1" from_revision="$2" target_revision="$3"
-  mkdir -p "$drain_dir"
-  print -r -- "state=$state" > "$worker_update_permit"
-  print -r -- "from=$from_revision" >> "$worker_update_permit"
-  print -r -- "target=$target_revision" >> "$worker_update_permit"
+set_patrol_drain_state() {
+  patrol_drain_state="$1"
 }
 
 runtime_supports_worker_drain() {
-  [[ -f "$runtime_dir/crates/intelligence/src/model_worker_drain.rs" ]] \
-    && grep -q 'run_model_worker_with_drain' "$runtime_dir/apps/worker/src/main.rs"
+  [[ -f "$runtime_dir/apps/worker/src/shutdown.rs" ]] \
+    && grep -q 'write_drain_ack' "$runtime_dir/apps/worker/src/shutdown.rs"
 }
 
 no_running_model_invocations() {
   local running
-  set -a
-  source "$repo_root/.env"
-  set +a
-  running="$(docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" \
-    "${LINGGAN_POSTGRES_CONTAINER:-linggan-intelligence-postgres-1}" \
-    psql -X -At -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
-    -c "SELECT count(*) FROM linggan_model_invocation WHERE state='running'" 2>/dev/null)" \
-    || return 1
+  running="$(runtime_sql "SELECT count(*) FROM linggan_model_invocation WHERE state='running'")" || return 1
   [[ "$running" == "0" ]]
 }
 
 request_worker_drain() {
-  local from_revision="$1" target_revision="$2" worker_pid worker_inspection ack_pid ack_state waited=0
+  local worker_pid worker_inspection ack_pid ack_state waited=0
   if ! worker_inspection="$(launchctl print "gui/$(id -u)/$worker_label" 2>&1)"; then
     if [[ "$worker_inspection" == *"Could not find service \"$worker_label\" "* ]]; then
-      log "没有运行中的巡检 worker；记录无需 drain 的更新许可"
-      write_worker_update_permit "no_worker" "$from_revision" "$target_revision"
+      log "没有运行中的巡检worker；记录巡检状态，最终许可仍需四服务及数据库复核"
+      set_patrol_drain_state "not_running"
       return
     fi
     print -r -- "无法查询 $worker_label 的 drain 状态；未切换运行 revision" >&2
@@ -77,8 +76,8 @@ request_worker_drain() {
   fi
   worker_pid="$(print -r -- "$worker_inspection" | awk '$1 == "pid" { print $3; exit }')"
   if [[ ! "$worker_pid" =~ '^[0-9]+$' ]]; then
-    log "没有运行中的巡检 worker；记录无需 drain 的更新许可"
-    write_worker_update_permit "no_worker" "$from_revision" "$target_revision"
+    log "没有运行中的巡检worker；记录巡检状态，最终许可仍需四服务及数据库复核"
+    set_patrol_drain_state "not_running"
     return
   fi
   if ! runtime_supports_worker_drain; then
@@ -96,7 +95,7 @@ request_worker_drain() {
       print -r -- "旧 worker 停止后仍有 running model invocation；保留未知费用/恢复链，未切换 revision" >&2
       exit 1
     fi
-    write_worker_update_permit "no_inflight_bootstrap" "$from_revision" "$target_revision"
+    set_patrol_drain_state "no_inflight_bootstrap"
     log "bootstrap 已证明无 running model invocation，允许切换但不声明 drain"
     return
   fi
@@ -107,78 +106,45 @@ request_worker_drain() {
     print -r -- "无法请求 $worker_label 停止；未切换运行 revision" >&2
     exit 1
   fi
-  while (( waited < 90 )); do
+  while (( waited < drain_grace_seconds )); do
     if [[ -f "$worker_drain_ack" ]]; then
       ack_pid="$(awk -F= '$1 == "pid" { print $2; exit }' "$worker_drain_ack")"
       ack_state="$(awk -F= '$1 == "state" { print $2; exit }' "$worker_drain_ack")"
-      if [[ "$ack_pid" == "$worker_pid" && "$ack_state" == "drained" ]]; then
-        write_worker_update_permit "drained" "$from_revision" "$target_revision"
+      if [[ "$ack_pid" == "$worker_pid" && "$ack_state" == "drained" ]] && python3 "$ai_guard" process-gone "$worker_pid" 2>/dev/null; then
+        python3 "$ai_guard" check-patrol "$worker_drain_ack" "$worker_pid" || return 1
+        set_patrol_drain_state "drained"
         log "巡检 worker 已确认 drain"
         return
       fi
     fi
-    sleep 1
-    waited=$((waited + 1))
-  done
-  print -r -- "巡检 worker 未在 90 秒内确认 drain；未切换运行 revision" >&2
-  exit 1
-}
-
-stop_service_for_migration() {
-  local label="$1" inspection
-  if inspection="$(launchctl print "gui/$(id -u)/$label" 2>&1)"; then
-    log "停止 $label，准备应用数据库迁移"
-    launchctl bootout "gui/$(id -u)/$label"
-    return
-  fi
-  if [[ "$inspection" == *"Could not find service \"$label\" "* ]]; then
-    log "$label 当前未加载"
-    return
-  fi
-  print -r -- "无法查询 $label；未继续数据库迁移准备" >&2
-  print -r -- "$inspection" >&2
-  exit 1
-}
-
-finish_migration_preparation() {
-  local label inspection waited=0
-  stop_service_for_migration "$worker_label"
-  stop_service_for_migration "com.linggan-intelligence.local-runtime"
-  stop_service_for_migration "com.linggan-intelligence.media-worker"
-  while (( waited < 30 )); do
-    local busy=0
-    for label in com.linggan-intelligence.local-runtime \
-      com.linggan-intelligence.patrol-worker com.linggan-intelligence.media-worker; do
-      if inspection="$(launchctl print "gui/$(id -u)/$label" 2>&1)"; then
-        busy=1
-      elif [[ "$inspection" != *"Could not find service \"$label\" "* ]]; then
-        print -r -- "无法确认 $label 已停止；迁移准备未完成" >&2
-        print -r -- "$inspection" >&2
-        exit 1
-      fi
-    done
-    if (( ! busy )) && ! lsof -nP -iTCP:3000 -sTCP:LISTEN >/dev/null 2>&1 \
-      && ! pgrep -x linggan-api >/dev/null 2>&1 \
-      && ! pgrep -x linggan-worker >/dev/null 2>&1 \
-      && ! pgrep -x linggan-media-worker >/dev/null 2>&1; then
-      log "巡检 worker 已 drain；API、巡检 worker 和媒体 worker 均已停止。现在可以单独运行 local-runtime.sh migrate。"
-      return
+    if [[ "${ack_pid:-}" == "$worker_pid" && "${ack_state:-}" != "drained" ]]; then
+      print -r -- "巡检worker返回失败收条；未继续切换代码" >&2
+      return 1
     fi
     sleep 1
     waited=$((waited + 1))
   done
-  print -r -- "运行服务未全部停止；迁移准备未完成，请勿执行 migrate" >&2
+  print -r -- "巡检 worker 未在共同宽限内确认 drain；未切换运行 revision" >&2
   exit 1
 }
 
 [[ -f "$repo_root/.env" ]] || { print -r -- "缺少 $repo_root/.env，先照 env.example 建好" >&2; exit 1; }
 
 mkdir -p "$log_dir" "$agents_dir" "$drain_dir"
+install_lock="$drain_dir/install.lock"
+mkdir "$install_lock" 2>/dev/null || { print -r -- "已有安装占用锁；未操作服务" >&2; exit 1; }
+trap 'rmdir "$install_lock" 2>/dev/null || true' EXIT
+rm -f -- "$worker_update_permit"
+runtime_capture_disabled
 
 # 运行目录是一个 detached worktree，跟随 origin/main。detached 是必须的：main 分支已由
 # 开发目录 checkout，同一个分支不能在两处。
 git -C "$repo_root" fetch --quiet origin main
 target_revision="$(git -C "$repo_root" rev-parse origin/main)"
+[[ "$(git -C "$repo_root" rev-parse HEAD)" == "$target_revision" ]] \
+  || { print -r -- "安装入口必须来自目标origin/main；未操作服务" >&2; exit 1; }
+git -C "$repo_root" diff --quiet HEAD -- scripts/runtime crates/contracts/src/ai_limits.json \
+  || { print -r -- "安装入口或资源合同存在未提交改动；未操作服务" >&2; exit 1; }
 if [[ -e "$runtime_dir" ]]; then
   # Linked worktrees keep .git as a file, so -d "$runtime_dir/.git" would
   # wrongly treat a healthy existing runtime as absent.  Never overwrite an
@@ -195,12 +161,14 @@ else
   git -C "$repo_root" worktree add --detach "$runtime_dir" origin/main
 fi
 runtime_revision="$(git -C "$runtime_dir" rev-parse HEAD)"
-request_worker_drain "$runtime_revision" "$target_revision"
-
+request_worker_drain
+runtime_drain_ai "$runtime_revision"
+runtime_stop_all
 if (( prepare_migration )); then
-  finish_migration_preparation
+  log "巡检/AI已核对排空，四服务已停止；未切换代码或启动服务，可在授权窗口单独迁移。"
   exit 0
 fi
+runtime_write_permit "$runtime_revision" "$target_revision" "$patrol_drain_state"
 
 # 启动时由新 revision 的 sync.sh 消费上面的 target-specific drain permit，再把运行目录同步到
 # origin/main。安装入口不能先 reset 再去停 worker，否则旧进程可能在已被替换的工作树上
@@ -221,57 +189,16 @@ fi
 # the source checkout, not the runtime copy that is about to be replaced.
 sync_copy="$(mktemp -t linggan-sync)"
 cp "$repo_root/scripts/runtime/sync.sh" "$sync_copy"
-LINGGAN_RUNTIME_DIR="$runtime_dir" LINGGAN_SUPPORT_DIR="$support_dir" /bin/zsh "$sync_copy"
+LINGGAN_RUNTIME_SOURCE_DIR="$repo_root" LINGGAN_RUNTIME_DIR="$runtime_dir" LINGGAN_SUPPORT_DIR="$support_dir" /bin/zsh "$sync_copy"
 rm -f "$sync_copy"
 
 [[ "$(git -C "$runtime_dir" rev-parse HEAD)" == "$target_revision" ]] \
   || { print -r -- "运行目录未同步到目标 revision；未重启服务" >&2; exit 1; }
 
-write_plist() {
-  local label="$1" binary="$2" logname="$3" port="${4:-}"
-  local plist="$agents_dir/com.linggan-intelligence.$label.plist"
-  {
-    print -r -- '<?xml version="1.0" encoding="UTF-8"?>'
-    print -r -- '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
-    print -r -- '<plist version="1.0"><dict>'
-    print -r -- "  <key>Label</key><string>com.linggan-intelligence.$label</string>"
-    print -r -- '  <key>ProgramArguments</key><array>'
-    print -r -- '    <string>/bin/zsh</string>'
-    print -r -- "    <string>$runtime_dir/scripts/runtime/launch.sh</string>"
-    print -r -- "    <string>$binary</string>"
-    print -r -- '  </array>'
-    # WorkingDirectory 必须指向一个真实存在的目录，否则 launchd 在执行脚本**之前**就以
-    # EX_CONFIG(78) 失败，而且不产生任何日志——2026-09-03 删旧快照时真实踩过这个坑。
-    print -r -- "  <key>WorkingDirectory</key><string>$runtime_dir</string>"
-    print -r -- '  <key>EnvironmentVariables</key><dict>'
-    print -r -- "    <key>LINGGAN_RUNTIME_DIR</key><string>$runtime_dir</string>"
-    print -r -- "    <key>LINGGAN_SUPPORT_DIR</key><string>$support_dir</string>"
-    if [[ "$binary" == "linggan-worker" ]]; then
-      print -r -- "    <key>LINGGAN_WORKER_DRAIN_ACK_PATH</key><string>$worker_drain_ack</string>"
-    fi
-    [[ -n "$port" ]] && print -r -- "    <key>LINGGAN_LOCAL_PORT</key><string>$port</string>"
-    print -r -- '  </dict>'
-    [[ "$binary" == "linggan-worker" ]] && print -r -- '  <key>ExitTimeOut</key><integer>90</integer>'
-    print -r -- '  <key>RunAtLoad</key><true/>'
-    print -r -- '  <key>KeepAlive</key><true/>'
-    # 启动即失败（配置错误、端口被占）时隔多久才允许再起一次。写出来是因为它必须与进程的退出
-    # 语义配套：一个「起来就崩」的进程若任由 launchd 按内置节流反复重起，日志会被同一行填满，
-    # 真正的变化反而看不见。30 秒 = 每半分钟最多一行，而不是每分钟六行。正常部署走的是
-    # bootout/bootstrap（不受此限制），所以它只约束崩溃循环，不拖慢部署。
-    print -r -- '  <key>ThrottleInterval</key><integer>30</integer>'
-    print -r -- "  <key>StandardOutPath</key><string>$log_dir/$logname.out.log</string>"
-    print -r -- "  <key>StandardErrorPath</key><string>$log_dir/$logname.err.log</string>"
-    print -r -- '</dict></plist>'
-  } > "$plist"
-  plutil -lint "$plist" >/dev/null
-  launchctl bootout "gui/$(id -u)/com.linggan-intelligence.$label" 2>/dev/null || true
-  launchctl bootstrap "gui/$(id -u)" "$plist"
-  log "已安装并启动 com.linggan-intelligence.$label"
-}
-
 write_plist local-runtime linggan-api          api           3000
 write_plist patrol-worker linggan-worker       worker
 write_plist media-worker  linggan-media-worker media-worker
+write_plist ai-executor   linggan-ai-worker    ai-worker
 
-log "完成。三个服务已在跟随 origin/main 运行。"
+log "配置更新完成；已启用服务跟随origin/main，原禁用服务与新AI初始禁用保持。"
 log "若有未应用的迁移，服务会拒绝启动；届时执行：./scripts/local-runtime.sh migrate"

@@ -25,7 +25,7 @@ async fn worker_admission_budget_fingerprints_and_bounded_recovery() {
     sqlx::query("INSERT INTO linggan_model_entry(model_ref,connection_version_ref,model_id,origin) VALUES($1,$2,'synthetic-creator','manual')").bind(model).bind(version).execute(db.pool()).await.unwrap();
     sqlx::query("INSERT INTO linggan_model_config(config_ref,model_ref,input_token_limit,output_token_limit,timeout_seconds,max_attempts) VALUES($1,$2,8192,1000,30,3)").bind(config).bind(model).execute(db.pool()).await.unwrap();
     let probe = Uuid::new_v4();
-    sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,operation,request_hash,state,reserved_tokens,charged_tokens,result) VALUES($1,$2,$3,'probe','synthetic','succeeded',0,0,$4)").bind(probe).bind(version).bind(model).bind(json!({"ok":true,"modelCallable":true,"semanticQualified":true})).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,operation,request_hash,state,reserved_tokens,charged_tokens,result,finished_at) VALUES($1,$2,$3,'probe','synthetic','succeeded',0,0,$4,scope_001_now())").bind(probe).bind(version).bind(model).bind(json!({"ok":true,"modelCallable":true,"semanticQualified":true})).execute(db.pool()).await.unwrap();
     let mut refs = Vec::new();
     for id in ["creator-one", "creator-two"] {
         let package=fixture::submit_package(&db,"content_detail",json!({"contentExternalId":id}),json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":id},"payload":{"title":"实践","bodyText":"家庭实践过程。".repeat(300),"authorId":"worker-author","likes":10}})).await;
@@ -65,13 +65,16 @@ async fn worker_admission_budget_fingerprints_and_bounded_recovery() {
     let count=sqlx::query_scalar::<_,i64>("SELECT count(*) FROM linggan_model_invocation WHERE operation='analyze' AND state='succeeded'").fetch_one(db.pool()).await.unwrap();
     assert_eq!(count, 3, "2 work analyses and 1 author analysis");
     let maps:Vec<serde_json::Value>=sqlx::query_scalar("SELECT result->'citationMap' FROM linggan_model_invocation WHERE result->>'jobKind'='work' AND state='succeeded'").fetch_all(db.pool()).await.unwrap();
-    assert_eq!(maps.len(),2);
+    assert_eq!(maps.len(), 2);
     for map in maps {
-        assert_eq!(map[0]["citation"],"S1");
+        assert_eq!(map[0]["citation"], "S1");
         assert!(map[0]["fragmentId"].as_str().unwrap().contains(".title."));
         assert!(map[0]["sourceRef"].as_str().is_some());
         assert!(map[0]["sourceVersion"].as_str().is_some());
-        assert!(map[0].get("text").is_none(),"no duplicate original text in audit map");
+        assert!(
+            map[0].get("text").is_none(),
+            "no duplicate original text in audit map"
+        );
     }
     let q = serde_json::from_value(json!({"domain":D})).unwrap();
     let data = load(&db, &q).await.unwrap();
@@ -119,7 +122,7 @@ async fn worker_admission_budget_fingerprints_and_bounded_recovery() {
     assert_eq!(state.1, 3);
     assert_eq!(state.2["personal_experience"]["value"]["value"], "no");
     // Qualification failure cannot dispatch; paused attempts do not exhaust retries.
-    sqlx::query("UPDATE linggan_model_invocation SET result=$2 WHERE invocation_ref=$1")
+    sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,operation,request_hash,state,reserved_tokens,charged_tokens,result,finished_at,task_key,quota_bucket) SELECT gen_random_uuid(),connection_version_ref,model_ref,'probe','synthetic-probe-revision',CASE WHEN $2::jsonb->>'ok'='true' THEN 'succeeded' ELSE 'failed' END,0,0,$2,scope_001_now(),'model_probe','probe' FROM linggan_model_invocation WHERE invocation_ref=$1")
         .bind(probe)
         .bind(json!({"ok":false}))
         .execute(db.pool())
@@ -146,7 +149,7 @@ async fn worker_admission_budget_fingerprints_and_bounded_recovery() {
         .unwrap(),
         before
     );
-    sqlx::query("UPDATE linggan_model_invocation SET result=$2 WHERE invocation_ref=$1")
+    sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,operation,request_hash,state,reserved_tokens,charged_tokens,result,finished_at,task_key,quota_bucket) SELECT gen_random_uuid(),connection_version_ref,model_ref,'probe','synthetic-probe-revision',CASE WHEN $2::jsonb->>'ok'='true' THEN 'succeeded' ELSE 'failed' END,0,0,$2,scope_001_now(),'model_probe','probe' FROM linggan_model_invocation WHERE invocation_ref=$1")
         .bind(probe)
         .bind(json!({"ok":true,"modelCallable":true,"semanticQualified":true}))
         .execute(db.pool())

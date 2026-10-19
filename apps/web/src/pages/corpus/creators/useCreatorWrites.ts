@@ -1,13 +1,11 @@
 import { useIsMutating, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   registerCreator,
-  retryAnalysis,
   saveOverride,
   savePolicy,
   type OverrideRequest,
   type PolicyRequest,
   type RegisterRequest,
-  type RetryScope,
 } from './creatorsApi';
 
 function useRefreshingMutation<V, R>(kind: string, perform: (variables: V) => Promise<R>) {
@@ -26,9 +24,6 @@ function useRefreshingMutation<V, R>(kind: string, perform: (variables: V) => Pr
 export const useJoinMutation = () => useRefreshingMutation('join', (request: RegisterRequest) => registerCreator(request));
 export const usePolicyMutation = () => useRefreshingMutation('policy', (request: PolicyRequest) => savePolicy(request));
 export const useOverrideMutation = () => useRefreshingMutation('override', (request: OverrideRequest) => saveOverride(request));
-export const useRetryMutation = () =>
-  useRefreshingMutation('retry', (request: { domain: string; scope: RetryScope }) => retryAnalysis(request.domain, request.scope));
-
 /** 某位作者的「加入观察」是否正在提交——行内按钮与抽屉按钮共同参照，重复点击只显示进行中。 */
 export function useJoinPending(creatorKey: string): boolean {
   return (

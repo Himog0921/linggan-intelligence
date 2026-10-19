@@ -278,7 +278,7 @@ try {
     await page.getByRole('button', { name: '发现设置' }).click();
     const dialog = page.getByRole('dialog', { name: '发现设置' });
     await dialog.waitFor();
-    await page.waitForFunction(() => !document.querySelector('dialog[open] select')?.disabled);
+    await dialog.getByRole('link', { name: '去 AI 设置' }).waitFor();
     await dialog.getByRole('spinbutton', { name: /最低点赞/ }).fill('100');
     await dialog.getByRole('button', { name: '保存设置' }).click();
     await dialog.waitFor({ state: 'detached' });
@@ -286,7 +286,7 @@ try {
     const put = report.writes.at(-1);
     assert.equal(put.method, 'PUT');
     assert.equal(put.path, '/api/local/creator-discovery-policy');
-    assert.deepEqual(JSON.parse(put.body), { domain: domainOne, revision: 0, likeThreshold: 100, analysisEnabled: false, configRef: null, dailyTokenLimit: null });
+    assert.deepEqual(JSON.parse(put.body), { domain: domainOne, revision: 0, likeThreshold: 100 });
     // 合成作者 03 的相关作品有 300 个赞 ≥ 100，且尚未加入观察。
     await page.getByRole('button', { name: '未观察的爆款作者 1' }).waitFor();
     // 第二次打开带着新的设置版本号。

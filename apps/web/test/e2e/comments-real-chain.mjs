@@ -24,41 +24,61 @@ const networkGuard=route=>{const r=route.request();if(new URL(r.url()).origin!==
 await context.route('**/*',networkGuard);
 async function step(name,fn){try{await fn();await page.screenshot({path:path.join(root,String(report.steps.length+1).padStart(2,'0')+'.png'),fullPage:true});report.steps.push({name,status:'PASS'});}catch(e){await page.screenshot({path:path.join(root,'failure.png'),fullPage:true}).catch(()=>{});report.steps.push({name,status:'FAIL',message:e.message});throw e;}}
 const button=name=>page.getByRole('button',{name,exact:true});
-async function waitText(selector,text){await page.locator(selector).filter({hasText:text}).waitFor();}
 try {
  const proof=await page.request.get(origin+'/__comment-study-browser-proof');assert.equal(proof.status(),200);assert.equal(await proof.text(),v['proof-token']);
  if(mode==='commands'){
-  await step('Comment directory keeps filters readable and owns research start',async()=>{await page.goto(`${origin}/corpus/comments?domain=${domain}&view=comments`);await page.locator('#comment-filter-form').waitFor();const layout=await page.locator('#comment-filter-form').evaluate(form=>{const labels=[...form.querySelectorAll('label')].slice(0,4).map(label=>label.getBoundingClientRect());const bar=form.firstElementChild?.getBoundingClientRect();return {form:form.getBoundingClientRect().width,bar:bar?.width??0,labelWidths:labels.map(label=>label.width),labelHeights:labels.map(label=>label.height)};});assert.ok(layout.form>0&&layout.bar>0,JSON.stringify(layout));assert.ok(layout.labelWidths.every(width=>width>=80),JSON.stringify(layout));assert.ok(layout.labelHeights.every(height=>height<80),JSON.stringify(layout));await button('发起研究').waitFor();});
-  await step('React entry and immutable method source',async()=>{await button('发起研究').click();await page.locator('#work-'+v['work-ref']).waitFor();assert.equal(await page.locator('#study-policy').inputValue(),v['existing-policy-ref']);await page.locator('#view-policy').click();await waitText('#policy-viewer-content',v['existing-policy-ref']);await page.locator('#close-policy-viewer').click();});
-  await step('Copy method, save actual new version and compare original',async()=>{await page.locator('#edit-policy').click();await waitText('#policy-status','编辑副本已载入');await page.locator('#method-name').fill('隔离浏览器方法');await page.locator('#stage-semantic').fill('仅用于真实 Axum 与隔离 PostgreSQL 浏览器回归');await page.locator('#save-policy').click();await waitText('#policy-status','已保存并选中新方法版本');const saved=await page.locator('#study-policy').inputValue();assert.notEqual(saved,v['existing-policy-ref']);await page.locator('#view-policy').click();await waitText('#policy-viewer-content','仅用于真实 Axum 与隔离 PostgreSQL 浏览器回归');await page.locator('#compare-policy').selectOption(v['existing-policy-ref']);await page.locator('[data-policy-comparison]').waitFor();assert.ok(!(await page.locator('[data-policy-comparison]').innerText()).includes('仅用于真实 Axum 与隔离 PostgreSQL 浏览器回归'));await page.locator('#close-policy-viewer').click();await page.locator('#activate-policy').click();await waitText('#policy-status','已将所选方法设为当前领域默认版本。');});
-  await step('Explicit scope and preview retain exact limits',async()=>{await page.locator('#work-'+v['work-ref']).check();await page.locator('#run-comment-budget').fill('2');await page.locator('#run-context-character-budget').fill('3500');await page.locator('#token-budget').fill('4096');await page.locator('#preview-run').click();await waitText('#selection-preview','预计冻结 2 条');});
-  let lost=null,drop=true;
-  await page.route('**/api/local/comment-study/runs',async route=>{if(route.request().method()==='POST'&&drop){drop=false;const r=await route.fetch();lost=await r.json();assert.equal(r.status(),201);await route.abort('failed');}else await route.continue();});
-  await step('Lost creation receipt stays unconfirmed',async()=>{await page.locator('#start-run').click();await waitText('#run-result','创建结果未获确认');assert.ok(lost?.runRef);assert.equal(await page.locator('#study-dialog').isVisible(),true);await page.locator('#study-dialog-close').click();await button('用户评论').click();await button('发起研究').click();await page.locator('#start-run').filter({hasText:'核对并重试原启动请求'}).waitFor();assert.equal(await page.locator('#selection-preview').innerText(),'');assert.equal(await page.locator('#start-run').isEnabled(),true);});
-  await step('Explicit retry replays original request identity',async()=>{await page.locator('#start-run').click();await page.locator('[data-run-control="pause"]').first().waitFor();const calls=report.writes.filter(r=>r.path.endsWith('/runs'));assert.equal(calls.length,2);assert.equal(calls[0].body.requestRef,calls[1].body.requestRef);assert.equal(new URL(page.url()).searchParams.get('runRef'),lost.runRef);});
-  await step('Reopening a successful research intent requires a new preview',async()=>{await button('用户评论').click();await button('发起研究').click();await page.locator('#study-dialog').waitFor();assert.equal(await page.locator('#start-run').isDisabled(),true);assert.equal(await page.locator('#selection-preview').innerText(),'');assert.equal(await page.locator('#run-result').innerText(),'');await page.locator('#study-dialog-close').click();await button('研究批次').click();await page.locator('[aria-label="本次运行操作"] [data-run-control="pause"]').first().waitFor();});
-  await step('Pause and resume follow actual CAS receipts',async()=>{await page.locator('[aria-label="本次运行操作"] [data-run-control="pause"]').click();await waitText('#study-run-control-feedback','已按服务端回执暂停派发');await page.locator('[aria-label="本次运行操作"] [data-run-control="resume"]').click();await waitText('#study-run-control-feedback','已按服务端回执恢复派发');});
-  await step('Stale control version is rejected by real API',async()=>{const response=await page.request.post(`${origin}/api/local/comment-study/runs/${lost.runRef}/pause`,{data:{expectedControlVersion:0}});assert.equal(response.status(),409);});
-  await step('Stopping requires concrete identity and preserves server outcome',async()=>{await page.locator('[aria-label="本次运行操作"] [data-run-control="stop"]').click();await waitText('#study-stop-run-identity',lost.runRef);assert.ok((await page.locator('#study-stop-description').innerText()).includes('已经开始的调用无法保证中断'));await page.locator('#study-stop-confirm').click();await waitText('#study-run-control-feedback','已按服务端回执停止本次运行');});
-  await step('Explicit bounded recovery creates linked new run',async()=>{await page.locator('[aria-label="本次运行操作"] [data-run-recover]').click();await waitText('#study-recover-description',lost.runRef.slice(0,8).toUpperCase());await page.locator('#study-recover-confirm').click();await waitText('#study-run-control-feedback','已按服务端回执创建补跑批次');assert.notEqual(new URL(page.url()).searchParams.get('runRef'),lost.runRef);await page.locator('[aria-label="本次运行操作"] [data-run-control="stop"]').click();await page.locator('#study-stop-confirm').click();await waitText('#study-run-control-feedback','已按服务端回执停止本次运行');});
-  await step('Post usage lost receipt replays once and unmark restores actual state',async()=>{
-   await button('用户评论').click();await page.locator('[data-post-usage="mark"]').first().waitFor();let dropMark=true;
-   await page.route('**/api/local/comment-study/comments/post-usage',async route=>{if(dropMark){dropMark=false;const reply=await route.fetch();assert.equal(reply.status(),200);await route.abort('failed');}else await route.continue();});
-   await page.locator('[data-post-usage="mark"]').first().click();await page.getByText(/保存未获确认/).waitFor();assert.equal(await page.locator('[data-post-usage="unmark"]').count(),0);
+  await step('Comment directory preserves filtering and shows frozen AI with the unified settings link',async()=>{
+   await page.goto(`${origin}/corpus/comments?domain=${domain}&view=comments`);
+   await page.locator('#comment-filter-form').waitFor();
+   await page.getByRole('region',{name:'评论研究 AI状态'}).waitFor();
+   assert.equal(await button('发起研究').count(),0);
+   assert.equal(await page.getByRole('link',{name:'去 AI 设置'}).getAttribute('href'),'/settings/models?section=automation&task=comment_study');
+  });
+  await step('Historical methods remain immutable, readable and comparable',async()=>{
+   await page.getByText('查看历史方法版本',{exact:true}).click();
+   const select=page.getByRole('combobox',{name:'历史方法版本'});await select.waitFor();
+   await select.selectOption(v['existing-policy-ref']);
+   await page.getByRole('heading',{name:'SYNTHETIC A',exact:true}).waitFor();
+   const compare=page.getByRole('combobox',{name:'并排对比其他历史版本'});
+   const older=await compare.locator('option').evaluateAll(options=>options.find(option=>option.textContent.includes('SYNTHETIC B'))?.value);
+   assert.ok(older);await compare.selectOption(older);
+   await page.locator('article').filter({hasText:'默认评论上限'}).nth(1).waitFor();
+   assert.equal(await button('设为默认方法').count(),0);
+   assert.equal(await button('保存新方法版本').count(),0);
+   await select.selectOption(v['initial-active-policy-ref']);
+   await page.getByText('这个历史方法的完整内容未记录。',{exact:true}).waitFor();
+  });
+  await step('Old start, resume, recovery and method writes are actually rejected without a model',async()=>{
+   for(const pathname of ['/api/local/comment-study/runs','/api/local/comment-study/policies',
+    `/api/local/comment-study/policies/${v['existing-policy-ref']}/activate`,
+    '/api/local/comment-study/runs/00000000-0000-4000-8000-000000000001/resume',
+    '/api/local/comment-study/runs/00000000-0000-4000-8000-000000000001/recover']){
+    const response=await page.request.post(origin+pathname,{data:{}});
+    assert.equal(response.status(),410);assert.equal((await response.json()).error,'ai_legacy_execution_retired');
+   }
+  });
+  await step('Human post usage retains request identity after a lost receipt and can be undone',async()=>{
+   let dropMark=true;
+   await page.route('**/api/local/comment-study/comments/post-usage',async route=>{
+    if(dropMark){dropMark=false;const reply=await route.fetch();assert.equal(reply.status(),200);await route.abort('failed');}else await route.continue();
+   });
+   await page.locator('[data-post-usage="mark"]').first().click();await page.getByText(/保存未获确认/).waitFor();
+   assert.equal(await page.locator('[data-post-usage="unmark"]').count(),0);
    await page.locator('[data-post-usage="mark"]').first().click();await page.locator('[data-post-usage="unmark"]').first().waitFor();
-   const writes=report.writes.filter(item=>item.path.endsWith('/comments/post-usage'));assert.equal(writes.length,2);assert.equal(writes[0].body.requestRef,writes[1].body.requestRef);
+   const writes=report.writes.filter(item=>item.path.endsWith('/comments/post-usage'));
+   assert.equal(writes.length,2);assert.equal(writes[0].body.requestRef,writes[1].body.requestRef);
    await page.locator('[data-post-usage="unmark"]').first().click();await page.locator('[data-post-usage="unmark"]').waitFor({state:'hidden'});
   });
-  await step('Selected comments preview uses actual comment identities and roles',async()=>{
-   const choice=page.locator('[data-select-comment][data-eligible="true"]').first();await choice.waitFor();const work=await choice.getAttribute('data-work-ref'),commentId=await choice.getAttribute('data-comment-id');await choice.check();await button('研究所选评论').click();await page.locator('#preview-run').click();await page.locator('#selection-preview').filter({hasText:'预计冻结'}).waitFor();
-   const previews=report.writes.filter(item=>item.path.endsWith('/selection-preview'));const body=previews.at(-1).body;assert.deepEqual(body.scope,{kind:'comments',commentKeys:[{workRef:work,commentExternalId:commentId}]});assert.deepEqual(body.workRoles,[{contentPublicRef:work,observationRole:'primary'}]);await page.locator('#study-dialog-close').click();
+  await step('Cross-view comment selection and all four historical views never create old research',async()=>{
+   await page.locator('[data-select-comment][data-eligible="true"]').first().check();
+   for(const name of ['概览','研究批次','用户问题','用户评论']){await button(name).click();assert.equal(await button('发起研究').count(),0);}
+   await page.locator('[data-select-comment][data-eligible="true"]').first().waitFor();
+   assert.equal(await page.locator('[data-select-comment][data-eligible="true"]').first().isChecked(),true);
+   assert.ok(report.writes.every(write=>write.path.endsWith('/comments/post-usage')));
   });
-  await Promise.all(pending);
-  const activation=report.writes.find(r=>r.path.endsWith('/activate'));assert.equal(activation.body.expectedActivePolicyRef,v['initial-active-policy-ref']);
-  const preview=report.writes.find(r=>r.path.endsWith('/selection-preview'));assert.deepEqual(preview.body.limits,{commentBudget:2,contextCharacterBudget:3500,tokenLimit:4096});
  }else{
   const run=v['e2e-run-ref'],problem=v['e2e-problem-ref'];
-  await step('Overview, runs and problems do not expose proactive research',async()=>{for(const view of ['overview','runs','problems']){await page.goto(`${origin}/corpus/comments?${new URLSearchParams({domain,view})}`);await page.getByRole('button',{name:'发起研究',exact:true}).waitFor({state:'hidden'});}await page.goto(`${origin}/corpus/comments?${new URLSearchParams({domain,view:'comments'})}`);await button('发起研究').waitFor();});
+  await step('Overview, runs and problems do not expose proactive research',async()=>{for(const view of ['overview','runs','problems']){await page.goto(`${origin}/corpus/comments?${new URLSearchParams({domain,view})}`);await page.getByRole('button',{name:'发起研究',exact:true}).waitFor({state:'hidden'});}await page.goto(`${origin}/corpus/comments?${new URLSearchParams({domain,view:'comments'})}`);assert.equal(await button('发起研究').count(),0);});
   const response=await page.request.get(`${origin}/api/local/comment-study/targets?${new URLSearchParams({domain,runRef:run,limit:'100'})}`);assert.equal(response.status(),200);const targets=await response.json(),target=targets.targets.find(row=>row.commentKey?.commentExternalId&&row.signalCount>0);assert.ok(target);const key=target.commentKey;
   await step('Comment deep link shows distinct raw, parent, cleaning and history',async()=>{await page.goto(`${origin}/corpus/comments?${new URLSearchParams({domain,view:'comments',commentWorkRef:key.workRef,commentExternalId:key.commentExternalId})}`);await page.getByRole('heading',{name:'父评论语境',exact:true}).waitFor();assert.ok(await page.locator('#comment-detail-body [data-history-run="'+run+'"]').count()>=3);});
   await step('History to immutable run method and real request snapshot',async()=>{await page.locator('#comment-detail-body [data-history-panel="method"]').first().click();await page.getByRole('heading',{name:'本次方法',exact:true}).waitFor();await page.getByRole('tab',{name:'调用记录',exact:true}).click();await page.locator('[data-request-detail]').first().click();await page.getByRole('heading',{name:'本次冻结请求快照',exact:true}).waitFor();assert.ok((await page.locator('[data-comment-study-content]').innerText()).includes('SYNTHETIC / NOT EVIDENCE'));});
@@ -69,9 +89,9 @@ try {
   await step('Responsive dialogs retain reachable close controls without page overflow',async()=>{
    for(const [width,dpr] of [[1440,1],[1024,1],[390,1],[720,2]]){
     const scoped=await browser.newContext({viewport:{width,height:1000},deviceScaleFactor:dpr,reducedMotion:'reduce'});await scoped.route('**/*',networkGuard);const check=await scoped.newPage();check.on('pageerror',e=>report.errors.push(e.message));
-    try{await check.goto(`${origin}/corpus/comments?${new URLSearchParams({domain,view:'comments'})}`);await check.locator('#comment-filter-form').waitFor();const filters=await check.locator('#comment-filter-form').evaluate(form=>{const labels=[...form.querySelectorAll('label')].slice(0,4).map(label=>label.getBoundingClientRect());return {clientWidth:form.clientWidth,scrollWidth:form.scrollWidth,labelWidths:labels.map(label=>label.width),labelHeights:labels.map(label=>label.height)};});assert.ok(filters.scrollWidth<=filters.clientWidth+1,JSON.stringify(filters));assert.ok(filters.labelWidths.every(width=>width>=72),JSON.stringify(filters));assert.ok(filters.labelHeights.every(height=>height<80),JSON.stringify(filters));await check.screenshot({path:path.join(root,`filters-${width}-${dpr}x.png`),fullPage:true});await check.locator('#open-study-dialog').click();await check.locator('#work-filter-status').waitFor();
-     const geometry=await check.evaluate(()=>{const r=document.querySelector('#study-dialog-close').getBoundingClientRect();return {x:r.x,y:r.y,right:r.right,bottom:r.bottom,width:innerWidth,height:innerHeight,documentWidth:document.documentElement.scrollWidth};});
-     assert.ok(geometry.x>=0&&geometry.y>=0&&geometry.right<=geometry.width&&geometry.bottom<=geometry.height,JSON.stringify(geometry));assert.ok(geometry.documentWidth<=geometry.width,JSON.stringify(geometry));await check.screenshot({path:path.join(root,`viewport-${width}-${dpr}x.png`),fullPage:true});await check.locator('#study-dialog-close').click();assert.equal(await check.locator('#study-dialog').isVisible(),false);
+    try{await check.goto(`${origin}/corpus/comments?${new URLSearchParams({domain,view:'comments'})}`);await check.locator('#comment-filter-form').waitFor();const filters=await check.locator('#comment-filter-form').evaluate(form=>{const labels=[...form.querySelectorAll('label')].slice(0,4).map(label=>label.getBoundingClientRect());return {clientWidth:form.clientWidth,scrollWidth:form.scrollWidth,labelWidths:labels.map(label=>label.width),labelHeights:labels.map(label=>label.height)};});assert.ok(filters.scrollWidth<=filters.clientWidth+1,JSON.stringify(filters));assert.ok(filters.labelWidths.every(width=>width>=72),JSON.stringify(filters));assert.ok(filters.labelHeights.every(height=>height<80),JSON.stringify(filters));await check.screenshot({path:path.join(root,`filters-${width}-${dpr}x.png`),fullPage:true});await check.locator('button[data-comment-work][data-comment-id]').first().click();await check.locator('#comment-detail-close').waitFor();
+     const geometry=await check.evaluate(()=>{const r=document.querySelector('#comment-detail-close').getBoundingClientRect();return {x:r.x,y:r.y,right:r.right,bottom:r.bottom,width:innerWidth,height:innerHeight,documentWidth:document.documentElement.scrollWidth};});
+     assert.ok(geometry.x>=0&&geometry.y>=0&&geometry.right<=geometry.width&&geometry.bottom<=geometry.height,JSON.stringify(geometry));assert.ok(geometry.documentWidth<=geometry.width,JSON.stringify(geometry));await check.screenshot({path:path.join(root,`viewport-${width}-${dpr}x.png`),fullPage:true});await check.locator('#comment-detail-close').click();assert.equal(await check.locator('#comment-detail-dialog').count(),0);
     }finally{await scoped.close();}
    }
   });

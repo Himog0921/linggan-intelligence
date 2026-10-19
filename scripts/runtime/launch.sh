@@ -12,11 +12,15 @@
 {
 set -euo pipefail
 
-binary="${1:?用法: launch.sh <linggan-api|linggan-worker|linggan-media-worker>}"
+binary="${1:?用法: launch.sh <linggan-api|linggan-worker|linggan-media-worker|linggan-ai-worker>}"
 
 : "${LINGGAN_RUNTIME_DIR:=$HOME/Library/Application Support/Linggan Intelligence/runtime-main}"
 : "${LINGGAN_SUPPORT_DIR:=$HOME/Library/Application Support/Linggan Intelligence}"
 export LINGGAN_RUNTIME_DIR
+case "$binary" in
+  linggan-api|linggan-worker|linggan-media-worker|linggan-ai-worker) ;;
+  *) print -r -- "不支持的运行服务" >&2; exit 1 ;;
+esac
 
 # 同步跑在**临时副本**上。它会 reset --hard 覆盖工作树里的自己，而 zsh 读脚本是惰性的；
 # 从副本执行就没有这个窗口。

@@ -7,10 +7,27 @@ use serde_json::json;
 use uuid::Uuid;
 #[path = "support/content_workbench_fixture.rs"]
 mod fixture;
+#[path = "support/ai_writing_fixture.rs"]
+mod foundation_fixture;
+use foundation_fixture::run_request;
 
-fn adapter() -> (PiAdapter, std::path::PathBuf, std::path::PathBuf) {
-    let root = std::env::temp_dir().join(format!("creation-ai-fake-{}", Uuid::new_v4()));
-    std::fs::create_dir_all(&root).unwrap();
+struct OwnedFakeRoot(std::path::PathBuf);
+impl AsRef<std::path::Path> for OwnedFakeRoot {
+    fn as_ref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+impl Drop for OwnedFakeRoot {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+fn adapter() -> (PiAdapter, std::path::PathBuf, OwnedFakeRoot) {
+    let parent = std::env::var_os("LINGGAN_CREATION_ASSET_ROOT")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    let root = parent.join(format!("creation-ai-fake-{}", Uuid::new_v4()));
+    std::fs::create_dir(&root).unwrap();
     let count = root.join("calls");
     let script = root.join("adapter.py");
     let source = format!(
@@ -43,7 +60,7 @@ print(json.dumps({{'version':'linggan.pi.v1/0.85.1','ok':True,'text':text,'failu
     (
         PiAdapter::configured_with_test_command("/usr/bin/python3".into(), script),
         count,
-        root,
+        OwnedFakeRoot(root),
     )
 }
 fn request(
@@ -89,16 +106,7 @@ fn call_count(path: &std::path::Path) -> usize {
 #[ignore = "isolated PostgreSQL proof with local fake transport"]
 async fn explicit_ai_dispatch_replay_stale_cancel_and_usage_are_separate() {
     let db = fixture::db("creation_ai").await;
-    fixture::dossier::model_config(&db).await;
-    let config: Uuid = sqlx::query_scalar("SELECT config_ref FROM linggan_model_config LIMIT 1")
-        .fetch_one(db.pool())
-        .await
-        .unwrap();
-    sqlx::query("UPDATE linggan_model_workspace SET default_config_ref=$1 WHERE singleton")
-        .bind(config)
-        .execute(db.pool())
-        .await
-        .unwrap();
+    let config = foundation_fixture::configure_fake_prerequisites(&db).await;
     let work = fixture::create(&db, fixture::doc()).await;
     let (adapter, count, root) = adapter();
     let ready = ai::readiness(&db).await.unwrap();
@@ -142,8 +150,8 @@ async fn explicit_ai_dispatch_replay_stale_cancel_and_usage_are_separate() {
         Err(WorkbenchError::RequestConflict)
     ));
     let (a, b) = tokio::join!(
-        ai::run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter),
-        ai::run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter)
+        run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter),
+        run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter)
     );
     a.unwrap();
     b.unwrap();
@@ -188,7 +196,7 @@ async fn explicit_ai_dispatch_replay_stale_cancel_and_usage_are_separate() {
     let r = request(&newer, config, ai::WritingAction::RewriteSelection, "");
     let exec = prepare(&db, &r).await;
     ai::execute(&db, &exec).await.unwrap();
-    ai::run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter)
+    run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter)
         .await
         .unwrap();
     let adoption = ai::AdoptRequest {
@@ -221,7 +229,7 @@ async fn explicit_ai_dispatch_replay_stale_cancel_and_usage_are_separate() {
     let r = request(&latest, config, ai::WritingAction::Draft, "DELAY");
     let exec = prepare(&db, &r).await;
     ai::execute(&db, &exec).await.unwrap();
-    let future = ai::run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter);
+    let future = run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter);
     let cancel = async {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         ai::cancel(&db, exec.request_id).await.unwrap();
@@ -235,7 +243,7 @@ async fn explicit_ai_dispatch_replay_stale_cancel_and_usage_are_separate() {
     let r = request(&latest, config, ai::WritingAction::Draft, "INVALID");
     let exec = prepare(&db, &r).await;
     ai::execute(&db, &exec).await.unwrap();
-    ai::run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter)
+    run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter)
         .await
         .unwrap();
     let status = ai::status(&db, exec.request_id).await.unwrap();
@@ -245,7 +253,7 @@ async fn explicit_ai_dispatch_replay_stale_cancel_and_usage_are_separate() {
     let r = request(&latest, config, ai::WritingAction::PageCopy, "BADPAGE");
     let exec = prepare(&db, &r).await;
     ai::execute(&db, &exec).await.unwrap();
-    ai::run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter)
+    run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter)
         .await
         .unwrap();
     assert_eq!(
@@ -255,7 +263,7 @@ async fn explicit_ai_dispatch_replay_stale_cancel_and_usage_are_separate() {
     let r = request(&latest, config, ai::WritingAction::PageCopy, "");
     let exec = prepare(&db, &r).await;
     ai::execute(&db, &exec).await.unwrap();
-    ai::run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter)
+    run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter)
         .await
         .unwrap();
     assert_eq!(
@@ -265,7 +273,7 @@ async fn explicit_ai_dispatch_replay_stale_cancel_and_usage_are_separate() {
     let r = request(&latest, config, ai::WritingAction::Draft, "DELAY");
     let exec = prepare(&db, &r).await;
     ai::execute(&db, &exec).await.unwrap();
-    let future = ai::run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter);
+    let future = run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter);
     let disable = async {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         sqlx::query("UPDATE linggan_model_connection SET enabled=false")
@@ -287,14 +295,14 @@ async fn explicit_ai_dispatch_replay_stale_cancel_and_usage_are_separate() {
     ai::execute(&db, &exec).await.unwrap();
     ai::cancel(&db, exec.request_id).await.unwrap();
     let before = call_count(&count);
-    ai::run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter)
+    run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter)
         .await
         .unwrap();
     assert_eq!(call_count(&count), before);
-    assert_eq!(
-        ai::status(&db, exec.request_id).await.unwrap()["usage"]["chargedTokens"],
-        0
-    );
+    let cancelled = ai::status(&db, exec.request_id).await.unwrap();
+    assert!(cancelled["invocationRef"].is_null());
+    assert!(cancelled["usage"]["chargedTokens"].is_null());
+    assert_eq!(cancelled["usage"]["state"], "not_reserved");
     // Not selecting a material checkbox cannot authorize sending a paragraph that still
     // carries its exact source-use link after the source has changed.
     let document = fixture::cited_doc(&db).await;
@@ -320,15 +328,17 @@ async fn explicit_ai_dispatch_replay_stale_cancel_and_usage_are_separate() {
     ai::execute(&db, &exec).await.unwrap();
     let before = call_count(&count);
     fixture::dossier::fixture::submit_package_at(&db,"content_detail",json!({"contentExternalId":"dossier-note"}),json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":"dossier-note"},"payload":{"title":"合成替代版本","bodyText":"新版原文","authorId":"synthetic-author"}}),"2026-08-29T10:00:00Z").await;
-    ai::run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter)
+    run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter)
         .await
         .unwrap();
     assert_eq!(call_count(&count), before);
     let status = ai::status(&db, exec.request_id).await.unwrap();
     assert_eq!(status["state"], "failed");
-    assert_eq!(status["usage"]["chargedTokens"], 0);
+    assert!(status["invocationRef"].is_null());
+    assert!(status["usage"]["chargedTokens"].is_null());
+    assert_eq!(status["usage"]["state"], "not_reserved");
     assert!(status["suggestion"].is_null());
-    let research_count:i64=sqlx::query_scalar("SELECT count(*) FROM linggan_model_invocation i WHERE NOT EXISTS(SELECT 1 FROM linggan_creation_ai_request r WHERE r.invocation_ref=i.invocation_ref) OR i.result->>'purpose' IS DISTINCT FROM 'content_workbench'").fetch_one(db.pool()).await.unwrap();
+    let research_count:i64=sqlx::query_scalar("SELECT count(*) FROM linggan_model_invocation i WHERE i.operation='analyze' AND (NOT EXISTS(SELECT 1 FROM linggan_creation_ai_request r WHERE r.invocation_ref=i.invocation_ref) OR i.result->>'purpose' IS DISTINCT FROM 'content_workbench')").fetch_one(db.pool()).await.unwrap();
     assert_eq!(research_count, 0);
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -338,11 +348,7 @@ async fn explicit_ai_dispatch_replay_stale_cancel_and_usage_are_separate() {
 async fn preview_only_citation_adoption_preserves_exact_spans_and_revokes_every_public_projection()
 {
     let db = fixture::db("creation_ai_quote").await;
-    fixture::dossier::model_config(&db).await;
-    let config: Uuid = sqlx::query_scalar("SELECT config_ref FROM linggan_model_config LIMIT 1")
-        .fetch_one(db.pool())
-        .await
-        .unwrap();
+    let config = foundation_fixture::configure_fake_prerequisites(&db).await;
     let cited = fixture::comment_doc(&db).await;
     let citation = cited.excerpts[0].citation.clone();
     let raw = cited.excerpts[0].selected_text.clone().unwrap();
@@ -362,7 +368,7 @@ async fn preview_only_citation_adoption_preserves_exact_spans_and_revokes_every_
     preview.citations.push(overlapping);
     let execute = prepare(&db, &preview).await;
     ai::execute(&db, &execute).await.unwrap();
-    ai::run_request(&db, execute.request_id, &SyntheticModelSecrets, &adapter)
+    run_request(&db, execute.request_id, &SyntheticModelSecrets, &adapter)
         .await
         .unwrap();
     let adoption = ai::AdoptRequest {
@@ -388,7 +394,7 @@ async fn preview_only_citation_adoption_preserves_exact_spans_and_revokes_every_
     preview.citations = vec![citation.clone()];
     let execute_pages = prepare(&db, &preview).await;
     ai::execute(&db, &execute_pages).await.unwrap();
-    ai::run_request(
+    run_request(
         &db,
         execute_pages.request_id,
         &SyntheticModelSecrets,
@@ -587,11 +593,7 @@ async fn preview_only_citation_adoption_preserves_exact_spans_and_revokes_every_
 #[ignore = "isolated PostgreSQL UTF scalar selection proof with local fake transport"]
 async fn selected_unicode_range_rewrite_splices_only_the_confirmed_substring() {
     let db = fixture::db("creation_ai_selection").await;
-    fixture::dossier::model_config(&db).await;
-    let config: Uuid = sqlx::query_scalar("SELECT config_ref FROM linggan_model_config LIMIT 1")
-        .fetch_one(db.pool())
-        .await
-        .unwrap();
+    let config = foundation_fixture::configure_fake_prerequisites(&db).await;
     let mut doc = fixture::doc();
     doc.paragraphs[0].text = "前😀待修改🙂后文".into();
     let first = fixture::create(&db, doc).await;
@@ -617,7 +619,7 @@ async fn selected_unicode_range_rewrite_splices_only_the_confirmed_substring() {
     let execute = prepare(&db, &r).await;
     let (adapter, _, root) = adapter();
     ai::execute(&db, &execute).await.unwrap();
-    ai::run_request(&db, execute.request_id, &SyntheticModelSecrets, &adapter)
+    run_request(&db, execute.request_id, &SyntheticModelSecrets, &adapter)
         .await
         .unwrap();
     let adopted = ai::adopt(
@@ -648,11 +650,7 @@ async fn selected_unicode_range_rewrite_splices_only_the_confirmed_substring() {
 #[ignore = "isolated PostgreSQL full-known-citation movement and authored-field security proof"]
 async fn moved_known_quote_retains_identity_and_restrictions_across_every_authored_surface() {
     let db = fixture::db("creation_quote_move").await;
-    fixture::dossier::model_config(&db).await;
-    let config: Uuid = sqlx::query_scalar("SELECT config_ref FROM linggan_model_config LIMIT 1")
-        .fetch_one(db.pool())
-        .await
-        .unwrap();
+    let config = foundation_fixture::configure_fake_prerequisites(&db).await;
     let mut cited = fixture::comment_doc(&db).await;
     let raw = cited.excerpts[0]
         .selected_text

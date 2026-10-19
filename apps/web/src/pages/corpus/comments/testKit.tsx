@@ -1,3 +1,4 @@
+import { businessSettingsFixture } from '../../settings/aiSettingsFixture.test-support';
 import { StrictMode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render } from '@testing-library/react';
@@ -14,6 +15,7 @@ export function overview(domain = DOMAIN) { return { domainRef: domain, asOf: '2
 export function policy(ref = POLICY) { return { policyRef: ref, methodName: '合成方法', recordingState: 'recorded', isActive: true, defaults: { commentBudget: 100, contextCharacterBudget: 6000 }, methodManifest: { stages: Object.fromEntries(['semantic', 'resolution', 'pair'].map(k => [k, { systemInstruction: '<stage-instructions>\n\n</stage-instructions>', outputSchema: {} }])) } }; }
 export const calls: { url: URL; method: string; body: Record<string, unknown> | null; signal: AbortSignal | null }[] = [];
 export function defaultReply(url: URL) {
+ if (url.pathname === '/api/local/ai-settings') return businessSettingsFixture();
  const domain = url.searchParams.get('domain') || DOMAIN, endpoint = url.pathname.split('/').at(-1);
  if (url.pathname === '/api/local/corpus/shell') return { domains: [{ domainRef: DOMAIN, name: '合成领域一', status: 'active', targetCount: 2, sampleCount: 3 }, { domainRef: OTHER, name: '合成领域二', status: 'active', targetCount: 0, sampleCount: null }], selectedDomain: domain, collectionState: '观察中' };
  if (endpoint === 'overview') return overview(domain);

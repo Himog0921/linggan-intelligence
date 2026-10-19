@@ -21,6 +21,8 @@
 
 ## 2026-10-19 · 评论研究 Context Bar 与数据工作台
 
+同日AI-GEN1 / PR-1B：[AI设置页具体规格](../plans/active/ai-gen1-pr1b-foundation.md#page-ai-settings-001--g1-已确认规格)已由Mog选择A确认，采用L1 Settings/Governance与现有React/AppShell。四区、表面/状态/依赖/验收矩阵在该计划维护；对应四区React源码及隔离浏览器证明已接入；三业务入口、完整故障矩阵、整包交付与Mog运行验收仍待，不把隔离通过当成共享运行已发布。
+
 用户最新批准的评论研究三级导航位置、统计折叠与严格单行表格，见[评论研究产品化最新 UI 补充](pages/comment-study-productization-001.md)和 [LIDS Context Bar 局部例外](lids/shell-zones.md)。当前单一 React 应用使用 AppShell 的可选 contextNav 插槽，不为独立页面创建第二套 Header 或运行时 Token；业务状态、资格与数据合同不变，候选待审查，未将新增位置推广成未获批的全站读数塞入规则。
 
 ## 内容工作台专项 · 阶段二
