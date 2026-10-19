@@ -8,6 +8,97 @@ use fixture::dossier::{self, DOMAIN};
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof"]
+async fn typed_material_search_reads_only_requested_family() {
+    use sources::materials::{SearchQuery, search};
+    let schema = "creation_kind_read_only";
+    let db = fixture::db(schema).await;
+    fixture::comment_doc(&db).await;
+    fixture::ops_seed(&db).await;
+    // Fix only this isolated schema's read clock so every document field can be compared.
+    sqlx::raw_sql("CREATE TABLE kind_search_clock AS SELECT clock_timestamp() AS value; CREATE OR REPLACE FUNCTION scope_001_now() RETURNS timestamptz LANGUAGE sql STABLE AS $$ SELECT value FROM kind_search_clock $$;")
+        .execute(db.pool()).await.unwrap();
+    let kinds = [
+        SourceKind::Note,
+        SourceKind::Comment,
+        SourceKind::OpsPublication,
+    ];
+    let patterns = [
+        "%FROM linggan_material_content material WHERE EXISTS%",
+        "%FROM linggan_material_comment_current c JOIN linggan_runtime_capture_package package USING(package_ref) WHERE package.accepted_at%",
+        "%FROM linggan_ops_publication p JOIN linggan_ops_account a ON a.account_ref=p.account_ref WHERE p.merged_into_ref%",
+    ];
+    let query = |kind| SearchQuery {
+        domain_ref: DOMAIN,
+        query: "合成".into(),
+        kind,
+        cursor: None,
+    };
+    let all_before = search(&db, &query(None)).await.unwrap();
+    assert!(all_before["nextCursor"].is_null());
+    let mut baselines = Vec::new();
+    let mut failures = Vec::new();
+    for (selected, kind) in kinds.iter().enumerate() {
+        let baseline = search(&db, &query(Some(kind.clone()))).await.unwrap();
+        assert!(!baseline["documents"].as_array().unwrap().is_empty());
+        let expected: Vec<_> = all_before["documents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|document| document["sourceKind"] == json!(kind))
+            .cloned()
+            .collect();
+        assert_eq!(baseline["documents"], json!(expected));
+        sqlx::query("SELECT public.pg_stat_statements_reset()")
+            .execute(db.pool())
+            .await
+            .unwrap();
+        let measured = search(&db, &query(Some(kind.clone()))).await.unwrap();
+        assert_eq!(measured["documents"], baseline["documents"]);
+        for (family, pattern) in patterns.iter().enumerate() {
+            let calls: i64 = sqlx::query_scalar("SELECT COALESCE(sum(calls),0)::bigint FROM public.pg_stat_statements WHERE query LIKE $1")
+                .bind(pattern).fetch_one(db.pool()).await.unwrap();
+            if family == selected {
+                assert!(calls > 0, "selected reader must actually run: {kind:?}");
+            } else if calls != 0 {
+                failures.push(format!(
+                    "{kind:?} unnecessarily read family {family}: {calls} directory calls"
+                ));
+            }
+        }
+        baselines.push(baseline["documents"].clone());
+    }
+    assert_eq!(
+        search(&db, &query(None)).await.unwrap()["documents"],
+        all_before["documents"]
+    );
+
+    // The selected readers must also survive an unavailable unrelated publication reader.
+    // A fresh pool prevents a pre-DDL prepared plan from masking the missing relation.
+    sqlx::query("ALTER TABLE linggan_ops_publication RENAME TO unavailable_publication_reader")
+        .execute(db.pool())
+        .await
+        .unwrap();
+    let isolated_url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
+    let fresh = linggan_storage_postgres::Database::connect_within_schema(&isolated_url, schema)
+        .await
+        .unwrap();
+    for (selected, kind) in kinds.iter().take(2).enumerate() {
+        match search(&fresh, &query(Some(kind.clone()))).await {
+            Ok(result) => assert_eq!(result["documents"], baselines[selected]),
+            Err(error) => failures.push(format!(
+                "{kind:?} failed on unrelated publication reader: {error}"
+            )),
+        }
+    }
+    sqlx::query("ALTER TABLE unavailable_publication_reader RENAME TO linggan_ops_publication")
+        .execute(db.pool())
+        .await
+        .unwrap();
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
 async fn exact_sources_keep_domain_version_parent_and_ocr_image_identity() {
     let db = fixture::db("creation_sources").await;
     let doc = fixture::cited_doc(&db).await;

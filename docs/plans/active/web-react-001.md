@@ -10,7 +10,7 @@
 
 开工实时核实：main、runtime-main、3000为362dad3f（#445）；A+B、C基线、D1/D2/D3、E/F/G均已合入并部署，F两项旧内核及D3启动锁回归已修复。#434@c1459357仍未独立合入；本包将其完整集成，并复核原树未提交的C-UX走查问题。Mog当前明确要求上述全部遗留收口、所有页面含子页面统一最新React栈、删除旧运行代码，并授权按需合并部署刷新3000；此授权替代旧阶段“不合并、不部署”的执行限制，不改写旧测试结果。
 
-唯一工作包WEB-REACT-001-CLOSEOUT-20261018，root单执行，#430 Claim；分支codex/web-react-001-closeout。当前Draft [PR #446](https://github.com/Himog0921/linggan-intelligence/pull/446)已提交e38a4398（3项CI成功、4项条件跳过），尚未合并部署；GitHub后续历史恢复P2已在本机修正，971项前端和C22步通过，当前修正尚未提交，不计入旧head CI。当前候选React/React DOM19.3.1（已核对npm当前版本）、TypeScript strict、Vite，同一个Root/路由。H登录、Token/外壳归位与旧UI清理已实施候选；全阶段隔离链路首轮通过，最终C/F/G与登录隔离链路已复验；补入动画动态偏好反例后再跑完整链路，运行演练尚待执行。登录六视口六状态36对实际截图逐像素一致，不代替最终部署或Mog审美签收。完整范围/状态/依赖/验收见[收尾矩阵](../../design/acceptance/web-react-001-closeout.md)。
+唯一工作包WEB-REACT-001-CLOSEOUT-20261018，root单执行，#430 Claim；分支codex/web-react-001-closeout。Draft [PR #446](https://github.com/Himog0921/linggan-intelligence/pull/446)已提交8ecc2e52，Mog授权的唯一GPT替代reviewer已完成该历史恢复P2增量与精确提交复核PASS，当前head CI的3项执行成功、4项条件跳过。最终合并核对新增类型搜索读取无关族、前端无标注语义猜分类两项P2，源码确认后同包修正，尚未提交/复核/新CI。当前前端978项、完整PG/HTTP23项与22步浏览器复验通过，五张PNG哈希保持；保留原阅读提示/筛选并明确未核对来源，不将8ecc绿色覆盖新代码。候选React/React DOM19.3.1、TypeScript strict、Vite、单Root/路由，17个正式模式及H旧UI清理已实施；正式3000仍362dad3f，尚未执行本包部署/运行演练/正式首篇。完整范围与分层证据见[收尾矩阵](../../design/acceptance/web-react-001-closeout.md)。
 
 旧feat/web-react-001@ba98ba26与下文按日期保留的候选均是历史来源。B正式离线/整版回退与C真实模型/成品/性能尚待正式验收；F最终B渲染性能已有本包同输入21轮证明（不含SQL/模型）；Mog全站签收仍必须独立关闭。§8后续产品（每日十方案等）继续另行派定，不通过迁移自动扩权。
 

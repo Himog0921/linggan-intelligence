@@ -3,6 +3,7 @@ import { ActionButton } from "../../shared/ActionButton";
 import type { MaterialDocument } from "./workbenchModel";
 import {
   FRAGMENT_TYPES,
+  READING_HINT_NOTICE,
   type FragmentType,
   type ReadingPiece,
 } from "./materialReading";
@@ -54,9 +55,9 @@ export function MaterialDistribution({
   };
   return (
     <>
-      <nav className={styles.distribution} aria-label="材料分布索引">
+      <nav className={styles.distribution} aria-label="材料分布索引" aria-description={READING_HINT_NOTICE}>
         <div className={styles.matrixHeading}>
-          <small>片段分布</small>
+          <small title={READING_HINT_NOTICE}>词语提示分布（未核对）</small>
           <small>
             {countsReady ? visible.length : "—"} 个片段 ·{" "}
             {countsReady ? documents.length : "—"} 份材料

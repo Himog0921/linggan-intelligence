@@ -91,34 +91,38 @@ async fn collect(
     let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text")
         .fetch_one(&mut *tx)
         .await?;
-    let (refs, mut limited) = candidates_in(&mut tx, domain, terms, 0).await?;
     let mut documents = Vec::new();
-    let mut dossiers = research_dossier::read_in(&mut tx, &refs, &as_of).await?;
-    for reference in refs {
-        let Some(dossier) = dossiers.remove(&reference) else {
-            continue;
-        };
-        match note_document_in(&mut tx, dossier).await {
-            Ok(mut d) => {
-                let text = d
-                    .fragments
-                    .iter()
-                    .map(|f| f.text.as_str())
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                let hits = if prepare {
-                    related(&text, terms)
-                } else {
-                    let hits = matches(&text, terms);
-                    (!hits.is_empty()).then_some(hits)
-                };
-                if let Some(hits) = hits {
-                    d.match_reasons = reasons(&hits, false);
-                    documents.push(d);
+    let mut limited = false;
+    if prepare || kind.is_none() || kind == Some(&SourceKind::Note) {
+        let (refs, note_limited) = candidates_in(&mut tx, domain, terms, 0).await?;
+        limited |= note_limited;
+        let mut dossiers = research_dossier::read_in(&mut tx, &refs, &as_of).await?;
+        for reference in refs {
+            let Some(dossier) = dossiers.remove(&reference) else {
+                continue;
+            };
+            match note_document_in(&mut tx, dossier).await {
+                Ok(mut d) => {
+                    let text = d
+                        .fragments
+                        .iter()
+                        .map(|f| f.text.as_str())
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    let hits = if prepare {
+                        related(&text, terms)
+                    } else {
+                        let hits = matches(&text, terms);
+                        (!hits.is_empty()).then_some(hits)
+                    };
+                    if let Some(hits) = hits {
+                        d.match_reasons = reasons(&hits, false);
+                        documents.push(d);
+                    }
                 }
+                Err(SourceError::Unavailable | SourceError::Restricted | SourceError::Changed) => {}
+                Err(e) => return Err(e),
             }
-            Err(SourceError::Unavailable | SourceError::Restricted | SourceError::Changed) => {}
-            Err(e) => return Err(e),
         }
     }
     if prepare {
@@ -131,46 +135,49 @@ async fn collect(
         .iter()
         .map(|document| document.source_ref)
         .collect();
-    // Pick comments only from qualified matching works; own words must also match an action/problem.
-    let comment_refs: Vec<Uuid> = if prepare {
-        sqlx::query("SELECT material_ref FROM (SELECT c.material_ref,c.content_public_ref,row_number() OVER(PARTITION BY c.content_public_ref ORDER BY c.material_ref) AS parent_order FROM linggan_material_comment_current c JOIN linggan_runtime_capture_package p USING(package_ref) WHERE c.content_public_ref=ANY($1) AND p.accepted_at<=scope_001_now() AND c.body_state='KNOWN' AND NOT EXISTS(SELECT 1 FROM linggan_material_comment_restriction r WHERE r.content_public_ref=c.content_public_ref AND r.comment_external_id=c.comment_external_id) AND EXISTS(SELECT 1 FROM unnest($2::text[]) term WHERE strpos(lower(c.body_text),term)>0)) candidates ORDER BY parent_order,content_public_ref,material_ref LIMIT 120").bind(&related_works).bind(terms).fetch_all(&mut *tx).await?.iter().map(|r|r.get("material_ref")).collect()
-    } else {
-        let mut refs = BTreeSet::new();
-        for term in terms {
-            let (rows, total) =
-                linggan_evidence::creation_comment_directory_in(&mut tx, domain, Some(term), 0)
-                    .await?;
-            limited |= total > 30;
-            refs.extend(rows.into_iter().take(30));
-        }
-        refs.into_iter().take(CANDIDATE_LIMIT).collect()
-    };
-    let mut comments = read_comment_documents_in(&mut tx, domain, &comment_refs).await?;
-    for reference in comment_refs {
-        match comments
-            .remove(&reference)
-            .unwrap_or(Err(SourceError::Unavailable))
-        {
-            Ok(mut d) => {
-                let hits = matches(&d.fragments[0].text, terms);
-                let meaningful = if prepare && terms.first().is_some_and(|t| t == "作业") {
-                    hits.iter().any(|t| t != "作业" && t != "开始")
-                        || (hits.iter().any(|t| t == "作业") && hits.iter().any(|t| t == "开始"))
-                } else if prepare {
-                    related(&d.fragments[0].text, terms).is_some()
-                } else {
-                    !hits.is_empty()
-                };
-                if meaningful {
-                    d.match_reasons = reasons(&hits, prepare);
-                    documents.push(d);
-                }
+    if prepare || kind.is_none() || kind == Some(&SourceKind::Comment) {
+        // Pick comments only from qualified matching works; own words must also match an action/problem.
+        let comment_refs: Vec<Uuid> = if prepare {
+            sqlx::query("SELECT material_ref FROM (SELECT c.material_ref,c.content_public_ref,row_number() OVER(PARTITION BY c.content_public_ref ORDER BY c.material_ref) AS parent_order FROM linggan_material_comment_current c JOIN linggan_runtime_capture_package p USING(package_ref) WHERE c.content_public_ref=ANY($1) AND p.accepted_at<=scope_001_now() AND c.body_state='KNOWN' AND NOT EXISTS(SELECT 1 FROM linggan_material_comment_restriction r WHERE r.content_public_ref=c.content_public_ref AND r.comment_external_id=c.comment_external_id) AND EXISTS(SELECT 1 FROM unnest($2::text[]) term WHERE strpos(lower(c.body_text),term)>0)) candidates ORDER BY parent_order,content_public_ref,material_ref LIMIT 120").bind(&related_works).bind(terms).fetch_all(&mut *tx).await?.iter().map(|r|r.get("material_ref")).collect()
+        } else {
+            let mut refs = BTreeSet::new();
+            for term in terms {
+                let (rows, total) =
+                    linggan_evidence::creation_comment_directory_in(&mut tx, domain, Some(term), 0)
+                        .await?;
+                limited |= total > 30;
+                refs.extend(rows.into_iter().take(30));
             }
-            Err(SourceError::Unavailable | SourceError::Restricted | SourceError::Changed) => {}
-            Err(e) => return Err(e),
+            refs.into_iter().take(CANDIDATE_LIMIT).collect()
+        };
+        let mut comments = read_comment_documents_in(&mut tx, domain, &comment_refs).await?;
+        for reference in comment_refs {
+            match comments
+                .remove(&reference)
+                .unwrap_or(Err(SourceError::Unavailable))
+            {
+                Ok(mut d) => {
+                    let hits = matches(&d.fragments[0].text, terms);
+                    let meaningful = if prepare && terms.first().is_some_and(|t| t == "作业") {
+                        hits.iter().any(|t| t != "作业" && t != "开始")
+                            || (hits.iter().any(|t| t == "作业")
+                                && hits.iter().any(|t| t == "开始"))
+                    } else if prepare {
+                        related(&d.fragments[0].text, terms).is_some()
+                    } else {
+                        !hits.is_empty()
+                    };
+                    if meaningful {
+                        d.match_reasons = reasons(&hits, prepare);
+                        documents.push(d);
+                    }
+                }
+                Err(SourceError::Unavailable | SourceError::Restricted | SourceError::Changed) => {}
+                Err(e) => return Err(e),
+            }
         }
     }
-    if !prepare {
+    if !prepare && (kind.is_none() || kind == Some(&SourceKind::OpsPublication)) {
         let mut refs = BTreeSet::new();
         for term in terms {
             let (rows, total) = crate::ops_ledger::read::creation_publication_directory_in(

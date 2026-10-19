@@ -411,6 +411,43 @@ it("does not project historical citation offsets onto a newer source version", a
   ).toBeNull();
 });
 
+it.each([
+  ["昨天晚上，每次坐在桌前。", "场景"],
+  ["建议先把第一步拆成一个步骤。", "做法"],
+  ["但是这句话不代表已经有边界标注。", "边界"],
+  ["我认为关键在于这个观点。", "观点"],
+  ["今天可以试着这样做，然后再看。", "做法"],
+])("keeps wording-based reading hints explicitly unverified: %s", (text, type) => {
+  const sources: SourceItem[] = [
+    { ...item, sourceKind: "note", text },
+    { ...item, sourceKind: "ocr", field: "ocr", text },
+    { ...item, sourceKind: "ops_publication", text },
+  ];
+  for (const source of sources) {
+    const pieces = materialPieces({ ...material, sourceKind: source.sourceKind === "ocr" ? "note" : source.sourceKind, fragments: [source] });
+    expect(pieces.length).toBeGreaterThan(0);
+    expect(pieces.every((piece) => piece.type === type && piece.typeBasis === "unverified_keyword")).toBe(true);
+    expect(pieces.map((piece) => piece.text).join("")).toBe(text);
+  }
+});
+
+it("uses factual source-kind basis for comment voices", () => {
+  const pieces = materialPieces({ ...material, sourceKind: "comment", fragments: [{ ...item, sourceKind: "comment", field: "comment_body", text: "昨天我建议先做一步，但是还没开始。" }] });
+  expect(pieces.length).toBeGreaterThan(0);
+  expect(pieces.every((piece) => piece.type === "原声" && piece.typeBasis === "source_kind")).toBe(true);
+});
+
+it("qualifies both type filters and the distribution as local reading hints rather than research annotations", async () => {
+  show();
+  await within(screen.getByRole("region", { name: "分组摘录纸条" })).findByRole("button", { name: "第一段😀" });
+  expect(screen.getByText("本机词语提示 · 未核对")).toBeInTheDocument();
+  const filters = screen.getByRole("group", { name: "片段类型" });
+  const matrix = screen.getByRole("navigation", { name: "材料分布索引" });
+  expect(filters).toHaveAccessibleDescription(/本机词语匹配.*不是研究标注/);
+  expect(matrix).toHaveAccessibleDescription(/本机词语匹配.*不是研究标注/);
+  expect(within(matrix).getByText("词语提示分布（未核对）")).toBeInTheDocument();
+});
+
 it("keeps unclassified titles and factual sentences separate while conserving every fragment across matrix types", () => {
   const document = {
     ...material,

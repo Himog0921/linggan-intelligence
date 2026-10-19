@@ -16,6 +16,7 @@ import {
 } from "./workbenchModel";
 import {
   FRAGMENT_TYPES,
+  READING_HINT_NOTICE,
   materialPieces,
   readingLeaves,
   type ReadingPiece,
@@ -867,7 +868,7 @@ export function MaterialBrowser({
         />
       </div>
       <div className={styles.filterbar}>
-        <div role="group" aria-label="片段类型">
+        <div role="group" aria-label="片段类型" aria-description={READING_HINT_NOTICE}>
           {["全部", ...FRAGMENT_TYPES].map((item) => (
             <button
               key={item}
@@ -889,7 +890,7 @@ export function MaterialBrowser({
             </button>
           ))}
         </div>
-        <small>规则辅助 · 待核对</small>
+        <small title={READING_HINT_NOTICE}>本机词语提示 · 未核对</small>
       </div>
       {collection.error ? (
         <p role="alert" className={styles.error}>

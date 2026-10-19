@@ -1,4 +1,6 @@
 import type { MaterialDocument, SourceItem } from "./workbenchModel";
+export const READING_HINT_NOTICE =
+  "场景、观点、做法、边界来自本机词语匹配，尚未核对，不是研究标注；原声仅表示评论来源。";
 export const FRAGMENT_TYPES = [
   "场景",
   "观点",
@@ -16,6 +18,7 @@ export interface ReadingPiece {
   end: number;
   text: string;
   type: FragmentType;
+  typeBasis: "source_kind" | "unverified_keyword" | "unclassified";
 }
 export function fragmentType(source: SourceItem, text: string): FragmentType {
   if (source.sourceKind === "comment") return "原声";
@@ -59,7 +62,8 @@ export function materialPieces(document: MaterialDocument): ReadingPiece[] {
       }
       while (end < chars.length && /\s/u.test(chars[end] ?? "")) end++;
       const text = chars.slice(start, end).join("");
-      if (text.trim())
+      if (text.trim()) {
+        const type = fragmentType(source, text);
         pieces.push({
           id: `${source.fragmentId}:${start}:${end}`,
           documentId: document.documentId,
@@ -67,8 +71,12 @@ export function materialPieces(document: MaterialDocument): ReadingPiece[] {
           start,
           end,
           text,
-          type: fragmentType(source, text),
+          type,
+          typeBasis: source.sourceKind === "comment"
+            ? "source_kind"
+            : type === "待分类" ? "unclassified" : "unverified_keyword",
         });
+      }
       start = end;
     }
     return pieces;
