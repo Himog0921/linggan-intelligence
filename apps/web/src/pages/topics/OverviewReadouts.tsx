@@ -32,7 +32,7 @@ function GlyphMark({ kind }: { kind: Glyph }) {
   );
 }
 function Readout({
-  glyph, label, value, valueText, unit, detail, deltaLabel, action, drill = false,
+  glyph, label, value, valueText, unit, detail, deltaLabel, drill = false,
 }: {
   glyph: Glyph;
   label: string;
@@ -41,12 +41,11 @@ function Readout({
   unit?: string;
   detail: ReactNode;
   deltaLabel: string;
-  action?: ReactNode;
   drill?: boolean;
 }) {
   return (
     <div className={s.readout}>
-      <div className={s.label}><GlyphMark kind={glyph} /><span>{label}</span>{action}</div>
+      <div className={s.label}><GlyphMark kind={glyph} /><span>{label}</span></div>
       <div className={s.figure}>
         <div className={s.value}>{drill
           ? btn(
@@ -97,7 +96,6 @@ export function OverviewReadouts({
               detail={<><span>达标 <b>{p.highPerformanceThreshold == null ? "—" : readoutNumber(p.highPerformanceCount)}</b></span><span>可判定 <b>{readoutNumber(p.knownLikeCount)}</b></span>
                 <span className={s.visuallyHidden}>{p.highPerformanceThreshold == null ? "样本爆款规则未设置" : "样本爆款：点赞 ≥ " + number(p.highPerformanceThreshold)}</span>
               </>}
-              action={btn("规则", "rules", "", s.ruleAction, { "aria-label": "查看或调整样本爆款规则" })}
             />
             <Readout
               glyph="distribution"
@@ -109,7 +107,7 @@ export function OverviewReadouts({
         ))}
       </div>
       {platforms.length === 0 ? (
-        <div className={s.noPlatform}>当前范围暂无可判定的平台表现，已有材料仍可阅读。{btn("规则", "rules", "", s.ruleAction)}</div>
+        <div className={s.noPlatform}>当前范围暂无可判定的平台表现，已有材料仍可阅读。</div>
       ) : null}
       {controls ? <div className={s.controls}>{controls}</div> : null}
     </section>
