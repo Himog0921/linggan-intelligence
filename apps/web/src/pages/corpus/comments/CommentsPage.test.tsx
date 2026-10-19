@@ -58,6 +58,15 @@ describe('D3 actual four-view React boundary', () => {
   await userEvent.click(screen.getByRole('button',{name:'清空选择'}));
   expect(screen.queryByText('已选 1 条 · 来自 1 篇作品')).not.toBeInTheDocument();
  });
+ it('keeps research start independent of comment-directory failures',async()=>{
+  installFetch(url=>url.pathname.endsWith('/comments')?json({error:'unavailable'},503):undefined);
+  renderPage(`domain=${DOMAIN}&view=comments`);
+  await screen.findByText(/评论目录读取失败/);
+  expect(document.querySelector('.v7-context-count summary b')).toHaveTextContent('—');
+  const start=screen.getByRole('button',{name:'发起研究'});expect(start).toBeEnabled();
+  await userEvent.click(start);
+  expect(await screen.findByRole('combobox',{name:'本次使用的方法版本'})).toBeInTheDocument();
+ });
  it('retains an uncertain post-usage request identity and never updates optimistically',async()=>{
   let attempts=0;installFetch((url,options)=>{
    if(url.pathname.endsWith('/comments/post-usage')){attempts++;if(attempts===1)return Promise.reject(new TypeError('lost receipt'));const body=JSON.parse(String(options.body));return json({contract:'comment-post-usage.v1',requestRef:body.requestRef,commentKey:body, outcome:'replayed',postUsage:{state:'used',markedAt:null}});}
