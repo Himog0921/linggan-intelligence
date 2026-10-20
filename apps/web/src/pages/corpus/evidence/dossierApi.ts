@@ -30,7 +30,7 @@ export async function fetchRelayerPlan(work: string, domain: string, signal?: Ab
   return parseRelayerPlanResponse(await requestJson(`${base(work)}/relayer-plan?${scope(domain)}`, signal ? { signal } : {}));
 }
 
-/** 「按当前模型预览完整请求」：只读，不调用模型。 */
+/** 「按旧配置预览完整请求」：只读，不调用模型。 */
 export async function fetchCreatorPreview(work: string, domain: string, signal?: AbortSignal): Promise<CreatorPreview> {
   return parseCreatorPreview(await requestJson(`${base(work)}/creator-preview?${scope(domain)}`, signal ? { signal } : {}));
 }

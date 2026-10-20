@@ -9,6 +9,7 @@ import type { DossierMedia, DossierPayload } from './dossierTypes';
 import { ImageCompare } from './ImageCompare';
 import { FeedbackLine, Section } from './Primitives';
 import { TaskInput } from './TaskInput';
+import { NoteMaterialSection } from './NoteMaterialSection';
 import { errorCode } from './evidenceFeedback';
 import { DOSSIER_KEY, dossierKey } from './evidenceKeys';
 import { momentText } from './evidencePresent';
@@ -45,7 +46,7 @@ function Head({ payload, relayer, busy, onRefresh, onPreview }: { payload: Dossi
       <p className={styles.note}>{`本篇可用布局 ${plan.layoutCount} 个 · 待分层 ${plan.pendingLayouts} 个 · 已是当前版本 ${plan.alreadyCurrent} 个 · 需先识字 ${plan.needsOcr} 个`}</p>
       <div className={styles.toolbar}>
         <ActionButton variant="primary" onClick={onPreview}>
-          预览 AI 输入
+          预览旧任务输入
         </ActionButton>
         <button type="button" disabled={busy} onClick={onRefresh}>
           刷新底稿
@@ -134,6 +135,7 @@ export function DossierPanel({ work, domain, active, platformComments, onOpenIma
         </p>
       ) : null}
       <CoverageSection payload={payload} />
+      <NoteMaterialSection key={`${domain}:${work}`} work={work} domain={domain} />
       <TaskInput payload={payload} work={work} domain={domain} sectionRef={taskSection} />
       <FragmentsSection payload={payload} onCompare={compare} />
       <Section title="原图与识别对照">

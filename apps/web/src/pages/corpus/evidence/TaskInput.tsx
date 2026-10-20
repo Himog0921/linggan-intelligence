@@ -22,11 +22,11 @@ function PreviewResult({ preview }: { preview: Preview }) {
   if (preview.phase !== 'done') return null;
   const { result } = preview;
   if (!result.available) {
-    return <p className={styles.note}>{result.reason === 'model_not_configured' ? '尚未配置模型，以上为默认材料预览。' : '当前无法准备完整请求，请检查模型输入额度或材料范围。'}</p>;
+    return <p className={styles.note}>{result.reason === 'model_not_configured' ? '旧配置尚未指定模型，以上为旧任务默认材料预览。' : '当前无法准备完整请求，请检查模型输入额度或材料范围。'}</p>;
   }
   return (
     <>
-      <p>{`模型输入上限 ${result.inputTokenLimit ?? '未知'} tokens；输入保守估算上界 ${result.estimatedInputTokensUpperBound ?? '未知'} tokens。正式任务会在启动时再次准备并冻结。`}</p>
+      <p>{`模型输入上限 ${result.inputTokenLimit ?? '未知'} tokens；输入保守估算上界 ${result.estimatedInputTokensUpperBound ?? '未知'} tokens。这是旧配置下的预览，不会启用任务。`}</p>
       {result.materials ? <Disclosure title="实际准备的 Markdown 材料" text={result.materials} /> : null}
       {/* 完整请求含系统提示词与整份输入：只作折叠诊断显示，不写存储、不写日志（P08）。 */}
       <Disclosure title="完整请求与来源映射" text={JSON.stringify(result.raw, null, 2)} />
@@ -36,7 +36,7 @@ function PreviewResult({ preview }: { preview: Preview }) {
 
 /**
  * 「送给研究任务的材料」：选一个研究任务，看它实际会拿到的材料——已纳入的字符数、是否有预算截断、各片段、标准 Markdown。
- * 创作者任务另有「按当前模型预览完整请求」：只读，不调用模型、不预留额度，只在用户点击后读取。
+ * 创作者任务另有「按旧配置预览完整请求」：只读，不调用模型、不预留额度，只在用户点击后读取。
  */
 export function TaskInput({ payload, work, domain, sectionRef }: { payload: DossierPayload; work: string; domain: string; sectionRef: Ref<HTMLDivElement> }) {
   const [task, setTask] = useState<TaskKey>('creator');
@@ -62,7 +62,8 @@ export function TaskInput({ payload, work, domain, sectionRef }: { payload: Doss
 
   return (
     <div ref={sectionRef} className={styles.anchor}>
-      <Section title="送给研究任务的材料">
+      <Section title="旧任务输入预览">
+        <p className={styles.note}>以下是旧任务材料与旧配置预览，当前执行已停用；不代表新统一设置或每篇解读的实际模型请求。</p>
         <label className={styles.task}>
           选择任务
           <SelectField label="选择研究任务" value={task} options={TASK_OPTIONS.map(([value, label]) => ({ value, label }))}
@@ -78,7 +79,7 @@ export function TaskInput({ payload, work, domain, sectionRef }: { payload: Doss
         {task === 'creator' ? (
           <>
             <button type="button" disabled={preview.phase === 'loading'} onClick={readPreview}>
-              按当前模型预览完整请求
+              按旧配置预览完整请求
             </button>
             <PreviewResult preview={preview} />
           </>

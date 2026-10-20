@@ -431,4 +431,8 @@ AI-GEN1 PR-1B安装接续：人工维护源码为`scripts/runtime/ai_guard.py`�
 
 AI-GEN1正式设置页候选：人工维护的apps/web/src/pages/settings分区/闭集解码/交互测试及ai_foundation样本读口是入Git源码。实际React/TS/lint/build/owned浏览器输出固定private/ai-gen1-pr1b/settings-*，不入Git；浏览器只连owned loopback，素材/skill包来自自有fixture目录，不读取真实用户目录或运行模型。页面构建仍在apps/web/dist，使用原Web治理生命周期。
 
-AI-GEN1 C0：人工维护离线合同/固定合成fixture/页面与纯合成测试/计划允许入Git；验证输出固定本独立树`artifacts/private/ai-gen1-pr1c0/`，忽略不提交，无真实材料或共享DB。CI同一浏览器证据放自有`$RUNNER_TEMP/web-app-proof/c0-offline/`，随既有Web artifact归档；截图/report/临时fixture.json不入Git。B自有target已移交本C0树target，不碰runtime-main；删除工作树前保留需要的私有日志。
+AI-GEN1 C0：人工维护离线合同/固定合成fixture/页面与纯合成测试/计划允许入Git；验证输出固定本独立树`artifacts/private/ai-gen1-pr1c0/`，忽略不提交，无真实材料或共享DB。CI同一浏览器证据放自有`$RUNNER_TEMP/web-app-proof/c0-offline/`，随既有Web artifact归档；截图/report/临时fixture.json不入Git。研发阶段B自有target曾移交C0；合并收尾已清理该工作树/target，日志保留到仓库根同名`artifacts/private/ai-gen1-pr1c0/`。Mog另行授权的实际发布只读元数据与合成页面回执沿该private目录保留，不含真实原文/秘密，不能与无DB研发证明混称。
+
+## AI-GEN1 · 材料只读预览隔离证明
+
+`artifacts/private/ai-gen1-note-material-preview/`：本任务自有合成浏览器报告、截图、日志、审查哈希和CI回执，不入Git；由正式测试runner生成，交付/集成后按任务证据保留，不包含真实原文/秘密。CI写入`$RUNNER_TEMP/web-app-proof/note-material/`，沿既有artifact上传/到期清理。

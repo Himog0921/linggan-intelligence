@@ -65,7 +65,8 @@ async fn dossier_http_preview_relayer_comments_and_scope_are_real_routes() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(creator["available"], true, "{creator}");
     assert!(creator["estimatedInputTokensUpperBound"].as_u64().unwrap() <= 8192);
-    let scope = serde_json::from_value(json!({"domain":dossier_fixture::DOMAIN,"platform":"xhs"})).unwrap();
+    let scope =
+        serde_json::from_value(json!({"domain":dossier_fixture::DOMAIN,"platform":"xhs"})).unwrap();
     let data =
         linggan_evidence::creator_discovery::load_creator_material_for_work(&db, &scope, work)
             .await
@@ -261,5 +262,66 @@ async fn dossier_http_note_material_is_scoped_read_only_and_origin_guarded() {
             .await
             .unwrap(),
         0
+    );
+}
+
+/// PAGE-NOTE-MATERIAL-001: owned synthetic DB, actual read handler and production React.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "owned PostgreSQL + built React + Chromium; --note-material-ui only"]
+async fn dossier_note_material_readonly_browser_proof() {
+    assert_eq!(std::env::var("NOTE_MATERIAL_UI_PROOF").as_deref(), Ok("1"));
+    let db = dossier_fixture::fixture::proof_database("note_material_ui").await;
+    let work = dossier_fixture::work(&db).await;
+    dossier_fixture::legacy_ocr(&db).await;
+    linggan_evidence::record_slot_disposition(
+        &db,
+        "xhs:dossier-note:image:1",
+        linggan_evidence::MaterialMediaDisposition::WithdrawnOrRestricted,
+        "synthetic-proof",
+        "readonly UI restricted-column fixture",
+    )
+    .await
+    .unwrap();
+    let effects = || async {
+        sqlx::query_scalar::<_, Value>("SELECT jsonb_build_array((SELECT count(*) FROM linggan_note_material_snapshot),(SELECT count(*) FROM linggan_model_invocation),(SELECT count(*) FROM linggan_media_processing_job),(SELECT count(*) FROM linggan_media_processing_job_event),(SELECT count(*) FROM linggan_media_ocr_layering_result),(SELECT count(*) FROM linggan_runtime_capture_package),(SELECT count(*) FROM collection_acquisition_request),(SELECT count(*) FROM collection_work_order),(SELECT count(*) FROM collection_work_order_lease))")
+            .fetch_one(db.pool()).await.unwrap()
+    };
+    let before = effects().await;
+    let directory = std::env::var("WEB_APP_PROOF_DIR").expect("owned proof output directory");
+    std::fs::create_dir_all(&directory).unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let application = app_with_database(db.clone());
+    let server = tokio::spawn(async move { axum::serve(listener, application).await.unwrap() });
+    std::fs::write(
+        std::path::Path::new(&directory).join("fixture.json"),
+        json!({"origin":origin,"domain":dossier_fixture::DOMAIN,"work":work}).to_string(),
+    )
+    .unwrap();
+    let result =
+        std::process::Command::new(std::env::var("WEB_APP_PROOF_NODE").expect("Node supplied"))
+            .arg(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../web/test/e2e/note-material-readonly.mjs"),
+            )
+            .env("WEB_APP_PROOF_DIR", &directory)
+            .status();
+    server.abort();
+    let _ = server.await;
+    assert!(
+        result.unwrap().success(),
+        "readonly browser proof failed: {directory}"
+    );
+    let report: Value = serde_json::from_slice(
+        &std::fs::read(std::path::Path::new(&directory).join("report.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(report["finished"], true);
+    assert_eq!(report["pageErrors"], json!([]));
+    assert_eq!(report["blockedRequests"], json!([]));
+    assert_eq!(
+        effects().await,
+        before,
+        "read path creates no model, snapshot, media, layering, collection, work-order or lease side effects"
     );
 }
