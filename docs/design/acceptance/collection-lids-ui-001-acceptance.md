@@ -48,3 +48,25 @@ Mog视觉/业务签收、独立复审、远端CI、main整合、#457最终head�
 补证路径：`/tmp/collection-lids-ui-001/feedback-02/`的targets-hover.png、creator-frozen.png、keyword-frozen.png、freeze.json、task-detail.png、task-results.png、tasks-search.png、task-detail-{1280,820,390}.png、drawer-viewports.json、detail-proof.json及verify.log。截图/日志私有不入Git。冻结参考只用于交互核对，未引入外部组件：[Airtable字段冻结](https://support.airtable.com/articles/6540330000-airtable-field-actions)、[AG Grid固定列](https://www.ag-grid.com/javascript-data-grid/column-pinning/)。
 
 本轮仍为#458候选及4196只读预览，正式3000/main、真实业务写入、独立复审、远端CI和Mog最终签收不由以上验证替代。
+
+## 2026-10-20 · 工位弹窗收口验收（第三轮，最新）
+
+同一#458候选、基于3dcbe33c继续；本轮按Mog直接裁定取代旧大页面/大看板/运行概览。工位管理成为当前列表的居中模态弹窗，四页签为工位、今天在跑什么、自动观察排程、插件认领；保留所属工位的能力/账号/接活/认领窗口/改名/停用与新增。旧runtime深链安全返回原来源，保留station定位，拒绝外部/反斜杠返回。侧栏分组删除，任务主新建按钮右对齐。
+
+插件认领以最近报到为首层，旧安装折叠；原生required在无工位选择时阻止提交，非受控字段承接原CommandForm恢复。运行/排程/工位/安装未知分别展示，真实0不冒充未知。能力名称取现有合同与中文映射，颜色按后端原状态，只更换呈现，不重算资格。工具与页签在正文滚动时保持可达。
+
+提交前本地只读commit-reviewer按AGENTS要求执行（Sonnet不可选，继承当前模型）；两项P2先隔离复现、后修复：浏览器后退跳过脏稿保护；认领受控select丢失恢复选择。新增回归包含后退→继续/放弃与丢回包→重开→拒绝回执保留选择/无第二次POST。修后四文件106项通过，无未处理发现。关闭/遮罩/Escape/浏览器后退统一保护，硬刷新/离站由beforeunload提示；收起未确认操作保留原请求，迟到回执不重新打开弹窗或跳页。
+
+初次最终全量verify出现一项原创作者筛选关闭断言失败（95文件中94通过，1062项中1061通过）；失败路径位于未改动的CreatorsPage.test.tsx:372，已保留verify-first.log，不将此次执行写成全绿。定向复验与最终全量结果收尾追加，不改该范围外实现或降低断言。
+
+本轮私有证据位置`/tmp/collection-lids-ui-001/feedback-03/`；没有真实新增、认领、停用、平台、模型或采集写入，没有正式3000/main发布。浏览器和最终检查结果随后追加。
+
+第三轮最终回执：含最终路由读取修订的全量verify为**95文件1062项全过**，strict类型/ESLint/Vite构建通过；初次失败的原创作者文件独立48项全过，完整重跑亦通过，保留原失败，不修改范围外断言。最后仅中文/留白收紧后，相关两文件15项及类型/构建补验通过。Token镜像、LIDS213项/46反例、设计手册、diff通过；项目治理收尾PASS。
+
+浏览器实测补齐了真实POP的第三个问题：被拦截的浏览器地址短暂变化使旧useManagementRead查询键切换，重挂表单。现查询键与请求都消费React Router已确认的search；管理API参数仍兼容原默认入口。真实“新增输入→浏览器后退→继续处理”确认输入仍为原草稿；明确放弃才关闭，URL仍保留domain=all/page=3，普通关闭焦点回到工位入口。旧runtime含station/return_to实际转到任务page=3，指定工位展开且焦点落到该行。观察目标与任务两页入口均原位打开。
+
+默认1626宽按钮右缘与工具栏右缘同为1602px（1440截图单独留存）；侧栏无“采集与观察”。工位弹窗1440/1280宽均1152px，左右居中；820宽772px、390宽374px，各自位于实际面包屑下沿之下，root与正文/弹窗均无意外横向溢出。展开能力长正文在390宽时内部滚动908px，工具区仍在top254.09px。能力“就绪”实测success颜色；实际工位2台、执行0、排程0、最近待认领0、历史安装10条，均来自当前只读数据。历史默认收起，空选择保持required；未提交真实认领。页面错误日志为空，结束恢复默认viewport。
+
+证据：feedback-03的tasks-aligned.png、runtime-stations.png、runtime-targets.png、runtime-capabilities.png、runtime-claims.png、runtime-claims-expanded.png、runtime-back-draft.png、runtime-{1440,1280,820,390}.png、runtime-final.png、viewports.json、verify-first.log、creators-recheck.log、verify.log、final-targeted.log、build.log。截图/日志私有不入Git。本轮本地提交前复核及最终增量复核无未处理发现，远端CI/发布复审、main/3000与Mog签收仍不由本地通过替代。
+
+收尾只读状态刷新：#457仍OPEN且head已前移至6fdbe9a1；本候选仍基于4700352b，合并前的依赖/head对齐继续待做，本轮不自行整合。共享3000现为2dc1f520/ready（不再是前两轮观察到的616ac30f）；本任务没有发布或重启正式运行。以上新读数替代文中旧的“当前3000/main”快照，不从health推断main、采集或Mog签收。

@@ -1,9 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
+import { useLocation } from 'react-router';
 
-export function useManagementRead<T>(load: (signal: AbortSignal) => Promise<T>) {
+export function useManagementRead<T>(load: (signal: AbortSignal, search: string) => Promise<T>) {
+  const {search}=useLocation();
   const query = useQuery({
-    queryKey: ['collection-management', load.name, window.location.search],
-    queryFn: ({ signal }) => load(signal),
+    queryKey: ['collection-management', load.name, search],
+    queryFn: ({ signal }) => load(signal,search),
     gcTime: 0,
     retry: false,
   });

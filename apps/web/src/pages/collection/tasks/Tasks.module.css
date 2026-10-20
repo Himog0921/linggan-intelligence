@@ -13,3 +13,5 @@
 .pagination>span{margin-right:auto}
 @media(max-width:1000px){.searchForm{flex-basis:100%}.band{gap:var(--lgi-space-4)}.filters{flex:1;gap:var(--lgi-space-3)}}
 @media(max-width:600px){.band>button{margin-left:auto}.filters{flex-basis:100%}.pagination{flex-wrap:wrap}.pagination>span{flex-basis:100%}}
+
+.band>button:global([data-new-run]){margin-left:auto}

@@ -45,3 +45,19 @@
 任务页删除旧“历史执行记录与诊断”及无调用者的旧前端诊断组件/适配器，后端历史数据/API不删除；详情删除原始JSON/版本/UUID/租约等技术诊断展示，保留进展、成果、缺口、来源/范围、工位入口、停止确认及未确认原请求核实。详情默认紧凑宽度，顶沿不高于实际共享页头含面包屑下沿；去除大占位和无业务价值的重复解释。搜索复用现有检索组合的完整FIND边界/输入/C焦点与M2提交按钮，保留手动提交、IME、URL/清空语义，不新增查询规则。
 
 文件边界为本包CollectionFrame/目标表/任务页/详情CSS Modules及必要回归；唯一Token、共享AppShell、后端、数据库、插件不改。验收新增：真实hover各格颜色一致，creator与keyword各自纵向冻结/横向对齐且换表不串字段，标题位移，任务详情实际top/width/滚动/返回，旧诊断DOM与请求不存在，搜索完整边界/IME/空结果/清空及原命令保护。全部在GET-only预览验证；证明写入已登记的/tmp/collection-lids-ui-001/feedback-02/，不入Git。
+
+## 2026-10-20 · 工位管理弹窗与导航收口（第三轮）
+
+Mog直接要求主新建按钮右对齐、删去侧栏“采集与观察”、工位管理改居中弹窗，核心只保留新增工位、工位及能力、今天在跑什么、自动观察排程与插件认领。该最新确认局部替代PAGE-COLLECTION-001“管理面整体复用原页面与全部能力”的呈现要求：运行大看板/运行概览与独立管理页面退役为历史；工位的改名/接活/账号/能力/认领窗口/停用仍归所属工位，不新增后端能力。
+
+表面图：Tasks工具栏主动作右对齐；CollectionFrame删导航分组字样，Z02工位入口用URL-owned runtime=1打开居中原生ModalDialog，旧runtime深链转到安全返回页并打开弹窗；弹窗含工位/今天在跑什么/自动观察排程/插件认领四页签，新增工位为所属表单。工位用紧凑对象行及能力/设置展开区代替十列横向宽表；插件最近报到优先、历史安装折叠，原生required阻止未选工位提交。
+
+状态图：未知/已知空/读取失败及保留旧值独立；连接/能力/执行/额度分别呈现，不把已有插件数当在线数。只展示真实running当前执行，不伪造今日累计。原CommandForm请求身份/回执/未确认状态保留；关闭弹窗遇未保存/在途表单先明确继续或放弃/收起原请求，迟到回执不跳页。
+
+依赖图：复用现有ModalDialog、ActionButton、CommandForm、managementApi与唯一Token，不改共享壳、后端/DB/插件；新增RuntimeManagementDialog.tsx/RuntimeManagementDialog.module.css为Collection专属适配，RuntimeContent.tsx及StationManagement.tsx拆分现有领域呈现，测试仍在management/CollectionFrame相关同目录。旧RuntimePage及runtimeDestination.ts只做兼容重定向，运行概览组件由Git保留可追溯历史。私有截图日志仍在已登记/tmp/collection-lids-ui-001/feedback-03/。
+
+验收图：按钮右缘/无导航分组；两个日常页打开关闭弹窗保留完整URL/分页/焦点；旧runtime含station与return_to的深链安全恢复；四页签真实与未知状态、新增及未保存/请求收起保护、插件空选择不POST；真实浏览器1440/1280及窄屏对话框/内容局部滚动/各页签/能力/认领/关闭返回，GET-only不触发写；全量verify、Token/LIDS/手册/治理/diff及AGENTS要求提交前只读commit-reviewer复核。无main/3000发布。
+
+提交前复核：按本树AGENTS新增明确要求执行一次commit-reviewer只读子代理（与原单实施Agent声明区分）；定义中的Sonnet本会话不可选，使用继承模型。两项P2经隔离复现：URL后退绕过脏稿、受控认领下拉无法承接原请求草稿恢复，均已修复并加回归；改用项目现有useBlocker/beforeunload及非受控required下拉。复核四文件106项通过、最终未处理发现0，仅本地提交前复核，不替代远端CI/整包独立发布复审。
+
+浏览器追加依赖：真实popstate在useBlocker回退时会暂时改变window.location，现useManagementRead以原始window.search作queryKey，导致弹窗内表单重挂载。必要依赖明确纳入useManagementRead.ts与managementApi.ts：使用React Router确认的search为同一读取key/请求上下文，不新增接口/数据语义；原APIload仍支持默认search以兼容既有调用。验收真实浏览器后退被拦截后继续，表单和输入均不丢。

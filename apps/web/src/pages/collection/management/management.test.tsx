@@ -49,7 +49,7 @@ describe('collection management data boundaries', () => {
     const read = decodeRuntime(runtime({ stations: null }));
     if (!read.projection) throw new Error('missing synthetic projection');
     render(<RuntimeContent data={read.projection} reload={vi.fn()} />);
-    expect(screen.getByText('工位列表当前读不到。这不表示没有登记工位，也不表示它们离线——两者的处置不同。')).toBeInTheDocument();
+    expect(screen.getByText('工位列表当前读不到，不能据此认定没有工位或全部离线。')).toBeInTheDocument();
     expect(screen.queryByText(/还没有登记任何工位/)).not.toBeInTheDocument();
   });
   it('retains the station management actions and explicit unknown capability/account states', async () => {
@@ -57,11 +57,22 @@ describe('collection management data boundaries', () => {
     if (!read.projection) throw new Error('missing synthetic projection');
     render(<RuntimeContent data={read.projection} reload={vi.fn()} />);
     await userEvent.click(screen.getByRole('button', { name: '管理 合成工位 工位' }));
-    const modal = screen.getByRole('dialog', { name: '管理 合成工位' });
+    const modal = screen.getByRole('region', { name: '工位列表' });
     expect(within(modal).getByText(/能力矩阵当前读不到/)).toBeInTheDocument();
     expect(within(modal).getByText(/接活开关与账号绑定当前读不到/)).toBeInTheDocument();
-    expect(within(modal).getByRole('button', { name: '开窗口' })).toBeInTheDocument();
+    expect(within(modal).getByRole('button', { name: '开启认领窗口' })).toBeInTheDocument();
     expect(within(modal).getByRole('button', { name: '停用这台工位' })).toBeInTheDocument();
+  });
+  it('插件认领先明确选择工位，历史安装默认收起', async () => {
+    const read=decodeRuntime(runtime({unclaimed:[{installationRef:'new-install',pluginVersion:'synthetic',browser:'Chrome',firstSeen:'今天',recent:true},{installationRef:'old-install',pluginVersion:'old',browser:'Chrome',firstSeen:'去年',recent:false}]}));
+    if(!read.projection) throw new Error('missing synthetic projection');
+    render(<RuntimeContent data={read.projection} reload={vi.fn()}/>);
+    await userEvent.click(screen.getByRole('button',{name:/插件认领/}));
+    const recent=within(screen.getByText('首次报到 今天').closest('article')!);
+    const claim=recent.getByRole('button',{name:'认领到工位'});expect(recent.getByRole('combobox',{name:'认领到哪台工位'})).toBeInvalid();await userEvent.click(claim);expect(recent.queryByText('正在等待服务器回执…')).not.toBeInTheDocument();
+    expect(recent.getByRole('combobox',{name:'认领到哪台工位'})).toHaveValue('');
+    await userEvent.selectOptions(recent.getByRole('combobox',{name:'认领到哪台工位'}),'s');expect(claim).toBeEnabled();
+    expect(screen.getByText('较早的安装 · 1 条').closest('details')).not.toHaveAttribute('open');
   });
   it('keeps native field constraints and leaves draft input after an explicit server rejection', async () => {
     const calls: { path: string; body: unknown }[] = [];
@@ -154,4 +165,13 @@ describe('collection management data boundaries', () => {
     expect(posts).toBe(2);
   });
 
+});
+
+it('认领请求失去回包后重开，拒绝回执仍保留原选工位',async()=>{
+  let identity:unknown;let posts=0;
+  vi.stubGlobal('fetch',vi.fn(async(path:string,options?:RequestInit)=>{if(path.endsWith('/context'))return Response.json({epoch:'claim-recovery'});if(options?.method==='POST'){posts++;const body:unknown=JSON.parse(String(options.body));if(typeof body==='object'&&body!==null&&'requestRef' in body)identity=body.requestRef;throw new TypeError('lost reply');}expect(path).toContain(`/receipts/${String(identity)}`);return Response.json({requestRef:identity,action:'runtime-claims',outcome:'rejected',code:'claim_rejected',location:null});}));
+  const read=decodeRuntime(runtime({unclaimed:[{installationRef:'claim-recovery',pluginVersion:'synthetic',browser:'Chrome',firstSeen:'今天',recent:true}]}));if(!read.projection)throw new Error('missing projection');
+  const view=()=> <RuntimeContent data={read.projection!} reload={vi.fn()}/>;
+  const first=render(view());await userEvent.click(screen.getByRole('button',{name:/插件认领/}));await userEvent.selectOptions(screen.getByRole('combobox',{name:'认领到哪台工位'}),'s');await userEvent.click(screen.getByRole('button',{name:'认领到工位'}));await screen.findByText(/结果未确认/);first.unmount();
+  render(view());await userEvent.click(screen.getByRole('button',{name:/插件认领/}));expect(screen.getByRole('combobox',{name:'认领到哪台工位'})).toHaveValue('s');await userEvent.click(screen.getByRole('button',{name:'核实同一请求'}));await screen.findByText(/认领没有成功/);expect(screen.getByRole('combobox',{name:'认领到哪台工位'})).toHaveValue('s');expect(screen.getByRole('button',{name:'认领到工位'})).toBeEnabled();expect(posts).toBe(1);
 });

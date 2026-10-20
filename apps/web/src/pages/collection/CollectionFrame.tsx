@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router';
+import { ActionButton } from '../../shared/ActionButton';
 import { Sidebar, NavIcon } from '../../shared/Sidebar';
 import { AppShell } from '../../app/AppShell';
 import { requestJson } from '../../shared/api';
@@ -8,6 +9,7 @@ import collectionSurface from './CollectionSurface.module.css';
 import styles from './CollectionFrame.module.css';
 import { parseCollectionShell } from './collectionShell';
 
+const RuntimeManagementDialog = lazy(() => import('./management/RuntimeManagementDialog').then(m => ({ default: m.RuntimeManagementDialog })));
 const DomainManagementDialog = lazy(() => import('./management/DomainManagementDialog').then(m => ({ default: m.DomainManagementDialog })));
 
 function domainSummary(d: {status:string; targetCount:number; sampleCount:number|null}) { return d.status === 'paused' ? '已暂停' : `${d.targetCount} 个目标 · ${d.sampleCount ?? '未知'} 篇作品`; }
@@ -21,7 +23,7 @@ export function CollectionReadout({ value, label, scope, valueFirst = false }: {
 
 export function CollectionFrame({ section, toolbar, meta, children }: { section: Section; toolbar?: ReactNode; meta?: ReactNode; children: ReactNode }) {
   const [domainManager, setDomainManager] = useState(false);
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const returnPath = params.get('return_to');
   const returnDomain = returnPath && /^\/collection\/(targets|tasks)(?:[?#]|$)/.test(returnPath) && !/[\\\r\n]/.test(returnPath) ? new URL(returnPath, location.origin).searchParams.get('domain') : null;
   const domain = params.get('domain') ?? (section === 'domains' || section === 'runtime' ? returnDomain : null);
@@ -33,13 +35,14 @@ export function CollectionFrame({ section, toolbar, meta, children }: { section:
   const navDomain = section === 'targets' ? shell ? selected?.domainRef ?? 'all' : domain : domain;
   const suffix = navDomain ? `?domain=${encodeURIComponent(navDomain)}` : '';
   const source = `/collection/${section === 'tasks' ? 'tasks' : 'targets'}${suffix}`;
-  const management = `/collection/runtime?return_to=${encodeURIComponent(source)}`;
+  const runtimeOpen = params.get('runtime') === '1';
+  function toggleRuntime(open: boolean) { const next=new URLSearchParams(params); if(open) next.set('runtime','1'); else {next.delete('runtime');next.delete('station');} setParams(next); }
   const scheduler = shell?.scheduler === 'running' ? '调度心跳正常' : shell?.scheduler === 'stale' ? '调度心跳已过期' : '调度状态读不到';
   useEffect(() => { document.title = `${titles[section]} · 采集 · Linggan Intelligence`; }, [section]);
   const picker = <details className="v7-domain-picker"><summary aria-label="切换当前观察领域"><span>{shell ? selected?.name ?? '全部领域' : '读取领域…'}</span><small>{selected ? domainSummary(selected) : '全部领域'}</small><i aria-hidden="true" /></summary><nav aria-label="可选观察领域"><a href="/collection/targets?domain=all" aria-current={shell && !selected ? 'page' : undefined} aria-label="全部领域，全部领域"><span>全部领域</span><small>全部领域</small></a>{shell?.domains?.map(d => <a key={d.domainRef} href={`/collection/targets?domain=${encodeURIComponent(d.domainRef)}`} aria-current={d.domainRef === selected?.domainRef ? 'page' : undefined} aria-label={`${d.name}，${domainSummary(d)}`}><span>{d.name}</span><small>{domainSummary(d)}</small></a>)}<a className="c-domain-management-link" href={`/collection/domains?return_to=${encodeURIComponent(source)}`} data-collection-management onClick={e => { e.preventDefault(); e.currentTarget.closest('details')?.removeAttribute('open'); setDomainManager(true); }}><span>管理领域</span><small>配置与目标用途</small></a></nav></details>;
   const crumb = <>采集 <span className="v7-slash">/</span> {section === 'targets' ? <>{picker} <span className="v7-slash">/</span> </> : null}<b>{titles[section]}</b></>;
   const collectionState = !shell || shell.totalTargets === null ? '状态未知' : shell.totalTargets > 0 ? '观察中' : '无观察目标';
-  return <AppShell active="collection" collectionState={collectionState} boundaryLabel={shell ? '本机不访问平台' : '采集状态未知'} crumb={crumb} meta={<>{meta}{section !== 'runtime' ? <a className="c-btn-quiet c-management-entry" href={management} data-collection-management aria-label="工位管理，全局执行资源">工位管理</a> : null}</>}>
-    <div className="v7-shell"><Sidebar aria-label="采集导航"><div className="v7-nav-label" data-readout="COLLECTION">采集与观察</div>{(['targets', 'tasks'] as const).map((entry) => <a key={entry} className="v7-side-nav" href={`/collection/${entry}${suffix}`} aria-current={section === entry ? 'page' : undefined}><NavIcon name={entry} /><span>{titles[entry]}</span></a>)}<div className="v7-side-foot"><span className="v7-side-dot" />{!shell || shell.totalTargets === null ? <>采集状态未知<br /><span className="v7-mono">目标与调度状态当前读不到</span></> : shell.totalTargets === 0 ? <>暂无观察目标<br /><span className="v7-mono">没有可巡检的对象 · {scheduler}</span></> : <>观察目标 {shell.totalTargets}<br /><span className="v7-mono">巡检开着 {shell.monitoringTargets ?? '未知'} · {scheduler}</span></>}</div></Sidebar><main className={`${collectionSurface['c-page'] ?? 'c-page'} ${section === 'domains' ? '' : styles.frame}`} data-collection-page={section} aria-labelledby="page-title"><h1 className="v7-sr-only" id="page-title">{titles[section]}</h1>{toolbar}<div className={`c-body ${section === 'domains' ? '' : styles.body}`}>{children}</div>{domainManager && <Suspense fallback={<p role="status">正在读取领域管理…</p>}><DomainManagementDialog onClose={() => setDomainManager(false)} /></Suspense>}</main></div>
+  return <AppShell active="collection" collectionState={collectionState} boundaryLabel={shell ? '本机不访问平台' : '采集状态未知'} crumb={crumb} meta={<>{meta}{section !== 'runtime' ? <ActionButton variant="quiet" className="c-management-entry" data-collection-management aria-label="工位管理，全局执行资源" aria-haspopup="dialog" aria-expanded={runtimeOpen} onClick={()=>toggleRuntime(true)}>工位管理</ActionButton> : null}</>}>
+    <div className="v7-shell"><Sidebar aria-label="采集导航">{(['targets', 'tasks'] as const).map((entry) => <a key={entry} className="v7-side-nav" href={`/collection/${entry}${suffix}`} aria-current={section === entry ? 'page' : undefined}><NavIcon name={entry} /><span>{titles[entry]}</span></a>)}<div className="v7-side-foot"><span className="v7-side-dot" />{!shell || shell.totalTargets === null ? <>采集状态未知<br /><span className="v7-mono">目标与调度状态当前读不到</span></> : shell.totalTargets === 0 ? <>暂无观察目标<br /><span className="v7-mono">没有可巡检的对象 · {scheduler}</span></> : <>观察目标 {shell.totalTargets}<br /><span className="v7-mono">巡检开着 {shell.monitoringTargets ?? '未知'} · {scheduler}</span></>}</div></Sidebar><main className={`${collectionSurface['c-page'] ?? 'c-page'} ${section === 'domains' ? '' : styles.frame}`} data-collection-page={section} aria-labelledby="page-title"><h1 className="v7-sr-only" id="page-title">{titles[section]}</h1>{toolbar}<div className={`c-body ${section === 'domains' ? '' : styles.body}`}>{children}</div>{domainManager && <Suspense fallback={<p role="status">正在读取领域管理…</p>}><DomainManagementDialog onClose={() => setDomainManager(false)} /></Suspense>}{runtimeOpen && <Suspense fallback={<p role="status">正在打开工位管理…</p>}><RuntimeManagementDialog onClose={()=>toggleRuntime(false)}/></Suspense>}</main></div>
   </AppShell>;
 }

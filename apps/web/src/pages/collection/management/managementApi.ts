@@ -93,11 +93,11 @@ export function decodeRuntime(value: unknown) {
   return { asOf: nullable(row.asOf, text), returnTo: text(row.returnTo), readable: boolean(row.readable), projection: row.readable === true ? projection(row.projection) : null };
 }
 export type RuntimeRead = ReturnType<typeof decodeRuntime>;
-export function managementPath(page: 'domains' | 'runtime') {
-  const query = new URLSearchParams(window.location.search);
+export function managementPath(page: 'domains' | 'runtime', search = window.location.search) {
+  const query = new URLSearchParams(search);
   const params = new URLSearchParams();
   for (const name of ['domain', 'return_to']) { const value = query.get(name); if (value !== null) params.set(name, value); }
   return `/api/collection/workspace/${page}?${params.toString()}`;
 }
-export async function loadDomains(signal?: AbortSignal) { return decodeDomains(await requestJson(managementPath('domains'), { signal })); }
-export async function loadRuntime(signal?: AbortSignal) { return decodeRuntime(await requestJson(managementPath('runtime'), { signal })); }
+export async function loadDomains(signal?: AbortSignal, search?: string) { return decodeDomains(await requestJson(managementPath('domains',search), { signal })); }
+export async function loadRuntime(signal?: AbortSignal, search?: string) { return decodeRuntime(await requestJson(managementPath('runtime',search), { signal })); }
