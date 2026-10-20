@@ -71,3 +71,5 @@ Mog明确接受候选，并授权核对两PR依赖/检查，无问题合并并�
 发布检查兼容性：项目现存Collection隔离浏览器证明仍定位旧表格/诊断/工位大页面。为验证本轮用户已批准呈现，必要纳入scripts/test-collection-single-run-ui.cjs、test-collection-management-json.cjs、test-collection-targets-json.cjs；只调整真实UI入口/选择器/业务文案与退役诊断断言，保留所有领域/工位/请求幂等/材料/分页/跨域/真实库后果检查，新增布局和无诊断回退断言，不降低HTTP/DB/请求验证。不在CI调用的旧同数据视觉对比脚本保留历史，不伪称本次运行。
 
 本地整合验收回执：97文件/1063测试及types/lint/build通过，治理213项通过，独立commit-reviewer无未处理发现。Collection隔离PG核心14项通过、5条route合同通过；真实browser任务/分页/跨领域/原请求GET回执/51唯一作品通过，目标11合同通过，工位6合同/18次隔离UI命令通过，未访问外部平台，临时容器与卷清理verified。目标脚本回执status定位收窄到原alertdialog，避免新选择计数status导致严格匹配重复；仍核完整lostRef。远端CI/两PR最终整合与3000运行证明继续待后续精确head确认。
+
+最终依赖接入08ae340e（含main686280f7）后，100文件1073测试、types/lint/build及治理通过；独立复核确认采集代码/3脚本相对已验收树无增量，新材料只读预览等与#457精确一致，无未处理发现。#458现转main并移出Draft，仍先合并#457；本次文档提交触发主线PR的精确head CI。最终提交隔离浏览器补跑中，未将旧head结果或SKIPPED写成最终PASS。合并/3000切换待检查完成后执行。
