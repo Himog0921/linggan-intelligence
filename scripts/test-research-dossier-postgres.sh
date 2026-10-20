@@ -148,6 +148,18 @@ if [[ "${1:-}" == "--ai-foundation" || "${1:-}" == "--ai-ledger" || "${1:-}" == 
   fi
   exit 0
 fi
+if [[ "${1:-}" == "--note-material-ui" ]]; then
+  command -v node >/dev/null || { echo "Node is required for the readonly UI proof" >&2; exit 1; }
+  [[ -d apps/web/node_modules ]] || npm ci --prefix apps/web --ignore-scripts --no-audit --no-fund
+  npm --prefix apps/web run build
+  export LINGGAN_WEB_DIST="$project_root/apps/web/dist"
+  export WEB_APP_PROOF_DIR="${WEB_APP_PROOF_DIR:-$project_root/artifacts/private/ai-gen1-note-material-preview/browser}"
+  export WEB_APP_PROOF_NODE="$(command -v node)"
+  export NOTE_MATERIAL_UI_PROOF=1
+  export LINGGAN_PI_NODE="$project_root/artifacts/private/ai-gen1-note-material-preview/no-model-process"
+  cargo test -p linggan-api --bin linggan-api dossier_note_material_readonly_browser_proof --locked -- --ignored --nocapture
+  exit 0
+fi
 if [[ "${1:-}" == "--note-material" ]]; then
   cargo test -p linggan-evidence --test local_producer_postgres every_declared_capability_admits_one_typed_package --locked -- --ignored --nocapture
   cargo test -p linggan-evidence --test note_material_postgres --locked -- --ignored --nocapture

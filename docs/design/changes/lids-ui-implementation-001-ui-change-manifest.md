@@ -78,3 +78,5 @@ apps/web、`apps/api/src/local_web/web_app.rs` 及其测试 `web_app_tests.rs` �
 远端最新head的证据库浏览器证明在通道状态第13项点击前关闭下拉；本地同head全链通过。共享SelectField对active项调用scrollIntoView会连带滚动祖先，而组件明确在外部滚动时关闭，存在自触发关闭的路径。必要修复限shared/SelectField.tsx：键盘/悬停active项仅滚动所属菜单，不滚动页面或外层筛选面；补shared/SelectField.test.tsx复现并覆盖长菜单末项、外部滚动关闭及真实选择，保留完整浏览器点击断言后复跑CI。属于已授权两页统一选择器缺陷修复，不改产品/API/查询合同。
 
 修复后本地verify 93文件/1036项及types/lint/build通过，独立commit-reviewer 2文件8项复核通过、无未处理发现；首次末项高度收紧定位按position再次运行，无祖先滚动。治理/diff通过。修复前1a6b6d12的本地完整PG/浏览器全部阶段与清理已通过，但远端同head选择器点击失败不作PASS；修复后的远端完整CI必须重跑确认，3000未切换。
+
+等待检查期间main前进至686280f7（#460材料只读预览），再次整合主线：DossierPanel冲突保留LIDS ActionButton及main“预览旧任务输入”的准确标签、NoteMaterialSection只读入口；TaskInput/evidence browser与对应文档取自动三方整合并复核。进度并集，不删除新主线能力；重新verify/独立review/精确head CI后才合并。

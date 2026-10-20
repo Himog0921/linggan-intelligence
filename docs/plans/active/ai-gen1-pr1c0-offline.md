@@ -1,6 +1,7 @@
 # AI-GEN1 PR-1C0：离线产品与合同
 
 > 状态: 活跃计划
+> 交付进度: C0工程已发布，当前事实见PR #459，真实C1/G4另列
 > 最后核对: 2026-10-20
 > 适用范围: #454 C0；同一主执行任务，独立工作树
 > 事实来源: Mog 2026-10-20 的C0/C1拆分；DEC-0011、note-material-input.v1 与 B@87cda8bd
@@ -99,4 +100,6 @@ C0新增的唯一数据源为后端人工维护的合成fixture及纯合同模�
 - 构建成功后，设`C0_PREVIEW_NODE`为当前固定Node、`C0_PREVIEW_PROOF_DIR`为自有private目录，运行`cargo test --locked -p linggan-api --bins offline_preview_browser_main_path -- --ignored --nocapture`。监听127.0.0.1随机端口、app数据库NotConfigured，浏览器只允许该origin及固定预演POST，finally关闭浏览器，Rust退出前abort并等待自有server。5步为同一用户主路径，不是5轮验收。
 - 过程中的Token、自有测试选项类型、标签定位及构建未就绪失败原件保留，不计成功。源码资格、相应测试、一次审查/最终提交/CI各自核实；不补全套故障/缩放/恢复包。具体最终数字和head集中本包PR，避免多份状态漂移。
 
-未证明：真实ADHD清单/解读质量、真实材料完整率、供应商/额度、正式裁定持久化/来源撤回传播、#420/G4、C1启用，以及本包合并部署。C0的合成流程不放行这些后续动作。
+未证明：真实ADHD清单/解读质量、真实材料完整率、供应商/额度、正式裁定持久化/来源撤回传播、#420/G4、C1启用。C0的合成流程不放行这些后续动作。
+
+Mog已另行批准精确head发布，C0合并/部署的实际回执统一维护在[#459](https://github.com/Himog0921/linggan-intelligence/pull/459)及本机交接11。本计划保留实施合同和研发证明条件，当前不再把合并部署列为未完成；不据此签G4或启用C1。
