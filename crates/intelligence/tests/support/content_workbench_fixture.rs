@@ -20,6 +20,41 @@ pub async fn db(name: &str) -> Database {
     .execute(db.pool())
     .await
     .unwrap();
+    sqlx::raw_sql(include_str!(
+        "../../../../database/migrations/0140_ai_gen1_writing.sql"
+    ))
+    .execute(db.pool())
+    .await
+    .unwrap();
+    sqlx::raw_sql(include_str!(
+        "../../../../database/migrations/0141_ai_gen1_legacy_settings.sql"
+    ))
+    .execute(db.pool())
+    .await
+    .unwrap();
+    // These migrations really ran above. Record their exact sources for the dedicated
+    // executor's startup check; the minimal material fixture intentionally omits them.
+    for (id, source) in [
+        (
+            "0141_ai_gen1_legacy_settings",
+            include_str!("../../../../database/migrations/0141_ai_gen1_legacy_settings.sql"),
+        ),
+        (
+            "0127_content_workbench",
+            include_str!("../../../../database/migrations/0127_content_workbench.sql"),
+        ),
+        (
+            "0128_content_workbench_ai",
+            include_str!("../../../../database/migrations/0128_content_workbench_ai.sql"),
+        ),
+        (
+            "0140_ai_gen1_writing",
+            include_str!("../../../../database/migrations/0140_ai_gen1_writing.sql"),
+        ),
+    ] {
+        sqlx::query("INSERT INTO linggan_local_schema_migration(migration_id,migration_sha256) VALUES($1,$2)")
+            .bind(id).bind(text_hash(source)).execute(db.pool()).await.unwrap();
+    }
     db
 }
 pub fn page(kind: PageKind) -> ImagePage {

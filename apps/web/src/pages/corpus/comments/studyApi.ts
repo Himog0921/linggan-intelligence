@@ -45,3 +45,5 @@ export interface StudyNavigation {
   comment(key: CommentKey): void;
   candidates(state: string): void;
 }
+
+export interface SelectedComment { commentKey: CommentKey; observationRole: string }

@@ -258,19 +258,7 @@ pub fn validate_context_links(
 /// A reproducible estimate, not a tokenizer count or a guarantee for every provider.
 /// Keep this formula in sync with estimateTopicInputTokens in the Pi adapter.
 pub fn estimate_input_tokens(system: &str, prompt: &str) -> i64 {
-    fn estimate(value: &str) -> i64 {
-        let (mut total, mut ascii_run) = (0_i64, 0_i64);
-        for ch in value.chars() {
-            if ch.is_ascii_alphanumeric() {
-                ascii_run += 1;
-            } else {
-                total += (ascii_run + 2) / 3 + 1;
-                ascii_run = 0;
-            }
-        }
-        total + (ascii_run + 2) / 3
-    }
-    estimate(system) + estimate(prompt) + 128
+    crate::ai_foundation::transport::estimate_input_tokens(system, prompt) as i64
 }
 fn citations(c: &[Citation], fragments: &[Fragment], required: bool) -> bool {
     (!required || !c.is_empty())

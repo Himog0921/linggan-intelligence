@@ -64,6 +64,7 @@ pub async fn run_once(
     secrets: &dyn ModelSecretStore,
     adapter: &PiAdapter,
 ) -> Result<bool, ModelError> {
+    crate::model_settings::legacy_execution_gate()?;
     let ready: bool =
         sqlx::query_scalar("SELECT to_regclass('linggan_creator_discovery_policy') IS NOT NULL")
             .fetch_one(db.pool())
@@ -80,7 +81,7 @@ pub async fn run_once(
     ] {
         // Private static identifiers, never input text.
         let sql = format!(
-            "UPDATE {table} SET job_state='queued',next_attempt_at=scope_001_now(),last_error_code=NULL WHERE job_state='paused' AND last_error_code='model_budget_exhausted' AND updated_at < date_trunc('day',scope_001_now() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai'"
+            "UPDATE {table} SET job_state='queued',next_attempt_at=scope_001_now(),last_error_code=NULL WHERE job_state='paused' AND last_error_code='model_budget_exhausted' AND linggan_ai_budget_day(updated_at)<linggan_ai_budget_day()"
         );
         sqlx::query(sqlx::AssertSqlSafe(sql))
             .execute(db.pool())
@@ -289,12 +290,12 @@ async fn call(
         .bind(config)
         .fetch_one(&mut *tx)
         .await?;
-    let charged:i64=sqlx::query_scalar("SELECT COALESCE(sum(charged_tokens),0)::bigint FROM linggan_model_invocation WHERE result->>'purpose'='creator_discovery' AND result->>'domainRef'=$1::text AND created_at>=date_trunc('day',scope_001_now() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai'").bind(domain.to_string()).fetch_one(&mut *tx).await?;
+    let charged:i64=sqlx::query_scalar("SELECT COALESCE(sum(charged_tokens),0)::bigint FROM linggan_model_invocation WHERE task_key='legacy_creator_discovery' AND budget_domain_ref=$1::uuid AND budget_day=linggan_ai_budget_day()").bind(domain.to_string()).fetch_one(&mut *tx).await?;
     let daily_limit:i64=sqlx::query_scalar("SELECT daily_token_limit FROM linggan_creator_discovery_policy WHERE domain_ref=$1 AND platform='xhs'").bind(domain).fetch_one(&mut *tx).await?;
     if charged + reserved > daily_limit {
         return Err(ModelError::Budget);
     }
-    sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,config_ref,operation,request_hash,state,reserved_tokens,charged_tokens,result) VALUES($1,$2,$3,$4,'analyze',$5,'running',$6,$6,jsonb_build_object('purpose','creator_discovery','domainRef',$7::text,'jobKind',$8::text,'jobKey',$9::text,'jobLease',$10::text,'inputFingerprint',$11::text,'citationMap',$12::jsonb))").bind(invocation).bind(row.get::<Uuid,_>("connection_version_ref")).bind(row.get::<Uuid,_>("model_ref")).bind(config).bind(discovery::hash(&input.to_string())).bind(reserved).bind(domain.to_string()).bind(job_kind).bind(&job_key).bind(lease.to_string()).bind(fingerprint).bind(citation_map).execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,config_ref,operation,request_hash,state,reserved_tokens,charged_tokens,task_key,quota_bucket,budget_domain_ref,classification_source,result) VALUES($1,$2,$3,$4,'analyze',$5,'running',$6,$6,'legacy_creator_discovery','domain_day',$7::uuid,'producer_v1',jsonb_build_object('purpose','creator_discovery','domainRef',$7::text,'jobKind',$8::text,'jobKey',$9::text,'jobLease',$10::text,'inputFingerprint',$11::text,'citationMap',$12::jsonb))").bind(invocation).bind(row.get::<Uuid,_>("connection_version_ref")).bind(row.get::<Uuid,_>("model_ref")).bind(config).bind(discovery::hash(&input.to_string())).bind(reserved).bind(domain.to_string()).bind(job_kind).bind(&job_key).bind(lease.to_string()).bind(fingerprint).bind(citation_map).execute(&mut *tx).await?;
     tx.commit().await?;
     let mut dispatch = permit.begin().await?;
     let ready = research_model_semantically_ready_in_transaction(&mut dispatch, config).await;

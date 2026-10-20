@@ -135,7 +135,7 @@ describe('依据抽屉 · 作品与依据（按作品分组）', () => {
     expect(within(quote.closest('blockquote') as HTMLElement).getByRole('link', { name: '回查原作品' }).getAttribute('href')).toContain('/corpus/evidence?');
   });
 
-  it('各篇的分析状态分别显示；只有失败 / 暂停且分析已开启才出现重试；错误码只在「处理信息」里', async () => {
+  it('历史分析状态与错误依据保持可读；旧开关已开启也不出现重试', async () => {
     defaultRoutes(
       kit,
       ok(
@@ -159,7 +159,7 @@ describe('依据抽屉 · 作品与依据（按作品分组）', () => {
     expect(queued).toHaveTextContent('排队待分析');
     expect(within(queued!).queryByRole('button', { name: /重试/ })).toBeNull();
     expect(failed).toHaveTextContent('分析失败 · 模型服务暂不可用');
-    expect(within(failed!).getByRole('button', { name: '重试这篇作品的失败分析' })).toBeEnabled();
+    expect(within(failed!).queryByRole('button', { name: /重试/ })).toBeNull();
     const processing = within(failed!).getByText('处理信息').closest('details') as HTMLElement;
     expect(processing).toHaveTextContent('model_provider_unavailable');
     expect(failed!.textContent?.replace(processing.textContent ?? '', '')).not.toContain('model_provider_unavailable');
@@ -235,13 +235,13 @@ describe('依据抽屉 · 作者资料与提交栏', () => {
     }
   });
 
-  it('领域已暂停：调整判断、重试、加入都不可用', async () => {
+  it('领域已暂停：人工调整与加入不可用，旧分析重试已移除', async () => {
     defaultRoutes(kit, ok(listJson({ domainStatus: 'paused', analysisEnabled: true, items: [itemJson(1, { works: [workJson(11, { state: 'failed', lastErrorCode: 'model_disabled', withResult: false })] })] })));
     const { dialog, user } = await openDrawer();
     expect(within(dialog).getByRole('button', { name: '调整判断' })).toBeDisabled();
     expect(within(dialog).getByRole('button', { name: '加入本领域观察' })).toBeDisabled();
     await user.click(within(dialog).getByRole('tab', { name: '作品与依据' }));
-    expect(within(dialog).getByRole('button', { name: '重试这篇作品的失败分析' })).toBeDisabled();
+    expect(within(dialog).queryByRole('button', { name: /重试/ })).toBeNull();
     for (const button of within(dialog).getAllByRole('button', { name: /调整判断|补充判断/ })) expect(button).toBeDisabled();
   });
 });

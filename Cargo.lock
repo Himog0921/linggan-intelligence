@@ -879,6 +879,7 @@ dependencies = [
 name = "linggan-intelligence"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "image",
  "linggan-contracts",
  "linggan-evidence",
@@ -891,6 +892,7 @@ dependencies = [
  "sqlx",
  "thiserror",
  "tokio",
+ "unicode-normalization",
  "unicode-properties",
  "url",
  "uuid",
@@ -917,6 +919,7 @@ dependencies = [
  "linggan-evidence",
  "linggan-intelligence",
  "linggan-storage-postgres",
+ "png",
  "serde",
  "serde_json",
  "sha2 0.11.0",

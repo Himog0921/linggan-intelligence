@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { execute, sseByteLimit, VERSION } from '../src/adapter.mjs';
+import { LIMITS } from '../src/execution.mjs';
 
 async function server(handler) {
   const s=http.createServer(handler);await new Promise(resolve=>s.listen(0,'127.0.0.1',resolve));
@@ -10,11 +11,13 @@ async function server(handler) {
 const request=(baseUrl,extra={})=>({version:VERSION,operation:'probe',api:'openai-completions',baseUrl,
   localEndpoint:true,apiKey:'synthetic-credential-only',modelId:'synthetic-model',timeoutMs:3000,maxOutputTokens:128,
   system:'Synthetic protocol proof, no real material.',prompt:'Return a JSON object.',...extra});
-const DIAGNOSTIC_KEYS=['elapsedMs','finishReason','httpStatus','limitKind','receivedBytes','responseStarted','retryClass','schemaVersion','sdkErrorType','stage','terminalReceived','usageKnown'];
+const DIAGNOSTIC_KEYS=['elapsedMs','finishReason','httpStatus','limitKind','receivedBytes','requestSent','responseStarted','retryClass','schemaVersion','sdkErrorType','stage','terminalReceived','usageKnown'];
 function assertDiagnostic(result,expected={}) {
   const d=result.diagnostic;
   assert.deepEqual(Object.keys(d).sort(),DIAGNOSTIC_KEYS);
   assert.equal(d.schemaVersion,1);
+  assert.equal(typeof d.requestSent,'boolean');
+  if(d.httpStatus!==null)assert.equal(d.requestSent,true);
   assert.ok(Number.isSafeInteger(d.elapsedMs)&&d.elapsedMs>=0);
   for(const [key,value] of Object.entries(expected))assert.equal(d[key],value,`diagnostic.${key}`);
   return d;
@@ -35,7 +38,7 @@ test('actual Pi AI and Agent SDK use explicit key, no tools, one request, record
     const body=JSON.parse(Buffer.concat(chunks));assert.equal(body.model,'synthetic-model');
     assert.ok(!body.tools?.length);assert.equal(body.stream,true);success(res);
   });
-  try{const result=await execute(request(s.url));assert.equal(result.ok,true);assert.equal(result.text,'{"ok":true}');assert.deepEqual(result.usage,{inputTokens:17,outputTokens:5,costUsd:null});assert.equal(calls,1);const d=assertDiagnostic(result,{stage:'terminal',httpStatus:200,responseStarted:true,terminalReceived:true,finishReason:'stop',usageKnown:true,sdkErrorType:null,retryClass:'never'});assert.ok(d.receivedBytes>0);}finally{await s.close();}
+  try{const result=await execute(request(s.url));assert.equal(result.ok,true);assert.equal(result.text,'{"ok":true}');assert.deepEqual(result.usage,{inputTokens:17,outputTokens:5,cachedInputTokens:null,cachedWriteTokens:null,reasoningTokens:null,costUsd:null});assert.equal(calls,1);const d=assertDiagnostic(result,{stage:'terminal',httpStatus:200,responseStarted:true,terminalReceived:true,finishReason:'stop',usageKnown:true,sdkErrorType:null,retryClass:'never'});assert.ok(d.receivedBytes>0);}finally{await s.close();}
 });
 test('omitted provider usage remains unknown and catalog is an account endpoint list',async()=>{
   const s=await server((req,res)=>{if(req.url.endsWith('/models')){res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({data:[{id:'synthetic-model'}]}));}else success(res,'{"ok":true}',false);});
@@ -74,15 +77,15 @@ test('recorded limit kind distinguishes wire bytes from final text bytes',async(
     const wire=await server((req,res)=>{res.writeHead(200,{'Content-Type':'text/event-stream'});res.end(wireBody);});
     try{const result=await execute(request(wire.url,{maxOutputTokens}));assert.equal(result.failureCode,'response_too_large');assertDiagnostic(result,{limitKind:'sse_stream_token_budget',retryClass:'never'});}finally{await wire.close();}
   }
-  const final=await server((req,res)=>success(res,'x'.repeat(65537),false));
-  try{const result=await execute(request(final.url));assert.equal(result.failureCode,'response_too_large');assertDiagnostic(result,{limitKind:'final_text_65536'});}finally{await final.close();}
+  const final=await server((req,res)=>success(res,'x'.repeat(LIMITS.maxTextBytes+1),false));
+  try{const result=await execute(request(final.url,{maxOutputTokens:8192}));assert.equal(result.failureCode,'response_too_large');assertDiagnostic(result,{limitKind:'final_text_bytes'});}finally{await final.close();}
 });
 test('2,000-token fragmented output succeeds above the historical SSE byte cap',async()=>{
   let calls=0;
   const expected=`{"synthetic":"${'材'.repeat(1976)}"}`;
   const s=await server(async(req,res)=>{
     calls++;const chunks=[];for await(const chunk of req)chunks.push(chunk);
-    const body=JSON.parse(Buffer.concat(chunks));assert.equal(body.max_completion_tokens,2000);
+    const body=JSON.parse(Buffer.concat(chunks));assert.equal(body.max_tokens,2000);assert.equal(body.max_completion_tokens,undefined);
     res.writeHead(200,{'Content-Type':'text/event-stream'});
     for(const content of expected)res.write(`data: ${JSON.stringify({id:'synthetic-fragmented-response',object:'chat.completion.chunk',created:1,model:'synthetic-model',choices:[{index:0,delta:{content},finish_reason:null}]})}\n\n`);
     res.write(`data: ${JSON.stringify({id:'synthetic-fragmented-response',choices:[{index:0,delta:{},finish_reason:'stop'}],usage:{prompt_tokens:17,completion_tokens:2000}})}\n\n`);
@@ -91,7 +94,7 @@ test('2,000-token fragmented output succeeds above the historical SSE byte cap',
   try{
     const result=await execute(request(s.url,{maxOutputTokens:2000}));
     assert.equal(result.ok,true);assert.equal(result.text,expected);assert.equal(calls,1);
-    assert.deepEqual(result.usage,{inputTokens:17,outputTokens:2000,costUsd:null});
+    assert.deepEqual(result.usage,{inputTokens:17,outputTokens:2000,cachedInputTokens:null,cachedWriteTokens:null,reasoningTokens:null,costUsd:null});
     const d=assertDiagnostic(result,{limitKind:null,terminalReceived:true,finishReason:'stop',usageKnown:true,retryClass:'never'});
     assert.ok(d.receivedBytes>262144);assert.ok(d.receivedBytes<sseByteLimit(2000));
   }finally{await s.close();}
@@ -99,9 +102,10 @@ test('2,000-token fragmented output succeeds above the historical SSE byte cap',
 test('SSE budget is finite and token-specific while non-stream bodies keep their cap',async()=>{
   assert.equal(sseByteLimit(2000),4358144);
   assert.ok(sseByteLimit(16)<sseByteLimit(2000));
-  assert.equal(sseByteLimit(8192),8388608);
-  const s=await server((req,res)=>{res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({data:[],padding:'x'.repeat(262145)}));});
-  try{const result=await execute(request(s.url,{operation:'discover',maxOutputTokens:2000}));assert.equal(result.failureCode,'response_too_large');assertDiagnostic(result,{limitKind:'sse_stream_262144'});}finally{await s.close();}
+  assert.equal(sseByteLimit(8192),Math.min(LIMITS.maxStreamBytes,LIMITS.baseStreamBytes+8192*LIMITS.streamBytesPerOutputToken));
+  assert.equal(sseByteLimit(LIMITS.maxOutputTokens),LIMITS.maxStreamBytes);
+  const s=await server((req,res)=>{res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({data:[],padding:'x'.repeat(LIMITS.maxResponseBytes+1)}));});
+  try{const result=await execute(request(s.url,{operation:'discover',maxOutputTokens:2000}));assert.equal(result.failureCode,'response_too_large');assertDiagnostic(result,{limitKind:'response_bytes'});}finally{await s.close();}
 });
 test('known provider usage above the authorized token limit is rejected despite stop',async()=>{
   const s=await server((req,res)=>{
@@ -130,13 +134,13 @@ test('real Anthropic SDK protocol preserves start input and final output usage',
     assert.ok(req.url.startsWith('/v1/messages'));assert.equal(req.headers['x-api-key'],'synthetic-credential-only');
     const chunks=[];for await(const c of req)chunks.push(c);const body=JSON.parse(Buffer.concat(chunks));assert.equal(body.max_tokens,128);assert.ok(!body.tools?.length);
     res.writeHead(200,{'Content-Type':'text/event-stream'});
-    const events=[{type:'message_start',message:{id:'msg_synthetic',model:'synthetic-model',role:'assistant',type:'message',content:[],usage:{input_tokens:10,output_tokens:0,cache_read_input_tokens:3}}},
+    const events=[{type:'message_start',message:{id:'msg_synthetic',model:'synthetic-model',role:'assistant',type:'message',content:[],usage:{input_tokens:10,output_tokens:0,cache_read_input_tokens:3,cache_creation_input_tokens:0}}},
       {type:'content_block_start',index:0,content_block:{type:'text',text:''}},
       {type:'content_block_delta',index:0,delta:{type:'text_delta',text:'{"ok":true}'}},
       {type:'content_block_stop',index:0},{type:'message_delta',delta:{stop_reason:'end_turn'},usage:{output_tokens:5}},{type:'message_stop'}];
     for(const e of events)res.write(`event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`);res.end();
   });
-  try{const r=await execute(request(s.url.replace(/\/v1$/,''),{api:'anthropic-messages'}));assert.equal(r.ok,true);assert.equal(r.text,'{"ok":true}');assert.deepEqual(r.usage,{inputTokens:13,outputTokens:5,costUsd:null});}finally{await s.close();}
+  try{const r=await execute(request(s.url.replace(/\/v1$/,''),{api:'anthropic-messages'}));assert.equal(r.ok,true);assert.equal(r.text,'{"ok":true}');assert.deepEqual(r.usage,{inputTokens:13,outputTokens:5,cachedInputTokens:3,cachedWriteTokens:0,reasoningTokens:null,costUsd:null});}finally{await s.close();}
 });
 test('real OpenAI Responses SDK protocol records response completion usage',async()=>{
   const s=await server(async(req,res)=>{
@@ -146,7 +150,7 @@ test('real OpenAI Responses SDK protocol records response completion usage',asyn
     const events=[{type:'response.created',response:{id:'resp_synthetic'}},{type:'response.output_item.added',output_index:0,item:{...item,content:[]}},{type:'response.output_text.delta',output_index:0,delta:'{"ok":true}'},{type:'response.output_item.done',output_index:0,item},{type:'response.completed',response:{id:'resp_synthetic',status:'completed',output:[item],usage:{input_tokens:12,output_tokens:4,total_tokens:16,input_tokens_details:{cached_tokens:0},output_tokens_details:{reasoning_tokens:0}}}}];
     for(const e of events)res.write(`event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`);res.end();
   });
-  try{const r=await execute(request(s.url,{api:'openai-responses'}));assert.equal(r.ok,true);assert.equal(r.text,'{"ok":true}');assert.deepEqual(r.usage,{inputTokens:12,outputTokens:4,costUsd:null});}finally{await s.close();}
+  try{const r=await execute(request(s.url,{api:'openai-responses'}));assert.equal(r.ok,true);assert.equal(r.text,'{"ok":true}');assert.deepEqual(r.usage,{inputTokens:12,outputTokens:4,cachedInputTokens:0,cachedWriteTokens:null,reasoningTokens:0,costUsd:null});}finally{await s.close();}
 });
 test('invalid request and unsafe endpoint are rejected before any provider call',async()=>{
   assert.equal((await execute(null)).failureCode,'invalid_request');

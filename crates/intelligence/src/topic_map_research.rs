@@ -30,8 +30,8 @@ pub(crate) use restoration::{
 };
 pub(crate) use source::{load_inputs, load_inputs_for_works, manifest_source_work_refs};
 pub(crate) use windows::{
-    input_identity, is_research_evidence, reference_manifest, research_window_count, research_windows,
-    selected_comment_study, with_comparison_context,
+    input_identity, is_research_evidence, reference_manifest, research_window_count,
+    research_windows, selected_comment_study, with_comparison_context,
 };
 #[cfg(test)]
 #[path = "topic_map_research/tests.rs"]
@@ -150,6 +150,14 @@ pub async fn apply_research_command(
     db: &Database,
     command: &ResearchCommand,
 ) -> Result<Value, ResearchError> {
+    if matches!(
+        command,
+        ResearchCommand::Configure { .. }
+            | ResearchCommand::Start { .. }
+            | ResearchCommand::Resume { .. }
+    ) {
+        return Err(ResearchError::Invalid("ai_legacy_execution_retired"));
+    }
     let (request, domain) = command.identity();
     let hash = creator_discovery::hash(
         &serde_json::to_string(command).map_err(|_| ResearchError::Invalid("invalid_command"))?,
@@ -290,7 +298,7 @@ async fn finish_pending_start(
 pub async fn read_research_progress(db: &Database, domain: Uuid) -> Result<Value, ResearchError> {
     let p=sqlx::query("SELECT *,updated_at::text AS updated FROM linggan_topic_map_research_policy WHERE domain_ref=$1").bind(domain).fetch_optional(db.pool()).await?;
     let policy=p.map(|r|json!({"modelConfigRef":r.get::<Uuid,_>("model_config_ref"),"dailyTokenLimit":r.get::<i64,_>("daily_token_limit"),"runTokenLimit":r.get::<i64,_>("run_token_limit"),"automaticEnabled":r.get::<bool,_>("automatic_enabled"),"collectionEnabled":r.get::<bool,_>("collection_enabled"),"status":r.get::<String,_>("status"),"updatedAt":r.get::<String,_>("updated")}));
-    let usage=sqlx::query("SELECT COALESCE(sum(i.charged_tokens),0)::bigint AS charged,COALESCE(sum(i.reserved_tokens)FILTER(WHERE i.state='running'),0)::bigint AS reserved FROM linggan_topic_map_research_request q JOIN linggan_model_invocation i USING(invocation_ref) JOIN linggan_topic_map_research_run r USING(run_ref) WHERE r.domain_ref=$1 AND q.budget_day=(scope_001_now() AT TIME ZONE 'Asia/Shanghai')::date").bind(domain).fetch_one(db.pool()).await?;
+    let usage=sqlx::query("SELECT COALESCE(sum(i.charged_tokens),0)::bigint AS charged,COALESCE(sum(i.reserved_tokens)FILTER(WHERE i.state='running'),0)::bigint AS reserved FROM linggan_model_invocation i WHERE i.task_key='legacy_topic_map' AND i.budget_domain_ref=$1 AND i.budget_day=linggan_ai_budget_day()").bind(domain).fetch_one(db.pool()).await?;
     let rows = read_research_runs(db, domain).await?;
     let summary = read_research_summary(db, domain, None).await?;
     let current_method_summary = read_research_summary(db, domain, Some(METHOD_VERSION)).await?;

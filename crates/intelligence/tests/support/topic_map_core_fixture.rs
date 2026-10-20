@@ -17,7 +17,7 @@ pub async fn model_config_mode(db: &Database, original: Uuid, mode: &str, attemp
         .bind(model).bind(original).bind(mode).execute(db.pool()).await.unwrap();
     sqlx::query("INSERT INTO linggan_model_config(config_ref,model_ref,input_token_limit,output_token_limit,timeout_seconds,max_attempts) SELECT $1,$2,input_token_limit,output_token_limit,timeout_seconds,$4 FROM linggan_model_config WHERE config_ref=$3")
         .bind(config).bind(model).bind(original).bind(attempts).execute(db.pool()).await.unwrap();
-    sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,operation,request_hash,state,reserved_tokens,charged_tokens,result) SELECT $1,connection_version_ref,model_ref,'probe','synthetic-semantic-review','succeeded',0,0,$3 FROM linggan_model_entry WHERE model_ref=$2")
+    sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,operation,request_hash,state,reserved_tokens,charged_tokens,result,finished_at) SELECT $1,connection_version_ref,model_ref,'probe','synthetic-semantic-review','succeeded',0,0,$3,scope_001_now() FROM linggan_model_entry WHERE model_ref=$2")
         .bind(Uuid::new_v4()).bind(model).bind(json!({"ok":true,"modelCallable":true,"semanticQualified":true})).execute(db.pool()).await.unwrap();
     config
 }
@@ -35,7 +35,7 @@ pub async fn setup(name: &str) -> (Database, Uuid, PiAdapter) {
     sqlx::query("INSERT INTO linggan_model_connection_version(version_ref,connection_ref,revision,name,api,base_url,local_endpoint,secret_ref)VALUES($1,$2,1,'Synthetic','openai-completions','http://127.0.0.1:18080',true,$3)").bind(version).bind(conn).bind(Uuid::new_v4()).execute(db.pool()).await.unwrap();
     sqlx::query("INSERT INTO linggan_model_entry(model_ref,connection_version_ref,model_id,origin)VALUES($1,$2,'synthetic-topic-map','manual')").bind(model).bind(version).execute(db.pool()).await.unwrap();
     sqlx::query("INSERT INTO linggan_model_config(config_ref,model_ref,input_token_limit,output_token_limit,timeout_seconds,max_attempts)VALUES($1,$2,8192,1000,30,$3)").bind(config).bind(model).bind(if name=="topic_map_research_unsent"{1}else{3}).execute(db.pool()).await.unwrap();
-    sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,operation,request_hash,state,reserved_tokens,charged_tokens,result)VALUES($1,$2,$3,'probe','synthetic','succeeded',0,0,$4)").bind(Uuid::new_v4()).bind(version).bind(model).bind(json!({"ok":true,"modelCallable":true,"semanticQualified":true})).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,operation,request_hash,state,reserved_tokens,charged_tokens,result,finished_at)VALUES($1,$2,$3,'probe','synthetic','succeeded',0,0,$4,scope_001_now())").bind(Uuid::new_v4()).bind(version).bind(model).bind(json!({"ok":true,"modelCallable":true,"semanticQualified":true})).execute(db.pool()).await.unwrap();
     let node = std::env::var_os("CREATOR_PROOF_NODE")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| {

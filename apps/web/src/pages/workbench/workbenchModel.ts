@@ -276,9 +276,11 @@ export interface AiReadiness {
   writingQualified: boolean | null;
   configRef: string | null;
   methodVersion: string;
-  modelRef?: string;
+  modelRef?: string | null;
   connectionVersionRef?: string;
   qualificationScope?: string;
+  taskConfigRef?: string;
+  deniedReasons?: string[];
 }
 export interface AiPreview {
   previewRef: string;
@@ -287,15 +289,16 @@ export interface AiPreview {
   action: WritingAction;
   methodVersion: string;
   configRef: string;
-  modelRef: string;
+  modelRef: string | null;
   connectionVersionRef: string;
   sourceCount: number;
   inputCharacterCount: number;
-  estimatedInputTokensUpperBound: number;
+  estimatedInputTokens: number;
   reservedTokens: number;
   maxCalls: number;
   outboundInput: unknown;
   confirmationRequired: boolean;
+  taskConfigRef?: string;
 }
 export interface WritingSuggestion {
   title: string | null;
@@ -312,7 +315,7 @@ export interface WritingSuggestion {
 export interface AiStatus {
   requestId: string;
   workRef: string;
-  invocationRef: string;
+  invocationRef: string | null;
   state: string;
   inputRevision: string;
   action: WritingAction;
@@ -321,11 +324,19 @@ export interface AiStatus {
   sourceQualification: string;
   failureCode: string | null;
   staleBase: boolean;
+  batchRef?: string | null;
+  taskConfigRef?: string | null;
   usage: {
+    state: string;
     inputTokens: number | null;
     outputTokens: number | null;
-    chargedTokens: number;
+    chargedTokens: number | null;
     costUsd: number | null;
+    measuredTokens?: number | null;
+    cachedInputTokens?: number | null;
+    cachedWriteTokens?: number | null;
+    reasoningTokens?: number | null;
+    costPicoUsd?: string | null;
   };
 }
 type Parser<T> = (value: unknown) => T;
@@ -685,9 +696,11 @@ export const parseReadiness = shape<AiReadiness>({
   writingQualified: nullable(bool),
   configRef: nullable(uuid),
   methodVersion: str,
-  modelRef: optional(uuid),
+  modelRef: optional(nullable(uuid)),
   connectionVersionRef: optional(uuid),
-  qualificationScope: optional(str)
+  qualificationScope: optional(str),
+  taskConfigRef: optional(uuid),
+  deniedReasons: optional(array(str))
 });
 const action = choice('draft', 'rewrite_selection', 'page_copy');
 export const parsePreview = shape<AiPreview>({
@@ -697,17 +710,18 @@ export const parsePreview = shape<AiPreview>({
   action,
   methodVersion: str,
   configRef: uuid,
-  modelRef: uuid,
+  modelRef: nullable(uuid),
   connectionVersionRef: uuid,
   sourceCount: integer,
   inputCharacterCount: integer,
-  estimatedInputTokensUpperBound: integer,
+  estimatedInputTokens: integer,
   reservedTokens: integer,
   maxCalls: integer,
   outboundInput: v => v,
-  confirmationRequired: bool
+  confirmationRequired: bool,
+  taskConfigRef: optional(uuid)
 });
-const suggestion = shape<WritingSuggestion>({
+export const parseWritingSuggestion = shape<WritingSuggestion>({
   title: nullable(str),
   paragraphs: array(shape({
     paragraphId: nullable(uuid),
@@ -722,20 +736,28 @@ const suggestion = shape<WritingSuggestion>({
 export const parseAiStatus = shape<AiStatus>({
   requestId: uuid,
   workRef: uuid,
-  invocationRef: uuid,
+  invocationRef: nullable(uuid),
   state: str,
   inputRevision: uuid,
   action,
   methodVersion: str,
-  suggestion: nullable(suggestion),
+  suggestion: nullable(parseWritingSuggestion),
   sourceQualification: str,
   failureCode: nullable(str),
   staleBase: bool,
+  batchRef: optional(nullable(uuid)),
+  taskConfigRef: optional(nullable(uuid)),
   usage: shape({
+    state: str,
     inputTokens: nullable(integer),
     outputTokens: nullable(integer),
-    chargedTokens: integer,
-    costUsd: nullable(num)
+    chargedTokens: nullable(integer),
+    costUsd: nullable(num),
+    measuredTokens: optional(nullable(integer)),
+    cachedInputTokens: optional(nullable(integer)),
+    cachedWriteTokens: optional(nullable(integer)),
+    reasoningTokens: optional(nullable(integer)),
+    costPicoUsd: optional(nullable(str))
   })
 });
 export function newDocument(title = ''): WorkDocument {

@@ -21,7 +21,12 @@ pub(super) fn routes() -> Router<LocalWebState> {
             "/api/local/creator-discovery-overrides",
             put(override_field),
         )
-        .route("/api/local/creator-discovery-analysis/retry", post(retry))
+        .route(
+            "/api/local/creator-discovery-analysis/retry",
+            post(|| async {
+                crate::local_web::ai_settings::legacy_closed("legacy_creator_discovery")
+            }),
+        )
         .layer(axum::middleware::from_fn(
             super::comment_study::local_comment_study_guard,
         ))
@@ -103,15 +108,18 @@ struct Policy {
     daily_token_limit: Option<i64>,
 }
 async fn policy(State(state): State<LocalWebState>, Json(body): Json<Policy>) -> Response {
+    if body.analysis_enabled.is_some()
+        || body.config_ref.is_some()
+        || body.daily_token_limit.is_some()
+    {
+        return crate::local_web::ai_settings::legacy_closed("legacy_creator_discovery");
+    }
     let Some(db) = state.database.database() else {
         return error(DiscoveryError::Invalid("read_model_not_connected"));
     };
     let result = async {
         if body.like_threshold.is_some_and(|n| n <= 0) {
             return Err(DiscoveryError::Invalid("invalid_like_threshold"));
-        }
-        if body.daily_token_limit.is_some_and(|n| !(1024..=10_000_000).contains(&n)) {
-            return Err(DiscoveryError::Invalid("invalid_daily_token_limit"));
         }
         let mut tx = db.pool().begin().await?;
         let status: Option<String> = sqlx::query_scalar(
@@ -130,34 +138,8 @@ async fn policy(State(state): State<LocalWebState>, Json(body): Json<Policy>) ->
         if existing.get::<i64, _>("revision") != body.revision {
             return Err(DiscoveryError::Invalid("policy_revision_conflict"));
         }
-        let was_enabled: bool = existing.get("analysis_enabled");
-        let enabled = body.analysis_enabled.unwrap_or(was_enabled);
-        let config = body.config_ref.or(existing.get("config_ref"));
-        let limit = body.daily_token_limit.or(existing.get("daily_token_limit"));
-        if enabled {
-            if config.is_none() {
-                return Err(DiscoveryError::Invalid("analysis_config_required"));
-            }
-            if limit.is_none() {
-                return Err(DiscoveryError::Invalid("daily_token_limit_required"));
-            }
-        }
-        if let Some(config) = config {
-            let known: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_model_config WHERE config_ref=$1)")
-                .bind(config).fetch_one(&mut *tx).await?;
-            if !known {
-                return Err(DiscoveryError::Invalid("analysis_config_not_found"));
-            }
-        }
-        let row = sqlx::query("UPDATE linggan_creator_discovery_policy SET like_threshold=$2,revision=revision+1,analysis_enabled=$4,config_ref=$5,daily_token_limit=$6,updated_at=scope_001_now() WHERE domain_ref=$1 AND platform='xhs' AND revision=$3 RETURNING revision")
-            .bind(body.domain).bind(body.like_threshold).bind(body.revision)
-            .bind(enabled).bind(config).bind(limit).fetch_one(&mut *tx).await?;
-        if enabled && !was_enabled {
-            sqlx::query("UPDATE linggan_creator_discovery_work_analysis SET job_state='queued',attempt_count=0,next_attempt_at=scope_001_now() WHERE domain_ref=$1 AND job_state='paused'")
-                .bind(body.domain).execute(&mut *tx).await?;
-            sqlx::query("UPDATE linggan_creator_discovery_author_analysis SET job_state='queued',attempt_count=0,next_attempt_at=scope_001_now() WHERE domain_ref=$1 AND job_state='paused'")
-                .bind(body.domain).execute(&mut *tx).await?;
-        }
+        let row = sqlx::query("UPDATE linggan_creator_discovery_policy SET like_threshold=$2,revision=revision+1,updated_at=scope_001_now() WHERE domain_ref=$1 AND platform='xhs' AND revision=$3 RETURNING revision")
+            .bind(body.domain).bind(body.like_threshold).bind(body.revision).fetch_one(&mut *tx).await?;
         tx.commit().await?;
         Ok::<_, DiscoveryError>(json!({"revision":row.get::<i64, _>("revision"),"saved":true}))
     }.await;
@@ -222,42 +204,6 @@ async fn override_field(
   tx.commit().await?;
   Ok::<_,DiscoveryError>(json!({"saved":true}))
  }.await;
-    match result {
-        Ok(v) => Json(v).into_response(),
-        Err(e) => error(e),
-    }
-}
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct Retry {
-    domain: Uuid,
-    work_ref: Option<Uuid>,
-    creator_key: Option<String>,
-}
-async fn retry(State(state): State<LocalWebState>, Json(body): Json<Retry>) -> Response {
-    let Some(db) = state.database.database() else {
-        return error(DiscoveryError::Invalid("read_model_not_connected"));
-    };
-    if body.work_ref.is_some() == body.creator_key.is_some() {
-        return error(DiscoveryError::Invalid("one_retry_scope_required"));
-    }
-    let result=async {
-        let mut tx=db.pool().begin().await?;
-        let status:Option<String>=sqlx::query_scalar("SELECT status FROM observation_domain WHERE domain_ref=$1 FOR SHARE").bind(body.domain).fetch_optional(&mut *tx).await?;
-        if status.as_deref()!=Some("active"){return Err(DiscoveryError::Invalid("domain_paused_or_missing"));}
-        let analysis_enabled:bool=sqlx::query_scalar("SELECT COALESCE((SELECT analysis_enabled FROM linggan_creator_discovery_policy WHERE domain_ref=$1 AND platform='xhs'),false)").bind(body.domain).fetch_one(&mut *tx).await?;
-        if !analysis_enabled {return Err(DiscoveryError::Invalid("analysis_disabled"));}
-        let affected=if let Some(work)=body.work_ref {
-            sqlx::query("UPDATE linggan_creator_discovery_work_analysis SET job_state='queued',attempt_count=0,next_attempt_at=scope_001_now(),last_error_code=NULL WHERE domain_ref=$1 AND work_public_ref=$2 AND job_state IN('failed','paused')")
-                .bind(body.domain).bind(work).execute(&mut *tx).await?.rows_affected()
-        }else{
-            let (platform,author)=body.creator_key.as_deref().and_then(linggan_contracts::creator_discovery::decode_creator_key).ok_or(DiscoveryError::Invalid("invalid_creator_key"))?;
-            sqlx::query("UPDATE linggan_creator_discovery_author_analysis SET job_state='queued',attempt_count=0,next_attempt_at=scope_001_now(),last_error_code=NULL WHERE domain_ref=$1 AND platform=$2 AND author_external_id=$3 AND job_state IN('failed','paused')")
-                .bind(body.domain).bind(platform).bind(author).execute(&mut *tx).await?.rows_affected()
-        };
-        tx.commit().await?;
-        Ok::<_,DiscoveryError>(json!({"queued":affected==1}))
-    }.await;
     match result {
         Ok(v) => Json(v).into_response(),
         Err(e) => error(e),

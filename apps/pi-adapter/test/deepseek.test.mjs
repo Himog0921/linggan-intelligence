@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { execute, VERSION } from '../src/adapter.mjs';
+import { capabilityFacts } from './request-facts.mjs';
 
 // Route the SDK's final HTTP request to a local fixture. Never contact DeepSeek.
 test('DeepSeek V4 Responses uses non-thinking mode consistently for probe and analysis', async () => {
@@ -26,7 +27,7 @@ test('DeepSeek V4 Responses uses non-thinking mode consistently for probe and an
     assert.ok(['api.deepseek.com','api.deepseek.com.example.invalid'].includes(url.hostname));
     return originalFetch(`http://127.0.0.1:${server.address().port}${url.pathname}`,init);
   };
-  const request={version:VERSION,api:'openai-responses',baseUrl:'https://api.deepseek.com/v1',apiKey:'SYNTHETIC-NOT-A-CREDENTIAL',modelId:'deepseek-v4-flash',timeoutMs:3000,maxOutputTokens:1024,system:'Synthetic protocol proof.',prompt:'Return one JSON object.'};
+  const request={version:VERSION,api:'openai-responses',execution:capabilityFacts('openai-responses',{outputMode:'prompt_only'}),baseUrl:'https://api.deepseek.com/v1',apiKey:'SYNTHETIC-NOT-A-CREDENTIAL',modelId:'deepseek-v4-flash',timeoutMs:3000,maxOutputTokens:1024,system:'Synthetic protocol proof.',prompt:'Return one JSON object.'};
   try {
     for(const operation of ['probe','analyze']){
       const result=await execute({...request,operation});
@@ -34,14 +35,18 @@ test('DeepSeek V4 Responses uses non-thinking mode consistently for probe and an
       assert.equal(result.usage.outputTokens,8);
     }
     const other=await execute({...request,operation:'probe',baseUrl:'https://api.deepseek.com.example.invalid/v1'});
-    assert.equal(other.failureCode,'output_limit');
-    assert.equal(other.usage.outputTokens,1024);
+    assert.equal(other.ok,true);
+    assert.equal(other.usage.outputTokens,8);
     const unknown=await execute({...request,operation:'probe',modelId:'unknown-model'});
-    assert.equal(unknown.failureCode,'output_limit');
-    assert.equal(bodies.length,4);
+    assert.equal(unknown.ok,true);
+    const unqualified=await execute({...request,operation:'probe',execution:null});
+    assert.equal(unqualified.failureCode,'output_limit');
+    assert.equal(unqualified.usage.outputTokens,1024);
+    assert.equal(bodies.length,5);
     assert.equal(bodies[0].max_output_tokens,1024);
-    assert.equal(bodies[2].reasoning,undefined);
-    assert.equal(bodies[3].reasoning,undefined);
+    assert.deepEqual(bodies[2].reasoning,{effort:'none'});
+    assert.deepEqual(bodies[3].reasoning,{effort:'none'});
+    assert.equal(bodies[4].reasoning,undefined);
   } finally {
     globalThis.fetch=originalFetch;
     await new Promise(resolve=>server.close(resolve));
@@ -60,7 +65,7 @@ test('DeepSeek V4 Chat Completions sends the documented thinking toggle',async()
   const originalFetch=globalThis.fetch;
   globalThis.fetch=(input,init)=>{const url=new URL(typeof input==='string'||input instanceof URL?input:input.url);assert.equal(url.hostname,'api.deepseek.com');return originalFetch(`http://127.0.0.1:${server.address().port}${url.pathname}`,init);};
   try {
-    for(const operation of ['probe','analyze'])assert.equal((await execute({version:VERSION,api:'openai-completions',baseUrl:'https://api.deepseek.com/v1',apiKey:'SYNTHETIC-NOT-A-CREDENTIAL',modelId:'deepseek-v4-pro',operation,timeoutMs:3000,maxOutputTokens:1024,system:'Synthetic proof.',prompt:'Return JSON.'})).ok,true);
+    for(const operation of ['probe','analyze'])assert.equal((await execute({version:VERSION,api:'openai-completions',baseUrl:'https://api.deepseek.com/v1',apiKey:'SYNTHETIC-NOT-A-CREDENTIAL',modelId:'deepseek-v4-pro',operation,execution:capabilityFacts('openai-completions',{outputMode:'prompt_only'}),timeoutMs:3000,maxOutputTokens:1024,system:'Synthetic proof.',prompt:'Return JSON.'})).ok,true);
     assert.equal(bodies.length,2);
     for(const b of bodies){assert.deepEqual(b.thinking,{type:'disabled'});assert.ok(!b.tools?.length);}
   }finally{globalThis.fetch=originalFetch;await new Promise(resolve=>server.close(resolve));}

@@ -35,6 +35,7 @@ pub use material_admission::{
 };
 mod material_asset_read;
 mod material_contract_validation;
+mod material_creation_comments;
 mod material_cursor;
 mod material_detail_read;
 mod material_disposition;
@@ -42,17 +43,16 @@ mod material_evidence_fragment;
 mod material_media;
 mod material_media_read;
 mod material_processing;
-pub mod ocr_layering;
-pub mod research_dossier;
 mod material_processing_validation;
 mod material_projection;
 mod material_projection_types;
 mod material_query_sql;
 mod material_social_read;
-mod material_creation_comments;
 mod material_storage_key;
 mod media_acquisition;
 mod monitor_rule_read;
+pub mod ocr_layering;
+pub mod research_dossier;
 pub use keyword_archive_detail::{
     KeywordDetailAdvance, KeywordDetailTickSummary, advance_keyword_archive_detail,
     advance_keyword_archive_detail_for_domain, keyword_targets_pending_detail,
@@ -181,6 +181,7 @@ pub use local_producer::{
 pub use material_asset_read::{
     LocalMaterialAsset, read_local_derivative, read_local_materialization,
 };
+pub use material_creation_comments::read_creation_comments_in;
 pub use material_disposition::{
     MaterialMediaDisposition, record_blob_disposition, record_derivative_disposition,
     record_materialization_disposition, record_slot_disposition,
@@ -194,8 +195,10 @@ pub use material_processing::{
     fail_media_processing_work, processor_version_for_kind, read_claim_gate_readiness,
     record_media_derivative_completion, requeue_outdated_processor_jobs,
 };
-pub use material_creation_comments::read_creation_comments_in;
-pub use material_social_read::{read_authorized_research_comments, read_dossier_comments, read_creation_comment_in, creation_comment_directory_in};
+pub use material_social_read::{
+    creation_comment_directory_in, read_authorized_research_comments, read_creation_comment_in,
+    read_dossier_comments,
+};
 pub use media_acquisition::{
     MediaAcquisitionDecision, MediaAcquisitionError, MediaAcquisitionFailureOutcome,
     claim_media_acquisition, ensure_discovery_cover_media_work, media_acquisition_schema_is_ready,
@@ -227,7 +230,7 @@ pub use runtime_capacity::{
 };
 pub use runtime_event::{
     EVENT_FIELD_WHITELIST, EVENT_READINESS, EVENT_STARTUP, EVENT_TICK, EVENT_TICK_STEP,
-    RuntimeEvent, SERVICE_MEDIA_WORKER, SERVICE_WORKER, runtime_revision,
+    RuntimeEvent, SERVICE_AI_WORKER, SERVICE_MEDIA_WORKER, SERVICE_WORKER, runtime_revision,
 };
 pub use runtime_readiness::{
     COLLECTION_RUNTIME_REQUIREMENTS, READINESS_RETRY_START, ReadinessState, RuntimeReadiness,

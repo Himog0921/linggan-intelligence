@@ -1,53 +1,36 @@
-//! 关停：等模型循环把在途预留收干净，再写收条、定退出码。
-//!
-//! 单独一个文件是为了守住入口文件的 200 行上限（治理脚本守着）。这里的语义由 T29 定下：
-//! **连不上数据库不以 SUCCESS 退出**——那是把故障说成正常；`drain` 收条是部署脚本
-//! （`scripts/runtime/sync.sh`）等待的信号，它有三种取值，缺一种都会让脚本猜。
+//! Patrol shutdown waits for deterministic local writes; it never drains a model owner.
+use crate::maintenance::MaintenanceTask;
+use std::{
+    io::{self, Write},
+    os::unix::fs::OpenOptionsExt,
+    path::PathBuf,
+    process::ExitCode,
+};
 
-use std::path::PathBuf;
-use std::process::ExitCode;
-
-use linggan_intelligence::model_runner::model_worker_heartbeat;
-use linggan_intelligence::model_worker_drain::MODEL_WORKER_DRAIN_GRACE;
-use linggan_storage_postgres::Database;
-
-pub type ModelWorkerTask =
-    tokio::task::JoinHandle<Result<(), linggan_intelligence::model_settings::ModelError>>;
-
-pub async fn finish_worker_shutdown(
-    database: &Database,
-    model_worker: &mut ModelWorkerTask,
-) -> ExitCode {
-    match tokio::time::timeout(MODEL_WORKER_DRAIN_GRACE, &mut *model_worker).await {
-        Ok(Ok(Ok(()))) => {
-            write_drain_ack("drained");
-            println!("linggan worker: model drain confirmed");
-            ExitCode::SUCCESS
-        }
-        Ok(Ok(Err(error))) => {
-            eprintln!(
-                "linggan worker: model receipt finalization failed: {}",
-                error.code()
-            );
-            let _ =
-                model_worker_heartbeat(database, "error", Some("drain_finalization_failed")).await;
-            write_drain_ack("failed");
-            ExitCode::FAILURE
-        }
-        Ok(Err(error)) => {
-            eprintln!("linggan worker: model drain task failed: {error}");
-            let _ = model_worker_heartbeat(database, "error", Some("drain_task_failed")).await;
-            write_drain_ack("failed");
-            ExitCode::FAILURE
-        }
+pub async fn finish_worker_shutdown(task: &mut MaintenanceTask) -> ExitCode {
+    let state = match tokio::time::timeout(
+        crate::maintenance::ATTEMPT_LIMIT + std::time::Duration::from_secs(1),
+        &mut *task,
+    )
+    .await
+    {
+        Ok(Ok(Ok(()))) => "drained",
+        Ok(_) => "failed",
         Err(_) => {
-            model_worker.abort();
-            let _ = model_worker.await;
-            let _ = model_worker_heartbeat(database, "error", Some("drain_timeout")).await;
-            write_drain_ack("timed_out");
-            eprintln!("linggan worker: model drain exceeded its bounded grace");
-            ExitCode::FAILURE
+            task.abort();
+            let _ = task.await;
+            "timed_out"
         }
+    };
+    if write_drain_ack(state).is_err() {
+        eprintln!("linggan worker: drain_ack_unavailable");
+        return ExitCode::FAILURE;
+    }
+    if state == "drained" {
+        ExitCode::SUCCESS
+    } else {
+        eprintln!("linggan worker: local_maintenance_drain_failed");
+        ExitCode::FAILURE
     }
 }
 
@@ -60,31 +43,36 @@ pub async fn wait_for_worker_shutdown() {
     }
 }
 
-/// 收条是给部署脚本（`scripts/runtime/sync.sh`）等的信号，三条退出路径各写各的取值。
-pub(crate) fn write_drain_ack(state: &str) {
+pub(crate) fn write_drain_ack(state: &str) -> io::Result<()> {
     let path = std::env::var_os("LINGGAN_WORKER_DRAIN_ACK_PATH")
         .map(PathBuf::from)
         .or_else(|| {
-            std::env::var_os("LINGGAN_SUPPORT_DIR").map(|root| {
-                PathBuf::from(root)
-                    .join("runtime-drain")
-                    .join("worker-drain-ack")
-            })
-        });
-    let Some(path) = path else {
-        eprintln!("linggan worker: no drain acknowledgement path is configured");
-        return;
-    };
-    let Some(parent) = path.parent() else {
-        eprintln!("linggan worker: drain acknowledgement path has no parent");
-        return;
-    };
-    if let Err(error) = std::fs::create_dir_all(parent).and_then(|_| {
-        std::fs::write(
-            &path,
-            format!("pid={}\nstate={state}\n", std::process::id()),
-        )
-    }) {
-        eprintln!("linggan worker: cannot persist drain acknowledgement: {error}");
+            std::env::var_os("LINGGAN_SUPPORT_DIR")
+                .map(|root| PathBuf::from(root).join("runtime-drain/worker-drain-ack"))
+        })
+        .ok_or_else(|| io::Error::other("drain_ack_not_configured"))?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| io::Error::other("drain_ack_invalid"))?;
+    std::fs::create_dir_all(parent)?;
+    let temp = parent.join(format!(
+        ".patrol-drain-{}-{}.tmp",
+        std::process::id(),
+        uuid::Uuid::new_v4()
+    ));
+    let result = (|| {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&temp)?;
+        write!(&mut file, "pid={}\nstate={state}\n", std::process::id())?;
+        file.sync_all()?;
+        std::fs::rename(&temp, &path)?;
+        std::fs::File::open(parent)?.sync_all()
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temp);
     }
+    result
 }

@@ -7,6 +7,8 @@ use uuid::Uuid;
 mod fixture;
 #[path = "content_workbench_private_review.rs"]
 mod private_review;
+#[path = "../../../../crates/intelligence/tests/support/ai_writing_fixture.rs"]
+mod writing_setup;
 
 async fn seed_note(db: &Database, external: &str, title: &str, anchor: &str) -> Uuid {
     let body = format!(
@@ -123,16 +125,7 @@ async fn content_workbench_real_chain_browser_proof() {
         let (account, publication) = fixture::ops_seed(&db).await;
         json!({"noteRefs":[first,second],"voiceRefs":[voice_one,voice_two],"replyRef":reply,"accountRef":account,"publicationRef":publication})
     };
-    fixture::dossier::model_config(&db).await;
-    let config: Uuid = sqlx::query_scalar("SELECT config_ref FROM linggan_model_config LIMIT 1")
-        .fetch_one(db.pool())
-        .await
-        .unwrap();
-    sqlx::query("UPDATE linggan_model_workspace SET default_config_ref=$1 WHERE singleton")
-        .bind(config)
-        .execute(db.pool())
-        .await
-        .unwrap();
+    let config = writing_setup::configure_fake_prerequisites(&db).await;
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_creation_work")
             .fetch_one(db.pool())

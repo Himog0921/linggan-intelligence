@@ -1,5 +1,5 @@
 import { c as cls } from "./styles";
-import { badge, btn } from "./topicElements";
+import { badge } from "./topicElements";
 import { esc, known, labelState, list, number } from "./topicModel";
 import type * as T from "./types";
 export function researchPhases(run: { phases?: T.Phases }) {
@@ -480,53 +480,7 @@ export function researchRunDetails(run: T.Run) {
     ""
   );
 }
-export function researchRunActions(
-  run: T.Run,
-  policy: T.Policy | null | undefined,
-) {
-  if (
-    !["queued", "running", "daily_budget_paused", "paused"].includes(run.state)
-  )
-    return "";
-  const paused = run.state === "paused";
-  if (paused && policy?.status === "paused")
-    return (
-      <>
-        <div className={cls("lgi-tm-row")}>
-          <p className={cls("lgi-tm-note")}>
-            {"恢复批次前，请先恢复领域研究。"}
-          </p>
-          {btn(
-            "明确停止",
-            "research-stop",
-            run.runRef,
-            "lgi-tm-danger",
-            "data-mutation",
-          )}
-        </div>
-      </>
-    );
-  return (
-    <>
-      <div className={cls("lgi-tm-row")}>
-        {btn(
-          paused ? "恢复" : "暂停",
-          paused ? "research-resume" : "research-pause",
-          run.runRef,
-          "",
-          "data-mutation",
-        )}
-        {btn(
-          "明确停止",
-          "research-stop",
-          run.runRef,
-          "lgi-tm-danger",
-          "data-mutation",
-        )}
-      </div>
-    </>
-  );
-}
+
 export function researchIssueCount(run: T.Run) {
   return known(run.failedCount) && known(run.unknownDispatchCount)
     ? run.failedCount + run.unknownDispatchCount
@@ -603,54 +557,9 @@ export function researchCoverageCounts(counts: T.Counts | null | undefined) {
     </>
   );
 }
-export function researchPolicy(policy: T.Policy | null | undefined) {
-  if (!policy)
-    return (
-      <>
-        <p className={cls("lgi-tm-note")}>{"领域研究尚未设置。"}</p>
-      </>
-    );
-  const paused = policy.status === "paused",
-    active = policy.status === "active";
-  const text = paused
-    ? "领域研究已暂停；批次与任务账本保留，已发出的请求仍以实际回执结算。"
-    : active
-      ? "领域研究允许继续调度；实际处理仍受来源资格、批次状态与预算约束。"
-      : policy.status === "stopped"
-        ? "领域研究已停止。"
-        : "领域研究状态尚未识别，请刷新进度。";
-  return (
-    <>
-      <div className={cls("lgi-tm-callout")}>
-        <p>{text}</p>
-        {paused || active
-          ? btn(
-              paused ? "恢复领域研究" : "暂停领域研究",
-              paused ? "research-domain-resume" : "research-domain-pause",
-              "",
-              "",
-              "data-mutation",
-            )
-          : ""}
-      </div>
-    </>
-  );
-}
-export function researchRun(run: T.Run, policy: T.Policy | null | undefined) {
-  const waiting =
-    policy?.status === "paused" &&
-    ["queued", "running", "daily_budget_paused"].includes(run.state);
-  const state = waiting
-    ? "保留进度 · 等待领域恢复"
-    : run.state === "daily_budget_paused"
-      ? "等待日额度"
-      : run.state === "run_budget_exhausted"
-        ? "本次研究额度已用尽"
-        : run.state === "completed" && run.failedCount > 0
-          ? "处理结束，含失败"
-          : run.state === "completed" && run.unknownDispatchCount > 0
-            ? "处理结束，含派发未知"
-            : labelState(run.state);
+
+export function researchRun(run: T.Run) {
+  const state = `旧记录：${run.state === "daily_budget_paused" ? "当时因日额度暂停" : run.state === "run_budget_exhausted" ? "当时研究额度已用尽" : labelState(run.state)}`;
   const trigger =
     Object.assign({
       historical: "历史回填",
@@ -672,7 +581,7 @@ export function researchRun(run: T.Run, policy: T.Policy | null | undefined) {
           <p>{["创建于 ", esc(run.createdAt)].join("")}</p>
           <small className={cls("lgi-tm-num")}>{esc(run.runRef)}</small>
         </div>
-        {researchRunActions(run, policy)}
+
       </article>
     </>
   );

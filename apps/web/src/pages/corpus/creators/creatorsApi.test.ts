@@ -4,10 +4,8 @@ import {
   fetchCreators,
   fetchWorkResources,
   parseCreatorList,
-  parseModelChoices,
   parseWorkResources,
   registerCreator,
-  retryAnalysis,
   safeAssetUrl,
   saveOverride,
   savePolicy,
@@ -139,21 +137,6 @@ describe('作品资源与媒体地址', () => {
   });
 });
 
-describe('模型配置选项：给人看名字，不显示编号', () => {
-  it('用「连接 / 模型 ID」命名默认研究配置', () => {
-    const choices = parseModelChoices({
-      config: { configRef: '05d1c53a-ae0a-4d57-ac09-10e3703f401c', modelRef: 'm1' },
-      models: [{ modelRef: 'm1', modelId: 'model-a', connectionName: '本机连接' }],
-    });
-    expect(choices).toEqual([{ configRef: '05d1c53a-ae0a-4d57-ac09-10e3703f401c', label: '本机连接 / model-a' }]);
-    expect(choices[0]?.label).not.toMatch(/[0-9a-f]{8}-/);
-  });
-  it('查不到模型记录时写「默认研究配置」，仍不露编号；没有默认配置就是空', () => {
-    expect(parseModelChoices({ config: { configRef: 'c1', modelRef: 'gone' }, models: [] })[0]?.label).toBe('默认研究配置');
-    expect(parseModelChoices({ config: null, models: [] })).toEqual([]);
-  });
-});
-
 describe('写接口：方法、路径与请求体', () => {
   it('加入观察：POST，按作者键定位，体里只有领域与用途；重试发送的是同一个请求体', async () => {
     const kit = createFetchMock();
@@ -178,32 +161,27 @@ describe('写接口：方法、路径与请求体', () => {
     kit.install();
     await expect(savePolicy({ domain: DOMAIN, revision: 3, likeThreshold: 100 })).resolves.toEqual({ revision: 4 });
     expect(kit.calls[0]!.body).toEqual({ domain: DOMAIN, revision: 3, likeThreshold: 100 });
-    await savePolicy({ domain: DOMAIN, revision: 4, likeThreshold: null, analysis: { analysisEnabled: true, configRef: 'c1', dailyTokenLimit: 100000 } });
-    expect(kit.calls[1]!.body).toEqual({ domain: DOMAIN, revision: 4, likeThreshold: null, analysisEnabled: true, configRef: 'c1', dailyTokenLimit: 100000 });
+    await savePolicy({ domain: DOMAIN, revision: 4, likeThreshold: null });
+    expect(kit.calls[1]!.body).toEqual({ domain: DOMAIN, revision: 4, likeThreshold: null });
   });
 
   it('回执形状不对就是「无法解析」，不报成功', async () => {
     const kit = createFetchMock();
     kit.route('PUT', '/api/local/creator-discovery-policy', ok({ saved: false }));
     kit.route('PUT', '/api/local/creator-discovery-overrides', ok({}));
-    kit.route('POST', '/api/local/creator-discovery-analysis/retry', ok({ queued: 'yes' }));
     kit.install();
     await expect(savePolicy({ domain: DOMAIN, revision: 0, likeThreshold: null })).rejects.toMatchObject({ failure: { kind: 'invalid_response' } });
     await expect(saveOverride({ domain: DOMAIN, creatorKey: 'xhs:61', workRef: null, field: 'focus', value: null, reason: null, supportFragmentIds: [] })).rejects.toMatchObject({
       failure: { kind: 'invalid_response' },
     });
-    await expect(retryAnalysis(DOMAIN, { creatorKey: 'xhs:61' })).rejects.toMatchObject({ failure: { kind: 'invalid_response' } });
   });
 
-  it('调整判断与重试：路径与请求体', async () => {
+  it('调整判断：路径与请求体', async () => {
     const kit = createFetchMock();
     kit.route('PUT', '/api/local/creator-discovery-overrides', ok({ saved: true }));
-    kit.route('POST', '/api/local/creator-discovery-analysis/retry', ok({ queued: true }));
     kit.install();
     const override = { domain: DOMAIN, creatorKey: 'xhs:61', workRef: null, field: 'focus', value: 'vertical_tendency', reason: '理由', supportFragmentIds: ['f1'] };
     await saveOverride(override);
     expect(kit.calls[0]!.body).toEqual(override);
-    await expect(retryAnalysis(DOMAIN, { workRef: 'w1' })).resolves.toEqual({ queued: true });
-    expect(kit.calls[1]!.body).toEqual({ domain: DOMAIN, workRef: 'w1' });
   });
 });

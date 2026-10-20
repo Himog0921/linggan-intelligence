@@ -33,9 +33,10 @@ pub const EVENT_READINESS: &str = "readiness";
 pub const EVENT_TICK: &str = "tick";
 pub const EVENT_TICK_STEP: &str = "tick_step";
 
-/// 谁在说话。取值对应 `scripts/runtime/install.sh` 装的三个 launchd 服务。
+/// 谁在说话。AI-GEN1 adds a dedicated executor; these are process identities, not enablement.
 pub const SERVICE_WORKER: &str = "worker";
 pub const SERVICE_MEDIA_WORKER: &str = "media-worker";
+pub const SERVICE_AI_WORKER: &str = "ai-worker";
 
 /// 事件行允许出现的顶层字段。测试据此断言，文档（runbook「运行诊断」）据此给白名单。
 ///

@@ -10,7 +10,7 @@ usage: ./scripts/local-runtime.sh {migrate|repair-password|serve} [--database da
 
   migrate          apply the approved local Linggan migrations exactly once
   repair-password  explicitly align the local persistent database role with .env
-serve            migrate, then start the API, scheduler and local media processor
+serve            migrate, then start API, patrol, media and the controlled AI executor
 
 The optional --database form is reserved for an exact, disposable runtime proof
 database. It refuses every name except linggan_intelligence_runtime_proof_<hex>.
@@ -118,7 +118,7 @@ verify_persistent_runtime_is_stopped_for_migration() {
     exit 1
   fi
   for label in com.linggan-intelligence.local-runtime \
-    com.linggan-intelligence.patrol-worker com.linggan-intelligence.media-worker; do
+    com.linggan-intelligence.patrol-worker com.linggan-intelligence.media-worker com.linggan-intelligence.ai-executor; do
     if launchctl_result="$(launchctl print "gui/$(id -u)/$label" 2>&1)"; then
       echo "${label} must be stopped before persistent database migration; use scripts/runtime/install.sh --prepare-migration" >&2
       exit 1
@@ -129,7 +129,7 @@ verify_persistent_runtime_is_stopped_for_migration() {
       exit 1
     fi
   done
-  for process in linggan-api linggan-worker linggan-media-worker; do
+  for process in linggan-api linggan-worker linggan-media-worker linggan-ai-worker; do
     if pgrep -x "$process" >/dev/null 2>&1; then
       echo "${process} is still running; refusing persistent database migration" >&2
       exit 1
@@ -366,6 +366,17 @@ migrate() {
   apply_migration_once "0128_content_workbench_ai" "$project_root/database/migrations/0128_content_workbench_ai.sql"
   apply_migration_once "0129_note_material_hashtags" "$project_root/database/migrations/0129_note_material_hashtags.sql"
   apply_migration_once "0130_note_material_snapshot" "$project_root/database/migrations/0130_note_material_snapshot.sql"
+  apply_migration_once "0131_ai_gen1_provider" "$project_root/database/migrations/0131_ai_gen1_provider.sql"
+  apply_migration_once "0132_ai_gen1_control" "$project_root/database/migrations/0132_ai_gen1_control.sql"
+  apply_migration_once "0133_ai_gen1_skill" "$project_root/database/migrations/0133_ai_gen1_skill.sql"
+  apply_migration_once "0134_ai_gen1_task_config" "$project_root/database/migrations/0134_ai_gen1_task_config.sql"
+  apply_migration_once "0135_ai_gen1_batch" "$project_root/database/migrations/0135_ai_gen1_batch.sql"
+  apply_migration_once "0136_ai_gen1_skill_binding" "$project_root/database/migrations/0136_ai_gen1_skill_binding.sql"
+  apply_migration_once "0137_ai_gen1_round" "$project_root/database/migrations/0137_ai_gen1_round.sql"
+  apply_migration_once "0138_ai_gen1_invocation" "$project_root/database/migrations/0138_ai_gen1_invocation.sql"
+  apply_migration_once "0139_ai_gen1_executor" "$project_root/database/migrations/0139_ai_gen1_executor.sql"
+  apply_migration_once "0140_ai_gen1_writing" "$project_root/database/migrations/0140_ai_gen1_writing.sql"
+  apply_migration_once "0141_ai_gen1_legacy_settings" "$project_root/database/migrations/0141_ai_gen1_legacy_settings.sql"
 }
 
 case "$command_name" in
@@ -388,41 +399,50 @@ case "$command_name" in
     database_name="${database_name:-$POSTGRES_DB}"
     migrate
     bind_runtime_database_target
-    # Build the three binaries once. Launching three concurrent `cargo run` processes can make
+    # Build the four binaries once. Concurrent `cargo run` processes can make
     # startup appear hung while they contend for Cargo's build lock.
     cargo build -p linggan-api -p linggan-worker --bins
     runtime_drain_dir="$(mktemp -d "${TMPDIR:-/tmp}/linggan-runtime-drain.XXXXXX")"
     export LINGGAN_WORKER_DRAIN_ACK_PATH="$runtime_drain_dir/worker-drain-ack"
+    export LINGGAN_AI_DRAIN_ACK_PATH="$runtime_drain_dir/ai-drain-ack"
+    runtime_ai_guard="$project_root/scripts/runtime/ai_guard.py"
+    runtime_drain_grace="$(python3 "$runtime_ai_guard" grace "$project_root/crates/contracts/src/ai_limits.json")"
     "$project_root/target/debug/linggan-worker" &
     scheduler_pid=$!
+    "$project_root/target/debug/linggan-ai-worker" &
+    ai_worker_pid=$!
     "$project_root/target/debug/linggan-media-worker" &
     media_worker_pid=$!
     "$project_root/target/debug/linggan-api" &
     api_pid=$!
     cleanup_runtime_children() {
       trap - EXIT INT TERM
-      kill -TERM "$scheduler_pid" 2>/dev/null || true
-      local deadline=$((SECONDS + 90)) ack_pid="" ack_state=""
+      kill -TERM "$scheduler_pid" "$ai_worker_pid" 2>/dev/null || true
+      local deadline=$((SECONDS + runtime_drain_grace)) snapshot presence snapshot_sql child_ok
       while (( SECONDS < deadline )); do
-        if [[ -f "$LINGGAN_WORKER_DRAIN_ACK_PATH" ]]; then
-          ack_pid="$(awk -F= '$1 == "pid" { print $2; exit }' "$LINGGAN_WORKER_DRAIN_ACK_PATH")"
-          ack_state="$(awk -F= '$1 == "state" { print $2; exit }' "$LINGGAN_WORKER_DRAIN_ACK_PATH")"
-          if [[ "$ack_pid" == "$scheduler_pid" && "$ack_state" == "drained" ]]; then
-            wait "$scheduler_pid" 2>/dev/null || true
-            kill "$media_worker_pid" "$api_pid" 2>/dev/null || true
-            wait "$media_worker_pid" "$api_pid" 2>/dev/null || true
-            rm -f -- "$LINGGAN_WORKER_DRAIN_ACK_PATH"
-            rmdir "$runtime_drain_dir"
-            return 0
-          fi
-          [[ "$ack_pid" == "$scheduler_pid" && "$ack_state" != "drained" ]] && break
+        if [[ -f "$LINGGAN_WORKER_DRAIN_ACK_PATH" && -f "$LINGGAN_AI_DRAIN_ACK_PATH" ]]; then
+          child_ok=1
+          wait "$scheduler_pid" || child_ok=0
+          wait "$ai_worker_pid" || child_ok=0
+          (( child_ok )) || break
+          python3 "$runtime_ai_guard" check-patrol "$LINGGAN_WORKER_DRAIN_ACK_PATH" "$scheduler_pid" || break
+          presence="$(psql_in_container -qAtc "SELECT (to_regclass('linggan_ai_executor_current') IS NOT NULL)::int::text||','||(to_regclass('linggan_model_invocation') IS NOT NULL)::int::text")" || break
+          snapshot_sql="$(python3 "$runtime_ai_guard" snapshot-query "$presence")" || break
+          snapshot="$(psql_in_container -qAtc "$snapshot_sql")" || break
+          printf '%s\n' "$snapshot" | python3 "$runtime_ai_guard" check-local-ack "$LINGGAN_AI_DRAIN_ACK_PATH" "$ai_worker_pid" >/dev/null || break
+          kill -TERM "$media_worker_pid" "$api_pid" 2>/dev/null || true
+          wait "$media_worker_pid" "$api_pid" 2>/dev/null || true
+          rm -f -- "$LINGGAN_WORKER_DRAIN_ACK_PATH" "$LINGGAN_AI_DRAIN_ACK_PATH" || return 1
+          rmdir "$runtime_drain_dir" || return 1
+          return 0
         fi
         sleep 1
       done
-      echo "worker 未确认安全落账；保留其他服务及 drain 回执，不继续强制停止。" >&2
+      echo "巡检/AI未确认安全落账；保留其他子进程和收条（$runtime_drain_dir），未继续强制停止。" >&2
       return 1
     }
-    trap cleanup_runtime_children EXIT
+
+    trap 'runtime_exit_code=$?; if ! cleanup_runtime_children; then exit 1; fi; exit "$runtime_exit_code"' EXIT
     trap 'exit 143' INT TERM
     wait "$api_pid"
     ;;

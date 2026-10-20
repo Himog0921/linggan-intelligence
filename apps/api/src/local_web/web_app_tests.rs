@@ -182,14 +182,14 @@ async fn legacy_settings_page_assets_are_retired_and_unknown_paths_stay_404() {
     }
     // 接口没有被页面入口吞掉：仍是接口自己的 JSON 回答。
     let (status, headers, body) = send(app(), "/api/local/model-settings", "127.0.0.1:3000").await;
-    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(status, StatusCode::GONE);
     assert!(
         headers[header::CONTENT_TYPE]
             .to_str()
             .unwrap()
             .starts_with("application/json")
     );
-    assert!(body.contains("model_database_unavailable"));
+    assert!(body.contains("ai_legacy_endpoint_retired"));
 }
 
 /// 阶段 D1：创作者页迁到 React。登记路径返回前端入口；旧页面的样式、脚本已删除（不留双轨）；
@@ -417,7 +417,7 @@ async fn settings_page_real_chain_browser_proof() {
     .await
     .expect("migrations apply");
     let application = router(LocalWebState {
-        database: LocalDatabaseState::Ready(Arc::new(database)),
+        database: LocalDatabaseState::Ready(Arc::new(database.clone())),
         active_media_sessions: Arc::new(tokio::sync::Mutex::new(BTreeSet::new())),
         account_digest_key: None,
     });
@@ -454,6 +454,19 @@ async fn settings_page_real_chain_browser_proof() {
         None
     };
     server.abort();
+    let calls: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_model_invocation")
+        .fetch_one(database.pool())
+        .await
+        .unwrap();
+    let batches: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_ai_batch")
+        .fetch_one(database.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        (calls, batches),
+        (0, 0),
+        "settings saves and first activation must not dispatch or queue"
+    );
     assert!(
         result.success(),
         "React settings browser proof failed; see the evidence directory"

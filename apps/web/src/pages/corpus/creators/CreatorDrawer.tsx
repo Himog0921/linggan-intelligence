@@ -1,17 +1,13 @@
 import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { ModalDialog } from '../../../corpus/ModalDialog';
 import { findAuthorButton } from './findAuthor';
-import { feedbackForError, type Feedback } from './creatorsFeedback';
 import { authorName, observedText, preservedLifecycle, targetHref } from './creatorsPresent';
 import { formatCount, type CreatorQuery, type LinkContext } from './creatorsQuery';
 import type { CreatorItem, CreatorList } from './creatorsTypes';
-import type { RetryScope } from './creatorsApi';
 import { Metric, type DrawerTab } from './CreatorTable';
 import { EvidencePanel, OverviewPanel, ProfilePanel, type PanelContext } from './DrawerPanels';
-import { FeedbackLine } from './FeedbackLine';
 import { Avatar } from './Media';
-import { useJoinPending, useRetryMutation } from './useCreatorWrites';
-import { useWriteGuard } from './useWriteGuard';
+import { useJoinPending } from './useCreatorWrites';
 import type { WorkResources } from './useWorkResources';
 import pageStyles from './CreatorsPage.module.css';
 import styles from './CreatorDrawer.module.css';
@@ -66,17 +62,12 @@ function positionBelowHeader(dialog: HTMLDialogElement): () => void {
 export function CreatorDrawer({ item, data, query, link, resources, initialTab, restore, onClose, onCorrect, onJoin, onLeave }: CreatorDrawerProps) {
   const titleId = useId();
   const idBase = useId();
-  const begin = useWriteGuard(item.creatorKey);
-  const retry = useRetryMutation();
   const body = useRef<HTMLDivElement>(null);
   // 每个分区各记一个滚动位置；从证据库返回时，恢复离开时所在分区的位置。
   const positions = useRef<Record<DrawerTab, number>>({ overview: 0, evidence: 0, profile: 0, [restore?.tab ?? initialTab]: restore?.drawerScroll ?? 0 });
-  const inFlight = useRef(new Set<string>());
   const tabButtons = useRef<Record<DrawerTab, HTMLButtonElement | null>>({ overview: null, evidence: null, profile: null });
   const [tab, setTab] = useState<DrawerTab>(initialTab);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set(restore?.expanded ?? []));
-  const [retrying, setRetrying] = useState<ReadonlySet<string>>(() => new Set());
-  const [status, setStatus] = useState<Feedback | null>(null);
   const joinPending = useJoinPending(item.creatorKey);
 
   const domainActive = data.domain.status === 'active';
@@ -107,25 +98,6 @@ export function CreatorDrawer({ item, data, query, link, resources, initialTab, 
     tabButtons.current[target]?.focus();
   }
 
-  async function runRetry(scope: RetryScope, id: string) {
-    if (inFlight.current.has(id)) return;
-    const isCurrent = begin();
-    inFlight.current.add(id);
-    setRetrying(new Set(inFlight.current));
-    setStatus(null);
-    try {
-      const receipt = await retry.mutateAsync({ domain: data.domain.domainRef, scope });
-      if (isCurrent()) {
-        setStatus({ tone: 'success', text: receipt.queued ? '已排队，符合现有配置及额度后执行。' : '当前没有可重试的失败分析。', code: null });
-      }
-    } catch (error) {
-      if (isCurrent()) setStatus(feedbackForError(error, { retryNote: '重试只把失败的分析重新排队，重复提交不会产生第二次分析。' }));
-    } finally {
-      inFlight.current.delete(id);
-      if (isCurrent()) setRetrying(new Set(inFlight.current));
-    }
-  }
-
   const context: PanelContext = {
     item,
     data,
@@ -135,8 +107,6 @@ export function CreatorDrawer({ item, data, query, link, resources, initialTab, 
     analysisEnabled,
     writable: domainActive,
     onCorrect,
-    onRetry: (scope, id) => void runRetry(scope, id),
-    retrying,
     onTab: switchTab,
   };
 
@@ -237,8 +207,7 @@ export function CreatorDrawer({ item, data, query, link, resources, initialTab, 
       <footer className={styles.footer}>
         <div>
           <span>{observedText(observation)}</span>
-          <FeedbackLine feedback={status} />
-        </div>
+          </div>
         <div className={styles.actions}>
           {observation.lookup === 'unavailable' || observation.inCurrentDomain === null ? (
             <button type="button" disabled>

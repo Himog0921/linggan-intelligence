@@ -1,9 +1,6 @@
-//! Bounded executor for the clean comment-study batch lifecycle.
-//!
-//! A worker never selects comments or creates a StudyRun (that is `prepare_study_run`, driven by
-//! the user's own choice of notes and budget) and never uses a historical execution path. It does
-//! decide which already-frozen, already user-authorized run's queued targets get packaged into a
-//! batch next (`prepare_next_batch_across_runs`), and it claims already-prepared batches.
+//! Retired scheduling entry points retained until the old business chains are removed.
+//! AI-GEN1 closes each entry before work/leases/credentials; the former worker loop and
+//! workspace heartbeat are gone. Active execution belongs to ai_foundation::executor.
 
 use crate::{
     comment_study_batch::{
@@ -22,17 +19,14 @@ use crate::{
     comment_study_model_dispatch::StudyModelDispatchError,
     comment_study_model_runner::{StudyModelRunnerError, call_study_batch_model},
     comment_study_pair_worker::{PairExecution, run_one_problem_pair_with_outcome},
-    comment_study_read,
     comment_study_resolution_worker::{
         ResolutionExecution, run_one_problem_resolution_with_outcome,
     },
-    model_secrets::{ModelSecretStore, model_secret_store},
+    model_secrets::ModelSecretStore,
     model_settings::ModelError,
-    model_worker_drain::ModelWorkerDrain,
     pi_adapter::PiAdapter,
 };
 use linggan_storage_postgres::Database;
-use std::sync::Arc;
 use uuid::Uuid;
 
 pub async fn run_model_work_once(
@@ -183,6 +177,7 @@ pub async fn run_model_work_once_with_fairness(
     adapter: &PiAdapter,
     fairness: &mut ModelWorkerFairness,
 ) -> Result<bool, ModelError> {
+    crate::model_settings::legacy_execution_gate()?;
     // P3 recovery must run before any fresh work. Unsent reservations settle at zero; dispatched
     // requests with unknown usage retain their reservation before their subject can be retried.
     // Recovery is bounded; continue with other lanes even when it found expired work.
@@ -499,6 +494,7 @@ pub async fn prepare_next_batch_across_runs_with_fairness(
     database: &Database,
     fairness: &mut ModelWorkerFairness,
 ) -> Result<bool, ModelError> {
+    crate::model_settings::legacy_execution_gate()?;
     let mut skipped_run_refs = Vec::new();
     while skipped_run_refs.len() < MAX_BATCH_PREPARATION_ATTEMPTS_PER_TICK {
         let Some(run_ref) = crate::comment_study_batch::next_run_needing_batch_after(
@@ -542,77 +538,6 @@ pub async fn prepare_next_batch_across_runs_with_fairness(
     Ok(false)
 }
 
-pub async fn model_schema_ready(database: &Database) -> bool {
-    comment_study_read::schema_ready(database)
-        .await
-        .unwrap_or(false)
-}
-
-pub async fn run_model_worker(database: Database) {
-    let _ = run_model_worker_with_drain(database, ModelWorkerDrain::new()).await;
-}
-
-pub async fn run_model_worker_with_drain(
-    database: Database,
-    drain: ModelWorkerDrain,
-) -> Result<(), ModelError> {
-    run_model_worker_with_dependencies(
-        database,
-        drain,
-        model_secret_store(),
-        PiAdapter::configured(),
-    )
-    .await
-}
-
-/// Isolated PostgreSQL proofs inject a synthetic secret store and local Pi child so a drain can
-/// be requested while the real worker loop owns an in-flight provider boundary.
-#[doc(hidden)]
-pub async fn run_model_worker_with_test_dependencies(
-    database: Database,
-    drain: ModelWorkerDrain,
-    store: Arc<dyn ModelSecretStore>,
-    adapter: PiAdapter,
-) -> Result<(), ModelError> {
-    run_model_worker_with_dependencies(database, drain, store, adapter).await
-}
-
-async fn run_model_worker_with_dependencies(
-    database: Database,
-    drain: ModelWorkerDrain,
-    store: Arc<dyn ModelSecretStore>,
-    adapter: PiAdapter,
-) -> Result<(), ModelError> {
-    let mut interval = tokio::time::interval(std::time::Duration::from_secs(10));
-    let mut shutdown = drain.subscribe();
-    let mut fairness = ModelWorkerFairness::default();
-    loop {
-        if drain.is_requested() {
-            break;
-        }
-        tokio::select! {
-            _ = interval.tick() => {}
-            changed = shutdown.changed() => { if changed.is_ok() && *shutdown.borrow() { break; } }
-        }
-        if drain.is_requested() || !model_schema_ready(&database).await {
-            continue;
-        }
-        model_worker_heartbeat(&database, "running", None).await?;
-        match run_model_work_once_with_fairness(&database, store.as_ref(), &adapter, &mut fairness)
-            .await
-        {
-            Ok(_) => model_worker_heartbeat(&database, "idle", None).await?,
-            Err(error) => {
-                model_worker_heartbeat(&database, "error", Some(error.code())).await?;
-                if drain.is_requested() {
-                    return Err(error);
-                }
-            }
-        }
-    }
-    model_worker_heartbeat(&database, "idle", None).await
-}
-
 fn catalog_error(error: crate::comment_study_catalog::StudyCatalogError) -> ModelError {
     match error {
         crate::comment_study_catalog::StudyCatalogError::Database(error) => {
@@ -651,21 +576,4 @@ fn runner_error(error: StudyModelRunnerError) -> ModelError {
         StudyModelRunnerError::OutputNotJson => ModelError::InvalidOutput,
         StudyModelRunnerError::ProviderFailure => ModelError::AdapterUnavailable,
     }
-}
-
-pub async fn model_worker_heartbeat(
-    database: &Database,
-    state: &str,
-    error: Option<&str>,
-) -> Result<(), ModelError> {
-    sqlx::query(
-        "UPDATE linggan_model_workspace \
-         SET worker_last_seen_at=scope_001_now(),worker_state=$1,worker_last_error=$2 \
-         WHERE singleton",
-    )
-    .bind(state)
-    .bind(error)
-    .execute(database.pool())
-    .await?;
-    Ok(())
 }

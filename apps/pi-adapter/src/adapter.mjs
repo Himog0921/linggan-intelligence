@@ -1,3 +1,6 @@
+import { pinnedSdkAvailable } from './sdk-version.mjs';
+import { LIMITS, PROTOCOL, executionPolicy, completeSchema, structuredPayload, boundedPayload } from './execution.mjs';
+import { emptyUsage, recordWireUsage } from './usage.mjs';
 import { embed, EmbeddingError } from './embeddings.mjs';
 import { Agent } from '@earendil-works/pi-agent-core';
 import { createModels, createProvider } from '@earendil-works/pi-ai';
@@ -22,16 +25,16 @@ import {
 } from './diagnostic.mjs';
 
 const API = {'openai-completions':openAICompletionsApi, 'openai-responses':openAIResponsesApi, 'anthropic-messages':anthropicMessagesApi};
-export const VERSION = 'linggan.pi.v1/0.85.1';
-export const TOPIC_TRANSPORT_BYTE_LIMIT = 1_048_576;
-const RESPONSE_BYTE_LIMIT = 262_144;
-const SSE_BYTE_CEILING = 8_388_608;
+export const VERSION = PROTOCOL.wireVersion;
+export const TOPIC_TRANSPORT_BYTE_LIMIT = LIMITS.legacyTopicRequestBytes;
+const RESPONSE_BYTE_LIMIT = LIMITS.maxResponseBytes;
+const SSE_BYTE_CEILING = LIMITS.maxStreamBytes;
 // SSE envelopes repeat metadata per token, so wire bytes are not final text bytes.
 // The finite allowance follows the authorized output budget, with a fixed ceiling.
 export function sseByteLimit(maxOutputTokens) {
-  return Math.min(SSE_BYTE_CEILING, RESPONSE_BYTE_LIMIT + maxOutputTokens * 2048);
+  return Math.min(SSE_BYTE_CEILING, LIMITS.baseStreamBytes + maxOutputTokens * LIMITS.streamBytesPerOutputToken);
 }
-const TOPIC_CONTRACTS = new Set(['topic-map.research.v2', 'topic-map.resolve.v1', 'topic-map.research.v3', 'topic-map.resolve.v2', 'topic-map.extract.compact.v1', 'topic-map.extract.quotes.v1', 'topic-map.verify.v1']);
+const TOPIC_CONTRACTS = new Set(PROTOCOL.legacyTopicContracts);
 class Rejected extends Error { constructor(code) { super(code); this.code=code; } }
 const integer = (v,min,max) => Number.isSafeInteger(v) && v>=min && v<=max;
 function topicPacket(r) {
@@ -51,71 +54,32 @@ export function estimateTopicInputTokens(system,prompt) {
   };
   return estimate(system)+estimate(prompt)+128;
 }
-function completeTopicSchema(schema) {
-  let nodes=0;
-  const visit=(s,depth=0)=>{
-    if(!s||typeof s!=='object'||Array.isArray(s)||depth>20||++nodes>256)return false;
-    if(Array.isArray(s.anyOf))return s.anyOf.length>0&&s.anyOf.every(v=>visit(v,depth+1));
-    if(s.type==='object'){
-      if(!s.properties||typeof s.properties!=='object'||Array.isArray(s.properties)||s.additionalProperties!==false||!Array.isArray(s.required))return false;
-      const keys=Object.keys(s.properties);
-      return keys.length===s.required.length&&new Set(s.required).size===keys.length&&keys.every(k=>s.required.includes(k)&&visit(s.properties[k],depth+1));
-    }
-    if(s.type==='array')return visit(s.items,depth+1);
-    return ['string','integer','number','boolean','null'].includes(s.type);
-  };
-  return visit(schema);
-}
-const DEEPSEEK_TEXT_MODELS=new Set(['deepseek-v4-flash','deepseek-v4-pro','deepseek-v4-flash-vision-exp']);
-// Capability allowlist, not provider-name inference. Unknown models and proxies retain
-// prompt-only output and the same strict server validator until separately qualified.
-const OPENAI_STRUCTURED_MODELS=new Set(['gpt-4o','gpt-4o-2024-08-06','gpt-4o-2024-11-20','gpt-4o-mini','gpt-4o-mini-2024-07-18','gpt-6-astra']);
-function researchOutputFormat(r,base) {
+function packetSchema(r) {
   let packet;try{packet=JSON.parse(r.prompt);}catch{return null;}
-  const schemaNames={
-    'comment-research.semantic.v1':'comment_research_semantic_v1','comment-research.semantic.v2':'comment_research_semantic_v2','comment-research.semantic.v3':'comment_research_semantic_v3','comment-research.semantic.v4':'comment_research_semantic_v4','comment-research.semantic.v5':'comment_research_semantic_v5','comment-research.semantic.v6':'comment_research_semantic_v6',
-    'comment-research.semantic.v1/problem-resolution':'comment_research_problem_resolution_v1','comment-research.semantic.v2/problem-resolution':'comment_research_problem_resolution_v2','comment-research.semantic.v3/problem-resolution':'comment_research_problem_resolution_v3','comment-research.semantic.v4/problem-resolution':'comment_research_problem_resolution_v4','comment-research.semantic.v5/problem-resolution':'comment_research_problem_resolution_v5','comment-research.semantic.v6/problem-resolution':'comment_research_problem_resolution_v6',
-    'comment-study.note-batch.v1':'comment_study_note_batch_v1','comment-study.problem-resolution.v1':'comment_study_problem_resolution_v1','comment-study.problem-pair.v1':'comment_study_problem_pair_v1',
-    'topic-map.research.v2':'topic_map_research_v2','topic-map.resolve.v1':'topic_map_resolve_v1','topic-map.research.v3':'topic_map_research_v3','topic-map.resolve.v2':'topic_map_resolve_v2','topic-map.extract.compact.v1':'topic_map_extract_compact_v1','topic-map.extract.quotes.v1':'topic_map_extract_quotes_v1','topic-map.verify.v1':'topic_map_verify_v1'
-  };
-  const schemaName=schemaNames[packet?.contract];
-  if(!schemaName)return null;
-  const schema=packet.outputSchema;
-  const topic=TOPIC_CONTRACTS.has(packet.contract);
-  const schemaLength=schema?JSON.stringify(schema).length:0;
-  if(!schema||schema.type!=='object'||!schema.properties||schema.additionalProperties!==false
-    ||schemaLength>(topic?32768:6144)
-    ||(topic&&(!completeTopicSchema(schema)||schema.properties.contract?.enum?.length!==1||schema.properties.contract.enum[0]!==packet.contract)))throw new Rejected('invalid_request');
-  const official=base.protocol==='https:'&&!base.port&&['','/','/v1','/v1/'].includes(base.pathname);
-  const deepseek=official&&base.hostname==='api.deepseek.com'&&DEEPSEEK_TEXT_MODELS.has(r.modelId);
-  const openai=official&&base.hostname==='api.openai.com'&&OPENAI_STRUCTURED_MODELS.has(r.modelId);
-  // V1 uses optional fields for its two tagged response variants.  Do not claim strict
-  // provider validation when the provider would require every property on the root object;
-  // Rust remains the contract authority after transport.
-  if(r.api==='openai-responses'&&(deepseek||openai))return {text:{format:{type:'json_schema',name:schemaName,schema,...(topic&&openai?{strict:true}:{})}}};
-  if(r.api==='openai-completions'&&deepseek)return {response_format:{type:'json_object'}};
-  if(r.api==='openai-completions'&&openai)return {response_format:{type:'json_schema',json_schema:{name:schemaName,schema,...(topic?{strict:true}:{})}}};
-  return null;
+  if(!packet?.outputSchema || typeof packet.contract!=='string')return null;
+  const topic=TOPIC_CONTRACTS.has(packet.contract),schema=packet.outputSchema;
+  const legacyKnown=topic||/^comment-(?:research|study)\./.test(packet.contract);
+  if(legacyKnown&&(!schema||schema.type!=='object'||!schema.properties||schema.additionalProperties!==false
+    ||Buffer.byteLength(JSON.stringify(schema))>(topic?LIMITS.maxResponseSchemaBytes:LIMITS.legacyCommentSchemaBytes)
+    ||(topic&&(!completeSchema(schema)||schema.properties.contract?.enum?.length!==1||schema.properties.contract.enum[0]!==packet.contract))))throw new Rejected('invalid_request');
+  const name=packet.contract.replace(/^comment-research\.semantic\.(v\d+)\/problem-resolution$/,'comment_research_problem_resolution_$1');
+  return {name:name.replace(/[^a-zA-Z0-9_-]/g,'_').replaceAll('-','_'),schema};
 }
+
 function validate(r) {
   if(!r || r.version!==VERSION || !['connect','discover','probe','analyze','embed'].includes(r.operation) || !API[r.api]
-    || !integer(r.timeoutMs,100,60000) || !integer(r.maxOutputTokens,16,8192)
+    || !integer(r.timeoutMs,100,LIMITS.maxTimeoutSeconds*1000) || !integer(r.maxOutputTokens,16,LIMITS.maxOutputTokens)
     || typeof r.apiKey!=='string' || r.apiKey.length>4096 || typeof r.baseUrl!=='string') throw new Rejected('invalid_request');
   let u;try{u=new URL(r.baseUrl);}catch{throw new Rejected('invalid_request');}
   if(u.username||u.password||u.search||u.hash||(r.localEndpoint===true&&!['127.0.0.1','localhost','[::1]'].includes(u.hostname))||!(u.protocol==='https:'||(r.localEndpoint===true&&u.protocol==='http:'&&['127.0.0.1','localhost','[::1]'].includes(u.hostname))))throw new Rejected('endpoint_rejected');
   if(!['connect','discover'].includes(r.operation)&&(!r.modelId||typeof r.modelId!=='string'||r.modelId.length>200||typeof r.prompt!=='string'||typeof r.system!=='string'))throw new Rejected('invalid_request');
   return u;
 }
-function usageFrom(value,usage) {
-  const u=value.usage || value.message?.usage || value.response?.usage;
-  if(!u || typeof u!=='object')return;
-  const input=u.prompt_tokens ?? u.input_tokens;
-  const output=u.completion_tokens ?? u.output_tokens;
-  const cacheRead=u.cache_read_input_tokens;
-  const cacheWrite=u.cache_creation_input_tokens;
-  if(integer(input,0,100000000))usage.inputTokens=input+(integer(cacheRead,0,100000000)?cacheRead:0)+(integer(cacheWrite,0,100000000)?cacheWrite:0);
-  if(integer(output,0,100000000))usage.outputTokens=output;
+function usageFrom(api,value,usage) {
+  try { recordWireUsage(api,value,usage); }
+  catch { throw new Rejected('provider_invalid_usage'); }
 }
+
 function providerFailure(status,url) {
   if(status>=300&&status<400)return 'provider_redirect_rejected';
   if(status===401||status===403)return 'authentication_failed';
@@ -125,7 +89,7 @@ function providerFailure(status,url) {
   if(status>=500)return 'provider_unavailable';
   return 'provider_failed';
 }
-function scopedFetch(base,signal,usage,failure,observation,maxOutputTokens) {
+function scopedFetch(base,signal,usage,failure,observation,maxOutputTokens,api) {
   return async (input,init={}) => {
     let url;try{url=new URL(typeof input==='string'||input instanceof URL?input:input.url);}catch{throw new Rejected('endpoint_rejected');}
     const prefix=base.pathname.replace(/\/$/,'');
@@ -141,10 +105,10 @@ function scopedFetch(base,signal,usage,failure,observation,maxOutputTokens) {
     const sse=response.headers.get('content-type')?.split(';',1)[0].trim().toLowerCase()==='text/event-stream';
     const byteLimit=sse?sseByteLimit(maxOutputTokens):RESPONSE_BYTE_LIMIT;
     let buffer='';const decoder=new TextDecoder();
-    const inspect=line=>observeSseLine(observation,line,usage,usageFrom);
+    const inspect=line=>observeSseLine(observation,line,usage,(value,usage)=>usageFrom(api,value,usage));
     const body=response.body.pipeThrough(new TransformStream({transform(chunk,controller){
       receivedChunk(observation,chunk.byteLength);
-      if(observation.diagnostic.receivedBytes>byteLimit){observation.diagnostic.limitKind=sse?'sse_stream_token_budget':'sse_stream_262144';failure.code='response_too_large';throw new Rejected(failure.code);}
+      if(observation.diagnostic.receivedBytes>byteLimit){observation.diagnostic.limitKind=sse?'sse_stream_token_budget':'response_bytes';failure.code='response_too_large';throw new Rejected(failure.code);}
       buffer+=decoder.decode(chunk,{stream:true});
       const lines=buffer.split(/\r?\n/);buffer=lines.pop()??'';
       for(const line of lines)inspect(line);
@@ -158,16 +122,19 @@ function scopedFetch(base,signal,usage,failure,observation,maxOutputTokens) {
   };
 }
 export async function execute(r) {
-  let timer,agent,abort;const usage={inputTokens:null,outputTokens:null,costUsd:null};
+  let timer,agent,abort;const usage=emptyUsage();
   const started=Date.now();
   const observation=createObservation(),failure={code:null};
   const response=payload=>({...payload,diagnostic:completeDiagnostic(observation,usage,started)});
   try {
+    if(!pinnedSdkAvailable())throw new Rejected('adapter_version_mismatch');
     const base=validate(r),topic=topicPacket(r);
-    if(Buffer.byteLength(JSON.stringify(r))>(topic?TOPIC_TRANSPORT_BYTE_LIMIT:131072))throw new Rejected('invalid_request');
+    let policy;try{policy=executionPolicy(r);}catch{throw new Rejected('invalid_request');}
+    const requestLimit=policy.qualified?LIMITS.maxRequestBytes:(topic?TOPIC_TRANSPORT_BYTE_LIMIT:LIMITS.legacyRequestBytes);
+    if(Buffer.byteLength(JSON.stringify(r))>requestLimit)throw new Rejected('invalid_request');
     abort=new AbortController();
     timer=setTimeout(()=>{abort.abort();agent?.abort();},r.timeoutMs);
-    const transport=scopedFetch(base,abort.signal,usage,failure,observation,r.maxOutputTokens);
+    const transport=scopedFetch(base,abort.signal,usage,failure,observation,r.maxOutputTokens,r.api);
     if(r.operation==='embed') {
       const result=await embed(r,base,transport,usage);usage.inputTokens=result.inputTokens;usage.outputTokens=0;
       succeeded(observation);
@@ -183,31 +150,27 @@ export async function execute(r) {
       succeeded(observation);
       return response({version:VERSION,ok:true,modelIds:ids,modelListOrigin:'ACCOUNT_ENDPOINT',usage,elapsedMs:Date.now()-started});
     }
-    // Topic input tokens and transport bytes have separate limits; other contracts retain
-    // their existing envelope. Configuration is an input budget, not provider capacity.
-    if(topic){
-      if(!integer(topic.inputTokenLimit,1024,32768))throw new Rejected('invalid_request');
+    if(policy.qualified){
+      if(estimateTopicInputTokens(r.system,r.prompt)>policy.inputTokenLimit)throw new Rejected('model_input_limit');
+    }else if(topic){
+      if(!integer(topic.inputTokenLimit,1024,LIMITS.legacyInputTokens))throw new Rejected('invalid_request');
       if(estimateTopicInputTokens(r.system,r.prompt)>topic.inputTokenLimit)throw new Rejected('model_input_limit');
-    }else if(Buffer.byteLength(r.prompt)+Buffer.byteLength(r.system)+r.maxOutputTokens>32768)throw new Rejected('model_input_limit');
+    }else if(Buffer.byteLength(r.prompt)+Buffer.byteLength(r.system)+r.maxOutputTokens>LIMITS.legacyInputTokens)throw new Rejected('model_input_limit');
+    // pi requires numeric price metadata internally; those placeholders never enter our ledger.
     const model={id:r.modelId,name:r.modelId,api:r.api,provider:'linggan-explicit',baseUrl:base.href,
-      reasoning:false,input:['text'],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:topic?topic.inputTokenLimit+r.maxOutputTokens:32768,maxTokens:r.maxOutputTokens};
-    // Our current contract accepts final text only. DeepSeek V4 otherwise defaults
-    // to thinking even when the local model metadata says reasoning:false.
-    const deepseekTextOnly=base.hostname==='api.deepseek.com'&&DEEPSEEK_TEXT_MODELS.has(r.modelId);
-    const outputFormat=researchOutputFormat(r,base);
+      reasoning:policy.modelReasoning,thinkingLevelMap:policy.thinkingLevelMap,compat:policy.compat,
+      input:['text'],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},
+      contextWindow:policy.qualified?policy.contextWindow:(topic?topic.inputTokenLimit+r.maxOutputTokens:LIMITS.legacyInputTokens),maxTokens:r.maxOutputTokens};
+    let outputFormat;try{outputFormat=structuredPayload(r,policy,packetSchema(r));}catch{throw new Rejected('invalid_request');}
     const onPayload=payload=>{
-      const formatted={...payload,...outputFormat};
-      if(!deepseekTextOnly)return formatted;
-      if(r.api==='openai-responses')return {...formatted,reasoning:{effort:'none'}};
-      if(r.api==='openai-completions')return {...formatted,thinking:{type:'disabled'}};
-      return formatted;
+      try{return boundedPayload(r,policy,payload,outputFormat);}catch{throw new Rejected('invalid_request');}
     };
     const models=createModels();
     models.setProvider(createProvider({id:model.provider,baseUrl:base.href,models:[model],
       auth:{apiKey:{name:'Explicit connection',resolve:async()=>({auth:{apiKey:r.apiKey}})}},api:API[r.api]()}));
     agent=new Agent({initialState:{systemPrompt:r.system,model,tools:[]},
       streamFn:(m,c,o)=>models.streamSimple(m,c,{...o,signal:AbortSignal.any([abort.signal,...(o?.signal?[o.signal]:[])]),
-        apiKey:r.apiKey,fetch:transport,onPayload,timeoutMs:r.timeoutMs,maxRetries:0,maxTokens:r.maxOutputTokens}),
+        apiKey:r.apiKey,fetch:transport,onPayload,timeoutMs:r.timeoutMs,maxRetries:0,maxTokens:r.maxOutputTokens,reasoning:policy.reasoning,cacheRetention:'none'}),
       shouldStopAfterTurn:()=>true,beforeToolCall:()=>({block:true,reason:'No tools granted',terminate:true})});
     await agent.prompt(r.prompt);
     if(abort.signal.aborted||Date.now()-started>=r.timeoutMs)throw new Rejected('provider_timeout');
@@ -223,10 +186,10 @@ export async function execute(r) {
       if(message.stopReason==='aborted')throw new Rejected('provider_timeout');
       throw new Rejected(classifyUnterminated(observation));
     }
-    if(message.content.some(b=>b.type!=='text'))throw new Rejected('unexpected_content');
+    if(message.content.some(b=>b.type!=='text'&&!(policy.thinkingAllowed&&b.type==='thinking')))throw new Rejected('unexpected_content');
     if(usage.outputTokens!==null&&usage.outputTokens>r.maxOutputTokens){observation.diagnostic.limitKind='output_tokens';throw new Rejected('output_limit');}
-    const text=message.content.map(b=>b.text).join('');
-    if(Buffer.byteLength(text)>65536){observation.diagnostic.limitKind='final_text_65536';throw new Rejected('response_too_large');}
+    const text=message.content.filter(b=>b.type==='text').map(b=>b.text).join('');
+    if(Buffer.byteLength(text)>LIMITS.maxTextBytes){observation.diagnostic.limitKind='final_text_bytes';throw new Rejected('response_too_large');}
     let normalized=text;try{normalized=JSON.stringify(JSON.parse(text));}catch{ /* business validation follows */ }
     if(r.apiKey&&(text.includes(r.apiKey)||normalized.includes(r.apiKey)))throw new Rejected('secret_echo_rejected');
     succeeded(observation,'stop');
@@ -236,7 +199,7 @@ export async function execute(r) {
     if(r&&((abort?.signal.aborted===true)||Date.now()-started>=r.timeoutMs))code='provider_timeout';
     else if(error instanceof Rejected||error instanceof EmbeddingError)code=error.code;
     else code=classifyUnterminated(observation);
-    if(['invalid_request','endpoint_rejected','model_input_limit'].includes(code))rejected(observation);
+    if(['invalid_request','endpoint_rejected','model_input_limit','adapter_version_mismatch'].includes(code))rejected(observation);
     else failedDiagnostic(observation,code);
     return response({version:VERSION,ok:false,failureCode:code,usage,elapsedMs:Date.now()-started});
   } finally {clearTimeout(timer);agent?.abort();}
@@ -245,8 +208,8 @@ export async function execute(r) {
 if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href) {
   let bytes=0,chunks=[];
   try {
-    for await(const chunk of process.stdin){bytes+=chunk.length;if(bytes>TOPIC_TRANSPORT_BYTE_LIMIT)throw new Error();chunks.push(chunk);}
+    for await(const chunk of process.stdin){bytes+=chunk.length;if(bytes>LIMITS.maxRequestBytes)throw new Error();chunks.push(chunk);}
     const request=JSON.parse(Buffer.concat(chunks).toString('utf8'));
     process.stdout.write(JSON.stringify(await execute(request))+'\n');
-  } catch {process.stdout.write(JSON.stringify({version:VERSION,ok:false,failureCode:'invalid_request',usage:{inputTokens:null,outputTokens:null,costUsd:null}})+'\n');}
+  } catch {process.stdout.write(JSON.stringify({version:VERSION,ok:false,failureCode:'invalid_request',usage:emptyUsage()})+'\n');}
 }

@@ -255,50 +255,36 @@ describe('迟到的回执不改写之后打开的对话框（#384 发现 5）', 
 });
 
 describe('发现设置', () => {
-  const modelSettings = ok({ config: { configRef: '05d1c53a-ae0a-4d57-ac09-10e3703f401c', modelRef: 'm1' }, models: [{ modelRef: 'm1', modelId: 'model-a', connectionName: '本机连接' }] });
-
   async function openPolicy(list = listJson({ revision: 3, items: [itemJson(1)] })) {
     const view = await page(list);
-    kit.route('GET', '/api/local/model-settings', modelSettings);
     await view.user.click(screen.getByRole('button', { name: '发现设置' }));
     const dialog = await screen.findByRole('dialog', { name: '发现设置' });
     return { ...view, dialog };
   }
 
-  it('模型配置显示「连接 / 模型」名，不显示编号；只存点赞标准时带着设置版本号', async () => {
+  it('只保存点赞标准与设置版本，AI 状态与统一入口不含旧模型选择', async () => {
     kit.route('PUT', '/api/local/creator-discovery-policy', ok({ revision: 4, saved: true }));
     const { user, dialog } = await openPolicy();
-    const select = within(dialog).getByRole('combobox', { name: '已有模型配置' });
-    await waitFor(() => expect(select).toBeEnabled());
-    expect(within(select).getByRole('option', { name: '本机连接 / model-a' })).toBeInTheDocument();
-    expect(dialog.textContent).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}/);
+    expect(within(dialog).queryByRole('combobox')).toBeNull();
+    expect(within(dialog).getByRole('link', { name: '去 AI 设置' })).toHaveAttribute('href', '/settings/models?section=automation&task=legacy_creator_discovery');
     await user.type(within(dialog).getByRole('spinbutton', { name: /最低点赞/ }), '100');
     await user.click(within(dialog).getByRole('button', { name: '保存设置' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(kit.of('PUT', '/api/local/creator-discovery-policy')[0]?.body).toEqual({
-      domain: DOMAIN, revision: 3, likeThreshold: 100, analysisEnabled: false, configRef: null, dailyTokenLimit: null,
+      domain: DOMAIN, revision: 3, likeThreshold: 100,
     });
     expect(await screen.findByText(/发现设置已保存。保存本身不启动采集，也不会立刻调用模型/)).toBeInTheDocument();
     await waitFor(() => expect(creators().length).toBeGreaterThanOrEqual(2));
   });
 
-  it('启用分析前必须选择模型配置、填写有效的每日词元上限；不满足不发请求', async () => {
-    kit.route('PUT', '/api/local/creator-discovery-policy', ok({ revision: 4, saved: true }));
-    const { user, dialog } = await openPolicy();
-    await waitFor(() => expect(within(dialog).getByRole('checkbox', { name: /启用本领域作品与创作者来源分析/ })).toBeEnabled());
-    await user.click(within(dialog).getByRole('checkbox', { name: /启用本领域作品与创作者来源分析/ }));
-    await user.click(within(dialog).getByRole('button', { name: '保存设置' }));
-    expect(await within(dialog).findByText('启用分析前请选择模型配置。')).toBeInTheDocument();
-    await user.selectOptions(within(dialog).getByRole('combobox', { name: '已有模型配置' }), '本机连接 / model-a');
-    await user.click(within(dialog).getByRole('button', { name: '保存设置' }));
-    expect(await within(dialog).findByText(/请填写有效的每日词元上限/)).toBeInTheDocument();
-    expect(kit.of('PUT', '/api/local/creator-discovery-policy')).toHaveLength(0);
-    await user.type(within(dialog).getByRole('spinbutton', { name: /每日词元上限/ }), '100000');
-    await user.click(within(dialog).getByRole('button', { name: '保存设置' }));
-    await waitFor(() => expect(kit.of('PUT', '/api/local/creator-discovery-policy')).toHaveLength(1));
-    expect(kit.of('PUT', '/api/local/creator-discovery-policy')[0]?.body).toEqual({
-      domain: DOMAIN, revision: 3, likeThreshold: null, analysisEnabled: true, configRef: '05d1c53a-ae0a-4d57-ac09-10e3703f401c', dailyTokenLimit: 100000,
-    });
+  it('旧分析开关已开启也只读展示退役状态，不能配置或重试旧执行链', async () => {
+    const { dialog } = await openPolicy(listJson({ analysisEnabled: true, items: [itemJson(1)] }));
+    expect(within(dialog).getByText(/旧分析已停用/)).toBeInTheDocument();
+    expect(within(dialog).queryByRole('checkbox')).toBeNull();
+    expect(within(dialog).queryByRole('combobox')).toBeNull();
+    expect(within(dialog).queryByRole('spinbutton', { name: /词元/ })).toBeNull();
+    expect(kit.of('GET', '/api/local/model-settings')).toHaveLength(0);
+    expect(kit.of('POST', '/api/local/creator-discovery-analysis/retry')).toHaveLength(0);
   });
 
   it('设置已被别处更新：「未完成」+ 中文说明 + 错误码，对话框保持打开', async () => {
@@ -311,17 +297,17 @@ describe('发现设置', () => {
     expect(screen.getByRole('dialog', { name: '发现设置' })).toBe(dialog);
   });
 
-  it('模型配置读不到：说明并只存点赞标准，分析设置保持原值（请求里不带分析三项）', async () => {
+  it('统一 AI 状态读取失败仍可独立保存点赞标准，不发送旧分析字段', async () => {
     kit.route('PUT', '/api/local/creator-discovery-policy', ok({ revision: 4, saved: true }));
-    const view = await page(listJson({ revision: 3, analysisEnabled: true, configRef: 'cfg-x', dailyTokenLimit: 5000, items: [itemJson(1)] }));
-    kit.route('GET', '/api/local/model-settings', () => error(503, 'model_database_unavailable'));
-    await view.user.click(screen.getByRole('button', { name: '发现设置' }));
+    defaultRoutes(kit, ok(listJson({ revision: 3, analysisEnabled: true, configRef: 'cfg-x', dailyTokenLimit: 5000, items: [itemJson(1)] })));
+    kit.route('GET', '/api/local/ai-settings', () => error(503, 'ai_database_unavailable'));
+    const { user } = renderCreatorsPage();
+    await screen.findByRole('table');
+    await user.click(screen.getByRole('button', { name: '发现设置' }));
     const dialog = await screen.findByRole('dialog', { name: '发现设置' });
-    expect(await within(dialog).findByText('模型配置读取失败。可保存点赞标准，分析设置保持原值。')).toBeInTheDocument();
-    expect(within(dialog).getByRole('checkbox', { name: /启用本领域作品与创作者来源分析/ })).toBeDisabled();
-    expect(within(dialog).getByRole('combobox', { name: '已有模型配置' })).toBeDisabled();
-    await view.user.type(within(dialog).getByRole('spinbutton', { name: /最低点赞/ }), '50');
-    await view.user.click(within(dialog).getByRole('button', { name: '保存设置' }));
+    expect(await within(dialog).findByText('开关读取失败，当前值待核对。')).toBeInTheDocument();
+    await user.type(within(dialog).getByRole('spinbutton', { name: /最低点赞/ }), '50');
+    await user.click(within(dialog).getByRole('button', { name: '保存设置' }));
     await waitFor(() => expect(kit.of('PUT', '/api/local/creator-discovery-policy')).toHaveLength(1));
     expect(kit.of('PUT', '/api/local/creator-discovery-policy')[0]?.body).toEqual({ domain: DOMAIN, revision: 3, likeThreshold: 50 });
   });
@@ -514,66 +500,20 @@ describe('调整判断', () => {
   });
 });
 
-describe('重试失败的分析', () => {
-  const retryPath = '/api/local/creator-discovery-analysis/retry';
-  const failedItem = (n: number) =>
-    itemJson(n, { works: [workJson(n * 10 + 1, { state: 'failed', lastErrorCode: 'model_budget_exhausted', withResult: false })], authorState: 'failed', authorErrorCode: 'model_disabled', authorResult: false, focusValue: 'unknown' });
-
-  async function withFailedAuthors() {
-    const view = await page(listJson({ analysisEnabled: true, items: [failedItem(1), failedItem(2)] }));
-    await view.user.click(screen.getByRole('button', { name: '合成作者 1' }));
-    const drawer = await screen.findByRole('dialog', { name: '合成作者 1' });
-    return { ...view, drawer };
-  }
-
-  it('作者级与作品级的重试各自带正确的范围；进行中显示「正在排队…」并拒绝重复点击；回执后才显示结果', async () => {
-    const gate = deferred<Reply>();
-    kit.route('POST', retryPath, () => gate.promise, ok({ queued: false }));
-    const { user, drawer } = await withFailedAuthors();
-    const authorRetry = within(drawer).getByRole('button', { name: '重试失败分析' });
-    await user.click(authorRetry);
-    expect(await within(drawer).findByRole('button', { name: '正在排队…' })).toBeDisabled();
-    fireEvent.click(within(drawer).getByRole('button', { name: '正在排队…' }));
-    expect(kit.of('POST', retryPath)).toHaveLength(1);
-    expect(kit.of('POST', retryPath)[0]?.body).toEqual({ domain: DOMAIN, creatorKey: creatorKeyFor('author-1') });
-    expect(drawer.querySelector('footer')).not.toHaveTextContent('已完成');
-    gate.resolve({ status: 200, body: { queued: true } });
-    await within(drawer).findByText('已完成');
-    expect(drawer.querySelector('footer')).toHaveTextContent('已排队，符合现有配置及额度后执行。');
+describe('旧分析退役后的历史读取', () => {
+  it('保留作者与作品失败依据；在各分区切换、关闭再打开都不创建重试', async () => {
+    const item = itemJson(1, { works: [workJson(11, { state: 'failed', lastErrorCode: 'model_budget_exhausted', withResult: false })], authorState: 'failed', authorErrorCode: 'model_disabled', authorResult: false, focusValue: 'unknown' });
+    const { user } = await page(listJson({ analysisEnabled: true, items: [item] }));
+    await user.click(screen.getByRole('button', { name: '合成作者 1' }));
+    let drawer = await screen.findByRole('dialog', { name: '合成作者 1' });
+    expect(within(drawer).queryByRole('button', { name: /重试/ })).toBeNull();
     await user.click(within(drawer).getByRole('tab', { name: '作品与依据' }));
-    await user.click(within(drawer).getByRole('button', { name: '重试这篇作品的失败分析' }));
-    await waitFor(() => expect(kit.of('POST', retryPath)).toHaveLength(2));
-    expect(kit.of('POST', retryPath)[1]?.body).toEqual({ domain: DOMAIN, workRef: workRef(11) });
-    expect(await within(drawer).findByText('当前没有可重试的失败分析。')).toBeInTheDocument();
-  });
-
-  it('服务器拒绝：「未完成」+ 中文原因；按钮恢复可点', async () => {
-    kit.route('POST', retryPath, () => error(400, 'analysis_disabled'));
-    const { user, drawer } = await withFailedAuthors();
-    await user.click(within(drawer).getByRole('button', { name: '重试失败分析' }));
-    const status = (await within(drawer).findByText('未完成')).closest('p') as HTMLElement;
-    expect(status).toHaveTextContent('本领域未开启自动分析，不能重试。');
-    expect(within(status).getByText('analysis_disabled')).toBeInTheDocument();
-    expect(within(drawer).getByRole('button', { name: '重试失败分析' })).toBeEnabled();
-  });
-
-  it('重试还在路上时换了一位作者的抽屉：迟到的回执只刷新列表，不在新抽屉里留下任何回执', async () => {
-    const gate = deferred<Reply>();
-    kit.route('POST', retryPath, () => gate.promise);
-    const { user, drawer } = await withFailedAuthors();
-    await user.click(within(drawer).getByRole('button', { name: '重试失败分析' }));
-    await waitFor(() => expect(kit.of('POST', retryPath)).toHaveLength(1));
-    cancel(); // 关闭 A 的抽屉
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    await user.click(screen.getByRole('button', { name: '合成作者 2' }));
-    const drawerB = await screen.findByRole('dialog', { name: '合成作者 2' });
-    const listCalls = creators().length;
-    gate.resolve({ status: 200, body: { queued: true } });
-    await waitFor(() => expect(creators().length).toBeGreaterThan(listCalls));
-    expect(screen.getByRole('dialog', { name: '合成作者 2' })).toBe(drawerB);
-    expect(drawerB.querySelector('footer')).not.toHaveTextContent('已完成');
-    expect(drawerB.querySelector('footer')).not.toHaveTextContent('已排队');
-    // B 自己的重试按钮不受 A 的进行中状态影响。
-    expect(within(drawerB).getByRole('button', { name: '重试失败分析' })).toBeEnabled();
+    expect(drawer).toHaveTextContent('model_budget_exhausted');
+    expect(within(drawer).queryByRole('button', { name: /重试/ })).toBeNull();
+    cancel();
+    await user.click(screen.getByRole('button', { name: '合成作者 1' }));
+    drawer = await screen.findByRole('dialog', { name: '合成作者 1' });
+    expect(within(drawer).queryByRole('button', { name: /重试/ })).toBeNull();
+    expect(kit.of('POST', '/api/local/creator-discovery-analysis/retry')).toHaveLength(0);
   });
 });
