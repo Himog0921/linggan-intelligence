@@ -61,3 +61,9 @@ Mog直接要求主新建按钮右对齐、删去侧栏“采集与观察”、�
 提交前复核：按本树AGENTS新增明确要求执行一次commit-reviewer只读子代理（与原单实施Agent声明区分）；定义中的Sonnet本会话不可选，使用继承模型。两项P2经隔离复现：URL后退绕过脏稿、受控认领下拉无法承接原请求草稿恢复，均已修复并加回归；改用项目现有useBlocker/beforeunload及非受控required下拉。复核四文件106项通过、最终未处理发现0，仅本地提交前复核，不替代远端CI/整包独立发布复审。
 
 浏览器追加依赖：真实popstate在useBlocker回退时会暂时改变window.location，现useManagementRead以原始window.search作queryKey，导致弹窗内表单重挂载。必要依赖明确纳入useManagementRead.ts与managementApi.ts：使用React Router确认的search为同一读取key/请求上下文，不新增接口/数据语义；原APIload仍支持默认search以兼容既有调用。验收真实浏览器后退被拦截后继续，表单和输入均不丢。
+
+## 2026-10-20 · #457/#458 授权整合与本机发布
+
+Mog明确接受候选，并授权核对两PR依赖/检查，无问题合并并更新3000。当前#457@6fdbe9a1与main@2dc1f520冲突，#458@e99e18d8基于旧4700352b且为Draft；最新head无远端checks，旧自动review额度耗尽不作PASS。先在专属`.worktrees/lids-release-integration-001`整合#457与main，保留两边既有能力，提交前按AGENTS独立只读复核；先#457后#458转main并合并已集成依赖。必要共享冲突限既有来源合并，不新增功能。四图沿原表面/状态，新增验收精确head/远端CI或缺失明示/本地隔离回归/合并main/运行PID与前端身份/实际3000页面。
+
+部署仅从干净的目标main使用现行installer，复用canonical runtime的.env不展示或提交；先只读核对migration与在途调用，原禁用worker不启用。若需不在既有授权范围的不可逆迁移则停止该部分报告，不因旧PR正文授权而执行。私有发布证据为已登记/tmp/collection-lids-ui-001/release-01/；不改共享开发目录未提交文件，不调用真实模型/平台/采集。Mog视觉接受仅针对4196候选，实际3000需复验。
