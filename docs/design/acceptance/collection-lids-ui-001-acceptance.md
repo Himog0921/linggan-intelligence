@@ -34,3 +34,17 @@
 ## 未证明与交付边界
 
 Mog视觉/业务签收、独立复审、远端CI、main整合、#457最终head对齐、正式3000刷新、真实写回执/采集/平台/模型及跨系统辅助技术均NOT VERIFIED。此包没有把“读到旧材料”“当前可接活投影”外推为采集成功、实时健康或业务完成。浏览器失败态注入、所有表单的全部异常组合和原生200%缩放未运行；640px等价宽度不能替代原生缩放。
+
+## 2026-10-20 · 七张截图反馈续修验收（取代上述同项旧表现）
+
+标题实测249→243px，上移6px；hover行、吸附对象与操作格均为同一canvas-sunken，内按钮透明，不再留下白块。编号与正向新增均为signal-ink；0与未知不冒充新发现。creator/keyword各自的标题与字段在滚动到表身后贴齐主内容顶沿201px，换到keyword后creator字段退出；创作者横滚80px时其字段与数据同为80px，keyword保持0，互不串位。
+
+任务旧“历史执行记录与诊断”DOM和读取逻辑已删除，三个无调用者的旧前端诊断文件退役；详情无原始JSON、UUID、版本与租约展示，后端历史数据/API保留。进展为当前状态、三项成果、紧凑范围/缺口和三步进展；成果保留真实作品/评论入口与分页。停止确认、未确认原请求核实及原控制请求身份不变。null显示破折号、真实0保留。
+
+实际浏览器详情：1440宽时顶沿128px、宽672px，短内容高度约665px；1280宽同为顶沿128px/宽672px，820宽顶沿186px/宽672px，390宽顶沿191.09px/宽390px，全部等于实际页头含面包屑下沿。三种补测宽度root client/scroll完全相等；窄屏正文内部滚动且页尾主动作可见。成果20篇长列表在1440宽时正文601px、内容1615px，抽屉止于900px视口底部。搜索完整边界、M2提交、真实无匹配提交和清空恢复已浏览器走通；IME组合输入保护由自动回归覆盖。浏览器错误日志为空，结束恢复默认viewport。
+
+最新`npm --prefix apps/web run verify`：strict类型/ESLint/**94文件1053项测试**/Vite构建通过，取代前版自动检查总量。新增回归覆盖两种目标各自字段及横向同步、正向新增、任务搜索IME/URL提交/清空、旧诊断不读取、详情业务展示及原停止确认。本轮Token镜像PASS、LIDS对齐213项/46反例PASS、设计手册PASS、项目治理PASS、diff检查PASS。
+
+补证路径：`/tmp/collection-lids-ui-001/feedback-02/`的targets-hover.png、creator-frozen.png、keyword-frozen.png、freeze.json、task-detail.png、task-results.png、tasks-search.png、task-detail-{1280,820,390}.png、drawer-viewports.json、detail-proof.json及verify.log。截图/日志私有不入Git。冻结参考只用于交互核对，未引入外部组件：[Airtable字段冻结](https://support.airtable.com/articles/6540330000-airtable-field-actions)、[AG Grid固定列](https://www.ag-grid.com/javascript-data-grid/column-pinning/)。
+
+本轮仍为#458候选及4196只读预览，正式3000/main、真实业务写入、独立复审、远端CI和Mog最终签收不由以上验证替代。

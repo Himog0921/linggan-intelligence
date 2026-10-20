@@ -1,0 +1,2 @@
+.header{position:sticky;top:calc(-1 * var(--target-top-inset));z-index:var(--lgi-z-sticky);background:var(--lgi-canvas)}
+.headerViewport{overflow:hidden;container:target-table / inline-size}

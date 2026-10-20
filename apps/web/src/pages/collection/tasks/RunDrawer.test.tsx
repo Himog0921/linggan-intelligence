@@ -18,3 +18,14 @@ it('停止先展示后果，返回不发命令；只读遮罩可关闭详情',as
   expect(fetch.mock.calls).toHaveLength(1);
   fireEvent.click(screen.getByRole('dialog'),{clientX:-1,clientY:-1});expect(close).toHaveBeenCalledOnce();
 });
+
+it('进展仅呈现业务信息，历史与内部诊断不渲染也不请求',async()=>{
+  const fetch=vi.fn(async()=>new Response(JSON.stringify({...data,legacy:true,ended:true,revision:null,control_intent:null}),{status:200,headers:{'Content-Type':'application/json'}}));vi.stubGlobal('fetch',fetch);
+  render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><RunDrawer id={run} domain={domain} onClose={()=>{}}/></QueryClientProvider>);
+  await screen.findByText('历史采集');
+  expect(screen.getByRole('heading',{name:'采集进展'})).toBeInTheDocument();
+  expect(screen.queryByText('执行记录与诊断')).not.toBeInTheDocument();
+  expect(screen.queryByText(run)).not.toBeInTheDocument();
+  expect(screen.queryByText(/有效租约|冻结范围|Attempt|Package|Receipt/)).not.toBeInTheDocument();
+  expect(fetch.mock.calls).toHaveLength(1);
+});
