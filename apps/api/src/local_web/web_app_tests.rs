@@ -34,13 +34,25 @@ fn synthetic_dist(revision: Option<&str>, with_entry: bool) -> PathBuf {
         ("fonts/lids/manifest.json", "{}"),
         ("fonts/lids/opposans/OPPOSans40.ttf", "synthetic-oppo"),
         ("fonts/lids/opposans/LICENSE.txt", "synthetic-oppo-license"),
-        ("fonts/lids/albertsans/AlbertSans[wght].woff2", "synthetic-albert"),
+        (
+            "fonts/lids/albertsans/AlbertSans[wght].woff2",
+            "synthetic-albert",
+        ),
         ("fonts/lids/albertsans/OFL.txt", "synthetic-albert-license"),
-        ("fonts/lids/alumnisans/AlumniSans[wght].woff2", "synthetic-alumni"),
+        (
+            "fonts/lids/alumnisans/AlumniSans[wght].woff2",
+            "synthetic-alumni",
+        ),
         ("fonts/lids/alumnisans/OFL.txt", "synthetic-alumni-license"),
-        ("fonts/lids/manrope/Manrope[wght].woff2", "synthetic-manrope"),
+        (
+            "fonts/lids/manrope/Manrope[wght].woff2",
+            "synthetic-manrope",
+        ),
         ("fonts/lids/manrope/OFL.txt", "synthetic-manrope-license"),
-        ("fonts/lids/jetbrainsmono/JetBrainsMono[wght].woff2", "synthetic-mono"),
+        (
+            "fonts/lids/jetbrainsmono/JetBrainsMono[wght].woff2",
+            "synthetic-mono",
+        ),
         ("fonts/lids/jetbrainsmono/OFL.txt", "synthetic-mono-license"),
     ] {
         let path = directory.join(file);
@@ -168,7 +180,10 @@ async fn hashed_assets_are_long_cached_and_only_declared_font_assets_are_reachab
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(headers[header::CONTENT_TYPE], "font/ttf");
-    assert_eq!(headers[header::CACHE_CONTROL], "public, max-age=3600, must-revalidate");
+    assert_eq!(
+        headers[header::CACHE_CONTROL],
+        "public, max-age=3600, must-revalidate"
+    );
     assert_eq!(headers[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
     assert_eq!(body, "synthetic-oppo");
     let (status, headers, body) = send(
@@ -179,23 +194,44 @@ async fn hashed_assets_are_long_cached_and_only_declared_font_assets_are_reachab
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(headers[header::CONTENT_TYPE], "text/plain; charset=utf-8");
-    assert_eq!(headers[header::CACHE_CONTROL], "public, max-age=3600, must-revalidate");
+    assert_eq!(
+        headers[header::CACHE_CONTROL],
+        "public, max-age=3600, must-revalidate"
+    );
     assert_eq!(body, "synthetic-notice");
     for (file, content_type) in [
         ("fonts/lids/albertsans/AlbertSans[wght].woff2", "font/woff2"),
         ("fonts/lids/alumnisans/AlumniSans[wght].woff2", "font/woff2"),
         ("fonts/lids/manrope/Manrope[wght].woff2", "font/woff2"),
-        ("fonts/lids/jetbrainsmono/JetBrainsMono[wght].woff2", "font/woff2"),
-        ("fonts/lids/opposans/LICENSE.txt", "text/plain; charset=utf-8"),
+        (
+            "fonts/lids/jetbrainsmono/JetBrainsMono[wght].woff2",
+            "font/woff2",
+        ),
+        (
+            "fonts/lids/opposans/LICENSE.txt",
+            "text/plain; charset=utf-8",
+        ),
         ("fonts/lids/albertsans/OFL.txt", "text/plain; charset=utf-8"),
         ("fonts/lids/alumnisans/OFL.txt", "text/plain; charset=utf-8"),
         ("fonts/lids/manrope/OFL.txt", "text/plain; charset=utf-8"),
-        ("fonts/lids/jetbrainsmono/OFL.txt", "text/plain; charset=utf-8"),
+        (
+            "fonts/lids/jetbrainsmono/OFL.txt",
+            "text/plain; charset=utf-8",
+        ),
     ] {
-        let (status, headers, _) = send(web(dist.clone(), "unknown"), &format!("/ui-assets/{file}"), "127.0.0.1:3000").await;
+        let (status, headers, _) = send(
+            web(dist.clone(), "unknown"),
+            &format!("/ui-assets/{file}"),
+            "127.0.0.1:3000",
+        )
+        .await;
         assert_eq!(status, StatusCode::OK, "{file}");
         assert_eq!(headers[header::CONTENT_TYPE], content_type, "{file}");
-        assert_eq!(headers[header::CACHE_CONTROL], "public, max-age=3600, must-revalidate", "{file}");
+        assert_eq!(
+            headers[header::CACHE_CONTROL],
+            "public, max-age=3600, must-revalidate",
+            "{file}"
+        );
         assert_eq!(headers[header::X_CONTENT_TYPE_OPTIONS], "nosniff", "{file}");
     }
     for blocked in [

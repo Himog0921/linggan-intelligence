@@ -59,12 +59,21 @@ const FONT_ASSETS: &[(&str, &str)] = &[
     ("fonts/lids/albertsans/OFL.txt", "text/plain; charset=utf-8"),
     ("fonts/lids/alumnisans/AlumniSans[wght].woff2", "font/woff2"),
     ("fonts/lids/alumnisans/OFL.txt", "text/plain; charset=utf-8"),
-    ("fonts/lids/jetbrainsmono/JetBrainsMono[wght].woff2", "font/woff2"),
-    ("fonts/lids/jetbrainsmono/OFL.txt", "text/plain; charset=utf-8"),
+    (
+        "fonts/lids/jetbrainsmono/JetBrainsMono[wght].woff2",
+        "font/woff2",
+    ),
+    (
+        "fonts/lids/jetbrainsmono/OFL.txt",
+        "text/plain; charset=utf-8",
+    ),
     ("fonts/lids/manrope/Manrope[wght].woff2", "font/woff2"),
     ("fonts/lids/manrope/OFL.txt", "text/plain; charset=utf-8"),
     ("fonts/lids/opposans/OPPOSans40.ttf", "font/ttf"),
-    ("fonts/lids/opposans/LICENSE.txt", "text/plain; charset=utf-8"),
+    (
+        "fonts/lids/opposans/LICENSE.txt",
+        "text/plain; charset=utf-8",
+    ),
 ];
 
 #[derive(Clone)]
