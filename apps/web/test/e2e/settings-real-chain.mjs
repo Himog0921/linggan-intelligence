@@ -11,7 +11,7 @@ assert.ok(directory, 'WEB_APP_PROOF_DIR is required');
 const { origin } = JSON.parse(await readFile(path.join(directory, 'fixture.json'), 'utf8'));
 await mkdir(directory, { recursive: true });
 
-const report = { origin, steps: [], screenshots: [], pageErrors: [], consoleErrors: [], failedRequests: [], probeBodies: [], settingsReads: [] };
+const report = { origin, steps: [], screenshots: [], pageErrors: [], consoleErrors: [], failedRequests: [], assetErrors: [], probeBodies: [], settingsReads: [] };
 let currentStep = 'setup';
 const step = async (name, run) => {
   currentStep = name;
@@ -37,6 +37,12 @@ page.on('requestfailed', request => {
   report.failedRequests.push(`${request.method()} ${new URL(request.url()).pathname} ${request.failure()?.errorText ?? ''}`);
   const read = settingsReads.get(request);
   if (read) Object.assign(read, { failedStep: currentStep, error: request.failure()?.errorText, endedAt: Date.now() });
+});
+// A static asset answered with an HTTP error is a real failure; a download the browser cancels because the document
+// navigated away (the 22 MB OPPO Sans font is the one that is often still in flight) is not.
+page.on('response', response => {
+  const { pathname } = new URL(response.url());
+  if (pathname.startsWith('/ui-assets/') && response.status() >= 400) report.assetErrors.push(`${response.request().method()} ${pathname} ${response.status()}`);
 });
 page.on('requestfinished', request => {
   const read = settingsReads.get(request);
@@ -238,8 +244,10 @@ try {
   await step('页面没有脚本错误；失败请求只有有意拦截的一次', async () => {
     assert.deepEqual(report.pageErrors, []);
     assert.deepEqual(report.consoleErrors.filter(text => !text.includes('Failed to load resource')), []);
-    const unexpected = report.failedRequests.filter(entry => !entry.startsWith('POST /api/local/model-settings/probes'));
+    const cancelledRead = entry => entry.startsWith('GET ') && entry.endsWith('net::ERR_ABORTED');
+    const unexpected = report.failedRequests.filter(entry => !entry.startsWith('POST /api/local/model-settings/probes') && !cancelledRead(entry));
     assert.deepEqual(unexpected, []);
+    assert.deepEqual(report.assetErrors, [], 'static assets must not answer with HTTP errors');
   });
   finished = true;
 } finally {
