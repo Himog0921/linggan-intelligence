@@ -63,6 +63,9 @@ mod material_projection_tests;
 #[cfg(test)]
 mod material_replica_fallback_tests;
 mod model_settings;
+mod offline_preview;
+#[cfg(test)]
+mod offline_preview_tests;
 mod ops;
 mod ops_api;
 #[cfg(test)]
@@ -375,6 +378,7 @@ fn router(state: LocalWebState) -> Router {
         .merge(comment_study::routes())
         .merge(model_settings::routes())
         .merge(ai_settings::routes())
+        .merge(offline_preview::routes())
         .merge(web_app::routes())
         .merge(ops::routes())
         .merge(content_workbench_api::routes())

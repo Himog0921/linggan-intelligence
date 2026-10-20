@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
 import { AssignDomain } from './TargetAssignment';
@@ -62,7 +62,7 @@ describe('监控规则原回执与失败语义', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(answer({ code: 'target_not_found' }, 404));
     render(<MemoryRouter><RuleModal targetRef={targetRef} params={new URLSearchParams()} commands={commands()} revision={0} /></MemoryRouter>);
     expect(await screen.findByRole('heading', { name: '没有找到这个观察目标' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: '没有找到这个观察目标' })).toHaveFocus();
+    await waitFor(() => expect(screen.getByRole('heading', { name: '没有找到这个观察目标' })).toHaveFocus());
     expect(screen.getByText('这个本机标识没有对应目标；它不证明平台上的对象不存在，也不证明目标曾被删除。')).toBeInTheDocument();
     expect(screen.getByRole('dialog')).toHaveClass('c-rule-modal-compact');
     expect(screen.queryByRole('button', { name: '保存新版本' })).not.toBeInTheDocument();

@@ -175,6 +175,7 @@ export function TopicsPage() {
           </div>
         }
       >
+        <p><a href="/topics/offline-review">离线预演</a></p>
         <div
           id="topic-map-root"
           data-view={state.view}

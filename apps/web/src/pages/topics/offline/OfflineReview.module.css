@@ -1,0 +1,43 @@
+.page { padding: var(--lgi-space-6); color: var(--lgi-body); font-size: var(--lgi-text-body); }
+.page h1 { color: var(--lgi-ink); font-size: var(--lgi-text-page-title); }
+.page h2 { color: var(--lgi-ink); font-size: var(--lgi-text-section); }
+.page h3 { color: var(--lgi-ink); font-size: var(--lgi-text-body); }
+.page p { line-height: 1.6; }
+.header, .toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--lgi-space-4); }
+.toolbar { justify-content: flex-start; margin-block: var(--lgi-space-6); }
+.toolbar nav { display: flex; gap: var(--lgi-space-4); margin-inline-end: auto; }
+.toolbar nav button { border: 0; border-bottom: var(--lgi-space-1) solid transparent; background: transparent; padding: var(--lgi-space-3); color: var(--lgi-body); font: inherit; cursor: pointer; }
+.toolbar nav button[aria-current] { border-bottom-color: var(--lgi-signal); color: var(--lgi-ink); font-weight: 700; }
+.page label { display: grid; gap: var(--lgi-space-2); }
+.page select, .page textarea { min-height: var(--lgi-space-10); padding: var(--lgi-space-2); border: 1px solid var(--lgi-border-strong); border-radius: var(--lgi-radius-none); color: var(--lgi-ink); background: var(--lgi-canvas); font: inherit; max-width: 100%; }
+.page textarea { min-height: var(--lgi-space-24); resize: vertical; }
+.page code { font-family: var(--lgi-font-mono); font-size: var(--lgi-text-data); overflow-wrap: anywhere; }
+.identity { margin-block: var(--lgi-space-4); }
+.workspace { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.35fr) minmax(0, 1.35fr); gap: var(--lgi-space-6); align-items: start; }
+.workspace > * { min-width: 0; overflow-wrap: anywhere; }
+.index { display: grid; gap: var(--lgi-space-2); }
+.index button { text-align: left; padding: var(--lgi-space-3); border: 0; border-inline-start: var(--lgi-space-1) solid transparent; background: transparent; font: inherit; color: var(--lgi-body); cursor: pointer; }
+.index button[aria-current] { background: var(--lgi-signal-soft); border-inline-start-color: var(--lgi-signal); color: var(--lgi-ink); }
+.index strong, .index small { display: block; }
+.index small { font-size: var(--lgi-text-data); margin-top: var(--lgi-space-2); }
+.reader > section { margin-block: var(--lgi-space-6); }
+.reader small { color: var(--lgi-muted); font-weight: 400; }
+.literal { white-space: pre-wrap; color: var(--lgi-ink); }
+.result { background: var(--lgi-canvas-low); padding: var(--lgi-space-4); }
+.result dt { color: var(--lgi-muted); margin-top: var(--lgi-space-3); }
+.result dd { margin: 0; color: var(--lgi-ink); }
+.result details { margin-block: var(--lgi-space-4); }
+.form { margin-top: var(--lgi-space-6); }
+.form fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: var(--lgi-space-3); min-width: 0; }
+.notice { padding: var(--lgi-space-3); background: var(--lgi-canvas-low); color: var(--lgi-ink); }
+.page summary { cursor: pointer; color: var(--lgi-ink); }
+.page table { width: 100%; border-collapse: collapse; text-align: left; font-variant-numeric: tabular-nums; }
+.page th, .page td { padding: var(--lgi-space-3); vertical-align: top; overflow-wrap: anywhere; }
+.page th { color: var(--lgi-muted); font-weight: 600; }
+.catalogue td:first-child { width: 75%; }
+.catalogue td button { min-width: var(--lgi-space-10); min-height: var(--lgi-space-10); border: 1px solid var(--lgi-border-strong); background: var(--lgi-canvas); color: var(--lgi-ink); margin-inline-end: var(--lgi-space-2); cursor: pointer; }
+.statistics { margin-top: var(--lgi-space-8); }
+.tableScroll { overflow-x: auto; }
+.page :is(button, a, select, textarea, summary):focus-visible { outline: 2px solid var(--lgi-focus); outline-offset: var(--lgi-space-1); }
+@media (max-width: 70rem) { .workspace { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .index { grid-column: 1 / -1; grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 45rem) { .page { padding: var(--lgi-space-4); } .workspace { display: block; } .index { grid-template-columns: minmax(0, 1fr); } .reader, .result { margin-top: var(--lgi-space-6); } .toolbar { align-items: stretch; } .page th, .page td { padding: var(--lgi-space-2); } }
