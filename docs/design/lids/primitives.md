@@ -32,7 +32,7 @@ Primitive 是全站可复用的基础语法，不承载具体 Topic、真实请�
 
 ## 按钮：一个动作区域最多一个 Primary
 
-ALIGN-CONTROL：按钮与下拉采用[materials](materials.md)的ALIGN-MATERIAL-006（Q05 M2）；精确参数只维护于[control-material.json](control-material.json)。本范围Primary深橙、白字、墨框、小硬投影及受限位移；Secondary白底小纹理、静止无投影，Danger／Quiet保持职责。以下旧4px／7px投影与双轴位移在本范围由M2取代，未涉及的既有角色与受控V8例外继续有效。D07的全Primary墨色／无投影候选已退出当前标准。
+ALIGN-CONTROL：按钮与下拉采用[materials](materials.md)的ALIGN-MATERIAL-006（Q05 M2）；精确参数只维护于[control-material.json](control-material.json)。本范围Primary深橙、白字、墨框、小硬投影及受限位移；Secondary白底小纹理、静止无投影，Danger／Quiet保持职责。以下旧4px／7px投影与双轴位移在本范围由M2取代，未涉及的既有角色与受控V8例外继续有效（工作台动作按钮外观已由ALIGN-WORKBENCH-015于2026-10-20取代，不再属于该例外）。D07的全Primary墨色／无投影候选已退出当前标准。
 
 | 类型 | 使用 | 禁止 |
 |---|---|---|
@@ -217,8 +217,8 @@ Mog明确采用Q04候选C。输入／FIND不增加外圈，鼠标输入使用轻
 
 ## 2026-10-15 · 工作台 V8 ActionButton
 
-本轮 Mog 明确指定的 V8 动作风格通过唯一 React `shared/ActionButton` 实施，替代工作台各页重复的操作按钮样式；不是给导航、纸条、缩略图或普通卡片增加动作纹理。primary/ink/outline/soft/danger/quiet 六类按职责使用，loading 为原生禁用的进行中状态，保留可访问名称、四格反馈和右缘一列点阵。
+【外观以 ALIGN-WORKBENCH-015（2026-10-20）采用的 M2 为准，见本节下一段的标记。】本轮 Mog 明确指定的 V8 动作风格通过唯一 React `shared/ActionButton` 实施，替代工作台各页重复的操作按钮样式；不是给导航、纸条、缩略图或普通卡片增加动作纹理。primary/ink/outline/soft/danger/quiet 六类按职责使用，loading 为原生禁用的进行中状态，保留可访问名称、四格反馈和右缘一列点阵。
 
-本控件遵守 [Token 增量](tokens.md#2026-10-15--创作工作台-v8-动作控件的受控增量) 的局部例外：primary/ink 悬停位移−1px，按压4px；点阵可在按下时铺满，标签始终位于纹理上方。键盘焦点覆盖阴影外沿，禁用显示休眠纹理；busy 不能二次触发动作，减少动态效果时仍保留明确的状态文字与静止四格。不把 busy 当后端成功，不改请求/确认语义。
+【2026-10-20 起被 ALIGN-WORKBENCH-015 取代：工作台动作按钮已采用 M2，下列 V8 外观数值不再是现行值，现行值只读 control-material.json；以下原文保留作采用前记录。】本控件遵守 [Token 增量](tokens.md#2026-10-15--创作工作台-v8-动作控件的受控增量) 的局部例外：primary/ink 悬停位移−1px，按压4px；点阵可在按下时铺满，标签始终位于纹理上方。键盘焦点覆盖阴影外沿，禁用显示休眠纹理；busy 不能二次触发动作，减少动态效果时仍保留明确的状态文字与静止四格。不把 busy 当后端成功，不改请求/确认语义。
 
 采集任务表按[regions](regions.md)的ALIGN-LEDGER-008，参数唯一[ledger-layout.json](ledger-layout.json)；L1/44px/名称144px及字段自定义/横滚已采用，不改变其他页型表格的合法尺寸。

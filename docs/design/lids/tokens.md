@@ -524,6 +524,8 @@ L3 GEOMETRY   间距 / 字号 / 线宽 / 圆角 / 动效 五套阶梯
 
 Mog 本轮明确要求按 V8 动作层级纠正工作台按钮。本条是局部增量，覆盖本控件与上文旧 Mosaic 面积/按压、hover 禁止、硬投影聚焦组合的冲突；不启动全站换值或旧页面迁移。运行时唯一声明仍为 `apps/web/src/styles/lids_tokens.css`，旧 Token 原值不改。
 
+> **2026-10-20 更新（ALIGN-WORKBENCH-015）**：Mog 决定工作台动作按钮采用 M2。下表中关于按钮**外观**的行（`lattice-*` 的 16px 棋格与右缘 idle／hover／active 比例、`shadow-*／*-shift` 的 4px／5px／−1px／4px、`focus-*` 的隔离带加聚焦环、`font-size` 的 13px）已不是现行值，仅保留作采用前记录；现行值只读 [control-material.json](control-material.json)，由 `scripts/sync-lids-runtime.py` 映射到 `lids_tokens.css`。`fill／ink／paper` 色、`motion-*／cell-*`（忙碌四格）仍然现行。表后「只在工作台生效」一句也已过时：`ActionButton` 现同时被创作者页、证据库页和工作台使用。
+
 | Token 家族 | 认可值与用途 |
 |---|---|
 | `--lgi-action-fill/ink/paper` | V8 承字主色 #c63214、墨色 #0b0f12、白色；主操作白字对比度约5.4:1 |

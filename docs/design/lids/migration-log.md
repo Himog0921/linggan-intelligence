@@ -818,3 +818,8 @@ U23采用Q12 E1及媒体白场，九源/镜像/构建守卫与项目Agent渐进�
 ## 2026-10-20 · LIDS-UI-001 本地正式前端候选
 
 基于 origin/main@612dcbea 实施共享基础、原字体/许可、A壳和任务L1。独立治理树按共同祖先三方衔接，保留最新React规则与评论Z02读数合同；旧只读规范包的范围不再限制本次直接授权。运行值由 sync-lids-runtime.py 映射唯一Token，具体已证明/未证明见本轮验收；main/3000尚未变更。
+
+
+## 2026-10-20 · ALIGN-WORKBENCH-015 工作台动作按钮并入 M2
+
+LIDS-UI-001 两页发布补验时发现：共享 `ActionButton`（V8 动作族，主干上仅内容工作台使用）随创作者页、证据库页采用 M2 而整体换参，工作台浏览器证明因按钮外观断言失败。Mog 在发布核对中选择「工作台也变成新样式」，裁定记入 decisions.md；`tokens.md`、`primitives.md`、`materials.md`、`patterns.md`、`component-promotion.md` 中「V8 工作台按钮保持」的说法加替代标记，历史数值保留。证明侧：`workbench-real-chain.mjs` 的按钮断言改读 control-material.json；无新增后端、迁移、业务 Token 或字体变化。工作台按钮外观在 3000 上随发布变化（阴影变薄、右缘纹理更密），功能与请求语义不变。

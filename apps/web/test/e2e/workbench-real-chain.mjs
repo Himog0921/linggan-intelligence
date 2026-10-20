@@ -10,6 +10,9 @@ import { chromium } from 'playwright';
 const directory = process.env.CW_BROWSER_PROOF_DIR;
 assert.ok(directory, 'CW_BROWSER_PROOF_DIR is required');
 const fixture = JSON.parse(await readFile(path.join(directory, 'fixture.json'), 'utf8'));
+// Action geometry comes from the confirmed M2 source (ALIGN-MATERIAL-006), not from what the browser happens to report.
+const m2Source = JSON.parse(await readFile(new URL('../../../../docs/design/lids/control-material.json', import.meta.url), 'utf8'));
+const m2 = m2Source.parameters, m2geo = m2Source.geometry;
 const { origin, domainRef, accountRef } = fixture;
 assert.equal(new URL(origin).hostname, '127.0.0.1');
 await mkdir(directory, { recursive: true });
@@ -170,8 +173,8 @@ async function v8Style(locator) {
   return locator.evaluate(node=>{
     const style=getComputedStyle(node),before=getComputedStyle(node,'::before'),matrix=new DOMMatrixReadOnly(style.transform);
     return {family:node.getAttribute('data-action-button'),variant:node.getAttribute('data-variant'),disabled:node.matches(':disabled'),busy:node.getAttribute('aria-busy'),focusVisible:node.matches(':focus-visible'),active:node.matches(':active'),clientWidth:node.clientWidth,
-      background:style.backgroundColor,backgroundImage:style.backgroundImage,color:style.color,borderWidth:style.borderTopWidth,borderStyle:style.borderTopStyle,borderColor:style.borderTopColor,radius:style.borderRadius,shadow:style.boxShadow,shift:[matrix.m41,matrix.m42],transition:style.transitionDuration,
-      before:{display:before.display,width:parseFloat(before.width),image:before.backgroundImage,mask:before.maskImage,transition:before.transitionDuration,timing:before.transitionTimingFunction},
+      background:style.backgroundColor,backgroundImage:style.backgroundImage,color:style.color,borderWidth:style.borderTopWidth,borderStyle:style.borderTopStyle,borderColor:style.borderTopColor,radius:style.borderRadius,shadow:style.boxShadow,outlineStyle:style.outlineStyle,outlineWidth:style.outlineWidth,outlineColor:style.outlineColor,shift:[matrix.m41,matrix.m42],transition:style.transitionDuration,
+      before:{display:before.display,width:parseFloat(before.width),size:before.backgroundSize,image:before.backgroundImage,mask:before.maskImage,transition:before.transitionDuration,timing:before.transitionTimingFunction},
       cells:[...node.querySelectorAll('[aria-hidden="true"] > i')].map(cell=>{const s=getComputedStyle(cell);return {width:s.width,height:s.height,animation:s.animationName,duration:s.animationDuration,timing:s.animationTimingFunction,delay:s.animationDelay,opacity:s.opacity};})};
   });
 }
@@ -191,23 +194,25 @@ async function tabTo(locator) {
   throw new Error('Keyboard could not reach the actual V8 action');
 }
 async function assertV8EnabledActionStates(locator) {
+  const idle=`${m2.buttonShadow}px ${m2.buttonShadow}px 0px 0px`,lifted=`${m2.buttonShadow+m2.hoverLift}px ${m2.buttonShadow+m2.hoverLift}px 0px 0px`;
   await page.emulateMedia({reducedMotion:'no-preference'});await locator.scrollIntoViewIfNeeded();await page.mouse.move(0,0);
-  let style=await recordV8('default',locator);assert.equal(style.family,'v8');assert.equal(style.variant,'primary');assert.equal(style.background,'rgb(198, 50, 20)');assert.equal(style.radius,'0px');assert.equal(style.borderWidth,'2px');assert.equal(style.borderColor,'rgb(11, 15, 18)');shadowHas(style,'4px 4px 0px 0px');assert.equal(style.before.width,16);assert.match(style.before.image,/conic-gradient/);assert.match(style.before.mask,/linear-gradient/);
-  await locator.hover();await until(async()=>{const s=await v8Style(locator);return Math.abs(s.before.width-s.clientWidth*.4)<1&&s.shift[0]===-1&&s.shadow.includes('5px 5px 0px 0px');},'V8 quantised hover settles at 40%');style=await recordV8('hover',locator);assert.deepEqual(style.shift,[-1,-1]);shadowHas(style,'5px 5px 0px 0px');assert.match(style.before.timing,/steps\(3\)/);
+  let style=await recordV8('default',locator);assert.equal(style.family,'v8');assert.equal(style.variant,'primary');assert.equal(style.background,'rgb(198, 50, 20)');assert.equal(style.radius,'0px');assert.equal(style.borderWidth,'2px');assert.equal(style.borderColor,'rgb(11, 15, 18)');shadowHas(style,idle);
+  assert.equal(style.before.width,m2.buttonTail,'M2 primary keeps a fixed right-edge texture strip');assert.equal(style.before.size,`${m2.buttonPitch}px ${m2.buttonPitch}px`);assert.match(style.before.image,/conic-gradient/);assert.match(style.before.image,new RegExp(String(m2.buttonOpacity).replace('.','\\.')));assert.match(style.before.mask,/linear-gradient/);
+  await locator.hover();await until(async()=>{const s=await v8Style(locator);return s.shift[0]===-m2.hoverLift&&s.shadow.includes(lifted);},'M2 hover lifts the primary action');style=await recordV8('hover',locator);assert.deepEqual(style.shift,[-m2.hoverLift,-m2.hoverLift]);shadowHas(style,lifted);assert.equal(style.before.width,m2.buttonTail,'hover does not widen the texture strip');
   const freezes=()=>report.requests.filter(item=>item.method==='POST'&&item.path.endsWith('/exports')).length,before=freezes();
   try {
-    await page.mouse.down();await until(async()=>{const s=await v8Style(locator);return Math.abs(s.before.width-s.clientWidth)<1&&s.shift[0]===4&&s.shadow==='none';},'held mouse press fills the button');style=await recordV8('held-mouse-press',locator);assert.equal(style.active,true);assert.deepEqual(style.shift,[4,4]);assert.equal(style.shadow,'none');
+    await page.mouse.down();await until(async()=>{const s=await v8Style(locator);return s.shift[0]===m2.pressDepth&&s.shadow==='none';},'held mouse press sinks the action by pressDepth and drops the shadow');style=await recordV8('held-mouse-press',locator);assert.equal(style.active,true);assert.deepEqual(style.shift,[m2.pressDepth,m2.pressDepth]);assert.equal(style.shadow,'none');
   } finally {await page.mouse.move(0,0);await page.mouse.up();}
   assert.equal(freezes(),before,'moving off before release cancels the real export action');
-  await tabTo(locator);await until(async()=>{const s=await v8Style(locator);return s.focusVisible&&s.shadow.includes('2px 2px 0px 5px')&&s.shadow.includes('2px 2px 0px 7px');},'native keyboard focus ring transition settles');style=await recordV8('keyboard-focus',locator);shadowHas(style,'2px 2px 0px 5px');shadowHas(style,'2px 2px 0px 7px');
-  await locator.hover();await until(async()=>{const s=await v8Style(locator);return s.shift[0]===-1&&s.shadow.includes('3px 3px 0px 6px')&&s.shadow.includes('3px 3px 0px 8px');},'focused hover ring transition settles');style=await recordV8('focus-hover',locator);assert.equal(style.focusVisible,true);shadowHas(style,'3px 3px 0px 6px');shadowHas(style,'3px 3px 0px 8px');
+  await tabTo(locator);await until(async()=>{const s=await v8Style(locator);return s.focusVisible&&s.outlineStyle==='solid'&&s.shadow.includes(idle);},'native keyboard focus shows the retained visible button focus once the idle shadow has settled');style=await recordV8('keyboard-focus',locator);assert.equal(style.outlineStyle,'solid');assert.equal(style.outlineWidth,'2px');assert.notEqual(style.outlineColor,'rgba(0, 0, 0, 0)');shadowHas(style,idle);
+  await locator.hover();await until(async()=>{const s=await v8Style(locator);return s.shift[0]===-m2.hoverLift&&s.shadow.includes(lifted);},'focused hover keeps the lift');style=await recordV8('focus-hover',locator);assert.equal(style.focusVisible,true);assert.equal(style.outlineStyle,'solid');shadowHas(style,lifted);
   await page.mouse.move(0,0);
   try {
-    await page.keyboard.down('Space');await until(async()=>{const s=await v8Style(locator);return s.shift[0]===4&&s.shadow.includes('0px 0px 0px 3px')&&s.shadow.includes('0px 0px 0px 5px');},'held keyboard press ring transition settles');style=await recordV8('focus-held-keyboard-press',locator);assert.equal(style.focusVisible,true);assert.equal(style.active,true);shadowHas(style,'0px 0px 0px 3px');shadowHas(style,'0px 0px 0px 5px');
+    await page.keyboard.down('Space');await until(async()=>{const s=await v8Style(locator);return s.shift[0]===m2.pressDepth&&s.shadow==='none';},'held keyboard press sinks the action and drops the shadow');style=await recordV8('focus-held-keyboard-press',locator);assert.equal(style.focusVisible,true);assert.equal(style.active,true);assert.equal(style.shadow,'none');assert.equal(style.outlineStyle,'solid');
     await page.keyboard.press('Tab');
   } finally {await page.keyboard.up('Space');}
   assert.equal(freezes(),before,'moving keyboard focus before release cancels the real export action');
-  await page.emulateMedia({reducedMotion:'reduce'});await locator.hover();style=await recordV8('reduced-motion',locator);assert.equal(style.transition,'0s');assert.equal(style.before.transition,'0s');await page.mouse.move(0,0);
+  await page.emulateMedia({reducedMotion:'reduce'});await locator.hover();style=await recordV8('reduced-motion',locator);assert.equal(style.transition,'0s');assert.equal(style.before.transition,'0s');assert.deepEqual(style.shift,[0,0],'reduced motion removes the displacement');await page.mouse.move(0,0);
 }
 async function generateWithV8BusyProof(locator) {
   const pattern='**/ops/api/creation/works/*/exports';let release,freezeEntered=false,handlerFinished=false,routeError,actionError;
@@ -217,9 +222,9 @@ async function generateWithV8BusyProof(locator) {
   try {
     const count=()=>report.requests.filter(item=>item.method==='POST'&&item.path.endsWith('/exports')).length,before=count();
     await locator.click();await until(()=>freezeEntered,'actual export freeze request reaches the isolated server');await until(async()=>{const s=await v8Style(locator);return s.busy==='true'&&s.cells.length===4;},'busy is backed by the actual held freeze response');
-    let style=await recordV8('busy-reduced-motion',locator);assert.equal(style.disabled,true);assert.equal(style.before.display,'block');assert.equal(style.before.width,16);assert.match(style.before.image,/11, 15, 18/);assert.equal(style.cells.length,4);assert.ok(style.cells.every(cell=>cell.animation==='none'&&cell.opacity==='1'));
+    let style=await recordV8('busy-reduced-motion',locator);assert.equal(style.disabled,true);assert.equal(style.before.display,'block');assert.equal(style.before.width,m2.buttonPitch,'busy keeps one lattice cell');assert.match(style.before.image,/conic-gradient/);assert.match(style.before.image,new RegExp(String(m2geo.secondaryMosaicInkOpacity).replace('.','\\.')));assert.equal(style.cells.length,4);assert.ok(style.cells.every(cell=>cell.animation==='none'&&cell.opacity==='1'));
     await page.emulateMedia({reducedMotion:'no-preference'});style=await recordV8('busy-four-discrete-cells',locator);assert.ok(style.cells.every(cell=>cell.animation!=='none'&&cell.duration==='0.8s'&&/steps\(1\)|step-end/.test(cell.timing)));assert.deepEqual(style.cells.map(cell=>cell.delay),['0s','0.2s','0.4s','0.6s']);
-    await locator.hover();assert.equal((await v8Style(locator)).before.width,16,'busy retains one idle lattice column instead of expanding on hover');const box=await locator.boundingBox();assert.ok(box);await page.mouse.click(box.x+box.width/2,box.y+box.height/2);await page.keyboard.press('Enter');await remains(()=>count()===before+1,'busy native-disabled action cannot send a duplicate freeze',200);
+    await locator.hover();assert.equal((await v8Style(locator)).before.width,m2.buttonPitch,'busy retains one lattice cell instead of expanding on hover');const box=await locator.boundingBox();assert.ok(box);await page.mouse.click(box.x+box.width/2,box.y+box.height/2);await page.keyboard.press('Enter');await remains(()=>count()===before+1,'busy native-disabled action cannot send a duplicate freeze',200);
   } catch(error) {actionError=error;} finally {await page.emulateMedia({reducedMotion:'reduce'});release();if(freezeEntered)await until(()=>handlerFinished,'held freeze response is fulfilled before removing its route');await page.unroute(pattern,handler);}
   if(routeError)report.v8RouteError=String(routeError);
   if(actionError)throw actionError;
