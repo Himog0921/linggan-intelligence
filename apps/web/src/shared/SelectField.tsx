@@ -57,8 +57,19 @@ export function SelectField<T extends string>({ label, value, options, onChange,
   }, [open]);
 
   useLayoutEffect(() => {
-    if (open) menu.current?.children[active]?.scrollIntoView?.({ block: 'nearest' });
-  }, [active, open]);
+    if (!open) return;
+    const popup = menu.current;
+    const option = popup?.children[active];
+    if (!popup || !(option instanceof HTMLElement)) return;
+    const bounds = popup.getBoundingClientRect();
+    const item = option.getBoundingClientRect();
+    const top = bounds.top + popup.clientTop;
+    const bottom = top + popup.clientHeight;
+    // Keep navigation inside this menu: scrollIntoView also scrolls ancestors,
+    // which our external-scroll handler correctly treats as a dismissal.
+    if (item.top < top) popup.scrollTop += item.top - top;
+    else if (item.bottom > bottom) popup.scrollTop += item.bottom - bottom;
+  }, [active, open, position]);
 
   function choose(index: number) {
     const option = options[index];

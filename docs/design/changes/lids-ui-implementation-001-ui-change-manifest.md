@@ -74,3 +74,7 @@ apps/web、`apps/api/src/local_web/web_app.rs` 及其测试 `web_app_tests.rs` �
 当前对话Mog已接受采集候选并明确授权核对两PR、无问题合并并部署。#457@6fdbe9a1与main@2dc1f520冲突，本轮由root在专属lids-release-integration-001整合现有来源：保留主线AI-GEN1离线评审/策略读写，套用本包LIDS UI；不创造第三种产品语义。冲突涉及CreatorPolicyDialog/CreatorWrites回归、creators/settings浏览器证明与文档索引/迁移日志/注册表/进度。保留两边断言和已确认语义，先前审查仅历史依据，最终树另做commit-reviewer与自动检查。
 
 表面/状态/权限沿两包既定合同；新增依赖图为main→#457→#458，验收精确head、CI、隔离真实库/浏览器、实际main/runtime/PID/3000页面。部署只用当前main installer，保留禁用worker，未提供数据库不可逆处置、真实模型/平台/采集授权。证据沿已登记/tmp/collection-lids-ui-001/release-01/，不入Git，不改原#457工作树。
+
+远端最新head的证据库浏览器证明在通道状态第13项点击前关闭下拉；本地同head全链通过。共享SelectField对active项调用scrollIntoView会连带滚动祖先，而组件明确在外部滚动时关闭，存在自触发关闭的路径。必要修复限shared/SelectField.tsx：键盘/悬停active项仅滚动所属菜单，不滚动页面或外层筛选面；补shared/SelectField.test.tsx复现并覆盖长菜单末项、外部滚动关闭及真实选择，保留完整浏览器点击断言后复跑CI。属于已授权两页统一选择器缺陷修复，不改产品/API/查询合同。
+
+修复后本地verify 93文件/1036项及types/lint/build通过，独立commit-reviewer 2文件8项复核通过、无未处理发现；首次末项高度收紧定位按position再次运行，无祖先滚动。治理/diff通过。修复前1a6b6d12的本地完整PG/浏览器全部阶段与清理已通过，但远端同head选择器点击失败不作PASS；修复后的远端完整CI必须重跑确认，3000未切换。
