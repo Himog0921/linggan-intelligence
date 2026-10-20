@@ -43,6 +43,8 @@ pub async fn relayer_work(
                 .as_str()
                 .and_then(|s| s.parse::<Uuid>().ok())
         })
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
         .collect();
     if layouts.len() > 100 {
         return Err(crate::ProducerRuntimeError::MaterialIdentityConflict);

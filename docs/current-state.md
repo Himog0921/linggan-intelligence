@@ -6,6 +6,14 @@
 > 事实来源: 用户要求、2026-10-18 GitHub/main与本机运行身份核对、D3候选隔离证明及此前按日期保留的现场回执
 > 冲突时以谁为准: 真实运行结果、ACCEPTED ADR 与用户最新确认
 
+## 2026-10-19 · AI-GEN1 / PR-1A（独立候选）
+
+Mog 正式派定 PR-1A 底稿补齐、隔离证明和 Draft PR；统一主 Issue [#454](https://github.com/Himog0921/linggan-intelligence/issues/454) 已登记 Claim，并与原 [#420](https://github.com/Himog0921/linggan-intelligence/issues/420) 双向关联。基于 main `612dcbea`，专属树 `.worktrees/ai-gen1-pr1a-dossier`，不使用共享脏 checkout 或 runtime-main 实施。新增标签接纳/窄补投影、`note-material-input.v1`、真实 work 就绪判断、不可变引用快照及有界 plan/apply；旧底稿与三类消费者保持原合同。工程规格见[统一计划](plans/active/ai-gen1-001.md)、[输入合同](data-contracts/note-material-input.md)。
+
+代码/隔离证明与运行/真实材料/页面验收分别计；本包不合并部署，不动共享数据库/服务，不调用真实模型、不处理媒体积压或采集。只读 API 先交付；#420 页面 G4、真实覆盖及新显示规格尚未验证。PR-1B 在 1A 补齐实施完成后进入；PR-1C 仍等 1A/1B 上线与 G4。下方其他任务的运行数字保留其原记录日期，本轮没有刷新运行事实。
+
+PR-1A [Draft #455](https://github.com/Himog0921/linggan-intelligence/pull/455) 的代码head `93ab18c5` 已取得2项实际CI成功（web-checks、real-chain-browser-proof），4项分支限定检查SKIPPED；AI-GEN1专项与合成PG/浏览器证明实际执行。核对main仍612dcbea、无合并冲突或审查线程，工程上具备合并条件；本轮仅同步文档，代码与该已测提交一致。保持Draft、未合并部署，真实覆盖/页面G4及实际数据窗口不升级；详见[CI回执](audits/ai-gen1-pr1a-acceptance.md#ci-跟进与合并条件2026-10-19)。
+
 ## 2026-10-19 · WEB-REACT-001 完整收尾包（当前）
 
 #446 已按 c0abdb9e 合并为 main@d635718e，原 head 的3项实际执行CI成功、4项条件跳过，独立GPT复核覆盖该精确提交。本机 runtime/3000仍为362dad3f（16个React路由模式，登录旧实现），尚未部署本包。最终合并核对发现新增的保留副本标签/双页缩放P2，但门控shell缺少失败即停止，断言失败后仍执行了merge；此为root执行错误，已停止发布，原实施树按规定移除、私有证据移交，改在同一#430收尾包的codex/web-react-001-recovery专属树修复，不改共享脏目录。

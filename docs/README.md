@@ -421,3 +421,13 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发，并于 2026-10-02 
 阶段 F 证明：[主题图谱与 Topic Workspace 迁移验收](design/acceptance/web-react-001-f-acceptance.md)（旧迁移保真及当前B改版实际截图、正式隔离链路，部署与 Mog 签收独立）。
 
 主题概览 B「材料优先」正式改版：[阶段 F 计划 §7](plans/active/web-react-001-f-topics.md#7-2026-10-17--mog-选定-b材料优先正式改版)，Mog 已选定并授权；保留全部功能/口径，候选实施与验收中。
+
+
+## AI-GEN1-001
+
+| 文档 | 状态 | 用途 |
+|---|---|---|
+| [统一实施计划](plans/active/ai-gen1-001.md) | 活跃计划 | #454；PR-1A → PR-1B → PR-1C；各阶段权限与验收 |
+| [第一代 AI 决定](decisions/0011-ai-generation-one.md) | 已确认决定 | 设置集中、skill 范围、顺序与旧决定替代关系 |
+| [每篇解读材料输入](data-contracts/note-material-input.md) | 代码事实优先 | 新适配、标签、指纹/来源、就绪、快照及窄批处理 |
+| [PR-1A 验收回执](audits/ai-gen1-pr1a-acceptance.md) | 一次性报告 | 合成隔离证明、收尾审查、Draft 与未证层 |

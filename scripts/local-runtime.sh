@@ -364,6 +364,8 @@ migrate() {
   apply_migration_once "0126_ops_target" "$project_root/database/migrations/0126_ops_target.sql"
   apply_migration_once "0127_content_workbench" "$project_root/database/migrations/0127_content_workbench.sql"
   apply_migration_once "0128_content_workbench_ai" "$project_root/database/migrations/0128_content_workbench_ai.sql"
+  apply_migration_once "0129_note_material_hashtags" "$project_root/database/migrations/0129_note_material_hashtags.sql"
+  apply_migration_once "0130_note_material_snapshot" "$project_root/database/migrations/0130_note_material_snapshot.sql"
 }
 
 case "$command_name" in

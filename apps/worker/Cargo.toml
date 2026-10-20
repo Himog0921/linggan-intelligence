@@ -43,3 +43,7 @@ path = "src/bin/ops_history_import.rs"
 
 [lints]
 workspace = true
+
+[[bin]]
+name = "linggan-note-material"
+path = "src/bin/note_material.rs"

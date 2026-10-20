@@ -871,6 +871,7 @@ dependencies = [
  "sqlx",
  "thiserror",
  "tokio",
+ "unicode-normalization",
  "uuid",
 ]
 
