@@ -381,7 +381,7 @@ try {
   });
 
   // ⑧ 研究底稿
-  await step('研究底稿：读取、预览 AI 输入（不调用模型）、导出内容、重新分层（已完成／已是当前版本）', async () => {
+  await step('研究底稿：读取、预览旧任务输入（不调用模型）、导出内容、重新分层（已完成／已是当前版本）', async () => {
     const before = requestsTo('GET', /research-dossier$/).length;
     await open(`&work=${rich}`);
     await waitInspector(TITLE.rich);
@@ -394,10 +394,10 @@ try {
     await shot('evidence-1440-dossier');
     // 对照原图：展开第一张图的识别结果，点一行在原图上标出位置（框坐标须都在 0–1）。
     await dossier.locator('details > summary').filter({ hasText: /图片|识别/ }).first().click();
-    // 预览 AI 输入：只读，不调用模型。
-    await dossier.getByRole('button', { name: '预览 AI 输入' }).click();
-    await dossier.getByRole('button', { name: '按当前模型预览完整请求' }).waitFor();
-    await dossier.getByRole('button', { name: '按当前模型预览完整请求' }).click();
+    // 预览旧任务输入：只读，不调用模型。
+    await dossier.getByRole('button', { name: '预览旧任务输入' }).click();
+    await dossier.getByRole('button', { name: '按旧配置预览完整请求' }).waitFor();
+    await dossier.getByRole('button', { name: '按旧配置预览完整请求' }).click();
     await page.waitForFunction(() => /预览|估算|上限/.test(document.querySelector('[role="tabpanel"]:not([hidden])')?.textContent ?? ''));
     // 导出：Markdown 与 JSON 都是用户显式触发的下载，内容来自服务器给的底稿。
     const [markdown] = await Promise.all([page.waitForEvent('download'), dossier.getByRole('button', { name: '导出 Markdown' }).click()]);

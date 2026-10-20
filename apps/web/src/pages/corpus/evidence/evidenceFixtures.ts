@@ -536,3 +536,17 @@ export function shellJson(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
+
+/** note-material-input.v1 合成响应；真实形状另由 owned Axum/PG 主路径核对。 */
+export function noteMaterialJson(work = workRef(1), domain = DOMAIN) {
+  const fields = ['title', 'cover_headline', 'body', 'tags', 'ocr', 'transcript'];
+  return {
+    contract: 'note-material-input.v1', fingerprintContract: 'note-material-fingerprint.v1',
+    workRef: work, domainRef: domain, asOf: '2026-10-20T00:00:00Z', dossierRevision: 'synthetic-dossier-v1',
+    materialFingerprint: SHA, provenanceHash: 'b'.repeat(64), snapshotIdentity: 'c'.repeat(64),
+    ready: false, notReadyReasons: ['transcript_processing_pending'], layerVersion: 'rules-v3',
+    processingScope: { included: ['image_ocr', 'asr'], contextOnly: ['comment_image', 'author_avatar', 'thumbnail', 'audio_extract'], notConnected: ['video_frame_ocr'] },
+    columns: fields.map(field => ({ field, state: field === 'body' ? 'available' : field === 'transcript' ? 'waiting' : 'not_acquired', reasons: [] as string[] })),
+    fragments: [{ citationId: 'S1', field: 'body', logicalPosition: 'native', sourceRef: workRef(99), sourceVersion: 'synthetic-v1', start: 4, end: 8, textHash: SHA, text: '合成🙂文' }],
+  };
+}
