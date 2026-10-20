@@ -453,3 +453,8 @@ AI-GEN1 PR-1B 当前执行：[底座实施包](plans/active/ai-gen1-pr1b-foundat
 - [AI-GEN1 C0离线计划](plans/active/ai-gen1-pr1c0-offline.md)：离线合同/合成流程，C1真实启用另计；[离线合同](data-contracts/note-interpretation-offline.md)。
 
 - [每篇解读材料只读预览](plans/active/ai-gen1-note-material-preview.md)：#454/#420，Mog已确认G1；最小UI增量，运行/G4另列。
+
+## 运营 LIDS 发布与标准件同步（2026-10-20）
+
+- [组件同步合同](design/lids/component-sync.md)、[生成组件目录](design/lids/component-library.generated.md)：C09/C16规则、实现、展示同源。
+- [运营页规格](design/pages/ops-page.md)、[创作页规格](design/pages/content-workbench-page.md)：数据/创作二级及Z02三级导航，发布证据沿LIDS-UI-001计划与验收。

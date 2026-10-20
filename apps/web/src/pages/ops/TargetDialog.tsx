@@ -1,3 +1,5 @@
+import { useOpsLeave } from './useOpsLeave';
+import { ActionButton } from '../../shared/ActionButton';
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as api from "./api";
@@ -17,22 +19,25 @@ export function TargetDialog({
   saved: (note: string) => void;
 }) {
   const [type, setType] = useState(initial);
+  const [protection, setProtection] = useState({ dirty: false, pending: false });
+  const guard = useOpsLeave({ ...protection, onClose: close });
   const periodKey =
     type === "month" ? data.window.thisMonth : data.window.thisWeek;
   return (
-    <Dialog title="ops-target-title" onClose={close}>
+    <><Dialog title="ops-target-title" onClose={guard.requestClose}>
       <div>
         <TargetForm
           key={`${type}:${periodKey}`}
           type={type}
           periodKey={periodKey}
-          setType={setType}
+          setType={next => guard.requestLeave(() => setType(next), 'switch_period')}
+          protect={setProtection}
           data={data}
-          close={close}
+          close={guard.requestClose}
           saved={saved}
         />
       </div>
-    </Dialog>
+    </Dialog>{guard.confirmation}</>
   );
 }
 function TargetForm({
@@ -41,8 +46,9 @@ function TargetForm({
   setType,
   data,
   close,
-  saved,
+  saved, protect,
 }: {
+  protect: (state: { dirty: boolean; pending: boolean }) => void;
   type: api.PeriodType;
   periodKey: string;
   setType: (v: api.PeriodType) => void;
@@ -97,6 +103,9 @@ function TargetForm({
         ? String(query.data.current.targetValue)
         : "");
   const revision = current === undefined ? query.data?.current : current;
+  const dirty = value !== null && value !== (revision ? String(revision.targetValue) : '');
+  const tracking = saving || Boolean(pending);
+  useEffect(() => { protect({ dirty, pending: tracking }); }, [dirty, tracking, protect]);
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const targetValue = Number(shown);
@@ -212,16 +221,16 @@ function TargetForm({
         </details>
       </div>
       <footer>
-        <button type="button" onClick={close}>
+        <ActionButton type="button" onClick={close}>
           取消
-        </button>
-        <button
+        </ActionButton>
+        <ActionButton
           type="submit"
-          className={c("ops-primary")}
-          disabled={saving || Boolean(pending?.sending)}
+          variant="primary"
+          busy={saving || Boolean(pending?.sending)}
         >
           保存目标
-        </button>
+        </ActionButton>
       </footer>
     </form>
   );

@@ -1,0 +1,1356 @@
+{
+  "id": "LIDS-PROJECT-CURRENT",
+  "status": "accepted_rules_live_components_not_CMP_certification",
+  "date": "2026-10-20",
+  "rules": {
+    "typography": {
+      "id": "LIDS-TYPE-001-B",
+      "status": "accepted",
+      "date": "2026-10-19",
+      "decision": {
+        "evidence": "U09",
+        "quote": "全部按照 B 来落实，确保当前的一致性，以及只有一个标准",
+        "scope": [
+          "Q01 字号与行高",
+          "Q02 字重"
+        ],
+        "origin": "TYPE-04 对照中的 B，即 TYPE-03 当前审阅稿完整值"
+      },
+      "authority": "唯一当前排版数值源；文档表格与隔离审阅登记均为生成视图。业务运行时仍为未迁移实现，不作为备选设计标准。",
+      "families": {
+        "ui": "\"Linggan UI Digits\",\"Linggan Albert\",\"Linggan OPPO\",Arial,Helvetica,\"PingFang SC\",\"Microsoft YaHei\",system-ui,sans-serif",
+        "chinese": "\"Linggan OPPO\",\"PingFang SC\",\"Microsoft YaHei\",system-ui,sans-serif",
+        "english": "\"Linggan Albert\",\"Linggan OPPO\",Arial,Helvetica,system-ui,sans-serif",
+        "display": "\"Linggan Alumni\",\"Linggan Albert\",\"Linggan OPPO\",\"Arial Narrow\",Arial,system-ui,sans-serif",
+        "data": "\"Linggan Manrope\",\"Linggan OPPO\",Arial,Helvetica,system-ui,sans-serif",
+        "code": "\"Linggan Mono\",\"Linggan OPPO\",monospace",
+        "brand": "\"SFMono-Regular\",\"SF Mono\",ui-monospace,monospace",
+        "evidence": "\"Linggan OPPO\",\"PingFang SC\",\"Microsoft YaHei\",system-ui,sans-serif"
+      },
+      "roles": {
+        "aux": {
+          "size": 11,
+          "weight": 400,
+          "lineHeight": 1.6
+        },
+        "label": {
+          "size": 12,
+          "weight": 500,
+          "lineHeight": 1.5
+        },
+        "control": {
+          "size": 13,
+          "weight": 500,
+          "lineHeight": 1.5
+        },
+        "body": {
+          "size": 14,
+          "weight": 400,
+          "lineHeight": 1.75
+        },
+        "reading": {
+          "size": 16,
+          "weight": 400,
+          "lineHeight": 1.85
+        },
+        "section": {
+          "size": 18,
+          "weight": 600,
+          "lineHeight": 1.5
+        },
+        "object": {
+          "size": 22,
+          "weight": 600,
+          "lineHeight": 1.4
+        },
+        "page": {
+          "size": 24,
+          "weight": 600,
+          "lineHeight": 1.4
+        },
+        "data": {
+          "size": 14,
+          "weight": 500,
+          "lineHeight": 1.5
+        },
+        "metric": {
+          "size": 24,
+          "weight": 600,
+          "lineHeight": 1.3
+        },
+        "metricLarge": {
+          "size": 44,
+          "weight": 600,
+          "lineHeight": 1.1
+        },
+        "display": {
+          "size": 88,
+          "weight": 300,
+          "lineHeight": 1.04
+        },
+        "displayCompact": {
+          "size": 64,
+          "weight": 300,
+          "lineHeight": 1.04
+        },
+        "displaySample": {
+          "size": 40,
+          "weight": 400,
+          "lineHeight": 1.1
+        },
+        "input": {
+          "size": 13,
+          "weight": 400,
+          "lineHeight": 1.5
+        }
+      },
+      "roleLabels": {
+        "aux": "辅助信息",
+        "label": "标签／表头",
+        "control": "按钮／选择",
+        "body": "正文／表格",
+        "reading": "连续阅读",
+        "section": "分区标题",
+        "object": "对象／弹层标题",
+        "page": "页面标题",
+        "data": "普通数字／时间",
+        "metric": "紧凑读数",
+        "metricLarge": "概览大读数",
+        "display": "英文展示标题",
+        "displayCompact": "紧凑英文展示",
+        "displaySample": "字体样张",
+        "input": "输入文字"
+      },
+      "weights": {
+        "regular": 400,
+        "medium": 500,
+        "strong": 600,
+        "brand": 700
+      },
+      "rules": [
+        "按语义角色使用整组字号、行高与字重；所有组件和代表页面读取同一标准。",
+        "300仅用于Alumni英文展示，500用于表头、控件与普通数据；字体必须提供真实字重，font-synthesis:none。",
+        "普通数字、时间与普通编号使用Manrope及tabular-nums lining-nums；代码与字标保留对应角色。",
+        "Alumni仅用于足够大的英文展示标题，中文及小控件按各自字族。",
+        "功能文字至少11px，关键正文至少14px，长阅读至少16px；窄屏通过布局及局部滚动适配，不通过缩小字号。",
+        "Q03已关闭：原声、评论原文和访谈引文统一使用OPPO Sans，读取evidence字族；字号、行高、字重沿B语义角色，来源与系统判断通过结构分离。",
+        "Q11已采用ALIGN-FONT-012：先显示可读回退，加载后自动换入；回退F2按families唯一值，普通数字右对齐，小数列按小数点对齐且保留原始精度/未知。许可、性能、字形覆盖和业务资产迁移在具体实施中核验，运行时Token另获授权才迁移。"
+      ],
+      "pendingReviewItems": [],
+      "runtimeMigrated": false,
+      "voiceDecision": {
+        "id": "ALIGN-VOICE-004",
+        "evidence": "U11",
+        "quote": "Q03 原声也统一用 Sans，就用 OPPO Sans，按这个收口",
+        "status": "accepted",
+        "runtimeMigrated": false
+      },
+      "deliveryDecision": {
+        "id": "ALIGN-FONT-012",
+        "status": "accepted",
+        "date": "2026-10-20",
+        "evidence": "U22",
+        "quote": "字体加载后自动换入，回退用F2，普通数字右对齐，小数列按小数点对齐",
+        "automaticApplication": true,
+        "fontDisplay": "swap",
+        "fallback": "F2",
+        "numeric": {
+          "features": [
+            "tabular-nums",
+            "lining-nums"
+          ],
+          "ordinaryAlignment": "right",
+          "decimalColumnAlignment": "decimal_point",
+          "preserveOriginalScale": true,
+          "unknownAsZero": false
+        },
+        "fontAssetsChanged": false,
+        "runtimeMigrated": false
+      }
+    },
+    "focus": {
+      "id": "ALIGN-FOCUS-005",
+      "status": "accepted",
+      "date": "2026-10-19",
+      "decision": {
+        "evidence": "U12",
+        "selected": "C",
+        "quote": "Q04就按C来收口，鼠标输入轻一点，键盘定位清楚一些"
+      },
+      "scope": "input_FIND_and_closed_select_trigger; other controls retain existing visible keyboard focus",
+      "parameters": {
+        "warmFill": "#fffaf7",
+        "keyboardInsetPx": 2,
+        "inkRole": "ink",
+        "readonlyFillRole": "wash"
+      },
+      "pointer": {
+        "field": "warm_fill_no_added_line",
+        "FIND": "ink_word_on_clear_plate_with_warm_input"
+      },
+      "keyboard": {
+        "field": "warm_fill_with_ink_internal_baseline",
+        "FIND": "ink_white_wordplate_and_active_child_internal_baseline",
+        "closedSelect": "ink_internal_baseline"
+      },
+      "exceptions": {
+        "readonly": "wash_fill_and_ink_internal_baseline",
+        "disabled": "native_disabled_skip_tab",
+        "invalid": "keep_inline_error_and_error_fill_visible",
+        "forcedColors": "system_Highlight_internal_bottom_border",
+        "darkTrigger": "retain_visible_signal_internal_baseline_on_ink"
+      },
+      "externalPerimeter": false,
+      "fontRolesChanged": false,
+      "runtimeMigrated": false
+    },
+    "control-material": {
+      "id": "ALIGN-MATERIAL-006",
+      "status": "accepted",
+      "date": "2026-10-19",
+      "decision": {
+        "evidence": "U13",
+        "selected": "M2",
+        "quote": "还是喜欢 M2"
+      },
+      "scope": "shared_review_controls_and_shell; production_migration_requires_separate_authorization",
+      "parameters": {
+        "primaryFill": "signal",
+        "buttonPitch": 8,
+        "buttonOpacity": 0.28,
+        "buttonTail": 24,
+        "secondaryPitch": 4,
+        "secondaryTail": 7,
+        "buttonShadow": 2,
+        "hoverLift": 1,
+        "pressDepth": 2,
+        "menuShadow": 2,
+        "shellPitch": 6,
+        "shellOpacity": 0.22,
+        "domainTail": 28,
+        "contextMajor": 56,
+        "contextFine": 14
+      },
+      "roles": {
+        "primary": "single_signal_action; signalText_fill_white_label_ink_border; edge_texture",
+        "secondary": "white_ink_border_small_edge_grip; no_static_shadow_or_hover_lift",
+        "danger": "retain_danger_role_and_confirmation_contract",
+        "quiet": "retain_text_action_role",
+        "menu": "square_ink_structure_hard_shadow",
+        "domain": "keep_in_Z02_breadcrumb; textured_right_edge",
+        "selectedNavigation": "ink_white; right_edge_checker_fades; clean_ink_behind_labels",
+        "context": "existing_double_dot_mesh; no_texture_in_body_table_or_source_quotes"
+      },
+      "geometry": {
+        "contextFill": "#f7f8f8",
+        "contextDotRadii": [
+          1.1,
+          1
+        ],
+        "contextDotOpacities": [
+          0.1,
+          0.055
+        ],
+        "primaryMosaicInkOpacity": 0.22,
+        "secondaryMosaicInkOpacity": 0.13,
+        "navTextureMaxPx": 84,
+        "navTextureMaxPercent": 45
+      },
+      "states": {
+        "hover": "primary_up_by_hoverLift; secondary_wash_without_lift",
+        "active": "primary_and_secondary_down_by_pressDepth; no_shadow",
+        "keyboard": "retain_existing_visible_button_focus; input_FIND_select_use_ALIGN-FOCUS-005",
+        "busy": "preserve_width_show_stage_prevent_duplicate; no_simulated_business_success",
+        "disabled": "native_disabled; no_shadow_or_displacement; subdued_texture",
+        "reducedMotion": "no_displacement_or_transition"
+      },
+      "preserves": [
+        "LIDS-TYPE-001-B",
+        "ALIGN-VOICE-004",
+        "ALIGN-FOCUS-005",
+        "ALIGN-NAV-003"
+      ],
+      "localExceptionsUnchanged": [
+        "M-02E",
+        "M-06",
+        "V8_workbench"
+      ],
+      "runtimeMigrated": false,
+      "componentCertificationChanged": false
+    },
+    "shell-layout": {
+      "id": "ALIGN-SHELL-007",
+      "status": "accepted",
+      "decision": {
+        "selected": "A",
+        "evidence": "U15",
+        "quote": "Q06 就按 A来收口，但是左侧导航栏可以支持点击折叠，只露出图标"
+      },
+      "domainHost": "Z02",
+      "tertiaryHost": "Z02",
+      "layout": {
+        "name": "连续导航轨",
+        "description": "所有入口保持展开，窄屏用局部横向滚动。",
+        "header": "一级导航独立横轨",
+        "context": "宽屏同带；窄屏在Z02内换行",
+        "secondary": "宽屏左侧手动折叠为图标；窄屏同一Z03横轨可切换图标模式",
+        "collapseBelow": 820,
+        "sideWidth": 160,
+        "tabsBelow": 820,
+        "collapsedWidth": 64,
+        "iconSize": 18,
+        "defaultCollapsed": false
+      },
+      "sidebar": {
+        "manualToggle": true,
+        "ariaExpanded": true,
+        "accessibleNamesRequired": true,
+        "keyboardAndPointerLabels": true,
+        "collapsePreservesPageQueryFocus": true,
+        "narrowMode": "horizontal_rail",
+        "storage": "memory_only"
+      },
+      "clock": "optional_when_page_contract_requires; no_mandatory_empty_slot",
+      "supersedes": [
+        "ADR-10 fixed brand326/system400/3+4slots/silent120/mandatory-clock in shared shell"
+      ],
+      "fixed": [
+        "LIDS-TYPE-001-B",
+        "ALIGN-VOICE-004",
+        "ALIGN-FOCUS-005",
+        "ALIGN-MATERIAL-006",
+        "ALIGN-NAV-003"
+      ],
+      "runtimeMigrated": false,
+      "componentCertificationChanged": false
+    },
+    "ledger-layout": {
+      "id": "ALIGN-LEDGER-008",
+      "status": "accepted",
+      "decision": {
+        "selected": "L1",
+        "evidence": "U16",
+        "rowHeight": 44,
+        "nameColumnWidth": 144,
+        "columnWidthInterpretation": "Current user tab selected task-name column at144px; other L1 column widths unchanged",
+        "quote": "Q07就按L1、44px来收口，列宽144px收口，保留字段自定义和窄屏横向滚动，坚持一个任务一行"
+      },
+      "fields": [
+        "name",
+        "id",
+        "stage",
+        "domain",
+        "source",
+        "scope",
+        "mode",
+        "rank",
+        "details",
+        "comments",
+        "reused",
+        "added",
+        "cumulative",
+        "next",
+        "created",
+        "updated",
+        "action"
+      ],
+      "widths": {
+        "name": 144,
+        "id": 132,
+        "domain": 100,
+        "source": 122,
+        "scope": 112,
+        "mode": 190,
+        "rank": 112,
+        "details": 100,
+        "comments": 100,
+        "reused": 100,
+        "added": 112,
+        "cumulative": 112,
+        "stage": 176,
+        "next": 240,
+        "created": 140,
+        "updated": 140,
+        "action": 88
+      },
+      "priority": {
+        "P0": [
+          "name",
+          "id",
+          "stage",
+          "action"
+        ],
+        "P1": [
+          "source",
+          "scope",
+          "details",
+          "comments",
+          "updated"
+        ],
+        "P2": [
+          "domain",
+          "mode",
+          "rank",
+          "reused",
+          "added",
+          "cumulative",
+          "next",
+          "created"
+        ]
+      },
+      "narrow": {
+        "automaticFieldHiding": false,
+        "fontShrinking": false,
+        "rowWrapping": false,
+        "stickyName": "only_when_at_least_96px_remain; otherwise_same_width_scrolls",
+        "stickyActionMinContentWidth": 600
+      },
+      "customization": {
+        "fields": true,
+        "automaticFieldHiding": false,
+        "storage": "memory_only_in_review"
+      },
+      "singleTaskSingleRow": true,
+      "fontShrinking": false,
+      "rowWrapping": false,
+      "fixed": [
+        "LIDS-TYPE-001-B",
+        "ALIGN-VOICE-004",
+        "ALIGN-FOCUS-005",
+        "ALIGN-MATERIAL-006",
+        "ALIGN-NAV-003",
+        "ALIGN-SHELL-007"
+      ],
+      "runtimeMigrated": false,
+      "componentCertificationChanged": false,
+      "businessFieldProjectionApproved": false
+    },
+    "composition-layout": {
+      "id": "ALIGN-COMPOSITION-009",
+      "status": "accepted",
+      "decision": {
+        "evidence": "U18",
+        "search": "B",
+        "functional": "C",
+        "quote": "Q08检索页按照B，功能页按照C；评论研究用户问题页当前卡片设计保留，其余已确认标准/面包屑和业务不动",
+        "basis": [
+          "U17",
+          "U18"
+        ]
+      },
+      "classification": "All searchable list pages use B, including cards and task ledgers. Other functional pages use C; entry form has no workspace and stays A. Search inside editor/graph/reading does not turn that page into a list. Explicit page:mode mapping is authoritative.",
+      "modes": {
+        "P01:entry": {
+          "category": "entry",
+          "variant": "A",
+          "patternId": "PT01"
+        },
+        "P02:settings": {
+          "category": "functional",
+          "variant": "C",
+          "patternId": "PT07"
+        },
+        "P03:collection": {
+          "category": "search",
+          "variant": "B",
+          "patternId": "PT02"
+        },
+        "P04:overview": {
+          "category": "functional",
+          "variant": "C",
+          "patternId": "PT03"
+        },
+        "P04:comments": {
+          "category": "search",
+          "variant": "B",
+          "patternId": "PT02"
+        },
+        "P04:runs": {
+          "category": "search",
+          "variant": "B",
+          "patternId": "PT08"
+        },
+        "P04:problems": {
+          "category": "search",
+          "variant": "B",
+          "patternId": "PT02"
+        },
+        "P05:list": {
+          "category": "search",
+          "variant": "B",
+          "patternId": "PT02"
+        },
+        "P06:overview": {
+          "category": "functional",
+          "variant": "C",
+          "patternId": "PT04"
+        },
+        "P06:journey": {
+          "category": "functional",
+          "variant": "C",
+          "patternId": "PT04"
+        },
+        "P07:reading": {
+          "category": "functional",
+          "variant": "C",
+          "patternId": "PT05"
+        },
+        "P08:targets": {
+          "category": "search",
+          "variant": "B",
+          "patternId": "PT02"
+        },
+        "P09:runs": {
+          "category": "search",
+          "variant": "B",
+          "patternId": "PT08"
+        },
+        "P10:domains": {
+          "category": "functional",
+          "variant": "C",
+          "patternId": "PT07"
+        },
+        "P11:stations": {
+          "category": "functional",
+          "variant": "C",
+          "patternId": "PT09"
+        },
+        "P12:library": {
+          "category": "search",
+          "variant": "B",
+          "patternId": "PT02"
+        },
+        "P12:topic": {
+          "category": "functional",
+          "variant": "C",
+          "patternId": "PT06"
+        },
+        "P12:materials": {
+          "category": "functional",
+          "variant": "C",
+          "patternId": "PT05"
+        },
+        "P12:canvas": {
+          "category": "functional",
+          "variant": "C",
+          "patternId": "PT06"
+        },
+        "P12:body": {
+          "category": "functional",
+          "variant": "C",
+          "patternId": "PT06"
+        },
+        "P12:images": {
+          "category": "functional",
+          "variant": "C",
+          "patternId": "PT06"
+        },
+        "P13:overview": {
+          "category": "functional",
+          "variant": "C",
+          "patternId": "PT03"
+        },
+        "P14:publications": {
+          "category": "search",
+          "variant": "B",
+          "patternId": "PT02"
+        },
+        "P15:accounts": {
+          "category": "functional",
+          "variant": "C",
+          "patternId": "PT02"
+        },
+        "P16:daily": {
+          "category": "functional",
+          "variant": "C",
+          "patternId": "PT10"
+        },
+        "P17:delivery": {
+          "category": "functional",
+          "variant": "C",
+          "patternId": "PT11"
+        }
+      },
+      "recipes": {
+        "A": {
+          "name": "入口表单",
+          "scope": "P01:entry only; do not create empty workspace tools"
+        },
+        "B": {
+          "name": "检索工具合带",
+          "toolsAndViews": "same band when work area is wide; restore T→V→R→B→P order when narrow",
+          "collectionAction": "Z04-T trailing side; low frequency settings stay Z04-V",
+          "reviewSplitBelowPx": 1000
+        },
+        "C": {
+          "name": "功能工具常驻",
+          "tools": "sticky inside current work area, below Z02; current area scrolls independently",
+          "objectAndFormActions": "remain in current row/detail/form; no global save for unrelated objects",
+          "reviewMaxHeightPx": 620,
+          "productionHeight": "available work-area height; review620px is a preview fixture, not a new runtime pixel token"
+        }
+      },
+      "domainHost": "Z02",
+      "tertiaryHost": "Z02",
+      "actionOwnership": {
+        "collection": "Z04-T",
+        "configuration": "Z04-V",
+        "selection": "existing selection context only",
+        "object": "row or Z05-A",
+        "form": "inside owning form"
+      },
+      "preservedCards": {
+        "pageMode": "P04:problems",
+        "sourceComponent": "apps/web/src/pages/corpus/comments/ProblemCards.tsx",
+        "sourceStyle": "apps/web/src/pages/corpus/comments/Results.module.css",
+        "variants": [
+          "ProblemResultCard",
+          "ProblemClueCard"
+        ],
+        "structure": [
+          "identifier_and_change_kind",
+          "title",
+          "saved_definition_or_clue_role",
+          "source_quote",
+          "metrics_or_clue_note_and_open_glyph",
+          "scope_note_and_time",
+          "whole_card_detail_entry"
+        ],
+        "geometry": {
+          "columnsWide": 3,
+          "columnsMedium": 2,
+          "columnsNarrow": 1,
+          "gapPx": 20,
+          "paddingPx": 20,
+          "rowGapPx": 16,
+          "compactPaddingPx": 16,
+          "compactRowGapPx": 12,
+          "borderPx": 1,
+          "radiusPx": 0,
+          "shadowOffsetPx": 8,
+          "shadowOpacity": 0.07,
+          "hoverShadowOffsetPx": 4,
+          "quoteCutPx": 12,
+          "openGlyphPx": 32
+        },
+        "material": {
+          "canvas": "#ffffff",
+          "quote": "#f7f8f8",
+          "ink": "#111315",
+          "hairline": "#11131517"
+        },
+        "preserve": [
+          "black_identifier",
+          "square_edges",
+          "hard_shadow",
+          "cut_corner_quote",
+          "separate_definition_and_original_voice",
+          "result_vs_unmerged_clue_semantics",
+          "reading_and_compact_density",
+          "whole_card_detail_and_return"
+        ],
+        "typography": "Reuse accepted B roles and OPPO evidence/Manrope numbers; no per-card font source",
+        "tableReplacementAllowed": false,
+        "newBusinessDataAllowed": false,
+        "certification": "not_promoted_by_visual_acceptance"
+      },
+      "fixed": [
+        "LIDS-TYPE-001-B",
+        "ALIGN-VOICE-004",
+        "ALIGN-FOCUS-005",
+        "ALIGN-MATERIAL-006",
+        "ALIGN-NAV-003",
+        "ALIGN-SHELL-007",
+        "ALIGN-LEDGER-008"
+      ],
+      "localExceptionsUnchanged": [
+        "M-02E",
+        "M-06",
+        "V8_workbench"
+      ],
+      "runtimeMigrated": false,
+      "businessRequests": false,
+      "componentCertificationChanged": false,
+      "pageContractsApproved": false
+    },
+    "overlay-policy": {
+      "id": "ALIGN-OVERLAY-010",
+      "status": "accepted",
+      "decision": {
+        "evidence": "U20",
+        "selected": "S1",
+        "quote": "Q09就按S1收口，保留未保存保护和原请求跟踪，停止后不能恢复"
+      },
+      "policy": {
+        "name": "按用途关闭",
+        "readonlyBackdropCloses": true,
+        "dirtyLeave": "ask_continue_discard_or_save_then_leave",
+        "pendingLeave": "explicit_detach_with_original_request_tracking",
+        "unknownResult": "lookup_same_request_before_new_submission",
+        "lateReceipt": "keep_current_page_and_scope"
+      },
+      "formsModal": true,
+      "consequenceConfirmationModal": true,
+      "readonlyShape": "declared_by_object_contract",
+      "focus": {
+        "modalTrap": true,
+        "nonmodalTrap": false,
+        "nonmodalEscape": "owned_by_focused_surface",
+        "closeReturn": "original_trigger_or_declared_fallback"
+      },
+      "longTask": {
+        "stopRequiresConfirmation": true,
+        "commandReceiptRequiresRunRead": true,
+        "stoppedCanResume": false,
+        "endedCanResume": false,
+        "pauseContinueRequiresQualification": true,
+        "retainAcquiredAndInFlightMaterials": true
+      },
+      "domainHost": "Z02",
+      "tertiaryHost": "Z02",
+      "runtimeMigrated": false,
+      "businessRequests": false,
+      "componentCertificationChanged": false
+    },
+    "component-reuse": {
+      "id": "ALIGN-REUSE-011",
+      "status": "accepted",
+      "decision": {
+        "evidence": "U21",
+        "quote": "Q10就按这四类来收口，组件晋升仍按七项门槛执行"
+      },
+      "routes": {
+        "shared": {
+          "label": "基础复用",
+          "description": "共用外观与基础交互；不包进业务判断。"
+        },
+        "adapter": {
+          "label": "页面适配",
+          "description": "同一基础组件，由页面提供查询、列、状态和资格。"
+        },
+        "business": {
+          "label": "领域专属",
+          "description": "保留定义、证据和任务语义；不因形似就合并。"
+        },
+        "gap": {
+          "label": "先补合同",
+          "description": "缺输入或验证，不把样例当现成能力。"
+        }
+      },
+      "components": [
+        {
+          "id": "C01",
+          "route": "shared",
+          "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+          "certified": false
+        },
+        {
+          "id": "C02",
+          "route": "shared",
+          "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+          "certified": false
+        },
+        {
+          "id": "C03",
+          "route": "shared",
+          "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+          "certified": false
+        },
+        {
+          "id": "C04",
+          "route": "shared",
+          "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+          "certified": false
+        },
+        {
+          "id": "C05",
+          "route": "shared",
+          "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+          "certified": false
+        },
+        {
+          "id": "C06",
+          "route": "shared",
+          "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+          "certified": false
+        },
+        {
+          "id": "C07",
+          "route": "shared",
+          "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+          "certified": false
+        },
+        {
+          "id": "C08",
+          "route": "shared",
+          "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+          "certified": false
+        },
+        {
+          "id": "C09",
+          "route": "shared",
+          "boundary": "复用动作外观，页面传入文案、忙碌与资格；不把颜色当权限。",
+          "certified": false
+        },
+        {
+          "id": "C10",
+          "route": "shared",
+          "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+          "certified": false
+        },
+        {
+          "id": "C11",
+          "route": "shared",
+          "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+          "certified": false
+        },
+        {
+          "id": "C12",
+          "route": "shared",
+          "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+          "certified": false
+        },
+        {
+          "id": "C13",
+          "route": "shared",
+          "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+          "certified": false
+        },
+        {
+          "id": "C14",
+          "route": "shared",
+          "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+          "certified": false
+        },
+        {
+          "id": "C15",
+          "route": "shared",
+          "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+          "certified": false
+        },
+        {
+          "id": "C16",
+          "route": "adapter",
+          "boundary": "同一FIND结构；创作者250ms防抖，采集任务按提交；IME与清空保留。",
+          "certified": false
+        },
+        {
+          "id": "C17",
+          "route": "shared",
+          "boundary": "外观与键盘选择共用；选项、未知原值与范围变化由所有者提供。",
+          "certified": false
+        },
+        {
+          "id": "C18",
+          "route": "shared",
+          "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+          "certified": false
+        },
+        {
+          "id": "C19",
+          "route": "shared",
+          "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+          "certified": false
+        },
+        {
+          "id": "C20",
+          "route": "shared",
+          "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+          "certified": false
+        },
+        {
+          "id": "C21",
+          "route": "gap",
+          "boundary": "目前只有结构样例或来源不齐；先补输入、交互和验收合同再推广。",
+          "certified": false
+        },
+        {
+          "id": "C22",
+          "route": "gap",
+          "boundary": "目前只有结构样例或来源不齐；先补输入、交互和验收合同再推广。",
+          "certified": false
+        },
+        {
+          "id": "C23",
+          "route": "gap",
+          "boundary": "目前只有结构样例或来源不齐；先补输入、交互和验收合同再推广。",
+          "certified": false
+        },
+        {
+          "id": "C24",
+          "route": "adapter",
+          "boundary": "共用基础结构；页面适配器保留业务输入、状态、查询或动作资格。",
+          "certified": false
+        },
+        {
+          "id": "C25",
+          "route": "shared",
+          "boundary": "三级页面Tab由Z02承载；对象内部Tab按对象，不混进集合筛选。",
+          "certified": false
+        },
+        {
+          "id": "C26",
+          "route": "shared",
+          "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+          "certified": false
+        },
+        {
+          "id": "C27",
+          "route": "adapter",
+          "boundary": "共用基础结构；页面适配器保留业务输入、状态、查询或动作资格。",
+          "certified": false
+        },
+        {
+          "id": "C28",
+          "route": "shared",
+          "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+          "certified": false
+        },
+        {
+          "id": "C29",
+          "route": "gap",
+          "boundary": "目前只有结构样例或来源不齐；先补输入、交互和验收合同再推广。",
+          "certified": false
+        },
+        {
+          "id": "C30",
+          "route": "adapter",
+          "boundary": "共用基础结构；页面适配器保留业务输入、状态、查询或动作资格。",
+          "certified": false
+        },
+        {
+          "id": "C31",
+          "route": "adapter",
+          "boundary": "表格只承载已定义列；采集账本是专属配置L1/44px/名称144px，不扩成全站表格高度。",
+          "certified": false
+        },
+        {
+          "id": "C32",
+          "route": "adapter",
+          "boundary": "共用基础结构；页面适配器保留业务输入、状态、查询或动作资格。",
+          "certified": false
+        },
+        {
+          "id": "C33",
+          "route": "business",
+          "boundary": "保留用户问题真实卡片的定义、原声、证据与阅读密度；不替换成万能卡片。",
+          "certified": false
+        },
+        {
+          "id": "C34",
+          "route": "shared",
+          "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+          "certified": false
+        },
+        {
+          "id": "C35",
+          "route": "shared",
+          "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+          "certified": false
+        },
+        {
+          "id": "C36",
+          "route": "adapter",
+          "boundary": "呈现状态，状态含义和不同轴的资格由领域view model给出。",
+          "certified": false
+        },
+        {
+          "id": "C37",
+          "route": "shared",
+          "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+          "certified": false
+        },
+        {
+          "id": "C38",
+          "route": "adapter",
+          "boundary": "共用基础结构；页面适配器保留业务输入、状态、查询或动作资格。",
+          "certified": false
+        },
+        {
+          "id": "C39",
+          "route": "gap",
+          "boundary": "目前只有结构样例或来源不齐；先补输入、交互和验收合同再推广。",
+          "certified": false
+        },
+        {
+          "id": "C40",
+          "route": "adapter",
+          "boundary": "引用结构可共用；原文资格、来源位置、版本与受限说明来自业务。",
+          "certified": false
+        },
+        {
+          "id": "C41",
+          "route": "shared",
+          "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+          "certified": false
+        },
+        {
+          "id": "C42",
+          "route": "shared",
+          "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+          "certified": false
+        },
+        {
+          "id": "C43",
+          "route": "shared",
+          "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+          "certified": false
+        },
+        {
+          "id": "C44",
+          "route": "adapter",
+          "boundary": "展示回执，不生成成功；原请求身份、冻结范围和核对由业务适配器保留。",
+          "certified": false
+        },
+        {
+          "id": "C45",
+          "route": "adapter",
+          "boundary": "容器服从S1；表单稿件、提交与离开意图由页面控制，不藏进通用弹窗。",
+          "certified": false
+        },
+        {
+          "id": "C46",
+          "route": "adapter",
+          "boundary": "后果确认服从S1；对象、停止资格与回执由业务所有者提供。",
+          "certified": false
+        },
+        {
+          "id": "C47",
+          "route": "adapter",
+          "boundary": "详情形态按对象声明；模态圈定焦点，非模态保留背景；S1关闭不取消业务。",
+          "certified": false
+        },
+        {
+          "id": "C48",
+          "route": "shared",
+          "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+          "certified": false
+        }
+      ],
+      "gates": [
+        "第二独立页面验证同一职责",
+        "职责、禁用场景和层级稳定",
+        "数据/空值/权限/真实动作来源齐",
+        "查重并有唯一实现/替代计划",
+        "键盘/读屏/触屏/减少动态/响应式要求",
+        "合法变体、受影响页、预览和验收清单",
+        "跨页不压平事实、权限或动作语义"
+      ],
+      "variantPolicy": "先查已有允许变体和职责；新增变体另行裁定。复用分类采用不等于所有候选状态或实现已认证。",
+      "formalCMPsGranted": 0,
+      "runtimeMigrated": false,
+      "businessRequests": false,
+      "problemCardsChanged": false,
+      "domainHost": "Z02",
+      "tertiaryHost": "Z02"
+    },
+    "media-material": {
+      "id": "ALIGN-MEDIA-013",
+      "status": "accepted",
+      "date": "2026-10-20",
+      "decision": {
+        "selected": "E1",
+        "stageField": "plain",
+        "evidence": "U23"
+      },
+      "paper": {
+        "period": 24,
+        "radius": 0.6,
+        "points": [
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            8
+          ],
+          [
+            8,
+            16
+          ]
+        ],
+        "alpha": [
+          0.15,
+          0.11,
+          0.13
+        ],
+        "selectedPoints": [
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            8
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            8,
+            16
+          ]
+        ],
+        "selectedAlpha": [
+          0.2,
+          0.14,
+          0.2,
+          0.14
+        ]
+      },
+      "station": {
+        "headerWidthPercent": 35,
+        "headerPitch": 16,
+        "headerOpacity": 0.78,
+        "buttonTail": 8,
+        "buttonPitch": 4,
+        "buttonOpacity": 0.62
+      },
+      "cover": {
+        "borderPx": 1,
+        "material": "M-06",
+        "scope": "independent_cover_card_only"
+      },
+      "media": {
+        "stageBackground": "white",
+        "fit": "contain",
+        "containerRatio": "3/4",
+        "preserveSourceColor": true,
+        "states": [
+          "ready",
+          "loading",
+          "absent",
+          "failed"
+        ]
+      },
+      "stationScope": "M-02E_runtime_board_only",
+      "preservedExceptions": [
+        "V8_workbench"
+      ],
+      "forbidden": [
+        "paper_on_problem_cards",
+        "texture_on_reading_or_table_cells",
+        "stage_calibration_grid",
+        "resume_stopped_task"
+      ],
+      "runtimeMigrated": false,
+      "businessRequests": false,
+      "componentCertificationChanged": false,
+      "fontAssetsChanged": false,
+      "problemCardsChanged": false
+    },
+    "color": {
+      "id": "LIDS-COLOR-001",
+      "status": "accepted",
+      "evidence": "U24",
+      "decision": "采用正式LIDS目标语义色板，关闭A18-01",
+      "values": {
+        "ink": "#0b0f12",
+        "body": "#30373c",
+        "secondary": "#5f6a71",
+        "meta": "#6b767d",
+        "disabled": "#8c959b",
+        "signal": "#c63214",
+        "mark": "#f24a23",
+        "success": "#137557",
+        "warning": "#8a5c00",
+        "danger": "#b52b20",
+        "info": "#335e72",
+        "canvas": "#ffffff"
+      },
+      "userQuote": "按照你的建议来，同时可以按照当前已经决策好的设计，开始动手优化我真实的项目代码以及前端 UI 了"
+    }
+  },
+  "licenses": [
+    {
+      "file": "opposans/LICENSE.txt",
+      "text": "License Notice\r\nCopyright 2024 Guangdong OPPO Mobile Telecommunications Corp., Ltd.\r\n\r\nOPPO Sans Fonts Software is licensed under OPPO Sans Fonts License Agreement.\r\n\r\n--------------------------------------------------------------------------------\r\nOPPO Sans Fonts License Agreement\r\n\r\nTHIS OPPO SANS FONTS LICENSE AGREEMENT (\"AGREEMENT\") IS A LEGAL AGREEMENT BETWEEN YOU (EITHER A SINGLE INDIVIDUAL, OR SINGLE LEGAL ENTITY) AND GUANGDONG OPPO MOBILE TELECOMMUNICATION CORP.,LTD. ( \"LICENSOR\") FOR THE USE OF THE OPPO SANS FONTS ACCOMPANYING THIS AGREEMENT. BY DOWNLOADING, COPYING OR OTHERWISE USING OPPO SANS FONTS YOU INDICATE THAT YOU AGREE TO BE BOUND BY ALL OF THE TERMS OF THIS AGREEMENT. IF YOU DO NOT AGREE TO THE TERMS OF THIS AGREEMENT, YOU MAY NOT DOWNLOAD, COPY OR OTHERWISE USE THE OPPO SANS FONTS, AND YOU SHALL PROMPTLY DESTROY AND DELETE ALL THE OPPO SANS FONTS.\r\n\r\n1.Definition  \r\n\"OPPO Sans Fonts\" shall mean the collection of fonts software components provided by Licensor under this Agreement and clearly marked as \"OPPO Sans\".\r\n\r\n\"YOU\" shall mean an individual or legal entity exercising permissions granted by this Agreement. \r\n\r\n2.GRANT OF LICENSE\r\n\r\nSubject to the terms and conditions of this Agreement, Licensor hereby grant YOU a non-transferable, non-exclusive, royalty-free, revocable, worldwide copyright license to use, copy, merge, embed, bundle, redistribute and/or sell unmodified copies of OPPO Sans Fonts with any software except for fonts software，subject to the  following conditions:\r\n1)YOU shall make a prominent notice in the software to state that OPPO Sans Fonts are used. \r\n2)YOU may not make any modifications to OPPO Sans Fonts or any of their individual components. \r\n3)Neither OPPO Sans Fonts nor any of their individual components may be redistributed or sold in a stand-alone base. This limitation does not apply to any work created by using OPPO Sans Fonts. You can freely distribute or sell your work, such as materials, logos, application software etc. created by using OPPO Sans Fonts.\r\n4)YOU shall retain the copyright notice and this Agreement in any copies of OPPO Sans Fonts.\r\n\r\n3.Termination\r\nThis Agreement will be automatically terminated if YOU breach any of this Agreement.\r\n\r\n4.NO WARRANTY\r\nYOU AGREE THAT THE OPPO SANS FONTS ARE PROVIDED BY LICENSOR ON AN \"AS IS\" BASIS. LICENSOR MAKES NO WARRANTY, EXPRESSED OR IMPLIED OR STATUTORY, WITH RESPECT TO ANY OF THE OPPO SANS FONTS, INCLUDING WITHOUT LIMITATION, ANY IMPLIED WARRANTIES OF MERCHANTABILITY, SATISFACTORY QUALITY, FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.\r\n\r\n5.NO LIABILITY\r\n\r\nIN NO EVENT SHALL LICENSOR BE LIABLE FOR ANY DIRECT OR INDIRECT, SPECIAL, INCIDENTAL OR CONSEQUENTIAL DAMAGES (INCLUDING WITHOUT LIMITATION, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) ARISING IN ANY WAY OUT OF THE USE OF OR INABILITY TO USE OPPO SANS FONTS, WHETHER UNDER THEORY OF CONTRACT, TORT (INCLUDING NEGLIGENCE), STRICT LIABILITY OR OTHER LEGAL THEORY, EVEN IF LICENSOR HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.\r\n\r\nYOU EXPRESSLY ASSUME ALL LIABILITIES AND RISKS FOR USE OF OPPO SANS FONTS. SHOULD THE OPPO SANS FONTS PROVE DEFECTIVE, YOU ASSUME THE ENTIRE COST OF ALL NECESSARY SERVICING, REPAIR OR CORRECTION.",
+      "sha256": "b013f80fa2fa6f6db4a31b793676f787af78263b568088a2d896e9d9b3e5fde7"
+    },
+    {
+      "file": "albertsans/OFL.txt",
+      "text": "Copyright 2021 The Albert Sans Project Authors (https://github.com/usted/Albert-Sans)\n\nThis Font Software is licensed under the SIL Open Font License, Version 1.1.\nThis license is copied below, and is also available with a FAQ at:\nhttps://scripts.sil.org/OFL\n\n\n-----------------------------------------------------------\nSIL OPEN FONT LICENSE Version 1.1 - 26 February 2007\n-----------------------------------------------------------\n\nPREAMBLE\nThe goals of the Open Font License (OFL) are to stimulate worldwide\ndevelopment of collaborative font projects, to support the font creation\nefforts of academic and linguistic communities, and to provide a free and\nopen framework in which fonts may be shared and improved in partnership\nwith others.\n\nThe OFL allows the licensed fonts to be used, studied, modified and\nredistributed freely as long as they are not sold by themselves. The\nfonts, including any derivative works, can be bundled, embedded, \nredistributed and/or sold with any software provided that any reserved\nnames are not used by derivative works. The fonts and derivatives,\nhowever, cannot be released under any other type of license. The\nrequirement for fonts to remain under this license does not apply\nto any document created using the fonts or their derivatives.\n\nDEFINITIONS\n\"Font Software\" refers to the set of files released by the Copyright\nHolder(s) under this license and clearly marked as such. This may\ninclude source files, build scripts and documentation.\n\n\"Reserved Font Name\" refers to any names specified as such after the\ncopyright statement(s).\n\n\"Original Version\" refers to the collection of Font Software components as\ndistributed by the Copyright Holder(s).\n\n\"Modified Version\" refers to any derivative made by adding to, deleting,\nor substituting -- in part or in whole -- any of the components of the\nOriginal Version, by changing formats or by porting the Font Software to a\nnew environment.\n\n\"Author\" refers to any designer, engineer, programmer, technical\nwriter or other person who contributed to the Font Software.\n\nPERMISSION & CONDITIONS\nPermission is hereby granted, free of charge, to any person obtaining\na copy of the Font Software, to use, study, copy, merge, embed, modify,\nredistribute, and sell modified and unmodified copies of the Font\nSoftware, subject to the following conditions:\n\n1) Neither the Font Software nor any of its individual components,\nin Original or Modified Versions, may be sold by itself.\n\n2) Original or Modified Versions of the Font Software may be bundled,\nredistributed and/or sold with any software, provided that each copy\ncontains the above copyright notice and this license. These can be\nincluded either as stand-alone text files, human-readable headers or\nin the appropriate machine-readable metadata fields within text or\nbinary files as long as those fields can be easily viewed by the user.\n\n3) No Modified Version of the Font Software may use the Reserved Font\nName(s) unless explicit written permission is granted by the corresponding\nCopyright Holder. This restriction only applies to the primary font name as\npresented to the users.\n\n4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font\nSoftware shall not be used to promote, endorse or advertise any\nModified Version, except to acknowledge the contribution(s) of the\nCopyright Holder(s) and the Author(s) or with their explicit written\npermission.\n\n5) The Font Software, modified or unmodified, in part or in whole,\nmust be distributed entirely under this license, and must not be\ndistributed under any other license. The requirement for fonts to\nremain under this license does not apply to any document created\nusing the Font Software.\n\nTERMINATION\nThis license becomes null and void if any of the above conditions are\nnot met.\n\nDISCLAIMER\nTHE FONT SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\nEXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF\nMERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT\nOF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE\nCOPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,\nINCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL\nDAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING\nFROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM\nOTHER DEALINGS IN THE FONT SOFTWARE.\n",
+      "sha256": "5c856c086e8743b84932aae46ced424729a703932b601e9eb8aaeac15a617ec6"
+    },
+    {
+      "file": "alumnisans/OFL.txt",
+      "text": "Copyright 2015 The Alumni Sans Project Authors (https://github.com/googlefonts/alumni)\r\n\r\nThis Font Software is licensed under the SIL Open Font License, Version 1.1.\r\nThis license is copied below, and is also available with a FAQ at:\r\nhttp://scripts.sil.org/OFL\r\n\r\n\r\n-----------------------------------------------------------\r\nSIL OPEN FONT LICENSE Version 1.1 - 26 February 2007\r\n-----------------------------------------------------------\r\n\r\nPREAMBLE\r\nThe goals of the Open Font License (OFL) are to stimulate worldwide\r\ndevelopment of collaborative font projects, to support the font creation\r\nefforts of academic and linguistic communities, and to provide a free and\r\nopen framework in which fonts may be shared and improved in partnership\r\nwith others.\r\n\r\nThe OFL allows the licensed fonts to be used, studied, modified and\r\nredistributed freely as long as they are not sold by themselves. The\r\nfonts, including any derivative works, can be bundled, embedded, \r\nredistributed and/or sold with any software provided that any reserved\r\nnames are not used by derivative works. The fonts and derivatives,\r\nhowever, cannot be released under any other type of license. The\r\nrequirement for fonts to remain under this license does not apply\r\nto any document created using the fonts or their derivatives.\r\n\r\nDEFINITIONS\r\n\"Font Software\" refers to the set of files released by the Copyright\r\nHolder(s) under this license and clearly marked as such. This may\r\ninclude source files, build scripts and documentation.\r\n\r\n\"Reserved Font Name\" refers to any names specified as such after the\r\ncopyright statement(s).\r\n\r\n\"Original Version\" refers to the collection of Font Software components as\r\ndistributed by the Copyright Holder(s).\r\n\r\n\"Modified Version\" refers to any derivative made by adding to, deleting,\r\nor substituting -- in part or in whole -- any of the components of the\r\nOriginal Version, by changing formats or by porting the Font Software to a\r\nnew environment.\r\n\r\n\"Author\" refers to any designer, engineer, programmer, technical\r\nwriter or other person who contributed to the Font Software.\r\n\r\nPERMISSION & CONDITIONS\r\nPermission is hereby granted, free of charge, to any person obtaining\r\na copy of the Font Software, to use, study, copy, merge, embed, modify,\r\nredistribute, and sell modified and unmodified copies of the Font\r\nSoftware, subject to the following conditions:\r\n\r\n1) Neither the Font Software nor any of its individual components,\r\nin Original or Modified Versions, may be sold by itself.\r\n\r\n2) Original or Modified Versions of the Font Software may be bundled,\r\nredistributed and/or sold with any software, provided that each copy\r\ncontains the above copyright notice and this license. These can be\r\nincluded either as stand-alone text files, human-readable headers or\r\nin the appropriate machine-readable metadata fields within text or\r\nbinary files as long as those fields can be easily viewed by the user.\r\n\r\n3) No Modified Version of the Font Software may use the Reserved Font\r\nName(s) unless explicit written permission is granted by the corresponding\r\nCopyright Holder. This restriction only applies to the primary font name as\r\npresented to the users.\r\n\r\n4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font\r\nSoftware shall not be used to promote, endorse or advertise any\r\nModified Version, except to acknowledge the contribution(s) of the\r\nCopyright Holder(s) and the Author(s) or with their explicit written\r\npermission.\r\n\r\n5) The Font Software, modified or unmodified, in part or in whole,\r\nmust be distributed entirely under this license, and must not be\r\ndistributed under any other license. The requirement for fonts to\r\nremain under this license does not apply to any document created\r\nusing the Font Software.\r\n\r\nTERMINATION\r\nThis license becomes null and void if any of the above conditions are\r\nnot met.\r\n\r\nDISCLAIMER\r\nTHE FONT SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\r\nEXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF\r\nMERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT\r\nOF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE\r\nCOPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,\r\nINCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL\r\nDAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING\r\nFROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM\r\nOTHER DEALINGS IN THE FONT SOFTWARE.\r\n",
+      "sha256": "08e1c6fa00b198f9cf90fd8c7f540ce400892063234d5a3b38dcae9f659c977f"
+    },
+    {
+      "file": "manrope/OFL.txt",
+      "text": "Copyright 2018 The Manrope Project Authors (https://github.com/googlefonts/manrope)\n\nThis Font Software is licensed under the SIL Open Font License, Version 1.1.\nThis license is copied below, and is also available with a FAQ at:\nhttp://scripts.sil.org/OFL\n\n\n-----------------------------------------------------------\nSIL OPEN FONT LICENSE Version 1.1 - 26 February 2007\n-----------------------------------------------------------\n\nPREAMBLE\nThe goals of the Open Font License (OFL) are to stimulate worldwide\ndevelopment of collaborative font projects, to support the font creation\nefforts of academic and linguistic communities, and to provide a free and\nopen framework in which fonts may be shared and improved in partnership\nwith others.\n\nThe OFL allows the licensed fonts to be used, studied, modified and\nredistributed freely as long as they are not sold by themselves. The\nfonts, including any derivative works, can be bundled, embedded, \nredistributed and/or sold with any software provided that any reserved\nnames are not used by derivative works. The fonts and derivatives,\nhowever, cannot be released under any other type of license. The\nrequirement for fonts to remain under this license does not apply\nto any document created using the fonts or their derivatives.\n\nDEFINITIONS\n\"Font Software\" refers to the set of files released by the Copyright\nHolder(s) under this license and clearly marked as such. This may\ninclude source files, build scripts and documentation.\n\n\"Reserved Font Name\" refers to any names specified as such after the\ncopyright statement(s).\n\n\"Original Version\" refers to the collection of Font Software components as\ndistributed by the Copyright Holder(s).\n\n\"Modified Version\" refers to any derivative made by adding to, deleting,\nor substituting -- in part or in whole -- any of the components of the\nOriginal Version, by changing formats or by porting the Font Software to a\nnew environment.\n\n\"Author\" refers to any designer, engineer, programmer, technical\nwriter or other person who contributed to the Font Software.\n\nPERMISSION & CONDITIONS\nPermission is hereby granted, free of charge, to any person obtaining\na copy of the Font Software, to use, study, copy, merge, embed, modify,\nredistribute, and sell modified and unmodified copies of the Font\nSoftware, subject to the following conditions:\n\n1) Neither the Font Software nor any of its individual components,\nin Original or Modified Versions, may be sold by itself.\n\n2) Original or Modified Versions of the Font Software may be bundled,\nredistributed and/or sold with any software, provided that each copy\ncontains the above copyright notice and this license. These can be\nincluded either as stand-alone text files, human-readable headers or\nin the appropriate machine-readable metadata fields within text or\nbinary files as long as those fields can be easily viewed by the user.\n\n3) No Modified Version of the Font Software may use the Reserved Font\nName(s) unless explicit written permission is granted by the corresponding\nCopyright Holder. This restriction only applies to the primary font name as\npresented to the users.\n\n4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font\nSoftware shall not be used to promote, endorse or advertise any\nModified Version, except to acknowledge the contribution(s) of the\nCopyright Holder(s) and the Author(s) or with their explicit written\npermission.\n\n5) The Font Software, modified or unmodified, in part or in whole,\nmust be distributed entirely under this license, and must not be\ndistributed under any other license. The requirement for fonts to\nremain under this license does not apply to any document created\nusing the Font Software.\n\nTERMINATION\nThis license becomes null and void if any of the above conditions are\nnot met.\n\nDISCLAIMER\nTHE FONT SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\nEXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF\nMERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT\nOF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE\nCOPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,\nINCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL\nDAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING\nFROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM\nOTHER DEALINGS IN THE FONT SOFTWARE.\n",
+      "sha256": "58172e0c0fac2cda8a37b348164bb55e44b0e69051e557e92b1d3f6910141f7b"
+    },
+    {
+      "file": "jetbrainsmono/OFL.txt",
+      "text": "Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono)\n\nThis Font Software is licensed under the SIL Open Font License, Version 1.1.\n\nThis license is copied below, and is also available with a FAQ at: https://scripts.sil.org/OFL\n\n\n-----------------------------------------------------------\nSIL OPEN FONT LICENSE Version 1.1 - 26 February 2007\n-----------------------------------------------------------\n\nPREAMBLE\nThe goals of the Open Font License (OFL) are to stimulate worldwide\ndevelopment of collaborative font projects, to support the font creation\nefforts of academic and linguistic communities, and to provide a free and\nopen framework in which fonts may be shared and improved in partnership\nwith others.\n\nThe OFL allows the licensed fonts to be used, studied, modified and\nredistributed freely as long as they are not sold by themselves. The\nfonts, including any derivative works, can be bundled, embedded,\nredistributed and/or sold with any software provided that any reserved\nnames are not used by derivative works. The fonts and derivatives,\nhowever, cannot be released under any other type of license. The\nrequirement for fonts to remain under this license does not apply\nto any document created using the fonts or their derivatives.\n\nDEFINITIONS\n\"Font Software\" refers to the set of files released by the Copyright\nHolder(s) under this license and clearly marked as such. This may\ninclude source files, build scripts and documentation.\n\n\"Reserved Font Name\" refers to any names specified as such after the\ncopyright statement(s).\n\n\"Original Version\" refers to the collection of Font Software components as\ndistributed by the Copyright Holder(s).\n\n\"Modified Version\" refers to any derivative made by adding to, deleting,\nor substituting -- in part or in whole -- any of the components of the\nOriginal Version, by changing formats or by porting the Font Software to a\nnew environment.\n\n\"Author\" refers to any designer, engineer, programmer, technical\nwriter or other person who contributed to the Font Software.\n\nPERMISSION & CONDITIONS\nPermission is hereby granted, free of charge, to any person obtaining\na copy of the Font Software, to use, study, copy, merge, embed, modify,\nredistribute, and sell modified and unmodified copies of the Font\nSoftware, subject to the following conditions:\n\n1) Neither the Font Software nor any of its individual components,\nin Original or Modified Versions, may be sold by itself.\n\n2) Original or Modified Versions of the Font Software may be bundled,\nredistributed and/or sold with any software, provided that each copy\ncontains the above copyright notice and this license. These can be\nincluded either as stand-alone text files, human-readable headers or\nin the appropriate machine-readable metadata fields within text or\nbinary files as long as those fields can be easily viewed by the user.\n\n3) No Modified Version of the Font Software may use the Reserved Font\nName(s) unless explicit written permission is granted by the corresponding\nCopyright Holder. This restriction only applies to the primary font name as\npresented to the users.\n\n4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font\nSoftware shall not be used to promote, endorse or advertise any\nModified Version, except to acknowledge the contribution(s) of the\nCopyright Holder(s) and the Author(s) or with their explicit written\npermission.\n\n5) The Font Software, modified or unmodified, in part or in whole,\nmust be distributed entirely under this license, and must not be\ndistributed under any other license. The requirement for fonts to\nremain under this license does not apply to any document created\nusing the Font Software.\n\nTERMINATION\nThis license becomes null and void if any of the above conditions are\nnot met.\n\nDISCLAIMER\nTHE FONT SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\nEXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF\nMERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT\nOF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE\nCOPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,\nINCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL\nDAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING\nFROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM\nOTHER DEALINGS IN THE FONT SOFTWARE.\n",
+      "sha256": "b2fe5e8987594e9ffd1d2ca52a2f5d73eb8335243893c5d6254b5ad69269591d"
+    }
+  ],
+  "sources": [
+    {
+      "path": "docs/design/lids/typography.json",
+      "sha256": "b1126738fdcd52ed294b766ef8fbd0114074aa33a91c7796a9ad7d75eefaed5c"
+    },
+    {
+      "path": "docs/design/lids/focus.json",
+      "sha256": "cfadcc02dd48aef2e092906ee0b20f72c55370891a6cd2617e35f7061cea0e93"
+    },
+    {
+      "path": "docs/design/lids/control-material.json",
+      "sha256": "a1d3f83e01acbf1fdd94198365b4e1eeee8f0a3eb3082f39e167735a1f7a194a"
+    },
+    {
+      "path": "docs/design/lids/shell-layout.json",
+      "sha256": "5fcab4ad570e18e4c5099df9b239d0097d4d4148313a08a5057f07f73f427dfc"
+    },
+    {
+      "path": "docs/design/lids/ledger-layout.json",
+      "sha256": "e70a86175267d50a4b1dcd6c542ab68f3d9f9a8e70a601678a896c1b8b4f204a"
+    },
+    {
+      "path": "docs/design/lids/composition-layout.json",
+      "sha256": "41be098b92de62521b7aa6b16aa6e7aa6b1e0d947288aced3405709c1c5b4081"
+    },
+    {
+      "path": "docs/design/lids/overlay-policy.json",
+      "sha256": "3662d482cc973e39c0c9e06b50b3c6e0c7b0a55ac7543d4d14ee552e407e84a0"
+    },
+    {
+      "path": "docs/design/lids/component-reuse.json",
+      "sha256": "1af8299c2f779e48921a34bc8193d94cfca2ede72dd885ef9b5314d47c20ceba"
+    },
+    {
+      "path": "docs/design/lids/media-material.json",
+      "sha256": "d51fb6627a6c3372d94e9b945c470f93fc7ae33b4862a73266e4892729d8e4ed"
+    },
+    {
+      "path": "docs/design/lids/color.json",
+      "sha256": "332ed74d58f17f51bf0df3707a15835372cf447e6f4f1d5b901eb66d9935729f"
+    }
+  ],
+  "inventory": {
+    "activePages": 16,
+    "activeModes": 25,
+    "retiredPages": 1,
+    "pages": 17,
+    "modes": 26,
+    "patterns": 11,
+    "regions": 18,
+    "components": 48,
+    "interactions": 32,
+    "businessBlocks": 41
+  },
+  "fingerprint": "232360d7d774ef5072abcdde8f16a10bb863be69c9da135110db9a894533e098",
+  "sharedComponents": {
+    "C09": {
+      "name": "动作按钮",
+      "implementation": "apps/web/src/shared/ActionButton.tsx",
+      "styles": "apps/web/src/shared/ActionButton.module.css",
+      "tests": [
+        "apps/web/src/shared/ActionButton.test.tsx"
+      ],
+      "demo": "apps/web/design-system/dsReview/ui.jsx",
+      "variants": [
+        "primary",
+        "ink",
+        "outline",
+        "soft",
+        "danger",
+        "quiet",
+        "loading"
+      ],
+      "states": [
+        "idle",
+        "focus",
+        "disabled",
+        "pending",
+        "rejected",
+        "unconfirmed"
+      ],
+      "owns": [
+        "原生button与显式type",
+        "忙碌禁用与aria-busy",
+        "M2材质和标签宽度"
+      ],
+      "excludes": [
+        "导航资格",
+        "权限判断",
+        "真实成功回执"
+      ],
+      "ruleSources": [
+        "control-material",
+        "focus",
+        "typography",
+        "color"
+      ],
+      "consumers": [
+        "apps/web/src/pages/corpus/creators/CreatorControls.tsx",
+        "apps/web/src/pages/corpus/evidence/EvidenceControls.tsx",
+        "apps/web/src/pages/collection/tasks/TasksPage.tsx",
+        "apps/web/src/pages/ops/LedgerPage.tsx",
+        "apps/web/src/pages/ops/TargetDialog.tsx",
+        "apps/web/src/pages/workbench/WorkbenchPage.tsx"
+      ],
+      "certified": false,
+      "nativeStates": [
+        "pointer_hover",
+        "pressed"
+      ]
+    },
+    "C16": {
+      "name": "FIND检索输入",
+      "implementation": "apps/web/src/shared/FindField.tsx",
+      "styles": "apps/web/src/shared/FindField.module.css",
+      "tests": [
+        "apps/web/src/shared/FindField.test.tsx"
+      ],
+      "demo": "apps/web/design-system/dsReview/ui.jsx",
+      "triggers": [
+        "submit",
+        "debounce_250"
+      ],
+      "debounceMs": 250,
+      "states": [
+        "idle",
+        "composing",
+        "querying",
+        "results",
+        "empty",
+        "error",
+        "disabled",
+        "pending"
+      ],
+      "owns": [
+        "FIND识别与清空/快捷键",
+        "IME保护、防抖及手动提交",
+        "外部查询/范围改变取消旧定时器",
+        "flush与focus"
+      ],
+      "excludes": [
+        "业务查询结果",
+        "URL编码和返回历史",
+        "作者/作品资格",
+        "创建搜索能力"
+      ],
+      "ruleSources": [
+        "focus",
+        "typography",
+        "composition-layout"
+      ],
+      "consumers": [
+        "apps/web/src/pages/ops/LedgerPage.tsx",
+        "apps/web/src/pages/workbench/TopicLibrary.tsx"
+      ],
+      "certified": false,
+      "nativeStates": [
+        "pointer_focus",
+        "keyboard_focus",
+        "draft"
+      ]
+    }
+  }
+}

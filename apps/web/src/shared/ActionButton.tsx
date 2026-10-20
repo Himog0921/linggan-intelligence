@@ -1,7 +1,8 @@
 import type { ComponentPropsWithRef } from 'react';
 import styles from './ActionButton.module.css';
 
-export type ActionVariant = 'primary' | 'ink' | 'outline' | 'soft' | 'danger' | 'quiet' | 'loading';
+import type { ActionVariant } from './lidsComponents.generated';
+export type { ActionVariant } from './lidsComponents.generated';
 export interface ActionButtonProps extends ComponentPropsWithRef<'button'> {
   variant?: ActionVariant;
   busy?: boolean;
@@ -12,7 +13,7 @@ export function ActionButton({ variant = 'outline', busy = false, disabled, clas
   type = 'button', 'aria-busy': ariaBusy, ...props }: ActionButtonProps) {
   const loading = busy || variant === 'loading';
   return <button {...props} type={type} className={[styles.action, styles[variant === 'loading' ? 'outline' : variant], className].filter(Boolean).join(' ')}
-    data-action-button="v8" data-variant={variant} data-loading={loading ? '' : undefined}
+    data-action-button="v8" data-lids-component="C09" data-variant={variant} data-loading={loading ? '' : undefined}
     aria-busy={loading ? true : ariaBusy} disabled={disabled || loading}>
     {loading && <span className={styles.cells} aria-hidden="true"><i/><i/><i/><i/></span>}
     <span className={styles.label}>{children}</span>

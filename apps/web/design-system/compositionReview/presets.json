@@ -1,0 +1,86 @@
+{
+  "id": "Q08-COMPOSITION-12",
+  "status": "historical_candidates_superseded_by_ALIGN-COMPOSITION-009",
+  "fixed": [
+    "LIDS-TYPE-001-B",
+    "ALIGN-VOICE-004",
+    "ALIGN-FOCUS-005",
+    "ALIGN-MATERIAL-006",
+    "ALIGN-NAV-003",
+    "ALIGN-SHELL-007",
+    "ALIGN-LEDGER-008"
+  ],
+  "variants": {
+    "A": {
+      "name": "分带排列",
+      "description": "工具、视图、结果分带；主操作在工作工具栏右侧，对象和表单动作留在当前对象。"
+    },
+    "B": {
+      "name": "合并工具带",
+      "description": "宽屏将查询、视图与动作合带；配置表单并排，窄屏按职责顺序收回。"
+    },
+    "C": {
+      "name": "工具带常驻",
+      "description": "工作区独立纵向滚动，集合工具留在顶端；局部表单和对象操作不迁到全局。"
+    }
+  },
+  "representatives": {
+    "PT01": [
+      "P01",
+      "entry"
+    ],
+    "PT02": [
+      "P05",
+      "list"
+    ],
+    "PT03": [
+      "P04",
+      "overview"
+    ],
+    "PT04": [
+      "P06",
+      "overview"
+    ],
+    "PT05": [
+      "P07",
+      "reading"
+    ],
+    "PT06": [
+      "P12",
+      "body"
+    ],
+    "PT07": [
+      "P10",
+      "domains"
+    ],
+    "PT08": [
+      "P09",
+      "runs"
+    ],
+    "PT09": [
+      "P11",
+      "stations"
+    ],
+    "PT10": [
+      "P16",
+      "daily"
+    ],
+    "PT11": [
+      "P17",
+      "delivery"
+    ]
+  },
+  "availability": {
+    "PT01": [
+      "A"
+    ],
+    "PT07": [
+      "A",
+      "B"
+    ]
+  },
+  "scope": "composition_and_action_location_only",
+  "businessRequests": false,
+  "runtimeMigrated": false,
+  "componentCertificationChanged": false
+}

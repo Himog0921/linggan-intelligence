@@ -20,3 +20,5 @@
 /apps/comment-semantics/.venv/
 /apps/comment-semantics/**/__pycache__/
 /apps/comment-semantics/.pytest_cache/
+
+/artifacts/lids-sync/

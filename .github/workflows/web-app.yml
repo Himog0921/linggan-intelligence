@@ -6,6 +6,14 @@ on:
     branches: [main]
     paths:
       - 'apps/web/**'
+      - 'docs/design/lids/**'
+      - 'AGENTS.md'
+      - 'CLAUDE.md'
+      - 'codx.md'
+      - 'docs/governance/ui-design-execution.md'
+      - 'docs/design/changes/lids-component-change.json'
+      - 'scripts/lids*'
+      - 'scripts/sync-lids*'
       - 'apps/api/src/**'
       - 'scripts/check-web-react-*'
       - 'scripts/login-anatomy/**'
@@ -70,6 +78,8 @@ jobs:
         run: node scripts/check-web-react-boundary.mjs && node --test scripts/check-web-react-boundary.test.mjs
       - name: Typecheck, lint, unit and component tests, production build
         run: npm --prefix apps/web run verify
+      - name: LIDS sources and offline examples stay synchronized
+        run: npm --prefix apps/web run lids:verify
       - name: Runtime preparation script reuses a matching build
         run: |
           export LINGGAN_WEB_NODE="$(command -v node)"

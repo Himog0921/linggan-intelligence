@@ -440,3 +440,11 @@ AI-GEN1 C0：人工维护离线合同/固定合成fixture/页面与纯合成测�
 ## AI-GEN1 · 材料只读预览隔离证明
 
 `artifacts/private/ai-gen1-note-material-preview/`：本任务自有合成浏览器报告、截图、日志、审查哈希和CI回执，不入Git；由正式测试runner生成，交付/集成后按任务证据保留，不包含真实原文/秘密。CI写入`$RUNNER_TEMP/web-app-proof/note-material/`，沿既有artifact上传/到期清理。
+
+## LIDS-UI-001 · 运营发布与同源构建
+
+来源为本包真实源码与LIDS规则；人工维护 apps/web/design-system、scripts/lids.mjs 与 docs/design/lids/{catalog-source,component-contracts}.json。生成目录 apps/web/design-system/generated、shared/lidsComponents.generated.ts、component-library.generated.md 允许入Git，唯一再生命令 npm --prefix apps/web run lids:sync；禁止手改，lids:check核对输入指纹。离线HTML/ZIP只写 apps/web/dist-design-system（忽略）；验证日志、review与浏览器截图只写 artifacts/lids-sync/ops-release（忽略、不提交，无秘密/原始API），当前root负责，保留至Mog验收，只清理精确目录。dist/node_modules沿既有登记；登记不授权模型、平台或数据库迁移。
+
+本包Ops隔离PG浏览器证明沿上述ops-release/pg-browser；scripts/test-web-app-postgres.sh新增ops定向入口，只使用runner自建container/volume/schema与合成材料，finally清理自有资源，不读取运行库或调用模型/平台。
+
+运营发布的workbench定向隔离证明沿ops-release/workbench-browser；沿同一自有runner，媒体/图页资产只写support_dir/creation-assets并随support清理，清除真实样本环境变量，使用合成数据与本机生成图像。不得把合成目标/稿件/图页写入声明为正式业务写证明。

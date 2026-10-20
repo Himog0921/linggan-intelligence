@@ -67,3 +67,6 @@ LIDS-ALIGN-001 是前期规范包的授权边界，其 runtimeMigrated=false 描
 ## 正式代码采用的检查入口
 
 颜色按唯一 [color.json](../design/lids/color.json) 执行；字体、C、M2、A 和 L1 由 `python3 scripts/sync-lids-runtime.py` 映射到唯一 lids_tokens.css，`--check` 在应用测试中检查漂移。改变运行值时先修改已批准源再再生。既有语义别名只指向这一源，不得在页面复制数字。实现/发布进度只读 [LIDS-UI-001 验收](../design/acceptance/lids-ui-implementation-001-acceptance.md)，前期九源的 runtimeMigrated=false 是规范包快照，不是第二设计标准。
+
+
+标准件持续同步入口：[组件同步执行合同](../design/lids/component-sync.md)。UI 标准件修改须声明实现修正/共享标准/页面例外，按编号读取合同，再同步真实组件、展示与离线HTML；运行 apps/web 的 lids:check/lids:verify，不把合成示例当成CMP认证。当前 C16 的正式接入消费者为运营发布记录与创作列表；其他页面继续各自已合并实现，不宣称全站已接通。

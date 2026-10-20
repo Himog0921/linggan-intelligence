@@ -1,3 +1,6 @@
+import { useOpsLeave } from './useOpsLeave';
+import { ActionButton } from '../../shared/ActionButton';
+import { FindField } from '../../shared/FindField';
 import { useEffect, useRef, useState } from "react";
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useSearchParams } from "react-router";
@@ -141,6 +144,9 @@ export function LedgerPage({
   const operator = params.get("operator") || "";
   const [dates, setDates] = useState(false);
   const [cover, setCover] = useState<string | null>(null);
+  const [coverFailed, setCoverFailed] = useState(false);
+  const [detail, setDetail] = useState<api.Publication | null>(null);
+  function openCover(src: string) { setCoverFailed(false); setCover(src); }
   const wrap = useRef<HTMLDivElement>(null);
   const query = Object.fromEntries(params);
   const pubs = useQuery({
@@ -219,28 +225,18 @@ export function LedgerPage({
   const operators = data?.operators || (operator ? [operator] : []);
   return (
     <>
-      {kind === "publications" ? (
-        <Readouts
-          data={summary.isError ? undefined : summary.data}
-          business={business}
-        />
-      ) : null}
       <div
         className={c(
           "ops-toolbar",
           ...(kind === "publications" ? ["ops-toolbar-stacked"] : []),
         )}
       >
-        <Tabs
-          id="ops-operators"
-          label="运营人"
-          values={peopleTabs(operators)}
-          current={operator}
-          onSelect={(name) => update({ operator: name })}
-        />
         <div className={c("ops-tools")}>
           {kind === "publications" ? (
             <>
+              <FindField formId="ops-account-search" inputId="ops-account" name="account" className={c('ops-find')}
+                label="搜索账号" value={params.get('account') || ''} placeholder="账号名称" maxLength={200}
+                contextKey={business} trigger="submit" onCommit={account => update({ account })} shortcut submitLabel="搜索" />
               <nav className={c("ops-tabs", "ops-platforms")} aria-label="平台">
                 {[
                   ["", "总数据"],
@@ -257,35 +253,9 @@ export function LedgerPage({
                   </button>
                 ))}
               </nav>
-              <form
-                id="ops-account-search"
-                className={c("ops-search")}
-                role="search"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  update({
-                    account: String(
-                      new FormData(event.currentTarget).get("account") || "",
-                    ).trim(),
-                  });
-                }}
-              >
-                <label className="v7-sr-only" htmlFor="ops-account">
-                  搜索账号
-                </label>
-                <input
-                  key={params.get("account") || ""}
-                  id="ops-account"
-                  name="account"
-                  type="search"
-                  placeholder="搜索账号..."
-                  maxLength={200}
-                  autoComplete="off"
-                  defaultValue={params.get("account") || ""}
-                />
-                <button type="submit">搜索</button>
-              </form>
-              <button
+
+
+              <ActionButton
                 type="button"
                 id="ops-date-open"
                 onClick={() => setDates(true)}
@@ -293,8 +263,8 @@ export function LedgerPage({
                 {params.get("from") || params.get("to")
                   ? `${params.get("from") || "开始"} ~ ${params.get("to") || "结束"}`
                   : "日期范围"}
-              </button>
-              <button
+              </ActionButton>
+              <ActionButton
                 type="button"
                 id="ops-pending"
                 aria-pressed={params.get("views") === "pending"}
@@ -305,7 +275,7 @@ export function LedgerPage({
                 }
               >
                 待补阅读量
-              </button>
+              </ActionButton>
             </>
           ) : kind === "accounts" ? (
             <span
@@ -325,20 +295,33 @@ export function LedgerPage({
           <small className={c("ops-note")}>切换前只读</small>
           {kind === "publications" ? (
             <>
-              <button type="button" disabled title={readonly}>
+              <ActionButton type="button" disabled title={readonly}>
                 新增发布
-              </button>
-              <button type="button" disabled title="自动发现我方帖子上线后可用">
+              </ActionButton>
+              <ActionButton type="button" disabled title="自动发现我方帖子上线后可用">
                 同步数据
-              </button>
+              </ActionButton>
             </>
           ) : kind === "accounts" ? (
-            <button type="button" disabled title={readonly}>
+            <ActionButton type="button" disabled title={readonly}>
               新增账号
-            </button>
+            </ActionButton>
           ) : null}
         </div>
+        <Tabs
+          id="ops-operators"
+          label="运营人"
+          values={peopleTabs(operators)}
+          current={operator}
+          onSelect={(name) => update({ operator: name })}
+        />
       </div>
+      {kind === "publications" ? (
+        <Readouts
+          data={summary.isError ? undefined : summary.data}
+          business={business}
+        />
+      ) : null}
       {kind === "daily" ? (
         <p
           id="ops-scope-note"
@@ -400,7 +383,8 @@ export function LedgerPage({
                 <PublicationRow
                   key={item.ref}
                   item={item}
-                  openCover={setCover}
+                  openCover={openCover}
+                  openDetail={setDetail}
                 />
               ))
             ) : kind === "accounts" && accounts.data?.items.length ? (
@@ -427,7 +411,7 @@ export function LedgerPage({
                 }
                 action={
                   kind === "publications" && filtered ? (
-                    <button
+                    <ActionButton
                       type="button"
                       onClick={() => {
                         update({
@@ -441,7 +425,7 @@ export function LedgerPage({
                       }}
                     >
                       清除筛选
-                    </button>
+                    </ActionButton>
                   ) : null
                 }
               />
@@ -456,7 +440,7 @@ export function LedgerPage({
               ? `第 ${pubs.data.page} / ${Math.max(pubs.data.totalPages, 1)} 页 · 共 ${pubs.data.total.toLocaleString("zh-CN")} 条 · 每页最多 ${pubs.data.pageSize} 条`
               : ""}
           </span>
-          <button
+          <ActionButton
             type="button"
             id="ops-prev"
             disabled={pubs.isFetching || !pubs.data || pubs.data.page <= 1}
@@ -465,8 +449,8 @@ export function LedgerPage({
             }
           >
             上一页
-          </button>
-          <button
+          </ActionButton>
+          <ActionButton
             type="button"
             id="ops-next"
             disabled={
@@ -479,7 +463,7 @@ export function LedgerPage({
             }
           >
             下一页
-          </button>
+          </ActionButton>
         </nav>
       ) : (
         <p className={c("ops-footnote")}>
@@ -499,9 +483,24 @@ export function LedgerPage({
           }}
         />
       ) : null}
+      {detail ? <Dialog label="发布记录详情" outsideClose onClose={() => setDetail(null)}>
+        <header className={c('ops-detail-head')}><h2>{detail.title || '无标题发布记录'}</h2><ActionButton onClick={() => setDetail(null)}>关闭详情</ActionButton></header>
+        <div className={c('ops-dialog-body')}>
+          <p>{detail.businessDate} · {f.platformLabel[detail.platform]} · {detail.account?.name || '账号未知'}</p>
+          <p className={c('ops-note')}>迁入记录 · 系统尚未核对平台发布状态</p>
+          <External href={detail.url} title="原发布链接">查看原发布链接 ↗</External>
+          <dl className={c('ops-detail-facts')}>
+            <div><dt>阅读量</dt><dd>{detail.views.state === 'value' ? f.count(detail.views.value).text : detail.views.state === 'pending' ? '待补' : '选填，未知'}</dd></div>
+            <div><dt>点赞</dt><dd>{f.count(detail.likes).text}</dd></div><div><dt>收藏</dt><dd>{f.count(detail.collects).text}</dd></div><div><dt>评论</dt><dd>{f.count(detail.comments).text}</dd></div>
+          </dl>
+          <h3>发布正文</h3><p className={c('ops-full-text')}>{detail.body || '未迁入正文'}</p>
+          {detail.duplicates.length ? <p>合并的重复登记日期：{detail.duplicates.map(row => row.businessDate).join('、')}</p> : null}
+          {detail.cover.available ? <ActionButton onClick={() => openCover(`/ops/covers/${encodeURIComponent(detail.ref)}`)}>查看封面大图</ActionButton> : <p>封面未迁入</p>}
+        </div>
+      </Dialog> : null}
       {cover ? (
         <Dialog
-          label="封面大图"
+          label="封面大图" outsideClose
           className="ops-cover-dialog"
           onClose={() => setCover(null)}
         >
@@ -512,9 +511,9 @@ export function LedgerPage({
               setCover(null);
             }}
           >
-            <button type="submit">关闭</button>
+            <ActionButton type="submit">关闭</ActionButton>
           </form>
-          <img id="ops-cover-large" src={cover} alt="封面大图" />
+          {coverFailed ? <div role="status"><p>封面暂时无法读取，原记录仍保留。</p><ActionButton onClick={() => setCoverFailed(false)}>重新加载封面</ActionButton></div> : <img id="ops-cover-large" src={cover} alt="封面大图" onError={() => setCoverFailed(true)} />}
         </Dialog>
       ) : null}
     </>
@@ -566,10 +565,11 @@ function Readouts({
 }
 function PublicationRow({
   item,
-  openCover,
+  openCover, openDetail,
 }: {
   item: api.Publication;
   openCover: (src: string) => void;
+  openDetail: (item: api.Publication) => void;
 }) {
   return (
     <tr>
@@ -585,16 +585,11 @@ function PublicationRow({
       </td>
       <td>{f.platformLabel[item.platform]}</td>
       <td>
-        {item.title || item.body ? (
-          <span
-            className={c("ops-clamp", ...(item.title ? [] : ["ops-secondary"]))}
-            title={item.title || "没有标题，显示正文开头"}
-          >
-            {item.title || item.body}
-          </span>
-        ) : (
-          <Missing />
-        )}
+        <button type="button" onClick={() => openDetail(item)} aria-label={`查看发布记录：${item.title || '无标题'}`}
+          className={c('ops-object', 'ops-clamp', ...(item.title ? [] : ['ops-secondary']))}
+          title={item.title || (item.body ? '没有标题，显示正文开头' : '标题和正文未迁入，可查看记录详情')}>
+          {item.title || item.body || '标题未迁入'}
+        </button>
       </td>
       <td>
         <div className={c("ops-stack")}>
@@ -792,9 +787,9 @@ function DailyRow({ item }: { item: api.Daily }) {
       <NumberCell value={item.monthFollowersGained} />
       <NumberCell value={item.monthPublished} />
       <td>
-        <button type="button" disabled title={readonly}>
+        <ActionButton type="button" disabled title={readonly}>
           编辑
-        </button>
+        </ActionButton>
       </td>
     </tr>
   );
@@ -810,13 +805,20 @@ function DateDialog({
   close: () => void;
   save: (from: string, to: string) => void;
 }) {
+  const [error, setError] = useState('');
+  const [draftFrom, setDraftFrom] = useState(from);
+  const [draftTo, setDraftTo] = useState(to);
+  const guard = useOpsLeave({ dirty: draftFrom !== from || draftTo !== to, onClose: close });
   return (
-    <Dialog title="ops-date-title" onClose={close}>
+    <><Dialog title="ops-date-title" onClose={guard.requestClose}>
       <form
+        onInvalid={event => { event.preventDefault(); const input = event.target; if (input instanceof HTMLInputElement) setError(input.validity.valueMissing ? "请选择开始和结束日期" : input.validity.badInput ? "请输入完整有效的日期" : "开始日期不能晚于结束日期"); }}
         onSubmit={(event) => {
           event.preventDefault();
           const form = new FormData(event.currentTarget);
-          save(String(form.get("from") || ""), String(form.get("to") || ""));
+          const start = String(form.get('from') || ''), end = String(form.get('to') || '');
+          if (start && end && start > end) { setError('开始日期不能晚于结束日期'); return; }
+          save(start, end);
         }}
       >
         <header>
@@ -826,25 +828,26 @@ function DateDialog({
         <div className={c("ops-dialog-body")}>
           <label>
             开始日期
-            <input type="date" name="from" defaultValue={from} />
+            <input type="date" name="from" value={draftFrom} onChange={event => { setDraftFrom(event.target.value); setError(''); }} max={draftTo || undefined} />
           </label>
           <label>
             结束日期
-            <input type="date" name="to" defaultValue={to} />
+            <input type="date" name="to" value={draftTo} onChange={event => { setDraftTo(event.target.value); setError(''); }} min={draftFrom || undefined} />
           </label>
         </div>
+        {error ? <p role="alert">{error}</p> : null}
         <footer>
-          <button type="button" onClick={() => save("", "")}>
+          <ActionButton type="button" onClick={() => save("", "")}>
             清空日期
-          </button>
-          <button type="button" onClick={close}>
+          </ActionButton>
+          <ActionButton type="button" onClick={guard.requestClose}>
             取消
-          </button>
-          <button type="submit" className={c("ops-primary")}>
+          </ActionButton>
+          <ActionButton type="submit" variant="primary">
             确认
-          </button>
+          </ActionButton>
         </footer>
       </form>
-    </Dialog>
+    </Dialog>{guard.confirmation}</>
   );
 }

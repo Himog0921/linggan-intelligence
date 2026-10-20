@@ -225,7 +225,7 @@ try {
     assert.equal(await unknown.locator("td").nth(4).innerText(), "—");
     await page.getByRole("group").count();
     await page.getByText("全部业务", { exact: true }).first().click();
-    await page.getByRole("link", { name: /合成业务二，1 个账号/ }).click();
+    await page.getByRole("button", { name: /合成业务二.*1 个账号/ }).click();
     await wait(
       async () => (await page.locator("#ops-rows > tr").count()) === 1,
       "business selection",
@@ -237,7 +237,7 @@ try {
       .count()
       .catch(() => {});
     await page
-      .locator('aside[aria-label="运营导航"]')
+      .getByRole("navigation", { name: "数据页面" })
       .getByRole("link", { name: /每日数据/ })
       .click();
     await wait(
@@ -258,26 +258,19 @@ try {
     );
   });
   await step(
-    "all six downloads equal frozen core bytes and retain export cutoff",
+    "retired IO redirects; six read-only exports keep frozen core bytes and cutoff",
     async () => {
       await go("io");
+      assert.equal(new URL(page.url()).pathname, '/ops/overview');
+      assert.equal(await page.getByText('导入导出', { exact: true }).count(), 0);
       for (const kind of ["accounts", "publications", "daily"])
         for (const format of ["csv", "json"]) {
-          const downloadPromise = page.waitForEvent("download");
-          await page
-            .locator(`a[href*="kind=${kind}"][href*="format=${format}"]`)
-            .click();
-          const download = await downloadPromise;
-          assert.equal(download.suggestedFilename(), `ops-${kind}.${format}`);
-          const saved = path.join(dir, download.suggestedFilename());
-          await download.saveAs(saved);
-          const bytes = await readFile(saved),
-            expected = await readFile(
-              path.join(dir, `expected-${kind}.${format}`),
-            );
+          // The visible IO module is retired; its existing read-only backend remains compatible.
+          const response = await context.request.get(`${origin}/api/local/ops/export?kind=${kind}&format=${format}`);
+          assert.equal(response.status(), 200);
+          const bytes = await response.body(), expected = await readFile(path.join(dir, `expected-${kind}.${format}`));
           assert.deepEqual(bytes, expected, `${kind} ${format} byte equality`);
-          if (format === "json")
-            assert.equal(JSON.parse(bytes).asOf, fixture.asOf.exportedAt);
+          if (format === "json") assert.equal(JSON.parse(bytes).asOf, fixture.asOf.exportedAt);
           else assert.match(bytes.toString(), /2026-10-12 22:43/);
         }
     },
@@ -423,6 +416,7 @@ try {
         "unconfirmed",
       );
       await page.getByRole("button", { name: "取消", exact: true }).click();
+      await page.getByRole("button", { name: "收起并继续跟踪", exact: true }).click();
       await openTarget();
       assert.equal(await targetValue().inputValue(), "300");
       assert.equal(await targetValue().isDisabled(), true);
@@ -467,6 +461,7 @@ try {
       assert.equal(await targetValue().isDisabled(), false);
       assert.match(await page.locator("#ops-target").innerText(), /300/);
       await page.getByRole("button", { name: "取消", exact: true }).click();
+      await page.getByRole("button", { name: "放弃修改", exact: true }).click();
       await page.unroute("**/api/local/ops/targets", handler);
     },
   );
@@ -558,7 +553,7 @@ try {
     },
   );
   await step(
-    "four viewports, five pages and dialog keyboard navigation",
+    "four viewports, four data pages and dialog keyboard navigation",
     async () => {
       for (const width of [1440, 1280, 1024, 390]) {
         await page.setViewportSize({
@@ -570,7 +565,6 @@ try {
           "publications",
           "accounts",
           "daily",
-          "io",
         ]) {
           await go(name);
           assert.ok(
