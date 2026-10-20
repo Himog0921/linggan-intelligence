@@ -82,7 +82,7 @@ const { chromium } = require('playwright');
       if(filter==='results')await page.screenshot({path:path.join(directory,'tasks-results-1440.png')});
     }
     await page.goto(`${fixture.origin}/collection/tasks?domain=${fixture.domainRef}&filter=attention`);await page.locator('[data-open-run]').first().click();await page.locator('[data-run-detail]').filter({hasText:'需要处理'}).waitFor();await page.screenshot({path:path.join(directory,'blocked-drawer-1440.png')});
-    await page.keyboard.press('Escape');await page.getByRole('searchbox',{name:'搜索采集任务'}).fill('合成采集 01');await page.getByRole('search').getByRole('button',{name:'搜索',exact:true}).click();await page.waitForURL(/q=/);await tasksSettled();assert.equal(new URL(page.url()).searchParams.get('filter'),'attention');assert.equal(await page.locator('[data-collection-runs] table tbody tr').count(),1);
+    await page.keyboard.press('Escape');await page.locator('#collection-run-drawer').waitFor({state:'detached'});await page.waitForURL(url=>!url.searchParams.has('run'));await page.getByRole('searchbox',{name:'搜索采集任务'}).fill('合成采集 01');assert.equal(await page.getByRole('searchbox',{name:'搜索采集任务'}).inputValue(),'合成采集 01');await page.getByRole('search').getByRole('button',{name:'搜索',exact:true}).click();await page.waitForURL(/q=/);await tasksSettled();assert.equal(new URL(page.url()).searchParams.get('filter'),'attention');assert.equal(await page.locator('[data-collection-runs] table tbody tr').count(),1);
     await page.goto(`${fixture.origin}/collection/tasks?domain=${fixture.domainRef}&q=${encodeURIComponent('超长合成')}`);assert.equal(await page.locator('[data-collection-runs] table tbody tr').count(),1);await page.locator('[data-open-run]').first().click();await page.locator('[data-run-detail]').filter({hasText:'已暂停'}).waitFor();await page.setViewportSize({width:390,height:1000});await page.screenshot({path:path.join(directory,'paused-long-drawer-390.png')});await page.setViewportSize({width:1440,height:1000});
     assert((await page.locator('#collection-run-title').innerText()).length>40);
     assert.equal(await page.locator('[data-run-execution-diagnostics]').count(),0,'retired technical diagnostics must not reappear');
@@ -173,7 +173,7 @@ const { chromium } = require('playwright');
     console.log('formal populated collection browser proof passed');
   } catch(error) {
     await page.screenshot({path:path.join(directory,'failure.png'),fullPage:true}).catch(()=>{});
-    console.error('Formal UI failure',JSON.stringify({url:page.url(),errors,writes,feedback:await page.locator('[data-run-form-feedback]').textContent().catch(()=>null)}));
+    console.error('Formal UI failure',JSON.stringify({url:page.url(),errors,writes,feedback:await page.locator('[data-run-form-feedback]').textContent({timeout:1000}).catch(()=>null)}));
     throw error;
   } finally {await browser.close();}
 })().catch(error => {console.error(error);process.exitCode=1;});
