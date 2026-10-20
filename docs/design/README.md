@@ -202,3 +202,8 @@ LIDS 现在统一约束全项目的设计表达，但其成熟度仍为 Proposed
 阶段 F 验收：[ACC-WEB-REACT-001-F](acceptance/web-react-001-f-acceptance.md)，完整实际 UI 截图与隔离 PostgreSQL 回执证明。
 
 主题概览 B「材料优先」正式改版：[阶段 F 计划 §7](../plans/active/web-react-001-f-topics.md#7-2026-10-17--mog-选定-b材料优先正式改版)，Mog 已选定并授权；保留全部功能/口径，候选实施与验收中。
+
+
+## AI-GEN1 C0 · 离线预演
+
+Mog已确认[PAGE-AI-OFFLINE-001](../plans/active/ai-gen1-pr1c0-offline.md#page-ai-offline-001--g1-已确认规格)；表面/状态/依赖/验收在同一计划维护。复用AppShell/ActionButton、LIDS L2 Split Evidence Inspector和唯一Token，固定后端合成数据，前端不维护第二份样本。采用与真实证明边界见[LIDS记录](lids/migration-log.md#ai-gen1-c0--离线预演2026-10-20)，不把本页采用推广为全站v7已迁移。

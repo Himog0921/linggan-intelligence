@@ -288,3 +288,5 @@ AI-GEN1 PR-1B安装接续：人工维护源码为`scripts/runtime/ai_guard.py`�
 安装接续的真实进程/PG证明由`--ai-install`同一owned runner执行；patrol证明目录优先放在runner的ledger-assets下，直接执行对应单测时只允许自建`linggan-patrol-proof-<UUID>`/`linggan-drain-proof-<UUID>`，由持有的Child guard回收。CLI控制用例的四个dummy进程用独立session创建，finally只回收该自有process group。`install-first-compile-failure.log`保留SQLx动态SQL边界适配前的编译失败；`install-local-children-first-observer-failure.log`保留dummy子进程继承observer pipe的超时，fixture重定向后证明通过。这些都是过程证据，不作为产品失败计数。Python入口禁写项目字节码，日志均忽略不提交；不运行共享dev DB的旧test-local-runtime.sh。
 
 AI-GEN1正式设置页候选：人工维护的apps/web/src/pages/settings分区/闭集解码/交互测试及ai_foundation样本读口是入Git源码。实际React/TS/lint/build/owned浏览器输出固定private/ai-gen1-pr1b/settings-*，不入Git；浏览器只连owned loopback，素材/skill包来自自有fixture目录，不读取真实用户目录或运行模型。页面构建仍在apps/web/dist，使用原Web治理生命周期。
+
+AI-GEN1 C0：人工维护离线合同/固定合成fixture/页面与纯合成测试/计划允许入Git；验证输出固定本独立树`artifacts/private/ai-gen1-pr1c0/`，忽略不提交，无真实材料或共享DB。CI同一浏览器证据放自有`$RUNNER_TEMP/web-app-proof/c0-offline/`，随既有Web artifact归档；截图/report/临时fixture.json不入Git。B自有target已移交本C0树target，不碰runtime-main；删除工作树前保留需要的私有日志。

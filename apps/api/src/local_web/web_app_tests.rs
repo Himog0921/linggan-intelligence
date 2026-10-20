@@ -360,6 +360,7 @@ async fn health_reports_the_frontend_build() {
             "/ops/daily",
             "/ops/io",
             "/topics",
+            "/topics/offline-review",
             "/topics/{canonical_key}"
         ])
     );

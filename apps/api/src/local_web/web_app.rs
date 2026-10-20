@@ -36,6 +36,7 @@ const REACT_PAGES: &[&str] = &[
     "/ops/daily",
     "/ops/io",
     "/topics",
+    "/topics/offline-review",
     "/topics/{canonical_key}",
 ];
 

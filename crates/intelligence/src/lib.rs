@@ -5,6 +5,7 @@ pub mod ai_foundation;
 pub mod creator_discovery_analysis;
 pub mod creator_discovery_input;
 pub mod creator_discovery_worker;
+pub mod note_interpretation_offline;
 pub mod research_text;
 pub mod topic_map;
 pub mod topic_map_collection_search;

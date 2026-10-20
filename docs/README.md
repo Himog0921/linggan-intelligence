@@ -434,3 +434,5 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发，并于 2026-10-02 
 
 
 AI-GEN1 PR-1B 当前执行：[底座实施包](plans/active/ai-gen1-pr1b-foundation.md)；[AI底座合同](data-contracts/ai-foundation.md)。同一主任务继续，依赖未合并的#455；运行/数据/真实调用授权不继承编码目标。
+
+- [AI-GEN1 C0离线计划](plans/active/ai-gen1-pr1c0-offline.md)：离线合同/合成流程，C1真实启用另计；[离线合同](data-contracts/note-interpretation-offline.md)。
