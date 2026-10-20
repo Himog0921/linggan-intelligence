@@ -1,0 +1,20 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, expect, it, vi } from 'vitest';
+import { RunDrawer } from './RunDrawer';
+const run='a0000000-0000-4000-8000-000000000001',domain='a0000000-0000-4000-8000-000000000002';
+const data={run_ref:run,domain_ref:domain,name:'合成进行中任务',domain_name:'合成领域',source_kind:'temporary_keyword',legacy:false,ended:false,control_intent:'running',phase:'executing',comment_mode:'sample_30',created_at:'2026-10-14T00:00:00Z',updated_at:'2026-10-14T00:00:00Z',revision:1,work_limit:20,selected_works:2,available_details:0,delivered_comments:0};
+afterEach(()=>{cleanup();vi.unstubAllGlobals();sessionStorage.clear();});
+it('停止先展示后果，返回不发命令；只读遮罩可关闭详情',async()=>{
+  const fetch=vi.fn(async()=>new Response(JSON.stringify(data),{status:200,headers:{'Content-Type':'application/json'}}));vi.stubGlobal('fetch',fetch);
+  const close=vi.fn();
+  render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><RunDrawer id={run} domain={domain} onClose={close}/></QueryClientProvider>);
+  fireEvent.click(await screen.findByRole('button',{name:'停止本次'}));
+  expect(screen.getByRole('heading',{name:'停止本次采集？'})).toBeInTheDocument();
+  expect(screen.getByText(/停止后不能继续这次任务/)).toBeInTheDocument();
+  expect(fetch.mock.calls).toHaveLength(1);
+  fireEvent.click(screen.getByRole('button',{name:'返回进展'}));
+  expect(screen.getByRole('button',{name:'停止本次'})).toBeInTheDocument();
+  expect(fetch.mock.calls).toHaveLength(1);
+  fireEvent.click(screen.getByRole('dialog'),{clientX:-1,clientY:-1});expect(close).toHaveBeenCalledOnce();
+});

@@ -823,3 +823,9 @@ U23采用Q12 E1及媒体白场，九源/镜像/构建守卫与项目Agent渐进�
 ## 2026-10-20 · ALIGN-WORKBENCH-015 工作台动作按钮并入 M2
 
 LIDS-UI-001 两页发布补验时发现：共享 `ActionButton`（V8 动作族，主干上仅内容工作台使用）随创作者页、证据库页采用 M2 而整体换参，工作台浏览器证明因按钮外观断言失败。Mog 在发布核对中选择「工作台也变成新样式」，裁定记入 decisions.md；`tokens.md`、`primitives.md`、`materials.md`、`patterns.md`、`component-promotion.md` 中「V8 工作台按钮保持」的说法加替代标记，历史数值保留。证明侧：`workbench-real-chain.mjs` 的按钮断言改读 control-material.json；无新增后端、迁移、业务 Token 或字体变化。工作台按钮外观在 3000 上随发布变化（阴影变薄、右缘纹理更密），功能与请求语义不变。
+
+## 2026-10-20 · COLLECTION-LIDS-UI-001 三页候选
+
+当前对话直接派定，基于#457@4700352b，单Agent专属树。采集目标/任务B、工位C；采用B字级/M2/C焦点/L1账本/Sidebar及现行唯一Token；不修改规则参数或全站样式。目标固定列/局部横滚、新建所属表单与草稿收起，任务17字段一行44px/144px与字段显隐，工位常驻工具及管理入口保留。读数“已有插件”按权威active_plugin_version计数，不假称心跳在线。
+
+strict类型/lint/92文件1046项/构建，Token/LIDS46反例/手册/治理通过；1440/1280/820/390真实视口三页无根/main横溢出，任务44px。详情/返回/字段/空结果和管理读取通过；真实写、独立复审、CI、main/#457整合、3000、采集与Mog签收未验证。见[验收](../acceptance/collection-lids-ui-001-acceptance.md)。

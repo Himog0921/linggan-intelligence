@@ -1,6 +1,6 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 
-export function RunDialog({ id, className = '', labelledBy, onClose, children }: { id?: string; className?: string; labelledBy: string; onClose: () => void; children: ReactNode }) {
+export function RunDialog({ id, className = '', labelledBy, onClose, children, dismissOnBackdrop = false }: { id?: string; className?: string; labelledBy: string; onClose: () => void; children: ReactNode; dismissOnBackdrop?: boolean }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const dialog = ref.current;
@@ -13,5 +13,9 @@ export function RunDialog({ id, className = '', labelledBy, onClose, children }:
       if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
     };
   }, []);
-  return <dialog id={id} ref={ref} className={`c-run-dialog ${className}`} aria-labelledby={labelledBy} onCancel={event => { event.preventDefault(); onClose(); }}>{children}</dialog>;
+  return <dialog id={id} ref={ref} className={`c-run-dialog ${className}`} aria-labelledby={labelledBy} onClick={event => {
+    if (!dismissOnBackdrop || event.target !== event.currentTarget) return;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) onClose();
+  }} onCancel={event => { event.preventDefault(); onClose(); }}>{children}</dialog>;
 }

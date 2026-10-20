@@ -1,10 +1,20 @@
 # PAGE-COLLECTION-001 · Collection Workspace 本地页面族
 
 > 状态: 权威当前
-> 最后核对: 2026-10-12
+> 最后核对: 2026-10-20
 > 适用范围: `http://localhost:3000/collection/*` 的两个日常页面与上下文管理入口
 > 事实来源: Mog 于 2026-08-26 的直接指定与逐项裁定、`REF-V4-001`、LIDS、领域不变量、当前 SCOPE 与真实 Rust 实现
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实运行/代码/合同、ACCEPTED 决定；V4 为本页族受限的视觉与骨架 Gold Master
+
+## COLLECTION-LIDS-UI-001 · 当前三页呈现增量
+
+Mog于2026-10-20直接派定观察目标、采集任务与工位管理UI更新，按已确认Q01–Q12和#457的设计基础实施。旧V4的固定1040px页面宽、工具栏内新建表单、多行任务混合字段、重看板几何由本节局部替代；以下产品、数据、权限、命令、材料和历史验收边界继续有效。
+
+目标P08/B与任务P09/B使用紧凑工具/结果/主体，工位P11/C工具常驻。目标creator/keyword列语义及全部抽屉保留，字段宽度不足用表内横滚；任务按ledger-layout.json的L1/44px/名称144px，17字段、四核心固定、显隐与窄屏横滚保持，一任务一行。工位管理入口仍在Z02右侧、领域管理仍在领域下拉，不自行增加日常导航页。新建/批量/对象/表单动作分别归其对象；停止先确认后果，工位恢复接收不等于继续停止任务。
+
+当前React样式来源为`apps/web/src/pages/collection/CollectionFrame.module.css`、目标工具/任务账本/任务页/管理CSS Modules，并消费唯一运行Token。下文`collection_workspace.css`等原Rust路径只保留历史沿革，不是本次新增实现位置。目标门户抽屉的既有结构保持，由当前全局字体/Token继承；未宣称其所有历史CSS均已清偿。
+
+变更依据与表面/状态/依赖/验收见[本包清单](../changes/collection-lids-ui-001-ui-change-manifest.md)，实际结果见[本包验收](../acceptance/collection-lids-ui-001-acceptance.md)。1280/820/390只是本次前端布局验证，不改旧Package业务签收，不宣布Mog验收、真实采集、main或3000已更新。
 
 ## 1. 身份与授权
 

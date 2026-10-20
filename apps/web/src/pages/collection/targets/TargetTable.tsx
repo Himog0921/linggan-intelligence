@@ -172,7 +172,7 @@ export function TargetTable({
                     aria-pressed={target.monitoring}
                     aria-label={target.monitoring ? '正在观察，点击停止观察' : '已停止观察，点击恢复观察'}
                     title={target.monitoring ? '正在观察，点击停止观察' : '已停止观察，点击恢复观察'}
-                  />
+                  >{target.monitoring ? '暂停' : '恢复'}</button>
                 </form>
                 <Link
                   className="c-tg-act c-tg-act-danger"

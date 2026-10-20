@@ -139,15 +139,30 @@ describe('原目标弹窗的几何与初始选择', () => {
       const read = { ...list, domains: [...list.domains, { domainRef: targetRef, name: '另一合成领域', status: 'active' }, { domainRef: 'paused-domain', name: '已暂停合成领域', status: 'paused' }] };
       const { rerender } = render(<MemoryRouter><Toolbar list={null} params={new URLSearchParams({ domain: current })} selected={[]} commands={commands()} openBatch={vi.fn()} /></MemoryRouter>);
       rerender(<MemoryRouter><Toolbar list={read} params={new URLSearchParams({ domain: current })} selected={[]} commands={commands()} openBatch={vi.fn()} /></MemoryRouter>);
-      fireEvent.change(screen.getByRole('textbox', { name: '创作者主页链接、ID 或关键词' }), { target: { value: 'ad0000000000000000000992' } });
+      expect(screen.queryByRole('textbox', { name: '创作者主页链接、ID 或关键词' })).not.toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: '＋ 新建目标' }));
-      const dialog = screen.getByRole('dialog', { name: '这个目标参与哪个领域' });
+      const dialog = screen.getByRole('dialog', { name: '新建观察目标' });
+      expect(screen.getByRole('textbox', { name: '创作者主页链接、ID 或关键词' })).toHaveFocus();
+      fireEvent.change(screen.getByRole('textbox', { name: '创作者主页链接、ID 或关键词' }), { target: { value: 'ad0000000000000000000992' } });
       expect(dialog.id).toBe('target-domain-modal');
       expect(screen.getByRole('combobox', { name: '领域' })).toHaveValue(expected);
-      expect(screen.getByRole('combobox', { name: '领域' })).toHaveFocus();
+
       expect(screen.queryByRole('option', { name: '已暂停合成领域' })).not.toBeInTheDocument();
     },
   );
+  it('收起新建目标必须明确保留输入，重新打开保留草稿且没有发送命令', () => {
+    const actions=commands();
+    render(<MemoryRouter><Toolbar list={list} params={new URLSearchParams()} selected={[]} commands={actions} openBatch={vi.fn()}/></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button',{name:'＋ 新建目标'}));
+    fireEvent.change(screen.getByRole('textbox',{name:'创作者主页链接、ID 或关键词'}),{target:{value:'合成未提交目标'}});
+    fireEvent.click(screen.getByRole('button',{name:'取消'}));
+    expect(screen.getByRole('region',{name:'保留目标输入'})).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:'收起并保留输入'}));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:'＋ 新建目标'}));
+    expect(screen.getByRole('textbox',{name:'创作者主页链接、ID 或关键词'})).toHaveValue('合成未提交目标');
+    expect(actions.run).not.toHaveBeenCalled();
+  });
   it('批量打开的初始焦点在原 group_name 输入', () => {
     render(<Modal id="batch-title" initialFocus='input[name="group_name"]' className="c-tg-batch-dialog"><h2 id="batch-title">批量</h2><input name="group_name" aria-label="分组" /></Modal>);
     expect(screen.getByRole('textbox', { name: '分组' })).toHaveFocus();

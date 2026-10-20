@@ -206,3 +206,7 @@ LIDS 现在统一约束全项目的设计表达，但其成熟度仍为 Proposed
 规范读取统一从 [LIDS 入口](lids/README.md)及[渐进执行标准](../governance/ui-design-execution.md)进入；Q01–Q12 已确认项为唯一设计标准，状态见[逐项对齐](lids/review-alignment.md)。实现与运行验收见 [实施计划](../plans/active/lids-ui-implementation-001.md)。React 技术、产品/数据合同及较新的页面功能保持现行 main，不从旧审阅树覆盖业务源码。
 
 2026-10-20证据库续修：同一LIDS-UI-001真实候选采用B查询/视图合带、统一筛选/作品卡与对象详情，保留FIND/Z02领域/E1白场及三种排版；参数从LIDS单源读取。实施/回执沿本包计划与验收，Mog签收与合并部署另计。
+
+- [COLLECTION-LIDS-UI-001：采集三页 UI 变更清单](changes/collection-lids-ui-001-ui-change-manifest.md) · 活跃计划；当前对话派定，依赖 #457 已提交设计基础。
+
+- [COLLECTION-LIDS-UI-001：采集三页前端验收](acceptance/collection-lids-ui-001-acceptance.md) · 一次性报告；候选源码/自动检查/真实只读浏览器证据，未部署。

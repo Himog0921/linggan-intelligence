@@ -442,3 +442,7 @@ LIDS 模块索引：[字体](design/lids/typography.md)、[区域](design/lids/r
 创作者页LIDS续修：同一[LIDS-UI-001计划](plans/active/lids-ui-implementation-001.md)内按P05:list/B制作真实代码候选；范围/四图与[验收](design/acceptance/lids-ui-implementation-001-acceptance.md)独立记录。Mog明确先不合并部署。
 
 2026-10-20证据库续修：同一LIDS-UI-001真实候选采用B查询/视图合带、统一筛选/作品卡与对象详情，保留FIND/Z02领域/E1白场及三种排版；参数从LIDS单源读取。实施/回执沿本包计划与验收，Mog签收与合并部署另计。
+
+- [COLLECTION-LIDS-UI-001：采集三页 UI 变更清单](design/changes/collection-lids-ui-001-ui-change-manifest.md) · 活跃计划；当前对话派定，依赖 #457 已提交设计基础。
+
+- [COLLECTION-LIDS-UI-001：采集三页前端验收](design/acceptance/collection-lids-ui-001-acceptance.md) · 一次性报告；候选源码/自动检查/真实只读浏览器证据，未部署。

@@ -1,3 +1,48 @@
 .fields { display: contents; }
 /* Keep the label inside its own grid cell so the state cell cannot cover the edit control. */
 .stationName:global(.c-stn-name-label) { min-width: 0; flex-shrink: 1; }
+
+.workspace{min-width:0;display:flex;flex-direction:column;gap:var(--lgi-space-8);font-size:var(--lgi-type-body-size)}
+.tools{position:sticky;top:0;z-index:var(--lgi-z-sticky);display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:var(--lgi-space-4);padding:var(--lgi-space-3) 0 var(--lgi-space-5);border-bottom:var(--lgi-action-border-width) solid var(--lgi-hairline);background:var(--lgi-canvas)}
+.scope{display:flex;flex-wrap:wrap;gap:var(--lgi-space-4);font-size:var(--lgi-type-aux-size);color:var(--lgi-muted)}
+.scope>span:first-child{color:var(--lgi-ink);font-weight:var(--lgi-weight-medium)}
+.actions{display:flex;flex-wrap:wrap;gap:var(--lgi-space-3);margin-left:auto}
+.workspace :global(.c-runtime-board){margin:0;border:0;box-shadow:none;background:var(--lgi-canvas)}
+.workspace :global(.c-runtime-board-head){display:flex;flex-wrap:wrap;min-height:var(--lgi-space-12);padding:var(--lgi-space-3) var(--lgi-space-4);gap:var(--lgi-space-3);background:var(--lgi-ink);color:var(--lgi-canvas)}
+.workspace :global(.c-runtime-board-head::before){display:none}
+.workspace :global(.c-runtime-board-head::after){width:35%;background:var(--lgi-mosaic-on-dark);background-size:var(--lgi-control-pitch) var(--lgi-control-pitch);mask-image:var(--lgi-action-mask)}
+.workspace :global(.c-runtime-board-state){font:var(--lgi-type-body-weight) var(--lgi-type-body-size)/var(--lgi-type-body-leading) var(--lgi-font-ui)}
+.workspace :global(.c-runtime-board-code){font:var(--lgi-type-aux-weight) var(--lgi-type-aux-size)/var(--lgi-type-aux-leading) var(--lgi-font-ui);color:var(--lgi-stream-muted);overflow-wrap:anywhere}
+.workspace :global(.c-runtime-board-body){display:flex;flex-direction:column;min-height:0;background:var(--lgi-canvas)}
+.workspace :global(.c-runtime-board-lanes){padding:var(--lgi-space-3) 0}
+.workspace :global(.c-instr-issue){min-height:var(--lgi-space-10);display:flex;flex-wrap:wrap;gap:var(--lgi-space-3);border-bottom:var(--lgi-action-border-width) solid var(--lgi-hairline)}
+.workspace :global(.c-lane-name){font:var(--lgi-type-body-weight) var(--lgi-type-body-size)/var(--lgi-type-body-leading) var(--lgi-font-ui);overflow-wrap:anywhere;flex:1;min-width:0}
+.workspace :global(.c-lane-state){font-size:var(--lgi-type-label-size);white-space:nowrap}
+.workspace :global(.c-runtime-board-metrics){display:flex;flex-wrap:wrap;gap:var(--lgi-space-5);border:0;border-top:var(--lgi-action-border-width) solid var(--lgi-hairline);padding:var(--lgi-space-4) 0}
+.workspace :global(.c-runtime-board-metric){display:flex;flex-direction:row-reverse;gap:var(--lgi-space-2);align-items:baseline;border:0;min-height:0;padding:0}
+.workspace :global(.c-runtime-board-metric b){font:var(--lgi-type-data-weight) var(--lgi-type-data-size)/var(--lgi-type-data-leading) var(--lgi-font-data);font-variant-numeric:tabular-nums}
+.workspace :global(.c-runtime-board-metric span){font-size:var(--lgi-type-aux-size)}
+.workspace :global(.c-sect){margin:0;border:0;background:var(--lgi-canvas)}
+.workspace :global(.c-sect-head){gap:var(--lgi-space-3);min-height:var(--lgi-space-12);padding:0;display:flex;justify-content:space-between;border:0;flex-wrap:wrap}
+.workspace :global(.c-sect-head h2){font:var(--lgi-type-section-weight) var(--lgi-type-section-size)/var(--lgi-type-section-leading) var(--lgi-font-ui)}
+.workspace :global(.c-sect-meta){font:var(--lgi-type-aux-weight) var(--lgi-type-aux-size)/var(--lgi-type-aux-leading) var(--lgi-font-ui);color:var(--lgi-muted)}
+.workspace :global(.c-stn-list){border:0}
+.workspace :global(.c-tg-table-head.c-tg-station-grid),.workspace :global(.c-tg-item.c-tg-station-grid){grid-template-columns:var(--lgi-space-12) calc(var(--lgi-space-24) * 3) var(--lgi-space-24) var(--lgi-space-24) calc(var(--lgi-space-24) + var(--lgi-space-8)) calc(var(--lgi-space-24) + var(--lgi-space-16)) calc(var(--lgi-space-24) + var(--lgi-space-8)) var(--lgi-space-24) calc(var(--lgi-space-24) + var(--lgi-space-24)) calc(var(--lgi-space-24) * 2);min-width:max-content;min-height:var(--lgi-space-16)}
+.workspace :global(.c-stn-name-cell){min-width:0}
+.workspace :global(.c-stn-name-label){font:var(--lgi-type-body-weight) var(--lgi-type-body-size)/var(--lgi-type-body-leading) var(--lgi-font-ui)}
+.workspace :global(.c-stn-mono){font:var(--lgi-type-data-weight) var(--lgi-type-data-size)/var(--lgi-type-data-leading) var(--lgi-font-data)}
+.workspace :global(.c-stn-empty){padding:var(--lgi-space-6) 0;color:var(--lgi-muted);font-size:var(--lgi-type-body-size)}
+.workspace :global(.c-run-row){padding:var(--lgi-space-4) 0;border-bottom:var(--lgi-action-border-width) solid var(--lgi-hairline);gap:var(--lgi-space-4);flex-wrap:wrap}
+.workspace :global(.c-run-meta){display:flex;flex-wrap:wrap;gap:var(--lgi-space-4)}
+.workspace :global(.c-stn-footer){margin:0;padding:0;border:0}
+.workspace :global(.c-stn-unclaimed){padding:0;border:0;border-top:var(--lgi-action-border-width) solid var(--lgi-hairline);background:var(--lgi-canvas)}
+.workspace :global(.c-stn-unclaimed>summary){flex-wrap:wrap;font-size:var(--lgi-type-body-size);padding:var(--lgi-space-4) 0}
+.workspace :global(.c-stn-unclaimed>summary span){font:var(--lgi-type-aux-weight) var(--lgi-type-aux-size)/var(--lgi-type-aux-leading) var(--lgi-font-ui)}
+.workspace :global(.c-stn-note){font-size:var(--lgi-type-body-size);line-height:var(--lgi-type-body-leading);overflow-wrap:anywhere}
+@media(max-width:1000px){.tools{gap:var(--lgi-space-3)}.workspace :global(.c-lane-code){max-width:100%;overflow-wrap:anywhere;white-space:normal}.workspace :global(.c-runtime-board-head){align-items:flex-start}.workspace :global(.c-runtime-board-code){flex-basis:100%}}
+
+.workspace{gap:var(--lgi-space-6)}
+.tools{padding:var(--lgi-space-2) 0 var(--lgi-space-4)}
+.workspace :global(.c-instr-issue-list){display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--lgi-space-6)}
+.workspace :global(.c-instr-issue){padding:var(--lgi-space-3) 0}
+@media(max-width:1000px){.workspace :global(.c-instr-issue-list){grid-template-columns:1fr;gap:0}}
