@@ -75,3 +75,5 @@ Mog明确接受候选，并授权核对两PR依赖/检查，无问题合并并�
 最终依赖接入08ae340e（含main686280f7）后，100文件1073测试、types/lint/build及治理通过；独立复核确认采集代码/3脚本相对已验收树无增量，新材料只读预览等与#457精确一致，无未处理发现。#458现转main并移出Draft，仍先合并#457；本次文档提交触发主线PR的精确head CI。最终提交隔离浏览器补跑中，未将旧head结果或SKIPPED写成最终PASS。合并/3000切换待检查完成后执行。
 
 最终本地补跑发现测试在Escape后立即向原生dialog后方输入，关闭后截图显示输入为空、URL搜索超时（过渡时序是当前排查假设）（无页面错误/写入）。证明脚本现在先确认drawer已卸载且run已从URL移除，再填搜索并明确断言输入值正确，仍要求搜索URL与筛选/结果数量成立；只补真实可交互边界，不改生产组件或放松断言。失败诊断读取不存在表单改1秒超时，避免额外30秒掩盖原失败。
+
+远端b138复核补充两项P2，逐项核实后纳入最小收尾：RuntimeManagementDialog清理须排除即将关闭的自身dialog再判断其他open弹窗，避免共享ModalDialog先cleanup后close的顺序残留滚动锁；CollectionFrame对自己打开的runtime历史条目关闭时回退，直达深链则replace移除modal参数，避免push出可被后退重新打开的幽灵弹窗。保留URL/搜索分页、脏稿/未确认请求useBlocker策略；必要文件仅这两个组件、既有RuntimeManagementDialog.test.tsx、工位隔离证明的关闭后解锁断言。新增直接深链和prior→列表→modal→close→Back的历史/锁验收，不扩展后端/权限/产品样式。

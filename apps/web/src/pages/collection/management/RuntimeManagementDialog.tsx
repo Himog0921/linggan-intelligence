@@ -28,7 +28,7 @@ export function RuntimeManagementDialog({onClose}:{onClose:()=>void}) {
   function requestClose() {const reason=leaveReason();if(reason)setLeaving(reason);else onClose();}
   function keepEditing(){setLeaving(null);if(blocker.state==='blocked')blocker.reset();}
   function completeLeave(){allowingExit.current=true;if(blocker.state==='blocked')blocker.proceed();else onClose();}
-  return <ModalDialog className={`c-run-dialog ${styles.dialog}`} labelledBy="runtime-manager-title" closeOnBackdrop onClose={requestClose} setup={()=>{document.documentElement.classList.add('c-run-dialog-open');return()=>{if(!document.querySelector('dialog[open]'))document.documentElement.classList.remove('c-run-dialog-open');};}}>
+  return <ModalDialog className={`c-run-dialog ${styles.dialog}`} labelledBy="runtime-manager-title" closeOnBackdrop onClose={requestClose} setup={dialog=>{document.documentElement.classList.add('c-run-dialog-open');return()=>{if(![...document.querySelectorAll('dialog[open]')].some(open=>open!==dialog))document.documentElement.classList.remove('c-run-dialog-open');};}}>
     <header className={styles.heading}><h2 id="runtime-manager-title">工位管理</h2><ActionButton variant="quiet" data-initial-focus aria-label="关闭工位管理" onClick={requestClose}>关闭</ActionButton></header>
     <div ref={content} className={styles.body}>
       {read.error && <p role="alert">工位信息读取失败。{read.data ? `以下保留上次读取结果（${read.data.asOf ?? '时间未知'}）。` : '请重新读取。'}<ActionButton onClick={()=>void read.reload()}>重新读取</ActionButton></p>}

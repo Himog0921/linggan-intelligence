@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
-import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
-import { useSearchParams } from 'react-router';
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { ActionButton } from '../../shared/ActionButton';
 import { Sidebar, NavIcon } from '../../shared/Sidebar';
 import { AppShell } from '../../app/AppShell';
@@ -24,6 +24,9 @@ export function CollectionReadout({ value, label, scope, valueFirst = false }: {
 export function CollectionFrame({ section, toolbar, meta, children }: { section: Section; toolbar?: ReactNode; meta?: ReactNode; children: ReactNode }) {
   const [domainManager, setDomainManager] = useState(false);
   const [params, setParams] = useSearchParams();
+  const routerLocation = useLocation();
+  const navigate = useNavigate();
+  const openedFrom = useRef<string | null>(null);
   const returnPath = params.get('return_to');
   const returnDomain = returnPath && /^\/collection\/(targets|tasks)(?:[?#]|$)/.test(returnPath) && !/[\\\r\n]/.test(returnPath) ? new URL(returnPath, location.origin).searchParams.get('domain') : null;
   const domain = params.get('domain') ?? (section === 'domains' || section === 'runtime' ? returnDomain : null);
@@ -36,7 +39,15 @@ export function CollectionFrame({ section, toolbar, meta, children }: { section:
   const suffix = navDomain ? `?domain=${encodeURIComponent(navDomain)}` : '';
   const source = `/collection/${section === 'tasks' ? 'tasks' : 'targets'}${suffix}`;
   const runtimeOpen = params.get('runtime') === '1';
-  function toggleRuntime(open: boolean) { const next=new URLSearchParams(params); if(open) next.set('runtime','1'); else {next.delete('runtime');next.delete('station');} setParams(next); }
+  function toggleRuntime(open: boolean) {
+    const next = new URLSearchParams(params);
+    if (open) {
+      openedFrom.current = routerLocation.key;
+      next.set('runtime','1');
+      setParams(next, { state: { ...routerLocation.state, collectionRuntimeOrigin: routerLocation.key } });
+    } else if (openedFrom.current !== null && routerLocation.state?.collectionRuntimeOrigin === openedFrom.current) navigate(-1);
+    else { next.delete('runtime'); next.delete('station'); setParams(next, { replace: true, state: routerLocation.state }); }
+  }
   const scheduler = shell?.scheduler === 'running' ? '调度心跳正常' : shell?.scheduler === 'stale' ? '调度心跳已过期' : '调度状态读不到';
   useEffect(() => { document.title = `${titles[section]} · 采集 · Linggan Intelligence`; }, [section]);
   const picker = <details className="v7-domain-picker"><summary aria-label="切换当前观察领域"><span>{shell ? selected?.name ?? '全部领域' : '读取领域…'}</span><small>{selected ? domainSummary(selected) : '全部领域'}</small><i aria-hidden="true" /></summary><nav aria-label="可选观察领域"><a href="/collection/targets?domain=all" aria-current={shell && !selected ? 'page' : undefined} aria-label="全部领域，全部领域"><span>全部领域</span><small>全部领域</small></a>{shell?.domains?.map(d => <a key={d.domainRef} href={`/collection/targets?domain=${encodeURIComponent(d.domainRef)}`} aria-current={d.domainRef === selected?.domainRef ? 'page' : undefined} aria-label={`${d.name}，${domainSummary(d)}`}><span>{d.name}</span><small>{domainSummary(d)}</small></a>)}<a className="c-domain-management-link" href={`/collection/domains?return_to=${encodeURIComponent(source)}`} data-collection-management onClick={e => { e.preventDefault(); e.currentTarget.closest('details')?.removeAttribute('open'); setDomainManager(true); }}><span>管理领域</span><small>配置与目标用途</small></a></nav></details>;

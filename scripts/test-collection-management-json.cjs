@@ -181,6 +181,21 @@ async function main() {
     await page.getByRole('button',{name:'关闭工位管理',exact:true}).click();
     await page.getByRole('dialog',{name:'工位管理',exact:true}).waitFor({state:'detached'});
     assert.equal(new URL(page.url()).pathname+new URL(page.url()).search,returnUrl);
+    await page.locator('#collection-run-drawer[open]').waitFor();
+    assert.equal(await page.evaluate(()=>document.documentElement.classList.contains('c-run-dialog-open')),true,'underlying task detail keeps its scroll lock');
+    await page.locator('[data-close-run-dialog]').click();await page.locator('#collection-run-drawer').waitFor({state:'detached'});
+    assert.equal(await page.evaluate(()=>document.documentElement.classList.contains('c-run-dialog-open')),false,'closing the last dialog releases scrolling');
+    const previousUrl=`/collection/tasks?domain=${fixture.domainRef}&page=2`;
+    const sourceUrl=`/collection/tasks?domain=${fixture.domainRef}&page=1`;
+    await page.goto(endpoint(previousUrl));await page.goto(endpoint(sourceUrl));
+    await page.getByRole('button',{name:'工位管理，全局执行资源',exact:true}).click();
+    await page.getByRole('dialog',{name:'工位管理',exact:true}).waitFor();
+    await page.getByRole('button',{name:'关闭工位管理',exact:true}).click();
+    await page.getByRole('dialog',{name:'工位管理',exact:true}).waitFor({state:'detached'});
+    assert.equal(new URL(page.url()).pathname+new URL(page.url()).search,sourceUrl);
+    assert.equal(await page.evaluate(()=>document.documentElement.classList.contains('c-run-dialog-open')),false,'standalone management releases scrolling');
+    await page.goBack();assert.equal(new URL(page.url()).pathname+new URL(page.url()).search,previousUrl);
+    assert.equal(await page.getByRole('dialog',{name:'工位管理',exact:true}).count(),0,'Back after manual close never reopens management');
     for (const [width, height] of [[1280, 720], [1024, 768], [390, 844]]) {
       await page.setViewportSize({ width, height });
       await page.goto(endpoint('/collection/domains')); await page.locator('.domain-card').first().waitFor();

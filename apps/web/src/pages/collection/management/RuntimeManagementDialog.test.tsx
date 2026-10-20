@@ -8,7 +8,7 @@ import { runtimeDestination } from './runtimeDestination';
 const projection={meta:{vacantStations:0,unclaimedInstallations:0},board:{state:'未知',tone:'unknown',badge:'未知',headNote:'',metrics:[]},lanes:null,stations:[],unclaimed:[],accountObservationAvailable:false,staffedCount:0,running:null,schedule:null,drawer:{coverage:'',readCount:0,picked:0,capabilityFailures:0,executionFailures:0,oldest:null,pauses:null,dispatched:'未知',succeeded:'未知'}};
 const shell={domains:[],domainsReadable:true,selectedDomain:null,totalTargets:0,monitoringTargets:0,scheduler:'unknown'};
 function Location(){return <output data-testid="route">{useLocation().search}</output>;}
-function mount(){const client=new QueryClient({defaultOptions:{queries:{retry:false}}});const router=createMemoryRouter([{path:'/collection/tasks',element:<><CollectionFrame section="tasks"><p>原任务列表</p></CollectionFrame><Location/></>}],{initialEntries:['/collection/tasks?domain=all&page=3&q=保留条件']});const result=render(<QueryClientProvider client={client}><RouterProvider router={router}/></QueryClientProvider>);return {...result,router};}
+function mount(entries: Array<string | {pathname:string;search:string;state:Record<string,unknown>}> = ['/collection/tasks?domain=all&page=3&q=保留条件']){const client=new QueryClient({defaultOptions:{queries:{retry:false}}});const router=createMemoryRouter([{path:'/collection/tasks',element:<><CollectionFrame section="tasks"><p>原任务列表</p></CollectionFrame><Location/></>}],{initialEntries:entries});const result=render(<QueryClientProvider client={client}><RouterProvider router={router}/></QueryClientProvider>);return {...result,router};}
 function mockRead(){const fetch=vi.fn(async(path:string)=>Response.json(path.includes('/workspace/runtime')?{readable:true,asOf:null,returnTo:'/collection/tasks',projection}:shell));vi.stubGlobal('fetch',fetch);return fetch;}
 afterEach(()=>{cleanup();vi.unstubAllGlobals();});
 it('从面包屑原位打开与关闭，保留搜索分页并恢复焦点',async()=>{
@@ -20,7 +20,7 @@ it('从面包屑原位打开与关闭，保留搜索分页并恢复焦点',async
   await userEvent.click(screen.getByRole('button',{name:/今天在跑什么/}));expect(screen.getByText('当前执行情况读不到。')).toBeVisible();
   await userEvent.click(screen.getByRole('button',{name:/自动观察排程/}));expect(screen.getByText('自动观察排程当前读不到。')).toBeVisible();
   await userEvent.click(screen.getByRole('button',{name:'关闭工位管理'}));await waitFor(()=>expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-  const route=new URLSearchParams(screen.getByTestId('route').textContent??'');expect(route.get('runtime')).toBeNull();expect(route.get('page')).toBe('3');expect(route.get('q')).toBe('保留条件');expect(opener).toHaveFocus();
+  const route=new URLSearchParams(screen.getByTestId('route').textContent??'');expect(route.get('runtime')).toBeNull();expect(route.get('page')).toBe('3');expect(route.get('q')).toBe('保留条件');expect(opener).toHaveFocus();expect(document.documentElement).not.toHaveClass('c-run-dialog-open');
 });
 it('关闭新增草稿先披露放弃后果，继续处理时保留输入且不写入',async()=>{
   const fetch=mockRead();mount();await userEvent.click(screen.getByRole('button',{name:'工位管理，全局执行资源'}));await screen.findByRole('button',{name:'＋ 新增工位'});
@@ -55,4 +55,22 @@ it('浏览器后退经过同一草稿保护，继续编辑保留弹窗与地址'
   await router.navigate(-1);await screen.findByText('有尚未保存的输入，关闭将放弃这些修改。');expect(router.state.location.search).toContain('runtime=1');
   await userEvent.click(screen.getByRole('button',{name:'继续处理'}));expect(screen.getByRole('textbox',{name:'工位名称'})).toHaveValue('本机 Chrome有修改');
   await router.navigate(-1);await screen.findByText('有尚未保存的输入，关闭将放弃这些修改。');await userEvent.click(screen.getByRole('button',{name:'放弃修改并关闭'}));await waitFor(()=>expect(screen.queryByRole('dialog')).not.toBeInTheDocument());expect(router.state.location.search).not.toContain('runtime=1');
+});
+
+
+it('手动关闭消费自己打开的历史，下一次后退不重新打开工位弹窗',async()=>{
+  mockRead();const {router}=mount(['/collection/tasks?domain=all&page=1','/collection/tasks?domain=all&page=3&q=保留条件']);
+  await userEvent.click(screen.getByRole('button',{name:'工位管理，全局执行资源'}));await screen.findByRole('dialog',{name:'工位管理'});
+  await userEvent.click(screen.getByRole('button',{name:'关闭工位管理'}));await waitFor(()=>expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  await router.navigate(-1);await waitFor(()=>expect(router.state.location.search).toBe('?domain=all&page=1'));
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+});
+
+it('直接工位深链关闭以replace保留来源筛选，后退回到原页面',async()=>{
+  mockRead();const {router}=mount(['/collection/tasks?domain=all&page=1',{pathname:'/collection/tasks',search:'?domain=all&page=3&q=保留条件&runtime=1&station=station-1',state:{marker:'keep-me'}}]);
+  await screen.findByRole('dialog',{name:'工位管理'});await userEvent.click(screen.getByRole('button',{name:'关闭工位管理'}));
+  await waitFor(()=>expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  const params=new URLSearchParams(router.state.location.search);expect(params.get('page')).toBe('3');expect(params.get('q')).toBe('保留条件');expect(params.has('runtime')).toBe(false);expect(params.has('station')).toBe(false);expect(router.state.location.state).toEqual({marker:'keep-me'});
+  expect(document.documentElement).not.toHaveClass('c-run-dialog-open');
+  await router.navigate(-1);await waitFor(()=>expect(router.state.location.search).toBe('?domain=all&page=1'));
 });
