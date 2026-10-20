@@ -1,3 +1,4 @@
+import { ActionButton } from '../../shared/ActionButton';
 import { useState, type CSSProperties } from "react";
 import type { Overview, PeriodType } from "./api";
 import * as f from "./format";
@@ -132,12 +133,12 @@ export function Target({
                 ? "只能在本机设定"
                 : `${rev?.setAtBeijing} 改为 ${f.number(rev?.targetValue)} · 本机`}
             </span>
-            <button
+            <ActionButton
               type="button"
               onClick={() => open(t.periodType === "month" ? "month" : "week")}
             >
               {t.state === "set" ? "修改目标" : "设定目标"}
-            </button>
+            </ActionButton>
           </div>
         </>
       )}
@@ -247,14 +248,14 @@ export function Attention({ data }: { data: Overview }) {
       </ol>
       <p className={c("ops-note-line")} id="ops-attention-more">
         {items.length && rest.length ? (
-          <button
+          <ActionButton
             type="button"
             aria-expanded={open}
             aria-controls="ops-attention"
             onClick={() => setOpen(!open)}
           >
             {open ? "收起" : `另有 ${rest.length} 项，展开`}
-          </button>
+          </ActionButton>
         ) : null}
       </p>
     </section>

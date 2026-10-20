@@ -1,0 +1,13 @@
+import registry from '../generated/registry.json';
+export const spec=registry;
+export const byId=(rows,id)=>rows.find(x=>x.id===id);
+export const region=id=>byId(spec.regions,id);
+export const component=id=>byId(spec.components,id);
+export const interaction=id=>byId(spec.interactions,id);
+export const patterns=Object.fromEntries(spec.patterns.map(x=>[x.id,x]));
+export const pageGroups=[['入口与设置',['P01','P02']],['研究与材料',['P03','P04','P05','P06','P07']],['采集与执行',['P08','P09','P10','P11']],['创作与运营',['P12','P13','P14','P15','P16','P17']]];
+export const authors=[['林间笔记','linjian_notes','8,630',24,'持续创作','未加入'],['许一的日常观察','xuyi_record','2.4 万',18,'持续创作','已加入'],['慢慢生长','slowly_grow',null,12,'判断待形成','未加入'],['小陈与小树','chen_and_tree','4,210',8,'依据不足','未加入']];
+export const tasks=[['家庭任务启动','RUN-026','执行中',18,126],['亲子沟通','RUN-025','本轮结束',32,284],['林间笔记','RUN-024','等待执行',null,null],['作业与时间管理','RUN-023','执行失败',7,0]];
+export const zhState={current:'当前位置',root:'根路径',nested:'多级路径',invalid_parent:'上级不可用',ready:'可用',long:'长标题',busy:'处理中',unconfirmed:'结果未确认',rejected:'明确拒绝',readonly:'只读',filled:'已填写',no_options:'无可选项',unknown_original:'原值未知',off:'关闭',on:'开启',mixed:'部分选择',known_zero:'已知为0',known_value:'已知有值',preset:'预设范围',custom:'自定义范围',uploading:'上传中样例',accepted:'已接纳',unconfigured:'未配置',configured:'已配置',replacing:'替换中',pristine:'未修改',validating:'校验中',submitting:'提交中',first:'第一页',middle:'中间页',last:'末页',fetching:'读取中',collapsed:'折叠',expanded:'展开',none:'未选择',page_set:'当前页集合',exact_set:'精确集合',invalidated:'范围已变化',missing_media:'媒体未取得',not_applicable:'不适用',domain_defined:'由领域定义',queued:'等待',active:'执行中',paused:'已暂停',ended:'本轮结束',no_media:'无媒体',refreshing:'刷新中',stale_error:'刷新失败保留旧值',empty_ready:'读取完成无结果',info:'说明',warning:'提醒',dismissed:'已收起',applied:'已应用',uncertain:'后果待核对',review:'确认前核对',hidden:'隐藏',touch:'触屏入口',idle:'默认',normal:'默认',hover:'悬停',pressed:'按下',focused:'键盘焦点',focus:'键盘焦点',disabled:'不可操作',pending:'请求在途',failed:'失败',error:'读取失败',loading:'初次读取',refresh:'刷新中',initial:'初次读取',empty:'空结果',known:'已知',unknown:'未知',unavailable:'当前不可用',stale:'过期',selected:'已选中',unselected:'未选中',open:'展开',closed:'收起',dirty:'未保存',saved:'已保存',conflict:'版本冲突',partial:'部分结果',composing:'中文组词',querying:'检索中',results:'有结果',invalid:'输入无效',valid:'有效',clean:'无变更',checked:'已勾选',unchecked:'未勾选',available:'可用',restricted:'受限',changed:'来源变化',missing:'缺失',object_loading:'对象读取中',permission_limited:'权限受限',narrow:'窄屏',read_only:'只读'};
+export const stateLabel=s=>zhState[s]||s.replaceAll('_',' ');
+export const show=n=>n===null||n===undefined?'未知':n.toLocaleString?.('zh-CN')||n;

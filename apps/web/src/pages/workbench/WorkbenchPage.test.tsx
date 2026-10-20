@@ -375,7 +375,7 @@ it('keeps an uncertain create frozen and locks domain until original receipt is 
   await screen.findByRole('button', {
     name: '核实原请求并重试'
   });
-  expect(screen.getByLabelText('创作领域')).toBeDisabled();
+  expect(screen.getByLabelText('创作领域')).toHaveAttribute('aria-disabled', 'true');
   expect(screen.getByLabelText('新选题标题')).toBeDisabled();
   const frozen = vi.mocked(api.create).mock.calls[0]![0];
   vi.mocked(api.lookupWorkRequest).mockResolvedValue({
@@ -799,4 +799,44 @@ describe('retained recovery copies preserve manuscript tags', () => {
     expect(vi.mocked(api.save).mock.calls[0]?.[1].document.tags).toEqual(expected);
     expect(screen.getByLabelText('确认发布标签')).toHaveValue(expected.join(' '));
   });
+});
+
+it('uses the standard shell and Z02 creation tabs, keeps empty scope explicit, and never loads works for all', async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/ops/creation?domain=all']}><WorkbenchPage/></MemoryRouter></QueryClientProvider>);
+  await screen.findByText('当前领域不可用于创作');
+  expect(screen.getByLabelText('创作领域').closest('.v7-context-crumb')).not.toBeNull();
+  expect(screen.getByRole('navigation', { name: '创作页面' }).closest('.v7-context-main')).not.toBeNull();
+  expect(screen.getByRole('navigation', { name: '一级导航' })).toBeInTheDocument();
+  expect(api.listWorks).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByLabelText('创作领域'));
+  fireEvent.click(screen.getByRole('button', { name: '合成领域' }));
+  await screen.findByLabelText('新选题标题');
+  expect(api.listWorks).toHaveBeenCalledWith(domain, expect.any(AbortSignal));
+});
+
+it('keeps the current editor and unsaved text mounted while entering and leaving immersion', async () => {
+  show();
+  const body = await screen.findByLabelText('正文第 1 段');
+  fireEvent.change(body, { target: { value: '切换沉浸仍保留的未保存正文' } });
+  fireEvent.click(screen.getByRole('button', { name: '收起导航' }));
+  expect(screen.getByLabelText('正文第 1 段')).toBe(body);
+  expect(body).toHaveValue('切换沉浸仍保留的未保存正文');
+  fireEvent.click(screen.getByRole('button', { name: '退出沉浸' }));
+  expect(screen.getByLabelText('正文第 1 段')).toBe(body);
+  expect(body).toHaveValue('切换沉浸仍保留的未保存正文');
+});
+
+
+it('keeps every editor step reachable locally after adopting the two-item Ops sidebar', async () => {
+  show(); await screen.findByLabelText('正文第 1 段');
+  const nav = screen.getByRole('navigation', { name: '创作步骤' });
+  for (const name of ['选题方案','材料浏览','创作画布','正文','封面','内页','预览与导出']) {
+    expect(within(nav).getByRole('button', { name })).toBeInTheDocument();
+  }
+  fireEvent.click(within(nav).getByRole('button', { name: '材料浏览' }));
+  await waitFor(() => expect(within(nav).getByRole('button', { name: '材料浏览' })).toHaveAttribute('aria-current', 'step'));
+  fireEvent.click(within(nav).getByRole('button', { name: '正文' }));
+  await waitFor(() => expect(within(nav).getByRole('button', { name: '正文' })).toHaveAttribute('aria-current', 'step'));
+  await screen.findByLabelText('正文第 1 段');
 });

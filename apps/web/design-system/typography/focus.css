@@ -1,0 +1,19 @@
+
+@layer lids-review {
+/* ALIGN-FOCUS-005: accepted C, applied only to the isolated review project. */
+.type-system{--focus-ink:var(--ds-ink,var(--ink,#121416));--focus-wash:var(--ds-wash,#f6f7f7)}
+.type-system .accepted-input-method :is(.ds-find,.find-search):focus-within{outline:none;outline-offset:0;box-shadow:none}
+.type-system .accepted-input-method :where(input:not([type=checkbox]):not([type=radio]):not([type=file]),textarea):focus{outline:none;outline-offset:0;box-shadow:none;background:var(--focus-warm);caret-color:var(--focus-ink)}
+.type-system .accepted-input-method .ds-field:focus-within{color:var(--focus-ink)}
+.type-system .accepted-input-method .ds-field:focus-within>span:first-child{font-weight:var(--ty-label-weight)}
+.type-system .accepted-input-method :is(.ds-find:focus-within>span:first-child,.find-search:focus-within>.find-mark){background:transparent;color:var(--focus-ink)}
+.type-system .accepted-input-method[data-input-method=keyboard] :where(input:not([type=checkbox]):not([type=radio]):not([type=file]),textarea):focus{box-shadow:inset 0 calc(-1 * var(--focus-inset)) var(--focus-ink)}
+.type-system .accepted-input-method[data-input-method=keyboard] :is(.ds-find:focus-within>span:first-child,.find-search:focus-within>.find-mark){background:var(--focus-ink);color:#fff}
+.type-system .accepted-input-method[data-input-method=keyboard] :is(.ds-select-trigger:not([aria-expanded=true]),select):focus-visible{outline:none;outline-offset:0;box-shadow:inset 0 calc(-1 * var(--focus-inset)) var(--focus-ink)}
+.type-system .accepted-input-method input[readonly]:focus{background:var(--focus-wash);box-shadow:inset 0 calc(-1 * var(--focus-inset)) var(--focus-ink);caret-color:transparent}
+.type-system .accepted-input-method :is(input,textarea)[aria-invalid=true],.type-system .accepted-input-method :is(input,textarea)[aria-invalid=true]:focus{background:#fff8f5}
+@media(forced-colors:active){.type-system .accepted-input-method :is(input,textarea):focus,.type-system .accepted-input-method .ds-select-trigger:focus-visible{border-bottom:3px solid Highlight!important;outline:none!important}.type-system .accepted-input-method :is(.ds-find,.find-search)>input:focus{border:0;border-bottom:3px solid Highlight!important}}
+
+.type-system .accepted-input-method[data-input-method=keyboard] .ds-select.domain .ds-select-trigger:focus-visible:not([aria-expanded=true]){box-shadow:inset 0 calc(-1 * var(--focus-inset)) var(--ds-orange,var(--orange,#ff4a22))}
+
+}

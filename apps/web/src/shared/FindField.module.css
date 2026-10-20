@@ -1,0 +1,13 @@
+.find { display:flex; align-items:center; gap:var(--lgi-space-2); box-sizing:border-box; min-width:0; width:100%; height:calc(var(--lgi-space-10) + var(--lgi-space-1)); border:2px solid var(--lgi-ink); padding:0 var(--lgi-space-3); background:var(--lgi-canvas); }
+.find:focus-within { outline:0; box-shadow:none; background:var(--lgi-focus-warm); }
+.mark { align-self:stretch; display:flex; align-items:center; flex:none; color:var(--lgi-signal-ink); font:var(--lgi-weight-bold) var(--lgi-type-label-size)/var(--lgi-type-label-leading) var(--lgi-font-brand); letter-spacing:var(--lgi-ls-caps); }
+.find > span:has([role=combobox]) { flex:none; border-right:1px solid var(--lgi-border); }
+.find input { flex:1; width:0; min-width:0; height:100%; box-sizing:border-box; border:0; padding:0; color:var(--lgi-ink); font:var(--lgi-type-input-weight) var(--lgi-type-input-size)/var(--lgi-type-input-leading) var(--lgi-font-ui); background:transparent; outline:0; box-shadow:none; }
+.find input::-webkit-search-cancel-button { display:none; }
+.find kbd { flex:none; border:1px solid var(--lgi-border); padding:0 var(--lgi-space-1); color:var(--lgi-ghost); font:var(--lgi-type-label-size)/var(--lgi-type-label-leading) var(--lgi-font-data); }
+.clear,.submit { flex:none; min-height:var(--lgi-space-8); padding:0 var(--lgi-space-1); border:0; background:transparent; color:var(--lgi-muted); font:var(--lgi-type-control-weight) var(--lgi-type-control-size)/var(--lgi-type-control-leading) var(--lgi-font-ui); cursor:pointer; }
+.submit { border-left:1px solid var(--lgi-border); padding-left:var(--lgi-space-3); }
+.clear:disabled,.submit:disabled { color:var(--lgi-ghost); cursor:not-allowed; }
+:global(:root[data-input-mode='keyboard']) .find:focus-within .mark { background:var(--lgi-ink); color:var(--lgi-canvas); }
+:global(:root[data-input-mode='keyboard']) .find input:focus { box-shadow:inset 0 calc(-1 * var(--lgi-focus-inset)) 0 var(--lgi-ink); }
+@media(max-width:640px) { .find { padding-inline:var(--lgi-space-2); gap:var(--lgi-space-1); } }

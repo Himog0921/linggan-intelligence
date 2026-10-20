@@ -1,0 +1,413 @@
+{
+  "fingerprint": "232360d7d774ef5072abcdde8f16a10bb863be69c9da135110db9a894533e098",
+  "inputs": [
+    {
+      "path": "AGENTS.md",
+      "sha256": "6f05586d5bddbfcb733d5702b863d7f5d259b64ae2c06aa40e14c330b265885a"
+    },
+    {
+      "path": "CLAUDE.md",
+      "sha256": "820ee0dce4cd8999dd1589b2b4998f380bcf8f35cf213799113318e1b621a6cc"
+    },
+    {
+      "path": "apps/web/design-system/compositionReview/CompositionReview.jsx",
+      "sha256": "cc275b8ff956858af586912a4fea463c4dde0f99a8debe277d32cae0190429d9"
+    },
+    {
+      "path": "apps/web/design-system/compositionReview/composition.css",
+      "sha256": "759b40736e2b3a10a2097ba944fee45d9b217899b0b03d217ecbd07dd7f288eb"
+    },
+    {
+      "path": "apps/web/design-system/compositionReview/presets.json",
+      "sha256": "e4ee8ef42fe76f82be2730f3fc0ad3bd09ffb7379357eb2059f43f232f5563f1"
+    },
+    {
+      "path": "apps/web/design-system/dsReview/ComponentDemo.jsx",
+      "sha256": "3456def75b6421a1a69aba83ee21da58cfde60e56c03ae10b741115a8dca3af8"
+    },
+    {
+      "path": "apps/web/design-system/dsReview/InteractionDemo.jsx",
+      "sha256": "2ae86d68760b3db91ddbbf49630b97a79a336e52447b35d3a82ed482ef4b7e34"
+    },
+    {
+      "path": "apps/web/design-system/dsReview/PagePreview.jsx",
+      "sha256": "c97a331d90efd4a032cc3c153d2fa153f4546474897f1548afa60a82ae365f25"
+    },
+    {
+      "path": "apps/web/design-system/dsReview/PersonalMenu.jsx",
+      "sha256": "fd4ecb31dbd8cce412dc30f543e1a095caa312afe0a264c9db5fccf950b2d0ea"
+    },
+    {
+      "path": "apps/web/design-system/dsReview/ProblemCards.jsx",
+      "sha256": "fbee12c3b8f6f3c56e98ab9f8d6d3b1ce9599696d023c7e12505f10cf58c7f5b"
+    },
+    {
+      "path": "apps/web/design-system/dsReview/ProductShell.jsx",
+      "sha256": "773c35ca6bee3dddd85e26cb4f47394e504b42ba8c20b8bca54ca472ad684c1f"
+    },
+    {
+      "path": "apps/web/design-system/dsReview/Select.jsx",
+      "sha256": "e5e8469562662ba4b0bfb6086bc86d181cfb88062091bbb4ff9509c57b3327b8"
+    },
+    {
+      "path": "apps/web/design-system/dsReview/TertiaryTabs.jsx",
+      "sha256": "e8dffada2be6efd9ce6c2576d43c8302c47d684ee258a162044ad9334c6a23db"
+    },
+    {
+      "path": "apps/web/design-system/dsReview/controls.css",
+      "sha256": "fbe38d886de7e7894bb6d6eaaa5d563b85577ba2962d50e5bff5429a572924c2"
+    },
+    {
+      "path": "apps/web/design-system/dsReview/data.js",
+      "sha256": "b55f7f8ad0e3485eabe69c995ae6dd37a61f6fadd97ba534720a94a9f9592882"
+    },
+    {
+      "path": "apps/web/design-system/dsReview/problem-cards.css",
+      "sha256": "c8c5584d4b4767de48e1f8ba5c7364c6d82a5d595f57816db9a5a3abcd3ee6e3"
+    },
+    {
+      "path": "apps/web/design-system/dsReview/review.css",
+      "sha256": "256fa171f6524dc0390ddf7fda4df83cadf061e5872ee1c61a749438c3d4ed93"
+    },
+    {
+      "path": "apps/web/design-system/dsReview/tertiary-tabs.css",
+      "sha256": "78d91ea488e504a539a8e83543ff9080108a23e80f8f4f2c9e938e3a9d6a609e"
+    },
+    {
+      "path": "apps/web/design-system/dsReview/ui.jsx",
+      "sha256": "dbb6b6f11f98801bb5b30b62c0ce7676fa1782a062bab23960ac753cf3342ece"
+    },
+    {
+      "path": "apps/web/design-system/finalEdition/FinalHandbook.jsx",
+      "sha256": "ceb0ed96e24a4b37e3253a824dbf8b6ddecc5b01e70e8875b5ffff80d7c5838f"
+    },
+    {
+      "path": "apps/web/design-system/finalEdition/final.css",
+      "sha256": "2df55f2b6b66371a49028b3dd1a9a6bfb4d93e6f802f467c2a330f6cfd4af40e"
+    },
+    {
+      "path": "apps/web/design-system/finalEdition/main.jsx",
+      "sha256": "feae8f6fb6c556466c27da431fb71ecf1512f0ab41d3d47789224383bf3642d5"
+    },
+    {
+      "path": "apps/web/design-system/interactionReview/InteractionReview.jsx",
+      "sha256": "b5c72758feb9567360df73657f523d5a43ebb490dcc29a941bd9d355cb7e6e13"
+    },
+    {
+      "path": "apps/web/design-system/interactionReview/OverlayPanel.jsx",
+      "sha256": "b4484bc0fc48d36da4e555b2950dd79c742e582e1fbd1ff3d35a9f4856ff8ed8"
+    },
+    {
+      "path": "apps/web/design-system/interactionReview/model.js",
+      "sha256": "9505433ab1a293c2f342fe10ecc5e29e81a8da18b9f303423bf885ac6e989896"
+    },
+    {
+      "path": "apps/web/design-system/interactionReview/overlays.css",
+      "sha256": "11c5d578f646d6374d01de87bc078d03a78485af39f76b72cfb6dd2f1a96389f"
+    },
+    {
+      "path": "apps/web/design-system/interactionReview/presets.json",
+      "sha256": "a4a4efed10304f0174eeb76a99c0b706aaf490de16bc9b8200dcc5a8b65b1bff"
+    },
+    {
+      "path": "apps/web/design-system/ledgerReview/TaskLedger.jsx",
+      "sha256": "50336573198201fb5d3beec05ac677321bde9653c60ef32798aeaac6e001943e"
+    },
+    {
+      "path": "apps/web/design-system/ledgerReview/ledger.css",
+      "sha256": "6ef8bbf5fc95db17ed11136aff476542a508471120feb52ec64561ac4cbcd275"
+    },
+    {
+      "path": "apps/web/design-system/reference.css",
+      "sha256": "47f70ca5bb2e25436636400be4fda084456a7ac6557a12fdf544360c30e80df7"
+    },
+    {
+      "path": "apps/web/design-system/shellReview/ShellFrame.jsx",
+      "sha256": "2dc6ac3decf2eb2e4fc0f2873eed65dcdc0cef02b7263ed67a64e7b70e637bfa"
+    },
+    {
+      "path": "apps/web/design-system/shellReview/shell.css",
+      "sha256": "d5b5dee5ff2a6924645aeea6e92177272f4110050f6d1c52fd7a1a885b73fc46"
+    },
+    {
+      "path": "apps/web/design-system/styles.css",
+      "sha256": "195704f8665df4d441f682209c55b58ed077cdfc5142149b0867561b0fa741c8"
+    },
+    {
+      "path": "apps/web/design-system/taskLedger/model.js",
+      "sha256": "86660bb2df61567cd379912e44a6351c33cc9a35876ffec6f1d0d3b295a377a8"
+    },
+    {
+      "path": "apps/web/design-system/tasksReview/data.js",
+      "sha256": "835cbb137a3a5cc81bbc1b160d2f4eee889c1b64bc8d7869b110a460c8a4c134"
+    },
+    {
+      "path": "apps/web/design-system/typeComparison/compare.css",
+      "sha256": "411fc6d5176fd363ef75d556169c6c32fd50ebcaeda0b76541bfa012a06eb655"
+    },
+    {
+      "path": "apps/web/design-system/typeComparison/model.js",
+      "sha256": "4001eaf2f9e5a615e9c855a621334239bf65fbff6986d3668072f8fbbf392cc3"
+    },
+    {
+      "path": "apps/web/design-system/typography/InputMethod.jsx",
+      "sha256": "8a5ea7b83f9af8498c25c593dc3acf2fc9978ef326b04d650922bdbc9e8cb3af"
+    },
+    {
+      "path": "apps/web/design-system/typography/TypographyScope.jsx",
+      "sha256": "32a7b3c33c681b1ff31851f66017e18357c269103942571bc3a1c403fc5e2358"
+    },
+    {
+      "path": "apps/web/design-system/typography/delivery.css",
+      "sha256": "73776320cf57d64877730ac78345b42cf929d715bf192159a8792225500a367e"
+    },
+    {
+      "path": "apps/web/design-system/typography/focus.css",
+      "sha256": "698165e5f8464d703412a92efbe4a49f05426d6b386207ba3008ea0f9c129f71"
+    },
+    {
+      "path": "apps/web/design-system/typography/fonts.css",
+      "sha256": "c37431155da6254d4348936301d7698499a24a665cf2bca5a0ce6bffaf00d629"
+    },
+    {
+      "path": "apps/web/design-system/typography/system.css",
+      "sha256": "55018bd41102a77818b433f14968aed65db21177d7df933485f403f39dc31d84"
+    },
+    {
+      "path": "apps/web/package.json",
+      "sha256": "2c7cc75921cc049cc9b81c2832cb832264f5033a3c47a0032a46b3ffb812a72c"
+    },
+    {
+      "path": "apps/web/public/fonts/lids/albertsans/AlbertSans[wght].woff2",
+      "sha256": "bea33c08dd931e844dcc5a2a948829fc9fff9c01266a8af1b79e71caa5d7d45d"
+    },
+    {
+      "path": "apps/web/public/fonts/lids/albertsans/OFL.txt",
+      "sha256": "5c856c086e8743b84932aae46ced424729a703932b601e9eb8aaeac15a617ec6"
+    },
+    {
+      "path": "apps/web/public/fonts/lids/alumnisans/AlumniSans[wght].woff2",
+      "sha256": "ae6f63aa3ee89dd4ee8553969b2eba7e6c484d705fe85dc2c6f077359bcca7a5"
+    },
+    {
+      "path": "apps/web/public/fonts/lids/alumnisans/OFL.txt",
+      "sha256": "08e1c6fa00b198f9cf90fd8c7f540ce400892063234d5a3b38dcae9f659c977f"
+    },
+    {
+      "path": "apps/web/public/fonts/lids/jetbrainsmono/JetBrainsMono[wght].woff2",
+      "sha256": "8e2b558b00b20c92f1c266f53babfbe72546605aec581af1090be3b4a62062c3"
+    },
+    {
+      "path": "apps/web/public/fonts/lids/jetbrainsmono/OFL.txt",
+      "sha256": "b2fe5e8987594e9ffd1d2ca52a2f5d73eb8335243893c5d6254b5ad69269591d"
+    },
+    {
+      "path": "apps/web/public/fonts/lids/manifest.json",
+      "sha256": "3c9bf574f59868edcc9d4214830f55b15e9ad71f39a2d8355387d53a28aa0fe5"
+    },
+    {
+      "path": "apps/web/public/fonts/lids/manrope/Manrope[wght].woff2",
+      "sha256": "546db9683ad6fb4b78ca85b2c585bef92a13de99d30dc4f6d6489a54b73b5de7"
+    },
+    {
+      "path": "apps/web/public/fonts/lids/manrope/OFL.txt",
+      "sha256": "58172e0c0fac2cda8a37b348164bb55e44b0e69051e557e92b1d3f6910141f7b"
+    },
+    {
+      "path": "apps/web/public/fonts/lids/opposans/LICENSE.txt",
+      "sha256": "b013f80fa2fa6f6db4a31b793676f787af78263b568088a2d896e9d9b3e5fde7"
+    },
+    {
+      "path": "apps/web/public/fonts/lids/opposans/OPPOSans40.ttf",
+      "sha256": "6c7d5864c661516e1f400d9f21e4297f2e2a0719909691e29607cc4ef484a9f4"
+    },
+    {
+      "path": "apps/web/src/pages/collection/tasks/TasksPage.tsx",
+      "sha256": "6ed40500b440a169185f0dc7a460a08c5264cf2e708e3a1a8f37c5dabb6b762c"
+    },
+    {
+      "path": "apps/web/src/pages/corpus/creators/CreatorControls.tsx",
+      "sha256": "6b08bac82600560da6e2710e7f88481c5ac938801524f7008272ee623b6102e6"
+    },
+    {
+      "path": "apps/web/src/pages/corpus/evidence/EvidenceControls.tsx",
+      "sha256": "0b2f93fa70d7576bccb60b517fe16b16a5cba2a4591b41033f4d636d2d76c0b2"
+    },
+    {
+      "path": "apps/web/src/pages/ops/LedgerPage.tsx",
+      "sha256": "77ea458cf80d1b6f78f614e11a94bafecb6c2c1382488efa1c9c87ead6a493fb"
+    },
+    {
+      "path": "apps/web/src/pages/ops/Ops.module.css",
+      "sha256": "7abc1e4e0f39e1727f98dc6a22afd5455ae7a5134f352797fbabd304d5371a3b"
+    },
+    {
+      "path": "apps/web/src/pages/ops/OpsFrame.tsx",
+      "sha256": "630f8356010a0c783d9e6f876b07fff19d1bdd44b47bfb165a1ba47a1d36a92f"
+    },
+    {
+      "path": "apps/web/src/pages/ops/OpsPage.tsx",
+      "sha256": "b0a996a50514686d118163d3fe906f1adebda1d57d5bb66c80998f55ac7f80a4"
+    },
+    {
+      "path": "apps/web/src/pages/ops/OpsScopePicker.tsx",
+      "sha256": "33855d054bf120cfeba509fb39be121663b77b1ebff21694b81a2659c30db1bd"
+    },
+    {
+      "path": "apps/web/src/pages/ops/OverviewBlocks.tsx",
+      "sha256": "28ff9df0163bb8f6e48445011bacbfeef020e6c5b3665ba5b0908fd55cbe452b"
+    },
+    {
+      "path": "apps/web/src/pages/ops/OverviewPage.tsx",
+      "sha256": "2ff671ba07405a0dddc1eee9bfcbf0bddc23f5b8e432a14c53f18ceb4001521a"
+    },
+    {
+      "path": "apps/web/src/pages/ops/TargetDialog.tsx",
+      "sha256": "8fd99217df5e40a8172bda811045faf7a838a781cc801f3570ce2080a4c47294"
+    },
+    {
+      "path": "apps/web/src/pages/ops/ui.tsx",
+      "sha256": "1fffdf63ef323475af3ff52f64d82e346ec6ff8ff5afe53e4e3dc37e101e1c8f"
+    },
+    {
+      "path": "apps/web/src/pages/ops/useOpsLeave.tsx",
+      "sha256": "19286238a6c026ad025a323bb3d59635ffe6010b79324851803d4fc624c6c4a5"
+    },
+    {
+      "path": "apps/web/src/pages/workbench/ImagePages.module.css",
+      "sha256": "38dc28919281fe57b6e841fe47ebd8ff253d4fe36991627c7f174c2309e7fa54"
+    },
+    {
+      "path": "apps/web/src/pages/workbench/TopicLibrary.tsx",
+      "sha256": "bc1f7d4ef6f2082867f33e39bb03e41092723ae28d0b97c1fe5a8bcaf696026e"
+    },
+    {
+      "path": "apps/web/src/pages/workbench/WorkbenchPage.module.css",
+      "sha256": "8d35c87e8e131501ee39b5e5f7d2cf5a56af4e0023bdb4476c01e50690a2125d"
+    },
+    {
+      "path": "apps/web/src/pages/workbench/WorkbenchPage.tsx",
+      "sha256": "31f0b5a5f4f3db379edd234f121712ae1bda2c4f008bdb37a5824b2d2b21e00a"
+    },
+    {
+      "path": "apps/web/src/shared/ActionButton.module.css",
+      "sha256": "b370d1aa2122dada978641adeb402dc6786d312b1a593888f38f4da1324d8dea"
+    },
+    {
+      "path": "apps/web/src/shared/ActionButton.test.tsx",
+      "sha256": "3bf42a2be13d23dd83ce31453b6130d67222561360aadd003266e6a6a83d93c0"
+    },
+    {
+      "path": "apps/web/src/shared/ActionButton.tsx",
+      "sha256": "99bfcb384e19d64cff94daa930e43d55da50ded1ca5f374816771614b3314566"
+    },
+    {
+      "path": "apps/web/src/shared/FindField.module.css",
+      "sha256": "97fa8bfec5f69cfd5dfa09310b817e964df10a5c2b8beb81a6da9dd3c7fc2714"
+    },
+    {
+      "path": "apps/web/src/shared/FindField.test.tsx",
+      "sha256": "301a178c295652671bb2f0692c27d9a9c312bcae6f8f6893f1f4238cf727f427"
+    },
+    {
+      "path": "apps/web/src/shared/FindField.tsx",
+      "sha256": "ea017da42fe8c78f9ba591514bb21da007ba2106a59869741d85f757d6dc91bb"
+    },
+    {
+      "path": "apps/web/src/shared/SelectField.module.css",
+      "sha256": "f3b5c6082639cbd517619f81d14a434d3d7ce3466b4e5dc8f09441cb838ed258"
+    },
+    {
+      "path": "apps/web/src/shared/SelectField.tsx",
+      "sha256": "cfbbff78e55d4e04c77f2ba178dd8b64d752f3fb7426aa2f06a1fd7f4ac9b8fa"
+    },
+    {
+      "path": "apps/web/src/shared/inputMethod.ts",
+      "sha256": "52309eb615dabbcf241533f8e3dad4ce15dbb7128bc63733dc01db560bef9267"
+    },
+    {
+      "path": "apps/web/src/styles/shell.css",
+      "sha256": "4d61745bb05b549c053fa45ff0640e190863f87798a03e372f33f24ca62d15bd"
+    },
+    {
+      "path": "apps/web/src/styles/typography.css",
+      "sha256": "fa6bb30912bcb1ff60707ac8fa275ff1bdad7248e01faceea3aa39f6590bee30"
+    },
+    {
+      "path": "codx.md",
+      "sha256": "4a7bf563d7a9a314e4753c7dad26be21a1ee5e96d6e53079e3d13940324bc793"
+    },
+    {
+      "path": "docs/design/changes/lids-component-change.json",
+      "sha256": "edf73f5edfd8ec93c62c20c9724150f173711486d6532e08c2d8f31b1c2dcbc0"
+    },
+    {
+      "path": "docs/design/lids/catalog-source.json",
+      "sha256": "01b9734ccf08fc58dab2838d4b6ab380c2dfb4ca5544320b7c3a3bd1eff7c810"
+    },
+    {
+      "path": "docs/design/lids/color.json",
+      "sha256": "332ed74d58f17f51bf0df3707a15835372cf447e6f4f1d5b901eb66d9935729f"
+    },
+    {
+      "path": "docs/design/lids/component-contracts.json",
+      "sha256": "a8955008f547e8f984a6bbfd46dcad953094ec7d84d40dcd0da499d255cf3565"
+    },
+    {
+      "path": "docs/design/lids/component-reuse.json",
+      "sha256": "1af8299c2f779e48921a34bc8193d94cfca2ede72dd885ef9b5314d47c20ceba"
+    },
+    {
+      "path": "docs/design/lids/component-sync.md",
+      "sha256": "b3c2ee193359c0b0119ad1dfcc9ba9c5cb9402d87c2dd1f767482e15fcbe015d"
+    },
+    {
+      "path": "docs/design/lids/composition-layout.json",
+      "sha256": "41be098b92de62521b7aa6b16aa6e7aa6b1e0d947288aced3405709c1c5b4081"
+    },
+    {
+      "path": "docs/design/lids/control-material.json",
+      "sha256": "a1d3f83e01acbf1fdd94198365b4e1eeee8f0a3eb3082f39e167735a1f7a194a"
+    },
+    {
+      "path": "docs/design/lids/focus.json",
+      "sha256": "cfadcc02dd48aef2e092906ee0b20f72c55370891a6cd2617e35f7061cea0e93"
+    },
+    {
+      "path": "docs/design/lids/ledger-layout.json",
+      "sha256": "e70a86175267d50a4b1dcd6c542ab68f3d9f9a8e70a601678a896c1b8b4f204a"
+    },
+    {
+      "path": "docs/design/lids/media-material.json",
+      "sha256": "d51fb6627a6c3372d94e9b945c470f93fc7ae33b4862a73266e4892729d8e4ed"
+    },
+    {
+      "path": "docs/design/lids/overlay-policy.json",
+      "sha256": "3662d482cc973e39c0c9e06b50b3c6e0c7b0a55ac7543d4d14ee552e407e84a0"
+    },
+    {
+      "path": "docs/design/lids/shell-layout.json",
+      "sha256": "5fcab4ad570e18e4c5099df9b239d0097d4d4148313a08a5057f07f73f427dfc"
+    },
+    {
+      "path": "docs/design/lids/typography.json",
+      "sha256": "b1126738fdcd52ed294b766ef8fbd0114074aa33a91c7796a9ad7d75eefaed5c"
+    },
+    {
+      "path": "docs/governance/ui-design-execution.md",
+      "sha256": "0ccbe06d6aceb777dfeb4e30fb79488dc9374400e8914fc86008b412213bae01"
+    },
+    {
+      "path": "scripts/lids.mjs",
+      "sha256": "def50c27eb5ca6f8b7fdebcd27f1ec92be9934134c9f8fb0a87d43c4d7c82ffb"
+    },
+    {
+      "path": "scripts/lids.test.mjs",
+      "sha256": "f3370a451703b5e1da7c1e5cf94f2de06bfec7889f61fdfe28f3917ad0df1a04"
+    },
+    {
+      "path": "scripts/sync-lids-runtime.py",
+      "sha256": "eb73d515d4037d69ee59afb827acf5452253ce0f32045d606513584a440ed0a6"
+    }
+  ]
+}

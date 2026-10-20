@@ -38,8 +38,6 @@ let exportedRecord;
 let packageBytes;
 const imageSection = () => page.getByRole('region', { name: '封面与内页' });
 const stage = async (name, surface = page) => {
-  const reading = ['材料','画布'].includes(name);
-  await surface.getByRole('navigation',{name:'运营导航'}).getByRole('button',{name:reading?'研读取材':'图文创作',exact:true}).click();
   const label = ({材料:'材料浏览',画布:'创作画布'})[name] ?? name;
   const button=surface.getByRole('navigation',{name:'创作步骤'}).getByRole('button').filter({hasText:label});
   await button.click();
@@ -146,6 +144,7 @@ async function download(locator, filename) {
 async function assertWholeEditPreview() {
   const canvas=imageSection().locator('figure canvas').last();await canvas.scrollIntoViewIfNeeded();
   const bounds=await canvas.boundingBox(),viewport=page.viewportSize();assert.ok(bounds&&viewport);
+  report.editPreviewBounds??=[];report.editPreviewBounds.push({viewport,bounds});
   assert.ok(bounds.height<=viewport.height*0.65+1,'single editor preview is bounded by available viewport');
   assert.ok(Math.abs(bounds.width/bounds.height-0.75)<0.01,'preview preserves full 3:4 artwork ratio');
   assert.ok(bounds.y>=0&&bounds.y+bounds.height<=viewport.height+1,'entire edit preview fits within visible viewport');
@@ -242,7 +241,7 @@ try {
   });
   await step('运营入口建立真实服务器作品并保存角度提纲账号',async()=>{
     await page.goto(`${origin}/ops`);assert.equal(new URL(page.url()).pathname,'/ops/creation');
-    await page.getByLabel('创作领域').selectOption(domainRef);await page.getByLabel('新选题标题').fill('作业启动');
+    await page.getByLabel('创作领域',{exact:true}).click();await page.getByRole('navigation',{name:'可选创作领域'}).getByRole('button').first().click();await until(async()=>new URL(page.url()).searchParams.get('domain')===domainRef,'chosen fixture domain');await page.getByLabel('新选题标题').fill('作业启动');
     await page.getByRole('button',{name:'建立选题',exact:true}).click();await page.getByRole('button',{name:'编辑方案',exact:true}).click();await page.getByLabel('切入角度').waitFor();
     workId=new URL(page.url()).searchParams.get('work');assert.ok(workId);workUrl=page.url();report.workId=workId;
     await page.getByLabel('切入角度').fill('把作业启动缩小成可执行的第一步；仅作隔离合成验收。');

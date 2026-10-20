@@ -1,0 +1,5 @@
+
+@layer lids-review {
+.type-system [data-numeric-kind=ordinary]{text-align:right;font-family:var(--ty-data);font-variant-numeric:tabular-nums lining-nums}.type-system [data-numeric-kind=decimal]{text-align:right;font-family:var(--ty-data);font-variant-numeric:tabular-nums lining-nums}.ty-decimal{display:grid;grid-template-columns:minmax(0,1fr) auto var(--decimal-fraction-width,4ch);gap:0}.ty-decimal>span:first-child{text-align:right}.ty-decimal>span:last-child{text-align:left}.ty-unknown{font-family:var(--ty-ui)}
+
+}

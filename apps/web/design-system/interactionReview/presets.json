@@ -1,0 +1,65 @@
+{
+  "id": "Q09-OVERLAY-14",
+  "status": "accepted_S1_review_runtime_not_migrated",
+  "businessRequests": false,
+  "persistence": "memory_only",
+  "fixed": [
+    "LIDS-TYPE-001-B",
+    "ALIGN-VOICE-004",
+    "ALIGN-FOCUS-005",
+    "ALIGN-MATERIAL-006",
+    "ALIGN-SHELL-007",
+    "ALIGN-LEDGER-008",
+    "ALIGN-COMPOSITION-009",
+    "ALIGN-NAV-003"
+  ],
+  "policies": {
+    "S1": {
+      "name": "按用途关闭",
+      "description": "只读可点遮罩；有修改先询问；提交中可明确收起并保留原请求跟踪。"
+    }
+  },
+  "shapes": {
+    "drawer": "模态抽屉",
+    "dialog": "居中弹窗",
+    "nonmodal": "非模态详情"
+  },
+  "scenarios": {
+    "read": {
+      "name": "用户问题 · 只读详情",
+      "scene": "P04:problems",
+      "guide": "点击真实结构的合成卡片，试遮罩、Escape、Tab和返回原卡片；对比三种详情形态。"
+    },
+    "create": {
+      "name": "新建采集 · 未保存与提交",
+      "scene": "P09:runs",
+      "guide": "打开新建采集，改关键词后关闭；再提交，试收起、未确认、核对原回执和迟到回执。"
+    },
+    "edit": {
+      "name": "作品编辑 · 离开当前页",
+      "scene": "P12:body",
+      "guide": "修改正文，再切面包屑三级分区或领域；对照继续编辑、放弃、保存后离开和提交中离开。"
+    },
+    "settings": {
+      "name": "配置表单 · 局部保存",
+      "scene": "P10:domains",
+      "guide": "编辑当前配置，检查脏稿、明确拒绝、未确认与原请求范围；不提交其他表单。"
+    },
+    "task": {
+      "name": "采集进展 · 停止与恢复",
+      "scene": "P09:runs",
+      "guide": "打开任务详情，暂停后继续；停止需单独确认，核对回执和运行，再试已停止不可恢复、在途材料交付与版本冲突。"
+    }
+  },
+  "contracts": [
+    "只读详情形态与模态",
+    "初始焦点与Tab/Escape/返回",
+    "遮罩与显式关闭",
+    "未保存离开保护",
+    "提交中收起与冻结请求",
+    "失败/未确认/冲突与原身份核对",
+    "长任务暂停/继续/停止与材料保留"
+  ],
+  "selected": "S1",
+  "normativeSource": "docs/design/lids/overlay-policy.json"
+}

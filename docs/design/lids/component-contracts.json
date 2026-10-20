@@ -1,0 +1,112 @@
+{
+  "id": "LIDS-COMPONENT-SYNC-001",
+  "status": "current_implementation_contract_not_CMP_certification",
+  "components": {
+    "C09": {
+      "name": "动作按钮",
+      "implementation": "apps/web/src/shared/ActionButton.tsx",
+      "styles": "apps/web/src/shared/ActionButton.module.css",
+      "tests": [
+        "apps/web/src/shared/ActionButton.test.tsx"
+      ],
+      "demo": "apps/web/design-system/dsReview/ui.jsx",
+      "variants": [
+        "primary",
+        "ink",
+        "outline",
+        "soft",
+        "danger",
+        "quiet",
+        "loading"
+      ],
+      "states": [
+        "idle",
+        "focus",
+        "disabled",
+        "pending",
+        "rejected",
+        "unconfirmed"
+      ],
+      "owns": [
+        "原生button与显式type",
+        "忙碌禁用与aria-busy",
+        "M2材质和标签宽度"
+      ],
+      "excludes": [
+        "导航资格",
+        "权限判断",
+        "真实成功回执"
+      ],
+      "ruleSources": [
+        "control-material",
+        "focus",
+        "typography",
+        "color"
+      ],
+      "consumers": [
+        "apps/web/src/pages/corpus/creators/CreatorControls.tsx",
+        "apps/web/src/pages/corpus/evidence/EvidenceControls.tsx",
+        "apps/web/src/pages/collection/tasks/TasksPage.tsx",
+        "apps/web/src/pages/ops/LedgerPage.tsx",
+        "apps/web/src/pages/ops/TargetDialog.tsx",
+        "apps/web/src/pages/workbench/WorkbenchPage.tsx"
+      ],
+      "certified": false,
+      "nativeStates": [
+        "pointer_hover",
+        "pressed"
+      ]
+    },
+    "C16": {
+      "name": "FIND检索输入",
+      "implementation": "apps/web/src/shared/FindField.tsx",
+      "styles": "apps/web/src/shared/FindField.module.css",
+      "tests": [
+        "apps/web/src/shared/FindField.test.tsx"
+      ],
+      "demo": "apps/web/design-system/dsReview/ui.jsx",
+      "triggers": [
+        "submit",
+        "debounce_250"
+      ],
+      "debounceMs": 250,
+      "states": [
+        "idle",
+        "composing",
+        "querying",
+        "results",
+        "empty",
+        "error",
+        "disabled",
+        "pending"
+      ],
+      "owns": [
+        "FIND识别与清空/快捷键",
+        "IME保护、防抖及手动提交",
+        "外部查询/范围改变取消旧定时器",
+        "flush与focus"
+      ],
+      "excludes": [
+        "业务查询结果",
+        "URL编码和返回历史",
+        "作者/作品资格",
+        "创建搜索能力"
+      ],
+      "ruleSources": [
+        "focus",
+        "typography",
+        "composition-layout"
+      ],
+      "consumers": [
+        "apps/web/src/pages/ops/LedgerPage.tsx",
+        "apps/web/src/pages/workbench/TopicLibrary.tsx"
+      ],
+      "certified": false,
+      "nativeStates": [
+        "pointer_focus",
+        "keyboard_focus",
+        "draft"
+      ]
+    }
+  }
+}

@@ -1,3 +1,4 @@
+import { ActionButton } from '../../shared/ActionButton';
 import { useEffect, useRef, type ReactNode } from "react";
 import { c } from "./styles";
 import { count, safeHref } from "./format";
@@ -91,12 +92,12 @@ export function DisabledActions() {
   return (
     <td>
       <div className={c("ops-row-actions")}>
-        <button type="button" disabled title={readonly}>
+        <ActionButton type="button" disabled title={readonly}>
           编辑
-        </button>
-        <button type="button" disabled title={readonly}>
+        </ActionButton>
+        <ActionButton type="button" disabled title={readonly}>
           删除
-        </button>
+        </ActionButton>
       </div>
     </td>
   );
@@ -155,9 +156,9 @@ export function Status({
       {retry ? (
         <>
           {" "}
-          <button type="button" onClick={retry}>
+          <ActionButton type="button" onClick={retry}>
             重试
-          </button>
+          </ActionButton>
         </>
       ) : null}
     </p>
@@ -187,12 +188,14 @@ export function Dialog({
   children,
   onClose,
   className,
+  outsideClose = false,
 }: {
   title?: string;
   label?: string;
   children: ReactNode;
   onClose: () => void;
   className?: string;
+  outsideClose?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -210,6 +213,11 @@ export function Dialog({
       className={c("ops-dialog", ...(className ? [className] : []))}
       aria-labelledby={title}
       aria-label={label}
+      onClick={event => {
+        if (!outsideClose || event.target !== event.currentTarget) return;
+        const rect = event.currentTarget.getBoundingClientRect();
+        if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) onClose();
+      }}
       onCancel={(event) => {
         event.preventDefault();
         onClose();

@@ -1,6 +1,7 @@
 import { humanMoment } from '../../shared/formatting';
 import { ActionButton } from "../../shared/ActionButton";
-import { useState } from "react";
+import { FindField } from '../../shared/FindField';
+import { useState, type ReactNode } from "react";
 import { useQueries } from "@tanstack/react-query";
 import * as api from "./workbenchApi";
 import type { WorkSummary } from "./workbenchModel";
@@ -9,11 +10,12 @@ import styles from "./WorkbenchPage.module.css";
 export function TopicLibrary({
   section,
   works,
-  onOpen,
+  onOpen, action, loading = false, failed = false,
 }: {
   section: "today" | "works";
   works: WorkSummary[];
   onOpen: (id: string) => void;
+  action?: ReactNode; loading?: boolean; failed?: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
@@ -45,6 +47,10 @@ export function TopicLibrary({
   });
   return (
     <>
+      <div className={styles.libraryToolbar}>
+        <FindField value={query} onCommit={setQuery} label="搜索选题或角度" placeholder="选题名称、切入角度" trigger="debounce_250" trim={false} shortcut />
+        {action}
+      </div>
       <div className={styles.libraryFilters}>
         <div className={styles.steps} role="group" aria-label="选题筛选">
           {[
@@ -61,12 +67,6 @@ export function TopicLibrary({
             </button>
           ))}
         </div>
-        <input
-          aria-label="搜索选题或角度"
-          placeholder="搜索选题或角度"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
       </div>
       {unresolved.length ? (
         <div className={styles.libraryReadStatus} role="status">
@@ -160,7 +160,8 @@ export function TopicLibrary({
           })}
         </div>
       )}
-      {!rows.length && !unresolved.length ? (
+      {loading ? <p role="status">正在读取已保存作品…</p> : null}
+      {!loading && !failed && !rows.length && !unresolved.length ? (
         <div className={styles.empty}>
           {works.length
             ? "没有匹配的方案，试试其他词或清除筛选。"

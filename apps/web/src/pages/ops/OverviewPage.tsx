@@ -1,3 +1,5 @@
+import { useOpsLeave } from './useOpsLeave';
+import { ActionButton } from '../../shared/ActionButton';
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router";
@@ -372,7 +374,7 @@ export function OverviewPage({ business }: { business: string }) {
     </>
   );
 }
-function CustomDialog({
+export function CustomDialog({
   from,
   to,
   close,
@@ -384,10 +386,14 @@ function CustomDialog({
   save: (from: string, to: string) => void;
 }) {
   const [error, setError] = useState("");
+  const [draftFrom, setDraftFrom] = useState(from);
+  const [draftTo, setDraftTo] = useState(to);
+  const guard = useOpsLeave({ dirty: draftFrom !== from || draftTo !== to, onClose: close });
   return (
-    <Dialog title="ops-custom-title" onClose={close}>
+    <><Dialog title="ops-custom-title" onClose={guard.requestClose}>
       <form
         id="ops-custom-form"
+        onInvalid={event => { event.preventDefault(); const input = event.target; if (input instanceof HTMLInputElement) setError(input.validity.valueMissing ? "请选择开始和结束日期" : input.validity.badInput ? "请输入完整有效的日期" : "开始日期不能晚于结束日期，最长 366 天"); }}
         onSubmit={(event) => {
           event.preventDefault();
           const form = new FormData(event.currentTarget);
@@ -411,25 +417,25 @@ function CustomDialog({
         <div className={c("ops-dialog-body")}>
           <label>
             开始日期
-            <input type="date" name="from" required defaultValue={from} />
+            <input type="date" name="from" required value={draftFrom} onChange={event => { setDraftFrom(event.target.value); setError(''); }} max={draftTo || undefined} />
           </label>
           <label>
             结束日期
-            <input type="date" name="to" required defaultValue={to} />
+            <input type="date" name="to" required value={draftTo} onChange={event => { setDraftTo(event.target.value); setError(''); }} min={draftFrom || undefined} />
           </label>
           <p className={c("ops-form-error")} role="alert">
             {error}
           </p>
         </div>
         <footer>
-          <button type="button" onClick={close}>
+          <ActionButton type="button" onClick={guard.requestClose}>
             取消
-          </button>
-          <button type="submit" className={c("ops-primary")}>
+          </ActionButton>
+          <ActionButton type="submit" variant="primary">
             确认
-          </button>
+          </ActionButton>
         </footer>
       </form>
-    </Dialog>
+    </Dialog>{guard.confirmation}</>
   );
 }

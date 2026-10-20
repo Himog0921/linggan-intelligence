@@ -13,7 +13,14 @@
     "lint": "eslint .",
     "test": "vitest run",
     "build": "tsc --noEmit -p tsconfig.json && vite build",
-    "verify": "npm run typecheck && npm run lint && npm run test && npm run build"
+    "verify": "npm run typecheck && npm run lint && npm run test && npm run build",
+    "lids:record": "node ../../scripts/lids.mjs record",
+    "lids:sync": "node ../../scripts/lids.mjs sync",
+    "lids:check": "node ../../scripts/lids.mjs check",
+    "lids:build": "node ../../scripts/lids.mjs build",
+    "lids:dev": "node ../../scripts/lids.mjs serve",
+    "lids:verify": "npm run lids:check && node --test ../../scripts/lids.test.mjs && npm run lids:build",
+    "prebuild": "npm run lids:check"
   },
   "dependencies": {
     "@tanstack/react-query": "5.104.2",

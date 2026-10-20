@@ -1,0 +1,57 @@
+
+@layer lids-review {
+/* Adopted B values: generated registry mirror of project LIDS typography.json. */
+.type-system{--sans:var(--ty-ui);--mono:var(--ty-data);font-family:var(--ty-ui);font-size:var(--ty-body-size);font-weight:var(--ty-body-weight);line-height:var(--ty-body-line);font-synthesis:none;font-variant-numeric:lining-nums tabular-nums;-webkit-font-smoothing:antialiased}
+.type-system .ds-review{--ds-sans:var(--ty-ui);--ds-mono:var(--ty-data);font-family:var(--ty-ui);font-size:var(--ty-body-size);font-weight:var(--ty-body-weight);line-height:var(--ty-body-line);font-synthesis:none}
+
+.type-system .ds-review p{line-height:var(--ty-body-line)}
+.type-system :is(.ds-table td,.ledger td){font-size:var(--ty-body-size);font-weight:var(--ty-body-weight);line-height:var(--ty-body-line)}
+.type-system :is(.ds-table th,.ledger th,.lr-ledger th,.ds-field){font-size:var(--ty-label-size);font-weight:var(--ty-label-weight);line-height:var(--ty-label-line)}
+.type-system :is(.ds-modal h2,.lr-dialog h2){font-size:var(--ty-object-size);font-weight:var(--ty-object-weight);line-height:var(--ty-object-line)}
+.type-system :is(.ds-caption,.ds-muted,.lr-quiet){line-height:var(--ty-aux-line)}
+.type-system :is(button,input,select,textarea){font-family:var(--ty-ui)}
+.type-system .ds-review :is(input,select,textarea){font-size:var(--ty-control-size);font-weight:var(--ty-input-weight);line-height:var(--ty-input-line)}
+.type-system .ds-index-scroll h2{font-size:var(--ty-label-size);font-weight:var(--ty-label-weight);line-height:var(--ty-label-line)}
+.type-system .ds-inspector-block h3{font-size:var(--ty-label-size);font-weight:var(--ty-weight-strong);line-height:var(--ty-label-line)}
+.type-system .ds-states button>small{font-size:var(--ty-aux-size);font-weight:var(--ty-weight-regular);line-height:var(--ty-aux-line)}
+.type-system :is(.ds-button,.ds-select-trigger,.primary,.secondary,.text-action,.lr-row-action){font-size:var(--ty-control-size);font-weight:var(--ty-control-weight);line-height:var(--ty-control-line)}
+.type-system :is(.ds-button.primary,.primary,.lr-toolbar>.ds-button.primary){font-weight:var(--ty-control-weight)}
+.type-system :is(.ds-mono,.mono,.num){letter-spacing:0;font-variant-numeric:tabular-nums lining-nums}
+.type-system :is(code,pre,.lr-diagnostics,.lr-technical,.tr-disclosure){--ds-mono:var(--ty-code);--mono:var(--ty-code);font-family:var(--ty-code)}
+.type-system :is(kbd,.ds-brand>span,.ds-mini-brand,.ds-real-li,.brand-mark,.ds-find>span:first-child,.find-word,.find-mark){font-family:var(--ty-brand)}
+.type-system :is(.ds-kicker,.eyebrow){font-family:var(--ty-code)}
+.type-system :is(.ds-brand>strong,.brand-title){font-family:var(--ty-english);font-size:var(--ty-reading-size);font-weight:var(--ty-weight-strong)}
+.type-system :is(.ds-find>input,.find-input){font-family:var(--ty-ui)}
+.type-system :is(.ds-table td.ds-mono,.ledger td.numeric,.lr-ledger td:is(.lr-col-details,.lr-col-comments,.lr-col-reused,.lr-col-added,.lr-col-cumulative,.lr-col-scope,.lr-col-created,.lr-col-updated,.lr-col-id)){font-family:var(--ty-data);font-size:var(--ty-data-size);font-weight:var(--ty-data-weight);line-height:var(--ty-data-line);font-variant-numeric:tabular-nums lining-nums}
+.type-system :is(.ds-table td.ds-mono,.ledger td.numeric,.lr-col-details,.lr-col-comments,.lr-col-reused,.lr-col-added,.lr-col-cumulative){text-align:right}
+.type-system :is(.ds-metric-demo strong,.ds-overview-numbers>strong,.ds-number-lab strong,.lr-account td,.tr-detail-facts dd,.num,.table-number){font-family:var(--ty-data);font-variant-numeric:tabular-nums lining-nums;font-weight:var(--ty-weight-strong)}
+.type-system :is(.ds-metric-demo:not(.large)>strong,.ds-number-lab strong,.lr-account td,.tr-detail-facts dd,.ds-font-role h3.font-number){font-size:var(--ty-metric-size);line-height:var(--ty-metric-line)}
+.type-system .table-number{font-size:var(--ty-data-size);line-height:var(--ty-data-line)}
+.type-system .ds-metric-demo.large strong,.type-system .ds-overview-numbers>strong:not(.sub){font-size:var(--ty-metricLarge-size);font-weight:var(--ty-metricLarge-weight);line-height:var(--ty-metricLarge-line);letter-spacing:0}
+.type-system .ds-overview-numbers>strong.sub{font-size:var(--ty-metric-size);font-weight:var(--ty-metric-weight);line-height:var(--ty-metric-line);letter-spacing:0}
+.type-system .lr-ledger :is(th,td){height:var(--accepted-task-row);white-space:nowrap}
+.type-system .ds-single-task-table{min-width:760px}
+.type-system .ds-single-task-table td{height:var(--accepted-ledger-row);padding-top:0;padding-bottom:0;white-space:nowrap}
+.type-system .ds-single-task-table td .ds-button{min-height:36px}
+.type-system :is(.ds-font-review .font-display,.type-display){font-family:var(--ty-display)}
+.type-system :is(.ds-reading article>p,.ds-source-quote,.lr-original-text>p,.tc-english-reading,blockquote){font-family:var(--ty-ui);font-size:var(--ty-reading-size);font-weight:var(--ty-reading-weight);line-height:var(--ty-reading-line)}
+.type-system .ds-font-specimen .font-body{font-size:var(--ty-reading-size);font-weight:var(--ty-reading-weight);line-height:var(--ty-reading-line)}
+.type-system .type-license{font-family:var(--ty-ui);font-size:var(--ty-aux-size);font-weight:var(--ty-aux-weight);line-height:var(--ty-aux-line);padding:14px 24px;border-top:1px solid #e8eaea;color:#697278;display:flex;justify-content:flex-end;gap:12px;flex-wrap:wrap;background:#fff}
+.type-system .type-license a{color:inherit;text-underline-offset:3px}
+.type-system .ds-type-scale{overflow-x:auto}
+.type-system .ds-type-scale table{width:100%;border-collapse:collapse;font-size:var(--ty-label-size);font-weight:var(--ty-weight-regular);margin:18px 0}
+.type-system .ds-type-scale :is(th,td){padding:10px 12px;border-bottom:1px solid #e8eaea;text-align:left;white-space:nowrap}
+.type-system .ds-type-scale th{font-weight:var(--ty-label-weight)}
+.type-system .ds-type-scale :is(td:nth-child(2),td:nth-child(3),td:nth-child(4)){font-family:var(--ty-data)}
+.type-system .ds-font-history{margin:12px 0 22px}
+.type-system .ds-font-history>summary{font-size:var(--ty-label-size);color:#697278;cursor:pointer;padding:10px 0}
+.type-system .ds-font-history .ds-numeric-review{padding:20px 0}
+/* Main task controls retain the same readable size on narrow layouts. */
+@media(max-width:720px){.type-system .lr-toolbar .ds-find{min-width:0}.type-system .ds-font-specimen h2.font-display{font-size:var(--ty-displayCompact-size)}.type-system .type-license{padding:12px 16px;justify-content:flex-start}}
+
+.type-system :is(.ds-brand>span,.brand-mark,.ds-real-li,.ds-mini-brand,.ds-find>span:first-child,.find-mark){font-weight:var(--ty-weight-brand)}
+
+/* ALIGN-VOICE-004: source quotes use the single accepted OPPO evidence family. */
+.type-system :is(.ds-reading article>p,.ds-source-quote,.lr-original-text>p,blockquote){font-family:var(--ty-evidence)}
+
+}

@@ -1,0 +1,11 @@
+import React from 'react';
+import '../../src/styles/lids_tokens.css';
+import {trackInputMethod} from '../../src/shared/inputMethod';
+trackInputMethod(document);
+import {createRoot} from 'react-dom/client';
+import {TypographyScope} from '../typography/TypographyScope.jsx';
+import {FinalHandbook} from './FinalHandbook.jsx';
+import '../styles.css';
+import '../dsReview/controls.css';
+import './final.css';
+createRoot(document.getElementById('root')).render(<div data-theme="linggan-intelligence"><TypographyScope><FinalHandbook/></TypographyScope></div>);

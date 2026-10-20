@@ -3,7 +3,8 @@ import { ActionButton } from '../../shared/ActionButton';
 import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router';
-import { AppShell } from '../../app/AppShell';
+import { OpsFrame } from '../ops/OpsFrame';
+import { OpsScopePicker } from '../ops/OpsScopePicker';
 import { ApiError } from '../../shared/api';
 import { RequestIdentities } from '../../shared/requestIdentity';
 import * as api from './workbenchApi';
@@ -107,7 +108,7 @@ export function WorkbenchPage() {
   const [params, setParams] = useSearchParams();
   const domain = params.get('domain') ?? '';
   const work = params.get('work');
-  const [section, setSection] = useState<'today' | 'works'>(work ? 'works' : 'today');
+  const section = params.get('section') === 'works' || work ? 'works' : 'today';
   const [title, setTitle] = useState('');
   const [immersive, setImmersive] = useState(false);
   const [error, setError] = useState('');
@@ -128,12 +129,14 @@ export function WorkbenchPage() {
     }) => api.domains(signal),
     staleTime: 0
   });
+  const validDomain = domainQuery.data?.some(option => option.domainRef === domain) === true;
+  useEffect(() => { window.document.title = `${work ? '作品编辑' : section === 'today' ? '今日选题' : '我的创作'} · 运营`; }, [work, section]);
   const works = useQuery({
     queryKey: ['creation-works', domain],
     queryFn: ({
       signal
     }) => api.listWorks(domain, signal),
-    enabled: !!domain,
+    enabled: !!domain && validDomain,
     gcTime: 0
   });
   const current = useQuery({
@@ -144,7 +147,7 @@ export function WorkbenchPage() {
       if (!work) throw new api.WorkbenchActionError('未选作品');
       return api.readWork(work, signal);
     },
-    enabled: !!work && !!domain,
+    enabled: !!work && validDomain,
     gcTime: 0
   });
   if (current.data && current.data.domainRef === domain && !openWorks.some(w => w.workId === current.data.workId)) setOpenWorks([...openWorks, current.data]);
@@ -155,6 +158,13 @@ export function WorkbenchPage() {
       view: section === 'works' ? 'body' : 'topic'
     });
   }
+  useEffect(() => {
+    const protectCreate = (event: BeforeUnloadEvent) => {
+      if (creating || createUnknown || title.trim()) { event.preventDefault(); event.returnValue = ''; }
+    };
+    window.addEventListener('beforeunload', protectCreate);
+    return () => window.removeEventListener('beforeunload', protectCreate);
+  }, [creating, createUnknown, title]);
   async function createWork() {
     if (!domain || creating) return;
     setCreating(true);
@@ -174,6 +184,7 @@ export function WorkbenchPage() {
       identities.settle('create');
       createPending.current = null;
       setCreateUnknown(false);
+      setTitle('');
       await queryClient.invalidateQueries({
         queryKey: ['creation-works', domain]
       });
@@ -193,44 +204,28 @@ export function WorkbenchPage() {
       setCreating(false);
     }
   }
-  return <AppShell workbenchMode={immersive && !!work ? 'immersive' : 'compact'} active="ops" activeState="创作" boundaryLabel="本机创作" crumb={<>运营 / {work ? ['materials','canvas'].includes(params.get('view') ?? '') ? '研读取材' : params.get('view') === 'topic' ? '选题方案' : '图文创作' : section === 'today' ? '今日选题' : '我的创作'}</>} meta={<span>个人空间</span>}>
-<main className={`${styles.workspace} ${immersive && work ? styles.immersiveWorkspace : ''}`}>
-    <nav className={styles.opsNav} aria-label="运营导航">
-<button aria-pressed={!work && section === 'today'} onClick={() => {
-          setSection('today');
-          setParams(domain ? {
-            domain
-          } : {});
-        }}>今日选题</button>
-<button aria-pressed={!work && section === 'works'} onClick={() => {
-          setSection('works');
-          setParams(domain ? {
-            domain
-          } : {});
-        }}>我的创作</button>{work ? <><button aria-pressed={['materials','canvas'].includes(params.get('view') ?? '')} onClick={() => setParams({domain,work,view:'materials'})}>研读取材</button><button aria-pressed={['body','cover','inner','export'].includes(params.get('view') ?? '')} onClick={() => setParams({domain,work,view:'body'})}>图文创作</button></> : null}
-<select aria-label="创作领域" value={domain} disabled={creating || createUnknown} onChange={e => {
-          if (createPending.current) return;
-          setError('');
-          setParams(e.target.value ? {
-            domain: e.target.value
-          } : {});
-        }}>
-<option value="">选择领域</option>{domainQuery.data?.map(d => <option key={d.domainRef} value={d.domainRef}>{d.name}</option>)}</select>
-<details className={styles.ledgerMenu}><summary>运营台账</summary><a href="/ops/overview">总览</a><a href="/ops/publications">发布</a><a href="/ops/accounts">账号</a><a href="/ops/daily">每日数据</a><a href="/ops/io">导入导出</a></details></nav>
+  return <OpsFrame section="creation" domain={domain} immersive={immersive && !!work}
+    scope={<OpsScopePicker creation options={domainQuery.data ?? []} value={domain} loading={domainQuery.isPending} failed={domainQuery.isError}
+      disabled={creating || createUnknown} onChange={next => { if (createPending.current) return; setError(''); setParams({ domain: next, section }); }} />}
+    tabs={<>{(['today', 'works'] as const).map(value => <button type="button" key={value}
+      aria-current={!work && section === value ? 'page' : undefined} onClick={() => setParams({ ...(domain ? { domain } : {}), section: value })}>
+      {value === 'today' ? '今日选题' : '我的创作'}</button>)}{work ? <span aria-current="page">作品编辑</span> : null}</>}
+    meta={<span>个人创作空间</span>}>
+<main className={`${styles.workspace} ${immersive && work ? styles.immersiveWorkspace : ''}`} aria-label="运营创作">
     {domainQuery.error ? <p className={styles.error} role="alert">{api.errorText(domainQuery.error)}</p> : null}
-    {!domain ? <div className={styles.empty}>选择领域，开始或继续一篇创作。</div> : work ? <>{current.isPending ? <p>恢复服务器草稿中…</p> : current.error ? <p role="alert" className={styles.error}>{api.errorText(current.error)} <ActionButton variant="outline" onClick={() => void current.refetch()}>重新读取</ActionButton>
+    {domainQuery.isPending ? <div className={styles.empty} role="status">正在读取创作领域…</div> : !domain || !validDomain ? <div className={styles.entryEmpty}><span className={styles.entryIndex} aria-hidden="true">01 / CREATE</span><h1>{domain ? '当前领域不可用于创作' : '从一个领域开始创作'}</h1><p>{domain ? '请在上方面包屑中切换可用领域，再查看选题和稿件。' : '在上方面包屑选择创作领域，随后可以建立选题，或继续已保存的稿件。'}</p>{domainQuery.isError ? <ActionButton onClick={() => void domainQuery.refetch()}>重新读取领域</ActionButton> : <p>今日选题 · 方案与材料 / 我的创作 · 正文与图页</p>}</div> : work ? <>{current.isPending ? <p>恢复服务器草稿中…</p> : current.error ? <p role="alert" className={styles.error}>{api.errorText(current.error)} <ActionButton variant="outline" onClick={() => void current.refetch()}>重新读取</ActionButton>
 </p> : current.data && current.data.domainRef === domain ? null : <p className={styles.error}>作品不属于当前领域。</p>}</> : <section className={styles.library}>
 <div className={styles.libraryTools}>
-<h1>{section === 'today' ? '今日选题' : '我的创作'}</h1>
-<small>{works.data ? `${works.data.length} 篇已保存作品` : '读取中'}</small>
+<h1 className={styles.srOnly}>{section === 'today' ? '今日选题' : '我的创作'}</h1>
+<small>{works.isError ? '作品读取失败' : works.data ? `${works.data.length} 篇已保存作品` : '读取中'}</small>
 </div>
-<form className={styles.createForm} onSubmit={e => {
+{error ? <p role="alert" className={styles.error}>{error}</p> : null}{works.error ? <p role="alert" className={styles.error}>{api.errorText(works.error)}</p> : null}<TopicLibrary key={domain} section={section} works={works.isError ? [] : works.data ?? []} loading={works.isPending} failed={works.isError} onOpen={open} action={<form className={styles.createForm} onSubmit={e => {
           e.preventDefault();
           void createWork();
         }}>
-<input aria-label="新选题标题" placeholder="新选题标题" value={title} disabled={createUnknown} onChange={e => setTitle(e.target.value)} />
+<input aria-label="新选题标题" placeholder="新选题标题" value={title} disabled={creating || createUnknown} onChange={e => setTitle(e.target.value)} />
 <ActionButton type="submit" variant="primary" busy={creating} disabled={!title.trim() || creating}>{creating ? '建立中…' : createUnknown ? '核实原请求并重试' : '建立选题'}</ActionButton>
-</form>{error ? <p role="alert" className={styles.error}>{error}</p> : null}{works.error ? <p role="alert" className={styles.error}>{api.errorText(works.error)}</p> : null}<TopicLibrary section={section} works={works.data ?? []} onOpen={open} /></section>}{openWorks.map(w => <div hidden={w.workId !== work || w.domainRef !== domain} key={w.workId}>
+</form>} /></section>}{openWorks.map(w => <div hidden={w.workId !== work || w.domainRef !== domain} key={w.workId}>
 <WorkEditor immersive={immersive} onImmersive={setImmersive} initial={w} active={w.workId === work && w.domainRef === domain} view={viewValue(params.get('view'))} onView={view => setParams({
           domain: w.domainRef,
           work: w.workId,
@@ -238,7 +233,7 @@ export function WorkbenchPage() {
         })} />
 </div>)}
     </main>
-</AppShell>;
+</OpsFrame>;
 }
 interface Pending {
   requestId: string;
@@ -835,7 +830,7 @@ function WorkEditor({
   }
   return <div className={styles.editorWorkspace} data-view={view}>
     <div className={styles.commandRow}>
-<nav aria-label="创作步骤" className={styles.steps}>{(view === 'materials' || view === 'canvas' ? VIEWS.filter(item => item.id === 'materials' || item.id === 'canvas') : view === 'topic' ? VIEWS.filter(item => item.id === 'topic') : VIEWS.filter(item => ['body','cover','inner','export'].includes(item.id))).map((item, index) => <button key={item.id} aria-current={view === item.id ? 'step' : undefined} onClick={() => onView(item.id)}>{!['topic','materials','canvas'].includes(item.id) ? <small aria-hidden="true">{String(index + 1).padStart(2, '0')} </small> : null}{item.label}</button>)}</nav>
+<nav aria-label="创作步骤" className={styles.steps}>{VIEWS.map((item, index) => <button key={item.id} aria-current={view === item.id ? 'step' : undefined} onClick={() => onView(item.id)}><small aria-hidden="true">{String(index + 1).padStart(2, '0')} </small>{item.label}</button>)}</nav>
 <div className={styles.row}>
 <details className={styles.saveDetails}>
 <summary aria-label={`保存状态：${saveState === 'saved' ? '已保存' : saveState === 'saving' ? '保存中' : saveState === 'dirty' ? '未保存' : saveState === 'unknown' ? '结果未确认' : saveState === 'conflict' ? '版本冲突' : '保存失败'}`}>{saveState === 'saved' ? '✓' : saveState === 'saving' ? '保存中…' : saveState === 'dirty' ? '未保存' : '!'}<span className={styles.srOnly}>保存状态</span>

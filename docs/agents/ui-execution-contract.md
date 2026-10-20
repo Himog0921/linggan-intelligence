@@ -131,3 +131,6 @@ Agent 不得：
 5. 仅在 Mog 指定时配合 reviewer 或 integration owner；执行 Agent 不自行宣布最终通过、合并或关闭 Issue。
 
 本合同不授权前端代码、真实数据、生产部署或业务验收；它只确保未来被批准的 UI 工作不会在模糊边界中发散。
+
+
+标准件持续同步入口：[组件同步执行合同](../design/lids/component-sync.md)。UI 标准件修改须声明实现修正/共享标准/页面例外，按编号读取合同，再同步真实组件、展示与离线HTML；运行 apps/web 的 lids:check/lids:verify，不把合成示例当成CMP认证。当前 C16 的正式接入消费者为运营发布记录与创作列表；其他页面继续各自已合并实现，不宣称全站已接通。
