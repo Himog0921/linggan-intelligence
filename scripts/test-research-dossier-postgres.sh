@@ -109,6 +109,7 @@ if [[ "${1:-}" == "--ai-foundation" || "${1:-}" == "--ai-ledger" || "${1:-}" == 
     exit 0
   fi
   if [[ "${1:-}" != "--ai-writing" && "${1:-}" != "--ai-compatibility" ]]; then
+    cargo test -p linggan-intelligence --test ai_pool_cancellation_postgres --locked -- --ignored --nocapture
     AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo test -p linggan-intelligence --test ai_foundation_postgres --locked -- --ignored --nocapture
     cargo test -p linggan-api --bin linggan-api ai_settings_http_ --locked -- --ignored --nocapture
     AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo test -p linggan-intelligence --test ai_adapter_transport --locked -- --ignored --nocapture

@@ -9,6 +9,7 @@ on:
       - '.nvmrc'
       - 'crates/contracts/src/ai_*'
       - 'crates/intelligence/**'
+      - 'crates/storage-postgres/**'
       - 'apps/api/src/local_web/**'
       - 'apps/worker/**'
       - 'apps/pi-adapter/**'
