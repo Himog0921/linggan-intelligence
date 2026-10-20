@@ -1,17 +1,10 @@
 //! Versioned local workspace model configuration; no save command invokes a provider.
 use crate::{model_secrets::ModelSecretStore, research_text::valid_text};
 use linggan_storage_postgres::Database;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{Value, json};
 use sqlx::{Acquire, Postgres, Row, pool::PoolConnection};
 use uuid::Uuid;
-
-/// Browser projection of generic provider callability. It is diagnostic only; V1 research
-/// admission must use `research_model_semantically_ready_in_transaction` below.
-/// The marker always refers to the model entry alias `m`; callers supply static SQL only.
-pub(crate) fn with_model_callability(sql: &'static str) -> sqlx::AssertSqlSafe<String> {
-    sqlx::AssertSqlSafe(sql.replace("__MODEL_CALLABLE__", "COALESCE((SELECT i.state='succeeded' AND i.result->>'ok'='true' AND i.result->>'modelCallable'='true' FROM linggan_model_invocation i WHERE i.model_ref=m.model_ref AND i.operation='probe' ORDER BY i.created_at DESC,i.invocation_ref DESC LIMIT 1),false)"))
-}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ModelError {
@@ -45,6 +38,8 @@ pub enum ModelError {
     Database(#[from] sqlx::Error),
     #[error("model_source_unavailable")]
     Source,
+    #[error("ai_legacy_execution_retired")]
+    LegacyRetired,
 }
 impl ModelError {
     pub fn code(&self) -> &'static str {
@@ -64,8 +59,15 @@ impl ModelError {
             Self::SchemaMissing => "model_schema_missing",
             Self::Database(_) => "model_database_unavailable",
             Self::Source => "model_source_unavailable",
+            Self::LegacyRetired => "ai_legacy_execution_retired",
         }
     }
+}
+
+/// Permanent cutoff for the retired execution entry points, before leases, credentials or I/O.
+/// The unified executor owns the active handlers; legacy flags cannot reopen an old handler.
+pub(crate) fn legacy_execution_gate() -> Result<(), ModelError> {
+    Err(ModelError::LegacyRetired)
 }
 
 pub async fn ensure_model_schema(db: &Database) -> Result<(), ModelError> {
@@ -328,10 +330,9 @@ pub async fn save_model_connection(
     r: &SaveModelConnection,
 ) -> Result<Value, ModelError> {
     if !valid_text(&r.name, 100)
-        || !matches!(
-            r.api.as_str(),
-            "openai-completions" | "openai-responses" | "anthropic-messages"
-        )
+        || !linggan_contracts::ai_protocol::PROTOCOL["editableConnectionApis"]
+            .as_array()
+            .is_some_and(|apis| apis.iter().any(|api| api.as_str() == Some(&r.api)))
         || r.expected_revision < 0
         || r.expected_revision == i32::MAX
         || r.api_key.len() > 4096
@@ -468,68 +469,4 @@ pub async fn save_model_entry(db: &Database, r: &SaveModelEntry) -> Result<Value
     let model_ref: Uuid = row.get("model_ref");
     tx.commit().await?;
     Ok(json!({"modelRef":model_ref,"state":"UNTESTED"}))
-}
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct SaveModelConfig {
-    pub config_ref: Uuid,
-    pub expected_config_ref: Option<Uuid>,
-    pub model_ref: Uuid,
-    pub input_token_limit: i32,
-    pub output_token_limit: i32,
-    pub timeout_seconds: i32,
-    pub max_attempts: i32,
-}
-impl SaveModelConfig {
-    pub fn validate(&self) -> Result<(), ModelError> {
-        if !(1024..=32768).contains(&self.input_token_limit)
-            || !(128..=8192).contains(&self.output_token_limit)
-            || !(1..=60).contains(&self.timeout_seconds)
-            || !(1..=3).contains(&self.max_attempts)
-        {
-            Err(ModelError::Invalid)
-        } else {
-            Ok(())
-        }
-    }
-}
-pub async fn save_model_config(db: &Database, r: &SaveModelConfig) -> Result<Value, ModelError> {
-    r.validate()?;
-    let mut tx = db.pool().begin().await?;
-    let current: Option<Uuid> = sqlx::query_scalar(
-        "SELECT default_config_ref FROM linggan_model_workspace WHERE singleton FOR UPDATE",
-    )
-    .fetch_one(&mut *tx)
-    .await?;
-    if let Some(row) = sqlx::query(
-        "SELECT to_jsonb(c)-'created_at' AS config FROM linggan_model_config c WHERE config_ref=$1",
-    )
-    .bind(r.config_ref)
-    .fetch_optional(&mut *tx)
-    .await?
-    {
-        let old: Value = row.get("config");
-        let expected = json!({"config_ref":r.config_ref,"model_ref":r.model_ref,"input_token_limit":r.input_token_limit,"output_token_limit":r.output_token_limit,"timeout_seconds":r.timeout_seconds,"max_attempts":r.max_attempts});
-        if old != expected {
-            return Err(ModelError::Conflict);
-        }
-        if !research_model_semantically_ready_in_transaction(&mut tx, r.config_ref).await? {
-            return Err(ModelError::NotQualified);
-        }
-        return Ok(json!({"configRef":current,"replayed":true}));
-    }
-    if current != r.expected_config_ref {
-        return Err(ModelError::Conflict);
-    }
-    sqlx::query("INSERT INTO linggan_model_config(config_ref,model_ref,input_token_limit,output_token_limit,timeout_seconds,max_attempts) VALUES($1,$2,$3,$4,$5,$6)")
-        .bind(r.config_ref).bind(r.model_ref).bind(r.input_token_limit).bind(r.output_token_limit).bind(r.timeout_seconds).bind(r.max_attempts).execute(&mut *tx).await?;
-    if !research_model_semantically_ready_in_transaction(&mut tx, r.config_ref).await? {
-        return Err(ModelError::NotQualified);
-    }
-    sqlx::query("UPDATE linggan_model_workspace SET default_config_ref=$1 WHERE singleton")
-        .bind(r.config_ref)
-        .execute(&mut *tx)
-        .await?;
-    tx.commit().await?;
-    Ok(json!({"configRef":r.config_ref,"state":"SAVED_NO_ANALYSIS_STARTED"}))
 }

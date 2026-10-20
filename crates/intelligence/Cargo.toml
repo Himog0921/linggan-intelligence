@@ -16,6 +16,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json.workspace = true
 serde_path_to_error = "0.1.20"
 sha2 = "0.11.0"
+base64 = "=0.22.1"
+unicode-normalization = "0.1"
 url = "2.5.8"
 unicode-properties = { version = "=0.1.4", default-features = false, features = ["emoji"] }
 sqlx.workspace = true

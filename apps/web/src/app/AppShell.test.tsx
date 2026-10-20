@@ -154,13 +154,16 @@ describe('共享页头高度测量（固定抽屉的起点）', () => {
   it('页头尺寸变化与窗口缩放都会重新量，卸载时断开观察', () => {
     let notify: () => void = () => {};
     const disconnect = vi.fn();
+    const observe = vi.fn();
     class FakeResizeObserver {
       constructor(callback: () => void) { notify = callback; }
-      observe = vi.fn();
+      observe = observe;
       disconnect = disconnect;
     }
     vi.stubGlobal('ResizeObserver', FakeResizeObserver);
     const { unmount } = render(<AppShell {...props}>x</AppShell>);
+    // The measured value is the header's border-box bottom, so the border box is what must be observed.
+    expect(observe).toHaveBeenCalledWith(document.querySelector('[data-v7-shell-header]'), { box: 'border-box' });
     headerBottom = 120;
     notify();
     flushFrames();

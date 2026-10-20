@@ -1,7 +1,7 @@
 # PAGE-CONTENT-WORKBENCH-001 · 沉浸图文创作
 
 > 状态: 权威当前
-> 最后核对: 2026-10-15
+> 最后核对: 2026-10-20
 > 适用范围: WEB-REACT-001 阶段 C 的 V3 页面规格；后端沿用 #425，React 前端已派定实施
 > 事实来源: Mog 已认可V3、删除描述文字的明确要求、实施授权
 > 冲突时以谁为准: 用户最新确认、[数据合同](../../data-contracts/content-workbench-001.md)、LIDS
@@ -27,6 +27,8 @@
 - 预览/导出：同渲染器实际画幅，资源/溢出检查；正文+1封面+4内页为验收样稿。保存失败、资源缺失、生成失败分别说明；重新下载成功包与生成新版分开。
 
 ## 状态与验收
+
+#454 PR-1B写作兼容只改现有AI对话框的数据解码/回执：queued允许无调用ID，按需调用记录显示“尚未派发，未建立调用账”；未知用量不显示0，预留与实测区分。刷新/取消仍为明确动作，数据返回不自动再次派发。布局/Token/外壳与本页其余动作不变；TS、组件、lint/build为隔离证明，未据此签收正式浏览器或V3审美。
 
 source unknown/partial/restricted/changed、save pending/failed/conflict、suggestion running/failed/cancelled/stale、export rendering/failed/complete均按数据合同呈现。普通UI用中文动作和可解决问题；技术ID/版本/调用账只在按需详情。已取得数不冒充平台总量，模型未配置不冒充空建议。验收采用计划A01–A13，UI截图与实际PNG/Mog审美签收分别记录。
 

@@ -123,6 +123,7 @@ pub async fn embed_pending_signals(
     database: &Database,
     adapter: &PiAdapter,
 ) -> Result<EmbeddingOutcome, EmbeddingError> {
+    crate::model_settings::legacy_execution_gate()?;
     let Some(profile_ref) = active_profile(database).await? else {
         return Ok(EmbeddingOutcome::Stood {
             reason: "no_qualified_profile",
@@ -324,6 +325,7 @@ pub async fn probe_and_register_embedding_profile(
     database: &Database,
     adapter: &PiAdapter,
 ) -> Result<ProbeOutcome, EmbeddingError> {
+    crate::model_settings::legacy_execution_gate()?;
     let handshake = adapter.wemm_runtime_handshake().await?;
     let Some(model_revision) = handshake.model_revision.clone() else {
         return Err(EmbeddingError::Model(ModelError::InvalidOutput));

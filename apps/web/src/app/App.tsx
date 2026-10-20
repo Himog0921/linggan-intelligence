@@ -4,7 +4,7 @@ import { createBrowserRouter } from 'react-router';
 import { RouterProvider } from 'react-router/dom';
 import { ModelSettingsPage } from '../pages/settings/ModelSettingsPage';
 import { NotFoundPage } from './NotFoundPage';
-import { OPS_PATHS, COLLECTION_PATHS, CREATORS_PATH, EVIDENCE_PATH, COMMENTS_PATH, MODEL_SETTINGS_PATH, WORKBENCH_PATH, TOPICS_PATH } from './pages';
+import { OPS_PATHS, COLLECTION_PATHS, CREATORS_PATH, EVIDENCE_PATH, COMMENTS_PATH, MODEL_SETTINGS_PATH, WORKBENCH_PATH, TOPICS_PATH, OFFLINE_REVIEW_PATH } from './pages';
 
 const LoginPage = lazy(() => import('../pages/login/LoginPage').then(module => ({ default: module.LoginPage })));
 const WorkbenchPage = lazy(() => import('../pages/workbench/WorkbenchPage').then(module => ({ default: module.WorkbenchPage })));
@@ -39,6 +39,7 @@ const router = createBrowserRouter([
   ...[TargetsPage, TasksPage, DomainsPage, RuntimePage].map((Page, i) => ({ path: COLLECTION_PATHS[i], element: <Suspense fallback={<p role="status">正在打开采集页面…</p>}><Page key={collectionPages[i]} /></Suspense> })),
   ...OPS_PATHS.map(path => ({ path, element: <Suspense fallback={<p role="status">正在打开运营页面…</p>}><OpsPage /></Suspense> })),
   { path: TOPICS_PATH, HydrateFallback: () => <p role="status">正在打开主题图谱…</p>, lazy: async () => ({ Component: (await import('../pages/topics/TopicsPage')).TopicsPage }) },
+  { path: OFFLINE_REVIEW_PATH, HydrateFallback: () => <p role="status">正在打开离线预演…</p>, lazy: async () => ({ Component: (await import('../pages/topics/offline/OfflineReviewPage')).OfflineReviewPage }) },
   { path: '/topics/:canonical_key', HydrateFallback: () => <p role="status">正在打开 Topic 工作区…</p>, lazy: async () => ({ Component: (await import('../pages/topics/WorkspacePage')).WorkspacePage }) },
   { path: '*', element: <NotFoundPage /> },
 ]);

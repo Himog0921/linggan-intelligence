@@ -1,3 +1,8 @@
+mod ai_settings;
+#[cfg(test)]
+mod ai_settings_browser_tests;
+#[cfg(test)]
+mod ai_settings_tests;
 mod collection;
 mod collection_command_api;
 mod collection_dispatch;
@@ -58,6 +63,9 @@ mod material_projection_tests;
 #[cfg(test)]
 mod material_replica_fallback_tests;
 mod model_settings;
+mod offline_preview;
+#[cfg(test)]
+mod offline_preview_tests;
 mod ops;
 mod ops_api;
 #[cfg(test)]
@@ -369,6 +377,8 @@ fn router(state: LocalWebState) -> Router {
         .merge(topic_map::routes(state.database.database().cloned()))
         .merge(comment_study::routes())
         .merge(model_settings::routes())
+        .merge(ai_settings::routes())
+        .merge(offline_preview::routes())
         .merge(web_app::routes())
         .merge(ops::routes())
         .merge(content_workbench_api::routes())
@@ -381,12 +391,42 @@ fn router(state: LocalWebState) -> Router {
 
 fn material_api_routes() -> Router<LocalWebState> {
     Router::new()
-        .route("/api/local/work-resources/{public_ref}/research-dossier", get(research_dossier::read).layer(axum::middleware::from_fn(comment_study::local_comment_study_guard)))
-        .route("/api/local/work-resources/{public_ref}/research-dossier/note-material", get(research_dossier::note_material).layer(axum::middleware::from_fn(comment_study::local_comment_study_guard)))
-        .route("/api/local/work-resources/{public_ref}/research-dossier/creator-preview", get(research_dossier::creator_preview).layer(axum::middleware::from_fn(comment_study::local_comment_study_guard)))
-        .route("/api/local/work-resources/{public_ref}/research-dossier/comments", get(research_dossier::comments).layer(axum::middleware::from_fn(comment_study::local_comment_study_guard)))
-        .route("/api/local/work-resources/{public_ref}/research-dossier/relayer-plan", get(research_dossier::plan).layer(axum::middleware::from_fn(comment_study::local_comment_study_guard)))
-        .route("/api/local/work-resources/{public_ref}/research-dossier/relayer", post(research_dossier::relayer).layer(axum::middleware::from_fn(comment_study::local_comment_study_guard)))
+        .route(
+            "/api/local/work-resources/{public_ref}/research-dossier",
+            get(research_dossier::read).layer(axum::middleware::from_fn(
+                comment_study::local_comment_study_guard,
+            )),
+        )
+        .route(
+            "/api/local/work-resources/{public_ref}/research-dossier/note-material",
+            get(research_dossier::note_material).layer(axum::middleware::from_fn(
+                comment_study::local_comment_study_guard,
+            )),
+        )
+        .route(
+            "/api/local/work-resources/{public_ref}/research-dossier/creator-preview",
+            get(research_dossier::creator_preview).layer(axum::middleware::from_fn(
+                comment_study::local_comment_study_guard,
+            )),
+        )
+        .route(
+            "/api/local/work-resources/{public_ref}/research-dossier/comments",
+            get(research_dossier::comments).layer(axum::middleware::from_fn(
+                comment_study::local_comment_study_guard,
+            )),
+        )
+        .route(
+            "/api/local/work-resources/{public_ref}/research-dossier/relayer-plan",
+            get(research_dossier::plan).layer(axum::middleware::from_fn(
+                comment_study::local_comment_study_guard,
+            )),
+        )
+        .route(
+            "/api/local/work-resources/{public_ref}/research-dossier/relayer",
+            post(research_dossier::relayer).layer(axum::middleware::from_fn(
+                comment_study::local_comment_study_guard,
+            )),
+        )
         .route(
             "/api/local/media/{materialization_ref}/{sha256}",
             get(local_media_routes::materialization),

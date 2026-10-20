@@ -1,4 +1,4 @@
-//! No automatic dispatch: only a confirmed creation request enters the single-call executor.
+//! Confirmed requests are queued atomically; only the independent AI service dispatches them.
 use super::LocalWebState;
 use axum::{
     Json, Router,
@@ -8,9 +8,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use linggan_intelligence::{
-    content_workbench_ai as ai, model_secrets::model_secret_store, pi_adapter::PiAdapter,
-};
+use linggan_intelligence::content_workbench_ai as ai;
 use uuid::Uuid;
 pub(super) fn routes() -> Router<LocalWebState> {
     Router::new()
@@ -27,6 +25,11 @@ pub(super) fn routes() -> Router<LocalWebState> {
 fn respond(result: Result<serde_json::Value, ai::AiError>) -> Response {
     match result {
         Ok(v) => Json(v).into_response(),
+        Err(ai::AiError::AdmissionDenied(reasons)) => (
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({"error":"creation_ai_admission_denied","reasons":reasons})),
+        )
+            .into_response(),
         Err(e) => super::local_read_json_error(
             match e {
                 ai::AiError::Invalid => StatusCode::BAD_REQUEST,
@@ -64,17 +67,7 @@ async fn execute(State(s): State<LocalWebState>, Json(r): Json<ai::ExecuteReques
             "read_model_not_connected",
         );
     };
-    let result = ai::execute(db, &r).await;
-    if result.is_ok() {
-        let db = db.clone();
-        let id = r.request_id;
-        tokio::spawn(async move {
-            let secrets = model_secret_store();
-            let adapter = PiAdapter::configured();
-            let _ = ai::run_request(&db, id, secrets.as_ref(), &adapter).await;
-        });
-    }
-    respond(result)
+    respond(ai::execute(db, &r).await)
 }
 async fn status(State(s): State<LocalWebState>, Path(id): Path<Uuid>) -> Response {
     let Some(db) = s.database.database() else {

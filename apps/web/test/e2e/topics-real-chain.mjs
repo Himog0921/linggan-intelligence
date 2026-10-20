@@ -405,30 +405,20 @@ try {
     },
   );
   await step(
-    "research settings and policy pause/resume receive scoped real receipts without dispatch",
+    "retired research preserves history and central settings without configuration or dispatch",
     async () => {
       await go();
       await action("research");
-      const settings = page
-        .locator("details")
-        .filter({ has: page.locator('form[data-form="research-config"]') });
-      await settings.locator("summary").click();
-      const form = page.locator('form[data-form="research-config"]');
-      await form
-        .locator('[name="modelConfigRef"]')
-        .selectOption(fixture.modelConfigRef);
-      await form.locator('[name="dailyTokenLimit"]').fill("50000");
-      await form.locator('[name="runTokenLimit"]').fill("10000");
-      const result = await submit(form);
-      assert.equal(result.status, 200);
-      assert.equal(result.body.state, "configured");
-      assert.equal(result.body.domainRef, domain);
-      await action("research-domain-pause");
-      await page
-        .locator('dialog [data-action="research-domain-resume"]')
-        .waitFor();
-      await action("research-domain-resume");
-      await settled();
+      const dialog=page.getByRole("dialog",{name:"AI 状态与历史研究"});await dialog.waitFor();
+      assert.equal(await dialog.getByRole("link",{name:"去 AI 设置"}).getAttribute("href"),"/settings/models?section=automation&task=legacy_topic_map");
+      assert.equal(await dialog.locator('form[data-form="research-config"]').count(),0);
+      const refreshed=page.waitForResponse(r=>r.request().method()==="GET"&&r.url().includes("/topic-map/research?"));
+      await dialog.getByRole("button",{name:"刷新历史记录"}).click();assert.equal((await refreshed).status(),200);
+      const response=await page.request.post(origin+"/api/local/topic-map/research/commands",{data:{
+        action:"configure",requestRef:crypto.randomUUID(),domainRef:domain,modelConfigRef:fixture.modelConfigRef,
+        dailyTokenLimit:50000,runTokenLimit:10000,automaticEnabled:true,collectionEnabled:false,
+      }});
+      assert.equal(response.status(),410);assert.equal((await response.json()).error,"ai_legacy_execution_retired");
       await close();
     },
   );

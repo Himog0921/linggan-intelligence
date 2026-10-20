@@ -68,3 +68,9 @@ apps/web、`apps/api/src/local_web/web_app.rs` 及其测试 `web_app_tests.rs` �
 - 读取回执：项目AGENTS、治理/UI执行合同、LIDS单源与Q01–Q12、PAGE-EVIDENCE-001、当前EvidencePage/Controls/query/Inspector/CoverCard/媒体/列表及测试。历史PAGE的旧视觉/几何测量场按已确认Q12替代，不推翻材料/资格/状态语义。历史溢出修复只作检查线索，按当前DOM重新验证。
 
 证明目录固定implementation-21-evidence（先登记后生成），更改前hash基于当前已优化候选，不以HEAD冒充页面基线。保留创作者续修的全部未提交改动。本阶段无提交/合并/部署。
+
+## 2026-10-20 · Mog授权#457/#458依赖整合与3000发布
+
+当前对话Mog已接受采集候选并明确授权核对两PR、无问题合并并部署。#457@6fdbe9a1与main@2dc1f520冲突，本轮由root在专属lids-release-integration-001整合现有来源：保留主线AI-GEN1离线评审/策略读写，套用本包LIDS UI；不创造第三种产品语义。冲突涉及CreatorPolicyDialog/CreatorWrites回归、creators/settings浏览器证明与文档索引/迁移日志/注册表/进度。保留两边断言和已确认语义，先前审查仅历史依据，最终树另做commit-reviewer与自动检查。
+
+表面/状态/权限沿两包既定合同；新增依赖图为main→#457→#458，验收精确head、CI、隔离真实库/浏览器、实际main/runtime/PID/3000页面。部署只用当前main installer，保留禁用worker，未提供数据库不可逆处置、真实模型/平台/采集授权。证据沿已登记/tmp/collection-lids-ui-001/release-01/，不入Git，不改原#457工作树。

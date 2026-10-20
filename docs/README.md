@@ -446,3 +446,8 @@ LIDS 模块索引：[字体](design/lids/typography.md)、[区域](design/lids/r
 - [COLLECTION-LIDS-UI-001：采集三页 UI 变更清单](design/changes/collection-lids-ui-001-ui-change-manifest.md) · 活跃计划；当前对话派定，依赖 #457 已提交设计基础。
 
 - [COLLECTION-LIDS-UI-001：采集三页前端验收](design/acceptance/collection-lids-ui-001-acceptance.md) · 一次性报告；候选源码/自动检查/真实只读浏览器证据，未部署。
+
+
+AI-GEN1 PR-1B 当前执行：[底座实施包](plans/active/ai-gen1-pr1b-foundation.md)；[AI底座合同](data-contracts/ai-foundation.md)。同一主任务继续，依赖未合并的#455；运行/数据/真实调用授权不继承编码目标。
+
+- [AI-GEN1 C0离线计划](plans/active/ai-gen1-pr1c0-offline.md)：离线合同/合成流程，C1真实启用另计；[离线合同](data-contracts/note-interpretation-offline.md)。

@@ -18,15 +18,9 @@ worker_update_permit="${LINGGAN_WORKER_UPDATE_PERMIT_PATH:-$support_dir/runtime-
 
 log() { print -r -- "[sync] $*"; }
 
-has_worker_update_permit() {
-  local expected_from="$1" expected_target="$2" state from target
-  [[ -f "$worker_update_permit" ]] || return 1
-  state="$(awk -F= '$1 == "state" { print $2; exit }' "$worker_update_permit")"
-  from="$(awk -F= '$1 == "from" { print $2; exit }' "$worker_update_permit")"
-  target="$(awk -F= '$1 == "target" { print $2; exit }' "$worker_update_permit")"
-  [[ "$from" == "$expected_from" && "$target" == "$expected_target" \
-    && ( "$state" == "drained" || "$state" == "no_worker" || "$state" == "no_inflight_bootstrap" ) ]]
-}
+guard_source_root="${LINGGAN_RUNTIME_SOURCE_DIR:-$runtime_main}"
+runtime_env="$runtime_main/.env"
+source "$guard_source_root/scripts/runtime/drain.zsh"
 
 cd "$runtime_main"
 
@@ -55,11 +49,11 @@ previous="$(git rev-parse --short HEAD)"
 if git fetch --quiet origin main 2>/dev/null; then
   target="$(git rev-parse origin/main)"
   current_full="$(git rev-parse HEAD)"
-  if [[ "$current_full" != "$target" ]] && ! has_worker_update_permit "$current_full" "$target"; then
-    log "拒绝切换 ${current_full:0:7} → ${target:0:7}：没有匹配的 worker drain 回执"
+  if [[ "$current_full" != "$target" ]] && ! runtime_check_permit "$current_full" "$target"; then
+    log "拒绝切换 ${current_full:0:7} → ${target:0:7}：没有匹配的巡检/AI与数据库排空许可"
     exit 1
   fi
-  git reset --quiet --hard "$target"
+  if [[ "$current_full" != "$target" ]]; then git reset --quiet --hard "$target"; fi
   current="$(git rev-parse --short HEAD)"
   [[ "$previous" == "$current" ]] && log "已是最新 origin/main（${current}）" \
                                   || log "同步 ${previous} → ${current}"
@@ -78,7 +72,7 @@ pending=()
 migration_head=""
 # 按 id 排序读：下面的循环只关心「某个 id 在不在」，排序是为了让**最后一行就是台账头**
 # （写进 runtime-identity.json 的那个值）。迁移 id 是零填充的（`0098`），字典序即顺序。
-if applied="$(docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" \
+if applied="$(PGPASSWORD="$POSTGRES_PASSWORD" docker exec --env PGPASSWORD \
       "${LINGGAN_POSTGRES_CONTAINER:-linggan-intelligence-postgres-1}" \
       psql -X -At -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
       -c 'SELECT migration_id FROM linggan_local_schema_migration ORDER BY migration_id' 2>/dev/null)"; then
@@ -113,14 +107,14 @@ build_log="${build_dir}/sync-build.log"
 mkdir -p "$build_dir"
 print -r -- "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] build revision ${current}" >> "$build_log"
 log "构建 revision ${current}（完整输出：${build_log}）"
-if ! cargo build --quiet --bin linggan-api --bin linggan-worker --bin linggan-media-worker \
+if ! cargo build --quiet --bin linggan-api --bin linggan-worker --bin linggan-media-worker --bin linggan-ai-worker \
      >>"$build_log" 2>&1; then
   log "构建失败；最近 20 行如下，完整输出见 ${build_log}"
   tail -n 20 "$build_log" | while IFS= read -r line; do log "  ${line}"; done
   exit 1
 fi
 
-for binary in linggan-api linggan-worker linggan-media-worker; do
+for binary in linggan-api linggan-worker linggan-media-worker linggan-ai-worker; do
   [[ -x "target/debug/${binary}" ]] || { log "构建后仍找不到 target/debug/${binary}"; exit 1; }
 done
 
@@ -134,7 +128,7 @@ if ! ./scripts/runtime/prepare-web.sh --build "$current" >>"$build_log" 2>&1; th
   exit 1
 fi
 
-# The independent comment loop runs inside linggan-worker. It needs the real SDK even
+# The independent AI executor needs the pinned SDK even
 # when launchd has no nvm shell initialization. This installs only fixed local packages.
 ./scripts/runtime/prepare-pi-adapter.sh --install
 
@@ -145,12 +139,13 @@ fi
 # **先写临时文件再改名**：三个服务会同时启动并读这个文件，写一半被读到的话，读到的会是一个
 # 残缺的 JSON——进程按约定报 `unknown`，于是「刚部署完却看不出 revision」。同一个目录里的
 # 改名是原子的，读到的要么是旧的一份、要么是新的完整一份。
+identity_revision="$(git rev-parse HEAD)"
 identity_file="${LINGGAN_RUNTIME_IDENTITY_PATH:-$support_dir/runtime-identity.json}"
 identity_tmp="${identity_file}.tmp.$$"
 mkdir -p "${identity_file:h}"
 {
   print -r -- '{'
-  print -r -- "  \"revision\": \"${current}\","
+  print -r -- "  \"revision\": \"${identity_revision}\","
   print -r -- "  \"builtAt\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\","
   if [[ -n "$migration_head" ]]; then
     print -r -- "  \"migrationHead\": \"${migration_head}\""

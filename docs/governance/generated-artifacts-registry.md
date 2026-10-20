@@ -415,3 +415,24 @@ LIDS-UI-001 实际复用目录为既有 apps/web/src/shared/（Sidebar/inputMeth
 ## COLLECTION-LIDS-UI-001 私有检查产物
 
 来源：本包构建、GET桥与浏览器检查。固定位置：`/tmp/collection-lids-ui-001/`；截图/日志/preview.mjs私有不入Git。桥拒绝非GET/HEAD。再生：前端verify/build及preview.mjs；负责人root。审阅后只清理自有临时目录。dist/node_modules沿既有登记。
+
+
+## AI-GEN1 / PR-1B
+
+私有证据固定在本工作树 `artifacts/private/ai-gen1-pr1b/`，Rust/Node、合成PG/browser、源码定位与收尾审查日志忽略、不提交；生成来源为本包实际命令，不得伪造。只创建脚本拥有的一次性PG/卷/临时目录并清理，不读取共享DSN或真实秘密。Pi依赖仍按现有精确lock在本工作树 `apps/pi-adapter/node_modules/` 安装，忽略、不手改；不借用runtime-main依赖写入。
+
+`crates/contracts/src/ai_limits.json` 是手写的版本化运行合同源，允许入Git，不是模型能力记录或生成物；Rust/Node读取同源，SQL迁移的冻结副本用测试核对，部署脚本消费合同推导排空上限。更改上限须新合同/迁移与相关检查，不回写旧migration。
+
+AI-GEN1 PR-1B的writing-*日志来自0140、实际SDK写作/迁移与前端类型/组件/lint/build命令，沿上述private路径保留失败与最终结果，不入Git。Web依赖在本树apps/web/node_modules按现有package-lock执行npm ci --ignore-scripts，仍忽略；dist沿既有网页构建登记，不把build当部署。旧写作fake child优先归入runner拥有的资产根，并以Drop回收；首次失败残留的精确临时目录已凭脚本/所有权/时段核验清理，未做泛化临时目录清扫。
+
+AI-GEN1 PR-1B独立进程增量：`artifacts/private/ai-gen1-pr1b/service-*.log`由本包实际编译/owned隔离runner生成，忽略、不入Git。进程证明的ack/身份/adapter输出只放runner拥有的`ledger-assets.*`目录，终止并回收自有进程后由该runner删除；不接入共享运行目录或读取真实凭据。人工维护入口/调度/测试为源文件，按原WP3 Claim入Git。
+
+独立AI进程proof默认使用runner的`ledger-assets.*`作为所有子进程ack/日志根；单独运行无数据库的worker单测时，只允许系统临时目录下由该用例exclusive创建的`linggan-ai-worker-proof-<UUID>`，Drop先回收自己的PID再删除精确自有目录。首次并发锁升级超时日志保留为`service-first-concurrency-failure.log`；修复后的证明覆盖4/8实际并发和轮次结算。禁止为这些proof运行会读取共享`.env`和启动开发库的旧`test-local-runtime.sh`。
+
+AI-GEN1 PR-1B安装接续：人工维护源码为`scripts/runtime/ai_guard.py`、`scripts/runtime/ai_snapshot.py`、`scripts/runtime/drain.zsh`、`scripts/runtime/plist.zsh`、相关install/sync/launch与`scripts/runtime/tests/*.py`，允许入Git。证明日志固定`artifacts/private/ai-gen1-pr1b/install-*.log`；所有fake-repo/fake-runtime/替身命令/plist/收条只在该private目录下exclusive创建的`install-proof.<UUID>`，finally回收测试子进程并只删除自有根。真实运行时的disabled快照、AI收条与更新许可放在既有support/runtime-drain，由安装/进程原子生成，不入Git；不能将替身结果当作本机launchd或共享数据库证明。
+
+安装接续的真实进程/PG证明由`--ai-install`同一owned runner执行；patrol证明目录优先放在runner的ledger-assets下，直接执行对应单测时只允许自建`linggan-patrol-proof-<UUID>`/`linggan-drain-proof-<UUID>`，由持有的Child guard回收。CLI控制用例的四个dummy进程用独立session创建，finally只回收该自有process group。`install-first-compile-failure.log`保留SQLx动态SQL边界适配前的编译失败；`install-local-children-first-observer-failure.log`保留dummy子进程继承observer pipe的超时，fixture重定向后证明通过。这些都是过程证据，不作为产品失败计数。Python入口禁写项目字节码，日志均忽略不提交；不运行共享dev DB的旧test-local-runtime.sh。
+
+AI-GEN1正式设置页候选：人工维护的apps/web/src/pages/settings分区/闭集解码/交互测试及ai_foundation样本读口是入Git源码。实际React/TS/lint/build/owned浏览器输出固定private/ai-gen1-pr1b/settings-*，不入Git；浏览器只连owned loopback，素材/skill包来自自有fixture目录，不读取真实用户目录或运行模型。页面构建仍在apps/web/dist，使用原Web治理生命周期。
+
+AI-GEN1 C0：人工维护离线合同/固定合成fixture/页面与纯合成测试/计划允许入Git；验证输出固定本独立树`artifacts/private/ai-gen1-pr1c0/`，忽略不提交，无真实材料或共享DB。CI同一浏览器证据放自有`$RUNNER_TEMP/web-app-proof/c0-offline/`，随既有Web artifact归档；截图/report/临时fixture.json不入Git。B自有target已移交本C0树target，不碰runtime-main；删除工作树前保留需要的私有日志。

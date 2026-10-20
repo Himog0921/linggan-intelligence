@@ -1,0 +1,72 @@
+name: AI-GEN1 foundation proof
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/ai-gen1-foundation.yml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.nvmrc'
+      - 'crates/contracts/src/ai_*'
+      - 'crates/intelligence/**'
+      - 'crates/storage-postgres/**'
+      - 'apps/api/src/local_web/**'
+      - 'apps/worker/**'
+      - 'apps/pi-adapter/**'
+      - 'database/migrations/**'
+      - 'scripts/runtime/**'
+      - 'scripts/local-runtime.sh'
+      - 'scripts/test-research-dossier-postgres.sh'
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+concurrency:
+  group: ai-gen1-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  synthetic-foundation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_PROFILE_TEST_DEBUG: '0'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version-file: .nvmrc
+      - name: Matching Rust and locked SDK
+        run: |
+          rustup toolchain install 1.95.0 --profile minimal --component rustfmt
+          rustup default 1.95.0
+          npm ci --prefix apps/pi-adapter --ignore-scripts --no-audit --no-fund
+          mkdir -p artifacts/private/ai-gen1-pr1b
+      - name: Runtime proof shell
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends zsh
+      - name: Contracts, library and pinned SDK tests
+        run: |
+          cargo test -p linggan-contracts --lib --locked
+          cargo test -p linggan-intelligence --lib --locked
+          npm --prefix apps/pi-adapter test
+      - name: Owned PostgreSQL foundation, transport and writing upgrade
+        run: bash scripts/test-research-dossier-postgres.sh --ai-foundation 2>&1 | tee artifacts/private/ai-gen1-pr1b/ci-foundation.log
+      - name: Actual executor concurrency, fault and process proofs
+        run: bash scripts/test-research-dossier-postgres.sh --ai-service 2>&1 | tee artifacts/private/ai-gen1-pr1b/ci-service.log
+      - name: Copied installer guard and patrol ownership
+        run: bash scripts/test-research-dossier-postgres.sh --ai-install 2>&1 | tee artifacts/private/ai-gen1-pr1b/ci-install.log
+      - name: Historical material read qualification
+        run: bash scripts/test-research-dossier-postgres.sh --ai-readonly 2>&1 | tee artifacts/private/ai-gen1-pr1b/ci-readonly.log
+      - name: Governance and whitespace
+        run: |
+          bash scripts/check-project-governance.sh origin/main
+          bash scripts/verify-ui-design-handbook.sh
+          git diff --check

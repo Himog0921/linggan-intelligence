@@ -1,0 +1,198 @@
+{
+  "contract": "ai-adapter-protocol.v1",
+  "wireVersion": "linggan.pi.v1/0.85.1",
+  "sdkVersion": "0.85.1",
+  "thinkingLevels": [
+    "off",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "apis": {
+    "openai-completions": {
+      "defaults": {
+        "supportsStore": false,
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": true,
+        "supportsUsageInStreaming": true,
+        "supportsFinishReason": true,
+        "maxTokensField": "max_tokens",
+        "requiresToolResultName": false,
+        "requiresAssistantAfterToolResult": false,
+        "requiresThinkingAsText": false,
+        "requiresReasoningContentOnAssistantMessages": false,
+        "thinkingFormat": "openai",
+        "supportsStrictMode": false,
+        "sendSessionAffinityHeaders": false,
+        "sessionAffinityFormat": "openai-nosession",
+        "supportsLongCacheRetention": false
+      },
+      "booleans": [
+        "supportsStore",
+        "supportsDeveloperRole",
+        "supportsReasoningEffort",
+        "supportsUsageInStreaming",
+        "supportsFinishReason",
+        "requiresToolResultName",
+        "requiresAssistantAfterToolResult",
+        "requiresThinkingAsText",
+        "requiresReasoningContentOnAssistantMessages",
+        "zaiToolStream",
+        "supportsThinkingTokenBudget",
+        "supportsOpenAIGrammarTools",
+        "supportsStrictMode",
+        "sendSessionAffinityHeaders",
+        "supportsLongCacheRetention"
+      ],
+      "enums": {
+        "maxTokensField": [
+          "max_completion_tokens",
+          "max_tokens"
+        ],
+        "thinkingFormat": [
+          "openai",
+          "openrouter",
+          "deepseek",
+          "together",
+          "baseten",
+          "zai",
+          "qwen",
+          "chat-template",
+          "qwen-chat-template",
+          "string-thinking",
+          "ant-ling"
+        ],
+        "thinkingTokenBudgetField": [
+          "thinking_token_budget",
+          "thinking_budget",
+          "thinking_budget_tokens"
+        ],
+        "cacheControlFormat": [
+          "anthropic"
+        ],
+        "sessionAffinityFormat": [
+          "openai",
+          "openai-nosession",
+          "openrouter"
+        ],
+        "deferredToolsMode": [
+          "kimi"
+        ]
+      },
+      "templates": [
+        "chatTemplateKwargs",
+        "chatTemplateArgs"
+      ],
+      "numbers": {
+        "vllmPriority": {
+          "min": -2147483648,
+          "max": 2147483647
+        }
+      },
+      "outputModes": [
+        "prompt_only",
+        "json_object",
+        "json_schema"
+      ]
+    },
+    "openai-responses": {
+      "defaults": {
+        "supportsDeveloperRole": true,
+        "supportsLongCacheRetention": false,
+        "supportsStrictMode": false,
+        "supportsOpenAIGrammarTools": false,
+        "supportsAdditionalTools": false,
+        "supportsToolSearch": false,
+        "supportsExplicitPromptCacheMode": false,
+        "supportsMaxOutputTokens": true,
+        "sessionAffinityFormat": "openai-nosession"
+      },
+      "booleans": [
+        "supportsDeveloperRole",
+        "supportsLongCacheRetention",
+        "supportsStrictMode",
+        "supportsOpenAIGrammarTools",
+        "supportsAdditionalTools",
+        "supportsToolSearch",
+        "supportsExplicitPromptCacheMode",
+        "supportsMaxOutputTokens"
+      ],
+      "enums": {
+        "sessionAffinityFormat": [
+          "openai",
+          "openai-nosession",
+          "openrouter"
+        ]
+      },
+      "templates": [],
+      "numbers": {},
+      "outputModes": [
+        "prompt_only",
+        "json_object",
+        "json_schema"
+      ]
+    },
+    "anthropic-messages": {
+      "defaults": {
+        "supportsEagerToolInputStreaming": false,
+        "supportsLongCacheRetention": false,
+        "sendSessionAffinityHeaders": false,
+        "supportsCacheControlOnTools": false,
+        "supportsTemperature": false,
+        "forceAdaptiveThinking": false,
+        "allowEmptySignature": false,
+        "supportsStrictTools": false,
+        "supportsMidConvoEffort": false,
+        "supportsToolReferences": false
+      },
+      "booleans": [
+        "supportsEagerToolInputStreaming",
+        "supportsLongCacheRetention",
+        "sendSessionAffinityHeaders",
+        "supportsCacheControlOnTools",
+        "supportsTemperature",
+        "forceAdaptiveThinking",
+        "allowEmptySignature",
+        "supportsStrictTools",
+        "supportsMidConvoEffort",
+        "supportsToolReferences"
+      ],
+      "enums": {},
+      "templates": [],
+      "numbers": {},
+      "outputModes": [
+        "prompt_only",
+        "json_schema"
+      ],
+      "minBudgetThinkingTokens": 1024,
+      "minThinkingAnswerTokens": 1024
+    },
+    "local-wemm-runtime": {
+      "defaults": {},
+      "booleans": [],
+      "enums": {},
+      "templates": [],
+      "numbers": {},
+      "outputModes": [
+        "prompt_only"
+      ]
+    }
+  },
+  "legacyTopicContracts": [
+    "topic-map.research.v2",
+    "topic-map.resolve.v1",
+    "topic-map.research.v3",
+    "topic-map.resolve.v2",
+    "topic-map.extract.compact.v1",
+    "topic-map.extract.quotes.v1",
+    "topic-map.verify.v1"
+  ],
+  "editableConnectionApis": [
+    "openai-completions",
+    "openai-responses",
+    "anthropic-messages"
+  ]
+}

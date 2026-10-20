@@ -94,7 +94,9 @@ export function AppShell({ className, active, activeState, collectionState, boun
     // useLayoutEffect 在绘制前先量一次，避免 portal 在首帧沿用 CSS 的估算值。
     measure();
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(schedule);
-    observer?.observe(shellHeader);
+    // The measured value is the header's border-box bottom, so observe the border box: a change of the header's own
+    // padding or border moves that bottom without touching its content box, which the default observation would miss.
+    observer?.observe(shellHeader, { box: 'border-box' });
     window.addEventListener('resize', schedule);
     // 窄屏页头随文档一起滚出视口时，fixed portal 也必须跟随当前可见下沿。
     window.addEventListener('scroll', schedule, { passive: true });

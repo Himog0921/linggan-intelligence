@@ -196,6 +196,8 @@ async function tabTo(locator) {
 async function assertV8EnabledActionStates(locator) {
   const idle=`${m2.buttonShadow}px ${m2.buttonShadow}px 0px 0px`,lifted=`${m2.buttonShadow+m2.hoverLift}px ${m2.buttonShadow+m2.hoverLift}px 0px 0px`;
   await page.emulateMedia({reducedMotion:'no-preference'});await locator.scrollIntoViewIfNeeded();await page.mouse.move(0,0);
+  // A hover transition from the previous state can still be running on a slow runner; measure the idle state once it has settled.
+  await until(async()=>{const s=await v8Style(locator);return s.shift[0]===0&&s.shadow.includes(idle);},'the idle state settles before it is measured');
   let style=await recordV8('default',locator);assert.equal(style.family,'v8');assert.equal(style.variant,'primary');assert.equal(style.background,'rgb(198, 50, 20)');assert.equal(style.radius,'0px');assert.equal(style.borderWidth,'2px');assert.equal(style.borderColor,'rgb(11, 15, 18)');shadowHas(style,idle);
   assert.equal(style.before.width,m2.buttonTail,'M2 primary keeps a fixed right-edge texture strip');assert.equal(style.before.size,`${m2.buttonPitch}px ${m2.buttonPitch}px`);assert.match(style.before.image,/conic-gradient/);assert.match(style.before.image,new RegExp(String(m2.buttonOpacity).replace('.','\\.')));assert.match(style.before.mask,/linear-gradient/);
   await locator.hover();await until(async()=>{const s=await v8Style(locator);return s.shift[0]===-m2.hoverLift&&s.shadow.includes(lifted);},'M2 hover lifts the primary action');style=await recordV8('hover',locator);assert.deepEqual(style.shift,[-m2.hoverLift,-m2.hoverLift]);shadowHas(style,lifted);assert.equal(style.before.width,m2.buttonTail,'hover does not widen the texture strip');
@@ -233,7 +235,7 @@ async function generateWithV8BusyProof(locator) {
 
 try {
   await step('设置页不加载创作模块或本地图页字体',async()=>{
-    await page.goto(`${origin}/settings/models`);await page.getByRole('heading',{name:'评论研究的模型设置'}).waitFor();
+    await page.goto(`${origin}/settings/models`);await page.getByRole('heading',{name:'AI 设置'}).waitFor();
     const resources=await page.evaluate(()=>performance.getEntriesByType('resource').map(entry=>entry.name));
     assert.ok(resources.every(url=>!url.includes('WorkbenchPage')&&!url.includes('noto-sans-sc')));
     report.settingsResources=resources.map(url=>new URL(url).pathname);

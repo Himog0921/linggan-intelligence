@@ -158,9 +158,3 @@ export interface RegisterReceipt {
   lifecycleState: string | null;
   monitoringEnabled: boolean | null;
 }
-
-export interface ModelChoice {
-  configRef: string;
-  /** 给人看的名字：连接 / 模型 ID；查不到模型记录时才退回到「默认研究配置」。 */
-  label: string;
-}

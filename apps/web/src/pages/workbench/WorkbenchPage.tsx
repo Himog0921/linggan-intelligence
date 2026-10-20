@@ -981,7 +981,7 @@ function WorkEditor({
 <p>{preview.methodVersion} · {preview.modelRef} · {preview.connectionVersionRef}</p>
 </details>
 <label>本次额度（token）<input type="number" min={preview.reservedTokens} aria-label="本次调用额度" disabled={aiUnknown || aiBusy} value={budget} onChange={e => setBudget(e.target.value)} />
-</label>
+</label><p>按配置的输入与输出上限预留，实测用量明确后释放差额；未知用量继续占用预留。</p>
 <label>
 <input type="checkbox" disabled={aiUnknown || aiBusy} checked={confirmed} onChange={e => setConfirmed(e.target.checked)} />确认这次输入和额度，执行一次</label>
 <ActionButton variant="primary" busy={aiBusy} disabled={!confirmed || aiBusy || dirty || Number(budget) < preview.reservedTokens} onClick={() => void executeAi()}>{aiUnknown ? '核实原请求并重试' : '执行一次'}</ActionButton>
@@ -999,11 +999,11 @@ function WorkEditor({
 </section>)}<ActionButton variant="primary" disabled={busy || dirty || ai.staleBase || ai.inputRevision !== revision.id} onClick={() => void adopt(null, null, true)}>采用全部建议</ActionButton>
 </> : null}<details>
 <summary>调用记录</summary>
-<p>{ai.methodVersion} · {ai.invocationRef}</p><pre>{JSON.stringify({
+<p>{ai.methodVersion} · {ai.invocationRef ?? '尚未派发'}</p><pre>{JSON.stringify({
                 state: ai.state,
                 failureCode: ai.failureCode
               }, null, 2)}</pre>
-<p>输入 {ai.usage.inputTokens ?? '未知'} / 输出 {ai.usage.outputTokens ?? '未知'} / 费用 {ai.usage.costUsd ?? '未知'}</p>
+{ai.usage.state === 'not_reserved' ? <p>尚未派发，未建立调用账。</p> : <p>输入 {ai.usage.inputTokens ?? '未知'} / 输出 {ai.usage.outputTokens ?? '未知'} / 费用 {ai.usage.costUsd ?? '未知'}</p>}
 </details>
 </section> : null}{feedback ? <p role="alert" className={styles.error}>{feedback}</p> : null}</div>
 </Modal> : null}

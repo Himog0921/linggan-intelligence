@@ -24,7 +24,6 @@ import type {
   Fragment,
   Judgement,
   ManualEntry,
-  ModelChoice,
   Observation,
   RegisterReceipt,
   Work,
@@ -269,25 +268,6 @@ export function parseRegisterReceipt(value: unknown): RegisterReceipt {
   }));
 }
 
-/**
- * 分析用的模型配置选项。只取页面需要的两样：默认研究配置的编号，以及用来给它起人话名字的模型/连接名。
- * 不要求模型设置页的全部字段都在——设置页别处的结构变化不应让这里的对话框打不开。
- */
-export function parseModelChoices(value: unknown): ModelChoice[] {
-  return decode(value, root => {
-    const config = optObj(root, 'config');
-    if (config === null) return [];
-    const configRef = str(config, 'configRef');
-    const modelRef = optStr(config, 'modelRef');
-    const models = Array.isArray(root.models) ? root.models.filter(isRecord) : [];
-    const model = models.find(row => row.modelRef === modelRef);
-    const modelId = model && typeof model.modelId === 'string' ? model.modelId : null;
-    const connection = model && typeof model.connectionName === 'string' ? model.connectionName : null;
-    const label = modelId ? (connection ? `${connection} / ${modelId}` : modelId) : '默认研究配置';
-    return [{ configRef, label }];
-  });
-}
-
 // ───────────────────────── 请求 ─────────────────────────
 
 export async function fetchCreators(domain: string, query: CreatorQuery, signal?: AbortSignal): Promise<CreatorList> {
@@ -301,10 +281,6 @@ export async function fetchWorkResources(domain: string, refs: readonly string[]
   if (unique.length === 0) return [];
   const params = new URLSearchParams({ domain, publicRefs: unique.join(',') });
   return parseWorkResources(await requestJson(`${API}/work-resources?${params}`, signal ? { signal } : {}));
-}
-
-export async function fetchModelChoices(signal?: AbortSignal): Promise<ModelChoice[]> {
-  return parseModelChoices(await requestJson(`${API}/model-settings`, signal ? { signal } : {}));
 }
 
 export interface RegisterRequest {
@@ -328,8 +304,6 @@ export interface PolicyRequest {
   domain: string;
   revision: number;
   likeThreshold: number | null;
-  /** 模型配置读不到时不带这三项，分析设置保持原值。 */
-  analysis?: { analysisEnabled: boolean; configRef: string | null; dailyTokenLimit: number | null };
 }
 
 export async function savePolicy(request: PolicyRequest): Promise<{ revision: number }> {
@@ -337,7 +311,6 @@ export async function savePolicy(request: PolicyRequest): Promise<{ revision: nu
     domain: request.domain,
     revision: request.revision,
     likeThreshold: request.likeThreshold,
-    ...(request.analysis ?? {}),
   };
   const receipt = await requestJson(`${API}/creator-discovery-policy`, { method: 'PUT', body });
   if (!isRecord(receipt) || typeof receipt.revision !== 'number' || receipt.saved !== true) {
@@ -360,12 +333,4 @@ export interface OverrideRequest {
 export async function saveOverride(request: OverrideRequest): Promise<void> {
   const receipt = await requestJson(`${API}/creator-discovery-overrides`, { method: 'PUT', body: request });
   if (!isRecord(receipt) || receipt.saved !== true) throw new ApiError({ kind: 'invalid_response', status: 200 });
-}
-
-export type RetryScope = { workRef: string } | { creatorKey: string };
-
-export async function retryAnalysis(domain: string, scope: RetryScope): Promise<{ queued: boolean }> {
-  const receipt = await requestJson(`${API}/creator-discovery-analysis/retry`, { method: 'POST', body: { domain, ...scope } });
-  if (!isRecord(receipt) || typeof receipt.queued !== 'boolean') throw new ApiError({ kind: 'invalid_response', status: 200 });
-  return { queued: receipt.queued };
 }

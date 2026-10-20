@@ -23,24 +23,38 @@ postgres_image="linggan-intelligence-postgres-pgvector:16.14-v0.8.0-r1"
 [[ "$proof_volume" =~ ^linggan-comment-study-productization-[a-zA-Z0-9_-]+-data$ ]] || exit 1
 "$project_root/scripts/runtime/build-pgvector-image.sh" --ensure
 cleanup() {
-  local result=$?
+  local task_exit=$?
   trap - EXIT
-  docker rm -f "$proof_container" >/dev/null 2>&1 || true
-  docker volume rm "$proof_volume" >/dev/null 2>&1 || true
-  exit "$result"
+  local cleanup_failed=0 remaining
+  if [[ "${proof_container_created:-0}" -eq 1 ]]; then
+    docker rm -f "$proof_container" >/dev/null || cleanup_failed=1
+    remaining="$(docker ps -a --filter "name=$proof_container" --format '{{.Names}}')" || cleanup_failed=1
+    [[ -z "$remaining" ]] || cleanup_failed=1
+  fi
+  if [[ "${proof_volume_created:-0}" -eq 1 ]]; then
+    docker volume rm "$proof_volume" >/dev/null || cleanup_failed=1
+    remaining="$(docker volume ls --filter "name=$proof_volume" --format '{{.Name}}')" || cleanup_failed=1
+    [[ -z "$remaining" ]] || cleanup_failed=1
+  fi
+  [[ "$cleanup_failed" -eq 0 ]] || { echo "Comment Study owned proof cleanup failed" >&2; exit 1; }
+  echo "Comment Study owned proof container and volume cleanup verified"
+  exit "$task_exit"
 }
 trap cleanup EXIT
+printf 'Comment Study owned proof resources: container=%s volume=%s\n' "$proof_container" "$proof_volume"
 docker volume create "$proof_volume" >/dev/null
+proof_volume_created=1
 docker run -d --name "$proof_container" \
   --mount "type=volume,source=$proof_volume,target=/var/lib/postgresql/data" \
   --env POSTGRES_DB="$proof_database" --env POSTGRES_USER="$proof_user" \
   --env POSTGRES_PASSWORD="$proof_password" --publish 127.0.0.1::5432 \
   "$postgres_image" >/dev/null
+proof_container_created=1
 for _ in {1..30}; do
-  docker exec "$proof_container" pg_isready -U "$proof_user" -d "$proof_database" >/dev/null 2>&1 && break
+  docker exec "$proof_container" pg_isready -h 127.0.0.1 -p 5432 -U "$proof_user" -d "$proof_database" >/dev/null 2>&1 && break
   sleep 1
 done
-docker exec "$proof_container" pg_isready -U "$proof_user" -d "$proof_database" >/dev/null
+docker exec "$proof_container" pg_isready -h 127.0.0.1 -p 5432 -U "$proof_user" -d "$proof_database" >/dev/null
 proof_port="$(docker inspect --format '{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostPort}}' "$proof_container")"
 export LOCAL_001_PROOF_DATABASE_URL="postgresql://${proof_user}:${proof_password}@127.0.0.1:${proof_port}/${proof_database}"
 RUST_TEST_THREADS=1 cargo test -p linggan-intelligence \
@@ -61,12 +75,12 @@ RUST_TEST_THREADS=1 cargo test -p linggan-intelligence --test comment_study_rebu
 P1_BROWSER_PROOF=1 RUST_TEST_THREADS=1 cargo test -p linggan-api --locked \
   local_web::comment_study::catalog_api::command_api::postgres_tests:: \
   -- --ignored --nocapture --test-threads=1
-# Exercise the real worker binary's OS signal handler while a synthetic model child is blocked in
-# flight. The test uses only the disposable PostgreSQL database created above and never starts a provider.
+# Patrol now owns only local maintenance. The AI owner/signal/usage proofs run in
+# test-research-dossier-postgres.sh --ai-service with its explicit pinned Node/SDK setup.
 RUST_TEST_THREADS=1 cargo test -p linggan-worker --test startup_contract --locked \
-  sigterm_drains_an_in_flight_comment_study_model_call \
+  patrol_maintains_local_catalog_but_never_dispatches_a_ready_legacy_run \
   -- --ignored --nocapture --test-threads=1
 RUST_TEST_THREADS=1 cargo test -p linggan-worker --test startup_contract --locked \
-  forced_worker_kill_recovers_the_dispatched_call_after_restart \
+  sigterm_drains_even_while_the_collection_tick_is_blocked \
   -- --ignored --nocapture --test-threads=1
 printf '%s\n' 'Implemented Comment Study productization PostgreSQL subset passed; not the complete T01-T54 suite'

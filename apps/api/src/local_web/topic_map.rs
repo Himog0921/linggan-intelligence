@@ -321,6 +321,9 @@ async fn research_command(
     }
 }
 fn research_error(err: ResearchError) -> Response {
+    if err.code() == "ai_legacy_execution_retired" {
+        return crate::local_web::ai_settings::legacy_closed("legacy_topic_map");
+    }
     let status = match &err {
         ResearchError::Database(_) => StatusCode::SERVICE_UNAVAILABLE,
         ResearchError::NotFound => StatusCode::NOT_FOUND,

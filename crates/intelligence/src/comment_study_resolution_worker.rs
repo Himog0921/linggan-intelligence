@@ -80,6 +80,7 @@ pub async fn run_one_problem_resolution_with_outcome(
     secrets: &dyn ModelSecretStore,
     adapter: &PiAdapter,
 ) -> Result<ResolutionExecution, ResolutionWorkerError> {
+    crate::model_settings::legacy_execution_gate()?;
     if !crate::comment_study_request_ledger::pair_failure_state_supported(database).await? {
         return Ok(ResolutionExecution::Idle);
     }

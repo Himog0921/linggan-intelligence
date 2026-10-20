@@ -85,7 +85,7 @@ export function RunLedger({ runs, message, onOpen, summary, refresh }: { runs: r
     </div>
     <div className={styles.scroll} role="region" aria-label="采集任务账本，可横向滚动" tabIndex={0}>
       <table className={styles.table} style={{ width: tableWidth } as CSSProperties}>
-        <caption className="v7-sr-only">采集任务，每个任务一行；完整名称和编号可在任务详情中核对</caption>
+        <caption className="v7-sr-only">采集任务，每个任务一行；完整名称和编号可在单元格提示中核对</caption>
         <colgroup>{columns.map(([field]) => <col key={field} style={{ width: `var(--lgi-ledger-col-${field})` }}/>)}</colgroup>
         <thead><tr>{columns.map(([field, label]) => <th key={field} scope="col" data-field={field} className={numeric.has(field) ? styles.number : undefined}>{label}</th>)}</tr></thead>
         <tbody>{runs.map(run => <tr key={run.run_ref} data-run-row={run.run_ref}>{columns.map(([field]) => {

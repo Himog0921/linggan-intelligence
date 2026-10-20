@@ -10,9 +10,10 @@ import { Overview } from './Overview';
 import { initialOverviewPreferences } from './overviewState';
 import { ProblemsView } from './ProblemsView';
 import { RunPicker, RunsView } from './RunsView';
-import { StartResearch, type SelectedComment } from './StartResearch';
+import { AiBusinessStatus } from '../../settings/AiBusinessStatus';
+import { PolicyHistory } from './PolicyHistory';
+import type { SelectedComment } from './studyApi';
 import type { StudyNavigation } from './studyApi';
-import type { WorkRole } from './WorkPicker';
 import { c } from './styles';
 import { errorText, num } from './format';
 import type { CommentCounts } from './CommentsView';
@@ -35,15 +36,10 @@ function Workspace({ domain, domainName, domainStatus, collectionState, crumb, l
   const location = useLocation(), navigate = useNavigate(), params = new URLSearchParams(location.search), view = activeView(params.get('view'));
   const [overviewPreferences, setOverviewPreferences] = useState(initialOverviewPreferences);
   const [savedViews, setSavedViews] = useState<Partial<Record<View, { search: string; state: unknown }>>>({});
-  const [selectedComments, setSelectedComments] = useState<SelectedComment[]>([]), [selectedWorks, setSelectedWorks] = useState<WorkRole[]>([]);
+  const [selectedComments, setSelectedComments] = useState<SelectedComment[]>([]);
   const [commentCounts, setCommentCounts] = useState<CommentCounts | null>(null);
-  const [study, setStudy] = useState<{ open: boolean; kind: 'works' | 'comments'; opening: number }>({ open: false, kind: 'works', opening: 0 }), [feedback, setFeedback] = useState<{ runRef: string; text: string } | null>(null);
-  const noticeRoute = `${view}:${params.get('runRef') || ''}`;
-  const [lastNoticeRoute, setLastNoticeRoute] = useState(noticeRoute);
-  if (lastNoticeRoute !== noticeRoute) { setLastNoticeRoute(noticeRoute); if (feedback && (view !== 'runs' || params.get('runRef') !== feedback.runRef)) setFeedback(null); }
-  const [setupStatus, setSetupStatus] = useState<{ text: string; kind: string }>({ text: '', kind: 'info' });
-  const [usageRefs] = useState(() => new Map<string, string>()), [recoveryRefs] = useState(() => new Map<string, string>());
   const queryClient = useQueryClient();
+  const [usageRefs] = useState(() => new Map<string, string>());
   useLayoutEffect(() => { if (window.scrollY) window.scrollTo(0, 0); }, []);
   useEffect(() => () => { if (domain) queryClient.removeQueries({ queryKey: ['comment-study', domain] }); }, [domain, queryClient]);
   function destination(next: View, extra: Record<string, string | null> = {}, stateExtra: Record<string, unknown> = {}) {
@@ -57,8 +53,8 @@ function Workspace({ domain, domainName, domainStatus, collectionState, crumb, l
     return { url: `/corpus/comments?${target}`, state: { ...(saved?.state && typeof saved.state === 'object' ? saved.state : {}), ...stateExtra } };
   }
   const nav: StudyNavigation = {
-    view: next => { setFeedback(null); const to = destination(next); void navigate(to.url, { state: to.state }); },
-    run: (runRef, panel = 'targets', targetRef = null, signalRef = null) => { setFeedback(null); const to = destination('runs', { runRef, panel, targetRef, signalRef }); void navigate(to.url, { state: to.state }); },
+    view: next => { const to = destination(next); void navigate(to.url, { state: to.state }); },
+    run: (runRef, panel = 'targets', targetRef = null, signalRef = null) => { const to = destination('runs', { runRef, panel, targetRef, signalRef }); void navigate(to.url, { state: to.state }); },
     problem: problemRef => { const to = destination('problems', { problemRef }); void navigate(to.url, { state: to.state }); },
     candidates: state => { const to = destination('problems', { state: 'clues', cursor: null, q: null, problemRef: null }, { problemResults: { domain, view: 'clues', q: '', order: 'recent', cursor: null, candidate: state, density: 'standard' } }); void navigate(to.url, { state: to.state }); },
     comment: key => {
@@ -82,16 +78,16 @@ function Workspace({ domain, domainName, domainStatus, collectionState, crumb, l
       <small>— 表示当前读数未获确认；不是零。</small>
     </div>
   </details> : `${domainName} · 状态 ${domainStatus}`;
-  const openResearch = () => setStudy(old => ({ open: true, kind: 'works', opening: old.opening + 1 }));
   return <AppShell active="corpus" collectionState={collectionState} boundaryLabel="本机服务状态" crumb={crumb} contextNav={contextNav} meta={contextMeta}>
     <title>评论研究</title><div className="v7-shell"><CorpusSideNav active="comments" domain={domain} foot={<>只读呈现新评论研究链路<br />自动排程保持关闭</>} />
     {fatalShellError ? <main className={c('study-main')} aria-labelledby="comment-study-title"><h1 id="comment-study-title" className="v7-sr-only">评论研究</h1><p className={c('study-empty')} role="status">评论研究准备信息读取失败：{shellError} <button type="button" onClick={retryShell}>重试读取</button></p></main> :
     <main className={c('study-main')} aria-labelledby="comment-study-title"><h1 id="comment-study-title" className="v7-sr-only">评论研究</h1>
+    <AiBusinessStatus taskKey="comment_study" />
+    {domain ? <PolicyHistory domain={domain} /> : null}
     {shellError ? <p className={c('study-table-status')} role="status">领域信息刷新失败；当前显示上次读取结果。{shellError} <button type="button" onClick={retryShell}>重新读取领域信息</button></p> : null}
     {domain && view === 'runs' ? <RunPicker domain={domain} selected={params.get('runRef')} nav={nav} /> : <div id="study-run-picker" className={c('study-run-picker')} hidden />}
     <section id="study-tab-result" className={view === 'comments' ? c('study-tab-comments') : undefined} aria-live="polite" data-comment-study-content aria-busy={loading}>
-      {loading ? <p className={c('study-empty')}>正在读取评论研究…</p> : !domain ? <p className={c('study-empty')}>请先在页头选择观察领域，再查看评论研究。</p> : view === 'comments' ? <CommentsView domain={domain} nav={nav} selected={selectedComments} onSelected={setSelectedComments} onStudy={() => setStudy(old => ({ open: true, kind: 'comments', opening: old.opening + 1 }))} onStart={openResearch} setupStatus={setupStatus} onCounts={setCommentCounts} requestRefs={usageRefs} closeDetail={closeComment} /> : view === 'runs' ? <RunsView domain={domain} nav={nav} recoveryRefs={recoveryRefs} initialFeedback={feedback?.runRef === params.get('runRef') ? feedback.text : ''} /> : view === 'problems' ? <ProblemsView domain={domain} nav={nav} /> : <Overview domain={domain} nav={nav} preferences={overviewPreferences} onPreferences={setOverviewPreferences} />}
+      {loading ? <p className={c('study-empty')}>正在读取评论研究…</p> : !domain ? <p className={c('study-empty')}>请先在页头选择观察领域，再查看评论研究。</p> : view === 'comments' ? <CommentsView domain={domain} nav={nav} selected={selectedComments} onSelected={setSelectedComments} onCounts={setCommentCounts} requestRefs={usageRefs} closeDetail={closeComment} /> : view === 'runs' ? <RunsView domain={domain} nav={nav} initialFeedback="" /> : view === 'problems' ? <ProblemsView domain={domain} nav={nav} /> : <Overview domain={domain} nav={nav} preferences={overviewPreferences} onPreferences={setOverviewPreferences} />}
     </section>
-    {domain ? <StartResearch domain={domain} domainName={domainName} onStatus={setSetupStatus} open={study.open} kind={study.kind} opening={study.opening} selectedComments={selectedComments} selectedWorks={selectedWorks} onSelectedWorks={setSelectedWorks} onClose={() => setStudy(old => ({ ...old, open: false }))} onCreated={(runRef, text) => { setFeedback({ runRef, text }); void queryClient.invalidateQueries({ queryKey: ['comment-study', domain, 'runs-directory'] }); setStudy(old => ({ ...old, open: false })); const to = destination('runs', { runRef, panel: 'targets', targetRef: null, signalRef: null }); void navigate(to.url, { state: to.state }); }} /> : null}
     </main>}</div></AppShell>;
 }
