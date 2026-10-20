@@ -207,3 +207,5 @@ LIDS 现在统一约束全项目的设计表达，但其成熟度仍为 Proposed
 ## AI-GEN1 C0 · 离线预演
 
 Mog已确认[PAGE-AI-OFFLINE-001](../plans/active/ai-gen1-pr1c0-offline.md#page-ai-offline-001--g1-已确认规格)；表面/状态/依赖/验收在同一计划维护。复用AppShell/ActionButton、LIDS L2 Split Evidence Inspector和唯一Token，固定后端合成数据，前端不维护第二份样本。采用与真实证明边界见[LIDS记录](lids/migration-log.md#ai-gen1-c0--离线预演2026-10-20)，不把本页采用推广为全站v7已迁移。
+
+- [PAGE-NOTE-MATERIAL-001](../plans/active/ai-gen1-note-material-preview.md)：已确认底稿只读材料区，表面/状态/依赖/验收统一维护。
