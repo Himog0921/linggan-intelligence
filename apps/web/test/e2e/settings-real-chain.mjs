@@ -1,258 +1,142 @@
-// WEB-REACT-001 阶段 B 真实链路证明：本机 Axum 路由 + 隔离 PostgreSQL + 已构建的 React 前端。
-// 由 apps/api 的 `settings_page_real_chain_browser_proof`（scripts/test-web-app-postgres.sh）启动。
-// 只访问 fixture 给出的本机地址，其余请求一律拦截；只用合成凭据，模型连接指向本机回环端口。
+// AI-GEN1 / G1 approved four sections: real React + Axum + owned PostgreSQL.
+// No executor is started; all saved connections use an inert loopback endpoint.
 import assert from 'node:assert/strict';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { chromium } from 'playwright';
-
 const directory = process.env.WEB_APP_PROOF_DIR;
-assert.ok(directory, 'WEB_APP_PROOF_DIR is required');
+assert.ok(directory, 'owned proof directory is required');
 const { origin } = JSON.parse(await readFile(path.join(directory, 'fixture.json'), 'utf8'));
-await mkdir(directory, { recursive: true });
-
-const report = { origin, steps: [], screenshots: [], pageErrors: [], consoleErrors: [], failedRequests: [], assetErrors: [], probeBodies: [], settingsReads: [] };
-let currentStep = 'setup';
-const step = async (name, run) => {
-  currentStep = name;
-  try {
-    await run();
-    report.steps.push({ name, result: 'PASS' });
-  } catch (error) {
-    report.steps.push({ name, result: 'FAIL', error: String(error?.stack ?? error) });
-    throw error;
-  }
-};
-
+assert.equal(new URL(origin).hostname, '127.0.0.1');
+const longName = 'SYNTHETIC长名称' + '家庭养育'.repeat(20);
+const longUrl = 'http://127.0.0.1:9/v1/SYNTHETIC_' + 'a'.repeat(600);
+const modelId = 'synthetic-' + 'm'.repeat(180);
+const skillEnd = 'SYNTHETIC长文结束锚点';
+const report = { scope: 'synthetic isolated database; no model execution', steps: [], screenshots: [], errors: [], httpFailures: [], posts: [], failedRequests: [], consoleErrors: [], assetErrors: [] };
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'zh-CN', timezoneId: 'Asia/Shanghai' });
-await context.route('**/*', route => (new URL(route.request().url()).origin === origin ? route.continue() : route.abort()));
+await context.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
 const page = await context.newPage();
-page.on('pageerror', error => report.pageErrors.push(error.message));
-page.on('console', message => {
-  if (message.type() === 'error') report.consoleErrors.push(message.text());
-});
-const settingsReads = new Map();
-page.on('requestfailed', request => {
-  report.failedRequests.push(`${request.method()} ${new URL(request.url()).pathname} ${request.failure()?.errorText ?? ''}`);
-  const read = settingsReads.get(request);
-  if (read) Object.assign(read, { failedStep: currentStep, error: request.failure()?.errorText, endedAt: Date.now() });
-});
-// A static asset answered with an HTTP error is a real failure; a download the browser cancels because the document
-// navigated away (the 22 MB OPPO Sans font is the one that is often still in flight) is not.
-page.on('response', response => {
-  const { pathname } = new URL(response.url());
-  if (pathname.startsWith('/ui-assets/') && response.status() >= 400) report.assetErrors.push(`${response.request().method()} ${pathname} ${response.status()}`);
-});
-page.on('requestfinished', request => {
-  const read = settingsReads.get(request);
-  if (read) Object.assign(read, { finishedStep: currentStep, endedAt: Date.now() });
-});
-page.on('request', request => {
-  if (request.method() === 'GET' && new URL(request.url()).pathname === '/api/local/model-settings') {
-    const read = { number: report.settingsReads.length + 1, startedStep: currentStep, startedAt: Date.now() };
-    settingsReads.set(request, read);
-    report.settingsReads.push(read);
-  }
-  if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/local/model-settings/probes') {
-    report.probeBodies.push(JSON.parse(request.postData() ?? '{}'));
-  }
-});
-
-const shot = async name => {
-  const file = path.join(directory, `${name}.png`);
-  await page.screenshot({ path: file });
-  const layout = await page.evaluate(() => ({ viewport: innerWidth, documentWidth: document.documentElement.scrollWidth }));
-  report.screenshots.push({ name, ...layout });
-  return layout;
-};
-const status = () => page.locator('#settings-feedback');
-const dialog = () => page.getByRole('dialog');
-
-// A write receipt can precede its invalidation GET. Await that actual new read,
-// its body, and the rendered ready control before another write or navigation.
-const afterSettingsRead = async action => {
-  const [response] = await Promise.all([
-    page.waitForResponse(response => response.request().method() === 'GET' && new URL(response.url()).pathname === '/api/local/model-settings'),
-    action(),
-  ]);
-  assert.equal(response.status(), 200);
-  assert.equal(await response.finished(), null);
-  await page.getByRole('button', { name: '刷新', exact: true }).waitFor();
-};
-
-let finished = false;
+page.on('pageerror', error => report.errors.push(error.message));
+page.on('console', message => { if (message.type() === 'error') report.consoleErrors.push(message.text()); });
+page.on('requestfailed', request => report.failedRequests.push(`${request.method()} ${new URL(request.url()).pathname} ${request.failure()?.errorText ?? ''}`));
+page.on('response', response => { const pathname = new URL(response.url()).pathname; if (pathname.startsWith('/ui-assets/') && response.status() >= 400) report.assetErrors.push(`${response.request().method()} ${pathname} ${response.status()}`); });
+page.on('response', response => { if (response.status() >= 400) report.httpFailures.push({ path: new URL(response.url()).pathname, status: response.status() }); });
+page.on('request', request => { if (request.method() === 'POST') report.posts.push(new URL(request.url()).pathname); });
+async function step(name, action) {
+  try { await action(); report.steps.push({ name, result: 'PASS' }); console.log(`settings PASS: ${name}`); }
+  catch (error) { report.steps.push({ name, result: 'FAIL', error: String(error.stack ?? error) }); throw error; }
+}
+async function goto(query = '') { await page.goto(`${origin}/settings/models${query}`); await page.getByRole('heading', { name: 'AI 设置', exact: true }).waitFor(); }
+async function receipt(text) { await page.getByRole('status').filter({ hasText: text }).waitFor(); }
 try {
-  await step('入口跳转与页面加载', async () => {
-    let response;
-    await afterSettingsRead(async () => { response = await page.goto(`${origin}/settings`); });
-    assert.equal(response?.status(), 200);
-    assert.equal(new URL(page.url()).pathname, '/settings/models');
-    await page.getByRole('heading', { name: '评论研究的模型设置' }).waitFor();
-    assert.match(await page.title(), /模型与 AI/);
-    // 共享外壳来自 shell.css：页头存在且一级导航六项。
-    const nav = page.getByRole('navigation', { name: '一级导航' });
-    assert.equal(await nav.locator('a, button').count(), 6);
-    assert.equal(await nav.getByRole('link', { name: /语料/ }).getAttribute('href'), '/corpus');
-    const headerBorder = await page.locator('.v7-global-row').evaluate(node => getComputedStyle(node).borderBottomWidth);
-    assert.equal(headerBorder, '2px');
+  await step('new connection save does not test or enqueue', async () => {
+    await goto();
+    await page.getByLabel('连接名称', { exact: true }).fill(longName);
+    await page.getByLabel('服务地址', { exact: true }).fill(longUrl);
+    await page.getByLabel('API 密钥', { exact: true }).fill('SYNTHETIC-NOT-A-CREDENTIAL');
+    await page.getByText('本机端点', { exact: true }).check();
+    await page.getByRole('button', { name: '保存连接', exact: true }).click();
+    await receipt('连接已保存');
+    await page.getByLabel('登记模型标识', { exact: true }).fill(modelId);
+    await page.getByRole('button', { name: '登记模型', exact: true }).click();
+    await receipt('模型标识已保存');
   });
-
-  await step('空状态如实说明', async () => {
-    await page.getByText('还没有供应商连接。').waitFor();
-    await page.getByText('尚未保存默认研究模型。先添加并测试连接。').waitFor();
-    await page.getByText('还没有调用记录。').waitFor();
-    const layout = await shot('settings-1440-empty');
-    assert.ok(layout.documentWidth <= layout.viewport, '1440 宽度不应横向溢出');
+  await step('manual capability and zero versus unknown prices', async () => {
+    await page.getByLabel('上下文容量', { exact: true }).fill('4096');
+    await page.getByLabel('最大输出容量', { exact: true }).fill('512');
+    await page.getByLabel('最长等待秒数', { exact: true }).fill('30');
+    await page.getByLabel('声明依据及版本', { exact: true }).fill('synthetic-browser-manual-v1');
+    await page.getByRole('checkbox', { name: '关闭思考', exact: true }).check();
+    await page.getByRole('button', { name: '保存能力声明', exact: true }).click();
+    await receipt('能力声明已保存');
+    await page.getByLabel('输入价格', { exact: true }).fill('0');
+    await page.getByLabel('价格依据及版本', { exact: true }).fill('synthetic-price-v1');
+    await page.getByRole('button', { name: '保存价格', exact: true }).click();
+    await receipt('价格已保存');
   });
-
-  await step('键盘打开对话框，Esc 关闭并把焦点还给触发按钮', async () => {
-    const add = page.getByRole('button', { name: '添加连接' });
-    await add.focus();
-    await page.keyboard.press('Enter');
-    await dialog().waitFor();
-    await page.keyboard.press('Escape');
-    await dialog().waitFor({ state: 'detached' });
-    assert.equal(await page.evaluate(() => document.activeElement?.textContent), '添加连接');
+  await step('quota save is separate from enablement', async () => {
+    await goto('?section=automation&task=model_probe');
+    await page.getByLabel('每日额度', { exact: true }).selectOption('unlimited');
+    await page.getByRole('button', { name: '保存配置', exact: true }).click();
+    await receipt('配置已保存');
+    assert.equal(await page.getByRole('button', { name: '启用全局 AI', exact: true }).isDisabled(), true);
   });
-
-  await step('添加连接（只保存，不测试）', async () => {
-    await page.getByRole('button', { name: '添加连接' }).click();
-    const form = dialog();
-    await form.getByLabel('连接名称').fill('合成连接');
-    await form.getByLabel('API 地址').fill('http://127.0.0.1:9/v1');
-    await form.getByLabel('API Key').fill('SYNTHETIC-NOT-A-CREDENTIAL');
-    await form.getByLabel('模型 ID').fill('synthetic-model');
-    await form.getByLabel('本机回环服务（允许 HTTP）').check();
-    await shot('settings-1440-dialog');
-    await afterSettingsRead(() => form.getByRole('button', { name: '保存', exact: true }).click());
-    await status().getByText('供应商连接已保存；尚未发送测试请求。').waitFor();
-    await dialog().waitFor({ state: 'detached' });
-    const table = page.getByRole('table').first();
-    await table.getByText('合成连接').waitFor();
-    await table.getByText('需要完成模型测试', { exact: false }).waitFor();
+  const skillDirectory = path.join(directory, 'browser-example');
+  await mkdir(skillDirectory, { recursive: true });
+  await writeFile(path.join(skillDirectory, 'SKILL.md'), `---\nname: browser-example\ndescription: ${'合成做法说明'.repeat(35)}\n---\nUse only the explicitly selected writing material.\n${Array.from({ length: 150 }, (_, i) => `第${i + 1}段：合成长文🙂。${'x'.repeat(180)}`).join('\n')}\n${skillEnd}\n`);
+  await step('folder import creates a fixed local version', async () => {
+    await goto('?section=skills&task=writing_legacy');
+    await page.getByLabel('选择做法目录', { exact: true }).setInputFiles(skillDirectory);
+    await page.getByRole('button', { name: '导入做法包', exact: true }).click();
+    await receipt('已导入做法');
   });
-
-  await step('测试模型：结果按真实回执显示，失败原因保留错误码', async () => {
-    await afterSettingsRead(() => page.getByRole('button', { name: '测试', exact: true }).click());
-    await status().getByText('模型测试未通过', { exact: false }).waitFor();
-    const code = await status().locator('code').textContent();
-    assert.ok(code && code.length > 0, '失败回执应带错误码');
-    report.probeFailureCode = code;
-    const ledger = page.getByRole('table').nth(1);
-    await ledger.getByText('能力测试 · synthetic-model').waitFor();
-    await ledger.getByText('失败').first().waitFor();
-    await shot('settings-1440-after-probe');
+  const settings = await (await page.request.get(`${origin}/api/local/ai-settings`)).json();
+  const model = settings.models.find(m => m.modelId === modelId);
+  const version = settings.skills.find(s => s.name === 'browser-example').versions[0];
+  assert.ok(model.capability); assert.equal(model.price.input, '0'); assert.equal(model.price.output, null);
+  await step('writing candidate save and reasoned first-version activation', async () => {
+    await goto('?section=automation&task=writing_legacy');
+    await page.getByLabel('选择模型', { exact: true }).selectOption(model.identityRef);
+    await page.getByLabel('输入 token 上限', { exact: true }).fill('1024');
+    await page.getByLabel('输出 token 上限', { exact: true }).fill('128');
+    await page.getByLabel('单次等待秒数', { exact: true }).fill('5');
+    await page.getByLabel('思考等级', { exact: true }).selectOption('off');
+    await page.getByLabel('固定做法版本', { exact: true }).selectOption(version.versionRef);
+    await page.getByLabel('每日额度', { exact: true }).selectOption('unlimited');
+    await page.getByRole('button', { name: '保存配置', exact: true }).click();
+    await receipt('候选配置已保存');
+    await goto('?section=skills&task=writing_legacy');
+    await page.getByRole('checkbox', { name: '此做法在本工作首版，申请跳过旧新比较', exact: true }).check();
+    await page.getByLabel('启用理由', { exact: true }).fill('Synthetic first-version browser activation; switches remain off.');
+    await page.getByRole('button', { name: '启用候选做法', exact: true }).click();
+    await receipt('固定做法版本已启用');
   });
-
-  await step('请求没有答复时显示「未确认」，重试沿用同一个请求编号', async () => {
-    let aborted = false;
-    await page.route('**/api/local/model-settings/probes', async route => {
-      if (!aborted) {
-        aborted = true;
-        await route.abort('connectionreset');
-      } else {
-        await route.continue();
-      }
-    });
-    const before = report.probeBodies.length;
-    await page.getByRole('button', { name: '测试', exact: true }).click();
-    await status().getByText('结果未确认', { exact: false }).waitFor();
-    await afterSettingsRead(() => page.getByRole('button', { name: '测试', exact: true }).click());
-    await status().getByText('模型测试未通过', { exact: false }).waitFor();
-    await page.unroute('**/api/local/model-settings/probes');
-    const attempts = report.probeBodies.slice(before);
-    assert.equal(attempts.length, 2);
-    assert.equal(attempts[0].invocationRef, attempts[1].invocationRef);
-  });
-
-  await step('刷新页面后数据仍在（服务器为准）', async () => {
-    await afterSettingsRead(() => page.reload());
-    await page.getByRole('table').first().getByText('合成连接').waitFor();
-    await page.getByRole('table').nth(1).getByText('能力测试 · synthetic-model').first().waitFor();
-  });
-
-  await step('停用与启用：带修订号提交，回执后更新', async () => {
-    await afterSettingsRead(() => page.getByRole('button', { name: '停用' }).click());
-    await status().getByText('连接已停用。').waitFor();
-    await page.getByRole('table').first().getByText('已停用', { exact: true }).waitFor();
-    await afterSettingsRead(() => page.getByRole('button', { name: '启用' }).click());
-    await status().getByText('连接已启用。').waitFor();
-  });
-
-  await step('未通过测试的模型不能保存为默认研究模型', async () => {
-    const select = page.getByRole('combobox', { name: '研究模型' });
-    report.modelOptions = await select.evaluate(node => [...node.options].map(option => ({ text: option.textContent, value: option.value, disabled: option.disabled })));
-    const candidates = report.modelOptions.filter(option => option.value !== '');
-    assert.ok(candidates.length > 0, '下拉框里应有已登记的模型');
-    assert.ok(candidates.every(option => option.disabled), '未通过 V1 JSON 测试的模型必须不可选');
-    let configPosts = 0;
-    page.on('request', request => {
-      if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/local/model-settings/config') configPosts += 1;
-    });
-    await page.getByRole('button', { name: '保存默认配置' }).click();
-    assert.equal(configPosts, 0);
-  });
-
-  await step('编辑连接且模型 ID 不变：新版本下重新登记模型，不再报版本冲突', async () => {
-    await page.getByRole('button', { name: '编辑' }).click();
-    const form = dialog();
-    await form.getByLabel('连接名称').fill('合成连接（改）');
-    await afterSettingsRead(() => form.getByRole('button', { name: '保存', exact: true }).click());
-    await status().getByText('供应商连接已保存；尚未发送测试请求。').waitFor();
-    const table = page.getByRole('table').first();
-    await table.getByText('合成连接（改）').waitFor();
-    await table.getByText('synthetic-model').waitFor();
-  });
-
-  await step('短屏可以滚到页面底部', async () => {
-    await page.setViewportSize({ width: 1280, height: 720 });
-    const note = page.getByText('调用记录保留使用量和安全传输诊断，不保存评论正文或模型原始输出。');
-    await note.scrollIntoViewIfNeeded();
-    assert.equal(await note.isVisible(), true);
-    await shot('settings-1280x720-bottom');
-  });
-
-  for (const [width, height] of [
-    [1024, 768],
-    [390, 844],
-  ]) {
-    await step(`${width} 宽度无横向溢出`, async () => {
+  await step('all four sections remain readable at four viewports', async () => {
+    for (const [width, height] of [[1280, 800], [1440, 900], [1920, 1080], [390, 844]]) {
       await page.setViewportSize({ width, height });
-      await afterSettingsRead(() => page.goto(`${origin}/settings/models`));
-      await page.getByRole('heading', { name: '评论研究的模型设置' }).waitFor();
-      // 等数据读完再量：连接表、默认配置与调用记录都在页面上时才算真实布局。
-      await page.getByRole('table').first().getByText('合成连接（改）').waitFor();
-      await page.getByRole('heading', { name: '后台执行器与调用记录' }).waitFor();
-      const layout = await shot(`settings-${width}`);
-      assert.ok(layout.documentWidth <= layout.viewport, `${width} 宽度不应横向溢出`);
-    });
-  }
-
-  await step('从新页头进入语料：/corpus 跳转到证据库（React 页）', async () => {
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await afterSettingsRead(() => page.goto(`${origin}/settings/models`));
-    // Wait for the real settings read before leaving; the header alone can render
-    // while GET /api/local/model-settings is still in flight and would be aborted.
-    await page.getByRole('table').first().getByText('合成连接（改）').waitFor();
-    await page.getByRole('navigation', { name: '一级导航' }).getByRole('link', { name: /语料/ }).click();
-    await page.waitForURL(url => url.pathname === '/corpus/evidence');
-    await page.getByRole('navigation', { name: '一级导航' }).waitFor();
-    await shot('corpus-from-react-header');
+      for (const section of ['models', 'automation', 'skills', 'health']) {
+        const selection = section === 'models' ? `&connection=${model.connectionRef}&model=${model.identityRef}` : section === 'skills' ? `&task=writing_legacy&version=${version.versionRef}` : '';
+        await goto(`?section=${section}${selection}`);
+        await page.getByRole('heading', { name: { models: '模型', automation: '自动化与额度', skills: '做法', health: '运行状况' }[section], exact: true, level: 2 }).waitFor();
+        if (section === 'skills') {
+          await page.getByText('只读做法内容', { exact: true }).click();
+          const body = page.locator('details[open] pre');
+          await body.waitFor();
+          assert.ok((await body.innerText()).endsWith(skillEnd));
+          await body.evaluate(element => { element.scrollTop = element.scrollHeight; });
+          assert.ok(await body.evaluate(element => element.scrollTop + element.clientHeight >= element.scrollHeight - 1));
+        }
+        const dimensions = await page.evaluate(() => {
+          const main = document.querySelector('main');
+          return { client: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth, mainClient: main.clientWidth, mainScroll: main.scrollWidth };
+        });
+        assert.ok(dimensions.scroll <= dimensions.client, `${width} ${section} must not overflow document`);
+        assert.ok(dimensions.mainScroll <= dimensions.mainClient, `${width} ${section} long fields must not overflow main: ${JSON.stringify(dimensions)}`);
+        const name = `settings-${section}-${width}.png`;
+        await page.screenshot({ path: path.join(directory, name), fullPage: true }); report.screenshots.push(name);
+      }
+    }
+    await page.keyboard.press('Tab'); assert.ok(await page.evaluate(() => document.activeElement !== document.body));
   });
-
-  await step('页面没有脚本错误；失败请求只有有意拦截的一次', async () => {
-    assert.deepEqual(report.pageErrors, []);
-    assert.deepEqual(report.consoleErrors.filter(text => !text.includes('Failed to load resource')), []);
+  await step('actual read receipts preserve off, not started, and no invocation', async () => {
+    const current = await (await page.request.get(`${origin}/api/local/ai-settings`)).json();
+    assert.equal(current.execution.service.observedState, 'not_started');
+    assert.deepEqual(current.batches, []); assert.deepEqual(current.execution.dailyUsage, []);
+    assert.ok(current.controls.every(control => control.enabled === false));
+    assert.equal(current.tasks.find(task => task.taskKey === 'writing_legacy').activeSkillVersionRef, version.versionRef);
+    assert.ok(report.posts.every(route => !route.endsWith('/probes') && !route.endsWith('/batches') && !route.endsWith('/control')));
+    assert.deepEqual(report.errors, []);
+    assert.deepEqual(report.httpFailures, []);
+    // A navigation may cancel the large font GET; an answered asset error is never a cancellation.
     const cancelledRead = entry => entry.startsWith('GET ') && entry.endsWith('net::ERR_ABORTED');
-    const unexpected = report.failedRequests.filter(entry => !entry.startsWith('POST /api/local/model-settings/probes') && !cancelledRead(entry));
-    assert.deepEqual(unexpected, []);
+    assert.deepEqual(report.failedRequests.filter(entry => !cancelledRead(entry)), []);
+    assert.deepEqual(report.consoleErrors.filter(text => !text.includes('Failed to load resource')), []);
     assert.deepEqual(report.assetErrors, [], 'static assets must not answer with HTTP errors');
   });
-  finished = true;
 } finally {
-  report.finished = finished;
-  await writeFile(path.join(directory, 'report.json'), JSON.stringify(report, null, 2));
+  if (report.steps.at(-1)?.result === 'FAIL') await page.screenshot({ path: path.join(directory, 'settings-failure.png'), fullPage: true }).catch(() => {});
+  await writeFile(path.join(directory, 'settings-report.json'), `${JSON.stringify(report, null, 2)}\n`);
   await browser.close();
 }
-console.log(`WEB-REACT-001 settings real-chain proof: ${report.steps.length} steps passed`);
+console.log(`AI-GEN1 settings browser: ${report.steps.length} steps passed, ${report.screenshots.length} screenshots, no queue or model calls.`);

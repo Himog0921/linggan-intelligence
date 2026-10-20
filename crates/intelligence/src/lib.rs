@@ -1,13 +1,15 @@
 //! Domain intelligence interfaces. Topic workspaces are explicit, versioned human research
 //! decisions over Work Resource identities; they never manufacture Evidence or source facts.
 
+pub mod ai_foundation;
 pub mod creator_discovery_analysis;
-pub mod creator_discovery_worker;
 pub mod creator_discovery_input;
+pub mod creator_discovery_worker;
+pub mod note_interpretation_offline;
 pub mod research_text;
 pub mod topic_map;
-pub mod topic_map_core;
 pub mod topic_map_collection_search;
+pub mod topic_map_core;
 pub mod topic_map_research;
 pub mod topic_map_research_analysis;
 pub mod topic_map_research_collection;
@@ -26,20 +28,21 @@ pub const INTELLIGENCE_IMPLEMENTED: bool = true;
 pub mod ops_ledger;
 
 pub mod content_workbench;
-pub mod content_workbench_sources;
 pub mod content_workbench_ai;
+pub mod content_workbench_sources;
 
 pub mod model_secrets;
 pub mod model_settings;
 pub mod pi_adapter;
+mod pi_offline;
+mod pi_request;
+mod pi_skills;
 
 pub mod model_invocation;
 
 pub mod model_runner;
 
 pub mod model_worker_drain;
-
-pub mod model_settings_read;
 
 pub(crate) mod comment_cleaning;
 pub mod comment_study_acceptance;

@@ -160,58 +160,16 @@ pub(crate) async fn reserve_problem_stage_call(
         .and_then(|value| value.parse::<i64>().ok())
         .ok_or(RequestLedgerError::RunUnavailable)?;
     let spent_or_reserved: i64 = sqlx::query_scalar(
-        "SELECT COALESCE(SUM(CASE WHEN invocation.state='running' \
-                                 AND (invocation.input_tokens IS NULL OR invocation.output_tokens IS NULL) \
-                                 THEN GREATEST(invocation.reserved_tokens,COALESCE(invocation.charged_tokens,0)) \
-                                 ELSE COALESCE(invocation.charged_tokens,invocation.reserved_tokens) END),0)::bigint \
-         FROM linggan_model_invocation invocation \
-         WHERE invocation.invocation_ref IN ( \
-           SELECT request.invocation_ref FROM linggan_comment_study_model_request request WHERE request.run_ref=$1 \
-           UNION SELECT resolution.model_invocation_ref \
-             FROM linggan_comment_study_resolution resolution \
-             JOIN linggan_comment_study_signal signal USING(signal_ref) \
-             JOIN linggan_comment_study_target target USING(target_ref) \
-             JOIN linggan_comment_study_run owner ON owner.run_ref=target.run_ref \
-             WHERE target.run_ref=$1 AND owner.selection_manifest->>'contract'='comment-study.run-selection.v2' \
-               AND resolution.model_invocation_ref IS NOT NULL \
-           UNION SELECT pair.model_invocation_ref \
-             FROM linggan_comment_study_problem_pair pair \
-             JOIN linggan_comment_study_signal signal ON signal.signal_ref=pair.first_signal_ref \
-             JOIN linggan_comment_study_target target USING(target_ref) \
-             JOIN linggan_comment_study_run owner ON owner.run_ref=target.run_ref \
-             WHERE target.run_ref=$1 AND owner.selection_manifest->>'contract'='comment-study.run-selection.v2' \
-               AND pair.model_invocation_ref IS NOT NULL \
-           UNION SELECT legacy.invocation_ref FROM linggan_model_invocation legacy \
-             WHERE legacy.result->>'legacyRequestLedgerMissing'='true' \
-               AND legacy.result->>'legacyRunRef'=$1::text \
-         )",
+        "SELECT COALESCE(sum(charged_tokens),0)::bigint FROM linggan_model_invocation \
+         WHERE task_key='comment_study' AND budget_run_ref=$1",
     )
     .bind(run_ref)
     .fetch_one(&mut **transaction)
     .await?;
     if spent_or_reserved.saturating_add(reserved_tokens) > token_limit {
         let in_flight: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM linggan_model_invocation invocation \
-             WHERE invocation.state='running' AND invocation.invocation_ref IN ( \
-               SELECT request.invocation_ref FROM linggan_comment_study_model_request request WHERE request.run_ref=$1 \
-               UNION SELECT resolution.model_invocation_ref \
-                 FROM linggan_comment_study_resolution resolution \
-                 JOIN linggan_comment_study_signal signal USING(signal_ref) \
-                 JOIN linggan_comment_study_target target USING(target_ref) \
-                 JOIN linggan_comment_study_run owner ON owner.run_ref=target.run_ref \
-                 WHERE target.run_ref=$1 AND owner.selection_manifest->>'contract'='comment-study.run-selection.v2' \
-                   AND resolution.model_invocation_ref IS NOT NULL \
-               UNION SELECT pair.model_invocation_ref \
-                 FROM linggan_comment_study_problem_pair pair \
-                 JOIN linggan_comment_study_signal signal ON signal.signal_ref=pair.first_signal_ref \
-                 JOIN linggan_comment_study_target target USING(target_ref) \
-                 JOIN linggan_comment_study_run owner ON owner.run_ref=target.run_ref \
-                 WHERE target.run_ref=$1 AND owner.selection_manifest->>'contract'='comment-study.run-selection.v2' \
-                   AND pair.model_invocation_ref IS NOT NULL \
-               UNION SELECT legacy.invocation_ref FROM linggan_model_invocation legacy \
-                 WHERE legacy.result->>'legacyRequestLedgerMissing'='true' \
-                   AND legacy.result->>'legacyRunRef'=$1::text \
-             )",
+            "SELECT count(*) FROM linggan_model_invocation \
+                 WHERE task_key='comment_study' AND budget_run_ref=$1 AND state='running'",
         )
         .bind(run_ref)
         .fetch_one(&mut **transaction)
@@ -269,8 +227,8 @@ pub(crate) async fn reserve_problem_stage_call(
     sqlx::query(
         "INSERT INTO linggan_model_invocation( \
            invocation_ref,connection_version_ref,model_ref,config_ref,operation,request_hash, \
-           state,reserved_tokens,charged_tokens,result \
-         ) VALUES($1,$2,$3,$4,'analyze',$5,'running',$6,0,$7)",
+           state,reserved_tokens,charged_tokens,result,task_key,quota_bucket,budget_run_ref,budget_domain_ref,classification_source \
+         ) VALUES($1,$2,$3,$4,'analyze',$5,'running',$6,$6,$7,'comment_study','run',$8,(SELECT p.domain_ref FROM linggan_comment_study_run r JOIN linggan_comment_study_policy p USING(policy_ref) WHERE r.run_ref=$8),'producer_v1')",
     )
     .bind(invocation_ref)
     .bind(connection_version_ref)
@@ -279,6 +237,7 @@ pub(crate) async fn reserve_problem_stage_call(
     .bind(request_hash)
     .bind(reserved_tokens)
     .bind(json!({"runRef":run_ref,"stage":subject.stage(),"callStarted":false}))
+    .bind(run_ref)
     .execute(&mut **transaction)
     .await?;
 
@@ -972,11 +931,12 @@ pub(crate) async fn recover_expired_problem_stage_requests(
                failure_code='request_deadline_expired', \
                result=COALESCE(result,'{}'::jsonb)||jsonb_build_object( \
                    'ok',false,'failureCode','request_deadline_expired'), \
-               finished_at=scope_001_now() \
+               dispatch_state=CASE WHEN $3 THEN 'started' ELSE 'not_dispatched' END,finished_at=scope_001_now() \
              WHERE invocation_ref=$1 AND state='running'",
         )
         .bind(invocation_ref)
         .bind(settled_charge)
+        .bind(dispatched)
         .execute(&mut *transaction)
         .await?;
         if changed.rows_affected() != 1 {
@@ -1184,7 +1144,7 @@ async fn recover_pre_ledger_v2_problem_stage_invocations(
                  'ok',false,'failureCode',$3,'legacyRequestLedgerMissing',true, \
                  'legacyRunRef',$4::text,'legacyStage',$5,'legacySubjectRef',$6::text), \
                finished_at=COALESCE(finished_at,scope_001_now()) \
-             WHERE invocation_ref=$1 AND state IN ('running','failed')",
+             WHERE invocation_ref=$1 AND state='running'",
         )
         .bind(invocation_ref)
         .bind(settled_charge)

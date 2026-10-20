@@ -40,10 +40,10 @@ async fn recover(db: &Database) -> Result<(), ModelError> {
     for r in rows {
         let sent: bool = r.get("sent");
         let invocation: Uuid = r.get("invocation_ref");
-        sqlx::query("UPDATE linggan_model_invocation SET state='failed',finished_at=scope_001_now(),failure_code=$2,charged_tokens=CASE WHEN $3 THEN charged_tokens ELSE 0 END,result=COALESCE(result,'{}'::jsonb)||jsonb_build_object('dispatchUnknown',$3::bool) WHERE invocation_ref=$1").bind(invocation).bind(if sent{"unknown_dispatch"}else{"request_not_started"}).bind(sent).execute(&mut *tx).await?;
+        sqlx::query("UPDATE linggan_model_invocation SET state='failed',finished_at=scope_001_now(),failure_code=$2,dispatch_state=CASE WHEN $3 THEN 'started' ELSE 'not_dispatched' END,charged_tokens=CASE WHEN $3 THEN charged_tokens ELSE 0 END,result=COALESCE(result,'{}'::jsonb)||jsonb_build_object('dispatchUnknown',$3::bool) WHERE invocation_ref=$1").bind(invocation).bind(if sent{"unknown_dispatch"}else{"request_not_started"}).bind(sent).execute(&mut *tx).await?;
         sqlx::query("UPDATE linggan_topic_map_research_task SET state=CASE WHEN $2 THEN 'unknown_dispatch' WHEN phase_attempt_count>=(SELECT c.max_attempts FROM linggan_topic_map_research_run r JOIN linggan_model_config c ON c.config_ref=r.config_ref WHERE r.run_ref=linggan_topic_map_research_task.run_ref) THEN 'failed' ELSE 'queued' END,last_reason=CASE WHEN $2 THEN 'unknown_dispatch' ELSE 'request_not_started' END,lease_token=NULL,lease_expires_at=NULL WHERE task_ref=$1").bind(r.get::<Uuid,_>("task_ref")).bind(sent).execute(&mut *tx).await?;
     }
-    sqlx::query("UPDATE linggan_topic_map_research_run r SET state='queued',last_reason=NULL,updated_at=scope_001_now() FROM linggan_topic_map_research_policy p WHERE r.domain_ref=p.domain_ref AND r.state='daily_budget_paused' AND r.updated_at < date_trunc('day',scope_001_now()AT TIME ZONE 'Asia/Shanghai')AT TIME ZONE 'Asia/Shanghai' AND p.status='active' AND EXISTS(SELECT 1 FROM observation_domain d WHERE d.domain_ref=r.domain_ref AND d.status='active')").execute(&mut *tx).await?;
+    sqlx::query("UPDATE linggan_topic_map_research_run r SET state='queued',last_reason=NULL,updated_at=scope_001_now() FROM linggan_topic_map_research_policy p WHERE r.domain_ref=p.domain_ref AND r.state='daily_budget_paused' AND linggan_ai_budget_day(r.updated_at)<linggan_ai_budget_day() AND p.status='active' AND EXISTS(SELECT 1 FROM observation_domain d WHERE d.domain_ref=r.domain_ref AND d.status='active')").execute(&mut *tx).await?;
     tx.commit().await?;
     Ok(())
 }
@@ -53,6 +53,7 @@ pub async fn run_once(
     secrets: &dyn ModelSecretStore,
     adapter: &PiAdapter,
 ) -> Result<bool, ModelError> {
+    crate::model_settings::legacy_execution_gate()?;
     let ready: bool =
         sqlx::query_scalar("SELECT to_regclass('linggan_topic_map_concept_rule')IS NOT NULL")
             .fetch_one(db.pool())

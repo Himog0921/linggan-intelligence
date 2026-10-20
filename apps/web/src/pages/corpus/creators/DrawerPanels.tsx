@@ -5,7 +5,6 @@ import {
   acquisitionText,
   analysisStatus,
   authorFocus,
-  canRetry,
   COEXISTENCE,
   CRITERIA,
   effectiveJudgement,
@@ -19,7 +18,6 @@ import {
 import { LABELS, evidenceLink, formatCount, workLink, type LinkContext, type CreatorQuery } from './creatorsQuery';
 import { Metric, type DrawerTab } from './CreatorTable';
 import type { Analysis, CreatorItem, CreatorList, Work } from './creatorsTypes';
-import type { RetryScope } from './creatorsApi';
 import type { WorkResources } from './useWorkResources';
 import pageStyles from './CreatorsPage.module.css';
 import styles from './CreatorDrawer.module.css';
@@ -34,8 +32,6 @@ export interface PanelContext {
   /** 领域已暂停时历史材料仍可读，写入操作不可用。 */
   writable: boolean;
   onCorrect: (field: string, workRef: string | null) => void;
-  onRetry: (scope: RetryScope, key: string) => void;
-  retrying: ReadonlySet<string>;
   onTab: (tab: DrawerTab) => void;
 }
 
@@ -49,14 +45,6 @@ function AnalysisLine({ analysis, value, enabled }: { analysis: Analysis; value:
   );
 }
 
-function RetryButton({ ctx, scope, id, label }: { ctx: PanelContext; scope: RetryScope; id: string; label: string }) {
-  const busy = ctx.retrying.has(id);
-  return (
-    <button type="button" className={styles.textButton} disabled={!ctx.writable || busy} onClick={() => ctx.onRetry(scope, id)}>
-      {busy ? '正在排队…' : label}
-    </button>
-  );
-}
 
 function moment(raw: string | null, display: string | null): string {
   return raw ? humanMoment(raw) : (display ?? '未记录');
@@ -109,7 +97,6 @@ export function OverviewPanel({ ctx }: { ctx: PanelContext }) {
           {sampleText(analysis)}
           仅使用本领域已取得材料，不代表账号全部作品。
         </p>
-        {canRetry(analysis, analysisEnabled) ? <RetryButton ctx={ctx} scope={{ creatorKey: item.creatorKey }} id={`author:${item.creatorKey}`} label="重试失败分析" /> : null}
       </section>
       <section aria-label="内容方向与作品表达">
         <h3>内容方向与作品表达</h3>
@@ -217,9 +204,6 @@ export function EvidencePanel({
               />
             ))}
             <AnalysisLine analysis={work.analysis} value={work.relevance} enabled={analysisEnabled} />
-            {canRetry(work.analysis, analysisEnabled) ? (
-              <RetryButton ctx={ctx} scope={{ workRef: work.workRef }} id={`work:${work.workRef}`} label="重试这篇作品的失败分析" />
-            ) : null}
             {work.analysis.lastErrorCode ? (
               <details>
                 <summary>处理信息</summary>

@@ -1,7 +1,9 @@
-//! Versioned boundary contracts. SCOPE-001 authorizes only the frozen
-//! `content-detail.synthetic.v1` proof contract; real producer contracts require a later scope.
+//! Versioned bootstrap, producer, discovery and AI boundary contracts.
+//! Valid input or a resource ceiling never grants execution permission.
 
 mod admission;
+pub mod ai_limits;
+pub mod ai_protocol;
 mod canonical;
 mod capture;
 mod collection;

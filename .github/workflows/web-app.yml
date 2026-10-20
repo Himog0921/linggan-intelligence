@@ -31,6 +31,9 @@ on:
       - 'crates/intelligence/src/ops_ledger/read/creation_read.rs'
       - 'Cargo.lock'
       - 'crates/intelligence/Cargo.toml'
+      - 'crates/intelligence/src/note_interpretation_offline.rs'
+      - 'crates/intelligence/src/note_interpretation_offline/**'
+      - 'crates/intelligence/tests/note_interpretation_offline.rs'
       - 'crates/intelligence/src/comment_study_run/**'
       - 'crates/intelligence/tests/comment_study_start_postgres.rs'
       - 'scripts/test-comment-study-productization-postgres.sh'
@@ -99,9 +102,19 @@ jobs:
       - name: Locked install and browser
         run: |
           npm ci --prefix apps/web --ignore-scripts --no-audit --no-fund
+          npm ci --prefix apps/pi-adapter --ignore-scripts --no-audit --no-fund
           npx --prefix apps/web playwright install --with-deps chromium
       - name: API route regression
         run: cargo test -p linggan-api --bins --locked -- local_web::web_app_tests local_web::corpus_shell_api local_web::evidence_ local_web::content_workbench_sources_api::tests
+      - name: C0 offline contracts and real React main path (no database or provider)
+        env:
+          C0_PREVIEW_PROOF_DIR: ${{ runner.temp }}/web-app-proof/c0-offline
+        run: |
+          npm --prefix apps/web run build
+          cargo test -p linggan-intelligence --test note_interpretation_offline --locked
+          cargo test -p linggan-api --bins --locked -- local_web::offline_preview_tests
+          export C0_PREVIEW_NODE="$(command -v node)"
+          cargo test -p linggan-api --bins --locked offline_preview_browser_main_path -- --ignored --nocapture
       - name: Isolated PostgreSQL + Axum + React browser proof (synthetic credential only)
         env:
           WEB_APP_PROOF_DIR: ${{ runner.temp }}/web-app-proof

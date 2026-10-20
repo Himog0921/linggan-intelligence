@@ -7,13 +7,13 @@ import { commentEligibility, commentFilters, commentStatus, shortBeijingDate, ty
 import { errorText, studyTime } from './format';
 import { signalKindLabel, workTitleSourceLabel } from './labels';
 import { parseWorkCatalog } from './methodDtos';
-import type { SelectedComment } from './StartResearch';
+import type { SelectedComment } from './studyApi';
 import { commentIdentity, studyRead, useStudyRead, type StudyNavigation } from './studyApi';
 import { c } from './styles';
 
 export interface CommentCounts { displayableCommentCount: number | null; eligibleCommentCount: number | null; indexedCount: number | null; pendingCount: number | null }
-interface Props { domain: string; nav: StudyNavigation; selected: SelectedComment[]; onSelected: (rows: SelectedComment[]) => void; onStudy: () => void; onStart: () => void; setupStatus: { text: string; kind: string }; onCounts: (counts: CommentCounts | null) => void; requestRefs: Map<string, string>; closeDetail: () => void }
-export function CommentsView({ domain, nav, selected, onSelected, onStudy, onStart, setupStatus, onCounts, requestRefs, closeDetail }: Props) {
+interface Props { domain: string; nav: StudyNavigation; selected: SelectedComment[]; onSelected: (rows: SelectedComment[]) => void; onCounts: (counts: CommentCounts | null) => void; requestRefs: Map<string, string>; closeDetail: () => void }
+export function CommentsView({ domain, nav, selected, onSelected, onCounts, requestRefs, closeDetail }: Props) {
   const location = useLocation(), navigate = useNavigate(), params = new URLSearchParams(location.search);
   const state = location.state as { commentFilter?: CommentFilters; commentDomain?: string } | null;
   const filter = commentFilters(params, state?.commentDomain === domain ? state.commentFilter : null);
@@ -54,10 +54,9 @@ export function CommentsView({ domain, nav, selected, onSelected, onStudy, onSta
 
   const extraCount = Number(filter.voiceRole !== 'reader_and_unknown') + Number(!!filter.minLikes) + Number(filter.postUsage !== 'all') + Number(!!filter.workRef);
   return <div className={c('study-results-comments')}>
-    {query.isPending ? <div className={c('study-comment-read-status')}><p className={c('study-empty')}>正在读取评论研究…</p><button type="button" id="open-study-dialog" className={c('study-primary-action')} onClick={onStart}>发起研究</button></div> : query.isError ? <div className={c('study-comment-read-status')}><p className={c('study-empty')}>评论目录读取失败：{errorText(query.error)} <button type="button" onClick={() => { void query.refetch(); }}>重试</button></p><button type="button" id="open-study-dialog" className={c('study-primary-action')} onClick={onStart}>发起研究</button></div> :
+    {query.isPending ? <div className={c('study-comment-read-status')}><p className={c('study-empty')}>正在读取评论研究…</p></div> : query.isError ? <div className={c('study-comment-read-status')}><p className={c('study-empty')}>评论目录读取失败：{errorText(query.error)} <button type="button" onClick={() => { void query.refetch(); }}>重试</button></p></div> :
     <section className={c('study-comments')} aria-label="用户评论">
       {feedback ? <p className={c('study-detail-muted')} role="status">{feedback}</p> : null}
-      {setupStatus.text ? <p id="setup-status" className={c('study-setup-status')} role="status" data-kind={setupStatus.kind}>{setupStatus.text}</p> : null}
       {postUsageFeedback ? <p className={c('study-table-status')} role="status">{postUsageFeedback}</p> : null}
       <form key={queryParams.toString()} id="comment-filter-form" className={c('study-worktable-filters')} onSubmit={event => {
         event.preventDefault();
@@ -74,7 +73,7 @@ export function CommentsView({ domain, nav, selected, onSelected, onStudy, onSta
           <div className={c('study-worktable-filter-actions')}>
           <button type="button" className={c('study-filter-more')} aria-controls="comment-advanced-filters" aria-expanded={advanced} onClick={() => setAdvanced(old => !old)}>更多筛选{extraCount ? ' · ' + extraCount : ''} <span aria-hidden="true">{advanced ? '⌃' : '⌄'}</span></button>
           <button type="submit" className={c('study-filter-submit')}>应用筛选</button>
-          <button type="button" id="open-study-dialog" className={c('study-primary-action')} onClick={onStart}>发起研究</button>
+
           </div>
         </div>
         <div id="comment-advanced-filters" className={c('study-filter-advanced')} hidden={!advanced}>
@@ -92,10 +91,9 @@ export function CommentsView({ domain, nav, selected, onSelected, onStudy, onSta
           route({ workRef: ref, workLabel: filter.workChoices.find(row => row.workRef === ref)?.displayTitle || '', cursor: null, history: [] });
         }}>{workError ? <option value="">{workError}</option> : <><option value="">全部作品</option>{filter.workChoices.map(work => <option value={work.workRef} key={work.workRef}>{work.displayTitle || '未命名作品'}</option>)}</>}</select></label>
       </div>
-      {selected.length ? <div className={c('study-comment-selection')} aria-label="当前所选研究范围">
+      {selected.length ? <div className={c('study-comment-selection')} aria-label="当前所选评论">
         <span id="comment-selection-count" role="status">已选 {selected.length} 条 · 来自 {selectedWorks.size} 篇作品</span>
-        {selected.length >= 2700 || selectedWorks.size >= 90 ? <span className={c('study-selection-limit')} title="研究选择上限：3000 条评论，100 篇作品">接近上限：最多 3000 条 / 100 作品</span> : null}
-        <button id="study-selected-comments" type="button" onClick={onStudy}>研究所选评论</button>
+        {selected.length >= 2700 || selectedWorks.size >= 90 ? <span className={c('study-selection-limit')} title="评论选择上限：3000 条评论，100 篇作品">接近上限：最多 3000 条 / 100 作品</span> : null}
         <button type="button" className={c('study-selection-clear')} onClick={() => onSelected([])}>清空选择</button>
       </div> : null}
       <div className={c('study-review-table-wrap')}><table className={c('study-review-table study-comments-table')}>
@@ -106,7 +104,7 @@ export function CommentsView({ domain, nav, selected, onSelected, onStudy, onSta
             kinds = item.signalKinds.filter(kind => Object.hasOwn(signalKindLabel, kind)), fullKinds = kinds.map(kind => signalKindLabel[kind]).join('、');
           const eligibilityText = eligible ? '' : commentEligibility(item), statusText = commentStatus(item);
           return <tr key={key} data-selected={checked ? 'true' : undefined}>
-            <td><input type="checkbox" data-select-comment data-work-ref={item.commentKey.workRef} data-comment-id={item.commentKey.commentExternalId} data-eligible={eligible} aria-label="选择这条评论进入研究" title={!eligible ? eligibilityText : capped ? '本次选择已达到评论或作品数量上限' : undefined} checked={checked} disabled={!eligible || capped} onChange={event => {
+            <td><input type="checkbox" data-select-comment data-work-ref={item.commentKey.workRef} data-comment-id={item.commentKey.commentExternalId} data-eligible={eligible} aria-label="选择这条评论" title={!eligible ? eligibilityText : capped ? '本次选择已达到评论或作品数量上限' : undefined} checked={checked} disabled={!eligible || capped} onChange={event => {
               if (event.target.checked && eligible && !capped) onSelected([...selected, { commentKey: item.commentKey, observationRole: item.observationRole }]);
               else onSelected(selected.filter(row => commentIdentity(row.commentKey) !== key));
             }} /></td>

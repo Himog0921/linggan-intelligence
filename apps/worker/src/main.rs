@@ -1,27 +1,6 @@
-//! Linggan Intelligence 的巡检 tick。
-//!
-//! 这是全系统第一个会自己动的东西。在它之前每一步都要人去戳一下。
-//!
-//! **tick 只做轻量的状态推进与入队**（产品规则 §6.3，取自内容工作台的教训：那边的调度
-//! tick 把媒体下载和转录塞进同一个 120 秒事务里，任何超时的 tick 都会丢锁并以异常收场）。
-//! 这里不下载、不转录、不访问任何平台——它只判断「谁到期了」，然后走一遍与人点按钮
-//! 完全相同的授权链。
-//!
-//! MODEL-PI-001 additionally composes an independent asynchronous comment model loop.
-//! Its bounded external calls never run inside or block the patrol tick below.
-//!
-//! **自动化不是豁免权**：准入若说资源不够、风险暂停生效或额度触顶，tick 也只能记下理由
-//! 然后等下一轮。
-//!
-//! **但「干不了活」与「没有活」必须分得开**（COLLECTION-UPGRADE-001 · T29/T30）。数据库连不上、
-//! 迁移台账读不到、迁移没跑、schema 不兼容时，这个进程以前会照常启动、照常每 60 秒走一遍、
-//! 一行「本轮 0 个」都不打——和一台空闲机器长得一模一样。现在每轮先判就绪（`runtime_readiness`）：
-//! 未就绪就不碰任何采集步骤，按退避重试，状态变化时才说话。连不上数据库绝不以 SUCCESS 退出
-//! （那是把故障说成正常），也绝不空转热重启：进程留在原地等它回来。这道闸只管**采集面**——
-//! 模型评论循环是另一条通道，有自己的表，只要有连接就照常跑（见 tick 循环里的注释）。
-//!
-//! 一轮 tick 的四步与每一步的结果住在 `tick.rs`；关停住在 `shutdown.rs`。这个文件只负责
-//! 把它们按顺序装起来。
+//! Collection patrol and deterministic catalog maintenance only.
+//! AI calls and embeddings are not composed into this process. The AI executor has its own
+//! session, switches and receipts; an interrupted collection tick is not a completed tick.
 
 use std::process::ExitCode;
 
@@ -29,16 +8,15 @@ use linggan_evidence::{
     EVENT_READINESS, EVENT_STARTUP, READINESS_RETRY_START, RuntimeEvent, SERVICE_WORKER,
     next_readiness_retry, record_readiness, record_scheduler_started,
 };
-use linggan_intelligence::model_worker_drain::ModelWorkerDrain;
 use linggan_storage_postgres::Database;
 
 mod keyword_details;
+mod maintenance;
 mod shutdown;
 mod tick;
 
-use shutdown::{
-    ModelWorkerTask, finish_worker_shutdown, wait_for_worker_shutdown, write_drain_ack,
-};
+use maintenance::MaintenanceTask;
+use shutdown::{finish_worker_shutdown, wait_for_worker_shutdown, write_drain_ack};
 use tick::{TICK_INTERVAL, observe_readiness, run_collection_tick};
 
 #[tokio::main]
@@ -52,12 +30,12 @@ async fn main() -> ExitCode {
         );
         return ExitCode::FAILURE;
     };
-    let drain = ModelWorkerDrain::new();
-    let drain_on_signal = drain.clone();
-    // Listen independently: a patrol database await must not delay closing model reservations.
+    let (stop, _) = tokio::sync::watch::channel(false);
+    let stop_on_signal = stop.clone();
+    // A blocked patrol SQL await must not delay the shutdown signal.
     let mut shutdown = tokio::spawn(async move {
         wait_for_worker_shutdown().await;
-        drain_on_signal.request();
+        stop_on_signal.send_replace(true);
     });
 
     // 先说着，再说别的：判定本身可能有十几秒，而这十几秒里不能让日志空着——
@@ -73,13 +51,13 @@ async fn main() -> ExitCode {
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
     let mut database: Option<Database> = None;
-    let mut model_worker: Option<ModelWorkerTask> = None;
+    let mut maintenance: Option<MaintenanceTask> = None;
     // 只在状态**变化**时说话：持续故障每分钟重复一行会把日志变成噪音，而噪音里看不见变化。
     let mut announced: Option<&'static str> = None;
     let mut tick_announced = false;
     let mut retry_after = READINESS_RETRY_START;
 
-    // Cancel only the collection loop. In-flight model receipts drain independently below.
+    // Cancel only the collection loop. Local maintenance finishes independently below.
     // An interrupted tick retains its unfinished ledger row; cancellation is not completion.
     tokio::select! {
         biased;
@@ -87,23 +65,12 @@ async fn main() -> ExitCode {
         _ = async {
             loop {
                 let readiness = observe_readiness(&url, &mut database).await;
-                // 模型评论循环**不**由采集面的就绪判据决定：它有自己的表，采集面的缺口不该把另一条
-                // 通道连坐停摆（要求清单是每消费者各主张的下限，不是一个总闸）。它的判据是「有没有
-                // 连接」——连不上时把它跑起来，只会制造一屋子错误日志。
-                if model_worker.is_none() {
-                    if let Some(connection) = database.as_ref() {
-                        let worker_instance_ref = uuid::Uuid::new_v4();
-                        if let Err(error) =
-                            record_scheduler_started(connection, worker_instance_ref).await
-                        {
-                            println!("linggan worker: cannot record scheduler identity: {error}");
+                if maintenance.is_none() {
+                    if let Some(connection)=database.as_ref() {
+                        if record_scheduler_started(connection,uuid::Uuid::new_v4()).await.is_err() {
+                            eprintln!("linggan worker: scheduler_identity_unavailable");
                         }
-                        model_worker = Some(tokio::spawn(
-                            linggan_intelligence::model_runner::run_model_worker_with_drain(
-                                connection.clone(),
-                                drain.clone(),
-                            ),
-                        ));
+                        maintenance=Some(tokio::spawn(maintenance::run(connection.clone(),stop.subscribe())));
                     }
                 }
                 if !readiness.is_ready() {
@@ -158,17 +125,14 @@ async fn main() -> ExitCode {
         } => {},
     }
 
-    drain.request();
-    println!("linggan worker: shutdown requested; stopping new model reservations");
-    match (database.as_ref(), model_worker.as_mut()) {
-        (Some(database), Some(model_worker)) => {
-            finish_worker_shutdown(database, model_worker).await
-        }
-        // 一次都没连上数据库，模型循环也就没起过：没有在途预留要等；但「它没起过」要如实说出来。
+    stop.send_replace(true);
+    println!("linggan worker: shutdown requested; finishing local maintenance");
+    match (database.as_ref(), maintenance.as_mut()) {
+        (Some(_), Some(task)) => finish_worker_shutdown(task).await,
         _ => {
-            write_drain_ack("drained");
-            println!("linggan worker: the model loop was never started; nothing to drain");
-            ExitCode::SUCCESS
+            let _ = write_drain_ack("failed");
+            eprintln!("linggan worker: database_unverified_at_shutdown");
+            ExitCode::FAILURE
         }
     }
 }

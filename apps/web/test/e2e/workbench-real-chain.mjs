@@ -235,7 +235,7 @@ async function generateWithV8BusyProof(locator) {
 
 try {
   await step('设置页不加载创作模块或本地图页字体',async()=>{
-    await page.goto(`${origin}/settings/models`);await page.getByRole('heading',{name:'评论研究的模型设置'}).waitFor();
+    await page.goto(`${origin}/settings/models`);await page.getByRole('heading',{name:'AI 设置'}).waitFor();
     const resources=await page.evaluate(()=>performance.getEntriesByType('resource').map(entry=>entry.name));
     assert.ok(resources.every(url=>!url.includes('WorkbenchPage')&&!url.includes('noto-sans-sc')));
     report.settingsResources=resources.map(url=>new URL(url).pathname);

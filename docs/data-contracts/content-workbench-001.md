@@ -1,7 +1,7 @@
 # CONTENT-WORKBENCH-001 · 作品与材料使用合同
 
 > 状态: 权威当前
-> 最后核对: 2026-10-15
+> 最后核对: 2026-10-20
 > 适用范围: Issue #425 后端候选，供 WEB-REACT-001 阶段 C 消费
 > 事实来源: Mog 实施授权、已认可 V3、main@0a90fd4a React 底座与阶段 C 候选源码
 > 冲突时以谁为准: 用户最新确认、真实来源资格；运行事实以实际代码与验证回执为准
@@ -61,6 +61,8 @@ Citation 为 sourceKind(note/comment/ocr/ops_publication)、sourceRef、workRef�
 - POST `/works/{id}/exports` 冻结expectedRevision；PUT `/exports/{exportId}/pages/{pageId}`上传实际PNG；POST `/exports/{id}/finalize`；GET状态、download及单页。所有资产/导出路径均由服务端固定。
 
 ## AI
+
+2026-10-20 / #454 PR-1B候选补充：writing_legacy使用[统一AI底座](ai-foundation.md)配置与队列，预览固定task_config_ref，确认返回queued且不内联派发。预留按冻结输入/输出额度，estimatedInputTokens是估算；无调用账时invocationRef/用量为NULL且usage.state=not_reserved，和已建账的未知/实测分开。实际调用、在途取消、晚到用量由统一执行器结算；正式建议与采用仍属于本合同。0140拒绝未核实的旧在途；历史已完成结果可读，不变更旧回执。该行为在独立候选/一次性PG证明，尚未合并部署或取得真实供应商/A06验收。
 
 动作仅 draft/rewrite_selection/page_copy；methodVersion `content-workbench-writing.v1`。只发用户选定材料、底稿与指令，材料按数据编码，不作为系统指令。configuration、transportCallable、writingQualified 分别报告；不得以评论研究资格证明创作。可用既有immutable model config，但资格/建议/请求/采用记录属于创作模块，统一 model_invocation只承担传输与计量。
 

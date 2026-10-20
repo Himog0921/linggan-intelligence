@@ -1,9 +1,9 @@
+import { AiBusinessStatus } from '../settings/AiBusinessStatus';
 import { TopicButton } from "./TopicButton";
 import type { JSX } from "react";
 import { attributes } from "./elementProps";
 import {
   currentResearchSummary,
-  researchPolicy,
   researchRun,
   researchSummary,
 } from "./researchViews";
@@ -626,15 +626,9 @@ export function createTopicDialogs(context: TopicDialogsContext) {
             </section>
             <section className={cls("lgi-tm-rail-box")}>
               <h3>{"已有结果继续可读"}</h3>
-              <p>{"研究仅在明确预算与当前最多10篇冻结集合内启动。"}</p>
-              {btn(
-                "研究当前精选",
-                "start-topic-research",
-                ref,
-                "",
-                "data-mutation",
-              )}
-              {btn("研究进度与设置", "research", "", "lgi-tm-quiet")}
+              <p>{"旧主题研究已退役，材料与历史结果继续保留。"}</p>
+
+              {btn("AI 状态与历史研究", "research", "", "lgi-tm-quiet")}
             </section>
           </aside>
         </div>
@@ -758,7 +752,7 @@ export function createTopicDialogs(context: TopicDialogsContext) {
             ))
           : empty(
               "当前没有已研究、可引用的不同角度",
-              "已有作品可继续读；明确开启研究后才会产生模型角度。",
+              "已有作品可继续读；旧模型研究已停用。",
             )}
       </>
     );
@@ -2056,168 +2050,19 @@ export function createTopicDialogs(context: TopicDialogsContext) {
   }
   function researchDialog() {
     const activeDialog = context.requireDialog();
-    if (activeDialog.loading)
-      return (
-        <>
-          <p role={"status"}>{"正在读取研究设置与真实进度回执。"}</p>
-        </>
-      );
-    const p = activeDialog.progress || context.progress,
-      policy = p?.policy,
-      models = list(p?.models),
-      usage = p?.usage;
-    return (
-      <>
-        {researchPolicy(policy)}
+    const p = activeDialog.progress || context.progress;
+    return <>
+      <AiBusinessStatus taskKey="legacy_topic_map" />
+      {activeDialog.loading ? <p role="status">正在读取历史研究回执…</p> : <>
+        <p>以下批次与用量是旧研究记录；执行链已停用，刷新不会恢复研究。</p>
         {currentResearchSummary(p)}
-        <details className={cls("lgi-tm-core-details")}>
-          <summary>{"模型、预算与自动研究设置"}</summary>
-          <div className={cls("lgi-tm-callout")}>
-            {
-              "开启后，历史材料分批研究、新材料增量处理。只有明确保存开启配置才启动，不因普通开页调用模型。关闭弹窗不取消已发任务，明确停止阻止继续启动新请求。"
-            }
-          </div>
-          <div className={cls("lgi-tm-metrics")}>
-            <div>
-              <span>{"今日已记账"}</span>
-              <strong>{number(usage?.chargedTokens)}</strong>
-              <small>
-                {["token · ", esc(usage?.timezone || "Asia/Shanghai")].join("")}
-              </small>
-            </div>
-            <div>
-              <span>{"当前预留"}</span>
-              <strong>{number(usage?.reservedTokens)}</strong>
-              <small>{"token · 不等于已消费"}</small>
-            </div>
-            <div>
-              <span>{"每日上限"}</span>
-              <strong>{number(policy?.dailyTokenLimit)}</strong>
-              <small>{"达到上限后延后待处理"}</small>
-            </div>
-            <div>
-              <span>{"每次研究上限"}</span>
-              <strong>{number(policy?.runTokenLimit)}</strong>
-              <small>{"token · 与精选10篇不同"}</small>
-            </div>
-          </div>
-          <form data-form={"research-config"} className={cls("lgi-tm-form")}>
-            <h3>{"研究设置"}</h3>
-            <label>
-              <span>{"已有模型配置"}</span>
-              <select name={"modelConfigRef"} required={true}>
-                <option value={""}>{"请选择配置"}</option>
-                {models.map((m) => (
-                  <>
-                    <option
-                      value={esc(m.configRef)}
-                      {...attributes(
-                        policy?.modelConfigRef === m.configRef
-                          ? "selected"
-                          : "",
-                      )}
-                    >
-                      {[
-                        esc(m.modelId),
-                        " · 输入 ",
-                        number(m.inputTokenLimit),
-                        " / 输出 ",
-                        number(m.outputTokenLimit),
-                        " token",
-                      ].join("")}
-                    </option>
-                  </>
-                ))}
-              </select>
-            </label>
-            <div className={cls("lgi-tm-form-grid")}>
-              <label>
-                <span>{"每日 token 上限"}</span>
-                <input
-                  type={"number"}
-                  name={"dailyTokenLimit"}
-                  min={"1024"}
-                  max={"10000000"}
-                  step={"1"}
-                  required={true}
-                  defaultValue={policy?.dailyTokenLimit ?? ""}
-                  placeholder={"明确预算后填写"}
-                />
-              </label>
-              <label>
-                <span>{"每次研究 token 上限"}</span>
-                <input
-                  type={"number"}
-                  name={"runTokenLimit"}
-                  min={"1024"}
-                  max={"10000000"}
-                  step={"1"}
-                  required={true}
-                  defaultValue={policy?.runTokenLimit ?? ""}
-                  placeholder={"明确预算后填写"}
-                />
-              </label>
-            </div>
-            <label className={cls("lgi-tm-check-label")}>
-              <input
-                type={"checkbox"}
-                name={"automaticEnabled"}
-                {...attributes(policy?.automaticEnabled ? "checked" : "")}
-              />
-              <span>{"明确开启历史回填与新材料自动增量研究"}</span>
-            </label>
-            <label className={cls("lgi-tm-check-label")}>
-              <input
-                type={"checkbox"}
-                name={"collectionEnabled"}
-                {...attributes(policy?.collectionEnabled ? "checked" : "")}
-              />
-              <span>{"在已授权范围内允许主题临时补采，每轮最多10篇详情"}</span>
-            </label>
-            <p>
-              {
-                "已有材料仍可用；研究配置不替代平台执行授权、工位范围与采集限制。"
-              }
-            </p>
-            <TopicButton
-              type={"submit"}
-              className={cls("lgi-tm-button lgi-tm-primary")}
-              data-mutation=""
-            >
-              {"保存明确设置"}
-            </TopicButton>
-          </form>
-        </details>
-        <details className={cls("lgi-tm-core-details")}>
-          <summary>{"历史任务账本"}</summary>
-          {researchSummary(p)}
-        </details>
-        <section className={cls("lgi-tm-section")}>
-          <div className={cls("lgi-tm-section-head")}>
-            <h3>{"最近批次"}</h3>
-            {btn("刷新进度", "research-refresh")}
-          </div>
-          <p>
-            {[
-              "显示最近 ",
-              number(p?.runListLimit),
-              " 批次中的 ",
-              number(list(p?.runs).length),
-              " 批 · 全领域共 ",
-              number(p?.summary?.totalRunCount),
-              " 批",
-            ].join("")}
-          </p>
-          {withEmpty(
-            list(p?.runs).map((run) => researchRun(run, policy)),
-            empty(
-              "当前没有研究运行",
-              "首次开启或明确按需启动后，真实回执会出现在这里。",
-            ),
-          )}
+        <details className={cls("lgi-tm-core-details")}><summary>历史任务账本</summary>{researchSummary(p)}</details>
+        <section className={cls("lgi-tm-section")}><div className={cls("lgi-tm-section-head")}><h3>历史批次</h3>{btn("刷新历史记录", "research-refresh")}</div>
+          <p>显示最近 {number(p?.runListLimit)} 批次中的 {number(list(p?.runs).length)} 批；全领域历史共 {number(p?.summary?.totalRunCount)} 批。</p>
+          {withEmpty(list(p?.runs).map(run => researchRun(run)), empty("没有历史研究运行", "材料仍可阅读和人工整理。"))}
         </section>
-      </>
-    );
+      </>}
+    </>;
   }
   function moveDialog() {
     const activeDialog = context.requireDialog();

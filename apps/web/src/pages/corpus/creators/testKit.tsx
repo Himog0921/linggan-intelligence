@@ -1,3 +1,4 @@
+import { businessSettingsFixture } from '../../settings/aiSettingsFixture.test-support';
 /**
  * 创作者页测试用的合成数据与假 fetch。所有内容都是合成的，不是任何真实作者、作品或原声。
  * 形状照 `GET /api/local/creators` 的真实输出（`discovery::aggregate`），不是自己想象的结构。
@@ -312,7 +313,7 @@ export function defaultRoutes(kit: FetchKit, list: Responder = ok(listJson())) {
   kit.route('GET', '/api/local/corpus/shell', ok(shellJson()));
   kit.route('GET', '/api/local/creators', list);
   kit.route('GET', '/api/local/work-resources', ok({ items: [] }));
-  kit.route('GET', '/api/local/model-settings', ok({ config: null, models: [] }));
+  kit.route('GET', '/api/local/ai-settings', ok(businessSettingsFixture()));
 }
 
 export function renderCreatorsPage(url = `/corpus/creators?domain=${DOMAIN}`) {

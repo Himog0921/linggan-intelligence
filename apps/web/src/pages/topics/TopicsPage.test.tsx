@@ -1,3 +1,4 @@
+import { businessSettingsFixture } from '../settings/aiSettingsFixture.test-support';
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -29,6 +30,7 @@ function page() {
   );
 }
 function defaultRead(path: string) {
+  if (path === "/api/local/ai-settings") return businessSettingsFixture();
   if (path.includes("/context")) return topicContext;
   if (path.includes("/research")) return topicProgress();
   if (path.includes("/comments"))
@@ -249,7 +251,7 @@ describe("Topic React interaction and lifetime", () => {
         screen.getByRole("button", { name: "合成材料 0" }),
       ).toBeInTheDocument(),
     );
-    expect(await screen.findByText("研究状态读取失败")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /历史记录读取失败/ })).toBeInTheDocument();
     expect(screen.queryByText("研究未设置")).not.toBeInTheDocument();
   });
   it("discards an old domain read after popstate even if the transport ignores abort", async () => {
@@ -396,17 +398,10 @@ describe("Topic React interaction and lifetime", () => {
     await screen.findByText(/已保存 · 回执/);
   });
   it.each(["pending", "failed"])(
-    "keeps research reads and explicit settings independent of a %s first map",
+    "keeps historical research reads and centralized settings independent of a %s first map",
     async (mode) => {
       const summary = pendingResponse();
       const progress = topicProgress();
-      const configRef = "70000000-0000-4000-8000-000000000001";
-      progress.models.push({
-        configRef,
-        modelId: "synthetic-only",
-        inputTokenLimit: 4096,
-        outputTokenLimit: 2048,
-      });
       const writes: unknown[] = [];
       const fetcher = vi.fn((path: string, init?: RequestInit) => {
         if (init?.method === "POST") {
@@ -422,7 +417,7 @@ describe("Topic React interaction and lifetime", () => {
             jsonResponse({ code: "topic_map_read_unavailable" }, 503),
           );
         return Promise.resolve(jsonResponse(
-          path.includes("/context") ? topicContext
+          path === "/api/local/ai-settings" ? businessSettingsFixture() : path.includes("/context") ? topicContext
             : path.includes("/research") ? progress : topicSnapshot(),
         ));
       });
@@ -430,31 +425,24 @@ describe("Topic React interaction and lifetime", () => {
       page();
       if (mode === "failed") await screen.findByText("当前读取未成功");
       const trigger = await screen.findByRole("button", {
-        name: /研究进度|研究未设置/,
+        name: /旧研究已退役|历史研究记录读取中/,
       });
       await userEvent.click(trigger);
       expect(await screen.findByRole("dialog", {
-        name: "研究进度与设置",
+        name: "AI 状态与历史研究",
       })).toBeInTheDocument();
-      await screen.findByRole("button", { name: "刷新进度" });
+      await screen.findByRole("button", { name: "刷新历史记录" });
       expect(writes).toEqual([]);
       const researchReads = () => fetcher.mock.calls.filter(
         ([path]) => path.includes("/research?"),
       ).length;
       const readsBefore = researchReads();
-      await userEvent.click(screen.getByRole("button", { name: "刷新进度" }));
+      await userEvent.click(screen.getByRole("button", { name: "刷新历史记录" }));
       await waitFor(() => expect(researchReads()).toBeGreaterThan(readsBefore));
-      await userEvent.click(screen.getByText("模型、预算与自动研究设置"));
-      await userEvent.selectOptions(screen.getByLabelText("已有模型配置"), configRef);
-      await userEvent.type(screen.getByLabelText("每日 token 上限"), "4096");
-      await userEvent.type(screen.getByLabelText("每次研究 token 上限"), "2048");
-      await userEvent.click(screen.getByRole("button", { name: "保存明确设置" }));
-      await screen.findByText(/动作已获得后端回执/);
-      expect(writes).toHaveLength(1);
-      expect(writes[0]).toMatchObject({
-        action: "configure", domainRef: topicDomain,
-        automaticEnabled: false, collectionEnabled: false,
-      });
+      expect(screen.getByRole("link", { name: "去 AI 设置" })).toHaveAttribute("href", "/settings/models?section=automation&task=legacy_topic_map");
+      expect(screen.queryByLabelText("已有模型配置")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "保存明确设置" })).not.toBeInTheDocument();
+      expect(writes).toEqual([]);
       await userEvent.click(screen.getByRole("button", {
         name: "关闭对话框，保留研究任务",
       }));

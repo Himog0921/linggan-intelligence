@@ -1,7 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { execute, VERSION, estimateTopicInputTokens, TOPIC_TRANSPORT_BYTE_LIMIT } from '../src/adapter.mjs';
+import { execute as rawExecute, VERSION, estimateTopicInputTokens, TOPIC_TRANSPORT_BYTE_LIMIT } from '../src/adapter.mjs';
+import { capabilityFacts } from './request-facts.mjs';
+// Every positive structured-format request explicitly carries constructed frozen facts.
+const execute = r => rawExecute({ ...r, execution: Object.hasOwn(r, 'execution') ? r.execution : capabilityFacts(r.api) });
+
 
 // Small synthetic schema tests the V1 wire boundary. The Rust packet owns the real schema.
 const schema={type:'object',properties:{outcome:{type:'string',enum:['atoms','no_signal']},atoms:{type:'array',items:{type:'object',properties:{kind:{type:'string'},proposition:{type:'string'},basis:{type:'string'},evidenceStart:{type:'integer'},evidenceEnd:{type:'integer'}},required:['kind','proposition','basis','evidenceStart','evidenceEnd'],additionalProperties:false}},reason:{type:'string'}},required:['outcome'],additionalProperties:false};
@@ -58,7 +62,7 @@ test('actual SDK sends V1 schema for analysis and JSON mode for DeepSeek chat',a
 test('official supported OpenAI models receive the V1 schema in each documented protocol',async()=>{
   await fixture(async bodies=>{
     for(const api of ['openai-responses','openai-completions']){
-      assert.equal((await execute({...request,baseUrl:'https://api.openai.com/v1',modelId:'gpt-4o-mini',api})).ok,true);
+      assert.equal((await execute({...request,baseUrl:'https://api.openai.com/v1',modelId:'gpt-4o-mini',api,execution:capabilityFacts(api,{outputMode:'json_schema'})})).ok,true);
       const body=bodies.at(-1);
       if(api==='openai-responses')assert.deepEqual(body.text.format,{type:'json_schema',name:'comment_research_semantic_v1',schema});
       else assert.deepEqual(body.response_format,{type:'json_schema',json_schema:{name:'comment_research_semantic_v1',schema}});
@@ -129,9 +133,10 @@ test('V6 research packets retain the distinct named schemas on the documented De
     assert.equal(bodies.at(-1).text.format.name,'comment_research_problem_resolution_v6');
   });
 });
-test('unknown host, path, model and unrelated prompts do not inherit structured capability',async()=>{
+test('host, path, model and prompt names never grant missing structured capability',async()=>{
   await fixture(async bodies=>{
     for(const change of [
+      {},
       {baseUrl:'https://api.deepseek.com.example.invalid/v1'},
       {baseUrl:'https://api.deepseek.com/custom'},
       {modelId:'future-unknown-model'},
@@ -139,7 +144,7 @@ test('unknown host, path, model and unrelated prompts do not inherit structured 
       {prompt:'Return JSON.'},
       {prompt:JSON.stringify({contract:'another-contract',untrustedMaterial:{contract:'comment-research.semantic.v1',outputSchema:schema}})},
     ]){
-      assert.equal((await execute({...request,...change})).ok,true);
+      assert.equal((await execute({...request,...change,execution:null})).ok,true);
       assert.equal(bodies.at(-1).text?.format,undefined);
       assert.equal(bodies.at(-1).response_format,undefined);
     }
@@ -189,7 +194,7 @@ test('topic extraction and resolution carry named schemas through the actual SDK
         if(api==='openai-responses')assert.deepEqual(bodies.at(-1).text.format,{type:'json_schema',name,schema:outputSchema});
         else assert.deepEqual(bodies.at(-1).response_format,{type:'json_object'});
         assert.ok(!bodies.at(-1).tools?.length);
-        assert.equal((await execute({...request,api,prompt,baseUrl:'https://api.openai.com/v1',modelId:'gpt-4o-mini'})).ok,true);
+        assert.equal((await execute({...request,api,prompt,baseUrl:'https://api.openai.com/v1',modelId:'gpt-4o-mini',execution:capabilityFacts(api,{outputMode:'json_schema',strictSchema:true})})).ok,true);
         if(api==='openai-responses')assert.deepEqual(bodies.at(-1).text.format,{type:'json_schema',name,schema:outputSchema,strict:true});
         else assert.deepEqual(bodies.at(-1).response_format,{type:'json_schema',json_schema:{name,schema:outputSchema,strict:true}});
       }
@@ -229,14 +234,14 @@ test('Unicode topic material uses estimated tokens independently of its UTF-8 by
   assert.ok(Buffer.byteLength(prompt)+Buffer.byteLength(request.system)+request.maxOutputTokens>32768);
   assert.ok(estimateTopicInputTokens(request.system,prompt)<16384);
   await fixture(async bodies=>{
-    assert.equal((await execute({...request,prompt})).ok,true);
+    assert.equal((await execute({...request,execution:null,prompt})).ok,true);
     assert.equal(bodies.length,1);
     assert.ok(JSON.stringify(bodies[0]).includes(material));
     const tooSmall=topicPrompt('topic-map.research.v2',{inputTokenLimit:1024,material});
-    assert.equal((await execute({...request,prompt:tooSmall})).failureCode,'model_input_limit');
+    assert.equal((await execute({...request,execution:null,prompt:tooSmall})).failureCode,'model_input_limit');
     assert.equal(bodies.length,1);
     const unrelated=JSON.stringify({contract:'unrelated',inputTokenLimit:16384,input:{material}});
-    assert.equal((await execute({...request,prompt:unrelated})).failureCode,'model_input_limit');
+    assert.equal((await execute({...request,execution:null,prompt:unrelated})).failureCode,'model_input_limit');
     assert.equal(bodies.length,1);
   });
 });
@@ -246,11 +251,11 @@ test('topic token configuration and byte transport limits cannot be silently byp
       const packet=JSON.parse(topicPrompt('topic-map.resolve.v1'));
       if(limit===undefined)delete packet.inputTokenLimit;
       else packet.inputTokenLimit=limit;
-      assert.equal((await execute({...request,prompt:JSON.stringify(packet)})).failureCode,'invalid_request');
+      assert.equal((await execute({...request,execution:null,prompt:JSON.stringify(packet)})).failureCode,'invalid_request');
     }
-    const oversized={...request,prompt:topicPrompt('topic-map.resolve.v1'),system:'x'.repeat(TOPIC_TRANSPORT_BYTE_LIMIT)};
+    const oversized={...request,execution:null,prompt:topicPrompt('topic-map.resolve.v1'),system:'x'.repeat(TOPIC_TRANSPORT_BYTE_LIMIT)};
     assert.equal((await execute(oversized)).failureCode,'invalid_request');
-    const nonTopic={...request,system:'x'.repeat(131072)};
+    const nonTopic={...request,execution:null,system:'x'.repeat(131072)};
     assert.equal((await execute(nonTopic)).failureCode,'invalid_request');
     assert.equal(bodies.length,0);
   });

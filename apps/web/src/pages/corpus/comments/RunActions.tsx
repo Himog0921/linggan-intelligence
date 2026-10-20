@@ -1,9 +1,0 @@
-import type { StudyRun } from './runDtos';
-import { c } from './styles';
-
-export type ControlAction = 'pause' | 'resume' | 'stop' | 'recover';
-export function RunActions({ run, busy, act }: { run: StudyRun; busy: boolean; act: (run: StudyRun, action: ControlAction) => void }) {
-  const canControl = run.selectionContract === 'comment-study.run-selection.v2' && !run.finishedAt && run.controlVersion != null && Number.isInteger(run.controlVersion) && run.controlVersion >= 0;
-  const unfinished = Number(run.failedCount || 0) + Number(run.cancelledCount || 0) + Number(run.needsContextCount || 0) + Number(run.excludedCount || 0);
-  return <>{canControl && run.dispatchState === 'enabled' ? <button className={c('study-run-control')} type="button" data-run-control="pause" data-run={run.runRef} data-control-version={run.controlVersion} disabled={busy} onClick={() => act(run, 'pause')}>暂停派发</button> : null}{canControl && run.dispatchState === 'paused' && run.dispatchReason === 'user_paused' ? <button className={c('study-run-control')} type="button" data-run-control="resume" data-run={run.runRef} data-control-version={run.controlVersion} disabled={busy} onClick={() => act(run, 'resume')}>恢复派发</button> : null}{canControl && ['enabled', 'paused'].includes(run.dispatchState ?? '') ? <button className={c('study-run-control study-run-stop')} type="button" data-run-control="stop" data-run={run.runRef} data-control-version={run.controlVersion} data-target-count={run.targetCount} data-pending-count={run.pendingCount ?? '未知'} disabled={busy} onClick={() => act(run, 'stop')}>停止本次运行</button> : null}{run.selectionContract === 'comment-study.run-selection.v2' && run.finishedAt && unfinished > 0 ? <button type="button" className={c('study-link')} data-run-recover={run.runRef} disabled={busy} onClick={() => act(run, 'recover')}>补跑未完成</button> : null}</>;
-}

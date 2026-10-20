@@ -25,13 +25,37 @@ pub struct PiRequest {
     pub max_output_tokens: i32,
     pub system: String,
     pub prompt: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution: Option<crate::ai_foundation::transport::PiExecution>,
 }
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Default, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PiUsage {
     pub input_tokens: Option<i64>,
     pub output_tokens: Option<i64>,
     pub cost_usd: Option<f64>,
+    pub cached_input_tokens: Option<i64>,
+    pub cached_write_tokens: Option<i64>,
+    pub reasoning_tokens: Option<i64>,
+}
+impl PiUsage {
+    pub(crate) fn ledger_usage(
+        &self,
+    ) -> Result<crate::ai_foundation::usage::TokenUsage, ModelError> {
+        let token = |v: Option<i64>| -> Result<Option<u64>, ModelError> {
+            v.map(|n| u64::try_from(n).map_err(|_| ModelError::InvalidOutput))
+                .transpose()
+        };
+        let usage = crate::ai_foundation::usage::TokenUsage {
+            input: token(self.input_tokens)?,
+            output: token(self.output_tokens)?,
+            cached_read: token(self.cached_input_tokens)?,
+            cached_write: token(self.cached_write_tokens)?,
+            reasoning: token(self.reasoning_tokens)?,
+        };
+        usage.validate().map_err(|_| ModelError::InvalidOutput)?;
+        Ok(usage)
+    }
 }
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -53,6 +77,8 @@ pub struct PiResponse {
 pub struct PiDiagnostic {
     pub schema_version: u8,
     pub stage: String,
+    #[serde(default)]
+    pub request_sent: Option<bool>,
     pub http_status: Option<u16>,
     pub response_started: Option<bool>,
     pub terminal_received: Option<bool>,
@@ -67,6 +93,20 @@ pub struct PiDiagnostic {
 impl PiDiagnostic {
     pub fn valid(&self) -> bool {
         self.schema_version == 1
+            && self.request_sent.is_none_or(|sent| {
+                if sent {
+                    self.stage != "request_not_started"
+                } else {
+                    matches!(
+                        self.stage.as_str(),
+                        "request_not_started" | "rejected" | "failed" | "timed_out"
+                    ) && self.http_status.is_none()
+                        && self.response_started != Some(true)
+                        && self.terminal_received != Some(true)
+                        && self.received_bytes.is_none_or(|n| n == 0)
+                        && !self.usage_known
+                }
+            })
             && matches!(
                 self.stage.as_str(),
                 "request_not_started"
@@ -86,6 +126,8 @@ impl PiDiagnostic {
                     "sse_stream_262144"
                         | "sse_stream_token_budget"
                         | "final_text_65536"
+                        | "final_text_bytes"
+                        | "response_bytes"
                         | "output_tokens"
                 )
             })
@@ -117,6 +159,7 @@ impl PiDiagnostic {
         Self {
             schema_version: 1,
             stage: "timed_out".into(),
+            request_sent: None,
             http_status: None,
             response_started: None,
             terminal_received: None,
@@ -220,6 +263,9 @@ impl WeMMResponse {
     }
 }
 impl PiAdapter {
+    pub(crate) fn node_path(&self) -> &std::path::Path {
+        &self.node
+    }
     pub fn configured() -> Self {
         let support_dir = std::env::var_os("LINGGAN_SUPPORT_DIR")
             .map(PathBuf::from)
@@ -394,25 +440,8 @@ impl PiAdapter {
     }
 
     pub async fn call(&self, request: &PiRequest) -> Result<PiResponse, ModelError> {
-        let input = serde_json::to_vec(request).map_err(|_| ModelError::Invalid)?;
-        let topic_contract = serde_json::from_str::<Value>(&request.prompt)
-            .ok()
-            .and_then(|packet| packet["contract"].as_str().map(str::to_owned))
-            .is_some_and(|contract| {
-                matches!(
-                    contract.as_str(),
-                    "topic-map.research.v2"
-                        | "topic-map.research.v3"
-                        | "topic-map.resolve.v1"
-                        | "topic-map.resolve.v2"
-                        | "topic-map.extract.compact.v1"
-                        | "topic-map.extract.quotes.v1"
-                        | "topic-map.verify.v1"
-                )
-            });
-        if input.len() > if topic_contract { 1024 * 1024 } else { 131072 } {
-            return Err(ModelError::InputLimit);
-        }
+        let input = request.wire_bytes()?;
+        let limits = &linggan_contracts::ai_limits::AI_LIMITS;
         let mut child = tokio::process::Command::new(&self.node)
             .arg(&self.script)
             .env_clear()
@@ -424,7 +453,9 @@ impl PiAdapter {
             .map_err(|_| ModelError::AdapterUnavailable)?;
         let mut stdin = child.stdin.take().ok_or(ModelError::AdapterUnavailable)?;
         let stdout = child.stdout.take().ok_or(ModelError::AdapterUnavailable)?;
-        let deadline = Duration::from_millis(request.timeout_ms + 1000);
+        let deadline = Duration::from_millis(
+            request.timeout_ms + limits.adapter_deadline_allowance_seconds * 1000,
+        );
         let outcome = tokio::time::timeout(deadline, async {
             stdin
                 .write_all(&input)
@@ -437,11 +468,11 @@ impl PiAdapter {
             drop(stdin);
             let mut bytes = Vec::new();
             stdout
-                .take(262145)
+                .take(limits.max_response_bytes + 1)
                 .read_to_end(&mut bytes)
                 .await
                 .map_err(|_| ModelError::AdapterUnavailable)?;
-            if bytes.len() > 262144 {
+            if bytes.len() as u64 > limits.max_response_bytes {
                 return Err(ModelError::InvalidOutput);
             }
             let status = child
@@ -453,6 +484,7 @@ impl PiAdapter {
             }
             let response: PiResponse =
                 serde_json::from_slice(&bytes).map_err(|_| ModelError::InvalidOutput)?;
+            response.usage.ledger_usage()?;
             if response.version != PI_PROTOCOL
                 || response.diagnostic.as_ref().is_some_and(|d| {
                     !d.valid()
@@ -584,20 +616,46 @@ mod diagnostic_tests {
     async fn topic_map_quote_and_review_packets_reach_the_topic_byte_gate() {
         // An unavailable executable proves the byte gate was passed without any provider call.
         let adapter = PiAdapter::configured_with_test_command(
-            PathBuf::from("/nonexistent-topic-map-synthetic-executable"), PathBuf::from("/unused"));
-        let mut request = PiRequest { version: "linggan.pi.v1", operation: "analyze".into(), api: "openai-responses".into(),
-            base_url: "http://127.0.0.1:1".into(), local_endpoint: true, api_key: "synthetic".into(),
-            model_id: "synthetic".into(), timeout_ms: 1000, max_output_tokens: 2000,
-            system: "x".repeat(140000), prompt: String::new() };
-        for contract in ["topic-map.extract.compact.v1", "topic-map.extract.quotes.v1", "topic-map.verify.v1"] {
+            PathBuf::from("/nonexistent-topic-map-synthetic-executable"),
+            PathBuf::from("/unused"),
+        );
+        let mut request = PiRequest {
+            version: PI_PROTOCOL,
+            operation: "analyze".into(),
+            api: "openai-responses".into(),
+            base_url: "http://127.0.0.1:1".into(),
+            local_endpoint: true,
+            api_key: "synthetic".into(),
+            model_id: "synthetic".into(),
+            timeout_ms: 1000,
+            max_output_tokens: 2000,
+            system: "x".repeat(140000),
+            prompt: String::new(),
+            execution: None,
+        };
+        for contract in [
+            "topic-map.extract.compact.v1",
+            "topic-map.extract.quotes.v1",
+            "topic-map.verify.v1",
+        ] {
             request.prompt = serde_json::json!({"contract":contract}).to_string();
-            assert!(matches!(adapter.call(&request).await, Err(ModelError::AdapterUnavailable)));
+            assert!(matches!(
+                adapter.call(&request).await,
+                Err(ModelError::AdapterUnavailable)
+            ));
         }
-        request.prompt = serde_json::json!({"contract":"other","input":{"contract":"topic-map.verify.v1"}}).to_string();
-        assert!(matches!(adapter.call(&request).await, Err(ModelError::InputLimit)));
+        request.prompt =
+            serde_json::json!({"contract":"other","input":{"contract":"topic-map.verify.v1"}})
+                .to_string();
+        assert!(matches!(
+            adapter.call(&request).await,
+            Err(ModelError::InputLimit)
+        ));
         request.prompt = serde_json::json!({"contract":"topic-map.verify.v1"}).to_string();
         request.system = "x".repeat(1048576);
-        assert!(matches!(adapter.call(&request).await, Err(ModelError::InputLimit)));
+        assert!(matches!(
+            adapter.call(&request).await,
+            Err(ModelError::InputLimit)
+        ));
     }
-
 }

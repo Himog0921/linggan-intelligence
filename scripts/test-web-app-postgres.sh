@@ -3,7 +3,8 @@
 # + 无界面浏览器。依次运行：阶段 B 的设置页证明；阶段 D1 的语料外壳接口读库证明与创作者页证明；
 # 阶段 D2 的证据库接口证明（DR-1 失效控件、两条写路径的库内后果）与证据库页证明；阶段 E 的运营台账五页证明
 # （合成作者与作品，真实写入只落在隔离库）。不连接开发库或本机常驻服务；只用合成模型凭据，
-# 模型连接指向本机回环端口，模型调用组件被指到不存在的路径，因此不会启动任何模型进程或外发请求。
+# 普通页面证明禁用模型进程；做法试跑专项仅使用固定 SDK 和自有回环端点，
+# 不连接真实供应商，也不读取共享服务凭据。
 set -euo pipefail
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$project_root"
@@ -103,10 +104,25 @@ run_proof() {
 }
 
 # Focused local reruns use the same disposable environment; CI defaults to every stage.
+if [[ "${WEB_APP_PROOF_SCOPE:-all}" == ai-trials ]]; then
+  run_proof "$proof_dir" env LINGGAN_PI_NODE="$node_bin" cargo test -p linggan-api --bins --locked ai_settings_skill_trial_real_chain_browser_proof -- --ignored --nocapture --test-threads=1
+  exit 0
+fi
+if [[ "${WEB_APP_PROOF_SCOPE:-all}" == settings ]]; then
+  run_proof "$proof_dir" env LINGGAN_PI_NODE="$node_bin" cargo test -p linggan-api --bins --locked settings_page_real_chain_browser_proof -- --ignored --nocapture --test-threads=1
+  exit 0
+fi
 if [[ "${WEB_APP_PROOF_SCOPE:-all}" == topics ]]; then
   mkdir -p "$proof_dir/topics"
   run_proof "$proof_dir/topics" cargo test -p linggan-api --bins --locked local_web::topic_workspace_tests -- --ignored --nocapture --test-threads=1
   run_proof "$proof_dir/topics" cargo test -p linggan-api --bins --locked local_web::topic_browser_tests -- --ignored --nocapture --test-threads=1
+  exit 0
+fi
+if [[ "${WEB_APP_PROOF_SCOPE:-all}" == comments-contracts ]]; then
+  mkdir -p "$proof_dir/comments"
+  run_proof "$proof_dir/comments" cargo test -p linggan-api --bins --locked \
+    local_web::comment_study::catalog_api::command_api::postgres_tests:: \
+    -- --ignored --nocapture --test-threads=1
   exit 0
 fi
 if [[ "${WEB_APP_PROOF_SCOPE:-all}" == comments ]]; then
@@ -120,10 +136,15 @@ fi
 
 # 阶段 B：设置页。
 run_proof "$proof_dir" \
-  cargo test -p linggan-api --bins --locked \
+  env LINGGAN_PI_NODE="$node_bin" cargo test -p linggan-api --bins --locked \
   local_web::web_app_tests::settings_page_real_chain_browser_proof \
   -- --ignored --nocapture --test-threads=1
 printf '%s\n' 'WEB-REACT-001 settings page real-chain proof passed (isolated database; synthetic credential only)'
+
+# AI-GEN1: owned service and synthetic SDK endpoint; deliberately distinct from zero-call settings.
+mkdir -p "$proof_dir/ai-trials"
+run_proof "$proof_dir/ai-trials" env LINGGAN_PI_NODE="$node_bin" cargo test -p linggan-api --bins --locked ai_settings_skill_trial_real_chain_browser_proof -- --ignored --nocapture --test-threads=1
+
 
 # 阶段 D1：语料外壳接口读真实库 + 创作者页（证据放在 creators/ 子目录）。
 mkdir -p "$proof_dir/creators"

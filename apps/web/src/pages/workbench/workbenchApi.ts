@@ -285,6 +285,14 @@ export class WorkbenchActionError extends Error {}
 export function aiFailureText(code: string | null): string {
   const messages: Record<string, string> = {
     writing_output_invalid: '这次返回的建议暂时无法使用，正文没有改变。可调整要求后重新准备，也可以继续手写。',
+    ai_output_invalid: '这次返回的建议暂时无法使用，正文没有改变。请核对调用用量后重新准备，也可以继续手写。',
+    ai_source_unavailable: '选定材料的版本或可用性已变化，正文没有改变。请重新核对材料，再准备建议。',
+    ai_dispatch_unknown: '尚不能确认这次调用的结果，用量仍占预留。请先核对调用记录，避免重复生成。',
+    ai_cancelled_after_dispatch: '生成已取消，正文没有改变。已发生的调用用量仍会结算。',
+    ai_configuration_stale: '模型配置或连接已经变化。请到AI设置核对后重新准备。',
+    ai_adapter_rejected_before_dispatch: '请求未发出。请到AI设置核对模型能力与请求配置。',
+    ai_input_limit_before_dispatch: '选定输入超过模型上限，请减少材料或调整配置后重新准备。',
+
     source_or_base_changed_before_dispatch: '选定材料或底稿已经变化，这次生成没有继续。请核对后重新准备。',
     creation_ai_source_unavailable: '所选材料已经变化或暂不可用。请回到材料重新选取，再准备建议。',
     creation_ai_model_unavailable: '创作模型暂不可用，请到设置核对连接。当前输入仍保留，也可以继续手写。',
@@ -322,6 +330,7 @@ export function errorText(error: unknown): string {
       creation_not_connected: '创作暂时无法读取，当前输入仍保留。请稍后重试。',
       creation_storage_not_configured: '图片存储尚未配置，仍可继续写正文。',
       creation_ai_model_unavailable: '创作模型尚不可用，仍可手写。',
+      creation_ai_admission_denied: '当前运行条件尚未满足，请到AI设置核对开关、模型、额度和外发许可。当前输入仍保留。',
       creation_ai_stale: '底稿已改变，请重新预览。',
       creation_request_conflict: '这次操作与先前的内容不一致，请先刷新核对。当前输入仍保留。'
     };

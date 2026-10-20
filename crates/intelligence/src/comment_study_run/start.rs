@@ -281,7 +281,7 @@ async fn settle_stopped_run(
     // invocations eligible for their bounded, immutable settlement window.
     sqlx::query(
         "UPDATE linggan_model_invocation invocation \
-         SET state='failed',charged_tokens=0,failure_code='user_stopped', \
+         SET state='failed',charged_tokens=0,dispatch_state='not_dispatched',failure_code='user_stopped', \
              result=COALESCE(invocation.result,'{}'::jsonb)||jsonb_build_object('ok',false,'failureCode','user_stopped'), \
              finished_at=scope_001_now() \
          FROM linggan_comment_study_model_request request \

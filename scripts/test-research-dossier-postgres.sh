@@ -41,6 +41,15 @@ cleanup() {
   task_exit=$?
   trap - EXIT
   cleanup_failed=0
+  if [[ -n "${ledger_asset_root:-}" ]]; then
+    if [[ "$ledger_asset_root" == "$project_root"/artifacts/private/ai-gen1-pr1b/ledger-assets.* ]]; then
+      rm -rf -- "$ledger_asset_root" || cleanup_failed=1
+      [[ ! -e "$ledger_asset_root" ]] || cleanup_failed=1
+    else
+      echo "AI ledger proof cleanup refused an unowned asset path" >&2
+      cleanup_failed=1
+    fi
+  fi
   if [[ "${proof_database_created:-0}" -eq 0 && "${proof_container_created:-0}" -eq 0 && "${proof_volume_created:-0}" -eq 0 ]]; then
     echo "RESEARCH-DOSSIER-001 PostgreSQL proof created no resources; cleanup was not required"
     exit "$task_exit"
@@ -53,7 +62,7 @@ cleanup() {
   [[ "${proof_container_created:-0}" -eq 0 ]] || docker rm -f "$proof_container" >/dev/null || cleanup_failed=1
   [[ "${proof_volume_created:-0}" -eq 0 ]] || docker volume rm "$proof_volume" >/dev/null || cleanup_failed=1
   [[ "$cleanup_failed" -eq 0 ]] || { echo "RESEARCH-DOSSIER-001 PostgreSQL proof cleanup failed" >&2; exit 1; }
-  echo "RESEARCH-DOSSIER-001 PostgreSQL proof cleanup verified; isolated database, container, and volume were removed"
+  echo "RESEARCH-DOSSIER-001 PostgreSQL proof cleanup verified; isolated database, container, volume, and any owned ledger assets were removed"
   exit "$task_exit"
 }
 trap cleanup EXIT
@@ -63,14 +72,82 @@ docker volume create "$proof_volume" >/dev/null
 proof_volume_created=1
 docker run -d --name "$proof_container" --mount "type=volume,source=$proof_volume,target=/var/lib/postgresql/data" --env POSTGRES_DB=postgres --env POSTGRES_USER="$proof_user" --env POSTGRES_PASSWORD="$proof_password" --publish 127.0.0.1::5432 "$postgres_image" -c shared_preload_libraries=pg_stat_statements -c max_wal_size=128MB -c min_wal_size=32MB >/dev/null
 proof_container_created=1
-for _ in {1..30}; do docker exec "$proof_container" pg_isready -U "$proof_user" -d postgres >/dev/null 2>&1 && break; sleep 1; done
-docker exec "$proof_container" pg_isready -U "$proof_user" -d postgres >/dev/null
+# The image's temporary init server is Unix-only and stops before normal startup.
+# A successful socket probe cannot authorize createdb against the final server.
+for _ in {1..30}; do docker exec "$proof_container" pg_isready -h 127.0.0.1 -p 5432 -U "$proof_user" -d postgres >/dev/null 2>&1 && break; sleep 1; done
+docker exec "$proof_container" pg_isready -h 127.0.0.1 -p 5432 -U "$proof_user" -d postgres >/dev/null
 proof_port="$(docker port "$proof_container" 5432/tcp | sed -n 's/^127\.0\.0\.1:\([0-9][0-9]*\)$/\1/p')"
 [[ "$proof_port" =~ ^[0-9]+$ ]] || { echo "isolated proof PostgreSQL did not expose a safe local port" >&2; exit 1; }
 docker exec "$proof_container" createdb -U "$proof_user" "$proof_database"
 proof_database_created=1
 docker exec "$proof_container" psql -X -v ON_ERROR_STOP=1 -U "$proof_user" -d "$proof_database" -c "CREATE EXTENSION pg_stat_statements" >/dev/null
 export LOCAL_001_PROOF_DATABASE_URL="postgresql://${proof_user}:${proof_password}@127.0.0.1:${proof_port}/${proof_database}"
+if [[ "${1:-}" == "--ai-foundation" || "${1:-}" == "--ai-ledger" || "${1:-}" == "--ai-writing" || "${1:-}" == "--ai-service" || "${1:-}" == "--ai-install" || "${1:-}" == "--ai-readonly" || "${1:-}" == "--ai-compatibility" ]]; then
+  ledger_asset_root="$(mktemp -d "$project_root/artifacts/private/ai-gen1-pr1b/ledger-assets.XXXXXX")"
+  export LINGGAN_CREATION_ASSET_ROOT="$ledger_asset_root"
+  export LINGGAN_LOCAL_MEDIA_ROOT="$ledger_asset_root/source-media"
+  export LINGGAN_PI_NODE="$(command -v node)"
+  if [[ "${1:-}" == "--ai-readonly" ]]; then
+    cargo test -p linggan-intelligence --test topic_map_postgres --locked -- --ignored --nocapture
+    echo "AI-GEN1 historical Topic Map source/read qualification proof passed"
+    exit 0
+  fi
+  if [[ "${1:-}" == "--ai-install" ]]; then
+    python3 -B scripts/runtime/tests/test_ai_guard.py
+    python3 -B scripts/runtime/tests/test_install_flow.py
+    python3 -B scripts/runtime/tests/test_local_children.py
+    AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo test -p linggan-worker --test ai_worker_contract --locked -- --include-ignored --nocapture
+    cargo test -p linggan-worker --test startup_contract --locked -- --include-ignored --nocapture
+    echo "AI-GEN1 release handshake and patrol ownership proof passed"
+    exit 0
+  fi
+  if [[ "${1:-}" == "--ai-service" ]]; then
+    AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo test -p linggan-intelligence --test ai_foundation_postgres executor_probe:: --locked -- --ignored --nocapture
+    AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo test -p linggan-intelligence --test ai_executor_service_postgres --locked -- --ignored --nocapture
+    AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo test -p linggan-worker --test ai_worker_contract --locked -- --include-ignored --nocapture
+    echo "AI-GEN1 dedicated executor service proof passed"
+    exit 0
+  fi
+  if [[ "${1:-}" != "--ai-writing" && "${1:-}" != "--ai-compatibility" ]]; then
+    cargo test -p linggan-intelligence --test ai_pool_cancellation_postgres --locked -- --ignored --nocapture
+    AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo test -p linggan-intelligence --test ai_foundation_postgres --locked -- --ignored --nocapture
+    cargo test -p linggan-api --bin linggan-api ai_settings_http_ --locked -- --ignored --nocapture
+    AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo test -p linggan-intelligence --test ai_adapter_transport --locked -- --ignored --nocapture
+  fi
+  if [[ "${1:-}" != "--ai-compatibility" ]]; then
+    AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo test -p linggan-intelligence --test ai_writing_executor_postgres --locked -- --ignored --nocapture
+  fi
+  export LINGGAN_PI_NODE="$ledger_asset_root/no-model-process"
+  if [[ "${1:-}" == "--ai-writing" ]]; then
+    cargo test -p linggan-intelligence --test content_workbench_ai_postgres --locked -- --ignored --nocapture
+  fi
+  if [[ "${1:-}" == "--ai-ledger" || "${1:-}" == "--ai-compatibility" ]]; then
+    export CREATOR_PROOF_NODE="$(command -v node)"
+    ledger_consumers=(creator_discovery_worker_postgres content_workbench_ai_postgres comment_study_start_postgres topic_map_research_postgres)
+    if [[ $# -gt 1 ]]; then
+      ledger_consumers=()
+      for ledger_selection in "${@:2}"; do
+        case "$ledger_selection" in
+          creator_discovery_worker_postgres|content_workbench_ai_postgres|comment_study_start_postgres|comment_study_rebuild_postgres|topic_map_research_postgres) ledger_consumers+=("$ledger_selection") ;;
+          *) echo "unsupported AI ledger consumer proof" >&2; exit 1 ;;
+        esac
+      done
+    fi
+    ledger_failures=0
+    for ledger_consumer in "${ledger_consumers[@]}"; do
+      if ! cargo test -p linggan-intelligence --test "$ledger_consumer" --locked -- --ignored --nocapture; then
+        ledger_failures=$((ledger_failures + 1))
+      fi
+    done
+    [[ "$ledger_failures" -eq 0 ]] || { echo "AI ledger consumer proof failed: $ledger_failures suites" >&2; exit 1; }
+  fi
+  if [[ "${1:-}" == "--ai-compatibility" ]]; then
+    echo "AI-GEN1 selected historical consumer contracts passed; foundation suite was not rerun"
+  else
+    echo "AI-GEN1 PR-1B foundation PostgreSQL proof passed"
+  fi
+  exit 0
+fi
 if [[ "${1:-}" == "--note-material" ]]; then
   cargo test -p linggan-evidence --test local_producer_postgres every_declared_capability_admits_one_typed_package --locked -- --ignored --nocapture
   cargo test -p linggan-evidence --test note_material_postgres --locked -- --ignored --nocapture

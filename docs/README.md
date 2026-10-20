@@ -442,3 +442,8 @@ LIDS 模块索引：[字体](design/lids/typography.md)、[区域](design/lids/r
 创作者页LIDS续修：同一[LIDS-UI-001计划](plans/active/lids-ui-implementation-001.md)内按P05:list/B制作真实代码候选；范围/四图与[验收](design/acceptance/lids-ui-implementation-001-acceptance.md)独立记录。Mog明确先不合并部署。
 
 2026-10-20证据库续修：同一LIDS-UI-001真实候选采用B查询/视图合带、统一筛选/作品卡与对象详情，保留FIND/Z02领域/E1白场及三种排版；参数从LIDS单源读取。实施/回执沿本包计划与验收，Mog签收与合并部署另计。
+
+
+AI-GEN1 PR-1B 当前执行：[底座实施包](plans/active/ai-gen1-pr1b-foundation.md)；[AI底座合同](data-contracts/ai-foundation.md)。同一主任务继续，依赖未合并的#455；运行/数据/真实调用授权不继承编码目标。
+
+- [AI-GEN1 C0离线计划](plans/active/ai-gen1-pr1c0-offline.md)：离线合同/合成流程，C1真实启用另计；[离线合同](data-contracts/note-interpretation-offline.md)。

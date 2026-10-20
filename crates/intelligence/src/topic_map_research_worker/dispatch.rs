@@ -282,8 +282,8 @@ async fn reserve(
         tx.rollback().await?;
         return Ok(Gate::Idle);
     }
-    let run_used:i64=sqlx::query_scalar("SELECT COALESCE(sum(i.charged_tokens),0)::bigint FROM linggan_topic_map_research_request q JOIN linggan_model_invocation i USING(invocation_ref)WHERE q.run_ref=$1").bind(run).fetch_one(&mut *tx).await?;
-    let daily_used:i64=sqlx::query_scalar("SELECT COALESCE(sum(i.charged_tokens),0)::bigint FROM linggan_topic_map_research_request q JOIN linggan_model_invocation i USING(invocation_ref) JOIN linggan_topic_map_research_run r USING(run_ref) WHERE r.domain_ref=$1 AND q.budget_day=(scope_001_now()AT TIME ZONE 'Asia/Shanghai')::date").bind(domain).fetch_one(&mut *tx).await?;
+    let run_used:i64=sqlx::query_scalar("SELECT COALESCE(sum(charged_tokens),0)::bigint FROM linggan_model_invocation WHERE task_key='legacy_topic_map' AND budget_run_ref=$1").bind(run).fetch_one(&mut *tx).await?;
+    let daily_used:i64=sqlx::query_scalar("SELECT COALESCE(sum(charged_tokens),0)::bigint FROM linggan_model_invocation WHERE task_key='legacy_topic_map' AND budget_domain_ref=$1 AND budget_day=linggan_ai_budget_day()").bind(domain).fetch_one(&mut *tx).await?;
     let pause = if run_used + *reserved > run_row.get::<i64, _>("token_limit") {
         Some("run_budget_exhausted")
     } else if daily_used + *reserved > policy.get::<i64, _>("daily_token_limit") {
@@ -298,8 +298,8 @@ async fn reserve(
     }
     let ordinal = task_row.get::<i32, _>("attempt_count") + 1;
     let request_hash=linggan_evidence::creator_discovery::hash(&json!({"input":hash,"model":config,"method":analysis::METHOD_VERSION,"phase":phase,"system":provider.system,"prompt":provider.prompt}).to_string());
-    sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,config_ref,operation,request_hash,state,reserved_tokens,charged_tokens,result) VALUES($1,$2,$3,$4,'analyze',$5,'running',$6,$6,$7)").bind(invocation).bind(model.get::<Uuid,_>("connection_version_ref")).bind(model.get::<Uuid,_>("model_ref")).bind(config).bind(&request_hash).bind(reserved).bind(json!({"purpose":"topic_map","domainRef":domain,"runRef":run,"taskRef":task,"methodVersion":analysis::METHOD_VERSION})).execute(&mut *tx).await?;
-    sqlx::query("INSERT INTO linggan_topic_map_research_request(invocation_ref,task_ref,run_ref,attempt_ordinal,request_hash,request_manifest,budget_day,deadline_at,phase)VALUES($1,$2,$3,$4,$5,$6,(scope_001_now()AT TIME ZONE 'Asia/Shanghai')::date,scope_001_now()+make_interval(secs=>$7),$8)").bind(invocation).bind(task).bind(run).bind(ordinal).bind(&request_hash).bind(json!({"source":topic_map_research::reference_manifest(&input),"phase":phase,"unitIds":prepared.units.iter().map(|(id,_)|id).collect::<Vec<_>>(),"topics":prepared.candidates,"recall":prepared.recall,"semanticStage":if prepared.review.is_some(){"review"}else{"proposal"},"proposalHash":prepared.review.as_ref().map(|p|p.fingerprint()).transpose()?,"sourceInvocationRef":prepared.review.as_ref().map(|p|p.source_invocation_ref),"validationFeedback":serde_json::from_str::<Value>(&provider.prompt).ok().and_then(|v|v.get("validationFeedback").cloned())})).bind(model.get::<i32,_>("timeout_seconds")+30).bind(&phase).execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,config_ref,operation,request_hash,state,reserved_tokens,charged_tokens,result,task_key,quota_bucket,budget_domain_ref,budget_run_ref,classification_source) VALUES($1,$2,$3,$4,'analyze',$5,'running',$6,$6,$7,'legacy_topic_map','run',$8,$9,'producer_v1')").bind(invocation).bind(model.get::<Uuid,_>("connection_version_ref")).bind(model.get::<Uuid,_>("model_ref")).bind(config).bind(&request_hash).bind(reserved).bind(json!({"purpose":"topic_map","domainRef":domain,"runRef":run,"taskRef":task,"methodVersion":analysis::METHOD_VERSION})).bind(domain).bind(run).execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO linggan_topic_map_research_request(invocation_ref,task_ref,run_ref,attempt_ordinal,request_hash,request_manifest,budget_day,deadline_at,phase)VALUES($1,$2,$3,$4,$5,$6,linggan_ai_budget_day(),scope_001_now()+make_interval(secs=>$7),$8)").bind(invocation).bind(task).bind(run).bind(ordinal).bind(&request_hash).bind(json!({"source":topic_map_research::reference_manifest(&input),"phase":phase,"unitIds":prepared.units.iter().map(|(id,_)|id).collect::<Vec<_>>(),"topics":prepared.candidates,"recall":prepared.recall,"semanticStage":if prepared.review.is_some(){"review"}else{"proposal"},"proposalHash":prepared.review.as_ref().map(|p|p.fingerprint()).transpose()?,"sourceInvocationRef":prepared.review.as_ref().map(|p|p.source_invocation_ref),"validationFeedback":serde_json::from_str::<Value>(&provider.prompt).ok().and_then(|v|v.get("validationFeedback").cloned())})).bind(model.get::<i32,_>("timeout_seconds")+30).bind(&phase).execute(&mut *tx).await?;
     sqlx::query("UPDATE linggan_topic_map_research_task SET state='running',attempt_count=$2,phase_attempt_count=phase_attempt_count+1,lease_token=$3,lease_expires_at=scope_001_now()+make_interval(secs=>$4)WHERE task_ref=$1").bind(task).bind(ordinal).bind(lease).bind(model.get::<i32,_>("timeout_seconds")+30).execute(&mut *tx).await?;
     sqlx::query("UPDATE linggan_topic_map_research_run SET state='running',updated_at=scope_001_now()WHERE run_ref=$1").bind(run).execute(&mut *tx).await?;
     tx.commit().await?;
@@ -316,7 +316,7 @@ async fn authorize_send(
     let lease = pending.lease;
     // Just before transmission, serialize with stop/pause and a new budget day.
     let mut tx = permit.begin().await?;
-    let current = sqlx::query("SELECT r.state='running' AND p.status='active' AND d.status='active' AND q.budget_day=(scope_001_now()AT TIME ZONE 'Asia/Shanghai')::date AS enabled,p.automatic_enabled,r.trigger,r.input_scope,t.recall_manifest,t.work_public_ref FROM linggan_topic_map_research_request q JOIN linggan_topic_map_research_run r ON r.run_ref=q.run_ref JOIN linggan_topic_map_research_policy p ON p.domain_ref=r.domain_ref JOIN observation_domain d ON d.domain_ref=r.domain_ref JOIN linggan_topic_map_research_task t ON t.task_ref=q.task_ref WHERE q.invocation_ref=$1 AND t.task_ref=$2 AND t.lease_token=$3 AND t.state='running' FOR UPDATE OF p,r,t")
+    let current = sqlx::query("SELECT r.state='running' AND p.status='active' AND d.status='active' AND q.budget_day=linggan_ai_budget_day() AS enabled,p.automatic_enabled,r.trigger,r.input_scope,t.recall_manifest,t.work_public_ref FROM linggan_topic_map_research_request q JOIN linggan_topic_map_research_run r ON r.run_ref=q.run_ref JOIN linggan_topic_map_research_policy p ON p.domain_ref=r.domain_ref JOIN observation_domain d ON d.domain_ref=r.domain_ref JOIN linggan_topic_map_research_task t ON t.task_ref=q.task_ref WHERE q.invocation_ref=$1 AND t.task_ref=$2 AND t.lease_token=$3 AND t.state='running' FOR UPDATE OF p,r,t")
         .bind(invocation).bind(task).bind(lease).fetch_optional(&mut *tx).await?;
     let enabled = current.is_some_and(|row| {
         row.get::<bool, _>("enabled")
@@ -365,13 +365,14 @@ async fn authorize_send(
         }
     };
     if let Some((state, reason)) = denial {
-        sqlx::query("UPDATE linggan_model_invocation SET state='failed',charged_tokens=0,failure_code=$2,finished_at=scope_001_now() WHERE invocation_ref=$1")
+        sqlx::query("UPDATE linggan_model_invocation SET state='failed',charged_tokens=0,failure_code=$2,dispatch_state='not_dispatched',finished_at=scope_001_now() WHERE invocation_ref=$1 AND state='running'")
             .bind(invocation).bind(reason).execute(&mut *tx).await?;
         sqlx::query("UPDATE linggan_topic_map_research_task SET state=$3,last_reason=$4,phase_attempt_count=GREATEST(0,phase_attempt_count-1),lease_token=NULL,lease_expires_at=NULL WHERE task_ref=$1 AND lease_token=$2")
             .bind(task).bind(lease).bind(state).bind(reason).execute(&mut *tx).await?;
         tx.commit().await?;
         return Ok(false);
     }
+    sqlx::query("UPDATE linggan_model_invocation SET dispatch_state='started',dispatch_admitted_at=scope_001_now() WHERE invocation_ref=$1 AND state='running'").bind(invocation).execute(&mut *tx).await?;
     sqlx::query("UPDATE linggan_topic_map_research_request SET dispatch_started_at=scope_001_now()WHERE invocation_ref=$1").bind(invocation).execute(&mut *tx).await?;
     tx.commit().await?;
     Ok(true)

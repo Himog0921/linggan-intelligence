@@ -1076,8 +1076,16 @@ async fn page_read_model_reuses_complete_results_and_invalidates_update_delete_a
     .execute(db.pool())
     .await
     .unwrap();
-    sqlx::query("UPDATE linggan_model_workspace SET worker_last_seen_at=scope_001_now(),worker_state='running',worker_last_error='synthetic heartbeat'")
-        .execute(db.pool()).await.unwrap();
+    let mut executor = linggan_intelligence::ai_foundation::executor::ExecutorSession::acquire(
+        &db,
+        "synthetic-topic-read-heartbeat",
+        4,
+    )
+    .await
+    .unwrap();
+    executor.heartbeat().await.unwrap();
+    executor.request_drain().await.unwrap();
+    executor.complete_drain().await.unwrap();
     assert_eq!(
         before_tick,
         source_revision(&db).await.unwrap(),

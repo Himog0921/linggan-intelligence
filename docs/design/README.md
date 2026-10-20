@@ -21,6 +21,8 @@
 
 ## 2026-10-19 · 评论研究 Context Bar 与数据工作台
 
+同日AI-GEN1 / PR-1B：[AI设置页具体规格](../plans/active/ai-gen1-pr1b-foundation.md#page-ai-settings-001--g1-已确认规格)已由Mog选择A确认，采用L1 Settings/Governance与现有React/AppShell。四区、表面/状态/依赖/验收矩阵在该计划维护；对应四区React源码及隔离浏览器证明已接入；三业务入口、完整故障矩阵、整包交付与Mog运行验收仍待，不把隔离通过当成共享运行已发布。
+
 用户最新批准的评论研究三级导航位置、统计折叠与严格单行表格，见[评论研究产品化最新 UI 补充](pages/comment-study-productization-001.md)和 [LIDS Context Bar 局部例外](lids/shell-zones.md)。当前单一 React 应用使用 AppShell 的可选 contextNav 插槽，不为独立页面创建第二套 Header 或运行时 Token；业务状态、资格与数据合同不变，候选待审查，未将新增位置推广成未获批的全站读数塞入规则。
 
 ## 内容工作台专项 · 阶段二
@@ -206,3 +208,8 @@ LIDS 现在统一约束全项目的设计表达，但其成熟度仍为 Proposed
 规范读取统一从 [LIDS 入口](lids/README.md)及[渐进执行标准](../governance/ui-design-execution.md)进入；Q01–Q12 已确认项为唯一设计标准，状态见[逐项对齐](lids/review-alignment.md)。实现与运行验收见 [实施计划](../plans/active/lids-ui-implementation-001.md)。React 技术、产品/数据合同及较新的页面功能保持现行 main，不从旧审阅树覆盖业务源码。
 
 2026-10-20证据库续修：同一LIDS-UI-001真实候选采用B查询/视图合带、统一筛选/作品卡与对象详情，保留FIND/Z02领域/E1白场及三种排版；参数从LIDS单源读取。实施/回执沿本包计划与验收，Mog签收与合并部署另计。
+
+
+## AI-GEN1 C0 · 离线预演
+
+Mog已确认[PAGE-AI-OFFLINE-001](../plans/active/ai-gen1-pr1c0-offline.md#page-ai-offline-001--g1-已确认规格)；表面/状态/依赖/验收在同一计划维护。复用AppShell/ActionButton、LIDS L2 Split Evidence Inspector和唯一Token，固定后端合成数据，前端不维护第二份样本。采用与真实证明边界见[LIDS记录](lids/migration-log.md#ai-gen1-c0--离线预演2026-10-20)，不把本页采用推广为全站v7已迁移。

@@ -2,10 +2,7 @@
 use super::{LocalDatabaseState, LocalWebState};
 use axum::{
     Json, Router,
-    extract::{
-        Path, Query, State,
-        rejection::{JsonRejection, QueryRejection},
-    },
+    extract::{Path, Query, State, rejection::QueryRejection},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::get,
@@ -13,8 +10,8 @@ use axum::{
 use linggan_intelligence::{
     comment_study_catalog::StudyCatalogError,
     comment_study_policy::{
-        CreateStudyPolicyCommand, StudyPolicyContractError, StudyPolicyQuery,
-        StudyPolicyStoreError, create_study_policy, read_study_policies, read_study_policy,
+        StudyPolicyContractError, StudyPolicyQuery, StudyPolicyStoreError, read_study_policies,
+        read_study_policy,
     },
 };
 use serde::Deserialize;
@@ -69,20 +66,8 @@ async fn detail(
     )
 }
 
-async fn create(
-    State(state): State<LocalWebState>,
-    body: Result<Json<CreateStudyPolicyCommand>, JsonRejection>,
-) -> Response {
-    let Ok(Json(command)) = body else {
-        return invalid();
-    };
-    if let Err(error) = command.validate() {
-        return response(Err(error.into()), StatusCode::CREATED);
-    }
-    let LocalDatabaseState::Ready(db) = &state.database else {
-        return unavailable();
-    };
-    response(create_study_policy(db, command).await, StatusCode::CREATED)
+async fn create() -> Response {
+    crate::local_web::ai_settings::legacy_closed("comment_study")
 }
 
 fn invalid() -> Response {
@@ -257,7 +242,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn invalid_json_content_type_and_extra_fields_never_reach_storage() {
+    async fn retired_policy_write_rejects_every_body_before_storage() {
         for (content_type, body) in [
             ("text/plain", "{}"),
             ("application/json", "{"),
@@ -275,7 +260,7 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            assert_eq!(response.status(), StatusCode::GONE);
         }
     }
 

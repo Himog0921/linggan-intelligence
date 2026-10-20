@@ -55,6 +55,7 @@ pub async fn call_study_batch_model(
     batch_ref: Uuid,
     lease_token: Uuid,
 ) -> Result<StudyBatchModelOutput, StudyModelRunnerError> {
+    crate::model_settings::legacy_execution_gate().map_err(StudyModelRunnerError::Model)?;
     let reservation = reserve_study_batch_model_call(database, batch_ref, lease_token).await?;
     let manifest = match frozen_batch_manifest(database, batch_ref, lease_token).await {
         Ok(manifest) => manifest,
@@ -202,13 +203,6 @@ async fn settle_pre_provider_failure(
         Some(code),
         &result,
     )
-    .await?;
-    sqlx::query(
-        "UPDATE linggan_model_invocation SET charged_tokens=0 \
-         WHERE invocation_ref=$1 AND state='failed' AND result->>'callStarted'='false'",
-    )
-    .bind(reservation.invocation_ref)
-    .execute(database.pool())
     .await?;
     settle_dispatched_batch(database, reservation.batch_ref, lease_token, Some(code)).await;
     Ok(())

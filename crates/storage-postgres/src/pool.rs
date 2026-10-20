@@ -50,6 +50,15 @@ impl Database {
         // 传进去的同名参数会被它覆盖掉——试过，会话时区仍然是 UTC。
         let pool = PgPoolOptions::new()
             .max_connections(4)
+            .after_release(|connection, _meta| {
+                Box::pin(async move {
+                    // SQLx 0.9 can lose track of BEGIN when its reply future is cancelled.
+                    // End any backend transaction before reuse, without committing data or
+                    // discarding session settings/caches. BEGIN avoids idle ROLLBACK warnings.
+                    sqlx::raw_sql("BEGIN; ROLLBACK").execute(connection).await?;
+                    Ok(true)
+                })
+            })
             .after_connect(|connection, _meta| {
                 Box::pin(async move {
                     sqlx::query("SET TIME ZONE 'Asia/Shanghai'")

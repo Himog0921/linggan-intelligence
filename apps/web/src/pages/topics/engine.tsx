@@ -636,21 +636,7 @@ export function createTopicEngine() {
   }
   function readiness() {
     const counts = progress?.currentMethodSummary;
-    const operation = progressLoading
-      ? "研究状态读取中"
-      : progressError
-        ? "研究状态读取失败"
-        : progress?.policy?.status === "paused"
-          ? "研究已暂停"
-          : progress?.policy?.status === "active"
-            ? "研究允许调度"
-            : progress?.policy?.status === "stopped"
-              ? "研究已停止"
-              : progress?.policy
-                ? "研究状态未知"
-                : progress
-                  ? "研究未设置"
-                  : "研究状态未读取";
+    const operation = progressLoading ? "历史研究记录读取中" : progressError ? "历史记录读取失败" : "旧研究已退役";
     const summary = counts
       ? `接纳 ${number(counts.succeededCount)} · 失败 ${number(counts.failedCount)} · 派发未知 ${number(counts.unknownDispatchCount)}`
       : "当前方法统计尚未取得";
@@ -676,8 +662,8 @@ export function createTopicEngine() {
       "",
       "lgi-tm-quiet lgi-tm-research-status",
       {
-        title: `${summary}；打开研究进度与设置`,
-        "aria-label": `${operation}；${summary}；打开研究进度与设置`,
+        title: `${summary}；打开AI 状态与历史研究`,
+        "aria-label": `${operation}；${summary}；打开AI 状态与历史研究`,
       },
     );
   }
@@ -866,7 +852,7 @@ export function createTopicEngine() {
       identity: "我方矩阵与观察范围",
       saved: "我的备选",
       save: "保留角度与依据",
-      research: "研究进度与设置",
+      research: "AI 状态与历史研究",
       rules: "样本表现规则",
       method: "方法与统计边界",
       changes: "结构与依据变化",
@@ -1326,7 +1312,7 @@ export function createTopicEngine() {
 
   async function openResearch() {
     if (!state.domainRef) {
-      notice = "先选择实际领域，再读取研究设置。";
+      notice = "先选择实际领域，再读取历史研究记录。";
       renderNotice();
       return;
     }
@@ -1346,36 +1332,6 @@ export function createTopicEngine() {
     }
   }
 
-  async function researchCommand(payload: Record<string, unknown>) {
-    if (pending) return null;
-    pending = true;
-    const owner = dialogState,
-      domain = state.domainRef;
-    const current = () =>
-      !disposed && dialogState === owner && state.domainRef === domain;
-    const feedback = (text: string) => {
-      if (current()) dialogFeedback(text);
-    };
-    feedback("正在提交明确动作…");
-    try {
-      const result = await mutations.submit(
-        "/api/local/topic-map/research/commands",
-        { ...payload, requestRef: uuid(), domainRef: domain },
-        decodeResearchReceipt,
-        async () => {
-          feedback("动作已获得后端回执；排队、外发与结果接纳分别以进度为准。");
-        },
-      );
-      return current() ? result : null;
-    } catch (caughtError) {
-      const error = caught(caughtError);
-      feedback(`动作未完成：${error.message}`);
-      return null;
-    } finally {
-      pending = false;
-      notify();
-    }
-  }
 
   async function previewStructure(form: HTMLFormElement, data: FormData) {
     const activeDialog = requireDialog();
@@ -1573,18 +1529,7 @@ export function createTopicEngine() {
       } else feedback(notice);
       return;
     }
-    if (name === "research-config") {
-      const result = await researchCommand({
-        action: "configure",
-        modelConfigRef: String(data.get("modelConfigRef")),
-        dailyTokenLimit: Number(data.get("dailyTokenLimit")),
-        runTokenLimit: Number(data.get("runTokenLimit")),
-        automaticEnabled: data.has("automaticEnabled"),
-        collectionEnabled: data.has("collectionEnabled"),
-      });
-      if (result) await refreshResearch();
-      return;
-    }
+
     if (name === "freeze-details") {
       const refs = data.getAll("workRefs");
       if (!refs.length || refs.length > 10)
@@ -1643,27 +1588,7 @@ export function createTopicEngine() {
         dialogFeedback(`进度读取未成功：${error.message}`);
     }
   }
-  async function startTopicResearch(ref: string) {
-    const evidence =
-      dialogState?.type === "judge" && dialogState.topicRef === ref
-        ? list(dialogState.works)
-        : topicOverview.curated(ref, dialogState?.snapshot || snapshot);
-    const wrefs = [...new Set(evidence.map((w) => w.workRef))].slice(0, 10);
-    if (!wrefs.length)
-      return dialogFeedback(
-        "当前没有可引用的精选材料，先查看已有来源或明确补充材料。",
-      );
-    const result = await researchCommand({
-      action: "start",
-      trigger: "on_demand",
-      workRefs: wrefs,
-      topicRef: ref || null,
-    });
-    if (result)
-      dialogFeedback(
-        "按需研究已获得后端回执，已有材料继续可读；查看进度确认排队与结果。",
-      );
-  }
+
   async function collectionCommand(
     payload: Record<string, unknown>,
     search = false,
@@ -1813,24 +1738,6 @@ export function createTopicEngine() {
     }
     if (action === "research-refresh") {
       await refreshResearch();
-      return;
-    }
-    if (["research-domain-pause", "research-domain-resume"].includes(action)) {
-      const result = await researchCommand({
-        action: action.replace("research-domain-", ""),
-        runRef: null,
-      });
-      if (result) await refreshResearch();
-      return;
-    }
-    if (
-      ["research-pause", "research-resume", "research-stop"].includes(action)
-    ) {
-      const result = await researchCommand({
-        action: action.replace("research-", ""),
-        runRef: id,
-      });
-      if (result) await refreshResearch();
       return;
     }
     if (action === "dialog-close") {
@@ -2358,10 +2265,6 @@ export function createTopicEngine() {
       );
       if (result) await refreshIdentity();
       else if (dialogState === owner) dialogFeedback(notice);
-      return;
-    }
-    if (action === "start-topic-research") {
-      await startTopicResearch(id);
       return;
     }
     if (action === "capture-refresh") {
