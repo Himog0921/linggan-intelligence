@@ -1,3 +1,5 @@
+import { useRef } from 'react';
+import styles from './TargetTable.module.css';
 import { Link } from 'react-router';
 import type { Target } from './api';
 import { Action, Avatar } from './TargetControls';
@@ -30,6 +32,7 @@ export function TargetTable({
   setSelected: (v: string[]) => void;
   commands: Commands;
 }) {
+  const headerViewport = useRef<HTMLDivElement>(null);
   const creator = kind === 'creator',
     title = creator ? '创作者档案' : '关键词观察',
     matching = rows.filter((r) => r.kind === kind),
@@ -38,12 +41,14 @@ export function TargetTable({
   const toggle = (ref: string, checked: boolean) =>
     setSelected(checked ? [...new Set([...selected, ref])] : selected.filter((v) => v !== ref));
   return (
-    <section className="c-tg-kind" aria-labelledby={`target-kind-${kind}`}>
+    <section className="c-tg-kind" aria-labelledby={`target-kind-${kind}`} data-target-kind={kind}>
+      <div role="table" aria-label={title}>
+      <div className={styles.header} data-target-header={kind}>
       <div className="c-tg-kind-head">
         <h2 id={`target-kind-${kind}`}>{title}</h2>
         <span>{matching.length} 项</span>
       </div>
-      <div className="c-tg-table-scroll" role="table" aria-label={title}>
+      <div ref={headerViewport} className={styles.headerViewport}>
         <div className={`c-tg-table-head ${grid}`} role="row">
           <span role="columnheader">
             <label className="c-tg-select-all">
@@ -85,6 +90,8 @@ export function TargetTable({
             </span>
           ))}
         </div>
+      </div></div>
+      <div className="c-tg-table-scroll" tabIndex={0} role="region" aria-label={`${title}，可横向滚动`} onScroll={event => { if (headerViewport.current) headerViewport.current.scrollLeft = event.currentTarget.scrollLeft; }}>
         <div className="c-tg-list" role="rowgroup">
           {matching.map((target) => (
             <article className={`c-tg-item ${grid}`} role="row" key={target.targetRef}>
@@ -138,7 +145,7 @@ export function TargetTable({
               <div className="c-tg-cell" role="cell">
                 <span className={`c-tg-truth c-tg-${target.patrolTone}`}>{target.patrolLabel}</span>
               </div>
-              <div className="c-tg-cell c-tg-change" role="cell">
+              <div className="c-tg-cell c-tg-change" data-has-new={target.recentNew !== null && target.recentNew > 0 ? 'true' : undefined} role="cell">
                 {target.recentNew === null
                   ? '尚无成功巡查'
                   : creator
@@ -172,7 +179,7 @@ export function TargetTable({
                     aria-pressed={target.monitoring}
                     aria-label={target.monitoring ? '正在观察，点击停止观察' : '已停止观察，点击恢复观察'}
                     title={target.monitoring ? '正在观察，点击停止观察' : '已停止观察，点击恢复观察'}
-                  />
+                  >{target.monitoring ? '暂停' : '恢复'}</button>
                 </form>
                 <Link
                   className="c-tg-act c-tg-act-danger"
@@ -184,7 +191,7 @@ export function TargetTable({
             </article>
           ))}
         </div>
-      </div>
+      </div></div>
     </section>
   );
 }

@@ -1,3 +1,5 @@
+import { ActionButton } from '../../../shared/ActionButton';
+import styles from './TargetToolbar.module.css';
 import { TargetSelect } from './TargetSelect';
 import { useState } from 'react';
 import { Link } from 'react-router';
@@ -18,6 +20,8 @@ export function Toolbar({
   openBatch: () => void;
 }) {
   const pending = pendingTargetFields('new', {}, targetCommandContext(params));
+  const [closing, setClosing] = useState(false);
+  function requestClose() { if (identity.trim() || kind !== 'creator' || domain !== null) setClosing(true); else setOpen(false); }
   const [kind, setKind] = useState(typeof pending?.target_kind === 'string' ? pending.target_kind : 'creator'),
     [identity, setIdentity] = useState(typeof pending?.identity === 'string' ? pending.identity : ''),
     [open, setOpen] = useState(pending !== null),
@@ -45,18 +49,16 @@ export function Toolbar({
           </Link>
         ))}
       </div>
-      <div className="c-actions c-tg-toolbar">
-        <Link
-          className="c-tg-ctl c-tg-sort"
-          to={listHref(params, { sort: 'last' })}
-          aria-label="按最近观察排序"
-        >
-          <span>最近观察</span>
-          <i className="c-tg-caret" aria-hidden="true" />
-        </Link>
-        <form
+      <div className={styles.actions}>
+        <Link className={styles.sort} to={listHref(params, { sort: 'last' })} aria-label="按最近观察排序">最近观察 ↓</Link>
+        <ActionButton disabled={!selected.length || commands.busy} onClick={openBatch}>批量编辑{selected.length > 0 && <strong>{selected.length}</strong>}</ActionButton>
+        <ActionButton variant="primary" disabled={commands.busy} onClick={() => setOpen(true)}>＋ 新建目标</ActionButton>
+      </div>
+      {open && <Modal commands={commands} sectionId="target-domain-modal" initialFocus='input[name="identity"]' id="target-domain-title" className={`c-tg-batch-dialog ${styles.dialog}`} onClose={requestClose}>
+        <header><h2 id="target-domain-title">新建观察目标</h2><p>选择观察对象与所属领域。</p></header>
+        <form hidden={closing}
           id="collection-target-create"
-          className="c-target-add"
+          className={styles.form}
           onSubmit={(e) => {
             e.preventDefault();
             void commands.run('new', { target_kind: kind, identity, domain: selectedDomain }).then((ok) => {
@@ -78,7 +80,7 @@ export function Toolbar({
               { value: 'keyword', label: '关键词' },
             ]}
           />
-          <label className="c-tg-field c-tg-field-query">
+          <label className={styles.identity}>
             <span className="v7-sr-only">主页链接、ID 或关键词</span>
             <input
               name="identity"
@@ -90,35 +92,6 @@ export function Toolbar({
               onChange={(e) => setIdentity(e.target.value)}
             />
           </label>
-          <button
-            className="c-btn-secondary c-tg-batch-open"
-            type="button"
-            disabled={!selected.length || commands.busy}
-            onClick={openBatch}
-          >
-            <span>批量编辑</span>
-            {selected.length > 0 && <strong>{selected.length}</strong>}
-          </button>
-          <button
-            className="c-btn-primary"
-            type="button"
-            disabled={commands.busy}
-            onClick={(e) => {
-              const form = e.currentTarget.form;
-              if (form?.reportValidity()) setOpen(true);
-            }}
-          >
-            ＋ 新建目标
-          </button>
-          {open && (
-            <Modal commands={commands} sectionId="target-domain-modal" initialFocus='select[name="domain"]' id="target-domain-title" className="c-tg-batch-dialog" onClose={() => setOpen(false)}>
-              <div>
-                <h2 id="target-domain-title">这个目标参与哪个领域</h2>
-                <p>
-                  同一 Target 可以关联多个领域；每个领域分别设置 primary 或
-                  reference。材料统一进入共享材料链。
-                </p>
-              </div>
               <label>
                 领域
                 <TargetSelect
@@ -132,21 +105,14 @@ export function Toolbar({
                   ]}
                 />
               </label>
-              <p>
-                需要新建领域或调整角色？<Link to="/collection/domains">打开领域管理</Link>。
-              </p>
+              {activeDomains.length === 0 && <p role="status">当前没有可用领域。请先<Link to="/collection/domains">管理领域</Link>，再建立观察目标。</p>}
               <div className="c-tg-batch-dialog-actions">
-                <button className="c-btn-secondary" type="button" onClick={() => setOpen(false)}>
-                  取消
-                </button>
-                <button className="c-btn-primary" disabled={commands.busy}>
-                  建立目标
-                </button>
+                <ActionButton onClick={requestClose}>取消</ActionButton>
+                <ActionButton variant="primary" type="submit" busy={commands.busy} disabled={!selectedDomain}>建立目标</ActionButton>
               </div>
-            </Modal>
-          )}
         </form>
-      </div>
+        {closing && <section aria-label="保留目标输入"><p>目标尚未建立。收起后保留当前输入，可返回继续编辑。</p><div className="c-tg-batch-dialog-actions"><ActionButton onClick={() => setClosing(false)}>继续编辑</ActionButton><ActionButton onClick={() => { setClosing(false); setOpen(false); }}>收起并保留输入</ActionButton></div></section>}
+      </Modal>}
     </div>
   );
 }

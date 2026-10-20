@@ -45,11 +45,12 @@ export function TargetsPage() {
       }
     >
       <section className="c-tg-workspace">
+        {(selected.length > 0 || (list && list.rows.length >= list.limit)) && <p className="c-collection-result" role="status">{selected.length > 0 ? `已选 ${selected.length} 个观察目标` : ''}{list && list.rows.length >= list.limit ? ` · 当前最多展示 ${list.limit} 个目标` : ''}</p>}
         <TargetFeedback commands={commands} code={params.get('error')} ahead={params.get('ahead')} />
         {read.error ? (
           <section className="c-empty">
             <h2>当前读不到观察目标</h2>
-            <p>{read.error}</p>
+            <p>{read.error}</p><button type="button" className="c-btn-secondary" onClick={() => setRevision(value => value + 1)}>重新读取</button>
           </section>
         ) : !list ? (
           <section className="c-empty" aria-busy="true">

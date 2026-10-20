@@ -46,10 +46,10 @@ const { chromium } = createRequire(path.resolve('apps/web/package.json'))('playw
   }
   async function create(kind, identity, domain) {
     await goto({ domain });
-    await page.locator('[name=target_kind]').selectOption(kind);
-    await page.locator('[name=identity]').fill(identity);
     await page.getByRole('button', { name: '＋ 新建目标', exact: true }).click();
-    const modal = page.getByRole('dialog', { name: '这个目标参与哪个领域' }); await modal.waitFor();
+    const modal = page.getByRole('dialog', { name: '新建观察目标' }); await modal.waitFor();
+    await modal.locator('[name=target_kind]').selectOption(kind);
+    await modal.locator('[name=identity]').fill(identity);
     await modal.locator('select[name=domain]').selectOption(domain);
     await mutate('new', () => modal.getByRole('button', { name: '建立目标', exact: true }).click());
     const list = await targets(domain), found = list.rows.find(r => r.identity === identity || r.name === identity);
@@ -164,7 +164,7 @@ const { chromium } = createRequire(path.resolve('apps/web/package.json'))('playw
     await page.keyboard.press('Tab');
     assert(await verifyButton.evaluate(el => document.activeElement === el), 'pending confirmation stays keyboard reachable above original modal trap');
     assert(lostRef); assert.equal(intercepted, 1);
-    assert((await page.locator('[role=status]').innerText()).includes(lostRef));
+    assert((await page.getByRole('alertdialog', { name: '提交结果未确认', exact: true }).getByRole('status').innerText()).includes(lostRef));
     await page.getByRole('button', { name: '核实本次请求', exact: true }).click();
     await page.waitForFunction(() => !document.body.textContent.includes('提交结果未确认'));
     assert.equal(intercepted, 1); await page.unroute('**/api/collection/commands/batch');

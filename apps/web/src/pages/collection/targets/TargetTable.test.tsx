@@ -1,0 +1,23 @@
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { MemoryRouter } from 'react-router';
+import { afterEach, expect, it, vi } from 'vitest';
+import { TargetTable } from './TargetTable';
+import { decodeTarget } from './api';
+import type { Commands } from './useWorkspace';
+const creator=decodeTarget({targetRef:'creator',kind:'creator',platform:'xhs',identity:'creator',handle:'creator',name:'合成创作者',group:'未分组',domainName:null,lifecycle:'monitoring',monitoring:false,avatar:{state:'not_observed',path:null},archiveLabel:'尚未建立',archiveTone:'neutral',patrolLabel:'已暂停',patrolTone:'neutral',works:'2 篇',details:'0/2',recentNew:2,recentHits:null,last:null,next:null,action:{kind:'view',label:'查看',tab:'works',fragment:''}});
+const keyword={...creator,targetRef:'keyword',kind:'keyword',name:'合成关键词',recentNew:0};
+const commands: Commands={run:vi.fn(async()=>false),verify:vi.fn(async()=>{}),busy:false,feedback:null};
+afterEach(cleanup);
+it('每类目标用自己的字段与横向位置，新发现与零新增有不同标记',()=>{
+  render(<MemoryRouter>{['creator','keyword'].map(kind=><TargetTable key={kind} kind={kind} rows={[creator,keyword]} params={new URLSearchParams()} selected={[]} setSelected={()=>{}} commands={commands}/>)}</MemoryRouter>);
+  const authors=screen.getByRole('table',{name:'创作者档案'}),keywords=screen.getByRole('table',{name:'关键词观察'});
+  expect(within(authors).getByRole('columnheader',{name:'作品目录'})).toBeInTheDocument();
+  expect(within(authors).queryByRole('columnheader',{name:'命中作品'})).not.toBeInTheDocument();
+  expect(within(keywords).getByRole('columnheader',{name:'命中作品'})).toBeInTheDocument();
+  expect(within(keywords).queryByRole('columnheader',{name:'创作者'})).not.toBeInTheDocument();
+  const authorScroll=within(authors).getByRole('region');authorScroll.scrollLeft=200;fireEvent.scroll(authorScroll);
+  expect(authors.querySelector('[data-target-header] > div:last-child')?.scrollLeft).toBe(200);
+  expect(keywords.querySelector('[data-target-header] > div:last-child')?.scrollLeft).toBe(0);
+  expect(within(authors).getByText('+2 新发现')).toHaveAttribute('data-has-new','true');
+  expect(within(keywords).getByText('+0')).not.toHaveAttribute('data-has-new');
+});

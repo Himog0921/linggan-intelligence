@@ -57,8 +57,10 @@ async function main() {
   const domainCard = name => page.locator('.domain-card').filter({ has: page.getByRole('heading', { name, exact: true }) });
   const stationRow = reference => page.locator(`[data-station-entry="${reference}"]`);
   async function manage(reference) {
-    await stationRow(reference).locator('button.c-stn-manage').click();
-    const modal = page.locator(`#station-manage-${reference}`); await modal.waitFor({ state: 'visible' }); return modal;
+    const row=stationRow(reference);
+    const trigger=row.getByRole('button',{name:/^管理 /});
+    if(await trigger.getAttribute('aria-expanded')!=='true')await trigger.click();
+    const panel=row.locator(`[id="station-settings-${reference}"]`);await panel.waitFor({state:'visible'});return panel;
   }
   try {
     // Domain create/update/pause/resume are actual UI submissions and verified from a new read.
@@ -111,56 +113,57 @@ async function main() {
     reports.push('same identity replays one persisted domain; changed intent is rejected without a second domain');
 
     await page.goto(endpoint(`/collection/runtime?return_to=${encodeURIComponent(`/collection/tasks?domain=${fixture.domainRef}&run=${fixture.runRef}`)}`));
-    await page.locator('.c-runtime').waitFor(); await page.getByRole('button', { name: '新增工位', exact: true }).click();
+    await page.getByRole('dialog',{name:'工位管理',exact:true}).waitFor();await page.getByRole('button', { name: '＋ 新增工位', exact: true }).click();
     // Seven Chinese characters plus this legal eight-hex suffix is the observed
     // boundary: legacy width detection did not mark it truncated, yet its edit
     // control crossed into the adjacent connection-state cell.
     const initialStation = '合成管理工位复-a1b2c3d4';
-    await page.locator('#station-register [name=display_name]').fill(initialStation);
-    await submit('runtime-register', () => page.locator('#station-register').getByRole('button', { name: '登记', exact: true }).click());
+    await page.getByRole('region',{name:'新增工位',exact:true}).locator('[name=display_name]').fill(initialStation);
+    await submit('runtime-register', () => page.getByRole('region',{name:'新增工位',exact:true}).getByRole('button', { name: '登记工位', exact: true }).click());
     const registered = await eventually(() => get('runtime'), value => value.projection.stations.some(station => station.name === initialStation));
     const station = registered.projection.stations.find(station => station.name === initialStation); assert(station);
     const duplicateStation = await command('runtime-register', { display_name: initialStation }, randomUUID(), 'rejected');
     assert.equal(duplicateStation.code, 'station_rejected');
     assert.equal((await get('runtime')).projection.stations.filter(item => item.name === initialStation).length, 1);
     let row = stationRow(station.stationRef); await row.waitFor();
-    const editName = row.getByRole('button', { name: `编辑 ${initialStation} 工位名称`, exact: true });
-    const [editBox, stateBox] = await Promise.all([editName.boundingBox(), row.locator('.c-tg-cell').first().boundingBox()]);
-    assert(editBox && stateBox && editBox.x + editBox.width <= stateBox.x, 'station name controls stay inside their own grid cell');
-    await editName.click();
+    const manageButton=row.getByRole('button',{name:/^管理 /});
+    const [controlBox,rowBox,stateBox,nameBox]=await Promise.all([manageButton.boundingBox(),row.boundingBox(),row.locator('h3 + .c-tg-truth').boundingBox(),row.locator('h3').boundingBox()]);
+    assert(controlBox && rowBox && stateBox && nameBox && controlBox.x+controlBox.width<=rowBox.x+rowBox.width+1 && nameBox.x+nameBox.width<=stateBox.x+1,'long station name and controls do not overlap the connection state');
+    await manage(station.stationRef);
     const finalStation = `${initialStation}-已更名`; await row.locator('[name=display_name]').fill(finalStation);
-    await submit('runtime-rename', () => row.getByRole('button', { name: '保存', exact: true }).click());
+    await submit('runtime-rename', () => row.getByRole('button', { name: '保存名称', exact: true }).click());
     await eventually(() => get('runtime'), value => value.projection.stations.find(item => item.stationRef === station.stationRef)?.name === finalStation);
     await row.getByText(finalStation, { exact: true }).waitFor();
     let modal = await manage(station.stationRef);
     await modal.locator('[name=valid_for_hours]').selectOption('8');
-    await submit('runtime-claim-window', () => modal.getByRole('button', { name: '开窗口', exact: true }).click());
-    await modal.getByRole('button', { name: '现在就关掉认领窗口', exact: true }).waitFor();
-    await submit('runtime-close-window', () => modal.getByRole('button', { name: '现在就关掉认领窗口', exact: true }).click());
-    await modal.getByRole('button', { name: '开窗口', exact: true }).waitFor();
-    await modal.getByRole('button', { name: '关闭', exact: true }).click();
-    for (const [label, accepting] of [['恢复', true], ['暂停', false], ['恢复', true]]) {
+    await submit('runtime-claim-window', () => modal.getByRole('button', { name: '开启认领窗口', exact: true }).click());
+    await modal.getByRole('button', { name: '关闭认领窗口', exact: true }).waitFor();
+    await submit('runtime-close-window', () => modal.getByRole('button', { name: '关闭认领窗口', exact: true }).click());
+    await modal.getByRole('button', { name: '开启认领窗口', exact: true }).waitFor();
+    for (const [label, accepting] of [['恢复自动接活', true], ['暂停接活', false], ['恢复自动接活', true]]) {
       await submit('runtime-accepting', () => row.getByRole('button', { name: label, exact: true }).click());
       await eventually(() => get('runtime'), value => value.projection.stations.find(item => item.stationRef === station.stationRef)?.account?.accepting === accepting);
     }
     modal = await manage(fixture.activeStationRef);
     await submit('runtime-account-bindings', () => modal.getByRole('button', { name: '确认这个观察账号', exact: true }).click());
     await eventually(() => get('runtime'), value => value.projection.stations.find(item => item.stationRef === fixture.activeStationRef)?.account?.bindingState === 'current');
-    await modal.getByRole('button', { name: '关闭', exact: true }).click();
-    const unclaimed = page.locator('.c-stn-unclaimed'); if (await unclaimed.getAttribute('open') === null) await unclaimed.locator('summary').click();
-    const installation = page.locator(`[data-installation-ref="${fixture.unclaimedRef}"]`); await installation.waitFor();
+    await page.getByRole('navigation',{name:'工位管理内容'}).getByRole('button',{name:/插件认领/}).click();
+    const installation = page.locator(`[data-installation-ref="${fixture.unclaimedRef}"]`);
+    if(!await installation.isVisible())await page.getByText(/^较早的安装 ·/).click();
+    await installation.waitFor();
     await installation.locator('[name=station_ref]').selectOption(station.stationRef);
-    await submit('runtime-claims', () => installation.getByRole('button', { name: '认领', exact: true }).click());
+    await submit('runtime-claims', () => installation.getByRole('button', { name: '认领到工位', exact: true }).click());
     await eventually(() => get('runtime'), value => !value.projection.unclaimed.some(item => item.installationRef === fixture.unclaimedRef));
     reports.push('station UI register/rename/window open/close/accepting pause/resume/account confirmation/installation claim');
 
     // The real server applies once; losing that HTTP reply must offer a GET receipt, never POST again.
-    row = stationRow(station.stationRef); await row.getByRole('button', { name: `编辑 ${finalStation} 工位名称`, exact: true }).click();
+    await page.getByRole('navigation',{name:'工位管理内容'}).getByRole('button',{name:/^工位\s*\d/}).click();
+    row = stationRow(station.stationRef);await manage(station.stationRef);
     const recoveredName = `${initialStation}-回执核实`; await row.locator('[name=display_name]').fill(recoveredName);
     let dropped = 0;
     await page.route('**/api/collection/commands/runtime-rename', async route => { dropped++; await route.fetch(); await route.abort('failed'); });
-    await row.getByRole('button', { name: '保存', exact: true }).click(); await row.getByText(/结果未确认/).waitFor();
-    assert.equal(await row.getByRole('button', { name: '保存', exact: true }).isDisabled(), true);
+    await row.getByRole('button', { name: '保存名称', exact: true }).click(); await row.getByText(/结果未确认/).waitFor();
+    assert.equal(await row.getByRole('button', { name: '保存名称', exact: true }).isDisabled(), true);
     await row.getByRole('button', { name: '核实同一请求', exact: true }).click();
     await row.getByText(recoveredName, { exact: true }).waitFor(); assert.equal(dropped, 1);
     await page.unroute('**/api/collection/commands/runtime-rename');
@@ -175,12 +178,29 @@ async function main() {
     const returnUrl = `/collection/tasks?domain=${fixture.domainRef}&run=${fixture.runRef}`;
     await page.goto(endpoint(`/collection/runtime?station=${fixture.activeStationRef}&return_to=${encodeURIComponent(returnUrl)}`));
     await page.waitForFunction(reference => document.activeElement?.getAttribute('data-station-entry') === reference, fixture.activeStationRef);
-    assert.equal(await page.locator('[data-collection-management-return]').getAttribute('href'), returnUrl);
+    await page.getByRole('button',{name:'关闭工位管理',exact:true}).click();
+    await page.getByRole('dialog',{name:'工位管理',exact:true}).waitFor({state:'detached'});
+    assert.equal(new URL(page.url()).pathname+new URL(page.url()).search,returnUrl);
+    await page.locator('#collection-run-drawer[open]').waitFor();
+    assert.equal(await page.evaluate(()=>document.documentElement.classList.contains('c-run-dialog-open')),true,'underlying task detail keeps its scroll lock');
+    await page.locator('[data-close-run-dialog]').click();await page.locator('#collection-run-drawer').waitFor({state:'detached'});
+    assert.equal(await page.evaluate(()=>document.documentElement.classList.contains('c-run-dialog-open')),false,'closing the last dialog releases scrolling');
+    const previousUrl=`/collection/tasks?domain=${fixture.domainRef}&page=2`;
+    const sourceUrl=`/collection/tasks?domain=${fixture.domainRef}&page=1`;
+    await page.goto(endpoint(previousUrl));await page.goto(endpoint(sourceUrl));
+    await page.getByRole('button',{name:'工位管理，全局执行资源',exact:true}).click();
+    await page.getByRole('dialog',{name:'工位管理',exact:true}).waitFor();
+    await page.getByRole('button',{name:'关闭工位管理',exact:true}).click();
+    await page.getByRole('dialog',{name:'工位管理',exact:true}).waitFor({state:'detached'});
+    assert.equal(new URL(page.url()).pathname+new URL(page.url()).search,sourceUrl);
+    assert.equal(await page.evaluate(()=>document.documentElement.classList.contains('c-run-dialog-open')),false,'standalone management releases scrolling');
+    await page.goBack();assert.equal(new URL(page.url()).pathname+new URL(page.url()).search,previousUrl);
+    assert.equal(await page.getByRole('dialog',{name:'工位管理',exact:true}).count(),0,'Back after manual close never reopens management');
     for (const [width, height] of [[1280, 720], [1024, 768], [390, 844]]) {
       await page.setViewportSize({ width, height });
       await page.goto(endpoint('/collection/domains')); await page.locator('.domain-card').first().waitFor();
       await page.screenshot({ path: path.join(directory, `management-domains-${width}.png`), fullPage: false });
-      await page.goto(endpoint('/collection/runtime')); await page.locator('.c-stn-row').first().waitFor();
+      await page.goto(endpoint('/collection/runtime')); await page.locator('[data-station-entry]').first().waitFor();
       await page.screenshot({ path: path.join(directory, `management-runtime-${width}.png`), fullPage: false });
     }
     reports.push('source station focus/return query and management surfaces at 1440/1280/1024/390');

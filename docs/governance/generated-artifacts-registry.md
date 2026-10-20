@@ -412,6 +412,10 @@ LIDS-UI-001 实际复用目录为既有 apps/web/src/shared/（Sidebar/inputMeth
 
 固定位置：`/Users/moglenny/.codex/visualizations/2026/10/16/01a142dc-a14f-7023-b8f7-faa60edbc98b/intelligence-design-system/release-22-creators-evidence/`。当前Agent与Mog指定的gpt-5.6-terra子代理负责；含模型启动/执行回执、精确文件清单/commit/PR/CI、治理与测试、迁移授权与无秘密的前后状态、3000身份/浏览器截图及发布回执，不入Git。只保留最小聚合身份，不输出.env/秘密/原始请求；登记不授权迁移或真实采集/provider。仅按本精确目录清理，保留至Mog验收。原implementation工作树保留尚未发布的页面改动，发布若需独立树只放仓库.worktrees内，回执独立区分已合并与已部署。
 
+## COLLECTION-LIDS-UI-001 私有检查产物
+
+来源：本包构建、GET桥与浏览器检查。固定位置：`/tmp/collection-lids-ui-001/`；截图/日志/preview.mjs私有不入Git。桥拒绝非GET/HEAD。再生：前端verify/build及preview.mjs；负责人root。审阅后只清理自有临时目录。dist/node_modules沿既有登记。
+
 
 ## AI-GEN1 / PR-1B
 
