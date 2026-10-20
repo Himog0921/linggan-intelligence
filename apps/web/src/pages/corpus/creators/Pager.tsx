@@ -1,4 +1,6 @@
 import { useState, type FormEvent } from 'react';
+import { ActionButton } from '../../../shared/ActionButton';
+import { CreatorSelect } from './CreatorSelect';
 import { PAGE_SIZES } from './creatorsQuery';
 import styles from './CreatorsPage.module.css';
 
@@ -42,12 +44,12 @@ export function Pager({ page, pageSize, total, onPage, onPageSize }: PagerProps)
       <span className={styles.pageSummary} aria-live="polite">
         {total === null ? '' : pages > 0 ? `${page + 1} / ${pages} 页` : '0 页'}
       </span>
-      <button type="button" disabled={pages === 0 || page === 0} onClick={() => onPage(page - 1)}>
+      <ActionButton className={styles.pageButton} disabled={pages === 0 || page === 0} onClick={() => onPage(page - 1)}>
         上一页
-      </button>
-      <button type="button" disabled={pages === 0 || page + 1 >= pages} onClick={() => onPage(page + 1)}>
+      </ActionButton>
+      <ActionButton className={styles.pageButton} disabled={pages === 0 || page + 1 >= pages} onClick={() => onPage(page + 1)}>
         下一页
-      </button>
+      </ActionButton>
       <form className={styles.jump} noValidate onSubmit={submit}>
         <label>
           第{' '}
@@ -65,23 +67,17 @@ export function Pager({ page, pageSize, total, onPage, onPageSize }: PagerProps)
           />{' '}
           页
         </label>
-        <button type="submit" disabled={pages === 0}>
+        <ActionButton type="submit" className={styles.pageButton} disabled={pages === 0}>
           跳转
-        </button>
+        </ActionButton>
         <span className={styles.jumpError} role="status">
           {error}
         </span>
       </form>
-      <label>
-        每页{' '}
-        <select value={pageSize} onChange={event => onPageSize(Number(event.target.value))}>
-          {PAGE_SIZES.map(size => (
-            <option key={size} value={size}>
-              {size}
-            </option>
-          ))}
-        </select>
-      </label>
+      <div className={styles.pageSize}>
+        每页 <CreatorSelect label="每页数量" value={String(pageSize)} options={PAGE_SIZES.map(size => ({ value: String(size), label: String(size) }))}
+          onChange={value => onPageSize(Number(value))} />
+      </div>
     </nav>
   );
 }

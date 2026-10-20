@@ -204,7 +204,8 @@ describe('迟到的回执不改写之后打开的对话框（#384 发现 5）', 
     expect(dialogA).toHaveTextContent('「合成作者 1」');
     await user.click(within(dialogA).getByRole('button', { name: '确认加入' }));
     await waitFor(() => expect(kit.of('POST', registerPath(1))).toHaveLength(1));
-    cancel(); // A 的请求还在路上，用户关掉了对话框
+    cancel(); // S1: 明确收起后原请求继续
+    await user.click(await screen.findByRole('button', { name: '收起并继续跟踪' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     // 重复点击：A 那一行显示进行中，不能再次提交。
     const pendingButton = within(row('合成作者 1')).getByRole('button', { name: '加入中…' });
@@ -243,6 +244,7 @@ describe('迟到的回执不改写之后打开的对话框（#384 发现 5）', 
     await user.click(within(await screen.findByRole('dialog', { name: '加入观察目标' })).getByRole('button', { name: '确认加入' }));
     await waitFor(() => expect(kit.of('POST', registerPath(1))).toHaveLength(1));
     cancel();
+    await user.click(await screen.findByRole('button', { name: '收起并继续跟踪' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     await user.click(within(row('合成作者 2')).getByRole('button', { name: '加入观察' }));
     const dialogB = await screen.findByRole('dialog', { name: '加入观察目标' });
@@ -319,6 +321,18 @@ describe('发现设置', () => {
     expect(within(dialog).getByRole('spinbutton', { name: /最低点赞/ })).toBeDisabled();
   });
 
+  it('未保存设置的Esc离开先询问，继续保留草稿，放弃不写服务器', async () => {
+    const { user, dialog } = await openPolicy();
+    await user.type(within(dialog).getByRole('spinbutton', { name: /最低点赞/ }), '100');
+    cancel();
+    const warning = await screen.findByRole('dialog', { name: '放弃未保存的修改？' });
+    expect(within(warning).getByRole('button', { name: '继续编辑' })).toHaveFocus();
+    await user.click(within(warning).getByRole('button', { name: '继续编辑' }));
+    expect(within(dialog).getByRole('spinbutton', { name: /最低点赞/ })).toHaveValue(100);
+    cancel(); await user.click(await screen.findByRole('button', { name: '放弃修改' }));
+    expect(screen.queryByRole('dialog')).toBeNull(); expect(kit.of('PUT', '/api/local/creator-discovery-policy')).toHaveLength(0);
+  });
+
   it('保存还在路上时关掉再重新打开：迟到的回执不关闭新对话框，也不清掉新输入', async () => {
     const gate = deferred<Reply>();
     kit.route('PUT', '/api/local/creator-discovery-policy', () => gate.promise);
@@ -327,6 +341,7 @@ describe('发现设置', () => {
     await user.click(within(dialog).getByRole('button', { name: '保存设置' }));
     expect(await within(dialog).findByRole('button', { name: '保存中…' })).toBeDisabled();
     cancel();
+    await user.click(await screen.findByRole('button', { name: '收起并继续跟踪' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     await user.click(screen.getByRole('button', { name: '发现设置' }));
     const reopened = await screen.findByRole('dialog', { name: '发现设置' });
@@ -357,7 +372,7 @@ describe('调整判断', () => {
     const dialog = await screen.findByRole('dialog', { name: '调整作者倾向' });
     expect(dialog).toHaveTextContent('创作者：合成作者 1 · 合成领域一 · 仅修改本项判断');
     expect(dialog).toHaveTextContent('判定依据：持续创作倾向须至少两篇独立相关作品');
-    expect(within(dialog).getByRole('combobox', { name: '你的判断' })).toHaveValue('vertical_tendency');
+    expect(within(dialog).getByRole('combobox', { name: '你的判断' })).toHaveTextContent('本领域持续创作');
     const groups = Array.from(dialog.querySelectorAll('details')).map(details => details.querySelector('summary')?.textContent);
     expect(groups).toEqual(['公开简介 · 1 个片段', '合成作品 11 · 1 个片段', '合成作品 12 · 1 个片段']);
     // 与旧页面一致：全部展开，用户不必先点开分组才能勾选材料。
@@ -413,7 +428,8 @@ describe('调整判断', () => {
     await user.click(within(drawer).getByRole('button', { name: '调整判断' }));
     const dialog = await screen.findByRole('dialog', { name: '调整作者倾向' });
     expect(within(dialog).getByRole('textbox', { name: /调整原因/ })).toHaveAttribute('maxlength', '300');
-    await user.selectOptions(within(dialog).getByRole('combobox', { name: '你的判断' }), 'unknown');
+    await user.click(within(dialog).getByRole('combobox', { name: '你的判断' }));
+    await user.click(screen.getByRole('option', { name: '尚不能判定' }));
     await user.click(within(dialog).getByRole('button', { name: '保存判断' }));
     await waitFor(() => expect(kit.of('PUT', overrides)).toHaveLength(1));
     expect(kit.of('PUT', overrides)[0]?.body).toMatchObject({ value: 'unknown', supportFragmentIds: [], reason: null });
@@ -432,7 +448,7 @@ describe('调整判断', () => {
     const second = await openCorrection(itemJson(1, { authorManual: manual }));
     await second.user.click(within(second.drawer).getByRole('button', { name: '调整判断' }));
     const dialog = await screen.findByRole('dialog', { name: '调整作者倾向' });
-    expect(within(dialog).getByRole('combobox', { name: '你的判断' })).toHaveValue('multi_topic');
+    expect(within(dialog).getByRole('combobox', { name: '你的判断' })).toHaveTextContent('多主题分享');
     expect(within(dialog).getByRole('textbox', { name: /调整原因/ })).toHaveValue('我的判断');
     expect(within(dialog).getByRole('checkbox', { name: /合成公开简介/ })).toBeChecked();
     await second.user.click(within(dialog).getByRole('button', { name: '恢复自动判断' }));
@@ -483,6 +499,7 @@ describe('调整判断', () => {
     await user.click(within(first).getByRole('button', { name: '保存判断' }));
     expect(await within(first).findByRole('button', { name: '保存中…' })).toBeDisabled();
     cancel();
+    await user.click(await screen.findByRole('button', { name: '收起并继续跟踪' }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '调整作者倾向' })).toBeNull());
     // 为同一位作者的另一项（机构／品牌自述，在「作者资料」分区）打开新的对话框，写上还没保存的内容。
     await user.click(within(drawer).getByRole('tab', { name: '作者资料' }));

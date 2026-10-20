@@ -1,2 +1,5 @@
 # Reference snapshots are preserved byte-for-byte, including historical whitespace.
 references/** -whitespace
+
+# Third-party font binaries and license notices are checked in byte-for-byte.
+apps/web/public/fonts/lids/** -whitespace

@@ -1,0 +1,22 @@
+@font-face{font-family:"Linggan OPPO";src:url('/ui-assets/fonts/lids/opposans/OPPOSans40.ttf') format('truetype');font-style:normal;font-weight:100 700;font-display:swap}
+@font-face{font-family:"Linggan Albert";src:url('/ui-assets/fonts/lids/albertsans/AlbertSans[wght].woff2') format('woff2');font-style:normal;font-weight:100 900;font-display:swap}
+@font-face{font-family:"Linggan Alumni";src:url('/ui-assets/fonts/lids/alumnisans/AlumniSans[wght].woff2') format('woff2');font-style:normal;font-weight:100 900;font-display:swap}
+@font-face{font-family:"Linggan Manrope";src:url('/ui-assets/fonts/lids/manrope/Manrope[wght].woff2') format('woff2');font-style:normal;font-weight:200 800;font-display:swap}
+@font-face{font-family:"Linggan Mono";src:url('/ui-assets/fonts/lids/jetbrainsmono/JetBrainsMono[wght].woff2') format('woff2');font-style:normal;font-weight:100 800;font-display:swap}
+@font-face{font-family:"Linggan UI Digits";src:url('/ui-assets/fonts/lids/manrope/Manrope[wght].woff2') format('woff2');font-style:normal;font-weight:200 800;font-display:swap;unicode-range:U+0030-0039}
+[data-theme="linggan-intelligence"] {font-synthesis:none;font-variant-numeric:tabular-nums lining-nums}
+[data-theme="linggan-intelligence"] :is(code,pre,samp) {font-family:var(--lgi-font-code)}
+[data-theme="linggan-intelligence"] :is(input:not([type="checkbox"]):not([type="radio"]),textarea,select) {font-family:var(--lgi-font-ui);font-size:var(--lgi-type-input-size);font-weight:var(--lgi-type-input-weight);line-height:var(--lgi-type-input-leading)}
+/* C: pointer uses a quiet fill; keyboard adds an internal locator. Preserve invalid/error paint. */
+[data-theme="linggan-intelligence"] :is(input:not([type="checkbox"]):not([type="radio"]),textarea,select):focus:not([aria-invalid="true"]) {outline:none;background-color:var(--lgi-focus-warm)}
+[data-theme="linggan-intelligence"] :is(input:not([type="checkbox"]):not([type="radio"]),textarea,select):focus-visible {outline:none;box-shadow:inset 0 calc(-1 * var(--lgi-focus-inset)) 0 var(--lgi-ink)}
+@media(forced-colors:active) {[data-theme="linggan-intelligence"] :is(input,textarea,select):focus-visible{outline:2px solid Highlight;outline-offset:-2px}}
+
+[data-theme="linggan-intelligence"] [data-find]:focus-within{outline:none;background-color:var(--lgi-focus-warm)}
+[data-theme="linggan-intelligence"] [data-find]:focus-within [data-find-mark]{color:var(--lgi-ink)}
+[data-theme="linggan-intelligence"][data-input-mode="keyboard"] [data-find]:focus-within [data-find-mark]{background:var(--lgi-ink);color:var(--lgi-on-dark)}
+
+[data-theme="linggan-intelligence"][data-input-mode="pointer"] :is(input:not([type="checkbox"]):not([type="radio"]),textarea,select):focus{outline:none;box-shadow:none}
+[data-theme="linggan-intelligence"] :is(input[readonly],textarea[readonly]):focus{background-color:var(--lgi-canvas-low)}
+
+[data-theme="linggan-intelligence"] .login-page{--sans:var(--lgi-font-ui);--mono:var(--lgi-font-data);font-family:var(--lgi-font-ui)}

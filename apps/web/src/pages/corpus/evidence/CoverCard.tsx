@@ -1,5 +1,6 @@
 import { useId, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import { GEOMETRY_SHAPES, coverGeometryKind, coverKindLabel, type GeometryKind } from './coverGeometry';
+import { MediaImage } from './Media';
 import { StateLine } from './Primitives';
 import {
   coverObservationMoment,
@@ -46,7 +47,8 @@ function Face({ front, item, title, index }: { front: boolean; item: WorkItem; t
             {front ? (
               <Geometry kind={kind} />
             ) : cover !== null ? (
-              <img src={cover} alt={`${title}封面`} loading="lazy" decoding="async" />
+              <MediaImage url={cover} className={styles.photoImage} showStatus fallback={stateMeta(item.media.coverState)[0]}
+                names={{ loaded: `${title}封面`, loading: '封面读取中', failed: '封面读取失败', absent: `封面${stateMeta(item.media.coverState)[0]}` }} />
             ) : (
               <strong className={styles.unavailable}>{stateMeta(item.media.coverState)[0]}</strong>
             )}
@@ -129,7 +131,7 @@ export function CoverCard({ item, ordinal, selected, tabStop, canCheck, checked,
       <div className={styles.card}>
         <Visual item={item} title={title} index={String(ordinal).padStart(3, '0')} />
         <div className={styles.plate}>
-          <button type="button" className={styles.select} data-select-target="" aria-current={selected ? 'true' : undefined} tabIndex={tabStop ? 0 : -1} aria-label={title} aria-describedby={statusId} />
+          <button type="button" className={styles.select} data-select-target="" aria-current={selected ? 'true' : undefined} tabIndex={tabStop ? 0 : -1} aria-label={title} aria-describedby={statusId} title={`${title} · ${lines.join('；')}`} />
           <div className={styles.plateTop}>
             <AuthorFact item={item} />
             <span className={styles.date} title={`发布时间 ${coverPublishedCopy(item.display)}`}>

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type Ref } from 'react';
 import { fetchCreatorPreview } from './dossierApi';
 import { TASK_OPTIONS, fieldName, taskNote } from './dossierPresent';
 import type { CreatorPreview, DossierPayload, TaskKey } from './dossierTypes';
+import { SelectField } from '../../../shared/SelectField';
 import { Section } from './Primitives';
 import styles from './Dossier.module.css';
 
@@ -65,20 +66,8 @@ export function TaskInput({ payload, work, domain, sectionRef }: { payload: Doss
         <p className={styles.note}>以下是旧任务材料与旧配置预览，当前执行已停用；不代表新统一设置或每篇解读的实际模型请求。</p>
         <label className={styles.task}>
           选择任务
-          <select
-            aria-label="选择研究任务"
-            value={task}
-            onChange={event => {
-              setTask(event.currentTarget.value as TaskKey);
-              setPreview({ phase: 'idle' });
-            }}
-          >
-            {TASK_OPTIONS.map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
+          <SelectField label="选择研究任务" value={task} options={TASK_OPTIONS.map(([value, label]) => ({ value, label }))}
+            onChange={value => { setTask(value); setPreview({ phase: 'idle' }); }} />
         </label>
         <p className={styles.note}>{taskNote(task)}</p>
         <p>{`已纳入 ${input.includedCharacterCount} 字符${input.truncated ? ' · 有材料因预算未纳入' : ' · 本层没有预算截断'}`}</p>

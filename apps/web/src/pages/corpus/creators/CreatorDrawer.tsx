@@ -1,4 +1,5 @@
 import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { ActionButton } from '../../../shared/ActionButton';
 import { ModalDialog } from '../../../corpus/ModalDialog';
 import { findAuthorButton } from './findAuthor';
 import { authorName, observedText, preservedLifecycle, targetHref } from './creatorsPresent';
@@ -123,6 +124,7 @@ export function CreatorDrawer({ item, data, query, link, resources, initialTab, 
       onClose={onClose}
       restoreFocus={() => findAuthorButton(item.creatorKey)}
       setup={positionBelowHeader}
+      closeOnBackdrop
     >
       <header className={styles.head}>
         <div className={styles.title}>
@@ -210,9 +212,7 @@ export function CreatorDrawer({ item, data, query, link, resources, initialTab, 
           </div>
         <div className={styles.actions}>
           {observation.lookup === 'unavailable' || observation.inCurrentDomain === null ? (
-            <button type="button" disabled>
-              观察关系暂不可用
-            </button>
+            <ActionButton disabled>观察关系暂不可用</ActionButton>
           ) : observation.inCurrentDomain ? (
             observation.targetRef ? (
               <a href={targetHref(data.domain.domainRef, observation.targetRef)}>查看观察目标 →</a>
@@ -221,9 +221,9 @@ export function CreatorDrawer({ item, data, query, link, resources, initialTab, 
             )
           ) : (
             <>
-              <button type="button" className={styles.primary} disabled={!domainActive || joinPending} onClick={() => onJoin(item, role)}>
+              <ActionButton variant="primary" disabled={!domainActive} busy={joinPending} onClick={() => onJoin(item, role)}>
                 {joinPending ? '加入中…' : joinLabel}
-              </button>
+              </ActionButton>
               {blocked ? <small>其他领域已有主研究关系；此操作仅加入参照用途，不改变原巡查规则。</small> : null}
               {observation.targetRef ? <a href={targetHref(data.domain.domainRef, observation.targetRef)}>查看原目标</a> : null}
             </>

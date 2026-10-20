@@ -422,7 +422,6 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发，并于 2026-10-02 
 
 主题概览 B「材料优先」正式改版：[阶段 F 计划 §7](plans/active/web-react-001-f-topics.md#7-2026-10-17--mog-选定-b材料优先正式改版)，Mog 已选定并授权；保留全部功能/口径，候选实施与验收中。
 
-
 ## AI-GEN1-001
 
 | 文档 | 状态 | 用途 |
@@ -431,6 +430,18 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发，并于 2026-10-02 
 | [第一代 AI 决定](decisions/0011-ai-generation-one.md) | 已确认决定 | 设置集中、skill 范围、顺序与旧决定替代关系 |
 | [每篇解读材料输入](data-contracts/note-material-input.md) | 代码事实优先 | 新适配、标签、指纹/来源、就绪、快照及窄批处理 |
 | [PR-1A 验收回执](audits/ai-gen1-pr1a-acceptance.md) | 一次性报告 | 合成隔离证明、收尾审查、Draft 与未证层 |
+
+## LIDS-UI-001 · 正式前端采用
+
+- [实施计划](plans/active/lids-ui-implementation-001.md)、[UI 变更清单](design/changes/lids-ui-implementation-001-ui-change-manifest.md)、[验收回执](design/acceptance/lids-ui-implementation-001-acceptance.md)。用户当前授权本地代码/UI实施，main/3000 未变。
+- [LIDS 渐进执行标准](governance/ui-design-execution.md)与[逐项对齐](design/lids/review-alignment.md)；[前期收口审计](audits/lids-closeout-audit-2026-10-20.md)是历史边界证据，不作当前实现完成声明。
+
+LIDS 模块索引：[字体](design/lids/typography.md)、[区域](design/lids/regions.md)、[交互](design/lids/interaction-contracts.md)、[待审与边界](design/lids/review-items.md)。
+
+
+创作者页LIDS续修：同一[LIDS-UI-001计划](plans/active/lids-ui-implementation-001.md)内按P05:list/B制作真实代码候选；范围/四图与[验收](design/acceptance/lids-ui-implementation-001-acceptance.md)独立记录。Mog明确先不合并部署。
+
+2026-10-20证据库续修：同一LIDS-UI-001真实候选采用B查询/视图合带、统一筛选/作品卡与对象详情，保留FIND/Z02领域/E1白场及三种排版；参数从LIDS单源读取。实施/回执沿本包计划与验收，Mog签收与合并部署另计。
 
 
 AI-GEN1 PR-1B 当前执行：[底座实施包](plans/active/ai-gen1-pr1b-foundation.md)；[AI底座合同](data-contracts/ai-foundation.md)。同一主任务继续，依赖未合并的#455；运行/数据/真实调用授权不继承编码目标。

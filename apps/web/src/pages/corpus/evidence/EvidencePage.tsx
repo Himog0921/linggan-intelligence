@@ -120,11 +120,7 @@ export function EvidencePage() {
       pageLabel="证据库"
       action="/corpus/evidence"
       shell={shell}
-      meta={
-        <span className={styles.readout} aria-live="polite">
-          {readout}
-        </span>
-      }
+      meta={null}
       foot="只读本机材料投影／列表与详情不触发采集"
       evidenceCount={hasDomain ? { count: facts.works, title: readoutTitle(facts) } : null}
     >
@@ -133,6 +129,8 @@ export function EvidencePage() {
           <EvidenceControls
             query={shownQuery}
             hasDomain={hasDomain}
+            scope={domain}
+            busy={list.isFetching && !list.isFetchingNextPage}
             onChange={go}
             onSubmit={text => reread({ ...query, q: text, view: 'all', work: null })}
             onClearFilters={() => reread({ ...query, lane: '', laneState: '', mediaKind: '', view: 'all', work: null })}
@@ -148,6 +146,10 @@ export function EvidencePage() {
               onResumeBatch={batch.resume}
             />
           </EvidenceControls>
+        </div>
+        <div className={styles.resultMeta} aria-live="polite">
+          <span>{hasDomain ? `已载入 ${items.length.toLocaleString('zh-CN')} 篇作品` : '选择领域后读取材料'}</span>
+          <span className={styles.readout}>{readout}</span>
         </div>
         <ReadReceipt last={last} failure={list.error} count={items.length} />
         <div className={styles.bench} data-inspector={closed ? 'closed' : width}>

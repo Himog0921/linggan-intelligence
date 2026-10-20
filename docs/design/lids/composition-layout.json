@@ -1,0 +1,248 @@
+{
+  "id": "ALIGN-COMPOSITION-009",
+  "status": "accepted",
+  "decision": {
+    "evidence": "U18",
+    "search": "B",
+    "functional": "C",
+    "quote": "Q08检索页按照B，功能页按照C；评论研究用户问题页当前卡片设计保留，其余已确认标准/面包屑和业务不动",
+    "basis": [
+      "U17",
+      "U18"
+    ]
+  },
+  "classification": "All searchable list pages use B, including cards and task ledgers. Other functional pages use C; entry form has no workspace and stays A. Search inside editor/graph/reading does not turn that page into a list. Explicit page:mode mapping is authoritative.",
+  "modes": {
+    "P01:entry": {
+      "category": "entry",
+      "variant": "A",
+      "patternId": "PT01"
+    },
+    "P02:settings": {
+      "category": "functional",
+      "variant": "C",
+      "patternId": "PT07"
+    },
+    "P03:collection": {
+      "category": "search",
+      "variant": "B",
+      "patternId": "PT02"
+    },
+    "P04:overview": {
+      "category": "functional",
+      "variant": "C",
+      "patternId": "PT03"
+    },
+    "P04:comments": {
+      "category": "search",
+      "variant": "B",
+      "patternId": "PT02"
+    },
+    "P04:runs": {
+      "category": "search",
+      "variant": "B",
+      "patternId": "PT08"
+    },
+    "P04:problems": {
+      "category": "search",
+      "variant": "B",
+      "patternId": "PT02"
+    },
+    "P05:list": {
+      "category": "search",
+      "variant": "B",
+      "patternId": "PT02"
+    },
+    "P06:overview": {
+      "category": "functional",
+      "variant": "C",
+      "patternId": "PT04"
+    },
+    "P06:journey": {
+      "category": "functional",
+      "variant": "C",
+      "patternId": "PT04"
+    },
+    "P07:reading": {
+      "category": "functional",
+      "variant": "C",
+      "patternId": "PT05"
+    },
+    "P08:targets": {
+      "category": "search",
+      "variant": "B",
+      "patternId": "PT02"
+    },
+    "P09:runs": {
+      "category": "search",
+      "variant": "B",
+      "patternId": "PT08"
+    },
+    "P10:domains": {
+      "category": "functional",
+      "variant": "C",
+      "patternId": "PT07"
+    },
+    "P11:stations": {
+      "category": "functional",
+      "variant": "C",
+      "patternId": "PT09"
+    },
+    "P12:library": {
+      "category": "search",
+      "variant": "B",
+      "patternId": "PT02"
+    },
+    "P12:topic": {
+      "category": "functional",
+      "variant": "C",
+      "patternId": "PT06"
+    },
+    "P12:materials": {
+      "category": "functional",
+      "variant": "C",
+      "patternId": "PT05"
+    },
+    "P12:canvas": {
+      "category": "functional",
+      "variant": "C",
+      "patternId": "PT06"
+    },
+    "P12:body": {
+      "category": "functional",
+      "variant": "C",
+      "patternId": "PT06"
+    },
+    "P12:images": {
+      "category": "functional",
+      "variant": "C",
+      "patternId": "PT06"
+    },
+    "P13:overview": {
+      "category": "functional",
+      "variant": "C",
+      "patternId": "PT03"
+    },
+    "P14:publications": {
+      "category": "search",
+      "variant": "B",
+      "patternId": "PT02"
+    },
+    "P15:accounts": {
+      "category": "functional",
+      "variant": "C",
+      "patternId": "PT02"
+    },
+    "P16:daily": {
+      "category": "functional",
+      "variant": "C",
+      "patternId": "PT10"
+    },
+    "P17:delivery": {
+      "category": "functional",
+      "variant": "C",
+      "patternId": "PT11"
+    }
+  },
+  "recipes": {
+    "A": {
+      "name": "入口表单",
+      "scope": "P01:entry only; do not create empty workspace tools"
+    },
+    "B": {
+      "name": "检索工具合带",
+      "toolsAndViews": "same band when work area is wide; restore T→V→R→B→P order when narrow",
+      "collectionAction": "Z04-T trailing side; low frequency settings stay Z04-V",
+      "reviewSplitBelowPx": 1000
+    },
+    "C": {
+      "name": "功能工具常驻",
+      "tools": "sticky inside current work area, below Z02; current area scrolls independently",
+      "objectAndFormActions": "remain in current row/detail/form; no global save for unrelated objects",
+      "reviewMaxHeightPx": 620,
+      "productionHeight": "available work-area height; review620px is a preview fixture, not a new runtime pixel token"
+    }
+  },
+  "domainHost": "Z02",
+  "tertiaryHost": "Z02",
+  "actionOwnership": {
+    "collection": "Z04-T",
+    "configuration": "Z04-V",
+    "selection": "existing selection context only",
+    "object": "row or Z05-A",
+    "form": "inside owning form"
+  },
+  "preservedCards": {
+    "pageMode": "P04:problems",
+    "sourceComponent": "apps/web/src/pages/corpus/comments/ProblemCards.tsx",
+    "sourceStyle": "apps/web/src/pages/corpus/comments/Results.module.css",
+    "variants": [
+      "ProblemResultCard",
+      "ProblemClueCard"
+    ],
+    "structure": [
+      "identifier_and_change_kind",
+      "title",
+      "saved_definition_or_clue_role",
+      "source_quote",
+      "metrics_or_clue_note_and_open_glyph",
+      "scope_note_and_time",
+      "whole_card_detail_entry"
+    ],
+    "geometry": {
+      "columnsWide": 3,
+      "columnsMedium": 2,
+      "columnsNarrow": 1,
+      "gapPx": 20,
+      "paddingPx": 20,
+      "rowGapPx": 16,
+      "compactPaddingPx": 16,
+      "compactRowGapPx": 12,
+      "borderPx": 1,
+      "radiusPx": 0,
+      "shadowOffsetPx": 8,
+      "shadowOpacity": 0.07,
+      "hoverShadowOffsetPx": 4,
+      "quoteCutPx": 12,
+      "openGlyphPx": 32
+    },
+    "material": {
+      "canvas": "#ffffff",
+      "quote": "#f7f8f8",
+      "ink": "#111315",
+      "hairline": "#11131517"
+    },
+    "preserve": [
+      "black_identifier",
+      "square_edges",
+      "hard_shadow",
+      "cut_corner_quote",
+      "separate_definition_and_original_voice",
+      "result_vs_unmerged_clue_semantics",
+      "reading_and_compact_density",
+      "whole_card_detail_and_return"
+    ],
+    "typography": "Reuse accepted B roles and OPPO evidence/Manrope numbers; no per-card font source",
+    "tableReplacementAllowed": false,
+    "newBusinessDataAllowed": false,
+    "certification": "not_promoted_by_visual_acceptance"
+  },
+  "fixed": [
+    "LIDS-TYPE-001-B",
+    "ALIGN-VOICE-004",
+    "ALIGN-FOCUS-005",
+    "ALIGN-MATERIAL-006",
+    "ALIGN-NAV-003",
+    "ALIGN-SHELL-007",
+    "ALIGN-LEDGER-008"
+  ],
+  "localExceptionsUnchanged": [
+    "M-02E",
+    "M-06",
+    "V8_workbench"
+  ],
+  "runtimeMigrated": false,
+  "businessRequests": false,
+  "componentCertificationChanged": false,
+  "pageContractsApproved": false
+}

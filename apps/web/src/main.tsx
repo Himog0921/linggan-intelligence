@@ -3,7 +3,12 @@ import { createRoot } from 'react-dom/client';
 // LIDS Token 与共享外壳样式的唯一来源（DEC-0010、WEB-REACT-001 §4.5 / R4）：直接引用，不复制第二份。
 import './styles/lids_tokens.css';
 import './styles/shell.css';
+import './styles/typography.css';
+import { trackInputMethod } from './shared/inputMethod';
 import { App } from './app/App';
+
+const releaseInputMethod = trackInputMethod(document);
+if (import.meta.hot) import.meta.hot.dispose(releaseInputMethod);
 
 const container = document.getElementById('root');
 if (!container) throw new Error('页面缺少挂载点 #root');

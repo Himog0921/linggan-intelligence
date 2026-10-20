@@ -1,0 +1,55 @@
+{
+  "source": "Mog已确认的独立审阅原始字体；不裁切转换，许可逐家族保留",
+  "files": [
+    {
+      "file": "opposans/OPPOSans40.ttf",
+      "sha256": "6c7d5864c661516e1f400d9f21e4297f2e2a0719909691e29607cc4ef484a9f4",
+      "bytes": 22741096
+    },
+    {
+      "file": "opposans/LICENSE.txt",
+      "sha256": "b013f80fa2fa6f6db4a31b793676f787af78263b568088a2d896e9d9b3e5fde7",
+      "bytes": 3304
+    },
+    {
+      "file": "albertsans/AlbertSans[wght].woff2",
+      "sha256": "bea33c08dd931e844dcc5a2a948829fc9fff9c01266a8af1b79e71caa5d7d45d",
+      "bytes": 52468
+    },
+    {
+      "file": "albertsans/OFL.txt",
+      "sha256": "5c856c086e8743b84932aae46ced424729a703932b601e9eb8aaeac15a617ec6",
+      "bytes": 4390
+    },
+    {
+      "file": "alumnisans/AlumniSans[wght].woff2",
+      "sha256": "ae6f63aa3ee89dd4ee8553969b2eba7e6c484d705fe85dc2c6f077359bcca7a5",
+      "bytes": 57092
+    },
+    {
+      "file": "alumnisans/OFL.txt",
+      "sha256": "08e1c6fa00b198f9cf90fd8c7f540ce400892063234d5a3b38dcae9f659c977f",
+      "bytes": 4483
+    },
+    {
+      "file": "manrope/OFL.txt",
+      "sha256": "58172e0c0fac2cda8a37b348164bb55e44b0e69051e557e92b1d3f6910141f7b",
+      "bytes": 4387
+    },
+    {
+      "file": "manrope/Manrope[wght].woff2",
+      "sha256": "546db9683ad6fb4b78ca85b2c585bef92a13de99d30dc4f6d6489a54b73b5de7",
+      "bytes": 53728
+    },
+    {
+      "file": "jetbrainsmono/JetBrainsMono[wght].woff2",
+      "sha256": "8e2b558b00b20c92f1c266f53babfbe72546605aec581af1090be3b4a62062c3",
+      "bytes": 71576
+    },
+    {
+      "file": "jetbrainsmono/OFL.txt",
+      "sha256": "b2fe5e8987594e9ffd1d2ca52a2f5d73eb8335243893c5d6254b5ad69269591d",
+      "bytes": 4399
+    }
+  ]
+}

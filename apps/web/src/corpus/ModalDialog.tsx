@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode, type PointerEvent as ReactPointerEvent } from 'react';
 
 interface ModalDialogProps {
   /** 标题元素的 id，作为对话框的可访问名称。 */
   labelledBy: string;
   className?: string;
+  /** S1: only opt in when the owning surface supplies its close/dirty policy. */
+  closeOnBackdrop?: boolean;
   /** Esc 或其他原生取消动作。由调用方决定是否真的关闭；默认直接关闭。 */
   onClose: () => void;
   /** 关闭后默认回到打开前的焦点；打开者已不在页面上时用它指定落点。 */
@@ -17,7 +19,7 @@ interface ModalDialogProps {
  * 原生 `<dialog>` 的模态包装：挂载即 `showModal()`（浏览器负责焦点陷阱与背景惰性），卸载即关闭。
  * 每次打开都是一个新的实例（调用方用 key 区分对象），它的状态和进行中的请求都不会串到下一次打开。
  */
-export function ModalDialog({ labelledBy, className, onClose, restoreFocus, setup, children }: ModalDialogProps) {
+export function ModalDialog({ labelledBy, className, closeOnBackdrop = false, onClose, restoreFocus, setup, children }: ModalDialogProps) {
   const ref = useRef<HTMLDialogElement>(null);
   // 打开前的焦点位置：关闭后还给它，键盘用户不会被丢回页面顶部。
   const [opener] = useState(() => (document.activeElement instanceof HTMLElement ? document.activeElement : null));
@@ -27,6 +29,7 @@ export function ModalDialog({ labelledBy, className, onClose, restoreFocus, setu
   useEffect(() => {
     const dialog = ref.current;
     if (dialog && !dialog.open) dialog.showModal();
+    dialog?.querySelector<HTMLElement>('[data-initial-focus]')?.focus();
     const cleanup = dialog ? configure?.(dialog) : undefined;
     return () => {
       cleanup?.();
@@ -36,11 +39,22 @@ export function ModalDialog({ labelledBy, className, onClose, restoreFocus, setu
     };
   }, [opener, fallback, configure]);
 
+  const startedOutside = useRef(false);
+  const isOutside = (event: ReactPointerEvent<HTMLDialogElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return event.target === event.currentTarget && (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom);
+  };
   return (
     <dialog
       ref={ref}
       className={className}
       aria-labelledby={labelledBy}
+      onPointerDown={event => { startedOutside.current = closeOnBackdrop && isOutside(event); }}
+      onPointerCancel={() => { startedOutside.current = false; }}
+      onPointerUp={event => {
+        if (startedOutside.current && isOutside(event)) onClose();
+        startedOutside.current = false;
+      }}
       onCancel={event => {
         event.preventDefault();
         onClose();

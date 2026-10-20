@@ -7,7 +7,7 @@
   align-items: center;
   gap: var(--lgi-space-2);
   color: var(--lgi-muted);
-  font: var(--lgi-weight-semibold) var(--lgi-text-label) / var(--lgi-lh-data) var(--lgi-font-sans);
+  font: var(--lgi-type-label-weight) var(--lgi-type-label-size) / var(--lgi-type-label-leading) var(--lgi-font-ui);
 }
 
 .dot {
@@ -70,7 +70,7 @@
 
 .facts dd {
   color: var(--lgi-ink);
-  font-weight: var(--lgi-weight-semibold);
+  font-weight: var(--lgi-type-body-weight);
 }
 
 .facts dd .tech {
@@ -105,8 +105,7 @@
   margin: 0 0 calc(var(--lgi-space-2) + var(--lgi-space-1) / 2);
   border-bottom: 1px solid var(--lgi-ink);
   padding-bottom: calc(var(--lgi-space-1) * 1.75);
-  font-size: var(--lgi-text-data);
-  font-weight: var(--lgi-weight-bold);
+  font: var(--lgi-type-section-weight) var(--lgi-type-section-size) / var(--lgi-type-section-leading) var(--lgi-font-ui);
 }
 
 /* ── 行内状态：失败、警示、访问边界三者分色，不共用一个视觉 ── */

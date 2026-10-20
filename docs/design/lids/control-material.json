@@ -1,0 +1,74 @@
+{
+  "id": "ALIGN-MATERIAL-006",
+  "status": "accepted",
+  "date": "2026-10-19",
+  "decision": {
+    "evidence": "U13",
+    "selected": "M2",
+    "quote": "还是喜欢 M2"
+  },
+  "scope": "shared_review_controls_and_shell; production_migration_requires_separate_authorization",
+  "parameters": {
+    "primaryFill": "signal",
+    "buttonPitch": 8,
+    "buttonOpacity": 0.28,
+    "buttonTail": 24,
+    "secondaryPitch": 4,
+    "secondaryTail": 7,
+    "buttonShadow": 2,
+    "hoverLift": 1,
+    "pressDepth": 2,
+    "menuShadow": 2,
+    "shellPitch": 6,
+    "shellOpacity": 0.22,
+    "domainTail": 28,
+    "contextMajor": 56,
+    "contextFine": 14
+  },
+  "roles": {
+    "primary": "single_signal_action; signalText_fill_white_label_ink_border; edge_texture",
+    "secondary": "white_ink_border_small_edge_grip; no_static_shadow_or_hover_lift",
+    "danger": "retain_danger_role_and_confirmation_contract",
+    "quiet": "retain_text_action_role",
+    "menu": "square_ink_structure_hard_shadow",
+    "domain": "keep_in_Z02_breadcrumb; textured_right_edge",
+    "selectedNavigation": "ink_white; right_edge_checker_fades; clean_ink_behind_labels",
+    "context": "existing_double_dot_mesh; no_texture_in_body_table_or_source_quotes"
+  },
+  "geometry": {
+    "contextFill": "#f7f8f8",
+    "contextDotRadii": [
+      1.1,
+      1
+    ],
+    "contextDotOpacities": [
+      0.1,
+      0.055
+    ],
+    "primaryMosaicInkOpacity": 0.22,
+    "secondaryMosaicInkOpacity": 0.13,
+    "navTextureMaxPx": 84,
+    "navTextureMaxPercent": 45
+  },
+  "states": {
+    "hover": "primary_up_by_hoverLift; secondary_wash_without_lift",
+    "active": "primary_and_secondary_down_by_pressDepth; no_shadow",
+    "keyboard": "retain_existing_visible_button_focus; input_FIND_select_use_ALIGN-FOCUS-005",
+    "busy": "preserve_width_show_stage_prevent_duplicate; no_simulated_business_success",
+    "disabled": "native_disabled; no_shadow_or_displacement; subdued_texture",
+    "reducedMotion": "no_displacement_or_transition"
+  },
+  "preserves": [
+    "LIDS-TYPE-001-B",
+    "ALIGN-VOICE-004",
+    "ALIGN-FOCUS-005",
+    "ALIGN-NAV-003"
+  ],
+  "localExceptionsUnchanged": [
+    "M-02E",
+    "M-06",
+    "V8_workbench"
+  ],
+  "runtimeMigrated": false,
+  "componentCertificationChanged": false
+}

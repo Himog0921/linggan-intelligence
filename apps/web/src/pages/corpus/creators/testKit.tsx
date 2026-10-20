@@ -324,5 +324,5 @@ export function renderCreatorsPage(url = `/corpus/creators?domain=${DOMAIN}`) {
       <RouterProvider router={router} />
     </QueryClientProvider>,
   );
-  return { ...view, user: userEvent.setup(), client, location: () => router.state.location.pathname + router.state.location.search };
+  return { ...view, user: userEvent.setup(), client, router, location: () => router.state.location.pathname + router.state.location.search };
 }

@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppShell } from './AppShell';
 
 function states(): Record<string, string> {
@@ -75,5 +75,145 @@ describe('全站唯一React导航', () => {
     expect(within(navigation).getByRole('button',{name:/雷达/})).toBeDisabled();
     expect(within(navigation).getByRole('button',{name:/洞察/})).toBeDisabled();
     expect(screen.getByRole('link',{name:'设置'})).toHaveAttribute('href','/settings');
+  });
+});
+
+describe('共享页头高度测量（固定抽屉的起点）', () => {
+  const root = document.documentElement;
+  const variable = () => root.style.getPropertyValue('--v7-header-height');
+  let headerBottom = 56;
+  let nextFrame = 1;
+  const frames = new Map<number, FrameRequestCallback>();
+  let fontsReady: () => void = () => {};
+
+  const flushFrames = () => {
+    const pending = [...frames.values()];
+    frames.clear();
+    pending.forEach(callback => callback(0));
+  };
+  const settle = async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  };
+
+  beforeEach(() => {
+    headerBottom = 56;
+    nextFrame = 1;
+    frames.clear();
+    root.style.removeProperty('--v7-header-height');
+    // 真实浏览器里已脱离文档的元素量出来全是 0；页头还在文档里时量出它当前的下沿。
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      const bottom = this.isConnected && this.hasAttribute('data-v7-shell-header') ? headerBottom : 0;
+      return { x: 0, y: 0, width: 0, height: 0, top: 0, left: 0, right: 0, bottom, toJSON: () => ({}) } as DOMRect;
+    });
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback: FrameRequestCallback) => {
+      const id = nextFrame++;
+      frames.set(id, callback);
+      return id;
+    });
+    vi.spyOn(window, 'cancelAnimationFrame').mockImplementation((id: number) => {
+      frames.delete(id);
+    });
+    const ready = new Promise<void>(resolve => { fontsReady = resolve; });
+    Object.defineProperty(document, 'fonts', { configurable: true, value: { ready } });
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    Reflect.deleteProperty(document, 'fonts');
+    root.style.removeProperty('--v7-header-height');
+  });
+
+  it('挂载时同步写入页头实际下沿，卸载时原样还原', () => {
+    root.style.setProperty('--v7-header-height', '77px');
+    const { unmount } = render(<AppShell {...props}>x</AppShell>);
+    expect(variable()).toBe('56px');
+    unmount();
+    expect(variable()).toBe('77px');
+  });
+
+  it('原先没有这个变量时，卸载后移除它而不是留下 0px', () => {
+    const { unmount } = render(<AppShell {...props}>x</AppShell>);
+    expect(variable()).toBe('56px');
+    unmount();
+    expect(variable()).toBe('');
+  });
+
+  it('窄屏文档滚动使页头移出视口：变量夹到 0，并随可见下沿变化', () => {
+    render(<AppShell {...props}>x</AppShell>);
+    headerBottom = -40;
+    window.dispatchEvent(new Event('scroll'));
+    flushFrames();
+    expect(variable()).toBe('0px');
+    headerBottom = 20;
+    window.dispatchEvent(new Event('scroll'));
+    flushFrames();
+    expect(variable()).toBe('20px');
+  });
+
+  it('页头尺寸变化与窗口缩放都会重新量，卸载时断开观察', () => {
+    let notify: () => void = () => {};
+    const disconnect = vi.fn();
+    const observe = vi.fn();
+    class FakeResizeObserver {
+      constructor(callback: () => void) { notify = callback; }
+      observe = observe;
+      disconnect = disconnect;
+    }
+    vi.stubGlobal('ResizeObserver', FakeResizeObserver);
+    const { unmount } = render(<AppShell {...props}>x</AppShell>);
+    // The measured value is the header's border-box bottom, so the border box is what must be observed.
+    expect(observe).toHaveBeenCalledWith(document.querySelector('[data-v7-shell-header]'), { box: 'border-box' });
+    headerBottom = 120;
+    notify();
+    flushFrames();
+    expect(variable()).toBe('120px');
+    headerBottom = 64;
+    window.dispatchEvent(new Event('resize'));
+    flushFrames();
+    expect(variable()).toBe('64px');
+    unmount();
+    expect(disconnect).toHaveBeenCalled();
+  });
+
+  it('字体就绪后页头换行高度可能变了，要再量一次', async () => {
+    render(<AppShell {...props}>x</AppShell>);
+    headerBottom = 64;
+    fontsReady();
+    await settle();
+    flushFrames();
+    expect(variable()).toBe('64px');
+  });
+
+  it('页面卸载后才就绪的字体回调，不会把已还原的变量覆写成 0px', async () => {
+    root.style.setProperty('--v7-header-height', '77px');
+    const { unmount } = render(<AppShell {...props}>x</AppShell>);
+    unmount();
+    fontsReady();
+    await settle();
+    flushFrames();
+    expect(variable()).toBe('77px');
+  });
+
+  it('切入工作台模式后，旧页面等待中的字体回调同样不能改写变量', async () => {
+    root.style.setProperty('--v7-header-height', '77px');
+    const { rerender } = render(<AppShell {...props}>x</AppShell>);
+    expect(variable()).toBe('56px');
+    rerender(<AppShell {...props} workbenchMode="compact">x</AppShell>);
+    expect(variable()).toBe('77px');
+    fontsReady();
+    await settle();
+    flushFrames();
+    window.dispatchEvent(new Event('scroll'));
+    flushFrames();
+    expect(variable()).toBe('77px');
+  });
+
+  it('工作台模式不测量也不改写这个变量', () => {
+    root.style.setProperty('--v7-header-height', '77px');
+    render(<AppShell {...props} workbenchMode="compact">x</AppShell>);
+    window.dispatchEvent(new Event('scroll'));
+    flushFrames();
+    expect(variable()).toBe('77px');
   });
 });

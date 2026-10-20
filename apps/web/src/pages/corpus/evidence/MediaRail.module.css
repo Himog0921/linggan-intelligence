@@ -116,10 +116,10 @@
   position: relative;
   display: grid;
   place-items: center;
-  aspect-ratio: 4 / 5;
+  aspect-ratio: 3 / 4;
   overflow: hidden;
   border: 1px solid var(--lgi-border-strong);
-  background: var(--lgi-canvas-low);
+  background: var(--lgi-canvas);
 }
 
 .card:hover .frame {
@@ -209,3 +209,5 @@
     transition: none;
   }
 }
+
+.loading { position: absolute; bottom: var(--lgi-space-2); padding: var(--lgi-space-1); background: var(--lgi-canvas); color: var(--lgi-muted); font: var(--lgi-type-label-weight) var(--lgi-type-label-size) / var(--lgi-type-label-leading) var(--lgi-font-ui); }

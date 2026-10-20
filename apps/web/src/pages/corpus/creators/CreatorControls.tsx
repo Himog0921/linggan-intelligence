@@ -1,4 +1,6 @@
 import type { Ref } from 'react';
+import { ActionButton } from '../../../shared/ActionButton';
+import { CreatorSelect } from './CreatorSelect';
 import { SearchField, type SearchFieldHandle } from './SearchField';
 import { conditionChips, formatCount, quickPressed, type ConditionChip, type CreatorQuery, type QuickKey, type SortKey } from './creatorsQuery';
 import type { CreatorList } from './creatorsTypes';
@@ -16,6 +18,7 @@ interface CreatorControlsProps {
   onOpenFilter: () => void;
   onSort: (sort: SortKey) => void;
   onRefresh: () => void;
+  refreshing: boolean;
   onQuick: (key: QuickKey) => void;
   onOpenPolicy: () => void;
   onOpenScope: () => void;
@@ -43,7 +46,8 @@ export function CreatorControls(props: CreatorControlsProps) {
   const scope = `${query.usageRole === 'reference' ? '参照' : '主研究'} · ${rangeText(query)}`;
   return (
     <>
-      <div className={styles.toolbar}>
+      <div className={styles.workTools}>
+      <div className={styles.toolbar} data-region="Z04-T">
         <SearchField
           handle={props.searchHandle}
           mode={query.searchMode}
@@ -51,25 +55,21 @@ export function CreatorControls(props: CreatorControlsProps) {
           onCommit={props.onSearchCommit}
           onModeChange={props.onSearchMode}
         />
-        <button type="button" onClick={props.onOpenFilter}>
+        <div className={styles.queryActions}>
+        <ActionButton onClick={props.onOpenFilter} disabled={data === null}>
           筛选 <span className={styles.count}>{chips.length}</span>
-        </button>
-        <label className="v7-sr-only" htmlFor="creator-sort">
-          排序
-        </label>
-        <select id="creator-sort" value={query.sort} onChange={event => props.onSort(event.target.value as SortKey)}>
-          <option value="recent">最近收录</option>
-          <option value="related_works">命中相关作品数</option>
-          <option value="high_likes">命中最高点赞</option>
-          <option value="viral_works" disabled={!hasRule}>
-            命中相关爆款数
-          </option>
-        </select>
-        <button type="button" className={styles.primary} onClick={props.onRefresh}>
-          刷新结果
-        </button>
+        </ActionButton>
+        <CreatorSelect label="排序" value={query.sort} onChange={props.onSort}
+          options={[
+            { value: 'recent', label: '最近收录' }, { value: 'related_works', label: '命中相关作品数' },
+            { value: 'high_likes', label: '命中最高点赞' }, { value: 'viral_works', label: '命中相关爆款数', disabled: !hasRule },
+          ]} />
+        <ActionButton onClick={props.onRefresh} busy={props.refreshing} disabled={data === null}>
+          {props.refreshing ? '读取中…' : '刷新结果'}
+        </ActionButton>
+        </div>
       </div>
-      <div className={styles.viewBar}>
+      <div className={styles.viewBar} data-region="Z04-V">
         <nav className={styles.quick} aria-label="创作者视图">
           <button type="button" aria-pressed={pressed.all} onClick={() => props.onQuick('all')}>
             全部创作者{stats ? ` ${formatCount(stats.authors)}` : ''}
@@ -91,7 +91,8 @@ export function CreatorControls(props: CreatorControlsProps) {
           </span>
         </button>
       </div>
-      <div className={styles.resultBar}>
+      </div>
+      <div className={styles.resultBar} data-region="Z04-R">
         <strong className={styles.resultCount} aria-live="polite">
           {resultText}
         </strong>

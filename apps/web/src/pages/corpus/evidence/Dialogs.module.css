@@ -24,27 +24,26 @@
   background: color-mix(in srgb, var(--lgi-ink) 22%, transparent);
 }
 
-.dialog :is(button, select) {
+.dialog :is(button:not([data-action-button]), select) {
   box-sizing: border-box;
   border-radius: var(--lgi-radius-none);
   color: inherit;
   font: inherit;
 }
 
-.dialog button {
+.dialog :where(button:not([data-action-button])) {
   border: 1px solid var(--lgi-border-strong);
   padding: var(--lgi-space-2) var(--lgi-space-3);
   background: var(--lgi-canvas);
-  font-size: var(--lgi-text-data);
-  font-weight: var(--lgi-weight-medium);
+  font: var(--lgi-type-control-weight) var(--lgi-type-control-size) / var(--lgi-type-control-leading) var(--lgi-font-ui);
   cursor: pointer;
 }
 
-.dialog button:hover:not(:disabled) {
+.dialog :where(button:not([data-action-button])):hover:not(:disabled) {
   background: var(--lgi-canvas-low);
 }
 
-.dialog button:disabled {
+.dialog :where(button:not([data-action-button])):disabled {
   background: var(--lgi-canvas-low);
   color: var(--lgi-ghost);
   cursor: not-allowed;
@@ -62,17 +61,6 @@
 .dialog :focus-visible {
   outline: 2px solid var(--lgi-focus);
   outline-offset: 2px;
-}
-
-.dialog .primary {
-  border-color: var(--lgi-ink);
-  background: var(--lgi-ink);
-  color: var(--lgi-on-dark);
-}
-
-.dialog .primary:hover:not(:disabled) {
-  border-color: var(--lgi-signal-ink);
-  background: var(--lgi-signal-ink);
 }
 
 .dialog .textButton {

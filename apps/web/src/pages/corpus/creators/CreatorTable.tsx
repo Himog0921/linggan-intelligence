@@ -51,8 +51,9 @@ export function CreatorTable(props: CreatorTableProps) {
   const filtered = hasWorkFilter(query);
   const high = highMode(query);
   return (
-    <div ref={scrollRef} className={styles.tableWrap} tabIndex={0} aria-label="创作者表格，可横向滚动" aria-busy={busy}>
+    <div ref={scrollRef} className={styles.tableWrap} tabIndex={0} role="region" aria-label="创作者表格，可横向滚动" aria-busy={busy}>
       <table className={styles.table}>
+        <caption className="v7-sr-only">当前领域的创作者与作品判断、观察关系</caption>
         <colgroup>
           <col className={styles.colAuthor} />
           <col className={styles.colDirection} />

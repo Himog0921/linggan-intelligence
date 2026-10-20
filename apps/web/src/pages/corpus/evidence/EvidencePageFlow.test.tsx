@@ -144,12 +144,14 @@ describe('检索与筛选', () => {
     pageRoutes(kit);
     const view = await opened();
     await view.user.click(screen.getByRole('button', { name: /^筛选/ }));
-    await view.user.selectOptions(screen.getByRole('combobox', { name: '材料通道' }), 'comments');
+    await view.user.click(screen.getByRole('combobox', { name: '材料通道' }));
+    await view.user.click(screen.getByRole('option', { name: '评论' }));
     await waitFor(() => expect(lastList().search.get('lane')).toBe('comments'));
     expect(view.location()).toContain('lane=comments');
     expect(screen.getByLabelText('已选 1 项筛选')).toBeInTheDocument();
 
-    await view.user.selectOptions(screen.getByRole('combobox', { name: '通道状态' }), 'PARTIAL');
+    await view.user.click(screen.getByRole('combobox', { name: '通道状态' }));
+    await view.user.click(screen.getByRole('option', { name: '部分取得' }));
     await waitFor(() => expect(lastList().search.get('laneState')).toBe('PARTIAL'));
     expect(screen.getByLabelText('已选 2 项筛选')).toBeInTheDocument();
 
@@ -163,7 +165,8 @@ describe('检索与筛选', () => {
     pageRoutes(kit);
     const view = await opened();
     await view.user.click(screen.getByRole('button', { name: /^筛选/ }));
-    await view.user.selectOptions(screen.getByRole('combobox', { name: '材料通道' }), 'comments');
+    await view.user.click(screen.getByRole('combobox', { name: '材料通道' }));
+    await view.user.click(screen.getByRole('option', { name: '评论' }));
     await waitFor(() => expect(lastList().search.get('lane')).toBe('comments'));
     await screen.findByRole('button', { name: '合成作品 1' });
     await waitFor(() => expect(view.location()).toBe(withWork(1, `domain=${DOMAIN}&lane=comments`)));

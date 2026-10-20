@@ -10,17 +10,18 @@ interface MediaImageProps {
   /** 各阶段的可访问名称：必须和图片的真实状态一致（F04）。 */
   names: { loaded: string; loading: string; failed: string; absent: string };
   fallback: ReactNode;
+  showStatus?: boolean;
   className: string | undefined;
 }
 
-function MediaImageInner({ url, names, fallback, className }: MediaImageProps) {
+function MediaImageInner({ url, names, fallback, className, showStatus }: MediaImageProps) {
   const [phase, setPhase] = useState<Phase>('loading');
   const showImage = url !== null && phase !== 'failed';
   const name = url === null ? names.absent : phase === 'loaded' ? names.loaded : phase === 'failed' ? names.failed : names.loading;
   return (
     <span role="img" aria-label={name} className={`${styles.frame} ${className ?? ''}`} data-media-state={url === null ? 'absent' : phase}>
       {showImage ? <img className={styles.image} src={url} alt="" loading="lazy" decoding="async" onLoad={() => setPhase('loaded')} onError={() => setPhase('failed')} /> : null}
-      {showImage && phase === 'loaded' ? null : <span className={styles.fallback}>{fallback}</span>}
+      {showImage && phase === 'loaded' ? null : <span className={styles.fallback}>{showStatus && url !== null ? (phase === 'failed' ? names.failed : names.loading) : fallback}</span>}
     </span>
   );
 }
@@ -49,6 +50,7 @@ export function CoverPreview({ title, url, state }: { title: string; url: string
   return (
     <MediaImage
       url={url}
+      showStatus
       className={styles.preview}
       fallback={word}
       names={{ loaded: `${title}的封面`, loading: '封面读取中', failed: '封面读取失败', absent: `封面${word}` }}

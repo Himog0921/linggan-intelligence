@@ -18,8 +18,8 @@
 
 /* 卡片标题在窄的六列卡上是图注而不是页面标题：两行上限，所有卡的舞台落在同一像素上。 */
 .visual {
-  --cover-title-size: var(--lgi-text-longform);
-  --cover-title-height: calc(var(--cover-title-size) * var(--lgi-lh-title) * 2);
+  --cover-title-size: var(--lgi-type-section-size);
+  --cover-title-height: calc(var(--cover-title-size) * var(--lgi-type-section-leading) * 2);
   --cover-chamfer: var(--lgi-space-2);
   position: relative;
   min-width: 0;
@@ -127,7 +127,7 @@
 .item[data-selected='true'] .front,
 .item[data-selected='true'] .back,
 .item[data-selected='true'] .plate {
-  background: var(--lgi-signal);
+  background: var(--lgi-signal-mark);
 }
 
 .item[data-selected='true'] .face::after {
@@ -158,6 +158,7 @@
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
   gap: var(--lgi-space-2);
+  padding-right: var(--lgi-space-8);
   min-height: 0;
 }
 
@@ -167,7 +168,7 @@
   margin: 0;
   overflow: hidden;
   color: var(--lgi-ink);
-  font: var(--lgi-weight-bold) var(--cover-title-size) / var(--lgi-lh-title) var(--lgi-font-sans);
+  font: var(--lgi-type-section-weight) var(--cover-title-size) / var(--lgi-type-section-leading) var(--lgi-font-ui);
   letter-spacing: var(--lgi-ls-tight);
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -177,7 +178,7 @@
 .index,
 .micro,
 .cue {
-  font: var(--lgi-weight-semibold) var(--lgi-text-label) / var(--lgi-lh-data) var(--lgi-font-mono);
+  font: var(--lgi-type-label-weight) var(--lgi-type-label-size) / var(--lgi-type-label-leading) var(--lgi-font-ui);
   letter-spacing: var(--lgi-ls-data);
   font-variant-numeric: tabular-nums;
 }
@@ -204,7 +205,7 @@
   aspect-ratio: 3 / 4;
   overflow: hidden;
   border: 1px solid var(--lgi-border-strong);
-  background: var(--lgi-canvas-hi);
+  background: var(--lgi-canvas);
   color: var(--lgi-ink);
 }
 
@@ -213,7 +214,7 @@
 }
 
 .photo {
-  background: var(--lgi-ink);
+  background: var(--lgi-canvas);
 }
 
 /* 舞台的高度由共用占位推出，百分比高度不可靠：封面脱离文档流、铺满同一个 3:4 盒子，
@@ -228,7 +229,7 @@
 
 .stageFrame[data-unavailable='true'] {
   place-items: center;
-  background: var(--lgi-canvas-sunken);
+  background: var(--lgi-canvas);
   color: var(--lgi-muted);
   text-align: center;
 }
@@ -236,19 +237,6 @@
 .unavailable {
   padding: var(--lgi-space-3);
   font: var(--lgi-weight-semibold) var(--lgi-text-data) / var(--lgi-lh-data) var(--lgi-font-sans);
-}
-
-/* 测量场：覆盖整个 3:4 舞台的真实 8px 点阵。用 CSS 渐变而不是内联 SVG：渐变平铺没有固有比例，
- * 不会像按比例推出的 SVG 盒那样把舞台底部漏测。 */
-.diagram::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  background-image: radial-gradient(circle, var(--lgi-ink) 1px, transparent 1.2px);
-  background-size: 8px 8px;
-  opacity: 0.13;
 }
 
 .geometry {
@@ -348,7 +336,7 @@
 .plate :is(.date, .observed) {
   overflow: hidden;
   color: var(--lgi-muted);
-  font: var(--lgi-weight-semibold) var(--lgi-text-label) / var(--lgi-lh-data) var(--lgi-font-mono);
+  font: var(--lgi-type-label-weight) var(--lgi-type-label-size) / var(--lgi-type-label-leading) var(--lgi-font-ui);
   font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -446,3 +434,5 @@
     transition: none;
   }
 }
+
+.photoImage { width: 100%; height: 100%; background: var(--lgi-canvas); }

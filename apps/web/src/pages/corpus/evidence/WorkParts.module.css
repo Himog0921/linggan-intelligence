@@ -1,6 +1,6 @@
 /* 作品行与检查器共用的小部件：原声、互动、材料完整度导轨、作者。只消费 LIDS --lgi-* Token。 */
 
-/* 原声：整页唯一的衬线角色——逐字引自来源的材料。来源标签在引文之外，机器读出的行不会被误认成某人写的句子。 */
+/* 原声：OPPO Sans 原文角色——逐字引自来源的材料。来源标签在引文之外，机器读出的行不会被误认成某人写的句子。 */
 .quote {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -9,7 +9,7 @@
   margin-top: var(--lgi-space-2);
   border-left: 3px solid var(--lgi-signal);
   padding: calc(var(--lgi-space-1) * 1.5) calc(var(--lgi-space-2) + var(--lgi-space-1) / 2);
-  background: var(--lgi-signal-faint);
+  background: var(--lgi-canvas);
 }
 
 .quoteSource {
@@ -34,7 +34,7 @@
 
 .quote[data-wrap='true'] q {
   overflow: visible;
-  line-height: var(--lgi-lh-longform);
+  font: var(--lgi-type-reading-weight) var(--lgi-type-reading-size) / var(--lgi-type-reading-leading) var(--lgi-font-evidence);
   text-overflow: clip;
   white-space: normal;
 }
@@ -69,7 +69,7 @@
   gap: var(--lgi-space-1) var(--lgi-space-4);
   margin-top: var(--lgi-space-2);
   color: var(--lgi-muted);
-  font: var(--lgi-weight-semibold) var(--lgi-text-data) / var(--lgi-lh-data) var(--lgi-font-mono);
+  font: var(--lgi-type-data-weight) var(--lgi-type-data-size) / var(--lgi-type-data-leading) var(--lgi-font-data);
   font-variant-numeric: tabular-nums;
 }
 
@@ -86,7 +86,7 @@
 
 .engagement b {
   color: var(--lgi-ink);
-  font-weight: var(--lgi-weight-bold);
+  font-weight: var(--lgi-type-data-weight);
 }
 
 /* 材料完整度导轨：五个固定维度；不适用画成轮廓；未知是单独的一种填充，从不画成零。 */
@@ -160,7 +160,7 @@
 .authorFact strong {
   overflow: hidden;
   font-size: var(--lgi-text-data);
-  font-weight: var(--lgi-weight-semibold);
+  font-weight: var(--lgi-type-label-weight);
   text-overflow: ellipsis;
   white-space: nowrap;
 }

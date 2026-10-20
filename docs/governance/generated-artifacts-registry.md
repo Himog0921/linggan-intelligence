@@ -270,6 +270,148 @@ Mog 授权三篇指定作品在本机核对与重新分层。私有材料快照�
 - 重放入口：`scripts/test-research-dossier-postgres.sh --note-material` 与原完整兼容 runner。随机 Docker PG/卷/数据库只由该脚本创建并由其 trap 清理；不借用共享 DSN、不清理其他容器或 schema。CLI 的 plan/receipt 是操作者显式生成的本机 JSON，不自动写进 Git；无正文。真实范围的 plan/apply 尚未获派。
 - `Cargo.lock` 按既有登记由 Cargo 管理；本包加入已解析的 Unicode normalization 依赖，不手改生成锁。没有新前端生成物或发布包。
 
+## 前期规范包生成登记（保留历史生命周期）
+
+以下记录描述 LIDS-ALIGN-001 的规范/审阅阶段；本轮真实代码采用以末尾 LIDS-UI-001 为准。
+
+## LIDS-ALIGN-001 · 逐项对齐表与校验
+
+- 手工维护源：`docs/design/lids/review-alignment.json`，由已核对审阅稿导入，含来源SHA、用户确认摘要、逐项状态和正式落点；候选要求不作为正式规则。规则正文继续由LIDS分册维护。责任为本次文档交付者root。
+- 派生文件：`docs/design/lids/review-alignment.md`，允许入Git，禁止手改表格；`python3 scripts/verify-lids-alignment.py --render`再生，`--check --self-test`检查一致性、来源/状态及反例。不需要外部审阅目录即可读取、检查。
+- 校验日志、业务源码前后指纹和临时维护脚本放本任务系统临时目录，不入Git；不含真实业务原文、字体字节或秘密。重新运行治理检查及相同tracked文件指纹即可再生，审阅后按本任务精确路径清理。
+
+## LIDS-TYPE-001-B · 唯一排版参数与生成镜像
+
+- 手工权威源：`docs/design/lids/typography.json`；来源为Mog对Q01/Q02明确采用B、Q03原声采用OPPO Sans的决定，维护职责为排版规范维护者。该源允许入Git，业务资产及运行Token未改。
+- 项目派生表：`typography.md`中的TYPE-B标记区，由`python3 scripts/verify-lids-alignment.py --render`生成；`--check --self-test`核对表格、采用状态、用户依据及已关闭Q项。
+- 隔离审阅镜像：任务visualizations的`intelligence-design-system/spec/registry.json → visual.typographyApplication`，由`python3 scripts/sync-lids-typography.py --review-root <审阅根目录> --write`生成，`--check`校验参数、来源SHA与状态。它是生成缓存，不是可手改的第二参数源，也不进入业务构建。镜像包含本机生成checkout路径；工作树迁移后从新的正式项目源重新生成。审阅predev/prebuild自动校验同源参数，漂移时拒绝构建。参考册再由审阅包`spec/tools/render.py`生成。
+- 原A对照参数与采用前审阅记录保留历史身份；审阅入口只应用B，历史URL的variant/custom不成为当前覆盖值。无额外全局设置、数据库、服务或部署。
+- 采用前后指纹、浏览器截图、检查回执在同任务`typography-review/adoption-05/`本机保留，不入项目Git；无真实业务原文或秘密。
+
+## Q03-VOICE-06 · 原声对照与三级导航证明
+
+- Q03已由ALIGN-VOICE-004确认OPPO Sans；voice-06保留历史字族对照，当前规则及唯一参数源在LIDS分册。三级页面Tab归Z02的已确认位置按ALIGN-NAV-003执行；不是新CMP推广。
+- 隔离审阅代码与合成评论：任务visualizations内intelligence-design-system/reference-study/src/voiceReview；passage.json是同段原文唯一源，不含真实评论或个人数据，评论详情／阅读页及两种字族共用。工具状态在内存，意见手动导出，不写业务。
+- Serif样例为官方google/fonts固定revision的NotoSerifSC[wght].ttf，连同原OFL.txt和METADATA.pb仅保存在同审阅工程public/fonts/notoserifsc/；SHA、来源URL与固定revision见本机typography-review/voice-06/font-source.json及对齐清单voiceReview.fontEvidence。禁止后台更新或复制进业务字体资产，Q03已确认Sans，生产接入另按Q11决定。
+- 指纹、截图、浏览器实测和构建回执固定在typography-review/voice-06/，不入项目Git，无模型、业务写入或部署；保留至Mog审阅，按精确本机目录清理。
+
+## Q04-FOCUS-07 · 焦点反馈审阅与Q03收口
+
+- Q03由Mog明确采用OPPO Sans；当前审阅入口只显示Sans，旧voice-06对照证据及Noto样例字节保留历史身份，不再作为活跃选项。B字号／行高／字重和ALIGN-NAV-003不变。
+- Q04隔离源码固定在同任务intelligence-design-system/reference-study/src/focusReview/；复用Find、Select、Button、PagePreview，不复制业务实现。组件／创作者／新建采集仅为焦点审阅的合成工作面；输入、校验、选择、记录均在内存，无业务请求。
+- Q04已按ALIGN-FOCUS-005采用C；旧focus-07保留历史候选对照，当前focus入口仅C，隔离审阅共用已采纳参数。源码与当前入口由同任务README及字体审阅入口索引。
+- 指纹、截图、浏览器实测、构建及治理回执固定在同任务typography-review/focus-07/，不入项目Git；无真实原文、秘密、模型或部署。保留至Mog审阅，精确目录清理。
+
+## Q06-SHELL-10 · 壳层容量与窄屏收纳审阅
+
+- 候选源及隔离源码固定于同任务 `intelligence-design-system/reference-study/src/shellReview/`，`presets.json`为三种收纳策略的唯一候选参数源，不入业务构建。沿现有 `?page=system&section=review&review=shell` 审阅路由，复用Select、TertiaryTabs、个人菜单与PagePreview内容；默认页面不应用候选。
+- 指纹、源码核对、截图、浏览器实测、构建及治理回执固定于同任务 `typography-review/shell-10/`；不入项目Git，无真实数据或秘密。来源与当前入口从任务README、spec/AI-ENTRY.md及项目shell-zones／review-items索引；保留至Mog审阅，按精确目录清理。
+- Q06保持待审；字体／B字级／C焦点／M2材质源与领域、三级Tab的Z02归属固定。预览宽度、长名称、时钟及导航收纳均仅为压力样例；不授予业务代码、路由、权限、全局设置或部署变更。
+
+## ALIGN-MATERIAL-006 · Q05采用M2
+
+- 唯一手工参数源：`docs/design/lids/control-material.json`（入Git），职责与替代关系从materials.md／primitives.md进入。`scripts/sync-lids-material.py`生成同任务审阅`spec/registry.json → visual.materialApplication`；隔离`reference-study/scripts/check-lids-material.mjs`于predev／prebuild核对SHA与内容。镜像不可手改，业务Token不在本次范围。
+- 同任务固定证据目录：`intelligence-design-system/typography-review/material-adoption-09/`，保存采用前后指纹、浏览器测量、截图、检查与README，不入项目Git。责任方为当前LIDS-ALIGN-001执行Agent；保留至Mog审阅，清理仅限该精确目录。入口从任务README与spec/AI-ENTRY.md索引。
+- 旧material-08截图、参数和回执保留为采用前历史；原presets.json降级历史对照，当前审阅只消费M2生成镜像，不再提供M1/M3或临时微调。M-02E、M-06、V8_workbench范围不变。
+
+## ALIGN-FOCUS-005与Q05-MATERIAL-08 · 焦点采用与材质审阅（历史阶段）
+
+- 已确认Q04参数唯一源：docs/design/lids/focus.json（入Git），primitives.md说明职责；sync-lids-focus.py将其生成到隔离registry.visual.focusApplication，审阅predev／prebuild校验SHA及内容。只迁移隔离审阅样式，不改业务Token。
+- Q05采用前候选源：同任务intelligence-design-system/reference-study/src/materialReview/presets.json；已由ALIGN-MATERIAL-006采用M2取代，原参数只保留历史。隔离源码在src/materialReview，入口与回执从同任务README索引。
+- 本轮基线、截图、浏览器实测、构建／治理结果及审阅导出试样固定于同任务typography-review/material-08/，不入项目Git；样例与操作仅本地合成及内存，无真实业务、秘密、外部模型或部署。旧focus-07保留历史候选对照，当前focus入口只应用已确认C。保留至Mog审阅后按精确目录清理。
+
+
+## ALIGN-SHELL-007 / Q07-LEDGER-11 · A壳层采用与单行账本审阅
+
+- 正式壳层参数源：`docs/design/lids/shell-layout.json`；由`scripts/sync-lids-shell.py`生成同任务`intelligence-design-system/spec/registry.json`的`visual.shellApplication`；隔离`reference-study/scripts/check-lids-shell.mjs`守卫同源。
+- 隔离源码：同任务`reference-study/src/shellReview/`采用A并增加图标侧栏开关；共享`dsReview/PersonalMenu.jsx`提取原菜单，避免壳层循环依赖。`src/ledgerReview/`仅Q07候选，参数在`presets.json`，复用原任务fixture和详情语义。
+- 证据目录：同任务`typography-review/shell-adoption-ledger-11/`，含README（变更清单、表面/状态/依赖/验收矩阵）、before.json、verification.json、浏览器回执、截图、构建/治理日志和审阅意见样例。创建前登记；不入业务构建。
+- Q06采用A和用户要求的手动图标折叠，Q07行高/列宽/字段优先级/窄屏三案待审。一任务一行、不缩字号、不多行回退；字体B/C/M2及Z02领域/三级Tab固定。业务、权限、服务、数据库、字体资产、全局配置、合并与部署均不在本次范围。
+
+
+## ALIGN-LEDGER-008 / Q08-COMPOSITION-12 · L1账本采用与页型组合审阅
+
+- 正式源`docs/design/lids/ledger-layout.json`由用户Q07选择L1/44px及当前任务名称列144px形成；`scripts/sync-lids-ledger.py`生成隔离registry.visual.ledgerApplication，`reference-study/scripts/check-lids-ledger.mjs`守卫同源。其余列宽维持原L1各字段值，不将全表列强制成144px。
+- 隔离`src/ledgerReview/TaskLedger.jsx`承载统一账本组件；Q07活跃入口仅L1，旧presets保留历史。常规P09、Q06/Q08与原连续账本的行尺寸和字段定义读已采用源；真实业务代码不改。
+- 隔离`reference-study/src/compositionReview/`为Q08候选，沿review=composition路由，读取原17页/26模式、11页型、组件与动作候选。A分带/B合带/C常驻只比较允许区域组合，不覆盖Z02规则或新增产品能力。共享ShellFrame通过可选页面配置复用已采用A。
+- 证据固定于同任务`typography-review/ledger-adoption-composition-12/`：README清单/表面状态依赖验收矩阵、before/verification、用户144px字段证据、来源、浏览器矩阵/截图、构建与治理日志。创建前登记，不入业务构建，不作生产/组件认证。Q08保持待审，Q09–Q12不展开；禁止业务API、模型、数据库、服务、字体资产、全局设置、推送/合并/部署变化。
+
+## ALIGN-COMPOSITION-009 · Q08采用与用户问题卡片保留
+
+- 唯一组合规则源为`docs/design/lids/composition-layout.json`，从patterns.md按需进入，登记检索B/功能C与入口表单豁免、逐模式映射、Z02与局部动作归属；`scripts/sync-lids-composition.py`生成同任务`spec/registry.json → visual.compositionApplication`，`reference-study/scripts/check-lids-composition.mjs`核对源/镜像。
+- 隔离`reference-study/src/compositionReview/`沿既有入口采用已选组合；旧presets及前轮ledger-adoption-composition-12保留历史。`reference-study/src/dsReview/ProblemCards.jsx`和`problem-cards.css`仅在隔离原型补齐真实用户问题卡片的结构与材质，合成内容、已有B字体/C焦点映射，不改业务来源组件/CSS或真实数据。
+- 来源为专属工作树的`apps/web/src/pages/corpus/comments/ProblemCards.tsx`、`Results.module.css`及真实3000只读结构/计算样式核对；保留问题/线索卡、原声切角、硬投影、黑色编号、指标/时间和整卡详情入口，不借通用检索表格替代。卡片保护不扩展为整个业务页面或组件认证。
+- 新证据固定于同任务`typography-review/composition-adoption-13/`：README、before/verification、结构/计算样式（不含真实用户原文）、源码指纹、合成截图、宽窄布局和交互/同源/构建/治理记录。创建前登记，不入项目Git；责任为当前LIDS-ALIGN-001执行Agent，保留至Mog审阅，清理仅限该精确目录。业务/运行/字体资产/全局文件、真实命令及合并部署边界不变，Q09–Q12不自动批准。
+
+## Q09-OVERLAY-14 · 浮层、离开与长任务交互审阅
+
+- 候选源码为同任务`reference-study/src/interactionReview/`，沿`?page=system&section=review&review=overlays`；presets.json声明候选策略、形态和场景，model.js为内存状态演练，OverlayPanel.jsx及InteractionReview.jsx渲染可操作对照。复用ShellFrame、PagePreview、TaskLedgerSurface、ProblemCards及既有B/C/M2/C焦点；只添加可选审阅回调，默认已采用页面不变。
+- 候选比较模态抽屉/居中弹窗/只读非模态详情、遮罩/Escape/显式关闭、脏稿保护、提交中离开/回执跟踪、暂停/继续/停止/结果未确认/版本冲突。真实合同的原身份核对、停止不可继续、已得与在途材料保留不作为可选项，不提供真实API/Provider/数据库/Storage写入。
+- 来源定向只读核对项目`RunDialog.tsx`、`RunCreationDialog.tsx`、`RunDrawer.tsx`、`runRequests.ts`、`StudyDialog.tsx`、`ProblemDrawerShell.tsx`、`WorkbenchPage.tsx`及collection-single-run-001合同。七项浮层合同的候选覆盖不等于32交互全部认证，新增默认仍待Mog审阅。
+- 证据目录固定为同任务`typography-review/overlays-14/`，含有界清单、before/verification、来源、浏览器状态/焦点/窄屏/回执与关闭证据、合成截图及构建/治理日志；创建前登记，不入业务Git，不存真实用户原文/秘密。入口由任务README、spec/AI-ENTRY及项目interaction-contracts/review-items路由。责任为当前LIDS-ALIGN-001执行Agent，保留至Mog审阅，仅按精确目录清理；不新增提交、推送、合并、部署或更改全局设置。
+
+## ALIGN-OVERLAY-010 / Q10-COMPONENT-15 · S1收口与组件准入审阅
+
+- 当前用户U20采用Q09 S1，保留未保存保护、原请求跟踪和停止不可恢复；唯一规则源为项目`docs/design/lids/overlay-policy.json`，已确认规则进入interaction-contracts。`scripts/sync-lids-overlay.py`生成隔离`spec/registry.json → visual.overlayApplication`，`reference-study/scripts/check-lids-overlay.mjs`在predev/prebuild拒绝漂移；旧S2只留14证据，不是活跃候选。新增JSON为权威规则，脚本为再生/检查入口，入项目Git；业务和字体资产不动。
+- Q10候选源码固定在本任务`reference-study/src/componentReview/`：catalog.json记48分类/边界案与来源，model.js做纯查找/边界判断，ComponentReview.jsx及components.css提供目录、变体/状态、代表页和复用判断。入口`review=components`；复用既有Button/Find/Select/ShellFrame/TaskLedger/ProblemCards与Q09 S1，不另起业务组件库。候选白名单不等于正式CMP或新能力授权。
+- 新证据目录固定为同任务`typography-review/overlay-adoption-components-15/`：状态头README/四项有界清单、before/verification、来源/指纹、浏览器交互/布局/截图、构建与治理/镜像反例日志。创建前登记，不入业务Git，不存真实敏感内容。责任为当前LIDS-ALIGN-001执行Agent；保留至Mog审阅，仅按该精确目录清理。任务README/spec AI-ENTRY及项目索引/组件晋升规则均链接此入口。
+- Q10仍待Mog审阅；Q11/Q12和真实CMP资格不随S1采用批准。不改apps/crates/database/plugins、正式Token、字体资产、运行服务、全局设置，不执行API/Provider/DB，不新增提交、推送、合并或部署。
+
+Q10渐进查询沿既有隔离`spec/tools/contract.py component Cxx`只返回一项reuseReviewCandidate；self-check附48项分类覆盖/候选边界校验。catalog是该候选分类唯一源，不反向写业务或正式CMP目录。
+
+## ALIGN-REUSE-011 / Q11-FONT-16 · 四类组件边界采用与字体交付审阅
+
+- U21采用Q10四类（基础复用/页面适配/领域专属/先补合同），七项晋升硬门保持。唯一机器规则源为项目`docs/design/lids/component-reuse.json`，`scripts/sync-lids-components.py`生成隔离spec.visual.componentApplication及componentReview/catalog的采用字段，第八个`reference-study/scripts/check-lids-components.mjs`在predev/prebuild校验。48项分类是复用路线，全部certified仍false，正式CMP授予0。JSON为当前规则，脚本为再生入口，入项目Git。
+- Q11候选源码固定于本任务`reference-study/src/fontDeliveryReview/`：presets.json候选回退/演练输入；font-inventory.json由未改字体文件元数据/许可/哈希只读生成；model.js和useFontRun.js为测量/FontFace对象管理；FontDeliveryReview.jsx和fonts.css为可操作演练。复用当前组件、壳、账本和卡片，字体只从已存在本机静态路径载入，不复制/改写字体资产，不接业务。
+- 新证据目录固定为同任务`typography-review/reuse-adoption-fonts-16/`，含状态头README/表面-状态-依赖-验收清单、before/verification、来源/字体元数据、浏览器加载/回退/字重/数字/窄容器记录与合成截图、镜像/静态注册表/构建/治理日志。创建前登记，不入业务Git，不存真实用户内容。责任为当前LIDS-ALIGN-001执行Agent，保留至Mog审阅，仅按该精确目录清理。
+- 任务README/spec AI-ENTRY、项目typography/component-promotion及索引路由；spec/tools/contract.py逐C披露采用路线与未认证状态。Q11保留待审，Q12及生产字体迁移不继承批准。业务apps/crates/database/plugins、字体资产/许可、正式Token、运行服务、数据库、全局设置及合并部署均不改；演练仅本机静态字体请求，不使用CDN/Provider。
+
+
+## ALIGN-FONT-012 / Q12-EXCEPTIONS-17 · 字体交付采用与材料例外审阅
+
+- U22明确采用Q11自动换入、F2回退、普通数字右对齐/小数列按小数点对齐。唯一规则继续置于项目docs/design/lids/typography.json的families和deliveryDecision；sync-lids-typography.py生成visual.typographyApplication，第一个predev/prebuild守卫扩展校验deliveryDecision，不新造主题或修改原字体/许可。
+- 隔离审阅的src/typography/DecimalValue.jsx及delivery.css为保留精度的数值定位辅助，非正式CMP；TypographyScope共享F2和已有swap字脸；fontDeliveryReview由候选改为采用状态/自动加载，旧F1/pnum/手动放行只留16证据。
+- Q12候选源码登记于同任务reference-study/src/mediaMaterialReview/：presets.json记录受控例外与来源/待决冲突，MediaMaterialReview.jsx、Surfaces.jsx、materials.css为作品卡/媒体/工位合成代表页，复用A壳、B/C组合、M2控件、S1浮层及B字体。仅本地内存和内联合成比例样张，无真实媒体/平台/Provider/业务API；材料对照不授予新业务操作或CMP。作品卡M-06、媒体contain、工位M-02E与已登记工作台V8边界逐项披露，不能互相外溢。
+- 新证据目录固定为同任务typography-review/font-adoption-exceptions-17/，创建前登记：README有界表面/状态/依赖/验收声明，before/source-proof、来源元数据/冲突、宽窄交互/计算样式/截图、镜像反例、构建与治理回执。任务README/spec AI-ENTRY、原型AGENTS及项目typography/materials/review-items/Agent入口按模块链接。责任为当前LIDS执行Agent，保留至Mog审阅，清理仅限该精确目录；不入业务Git，不新增提交推送合并部署，不改业务apps/crates/database/plugins、运行Token、字体资产、服务/数据库或全局。
+
+本轮同步既有spec/tools/render.py的foundations字体交付段落，生成既有foundations.md，不新造手工字体表；ShellFrame.jsx仅修正受控导航已接入项的title，避免实际可点却提示“未接入”。
+
+
+## ALIGN-MEDIA-013 / LIDS-CLOSEOUT-18 · Q12采用与全层收口核查
+
+- U23采用Q12 E1与媒体舞台白场。唯一局部材料源登记为项目docs/design/lids/media-material.json，sync-lids-media.py生成隔离spec.visual.mediaApplication及第九个predev/prebuild守卫check-lids-media.mjs；原mediaMaterialReview的E0/测量底纹退为17历史，不改业务媒体与字体资产。
+- 同任务typography-review/closeout-18/为本轮独立证据目录，创建前登记。含README有界四图、before/source-proof、全目录/样张与代表页核对、冲突/遗漏索引、浏览器状态/截图/控制台、再生/镜像反例/构建及项目治理日志；本任务Agent负责，保留至Mog审阅，仅按该精确目录清理，不存真实用户原文/秘密，不入项目Git。
+- 审阅工程只修已确认标准漂移：通用页面复用既有CompositionReview的受控嵌入模式，不再并行维护早期外壳/工具组合；ComponentDemo/Modal按明确合同对齐共享控件与S1，ProblemCards源码保护；旧历史路由明确状态并指向当前入口。新审阅元数据从项目对齐源再生，不另立设计标准。
+- 项目一次性报告固定docs/audits/lids-closeout-audit-2026-10-20.md，索引到docs/README及LIDS入口；待决/遗漏只在review-items单列，报告引用状态与证据，不取代规则。原型AGENTS改为当前短路由，旧交付原文移入精确本任务证据历史，不删除历史。正式LIDS与项目AGENTS/CLAUDE/codx通过模块入口渐进展开。
+- 原字体/许可、业务apps/crates/database/plugins、运行Token、服务/数据库、全局配置和主线合并部署保持不动；无提交/推送/子Agent派单。规范收口不自动认证48个组件或全部业务状态。
+
+
+## LIDS-UI-001 · 已采用设计进入正式前端（2026-10-20）
+
+Mog在当前对话明确允许按建议收口色值并开始优化真实项目代码/UI；这是同一已派交付包的实施授权，本Agent单独执行，不新增并发、不改其他checkout、不合并部署。
+
+- 专属工作树 `/Users/moglenny/proma/linggan-intelligence/.worktrees/lids-ui-implementation-001`，分支codex/lids-ui-implementation-001，取已fetch的origin/main@612dcbea。旧治理树保留，规范通过有来源的三方衔接带入，不能覆盖较新业务合同。
+- 活跃计划 `docs/plans/active/lids-ui-implementation-001.md`、UI变更清单 `docs/design/changes/lids-ui-implementation-001-ui-change-manifest.md`、验收 `docs/design/acceptance/lids-ui-implementation-001-acceptance.md`；均入Git、索引docs/README，计划完成后按生命周期归档，未验证保持NOT VERIFIED。
+- 当前正式颜色单源 `docs/design/lids/color.json`，按已存在tokens目标表裁定，新增color源同步/验证路径沿项目scripts；其余九源保持已确认设计。
+- 生成值只进入唯一 `apps/web/src/styles/lids_tokens.css`，禁止第二套Runtime Token；可增加字体声明/许可说明和应用共享控件CSS，值从已确认源生成，按源再生。字体原文件和许可完整复制到 `apps/web/public/fonts/lids/`，来源为独立审阅的public/fonts；保留哈希/完整许可/使用标记，不裁切转换。
+- 正式TypeScript/React共享改动在 `apps/web/src/ui/`、app壳/导航与已有页面模块。需要新文件时归对应模块，遵守现有CSS Modules；不创建新业务页面/功能/数据字段。必要校验用 `apps/web/src/test/`及已有测试所在模块。
+- 本地证明固定于同任务 `intelligence-design-system/implementation-19/`，不入Git；含before/验证日志/实际页面截图/哈希/只读候选预览工具。预览工具只放行3000的GET/HEAD并拒绝写，不改3000运行。测试、构建和只读预览允许；数据库、后端业务、providers、工位、插件与部署禁止。
+
+LIDS-UI-001 实际复用目录为既有 apps/web/src/shared/（Sidebar/inputMethod 与既有 ActionButton），未创建另一个 ui 组件库；页面新CSS位于 CollectionFrame/tasks。typography.css 为原字体声明与C焦点消费层，几何/值仍由唯一Token映射。字体 manifest.json/README/许可随静态资源发布；共享参数再生入口为 scripts/sync-lids-runtime.py，--check由lidsRuntime.test.ts执行。预览宽窄框架仅位于登记的 implementation-19/serve-preview.mjs，用真实构建iframe，不入业务Git。
+
+
+### LIDS-UI-001 · 创作者页续修证据
+
+固定位置：`/Users/moglenny/.codex/visualizations/2026/10/16/01a142dc-a14f-7023-b8f7-faa60edbc98b/intelligence-design-system/implementation-20-creators/`。责任当前Agent，来源为本工作树creators真实代码、现有只读4190候选与3000 GET数据；包含before哈希/基线、验证日志、实际宽窄/筛选/抽屉截图和DOM读数及README边界，不入Git。沿用implementation-19的GET/HEAD桥，所有写请求拒绝；保留至Mog验收，仅按此精确目录清理。不导出原始API/秘密；真实页面截图限本机审阅。构建仍沿已登记apps/web/dist，应用新适配器源码/CSS/测试归既有creators目录，未增加业务生成代码或第二Token。
+
+### LIDS-UI-001 · 证据库续修证据
+
+固定位置：`/Users/moglenny/.codex/visualizations/2026/10/16/01a142dc-a14f-7023-b8f7-faa60edbc98b/intelligence-design-system/implementation-21-evidence/`。当前Agent负责；来源本工作树真实evidence代码和4190 GET只读候选/3000 GET数据。含before哈希/基线、核对日志、宽窄/筛选/作品卡/详情/白场媒体截图与DOM几何、README边界；不入Git，不导出原始API/秘密，仅本机验收，保留至Mog验收并仅按精确目录清理。沿implementation-19只读桥，窄屏harness只扩充evidence路由白名单；不转发写请求，不触发真实采集/模型。dist沿现有登记，基本选择源码shared/SelectField不算生成物。
+
+### LIDS-UI-001 · 两页合并与3000发布证明（Mog指定Terra）
+
+固定位置：`/Users/moglenny/.codex/visualizations/2026/10/16/01a142dc-a14f-7023-b8f7-faa60edbc98b/intelligence-design-system/release-22-creators-evidence/`。当前Agent与Mog指定的gpt-5.6-terra子代理负责；含模型启动/执行回执、精确文件清单/commit/PR/CI、治理与测试、迁移授权与无秘密的前后状态、3000身份/浏览器截图及发布回执，不入Git。只保留最小聚合身份，不输出.env/秘密/原始请求；登记不授权迁移或真实采集/provider。仅按本精确目录清理，保留至Mog验收。原implementation工作树保留尚未发布的页面改动，发布若需独立树只放仓库.worktrees内，回执独立区分已合并与已部署。
+
 
 ## AI-GEN1 / PR-1B
 

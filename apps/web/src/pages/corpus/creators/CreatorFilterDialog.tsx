@@ -1,4 +1,7 @@
-import { useId, useState, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import { useBlocker } from 'react-router';
+import { ActionButton } from '../../../shared/ActionButton';
+import { CreatorSelect } from './CreatorSelect';
 import { ModalDialog } from '../../../corpus/ModalDialog';
 import { COEXISTENCE, CRITERIA } from './creatorsPresent';
 import { DEFAULT_QUERY, LABELS, TRAIT_KEYS, dateRangeError, presetDates, type CreatorQuery } from './creatorsQuery';
@@ -81,6 +84,21 @@ export function CreatorFilterDialog({ query, hasThreshold, observationAvailable,
   const [error, setError] = useState<string | null>(null);
   const update = (patch: Partial<Draft>) => setDraft(current => ({ ...current, ...patch }));
 
+  const dirty = JSON.stringify(draft) !== JSON.stringify(draftFrom(query));
+  const [closing, setClosing] = useState(false);
+  const applying = useRef(false);
+  const blocker = useBlocker(() => dirty && !applying.current);
+  const confirming = closing || blocker.state === 'blocked';
+  function requestClose() { if (dirty) setClosing(true); else onClose(); }
+  function keepEditing() { setClosing(false); if (blocker.state === 'blocked') blocker.reset(); }
+  function discard() { if (blocker.state === 'blocked') blocker.proceed(); else onClose(); }
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty]);
+
   function chooseWindow(window: WindowKind) {
     if (window === 'custom') return update({ window });
     if (window === 'all') return update({ window, publishedFrom: '', publishedTo: '' });
@@ -96,18 +114,19 @@ export function CreatorFilterDialog({ query, hasThreshold, observationAvailable,
       setError(problem);
       return;
     }
+    applying.current = true;
     onApply(applyDraft(query, draft));
   }
 
   return (
-    <ModalDialog labelledBy={titleId} className={styles.dialog} onClose={onClose}>
+    <ModalDialog labelledBy={titleId} className={styles.dialog} onClose={requestClose} closeOnBackdrop>
       <form className={styles.form} onSubmit={submit}>
         <header className={styles.head}>
           <div>
             <small>创作者 · 查询条件</small>
             <h2 id={titleId}>筛选材料与作者</h2>
           </div>
-          <button type="button" className={styles.textButton} aria-label="关闭筛选" onClick={onClose}>
+          <button type="button" className={styles.textButton} aria-label="关闭筛选" onClick={requestClose}>
             关闭
           </button>
         </header>
@@ -115,28 +134,19 @@ export function CreatorFilterDialog({ query, hasThreshold, observationAvailable,
           <section>
             <h3>材料范围</h3>
             <div className={styles.grid}>
-              <label>
-                材料用途
-                <select value={draft.usageRole} onChange={event => update({ usageRole: event.target.value === 'reference' ? 'reference' : 'primary' })}>
-                  <option value="primary">主研究</option>
-                  <option value="reference">参照</option>
-                </select>
-              </label>
-              <label>
-                平台
-                <select value="xhs" disabled onChange={() => undefined}>
-                  <option value="xhs">小红书</option>
-                </select>
-              </label>
-              <label>
-                作品发表日期
-                <select value={draft.window} onChange={event => chooseWindow(event.target.value as WindowKind)}>
-                  <option value="all">全部日期</option>
-                  <option value="30">近30天</option>
-                  <option value="90">近90天</option>
-                  <option value="custom">自定义日期</option>
-                </select>
-              </label>
+              <div className={styles.selectField}>
+                <span>材料用途</span>
+                <CreatorSelect label="材料用途" value={draft.usageRole} onChange={value => update({ usageRole: value === 'reference' ? 'reference' : 'primary' })}
+                  options={[{ value: 'primary', label: '主研究' }, { value: 'reference', label: '参照' }]} />
+              </div>
+              <div className={styles.selectField}><span>平台</span>
+                <CreatorSelect label="平台" value="xhs" disabled onChange={() => undefined} options={[{ value: 'xhs', label: '小红书' }]} />
+              </div>
+              <div className={styles.selectField}>
+                <span>作品发表日期</span>
+                <CreatorSelect label="作品发表日期" value={draft.window} onChange={value => chooseWindow(value as WindowKind)}
+                  options={[{ value: 'all', label: '全部日期' }, { value: '30', label: '近30天' }, { value: '90', label: '近90天' }, { value: 'custom', label: '自定义日期' }]} />
+              </div>
               {draft.window === 'custom' ? (
                 <div className={`${styles.grid} ${styles.full}`}>
                   <label>
@@ -171,36 +181,21 @@ export function CreatorFilterDialog({ query, hasThreshold, observationAvailable,
           <section>
             <h3>作者倾向与作品条件</h3>
             <div className={styles.grid}>
-              <label>
-                作者倾向（作者层面）
-                <select value={draft.focus} onChange={event => update({ focus: event.target.value })}>
-                  <option value="">全部</option>
-                  <option value="vertical_tendency">本领域持续创作</option>
-                  <option value="multi_topic">多主题分享</option>
-                  <option value="unknown">尚不能判定</option>
-                </select>
-              </label>
-              <label>
-                观察关系
-                <select value={draft.observation} disabled={!observationAvailable} onChange={event => update({ observation: event.target.value })}>
-                  <option value="">全部</option>
-                  <option value="outside">未加入本领域</option>
-                  <option value="inside">已加入本领域</option>
-                  <option value="monitoring">巡查中</option>
-                  <option value="paused">已暂停</option>
-                  <option value="other_domains_only">仅其他领域有目标</option>
-                  <option value="dismissed">已忽略</option>
-                </select>
-              </label>
-              <label>
-                领域相关性
-                <select value={draft.relevance} onChange={event => update({ relevance: event.target.value })}>
-                  <option value="">全部</option>
-                  <option value="related">已判相关</option>
-                  <option value="unknown">待判断</option>
-                  <option value="unrelated">已判无关</option>
-                </select>
-              </label>
+              <div className={styles.selectField}>
+                <span>作者倾向（作者层面）</span>
+                <CreatorSelect label="作者倾向（作者层面）" value={draft.focus} onChange={value => update({ focus: value })}
+                  options={[{ value: '', label: '全部' }, { value: 'vertical_tendency', label: '本领域持续创作' }, { value: 'multi_topic', label: '多主题分享' }, { value: 'unknown', label: '尚不能判定' }]} />
+              </div>
+              <div className={styles.selectField}>
+                <span>观察关系</span>
+                <CreatorSelect label="观察关系" value={draft.observation} disabled={!observationAvailable} onChange={value => update({ observation: value })}
+                  options={[{ value: '', label: '全部' }, { value: 'outside', label: '未加入本领域' }, { value: 'inside', label: '已加入本领域' }, { value: 'monitoring', label: '巡查中' }, { value: 'paused', label: '已暂停' }, { value: 'other_domains_only', label: '仅其他领域有目标' }, { value: 'dismissed', label: '已忽略' }]} />
+              </div>
+              <div className={styles.selectField}>
+                <span>领域相关性</span>
+                <CreatorSelect label="领域相关性" value={draft.relevance} onChange={value => update({ relevance: value })}
+                  options={[{ value: '', label: '全部' }, { value: 'related', label: '已判相关' }, { value: 'unknown', label: '待判断' }, { value: 'unrelated', label: '已判无关' }]} />
+              </div>
               <label>
                 最低点赞
                 <input type="number" min={0} step={1} placeholder="不限" value={draft.minLikes} onChange={event => update({ minLikes: event.target.value })} />
@@ -231,20 +226,19 @@ export function CreatorFilterDialog({ query, hasThreshold, observationAvailable,
           </section>
         </div>
         <footer className={styles.foot}>
-          <button
-            type="button"
-            className={styles.textButton}
-            onClick={() => setDraft(current => ({ ...current, traits: [], focus: '', observation: '', relevance: '', minLikes: '', topicHint: '', viral: false, highLikes: false, query: '', sort: DEFAULT_QUERY.sort }))}
-          >
+          {confirming ? <>
+            <p className={styles.footNote} role="status">筛选尚未应用，放弃本次修改？</p>
+            <ActionButton autoFocus onClick={keepEditing}>继续筛选</ActionButton>
+            <ActionButton onClick={discard}>放弃修改</ActionButton>
+          </> : <>
+          <button type="button" className={styles.textButton}
+            onClick={() => setDraft(current => ({ ...current, traits: [], focus: '', observation: '', relevance: '', minLikes: '', topicHint: '', viral: false, highLikes: false, query: '', sort: DEFAULT_QUERY.sort }))}>
             清除额外条件
           </button>
           <span className={styles.spacer} />
-          <button type="button" onClick={onClose}>
-            取消
-          </button>
-          <button type="submit" className={styles.primary}>
-            应用筛选
-          </button>
+          <ActionButton onClick={requestClose}>取消</ActionButton>
+          <ActionButton type="submit" variant="primary">应用筛选</ActionButton>
+          </>}
         </footer>
       </form>
     </ModalDialog>

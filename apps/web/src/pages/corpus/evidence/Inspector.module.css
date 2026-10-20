@@ -28,7 +28,7 @@
   border: 0;
   background: transparent;
   color: var(--lgi-info);
-  font-weight: var(--lgi-weight-bold);
+  font-weight: var(--lgi-type-control-weight);
 }
 
 .tools {
@@ -141,13 +141,13 @@
   padding: 0 calc(var(--lgi-space-1) * 1.25);
   background: transparent;
   color: var(--lgi-muted);
-  font: var(--lgi-weight-semibold) var(--lgi-text-data) / 1 var(--lgi-font-sans);
+  font: var(--lgi-type-control-weight) var(--lgi-type-control-size) / var(--lgi-type-control-leading) var(--lgi-font-ui);
 }
 
 .tabs button[aria-selected='true'] {
   border-bottom-color: var(--lgi-signal);
   color: var(--lgi-ink);
-  font-weight: var(--lgi-weight-bold);
+  font-weight: var(--lgi-type-control-weight);
 }
 
 .body {
@@ -165,7 +165,7 @@
 
 .readingTitle {
   margin: 0;
-  font: var(--lgi-weight-bold) calc(var(--lgi-text-section) + var(--lgi-space-1)) / var(--lgi-lh-heading) var(--lgi-font-sans);
+  font: var(--lgi-type-object-weight) var(--lgi-type-object-size) / var(--lgi-type-object-leading) var(--lgi-font-ui);
   letter-spacing: var(--lgi-ls-normal);
   overflow-wrap: anywhere;
 }
@@ -176,7 +176,7 @@
   gap: var(--lgi-space-2);
   margin-top: var(--lgi-space-1);
   color: var(--lgi-ghost);
-  font: var(--lgi-weight-semibold) var(--lgi-text-calibration) / var(--lgi-lh-data) var(--lgi-font-mono);
+  font: var(--lgi-type-label-weight) var(--lgi-type-label-size) / var(--lgi-type-label-leading) var(--lgi-font-ui);
   letter-spacing: var(--lgi-ls-data);
 }
 
@@ -199,7 +199,7 @@
 .bodyBlock {
   margin: 0;
   color: var(--lgi-ink);
-  font: var(--lgi-text-body) / var(--lgi-lh-longform) var(--lgi-font-evidence);
+  font: var(--lgi-type-reading-weight) var(--lgi-type-reading-size) / var(--lgi-type-reading-leading) var(--lgi-font-evidence);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -307,7 +307,7 @@
   display: block;
   margin: 0 0 var(--lgi-space-2);
   color: var(--lgi-ink);
-  font: var(--lgi-text-data) / var(--lgi-lh-longform) var(--lgi-font-evidence);
+  font: var(--lgi-type-reading-weight) var(--lgi-type-reading-size) / var(--lgi-type-reading-leading) var(--lgi-font-evidence);
   quotes: none;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -396,4 +396,10 @@
   .inspector {
     transition: none;
   }
+}
+
+@media (max-width: 640px) {
+  .inspector { width: 100%; border-left: 0; }
+  .tabs { display: flex; overflow-x: auto; }
+  .tabs button { flex: none; padding: 0 var(--lgi-space-3); }
 }

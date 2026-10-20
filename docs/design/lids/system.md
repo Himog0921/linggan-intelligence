@@ -2,12 +2,18 @@
 
 > 状态: 权威当前
 > 标准成熟度: PROPOSED
-> 最后核对: 2026-09-02
+> 最后核对: 2026-10-19
 > 适用范围: Linggan Intelligence 中所有获准实施的用户界面、视觉资产、状态呈现、动效、页面/组件规格和 UI Agent 交付
-> 事实来源: Mog 于 2026-09-02 指定的 `linggan-design-system-v7.html`、此前的 LIDS v2.0 来源包、[README.md](README.md)、AGENTS.md、docs/governance/、已确认产品页面、数据/权限/行动合同和当前 SCOPE
+> 事实来源: Mog 于 2026-09-02 指定的 `linggan-design-system-v7.html`、此前的 LIDS v2.0 来源包、[README.md](README.md)、AGENTS.md、docs/governance/、已确认产品页面、数据/权限/行动合同和当前 SCOPE；LIDS-ALIGN-001 本次授权与对齐记录
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实运行/代码/合同、ACCEPTED 决策和当前 SCOPE；没有产品或数据依据时停止，不以 LIDS 补全事实
 
 > **DESIGN-010（2026-09-02）把本标准从 v2.0 升级到 v7.0。** 升级是表达标准的换代，不是运行时状态的变化：本次只改治理文档，运行时代码仍停在 v2.0 的 token 与文案口径。全部差异与欠账登记在 [decisions.md](decisions.md) 与 [tokens.md](tokens.md) 第 4 节。**把本文件读成"代码已经这样了"是最容易犯的误读。**
+
+## LIDS-ALIGN-001 · 本轮已确认增量
+
+无边框V2为当前业务工作面的气质依据：连续白场、黑色结构、橙色重音、少量方角纹理控件，列表服务比较与操作、概览服务范围与变化。v8仍是粗稿；不将参考HTML、默认示例或候选组件当成全部验收。
+
+字体按 [typography](typography.md)，区域按 [regions](regions.md)，壳层按 [shell-zones](shell-zones.md)，输入/FIND焦点按 [primitives](primitives.md)的ALIGN-FOCUS。此处按范围替代旧条款；未涉及的状态、场景、可读性与合法媒体材料例外继续有效。字号、行高、字重已按ALIGN-SCALE-B采纳；M2控件参数及E1局部材料/白场舞台已确认；未裁定差异仅列[review-items](review-items.md)，业务Token迁移另需授权。
 
 ## 1. 设计职责与唯一主题
 
@@ -91,11 +97,11 @@ v7 为这条链补齐了三份专门约束，它们横切五层，与本文件�
 ## 4. 所有页面的基本视觉约束
 
 1. 颜色、字号、间距、圆角、阴影、动效只可引用 [tokens.md](tokens.md)；不写硬编码六位色、任意字号或随机间距。组件只引用 L2 SEMANTIC 与 L3 GEOMETRY，**不直接引用 L1 PRIMITIVE 原色**。
-2. 中文阅读使用 Sans；机器事实、状态枚举、结构编号使用 Mono；**人的原声使用 Serif**。长中文正文与研究结论禁止使用 Mono。英文的三类预算见 [语言规则 LANG-05](language-policy.md)。
+2. 字体角色按 [typography](typography.md)：中文OPPO、英文Albert、英文展示Alumni、普通数字Manrope；技术原样字符串与字标保留各自角色。原声按ALIGN-VOICE-004统一OPPO Sans，来源结构必须明确；英文使用范围仍受LANG-05约束。
 3. **功能文字下限 11px，没有例外**（`ADR-03`）。9px 及以下的装饰刻度已废止——在非高分屏上不可读。关键正文不小于 14px；长评论/原声为 16px 或以上。
 4. 采用 4px 间距基数，同层级相邻元素使用同一间距值。页面大区块优先 32/48px，组件内部优先 8/12/16px。
 5. 常规容器圆角只允许 0/4/8px，pill 仅给状态点一类纯圆元素；不以厚胶囊、12px 以上圆角、渐变或多层阴影制造“AI 感”。
-6. **字重只有 400 / 600 / 700 三档**（`ADR-02`）。850、950 一类在 PingFang SC 与 Noto Sans SC 中不存在，只会触发浏览器合成加粗，导致中英混排笔画粗细不一致。
+6. 字号、行高、字重仅按[typography](typography.md)的B角色调用；300/500按对应角色已采纳，旧三档限制已被取代。字体须支持实际字重，禁止合成字形。
 7. **边框不使用 1.5px**——在 1x 屏上产生半像素模糊。线宽为 1（分隔）/ 2（对象边界）/ 3（模式切换）/ 5（信号条）四档。SVG 图标描边的 1.5 是会随尺寸缩放的单位，不受此限。
 8. 边界优先次序为：留白 → 底色 → 左轨/坐标 → 1px Hairline → 强边框。普通列表、表格和读数默认无阴影。
 9. Signal 橙红只表达活跃数据流、选中、情报升级和主动作反馈；不承担 Warning、Danger、Success 或所有增长数字。**它有两个角色且不可互换**（`ADR-04`）：`signal-fill`（`#c63214`，5.4:1）承载文字，`signal-mark`（`#f24a23`，3.6:1）只做色块、轨与销钉，绝不承载任何文字。
@@ -172,7 +178,7 @@ v7 把时长收敛为**四档**，共用单一缓动 `cubic-bezier(.2,.78,.2,1)`
 
 L3 等距场景只能在另获技术和资产授权时进入实现；静态 Style Frame、灰模、材质/灯光、状态机、真实数据绑定、Poster、移动降级、Reduced Motion、性能记录和等价 HTML 都是前置门。当前不得把来源包 V3 的 JavaScript Prism、模拟数值或持续动画复用到产品。L2 只可使用受控局部 2.5D/Poster；L1 禁止品牌级常驻场景。
 
-每个可交互元素可键盘到达，命中区至少 24×24px，主要按钮建议 36–40px，具有双层 Focus Ring，且没有 `outline: none` 的无替代。状态必须以颜色 + 图标/定位 + 文字双通道表达；Tooltip 永远不是必读信息或唯一错误处置入口；场景热点需有键盘、触屏和等价 HTML 列表/树。
+每个可交互元素可键盘到达，命中区至少 24×24px，主要按钮建议 36–40px，焦点按primitives的ALIGN-FOCUS清晰可见，输入/FIND采用无外圈例外，且没有 `outline: none` 的无替代。状态必须以颜色 + 图标/定位 + 文字双通道表达；Tooltip 永远不是必读信息或唯一错误处置入口；场景热点需有键盘、触屏和等价 HTML 列表/树。
 
 ## 7. 页面和组件的不可跳过门
 

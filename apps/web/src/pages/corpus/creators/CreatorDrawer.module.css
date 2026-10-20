@@ -3,7 +3,6 @@
 
 .drawer {
   --creator-control: calc(var(--lgi-space-10) + var(--lgi-space-1));
-  --creator-text: calc((var(--lgi-text-body) + var(--lgi-text-data)) / 2);
   position: fixed;
   inset: var(--creator-shell-top, var(--v7-header-height)) 0 0 auto;
   box-sizing: border-box;
@@ -16,7 +15,7 @@
   padding: 0;
   overflow: hidden;
   background: var(--lgi-canvas);
-  box-shadow: var(--lgi-shadow-overlay);
+  box-shadow:calc(-1 * var(--lgi-action-shadow-idle)) 0 0 var(--lgi-ink);
   color: var(--lgi-ink);
   font: var(--lgi-text-body) / var(--lgi-lh-body) var(--lgi-font-sans);
 }
@@ -31,27 +30,26 @@
   background: color-mix(in srgb, var(--lgi-ink) 22%, transparent);
 }
 
-.drawer :is(button, input, select) {
+.drawer :where(button:not([data-action-button]), input, select) {
   box-sizing: border-box;
   border-radius: var(--lgi-radius-none);
   color: inherit;
   font: inherit;
 }
 
-.drawer button {
+.drawer :where(button:not([data-action-button])) {
   border: 1px solid var(--lgi-border-strong);
   padding: var(--lgi-space-2) var(--lgi-space-3);
   background: var(--lgi-canvas);
-  font-size: var(--lgi-text-data);
-  font-weight: var(--lgi-weight-medium);
+  font:var(--lgi-type-control-weight) var(--lgi-type-control-size)/var(--lgi-type-control-leading) var(--lgi-font-sans);
   cursor: pointer;
 }
 
-.drawer button:hover:not(:disabled) {
+.drawer :where(button:not([data-action-button])):hover:not(:disabled) {
   background: var(--lgi-canvas-low);
 }
 
-.drawer button:disabled {
+.drawer :where(button:not([data-action-button])):disabled {
   background: var(--lgi-canvas-low);
   color: var(--lgi-ghost);
   cursor: not-allowed;
@@ -69,17 +67,6 @@
 .drawer :focus-visible {
   outline: 2px solid var(--lgi-focus);
   outline-offset: 2px;
-}
-
-.drawer .primary {
-  border-color: var(--lgi-ink);
-  background: var(--lgi-ink);
-  color: var(--lgi-on-dark);
-}
-
-.drawer .primary:hover:not(:disabled) {
-  border-color: var(--lgi-signal-ink);
-  background: var(--lgi-signal-ink);
 }
 
 .drawer .textButton {
@@ -117,15 +104,15 @@
 .title small {
   display: block;
   color: var(--lgi-muted);
-  font-size: var(--lgi-text-data);
+  font-size:var(--lgi-type-label-size);
 }
 
 .title h2 {
   margin: var(--lgi-space-1) 0 0;
   overflow: hidden;
-  font-size: calc(var(--lgi-text-section) + var(--lgi-space-1));
+  font-size:var(--lgi-type-object-size);
   font-weight: var(--lgi-weight-semibold);
-  line-height: calc(var(--lgi-space-8) - var(--lgi-space-1) / 2);
+  line-height:var(--lgi-type-object-leading);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -134,7 +121,7 @@
   margin: var(--lgi-space-1) 0 0;
   overflow: hidden;
   color: var(--lgi-muted);
-  font-size: var(--lgi-text-data);
+  font-size:var(--lgi-type-label-size);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -148,17 +135,18 @@
   display: flex;
   gap: var(--lgi-space-6);
   margin-top: var(--lgi-space-5);
-  padding: var(--lgi-space-3) var(--lgi-space-4);
-  background: var(--lgi-canvas-low);
+  padding:var(--lgi-space-3) 0;
+  background:var(--lgi-canvas);
+  border-bottom:1px solid var(--lgi-hairline);
   color: var(--lgi-muted);
-  font-size: var(--lgi-text-data);
+  font-size:var(--lgi-type-label-size);
 }
 
 .metrics strong {
   margin-left: var(--lgi-space-2);
   color: var(--lgi-ink);
-  font-size: var(--lgi-text-body);
-  font-variant-numeric: tabular-nums;
+  font:var(--lgi-type-data-weight) var(--lgi-type-data-size)/var(--lgi-type-data-leading) var(--lgi-font-data);
+  font-variant-numeric:tabular-nums;
 }
 
 .tabs {
@@ -175,7 +163,7 @@
   padding: 0;
   background: transparent;
   color: var(--lgi-muted);
-  font-size: var(--lgi-text-body);
+  font:var(--lgi-type-control-weight) var(--lgi-type-control-size)/var(--lgi-type-control-leading) var(--lgi-font-sans);
 }
 
 .drawer .tabs button[aria-selected='true'] {
@@ -200,8 +188,9 @@
 
 .body h3 {
   margin: 0 0 var(--lgi-space-3);
-  font-size: var(--lgi-text-body);
-  font-weight: var(--lgi-weight-semibold);
+  font-size:var(--lgi-type-section-size);
+  font-weight:var(--lgi-type-section-weight);
+  line-height:var(--lgi-type-section-leading);
 }
 
 .body p {
@@ -215,19 +204,19 @@
 
 .body summary {
   color: var(--lgi-muted);
-  font-size: var(--lgi-text-data);
+  font-size:var(--lgi-type-label-size);
   cursor: pointer;
 }
 
 .help {
   color: var(--lgi-muted);
-  font-size: var(--lgi-text-data);
+  font-size:var(--lgi-type-label-size);
   line-height: var(--lgi-lh-longform);
 }
 
 .criteria {
   color: var(--lgi-muted);
-  font-size: var(--lgi-text-data);
+  font-size:var(--lgi-type-label-size);
   line-height: var(--lgi-lh-longform);
 }
 
@@ -264,7 +253,7 @@
 .tags span {
   background: var(--lgi-canvas-low);
   padding: var(--lgi-space-1) var(--lgi-space-2);
-  font-size: var(--lgi-text-data);
+  font-size:var(--lgi-type-label-size);
 }
 
 .previewCard {
@@ -293,7 +282,7 @@
   display: block;
   margin-top: calc(var(--lgi-space-1) / 4);
   color: var(--lgi-muted);
-  font-size: var(--lgi-text-data);
+  font-size:var(--lgi-type-label-size);
 }
 
 /* 按作品分组：每篇作品一个可折叠的块，块里是这篇作品的四项判断与它们的引文。 */
@@ -365,8 +354,7 @@
   border-left: 2px solid var(--lgi-border-strong);
   padding: var(--lgi-space-3) var(--lgi-space-4);
   background: var(--lgi-canvas-low);
-  font-family: var(--lgi-font-evidence);
-  line-height: var(--lgi-lh-longform);
+  font:var(--lgi-type-reading-weight) var(--lgi-type-reading-size)/var(--lgi-type-reading-leading) var(--lgi-font-evidence);
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
@@ -383,7 +371,7 @@
   grid-template-columns: auto minmax(0, 1fr);
   gap: var(--lgi-space-3) var(--lgi-space-5);
   margin: 0;
-  font-size: var(--lgi-text-data);
+  font-size:var(--lgi-type-label-size);
 }
 
 .profileList dt {
@@ -407,7 +395,6 @@
   width: var(--lgi-space-2);
   height: var(--lgi-space-2);
   margin-right: var(--lgi-space-1);
-  border-radius: 50%;
   background: var(--lgi-unknown-dot);
 }
 
@@ -444,7 +431,7 @@
 .footer > div:first-child {
   flex: 1;
   min-width: 0;
-  font-size: var(--lgi-text-data);
+  font-size:var(--lgi-type-label-size);
 }
 
 .actions {
@@ -452,13 +439,13 @@
   flex-wrap: wrap;
   align-items: center;
   gap: var(--lgi-space-2);
-  max-width: 60%;
+  max-width: 65%;
 }
 
 .actions small {
   flex-basis: 100%;
   color: var(--lgi-muted);
-  font-size: var(--lgi-text-data);
+  font-size:var(--lgi-type-label-size);
 }
 
 .actions button {
@@ -499,9 +486,9 @@
     margin-left: var(--lgi-space-1);
   }
 
-  .actions {
-    max-width: 55%;
-  }
+  .footer { flex-wrap:wrap; }
+  .actions { max-width:100%; width:100%; }
+  .actions [data-action-button] { flex:1; }
 }
 
 @media (max-height: 540px) {
@@ -519,9 +506,7 @@
     margin-top: var(--lgi-space-1);
   }
 
-  .title h2 {
-    font-size: var(--lgi-text-section);
-  }
+
 
   .footer {
     padding-block: var(--lgi-space-2);

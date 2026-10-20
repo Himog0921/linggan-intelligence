@@ -1,3 +1,4 @@
+import { ActionButton } from '../../../shared/ActionButton';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
 import { fetchDossier } from './dossierApi';
@@ -44,9 +45,9 @@ function Head({ payload, relayer, busy, onRefresh, onPreview }: { payload: Dossi
       <p className={styles.note}>底稿使用当前可读取的共享材料。历史运行继续保留其冻结输入；待确认行不进入正文。</p>
       <p className={styles.note}>{`本篇可用布局 ${plan.layoutCount} 个 · 待分层 ${plan.pendingLayouts} 个 · 已是当前版本 ${plan.alreadyCurrent} 个 · 需先识字 ${plan.needsOcr} 个`}</p>
       <div className={styles.toolbar}>
-        <button type="button" className={page.primary} onClick={onPreview}>
+        <ActionButton variant="primary" onClick={onPreview}>
           预览旧任务输入
-        </button>
+        </ActionButton>
         <button type="button" disabled={busy} onClick={onRefresh}>
           刷新底稿
         </button>

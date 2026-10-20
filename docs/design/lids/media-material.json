@@ -1,0 +1,97 @@
+{
+  "id": "ALIGN-MEDIA-013",
+  "status": "accepted",
+  "date": "2026-10-20",
+  "decision": {
+    "selected": "E1",
+    "stageField": "plain",
+    "evidence": "U23"
+  },
+  "paper": {
+    "period": 24,
+    "radius": 0.6,
+    "points": [
+      [
+        0,
+        0
+      ],
+      [
+        0,
+        8
+      ],
+      [
+        8,
+        16
+      ]
+    ],
+    "alpha": [
+      0.15,
+      0.11,
+      0.13
+    ],
+    "selectedPoints": [
+      [
+        0,
+        0
+      ],
+      [
+        0,
+        8
+      ],
+      [
+        8,
+        8
+      ],
+      [
+        8,
+        16
+      ]
+    ],
+    "selectedAlpha": [
+      0.2,
+      0.14,
+      0.2,
+      0.14
+    ]
+  },
+  "station": {
+    "headerWidthPercent": 35,
+    "headerPitch": 16,
+    "headerOpacity": 0.78,
+    "buttonTail": 8,
+    "buttonPitch": 4,
+    "buttonOpacity": 0.62
+  },
+  "cover": {
+    "borderPx": 1,
+    "material": "M-06",
+    "scope": "independent_cover_card_only"
+  },
+  "media": {
+    "stageBackground": "white",
+    "fit": "contain",
+    "containerRatio": "3/4",
+    "preserveSourceColor": true,
+    "states": [
+      "ready",
+      "loading",
+      "absent",
+      "failed"
+    ]
+  },
+  "stationScope": "M-02E_runtime_board_only",
+  "preservedExceptions": [
+    "V8_workbench"
+  ],
+  "forbidden": [
+    "paper_on_problem_cards",
+    "texture_on_reading_or_table_cells",
+    "stage_calibration_grid",
+    "resume_stopped_task"
+  ],
+  "runtimeMigrated": false,
+  "businessRequests": false,
+  "componentCertificationChanged": false,
+  "fontAssetsChanged": false,
+  "problemCardsChanged": false
+}

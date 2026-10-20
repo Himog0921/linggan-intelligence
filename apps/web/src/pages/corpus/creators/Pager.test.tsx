@@ -79,10 +79,11 @@ describe('分页', () => {
 
   it('每页数量只有 25 / 50 / 100', () => {
     const { onPageSize } = setup(0, 100, 50);
-    const select = screen.getByRole('combobox') as HTMLSelectElement;
-    expect([...select.options].map(option => option.value)).toEqual(['25', '50', '100']);
-    expect(select.value).toBe('50');
-    fireEvent.change(select, { target: { value: '100' } });
+    const select = screen.getByRole('combobox');
+    expect(select).toHaveTextContent('50');
+    fireEvent.click(select);
+    expect(screen.getAllByRole('option').map(option => option.textContent?.replace('✓', ''))).toEqual(['25', '50', '100']);
+    fireEvent.click(screen.getByRole('option', { name: '100' }));
     expect(onPageSize).toHaveBeenCalledWith(100);
   });
 });

@@ -1,0 +1,36 @@
+{
+  "id": "ALIGN-FOCUS-005",
+  "status": "accepted",
+  "date": "2026-10-19",
+  "decision": {
+    "evidence": "U12",
+    "selected": "C",
+    "quote": "Q04就按C来收口，鼠标输入轻一点，键盘定位清楚一些"
+  },
+  "scope": "input_FIND_and_closed_select_trigger; other controls retain existing visible keyboard focus",
+  "parameters": {
+    "warmFill": "#fffaf7",
+    "keyboardInsetPx": 2,
+    "inkRole": "ink",
+    "readonlyFillRole": "wash"
+  },
+  "pointer": {
+    "field": "warm_fill_no_added_line",
+    "FIND": "ink_word_on_clear_plate_with_warm_input"
+  },
+  "keyboard": {
+    "field": "warm_fill_with_ink_internal_baseline",
+    "FIND": "ink_white_wordplate_and_active_child_internal_baseline",
+    "closedSelect": "ink_internal_baseline"
+  },
+  "exceptions": {
+    "readonly": "wash_fill_and_ink_internal_baseline",
+    "disabled": "native_disabled_skip_tab",
+    "invalid": "keep_inline_error_and_error_fill_visible",
+    "forcedColors": "system_Highlight_internal_bottom_border",
+    "darkTrigger": "retain_visible_signal_internal_baseline_on_ink"
+  },
+  "externalPerimeter": false,
+  "fontRolesChanged": false,
+  "runtimeMigrated": false
+}

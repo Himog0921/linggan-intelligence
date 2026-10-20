@@ -1,0 +1,21 @@
+{
+  "id": "LIDS-COLOR-001",
+  "status": "accepted",
+  "evidence": "U24",
+  "decision": "采用正式LIDS目标语义色板，关闭A18-01",
+  "values": {
+    "ink": "#0b0f12",
+    "body": "#30373c",
+    "secondary": "#5f6a71",
+    "meta": "#6b767d",
+    "disabled": "#8c959b",
+    "signal": "#c63214",
+    "mark": "#f24a23",
+    "success": "#137557",
+    "warning": "#8a5c00",
+    "danger": "#b52b20",
+    "info": "#335e72",
+    "canvas": "#ffffff"
+  },
+  "userQuote": "按照你的建议来，同时可以按照当前已经决策好的设计，开始动手优化我真实的项目代码以及前端 UI 了"
+}

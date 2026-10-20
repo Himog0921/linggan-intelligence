@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { EvidenceControls } from './EvidenceControls';
@@ -55,14 +55,16 @@ describe('检索', () => {
 });
 
 describe('筛选浮层', () => {
-  it('三个原生下拉：材料通道、通道状态、媒体类型；DR-1 移除的排序与读取窗口不再出现', async () => {
+  it('三个统一选择器：材料通道、通道状态、媒体类型；DR-1 移除的排序与读取窗口不再出现', async () => {
     const { user } = setup();
     await user.click(screen.getByRole('button', { name: /筛选/ }));
     const panel = screen.getByRole('group', { name: '筛选条件' });
     expect(within(panel).getAllByRole('combobox').map(select => select.getAttribute('aria-label'))).toEqual(['材料通道', '通道状态', '媒体类型']);
-    expect(within(within(panel).getByRole('combobox', { name: '材料通道' })).getAllByRole('option')).toHaveLength(10);
-    expect(within(within(panel).getByRole('combobox', { name: '通道状态' })).getAllByRole('option')).toHaveLength(15);
-    expect(within(within(panel).getByRole('combobox', { name: '媒体类型' })).getAllByRole('option')).toHaveLength(5);
+    for (const [name, count] of [['材料通道', 10], ['通道状态', 15], ['媒体类型', 5]] as const) {
+      await user.click(within(panel).getByRole('combobox', { name }));
+      expect(within(screen.getByRole('listbox', { name })).getAllByRole('option')).toHaveLength(count);
+      await user.keyboard('{Escape}');
+    }
     expect(screen.queryByText('读取窗口')).toBeNull();
     expect(screen.queryByText(/近 7 天|近 30 天/)).toBeNull();
     expect(screen.queryByRole('combobox', { name: '结果排序' })).toBeNull();
@@ -73,7 +75,8 @@ describe('筛选浮层', () => {
   it('选一项：新增历史、重新读取（work 清空，让第一项自动选中）；系统视图保持', async () => {
     const { user, onChange } = setup({ ...DEFAULT_QUERY, view: 'risk', work: workRef(1) });
     await user.click(screen.getByRole('button', { name: /筛选/ }));
-    await user.selectOptions(screen.getByRole('combobox', { name: '材料通道' }), 'comments');
+    await user.click(screen.getByRole('combobox', { name: '材料通道' }));
+    await user.click(screen.getByRole('option', { name: '评论' }));
     const next = applied(onChange, { ...DEFAULT_QUERY, view: 'risk', work: workRef(1) });
     expect(next).toMatchObject({ lane: 'comments', view: 'risk', work: null });
     expect(onChange.mock.calls[0]?.[1]).toBeUndefined();
@@ -83,7 +86,7 @@ describe('筛选浮层', () => {
     const { user } = setup({ ...DEFAULT_QUERY, lane: 'ocr', mediaKind: 'video', view: 'risk' });
     const toggle = screen.getByRole('button', { name: /筛选/ });
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    expect(within(toggle).getByLabelText('已选 2 项筛选')).toHaveTextContent('2');
+    expect(within(toggle).getByLabelText('已选 2 项筛选')).toHaveTextContent('02');
     await user.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
     expect(toggle).toHaveAttribute('aria-controls', screen.getByRole('group', { name: '筛选条件' }).id);
@@ -93,7 +96,8 @@ describe('筛选浮层', () => {
     const { user } = setup();
     const toggle = screen.getByRole('button', { name: /筛选/ });
     await user.click(toggle);
-    await user.selectOptions(screen.getByRole('combobox', { name: '通道状态' }), 'PARTIAL');
+    await user.click(screen.getByRole('combobox', { name: '通道状态' }));
+    await user.click(screen.getByRole('option', { name: '部分取得' }));
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('group', { name: '筛选条件' })).toBeNull();
     expect(document.activeElement).toBe(toggle);
@@ -134,4 +138,52 @@ describe('系统视图与排版', () => {
     setup();
     expect(screen.queryByText(/我的视图|暂无已保存视图/)).toBeNull();
   });
+});
+
+describe('查询输入边界', () => {
+  it('中文组词时Enter不提交；组词完成后仍由用户确认', async () => {
+    const { user, onSubmit } = setup();
+    const box = screen.getByRole('searchbox');
+    fireEvent.compositionStart(box);
+    await user.type(box, '家庭{Enter}');
+    expect(onSubmit).not.toHaveBeenCalled();
+    fireEvent.compositionEnd(box);
+    await user.keyboard('{Enter}');
+    expect(onSubmit).toHaveBeenCalledWith('家庭');
+  });
+  it('清空检索同时提交空词并保持输入焦点', async () => {
+    const { user, onSubmit } = setup({ ...DEFAULT_QUERY, q: '旧词' });
+    await user.click(screen.getByRole('button', { name: '清空检索' }));
+    expect(onSubmit).toHaveBeenCalledWith('');
+    expect(screen.getByRole('searchbox')).toHaveValue('');
+    expect(screen.getByRole('searchbox')).toHaveFocus();
+  });
+  it('斜线定位FIND，不吞掉输入框里的斜线', async () => {
+    const { user } = setup();
+    await user.keyboard('/');
+    expect(screen.getByRole('searchbox')).toHaveFocus();
+    await user.keyboard('/');
+    expect(screen.getByRole('searchbox')).toHaveValue('/');
+  });
+  it('选择器Esc只收起选项；再次Esc才收起筛选面板', async () => {
+    const { user } = setup();
+    await user.click(screen.getByRole('button', { name: /^筛选/ }));
+    const combo = screen.getByRole('combobox', { name: '材料通道' });
+    await user.click(combo);
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(screen.getByRole('group', { name: '筛选条件' })).toBeInTheDocument();
+    expect(combo).toHaveFocus();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('group', { name: '筛选条件' })).toBeNull();
+  });
+});
+
+it('切换领域不保留上个领域尚未提交的词，即使两个领域地址q都为空', async () => {
+  const onSubmit = vi.fn(); const onChange = vi.fn(); const onClearFilters = vi.fn();
+  const view = render(<EvidenceControls scope="one" query={DEFAULT_QUERY} hasDomain onSubmit={onSubmit} onChange={onChange} onClearFilters={onClearFilters} />);
+  await userEvent.type(screen.getByRole('searchbox'), '旧领域草稿');
+  view.rerender(<EvidenceControls scope="two" query={DEFAULT_QUERY} hasDomain onSubmit={onSubmit} onChange={onChange} onClearFilters={onClearFilters} />);
+  expect(screen.getByRole('searchbox')).toHaveValue('');
+  expect(onSubmit).not.toHaveBeenCalled();
 });

@@ -4,6 +4,7 @@
 .page {
   /* 检查器宽度是一个变量，工作台、媒体轨道与响应式规则都读同一个数。关闭是让这一栏塌缩，而不是隐藏元素。 */
   --ev-inspector-w: calc(var(--lgi-space-24) * 4 + var(--lgi-space-4) + var(--lgi-space-2));
+  container: evidence-workspace / inline-size;
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -18,14 +19,14 @@
 
 /* 页面级的原生控件基线。全部写在 :where() 里，特异性几乎为零：各部件自己的模块里任何一个单类规则都能盖过它，
  * 不依赖样式表的先后顺序（jsdom 不算层叠，所以这一点要靠静止态截图核对）。 */
-:where(.page) :is(button, input, select) {
+:where(.page) :is(button:not([data-action-button]), input, select) {
   box-sizing: border-box;
   border-radius: var(--lgi-radius-none);
   color: inherit;
   font: inherit;
 }
 
-:where(.page) :is(button, select) {
+:where(.page) :is(button:not([data-action-button]), select) {
   cursor: pointer;
 }
 
@@ -36,19 +37,19 @@
   background: var(--lgi-canvas);
 }
 
-:where(.page) :where(button) {
+:where(.page) :where(button:not([data-action-button])) {
   min-height: calc(var(--lgi-space-10) + var(--lgi-space-1));
   border: 1px solid var(--lgi-ink);
   padding: 0 var(--lgi-space-4);
   background: var(--lgi-canvas);
-  font: var(--lgi-weight-semibold) var(--lgi-text-data) / 1 var(--lgi-font-sans);
+  font: var(--lgi-type-control-weight) var(--lgi-type-control-size) / var(--lgi-type-control-leading) var(--lgi-font-ui);
 }
 
-:where(.page) :where(button):hover:not(:disabled) {
+:where(.page) :where(button:not([data-action-button])):hover:not(:disabled) {
   background: var(--lgi-canvas-low);
 }
 
-:where(.page) :where(button):disabled {
+:where(.page) :where(button:not([data-action-button])):disabled {
   background: var(--lgi-canvas-low);
   color: var(--lgi-ghost);
   cursor: not-allowed;
@@ -66,24 +67,6 @@
 :where(.page) :focus-visible {
   outline: 2px solid var(--lgi-focus);
   outline-offset: 2px;
-}
-
-/* 一个界面一个实心墨色动作；悬停改色，不上浮。 */
-.primary {
-  border: 2px solid var(--lgi-ink);
-  background: var(--lgi-ink);
-  color: var(--lgi-on-dark);
-}
-
-.primary:hover:not(:disabled) {
-  border-color: var(--lgi-signal-ink);
-  background: var(--lgi-signal-ink);
-}
-
-.primary:disabled {
-  border-color: var(--lgi-border-strong);
-  background: var(--lgi-canvas-low);
-  color: var(--lgi-ghost);
 }
 
 .textButton {
@@ -104,15 +87,15 @@
 /* 页头右侧读数：读取时间，不放数字之外的状态。 */
 .readout {
   color: var(--lgi-muted);
-  font: var(--lgi-text-data) / var(--lgi-lh-data) var(--lgi-font-sans);
+  font: var(--lgi-type-label-weight) var(--lgi-type-label-size) / var(--lgi-type-label-leading) var(--lgi-font-ui);
   white-space: nowrap;
 }
 
 /* ── 查询区 ─────────────────────────────────── */
 .command {
   flex: none;
-  border-bottom: 1px solid var(--lgi-ink);
-  background: var(--lgi-canvas-low);
+  border-bottom: 2px solid var(--lgi-ink);
+  background: var(--lgi-canvas);
 }
 
 .banner {
@@ -169,7 +152,7 @@
 .results {
   min-width: 0;
   overflow: auto;
-  border-right: 2px solid var(--lgi-ink);
+  border-right: 1px solid var(--lgi-ink);
   background: var(--lgi-canvas);
 }
 
@@ -234,6 +217,7 @@
   display: flex;
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
 }
 
 .manage {
@@ -287,3 +271,6 @@
     overflow: visible;
   }
 }
+
+.resultMeta { display: flex; justify-content: space-between; align-items: center; flex: none; gap: var(--lgi-space-3); padding: var(--lgi-space-3) var(--lgi-space-5); border-bottom: 1px solid var(--lgi-hairline); font: var(--lgi-type-label-weight) var(--lgi-type-label-size) / var(--lgi-type-label-leading) var(--lgi-font-ui); color: var(--lgi-muted); }
+@media (max-width: 640px) { .resultMeta { flex-wrap: wrap; padding-inline: var(--lgi-space-4); } }

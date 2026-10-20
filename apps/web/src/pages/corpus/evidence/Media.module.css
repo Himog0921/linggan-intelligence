@@ -16,7 +16,7 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
-  background: var(--lgi-canvas-low);
+  background: var(--lgi-canvas);
 }
 
 .fallback {
@@ -32,7 +32,7 @@
   width: 100%;
   aspect-ratio: 3 / 4;
   border: 1px solid var(--lgi-border-strong);
-  background: var(--lgi-canvas-low);
+  background: var(--lgi-canvas);
 }
 
 .preview .image {
@@ -45,7 +45,7 @@
   flex: none;
   border: 1px solid var(--lgi-ink);
   border-radius: 50%;
-  background: var(--lgi-canvas-low);
+  background: var(--lgi-canvas);
 }
 
 .avatar[data-media-state='loaded'] {

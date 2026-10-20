@@ -1,3 +1,4 @@
+import { ActionButton } from '../../../shared/ActionButton';
 import styles from './Controls.module.css';
 
 /** 单次批量动作的作品上限（评论深采、整理图片文字都按它判断）。 */
@@ -22,21 +23,21 @@ export function SelectionBar({ count, hasDomain, hasPendingBatch, onSelectPage, 
   const usable = hasDomain && count > 0 && count <= SELECTION_LIMIT;
   return (
     <div className={styles.selection} role="group" aria-label="批量操作">
-      <button type="button" disabled={!hasDomain} onClick={onSelectPage}>
+      <ActionButton variant="quiet" disabled={!hasDomain} onClick={onSelectPage}>
         勾选本页
-      </button>
+      </ActionButton>
       <span role="status" aria-live="polite">{`已勾选 ${count} 篇作品`}</span>
       {count > SELECTION_LIMIT ? <span className={styles.limit}>{`最多 ${SELECTION_LIMIT} 篇，请减少勾选`}</span> : null}
-      <button type="button" disabled={!usable} onClick={onDeepCollect}>
+      <ActionButton variant="quiet" disabled={!usable} onClick={onDeepCollect}>
         评论深采
-      </button>
-      <button type="button" disabled={!usable} onClick={onOpenBatch}>
+      </ActionButton>
+      <ActionButton variant="quiet" disabled={!usable} onClick={onOpenBatch}>
         整理图片文字
-      </button>
+      </ActionButton>
       {hasPendingBatch ? (
-        <button type="button" className={styles.resume} onClick={onResumeBatch}>
+        <ActionButton variant="quiet" className={styles.resume} onClick={onResumeBatch}>
           继续上次整理
-        </button>
+        </ActionButton>
       ) : null}
     </div>
   );

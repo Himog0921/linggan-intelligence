@@ -1,10 +1,12 @@
 import { useId, useRef, useState, type FormEvent } from 'react';
+import { ActionButton } from '../../../shared/ActionButton';
 import { ModalDialog } from '../../../corpus/ModalDialog';
 import { AiBusinessStatus } from '../../settings/AiBusinessStatus';
 import { feedbackForError, type Feedback } from './creatorsFeedback';
 import type { CreatorPolicy } from './creatorsTypes';
 import { FeedbackLine } from './FeedbackLine';
 import { usePolicyMutation } from './useCreatorWrites';
+import { useCreatorLeave } from './useCreatorLeave';
 import { useWriteGuard } from './useWriteGuard';
 import styles from './CreatorDialogs.module.css';
 
@@ -26,6 +28,9 @@ export function CreatorPolicyDialog({ domain, policy, domainActive, onSaved, onC
   const [threshold, setThreshold] = useState(policy.likeThreshold === null ? '' : String(policy.likeThreshold));
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const dirty = threshold !== (policy.likeThreshold === null ? '' : String(policy.likeThreshold));
+  const { requestClose, confirmation } = useCreatorLeave({ dirty, busy, onClose });
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -52,14 +57,15 @@ export function CreatorPolicyDialog({ domain, policy, domainActive, onSaved, onC
   }
 
   return (
-    <ModalDialog labelledBy={titleId} className={styles.dialog} onClose={onClose}>
+    <>
+    <ModalDialog labelledBy={titleId} className={styles.dialog} onClose={requestClose}>
       <form className={styles.form} onSubmit={event => void submit(event)}>
         <header className={styles.head}>
           <div>
             <small>仅影响当前领域</small>
             <h2 id={titleId}>发现设置</h2>
           </div>
-          <button type="button" className={styles.textButton} onClick={onClose}>
+          <button type="button" className={styles.textButton} onClick={requestClose}>
             关闭
           </button>
         </header>
@@ -79,14 +85,14 @@ export function CreatorPolicyDialog({ domain, policy, domainActive, onSaved, onC
           <div className={styles.footNote}>
             <FeedbackLine feedback={feedback} />
           </div>
-          <button type="button" onClick={onClose}>
-            取消
-          </button>
-          <button type="submit" className={styles.primary} disabled={busy || !domainActive}>
+          <ActionButton onClick={requestClose}>取消</ActionButton>
+          <ActionButton type="submit" variant="primary" busy={busy} disabled={!domainActive}>
             {busy ? '保存中…' : '保存设置'}
-          </button>
+          </ActionButton>
         </footer>
       </form>
     </ModalDialog>
+    {confirmation}
+    </>
   );
 }

@@ -1,3 +1,4 @@
+import { ActionButton } from '../../../shared/ActionButton';
 import type { Ref } from 'react';
 import { Tech } from './Primitives';
 import { ResultsStatus } from './ResultsStatus';
@@ -93,9 +94,9 @@ export function ResultsArea(props: ResultsAreaProps) {
               {errorCode(list.error) ? <Tech>{errorCode(list.error)}</Tech> : null}
             </p>
           ) : null}
-          <button type="button" disabled={list.fetchingNext} onClick={list.loadMore}>
+          <ActionButton variant="outline" busy={list.fetchingNext} onClick={list.loadMore}>
             继续读取作品
-          </button>
+          </ActionButton>
         </div>
       ) : null}
     </div>

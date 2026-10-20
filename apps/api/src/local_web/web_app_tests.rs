@@ -29,6 +29,36 @@ fn synthetic_dist(revision: Option<&str>, with_entry: bool) -> PathBuf {
         "console.log('synthetic');",
     )
     .unwrap();
+    for (file, contents) in [
+        ("fonts/lids/NOTICE.txt", "synthetic-notice"),
+        ("fonts/lids/manifest.json", "{}"),
+        ("fonts/lids/opposans/OPPOSans40.ttf", "synthetic-oppo"),
+        ("fonts/lids/opposans/LICENSE.txt", "synthetic-oppo-license"),
+        (
+            "fonts/lids/albertsans/AlbertSans[wght].woff2",
+            "synthetic-albert",
+        ),
+        ("fonts/lids/albertsans/OFL.txt", "synthetic-albert-license"),
+        (
+            "fonts/lids/alumnisans/AlumniSans[wght].woff2",
+            "synthetic-alumni",
+        ),
+        ("fonts/lids/alumnisans/OFL.txt", "synthetic-alumni-license"),
+        (
+            "fonts/lids/manrope/Manrope[wght].woff2",
+            "synthetic-manrope",
+        ),
+        ("fonts/lids/manrope/OFL.txt", "synthetic-manrope-license"),
+        (
+            "fonts/lids/jetbrainsmono/JetBrainsMono[wght].woff2",
+            "synthetic-mono",
+        ),
+        ("fonts/lids/jetbrainsmono/OFL.txt", "synthetic-mono-license"),
+    ] {
+        let path = directory.join(file);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, contents).unwrap();
+    }
     directory
 }
 
@@ -123,7 +153,7 @@ fn revisions_compare_only_when_both_sides_are_known() {
 }
 
 #[tokio::test]
-async fn hashed_assets_are_long_cached_and_nothing_else_is_reachable() {
+async fn hashed_assets_are_long_cached_and_only_declared_font_assets_are_reachable() {
     let dist = synthetic_dist(Some("284cd3a9"), true);
     let (status, headers, body) = send(
         web(dist.clone(), "unknown"),
@@ -142,11 +172,75 @@ async fn hashed_assets_are_long_cached_and_nothing_else_is_reachable() {
     );
     assert_eq!(headers[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
     assert!(body.contains("synthetic"));
+    let (status, headers, body) = send(
+        web(dist.clone(), "unknown"),
+        "/ui-assets/fonts/lids/opposans/OPPOSans40.ttf",
+        "127.0.0.1:3000",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers[header::CONTENT_TYPE], "font/ttf");
+    assert_eq!(
+        headers[header::CACHE_CONTROL],
+        "public, max-age=3600, must-revalidate"
+    );
+    assert_eq!(headers[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
+    assert_eq!(body, "synthetic-oppo");
+    let (status, headers, body) = send(
+        web(dist.clone(), "unknown"),
+        "/ui-assets/fonts/lids/NOTICE.txt",
+        "127.0.0.1:3000",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers[header::CONTENT_TYPE], "text/plain; charset=utf-8");
+    assert_eq!(
+        headers[header::CACHE_CONTROL],
+        "public, max-age=3600, must-revalidate"
+    );
+    assert_eq!(body, "synthetic-notice");
+    for (file, content_type) in [
+        ("fonts/lids/albertsans/AlbertSans[wght].woff2", "font/woff2"),
+        ("fonts/lids/alumnisans/AlumniSans[wght].woff2", "font/woff2"),
+        ("fonts/lids/manrope/Manrope[wght].woff2", "font/woff2"),
+        (
+            "fonts/lids/jetbrainsmono/JetBrainsMono[wght].woff2",
+            "font/woff2",
+        ),
+        (
+            "fonts/lids/opposans/LICENSE.txt",
+            "text/plain; charset=utf-8",
+        ),
+        ("fonts/lids/albertsans/OFL.txt", "text/plain; charset=utf-8"),
+        ("fonts/lids/alumnisans/OFL.txt", "text/plain; charset=utf-8"),
+        ("fonts/lids/manrope/OFL.txt", "text/plain; charset=utf-8"),
+        (
+            "fonts/lids/jetbrainsmono/OFL.txt",
+            "text/plain; charset=utf-8",
+        ),
+    ] {
+        let (status, headers, _) = send(
+            web(dist.clone(), "unknown"),
+            &format!("/ui-assets/{file}"),
+            "127.0.0.1:3000",
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{file}");
+        assert_eq!(headers[header::CONTENT_TYPE], content_type, "{file}");
+        assert_eq!(
+            headers[header::CACHE_CONTROL],
+            "public, max-age=3600, must-revalidate",
+            "{file}"
+        );
+        assert_eq!(headers[header::X_CONTENT_TYPE_OPTIONS], "nosniff", "{file}");
+    }
     for blocked in [
         "/ui-assets/index.html",
         "/ui-assets/build-info.json",
         "/ui-assets/..%2Findex.html",
         "/ui-assets/%2E%2E%2Fbuild-info.json",
+        "/ui-assets/fonts/lids/../../build-info.json",
+        "/ui-assets/fonts/lids/opposans/README.txt",
         "/ui-assets/missing-file.js",
     ] {
         let (status, _, _) = send(web(dist.clone(), "unknown"), blocked, "127.0.0.1:3000").await;
@@ -161,6 +255,63 @@ async fn hashed_assets_are_long_cached_and_nothing_else_is_reachable() {
         test_support::content_type_of("font-Ab_1.woff2"),
         Some("font/woff2")
     );
+    assert_eq!(
+        test_support::content_type_of("fonts/lids/opposans/OPPOSans40.ttf"),
+        Some("font/ttf")
+    );
+    assert_eq!(
+        test_support::content_type_of("fonts/lids/opposans/README.txt"),
+        None
+    );
+}
+
+/// 页面样式引用的字体路径、随包登记的字体与许可、服务端精确白名单三者必须逐项对得上：
+/// 任何一边漂移，浏览器只会静默回退到系统字体，不会报错。
+#[test]
+fn shipped_font_urls_registered_files_and_the_whitelist_agree() {
+    let web = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../web");
+    let css = fs::read_to_string(web.join("src/styles/typography.css")).unwrap();
+    let manifest: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(web.join("public/fonts/lids/manifest.json")).unwrap(),
+    )
+    .unwrap();
+    let prefix = "/ui-assets/fonts/lids/";
+    let mut referenced = std::collections::BTreeSet::new();
+    for part in css.split("url('").skip(1) {
+        let url = part.split('\'').next().unwrap();
+        let relative = url
+            .strip_prefix(prefix)
+            .unwrap_or_else(|| panic!("font url outside {prefix}: {url}"));
+        referenced.insert(relative.to_owned());
+    }
+    let registered: std::collections::BTreeSet<String> = manifest["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["file"].as_str().unwrap().to_owned())
+        .collect();
+    let registered_fonts: std::collections::BTreeSet<String> = registered
+        .iter()
+        .filter(|file| file.ends_with(".woff2") || file.ends_with(".ttf"))
+        .cloned()
+        .collect();
+    assert_eq!(referenced, registered_fonts);
+    assert!(!registered_fonts.is_empty());
+    for file in &registered {
+        let expected = if file.ends_with(".woff2") {
+            "font/woff2"
+        } else if file.ends_with(".ttf") {
+            "font/ttf"
+        } else {
+            "text/plain; charset=utf-8"
+        };
+        assert_eq!(
+            test_support::content_type_of(&format!("fonts/lids/{file}")),
+            Some(expected),
+            "{file}"
+        );
+        assert!(web.join("public/fonts/lids").join(file).is_file(), "{file}");
+    }
 }
 
 #[tokio::test]

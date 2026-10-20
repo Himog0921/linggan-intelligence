@@ -1,3 +1,4 @@
+import { ActionButton } from '../../../shared/ActionButton';
 import { useState } from 'react';
 import { OperationBlock } from './ReobservationOperation';
 import { FeedbackLine, InlineState, Section, SourceNote, Tech } from './Primitives';
@@ -40,9 +41,9 @@ export function ReobservationSection({ item, channel, domain, state, onRecheck }
     <Section title="立即复观测">
       <p className={styles.scope}>范围：详情、评论（最多 30 条）与回复；不下载媒体、不跑 OCR / 转录。</p>
       <div className={styles.actions}>
-        <button type="button" className={page.primary} disabled={state.queued || state.sending} onClick={() => setConfirming(true)}>
+        <ActionButton variant="primary" disabled={state.queued || state.sending} onClick={() => setConfirming(true)}>
           {state.queued ? '复观测已入队' : state.sending ? '提交中…' : '立即复观测'}
-        </button>
+        </ActionButton>
         <span className={styles.policy}>{(channel.mediaPolicy ? MEDIA_POLICY[channel.mediaPolicy] : undefined) ?? (channel.mediaPolicy ? <Tech>{channel.mediaPolicy}</Tech> : '媒体策略未知')}</span>
       </div>
       <FeedbackLine feedback={state.feedback}>

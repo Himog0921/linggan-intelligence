@@ -1,0 +1,3 @@
+# Linggan 字体许可与归属
+
+中文/原声使用 OPPO Sans 4.0，© 2024 Guangdong OPPO Mobile Telecommunications Corp., Ltd.，依 opposans/LICENSE.txt 原许可提供；未改写、未转换、未裁切原始字体。英文使用 Albert Sans（作者/版权见 albertsans/OFL.txt），大型英文展示 Alumni Sans（alumnisans/OFL.txt），普通数字 Manrope（manrope/OFL.txt），机器代码 JetBrains Mono（jetbrainsmono/OFL.txt）。各开源字体依 SIL OFL 1.1 提供，原许可/版权完整随文件保留。CSS 字族别名只用于应用路由，不修改字体文件内部名称。来源为已审阅 public/fonts 原件；逐文件字节数与 SHA-256 见 manifest.json。此说明与许可随网页静态资源一起发布。

@@ -1,10 +1,13 @@
 import { useId, useRef, useState, type FormEvent } from 'react';
+import { ActionButton } from '../../../shared/ActionButton';
+import { CreatorSelect } from './CreatorSelect';
 import { ModalDialog } from '../../../corpus/ModalDialog';
 import { feedbackForError, type Feedback } from './creatorsFeedback';
 import { CRITERIA, FIELD_NAMES, fieldSource } from './creatorsPresent';
 import type { Fragment } from './creatorsTypes';
 import { FeedbackLine } from './FeedbackLine';
 import { useOverrideMutation } from './useCreatorWrites';
+import { useCreatorLeave } from './useCreatorLeave';
 import { useWriteGuard } from './useWriteGuard';
 import styles from './CreatorDialogs.module.css';
 
@@ -80,6 +83,9 @@ export function CreatorCorrectionDialog({ target, onSaved, onClose }: Correction
   const groups = groupFragments(target.supports, target.workTitles);
   const fieldName = target.field === 'focus' ? '作者倾向' : (FIELD_NAMES[target.field] ?? target.field);
 
+  const dirty = value !== target.currentValue || reason !== (target.manual?.reason ?? '') || [...selected].sort().join('|') !== [...(target.manual?.supportFragmentIds ?? [])].sort().join('|');
+  const { requestClose, confirmation } = useCreatorLeave({ dirty, busy, onClose });
+
   async function perform(next: string | null) {
     if (inFlight.current) return;
     const ids = next === null ? [] : [...selected];
@@ -121,7 +127,8 @@ export function CreatorCorrectionDialog({ target, onSaved, onClose }: Correction
   }
 
   return (
-    <ModalDialog labelledBy={titleId} className={styles.dialog} onClose={onClose}>
+    <>
+    <ModalDialog labelledBy={titleId} className={styles.dialog} onClose={requestClose}>
       <form className={styles.form} onSubmit={submit}>
         <header className={styles.head}>
           <div>
@@ -131,7 +138,7 @@ export function CreatorCorrectionDialog({ target, onSaved, onClose }: Correction
               {fieldName}
             </h2>
           </div>
-          <button type="button" className={styles.textButton} onClick={onClose}>
+          <button type="button" className={styles.textButton} onClick={requestClose}>
             关闭
           </button>
         </header>
@@ -140,23 +147,10 @@ export function CreatorCorrectionDialog({ target, onSaved, onClose }: Correction
             {authorLevel ? '创作者' : '作品'}：{target.subjectTitle} · {target.domainName} · 仅修改本项判断
           </p>
           <p className={styles.help}>判定依据：{CRITERIA[target.field] ?? ''}</p>
-          <label>
-            你的判断
-            <select
-              value={value}
-              required
-              onChange={event => {
-                setValue(event.target.value);
-                dropStaleHint();
-              }}
-            >
-              {choices.map(([optionValue, label]) => (
-                <option key={optionValue} value={optionValue}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className={styles.selectField}><span>你的判断</span>
+            <CreatorSelect label="你的判断" value={value} onChange={next => { setValue(next); dropStaleHint(); }}
+              options={choices.map(([optionValue, label]) => ({ value: optionValue, label }))} />
+          </div>
           <p className={styles.help}>保存后，这一项使用你的判断；自动分析不会覆盖。可随时恢复当前自动结果。</p>
           <fieldset>
             <legend>选择支持这项判断的材料</legend>
@@ -200,14 +194,14 @@ export function CreatorCorrectionDialog({ target, onSaved, onClose }: Correction
           <div className={styles.footNote}>
             <FeedbackLine feedback={feedback} />
           </div>
-          <button type="button" onClick={onClose}>
-            取消
-          </button>
-          <button type="submit" className={styles.primary} disabled={busy}>
+          <ActionButton onClick={requestClose}>取消</ActionButton>
+          <ActionButton type="submit" variant="primary" busy={busy}>
             {busy ? '保存中…' : '保存判断'}
-          </button>
+          </ActionButton>
         </footer>
       </form>
     </ModalDialog>
+    {confirmation}
+    </>
   );
 }

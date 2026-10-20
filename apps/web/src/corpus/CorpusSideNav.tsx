@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { Sidebar, NavIcon } from '../shared/Sidebar';
 import { CORPUS_ENTRIES, type CorpusPageKey } from './corpusPages';
 
 /** 证据库页填写的侧栏计数：本次读取的作品数，及悬停说明（读模型不给总数，所以只说「本次读取」）。 */
@@ -25,20 +26,20 @@ interface CorpusSideNavProps {
  */
 export function CorpusSideNav({ active, domain, foot, evidenceCount = null }: CorpusSideNavProps) {
   return (
-    <aside className="v7-side" aria-label="语料导航">
+    <Sidebar aria-label="语料导航">
       {CORPUS_ENTRIES.map(entry => {
         if (entry.href === null) {
           return (
             <span key={entry.ordinal} className="v7-side-nav" aria-disabled="true">
-              <i>{entry.ordinal}</i>
+              <NavIcon name={entry.page ?? "default"} />
               <span>{entry.label}</span>
             </span>
           );
         }
         const href = domain ? `${entry.href}?domain=${encodeURIComponent(domain)}` : entry.href;
         return (
-          <a key={entry.ordinal} className="v7-side-nav" href={href} aria-current={entry.page === active ? 'page' : undefined}>
-            <i>{entry.ordinal}</i>
+          <a key={entry.ordinal} className="v7-side-nav" aria-label={entry.label} title={entry.label} href={href} aria-current={entry.page === active ? 'page' : undefined}>
+            <NavIcon name={entry.page ?? "default"} />
             <span>{entry.label}</span>
             {/* 证据库的计数徽标位：由证据库页填写，其他页保持隐藏。 */}
             {entry.page === 'evidence' ? (
@@ -54,6 +55,6 @@ export function CorpusSideNav({ active, domain, foot, evidenceCount = null }: Co
         );
       })}
       <div className="v7-side-foot">{foot}</div>
-    </aside>
+    </Sidebar>
   );
 }

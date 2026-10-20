@@ -1,0 +1,2 @@
+.notice{display:block;color:var(--lgi-muted);font:var(--lgi-type-aux-weight) var(--lgi-type-aux-size)/var(--lgi-type-aux-leading) var(--lgi-font-ui);white-space:normal}
+.notice.notice a{display:inline;padding:0;color:var(--lgi-muted);font:inherit;text-decoration:underline;text-underline-offset:var(--lgi-space-1)}

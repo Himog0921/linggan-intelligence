@@ -800,3 +800,13 @@ Mog当前授权的[采集读取性能](plans/active/collection-read-performance-
 
 
 RESEARCH-DOSSIER-001 / #420：第一阶段候选已实现 rules-v2、本篇研究底稿、原图对照、固定范围重新分层，并接入创作者/评论 P1-P2/主题材料。隔离 PostgreSQL、相关回归和合成页面验证见[模块计划](plans/active/research-dossier-001.md)。PR #423 已合并并更新 3000；Mog 随后授权三篇真实作品的本机重新分层，旧版面与原始文字保留，研究暂停及 worker 停用不变。底稿操作不调用模型；后续恢复自动研究须考虑新指纹触发原调度器重新准备的影响。
+
+
+## 2026-10-20 · LIDS-UI-001 本地候选
+
+用户直接批准真实 UI 实施；[计划](plans/active/lids-ui-implementation-001.md)与[验收](design/acceptance/lids-ui-implementation-001-acceptance.md)记录共享基础/A壳/采集账本。基于612dcbea独立工作树，不代表当前main/3000更新。前期规范包runtimeMigrated=false为历史范围，不是当前实现进度。
+
+
+2026-10-20创作者续修：Mog已派按P05:list/B统一FIND、选择/筛选、八列表格与对象抽屉，继续当前独立LIDS候选。页面规格已补当前组合及S1边界；实施与验证只读[同一验收](design/acceptance/lids-ui-implementation-001-acceptance.md)，先不合并部署。
+
+2026-10-20证据库续修：同一LIDS-UI-001真实候选采用B查询/视图合带、统一筛选/作品卡与对象详情，保留FIND/Z02领域/E1白场及三种排版；参数从LIDS单源读取。实施/回执沿本包计划与验收，Mog签收与合并部署另计。

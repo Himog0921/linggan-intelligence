@@ -21,7 +21,8 @@ function scrollRail(viewport: HTMLElement, left: number) {
 }
 
 function Card({ object, total, onOpen }: { object: MediaObject; total: number; onOpen: MediaRailProps['onOpen'] }) {
-  const [failed, setFailed] = useState(false);
+  const [phase, setPhase] = useState<'loading' | 'loaded' | 'failed'>('loading');
+  const failed = phase === 'failed';
   const label = `${purposeLabel(object.purpose)} 第 ${object.ordinal} 个本地媒体对象`;
   return (
     <button
@@ -35,7 +36,7 @@ function Card({ object, total, onOpen }: { object: MediaObject; total: number; o
       <span className={styles.frame}>
         {object.assetUrl && !failed ? (
           // 单张图读取失败只在原位提示：一个坏对象不能让整个作品看起来没有媒体。
-          <img src={object.assetUrl} alt={label} loading="lazy" decoding="async" onError={() => setFailed(true)} />
+          <img src={object.assetUrl} alt={label} loading="lazy" decoding="async" onLoad={() => setPhase('loaded')} onError={() => setPhase('failed')} />
         ) : object.assetUrl ? (
           <span className={styles.absent}>这个对象的本地副本读取失败；其余对象不受影响。</span>
         ) : object.inlineBlocked ? (
@@ -43,6 +44,7 @@ function Card({ object, total, onOpen }: { object: MediaObject; total: number; o
         ) : (
           <span className={styles.absent}>{stateMeta(object.bytesState)[0]}</span>
         )}
+        {object.assetUrl && phase === 'loading' ? <span className={styles.loading} role="status">读取中…</span> : null}
         <span className={styles.index}>{positionText(object.index, total)}</span>
       </span>
       <span className={styles.meta}>
@@ -212,7 +214,7 @@ export function MediaRail({ objects, onOpen }: MediaRailProps) {
       >
         <div ref={strip} className={styles.strip}>
           {objects.map(object => (
-            <Card key={object.slotKey ?? object.index} object={object} total={total} onOpen={onOpen} />
+            <Card key={`${object.slotKey ?? object.index}:${object.assetUrl ?? ''}`} object={object} total={total} onOpen={onOpen} />
           ))}
         </div>
       </div>

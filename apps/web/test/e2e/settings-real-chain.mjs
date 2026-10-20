@@ -12,12 +12,15 @@ const longName = 'SYNTHETIC长名称' + '家庭养育'.repeat(20);
 const longUrl = 'http://127.0.0.1:9/v1/SYNTHETIC_' + 'a'.repeat(600);
 const modelId = 'synthetic-' + 'm'.repeat(180);
 const skillEnd = 'SYNTHETIC长文结束锚点';
-const report = { scope: 'synthetic isolated database; no model execution', steps: [], screenshots: [], errors: [], httpFailures: [], posts: [] };
+const report = { scope: 'synthetic isolated database; no model execution', steps: [], screenshots: [], errors: [], httpFailures: [], posts: [], failedRequests: [], consoleErrors: [], assetErrors: [] };
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'zh-CN', timezoneId: 'Asia/Shanghai' });
 await context.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
 const page = await context.newPage();
 page.on('pageerror', error => report.errors.push(error.message));
+page.on('console', message => { if (message.type() === 'error') report.consoleErrors.push(message.text()); });
+page.on('requestfailed', request => report.failedRequests.push(`${request.method()} ${new URL(request.url()).pathname} ${request.failure()?.errorText ?? ''}`));
+page.on('response', response => { const pathname = new URL(response.url()).pathname; if (pathname.startsWith('/ui-assets/') && response.status() >= 400) report.assetErrors.push(`${response.request().method()} ${pathname} ${response.status()}`); });
 page.on('response', response => { if (response.status() >= 400) report.httpFailures.push({ path: new URL(response.url()).pathname, status: response.status() }); });
 page.on('request', request => { if (request.method() === 'POST') report.posts.push(new URL(request.url()).pathname); });
 async function step(name, action) {
@@ -125,6 +128,11 @@ try {
     assert.ok(report.posts.every(route => !route.endsWith('/probes') && !route.endsWith('/batches') && !route.endsWith('/control')));
     assert.deepEqual(report.errors, []);
     assert.deepEqual(report.httpFailures, []);
+    // A navigation may cancel the large font GET; an answered asset error is never a cancellation.
+    const cancelledRead = entry => entry.startsWith('GET ') && entry.endsWith('net::ERR_ABORTED');
+    assert.deepEqual(report.failedRequests.filter(entry => !cancelledRead(entry)), []);
+    assert.deepEqual(report.consoleErrors.filter(text => !text.includes('Failed to load resource')), []);
+    assert.deepEqual(report.assetErrors, [], 'static assets must not answer with HTTP errors');
   });
 } finally {
   if (report.steps.at(-1)?.result === 'FAIL') await page.screenshot({ path: path.join(directory, 'settings-failure.png'), fullPage: true }).catch(() => {});
