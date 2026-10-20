@@ -70,6 +70,10 @@ class GuardContracts(unittest.TestCase):
         self.assertTrue(result[guard.LABELS[3]])
         self.assertFalse(result[guard.LABELS[0]])
         self.assertFalse(guard.disabled('{\n "com.linggan-intelligence.ai-executor" => false\n}')[guard.LABELS[3]])
+        native = guard.disabled('disabled services = {\n "com.linggan-intelligence.local-runtime" => enabled\n "com.linggan-intelligence.patrol-worker" => disabled\n "com.linggan-intelligence.media-worker" => disabled\n "other.service" => enabled\n}')
+        self.assertEqual(native, dict(zip(guard.LABELS, (False, True, True, True))))
+        self.assertFalse(guard.disabled('{\n "com.linggan-intelligence.ai-executor" => enabled\n}')[guard.LABELS[3]])
+        self.assertTrue(guard.disabled('{\n "com.linggan-intelligence.ai-executor" => disabled\n}')[guard.LABELS[3]])
         for text in ["permission denied", "unreadable {}", '{\n "x" => 0\n}', '{\n "x" => true\n "x" => false\n}']:
             with self.subTest(text=text), self.assertRaises(ValueError): guard.disabled(text)
 

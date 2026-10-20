@@ -101,13 +101,13 @@ def disabled(text):
     for line in body.splitlines():
         if not line.strip():
             continue
-        match = re.fullmatch(r'\s*"([^"\n]+)"\s*=>\s*(true|false)\s*,?\s*', line)
+        match = re.fullmatch(r'\s*"([^"\n]+)"\s*=>\s*(true|false|enabled|disabled)\s*,?\s*', line)
         need(match is not None, "launchd_disabled_unreadable")
         name, flag = match.groups()
         need(name not in seen, "launchd_disabled_unreadable")
         seen.add(name)
         if name in result:
-            result[name] = flag == "true"
+            result[name] = flag in ("true", "disabled")
     return result
 
 
