@@ -1,9 +1,11 @@
 import { useId, useRef, useState } from 'react';
+import { ActionButton } from '../../../shared/ActionButton';
 import { ModalDialog } from '../../../corpus/ModalDialog';
 import type { RegisterReceipt } from './creatorsTypes';
 import { feedbackForError, type Feedback } from './creatorsFeedback';
 import { FeedbackLine } from './FeedbackLine';
 import { useJoinMutation } from './useCreatorWrites';
+import { useCreatorLeave } from './useCreatorLeave';
 import { useWriteGuard } from './useWriteGuard';
 import styles from './CreatorDialogs.module.css';
 
@@ -53,6 +55,8 @@ export function CreatorJoinDialog({ target, onClose }: CreatorJoinDialogProps) {
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const roleText = target.role === 'reference' ? '参照' : '主研究';
 
+  const { requestClose, confirmation } = useCreatorLeave({ dirty: false, busy: phase === 'sending', onClose });
+
   async function confirm() {
     if (inFlight.current) return;
     const isCurrent = begin();
@@ -76,14 +80,15 @@ export function CreatorJoinDialog({ target, onClose }: CreatorJoinDialogProps) {
   }
 
   return (
-    <ModalDialog labelledBy={titleId} className={styles.dialog} onClose={onClose}>
+    <>
+    <ModalDialog labelledBy={titleId} className={styles.dialog} onClose={requestClose}>
       <div className={styles.form}>
         <header className={styles.head}>
           <div>
             <small>创作者 · 观察名单</small>
             <h2 id={titleId}>加入观察目标</h2>
           </div>
-          <button type="button" className={styles.textButton} aria-label="关闭加入观察对话框" onClick={onClose}>
+          <button type="button" className={styles.textButton} aria-label="关闭加入观察对话框" onClick={requestClose}>
             关闭
           </button>
         </header>
@@ -118,21 +123,23 @@ export function CreatorJoinDialog({ target, onClose }: CreatorJoinDialogProps) {
         <footer className={styles.foot}>
           <span className={styles.spacer} />
           {phase === 'done' ? (
-            <button type="button" className={styles.primary} autoFocus onClick={onClose}>
+            <ActionButton type="button" variant="primary" autoFocus onClick={requestClose}>
               关闭
-            </button>
+            </ActionButton>
           ) : (
             <>
-              <button type="button" onClick={onClose}>
+              <button type="button" onClick={requestClose}>
                 {phase === 'failed' ? '关闭' : '取消'}
               </button>
-              <button type="button" className={styles.primary} disabled={phase === 'sending'} onClick={() => void confirm()}>
+              <ActionButton type="button" variant="primary" busy={phase === 'sending'} onClick={() => void confirm()}>
                 {phase === 'sending' ? '加入中…' : phase === 'failed' ? (feedback?.tone === 'unknown' ? '重试（同一请求）' : '重新提交') : '确认加入'}
-              </button>
+              </ActionButton>
             </>
           )}
         </footer>
       </div>
     </ModalDialog>
+    {confirmation}
+    </>
   );
 }

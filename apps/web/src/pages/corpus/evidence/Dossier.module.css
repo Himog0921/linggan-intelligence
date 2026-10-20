@@ -51,7 +51,7 @@
 }
 
 .text {
-  font: var(--lgi-text-body) / var(--lgi-lh-longform) var(--lgi-font-evidence);
+  font: var(--lgi-type-reading-weight) var(--lgi-type-reading-size) / var(--lgi-type-reading-leading) var(--lgi-font-evidence);
 }
 
 .task {

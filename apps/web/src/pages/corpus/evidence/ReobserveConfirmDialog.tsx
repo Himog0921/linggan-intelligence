@@ -1,3 +1,4 @@
+import { ActionButton } from '../../../shared/ActionButton';
 import { useId } from 'react';
 import { ModalDialog } from '../../../corpus/ModalDialog';
 import styles from './Dialogs.module.css';
@@ -50,9 +51,9 @@ export function ReobserveConfirmDialog({ afterUnknown, onConfirm, onCancel }: Re
           <button type="button" onClick={onCancel}>
             取消
           </button>
-          <button type="button" className={styles.primary} onClick={onConfirm}>
+          <ActionButton variant="primary" onClick={onConfirm}>
             {afterUnknown ? '仍然提交' : '确认提交'}
-          </button>
+          </ActionButton>
         </footer>
       </div>
     </ModalDialog>

@@ -1,11 +1,14 @@
 import { useQuery } from '@tanstack/react-query';
 import { useId, useRef, useState, type FormEvent } from 'react';
+import { ActionButton } from '../../../shared/ActionButton';
+import { CreatorSelect } from './CreatorSelect';
 import { ModalDialog } from '../../../corpus/ModalDialog';
 import { fetchModelChoices } from './creatorsApi';
 import { feedbackForError, type Feedback } from './creatorsFeedback';
 import type { CreatorPolicy } from './creatorsTypes';
 import { FeedbackLine } from './FeedbackLine';
 import { usePolicyMutation } from './useCreatorWrites';
+import { useCreatorLeave } from './useCreatorLeave';
 import { useWriteGuard } from './useWriteGuard';
 import styles from './CreatorDialogs.module.css';
 
@@ -38,6 +41,9 @@ export function CreatorPolicyDialog({ domain, policy, domainActive, onSaved, onC
   const analysisEditable = models.isSuccess && domainActive;
   const choices = models.data ?? [];
   const knownConfig = choices.some(choice => choice.configRef === policy.configRef);
+
+  const dirty = threshold !== (policy.likeThreshold === null ? '' : String(policy.likeThreshold)) || enabled !== policy.analysisEnabled || configRef !== (policy.configRef ?? '') || limit !== (policy.dailyTokenLimit === null ? '' : String(policy.dailyTokenLimit));
+  const { requestClose, confirmation } = useCreatorLeave({ dirty, busy, onClose });
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -72,14 +78,15 @@ export function CreatorPolicyDialog({ domain, policy, domainActive, onSaved, onC
   }
 
   return (
-    <ModalDialog labelledBy={titleId} className={styles.dialog} onClose={onClose}>
+    <>
+    <ModalDialog labelledBy={titleId} className={styles.dialog} onClose={requestClose}>
       <form className={styles.form} onSubmit={event => void submit(event)}>
         <header className={styles.head}>
           <div>
             <small>仅影响当前领域</small>
             <h2 id={titleId}>发现设置</h2>
           </div>
-          <button type="button" className={styles.textButton} onClick={onClose}>
+          <button type="button" className={styles.textButton} onClick={requestClose}>
             关闭
           </button>
         </header>
@@ -99,18 +106,11 @@ export function CreatorPolicyDialog({ domain, policy, domainActive, onSaved, onC
               启用本领域作品与创作者来源分析
             </label>
             <p className={styles.help}>处理本领域已有材料及公开资料，使用已有模型与本用途额度；不采主页，不处理评论。</p>
-            <label>
-              已有模型配置
-              <select value={configRef} disabled={!analysisEditable} onChange={event => setConfigRef(event.target.value)}>
-                <option value="">选择模型配置</option>
-                {choices.map(choice => (
-                  <option key={choice.configRef} value={choice.configRef}>
-                    {choice.label}
-                  </option>
-                ))}
-                {policy.configRef && !knownConfig ? <option value={policy.configRef}>当前来源分析配置</option> : null}
-              </select>
-            </label>
+            <div className={styles.selectField}><span>已有模型配置</span>
+              <CreatorSelect label="已有模型配置" value={configRef} disabled={!analysisEditable} onChange={setConfigRef}
+                options={[{ value: '', label: '选择模型配置' }, ...choices.map(choice => ({ value: choice.configRef, label: choice.label })),
+                  ...(policy.configRef && !knownConfig ? [{ value: policy.configRef, label: '当前来源分析配置' }] : [])]} />
+            </div>
             <label>
               本用途每日词元上限
               <input
@@ -133,14 +133,14 @@ export function CreatorPolicyDialog({ domain, policy, domainActive, onSaved, onC
           <div className={styles.footNote}>
             <FeedbackLine feedback={feedback} />
           </div>
-          <button type="button" onClick={onClose}>
-            取消
-          </button>
-          <button type="submit" className={styles.primary} disabled={busy || !domainActive}>
+          <ActionButton onClick={requestClose}>取消</ActionButton>
+          <ActionButton type="submit" variant="primary" busy={busy} disabled={!domainActive}>
             {busy ? '保存中…' : '保存设置'}
-          </button>
+          </ActionButton>
         </footer>
       </form>
     </ModalDialog>
+    {confirmation}
+    </>
   );
 }

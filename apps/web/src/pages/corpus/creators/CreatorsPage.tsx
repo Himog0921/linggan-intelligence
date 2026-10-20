@@ -40,7 +40,7 @@ import { mergeResources, useWorkResources } from './useWorkResources';
 import styles from './CreatorsPage.module.css';
 
 type Dialog =
-  | { kind: 'filter' }
+  | { kind: 'filter'; scope: string; query: CreatorQuery }
   | { kind: 'scope' }
   | { kind: 'policy'; seq: number }
   | { kind: 'correction'; seq: number; target: CorrectionTarget }
@@ -123,7 +123,7 @@ export function CreatorsPage() {
   if (seenScope !== scopeKey) {
     setSeenScope(scopeKey);
     setDrawer(null);
-    setDialog(null);
+    setDialog(current => current?.kind === 'filter' && current.scope === scopeKey ? current : null);
     setNotice(null);
   }
 
@@ -168,7 +168,7 @@ export function CreatorsPage() {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key !== '/' || event.ctrlKey || event.metaKey || event.altKey) return;
       if (document.querySelector('dialog[open]')) return;
-      if ((event.target as HTMLElement | null)?.closest('input, textarea, select, [contenteditable="true"]')) return;
+      if ((event.target as HTMLElement | null)?.closest('input, textarea, select, [role="combobox"], [role="listbox"], [contenteditable="true"]')) return;
       event.preventDefault();
       searchHandle.current?.focus();
     }
@@ -233,7 +233,8 @@ export function CreatorsPage() {
 
   function openFilter() {
     searchHandle.current?.flush();
-    setDialog({ kind: 'filter' });
+    const pending = latest.current.query;
+    setDialog({ kind: 'filter', query: pending, scope: `${domain ?? ''}|${domain ? toApiParams(domain, pending).toString() : ''}` });
   }
 
   function quick(key: QuickKey) {
@@ -342,6 +343,7 @@ export function CreatorsPage() {
           onOpenFilter={openFilter}
           onSort={(sort: SortKey) => go(current => ({ ...current, sort, page: 0 }))}
           onRefresh={refresh}
+          refreshing={list.isFetching}
           onQuick={quick}
           onOpenPolicy={() => {
             sequence.current += 1;
@@ -424,7 +426,7 @@ export function CreatorsPage() {
         ) : null}
         {dialog?.kind === 'filter' && shown ? (
           <CreatorFilterDialog
-            query={query}
+            query={dialog.query}
             hasThreshold={hasThreshold}
             observationAvailable={shown.stats.outside !== null}
             onApply={next => {

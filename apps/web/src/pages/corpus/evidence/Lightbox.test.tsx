@@ -135,7 +135,8 @@ describe('原尺寸查看器', () => {
     expect(onClose).toHaveBeenCalledTimes(2);
     fireEvent.click(screen.getByRole('img', { name: '正文图片 原尺寸本地副本' }));
     expect(onClose).toHaveBeenCalledTimes(2);
-    fireEvent.click(screen.getByRole('img', { name: '正文图片 原尺寸本地副本' }).closest('figure')!.parentElement!);
+    const stage = screen.getByRole('img', { name: '正文图片 原尺寸本地副本' }).closest('figure')!.parentElement!;
+    fireEvent.pointerDown(stage); fireEvent.pointerUp(stage);
     expect(onClose).toHaveBeenCalledTimes(3);
   });
 
@@ -153,4 +154,28 @@ describe('原尺寸查看器', () => {
     expect(screen.queryByRole('img', { name: /原尺寸本地副本/ })).toBeNull();
     expect(screen.getByText('这个对象没有可内联的本地副本：尚未形成观察')).toBeInTheDocument();
   });
+});
+
+it('查看器区分读取/失败；换图重新读取，控制按钮和焦点不重建', () => {
+  const { rerender, onIndex, onClose } = setup();
+  expect(screen.getByRole('status')).toHaveTextContent('正在读取本地副本');
+  fireEvent.error(screen.getByRole('img', { name: '正文图片 原尺寸本地副本' }));
+  expect(screen.getByRole('status')).toHaveTextContent('本地副本读取失败');
+  expect(screen.queryByRole('img')).toBeNull();
+  const next = screen.getByRole('button', { name: '下一张' }); next.focus();
+  rerender(<Lightbox objects={objects()} index={1} onIndex={onIndex} onClose={onClose} />);
+  expect(screen.getByRole('status')).toHaveTextContent('正在读取本地副本');
+  expect(screen.getByRole('button', { name: '下一张' })).toBe(next);
+  expect(next).toHaveFocus();
+  fireEvent.load(screen.getByRole('img', { name: '正文图片 原尺寸本地副本' }));
+  expect(screen.queryByRole('status')).toBeNull();
+});
+it('从图片拖到舞台空白不会关闭；只有空白按下和抬起才关闭', () => {
+  const { onClose } = setup();
+  const image = screen.getByRole('img', { name: '正文图片 原尺寸本地副本' });
+  const stage = image.closest('figure')!.parentElement!;
+  fireEvent.pointerDown(image); fireEvent.pointerUp(stage);
+  expect(onClose).not.toHaveBeenCalled();
+  fireEvent.pointerDown(stage); fireEvent.pointerCancel(stage); fireEvent.pointerUp(stage);
+  expect(onClose).not.toHaveBeenCalled();
 });

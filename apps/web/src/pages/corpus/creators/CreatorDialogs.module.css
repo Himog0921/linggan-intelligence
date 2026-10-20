@@ -10,7 +10,7 @@
   padding: 0;
   overflow: hidden;
   background: var(--lgi-canvas);
-  box-shadow: var(--lgi-shadow-overlay);
+  box-shadow:var(--lgi-action-shadow-idle) var(--lgi-action-shadow-idle) 0 var(--lgi-ink);
   color: var(--lgi-ink);
   font: var(--lgi-text-body) / var(--lgi-lh-body) var(--lgi-font-sans);
 }
@@ -25,27 +25,26 @@
   background: color-mix(in srgb, var(--lgi-ink) 22%, transparent);
 }
 
-.dialog :is(button, input, select, textarea) {
+.dialog :where(button:not([data-action-button]), input, select, textarea) {
   box-sizing: border-box;
   border-radius: var(--lgi-radius-none);
   color: inherit;
   font: inherit;
 }
 
-.dialog button {
+.dialog :where(button:not([data-action-button])) {
   border: 1px solid var(--lgi-border-strong);
   padding: var(--lgi-space-2) var(--lgi-space-3);
   background: var(--lgi-canvas);
-  font-size: var(--lgi-text-data);
-  font-weight: var(--lgi-weight-medium);
+  font:var(--lgi-type-control-weight) var(--lgi-type-control-size)/var(--lgi-type-control-leading) var(--lgi-font-sans);
   cursor: pointer;
 }
 
-.dialog button:hover:not(:disabled) {
+.dialog :where(button:not([data-action-button])):hover:not(:disabled) {
   background: var(--lgi-canvas-low);
 }
 
-.dialog button:disabled {
+.dialog :where(button:not([data-action-button])):disabled {
   background: var(--lgi-canvas-low);
   color: var(--lgi-ghost);
   cursor: not-allowed;
@@ -70,17 +69,6 @@
 .dialog :focus-visible {
   outline: 2px solid var(--lgi-focus);
   outline-offset: 2px;
-}
-
-.dialog .primary {
-  border-color: var(--lgi-ink);
-  background: var(--lgi-ink);
-  color: var(--lgi-on-dark);
-}
-
-.dialog .primary:hover:not(:disabled) {
-  border-color: var(--lgi-signal-ink);
-  background: var(--lgi-signal-ink);
 }
 
 .dialog .textButton {
@@ -117,14 +105,14 @@
 
 .head small {
   color: var(--lgi-muted);
-  font-size: var(--lgi-text-data);
+  font-size:var(--lgi-type-label-size);
 }
 
 .head h2 {
   margin: var(--lgi-space-1) 0 0;
-  font-size: calc(var(--lgi-text-section) + var(--lgi-space-1) / 2);
+  font-size:var(--lgi-type-object-size);
   font-weight: var(--lgi-weight-semibold);
-  line-height: var(--lgi-lh-heading);
+  line-height:var(--lgi-type-object-leading);
 }
 
 .body {
@@ -141,20 +129,22 @@
 
 .body h3 {
   margin: 0 0 var(--lgi-space-3);
-  font-size: var(--lgi-text-body);
-  font-weight: var(--lgi-weight-semibold);
+  font-size:var(--lgi-type-section-size);
+  font-weight:var(--lgi-type-section-weight);
+  line-height:var(--lgi-type-section-leading);
 }
 
 .body p {
   overflow-wrap: anywhere;
 }
 
-.body label {
+.body label,
+.selectField {
   display: flex;
   flex-direction: column;
   gap: var(--lgi-space-2);
   margin-bottom: var(--lgi-space-3);
-  font-size: var(--lgi-text-data);
+  font-size:var(--lgi-type-label-size);
 }
 
 .body :is(input:not([type='checkbox']), select) {
@@ -170,7 +160,7 @@
 
 .help {
   color: var(--lgi-muted);
-  font-size: var(--lgi-text-data);
+  font-size:var(--lgi-type-label-size);
   line-height: var(--lgi-lh-longform);
 }
 
@@ -208,12 +198,13 @@
 
 .foot {
   display: flex;
+  flex-wrap:wrap;
   flex: none;
   align-items: center;
   gap: var(--lgi-space-3);
   border-top: 1px solid var(--lgi-border);
   padding: var(--lgi-space-4) var(--lgi-space-6);
-  background: var(--lgi-canvas-low);
+  background:var(--lgi-canvas);
 }
 
 .foot button {
@@ -251,7 +242,7 @@
 }
 
 .coverage {
-  font-size: var(--lgi-text-data);
+  font-size:var(--lgi-type-label-size);
   overflow-wrap: anywhere;
 }
 
@@ -261,14 +252,14 @@
 
 .definitions dt {
   margin-top: var(--lgi-space-3);
-  font-size: var(--lgi-text-data);
+  font-size:var(--lgi-type-label-size);
   font-weight: var(--lgi-weight-semibold);
 }
 
 .definitions dd {
   margin: var(--lgi-space-1) 0 0;
   color: var(--lgi-body);
-  font-size: var(--lgi-text-data);
+  font-size:var(--lgi-type-label-size);
   line-height: var(--lgi-lh-longform);
 }
 
@@ -282,7 +273,7 @@
 .body legend {
   margin-bottom: var(--lgi-space-3);
   padding: 0;
-  font-size: var(--lgi-text-data);
+  font-size:var(--lgi-type-label-size);
   font-weight: var(--lgi-weight-semibold);
 }
 
@@ -315,7 +306,7 @@
   display: block;
   color: var(--lgi-muted);
   font-family: var(--lgi-font-sans);
-  font-size: var(--lgi-text-data);
+  font-size:var(--lgi-type-label-size);
 }
 
 .list {
@@ -329,13 +320,13 @@
   border-left: 3px solid var(--lgi-warning-dot);
   padding: var(--lgi-space-2) var(--lgi-space-3);
   background: var(--lgi-warning-soft);
-  font-size: var(--lgi-text-data);
+  font-size:var(--lgi-type-label-size);
 }
 
 .inlineError {
   margin: var(--lgi-space-2) 0 0;
   color: var(--lgi-danger);
-  font-size: var(--lgi-text-data);
+  font-size:var(--lgi-type-label-size);
 }
 
 /* 回执：左侧色条 + 文字标签共同表达结果，不只靠颜色。 */
@@ -348,7 +339,7 @@
   border-left: 3px solid var(--lgi-border-strong);
   padding: var(--lgi-space-3);
   background: var(--lgi-canvas-low);
-  font-size: var(--lgi-text-data);
+  font-size:var(--lgi-type-label-size);
 }
 
 .feedbackEmpty {
@@ -433,3 +424,7 @@
     display: none;
   }
 }
+
+.body :is(label,.selectField) > span:has([role=combobox]) { display:flex; width:100%; }
+
+@media (max-width:420px) { .grid { grid-template-columns:minmax(0,1fr); } .footNote { flex-basis:100%; margin:0; } }

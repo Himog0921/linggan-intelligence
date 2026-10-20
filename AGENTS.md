@@ -84,9 +84,11 @@ Mog 负责定义**想得到的用户结果**、**明确不能接受的结果**�
 
 ### UI design handbook
 
-任何 Agent 在创建、修改、审查或验收用户可见 Web UI、前端组件、页面交互、状态文案、视觉资产或 UI 自动验证前，必须先阅读 docs/agents/ui-execution-contract.md、docs/design/README.md 和 docs/design/lids/README.md，再按具体事项进入相关产品页面、设计规则与数据合同。
+UI 设计、实现、审查或规范维护前，必须读 [UI Agent 渐进执行标准](docs/governance/ui-design-execution.md)、docs/agents/ui-execution-contract.md 与 docs/design/lids/README.md，再按任务触发字体、控件、壳层、区域、交互、组件或材质分册；不要一次加载全部候选目录。
 
-LIDS 是全项目唯一设计表达标准：Token → Primitive → Component → Pattern → Page，Motion / Scene / Data Truth 为横向约束。设计手册只规定已获批准的界面表达与协作流程，不替代用户确认、运行时事实、产品语义、权限边界、API/数据合同或当前 SCOPE。LIDS 的建议技术路径、原型、模拟数值和历史状态不是实现授权；没有状态为“权威当前”的明确依据时，Agent 必须停止受影响部分并标记 DECISION_REQUIRED，不得借助参考图、旧系统、截图、通用设计习惯或模型推断自行补全。
+LIDS 是唯一设计表达标准：Token → Primitive → Component → Pattern → Page。Q01–Q12 已确认，不重开选型；规则值读取各分册JSON，通过 `scripts/sync-lids-runtime.py` 映射唯一 `apps/web/src/styles/lids_tokens.css`，禁止页面复制参数。领域和三级页面Tab属于面包屑Z02；对象内部Tab和结果筛选仍属局部。组件按四类路由及七门槛复用，候选不自动认证。
+
+进入代码前声明表面、状态、依赖与验收四图。按触发模块与本次授权实施，无法解释的业务含义/权限停止受影响项；已确认设计不重复询问。代码、浏览器、真实副作用、主线/部署及Mog验收分别记证据。当前本地实施及剩余范围读 [LIDS-UI-001](docs/plans/active/lids-ui-implementation-001.md)，不以历史规范包未迁移快照代替现状。
 
 ### Web 前端技术（DEC-0010）
 
@@ -97,16 +99,6 @@ LIDS 是全项目唯一设计表达标准：Token → Primitive → Component �
 - 业务判断、资格、授权、幂等与操作回执仍由 Rust/PostgreSQL 负责；前端不重算业务结论，只在服务器回执后显示成功。
 - `apps/web` 的页面样式由 `apps/web/src/test/tokenDiscipline.test.ts` 自动检查：不得写死颜色、字号、行高与间距（下文「没有自动检查兜底」只对尚未迁移的旧页面成立）。
 
-## Design System (LIDS) Constraints
-
-手册入口 `docs/design/lids/README.md`；Token 基线 `docs/design/lids/tokens.md`，运行时镜像 `apps/web/src/styles/lids_tokens.css`。
-
-- No hardcoded colors, font-sizes, or spacing values — use the defined tokens only.
-- No hover-lift transforms; primary buttons use the specified fill (see LIDS manual).
-- Propose visual/texture changes (background patterns, accent weight, shadow thickness) as a small isolated diff and ask before applying site-wide.
-- Write/refresh governance docs BEFORE implementation, not after.
-
-第一条目前**没有自动检查兜底**：`scripts/verify-ui-design-handbook.sh` 只校验手册文档本身的完整性，不扫代码里的写死值。在补上这道检查之前，这一条靠改动者自觉与 review 守，不要因为"检查通过了"就认为没有违规。
 
 ## 目标
 

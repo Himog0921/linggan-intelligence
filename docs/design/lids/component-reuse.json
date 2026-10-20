@@ -1,0 +1,332 @@
+{
+  "id": "ALIGN-REUSE-011",
+  "status": "accepted",
+  "decision": {
+    "evidence": "U21",
+    "quote": "Q10就按这四类来收口，组件晋升仍按七项门槛执行"
+  },
+  "routes": {
+    "shared": {
+      "label": "基础复用",
+      "description": "共用外观与基础交互；不包进业务判断。"
+    },
+    "adapter": {
+      "label": "页面适配",
+      "description": "同一基础组件，由页面提供查询、列、状态和资格。"
+    },
+    "business": {
+      "label": "领域专属",
+      "description": "保留定义、证据和任务语义；不因形似就合并。"
+    },
+    "gap": {
+      "label": "先补合同",
+      "description": "缺输入或验证，不把样例当现成能力。"
+    }
+  },
+  "components": [
+    {
+      "id": "C01",
+      "route": "shared",
+      "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+      "certified": false
+    },
+    {
+      "id": "C02",
+      "route": "shared",
+      "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+      "certified": false
+    },
+    {
+      "id": "C03",
+      "route": "shared",
+      "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+      "certified": false
+    },
+    {
+      "id": "C04",
+      "route": "shared",
+      "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+      "certified": false
+    },
+    {
+      "id": "C05",
+      "route": "shared",
+      "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+      "certified": false
+    },
+    {
+      "id": "C06",
+      "route": "shared",
+      "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+      "certified": false
+    },
+    {
+      "id": "C07",
+      "route": "shared",
+      "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+      "certified": false
+    },
+    {
+      "id": "C08",
+      "route": "shared",
+      "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+      "certified": false
+    },
+    {
+      "id": "C09",
+      "route": "shared",
+      "boundary": "复用动作外观，页面传入文案、忙碌与资格；不把颜色当权限。",
+      "certified": false
+    },
+    {
+      "id": "C10",
+      "route": "shared",
+      "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+      "certified": false
+    },
+    {
+      "id": "C11",
+      "route": "shared",
+      "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+      "certified": false
+    },
+    {
+      "id": "C12",
+      "route": "shared",
+      "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+      "certified": false
+    },
+    {
+      "id": "C13",
+      "route": "shared",
+      "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+      "certified": false
+    },
+    {
+      "id": "C14",
+      "route": "shared",
+      "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+      "certified": false
+    },
+    {
+      "id": "C15",
+      "route": "shared",
+      "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+      "certified": false
+    },
+    {
+      "id": "C16",
+      "route": "adapter",
+      "boundary": "同一FIND结构；创作者250ms防抖，采集任务按提交；IME与清空保留。",
+      "certified": false
+    },
+    {
+      "id": "C17",
+      "route": "shared",
+      "boundary": "外观与键盘选择共用；选项、未知原值与范围变化由所有者提供。",
+      "certified": false
+    },
+    {
+      "id": "C18",
+      "route": "shared",
+      "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+      "certified": false
+    },
+    {
+      "id": "C19",
+      "route": "shared",
+      "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+      "certified": false
+    },
+    {
+      "id": "C20",
+      "route": "shared",
+      "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+      "certified": false
+    },
+    {
+      "id": "C21",
+      "route": "gap",
+      "boundary": "目前只有结构样例或来源不齐；先补输入、交互和验收合同再推广。",
+      "certified": false
+    },
+    {
+      "id": "C22",
+      "route": "gap",
+      "boundary": "目前只有结构样例或来源不齐；先补输入、交互和验收合同再推广。",
+      "certified": false
+    },
+    {
+      "id": "C23",
+      "route": "gap",
+      "boundary": "目前只有结构样例或来源不齐；先补输入、交互和验收合同再推广。",
+      "certified": false
+    },
+    {
+      "id": "C24",
+      "route": "adapter",
+      "boundary": "共用基础结构；页面适配器保留业务输入、状态、查询或动作资格。",
+      "certified": false
+    },
+    {
+      "id": "C25",
+      "route": "shared",
+      "boundary": "三级页面Tab由Z02承载；对象内部Tab按对象，不混进集合筛选。",
+      "certified": false
+    },
+    {
+      "id": "C26",
+      "route": "shared",
+      "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+      "certified": false
+    },
+    {
+      "id": "C27",
+      "route": "adapter",
+      "boundary": "共用基础结构；页面适配器保留业务输入、状态、查询或动作资格。",
+      "certified": false
+    },
+    {
+      "id": "C28",
+      "route": "shared",
+      "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+      "certified": false
+    },
+    {
+      "id": "C29",
+      "route": "gap",
+      "boundary": "目前只有结构样例或来源不齐；先补输入、交互和验收合同再推广。",
+      "certified": false
+    },
+    {
+      "id": "C30",
+      "route": "adapter",
+      "boundary": "共用基础结构；页面适配器保留业务输入、状态、查询或动作资格。",
+      "certified": false
+    },
+    {
+      "id": "C31",
+      "route": "adapter",
+      "boundary": "表格只承载已定义列；采集账本是专属配置L1/44px/名称144px，不扩成全站表格高度。",
+      "certified": false
+    },
+    {
+      "id": "C32",
+      "route": "adapter",
+      "boundary": "共用基础结构；页面适配器保留业务输入、状态、查询或动作资格。",
+      "certified": false
+    },
+    {
+      "id": "C33",
+      "route": "business",
+      "boundary": "保留用户问题真实卡片的定义、原声、证据与阅读密度；不替换成万能卡片。",
+      "certified": false
+    },
+    {
+      "id": "C34",
+      "route": "shared",
+      "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+      "certified": false
+    },
+    {
+      "id": "C35",
+      "route": "shared",
+      "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+      "certified": false
+    },
+    {
+      "id": "C36",
+      "route": "adapter",
+      "boundary": "呈现状态，状态含义和不同轴的资格由领域view model给出。",
+      "certified": false
+    },
+    {
+      "id": "C37",
+      "route": "shared",
+      "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+      "certified": false
+    },
+    {
+      "id": "C38",
+      "route": "adapter",
+      "boundary": "共用基础结构；页面适配器保留业务输入、状态、查询或动作资格。",
+      "certified": false
+    },
+    {
+      "id": "C39",
+      "route": "gap",
+      "boundary": "目前只有结构样例或来源不齐；先补输入、交互和验收合同再推广。",
+      "certified": false
+    },
+    {
+      "id": "C40",
+      "route": "adapter",
+      "boundary": "引用结构可共用；原文资格、来源位置、版本与受限说明来自业务。",
+      "certified": false
+    },
+    {
+      "id": "C41",
+      "route": "shared",
+      "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+      "certified": false
+    },
+    {
+      "id": "C42",
+      "route": "shared",
+      "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+      "certified": false
+    },
+    {
+      "id": "C43",
+      "route": "shared",
+      "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+      "certified": false
+    },
+    {
+      "id": "C44",
+      "route": "adapter",
+      "boundary": "展示回执，不生成成功；原请求身份、冻结范围和核对由业务适配器保留。",
+      "certified": false
+    },
+    {
+      "id": "C45",
+      "route": "adapter",
+      "boundary": "容器服从S1；表单稿件、提交与离开意图由页面控制，不藏进通用弹窗。",
+      "certified": false
+    },
+    {
+      "id": "C46",
+      "route": "adapter",
+      "boundary": "后果确认服从S1；对象、停止资格与回执由业务所有者提供。",
+      "certified": false
+    },
+    {
+      "id": "C47",
+      "route": "adapter",
+      "boundary": "详情形态按对象声明；模态圈定焦点，非模态保留背景；S1关闭不取消业务。",
+      "certified": false
+    },
+    {
+      "id": "C48",
+      "route": "shared",
+      "boundary": "优先复用现有呈现/交互；数据、命令与权限仍由调用方提供。",
+      "certified": false
+    }
+  ],
+  "gates": [
+    "第二独立页面验证同一职责",
+    "职责、禁用场景和层级稳定",
+    "数据/空值/权限/真实动作来源齐",
+    "查重并有唯一实现/替代计划",
+    "键盘/读屏/触屏/减少动态/响应式要求",
+    "合法变体、受影响页、预览和验收清单",
+    "跨页不压平事实、权限或动作语义"
+  ],
+  "variantPolicy": "先查已有允许变体和职责；新增变体另行裁定。复用分类采用不等于所有候选状态或实现已认证。",
+  "formalCMPsGranted": 0,
+  "runtimeMigrated": false,
+  "businessRequests": false,
+  "problemCardsChanged": false,
+  "domainHost": "Z02",
+  "tertiaryHost": "Z02"
+}

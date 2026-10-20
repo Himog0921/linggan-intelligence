@@ -1,10 +1,12 @@
 # UI 协作 Agent 执行合同
 
 > 状态: 权威当前
-> 最后核对: 2026-10-15
+> 最后核对: 2026-10-19
 > 适用范围: 所有创建、修改、审查或验收 Linggan 用户可见 UI、前端组件、页面交互、状态文案、视觉资产和 UI 自动验证的 Agent
-> 事实来源: AGENTS.md、docs/governance/、docs/design/、LIDS v7.0、当前 SCOPE、产品/数据合同、用户对 DESIGN-001/DESIGN-002/DESIGN-010 的授权，以及 DEC-0010（网页前端统一为 React）
+> 事实来源: AGENTS.md、docs/governance/、docs/design/、LIDS v7.0、当前 SCOPE、产品/数据合同、用户对 DESIGN-001/DESIGN-002/DESIGN-010 的授权，以及 DEC-0010（网页前端统一为 React）；LIDS-ALIGN-001 本次授权与对齐记录
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实运行/代码/合同、ACCEPTED 决策和当前 SCOPE；本合同不自行扩大任何授权
+
+本合同的模块读取与本次设计采用状态统一由 [UI Agent 渐进执行标准](../governance/ui-design-execution.md)路由；具体字体、焦点和区域按最新 LIDS 分册执行。LIDS-ALIGN-001 只采用已确认设计原则，不修改业务代码；新候选按待审清单处理。
 
 本合同让 UI Agent 成为已批准设计的执行者和问题发现者，而不是新的产品负责人、视觉总监、权限裁定者或事实来源。
 
@@ -38,7 +40,7 @@ UI Agent 面向的用户结果是一个交付包，不是一串文件修改。Mo
    | 任何界面文案 | [../design/lids/language-policy.md](../design/lids/language-policy.md) 的 LANG-05 |
    | 想破一条规则 | [../design/lids/decisions.md](../design/lids/decisions.md) —— 先确认这条是否已被决定过 |
 
-   **读 LIDS 时必须分清「规则已采纳」与「运行时已符合」。** DESIGN-010 之后多数条款是前者：新工作按 v7.0 执行，但现有代码仍停在 v2.0 口径。不得把现有实现当作合规先例，也不得声称代码已符合 v7.0；
+   **读 LIDS 时必须分清「规则已采纳」与「运行时已符合」。** 历史 DESIGN-010 的迁移描述只是当时快照；当前按各规则/页面的独立证据核对。字体与字号须另读 [typography](../design/lids/typography.md)，页面区域须读 [regions](../design/lids/regions.md)，未决差异按 review-items 处理；
 4. 按任务读取相应的 LIDS Token、Primitive、Pattern、Agent guide 或原型审计；先定 `Token → Primitive → Component → Pattern → Page` 和 L1/L2/L3，后写任何视觉实现；
 5. 阅读与本次 UI 事项直接相关的产品页面文档、已批准页面/组件/模式规格、数据/权限/行动合同和当前 SCOPE；
 6. 在 Issue、计划或 PR 中填写 [../design/templates/ui-change-manifest-form.md](../design/templates/ui-change-manifest-form.md) 所要求的读取回执、范围、非目标、分类、文件边界、停止条件和验证计划，并附本交付包的表面、状态、依赖和验收矩阵。

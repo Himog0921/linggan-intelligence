@@ -1,49 +1,47 @@
-# LIDS v7.0 · Linggan Intelligence 设计标准
+# LIDS v7.0 · 当前规则与审阅增量入口
 
 > 状态: 权威当前
+> 最后核对: 2026-10-19
+> 适用范围: 全项目设计规则、候选审阅、渐进读取与迁移状态
+> 事实来源: Mog 本次 LIDS-ALIGN-001 交付授权、已确认对话决定、现行 LIDS 与 main@9ff50b81；逐项来源见 review-alignment.json；LIDS-ALIGN-001 本次授权与对齐记录
+> 冲突时以谁为准: 用户最新明确确认、产品/数据/权限合同与当前 SCOPE；已采纳设计按本文及明确替代关系执行，候选不自动生效
+
+
 > 标准成熟度: PROPOSED
-> 最后核对: 2026-09-02
-> 适用范围: Linggan Intelligence 全部未来用户可见 Web UI、设计 Token、基础语法、组件、页面模式、动效、场景、状态表达与 UI Agent 协作产物
-> 事实来源: Mog 于 2026-09-02 明确指定的 `linggan-design-system-v7.html`、此前的 `Linggan_Intelligence_Design_System_v2.0`、AGENTS.md、docs/governance/、docs/current-state.md、已确认产品/数据/权限合同与当前 SCOPE
-> 冲突时以谁为准: 用户最新确认、AGENTS.md、真实运行/代码/合同、ACCEPTED 决策与当前 SCOPE；LIDS 只约束设计表达，不能越权改写这些来源
+> 当前增量: LIDS-ALIGN-001；确认原则入库，不宣布完整组件库、业务迁移或整体视觉验收完成。
 
-LIDS（Linggan Intelligence Design System）是本项目唯一的设计表达标准。它不是“暖灰、ASCII 或未来感”的灵感集，也不是让 Agent 根据截图补全产品的页面模板；它将可用的设计决策固定为一条可复核的生产链：
+LIDS继续是全项目唯一设计表达标准：Token → Primitive → Component → Pattern → Page。Motion / Scene / Data Truth横向约束。v7保留规范身份，本次不将v8粗稿或独立审阅0.1.0宣布为完成版。
 
-```text
-Token → Primitive → Component → Pattern → Page
-        ↘ Motion / Scene / Data Truth（横向约束） ↗
-```
+## 正式前端采用状态
 
-**它现在已经生效的含义**：未来 UI 任务必须按照这条链选择规则、记录来源、复用已正式化的构件并通过检查；不能再自建第二套颜色、按钮、状态标签、容器语言或页面骨架。
-
-**它尚不证明的事情**：LOCAL-001A 已有受限的 loopback Rust Web host、一个 Evidence Library 页面和唯一运行时 Token 源；这不证明真实数据或 Materials read model、通用组件库、L2/L3 页面、L3 3D 场景、外部 Agent 动作、部署或完整产品 Web 已成立。LIDS 的建议目录、React/Three/Blender 路线、V3 原型演示值及任何运行态文字均不是这些能力的授权。
+LIDS-UI-001 已由 Mog 授权真实代码实施；唯一色值源 [color.json](color.json) 采用原正式目标色板。共享参数由 sync-lids-runtime.py 生成唯一运行 Token；[本轮验收](../acceptance/lids-ui-implementation-001-acceptance.md)逐项记录已实现、未迁移与未部署。下文及九源的“未改业务/runtimeMigrated=false”只描述原 LIDS-ALIGN-001 规范包，不覆盖本轮授权，也不表示全站已验收。
 
 ## 先读什么
 
-所有 UI Agent 先完成 [UI 协作 Agent 执行合同](../../agents/ui-execution-contract.md) 的读取，再按工作类型进入下列材料。没有被页面规格、数据合同或当前 SCOPE 支撑的内容，一律是 `DECISION_REQUIRED`，而不是设计发挥空间。
+先读 [UI Agent 渐进执行标准](../../governance/ui-design-execution.md)；按L1触发条件只展开本任务模块，再进入实际PAGE/CMP、产品与数据合同。根AGENTS.md、CLAUDE.md、codx.md共用该路由。
 
-| 工作 | 必读材料 | 本次事项还必须补齐 |
-|---|---|---|
-| 新页面 | [system.md](system.md)、[patterns.md](patterns.md)、对应 PAGE 规格 | 产品页面、数据/权限/行动合同、UI Change Manifest |
-| 新基础视觉或 Token 调整 | [tokens.md](tokens.md)、[system.md](system.md)、[migration-log.md](migration-log.md) | 唯一 Token 真源、影响面、验证与迁移记录 |
-| 新/改组件 | [primitives.md](primitives.md)、[agent-execution-guide.md](agent-execution-guide.md)、CMP 规格 | 查重、数据与状态合同、预览、替代/废止计划 |
-| L3 场景或动效 | [system.md](system.md) 的场景条款、[prototype-audit.md](prototype-audit.md) | 另行批准的技术、资产、性能、降级、真实状态与等价 HTML |
-| 静态/合成参考 | 对应 PAGE、[agent-execution-guide.md](agent-execution-guide.md) | 首屏合成边界；不得伪造运行、来源或动作回执 |
-| 背景材料 / 纹理 | [materials.md](materials.md) | 材料预算、区位限制、状态仍由三通道表达 |
-| 页头 / Context Bar | [shell-zones.md](shell-zones.md) | 区位、容量上限、静默区保护 |
-| 任何承载真实数据的组件 | [data-boundaries.md](data-boundaries.md) | 四种极端情况的渲染证据（准入条件） |
-| 界面文案 | [language-policy.md](language-policy.md) 的 LANG-05 | 每处英文逐条对照数据合同 |
+| 当前规则模块 | 唯一正文职责 |
+| --- | --- |
+| [system](system.md) | 视觉气质、强度、五层与Data Truth |
+| [typography](typography.md) | 已采纳字体与B唯一字级；[参数源](typography.json)和生产接入边界 |
+| [tokens](tokens.md) | 语义值、目标阶梯与未改动的运行时镜像 |
+| [primitives](primitives.md) | 控件、按钮、输入/FIND的C焦点与基础反馈；参数[focus.json](focus.json) |
+| [materials](materials.md) | M2控件材质与既有家族；参数[control-material.json](control-material.json) |
+| [shell-zones](shell-zones.md) | 共享壳、领域原位、三级页面Tab统一归面包屑模块与A容量／图标折叠；参数[shell-layout.json](shell-layout.json) |
+| [regions](regions.md) / [patterns](patterns.md) | 18个职责坐标、已确认组合原则与现有Pattern |
+| [interaction-contracts](interaction-contracts.md) | 触发、反馈、取消、返回及真实回执 |
+| [data-boundaries](data-boundaries.md) / [language-policy](language-policy.md) | 数据四态、来源、中文与英文使用边界 |
+| [component-promotion](../components/component-promotion.md) | 共享组件查重、第二独立页面与正式CMP准入 |
 
-## LIDS 的项目内权威边界
+## 决定、待审与证据
 
-1. [system.md](system.md) 是 LIDS 在 Linggan 的主标准：定义产品气质、五层架构、L1/L2/L3、状态表达、动效、响应式、可访问性与治理门。
-2. [tokens.md](tokens.md) 是 `LIDS-TOK-001` 的版本化规范与校验镜像；LOCAL-001A 的 `apps/web/src/styles/lids_tokens.css` 已是唯一可编辑的运行时 Token 值源。两者的单向同步与 107 项名称→值校验规则由 `tokens.md` 明确规定；页面 CSS 只能消费 Token，不得另行声明主题。
-3. [primitives.md](primitives.md) 和 [patterns.md](patterns.md) 是基础语法与页面组合的权威约束；它们不是现有代码实现的声明。
-4. [agent-execution-guide.md](agent-execution-guide.md) 是给协作 Agent 的简明强制清单；它从主标准派生，不能与主标准冲突。
-5. [prototype-audit.md](prototype-audit.md) 把下载包中的 Observatory V3 降级为 L3 视觉母题参考，防止旧单页原型、模拟数据、永久动画或假运行状态被误带入产品。
-6. [migration-log.md](migration-log.md) 记录每次 LIDS 规则、实现、替代或例外的实际变化与验证边界；改动五层中的任一层必须同一事项更新它。
-7. [materials.md](materials.md)、[shell-zones.md](shell-zones.md)、[data-boundaries.md](data-boundaries.md) 是 v7 新增的三份横切约束，与主标准同级生效。
-8. [decisions.md](decisions.md) 是全部结构性决定的台账。它有**规则状态**与**运行时状态**两栏，必须分开读——多数条目是「规则已采纳、运行时未迁移」。
+- [逐项对齐表](review-alignment.md)及其[清单源](review-alignment.json)：覆盖审阅稿全部R/Z/PT/C/B/I/P/A/D条目；只查本任务命中ID。它是追踪目录，不复制另一套规范权威。
+- [待审项](review-items.md)：Q01/Q02已采用B、Q03原声已统一OPPO Sans；Q04焦点已采用C、Q05材质已采用M2；Q06壳层按ALIGN-SHELL-007采用A及图标折叠，Q07按ALIGN-LEDGER-008采用L1/44px/任务名称144px；Q08组合已按ALIGN-COMPOSITION-009采用含搜索的列表B/其余功能C，用户问题卡片保留；Q09浮层已按ALIGN-OVERLAY-010采用S1；Q10四类已按ALIGN-REUSE-011采用，七门槛保持；Q11字体交付已按ALIGN-FONT-012采用，Q12按ALIGN-MEDIA-013采用E1与白场舞台。
+- [决定台账](decisions.md)：明确已确认规则对旧条款的局部替代，规则状态与运行时状态分列。
+- [迁移记录](migration-log.md)：本次实际只改文档与治理检查；不宣称业务字体/组件/页面已迁移。
+- [UI执行合同](../../agents/ui-execution-contract.md)与[设计治理](../design-governance.md)：授权、产品语义和验收边界继续有效。
+
+新规则取代的部分以各分册ALIGN标记为准；旧规则未涉及部分及合法局部例外继续有效。旧设计快照不能覆盖用户最新确认；审阅稿中的新参数也不能覆盖未确认的正式值。规范采用、实现、运行、视觉和业务验收分别记录。
 
 ## 来源回执与不继承清单
 
@@ -73,20 +71,6 @@ Token → Primitive → Component → Pattern → Page
 
 **明确不继承**：来源包任何模拟 Topic、样本数、覆盖数、时间、`LIVE`/运行状态、产品路径、旧原型 HTML、技术栈、目录、第三方资产、Blender/GLB/React Three Fiber/Three.js 选择或部署假设。它们只有在未来独立产品、技术、数据和资产授权全部成立时，才可以作为候选重新评估。
 
-## 与现有手册的关系
-
-| 现有位置 | 现在的作用 |
-|---|---|
-| [../design-governance.md](../design-governance.md) | 规定设计来源优先级、闭集执行、例外与交接；本目录受其约束 |
-| [../templates/page-spec-form.md](../templates/page-spec-form.md) | 采用 LIDS Page 规则的唯一 PAGE 规格表单 |
-| [../templates/component-spec-form.md](../templates/component-spec-form.md) | 成为跨页面 CMP 前的唯一规格表单 |
-| [../components/component-promotion.md](../components/component-promotion.md) | 防止一次参考页把局部块误报为正式 LIDS 组件 |
-| [../pages/topic-intelligence-reference-page.md](../pages/topic-intelligence-reference-page.md) | 首个 L2 合成参考页；只验证 LIDS 的局部设计表达，不代表真实产品页 |
-| [language-policy.md](language-policy.md) | `LIDS-LANG-001`：用户界面中文主表达、英文技术旁注的权威规则；v7 的 LANG-05 收窄了英文预算；页面迁移仍须逐项受控 |
-| [materials.md](materials.md) | `LIDS-MAT-001`：8px 采样点阵的七种状态（含 `M-06` 纸面残留）、材料预算与区位限制 |
-| [shell-zones.md](shell-zones.md) | `LIDS-SHELL-001`：页头 3 区、Context Bar 4 区的容量上限与静默区保护 |
-| [data-boundaries.md](data-boundaries.md) | `LIDS-BOUND-001`：组件必须跑通的四种极端数据情况 |
-| [decisions.md](decisions.md) | `LIDS-ADR-001`：v7 全部结构性决定的台账，规则状态与运行时状态分列 |
 
 ## 标准状态与升级门
 
@@ -94,15 +78,4 @@ LIDS 对协作执行的约束已经是“权威当前”，但其系统成熟度
 
 这不是推迟 LIDS 的执行：从今天起，所有获准 UI 工作都遵从 LIDS；只是不能把“设计标准已写好”误报为“产品和完整组件系统已建成”。
 
-## v7.0 的落地边界（DESIGN-010，2026-09-02）
-
-按 Mog 的明确范围裁定，本次升级**只改治理文档**：
-
-| 层 | 状态 |
-|---|---|
-| 规则 / 约束 / 验收标准 | **已按 v7.0 生效** |
-| 运行时 token、样式表、页面模板、文案 | **仍停在 v2.0 口径，未迁移** |
-
-因此在读本目录任何文件时，「已采纳」= 新工作必须这样做，**不等于**现有代码已经这样。逐项差异见 [decisions.md](decisions.md) 的两栏状态表、[tokens.md](tokens.md) 第 4 节的差异表与分步迁移顺序、[language-policy.md](language-policy.md) 第 6 节的文案欠账。
-
-新写的界面直接按 v7.0 执行；**不得以"和旁边保持一致"为由继续沿用 v2.0 的口径**。既有违规不构成先例。
+- [LIDS-CLOSEOUT-18 · 整体收口核查](../../audits/lids-closeout-audit-2026-10-20.md)：Q01–Q12采用、已修复漂移、色值冲突与未验证层分开。

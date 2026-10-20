@@ -1,0 +1,101 @@
+{
+  "id": "ALIGN-LEDGER-008",
+  "status": "accepted",
+  "decision": {
+    "selected": "L1",
+    "evidence": "U16",
+    "rowHeight": 44,
+    "nameColumnWidth": 144,
+    "columnWidthInterpretation": "Current user tab selected task-name column at144px; other L1 column widths unchanged",
+    "quote": "Q07就按L1、44px来收口，列宽144px收口，保留字段自定义和窄屏横向滚动，坚持一个任务一行"
+  },
+  "fields": [
+    "name",
+    "id",
+    "stage",
+    "domain",
+    "source",
+    "scope",
+    "mode",
+    "rank",
+    "details",
+    "comments",
+    "reused",
+    "added",
+    "cumulative",
+    "next",
+    "created",
+    "updated",
+    "action"
+  ],
+  "widths": {
+    "name": 144,
+    "id": 132,
+    "domain": 100,
+    "source": 122,
+    "scope": 112,
+    "mode": 190,
+    "rank": 112,
+    "details": 100,
+    "comments": 100,
+    "reused": 100,
+    "added": 112,
+    "cumulative": 112,
+    "stage": 176,
+    "next": 240,
+    "created": 140,
+    "updated": 140,
+    "action": 88
+  },
+  "priority": {
+    "P0": [
+      "name",
+      "id",
+      "stage",
+      "action"
+    ],
+    "P1": [
+      "source",
+      "scope",
+      "details",
+      "comments",
+      "updated"
+    ],
+    "P2": [
+      "domain",
+      "mode",
+      "rank",
+      "reused",
+      "added",
+      "cumulative",
+      "next",
+      "created"
+    ]
+  },
+  "narrow": {
+    "automaticFieldHiding": false,
+    "fontShrinking": false,
+    "rowWrapping": false,
+    "stickyName": "only_when_at_least_96px_remain; otherwise_same_width_scrolls",
+    "stickyActionMinContentWidth": 600
+  },
+  "customization": {
+    "fields": true,
+    "automaticFieldHiding": false,
+    "storage": "memory_only_in_review"
+  },
+  "singleTaskSingleRow": true,
+  "fontShrinking": false,
+  "rowWrapping": false,
+  "fixed": [
+    "LIDS-TYPE-001-B",
+    "ALIGN-VOICE-004",
+    "ALIGN-FOCUS-005",
+    "ALIGN-MATERIAL-006",
+    "ALIGN-NAV-003",
+    "ALIGN-SHELL-007"
+  ],
+  "runtimeMigrated": false,
+  "componentCertificationChanged": false,
+  "businessFieldProjectionApproved": false
+}

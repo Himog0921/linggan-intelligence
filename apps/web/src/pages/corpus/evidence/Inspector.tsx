@@ -140,22 +140,43 @@ function Panel({ id, active, children }: { id: TabKey; active: boolean; children
 export function Inspector(props: InspectorProps) {
   const { domain, selectedRef, listItem, detail, tab, width, drawer, open, onTab, onWidth, onClose, onBack, onRetry, onRefresh, onApplied } = props;
   const titleId = useId();
+  const surface = useRef<HTMLElement>(null);
+  const back = useRef<HTMLButtonElement>(null);
   const tabs = useRef<Record<string, HTMLButtonElement | null>>({});
   const state = stateText(props);
   const note = unavailableNote(detail);
   const title = detail.data ? workTitle(detail.data.item) : listItem ? workTitle(listItem) : '请选择一个作品材料集合';
 
-  // 抽屉打开时 Esc 逐层关闭：对话框与浮层先处理（它们会 preventDefault），这里只在没人处理时关抽屉。
+  useEffect(() => {
+    if (drawer && open) back.current?.focus({ preventScroll: true });
+  }, [drawer, open]);
+
+  // S1只读非模态抽屉：内层浮层优先；拖出抽屉不算点空白，列表仍可直接切换作品。
   useEffect(() => {
     if (!drawer || !open) return;
+    let outside = false;
+    const blocked = () => document.querySelector('dialog[open], [role="listbox"]') !== null;
+    const isOutside = (event: PointerEvent) => event.target instanceof Node && !surface.current?.contains(event.target);
+    const down = (event: PointerEvent) => { outside = !blocked() && isOutside(event); };
+    const up = (event: PointerEvent) => {
+      if (outside && !blocked() && isOutside(event)) onClose();
+      outside = false;
+    };
+    const cancel = () => { outside = false; };
     const onKey = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented) return;
-      if (document.querySelector('dialog[open]')) return;
-      event.preventDefault();
-      onClose();
+      if (event.key !== 'Escape' || event.defaultPrevented || blocked()) return;
+      event.preventDefault(); onClose();
     };
     document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
+    document.addEventListener('pointerdown', down, true);
+    document.addEventListener('pointerup', up, true);
+    document.addEventListener('pointercancel', cancel, true);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('pointerdown', down, true);
+      document.removeEventListener('pointerup', up, true);
+      document.removeEventListener('pointercancel', cancel, true);
+    };
   }, [drawer, open, onClose]);
 
   function onTabKey(event: KeyboardEvent) {
@@ -176,9 +197,9 @@ export function Inspector(props: InspectorProps) {
   }
 
   return (
-    <aside className={styles.inspector} aria-labelledby={titleId} data-width={width} data-drawer-open={drawer && open} inert={drawer && !open ? true : undefined}>
+    <aside ref={surface} className={styles.inspector} aria-labelledby={titleId} data-width={width} data-drawer-open={drawer && open} inert={drawer && !open ? true : undefined}>
       <header className={styles.head}>
-        <button type="button" className={styles.back} onClick={onBack}>
+        <button ref={back} type="button" className={styles.back} onClick={onBack}>
           ← 返回当前作品
         </button>
         <h2 id={titleId} className="v7-sr-only">

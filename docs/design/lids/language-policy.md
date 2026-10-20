@@ -1,12 +1,18 @@
 # LIDS-LANG-001 · 中文优先的界面语言规则
 
 > 状态: 权威当前
-> 最后核对: 2026-09-02
+> 最后核对: 2026-10-19
 > 适用范围: Linggan Intelligence 全部面向用户的运行时 Web UI；首个落地页面为 `PAGE-EVIDENCE-001 /corpus/evidence`
-> 事实来源: Mog 对 Evidence Library 的明确确认「中文为主，英文只用来装饰或作为注释」、Mog 于 2026-09-02 指定的 `linggan-design-system-v7.html`（§03 Mono 预算、§04 壳层违规样本）、AGENTS.md、UI 协作 Agent 执行合同、LIDS-SYS-001、LIDS-PRI-001、PAGE-EVIDENCE-001 与 LOCAL-001C0 数据合同
+> 事实来源: Mog 对 Evidence Library 的明确确认「中文为主，英文只用来装饰或作为注释」、Mog 于 2026-09-02 指定的 `linggan-design-system-v7.html`（§03 Mono 预算、§04 壳层违规样本）、AGENTS.md、UI 协作 Agent 执行合同、LIDS-SYS-001、LIDS-PRI-001、PAGE-EVIDENCE-001 与 LOCAL-001C0 数据合同；LIDS-ALIGN-001 本次授权与对齐记录
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实运行/代码/合同、ACCEPTED 决策与当前 SCOPE；本规则只约束表达，不改写事实、权限、数据或行动
 
 > **DESIGN-010（2026-09-02）收窄了本规则的执行口径。** 原 LANG-02 允许英文技术键紧邻任何中文出现，实践中扩散为满屏中英成对。v7 把「中英对照并列」明确列为违规，并给出 Mono 预算：只有三类内容可以是英文。新增的 LANG-05 是本规则现在的执行口径，与 LANG-01/03/04 一并生效。
+
+## ALIGN-LANGUAGE · 字体与装饰识别
+
+LANG-01/03的中文可理解性与数据诚实性继续有效。选择Albert/Alumni不扩大英文文案预算；FIND是用户已确认的搜索装饰识别例外，可保留字标，但不能代替中文范围或输入名称，也不变成按钮。数字字体与Mono角色分配由 [typography](typography.md)统一；LANG-05的“三类允许内容”仍约束内容使用面，不再强制其中所有普通数字采用Mono字族。
+
+实现教学、设计说明与技术宣言放进规格文档；业务主区只展示与当前任务、状态及必要后果相关的说明。
 
 ## 1. 规则与目的
 

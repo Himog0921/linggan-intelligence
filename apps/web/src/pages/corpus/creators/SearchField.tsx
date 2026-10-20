@@ -1,4 +1,5 @@
 import { useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react';
+import { CreatorSelect } from './CreatorSelect';
 import styles from './CreatorsPage.module.css';
 
 export interface SearchFieldHandle {
@@ -39,6 +40,7 @@ export function SearchField({ mode, value, onCommit, onModeChange, handle }: Sea
     latest.current = { value, onCommit };
   });
   useEffect(() => () => window.clearTimeout(timer.current), []);
+  useEffect(() => { window.clearTimeout(timer.current); }, [value, mode]);
 
   const commit = (next: string) => {
     window.clearTimeout(timer.current);
@@ -51,29 +53,26 @@ export function SearchField({ mode, value, onCommit, onModeChange, handle }: Sea
   };
 
   useImperativeHandle(handle, () => ({
-    flush: () => commit(input.current?.value ?? text),
+    flush: () => { if (!composing.current) commit(input.current?.value ?? text); },
     focus: () => input.current?.focus(),
   }));
 
   return (
     <form
       className={styles.search}
+      data-find
       role="search"
       onSubmit={event => {
         event.preventDefault();
         if (!composing.current) commit(text);
       }}
     >
-      <span className={styles.findMark} aria-hidden="true">
+      <span className={styles.findMark} data-find-mark aria-hidden="true">
         FIND
       </span>
-      <label className="v7-sr-only" htmlFor="creator-search-mode">
-        搜索范围
-      </label>
-      <select id="creator-search-mode" value={mode} onChange={event => onModeChange(event.target.value === 'work' ? 'work' : 'author', text.trim())}>
-        <option value="author">创作者资料</option>
-        <option value="work">作品内容</option>
-      </select>
+      <CreatorSelect label="搜索范围" compact value={mode}
+        options={[{ value: 'author', label: '创作者资料' }, { value: 'work', label: '作品内容' }]}
+        onChange={next => { window.clearTimeout(timer.current); onModeChange(next, text.trim()); }} />
       <label className="v7-sr-only" htmlFor="creator-search-input">
         搜索创作者或作品
       </label>
@@ -99,7 +98,7 @@ export function SearchField({ mode, value, onCommit, onModeChange, handle }: Sea
         }}
       />
       {text !== '' ? (
-        <button type="button" className={styles.textButton} aria-label="清空搜索" onClick={() => onCommit('')}>
+        <button type="button" className={styles.textButton} aria-label="清空搜索" onClick={() => { window.clearTimeout(timer.current); setText(''); onCommit(''); input.current?.focus(); }}>
           清空
         </button>
       ) : (

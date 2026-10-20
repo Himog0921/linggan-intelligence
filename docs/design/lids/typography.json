@@ -1,0 +1,165 @@
+{
+  "id": "LIDS-TYPE-001-B",
+  "status": "accepted",
+  "date": "2026-10-19",
+  "decision": {
+    "evidence": "U09",
+    "quote": "全部按照 B 来落实，确保当前的一致性，以及只有一个标准",
+    "scope": [
+      "Q01 字号与行高",
+      "Q02 字重"
+    ],
+    "origin": "TYPE-04 对照中的 B，即 TYPE-03 当前审阅稿完整值"
+  },
+  "authority": "唯一当前排版数值源；文档表格与隔离审阅登记均为生成视图。业务运行时仍为未迁移实现，不作为备选设计标准。",
+  "families": {
+    "ui": "\"Linggan UI Digits\",\"Linggan Albert\",\"Linggan OPPO\",Arial,Helvetica,\"PingFang SC\",\"Microsoft YaHei\",system-ui,sans-serif",
+    "chinese": "\"Linggan OPPO\",\"PingFang SC\",\"Microsoft YaHei\",system-ui,sans-serif",
+    "english": "\"Linggan Albert\",\"Linggan OPPO\",Arial,Helvetica,system-ui,sans-serif",
+    "display": "\"Linggan Alumni\",\"Linggan Albert\",\"Linggan OPPO\",\"Arial Narrow\",Arial,system-ui,sans-serif",
+    "data": "\"Linggan Manrope\",\"Linggan OPPO\",Arial,Helvetica,system-ui,sans-serif",
+    "code": "\"Linggan Mono\",\"Linggan OPPO\",monospace",
+    "brand": "\"SFMono-Regular\",\"SF Mono\",ui-monospace,monospace",
+    "evidence": "\"Linggan OPPO\",\"PingFang SC\",\"Microsoft YaHei\",system-ui,sans-serif"
+  },
+  "roles": {
+    "aux": {
+      "size": 11,
+      "weight": 400,
+      "lineHeight": 1.6
+    },
+    "label": {
+      "size": 12,
+      "weight": 500,
+      "lineHeight": 1.5
+    },
+    "control": {
+      "size": 13,
+      "weight": 500,
+      "lineHeight": 1.5
+    },
+    "body": {
+      "size": 14,
+      "weight": 400,
+      "lineHeight": 1.75
+    },
+    "reading": {
+      "size": 16,
+      "weight": 400,
+      "lineHeight": 1.85
+    },
+    "section": {
+      "size": 18,
+      "weight": 600,
+      "lineHeight": 1.5
+    },
+    "object": {
+      "size": 22,
+      "weight": 600,
+      "lineHeight": 1.4
+    },
+    "page": {
+      "size": 24,
+      "weight": 600,
+      "lineHeight": 1.4
+    },
+    "data": {
+      "size": 14,
+      "weight": 500,
+      "lineHeight": 1.5
+    },
+    "metric": {
+      "size": 24,
+      "weight": 600,
+      "lineHeight": 1.3
+    },
+    "metricLarge": {
+      "size": 44,
+      "weight": 600,
+      "lineHeight": 1.1
+    },
+    "display": {
+      "size": 88,
+      "weight": 300,
+      "lineHeight": 1.04
+    },
+    "displayCompact": {
+      "size": 64,
+      "weight": 300,
+      "lineHeight": 1.04
+    },
+    "displaySample": {
+      "size": 40,
+      "weight": 400,
+      "lineHeight": 1.1
+    },
+    "input": {
+      "size": 13,
+      "weight": 400,
+      "lineHeight": 1.5
+    }
+  },
+  "roleLabels": {
+    "aux": "辅助信息",
+    "label": "标签／表头",
+    "control": "按钮／选择",
+    "body": "正文／表格",
+    "reading": "连续阅读",
+    "section": "分区标题",
+    "object": "对象／弹层标题",
+    "page": "页面标题",
+    "data": "普通数字／时间",
+    "metric": "紧凑读数",
+    "metricLarge": "概览大读数",
+    "display": "英文展示标题",
+    "displayCompact": "紧凑英文展示",
+    "displaySample": "字体样张",
+    "input": "输入文字"
+  },
+  "weights": {
+    "regular": 400,
+    "medium": 500,
+    "strong": 600,
+    "brand": 700
+  },
+  "rules": [
+    "按语义角色使用整组字号、行高与字重；所有组件和代表页面读取同一标准。",
+    "300仅用于Alumni英文展示，500用于表头、控件与普通数据；字体必须提供真实字重，font-synthesis:none。",
+    "普通数字、时间与普通编号使用Manrope及tabular-nums lining-nums；代码与字标保留对应角色。",
+    "Alumni仅用于足够大的英文展示标题，中文及小控件按各自字族。",
+    "功能文字至少11px，关键正文至少14px，长阅读至少16px；窄屏通过布局及局部滚动适配，不通过缩小字号。",
+    "Q03已关闭：原声、评论原文和访谈引文统一使用OPPO Sans，读取evidence字族；字号、行高、字重沿B语义角色，来源与系统判断通过结构分离。",
+    "Q11已采用ALIGN-FONT-012：先显示可读回退，加载后自动换入；回退F2按families唯一值，普通数字右对齐，小数列按小数点对齐且保留原始精度/未知。许可、性能、字形覆盖和业务资产迁移在具体实施中核验，运行时Token另获授权才迁移。"
+  ],
+  "pendingReviewItems": [],
+  "runtimeMigrated": false,
+  "voiceDecision": {
+    "id": "ALIGN-VOICE-004",
+    "evidence": "U11",
+    "quote": "Q03 原声也统一用 Sans，就用 OPPO Sans，按这个收口",
+    "status": "accepted",
+    "runtimeMigrated": false
+  },
+  "deliveryDecision": {
+    "id": "ALIGN-FONT-012",
+    "status": "accepted",
+    "date": "2026-10-20",
+    "evidence": "U22",
+    "quote": "字体加载后自动换入，回退用F2，普通数字右对齐，小数列按小数点对齐",
+    "automaticApplication": true,
+    "fontDisplay": "swap",
+    "fallback": "F2",
+    "numeric": {
+      "features": [
+        "tabular-nums",
+        "lining-nums"
+      ],
+      "ordinaryAlignment": "right",
+      "decimalColumnAlignment": "decimal_point",
+      "preserveOriginalScale": true,
+      "unknownAsZero": false
+    },
+    "fontAssetsChanged": false,
+    "runtimeMigrated": false
+  }
+}

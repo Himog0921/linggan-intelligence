@@ -164,6 +164,8 @@ try {
     let dialog = page.getByRole('dialog', { name: '筛选材料与作者' });
     await dialog.getByRole('checkbox', { name: '亲历自述' }).check();
     await dialog.getByRole('button', { name: '取消' }).click();
+    await dialog.getByText('筛选尚未应用，放弃本次修改？').waitFor();
+    await dialog.getByRole('button', { name: '放弃修改' }).click();
     await dialog.waitFor({ state: 'detached' });
     assert.equal(new URL(page.url()).searchParams.get('traits'), null);
     // 应用：真实数据里还没有任何分析结果，所以「亲历自述」命中 0 位——如实显示零命中，不是错误。
@@ -239,7 +241,15 @@ try {
     const dialog = page.getByRole('dialog', { name: '补充与当前领域的关系' });
     await dialog.waitFor();
     // 正向判断必须选当前支持材料。
-    await dialog.getByRole('combobox', { name: '你的判断' }).selectOption('related');
+    const judgment = dialog.getByRole('combobox', { name: '你的判断' });
+    await judgment.click();
+    const choices = page.getByRole('listbox', { name: '你的判断' });
+    const related = choices.getByRole('option', { name: '与当前领域相关', exact: true });
+    assert.equal(await related.getAttribute('aria-selected'), 'false');
+    assert.equal(await related.getAttribute('aria-disabled'), null);
+    await related.click();
+    assert.equal(await judgment.getAttribute('aria-expanded'), 'false');
+    assert.match(await judgment.innerText(), /与当前领域相关/);
     await dialog.getByRole('button', { name: '保存判断' }).click();
     await dialog.getByText('请选择至少一项当前材料作为支持依据。').waitFor();
     assert.equal(report.writes.length, 0, '未选支持材料时不发请求');
@@ -278,7 +288,11 @@ try {
     await page.getByRole('button', { name: '发现设置' }).click();
     const dialog = page.getByRole('dialog', { name: '发现设置' });
     await dialog.waitFor();
-    await page.waitForFunction(() => !document.querySelector('dialog[open] select')?.disabled);
+    await page.waitForFunction(() => {
+      const modelConfig = document.querySelector('dialog[open] [role="combobox"][aria-label="已有模型配置"]');
+      const save = [...document.querySelectorAll('dialog[open] button')].find(button => button.textContent?.trim() === '保存设置');
+      return modelConfig instanceof HTMLButtonElement && !modelConfig.disabled && save instanceof HTMLButtonElement && !save.disabled;
+    });
     await dialog.getByRole('spinbutton', { name: /最低点赞/ }).fill('100');
     await dialog.getByRole('button', { name: '保存设置' }).click();
     await dialog.waitFor({ state: 'detached' });

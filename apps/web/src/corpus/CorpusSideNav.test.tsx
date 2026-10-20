@@ -5,11 +5,11 @@ import { CorpusSideNav } from './CorpusSideNav';
 const D = '00000000-0000-4000-8000-000000000001';
 
 describe('语料侧栏', () => {
-  it('三项按序号排列，当前项 aria-current，底部说明本页数据范围', () => {
+  it('三项按已确认顺序排列，当前项 aria-current，底部说明本页数据范围', () => {
     render(<CorpusSideNav active="creators" domain={null} foot="作者来自当前领域已有作品" />);
     const nav = screen.getByRole('complementary', { name: '语料导航' });
     const links = screen.getAllByRole('link');
-    expect(links.map(link => link.textContent)).toEqual(['01证据库', '02评论研究', '03创作者']);
+    expect(links.map(link => link.textContent)).toEqual(['证据库', '评论研究', '创作者']);
     expect(links.map(link => link.getAttribute('aria-current'))).toEqual([null, null, 'page']);
     expect(nav).toHaveTextContent('作者来自当前领域已有作品');
   });

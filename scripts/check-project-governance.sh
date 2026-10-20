@@ -31,7 +31,7 @@ done
 while IFS= read -r path; do
   name="${path#./}"
   case "$name" in
-    README.md|AGENTS.md|CODEX.md|CLAUDE.md) ;;
+    README.md|AGENTS.md|CODEX.md|CLAUDE.md|codx.md) ;;
     *) report_error "unexpected root Markdown file: $name" ;;
   esac
 done < <(find . -maxdepth 1 -type f -name '*.md' -print | sort)
@@ -83,7 +83,7 @@ done < <(
     grep -E '(^|/)(\.DS_Store|target/|dist/|build/|coverage/|tmp/|temp/|artifacts/private/|database/backups/|database/restores/)' || true
 )
 
-link_files=(README.md AGENTS.md)
+link_files=(README.md AGENTS.md CLAUDE.md codx.md)
 while IFS= read -r path; do link_files+=("$path"); done < <(find docs database -type f -name '*.md' -print | sort)
 link_files+=(references/README.md)
 
@@ -184,5 +184,7 @@ if [[ "$errors" -ne 0 ]]; then
   echo "project governance check failed with $errors error(s)" >&2
   exit 1
 fi
+
+python3 scripts/verify-lids-alignment.py --check
 
 echo "project governance check passed"

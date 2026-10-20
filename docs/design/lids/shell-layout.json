@@ -1,0 +1,46 @@
+{
+  "id": "ALIGN-SHELL-007",
+  "status": "accepted",
+  "decision": {
+    "selected": "A",
+    "evidence": "U15",
+    "quote": "Q06 就按 A来收口，但是左侧导航栏可以支持点击折叠，只露出图标"
+  },
+  "domainHost": "Z02",
+  "tertiaryHost": "Z02",
+  "layout": {
+    "name": "连续导航轨",
+    "description": "所有入口保持展开，窄屏用局部横向滚动。",
+    "header": "一级导航独立横轨",
+    "context": "宽屏同带；窄屏在Z02内换行",
+    "secondary": "宽屏左侧手动折叠为图标；窄屏同一Z03横轨可切换图标模式",
+    "collapseBelow": 820,
+    "sideWidth": 160,
+    "tabsBelow": 820,
+    "collapsedWidth": 64,
+    "iconSize": 18,
+    "defaultCollapsed": false
+  },
+  "sidebar": {
+    "manualToggle": true,
+    "ariaExpanded": true,
+    "accessibleNamesRequired": true,
+    "keyboardAndPointerLabels": true,
+    "collapsePreservesPageQueryFocus": true,
+    "narrowMode": "horizontal_rail",
+    "storage": "memory_only"
+  },
+  "clock": "optional_when_page_contract_requires; no_mandatory_empty_slot",
+  "supersedes": [
+    "ADR-10 fixed brand326/system400/3+4slots/silent120/mandatory-clock in shared shell"
+  ],
+  "fixed": [
+    "LIDS-TYPE-001-B",
+    "ALIGN-VOICE-004",
+    "ALIGN-FOCUS-005",
+    "ALIGN-MATERIAL-006",
+    "ALIGN-NAV-003"
+  ],
+  "runtimeMigrated": false,
+  "componentCertificationChanged": false
+}

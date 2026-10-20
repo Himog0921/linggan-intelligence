@@ -137,7 +137,9 @@ try {
     );
     assert.equal(await side.getByRole('link', { name: /证据库/ }).getAttribute('aria-current'), 'page');
     assert.match(await page.getByLabel('切换当前观察领域').innerText(), /合成领域一/);
-    assert.match(await page.locator('.v7-context-meta').innerText(), /^读取于 \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+    const readout = page.getByText(/^读取于 \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+    await readout.waitFor();
+    assert.match(await readout.innerText(), /^读取于 \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
     // 侧栏徽标：本次读取的作品数，悬停说明里是三个读数；读模型不给总数，页面不编造「共 N 个」。
     assert.equal((await page.locator('#ev-rail-count').innerText()).trim(), String(pageSize));
     assert.match(await page.locator('#ev-rail-count').getAttribute('title'), /^本次读取 50 个作品 · 已留存评论 \d+ · 本地材料 \d+ · 部分或缺口 \d+$/);
@@ -240,15 +242,37 @@ try {
     assert.equal(new URL(page.url()).searchParams.has('q'), false);
     // 筛选浮层：三个下拉＋徽标；通道状态=风险控制停止。
     await page.getByRole('button', { name: /^筛选/ }).click();
-    await page.getByRole('combobox', { name: '通道状态' }).selectOption('RISK_CONTROL');
+    const laneState = page.getByRole('combobox', { name: '通道状态' });
+    await laneState.click();
+    const laneStateOptions = page.getByRole('listbox', { name: '通道状态' });
+    const riskControl = laneStateOptions.getByRole('option', { name: '风险控制停止', exact: true });
+    assert.equal(await riskControl.getAttribute('aria-selected'), 'false');
+    assert.equal(await riskControl.getAttribute('aria-disabled'), null);
+    await riskControl.click();
+    await page.waitForURL(url => url.searchParams.get('laneState') === 'RISK_CONTROL');
+    await page.waitForFunction(() => document.querySelector('[role="combobox"][aria-label="通道状态"]')?.textContent?.includes('风险控制停止') === true);
+    assert.match(await laneState.innerText(), /风险控制停止/);
     await page.waitForFunction(() => document.querySelectorAll('li[data-work-ref]').length === 1);
     assert.equal(await rowOf(TITLE.risk).count(), 1);
     assert.equal(await page.getByLabel('已选 1 项筛选').count(), 1);
-    await page.getByRole('combobox', { name: '通道状态' }).selectOption('');
+    await laneState.click();
+    const allStates = page.getByRole('listbox', { name: '通道状态' }).getByRole('option', { name: '全部状态', exact: true });
+    assert.equal(await allStates.getAttribute('aria-selected'), 'false');
+    await allStates.click();
+    await page.waitForURL(url => !url.searchParams.has('laneState'));
+    await page.waitForFunction(() => document.querySelector('[role="combobox"][aria-label="通道状态"]')?.textContent?.includes('全部状态') === true);
+    assert.match(await laneState.innerText(), /全部状态/);
     await page.waitForFunction(size => document.querySelectorAll('li[data-work-ref]').length === size, pageSize);
-    await page.getByRole('combobox', { name: '媒体类型' }).selectOption('video');
+    const mediaKind = page.getByRole('combobox', { name: '媒体类型' });
+    await mediaKind.click();
+    const video = page.getByRole('listbox', { name: '媒体类型' }).getByRole('option', { name: '视频', exact: true });
+    assert.equal(await video.getAttribute('aria-selected'), 'false');
+    assert.equal(await video.getAttribute('aria-disabled'), null);
+    await video.click();
     // 等筛选后的列表真的到了：地址带上媒体类型，且列表不再是未筛选时的整页（只等「至少一行」会被旧列表满足）。
     await page.waitForURL(url => url.searchParams.get('mediaKind') === 'video');
+    await page.waitForFunction(() => document.querySelector('[role="combobox"][aria-label="媒体类型"]')?.textContent?.includes('视频') === true);
+    assert.match(await mediaKind.innerText(), /视频/);
     await page.waitForFunction(size => {
       const count = document.querySelectorAll('li[data-work-ref]').length;
       return count >= 1 && count < size;

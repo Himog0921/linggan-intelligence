@@ -1,4 +1,6 @@
-import type { ReactNode } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { FontNotice } from '../shared/FontNotice';
+import { SidebarState } from '../shared/sidebarState';
 import { PERSONAL_MENU_LINKS, PRIMARY_ENTRIES, type PrimaryEntry, type PrimarySurface } from './navigation';
 import styles from './AppShell.module.css';
 
@@ -67,6 +69,48 @@ function PrimaryEntryLink({ entry, active, states }: { entry: PrimaryEntry; acti
  */
 export function AppShell({ className, active, activeState, collectionState, boundaryLabel, crumb, contextNav, meta, children, workbenchMode }: AppShellProps) {
   const states: EntryStates = { activeState, collectionState };
+  const [collapsed, setCollapsed] = useState(false);
+  const header = useRef<HTMLElement>(null);
+
+  // 固定抽屉的起点必须等于实际共享页头的下沿：窄屏一级导航换行、三级导航及字体完成加载都会改变它。
+  // Collection 抽屉经 portal 挂到 body，故写入既有根变量；卸载时原样恢复，工作台特例不受影响。
+  useLayoutEffect(() => {
+    if (workbenchMode) return;
+    const root = document.documentElement;
+    const shellHeader = header.current;
+    if (!shellHeader) return;
+    const previous = root.style.getPropertyValue('--v7-header-height');
+    let frame: number | null = null;
+    let disposed = false;
+    const measure = () => {
+      frame = null;
+      if (disposed || !shellHeader.isConnected) return;
+      root.style.setProperty('--v7-header-height', `${Math.max(0, shellHeader.getBoundingClientRect().bottom)}px`);
+    };
+    const schedule = () => {
+      if (disposed) return;
+      if (frame === null) frame = window.requestAnimationFrame(measure);
+    };
+    // useLayoutEffect 在绘制前先量一次，避免 portal 在首帧沿用 CSS 的估算值。
+    measure();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(schedule);
+    observer?.observe(shellHeader);
+    window.addEventListener('resize', schedule);
+    // 窄屏页头随文档一起滚出视口时，fixed portal 也必须跟随当前可见下沿。
+    window.addEventListener('scroll', schedule, { passive: true });
+    void document.fonts?.ready?.then(() => {
+      if (!disposed) schedule();
+    });
+    return () => {
+      disposed = true;
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      observer?.disconnect();
+      window.removeEventListener('resize', schedule);
+      window.removeEventListener('scroll', schedule);
+      if (previous) root.style.setProperty('--v7-header-height', previous);
+      else root.style.removeProperty('--v7-header-height');
+    };
+  }, [workbenchMode]);
   if (workbenchMode) {
     return <div className={`${styles.workbench} ${workbenchMode === 'immersive' ? styles.immersive : ''}`}>
       {workbenchMode === 'compact' ? <header className={styles.header}>
@@ -79,6 +123,7 @@ export function AppShell({ className, active, activeState, collectionState, boun
             <nav aria-label="一级导航">
               {PRIMARY_ENTRIES.map(entry => entry.href ? <a key={entry.zh} href={entry.href} aria-current={entry.surface === active ? 'page' : undefined}>{entry.zh}</a> : <span key={entry.zh} aria-disabled="true">{entry.zh} · 未开放</span>)}
               {PERSONAL_MENU_LINKS.map(link => <a key={link.href} href={link.href}>{link.label}</a>)}
+              <FontNotice/>
             </nav>
           </details>
         </div>
@@ -87,8 +132,9 @@ export function AppShell({ className, active, activeState, collectionState, boun
     </div>;
   }
   return (
-    <div className={["v7-app", className].filter(Boolean).join(" ")}>
-      <header className="v7-global-header">
+    <SidebarState value={{ collapsed, toggle: () => setCollapsed(value => !value) }}>
+    <div className={["v7-app", className].filter(Boolean).join(" ")} data-sidebar={collapsed ? "collapsed" : "expanded"}>
+      <header ref={header} className="v7-global-header" data-v7-shell-header>
         <div className="v7-global-row">
           <div className="v7-global-brand" aria-label="Linggan Intelligence">
             <div className="v7-li-mark">LI</div>
@@ -116,6 +162,7 @@ export function AppShell({ className, active, activeState, collectionState, boun
                     {link.label}
                   </a>
                 ))}
+                <FontNotice/>
               </nav>
             </details>
           </div>
@@ -131,5 +178,6 @@ export function AppShell({ className, active, activeState, collectionState, boun
       </header>
       {children}
     </div>
+    </SidebarState>
   );
 }

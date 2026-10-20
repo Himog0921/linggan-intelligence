@@ -2,10 +2,22 @@
 
 > 状态: 权威当前
 > 运行时状态: 第 3 节的 186 项 `--lgi-*` 是当前**唯一运行时值源**；第 2 节的 v7 三层架构是**目标态与新工作的选值依据**，尚未进入运行时
-> 最后核对: 2026-10-15
+> 最后核对: 2026-10-19
 > 适用范围: Linggan Intelligence 主题、Primitive、Component、Pattern、Page、动效和受控场景的颜色、排版、间距、边界、层级与性能数值
-> 事实来源: Mog 于 2026-09-02 指定的 `linggan-design-system-v7.html`（§01 Tokens、ADR-02/03/04）、Mog 指定的 LIDS v2.0 `tokens.md`（SHA-256: `97fac0fb590c7f349f5fe7bfc2e2e423c6c8145b03cec9ffdd80d4494f757e77`）、[system.md](system.md)、LOCAL-001A 运行时 Token 源与对应 Rust 校验
+> 事实来源: Mog 于 2026-09-02 指定的 `linggan-design-system-v7.html`（§01 Tokens、ADR-02/03/04）、Mog 指定的 LIDS v2.0 `tokens.md`（SHA-256: `97fac0fb590c7f349f5fe7bfc2e2e423c6c8145b03cec9ffdd80d4494f757e77`）、[system.md](system.md)、LOCAL-001A 运行时 Token 源与对应 Rust 校验；LIDS-ALIGN-001 本次授权与对齐记录
 > 冲突时以谁为准: 已获准运行时的唯一 Token 文件 `apps/web/src/styles/lids_tokens.css` 优先于本文件第 3 节；第 2 节的 v7 架构优先于第 3 节**作为新工作的选值依据**，但不得被写进运行时而不走迁移治理。产品/数据/权限冲突不由 Token 解决
+
+ALIGN-MATERIAL-006：Q05控件材质采用M2，参数唯一[control-material.json](control-material.json)；业务Token映射在获准迁移时执行。本文件运行时镜像保持代码事实，不作为第二候选标准。
+
+## LIDS-UI-001 当前映射
+
+Mog 已确认正式语义目标色板，color.json 为当前值源。下面运行时 CSS 镜像已更新为本地候选；后续旧迁移差异表仅保留历史对照，不是当前备选值。应用排版按 typography.json 的B整组映射；主按钮按M2，不延用V8旧阴影。字体许可与完整原文件在 apps/web/public/fonts/lids，本机3000未部署。
+
+## ALIGN-TOKEN · B排版已采纳，运行时未迁移
+
+字体族的当前规则见 [typography.md](typography.md)，取代本文件旧字族角色中“普通数字全部Mono”的口径。新字体尚未写入本文件的运行时镜像；该镜像与 `apps/web/src/styles/lids_tokens.css` 原样保持。本轮只改文档，不改变任何 `--lgi-*` 名称或值。
+
+Q01/Q02已明确采用B，排版唯一目标值源为[typography.json](typography.json)，使用说明见[typography](typography.md)。§2排版旧值由B取代；§3仅保留当前业务实现的精确镜像，属于迁移现状，不是另一个可选标准。未来业务实现把B角色映射到唯一`--lgi-*`源，当前文档采用不写业务CSS。原声字族已按ALIGN-VOICE-004采用OPPO Sans；§3中旧Serif字节只是未迁移的运行镜像，其余几何、颜色与镜像约束继续有效。
 
 ## 0. 本文件现在有两层，必须分开读
 
@@ -84,9 +96,9 @@ L3 GEOMETRY   间距 / 字号 / 线宽 / 圆角 / 动效 五套阶梯
 | 阶梯 | 取值 | 约束 |
 |---|---|---|
 | 间距 | 2 / 4 / 8 / 12 / 16 / 24 / 32 / 48 / 64 | 4pt 基准 9 阶；不新增孤立补丁值 |
-| 字号 | 11 / 12 / 13 / 15 / 17 / 21 / 27 + `display` | 7 阶，**下限 11px**（`ADR-03`） |
-| 行高 | 1.2 / 1.4 / 1.6 / 1.75 | — |
-| 字重 | **400 / 600 / 700** | 3 档（`ADR-02`）；850/950 在 PingFang SC 与 Noto Sans SC 中不存在，只会触发浏览器合成加粗 |
+| 字号 | 按[唯一B角色表](typography.json) | 已采纳；下限11px；旧七阶在本范围被取代 |
+| 行高 | 按[唯一B角色表](typography.json) | 与字号、字重成组调用 |
+| 字重 | 按[唯一B角色表](typography.json) | 角色限定，真实字形，禁止合成字重；替代ADR-02三档限制 |
 | 线宽 | 1（分隔）/ 2（对象边界）/ 3（模式切换）/ 5（信号条）/ 6（硬投影位移） | **边框中的 1.5px 全部移除**——1x 屏上产生半像素模糊。图标描边 1.5 是 SVG 单位会随尺寸缩放，不受此限 |
 | 圆角 | 0 / 4 / 8 / pill | pill 仅用于状态点一类纯圆元素，不用于按钮 |
 | 尺寸 | 28 / 34 / 40 / 48 / 56 | 控件高度 |
@@ -98,22 +110,22 @@ L3 GEOMETRY   间距 / 字号 / 线宽 / 圆角 / 动效 五套阶梯
 |---|---|
 | `font-ui` Sans | 操作与连续阅读。标题靠字号差、字重与结构线形成强度，不靠奇怪字体 |
 | `font-mono` | 机器事实、状态枚举、结构编号。预算见 [language-policy.md](language-policy.md) |
-| `font-evidence` Serif | **人的原声**。评论原文、访谈引用——保留它不是装饰，是标明"这句话不是系统写的" |
+| `font-evidence` Sans | **人的原声**。OPPO Sans，读取typography.json的evidence；原声身份由来源、引用边界与系统判断分区表达（ALIGN-VOICE-004） |
 
 负字距只作用于拉丁标题；**中文正文不收紧字距**。
 
 ### 2.5 密度（`ADR-06`）
 
-密度控制**一屏能看多少内容**——内边距、行高与次要元数据的显隐。**它不是纹理浓度。**
+密度控制**一屏能看多少内容**——内边距与显式可配置字段。B角色的字号/行高/字重整组不随密度缩放；P0不能隐藏，次要列由用户配置或保留横滚。**它不是纹理浓度。**
 
 | 档 | 内边距 | 行高 | 次要元数据 | 材料可见度 |
 |---|---|---|---|---|
-| T0 疏 | ×1.35 | ×1.25 | 显示 | 关闭 |
-| T1 | ×1.15 | ×1.1 | 显示 | 0.45 |
-| T2 默认 | ×1 | ×1 | 显示 | 1 |
-| T3 密 | ×0.8 | ×0.88 | **隐藏** | 1 |
+| T0 疏 | ×1.35 | B角色原值 | 显示 | 关闭 |
+| T1 | ×1.15 | B角色原值 | 显示 | 0.45 |
+| T2 默认 | ×1 | B角色原值 | 显示 | 1 |
+| T3 密 | ×0.8 | B角色原值 | 用户显式配置；P0保留 | 1 |
 
-材料强度是密度的**附带效果**，不是它的目的。切换密度后如果一屏能看的条数没变，这个实现就是错的。
+材料强度是密度的附带效果。密度通过允许的间距与显式字段配置调整信息量；已确认L1采集行始终44px，不缩字号/行高，不要求所有页都改变条数。
 
 ## 3. 完整运行时基线（186 项 `--lgi-*`）
 
@@ -130,50 +142,30 @@ L3 GEOMETRY   间距 / 字号 / 线宽 / 圆角 / 动效 五套阶梯
   --lgi-canvas-glass: rgba(255, 255, 255, 0.88);
 
   /* Ink */
-  --lgi-ink: #111315;
-  --lgi-body: #4a5057;
-  --lgi-muted: #6f747a;
-  --lgi-ghost: #9aa0a6;
   --lgi-on-dark: #ffffff;
 
   /* Signature signal */
-  --lgi-signal: #ef4f25;
-  --lgi-signal-hover: #c73a15;
-  --lgi-signal-ink: #a73317;
-  --lgi-signal-soft: rgba(239, 79, 37, 0.10);
-  --lgi-signal-faint: rgba(239, 79, 37, 0.05);
   /* Shared keyboard focus ring; distinct from the product signal state. */
   --lgi-focus: #335e72;
 
   /* Semantic: five axes, each carries text / fill / soft.
    * Fill values stay saturated for solid badges; text values are darkened
    * so they clear 4.5:1 on the white canvas. Never swap the two roles. */
-  --lgi-success: #05674a;
   --lgi-success-dot: #0e9e6e;
   --lgi-success-soft: rgba(14, 158, 110, 0.10);
-  --lgi-warning: #a67a04;
   --lgi-warning-dot: #eaaa05;
   --lgi-warning-soft: rgba(234, 170, 5, 0.12);
-  --lgi-danger: #a42001;
   --lgi-danger-dot: #a42001;
   --lgi-danger-soft: rgba(164, 32, 1, 0.08);
-  --lgi-info: #42555a;
   --lgi-info-dot: #8d9a9d;
   --lgi-info-soft: rgba(141, 154, 157, 0.14);
-  --lgi-unknown: #6f747a;
   --lgi-unknown-dot: #c3c8cb;
   --lgi-unknown-soft: #e7eaeb;
 
   /* Borders */
-  --lgi-hairline: rgba(17, 19, 21, 0.09);
-  --lgi-border: rgba(17, 19, 21, 0.15);
-  --lgi-border-strong: rgba(17, 19, 21, 0.22);
-  --lgi-border-solid: #111315;
 
   /* Instrument mesh: a measurement field, not decoration. Dots read lighter than
    * a ruled grid at the same weight, so the surface stays quiet while gaining depth. */
-  --lgi-mesh-fine: rgba(17, 19, 21, 0.055);
-  --lgi-mesh-major: rgba(17, 19, 21, 0.10);
 
   /* Observation stream: the one deliberately dark surface in the product. Mog approved
    * keeping the V4 Gold Master's low-luminance instrument terminal on 2026-08-26; it is a
@@ -191,26 +183,13 @@ L3 GEOMETRY   间距 / 字号 / 线宽 / 圆角 / 动效 五套阶梯
   --lgi-stream-line: rgba(99, 217, 165, 0.2);
 
   /* V8 action family: opt-in only; existing page tokens retain their values. */
-  --lgi-action-fill: #c63214;
-  --lgi-action-ink: #0b0f12;
-  --lgi-action-ink-shadow: #151b1f;
-  --lgi-action-paper: #ffffff;
   --lgi-action-sunken: #f5f7f8;
-  --lgi-action-secondary: #5f6a71;
-  --lgi-action-disabled: #8c959b;
   --lgi-action-border: #c6ced3;
-  --lgi-action-focus: #335e72;
-  --lgi-action-danger: #b52b20;
   --lgi-action-danger-soft: #fff0ed;
-  --lgi-action-mark: #f24a23;
-  --lgi-action-lattice-light: repeating-conic-gradient(rgba(255,255,255,.36) 0% 25%,transparent 0% 50%);
-  --lgi-action-lattice-ink: repeating-conic-gradient(rgba(11,15,18,.16) 0% 25%,transparent 0% 50%);
   --lgi-action-lattice-danger: repeating-conic-gradient(rgba(181,43,32,.2) 0% 25%,transparent 0% 50%);
   --lgi-action-lattice-dim: repeating-conic-gradient(rgba(11,15,18,.07) 0% 25%,transparent 0% 50%);
   --lgi-action-mask: linear-gradient(90deg,#0000 0 8%,#00000026 8% 22%,#0000004d 22% 36%,#00000073 36% 50%,#0000009e 50% 64%,#000000c4 64% 78%,#000000e8 78% 90%,#000 90% 100%);
   --lgi-action-quiet-ruler: repeating-linear-gradient(90deg,var(--lgi-action-mark) 0 8px,transparent 8px 10px);
-  --lgi-action-font-size: 13px;
-  --lgi-action-line-height: 1.6;
   --lgi-action-height: 40px;
   --lgi-action-quiet-height: 28px;
   --lgi-action-gap: 4px;
@@ -218,13 +197,8 @@ L3 GEOMETRY   间距 / 字号 / 线宽 / 圆角 / 动效 五套阶梯
   --lgi-action-quiet-padding: 2px;
   --lgi-action-border-width: 1px;
   --lgi-action-rail-width: 2px;
-  --lgi-action-lattice-cell: 16px;
   --lgi-action-lattice-hover: 40%;
   --lgi-action-lattice-active: 100%;
-  --lgi-action-shadow-idle: 4px;
-  --lgi-action-shadow-hover: 5px;
-  --lgi-action-hover-shift: -1px;
-  --lgi-action-press-shift: 1px;
   --lgi-action-focus-offset: 2px;
   --lgi-action-focus-gap-width: 3px;
   --lgi-action-focus-idle-gap: 5px;
@@ -249,39 +223,19 @@ L3 GEOMETRY   间距 / 字号 / 线宽 / 圆角 / 动效 五套阶梯
   --lgi-reading-cover: #7c5042;
 
   /* Typography */
-  --lgi-font-sans: "PingFang SC", "Noto Sans SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
-  --lgi-font-mono: "SFMono-Regular", "JetBrains Mono", "Roboto Mono", "Noto Sans Mono CJK SC", ui-monospace, monospace;
   /* Three type roles, three jobs. Sans states what the system knows; mono carries the things a
    * machine assigned — refs, counts, timestamps, state codes; serif is reserved for material
    * quoted verbatim out of a source. A reader must be able to tell someone's own sentence from
    * the system's description of it without reading either, so serif is never used for chrome. */
-  --lgi-font-evidence: "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", "STSong", Georgia, serif;
-  --lgi-font-display: "Arial Narrow", "DIN Condensed", "Roboto Condensed", "Helvetica Neue", var(--lgi-font-sans);
 
   /* Applied to the right edge of a solid Ink action or an active plate, under a fade mask, so
    * the mark reads as an instrument surface rather than as decoration. It must never sit under
    * a label: mask the fade so the texture starts after the text ends. */
   --lgi-mosaic-on-dark: conic-gradient(from 90deg, rgba(255, 255, 255, 0.22) 25%, transparent 0 50%, rgba(255, 255, 255, 0.22) 0 75%, transparent 0);
   --lgi-mosaic-on-light: conic-gradient(from 90deg, rgba(17, 19, 21, 0.13) 25%, transparent 0 50%, rgba(17, 19, 21, 0.13) 0 75%, transparent 0);
-  --lgi-text-display: clamp(3rem, 6vw, 5.5rem);
-  --lgi-text-hero: 3rem;
-  --lgi-text-page-title: 1.75rem;
-  --lgi-text-section: 1.125rem;
-  --lgi-text-longform: 1rem;
-  --lgi-text-body: 0.875rem;
-  --lgi-text-data: 0.75rem;
-  --lgi-text-label: 0.6875rem;
-  --lgi-text-calibration: 0.5625rem;
   --lgi-weight-regular: 400;
   --lgi-weight-medium: 500;
   --lgi-weight-semibold: 600;
-  --lgi-weight-bold: 700;
-  --lgi-lh-display: 0.96;
-  --lgi-lh-title: 1.1;
-  --lgi-lh-heading: 1.25;
-  --lgi-lh-data: 1.4;
-  --lgi-lh-body: 1.55;
-  --lgi-lh-longform: 1.65;
   --lgi-ls-tight: -0.04em;
   --lgi-ls-normal: 0;
   --lgi-ls-data: 0.04em;
@@ -313,8 +267,6 @@ L3 GEOMETRY   间距 / 字号 / 线宽 / 圆角 / 动效 五套阶梯
   --lgi-shadow-overlay: 0 12px 30px rgba(17, 19, 21, 0.11);
   --lgi-shadow-stage: 0 24px 25px rgba(17, 19, 21, 0.05);
   --lgi-shadow-hard: 8px 8px 0 rgba(17, 19, 21, 0.07);
-  --lgi-shadow-brutal: 4px 4px 0 #111315;
-  --lgi-shadow-brutal-lg: 7px 7px 0 #111315;
 
   /* Layout */
   --lgi-page-max-l3: 1720px;
@@ -357,6 +309,153 @@ L3 GEOMETRY   间距 / 字号 / 线宽 / 圆角 / 动效 五套阶梯
 
   /* WebGL quality */
   --lgi-scene-pixel-ratio-max: 1.75;
+
+  /* LIDS-UI-001 generated: start */
+  --lgi-font-ui: "Linggan UI Digits","Linggan Albert","Linggan OPPO",Arial,Helvetica,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  --lgi-font-chinese: "Linggan OPPO","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  --lgi-font-english: "Linggan Albert","Linggan OPPO",Arial,Helvetica,system-ui,sans-serif;
+  --lgi-font-display: "Linggan Alumni","Linggan Albert","Linggan OPPO","Arial Narrow",Arial,system-ui,sans-serif;
+  --lgi-font-data: "Linggan Manrope","Linggan OPPO",Arial,Helvetica,system-ui,sans-serif;
+  --lgi-font-code: "Linggan Mono","Linggan OPPO",monospace;
+  --lgi-font-brand: "SFMono-Regular","SF Mono",ui-monospace,monospace;
+  --lgi-font-evidence: var(--lgi-font-chinese);
+  --lgi-type-aux-size: 11px;
+  --lgi-type-aux-weight: 400;
+  --lgi-type-aux-leading: 1.6;
+  --lgi-type-label-size: 12px;
+  --lgi-type-label-weight: 500;
+  --lgi-type-label-leading: 1.5;
+  --lgi-type-control-size: 13px;
+  --lgi-type-control-weight: 500;
+  --lgi-type-control-leading: 1.5;
+  --lgi-type-body-size: 14px;
+  --lgi-type-body-weight: 400;
+  --lgi-type-body-leading: 1.75;
+  --lgi-type-reading-size: 16px;
+  --lgi-type-reading-weight: 400;
+  --lgi-type-reading-leading: 1.85;
+  --lgi-type-section-size: 18px;
+  --lgi-type-section-weight: 600;
+  --lgi-type-section-leading: 1.5;
+  --lgi-type-object-size: 22px;
+  --lgi-type-object-weight: 600;
+  --lgi-type-object-leading: 1.4;
+  --lgi-type-page-size: 24px;
+  --lgi-type-page-weight: 600;
+  --lgi-type-page-leading: 1.4;
+  --lgi-type-data-size: 14px;
+  --lgi-type-data-weight: 500;
+  --lgi-type-data-leading: 1.5;
+  --lgi-type-metric-size: 24px;
+  --lgi-type-metric-weight: 600;
+  --lgi-type-metric-leading: 1.3;
+  --lgi-type-metric-large-size: 44px;
+  --lgi-type-metric-large-weight: 600;
+  --lgi-type-metric-large-leading: 1.1;
+  --lgi-type-display-size: 88px;
+  --lgi-type-display-weight: 300;
+  --lgi-type-display-leading: 1.04;
+  --lgi-type-display-compact-size: 64px;
+  --lgi-type-display-compact-weight: 300;
+  --lgi-type-display-compact-leading: 1.04;
+  --lgi-type-display-sample-size: 40px;
+  --lgi-type-display-sample-weight: 400;
+  --lgi-type-display-sample-leading: 1.1;
+  --lgi-type-input-size: 13px;
+  --lgi-type-input-weight: 400;
+  --lgi-type-input-leading: 1.5;
+  --lgi-focus-warm: #fffaf7;
+  --lgi-focus-inset: 2px;
+  --lgi-shell-side: 160px;
+  --lgi-shell-collapsed: 64px;
+  --lgi-shell-icon: 18px;
+  --lgi-ledger-row: 44px;
+  --lgi-control-tail: 24px;
+  --lgi-control-pitch: 8px;
+  --lgi-secondary-tail: 7px;
+  --lgi-secondary-pitch: 4px;
+  --lgi-domain-tail: 28px;
+  --lgi-shell-pitch: 6px;
+  --lgi-context-major: 56px;
+  --lgi-context-fine: 14px;
+  --lgi-action-shadow-idle: 2px;
+  --lgi-action-shadow-hover: 3px;
+  --lgi-action-hover-shift: -1px;
+  --lgi-action-press-shift: 2px;
+  --lgi-action-line-height: 1.5;
+  --lgi-action-lattice-cell: 8px;
+  --lgi-action-lattice-light: repeating-conic-gradient(rgb(255 255 255 / 0.28) 0% 25%,transparent 0% 50%);
+  --lgi-action-lattice-ink: repeating-conic-gradient(color-mix(in srgb,var(--lgi-ink) 13%,transparent) 0% 25%,transparent 0% 50%);
+  --lgi-ledger-col-name: 144px;
+  --lgi-ledger-col-id: 132px;
+  --lgi-ledger-col-domain: 100px;
+  --lgi-ledger-col-source: 122px;
+  --lgi-ledger-col-scope: 112px;
+  --lgi-ledger-col-mode: 190px;
+  --lgi-ledger-col-rank: 112px;
+  --lgi-ledger-col-details: 100px;
+  --lgi-ledger-col-comments: 100px;
+  --lgi-ledger-col-reused: 100px;
+  --lgi-ledger-col-added: 112px;
+  --lgi-ledger-col-cumulative: 112px;
+  --lgi-ledger-col-stage: 176px;
+  --lgi-ledger-col-next: 240px;
+  --lgi-ledger-col-created: 140px;
+  --lgi-ledger-col-updated: 140px;
+  --lgi-ledger-col-action: 88px;
+  --lgi-font-sans: var(--lgi-font-ui);
+  --lgi-font-mono: var(--lgi-font-data);
+  --lgi-text-display: var(--lgi-type-display-size);
+  --lgi-text-hero: var(--lgi-type-metric-large-size);
+  --lgi-text-page-title: var(--lgi-type-page-size);
+  --lgi-text-section: var(--lgi-type-section-size);
+  --lgi-text-longform: var(--lgi-type-reading-size);
+  --lgi-text-body: var(--lgi-type-body-size);
+  --lgi-text-data: var(--lgi-type-data-size);
+  --lgi-text-label: var(--lgi-type-label-size);
+  --lgi-text-calibration: var(--lgi-type-aux-size);
+  --lgi-lh-display: var(--lgi-type-display-leading);
+  --lgi-lh-title: var(--lgi-type-page-leading);
+  --lgi-lh-heading: var(--lgi-type-section-leading);
+  --lgi-lh-data: var(--lgi-type-data-leading);
+  --lgi-lh-body: var(--lgi-type-body-leading);
+  --lgi-lh-longform: var(--lgi-type-reading-leading);
+  --lgi-action-font-size: var(--lgi-type-control-size);
+  --lgi-action-fill: var(--lgi-signal);
+  --lgi-action-ink: var(--lgi-ink);
+  --lgi-action-ink-shadow: var(--lgi-ink);
+  --lgi-action-paper: var(--lgi-canvas);
+  --lgi-action-secondary: var(--lgi-muted);
+  --lgi-action-disabled: var(--lgi-ghost);
+  --lgi-action-focus: var(--lgi-focus);
+  --lgi-action-danger: var(--lgi-danger);
+  --lgi-action-mark: var(--lgi-signal-mark);
+  --lgi-ink: #0b0f12;
+  --lgi-body: #30373c;
+  --lgi-muted: #5f6a71;
+  --lgi-ghost: #8c959b;
+  --lgi-meta: #6b767d;
+  --lgi-signal: #c63214;
+  --lgi-signal-hover: #c63214;
+  --lgi-signal-ink: #c63214;
+  --lgi-signal-mark: #f24a23;
+  --lgi-success: #137557;
+  --lgi-warning: #8a5c00;
+  --lgi-danger: #b52b20;
+  --lgi-info: #335e72;
+  --lgi-unknown: #6b767d;
+  --lgi-border-solid: #0b0f12;
+  --lgi-weight-bold: 600;
+  --lgi-shadow-brutal: 2px 2px 0 var(--lgi-ink);
+  --lgi-shadow-brutal-lg: 3px 3px 0 var(--lgi-ink);
+  --lgi-hairline: color-mix(in srgb,var(--lgi-ink) 9%,transparent);
+  --lgi-border: color-mix(in srgb,var(--lgi-ink) 15%,transparent);
+  --lgi-border-strong: color-mix(in srgb,var(--lgi-ink) 22%,transparent);
+  --lgi-mesh-fine: color-mix(in srgb,var(--lgi-ink) 5.5%,transparent);
+  --lgi-mesh-major: color-mix(in srgb,var(--lgi-ink) 10%,transparent);
+  --lgi-signal-soft: color-mix(in srgb,var(--lgi-signal) 10%,transparent);
+  --lgi-signal-faint: color-mix(in srgb,var(--lgi-signal) 5%,transparent);
+  /* LIDS-UI-001 generated: end */
 }
 ```
 
@@ -369,7 +468,7 @@ L3 GEOMETRY   间距 / 字号 / 线宽 / 圆角 / 动效 五套阶梯
 | 命名结构 | 单层 `--lgi-*` 前缀 | L1/L2/L3 三层，组件只引用 L2/L3 | 全部样式表 | — |
 | 主信号色 | `--lgi-signal: #ef4f25`，单值双用 | `signal-fill #c63214`（承字）/ `signal-mark #f24a23`（仅色块） | 主按钮、选中态、徽章 | `ADR-04` |
 | 墨色 | `--lgi-ink: #111315` | `#0b0f12` | 全站文字与边框 | — |
-| 字重 | 含 500（`--lgi-weight-medium`） | 仅 400/600/700 | 全站排版 | `ADR-02` |
+| 排版角色 | 当前旧`--lgi-*`字号、行高、字重及字体栈 | [B唯一标准](typography.json)，按角色整体映射 | 全站排版 | ALIGN-SCALE-B取代旧ADR-02及七阶值；业务未迁移 |
 | 字号下限 | 9px（`--lgi-text-calibration`） | 11px | 校准刻度、系统标签 | `ADR-03` |
 | 线宽 | [primitives.md](primitives.md) 曾规定"全站只有两级线宽"（1/2px） | 4 档（1/2/3/5）+ 硬投影 6px | 分隔、Tab、信号条 | — |
 | 圆角 | 0/2/4/8 | 0/4/8/pill（去掉 2px，新增 pill） | 标签、状态点 | — |

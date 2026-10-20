@@ -1,3 +1,4 @@
+import { ActionButton } from '../../../shared/ActionButton';
 import { useEffect, useId, useRef, useState } from 'react';
 import { ApiError } from '../../../shared/api';
 import { ModalDialog } from '../../../corpus/ModalDialog';
@@ -112,9 +113,9 @@ export function RelayerBatchDialog({ initial, onClose, onChange }: RelayerBatchD
           <button type="button" disabled={running !== 'idle'} onClick={() => void run('preview')}>
             预览 / 刷新范围
           </button>
-          <button type="button" className={styles.primary} disabled={running !== 'idle' || !batch.items.some(item => item.state !== 'done' && item.plan)} onClick={() => void run('execute')}>
+          <ActionButton variant="primary" disabled={running !== 'idle' || !batch.items.some(item => item.state !== 'done' && item.plan)} onClick={() => void run('execute')}>
             开始 / 继续整理
-          </button>
+          </ActionButton>
           <button type="button" disabled={running === 'idle'} onClick={() => (paused.current = true)}>
             处理完当前篇后暂停
           </button>

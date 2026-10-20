@@ -8,50 +8,30 @@
   --lgi-canvas-glass: rgba(255, 255, 255, 0.88);
 
   /* Ink */
-  --lgi-ink: #111315;
-  --lgi-body: #4a5057;
-  --lgi-muted: #6f747a;
-  --lgi-ghost: #9aa0a6;
   --lgi-on-dark: #ffffff;
 
   /* Signature signal */
-  --lgi-signal: #ef4f25;
-  --lgi-signal-hover: #c73a15;
-  --lgi-signal-ink: #a73317;
-  --lgi-signal-soft: rgba(239, 79, 37, 0.10);
-  --lgi-signal-faint: rgba(239, 79, 37, 0.05);
   /* Shared keyboard focus ring; distinct from the product signal state. */
   --lgi-focus: #335e72;
 
   /* Semantic: five axes, each carries text / fill / soft.
    * Fill values stay saturated for solid badges; text values are darkened
    * so they clear 4.5:1 on the white canvas. Never swap the two roles. */
-  --lgi-success: #05674a;
   --lgi-success-dot: #0e9e6e;
   --lgi-success-soft: rgba(14, 158, 110, 0.10);
-  --lgi-warning: #a67a04;
   --lgi-warning-dot: #eaaa05;
   --lgi-warning-soft: rgba(234, 170, 5, 0.12);
-  --lgi-danger: #a42001;
   --lgi-danger-dot: #a42001;
   --lgi-danger-soft: rgba(164, 32, 1, 0.08);
-  --lgi-info: #42555a;
   --lgi-info-dot: #8d9a9d;
   --lgi-info-soft: rgba(141, 154, 157, 0.14);
-  --lgi-unknown: #6f747a;
   --lgi-unknown-dot: #c3c8cb;
   --lgi-unknown-soft: #e7eaeb;
 
   /* Borders */
-  --lgi-hairline: rgba(17, 19, 21, 0.09);
-  --lgi-border: rgba(17, 19, 21, 0.15);
-  --lgi-border-strong: rgba(17, 19, 21, 0.22);
-  --lgi-border-solid: #111315;
 
   /* Instrument mesh: a measurement field, not decoration. Dots read lighter than
    * a ruled grid at the same weight, so the surface stays quiet while gaining depth. */
-  --lgi-mesh-fine: rgba(17, 19, 21, 0.055);
-  --lgi-mesh-major: rgba(17, 19, 21, 0.10);
 
   /* Observation stream: the one deliberately dark surface in the product. Mog approved
    * keeping the V4 Gold Master's low-luminance instrument terminal on 2026-08-26; it is a
@@ -69,26 +49,13 @@
   --lgi-stream-line: rgba(99, 217, 165, 0.2);
 
   /* V8 action family: opt-in only; existing page tokens retain their values. */
-  --lgi-action-fill: #c63214;
-  --lgi-action-ink: #0b0f12;
-  --lgi-action-ink-shadow: #151b1f;
-  --lgi-action-paper: #ffffff;
   --lgi-action-sunken: #f5f7f8;
-  --lgi-action-secondary: #5f6a71;
-  --lgi-action-disabled: #8c959b;
   --lgi-action-border: #c6ced3;
-  --lgi-action-focus: #335e72;
-  --lgi-action-danger: #b52b20;
   --lgi-action-danger-soft: #fff0ed;
-  --lgi-action-mark: #f24a23;
-  --lgi-action-lattice-light: repeating-conic-gradient(rgba(255,255,255,.36) 0% 25%,transparent 0% 50%);
-  --lgi-action-lattice-ink: repeating-conic-gradient(rgba(11,15,18,.16) 0% 25%,transparent 0% 50%);
   --lgi-action-lattice-danger: repeating-conic-gradient(rgba(181,43,32,.2) 0% 25%,transparent 0% 50%);
   --lgi-action-lattice-dim: repeating-conic-gradient(rgba(11,15,18,.07) 0% 25%,transparent 0% 50%);
   --lgi-action-mask: linear-gradient(90deg,#0000 0 8%,#00000026 8% 22%,#0000004d 22% 36%,#00000073 36% 50%,#0000009e 50% 64%,#000000c4 64% 78%,#000000e8 78% 90%,#000 90% 100%);
   --lgi-action-quiet-ruler: repeating-linear-gradient(90deg,var(--lgi-action-mark) 0 8px,transparent 8px 10px);
-  --lgi-action-font-size: 13px;
-  --lgi-action-line-height: 1.6;
   --lgi-action-height: 40px;
   --lgi-action-quiet-height: 28px;
   --lgi-action-gap: 4px;
@@ -96,13 +63,8 @@
   --lgi-action-quiet-padding: 2px;
   --lgi-action-border-width: 1px;
   --lgi-action-rail-width: 2px;
-  --lgi-action-lattice-cell: 16px;
   --lgi-action-lattice-hover: 40%;
   --lgi-action-lattice-active: 100%;
-  --lgi-action-shadow-idle: 4px;
-  --lgi-action-shadow-hover: 5px;
-  --lgi-action-hover-shift: -1px;
-  --lgi-action-press-shift: 1px;
   --lgi-action-focus-offset: 2px;
   --lgi-action-focus-gap-width: 3px;
   --lgi-action-focus-idle-gap: 5px;
@@ -127,39 +89,19 @@
   --lgi-reading-cover: #7c5042;
 
   /* Typography */
-  --lgi-font-sans: "PingFang SC", "Noto Sans SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
-  --lgi-font-mono: "SFMono-Regular", "JetBrains Mono", "Roboto Mono", "Noto Sans Mono CJK SC", ui-monospace, monospace;
   /* Three type roles, three jobs. Sans states what the system knows; mono carries the things a
    * machine assigned — refs, counts, timestamps, state codes; serif is reserved for material
    * quoted verbatim out of a source. A reader must be able to tell someone's own sentence from
    * the system's description of it without reading either, so serif is never used for chrome. */
-  --lgi-font-evidence: "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", "STSong", Georgia, serif;
-  --lgi-font-display: "Arial Narrow", "DIN Condensed", "Roboto Condensed", "Helvetica Neue", var(--lgi-font-sans);
 
   /* Applied to the right edge of a solid Ink action or an active plate, under a fade mask, so
    * the mark reads as an instrument surface rather than as decoration. It must never sit under
    * a label: mask the fade so the texture starts after the text ends. */
   --lgi-mosaic-on-dark: conic-gradient(from 90deg, rgba(255, 255, 255, 0.22) 25%, transparent 0 50%, rgba(255, 255, 255, 0.22) 0 75%, transparent 0);
   --lgi-mosaic-on-light: conic-gradient(from 90deg, rgba(17, 19, 21, 0.13) 25%, transparent 0 50%, rgba(17, 19, 21, 0.13) 0 75%, transparent 0);
-  --lgi-text-display: clamp(3rem, 6vw, 5.5rem);
-  --lgi-text-hero: 3rem;
-  --lgi-text-page-title: 1.75rem;
-  --lgi-text-section: 1.125rem;
-  --lgi-text-longform: 1rem;
-  --lgi-text-body: 0.875rem;
-  --lgi-text-data: 0.75rem;
-  --lgi-text-label: 0.6875rem;
-  --lgi-text-calibration: 0.5625rem;
   --lgi-weight-regular: 400;
   --lgi-weight-medium: 500;
   --lgi-weight-semibold: 600;
-  --lgi-weight-bold: 700;
-  --lgi-lh-display: 0.96;
-  --lgi-lh-title: 1.1;
-  --lgi-lh-heading: 1.25;
-  --lgi-lh-data: 1.4;
-  --lgi-lh-body: 1.55;
-  --lgi-lh-longform: 1.65;
   --lgi-ls-tight: -0.04em;
   --lgi-ls-normal: 0;
   --lgi-ls-data: 0.04em;
@@ -191,8 +133,6 @@
   --lgi-shadow-overlay: 0 12px 30px rgba(17, 19, 21, 0.11);
   --lgi-shadow-stage: 0 24px 25px rgba(17, 19, 21, 0.05);
   --lgi-shadow-hard: 8px 8px 0 rgba(17, 19, 21, 0.07);
-  --lgi-shadow-brutal: 4px 4px 0 #111315;
-  --lgi-shadow-brutal-lg: 7px 7px 0 #111315;
 
   /* Layout */
   --lgi-page-max-l3: 1720px;
@@ -235,4 +175,151 @@
 
   /* WebGL quality */
   --lgi-scene-pixel-ratio-max: 1.75;
+
+  /* LIDS-UI-001 generated: start */
+  --lgi-font-ui: "Linggan UI Digits","Linggan Albert","Linggan OPPO",Arial,Helvetica,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  --lgi-font-chinese: "Linggan OPPO","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  --lgi-font-english: "Linggan Albert","Linggan OPPO",Arial,Helvetica,system-ui,sans-serif;
+  --lgi-font-display: "Linggan Alumni","Linggan Albert","Linggan OPPO","Arial Narrow",Arial,system-ui,sans-serif;
+  --lgi-font-data: "Linggan Manrope","Linggan OPPO",Arial,Helvetica,system-ui,sans-serif;
+  --lgi-font-code: "Linggan Mono","Linggan OPPO",monospace;
+  --lgi-font-brand: "SFMono-Regular","SF Mono",ui-monospace,monospace;
+  --lgi-font-evidence: var(--lgi-font-chinese);
+  --lgi-type-aux-size: 11px;
+  --lgi-type-aux-weight: 400;
+  --lgi-type-aux-leading: 1.6;
+  --lgi-type-label-size: 12px;
+  --lgi-type-label-weight: 500;
+  --lgi-type-label-leading: 1.5;
+  --lgi-type-control-size: 13px;
+  --lgi-type-control-weight: 500;
+  --lgi-type-control-leading: 1.5;
+  --lgi-type-body-size: 14px;
+  --lgi-type-body-weight: 400;
+  --lgi-type-body-leading: 1.75;
+  --lgi-type-reading-size: 16px;
+  --lgi-type-reading-weight: 400;
+  --lgi-type-reading-leading: 1.85;
+  --lgi-type-section-size: 18px;
+  --lgi-type-section-weight: 600;
+  --lgi-type-section-leading: 1.5;
+  --lgi-type-object-size: 22px;
+  --lgi-type-object-weight: 600;
+  --lgi-type-object-leading: 1.4;
+  --lgi-type-page-size: 24px;
+  --lgi-type-page-weight: 600;
+  --lgi-type-page-leading: 1.4;
+  --lgi-type-data-size: 14px;
+  --lgi-type-data-weight: 500;
+  --lgi-type-data-leading: 1.5;
+  --lgi-type-metric-size: 24px;
+  --lgi-type-metric-weight: 600;
+  --lgi-type-metric-leading: 1.3;
+  --lgi-type-metric-large-size: 44px;
+  --lgi-type-metric-large-weight: 600;
+  --lgi-type-metric-large-leading: 1.1;
+  --lgi-type-display-size: 88px;
+  --lgi-type-display-weight: 300;
+  --lgi-type-display-leading: 1.04;
+  --lgi-type-display-compact-size: 64px;
+  --lgi-type-display-compact-weight: 300;
+  --lgi-type-display-compact-leading: 1.04;
+  --lgi-type-display-sample-size: 40px;
+  --lgi-type-display-sample-weight: 400;
+  --lgi-type-display-sample-leading: 1.1;
+  --lgi-type-input-size: 13px;
+  --lgi-type-input-weight: 400;
+  --lgi-type-input-leading: 1.5;
+  --lgi-focus-warm: #fffaf7;
+  --lgi-focus-inset: 2px;
+  --lgi-shell-side: 160px;
+  --lgi-shell-collapsed: 64px;
+  --lgi-shell-icon: 18px;
+  --lgi-ledger-row: 44px;
+  --lgi-control-tail: 24px;
+  --lgi-control-pitch: 8px;
+  --lgi-secondary-tail: 7px;
+  --lgi-secondary-pitch: 4px;
+  --lgi-domain-tail: 28px;
+  --lgi-shell-pitch: 6px;
+  --lgi-context-major: 56px;
+  --lgi-context-fine: 14px;
+  --lgi-action-shadow-idle: 2px;
+  --lgi-action-shadow-hover: 3px;
+  --lgi-action-hover-shift: -1px;
+  --lgi-action-press-shift: 2px;
+  --lgi-action-line-height: 1.5;
+  --lgi-action-lattice-cell: 8px;
+  --lgi-action-lattice-light: repeating-conic-gradient(rgb(255 255 255 / 0.28) 0% 25%,transparent 0% 50%);
+  --lgi-action-lattice-ink: repeating-conic-gradient(color-mix(in srgb,var(--lgi-ink) 13%,transparent) 0% 25%,transparent 0% 50%);
+  --lgi-ledger-col-name: 144px;
+  --lgi-ledger-col-id: 132px;
+  --lgi-ledger-col-domain: 100px;
+  --lgi-ledger-col-source: 122px;
+  --lgi-ledger-col-scope: 112px;
+  --lgi-ledger-col-mode: 190px;
+  --lgi-ledger-col-rank: 112px;
+  --lgi-ledger-col-details: 100px;
+  --lgi-ledger-col-comments: 100px;
+  --lgi-ledger-col-reused: 100px;
+  --lgi-ledger-col-added: 112px;
+  --lgi-ledger-col-cumulative: 112px;
+  --lgi-ledger-col-stage: 176px;
+  --lgi-ledger-col-next: 240px;
+  --lgi-ledger-col-created: 140px;
+  --lgi-ledger-col-updated: 140px;
+  --lgi-ledger-col-action: 88px;
+  --lgi-font-sans: var(--lgi-font-ui);
+  --lgi-font-mono: var(--lgi-font-data);
+  --lgi-text-display: var(--lgi-type-display-size);
+  --lgi-text-hero: var(--lgi-type-metric-large-size);
+  --lgi-text-page-title: var(--lgi-type-page-size);
+  --lgi-text-section: var(--lgi-type-section-size);
+  --lgi-text-longform: var(--lgi-type-reading-size);
+  --lgi-text-body: var(--lgi-type-body-size);
+  --lgi-text-data: var(--lgi-type-data-size);
+  --lgi-text-label: var(--lgi-type-label-size);
+  --lgi-text-calibration: var(--lgi-type-aux-size);
+  --lgi-lh-display: var(--lgi-type-display-leading);
+  --lgi-lh-title: var(--lgi-type-page-leading);
+  --lgi-lh-heading: var(--lgi-type-section-leading);
+  --lgi-lh-data: var(--lgi-type-data-leading);
+  --lgi-lh-body: var(--lgi-type-body-leading);
+  --lgi-lh-longform: var(--lgi-type-reading-leading);
+  --lgi-action-font-size: var(--lgi-type-control-size);
+  --lgi-action-fill: var(--lgi-signal);
+  --lgi-action-ink: var(--lgi-ink);
+  --lgi-action-ink-shadow: var(--lgi-ink);
+  --lgi-action-paper: var(--lgi-canvas);
+  --lgi-action-secondary: var(--lgi-muted);
+  --lgi-action-disabled: var(--lgi-ghost);
+  --lgi-action-focus: var(--lgi-focus);
+  --lgi-action-danger: var(--lgi-danger);
+  --lgi-action-mark: var(--lgi-signal-mark);
+  --lgi-ink: #0b0f12;
+  --lgi-body: #30373c;
+  --lgi-muted: #5f6a71;
+  --lgi-ghost: #8c959b;
+  --lgi-meta: #6b767d;
+  --lgi-signal: #c63214;
+  --lgi-signal-hover: #c63214;
+  --lgi-signal-ink: #c63214;
+  --lgi-signal-mark: #f24a23;
+  --lgi-success: #137557;
+  --lgi-warning: #8a5c00;
+  --lgi-danger: #b52b20;
+  --lgi-info: #335e72;
+  --lgi-unknown: #6b767d;
+  --lgi-border-solid: #0b0f12;
+  --lgi-weight-bold: 600;
+  --lgi-shadow-brutal: 2px 2px 0 var(--lgi-ink);
+  --lgi-shadow-brutal-lg: 3px 3px 0 var(--lgi-ink);
+  --lgi-hairline: color-mix(in srgb,var(--lgi-ink) 9%,transparent);
+  --lgi-border: color-mix(in srgb,var(--lgi-ink) 15%,transparent);
+  --lgi-border-strong: color-mix(in srgb,var(--lgi-ink) 22%,transparent);
+  --lgi-mesh-fine: color-mix(in srgb,var(--lgi-ink) 5.5%,transparent);
+  --lgi-mesh-major: color-mix(in srgb,var(--lgi-ink) 10%,transparent);
+  --lgi-signal-soft: color-mix(in srgb,var(--lgi-signal) 10%,transparent);
+  --lgi-signal-faint: color-mix(in srgb,var(--lgi-signal) 5%,transparent);
+  /* LIDS-UI-001 generated: end */
 }

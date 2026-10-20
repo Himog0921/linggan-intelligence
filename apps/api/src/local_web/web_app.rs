@@ -50,6 +50,23 @@ const ASSET_TYPES: &[(&str, &str)] = &[
     ("woff2", "font/woff2"),
 ];
 
+/// 这些字体和许可文件不是 Vite 指纹产物，但属于本次发布时明确随前端带上的固定原件。
+/// 用精确清单而非放宽目录服务：字体 URL 与可见许可可读，其他嵌套文件仍不可枚举或读取。
+const FONT_ASSETS: &[(&str, &str)] = &[
+    ("fonts/lids/NOTICE.txt", "text/plain; charset=utf-8"),
+    ("fonts/lids/manifest.json", "application/json"),
+    ("fonts/lids/albertsans/AlbertSans[wght].woff2", "font/woff2"),
+    ("fonts/lids/albertsans/OFL.txt", "text/plain; charset=utf-8"),
+    ("fonts/lids/alumnisans/AlumniSans[wght].woff2", "font/woff2"),
+    ("fonts/lids/alumnisans/OFL.txt", "text/plain; charset=utf-8"),
+    ("fonts/lids/jetbrainsmono/JetBrainsMono[wght].woff2", "font/woff2"),
+    ("fonts/lids/jetbrainsmono/OFL.txt", "text/plain; charset=utf-8"),
+    ("fonts/lids/manrope/Manrope[wght].woff2", "font/woff2"),
+    ("fonts/lids/manrope/OFL.txt", "text/plain; charset=utf-8"),
+    ("fonts/lids/opposans/OPPOSans40.ttf", "font/ttf"),
+    ("fonts/lids/opposans/LICENSE.txt", "text/plain; charset=utf-8"),
+];
+
 #[derive(Clone)]
 pub(super) struct WebAppConfig {
     dist: Arc<PathBuf>,
@@ -97,7 +114,7 @@ pub(super) fn routes_for<S: Clone + Send + Sync + 'static>(config: WebAppConfig)
     pages
         .layer(middleware::from_fn(local_comment_study_guard))
         .route("/login", get(login_entry))
-        .route("/ui-assets/{file}", get(asset))
+        .route("/ui-assets/{*file}", get(asset))
         .with_state(config)
 }
 
@@ -209,10 +226,11 @@ async fn asset(State(config): State<WebAppConfig>, Path(file): Path<String>) -> 
     let mut response = bytes.into_response();
     let headers = response.headers_mut();
     headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
-    // 文件名带内容指纹，内容变了名字就变，可以长期缓存；旧名字在新构建里自然消失。
+    // Vite 文件名带内容指纹，内容变了名字就变，可以长期缓存；旧名字在新构建里自然消失。
+    // 许可原件与原字体没有指纹，故不得标记 immutable。
     headers.insert(
         header::CACHE_CONTROL,
-        HeaderValue::from_static("public, max-age=31536000, immutable"),
+        HeaderValue::from_static(asset_cache_control(&file)),
     );
     headers.insert(
         header::X_CONTENT_TYPE_OPTIONS,
@@ -222,8 +240,11 @@ async fn asset(State(config): State<WebAppConfig>, Path(file): Path<String>) -> 
 }
 
 /// 只接受单段文件名：字母、数字、短横线、下划线，用点分段且必须有扩展名。
-/// 不可能出现路径分隔符或 `..`，也就读不到产物目录以外的文件。
+/// 例外是 `FONT_ASSETS` 的逐项许可字体路径；它们同样不是可浏览目录。
 fn asset_content_type(file: &str) -> Option<&'static str> {
+    if let Some((_, content_type)) = FONT_ASSETS.iter().find(|(path, _)| *path == file) {
+        return Some(*content_type);
+    }
     let well_formed = file.len() <= 128
         && file.contains('.')
         && file.split('.').all(|part| {
@@ -245,6 +266,14 @@ fn asset_content_type(file: &str) -> Option<&'static str> {
         .iter()
         .find(|(known, _)| *known == extension)
         .map(|(_, content_type)| *content_type)
+}
+
+fn asset_cache_control(file: &str) -> &'static str {
+    if FONT_ASSETS.iter().any(|(path, _)| *path == file) {
+        "public, max-age=3600, must-revalidate"
+    } else {
+        "public, max-age=31536000, immutable"
+    }
 }
 
 /// `/health` 里的前端产物状态：给人和部署脚本核对「界面和后台是不是同一个版本」。

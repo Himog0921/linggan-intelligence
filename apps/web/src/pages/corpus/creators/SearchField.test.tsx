@@ -89,6 +89,24 @@ describe('搜索框', () => {
     expect(onCommit).toHaveBeenCalledWith('');
   });
 
+  it('清空取消尚未到期的查询，不会在250ms后把旧词写回来', () => {
+    const { onCommit } = setup();
+    fireEvent.change(input(), { target: { value: '尚未提交' } });
+    fireEvent.click(screen.getByRole('button', { name: '清空搜索' }));
+    act(() => vi.advanceTimersByTime(300));
+    expect(onCommit.mock.calls).toEqual([['']]);
+    expect(input()).toHaveValue('');
+    expect(input()).toHaveFocus();
+  });
+
+  it('后退或外部查询改变时取消旧输入定时器，不覆盖已经恢复的URL条件', () => {
+    const { onCommit, onModeChange, rerender } = setup('旧词');
+    fireEvent.change(input(), { target: { value: '尚未发出' } });
+    rerender(<SearchField mode="author" value="返回的查询" onCommit={onCommit} onModeChange={onModeChange} />);
+    act(() => vi.advanceTimersByTime(300));
+    expect(input()).toHaveValue('返回的查询'); expect(onCommit).not.toHaveBeenCalled();
+  });
+
   it('无词时显示「/」提示', () => {
     setup('');
     expect(screen.getByText('/')).toBeInTheDocument();
@@ -99,7 +117,8 @@ describe('搜索框', () => {
     const { onModeChange, rerender, onCommit, handle } = setup();
     expect(input()).toHaveAttribute('placeholder', '昵称、平台账号、公开简介');
     fireEvent.change(input(), { target: { value: ' 词 ' } });
-    fireEvent.change(screen.getByRole('combobox', { name: '搜索范围' }), { target: { value: 'work' } });
+    fireEvent.click(screen.getByRole('combobox', { name: '搜索范围' }));
+    fireEvent.click(screen.getByRole('option', { name: '作品内容' }));
     expect(onModeChange).toHaveBeenCalledWith('work', '词');
     rerender(<SearchField mode="work" value="" onCommit={onCommit} onModeChange={onModeChange} handle={handle} />);
     expect(input()).toHaveAttribute('placeholder', '标题、正文、图文识别或内容方向');

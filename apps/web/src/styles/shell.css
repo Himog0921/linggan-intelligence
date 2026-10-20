@@ -1,160 +1,89 @@
-/* Shared shell layer for every Linggan local page: page-local geometry variables,
- * reset, the 128px global header, the context row and the 216px local rail.
- * Colour is never authored here — every value resolves to a LIDS token in lids_tokens.css.
- * Page-specific styling belongs in that page's own stylesheet, loaded after this one. */
-/* LOCAL-001A V7 page-local fidelity layer. It consumes LIDS runtime tokens
- * but keeps V7 exact geometry and visual constants private to this route. */
+/* LIDS shared shell: A capacity, M2 material, B type. Pages own content, not this shell. */
 :root {
- /* Colour is never authored here. Every value below resolves to a LIDS token so the
-  * page cannot drift from the single source in lids_tokens.css. Geometry stays local. */
- --v7-black:var(--lgi-ink); --v7-white:var(--lgi-canvas); --v7-gray:var(--lgi-canvas-low);
- --v7-sunken:var(--lgi-canvas-sunken); --v7-line:var(--lgi-hairline); --v7-line-strong:var(--lgi-border);
- --v7-red:var(--lgi-signal); --v7-red-hover:var(--lgi-signal-hover); --v7-soft-red:var(--lgi-signal-soft); --v7-focus:var(--lgi-focus);
- --v7-muted:var(--lgi-muted); --v7-ghost:var(--lgi-ghost);
- --v7-ok:var(--lgi-success); --v7-ok-fill:var(--lgi-success-dot); --v7-ok-soft:var(--lgi-success-soft);
- --v7-warn:var(--lgi-warning); --v7-warn-fill:var(--lgi-warning-dot); --v7-warn-soft:var(--lgi-warning-soft);
- --v7-bad:var(--lgi-danger); --v7-bad-fill:var(--lgi-danger-dot); --v7-bad-soft:var(--lgi-danger-soft);
- --v7-info:var(--lgi-info); --v7-info-fill:var(--lgi-info-dot); --v7-info-soft:var(--lgi-info-soft);
- --v7-unknown:var(--lgi-unknown); --v7-unknown-fill:var(--lgi-unknown-dot); --v7-unknown-soft:var(--lgi-unknown-soft);
- --v7-brutal:var(--lgi-shadow-brutal); --v7-brutal-lg:var(--lgi-shadow-brutal-lg);
- --v7-t-press:var(--lgi-duration-press); --v7-t-state:var(--lgi-duration-state); --v7-ease:var(--lgi-ease-ui);
- --v7-header-height:128px; --v7-global-row:78px; --v7-context-row:50px;
- --v7-side-width:216px; --v7-inspector-width:440px; }
-* { box-sizing:border-box; } html,body { height:100%; overflow:hidden; } body { margin:0; min-width:320px; background:var(--v7-white); color:var(--v7-black); font:14px/1.45 var(--lgi-font-sans); } button,input { font:inherit; } button { cursor:default; } button:disabled,input:disabled { cursor:not-allowed; opacity:1; }
-.v7-mono,.v7-label,dt { font-family:var(--lgi-font-mono); }
-
-/* ── DESIGN-003 · Chinese-first typography for the shell ────────────────────
- * Chinese carries the label; Latin and status codes drop to a mono annotation, and
- * Chinese never takes the mono face or the caps tracking that goes with it.
- * These rules style components React AppShell renders for every page — the primary nav and
- * the local rail — so they belong here. While they lived in one page's stylesheet the
- * two surfaces drifted: the same readout rendered 11px on Corpus and 8px on Collection,
- * which reads as one header with two type standards. */
-.v7-nav-zh { font:600 13px/1 var(--lgi-font-sans); letter-spacing:.01em; }
-.v7-side-nav span { font-family:var(--lgi-font-sans); }
-
-/* Focus is a state, not decoration: every reachable control in the themed document shows the
- * same ring, including fixed drawers rendered beside `.v7-app` and SVG links inside them.
- * The theme + interactive-set + state specificity deliberately outranks older page-local class
- * rules that load later, without !important or changing any non-focus/error styling. */
-[data-theme="linggan-intelligence"] :is(a,button,input,select,textarea,summary,[tabindex]):focus-visible { outline:2px solid var(--v7-focus); outline-offset:2px; }
-@media (prefers-reduced-motion:reduce) { .v7-app * { transition:none !important; animation:none !important; } .v7-side-nav[aria-current="page"] { transform:none; } }
-
-/* ── DESIGN-003 · Header reclaim, shared by every page ──────────────────────
- * A page states its own name three times before its content starts: the context row
- * breadcrumb, the local rail, and the h1. Only the h1 has to survive, and only for
- * assistive tech and document structure, so it goes visually hidden and the vertical
- * space returns to the content. The counts it used to sit beside move up into the
- * context row as .v7-kpi. These live in the shell rather than in one page's stylesheet
- * because the context row itself is rendered by React AppShell for every page. */
-.v7-sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden;
-  clip:rect(0 0 0 0); clip-path:inset(50%); white-space:nowrap; border:0; }
-.v7-kpi { display:inline-flex; align-items:baseline; gap:var(--lgi-space-2); }
-.v7-kpi em { color:var(--v7-muted); font:500 11px var(--lgi-font-sans); font-style:normal; letter-spacing:0; }
-.v7-kpi b { color:var(--v7-black); font:700 12px var(--lgi-font-mono); letter-spacing:.03em; }
-.v7-kpi small { color:var(--v7-ghost); font:var(--lgi-weight-regular) var(--lgi-text-label)/1.2 var(--lgi-font-sans); letter-spacing:0; }
-.v7-vr { width:1px; height:16px; background:var(--v7-line-strong); }
-
-/* V7 standardized 78px global row + 50px context row */
-.v7-app { height:100vh; min-height:0; display:grid; grid-template-rows:var(--v7-header-height) minmax(0,1fr); overflow:hidden; }.v7-global-header { height:var(--v7-header-height); background:var(--v7-white); position:relative; z-index:var(--lgi-z-header); }.v7-global-row { height:var(--v7-global-row); display:flex; align-items:stretch; border-bottom:2px solid var(--v7-black); background:var(--v7-white); }.v7-global-brand { width:340px; flex:0 0 340px; display:flex; align-items:center; gap:13px; padding:0 24px; border-right:1px solid var(--v7-line-strong); }.v7-li-mark { width:38px; height:38px; display:grid; place-items:center; background:var(--v7-red); color:var(--v7-white); border:2px solid var(--v7-black); box-shadow:var(--v7-brutal); font:900 15px/1 var(--lgi-font-mono); letter-spacing:.02em; transition:transform var(--v7-t-state) var(--v7-ease), box-shadow var(--v7-t-state) var(--v7-ease); }
-.v7-global-brand:hover .v7-li-mark { transform:translate(-2px,-2px); box-shadow:var(--v7-brutal-lg); }.v7-global-brand-copy { min-width:0; }.v7-global-brand-name { font-size:15px; font-weight:850; letter-spacing:-.02em; white-space:nowrap; }.v7-global-brand-sub { display:flex; align-items:baseline; gap:6px; margin-top:4px; white-space:nowrap; }.v7-brand-sub-zh { color:var(--v7-muted); font:600 11px/1.2 var(--lgi-font-sans); letter-spacing:.01em; }
-.v7-primary-nav { height:100%; display:flex; align-items:stretch; flex:0 0 auto; }.v7-primary-nav button,.v7-primary-nav a { position:relative; min-width:118px; padding:0 22px; border:0; background:var(--v7-white); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px; color:var(--v7-black); font-size:13px; font-weight:740; text-decoration:none; transition:background var(--v7-t-press) var(--v7-ease); }
-.v7-primary-nav a:focus-visible { outline:2px solid var(--v7-focus); outline-offset:2px; }
-.v7-primary-nav button:not([disabled]):hover,.v7-primary-nav a:not([aria-current="page"]):hover { background:var(--v7-gray); }.v7-primary-nav button[aria-current="page"]::after,.v7-primary-nav a[aria-current="page"]::after { content:""; position:absolute; left:18px; right:18px; bottom:0; height:5px; background:var(--v7-red); }/* One readout scale and one colour across the whole row. The current entry is marked by
- * the signal rule under it, not by darkening its readout: at this size a colour change
- * reads as a size change, so an inked current readout made the row look like it carried
- * two type standards. The scale itself is DESIGN-003's Latin annotation, declared once. */
-.v7-primary-nav .v7-nav-readout { display:flex; align-items:baseline; gap:5px; color:var(--v7-muted); line-height:1; }.v7-nav-state { color:var(--v7-muted); font:600 11px/1 var(--lgi-font-sans); letter-spacing:.01em; }/* Relative so the annotation stays 18% under whatever it annotates: this key appears beside
- * 26px counts and 11px labels alike, and one fixed size cannot serve both. */
-.v7-tech-key { display:inline; color:var(--v7-ghost); font:500 .82em/1.2 var(--lgi-font-mono); letter-spacing:.06em; white-space:nowrap; }.v7-global-flex { flex:1; min-width:40px; border-right:1px solid var(--v7-black); }.v7-global-system { display:flex; flex:0 0 auto; align-items:center; gap:12px; padding:0 22px; background:var(--v7-white); }.v7-system-boundary { height:37px; display:flex; flex:0 0 auto; align-items:center; gap:7px; padding:0 13px; border:1px solid var(--v7-black); background:var(--v7-warn-soft); color:var(--v7-black); white-space:nowrap; }.v7-system-boundary .v7-status-main { font:800 11px/1 var(--lgi-font-sans); letter-spacing:.01em; }.v7-system-boundary::before { content:""; width:7px; height:7px; flex:0 0 auto; border-radius:50%; background:var(--v7-warn-fill); }.v7-global-command { height:37px; width:158px; border:1px solid var(--v7-black); background:var(--v7-white); display:flex; align-items:center; justify-content:space-between; padding:0 11px; color:var(--v7-ghost); font-size:11px; }.v7-global-command kbd { min-width:22px; height:20px; display:grid; place-items:center; border-left:1px solid var(--v7-line); padding-left:8px; color:var(--v7-black); font:9px var(--lgi-font-mono); }
-.v7-context-row { height:var(--v7-context-row); display:grid; grid-template-columns:var(--v7-side-width) 1fr; border-bottom:1px solid var(--v7-black); background-color:var(--v7-gray); background-image:radial-gradient(circle at center, var(--lgi-mesh-major) 1.1px, transparent 1.1px),radial-gradient(circle at center, var(--lgi-mesh-fine) 1px, transparent 1px); background-size:56px 56px, 14px 14px; background-position:0 0, 0 0; }.v7-context-main { background:transparent; min-width:0; display:flex; align-items:center; justify-content:space-between; gap:24px; padding:0 24px 0 10px; }.v7-context-crumb { color:var(--v7-muted); font:800 10px var(--lgi-font-mono); letter-spacing:.055em; white-space:nowrap; }.v7-context-crumb b,.v7-context-current { color:var(--v7-black); }.v7-context-crumb .v7-status-main { color:var(--v7-black); font:700 12px/1 var(--lgi-font-sans); letter-spacing:.01em; }.v7-slash { color:var(--v7-ghost); padding:0 7px; }.v7-context-meta { display:flex; gap:16px; align-items:baseline; color:var(--v7-muted); font:800 9px var(--lgi-font-mono); letter-spacing:.055em; white-space:nowrap; }.v7-context-meta .v7-status-main { color:var(--v7-muted); font:600 11px/1 var(--lgi-font-sans); letter-spacing:.01em; }.v7-context-meta .v7-query-meta { color:var(--v7-black); }
-
-/* V7 216px Corpus rail */
-.v7-shell { min-height:0; display:grid; grid-template-columns:var(--v7-side-width) minmax(0,1fr); background:var(--v7-white); }.v7-side { min-height:0; overflow:auto; padding:18px 12px 14px; border-right:2px solid var(--v7-black); background:var(--v7-white); display:flex; flex-direction:column; }.v7-nav-label { padding:0 9px 10px; color:var(--v7-black); font:800 10px var(--lgi-font-mono); letter-spacing:.13em; }.v7-nav-label::after { content:attr(data-readout); display:block; margin-top:5px; color:var(--v7-ghost); font:500 11px var(--lgi-font-mono); letter-spacing:.11em; }.v7-nav-label[data-readout="CORPUS"]::after { content:"语料库"; font:600 11px/1 var(--lgi-font-sans); letter-spacing:.01em; }.v7-nav-label[data-readout="COLLECTION"]::after { content:"采集"; font:600 11px/1 var(--lgi-font-sans); letter-spacing:.01em; }.v7-side-nav { position:relative; width:100%; padding:12px 9px; border:0; background:transparent; display:flex; align-items:center; gap:9px; color:var(--v7-muted); text-align:left; font-size:12px; transition:background var(--v7-t-state) var(--v7-ease), color var(--v7-t-state) var(--v7-ease); }
-.v7-side-nav > i,.v7-side-nav > span { position:relative; }
-.v7-side-nav:focus-visible { outline:2px solid var(--v7-focus); outline-offset:2px; }
-/* Hover is the invitation to leave the current page, so it must never repaint the page
- * you are already on: the selected item keeps its inked block. Excluding aria-current here
- * rather than restating the selected colours after this rule keeps one owner per state. */
-.v7-side-nav:not([disabled]):not([aria-current="page"]):hover { background:var(--v7-gray); color:var(--v7-black); }
-.v7-side-nav:not([disabled]):not([aria-current="page"]):hover i { color:var(--v7-red); }.v7-side-nav i { width:22px; color:var(--v7-ghost); font:600 11px var(--lgi-font-mono); font-style:normal; letter-spacing:.04em; }.v7-side-nav[aria-current="page"] { background:var(--v7-black); color:var(--v7-white); box-shadow:var(--v7-brutal); transform:translate(-2px,-2px); }.v7-side-nav[aria-current="page"] i { color:var(--v7-red); }.v7-side-nav[aria-current="page"]::after { content:""; position:absolute; inset:0; pointer-events:none; opacity:.22; background-image:repeating-conic-gradient(var(--lgi-on-dark) 0 25%, transparent 0 50%); background-size:6px 6px; -webkit-mask-image:linear-gradient(to left, var(--lgi-ink) 0 24px, color-mix(in srgb, var(--lgi-ink) 60%, transparent) 24px 52px, color-mix(in srgb, var(--lgi-ink) 26%, transparent) 52px 84px, transparent 84px 100%); mask-image:linear-gradient(to left, var(--lgi-ink) 0 24px, color-mix(in srgb, var(--lgi-ink) 60%, transparent) 24px 52px, color-mix(in srgb, var(--lgi-ink) 26%, transparent) 52px 84px, transparent 84px 100%); }.v7-side-foot { margin-top:auto; padding:12px 9px 0; border-top:1px solid var(--v7-line); color:var(--v7-muted); font-size:10px; line-height:1.7; }.v7-side-dot { width:7px; height:7px; display:inline-block; margin-right:6px; border-radius:50%; background:var(--v7-warn-fill); box-shadow:0 0 0 3px var(--v7-warn-soft); }
-a.v7-side-nav { text-decoration:none; }
-
-/* ── Shell responsive geometry ──────────────────────────────────────────────
- * The header, context row and rail belong to every page, so their breakpoints do too.
- * These lived in the Evidence Library stylesheet, which left Collection with no header
- * adaptation at all. Both entry forms are named: the primary nav mixes served routes
- * (<a>) with unconnected responsibilities (<button>), and a rule that lists only one of
- * them silently resizes half the row. */
-/* Six primary entries (运营 joined in OPS-MIGRATION-001 D2) need about 1545px at full size and
- * 1362px at the first step, so the header compacts earlier than the rail and context row do.
- * The steps only narrow the header; the service-status capsule stays until the existing 1180 step. */
-@media(max-width:1560px){.v7-global-brand{width:285px;flex-basis:285px;padding-left:18px}.v7-primary-nav button,.v7-primary-nav a{min-width:104px;padding:0 15px}.v7-global-command{width:130px}.v7-context-meta{gap:14px}.v7-global-system{padding:0 14px}}
-@media(max-width:1380px){.v7-global-brand{width:230px;flex-basis:230px}.v7-global-brand-sub,.v7-global-flex{display:none}.v7-primary-nav button,.v7-primary-nav a{min-width:90px;padding:0 calc(var(--lgi-space-2) + var(--lgi-space-1)/2)}}
-@media(max-width:1240px){.v7-primary-nav .v7-tech-key{display:none}}
-@media(max-width:1180px){:root{--v7-side-width:190px}.v7-global-brand{width:230px;flex-basis:230px}.v7-global-brand-sub,.v7-global-flex,.v7-system-boundary,.v7-context-meta span:nth-child(2){display:none}.v7-primary-nav button,.v7-primary-nav a{min-width:90px;padding:0 10px}}
-@media(max-width:960px){.v7-primary-nav button,.v7-primary-nav a{min-width:80px;padding:0 var(--lgi-space-2)}}
-@media(max-width:900px){html,body{height:auto;min-height:100%;overflow:auto}.v7-app{height:auto;min-height:100vh;grid-template-rows:auto minmax(0,1fr);overflow:visible}.v7-global-header{height:auto}.v7-global-row{min-height:78px;height:auto;overflow-x:auto}.v7-global-brand{min-width:230px}.v7-primary-nav button,.v7-primary-nav a{min-width:86px}.v7-shell{grid-template-columns:1fr}.v7-side{border-right:0;border-bottom:2px solid var(--v7-black)}}
-/* A primary responsibility must never require a hidden horizontal swipe to be reached.
- * Five entries fit across a 390px viewport; narrower screens and future entries grow a
- * second grid row instead of clipping the last responsibility. The semantic nav remains
- * unchanged: this only changes how its existing controls share the available width. */
-@media(max-width:640px){
-  .v7-global-row{display:grid;grid-template-columns:minmax(0,1fr) auto;overflow:visible}
-  .v7-global-brand{width:auto;min-width:0;padding:0 14px;border-right:0}
-  .v7-primary-nav{grid-column:1/-1;height:auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(72px,1fr));overflow:visible;border-top:1px solid var(--v7-line)}
-  .v7-primary-nav button,.v7-primary-nav a{width:100%;min-width:0;min-height:58px;padding:8px 4px;gap:3px}
-  .v7-primary-nav .v7-nav-readout{min-width:0;flex-direction:column;align-items:center;gap:2px}
-  .v7-primary-nav .v7-tech-key{display:none}
-  .v7-nav-zh{font-size:12px;white-space:nowrap}
-  .v7-nav-state{white-space:nowrap}
-  .v7-global-system{padding:0 10px}
-  .v7-global-command{width:auto}
-  .v7-context-row{grid-template-columns:1fr;height:auto}
-  .v7-context-main{min-height:50px;padding:0 14px}
-  .v7-context-meta{display:none}
+ --v7-black:var(--lgi-ink);--v7-white:var(--lgi-canvas);--v7-gray:var(--lgi-canvas-low);
+ --v7-sunken:var(--lgi-canvas-sunken);--v7-line:var(--lgi-hairline);--v7-line-strong:var(--lgi-border);
+ --v7-red:var(--lgi-signal);--v7-red-hover:var(--lgi-signal-hover);--v7-soft-red:var(--lgi-signal-soft);--v7-focus:var(--lgi-focus);
+ --v7-muted:var(--lgi-muted);--v7-ghost:var(--lgi-ghost);
+ --v7-ok:var(--lgi-success);--v7-ok-fill:var(--lgi-success-dot);--v7-ok-soft:var(--lgi-success-soft);
+ --v7-warn:var(--lgi-warning);--v7-warn-fill:var(--lgi-warning-dot);--v7-warn-soft:var(--lgi-warning-soft);
+ --v7-bad:var(--lgi-danger);--v7-bad-fill:var(--lgi-danger-dot);--v7-bad-soft:var(--lgi-danger-soft);
+ --v7-info:var(--lgi-info);--v7-info-fill:var(--lgi-info-dot);--v7-info-soft:var(--lgi-info-soft);
+ --v7-unknown:var(--lgi-unknown);--v7-unknown-fill:var(--lgi-unknown-dot);--v7-unknown-soft:var(--lgi-unknown-soft);
+ --v7-brutal:var(--lgi-shadow-brutal);--v7-brutal-lg:var(--lgi-shadow-brutal-lg);
+ --v7-t-press:var(--lgi-duration-press);--v7-t-state:var(--lgi-duration-state);--v7-ease:var(--lgi-ease-ui);
+ --v7-global-row:calc(var(--lgi-space-16) + var(--lgi-space-2));--v7-context-row:calc(var(--lgi-space-12) + var(--lgi-space-2));--v7-header-height:calc(var(--v7-global-row) + var(--v7-context-row));
+ --v7-side-width:var(--lgi-shell-side);--v7-inspector-width:440px;
 }
-
-/* MODEL-PI-001: the user menu occupies the existing command slot. */
-.v7-personal-menu{position:relative}.v7-personal-menu summary{cursor:pointer;list-style:none;color:var(--lgi-ink);font-size:13px}.v7-personal-menu summary:focus-visible{outline:2px solid var(--lgi-focus);outline-offset:2px}.v7-personal-menu summary::-webkit-details-marker{display:none}.v7-personal-menu nav{position:absolute;right:0;top:100%;z-index:60;min-width:160px;padding:8px;background:var(--lgi-canvas);border:1px solid var(--lgi-border-strong)}.v7-personal-menu nav a{display:block;padding:12px;color:var(--lgi-ink);font-size:15px;text-decoration:none}.v7-personal-menu nav a:focus-visible{outline:2px solid var(--lgi-ink)}
-
-/* 面包屑里的领域选择器是当前观察对象，不是页面内筛选控件。原生 select 的菜单交给系统
-   绘制，必然带圆角、蓝色高亮和阴影；这里改用 disclosure + 链接，保留键盘语义，同时由
-   LIDS 接管打开态、当前项、焦点和密度。 */
+*{box-sizing:border-box}html,body{height:100%;overflow:hidden}body{margin:0;min-width:320px;background:var(--lgi-canvas);color:var(--lgi-ink);font:var(--lgi-type-body-weight) var(--lgi-type-body-size)/var(--lgi-type-body-leading) var(--lgi-font-ui)}
+button,input,select,textarea{font:inherit}button{cursor:pointer}button:disabled,input:disabled{cursor:not-allowed;opacity:1}
+.v7-mono{font-family:var(--lgi-font-data);font-variant-numeric:tabular-nums lining-nums}.v7-label,dt{font-family:var(--lgi-font-ui)}
+[data-theme="linggan-intelligence"] :is(a,button,input,select,textarea,summary,[tabindex]):focus-visible{outline:2px solid var(--lgi-focus);outline-offset:2px}
+.v7-sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.v7-kpi{display:inline-flex;align-items:baseline;gap:var(--lgi-space-2);color:var(--lgi-muted);font:var(--lgi-type-label-weight) var(--lgi-type-label-size)/var(--lgi-type-label-leading) var(--lgi-font-ui)}
+.v7-kpi em{font-style:normal}.v7-kpi b{color:var(--lgi-ink);font-family:var(--lgi-font-data);font-weight:var(--lgi-type-data-weight)}.v7-kpi small{display:none}.v7-vr{width:1px;height:var(--lgi-space-4);background:var(--lgi-border)}
+.v7-app{--v7-side-width:var(--lgi-shell-side);height:100dvh;min-height:0;display:grid;grid-template-rows:auto minmax(0,1fr);overflow:hidden}
+.v7-app[data-sidebar="collapsed"]{--v7-side-width:var(--lgi-shell-collapsed)}
+.v7-global-header{position:relative;z-index:var(--lgi-z-header);min-width:0;background:var(--lgi-canvas)}
+.v7-global-row{min-height:var(--v7-global-row);display:grid;grid-template-columns:max-content minmax(0,1fr) max-content;border-bottom:2px solid var(--lgi-ink)}
+.v7-global-brand{display:flex;align-items:center;gap:var(--lgi-space-3);padding:var(--lgi-space-3) var(--lgi-space-5)}
+.v7-li-mark{width:var(--lgi-space-10);height:var(--lgi-space-10);display:grid;place-items:center;background:var(--lgi-signal);color:var(--lgi-on-dark);box-shadow:var(--lgi-shadow-brutal);font:700 var(--lgi-type-section-size)/1 var(--lgi-font-brand)}
+.v7-global-brand-name{font:var(--lgi-weight-semibold) var(--lgi-type-body-size)/var(--lgi-type-body-leading) var(--lgi-font-english);white-space:nowrap}
+.v7-global-brand-sub{display:flex;align-items:baseline;gap:var(--lgi-space-2);color:var(--lgi-muted);font-size:var(--lgi-type-aux-size)}
+.v7-global-brand-sub .v7-tech-key{display:none}.v7-global-flex{display:none}
+.v7-primary-nav{min-width:0;display:flex;overflow-x:auto;align-items:stretch;scrollbar-width:thin}
+.v7-primary-nav :is(a,button){position:relative;flex:1 0 auto;min-width:var(--lgi-space-16);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--lgi-space-1);padding:var(--lgi-space-2) var(--lgi-space-3);border:0;background:transparent;color:var(--lgi-ink);text-decoration:none;white-space:nowrap}
+.v7-nav-zh{font:var(--lgi-type-control-weight) var(--lgi-type-control-size)/var(--lgi-type-control-leading) var(--lgi-font-ui)}
+.v7-primary-nav .v7-nav-readout{display:flex;gap:var(--lgi-space-1);color:var(--lgi-muted);font-size:var(--lgi-type-aux-size)}
+.v7-primary-nav .v7-tech-key{display:none}.v7-nav-state{font:var(--lgi-type-aux-weight) var(--lgi-type-aux-size)/var(--lgi-type-aux-leading) var(--lgi-font-ui)}
+.v7-primary-nav a:not([aria-current="page"]):hover{background:var(--lgi-canvas-low)}.v7-primary-nav :is(a,button)[aria-current="page"]::after{content:"";position:absolute;inset:auto var(--lgi-space-3) 0;height:var(--lgi-space-1);background:var(--lgi-signal-mark)}
+.v7-primary-nav button:disabled{color:var(--lgi-ghost)}
+.v7-tech-key{font:var(--lgi-type-aux-weight) var(--lgi-type-aux-size)/var(--lgi-type-aux-leading) var(--lgi-font-english);color:var(--lgi-meta)}
+.v7-global-system{display:flex;align-items:center;gap:var(--lgi-space-3);padding:var(--lgi-space-3) var(--lgi-space-5)}
+.v7-system-boundary{display:flex;align-items:center;gap:var(--lgi-space-2);white-space:nowrap;color:var(--lgi-muted);font-size:var(--lgi-type-aux-size)}
+.v7-system-boundary::before{content:"";width:var(--lgi-space-1);height:var(--lgi-space-1);background:var(--lgi-signal-mark)}
+.v7-personal-menu{position:relative}.v7-personal-menu summary{position:relative;display:flex;align-items:center;min-height:var(--lgi-action-height);padding:0 var(--lgi-space-4);border:1px solid var(--lgi-ink);font:var(--lgi-type-control-weight) var(--lgi-type-control-size)/var(--lgi-type-control-leading) var(--lgi-font-ui);list-style:none;cursor:pointer;background:var(--lgi-canvas)}
+.v7-personal-menu summary::after{content:"";position:absolute;inset:0 0 0 auto;width:var(--lgi-secondary-tail);background:var(--lgi-mosaic-on-light) 0 0/var(--lgi-secondary-pitch) var(--lgi-secondary-pitch);pointer-events:none}
+.v7-personal-menu summary::-webkit-details-marker,.v7-domain-picker summary::-webkit-details-marker{display:none}
+.v7-personal-menu nav{position:absolute;right:0;top:calc(100% + var(--lgi-space-2));z-index:var(--lgi-z-popover);min-width:var(--lgi-shell-side);padding:var(--lgi-space-1);border:1px solid var(--lgi-ink);background:var(--lgi-canvas);box-shadow:var(--lgi-shadow-brutal)}
+.v7-personal-menu nav a{display:block;padding:var(--lgi-space-3);color:var(--lgi-ink);font-size:var(--lgi-type-control-size);text-decoration:none}.v7-personal-menu nav a:hover{background:var(--lgi-canvas-low)}
+.v7-context-row{min-height:var(--v7-context-row);display:grid;grid-template-columns:var(--v7-side-width) minmax(0,1fr);border-bottom:1px solid var(--lgi-border);background-color:var(--lgi-canvas-low);background-image:radial-gradient(circle at center,var(--lgi-mesh-major) 1.1px,transparent 1.1px),radial-gradient(circle at center,var(--lgi-mesh-fine) 1px,transparent 1px);background-size:var(--lgi-context-major) var(--lgi-context-major),var(--lgi-context-fine) var(--lgi-context-fine)}
+.v7-context-main{min-width:0;display:flex;align-items:center;gap:var(--lgi-space-5);padding:var(--lgi-space-2) var(--lgi-space-6)}
+.v7-context-crumb{display:flex;align-items:center;flex:none;gap:var(--lgi-space-2);font:var(--lgi-type-control-weight) var(--lgi-type-control-size)/var(--lgi-type-control-leading) var(--lgi-font-ui);color:var(--lgi-muted);white-space:nowrap}
+.v7-context-crumb b,.v7-context-current{color:var(--lgi-ink);font-weight:var(--lgi-weight-medium)}.v7-slash{color:var(--lgi-ghost)}
+.v7-context-meta{min-width:0;margin-left:auto;display:flex;align-items:center;gap:var(--lgi-space-3);font:var(--lgi-type-aux-weight) var(--lgi-type-aux-size)/var(--lgi-type-aux-leading) var(--lgi-font-ui);color:var(--lgi-muted)}
+.v7-context-meta .v7-tech-key{display:none}.v7-context-meta small{font-size:var(--lgi-type-aux-size)}
+.v7-context-section-nav{align-self:stretch;display:flex;align-items:center;min-width:0;flex:1 1 auto}
+.v7-tertiary-nav{display:flex;align-items:stretch;gap:var(--lgi-space-5);min-width:0;max-width:100%;overflow-x:auto;scrollbar-width:thin}
+.v7-tertiary-nav button{position:relative;flex:none;min-height:var(--lgi-space-10);border:0;background:transparent;padding:0 var(--lgi-space-1);white-space:nowrap;color:var(--lgi-muted);font:var(--lgi-type-control-weight) var(--lgi-type-control-size)/var(--lgi-type-control-leading) var(--lgi-font-ui)}
+.v7-tertiary-nav button[aria-current="page"]{color:var(--lgi-ink)}.v7-tertiary-nav button[aria-current="page"]::after{content:"";position:absolute;inset:auto 0 0;height:2px;background:var(--lgi-signal-mark)}.v7-tertiary-select{display:none}
+.v7-context-count{position:relative;white-space:nowrap;font-size:var(--lgi-type-label-size)}.v7-context-count summary{display:flex;align-items:center;gap:var(--lgi-space-2);list-style:none;cursor:pointer}.v7-context-count summary::-webkit-details-marker{display:none}.v7-context-count summary b{font-family:var(--lgi-font-data);color:var(--lgi-ink)}
+.v7-context-count-detail{position:absolute;right:0;top:calc(100% + var(--lgi-space-3));z-index:var(--lgi-z-popover);min-width:calc(var(--lgi-space-24) * 2);padding:var(--lgi-space-3);border:1px solid var(--lgi-ink);background:var(--lgi-canvas);box-shadow:var(--lgi-shadow-brutal);color:var(--lgi-body)}.v7-context-count-detail p{display:flex;justify-content:space-between;gap:var(--lgi-space-4);margin:0;padding:var(--lgi-space-2) 0;border-bottom:1px solid var(--lgi-hairline)}.v7-context-count-detail small{display:block;white-space:normal}
 .v7-domain-picker{position:relative;display:inline-block;margin:0;color:var(--lgi-ink)}
-.v7-domain-picker summary{display:flex;align-items:center;gap:7px;min-height:28px;padding:0 8px;border:1px solid var(--lgi-ink);background:var(--lgi-ink);color:var(--lgi-canvas);font:700 11px/1 var(--lgi-font-sans);cursor:pointer;list-style:none}
-.v7-domain-picker summary::-webkit-details-marker{display:none}
-.v7-domain-picker summary small{color:rgba(255,255,255,.7);font:650 9px/1 var(--lgi-font-mono);letter-spacing:.04em}
-.v7-domain-picker summary i{width:7px;height:7px;margin-left:2px;border-right:1px solid currentColor;border-bottom:1px solid currentColor;transform:translateY(-2px) rotate(45deg)}
-.v7-domain-picker[open] summary{box-shadow:var(--lgi-shadow-brutal)}
-.v7-domain-picker summary:focus-visible,.v7-domain-picker nav a:focus-visible{outline:2px solid var(--lgi-focus);outline-offset:2px}
-.v7-domain-picker nav{position:absolute;top:calc(100% + 5px);left:0;z-index:60;display:grid;min-width:210px;padding:4px;border:1px solid var(--lgi-ink);background:var(--lgi-canvas);box-shadow:var(--lgi-shadow-brutal)}
-/* 每一项在自己的 38px 行高里垂直居中。baseline 会让名字与右侧计量各自贴基线，
- * 整块内容因此坐在行的上半部，看着像没对齐。 */
-.v7-domain-picker nav a{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:38px;padding:0 10px;color:var(--lgi-ink);font:650 13px/1.2 var(--lgi-font-sans);text-decoration:none;white-space:nowrap}
-.v7-domain-picker nav a:hover{background:var(--lgi-canvas-low)}
-.v7-domain-picker nav a[aria-current="page"]{background:var(--lgi-ink);color:var(--lgi-canvas)}
-.v7-domain-picker nav a small{color:var(--lgi-muted);font:650 9px/1 var(--lgi-font-mono);letter-spacing:.04em}
-.v7-domain-picker nav a[aria-current="page"] small{color:rgba(255,255,255,.7)}
+.v7-domain-picker summary{position:relative;display:flex;align-items:center;gap:var(--lgi-space-2);min-height:var(--lgi-space-8);padding:var(--lgi-space-1) var(--lgi-space-3);border:1px solid var(--lgi-ink);background:var(--lgi-ink);color:var(--lgi-on-dark);font:var(--lgi-type-control-weight) var(--lgi-type-control-size)/var(--lgi-type-control-leading) var(--lgi-font-ui);cursor:pointer;list-style:none}
+.v7-domain-picker summary::after{content:"";position:absolute;inset:0 0 0 auto;width:var(--lgi-domain-tail);background:var(--lgi-mosaic-on-dark) 0 0/var(--lgi-shell-pitch) var(--lgi-shell-pitch);pointer-events:none}
+.v7-domain-picker summary small{display:none}.v7-domain-picker summary i{width:var(--lgi-space-2);height:var(--lgi-space-2);border-right:1px solid currentColor;border-bottom:1px solid currentColor;transform:translateY(-2px) rotate(45deg)}
+.v7-domain-picker nav{position:absolute;top:calc(100% + var(--lgi-space-2));left:0;z-index:var(--lgi-z-popover);display:grid;min-width:calc(var(--lgi-space-24) * 2);max-width:calc(100vw - var(--lgi-space-8));padding:var(--lgi-space-1);border:1px solid var(--lgi-ink);background:var(--lgi-canvas);box-shadow:var(--lgi-shadow-brutal)}
+.v7-domain-picker nav a{display:flex;align-items:center;justify-content:space-between;gap:var(--lgi-space-4);min-height:var(--lgi-action-height);padding:var(--lgi-space-2) var(--lgi-space-3);color:var(--lgi-ink);font-size:var(--lgi-type-control-size);text-decoration:none;white-space:nowrap}.v7-domain-picker nav a:hover{background:var(--lgi-canvas-low)}.v7-domain-picker nav a[aria-current="page"]{background:var(--lgi-ink);color:var(--lgi-on-dark)}.v7-domain-picker nav a small{color:var(--lgi-muted);font-size:var(--lgi-type-aux-size)}.v7-domain-picker nav a[aria-current="page"] small{color:var(--lgi-on-dark)}
+.v7-shell{min-width:0;min-height:0;display:grid;grid-template-columns:var(--v7-side-width) minmax(0,1fr);background:var(--lgi-canvas)}
+.v7-side{min-width:0;min-height:0;overflow:auto;padding:var(--lgi-space-4) var(--lgi-space-2);border-right:2px solid var(--lgi-ink);background:var(--lgi-canvas);display:flex;flex-direction:column;gap:var(--lgi-space-3)}
+.v7-side-content{display:flex;flex-direction:column;flex:1;min-height:0;gap:var(--lgi-space-1)}
+.v7-side-toggle{display:flex;align-items:center;gap:var(--lgi-space-2);flex:none;min-height:var(--lgi-space-8);padding:var(--lgi-space-1) var(--lgi-space-2);border:0;background:transparent;color:var(--lgi-muted);font-size:var(--lgi-type-aux-size)}
+.v7-side :is(.v7-side-icon,.v7-side-toggle svg){flex:none;width:var(--lgi-shell-icon);height:var(--lgi-shell-icon);fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:square;stroke-linejoin:miter}
+.v7-nav-label{padding:var(--lgi-space-2);color:var(--lgi-muted);font-size:var(--lgi-type-aux-size)}.v7-nav-label::after{display:none}
+.v7-side-nav{position:relative;min-height:var(--lgi-ledger-row);padding:var(--lgi-space-3) var(--lgi-space-2);display:flex;align-items:center;gap:var(--lgi-space-2);border:0;background:transparent;color:var(--lgi-muted);text-align:left;font:var(--lgi-type-control-weight) var(--lgi-type-control-size)/var(--lgi-type-control-leading) var(--lgi-font-ui);text-decoration:none;white-space:nowrap}
+.v7-side-nav:not([aria-disabled="true"]):not([aria-current="page"]):hover{background:var(--lgi-canvas-low);color:var(--lgi-ink)}
+.v7-side-nav[aria-current="page"]{background:var(--lgi-ink);color:var(--lgi-on-dark);box-shadow:var(--lgi-shadow-brutal)}
+.v7-side-nav[aria-current="page"]::after{content:"";position:absolute;inset:0 0 0 auto;width:45%;pointer-events:none;background:var(--lgi-mosaic-on-dark) 0 0/var(--lgi-shell-pitch) var(--lgi-shell-pitch);mask-image:linear-gradient(to left,var(--lgi-ink),transparent)}
+.v7-side-nav i{color:var(--lgi-signal-mark);font-style:normal;font-family:var(--lgi-font-data)}
+.v7-side-foot{margin-top:auto;padding:var(--lgi-space-3) var(--lgi-space-2);border-top:1px solid var(--lgi-hairline);color:var(--lgi-muted);font-size:var(--lgi-type-aux-size);line-height:var(--lgi-type-aux-leading);overflow-wrap:anywhere}.v7-side-dot{display:inline-block;width:var(--lgi-space-1);height:var(--lgi-space-1);margin-right:var(--lgi-space-2);background:var(--lgi-signal-mark)}
+.v7-app[data-sidebar="collapsed"] .v7-side :is(.v7-side-nav>span,.v7-side-toggle>span,.v7-nav-label,.v7-side-foot,.ev-rail-count){display:none}
+.v7-app[data-sidebar="collapsed"] .v7-side-nav,.v7-app[data-sidebar="collapsed"] .v7-side-toggle{justify-content:center}
+@media(max-width:1100px){.v7-global-row{grid-template-columns:minmax(0,1fr) auto}.v7-primary-nav{grid-row:2;grid-column:1/-1;min-height:var(--lgi-space-16);border-top:1px solid var(--lgi-hairline)}.v7-global-system{grid-row:1;grid-column:2}.v7-global-brand-sub{display:none}.v7-context-main{flex-wrap:wrap;gap:var(--lgi-space-3)}.v7-context-section-nav{order:3;flex-basis:100%}.v7-system-boundary{display:none}}
+@media(max-width:820px){html,body{height:auto;min-height:100%;overflow:auto}.v7-app{height:auto;min-height:100dvh;overflow:visible;grid-template-rows:auto minmax(0,1fr)}.v7-global-brand{padding:var(--lgi-space-3)}.v7-global-system{padding:var(--lgi-space-3)}.v7-global-brand-name{font-size:var(--lgi-type-control-size)}.v7-context-row{grid-template-columns:minmax(0,1fr)}.v7-context-main{padding:var(--lgi-space-2) var(--lgi-space-4)}.v7-context-meta{flex-wrap:wrap;white-space:normal}.v7-context-meta>.v7-vr,.v7-context-meta>.v7-query-meta,.v7-context-meta>span:not(.v7-kpi){display:none}.v7-context-crumb{max-width:100%;flex-wrap:wrap}.v7-shell{grid-template-columns:minmax(0,1fr)}.v7-side{flex-direction:row;align-items:center;gap:var(--lgi-space-2);padding:var(--lgi-space-2);border-right:0;border-bottom:1px solid var(--lgi-ink)}.v7-side-content{flex-direction:row;overflow-x:auto;gap:var(--lgi-space-2)}.v7-side-content .v7-side-nav{flex:none;min-width:var(--lgi-action-height)}.v7-side :is(.v7-side-foot,.v7-nav-label,.v7-side-toggle>span){display:none}.v7-context-section-nav{overflow:hidden}.v7-tertiary-nav{max-width:100%}}
+@media(prefers-reduced-motion:reduce){.v7-app *{transition:none!important;animation:none!important}}
 
-/* Context Bar: approved optional tertiary navigation, same row as the domain breadcrumb. */
-.v7-context-crumb{min-width:0;flex:0 1 auto}
-.v7-context-section-nav{align-self:stretch;display:flex;align-items:center;min-width:0;flex:1 1 auto;overflow:hidden}
-.v7-tertiary-nav{display:flex;align-items:stretch;gap:var(--lgi-space-5);min-width:0;max-width:100%;overflow-x:auto;scrollbar-width:none}
-.v7-tertiary-nav::-webkit-scrollbar{display:none}
-.v7-tertiary-nav button{position:relative;flex:none;display:flex;align-items:center;border:0;background:transparent;padding:0 var(--lgi-space-1);white-space:nowrap;color:var(--lgi-muted);font:var(--lgi-weight-regular) var(--lgi-text-body)/var(--lgi-lh-data) var(--lgi-font-sans);cursor:pointer}
-.v7-tertiary-nav button:hover{color:var(--lgi-ink)}
-.v7-tertiary-nav button[aria-current="page"]{color:var(--lgi-ink);font-weight:var(--lgi-weight-semibold)}
-.v7-tertiary-nav button[aria-current="page"]::after{content:"";position:absolute;inset:auto 0 0;height:var(--lgi-space-1);background:var(--lgi-signal)}
-.v7-tertiary-nav button:focus-visible,.v7-tertiary-select:focus-visible,.v7-context-count summary:focus-visible{outline:2px solid var(--lgi-focus);outline-offset:2px}
-.v7-tertiary-select{display:none}
-.v7-context-count{position:relative;white-space:nowrap;font:var(--lgi-weight-medium) var(--lgi-text-label)/var(--lgi-lh-body) var(--lgi-font-sans)}
-.v7-context-count summary{display:flex;align-items:center;gap:var(--lgi-space-2);list-style:none;cursor:pointer}
-.v7-context-count summary::-webkit-details-marker{display:none}
-.v7-context-count summary b{color:var(--lgi-ink);font:var(--lgi-weight-bold) var(--lgi-text-data)/var(--lgi-lh-data) var(--lgi-font-mono);font-variant-numeric:tabular-nums}
-.v7-context-count-detail{position:absolute;right:0;top:calc(100% + var(--lgi-space-4));z-index:var(--lgi-z-popover);min-width:calc(var(--lgi-space-24) * 2);padding:var(--lgi-space-3) var(--lgi-space-4);border:1px solid var(--lgi-border-solid);background:var(--lgi-canvas);box-shadow:var(--lgi-shadow-brutal);color:var(--lgi-body);font:var(--lgi-text-data)/var(--lgi-lh-body) var(--lgi-font-sans);letter-spacing:normal}
-.v7-context-count-detail p{display:flex;align-items:center;justify-content:space-between;gap:var(--lgi-space-4);margin:0;padding:var(--lgi-space-2) 0;border-bottom:1px solid var(--lgi-hairline)}
-.v7-context-count-detail b{font-variant-numeric:tabular-nums}
-.v7-context-count-detail small{display:block;margin-top:var(--lgi-space-2);color:var(--lgi-muted)}
-@media(max-width:900px){.v7-context-section-nav{min-height:var(--lgi-space-12)}.v7-context-main{gap:var(--lgi-space-3)}.v7-context-count summary{max-width:calc(var(--lgi-space-24) * 2)}}
-@media(max-width:640px){.v7-context-crumb{overflow:hidden;text-overflow:ellipsis;flex:1 1 auto}.v7-context-section-nav{flex:0 0 auto;overflow:visible}.v7-tertiary-nav button{display:none}.v7-tertiary-select{display:block;max-width:calc(var(--lgi-space-24) * 2);padding:var(--lgi-space-2);border:1px solid var(--lgi-border-strong);background:var(--lgi-canvas);color:var(--lgi-ink);font:var(--lgi-text-data)/var(--lgi-lh-data) var(--lgi-font-sans)}}
+.v7-side-nav[aria-current="page"]>span{position:relative;z-index:1;background:var(--lgi-ink);padding-right:var(--lgi-space-1)}
+.v7-app[data-sidebar="collapsed"] .v7-side-nav[aria-current="page"]::after{width:var(--lgi-secondary-tail)}
+.v7-domain-picker summary:focus-visible{outline:none;box-shadow:inset 0 calc(-1 * var(--lgi-focus-inset)) 0 var(--lgi-signal-mark)}
+
+@media(max-width:820px){.v7-context-meta .v7-kpi{display:none}}

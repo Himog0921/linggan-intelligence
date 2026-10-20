@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, type KeyboardEvent } from 'react';
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import { ModalDialog } from '../../../corpus/ModalDialog';
 import { purposeLabel, stateMeta } from './evidencePresent';
 import { positionText, type ViewerObject } from './mediaObjects';
@@ -23,6 +23,11 @@ function Viewer({ object, total, titleId, onIndex, onClose }: { object: ViewerOb
   const frame = useRef<HTMLDivElement>(null);
   const image = useRef<HTMLImageElement>(null);
   const zoom = useZoomPan(frame, image, object.index);
+  const mediaKey = `${object.index}:${object.assetUrl ?? ''}`;
+  const [imageState, setImageState] = useState<{ key: string; phase: 'loading' | 'loaded' | 'failed' }>({ key: mediaKey, phase: 'loading' });
+  if (imageState.key !== mediaKey) setImageState({ key: mediaKey, phase: 'loading' });
+  const phase = imageState.key === mediaKey ? imageState.phase : 'loading';
+  const stagePress = useRef(false);
   const previous = object.index > 0 && total > 1;
   const next = object.index < total - 1;
 
@@ -67,7 +72,10 @@ function Viewer({ object, total, titleId, onIndex, onClose }: { object: ViewerOb
           </button>
         </div>
       </header>
-      <div className={styles.stage} onClick={event => event.target === event.currentTarget && onClose()}>
+      <div className={styles.stage}
+        onPointerDown={event => { stagePress.current = event.target === event.currentTarget; }}
+        onPointerCancel={() => { stagePress.current = false; }}
+        onPointerUp={event => { if (stagePress.current && event.target === event.currentTarget) onClose(); stagePress.current = false; }}>
         <button type="button" className={styles.step} aria-label="上一张" disabled={!previous} onClick={() => onIndex(object.index - 1)}>
           <span aria-hidden="true">←</span>
         </button>
@@ -83,9 +91,10 @@ function Viewer({ object, total, titleId, onIndex, onClose }: { object: ViewerOb
             onPointerUp={zoom.onPointerEnd}
             onPointerCancel={zoom.onPointerEnd}
           >
-            {object.assetUrl ? (
-              <img key={object.index} ref={image} src={object.assetUrl} alt={`${purposeLabel(object.purpose)} 原尺寸本地副本`} style={{ transform: `translate(${zoom.pan.x}px, ${zoom.pan.y}px) scale(${zoom.zoom})` }} />
+            {object.assetUrl && phase !== 'failed' ? (
+              <img key={object.index} ref={image} src={object.assetUrl} alt={`${purposeLabel(object.purpose)} 原尺寸本地副本`} onLoad={() => setImageState({ key: mediaKey, phase: 'loaded' })} onError={() => setImageState({ key: mediaKey, phase: 'failed' })} style={{ transform: `translate(${zoom.pan.x}px, ${zoom.pan.y}px) scale(${zoom.zoom})` }} />
             ) : null}
+            {!object.assetUrl || phase !== 'loaded' ? <span className={styles.mediaState} role="status">{!object.assetUrl ? `未取得可内联副本 · ${stateMeta(object.bytesState)[0]}` : phase === 'failed' ? '本地副本读取失败；可切换其他对象或关闭查看器。' : '正在读取本地副本…'}</span> : null}
           </div>
           <figcaption>{caption(object)}</figcaption>
         </figure>

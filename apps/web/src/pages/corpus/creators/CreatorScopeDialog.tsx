@@ -42,7 +42,7 @@ export function CreatorScopeDialog({ data, usageRole, hasDateRange, link, onQuic
     },
   ];
   return (
-    <ModalDialog labelledBy={titleId} className={styles.dialog} onClose={onClose}>
+    <ModalDialog labelledBy={titleId} className={styles.dialog} onClose={onClose} closeOnBackdrop>
       <div className={styles.form}>
         <header className={styles.head}>
           <div>

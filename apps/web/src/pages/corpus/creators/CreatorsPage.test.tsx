@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DOMAIN,
@@ -325,6 +325,54 @@ describe('创作者页 · 筛选、快捷视图与重置', () => {
     expect(second.location()).toContain('sort=viral_works');
   });
 
+  it('输入后立刻打开筛选，提交待发词后仍保留筛选窗口，应用不丢查询', async () => {
+    defaultRoutes(kit); const { user, location } = await loaded();
+    await user.type(screen.getByRole('searchbox'), '待发词');
+    await user.click(screen.getByRole('button', { name: /^筛选/ }));
+    const dialog = await screen.findByRole('dialog', { name: '筛选材料与作者' });
+    await user.click(within(dialog).getByRole('checkbox', { name: '亲历自述' }));
+    await user.click(within(dialog).getByRole('button', { name: '应用筛选' }));
+    await waitFor(() => expect(lastCreatorsCall()?.search.get('traits')).toBe('personal_experience'));
+    expect(lastCreatorsCall()?.search.get('query')).toBe('待发词'); expect(location()).toContain('query=');
+  });
+
+  it('菜单Escape不关闭筛选，草稿关闭先确认，继续保留输入，明确放弃才关闭并返回焦点', async () => {
+    defaultRoutes(kit); const { user } = await loaded();
+    const opener = screen.getByRole('button', { name: /^筛选/ }); await user.click(opener);
+    const dialog = await screen.findByRole('dialog', { name: '筛选材料与作者' });
+    const select = within(dialog).getByRole('combobox', { name: '材料用途' });
+    await user.click(select); await user.keyboard('{Escape}');
+    expect(dialog).toBeInTheDocument(); expect(select).toHaveAttribute('aria-expanded', 'false');
+    await user.click(within(dialog).getByRole('checkbox', { name: '亲历自述' }));
+    fireEvent(dialog, new Event('cancel', { cancelable: true }));
+    expect(within(dialog).getByText('筛选尚未应用，放弃本次修改？')).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: '继续筛选' }));
+    expect(within(dialog).getByRole('checkbox', { name: '亲历自述' })).toBeChecked();
+    await user.click(within(dialog).getByRole('button', { name: '关闭筛选' }));
+    await user.click(within(dialog).getByRole('button', { name: '放弃修改' }));
+    expect(screen.queryByRole('dialog')).toBeNull(); expect(opener).toHaveFocus();
+    expect(creatorsCalls()).toHaveLength(1);
+  });
+
+  it('筛选脏稿保护浏览器后退，继续保留当前URL，明确放弃才返回上一条查询', async () => {
+    defaultRoutes(kit); const { user, router, location } = await loaded();
+    await user.click(screen.getByRole('button', { name: /^未加入观察/ }));
+    await waitFor(() => expect(lastCreatorsCall()?.search.get('observation')).toBe('outside'));
+    const current = location();
+    await user.click(screen.getByRole('button', { name: /^筛选/ }));
+    const dialog = await screen.findByRole('dialog', { name: '筛选材料与作者' });
+    await user.click(within(dialog).getByRole('checkbox', { name: '亲历自述' }));
+    await act(async () => { await router.navigate(-1); });
+    expect(location()).toBe(current);
+    await user.click(within(dialog).getByRole('button', { name: '继续筛选' }));
+    expect(within(dialog).getByRole('checkbox', { name: '亲历自述' })).toBeChecked();
+    await act(async () => { await router.navigate(-1); });
+    await user.click(within(dialog).getByRole('button', { name: '放弃修改' }));
+    await waitFor(() => expect(location()).toBe(`/corpus/creators?domain=${DOMAIN}`));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(creatorsCalls().some(call => call.search.get('traits') === 'personal_experience')).toBe(false);
+  });
+
   it('范围统计与筛选结果分开：筛选后结果条变，快捷视图上的范围数字不变', async () => {
     kit.route('GET', '/api/local/corpus/shell', ok(shellJson()));
     kit.route('GET', '/api/local/work-resources', ok({ items: [] }));
@@ -350,8 +398,11 @@ describe('创作者页 · 筛选、快捷视图与重置', () => {
     await user.click(screen.getByRole('button', { name: /^筛选/ }));
     let dialog = await screen.findByRole('dialog', { name: '筛选材料与作者' });
     await user.click(within(dialog).getByRole('checkbox', { name: '亲历自述' }));
-    await user.selectOptions(within(dialog).getByRole('combobox', { name: /作者倾向/ }), 'vertical_tendency');
+    await user.click(within(dialog).getByRole('combobox', { name: /作者倾向/ }));
+    await user.click(screen.getByRole('option', { name: '本领域持续创作' }));
     await user.click(within(dialog).getByRole('button', { name: '取消' }));
+    expect(within(dialog).getByText('筛选尚未应用，放弃本次修改？')).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: '放弃修改' }));
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(location()).toBe(`/corpus/creators?domain=${DOMAIN}`);
     expect(creatorsCalls()).toHaveLength(1);
@@ -361,7 +412,8 @@ describe('创作者页 · 筛选、快捷视图与重置', () => {
     expect(within(dialog).getByRole('checkbox', { name: '亲历自述' })).not.toBeChecked();
     await user.click(within(dialog).getByRole('checkbox', { name: '亲历自述' }));
     await user.click(within(dialog).getByRole('checkbox', { name: '推广表达' }));
-    await user.selectOptions(within(dialog).getByRole('combobox', { name: /作者倾向/ }), 'vertical_tendency');
+    await user.click(within(dialog).getByRole('combobox', { name: /作者倾向/ }));
+    await user.click(screen.getByRole('option', { name: '本领域持续创作' }));
     await user.type(within(dialog).getByRole('spinbutton', { name: '最低点赞' }), '100');
     await user.click(within(dialog).getByRole('button', { name: '应用筛选' }));
     await waitFor(() => expect(lastCreatorsCall()?.search.get('traits')).toBe('personal_experience,explicit_promotion'));
@@ -394,7 +446,8 @@ describe('创作者页 · 筛选、快捷视图与重置', () => {
     const { user } = await loaded();
     await user.click(screen.getByRole('button', { name: /^筛选/ }));
     const dialog = await screen.findByRole('dialog', { name: '筛选材料与作者' });
-    await user.selectOptions(within(dialog).getByRole('combobox', { name: '作品发表日期' }), 'custom');
+    await user.click(within(dialog).getByRole('combobox', { name: '作品发表日期' }));
+    await user.click(screen.getByRole('option', { name: '自定义日期' }));
     await user.type(within(dialog).getByLabelText('开始日期'), '2026-10-16');
     await user.type(within(dialog).getByLabelText('结束日期（不含）'), '2026-10-16');
     await user.click(within(dialog).getByRole('button', { name: '应用筛选' }));
@@ -407,7 +460,8 @@ describe('创作者页 · 筛选、快捷视图与重置', () => {
     const { user, location } = await loaded();
     await user.click(screen.getByRole('button', { name: /^筛选/ }));
     const dialog = await screen.findByRole('dialog', { name: '筛选材料与作者' });
-    await user.selectOptions(within(dialog).getByRole('combobox', { name: '作品发表日期' }), '30');
+    await user.click(within(dialog).getByRole('combobox', { name: '作品发表日期' }));
+    await user.click(screen.getByRole('option', { name: '近30天' }));
     await user.click(within(dialog).getByRole('button', { name: '应用筛选' }));
     await waitFor(() => expect(location()).toMatch(/publishedFrom=\d{4}-\d{2}-\d{2}&publishedTo=\d{4}-\d{2}-\d{2}/));
     const params = new URLSearchParams(location().split('?')[1]);
@@ -415,7 +469,7 @@ describe('创作者页 · 筛选、快捷视图与重置', () => {
     expect(days).toBe(30);
     // 再打开时显示为自定义日期，不假装还是「近 30 天」。
     await user.click(screen.getByRole('button', { name: /^筛选/ }));
-    expect(within(await screen.findByRole('dialog', { name: '筛选材料与作者' })).getByRole('combobox', { name: '作品发表日期' })).toHaveValue('custom');
+    expect(within(await screen.findByRole('dialog', { name: '筛选材料与作者' })).getByRole('combobox', { name: '作品发表日期' })).toHaveTextContent('自定义日期');
   });
 
   it('观察关系读不到时，对话框里的「观察关系」与「有相关爆款」不可选', async () => {
@@ -459,7 +513,8 @@ describe('创作者页 · 搜索、排序、分页', () => {
     defaultRoutes(kit);
     const { user } = await loaded();
     await user.type(screen.getByRole('searchbox', { name: '搜索创作者或作品' }), '正文词');
-    await user.selectOptions(screen.getByRole('combobox', { name: '搜索范围' }), 'work');
+    await user.click(screen.getByRole('combobox', { name: '搜索范围' }));
+    await user.click(screen.getByRole('option', { name: '作品内容' }));
     await waitFor(() => expect(lastCreatorsCall()?.search.get('searchMode')).toBe('work'));
     expect(lastCreatorsCall()?.search.get('query')).toBe('正文词');
   });
@@ -476,11 +531,14 @@ describe('创作者页 · 搜索、排序、分页', () => {
   it('排序：下拉与表头都改 sort 并回到第一页；表头标出当前排序列；爆款排序在没有标准时不可选', async () => {
     defaultRoutes(kit);
     const { user, location } = await loaded(`/corpus/creators?domain=${DOMAIN}&page=1`);
-    expect(screen.getByRole('option', { name: '命中相关爆款数' })).toBeDisabled();
+    await user.click(screen.getByRole('combobox', { name: '排序' }));
+    expect(screen.getByRole('option', { name: '命中相关爆款数' })).toHaveAttribute('aria-disabled', 'true');
+    await user.keyboard('{Escape}');
     await user.click(screen.getByRole('button', { name: '相关作品' }));
     await waitFor(() => expect(location()).toBe(`/corpus/creators?domain=${DOMAIN}&sort=related_works`));
     expect(screen.getByRole('columnheader', { name: '相关作品' })).toHaveAttribute('aria-sort', 'descending');
-    await user.selectOptions(screen.getByRole('combobox', { name: '排序' }), 'high_likes');
+    await user.click(screen.getByRole('combobox', { name: '排序' }));
+    await user.click(screen.getByRole('option', { name: '命中最高点赞' }));
     await waitFor(() => expect(lastCreatorsCall()?.search.get('sort')).toBe('high_likes'));
     // 按最高赞排序时表头改称「命中最高赞」，仍标出当前排序列。
     expect(screen.getByRole('columnheader', { name: '命中最高赞' })).toHaveAttribute('aria-sort', 'descending');
@@ -504,7 +562,8 @@ describe('创作者页 · 搜索、排序、分页', () => {
     await waitFor(() => expect(lastCreatorsCall()?.search.get('page')).toBe('1'));
     expect(location()).toBe(`/corpus/creators?domain=${DOMAIN}&page=1&pageSize=25`);
     await screen.findByText('2 / 3 页');
-    await user.selectOptions(screen.getByRole('combobox', { name: /每页/ }), '50');
+    await user.click(screen.getByRole('combobox', { name: /每页/ }));
+    await user.click(screen.getByRole('option', { name: '50' }));
     await waitFor(() => expect(lastCreatorsCall()?.search.get('pageSize')).toBe('50'));
     expect(lastCreatorsCall()?.search.get('page')).toBe('0');
   });

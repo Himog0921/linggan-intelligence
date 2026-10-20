@@ -1,0 +1,16 @@
+{
+  "id": "ALIGN-OVERLAY-010",
+  "status": "accepted",
+  "decision": {"evidence": "U20", "selected": "S1", "quote": "Q09就按S1收口，保留未保存保护和原请求跟踪，停止后不能恢复"},
+  "policy": {"name": "按用途关闭", "readonlyBackdropCloses": true, "dirtyLeave": "ask_continue_discard_or_save_then_leave", "pendingLeave": "explicit_detach_with_original_request_tracking", "unknownResult": "lookup_same_request_before_new_submission", "lateReceipt": "keep_current_page_and_scope"},
+  "formsModal": true,
+  "consequenceConfirmationModal": true,
+  "readonlyShape": "declared_by_object_contract",
+  "focus": {"modalTrap": true, "nonmodalTrap": false, "nonmodalEscape": "owned_by_focused_surface", "closeReturn": "original_trigger_or_declared_fallback"},
+  "longTask": {"stopRequiresConfirmation": true, "commandReceiptRequiresRunRead": true, "stoppedCanResume": false, "endedCanResume": false, "pauseContinueRequiresQualification": true, "retainAcquiredAndInFlightMaterials": true},
+  "domainHost": "Z02",
+  "tertiaryHost": "Z02",
+  "runtimeMigrated": false,
+  "businessRequests": false,
+  "componentCertificationChanged": false
+}

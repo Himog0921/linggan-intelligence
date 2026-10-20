@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BATCH_KEY } from './batchStore';
 import { DOMAIN, OTHER_DOMAIN, dossierJson, shellJson, workRef } from './evidenceFixtures';
@@ -251,6 +251,32 @@ describe('抽屉模式（≤1180px）', () => {
     expect(aside()).toHaveAttribute('inert');
     expect(Element.prototype.scrollIntoView).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(rowButton(3)).toHaveFocus());
+  });
+
+  it('只读抽屉打开后定位返回控件，外部点击关闭并回到当前作品', async () => {
+    pageRoutes(kit);
+    const view = await opened();
+    await view.user.click(rowButton(2));
+    expect(screen.getByRole('button', { name: '← 返回当前作品' })).toHaveFocus();
+    await view.user.click(document.body);
+    expect(aside()).toHaveAttribute('inert');
+    expect(rowButton(2)).toHaveFocus();
+  });
+
+  it('从抽屉内部拖到外部不关闭；嵌套模态存在时不处理外部点击和Esc', async () => {
+    pageRoutes(kit);
+    const view = await opened();
+    await view.user.click(rowButton(2));
+    fireEvent.pointerDown(screen.getByRole('button', { name: '← 返回当前作品' }));
+    fireEvent.pointerUp(document.body);
+    expect(aside()).not.toHaveAttribute('inert');
+    const nested = document.createElement('dialog'); nested.setAttribute('open', ''); document.body.append(nested);
+    await view.user.click(document.body);
+    await view.user.keyboard('{Escape}');
+    expect(aside()).not.toHaveAttribute('inert');
+    nested.remove();
+    await view.user.keyboard('{Escape}');
+    expect(aside()).toHaveAttribute('inert');
   });
 
   it('地址直达一件作品：抽屉展开（旧页的「从地址还原」）', async () => {

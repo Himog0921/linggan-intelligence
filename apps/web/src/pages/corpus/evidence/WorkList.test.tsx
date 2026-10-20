@@ -202,3 +202,14 @@ describe('封面排版（翻转卡）', () => {
     expect(within(card).getByText('可检索')).toBeInTheDocument();
   });
 });
+
+it('封面卡的受控图片也明确区分读取中、成功和失败，失败不伪装未取得', () => {
+  renderList({ layout: 'cover' }, items([1, { media: { cover: 'available' } }]));
+  const loading = screen.getByRole('button', { name: '合成作品 1，查看封面' }).querySelector('[data-media-state]')!;
+  expect(loading).toHaveAttribute('data-media-state', 'loading');
+  fireEvent.error(loading.querySelector('img')!);
+  const failed = screen.getByRole('button', { name: '合成作品 1，查看封面' }).querySelector('[data-media-state]')!;
+  expect(failed).toHaveAttribute('data-media-state', 'failed');
+  expect(failed).toHaveTextContent('封面读取失败');
+  expect(failed.querySelector('img')).toBeNull();
+});
