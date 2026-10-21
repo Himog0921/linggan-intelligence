@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { ActionButton } from '../../shared/ActionButton';
 import { humanMoment } from '../../shared/formatting';
 import { saveConnection, saveModel, setConnectionEnabled } from './aiConnectionApi';
-import { command, fetchHistory } from './aiSettingsApi';
+import { fetchHistory } from './aiSettingsApi';
 import { AiCapabilityForm } from './AiCapabilityForm';
 import { NoticeLine } from './AiSettingsFields';
 import { ConnectionForm, EgressForm, ProbeForm } from './AiModelSection';
@@ -252,8 +252,13 @@ function moneyKnown(v: string | null) {
   return '$' + major.toString() + '.' + sub;
 }
 function useHistory(taskKey: string) {
-  const [cursors, setCursors] = useState(['']);
-  useEffect(() => setCursors(['']), [taskKey]);
+  // Cursor state is keyed by task, so switching filters cannot reuse a page
+  // from the previous task. Avoid synchronous effects that trigger extra renders.
+  const [state, setState] = useState<{ task: string; cursors: string[] }>({ task: taskKey, cursors: [''] });
+  const cursors = state.task === taskKey ? state.cursors : [''];
+  function setCursors(update: (current: string[]) => string[]) {
+    setState(previous => ({ task: taskKey, cursors: update(previous.task === taskKey ? previous.cursors : ['']) }));
+  }
   const before = cursors[cursors.length - 1] ?? '';
   const history = useQuery({ queryKey: ['ai-invocation-history', taskKey, before], queryFn: ({ signal }) => fetchHistory(taskKey, before, signal), retry: false });
   return { history, cursors, setCursors };
