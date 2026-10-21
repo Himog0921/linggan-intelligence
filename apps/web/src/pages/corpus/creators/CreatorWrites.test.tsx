@@ -281,7 +281,7 @@ describe('发现设置', () => {
 
   it('旧分析开关已开启也只读展示退役状态，不能配置或重试旧执行链', async () => {
     const { dialog } = await openPolicy(listJson({ analysisEnabled: true, items: [itemJson(1)] }));
-    expect(within(dialog).getByText(/旧分析已停用/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/旧自动分析已停用/)).toBeInTheDocument();
     expect(within(dialog).queryByRole('checkbox')).toBeNull();
     expect(within(dialog).queryByRole('combobox')).toBeNull();
     expect(within(dialog).queryByRole('spinbutton', { name: /词元/ })).toBeNull();
@@ -418,7 +418,7 @@ describe('调整判断', () => {
     });
     // 抽屉保持打开，页面给出回执，列表重读。
     expect(screen.getByRole('dialog', { name: '合成作者 1' })).toBeInTheDocument();
-    expect(await screen.findByText(/判断已保存；自动分析不会覆盖这一项/)).toBeInTheDocument();
+    expect(await screen.findByText(/判断已保存；这一项使用你的判断/)).toBeInTheDocument();
     await waitFor(() => expect(creators().length).toBeGreaterThanOrEqual(2));
   });
 
@@ -435,25 +435,29 @@ describe('调整判断', () => {
     expect(kit.of('PUT', overrides)[0]?.body).toMatchObject({ value: 'unknown', supportFragmentIds: [], reason: null });
   });
 
-  it('恢复自动判断：没有人工调整时不可用；有时发送 value: null', async () => {
+  it('撤销人工调整：无覆盖时不可用；没有历史分析结果时也只移除覆盖，不启动分析', async () => {
     kit.route('PUT', overrides, ok({ saved: true }));
     const first = await openCorrection();
     await first.user.click(within(first.drawer).getByRole('button', { name: '调整判断' }));
-    expect(within(await screen.findByRole('dialog', { name: '调整作者倾向' })).getByRole('button', { name: '恢复自动判断' })).toBeDisabled();
+    expect(within(await screen.findByRole('dialog', { name: '调整作者倾向' })).getByRole('button', { name: '撤销人工调整' })).toBeDisabled();
     first.unmount();
     kit = createFetchMock();
     kit.install();
     kit.route('PUT', overrides, ok({ saved: true }));
     const manual = { focus: { value: { value: 'multi_topic', reason: '我的判断', evidenceFragmentIds: ['author.1.biography'] }, supportFragmentIds: ['author.1.biography'], at: '2026-10-15 12:00:00+08' } };
-    const second = await openCorrection(itemJson(1, { authorManual: manual }));
+    const second = await openCorrection(itemJson(1, { authorManual: manual, authorResult: false, authorState: null }));
     await second.user.click(within(second.drawer).getByRole('button', { name: '调整判断' }));
     const dialog = await screen.findByRole('dialog', { name: '调整作者倾向' });
     expect(within(dialog).getByRole('combobox', { name: '你的判断' })).toHaveTextContent('多主题分享');
+    expect(dialog).toHaveTextContent('尚无结果则显示尚不能判定，不会启动新分析');
     expect(within(dialog).getByRole('textbox', { name: /调整原因/ })).toHaveValue('我的判断');
     expect(within(dialog).getByRole('checkbox', { name: /合成公开简介/ })).toBeChecked();
-    await second.user.click(within(dialog).getByRole('button', { name: '恢复自动判断' }));
+    await second.user.click(within(dialog).getByRole('button', { name: '撤销人工调整' }));
     await waitFor(() => expect(kit.of('PUT', overrides)).toHaveLength(1));
     expect(kit.of('PUT', overrides)[0]?.body).toMatchObject({ value: null, reason: null, supportFragmentIds: [], field: 'focus' });
+    expect(await screen.findByText('人工调整已撤销；显示已有分析结果，尚无结果则显示尚不能判定。未启动新分析。')).toBeInTheDocument();
+    expect(screen.queryByText(/这一项使用你的判断/)).toBeNull();
+    expect(kit.calls.filter(call => call.method === 'POST')).toHaveLength(0);
   });
 
   it('作品层的判断带 workRef；服务器拒绝时「未完成」+ 中文原因 + 错误码，对话框保持打开', async () => {

@@ -28,16 +28,15 @@ export interface PanelContext {
   query: CreatorQuery;
   link: LinkContext;
   resources: WorkResources;
-  analysisEnabled: boolean;
   /** 领域已暂停时历史材料仍可读，写入操作不可用。 */
   writable: boolean;
   onCorrect: (field: string, workRef: string | null) => void;
   onTab: (tab: DrawerTab) => void;
 }
 
-/** 状态文字 + 色点：在路上、需要处理、依据不足各有各的含义，颜色不是唯一的载体。 */
-function AnalysisLine({ analysis, value, enabled }: { analysis: Analysis; value: string | null | undefined; enabled: boolean }) {
-  const status = analysisStatus(analysis, value, enabled);
+/** 状态文字 + 色点：历史执行记录与已有结果分开表达，颜色不是唯一的载体。 */
+function AnalysisLine({ analysis, value }: { analysis: Analysis; value: string | null | undefined }) {
+  const status = analysisStatus(analysis, value);
   return (
     <p className={`${styles.help} ${styles.analysis}`} data-kind={status.kind}>
       {status.text}
@@ -74,7 +73,7 @@ function WorkPreview({ ctx, work }: { ctx: PanelContext; work: Work }) {
 
 /** 概览：先给结论（作者在本领域的倾向），再给方向与表达、当前条件下的作品预览。 */
 export function OverviewPanel({ ctx }: { ctx: PanelContext }) {
-  const { item, data, analysisEnabled } = ctx;
+  const { item, data } = ctx;
   const analysis = item.authorAnalysis;
   const focus = authorFocus(item);
   return (
@@ -92,7 +91,7 @@ export function OverviewPanel({ ctx }: { ctx: PanelContext }) {
           onCorrect={ctx.onCorrect}
           lead
         />
-        <AnalysisLine analysis={analysis} value={focus.value} enabled={analysisEnabled} />
+        <AnalysisLine analysis={analysis} value={focus.value} />
         <p className={styles.help}>
           {sampleText(analysis)}
           仅使用本领域已取得材料，不代表账号全部作品。
@@ -151,7 +150,7 @@ export function EvidencePanel({
   expanded: ReadonlySet<string>;
   onToggleWork: (workRef: string, open: boolean) => void;
 }) {
-  const { item, link, analysisEnabled } = ctx;
+  const { item, link } = ctx;
   return (
     <>
       <p className={styles.help}>
@@ -203,7 +202,7 @@ export function EvidencePanel({
                 onCorrect={ctx.onCorrect}
               />
             ))}
-            <AnalysisLine analysis={work.analysis} value={work.relevance} enabled={analysisEnabled} />
+            <AnalysisLine analysis={work.analysis} value={work.relevance} />
             {work.analysis.lastErrorCode ? (
               <details>
                 <summary>处理信息</summary>

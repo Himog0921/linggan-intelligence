@@ -324,7 +324,7 @@ export interface OverrideRequest {
   creatorKey: string;
   workRef: string | null;
   field: string;
-  /** null 表示恢复自动判断。 */
+  /** null 表示撤销人工调整。 */
   value: string | null;
   reason: string | null;
   supportFragmentIds: string[];

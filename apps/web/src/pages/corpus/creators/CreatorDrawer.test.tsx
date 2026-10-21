@@ -156,9 +156,9 @@ describe('依据抽屉 · 作品与依据（按作品分组）', () => {
     const { dialog, user } = await openDrawer();
     await user.click(within(dialog).getByRole('tab', { name: '作品与依据' }));
     const [queued, failed, insufficient] = Array.from(dialog.querySelectorAll('details[data-work]')) as HTMLElement[];
-    expect(queued).toHaveTextContent('排队待分析');
+    expect(queued).toHaveTextContent('历史排队记录 · 已停用，不再执行');
     expect(within(queued!).queryByRole('button', { name: /重试/ })).toBeNull();
-    expect(failed).toHaveTextContent('分析失败 · 模型服务暂不可用');
+    expect(failed).toHaveTextContent('历史分析失败 · 模型服务暂不可用');
     expect(within(failed!).queryByRole('button', { name: /重试/ })).toBeNull();
     const processing = within(failed!).getByText('处理信息').closest('details') as HTMLElement;
     expect(processing).toHaveTextContent('model_provider_unavailable');

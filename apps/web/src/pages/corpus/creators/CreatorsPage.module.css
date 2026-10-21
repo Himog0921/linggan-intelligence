@@ -192,10 +192,6 @@
   background: var(--lgi-unknown-dot);
 }
 
-.analysisOn::before {
-  background: var(--lgi-success-dot);
-}
-
 /* ── 结果条：筛选命中数与范围说明分开 ───────────── */
 .resultBar {
   display: flex;

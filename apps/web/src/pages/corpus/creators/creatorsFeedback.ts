@@ -32,7 +32,7 @@ const ERROR_TEXT: Record<string, string> = {
   too_many_support_fragments: '一次最多选择 40 个支持片段。',
   creator_work_mismatch: '作品与创作者不匹配，请刷新后重试。',
   unsupported_creator_identity: '这个平台账号暂不支持登记为观察目标。',
-  analysis_disabled: '本领域未开启自动分析，不能重试。',
+  analysis_disabled: '旧自动分析已停用，不能重试。',
   local_comment_study_origin_rejected: '这个页面只能在本机访问。',
 };
 

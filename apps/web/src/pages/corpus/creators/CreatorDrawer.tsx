@@ -72,7 +72,6 @@ export function CreatorDrawer({ item, data, query, link, resources, initialTab, 
   const joinPending = useJoinPending(item.creatorKey);
 
   const domainActive = data.domain.status === 'active';
-  const analysisEnabled = data.policy.analysisEnabled;
   const name = authorName(item);
   const first = item.representatives[0];
   const avatarUrl = first ? (resources.byRef.get(first.workRef)?.avatarUrl ?? null) : null;
@@ -105,7 +104,6 @@ export function CreatorDrawer({ item, data, query, link, resources, initialTab, 
     query,
     link,
     resources,
-    analysisEnabled,
     writable: domainActive,
     onCorrect,
     onTab: switchTab,
