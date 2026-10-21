@@ -2,6 +2,7 @@
  * 创作者页的文字与派生：服务器给出的判断值、状态码如何用中文说给人听。
  * 这里只翻译与归类，不重算任何业务结论（资格、相关性、观察关系都以服务器为准）。
  */
+import { CREATOR_AI_RETIREMENT_NOTICE } from '../../settings/aiSettingsModel';
 import { humanMoment } from '../../../shared/formatting';
 import { LABELS } from './creatorsQuery';
 import type { Analysis, CreatorItem, Fragment, Judgement, Observation, Work } from './creatorsTypes';
@@ -96,7 +97,7 @@ const FAILURE_REASONS: Record<string, string> = {
   creator_analysis_invalid_output: '结果未通过校验',
   source_unavailable: '材料暂不可用',
   model_source_unavailable: '材料暂不可用',
-  creator_source_changed: '材料已变化，请刷新后重试',
+  creator_source_changed: '历史执行时材料已变化',
   model_secret_unavailable: '模型密钥不可用',
   model_not_qualified: '模型尚未通过用途验证',
   model_disabled: '模型配置未启用',
@@ -104,41 +105,32 @@ const FAILURE_REASONS: Record<string, string> = {
 };
 
 export function failureReason(code: string | null): string {
-  return (code && FAILURE_REASONS[code]) || '查看处理信息，确认配置后重试';
+  return (code && FAILURE_REASONS[code]) || '历史失败原因未识别，可查看处理信息';
 }
 
-/**
- * 分析的五种结局，含义互不相同，分别显示（#384 发现）：
- * 排队/执行中（在路上）≠ 失败/暂停（需要处理）≠ 已分析但依据不足（分析做过了，材料撑不起结论）
- * ≠ 尚未取得结果（还没轮到）≠ 自动分析未开启。
- */
-export type AnalysisKind = 'running' | 'queued' | 'failed' | 'paused' | 'insufficient' | 'done' | 'pending' | 'off';
+/** 旧分析已退役；保留历史执行记录和结果，不将历史 running/queued 当作当前执行。 */
+export type AnalysisKind = 'failed' | 'paused' | 'insufficient' | 'done' | 'off';
 
 export function analysisStatus(
   analysis: Analysis,
   value: string | null | undefined,
-  analysisEnabled: boolean,
 ): { kind: AnalysisKind; text: string } {
   switch (analysis.state) {
     case 'running':
-      return { kind: 'running', text: '分析中' };
+      return { kind: 'off', text: '历史分析中记录 · 已停用，不再执行' };
     case 'queued':
-      return { kind: 'queued', text: '排队待分析' };
+      return { kind: 'off', text: '历史排队记录 · 已停用，不再执行' };
     case 'failed':
-      return { kind: 'failed', text: `分析失败 · ${failureReason(analysis.lastErrorCode)}` };
+      return { kind: 'failed', text: `历史分析失败 · ${failureReason(analysis.lastErrorCode)}` };
     case 'paused':
-      return { kind: 'paused', text: `分析已暂停 · ${failureReason(analysis.lastErrorCode)}` };
+      return { kind: 'paused', text: `历史分析暂停 · ${failureReason(analysis.lastErrorCode)}` };
   }
   if (analysis.resultAt !== null || analysis.resultAtDisplay !== null) {
     return value === 'unknown' || !value
       ? { kind: 'insufficient', text: '已分析，依据不足' }
       : { kind: 'done', text: '已有分析结果' };
   }
-  return analysisEnabled ? { kind: 'pending', text: '尚未取得当前分析结果' } : { kind: 'off', text: '自动分析未开启' };
-}
-
-export function canRetry(analysis: Analysis, analysisEnabled: boolean): boolean {
-  return analysisEnabled && (analysis.state === 'failed' || analysis.state === 'paused');
+  return { kind: 'off', text: `尚无分析结果 · ${CREATOR_AI_RETIREMENT_NOTICE}` };
 }
 
 /** 实际取样篇数：服务器记录了才显示，没记录就明说没记录，绝不显示成 0 或候选数。 */

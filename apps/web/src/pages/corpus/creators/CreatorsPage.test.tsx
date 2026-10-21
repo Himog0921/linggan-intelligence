@@ -105,17 +105,26 @@ describe('创作者页 · 列表', () => {
       ),
     );
     await loaded();
-    expect(rowFor('合成作者 1')).toHaveTextContent('排队待分析');
-    expect(rowFor('合成作者 2')).toHaveTextContent('分析失败 · 本日额度已用尽');
+    expect(rowFor('合成作者 1')).toHaveTextContent('历史排队记录 · 已停用，不再执行');
+    expect(rowFor('合成作者 2')).toHaveTextContent('历史分析失败 · 本日额度已用尽');
     expect(rowFor('合成作者 3')).toHaveTextContent('已分析，依据不足');
-    expect(rowFor('合成作者 4')).toHaveTextContent('尚未取得当前分析结果');
+    expect(rowFor('合成作者 4')).toHaveTextContent('尚无分析结果 · 旧自动分析已停用');
   });
 
-  it('分析未开启时不把「没有结果」说成「尚未分析」', async () => {
-    defaultRoutes(kit, ok(listJson({ analysisEnabled: false, items: [itemJson(1, { authorState: null, authorResult: false, focusValue: 'unknown' })] })));
-    await loaded();
-    expect(rowFor('合成作者 1')).toHaveTextContent('自动分析未开启');
-    expect(screen.getByRole('button', { name: '发现设置' })).toHaveTextContent('自动分析未开启');
+  it.each([true, false])('历史开关 %s 不改变退役展示，摘要、材料范围和筛选提示一致', async analysisEnabled => {
+    defaultRoutes(kit, ok(listJson({ analysisEnabled, items: [itemJson(1, { authorState: null, authorResult: false, focusValue: 'unknown' })] })));
+    const { user } = await loaded(`/corpus/creators?domain=${DOMAIN}&focus=unknown`);
+    expect(rowFor('合成作者 1')).toHaveTextContent('尚无分析结果 · 旧自动分析已停用');
+    expect(screen.getByRole('button', { name: '发现设置' })).toHaveTextContent('旧自动分析已停用');
+    expect(screen.getByText('仅检索已有判断；旧自动分析已停用。')).toBeInTheDocument();
+    expect(screen.queryByText(/自动分析已开启|自动分析未开启/)).toBeNull();
+    await user.click(screen.getByRole('button', { name: '材料范围' }));
+    const scope = await screen.findByRole('dialog', { name: '材料范围与判断标准' });
+    expect(scope).toHaveTextContent('旧自动分析已停用，当前标签仅统计已有判断');
+    expect(scope).toHaveTextContent('这些记录不会继续执行');
+    expect(scope).toHaveTextContent('旧分析不再提供重试');
+    expect(scope).not.toHaveTextContent('本领域已开启');
+    expect(kit.calls.every(call => call.method === 'GET')).toBe(true);
   });
 
   it('观察关系读不到：不列入「未纳入」，行内显示「关系待读取」，不可按观察关系筛选', async () => {
@@ -611,7 +620,7 @@ describe('创作者页 · 材料范围与判断标准', () => {
     expect(dialog).toHaveTextContent('当前范围 80 篇作品 · 已确认相关 20 位作者');
     expect(dialog).toHaveTextContent('领域说明：尚未填写');
     expect(dialog).toHaveTextContent('研究目标：尚未填写');
-    expect(dialog).toHaveTextContent('本领域未开启');
+    expect(dialog).toHaveTextContent('旧自动分析已停用');
     const unknownAuthors = within(dialog).getByRole('link', { name: '作者身份待补 4 篇' });
     expect(unknownAuthors.getAttribute('href')).toContain('/corpus/evidence?');
     expect(JSON.parse(new URL(unknownAuthors.getAttribute('href') as string, 'http://x').searchParams.get('creatorFilter') as string)).toMatchObject({ unknownAuthor: true });
@@ -643,7 +652,7 @@ describe('创作者页 · 材料范围与判断标准', () => {
     expect(criteria).toHaveTextContent('「作者」层面的倾向');
     const states = within(dialog).getByRole('region', { name: '分析状态说明' });
     expect(states).toHaveTextContent('已分析，依据不足');
-    expect(states).toHaveTextContent('不是失败');
+    expect(states).toHaveTextContent('不代表失败');
   });
 
   it('统计按钮点击 = 只看此项并清掉其他条件，对话框随之收起', async () => {

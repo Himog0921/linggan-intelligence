@@ -36,7 +36,6 @@ interface CreatorTableProps {
   link: LinkContext;
   resources: WorkResources;
   selectedKey: string | null;
-  analysisEnabled: boolean;
   domainActive: boolean;
   scrollRef: RefObject<HTMLDivElement | null>;
   busy: boolean;
@@ -107,10 +106,10 @@ export function CreatorTable(props: CreatorTableProps) {
 }
 
 function CreatorRow(props: CreatorTableProps & { item: CreatorItem; filtered: boolean; high: boolean }) {
-  const { item, link, resources, selectedKey, analysisEnabled, onOpen, filtered, high } = props;
+  const { item, link, resources, selectedKey, onOpen, filtered, high } = props;
   const work = item.representatives[0];
   const focus = authorFocus(item);
-  const state = analysisStatus(item.authorAnalysis, focus.value, analysisEnabled);
+  const state = analysisStatus(item.authorAnalysis, focus.value);
   const traits = item.traits.filter(key => key !== 'institution_or_brand' && LABELS[key]);
   const matched = filtered ? item.matchedRelatedWorkCount : item.relatedWorkCount;
   const likes = high ? item.candidateHighLikeCount : item.maxRelatedLikeCount;

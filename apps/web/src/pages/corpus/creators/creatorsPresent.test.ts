@@ -3,7 +3,6 @@ import {
   CRITERIA,
   COEXISTENCE,
   analysisStatus,
-  canRetry,
   effectiveJudgement,
   evidenceFor,
   failureReason,
@@ -23,35 +22,27 @@ const empty = parseAnalysis({});
 const analysis = (patch: Partial<Analysis>): Analysis => ({ ...empty, ...patch });
 
 describe('分析状态：五种结局含义不同，分别显示（#384 发现 2）', () => {
-  it('排队与执行中是「在路上」，不是失败也不是无关', () => {
-    expect(analysisStatus(analysis({ state: 'queued' }), 'unknown', true)).toEqual({ kind: 'queued', text: '排队待分析' });
-    expect(analysisStatus(analysis({ state: 'running' }), 'unknown', true)).toEqual({ kind: 'running', text: '分析中' });
+  it('排队和执行中只表示历史记录，不能暗示当前仍会执行', () => {
+    expect(analysisStatus(analysis({ state: 'queued' }), 'unknown')).toEqual({ kind: 'off', text: '历史排队记录 · 已停用，不再执行' });
+    expect(analysisStatus(analysis({ state: 'running' }), 'unknown')).toEqual({ kind: 'off', text: '历史分析中记录 · 已停用，不再执行' });
   });
 
   it('失败与暂停写明原因（中文），认不得的原因码不猜', () => {
-    expect(analysisStatus(analysis({ state: 'failed', lastErrorCode: 'model_budget_exhausted' }), 'unknown', true).text).toBe('分析失败 · 本日额度已用尽');
-    expect(analysisStatus(analysis({ state: 'paused', lastErrorCode: 'model_disabled' }), 'unknown', true).text).toBe('分析已暂停 · 模型配置未启用');
-    expect(analysisStatus(analysis({ state: 'failed', lastErrorCode: 'something_new' }), 'unknown', true).text).toBe('分析失败 · 查看处理信息，确认配置后重试');
-    expect(failureReason(null)).toBe('查看处理信息，确认配置后重试');
+    expect(analysisStatus(analysis({ state: 'failed', lastErrorCode: 'model_budget_exhausted' }), 'unknown').text).toBe('历史分析失败 · 本日额度已用尽');
+    expect(analysisStatus(analysis({ state: 'paused', lastErrorCode: 'model_disabled' }), 'unknown').text).toBe('历史分析暂停 · 模型配置未启用');
+    expect(analysisStatus(analysis({ state: 'failed', lastErrorCode: 'something_new' }), 'unknown').text).toBe('历史分析失败 · 历史失败原因未识别，可查看处理信息');
+    expect(failureReason(null)).toBe('历史失败原因未识别，可查看处理信息');
   });
 
   it('已分析但依据不足：分析做过了、结论仍是未知，不是失败', () => {
     const done = analysis({ state: 'idle', resultAt: '2026-10-14 10:00:00+08' });
-    expect(analysisStatus(done, 'unknown', true)).toEqual({ kind: 'insufficient', text: '已分析，依据不足' });
-    expect(analysisStatus(done, undefined, true).kind).toBe('insufficient');
-    expect(analysisStatus(done, 'vertical_tendency', true)).toEqual({ kind: 'done', text: '已有分析结果' });
+    expect(analysisStatus(done, 'unknown')).toEqual({ kind: 'insufficient', text: '已分析，依据不足' });
+    expect(analysisStatus(done, undefined).kind).toBe('insufficient');
+    expect(analysisStatus(done, 'vertical_tendency')).toEqual({ kind: 'done', text: '已有分析结果' });
   });
 
-  it('没有结果时区分「还没轮到」与「自动分析没开」', () => {
-    expect(analysisStatus(empty, 'unknown', true)).toEqual({ kind: 'pending', text: '尚未取得当前分析结果' });
-    expect(analysisStatus(empty, 'unknown', false)).toEqual({ kind: 'off', text: '自动分析未开启' });
-  });
-
-  it('只有分析已开启、且失败或暂停时才可重试', () => {
-    expect(canRetry(analysis({ state: 'failed' }), true)).toBe(true);
-    expect(canRetry(analysis({ state: 'paused' }), true)).toBe(true);
-    expect(canRetry(analysis({ state: 'failed' }), false)).toBe(false);
-    expect(canRetry(analysis({ state: 'queued' }), true)).toBe(false);
+  it('没有结果时明确已停用，不暗示仍在等待分析', () => {
+    expect(analysisStatus(empty, 'unknown')).toEqual({ kind: 'off', text: '尚无分析结果 · 旧自动分析已停用' });
   });
 });
 

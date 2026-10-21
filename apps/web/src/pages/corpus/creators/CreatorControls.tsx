@@ -1,3 +1,4 @@
+import { CREATOR_AI_RETIREMENT_NOTICE } from '../../settings/aiSettingsModel';
 import type { Ref } from 'react';
 import { ActionButton } from '../../../shared/ActionButton';
 import { CreatorSelect } from './CreatorSelect';
@@ -83,8 +84,8 @@ export function CreatorControls(props: CreatorControlsProps) {
           </button>
         </nav>
         <button type="button" className={`${styles.textButton} ${styles.analysisButton}`} aria-label="发现设置" onClick={props.onOpenPolicy} disabled={data === null}>
-          <span className={`${styles.analysisDot} ${data?.policy.analysisEnabled ? styles.analysisOn : ''}`}>
-            {data === null ? '分析状态待读取' : data.policy.analysisEnabled ? '自动分析已开启' : '自动分析未开启'}
+          <span className={styles.analysisDot}>
+            {CREATOR_AI_RETIREMENT_NOTICE}
           </span>
           <span aria-hidden="true">
             <span className={styles.analysisSep}>{' · '}</span>设置

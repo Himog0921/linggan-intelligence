@@ -1,5 +1,5 @@
 {
-  "fingerprint": "232360d7d774ef5072abcdde8f16a10bb863be69c9da135110db9a894533e098",
+  "fingerprint": "2510d01e91d3c9c59f3c0ab801bdcc238a764cfd29500a5bd44a6c5022773c27",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -227,7 +227,7 @@
     },
     {
       "path": "apps/web/src/pages/corpus/creators/CreatorControls.tsx",
-      "sha256": "6b08bac82600560da6e2710e7f88481c5ac938801524f7008272ee623b6102e6"
+      "sha256": "357be69dfa75b12fff293cb72e3f68207e688ed37a0e01a4cfefd6ddf3cbd7cc"
     },
     {
       "path": "apps/web/src/pages/corpus/evidence/EvidenceControls.tsx",
@@ -343,7 +343,7 @@
     },
     {
       "path": "docs/design/lids/catalog-source.json",
-      "sha256": "01b9734ccf08fc58dab2838d4b6ab380c2dfb4ca5544320b7c3a3bd1eff7c810"
+      "sha256": "812b88cf2c5abd20766cfd4f80c4ec44e2809138cba14b688f05c4c0c7488137"
     },
     {
       "path": "docs/design/lids/color.json",

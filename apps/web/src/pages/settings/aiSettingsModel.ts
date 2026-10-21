@@ -1,5 +1,7 @@
 import { ApiError, isRecord } from '../../shared/api';
 
+export const CREATOR_AI_RETIREMENT_NOTICE = '旧自动分析已停用';
+
 type Decoder<T> = (value: unknown) => T;
 type Fields = Record<string, Decoder<unknown>>;
 type Decoded<S extends Fields> = { [K in keyof S]: ReturnType<S[K]> };

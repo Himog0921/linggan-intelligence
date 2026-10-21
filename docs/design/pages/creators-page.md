@@ -8,6 +8,10 @@
 > 页面层级与模式: L1；`LIDS-PAT-001` 的 Corpus Explorer（读数条、筛选、连续表格、分页），依据抽屉为右侧受限的 Split Evidence Inspector；不新造页面骨架
 > 当前实现证据: D1历史实现见[原验收](../acceptance/web-react-001-d1-acceptance.md)；当前LIDS-UI-001/B续修为本地真实React候选，见[本轮验收](../acceptance/lids-ui-implementation-001-acceptance.md)，未合并部署，Mog待验收
 
+## 2026-10-21 · 旧 AI 退役状态展示修正
+
+Mog 要求旧策略摘要与统一 AI 退役状态一致。当前候选不再使用历史 analysisEnabled 作为执行开关：摘要/范围/筛选固定明说旧自动分析已停用；历史排队和分析中记录不代表正在执行，失败/暂停只保留当时原因，不提供旧重试。已有判断仍可读，人工覆盖可撤销人工调整（显示已有结果，尚无结果则尚不能判定），不会创建新分析。旧规格中的开启/重试承诺在本轮范围内被替代，设置仅保留点赞标准及统一 AI 只读状态。四图与验收见[LIDS 增量声明](../changes/lids-ui-implementation-001-ui-change-manifest.md#2026-10-21--创作者旧-ai-状态一致性续修)；合并部署与用户验收分开核对。
+
 ## LIDS-UI-001 · 当前已确认设计的采用
 
 Mog 2026-10-20直接派定本页按P05:list/B优化，业务字段与读写合同保持。此增量替代下文历史几何/字体与直接关闭行为：

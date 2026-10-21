@@ -1,3 +1,4 @@
+import { CREATOR_AI_RETIREMENT_NOTICE } from '../../settings/aiSettingsModel';
 import { useId } from 'react';
 import { ModalDialog } from '../../../corpus/ModalDialog';
 import { COEXISTENCE, CRITERIA, FIELD_NAMES } from './creatorsPresent';
@@ -15,12 +16,12 @@ interface CreatorScopeDialogProps {
   onClose: () => void;
 }
 
-/** 分析状态的四种含义，彼此不能互相替代（#384 发现）。 */
+/** 只解释历史分析记录；退役状态不由领域旧开关推断。 */
 const STATE_MEANINGS: readonly (readonly [string, string])[] = [
-  ['排队待分析 / 分析中', '任务在路上，结果还没有出来；不代表已经判为无关或不具备。'],
-  ['分析失败 / 已暂停', '执行没有完成（原因见各作者的处理信息），可以在依据抽屉里重试失败的分析；不代表材料有问题。'],
-  ['已分析，依据不足', '分析已经做过，但已取得的材料撑不起结论，所以判断仍是「尚不能判定」；不是失败，也不是没有。'],
-  ['尚未取得当前分析结果 / 自动分析未开启', '还没有当前的分析结果，或本领域没有开启自动分析；页面只展示已有判断，浏览与切换领域不会启动分析。'],
+  ['历史排队 / 分析中记录', '旧分析已停用，这些记录不会继续执行；不代表已经判为无关或不具备。'],
+  ['历史分析失败 / 暂停', '历史执行没有完成，保留当时原因；旧分析不再提供重试。'],
+  ['已分析，依据不足', '已有材料不足以支持结论，判断仍是「尚不能判定」；不代表失败或没有。'],
+  ['尚无分析结果', '当前没有可展示的分析结果；旧自动分析已停用，不会自动补充判断。'],
 ];
 
 /** 范围内的统计 + 领域说明 + 判断标准。统计只跟领域、用途、平台和发表日期变化，不随搜索与筛选改变。 */
@@ -94,7 +95,7 @@ export function CreatorScopeDialog({ data, usageRole, hasDateRange, link, onQuic
             <p className={styles.help}>领域说明：{domain.description ?? '尚未填写'}</p>
             <p className={styles.help}>研究目标：{domain.researchGoal ?? '尚未填写'}</p>
             <p className={styles.help}>
-              自动分析：{policy.analysisEnabled ? '本领域已开启' : '本领域未开启，当前标签仅统计已有判断'}。作品判断逐篇进行；作者判断只取样本领域已有作品的摘要，
+              {CREATOR_AI_RETIREMENT_NOTICE}，当前标签仅统计已有判断。历史作品判断逐篇进行；作者判断只取样本领域已有作品的摘要，
               实际取样篇数见各作者的依据，不要求全账号作品分析完。
             </p>
           </section>

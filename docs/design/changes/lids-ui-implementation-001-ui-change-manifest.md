@@ -80,3 +80,16 @@ apps/web、`apps/api/src/local_web/web_app.rs` 及其测试 `web_app_tests.rs` �
 修复后本地verify 93文件/1036项及types/lint/build通过，独立commit-reviewer 2文件8项复核通过、无未处理发现；首次末项高度收紧定位按position再次运行，无祖先滚动。治理/diff通过。修复前1a6b6d12的本地完整PG/浏览器全部阶段与清理已通过，但远端同head选择器点击失败不作PASS；修复后的远端完整CI必须重跑确认，3000未切换。
 
 等待检查期间main前进至686280f7（#460材料只读预览），再次整合主线：DossierPanel冲突保留LIDS ActionButton及main“预览旧任务输入”的准确标签、NoteMaterialSection只读入口；TaskInput/evidence browser与对应文档取自动三方整合并复核。进度并集，不删除新主线能力；重新verify/独立review/精确head CI后才合并。
+
+## 2026-10-21 · 创作者旧 AI 状态一致性续修
+
+Mog 当前直接派定“创作者旧策略摘要跟统一 AI 退役提示并存，一起修掉”；属于同一 UI 交付包续修。Claim root，base main@0be6b6e4，branch codex/creator-ai-status-copy-001，专属 .worktrees/creator-ai-status-copy-001。复用 LIDS 既有组件的实现修正，不改共享标准、Token、业务权限或模型开关。已读 AGENTS、总索引/current-state/governance、UI 执行合同、设计入口/治理、LIDS language-policy/data-boundaries 及 creators-page，按真实退役合同替代旧页面的运行暗示。
+
+| 四图 | 本轮边界与证明 |
+| --- | --- |
+| 表面 | 创作者列表摘要、作者/作品状态、材料范围、筛选提示、人工调整回执与恢复按钮、设置中的统一 AI 提示 |
+| 状态 | 退役固定明说“旧自动分析已停用”；旧 policy.analysisEnabled 不代表现行开启。历史 running/queued 明说历史记录且不继续执行；失败/暂停保留原因且不承诺重试；已有结果、依据不足、未知仍分别展示 |
+| 依赖 | 统一 AI 的 retired 合同/任务 key 保持；旧策略只保留 API 解码和点赞标准写入，移除其展示层启用判断。复用 ActionButton/ModalDialog 与现有样式；不改变 Rust/API/DB、任务/模型/工位及其他 Agent 文件 |
+| 验收 | true/false 历史开关、queued/running/failed/paused/完成/无结果矩阵；设置读取失败可独立保存点赞标准；人工移除覆盖仍只发既有 value:null 命令；前端全量与治理检查、提交前独立复核、浏览器只读核验。主线/3000/真实副作用/Mog 签收分别记证据 |
+
+停止条件：任何需要新增分析、恢复执行、改变统一开关或数据语义的需求需另行授权。本轮不做这些动作。证据固定 artifacts/private/creator-ai-status-copy-001，不入 Git；源码/手写文档允许入 Git，依赖和 dist 沿既有登记。

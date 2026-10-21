@@ -210,7 +210,7 @@ try {
     const overview = await panel.getByRole('tabpanel', { name: '概览' }).innerText();
     assert.ok(overview.indexOf('作者内容倾向') < overview.indexOf('内容方向与作品表达'));
     assert.match(overview, /尚不能判定/);
-    assert.match(overview, /自动分析未开启/);
+    assert.match(overview, /尚无分析结果 · 旧自动分析已停用/);
     assert.match(overview, /本次实际取样篇数未记录。/);
     assert.match(overview, /持续创作倾向须至少两篇独立相关作品/);
     assert.doesNotMatch(await panel.innerText(), UUID);
@@ -258,7 +258,7 @@ try {
     await shot('creators-1440-correction');
     await dialog.getByRole('button', { name: '保存判断' }).click();
     await dialog.waitFor({ state: 'detached' });
-    await page.getByText(/判断已保存；自动分析不会覆盖这一项/).waitFor();
+    await page.getByText(/判断已保存；这一项使用你的判断/).waitFor();
     assert.equal(report.writes.length, 1);
     assert.equal(report.writes[0].method, 'PUT');
     assert.equal(report.writes[0].path, '/api/local/creator-discovery-overrides');
