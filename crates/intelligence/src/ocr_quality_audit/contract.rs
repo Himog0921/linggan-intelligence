@@ -10,6 +10,12 @@ pub struct Settings {
     pub random_count: u32,
     pub risk_count: u32,
     pub regression_refs: Vec<Uuid>,
+    #[serde(default)]
+    pub privacy_cleared_refs: Vec<Uuid>,
+    #[serde(default)]
+    pub privacy_clearance_actor: String,
+    #[serde(default)]
+    pub privacy_clearance_reason: String,
     pub regression_count: u32,
     pub max_requests: u32,
     pub max_tokens: u64,
@@ -25,6 +31,9 @@ impl Default for Settings {
             random_count: 30,
             risk_count: 20,
             regression_refs: vec![],
+            privacy_cleared_refs: vec![],
+            privacy_clearance_actor: String::new(),
+            privacy_clearance_reason: String::new(),
             regression_count: 10,
             max_requests: 60,
             max_tokens: 600_000,
@@ -48,6 +57,18 @@ impl Settings {
             || self.max_tokens > 100_000_000
             || self.max_cost_micro_usd == 0
             || self.max_cost_micro_usd > 100_000_000
+            || self.privacy_cleared_refs.len() > 1000
+            || self
+                .privacy_cleared_refs
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                != self.privacy_cleared_refs.len()
+            || self.privacy_clearance_actor.chars().count() > 120
+            || self.privacy_clearance_reason.chars().count() > 300
+            || (!self.privacy_cleared_refs.is_empty()
+                && (self.privacy_clearance_actor.trim().is_empty()
+                    || self.privacy_clearance_reason.trim().is_empty()))
             || self.regression_refs.len() > 200
             || self
                 .regression_refs
@@ -105,6 +126,12 @@ pub struct VisualResult {
     pub title_text: Option<String>,
     pub regions: Vec<VisualRegion>,
     pub unreadable: bool,
+}
+pub fn qualifies_probe(v: &VisualResult) -> bool {
+    !v.unreadable
+        && v.regions
+            .iter()
+            .any(|r| r.legibility == Legibility::Clear && r.text.trim() == "42")
 }
 pub fn parse_visual(text: &str, finish: Option<&str>) -> Result<VisualResult, FoundationError> {
     if finish != Some("stop") || text.len() > 131072 || text.trim().is_empty() {

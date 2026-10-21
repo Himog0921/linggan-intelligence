@@ -163,6 +163,10 @@ print(json.dumps(b,ensure_ascii=False))
     .unwrap();
     let settings = audit::Settings {
         domain_ref: Some(fixture::dossier::DOMAIN),
+        privacy_cleared_refs: vec![adoption],
+        privacy_clearance_actor: "SYNTHETIC-PROOF-NOT-MOG".into(),
+        privacy_clearance_reason: "Procedurally generated pixels only; no real personal material"
+            .into(),
         random_count: 1,
         risk_count: 0,
         regression_count: 0,
@@ -226,6 +230,8 @@ print(json.dumps(b,ensure_ascii=False))
     execute(&db, &owner, &adapter).await;
     let report = audit::report::report(&db, run_ref).await.unwrap();
     assert_eq!(report["pools"][0]["selected"], 1);
+    assert_eq!(report["samples"][0]["workRef"], json!(work));
+    assert_eq!(report["domainRef"], json!(fixture::dossier::DOMAIN));
     assert_eq!(report["pools"][0]["humanReviewedSamples"], 0);
     assert_eq!(
         report["pools"][0]["metrics"]["bodyMissing"]["denominator"],
@@ -367,6 +373,10 @@ print(json.dumps(b,ensure_ascii=False))
     let automatic = audit::Settings {
         automatic: true,
         domain_ref: Some(fixture::dossier::DOMAIN),
+        privacy_cleared_refs: vec![adoption],
+        privacy_clearance_actor: "SYNTHETIC-PROOF-NOT-MOG".into(),
+        privacy_clearance_reason: "Procedurally generated pixels only; no real personal material"
+            .into(),
         random_count: 1,
         risk_count: 0,
         regression_count: 0,
@@ -413,6 +423,10 @@ print(json.dumps(b,ensure_ascii=False))
     let tiny = audit::Settings {
         max_tokens: 1,
         domain_ref: Some(fixture::dossier::DOMAIN),
+        privacy_cleared_refs: vec![adoption],
+        privacy_clearance_actor: "SYNTHETIC-PROOF-NOT-MOG".into(),
+        privacy_clearance_reason: "Procedurally generated pixels only; no real personal material"
+            .into(),
         random_count: 1,
         risk_count: 0,
         regression_count: 0,
@@ -443,6 +457,57 @@ print(json.dumps(b,ensure_ascii=False))
     let limit_run: Uuid = serde_json::from_value(limited["runRef"].clone()).unwrap();
     let skipped:i64=sqlx::query_scalar("SELECT count(*) FROM linggan_ai_batch_item_control c JOIN linggan_ai_batch_item i USING(item_ref) JOIN linggan_ai_batch b USING(batch_ref) WHERE b.command_ref=$1 AND c.state='skipped' AND c.attempt_count=0 AND c.failure_code='audit_run_budget_exhausted'").bind(limit_run).fetch_one(db.pool()).await.unwrap();
     assert_eq!(skipped, 1);
+    assert_eq!(wire.requests.lock().unwrap().len(), 3);
+    // Local eligibility alone never authorizes egress; revoke a frozen sample before dispatch.
+    let privacy_run = audit::store::start_run(
+        &db,
+        &StartRun {
+            command_ref: Uuid::new_v4(),
+            run_key: "manual:privacy-proof".into(),
+            seed: "privacy-proof".into(),
+            visual_probe: false,
+        },
+    )
+    .await
+    .unwrap();
+    let private_settings = audit::Settings {
+        domain_ref: Some(fixture::dossier::DOMAIN),
+        random_count: 1,
+        risk_count: 0,
+        regression_count: 0,
+        ..Default::default()
+    };
+    audit::store::save_settings(
+        &db,
+        &SaveSettings {
+            command_ref: Uuid::new_v4(),
+            expected_revision: 3,
+            settings: private_settings,
+        },
+    )
+    .await
+    .unwrap();
+    execute(&db, &owner, &adapter).await;
+    let privacy_run: Uuid = serde_json::from_value(privacy_run["runRef"].clone()).unwrap();
+    let stopped: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_ai_batch_item_control c JOIN linggan_ai_batch_item i USING(item_ref) JOIN linggan_ai_batch b USING(batch_ref) WHERE b.command_ref=$1 AND c.state='skipped' AND c.attempt_count=0 AND c.failure_code='audit_privacy_unreviewed'").bind(privacy_run).fetch_one(db.pool()).await.unwrap();
+    assert_eq!(stopped, 1);
+    assert_eq!(
+        audit::report::report(&db, privacy_run).await.unwrap()["samples"][0]["failureCode"],
+        "audit_privacy_unreviewed"
+    );
+    let uncleared = audit::store::start_run(
+        &db,
+        &StartRun {
+            command_ref: Uuid::new_v4(),
+            run_key: "manual:uncleared".into(),
+            seed: "uncleared".into(),
+            visual_probe: false,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(uncleared["selected"], 0);
+    assert_eq!(uncleared["inventory"]["skippedPrivacyUnreviewed"], 1);
     assert_eq!(wire.requests.lock().unwrap().len(), 3);
     owner.request_drain().await.unwrap();
     owner.complete_drain().await.unwrap();

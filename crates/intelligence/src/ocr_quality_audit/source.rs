@@ -51,6 +51,21 @@ pub async fn load_in(
         assessment,
     }))
 }
+/// Local use eligibility does not grant permission to send an image externally.
+/// An operator must explicitly clear the exact immutable adoption, with an audit reason.
+pub async fn external_clearance_in(
+    conn: &mut sqlx::PgConnection,
+    id: Uuid,
+) -> Result<bool, FoundationError> {
+    let value: Value =
+        sqlx::query_scalar("SELECT settings FROM linggan_ocr_audit_settings WHERE singleton")
+            .fetch_one(&mut *conn)
+            .await?;
+    let settings: super::Settings =
+        serde_json::from_value(value).map_err(|_| FoundationError::Invalid)?;
+    settings.validate()?;
+    Ok(settings.privacy_cleared_refs.contains(&id))
+}
 pub fn read_image(s: &Source) -> Result<crate::pi_adapter::PiImage, FoundationError> {
     use base64::Engine;
     use std::path::{Path, PathBuf};

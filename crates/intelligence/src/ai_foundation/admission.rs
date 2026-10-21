@@ -151,6 +151,19 @@ pub(crate) async fn check_queue_input_scope(
                 if pool == "probe" {
                     "synthetic_image_probe"
                 } else {
+                    let adoption: Uuid = sqlx::query_scalar(
+                        "SELECT adoption_ref FROM linggan_ocr_audit_sample WHERE sample_ref=$1",
+                    )
+                    .bind(sample_ref)
+                    .fetch_one(&mut **tx)
+                    .await?;
+                    if !crate::ocr_quality_audit::source::external_clearance_in(&mut **tx, adoption)
+                        .await?
+                    {
+                        return Err(FoundationError::AdmissionDenied(vec![
+                            "audit_privacy_unreviewed".into(),
+                        ]));
+                    }
                     "ocr_quality_image"
                 }
             }

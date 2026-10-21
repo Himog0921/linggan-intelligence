@@ -47,7 +47,7 @@ pub async fn report(db: &Database, run: Uuid) -> Result<Value, FoundationError> 
     .fetch_optional(&mut *tx)
     .await?
     .ok_or(FoundationError::NotFound)?;
-    let samples=sqlx::query("SELECT s.*,o.result IS NOT NULL AS observed,o.failure_code,i.state AS invocation_state,i.input_tokens,i.output_tokens,i.cost_pico_usd::text AS cost_pico_usd,d.reserved_tokens,d.reserved_cost_micro_usd FROM linggan_ocr_audit_sample s LEFT JOIN linggan_ocr_audit_dispatch d USING(sample_ref) LEFT JOIN linggan_model_invocation i USING(invocation_ref) LEFT JOIN linggan_ocr_audit_observation o ON o.sample_ref=s.sample_ref WHERE s.run_ref=$1 ORDER BY s.created_at,s.sample_ref").bind(run).fetch_all(&mut *tx).await?;
+    let samples=sqlx::query("SELECT s.*,o.result IS NOT NULL AS observed,o.vision_qualified,COALESCE(o.failure_code,ctl.failure_code) AS failure_code,i.state AS invocation_state,i.input_tokens,i.output_tokens,i.cost_pico_usd::text AS cost_pico_usd,d.reserved_tokens,d.reserved_cost_micro_usd FROM linggan_ocr_audit_sample s LEFT JOIN linggan_ocr_audit_dispatch d USING(sample_ref) LEFT JOIN linggan_model_invocation i USING(invocation_ref) LEFT JOIN linggan_ocr_audit_observation o ON o.sample_ref=s.sample_ref LEFT JOIN linggan_ai_batch batch ON batch.command_ref=s.run_ref LEFT JOIN linggan_ai_batch_item bi ON bi.batch_ref=batch.batch_ref AND bi.item_key=s.sample_ref::text LEFT JOIN linggan_ai_batch_item_control ctl ON ctl.item_ref=bi.item_ref WHERE s.run_ref=$1 ORDER BY s.created_at,s.sample_ref").bind(run).fetch_all(&mut *tx).await?;
     let mut pools = vec![];
     let mut visible = vec![];
     for pool in ["random", "risk", "regression", "probe"] {
@@ -98,10 +98,14 @@ pub async fn report(db: &Database, run: Uuid) -> Result<Value, FoundationError> 
                     .map(|(a, b)| a + b);
                 reserved += s.get::<Option<i64>, _>("reserved_tokens").unwrap_or(0);
             }
+            let mut work_ref = None;
             if let Some(adoption) = s.get::<Option<Uuid>, _>("adoption_ref") {
-                if source::load_in(&mut tx, adoption).await?.is_none() {
-                    withheld += 1;
-                    continue;
+                match source::load_in(&mut tx, adoption).await? {
+                    Some(source) => work_ref = Some(source.work_ref),
+                    None => {
+                        withheld += 1;
+                        continue;
+                    }
                 }
             }
             let issues: i64 = sqlx::query_scalar(
@@ -136,7 +140,7 @@ pub async fn report(db: &Database, run: Uuid) -> Result<Value, FoundationError> 
             if s.get::<Option<String>, _>("failure_code").is_some() {
                 failures += 1;
             }
-            visible.push(json!({"sampleRef":id,"pool":pool,"adoptionRef":s.get::<Option<Uuid>,_>("adoption_ref"),"observed":s.get::<bool,_>("observed"),"differenceCount":issues,"failureCode":s.get::<Option<String>,_>("failure_code")}));
+            visible.push(json!({"sampleRef":id,"workRef":work_ref,"pool":pool,"adoptionRef":s.get::<Option<Uuid>,_>("adoption_ref"),"observed":s.get::<bool,_>("observed"),"visionQualified":s.get::<Option<bool>,_>("vision_qualified"),"differenceCount":issues,"failureCode":s.get::<Option<String>,_>("failure_code")}));
         }
         for v in metrics.values_mut() {
             let d = v["denominator"].as_u64().unwrap();
@@ -150,7 +154,7 @@ pub async fn report(db: &Database, run: Uuid) -> Result<Value, FoundationError> 
     }
     let trend:Value=sqlx::query_scalar("SELECT COALESCE(jsonb_agg(jsonb_build_object('runRef',run_ref,'createdAt',created_at,'kind',kind) ORDER BY created_at DESC),'[]') FROM(SELECT run_ref,created_at,kind FROM linggan_ocr_audit_run WHERE kind='weekly' AND created_at>$1::text::timestamptz-interval '28 days' AND created_at<=$1::text::timestamptz ORDER BY created_at DESC LIMIT 4)v").bind(r.get::<String,_>("created_text")).fetch_one(&mut *tx).await?;
     Ok(
-        json!({"runRef":run,"kind":r.get::<String,_>("kind"),"runKey":r.get::<String,_>("run_key"),"createdAt":r.get::<String,_>("created_text"),"inventory":r.get::<Value,_>("inventory"),"modelId":r.get::<String,_>("model_id"),"promptVersion":r.get::<String,_>("prompt_version"),"settings":r.get::<Value,_>("settings"),"reviewVersions":sqlx::query_scalar::<_,Value>("SELECT COALESCE(jsonb_agg(jsonb_build_object('reviewRef',review_ref,'revision',revision) ORDER BY created_at),'[]') FROM linggan_media_ocr_review WHERE sample_ref IN(SELECT sample_ref FROM linggan_ocr_audit_sample WHERE run_ref=$1)").bind(run).fetch_one(&mut *tx).await?,"pools":pools,"samples":visible,"fourWeekRuns":trend,"truthBasis":"human_confirmed_points_only","costBasis":"frozen_price_estimate_not_provider_bill"}),
+        json!({"runRef":run,"kind":r.get::<String,_>("kind"),"runKey":r.get::<String,_>("run_key"),"createdAt":r.get::<String,_>("created_text"),"inventory":r.get::<Value,_>("inventory"),"domainRef":r.get::<Value,_>("settings")["domainRef"],"modelId":r.get::<String,_>("model_id"),"promptVersion":r.get::<String,_>("prompt_version"),"settings":r.get::<Value,_>("settings"),"reviewVersions":sqlx::query_scalar::<_,Value>("SELECT COALESCE(jsonb_agg(jsonb_build_object('reviewRef',review_ref,'revision',revision) ORDER BY created_at),'[]') FROM linggan_media_ocr_review WHERE sample_ref IN(SELECT sample_ref FROM linggan_ocr_audit_sample WHERE run_ref=$1)").bind(run).fetch_one(&mut *tx).await?,"pools":pools,"samples":visible,"fourWeekRuns":trend,"truthBasis":"human_confirmed_points_only","costBasis":"frozen_price_estimate_not_provider_bill"}),
     )
 }
 pub async fn recent(db: &Database) -> Result<Value, FoundationError> {

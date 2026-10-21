@@ -108,7 +108,7 @@ pub(crate) async fn start_run_kind(
     }
     let run = r.command_ref;
     let mut selections = vec![];
-    let mut inventory = json!({"eligible":0,"selected":0,"skippedRestricted":0,"seed":r.seed,"filterVersion":"admitted-ocr-v1"});
+    let mut inventory = json!({"eligible":0,"selected":1,"skippedRestrictedOrRetired":0,"skippedPrivacyUnreviewed":0,"seed":r.seed,"filterVersion":"admitted-ocr-v1"});
     if !r.visual_probe {
         let rows=sqlx::query("SELECT adoption_ref,content_public_ref,blob_sha256,state FROM linggan_ocr_audit_eligible_source a WHERE EXISTS(SELECT 1 FROM linggan_material_domain_usage u WHERE u.content_public_ref=a.content_public_ref AND u.domain_ref=$1) ORDER BY adoption_ref LIMIT 10001").bind(s.domain_ref).fetch_all(&mut *c.tx).await?;
         if rows.len() > 10000 {
@@ -125,9 +125,14 @@ pub(crate) async fn start_run_kind(
                 risk: row.get::<String, _>("state") != "ACCEPTED",
             })
             .collect();
+        let admitted_count = candidates.len();
+        let candidates: Vec<_> = candidates
+            .into_iter()
+            .filter(|c| s.privacy_cleared_refs.contains(&c.adoption_ref))
+            .collect();
         selections = sampling::select(&r.seed, &candidates, &s);
         let total:i64=sqlx::query_scalar("SELECT count(*) FROM linggan_media_ocr_adoption a JOIN linggan_media_ocr_layout l USING(layout_ref) WHERE EXISTS(SELECT 1 FROM linggan_material_domain_usage u WHERE u.content_public_ref=l.content_public_ref AND u.domain_ref=$1)").bind(s.domain_ref).fetch_one(&mut *c.tx).await?;
-        inventory = json!({"eligible":candidates.len(),"selected":selections.len(),"skippedRestrictedOrRetired":total-candidates.len() as i64,"candidates":candidates,"seed":r.seed,"filterVersion":"admitted-ocr-v1","randomPopulation":"eligible_except_fixed_regression","requested":{"random":s.random_count,"risk":s.risk_count,"regression":s.regression_count}});
+        inventory = json!({"eligible":candidates.len(),"selected":selections.len(),"skippedRestrictedOrRetired":total-admitted_count as i64,"skippedPrivacyUnreviewed":admitted_count-candidates.len(),"candidates":candidates,"seed":r.seed,"filterVersion":"admitted-ocr-v1","randomPopulation":"eligible_except_fixed_regression","requested":{"random":s.random_count,"risk":s.risk_count,"regression":s.regression_count}});
     }
     sqlx::query("INSERT INTO linggan_ocr_audit_run(run_ref,run_key,seed,kind,settings,task_config_ref,endpoint_ref,model_id,connection_version_ref,price_ref,prompt_version,inventory) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)")
  .bind(run).bind(&r.run_key).bind(&r.seed).bind(kind).bind(value).bind(cfg.get::<Uuid,_>("current_config_ref")).bind(model.endpoint_ref).bind(&model.model_id).bind(model.connection_version_ref).bind(price).bind(super::PROMPT_VERSION).bind(&inventory).execute(&mut *c.tx).await?;

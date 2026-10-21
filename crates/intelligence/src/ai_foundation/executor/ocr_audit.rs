@@ -206,19 +206,14 @@ pub async fn execute(
                 .first()
                 .map(String::as_str)
                 .unwrap_or("admission_denied");
-            if matches!(
-                reason,
-                "audit_run_budget_exhausted" | "audit_source_unavailable"
-            ) {
-                item.skip_unattempted(
-                    db,
-                    if reason == "audit_source_unavailable" {
-                        "audit_source_unavailable"
-                    } else {
-                        "audit_run_budget_exhausted"
-                    },
-                )
-                .await?;
+            let terminal = match reason {
+                "audit_run_budget_exhausted" => Some("audit_run_budget_exhausted"),
+                "audit_source_unavailable" => Some("audit_source_unavailable"),
+                "audit_privacy_unreviewed" => Some("audit_privacy_unreviewed"),
+                _ => None,
+            };
+            if let Some(code) = terminal {
+                item.skip_unattempted(db, code).await?;
             } else {
                 item.defer(db, reason).await?;
             }
@@ -269,19 +264,15 @@ async fn settle(
             .await;
     let allowed =
         !cancelled && permission.is_ok() && controls.is_ok() && (p.probe || source.is_some());
-    let success = parsed.is_some() && allowed;
-    let qualified = p.probe
-        && parsed.as_ref().is_some_and(|v| {
-            !v.unreadable
-                && v.regions
-                    .iter()
-                    .any(|r| r.legibility == audit::Legibility::Clear && r.text.trim() == "42")
-        });
+    let qualified = p.probe && parsed.as_ref().is_some_and(audit::qualifies_probe);
+    let success = parsed.is_some() && allowed && (!p.probe || qualified);
     let failure = if success {
         None
     } else {
         Some(if !allowed {
             "audit_publication_withheld"
+        } else if p.probe && parsed.is_some() && !qualified {
+            "audit_visual_probe_failed"
         } else if response.is_some_and(|r| r.ok) {
             "audit_visual_schema_invalid"
         } else {

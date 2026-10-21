@@ -38,7 +38,7 @@ CREATE VIEW linggan_ocr_audit_eligible_source AS
 CREATE TABLE linggan_ocr_audit_settings(
  singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),revision bigint NOT NULL DEFAULT 0 CHECK(revision>=0),
  settings jsonb NOT NULL CHECK(jsonb_typeof(settings)='object'),updated_at timestamptz NOT NULL DEFAULT scope_001_now());
-INSERT INTO linggan_ocr_audit_settings(settings) VALUES('{"automatic":false,"domainRef":null,"randomCount":30,"riskCount":20,"regressionRefs":[],"regressionCount":10,"maxRequests":60,"maxTokens":600000,"maxCostMicroUsd":2000000,"concurrency":1,"timeoutSeconds":60}');
+INSERT INTO linggan_ocr_audit_settings(settings) VALUES('{"automatic":false,"domainRef":null,"randomCount":30,"riskCount":20,"regressionRefs":[],"privacyClearedRefs":[],"privacyClearanceActor":"","privacyClearanceReason":"","regressionCount":10,"maxRequests":60,"maxTokens":600000,"maxCostMicroUsd":2000000,"concurrency":1,"timeoutSeconds":60}');
 CREATE TABLE linggan_ocr_audit_run(
  run_ref uuid PRIMARY KEY,run_key text NOT NULL UNIQUE CHECK(char_length(run_key) BETWEEN 1 AND 180),
  seed text NOT NULL,kind text NOT NULL CHECK(kind IN('manual','weekly','visual_probe')),

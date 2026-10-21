@@ -86,6 +86,7 @@ fn defaults_cannot_start_automatic_sampling_or_correction() {
     let s = Settings::default();
     assert!(!s.automatic);
     assert_eq!(s.domain_ref, None);
+    assert!(s.privacy_cleared_refs.is_empty());
     s.validate().unwrap();
     let mut invalid = s;
     invalid.concurrency = 0;
@@ -105,4 +106,24 @@ fn synthetic_visual_probe_is_a_real_bounded_image() {
     assert_eq!(image.width(), 144);
     assert_eq!(image.height(), 96);
     assert!(bytes.len() < 4096);
+    let mut v = parse_visual(&output().to_string(), Some("stop")).unwrap();
+    assert!(!audit::qualifies_probe(&v));
+    v.regions[0].text = "42".into();
+    assert!(audit::qualifies_probe(&v));
+    v.regions[0].legibility = audit::Legibility::Partial;
+    assert!(!audit::qualifies_probe(&v));
+}
+
+#[test]
+fn external_clearance_is_explicit_scoped_and_auditable() {
+    let mut s = Settings {
+        privacy_cleared_refs: vec![Uuid::from_u128(1)],
+        ..Default::default()
+    };
+    assert!(s.validate().is_err());
+    s.privacy_clearance_actor = "synthetic reviewer".into();
+    s.privacy_clearance_reason = "procedural image, no personal content".into();
+    assert!(s.validate().is_ok());
+    s.privacy_cleared_refs.push(Uuid::from_u128(1));
+    assert!(s.validate().is_err());
 }

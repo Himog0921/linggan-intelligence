@@ -1,12 +1,13 @@
 import { requestJson, isRecord, ApiError } from '../../shared/api';
-import { object, list, text, integer, nullable, bool, json } from './aiSettingsModel';
-const settings = object({ automatic: bool, domainRef: nullable(text), randomCount: integer, riskCount: integer, regressionRefs: list(text), regressionCount: integer, maxRequests: integer, maxTokens: integer, maxCostMicroUsd: integer, concurrency: integer, timeoutSeconds: integer });
+import { object, list, text, integer, nullable, optional, bool, json } from './aiSettingsModel';
+const settings = object({ automatic: bool, domainRef: nullable(text), randomCount: integer, riskCount: integer, regressionRefs: list(text), privacyClearedRefs: list(text), privacyClearanceActor: text, privacyClearanceReason: text, regressionCount: integer, maxRequests: integer, maxTokens: integer, maxCostMicroUsd: integer, concurrency: integer, timeoutSeconds: integer });
 export type AuditSettings = ReturnType<typeof settings>;
 const config = object({ revision: integer, settings, schedule: object({ weekday: text, time: text, timezone: text }), automaticCorrection: bool });
 const pair = object({ numerator: integer, denominator: integer, rate: nullable(integer) });
 const metrics = object({ titleFalseAdoption: pair, titleMissing: pair, bodyMissing: pair, hallucinatedText: pair, disputedRecovery: pair });
 const pool = object({ pool: text, selected: integer, withheld: integer, humanReviewedSamples: integer, pendingDifferences: integer, modelDifferences: integer, humanReviewedAgreements: integer, humanReviewedDisagreements: integer, modelCalls: integer, failures: integer, inputTokens: nullable(integer), outputTokens: nullable(integer), reservedTokens: integer, estimatedCostPicoUsd: nullable(text), metrics });
-const run = object({ runRef: text, kind: text, runKey: text, createdAt: text, inventory: json, modelId: text, promptVersion: text, settings: json, reviewVersions: list(json), pools: list(pool), samples: list(object({ sampleRef: text, pool: text, adoptionRef: nullable(text), observed: bool, differenceCount: integer, failureCode: nullable(text) })), fourWeekRuns: list(json), truthBasis: text, costBasis: text });
+const inventory = object({ eligible: integer, selected: integer, skippedRestrictedOrRetired: integer, skippedPrivacyUnreviewed: integer, seed: text, filterVersion: text, candidates: optional(list(object({ adoptionRef: text, workRef: text, blobSha256: text, risk: bool }))), randomPopulation: optional(text), requested: optional(object({ random: integer, risk: integer, regression: integer })) });
+const run = object({ runRef: text, kind: text, runKey: text, createdAt: text, inventory, domainRef: nullable(text), modelId: text, promptVersion: text, settings: json, reviewVersions: list(json), pools: list(pool), samples: list(object({ sampleRef: text, workRef: nullable(text), pool: text, adoptionRef: nullable(text), observed: bool, visionQualified: nullable(bool), differenceCount: integer, failureCode: nullable(text) })), fourWeekRuns: list(json), truthBasis: text, costBasis: text });
 const ROOT = '/api/local/ocr-audit';
 export async function fetchAuditSettings(signal?: AbortSignal) { return config(await requestJson(ROOT, { signal })); }
 export async function fetchAuditRuns(signal?: AbortSignal) { return object({ runs: list(run) })(await requestJson(`${ROOT}/runs`, { signal })); }

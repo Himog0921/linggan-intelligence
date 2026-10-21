@@ -8,7 +8,7 @@ await context.route('**/*',route=>{if(new URL(route.request().url()).origin!==or
 const page=await context.newPage();page.setDefaultTimeout(20000);page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>{if(r.method()==='POST')requests.push(new URL(r.url()).pathname);});
 try{
  await page.goto(origin+'/settings/models?view=runs');await page.getByRole('heading',{name:'图片文字质量抽检',exact:true}).waitFor();const originalReport=page.locator(`details[data-audit-run="${fixture.runRef}"]`);await originalReport.locator(':scope > summary').click();await originalReport.getByRole('columnheader',{name:'人工确认指标',exact:true}).first().waitFor();await page.screenshot({path:path.join(directory,'audit-report.png'),fullPage:true});
- await page.goto(`${origin}/corpus/evidence?domain=${fixture.domain}&work=${fixture.workRef}&tab=dossier&panel=focus`);
+ const sourceLink=originalReport.getByRole('link',{name:/查看原图与审阅/});await sourceLink.click();await page.waitForURL('**/corpus/evidence?**');
  const trigger=page.getByRole('button',{name:'查看质量抽检',exact:true,includeHidden:true});await trigger.waitFor({state:'attached'});
  // Reveal the existing dossier/image disclosures, without setting application state or mocking APIs.
  const summary=page.locator('details').filter({has:trigger}).locator(':scope > summary').first();
