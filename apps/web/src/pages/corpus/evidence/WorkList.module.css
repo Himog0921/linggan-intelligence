@@ -331,7 +331,10 @@
 .list[data-layout='research'] .article > :first-child { width:calc(var(--lgi-space-16) + var(--lgi-space-3) + var(--lgi-focus-inset)); height:calc(var(--lgi-space-24) + var(--lgi-space-2)); aspect-ratio:3/4; border:0; box-sizing:border-box; }
 .list[data-layout='research'] .identity { display:grid; grid-template-rows:calc(var(--lgi-space-5) + var(--lgi-focus-inset)) var(--lgi-shell-icon) calc(var(--lgi-space-5) + var(--lgi-action-border-width)) var(--lgi-shell-icon); gap:calc(var(--lgi-space-1) - var(--lgi-action-border-width)); padding-left:var(--lgi-space-1); max-width:none; min-width:0; align-content:center; height:calc(var(--lgi-space-24) + var(--lgi-space-2)); }
 .list[data-layout='research'] .title { font:600 var(--lgi-type-section-size)/calc(var(--lgi-space-5) + var(--lgi-focus-inset)) var(--lgi-font-ui); margin:0; min-height:0; }
-.list[data-layout='research'] .titleButton { display:block; width:100%; font:inherit; line-height:calc(var(--lgi-space-5) + var(--lgi-focus-inset)); }
+.list[data-layout='research'] .titleButton {
+  display:block; width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  font:inherit; line-height:calc(var(--lgi-space-5) + var(--lgi-focus-inset));
+}
 .list[data-layout='research'] .identity > :nth-child(2) {
   display:flex; align-items:center; min-height:var(--lgi-shell-icon); padding:0; margin:0;
   border:0; background:transparent; overflow:hidden; white-space:nowrap;

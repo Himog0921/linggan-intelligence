@@ -27,8 +27,9 @@ export function CheckBox({ item, checked, onCheck }: { item: WorkItem; checked: 
 }
 
 function SelectTitle({ item, selected, tabStop }: Pick<RowProps, 'item' | 'selected' | 'tabStop'>) {
+  const title = workTitle(item);
   return <button type="button" className={styles.titleButton} data-select-target=""
-    aria-current={selected ? 'true' : undefined} tabIndex={tabStop ? 0 : -1}>{workTitle(item)}</button>;
+    aria-current={selected ? 'true' : undefined} tabIndex={tabStop ? 0 : -1} title={title}>{title}</button>;
 }
 
 /** V2.2: 78×104 cover, 106px row including its edges. Title / quote / author / metrics are four fixed tracks. */

@@ -27,7 +27,7 @@ describe('研读排版', () => {
     const list = screen.getByRole('list', { name: '作品材料集合' });
     const row = within(list).getAllByRole('listitem')[0]!;
     expect(within(row).getByRole('heading', { level: 2 })).toHaveTextContent('合成作品 1');
-    expect(within(row).getByRole('button', { name: '合成作品 1' })).toBeInTheDocument();
+    expect(within(row).getByRole('button', { name: '合成作品 1' })).toHaveAttribute('title', '合成作品 1');
     expect(within(row).getByText('合成作者 1')).toBeInTheDocument();
     expect(within(row).getByText('2026-10-13')).toBeInTheDocument();
     expect(row.querySelector('q')).toHaveTextContent('合成正文 1：先做两分钟，再决定要不要继续。');
