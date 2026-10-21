@@ -72,7 +72,7 @@ describe('AI 设置正式四视图', () => {
     await screen.findByRole('heading', { name: '模型连接', level: 2 });
     expect(screen.getByText('隔离合成连接', { selector: 'b' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /本机 WeMM Runtime/ }));
-    expect(screen.getByText(/本机 WeMM 不需要 API 密钥/)).toBeInTheDocument();
+    expect(screen.getByText(/本机 WeMM 不使用通用 API 密钥/)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '技术配置' }));
     expect(screen.getByText(/不允许通过普通 HTTP 模型表单修改/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '保存连接' })).not.toBeInTheDocument();
@@ -127,7 +127,7 @@ describe('AI 设置正式四视图', () => {
     mount('/settings/models?view=runs');
     expect(await screen.findByRole('heading', { name: '运行与用量', level: 2 })).toBeInTheDocument();
     expect(await screen.findByText('synthetic-model')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /查看/ }));
+    await user.click(screen.getByRole('button', { name: '查看' }));
     expect(screen.getByRole('dialog', { name: '调用与版本详情' })).toBeInTheDocument();
     expect(screen.getByText('model_call_failed')).toBeInTheDocument();
     expect(screen.getByText('未知（未定价）')).toBeInTheDocument();
