@@ -1,6 +1,6 @@
 /* Intelligence AI settings: demo-accurate content surface under the ONE shared AppShell.
    Fonts, brand and focus use existing LIDS tokens. No duplicate rail / topbar. */
-.root { box-sizing:border-box; height:100%; min-width:0; overflow-y:auto; overflow-x:hidden; background:var(--lgi-canvas-low); color:var(--lgi-ink); }
+.root.root { box-sizing:border-box; width:100%; max-width:none; margin:0; padding:0; height:100%; min-width:0; overflow-y:auto; overflow-x:hidden; background:var(--lgi-canvas-low); color:var(--lgi-ink); }
 .inner { width:min(1500px,100%); margin:0 auto; padding:28px 40px 70px; min-width:0; }
 .heading { display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:16px; margin:0 0 25px; }
 .headingText small { display:block; color:var(--lgi-signal); font:600 10px/1.4 var(--lgi-font-data); letter-spacing:.12em; }
@@ -10,7 +10,7 @@
 .headingMeta small { color:var(--lgi-muted); font-size:11px; }
 .crumb { display:flex; align-items:center; gap:9px; }
 .crumb :last-child { color:var(--lgi-ink); }
-.nav { display:flex; min-width:0; gap:18px; align-items:center; }
+.nav { display:flex; min-width:0; max-width:100%; overflow-x:auto; scrollbar-width:none; gap:18px; align-items:center; }
 .nav a { display:inline-flex; align-items:center; position:relative; min-height:40px; gap:7px; padding:0 2px; font-size:12px; font-weight:650; color:var(--lgi-muted); white-space:nowrap; text-decoration:none; }
 .nav a:hover,.nav a[aria-current=page]{color:var(--lgi-ink);}
 .nav a[aria-current=page]::after { content:""; position:absolute; height:3px; bottom:0; right:0; left:0; background:var(--lgi-signal); }
