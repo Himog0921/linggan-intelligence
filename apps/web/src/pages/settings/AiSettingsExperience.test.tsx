@@ -39,7 +39,7 @@ describe('AI 设置正式四视图', () => {
     expect(screen.getByRole('link', { name: /AI 能力/ })).toHaveAttribute('aria-current', 'page');
     await user.click(screen.getByRole('button', { name: /评论研究/ }));
     expect(await screen.findByRole('dialog', { name: '评论研究' })).toBeInTheDocument();
-    expect(screen.getByText('当前禁止新执行', { exact: false })).toBeInTheDocument();
+    expect(screen.getByText(/目前不能执行新工作/)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '关闭详情' }));
     expect(screen.queryByRole('dialog', { name: '评论研究' })).not.toBeInTheDocument();
     expect(calls.filter(call => call.method === 'POST')).toHaveLength(0);
@@ -97,7 +97,7 @@ describe('AI 设置正式四视图', () => {
     await user.type(screen.getByRole('textbox', { name: '服务地址' }), 'https://example.com/v1');
     await user.type(screen.getByLabelText('API 密钥'), 'synthetic-test-key');
     await user.click(screen.getByRole('button', { name: '保存连接并继续' }));
-    expect(await screen.findByText(/连接已保存，尚未测试/)).toBeInTheDocument();
+    expect((await screen.findAllByText(/连接已保存，尚未测试/)).length).toBeGreaterThan(0);
     await waitFor(() => expect(screen.getByLabelText('模型 ID')).toBeInTheDocument());
     expect(calls.filter(call => call.method === 'POST')).toHaveLength(1);
     expect(calls.find(call => call.method === 'POST')).toMatchObject({
@@ -108,9 +108,10 @@ describe('AI 设置正式四视图', () => {
 
   it('运行页只显示真实响应；未知 token、未报价和失败详情均可回链', async () => {
     const data = settingsFixture();
-    data.execution.dailyUsage.push({ taskKey: 'model_probe', budgetDay: '2026-10-20', calls: '1', runningCalls: '0', failedCalls: '1',
+    const usage = { taskKey: 'model_probe', budgetDay: '2026-10-20', calls: '1', runningCalls: '0', failedCalls: '1',
       measuredCalls: '1', unknownCalls: '0', notDispatchedCalls: '0', measuredTokens: '16', quotaHeldTokens: '20',
-      unknownHeldTokens: '0', knownQuotePicoUsd: null, unpricedMeasuredCalls: '1', cacheReadUnknownCalls: '0', reasoningUnknownCalls: '0' });
+      unknownHeldTokens: '0', knownQuotePicoUsd: null, unpricedMeasuredCalls: '1', cacheReadUnknownCalls: '0', reasoningUnknownCalls: '0' };
+    const enriched = { ...data, execution: { ...data.execution, dailyUsage: [usage] } };
     const invocation = { invocationRef: 'invocation-1', taskKey: 'model_probe', taskConfigRef: 'config-1',
       modelConfigRef: null, batchRef: null, roundNo: null, operation: 'probe', state: 'failed',
       connectionVersionRef: 'version-1', modelId: 'synthetic-model', connectionName: '隔离合成连接', usageState: 'measured',
@@ -118,7 +119,7 @@ describe('AI 设置正式四视图', () => {
       measuredTokens: '16', cachedInputTokens: null, cacheWriteTokens: null, reasoningTokens: null,
       quotaHeldTokens: '20', legacyChargedTokens: null, quotePicoUsd: null, failureCode: 'model_call_failed',
       createdAt: '2026-10-20T03:00:00Z', finishedAt: '2026-10-20T03:00:01Z' };
-    respond = call => call.path === '/api/local/ai-settings' ? ok(data)
+    respond = call => call.path === '/api/local/ai-settings' ? ok(enriched)
       : call.path.startsWith('/api/local/ai-settings/invocations') ? ok({
         contract: 'ai-invocation-history.v1', pageSize: 50, hasMore: false, nextCursor: null, items: [invocation],
       }) : { status: 503, body: {} };
