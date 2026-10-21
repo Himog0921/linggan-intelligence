@@ -59,11 +59,9 @@ export const LAYOUTS = [
 ] as const;
 
 export const TABS = [
-  ['overview', '概览'],
-  ['evidence', '证据'],
+  ['overview', '作品'],
   ['dossier', '研究底稿'],
-  ['materials', '材料'],
-  ['trace', '来源轨迹'],
+  ['trace', '采集记录'],
 ] as const;
 
 export const PANELS = ['normal', 'wide', 'focus'] as const;
@@ -140,7 +138,8 @@ export function parseQuery(params: URLSearchParams): EvidenceQuery {
     view: oneOf(VIEWS, params.get('view'), 'all'),
     layout: oneOf(LAYOUTS, params.get('layout'), 'research'),
     work: work !== null && UUID_PATTERN.test(work) ? work : null,
-    tab: oneOf(TABS, params.get('tab'), 'overview'),
+    // Legacy tab URLs remain valid; their old content moves to the nearest new panel.
+    tab: params.get('tab') === 'evidence' ? 'dossier' : params.get('tab') === 'materials' ? 'trace' : oneOf(TABS, params.get('tab'), 'overview'),
     panel: panel === 'closed' ? 'closed' : (PANELS.find(width => width === panel) ?? null),
     creatorKey: params.get('creatorKey'),
     creatorFilter: params.get('creatorFilter'),

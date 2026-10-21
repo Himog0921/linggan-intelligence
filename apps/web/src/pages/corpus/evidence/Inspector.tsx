@@ -1,7 +1,11 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import { DossierPanel } from './DossierPanel';
-import { EvidencePanel } from './EvidencePanel';
 import { Lightbox } from './Lightbox';
+import { TechnicalFacts } from './TechnicalFacts';
+import { ReobservationSection } from './ReobservationSection';
+import { AuthorFact, Engagement, MaterialLegend, MaterialRail, QuoteBlock } from './WorkParts';
+import { Section } from './Primitives';
+import { materialSummary, publishedCopy } from './evidencePresent';
 import { MaterialsPanel } from './MaterialsPanel';
 import { SourceNote } from './Primitives';
 import { ReadingPanel, type PanelContext } from './ReadingPanel';
@@ -99,12 +103,10 @@ function WorkBody({ detail, listItem, domain, tab, onRefresh, onApplied }: BodyP
   return (
     <>
       <Panel id="overview" active={tab === 'overview'}>
-        <ReadingPanel context={context} domain={domain} reobservation={reobservation} onRecheck={recheck} />
-      </Panel>
-      <Panel id="evidence" active={tab === 'evidence'}>
-        <EvidencePanel context={context} />
+        <ReadingPanel context={context} />
       </Panel>
       <Panel id="dossier" active={tab === 'dossier'}>
+        {fragment ? <Section title="当前列表引用的原声"><QuoteBlock fragment={fragment} wrap /></Section> : null}
         <DossierPanel
           work={item.ref}
           domain={domain}
@@ -114,11 +116,15 @@ function WorkBody({ detail, listItem, domain, tab, onRefresh, onApplied }: BodyP
           onApplied={onApplied}
         />
       </Panel>
-      <Panel id="materials" active={tab === 'materials'}>
-        <MaterialsPanel context={context} />
-      </Panel>
       <Panel id="trace" active={tab === 'trace'}>
+        <Section title="材料完整度">
+          <MaterialRail summary={materialSummary(item)} />
+          <MaterialLegend summary={materialSummary(item)} />
+        </Section>
+        <ReobservationSection item={item} channel={channels.reobservation} domain={domain} state={reobservation} onRecheck={recheck} />
+        <MaterialsPanel context={context} />
         <TracePanel context={context} />
+        <TechnicalFacts item={item} inspector={inspector} />
       </Panel>
       {viewer ? <Lightbox objects={viewer.objects} index={viewer.index} onIndex={index => setViewer({ ...viewer, index })} onClose={() => setViewer(null)} /> : null}
     </>
@@ -134,7 +140,7 @@ function Panel({ id, active, children }: { id: TabKey; active: boolean; children
 }
 
 /**
- * 检查器：头部（宽度、关闭、状态、五个标签）与五个面板。标签 `role=tab`，漫游焦点，← → Home End 切换；
+ * 检查器：头部（宽度、关闭、状态、三个标签）与三个面板。标签 `role=tab`，漫游焦点，← → Home End 切换；
  * 抽屉模式下 Esc 关闭、「← 返回当前作品」把所选行滚入视野。关闭着的抽屉是惰性的（不在 tab 顺序里、读屏读不到）。
  */
 export function Inspector(props: InspectorProps) {
@@ -145,7 +151,8 @@ export function Inspector(props: InspectorProps) {
   const tabs = useRef<Record<string, HTMLButtonElement | null>>({});
   const state = stateText(props);
   const note = unavailableNote(detail);
-  const title = detail.data ? workTitle(detail.data.item) : listItem ? workTitle(listItem) : '请选择一个作品材料集合';
+  const work = detail.data?.item ?? listItem;
+  const title = work ? workTitle(work) : '请选择一个作品材料集合';
 
   useEffect(() => {
     if (drawer && open) back.current?.focus({ preventScroll: true });
@@ -221,6 +228,15 @@ export function Inspector(props: InspectorProps) {
             </button>
           </div>
         )}
+        {work ? <div className={styles.workSummary}>
+          <h3 className={styles.workTitle} title={title}>{title}</h3>
+          <div className={styles.workByline}>
+            <AuthorFact item={work} />
+            <span className={styles.workPlatform}>{work.platform.toUpperCase()}</span>
+            <span className={styles.workDate}>{publishedCopy(work.display, { compact: true, withFieldName: false })}</span>
+          </div>
+          <Engagement engagement={work.display.engagement} />
+        </div> : null}
         <div className={styles.state} role="status" data-empty={state === null}>
           {state ? (
             <>
@@ -254,7 +270,7 @@ export function Inspector(props: InspectorProps) {
           ))}
         </div>
       </header>
-      <div className={styles.body}>
+      <div className={styles.body} data-current-tab={tab}>
         {detail.status === 'ready' && detail.data && selectedRef ? (
           <WorkBody key={selectedRef} detail={detail.data} listItem={listItem} domain={domain} tab={tab} onRefresh={onRefresh} onApplied={onApplied} />
         ) : (

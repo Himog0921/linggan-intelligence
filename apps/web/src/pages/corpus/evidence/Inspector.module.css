@@ -403,3 +403,18 @@
   .tabs { display: flex; overflow-x: auto; }
   .tabs button { flex: none; padding: 0 var(--lgi-space-3); }
 }
+
+/* V2.2: a shared, scannable work header, three tabs and compact reading surfaces. */
+.workSummary { margin:var(--lgi-space-3) 0 var(--lgi-space-2);min-width:0; }
+.workTitle { margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font:600 var(--lgi-type-object-size)/1.35 var(--lgi-font-ui); }
+.workByline { display:flex;align-items:center;gap:var(--lgi-space-3);flex-wrap:wrap;margin-top:var(--lgi-space-2);
+  color:var(--lgi-muted);font:var(--lgi-type-label-size)/1.6 var(--lgi-font-ui); }
+.workPlatform { color:var(--lgi-meta);font:var(--lgi-type-aux-size)/1.4 var(--lgi-font-data); }
+.workDate { font-variant-numeric:tabular-nums; }
+.workSummary > :last-child { margin-top:var(--lgi-space-2); }
+.tabs { grid-template-columns:repeat(3,minmax(0,1fr));margin-top:var(--lgi-space-3); }
+.tabs button { min-height:var(--lgi-space-10);font:600 var(--lgi-type-control-size)/1.4 var(--lgi-font-ui); }
+.body { padding:var(--lgi-space-4) var(--lgi-space-5) var(--lgi-space-8); }
+.moreText { margin-top:var(--lgi-space-2);font-size:var(--lgi-type-control-size); }
+.readingBody > :first-child { margin-top:0; }
