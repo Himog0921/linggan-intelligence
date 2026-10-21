@@ -126,9 +126,17 @@ pub struct LocalRecheck {
 #[serde(rename_all = "snake_case")]
 pub enum AdoptionState {
     AdoptedBlock,
+    /// Only exact source ranges are usable; the original block still needs review.
+    AdoptedPartialBlock,
     AdoptedLineFallback,
     Pending,
     Excluded,
+}
+
+impl AdoptionState {
+    pub fn has_unresolved_text(self) -> bool {
+        matches!(self, Self::Pending | Self::AdoptedPartialBlock)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -185,6 +193,9 @@ pub enum Reason {
     CropVlAgreement,
     CropSupportsFallback,
     ScreenshotUiContext,
+    ScreenshotTextFiltered,
+    ConflictingLocalReadings,
+    UnverifiedSymbol,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

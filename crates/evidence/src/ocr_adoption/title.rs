@@ -106,17 +106,26 @@ fn candidate_groups(
         .map(|i| heights[i])
         .fold(0.0, f64::max);
     let mut remaining: Vec<_> = (0..regions.len())
-        .filter(|i| eligible(*i) && heights[*i] >= max_height * 0.70)
+        .filter(|i| eligible(*i) && heights[*i] >= max_height * 0.45)
         .collect();
     remaining.sort_by_key(|i| input.layout.blocks[*i].reading_order);
     let mut groups = vec![];
-    while let Some(first) = remaining.first().copied() {
-        remaining.remove(0);
+    while let Some(seed) = remaining
+        .iter()
+        .position(|i| heights[*i] >= max_height * 0.70)
+    {
+        let first = remaining.remove(seed);
         let mut group = vec![first];
         loop {
             let mut additions = vec![];
             remaining.retain(|i| {
-                if group.iter().any(|j| connects(input, *i, *j, heights)) {
+                if group.iter().any(|j| {
+                    if heights[*i].min(heights[*j]) >= max_height * 0.70 {
+                        connects(input, *i, *j, heights)
+                    } else {
+                        title_continuation(input, *i, *j, heights)
+                    }
+                }) {
                     additions.push(*i);
                     false
                 } else {
@@ -224,4 +233,16 @@ fn connects(input: &ImageInput, i: usize, j: usize, heights: &[f64]) -> bool {
     let vertical_gap = (a[1] - b[3]).max(b[1] - a[3]);
     let horizontal_overlap = a[2].min(b[2]) - a[0].max(b[0]);
     vertical_gap >= -scale * 0.5 && vertical_gap <= scale * 1.5 && horizontal_overlap > 0.0
+}
+
+// A smaller, tightly adjacent line can complete the same visual title. It cannot seed
+// a title by itself or bridge the larger whitespace before a separate body paragraph.
+fn title_continuation(input: &ImageInput, i: usize, j: usize, heights: &[f64]) -> bool {
+    let a = input.layout.blocks[i].bbox;
+    let b = input.layout.blocks[j].bbox;
+    let scale = heights[i].min(heights[j]) * f64::from(input.image.height);
+    let gap = (a[1] - b[3]).max(b[1] - a[3]);
+    let aligned = (a[0] - b[0]).abs() <= f64::from(input.image.width) * 0.05
+        || ((a[0] + a[2]) - (b[0] + b[2])).abs() <= f64::from(input.image.width) * 0.10;
+    gap >= 0.0 && gap <= scale * 0.85 && aligned
 }

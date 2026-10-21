@@ -69,7 +69,7 @@ pub fn project_work(images: &[Assessment]) -> Result<WorkProjection, InputError>
         let pending_blocks = a
             .regions
             .iter()
-            .filter(|r| r.adoption_state == AdoptionState::Pending)
+            .filter(|r| r.adoption_state.has_unresolved_text())
             .map(|r| r.block_ref.clone())
             .collect();
         result.images.push(WorkImageText {

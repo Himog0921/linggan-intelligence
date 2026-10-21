@@ -93,15 +93,16 @@ pub(super) fn visual_order(mut lines: Vec<&Line>) -> Vec<&Line> {
 }
 
 pub(super) fn assess_regions(input: &ImageInput) -> Vec<RegionAssessment> {
+    let screenshot = super::ui::is_screenshot(input);
     input
         .layout
         .blocks
         .iter()
-        .map(|b| assess_region(input, b))
+        .map(|b| assess_region(input, b, screenshot))
         .collect()
 }
 
-fn assess_region(input: &ImageInput, b: &Block) -> RegionAssessment {
+fn assess_region(input: &ImageInput, b: &Block, screenshot: bool) -> RegionAssessment {
     let lines = supported_lines(input, b);
     let line_text = lines
         .iter()
@@ -150,8 +151,9 @@ fn assess_region(input: &ImageInput, b: &Block) -> RegionAssessment {
     } else if matches {
         r.reasons.push(Reason::MatchingLineText);
     }
-    classify_ui_context(input, b, &mut r);
+    super::ui::classify(input, b, &mut r, screenshot);
     qualify_fragments(input, b, &lines, &mut r);
+    super::ui::filter_text(input, &mut r, screenshot);
 
     r
 }
@@ -303,6 +305,18 @@ fn qualify_fragments(input: &ImageInput, b: &Block, lines: &[&Line], r: &mut Reg
                 .join("\n"),
         );
         if !fallback.is_empty() && reread == fallback {
+            // A repeated line-engine reading cannot resolve a conflicting, completed
+            // VL crop. Keep the candidate instead of promoting an icon-shaped letter.
+            if input.rechecks.iter().any(|other| {
+                other.block_ref == b.block_ref
+                    && other.kind == RecheckKind::VlCrop
+                    && other.finish_reason.as_deref() == Some("stop")
+                    && !normalized(&other.text).is_empty()
+                    && normalized(&other.text) != fallback
+            }) {
+                r.reasons.push(Reason::ConflictingLocalReadings);
+                continue;
+            }
             r.usable_fragments = r.fallback_candidates.clone();
             r.adoption_state = AdoptionState::AdoptedLineFallback;
             r.reasons.push(Reason::CropSupportsFallback);
@@ -326,50 +340,6 @@ fn supported_extension(anchors: &str, vl: &str) -> bool {
         }
     }
     i == a.len()
-}
-
-fn classify_ui_context(input: &ImageInput, b: &Block, r: &mut RegionAssessment) {
-    let h = f64::from(input.image.height);
-    let w = f64::from(input.image.width);
-    let icons: Vec<_> = input
-        .layout
-        .blocks
-        .iter()
-        .filter(|i| {
-            matches!(i.label.as_str(), "image" | "header_image")
-                && (i.bbox[2] - i.bbox[0]) / w <= 0.18
-                && (i.bbox[3] - i.bbox[1]) / h <= 0.16
-        })
-        .collect();
-    if icons.len() < 3 || b.text.chars().count() > 48 || (b.bbox[3] - b.bbox[1]) / h > 0.06 {
-        return;
-    }
-    let neighbor = icons.iter().any(|i| {
-        i.bbox[2] <= b.bbox[0] + w * 0.02
-            && b.bbox[0] - i.bbox[2] < w * 0.06
-            && i.bbox[3].min(b.bbox[3]) > i.bbox[1].max(b.bbox[1])
-            // An avatar often extends below its name into the first comment row.
-            // Only the upper, name-aligned row is metadata on this geometric evidence.
-            && b.bbox[1] < (i.bbox[1] + i.bbox[3]) * 0.5
-            && b.bbox[3] <= i.bbox[3]
-    });
-    let dated = b.text.chars().filter(char::is_ascii_digit).count() >= 4
-        && (b.text.contains(':') || b.text.contains('-') || b.text.contains('年'));
-    let compact = normalized(&b.text);
-    if !compact.is_empty() && compact.len() <= 8 && compact.chars().all(|c| c.is_ascii_digit()) {
-        // A recognized isolated number in a repeated-avatar screenshot may be a counter.
-        // Preserve the observation; recognition agreement alone cannot qualify it as prose.
-        r.role = Role::Uncertain;
-        r.adoption_state = AdoptionState::Pending;
-        r.reasons.push(Reason::ScreenshotUiContext);
-        return;
-    }
-    let control = b.text.starts_with("展开") && b.text.contains("回复")
-        || b.text.starts_with("译自") && b.text.contains("显示原文");
-    if neighbor || dated || control {
-        r.role = Role::LayoutMetadata;
-        r.reasons.push(Reason::ScreenshotUiContext);
-    }
 }
 
 fn mathematical_expression(text: &str) -> bool {

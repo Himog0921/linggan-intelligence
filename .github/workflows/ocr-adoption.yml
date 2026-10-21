@@ -21,6 +21,7 @@ on:
       - 'crates/evidence/src/lib.rs'
       - 'crates/evidence/examples/ocr_adoption_replay.rs'
       - 'crates/evidence/tests/ocr_adoption.rs'
+      - 'crates/evidence/tests/ocr_adoption/**'
       - 'crates/evidence/Cargo.toml'
       - 'Cargo.toml'
       - 'Cargo.lock'
@@ -69,6 +70,6 @@ jobs:
           test "$(cat /tmp/ocr-err)" = ocr_adoption_replay_failed
       - name: Formatting, governance and diff
         run: |
-          rustfmt --check --edition 2024 --config skip_children=true crates/evidence/src/ocr_adoption.rs crates/evidence/src/ocr_adoption/*.rs crates/evidence/tests/ocr_adoption.rs crates/evidence/examples/ocr_adoption_replay.rs crates/evidence/src/ocr_adoption_persistence.rs crates/evidence/src/ocr_adoption_persistence/*.rs apps/worker/src/bin/media_worker_support/ocr_vl.rs apps/worker/tests/ocr_vl_postgres.rs
+          rustfmt --check --edition 2024 --config skip_children=true crates/evidence/src/ocr_adoption.rs crates/evidence/src/ocr_adoption/*.rs crates/evidence/tests/ocr_adoption.rs crates/evidence/tests/ocr_adoption/*.rs crates/evidence/examples/ocr_adoption_replay.rs crates/evidence/src/ocr_adoption_persistence.rs crates/evidence/src/ocr_adoption_persistence/*.rs apps/worker/src/bin/media_worker_support/ocr_vl.rs apps/worker/tests/ocr_vl_postgres.rs
           bash scripts/check-project-governance.sh origin/main
           git diff --check

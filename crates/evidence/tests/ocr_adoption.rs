@@ -1,6 +1,9 @@
 //! Synthetic source observations only. No original private OCR text or images.
 use linggan_evidence::ocr_adoption::*;
 
+#[path = "ocr_adoption/business_regressions.rs"]
+mod business_regressions;
+
 fn image() -> ImageIdentity {
     ImageIdentity {
         work_ref: uuid::Uuid::from_u128(1),
@@ -656,10 +659,11 @@ fn upstream_repetition_cannot_be_hidden_by_paddle_cleanup() {
 fn screenshot_counter_is_pending_even_when_both_recognizers_agree() {
     let mut input = input();
     add(&mut input, "text", "427", [800.0, 700.0, 850.0, 720.0]);
+    add(&mut input, "text", "展开3条回复", [80., 800., 350., 830.]);
     for n in 0..3 {
         input.layout.blocks.push(Block {
             block_ref: format!("icon:{n}"),
-            reading_order: n + 1,
+            reading_order: n + 2,
             label: "image".into(),
             text: String::new(),
             bbox: [

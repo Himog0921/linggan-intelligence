@@ -197,7 +197,7 @@ async fn insert_adoption(
         .assessment
         .regions
         .iter()
-        .any(|r| r.adoption_state == AdoptionState::Pending)
+        .any(|r| r.adoption_state.has_unresolved_text())
     {
         "PARTIAL"
     } else {
