@@ -48,6 +48,13 @@ export function useCollectionSelection(domain: string | null) {
 
   const toggle = useCallback((ref: string, checked: boolean) => update(selection => void (checked ? selection.add(ref) : selection.delete(ref))), [update]);
   const addAll = useCallback((refs: readonly string[]) => update(selection => refs.forEach(ref => selection.add(ref))), [update]);
+  /** One toggle affects only loaded refs. Other filters' selections remain untouched. */
+  const togglePage = useCallback((refs: readonly string[]) => update(selection => {
+    if (refs.length === 0) return;
+    const fullySelected = refs.every(ref => selection.has(ref));
+    for (const ref of refs) fullySelected ? selection.delete(ref) : selection.add(ref);
+  }), [update]);
+  const clear = useCallback(() => update(selection => selection.clear()), [update]);
 
-  return { selection: current, toggle, addAll };
+  return { selection: current, toggle, addAll, togglePage, clear };
 }
