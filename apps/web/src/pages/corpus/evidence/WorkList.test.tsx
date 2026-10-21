@@ -125,7 +125,7 @@ describe('表格排版', () => {
     expect(within(table).getAllByRole('columnheader')).toHaveLength(9);
     const rows = within(table).getAllByRole('row').slice(1);
     expect(rows).toHaveLength(3);
-    expect(within(rows[0]!).getByText('点赞')).toHaveClass('v7-sr-only');
+    expect(within(rows[0]!).getByText('点赞：')).toHaveClass('v7-sr-only');
     expect(within(rows[0]!).getByRole('button', { name: '合成作品 1' })).toBeInTheDocument();
     expect(within(rows[1]!).getByRole('button', { name: '合成作品 2' })).toHaveAttribute('aria-current', 'true');
     await user.click(within(rows[2]!).getByText('合成作者 3'));

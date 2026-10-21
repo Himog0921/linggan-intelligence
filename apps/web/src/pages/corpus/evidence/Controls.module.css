@@ -55,17 +55,17 @@
 .quickView { display:grid;gap:var(--lgi-space-2); }
 .quickViewChoices { display:flex;flex-wrap:wrap;gap:var(--lgi-space-2); }
 .quickViewChoices button { min-height:var(--lgi-space-8);padding:0 var(--lgi-space-2);
-  border:1px solid var(--lgi-border);background:var(--lgi-canvas);font:var(--lgi-type-label-weight) var(--lgi-type-label-size)/1.5 var(--lgi-font-ui); }
+  border:var(--lgi-action-border-width) solid var(--lgi-border);background:var(--lgi-canvas);font:var(--lgi-type-label-weight) var(--lgi-type-label-size)/1.5 var(--lgi-font-ui); }
 .quickViewChoices button[aria-pressed='true'] { color:var(--lgi-signal-ink);border-color:var(--lgi-signal); }
 .selectMode { display:inline-flex;align-items:center;justify-content:center;gap:var(--lgi-space-2);
   height:var(--lgi-space-10); min-height:var(--lgi-space-10);padding:0 var(--lgi-space-4);
-  border:1px solid var(--lgi-ink);background:var(--lgi-canvas);
+  border:var(--lgi-action-border-width) solid var(--lgi-ink);background:var(--lgi-canvas);
   color:var(--lgi-ink);font:600 var(--lgi-type-control-size)/1.5 var(--lgi-font-ui);white-space:nowrap;
 }
 .selectMode[aria-pressed='true'] { background:var(--lgi-ink);color:var(--lgi-on-dark); }
 .selectMode[aria-pressed='true']:hover { background:var(--lgi-body); }
-.selectGlyph { display:grid;grid-template-columns:repeat(2,5px);grid-template-rows:repeat(2,5px);gap:3px; }
-.selectGlyph i { display:block;border:1px solid currentColor; }
+.selectGlyph { display:grid;grid-template-columns:repeat(2,calc(var(--lgi-space-1) + var(--lgi-action-border-width)));grid-template-rows:repeat(2,calc(var(--lgi-space-1) + var(--lgi-action-border-width)));gap:calc(var(--lgi-space-1) - var(--lgi-action-border-width)); }
+.selectGlyph i { display:block;border:var(--lgi-action-border-width) solid currentColor; }
 .selectGlyph i:first-child { background:currentColor; }
 .selectPage { min-width:var(--lgi-space-24);white-space:nowrap; }
 .foot { min-height:var(--lgi-space-12); margin-top:0; }
@@ -75,7 +75,7 @@
   white-space:nowrap;color:var(--lgi-ink); }
 .selectedCount b { color:var(--lgi-signal);font:600 var(--lgi-type-data-size)/1 var(--lgi-font-data); }
 .selectedCount small { color:var(--lgi-muted);font-size:var(--lgi-type-aux-size);font-weight:400; }
-.selectionDivider { display:block; flex:none;width:1px;height:var(--lgi-space-4);background:var(--lgi-border); }
+.selectionDivider { display:block; flex:none;width:var(--lgi-action-border-width);height:var(--lgi-space-4);background:var(--lgi-border); }
 .selection [data-action-button] { white-space:nowrap; }
 @container evidence-workspace (max-width: 1000px) {
   .band { display:block; }
