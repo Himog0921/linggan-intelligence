@@ -32,7 +32,7 @@ try {
    await page.locator('#comment-filter-form').waitFor();
    await page.getByRole('region',{name:'评论研究 AI状态'}).waitFor();
    assert.equal(await button('发起研究').count(),0);
-   assert.equal(await page.getByRole('link',{name:'去 AI 设置'}).getAttribute('href'),'/settings/models?section=automation&task=comment_study');
+   assert.equal(await page.getByRole('link',{name:'去 AI 设置'}).getAttribute('href'),'/settings/models?view=advanced&area=work&task=comment_study');
   });
   await step('Historical methods remain immutable, readable and comparable',async()=>{
    await page.getByText('查看历史方法版本',{exact:true}).click();
