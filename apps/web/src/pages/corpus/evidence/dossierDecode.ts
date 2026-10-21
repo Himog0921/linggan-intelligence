@@ -82,6 +82,7 @@ function parseLayering(record: Json | null): DossierLayering | null {
 function parseMedia(record: Json): DossierMedia {
   const other = optObj(record, 'otherProcessing');
   const adoption = optObj(record, 'ocrAdoption');
+  const human = optObj(record, 'ocrHumanAdoption');
   return {
     derivativeRef: optStr(record, 'derivativeRef'),
     slotKey: optStr(record, 'slotKey'),
@@ -91,7 +92,9 @@ function parseMedia(record: Json): DossierMedia {
     contextOnly: optBool(record, 'contextOnly') === true,
     displayText: optStr(record, 'displayText'),
     researchText: optStr(record, 'researchText'),
+    humanReviewRef: human === null ? null : optStr(optObj(human, 'adopted_body') ?? {}, 'reviewRef'),
     ocrAdoption: adoption === null ? null : {
+      adoptionRef: optStr(adoption, 'adoptionRef'),
       rawBlocks: Array.isArray(adoption.rawBlocks) ? adoption.rawBlocks.filter(isRecord).map(block => ({ blockRef: str(block, 'blockRef'), text: str(block, 'text') })) : [],
       pendingBlocks: Array.isArray(adoption.pendingBlocks) ? adoption.pendingBlocks.filter((id): id is string => typeof id === 'string') : [],
       projectionVersion: optStr(adoption, 'projectionVersion'),

@@ -1,0 +1,13 @@
+/* A settings subsection, using existing controls and page tokens. */
+.audit { display: grid; gap: var(--lgi-space-4); min-width: 0; margin-bottom: var(--lgi-space-6); }
+.audit > details { min-width: 0; border-top: 1px solid var(--lgi-hairline); padding-top: var(--lgi-space-3); }
+.audit summary { cursor: pointer; overflow-wrap: anywhere; }
+.audit table { width: 100%; border-collapse: collapse; text-align: left; }
+.audit :is(th,td) { padding: var(--lgi-space-2) var(--lgi-space-3); border-bottom: 1px solid var(--lgi-hairline); }
+.audit tbody { font-variant-numeric: tabular-nums; }
+.config { display: grid; gap: var(--lgi-space-3); padding: var(--lgi-space-4) 0; }
+.config label { display: grid; gap: var(--lgi-space-2); min-width: 0; }
+.config :is(input,select,textarea) { box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; padding: var(--lgi-space-2) var(--lgi-space-3); font: inherit; background: var(--lgi-canvas); color: var(--lgi-body); border: 1px solid var(--lgi-border); }
+.config input[type=checkbox] { width: auto; }
+.config textarea { min-height: var(--lgi-space-24); resize: vertical; }
+.config :focus-visible { outline: 2px solid var(--lgi-focus); outline-offset: 2px; }

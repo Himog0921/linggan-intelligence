@@ -82,6 +82,7 @@ async fn prepare(
     let config=sqlx::query("SELECT model_config_ref,budget_mode,daily_token_limit FROM linggan_ai_task_config WHERE task_config_ref=$1")
         .bind(item.task_config_ref).fetch_one(&mut *tx).await?;
     let mut request = PiRequest {
+        images: vec![],
         version: PI_PROTOCOL,
         operation: operation.as_str().into(),
         api: row.get("api"),

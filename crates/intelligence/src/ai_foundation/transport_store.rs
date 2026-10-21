@@ -93,6 +93,7 @@ impl FrozenModel {
         let mut execution = self.execution.clone();
         execution.response_schema = response_schema;
         PiRequest {
+            images: vec![],
             version: PI_PROTOCOL,
             operation: "analyze".into(),
             api: self.api.clone(),

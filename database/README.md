@@ -70,3 +70,5 @@ ENV-001 的 proof 数据库只用于环境验证，验证后必须删除；它�
 
 
 `0142_ocr_adoption.sql` 仅为显式 local-vl-v1 作业增加附着已有 derivative/layout 的 append-only 原观察/采用投影；不改原图、旧OCR/平台标题，不创建待运行作业或启用 worker。#464 当前只在自有隔离 PostgreSQL 应用验证，未应用于共享数据库；生产默认 local-v3 不变。字段、候选/采用边界及 raw 引用见 [OCR合同](../docs/data-contracts/ocr-content-layering.md)。
+
+`0143_ocr_quality_audit.sql` 为现有AI队列增加默认关闭的OCR抽检任务和专用图片外发类别；附着原媒体采用记录的冻结抽样、模型意见、差异与人工版本均append-only。自动抽样和自动修正不启用，不迁移或重排共享材料。仅自有临时库验证；见[合同](../docs/data-contracts/ocr-quality-audit.md)与[实施计划](../docs/plans/active/ocr-quality-audit-454.md)。

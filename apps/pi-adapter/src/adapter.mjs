@@ -67,12 +67,22 @@ function packetSchema(r) {
 }
 
 function validate(r) {
-  if(!r || r.version!==VERSION || !['connect','discover','probe','analyze','embed'].includes(r.operation) || !API[r.api]
+  if(!r || r.version!==VERSION || !['connect','discover','probe','analyze','analyze_image','embed'].includes(r.operation) || !API[r.api]
     || !integer(r.timeoutMs,100,LIMITS.maxTimeoutSeconds*1000) || !integer(r.maxOutputTokens,16,LIMITS.maxOutputTokens)
     || typeof r.apiKey!=='string' || r.apiKey.length>4096 || typeof r.baseUrl!=='string') throw new Rejected('invalid_request');
   let u;try{u=new URL(r.baseUrl);}catch{throw new Rejected('invalid_request');}
   if(u.username||u.password||u.search||u.hash||(r.localEndpoint===true&&!['127.0.0.1','localhost','[::1]'].includes(u.hostname))||!(u.protocol==='https:'||(r.localEndpoint===true&&u.protocol==='http:'&&['127.0.0.1','localhost','[::1]'].includes(u.hostname))))throw new Rejected('endpoint_rejected');
   if(!['connect','discover'].includes(r.operation)&&(!r.modelId||typeof r.modelId!=='string'||r.modelId.length>200||typeof r.prompt!=='string'||typeof r.system!=='string'))throw new Rejected('invalid_request');
+  if(r.operation==='analyze_image'&&r.images===undefined)throw new Rejected('invalid_request');
+  if(r.images!==undefined){
+    if(!Array.isArray(r.images)||r.images.length!==1||!r.execution||r.operation!=='analyze_image')throw new Rejected('invalid_request');
+    for(const image of r.images){
+      if(!image||typeof image.data!=='string'||image.data.length>10666668||!/^[A-Za-z0-9+/]*={0,2}$/.test(image.data))throw new Rejected('invalid_request');
+      const bytes=Buffer.from(image.data,'base64');
+      const magic=image.mimeType==='image/png'?bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])):image.mimeType==='image/jpeg'?bytes.subarray(0,3).equals(Buffer.from([255,216,255])):image.mimeType==='image/webp'?bytes.subarray(0,4).toString()==='RIFF'&&bytes.subarray(8,12).toString()==='WEBP':false;
+      if(!magic||bytes.length>8000000||bytes.toString('base64')!==image.data)throw new Rejected('invalid_request');
+    }
+  }
   return u;
 }
 function usageFrom(api,value,usage) {
@@ -151,7 +161,7 @@ export async function execute(r) {
       return response({version:VERSION,ok:true,modelIds:ids,modelListOrigin:'ACCOUNT_ENDPOINT',usage,elapsedMs:Date.now()-started});
     }
     if(policy.qualified){
-      if(estimateTopicInputTokens(r.system,r.prompt)>policy.inputTokenLimit)throw new Rejected('model_input_limit');
+      if(estimateTopicInputTokens(r.system,r.prompt)+(r.images?.length?1024:0)>policy.inputTokenLimit)throw new Rejected('model_input_limit');
     }else if(topic){
       if(!integer(topic.inputTokenLimit,1024,LIMITS.legacyInputTokens))throw new Rejected('invalid_request');
       if(estimateTopicInputTokens(r.system,r.prompt)>topic.inputTokenLimit)throw new Rejected('model_input_limit');
@@ -159,7 +169,7 @@ export async function execute(r) {
     // pi requires numeric price metadata internally; those placeholders never enter our ledger.
     const model={id:r.modelId,name:r.modelId,api:r.api,provider:'linggan-explicit',baseUrl:base.href,
       reasoning:policy.modelReasoning,thinkingLevelMap:policy.thinkingLevelMap,compat:policy.compat,
-      input:['text'],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},
+      input:r.images?.length?['text','image']:['text'],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},
       contextWindow:policy.qualified?policy.contextWindow:(topic?topic.inputTokenLimit+r.maxOutputTokens:LIMITS.legacyInputTokens),maxTokens:r.maxOutputTokens};
     let outputFormat;try{outputFormat=structuredPayload(r,policy,packetSchema(r));}catch{throw new Rejected('invalid_request');}
     const onPayload=payload=>{
@@ -172,7 +182,7 @@ export async function execute(r) {
       streamFn:(m,c,o)=>models.streamSimple(m,c,{...o,signal:AbortSignal.any([abort.signal,...(o?.signal?[o.signal]:[])]),
         apiKey:r.apiKey,fetch:transport,onPayload,timeoutMs:r.timeoutMs,maxRetries:0,maxTokens:r.maxOutputTokens,reasoning:policy.reasoning,cacheRetention:'none'}),
       shouldStopAfterTurn:()=>true,beforeToolCall:()=>({block:true,reason:'No tools granted',terminate:true})});
-    await agent.prompt(r.prompt);
+    await agent.prompt(r.prompt,r.images?.map(image=>({type:'image',data:image.data,mimeType:image.mimeType})));
     if(abort.signal.aborted||Date.now()-started>=r.timeoutMs)throw new Rejected('provider_timeout');
     const message=agent.state.messages.filter(m=>m.role==='assistant').at(-1);
     if(!message)throw new Rejected(failure.code||classifyUnterminated(observation));

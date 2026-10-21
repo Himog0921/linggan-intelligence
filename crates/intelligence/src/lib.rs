@@ -71,3 +71,5 @@ pub mod comment_study_semantic;
 pub mod comment_study_source;
 
 pub mod topic_map_structure;
+
+pub mod ocr_quality_audit;

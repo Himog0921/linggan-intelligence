@@ -32,6 +32,7 @@ use serde_json::json;
 
 pub(super) fn routes() -> Router<LocalWebState> {
     Router::new()
+        .merge(super::ocr_audit::routes())
         .route("/api/local/ai-settings", get(read))
         .route("/api/local/ai-settings/invocations", get(invocations))
         .route(
@@ -237,7 +238,7 @@ async fn skill_read(
         linggan_intelligence::ai_foundation::settings_read::read_skill_version(db, version).await,
     )
 }
-fn invalid() -> Response {
+pub(super) fn invalid() -> Response {
     respond::<serde_json::Value>(Err(FoundationError::Invalid))
 }
 
@@ -251,14 +252,14 @@ pub(crate) fn legacy_closed(task_key: &'static str) -> Response {
     )
         .into_response()
 }
-fn unavailable() -> Response {
+pub(super) fn unavailable() -> Response {
     (
         StatusCode::SERVICE_UNAVAILABLE,
         Json(json!({"error":"ai_database_unavailable"})),
     )
         .into_response()
 }
-fn respond<T: Serialize>(result: Result<T, FoundationError>) -> Response {
+pub(super) fn respond<T: Serialize>(result: Result<T, FoundationError>) -> Response {
     match result {
         Err(FoundationError::AdmissionDenied(reasons)) => (
             StatusCode::CONFLICT,

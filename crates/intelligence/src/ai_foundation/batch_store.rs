@@ -50,6 +50,9 @@ pub enum InputRef {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         profile: Option<ProbeProfile>,
     },
+    OcrAuditSample {
+        sample_ref: Uuid,
+    },
     WritingRequest {
         request_ref: Uuid,
     },
@@ -82,6 +85,7 @@ impl InputRef {
                     && ((*operation == ProbeOperation::Probe) == model_ref.is_some())
                     && (profile.is_none() || *operation == ProbeOperation::Probe)
             }
+            Self::OcrAuditSample { .. } => task == TaskKey::OcrQualityAudit,
             Self::WritingRequest { .. } => task == TaskKey::WritingLegacy && !trial,
             Self::WritingPreview { .. } => task == TaskKey::WritingLegacy && trial,
             Self::Note { .. } => task == TaskKey::NoteInterpretation,
@@ -126,7 +130,9 @@ impl BatchKind {
             | TaskKey::WritingAssistant
             | TaskKey::DirectionListDraft
             | TaskKey::DirectionProposal => matches!(self, Self::Interactive | Self::Trial),
-            TaskKey::NoteInterpretation | TaskKey::AuthorOrgIdentity => self != Self::Probe,
+            TaskKey::NoteInterpretation | TaskKey::AuthorOrgIdentity | TaskKey::OcrQualityAudit => {
+                self != Self::Probe
+            }
             _ => false,
         }
     }

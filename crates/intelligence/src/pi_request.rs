@@ -28,6 +28,38 @@ impl PiRequest {
         {
             return Err(ModelError::Invalid);
         }
+        if self.operation == "analyze_image" && self.images.len() != 1 {
+            return Err(ModelError::Invalid);
+        }
+        if !self.images.is_empty() {
+            use base64::Engine;
+            if self.execution.is_none()
+                || self.images.len() != 1
+                || self.operation != "analyze_image"
+            {
+                return Err(ModelError::Invalid);
+            }
+            let image = &self.images[0];
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(&image.data)
+                .map_err(|_| ModelError::Invalid)?;
+            let magic = match image.mime_type.as_str() {
+                "image/png" => bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
+                "image/jpeg" => bytes.starts_with(&[255, 216, 255]),
+                "image/webp" => bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP"),
+                _ => false,
+            };
+            if !magic
+                || bytes.len() > 8_000_000
+                || super::ai_foundation::transport::estimate_input_tokens(
+                    &self.system,
+                    &self.prompt,
+                ) + 1024
+                    > self.execution.as_ref().unwrap().input_token_limit
+            {
+                return Err(ModelError::InputLimit);
+            }
+        }
         let topic = serde_json::from_str::<Value>(&self.prompt)
             .ok()
             .and_then(|p| p["contract"].as_str().map(str::to_owned))

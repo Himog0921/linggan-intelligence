@@ -63,6 +63,7 @@ mod material_projection_tests;
 #[cfg(test)]
 mod material_replica_fallback_tests;
 mod model_settings;
+mod ocr_audit;
 mod offline_preview;
 #[cfg(test)]
 mod offline_preview_tests;

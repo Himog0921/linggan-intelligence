@@ -127,11 +127,11 @@ pub async fn claim_next(
         JOIN linggan_ai_batch_control bc USING(batch_ref) JOIN linggan_ai_task t ON t.task_key=b.task_key
         JOIN linggan_ai_task_config cfg ON cfg.task_config_ref=b.task_config_ref
         WHERE c.state='pending' AND c.next_attempt_at<=clock_timestamp() AND bc.state='open' AND NOT bc.cancel_requested
-         AND t.lifecycle='active' AND t.task_key IN ('model_probe','writing_legacy')
+         AND t.lifecycle='active' AND t.task_key IN ('model_probe','writing_legacy','ocr_quality_audit')
          AND cfg.execution_contract=t.handler_contract AND c.attempt_count<$1
          AND item.position<(bc.last_round_no+1)*$2
          AND NOT EXISTS(SELECT 1 FROM linggan_ai_control switch WHERE switch.scope_key IN ('global','executor','task:'||b.task_key) AND NOT switch.enabled)
-        ORDER BY b.created_at,b.batch_ref,item.position FOR UPDATE OF c SKIP LOCKED LIMIT 1")
+        ORDER BY (b.task_key='ocr_quality_audit'),b.created_at,b.batch_ref,item.position FOR UPDATE OF c SKIP LOCKED LIMIT 1")
         .bind(AI_LIMITS.max_attempts as i32).bind(AI_LIMITS.round_size as i32)
         .fetch_optional(&mut *tx).await?;
     let Some(row) = row else { return Ok(None) };

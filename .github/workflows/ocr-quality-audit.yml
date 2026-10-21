@@ -1,0 +1,67 @@
+name: OCR quality audit isolated proof
+on:
+  pull_request:
+    branches: [main, codex/ocr-title-quality-454]
+    paths:
+      - '.github/workflows/ocr-quality-audit.yml'
+      - 'crates/intelligence/src/ocr_quality_audit*'
+      - 'crates/intelligence/src/ocr_quality_audit/**'
+      - 'crates/intelligence/src/ai_foundation/**'
+      - 'crates/intelligence/src/pi_*'
+      - 'crates/evidence/src/ocr_adoption_persistence/**'
+      - 'apps/api/src/local_web/ocr_audit.rs'
+      - 'apps/web/src/pages/settings/OcrAudit*'
+      - 'apps/web/src/pages/settings/ocrAuditApi.ts'
+      - 'apps/web/src/pages/corpus/evidence/OcrAudit*'
+      - 'apps/web/test/e2e/ocr-audit-real-chain.mjs'
+      - 'apps/pi-adapter/**'
+      - 'apps/worker/tests/ocr_quality_audit_postgres.rs'
+      - 'apps/worker/tests/support/ocr_audit_endpoint.rs'
+      - 'database/migrations/0143_ocr_quality_audit.sql'
+      - 'scripts/test-ocr-quality-audit-postgres.sh'
+permissions:
+  contents: read
+concurrency:
+  group: ocr-quality-audit-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  synthetic-audit-chain:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_PROFILE_TEST_DEBUG: '0'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version-file: .nvmrc
+      - name: Locked runtimes and browser
+        run: |
+          rustup toolchain install 1.95.0 --profile minimal --component rustfmt
+          rustup default 1.95.0
+          npm ci --prefix apps/pi-adapter --ignore-scripts --no-audit --no-fund
+          npm ci --prefix apps/web --ignore-scripts --no-audit --no-fund
+          cd apps/web
+          npx playwright install --with-deps chromium
+      - name: Contracts and bounded SDK transport
+        run: |
+          cargo test -p linggan-intelligence --lib --locked
+          cargo test -p linggan-intelligence --test ocr_quality_audit --locked
+          cargo test -p linggan-evidence --test ocr_adoption --locked
+          npm --prefix apps/pi-adapter test
+          npm --prefix apps/web run lint
+          npm --prefix apps/web run test
+      - name: Actual owned worker, database and React main path
+        run: bash scripts/test-ocr-quality-audit-postgres.sh --browser
+      - name: Governance and source formatting
+        run: |
+          bash scripts/check-project-governance.sh origin/main
+          bash scripts/verify-ui-design-handbook.sh
+          rustfmt --check --edition 2024 --config skip_children=true crates/intelligence/src/ocr_quality_audit.rs crates/intelligence/src/ocr_quality_audit/*.rs crates/intelligence/src/ai_foundation/executor/ocr_audit.rs crates/evidence/src/ocr_adoption_persistence/review.rs crates/intelligence/tests/ocr_quality_audit.rs apps/worker/tests/ocr_quality_audit_postgres.rs apps/worker/tests/support/ocr_audit_endpoint.rs apps/api/src/local_web/ocr_audit.rs
+          git diff --check

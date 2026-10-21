@@ -1,3 +1,4 @@
+import { OcrAuditReview } from './OcrAuditReview';
 import { useState, type Ref } from 'react';
 import { lineRole, imageSummary, processingState } from './dossierPresent';
 import type { DossierLine, DossierMedia } from './dossierTypes';
@@ -62,12 +63,12 @@ export function ImageCompare({ media, onOpenImage, register }: { media: DossierM
       {media.otherProcessing ? <p className={styles.note}>{`另有处理结果：${processingState(media.otherProcessing.state)}。当前展示所选可读版本。`}</p> : null}
       {adoption ? <>
         <details className={styles.disclosure} open>
-          <summary>已采用的图片文字</summary>
+          <summary>{media.humanReviewRef ? '人工修正后的采用文字' : '已采用的图片文字'}</summary>
           <p className={styles.note}>缺口提示由系统添加，不是原文；图片转录不代表作品作者的观点。</p>
           <pre className={styles.pre}>{media.researchText?.trim() || '尚无可直接采用的文字，请查看待核验片段。'}</pre>
         </details>
         {adoption.pendingBlocks.length > 0 ? <details className={styles.disclosure}>
-          <summary>{`待核验片段（${adoption.pendingBlocks.length} 个区块）`}</summary>
+          <summary>{`${media.humanReviewRef ? '本地 OCR 的待核验片段' : '待核验片段'}（${adoption.pendingBlocks.length} 个区块）`}</summary>
           {adoption.rawBlocks.filter(block => adoption.pendingBlocks.includes(block.blockRef)).map(block => <pre key={block.blockRef} className={styles.pre}>{block.text}</pre>)}
         </details> : null}
       </> : null}
@@ -75,6 +76,7 @@ export function ImageCompare({ media, onOpenImage, register }: { media: DossierM
         <summary>{adoption ? '原始 OCR（未筛选）' : '所选识别版本文字'}</summary>
         <pre className={styles.pre}>{adoption ? adoption.rawBlocks.map(block => block.text).join('\n\n') || '未取得原始文字' : media.researchText ?? media.displayText ?? '未取得'}</pre>
       </details>
+      {adoption?.adoptionRef ? <OcrAuditReview adoptionRef={adoption.adoptionRef} body={media.researchText ?? ''} /> : null}
       {layering ? (
         <details className={styles.disclosure}>
           <summary>来源与分层版本</summary>

@@ -124,7 +124,7 @@ export const parseComparison = object({ comparisonRef: text, taskKey: text, posi
   inputsSha256: text, baseline: nullable(comparisonSide), candidate: comparisonSide, qualifiesForActivation: bool, sourceQualification: text });
 export type Comparison = ReturnType<typeof parseComparison>;
 export const TASK_STATE: Record<string, string> = { active: '已接入', pending: '尚未接入', frozen: '已停用，接入时间另定', retired: '已退役', legacy: '仅保留历史' };
-export const MATERIAL: Record<string, string> = { synthetic_probe: '合成测试内容', model_catalog: '模型目录', note_material: '研究底稿', public_author_bio: '公开作者简介', selected_writing_material: '本篇选中写作材料' };
+export const MATERIAL: Record<string, string> = { synthetic_image_probe: '合成图片视觉探测', ocr_quality_image: '抽检原图', synthetic_probe: '合成测试内容', model_catalog: '模型目录', note_material: '研究底稿', public_author_bio: '公开作者简介', selected_writing_material: '本篇选中写作材料' };
 export const THINKING: Record<string, string> = { off: '关闭思考', minimal: '最低', low: '轻量', medium: '标准', high: '深入', xhigh: '更深入', max: '最高' };
 export const OUTPUT: Record<string, string> = { prompt_only: '按提示返回', json_object: 'JSON 对象', json_schema: '结构约束' };
 export const BATCH_STATE: Record<string, string> = { open: '待领取或执行中', completed: '本批已结束', cancelled: '已取消', pending: '待领取', running: '执行中', succeeded: '成功', failed: '失败', skipped: '已跳过' };

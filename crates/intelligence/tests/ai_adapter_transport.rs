@@ -14,6 +14,7 @@ use tokio::{
 use uuid::Uuid;
 fn request(base_url: String) -> PiRequest {
     PiRequest {
+        images: vec![],
         version: PI_PROTOCOL,
         operation: "analyze".into(),
         api: "openai-completions".into(),
