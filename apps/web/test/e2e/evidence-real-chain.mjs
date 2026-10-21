@@ -117,16 +117,16 @@ const TITLE = { rich: '合成长文：从两分钟开始建立习惯', video: '�
 let finished = false;
 try {
   // ① 打开与外壳
-  await step('打开页面：外壳、标题、读取时间、侧栏徽标；自动选中第一项并替换地址；没有写请求；普通层无 UUID', async () => {
+  await step('打开页面：外壳、标题、读取时间、侧栏徽标；浏览态不自动打开首篇；点击后才读详情；没有写请求；普通层无 UUID', async () => {
     const response = await page.goto(base);
     assert.equal(response?.status(), 200);
     await rows().first().waitFor();
     assert.equal(await page.title(), '证据库 · 语料');
     assert.equal((await page.getByRole('heading', { level: 1 }).textContent()).trim(), '证据库');
-    // 地址：第一项自动选中，写回 work（替换历史，不新增）。
-    await page.waitForURL(url => url.searchParams.get('work') === rich);
+    // 浏览态不替用户选中首篇，也不读取详情；点作品后才写入 work 并打开检查器。
+    assert.equal(new URL(page.url()).searchParams.get('work'), null);
     assert.equal(await rows().count(), pageSize);
-    await waitInspector(TITLE.rich);
+    assert.equal(await inspector().getAttribute('inert'), '');
     const nav = page.getByRole('navigation', { name: '一级导航' });
     assert.equal(await nav.locator('a, button').count(), 6);
     assert.equal(await nav.getByRole('link', { name: /语料/ }).getAttribute('aria-current'), 'page');
@@ -154,6 +154,10 @@ try {
     assert.deepEqual(report.writes, []);
     const layout = await shot('evidence-1440-research');
     assert.ok(layout.documentWidth <= layout.viewport, '1440 宽度不应横向溢出');
+
+    await rowOf(TITLE.rich).click();
+    await page.waitForURL(url => url.searchParams.get('work') === rich);
+    await waitInspector(TITLE.rich);
   });
 
   // ② 未选领域
