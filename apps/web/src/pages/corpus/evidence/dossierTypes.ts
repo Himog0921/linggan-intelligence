@@ -45,6 +45,12 @@ export interface DossierLayering {
   excluded: Readonly<Record<string, string>>;
 }
 
+export interface DossierOcrAdoption {
+  rawBlocks: { blockRef: string; text: string }[];
+  pendingBlocks: string[];
+  projectionVersion: string | null;
+}
+
 export interface DossierMedia {
   derivativeRef: string | null;
   slotKey: string | null;
@@ -54,6 +60,7 @@ export interface DossierMedia {
   contextOnly: boolean;
   displayText: string | null;
   researchText: string | null;
+  ocrAdoption?: DossierOcrAdoption | null;
   /** 原图的受控本地句柄（已过 `/api/local/media/` 校验）；没有是 null。 */
   originalUrl: string | null;
   originalMaterializationRef: string | null;

@@ -11,9 +11,9 @@ mod validation;
 mod work;
 
 pub use types::*;
-pub use work::{WorkFragment, WorkImageText, WorkProjection, project_work};
+pub use work::{WorkFragment, WorkImageText, WorkProjection, WorkSegment, project_work};
 
-pub const RULE_VERSION: &str = "ocr-adoption-v6";
+pub const RULE_VERSION: &str = "ocr-adoption-v6.1";
 
 pub fn assess(input: &ImageInput) -> Result<Assessment, InputError> {
     validation::validate(input)?;

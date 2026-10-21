@@ -82,7 +82,10 @@ fn screenshot_controls_and_inline_ui_are_removed_by_source_ranges() {
     );
     assert_eq!(f.bbox, [65., 750., 850., 810.]);
     let p = project_work(&[a]).unwrap();
-    assert_eq!(p.image_text, "这段原文保持原样。");
+    assert_eq!(
+        p.image_text,
+        "〔部分内容未采用〕\n这段原文保持原样。\n〔部分内容未采用〕"
+    );
     assert!(p.images[0].pending_blocks.contains(&mixed));
     assert_eq!(i.layout.blocks[6].text, original);
 }
@@ -319,7 +322,7 @@ fn aggregate_comments_keep_scoped_bodies_and_exclude_dates_and_counters() {
     let p = project_work(&[a]).unwrap();
     assert_eq!(
         p.image_text,
-        "这是第一条合成评论正文\n这是第二条合成评论正文"
+        "〔部分内容未采用〕\n这是第一条合成评论正文\n〔部分内容未采用〕\n这是第二条合成评论正文\n〔部分内容未采用〕"
     );
     assert_eq!(p.source_relation, "image_transcription_not_author_claim");
     assert_eq!(p.fragments.len(), 2);
@@ -341,4 +344,91 @@ fn date_in_a_card_is_not_enough_to_establish_a_screenshot() {
     let p = project_work(&[assess(&i).unwrap()]).unwrap();
     assert!(p.image_text.contains("2028年共同学习计划"));
     assert!(p.image_text.contains("合成昵称"));
+}
+
+#[test]
+fn navigation_clock_header_is_not_narrative_even_when_model_box_is_oversized() {
+    let mut i = input();
+    add(&mut i, "doc_title", "<昨天09:18杂字", [1., 20., 999., 600.]);
+    i.anchors.lines.clear();
+    for (n, (text, y)) in [("昨天", 25.), ("09:18", 60.)].into_iter().enumerate() {
+        i.anchors.lines.push(Line {
+            line_ref: n.to_string(),
+            reading_order: n as u32,
+            text: text.into(),
+            bbox: [440., y, 540., y + 30.],
+            confidence: 0.99,
+        });
+    }
+    let a = assess(&i).unwrap();
+    assert_eq!(a.regions[0].role, Role::LayoutMetadata);
+    assert!(a.regions[0].usable_fragments.is_empty());
+    assert!(project_work(&[a]).unwrap().image_text.is_empty());
+    assert_eq!(i.layout.blocks[0].text, "<昨天09:18杂字");
+    // A calendar on a poster without navigation is not screenshot metadata.
+    i.layout.blocks[0].text = "昨天09:18".into();
+    let a = assess(&i).unwrap();
+    assert_ne!(a.regions[0].role, Role::LayoutMetadata);
+}
+
+#[test]
+fn source_gaps_are_typed_and_never_part_of_cited_source_fragments() {
+    let mut i = input();
+    i.image_role = ImageRole::Interior;
+    i.sequence_ordinal = Some(2);
+    add(
+        &mut i,
+        "text",
+        "甲段原文争议乙段原文尾部",
+        [100., 200., 900., 500.],
+    );
+    let mut a = assess(&i).unwrap();
+    let r = &mut a.regions[0];
+    r.adoption_state = AdoptionState::AdoptedPartialBlock;
+    r.usable_fragments = [(0, 4, "甲段原文"), (6, 10, "乙段原文")]
+        .into_iter()
+        .map(|(start, end, text)| Fragment {
+            source_kind: SourceKind::Block,
+            source_ref: r.block_ref.clone(),
+            start,
+            end,
+            text: text.into(),
+            bbox: r.bbox,
+        })
+        .collect();
+    let p = project_work(&[a.clone()]).unwrap();
+    assert_eq!(
+        p.image_text,
+        "甲段原文\n〔部分内容未采用〕\n乙段原文\n〔部分内容未采用〕"
+    );
+    assert_eq!(
+        p.images[0]
+            .segments
+            .iter()
+            .filter(|s| matches!(s, WorkSegment::Gap { .. }))
+            .count(),
+        2
+    );
+    for f in &p.fragments {
+        assert_eq!(
+            p.image_text
+                .chars()
+                .skip(f.start)
+                .take(f.end - f.start)
+                .collect::<String>(),
+            f.source.text
+        );
+        assert!(!f.source.text.contains("〔"));
+    }
+    // Existing decisions stay readable without inventing an old raw-text length.
+    a.rule_version = "ocr-adoption-v6".into();
+    a.regions[0].source_char_count = None;
+    let p = project_work(&[a]).unwrap();
+    assert!(matches!(
+        p.images[0].segments.last(),
+        Some(WorkSegment::Gap {
+            source_end: None,
+            ..
+        })
+    ));
 }

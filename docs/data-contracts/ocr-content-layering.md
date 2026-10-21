@@ -70,3 +70,11 @@
 自然语言待定块可保留局部唯一对应的原文范围：同位置已完成VL裁剪与独立行证据共同支持，至少四个归一化字符定位，争议附近残词句不自动采用；每个片段仍给原块框，不制造逐字坐标。部分范围即使覆盖很多字仍保持adopted_partial_block/needs_review/PARTIAL，不降低整块有限扩充门槛。失败、截断、公式或背景块不能借此放行。
 
 同块可保存多个不同裁剪的回执；裁剪必须与原块有实际空间关联，重复身份/原图/框/hash/原始返回按原合同校验。只有覆盖整块的裁剪参与整块采用判断；子区域不会给整块背书。聚合content标签先保持待定，局部范围逐一核对，不能把昵称、日期、回复或多个表达者整块并为作者正文。原文范围、裁剪上下文与图片转录来源关系保留，缺乏证据的表达者/回复父项保持未知；这不是评论关系抽取已完成。
+
+## OCR v6.1 来源缺口投影（#464）
+
+`ocr-adoption-v6.1` 增加导航/日历/时钟上下文的 UI 排除；原始 OCR、平台标题及历史判定不覆盖。`RegionAssessment.sourceCharCount` 为原文 Unicode scalar 长度，旧记录缺失为 null。
+
+`imageTextProjection.projection.images[].segments` 为 `kind=source|gap`。source 携带原 Fragment 和投影 start/end；gap 携带 blockRef、sourceStart/sourceEnd（未知可 null）、reason=unadopted_source 和投影 start/end。范围均为 Unicode scalar 半开区间。系统标记 `〔部分内容未采用〕` 只进入展示/研究投影，不进入原始 OCR 或任何源 Fragment。开头、中间、尾部缺口及整块待核验均显式保留；整图无采用片段时 text 仍为空，gap 显示范围为0，不伪造可用正文。
+
+读回只重新投影保存的决定，不用新规则重判历史文字。ocrAdoption.rawBlocks、pendingBlocks、segments 与 projectionVersion=ocr-source-gaps-v1 同返；访问资格/撤回/cutoff 沿现有媒体选择。新入库的派生文本/研究输入含缺口提示，来源片段保持精确范围；不声称未经重排的历史检索缓存已重写。图片转录不能推断作品作者或评论者身份。

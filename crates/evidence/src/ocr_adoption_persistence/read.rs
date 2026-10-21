@@ -43,16 +43,21 @@ pub(crate) async fn attach_media(
                 "ocr_adoption_identity_mismatch".into(),
             ));
         }
-        let text: String = row.get("image_text");
+        // Re-project saved decisions with gap annotations; do not re-assess old OCR.
+        let projection = rule::project_work(std::slice::from_ref(&a)).map_err(|_| {
+            sqlx::Error::Protocol("ocr_adoption_projection_version_unsupported".into())
+        })?;
+        let image = &projection.images[0];
+        let text = &image.text;
         let title: Option<String> = row.get("cover_title");
         item["derivativeRef"] = json!(row.get::<Uuid, _>("derivative_ref"));
         item["displayText"] = json!(text.chars().take(600).collect::<String>());
         item["researchText"] = json!(text);
-        item["ocrAdoption"] = json!({"assessment":a,"lineRefMap":row.get::<Value,_>("line_ref_map"),"sourceRelation":"image_transcription_not_author_claim"});
+        item["ocrAdoption"] = json!({"assessment":a,"lineRefMap":row.get::<Value,_>("line_ref_map"),"sourceRelation":"image_transcription_not_author_claim","rawBlocks":input.layout.blocks,"segments":image.segments,"pendingBlocks":image.pending_blocks,"projectionVersion":"ocr-source-gaps-v1"});
         item["ocrLayering"] = json!({"layoutRef":row.get::<Uuid,_>("layout_ref"),"layeringRef":row.get::<Uuid,_>("adoption_ref"),
             "layerVersion":a.rule_version,"state":row.get::<String,_>("state"),"decisionSource":"local_ocr_adoption",
             "imageWidth":a.image.width,"imageHeight":a.image.height,"engineVersion":input.layout.pipeline.version,
-            "coverHeadline":title,"imageSubstantiveText":text,"cleanCorpusEligible":!text.is_empty(),
+            "coverHeadline":title,"imageSubstantiveText":text,"cleanCorpusEligible":!projection.fragments.is_empty(),
             "retainedLines":[],"excludedLines":[],"sourceFragments":a.regions.iter().flat_map(|r|&r.usable_fragments).collect::<Vec<_>>()});
     }
     Ok(())

@@ -118,6 +118,7 @@ fn assess_region(input: &ImageInput, b: &Block, screenshot: bool) -> RegionAsses
         .find(|r| r.block_ref == b.block_ref)
         .and_then(|r| r.finish_reason.clone());
     let mut r = RegionAssessment {
+        source_char_count: Some(b.text.chars().count()),
         block_ref: b.block_ref.clone(),
         reading_order: b.reading_order,
         bbox: b.bbox,

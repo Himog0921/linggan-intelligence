@@ -81,7 +81,41 @@ fn timestamp_suffix(text: &str) -> Option<usize> {
     })
 }
 
+// A back-navigation glyph plus independently read calendar/clock lines at the top
+// of an image identifies a screenshot header, even if VL gives it an oversized box.
+// Dates in prose or a poster without this navigation context are not UI evidence.
+fn navigation_clock(input: &ImageInput, b: &Block) -> bool {
+    let t = b.text.trim();
+    if t.chars().count() > 24 || !t.starts_with(['<', '‹', '〈', '←']) {
+        return false;
+    }
+    let lines = super::quality::supported_lines(input, b);
+    let header = |l: &&&Line| l.bbox[3] <= f64::from(input.image.height) * 0.12;
+    let calendar = lines
+        .iter()
+        .filter(header)
+        .any(|l| matches!(l.text.trim(), "今天" | "昨天" | "前天"));
+    let clock = lines.iter().filter(header).any(|l| {
+        let t = l.text.trim();
+        let Some((h, m)) = t.split_once([':', '：']) else {
+            return false;
+        };
+        (1..=2).contains(&h.len())
+            && m.len() == 2
+            && h.bytes().chain(m.bytes()).all(|c| c.is_ascii_digit())
+            && h.parse::<u8>().is_ok_and(|h| h < 24)
+            && m.parse::<u8>().is_ok_and(|m| m < 60)
+    });
+    calendar && clock
+}
+
 pub(super) fn classify(input: &ImageInput, b: &Block, r: &mut RegionAssessment, screenshot: bool) {
+    if navigation_clock(input, b) {
+        r.role = Role::LayoutMetadata;
+        r.adoption_state = AdoptionState::Excluded;
+        r.reasons.push(Reason::ScreenshotUiContext);
+        return;
+    }
     if !screenshot {
         return;
     }

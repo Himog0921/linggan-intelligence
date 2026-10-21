@@ -222,6 +222,9 @@ pub struct Fragment {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RegionAssessment {
+    /// Original Unicode scalar length. None for older stored assessments.
+    #[serde(default)]
+    pub source_char_count: Option<usize>,
     pub block_ref: String,
     pub reading_order: u32,
     pub bbox: [f64; 4],
