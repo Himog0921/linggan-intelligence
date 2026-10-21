@@ -118,7 +118,7 @@ function CapabilityDrawer({ data, task, onClose }: { data: AiSettings; task: Tas
     <div className={styles.drawerIntro}><Status stage={task.lifecycle}/><p>{COPY[task.taskKey]?.description ?? '当前业务工作，具体能力以实际接入合同为准。'}</p></div>
     <div className={styles.drawerSummary}><b>{task.lifecycle !== 'active' ? '目前不能执行新工作' : failed ? '尚未满足全部已知运行条件' : '已知配置通过，执行仍需服务端复核'}</b><small>{failed} 项尚未确认或通过 · 前端诊断不代替最终运行准入</small></div>
     <h3 className={styles.blockTitle}>运行条件</h3><div className={styles.checkList}>{checks.map(check => <div className={styles.checkRow} key={check.title}><span className={styles.checkMark} data-ok={String(check.okay)}>{check.okay === true ? '✓' : check.okay === false ? '!' : '?'}</span><div><b>{check.title}</b><small>{check.detail}</small></div></div>)}</div>
-    <h3 className={styles.blockTitle}>现有配置</h3><dl className={styles.definition}><dt>模型</dt><dd>{task.configuration.model?.modelId ?? '未配置'}</dd><dt>做法版本</dt><dd>{task.configuration.skillVersionRef ? '已选择固定版本' : '未绑定'}</dd><dt>每日额度</dt><dd>{budgetText(task.configuration.budget)}</dd><dt>工作开关</dt><dd>{data.controls.find(c => c.taskKey === task.taskKey)?.enabled ? '已启用' : '未启用'}</dd></dl>
+    <h3 className={styles.blockTitle}>现有配置</h3><dl className={styles.definition}><dt>模型</dt><dd>{task.configuration.model?.modelId ?? '未配置'}</dd><dt>做法版本</dt><dd>{task.configuration.skillVersionRef ? '已选择固定版本' : '未绑定'}</dd><dt>每日额度</dt><dd>{budgetText(task.configuration.budget)}</dd><dt>工作开关</dt><dd>{data.controls.find(c => c.taskKey === task.taskKey) ? data.controls.find(c => c.taskKey === task.taskKey)?.enabled ? '已启用' : '未启用' : '未知'}</dd></dl>
     <div className={styles.drawerFooter}><Link className={styles.actionLink} to={'?view=advanced&area=work&task=' + encodeURIComponent(task.taskKey)} onClick={onClose}>查看工作配置 <Glyph name="arrow"/></Link><Link className={styles.subtleLink} to={'?view=runs&task=' + encodeURIComponent(task.taskKey)} onClick={onClose}>查看调用记录</Link></div>
   </Drawer>;
 }
@@ -138,7 +138,7 @@ export function AiCapabilities({ data }: { data: AiSettings }) {
   const runner = data.controls.find(c => c.scope === 'executor');
   const selected = tasks.find(task => task.taskKey === detail);
   return <div className={styles.experience}>
-    <div className={styles.signalBar}><div className={styles.signalLead}><div className={styles.signalIcon}><Glyph name="pulse"/></div><div><b>{online ? '执行器已报告运行状态' : observed === 'not_started' ? '执行器尚未启动' : '执行器状态需核对'}</b><small>{online ? '执行器心跳可见，但具体工作仍需满足完整准入条件。' : '当前读取未证明执行器正在运行。已接入工作不等于现在可执行。'}</small></div></div><div className={styles.signalMeta}><span>GLOBAL SWITCH <b>{control ? control.enabled ? '已启用' : '已关闭' : '未知'}</b></span><span>RUNNER <b>{runner?.enabled ? '开关已启用' : '未启用'}</b></span><button type="button" onClick={() => setDiagnostics(true)}>查看受阻原因 <Glyph name="arrow"/></button></div></div>
+    <div className={styles.signalBar}><div className={styles.signalLead}><div className={styles.signalIcon}><Glyph name="pulse"/></div><div><b>{online ? '执行器已报告运行状态' : observed === 'not_started' ? '执行器尚未启动' : '执行器状态需核对'}</b><small>{online ? '执行器心跳可见，但具体工作仍需满足完整准入条件。' : '当前读取未证明执行器正在运行。已接入工作不等于现在可执行。'}</small></div></div><div className={styles.signalMeta}><span>GLOBAL SWITCH <b>{control ? control.enabled ? '已启用' : '已关闭' : '未知'}</b></span><span>RUNNER <b>{runner ? runner.enabled ? '开关已启用' : '未启用' : '未知'}</b></span><button type="button" onClick={() => setDiagnostics(true)}>查看受阻原因 <Glyph name="arrow"/></button></div></div>
     <div className={styles.statStrip}>{[
       ['已接入工作', tasks.filter(t => t.lifecycle === 'active').length, '仍需核对运行资格'],
       ['尚待接入', tasks.filter(t => t.lifecycle === 'pending').length, '技术执行尚未连接'],
@@ -270,7 +270,7 @@ export function AiRuns({ data }: { data: AiSettings }) {
   const [selected, setSelected] = useState<HistoryItem | null>(null);
   const { history, cursors, setCursors } = useHistory(taskKey);
   const rows = data.execution.dailyUsage.filter(row => !taskKey || row.taskKey === taskKey);
-  const add = (key: 'calls' | 'failedCalls' | 'unknownCalls' | 'measuredTokens') => rows.reduce<bigint | null>((sum, row) => sum === null || row[key] === null ? null : sum + BigInt(row[key] as string), 0n);
+  const add = (key: 'calls' | 'failedCalls' | 'unknownCalls' | 'measuredTokens') => rows.length ? rows.reduce<bigint | null>((sum, row) => sum === null || row[key] === null ? null : sum + BigInt(row[key] as string), 0n) : null;
   const calls = add('calls'), failures = add('failedCalls'), unknown = add('unknownCalls'), measured = add('measuredTokens');
   const byDay = new Map<string, { known: bigint; unknown: boolean }>();
   for (const row of rows) {
