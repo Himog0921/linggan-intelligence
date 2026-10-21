@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { DiscussionBlock } from './DiscussionBlock';
+import { DossierComments } from './DossierComments';
 import { InlineState, Section, SourceNote, StateLine } from './Primitives';
 import { MediaRail } from './MediaRail';
-import { laneSummary } from './evidencePresent';
+import { laneSummary, metricReading } from './evidencePresent';
 import { mediaObjects } from './mediaObjects';
 import type { Channels, Inspector, WorkItem } from './evidenceTypes';
 import type { CommentChannel } from './useCommentChannel';
@@ -28,8 +28,8 @@ function Body({ text }: { text: string }) {
   </div>;
 }
 /** Work page reads source content only. The shared inspector header owns metadata. */
-export function ReadingPanel({ context }: { context: PanelContext }) {
-  const { item, inspector, channels, listItem, comments, onOpenViewer } = context;
+export function ReadingPanel({ context, domain }: { context: PanelContext; domain: string }) {
+  const { item, inspector, listItem, onOpenViewer } = context;
   const objects = mediaObjects(inspector, (listItem ?? item).fragment);
   const body = inspector.detail.body;
   const ocr = laneSummary(item.lanes, 'ocr')?.state;
@@ -48,6 +48,13 @@ export function ReadingPanel({ context }: { context: PanelContext }) {
         {item.media.videoCount > 0 ? <><span>转录</span><StateLine state={asr} /></> : null}
       </div>
     </Section>
-    <DiscussionBlock item={item} inspector={inspector} channelUrl={channels.commentsUrl} channel={comments} />
+    <Section title="评论与回复">
+      <div className={styles.commentSummary}>
+        <span>平台显示 <strong>{metricReading(item.display.engagement.comment)}</strong> 条</span>
+        <span>本地评论 <strong>{inspector.commentsCoverage?.retained ?? '未知'}</strong> 条</span>
+        <span>已采回复 <strong>{inspector.repliesCoverage?.retained ?? '未知'}</strong> 条</span>
+      </div>
+      <DossierComments work={item.ref} domain={domain} platformComments={item.display.engagement.comment} />
+    </Section>
   </div>;
 }

@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import { DossierPanel } from './DossierPanel';
+import { EvidencePanel } from './EvidencePanel';
 import { Lightbox } from './Lightbox';
 import { TechnicalFacts } from './TechnicalFacts';
 import { ReobservationSection } from './ReobservationSection';
@@ -103,7 +104,7 @@ function WorkBody({ detail, listItem, domain, tab, onRefresh, onApplied }: BodyP
   return (
     <>
       <Panel id="overview" active={tab === 'overview'}>
-        <ReadingPanel context={context} />
+        <ReadingPanel context={context} domain={domain} />
       </Panel>
       <Panel id="dossier" active={tab === 'dossier'}>
         {fragment ? <Section title="当前列表引用的原声"><QuoteBlock fragment={fragment} wrap /></Section> : null}
@@ -115,6 +116,10 @@ function WorkBody({ detail, listItem, domain, tab, onRefresh, onApplied }: BodyP
           onOpenImage={media => setViewer({ objects: [singleViewerObject(media)], index: 0 })}
           onApplied={onApplied}
         />
+        <details className={styles.technical}>
+          <summary>原始识别、评论通道与来源回执（高级核对）</summary>
+          <EvidencePanel context={context} />
+        </details>
       </Panel>
       <Panel id="trace" active={tab === 'trace'}>
         <Section title="材料完整度">

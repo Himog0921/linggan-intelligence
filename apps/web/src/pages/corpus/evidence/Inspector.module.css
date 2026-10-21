@@ -418,3 +418,9 @@
 .body { padding:var(--lgi-space-4) var(--lgi-space-5) var(--lgi-space-8); }
 .moreText { margin-top:var(--lgi-space-2);font-size:var(--lgi-type-control-size); }
 .readingBody > :first-child { margin-top:0; }
+
+/* The only default comment reader is the nested reply-aware dossier channel. */
+.commentSummary { display:flex;align-items:center;gap:var(--lgi-space-4);
+  flex-wrap:wrap;color:var(--lgi-muted);
+  font:var(--lgi-type-label-weight) var(--lgi-type-label-size)/var(--lgi-type-label-leading) var(--lgi-font-ui); }
+.commentSummary strong { color:var(--lgi-ink);font-family:var(--lgi-font-data);font-variant-numeric:tabular-nums; }
