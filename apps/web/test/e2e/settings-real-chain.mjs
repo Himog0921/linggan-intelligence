@@ -27,9 +27,48 @@ async function step(name, action) {
   try { await action(); report.steps.push({ name, result: 'PASS' }); console.log(`settings PASS: ${name}`); }
   catch (error) { report.steps.push({ name, result: 'FAIL', error: String(error.stack ?? error) }); throw error; }
 }
-async function goto(query = '?section=models') { await page.goto(`${origin}/settings/models${query}`); await page.getByRole('heading', { name: 'AI 设置', exact: true }).waitFor(); }
+async function goto(query = '?section=models') { await page.goto(`${origin}/settings/models${query}`); await page.locator('[data-ai-settings-page]').waitFor(); }
 async function receipt(text) { await page.getByRole('status').filter({ hasText: text }).waitFor(); }
 try {
+  await step('new capability-first AI settings use real data and shared AppShell at two viewports', async () => {
+    for (const [width, height] of [[1440, 900], [390, 844]]) {
+      await page.setViewportSize({ width, height });
+      for (const [view, heading] of [
+        ['capabilities', '工作能力'], ['models', '模型连接'],
+        ['runs', '运行与用量'], ['advanced', '高级配置'],
+      ]) {
+        await goto('?view=' + view);
+        await page.getByRole('heading', { name: heading, exact: true, level: 2 }).waitFor();
+        assert.equal(await page.locator('.v7-global-header').count(), 1, 'reuse single shared AppShell');
+        const navigation = page.getByRole('complementary', { name: 'AI 设置视图' });
+        assert.equal(await navigation.count(), 1, 'left navigation must exist');
+        assert.equal(await navigation.locator('xpath=self::aside').count(), 1, 'view navigation must use the shared left rail');
+        assert.equal(await navigation.locator(':scope > .v7-side-content > a.v7-side-nav').count(), 4, 'each view link must be a direct shared rail item');
+        assert.equal(await page.getByText('SYSTEM / AI OPERATIONS', { exact: true }).count(), 0, 'removed system hero must not remain');
+        assert.equal(await page.getByRole('button', { name: '刷新设置', exact: true }).count(), 0, 'removed refresh action must not remain');
+        const dimensions = await page.evaluate(() => {
+          const main = document.querySelector('main');
+          return { client: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth,
+            mainClient: main.clientWidth, mainScroll: main.scrollWidth };
+        });
+        assert.ok(dimensions.scroll <= dimensions.client,
+          `${width} ${view} must not overflow document: ${JSON.stringify(dimensions)}`);
+        assert.ok(dimensions.mainScroll <= dimensions.mainClient,
+          `${width} ${view} must not overflow main: ${JSON.stringify(dimensions)}`);
+        if (width === 390) {
+          const rail = await navigation.locator('.v7-side-content').evaluate(element => ({
+            direction: getComputedStyle(element).flexDirection,
+            children: Array.from(element.children).filter(child => child.matches('a.v7-side-nav')).length,
+          }));
+          assert.deepEqual(rail, { direction: 'row', children: 4 }, 'narrow view must use the shared horizontal rail');
+        }
+        const name = `settings-new-${view}-${width}.png`;
+        await page.screenshot({ path: path.join(directory, name), fullPage: true });
+        report.screenshots.push(name);
+      }
+    }
+    assert.equal(report.posts.length, 0, 'switching views must not issue configuration writes');
+  });
   await step('new connection save does not test or enqueue', async () => {
     await goto();
     await page.getByLabel('连接名称', { exact: true }).fill(longName);
@@ -118,34 +157,6 @@ try {
       }
     }
     await page.keyboard.press('Tab'); assert.ok(await page.evaluate(() => document.activeElement !== document.body));
-  });
-  await step('new capability-first AI settings use real data and shared AppShell at two viewports', async () => {
-    const writesBefore = report.posts.length;
-    for (const [width, height] of [[1440, 900], [390, 844]]) {
-      await page.setViewportSize({ width, height });
-      for (const [view, heading] of [
-        ['capabilities', '工作能力'], ['models', '模型连接'],
-        ['runs', '运行与用量'], ['advanced', '高级配置'],
-      ]) {
-        await goto('?view=' + view);
-        await page.getByRole('heading', { name: heading, exact: true, level: 2 }).waitFor();
-        assert.equal(await page.locator('.v7-global-header').count(), 1, 'reuse single shared AppShell');
-        assert.equal(await page.getByRole('navigation', { name: 'AI 设置视图' }).count(), 1, 'context navigation must exist');
-        const dimensions = await page.evaluate(() => {
-          const main = document.querySelector('main');
-          return { client: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth,
-            mainClient: main.clientWidth, mainScroll: main.scrollWidth };
-        });
-        assert.ok(dimensions.scroll <= dimensions.client,
-          `${width} ${view} must not overflow document: ${JSON.stringify(dimensions)}`);
-        assert.ok(dimensions.mainScroll <= dimensions.mainClient,
-          `${width} ${view} must not overflow main: ${JSON.stringify(dimensions)}`);
-        const name = `settings-new-${view}-${width}.png`;
-        await page.screenshot({ path: path.join(directory, name), fullPage: true });
-        report.screenshots.push(name);
-      }
-    }
-    assert.equal(report.posts.length, writesBefore, 'switching views must not issue configuration writes');
   });
   await step('actual read receipts preserve off, not started, and no invocation', async () => {
     const current = await (await page.request.get(`${origin}/api/local/ai-settings`)).json();
