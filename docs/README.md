@@ -15,6 +15,12 @@
 
 - [主题图谱紧凑工作区变更](design/changes/topic-map-compact-382.md)：#382 当前 UI 后续，取代旧工作区布局，不改研究与来源合同。
 
+
+## 2026-10-21 · AI 设置左栏导航候选
+
+- [AI-SETTINGS-LEFT-NAV-001 变更清单](design/changes/ai-settings-left-nav-001-ui-change-manifest.md)：共享左栏、四视图深链接与无 Hero/刷新控件的候选范围；未合并、未部署。
+- [ACC-AI-SETTINGS-LEFT-NAV-001](design/acceptance/ai-settings-left-nav-001-acceptance.md)：聚焦自动检查、八个隔离浏览器视图场景、已知基线导入失败与未证明边界。
+
 ## 2026-10-19 · 评论研究紧凑工作台与三级导航候选
 
 [评论研究 UI 最新规格](design/pages/comment-study-productization-001.md) 与 [LIDS Context Bar 已批准例外](design/lids/shell-zones.md)：四视图导航移入面包屑同行、评论读数折叠、批量研究按需出现、筛选单行、评论表格 48px 单行，React 分支待 PR 复审。仅本次 UI 显示改造，不改变研究业务/API/库，未合并、未部署。

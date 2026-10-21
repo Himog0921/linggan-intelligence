@@ -25,6 +25,11 @@
 
 用户最新批准的评论研究三级导航位置、统计折叠与严格单行表格，见[评论研究产品化最新 UI 补充](pages/comment-study-productization-001.md)和 [LIDS Context Bar 局部例外](lids/shell-zones.md)。当前单一 React 应用使用 AppShell 的可选 contextNav 插槽，不为独立页面创建第二套 Header 或运行时 Token；业务状态、资格与数据合同不变，候选待审查，未将新增位置推广成未获批的全站读数塞入规则。
 
+
+## 2026-10-21 · AI 设置左栏导航
+
+Mog 明确要求把个人菜单下的 AI 设置改为与其他 Intelligence 模块一致的左侧导航，并删除三级视图重复的系统宣言、页名、说明和刷新按钮。实施范围、四视图/旧链接兼容、状态与证明边界见 [AI-SETTINGS-LEFT-NAV-001](changes/ai-settings-left-nav-001-ui-change-manifest.md)、[模型与 AI 设置页面规格](pages/model-ai-settings-page.md) 和 [实施验收](acceptance/ai-settings-left-nav-001-acceptance.md)。本项不改设置 API、权限、执行器、模型调用、迁移或部署。
+
 ## 内容工作台专项 · 阶段二
 
 [V3 空间材料浏览 / 作品关联](pages/content-workbench-prototype/v3/index.html) · [V2 研读 / 画布 / 对照原型](pages/content-workbench-prototype/v2/index.html) · [V1 三页原型](pages/content-workbench-prototype/index.html) · [设计提案](changes/uiux-content-workbench-001-prototype.md) · [验收记录](acceptance/uiux-content-workbench-001-prototype-acceptance.md)。V3 方向已获 Mog 认可，已精简常驻说明并收紧工作区工具栏。仅合成原型；LIDS 与正式运行页未改。 首个真实创作落地包的复用清单、实施步骤及验收统一见[专项计划 §10](../archive/plans/uiux-content-workbench-001.md#10-首个落地包一篇真实选题到成品导出)，后端已派定；原生前端暂停，界面实施并入 [WEB-REACT-001 阶段 C](../plans/active/web-react-001.md)。

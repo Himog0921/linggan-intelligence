@@ -29,14 +29,25 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('AI 设置正式四视图', () => {
-  it('默认展示工作能力，并沿用共享 Context Bar 的面包屑和导航，不读即写', async () => {
+  it('默认展示工作能力，并将四个视图放进共享左栏，不读即写', async () => {
     const user = userEvent.setup();
     mount();
     expect(await screen.findByRole('heading', { name: '工作能力' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'AI 设置', level: 1 })).toBeInTheDocument();
+    expect(document.querySelector('h1#ai-settings-page-title.v7-sr-only')).toBeInTheDocument();
     expect(document.querySelectorAll('.v7-global-header')).toHaveLength(1);
-    expect(screen.getByRole('navigation', { name: 'AI 设置视图' })).toHaveTextContent('运行与用量');
-    expect(screen.getByRole('link', { name: /AI 能力/ })).toHaveAttribute('aria-current', 'page');
+    const navigation = screen.getByRole('complementary', { name: 'AI 设置视图' });
+    expect(navigation).toHaveTextContent('运行与用量');
+    expect(navigation).toHaveAttribute('aria-label', 'AI 设置视图');
+    expect(navigation.querySelectorAll(':scope > .v7-side-content > a.v7-side-nav')).toHaveLength(4);
+    expect(screen.getByRole('link', { name: 'AI 能力' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.queryByText('SYSTEM / AI OPERATIONS')).not.toBeInTheDocument();
+    expect(screen.queryByText('管理研究能力、模型连接与运行结果，让每一项 AI 工作有据可查。')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '刷新设置' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('link', { name: '模型连接' }));
+    expect(await screen.findByRole('heading', { name: '模型连接', level: 2 })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '模型连接' })).toHaveAttribute('aria-current', 'page');
+    await user.click(screen.getByRole('link', { name: 'AI 能力' }));
+    expect(await screen.findByRole('heading', { name: '工作能力', level: 2 })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /评论研究/ }));
     expect(await screen.findByRole('dialog', { name: '评论研究' })).toBeInTheDocument();
     expect(screen.getByText(/目前不能执行新工作/)).toBeInTheDocument();

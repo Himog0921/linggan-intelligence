@@ -29,8 +29,9 @@ const posts = () => calls.filter(call => call.method === 'POST');
 describe('AI 设置四区', () => {
   it('原入口呈现四区；导航、样本读取与刷新不产生写操作', async () => {
     const user = userEvent.setup(); renderPage();
-    expect(await screen.findByRole('heading', { name: 'AI 设置', level: 1 })).toBeInTheDocument();
+    expect(document.querySelector('h1#ai-settings-page-title.v7-sr-only')).toBeInTheDocument();
     expect(await screen.findByLabelText('连接名称')).toHaveValue('隔离合成连接');
+    expect(screen.getByRole('navigation', { name: '旧版 AI 设置分区' })).toBeInTheDocument();
     expect(screen.getByText('当前密钥尚未测试')).toBeInTheDocument();
     for (const name of ['自动化与额度', '做法', '运行状况', '模型']) {
       await user.click(screen.getByRole('link', { name }));
