@@ -52,6 +52,7 @@ mod material_storage_key;
 mod media_acquisition;
 mod monitor_rule_read;
 pub mod ocr_layering;
+pub mod ocr_adoption;
 pub mod research_dossier;
 pub use keyword_archive_detail::{
     KeywordDetailAdvance, KeywordDetailTickSummary, advance_keyword_archive_detail,
