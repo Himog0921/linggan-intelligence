@@ -5,12 +5,16 @@ import { EvidenceControls } from './EvidenceControls';
 import { DEFAULT_QUERY, type EvidenceQuery } from './evidenceQuery';
 import { workRef } from './evidenceFixtures';
 
+const selectionProps = {
+  selecting: false, allPageSelected: false, pageHasItems: true,
+  onToggleSelecting: vi.fn(), onSelectPage: vi.fn(),
+};
 function setup(query: EvidenceQuery = DEFAULT_QUERY, hasDomain = true) {
   const onChange = vi.fn();
   const onSubmit = vi.fn();
   const onClearFilters = vi.fn();
-  const view = render(<EvidenceControls query={query} hasDomain={hasDomain} onChange={onChange} onSubmit={onSubmit} onClearFilters={onClearFilters} />);
-  const rerender = (next: EvidenceQuery) => view.rerender(<EvidenceControls query={next} hasDomain={hasDomain} onChange={onChange} onSubmit={onSubmit} onClearFilters={onClearFilters} />);
+  const view = render(<EvidenceControls {...selectionProps} query={query} hasDomain={hasDomain} onChange={onChange} onSubmit={onSubmit} onClearFilters={onClearFilters} />);
+  const rerender = (next: EvidenceQuery) => view.rerender(<EvidenceControls {...selectionProps} query={next} hasDomain={hasDomain} onChange={onChange} onSubmit={onSubmit} onClearFilters={onClearFilters} />);
   return { ...view, rerender, onChange, onSubmit, onClearFilters, user: userEvent.setup() };
 }
 
@@ -47,7 +51,8 @@ describe('检索', () => {
     expect(screen.getByRole('searchbox')).toHaveAttribute('title', reason);
     expect(screen.getByRole('button', { name: /筛选/ })).toBeDisabled();
     expect(screen.getByRole('button', { name: '读取材料' })).toBeDisabled();
-    for (const name of ['全部材料', '部分取得', '风险停止', '媒体已清理', '撤回或受限']) expect(screen.getByRole('button', { name })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '选择' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: '部分取得' })).toBeNull();
     expect(screen.getByRole('button', { name: '研读' })).toBeEnabled();
     await user.keyboard('{Enter}');
     expect(onSubmit).not.toHaveBeenCalled();
@@ -72,7 +77,7 @@ describe('筛选浮层', () => {
     expect(screen.queryByText('旧 OCR 已停用')).toBeNull();
   });
 
-  it('选一项：新增历史、重新读取（work 清空，让第一项自动选中）；系统视图保持', async () => {
+  it('选一项：新增历史、重新读取并关闭旧详情；系统视图保持', async () => {
     const { user, onChange } = setup({ ...DEFAULT_QUERY, view: 'risk', work: workRef(1) });
     await user.click(screen.getByRole('button', { name: /筛选/ }));
     await user.click(screen.getByRole('combobox', { name: '材料通道' }));
@@ -86,7 +91,7 @@ describe('筛选浮层', () => {
     const { user } = setup({ ...DEFAULT_QUERY, lane: 'ocr', mediaKind: 'video', view: 'risk' });
     const toggle = screen.getByRole('button', { name: /筛选/ });
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    expect(within(toggle).getByLabelText('已选 2 项筛选')).toHaveTextContent('02');
+    expect(within(toggle).getByLabelText('已选 3 项筛选')).toHaveTextContent('03');
     await user.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
     expect(toggle).toHaveAttribute('aria-controls', screen.getByRole('group', { name: '筛选条件' }).id);
@@ -118,7 +123,8 @@ describe('筛选浮层', () => {
 describe('系统视图与排版', () => {
   it('五个系统视图：aria-pressed 随地址；点选新增历史并清空 work', async () => {
     const { user, onChange } = setup({ ...DEFAULT_QUERY, view: 'partial', work: workRef(4) });
-    const group = screen.getByRole('group', { name: '按材料状态快速筛选' });
+    await user.click(screen.getByRole('button', { name: /筛选/ }));
+    const group = screen.getByRole('group', { name: '材料状态' });
     expect(within(group).getAllByRole('button').map(button => button.textContent)).toEqual(['全部材料', '部分取得', '风险停止', '媒体已清理', '撤回或受限']);
     expect(within(group).getByRole('button', { name: '部分取得' })).toHaveAttribute('aria-pressed', 'true');
     expect(within(group).getByRole('button', { name: '全部材料' })).toHaveAttribute('aria-pressed', 'false');
@@ -181,9 +187,9 @@ describe('查询输入边界', () => {
 
 it('切换领域不保留上个领域尚未提交的词，即使两个领域地址q都为空', async () => {
   const onSubmit = vi.fn(); const onChange = vi.fn(); const onClearFilters = vi.fn();
-  const view = render(<EvidenceControls scope="one" query={DEFAULT_QUERY} hasDomain onSubmit={onSubmit} onChange={onChange} onClearFilters={onClearFilters} />);
+  const view = render(<EvidenceControls {...selectionProps} scope="one" query={DEFAULT_QUERY} hasDomain onSubmit={onSubmit} onChange={onChange} onClearFilters={onClearFilters} />);
   await userEvent.type(screen.getByRole('searchbox'), '旧领域草稿');
-  view.rerender(<EvidenceControls scope="two" query={DEFAULT_QUERY} hasDomain onSubmit={onSubmit} onChange={onChange} onClearFilters={onClearFilters} />);
+  view.rerender(<EvidenceControls {...selectionProps} scope="two" query={DEFAULT_QUERY} hasDomain onSubmit={onSubmit} onChange={onChange} onClearFilters={onClearFilters} />);
   expect(screen.getByRole('searchbox')).toHaveValue('');
   expect(onSubmit).not.toHaveBeenCalled();
 });

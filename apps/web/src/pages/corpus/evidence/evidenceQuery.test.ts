@@ -41,6 +41,11 @@ describe('地址 → 查询状态', () => {
     expect(toPageSearch(DOMAIN, query).toString()).toBe(`domain=${DOMAIN}`);
   });
 
+  it('旧详情标签 URL 迁移到研究底稿或采集记录，不丢失 deep link', () => {
+    expect(parse('tab=evidence').tab).toBe('dossier');
+    expect(parse('tab=materials').tab).toBe('trace');
+    expect(parse('tab=trace').tab).toBe('trace');
+  });
   it('筛选项表：9 个通道、14 个状态', () => {
     expect(LANES).toHaveLength(9);
     expect(LANE_STATES).toHaveLength(14);
@@ -112,9 +117,9 @@ describe('查询状态 → 接口参数', () => {
     expect(toApiParams(DOMAIN, { ...DEFAULT_QUERY, view: 'restricted' }).get('restriction')).toBe('WITHDRAWN_OR_RESTRICTED');
   });
 
-  it('筛选徽标数只数手选的三个下拉，系统视图不计', () => {
+  it('筛选徽标数包含手选下拉和状态预设', () => {
     expect(activeFilterCount(DEFAULT_QUERY)).toBe(0);
-    expect(activeFilterCount({ ...DEFAULT_QUERY, lane: 'ocr', mediaKind: 'video', view: 'risk' })).toBe(2);
+    expect(activeFilterCount({ ...DEFAULT_QUERY, lane: 'ocr', mediaKind: 'video', view: 'risk' })).toBe(3);
   });
 });
 

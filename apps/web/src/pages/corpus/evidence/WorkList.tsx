@@ -3,7 +3,7 @@ import type { LayoutKey } from './evidenceQuery';
 import type { WorkItem } from './evidenceTypes';
 import { CoverCard } from './CoverCard';
 import { ENGAGEMENT_KINDS } from './evidencePresent';
-import { CheckBox, ResearchRow, TableRow, type RowProps } from './WorkRow';
+import { ResearchRow, TableRow, type RowProps } from './WorkRow';
 import { MetricIcon } from './WorkParts';
 import styles from './WorkList.module.css';
 
