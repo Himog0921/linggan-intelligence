@@ -17,7 +17,9 @@ export function MaterialsPanel({ context }: { context: PanelContext }) {
   const receipt = channels.mediaReceipt ?? inspector.mediaSlotsReceipt;
   return (
     <div>
-      <Section title="本机媒体材料" tech={String(objects.length).padStart(2, '0')}>
+      <details className={styles.technical}>
+        <summary>本机媒体对象 · {objects.length} 个</summary>
+        <Section title="本机媒体材料" tech={String(objects.length).padStart(2, '0')}>
         {objects.length === 0 ? (
           <InlineState tone="warning" title="当前没有本地媒体对象">
             这只说明本机还没有留存这个作品的媒体副本；这不表示作品没有媒体。
@@ -25,8 +27,11 @@ export function MaterialsPanel({ context }: { context: PanelContext }) {
         ) : (
           <MediaRail objects={objects} onOpen={onOpenViewer} />
         )}
-      </Section>
-      <Section title="材料处理台账">
+        </Section>
+      </details>
+      <details className={styles.technical}>
+        <summary>媒体处理台账与回执</summary>
+        <Section title="材料处理台账">
         <FactGrid rows={receiptRows(receipt)} />
         {ledger.map(object => (
           <article key={object.slotKey ?? object.index} className={styles.derivative}>
@@ -45,7 +50,8 @@ export function MaterialsPanel({ context }: { context: PanelContext }) {
             />
           </article>
         ))}
-      </Section>
+        </Section>
+      </details>
     </div>
   );
 }

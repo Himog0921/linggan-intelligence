@@ -23,7 +23,9 @@ export function TracePanel({ context }: { context: PanelContext }) {
   const receipt = channels.provenanceReceipt ?? provenance?.receipt ?? null;
   return (
     <div>
-      <Section title="来源轨迹通道">
+      <details className={styles.technical}>
+        <summary>来源与执行编号（技术核查）</summary>
+        <Section title="来源轨迹通道">
         <FactGrid rows={receiptRows(receipt)} />
       </Section>
       <Section title="来源与执行血缘">
@@ -55,7 +57,8 @@ export function TracePanel({ context }: { context: PanelContext }) {
             ))}
           </ul>
         )}
-      </Section>
+        </Section>
+      </details>
     </div>
   );
 }
