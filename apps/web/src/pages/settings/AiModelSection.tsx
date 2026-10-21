@@ -11,7 +11,7 @@ import { AiCapabilityForm } from './AiCapabilityForm';
 import type { AiAction } from './useAiAction';
 import styles from './AiSettings.module.css';
 
-function ConnectionForm({ connection, data, action }: { connection: Connection | null; data: AiSettings; action: AiAction }) {
+export function ConnectionForm({ connection, data, action }: { connection: Connection | null; data: AiSettings; action: AiAction }) {
   const [newReference] = useState(() => crypto.randomUUID());
   const [api, setApi] = useState(connection?.api ?? data.protocol.editableConnectionApis[0] ?? '');
   const [address, setAddress] = useState(connection?.baseUrl ?? '');
@@ -21,6 +21,7 @@ function ConnectionForm({ connection, data, action }: { connection: Connection |
       name: String(form.get('name')), api, baseUrl: address, localEndpoint: form.get('localEndpoint') === 'on', apiKey: String(form.get('apiKey')) };
     await action.run(`connection:${payload.connectionRef}`, payload, versionRef => saveConnection({ ...payload, versionRef }), '连接已保存，未进行测试或创建任务。');
   }
+  if (connection?.api === 'local-wemm-runtime') return <div className={styles.group}><h3>内置 WeMM Runtime（只读）</h3><p>此运行时由本机程序管理，使用 local:// 地址，不支持以 HTTP API 表单修改协议、地址或凭据。</p></div>;
   return <form className={styles.form} onSubmit={event => void save(event)}><h3>{connection ? '编辑连接' : '新建连接'}</h3><div className={styles.grid}>
     <Field label="连接名称"><input name="name" maxLength={100} required defaultValue={connection?.name ?? ''} autoComplete="off" /></Field>
     <Field label="协议"><select value={api} onChange={event => setApi(event.target.value)}>{data.protocol.editableConnectionApis.map(api => <option key={api}>{api}</option>)}</select></Field>
@@ -32,7 +33,7 @@ function ConnectionForm({ connection, data, action }: { connection: Connection |
   </form>;
 }
 const PERMISSIONS: Record<string, string[]> = { model_probe: ['synthetic_probe', 'model_catalog'], note_interpretation: ['note_material'], direction_list_draft: ['note_material'], direction_proposal: ['note_material'], author_org_identity: ['public_author_bio'], writing_assistant: ['selected_writing_material'], writing_legacy: ['selected_writing_material'] };
-function EgressForm({ data, connection, action }: { data: AiSettings; connection: Connection; action: AiAction }) {
+export function EgressForm({ data, connection, action }: { data: AiSettings; connection: Connection; action: AiAction }) {
   const [selection, setSelection] = useState('model_probe:synthetic_probe');
   const [taskKey = '', materialClass = ''] = selection.split(':');
   const current = data.egress.find(e => e.endpointRef === connection.endpointRef && e.taskKey === taskKey && e.materialClass === materialClass);
@@ -50,7 +51,7 @@ function EgressForm({ data, connection, action }: { data: AiSettings; connection
     </Impact>
   </div>;
 }
-function ProbeForm({ data, connection, model, action }: { data: AiSettings; connection: Connection; model: AiModel | null; action: AiAction }) {
+export function ProbeForm({ data, connection, model, action }: { data: AiSettings; connection: Connection; model: AiModel | null; action: AiAction }) {
   const [operation, setOperation] = useState<'connect' | 'discover' | 'probe'>(model ? 'probe' : 'connect');
   const task = data.tasks.find(task => task.taskKey === 'model_probe');
   async function enqueue(event: FormEvent<HTMLFormElement>) {
@@ -84,7 +85,7 @@ export function AiModelSection({ data, action }: { data: AiSettings; action: AiA
   return <section className={styles.section} aria-labelledby="models-title"><div className={styles.row}><h2 id="models-title">模型</h2><Link to="?section=models&connection=new">新建连接</Link></div>
     <nav className={styles.selector} aria-label="模型连接">{data.connections.map(c => <Link key={c.connectionRef} to={`?section=models&connection=${c.connectionRef}`} aria-current={c.connectionRef === connection?.connectionRef ? 'page' : undefined}><span>{c.name}</span><small>{c.enabled ? '已启用' : '已停用'} · {c.api}</small></Link>)}</nav>
     <ConnectionForm key={connection?.versionRef ?? 'new'} connection={connection} data={data} action={action} />
-    {connection ? <><Impact title={`连接${connection.enabled ? '已启用' : '已停用'}`} label={connection.enabled ? '停用此连接' : '启用此连接'} action={() => { const payload = { connectionRef: connection.connectionRef, expectedRevision: connection.revision, enabled: !connection.enabled }; void action.run(`connection-state:${connection.connectionRef}`, payload, () => setConnectionEnabled(payload), connection.enabled ? '连接已停用。' : '连接已启用，未发起请求。'); }} disabled={action.busy !== null}><p>连接开关与全局、执行器、工作开关分别生效。启用连接不批准材料外发。</p></Impact>
+    {connection && connection.api !== 'local-wemm-runtime' ? <><Impact title={`连接${connection.enabled ? '已启用' : '已停用'}`} label={connection.enabled ? '停用此连接' : '启用此连接'} action={() => { const payload = { connectionRef: connection.connectionRef, expectedRevision: connection.revision, enabled: !connection.enabled }; void action.run(`connection-state:${connection.connectionRef}`, payload, () => setConnectionEnabled(payload), connection.enabled ? '连接已停用。' : '连接已启用，未发起请求。'); }} disabled={action.busy !== null}><p>连接开关与全局、执行器、工作开关分别生效。启用连接不批准材料外发。</p></Impact>
       <form className={styles.form} onSubmit={event => void addModel(event)}><Field label="登记模型标识" hint="按服务商提供的模型 ID 填写，不以名称猜测能力。"><input name="modelId" required maxLength={200} /></Field><ActionButton type="submit" disabled={action.busy !== null}>登记模型</ActionButton></form>
       <nav className={styles.selector} aria-label="已登记模型">{models.map(m => <Link key={m.identityRef} to={`?section=models&connection=${connection.connectionRef}&model=${m.identityRef}`} aria-current={m.identityRef === model?.identityRef ? 'page' : undefined}>{m.modelId}</Link>)}</nav>
       {model ? <><dl className={styles.facts}><dt>稳定模型身份</dt><dd><Reference value={model.identityRef} /></dd><dt>当前密钥测试</dt><dd>{model.probe ? `${model.probe.state} · ${model.probe.modelCallable === true ? '已响应' : model.probe.modelCallable === false ? '调用未通过' : '调用资格未知'}` : '当前密钥尚未测试'}{model.probe?.failureCode ? ` · ${model.probe.failureCode}` : ''}</dd></dl><AiCapabilityForm key={`${model.identityRef}:${model.endpointRef}`} data={data} model={model} connection={connection} action={action} /></> : <p>尚未登记模型。先登记模型标识，再声明能力。</p>}
