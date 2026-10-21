@@ -51,6 +51,9 @@ describe('勾选与批量动作', () => {
     pageRoutes(kit);
     renderEvidencePage();
     await screen.findByRole('button', { name: '合成作品 1' });
+    expect(screen.queryByRole('group', { name: '批量操作' })).toBeNull();
+    const resume = screen.getByRole('button', { name: '选择' });
+    await (await import('@testing-library/user-event')).default.setup().click(resume);
     expect(screen.getByRole('group', { name: '批量操作' })).toHaveTextContent('已选 3 篇');
   });
 
@@ -75,6 +78,7 @@ describe('勾选与批量动作', () => {
   it('「评论深采」把集合交给采集页：键名、数组格式与跳转形状保持（DR-6）', async () => {
     pageRoutes(kit);
     const view = await opened();
+    await view.user.click(screen.getByRole('button', { name: '选择' }));
     expect(screen.getByRole('button', { name: '评论深采' })).toBeDisabled();
     await view.user.click(screen.getByRole('button', { name: '勾选本页' }));
     await view.user.click(screen.getByRole('button', { name: '评论深采' }));
@@ -87,7 +91,8 @@ describe('勾选与批量动作', () => {
   it('超过 200 篇就地说明，两个批量按钮都不可用', async () => {
     sessionStorage.setItem(selectionKey, JSON.stringify(Array.from({ length: 201 }, (_, index) => workRef(1000 + index))));
     pageRoutes(kit);
-    await opened();
+    const view = await opened();
+    await view.user.click(screen.getByRole('button', { name: '选择' }));
     expect(screen.getByRole('group', { name: '批量操作' })).toHaveTextContent('已选 201 篇');
     expect(screen.getByText('最多 200 篇，请减少勾选')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '评论深采' })).toBeDisabled();
@@ -98,6 +103,7 @@ describe('勾选与批量动作', () => {
     pageRoutes(kit);
     const view = await opened();
     expect(screen.queryByRole('button', { name: '继续上次整理' })).not.toBeInTheDocument();
+    await view.user.click(screen.getByRole('button', { name: '选择' }));
     await view.user.click(screen.getByRole('button', { name: '勾选本页' }));
     await view.user.click(screen.getByRole('button', { name: '整理图片文字' }));
     const dialog = await screen.findByRole('dialog', { name: '重新整理选定作品的图片文字' });
@@ -117,6 +123,7 @@ describe('勾选与批量动作', () => {
     sessionStorage.setItem(BATCH_KEY, JSON.stringify({ domain: DOMAIN, items: [{ work: workRef(1), state: 'pending' }] }));
     pageRoutes(kit);
     const view = await opened();
+    await view.user.click(screen.getByRole('button', { name: '选择' }));
     await view.user.click(screen.getByRole('button', { name: '继续上次整理' }));
     const dialog = await screen.findByRole('dialog', { name: '重新整理选定作品的图片文字' });
     expect(within(dialog).getByText('1 篇固定作品 · 已处理 0 篇 · 失败 0 篇 · 尚未处理 1 篇')).toBeInTheDocument();
@@ -124,7 +131,7 @@ describe('勾选与批量动作', () => {
 });
 
 describe('检查器外壳', () => {
-  it('五个标签，默认「概览」；点「证据」替换历史并写入地址', async () => {
+  it('三个标签，默认「作品」；点击研究底稿替换历史并写入地址', async () => {
     pageRoutes(kit);
     const view = await opened();
     expect(screen.getAllByRole('tab').map(tab => tab.textContent)).toEqual(['作品', '研究底稿', '采集记录']);
@@ -231,7 +238,7 @@ describe('抽屉模式（≤1180px）', () => {
     delete Element.prototype.scrollIntoView;
   });
 
-  it('列表加载后自动选中不展开抽屉；点选才展开；宽度控件与「×」不存在', async () => {
+  it('首次浏览不展开抽屉；点选才展开；宽度控件与「×」不存在', async () => {
     pageRoutes(kit);
     const view = renderEvidencePage();
     await screen.findByRole('button', { name: '合成作品 1' });
@@ -352,6 +359,7 @@ describe('敏感面', () => {
     pageRoutes(kit);
     const view = await opened();
     await view.user.click(screen.getByRole('button', { name: '加宽' }));
+    await view.user.click(screen.getByRole('button', { name: '选择' }));
     await view.user.click(screen.getByRole('button', { name: '勾选本页' }));
     await view.user.click(screen.getByRole('button', { name: '整理图片文字' }));
     await screen.findByRole('dialog', { name: '重新整理选定作品的图片文字' });

@@ -105,8 +105,8 @@ describe('检索与筛选', () => {
     await view.user.type(screen.getByRole('searchbox', { name: '检索作品与证据' }), 'abc{Enter}');
     await screen.findByRole('button', { name: '合成作品 4' });
     expect(lastList().search.get('q')).toBe('abc');
-    expect(view.location()).toBe(withWork(4, `domain=${DOMAIN}&q=abc`));
-    await waitFor(() => expect(kit.of('GET', detailPathOf(4))).toHaveLength(1));
+    expect(view.location()).toBe(pageUrl(`domain=${DOMAIN}&q=abc`));
+    expect(kit.of('GET', detailPathOf(4))).toHaveLength(0);
     expect(screen.queryByRole('button', { name: '合成作品 1' })).not.toBeInTheDocument();
 
     await act(() => view.router.navigate(-1));
@@ -127,9 +127,10 @@ describe('检索与筛选', () => {
   it('提交会把系统视图复位成「全部材料」', async () => {
     pageRoutes(kit);
     const view = await opened(pageUrl(`domain=${DOMAIN}&view=risk`));
+    await view.user.click(screen.getByRole('button', { name: /^筛选/ }));
     expect(screen.getByRole('button', { name: '风险停止' })).toHaveAttribute('aria-pressed', 'true');
     await view.user.type(screen.getByRole('searchbox', { name: '检索作品与证据' }), 'x{Enter}');
-    await waitFor(() => expect(screen.getByRole('button', { name: '全部材料' })).toHaveAttribute('aria-pressed', 'true'));
+    await waitFor(() => expect(view.location()).not.toContain('view=risk'));
     expect(view.location()).not.toContain('view=');
   });
 
@@ -171,7 +172,7 @@ describe('检索与筛选', () => {
     await view.user.click(screen.getByRole('option', { name: '评论' }));
     await waitFor(() => expect(lastList().search.get('lane')).toBe('comments'));
     await screen.findByRole('button', { name: '合成作品 1' });
-    await waitFor(() => expect(view.location()).toBe(withWork(1, `domain=${DOMAIN}&lane=comments`)));
+    await waitFor(() => expect(view.location()).toBe(pageUrl(`domain=${DOMAIN}&lane=comments`)));
     await act(() => view.router.navigate(-1));
     await waitFor(() => expect(lastList().search.has('lane')).toBe(false));
     expect(view.location()).toBe(withWork(1));
@@ -195,10 +196,11 @@ describe('检索与筛选', () => {
     pageRoutes(kit);
     const view = await opened(pageUrl(`domain=${DOMAIN}&laneState=OBSERVED`));
     expect(lastList().search.get('laneState')).toBe('OBSERVED');
+    await view.user.click(screen.getByRole('button', { name: /^筛选/ }));
     await view.user.click(screen.getByRole('button', { name: '部分取得' }));
     await waitFor(() => expect(lastList().search.get('laneState')).toBe('PARTIAL'));
     expect(view.location()).toContain('view=partial');
-    expect(view.location()).not.toContain('laneState=PARTIAL');
+    expect(view.location()).toContain('laneState=OBSERVED');
 
     await view.user.click(screen.getByRole('button', { name: '媒体已清理' }));
     await waitFor(() => expect(lastList().search.get('lane')).toBe('media_bytes'));

@@ -135,7 +135,7 @@ describe('没有领域', () => {
     renderEvidencePage('/corpus/evidence?q=abc&lane=comments&view=risk');
     await screen.findByRole('dialog', { name: '选择研究领域' });
     expect(screen.getByRole('searchbox', { name: '检索作品与证据' })).toHaveValue('');
-    expect(screen.getByRole('button', { name: '全部材料' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByRole('button', { name: '全部材料' })).toBeNull();
   });
 });
 
