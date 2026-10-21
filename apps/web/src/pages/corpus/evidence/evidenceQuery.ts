@@ -59,11 +59,9 @@ export const LAYOUTS = [
 ] as const;
 
 export const TABS = [
-  ['overview', '概览'],
-  ['evidence', '证据'],
+  ['overview', '作品'],
   ['dossier', '研究底稿'],
-  ['materials', '材料'],
-  ['trace', '来源轨迹'],
+  ['trace', '采集记录'],
 ] as const;
 
 export const PANELS = ['normal', 'wide', 'focus'] as const;
@@ -140,7 +138,8 @@ export function parseQuery(params: URLSearchParams): EvidenceQuery {
     view: oneOf(VIEWS, params.get('view'), 'all'),
     layout: oneOf(LAYOUTS, params.get('layout'), 'research'),
     work: work !== null && UUID_PATTERN.test(work) ? work : null,
-    tab: oneOf(TABS, params.get('tab'), 'overview'),
+    // Legacy tab URLs remain valid; their old content moves to the nearest new panel.
+    tab: params.get('tab') === 'evidence' ? 'dossier' : params.get('tab') === 'materials' ? 'trace' : oneOf(TABS, params.get('tab'), 'overview'),
     panel: panel === 'closed' ? 'closed' : (PANELS.find(width => width === panel) ?? null),
     creatorKey: params.get('creatorKey'),
     creatorFilter: params.get('creatorFilter'),
@@ -198,9 +197,9 @@ export function toApiParams(domain: string, query: EvidenceQuery, cursor: string
   return params;
 }
 
-/** 筛选浮层上的徽标数：四个下拉里与默认不同的个数（系统视图与排序不计）。 */
+/** One indicator for all effective filter choices, including the former quick-view tabs. */
 export function activeFilterCount(query: EvidenceQuery): number {
-  return [query.lane, query.laneState, query.mediaKind].filter(value => value !== '').length;
+  return [query.lane, query.laneState, query.mediaKind].filter(value => value !== '').length + (query.view === 'all' ? 0 : 1);
 }
 
 /** 是否带着创作者作品集合（`creatorKey` 或 `creatorFilter` 存在即成立）。 */

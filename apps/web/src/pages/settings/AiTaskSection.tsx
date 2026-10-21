@@ -61,12 +61,12 @@ function TaskForm({ data, task, action }: { data: AiSettings; task: Task; action
     <SaveBar busy={action.busy !== null} />
   </form>;
 }
-export function AiTaskSection({ data, action }: { data: AiSettings; action: AiAction }) {
+export function AiTaskSection({ data, action, linkBase = '?section=automation&task=' }: { data: AiSettings; action: AiAction; linkBase?: string }) {
   const [query] = useSearchParams();
   const task = data.tasks.find(t => t.taskKey === query.get('task')) ?? data.tasks[0];
   return <section className={styles.section} aria-labelledby="tasks-title"><h2 id="tasks-title">自动化与额度</h2><p>全局、执行器、工作三层开关分别记录。所有开关开启后，仍需通过当前配置、材料许可和额度检查。</p>
     <div className={styles.grid}>{data.controls.filter(c => c.taskKey === null).map(control => <ControlAction key={`${control.scope}:${control.revision}`} control={control} action={action} label={control.scope === 'global' ? '全局 AI' : '执行器'} />)}</div>
-    <nav className={styles.selector} aria-label="工作清单">{data.tasks.map(t => <Link key={t.taskKey} to={`?section=automation&task=${encodeURIComponent(t.taskKey)}`} aria-current={task?.taskKey === t.taskKey ? 'page' : undefined}><span>{t.label}</span><small>{TASK_STATE[t.lifecycle] ?? '状态未知'}</small></Link>)}</nav>
+    <nav className={styles.selector} aria-label="工作清单">{data.tasks.map(t => <Link key={t.taskKey} to={linkBase + encodeURIComponent(t.taskKey)} aria-current={task?.taskKey === t.taskKey ? 'page' : undefined}><span>{t.label}</span><small>{TASK_STATE[t.lifecycle] ?? '状态未知'}</small></Link>)}</nav>
     {task ? <>{['active', 'pending'].includes(task.lifecycle) ? <TaskForm key={`${task.taskKey}:${task.revision}`} task={task} data={data} action={action} /> : <section className={styles.group}><h3>{task.label} · 历史配置</h3><p>{TASK_STATE[task.lifecycle] ?? '接入状态未识别'}；保留历史版本，当前不提供配置或启用入口。</p><Reference value={task.configuration.taskConfigRef} /></section>}{data.controls.filter(c => c.taskKey === task.taskKey).map(control => <ControlAction key={`${control.scope}:${control.revision}`} control={control} action={action} label={task.label} />)}</> : <p>尚未取得工作注册表。</p>}
   </section>;
 }

@@ -24,6 +24,6 @@ export function AiBusinessStatus({ taskKey }: { taskKey: keyof typeof LANES }) {
   }
   return <section className={styles.businessStatus} aria-label={`${lane.label}状态`}><p><b>{lane.label}</b>：{lane.description}</p>
     <p>{query.isError ? '开关读取失败，当前值待核对。' : query.isPending ? '正在读取统一工作开关…' : task && control ? `${TASK_STATE[task.lifecycle] ?? '接入状态未识别'} · ${controlStatus(control)}` : '统一工作记录暂不可用。'}</p>
-    <div className={styles.actions}><ActionButton onClick={pause} disabled={!control?.enabled || action.busy !== null}>{control && !control.enabled ? '工作开关已关闭' : '暂停此项 AI'}</ActionButton><a href={`/settings/models?section=automation&task=${taskKey}`}>去 AI 设置</a></div>{action.notice ? <NoticeLine notice={action.notice} /> : null}
+    <div className={styles.actions}><ActionButton onClick={pause} disabled={!control?.enabled || action.busy !== null}>{control && !control.enabled ? '工作开关已关闭' : '暂停此项 AI'}</ActionButton><a href={`/settings/models?view=advanced&area=work&task=${taskKey}`}>去 AI 设置</a></div>{action.notice ? <NoticeLine notice={action.notice} /> : null}
   </section>;
 }

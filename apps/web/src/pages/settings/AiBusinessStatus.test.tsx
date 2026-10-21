@@ -19,7 +19,7 @@ describe('frozen business AI uses the same control', () => {
     expect(await screen.findByText('开关读取失败，当前值待核对。')).toBeInTheDocument();
     expect(screen.getByText(/已停用，接入时间另定/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '暂停此项 AI' })).toBeDisabled();
-    expect(screen.getByRole('link', { name: '去 AI 设置' })).toHaveAttribute('href', '/settings/models?section=automation&task=comment_study');
+    expect(screen.getByRole('link', { name: '去 AI 设置' })).toHaveAttribute('href', '/settings/models?view=advanced&area=work&task=comment_study');
     expect(fetch).toHaveBeenCalledTimes(1); expect(fetch.mock.calls[0]?.[0]).toBe('/api/local/ai-settings');
   });
   it('pauses by task CAS and reports a confirmed receipt; no legacy API or queue is used', async () => {

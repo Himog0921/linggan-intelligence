@@ -2,7 +2,6 @@ import { ActionButton } from '../../../shared/ActionButton';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
 import { fetchDossier } from './dossierApi';
-import { DossierComments } from './DossierComments';
 import { comparableImages } from './dossierPresent';
 import { CoverageSection, FragmentsSection, MetaSection } from './DossierSections';
 import type { DossierMedia, DossierPayload } from './dossierTypes';
@@ -12,7 +11,6 @@ import { TaskInput } from './TaskInput';
 import { NoteMaterialSection } from './NoteMaterialSection';
 import { errorCode } from './evidenceFeedback';
 import { DOSSIER_KEY, dossierKey } from './evidenceKeys';
-import { momentText } from './evidencePresent';
 import type { Metric } from './evidenceTypes';
 import { downloadDossier } from './exportDossier';
 import { useRelayer } from './useRelayer';
@@ -32,36 +30,25 @@ interface DossierPanelProps {
 
 const READ_FAILED = '暂时无法完成，请重试。已取得的原始材料仍保留。';
 
-function Head({ payload, relayer, busy, onRefresh, onPreview }: { payload: DossierPayload; relayer: ReturnType<typeof useRelayer>; busy: boolean; onRefresh: () => void; onPreview: () => void }) {
+function Head({ payload, relayer, busy, onRefresh }: { payload: DossierPayload; relayer: ReturnType<typeof useRelayer>; busy: boolean; onRefresh: () => void }) {
   const { dossier, relayerPlan: plan } = payload;
   const characters = dossier.fragments.reduce((sum, fragment) => sum + fragment.end, 0);
-  const author = dossier.metadata.authorDisplayName ?? '作者未知';
   const unconfirmed = relayer.feedback?.tone === 'unknown' || relayer.feedback?.code === 'dossier_changed_or_scope_unavailable';
   return (
     <Section title="研究底稿">
-      <p className={styles.note}>导出保留平台作品和作者编号，用于来源追溯；分享文件前请检查其中的来源信息。</p>
-      <p className={styles.note}>{`${dossier.metadata.platform} · ${author} · 发布时间 ${momentText(dossier.metadata.publishedAt, '未知')}`}</p>
-      <p>{`已整理 ${dossier.fragments.length} 个文字片段 · ${characters} 字符 · ${dossier.coverage.uncertainImages} 张图片部分待确认`}</p>
-      <p className={styles.note}>底稿使用当前可读取的共享材料。历史运行继续保留其冻结输入；待确认行不进入正文。</p>
-      <p className={styles.note}>{`本篇可用布局 ${plan.layoutCount} 个 · 待分层 ${plan.pendingLayouts} 个 · 已是当前版本 ${plan.alreadyCurrent} 个 · 需先识字 ${plan.needsOcr} 个`}</p>
+      <p className={styles.dossierCounts}>{`已整理 ${dossier.fragments.length} 个文字片段 · ${characters} 字符 · ${dossier.coverage.uncertainImages} 张图片待确认`}</p>
       <div className={styles.toolbar}>
-        <ActionButton variant="primary" onClick={onPreview}>
-          预览旧任务输入
-        </ActionButton>
-        <button type="button" disabled={busy} onClick={onRefresh}>
-          刷新底稿
-        </button>
-        <button type="button" onClick={() => downloadDossier(payload, 'md')}>
-          导出 Markdown
-        </button>
-        <button type="button" onClick={() => downloadDossier(payload, 'json')}>
-          导出 JSON
-        </button>
-        <button type="button" disabled={plan.layoutCount === 0 || plan.layoutCount > 100 || relayer.sending} onClick={relayer.run}>
-          {`重新分层（${plan.layoutCount} 个版面）`}
-        </button>
+        <ActionButton variant="outline" onClick={() => downloadDossier(payload, 'md')}>导出 Markdown</ActionButton>
+        <ActionButton variant="outline" onClick={() => downloadDossier(payload, 'json')}>导出 JSON</ActionButton>
+        <ActionButton variant="quiet" disabled={busy} onClick={onRefresh}>刷新底稿</ActionButton>
       </div>
-      <p className={styles.note}>重新分层处理已有版面；封面与首图可能是同一图片，送给 AI 时会去重。不重新识图，也不启动 AI 研究。</p>
+      <details className={styles.disclosure}>
+        <summary>材料重新分层与高级核对</summary>
+        <p className={styles.note}>{`可用布局 ${plan.layoutCount} · 待分层 ${plan.pendingLayouts} · 当前版本 ${plan.alreadyCurrent} · 待识字 ${plan.needsOcr}`}</p>
+        <button type="button" disabled={plan.layoutCount === 0 || plan.layoutCount > 100 || relayer.sending}
+          onClick={relayer.run}>{`重新分层（${plan.layoutCount} 个版面）`}</button>
+        <p className={styles.note}>只整理已有识别版面，不重新识图或发起研究。导出文件保留来源引用。</p>
+      </details>
       <FeedbackLine feedback={relayer.feedback}>
         {unconfirmed ? (
           <button type="button" className={page.textButton} disabled={busy} onClick={onRefresh}>
@@ -78,7 +65,7 @@ function Head({ payload, relayer, busy, onRefresh, onPreview }: { payload: Dossi
  * 研究底稿标签（RESEARCH-DOSSIER-001）：完整研究文字、来源与图片分层。标签激活时才读取；读取中 `aria-busy`；
  * 刷新失败保留上一次可读底稿并提示；重新分层是显式的本地写（先对账修订，不重新识图、不启动 AI 研究）。
  */
-export function DossierPanel({ work, domain, active, platformComments, onOpenImage, onApplied }: DossierPanelProps) {
+export function DossierPanel({ work, domain, active, onOpenImage, onApplied }: DossierPanelProps) {
   const [activated, setActivated] = useState(active);
   if (active && !activated) setActivated(true);
   const client = useQueryClient();
@@ -124,7 +111,7 @@ export function DossierPanel({ work, domain, active, platformComments, onOpenIma
   const media = comparableImages(payload.dossier.media);
   return (
     <div className={styles.panel} aria-busy={query.isFetching}>
-      <Head payload={payload} relayer={relayer} busy={query.isFetching} onRefresh={() => void query.refetch()} onPreview={() => taskSection.current?.scrollIntoView?.({ block: 'start' })} />
+      <Head payload={payload} relayer={relayer} busy={query.isFetching} onRefresh={() => void query.refetch()} />
       {query.isFetching ? <p role="status">正在刷新底稿…</p> : null}
       {query.isError ? (
         <p role="status" className={styles.note}>
@@ -134,9 +121,6 @@ export function DossierPanel({ work, domain, active, platformComments, onOpenIma
           </button>
         </p>
       ) : null}
-      <CoverageSection payload={payload} />
-      <NoteMaterialSection key={`${domain}:${work}`} work={work} domain={domain} />
-      <TaskInput payload={payload} work={work} domain={domain} sectionRef={taskSection} />
       <FragmentsSection payload={payload} onCompare={compare} />
       <Section title="原图与识别对照">
         {media.map(item => (
@@ -155,8 +139,13 @@ export function DossierPanel({ work, domain, active, platformComments, onOpenIma
         ))}
         {media.length === 0 ? <p>当前没有图片识别结果。</p> : null}
       </Section>
-      <DossierComments work={work} domain={domain} platformComments={platformComments} />
-      <MetaSection payload={payload} />
+      <details className={styles.advanced}>
+        <summary>材料完整度及旧任务输入</summary>
+        <CoverageSection payload={payload} />
+        <NoteMaterialSection key={`${domain}:${work}`} work={work} domain={domain} />
+        <TaskInput payload={payload} work={work} domain={domain} sectionRef={taskSection} />
+        <MetaSection payload={payload} />
+      </details>
     </div>
   );
 }

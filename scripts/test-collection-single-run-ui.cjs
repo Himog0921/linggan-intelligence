@@ -122,8 +122,11 @@ const { chromium } = require('playwright');
     await page.setViewportSize({width:390,height:1000});await page.screenshot({path:path.join(directory,'results-drawer-390.png')});await page.setViewportSize({width:1440,height:1000});
     assert.equal(await page.locator('[data-run-execution-diagnostics]').count(),0);
     await page.locator('[data-run-detail] a[href^="/corpus/evidence"]').first().click();
-    await page.getByRole('checkbox',{name:'勾选作品用于批量操作'}).first().waitFor();
-    assert.equal(await page.getByRole('checkbox',{name:'勾选作品用于批量操作'}).count(),5);
+    // V2.2 keeps browsing and bulk selection separate, so the boxes are not present by default.
+    await page.getByRole('button',{name:'选择',exact:true}).click();
+    const workCheckboxes=page.getByRole('checkbox',{name:/^勾选作品：/});
+    await workCheckboxes.first().waitFor();
+    assert.equal(await workCheckboxes.count(),5);
     const scoped=await page.request.get(`${fixture.origin}/api/local/work-resources?domain=${fixture.domainRef}&collectionRunRef=${fixture.runRef}`);
     assert.equal(scoped.status(),200);const materials=await scoped.json();assert.equal(materials.items.length,5);
     const firstRef=materials.items[0].identity.publicRef;
@@ -133,14 +136,19 @@ const { chromium } = require('playwright');
     const foreign=await page.request.get(`${fixture.origin}/api/local/work-resources?domain=${fixture.otherDomainRef}&collectionRunRef=${fixture.runRef}`);assert.equal((await foreign.json()).items.length,0);
     await page.screenshot({path:path.join(directory,'corpus-run-1440.png'),fullPage:true});
     await page.goto(`${fixture.origin}/corpus/evidence?domain=${fixture.domainRef}&collectionRunRef=${fixture.selectionRunRef}`);
-    await page.getByRole('checkbox',{name:'勾选作品用于批量操作'}).first().waitFor();
-    assert.equal(await page.getByRole('checkbox',{name:'勾选作品用于批量操作'}).count(),50);
+    await page.getByRole('button',{name:'选择',exact:true}).click();
+    const selectionCheckboxes=page.getByRole('checkbox',{name:/^勾选作品：/});
+    await selectionCheckboxes.first().waitFor();
+    assert.equal(await selectionCheckboxes.count(),50);
     await page.getByRole('button',{name:'勾选本页',exact:true}).click();
     await page.getByRole('button',{name:'继续读取作品',exact:true}).click();
-    await page.getByRole('checkbox',{name:'勾选作品用于批量操作'}).nth(50).waitFor();
+    await selectionCheckboxes.nth(50).waitFor();
     await page.getByRole('button',{name:'勾选本页',exact:true}).click();
     await page.screenshot({path:path.join(directory,'corpus-selection-1440.png')});
-    await page.reload();const checkedWorks=page.getByRole('checkbox',{name:'勾选作品用于批量操作',checked:true});await checkedWorks.first().waitFor();assert.equal(await checkedWorks.count(),50);
+    await page.reload();
+    await page.getByRole('button',{name:'选择',exact:true}).click();
+    const checkedWorks=page.getByRole('checkbox',{name:/^勾选作品：/,checked:true});
+    await checkedWorks.first().waitFor();assert.equal(await checkedWorks.count(),50);
     // A previous accepted request can remain unconfirmed in the browser draft.
     // Entering a different exact scope must never resolve that old receipt as the new request.
     await page.evaluate(({domainRef,existingRequestKey}) => {

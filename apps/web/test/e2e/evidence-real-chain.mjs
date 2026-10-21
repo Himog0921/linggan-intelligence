@@ -117,16 +117,17 @@ const TITLE = { rich: '合成长文：从两分钟开始建立习惯', video: '�
 let finished = false;
 try {
   // ① 打开与外壳
-  await step('打开页面：外壳、标题、读取时间、侧栏徽标；自动选中第一项并替换地址；没有写请求；普通层无 UUID', async () => {
+  await step('打开页面：外壳、标题、侧栏徽标；浏览态不自动打开首篇；点击后才读详情；没有写请求；普通层无 UUID', async () => {
     const response = await page.goto(base);
     assert.equal(response?.status(), 200);
     await rows().first().waitFor();
     assert.equal(await page.title(), '证据库 · 语料');
     assert.equal((await page.getByRole('heading', { level: 1 }).textContent()).trim(), '证据库');
-    // 地址：第一项自动选中，写回 work（替换历史，不新增）。
-    await page.waitForURL(url => url.searchParams.get('work') === rich);
+    // 浏览态不替用户选中首篇，也不读取详情；点作品后才写入 work 并打开检查器。
+    assert.equal(new URL(page.url()).searchParams.get('work'), null);
     assert.equal(await rows().count(), pageSize);
-    await waitInspector(TITLE.rich);
+    assert.equal(await page.locator('[data-inspector="closed"]').count(), 1);
+    assert.equal(await inspector().isVisible(), false);
     const nav = page.getByRole('navigation', { name: '一级导航' });
     assert.equal(await nav.locator('a, button').count(), 6);
     assert.equal(await nav.getByRole('link', { name: /语料/ }).getAttribute('aria-current'), 'page');
@@ -137,9 +138,6 @@ try {
     );
     assert.equal(await side.getByRole('link', { name: /证据库/ }).getAttribute('aria-current'), 'page');
     assert.match(await page.getByLabel('切换当前观察领域').innerText(), /合成领域一/);
-    const readout = page.getByText(/^读取于 \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
-    await readout.waitFor();
-    assert.match(await readout.innerText(), /^读取于 \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
     // 侧栏徽标：本次读取的作品数，悬停说明里是三个读数；读模型不给总数，页面不编造「共 N 个」。
     assert.equal((await page.locator('#ev-rail-count').innerText()).trim(), String(pageSize));
     assert.match(await page.locator('#ev-rail-count').getAttribute('title'), /^本次读取 50 个作品 · 已留存评论 \d+ · 本地材料 \d+ · 部分或缺口 \d+$/);
@@ -154,6 +152,10 @@ try {
     assert.deepEqual(report.writes, []);
     const layout = await shot('evidence-1440-research');
     assert.ok(layout.documentWidth <= layout.viewport, '1440 宽度不应横向溢出');
+
+    await rowOf(TITLE.rich).click();
+    await page.waitForURL(url => url.searchParams.get('work') === rich);
+    await waitInspector(TITLE.rich);
   });
 
   // ② 未选领域
@@ -189,7 +191,7 @@ try {
 
   // ③ 三种排版、50 条＋继续读取、排版切换不重新请求、3:4 探针
   await step('50 条＋「继续读取作品」；三种排版互相切换不重新读取；封面是 3:4', async () => {
-    await open();
+    await open(`&work=${rich}`);
     assert.equal(await rows().count(), pageSize);
     await page.getByRole('button', { name: '继续读取作品', exact: true }).click();
     await page.waitForFunction(total => document.querySelectorAll('li[data-work-ref]').length === total, totalWorks);
@@ -203,7 +205,10 @@ try {
     await page.getByRole('button', { name: '表格', exact: true }).click();
     await page.getByRole('table').waitFor();
     assert.equal(await page.locator('tbody tr[data-work-ref]').count(), totalWorks);
-    assert.deepEqual(await page.getByRole('columnheader').allTextContents(), ['作品', '作者', '材料', '互动：', '发布时间', '最近观察']);
+    const headers = page.getByRole('columnheader');
+    assert.equal(await headers.count(), 9);
+    assert.deepEqual(await headers.locator('svg[role="img"]').evaluateAll(icons => icons.map(icon => icon.getAttribute('aria-label'))), ['点赞', '评论', '收藏', '分享']);
+    assert.deepEqual(await headers.evaluateAll(cells => [cells[0]?.textContent, cells[1]?.textContent, cells[2]?.textContent, cells[7]?.textContent, cells[8]?.textContent]), ['作品', '作者', '材料', '发布时间', '最近观察']);
     await shot('evidence-1440-table');
     await page.getByRole('button', { name: '封面', exact: true }).click();
     await page.locator('li[data-work-ref]').first().waitFor();
@@ -248,7 +253,29 @@ try {
     const riskControl = laneStateOptions.getByRole('option', { name: '风险控制停止', exact: true });
     assert.equal(await riskControl.getAttribute('aria-selected'), 'false');
     assert.equal(await riskControl.getAttribute('aria-disabled'), null);
-    await riskControl.click();
+    // 点击后先等 React 提交打开态，避免首个按键仍由点击前的闭合态处理。
+    await laneStateOptions.waitFor();
+    await page.waitForFunction(() => document.querySelector('[role="combobox"][aria-label="通道状态"]')?.getAttribute('aria-expanded') === 'true');
+    // 长菜单的目标项可能在当前可视段外；经键盘到达并选择，核对同一无障碍菜单路径。
+    await laneState.press('End');
+    await page.waitForFunction(() => {
+      const trigger = document.querySelector('[role="combobox"][aria-label="通道状态"]');
+      const active = trigger?.getAttribute('aria-activedescendant');
+      return active !== null && document.getElementById(active)?.textContent?.includes('撤回或受限') === true;
+    });
+    await laneState.press('ArrowUp');
+    await page.waitForFunction(() => {
+      const trigger = document.querySelector('[role="combobox"][aria-label="通道状态"]');
+      const active = trigger?.getAttribute('aria-activedescendant');
+      return active !== null && document.getElementById(active)?.textContent?.includes('字节已清理') === true;
+    });
+    await laneState.press('ArrowUp');
+    await page.waitForFunction(() => {
+      const trigger = document.querySelector('[role="combobox"][aria-label="通道状态"]');
+      const active = trigger?.getAttribute('aria-activedescendant');
+      return active !== null && document.getElementById(active)?.textContent?.includes('风险控制停止') === true;
+    });
+    await laneState.press('Enter');
     await page.waitForURL(url => url.searchParams.get('laneState') === 'RISK_CONTROL');
     await page.waitForFunction(() => document.querySelector('[role="combobox"][aria-label="通道状态"]')?.textContent?.includes('风险控制停止') === true);
     assert.match(await laneState.innerText(), /风险控制停止/);
@@ -279,8 +306,9 @@ try {
     }, pageSize);
     assert.equal(await rowOf(TITLE.video).count(), 1);
     await page.keyboard.press('Escape');
-    // 系统视图：部分取得／风险停止／媒体已清理／撤回或受限；地址只写 view，接口收到展开后的条件。
+    // 系统视图收在筛选浮层：部分取得／风险停止／媒体已清理／撤回或受限；地址只写 view，接口收到展开后的条件。
     await open();
+    await page.getByRole('button', { name: /^筛选/ }).click();
     for (const [name, key, title] of [['部分取得', 'partial', TITLE.partial], ['风险停止', 'risk', TITLE.risk], ['媒体已清理', 'cleaned', TITLE.cleaned], ['撤回或受限', 'restricted', TITLE.restricted]]) {
       await page.getByRole('button', { name, exact: true }).click();
       await page.waitForURL(url => url.searchParams.get('view') === key);
@@ -292,7 +320,8 @@ try {
     const lastList = requestsTo('GET', /^\/api\/local\/work-resources$/).at(-1);
     assert.match(lastList.search, /restriction=WITHDRAWN_OR_RESTRICTED/);
     // 回到全部材料：清空筛选（浮层里）也是一样的复位。
-    await page.getByRole('button', { name: /^筛选/ }).click();
+    const filterToggle = page.getByRole('button', { name: /^筛选/ });
+    if (await filterToggle.getAttribute('aria-expanded') !== 'true') await filterToggle.click();
     await page.getByRole('button', { name: '清空筛选' }).click();
     await page.waitForFunction(size => document.querySelectorAll('li[data-work-ref]').length === size, pageSize);
     assert.equal(new URL(page.url()).searchParams.has('view'), false);
@@ -303,12 +332,14 @@ try {
   await step('阅读主序：标题、作者、发布时间、互动、正文；技术事实默认折叠；tab 深链', async () => {
     await open(`&work=${rich}`);
     await waitInspector(TITLE.rich);
-    const reading = panel('概览');
+    const reading = panel('作品');
     // 标题来自列表，作者、互动与正文来自随后的详情读取：等正文到了再读（只等标题会读到空白的分区）。
     await reading.locator('p[data-collapsed]').waitFor();
     const text = await reading.innerText();
-    assert.match(text, /合成作者 林/);
-    for (const figure of ['12,345', '321', '4,567', '89']) assert.ok(text.includes(figure), figure);
+    // 作者、发布时间、互动属于共享 Inspector 头部，正文标签只承载可阅读材料。
+    const summary = await inspector().innerText();
+    assert.match(summary, /合成作者 林/);
+    for (const figure of ['12,345', '321', '4,567', '89']) assert.ok(summary.includes(figure), figure);
     assert.ok(text.includes('第1段。'));
     // 长文折叠与展开：折叠只是不占满整屏，正文仍完整在页面里（裁切不删字）。
     const toggle = reading.getByRole('button', { name: '展开全文' });
@@ -322,37 +353,44 @@ try {
     const unfolded = await body.evaluate(node => ({ shown: node.clientHeight, full: node.scrollHeight }));
     assert.ok(unfolded.shown > folded.shown && unfolded.shown >= unfolded.full - 1, '展开后完整显示');
     await page.getByText('合成长文结尾标记。').waitFor();
-    // 技术事实：折叠；展开后才有稳定引用与技术码。
-    const facts = reading.locator('details').filter({ has: page.locator('summary', { hasText: '技术事实' }) });
+    // 技术事实归入「采集记录」：默认折叠；展开后才有稳定引用与技术码。
+    await page.getByRole('tab', { name: '采集记录' }).click();
+    const trace = panel('采集记录');
+    const facts = trace.locator('details').filter({ has: page.locator('summary', { hasText: '技术事实' }) });
     assert.equal(await facts.evaluate(node => node.open), false);
-    assert.doesNotMatch(await reading.innerText(), UUID);
+    assert.doesNotMatch(await trace.innerText(), UUID);
     await facts.locator('summary').click();
     assert.ok((await facts.innerText()).includes(rich));
     await shot('evidence-1440-rich-overview');
-    for (const [tab, marker] of [['evidence', '图片文字与转录原文'], ['materials', '材料处理台账'], ['trace', '来源与执行血缘']]) {
-      await open(`&work=${rich}&tab=${tab}`);
-      await waitInspector(TITLE.rich);
-      await page.getByRole('heading', { name: marker }).waitFor();
-    }
-    // 每个标签点击都写入地址，并替换历史（不让标签切换堆满后退栈）。
-    await page.getByRole('tab', { name: '证据' }).click();
-    await page.waitForURL(url => url.searchParams.get('tab') === 'evidence');
+    // 旧深链映射到最接近的三个标签，不显示已拆除的旧标签名。
+    await open(`&work=${rich}&tab=evidence`);
+    await page.getByRole('tab', { name: '研究底稿' }).waitFor();
+    assert.equal(await page.getByRole('tab', { name: '研究底稿' }).getAttribute('aria-selected'), 'true');
+    await page.getByRole('heading', { name: '研究底稿' }).waitFor();
+    await open(`&work=${rich}&tab=materials`);
+    assert.equal(await page.getByRole('tab', { name: '采集记录' }).getAttribute('aria-selected'), 'true');
+    await page.getByRole('heading', { name: '材料完整度' }).waitFor();
+    await open(`&work=${rich}&tab=trace`);
+    assert.equal(await page.getByRole('tab', { name: '采集记录' }).getAttribute('aria-selected'), 'true');
+    // 每个标签点击都写入规范地址，并替换历史（不让标签切换堆满后退栈）。
+    await page.getByRole('tab', { name: '研究底稿' }).click();
+    await page.waitForURL(url => url.searchParams.get('tab') === 'dossier');
   });
 
   // ⑥ 媒体轨道与查看器
   await step('媒体轨道：受控本机图片；查看器缩放、Esc、焦点回位；视频不内联', async () => {
-    await open(`&work=${rich}&tab=materials`);
+    await open(`&work=${rich}`);
     await waitInspector(TITLE.rich);
-    const cards = panel('材料').locator('button[data-index]');
+    const cards = panel('作品').locator('button[data-index]');
     // 图片都是受控本机句柄，且真的加载出来。
-    const images = panel('材料').locator('img[alt$="本地媒体对象"]');
+    const images = panel('作品').locator('img[alt$="本地媒体对象"]');
     // 材料分区随详情读取到达：等第四张出现再数（标题先到时分区还是空的）。
     await images.nth(3).waitFor();
     assert.equal(await images.count(), 4);
     await page.waitForFunction(() => [...document.querySelectorAll('[role="tabpanel"]:not([hidden]) img')].every(image => image.complete && image.naturalWidth > 0));
     for (const source of await images.evaluateAll(list => list.map(image => image.getAttribute('src')))) assert.match(source, /^\/api\/local\/media\//);
     await shot('evidence-1440-materials');
-    const first = panel('材料').locator('button[data-index="0"]');
+    const first = panel('作品').locator('button[data-index="0"]');
     await first.click();
     const dialog = page.getByRole('dialog').filter({ has: page.getByRole('button', { name: '关闭查看器' }) });
     await dialog.waitFor();
@@ -370,37 +408,35 @@ try {
     assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('data-index')), '0', '关闭后焦点回到打开它的那一张');
     assert.equal(await cards.count(), 4);
     // 视频：不内联播放，也不当图片渲染——卡片只写字节状态词；封面等其余对象不受影响。
-    await open(`&work=${video}&tab=materials`);
+    await open(`&work=${video}`);
     await waitInspector(TITLE.video);
-    const videoCard = panel('材料').locator('button[data-index]').filter({ hasText: '视频' });
+    const videoCard = panel('作品').locator('button[data-index]').filter({ hasText: '视频' });
     await videoCard.first().waitFor();
     assert.equal(await page.locator('video').count(), 0);
     assert.equal(await videoCard.count(), 1);
     assert.equal(await videoCard.locator('img').count(), 0, '视频不当图片渲染');
     assert.match(await videoCard.innerText(), /已取得/);
-    assert.equal(await panel('材料').locator('img[alt$="本地媒体对象"]').count(), 1, '同一作品的封面仍是受控图片');
+    assert.equal(await panel('作品').locator('img[alt$="本地媒体对象"]').count(), 1, '同一作品的封面仍是受控图片');
   });
 
   // ⑦ 评论
-  await step('评论：点击前没有评论请求；点击后 20 条匿名评论，续读；不出现平台用户标识', async () => {
+  await step('评论：点击前没有评论请求；点击后按 30 条分页读取，续读；不出现平台用户标识', async () => {
     const before = requestsTo('GET', /\/comments$/).length;
-    await open(`&work=${rich}&tab=evidence`);
+    await open(`&work=${rich}`);
     await waitInspector(TITLE.rich);
     assert.equal(requestsTo('GET', /\/comments$/).length, before, '没有点击就不读取评论原文');
-    const evidence = panel('证据');
-    await evidence.getByRole('button', { name: '读取评论原文' }).click();
-    await page.waitForFunction(() => document.querySelectorAll('[role="tabpanel"]:not([hidden]) article[data-relation]').length === 20);
-    assert.match(await evidence.innerText(), /总数 \d+ · 当前 20 · 本次 20/);
-    await evidence.getByRole('button', { name: '继续读取评论' }).click();
-    await page.waitForFunction(() => document.querySelectorAll('[role="tabpanel"]:not([hidden]) article[data-relation]').length === 40);
-    const text = await evidence.innerText();
+    const work = panel('作品');
+    await work.getByRole('button', { name: '读取前 30 条' }).click();
+    await work.getByText(/已展示 30 \/ 48 条可读取评论/).waitFor();
+    await work.getByRole('button', { name: '继续读取 30 条' }).click();
+    await work.getByText(/已展示 48 \/ 48 条可读取评论/).waitFor();
+    const text = await work.innerText();
     assert.doesNotMatch(text, /reader-\d|replier-\d/);
-    assert.ok(text.includes('匿名评论'));
     // 评论与回复按稳定来源编号排序（orderBasis: stable_source_ref_not_platform_order），编号每次播种都不同，
-    // 所以不断言哪一条在前两页；断言两页恰好是 40 条不同的评论或回复正文：续读不重复、不遗漏。
+    // 48 条含嵌套回复；折叠态只展示 45 条主评论摘要。两类数量分别断言，避免把折叠策略误当成数据缺失。
     const shown = [...text.matchAll(/合成(评论|回复) (\d+)：/g)].map(match => `${match[1]}${match[2]}`);
-    assert.equal(shown.length, 40, '两页共 40 条评论或回复正文');
-    assert.equal(new Set(shown).size, 40, '续读没有重复的条目');
+    assert.equal(shown.length, 45, '折叠态展示 45 条主评论摘要');
+    assert.equal(new Set(shown).size, 45, '续读没有重复的主评论');
     await shot('evidence-1440-comments');
   });
 
@@ -414,12 +450,13 @@ try {
     const dossier = panel('研究底稿');
     await dossier.getByRole('heading', { name: '研究底稿' }).waitFor();
     assert.equal(requestsTo('GET', /research-dossier$/).length, before + 1);
-    assert.match(await dossier.innerText(), /本篇可用布局 1 个 · 待分层 1 个 · 已是当前版本 0 个/);
+    await dossier.locator('details > summary').filter({ hasText: '材料重新分层与高级核对' }).click();
+    assert.match(await dossier.innerText(), /可用布局 1 · 待分层 1 · 当前版本 0/);
     await shot('evidence-1440-dossier');
     // 对照原图：展开第一张图的识别结果，点一行在原图上标出位置（框坐标须都在 0–1）。
     await dossier.locator('details > summary').filter({ hasText: /图片|识别/ }).first().click();
     // 预览旧任务输入：只读，不调用模型。
-    await dossier.getByRole('button', { name: '预览旧任务输入' }).click();
+    await dossier.locator('details > summary').filter({ hasText: '材料完整度及旧任务输入' }).click();
     await dossier.getByRole('button', { name: '按旧配置预览完整请求' }).waitFor();
     await dossier.getByRole('button', { name: '按旧配置预览完整请求' }).click();
     await page.waitForFunction(() => /预览|估算|上限/.test(document.querySelector('[role="tabpanel"]:not([hidden])')?.textContent ?? ''));
@@ -435,7 +472,7 @@ try {
     await dossier.getByRole('button', { name: /^重新分层/ }).click();
     await page.waitForFunction(() => /本次 1 个版面：更新 1 个/.test(document.querySelector('[role="tabpanel"]:not([hidden])')?.textContent ?? ''));
     await writesTotal(writes + 1);
-    await page.waitForFunction(() => /待分层 0 个 · 已是当前版本 1 个/.test(document.querySelector('[role="tabpanel"]:not([hidden])')?.textContent ?? ''));
+    await page.waitForFunction(() => /待分层 0 · 当前版本 1/.test(document.querySelector('[role="tabpanel"]:not([hidden])')?.textContent ?? ''));
     await dossier.getByRole('button', { name: /^重新分层/ }).click();
     await page.waitForFunction(() => /已是当前版本，无需更新/.test(document.querySelector('[role="tabpanel"]:not([hidden])')?.textContent ?? ''));
     await writesTotal(writes + 2);
@@ -443,7 +480,8 @@ try {
 
   await step('批量整理弹窗：固定范围逐篇预览与整理；断点只存引用；刷新后可继续', async () => {
     await open();
-    for (const title of [TITLE.video, TITLE.risk, TITLE.partial]) await rowOf(title).getByRole('checkbox', { name: '勾选作品用于批量操作' }).check();
+    await page.getByRole('button', { name: '选择', exact: true }).click();
+    for (const title of [TITLE.video, TITLE.risk, TITLE.partial]) await rowOf(title).getByRole('checkbox', { name: `勾选作品：${title}` }).check();
     await page.getByRole('button', { name: '整理图片文字', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: '重新整理选定作品的图片文字' });
     await dialog.waitFor();
@@ -458,6 +496,7 @@ try {
     // 刷新后可继续：从断点读回固定范围。
     await page.reload();
     await rows().first().waitFor();
+    await page.getByRole('button', { name: '选择', exact: true }).click();
     await page.getByRole('button', { name: '继续上次整理' }).click();
     const again = page.getByRole('dialog', { name: '重新整理选定作品的图片文字' });
     await again.getByText('3 篇固定作品 · 已处理 0 篇 · 失败 0 篇 · 尚未处理 3 篇').waitFor();
@@ -473,7 +512,8 @@ try {
   await step('立即复观测：确认步骤、取消不发请求；确认后库内一条请求一张工单、没有租约；再提交合并到同一工单；不可用时给原因', async () => {
     await open(`&work=${reobserve}`);
     await waitInspector(TITLE.reobserve);
-    const section = panel('概览');
+    await page.getByRole('tab', { name: '采集记录' }).click();
+    const section = panel('采集记录');
     const writes = report.writes.length;
     await section.getByRole('button', { name: '立即复观测' }).click();
     const dialog = page.getByRole('dialog', { name: '确认立即复观测' });
@@ -493,6 +533,7 @@ try {
     // 再提交一次（新开页面）：合并到覆盖这篇作品的在途工单。
     await open(`&work=${reobserve}`);
     await waitInspector(TITLE.reobserve);
+    await page.getByRole('tab', { name: '采集记录' }).click();
     await section.getByRole('button', { name: '立即复观测' }).click();
     await dialog.getByRole('button', { name: '确认提交' }).click();
     await section.getByText(/已合并到覆盖当前作品的在途工单/).waitFor();
@@ -501,8 +542,9 @@ try {
     // 不可用：没有关联授权的作品只说原因，不提供按钮。
     await open(`&work=${plain}`);
     await waitInspector(TITLE.plain);
-    await panel('概览').getByText(/尚未具备监控目标关联的有效深度归档授权/).first().waitFor();
-    assert.equal(await panel('概览').getByRole('button', { name: '立即复观测' }).count(), 0);
+    await page.getByRole('tab', { name: '采集记录' }).click();
+    await panel('采集记录').getByText(/尚未具备监控目标关联的有效深度归档授权/).first().waitFor();
+    assert.equal(await panel('采集记录').getByRole('button', { name: '立即复观测' }).count(), 0);
   });
 
   // ⑩ 入站
@@ -545,9 +587,10 @@ try {
     await open();
     await page.evaluate(key => sessionStorage.removeItem(key), `collection-selected:${domainOne}`);
     await open();
-    assert.equal(await page.getByText('已勾选 0 篇作品').count(), 1);
-    await rowOf(TITLE.rich).getByRole('checkbox', { name: '勾选作品用于批量操作' }).check();
-    await rowOf(TITLE.video).getByRole('checkbox', { name: '勾选作品用于批量操作' }).check();
+    await page.getByRole('button', { name: '选择', exact: true }).click();
+    assert.equal(await page.getByText('已选 0 篇').count(), 1);
+    await rowOf(TITLE.rich).getByRole('checkbox', { name: `勾选作品：${TITLE.rich}` }).check();
+    await rowOf(TITLE.video).getByRole('checkbox', { name: `勾选作品：${TITLE.video}` }).check();
     assert.deepEqual(
       JSON.parse(await page.evaluate(key => sessionStorage.getItem(key), `collection-selected:${domainOne}`)).sort(),
       [rich, video].sort(),
@@ -569,8 +612,11 @@ try {
   // ⑫ 存储
   await step('存储只有三类键且无作品内容', async () => {
     await open();
+    await page.getByRole('button', { name: '选择', exact: true }).click();
+    await rowOf(TITLE.rich).getByRole('checkbox', { name: `勾选作品：${TITLE.rich}` }).check();
+    await rowOf(TITLE.rich).getByRole('button', { name: TITLE.rich, exact: true }).click();
+    await waitInspector(TITLE.rich);
     await page.getByRole('button', { name: '加宽', exact: true }).click();
-    await rowOf(TITLE.rich).getByRole('checkbox', { name: '勾选作品用于批量操作' }).check();
     report.storage = await page.evaluate(() => ({
       local: Object.fromEntries(Object.keys(localStorage).map(key => [key, localStorage.getItem(key)])),
       session: Object.fromEntries(Object.keys(sessionStorage).map(key => [key, sessionStorage.getItem(key)])),
@@ -586,10 +632,9 @@ try {
 
   // ⑬ 四个视口
   for (const [width, height] of [[1440, 900], [1280, 720], [1024, 768], [390, 844]]) {
-    await step(`${width}×${height}：无页面级横向溢出；${width >= 1181 ? '首屏见第一行与检查器标题' : '检查器是抽屉，点选展开、Esc 收起'}；静止态主按钮是实心墨色`, async () => {
+    await step(`${width}×${height}：无页面级横向溢出；${width >= 1181 ? '首屏见第一行与检查器标题' : '检查器是抽屉，浏览态不展开、点选后再展开并可 Esc 收起'}；静止态主按钮是实心墨色`, async () => {
       await page.setViewportSize({ width, height });
       await open();
-      await waitInspector(TITLE.rich);
       await page.mouse.move(0, 0);
       let layout = await shot(`evidence-${width}-list`);
       assert.ok(layout.documentWidth <= layout.viewport, `${width} 宽度不应横向溢出`);
@@ -603,6 +648,8 @@ try {
       assert.ok(primary.height >= 40, `主按钮高度 ${primary.height}`);
       const firstRow = await rows().first().boundingBox();
       if (width >= 1181) {
+        await rowOf(TITLE.rich).getByRole('button', { name: TITLE.rich, exact: true }).click();
+        await waitInspector(TITLE.rich);
         // 1280×720 首屏：第一行与检查器标题都在视口里。
         assert.ok(firstRow.y + firstRow.height <= height + 1 || firstRow.y < height, '第一行在首屏');
         const title = await inspector().locator('h2').first().boundingBox();
@@ -610,7 +657,7 @@ try {
         const aside = await inspector().boundingBox();
         assert.ok(aside.x + aside.width <= width + 1, '检查器在视口内');
       } else {
-        // 抽屉：自动选中不展开（惰性）；点选展开；Esc 收起并把焦点还给所选行。
+        // 抽屉：浏览态不展开；点选展开；Esc 收起并把焦点还给所选行。
         assert.equal(await inspector().evaluate(node => node.hasAttribute('inert')), true);
         await rowOf(TITLE.video).getByRole('button', { name: TITLE.video, exact: true }).click();
         await page.waitForFunction(() => !document.querySelector('aside[data-width]')?.hasAttribute('inert'));
