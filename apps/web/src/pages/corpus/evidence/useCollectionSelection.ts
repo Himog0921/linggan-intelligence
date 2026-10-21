@@ -52,7 +52,10 @@ export function useCollectionSelection(domain: string | null) {
   const togglePage = useCallback((refs: readonly string[]) => update(selection => {
     if (refs.length === 0) return;
     const fullySelected = refs.every(ref => selection.has(ref));
-    for (const ref of refs) fullySelected ? selection.delete(ref) : selection.add(ref);
+    for (const ref of refs) {
+      if (fullySelected) selection.delete(ref);
+      else selection.add(ref);
+    }
   }), [update]);
   const clear = useCallback(() => update(selection => selection.clear()), [update]);
 
