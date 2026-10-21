@@ -248,7 +248,29 @@ try {
     const riskControl = laneStateOptions.getByRole('option', { name: '风险控制停止', exact: true });
     assert.equal(await riskControl.getAttribute('aria-selected'), 'false');
     assert.equal(await riskControl.getAttribute('aria-disabled'), null);
-    await riskControl.click();
+    // 点击后先等 React 提交打开态，避免首个按键仍由点击前的闭合态处理。
+    await laneStateOptions.waitFor();
+    await page.waitForFunction(() => document.querySelector('[role="combobox"][aria-label="通道状态"]')?.getAttribute('aria-expanded') === 'true');
+    // 长菜单的目标项可能在当前可视段外；经键盘到达并选择，核对同一无障碍菜单路径。
+    await laneState.press('End');
+    await page.waitForFunction(() => {
+      const trigger = document.querySelector('[role="combobox"][aria-label="通道状态"]');
+      const active = trigger?.getAttribute('aria-activedescendant');
+      return active !== null && document.getElementById(active)?.textContent?.includes('撤回或受限') === true;
+    });
+    await laneState.press('ArrowUp');
+    await page.waitForFunction(() => {
+      const trigger = document.querySelector('[role="combobox"][aria-label="通道状态"]');
+      const active = trigger?.getAttribute('aria-activedescendant');
+      return active !== null && document.getElementById(active)?.textContent?.includes('字节已清理') === true;
+    });
+    await laneState.press('ArrowUp');
+    await page.waitForFunction(() => {
+      const trigger = document.querySelector('[role="combobox"][aria-label="通道状态"]');
+      const active = trigger?.getAttribute('aria-activedescendant');
+      return active !== null && document.getElementById(active)?.textContent?.includes('风险控制停止') === true;
+    });
+    await laneState.press('Enter');
     await page.waitForURL(url => url.searchParams.get('laneState') === 'RISK_CONTROL');
     await page.waitForFunction(() => document.querySelector('[role="combobox"][aria-label="通道状态"]')?.textContent?.includes('风险控制停止') === true);
     assert.match(await laneState.innerText(), /风险控制停止/);

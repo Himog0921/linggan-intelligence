@@ -59,7 +59,7 @@ describe('D3 actual four-view React boundary', () => {
   expect(screen.queryByRole('button',{name:'发起研究'})).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole('button',{name:'用户评论'}));await screen.findByRole('table');
   expect(screen.queryByRole('button',{name:'发起研究'})).not.toBeInTheDocument();
-  expect(screen.getByRole('link',{name:'去 AI 设置'})).toHaveAttribute('href','/settings/models?section=automation&task=comment_study');
+  expect(screen.getByRole('link',{name:'去 AI 设置'})).toHaveAttribute('href','/settings/models?view=advanced&area=work&task=comment_study');
   expect(calls.every(call=>call.method==='GET')).toBe(true);
  });
  it('retains comment selection across tertiary pages and exposes the compact batch bar only when selected',async()=>{

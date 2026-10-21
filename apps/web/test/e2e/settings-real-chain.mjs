@@ -27,7 +27,7 @@ async function step(name, action) {
   try { await action(); report.steps.push({ name, result: 'PASS' }); console.log(`settings PASS: ${name}`); }
   catch (error) { report.steps.push({ name, result: 'FAIL', error: String(error.stack ?? error) }); throw error; }
 }
-async function goto(query = '') { await page.goto(`${origin}/settings/models${query}`); await page.getByRole('heading', { name: 'AI 设置', exact: true }).waitFor(); }
+async function goto(query = '?section=models') { await page.goto(`${origin}/settings/models${query}`); await page.getByRole('heading', { name: 'AI 设置', exact: true }).waitFor(); }
 async function receipt(text) { await page.getByRole('status').filter({ hasText: text }).waitFor(); }
 try {
   await step('new connection save does not test or enqueue', async () => {
@@ -118,6 +118,34 @@ try {
       }
     }
     await page.keyboard.press('Tab'); assert.ok(await page.evaluate(() => document.activeElement !== document.body));
+  });
+  await step('new capability-first AI settings use real data and shared AppShell at two viewports', async () => {
+    const writesBefore = report.posts.length;
+    for (const [width, height] of [[1440, 900], [390, 844]]) {
+      await page.setViewportSize({ width, height });
+      for (const [view, heading] of [
+        ['capabilities', '工作能力'], ['models', '模型连接'],
+        ['runs', '运行与用量'], ['advanced', '高级配置'],
+      ]) {
+        await goto('?view=' + view);
+        await page.getByRole('heading', { name: heading, exact: true, level: 2 }).waitFor();
+        assert.equal(await page.locator('.v7-global-header').count(), 1, 'reuse single shared AppShell');
+        assert.equal(await page.getByRole('navigation', { name: 'AI 设置视图' }).count(), 1, 'context navigation must exist');
+        const dimensions = await page.evaluate(() => {
+          const main = document.querySelector('main');
+          return { client: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth,
+            mainClient: main.clientWidth, mainScroll: main.scrollWidth };
+        });
+        assert.ok(dimensions.scroll <= dimensions.client,
+          `${width} ${view} must not overflow document: ${JSON.stringify(dimensions)}`);
+        assert.ok(dimensions.mainScroll <= dimensions.mainClient,
+          `${width} ${view} must not overflow main: ${JSON.stringify(dimensions)}`);
+        const name = `settings-new-${view}-${width}.png`;
+        await page.screenshot({ path: path.join(directory, name), fullPage: true });
+        report.screenshots.push(name);
+      }
+    }
+    assert.equal(report.posts.length, writesBefore, 'switching views must not issue configuration writes');
   });
   await step('actual read receipts preserve off, not started, and no invocation', async () => {
     const current = await (await page.request.get(`${origin}/api/local/ai-settings`)).json();

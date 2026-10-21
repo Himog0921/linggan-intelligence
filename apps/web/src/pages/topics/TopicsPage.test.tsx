@@ -439,7 +439,7 @@ describe("Topic React interaction and lifetime", () => {
       const readsBefore = researchReads();
       await userEvent.click(screen.getByRole("button", { name: "刷新历史记录" }));
       await waitFor(() => expect(researchReads()).toBeGreaterThan(readsBefore));
-      expect(screen.getByRole("link", { name: "去 AI 设置" })).toHaveAttribute("href", "/settings/models?section=automation&task=legacy_topic_map");
+      expect(screen.getByRole("link", { name: "去 AI 设置" })).toHaveAttribute("href", "/settings/models?view=advanced&area=work&task=legacy_topic_map");
       expect(screen.queryByLabelText("已有模型配置")).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "保存明确设置" })).not.toBeInTheDocument();
       expect(writes).toEqual([]);
