@@ -248,7 +248,11 @@ try {
     const riskControl = laneStateOptions.getByRole('option', { name: '风险控制停止', exact: true });
     assert.equal(await riskControl.getAttribute('aria-selected'), 'false');
     assert.equal(await riskControl.getAttribute('aria-disabled'), null);
-    await riskControl.click();
+    // 长菜单的目标项可能在当前可视段外；经键盘到达并选择，核对同一无障碍菜单路径。
+    await laneState.press('End');
+    await laneState.press('ArrowUp');
+    await laneState.press('ArrowUp');
+    await laneState.press('Enter');
     await page.waitForURL(url => url.searchParams.get('laneState') === 'RISK_CONTROL');
     await page.waitForFunction(() => document.querySelector('[role="combobox"][aria-label="通道状态"]')?.textContent?.includes('风险控制停止') === true);
     assert.match(await laneState.innerText(), /风险控制停止/);
