@@ -122,6 +122,7 @@ const { chromium } = require('playwright');
     await page.setViewportSize({width:390,height:1000});await page.screenshot({path:path.join(directory,'results-drawer-390.png')});await page.setViewportSize({width:1440,height:1000});
     assert.equal(await page.locator('[data-run-execution-diagnostics]').count(),0);
     await page.locator('[data-run-detail] a[href^="/corpus/evidence"]').first().click();
+    // V2.2 keeps browsing and bulk selection separate, so the boxes are not present by default.
     await page.getByRole('button',{name:'选择',exact:true}).click();
     const workCheckboxes=page.getByRole('checkbox',{name:/^勾选作品：/});
     await workCheckboxes.first().waitFor();
