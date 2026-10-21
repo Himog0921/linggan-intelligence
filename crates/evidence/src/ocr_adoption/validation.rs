@@ -11,6 +11,7 @@ pub(super) fn validate(input: &ImageInput) -> Result<(), InputError> {
         || input.layout.blocks.len() > 512
         || input.anchors.lines.len() > 4096
         || input.layout.terminations.len() > 512
+        || input.rechecks.len() > 1024
         || input
             .layout
             .blocks
@@ -84,6 +85,13 @@ pub(super) fn validate(input: &ImageInput) -> Result<(), InputError> {
             .blocks
             .iter()
             .find(|b| b.block_ref == receipt.block_ref);
+        if receipt.raw_text.as_ref().is_some_and(|text| {
+            text.len() > 100_000
+                || receipt.raw_output_sha256.as_deref()
+                    != Some(content_hash(text.as_bytes()).as_str())
+        }) {
+            return Err(InputError::Receipt);
+        }
         if !receipts.insert(&receipt.block_ref)
             || block.is_none_or(|b| content_hash(b.text.as_bytes()) != receipt.output_sha256)
             || receipt
@@ -94,7 +102,7 @@ pub(super) fn validate(input: &ImageInput) -> Result<(), InputError> {
             return Err(InputError::Receipt);
         }
     }
-    Ok(())
+    validate_rechecks(input)
 }
 
 fn bbox(b: [f64; 4], image: &ImageIdentity) -> bool {
@@ -111,4 +119,34 @@ fn hash(s: &str) -> bool {
     s.len() == 64
         && s.bytes()
             .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+}
+
+fn validate_rechecks(input: &ImageInput) -> Result<(), InputError> {
+    let mut ids = HashSet::new();
+    for c in &input.rechecks {
+        let Some(b) = input
+            .layout
+            .blocks
+            .iter()
+            .find(|b| b.block_ref == c.block_ref)
+        else {
+            return Err(InputError::Receipt);
+        };
+        if !ids.insert((&c.block_ref, c.kind as u8))
+            || c.image_blob_sha256 != input.image.blob_sha256
+            || !bbox(c.crop_bbox, &input.image)
+            || c.crop_bbox[0] > b.bbox[0]
+            || c.crop_bbox[1] > b.bbox[1]
+            || c.crop_bbox[2] < b.bbox[2]
+            || c.crop_bbox[3] < b.bbox[3]
+            || !hash(&c.crop_sha256)
+            || !hash(&c.raw_sha256)
+            || !reference(&c.pipeline_version)
+            || c.text.len() > 100_000
+            || c.finish_reason.as_ref().is_some_and(|s| !reference(s))
+        {
+            return Err(InputError::Receipt);
+        }
+    }
+    Ok(())
 }

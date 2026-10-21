@@ -183,6 +183,17 @@ pub async fn claim_media_processing_work(
     worker_instance_ref: Uuid,
     enabled_processors: &[String],
 ) -> Result<MediaProcessingClaimOutcome, sqlx::Error> {
+    claim_media_processing_work_for_version(database, worker_instance_ref, enabled_processors, None)
+        .await
+}
+
+/// An explicit version restriction for controlled local execution; normal claim behavior is unchanged.
+pub async fn claim_media_processing_work_for_version(
+    database: &Database,
+    worker_instance_ref: Uuid,
+    enabled_processors: &[String],
+    processor_version: Option<&str>,
+) -> Result<MediaProcessingClaimOutcome, sqlx::Error> {
     let ready: bool = sqlx::query_scalar(
         "SELECT to_regclass('linggan_media_processing_work') IS NOT NULL \
             AND to_regclass('linggan_media_processing_concurrency') IS NOT NULL",
@@ -249,6 +260,7 @@ pub async fn claim_media_processing_work(
            ON concurrency.processor_kind = job.processor_kind \
          WHERE work.state IN ('pending','retry_wait') AND work.attempt_count < $1 \
            AND job.processor_kind = ANY($2) \
+           AND ($3::text IS NULL OR job.processor_version=$3) \
            {retired_job_filter} \
            AND work.next_attempt_at <= scope_001_now() \
            AND (SELECT count(*) \
@@ -266,6 +278,7 @@ pub async fn claim_media_processing_work(
     )))
     .bind(MAX_PROCESSING_ATTEMPTS)
     .bind(enabled_processors)
+    .bind(processor_version)
     .fetch_optional(&mut *tx)
     .await?;
     let Some(candidate) = candidate else {
@@ -658,7 +671,7 @@ fn valid_ocr_layering_input(input: &OcrLayeringInput, line_count: usize) -> bool
             .is_none_or(|value| value.len() <= 20_000)
 }
 
-async fn claim_is_live(
+pub(crate) async fn claim_is_live(
     tx: &mut Transaction<'_, Postgres>,
     claim: &MediaProcessingClaim,
     worker_instance_ref: Uuid,
@@ -677,7 +690,7 @@ async fn claim_is_live(
     .map_err(ProducerRuntimeError::Internal)
 }
 
-async fn insert_ocr_lines(
+pub(crate) async fn insert_ocr_lines(
     tx: &mut Transaction<'_, Postgres>,
     layout_ref: Uuid,
     lines: &[OcrLineInput],
@@ -759,7 +772,7 @@ pub(crate) async fn insert_ocr_layering(
     Ok(inserted.rows_affected())
 }
 
-async fn finish_processing_claim(
+pub(crate) async fn finish_processing_claim(
     tx: &mut Transaction<'_, Postgres>,
     claim: &MediaProcessingClaim,
     worker_instance_ref: Uuid,

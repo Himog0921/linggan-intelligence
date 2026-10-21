@@ -11,6 +11,12 @@ fn main() {
     }
 }
 fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<_> = std::env::args().skip(1).collect();
+    let bridge = match args.as_slice() {
+        [] => false,
+        [arg] if arg == "--bridge" => true,
+        _ => return Err("unknown_mode".into()),
+    };
     let stdin = io::stdin();
     let mut reader = stdin.lock();
     let stdout = io::stdout();
@@ -28,8 +34,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         if read > 8_000_000 {
             return Err("record_too_large".into());
         }
-        let input: ImageInput = serde_json::from_slice(&bytes)?;
-        let result = assess(&input)?;
+        let result = if bridge {
+            linggan_evidence::ocr_adoption_persistence::prepare(&bytes)
+                .map_err(|kind| {
+                    eprintln!("ocr_bridge_{kind:?}");
+                    kind
+                })?
+                .assessment
+        } else {
+            let input: ImageInput = serde_json::from_slice(&bytes)?;
+            assess(&input)?
+        };
         serde_json::to_writer(&mut writer, &result)?;
         writer.write_all(b"\n")?;
         writer.flush()?;

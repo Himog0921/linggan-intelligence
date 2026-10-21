@@ -26,7 +26,9 @@ fn input() -> ImageInput {
             completed: true,
             blocks: vec![],
             terminations: vec![],
+            require_termination: false,
         },
+        rechecks: vec![],
         anchors: SavedAnchors {
             image,
             pipeline: Pipeline {
@@ -62,6 +64,7 @@ fn finish(input: &mut ImageInput, index: usize, reason: Option<&str>) {
         block_ref: b.block_ref.clone(),
         output_sha256: content_hash(b.text.as_bytes()),
         finish_reason: reason.map(str::to_owned),
+        ..Default::default()
     });
 }
 fn title(input: &ImageInput) -> CoverTitle {
@@ -213,8 +216,10 @@ fn anomalous_region_is_blocked_without_discarding_good_neighbor_or_raw() {
     assert_eq!(b.quality, Quality::Rejected);
     assert!(b.reasons.contains(&Reason::OutputTruncated));
     assert!(b.reasons.contains(&Reason::ExcessiveRepetition));
-    assert_eq!(b.usable_fragments[0].text, "后续内容");
-    assert_eq!(b.usable_fragments[0].source_kind, SourceKind::Line);
+    assert!(b.usable_fragments.is_empty());
+    assert_eq!(b.adoption_state, AdoptionState::Pending);
+    assert_eq!(b.fallback_candidates[0].text, "后续内容");
+    assert_eq!(b.fallback_candidates[0].source_kind, SourceKind::Line);
     assert_eq!(before, serde_json::to_vec(&i).unwrap());
 }
 
@@ -280,7 +285,8 @@ fn silent_rewrite_and_parenthetical_additions_fall_back_without_editing_raw() {
         i.anchors.lines[0].text = raw.into();
         let a = assess(&i).unwrap();
         assert_eq!(a.regions[0].quality, Quality::NeedsReview);
-        assert_eq!(a.regions[0].usable_fragments[0].text, raw);
+        assert!(a.regions[0].usable_fragments.is_empty());
+        assert_eq!(a.regions[0].fallback_candidates[0].text, raw);
         assert_eq!(i.layout.blocks[0].text, vl);
     }
 }
@@ -333,8 +339,9 @@ fn html_is_data_and_table_structure_is_not_adopted_as_proven_relationships() {
     );
     i.anchors.lines[0].text = "普通材料".into();
     let a = assess(&i).unwrap();
-    assert_eq!(a.regions[0].role, Role::Context);
-    assert_eq!(a.regions[0].usable_fragments[0].text, "普通材料");
+    assert_eq!(a.regions[0].role, Role::StructuredText);
+    assert!(a.regions[0].usable_fragments.is_empty());
+    assert_eq!(a.regions[0].fallback_candidates[0].text, "普通材料");
     assert_eq!(a.cover_title.state, TitleState::None);
 }
 
@@ -460,4 +467,218 @@ fn truncated_prominent_title_is_uncertain_instead_of_confirming_no_title() {
     assert_eq!(t.state, TitleState::Uncertain);
     assert!(t.text.is_none());
     assert_eq!(t.candidates.len(), 1);
+}
+
+fn crop(i: &ImageInput, block: usize, kind: RecheckKind, text: &str) -> LocalRecheck {
+    LocalRecheck {
+        block_ref: i.layout.blocks[block].block_ref.clone(),
+        image_blob_sha256: i.image.blob_sha256.clone(),
+        crop_bbox: i.layout.blocks[block].bbox,
+        crop_sha256: content_hash(b"synthetic crop"),
+        raw_sha256: content_hash(text.as_bytes()),
+        pipeline_version: "synthetic-local-recheck".into(),
+        kind,
+        text: text.into(),
+        finish_reason: if kind == RecheckKind::VlCrop {
+            Some("stop".into())
+        } else {
+            None
+        },
+    }
+}
+
+#[test]
+fn crop_ocr_can_support_visible_letters_missed_by_the_initial_ocr_without_a_whitelist() {
+    let mut i = input();
+    add(
+        &mut i,
+        "text",
+        "怎样安静地度过周末？",
+        [100., 200., 900., 300.],
+    );
+    i.anchors.lines[0].text = "安静地度过周末？".into();
+    assert_eq!(title(&i).state, TitleState::Uncertain);
+    i.rechecks
+        .push(crop(&i, 0, RecheckKind::LineCrop, "怎样安静地度过周末？"));
+    assert_eq!(title(&i).state, TitleState::Usable);
+}
+
+#[test]
+fn fallback_is_pending_until_a_bound_local_reading_agrees() {
+    let mut i = input();
+    add(&mut i, "text", "不支持的生成内容", [100., 200., 900., 230.]);
+    i.anchors.lines[0].text = "原行可核对的内容".into();
+    let a = assess(&i).unwrap();
+    assert!(a.regions[0].usable_fragments.is_empty());
+    assert!(!a.regions[0].fallback_candidates.is_empty());
+    i.rechecks
+        .push(crop(&i, 0, RecheckKind::LineCrop, "原行可核对的内容"));
+    let a = assess(&i).unwrap();
+    assert_eq!(
+        a.regions[0].adoption_state,
+        AdoptionState::AdoptedLineFallback
+    );
+    assert_eq!(
+        a.regions[0].usable_fragments[0].source_kind,
+        SourceKind::Line
+    );
+}
+
+#[test]
+fn same_model_repetition_does_not_validate_a_rewrite_or_unanchored_additions() {
+    for (original, anchor) in [
+        ("原词动力", "原词行动动力"),
+        ("没有依据的一大段补写", "原词"),
+    ] {
+        let mut i = input();
+        add(&mut i, "text", original, [100., 200., 900., 300.]);
+        i.anchors.lines[0].text = anchor.into();
+        i.rechecks.push(crop(&i, 0, RecheckKind::VlCrop, original));
+        assert!(assess(&i).unwrap().regions[0].usable_fragments.is_empty());
+    }
+}
+
+#[test]
+fn wrong_image_recheck_or_crop_not_covering_region_is_rejected() {
+    let mut i = input();
+    add(&mut i, "text", "用于复核的材料", [100., 200., 900., 300.]);
+    let mut c = crop(&i, 0, RecheckKind::LineCrop, "用于复核的材料");
+    c.image_blob_sha256 = content_hash(b"different image");
+    i.rechecks.push(c);
+    assert_eq!(assess(&i).unwrap_err(), InputError::Receipt);
+    i.rechecks[0] = crop(&i, 0, RecheckKind::LineCrop, "用于复核的材料");
+    i.rechecks[0].crop_bbox[0] = 110.;
+    assert_eq!(assess(&i).unwrap_err(), InputError::Receipt);
+}
+
+#[test]
+fn required_termination_cannot_be_invented_from_whole_image_success() {
+    let mut i = input();
+    add(
+        &mut i,
+        "text",
+        "有行支持但缺区域结束回执",
+        [100., 200., 900., 300.],
+    );
+    i.layout.require_termination = true;
+    let a = assess(&i).unwrap();
+    assert_eq!(a.regions[0].quality, Quality::Rejected);
+    assert!(a.regions[0].usable_fragments.is_empty());
+    finish(&mut i, 0, Some("stop"));
+    assert_eq!(
+        assess(&i).unwrap().regions[0].adoption_state,
+        AdoptionState::AdoptedBlock
+    );
+}
+
+#[test]
+fn inner_pages_form_ordered_body_with_headings_repetitions_and_exact_image_links() {
+    let mut first = input();
+    first.image_role = ImageRole::Interior;
+    first.sequence_ordinal = Some(2);
+    add(
+        &mut first,
+        "paragraph_title",
+        "第一段内页标题",
+        [100., 200., 900., 300.],
+    );
+    add(
+        &mut first,
+        "text",
+        "这段正文保留具体表达",
+        [100., 400., 900., 430.],
+    );
+    let a = assess(&first).unwrap();
+    let mut second = first.clone();
+    second.image.image_ref = "synthetic:image:3".into();
+    second.layout.image = second.image.clone();
+    second.anchors.image = second.image.clone();
+    second.sequence_ordinal = Some(3);
+    let b = assess(&second).unwrap();
+    let body = project_work(&[b, a]).unwrap();
+    assert_eq!(body.image_text.matches("第一段内页标题").count(), 2);
+    assert_eq!(body.images[0].ordinal, Some(2));
+    assert!(body.cover_title.is_none());
+    for f in &body.fragments {
+        let text: String = body
+            .image_text
+            .chars()
+            .skip(f.start)
+            .take(f.end - f.start)
+            .collect();
+        assert_eq!(text, f.source.text);
+    }
+}
+
+#[test]
+fn colored_same_row_words_use_geometry_without_modifying_raw_ordinals() {
+    let mut i = input();
+    add(&mut i, "text", "怎样安静度过周末", [100., 200., 900., 300.]);
+    i.anchors.lines[0].text = "安静".into();
+    i.anchors.lines[0].bbox = [300., 210., 450., 290.];
+    i.anchors.lines.push(Line {
+        line_ref: "prefix".into(),
+        reading_order: 1,
+        text: "怎样".into(),
+        confidence: 0.99,
+        bbox: [110., 210., 280., 290.],
+    });
+    i.anchors.lines.push(Line {
+        line_ref: "suffix".into(),
+        reading_order: 2,
+        text: "度过周末".into(),
+        confidence: 0.99,
+        bbox: [470., 210., 890., 290.],
+    });
+    assert_eq!(title(&i).state, TitleState::Usable);
+    assert_eq!(i.anchors.lines[0].text, "安静");
+}
+
+#[test]
+fn upstream_repetition_cannot_be_hidden_by_paddle_cleanup() {
+    let mut input = input();
+    add(
+        &mut input,
+        "text",
+        "visible words",
+        [10.0, 10.0, 900.0, 90.0],
+    );
+    finish(&mut input, 0, Some("stop"));
+    let raw = "1".repeat(4000);
+    input.layout.terminations[0].raw_output_sha256 = Some(content_hash(raw.as_bytes()));
+    input.layout.terminations[0].raw_text = Some(raw);
+    let result = assess(&input).unwrap();
+    assert_eq!(result.regions[0].quality, Quality::Rejected);
+    assert!(result.regions[0].usable_fragments.is_empty());
+}
+
+#[test]
+fn screenshot_counter_is_pending_even_when_both_recognizers_agree() {
+    let mut input = input();
+    add(&mut input, "text", "427", [800.0, 700.0, 850.0, 720.0]);
+    for n in 0..3 {
+        input.layout.blocks.push(Block {
+            block_ref: format!("icon:{n}"),
+            reading_order: n + 1,
+            label: "image".into(),
+            text: String::new(),
+            bbox: [
+                10.0,
+                100.0 + f64::from(n) * 120.0,
+                60.0,
+                150.0 + f64::from(n) * 120.0,
+            ],
+        });
+    }
+    let a = assess(&input).unwrap();
+    assert_eq!(a.regions[0].quality, Quality::Supported);
+    assert_eq!(a.regions[0].adoption_state, AdoptionState::Pending);
+    assert!(a.regions[0].usable_fragments.is_empty());
+    input.layout.blocks.truncate(1);
+    assert!(
+        !assess(&input).unwrap().regions[0]
+            .usable_fragments
+            .is_empty(),
+        "ordinary numeric material without screenshot context is retained"
+    );
 }

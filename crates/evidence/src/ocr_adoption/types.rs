@@ -37,6 +37,8 @@ pub struct ImageInput {
     pub sequence_ordinal: Option<u32>,
     pub layout: SavedLayout,
     pub anchors: SavedAnchors,
+    #[serde(default)]
+    pub rechecks: Vec<LocalRecheck>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,6 +49,8 @@ pub struct SavedLayout {
     pub completed: bool,
     pub blocks: Vec<Block>,
     pub terminations: Vec<Termination>,
+    #[serde(default)]
+    pub require_termination: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,13 +84,51 @@ pub struct Line {
     pub bbox: [f64; 4],
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Termination {
     pub block_ref: String,
     pub output_sha256: String,
     /// Absent if not saved. A whole-image "ok" or a sequential server log cannot fill it.
     pub finish_reason: Option<String>,
+    #[serde(default)]
+    pub request_ref: Option<String>,
+    #[serde(default)]
+    pub raw_output_sha256: Option<String>,
+    #[serde(default)]
+    pub generated_tokens: Option<u64>,
+    #[serde(default)]
+    pub raw_text: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecheckKind {
+    LineCrop,
+    VlCrop,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LocalRecheck {
+    pub block_ref: String,
+    pub image_blob_sha256: String,
+    pub crop_bbox: [f64; 4],
+    pub crop_sha256: String,
+    pub raw_sha256: String,
+    pub pipeline_version: String,
+    pub kind: RecheckKind,
+    pub text: String,
+    pub finish_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdoptionState {
+    AdoptedBlock,
+    AdoptedLineFallback,
+    Pending,
+    Excluded,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -100,6 +142,7 @@ pub enum Quality {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Role {
+    StructuredText,
     TextCandidate,
     ImageHeading,
     CoverTitle,
@@ -136,6 +179,11 @@ pub enum Reason {
     UnknownCoverIdentity,
     UnsupportedCandidate,
     LineFallback,
+    FallbackNotConfirmed,
+    CropLineAgreement,
+    CropVlAgreement,
+    CropSupportsFallback,
+    ScreenshotUiContext,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -166,6 +214,7 @@ pub struct RegionAssessment {
     pub bbox: [f64; 4],
     pub model_label: String,
     pub quality: Quality,
+    pub adoption_state: AdoptionState,
     pub role: Role,
     pub reasons: Vec<Reason>,
     pub finish_reason: Option<String>,
@@ -176,6 +225,7 @@ pub struct RegionAssessment {
     /// Only supported source text or explicitly identified line fallback. These remain
     /// text candidates; context/author/use eligibility must still be checked downstream.
     pub usable_fragments: Vec<Fragment>,
+    pub fallback_candidates: Vec<Fragment>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -52,7 +52,7 @@ pub(super) fn fragment(kind: SourceKind, id: &str, text: &str, bbox: [f64; 4]) -
 }
 
 pub(super) fn supported_lines<'a>(input: &'a ImageInput, b: &Block) -> Vec<&'a Line> {
-    let mut lines: Vec<_> = input
+    let lines: Vec<_> = input
         .anchors
         .lines
         .iter()
@@ -63,8 +63,32 @@ pub(super) fn supported_lines<'a>(input: &'a ImageInput, b: &Block) -> Vec<&'a L
             l.confidence >= 0.70 && overlap / area >= 0.60
         })
         .collect();
-    // The saved line order is source evidence; do not invent cross-column reading order.
-    lines.sort_by_key(|l| l.reading_order);
+    visual_order(lines)
+}
+
+pub(super) fn visual_order(mut lines: Vec<&Line>) -> Vec<&Line> {
+    // Preserve raw ordinals in the input. For support inside one VL block, derive visual
+    // rows so a differently coloured word cannot jump ahead of its left-hand prefix.
+    lines.sort_by(|a, b| a.bbox[1].total_cmp(&b.bbox[1]));
+    let mut rows: Vec<Vec<&Line>> = vec![];
+    for l in lines {
+        let same = rows.last().is_some_and(|row| {
+            let a = row[0].bbox;
+            let b = l.bbox;
+            a[3].min(b[3]) - a[1].max(b[1]) >= (a[3] - a[1]).min(b[3] - b[1]) * 0.5
+        });
+        if same {
+            if let Some(row) = rows.last_mut() {
+                row.push(l);
+            }
+        } else {
+            rows.push(vec![l]);
+        }
+    }
+    for row in &mut rows {
+        row.sort_by(|a, b| a.bbox[0].total_cmp(&b.bbox[0]));
+    }
+    let lines = rows.into_iter().flatten().collect();
     lines
 }
 
@@ -98,6 +122,7 @@ fn assess_region(input: &ImageInput, b: &Block) -> RegionAssessment {
         bbox: b.bbox,
         model_label: b.label.clone(),
         quality: Quality::Supported,
+        adoption_state: AdoptionState::Excluded,
         role: if matches!(b.label.as_str(), "doc_title" | "paragraph_title") {
             Role::ImageHeading
         } else {
@@ -109,6 +134,7 @@ fn assess_region(input: &ImageInput, b: &Block) -> RegionAssessment {
         normalized_text_matches: matches,
         median_line_height_norm: median_height(input, &lines),
         usable_fragments: vec![],
+        fallback_candidates: vec![],
     };
     execution_quality(input, b, &mut r);
     content_quality(b, &mut r);
@@ -124,13 +150,9 @@ fn assess_region(input: &ImageInput, b: &Block) -> RegionAssessment {
     } else if matches {
         r.reasons.push(Reason::MatchingLineText);
     }
-    r.usable_fragments = usable_fragments(input, b, &r, &lines);
-    if r.usable_fragments
-        .iter()
-        .any(|f| f.source_kind == SourceKind::Line)
-    {
-        r.reasons.push(Reason::LineFallback);
-    }
+    classify_ui_context(input, b, &mut r);
+    qualify_fragments(input, b, &lines, &mut r);
+
     r
 }
 
@@ -145,7 +167,12 @@ fn median_height(input: &ImageInput, lines: &[&Line]) -> Option<f64> {
 
 fn execution_quality(input: &ImageInput, b: &Block, r: &mut RegionAssessment) {
     match r.finish_reason.as_deref() {
-        None => r.reasons.push(Reason::FinishReasonMissing),
+        None => {
+            r.reasons.push(Reason::FinishReasonMissing);
+            if input.layout.require_termination && !b.text.trim().is_empty() {
+                r.quality = Quality::Rejected;
+            }
+        }
         Some("stop") => {}
         Some(other) => {
             r.quality = Quality::Rejected;
@@ -160,7 +187,14 @@ fn execution_quality(input: &ImageInput, b: &Block, r: &mut RegionAssessment) {
         r.quality = Quality::Rejected;
         r.reasons.push(Reason::ExecutionIncomplete);
     }
-    if repeated(&b.text) {
+    let raw_repeated = input
+        .layout
+        .terminations
+        .iter()
+        .find(|t| t.block_ref == b.block_ref)
+        .and_then(|t| t.raw_text.as_deref())
+        .is_some_and(repeated);
+    if repeated(&b.text) || raw_repeated {
         r.quality = Quality::Rejected;
         r.reasons.push(Reason::ExcessiveRepetition);
     }
@@ -190,7 +224,7 @@ fn content_quality(b: &Block, r: &mut RegionAssessment) {
         if r.quality != Quality::Rejected {
             r.quality = Quality::NeedsReview;
         }
-        r.role = Role::Context;
+        r.role = Role::StructuredText;
         r.reasons.push(Reason::StructuredLayoutUnverified);
     } else if !matches!(b.label.as_str(), "text" | "doc_title" | "paragraph_title") {
         r.role = Role::LayoutMetadata;
@@ -198,29 +232,125 @@ fn content_quality(b: &Block, r: &mut RegionAssessment) {
     }
 }
 
-fn usable_fragments(
-    input: &ImageInput,
-    b: &Block,
-    r: &RegionAssessment,
-    lines: &[&Line],
-) -> Vec<Fragment> {
+fn qualify_fragments(input: &ImageInput, b: &Block, lines: &[&Line], r: &mut RegionAssessment) {
     if !input.layout.completed
-        || b.text.trim().is_empty()
         || !matches!(
             r.role,
-            Role::TextCandidate | Role::ImageHeading | Role::Context
+            Role::TextCandidate | Role::ImageHeading | Role::StructuredText
         )
     {
-        return vec![];
+        return;
     }
-    if r.quality == Quality::Supported {
-        return vec![fragment(SourceKind::Block, &b.block_ref, &b.text, b.bbox)];
+    if r.quality == Quality::Supported && !b.text.trim().is_empty() {
+        r.usable_fragments = vec![fragment(SourceKind::Block, &b.block_ref, &b.text, b.bbox)];
+        r.adoption_state = AdoptionState::AdoptedBlock;
+        return;
     }
-    // Explicit, separately identified line fallback. No trimming, correcting or pretending
-    // a shortened VL result is its raw output. Missing line support stays missing.
-    lines
+    r.fallback_candidates = lines
         .iter()
         .filter(|l| l.confidence >= 0.75 && !repeated(&l.text))
         .map(|l| fragment(SourceKind::Line, &l.line_ref, &l.text, l.bbox))
-        .collect()
+        .collect();
+    r.adoption_state = AdoptionState::Pending;
+    if !r.fallback_candidates.is_empty() {
+        r.reasons.push(Reason::FallbackNotConfirmed);
+    }
+    let anchors = normalized(
+        &lines
+            .iter()
+            .map(|l| l.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n"),
+    );
+    let original = normalized(&b.text);
+    for check in input.rechecks.iter().filter(|c| c.block_ref == b.block_ref) {
+        let reread = normalized(&check.text);
+        let ended =
+            check.kind == RecheckKind::LineCrop || check.finish_reason.as_deref() == Some("stop");
+        if !ended || reread.is_empty() || repeated(&check.text) {
+            continue;
+        }
+        if r.quality != Quality::Rejected
+            && r.role != Role::StructuredText
+            && reread == original
+            && (check.kind == RecheckKind::LineCrop || supported_extension(&anchors, &original))
+        {
+            r.usable_fragments = vec![fragment(SourceKind::Block, &b.block_ref, &b.text, b.bbox)];
+            r.adoption_state = AdoptionState::AdoptedBlock;
+            r.reasons.push(if check.kind == RecheckKind::LineCrop {
+                Reason::CropLineAgreement
+            } else {
+                Reason::CropVlAgreement
+            });
+            return;
+        }
+        let fallback = normalized(
+            &r.fallback_candidates
+                .iter()
+                .map(|f| f.text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+        if !fallback.is_empty() && reread == fallback {
+            r.usable_fragments = r.fallback_candidates.clone();
+            r.adoption_state = AdoptionState::AdoptedLineFallback;
+            r.reasons.push(Reason::CropSupportsFallback);
+            return;
+        }
+    }
+}
+
+// VL may add visible letters missed by the old recognizer. It may not silently remove or
+// rewrite supported letters. Same-model re-reading alone has a deliberately limited ceiling.
+fn supported_extension(anchors: &str, vl: &str) -> bool {
+    let a: Vec<_> = anchors.chars().collect();
+    let v: Vec<_> = vl.chars().collect();
+    if a.is_empty() || (a.len() as f64) / (v.len().max(1) as f64) < 0.80 {
+        return false;
+    }
+    let mut i = 0;
+    for c in v {
+        if a.get(i) == Some(&c) {
+            i += 1;
+        }
+    }
+    i == a.len()
+}
+
+fn classify_ui_context(input: &ImageInput, b: &Block, r: &mut RegionAssessment) {
+    let h = f64::from(input.image.height);
+    let w = f64::from(input.image.width);
+    let icons: Vec<_> = input
+        .layout
+        .blocks
+        .iter()
+        .filter(|i| {
+            matches!(i.label.as_str(), "image" | "header_image")
+                && (i.bbox[2] - i.bbox[0]) / w <= 0.18
+                && (i.bbox[3] - i.bbox[1]) / h <= 0.16
+        })
+        .collect();
+    if icons.len() < 3 || b.text.chars().count() > 48 || (b.bbox[3] - b.bbox[1]) / h > 0.06 {
+        return;
+    }
+    let neighbor = icons.iter().any(|i| {
+        i.bbox[2] <= b.bbox[0] + w * 0.02
+            && b.bbox[0] - i.bbox[2] < w * 0.06
+            && i.bbox[3].min(b.bbox[3]) > i.bbox[1].max(b.bbox[1])
+    });
+    let dated = b.text.chars().filter(char::is_ascii_digit).count() >= 4
+        && (b.text.contains(':') || b.text.contains('-') || b.text.contains('年'));
+    let compact = normalized(&b.text);
+    if !compact.is_empty() && compact.len() <= 8 && compact.chars().all(|c| c.is_ascii_digit()) {
+        // A recognized isolated number in a repeated-avatar screenshot may be a counter.
+        // Preserve the observation; recognition agreement alone cannot qualify it as prose.
+        r.role = Role::Uncertain;
+        r.adoption_state = AdoptionState::Pending;
+        r.reasons.push(Reason::ScreenshotUiContext);
+        return;
+    }
+    if neighbor || dated || b.text.starts_with("展开") && b.text.contains("回复") {
+        r.role = Role::LayoutMetadata;
+        r.reasons.push(Reason::ScreenshotUiContext);
+    }
 }

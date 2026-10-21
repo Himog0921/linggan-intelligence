@@ -67,3 +67,6 @@ ENV-001 的 proof 数据库只用于环境验证，验证后必须删除；它�
 ## 0121 · 无方向人工备选候选
 
 `0121_topic_map_manual_alternative.sql` 允许备选 topic_ref/definition_ref 成对为空；无方向只限人工方法且不携带模型结果或索引。旧记录与外键保留，未添加主题、研究或材料表。调用侧对领域、非空冻结来源、幂等和重开资格继续守门。2026-10-12 Mog 仅批准一次性隔离库执行和验证，正式迁移需再次明确授权。具体回执见 [工作区计划](../docs/plans/active/topic-map-workflow-382.md)。
+
+
+`0142_ocr_adoption.sql` 仅为显式 local-vl-v1 作业增加附着已有 derivative/layout 的 append-only 原观察/采用投影；不改原图、旧OCR/平台标题，不创建待运行作业或启用 worker。#464 当前只在自有隔离 PostgreSQL 应用验证，未应用于共享数据库；生产默认 local-v3 不变。字段、候选/采用边界及 raw 引用见 [OCR合同](../docs/data-contracts/ocr-content-layering.md)。

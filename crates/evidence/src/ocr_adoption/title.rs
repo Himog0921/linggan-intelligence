@@ -85,6 +85,10 @@ fn candidate_groups(
         let n = normalized(&b.text).chars().count();
         matches!(b.label.as_str(), "text" | "doc_title" | "paragraph_title")
             && !b.text.contains('<')
+            && !matches!(
+                regions[i].role,
+                Role::LayoutMetadata | Role::Background | Role::NonNarrative | Role::Uncertain
+            )
             && (2..=160).contains(&n)
             && heights[i] >= 0.04
     };
@@ -158,7 +162,7 @@ fn candidate(
         line_height_norm: group.iter().map(|i| heights[*i]).fold(0.0, f64::max),
         supported: group
             .iter()
-            .all(|i| regions[*i].quality == Quality::Supported),
+            .all(|i| regions[*i].adoption_state == AdoptionState::AdoptedBlock),
     }
 }
 

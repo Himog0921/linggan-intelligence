@@ -51,8 +51,9 @@ mod material_social_read;
 mod material_storage_key;
 mod media_acquisition;
 mod monitor_rule_read;
-pub mod ocr_layering;
 pub mod ocr_adoption;
+pub mod ocr_adoption_persistence;
+pub mod ocr_layering;
 pub mod research_dossier;
 pub use keyword_archive_detail::{
     KeywordDetailAdvance, KeywordDetailTickSummary, advance_keyword_archive_detail,
@@ -190,7 +191,8 @@ pub use material_disposition::{
 pub use material_processing::{
     ClaimGateReadiness, MediaProcessingClaim, MediaProcessingClaimOutcome, OcrCompletionInput,
     OcrExcludedLineInput, OcrLayeringInput, OcrLineInput, ProcessorRequeueSummary,
-    REGISTERED_PROCESSOR_KINDS, claim_media_processing_work, complete_media_processing_derivative,
+    REGISTERED_PROCESSOR_KINDS, claim_media_processing_work,
+    claim_media_processing_work_for_version, complete_media_processing_derivative,
     complete_media_processing_ocr, complete_media_processing_text,
     complete_media_processing_without_output, ensure_media_processing_work,
     fail_media_processing_work, processor_version_for_kind, read_claim_gate_readiness,
