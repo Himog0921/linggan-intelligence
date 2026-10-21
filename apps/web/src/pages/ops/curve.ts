@@ -1,7 +1,7 @@
 type CurvePoint = { x: number; y: number };
 
 /** Smooth measured values without bridging missing data or overshooting adjacent values. */
-export function smoothSeriesPath(points: Array<CurvePoint | null>): string {
+export function smoothSeriesPath(points: Array<CurvePoint | null>, baseline?: number): string {
   const segments: CurvePoint[][] = [];
   let segment: CurvePoint[] = [];
   const flush = () => { if (segment.length) segments.push(segment); segment = []; };
@@ -25,6 +25,10 @@ export function smoothSeriesPath(points: Array<CurvePoint | null>): string {
       const secondY = clamp(b.y - (after.y - a.y) / 6);
       d += " C" + fmt(a.x + dx) + "," + fmt(firstY) + " " +
         fmt(b.x - dx) + "," + fmt(secondY) + " " + fmt(b.x) + "," + fmt(b.y);
+    }
+    if (baseline !== undefined) {
+      d += " L" + fmt(line.at(-1)!.x) + "," + fmt(baseline) +
+        " L" + fmt(line[0]!.x) + "," + fmt(baseline) + " Z";
     }
     return d;
   }).filter(Boolean).join(" ");

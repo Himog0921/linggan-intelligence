@@ -79,7 +79,17 @@ export function Target({
       ) : (
         <>
           <div className={c("ops-target-head")}>
-            <span>{`${period}（${t.periodKey}）${t.pace === "achieved" ? " · 目标已达成" : ""}`}</span>
+            <div className={c("ops-target-label")}>
+              <span>{`${period}（${t.periodKey}）${t.pace === "achieved" ? " · 目标已达成" : ""}`}</span>
+              <button type="button" className={c("ops-target-edit")}
+                aria-label={t.state === "set" ? "修改目标" : "设定目标"}
+                title={t.state === "set" ? "修改目标" : "设定目标"}
+                onClick={() => open(t.periodType === "month" ? "month" : "week")}>
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
+                  <path d="m15 5 4 4M4 20l5-1L20 8l-4-4L5 15l-1 5Z" />
+                </svg>
+              </button>
+            </div>
             <b data-state={t.state === "not_set" ? "unknown" : undefined}>
               {t.state === "set" ? f.number(rev?.targetValue) : "未设定"}
             </b>
@@ -127,19 +137,7 @@ export function Target({
               </dl>
             </>
           )}
-          <div className={c("ops-target-foot")}>
-            <span>
-              {t.state === "not_set"
-                ? "只能在本机设定"
-                : `${rev?.setAtBeijing} 改为 ${f.number(rev?.targetValue)} · 本机`}
-            </span>
-            <ActionButton
-              type="button"
-              onClick={() => open(t.periodType === "month" ? "month" : "week")}
-            >
-              {t.state === "set" ? "修改目标" : "设定目标"}
-            </ActionButton>
-          </div>
+
         </>
       )}
     </div>

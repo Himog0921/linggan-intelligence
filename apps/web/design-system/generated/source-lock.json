@@ -1,5 +1,5 @@
 {
-  "fingerprint": "232360d7d774ef5072abcdde8f16a10bb863be69c9da135110db9a894533e098",
+  "fingerprint": "b0714361f1f6ed09def69ec926f496b1540fbb0ea7edf5c947083e7f14a2fa82",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -31,7 +31,7 @@
     },
     {
       "path": "apps/web/design-system/dsReview/PagePreview.jsx",
-      "sha256": "c97a331d90efd4a032cc3c153d2fa153f4546474897f1548afa60a82ae365f25"
+      "sha256": "cf53d7350cb4dc7bbf7a1b02f75d9554faadef749a53a4b72ea3771842c950ca"
     },
     {
       "path": "apps/web/design-system/dsReview/PersonalMenu.jsx",
@@ -234,12 +234,16 @@
       "sha256": "0b2f93fa70d7576bccb60b517fe16b16a5cba2a4591b41033f4d636d2d76c0b2"
     },
     {
+      "path": "apps/web/src/pages/ops/Charts.tsx",
+      "sha256": "5e5e573998c25433ddaa6265ea0d1f9f4da293b416ec980adcf09dae466337bc"
+    },
+    {
       "path": "apps/web/src/pages/ops/LedgerPage.tsx",
-      "sha256": "77ea458cf80d1b6f78f614e11a94bafecb6c2c1382488efa1c9c87ead6a493fb"
+      "sha256": "d3446978cb8ae01f226790f97a405bbfbe448302a897cc40c2502f0ddd1f5532"
     },
     {
       "path": "apps/web/src/pages/ops/Ops.module.css",
-      "sha256": "7abc1e4e0f39e1727f98dc6a22afd5455ae7a5134f352797fbabd304d5371a3b"
+      "sha256": "2d3013da5bcfba5f071a2638ad0fb00d8997037b9f344aa300541f7c3d2fb8fd"
     },
     {
       "path": "apps/web/src/pages/ops/OpsFrame.tsx",
@@ -247,7 +251,7 @@
     },
     {
       "path": "apps/web/src/pages/ops/OpsPage.tsx",
-      "sha256": "b0a996a50514686d118163d3fe906f1adebda1d57d5bb66c80998f55ac7f80a4"
+      "sha256": "0617156480931e60b8484d03dce930112b4308e1e4cc2b8dff6c5470ead2d2c3"
     },
     {
       "path": "apps/web/src/pages/ops/OpsScopePicker.tsx",
@@ -255,15 +259,19 @@
     },
     {
       "path": "apps/web/src/pages/ops/OverviewBlocks.tsx",
-      "sha256": "28ff9df0163bb8f6e48445011bacbfeef020e6c5b3665ba5b0908fd55cbe452b"
+      "sha256": "20af41a1a4a96cc4ed385c4a7c3609425467e76224717861b5973faad0de3a11"
     },
     {
       "path": "apps/web/src/pages/ops/OverviewPage.tsx",
-      "sha256": "2ff671ba07405a0dddc1eee9bfcbf0bddc23f5b8e432a14c53f18ceb4001521a"
+      "sha256": "4ac72a786115bc769b7799cb447ca2f65fd5a05ee0062068a84af603e152c6f4"
     },
     {
       "path": "apps/web/src/pages/ops/TargetDialog.tsx",
       "sha256": "8fd99217df5e40a8172bda811045faf7a838a781cc801f3570ce2080a4c47294"
+    },
+    {
+      "path": "apps/web/src/pages/ops/curve.ts",
+      "sha256": "8548e8d5483edf2be6530e290dc7f06cfc02a5f189e117e84d555a3ff25d0c5b"
     },
     {
       "path": "apps/web/src/pages/ops/ui.tsx",
@@ -339,11 +347,11 @@
     },
     {
       "path": "docs/design/changes/lids-component-change.json",
-      "sha256": "edf73f5edfd8ec93c62c20c9724150f173711486d6532e08c2d8f31b1c2dcbc0"
+      "sha256": "901db23a4ba790ef688aa68554b769f4fbe8d3cf893c7ce9a33bddb6310dfe87"
     },
     {
       "path": "docs/design/lids/catalog-source.json",
-      "sha256": "01b9734ccf08fc58dab2838d4b6ab380c2dfb4ca5544320b7c3a3bd1eff7c810"
+      "sha256": "7138c1f3e2f5c09d9e36d7c68543aa134a67c4aac93fac326363fe9f6f809109"
     },
     {
       "path": "docs/design/lids/color.json",

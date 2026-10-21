@@ -2,7 +2,7 @@ import { useOpsLeave } from './useOpsLeave';
 import { ActionButton } from '../../shared/ActionButton';
 import { FindField } from '../../shared/FindField';
 import { useEffect, useRef, useState } from "react";
-import { useQuery, type UseQueryResult } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "react-router";
 import * as api from "./api";
 import * as f from "./format";
@@ -134,11 +134,9 @@ const titles: Record<string, string> = {
 export function LedgerPage({
   kind,
   business,
-  summary,
 }: {
   kind: LedgerKind;
   business: string;
-  summary: UseQueryResult<api.Summary>;
 }) {
   const [params, setParams] = useSearchParams();
   const operator = params.get("operator") || "";
@@ -217,9 +215,6 @@ export function LedgerPage({
   const failures = [
     result.isError
       ? `${kind === "publications" ? "发布记录" : kind === "accounts" ? "账号" : "每日数据"}（${api.reason(result.error)}）`
-      : "",
-    kind === "publications" && summary.isError
-      ? `读数（${api.reason(summary.error)}）`
       : "",
   ].filter(Boolean);
   const operators = data?.operators || (operator ? [operator] : []);
@@ -316,12 +311,6 @@ export function LedgerPage({
           onSelect={(name) => update({ operator: name })}
         />
       </div>
-      {kind === "publications" ? (
-        <Readouts
-          data={summary.isError ? undefined : summary.data}
-          business={business}
-        />
-      ) : null}
       {kind === "daily" ? (
         <p
           id="ops-scope-note"
@@ -337,7 +326,6 @@ export function LedgerPage({
           failures.length
             ? () => {
                 void result.refetch();
-                if (kind === "publications") void summary.refetch();
               }
             : undefined
         }
@@ -517,50 +505,6 @@ export function LedgerPage({
         </Dialog>
       ) : null}
     </>
-  );
-}
-function Readouts({
-  data,
-  business,
-}: {
-  data: api.Summary | undefined;
-  business: string;
-}) {
-  const values = [
-    data?.activeAccounts == null
-      ? "—"
-      : `${f.count(data.activeAccounts).text}/${f.count(data.ledgerAccounts).text}`,
-    f.count(data?.monthPublished).text,
-    "未接入",
-    f.count(data?.monthFollowersGained.value).text,
-    f.count(data?.monthHits).text,
-  ];
-  const labels = ["运营中账号", "本月发布", "有效发布", "本月加微", "本月爆款"];
-  const tips = [
-    "使用中与养号中的账号数 / 在台账的账号数",
-    "本月（北京时间）发布的登记条数，重复登记只算一次",
-    "要等系统能自动发现我方帖子后才接入，不是 0",
-    "本月每日数据的加微数之和；每日数据不分业务",
-    "本月发布的小红书帖子中，最新阅读量不少于 5000 的篇数",
-  ];
-  return (
-    <section className={c("ops-readouts")} aria-label="读数（随业务选择变化）">
-      {labels.map((label, i) => (
-        <div key={label} className={c("ops-readout")} title={tips[i]}>
-          <span>{label}</span>
-          <b
-            data-state={i === 2 ? "unknown" : undefined}
-            title={
-              i === 3 && business !== "all"
-                ? "每日数据不分业务，这是全部业务的数字"
-                : undefined
-            }
-          >
-            {values[i]}
-          </b>
-        </div>
-      ))}
-    </section>
   );
 }
 function PublicationRow({

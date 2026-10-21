@@ -20,6 +20,17 @@ describe("Ops trend curves", () => {
     expect(d).not.toContain("20.00");
   });
 
+  it("closes gradient areas at each measured segment without filling unknown gaps", () => {
+    const area = smoothSeriesPath([
+      { x: 0, y: 10 }, { x: 10, y: 7 }, null,
+      { x: 30, y: 3 }, { x: 40, y: 1 },
+    ], 20);
+    expect(area).toContain("L10.00,20.00 L0.00,20.00 Z M30.00,3.00");
+    expect(area).toContain("L40.00,20.00 L30.00,20.00 Z");
+    expect(area).not.toContain("20.00,20.00");
+    expect(smoothSeriesPath([null, null], 20)).toBe("");
+  });
+
   it("keeps its control points within the observed adjacent endpoint range", () => {
     const d = smoothSeriesPath([{ x: 0, y: 0 }, { x: 10, y: 100 }, { x: 20, y: 0 }]);
     const coordinates = [...d.matchAll(/ C(\d+\.?\d*),(-?\d+\.?\d*) (\d+\.?\d*),(-?\d+\.?\d*) /g)];

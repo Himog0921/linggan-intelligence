@@ -81,7 +81,6 @@ function OpsDataPage() {
               key={`${current[0]}:${business}`}
               kind={current[0]}
               business={business}
-              summary={summary}
             />
           )}
         </main>
