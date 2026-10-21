@@ -153,6 +153,7 @@ fn assess_region(input: &ImageInput, b: &Block, screenshot: bool) -> RegionAsses
     }
     super::ui::classify(input, b, &mut r, screenshot);
     qualify_fragments(input, b, &lines, &mut r);
+    super::partial::recover(input, b, &mut r);
     super::ui::filter_text(input, &mut r, screenshot);
 
     r
@@ -234,6 +235,12 @@ fn content_quality(b: &Block, r: &mut RegionAssessment) {
         }
         r.role = Role::StructuredText;
         r.reasons.push(Reason::StructuredLayoutUnverified);
+    } else if b.label == "content" {
+        // Some screenshot layouts aggregate multiple comments under this label.
+        // Keep the original as a candidate; only scoped literal support may adopt it.
+        if r.quality != Quality::Rejected {
+            r.quality = Quality::NeedsReview;
+        }
     } else if !matches!(b.label.as_str(), "text" | "doc_title" | "paragraph_title") {
         r.role = Role::LayoutMetadata;
         r.reasons.push(Reason::NonNarrativeLabel);
@@ -268,6 +275,9 @@ fn qualify_fragments(input: &ImageInput, b: &Block, lines: &[&Line], r: &mut Reg
     if r.reasons.contains(&Reason::MathematicalLayoutUnverified) {
         return;
     }
+    if b.label == "content" {
+        return;
+    }
     let anchors = normalized(
         &lines
             .iter()
@@ -276,7 +286,11 @@ fn qualify_fragments(input: &ImageInput, b: &Block, lines: &[&Line], r: &mut Reg
             .join("\n"),
     );
     let original = normalized(&b.text);
-    for check in input.rechecks.iter().filter(|c| c.block_ref == b.block_ref) {
+    for check in input
+        .rechecks
+        .iter()
+        .filter(|c| c.block_ref == b.block_ref && super::partial::covers(c.crop_bbox, b.bbox))
+    {
         let reread = normalized(&check.text);
         let ended =
             check.kind == RecheckKind::LineCrop || check.finish_reason.as_deref() == Some("stop");
@@ -309,6 +323,7 @@ fn qualify_fragments(input: &ImageInput, b: &Block, lines: &[&Line], r: &mut Reg
             // VL crop. Keep the candidate instead of promoting an icon-shaped letter.
             if input.rechecks.iter().any(|other| {
                 other.block_ref == b.block_ref
+                    && super::partial::covers(other.crop_bbox, b.bbox)
                     && other.kind == RecheckKind::VlCrop
                     && other.finish_reason.as_deref() == Some("stop")
                     && !normalized(&other.text).is_empty()

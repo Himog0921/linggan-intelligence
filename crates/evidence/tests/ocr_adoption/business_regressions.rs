@@ -161,8 +161,168 @@ fn long_disagreement_is_not_relaxed_to_a_fuzzy_whole_block_acceptance() {
     i.anchors.lines[0].text = "合成的第一句话。合成的错误用词。".into();
     i.rechecks.push(crop(&i, 0, RecheckKind::VlCrop, raw));
     let a = assess(&i).unwrap();
+    assert_eq!(
+        a.regions[0].adoption_state,
+        AdoptionState::AdoptedPartialBlock
+    );
+    assert_eq!(a.regions[0].usable_fragments[0].text, "合成的第一句话。");
+    assert_eq!(a.cover_title.state, TitleState::Uncertain);
+    assert_eq!(i.layout.blocks[0].text, raw);
+}
+
+#[test]
+fn one_disputed_word_does_not_erase_other_literal_clauses() {
+    let mut i = input();
+    i.image_role = ImageRole::Interior;
+    i.sequence_ordinal = Some(2);
+    let raw = "第一组合成要点、争议好词、第二组合成要点。其余完整说明应该保留。";
+    let line = raw.replace("争议好词", "争议坏词");
+    add(&mut i, "text", raw, [100., 200., 900., 500.]);
+    i.anchors.lines[0].text = line.clone();
+    i.rechecks.push(crop(&i, 0, RecheckKind::LineCrop, &line));
+    i.rechecks.push(crop(&i, 0, RecheckKind::VlCrop, raw));
+    let a = assess(&i).unwrap();
+    let r = &a.regions[0];
+    assert_eq!(r.adoption_state, AdoptionState::AdoptedPartialBlock);
+    for f in &r.usable_fragments {
+        assert_eq!(
+            raw.chars()
+                .skip(f.start)
+                .take(f.end - f.start)
+                .collect::<String>(),
+            f.text
+        );
+        assert_eq!(f.bbox, i.layout.blocks[0].bbox);
+    }
+    let p = project_work(&[a]).unwrap();
+    assert!(p.image_text.contains("第一组合成要点"));
+    assert!(p.image_text.contains("第二组合成要点"));
+    assert!(p.image_text.contains("其余完整说明应该保留"));
+    assert!(!p.image_text.contains("争议"));
+    assert_eq!(p.images[0].pending_blocks.len(), 1);
+}
+
+#[test]
+fn unsupported_formula_and_orphan_variation_selector_do_not_survive_projection() {
+    let mut i = input();
+    i.image_role = ImageRole::Interior;
+    i.sequence_ordinal = Some(2);
+    let raw = "合成文字前半句 $ ^{R} $ 后半句仍然完整保留🏔️。";
+    add(&mut i, "text", raw, [100., 200., 900., 300.]);
+    i.anchors.lines[0].text = "合成文字前半句后半句仍然完整保留。".into();
+    i.rechecks.push(crop(&i, 0, RecheckKind::VlCrop, raw));
+    let a = assess(&i).unwrap();
+    assert!(a.regions[0].reasons.contains(&Reason::UnverifiedSymbol));
+    let p = project_work(&[a]).unwrap();
+    assert!(p.image_text.contains("合成文字前半句"));
+    assert!(p.image_text.contains("后半句仍然完整保留"));
+    assert!(
+        !p.image_text
+            .chars()
+            .any(|c| matches!(c, '$' | '^' | 'R' | '\u{fe0f}' | '🏔'))
+    );
+    assert_eq!(i.layout.blocks[0].text, raw);
+}
+
+#[test]
+fn scoped_rechecks_cannot_certify_a_whole_block_or_a_different_crop() {
+    let mut i = input();
+    let raw = "已有依据的完整句子。没有依据的另外一句。";
+    add(&mut i, "text", raw, [100., 200., 900., 600.]);
+    i.anchors.lines[0].text = "行文字存在分歧".into();
+    for kind in [RecheckKind::LineCrop, RecheckKind::VlCrop] {
+        let mut c = crop(&i, 0, kind, "已有依据的完整句子。");
+        c.crop_bbox = [100., 200., 900., 350.];
+        i.rechecks.push(c);
+    }
+    let a = assess(&i).unwrap();
+    assert_eq!(
+        a.regions[0].adoption_state,
+        AdoptionState::AdoptedPartialBlock
+    );
+    assert_eq!(a.regions[0].usable_fragments.len(), 1);
+    assert_eq!(
+        a.regions[0].usable_fragments[0].text,
+        "已有依据的完整句子。"
+    );
+    assert_eq!(a.cover_title.state, TitleState::Uncertain);
+    i.rechecks[1].crop_bbox = [100., 450., 900., 600.];
+    assert!(assess(&i).unwrap().regions[0].usable_fragments.is_empty());
+    i.rechecks[1].crop_bbox = i.rechecks[0].crop_bbox;
+    i.rechecks[1].finish_reason = Some("length".into());
+    assert!(assess(&i).unwrap().regions[0].usable_fragments.is_empty());
+}
+
+#[test]
+fn aggregate_content_stays_pending_without_scoped_support() {
+    let mut i = input();
+    add(
+        &mut i,
+        "content",
+        "第一条合成评论。\n第二条合成评论。",
+        [100., 200., 900., 600.],
+    );
+    let a = assess(&i).unwrap();
     assert_eq!(a.regions[0].adoption_state, AdoptionState::Pending);
     assert!(a.regions[0].usable_fragments.is_empty());
+}
+
+#[test]
+fn partial_source_ranges_do_not_leave_orphan_latex_or_remove_supported_prose() {
+    let mut i = input();
+    i.image_role = ImageRole::Interior;
+    i.sequence_ordinal = Some(2);
+    let raw =
+        "合成前半句很完整 $ \\underline{\\text{这段合成正文应该保留}} $。争议好词、结尾合成要点。";
+    let line = "合成前半句很完整这段合成正文应该保留。争议坏词、结尾合成要点。";
+    add(&mut i, "text", raw, [100., 200., 900., 600.]);
+    i.anchors.lines[0].text = line.into();
+    i.rechecks.push(crop(&i, 0, RecheckKind::LineCrop, line));
+    i.rechecks.push(crop(&i, 0, RecheckKind::VlCrop, line));
+    let a = assess(&i).unwrap();
+    let p = project_work(&[a]).unwrap();
+    assert!(p.image_text.contains("这段合成正文应该保留"));
+    assert!(p.image_text.contains("结尾合成要点"));
+    assert!(
+        !p.image_text
+            .chars()
+            .any(|c| matches!(c, '$' | '\\' | '{' | '}'))
+    );
+}
+
+#[test]
+fn aggregate_comments_keep_scoped_bodies_and_exclude_dates_and_counters() {
+    let mut i = input();
+    i.image_role = ImageRole::Interior;
+    i.sequence_ordinal = Some(2);
+    let raw = "昵称甲\n这是第一条合成评论正文2028-01-02回复\n昵称乙\n这是第二条合成评论正文2028-01-02回复";
+    add(&mut i, "content", raw, [100., 200., 900., 600.]);
+    i.anchors.lines[0].text = "没有可靠的全块读法".into();
+    for (n, text) in [
+        "这是第一条合成评论正文2028-01-02回复",
+        "这是第二条合成评论正文2028-01-02回复",
+    ]
+    .iter()
+    .enumerate()
+    {
+        for kind in [RecheckKind::LineCrop, RecheckKind::VlCrop] {
+            let mut c = crop(&i, 0, kind, text);
+            c.crop_bbox = [100., 220. + n as f64 * 180., 900., 340. + n as f64 * 180.];
+            i.rechecks.push(c);
+        }
+    }
+    let a = assess(&i).unwrap();
+    assert_eq!(
+        a.regions[0].adoption_state,
+        AdoptionState::AdoptedPartialBlock
+    );
+    let p = project_work(&[a]).unwrap();
+    assert_eq!(
+        p.image_text,
+        "这是第一条合成评论正文\n这是第二条合成评论正文"
+    );
+    assert_eq!(p.source_relation, "image_transcription_not_author_claim");
+    assert_eq!(p.fragments.len(), 2);
     assert_eq!(i.layout.blocks[0].text, raw);
 }
 

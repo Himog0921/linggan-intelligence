@@ -196,6 +196,7 @@ pub enum Reason {
     ScreenshotTextFiltered,
     ConflictingLocalReadings,
     UnverifiedSymbol,
+    PartialLiteralAgreement,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

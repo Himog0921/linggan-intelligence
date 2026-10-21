@@ -542,7 +542,7 @@ fn same_model_repetition_does_not_validate_a_rewrite_or_unanchored_additions() {
 }
 
 #[test]
-fn wrong_image_recheck_or_crop_not_covering_region_is_rejected() {
+fn wrong_image_recheck_or_disconnected_crop_is_rejected() {
     let mut i = input();
     add(&mut i, "text", "用于复核的材料", [100., 200., 900., 300.]);
     let mut c = crop(&i, 0, RecheckKind::LineCrop, "用于复核的材料");
@@ -550,7 +550,7 @@ fn wrong_image_recheck_or_crop_not_covering_region_is_rejected() {
     i.rechecks.push(c);
     assert_eq!(assess(&i).unwrap_err(), InputError::Receipt);
     i.rechecks[0] = crop(&i, 0, RecheckKind::LineCrop, "用于复核的材料");
-    i.rechecks[0].crop_bbox[0] = 110.;
+    i.rechecks[0].crop_bbox = [10., 10., 90., 90.];
     assert_eq!(assess(&i).unwrap_err(), InputError::Receipt);
 }
 

@@ -2,6 +2,7 @@
 //!
 //! Layout labels describe the model's guess, not the author's cover title. An accepted
 //! projection remains a machine decision; it never certifies truth or author attribution.
+mod partial;
 mod quality;
 mod title;
 mod types;
@@ -12,7 +13,7 @@ mod work;
 pub use types::*;
 pub use work::{WorkFragment, WorkImageText, WorkProjection, project_work};
 
-pub const RULE_VERSION: &str = "ocr-adoption-v5";
+pub const RULE_VERSION: &str = "ocr-adoption-v6";
 
 pub fn assess(input: &ImageInput) -> Result<Assessment, InputError> {
     validation::validate(input)?;

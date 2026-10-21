@@ -12,12 +12,21 @@ fn icons(input: &ImageInput) -> impl Iterator<Item = &Block> {
 
 pub(super) fn is_screenshot(input: &ImageInput) -> bool {
     // Checkboxes and decorative icons alone do not establish a comment interface.
-    icons(input).count() >= 3
-        && input.layout.blocks.iter().any(|b| {
-            control(&b.text)
-                || timestamp_suffix(&b.text).is_some()
-                || date_control(&b.text) && b.text.contains("浏览量")
-        })
+    let comments = input.layout.blocks.iter().any(|b| {
+        b.label == "content"
+            && b.text
+                .lines()
+                .filter(|s| timestamp_suffix(s).is_some())
+                .count()
+                >= 2
+    });
+    comments
+        || icons(input).count() >= 3
+            && input.layout.blocks.iter().any(|b| {
+                control(&b.text)
+                    || timestamp_suffix(&b.text).is_some()
+                    || date_control(&b.text) && b.text.contains("浏览量")
+            })
 }
 
 fn name_aligned(input: &ImageInput, b: &Block) -> bool {
@@ -116,34 +125,123 @@ fn emoji(c: char) -> bool {
     matches!(c as u32, 0x1f000..=0x1faff | 0x2600..=0x27bf)
 }
 
+fn unsupported_ranges(text: &str, support: &str) -> Vec<(usize, usize)> {
+    let mut ranges = vec![];
+    for (open, close) in [("$", "$"), ("\\(", "\\)")] {
+        let mut cursor = 0;
+        while let Some(a) = text[cursor..].find(open).map(|n| cursor + n) {
+            let from = a + open.len();
+            let Some(b) = text[from..].find(close).map(|n| from + n + close.len()) else {
+                break;
+            };
+            if !support.contains(&text[a..b]) {
+                // LaTeX text wrappers are formatting, not image characters. Keep
+                // an already-qualified literal prose interior; omit its wrapper.
+                let interior = text[a..b].find("\\text{").and_then(|n| {
+                    let s = a + n + "\\text{".len();
+                    let e = s + text[s..b].find('}')?;
+                    text[s..e]
+                        .chars()
+                        .any(|c| ('\u{3400}'..='\u{9fff}').contains(&c))
+                        .then_some((s, e))
+                });
+                if let Some((s, e)) = interior {
+                    ranges.extend([(a, s), (e, b)]);
+                } else {
+                    ranges.push((a, b));
+                }
+            }
+            cursor = b;
+        }
+    }
+    let chars: Vec<_> = text.char_indices().collect();
+    for (n, &(offset, c)) in chars.iter().enumerate() {
+        let attachment = matches!(c as u32, 0xfe00..=0xfe0f | 0x200d | 0x20e3);
+        let preceding_removed = n.checked_sub(1).is_some_and(|i| {
+            ranges
+                .iter()
+                .any(|&(a, b)| chars[i].0 >= a && chars[i].0 < b)
+        });
+        if (emoji(c) && !support.contains(c))
+            || attachment && (n == 0 || preceding_removed || !emoji(chars[n - 1].1))
+        {
+            ranges.push((offset, offset + c.len_utf8()));
+        }
+    }
+    ranges
+}
+
 pub(super) fn filter_text(input: &ImageInput, r: &mut RegionAssessment, screenshot: bool) {
-    if !screenshot || r.usable_fragments.is_empty() {
+    if r.usable_fragments.is_empty() {
         return;
     }
     let mut filtered = vec![];
     let mut changed = false;
     let mut unsupported_symbol = false;
+    let support = input
+        .anchors
+        .lines
+        .iter()
+        .filter(|l| r.support_line_refs.contains(&l.line_ref))
+        .map(|l| l.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
     for f in &r.usable_fragments {
-        let start = reply_prefix(input, &f.text).unwrap_or(0);
-        let end = timestamp_suffix(&f.text).unwrap_or(f.text.len());
+        let start = if screenshot {
+            reply_prefix(input, &f.text).unwrap_or(0)
+        } else {
+            0
+        };
+        let end = if screenshot {
+            timestamp_suffix(&f.text).unwrap_or(f.text.len())
+        } else {
+            f.text.len()
+        };
         let mut spans = vec![];
         let mut from = start.min(end);
-        for (offset, c) in f
-            .text
-            .char_indices()
-            .filter(|(i, _)| *i >= start && *i < end)
-        {
-            if emoji(c)
-                && !input
-                    .anchors
-                    .lines
-                    .iter()
-                    .any(|l| r.support_line_refs.contains(&l.line_ref) && l.text.contains(c))
-            {
-                spans.push((from, offset));
-                from = offset + c.len_utf8();
-                unsupported_symbol = true;
+        // Inspect the entire original source, then intersect with the fragment.
+        // Otherwise a fragment cut through a formula could retain an orphan '$'.
+        let original = match f.source_kind {
+            SourceKind::Block => input
+                .layout
+                .blocks
+                .iter()
+                .find(|b| b.block_ref == f.source_ref)
+                .map(|b| b.text.as_str()),
+            SourceKind::Line => input
+                .anchors
+                .lines
+                .iter()
+                .find(|l| l.line_ref == f.source_ref)
+                .map(|l| l.text.as_str()),
+        }
+        .unwrap_or(&f.text);
+        let source_start = original
+            .chars()
+            .take(f.start)
+            .map(char::len_utf8)
+            .sum::<usize>();
+        let source_end = source_start + f.text.len();
+        let mut omitted: Vec<_> = unsupported_ranges(original, &support)
+            .into_iter()
+            .filter(|&(a, b)| a < source_end && b > source_start)
+            .map(|(a, b)| {
+                (
+                    a.max(source_start) - source_start,
+                    b.min(source_end) - source_start,
+                )
+            })
+            .collect();
+        omitted.sort_unstable();
+        for (a, b) in omitted {
+            if a >= end || b <= start {
+                continue;
             }
+            if a > from {
+                spans.push((from, a));
+            }
+            from = from.max(b.min(end));
+            unsupported_symbol = true;
         }
         spans.push((from, end));
         for (a, b) in spans {

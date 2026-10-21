@@ -132,13 +132,17 @@ fn validate_rechecks(input: &ImageInput) -> Result<(), InputError> {
         else {
             return Err(InputError::Receipt);
         };
-        if !ids.insert((&c.block_ref, c.kind as u8))
+        // A crop may cover the whole block or a bounded part of it. Partial crops
+        // can only support partial source ranges, never certify the entire block.
+        let contains =
+            |a: [f64; 4], b: [f64; 4]| a[0] <= b[0] && a[1] <= b[1] && a[2] >= b[2] && a[3] >= b[3];
+        let overlap = (c.crop_bbox[2].min(b.bbox[2]) - c.crop_bbox[0].max(b.bbox[0])).max(0.0)
+            * (c.crop_bbox[3].min(b.bbox[3]) - c.crop_bbox[1].max(b.bbox[1])).max(0.0);
+        let area = (c.crop_bbox[2] - c.crop_bbox[0]) * (c.crop_bbox[3] - c.crop_bbox[1]);
+        if !ids.insert((&c.block_ref, c.kind as u8, c.crop_bbox.map(f64::to_bits)))
             || c.image_blob_sha256 != input.image.blob_sha256
             || !bbox(c.crop_bbox, &input.image)
-            || c.crop_bbox[0] > b.bbox[0]
-            || c.crop_bbox[1] > b.bbox[1]
-            || c.crop_bbox[2] < b.bbox[2]
-            || c.crop_bbox[3] < b.bbox[3]
+            || !(contains(c.crop_bbox, b.bbox) || overlap / area >= 0.60)
             || !hash(&c.crop_sha256)
             || !hash(&c.raw_sha256)
             || !reference(&c.pipeline_version)
