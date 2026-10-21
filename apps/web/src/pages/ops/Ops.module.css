@@ -85,42 +85,6 @@
 .ops-main a:hover {
   text-decoration: underline;
 }
-/* 读数条：工作台页头的 5 个数字。 */
-.ops-readouts {
-  display: flex;
-  flex-wrap: wrap;
-  border-top: 0;
-  border-bottom: 1px solid var(--lgi-border);
-  flex: none;
-}
-.ops-readout {
-  display: flex;
-  align-items: baseline;
-  gap: var(--lgi-space-2);
-  padding: var(--lgi-space-2) var(--lgi-space-4);
-  min-width: 0;
-}
-.ops-readout + .ops-readout {
-  border-left: 1px solid var(--lgi-hairline);
-}
-.ops-readout span {
-  font-size: var(--lgi-text-data);
-  color: var(--lgi-muted);
-}
-.ops-readout b {
-  font-family: var(--lgi-font-data);
-  font-size: var(--lgi-type-data-size);
-  line-height: var(--lgi-lh-heading);
-  font-weight: var(--lgi-weight-semibold);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.ops-readout b[data-state="unknown"] {
-  color: var(--lgi-unknown);
-  font-weight: var(--lgi-weight-medium);
-}
 /* 页签：文字 + 3px 信号下划线（ADR-11），不用方块分段控件。 */
 /* 运营人页签放不下时换行，不藏起任何一个人；发布记录的筛选多，页签单独占一行。 */
 .ops-toolbar {
@@ -586,22 +550,12 @@
   max-height: calc(100dvh - var(--lgi-space-24));
   object-fit: contain;
 }
-@media (max-width: 1280px) {
-  .ops-readout {
-    padding: var(--lgi-space-2) var(--lgi-space-3);
-  }
-}
+
 /* A shell geometry stays in shell.css; this module only keeps the content scroll owner. */
 @media (max-width: 900px) {
   .ops-main {
     padding: var(--lgi-space-3) var(--lgi-space-3) 0;
     gap: var(--lgi-space-2);
-  }
-  .ops-readouts {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-  .ops-readout:nth-child(4) {
-    border-left: 0;
   }
   .ops-toolbar {
     flex-direction: column;
@@ -627,9 +581,6 @@
   }
 }
 @media (max-width: 640px) {
-  .ops-readout b {
-    font-size: var(--lgi-text-body);
-  }
   .ops-search input {
     width: calc(var(--lgi-space-24) + var(--lgi-space-4));
   }
@@ -800,6 +751,15 @@
   gap: var(--lgi-space-3);
   flex-wrap: wrap;
 }
+.ops-target-label { display: flex; align-items: center; min-width: 0; gap: var(--lgi-space-1); }
+.ops-target-edit {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: var(--lgi-space-10); height: var(--lgi-space-10); padding: var(--lgi-space-3);
+  border: 0; background: transparent; color: var(--lgi-muted); cursor: pointer;
+}
+.ops-target-edit svg { width: 100%; height: 100%; stroke: currentColor; stroke-width: 1.5; }
+.ops-target-edit:hover { color: var(--lgi-signal-ink); background: var(--lgi-canvas-sunken); }
+.ops-target-edit:focus-visible { outline: 2px solid var(--lgi-focus); outline-offset: calc(-1 * var(--lgi-focus-inset)); }
 .ops-target-head span {
   font-size: var(--lgi-text-data);
   color: var(--lgi-muted);
@@ -852,15 +812,6 @@
   margin: 0;
   font-variant-numeric: tabular-nums;
   font-weight: var(--lgi-weight-medium);
-}
-.ops-target-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--lgi-space-2);
-  flex-wrap: wrap;
-  font-size: var(--lgi-text-label);
-  color: var(--lgi-muted);
 }
 /* ② 漏斗 */
 .ops-funnel-row {
@@ -1384,24 +1335,6 @@
   color: var(--lgi-ink);
   font: var(--lgi-weight-semibold) var(--lgi-text-data)/var(--lgi-lh-data) var(--lgi-font-data);
 }
-.ops-overview-v2 .ops-target-foot {
-  border-top: 1px solid var(--lgi-hairline);
-  padding-top: var(--lgi-space-2);
-  margin-top: var(--lgi-space-1);
-}
-.ops-overview-v2 .ops-target-foot button:not([data-action-button]) {
-  border: 0;
-  border-bottom: 1px solid var(--lgi-signal);
-  padding: 0;
-  color: var(--lgi-signal-ink);
-  background: transparent;
-  font-weight: var(--lgi-weight-semibold);
-  cursor: pointer;
-}
-.ops-overview-v2 .ops-target-foot button:not([data-action-button]):focus-visible {
-  outline: 2px solid var(--lgi-focus);
-  outline-offset: calc(-1 * var(--lgi-focus-inset));
-}
 .ops-section-kicker-v2 {
   display: flex;
   align-items: baseline;
@@ -1641,7 +1574,7 @@
 .ops-table :is(th,td) {line-height:var(--lgi-type-data-leading);}
 .ops-table .ops-clamp {display:block;white-space:nowrap;text-overflow:ellipsis;line-height:var(--lgi-type-data-leading);}
 .ops-cover-dialog {background:var(--lgi-canvas);}
-@media(max-width:900px) {.ops-main .ops-toolbar-stacked>.ops-tools {flex-wrap:wrap;overflow:visible;gap:var(--lgi-space-3);}.ops-find {flex-basis:100%;order:-1;}.ops-readouts {display:flex;gap:0;}.ops-readout {padding:var(--lgi-space-2);}.ops-readout b {font-size:var(--lgi-type-data-size);}}
+@media(max-width:900px) {.ops-main .ops-toolbar-stacked>.ops-tools {flex-wrap:wrap;overflow:visible;gap:var(--lgi-space-3);}.ops-find {flex-basis:100%;order:-1;}}
 
 .ops-main .ops-object {display:block;max-width:100%;padding:0;border:0;background:transparent;height:auto;text-align:left;color:var(--lgi-ink);font-weight:var(--lgi-weight-medium);}
 .ops-main .ops-object:hover {color:var(--lgi-signal-ink);background:transparent;}

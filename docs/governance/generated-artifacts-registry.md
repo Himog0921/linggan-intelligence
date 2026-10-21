@@ -449,6 +449,8 @@ AI-GEN1 C0：人工维护离线合同/固定合成fixture/页面与纯合成测�
 
 运营发布的workbench定向隔离证明沿ops-release/workbench-browser；沿同一自有runner，媒体/图页资产只写support_dir/creation-assets并随support清理，清除真实样本环境变量，使用合成数据与本机生成图像。不得把合成目标/稿件/图页写入声明为正式业务写证明。
 
+运营四批注发布归档：本包PR合并/部署后删除候选worktree前，将该树ops-release回执、合成证明、上线截图及随版本生成的HTML/ZIP/manifest复制至主仓库忽略目录`artifacts/lids-sync/ops-release/annotations-20261021/`，离线文件作为该次发布只读快照放其`design-system/`，不是第二个生成源。root负责逐文件SHA核对、保留到Mog验收，禁止携带.env/凭据/原始API响应或node_modules；再生仍从对应main版本的lids:sync开始。仅精确清理本次候选与预览进程，不触碰其他worktree。
+
 ## 创作者退役状态一致性续修
 
 本轮日志、测试报告、独立复核与浏览器截图固定 artifacts/private/creator-ai-status-copy-001（本专属树；合并移除前复制至主仓库同名 private 目录保留），忽略、不入 Git，无秘密和原始材料导出。来源为实际本轮命令，root 负责，保留至 Mog 验收；只清理自有进程/目录。Web 依赖和 dist 使用既有登记，人工维护的 TS/TSX/CSS 与现有文档为源文件。

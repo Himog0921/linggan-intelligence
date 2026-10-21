@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { Overview, TrendPoint } from "./api";
 import * as f from "./format";
 import { c } from "./styles";
@@ -51,6 +51,7 @@ export function TrendChart({
   granularity: string;
 }) {
   const { ref, width } = useWidth();
+  const gradientId = useId();
   const left = 42, right = 12;
   const plotWidth = Math.max(1, width - left - right);
   const top = 25, followerHeight = 142, followerBaseline = top + followerHeight;
@@ -71,6 +72,12 @@ export function TrendChart({
   const hitsPath = smoothSeriesPath(points.map((p, i) =>
     p.hits === null ? null : { x: x(i), y: hy(p.hits) },
   ));
+  const followersArea = smoothSeriesPath(points.map((p, i) =>
+    p.followersGained === null ? null : { x: x(i), y: fy(p.followersGained) },
+  ), followerBaseline);
+  const hitsArea = smoothSeriesPath(points.map((p, i) =>
+    p.hits === null ? null : { x: x(i), y: hy(p.hits) },
+  ), hitBaseline);
   const showEvery = Math.max(1, Math.ceil(points.length / 7));
   const partial = points.filter((p) => p.coverage === "partial");
   return (
@@ -84,6 +91,18 @@ export function TrendChart({
       {points.length ? (
         <>
           <svg viewBox={[0, 0, width, height].join(" ")}>
+            <defs>
+              <linearGradient id={`${gradientId}-followers`} x1="0" y1={top} x2="0" y2={followerBaseline} gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stopColor="var(--lgi-ink)" stopOpacity="0.16" />
+                <stop offset="100%" stopColor="var(--lgi-ink)" stopOpacity="0" />
+              </linearGradient>
+              <linearGradient id={`${gradientId}-hits`} x1="0" y1={hitsTop} x2="0" y2={hitBaseline} gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stopColor="var(--lgi-signal)" stopOpacity="0.18" />
+                <stop offset="100%" stopColor="var(--lgi-signal)" stopOpacity="0" />
+              </linearGradient>
+            </defs>
+            {followersArea ? <path d={followersArea} fill={`url(#${gradientId}-followers)`} aria-hidden="true" /> : null}
+            {hitsArea ? <path d={hitsArea} fill={`url(#${gradientId}-hits)`} aria-hidden="true" /> : null}
             <text x={0} y={13} textAnchor="start" className={c("ops-axis")}>加微</text>
             <text x={0} y={hitsTop - 7} textAnchor="start" className={c("ops-axis")}>爆款</text>
             {[0.25, 0.5, 0.75, 1].map((step) => (

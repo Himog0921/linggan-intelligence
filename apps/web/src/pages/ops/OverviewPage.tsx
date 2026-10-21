@@ -110,13 +110,6 @@ export function OverviewPage({ business }: { business: string }) {
           </span>
         </div>
       </div>
-      <p
-        id="ops-scope-note"
-        className={c("ops-scope-note")}
-        hidden={!data?.businessSelected}
-      >
-        链接打开、加微、转化率和目标来自每日数据，不分业务。
-      </p>
       <Status
         error={result.isError || Boolean(data && !data.asOf)}
         retry={result.isError ? () => void result.refetch() : undefined}

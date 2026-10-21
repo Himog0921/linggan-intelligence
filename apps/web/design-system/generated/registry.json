@@ -12703,8 +12703,8 @@
       ],
       "conditionalRegions": "Z03有真实模块导航才显示；Z02-S有真实领域/业务范围才显示；不用时不预留占位",
       "scopeRule": "按真实合同在Z02选择领域/业务；创作不默认选第一个；数据允许全部业务，日数据不分业务",
-      "metricRule": "指标与趋势就是主体，允许大读数；单位/分母/覆盖必须同读",
-      "actionRule": "目标设置放相关指标/目标分区，不抢全站主动作",
+      "metricRule": "保留经营结果与目标读数；删除顶部全宽业务说明，口径留指标旁；趋势按连续已知段填轻渐变，未知不补零",
+      "actionRule": "目标标题右侧仅编辑图标，保留设定/修改的可访问名与原目标弹窗；删除目标底部时间与操作行",
       "regionContents": [
         {
           "id": "Z04-T",
@@ -12791,7 +12791,8 @@
             "C44",
             "C45",
             "C46",
-            "C48"
+            "C48",
+            "C10"
           ],
           "businessIds": [
             "B25",
@@ -12875,8 +12876,16 @@
         "apps/web/src/pages/ops/OverviewBlocks.tsx",
         "apps/web/src/pages/ops/TargetDialog.tsx",
         "apps/web/src/pages/ops/ui.tsx",
-        "apps/web/src/pages/ops/useOpsLeave.tsx"
-      ]
+        "apps/web/src/pages/ops/useOpsLeave.tsx",
+        "apps/web/src/pages/ops/Charts.tsx",
+        "apps/web/src/pages/ops/curve.ts"
+      ],
+      "trendAreaStyle": {
+        "followersTopOpacity": 0.16,
+        "hitsTopOpacity": 0.18,
+        "baselineOpacity": 0,
+        "scope": "PAGE-OPS-002 only; unchanged ink/signal tokens and unknown gaps"
+      }
     },
     {
       "id": "P14",
@@ -12892,7 +12901,7 @@
       ],
       "conditionalRegions": "Z03有真实模块导航才显示；Z02-S有真实领域/业务范围才显示；不用时不预留占位",
       "scopeRule": "按真实合同在Z02选择领域/业务；创作不默认选第一个；数据允许全部业务，日数据不分业务",
-      "metricRule": "记录数紧凑；平台差异与未知留对应列",
+      "metricRule": "删除运营中账号/本月发布/有效发布/本月加微/本月爆款整条读数；仅保留分页处当前结果数，不预留高度",
       "actionRule": "当前受限新增/同步不能升级成可执行主CTA",
       "regionContents": [
         {
