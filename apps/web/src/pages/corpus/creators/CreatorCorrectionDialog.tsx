@@ -21,7 +21,7 @@ export interface CorrectionTarget {
   field: string;
   subjectTitle: string;
   currentValue: string;
-  /** 已有的人工调整；有它才能「恢复自动判断」。 */
+  /** 已有的人工调整；有它才能「撤销人工调整」。 */
   manual: { reason: string | null; supportFragmentIds: string[] } | null;
   supports: Fragment[];
   /** 用来给支持片段起人话分组名：作品编号 → 标题。 */
@@ -30,7 +30,7 @@ export interface CorrectionTarget {
 
 interface CorrectionDialogProps {
   target: CorrectionTarget;
-  onSaved: () => void;
+  onSaved: (cleared: boolean) => void;
   onClose: () => void;
 }
 
@@ -107,7 +107,7 @@ export function CreatorCorrectionDialog({ target, onSaved, onClose }: Correction
         reason: next === null ? null : reason.trim() === '' ? null : reason.trim(),
         supportFragmentIds: ids,
       });
-      if (isCurrent()) onSaved();
+      if (isCurrent()) onSaved(next === null);
     } catch (error) {
       if (isCurrent()) setFeedback(feedbackForError(error, { retryNote: '这项判断按内容保存，重新保存同样的内容不会产生第二条记录。' }));
     } finally {
@@ -151,10 +151,10 @@ export function CreatorCorrectionDialog({ target, onSaved, onClose }: Correction
             <CreatorSelect label="你的判断" value={value} onChange={next => { setValue(next); dropStaleHint(); }}
               options={choices.map(([optionValue, label]) => ({ value: optionValue, label }))} />
           </div>
-          <p className={styles.help}>保存后，这一项使用你的判断；自动分析不会覆盖。可随时恢复当前自动结果。</p>
+          <p className={styles.help}>保存后，这一项使用你的判断。撤销人工调整后显示已有分析结果；尚无结果则显示尚不能判定，不会启动新分析。</p>
           <fieldset>
             <legend>选择支持这项判断的材料</legend>
-            {groups.length === 0 ? <p className={styles.help}>当前没有可选支持材料；仍可选择尚不能判定或恢复自动。</p> : null}
+            {groups.length === 0 ? <p className={styles.help}>当前没有可选支持材料；仍可选择尚不能判定或撤销人工调整。</p> : null}
             {groups.map(group => (
               <details key={group.key} className={styles.supportGroup} open>
                 <summary>
@@ -189,7 +189,7 @@ export function CreatorCorrectionDialog({ target, onSaved, onClose }: Correction
         </div>
         <footer className={styles.foot}>
           <button type="button" className={styles.textButton} disabled={target.manual === null || busy} onClick={() => void perform(null)}>
-            恢复自动判断
+            撤销人工调整
           </button>
           <div className={styles.footNote}>
             <FeedbackLine feedback={feedback} />
