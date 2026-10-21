@@ -1,16 +1,16 @@
-## AI 设置左栏导航候选（2026-10-21）
-
-`/settings/models?view=capabilities|models|runs|advanced` 的四个正常 AI 设置视图已在候选工作树迁入共享左栏，主区不再显示重复 Hero、说明或刷新按钮。聚焦测试、类型/lint/LIDS/生产构建与隔离浏览器的八个视图场景通过；390px 使用共享横向轨道的四个直接入口。完整 settings 实链的做法导入 `400` 并等待回执超时，可由未修改 `5997b189` 基线复现，未在本包掩盖。候选未提交、未合并、未部署或刷新本机 `:3000`；无迁移、共享库写入、真实模型/供应商或研究调用。详见 [变更清单](design/changes/ai-settings-left-nav-001-ui-change-manifest.md) 和 [验收记录](design/acceptance/ai-settings-left-nav-001-acceptance.md)。
-
 # 当前状态与事项队列
-
-OCR #454/#464 当前候选：v6 完成局部原文保留与固定四图九区本地复核，40图开发集经自有临时库读回；长正文、评论关系及生产业务验收仍有缺口。唯一状态入口为[OCR计划](plans/active/ocr-title-quality-454.md)，动态head/CI以PR为准。
 
 > 状态: 权威当前
 > 最后核对: 2026-10-20
 > 适用范围: 当前阶段、事项顺序、阻塞与下一步
 > 事实来源: 用户要求、2026-10-20 AI-GEN1候选源码/owned隔离证明与GitHub只读核对；其他模块及本机运行事实按各节原核对日保留
 > 冲突时以谁为准: 真实运行结果、ACCEPTED ADR 与用户最新确认
+
+OCR #454/#464 当前候选：v6 完成局部原文保留与固定四图九区本地复核，40图开发集经自有临时库读回；长正文、评论关系及生产业务验收仍有缺口。唯一状态入口为[OCR计划](plans/active/ocr-title-quality-454.md)，动态head/CI以PR为准。
+
+## AI 设置左栏导航候选（2026-10-21）
+
+`/settings/models?view=capabilities|models|runs|advanced` 的四个正常 AI 设置视图已在候选工作树迁入共享左栏，主区不再显示重复 Hero、说明或刷新按钮。聚焦测试、类型/lint/LIDS/生产构建与隔离浏览器的八个视图场景通过；390px 使用共享横向轨道的四个直接入口。完整 settings 实链的做法导入 `400` 并等待回执超时，可由未修改 `5997b189` 基线复现，未在本包掩盖。候选未提交、未合并、未部署或刷新本机 `:3000`；无迁移、共享库写入、真实模型/供应商或研究调用。详见 [变更清单](design/changes/ai-settings-left-nav-001-ui-change-manifest.md) 和 [验收记录](design/acceptance/ai-settings-left-nav-001-acceptance.md)。
 
 ## 2026-10-20 08:38 · Web CI 取消 BEGIN 的连接复用缺口
 
